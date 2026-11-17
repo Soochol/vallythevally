@@ -8,6 +8,7 @@ pub struct Settings {
     pub bind: SocketAddr,
     pub database_path: PathBuf,
     pub config: AccountConfig,
+    pub pending_login_limit: u32,
 }
 
 pub fn parse_env_file(text: &str) -> HashMap<String, String> {
@@ -53,6 +54,9 @@ impl Settings {
             token_url: endpoint("VALLY_ACCOUNT_NAVER_TOKEN_URL", NAVER_TOKEN_URL)?,
             profile_url: endpoint("VALLY_ACCOUNT_NAVER_PROFILE_URL", NAVER_PROFILE_URL)?,
         };
-        Ok(Self { bind, database_path, config: AccountConfig { public_url, google, naver } })
+        let pending_login_limit = get("VALLY_ACCOUNT_PENDING_LOGIN_LIMIT").map_or(Ok(DEFAULT_PENDING_LOGIN_LIMIT), |value| {
+            value.parse().map_err(|_| ConfigError("VALLY_ACCOUNT_PENDING_LOGIN_LIMIT를 읽을 수 없습니다".into()))
+        })?;
+        Ok(Self { bind, database_path, config: AccountConfig { public_url, google, naver }, pending_login_limit })
     }
 }

@@ -4,6 +4,7 @@ use common::*;
 use account_server::{Clock, PublicUrl, Secret, IdpUrl, router};
 use account_server::fake_idp::Fault;
 use std::sync::Arc;
+use url::Url;
 
 async fn round_trip(provider: &str) {
     let harness = Harness::start().await;
@@ -41,6 +42,15 @@ async fn google_asks_for_openid_scope_only_and_binds_a_nonce() {
     assert_eq!(requests[0]["response_type"], "code");
     assert!(requests[0]["nonce"].len() >= 32);
     assert_eq!(requests[0]["redirect_uri"], format!("{}/v1/auth/google/callback", harness.base));
+}
+
+#[tokio::test]
+async fn google_asks_to_pick_an_account_and_naver_is_left_alone() {
+    let harness = Harness::start().await;
+    harness.login("google", "a").await;
+    harness.login("naver", "b").await;
+    assert_eq!(harness.idp.authorize_requests("google")[0]["prompt"], "select_account");
+    assert!(!harness.idp.authorize_requests("naver")[0].contains_key("prompt"));
 }
 
 #[tokio::test]
@@ -127,6 +137,7 @@ async fn callback_without_the_matching_browser_never_reaches_the_connector() {
 
     let mut other = harness.browser();
     let _ = other.get(&harness.start_url("google", "b")).await;
+    assert_eq!(other.cookies.len(), 1);
     let response = other.get(&callback).await;
     assert_eq!(response.status(), 400);
     assert!(response.headers().get("location").is_none());
@@ -324,18 +335,20 @@ async fn the_login_cookie_uses_the_host_prefix_on_https_and_none_on_loopback_htt
     let response = tower::ServiceExt::oneshot(app, request).await.unwrap();
     assert_eq!(response.status(), 302);
     let cookie = response.headers()["set-cookie"].to_str().unwrap();
-    assert!(cookie.starts_with("__Host-"), "{cookie}");
+    let authorize = response.headers()["location"].to_str().unwrap();
+    let idp_state = Url::parse(authorize).unwrap().query_pairs().find(|(name, _)| name == "state").unwrap().1.into_owned();
+    assert!(cookie.starts_with(&format!("__Host-vally_login_{idp_state}=")), "{cookie}");
     for required in ["Secure", "Path=/", "HttpOnly", "SameSite=Lax"] {
         assert!(cookie.contains(required), "{cookie}");
     }
     assert!(!cookie.contains("Domain"));
-    let authorize = response.headers()["location"].to_str().unwrap();
     assert!(authorize.contains("redirect_uri=https%3A%2F%2Faccounts.example.test%2Fv1%2Fauth%2Fgoogle%2Fcallback"));
 
     let mut browser = harness.browser();
     let start = browser.get(&harness.start_url("google", "a")).await;
     let cookie = start.headers()["set-cookie"].to_str().unwrap();
-    assert!(cookie.starts_with("vally_login="), "{cookie}");
+    let idp_state = location(&start).query_pairs().find(|(name, _)| name == "state").unwrap().1.into_owned();
+    assert!(cookie.starts_with(&format!("vally_login_{idp_state}=")), "{cookie}");
     assert!(!cookie.contains("Secure"));
 }
 
@@ -362,6 +375,12 @@ fn settings_read_names_defaults_and_env_files() {
     assert_eq!(settings.bind.to_string(), "127.0.0.1:8090");
     assert_eq!(settings.database_path.to_str(), Some("data/account.db"));
     assert_eq!(settings.config.google.client_secret.expose(), "gs");
+    assert_eq!(settings.pending_login_limit, 10_000);
+    values.insert("VALLY_ACCOUNT_PENDING_LOGIN_LIMIT".into(), "25".into());
+    assert_eq!(Settings::from_values(&values).unwrap().pending_login_limit, 25);
+    values.insert("VALLY_ACCOUNT_PENDING_LOGIN_LIMIT".into(), "many".into());
+    assert!(Settings::from_values(&values).is_err());
+    values.remove("VALLY_ACCOUNT_PENDING_LOGIN_LIMIT");
     values.remove("VALLY_ACCOUNT_NAVER_CLIENT_SECRET");
     let error = Settings::from_values(&values).err().unwrap();
     assert!(error.to_string().contains("VALLY_ACCOUNT_NAVER_CLIENT_SECRET"));
@@ -380,4 +399,98 @@ async fn framework_rejections_use_the_json_error_shape() {
     assert_eq!(bad_path.status(), 400);
     let body: serde_json::Value = bad_path.json().await.unwrap();
     assert!(body["code"].is_string() && body["message"].is_string());
+}
+
+fn idp_state_of(callback: &str) -> String {
+    Url::parse(callback).unwrap().query_pairs().find(|(name, _)| name == "state").unwrap().1.into_owned()
+}
+
+#[tokio::test]
+async fn two_logins_in_one_browser_both_reach_the_connector_in_either_order() {
+    for first_finished in ["a", "b"] {
+        let harness = Harness::start().await;
+        let mut browser = harness.browser();
+        let callback_a = harness.idp_callback_url(&mut browser, "google", "a").await;
+        let callback_b = harness.idp_callback_url(&mut browser, "naver", "b").await;
+        assert_eq!(browser.cookies.len(), 2);
+        let (first, second) = if first_finished == "a" { (("a", &callback_a), ("b", &callback_b)) } else { (("b", &callback_b), ("a", &callback_a)) };
+        for (label, callback) in [first, second] {
+            let redirected = harness.finish(&mut browser, callback, label).await;
+            assert!(redirected.query.contains_key("code"), "{label}");
+        }
+        assert!(browser.cookies.is_empty());
+    }
+}
+
+#[tokio::test]
+async fn a_callback_clears_only_its_own_login_cookie() {
+    let harness = Harness::start().await;
+    let mut browser = harness.browser();
+    let callback_a = harness.idp_callback_url(&mut browser, "google", "a").await;
+    let _callback_b = harness.idp_callback_url(&mut browser, "google", "b").await;
+    let before = browser.set_cookies.len();
+    harness.finish(&mut browser, &callback_a, "a").await;
+    let cleared = &browser.set_cookies[before..];
+    assert_eq!(cleared.len(), 1);
+    assert!(cleared[0].starts_with(&format!("vally_login_{}=;", idp_state_of(&callback_a))), "{}", cleared[0]);
+    assert!(cleared[0].contains("Max-Age=0"));
+    assert_eq!(browser.cookies.len(), 1);
+}
+
+async fn start_status(harness: &Harness, label: &str) -> reqwest::Response {
+    harness.browser().get(&harness.start_url("google", label)).await
+}
+
+#[tokio::test]
+async fn a_full_pending_login_table_turns_start_into_a_busy_page_without_side_effects() {
+    let harness = Harness::start_with_limit(3).await;
+    for label in ["a", "b", "c"] {
+        let mut browser = harness.browser();
+        let authorize = location(&browser.get(&harness.start_url("google", label)).await);
+        browser.get(authorize.as_str()).await;
+    }
+    assert_eq!(harness.idp.authorize_requests("google").len(), 3);
+    assert_eq!(harness.count("pending_logins").await, 3);
+
+    let response = start_status(&harness, "d").await;
+    assert_eq!(response.status(), 503);
+    assert!(response.headers().contains_key("retry-after"));
+    assert!(response.headers()["content-type"].to_str().unwrap().starts_with("text/html"));
+    assert!(response.headers().get("location").is_none());
+    assert!(response.headers().get("set-cookie").is_none());
+    let body = response.text().await.unwrap();
+    assert!(body.contains("로그인 요청이 많아"));
+    assert_eq!(harness.idp.authorize_requests("google").len(), 3);
+    assert_eq!(harness.count("pending_logins").await, 3);
+}
+
+#[tokio::test]
+async fn expired_pending_logins_do_not_count_toward_the_limit() {
+    let harness = Harness::start_with_limit(2).await;
+    assert_eq!(start_status(&harness, "a").await.status(), 302);
+    assert_eq!(start_status(&harness, "b").await.status(), 302);
+    assert_eq!(start_status(&harness, "c").await.status(), 503);
+    harness.clock.advance(601);
+    assert_eq!(start_status(&harness, "d").await.status(), 302);
+    assert_eq!(harness.count("pending_logins").await, 1);
+}
+
+#[tokio::test]
+async fn concurrent_starts_never_push_pending_logins_past_the_limit() {
+    let harness = Arc::new(Harness::start_with_limit(5).await);
+    for label in ["a", "b", "c"] {
+        assert_eq!(start_status(&harness, label).await.status(), 302);
+    }
+    let mut starts = tokio::task::JoinSet::new();
+    for index in 0..20 {
+        let harness = harness.clone();
+        starts.spawn(async move { start_status(&harness, &format!("n{index}")).await.status().as_u16() });
+    }
+    let mut statuses = Vec::new();
+    while let Some(status) = starts.join_next().await {
+        statuses.push(status.unwrap());
+    }
+    assert_eq!(statuses.iter().filter(|status| **status == 302).count(), 2);
+    assert_eq!(statuses.iter().filter(|status| **status == 503).count(), 18);
+    assert_eq!(harness.count("pending_logins").await, 5);
 }

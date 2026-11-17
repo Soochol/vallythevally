@@ -89,6 +89,7 @@ pub struct AccountConfig {
     pub naver: NaverConfig,
 }
 
+pub const DEFAULT_PENDING_LOGIN_LIMIT: u32 = 10_000;
 pub const GOOGLE_AUTHORIZE_URL: &str = "https://accounts.google.com/o/oauth2/v2/auth";
 pub const GOOGLE_TOKEN_URL: &str = "https://oauth2.googleapis.com/token";
 pub const NAVER_AUTHORIZE_URL: &str = "https://nid.naver.com/oauth2.0/authorize";

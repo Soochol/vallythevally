@@ -1,7 +1,7 @@
 #![allow(dead_code)]
 use account_server::fake_idp::{ClientCredentials, FakeIdp};
 use account_server::{
-    AccountConfig, GoogleConfig, IdpUrl, ManualClock, NaverConfig, PublicUrl, Secret, UnixSeconds, open_database, router,
+    AccountConfig, GoogleConfig, IdpUrl, ManualClock, NaverConfig, PublicUrl, Secret, UnixSeconds, open_database, router_with_pending_login_limit,
 };
 use base64::Engine;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
@@ -36,26 +36,34 @@ pub fn verifier(label: &str) -> String {
 pub struct Browser {
     pub http: reqwest::Client,
     pub account_origin: String,
-    pub cookie: Option<String>,
+    pub cookies: std::collections::BTreeMap<String, String>,
+    pub set_cookies: Vec<String>,
     pub seen: Vec<String>,
 }
 
 impl Browser {
     pub fn new(account_origin: &str) -> Self {
         let http = reqwest::Client::builder().redirect(reqwest::redirect::Policy::none()).build().unwrap();
-        Self { http, account_origin: account_origin.to_owned(), cookie: None, seen: Vec::new() }
+        Self { http, account_origin: account_origin.to_owned(), cookies: Default::default(), set_cookies: Vec::new(), seen: Vec::new() }
     }
 
     pub async fn get(&mut self, url: &str) -> reqwest::Response {
         let mut request = self.http.get(url);
-        if let (Some(cookie), true) = (&self.cookie, url.starts_with(&self.account_origin)) {
-            request = request.header("cookie", cookie);
+        if !self.cookies.is_empty() && url.starts_with(&self.account_origin) {
+            let line: Vec<String> = self.cookies.iter().map(|(name, value)| format!("{name}={value}")).collect();
+            request = request.header("cookie", line.join("; "));
         }
         let response = request.send().await.unwrap();
         if url.starts_with(&self.account_origin) {
             for value in response.headers().get_all("set-cookie") {
-                let pair = value.to_str().unwrap().split(';').next().unwrap().to_owned();
-                self.cookie = pair.split_once('=').filter(|(_, v)| !v.is_empty()).map(|_| pair.clone());
+                let line = value.to_str().unwrap();
+                self.set_cookies.push(line.to_owned());
+                let (name, cookie_value) = line.split(';').next().unwrap().split_once('=').unwrap();
+                if cookie_value.is_empty() {
+                    self.cookies.remove(name);
+                } else {
+                    self.cookies.insert(name.to_owned(), cookie_value.to_owned());
+                }
             }
         }
         for (name, value) in response.headers() {
@@ -92,6 +100,10 @@ pub struct Redirected {
 
 impl Harness {
     pub async fn start() -> Self {
+        Self::start_with_limit(10_000).await
+    }
+
+    pub async fn start_with_limit(pending_login_limit: u32) -> Self {
         let clock = Arc::new(ManualClock::new(UnixSeconds(START_TIME)));
         let idp = FakeIdp::start(credentials(GOOGLE_ID, GOOGLE_SECRET), credentials(NAVER_ID, NAVER_SECRET), clock.clone()).await;
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -99,7 +111,7 @@ impl Harness {
         let config = test_config(&base, &idp);
         let dir = tempfile::tempdir().unwrap();
         let pool = open_database(&dir.path().join("account.db")).await.unwrap();
-        let app = router(config, pool.clone(), clock.clone());
+        let app = router_with_pending_login_limit(config, pool.clone(), clock.clone(), pending_login_limit);
         tokio::spawn(async move {
             axum::serve(listener, app).await.unwrap();
         });

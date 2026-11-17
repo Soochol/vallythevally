@@ -12,7 +12,7 @@ mod setup_api;
 mod setup_store;
 mod store;
 
-pub use app::router;
+pub use app::{router, router_with_pending_login_limit};
 pub use clock::{Clock, ManualClock, SystemClock, UnixSeconds};
 pub use config::{AccountConfig, ConfigError, GoogleConfig, IdpUrl, NaverConfig, PublicUrl};
 pub use secrets::Secret;

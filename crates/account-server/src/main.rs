@@ -1,5 +1,5 @@
 use account_server::settings::{Settings, parse_env_file};
-use account_server::{SystemClock, open_database, router};
+use account_server::{SystemClock, open_database, router_with_pending_login_limit};
 use std::collections::HashMap;
 use std::path::Path;
 use std::process::ExitCode;
@@ -30,7 +30,7 @@ async fn run() -> Result<(), String> {
         std::fs::create_dir_all(parent).map_err(|error| format!("DB 폴더를 만들지 못했다: {error}"))?;
     }
     let pool = open_database(&settings.database_path).await.map_err(|error| format!("DB를 열지 못했다: {error}"))?;
-    let app = router(settings.config, pool, Arc::new(SystemClock));
+    let app = router_with_pending_login_limit(settings.config, pool, Arc::new(SystemClock), settings.pending_login_limit);
     let listener = tokio::net::TcpListener::bind(settings.bind).await.map_err(|error| format!("{}에 묶지 못했다: {error}", settings.bind))?;
     tracing::info!(bind = %settings.bind, "계정 서버 시작");
     axum::serve(listener, app).with_graceful_shutdown(shutdown()).await.map_err(|error| error.to_string())
