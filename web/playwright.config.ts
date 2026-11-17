@@ -5,6 +5,7 @@ const origin = process.env.VALLY_E2E_BASE_URL ?? `http://127.0.0.1:${process.env
 export default defineConfig({
   testDir: "e2e",
   forbidOnly: !!process.env.CI,
+  fullyParallel: true,
   retries: 0,
   timeout: 90_000,
   expect: { timeout: 15_000 },
