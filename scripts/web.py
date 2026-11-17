@@ -12,6 +12,7 @@ import tempfile
 import tomllib
 
 import dev
+import e2e_rules
 import evidence
 
 
@@ -158,7 +159,12 @@ def prepare_web(root, environment):
 
 def check_web(root, arguments):
     with evidence.Run(root, "check", ["web.py", "check", *arguments]) as record:
-        record.plan("dependencies", "wasm", "types", "vitest")
+        record.plan("e2e-rules", "dependencies", "wasm", "types", "vitest")
+        with record.step("e2e-rules"):
+            problems = e2e_rules.check(root)
+            if problems:
+                print("\n".join(problems), flush=True)
+                raise ValueError(f"e2e 시험 규칙 위반 {len(problems)}건")
         environment = environment_for(root, record.directory / "tmp")
         prepare_web(root, environment)
         with record.step("vitest"):
