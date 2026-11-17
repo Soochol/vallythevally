@@ -15,6 +15,7 @@ pub struct Chunk {
     pub parts: u32,
     pub items: Vec<String>,
     pub types: Vec<RealType>,
+    pub sent: bool,
 }
 
 impl Chunk {
@@ -31,6 +32,7 @@ impl Chunk {
                 parts,
                 items: items.to_vec(),
                 types: registration.types().to_vec(),
+                sent: false,
             })
             .collect()
     }
@@ -78,7 +80,7 @@ pub struct Registry {
 impl Registry {
     pub fn standalone(items: Vec<String>) -> Registry {
         Registry {
-            wanted: vec![Chunk { seq: 0, id: STANDALONE_ID.to_owned(), part: 0, parts: 1, items, types: STREAM_TYPES.to_vec() }],
+            wanted: vec![Chunk { seq: 0, id: STANDALONE_ID.to_owned(), part: 0, parts: 1, items, types: STREAM_TYPES.to_vec(), sent: false }],
             next_seq: 1,
         }
     }
@@ -97,6 +99,20 @@ impl Registry {
             .collect();
         self.wanted.extend_from_slice(&numbered);
         numbered
+    }
+
+    pub fn replay(&mut self) -> Vec<Chunk> {
+        for chunk in &mut self.wanted {
+            self.next_seq += 1;
+            chunk.seq = self.next_seq;
+        }
+        self.wanted.clone()
+    }
+
+    pub fn mark_sent(&mut self, seq: u64) {
+        for chunk in self.wanted.iter_mut().filter(|chunk| chunk.seq == seq) {
+            chunk.sent = true;
+        }
     }
 
     pub fn accepted(&mut self, chunk: &Chunk) {
@@ -185,6 +201,30 @@ mod tests {
         let second = registry.add(Chunk::split(&registration("b", 1, &[RealType::Trade])));
         registry.forget(&second[0]);
         assert_eq!(registry.wanted(), &first[..]);
+    }
+
+    #[test]
+    fn after_a_replay_the_pieces_of_a_split_chunk_are_judged_one_by_one() {
+        let mut registry = Registry::default();
+        let chunks = registry.add(Chunk::split(&registration("a", 3, &[RealType::Trade, RealType::OrderBook])));
+        registry.accepted(&chunks[0]);
+        registry.remove(&Chunk::split(&registration("x", 1, &[RealType::Trade])));
+        assert_eq!(registry.wanted().len(), 2);
+        let replayed = registry.replay();
+        assert_ne!(replayed[0].seq, replayed[1].seq);
+        registry.forget(&replayed[0]);
+        assert_eq!(registry.wanted().len(), 1);
+        assert_eq!(registry.wanted()[0].items, ["000001_AL"]);
+        assert_eq!(registry.wanted()[0].types, [RealType::OrderBook]);
+    }
+
+    #[test]
+    fn a_piece_keeps_the_sent_mark_of_the_chunk_it_was_cut_from() {
+        let mut registry = Registry::default();
+        let chunks = registry.add(Chunk::split(&registration("a", 3, &[RealType::Trade, RealType::OrderBook])));
+        registry.mark_sent(chunks[0].seq);
+        registry.remove(&Chunk::split(&registration("x", 1, &[RealType::Trade])));
+        assert!(registry.wanted().iter().all(|chunk| chunk.sent));
     }
 
     #[test]
