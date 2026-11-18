@@ -3,13 +3,14 @@ import { Fragment, useEffect, useId, useRef, useState, useSyncExternalStore } fr
 import type { SymbolInfo } from "../../api/generated/SymbolInfo";
 import { useSymbolInfos, useSymbolSearch } from "../../api/queries";
 import { compareRefusal } from "../../chart/settings";
-import { KIND_LABEL, MARKET_LABEL } from "../../lib/symbol";
+import { isIndexCode, KIND_LABEL, MARKET_LABEL } from "../../lib/symbol";
 import { chartWindows, useLayoutStore } from "../../stores/layout";
 import { type SearchPurpose, useSelectionStore } from "../../stores/selection";
 import { useUiStore } from "../../stores/ui";
 import { useActiveWatchlist, useWatchlistStore } from "../../stores/watchlist";
 import { removalUndo } from "../watch/removalUndo";
 import { PutTargetPill } from "./PutTargetPill";
+import { clearPinPick, usePinPickStore } from "./pinPick";
 import { type SearchCommand, searchCommandsSnapshot, subscribeSearchCommands } from "../commands/registry";
 import { CloseIcon, Icon, ICON_PATHS, SearchIcon } from "../icons";
 import { CommandFrame } from "../commands/CommandFrame";
@@ -44,6 +45,8 @@ function SearchDialogBody({ purpose }: { purpose: SearchPurpose }) {
   const [active, setActive] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
   const pillRef = useRef<HTMLButtonElement>(null);
+  const [pinWindow] = useState(() => usePinPickStore.getState().window);
+  useEffect(() => clearPinPick, []);
   const putTarget = useSelectionStore((s) => s.putTarget);
   const putGroup = purpose === "watch" && putTarget?.listId === watchlist.id ? watchlist.groups.find((g) => g.id === putTarget.groupId) ?? null : null;
   const putName = putGroup?.name ?? watchlist.name;
@@ -55,9 +58,10 @@ function SearchDialogBody({ purpose }: { purpose: SearchPurpose }) {
   const search = useSymbolSearch(mode.kind === "symbols" && !offline ? query : "", filters);
   const ids = useId();
   const symbolList = searchList(query, { watch, recent }, search.data, filters);
+  const picking = pinWindow !== null;
   const rows: ResultRow[] = [
-    ...(mode.kind === "symbols" ? symbolList.rows.filter((row) => query !== "" || matchesMarket(row.info, market)).map((row): ResultRow => ({ kind: "symbol", ...row })) : []),
-    ...(query === "" || mode.kind === "commands" ? matchingCommands(commands, query).map((command): ResultRow => ({ kind: "command", command, group: "commands" })) : []),
+    ...(mode.kind === "symbols" ? symbolList.rows.filter((row) => (query !== "" || matchesMarket(row.info, market)) && !(picking && isIndexCode(row.info.code))).map((row): ResultRow => ({ kind: "symbol", ...row })) : []),
+    ...(!picking && (query === "" || mode.kind === "commands") ? matchingCommands(commands, query).map((command): ResultRow => ({ kind: "command", command, group: "commands" })) : []),
   ];
   const selectable = mode.kind === "commands" || (!offline && symbolList.selectable);
   const activeIndex = selectable ? Math.min(active, rows.length - 1) : -1;
@@ -86,7 +90,10 @@ function SearchDialogBody({ purpose }: { purpose: SearchPurpose }) {
   const chooseSymbol = (info: SymbolInfo, action: "open" | "watch" | "toggleWatch" | "compare") => {
     queryClient.setQueryData(["symbol", info.code], info);
     const selection = useSelectionStore.getState();
-    if (action === "compare") {
+    if (pinWindow !== null) {
+      const { notice } = useLayoutStore.getState().pickWindowSymbol(pinWindow, cellId, info);
+      if (notice) selection.showToast(notice);
+    } else if (action === "compare") {
       const layout = useLayoutStore.getState();
       const cell = chartWindows(layout.layout).find((c) => c.id === cellId);
       const refusal = cell && compareRefusal(cell.chartSettings, info.code, cell.symbol);
@@ -111,7 +118,7 @@ function SearchDialogBody({ purpose }: { purpose: SearchPurpose }) {
   };
   const choose = (row: ResultRow, modifiers = { ctrlKey: false, metaKey: false, shiftKey: false }) => {
     if (!selectable) return;
-    if (row.kind === "symbol") return chooseSymbol(row.info, modifiers.ctrlKey || modifiers.metaKey ? "toggleWatch" : modifiers.shiftKey ? "compare" : purpose);
+    if (row.kind === "symbol") return chooseSymbol(row.info, !picking && (modifiers.ctrlKey || modifiers.metaKey) ? "toggleWatch" : !picking && modifiers.shiftKey ? "compare" : purpose);
     close();
     try {
       void Promise.resolve(row.command.run({ cellId, queryClient })).catch((error: unknown) => useSelectionStore.getState().showToast(error instanceof Error ? error.message : "명령을 실행하지 못했습니다"));
@@ -137,7 +144,7 @@ function SearchDialogBody({ purpose }: { purpose: SearchPurpose }) {
 
   return <CommandFrame labelledBy={`${ids}-title`} onClose={close} width="h-[500px] w-[min(840px,calc(100vw-32px))] max-md:h-[80dvh]">
     <div className="flex min-h-0 flex-1 flex-col">
-      <h2 id={`${ids}-title`} className="sr-only">{purpose === "watch" ? "관심종목에 넣을 종목 검색" : "종목 검색"}</h2>
+      <h2 id={`${ids}-title`} className="sr-only">{picking ? "창에 보일 종목 고르기" : purpose === "watch" ? "관심종목에 넣을 종목 검색" : "종목 검색"}</h2>
       <div className="flex flex-none flex-wrap items-center gap-2 border-b border-line px-4 py-3">
         <label className="flex min-w-[180px] flex-1 items-center gap-2 text-l text-text-3">
           <SearchIcon size={20} />
@@ -165,7 +172,7 @@ function SearchDialogBody({ purpose }: { purpose: SearchPurpose }) {
               onPointerMove={() => selectable && i !== activeIndex && setActive(i)} onClick={(e) => choose(row, e)}
               className="group/row flex min-h-[36px] cursor-pointer items-center gap-2 rounded-m px-3 py-1 text-s aria-selected:bg-accent-soft aria-disabled:cursor-default aria-disabled:opacity-70 max-md:min-h-[44px]">
               {row.kind === "symbol" ? <>
-                <WatchStar included={watchlist.symbols.includes(row.info.code)} disabled={!selectable} addName={putName} removeName={watchlist.name} onToggle={() => toggleOrAdd(row.info, true)} />
+                {!picking && <WatchStar included={watchlist.symbols.includes(row.info.code)} disabled={!selectable} addName={putName} removeName={watchlist.name} onToggle={() => toggleOrAdd(row.info, true)} />}
                 <span className="min-w-0 flex-1"><span className="font-semibold"><Marked text={row.info.name} query={query} /></span> <span className="whitespace-nowrap text-xs text-text-3"><Marked text={row.info.code} query={query} /></span></span>
                 {putGroup?.symbols.includes(row.info.code) && <span className="max-w-[9rem] flex-none truncate text-[11px] text-text-2">✓ {putGroup.name}에 있음</span>}
                 <span className="rounded-s bg-raised px-1 text-xs text-text-3 max-md:hidden">{row.info.kind === "etf" ? KIND_LABEL.etf : MARKET_LABEL[row.info.market]}</span>
@@ -183,7 +190,7 @@ function SearchDialogBody({ purpose }: { purpose: SearchPurpose }) {
         <span className="flex-1" />
         <span className="whitespace-nowrap max-md:hidden"><kbd>↵</kbd> 넣기</span><span className="whitespace-nowrap max-md:hidden"><kbd>Tab</kbd> 넣을 곳</span><span className="whitespace-nowrap max-md:hidden"><kbd>Esc</kbd> 닫기</span>
       </div> : <div className="flex flex-none flex-wrap items-center gap-2 border-t border-line px-4 py-2 text-xs text-text-3">
-        <span><kbd>↑↓</kbd> 고르기</span><span><kbd>↵</kbd> 열기</span><span><kbd>☆·Ctrl+↵</kbd> 관심종목</span><span><kbd>Shift+↵</kbd> 비교</span><span><kbd>Esc</kbd> 닫기</span>
+        <span><kbd>↑↓</kbd> 고르기</span><span><kbd>↵</kbd> 열기</span>{!picking && <><span><kbd>☆·Ctrl+↵</kbd> 관심종목</span><span><kbd>Shift+↵</kbd> 비교</span></>}<span><kbd>Esc</kbd> 닫기</span>
       </div>}
     </div>
   </CommandFrame>;

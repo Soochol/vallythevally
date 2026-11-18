@@ -10,7 +10,7 @@ import type { CanvasPlacement, DockNode, DockPlacement, Placement } from "../lay
 import { byteLength, PAYLOAD_LIMIT_BYTES } from "../persist/bytes";
 import type { LinkColor } from "../api/generated/LinkColor";
 import type { SymbolCode } from "../api/generated/SymbolCode";
-import { ARRANGEMENT_STEPS, type ChartWindowState, chartWindow, chartWindows, DEFAULT_LAYOUT, fittedDock, linkedWindowCount, useLayoutStore, watchedSymbol, windowName, windowRefs, type WindowState } from "./layout";
+import { ARRANGEMENT_STEPS, type ChartWindowState, chartWindow, chartWindows, DEFAULT_LAYOUT, fittedDock, linkedWindowCount, linkedWindowSymbol, useLayoutStore, watchedSymbol, windowName, windowRefs, type WindowState } from "./layout";
 
 const state = () => useLayoutStore.getState();
 const shownTab = (kind: string) => {
@@ -588,4 +588,66 @@ test("창 50개를 모두 따로 묶은 도킹 배치, 일부를 띄운 도킹 �
     const placement: Placement = { v: 1, dock, canvas };
     expect(byteLength(JSON.stringify(placement))).toBeLessThan(PAYLOAD_LIMIT_BYTES);
   }
+});
+
+test("시세 창이 보이는 종목은 고정 종목이 연동 색과 활성 칸보다 먼저이고, 고정이 없으면 지금 규칙과 같다", () => {
+  linked();
+  state().openWindow("trades");
+  state().openWindow("book");
+  const layout = () => state().layout;
+  const shownIn = (id: string, active: string) => linkedWindowSymbol(layout(), windowId(id), windowId(active));
+  expect([shownIn("trades", "off"), shownIn("trades", "b1")]).toEqual(["000660", "035420"]);
+  state().setLink(windowId("book"), "a");
+  expect(shownIn("book", "b1")).toBe(watchedSymbol(layout(), windowId("book"), windowId("b1")));
+  state().pinSymbol(windowId("trades"), "005930");
+  state().pinSymbol(windowId("book"), "005930");
+  expect([shownIn("trades", "off"), shownIn("trades", "b1"), shownIn("book", "b1")]).toEqual(["005930", "005930", "005930"]);
+  state().setSymbol(windowId("a1"), SK);
+  expect(shownIn("book", "b1")).toBe("005930");
+  state().pinSymbol(windowId("trades"), null);
+  expect(shownIn("trades", "b1")).toBe("035420");
+});
+
+test("고정된 창에 연동 색을 고르면 고정이 풀리고 그 색을 따르며, 끔을 고르면 고정이 남는다", () => {
+  linked();
+  state().openWindow("trades");
+  state().pinSymbol(windowId("trades"), "005930");
+  state().setLink(windowId("trades"), null);
+  expect(state().layout.windows.find((w) => w.id === "trades")).toMatchObject({ symbol: "005930" });
+  state().setLink(windowId("trades"), "b");
+  const trades = state().layout.windows.find((w) => w.id === "trades")!;
+  expect(trades).toEqual({ id: "trades", link: "b", kind: "trades" });
+  expect(linkedWindowSymbol(state().layout, windowId("trades"), windowId("off"))).toBe("035420");
+});
+
+test("시세 창에서 종목을 고르면 끔인 창은 그 창에 고정하고, 연동 색 창은 그 색의 차트로 보내며 창 종목은 그대로다", () => {
+  linked();
+  state().openWindow("book");
+  const book = () => state().layout.windows.find((w) => w.id === "book")!;
+  expect(state().pickWindowSymbol(windowId("book"), windowId("off"), SK)).toEqual({ changed: ["book"], notice: null });
+  expect(book()).toMatchObject({ symbol: "000660" });
+  expect(shown().off).toEqual(["000660", "D"]);
+  state().pinSymbol(windowId("book"), null);
+  state().setLink(windowId("book"), "b");
+  expect(state().pickWindowSymbol(windowId("book"), windowId("off"), SAMSUNG)).toEqual({ changed: ["b1"], notice: null });
+  expect(book()).toEqual({ id: "book", link: "b", kind: "book" });
+  expect(shown().b1).toEqual(["005930", "5m"]);
+  state().setLink(windowId("book"), "c");
+  const before = state().layout;
+  expect(state().pickWindowSymbol(windowId("book"), windowId("off"), SK)).toEqual({ changed: [], notice: "연동 C를 따르는 차트가 없습니다. 차트의 연동 색을 C로 맞추세요" });
+  expect(state().layout).toBe(before);
+  expect(state().pickWindowSymbol(windowId("watchlist"), windowId("off"), SK)).toEqual({ changed: [], notice: null });
+  state().pinSymbol(windowId("book"), "005930");
+  expect(state().pickWindowSymbol(windowId("book"), windowId("off"), SK)).toEqual({ changed: [], notice: "연동 C를 따르는 차트가 없습니다. 차트의 연동 색을 C로 맞추세요" });
+  expect(book()).toMatchObject({ symbol: "005930" });
+});
+
+test("관심종목·스크리너의 보이는 종목은 창 종목이 아니라 보내는 규칙으로만 정해진다", () => {
+  linked();
+  state().openWindow("trades");
+  state().pinSymbol(windowId("trades"), "005930");
+  const layout = () => state().layout;
+  expect(watchedSymbol(layout(), windowId("watchlist"), windowId("b1"))).toBe("035420");
+  expect(watchedSymbol(layout(), windowId("trades"), windowId("b1"))).toBe("035420");
+  expect(watchedSymbol(layout(), null, windowId("off"))).toBe("000660");
 });
