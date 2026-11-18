@@ -7,7 +7,7 @@ use collector::collect::config::Variables;
 use collector::keys::{KeyIdentity, KeyList, KeyRole, KeysError};
 use collector::kst::KstTime;
 use collector::plan::{
-    KEY_CAPACITY, MARKET_TYPES, PlanError, PlanFile, PlanInput, Violation, build_plan, check_plan, plan_path, read_plan, write_plan,
+    KEY_CAPACITY, KeyShare, MARKET_TYPES, PlanError, PlanFile, PlanInput, Violation, build_plan, check_plan, plan_path, read_plan, write_plan,
 };
 use collector::protocol::KeyName;
 use collector::universe::{Diff, Entry, MarketName, StockKind, UniverseFile};
@@ -520,4 +520,193 @@ fn a_plan_file_with_format_version_zero_is_not_read() {
 fn the_plan_file_is_json_under_the_plan_folder_named_by_date() {
     let data = Path::new("/state/collector");
     assert_eq!(plan_path(data, DATE), data.join("plan").join("20261118.json"));
+}
+
+fn share_of<'a>(plan: &'a PlanFile, name: &str) -> &'a KeyShare {
+    plan.keys.iter().find(|key| key.name.as_str() == name).unwrap()
+}
+
+fn loads(values: &[(usize, u64)]) -> BTreeMap<String, u64> {
+    values.iter().map(|(number, load)| (code(*number), *load)).collect()
+}
+
+fn codes(numbers: &[usize]) -> Vec<String> {
+    numbers.iter().map(|number| code(*number)).collect()
+}
+
+fn two_collecting_keys() -> Vec<KeyIdentity> {
+    vec![identity("collect-02", KeyRole::Collecting), identity("spare-01", KeyRole::Spare), identity("collect-01", KeyRole::Collecting)]
+}
+
+#[test]
+fn stocks_with_the_same_load_are_dealt_in_code_order_and_equal_keys_go_to_the_first_name() {
+    let messages = loads(&[(0, 10), (1, 10), (2, 10), (3, 10)]);
+    let plan = plan(&two_collecting_keys(), &universe_of(4), &messages);
+    assert_eq!(share_of(&plan, "collect-01").stocks, codes(&[0, 2]));
+    assert_eq!(share_of(&plan, "collect-02").stocks, codes(&[1, 3]));
+}
+
+#[test]
+fn stocks_without_any_count_alternate_between_equal_keys_starting_at_the_first_name() {
+    let plan = plan(&two_collecting_keys(), &universe_of(5), &BTreeMap::new());
+    assert_eq!(share_of(&plan, "collect-01").stocks, codes(&[0, 2, 4]));
+    assert_eq!(share_of(&plan, "collect-02").stocks, codes(&[1, 3]));
+}
+
+#[test]
+fn a_stock_with_a_count_of_one_goes_by_load_and_a_stock_with_no_count_goes_by_stock_count() {
+    let messages = loads(&[(0, 100), (1, 3), (2, 3), (3, 3), (4, 1)]);
+    let plan = plan(&two_collecting_keys(), &universe_of(6), &messages);
+    assert_eq!(share_of(&plan, "collect-01").stocks, codes(&[0, 5]));
+    assert_eq!(share_of(&plan, "collect-02").stocks, codes(&[1, 2, 3, 4]));
+}
+
+#[test]
+fn a_stock_with_no_count_goes_to_the_lighter_key_when_stock_counts_are_equal() {
+    let messages = loads(&[(0, 100), (1, 3)]);
+    let plan = plan(&two_collecting_keys(), &universe_of(3), &messages);
+    assert_eq!(share_of(&plan, "collect-01").stocks, codes(&[0]));
+    assert_eq!(share_of(&plan, "collect-02").stocks, codes(&[1, 2]));
+}
+
+#[test]
+fn a_stock_with_a_count_goes_to_the_fewer_stocks_when_loads_are_equal() {
+    let messages = loads(&[(0, 9), (1, 6), (2, 5), (3, 1), (4, 1), (5, 1)]);
+    let plan = plan(&two_collecting_keys(), &universe_of(6), &messages);
+    assert_eq!(share_of(&plan, "collect-01").stocks, codes(&[0, 3, 4]));
+    assert_eq!(share_of(&plan, "collect-02").stocks, codes(&[1, 2, 5]));
+}
+
+#[test]
+fn the_market_types_go_to_the_lightest_collecting_key_then_the_one_with_fewer_stocks_then_the_first_name() {
+    let heavy_few = loads(&[(0, 100), (1, 3), (2, 3), (3, 3), (4, 1)]);
+    let by_load = plan(&two_collecting_keys(), &universe_of(5), &heavy_few);
+    assert_eq!(share_of(&by_load, "collect-02").market_types, MARKET_TYPES);
+    assert!(share_of(&by_load, "collect-01").market_types.is_empty());
+
+    let equal_load_fewer_stocks = plan(&two_collecting_keys(), &universe_of(3), &BTreeMap::new());
+    assert_eq!(share_of(&equal_load_fewer_stocks, "collect-01").stocks.len(), 2);
+    assert_eq!(share_of(&equal_load_fewer_stocks, "collect-02").market_types, MARKET_TYPES);
+    assert!(share_of(&equal_load_fewer_stocks, "collect-01").market_types.is_empty());
+
+    let equal_everything = plan(&two_collecting_keys(), &universe_of(2), &BTreeMap::new());
+    assert_eq!(share_of(&equal_everything, "collect-01").market_types, MARKET_TYPES);
+    assert!(share_of(&equal_everything, "collect-02").market_types.is_empty());
+    assert!(share_of(&equal_everything, "spare-01").market_types.is_empty());
+}
+
+#[test]
+fn the_stocks_on_every_key_are_listed_in_code_order() {
+    let plan = plan(&identities(3), &universe_of(570), &uneven_messages(570));
+    for key in &plan.keys {
+        let mut sorted = key.stocks.clone();
+        sorted.sort();
+        assert_eq!(key.stocks, sorted, "{}", key.name);
+    }
+}
+
+#[test]
+fn the_alert_for_excluded_stocks_counts_the_keys_needed_rounded_up() {
+    let plan = plan(&identities(3), &universe_of(600), &BTreeMap::new());
+    assert_eq!(
+        plan.alerts,
+        ["등록할 종목 600개가 수집 키 3개의 몫 570개를 넘어 30개(000571~000600)를 제외했습니다. 수집 키가 4개 필요합니다"]
+    );
+    let exact = self::plan(&identities(3), &universe_of(760), &BTreeMap::new());
+    assert_eq!(
+        exact.alerts,
+        ["등록할 종목 760개가 수집 키 3개의 몫 570개를 넘어 190개(000571~000760)를 제외했습니다. 수집 키가 4개 필요합니다"]
+    );
+    let one_over = self::plan(&identities(3), &universe_of(761), &BTreeMap::new());
+    assert!(one_over.alerts[0].ends_with("수집 키가 5개 필요합니다"), "{:?}", one_over.alerts);
+}
+
+#[test]
+fn a_plan_without_a_spare_key_alerts_that_no_handoff_is_possible() {
+    let keys: Vec<KeyIdentity> = identities(2).into_iter().filter(|key| key.role == KeyRole::Collecting).collect();
+    let plan = plan(&keys, &universe_of(10), &BTreeMap::new());
+    assert_eq!(plan.alerts, ["활성 예비 키가 없어 인계할 수 없습니다"]);
+}
+
+fn valid_plan() -> PlanFile {
+    let valid = plan(&identities(2), &universe_of(10), &BTreeMap::new());
+    assert_eq!(check_plan(&valid), Ok(()));
+    valid
+}
+
+fn spare_of(plan: &mut PlanFile) -> &mut KeyShare {
+    plan.keys.iter_mut().find(|key| key.role == KeyRole::Spare).unwrap()
+}
+
+#[test]
+fn the_check_rejects_a_key_listed_twice() {
+    let mut plan = valid_plan();
+    let again = spare_of(&mut plan).clone();
+    plan.keys.push(again);
+    assert_eq!(check_plan(&plan), Err(Violation::DuplicateKey(KeyName::parse("spare-01").unwrap())));
+    let mut collecting = valid_plan();
+    let mut again = collecting.keys[0].clone();
+    again.stocks.clear();
+    again.market_types.clear();
+    collecting.keys.push(again);
+    assert_eq!(check_plan(&collecting), Err(Violation::DuplicateKey(KeyName::parse("collect-01").unwrap())));
+}
+
+#[test]
+fn the_check_rejects_each_kind_of_work_on_the_spare() {
+    let spare_name = KeyName::parse("spare-01").unwrap();
+
+    let mut with_stock = valid_plan();
+    let moved = with_stock.keys[0].stocks.pop().unwrap();
+    spare_of(&mut with_stock).stocks.push(moved);
+    assert_eq!(check_plan(&with_stock), Err(Violation::SpareHoldsWork(spare_name.clone())));
+
+    let mut with_market_types = valid_plan();
+    let holder = with_market_types.keys.iter_mut().find(|key| !key.market_types.is_empty()).unwrap();
+    let moved = std::mem::take(&mut holder.market_types);
+    spare_of(&mut with_market_types).market_types = moved;
+    assert_eq!(check_plan(&with_market_types), Err(Violation::SpareHoldsWork(spare_name.clone())));
+
+    let mut with_one_market_type_too = valid_plan();
+    spare_of(&mut with_one_market_type_too).market_types.push(MARKET_TYPES[1]);
+    assert_eq!(check_plan(&with_one_market_type_too), Err(Violation::SpareHoldsWork(spare_name.clone())));
+
+    let mut with_rest_job = valid_plan();
+    spare_of(&mut with_rest_job).rest_jobs.push("ka10081".to_owned());
+    assert_eq!(check_plan(&with_rest_job), Err(Violation::SpareHoldsWork(spare_name)));
+}
+
+#[test]
+fn the_check_rejects_a_placed_stock_that_is_also_excluded_or_unregistered() {
+    let placed = code(0);
+    let holder = plan(&identities(2), &universe_of(10), &BTreeMap::new()).keys.iter().find(|key| key.stocks.contains(&placed)).unwrap().name.clone();
+
+    let mut also_excluded = valid_plan();
+    also_excluded.excluded.push(placed.clone());
+    assert_eq!(check_plan(&also_excluded), Err(Violation::StockAlsoUnplaced { code: placed.clone(), key: holder.clone() }));
+
+    let mut also_unregistered = valid_plan();
+    also_unregistered.unregistered.push(placed.clone());
+    assert_eq!(check_plan(&also_unregistered), Err(Violation::StockAlsoUnplaced { code: placed, key: holder }));
+
+    let mut apart = valid_plan();
+    apart.excluded.push("999990".to_owned());
+    apart.unregistered.push("999991".to_owned());
+    assert_eq!(check_plan(&apart), Ok(()));
+}
+
+#[test]
+fn the_check_rejects_a_market_type_on_no_key_and_on_two_keys_for_each_of_the_three_types() {
+    for market_type in MARKET_TYPES {
+        let mut missing = valid_plan();
+        for key in &mut missing.keys {
+            key.market_types.retain(|held| *held != market_type);
+        }
+        assert_eq!(check_plan(&missing), Err(Violation::MarketTypeCount { market_type: market_type.wire(), keys: 0 }), "{}", market_type.wire());
+
+        let mut doubled = valid_plan();
+        let other = doubled.keys.iter_mut().find(|key| key.market_types.is_empty() && key.role == KeyRole::Collecting).unwrap();
+        other.market_types.push(market_type);
+        assert_eq!(check_plan(&doubled), Err(Violation::MarketTypeCount { market_type: market_type.wire(), keys: 2 }), "{}", market_type.wire());
+    }
 }
