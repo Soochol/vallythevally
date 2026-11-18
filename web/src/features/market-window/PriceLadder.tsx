@@ -24,7 +24,7 @@ function Quantity({ row }: { row: LadderRow }) {
 
 function Price({ row, previousClose }: { row: LadderRow; previousClose: number | null }) {
   if (!row.level) return <div className="mw-px" />;
-  const tone = previousClose === null ? "flat" : direction(row.level.price - previousClose);
+  const tone = previousClose === null || !(previousClose > 0) ? "flat" : direction(row.level.price - previousClose);
   return (
     <div className={`mw-px ${TONE[tone]}`}>
       {formatPrice(row.level.price, false)}

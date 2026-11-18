@@ -1,0 +1,26 @@
+[Unit]
+Description=Vally 수집 감독 데몬 (collector supervise)
+After=network-online.target
+Wants=network-online.target
+OnFailure=vally-collector-alert.service
+StartLimitIntervalSec=1h
+StartLimitBurst=5
+
+[Service]
+Type=simple
+Environment=VALLY_KEYS=%h/.config/vally/collector-keys.json
+Environment=VALLY_DATA=%h/vally-data/hoga
+Environment=VALLY_STATE=%h/.local/state/vallythevally/collector
+Environment=VALLY_HOLIDAY_KEY=%h/.config/vally/holiday-service-key
+Environment=RUST_LOG=info
+WorkingDirectory=%h
+ExecStart=%h/.local/bin/collector supervise --keys ${VALLY_KEYS} --data ${VALLY_DATA} --state ${VALLY_STATE} --holiday-key ${VALLY_HOLIDAY_KEY}
+ExecStopPost=/bin/sh -c 'test "$SERVICE_RESULT" = success || exec systemctl --user start --no-block vally-collector-alert.service'
+Restart=on-failure
+RestartSec=30
+RestartPreventExitStatus=2
+TimeoutStopSec=120
+OOMPolicy=continue
+
+[Install]
+WantedBy=default.target

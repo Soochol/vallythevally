@@ -250,6 +250,7 @@ pub enum ServerMessage {
     Account { status: AccountStatus },
     CollectorDaemon { judgment: crate::collector::DaemonJudgment, at: UnixSeconds },
     SetupChanged { kinds: Vec<setup::DocumentKind> },
+    TradingAccountChanged { account_ref: String },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, TS)]
@@ -1536,6 +1537,8 @@ pub enum ApiErrorReason {
     Updating,
     DataChanged,
     NotConnected,
+    OrdersOff,
+    AccountChanged,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -1555,6 +1558,151 @@ pub struct ApiErrorBody {
 #[ts(export)]
 pub struct ApiError {
     pub error: ApiErrorBody,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum OrderSide {
+    Buy,
+    Sell,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum OrdersState {
+    Off,
+    On,
+    FileUnusable,
+    AccountChanged,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct OrdersStatus {
+    pub state: OrdersState,
+    pub account_ref: Option<String>,
+    pub account_tail: Option<String>,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct OrdersAccountCheck {
+    pub account_tail: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct OrdersSwitchInput {
+    pub enabled: bool,
+    pub confirm_account_tail: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct TradingHolding {
+    pub code: String,
+    pub name: String,
+    #[ts(type = "number")]
+    pub quantity: u64,
+    #[ts(type = "number")]
+    pub sellable_quantity: u64,
+    #[ts(type = "number")]
+    pub average_price: u64,
+    #[ts(type = "number")]
+    pub current_price: u64,
+    #[ts(type = "number")]
+    pub evaluation_profit: i64,
+    #[ts(type = "number | null")]
+    pub profit_rate_centi: Option<i64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct TradingBalance {
+    pub account_ref: String,
+    pub holdings: Vec<TradingHolding>,
+    #[ts(type = "number")]
+    pub total_purchase: i64,
+    #[ts(type = "number")]
+    pub total_evaluation: i64,
+    #[ts(type = "number")]
+    pub total_profit: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct TradingOpenOrder {
+    pub order_no: String,
+    pub code: String,
+    pub name: String,
+    pub side: OrderSide,
+    #[ts(type = "number")]
+    pub quantity: u64,
+    #[ts(type = "number")]
+    pub price: u64,
+    #[ts(type = "number")]
+    pub open_quantity: u64,
+    pub status: String,
+    pub ordered_at: String,
+    pub original_order_no: Option<String>,
+    pub venue: Venue,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct TradingOpenOrders {
+    pub account_ref: String,
+    pub orders: Vec<TradingOpenOrder>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct TradingOrderable {
+    pub account_ref: String,
+    pub code: String,
+    pub side: OrderSide,
+    #[ts(type = "number")]
+    pub price: u64,
+    #[ts(type = "number")]
+    pub amount: u64,
+    #[ts(type = "number")]
+    pub quantity: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct TradingExecution {
+    pub order_no: String,
+    pub code: String,
+    pub name: String,
+    pub side: OrderSide,
+    #[ts(type = "number")]
+    pub quantity: u64,
+    #[ts(type = "number")]
+    pub price: u64,
+    pub time: String,
+    pub venue: Venue,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct TradingExecutions {
+    pub account_ref: String,
+    pub day: KstDate,
+    pub executions: Vec<TradingExecution>,
 }
 
 #[cfg(test)]

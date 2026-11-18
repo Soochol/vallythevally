@@ -18,6 +18,9 @@ import type { DrawingInput } from "../../src/api/generated/DrawingInput";
 import type { Layout } from "../../src/api/generated/Layout";
 import type { LayoutInput } from "../../src/api/generated/LayoutInput";
 import type { LayoutWindow } from "../../src/api/generated/LayoutWindow";
+import type { OrdersAccountCheck } from "../../src/api/generated/OrdersAccountCheck";
+import type { OrdersStatus } from "../../src/api/generated/OrdersStatus";
+import type { OrdersSwitchInput } from "../../src/api/generated/OrdersSwitchInput";
 import type { Period } from "../../src/api/generated/Period";
 import type { Screens } from "../../src/api/generated/Screens";
 import type { ServerMessage } from "../../src/api/generated/ServerMessage";
@@ -150,6 +153,8 @@ export class LiveFrames {
   private state: ConnectionStatus;
   kiwoomLink: KiwoomLinkStatus = CONNECTED_KIWOOM;
   account: AccountStatus = { state: "local_only" };
+  orders: OrdersStatus = { state: "off", accountRef: null, accountTail: null, message: "주문 사용이 꺼져 있습니다" };
+  ordersAccountTail = "01";
   constructor(private readonly now: number, private readonly market: MarketFixtures) { this.state = { realtime: "live", since: Math.floor(now / 1000), backfilling: false }; }
   connect(socket: WebSocketRoute) {
     const subscriptions = new Map<string, Subscription>();
@@ -288,6 +293,14 @@ export class Scenario {
     }
     if (path === "/api/account" && method === "GET") return { body: this.live.account };
     if (path === "/api/system/kiwoom" && method === "GET") return { body: this.live.kiwoomLink };
+    if (path === "/api/system/orders" && method === "GET") return { body: this.live.orders };
+    if (path === "/api/system/orders/check-account" && method === "POST") return { body: { accountTail: this.live.ordersAccountTail } satisfies OrdersAccountCheck };
+    if (path === "/api/system/orders" && method === "PUT") {
+      const input: OrdersSwitchInput = request.postDataJSON();
+      if (!input.enabled) return { body: this.live.orders = { state: "off", accountRef: null, accountTail: null, message: "주문 사용이 꺼져 있습니다" } satisfies OrdersStatus };
+      if (input.confirmAccountTail !== this.live.ordersAccountTail) return error(400, "bad_request", "확인한 계좌 끝 2자리가 계좌와 다릅니다");
+      return { body: this.live.orders = { state: "on", accountRef: "synthetic-account", accountTail: this.live.ordersAccountTail, message: "주문 사용이 켜져 있습니다" } satisfies OrdersStatus };
+    }
     if (path === "/api/system/settings" && method === "GET") return { body: DEFAULT_SYSTEM_SETTINGS };
     if (path === "/api/symbols" && method === "GET") return { body: this.market.search(url.searchParams.get("q") ?? "", { market: url.searchParams.get("market"), kind: url.searchParams.get("kind") }) };
     if (path === "/api/quotes" && method === "GET") {

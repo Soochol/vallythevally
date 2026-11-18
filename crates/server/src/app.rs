@@ -119,9 +119,10 @@ pub fn application_with_system(inputs: ApplicationInputs, system: SystemState) -
     let bars = Arc::new(BarService::new(rest.clone(), symbols.clone(), clock.clone()));
     let screener = Arc::new(Screener::new(screener_store, rest.clone(), bars.clone(), symbols.clone(), clock.clone()));
     let registered = stream.watch_desired();
+    let trading = crate::trading::Trading::new(rest.clone(), clock.clone(), system.order_switch_store(), stream.account_feed());
     let hub = MarketHub::spawn(bars.clone(), stream, events, clock.clone());
     let link = Link::new(rest.clone(), symbols.clone(), screener.clone(), clock.clone(), screener_update_on_connect);
-    Arc::new(AppState { symbols, bars, rest, db, clock, static_dir, hub, screener, link, system, registered })
+    Arc::new(AppState { symbols, bars, rest, db, clock, static_dir, hub, screener, link, system, registered, trading })
 }
 
 pub async fn daily_maintenance(state: Arc<AppState>) {

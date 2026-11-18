@@ -1,5 +1,6 @@
-//! 시세 API만 허용(backend.md §4.4): 주문·계좌 경로와 api-id가 서버 소스에 없어야 한다.
+//! 시세 API만 허용(backend.md §4.4, ADR 0004). 주문·계좌 경로와 api-id는 `src/trading/` 안에만 있고, 그 안의 목록은 ADR 0029가 정한 것과 같아야 한다.
 
+use std::collections::BTreeSet;
 use std::path::Path;
 
 fn rust_files(dir: &Path, out: &mut Vec<std::path::PathBuf>) {
@@ -13,26 +14,98 @@ fn rust_files(dir: &Path, out: &mut Vec<std::path::PathBuf>) {
     }
 }
 
+struct Source {
+    relative: String,
+    text: String,
+}
+
+impl Source {
+    fn in_trading(&self) -> bool {
+        self.relative.starts_with("trading/")
+    }
+}
+
+fn server_sources() -> Vec<Source> {
+    let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+    let mut files = Vec::new();
+    rust_files(&src, &mut files);
+    assert!(files.len() > 3, "소스 파일을 찾지 못했습니다: {}", src.display());
+    files
+        .into_iter()
+        .map(|file| Source { relative: file.strip_prefix(&src).unwrap().to_string_lossy().replace('\\', "/"), text: std::fs::read_to_string(&file).unwrap() })
+        .collect()
+}
+
 /// `kt1` 다음에 숫자가 오는 api-id(주문·계좌 TR) 자리를 찾는다.
 fn has_kt_api_id(text: &str) -> bool {
     let lower = text.to_ascii_lowercase();
     lower.match_indices("kt1").any(|(i, _)| lower[i + 3..].starts_with(|c: char| c.is_ascii_digit()))
 }
 
-#[test]
-fn no_order_or_account_endpoints_in_server_source() {
-    let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
-    let mut files = Vec::new();
-    rust_files(&src, &mut files);
-    assert!(files.len() > 3, "소스 파일을 찾지 못했습니다: {}", src.display());
-    let banned = [["/api/dostk/", "ordr"].concat(), ["/api/dostk/", "acnt"].concat()];
-    for file in files {
-        let text = std::fs::read_to_string(&file).unwrap();
-        for needle in &banned {
-            assert!(!text.contains(needle.as_str()), "{}에 {needle}가 있습니다", file.display());
+fn banned_paths() -> [String; 2] {
+    [["/api/dostk/", "ordr"].concat(), ["/api/dostk/", "acnt"].concat()]
+}
+
+fn violations_outside_trading(sources: &[Source]) -> Vec<String> {
+    let mut found = Vec::new();
+    for source in sources.iter().filter(|s| !s.in_trading()) {
+        for needle in banned_paths() {
+            if source.text.contains(needle.as_str()) {
+                found.push(format!("{}에 {needle}가 있습니다", source.relative));
+            }
         }
-        assert!(!has_kt_api_id(&text), "{}에 kt1로 시작하는 api-id가 있습니다", file.display());
+        if has_kt_api_id(&source.text) || api_ids(&source.text).iter().any(|id| id.starts_with("kt")) {
+            found.push(format!("{}에 kt로 시작하는 api-id가 있습니다", source.relative));
+        }
     }
+    found
+}
+
+#[test]
+fn no_order_or_account_endpoints_outside_trading() {
+    let sources = server_sources();
+    assert_eq!(violations_outside_trading(&sources), Vec::<String>::new());
+    assert!(sources.iter().any(|s| s.in_trading() && s.text.contains(&banned_paths()[1])), "trading 안에서 계좌 경로를 찾지 못했습니다");
+}
+
+#[test]
+fn the_check_catches_order_and_account_ids_outside_trading() {
+    let account_path = banned_paths()[1].clone();
+    let order_path = banned_paths()[0].clone();
+    let source = |relative: &str, text: &str| Source { relative: relative.into(), text: text.into() };
+    let sources = [
+        source("market/leaks_path.rs", &format!("const P: &str = \"{account_path}\";")),
+        source("kiwoom/leaks_order_path.rs", &order_path),
+        source("quotes/leaks_account_id.rs", &["\"", "kt", "00018\""].concat()),
+        source("quotes/leaks_order_id.rs", &["\"", "kt", "10000\""].concat()),
+        source("trading/allowed.rs", &format!("{account_path} {}{}", "kt", "00018")),
+    ];
+    let found = violations_outside_trading(&sources);
+    assert_eq!(found.len(), 4, "{found:?}");
+    assert!(found.iter().all(|f| !f.starts_with("trading/")));
+    for leaked in ["market/leaks_path.rs", "kiwoom/leaks_order_path.rs", "quotes/leaks_account_id.rs", "quotes/leaks_order_id.rs"] {
+        assert!(found.iter().any(|f| f.starts_with(leaked)), "{leaked}를 잡지 못했습니다: {found:?}");
+    }
+}
+
+const TRADING_API_IDS: [&str; 5] = ["ka00001", "kt00018", "ka10075", "kt00010", "kt00007"];
+
+#[test]
+fn trading_api_ids_are_exactly_the_account_reads() {
+    let sources = server_sources();
+    let seen: BTreeSet<String> = sources.iter().filter(|s| s.in_trading()).flat_map(|s| api_ids(&s.text)).collect();
+    let want: BTreeSet<String> = TRADING_API_IDS.iter().map(|id| (*id).to_owned()).collect();
+    assert_eq!(seen, want, "trading 안의 api-id가 ADR 0029의 목록과 다릅니다");
+    assert!(sources.iter().filter(|s| s.in_trading()).all(|s| !s.text.contains(&banned_paths()[0])), "주문 쓰기 경로는 아직 넣지 않습니다");
+}
+
+#[test]
+fn trading_list_check_notices_a_missing_and_an_extra_id() {
+    let listed = |text: &str| api_ids(text).into_iter().collect::<BTreeSet<String>>();
+    let want: BTreeSet<String> = TRADING_API_IDS.iter().map(|id| (*id).to_owned()).collect();
+    assert_ne!(listed("ka00001 kt00018 ka10075 kt00010"), want, "빠진 id를 알아채야 한다");
+    assert_ne!(listed(&["ka00001 kt00018 ka10075 kt00010 kt00007 ", "kt", "10000"].concat()), want, "더해진 id를 알아채야 한다");
+    assert_eq!(listed("ka00001 kt00018 ka10075 kt00010 kt00007"), want);
 }
 
 /// 키움 api-id 모양(영문 2자 + 숫자 5자리) 낱말을 모두 찾는다.
@@ -55,14 +128,11 @@ const MARKET_API_IDS: [&str; 20] =
     ["au10001", "ka10099", "ka10100", "ka10095", "ka10001", "ka10080", "ka10081", "ka10082", "ka10083", "ka10094", "ka20005", "ka20006", "ka20007", "ka20008", "ka20019", "ka10008", "ka10059", "ka10004", "ka10003", "ka90008"];
 
 #[test]
-fn only_market_api_ids_in_server_source() {
-    let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
-    let mut files = Vec::new();
-    rust_files(&src, &mut files);
-    let mut seen = std::collections::BTreeSet::new();
-    for file in files {
-        for id in api_ids(&std::fs::read_to_string(&file).unwrap()) {
-            assert!(MARKET_API_IDS.contains(&id.as_str()), "{}에 시세 목록에 없는 api-id {id}가 있습니다", file.display());
+fn only_market_api_ids_outside_trading() {
+    let mut seen = BTreeSet::new();
+    for source in server_sources().into_iter().filter(|s| !s.in_trading()) {
+        for id in api_ids(&source.text) {
+            assert!(MARKET_API_IDS.contains(&id.as_str()), "{}에 시세 목록에 없는 api-id {id}가 있습니다", source.relative);
             seen.insert(id);
         }
     }

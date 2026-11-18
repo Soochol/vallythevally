@@ -31,7 +31,7 @@ fn folder(data_dir: &Path) -> PathBuf {
     data_dir.join(FOLDER)
 }
 
-fn universe_path(data_dir: &Path, date: u32) -> PathBuf {
+pub fn universe_path(data_dir: &Path, date: u32) -> PathBuf {
     folder(data_dir).join(format!("{date}.json"))
 }
 
@@ -127,6 +127,10 @@ pub fn remove_rejected(data_dir: &Path, date: u32) -> Result<(), StoreError> {
     }
 }
 
+pub fn after_close_path(data_dir: &Path, date: u32) -> PathBuf {
+    folder(data_dir).join(format!("{date}.after.json"))
+}
+
 pub fn write_after_close(data_dir: &Path, file: &AfterCloseFile) -> Result<(), StoreError> {
-    write_json(folder(data_dir).join(format!("{}.after.json", file.date)), file)
+    write_json(after_close_path(data_dir, file.date), file)
 }

@@ -701,15 +701,15 @@ mod tests {
                 return token(tokens.fetch_add(1, Ordering::SeqCst) + 1);
             }
             if s.body.contains(EMPTY_ROW) {
-                return ok(json!({array_of(s.api_id): [{"dt": "", "cntr_tm": "", "cur_prc": ""}], "return_code": 0}), None);
+                return ok(json!({array_of(s.api_id.market().unwrap()): [{"dt": "", "cntr_tm": "", "cur_prc": ""}], "return_code": 0}), None);
             }
-            let chart = match s.api_id {
+            let chart = match s.api_id.market().unwrap() {
                 ApiId::Ka10080 | ApiId::Ka20005 => &charts.minute,
                 ApiId::Ka10081 | ApiId::Ka20006 => &charts.day,
                 ApiId::Ka10082 | ApiId::Ka20007 => &charts.week,
                 _ => &charts.month,
             };
-            chart.respond(s, array_of(s.api_id))
+            chart.respond(s, array_of(s.api_id.market().unwrap()))
         }));
         let clock = Clock::fake(now);
         let rest = KiwoomRest::new(Arc::new(fake.clone()), KiwoomAuth::new(Secret::new("k".into()), Secret::new("s".into()), None), clock.clone());
@@ -955,7 +955,7 @@ mod tests {
         }
         h.bars.page(venue_key(SAMSUNG, Venue::Krx, Period::Day), None, 10).await.unwrap();
         h.bars.page(venue_key(SAMSUNG, Venue::Krx, Period::M1), None, 10).await.unwrap();
-        let sent: Vec<_> = h.chart_calls().iter().map(|s| (s.api_id, body(s)["stk_cd"].as_str().unwrap().to_owned())).collect();
+        let sent: Vec<_> = h.chart_calls().iter().map(|s| (s.api_id.market().unwrap(), body(s)["stk_cd"].as_str().unwrap().to_owned())).collect();
         let want = [(ApiId::Ka10081, "005930"), (ApiId::Ka10081, "005930_AL"), (ApiId::Ka10081, "005930_NX"), (ApiId::Ka10081, "005930"), (ApiId::Ka10080, "005930")];
         assert_eq!(sent, want.map(|(a, c)| (a, c.to_owned())), "KRX를 받아도 통합은 따로 받는다");
         assert_eq!(h.bars.series_count(), 4);
@@ -1089,7 +1089,7 @@ mod tests {
             if s.api_id == ApiId::Au10001 {
                 return token(1);
             }
-            assert!(matches!(s.api_id, ApiId::Ka10083 | ApiId::Ka20008));
+            assert!(matches!(s.api_id.market(), Some(ApiId::Ka10083 | ApiId::Ka20008)));
             let offset: usize = if same_key { sent_pages.fetch_add(1, Ordering::SeqCst) } else { s.cont.as_deref().unwrap_or("0").parse().unwrap() };
             if *failure.lock().unwrap() == Some(offset) {
                 return crate::kiwoom::rest::testing::status(503, json!({}));
@@ -1098,7 +1098,7 @@ mod tests {
                 "dt": dt, "open_pric": o.to_string(), "high_pric": h.to_string(), "low_pric": l.to_string(), "cur_prc": c.to_string(), "trde_qty": v.to_string()
             })).collect();
             let next = (offset + 1 < pages.len()).then(|| if same_key { "1".to_owned() } else { (offset + 1).to_string() });
-            ok(json!({array_of(s.api_id): rows, "return_code": 0}), next.as_deref())
+            ok(json!({array_of(s.api_id.market().unwrap()): rows, "return_code": 0}), next.as_deref())
         }));
         let clock = Clock::fake(kst(date(2026, 5, 20), 12, 0, 0));
         let rest = KiwoomRest::new(Arc::new(fake.clone()), KiwoomAuth::new(Secret::new("k".into()), Secret::new("s".into()), None), clock.clone());

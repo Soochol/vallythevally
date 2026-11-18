@@ -35,6 +35,7 @@ pub struct AppState {
     pub link: Link,
     pub system: crate::system_routes::SystemState,
     pub registered: tokio::sync::watch::Receiver<crate::kiwoom::stream::DesiredFeeds>,
+    pub trading: Arc<crate::trading::Trading>,
 }
 
 pub fn router(state: Arc<AppState>) -> Router {
@@ -54,6 +55,7 @@ pub fn router(state: Arc<AppState>) -> Router {
         .merge(crate::system_routes::routes(state.clone()))
         .merge(crate::account_routes::routes(state.clone()))
         .merge(crate::collector::routes())
+        .merge(crate::trading::routes(state.clone()))
         .route("/api", any(api_not_found))
         .route("/api/{*rest}", any(api_not_found))
         .method_not_allowed_fallback(method_not_allowed)
@@ -93,6 +95,26 @@ impl ApiFailure {
             reason: Some(reason(e)),
             retry_at: e.retry_at(),
             manual_action_required: e.manual_action_required(),
+        }
+    }
+
+    pub(crate) fn trading(e: crate::trading::TradingError) -> Self {
+        use crate::trading::TradingError as T;
+        use api::ApiErrorCode::*;
+        let with_reason = |code, reason| ApiFailure { reason: Some(reason), ..ApiFailure::new(code, e.to_string()) };
+        match &e {
+            T::Kiwoom(kiwoom) => {
+                let failure = ApiFailure::kiwoom(kiwoom);
+                tracing::warn!(reason = %kiwoom, "계좌 조회에 답하지 못했습니다");
+                failure
+            }
+            T::Off | T::FileUnusable(_) => with_reason(Conflict, api::ApiErrorReason::OrdersOff),
+            T::AccountChanged => with_reason(Conflict, api::ApiErrorReason::AccountChanged),
+            T::TailMismatch | T::BadRequest(_) => ApiFailure::bad_request(e.to_string()),
+            T::Unreadable(_) => {
+                tracing::error!(reason = %e, "키움 계좌 응답을 읽지 못했습니다");
+                with_reason(KiwoomUnavailable, api::ApiErrorReason::Protocol)
+            }
         }
     }
 

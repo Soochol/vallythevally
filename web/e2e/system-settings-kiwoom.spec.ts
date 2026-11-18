@@ -4,6 +4,7 @@ import type { Page } from "@playwright/test";
 import type { KiwoomConnectInput } from "../src/api/generated/KiwoomConnectInput";
 import type { KiwoomKeyInput } from "../src/api/generated/KiwoomKeyInput";
 import type { KiwoomLinkStatus } from "../src/api/generated/KiwoomLinkStatus";
+import type { OrdersSwitchInput } from "../src/api/generated/OrdersSwitchInput";
 import type { PublicIpCheck } from "../src/api/generated/PublicIpCheck";
 import type { RegisteredIpInput } from "../src/api/generated/RegisteredIpInput";
 import { cell, expect, test, type Scenario } from "./harness";
@@ -424,6 +425,46 @@ test.describe("1440×900", () => {
     await expect(portal).toHaveAttribute("href", "https://openapi.kiwoom.com");
     await expect(portal).toHaveAttribute("target", "_blank");
     await expect(portal).toHaveAttribute("rel", "noopener noreferrer");
+  });
+
+  test("주문 사용: 꺼짐 → 켜기 → 끝 2자리 확인 → 체크해야 켜기 확인 → 켜짐 → 끄기 → 꺼짐", async ({ page, scenario }) => {
+    await openKiwoom(page);
+    const orders = panel(page).getByRole("region", { name: "주문 사용" });
+    await expect(orders).toContainText("주문 사용 꺼짐");
+    await expect(orders.getByRole("button", { name: "주문 사용 끄기" })).toHaveCount(0);
+    expect(callsTo(scenario, "POST", "/api/system/orders/check-account")).toHaveLength(0);
+
+    await orders.getByRole("button", { name: "주문 사용 켜기" }).click();
+    await expect(orders).toContainText("계좌 끝 2자리: 01");
+    const confirm = orders.getByRole("button", { name: "켜기 확인" });
+    await expect(confirm).toBeDisabled();
+    expect(callsTo(scenario, "PUT", "/api/system/orders")).toHaveLength(0);
+    await orders.getByRole("checkbox", { name: "이 계좌가 맞습니다" }).check();
+    await expect(confirm).toBeEnabled();
+    await confirm.click();
+
+    await expect(orders).toContainText("주문 사용 켜짐 · 계좌 끝 01");
+    const [put] = callsTo(scenario, "PUT", "/api/system/orders");
+    expect(put!.postDataJSON()).toEqual({ enabled: true, confirmAccountTail: "01" } satisfies OrdersSwitchInput);
+
+    await orders.getByRole("button", { name: "주문 사용 끄기" }).click();
+    await expect(orders).toContainText("주문 사용 꺼짐");
+    expect(callsTo(scenario, "PUT", "/api/system/orders")[1]!.postDataJSON()).toEqual({ enabled: false, confirmAccountTail: null } satisfies OrdersSwitchInput);
+  });
+
+  test("주문 사용: 서버가 끝 2자리를 거절하면 오류가 보이고 꺼짐으로 남는다", async ({ page, scenario }) => {
+    scenario.on(route("PUT", "/api/system/orders"), () => ({
+      status: 400,
+      body: { error: { code: "bad_request", message: "확인한 계좌 끝 2자리가 계좌와 다릅니다", reason: null, retryAt: null, manualActionRequired: false } },
+    }));
+    await openKiwoom(page);
+    const orders = panel(page).getByRole("region", { name: "주문 사용" });
+    await orders.getByRole("button", { name: "주문 사용 켜기" }).click();
+    await orders.getByRole("checkbox", { name: "이 계좌가 맞습니다" }).check();
+    await orders.getByRole("button", { name: "켜기 확인" }).click();
+    await expect(orders.getByRole("alert")).toContainText("확인한 계좌 끝 2자리가 계좌와 다릅니다");
+    await orders.getByRole("button", { name: "취소" }).click();
+    await expect(orders).toContainText("주문 사용 꺼짐");
   });
 });
 

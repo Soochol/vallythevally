@@ -2,8 +2,8 @@ use std::fs;
 use std::num::NonZeroU32;
 use std::path::{Path, PathBuf};
 
-use collector::calendar::{Calendar, Day, HolidayRequest, HolidayTransport, TransportError};
-use collector::finalize::{DEFAULT_SPILL_BUDGET_BYTES, KeepReason, Options, PRUNE_LOG_NAME, RetentionSettings, delete_raw_day, finalize_day, prune_raw};
+use collector::calendar::{Calendar, Day, cache_path, HolidayRequest, HolidayTransport, TransportError};
+use collector::finalize::{DEFAULT_SPILL_BUDGET_BYTES, KeepReason, Options, PRUNE_LOG_NAME, RetentionSettings, delete_raw_day, finalize_day, prune_raw, prune_with_cached_calendar};
 use futures::future::BoxFuture;
 use serde_json::{Value, json};
 use server::config::Secret;
@@ -23,7 +23,7 @@ const NOV_16: u32 = 20_261_116;
 const NOV_19: u32 = 20_261_119;
 const NOV_20: u32 = 20_261_120;
 
-const YEAR_ROUND_HOLIDAYS: [(u32, &str); 3] = [(20_250_101, "1월1일"), (20_260_101, "1월1일"), (20_261_225, "기독탄신일")];
+const YEAR_ROUND_HOLIDAYS: [(u32, &str); 5] = [(20_250_101, "1월1일"), (20_260_101, "1월1일"), (20_261_225, "기독탄신일"), (20_270_101, "1월1일"), (20_280_101, "1월1일")];
 
 struct Holidays(Vec<(u32, &'static str)>);
 
@@ -352,4 +352,24 @@ fn the_prune_flag_without_cached_holidays_deletes_nothing() {
     assert_eq!(output.status.code(), Some(0), "{}", String::from_utf8_lossy(&output.stderr));
     assert!(raw_exists(data.path(), NOV_2));
     assert!(raw_exists(data.path(), NOV_3));
+}
+
+#[test]
+fn prunes_after_the_first_complete_day_is_two_years_old() {
+    let data = tempdir().unwrap();
+    let runtime = tokio::runtime::Builder::new_current_thread().build().unwrap();
+    for now in [NOV_20, 20_271_220, 20_280_103] {
+        let at_now = Day::from_yyyymmdd(now).unwrap().unix_ms_at_kst(8, 0);
+        runtime.block_on(Calendar::load(data.path(), &Holidays(Vec::new()), &Secret::new("시험용 키".to_owned()), at_now));
+    }
+    for year in 2026..=2028 {
+        assert!(cache_path(&data.path().join("calendar"), year).exists(), "{year} 캐시");
+    }
+    put_store(data.path(), 20_261_118, true, json!({"total": 0, "kinds": {}}));
+    clean_day(data.path(), NOV_19);
+
+    let report = prune_with_cached_calendar(data.path(), 20_280_103, &settings()).unwrap();
+
+    assert_eq!(report.deleted.len(), 1, "{:?}", report.kept);
+    assert!(!raw_exists(data.path(), NOV_19));
 }
