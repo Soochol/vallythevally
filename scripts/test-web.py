@@ -503,8 +503,8 @@ class WebRunsRetentionTest(unittest.TestCase):
         output, errors = self.prune()
         expected = {f"e2e-pass{index}" for index in range(2, 7)} | {f"e2e-fail{index}" for index in range(2, 12)} | {f"check-pass{index}" for index in range(3)}
         self.assertEqual(self.names(), expected)
-        self.assertIn("dev-web: target/web-runs 정리: 4개 삭제", output)
-        self.assertEqual(errors, "")
+        self.assertIn("dev-web: target/web-runs 정리: 4개 삭제", errors)
+        self.assertEqual(output, "")
 
     def test_nothing_to_remove_prints_nothing(self):
         self.make("e2e-a", "passed", started_at=1)
@@ -521,6 +521,17 @@ class WebRunsRetentionTest(unittest.TestCase):
             self.make(f"e2e-run{index}", "passed", started_at=1000 + index, age=index * self.HOUR)
         self.prune()
         self.assertEqual(self.names(), {f"e2e-run{index}" for index in range(1, 6)})
+
+    def test_unreadable_started_at_and_manifest_fall_back_to_folder_time(self):
+        for index in range(5):
+            self.make(f"e2e-pass{index}", "passed", started_at=1000 + index, age=100 * self.HOUR)
+        nan = self.make("e2e-nan", "passed", age=self.HOUR)
+        (nan / "manifest.json").write_text('{"status": "passed", "started_at": NaN}')
+        deep = self.make("e2e-deep", "passed", age=2 * self.HOUR)
+        (deep / "manifest.json").write_text("[" * 200000)
+        self.make("e2e-pass5", "passed", started_at=1005, age=100 * self.HOUR)
+        self.prune()
+        self.assertEqual(self.names(), {"e2e-pass5", "e2e-pass4", "e2e-pass3", "e2e-pass2", "e2e-nan", "e2e-deep"})
 
     def test_recent_running_and_manifestless_are_protected_and_uncounted(self):
         for index in range(10):

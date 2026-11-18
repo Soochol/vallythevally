@@ -3,6 +3,7 @@ import argparse
 import contextlib
 import hashlib
 import json
+import math
 import os
 from pathlib import Path
 import re
@@ -34,10 +35,10 @@ def run_directory_state(directory, now):
         manifest = json.loads(manifest_path.read_text())
         status = manifest["status"]
         manifest_modified = manifest_path.stat().st_mtime
-    except (OSError, ValueError, KeyError, TypeError):
+    except (OSError, ValueError, KeyError, TypeError, RecursionError):
         status, manifest_modified = None, modified
     started = manifest.get("started_at") if status is not None and isinstance(manifest, dict) else None
-    order = started if isinstance(started, (int, float)) else modified
+    order = started if isinstance(started, (int, float)) and math.isfinite(started) else modified
     if status == "passed":
         return "passed", order
     if status in (None, "running"):
@@ -95,7 +96,7 @@ def prune_web_runs(root):
     except OSError as error:
         print(f"dev-web: 경고: web-runs 정리 실패: {evidence.clean(str(error))}", file=sys.stderr, flush=True)
     if removed:
-        print(f"dev-web: target/web-runs 정리: {removed}개 삭제 (약 {freed / 2**20:.0f}MiB). 종류마다 통과 {KEPT_PASSED_RUNS}개·실패 {KEPT_FAILED_RUNS}개만 남긴다", flush=True)
+        print(f"dev-web: target/web-runs 정리: {removed}개 삭제 (약 {freed / 2**20:.0f}MiB). 종류마다 통과 {KEPT_PASSED_RUNS}개·실패 {KEPT_FAILED_RUNS}개만 남긴다", file=sys.stderr, flush=True)
 
 
 def requested_workers(value):
