@@ -17,6 +17,7 @@ pub mod financials;
 pub mod http;
 pub mod instance;
 pub mod investors;
+pub mod jump_bars;
 pub mod kiwoom;
 pub mod market;
 pub mod public_ip;
