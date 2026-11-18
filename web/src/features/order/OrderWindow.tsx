@@ -150,11 +150,11 @@ function OrderBody({ id, code }: { id: WindowId; code: SymbolCode }) {
       <AccountBand accountTail={accountTail} openOrders={data.openOrders} balance={data.balance} executions={data.executions} writable={writable} mock={mock} onCancel={writes.cancelOne} />
       <HoldingSummary holding={holding} buyableAmount={data.capacity.buyableAmount} unit={profitUnit} onUnit={() => setProfitUnit(toggledUnit)} onFill={(fill) => { setMode(fill.mode); setInput(fill.input); }} />
       <div className="od-entry">
-        <QuantityRow mode={mode} input={input} estimate={estimate} venue={venue} mock={mock} sharePresets={settings.sharePresets} onMode={setMode} onInput={setInput} onVenue={(next) => setVenue(id, next)} />
+        <QuantityRow mode={mode} input={input} estimate={estimate} venue={venue} mock={mock} sharePresets={settings.sharePresets} amountPresets={settings.amountPresets} onMode={setMode} onInput={setInput} onVenue={(next) => setVenue(id, next)} />
         <div className="od-toolbar">
           <button type="button" className="od-tool" data-testid="order-explorer" aria-pressed={exploring} disabled={referencePrice === null} onClick={() => setExplorerCenter(exploring ? null : referencePrice)}>전체 호가</button>
           <button type="button" className="od-tool" data-testid="order-current" disabled={!exploring} onClick={() => setExplorerCenter(null)}>현재가</button>
-          <OrderSettingsPopover settings={settings} onChange={setSettings} />
+          <OrderSettingsPopover settings={settings} holding={holding !== null} onChange={setSettings} />
         </div>
       </div>
       <OrderStatusBar status={writes.status} queued={writes.queued} blocked={data.blocked} onUndo={writes.cancelOne} onReconcile={writes.reconcile} />
