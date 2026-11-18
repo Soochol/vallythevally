@@ -3212,7 +3212,7 @@ mod tests {
         let want = |kinds: &[RealType]| h.desired.borrow().get(&samsung_symbol()).cloned().unwrap_or_default() == kinds.iter().copied().collect::<BTreeSet<_>>();
         h.hub.unsubscribe(conn, sub("first"));
         tokio::time::sleep(Duration::from_secs(60)).await;
-        assert!(want(&[RealType::Trade, RealType::Book]), "남은 창이 있으면 유예가 지나도 호가 종류가 등록 목록에 남는다");
+        assert!(want(&[RealType::Trade, RealType::Book, RealType::AfterHours]), "남은 창이 있으면 유예가 지나도 호가 종류가 등록 목록에 남는다");
         h.events.send(book_event(&h, 101, 10)).await.unwrap();
         let msgs = take(&out).await;
         let [ServerMessage::FeedBook { sub: fed, .. }] = msgs.as_slice() else { panic!("{msgs:?}") };
