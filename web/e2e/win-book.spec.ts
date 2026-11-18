@@ -89,7 +89,7 @@ test("첫 실시간 호가가 스냅샷을 대신하고 체결이 현재가 행�
   await expect(page.getByTestId("book-total-bid")).toHaveText("140주");
   await expect(ladderRows(page).locator(".mw-qty-value")).toHaveCount(4);
 
-  scenario.live.emit({ type: "feed_trades", sub: tradeSub, seq: 1, trades: [{ t: 1, price: 70000, qty: 3, venue: null, strength: null }] });
+  scenario.live.emit({ type: "feed_trades", sub: tradeSub, seq: 1, trades: [{ t: scenario.now / 1000, price: 70000, qty: 3, venue: null, strength: null }] });
   await expect(page.locator(".mw-lr[data-current]")).toHaveCount(1);
   await expect(page.locator(".mw-lr[data-current]")).toContainText("70,000");
 
@@ -105,7 +105,7 @@ test("교차 호가를 그대로 그리고 현재가 행은 하나다", async ({
   const bookSub = await subOf(scenario, "book");
   const tradeSub = await subOf(scenario, "trades");
   scenario.live.emit({ type: "feed_book", sub: bookSub, book: liveOf([[70000, 30], [70100, 20]], [[70100, 25], [70000, 15]], [50, 40]) });
-  scenario.live.emit({ type: "feed_trades", sub: tradeSub, seq: 1, trades: [{ t: 1, price: 70100, qty: 1, venue: null, strength: null }] });
+  scenario.live.emit({ type: "feed_trades", sub: tradeSub, seq: 1, trades: [{ t: scenario.now / 1000, price: 70100, qty: 1, venue: null, strength: null }] });
   await expect(page.locator(".mw-lr[data-current]")).toHaveCount(1);
   const prices = await ladderRows(page).locator(".mw-px").allTextContents();
   const shown = prices.map((text) => Number(text.replace(/[^0-9]/g, "").slice(0, 5))).filter((n) => n > 0);
@@ -159,4 +159,46 @@ test("지수 종목이면 빈 상태를 보이고 호가를 구독하지 않는�
   await windowTabs(page).getByRole("tab", { name: /^10호가/ }).click();
   await expect(page.getByText("이 창은 주식만 보입니다")).toBeVisible();
   expect(scenario.live.messages.filter((m) => m.type === "subscribe_feed")).toHaveLength(0);
+});
+
+function quoteAt(scenario: Scenario, price: number, t: number) {
+  const base = previousClose(scenario);
+  return { ...scenario.market.quote(CODE)!, price, change: price - base, t };
+}
+
+test("체결이 없어도 시세 조회 응답의 가격이 바뀌면 다음 조회 뒤 현재가 행이 옮겨 간다", async ({ page, scenario }) => {
+  const base = previousClose(scenario);
+  let price = base;
+  scenario.on((url) => url.pathname === "/api/quotes", () => ({ body: [quoteAt(scenario, price, scenario.now / 1000)] }));
+  await page.clock.install({ time: scenario.now });
+  await open(page, scenario, base);
+  await expect(page.locator(".mw-lr[data-current]")).toContainText(base.toLocaleString("ko-KR"));
+  price = base - 100;
+  await page.clock.fastForward(5000);
+  await expect(page.locator(".mw-lr[data-current]")).toHaveCount(1);
+  await expect(page.locator(".mw-lr[data-current]")).toContainText((base - 100).toLocaleString("ko-KR"));
+});
+
+test("시세보다 늦은 체결이 현재가이고 더 이른 체결은 시세를 바꾸지 못한다", async ({ page, scenario }) => {
+  const base = previousClose(scenario);
+  const quoteT = scenario.now / 1000;
+  scenario.on((url) => url.pathname === "/api/quotes", () => ({ body: [quoteAt(scenario, base, quoteT)] }));
+  await open(page, scenario, base);
+  const tradeSub = await subOf(scenario, "trades");
+  await expect(page.locator(".mw-lr[data-current]")).toContainText(base.toLocaleString("ko-KR"));
+
+  scenario.live.emit({ type: "feed_trades", sub: tradeSub, seq: 1, trades: [{ t: quoteT - 10, price: base + 100, qty: 1, venue: null, strength: null }] });
+  await expect(page.locator(".mw-lr[data-current]")).toContainText(base.toLocaleString("ko-KR"));
+
+  scenario.live.emit({ type: "feed_trades", sub: tradeSub, seq: 2, trades: [{ t: quoteT + 10, price: base + 200, qty: 1, venue: null, strength: null }] });
+  await expect(page.locator(".mw-lr[data-current]")).toHaveCount(1);
+  await expect(page.locator(".mw-lr[data-current]")).toContainText((base + 200).toLocaleString("ko-KR"));
+});
+
+test("구독 직후 끊김이 오면 호가가 오기 전에도 끊김을 보이고 사다리를 흐리게 한다", async ({ page, scenario }) => {
+  await open(page, scenario, 70000);
+  const bookSub = await subOf(scenario, "book");
+  scenario.live.emit({ type: "feed_link", sub: bookSub, live: false, at: 1 });
+  await expect(page.getByRole("status").filter({ hasText: "끊김" })).toBeVisible();
+  await expect(page.locator(".bk-ladder")).toHaveAttribute("data-stale", "");
 });
