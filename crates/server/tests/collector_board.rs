@@ -330,12 +330,25 @@ impl Fixture {
         body["access"].as_str().unwrap().to_owned()
     }
 
+    async fn in_real_time<T>(&self, work: impl std::future::Future<Output = T>) -> T {
+        let paused = self.running.is_some();
+        if paused {
+            tokio::time::resume();
+        }
+        let done = work.await;
+        if paused {
+            tokio::time::pause();
+        }
+        done
+    }
+
     async fn sign_in(&self) {
         let account = self.state.system.account();
         let now = UnixSeconds(self.state.clock.now().unix());
         let start = account.start_login(now, AccountProvider::Google, 1).unwrap();
         let state = reqwest::Url::parse(&start).unwrap().query_pairs().find(|(key, _)| key == "state").unwrap().1.into_owned();
-        account.complete_login(&self.state.db, now, CompleteQuery { code: Some("code".into()), state: Some(state), error: None }).await.unwrap();
+        let completed = self.in_real_time(account.complete_login(&self.state.db, now, CompleteQuery { code: Some("code".into()), state: Some(state), error: None })).await;
+        completed.unwrap();
     }
 
     async fn sign_in_as(&self, subject: Option<&str>) {
@@ -344,7 +357,7 @@ impl Fixture {
     }
 
     async fn sign_out(&self) {
-        self.state.system.account().logout().await.unwrap();
+        self.in_real_time(self.state.system.account().logout()).await.unwrap();
     }
 
     async fn reached(&self, judgment: DaemonJudgment) {
