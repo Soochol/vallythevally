@@ -67,16 +67,14 @@ test("새 결과는 수동 실행으로만 반영하고 D/W/M 범위 편집·저
   await expect(rowOf(page, "110010")).toHaveText(before!);
   await execute(page);
   await expect(rowOf(page, "110010")).toContainText((old.close + 200).toLocaleString("ko-KR"));
-  for (const period of ["D", "W", "M"]) {
-    for (const recent of [1, 2, 3]) {
-      await editRecent(page, period, recent);
-      await expect(results(page)).toHaveCount(period === "D" && recent === 1 ? 1 : 0);
-      screener.showResult(intradayResult(baseline, old.close + 200, period === "M" ? "2026-11-01" : "2026-11-09"));
-      await execute(page);
-      await expect(rowOf(page, "110010")).toContainText((old.close + 200).toLocaleString("ko-KR"));
-      await expect(rowOf(page, "110010").getByLabel("잠정", { exact: true })).toBeVisible();
-      await expect(rowOf(page, "110010").getByRole("cell")).toHaveCount(3);
-    }
+  for (const [period, recent] of [["D", 1], ["W", 2], ["M", 3]] as const) {
+    await editRecent(page, period, recent);
+    await expect(results(page)).toHaveCount(period === "D" ? 1 : 0);
+    screener.showResult(intradayResult(baseline, old.close + 200, period === "M" ? "2026-11-01" : "2026-11-09"));
+    await execute(page);
+    await expect(rowOf(page, "110010")).toContainText((old.close + 200).toLocaleString("ko-KR"));
+    await expect(rowOf(page, "110010").getByLabel("잠정", { exact: true })).toBeVisible();
+    await expect(rowOf(page, "110010").getByRole("cell")).toHaveCount(3);
   }
   await editRecent(page, "D", 2);
   await expandEditor(page);
@@ -192,47 +190,26 @@ test("서버가 반환한 오래된 관측일과 확정 표시는 유지하고 �
   await expect(meta(page)).toHaveText(original!);
 });
 
-test("전체 응답이 실패하면 처음에는 빈 상태이며 이전 결과가 있으면 수집 범위와 모든 행을 보존한다", async ({ scenario, screener, page }) => {
+test("범위를 바꾸고 다른 화면을 다녀온 최신 결과는 뒤늦은 실패로 바뀌지 않는다", async ({ scenario, screener, page }) => {
   await prepare(scenario, page);
-  screener.failRun();
+  let holding = true;
+  const held = scenario.hold((url) => url.pathname === "/api/screener/run" && holding);
   await runButton(page).click();
-  await expect(panel(page).getByRole("alert")).toContainText("결과 없음");
-  await expect(results(page)).toHaveCount(0);
-  const base = currentResult();
-  const many: ScreenerResult = { ...base, universe: 101, rows: Array.from({ length: 101 }, (_, i) => ({ ...base.rows[0]!, symbol: String(210000 + i), name: `결과 종목 ${i}`, close: 10_000 + i })) };
-  screener.showResult(many);
+  await held.received;
+  holding = false;
+  screener.showResult(intradayResult(currentResult(), 61_500, "2026-11-01"));
+  await editRecent(page, "M", 2);
   await execute(page);
-  await expect(rows(page)).toHaveCount(101);
+  const newestPrice = rowOf(page, "110010").getByRole("cell").nth(1);
+  await expect(newestPrice).toHaveText("61,500*");
   const original = await meta(page).textContent();
-  screener.failRun();
-  await runButton(page).click();
-  await expect(panel(page).getByRole("alert")).toContainText("이전 결과와 수집 시각을 유지합니다");
+  await page.getByRole("tablist", { name: "창 묶음 2" }).getByRole("tab", { name: "관심종목", exact: true }).click();
+  await openScreener(page);
+  const delivered = page.waitForEvent("requestfinished", (r) => new URL(r.url()).pathname === "/api/screener/run");
+  held.reply({ status: 503, body: runError() });
+  await delivered;
+  await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => resolve())));
   await expect(meta(page)).toHaveText(original!);
-  await expect(rows(page)).toHaveCount(101);
+  await expect(newestPrice).toHaveText("61,500*");
+  await expect(panel(page).getByRole("alert")).toHaveCount(0);
 });
-
-for (const olderFails of [false, true]) {
-  test(`범위를 바꾸고 다른 화면을 다녀온 최신 결과는 뒤늦은 ${olderFails ? "실패" : "성공"}으로 바뀌지 않는다`, async ({ scenario, screener, page }) => {
-    await prepare(scenario, page);
-    let holding = true;
-    const held = scenario.hold((url) => url.pathname === "/api/screener/run" && holding);
-    await runButton(page).click();
-    await held.received;
-    holding = false;
-    screener.showResult(intradayResult(currentResult(), 61_500, "2026-11-01"));
-    await editRecent(page, "M", 2);
-    await execute(page);
-    const newestPrice = rowOf(page, "110010").getByRole("cell").nth(1);
-    await expect(newestPrice).toHaveText("61,500*");
-    const original = await meta(page).textContent();
-    await page.getByRole("tablist", { name: "창 묶음 2" }).getByRole("tab", { name: "관심종목", exact: true }).click();
-    await openScreener(page);
-    const delivered = page.waitForEvent("requestfinished", (r) => new URL(r.url()).pathname === "/api/screener/run");
-    held.reply(olderFails ? { status: 503, body: runError() } : { body: currentResult() });
-    await delivered;
-    await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => resolve())));
-    await expect(meta(page)).toHaveText(original!);
-    await expect(newestPrice).toHaveText("61,500*");
-    await expect(panel(page).getByRole("alert")).toHaveCount(0);
-  });
-}

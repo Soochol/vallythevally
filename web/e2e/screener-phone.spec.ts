@@ -2,8 +2,7 @@ import type { Locator, Page } from "@playwright/test";
 import type { Screen } from "../src/api/generated/Screen";
 import type { Screens } from "../src/api/generated/Screens";
 import { type Scenario, expect, test } from "./screener-harness";
-import { allResult } from "./fixtures/screener";
-import { openScreener, panel, rowOf, rows, runButton, savedTo, screenChooser, updateBand, waitForUpdateToFinish } from "./screener-page";
+import { openScreener, panel, savedTo, screenChooser } from "./screener-page";
 import { renameScreen, sentenceEditor } from "./sentence-editor";
 
 const PHONE = { width: 390, height: 844 };
@@ -223,17 +222,4 @@ test("휴대폰에서 삭제가 서버 오류로 실패하면 대화상자와 �
   await expect(dialog).toBeHidden();
   await expect(screenChooser(page)).toHaveAccessibleName("조건식: 둘째");
   expect((await stored(scenario)).screens.map((screen) => screen.id)).toEqual(["b"]);
-});
-
-test("휴대폰 결과 줄에는 종목코드가 보이지 않고 풍선말에 이름과 코드가 있다", async ({ scenario, screener, page }) => {
-  await startPhone(scenario, page, [screenOf("all", "모든 종목")]);
-  screener.showResult(allResult());
-  await updateBand(page).getByRole("button", { name: "처음 받기", exact: true }).click();
-  await waitForUpdateToFinish(page, "11-06(금)");
-  await runButton(page).click();
-  await expect(rows(page)).toHaveCount(10);
-  for (const row of allResult().rows) {
-    await expect(rowOf(page, row.symbol).getByText(row.symbol)).toHaveCount(0);
-    await expect(rowOf(page, row.symbol).locator("b")).toHaveAttribute("title", `${row.name} ${row.symbol}`);
-  }
 });

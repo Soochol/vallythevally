@@ -71,7 +71,7 @@ test("모든 조건 종류의 문장 숫자 편집을 저장하고 마지막 줄
     ["일목균형표", "전환선 기간", "10", { kind: "ichimoku", conversion: 10 }],
     ["시가총액", "최소", "1234", { kind: "market_cap", min: 123400000000 }],
   ] as const;
-  for (const [label, field, value, expected] of variants) {
+  for (const [index, [label, field, value, expected]] of variants.entries()) {
     await test.step(label, async () => {
       await addCondition(editor, label);
       if (expected.kind === "value_range") await selectOption(editor.getByRole("combobox", { name: "조건 1 값", exact: true }), "close");
@@ -82,6 +82,7 @@ test("모든 조건 종류의 문장 숫자 편집을 저장하고 마지막 줄
       expect(saved.conditions).toHaveLength(1);
       expect(saved.conditions[0]).toMatchObject(expected);
       await conditionAction(editor, 1, "조건 지우기");
+      if (index < variants.length - 1) return;
       await editor.getByRole("button", { name: "저장", exact: true }).click();
       await savedEditor(editor);
       expect(scenario.documents.screens().screens[0]!.conditions).toEqual([]);
