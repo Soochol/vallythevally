@@ -60,7 +60,7 @@ function Price({ row, previousClose, mark }: { row: LadderRow; previousClose: nu
 }
 
 export function PriceLadder({ rows, previousClose, slots, rowSlots, mark }: Props) {
-  const columns = `${slots?.left ? "var(--size-64) " : ""}minmax(0, 1fr) var(--size-120) minmax(0, 1fr)${slots?.right ? " var(--size-64)" : ""}`;
+  const columns = `${slots?.left ? "var(--size-64) " : ""}minmax(0, 1fr) var(--size-133) minmax(0, 1fr)${slots?.right ? " var(--size-64)" : ""}`;
   const firstBottomLeft = LADDER_ROWS - BOTTOM_LEFT_ROWS;
   return (
     <div className="mw-ladder" data-testid="price-ladder">
