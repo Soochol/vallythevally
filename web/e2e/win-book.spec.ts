@@ -202,3 +202,38 @@ test("구독 직후 끊김이 오면 호가가 오기 전에도 끊김을 보이
   await expect(page.getByRole("status").filter({ hasText: "끊김" })).toBeVisible();
   await expect(page.locator(".bk-ladder")).toHaveAttribute("data-stale", "");
 });
+
+function bookSubs(scenario: Scenario): string[] {
+  return scenario.live.messages.flatMap((m) => (m.type === "subscribe_feed" && m.kind === "book" && m.symbol === CODE ? [m.sub] : []));
+}
+
+async function reconnect(scenario: Scenario): Promise<string> {
+  const before = bookSubs(scenario).length;
+  scenario.live.close();
+  await expect.poll(() => bookSubs(scenario).length).toBe(before + 1);
+  return bookSubs(scenario).at(-1)!;
+}
+
+test("끊김을 들은 창이 소켓을 다시 이었을 때 세션이 살아 있으면 끊김이 풀린다", async ({ page, scenario }) => {
+  await open(page, scenario, 70000);
+  scenario.live.emit({ type: "feed_link", sub: await subOf(scenario, "book"), live: false, at: 1 });
+  await expect(page.getByRole("status").filter({ hasText: "끊김" })).toBeVisible();
+
+  const resubscribed = await reconnect(scenario);
+  scenario.live.emit({ type: "feed_subscribed", sub: resubscribed, kind: "book" });
+  await expect(book(page)).toHaveAttribute("data-connected", "");
+  await expect(page.getByRole("status").filter({ hasText: "끊김" })).toHaveCount(0);
+  await expect(page.locator(".bk-ladder")).not.toHaveAttribute("data-stale", "");
+});
+
+test("세션이 내려간 채 소켓을 다시 이으면 끊김이 그대로 보인다", async ({ page, scenario }) => {
+  await open(page, scenario, 70000);
+  scenario.live.emit({ type: "feed_link", sub: await subOf(scenario, "book"), live: false, at: 1 });
+  await expect(page.getByRole("status").filter({ hasText: "끊김" })).toBeVisible();
+
+  const resubscribed = await reconnect(scenario);
+  scenario.live.emit({ type: "feed_subscribed", sub: resubscribed, kind: "book" });
+  scenario.live.emit({ type: "feed_link", sub: resubscribed, live: false, at: 1 });
+  await expect(page.getByRole("status").filter({ hasText: "끊김" })).toBeVisible();
+  await expect(page.locator(".bk-ladder")).toHaveAttribute("data-stale", "");
+});
