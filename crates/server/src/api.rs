@@ -1067,16 +1067,43 @@ pub enum WindowContent {
         #[ts(type = "unknown")]
         chart_settings: serde_json::Value,
     },
-    Watchlist,
-    Screener,
+    Watchlist {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
+        list: Option<String>,
+    },
+    Screener {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
+        screen: Option<String>,
+    },
     Indicators,
-    Trades,
-    Book,
-    Program,
-    Brokers,
+    Trades {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
+        symbol: Option<SymbolCode>,
+    },
+    Book {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
+        symbol: Option<SymbolCode>,
+    },
+    Program {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
+        symbol: Option<SymbolCode>,
+    },
+    Brokers {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
+        symbol: Option<SymbolCode>,
+    },
     Order {
         #[serde(default = "default_order_venue")]
         venue: Venue,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
+        symbol: Option<SymbolCode>,
     },
 }
 
@@ -1996,7 +2023,7 @@ mod tests {
         let WindowContent::Chart { feed, chart_settings, .. } = &layout.windows[0].content else { panic!("{:?}", layout.windows[0]) };
         assert_eq!(feed.0, domain::Feed::Stock(domain::StockCode::parse("005930").unwrap(), domain::Venue::Nxt));
         assert_eq!(*chart_settings, json!({"v": 1, "future": [1, 2]}));
-        assert_eq!(layout.windows[1].content, WindowContent::Watchlist);
+        assert_eq!(layout.windows[1].content, WindowContent::Watchlist { list: None });
         assert_eq!(layout.revision, Revision(1_794_152_040_123), "Date.now() 크기의 ms도 정확히 받는다");
         let mut expected = body.clone();
         expected["sync"] = json!({"crosshair": true, "scroll": false});

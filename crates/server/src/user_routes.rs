@@ -251,6 +251,9 @@ pub(crate) fn check_layout(path_id: &str, input: &LayoutInput) -> Result<Vec<Sym
     if let (Some(_), Some(second)) = (indicators.next(), indicators.next()) {
         return Err(ApiFailure::bad_request(format!("{} 창은 하나만 둘 수 있습니다", userdata::window_kind(&second.content))));
     }
+    for w in &input.windows {
+        check_window_state(w)?;
+    }
     let mut nxt = Vec::new();
     for w in &input.windows {
         if let WindowContent::Chart { feed: api::ChartFeed(Feed::Stock(code, Venue::Nxt)), .. } = &w.content {
@@ -258,6 +261,27 @@ pub(crate) fn check_layout(path_id: &str, input: &LayoutInput) -> Result<Vec<Sym
         }
     }
     Ok(nxt)
+}
+
+fn check_window_state(w: &api::LayoutWindow) -> Result<(), ApiFailure> {
+    let (symbol, list, screen) = match &w.content {
+        WindowContent::Trades { symbol } | WindowContent::Book { symbol } | WindowContent::Program { symbol } | WindowContent::Brokers { symbol } | WindowContent::Order { symbol, .. } => {
+            (symbol.as_ref(), None, None)
+        }
+        WindowContent::Watchlist { list } => (None, list.as_deref(), None),
+        WindowContent::Screener { screen } => (None, None, screen.as_deref()),
+        WindowContent::Chart { .. } | WindowContent::Indicators => return Ok(()),
+    };
+    if let Some(symbol) = symbol.filter(|s| domain::StockCode::parse(&s.0).is_err()) {
+        return Err(ApiFailure::bad_request(format!("창 {}의 고정 종목은 주식 코드여야 합니다: {}", w.id.as_str(), symbol.0)));
+    }
+    if let Some(list) = list.filter(|l| l.is_empty() || l.len() > MAX_WATCHLIST_ID_BYTES) {
+        return Err(ApiFailure::bad_request(format!("창 {}의 관심종목 목록 id는 1~{MAX_WATCHLIST_ID_BYTES}바이트여야 합니다: {list}", w.id.as_str())));
+    }
+    if let Some(screen) = screen.filter(|s| s.is_empty() || s.len() > MAX_SCREEN_ID_BYTES) {
+        return Err(ApiFailure::bad_request(format!("창 {}의 조건식 id는 1~{MAX_SCREEN_ID_BYTES}바이트여야 합니다: {screen}", w.id.as_str())));
+    }
+    Ok(())
 }
 
 async fn delete_layout(State(st): State<Arc<AppState>>, Path(id): Path<String>) -> Result<StatusCode, ApiFailure> {

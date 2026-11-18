@@ -188,7 +188,13 @@ fn read_window(r: &SqliteRow) -> Result<LayoutWindow, StoreError> {
         "order" => {
             let venue: Option<String> = r.get("venue");
             let Some(venue) = venue else { return Err(corrupt("호가주문 창", id.as_str())) };
-            WindowContent::Order { venue: from_wire_name("venue", venue)? }
+            WindowContent::Order { venue: from_wire_name("venue", venue)?, symbol: r.get::<Option<String>, _>("symbol").map(SymbolCode) }
+        }
+        "watchlist" => WindowContent::Watchlist { list: r.get("list") },
+        "screener" => WindowContent::Screener { screen: r.get("screen") },
+        "trades" | "book" | "program" | "brokers" => {
+            let symbol: Option<String> = r.get("symbol");
+            serde_json::from_value(serde_json::json!({ "kind": kind, "symbol": symbol })).map_err(|e| corrupt("창 종류", e))?
         }
         _ => serde_json::from_value(serde_json::json!({ "kind": kind })).map_err(|e| corrupt("창 종류", e))?,
     };
@@ -270,21 +276,25 @@ pub(crate) async fn store_layout(tx: &mut SqliteConnection, input: &LayoutInput,
     sync_log::saved(tx, DocumentKind::Layout, &input.id, input.revision.0).await?;
     sqlx::query("DELETE FROM layout_windows WHERE layout_id = ?").bind(&input.id).execute(&mut *tx).await?;
     for (position, w) in input.windows.iter().enumerate() {
-        let (symbol, venue, period, chart_settings) = match &w.content {
-            WindowContent::Chart { feed, period, chart_settings } => {
-                (Some(feed.0.symbol().as_wire()), feed.0.venue().map(|v| v.as_wire().to_owned()), Some(wire_name(period)), Some(chart_settings.to_string()))
+        let (symbol, venue, period, chart_settings, list, screen) = match &w.content {
+            WindowContent::Chart { feed, period, chart_settings } => (
+                Some(feed.0.symbol().as_wire()),
+                feed.0.venue().map(|v| v.as_wire().to_owned()),
+                Some(wire_name(period)),
+                Some(chart_settings.to_string()),
+                None,
+                None,
+            ),
+            WindowContent::Order { venue, symbol } => (symbol.as_ref().map(|s| s.0.clone()), Some(wire_name(venue)), None, None, None, None),
+            WindowContent::Watchlist { list } => (None, None, None, None, list.clone(), None),
+            WindowContent::Screener { screen } => (None, None, None, None, None, screen.clone()),
+            WindowContent::Trades { symbol } | WindowContent::Book { symbol } | WindowContent::Program { symbol } | WindowContent::Brokers { symbol } => {
+                (symbol.as_ref().map(|s| s.0.clone()), None, None, None, None, None)
             }
-            WindowContent::Order { venue } => (None, Some(wire_name(venue)), None, None),
-            WindowContent::Watchlist
-            | WindowContent::Screener
-            | WindowContent::Indicators
-            | WindowContent::Trades
-            | WindowContent::Book
-            | WindowContent::Program
-            | WindowContent::Brokers => (None, None, None, None),
+            WindowContent::Indicators => (None, None, None, None, None, None),
         };
         sqlx::query(
-            "INSERT INTO layout_windows (layout_id, id, position, kind, link, symbol, venue, period, chart_settings) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO layout_windows (layout_id, id, position, kind, link, symbol, venue, period, chart_settings, list, screen) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         )
         .bind(&input.id)
         .bind(w.id.as_str())
@@ -295,6 +305,8 @@ pub(crate) async fn store_layout(tx: &mut SqliteConnection, input: &LayoutInput,
         .bind(venue)
         .bind(period)
         .bind(chart_settings)
+        .bind(list)
+        .bind(screen)
         .execute(&mut *tx)
         .await?;
     }
@@ -633,6 +645,154 @@ mod tests {
         assert!(serde_json::from_value::<LayoutInput>(body).is_err());
     }
 
+    fn stateful_windows() -> Vec<LayoutWindow> {
+        let pinned = |content: WindowContent| side(content);
+        let mut windows = vec![chart("c", "005930", Some(Venue::Krx))];
+        windows.push(pinned(WindowContent::Watchlist { list: Some("L-등락".into()) }));
+        windows.push(pinned(WindowContent::Screener { screen: Some("S1".into()) }));
+        windows.push(pinned(WindowContent::Trades { symbol: Some(SymbolCode("000660".into())) }));
+        windows.push(pinned(WindowContent::Book { symbol: Some(SymbolCode("0000D0".into())) }));
+        windows.push(pinned(WindowContent::Program { symbol: Some(SymbolCode("035720".into())) }));
+        windows.push(pinned(WindowContent::Brokers { symbol: Some(SymbolCode("005930".into())) }));
+        windows.push(pinned(WindowContent::Order { venue: Venue::Nxt, symbol: Some(SymbolCode("373220".into())) }));
+        windows
+    }
+
+    #[sqlx::test(migrations = "./migrations")]
+    async fn window_state_fields_round_trip_through_the_database(_: SqlitePoolOptions, opts: SqliteConnectOptions) {
+        let db = db(opts).await;
+        let windows = stateful_windows();
+        put_layout(&db, &layout("L2", "창별 상태", windows.clone()), UnixSeconds(100)).await.unwrap();
+        assert_eq!(get_layout(&db, "L2").await.unwrap().windows, windows);
+
+        let blank: Vec<_> = stateful_windows()
+            .into_iter()
+            .map(|mut w| {
+                w.content = serde_json::from_value(json!({"kind": window_kind(&w.content), "symbol": "005930", "period": "D", "venue": "krx", "chartSettings": {}})).unwrap();
+                w
+            })
+            .collect();
+        put_layout(&db, &layout_at("L2", "창별 상태", blank.clone(), 2), UnixSeconds(101)).await.unwrap();
+        assert_eq!(get_layout(&db, "L2").await.unwrap().windows, blank);
+    }
+
+    #[test]
+    fn window_json_without_the_state_fields_reads_as_none() {
+        let read = |w: serde_json::Value| serde_json::from_value::<LayoutWindow>(w).unwrap().content;
+        assert_eq!(read(json!({"id": "w", "link": null, "kind": "watchlist"})), WindowContent::Watchlist { list: None });
+        assert_eq!(read(json!({"id": "w", "link": null, "kind": "screener"})), WindowContent::Screener { screen: None });
+        assert_eq!(read(json!({"id": "w", "link": null, "kind": "book"})), WindowContent::Book { symbol: None });
+        assert_eq!(read(json!({"id": "w", "link": null, "kind": "order", "venue": "nxt"})), WindowContent::Order { venue: Venue::Nxt, symbol: None });
+        assert_eq!(read(json!({"id": "w", "link": null, "kind": "trades", "symbol": null})), WindowContent::Trades { symbol: None });
+        let written = serde_json::to_value(LayoutWindow { id: window_id("w"), link: None, content: WindowContent::Watchlist { list: None } }).unwrap();
+        assert_eq!(written, json!({"id": "w", "link": null, "kind": "watchlist"}), "비어 있으면 JSON에 쓰지 않는다");
+    }
+
+    #[test]
+    fn a_state_field_on_another_kind_is_dropped_on_reading_not_stored() {
+        let read = |w: serde_json::Value| serde_json::from_value::<LayoutWindow>(w).unwrap().content;
+        assert_eq!(read(json!({"id": "w", "link": null, "kind": "trades", "list": "L1", "screen": "S1"})), WindowContent::Trades { symbol: None });
+        assert_eq!(read(json!({"id": "w", "link": null, "kind": "watchlist", "symbol": "005930", "screen": "S1"})), WindowContent::Watchlist { list: None });
+        assert_eq!(read(json!({"id": "w", "link": null, "kind": "screener", "list": "L1"})), WindowContent::Screener { screen: None });
+    }
+
+    #[test]
+    fn check_layout_rejects_an_index_pin_and_malformed_ids_but_not_unknown_ones() {
+        let with = |content: WindowContent| {
+            let mut windows = vec![chart("c", "005930", Some(Venue::Krx))];
+            windows.push(LayoutWindow { id: window_id("w"), link: None, content });
+            layout("L2", "검사", windows)
+        };
+        let check = |content: WindowContent| crate::user_routes::check_layout("L2", &with(content));
+        for kind in [
+            WindowContent::Trades { symbol: Some(SymbolCode("IDX:001".into())) },
+            WindowContent::Book { symbol: Some(SymbolCode("IDX:101".into())) },
+            WindowContent::Order { venue: Venue::Krx, symbol: Some(SymbolCode("IDX:001".into())) },
+            WindowContent::Program { symbol: Some(SymbolCode("5930".into())) },
+            WindowContent::Brokers { symbol: Some(SymbolCode("abcdef".into())) },
+            WindowContent::Watchlist { list: Some(String::new()) },
+            WindowContent::Watchlist { list: Some("x".repeat(setup::MAX_WATCHLIST_ID_BYTES + 1)) },
+            WindowContent::Screener { screen: Some(String::new()) },
+            WindowContent::Screener { screen: Some("x".repeat(65)) },
+        ] {
+            let failure = check(kind.clone()).expect_err(&format!("{kind:?}"));
+            assert_eq!(axum::response::IntoResponse::into_response(failure).status(), axum::http::StatusCode::BAD_REQUEST, "{kind:?}");
+        }
+        assert!(check(WindowContent::Trades { symbol: Some(SymbolCode("005930".into())) }).is_ok());
+        assert!(check(WindowContent::Watchlist { list: Some("지워진 목록".into()) }).is_ok(), "없는 id여도 형식만 맞으면 받는다");
+        assert!(check(WindowContent::Screener { screen: Some("x".repeat(64)) }).is_ok());
+    }
+
+    #[tokio::test]
+    async fn window_state_migration_keeps_windows_and_cell_drawings_and_adds_null_columns() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("vally.db");
+        {
+            let pool = SqlitePoolOptions::new().connect_with(SqliteConnectOptions::new().filename(&path).create_if_missing(true).foreign_keys(true)).await.unwrap();
+            sqlx::migrate!("./migrations").run_to(19, &pool).await.unwrap();
+            sqlx::query("INSERT INTO layouts (id, name, sync, position, updated_at, revision) VALUES ('L3', '셋', '{}', 1, 50, 7)").execute(&pool).await.unwrap();
+            for (position, id, kind, link, venue) in [
+                (0, "c", "chart", Some("b"), Some("nxt")),
+                (1, "w", "watchlist", None, None),
+                (2, "s", "screener", None, None),
+                (3, "t", "trades", Some("j"), None),
+                (4, "o", "order", None, Some("krx")),
+            ] {
+                let chart = kind == "chart";
+                sqlx::query("INSERT INTO layout_windows (layout_id, id, position, kind, link, symbol, venue, period, chart_settings) VALUES ('L3', ?, ?, ?, ?, ?, ?, ?, ?)")
+                    .bind(id).bind(position).bind(kind).bind(link).bind(chart.then_some("005930")).bind(venue).bind(chart.then_some("D")).bind(chart.then_some("{\"v\":1}"))
+                    .execute(&pool).await.unwrap();
+            }
+            sqlx::query(
+                "INSERT INTO drawings (id, symbol, tool, points, style, z, scope, layout_id, window_id, updated_at, revision) VALUES
+                 ('D1', '005930', 'hline', '[{\"t\":1,\"price\":2}]', '{}', 0, 'cell', 'L3', 'c', 40, 41)",
+            )
+            .execute(&pool).await.unwrap();
+            pool.close().await;
+        }
+        let db = AppDb::open(&path).await.unwrap();
+        let migrated = get_layout(&db, "L3").await.unwrap();
+        assert_eq!(
+            kinds(&migrated),
+            [
+                ("c", "chart".into(), Some(LinkColor::B)),
+                ("w", "watchlist".into(), None),
+                ("s", "screener".into(), None),
+                ("t", "trades".into(), Some(LinkColor::J)),
+                ("o", "order".into(), None)
+            ]
+        );
+        assert_eq!(migrated.windows[1].content, WindowContent::Watchlist { list: None });
+        assert_eq!(migrated.windows[2].content, WindowContent::Screener { screen: None });
+        assert_eq!(migrated.windows[3].content, WindowContent::Trades { symbol: None });
+        assert_eq!(migrated.windows[4].content, WindowContent::Order { venue: Venue::Krx, symbol: None });
+        assert_eq!(migrated.windows[0].content, WindowContent::Chart { feed: parse_layout_feed("005930", Some(Venue::Nxt)).unwrap(), period: Period::Day, chart_settings: json!({"v": 1}) });
+        let state: (Option<String>, Option<String>, Option<String>) =
+            sqlx::query_as("SELECT symbol, list, screen FROM layout_windows WHERE layout_id = 'L3' AND kind IN ('watchlist', 'screener', 'trades', 'order') AND (symbol IS NOT NULL OR list IS NOT NULL OR screen IS NOT NULL)")
+                .fetch_optional(db.read()).await.unwrap().unwrap_or_default();
+        assert_eq!(state, (None, None, None), "새 열은 NULL이다");
+
+        let drawings = crate::drawings::list_drawings_of(&db, "005930").await.unwrap();
+        assert_eq!(drawings.iter().map(|d| (d.id.as_str(), d.revision)).collect::<Vec<_>>(), [("D1", Revision(41))]);
+        assert_eq!(drawings[0].scope, crate::drawing_api::DrawingScope::Cell { layout_id: "L3".into(), window_id: window_id("c") });
+        let check = SqlitePoolOptions::new().connect_with(SqliteConnectOptions::new().filename(&path).foreign_keys(true)).await.unwrap();
+        assert!(sqlx::query("PRAGMA foreign_key_check").fetch_all(&check).await.unwrap().is_empty(), "외래 키 위반이 없다");
+
+        let windows = stateful_windows();
+        put_layout(&db, &layout_at("L3", "셋", windows.clone(), 8), UnixSeconds(100)).await.unwrap();
+        assert_eq!(get_layout(&db, "L3").await.unwrap().windows, windows);
+        for bad in [
+            "INSERT INTO layout_windows (layout_id, id, position, kind, symbol) VALUES ('L3', 'x', 90, 'trades', 'IDX:001')",
+            "INSERT INTO layout_windows (layout_id, id, position, kind, symbol) VALUES ('L3', 'x', 90, 'watchlist', '005930')",
+            "INSERT INTO layout_windows (layout_id, id, position, kind, list) VALUES ('L3', 'x', 90, 'trades', 'L1')",
+            "INSERT INTO layout_windows (layout_id, id, position, kind, screen) VALUES ('L3', 'x', 90, 'watchlist', 'S1')",
+            "INSERT INTO layout_windows (layout_id, id, position, kind, period) VALUES ('L3', 'x', 90, 'book', 'D')",
+        ] {
+            assert!(sqlx::query(bad).execute(&check).await.is_err(), "{bad}");
+        }
+        check.close().await;
+    }
+
     #[tokio::test]
     async fn link_colors_ten_migration_keeps_windows_and_cell_drawings_and_widens_the_link_check() {
         let tmp = tempfile::tempdir().unwrap();
@@ -718,11 +878,11 @@ mod tests {
 
         let mut linked = chart("right", "005930", Some(Venue::Nxt));
         linked.link = Some(LinkColor::B);
-        let mut screener = side(WindowContent::Screener);
+        let mut screener = side(WindowContent::Screener { screen: None });
         screener.link = Some(LinkColor::C);
         let mut last = chart("last", "000660", Some(Venue::Krx));
         last.link = Some(LinkColor::J);
-        let windows = vec![screener, linked, side(WindowContent::Indicators), chart("left", "IDX:101", None), side(WindowContent::Trades), last];
+        let windows = vec![screener, linked, side(WindowContent::Indicators), chart("left", "IDX:101", None), side(WindowContent::Trades { symbol: None }), last];
         let saved = put_layout(&db, &layout("L2", "둘", windows.clone()), UnixSeconds(100)).await.unwrap();
         let read = get_layout(&db, "L2").await.unwrap();
         assert_eq!(saved, read);
@@ -741,7 +901,7 @@ mod tests {
     }
 
     fn market_windows() -> Vec<LayoutWindow> {
-        vec![side(WindowContent::Trades), side(WindowContent::Book), side(WindowContent::Program), side(WindowContent::Brokers), side(WindowContent::Order { venue: Venue::Nxt })]
+        vec![side(WindowContent::Trades { symbol: None }), side(WindowContent::Book { symbol: None }), side(WindowContent::Program { symbol: None }), side(WindowContent::Brokers { symbol: None }), side(WindowContent::Order { venue: Venue::Nxt, symbol: None })]
     }
 
     #[sqlx::test(migrations = "./migrations")]
@@ -759,7 +919,7 @@ mod tests {
     }
 
     fn same_kind_contents() -> Vec<WindowContent> {
-        vec![WindowContent::Watchlist, WindowContent::Screener, WindowContent::Trades, WindowContent::Book, WindowContent::Program, WindowContent::Brokers, WindowContent::Order { venue: Venue::Krx }]
+        vec![WindowContent::Watchlist { list: None }, WindowContent::Screener { screen: None }, WindowContent::Trades { symbol: None }, WindowContent::Book { symbol: None }, WindowContent::Program { symbol: None }, WindowContent::Brokers { symbol: None }, WindowContent::Order { venue: Venue::Krx, symbol: None }]
     }
 
     fn windows_of(kinds: &[WindowContent], extra_ids: &str) -> Vec<LayoutWindow> {
@@ -785,7 +945,7 @@ mod tests {
     fn a_layout_holds_up_to_fifty_windows() {
         let layout_of = |count: usize| {
             let mut windows = vec![chart("c", "005930", Some(Venue::Krx))];
-            windows.extend((1..count).map(|n| LayoutWindow { id: window_id(&format!("trades-{n}")), link: None, content: WindowContent::Trades }));
+            windows.extend((1..count).map(|n| LayoutWindow { id: window_id(&format!("trades-{n}")), link: None, content: WindowContent::Trades { symbol: None } }));
             layout("L2", "많음", windows)
         };
         assert!(crate::user_routes::check_layout("L2", &layout_of(50)).is_ok());
@@ -798,7 +958,7 @@ mod tests {
         let mut windows = windows_of(&same_kind_contents(), "2");
         windows[1].link = Some(LinkColor::A);
         let last = windows.len() - 1;
-        windows[last] = LayoutWindow { id: window_id("order-2"), link: Some(LinkColor::J), content: WindowContent::Order { venue: Venue::Nxt } };
+        windows[last] = LayoutWindow { id: window_id("order-2"), link: Some(LinkColor::J), content: WindowContent::Order { venue: Venue::Nxt, symbol: None } };
         put_layout(&db, &layout("L2", "같은 종류", windows.clone()), UnixSeconds(100)).await.unwrap();
         let read = get_layout(&db, "L2").await.unwrap();
         assert_eq!(read.windows, windows);
@@ -952,7 +1112,7 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let db = AppDb::open(&tmp.path().join("vally.db")).await.unwrap();
         let one = layout("R", "race", vec![chart("a", "005930", Some(Venue::Krx))]);
-        let two = layout("R", "race", vec![chart("a", "005930", Some(Venue::Krx)), chart("b", "000660", Some(Venue::Krx)), side(WindowContent::Watchlist)]);
+        let two = layout("R", "race", vec![chart("a", "005930", Some(Venue::Krx)), chart("b", "000660", Some(Venue::Krx)), side(WindowContent::Watchlist { list: None })]);
         put_layout(&db, &one, UnixSeconds(0)).await.unwrap();
         let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
         let writer = {
