@@ -9,7 +9,7 @@ export default defineConfig({
   retries: 0,
   timeout: 90_000,
   expect: { timeout: 15_000 },
-  reporter: [["list"], ["html", { open: "never" }], ["./e2e/budget-reporter.ts"]],
+  reporter: [["./e2e/budget-reporter.ts"], ["list"], ["html", { open: "never" }]],
   webServer: process.env.VALLY_E2E_BASE_URL ? undefined : { command: "node e2e/serve.mjs", url: origin, reuseExistingServer: false },
   use: {
     baseURL: origin,

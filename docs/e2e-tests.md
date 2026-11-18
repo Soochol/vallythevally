@@ -21,6 +21,12 @@
 
 예산 초과는 실패가 아니라 경고다. 실행이 끝나면 `budget-reporter.ts`가 30초를 넘은 시험을 오래 걸린 순서로 출력하고 실행의 `results/budget.json`에 남긴다. 예산은 `VALLY_E2E_BUDGET_MS`로 바꿀 수 있다.
 
+시험별 시간은 같은 `results/`에 `durations.json`으로도 남는다. 최상위는 `runStart`(실행 시작 시각)와 `count`(시험 수), `tests`(시험마다 `file`, `line`, `title`, `status`, `durationMs`, `workerIndex`, `startMs`(실행 시작부터 잰 시작 시각), `retry`)다. 재시도, 실패, 건너뜀도 한 줄씩 들어간다. 실행 폴더는 곧 지워지므로 같은 JSON을 gzip과 base64로 바꾼 한 줄 `e2e-durations: <base64>`도 표준 출력에 나와 chute 검증 로그에 보존된다. 이 줄은 마지막 요약보다 앞에 나온다. 로그에서 JSON으로 되돌린다.
+
+```
+grep '^e2e-durations: ' e2e.1.log | cut -d' ' -f2 | base64 -d | gunzip
+```
+
 ## 시간 대신 상태와 이벤트를 기다린다
 
 고정 시간을 기다리지 말고 기다릴 상태를 정한다.
