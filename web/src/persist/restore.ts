@@ -8,6 +8,7 @@ import { ApiRequestError } from "../api/http";
 import { parseChartSettings } from "../chart/settings";
 import { MAX_WINDOWS, windowId, WINDOW_KINDS, type WindowKind } from "../layout/kinds";
 import { parsePlacement } from "../layout/placement";
+import { isRankingKind } from "../features/ranking/rankingKinds";
 import { alignLinks, DEFAULT_LAYOUT, type EditableLayout, type WindowState } from "../stores/layout";
 import { layoutPath, UI_STATE_PATH, WATCHLISTS_PATH } from "../api/userData";
 import { parseWatchlists } from "../lib/watchlist";
@@ -66,6 +67,7 @@ function isDraftWindow(w: unknown): w is LayoutWindow {
   if (w.kind === "watchlist") return absent(w.list) || isId(w.list, MAX_WATCHLIST_ID_BYTES);
   if (w.kind === "screener") return absent(w.screen) || isId(w.screen, MAX_SCREEN_ID_BYTES);
   if (PINNABLE_KINDS.includes(w.kind) && !isPin(w.symbol)) return false;
+  if (w.kind === "ranking") return isFields(w.ranking) && isRankingKind(w.ranking.kind);
   if (w.kind === "order") return w.venue === "combined" || w.venue === "krx" || w.venue === "nxt";
   return w.kind !== "chart" || (typeof w.symbol === "string" && typeof w.period === "string" && (w.venue === null || typeof w.venue === "string") && "chartSettings" in w);
 }
@@ -170,6 +172,8 @@ function restoreWindow(raw: LayoutWindow): WindowState {
     case "program":
     case "brokers":
       return { ...base, kind: raw.kind, ...optional("symbol", raw.symbol) };
+    case "ranking":
+      return { ...base, kind: raw.kind, ranking: raw.ranking };
     case "indicators":
       return { ...base, kind: raw.kind };
     case "chart":

@@ -289,6 +289,38 @@ async fn a_layout_with_window_state_fields_is_imported_and_a_bad_pin_is_refused(
 }
 
 #[tokio::test]
+async fn a_layout_with_two_ranking_windows_is_imported_with_their_conditions_and_a_bad_ranking_is_refused() {
+    let (from, into) = (machine().await, machine().await);
+    fill(&from).await;
+    let excludes = json!({"etfEtn": true, "preferred": false});
+    let rankings = [
+        json!({"id": "ranking", "link": "a", "kind": "ranking", "ranking": {"kind": "tradeAmount", "market": "all", "venue": "combined", "excludes": excludes, "excludeManaged": false}}),
+        json!({"id": "ranking-2", "link": null, "kind": "ranking", "ranking": {"kind": "program", "market": "kospi", "venue": "krx", "direction": "netSell", "excludes": {"etfEtn": false, "preferred": true}}}),
+    ];
+    let bundle = with_document(&from.export().await, "layout", LAYOUT_TWO, |d| d["body"]["windows"].as_array_mut().unwrap().extend(rankings.clone()));
+    let (status, answer) = into.import(&bundle).await;
+    assert_eq!(status, 200, "{answer}");
+    let (_, saved) = into.get(&format!("/api/layouts/{LAYOUT_TWO}")).await;
+    let windows = saved["windows"].as_array().unwrap();
+    assert_eq!(windows[3], rankings[0]);
+    assert_eq!(windows[4], rankings[1]);
+    let exported = documents_of(&into.export().await, "layout").into_iter().find(|d| d["id"] == LAYOUT_TWO).unwrap();
+    assert_eq!(exported["body"]["windows"][3], rankings[0]);
+    assert_eq!(exported["body"]["windows"][4], rankings[1]);
+
+    for (label, broken) in [
+        ("조건 없음", json!({"id": "ranking-3", "link": null, "kind": "ranking"})),
+        ("모르는 순위", json!({"id": "ranking-3", "link": null, "kind": "ranking", "ranking": {"kind": "nope"}})),
+        ("프로그램 시장 전체", json!({"id": "ranking-3", "link": null, "kind": "ranking", "ranking": {"kind": "program", "market": "all", "venue": "krx", "direction": "netBuy", "excludes": excludes}})),
+    ] {
+        let refused = with_document(&bundle, "layout", LAYOUT_TWO, |d| d["body"]["windows"].as_array_mut().unwrap().push(broken.clone()));
+        let (status, answer) = into.import(&refused).await;
+        assert_eq!(status, 400, "{label}: {answer}");
+        assert!(answer["error"]["message"].as_str().unwrap().contains(LAYOUT_TWO), "{label}");
+    }
+}
+
+#[tokio::test]
 async fn a_hidden_drawing_in_a_bundle_is_stored_visible() {
     let (from, into) = (machine().await, machine().await);
     fill(&from).await;

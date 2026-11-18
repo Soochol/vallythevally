@@ -15,6 +15,7 @@ export const DEFAULT_WINDOW_SIZE: Readonly<Record<WindowKind, Size>> = Object.fr
   program: { w: 300, h: 400 },
   brokers: { w: 420, h: 420 },
   order: { w: 440, h: 660 },
+  ranking: { w: 460, h: 520 },
 });
 
 const sameSpot = (a: Rect, b: Rect): boolean => Math.abs(a.x - b.x) < 1 && Math.abs(a.y - b.y) < 1;

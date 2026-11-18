@@ -174,12 +174,27 @@ test.each([
   ["호가주문의 지수 종목", { id: "order", link: null, kind: "order", venue: "krx", symbol: "IDX:101" }],
   ["문자열이 아닌 list", { id: "watchlist", link: null, kind: "watchlist", list: 7 }],
   ["빈 list", { id: "watchlist", link: null, kind: "watchlist", list: "" }],
+  ["순위 설정이 없는 순위 창", { id: "ranking", link: null, kind: "ranking" }],
+  ["모르는 순위 종류", { id: "ranking", link: null, kind: "ranking", ranking: { kind: "nope" } }],
+  ["객체가 아닌 순위 설정", { id: "ranking", link: null, kind: "ranking", ranking: "tradeAmount" }],
   ["문자열이 아닌 screen", { id: "screener", link: null, kind: "screener", screen: ["S1"] }],
   ["64바이트를 넘는 screen", { id: "screener", link: null, kind: "screener", screen: "x".repeat(65) }],
 ])("%s가 든 미저장 본문은 열지 않고 서버 레이아웃을 연다", async (_, bad) => {
   const r = await restore(sources({ unsaved: { layout: unsaved("/api/layouts/L1", 11, draftWith(bad)) } }));
   expect(chartWindows(r.layout).map((w) => w.period)).toEqual(["D"]);
   expect(r.layoutDirty).toBe(false);
+});
+
+test("순위 창 둘이 든 서버 레이아웃과 미저장 본문은 순위 설정을 그대로 연다", async () => {
+  const excludes = { etfEtn: true, preferred: false };
+  const first = { id: "ranking", link: "a", kind: "ranking", ranking: { kind: "tradeAmount", market: "all", venue: "krx", excludes, excludeManaged: false } } as const;
+  const second = { id: "ranking-2", link: null, kind: "ranking", ranking: { kind: "program", market: "kospi", venue: "nxt", direction: "netSell", excludes } } as const;
+  const stored: Layout = { ...layout("L1", cell({})), windows: [cell({}), first, second] };
+  const server = await restore(sources({ layouts: [stored] }));
+  expect(server.layout.windows.slice(1)).toEqual([first, second]);
+  const local = await restore(sources({ unsaved: { layout: unsaved("/api/layouts/L1", 11, draftWith(first, second)) } }));
+  expect(local.layout.windows.slice(1)).toEqual([first, second]);
+  expect([local.layoutDirty, local.revisions.layout]).toEqual([true, 11]);
 });
 
 test("지표 창이 둘 든 미저장 본문은 열지 않는다", async () => {

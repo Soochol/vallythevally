@@ -203,7 +203,7 @@ test("창 49개가 든 레이아웃에서 하나를 더하면 50개가 되고 �
   await pollSaved(() => saved(scenario).windows.length).toBe(50);
 
   await addButton(page).click();
-  await expect(menu(page).getByRole("menuitem")).toHaveCount(9);
+  await expect(menu(page).getByRole("menuitem")).toHaveCount(10);
   for (const item of await menu(page).getByRole("menuitem").all()) await expect(item).toBeDisabled();
   await expect(kindItem(page, "체결")).toContainText(WINDOW_LIMIT);
   await page.keyboard.press("Escape");

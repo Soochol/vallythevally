@@ -105,6 +105,7 @@ export const TradesIcon = ({ size }: P) => <Icon size={size} path="M4 6h16M4 12h
 export const BookIcon = ({ size }: P) => <Icon size={size} path="M12 4v16M3 7h6M5 12h4M2 17h7M15 7h6M15 12h4M15 17h6" />;
 export const ProgramIcon = ({ size }: P) => <Icon size={size} path="M5 20v-8M11 20V4M17 20v-6M3 20h18" />;
 export const OrderIcon = ({ size }: P) => <Icon size={size} path="M4 6h5v12H4zM15 6h5v12h-5zM9 12h6M12 9v6" />;
+export const RankingIcon = ({ size }: P) => <Icon size={size} path="M3 20h18M5 20v-6h4v6M10 20V5h4v15M15 20v-9h4v9" />;
 export const BrokersIcon = ({ size }: P) => <Icon size={size} path="M4 20h16M6 20V10l6-5 6 5v10M10 20v-6h4v6" />;
 export const SlidersIcon = ({ size = 16 }: P) => (
   <Icon size={size}>

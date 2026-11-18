@@ -80,6 +80,37 @@ for (const { kind, name } of KINDS) {
   });
 }
 
+test("순위 창은 창 더하기에서 열리고 고른 순위와 연동 색 점을 보이며 둘 더하면 순위 1·순위 2가 되고 기본 순위가 저장된다", async ({ page, scenario }) => {
+  const defaultRanking = { kind: "tradeAmount", market: "all", venue: "combined", excludes: { etfEtn: true, preferred: false }, excludeManaged: false };
+  await page.goto("/");
+  await expect(cell(page)).toHaveAttribute("aria-busy", "false");
+
+  await addButton(page).click();
+  await expect(kindItem(page, "순위")).toBeVisible();
+  await kindItem(page, "순위").click();
+  await expect(tabOf(page, "ranking")).toHaveAccessibleName(/^순위/);
+  await expect(page.getByTestId("ranking-window")).toBeVisible();
+  await expect(page.getByTestId("ranking-window")).toContainText("거래대금");
+  await expect(dotOf(page, "ranking")).toHaveAccessibleName("연동 색: 끔");
+  await pollSaved(() => savedWindows(scenario).filter((w) => w.kind === "ranking")).toEqual([{ id: "ranking", link: null, kind: "ranking", ranking: defaultRanking }]);
+
+  await dotOf(page, "ranking").click();
+  await page.getByRole("menu", { name: "연동 색" }).getByRole("menuitemradio", { name: /^B/ }).click();
+  await expect(dotOf(page, "ranking")).toHaveAccessibleName("연동 색: B");
+  await pollSaved(() => savedWindows(scenario).find((w) => w.kind === "ranking")?.link).toBe("b");
+
+  await addButton(page).click();
+  await expect(kindItem(page, "순위")).toContainText("1개 열림");
+  await kindItem(page, "순위").click();
+  await expect(windowTabs(page).getByRole("tab", { name: /^순위 1/ })).toHaveCount(1);
+  await expect(windowTabs(page).getByRole("tab", { name: /^순위 2/ })).toHaveCount(1);
+  await pollSaved(() => savedWindows(scenario).filter((w) => w.kind === "ranking").map((w) => [w.id, "ranking" in w ? w.ranking : null])).toEqual([["ranking", defaultRanking], ["ranking-2", defaultRanking]]);
+
+  await page.reload();
+  await expect(tabOf(page, "ranking")).toHaveCount(1);
+  await expect(tabOf(page, "ranking-2")).toHaveCount(1);
+});
+
 test("지수 종목을 따르는 시세 창은 주식만 보인다고 알린다", async ({ page }) => {
   await page.goto("/");
   await expect(cell(page)).toHaveAttribute("aria-busy", "false");

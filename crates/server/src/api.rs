@@ -1105,6 +1105,9 @@ pub enum WindowContent {
         #[ts(optional)]
         symbol: Option<SymbolCode>,
     },
+    Ranking {
+        ranking: Ranking,
+    },
 }
 
 fn default_order_venue() -> Venue {
@@ -1909,6 +1912,238 @@ pub struct OrderReconciliation {
     pub cleared: u64,
     pub open_orders: Vec<TradingOpenOrder>,
     pub executions: Vec<TradingExecution>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub enum RankingMarket {
+    All,
+    Kospi,
+    Kosdaq,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub enum TradingSession {
+    All,
+    Regular,
+    PreMarket,
+    AfterHours,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub enum SurgeBaseline {
+    PreviousDay,
+    Minutes1,
+    Minutes5,
+    Minutes10,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub enum SurgeSort {
+    SurgeVolume,
+    SurgeRate,
+    DropRate,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub enum MinTradeAmount {
+    Any,
+    AtLeast100Million,
+    AtLeast1Billion,
+    AtLeast10Billion,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub enum ExpectedSort {
+    Gainers,
+    Losers,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub enum RankingInvestor {
+    Foreign,
+    ForeignFirm,
+    FinancialInvestment,
+    InvestmentTrust,
+    OtherFinancial,
+    Bank,
+    Insurance,
+    PensionFund,
+    State,
+    OtherCorporation,
+    Institution,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub enum NetDirection {
+    NetBuy,
+    NetSell,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub enum TradeUnit {
+    Amount,
+    Quantity,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub enum BalanceSort {
+    NetBuyRemaining,
+    NetSellRemaining,
+    BuyRatio,
+    SellRatio,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub enum ViewSpan {
+    Seconds30,
+    Minute1,
+    Minutes10,
+    Hour1,
+    Today,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct Excludes {
+    pub etf_etn: bool,
+    pub preferred: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(tag = "kind", rename_all = "camelCase", rename_all_fields = "camelCase")]
+#[ts(export)]
+pub enum Ranking {
+    TradeAmount { market: RankingMarket, venue: Venue, excludes: Excludes, exclude_managed: bool },
+    TradeVolume { market: RankingMarket, venue: Venue, session: TradingSession, excludes: Excludes, exclude_managed: bool },
+    Turnover { market: RankingMarket, venue: Venue, excludes: Excludes, exclude_managed: bool },
+    VolumeSurge { market: RankingMarket, venue: Venue, baseline: SurgeBaseline, sort: SurgeSort, excludes: Excludes, exclude_managed: bool },
+    Gainers { market: RankingMarket, venue: Venue, include_limit: bool, min_trade_amount: MinTradeAmount, excludes: Excludes, exclude_managed: bool },
+    Losers { market: RankingMarket, venue: Venue, include_limit: bool, min_trade_amount: MinTradeAmount, excludes: Excludes, exclude_managed: bool },
+    Expected { market: RankingMarket, venue: Venue, sort: ExpectedSort, excludes: Excludes, exclude_managed: bool },
+    InvestorNetBuy { market: RankingMarket, investor: RankingInvestor, direction: NetDirection, unit: TradeUnit, excludes: Excludes },
+    ForeignStreak { market: RankingMarket, venue: Venue, direction: NetDirection, excludes: Excludes },
+    Program { market: Market, venue: Venue, direction: NetDirection, excludes: Excludes },
+    BidAskBalance { market: Market, venue: Venue, sort: BalanceSort, excludes: Excludes, exclude_managed: bool },
+    CreditRatio { market: RankingMarket, venue: Venue, excludes: Excludes, exclude_managed: bool },
+    MostViewed { span: ViewSpan, excludes: Excludes },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub enum RankingTrigger {
+    User,
+    Refresh,
+}
+
+pub const MAX_RANKING_PAGES: u8 = 30;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(try_from = "u8", into = "u8")]
+#[ts(export, type = "number")]
+pub struct RankingPages(u8);
+
+impl TryFrom<u8> for RankingPages {
+    type Error = &'static str;
+
+    fn try_from(value: u8) -> Result<Self, Self::Error> {
+        if (1..=MAX_RANKING_PAGES).contains(&value) {
+            Ok(Self(value))
+        } else {
+            Err("순위 페이지 수는 1 이상 30 이하의 정수여야 합니다")
+        }
+    }
+}
+
+impl From<RankingPages> for u8 {
+    fn from(value: RankingPages) -> u8 { value.0 }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct Won(#[ts(type = "number")] pub i64);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct Shares(#[ts(type = "number")] pub i64);
+
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct Percent(pub f64);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct RankingRequest {
+    pub ranking: Ranking,
+    pub pages: RankingPages,
+    pub trigger: RankingTrigger,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[serde(tag = "kind", rename_all = "camelCase", rename_all_fields = "camelCase")]
+#[ts(export)]
+pub enum RankingFigures {
+    TradeAmount { trade_amount: Won, volume: Shares, places_gained: Option<i32> },
+    TradeVolume { volume: Shares, previous_day_volume_rate: Option<Percent> },
+    Turnover { turnover_rate: Percent, volume: Shares },
+    VolumeSurge { surge_rate: Percent, surge_volume: Shares, volume: Shares },
+    Movers { price_change: Won, volume: Shares },
+    Expected { expected_price: Won, expected_change_rate: Percent, expected_volume: Shares },
+    NetAmounts { net: Won, buy: Won, sell: Won },
+    NetQuantities { net: Shares, buy: Shares, sell: Shares },
+    ForeignStreak { net_d1: Shares, net_d2: Shares, net_d3: Shares, net_total: Shares, limit_exhaustion_rate: Percent },
+    BidAskBalance { total_sell_remaining: Shares, total_buy_remaining: Shares, net_buy_remaining: Shares, buy_ratio: Percent },
+    CreditRatio { credit_ratio: Percent, volume: Shares },
+    MostViewed { reference_price: Won, change_from_reference_rate: Percent, places_gained: Option<i32> },
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct RankingRow {
+    pub rank: u32,
+    pub code: SymbolCode,
+    pub name: String,
+    pub listed: bool,
+    pub price: Option<Won>,
+    pub change_rate: Option<Percent>,
+    pub figures: RankingFigures,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct RankingPage {
+    pub rows: Vec<RankingRow>,
+    pub pages: RankingPages,
+    pub end: bool,
+    pub limited: bool,
+    pub hidden: u32,
+    pub fetched_at: UnixSeconds,
 }
 
 #[cfg(test)]
