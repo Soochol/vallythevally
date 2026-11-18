@@ -4,7 +4,7 @@ use std::process::Command;
 
 use collector::calendar::Day;
 use collector::finalize::{
-    DEFAULT_SPILL_BUDGET_BYTES, Options, finalize_day, publish_store, recover_interrupted_swap, seal_day, store_dir, tally_day, temporary_store_dir,
+    DEFAULT_SPILL_BUDGET_BYTES, Options, RawFiles, finalize_day, publish_store, recover_interrupted_swap, seal_day, store_dir, tally_day, temporary_store_dir,
     verify_store, write_store,
 };
 use collector::keys::KeyRole;
@@ -386,7 +386,7 @@ fn a_failed_comparison_writes_no_completion_marker_and_keeps_the_temporary_folde
     let report = verify_store(&written.store_dir, DATE, 16, 2, &full_tally).unwrap();
     assert!(!report.passed);
 
-    assert!(!seal_day(&options(reduced.path()), &report).unwrap());
+    assert!(!seal_day(&options(reduced.path()), &report, RawFiles::default()).unwrap());
     assert!(temporary_store_dir(reduced.path(), DATE).is_dir());
     assert!(!temporary_store_dir(reduced.path(), DATE).join("complete.json").exists());
     assert!(!store_dir(reduced.path(), DATE).exists());

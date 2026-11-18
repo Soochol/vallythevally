@@ -11,6 +11,7 @@ use crate::calendar::ReqwestHolidayTransport;
 use crate::collect::child::is_loopback_ws;
 use crate::collect::config::{Variables, default_state_folder, process_variables};
 use crate::collect::start::{KIWOOM_BASE_URL, forward_termination_signals, init_logging};
+use crate::finalize::RetentionSettings;
 use crate::keys::KeyList;
 
 mod api;
@@ -54,12 +55,26 @@ const SPEC: ArgSpec = ArgSpec {
         "reissue-spacing-secs",
         "finalize-threads",
         "holiday-key",
+        "keep-early",
+        "keep",
+        "early-period",
     ],
     flag_options: &[],
 };
 
-const DAEMON_ONLY_OPTIONS: [&str; 8] =
-    ["judge-at", "plan-at", "launch-at", "close-at", "open-grace-minutes", "reissue-spacing-secs", "finalize-threads", "holiday-key"];
+const DAEMON_ONLY_OPTIONS: [&str; 11] = [
+    "judge-at",
+    "plan-at",
+    "launch-at",
+    "close-at",
+    "open-grace-minutes",
+    "reissue-spacing-secs",
+    "finalize-threads",
+    "holiday-key",
+    "keep-early",
+    "keep",
+    "early-period",
+];
 
 const HOLIDAY_KEY_FILE: &str = "holiday-service-key";
 
@@ -117,8 +132,14 @@ fn parse_schedule(arguments: &Arguments) -> Result<ScheduleSettings, String> {
     if let Some(threads) = number("finalize-threads")? {
         schedule.finalize_threads = threads as usize;
     }
+    schedule.retention = RetentionSettings::from_arguments(arguments)?;
     schedule.check()?;
     Ok(schedule)
+}
+
+pub fn schedule_from_arguments(raw_arguments: &[String]) -> Result<ScheduleSettings, String> {
+    let arguments = Arguments::parse(raw_arguments, &SPEC).map_err(|error| error.to_string())?;
+    parse_schedule(&arguments)
 }
 
 fn run_daemon(arguments: &Arguments, keys_path: &std::path::Path) -> ExitCode {
