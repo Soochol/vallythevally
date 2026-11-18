@@ -322,8 +322,8 @@ async fn account_reads_stop_when_the_key_is_auth_blocked() {
         assert!(auth_blocked(&error), "{error:?}");
     }
     assert_eq!(fake.sent().len(), sent, "인증이 차단된 뒤에는 계좌 TR을 더 보내지 않는다");
-    let http = ApiFailure::trading(first);
-    assert_eq!((http.code(), http.into_body().reason), (crate::api::ApiErrorCode::KiwoomAuthFailed, Some(crate::api::ApiErrorReason::AuthBlocked)));
+    let body = ApiFailure::trading(first).into_body();
+    assert_eq!((body.code, body.reason), (crate::api::ApiErrorCode::KiwoomAuthFailed, Some(crate::api::ApiErrorReason::AuthBlocked)));
 }
 
 #[tokio::test]

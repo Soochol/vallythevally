@@ -15,12 +15,11 @@ use crate::api::{Revision, SymbolCode, UnixSeconds, WindowId};
 use crate::db::AppDb;
 use crate::drawing_api::{Drawing, DrawingInput, DrawingScope};
 use crate::http::{ApiFailure, AppState};
+use crate::setup_documents::check_drawing;
 use crate::user_routes::{parse_symbol, read_json};
 use setup::{DocumentKind, JSON_LIMIT};
 use crate::sync_log;
 use crate::userdata::{StoreError, check_newer, corrupt, from_wire_name, wire_name};
-
-const GROUP_CHARS: std::ops::RangeInclusive<usize> = 1..=100;
 
 pub fn routes() -> Router<Arc<AppState>> {
     Router::new()
@@ -164,41 +163,6 @@ pub async fn delete_drawing_by_id(db: &AppDb, id: &str, now: UnixSeconds) -> Res
         sync_log::deleted(&mut tx, DocumentKind::Drawing, id, now.millis()).await?;
     }
     tx.commit().await?;
-    Ok(())
-}
-
-pub(crate) fn check_drawing(path_id: &str, d: &DrawingInput) -> Result<(), ApiFailure> {
-    if !DocumentKind::Drawing.accepts_id(path_id) {
-        return Err(ApiFailure::bad_request(format!("드로잉 id는 영문자·숫자·`-`·`_`로 1~64바이트여야 합니다: {path_id}")));
-    }
-    if d.id != path_id {
-        return Err(ApiFailure::bad_request(format!("주소의 id({path_id})와 본문의 id({})가 다릅니다", d.id)));
-    }
-    parse_symbol(&d.symbol.0)?;
-    let range = d.tool.point_count();
-    if !range.contains(&d.points.len()) {
-        return Err(ApiFailure::bad_request(format!(
-            "{}의 점은 {}~{}개여야 합니다: {}개",
-            wire_name(&d.tool),
-            range.start(),
-            range.end(),
-            d.points.len()
-        )));
-    }
-    if d.points.iter().any(|p| !p.price.is_finite()) {
-        return Err(ApiFailure::bad_request("점의 가격은 유한한 수여야 합니다"));
-    }
-    if d.periods.as_ref().is_some_and(Vec::is_empty) {
-        return Err(ApiFailure::bad_request("periods는 null이거나 봉 주기가 하나 이상이어야 합니다"));
-    }
-    if !d.z.is_finite() {
-        return Err(ApiFailure::bad_request("z는 유한한 수여야 합니다"));
-    }
-    if let Some(group) = &d.group
-        && !GROUP_CHARS.contains(&group.chars().count())
-    {
-        return Err(ApiFailure::bad_request(format!("그룹 이름은 {}~{}자여야 합니다", GROUP_CHARS.start(), GROUP_CHARS.end())));
-    }
     Ok(())
 }
 

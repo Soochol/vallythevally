@@ -703,7 +703,7 @@ mod tests {
             windows.push(LayoutWindow { id: window_id("w"), link: None, content });
             layout("L2", "검사", windows)
         };
-        let check = |content: WindowContent| crate::user_routes::check_layout("L2", &with(content));
+        let check = |content: WindowContent| crate::setup_documents::check_layout("L2", &with(content));
         for kind in [
             WindowContent::Trades { symbol: Some(SymbolCode("IDX:001".into())) },
             WindowContent::Book { symbol: Some(SymbolCode("IDX:101".into())) },
@@ -716,7 +716,7 @@ mod tests {
             WindowContent::Screener { screen: Some("x".repeat(65)) },
         ] {
             let failure = check(kind.clone()).expect_err(&format!("{kind:?}"));
-            assert_eq!(axum::response::IntoResponse::into_response(failure).status(), axum::http::StatusCode::BAD_REQUEST, "{kind:?}");
+            assert!(matches!(failure, crate::setup_documents::Refusal::Invalid(_)), "{kind:?}");
         }
         assert!(check(WindowContent::Trades { symbol: Some(SymbolCode("005930".into())) }).is_ok());
         assert!(check(WindowContent::Watchlist { list: Some("지워진 목록".into()) }).is_ok(), "없는 id여도 형식만 맞으면 받는다");
@@ -932,13 +932,13 @@ mod tests {
     #[test]
     fn two_windows_of_a_kind_are_accepted_except_for_indicators_which_stay_single() {
         let twice = windows_of(&same_kind_contents(), "2");
-        assert!(crate::user_routes::check_layout("L2", &layout("L2", "둘", twice)).is_ok());
+        assert!(crate::setup_documents::check_layout("L2", &layout("L2", "둘", twice)).is_ok());
 
         let mut one_indicator = windows_of(&[], "2");
         one_indicator.push(side(WindowContent::Indicators));
-        assert!(crate::user_routes::check_layout("L2", &layout("L2", "하나", one_indicator.clone())).is_ok());
+        assert!(crate::setup_documents::check_layout("L2", &layout("L2", "하나", one_indicator.clone())).is_ok());
         one_indicator.push(LayoutWindow { id: window_id("indicators-2"), link: None, content: WindowContent::Indicators });
-        assert!(crate::user_routes::check_layout("L2", &layout("L2", "둘", one_indicator)).is_err());
+        assert!(crate::setup_documents::check_layout("L2", &layout("L2", "둘", one_indicator)).is_err());
     }
 
     #[test]
@@ -948,8 +948,8 @@ mod tests {
             windows.extend((1..count).map(|n| LayoutWindow { id: window_id(&format!("trades-{n}")), link: None, content: WindowContent::Trades { symbol: None } }));
             layout("L2", "많음", windows)
         };
-        assert!(crate::user_routes::check_layout("L2", &layout_of(50)).is_ok());
-        assert!(crate::user_routes::check_layout("L2", &layout_of(51)).is_err());
+        assert!(crate::setup_documents::check_layout("L2", &layout_of(50)).is_ok());
+        assert!(crate::setup_documents::check_layout("L2", &layout_of(51)).is_err());
     }
 
     #[sqlx::test(migrations = "./migrations")]
