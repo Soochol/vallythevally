@@ -225,7 +225,7 @@ mod tests {
     }
 
     fn layout(id: &str, windows: Vec<LayoutWindow>, revision: i64) -> LayoutInput {
-        LayoutInput { id: id.into(), name: id.into(), sync: LayoutSync { crosshair: true, scroll: true }, windows, placement: serde_json::Map::new(), revision: Revision(revision) }
+        LayoutInput { id: id.into(), name: id.into(), sync: LayoutSync { crosshair: true, scroll: true, crosshair_scope: Default::default() }, windows, placement: serde_json::Map::new(), revision: Revision(revision) }
     }
 
     fn cell(layout_id: &str, window: &str) -> DrawingScope {

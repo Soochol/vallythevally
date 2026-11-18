@@ -31,7 +31,7 @@ const SIDE_WINDOWS: LayoutWindow[] = [
   { id: "watchlist", link: null, kind: "watchlist" },
   { id: "screener", link: null, kind: "screener" },
 ];
-const SYNC = { crosshair: true, scroll: true };
+const SYNC = { crosshair: true, scroll: true, crosshairScope: "all" } as const;
 const layout = (id: string, ...cells: ChartWindow[]): Layout => ({ id, name: id, sync: SYNC, windows: [...cells, ...SIDE_WINDOWS], placement: {}, updatedAt: 1, revision: 10 });
 
 function sources(
@@ -117,6 +117,12 @@ test.each([
   const r = await restore(sources({ unsaved: { layout: unsaved("/api/layouts/L1", 11, draft) } }));
   expect(chartWindows(r.layout).map((w) => w.period)).toEqual(["D"]);
   expect(r.layoutDirty).toBe(false);
+});
+
+test("십자선 연동 범위가 없는 옛 미저장 본문은 서버 레이아웃의 범위를 이어받는다", async () => {
+  const draft = { id: "L1", name: "L1", sync: { crosshair: false, scroll: true }, windows: [{ id: "cell-0", link: null, kind: "chart", symbol: "000660", venue: "combined", period: "W", chartSettings: {} }], placement: {} };
+  const r = await restore(sources({ layouts: [{ ...layout("L1"), sync: { ...SYNC, crosshairScope: "symbol" } }], unsaved: { layout: unsaved("/api/layouts/L1", 11, draft) } }));
+  expect(r.layout.sync).toEqual({ crosshair: false, scroll: true, crosshairScope: "symbol" });
 });
 
 test("옛 미저장 본문의 개체 목록 창은 그 창만 빼고 열고 다시 저장한다", async () => {

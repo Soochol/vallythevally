@@ -152,6 +152,7 @@ fn generated_typescript_matches_the_committed_files() {
         generated::<KiwoomTargetKind>(),
         generated::<InvestorNetSharesDay>(),
         generated::<KstDate>(),
+        generated::<CrosshairScope>(),
         generated::<Layout>(),
         generated::<LayoutInput>(),
         generated::<LayoutSummary>(),

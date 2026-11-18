@@ -1,11 +1,12 @@
 import type { Locator, Page } from "@playwright/test";
 import type { UTCTimestamp } from "lightweight-charts";
 import type { Bar } from "../src/api/generated/Bar";
+import type { LayoutSync } from "../src/api/generated/LayoutSync";
 import type { LayoutWindow } from "../src/api/generated/LayoutWindow";
 import type { Period } from "../src/api/generated/Period";
 import { fromChartTime, toChartTime } from "../src/chart/time";
 import { installChartProbe } from "./chart-probe";
-import { type Scenario, cell, chartOf, DEFAULT_LAYOUT_ID, expect, test, pollSaved } from "./harness";
+import { type Scenario, cell, chartOf, DEFAULT_LAYOUT_ID, expect, SEARCH_BUTTON_TITLE, test, pollSaved } from "./harness";
 
 declare global {
   interface Window { pointedCrosshairTime: UTCTimestamp | null; nativeCrosshairEvents: (UTCTimestamp | null)[] }
@@ -136,27 +137,135 @@ for (const [source, follower, symbol] of [
   });
 }
 
-test("십자선 연동 끄기는 즉시 지우고 저장되며 다시 켜도 이전 위치를 재생하지 않는다", async ({ page, scenario }) => {
+const layoutButton = (page: Page) => page.getByRole("button", { name: /^레이아웃:/ });
+const radio = (page: Page, name: string) => page.getByRole("menuitemradio", { name, exact: true });
+
+async function chooseCrosshair(page: Page, name: string) {
+  await layoutButton(page).click();
+  await radio(page, name).click();
+}
+
+async function expectCrosshairChoice(page: Page, name: string) {
+  await layoutButton(page).click();
+  await expect(radio(page, name)).toHaveAttribute("aria-checked", "true");
+  for (const other of ["끔", "모든 차트", "같은 종목", "같은 연동 색"].filter((n) => n !== name)) await expect(radio(page, other)).toHaveAttribute("aria-checked", "false");
+  await page.keyboard.press("Escape");
+}
+
+type ScopeChart = { period: Period; symbol: string; link: LayoutWindow["link"] };
+
+function seedCharts(scenario: Scenario, charts: ScopeChart[], sync?: Partial<LayoutSync>) {
+  const layout = scenario.documents.layout(DEFAULT_LAYOUT_ID);
+  const windows: LayoutWindow[] = charts.map(({ period, symbol, link }, i) => ({ id: `cell-${i}`, link, kind: "chart", symbol, venue: "combined", period, chartSettings: SETTINGS }));
+  const groups = charts.map((_, i) => ({ kind: "group", id: `g${i}`, tabs: [`cell-${i}`], active: `cell-${i}` }));
+  const root = groups.slice(0, -1).reduceRight<Record<string, unknown>>((second, first) => ({ kind: "split", dir: "row", ratio: 1 / 2, first, second }), groups[groups.length - 1]!);
+  scenario.documents.saveLayout({ ...layout, sync: { ...layout.sync, ...sync }, windows, placement: { v: 1, dock: { root, floats: [] }, canvas: null }, revision: layout.revision + 1 });
+}
+
+async function readyAll(page: Page, count: number) {
+  await page.goto("/");
+  for (let n = 1; n <= count; n++) await expect(cell(page, n)).toHaveAttribute("aria-busy", "false");
+  await expect.poll(() => page.evaluate(() => window.chartProbes?.length ?? 0)).toBeGreaterThanOrEqual(count);
+  await page.evaluate(() => document.fonts.ready);
+  await frames(page);
+}
+
+test("십자선 연동 끄기는 즉시 지우고 저장되며 범위를 남긴 채 다시 켜도 이전 위치를 재생하지 않는다", async ({ page, scenario }) => {
   seed(scenario, "D", "D");
   await ready(page);
   await point(page, 1, TARGET);
   await expect(marker(page)).toBeVisible();
-  const menu = page.getByRole("menuitemcheckbox", { name: "십자선 연동", exact: true });
-  await page.getByRole("button", { name: /^레이아웃:/ }).click();
-  await expect(menu).toHaveAttribute("aria-checked", "true");
-  await menu.click();
+  await expectCrosshairChoice(page, "모든 차트");
+  await chooseCrosshair(page, "끔");
   await expect(marker(page)).toBeHidden();
-  await pollSaved(() => scenario.documents.layout().sync.crosshair).toBe(false);
+  await pollSaved(() => scenario.documents.layout().sync).toEqual({ crosshair: false, scroll: true, crosshairScope: "all" });
   await point(page, 1, LAST);
   await expect(marker(page)).toBeHidden();
   await page.reload();
   await expect(cell(page, 2)).toHaveAttribute("aria-busy", "false");
-  await page.getByRole("button", { name: /^레이아웃:/ }).click();
-  await expect(menu).toHaveAttribute("aria-checked", "false");
-  await menu.click();
+  await expectCrosshairChoice(page, "끔");
+  await chooseCrosshair(page, "모든 차트");
   await expect(marker(page)).toBeHidden();
   await point(page, 1, TARGET);
   await expect(marker(page)).toBeVisible();
+});
+
+test("메뉴에서 고른 범위는 저장되고 새로고침 뒤 같은 라디오에 체크가 있으며 끔을 골라도 범위는 남는다", async ({ page, scenario }) => {
+  seed(scenario, "D", "D");
+  await ready(page);
+  await chooseCrosshair(page, "같은 연동 색");
+  await pollSaved(() => scenario.documents.layout().sync).toEqual({ crosshair: true, scroll: true, crosshairScope: "link" });
+  await page.reload();
+  await expect(cell(page, 2)).toHaveAttribute("aria-busy", "false");
+  await expectCrosshairChoice(page, "같은 연동 색");
+  await chooseCrosshair(page, "같은 종목");
+  await pollSaved(() => scenario.documents.layout().sync.crosshairScope).toBe("symbol");
+  await chooseCrosshair(page, "끔");
+  await pollSaved(() => scenario.documents.layout().sync).toEqual({ crosshair: false, scroll: true, crosshairScope: "symbol" });
+  await page.reload();
+  await expect(cell(page, 2)).toHaveAttribute("aria-busy", "false");
+  await expectCrosshairChoice(page, "끔");
+  await layoutButton(page).click();
+  await expect(radio(page, "같은 종목")).toHaveAttribute("aria-checked", "false");
+  await radio(page, "같은 종목").click();
+  await pollSaved(() => scenario.documents.layout().sync).toEqual({ crosshair: true, scroll: true, crosshairScope: "symbol" });
+});
+
+test("범위가 없는 저장된 레이아웃은 모든 차트로 열리고 종목과 색에 상관없이 따른다", async ({ page, scenario }) => {
+  seed(scenario, "D", "D", "000660");
+  const layout = scenario.documents.layout(DEFAULT_LAYOUT_ID);
+  scenario.documents.saveLayout({ ...layout, sync: { crosshair: true, scroll: true } as unknown as LayoutSync, revision: layout.revision + 1 });
+  await ready(page);
+  await expectCrosshairChoice(page, "모든 차트");
+  await point(page, 1, TARGET);
+  await markerAt(page, 2, TARGET);
+});
+
+test("같은 종목 범위는 같은 종목의 다른 주기 차트만 따르고 종목을 맞추면 그 뒤로 따른다", async ({ page, scenario }) => {
+  seedCharts(scenario, [
+    { period: "D", symbol: "005930", link: null },
+    { period: "5m", symbol: "005930", link: null },
+    { period: "D", symbol: "000660", link: null },
+  ], { crosshairScope: "symbol" });
+  await readyAll(page, 3);
+  await point(page, 1, TARGET);
+  await markerAt(page, 2, TARGET + 9 * 3600);
+  await expect(marker(page, 3)).toBeHidden();
+  await page.mouse.move(2, 2);
+  await expect(marker(page, 2)).toBeHidden();
+  await cell(page, 3).focus();
+  await page.getByRole("toolbar", { name: "차트 도구 막대" }).getByTitle(SEARCH_BUTTON_TITLE).click();
+  const dialog = page.getByRole("dialog", { name: "종목 검색", exact: true });
+  await dialog.getByRole("combobox", { name: "종목 검색" }).fill("005930");
+  await dialog.getByRole("option").filter({ hasText: "005930" }).click();
+  await expect(cell(page, 3)).toHaveAttribute("aria-busy", "false");
+  await point(page, 1, TARGET);
+  await markerAt(page, 3, TARGET);
+  await markerAt(page, 2, TARGET + 9 * 3600);
+});
+
+test("같은 연동 색 범위는 같은 색 차트만 따르고 연동 색이 꺼진 차트는 보내지도 받지도 않는다", async ({ page, scenario }) => {
+  seedCharts(scenario, [
+    { period: "D", symbol: "005930", link: "a" },
+    { period: "5m", symbol: "005930", link: "a" },
+    { period: "D", symbol: "005930", link: "b" },
+    { period: "D", symbol: "005930", link: null },
+  ], { crosshairScope: "link" });
+  await readyAll(page, 4);
+  await point(page, 1, TARGET);
+  await markerAt(page, 2, TARGET + 9 * 3600);
+  await expect(marker(page, 3)).toBeHidden();
+  await expect(marker(page, 4)).toBeHidden();
+  await page.mouse.move(2, 2);
+  await point(page, 4, TARGET);
+  await expect(marker(page, 1)).toBeHidden();
+  await expect(marker(page, 2)).toBeHidden();
+  await expect(marker(page, 3)).toBeHidden();
+  await page.mouse.move(2, 2);
+  await point(page, 3, TARGET);
+  await expect(marker(page, 1)).toBeHidden();
+  await expect(marker(page, 2)).toBeHidden();
+  await expect(marker(page, 4)).toBeHidden();
 });
 
 test("없는 시각과 화면 밖 봉은 표시하거나 과거 봉을 요청하지 않는다", async ({ page, scenario }) => {
