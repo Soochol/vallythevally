@@ -8,12 +8,26 @@ import { copy, paste } from "./clipboard";
 import { DrawingSync } from "./sync";
 import { completionKey } from "./journal";
 import type { Drawing, DrawingBody } from "./types";
+import type { LayoutReceipt, ReceiptChange, ReceiptLayout } from "../../persist/layoutReceipt";
 
 const body: DrawingBody = { id: "new", symbol: "005930", tool: "hline", points: [{ t: 1, price: 100 }], text: null, style: {}, locked: false, hidden: false, periods: null, z: 1, group: null, scope: { kind: "symbol" }, revision: 0 };
 const CELL = windowId("cell-0");
 const saved = (d: DrawingBody, revision: number): Drawing => ({ ...d, revision, updatedAt: 1 });
 function deferred<T>() { let resolve: (value: T) => void = () => {}; const promise = new Promise<T>((done) => { resolve = done; }); return { promise, resolve }; }
-function setup(fetcher: typeof fetch, values: Record<string, string> = {}, readable = () => true) {
+function fakeReceipt() {
+  const listeners = new Set<(change: ReceiptChange) => void>();
+  const state = { holding: new Set<string>(), dropped: new Set<string>(), failed: false, layout: null as ReceiptLayout | null };
+  const receipt: LayoutReceipt = {
+    holds: (_layoutId, windowId) => state.holding.has(windowId),
+    mark: () => 0,
+    droppedSince: (windowId) => state.dropped.has(windowId),
+    current: () => state.layout,
+    failed: () => state.failed,
+    subscribe: (listener) => { listeners.add(listener); return () => { listeners.delete(listener); }; },
+  };
+  return { receipt, state, emit: (change: ReceiptChange) => { listeners.forEach((listener) => listener(change)); } };
+}
+function setup(fetcher: typeof fetch, values: Record<string, string> = {}, readable = () => true, layout = fakeReceipt()) {
   const storage = Object.defineProperties(values, {
     getItem: { value: (k: string) => { if (!readable()) throw new Error("Storage temporarily unavailable"); return values[k] ?? null; } },
     setItem: { writable: true, value: (k: string, value: string) => { values[k] = value; } },
@@ -26,7 +40,7 @@ function setup(fetcher: typeof fetch, values: Record<string, string> = {}, reada
   vi.stubGlobal("fetch", fetcher);
   usePersistStore.getState().setPhase({ kind: "ready" });
   const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: Infinity } } });
-  return { client, sync: new DrawingSync(client) };
+  return { client, sync: new DrawingSync(client, layout.receipt), layout };
 }
 afterEach(() => { vi.unstubAllGlobals(); });
 
@@ -161,4 +175,63 @@ test("an empty change asks nothing of the save phase while a real one still wait
   expect(useSelectionStore.getState().toast).toBeNull();
   expect(sync.commit(CELL, [{ kind: "create", after: body }])).toBe(false);
   expect(useSelectionStore.getState().toast?.text).toBe("서버 연결을 복구한 뒤 드로잉을 편집하세요");
+});
+
+const WINDOW = "chart-2";
+const cellBody: DrawingBody = { ...body, id: "cell", scope: { kind: "cell", layoutId: "L1", windowId: WINDOW } };
+const puts = (calls: { body: DrawingBody }[]) => calls.map((c) => c.body.scope.kind);
+
+test("a cell drawing waits for the layout save to confirm its chart window and is sent as soon as it does", async () => {
+  const layout = fakeReceipt();
+  layout.state.holding.add(WINDOW);
+  const sent: { body: DrawingBody }[] = [];
+  const { sync } = setup(async (_input, options) => {
+    if (options?.method === "PUT") { const b = JSON.parse(String(options.body)) as DrawingBody; sent.push({ body: b }); return Response.json(saved(b, 1)); }
+    return Response.json([]);
+  }, {}, () => true, layout);
+  sync.commit(CELL, [{ kind: "create", after: cellBody }]);
+  await vi.waitFor(() => expect(sync.save.kind).toBe("pending"));
+  await new Promise((done) => setTimeout(done, 20));
+  expect(sent).toEqual([]);
+  layout.state.holding.delete(WINDOW);
+  layout.emit("changed");
+  await vi.waitFor(() => expect(sync.save.kind).toBe("saved"));
+  expect(puts(sent)).toEqual(["cell"]);
+});
+
+test("a held cell drawing shows as failed while the layout save is failing", async () => {
+  const layout = fakeReceipt();
+  layout.state.holding.add(WINDOW);
+  const { sync } = setup(async () => Response.json([]), {}, () => true, layout);
+  sync.commit(CELL, [{ kind: "create", after: cellBody }]);
+  layout.state.failed = true;
+  layout.emit("changed");
+  await vi.waitFor(() => expect(sync.save).toEqual({ kind: "failed", reason: "error", message: "레이아웃이 저장되지 않아 드로잉을 기다립니다" }));
+  layout.state.failed = false;
+  layout.emit("changed");
+  expect(sync.save.kind).toBe("pending");
+});
+
+test("a rejection after the window left the layout is retried and the drawing moves to the layout scope once the layout is saved", async () => {
+  const layout = fakeReceipt();
+  const sent: { body: DrawingBody }[] = [];
+  const { sync } = setup(async (_input, options) => {
+    if (options?.method === "PUT") {
+      const b = JSON.parse(String(options.body)) as DrawingBody;
+      sent.push({ body: b });
+      if (b.scope.kind === "cell") return Response.json({ code: "bad_request", message: "no such window" }, { status: 400 });
+      return Response.json(saved(b, 1));
+    }
+    return Response.json([]);
+  }, {}, () => true, layout);
+  layout.state.dropped.add(WINDOW);
+  sync.commit(CELL, [{ kind: "create", after: cellBody }]);
+  await vi.waitFor(() => expect(sent).toHaveLength(1));
+  await vi.waitFor(() => expect(sync.save.kind).toBe("pending"));
+  layout.state.holding.add(WINDOW);
+  layout.state.layout = { id: "L1", charts: new Set() };
+  layout.emit("saved");
+  await vi.waitFor(() => expect(sync.save.kind).toBe("saved"));
+  expect(puts(sent)).toEqual(["cell", "layout"]);
+  expect(sync.history(CELL).past).toHaveLength(1);
 });

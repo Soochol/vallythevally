@@ -132,6 +132,14 @@ async fn jump_until_reissued(server: &Server, fake: &ScriptedTransport, max_jump
     }
 }
 
+async fn wait_until_failed(server: &Server, fake: &ScriptedTransport) {
+    let mut state = server.link().subscribe();
+    let waited = tokio::time::timeout(Duration::from_secs(30), state.wait_for(is_failed)).await;
+    if waited.is_err() {
+        panic!("연결 실패를 기다리다 제한 시간을 넘었다: 마지막 상태 {:?}, 요청 {:?}", server.link_state(), fake.api_ids());
+    }
+}
+
 #[tokio::test]
 async fn a_server_without_keys_starts_and_sends_nothing_across_the_daily_times() {
     let socket = counted_socket().await;
@@ -607,6 +615,7 @@ async fn an_8050_at_the_daily_reissue_leaves_the_link_failed_and_closed() {
     assert_eq!(server.connect(false).await, LinkState::Connected);
     reject_issue(&fake, EIGHT_FIFTY);
     jump_until_reissued(&server, &fake, DAYS_OF_JUMPS).await;
+    wait_until_failed(&server, &fake).await;
     tokio::time::sleep(Duration::from_millis(500)).await;
     assert_eq!(fake.issued(), 2, "{:?}", fake.api_ids());
     assert_eq!(failure(server.link_state()).problem, Problem::AuthBlocked8050);
@@ -629,6 +638,7 @@ async fn a_connect_that_crosses_20_05_still_gets_the_daily_reissue() {
     server.addr().await;
     assert_eq!(server.connect(false).await, LinkState::Connected);
     jump_until_reissued(&server, &fake, SAME_DAY_JUMPS).await;
+    wait_until_failed(&server, &fake).await;
     tokio::time::sleep(Duration::from_millis(500)).await;
     assert_eq!(fake.issued(), 2, "{:?}", fake.api_ids());
     assert_eq!(failure(server.link_state()).problem, Problem::AuthBlocked8050);

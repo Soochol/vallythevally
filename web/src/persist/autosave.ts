@@ -12,6 +12,7 @@ import { type CommitOutcome, type ConditionalCommit, createSaver, type Saver, ty
 import { clearUnsaved, writeUnsaved } from "./unsaved";
 import { toWireWindow } from "./layoutWire";
 import { toUiState } from "./uiState";
+import type { LayoutReceiptRecorder, ReceiptSession } from "./layoutReceipt";
 
 const DEBOUNCE_MS = 1000;
 export const RECENT_CLEARED = "최근 본 종목 기록을 지웠습니다";
@@ -21,6 +22,7 @@ export interface AutosaveDeps {
   toast(text: string): void;
   revisions: Record<SaveTarget, number>;
   serverCharts?: readonly string[];
+  receipt: LayoutReceiptRecorder;
   unsaved?: (target: SaveTarget) => SaverOptions<object>["unsaved"];
 }
 
@@ -34,35 +36,15 @@ export interface Autosave {
   replaceLayout(layout: EditableLayout, revision: number, serverCharts: readonly string[]): void;
 }
 
-type ServerLayout = { revision: number; charts: ReadonlySet<string> | null };
-
 let active: Autosave | null = null;
 interface LayoutSession {
   current: EditableLayout;
   saver: Saver<Omit<LayoutInput, "revision">>;
   owned: boolean;
-  saved: ServerLayout;
-  unsure: ServerLayout[];
-  sending: Set<ReadonlySet<string>>;
-  sent: { mark: number; charts: ReadonlySet<string> }[];
-}
-let session: LayoutSession | null = null;
-const SENT_HISTORY = 64;
-let lastMark = 0;
-
-export const layoutSendMark = (): number => lastMark;
-
-export function layoutSentWithoutChart(id: string, since: number): boolean {
-  return session?.sent.some((sent) => sent.mark > since && !sent.charts.has(id)) ?? false;
+  receipt: ReceiptSession;
 }
 
-export function serverMayLackChart(id: string): boolean {
-  if (!active || !session) return true;
-  const candidates = [session.saved, ...session.unsure];
-  return candidates.some(({ charts }) => charts === null || !charts.has(id)) || [...session.sending].some((charts) => !charts.has(id));
-}
-
-function layoutSent(json: string): ServerLayout & { charts: ReadonlySet<string> } {
+function layoutSent(json: string): { revision: number; charts: ReadonlySet<string> } {
   const { windows, revision } = JSON.parse(json) as Pick<LayoutInput, "windows" | "revision">;
   return { revision, charts: new Set(windows.filter((w) => w.kind === "chart").map((w) => w.id)) };
 }
@@ -99,9 +81,13 @@ export function startAutosave(deps: AutosaveDeps): Autosave {
   function createLayoutSession(current: EditableLayout, revision: number, serverCharts?: readonly string[]): LayoutSession {
     const path = layoutPath(current.id);
     const drafts = deps.unsaved ? unsaved("layout") : { write: (u: Parameters<typeof writeUnsaved>[1]) => writeUnsaved("layout", u), clear: (upTo: number) => clearUnsaved("layout", upTo, path) };
+    let shown = current;
+    const receipt = deps.receipt.begin(() => shown, serverCharts);
     const owner: LayoutSession = {
-      current, owned: true, saved: { revision: -Infinity, charts: serverCharts ? new Set(serverCharts) : null },
-      unsure: [], sending: new Set(), sent: [],
+      get current() { return shown; },
+      set current(next) { shown = next; },
+      owned: true,
+      receipt,
       saver: createSaver<Omit<LayoutInput, "revision">>({
         debounceMs: DEBOUNCE_MS,
         read: () => {
@@ -113,30 +99,24 @@ export function startAutosave(deps: AutosaveDeps): Autosave {
         revision,
         acceptStaleRevision: false,
         send: async (path, json, opts) => {
-          const sent = layoutSent(json);
-          owner.sending.add(sent.charts);
-          owner.sent = [...owner.sent, { mark: ++lastMark, charts: sent.charts }].slice(-SENT_HISTORY);
+          const { revision, charts } = layoutSent(json);
+          const sending = receipt.send(revision, charts);
           try {
             const saved = await deps.put(path, json, opts);
-            if (owner.owned && sent.revision > owner.saved.revision) owner.saved = sent;
-            if (owner.owned) owner.unsure = owner.unsure.filter((layout) => layout.revision > owner.saved.revision);
+            sending.saved();
             return saved;
           } catch (e) {
-            const stale = e instanceof ApiRequestError && e.code === "stale_revision";
-            if (owner.owned && sent.revision > owner.saved.revision) owner.unsure = [...owner.unsure, stale ? { revision: sent.revision, charts: null } : sent];
+            sending.unsure(e instanceof ApiRequestError && e.code === "stale_revision");
             throw e;
-          } finally {
-            owner.sending.delete(sent.charts);
           }
         },
         unsaved: drafts && { write: (u) => { if (owner.owned) drafts.write(u); }, clear: (upTo) => { if (owner.owned) drafts.clear(upTo); } },
-        onState: (s) => { if (owner.owned) setSave("layout", s); },
+        onState: (s) => { if (owner.owned) { setSave("layout", s); receipt.state(s); } },
       }),
     };
     return owner;
   }
   let layoutSession = createLayoutSession(useLayoutStore.getState().layout, deps.revisions.layout, deps.serverCharts);
-  session = layoutSession;
 
   const ui = createSaver({
     debounceMs: DEBOUNCE_MS,
@@ -188,7 +168,6 @@ export function startAutosave(deps: AutosaveDeps): Autosave {
       layoutSession.owned = false;
       void layoutSession.saver.stop();
       layoutSession = createLayoutSession(layout, revision, serverCharts);
-      session = layoutSession;
       setSave("layout", { kind: "idle" });
     },
     retry: () => all().forEach((s) => s.retry()),
@@ -196,6 +175,7 @@ export function startAutosave(deps: AutosaveDeps): Autosave {
     stop: () => {
       unsubscribe.forEach((u) => u());
       layoutSession.owned = false;
+      layoutSession.receipt.end();
       all().forEach((s) => { void s.stop(); });
       if (active === autosave) active = null;
     },

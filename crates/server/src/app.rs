@@ -28,7 +28,7 @@ use crate::kiwoom::link::{Link, LinkState};
 use crate::kiwoom::rest::{KiwoomRest, Priority};
 use crate::kiwoom::stream::KiwoomStream;
 use crate::kiwoom::token_file::TokenFile;
-use crate::kiwoom::transport::ReqwestTransport;
+use crate::kiwoom::transport::{ReqwestTransport, Transport};
 use crate::screener::Screener;
 use crate::screener::store::Store;
 use crate::symbols::SymbolDirectory;
@@ -68,10 +68,7 @@ pub fn main() -> ExitCode {
             return ExitCode::from(1);
         }
     };
-    let token_file = TokenFile::new(config.token_path.clone(), &lock).with_environment(config.kiwoom_environment);
-    let key_file = KeyFile::new(config.kiwoom_key_path.clone(), &lock).with_environment(config.kiwoom_environment);
-    let account_file = config.account_state_path.clone().map(|path| AccountStateFile::new(path, &lock));
-    let code = runtime.block_on(serve(config, token_file, key_file, account_file));
+    let code = runtime.block_on(serve(config, &lock));
     drop(lock);
     code
 }
@@ -132,26 +129,77 @@ pub async fn daily_maintenance(state: Arc<AppState>) {
     );
 }
 
-async fn serve(config: Config, token_file: TokenFile, key_file: KeyFile, account_file: Option<AccountStateFile>) -> ExitCode {
+pub enum StreamSource {
+    Connect,
+    Detached(tokio::sync::mpsc::Receiver<crate::kiwoom::stream::StreamEvent>),
+}
+
+pub struct Adapters {
+    pub kiwoom: Arc<dyn Transport>,
+    pub stream: StreamSource,
+    pub kiwoom_spacing: Option<Duration>,
+    pub dart_spacing: Option<Duration>,
+}
+
+impl Adapters {
+    pub fn production(config: &Config) -> Result<Adapters, StartFailure> {
+        match ReqwestTransport::new(config.kiwoom_base_url.clone()) {
+            Ok(transport) => Ok(Adapters { kiwoom: Arc::new(transport), stream: StreamSource::Connect, kiwoom_spacing: None, dart_spacing: None }),
+            Err(e) => {
+                tracing::error!(error = %e, "HTTP 클라이언트를 만들 수 없습니다");
+                Err(StartFailure)
+            }
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct StartFailure;
+
+pub struct Started {
+    pub state: Arc<AppState>,
+    pub router: axum::Router,
+    pub listener: TcpListener,
+    pub automatic: Option<tokio::task::JoinHandle<()>>,
+}
+
+async fn serve(config: Config, lock: &InstanceLock) -> ExitCode {
+    let Ok(adapters) = Adapters::production(&config) else { return ExitCode::from(1) };
+    let Ok(started) = start(&config, lock, adapters).await else { return ExitCode::from(1) };
+    started.state.link.connect_at_start();
+    tracing::info!(static_dir = %config.static_dir.display(), "요청을 받기 시작합니다");
+    if let Err(e) = axum::serve(started.listener, started.router).with_graceful_shutdown(shutdown_signal()).await {
+        tracing::error!(error = %e, "서버가 멈췄습니다");
+        return ExitCode::from(1);
+    }
+    ExitCode::SUCCESS
+}
+
+pub async fn start(config: &Config, lock: &InstanceLock, adapters: Adapters) -> Result<Started, StartFailure> {
+    let Adapters { kiwoom, stream: stream_source, kiwoom_spacing, dart_spacing } = adapters;
+    let token_file = TokenFile::new(config.token_path.clone(), lock).with_environment(config.kiwoom_environment);
+    let key_file = KeyFile::new(config.kiwoom_key_path.clone(), lock).with_environment(config.kiwoom_environment);
+    let account_file = config.account_state_path.clone().map(|path| AccountStateFile::new(path, lock));
     tracing::info!(environment = config.kiwoom_environment.as_str(), host = %crate::system_routes::kiwoom_target(&config.kiwoom_base_url).host.as_deref().unwrap_or("loopback"), "키움 투자구분으로 켭니다");
     let db = match AppDb::open_in(&config.db_path, config.kiwoom_environment).await {
         Ok(db) => db,
         Err(e) => {
             tracing::error!(path = %config.db_path.display(), error = %e, "사용자 자료 DB를 열 수 없습니다");
-            return ExitCode::from(1);
+            return Err(StartFailure);
         }
     };
     tracing::info!(path = %config.db_path.display(), "사용자 자료 DB를 열었습니다");
     let screener_path = config.screener_db_path.clone();
-    let screener_store = match tokio::task::spawn_blocking(move || Store::open(&screener_path)).await {
+    let dispatcher = tracing::dispatcher::get_default(Clone::clone);
+    let screener_store = match tokio::task::spawn_blocking(move || tracing::dispatcher::with_default(&dispatcher, || Store::open(&screener_path))).await {
         Ok(Ok(store)) => store,
         Ok(Err(e)) => {
             tracing::error!(path = %config.screener_db_path.display(), error = %e, "스크리너 저장소를 열 수 없습니다");
-            return ExitCode::from(1);
+            return Err(StartFailure);
         }
         Err(e) => {
             tracing::error!(path = %config.screener_db_path.display(), error = %e, "스크리너 저장소를 여는 작업이 끝나지 못했습니다");
-            return ExitCode::from(1);
+            return Err(StartFailure);
         }
     };
     tracing::info!(path = %config.screener_db_path.display(), "스크리너 저장소를 열었습니다");
@@ -159,7 +207,7 @@ async fn serve(config: Config, token_file: TokenFile, key_file: KeyFile, account
         Ok(l) => l,
         Err(e) => {
             tracing::error!(addr = %config.bind.socket_addr(), error = %e, "포트를 열 수 없습니다");
-            return ExitCode::from(1);
+            return Err(StartFailure);
         }
     };
     let bound_addr = match listener.local_addr() {
@@ -169,14 +217,7 @@ async fn serve(config: Config, token_file: TokenFile, key_file: KeyFile, account
         }
         Err(e) => {
             tracing::error!(error = %e, "연 주소를 읽지 못했습니다");
-            return ExitCode::from(1);
-        }
-    };
-    let transport = match ReqwestTransport::new(config.kiwoom_base_url.clone()) {
-        Ok(t) => t,
-        Err(e) => {
-            tracing::error!(error = %e, "HTTP 클라이언트를 만들 수 없습니다");
-            return ExitCode::from(1);
+            return Err(StartFailure);
         }
     };
     let clock = match config.clock_start {
@@ -188,23 +229,25 @@ async fn serve(config: Config, token_file: TokenFile, key_file: KeyFile, account
     };
     let env_key = config.kiwoom_credentials.is_some();
     let startup = startup_key(config.kiwoom_credentials.clone(), &key_file, config.kiwoom_environment);
-    let rest = KiwoomRest::for_environment(
-        Arc::new(transport),
-        match &startup.credentials {
-            Some(credentials) => KiwoomAuth::new(credentials.app_key.clone(), credentials.app_secret.clone(), Some(token_file)),
-            None => KiwoomAuth::keyless(Some(token_file)),
-        },
-        clock.clone(),
-        config.kiwoom_environment,
-    );
+    let auth = match &startup.credentials {
+        Some(credentials) => KiwoomAuth::new(credentials.app_key.clone(), credentials.app_secret.clone(), Some(token_file)),
+        None => KiwoomAuth::keyless(Some(token_file)),
+    };
+    let rest = match kiwoom_spacing {
+        None => KiwoomRest::for_environment(kiwoom, auth, clock.clone(), config.kiwoom_environment),
+        Some(spacing) => KiwoomRest::build(kiwoom, auth, clock.clone(), spacing, config.kiwoom_environment),
+    };
     rest.set_access(crate::kiwoom::rest::Access::Closed);
     let symbols = Arc::new(SymbolDirectory::default());
-    let stream = KiwoomStream::spawn(config.kiwoom_ws_url.clone(), rest.clone(), clock.clone());
+    let stream = match stream_source {
+        StreamSource::Connect => KiwoomStream::spawn(config.kiwoom_ws_url.clone(), rest.clone(), clock.clone()),
+        StreamSource::Detached(events) => (KiwoomStream::detached().0, events),
+    };
     let public_ip = match crate::public_ip::ReqwestPublicIp::new(config.public_ip_url.clone()) {
         Ok(t) => t,
         Err(e) => {
             tracing::error!(error = %e, "공인 IP 확인용 HTTP 클라이언트를 만들 수 없습니다");
-            return ExitCode::from(1);
+            return Err(StartFailure);
         }
     };
     let account = match (&config.account_server_url, account_file) {
@@ -212,7 +255,7 @@ async fn serve(config: Config, token_file: TokenFile, key_file: KeyFile, account
             Ok(account) => account,
             Err(e) => {
                 tracing::error!(error = %e, "계정 서버용 HTTP 클라이언트를 만들 수 없습니다");
-                return ExitCode::from(1);
+                return Err(StartFailure);
             }
         },
         _ => AccountState::local_only(),
@@ -224,32 +267,29 @@ async fn serve(config: Config, token_file: TokenFile, key_file: KeyFile, account
             Ok(webhook) => webhook.flatten(),
             Err(e) => {
                 tracing::error!(error = %e, "수집 경보 웹훅 주소 파일을 쓸 수 없습니다");
-                return ExitCode::from(1);
+                return Err(StartFailure);
             }
         };
         collector = Some(board.with_webhook(webhook));
     }
-    let system = SystemState::new(key_file, env_key, startup.file_problem, crate::api::SystemSettings::from_config(&config)).with_public_ip(Arc::new(public_ip)).with_account(account).with_collector(collector);
+    let system = SystemState::new(key_file, env_key, startup.file_problem, crate::api::SystemSettings::from_config(config)).with_public_ip(Arc::new(public_ip)).with_account(account).with_collector(collector);
     let state = application_with_system(ApplicationInputs { rest: rest.clone(), clock: clock.clone(), symbols: symbols.clone(), db, screener_store, stream, static_dir: config.static_dir.clone(), screener_update_on_connect: config.screener_update_on_start }, system);
     state.system.bound(bound_addr);
-    state.link.connect_at_start();
     tokio::spawn(daily_maintenance(state.clone()));
     tokio::spawn(crate::account::sync::run(state.clone()));
     tokio::spawn(crate::collector::run(state.clone()));
 
     let financial_store = crate::financials::store::Store::open(&config.financial_db_path).await;
     if let Err(failure) = financial_store { tracing::warn!(?failure, "재무 저장소를 열 수 없습니다"); }
-    let dart = config.opendart_api_key.clone().and_then(|key| crate::financials::client::Client::new(key, config.dart_base_url.clone(), config.kind_base_url.clone()).ok());
+    let dart = config.opendart_api_key.clone().and_then(|key| match dart_spacing {
+        None => crate::financials::client::Client::new(key, config.dart_base_url.clone(), config.kind_base_url.clone()),
+        Some(spacing) => crate::financials::client::Client::with_spacing(key, config.dart_base_url.clone(), config.kind_base_url.clone(), spacing),
+    }.ok());
     let financials = crate::financials::Financials::with_store(dart, financial_store, clock.clone());
-    if config.financial_automatic { financials.start_automatic(symbols.clone()); }
+    let automatic = config.financial_automatic.then(|| financials.start_automatic(symbols.clone()));
     let financial_routes = crate::financials::routes(financials, symbols.clone());
-    let app = router(state).merge(financial_routes);
-    tracing::info!(static_dir = %config.static_dir.display(), "요청을 받기 시작합니다");
-    if let Err(e) = axum::serve(listener, app).with_graceful_shutdown(shutdown_signal()).await {
-        tracing::error!(error = %e, "서버가 멈췄습니다");
-        return ExitCode::from(1);
-    }
-    ExitCode::SUCCESS
+    let router = router(state.clone()).merge(financial_routes);
+    Ok(Started { state, router, listener, automatic })
 }
 
 async fn shutdown_signal() {

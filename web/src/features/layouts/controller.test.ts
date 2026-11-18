@@ -8,6 +8,7 @@ import { restoreLayout } from "../../persist/restore";
 import { chartWindows, DEFAULT_LAYOUT, useLayoutStore } from "../../stores/layout";
 import { usePersistStore } from "../../stores/persist";
 import { createLayoutCommands, layoutNameProblem, useLayoutsStore } from "./controller";
+import { createLayoutReceipt } from "../../persist/layoutReceipt";
 
 const CELL = chartWindows(DEFAULT_LAYOUT)[0]!.id;
 const stored = (id: string): Layout => ({ ...DEFAULT_LAYOUT, windows: DEFAULT_LAYOUT.windows.map(toWireWindow), id, name: id, revision: 10, updatedAt: 0 });
@@ -38,7 +39,7 @@ beforeEach(() => {
   useLayoutStore.getState().load(DEFAULT_LAYOUT);
   sent = [];
   put = async () => {};
-  autosave = startAutosave({ put: async (_path, json) => { const value: LayoutInput = JSON.parse(json); sent.push(value); await put(value); }, toast: () => {}, revisions: { layout: 10, ui: 0, watchlist: 0 }, unsaved: () => undefined });
+  autosave = startAutosave({ put: async (_path, json) => { const value: LayoutInput = JSON.parse(json); sent.push(value); await put(value); }, toast: () => {}, revisions: { layout: 10, ui: 0, watchlist: 0 }, unsaved: () => undefined, receipt: createLayoutReceipt() });
   install = vi.fn<Parameters<typeof createLayoutCommands>[0]["install"]>();
 });
 afterEach(() => { autosave.stop(); vi.useRealTimers(); });

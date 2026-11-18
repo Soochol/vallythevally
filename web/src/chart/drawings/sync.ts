@@ -2,9 +2,8 @@ import { isCancelledError, type QueryClient } from "@tanstack/react-query";
 import { useSyncExternalStore } from "react";
 import { create } from "zustand";
 import { ApiRequestError, deleteJson, getJson, putJson } from "../../api/http";
-import { layoutSendMark, layoutSentWithoutChart, serverMayLackChart } from "../../persist/autosave";
+import type { LayoutReceipt } from "../../persist/layoutReceipt";
 import type { SaveState } from "../../persist/saver";
-import { chartWindows, type EditableLayout, useLayoutStore } from "../../stores/layout";
 import { usePersistStore } from "../../stores/persist";
 import { useSelectionStore } from "../../stores/selection";
 import { EMPTY_HISTORY, historyUndo, planRedo, planUndo, record, sameContent, type History } from "./history";
@@ -16,7 +15,7 @@ import type { WindowId } from "../../layout/kinds";
 const key = (symbol: string) => ["drawings", symbol] as const;
 export const drawingPath = (id: string) => `/api/drawings/${encodeURIComponent(id)}`;
 const toast = (text: string) => useSelectionStore.getState().showToast(text);
-const chartIds = (layout: EditableLayout) => new Set<string>(chartWindows(layout).map((w) => w.id));
+const LAYOUT_UNSAVED = "레이아웃이 저장되지 않아 드로잉을 기다립니다";
 export const useDrawingSave = create<{ state: SaveState; retry(): void }>()(() => ({ state: { kind: "idle" }, retry: () => {} }));
 
 export class DrawingSync {
@@ -39,7 +38,7 @@ export class DrawingSync {
   private errors = new Map<string, string>();
   save: SaveState = { kind: "idle" };
 
-  constructor(private client: QueryClient) {
+  constructor(private client: QueryClient, private receipt: LayoutReceipt) {
     useDrawingSave.setState({ retry: () => this.retry() });
     try {
       this.journal = new DrawingJournal();
@@ -54,7 +53,7 @@ export class DrawingSync {
     window.addEventListener("focus", () => this.refresh());
     document.addEventListener("visibilitychange", () => document.visibilityState === "visible" ? this.refresh() : this.flush());
     window.addEventListener("pagehide", () => this.flush());
-    usePersistStore.subscribe((s, prev) => { if (s.saves.layout !== prev.saves.layout && s.saves.layout.kind === "saved") this.followSavedLayout(useLayoutStore.getState().layout); });
+    receipt.subscribe((change) => { if (change === "saved") this.followSavedLayout(); this.updateSave(); this.pump(); });
     if (this.desired.size || this.recoveryError) this.updateSave();
   }
 
@@ -78,20 +77,23 @@ export class DrawingSync {
   refresh() { for (const symbol of this.symbols) void this.load(symbol); }
   private reload() { for (const symbol of this.symbols) void (this.loads.get(symbol) ?? Promise.resolve()).then(() => this.load(symbol)); }
 
-  private awaitsLayoutSave(want: queue.Intent["want"], sentAt?: number): boolean {
+  private holds(want: queue.Want): boolean {
     if (want.kind !== "put" || want.body.scope.kind !== "cell") return false;
-    const layout = useLayoutStore.getState().layout;
-    if (want.body.scope.layoutId !== layout.id) return false;
-    const window = want.body.scope.windowId;
-    return !chartIds(layout).has(window) || serverMayLackChart(window) || (sentAt !== undefined && layoutSentWithoutChart(window, sentAt));
+    return this.receipt.holds(want.body.scope.layoutId, want.body.scope.windowId);
   }
 
-  private followSavedLayout(layout: EditableLayout) {
-    const charts = chartIds(layout);
-    const closed = (drawing: DrawingBody) => drawing.scope.kind === "cell" && drawing.scope.layoutId === layout.id && !charts.has(drawing.scope.windowId);
+  private layoutLost(want: queue.Want, mark: number): boolean {
+    if (want.kind !== "put" || want.body.scope.kind !== "cell") return false;
+    return this.holds(want) || this.receipt.droppedSince(want.body.scope.windowId, mark);
+  }
+
+  private followSavedLayout() {
+    const layout = this.receipt.current();
+    if (!layout) return;
+    const closed = (drawing: DrawingBody) => drawing.scope.kind === "cell" && drawing.scope.layoutId === layout.id && !layout.charts.has(drawing.scope.windowId);
     const ops: DrawingOp[] = [...this.desired.values()].flatMap(({ intent: { want } }) =>
       want.kind === "put" && closed(want.body) ? [{ kind: "update", before: want.body, after: { ...want.body, scope: { kind: "layout", layoutId: layout.id } } }] : []);
-    if (ops.length) this.commit(useSelectionStore.getState().activeCell, ops, false);
+    if (ops.length) this.write(ops, null);
     if ([...this.symbols].some((symbol) => (this.client.getQueryData<Drawing[]>(key(symbol)) ?? []).some(closed))) this.reload();
   }
   dataChanged() { this.refresh(); }
@@ -107,6 +109,10 @@ export class DrawingSync {
 
   history(cellId: WindowId) { return this.histories.get(cellId) ?? EMPTY_HISTORY; }
   commit(cellId: WindowId, ops: readonly DrawingOp[], addHistory = true) {
+    return this.write(ops, addHistory ? cellId : null);
+  }
+
+  private write(ops: readonly DrawingOp[], historyOf: WindowId | null) {
     const changed = ops.filter((op) => op.kind !== "update" || !sameContent(op.before, op.after));
     if (!changed.length) return false;
     if (usePersistStore.getState().phase.kind !== "ready") { toast("서버 연결을 복구한 뒤 드로잉을 편집하세요"); return false; }
@@ -123,7 +129,7 @@ export class DrawingSync {
       } catch { stagingSucceeded = false; this.stageFailed = true; this.recoveryFailed(); break; }
     }
     if (stagingSucceeded) { if (this.stageFailed) this.recoveryError = null; this.stageFailed = false; }
-    if (addHistory && staged.length) this.histories.set(cellId, record(this.history(cellId), staged.map(({ op }) => op)));
+    if (historyOf !== null && staged.length) this.histories.set(historyOf, record(this.history(historyOf), staged.map(({ op }) => op)));
     this.saveFailure = null;
     this.updateSave(); this.pump();
     return staged.length > 0;
@@ -162,7 +168,10 @@ export class DrawingSync {
     this.outbox = queue.retryFailed(this.outbox);
     this.updateSave(); this.pump();
   }
-  private flush() { for (const id of queue.flushable(this.outbox)) this.send(id, true); }
+  private flush() {
+    this.outbox = queue.gate(this.outbox, (intent) => this.holds(intent.want));
+    for (const id of queue.flushable(this.outbox)) this.send(id, true);
+  }
 
   private recoveryFailed() {
     this.recoveryError = "복구 저장소를 쓸 수 없습니다. 이 탭을 닫기 전에 저장 상태를 확인하세요";
@@ -172,6 +181,7 @@ export class DrawingSync {
   private updateSave() {
     if (this.stageFailed || this.recoveryError) this.save = { kind: "failed", reason: "error", message: this.recoveryError ?? "드로잉 복구 기록을 저장하지 못했습니다" };
     else if (this.saveFailure) this.save = this.saveFailure;
+    else if (this.receipt.failed() && [...this.desired.values()].some(({ intent }) => this.holds(intent.want))) this.save = { kind: "failed", reason: "error", message: LAYOUT_UNSAVED };
     else if ([...this.outbox.lanes.values()].some(queue.isFailed)) this.save = { kind: "failed", reason: "error", message: "드로잉 저장 실패" };
     else if ([...this.outbox.lanes.values()].some((lane) => lane.state === "flying")) this.save = { kind: "saving" };
     else this.save = this.desired.size || this.admissions.size || this.cleanups.size || this.recoveryIds.size ? { kind: "pending" } : { kind: "saved", at: Date.now() };
@@ -228,6 +238,7 @@ export class DrawingSync {
 
   private pump() {
     if (this.timer !== null) clearTimeout(this.timer);
+    this.outbox = queue.gate(this.outbox, (intent) => this.holds(intent.want));
     for (const id of queue.nextToSend(this.outbox, Date.now())) this.send(id, false);
     const waiting = [...this.outbox.lanes.values()].flatMap((l) => l.state === "waiting" && Number.isFinite(l.retryAt) ? [l.retryAt] : []);
     if (waiting.length) this.timer = setTimeout(() => this.pump(), Math.max(0, Math.min(...waiting) - Date.now()));
@@ -249,8 +260,8 @@ export class DrawingSync {
       if (!started) return false;
       this.outbox = started.outbox;
       const { want, symbol } = started.send;
-      const awaitedAtSend = this.awaitsLayoutSave(want);
-      const sentAt = layoutSendMark();
+      const awaitedAtSend = this.holds(want);
+      const sentAt = this.receipt.mark();
       const sending = want.kind === "delete" ? deleteJson(drawingPath(id), { keepalive }) : putJson<Drawing>(drawingPath(id), want.body, { keepalive });
       this.updateSave();
       void sending.then(async (saved) => {
@@ -264,7 +275,7 @@ export class DrawingSync {
         this.settle(id, { kind: "ok" });
       }).catch((e: unknown) => {
         const outcome: queue.Outcome = e instanceof ApiRequestError && e.code === "stale_revision" ? { kind: "stale" }
-          : e instanceof ApiRequestError && e.code === "bad_request" && (awaitedAtSend || this.awaitsLayoutSave(want, sentAt)) ? { kind: "networkError" }
+          : e instanceof ApiRequestError && e.code === "bad_request" && (awaitedAtSend || this.layoutLost(want, sentAt)) ? { kind: "networkError" }
           : e instanceof ApiRequestError && (e.code === "bad_request" || e.code === "payload_too_large" || e.code === "not_found") ? { kind: "clientError", tooLarge: e.code === "payload_too_large" }
           : { kind: "networkError" };
         this.settle(id, outcome);
@@ -300,9 +311,9 @@ export class DrawingSync {
 }
 
 const services = new WeakMap<QueryClient, DrawingSync>();
-export function drawingSync(client: QueryClient): DrawingSync {
+export function drawingSync(client: QueryClient, receipt: LayoutReceipt): DrawingSync {
   let sync = services.get(client);
-  if (!sync) { sync = new DrawingSync(client); services.set(client, sync); }
+  if (!sync) { sync = new DrawingSync(client, receipt); services.set(client, sync); }
   return sync;
 }
 export function useDrawingVersion(sync: DrawingSync) { return useSyncExternalStore(sync.subscribe, sync.snapshot); }

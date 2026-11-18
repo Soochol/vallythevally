@@ -6,6 +6,7 @@ import { usePersistStore } from "../../stores/persist";
 import { useSelectionStore } from "../../stores/selection";
 import { useWatchlistStore } from "../../stores/watchlist";
 import { removalUndo } from "./removalUndo";
+import { createLayoutReceipt } from "../../persist/layoutReceipt";
 
 let autosave: Autosave;
 let server: Watchlists;
@@ -53,6 +54,7 @@ beforeEach(async () => {
     put: (path, body, opts) => sendJson("PUT", path, body, opts),
     toast: (text) => useSelectionStore.getState().showToast(text),
     revisions: { layout: 0, ui: 0, watchlist: server.revision },
+    receipt: createLayoutReceipt(),
   });
 });
 
@@ -175,6 +177,7 @@ test("그룹 안 종목을 되돌리면 서버에도 원래 그룹의 원래 자
     put: (path, body, opts) => sendJson("PUT", path, body, opts),
     toast: (text) => useSelectionStore.getState().showToast(text),
     revisions: { layout: 0, ui: 0, watchlist: server.revision },
+    receipt: createLayoutReceipt(),
   });
   const undo = removalUndo(useWatchlistStore.getState().removeFromListWithUndo("L", "X"))!;
   await vi.advanceTimersByTimeAsync(0);
