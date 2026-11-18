@@ -162,6 +162,7 @@ fn sub_of(msg: &ServerMessage) -> Option<&str> {
         ServerMessage::FeedSubscribed { .. }
         | ServerMessage::FeedTrades { .. }
         | ServerMessage::FeedBook { .. }
+        | ServerMessage::FeedAfterHours { .. }
         | ServerMessage::FeedProgram { .. }
         | ServerMessage::FeedBrokers { .. }
         | ServerMessage::FeedLink { .. }

@@ -3,7 +3,7 @@ import type { FeedBook } from "../../api/generated/FeedBook";
 import type { OrderBook } from "../../api/generated/OrderBook";
 import { acceptLive, acceptSnapshot, EMPTY_BOOK } from "./bookModel";
 
-const snapshot: OrderBook = { symbol: "005930", asks: [{ price: 101, quantity: 10 }], bids: [{ price: 100, quantity: 20 }], totalAskQuantity: 10, totalBidQuantity: 20, bookTime: null };
+const snapshot: OrderBook = { symbol: "005930", asks: [{ price: 101, quantity: 10 }], bids: [{ price: 100, quantity: 20 }], totalAskQuantity: 10, totalBidQuantity: 20, afterHoursAskQuantity: null, afterHoursBidQuantity: null, bookTime: null };
 const live = (asks: [number, number][], bids: [number, number][]): FeedBook => ({
   t: 1,
   asks: asks.map(([price, qty]) => ({ price, qty })),

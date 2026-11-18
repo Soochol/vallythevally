@@ -8,6 +8,14 @@ import type { SymbolCode } from "./SymbolCode";
  */
 export type OrderBook = { symbol: SymbolCode, asks: Array<OrderBookLevel>, bids: Array<OrderBookLevel>, totalAskQuantity: number, totalBidQuantity: number, 
 /**
+ * 시간외 매도호가 총잔량(`ovt_sel_req`). 필드가 없거나 비었거나 읽을 수 없으면 null.
+ */
+afterHoursAskQuantity: number | null, 
+/**
+ * 시간외 매수호가 총잔량(`ovt_buy_req`). 필드가 없거나 비었거나 읽을 수 없으면 null.
+ */
+afterHoursBidQuantity: number | null, 
+/**
  * 호가 기준 시각 `HH:MM:SS`(KST). 키움은 날짜를 주지 않는다. 없으면 null.
  */
 bookTime: string | null, };

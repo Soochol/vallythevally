@@ -200,6 +200,7 @@ fn generated_typescript_matches_the_committed_files() {
         generated::<FeedBookLevel>(),
         generated::<FeedExpected>(),
         generated::<FeedBook>(),
+        generated::<FeedAfterHoursTotals>(),
         generated::<FeedProgramRow>(),
         generated::<FeedBroker>(),
         generated::<FeedBrokers>(),
