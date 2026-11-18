@@ -16,7 +16,7 @@ use crate::protocol::RealType;
 
 pub const COMPLETE_FILE_NAME: &str = "complete.json";
 pub const COMPLETE_FORMAT_VERSION: u32 = 1;
-const REPLACED_SUFFIX: &str = ".old-";
+pub const REPLACED_SUFFIX: &str = ".old-";
 
 #[derive(Debug, Serialize)]
 pub struct VerifySummary {

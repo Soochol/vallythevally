@@ -18,7 +18,8 @@ const MAX_SHRINK_PERCENT: usize = 3;
 #[derive(Debug)]
 pub enum UniverseError {
     Store(StoreError),
-    NoFallback { reason: ReplaceReason, detail: String },
+    NoFallback { reason: ReplaceReason, detail: String, skipped: Vec<SkippedFile> },
+    TodayListUnreadable { date: u32, cause: StoreError, reason: ReplaceReason, detail: String },
     NoMorningList { date: u32, cause: StoreError },
     AfterCloseFetch { detail: String },
 }
@@ -27,7 +28,17 @@ impl std::fmt::Display for UniverseError {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             UniverseError::Store(error) => error.fmt(formatter),
-            UniverseError::NoFallback { detail, .. } => write!(formatter, "대신 쓸 이전 목록이 없습니다: {detail}"),
+            UniverseError::NoFallback { detail, skipped, .. } => {
+                write!(formatter, "대신 쓸 이전 목록이 없습니다: {detail}")?;
+                if skipped.is_empty() {
+                    return Ok(());
+                }
+                let causes: Vec<String> = skipped.iter().map(|file| format!("{}: {}", file.date, file.cause)).collect();
+                write!(formatter, " (읽을 수 없어 건너뛴 파일: {})", causes.join("; "))
+            }
+            UniverseError::TodayListUnreadable { date, cause, detail, .. } => {
+                write!(formatter, "{date} 목록 파일을 읽을 수 없고 새로 받은 목록도 쓰지 못해({detail}) 파일을 그대로 둡니다: {cause}")
+            }
             UniverseError::NoMorningList { date, cause } => write!(formatter, "{date} 아침 목록이 없습니다: {cause}"),
             UniverseError::AfterCloseFetch { detail } => write!(formatter, "마감 뒤 목록을 받지 못했습니다: {detail}"),
         }
@@ -117,10 +128,12 @@ pub struct Morning {
 
 pub async fn collect_morning(rest: &KiwoomRest, data_dir: &Path, date: u32, fetched_at: KstTime) -> Result<Morning, UniverseError> {
     let mut skipped = Vec::new();
+    let mut unreadable_today = None;
     let existing = match store::read_universe_if_present(data_dir, date) {
         Ok(existing) => existing,
         Err(error) => {
             skipped.push(SkippedFile { date, cause: error.to_string() });
+            unreadable_today = Some(error);
             None
         }
     };
@@ -144,25 +157,29 @@ pub async fn collect_morning(rest: &KiwoomRest, data_dir: &Path, date: u32, fetc
             Ok(Morning { file, written: Written::NewList, skipped, warnings })
         }
         Fetched::Rejected(rejection) => {
-            store::write_rejected(
-                data_dir,
-                &RejectedFile {
-                    format_version: FORMAT_VERSION,
-                    date,
-                    fetched_at: fetched_at.clone(),
-                    reason: rejection.reason,
-                    detail: rejection.detail.clone(),
-                    previous_count: previous.as_ref().map(|previous| previous.stocks.len()),
-                    stocks: rejection.stocks,
-                    warnings: rejection.warnings,
-                },
-            )?;
+            let rejected = RejectedFile {
+                format_version: FORMAT_VERSION,
+                date,
+                fetched_at: fetched_at.clone(),
+                reason: rejection.reason,
+                detail: rejection.detail.clone(),
+                previous_count: previous.as_ref().map(|previous| previous.stocks.len()),
+                stocks: rejection.stocks,
+                warnings: rejection.warnings,
+            };
+            if let Err(error) = store::write_rejected(data_dir, &rejected) {
+                tracing::warn!(date, %error, "그날의 rejected 파일을 쓰지 못했습니다");
+                warnings.push(error.to_string());
+            }
+            if let Some(cause) = unreadable_today {
+                return Err(UniverseError::TodayListUnreadable { date, cause, reason: rejection.reason, detail: rejection.detail });
+            }
             if let Some(file) = existing {
                 let written = Written::LeftAsIs { reason: rejection.reason, detail: rejection.detail };
                 return Ok(Morning { file, written, skipped, warnings });
             }
             let Some(previous) = previous else {
-                return Err(UniverseError::NoFallback { reason: rejection.reason, detail: rejection.detail });
+                return Err(UniverseError::NoFallback { reason: rejection.reason, detail: rejection.detail, skipped });
             };
             let replacement = Replacement { reason: rejection.reason, detail: rejection.detail, source_date: previous.date };
             let file = UniverseFile {

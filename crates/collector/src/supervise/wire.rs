@@ -49,6 +49,7 @@ pub enum CoverageState {
     Complete,
     Incomplete,
     InProgress,
+    VerifyFailed,
     Unreadable,
 }
 

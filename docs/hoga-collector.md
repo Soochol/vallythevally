@@ -393,7 +393,7 @@ universe/<YYYYMMDD>.rejected.json   쓰지 않기로 한 목록(진단용)
 universe/<YYYYMMDD>.after.json      마감 뒤 목록과 아침 목록의 차이
 ```
 
-모든 파일은 임시 파일에 쓴 뒤 이름을 바꿔 놓는다. 같은 날짜로 다시 돌려 정상 목록을 받으면 그날 파일을 새로 쓰고 그날의 `rejected.json`을 지운다(지우지 못하면 오류가 아니라 경고다). 전날 목록은 그날보다 이른 날짜 가운데 가장 늦은 `<YYYYMMDD>.json`이고, 읽을 수 없는 파일은 지우거나 고치지 않고 건너뛰어 그보다 앞선 읽히는 파일을 쓴다. 건너뛴 파일과 까닭은 `collect_morning`의 결과(`Morning::skipped`)와 로그에 남고, 3% 검사의 비교 대상도 같은 목록이다.
+모든 파일은 임시 파일에 쓴 뒤 이름을 바꿔 놓는다. 같은 날짜로 다시 돌려 정상 목록을 받으면 그날 파일을 새로 쓰고 그날의 `rejected.json`을 지운다(지우지 못하면 오류가 아니라 경고다). 전날 목록은 그날보다 이른 날짜 가운데 가장 늦은 `<YYYYMMDD>.json`이고, 읽을 수 없는 파일은 지우거나 고치지 않고 건너뛰어 그보다 앞선 읽히는 파일을 쓴다. 건너뛴 파일과 까닭은 `collect_morning`의 결과(`Morning::skipped`)와 로그에 남고, 대신 쓸 이전 목록이 없어 `NoFallback`으로 끝날 때도 그 오류(`skipped`)에 들어 있다. 3% 검사의 비교 대상도 같은 목록이다.
 
 ### 받기와 가르기
 
@@ -416,7 +416,7 @@ universe/<YYYYMMDD>.after.json      마감 뒤 목록과 아침 목록의 차이
 
 ### 검사
 
-아래 경우에는 받은 목록을 그날 목록으로 쓰지 않는다. 그날 목록 파일이 이미 있으면 그대로 둔다. 없을 때만 가장 최근 읽히는 이전 목록의 `stocks`를 그날 파일에 쓰고(`diff`는 비고 `warnings`는 그 목록의 것이다) `replaced`에 까닭을 적는다. 받은 목록은 `<YYYYMMDD>.rejected.json`에 남긴다(`reason`, `detail`, `previous_count`, `stocks`, `warnings`). 결과의 `Morning::written`이 새 목록(`NewList`), 대체(`ReplacementList`), 그대로 둠(`LeftAsIs`, 거부 까닭 포함) 중 무엇을 했는지 알린다.
+아래 경우에는 받은 목록을 그날 목록으로 쓰지 않는다. 그날 목록 파일이 이미 있으면 그대로 둔다. 그날 파일이 있는데 깨졌거나 형식 버전이 달라 읽을 수 없으면 그것도 덮지 않고 그대로 둔 채 `UniverseError::TodayListUnreadable`로 끝낸다(감독 데몬에서는 `stage_failed` 경보가 되고 그날 수집은 사람이 그 파일을 고치거나 지운 뒤 다시 돌려야 한다). 그날 파일을 새로 받은 정상 목록으로 바꾸는 것은 막지 않는다. 그날 파일이 없을 때만 가장 최근 읽히는 이전 목록의 `stocks`를 그날 파일에 쓰고(`diff`는 비고 `warnings`는 그 목록의 것이다) `replaced`에 까닭을 적는다. 받은 목록은 `<YYYYMMDD>.rejected.json`에 남긴다(`reason`, `detail`, `previous_count`, `stocks`, `warnings`). 결과의 `Morning::written`이 새 목록(`NewList`), 대체(`ReplacementList`), 그대로 둠(`LeftAsIs`, 거부 까닭 포함) 중 무엇을 했는지 알린다.
 
 | `reason` | 경우 |
 |---|---|
@@ -424,7 +424,7 @@ universe/<YYYYMMDD>.after.json      마감 뒤 목록과 아침 목록의 차이
 | `shrunk` | 종목 수가 가장 최근 목록보다 3% 넘게 줄었다. 정확히 3%는 쓴다 |
 | `cut_off` | 연속조회가 쪽 수 상한에 닿았는데 다음 쪽이 남았다 |
 
-대신 쓸 이전 목록이 없으면 `rejected.json`만 쓰고 `UniverseError::NoFallback`을 낸다.
+대신 쓸 이전 목록이 없으면 `rejected.json`만 쓰고 `UniverseError::NoFallback`을 낸다. `rejected.json`을 쓰지 못해도 오류로 끝내지 않는다. 경고(`Morning::warnings`와 로그)로 남기고 위 결과를 그대로 낸다.
 
 ### 마감 뒤 목록
 
@@ -432,7 +432,7 @@ universe/<YYYYMMDD>.after.json      마감 뒤 목록과 아침 목록의 차이
 
 ### 시험
 
-`crates/collector/tests/universe.rs`가 합성 `Transport`로 여러 쪽 응답을 주고 가르기, 차이 다섯 종류, 3% 경계, 조회 실패·끊긴 목록의 대체와 `rejected.json`, 같은 날 재실행이 좋은 목록을 덮지 않는 것, 읽히지 않는 최근 파일을 건너뛰는 것, 정상 재실행이 `rejected.json`을 지우는 것, 마감 뒤 목록이 그날 파일을 바꾸지 않는 것을 고정한다.
+`crates/collector/tests/universe.rs`가 합성 `Transport`로 여러 쪽 응답을 주고 가르기, 차이 다섯 종류, 3% 경계, 조회 실패·끊긴 목록의 대체와 `rejected.json`, 같은 날 재실행이 좋은 목록을 덮지 않는 것, 읽히지 않는 최근 파일을 건너뛰는 것, 정상 재실행이 `rejected.json`을 지우는 것, 읽을 수 없는 그날 파일이 조회 실패 뒤에도 그대로 남는 것, `NoFallback`에 건너뛴 파일이 들어 있는 것, `rejected.json` 쓰기 실패가 경고인 것, 마감 뒤 목록이 그날 파일을 바꾸지 않는 것을 고정한다.
 
 ## serve와 복기 화면
 
