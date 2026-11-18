@@ -20,6 +20,7 @@ export function useTradeTape(socket: Pick<MarketSocketLike, "subscribeFeed">, co
       if (event.type === "feed_trades") dispatch({ type: "live", trades: event.trades, receivedAt: Date.now() });
       else if (event.type === "feed_link") dispatch({ type: "link", live: event.live, at: event.at });
       else if (event.type === "resync") dispatch({ type: "resync", at: nowSeconds() });
+      else if (event.type === "feed_subscribed") setFeedError(null);
       else if (event.type === "sub_error") setFeedError(event.code);
     });
     getJson<TradeTape>(`/api/symbols/${encodeURIComponent(code)}/trades?venue=${venue}&limit=${MAX_TAPE_ROWS}`, controller.signal).then(
