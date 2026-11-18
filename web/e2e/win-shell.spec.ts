@@ -171,7 +171,7 @@ test("차트 창 두 개는 각자 봉을 그리고, 실시간 봉은 그 종목
   await page.screenshot({ path: path.join(SCREENS, "win-shell-two-charts-1024x768.png") });
 });
 
-test("둘째 차트를 누르면 위 막대·봉 주기·관심종목·드로잉 도구 막대·드로잉 수가 둘째 차트를 따른다", async ({ page, scenario }) => {
+test("둘째 차트를 누르면 위 막대·봉 주기·관심종목·드로잉 수가 둘째 차트를 따르고 드로잉 도구 막대는 칸 밖 한 자리에서 활성 칸에만 적용된다", async ({ page, scenario }) => {
   twoCharts(scenario);
   const lists = scenario.documents.watchlists();
   scenario.documents.saveWatchlists({ lists: lists.lists.map((list, i) => (i === 0 ? { ...list, symbols: ["000810"] } : list)), revision: lists.revision + 1 });
@@ -185,7 +185,10 @@ test("둘째 차트를 누르면 위 막대·봉 주기·관심종목·드로잉
   const toolbar = page.getByRole("navigation", { name: "드로잉 도구" });
   await expect(second).toHaveAttribute("aria-busy", "false");
   await expect(currentSymbol(topbar)).toContainText("삼성전자");
-  expect(inside(await boxOf(toolbar), await boxOf(group(page, 1)))).toBe(true);
+  const railBox = await boxOf(toolbar);
+  const workspaceBox = await boxOf(page.getByRole("main", { name: "작업 영역" }));
+  expect(railBox.x + railBox.width).toBeLessThanOrEqual(workspaceBox.x);
+  for (const n of [1, 2]) expect(inside(railBox, await boxOf(group(page, n)))).toBe(false);
 
   const chartMenu = page.getByRole("menu", { name: "드로잉 메뉴", exact: true });
   const countDrawings = async (cellBox: Box) => {
@@ -208,10 +211,22 @@ test("둘째 차트를 누르면 위 막대·봉 주기·관심종목·드로잉
   await expect(chartMenu).toContainText("드로잉 1개");
   await page.keyboard.press("Escape");
   await expect(chartMenu).toHaveCount(0);
-  const bar = await boxOf(toolbar);
-  const chartGroup = await boxOf(group(page, 2));
-  expect(inside(bar, chartGroup)).toBe(true);
-  expect(Math.abs(bar.x + bar.width / 2 - (chartGroup.x + chartGroup.width / 2))).toBeLessThanOrEqual(2);
+  expect(await boxOf(toolbar)).toEqual(railBox);
+  await toolbar.getByRole("button", { name: "추세선", exact: true }).click();
+  await expect(toolbar.getByRole("button", { name: "추세선", exact: true })).toHaveAttribute("aria-pressed", "true");
+  const spot = await boxOf(second);
+  const from = { x: spot.x + spot.width * 0.3, y: spot.y + spot.height * 0.6 };
+  const to = { x: spot.x + spot.width * 0.6, y: spot.y + spot.height * 0.4 };
+  await page.mouse.move(from.x, from.y);
+  await page.mouse.down();
+  await page.mouse.move(to.x, to.y, { steps: 8 });
+  await page.mouse.up();
+  await countDrawings(await boxOf(second));
+  await expect(chartMenu).toContainText("드로잉 2개");
+  await page.keyboard.press("Escape");
+  await countDrawings(await boxOf(first));
+  await expect(chartMenu).toContainText("드로잉 0개");
+  await page.keyboard.press("Escape");
 
   await tab(page, 1, "삼성전자").click();
   await expect(currentSymbol(topbar)).toContainText("삼성전자");
