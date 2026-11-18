@@ -9,7 +9,7 @@ use domain::{StockCode, Symbol, Venue};
 
 use crate::api;
 use crate::bars::BarError;
-use crate::http::{ApiFailure, AppState, Lookup, symbol_list};
+use crate::http::{ApiFailure, AppState, Lookup, symbol_list, venue_param};
 use crate::kiwoom::api::{MarketRequest, StockOrderBook, StockProgramTrades, StockTrades};
 use crate::kiwoom::rest::{ContKey, KiwoomRest, MergeScope, Priority};
 use crate::quotes::effective_venue;
@@ -56,10 +56,7 @@ async fn order_book(State(st): State<Arc<AppState>>, Path(code): Path<String>) -
 }
 
 async fn trades(State(st): State<Arc<AppState>>, Path(code): Path<String>, Query(q): Query<HashMap<String, String>>) -> Result<Json<api::TradeTape>, ApiFailure> {
-    let requested = match q.get("venue") {
-        None => Venue::Combined,
-        Some(s) => Venue::parse(s).ok_or_else(|| ApiFailure::bad_request(format!("거래소는 combined, krx, nxt 중 하나입니다: {s}")))?,
-    };
+    let requested = venue_param(&q)?.unwrap_or(Venue::Combined);
     let limit = match q.get("limit") {
         None => DEFAULT_TRADE_LIMIT,
         Some(s) => s.parse::<usize>().ok().filter(|n| (1..=MAX_TRADE_LIMIT).contains(n)).ok_or_else(|| ApiFailure::bad_request(format!("limit은 1~{MAX_TRADE_LIMIT}입니다: {s}")))?,

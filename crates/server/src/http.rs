@@ -286,10 +286,7 @@ fn parse_bars_query(q: &HashMap<String, String>) -> Result<BarsQuery, ApiFailure
     let required = |k: &str| q.get(k).ok_or_else(|| ApiFailure::bad_request(format!("{k}가 없습니다")));
     let symbol = Symbol::parse(required("symbol")?).map_err(|e| ApiFailure::bad_request(e.to_string()))?;
     let period = Period::parse(required("period")?).map_err(|e| ApiFailure::bad_request(e.to_string()))?;
-    let venue = match q.get("venue") {
-        None => None,
-        Some(s) => Some(Venue::parse(s).ok_or_else(|| ApiFailure::bad_request(format!("거래소는 combined, krx, nxt 중 하나입니다: {s}")))?),
-    };
+    let venue = venue_param(q)?;
     let feed = Feed::new(symbol, venue).ok_or_else(|| ApiFailure::bad_request("지수에는 거래소가 없습니다"))?;
     let limit = match q.get("limit") {
         None => DEFAULT_LIMIT,
@@ -351,11 +348,12 @@ fn with_snapshot(
 /// 한 번에 묻는 종목 수 상한. ka10095 두 번(100개씩)이다.
 pub const MAX_QUOTE_SYMBOLS: usize = 200;
 
+pub(crate) fn venue_param(q: &HashMap<String, String>) -> Result<Option<Venue>, ApiFailure> {
+    q.get("venue").map(|s| Venue::parse(s).ok_or_else(|| ApiFailure::bad_request(format!("거래소는 combined, krx, nxt 중 하나입니다: {s}")))).transpose()
+}
+
 async fn quotes(State(st): State<Arc<AppState>>, Query(q): Query<HashMap<String, String>>) -> Result<Json<Vec<api::Quote>>, ApiFailure> {
-    let venue = match q.get("venue") {
-        None => Venue::Combined,
-        Some(s) => Venue::parse(s).ok_or_else(|| ApiFailure::bad_request(format!("거래소는 combined, krx, nxt 중 하나입니다: {s}")))?,
-    };
+    let venue = venue_param(&q)?.unwrap_or(Venue::Combined);
     let raw = q.get("symbols").map_or("", String::as_str);
     if raw.is_empty() {
         return Ok(Json(Vec::new()));
