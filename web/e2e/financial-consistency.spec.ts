@@ -177,7 +177,10 @@ test.describe("재무 시각과 가격 시각", () => {
     const projected = (await mirror(page)).find((d) => d.id === historical.id)!;
     expect(projected.points[0]!.x).toBeCloseTo(old.x - box.x, 1);
     await page.keyboard.press("Escape");
-    if (await magnet.getAttribute("aria-pressed") === "true") await magnet.click();
+    await expandDock(page);
+    await expect(magnet).toHaveAttribute("aria-pressed", "true");
+    await magnet.click();
+    await expect(magnet).toHaveAttribute("aria-pressed", "false");
     const future = await page.evaluate((t) => {
       const scale = window.chartProbe.chart.timeScale();
       const last = scale.timeToIndex(t, false)!;
