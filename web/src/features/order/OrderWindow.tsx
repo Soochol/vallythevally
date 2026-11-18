@@ -16,12 +16,13 @@ import { basePrice, buildLadderRows, gridPrices, type LadderRow } from "../marke
 import { RatioBar, Segmented, Strip } from "../market-window/parts";
 import { useLinkedSymbol } from "../market-window/MarketWindowGate";
 import { formatShares } from "../market-window/format";
+import { infoSlot, tradeSlot } from "../market-window/LadderSlots";
+import { useLadderTrades, useQuoteInfo } from "../market-window/useLadderSlots";
 import { EmptyState } from "../overlay/State";
 import { openSystemSettings } from "../system-settings/open";
 import { AccountBand } from "./AccountBand";
 import { averageRowPrice, holdingOf, ladderClosed, type ProfitUnit, type SessionChoice, toggledUnit } from "./holdingSummary";
 import { HoldingSummary } from "./HoldingSummary";
-import { LadderTape, QuoteSummary } from "./LadderOverlays";
 import { OrderSettingsPopover } from "./OrderSettingsPopover";
 import { movePrice, tickRuleOf } from "../market-window/tick";
 import { explorerPrices } from "./priceRange";
@@ -105,6 +106,8 @@ function OrderBody({ id, code }: { id: WindowId; code: SymbolCode }) {
     if (referencePrice === null) return;
     setExplorerCenter((center) => movePrice(center ?? referencePrice, direction * WHEEL_TICKS, bounds, tickRule));
   }, [referencePrice, bounds.lower, bounds.upper, tickRule]);
+  const info = useQuoteInfo({ code, venue, lastPrice: feed.lastPrice, previousClose: feed.previousClose, upperLimit: bounds.upper, lowerLimit: bounds.lower });
+  const trades = useLadderTrades(code, venue);
   const data = useOrderData(code, access.open, referencePrice);
   const writes = useOrderWrites(code, venue);
   const holding = holdingOf(data.balance?.holdings ?? [], code);
@@ -146,20 +149,21 @@ function OrderBody({ id, code }: { id: WindowId; code: SymbolCode }) {
       )}
       <AccountBand accountTail={accountTail} openOrders={data.openOrders} balance={data.balance} executions={data.executions} writable={writable} mock={mock} onCancel={writes.cancelOne} />
       <HoldingSummary holding={holding} buyableAmount={data.capacity.buyableAmount} unit={profitUnit} onUnit={() => setProfitUnit(toggledUnit)} onFill={(fill) => { setMode(fill.mode); setInput(fill.input); }} />
-      <div className="od-toolbar">
-        <button type="button" className="od-tool" data-testid="order-explorer" aria-pressed={exploring} disabled={referencePrice === null} onClick={() => setExplorerCenter(exploring ? null : referencePrice)}>전체 호가</button>
-        <button type="button" className="od-tool" data-testid="order-current" disabled={!exploring} onClick={() => setExplorerCenter(null)}>현재가</button>
-        <OrderSettingsPopover settings={settings} holding={holding !== null} onChange={setSettings} />
+      <div className="od-entry">
+        <QuantityRow mode={mode} input={input} estimate={estimate} venue={venue} mock={mock} sharePresets={settings.sharePresets} amountPresets={settings.amountPresets} onMode={setMode} onInput={setInput} onVenue={(next) => setVenue(id, next)} />
+        <div className="od-toolbar">
+          <button type="button" className="od-tool" data-testid="order-explorer" aria-pressed={exploring} disabled={referencePrice === null} onClick={() => setExplorerCenter(exploring ? null : referencePrice)}>전체 호가</button>
+          <button type="button" className="od-tool" data-testid="order-current" disabled={!exploring} onClick={() => setExplorerCenter(null)}>현재가</button>
+          <OrderSettingsPopover settings={settings} holding={holding !== null} onChange={setSettings} />
+        </div>
       </div>
+      <OrderStatusBar status={writes.status} queued={writes.queued} blocked={data.blocked} onUndo={writes.cancelOne} onReconcile={writes.reconcile} />
       <div className="bk-ladder od-ladder-wrap" data-stale={feed.connected ? undefined : ""} data-exploring={exploring ? "" : undefined}>
         {closed
           ? <EmptyState title="호가 사다리 없음">{session === "after" ? <p>시간외에는 호가 사다리를 보이지 않습니다</p> : <p>이 종목은 15:30 뒤 호가가 멈춥니다</p>}</EmptyState>
           : view
-            ? <OrderLadder rows={rows} previousClose={feed.previousClose} groups={data.groups} writable={writable} previewQuantity={quantityAt(unitPrice)} hover={hover} onHover={setHover} averagePrice={averagePrice} divider={settings.divider} onWheel={wheel} onDragging={setDragging}
-                actions={{ place, drop, cancelOne: writes.cancelOne, cancelAtPrice: writes.cancelAtPrice, cancelGroups: (targets) => targets.forEach((g) => writes.cancelAtPrice(g.side, g.price)) }}>
-                <LadderTape code={code} venue={venue} previousClose={feed.previousClose} />
-                <QuoteSummary code={code} venue={venue} lastPrice={feed.lastPrice} previousClose={feed.previousClose} upperLimit={bounds.upper} lowerLimit={bounds.lower} />
-              </OrderLadder>
+            ? <OrderLadder rows={rows} previousClose={feed.previousClose} groups={data.groups} writable={writable} previewQuantity={quantityAt(unitPrice)} hover={hover} onHover={setHover} averagePrice={averagePrice} divider={settings.divider} onWheel={wheel} onDragging={setDragging} rowSlots={{ topRight: infoSlot(info), bottomLeft: tradeSlot(trades, feed.previousClose) }}
+                actions={{ place, drop, cancelOne: writes.cancelOne, cancelAtPrice: writes.cancelAtPrice, cancelGroups: (targets) => targets.forEach((g) => writes.cancelAtPrice(g.side, g.price)) }} />
             : <EmptyState title={feed.snapshotFailed ? "호가를 불러오지 못했습니다" : "호가를 기다리는 중입니다"} />}
       </div>
       <Strip>
@@ -177,8 +181,6 @@ function OrderBody({ id, code }: { id: WindowId; code: SymbolCode }) {
         })}
       </div>
       {listOpen && <OpenOrderList groups={data.groups} writable={writable} onCancel={writes.cancelOne} />}
-      <QuantityRow mode={mode} input={input} estimate={estimate} venue={venue} mock={mock} sharePresets={settings.sharePresets} amountPresets={settings.amountPresets} onMode={setMode} onInput={setInput} onVenue={(next) => setVenue(id, next)} />
-      <OrderStatusBar status={writes.status} queued={writes.queued} blocked={data.blocked} onUndo={writes.cancelOne} onReconcile={writes.reconcile} />
       {confirm && <HighValueConfirm request={confirm} onClose={() => setConfirm(null)} />}
     </div>
   );
