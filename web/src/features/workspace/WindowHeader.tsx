@@ -1,7 +1,6 @@
 import { useSymbolInfo } from "../../api/queries";
-import { WINDOW_KINDS } from "../../layout/kinds";
 import { PERIOD_LABEL } from "../../lib/symbol";
-import { chartWindows, type ChartWindowState, useLayoutStore, type WindowState } from "../../stores/layout";
+import { chartWindows, type ChartWindowState, useLayoutStore, useWindowName, type WindowState } from "../../stores/layout";
 import { CloseIcon, ExpandIcon } from "../icons";
 import { IntegratedBadge, showsIntegratedBadge } from "../market-window/parts";
 import { LinkDot } from "./LinkDot";
@@ -16,7 +15,7 @@ type HeaderProps = { window: WindowState } & ({ action: { kind: "attach"; run():
 
 export function WindowHeader({ window, maximized, onMaximize, action }: HeaderProps) {
   const alone = useLayoutStore((s) => window.kind === "chart" && chartWindows(s.layout).length <= 1);
-  const name = WINDOW_KINDS[window.kind].name;
+  const name = useWindowName(window);
   return (
     <>
       {window.kind === "chart" ? <ChartTitle window={window} /> : <span className="window-title">{name}</span>}

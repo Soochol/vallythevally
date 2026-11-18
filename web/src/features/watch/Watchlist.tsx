@@ -1,7 +1,7 @@
 import { FinancialUpdateButton } from "../financial-update/FinancialUpdateButton";
 import { EmptyState } from "../overlay/State";
 import { confirmAction } from "../overlay/Confirm";
-import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useId, useRef, useState, useSyncExternalStore } from "react";
 import type { Quote } from "../../api/generated/Quote";
 import type { SymbolCode } from "../../api/generated/SymbolCode";
 import type { WatchGroup } from "../../api/generated/WatchGroup";
@@ -223,6 +223,7 @@ function NameInput({ naming, onDone }: { naming: Naming; onDone(): void }) {
   const self = naming.kind === "rename" ? naming.id : null;
   const [value, setValue] = useState(() => (naming.kind === "rename" ? (lists.find((l) => l.id === naming.id)?.name ?? "") : nextListName(lists)));
   const input = useRef<HTMLInputElement>(null);
+  const problemId = useId();
   const problem = nameProblem(lists, value, self);
   useEffect(() => input.current?.select(), []);
 
@@ -249,7 +250,7 @@ function NameInput({ naming, onDone }: { naming: Naming; onDone(): void }) {
         ref={input}
         aria-label={naming.kind === "create" ? "새 목록 이름" : "목록 이름"}
         aria-invalid={problem !== null}
-        aria-describedby={problem ? "watch-name-problem" : undefined}
+        aria-describedby={problem ? problemId : undefined}
         maxLength={MAX_WATCHLIST_NAME}
         value={value}
         onChange={(e) => setValue(e.target.value)}
@@ -267,7 +268,7 @@ function NameInput({ naming, onDone }: { naming: Naming; onDone(): void }) {
         <CloseIcon />
       </button>
       {problem && (
-        <p id="watch-name-problem" role="alert" className="absolute left-0 top-[calc(100%+6px)] z-40 rounded-s border border-line bg-surface px-2 py-1 text-s text-danger shadow-dialog">
+        <p id={problemId} role="alert" className="absolute left-0 top-[calc(100%+6px)] z-40 rounded-s border border-line bg-surface px-2 py-1 text-s text-danger shadow-dialog">
           {problem}
         </p>
       )}
@@ -277,6 +278,7 @@ function NameInput({ naming, onDone }: { naming: Naming; onDone(): void }) {
 
 function WatchList({ variant, sender, editing, naming, onNaming, width = null }: { variant: WatchVariant; sender: WindowId | null; editing: boolean; width?: number | null } & GroupNaming) {
   const list = useActiveWatchlist();
+  const panelPrefix = useId();
   const symbols = list.symbols;
   const chosen = useUiStore((s) => s.prefs.watchColumns);
   const collapsed = useUiStore((s) => s.prefs.collapsedWatchGroups);
@@ -455,8 +457,8 @@ function WatchList({ variant, sender, editing, naming, onNaming, width = null }:
         <div ref={(el) => { scroller.current = el; }} role="group" aria-label={list.name} className={scrollClass} onDragLeave={leave}>
           {sections.map(({ group, symbols: codes }, i) => group ? (
             <div key={group.id} className={GROUP_SPACING}>
-              <GroupHead list={list} group={group} collapsed={collapsed.includes(group.id)} naming={naming === group.id} onNaming={onNaming} drop={headDrop(group.id)} />
-              {!collapsed.includes(group.id) && codes.length > 0 && <ul id={`watch-group-${group.id}`} aria-label={group.name}>{rows(sections[i]!)}</ul>}
+              <GroupHead list={list} group={group} collapsed={collapsed.includes(group.id)} naming={naming === group.id} onNaming={onNaming} drop={headDrop(group.id)} panelId={`${panelPrefix}-${group.id}`} />
+              {!collapsed.includes(group.id) && codes.length > 0 && <ul id={`${panelPrefix}-${group.id}`} aria-label={group.name}>{rows(sections[i]!)}</ul>}
             </div>
           ) : codes.length > 0 && (
             <div key="ungrouped" className={GROUP_SPACING}>
@@ -517,7 +519,7 @@ function UngroupedHead({ count, drop }: { count: number; drop: HeadDrop }) {
   );
 }
 
-function GroupHead({ list, group, collapsed, naming, onNaming, drop }: { list: Watchlist; group: WatchGroup; collapsed: boolean; naming: boolean; onNaming: GroupNaming["onNaming"]; drop: HeadDrop }) {
+function GroupHead({ list, group, collapsed, naming, onNaming, drop, panelId }: { list: Watchlist; group: WatchGroup; collapsed: boolean; naming: boolean; onNaming: GroupNaming["onNaming"]; drop: HeadDrop; panelId: string }) {
   if (naming) return <div className={`${GROUP_HEAD} ${HEAD_FILL.idle} text-text`}><GroupNameInput list={list} group={group} onDone={() => onNaming(null)} /></div>;
   return (
     <div className={`group/head ${GROUP_HEAD} ${HEAD_FILL[drop.state]} text-text`} onDragOver={drop.over} onDragLeave={drop.leave} onDrop={drop.drop}>
@@ -526,7 +528,7 @@ function GroupHead({ list, group, collapsed, naming, onNaming, drop }: { list: W
         className="flex h-full min-w-0 flex-1 items-center gap-1.5 text-left"
         aria-label={`${group.name} ${group.symbols.length}종목`}
         aria-expanded={!collapsed}
-        aria-controls={collapsed || group.symbols.length === 0 ? undefined : `watch-group-${group.id}`}
+        aria-controls={collapsed || group.symbols.length === 0 ? undefined : panelId}
         onClick={() => setCollapsed(group.id, !collapsed)}
       >
         <span className={`grid flex-none place-items-center text-text transition-transform ${collapsed ? "-rotate-90" : ""}`}><ChevronIcon /></span>
@@ -600,7 +602,7 @@ function GroupNameInput({ list, group, onDone }: { list: Watchlist; group: Watch
   const input = useRef<HTMLInputElement>(null);
   const problem = groupNameProblem(list, value, group.id);
   useEffect(() => input.current?.select(), []);
-  const problemId = `watch-group-name-problem-${group.id}`;
+  const problemId = useId();
   return (
     <form
       className="relative flex min-w-0 flex-1 items-center gap-1"

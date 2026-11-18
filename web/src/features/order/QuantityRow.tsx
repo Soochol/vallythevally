@@ -1,3 +1,4 @@
+import { useId } from "react";
 import type { Venue } from "../../api/generated/Venue";
 import { formatWon } from "../market-window/format";
 import { Segmented } from "../market-window/parts";
@@ -26,12 +27,13 @@ interface Props {
 }
 
 export function QuantityRow({ mode, input, estimate, venue, mock, sharePresets, amountPresets, onMode, onInput, onVenue }: Props) {
+  const inputId = useId();
   const presets = mode === "shares" ? sharePresets : amountPresets.map((man) => man * AMOUNT_UNIT_WON);
   return (
     <div className="od-qty" data-testid="order-quantity-row">
       <div className="od-qty-line">
-        <label className="od-qty-label" htmlFor="order-quantity">수량</label>
-        <input id="order-quantity" className="od-qty-input" inputMode="numeric" autoComplete="off" value={input} onChange={(e) => onInput(e.target.value.replace(/[^0-9]/g, ""))} />
+        <label className="od-qty-label" htmlFor={inputId}>수량</label>
+        <input id={inputId} className="od-qty-input" inputMode="numeric" autoComplete="off" value={input} onChange={(e) => onInput(e.target.value.replace(/[^0-9]/g, ""))} />
         <Segmented label="수량 방식" options={MODES} value={mode} onChange={onMode} />
       </div>
       <div className="od-qty-line">

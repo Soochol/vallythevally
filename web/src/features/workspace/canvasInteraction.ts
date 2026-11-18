@@ -2,9 +2,9 @@ import { type KeyboardEvent, type PointerEvent, useEffect, useRef, useState } fr
 import { bringToFront, rectsForArea } from "../../layout/canvas/arrange";
 import { minWindowSize, toRatio, type Area } from "../../layout/canvas/geometry";
 import { moveRect, resizeRect, type Guides, type ResizeHandle } from "../../layout/canvas/snap";
-import { WINDOW_KINDS, type WindowId } from "../../layout/kinds";
+import type { WindowId } from "../../layout/kinds";
 import type { CanvasPlacement, Rect } from "../../layout/placement";
-import { useLayoutStore, type WindowState } from "../../stores/layout";
+import { useLayoutStore, windowName, type WindowState } from "../../stores/layout";
 import { useUiStore } from "../../stores/ui";
 import { useSelectionStore } from "../../stores/selection";
 import { closeWindow } from "./manage";
@@ -58,7 +58,7 @@ export function useCanvasInteraction(canvas: CanvasPlacement, windows: readonly 
   validRef.current = valid;
   const minimumNotice = (window: WindowState) => {
     const min = minWindowSize(window.kind);
-    useSelectionStore.getState().showToast(`${WINDOW_KINDS[window.kind].name} 창은 ${min.w}×${min.h}보다 작게 줄일 수 없습니다`);
+    useSelectionStore.getState().showToast(`${windowName(useLayoutStore.getState().layout.windows, window)} 창은 ${min.w}×${min.h}보다 작게 줄일 수 없습니다`);
   };
 
   useEffect(() => {
@@ -171,7 +171,7 @@ export function useCanvasInteraction(canvas: CanvasPlacement, windows: readonly 
     if (event.target !== event.currentTarget) return;
     if (event.key === "Escape" && maximized) { event.preventDefault(); setMaximization(null); return; }
     if (event.key === "Enter") { event.preventDefault(); toggleMaximize(window); return; }
-    if (event.key === "Delete" || event.key === "Backspace") { event.preventDefault(); closeWindow(window.id, WINDOW_KINDS[window.kind].name); return; }
+    if (event.key === "Delete" || event.key === "Backspace") { event.preventDefault(); closeWindow(window.id, windowName(useLayoutStore.getState().layout.windows, window)); return; }
     const offset = ARROWS[event.key];
     if (!offset || event.altKey || event.ctrlKey || event.metaKey || maximized) return;
     event.preventDefault();

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useReducer, useRef, useState } from "react";
+import { useEffect, useId, useMemo, useReducer, useRef, useState } from "react";
 import type { SymbolCode } from "../../api/generated/SymbolCode";
 import { useSymbolInfo } from "../../api/queries";
 import { MINUS } from "../../lib/format";
@@ -22,6 +22,7 @@ function BrokersBody({ code }: { code: SymbolCode }) {
   const name = useSymbolInfo(code).data?.name ?? code;
   const [state, dispatch] = useReducer(reduceBrokers, EMPTY_BROKER_STATE);
   const [failed, setFailed] = useState(false);
+  const timeId = useId();
   const [picked, setPicked] = useState<number | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
 
@@ -50,8 +51,8 @@ function BrokersBody({ code }: { code: SymbolCode }) {
       {!failed && columns > 0 && (
         <>
           <div className="br-scrub">
-            <label htmlFor="br-time">기준 시각</label>
-            <input id="br-time" type="range" min={0} max={columns - 1} step={1} value={index} disabled={columns < 2} onChange={(e) => setPicked(Number(e.target.value))} />
+            <label htmlFor={timeId}>기준 시각</label>
+            <input id={timeId} type="range" min={0} max={columns - 1} step={1} value={index} disabled={columns < 2} onChange={(e) => setPicked(Number(e.target.value))} />
             <output data-testid="brokers-time">{grid.times[index] === undefined ? "" : formatClock(grid.times[index])}</output>
           </div>
           <Heatmap grid={grid} rows={rows} index={index} selected={selected} onSelect={(code) => setSelected((current) => (current === code ? null : code))} />

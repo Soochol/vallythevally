@@ -1,5 +1,5 @@
 import { findGroup } from "../../layout/dock/tree";
-import { MAX_WINDOWS, type WindowId, type WindowKind } from "../../layout/kinds";
+import { isSingleton, MAX_WINDOWS, type WindowId, type WindowKind } from "../../layout/kinds";
 import { chartWindows, fittedDock, type DockRoom, useLayoutStore } from "../../stores/layout";
 import { type ToastUndo, useSelectionStore } from "../../stores/selection";
 import { DOCK_GAP } from "./size";
@@ -17,6 +17,7 @@ export function workspaceRoom(): DockRoom | null {
 export function addWindow(kind: WindowKind, room: DockRoom | null, targetGroup?: string): WindowId | null {
   if (kind !== "chart") {
     const state = useLayoutStore.getState();
+    if (!isSingleton(kind)) return state.openWindow(kind, targetGroup);
     if (targetGroup && useLayoutStore.getState().canvasArea === null && !findGroup(fittedDock(state.layout).root, targetGroup)) return null;
     state.showWindow(kind, targetGroup);
     return useLayoutStore.getState().layout.windows.find((window) => window.kind === kind)?.id ?? null;

@@ -16,7 +16,7 @@ import { fitDock, type WindowList } from "../layout/dock/fit";
 import type { Size } from "../layout/dock/geometry";
 import { placeBeside } from "../layout/dock/split";
 import { findGroup, groupOfWindow, putTab, selectTab } from "../layout/dock/tree";
-import { MAX_WINDOWS, windowId, WINDOW_KINDS, type WindowId } from "../layout/kinds";
+import { MAX_WINDOWS, windowId, WINDOW_KINDS, type WindowId, type WindowRef } from "../layout/kinds";
 import type { CanvasPlacement, DockPlacement, Placement } from "../layout/placement";
 import { toward } from "../lib/josa";
 import { readDockOrigins, writeDockOrigins } from "../persist/dockOrigins";
@@ -51,6 +51,15 @@ export const chartWindow = (layout: EditableLayout, id: WindowId): ChartWindowSt
   chartWindows(layout).find((w) => w.id === id) ?? chartWindows(layout)[0]!;
 
 export const chartNumber = (layout: EditableLayout, id: WindowId): number => chartWindows(layout).findIndex((w) => w.id === id) + 1;
+
+export function windowName(windows: readonly WindowRef[], window: WindowRef): string {
+  const { name } = WINDOW_KINDS[window.kind];
+  if (window.kind === "chart") return name;
+  const sameKind = windows.filter((w) => w.kind === window.kind);
+  return sameKind.length > 1 ? `${name} ${sameKind.findIndex((w) => w.id === window.id) + 1}` : name;
+}
+
+export const useWindowName = (window: WindowRef): string => useLayoutStore((s) => windowName(s.layout.windows, window));
 
 export function windowRefs(windows: readonly WindowState[]): WindowList {
   const [first, ...rest] = windows.map(({ id, kind }) => ({ id, kind }));
@@ -156,6 +165,8 @@ interface LayoutState {
   settleDock(dock: DockPlacement): void;
   selectTab(window: WindowId): void;
   showWindow(kind: OtherWindowKind, targetGroup?: string): void;
+  openWindow(kind: OtherWindowKind, targetGroup?: string): WindowId | null;
+  duplicateWindow(window: WindowId): WindowId | null;
   addChart(from: WindowId, room: DockRoom | null, targetGroup?: string): WindowId | null;
   closeWindow(id: WindowId, replacement?: WindowId): boolean;
   setSymbol(cellId: WindowId, target: SymbolTarget): SymbolChange;
@@ -308,26 +319,47 @@ export const useLayoutStore = create<LayoutState>()((set, get) => {
     },
     showWindow: (kind, targetGroup) => {
       const { windows, placement } = get().layout;
+      const shown = windows.find((w) => w.kind === kind);
+      if (!shown) {
+        get().openWindow(kind, targetGroup);
+        return;
+      }
       const canvasArea = get().canvasArea;
-      if (!windows.some((w) => w.kind === kind) && windows.length >= MAX_WINDOWS) return;
       if (canvasActive() && canvasArea) {
-        const shown = windows.find((w) => w.kind === kind);
-        const id = shown?.id ?? freeWindowId(windows, kind);
-        const next = shown ? windows : [...windows, blankWindow(id, kind)];
-        arrangeCanvas(next, bringToFront(fitCanvas(placement.canvas, windowRefs(next), canvasArea), id));
+        arrangeCanvas(windows, bringToFront(fitCanvas(placement.canvas, windowRefs(windows), canvasArea), shown.id));
         return;
       }
       const dock = fittedDock(get().layout);
       if (targetGroup && !findGroup(dock.root, targetGroup)) return;
-      const shown = windows.find((w) => w.kind === kind);
-      if (shown) {
-        if (targetGroup && groupOfWindow(dock.root, shown.id)?.id !== targetGroup) arrangeDock(windows, putTab(dock, shown.id, targetGroup));
-        else get().selectTab(shown.id);
-        return;
-      }
+      if (targetGroup && groupOfWindow(dock.root, shown.id)?.id !== targetGroup) arrangeDock(windows, putTab(dock, shown.id, targetGroup));
+      else get().selectTab(shown.id);
+    },
+    openWindow: (kind, targetGroup) => {
+      const { windows, placement } = get().layout;
+      if (windows.length >= MAX_WINDOWS || windows.filter((w) => w.kind === kind).length >= WINDOW_KINDS[kind].maxCount) return null;
       const id = freeWindowId(windows, kind);
       const next = [...windows, blankWindow(id, kind)];
+      const canvasArea = get().canvasArea;
+      if (canvasActive() && canvasArea) {
+        arrangeCanvas(next, bringToFront(fitCanvas(placement.canvas, windowRefs(next), canvasArea), id));
+        return id;
+      }
+      const dock = fittedDock(get().layout);
+      if (targetGroup && !findGroup(dock.root, targetGroup)) return null;
       arrangeDock(next, targetGroup ? putTab(dock, id, targetGroup) : selectTab(fitDock(placement.dock, windowRefs(next)), id));
+      return id;
+    },
+    duplicateWindow: (window) => {
+      const { layout } = get();
+      const source = layout.windows.find((w) => w.id === window);
+      if (!source || source.kind === "chart" || canvasActive() || layout.windows.length >= MAX_WINDOWS) return null;
+      if (layout.windows.filter((w) => w.kind === source.kind).length >= WINDOW_KINDS[source.kind].maxCount) return null;
+      const dock = fittedDock(layout);
+      const group = groupOfWindow(dock.root, window);
+      if (!group) return null;
+      const id = freeWindowId(layout.windows, source.kind);
+      arrangeDock([...layout.windows, { ...source, id }], putTab(dock, id, group.id, group.tabs.indexOf(window) + 1));
+      return id;
     },
     addChart: (from, room, targetGroup) => {
       const { layout } = get();

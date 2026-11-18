@@ -758,16 +758,53 @@ mod tests {
         assert_eq!(kinds(&read).iter().map(|(_, kind, _)| kind.as_str()).collect::<Vec<_>>(), ["chart", "trades", "book", "program", "brokers", "order"]);
     }
 
-    #[test]
-    fn a_second_window_of_the_same_market_kind_is_rejected() {
+    fn same_kind_contents() -> Vec<WindowContent> {
+        vec![WindowContent::Watchlist, WindowContent::Screener, WindowContent::Trades, WindowContent::Book, WindowContent::Program, WindowContent::Brokers, WindowContent::Order { venue: Venue::Krx }]
+    }
+
+    fn windows_of(kinds: &[WindowContent], extra_ids: &str) -> Vec<LayoutWindow> {
         let mut windows = vec![chart("c", "005930", Some(Venue::Krx))];
-        windows.extend(market_windows());
-        assert!(crate::user_routes::check_layout("L2", &layout("L2", "넷", windows.clone())).is_ok());
-        for kind in [WindowContent::Trades, WindowContent::Book, WindowContent::Program, WindowContent::Brokers, WindowContent::Order { venue: Venue::Krx }] {
-            let mut twice = windows.clone();
-            twice.push(LayoutWindow { id: window_id("again"), link: None, content: kind.clone() });
-            assert!(crate::user_routes::check_layout("L2", &layout("L2", "둘", twice)).is_err(), "{kind:?}");
-        }
+        windows.extend(kinds.iter().cloned().map(side));
+        windows.extend(kinds.iter().cloned().map(|content| LayoutWindow { id: window_id(&format!("{}-{extra_ids}", window_kind(&content))), link: Some(LinkColor::B), content }));
+        windows
+    }
+
+    #[test]
+    fn two_windows_of_a_kind_are_accepted_except_for_indicators_which_stay_single() {
+        let twice = windows_of(&same_kind_contents(), "2");
+        assert!(crate::user_routes::check_layout("L2", &layout("L2", "둘", twice)).is_ok());
+
+        let mut one_indicator = windows_of(&[], "2");
+        one_indicator.push(side(WindowContent::Indicators));
+        assert!(crate::user_routes::check_layout("L2", &layout("L2", "하나", one_indicator.clone())).is_ok());
+        one_indicator.push(LayoutWindow { id: window_id("indicators-2"), link: None, content: WindowContent::Indicators });
+        assert!(crate::user_routes::check_layout("L2", &layout("L2", "둘", one_indicator)).is_err());
+    }
+
+    #[test]
+    fn a_layout_holds_up_to_fifty_windows() {
+        let layout_of = |count: usize| {
+            let mut windows = vec![chart("c", "005930", Some(Venue::Krx))];
+            windows.extend((1..count).map(|n| LayoutWindow { id: window_id(&format!("trades-{n}")), link: None, content: WindowContent::Trades }));
+            layout("L2", "많음", windows)
+        };
+        assert!(crate::user_routes::check_layout("L2", &layout_of(50)).is_ok());
+        assert!(crate::user_routes::check_layout("L2", &layout_of(51)).is_err());
+    }
+
+    #[sqlx::test(migrations = "./migrations")]
+    async fn windows_of_the_same_kind_round_trip_with_their_own_link_colors(_: SqlitePoolOptions, opts: SqliteConnectOptions) {
+        let db = db(opts).await;
+        let mut windows = windows_of(&same_kind_contents(), "2");
+        windows[1].link = Some(LinkColor::A);
+        let last = windows.len() - 1;
+        windows[last] = LayoutWindow { id: window_id("order-2"), link: Some(LinkColor::J), content: WindowContent::Order { venue: Venue::Nxt } };
+        put_layout(&db, &layout("L2", "같은 종류", windows.clone()), UnixSeconds(100)).await.unwrap();
+        let read = get_layout(&db, "L2").await.unwrap();
+        assert_eq!(read.windows, windows);
+        let kinds = kinds(&read);
+        assert_eq!(kinds.iter().filter(|(_, kind, _)| kind == "trades").count(), 2);
+        assert_eq!(kinds.iter().filter(|(_, kind, _)| kind == "order").count(), 2);
     }
 
     #[sqlx::test(migrations = "./migrations")]
