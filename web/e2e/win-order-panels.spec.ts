@@ -187,17 +187,53 @@ test("계좌 실시간 메시지가 오면 조회를 다시 읽는다", async ({
   expect(countOf("executions")).toBeGreaterThan(before.executions);
 });
 
-test("시간외를 고르면 호가 사다리 없음 빈 상태이고 정규장으로 돌아온다", async ({ page, scenario }) => {
-  ordersOn(scenario);
-  tradingApi(scenario);
-  await openOrderWindow(page, scenario);
-  await expect(page.getByTestId("order-total-ask")).toHaveText("1,000주");
-  await expect(page.getByTestId("order-total-bid")).toHaveText("3,000주");
-  await page.getByRole("group", { name: "세션" }).getByRole("button", { name: "시간외" }).click();
-  await expect(win(page)).toContainText("호가 사다리 없음");
-  await expect(page.getByTestId("price-ladder")).toHaveCount(0);
-  await page.getByRole("group", { name: "세션" }).getByRole("button", { name: "정규장" }).click();
-  await expect(ladderRows(page)).toHaveCount(20);
+const kstClock = (time: string) => new Date(`2026-11-18T${time}+09:00`);
+const SYMBOL_INFO = { code: CODE, name: "삼성전자", kind: "common", market: "kospi", nxtEnabled: false };
+
+test.describe("NXT 미거래 종목의 장 시간", () => {
+  test("보통주는 수요일 19:50에 사다리를 그리고 안내와 세션 토글이 없다", async ({ page, scenario }) => {
+    await page.clock.install({ time: kstClock("19:50:00") });
+    ordersOn(scenario);
+    tradingApi(scenario);
+    scenario.reply(`/api/symbols/${CODE}`, { body: SYMBOL_INFO });
+    await openOrderWindow(page, scenario);
+    await expect(ladderRows(page)).toHaveCount(20);
+    await expect(page.getByTestId("order-total-ask")).toHaveText("1,000주");
+    await expect(page.getByTestId("order-book-notice")).toHaveCount(0);
+    await expect(win(page)).not.toContainText("호가 사다리 없음");
+    await expect(page.getByRole("group", { name: "세션" })).toHaveCount(0);
+  });
+
+  test("보통주는 수요일 20:30에 사다리를 그리고 장 마감을 알린다", async ({ page, scenario }) => {
+    await page.clock.install({ time: kstClock("20:30:00") });
+    ordersOn(scenario);
+    tradingApi(scenario);
+    scenario.reply(`/api/symbols/${CODE}`, { body: SYMBOL_INFO });
+    await openOrderWindow(page, scenario);
+    await expect(ladderRows(page)).toHaveCount(20);
+    await expect(page.getByTestId("order-book-notice")).toHaveText("장 마감 · 마지막 호가입니다");
+  });
+
+  test("ETF는 수요일 16:30에 사다리를 그리고 거래 불가를 알린다", async ({ page, scenario }) => {
+    await page.clock.install({ time: kstClock("16:30:00") });
+    ordersOn(scenario);
+    tradingApi(scenario);
+    scenario.reply(`/api/symbols/${CODE}`, { body: { ...SYMBOL_INFO, kind: "etf" } });
+    await openOrderWindow(page, scenario);
+    await expect(ladderRows(page)).toHaveCount(20);
+    await expect(page.getByTestId("order-book-notice")).toHaveText("ETF·ETN은 15:30 뒤 거래되지 않습니다");
+  });
+
+  test("장 마감 시각에 호가 조회가 실패하면 안내 없이 불러오지 못했다고 보인다", async ({ page, scenario }) => {
+    await page.clock.install({ time: kstClock("20:30:00") });
+    ordersOn(scenario);
+    tradingApi(scenario);
+    scenario.reply(`/api/symbols/${CODE}`, { body: SYMBOL_INFO });
+    await openOrderWindow(page, scenario, false, "krx", undefined, true);
+    await expect(win(page)).toContainText("호가를 불러오지 못했습니다");
+    await expect(page.getByTestId("order-book-notice")).toHaveCount(0);
+    await expect(page.getByTestId("price-ladder")).toHaveCount(0);
+  });
 });
 
 test("설정 ⚙의 값이 창 설정으로 저장되고 새로고침해도 유지된다", async ({ page, scenario }) => {

@@ -87,7 +87,7 @@ export function snapshot(base: number) {
   };
 }
 
-export async function openOrderWindow(page: Page, scenario: Scenario, withSecondChart = false, savedVenue: Venue = "krx", limits: { upper: number | null; lower: number | null } = { upper: 91_000, lower: 49_000 }): Promise<void> {
+export async function openOrderWindow(page: Page, scenario: Scenario, withSecondChart = false, savedVenue: Venue = "krx", limits: { upper: number | null; lower: number | null } = { upper: 91_000, lower: 49_000 }, bookFails = false): Promise<void> {
   const layout = scenario.documents.layout(DEFAULT_LAYOUT_ID);
   const windows: LayoutWindow[] = [
     { id: "cell-0", link: null, kind: "chart", symbol: CODE, venue: "combined", period: "D", chartSettings: SETTINGS },
@@ -98,7 +98,7 @@ export async function openOrderWindow(page: Page, scenario: Scenario, withSecond
   scenario.documents.saveLayout({ ...layout, windows, placement: {}, revision: layout.revision + 1 });
   pinQuote(scenario, CODE, BASE);
   scenario.reply((url) => url.pathname === `/api/symbols/${CODE}/fundamentals`, { body: { symbol: CODE, upperLimit: limits.upper, lowerLimit: limits.lower, marketCap: null, listedShares: null, per: null, pbr: null, roe: null, eps: null, bps: null, foreignExhaustionRate: null, high52w: null, low52w: null } });
-  scenario.reply((url) => url.pathname === `/api/symbols/${CODE}/order-book`, { body: snapshot(BASE) });
+  scenario.reply((url) => url.pathname === `/api/symbols/${CODE}/order-book`, bookFails ? { status: 503, body: { error: { code: "internal", message: "호가 조회 실패", reason: null, retryAt: null, manualActionRequired: false } } } : { body: snapshot(BASE) });
   scenario.reply((url) => url.pathname === "/api/symbols/000660/order-book", { body: { ...snapshot(BASE), symbol: "000660" } });
   scenario.reply((url) => url.pathname === "/api/symbols/000660/fundamentals", { body: { symbol: "000660", upperLimit: null, lowerLimit: null } });
   scenario.reply((url) => url.pathname === `/api/symbols/${CODE}/trades`, { body: { symbol: CODE, venue: "krx", trades: [], skippedRows: 0 } });
@@ -108,7 +108,7 @@ export async function openOrderWindow(page: Page, scenario: Scenario, withSecond
   await expect(cell(page)).toHaveAttribute("aria-busy", "false");
   await windowTabs(page).getByRole("tab", { name: /^호가주문/ }).click();
   await expect(win(page)).toBeVisible();
-  await expect(page.getByTestId("price-ladder").locator(".mw-lr")).toHaveCount(20);
+  if (!bookFails) await expect(page.getByTestId("price-ladder").locator(".mw-lr")).toHaveCount(20);
 }
 
 export async function center(locator: Locator): Promise<{ x: number; y: number }> {
