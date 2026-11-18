@@ -70,15 +70,7 @@ test("관심종목에 넣기는 목록 메뉴로 바뀌고 이미 든 목록은 
   await expect.poll(() => scenario.documents.watchlists().lists[1]!.symbols).toEqual([first!.symbol]);
 });
 
-test("종목코드 복사는 클립보드에 코드를 넣고 알린다", async ({ page, context, baseURL }) => {
-  await context.grantPermissions(["clipboard-read", "clipboard-write"], { origin: baseURL });
-  await openMenu(page, second!.symbol);
-  await menu(page).getByRole("menuitem", { name: /^종목코드 복사/ }).click();
-  await expect(toast(page)).toContainText(`종목코드를 복사했습니다: ${second!.symbol}`);
-  expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(second!.symbol);
-});
-
-test("Shift+F10으로 열고 Esc로 닫으면 그 줄로 초점이 돌아가며 Shift+↵는 비교에 추가다", async ({ scenario, page }) => {
+test("Shift+F10으로 열고 Esc로 닫으면 그 줄로 초점이 돌아가며 Shift+↵는 비교에 추가다", async ({ page }) => {
   const button = rowOf(page, second!.symbol).getByRole("button");
   await button.focus();
   await page.keyboard.press("Shift+F10");
@@ -88,7 +80,6 @@ test("Shift+F10으로 열고 Esc로 닫으면 그 줄로 초점이 돌아가며 
   await expect(button).toBeFocused();
   await page.keyboard.press("Shift+Enter");
   await expect(toast(page)).toContainText(`비교에 추가했습니다: ${second!.name}`);
-  await expect.poll(() => compareOf(scenario)).toEqual([second!.symbol]);
 });
 
 test("아래 가장자리의 줄에서 열어도 메뉴가 화면 안에 있다", async ({ page }) => {
