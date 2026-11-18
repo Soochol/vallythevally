@@ -72,5 +72,3 @@
 .pg-bar[data-direction=buy] i { left:50%; background:var(--up-vol); }
 .pg-bar[data-direction=sell] i { right:50%; background:var(--down-vol); }
 .pg-gap { padding:var(--s2) var(--s4); border-top:var(--size-1) dashed var(--line-strong); border-bottom:var(--size-1) dashed var(--line-strong); color:var(--text-3); font-size:var(--fs-xs); text-align:center; }
-.pg-badge { margin-left:var(--s2); }
-.window-head:has(.mw-integrated) ~ .window-panel .pg-badge { display:none; }

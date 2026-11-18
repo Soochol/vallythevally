@@ -7,6 +7,7 @@ import { PERIOD_LABEL } from "../../lib/symbol";
 import { chartNumber, chartWindows, useCell, useLayoutStore, type WindowState } from "../../stores/layout";
 import { useSelectionStore } from "../../stores/selection";
 import { CloseIcon } from "../icons";
+import { IntegratedBadge, showsIntegratedBadge } from "../market-window/parts";
 import { ScreenerBadge } from "../screener/ScreenerPanel";
 import { AddWindowMenu } from "./AddWindowMenu";
 import type { DockInteraction } from "./dockInteraction";
@@ -37,7 +38,7 @@ function ChartTabLabel({ id }: { id: WindowId }) {
 
 function TabLabel({ window }: { window: WindowState }) {
   if (window.kind === "chart") return <ChartTabLabel id={window.id} />;
-  return <><span className="dock-tab-name">{WINDOW_KINDS[window.kind].name}</span>{window.kind === "screener" && <ScreenerBadge />}</>;
+  return <><span className="dock-tab-name">{WINDOW_KINDS[window.kind].name}</span>{window.kind === "screener" && <ScreenerBadge />}{showsIntegratedBadge(window.kind) && <IntegratedBadge />}</>;
 }
 
 function CloseTabButton({ id, name, reason, selected, onClosed }: { id: WindowId; name: string; reason: string | null; selected: boolean; onClosed(): void }) {

@@ -10,7 +10,7 @@ import { formatPrice, MINUS } from "../../lib/format";
 import { marketSocket } from "../../stores/realtime";
 import { MarketWindowGate } from "../market-window/MarketWindowGate";
 import { formatShares, withSign } from "../market-window/format";
-import { IntegratedBadge, RatioBar, Strip } from "../market-window/parts";
+import { RatioBar, Strip } from "../market-window/parts";
 import { ErrorState, EmptyState, Skeleton } from "../overlay/State";
 import { boldKeys, type ColumnWidths, eokFromMillionWon, formatEokAmount, historyRows, isNoProgramData, joinHistoryAndLive, liveRow, type ProgramLine, type ProgramRow, rowsOf, sparklinePoints, widestSoFar } from "./program";
 
@@ -62,7 +62,7 @@ function Summary({ rows }: { rows: readonly ProgramRow[] }) {
     <>
       <div className="pg-head" data-direction={direction}>
         <div className="pg-net">
-          <span className="pg-cap">순매수 누적 <span className="pg-badge"><IntegratedBadge /></span></span>
+          <span className="pg-cap">순매수 누적</span>
           <b data-testid="program-net-qty">{withSign(net, formatShares(Math.abs(net)))}</b>
           <span data-testid="program-net-amount">{withSign(amount, formatEokAmount(Math.abs(amount)))}</span>
         </div>

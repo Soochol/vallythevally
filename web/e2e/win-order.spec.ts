@@ -1,5 +1,5 @@
 import type { FeedBook } from "../src/api/generated/FeedBook";
-import { type Scenario, cell, DEFAULT_LAYOUT_ID, expect, test, windowTabs } from "./harness";
+import { type Scenario, cell, DEFAULT_LAYOUT_ID, expect, pickDesktopVenue, test, windowTabs } from "./harness";
 import { BASE, CODE, cellAt, center, chipAt, commandOf, dragChip, openOrder, openOrderWindow, ordersOn, snapshot, status, tradingApi, win, writesTo } from "./order-window";
 
 test("더블클릭이 그 가격에 지정가 신규를 내고 실시간 호가를 따른다", async ({ page, scenario }) => {
@@ -286,4 +286,15 @@ test("200 응답의 본문이 끊기면 답을 못 받은 것으로 보고 같�
   await expect.poll(() => placeIds(scenario).length).toBe(2);
   const [first, second] = placeIds(scenario);
   expect(second).toBe(first);
+});
+
+test("앱 거래소가 KRX이면 호가주문 도킹 탭에 통합 표시가 있고 본문에는 없다", async ({ page, scenario }) => {
+  ordersOn(scenario);
+  tradingApi(scenario);
+  await openOrderWindow(page, scenario);
+  const tab = windowTabs(page).getByRole("tab", { name: /^호가주문/ });
+  await expect(tab.locator(".mw-integrated")).toHaveCount(0);
+  await pickDesktopVenue(page, "KRX");
+  await expect(tab.locator(".mw-integrated")).toHaveText("통합");
+  await expect(win(page).locator(".mw-integrated")).toHaveCount(0);
 });
