@@ -76,6 +76,8 @@ button.od-cellbtn:hover:not(:disabled) { background:var(--hover); }
 .od-cellbtn b { max-width:100%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:var(--fs-xs); font-weight:600; }
 .od-cellbtn[data-tone=up] b { color:var(--up); } .od-cellbtn[data-tone=down] b { color:var(--down); }
 
+.od-entry { flex:none; border-top:var(--size-1) solid var(--line); }
+.od-entry .od-qty { border-top:0; padding-bottom:var(--s2); }
 .od-toolbar { display:flex; flex:none; align-items:center; gap:var(--s3); padding:var(--s2) var(--s4); }
 .od-tool { height:var(--size-24); padding:0 var(--s4); border-radius:var(--r-s); background:var(--raised); color:var(--text-2); font-size:var(--fs-xs); }
 .od-tool:hover:not(:disabled), .od-tool[aria-pressed=true] { background:var(--hover); color:var(--text); }
@@ -92,13 +94,4 @@ button.od-cellbtn:hover:not(:disabled) { background:var(--hover); }
 
 .od-ladder[data-divider] .mw-lr[data-side=ask] + .mw-lr[data-side=bid] { border-top:var(--size-1) solid var(--line-strong); }
 
-.od-tape { position:absolute; bottom:0; left:calc(var(--size-64) + var(--s4)); width:calc(50% - var(--size-64) - var(--size-72)); max-height:50%; overflow:hidden; background:color-mix(in srgb, var(--surface) 88%, transparent); font-size:var(--size-11); pointer-events:none; }
-.od-tape .tr-tape { overflow:hidden; }
-.od-tape .tr-row { padding-block:0; font-size:var(--size-11); }
-.od-tape-strength { padding:0 var(--s3); color:var(--text-3); font-size:var(--size-10); }
-.od-tape-strength b { color:var(--text); }
-.od-quote { position:absolute; top:0; right:calc(var(--size-64) + var(--s4)); width:calc(50% - var(--size-64) - var(--size-72)); margin:0; padding:0 var(--s3); background:color-mix(in srgb, var(--surface) 88%, transparent); font-size:var(--size-11); font-variant-numeric:tabular-nums; pointer-events:none; }
-.od-quote div { display:flex; justify-content:space-between; gap:var(--s3); }
-.od-quote dt { color:var(--text-3); } .od-quote dd { margin:0; }
-.od-quote dd[data-tone=up] { color:var(--up); } .od-quote dd[data-tone=down] { color:var(--down); }
 .od-ladder-wrap[data-exploring] { box-shadow:inset 0 0 0 var(--size-1) var(--accent); }

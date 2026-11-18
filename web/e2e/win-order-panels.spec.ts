@@ -1,4 +1,4 @@
-import type { Page } from "@playwright/test";
+import type { Locator, Page } from "@playwright/test";
 import type { TradingExecution } from "../src/api/generated/TradingExecution";
 import type { TradingHolding } from "../src/api/generated/TradingHolding";
 import { type Scenario, DEFAULT_LAYOUT_ID, expect, test } from "./harness";
@@ -9,11 +9,14 @@ const FILL: TradingExecution = { orderNo: "0000010", code: CODE, name: "삼성�
 
 const ladderRows = (page: Page) => page.getByTestId("price-ladder").locator(".mw-lr");
 
-function lastTrade(scenario: Scenario, price: number): void {
-  const request = scenario.live.messages.find((m) => m.type === "subscribe_feed" && m.kind === "trades" && m.venue === "combined");
+function lastTrade(scenario: Scenario, price: number, seq = 1, qty = 3, venue: "combined" | "krx" = "combined"): void {
+  const request = scenario.live.messages.find((m) => m.type === "subscribe_feed" && m.kind === "trades" && m.venue === venue);
   if (request?.type !== "subscribe_feed") throw new Error("체결 구독이 없습니다");
-  scenario.live.emit({ type: "feed_trades", sub: request.sub, seq: 1, trades: [{ t: 1_700_000_000, price, qty: 3, venue: "krx", strength: 101.5 }] });
+  scenario.live.emit({ type: "feed_trades", sub: request.sub, seq, trades: [{ t: 1_700_000_000 + seq, price, qty, venue: "krx", strength: 101.5 }] });
 }
+
+const tops = (locator: Locator) => locator.evaluateAll((elements) => elements.map((element) => Math.round(element.getBoundingClientRect().top * 10) / 10));
+const topOf = async (locator: Locator) => (await locator.boundingBox())!.y;
 
 test("미체결 패널이 모든 종목의 목록을 보이고 개별 취소 요청을 보낸다", async ({ page, scenario }) => {
   ordersOn(scenario);
@@ -184,4 +187,72 @@ test("설정 ⚙의 값이 창 설정으로 저장되고 새로고침해도 유�
   await expect(page.getByTestId("order-ladder")).not.toHaveAttribute("data-divider", "");
   await expect(page.getByTestId("ladder-mark")).toHaveCount(0);
   expect(scenario.documents.layout(DEFAULT_LAYOUT_ID).windows.some((w) => w.kind === "order")).toBe(true);
+});
+
+test("주문 입력과 상태 줄은 사다리 위에, 총잔량 띠와 접수 합계는 사다리 아래에 있다", async ({ page, scenario }) => {
+  ordersOn(scenario);
+  tradingApi(scenario);
+  await openOrderWindow(page, scenario);
+  const ladder = page.getByTestId("order-ladder");
+  const ladderTop = await topOf(ladder);
+  const ladderBottom = ladderTop + (await ladder.boundingBox())!.height;
+  const toolbar = page.getByTestId("order-explorer");
+  const quantity = page.getByRole("textbox", { name: "수량" });
+  expect(await topOf(quantity)).toBeLessThan(await topOf(toolbar));
+  expect(await topOf(toolbar)).toBeLessThan(await topOf(page.getByTestId("order-status")));
+  expect(await topOf(page.getByTestId("order-status"))).toBeLessThan(ladderTop);
+  expect(await topOf(page.getByTestId("order-estimate"))).toBeLessThan(ladderTop);
+  expect(await topOf(page.getByTestId("order-total-ask"))).toBeGreaterThanOrEqual(ladderBottom);
+  expect(await topOf(page.getByTestId("order-total-sell"))).toBeGreaterThan(await topOf(page.getByTestId("order-total-ask")));
+  await expect(page.getByTestId("order-tape")).toHaveCount(0);
+  await expect(page.getByTestId("order-quote")).toHaveCount(0);
+});
+
+test("정보 7항목이 사다리 1~7행과 같은 top에 있고 값이 맞다", async ({ page, scenario }) => {
+  ordersOn(scenario);
+  tradingApi(scenario);
+  await openOrderWindow(page, scenario);
+  const info = page.getByTestId("ladder-info");
+  await expect(info).toHaveCount(7);
+  await expect(info.filter({ hasText: "현재가" })).toContainText("70,000");
+  await expect(info.filter({ hasText: "상한가" })).toContainText("91,000");
+  await expect(info.filter({ hasText: "하한가" })).toContainText("49,000");
+  expect(await tops(info)).toEqual((await tops(ladderRows(page))).slice(0, 7));
+});
+
+test("체결강도는 13행, 최근 체결은 14행부터 같은 top에 있고 새 체결이 맨 위이며 대량 글자와 막대가 없다", async ({ page, scenario }) => {
+  ordersOn(scenario);
+  tradingApi(scenario);
+  await openOrderWindow(page, scenario);
+  lastTrade(scenario, 70_000, 1, 3, "krx");
+  lastTrade(scenario, 70_100, 2, 1_200_000, "krx");
+  await expect(page.getByTestId("ladder-trade")).toHaveCount(2);
+  await expect(page.getByTestId("ladder-strength")).toContainText("101.50%");
+  const rowTops = await tops(ladderRows(page));
+  expect(await tops(page.getByTestId("ladder-strength"))).toEqual([rowTops[12]]);
+  expect(await tops(page.getByTestId("ladder-trade"))).toEqual(rowTops.slice(13, 15));
+  await expect(page.getByTestId("ladder-trade").first()).toHaveAttribute("data-price", "70100");
+  lastTrade(scenario, 70_200, 3, 3, "krx");
+  await expect(page.getByTestId("ladder-trade").first()).toHaveAttribute("data-price", "70200");
+  await expect(win(page)).not.toContainText("대량");
+  await expect(page.locator(".mw-trade i")).toHaveCount(0);
+});
+
+test("교차 호가로 위 오른쪽 칸에 매수 잔량이 있으면 그 행은 잔량을 보이고 그 정보 항목은 보이지 않는다", async ({ page, scenario }) => {
+  ordersOn(scenario);
+  tradingApi(scenario);
+  await openOrderWindow(page, scenario);
+  let sub = "";
+  await expect.poll(() => {
+    const message = scenario.live.messages.find((m) => m.type === "subscribe_feed" && m.kind === "book" && m.symbol === CODE);
+    sub = message?.type === "subscribe_feed" ? message.sub : "";
+    return sub;
+  }).not.toBe("");
+  scenario.live.emit({ type: "feed_book", sub, book: { t: 1, asks: [{ price: 70_100, qty: 50 }], bids: [{ price: 70_700, qty: 33 }, { price: 70_000, qty: 80 }], totalAskQty: 50, totalBidQty: 113, expected: null } });
+  const crossed = ladderRows(page).filter({ has: page.locator(".mw-px-num", { hasText: /^70,700$/ }) });
+  await expect(crossed.locator(".mw-qty[data-side=bid] .mw-qty-value")).toHaveText("33주");
+  await expect(crossed.getByTestId("ladder-info")).toHaveCount(0);
+  const info = page.getByTestId("ladder-info");
+  await expect(info).toHaveCount(6);
+  await expect(info.filter({ hasText: "하한가" })).toContainText("49,000");
 });
