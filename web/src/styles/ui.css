@@ -89,6 +89,9 @@
 .dock-tab:focus-visible { box-shadow:inset 0 0 0 var(--size-2) var(--accent); }
 .dock-tab[aria-selected=true] { background:var(--raised); color:var(--text); font-weight:650; }
 .dock-group[data-kind=chart] .dock-tab[aria-selected=true] { background:var(--surface); }
+.dock-restore { flex:none; align-self:center; padding:var(--size-2) var(--size-8); border-radius:var(--r-m); color:var(--text-2); font-size:var(--fs-s); }
+.dock-restore:hover { background:var(--hover); color:var(--text); }
+.dock-restore:focus-visible { outline:none; box-shadow:inset 0 0 0 var(--size-2) var(--accent); }
 .dock-tab-name { min-width:0; overflow:hidden; text-overflow:ellipsis; }
 .dock-tab-sub { color:var(--text-3); font-weight:500; }
 .dock-tab:has(+ .link-dot) { position:relative; padding-right:var(--size-32); }

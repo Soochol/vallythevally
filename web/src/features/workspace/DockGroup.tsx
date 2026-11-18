@@ -78,7 +78,7 @@ const TAB_KEYS: Record<string, (index: number, count: number) => number> = {
   End: (_index, count) => count - 1,
 };
 
-export function DockGroup({ group, rect, number, interaction }: { group: GroupNode; rect: Rect; number: number; interaction: Pick<DockInteraction, "selectTab" | "keyTab" | "pressTab" | "contextTab"> }) {
+export function DockGroup({ group, rect, number, interaction, maximized, onToggleMaximize }: { group: GroupNode; rect: Rect; number: number; interaction: Pick<DockInteraction, "selectTab" | "keyTab" | "pressTab" | "contextTab">; maximized: boolean; onToggleMaximize(): void }) {
   const windows = useLayoutStore((s) => s.layout.windows);
   const activeCell = useSelectionStore((s) => s.activeCell);
   const shown = windows.find((w) => w.id === group.active);
@@ -97,7 +97,7 @@ export function DockGroup({ group, rect, number, interaction }: { group: GroupNo
   return (
     <div data-dock-group={group.id} data-kind={shown.kind} data-active-cell={shown.id === activeCell ? "" : undefined} className="dock-group"
       style={{ left: rect.x, top: rect.y, width: rect.w, height: rect.h }}>
-      <div role="tablist" aria-label={`창 묶음 ${number}`} className="dock-tabs">
+      <div role="tablist" aria-label={`창 묶음 ${number}`} className="dock-tabs" onDoubleClick={(event) => { if (!(event.target instanceof Element) || !event.target.closest("button, .link-dot")) onToggleMaximize(); }}>
         {group.tabs.map((tab) => {
           const window = windows.find((w) => w.id === tab);
           if (!window) return null;
@@ -116,6 +116,7 @@ export function DockGroup({ group, rect, number, interaction }: { group: GroupNo
           );
         })}
         <AddWindowMenu targetGroup={group.id} />
+        {maximized && <button type="button" className="dock-restore" aria-label="원래 크기로" title="원래 크기로" onClick={onToggleMaximize}>↙</button>}
       </div>
       <div id={panelId(group.id)} role="tabpanel" aria-labelledby={tabId(shown.id)} data-window-id={shown.id} className={`dock-panel ${overflow === "auto" ? "overflow-auto" : "overflow-hidden"}`} />
     </div>
