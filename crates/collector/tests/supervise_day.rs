@@ -10,7 +10,7 @@ use collector::keys::{ActiveKey, KeyIdentity, KeyRole};
 use collector::plan::{InputSummary, KeyShare, MARKET_TYPES, PlanFile, read_plan, write_plan};
 use collector::protocol::{Command, Event, KeyName, SessionState};
 use collector::supervise::{
-    ChildMessage, ChildProcess, Daemon, DaemonInjected, DaemonInputs, DaemonStatus, DayPhase, FinalizeRunner, Injected, Inputs, Launcher, ScheduleSettings,
+    ChildMessage, ChildProcess, Daemon, DaemonInjected, DaemonInputs, DaemonStartError, DaemonStatus, DayPhase, FinalizeRunner, Injected, Inputs, Launcher, ScheduleSettings,
     Settings, SocketSetting, Spawned, Supervisor, journal_path,
 };
 use domain::{KstDate, KstTime};
@@ -1060,4 +1060,30 @@ async fn a_restart_after_a_missing_zero_s_keeps_the_missing_result() {
     let complete = second.complete();
     assert_eq!(complete["observation"]["market_open"]["state"], "missing", "다시 뜬 데몬이 이미 적힌 0s 없음을 덮으면 안 된다");
     second.finish().await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_second_daemon_on_a_live_status_socket_does_not_start_even_without_an_explicit_socket_option() {
+    let harness = Harness::start(Config { socket: true, ..Config::default() });
+    let other_folder = tempfile::tempdir().unwrap();
+    write(&other_folder.path().join("holiday-key"), SERVICE_KEY);
+    let second = Daemon::start(
+        DaemonInputs {
+            keys: active_keys(other_folder.path()),
+            data_dir: other_folder.path().join("data"),
+            supervisor: Settings { status_socket: Some(SocketSetting { path: harness.socket(), required: false }), ..Settings::default() },
+            schedule: Config::default().schedule,
+            holiday_key_path: other_folder.path().join("holiday-key"),
+        },
+        DaemonInjected {
+            launcher: harness.launcher.clone(),
+            transport: harness.kiwoom.clone(),
+            holidays: harness.holidays.clone(),
+            finalizer: harness.finalizer.clone(),
+            clock: harness.clock.clone(),
+        },
+    );
+    let Err(DaemonStartError::StatusSocket { error, .. }) = second else { panic!("살아 있는 소켓을 두고 시작했다") };
+    assert_eq!(error.kind(), std::io::ErrorKind::AddrInUse);
+    assert!(Client::connect(&harness.socket()).await.status().await["type"] == "status");
 }
