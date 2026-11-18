@@ -25,14 +25,12 @@
 .od-ghost { position:fixed; z-index:60; transform:translate(var(--size-10), var(--size-10)); padding:var(--size-2) var(--s3); border-radius:var(--r-m); background:var(--raised); box-shadow:0 2px 10px rgb(0 0 0 / .35); color:var(--text); font-size:var(--fs-xs); pointer-events:none; white-space:nowrap; }
 .od-ghost[data-side=sell] b { color:var(--down); } .od-ghost[data-side=buy] b { color:var(--up); }
 
-.od-totals { display:flex; flex:none; gap:var(--s3); padding:var(--s3) var(--s4); border-top:var(--size-1) solid var(--line); }
-.od-total { flex:1; padding:var(--s2) var(--s3); border-radius:var(--r-m); background:var(--raised); color:var(--text-2); font-size:var(--fs-xs); text-align:left; }
-.od-total:hover { background:var(--hover); }
-.od-total[data-side=sell] b { color:var(--down); } .od-total[data-side=buy] b { color:var(--up); }
-.od-list { flex:none; max-height:var(--size-84); margin:0; padding:var(--s2) var(--s4); overflow:auto; list-style:none; font-size:var(--fs-xs); }
-.od-list li { display:flex; align-items:center; gap:var(--s4); height:var(--size-24); }
-.od-list li[data-side=sell] > span:first-child { color:var(--down); } .od-list li[data-side=buy] > span:first-child { color:var(--up); }
-.od-list li button { margin-left:auto; }
+.od-totals { display:flex; flex:none; justify-content:space-between; padding:var(--s2) var(--s4); }
+.od-total { width:var(--size-64); height:var(--size-20); padding:0; border:var(--size-1) solid var(--line); border-radius:var(--r-s); font-size:var(--size-11); font-weight:700; font-variant-numeric:tabular-nums; white-space:nowrap; color:var(--text); }
+.od-total[data-side=sell] { background:color-mix(in srgb, var(--down) 7%, transparent); }
+.od-total[data-side=buy] { background:color-mix(in srgb, var(--up) 7%, transparent); }
+.od-total:hover { border-color:var(--line-strong); }
+.od-total[data-empty] { opacity:.45; }
 .od-list-empty { margin:0; color:var(--text-3); }
 
 .od-qty { display:flex; flex:none; flex-direction:column; gap:var(--s3); padding:var(--s3) var(--s4); border-top:var(--size-1) solid var(--line); }

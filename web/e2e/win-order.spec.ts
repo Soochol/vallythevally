@@ -1,4 +1,4 @@
-import type { Page } from "@playwright/test";
+import type { Locator, Page } from "@playwright/test";
 import type { FeedBook } from "../src/api/generated/FeedBook";
 import { type Scenario, cell, DEFAULT_LAYOUT_ID, expect, pickDesktopVenue, test, windowTabs, pollSaved } from "./harness";
 import { DEFAULT_ORDER_SETTINGS } from "../src/features/order/orderSettings";
@@ -125,17 +125,69 @@ test("NXT에서 거래되는 종목은 경로가 NXT여도 경고 없이 신규�
   expect(writesTo(api, "place")[0]!.body.venue).toBe("nxt");
 });
 
-test("걸린 주문은 같은 가격 합계의 칩이고 총 접수 행이 방향별 수량과 건수를 보인다", async ({ page, scenario }) => {
+test("걸린 주문은 같은 가격 합계의 칩이고 사다리 아래 두 칸이 방향별 수량과 건수를 보인다", async ({ page, scenario }) => {
   ordersOn(scenario);
   tradingApi(scenario, [openOrder("0000001", "buy", 70_000, 5), openOrder("0000002", "buy", 70_000, 7), openOrder("0000003", "sell", 70_100, 4)]);
   await openOrderWindow(page, scenario);
   await expect(chipAt(page, "buy", 70_000)).toHaveText("12");
   await expect(chipAt(page, "sell", 70_100)).toHaveText("4");
-  await expect(page.getByTestId("order-total-buy")).toContainText("매수 접수 12주 (2건)");
-  await expect(page.getByTestId("order-total-sell")).toContainText("매도 접수 4주 (1건)");
-  await page.getByTestId("order-total-buy").click();
-  await expect(page.getByTestId("order-list").locator("li")).toHaveCount(3);
+  await expect(page.getByTestId("order-total-buy")).toHaveText("12 (2)");
+  await expect(page.getByTestId("order-total-buy")).toHaveAccessibleName("매수 접수 12주 2건");
+  await expect(page.getByTestId("order-total-sell")).toHaveText("4 (1)");
+  await expect(page.getByTestId("order-total-sell")).toHaveAccessibleName("매도 접수 4주 1건");
+  await expect(page.getByText("매도 접수", { exact: true })).toHaveCount(0);
+  await expect(page.getByText("매수 접수", { exact: true })).toHaveCount(0);
+  await expect(page.getByTestId("order-list")).toHaveCount(0);
   await page.screenshot({ path: "../target/ux-screens/win-order.png" });
+});
+
+test("접수 합계 칸은 사다리 주문 칸과 같은 열이고 사다리와 총잔량 띠 사이 줄에 있다", async ({ page, scenario }) => {
+  ordersOn(scenario);
+  tradingApi(scenario, [openOrder("0000001", "buy", 70_000, 5), openOrder("0000003", "sell", 70_100, 4)]);
+  await openOrderWindow(page, scenario);
+  const box = async (locator: Locator) => (await locator.boundingBox())!;
+  const sell = await box(page.getByTestId("order-total-sell"));
+  const buy = await box(page.getByTestId("order-total-buy"));
+  const sellCell = await box(cellAt(page, "sell", 70_100));
+  const buyCell = await box(cellAt(page, "buy", 70_000));
+  expect(Math.abs(sell.x - sellCell.x)).toBeLessThanOrEqual(1);
+  expect(Math.abs(sell.width - sellCell.width)).toBeLessThanOrEqual(1);
+  expect(Math.abs(buy.x - buyCell.x)).toBeLessThanOrEqual(1);
+  expect(Math.abs(buy.width - buyCell.width)).toBeLessThanOrEqual(1);
+  expect(sell.y).toBe(buy.y);
+  const ladder = await box(page.getByTestId("order-ladder"));
+  expect(sell.y).toBeGreaterThanOrEqual(ladder.y + ladder.height - 1);
+  expect(sell.y + sell.height).toBeLessThanOrEqual((await box(page.getByTestId("order-total-ask"))).y);
+});
+
+test("접수 합계 칸을 누르면 주문 메뉴가 열려 주문 하나 또는 그 쪽 전부를 취소한다", async ({ page, scenario }) => {
+  ordersOn(scenario);
+  const api = tradingApi(scenario, [openOrder("0000001", "buy", 70_000, 5), openOrder("0000002", "buy", 70_000, 7), openOrder("0000003", "sell", 70_100, 4)]);
+  await openOrderWindow(page, scenario);
+  const total = page.getByTestId("order-total-buy");
+  await total.click();
+  const menu = page.getByRole("menu", { name: "매수 접수 주문" });
+  await expect(menu).toContainText("매수 접수 2건");
+  await expect(menu.getByRole("menuitem")).toHaveText(["70,000원 · 5주", "70,000원 · 7주", "매수 모두 취소"]);
+  await menu.getByRole("menuitem", { name: "70,000원 · 5주" }).click();
+  await pollSaved(() => writesTo(api, "cancel")).toHaveLength(1);
+  expect(writesTo(api, "cancel")[0]!.body).toMatchObject({ orderNo: "0000001" });
+  await total.click();
+  await page.getByRole("menuitem", { name: "매수 모두 취소" }).click();
+  await pollSaved(() => writesTo(api, "cancel-batch")).toHaveLength(1);
+  expect(writesTo(api, "cancel-batch")[0]!.body).toMatchObject({ code: CODE, side: "buy", price: 70_000 });
+});
+
+test("접수 주문이 없으면 두 칸이 0 (0)이고 메뉴는 안내만 보인다", async ({ page, scenario }) => {
+  ordersOn(scenario);
+  tradingApi(scenario, []);
+  await openOrderWindow(page, scenario);
+  await expect(page.getByTestId("order-total-buy")).toHaveText("0 (0)");
+  await expect(page.getByTestId("order-total-sell")).toHaveText("0 (0)");
+  await page.getByTestId("order-total-sell").click();
+  const menu = page.getByRole("menu", { name: "매도 접수 주문" });
+  await expect(menu).toContainText("걸려 있는 주문이 없습니다");
+  await expect(menu.getByRole("menuitem")).toHaveCount(0);
 });
 
 test("칩을 같은 방향 칸으로 끌면 정정이고 고스트가 새 가격을 보인다", async ({ page, scenario }) => {
@@ -290,6 +342,21 @@ test("주문 사용이 꺼져 있으면 주문 칸을 막고 이유와 시스템
   expect(api.writes).toHaveLength(0);
   await page.getByTestId("order-gate").getByRole("button", { name: "시스템 설정 열기" }).click();
   await expect(page.getByRole("dialog")).toBeVisible();
+});
+
+test("쓰기가 막혀 있으면 접수 합계 메뉴의 취소 항목이 꺼져 있다", async ({ page, scenario }) => {
+  ordersOn(scenario);
+  const api = tradingApi(scenario, [openOrder("0000001", "buy", 70_000, 5)]);
+  await openOrderWindow(page, scenario);
+  api.placeReply = { state: "unknown", orderNo: null };
+  api.blocked = true;
+  await cellAt(page, "buy", 69_900).dblclick();
+  await expect(win(page)).not.toHaveAttribute("data-writable", "");
+  const before = api.writes.length;
+  await page.getByTestId("order-total-buy").click();
+  await expect(page.getByRole("menuitem", { name: "70,000원 · 5주" })).toBeDisabled();
+  await expect(page.getByRole("menuitem", { name: "매수 모두 취소" })).toBeDisabled();
+  expect(api.writes).toHaveLength(before);
 });
 
 test("창 더하기 메뉴에서 호가주문 창이 열리고 하나만 만들어진다", async ({ page, scenario }) => {

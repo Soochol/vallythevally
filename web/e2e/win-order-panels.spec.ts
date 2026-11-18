@@ -380,7 +380,7 @@ test("설정 창은 Esc와 바깥 클릭으로 닫히고 머리에 적용 범위
   await expect(page.getByTestId("order-settings")).toHaveCount(0);
 });
 
-test("주문 입력과 상태 줄은 사다리 위에, 총잔량 띠와 접수 합계는 사다리 아래에 있다", async ({ page, scenario }) => {
+test("주문 입력과 상태 줄은 사다리 위에, 총잔량 띠와 그 위 접수 합계 줄은 사다리 아래에 있다", async ({ page, scenario }) => {
   ordersOn(scenario);
   tradingApi(scenario);
   await openOrderWindow(page, scenario);
@@ -394,7 +394,8 @@ test("주문 입력과 상태 줄은 사다리 위에, 총잔량 띠와 접수 �
   expect(await topOf(page.getByTestId("order-status"))).toBeLessThan(ladderTop);
   expect(await topOf(page.getByTestId("order-estimate"))).toBeLessThan(ladderTop);
   expect(await topOf(page.getByTestId("order-total-ask"))).toBeGreaterThanOrEqual(ladderBottom);
-  expect(await topOf(page.getByTestId("order-total-sell"))).toBeGreaterThan(await topOf(page.getByTestId("order-total-ask")));
+  expect(await topOf(page.getByTestId("order-total-sell"))).toBeGreaterThanOrEqual(ladderBottom);
+  expect(await topOf(page.getByTestId("order-total-sell"))).toBeLessThan(await topOf(page.getByTestId("order-total-ask")));
   await expect(page.getByTestId("order-tape")).toHaveCount(0);
   await expect(page.getByTestId("order-quote")).toHaveCount(0);
 });

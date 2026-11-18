@@ -5,7 +5,6 @@
     "drawing-dock-collapse.spec.ts": 2,
     "drawing-tools-all.spec.ts": 1,
     "drawing-tools-measure.spec.ts": 1,
-    "drawing-tools-pattern.spec.ts": 1,
     "drawing-tools-shape.spec.ts": 1,
     "pending-frame-series.spec.ts": 1,
     "setup-wizard.spec.ts": 1,
