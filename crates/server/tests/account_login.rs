@@ -147,6 +147,14 @@ impl Connector {
         body
     }
 
+    async fn wait_for_the_login_sync(&self) {
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
+        while self.status().await["sync"]["lastSuccessAt"].is_null() {
+            assert!(tokio::time::Instant::now() < deadline, "로그인이 깨운 동기화가 끝나지 않았다");
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    }
+
     async fn start_login(&self, provider: &str) -> String {
         let (status, body) = self.post("/api/account/login", &json!({"provider": provider})).await;
         assert_eq!(status, 200, "{body}");
@@ -397,6 +405,7 @@ async fn refresh_signs_out_a_token_the_account_server_no_longer_knows_and_keeps_
     let (accounts, machine) = (Accounts::start().await, Machine::new());
     let connector = machine.run(Some(&accounts.base)).await;
     connector.login_ok(&accounts, "google").await;
+    connector.wait_for_the_login_sync().await;
     let (status, body) = connector.post("/api/account/refresh", &json!({})).await;
     assert_eq!((status, body["state"].clone()), (200, json!("signed_in")));
 

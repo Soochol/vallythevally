@@ -330,12 +330,37 @@ impl Fixture {
         body["access"].as_str().unwrap().to_owned()
     }
 
+    async fn in_real_time<T>(&self, work: impl std::future::Future<Output = T>) -> T {
+        let paused = self.running.is_some();
+        if paused {
+            tokio::time::resume();
+        }
+        let done = work.await;
+        if paused {
+            tokio::time::pause();
+        }
+        done
+    }
+
+    async fn wait_until_the_browser_is_told_of_the_login(&self, browser: &mut Socket) {
+        self.in_real_time(async {
+            loop {
+                let account = next_message_of_type(browser, "account", WAIT).await.expect("로그인을 브라우저에 알리지 않았다");
+                if account["status"]["state"] == "signed_in" {
+                    break;
+                }
+            }
+        })
+        .await;
+    }
+
     async fn sign_in(&self) {
         let account = self.state.system.account();
         let now = UnixSeconds(self.state.clock.now().unix());
         let start = account.start_login(now, AccountProvider::Google, 1).unwrap();
         let state = reqwest::Url::parse(&start).unwrap().query_pairs().find(|(key, _)| key == "state").unwrap().1.into_owned();
-        account.complete_login(&self.state.db, now, CompleteQuery { code: Some("code".into()), state: Some(state), error: None }).await.unwrap();
+        let completed = self.in_real_time(account.complete_login(&self.state.db, now, CompleteQuery { code: Some("code".into()), state: Some(state), error: None })).await;
+        completed.unwrap();
     }
 
     async fn sign_in_as(&self, subject: Option<&str>) {
@@ -344,7 +369,7 @@ impl Fixture {
     }
 
     async fn sign_out(&self) {
-        self.state.system.account().logout().await.unwrap();
+        self.in_real_time(self.state.system.account().logout()).await.unwrap();
     }
 
     async fn reached(&self, judgment: DaemonJudgment) {
@@ -750,6 +775,7 @@ async fn the_browser_notice_reaches_a_connection_only_while_the_current_login_is
     assert!(next_message_of_type(&mut browser, "collector_daemon", Duration::from_secs(10)).await.is_none(), "로그인 없음에는 보내지 않는다");
 
     fixture.sign_in_as(Some("1234")).await;
+    fixture.wait_until_the_browser_is_told_of_the_login(&mut browser).await;
     let mut daemon = Daemon::start(&fixture.socket, Mode::Beating);
     fixture.reached(DaemonJudgment::Healthy).await;
     daemon.stop().await;
@@ -766,6 +792,7 @@ async fn the_browser_notice_reaches_a_connection_only_while_the_current_login_is
 
     fixture.sign_out().await;
     fixture.sign_in_as(Some("9999")).await;
+    fixture.wait_until_the_browser_is_told_of_the_login(&mut browser).await;
     let mut daemon = Daemon::start(&fixture.socket, Mode::Beating);
     fixture.reached(DaemonJudgment::Healthy).await;
     daemon.stop().await;
