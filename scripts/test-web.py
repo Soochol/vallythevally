@@ -529,9 +529,11 @@ class WebRunsRetentionTest(unittest.TestCase):
         (nan / "manifest.json").write_text('{"status": "passed", "started_at": NaN}')
         deep = self.make("e2e-deep", "passed", age=2 * self.HOUR)
         (deep / "manifest.json").write_text("[" * 200000)
+        huge = self.make("e2e-huge", "passed", age=3 * self.HOUR)
+        (huge / "manifest.json").write_text('{"status": "passed", "started_at": ' + "9" * 400 + "}")
         self.make("e2e-pass5", "passed", started_at=1005, age=100 * self.HOUR)
         self.prune()
-        self.assertEqual(self.names(), {"e2e-pass5", "e2e-pass4", "e2e-pass3", "e2e-pass2", "e2e-nan", "e2e-deep"})
+        self.assertEqual(self.names(), {"e2e-pass5", "e2e-pass4", "e2e-pass3", "e2e-nan", "e2e-huge", "e2e-deep"})
 
     def test_recent_running_and_manifestless_are_protected_and_uncounted(self):
         for index in range(10):

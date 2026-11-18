@@ -38,7 +38,11 @@ def run_directory_state(directory, now):
     except (OSError, ValueError, KeyError, TypeError, RecursionError):
         status, manifest_modified = None, modified
     started = manifest.get("started_at") if status is not None and isinstance(manifest, dict) else None
-    order = started if isinstance(started, (int, float)) and math.isfinite(started) else modified
+    order = modified
+    if isinstance(started, (int, float)):
+        with contextlib.suppress(OverflowError):
+            if math.isfinite(started):
+                order = started
     if status == "passed":
         return "passed", order
     if status in (None, "running"):
