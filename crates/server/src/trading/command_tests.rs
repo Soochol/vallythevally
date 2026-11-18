@@ -292,6 +292,35 @@ async fn a_batch_cancel_queues_one_cancel_per_matching_order_and_is_idempotent()
 }
 
 #[tokio::test]
+async fn a_batch_id_reused_with_other_terms_is_refused_and_sends_nothing() {
+    let f = on().await;
+    let id = "batch-guard-01";
+    let (code, first) = order(&f.app, CANCEL_BATCH, json!({"batchId": id, "code": "005930", "side": "buy", "price": 71_000})).await;
+    assert_eq!(code, StatusCode::OK, "{first}");
+    assert_eq!(writes(&f).len(), 1);
+    for other in [json!({"batchId": id, "code": "005930", "side": "sell", "price": 72_000}), json!({"batchId": id, "code": "000660", "side": "buy", "price": 71_000}), json!({"batchId": id, "code": "005930", "side": "buy", "price": 71_100})] {
+        let (code, body) = order(&f.app, CANCEL_BATCH, other.clone()).await;
+        assert_eq!(code, StatusCode::BAD_REQUEST, "{other} {body}");
+    }
+    assert_eq!(writes(&f).len(), 1, "다른 내용의 같은 batchId는 취소를 더 보내지 않는다");
+    let (code, same) = order(&f.app, CANCEL_BATCH, json!({"batchId": id, "code": "005930", "side": "buy", "price": 71_000})).await;
+    assert_eq!((code, &same["commands"]), (StatusCode::OK, &first["commands"]));
+    assert_eq!(writes(&f).len(), 1);
+}
+
+#[tokio::test]
+async fn a_repeated_batch_returns_its_first_result_without_asking_kiwoom_again() {
+    let f = on().await;
+    let batch = json!({"batchId": "batch-guard-02", "code": "005930", "side": "buy", "price": 71_000});
+    let (_, first) = order(&f.app, CANCEL_BATCH, batch.clone()).await;
+    assert_eq!(first["commands"].as_array().unwrap().len(), 1, "{first}");
+    let sent_before = trading_sends(&f.fake).len();
+    let (code, again) = order(&f.app, CANCEL_BATCH, batch).await;
+    assert_eq!((code, &again["commands"]), (StatusCode::OK, &first["commands"]));
+    assert_eq!(trading_sends(&f.fake).len(), sent_before, "되풀이는 키움에 아무것도 보내지 않는다");
+}
+
+#[tokio::test]
 async fn writes_for_one_account_run_one_at_a_time() {
     let f = fixture_with(Duration::from_millis(150), Duration::ZERO).await;
     assert_eq!(enable(&f.app, "01").await.0, StatusCode::OK);

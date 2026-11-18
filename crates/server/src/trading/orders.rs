@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use domain::{StockCode, Symbol, SymbolInfo, Venue};
 
-use super::journal::{Begun, JournalError, Prepared};
+use super::journal::{BatchBegun, Begun, JournalError, Prepared, PreparedBatch};
 use super::request::{BuyOrder, CancelOrder, LimitOrder, ModifyOrder, OrderAck, OrderNumber, OrderRoute, SellOrder, TradingRequest};
 use super::service::{OpenEntry, Trading, TradingError};
 use super::switch::SwitchRecord;
@@ -200,34 +200,37 @@ impl Trading {
 
     async fn cancel_batch_detached(self: &Arc<Self>, input: api::OrderCancelBatchInput, code: StockCode, account_ref: String) -> Result<api::OrderCommands, TradingError> {
         self.ready().await?;
+        let batch = PreparedBatch { batch_id: input.batch_id.clone(), account_ref: account_ref.clone(), code: code.as_str().to_owned(), side: input.side, price: input.price };
+        if let Some(recorded) = self.journal.existing_batch(&batch).await? {
+            return self.batch_reply(account_ref, recorded).await;
+        }
         let (_, entries) = self.open_entries(Priority::Order).await?;
         let mut targets: Vec<String> = entries.into_iter().filter(|e| e.order.code == code.as_str() && e.order.side == input.side && e.order.price == input.price && e.order.open_quantity > 0).map(|e| e.order.order_no).collect();
         targets.sort();
-        let mut commands = Vec::new();
-        let mut created = Vec::new();
-        for order_no in targets {
-            let command_id = format!("{}_{order_no}", input.batch_id);
-            let target = OrderNumber::parse(&order_no).expect("목록에서 읽은 주문번호는 형식을 이미 확인했다");
-            let prepared = Prepared { command_id, account_ref: account_ref.clone(), kind: OrderCommandKind::Cancel, code: None, venue: None, quantity: None, price: None, target_order_no: Some(order_no) };
-            match self.journal.begin(&prepared, self.clock.now().unix()).await? {
-                Begun::Created(command) => {
-                    created.push((command.command_id.clone(), Work::Cancel { order_no: target }));
-                    commands.push(command);
-                }
-                Begun::Existing(command) => commands.push(command),
-                Begun::DifferentRequest => return Err(TradingError::BadRequest("같은 batch_id가 다른 내용으로 왔습니다")),
-            }
-        }
+        let cancels: Vec<Prepared> = targets.iter().map(|order_no| Prepared { command_id: format!("{}_{order_no}", input.batch_id), account_ref: account_ref.clone(), kind: OrderCommandKind::Cancel, code: None, venue: None, quantity: None, price: None, target_order_no: Some(order_no.clone()) }).collect();
+        let begun = self.journal.begin_batch(&batch, &cancels, self.clock.now().unix()).await?;
+        let BatchBegun::Created(_) = begun else {
+            return self.batch_reply(account_ref, begun).await;
+        };
         let turn = self.turn_of(&account_ref);
         {
             let _turn = turn.lock().await;
-            for (id, work) in created {
-                if let Err(e) = self.execute(&id, &account_ref, work).await {
+            for cancel in &cancels {
+                let target = OrderNumber::parse(cancel.target_order_no.as_deref().expect("일괄 취소 명령은 대상 주문번호를 가진다")).expect("목록에서 읽은 주문번호는 형식을 이미 확인했다");
+                if let Err(e) = self.execute(&cancel.command_id, &account_ref, Work::Cancel { order_no: target }).await {
                     tracing::error!(error = %e, "일괄 취소의 한 명령이 저널 오류로 끝났습니다");
                 }
             }
         }
         self.notify(account_ref.clone());
+        self.batch_reply(account_ref, begun).await
+    }
+
+    async fn batch_reply(&self, account_ref: String, begun: BatchBegun) -> Result<api::OrderCommands, TradingError> {
+        let mut commands = match begun {
+            BatchBegun::Created(commands) | BatchBegun::Existing(commands) => commands,
+            BatchBegun::DifferentRequest => return Err(TradingError::BadRequest("같은 batch_id가 다른 내용으로 왔습니다")),
+        };
         for command in &mut commands {
             if let Some(done) = self.journal.get(&command.command_id).await? {
                 *command = done;

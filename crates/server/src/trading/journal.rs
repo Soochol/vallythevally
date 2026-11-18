@@ -2,9 +2,10 @@ use domain::Venue;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 use sqlx::Row;
+use sqlx::SqliteConnection;
 use sqlx::sqlite::SqliteRow;
 
-use crate::api::{OrderCommand, OrderCommandKind, OrderCommandState, OrderRejectReason, UnixSeconds};
+use crate::api::{OrderCommand, OrderCommandKind, OrderCommandState, OrderRejectReason, OrderSide, UnixSeconds};
 use crate::db::AppDb;
 
 const RECENT_COMMANDS: i64 = 50;
@@ -39,6 +40,26 @@ impl Prepared {
     fn fingerprint(&self) -> String {
         format!("{}|{}|{}|{}|{}|{}", wire(&self.kind), self.code.as_deref().unwrap_or(""), self.venue.map_or("", Venue::as_wire), self.quantity.unwrap_or(0), self.price.unwrap_or(0), self.target_order_no.as_deref().unwrap_or(""))
     }
+}
+
+pub struct PreparedBatch {
+    pub batch_id: String,
+    pub account_ref: String,
+    pub code: String,
+    pub side: OrderSide,
+    pub price: u64,
+}
+
+impl PreparedBatch {
+    fn fingerprint(&self) -> String {
+        format!("{}|{}|{}|{}", self.account_ref, self.code, wire(&self.side), self.price)
+    }
+}
+
+pub enum BatchBegun {
+    Created(Vec<OrderCommand>),
+    Existing(Vec<OrderCommand>),
+    DifferentRequest,
 }
 
 pub enum Begun {
@@ -83,6 +104,46 @@ fn command_of(row: &SqliteRow) -> Result<OrderCommand, JournalError> {
     })
 }
 
+async fn begin_in(conn: &mut SqliteConnection, command: &Prepared, batch_id: Option<&str>, now: i64) -> Result<Begun, JournalError> {
+    let fingerprint = command.fingerprint();
+    if let Some(row) = sqlx::query("SELECT *, fingerprint AS stored FROM order_commands WHERE command_id = ?").bind(&command.command_id).fetch_optional(&mut *conn).await? {
+        let stored: String = row.try_get("stored")?;
+        let existing = command_of(&row)?;
+        return Ok(if stored == fingerprint { Begun::Existing(existing) } else { Begun::DifferentRequest });
+    }
+    sqlx::query(
+        "INSERT INTO order_commands (command_id, account_ref, fingerprint, kind, code, venue, quantity, price, target_order_no, batch_id, state, created_at, updated_at) \
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'prepared', ?, ?)",
+    )
+    .bind(&command.command_id)
+    .bind(&command.account_ref)
+    .bind(&fingerprint)
+    .bind(wire(&command.kind))
+    .bind(&command.code)
+    .bind(command.venue.map(Venue::as_wire))
+    .bind(command.quantity.map(|q| q as i64))
+    .bind(command.price.map(|p| p as i64))
+    .bind(&command.target_order_no)
+    .bind(batch_id)
+    .bind(now)
+    .bind(now)
+    .execute(&mut *conn)
+    .await?;
+    let row = sqlx::query("SELECT * FROM order_commands WHERE command_id = ?").bind(&command.command_id).fetch_one(&mut *conn).await?;
+    Ok(Begun::Created(command_of(&row)?))
+}
+
+async fn recorded_batch(conn: &mut SqliteConnection, batch: &PreparedBatch) -> Result<Option<BatchBegun>, JournalError> {
+    let Some(stored) = sqlx::query_scalar::<_, String>("SELECT fingerprint FROM order_batches WHERE batch_id = ?").bind(&batch.batch_id).fetch_optional(&mut *conn).await? else {
+        return Ok(None);
+    };
+    if stored != batch.fingerprint() {
+        return Ok(Some(BatchBegun::DifferentRequest));
+    }
+    let rows = sqlx::query("SELECT * FROM order_commands WHERE batch_id = ? ORDER BY rowid").bind(&batch.batch_id).fetch_all(&mut *conn).await?;
+    Ok(Some(BatchBegun::Existing(rows.iter().map(command_of).collect::<Result<_, _>>()?)))
+}
+
 #[derive(Clone)]
 pub struct Journal {
     db: AppDb,
@@ -94,34 +155,34 @@ impl Journal {
     }
 
     pub async fn begin(&self, command: &Prepared, now: i64) -> Result<Begun, JournalError> {
-        let fingerprint = command.fingerprint();
         let mut tx = self.db.begin_write().await?;
-        if let Some(row) = sqlx::query("SELECT *, fingerprint AS stored FROM order_commands WHERE command_id = ?").bind(&command.command_id).fetch_optional(&mut *tx).await? {
-            let stored: String = row.try_get("stored")?;
-            let existing = command_of(&row)?;
-            return Ok(if stored == fingerprint { Begun::Existing(existing) } else { Begun::DifferentRequest });
+        let begun = begin_in(&mut tx, command, None, now).await?;
+        if matches!(begun, Begun::Created(_)) {
+            tx.commit().await?;
         }
-        sqlx::query(
-            "INSERT INTO order_commands (command_id, account_ref, fingerprint, kind, code, venue, quantity, price, target_order_no, state, created_at, updated_at) \
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'prepared', ?, ?)",
-        )
-        .bind(&command.command_id)
-        .bind(&command.account_ref)
-        .bind(&fingerprint)
-        .bind(wire(&command.kind))
-        .bind(&command.code)
-        .bind(command.venue.map(Venue::as_wire))
-        .bind(command.quantity.map(|q| q as i64))
-        .bind(command.price.map(|p| p as i64))
-        .bind(&command.target_order_no)
-        .bind(now)
-        .bind(now)
-        .execute(&mut *tx)
-        .await?;
-        let row = sqlx::query("SELECT * FROM order_commands WHERE command_id = ?").bind(&command.command_id).fetch_one(&mut *tx).await?;
-        let created = command_of(&row)?;
+        Ok(begun)
+    }
+
+    pub async fn existing_batch(&self, batch: &PreparedBatch) -> Result<Option<BatchBegun>, JournalError> {
+        let mut conn = self.db.read().acquire().await?;
+        recorded_batch(&mut conn, batch).await
+    }
+
+    pub async fn begin_batch(&self, batch: &PreparedBatch, cancels: &[Prepared], now: i64) -> Result<BatchBegun, JournalError> {
+        let mut tx = self.db.begin_write().await?;
+        if let Some(recorded) = recorded_batch(&mut tx, batch).await? {
+            return Ok(recorded);
+        }
+        sqlx::query("INSERT INTO order_batches (batch_id, account_ref, fingerprint, created_at) VALUES (?, ?, ?, ?)").bind(&batch.batch_id).bind(&batch.account_ref).bind(batch.fingerprint()).bind(now).execute(&mut *tx).await?;
+        let mut commands = Vec::with_capacity(cancels.len());
+        for cancel in cancels {
+            match begin_in(&mut tx, cancel, Some(&batch.batch_id), now).await? {
+                Begun::Created(command) => commands.push(command),
+                Begun::Existing(_) | Begun::DifferentRequest => return Ok(BatchBegun::DifferentRequest),
+            }
+        }
         tx.commit().await?;
-        Ok(Begun::Created(created))
+        Ok(BatchBegun::Created(commands))
     }
 
     pub async fn get(&self, command_id: &str) -> Result<Option<OrderCommand>, JournalError> {
