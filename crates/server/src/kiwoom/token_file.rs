@@ -167,6 +167,24 @@ mod tests {
         assert_eq!(file.load().unwrap().unwrap().last_request_at, 7);
         let mock = TokenFile::new(file.path().to_owned(), &lock).with_environment(KiwoomEnvironment::Mock);
         assert!(mock.load().is_err());
+        file.save(&saved()).expect("표시 없는 실전 파일에는 실전 프로세스가 쓴다");
+        assert_eq!(file.load().unwrap().unwrap().last_request_at, 9);
+    }
+
+    #[test]
+    fn a_token_file_with_an_unreadable_environment_mark_is_not_overwritten() {
+        let (_dir, lock, file) = temp_token_file();
+        std::fs::DirBuilder::new().recursive(true).mode(0o700).create(file.path().parent().unwrap()).unwrap();
+        for content in [r#"{"environment":"paper","credential":null,"token":null,"last_request_at":7}"#, r#"{"environment":"mock","token":"FAKE-TOKEN-cut""#] {
+            std::fs::write(file.path(), content).unwrap();
+            set_mode(file.path(), 0o600);
+            for environment in [KiwoomEnvironment::Real, KiwoomEnvironment::Mock] {
+                let store = TokenFile::new(file.path().to_owned(), &lock).with_environment(environment);
+                let err = store.save(&saved()).expect_err("표시를 읽을 수 없으면 쓰지 않는다").to_string();
+                assert!(!err.contains("FAKE-"), "{err}");
+                assert_eq!(std::fs::read_to_string(file.path()).unwrap(), content, "파일은 그대로다");
+            }
+        }
     }
 
     fn set_mode(p: &Path, mode: u32) {

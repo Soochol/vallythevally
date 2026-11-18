@@ -160,4 +160,34 @@ mod tests {
         let mock = SwitchStore::file(PrivateFile::new(path), KiwoomEnvironment::Mock);
         assert_eq!(mock.load().unwrap(), None);
     }
+
+    #[test]
+    fn a_switch_file_with_an_unreadable_environment_mark_is_not_overwritten() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("state").join(ORDER_SWITCH_FILE_NAME);
+        SwitchStore::file(PrivateFile::new(path.clone()), KiwoomEnvironment::Real).save(&record(true)).unwrap();
+        let valid = std::fs::read_to_string(&path).unwrap();
+        let unknown = valid.replace("\"environment\":\"real\"", "\"environment\":\"paper\"");
+        assert_ne!(unknown, valid);
+        for content in [unknown, valid[..valid.len() / 2].to_owned()] {
+            std::fs::write(&path, &content).unwrap();
+            for environment in [KiwoomEnvironment::Real, KiwoomEnvironment::Mock] {
+                let store = SwitchStore::file(PrivateFile::new(path.clone()), environment);
+                assert!(store.save(&record(false)).is_err(), "표시를 읽을 수 없으면 쓰지 않는다");
+                assert_eq!(std::fs::read_to_string(&path).unwrap(), content, "파일은 그대로다");
+            }
+        }
+    }
+
+    #[test]
+    fn a_switch_file_without_the_environment_mark_is_written_by_the_real_process() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("state").join(ORDER_SWITCH_FILE_NAME);
+        let real = SwitchStore::file(PrivateFile::new(path.clone()), KiwoomEnvironment::Real);
+        real.save(&record(false)).unwrap();
+        let text = std::fs::read_to_string(&path).unwrap().replace("\"environment\":\"real\",", "");
+        std::fs::write(&path, text).unwrap();
+        real.save(&record(true)).expect("표시 없는 실전 파일에는 실전 프로세스가 쓴다");
+        assert_eq!(real.load().unwrap(), Some(record(true)));
+    }
 }
