@@ -298,6 +298,16 @@ class DevCacheTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             dev.cargo_command(["build", "--release"], False)
 
+    def test_cargo_test_execution_defaults_test_threads_without_touching_compile_or_caller_environment(self):
+        command = dev.cargo_command(["test", "-p", "server"], False)
+        for given, expected in (({}, "8"), ({"RUST_TEST_THREADS": "3"}, "3"), ({"RUST_TEST_THREADS": ""}, "")):
+            compiled, executed, before = [], [], dict(given)
+            with patch.object(dev, "compile_command", side_effect=lambda root, cmd, env: compiled.append(env)), patch.object(dev.evidence, "command", side_effect=lambda cmd, root, env: executed.append(env)):
+                dev.run_cargo(self.root, command, given)
+            self.assertEqual(executed[0]["RUST_TEST_THREADS"], expected)
+            self.assertEqual(compiled[0], given)
+            self.assertEqual(given, before)
+
     def test_fake_only_tests_do_not_prepare_duckdb(self):
         self.assertFalse(dev.needs_duckdb(["cargo", "test", "-p", "domain"]))
         self.assertTrue(dev.needs_duckdb(["cargo", "test", "--workspace"]))
