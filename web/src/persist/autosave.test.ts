@@ -206,6 +206,7 @@ test("UI 설정을 바꾸면 모르는 키와 함께 UiState를 보낸다", asyn
         indicatorWindow: "inspector",
         layoutMode: "dock",
         venue: "combined",
+        orderSettings: DEFAULT_UI_PREFS.orderSettings,
         revision: expect.any(Number),
       },
       keepalive: false,

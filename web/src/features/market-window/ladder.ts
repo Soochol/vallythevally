@@ -15,6 +15,7 @@ export interface LadderRow {
   readonly barRatio: number;
   readonly current: boolean;
   readonly rate: number | null;
+  readonly unquoted?: boolean;
 }
 
 export interface LadderInput {
