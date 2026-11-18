@@ -7,7 +7,7 @@ use std::time::Duration;
 
 use axum::Router;
 use axum::extract::State;
-use axum::http::{StatusCode, header};
+use axum::http::{Method, Uri, header};
 use axum::response::{IntoResponse, Json, Response};
 use axum::routing::get;
 use serde::{Deserialize, Serialize};
@@ -81,9 +81,9 @@ pub fn routes() -> Router<Arc<AppState>> {
         .route("/api/collector/disk", get(disk).fallback(other_method))
 }
 
-async fn other_method(State(st): State<Arc<AppState>>) -> Response {
+async fn other_method(State(st): State<Arc<AppState>>, method: Method, uri: Uri) -> Response {
     match allowed_board(&st) {
-        Ok(_) => (StatusCode::METHOD_NOT_ALLOWED, [(header::ALLOW, "GET")]).into_response(),
+        Ok(_) => ([(header::ALLOW, "GET,HEAD")], ApiFailure::new(ApiErrorCode::MethodNotAllowed, format!("{}에는 {method}를 쓸 수 없습니다", uri.path()))).into_response(),
         Err(failure) => failure.into_response(),
     }
 }

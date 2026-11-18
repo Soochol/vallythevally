@@ -493,7 +493,7 @@ async fn an_allowed_account_reads_the_daemon_status_coverage_and_disk() {
     let requests = daemon.requests();
     assert_eq!(requests.iter().map(|line| serde_json::from_str::<Value>(line).unwrap()["type"].as_str().unwrap().to_owned()).collect::<Vec<_>>(), ["watch", "coverage", "disk"], "커넥터는 읽기 요청만 보낸다");
     assert_eq!(serde_json::from_str::<Value>(&requests[0]).unwrap(), fixture_value("request-watch.json"));
-    fixture.assert_other_methods_answer(405, None, "허용된 계정").await;
+    fixture.assert_other_methods_answer(405, Some("method_not_allowed"), "허용된 계정").await;
     assert_eq!(daemon.requests().len(), 3, "GET이 아닌 요청은 데몬에 닿지 않는다");
 }
 
