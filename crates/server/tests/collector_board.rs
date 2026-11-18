@@ -427,6 +427,15 @@ fn a_reply_of_another_format_version_is_not_interpreted_and_unknown_fields_are_i
     assert_eq!(heartbeat.sequence, 3);
 }
 
+#[test]
+fn every_phase_the_contract_names_reads_as_itself() {
+    for phase in ["off_hours", "morning_prep", "collecting", "after_close", "finalizing"] {
+        let line = format!(r#"{{"v":1,"type":"heartbeat","sequence":1,"phase":"{phase}","sent_at":"x"}}"#);
+        let Line::Reply(Reply::Heartbeat(heartbeat)) = Line::parse(line.as_bytes()) else { panic!("{phase}") };
+        assert_eq!(serde_json::to_value(heartbeat.phase).unwrap(), phase);
+    }
+}
+
 #[tokio::test]
 async fn an_allowed_account_reads_the_daemon_status_coverage_and_disk() {
     let mut fixture = Fixture::start(Options::allowed_board()).await;

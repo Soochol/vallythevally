@@ -11,6 +11,7 @@ pub enum CollectorPhase {
     MorningPrep,
     Collecting,
     AfterClose,
+    Finalizing,
     #[serde(other)]
     Unknown,
 }
