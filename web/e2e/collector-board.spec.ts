@@ -270,6 +270,18 @@ test("현황판을 그리다 오류가 나도 차트 화면과 설정 창의 다
   await expect(dialog(p).getByRole("tabpanel")).not.toContainText("수집 현황판을 그리지 못했습니다");
 });
 
+test("오류 경계가 뜬 뒤 응답이 정상으로 돌아오면 다시 시도로 현황판이 돌아온다", async ({ page: p, scenario }) => {
+  const broken = { ...STATUS, keys: null } as unknown as CollectorStatus;
+  serve(scenario, "allowed", page("healthy", broken));
+  await openSettings(p);
+  await menuItem(p).click();
+  await expect(dialog(p).getByRole("alert")).toContainText("수집 현황판을 그리지 못했습니다");
+  scenario.reply("/api/collector/status", { body: page("healthy") });
+  await dialog(p).getByRole("button", { name: "다시 시도" }).click();
+  await expect(dialog(p).getByRole("table", { name: "키별 상태" })).toBeVisible();
+  await expect(dialog(p).getByRole("alert")).toHaveCount(0);
+});
+
 test.describe("360px 폭", () => {
   test.use({ viewport: { width: 360, height: 800 } });
 
@@ -291,6 +303,22 @@ test.describe("360px 폭", () => {
     await p.goto("/collector");
     await expect(p.getByRole("list", { name: "관측일 판단 근거" })).toContainText(long);
     await expect(p.getByRole("list", { name: "종목 목록 안내" })).toContainText(long);
+    await expect.poll(() => p.locator("main").evaluate((main) => main.scrollWidth - main.clientWidth)).toBe(0);
+  });
+
+  test("공백 없는 긴 모르는 판단·단계·판정·경보 종류가 있어도 현황판 main이 가로로 넘치지 않는다", async ({ page: p, scenario }) => {
+    const long = "x".repeat(240);
+    const status = {
+      ...STATUS,
+      phase: long,
+      observation_day: { verdict: long, reasons: [] },
+      alerts: [{ at: "2026-11-18T07:35:00+09:00", kind: long, message: "알 수 없는 종류" }],
+    } as unknown as CollectorStatus;
+    serve(scenario, "allowed", page(long as DaemonJudgment, status));
+    await p.goto("/collector");
+    await expect(p.getByRole("status", { name: "감독 데몬" })).toContainText(long);
+    await expect(p.getByRole("region", { name: "관측일 판단" })).toContainText(long);
+    await expect(p.getByRole("list", { name: "경보 목록" })).toContainText(long);
     await expect.poll(() => p.locator("main").evaluate((main) => main.scrollWidth - main.clientWidth)).toBe(0);
   });
 });

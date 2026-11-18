@@ -3,17 +3,20 @@ import type { CollectorStatus } from "../../api/generated/CollectorStatus";
 import type { CollectorStatusPage } from "../../api/generated/CollectorStatusPage";
 import type { CollectorStock } from "../../api/generated/CollectorStock";
 import type { CollectorUniverseChanges } from "../../api/generated/CollectorUniverseChanges";
+import { useQueryClient } from "@tanstack/react-query";
 import { useCollectorStatus } from "../../api/collector";
 import { Skeleton, ErrorState } from "../overlay/State";
 import { useNotificationAccess } from "./alerts";
 import { BoardErrorBoundary } from "./BoardErrorBoundary";
 import { CollectorStore } from "./CollectorStore";
-import { alertKindLabel, bannerOf, dateText, keyStateOf, KEY_ROLE, messageRateText, phaseLabel, receivedAtIso, receivedAtText, restText, VERDICT } from "./labels";
+import { alertKindLabel, bannerOf, dateText, keyStateOf, keyRoleLabel, messageRateText, phaseLabel, receivedAtIso, receivedAtText, restText, verdictOf } from "./labels";
 import { Cell, Empty, Section, Status, Table, toneText } from "./parts";
 
 export function CollectorBoard() {
+  const queryClient = useQueryClient();
+  const dropBoardData = () => queryClient.removeQueries({ queryKey: ["collector"], predicate: (q) => q.queryKey[1] !== "access" });
   return (
-    <BoardErrorBoundary>
+    <BoardErrorBoundary onRetry={dropBoardData}>
       <BoardContent />
     </BoardErrorBoundary>
   );
@@ -91,7 +94,7 @@ function Keys({ status }: { status: CollectorStatus }) {
               <tr key={`${key.name}-${key.app_key_hash_prefix}`}>
                 <Cell first>
                   <span className="font-medium">{key.name}</span>
-                  <span className="ml-2 text-s text-text-2">{KEY_ROLE[key.role] ?? key.role}</span>
+                  <span className="ml-2 text-s text-text-2">{keyRoleLabel(key.role)}</span>
                   <span className="ml-2 font-mono text-s text-text-3">{key.app_key_hash_prefix}</span>
                 </Cell>
                 <Cell><Status tone={state.tone}>{state.label}</Status></Cell>
@@ -142,7 +145,7 @@ function Universe({ changes, alerts }: { changes: CollectorUniverseChanges | nul
 }
 
 function Observation({ day }: { day: CollectorStatus["observation_day"] }) {
-  const verdict = day === null ? null : VERDICT[day.verdict] ?? { label: day.verdict, tone: "idle" as const };
+  const verdict = day === null ? null : verdictOf(day.verdict);
   return (
     <Section id="collector-observation" title="관측일 판단">
       {day === null || verdict === null ? <Empty>아직 판단 전입니다.</Empty> : (
@@ -163,7 +166,7 @@ function Alerts({ alerts }: { alerts: readonly CollectorAlert[] }) {
           {[...alerts].reverse().map((a, i) => (
             <li key={`${a.at}-${i}`} className="flex flex-wrap gap-x-3 border-b border-line py-1.5">
               <time className="font-mono text-s text-text-2">{a.at.replace("T", " ").slice(0, 19)}</time>
-              <span className="text-s text-warning">{alertKindLabel(a.kind)}</span>
+              <span className="min-w-0 break-words text-s text-warning [overflow-wrap:anywhere]">{alertKindLabel(a.kind)}</span>
               <span className="min-w-0 flex-1 break-words">{a.message}</span>
             </li>
           ))}

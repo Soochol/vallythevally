@@ -26,7 +26,9 @@ export const BANNERS: Record<DaemonJudgment, Banner> = {
   version_mismatch: { tone: "warn", title: "감독 데몬과 상태 형식 버전이 달라 상태를 읽지 못합니다", alert: true },
 };
 
-export const bannerOf = (judgment: DaemonJudgment): Banner => BANNERS[judgment] ?? { tone: "idle", title: String(judgment), alert: false };
+export const ownEntry = <V,>(table: Readonly<Record<string, V>>, key: string): V | undefined => (Object.prototype.hasOwnProperty.call(table, key) ? table[key] : undefined);
+
+export const bannerOf = (judgment: DaemonJudgment): Banner => ownEntry(BANNERS, judgment) ?? { tone: "idle", title: String(judgment), alert: false };
 
 export const PHASE_LABEL: Record<CollectorPhase, string> = {
   off_hours: "장 밖 대기",
@@ -77,10 +79,13 @@ export const ALERT_KIND: Record<string, string> = {
   stage_failed: "단계 실패",
 };
 
-export const phaseLabel = (phase: CollectorPhase): string => PHASE_LABEL[phase] ?? String(phase);
-export const alertKindLabel = (kind: string): string => ALERT_KIND[kind] ?? kind;
-export const keyStateOf = (state: CollectorKeyState) => KEY_STATE[state] ?? { label: String(state), tone: "idle" as const };
-export const dayStateOf = (state: CollectorDayState) => DAY_STATE[state] ?? { label: String(state), tone: "idle" as const };
+export const phaseLabel = (phase: CollectorPhase): string => ownEntry(PHASE_LABEL, phase) ?? String(phase);
+export const alertKindLabel = (kind: string): string => ownEntry(ALERT_KIND, kind) ?? kind;
+export const keyStateOf = (state: CollectorKeyState) => ownEntry(KEY_STATE, state) ?? { label: String(state), tone: "idle" as const };
+export const dayStateOf = (state: CollectorDayState) => ownEntry(DAY_STATE, state) ?? { label: String(state), tone: "idle" as const };
+
+export const keyRoleLabel = (role: CollectorKeyRole): string => ownEntry(KEY_ROLE, role) ?? String(role);
+export const verdictOf = (verdict: CollectorVerdict) => ownEntry(VERDICT, verdict) ?? { label: String(verdict), tone: "idle" as const };
 
 export const restText = (rest: CollectorRest): string => (rest.planned_jobs === 0 ? "없음" : `${rest.finished_jobs} / ${rest.planned_jobs}`);
 
