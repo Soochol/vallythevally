@@ -68,6 +68,7 @@ pub enum RawState {
     Same,
     NotRecorded,
     Changed { files: u64, examples: Vec<String> },
+    HasUnreadFiles { files: u64, examples: Vec<String> },
     Unreadable { detail: String },
 }
 
@@ -95,6 +96,7 @@ pub enum KeepReason {
     Unfinalized { total: u64, kinds: BTreeMap<String, u64> },
     RawFingerprintMissing,
     RawChangedAfterComplete { files: u64, examples: Vec<String> },
+    RawHasUnreadFiles { files: u64, examples: Vec<String> },
     RawUnreadable { detail: String },
     WithinRetention { keep_observation_days: u32 },
     ObservationUnknown { detail: String },
@@ -197,6 +199,7 @@ fn decide(today: u32, facts: &DayFacts, keep_days: &Result<NonZeroU32, KeepReaso
         RawState::Unchecked | RawState::Same => {}
         RawState::NotRecorded => return Err(KeepReason::RawFingerprintMissing),
         RawState::Changed { files, examples } => return Err(KeepReason::RawChangedAfterComplete { files: *files, examples: examples.clone() }),
+        RawState::HasUnreadFiles { files, examples } => return Err(KeepReason::RawHasUnreadFiles { files: *files, examples: examples.clone() }),
         RawState::Unreadable { detail } => return Err(KeepReason::RawUnreadable { detail: detail.clone() }),
     }
     let keep = keep_days.clone()?;
@@ -239,12 +242,23 @@ pub fn raw_days_without_complete(data_dir: &Path, before: u32) -> io::Result<Vec
 
 fn raw_state(data_dir: &Path, date: u32, recorded: Option<RawFiles>) -> RawState {
     let Some(recorded) = recorded else { return RawState::NotRecorded };
-    match RawFiles::of_day(data_dir, date) {
+    let examples = |paths: Vec<String>| (paths.len() as u64, paths.into_iter().take(CHANGED_EXAMPLES).collect());
+    let now = match RawFiles::of_day(data_dir, date) {
+        Ok(now) => now,
+        Err(error) => return RawState::Unreadable { detail: error.to_string() },
+    };
+    let differing = recorded.paths_differing_from(&now);
+    if !differing.is_empty() {
+        let (files, examples) = examples(differing);
+        return RawState::Changed { files, examples };
+    }
+    match RawFiles::unread_of_day(data_dir, date) {
         Err(error) => RawState::Unreadable { detail: error.to_string() },
-        Ok(now) => match recorded.paths_differing_from(&now) {
-            differing if differing.is_empty() => RawState::Same,
-            differing => RawState::Changed { files: differing.len() as u64, examples: differing.into_iter().take(CHANGED_EXAMPLES).collect() },
-        },
+        Ok(unread) if unread.is_empty() => RawState::Same,
+        Ok(unread) => {
+            let (files, examples) = examples(unread);
+            RawState::HasUnreadFiles { files, examples }
+        }
     }
 }
 
@@ -290,6 +304,13 @@ fn directory_bytes(path: &Path) -> io::Result<u64> {
 }
 
 pub fn delete_raw_day(data_dir: &Path, target: &Path) -> io::Result<u64> {
+    match remove_raw_day(data_dir, target, || None::<std::convert::Infallible>)? {
+        Ok(bytes) => Ok(bytes),
+        Err(never) => match never {},
+    }
+}
+
+fn remove_raw_day<Kept>(data_dir: &Path, target: &Path, last_check: impl FnOnce() -> Option<Kept>) -> io::Result<Result<u64, Kept>> {
     let refuse = |why: &str| io::Error::new(io::ErrorKind::InvalidInput, format!("{}는 raw/ 아래 날짜 폴더가 아니다: {why}", target.display()));
     if target.components().any(|component| component == Component::ParentDir) {
         return Err(refuse("상위 폴더 경로가 든다"));
@@ -307,8 +328,11 @@ pub fn delete_raw_day(data_dir: &Path, target: &Path) -> io::Result<u64> {
         return Err(refuse("폴더가 아니다"));
     }
     let bytes = directory_bytes(target)?;
+    if let Some(reason) = last_check() {
+        return Ok(Err(reason));
+    }
     fs::remove_dir_all(target)?;
-    Ok(bytes)
+    Ok(Ok(bytes))
 }
 
 fn append_log(data_dir: &Path, today: u32, report: &PruneReport) -> io::Result<()> {
@@ -339,11 +363,21 @@ pub fn prune_raw(data_dir: &Path, today: u32, calendar: &Calendar, settings: &Re
     let plan = plan_prune(today, first_complete_day(data_dir)?, &days, calendar, settings);
     let mut report = PruneReport { kept: plan.keep, ..PruneReport::default() };
     for date in plan.delete {
-        match delete_raw_day(data_dir, &raw_day_dir(data_dir, date)) {
-            Ok(bytes) => report.deleted.push((date, bytes)),
+        match delete_planned_day(data_dir, today, date, calendar, settings) {
+            Ok(Ok(bytes)) => report.deleted.push((date, bytes)),
+            Ok(Err(reason)) => report.kept.push((date, reason)),
             Err(error) => report.failed.push((date, error.to_string())),
         }
     }
     append_log(data_dir, today, &report)?;
     Ok(report)
+}
+
+pub fn delete_planned_day(data_dir: &Path, today: u32, date: u32, calendar: &Calendar, settings: &RetentionSettings) -> io::Result<Result<u64, KeepReason>> {
+    let first_complete = first_complete_day(data_dir)?;
+    let still_deletable = || {
+        let now = [read_day_facts(data_dir, date)];
+        plan_prune(today, first_complete, &now, calendar, settings).keep.into_iter().next().map(|(_, reason)| reason)
+    };
+    remove_raw_day(data_dir, &raw_day_dir(data_dir, date), still_deletable)
 }

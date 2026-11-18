@@ -1,3 +1,5 @@
+use std::collections::VecDeque;
+use std::ffi::OsString;
 use std::fs;
 use std::io;
 use std::os::unix::fs::{DirBuilderExt, FileTypeExt, PermissionsExt};
@@ -6,12 +8,13 @@ use std::sync::{Arc, Mutex as StdMutex};
 use std::time::Duration;
 
 use server::clock::Clock;
+use server::instance::{InstanceLock, LockError};
 use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncWriteExt, BufReader};
 use tokio::net::unix::OwnedWriteHalf;
 use tokio::net::{UnixListener, UnixStream};
 use tokio::sync::{Semaphore, mpsc, watch};
 use tokio::task::JoinSet;
-use tokio::time::{Instant, Interval, interval_at, timeout, timeout_at};
+use tokio::time::{Instant, Interval, interval_at, sleep_until, timeout, timeout_at};
 
 use super::files::{read_coverage, read_disk};
 use super::journal::kst_stamp;
@@ -22,6 +25,9 @@ pub const SOCKET_FILE_NAME: &str = "supervise.sock";
 pub const OUTBOX_LINES: usize = 64;
 pub const MAX_CONNECTIONS: usize = 16;
 const MAX_PENDING_REPLIES: usize = 4;
+const MAX_HELD_FILE_REQUESTS: usize = 16;
+const FIRST_REQUEST_LIMIT: Duration = Duration::from_secs(30);
+const LOCK_FILE_SUFFIX: &str = ".lock";
 const DRAIN_LIMIT: Duration = Duration::from_secs(30);
 const PARTIAL_LINE_LIMIT: Duration = Duration::from_secs(10);
 const WRITE_STALL_LIMIT: Duration = Duration::from_secs(5);
@@ -43,6 +49,13 @@ fn socket_is_alive(path: &Path) -> io::Result<bool> {
 pub struct StatusSocket {
     listener: UnixListener,
     path: PathBuf,
+    _lock: InstanceLock,
+}
+
+fn lock_path_of(socket: &Path) -> PathBuf {
+    let mut name = socket.file_name().map_or_else(OsString::new, OsString::from);
+    name.push(LOCK_FILE_SUFFIX);
+    socket.with_file_name(name)
 }
 
 impl StatusSocket {
@@ -50,6 +63,11 @@ impl StatusSocket {
         if let Some(folder) = path.parent().filter(|folder| !folder.as_os_str().is_empty()) {
             fs::DirBuilder::new().recursive(true).mode(FOLDER_MODE).create(folder)?;
         }
+        let lock = match InstanceLock::acquire(&lock_path_of(path)) {
+            Ok(lock) => lock,
+            Err(LockError::Held { .. }) => return Err(io::Error::new(io::ErrorKind::AddrInUse, format!("{}를 쓰는 다른 데몬이 이미 떠 있습니다", path.display()))),
+            Err(LockError::Io { error, .. }) => return Err(error),
+        };
         match fs::symlink_metadata(path) {
             Ok(metadata) if metadata.file_type().is_socket() => {
                 if socket_is_alive(path)? {
@@ -63,7 +81,7 @@ impl StatusSocket {
         }
         let listener = UnixListener::bind(path)?;
         fs::set_permissions(path, fs::Permissions::from_mode(SOCKET_MODE))?;
-        Ok(StatusSocket { listener, path: path.to_owned() })
+        Ok(StatusSocket { listener, path: path.to_owned(), _lock: lock })
     }
 }
 
@@ -160,7 +178,7 @@ impl Shared {
 
 pub async fn serve(socket: StatusSocket, api: StatusApi, mut shutdown: watch::Receiver<bool>) {
     let shared = Arc::new(Shared { api, coverage: CachedView::new(), disk: CachedView::new(), slots: Arc::new(Semaphore::new(MAX_CONNECTIONS)) });
-    let StatusSocket { listener, path } = socket;
+    let StatusSocket { listener, path, _lock } = socket;
     let mut connections = tokio::task::JoinSet::new();
     loop {
         tokio::select! {
@@ -280,7 +298,9 @@ async fn converse(reader: impl AsyncRead + Unpin, outbox: &mpsc::Sender<String>,
     let mut pending = Vec::new();
     let mut line_started_at = None;
     let mut replies = JoinSet::new();
-    let mut held_file_request: Option<RequestKind> = None;
+    let mut held_file_requests: VecDeque<RequestKind> = VecDeque::new();
+    let connected_at = Instant::now();
+    let mut asked = false;
     let mut ticker: Option<Interval> = None;
     let mut sequence = 0_u64;
     let mut last_phase = DayPhase::default();
@@ -293,6 +313,7 @@ async fn converse(reader: impl AsyncRead + Unpin, outbox: &mpsc::Sender<String>,
                 None => std::future::pending().await,
             }
         };
+        let idle = sleep_until(connected_at + FIRST_REQUEST_LIMIT);
         tokio::select! {
             biased;
             _ = shutdown.changed() => return Ended::Peer,
@@ -300,9 +321,13 @@ async fn converse(reader: impl AsyncRead + Unpin, outbox: &mpsc::Sender<String>,
                 if matches!(finished, Ok(false)) {
                     return Ended::Overflow;
                 }
-                if let Some(kind) = held_file_request.take() {
+                if let Some(kind) = held_file_requests.pop_front() {
                     spawn_file_reply(&mut replies, shared, outbox, kind);
                 }
+            }
+            _ = idle, if !asked && line_started_at.is_none() => {
+                push(outbox, &Reply::error(ErrorCode::BadRequest, format!("요청이 {}초 동안 오지 않아 연결을 닫습니다", FIRST_REQUEST_LIMIT.as_secs()))).await;
+                return Ended::Peer;
             }
             _ = tick => {
                 sequence += 1;
@@ -324,13 +349,13 @@ async fn converse(reader: impl AsyncRead + Unpin, outbox: &mpsc::Sender<String>,
                     }
                 }
             }
-            line = read_line_limited(&mut reader, &mut pending, &mut line_started_at), if held_file_request.is_none() => match line {
+            line = read_line_limited(&mut reader, &mut pending, &mut line_started_at), if held_file_requests.len() < MAX_HELD_FILE_REQUESTS => match line {
                 Line::Closed => {
                     let drained = timeout(DRAIN_LIMIT, async {
                         let mut sent_all = true;
                         while let Some(finished) = replies.join_next().await {
                             sent_all &= matches!(finished, Ok(true));
-                            if let Some(kind) = held_file_request.take() {
+                            if let Some(kind) = held_file_requests.pop_front() {
                                 spawn_file_reply(&mut replies, shared, outbox, kind);
                             }
                         }
@@ -348,6 +373,7 @@ async fn converse(reader: impl AsyncRead + Unpin, outbox: &mpsc::Sender<String>,
                     return Ended::Peer;
                 }
                 Line::Text(text) => {
+                    asked = true;
                     let reply = match parse_request(&text) {
                         Ok(request) => {
                             if request.kind == RequestKind::Watch && !watching {
@@ -360,7 +386,7 @@ async fn converse(reader: impl AsyncRead + Unpin, outbox: &mpsc::Sender<String>,
                                 if replies.len() < MAX_PENDING_REPLIES {
                                     spawn_file_reply(&mut replies, shared, outbox, request.kind);
                                 } else {
-                                    held_file_request = Some(request.kind);
+                                    held_file_requests.push_back(request.kind);
                                 }
                                 continue;
                             }

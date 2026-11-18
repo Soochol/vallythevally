@@ -2,7 +2,7 @@ use std::io;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::sync::Arc;
+use std::sync::{Arc, Barrier};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
@@ -11,7 +11,7 @@ use collector::plan::{InputSummary, KeyShare, MARKET_TYPES, PlanFile};
 use collector::protocol::{Command as ChildCommand, Event, KeyName, SessionState};
 use collector::supervise::{
     ChildMessage, ChildProcess, Control, DayPhase, Injected, Inputs, KeyState, Launcher, Reply, Request, Settings, SocketSetting, Spawned, StartError,
-    Supervisor,
+    StatusSocket, Supervisor,
 };
 use domain::KstDate;
 use futures::future::BoxFuture;
@@ -873,5 +873,81 @@ async fn a_slow_disk_read_keeps_the_reply_for_a_client_that_half_closed_and_its_
     let mut next = world.connect().await;
     let again = next.ask(fixture_line("request-coverage.json").trim()).await;
     assert_eq!(coverage_day(&again, 20261117)["state"], "verify_failed", "떠난 요청이 시작한 읽기의 결과도 캐시에 남는다");
+    world.finish().await;
+}
+
+#[test]
+fn two_daemons_binding_at_once_over_a_leftover_socket_never_both_get_it() {
+    let runtime = tokio::runtime::Builder::new_multi_thread().worker_threads(1).enable_all().build().unwrap();
+    for round in 0..1000 {
+        let sockets = short_folder();
+        let socket = sockets.path().join("run").join("supervise.sock");
+        leftover_socket_at(sockets.path());
+        let barrier = Arc::new(Barrier::new(2));
+        let bids: Vec<_> = (0..2)
+            .map(|_| {
+                let (barrier, socket, handle) = (barrier.clone(), socket.clone(), runtime.handle().clone());
+                std::thread::spawn(move || {
+                    let _inside_runtime = handle.enter();
+                    barrier.wait();
+                    StatusSocket::bind(&socket)
+                })
+            })
+            .collect();
+        let results: Vec<io::Result<StatusSocket>> = bids.into_iter().map(|bid| bid.join().unwrap()).collect();
+        let won = results.iter().filter(|result| result.is_ok()).count();
+        assert_eq!(won, 1, "{round}번째 판에서 소켓을 얻은 데몬이 {won}개다");
+        let lost = results.iter().find_map(|result| result.as_ref().err()).unwrap();
+        assert_eq!(lost.kind(), io::ErrorKind::AddrInUse, "{lost}");
+    }
+}
+
+#[tokio::test]
+async fn a_status_request_is_answered_even_when_a_fifth_file_request_is_waiting_for_a_slot() {
+    let world = World::start(plan_for(2, 3, 0));
+    let stuck = StuckRead::at(&world, 20261117);
+    let mut client = world.connect().await;
+    for _ in 0..5 {
+        client.send(&fixture_line("request-coverage.json")).await;
+    }
+    client.send("{\"v\":1,\"type\":\"status\"}\n").await;
+    let answered = timeout(Duration::from_secs(2), client.read_text()).await.expect("밀린 다섯째 파일 요청 뒤의 status가 답을 받지 못했다");
+    assert_eq!(serde_json::from_str::<Value>(&answered).unwrap()["type"], "status");
+
+    stuck.release(r#"{"passed":false}"#);
+    for _ in 0..5 {
+        assert_eq!(client.read().await["type"], "coverage");
+    }
+    world.finish().await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn connections_that_never_send_a_request_are_closed_and_give_their_slots_back_but_a_watching_one_stays() {
+    let world = World::start(plan_for(2, 3, 0));
+    sleep(Duration::from_secs(20)).await;
+    let mut watcher = world.connect().await;
+    watcher.send(&fixture_line("request-watch.json")).await;
+    assert_eq!(watcher.read().await["type"], "status");
+    let mut silent = Vec::new();
+    for _ in 0..15 {
+        silent.push(world.connect().await);
+    }
+    sleep(Duration::from_secs(1)).await;
+    let mut crowded = world.connect().await;
+    assert_eq!(error_code(&crowded.read().await), "too_many_connections");
+
+    sleep(Duration::from_secs(35)).await;
+    for client in &mut silent {
+        let mut rest = Vec::new();
+        timeout(Duration::from_secs(30), client.reader.read_to_end(&mut rest)).await.expect("요청 없이 붙어 있던 연결은 끊긴다").unwrap();
+        assert!(String::from_utf8_lossy(&rest).contains("bad_request"), "{}", String::from_utf8_lossy(&rest));
+    }
+    let mut kinds = Vec::new();
+    for _ in 0..14 {
+        kinds.push(watcher.read().await["type"].as_str().unwrap().to_owned());
+    }
+    assert!(kinds.iter().any(|kind| kind == "heartbeat"), "지켜보는 연결은 요청 없이도 남아 하트비트를 받는다: {kinds:?}");
+    let mut fresh = world.connect().await;
+    assert_eq!(fresh.ask(r#"{"v":1,"type":"status"}"#).await["type"], "status");
     world.finish().await;
 }

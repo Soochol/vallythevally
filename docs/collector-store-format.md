@@ -99,7 +99,7 @@ store/prune.log.jsonl        원문 지우기 기록(아래 "원문 지우기")
 | `format_version`, `date` | 이 파일의 형식 버전(1), 날짜(`YYYYMMDD` 수) |
 | `verify` | `passed`(원문 대조 통과 여부), `mismatch_count`, `buckets`, `lines_total`·`lines_finalized`·`lines_control`·`lines_unfinalized`(`verify.json`의 줄 수) |
 | `plan` | 그날 `plan/<날짜>.json`의 요약. 계획 파일이 없는 날은 `null`. `created_at`, `active_keys`, `universe_replaced`(불리언), `planned_stocks`, `excluded`, `unregistered`, `alerts`, `keys[]`(`name`, `role`, `stocks`(개수), `market_types`, `load`) |
-| `raw_files` | 정리한 `raw/<날짜>/`의 지문. 폴더 아래 파일마다 `raw/<날짜>/` 기준 상대 경로(`/`로 잇는다)를 키로 바이트 수를 적은 객체다. 정리를 시작할 때, 원문을 읽기 전에 잰다. 원문 지우기가 지금 원문과 견준다. 형식 버전은 그대로 1이고, 이 필드가 없는 파일도 있다 |
+| `raw_files` | 정리한 `raw/<날짜>/`의 지문. 폴더 아래 파일마다 `raw/<날짜>/` 기준 상대 경로(`/`로 잇는다)를 키로 바이트 수를 적은 객체다. 정리가 읽는 원문 파일만 적는다. `*.jsonl.zst`가 날짜 폴더 바로 아래나 그 아래 한 단계 폴더(키 폴더)에 있는 것이다. 정리를 시작할 때, 원문을 읽기 전에 잰다. 원문 지우기가 지금 원문과 견준다. 형식 버전은 그대로 1이고, 이 필드가 없는 파일도 있다 |
 | `observation` | 그날 사건 기록(`plan/<날짜>.events.jsonl`)이 적은 관측일 판단·개장 대조·지수 일봉 대조. 아래 표. 형식 버전은 그대로 1이고, 이 필드가 없는 파일도 있다 |
 | `stocks[]` | 종목마다 하나. 종목코드 순이다 |
 
@@ -143,9 +143,11 @@ store/prune.log.jsonl        원문 지우기 기록(아래 "원문 지우기")
 - `store/<날짜>/complete.json`이 있고 `verify.passed`가 `true`이며 `verify.json`의 `passed`도 `false`가 아니다.
 - `verify.json`의 `lines.unfinalized.total`이 0이다. 이 셈이 없거나 읽을 수 없으면 지우지 않는다.
 - `complete.json`의 `raw_files`가 있고 지금 `raw/<날짜>/` 아래 파일의 경로와 바이트 수가 그것과 같다. 정리 뒤에 원문이 늘거나 줄거나 바뀌었으면 정리하지 않은 원문이 있을 수 있으므로 지우지 않는다. 다시 정리가 대조에 실패해 옛 `complete.json`이 남은 날도 같다. 다시 정리해 통과하면 새 지문이 쓰여 지울 수 있게 된다. `raw_files`가 없는 옛 `complete.json`의 날도 지우지 않는다. 그 날을 다시 정리하면 지문이 생긴다.
+- `raw/<날짜>/` 아래에 정리가 읽지 않는 파일이 없다. 두 단계 이상 깊은 `*.jsonl.zst`나 `.jsonl.zst`로 끝나지 않는 파일이다. 지문에 들지 않아 정리 결과에 반영됐는지 알 수 없으므로 폴더째 지우지 않고 남긴다. 그 파일을 치우면 지울 수 있다.
+- 지우기로 정한 날도 폴더를 지우기 직전에 위 조건(지문 대조 포함)을 한 번 더 확인한다. 그 사이에 원문이 바뀌었으면 지우지 않고 `kept`로 기록한다.
 - 그날 뒤로 관측일이 보관 기간만큼 지났다. 기간은 지우기를 도는 날(`--date`)로 정한다. 처음 `complete.json`을 쓴 날(`store/` 아래 `complete.json`이 있는 가장 이른 날짜)을 포함한 10관측일 동안은 7관측일이고 그 뒤는 1관측일이다. 세 값은 `--keep-early`(7), `--keep`(1), `--early-period`(10)로 바꾼다. 관측일은 `collector-calendar`의 셈이고 휴장일은 들지 않는다. `calendar/`의 특일정보 캐시만 읽고 받지 않으므로, 캐시가 없어 관측일을 판단할 수 없으면 지우지 않는다. 달력은 처음 `complete.json`을 쓴 날이 속한 해부터 올해(12월이면 내년)까지 싣는다. 중간에 캐시가 없는 해가 끼면 그 해의 날은 판단 모름이라 지우지 않는데, 원문을 잃는 쪽이 아니라 남기는 쪽으로 실패하는 것이므로 옳고, 대신 그 해의 캐시를 채울 때까지 그 앞 원문이 계속 남는 것이 한계다.
 
-결과는 `store/prune.log.jsonl`에 줄마다 `run_date`, `date`, `action`(`deleted`·`kept`·`failed`)으로 덧붙인다. `deleted`에는 `bytes`, `kept`에는 `reason`이 있다. 까닭은 `no_complete`, `complete_unreadable`, `verification_failed`, `unfinalized_count_missing`, `unfinalized`(`total`과 종류별 `kinds`), `raw_fingerprint_missing`, `raw_changed_after_complete`(다른 파일 수 `files`와 그 가운데 앞 다섯 개의 경로 `examples`), `raw_unreadable`(`detail`), `within_retention`(`keep_observation_days`), `observation_unknown`이다. 지우는 부분은 `raw/` 바로 아래 8자리 날짜 폴더가 아닌 경로를 거부한다.
+결과는 `store/prune.log.jsonl`에 줄마다 `run_date`, `date`, `action`(`deleted`·`kept`·`failed`)으로 덧붙인다. `deleted`에는 `bytes`, `kept`에는 `reason`이 있다. 까닭은 `no_complete`, `complete_unreadable`, `verification_failed`, `unfinalized_count_missing`, `unfinalized`(`total`과 종류별 `kinds`), `raw_fingerprint_missing`, `raw_changed_after_complete`(다른 파일 수 `files`와 그 가운데 앞 다섯 개의 경로 `examples`), `raw_has_unread_files`(정리가 읽지 않는 파일 수 `files`와 앞 다섯 개의 경로 `examples`), `raw_unreadable`(`detail`), `within_retention`(`keep_observation_days`), `observation_unknown`이다. 지우는 부분은 `raw/` 바로 아래 8자리 날짜 폴더가 아닌 경로를 거부한다.
 
 ## 열 표
 

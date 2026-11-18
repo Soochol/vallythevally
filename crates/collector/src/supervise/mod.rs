@@ -35,7 +35,7 @@ pub use schedule::{Daemon, DaemonInjected, DaemonInputs, DaemonStartError, DayTi
 pub use settings::{MarketOpenCheck, Settings, SocketSetting};
 pub use status_command::run as run_status;
 pub use status::{Alert, AlertKind, DaemonStatus, DayPhase, KeyState, KeyStatus, ObservationDay, ObservationVerdict, RestProgress, Today};
-pub use api::{MAX_CONNECTIONS, OUTBOX_LINES, SOCKET_FILE_NAME};
+pub use api::{MAX_CONNECTIONS, OUTBOX_LINES, SOCKET_FILE_NAME, StatusSocket};
 pub use files::{read_coverage, read_disk};
 pub use wire::{API_VERSION, CoverageDay, CoverageState, DayBytes, DiskUsage, ErrorCode, Filesystem, Reply, ReplyBody, Request, RequestKind};
 
@@ -78,6 +78,10 @@ const DAEMON_ONLY_OPTIONS: [&str; 11] = [
 
 const HOLIDAY_KEY_FILE: &str = "holiday-service-key";
 const RUNTIME_STOP_LIMIT: std::time::Duration = std::time::Duration::from_secs(5);
+
+fn stop_runtime(runtime: tokio::runtime::Runtime, limit: std::time::Duration) {
+    runtime.shutdown_timeout(limit);
+}
 
 pub fn rest_base_url(variables: &Variables) -> Result<String, String> {
     let Some(url) = variables.get(REST_URL_VARIABLE).filter(|url| !url.is_empty()) else {
@@ -215,7 +219,7 @@ fn run_daemon(arguments: &Arguments, keys_path: &std::path::Path) -> ExitCode {
         daemon.run(shutdown).await;
         ExitCode::SUCCESS
     });
-    runtime.shutdown_timeout(RUNTIME_STOP_LIMIT);
+    stop_runtime(runtime, RUNTIME_STOP_LIMIT);
     code
 }
 
@@ -283,6 +287,28 @@ fn run_single_day(arguments: &Arguments, keys_path: &std::path::Path, date: &str
         supervisor.run(shutdown).await;
         ExitCode::SUCCESS
     });
-    runtime.shutdown_timeout(RUNTIME_STOP_LIMIT);
+    stop_runtime(runtime, RUNTIME_STOP_LIMIT);
     code
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::{Duration, Instant};
+
+    #[test]
+    fn stopping_the_runtime_gives_up_on_a_blocking_task_after_the_limit() {
+        let runtime = tokio::runtime::Builder::new_multi_thread().enable_all().build().unwrap();
+        let (started, running) = std::sync::mpsc::channel();
+        runtime.spawn_blocking(move || {
+            started.send(()).unwrap();
+            std::thread::sleep(Duration::from_secs(30));
+        });
+        running.recv().unwrap();
+        let limit = Duration::from_millis(300);
+        let before = Instant::now();
+        stop_runtime(runtime, limit);
+        let waited = before.elapsed();
+        assert!(waited >= limit && waited < Duration::from_secs(5), "{waited:?}");
+    }
 }
