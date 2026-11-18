@@ -272,20 +272,14 @@ fn check_window_state(w: &api::LayoutWindow) -> Result<(), ApiFailure> {
         WindowContent::Screener { screen } => (None, None, screen.as_deref()),
         WindowContent::Chart { .. } | WindowContent::Indicators => return Ok(()),
     };
-    if let Some(symbol) = symbol {
-        if domain::StockCode::parse(&symbol.0).is_err() {
-            return Err(ApiFailure::bad_request(format!("창 {}의 고정 종목은 주식 코드여야 합니다: {}", w.id.as_str(), symbol.0)));
-        }
+    if let Some(symbol) = symbol.filter(|s| domain::StockCode::parse(&s.0).is_err()) {
+        return Err(ApiFailure::bad_request(format!("창 {}의 고정 종목은 주식 코드여야 합니다: {}", w.id.as_str(), symbol.0)));
     }
-    if let Some(list) = list {
-        if list.is_empty() || list.len() > MAX_WATCHLIST_ID_BYTES {
-            return Err(ApiFailure::bad_request(format!("창 {}의 관심종목 목록 id는 1~{MAX_WATCHLIST_ID_BYTES}바이트여야 합니다: {list}", w.id.as_str())));
-        }
+    if let Some(list) = list.filter(|l| l.is_empty() || l.len() > MAX_WATCHLIST_ID_BYTES) {
+        return Err(ApiFailure::bad_request(format!("창 {}의 관심종목 목록 id는 1~{MAX_WATCHLIST_ID_BYTES}바이트여야 합니다: {list}", w.id.as_str())));
     }
-    if let Some(screen) = screen {
-        if screen.is_empty() || screen.len() > MAX_SCREEN_ID_BYTES {
-            return Err(ApiFailure::bad_request(format!("창 {}의 조건식 id는 1~{MAX_SCREEN_ID_BYTES}바이트여야 합니다: {screen}", w.id.as_str())));
-        }
+    if let Some(screen) = screen.filter(|s| s.is_empty() || s.len() > MAX_SCREEN_ID_BYTES) {
+        return Err(ApiFailure::bad_request(format!("창 {}의 조건식 id는 1~{MAX_SCREEN_ID_BYTES}바이트여야 합니다: {screen}", w.id.as_str())));
     }
     Ok(())
 }
