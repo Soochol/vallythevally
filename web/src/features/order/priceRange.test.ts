@@ -1,47 +1,45 @@
 import { describe, expect, it } from "vitest";
-import { EXPLORER_ROWS, explorerPrices, movePrice, tickSize } from "./priceRange";
+import { tickSize } from "../market-window/tick";
+import { fullRangePrices, scrollTopToCenter, visibleRowRange } from "./priceRange";
 
 const BOUNDS = { lower: 49_000, upper: 91_000 };
 
-describe("호가 단위", () => {
-  it("가격대별 단위를 고른다", () => {
-    expect([1_999, 2_000, 4_999, 5_000, 19_999, 20_000, 49_999, 50_000, 199_999, 200_000, 499_999, 500_000].map(tickSize)).toEqual([1, 5, 5, 10, 10, 50, 50, 100, 100, 500, 500, 1_000]);
+describe("전체 호가 가격 목록", () => {
+  it("상한에서 하한까지 틱 단위로 빠짐없이 내려간다", () => {
+    const prices = fullRangePrices(BOUNDS, "stock")!;
+    expect(prices[0]).toBe(91_000);
+    expect(prices.at(-1)).toBe(49_000);
+    for (let i = 1; i < prices.length; i++) expect(prices[i - 1]! - prices[i]!).toBe(tickSize(prices[i - 1]! - 1, "stock"));
+  });
+
+  it("50,000 경계에서 100원 틱이 50원 틱으로 바뀐다", () => {
+    const prices = fullRangePrices(BOUNDS, "stock")!;
+    const at = prices.indexOf(50_000);
+    expect(prices.slice(at - 1, at + 3)).toEqual([50_100, 50_000, 49_950, 49_900]);
+    expect(prices).toHaveLength(410 + 1 + 20);
+  });
+
+  it("상·하한을 모르면 목록이 없다", () => {
+    expect(fullRangePrices({ lower: null, upper: 91_000 }, "stock")).toBeNull();
+    expect(fullRangePrices({ lower: 49_000, upper: null }, "stock")).toBeNull();
   });
 });
 
-describe("전체 호가 탐색", () => {
-  it("호가 단위로 움직인다", () => {
-    expect(movePrice(70_000, 1, BOUNDS)).toBe(70_100);
-    expect(movePrice(70_000, -3, BOUNDS)).toBe(69_700);
+describe("보이는 행 범위", () => {
+  it("맨 위에서는 0부터 시작한다", () => {
+    expect(visibleRowRange(0, 240, 400, 24, 5)).toEqual({ start: 0, end: 15 });
   });
 
-  it("단위가 바뀌는 경계를 건넌다", () => {
-    expect(movePrice(50_000, -1, { lower: 1, upper: null })).toBe(49_950);
-    expect(movePrice(49_950, 1, { lower: 1, upper: null })).toBe(50_000);
+  it("맨 아래에서는 행 수에서 끝난다", () => {
+    expect(visibleRowRange(400 * 24 - 240, 240, 400, 24, 5)).toEqual({ start: 385, end: 400 });
   });
 
-  it("상한과 하한을 넘지 않는다", () => {
-    expect(movePrice(90_900, 50, BOUNDS)).toBe(91_000);
-    expect(movePrice(49_200, -50, BOUNDS)).toBe(49_000);
+  it("가운데에서는 보이는 행 앞뒤로 여유를 둔다", () => {
+    expect(visibleRowRange(2_400, 240, 400, 24, 5)).toEqual({ start: 95, end: 115 });
   });
 
-  it("한도를 모르면 1원 아래로 내려가지 않는다", () => {
-    expect(movePrice(3, -10, { lower: null, upper: null })).toBe(1);
-  });
-
-  it("행 가격은 내림차순이고 상한 위로 행을 만들지 않는다", () => {
-    const prices = explorerPrices(70_000, BOUNDS);
-    expect(prices).toHaveLength(EXPLORER_ROWS);
-    expect(prices[0]).toBe(71_000);
-    expect(prices[10]).toBe(70_000);
-    const nearTop = explorerPrices(90_800, BOUNDS);
-    expect(nearTop[0]).toBe(91_000);
-    expect(nearTop.filter((p) => p !== null && p > 91_000)).toEqual([]);
-  });
-
-  it("하한에 닿으면 남는 행은 비운다", () => {
-    const prices = explorerPrices(49_200, BOUNDS);
-    expect(prices.at(-1)).toBeNull();
-    expect(Math.min(...prices.filter((p): p is number => p !== null))).toBe(49_000);
+  it("행 가운데로 맞추는 스크롤 위치", () => {
+    expect(scrollTopToCenter(100, 240)).toBe(2_400 + 12 - 120);
+    expect(scrollTopToCenter(1, 240)).toBe(0);
   });
 });

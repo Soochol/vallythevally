@@ -35,7 +35,7 @@ async function emitLive(scenario: Scenario, frame: (sub: string) => Parameters<S
 
 const rowsOf = (page: Page) => page.getByTestId("program-row");
 
-test("조회 행 뒤에 실시간 행이 붙고 겹치는 조회 행은 사라지며 누적 숫자와 막대 방향이 맞다", async ({ page, scenario }) => {
+test("조회 행 뒤에 실시간 행이 붙고 겹치는 조회 행은 사라지며 누적 숫자와 증감 부호·색이 맞다", async ({ page, scenario }) => {
   linkStock(scenario, "005930", [point("09:00:00", 10), point("09:01:00", 30), point("09:02:00", 20)]);
   await openProgramWindow(page);
   await expect(rowsOf(page)).toHaveCount(3);
@@ -55,10 +55,15 @@ test("조회 행 뒤에 실시간 행이 붙고 겹치는 조회 행은 사라�
   await expect(page.getByTestId("program-net-amount")).toHaveText("+10.50억원");
   await expect(page.getByTestId("program-buy-qty")).toHaveText("5,000주");
   await expect(page.getByTestId("program-sell-qty")).toHaveText("3,000주");
-  await expect(rowsOf(page).nth(0).getByTestId("program-bar")).toHaveAttribute("data-direction", "sell");
-  await expect(rowsOf(page).nth(1).getByTestId("program-bar")).toHaveAttribute("data-direction", "buy");
-  await expect(rowsOf(page).nth(0).getByTestId("program-change")).toContainText("−10");
-  await expect(rowsOf(page).nth(1).getByTestId("program-change")).toContainText("+5");
+  await expect(page.locator(".pg-bar, .mw-ratio")).toHaveCount(0);
+  const sellChange = rowsOf(page).nth(0).getByTestId("program-change").locator("em");
+  const buyChange = rowsOf(page).nth(1).getByTestId("program-change").locator("em");
+  await expect(sellChange).toHaveText(/^−10/);
+  await expect(sellChange).toHaveClass(/mw-down/);
+  await expect(buyChange).toHaveText(/^\+5/);
+  await expect(buyChange).toHaveClass(/mw-up/);
+  const headHeight = await page.locator(".pg-head").evaluate((el) => el.getBoundingClientRect().height);
+  expect(headHeight).toBeLessThanOrEqual(52);
 });
 
 test("연결이 끊겼다 이어지면 실시간 행 사이에 끊김 줄이 생긴다", async ({ page, scenario }) => {

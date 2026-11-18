@@ -1,4 +1,4 @@
-import { MINUS } from "../../lib/format";
+import { formatDecimal, MINUS } from "../../lib/format";
 
 export { formatKstClockSeconds as formatClock } from "../../chart/time";
 
@@ -12,3 +12,5 @@ export const formatWon = (won: number): string => `${whole.format(won)}원`;
 export const formatEokWon = (won: number): string => `${twoDecimals.format(won / 1e8)}억원`;
 
 export const withSign = (value: number, formatted: string): string => (value > 0 ? "+" : value < 0 ? MINUS : "") + formatted;
+
+export const formatStrength = (strength: number | null): string => (strength === null ? "—" : `${formatDecimal(strength)}%`);

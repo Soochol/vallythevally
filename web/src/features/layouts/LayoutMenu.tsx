@@ -1,6 +1,6 @@
 import { type RefObject, useId, useLayoutEffect, useRef } from "react";
 import { useUiStore } from "../../stores/ui";
-import { setLayoutMode } from "../workspace/canvasCommands";
+import { equalizeDockSizes, setLayoutMode } from "../workspace/canvasCommands";
 import { useLayoutStore } from "../../stores/layout";
 import { usePersistStore } from "../../stores/persist";
 import { DialogFrame, Errors } from "../dialog/DialogParts";
@@ -36,6 +36,7 @@ export function LayoutMenu() {
     { kind: "separator" },
     { kind: "check", label: "십자선 연동", checked: layout.sync.crosshair, onSelect: () => useLayoutStore.getState().setCrosshairSync(!layout.sync.crosshair) },
     { kind: "action", label: "기본 배치로", onSelect: layoutCommands.resetPlacement },
+    { kind: "action", label: "크기 모두 고르게", disabled: mode !== "dock" || !layout.placement.dock, onSelect: equalizeDockSizes },
     { kind: "action", label: "배치 되돌리기", disabled: !canUndo, onSelect: () => useLayoutStore.getState().undoArrangement() },
   ];
   return (

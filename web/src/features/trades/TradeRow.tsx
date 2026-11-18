@@ -1,7 +1,5 @@
 import { direction, formatPrice } from "../../lib/format";
-import { amountBarRatio, amountWon, formatSecond, isBigTrade, type TradeRow as TradeRowData } from "./tape";
-
-const BAR_MAX_PERCENT = 55;
+import { formatSecond, isBigTrade, type TradeRow as TradeRowData } from "./tape";
 
 function priceColor(row: TradeRowData, previousClose: number | null): "up" | "down" | "flat" {
   if (previousClose !== null && previousClose > 0) return direction(row.price - previousClose);
@@ -14,11 +12,7 @@ export function TradeRow({ row, previousClose, fresh }: { row: TradeRowData; pre
     <div role="row" className="tr-row" data-testid="trade-row" data-side={row.side} data-big={big ? "" : undefined} data-fresh={fresh ? "" : undefined} data-price={row.price}>
       <span role="cell" className="tr-time">{formatSecond(row.secondOfDay)}</span>
       <span role="cell" className="tr-price" data-dir={priceColor(row, previousClose)}>{formatPrice(row.price, false)}</span>
-      <span role="cell" className="tr-qty">
-        <i className="tr-qty-bar" style={{ width: `${amountBarRatio(amountWon(row)) * BAR_MAX_PERCENT}%` }} />
-        <span className="tr-qty-value">{formatPrice(row.quantity, false)}</span>
-        {big && <b className="tr-big">대량</b>}
-      </span>
+      <span role="cell" className="tr-qty">{formatPrice(row.quantity, false)}</span>
     </div>
   );
 }

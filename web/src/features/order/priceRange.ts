@@ -1,48 +1,28 @@
-const TICK_TABLE: readonly (readonly [limit: number, tick: number])[] = [
-  [2_000, 1],
-  [5_000, 5],
-  [20_000, 10],
-  [50_000, 50],
-  [200_000, 100],
-  [500_000, 500],
-];
+import { stepPrice, type PriceBounds, type TickRule } from "../market-window/tick";
 
-const TOP_TICK = 1_000;
+export const LADDER_ROW_HEIGHT_PX = 24;
+const OVERSCAN_ROWS = 15;
+const MAX_TICKS = 20_000;
 
-export const EXPLORER_ROWS = 20;
-const ROWS_ABOVE_CENTER = 10;
-
-export function tickSize(price: number): number {
-  return TICK_TABLE.find(([limit]) => price < limit)?.[1] ?? TOP_TICK;
+export interface RowRange {
+  readonly start: number;
+  readonly end: number;
 }
 
-export interface PriceBounds {
-  readonly lower: number | null;
-  readonly upper: number | null;
+export function fullRangePrices(bounds: PriceBounds, rule: TickRule): number[] | null {
+  const { lower, upper } = bounds;
+  if (lower === null || upper === null || !(lower > 0) || upper < lower) return null;
+  const prices: number[] = [];
+  for (let price = upper; price >= lower && prices.length < MAX_TICKS; price = stepPrice(price, -1, rule)) prices.push(price);
+  return prices;
 }
 
-export const clampPrice = (price: number, { lower, upper }: PriceBounds): number => Math.max(lower ?? 1, Math.min(upper ?? Infinity, price));
-
-const stepOnce = (price: number, direction: 1 | -1): number => (direction === 1 ? price + tickSize(price) : price - tickSize(price - 1));
-
-export function movePrice(price: number, ticks: number, bounds: PriceBounds): number {
-  const direction = ticks < 0 ? -1 : 1;
-  let moved = clampPrice(price, bounds);
-  for (let step = 0; step < Math.abs(ticks); step++) {
-    const next = clampPrice(stepOnce(moved, direction), bounds);
-    if (next === moved) break;
-    moved = next;
-  }
-  return moved;
+export function visibleRowRange(scrollTop: number, viewportHeight: number, rowCount: number, rowHeight = LADDER_ROW_HEIGHT_PX, overscan = OVERSCAN_ROWS): RowRange {
+  const first = Math.floor(Math.max(0, scrollTop) / rowHeight);
+  const last = Math.ceil((Math.max(0, scrollTop) + Math.max(0, viewportHeight)) / rowHeight);
+  return { start: Math.min(rowCount, Math.max(0, first - overscan)), end: Math.min(rowCount, Math.max(0, last + overscan)) };
 }
 
-export function explorerPrices(center: number, bounds: PriceBounds): (number | null)[] {
-  const start = movePrice(center, ROWS_ABOVE_CENTER, bounds);
-  const prices: number[] = [start];
-  while (prices.length < EXPLORER_ROWS) {
-    const next = movePrice(prices[prices.length - 1]!, -1, bounds);
-    if (next === prices[prices.length - 1]) break;
-    prices.push(next);
-  }
-  return [...prices, ...Array<null>(EXPLORER_ROWS - prices.length).fill(null)];
+export function scrollTopToCenter(rowIndex: number, viewportHeight: number, rowHeight = LADDER_ROW_HEIGHT_PX): number {
+  return Math.max(0, rowIndex * rowHeight + rowHeight / 2 - viewportHeight / 2);
 }

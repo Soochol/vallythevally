@@ -4,6 +4,7 @@ import { workArea } from "../../layout/canvas/geometry";
 import { placementForMode } from "../../layout/modes";
 import { fitDock } from "../../layout/dock/fit";
 import { layoutDock, type DockSpace } from "../../layout/dock/geometry";
+import { findJunctions } from "../../layout/dock/junction";
 import type { DockPlacement } from "../../layout/placement";
 import { groupOfWindow, listGroups } from "../../layout/dock/tree";
 import { useLayoutStore, windowRefs } from "../../stores/layout";
@@ -12,6 +13,7 @@ import { useUiStore } from "../../stores/ui";
 import { CanvasWorkspace } from "./CanvasWorkspace";
 import { canvasPanelId } from "./canvasInteraction";
 import { Divider } from "./Divider";
+import { DockJunction } from "./DockJunction";
 import { DockFloats } from "./DockFloats";
 import { DockGroup } from "./DockGroup";
 import { DockTabMenu } from "./DockTabMenu";
@@ -65,6 +67,7 @@ export function Workspace() {
       {mode === "canvas" && canvas && canvasArea ? <CanvasWorkspace canvas={canvas} windows={windows} area={canvasArea} /> : null}
       {mode === "dock" && boxes?.groups.map(({ group, rect }, index) => (maximizedGroup && group.id !== maximizedGroup.group.id ? null : <DockGroup key={group.id} group={group} rect={maximizedGroup && space ? { x: 0, y: 0, w: space.area.w, h: space.area.h } : rect} number={index + 1} interaction={interaction} maximized={maximizedGroup !== undefined} onToggleMaximize={() => maximize.toggle(group.id)} />))}
       {mode === "dock" && space && !maximizedGroup && boxes?.gutters.map((box) => <Divider key={box.path.join("-") || "root"} box={box} dock={dock} space={space} onDraft={setDraft} />)}
+      {mode === "dock" && space && !maximizedGroup && boxes && findJunctions(boxes).map((junction) => <DockJunction key={`${junction.rowPath.join("-")}|${junction.columnPath.join("-")}`} junction={junction} layout={boxes} dock={dock} space={space} onDraft={setDraft} />)}
       {mode === "dock" && area && <DockFloats dock={shown} windows={windows} area={area} interaction={interaction} />}
       <div ref={parking} hidden inert />
       {windows.map((window) => {

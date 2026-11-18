@@ -1,7 +1,7 @@
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { expect, test } from "vitest";
-import { PriceLadder } from "./PriceLadder";
+import { PriceLadder, type LadderRowSlots } from "./PriceLadder";
 import { buildLadder } from "./ladder";
 
 const rows = buildLadder({
@@ -9,39 +9,81 @@ const rows = buildLadder({
   bids: [{ price: 71500, quantity: 450, change: -20 }],
   lastPrice: 71500,
   previousClose: 70000,
+  bounds: { lower: null, upper: null },
+  tickRule: "stock",
 });
+const render = (props: Partial<Parameters<typeof PriceLadder>[0]> = {}) => renderToStaticMarkup(createElement(PriceLadder, { rows, previousClose: 70000, ...props }));
 
-test("행은 스무 개이고 현재가 행에만 강조와 전일 대비 등락률이 붙는다", () => {
-  const html = renderToStaticMarkup(createElement(PriceLadder, { rows, previousClose: 70000 }));
+test("행은 스무 개이고 현재가 행에만 강조가 붙으며 등락률은 값이 있는 모든 행에 있다", () => {
+  const html = render();
   expect(html.match(/class="mw-lr"/g)).toHaveLength(20);
   expect(html.match(/data-current/g)).toHaveLength(1);
   expect(html).toContain("<small>+2.14%</small>");
-  expect(html).toContain("71,500");
+  expect(html.match(/<small>/g)).toHaveLength(20);
 });
 
 test("잔량 막대는 가장 큰 잔량 900을 100%로 잡는다", () => {
-  const html = renderToStaticMarkup(createElement(PriceLadder, { rows, previousClose: 70000 }));
+  const html = render();
   expect(html).toContain("width:100%");
   expect(html).toContain("width:50%");
 });
 
-test("왼쪽·오른쪽 칸은 slot이 있을 때만 열이 생기고 행마다 그 slot이 그려진다", () => {
-  const plain = renderToStaticMarkup(createElement(PriceLadder, { rows, previousClose: 70000 }));
-  const slotted = renderToStaticMarkup(createElement(PriceLadder, { rows, previousClose: 70000, slots: { left: (row) => createElement("em", { className: "left" }, row.key), right: (row) => createElement("em", { className: "right" }, row.key) } }));
-  expect(plain).toContain("grid-template-columns:1fr var(--size-84) 1fr");
-  expect(slotted).toContain("grid-template-columns:auto 1fr var(--size-84) 1fr auto");
+test("모든 행의 열 정의가 같고 왼쪽·오른쪽 칸은 slot이 있을 때만 고정 폭 열이 생긴다", () => {
+  const slotted = render({ slots: { left: (row) => createElement("em", { className: "left" }, row.key), right: (row) => createElement("em", { className: "right" }, row.key) } });
+  expect(render().match(/grid-template-columns:([^"]*)"/g)?.every((style) => style === 'grid-template-columns:minmax(0, 1fr) var(--size-133) minmax(0, 1fr)"')).toBe(true);
+  expect(new Set(slotted.match(/grid-template-columns:[^"]*/g))).toEqual(new Set(["grid-template-columns:var(--size-64) minmax(0, 1fr) var(--size-133) minmax(0, 1fr) var(--size-64)"]));
   expect(slotted.match(/class="left"/g)).toHaveLength(20);
   expect(slotted.match(/class="right"/g)).toHaveLength(20);
 });
 
-test("잔량이 늘면 상승, 줄면 하락 증감 뱃지를 부호와 함께 보인다", () => {
-  const html = renderToStaticMarkup(createElement(PriceLadder, { rows, previousClose: 70000 }));
-  expect(html).toContain('data-flash="up">+40주');
-  expect(html).toContain('data-flash="down">−20주');
+test("잔량이 늘면 상승, 줄면 하락 증감 글자를 부호와 함께 잔량 칸 안에 보인다", () => {
+  const html = render();
+  expect(html).toContain('class="mw-qty-change" data-flash="up">+40주');
+  expect(html).toContain('class="mw-qty-change" data-flash="down">−20주');
+  expect(html).not.toContain("mw-qty-delta");
+  expect(html).toMatch(/mw-qty-change" data-flash="up">\+40주<\/span><span class="mw-qty-value">300주/);
+  expect(html).toMatch(/mw-qty-value">450주<\/span><span class="mw-qty-change" data-flash="down">/);
 });
 
 test("기준가가 0이면 가격은 상승색이 아니다", () => {
-  const html = renderToStaticMarkup(createElement(PriceLadder, { rows, previousClose: 0 }));
+  const html = render({ previousClose: 0 });
   expect(html).not.toContain("mw-up");
   expect(html).not.toContain("mw-down");
+});
+
+test("위 오른쪽 자리는 1~7행의 빈 매수 잔량 칸에만, 아래 왼쪽 자리는 13~20행의 빈 매도 잔량 칸에만 그린다", () => {
+  const rowSlots: LadderRowSlots = {
+    topRight: (slot) => createElement("em", { className: "top" }, `t${slot}`),
+    bottomLeft: (slot) => createElement("em", { className: "bottom" }, `b${slot}`),
+  };
+  const html = render({ rowSlots });
+  expect(html.match(/<em class="top">t\d<\/em>/g)).toEqual(["<em class=\"top\">t0</em>", "<em class=\"top\">t1</em>", "<em class=\"top\">t2</em>", "<em class=\"top\">t3</em>", "<em class=\"top\">t4</em>", "<em class=\"top\">t5</em>", "<em class=\"top\">t6</em>"]);
+  expect(html.match(/<em class="bottom">b(\d)<\/em>/g)?.map((tag) => tag.match(/b(\d)/)![1])).toEqual(["0", "1", "2", "3", "4", "5", "6", "7"]);
+});
+
+test("그 칸에 잔량이 있는 행은 자리 내용을 그리지 않는다", () => {
+  const crossed = buildLadder({
+    asks: [{ price: 71000, quantity: 5, change: 0 }, { price: 70100, quantity: 7, change: 0 }, { price: 69500, quantity: 2, change: 0 }],
+    bids: [{ price: 70900, quantity: 9, change: 0 }, { price: 69100, quantity: 3, change: 0 }],
+    lastPrice: 70000,
+    previousClose: 70000,
+    bounds: { lower: null, upper: null },
+  tickRule: "stock",
+  });
+  const html = renderToStaticMarkup(createElement(PriceLadder, {
+    rows: crossed,
+    previousClose: 70000,
+    rowSlots: { topRight: (slot) => createElement("em", { className: "top" }, `t${slot}`), bottomLeft: (slot) => createElement("em", { className: "bottom" }, `b${slot}`) },
+  }));
+  expect(html.match(/class="top"/g)).toHaveLength(6);
+  expect(html).not.toContain("<em class=\"top\">t1</em>");
+  expect(html.match(/class="bottom"/g)).toHaveLength(7);
+  expect(html).not.toContain("<em class=\"bottom\">b3</em>");
+});
+
+test("표시 가격 하나에만 가격 숫자 앞에 점이 붙는다", () => {
+  const html = render({ mark: { price: 71700, label: "평단가" } });
+  expect(html.match(/ladder-mark/g)).toHaveLength(1);
+  expect(html).toContain('<span class="mw-px-num"><i class="mw-px-mark" data-testid="ladder-mark" title="평단가"></i>71,700</span>');
+  expect(render({ mark: { price: 12345, label: "평단가" } })).not.toContain("ladder-mark");
 });

@@ -81,8 +81,15 @@ const DAEMON_ONLY_OPTIONS: [&str; 12] = [
     "discord-webhook",
 ];
 
-const HOLIDAY_KEY_FILE: &str = "holiday-service-key";
+const HOLIDAY_KEY_FILE: &str = ".config/vally/holiday-service-key";
 const RUNTIME_STOP_LIMIT: std::time::Duration = std::time::Duration::from_secs(5);
+
+fn default_holiday_key_path(variables: &Variables) -> Result<PathBuf, String> {
+    match variables.get("HOME").filter(|home| !home.is_empty()) {
+        Some(home) => Ok(PathBuf::from(home).join(HOLIDAY_KEY_FILE)),
+        None => Err("HOME이 없어 특일정보 키 파일 경로를 정할 수 없습니다. --holiday-key를 주세요".to_string()),
+    }
+}
 
 fn stop_runtime(runtime: tokio::runtime::Runtime, limit: std::time::Duration) {
     runtime.shutdown_timeout(limit);
@@ -185,7 +192,13 @@ fn run_daemon(arguments: &Arguments, keys_path: &std::path::Path) -> ExitCode {
         Ok(keys) => keys,
         Err(error) => return usage_error(error),
     };
-    let holiday_key_path = arguments.value("holiday-key").map_or_else(|| state_folder.join(HOLIDAY_KEY_FILE), PathBuf::from);
+    let holiday_key_path = match arguments.value("holiday-key") {
+        Some(path) => PathBuf::from(path),
+        None => match default_holiday_key_path(&process) {
+            Ok(path) => path,
+            Err(message) => return usage_error(message),
+        },
+    };
     let webhook = match load_webhook(arguments, &process) {
         Ok(webhook) => webhook,
         Err(message) => return usage_error(message),
@@ -339,6 +352,13 @@ mod tests {
         assert!(load_webhook(&none, &process).unwrap().is_some(), "HOME 아래 기본 경로를 읽는다");
         std::fs::set_permissions(&default_file, std::fs::Permissions::from_mode(0o660)).unwrap();
         assert!(load_webhook(&none, &process).is_err());
+    }
+
+    #[test]
+    fn holiday_key_defaults_to_the_secrets_folder_under_home() {
+        let variables = Variables::from([("HOME".to_string(), "/home/someone".to_string())]);
+        assert_eq!(default_holiday_key_path(&variables).unwrap(), PathBuf::from("/home/someone/.config/vally/holiday-service-key"));
+        assert!(default_holiday_key_path(&Variables::new()).is_err());
     }
 
     #[test]

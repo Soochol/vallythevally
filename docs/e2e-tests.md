@@ -21,6 +21,12 @@
 
 예산 초과는 실패가 아니라 경고다. 실행이 끝나면 `budget-reporter.ts`가 30초를 넘은 시험을 오래 걸린 순서로 출력하고 실행의 `results/budget.json`에 남긴다. 예산은 `VALLY_E2E_BUDGET_MS`로 바꿀 수 있다.
 
+시험별 시간은 같은 `results/`에 `durations.json`으로도 남는다. 최상위는 `runStart`(실행 시작 시각)와 `count`(시험 수), `tests`(시험마다 `file`, `line`, `title`, `status`, `durationMs`, `workerIndex`, `startMs`(실행 시작부터 잰 시작 시각), `retry`)다. 재시도, 실패, 건너뜀도 한 줄씩 들어간다. 실행 폴더는 곧 지워지므로 같은 JSON을 gzip과 base64로 바꾼 한 줄 `e2e-durations: <base64>`도 표준 출력에 나와 chute 검증 로그에 보존된다. 이 줄은 마지막 요약보다 앞에 나온다. 로그에서 JSON으로 되돌린다.
+
+```
+grep '^e2e-durations: ' e2e.1.log | cut -d' ' -f2 | base64 -d | gunzip
+```
+
 ## 시간 대신 상태와 이벤트를 기다린다
 
 고정 시간을 기다리지 말고 기다릴 상태를 정한다.
@@ -62,6 +68,13 @@ Playwright 설정이 `fullyParallel: true`라서 같은 파일의 시험도 서�
 ## 시간에 민감한 새 시험은 부하에서 반복해 확인한다
 
 대기, 애니메이션, 실시간 프레임, 늦은 응답을 다루는 새 시험은 부하를 흉내 내 반복으로 확인하고, 명령과 결과를 PR 본문에 적는다.
+
+재현 수단은 두 가지다.
+
+- 결정적 방법: `scenario.hold`와 `reply`로 응답을 늦추고, `clockStart`와 `page.clock`으로 가상 시간을 넘기고, 앱이 내놓는 상태·전환 완료 신호(`data-*`, `aria-*`)를 기다린다.
+- 그 실행에만 거는 제한: 아래 `VALLY_E2E_CPU_THROTTLE`이다.
+
+PC 전체에 인위적 부하를 걸지 않는다. 무한 루프, `stress`·`stress-ng`, 코어 수만큼의 바쁜 프로세스, 같은 시험 실행을 여러 벌 동시에 띄우는 것이 모두 해당한다. 이 PC는 다른 작업자와 chute 병합 검증이 함께 쓰므로 전체 부하는 그들을 함께 느리게 하고 다른 시험을 흔든다. 위 수단으로 재현하지 못하면 부하를 키우지 않고, 무엇을 시도했는지 보고하고 멈춘다.
 
 ```sh
 env VALLY_E2E_CPU_THROTTLE=4 python3 scripts/web.py e2e --repeat-each=20 --workers=6 e2e/<파일>.spec.ts:<줄>
