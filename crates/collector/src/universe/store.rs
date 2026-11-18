@@ -111,6 +111,18 @@ pub fn write_universe(data_dir: &Path, file: &UniverseFile) -> Result<(), StoreE
     write_json(universe_path(data_dir, file.date), file)
 }
 
+pub fn move_unreadable_aside(data_dir: &Path, date: u32, stamp: String) -> Result<PathBuf, StoreError> {
+    let from = universe_path(data_dir, date);
+    let mut target = folder(data_dir).join(format!("{date}.unreadable-{stamp}.json"));
+    let mut attempt = 1;
+    while target.exists() {
+        attempt += 1;
+        target = folder(data_dir).join(format!("{date}.unreadable-{stamp}-{attempt}.json"));
+    }
+    fs::rename(&from, &target).map_err(|cause| StoreError::Write { path: from, cause })?;
+    Ok(target)
+}
+
 fn rejected_path(data_dir: &Path, date: u32) -> PathBuf {
     folder(data_dir).join(format!("{date}.rejected.json"))
 }
