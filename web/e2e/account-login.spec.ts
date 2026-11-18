@@ -2,7 +2,12 @@ import { mkdir } from "node:fs/promises";
 import path from "node:path";
 import type { Page } from "@playwright/test";
 import type { AccountStatus } from "../src/api/generated/AccountStatus";
-import { cell, expect, test, type Scenario } from "./harness";
+import { cell, expect, fixedWait, test, type Scenario } from "./harness";
+
+const passTime = async (page: Page, ms: number) => {
+  await page.clock.runFor(ms);
+  await fixedWait(page, ms, "요청이 나가지 않았음을 보려면 원래 대기만큼 실제 시간이 지나야 한다");
+};
 
 const SCREENS = path.resolve("../target/ux-screens");
 const ACCOUNT_ID = "0123456789abcdef0123";
@@ -131,12 +136,13 @@ test.describe("1440×900", () => {
   test("복원하는 도중 signed_out이 오면 복원이 끝나도 저장을 시작하지 않는다", async ({ page, scenario }) => {
     scenario.live.account = SIGNED_IN;
     const held = scenario.hold(route("GET", "/api/ui-state"));
+    await page.clock.install();
     await page.goto("/?symbol=005930");
     await held.received;
     scenario.live.setAccount(SIGNED_OUT);
     await expect(landing(page)).toBeVisible();
     held.reply({ body: scenario.documents.uiState() });
-    await page.waitForTimeout(1500);
+    await passTime(page, 1500);
     expect(scenario.requests.filter((r) => r.method() === "PUT")).toHaveLength(0);
     await expect(cell(page)).toHaveCount(0);
   });
@@ -199,11 +205,12 @@ test.describe("1440×900", () => {
     scenario.live.account = MISMATCH;
     answerStatus(scenario, "/api/account/replace-local", SIGNED_IN);
     await page.addInitScript(() => localStorage.setItem("vv.unsaved.watchlist", JSON.stringify({ path: "/api/watchlists", revision: 9_999_999_999_999, body: JSON.stringify({ lists: [{ id: "old", name: "이전계정목록", symbols: [] }], revision: 9_999_999_999_999 }) })));
+    await page.clock.install();
     await page.goto("/");
     await page.getByRole("button", { name: "이 PC 셋업 지우고 바꾸기" }).click();
     await page.getByRole("button", { name: "지우고 바꾸기", exact: true }).click();
     await expect(cell(page)).toBeVisible();
-    await page.waitForTimeout(1500);
+    await passTime(page, 1500);
     expect(scenario.requests.filter((r) => r.method() === "PUT" && new URL(r.url()).pathname === "/api/watchlists")).toHaveLength(0);
     expect(await page.evaluate(() => localStorage.getItem("vv.unsaved.watchlist"))).toBeNull();
   });

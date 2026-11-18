@@ -7,7 +7,7 @@ import type { KiwoomLinkStatus } from "../src/api/generated/KiwoomLinkStatus";
 import type { OrdersSwitchInput } from "../src/api/generated/OrdersSwitchInput";
 import type { PublicIpCheck } from "../src/api/generated/PublicIpCheck";
 import type { RegisteredIpInput } from "../src/api/generated/RegisteredIpInput";
-import { cell, expect, test, type Scenario, pollSaved } from "./harness";
+import { cell, expect, fixedWait, test, type Scenario, pollSaved } from "./harness";
 import { CONNECTED_KIWOOM } from "./fixtures/scenario";
 
 const SCREENS = path.resolve("../target/ux-screens");
@@ -25,6 +25,11 @@ const dialog = (page: Page) => page.getByRole("dialog", { name: "시스템 설�
 const panel = (page: Page) => dialog(page).getByRole("tabpanel");
 const route = (method: string, pathname: string) => (url: URL, request: { method(): string }) => url.pathname === pathname && request.method() === method;
 const callsTo = (scenario: Scenario, method: string, pathname: string) => scenario.requests.filter((r) => r.method() === method && new URL(r.url()).pathname === pathname);
+
+const passTime = async (page: Page, ms: number) => {
+  await page.clock.runFor(ms);
+  await fixedWait(page, ms, "요청이 나가지 않았음을 보려면 원래 대기만큼 실제 시간이 지나야 한다");
+};
 
 async function openKiwoom(page: Page) {
   await page.goto("/?symbol=005930");
@@ -373,6 +378,7 @@ test.describe("1440×900", () => {
 
   test("발급 간격 대기: 0이 되면 단추가 켜지지만 저절로 요청하지 않는다", async ({ page, scenario }) => {
     scenario.live.kiwoomLink = failed("issueIntervalWait", serverSeconds(scenario) + 4, "키움 토큰은 발급 사이를 10분 띄웁니다");
+    await page.clock.install();
     await openKiwoom(page);
     const reconnect = panel(page).getByRole("button", { name: /^다시 연결/ });
     await expect(panel(page)).toContainText("다음 발급 가능");
@@ -382,7 +388,7 @@ test.describe("1440×900", () => {
     await expect(reconnect).toBeEnabled({ timeout: 8000 });
     await expect(reconnect).toHaveText("다시 연결");
     await expect(panel(page)).toContainText("지금 연결할 수 있습니다");
-    await page.waitForTimeout(1500);
+    await passTime(page, 1500);
     expect(callsTo(scenario, "POST", "/api/system/kiwoom/connect")).toHaveLength(0);
   });
 

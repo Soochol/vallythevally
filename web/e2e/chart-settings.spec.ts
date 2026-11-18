@@ -2,7 +2,7 @@ import type { Page } from "@playwright/test";
 import { type ChartSettings, DEFAULT_CHART_SETTINGS, type IndicatorConfig } from "../src/chart/settings";
 import type { Bar } from "../src/api/generated/Bar";
 import { installChartProbe } from "./chart-probe";
-import { type Scenario, cell, chartOf, DEFAULT_LAYOUT_ID, expect, saveChartShare, test, firstChart, withFirstChart, pickDesktopVenue, pollSaved } from "./harness";
+import { type Scenario, cell, chartOf, DEFAULT_LAYOUT_ID, expect, saveChartShare, test, firstChart, withFirstChart, pickDesktopVenue, pollSaved, fixedWait } from "./harness";
 import { selectMinute } from "./select-option";
 
 const RIGHT_OFFSET = 6;
@@ -498,6 +498,7 @@ test("봉 값이 그대로면 크기가 바뀌어 다시 그려도 봉 값 줄�
   await page.setViewportSize({ width: 993, height: 800 });
   openWith(scenario, { showLegend: false, showOhlcChange: true });
   saveChartShare(scenario, 0.4);
+  await page.clock.install();
   await open(page);
   await pollSaved(() => scenario.live.subscriptions().some((s) => s.symbol === "005930")).toBe(true);
   scenario.live.emit({ type: "sub_error", sub: scenario.live.subscriptions().find((s) => s.symbol === "005930")!.sub, code: "realtime_limit" });
@@ -517,7 +518,8 @@ test("봉 값이 그대로면 크기가 바뀌어 다시 그려도 봉 값 줄�
   const wide = (await cell(page).locator(".chart-legend").boundingBox())!.width;
   await page.setViewportSize({ width: 793, height: 800 });
   await expect.poll(async () => (await cell(page).locator(".chart-legend").boundingBox())!.width).toBeLessThan(wide);
-  await page.waitForTimeout(1000);
+  await page.clock.runFor(1000);
+  await fixedWait(page, 1000, "봉 값 줄을 다시 만들지 않았음을 보려면 원래 대기만큼 실제 시간이 지나야 한다");
   expect(await page.evaluate(() => (window as unknown as { rebuiltOhlc: unknown[] }).rebuiltOhlc)).toEqual([]);
 });
 
