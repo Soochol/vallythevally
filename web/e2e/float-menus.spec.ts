@@ -23,13 +23,13 @@ test("차트 우클릭은 누른 가격과 날짜를 머리에 두고 차트 동
   await openChartMenu(page, 0.9);
   await expect(chartMenu(page)).toContainText(/[\d,]+ · \d{4}-\d{2}-\d{2}/);
   const jumpItem = chartMenu(page).getByRole("menuitem", { name: /^바로가기 · / });
-  await expect(jumpItem).toHaveText(/^바로가기 · \d{4}-\d{2}-\d{2}Alt\+G$/);
+  await expect(jumpItem).toHaveText("바로가기 · 2026-11-09Alt+G");
   const jumpLabel = (await jumpItem.textContent())!;
   await page.keyboard.press("Escape");
   await openChartMenu(page);
   await expect(chartMenu(page).getByRole("menuitem", { name: /^바로가기 · / })).toHaveText(jumpLabel);
   await expect(chartMenu(page).getByRole("presentation").first()).toHaveText(/^[\d,]+( · \d{4}-\d{2}-\d{2})?$/);
-  await expect(chartMenu(page).getByRole("menuitem")).toHaveText([/이 가격에 수평선/, /관심종목에 넣기/, /축 자동 맞춤/, /^바로가기 · \d{4}-\d{2}-\d{2}Alt\+G$/, /차트 이미지 복사/, /차트 이미지 내려받기/, /이 종목 드로잉 모두 지우기…/]);
+  await expect(chartMenu(page).getByRole("menuitem")).toHaveText([/이 가격에 수평선/, /관심종목에 넣기/, /축 자동 맞춤/, "바로가기 · 2026-11-09Alt+G", /차트 이미지 복사/, /차트 이미지 내려받기/, /이 종목 드로잉 모두 지우기…/]);
   await expect(chartMenu(page).getByRole("menuitem", { name: "붙여넣기" })).toHaveCount(0);
   await expect(chartMenu(page)).toContainText("드로잉 0개");
   await expect(chartMenu(page).getByRole("menuitem", { name: /이 종목 드로잉 모두 지우기/ })).toBeDisabled();
