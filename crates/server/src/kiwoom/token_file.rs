@@ -6,6 +6,8 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use super::error::CodeKey;
+use super::private_file::{parse_stamped, render_stamped};
+use crate::api::KiwoomEnvironment;
 use crate::instance::InstanceLock;
 
 #[derive(Serialize, Deserialize, PartialEq, Eq, Default)]
@@ -46,11 +48,17 @@ use super::private_file::PrivateFile;
 
 pub struct TokenFile {
     file: PrivateFile,
+    environment: KiwoomEnvironment,
 }
 
 impl TokenFile {
     pub fn new(path: PathBuf, _held: &InstanceLock) -> Self {
-        TokenFile { file: PrivateFile::new(path) }
+        TokenFile { file: PrivateFile::new(path), environment: KiwoomEnvironment::Real }
+    }
+
+    pub fn with_environment(mut self, environment: KiwoomEnvironment) -> Self {
+        self.environment = environment;
+        self
     }
 
     pub fn path(&self) -> &Path {
@@ -59,11 +67,20 @@ impl TokenFile {
 
     pub fn load(&self) -> Result<Option<Saved>, FileError> {
         let Some(text) = self.file.read()? else { return Ok(None) };
-        serde_json::from_str(&text).map(Some).map_err(|e| self.file.error(format_args!("JSON {:?} 오류, {}번째 줄", e.classify(), e.line())))
+        let (stored, saved) = parse_stamped(&text).map_err(|e| self.file.error(format_args!("JSON {:?} 오류, {}번째 줄", e.classify(), e.line())))?;
+        if stored != self.environment {
+            return Err(self.file.error_for_other_environment(stored, self.environment));
+        }
+        Ok(Some(saved))
     }
 
     pub fn save(&self, saved: &Saved) -> Result<(), FileError> {
-        self.file.write(&serde_json::to_vec(saved).expect("문자열과 정수만 담은 구조체"))
+        if let Some(stored) = self.file.stored_environment()?
+            && stored != self.environment
+        {
+            return Err(self.file.error_for_other_environment(stored, self.environment));
+        }
+        self.file.write(&render_stamped(self.environment, saved))
     }
 }
 
@@ -117,6 +134,39 @@ mod tests {
         std::fs::write(file.path(), "{\"token\": \"FAKE-TOKEN-broken\"").unwrap();
         let err = file.load().err().unwrap().to_string();
         assert!(!err.contains("FAKE-TOKEN-broken") && err.contains("token.json"), "{err}");
+    }
+
+    #[test]
+    fn a_token_file_from_the_other_environment_is_neither_read_nor_written() {
+        let (dir, lock, real) = temp_token_file();
+        let token = || Saved { credential: Some(credential_id("FAKE-APPKEY-env-1")), token: Some(SavedToken { value: "FAKE-TOKEN-env-1".into(), expires_dt: "20261110090000".into(), issued_at: 10 }), last_request_at: 9, ..Saved::default() };
+        real.save(&token()).unwrap();
+        let before = std::fs::read(real.path()).unwrap();
+        assert!(String::from_utf8(before.clone()).unwrap().contains("\"environment\":\"real\""));
+
+        let mock = TokenFile::new(real.path().to_owned(), &lock).with_environment(KiwoomEnvironment::Mock);
+        let err = mock.load().err().expect("모의 서버는 실전 파일을 읽지 않는다").to_string();
+        assert!(err.contains("real") && err.contains("mock") && !err.contains("FAKE-"), "{err}");
+        assert!(mock.save(&saved()).is_err(), "쓰지도 않는다");
+        assert_eq!(std::fs::read(real.path()).unwrap(), before, "파일은 그대로다");
+        assert!(real.load().unwrap() == Some(token()));
+
+        let separate = TokenFile::new(dir.path().join("mock/token.json"), &lock).with_environment(KiwoomEnvironment::Mock);
+        separate.save(&token()).unwrap();
+        assert!(separate.load().unwrap() == Some(token()));
+        let as_real = TokenFile::new(separate.path().to_owned(), &lock);
+        assert!(as_real.load().is_err() && as_real.save(&saved()).is_err(), "실전 서버도 모의 파일을 읽지 않는다");
+    }
+
+    #[test]
+    fn a_token_file_without_the_environment_mark_is_real() {
+        let (_dir, lock, file) = temp_token_file();
+        std::fs::DirBuilder::new().recursive(true).mode(0o700).create(file.path().parent().unwrap()).unwrap();
+        std::fs::write(file.path(), r#"{"credential":null,"token":null,"last_request_at":7}"#).unwrap();
+        set_mode(file.path(), 0o600);
+        assert_eq!(file.load().unwrap().unwrap().last_request_at, 7);
+        let mock = TokenFile::new(file.path().to_owned(), &lock).with_environment(KiwoomEnvironment::Mock);
+        assert!(mock.load().is_err());
     }
 
     fn set_mode(p: &Path, mode: u32) {

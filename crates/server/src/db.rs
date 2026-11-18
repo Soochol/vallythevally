@@ -9,6 +9,8 @@ use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePool, SqlitePo
 use sqlx::{Sqlite, Transaction};
 use tokio::sync::watch;
 
+use crate::api::KiwoomEnvironment;
+
 const READ_POOL: u32 = 4;
 const BUSY_TIMEOUT: Duration = Duration::from_secs(5);
 
@@ -39,13 +41,21 @@ pub struct AppDb {
 
 impl AppDb {
     pub async fn open(path: &Path) -> Result<AppDb, DbError> {
+        AppDb::open_in(path, KiwoomEnvironment::Real).await
+    }
+
+    pub async fn open_in(path: &Path, environment: KiwoomEnvironment) -> Result<AppDb, DbError> {
         if let Some(dir) = path.parent().filter(|d| !d.as_os_str().is_empty()) {
             std::fs::create_dir_all(dir).map_err(|e| DbError(format!("{}를 만들 수 없습니다: {e}", dir.display())))?;
         }
-        AppDb::connect(SqliteConnectOptions::new().filename(path).create_if_missing(true)).await
+        AppDb::connect_in(SqliteConnectOptions::new().filename(path).create_if_missing(true), environment).await
     }
 
     pub async fn connect(options: SqliteConnectOptions) -> Result<AppDb, DbError> {
+        AppDb::connect_in(options, KiwoomEnvironment::Real).await
+    }
+
+    pub async fn connect_in(options: SqliteConnectOptions, environment: KiwoomEnvironment) -> Result<AppDb, DbError> {
         let options = options
             .journal_mode(SqliteJournalMode::Wal)
             .foreign_keys(true)
@@ -61,7 +71,14 @@ impl AppDb {
             })
             .connect_with(options.clone())
             .await?;
+        let existed: bool = sqlx::query_scalar("SELECT EXISTS (SELECT 1 FROM sqlite_master WHERE name = '_sqlx_migrations')").fetch_one(&write).await?;
         sqlx::migrate!("./migrations").run(&write).await.map_err(|e| DbError(format!("마이그레이션 실패: {e}")))?;
+        let marked_for = if existed { KiwoomEnvironment::Real } else { environment };
+        sqlx::query("INSERT OR IGNORE INTO kiwoom_environment (id, environment) VALUES (1, ?)").bind(marked_for.as_str()).execute(&write).await?;
+        let stored: String = sqlx::query_scalar("SELECT environment FROM kiwoom_environment WHERE id = 1").fetch_one(&write).await?;
+        if stored != environment.as_str() {
+            return Err(DbError(format!("이 사용자 자료 DB는 투자구분 {stored}의 것이라 {} 서버로 열 수 없습니다. 투자구분마다 DB 파일을 따로 씁니다", environment.as_str())));
+        }
         let read = SqlitePoolOptions::new().max_connections(READ_POOL).connect_with(options.read_only(true)).await?;
         Ok(AppDb { read, write, released })
     }
@@ -100,5 +117,46 @@ mod tests {
         assert_eq!(layouts, 1, "첫 마이그레이션의 기본 레이아웃");
         drop(db);
         AppDb::open(&path).await.expect("다시 열어도 마이그레이션이 겹치지 않는다");
+    }
+
+    #[tokio::test]
+    async fn a_database_from_the_other_environment_stops_the_start() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("vally.db");
+        drop(AppDb::open_in(&path, KiwoomEnvironment::Mock).await.unwrap());
+        let error = AppDb::open_in(&path, KiwoomEnvironment::Real).await.err().expect("모의 DB를 실전으로 열 수 없다").to_string();
+        assert!(error.contains("mock") && error.contains("real"), "{error}");
+        AppDb::open_in(&path, KiwoomEnvironment::Mock).await.expect("같은 투자구분은 다시 열린다");
+
+        let real = tmp.path().join("real.db");
+        drop(AppDb::open(&real).await.unwrap());
+        assert!(AppDb::open_in(&real, KiwoomEnvironment::Mock).await.is_err(), "실전 DB를 모의로 열 수 없다");
+    }
+
+    async fn database_from_before_the_mark(path: &Path) {
+        drop(AppDb::open(path).await.unwrap());
+        let direct = sqlx::SqlitePool::connect_with(SqliteConnectOptions::new().filename(path)).await.unwrap();
+        sqlx::query("DROP TABLE kiwoom_environment").execute(&direct).await.unwrap();
+        sqlx::query("DELETE FROM _sqlx_migrations WHERE version = 18").execute(&direct).await.unwrap();
+        direct.close().await;
+    }
+
+    #[tokio::test]
+    async fn a_database_without_the_environment_mark_opens_as_real() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("vally.db");
+        database_from_before_the_mark(&path).await;
+        let db = AppDb::open(&path).await.expect("표시 없는 기존 DB는 실전으로 열린다");
+        let marked: String = sqlx::query_scalar("SELECT environment FROM kiwoom_environment").fetch_one(db.read()).await.unwrap();
+        assert_eq!(marked, "real");
+    }
+
+    #[tokio::test]
+    async fn a_database_without_the_environment_mark_does_not_open_as_mock() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("vally.db");
+        database_from_before_the_mark(&path).await;
+        let error = AppDb::open_in(&path, KiwoomEnvironment::Mock).await.err().expect("표시 없는 기존 DB는 실전이다").to_string();
+        assert!(error.contains("real"), "{error}");
     }
 }

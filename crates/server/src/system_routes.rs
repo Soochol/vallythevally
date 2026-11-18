@@ -8,7 +8,7 @@ use axum::response::Json;
 use axum::routing::{get, post, put};
 use serde::de::DeserializeOwned;
 
-use crate::api::{self, ApiErrorCode, KeySource, KiwoomAtStart, KiwoomConnectStep, KiwoomLinkProblem, KiwoomLinkState, KiwoomLinkStatus, UnixSeconds};
+use crate::api::{self, ApiErrorCode, KeySource, KiwoomAtStart, KiwoomEnvironment, KiwoomConnectStep, KiwoomLinkProblem, KiwoomLinkState, KiwoomLinkStatus, UnixSeconds};
 use crate::config::{Config, KiwoomCredentials, Secret};
 use crate::http::{ApiFailure, AppState};
 use crate::kiwoom::ip_file::RegisteredIpFile;
@@ -20,6 +20,7 @@ use crate::public_ip::{self, PublicIpTransport};
 const BODY_LIMIT: usize = 4096;
 
 pub struct SystemState {
+    environment: KiwoomEnvironment,
     key_file: Option<KeyFile>,
     ip_file: Option<RegisteredIpFile>,
     registered_ip: Mutex<Option<api::RegisteredIp>>,
@@ -41,7 +42,11 @@ impl SystemState {
             tracing::warn!(error = %e, "등록한 IP 기록을 읽지 못했습니다. 없는 것으로 봅니다");
             None
         });
-        SystemState { key_file: Some(key_file), ip_file: Some(ip_file), registered_ip: Mutex::new(registered_ip), public_ip: None, env_key, key_file_problem: Mutex::new(key_file_problem.map(|e| e.to_string())), settings: Some(settings), account: crate::account::AccountState::local_only(), collector: None, bound: OnceLock::new(), bound_signal: tokio::sync::Notify::new(), write: tokio::sync::Mutex::new(()) }
+        SystemState { environment: settings.environment, key_file: Some(key_file), ip_file: Some(ip_file), registered_ip: Mutex::new(registered_ip), public_ip: None, env_key, key_file_problem: Mutex::new(key_file_problem.map(|e| e.to_string())), settings: Some(settings), account: crate::account::AccountState::local_only(), collector: None, bound: OnceLock::new(), bound_signal: tokio::sync::Notify::new(), write: tokio::sync::Mutex::new(()) }
+    }
+
+    pub fn environment(&self) -> KiwoomEnvironment {
+        self.environment
     }
 
     pub fn with_public_ip(mut self, transport: Arc<dyn PublicIpTransport>) -> Self {
@@ -75,7 +80,7 @@ impl SystemState {
     }
 
     pub fn unconfigured() -> Self {
-        SystemState { key_file: None, ip_file: None, registered_ip: Mutex::new(None), public_ip: None, env_key: false, key_file_problem: Mutex::new(None), settings: None, account: crate::account::AccountState::local_only(), collector: None, bound: OnceLock::new(), bound_signal: tokio::sync::Notify::new(), write: tokio::sync::Mutex::new(()) }
+        SystemState { environment: KiwoomEnvironment::Real, key_file: None, ip_file: None, registered_ip: Mutex::new(None), public_ip: None, env_key: false, key_file_problem: Mutex::new(None), settings: None, account: crate::account::AccountState::local_only(), collector: None, bound: OnceLock::new(), bound_signal: tokio::sync::Notify::new(), write: tokio::sync::Mutex::new(()) }
     }
 
     pub fn bound(&self, addr: std::net::SocketAddr) {
@@ -116,6 +121,7 @@ impl api::SystemSettings {
     pub fn from_config(config: &Config) -> Self {
         let path = |p: &std::path::Path| p.display().to_string();
         api::SystemSettings {
+            environment: config.kiwoom_environment,
             bind: config.bind.socket_addr().to_string(),
             log_filter: config.log_filter.clone(),
             static_dir: path(&config.static_dir),
@@ -171,6 +177,10 @@ fn env_key_conflict() -> ApiFailure {
     ApiFailure::new(ApiErrorCode::Conflict, ".env에서 읽은 키라 화면에서 바꿀 수 없습니다")
 }
 
+fn mock_key_conflict() -> ApiFailure {
+    ApiFailure::new(ApiErrorCode::Conflict, "모의투자 키는 환경 설정(VALLY_KIWOOM_MOCK_APP_KEY, VALLY_KIWOOM_MOCK_APP_SECRET)에서만 받아 화면에서 바꿀 수 없습니다")
+}
+
 fn key_file_of(system: &SystemState) -> Result<&KeyFile, ApiFailure> {
     system.key_file.as_ref().ok_or_else(|| ApiFailure::new(ApiErrorCode::Internal, "키 파일 위치가 정해지지 않았습니다"))
 }
@@ -182,6 +192,9 @@ async fn get_kiwoom(State(st): State<Arc<AppState>>) -> Json<KiwoomLinkStatus> {
 async fn put_key(State(st): State<Arc<AppState>>, body: Body) -> Result<Json<KiwoomLinkStatus>, ApiFailure> {
     let input: api::KiwoomKeyInput = read_body(body).await?;
     let _write = st.system.write.lock().await;
+    if st.system.environment == KiwoomEnvironment::Mock {
+        return Err(mock_key_conflict());
+    }
     if st.system.env_key {
         return Err(env_key_conflict());
     }
@@ -204,6 +217,9 @@ async fn put_key(State(st): State<Arc<AppState>>, body: Body) -> Result<Json<Kiw
 
 async fn delete_key(State(st): State<Arc<AppState>>) -> Result<Json<KiwoomLinkStatus>, ApiFailure> {
     let _write = st.system.write.lock().await;
+    if st.system.environment == KiwoomEnvironment::Mock {
+        return Err(mock_key_conflict());
+    }
     if st.system.env_key {
         return Err(env_key_conflict());
     }
@@ -265,6 +281,7 @@ pub fn kiwoom_status(st: &AppState) -> KiwoomLinkStatus {
     let summary_present = summary.is_some();
     let key_source = if st.system.env_key { KeySource::Env } else if summary.is_some() { KeySource::File } else { KeySource::None };
     let mut status = KiwoomLinkStatus {
+        environment: st.system.environment,
         key_source,
         app_key_tail: summary.as_ref().and_then(|s| s.app_key_tail.clone()),
         credential_id: summary.map(|s| s.credential_prefix),
@@ -288,6 +305,7 @@ pub fn kiwoom_status(st: &AppState) -> KiwoomLinkStatus {
                 status.problem = Some(KiwoomLinkProblem::KeyFileUnusable);
                 status.message = format!("키 파일을 쓸 수 없어 키 없이 켰습니다({problem})");
             }
+            None if st.system.environment == KiwoomEnvironment::Mock => status.message = "모의투자 키가 없습니다. VALLY_KIWOOM_MOCK_APP_KEY와 VALLY_KIWOOM_MOCK_APP_SECRET을 설정하고 서버를 다시 켭니다".to_owned(),
             None => status.message = "키움 키가 없습니다. 저장만 하고 키움에는 아무것도 보내지 않습니다".to_owned(),
         },
         LinkState::Disconnected => {

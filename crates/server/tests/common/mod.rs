@@ -73,20 +73,22 @@ impl Server {
             let instance = server::instance::InstanceLock::acquire(&lock).unwrap();
             let token_path = value("VALLY_TOKEN_PATH").map(PathBuf::from).unwrap_or_else(|| token_path(&lock));
             let clock = value("VALLY_CLOCK_START").map(|at| server::clock::Clock::fake(server::kiwoom::wire::parse_kst_datetime(at).unwrap())).unwrap_or_else(server::clock::Clock::system);
-            let token_file = server::kiwoom::token_file::TokenFile::new(token_path.clone(), &instance);
-            let key_file = server::kiwoom::key_file::KeyFile::new(value("VALLY_KIWOOM_KEY_PATH").map(PathBuf::from).unwrap_or_else(|| lock.with_file_name("kiwoom-key.json")), &instance);
-            let env_key = match value("VALLY_KIWOOM_APP_KEY") {
+            let environment = if value("VALLY_KIWOOM_ENV") == Some("mock") { server::api::KiwoomEnvironment::Mock } else { server::api::KiwoomEnvironment::Real };
+            let token_file = server::kiwoom::token_file::TokenFile::new(token_path.clone(), &instance).with_environment(environment);
+            let key_file = server::kiwoom::key_file::KeyFile::new(value("VALLY_KIWOOM_KEY_PATH").map(PathBuf::from).unwrap_or_else(|| lock.with_file_name("kiwoom-key.json")), &instance).with_environment(environment);
+            let (key_name, secret_name) = if environment == server::api::KiwoomEnvironment::Mock { ("VALLY_KIWOOM_MOCK_APP_KEY", "VALLY_KIWOOM_MOCK_APP_SECRET") } else { ("VALLY_KIWOOM_APP_KEY", "VALLY_KIWOOM_APP_SECRET") };
+            let env_key = match value(key_name) {
                 Some("") => None,
-                key => Some(server::config::KiwoomCredentials { app_key: server::config::Secret::new(key.unwrap_or(APP_KEY).into()), app_secret: server::config::Secret::new(APP_SECRET.into()) }),
+                key => Some(server::config::KiwoomCredentials { app_key: server::config::Secret::new(key.unwrap_or(APP_KEY).into()), app_secret: server::config::Secret::new(value(secret_name).unwrap_or(APP_SECRET).into()) }),
             };
             let has_env_key = env_key.is_some();
-            let startup_key = server::kiwoom::key_file::startup_key(env_key, &key_file);
+            let startup_key = server::kiwoom::key_file::startup_key(env_key, &key_file, environment);
             let auth = match startup_key.credentials {
                 Some(credentials) => server::kiwoom::auth::KiwoomAuth::new(credentials.app_key, credentials.app_secret, Some(token_file)),
                 None => server::kiwoom::auth::KiwoomAuth::keyless(Some(token_file)),
             };
             let rest = server::kiwoom::rest::KiwoomRest::with_send_spacing(transport.transport(), auth, clock.clone(), std::time::Duration::from_millis(value("KIWOOM_SEND_SPACING_MILLIS").map_or(1, |millis| millis.parse().unwrap())));
-            let db = server::db::AppDb::open(&parent.join("vally.db")).await.unwrap();
+            let db = server::db::AppDb::open_in(&parent.join("vally.db"), environment).await.unwrap();
             let store_path = parent.join("screener.duckdb");
             let dispatcher = tracing::dispatcher::get_default(Clone::clone);
             let store = tokio::task::spawn_blocking(move || tracing::dispatcher::with_default(&dispatcher, || server::screener::store::Store::open(&store_path).unwrap())).await.unwrap();
@@ -105,7 +107,7 @@ impl Server {
             let account_path = value("VALLY_ACCOUNT_STATE_PATH").map(PathBuf::from).unwrap_or_else(|| lock.with_file_name("account.json"));
             let account_url = value("VALLY_ACCOUNT_SERVER_URL").map(|url| server::account::AccountServerUrl::parse(url).unwrap());
             let settings = server::api::SystemSettings {
-                bind: "127.0.0.1:0".into(), log_filter: "server=trace".into(), static_dir: path(&static_dir), db_path: path(&parent.join("vally.db")), screener_db_path: path(&parent.join("screener.duckdb")),
+                environment, bind: "127.0.0.1:0".into(), log_filter: "server=trace".into(), static_dir: path(&static_dir), db_path: path(&parent.join("vally.db")), screener_db_path: path(&parent.join("screener.duckdb")),
                 financial_db_path: path(&parent.join("financials.db")), screener_update_on_start: value("VALLY_SCREENER_UPDATE_ON_START") == Some("on"), financial_automatic: value("VALLY_FINANCIAL_AUTOMATIC") == Some("on"),
                 opendart_key_present: value("OPENDART_API_KEY").is_some_and(|key| !key.is_empty()), token_path: path(&token_path), key_path: path(key_file.path()), lock_path: path(&lock),
                 kiwoom_target: server::system_routes::kiwoom_target(value("VALLY_KIWOOM_BASE_URL").unwrap_or("http://127.0.0.1:1")), server_version: env!("CARGO_PKG_VERSION").into(),
