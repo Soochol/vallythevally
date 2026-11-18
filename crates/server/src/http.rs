@@ -16,7 +16,6 @@ use crate::api;
 use crate::bars::{BarError, BarService, DEFAULT_LIMIT, MAX_LIMIT};
 use crate::clock::Clock;
 use crate::db::AppDb;
-use crate::kiwoom::error::{Category, Failure, Note, Surface};
 use crate::kiwoom::link::Link;
 use crate::kiwoom::rest::{KiwoomError, KiwoomRest};
 use crate::market::hub::{HubHandle, HubSnapshot};
@@ -80,22 +79,8 @@ impl ApiFailure {
     }
 
     fn kiwoom(e: &KiwoomError) -> Self {
-        use api::ApiErrorCode::*;
-        let code = match e.failure().map(Failure::surface) {
-            Some(Surface::Unavailable) => KiwoomUnavailable,
-            Some(Surface::AuthFailed) => KiwoomAuthFailed,
-            Some(Surface::UnknownSymbol) => UnknownSymbol,
-            Some(Surface::Internal) => Internal,
-            None if matches!(e, KiwoomError::TokenFile(_)) => KiwoomAuthFailed,
-            None => KiwoomUnavailable,
-        };
-        ApiFailure {
-            code,
-            message: e.to_string(),
-            reason: Some(reason(e)),
-            retry_at: e.retry_at(),
-            manual_action_required: e.manual_action_required(),
-        }
+        let shown = e.shown();
+        ApiFailure { code: shown.code, message: e.to_string(), reason: Some(shown.reason), retry_at: shown.retry_at, manual_action_required: shown.manual_action_required }
     }
 
     pub(crate) fn trading(e: crate::trading::TradingError) -> Self {
@@ -234,33 +219,6 @@ impl Lookup {
                 ApiFailure::new(Internal, "서버 내부 오류입니다")
             }
         }
-    }
-}
-
-fn reason(e: &KiwoomError) -> api::ApiErrorReason {
-    use api::ApiErrorReason as R;
-    let Some(f) = e.failure() else {
-        return match e {
-            KiwoomError::TokenFile(_) => R::TokenFile,
-            KiwoomError::NotConnected => R::NotConnected,
-            _ => R::IssueInterval,
-        };
-    };
-    match f.category() {
-        Category::RateLimit => R::RateLimited,
-        Category::Transient => match f.note() {
-            Note::Transport(t) if t.timed_out => R::KiwoomTimeout,
-            Note::Transport(_) | Note::QueueGone => R::KiwoomUnreachable,
-            _ => R::KiwoomError,
-        },
-        Category::TokenInvalid => R::TokenInvalid,
-        Category::AuthBlocked => R::AuthBlocked,
-        Category::AuthIndeterminate => R::AuthIndeterminate,
-        Category::InvalidRequest | Category::BatchLimit => R::InvalidRequest,
-        Category::SymbolMismatch => R::SymbolMismatch,
-        Category::Unsupported => R::Unsupported,
-        Category::Protocol => R::Protocol,
-        Category::Unknown | Category::RealtimeCapacity | Category::ControlRejected | Category::SubscriptionMismatch => R::UnknownFailure,
     }
 }
 

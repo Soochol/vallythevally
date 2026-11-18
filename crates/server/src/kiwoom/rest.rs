@@ -15,11 +15,11 @@ use tokio::time::Instant;
 
 use super::api::{Endpoint, MarketRequest};
 use super::auth::{AuthError, BeginIssueError, Halt, KiwoomAuth, MIN_ISSUE_INTERVAL_SECS, TokenGen};
-use super::error::{self, Category, Failure, Note, Retry, Stop};
+use super::error::{self, Category, Failure, Note, Retry, Stop, Surface};
 use super::token_file::FileError;
 use super::transport::{HttpRequest, HttpResponse, Transport, TransportError};
 use super::wire::TokenResponse;
-use crate::api::KiwoomEnvironment;
+use crate::api::{ApiErrorCode, ApiErrorReason, KiwoomEnvironment};
 use crate::clock::Clock;
 use crate::config::Secret;
 use domain::KstTime;
@@ -128,6 +128,56 @@ impl KiwoomError {
     pub fn manual_action_required(&self) -> bool {
         matches!(self, KiwoomError::Stopped(_) | KiwoomError::TokenFile(_))
     }
+
+    pub fn shown(&self) -> Shown {
+        Shown { code: self.shown_code(), reason: self.shown_reason(), retry_at: self.retry_at(), manual_action_required: self.manual_action_required() }
+    }
+
+    fn shown_code(&self) -> ApiErrorCode {
+        match self.failure().map(Failure::surface) {
+            Some(Surface::Unavailable) => ApiErrorCode::KiwoomUnavailable,
+            Some(Surface::AuthFailed) => ApiErrorCode::KiwoomAuthFailed,
+            Some(Surface::UnknownSymbol) => ApiErrorCode::UnknownSymbol,
+            Some(Surface::Internal) => ApiErrorCode::Internal,
+            None if matches!(self, KiwoomError::TokenFile(_)) => ApiErrorCode::KiwoomAuthFailed,
+            None => ApiErrorCode::KiwoomUnavailable,
+        }
+    }
+
+    fn shown_reason(&self) -> ApiErrorReason {
+        use ApiErrorReason as R;
+        let Some(f) = self.failure() else {
+            return match self {
+                KiwoomError::TokenFile(_) => R::TokenFile,
+                KiwoomError::NotConnected => R::NotConnected,
+                _ => R::IssueInterval,
+            };
+        };
+        match f.category() {
+            Category::RateLimit => R::RateLimited,
+            Category::Transient => match f.note() {
+                Note::Transport(t) if t.timed_out => R::KiwoomTimeout,
+                Note::Transport(_) | Note::QueueGone => R::KiwoomUnreachable,
+                _ => R::KiwoomError,
+            },
+            Category::TokenInvalid => R::TokenInvalid,
+            Category::AuthBlocked => R::AuthBlocked,
+            Category::AuthIndeterminate => R::AuthIndeterminate,
+            Category::InvalidRequest | Category::BatchLimit => R::InvalidRequest,
+            Category::SymbolMismatch => R::SymbolMismatch,
+            Category::Unsupported => R::Unsupported,
+            Category::Protocol => R::Protocol,
+            Category::Unknown | Category::RealtimeCapacity | Category::ControlRejected | Category::SubscriptionMismatch => R::UnknownFailure,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Shown {
+    pub code: ApiErrorCode,
+    pub reason: ApiErrorReason,
+    pub retry_at: Option<KstTime>,
+    pub manual_action_required: bool,
 }
 
 impl fmt::Display for KiwoomError {
@@ -1707,5 +1757,31 @@ mod tests {
         assert!(call_k(&rest, 0, Priority::Screen).await.is_err());
         assert!(rest.issue_token().await.is_err());
         assert_eq!(fake.sent().len(), 0, "{:?}", fake.sent().iter().map(|s| s.api_id).collect::<Vec<_>>());
+    }
+    #[test]
+    fn a_kiwoom_failure_shows_its_code_reason_and_resume_time_from_one_place() {
+        use crate::api::{ApiErrorCode as C, ApiErrorReason as R};
+        use crate::kiwoom::error::judge;
+        use crate::kiwoom::transport::{Stage, TransportError};
+        let rejected = |detail: u16| KiwoomError::Failed(judge(ApiId::Ka10081, 200, &format!(r#"{{"return_code": 3, "return_msg": "실패[{detail}:사유]"}}"#)).unwrap_err());
+        let transport = |stage, timed_out| KiwoomError::Failed(Failure::transport(ApiId::Ka10081, TransportError { stage, timed_out }));
+        let until = kst(KstDate::new(2026, 11, 9).unwrap(), 9, 10, 0);
+        let cases = [
+            (rejected(1700), C::KiwoomUnavailable, R::RateLimited),
+            (rejected(8005), C::KiwoomAuthFailed, R::TokenInvalid),
+            (rejected(8003), C::KiwoomAuthFailed, R::AuthIndeterminate),
+            (rejected(1901), C::UnknownSymbol, R::SymbolMismatch),
+            (rejected(1501), C::Internal, R::InvalidRequest),
+            (transport(Stage::AwaitResponse, true), C::KiwoomUnavailable, R::KiwoomTimeout),
+            (transport(Stage::Connect, false), C::KiwoomUnavailable, R::KiwoomUnreachable),
+            (KiwoomError::NotConnected, C::KiwoomUnavailable, R::NotConnected),
+            (KiwoomError::Gated { until, cause: GateCause::IssueInterval }, C::KiwoomUnavailable, R::IssueInterval),
+        ];
+        for (error, code, reason) in cases {
+            let shown = error.shown();
+            assert_eq!((shown.code, shown.reason), (code, reason), "{error}");
+            assert_eq!((shown.retry_at, shown.manual_action_required), (error.retry_at(), error.manual_action_required()), "{error}");
+        }
+        assert_eq!(KiwoomError::Gated { until, cause: GateCause::IssueInterval }.shown().retry_at, Some(until));
     }
 }
