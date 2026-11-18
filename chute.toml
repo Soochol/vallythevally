@@ -14,7 +14,7 @@ run = "env VALLY_COMPILE_LANE=gate python3 scripts/web.py check"
 [[verify]]
 name = "clippy"
 run = "env VALLY_COMPILE_LANE=gate python3 scripts/dev.py cargo clippy -p server -p hoga-format -p collector -p account-server -p setup --all-targets -- -D warnings"
-paths = ["crates/", "Cargo.toml", "Cargo.lock"]
+paths = ["crates/", "Cargo.toml", "Cargo.lock", "scripts/dev.py", "scripts/evidence.py", "scripts/duckdb-prebuilt.json", ".cargo/"]
 
 [[verify]]
 name = "collector-test"
@@ -29,6 +29,9 @@ paths = [
   "Cargo.toml",
   "Cargo.lock",
   ".cargo/",
+  "scripts/dev.py",
+  "scripts/evidence.py",
+  "scripts/duckdb-prebuilt.json",
 ]
 
 [[verify]]
@@ -41,13 +44,16 @@ paths = [
   "Cargo.toml",
   "Cargo.lock",
   ".cargo/",
+  "scripts/dev.py",
+  "scripts/evidence.py",
+  "scripts/duckdb-prebuilt.json",
 ]
 
 [[verify]]
 name = "setup-test"
 run = "env VALLY_COMPILE_LANE=gate python3 scripts/dev.py cargo test -p setup"
 failed = 'test (\S+) \.\.\. FAILED'
-paths = ["crates/setup/", "Cargo.toml", "Cargo.lock"]
+paths = ["crates/setup/", "Cargo.toml", "Cargo.lock", "scripts/dev.py", "scripts/evidence.py", "scripts/duckdb-prebuilt.json", ".cargo/"]
 
 [[verify]]
 name = "server-test"
@@ -63,6 +69,9 @@ paths = [
   "Cargo.toml",
   "Cargo.lock",
   ".cargo/",
+  "scripts/dev.py",
+  "scripts/evidence.py",
+  "scripts/duckdb-prebuilt.json",
 ]
 
 [[post_verify]]
@@ -86,4 +95,6 @@ paths = [
   "scripts/web.py",
   "scripts/dev.py",
   "scripts/evidence.py",
+  "scripts/e2e_rules.py",
+  "scripts/duckdb-prebuilt.json",
 ]
