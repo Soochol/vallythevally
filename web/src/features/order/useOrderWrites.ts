@@ -5,12 +5,14 @@ import type { OrderCommands } from "../../api/generated/OrderCommands";
 import type { OrderSide } from "../../api/generated/OrderSide";
 import type { TradingOpenOrder } from "../../api/generated/TradingOpenOrder";
 import type { Venue } from "../../api/generated/Venue";
-import { cancelAction, cancelBatchAction, type CommandLedger, createLedger, modifyAction, newIdFor, placeAction, type Settlement } from "./commandLedger";
+import { cancelAction, cancelBatchAction, createLedger, modifyAction, newIdFor, placeAction, type Settlement } from "./commandLedger";
 import { cancelOrder, cancelOrdersAtPrice, modifyOrder, placeOrder, reconcileOrders } from "./orderApi";
 import { needsHighValueConfirm } from "./orderRules";
 import { IDLE_STATUS, isUnanswered, type OrderStatus, statusOfCommand, statusOfFailure } from "./statusText";
 
 export const ORDER_QUERY_KEY = ["order"] as const;
+
+const ledger = createLedger(newIdFor);
 
 export function statusOfBatch(result: OrderCommands): OrderStatus {
   if (result.commands.length === 0) return { tone: "info", text: "취소할 주문이 없습니다" };
@@ -43,12 +45,10 @@ export function useOrderWrites(code: string, venue: Venue): OrderWrites {
   const queryClient = useQueryClient();
   const [status, setStatus] = useState<OrderStatus>(IDLE_STATUS);
   const [queued, setQueued] = useState(0);
-  const ledger = useRef<CommandLedger | null>(null);
   const tail = useRef<Promise<void>>(Promise.resolve());
-  ledger.current ??= createLedger(newIdFor);
 
   const enqueue = useCallback(<T,>(action: string, call: (id: string) => Promise<T>, describe: (result: T) => OrderStatus) => {
-    const issued = ledger.current!.issue(action);
+    const issued = ledger.issue(action);
     if (!issued.send) return;
     setQueued((n) => n + 1);
     tail.current = tail.current.then(async () => {
@@ -59,7 +59,7 @@ export function useOrderWrites(code: string, venue: Venue): OrderWrites {
         if (isUnanswered(error)) settlement = "unanswered";
         setStatus(statusOfFailure(error));
       } finally {
-        ledger.current!.settle(action, settlement);
+        ledger.settle(action, settlement);
         setQueued((n) => n - 1);
         void queryClient.invalidateQueries({ queryKey: ORDER_QUERY_KEY });
       }

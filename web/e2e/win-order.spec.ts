@@ -70,16 +70,19 @@ function snapshot(base: number) {
   };
 }
 
-async function openOrderWindow(page: Page, scenario: Scenario): Promise<void> {
+async function openOrderWindow(page: Page, scenario: Scenario, withSecondChart = false): Promise<void> {
   const layout = scenario.documents.layout(DEFAULT_LAYOUT_ID);
   const windows: LayoutWindow[] = [
     { id: "cell-0", link: null, kind: "chart", symbol: CODE, venue: "combined", period: "D", chartSettings: SETTINGS },
+    ...(withSecondChart ? [{ id: "cell-1", link: null, kind: "chart", symbol: "000660", venue: "combined", period: "D", chartSettings: SETTINGS } satisfies LayoutWindow] : []),
     ...layout.windows.filter((w) => w.kind !== "chart"),
     { id: "order", link: null, kind: "order", venue: "krx" },
   ];
   scenario.documents.saveLayout({ ...layout, windows, placement: {}, revision: layout.revision + 1 });
   scenario.reply((url) => url.pathname === `/api/symbols/${CODE}/fundamentals`, { body: { symbol: CODE, upperLimit: 91_000, lowerLimit: 49_000, marketCap: null, listedShares: null, per: null, pbr: null, roe: null, eps: null, bps: null, foreignExhaustionRate: null, high52w: null, low52w: null } });
   scenario.reply((url) => url.pathname === `/api/symbols/${CODE}/order-book`, { body: snapshot(BASE) });
+  scenario.reply((url) => url.pathname === "/api/symbols/000660/order-book", { body: { ...snapshot(BASE), symbol: "000660" } });
+  scenario.reply((url) => url.pathname === "/api/symbols/000660/fundamentals", { body: { symbol: "000660", upperLimit: null, lowerLimit: null } });
   await page.setViewportSize({ width: 1440, height: 1500 });
   await page.goto("/");
   await expect(cell(page)).toHaveAttribute("aria-busy", "false");
@@ -345,4 +348,46 @@ test("창 더하기 메뉴에서 호가주문 창이 열리고 하나만 만들�
   await expect.poll(() => scenario.documents.layout(DEFAULT_LAYOUT_ID).windows.filter((w) => w.kind === "order")).toEqual([{ id: "order", link: null, kind: "order", venue: "krx" }]);
   await add.click();
   await expect(page.getByRole("menu", { name: "창 더하기" }).getByRole("menuitem", { name: /^호가주문/ })).toContainText("열려 있음");
+});
+
+const placeIds = (scenario: Scenario): string[] => scenario.requests
+  .filter((r) => new URL(r.url()).pathname === "/api/trading/commands/place" && r.method() === "POST")
+  .map((r) => String((r.postDataJSON() as Record<string, unknown>).commandId));
+
+test("답을 못 받은 신규는 다른 종목을 보고 돌아와 다시 해도 같은 commandId로 보낸다", async ({ page, scenario }) => {
+  ordersOn(scenario);
+  tradingApi(scenario);
+  await openOrderWindow(page, scenario, true);
+  const held = scenario.hold((url, request) => url.pathname === "/api/trading/commands/place" && request.method() === "POST");
+  await cellAt(page, "buy", 70_000).dblclick();
+  await held.received;
+  held.reply({ status: 503, body: { error: { code: "internal", message: "서버가 응답하지 못했습니다", reason: null, retryAt: null, manualActionRequired: false } } });
+  await expect(status(page)).toContainText("같은 동작을 다시 하면 같은 명령으로 보냅니다");
+  await cell(page, 2).click();
+  await expect(win(page)).toHaveAttribute("data-symbol", "000660");
+  await cell(page, 1).click();
+  await expect(win(page)).toHaveAttribute("data-symbol", CODE);
+  await expect(page.getByTestId("price-ladder").locator(".mw-lr")).toHaveCount(20);
+  await cellAt(page, "buy", 70_000).dblclick();
+  await expect.poll(() => placeIds(scenario).length).toBe(2);
+  const [first, second] = placeIds(scenario);
+  expect(second).toBe(first);
+});
+
+test("200 응답의 본문이 끊기면 답을 못 받은 것으로 보고 같은 commandId로 다시 보낸다", async ({ page, scenario }) => {
+  ordersOn(scenario);
+  tradingApi(scenario);
+  await openOrderWindow(page, scenario);
+  let cut = true;
+  await page.route("**/api/trading/commands/place", async (route) => {
+    if (!cut) return route.fallback();
+    cut = false;
+    return route.fulfill({ status: 200, contentType: "application/json", body: '{"commandId":"cmd-' });
+  });
+  await cellAt(page, "buy", 70_000).dblclick();
+  await expect(status(page)).toContainText("서버의 답을 받지 못했습니다");
+  await cellAt(page, "buy", 70_000).dblclick();
+  await expect.poll(() => placeIds(scenario).length).toBe(2);
+  const [first, second] = placeIds(scenario);
+  expect(second).toBe(first);
 });

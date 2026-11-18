@@ -57,10 +57,9 @@ export function statusOfCommand(command: OrderCommand): OrderStatus {
   }
 }
 
-export const isUnanswered = (error: unknown): boolean => error instanceof ApiRequestError && (error.code === "network" || error.code === "internal");
+export const isUnanswered = (error: unknown): boolean => !(error instanceof ApiRequestError) || error.code === "network" || error.code === "internal";
 
 export function statusOfFailure(error: unknown): OrderStatus {
-  if (isUnanswered(error)) return { tone: "error", text: "서버의 답을 받지 못했습니다. 같은 동작을 다시 하면 같은 명령으로 보냅니다" };
-  if (error instanceof ApiRequestError) return { tone: "error", text: `거절 · ${error.message}` };
-  return { tone: "error", text: "주문을 보내지 못했습니다" };
+  if (!(error instanceof ApiRequestError) || isUnanswered(error)) return { tone: "error", text: "서버의 답을 받지 못했습니다. 같은 동작을 다시 하면 같은 명령으로 보냅니다" };
+  return { tone: "error", text: `거절 · ${error.message}` };
 }
