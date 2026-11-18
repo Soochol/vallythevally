@@ -38,8 +38,6 @@ export interface OrderStatus {
   readonly unknown?: boolean;
 }
 
-export const IDLE_STATUS: OrderStatus = { tone: "info", text: "호가 칸을 더블클릭해 주문합니다" };
-
 const describe = (command: OrderCommand): string => {
   const price = command.price !== null ? ` ${formatPrice(command.price, false)}원` : "";
   const quantity = command.quantity !== null ? ` ${command.quantity.toLocaleString("ko-KR")}주` : "";

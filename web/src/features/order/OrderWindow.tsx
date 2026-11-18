@@ -22,7 +22,7 @@ import { useLadderTrades, useQuoteInfo } from "../market-window/useLadderSlots";
 import { EmptyState } from "../overlay/State";
 import { openSystemSettings } from "../system-settings/open";
 import { AccountBand } from "./AccountBand";
-import { averageRowPrice, BOOK_NOTICE_TEXT, bookNotice, holdingOf, type ProfitUnit, toggledUnit } from "./holdingSummary";
+import { averageRowPrice, ETF_AFTER_HOURS_TEXT, holdingOf, isEtfAfterHours, type ProfitUnit, toggledUnit } from "./holdingSummary";
 import { HoldingSummary } from "./HoldingSummary";
 import { OrderSettingsPopover } from "./OrderSettingsPopover";
 import { tickRuleOf } from "../market-window/tick";
@@ -32,7 +32,7 @@ import { type HoverCell, OrderLadder } from "./OrderLadder";
 import { OrderTotals } from "./OrderTotals";
 import { OrderStatusBar } from "./OrderStatusBar";
 import { REJECT_TEXT } from "./statusText";
-import { QuantityRow } from "./QuantityRow";
+import { OrderEstimate, QuantityRow } from "./QuantityRow";
 import { capacityProblem, type DragOutcome, needsHighValueConfirm, type PriceGroup, quantityOf, type QuantityMode, SIDE_LABEL } from "./orderRules";
 import { useOrderAccess, useOrderData } from "./useOrderData";
 import { useOrderWrites } from "./useOrderWrites";
@@ -83,7 +83,6 @@ function OrderBody({ code }: { code: SymbolCode }) {
   const explorerOn = exploring && fullPrices !== null;
   const shownRows: LadderRow[] = quotes ? buildLadderRows(explorerOn ? fullPrices : gridPrices(gridBase, bounds, tickRule), quotes) : [];
   const rows = settings.rate ? shownRows : shownRows.map((row) => ({ ...row, rate: null }));
-  const notice = view ? bookNotice(Math.floor(now / 1000), symbolInfo ?? null) : null;
   const info = useQuoteInfo({ code, venue, lastPrice: feed.lastPrice, previousClose: feed.previousClose, upperLimit: bounds.upper, lowerLimit: bounds.lower });
   const trades = useLadderTrades(code, venue);
   const expected = view ? visibleExpected(view.t, Math.floor(now / 1000), view.expected) : null;
@@ -93,7 +92,7 @@ function OrderBody({ code }: { code: SymbolCode }) {
   const writes = useOrderWrites(code, venue);
   const holding = holdingOf(data.balance?.holdings ?? [], code);
   const averagePrice = settings.averageDot ? averageRowPrice(rows.map((row) => row.price), holding?.averagePrice ?? null) : null;
-  const writable = access.open && !data.blocked && writes.status.unknown !== true;
+  const writable = access.open && !data.blocked && writes.status?.unknown !== true;
 
   const typed = Number(input);
   const unitPrice = hover?.price ?? referencePrice ?? 0;
@@ -103,6 +102,10 @@ function OrderBody({ code }: { code: SymbolCode }) {
   const place = (side: OrderSide, price: number) => {
     if (nxtNotTraded) {
       writes.say({ tone: "error", text: REJECT_TEXT.nxt_unavailable });
+      return;
+    }
+    if (isEtfAfterHours(Math.floor(Date.now() / 1000), symbolInfo ?? null)) {
+      writes.say({ tone: "error", text: ETF_AFTER_HOURS_TEXT });
       return;
     }
     const quantity = quantityAt(price);
@@ -135,20 +138,20 @@ function OrderBody({ code }: { code: SymbolCode }) {
       <AccountBand accountTail={accountTail} openOrders={data.openOrders} balance={data.balance} executions={data.executions} writable={writable} mock={mock} onCancel={writes.cancelOne} />
       <HoldingSummary holding={holding} buyableAmount={data.capacity.buyableAmount} unit={profitUnit} onUnit={() => setProfitUnit(toggledUnit)} onFill={(fill) => { setMode(fill.mode); setInput(fill.input); }} />
       <div className="od-entry">
-        <QuantityRow mode={mode} input={input} estimate={estimate} sharePresets={settings.sharePresets} amountPresets={settings.amountPresets} onMode={setMode} onInput={setInput} />
+        <QuantityRow mode={mode} input={input} sharePresets={settings.sharePresets} amountPresets={settings.amountPresets} onMode={setMode} onInput={setInput} />
         <div className="od-toolbar">
+          <OrderEstimate estimate={estimate} />
           <button type="button" className="od-tool" data-testid="order-explorer" aria-pressed={explorerOn} disabled={referencePrice === null || fullPrices === null} title={fullPrices === null ? EXPLORER_UNAVAILABLE : undefined} onClick={() => { if (!explorerOn) setCenterToken((token) => token + 1); setExploring(!explorerOn); }}>전체 호가</button>
           <button type="button" className="od-tool" data-testid="order-current" disabled={!explorerOn} onClick={() => setCenterToken((token) => token + 1)}>현재가</button>
           <OrderSettingsPopover settings={settings} venue={venue} mock={mock} nxtNotTraded={nxtNotTraded} holding={holding !== null} onChange={setSettings} />
         </div>
       </div>
-      <OrderStatusBar status={writes.status} queued={writes.queued} blocked={data.blocked} onUndo={writes.cancelOne} onReconcile={writes.reconcile} />
       <div className="bk-ladder od-ladder-wrap" data-stale={feed.connected ? undefined : ""} data-exploring={explorerOn ? "" : undefined}>
-        {notice && <p className="od-book-notice" data-testid="order-book-notice">{BOOK_NOTICE_TEXT[notice]}</p>}
         {view
             ? <OrderLadder rows={rows} previousClose={feed.previousClose} groups={data.groups} writable={writable} previewQuantity={quantityAt(unitPrice)} hover={hover} onHover={setHover} averagePrice={averagePrice} divider={settings.divider} explorer={explorerOn ? { centerPrice: referencePrice, centerToken } : undefined} onDragging={setDragging} expectedPrice={expected?.price ?? null} rowSlots={{ topRight: infoSlot(infoSlots), bottomLeft: tradeSlot(trades, feed.previousClose) }}
                 actions={{ place, drop, cancelOne: writes.cancelOne, cancelAtPrice: writes.cancelAtPrice, cancelGroups: (targets) => targets.forEach((g) => writes.cancelAtPrice(g.side, g.price)) }} />
             : <EmptyState title={feed.snapshotFailed ? "호가를 불러오지 못했습니다" : "호가를 기다리는 중입니다"} />}
+        <OrderStatusBar status={writes.status} queued={writes.queued} blocked={data.blocked} onUndo={writes.cancelOne} onReconcile={writes.reconcile} onDismiss={writes.dismiss} />
       </div>
       <OrderTotals groups={data.groups} writable={writable} actions={writes} />
       <Strip>

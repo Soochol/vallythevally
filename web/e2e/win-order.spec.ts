@@ -428,3 +428,51 @@ test("앱 거래소가 KRX이면 호가주문 도킹 탭에 통합 표시가 있
   await expect(tab.locator(".mw-integrated")).toHaveText("통합");
   await expect(win(page).locator(".mw-integrated")).toHaveCount(0);
 });
+
+const ladderFirstRowTop = (page: Page) => page.getByTestId("price-ladder").locator(".mw-lr").first().evaluate((element) => element.getBoundingClientRect().top);
+
+test("접수 알림은 사다리를 움직이지 않고 4초 뒤 사라진다", async ({ page, scenario }) => {
+  await page.clock.install({ time: new Date("2026-11-18T10:00:00+09:00") });
+  ordersOn(scenario);
+  tradingApi(scenario);
+  await openOrderWindow(page, scenario);
+  await expect(status(page)).toHaveCount(0);
+  const before = await ladderFirstRowTop(page);
+  await cellAt(page, "buy", 70_000).dblclick();
+  await expect(status(page)).toHaveAttribute("data-tone", "ok");
+  await expect(status(page)).toContainText("접수 · 매수 10주 70,000원");
+  expect(await ladderFirstRowTop(page)).toBe(before);
+  await page.clock.fastForward(5_000);
+  await expect(status(page)).toHaveCount(0);
+  expect(await ladderFirstRowTop(page)).toBe(before);
+});
+
+test("거절 알림은 시간이 지나도 남고 닫기 단추로 사라진다", async ({ page, scenario }) => {
+  await page.clock.install({ time: new Date("2026-11-18T10:00:00+09:00") });
+  ordersOn(scenario);
+  const api = tradingApi(scenario);
+  await openOrderWindow(page, scenario);
+  api.placeReply = { state: "rejected", reason: "out_of_limit", orderNo: null };
+  await cellAt(page, "sell", 70_300).dblclick();
+  await expect(status(page)).toContainText("거절 · 상·하한가 범위를 벗어난 가격입니다");
+  await page.clock.fastForward(10_000);
+  await expect(status(page)).toContainText("거절 · 상·하한가 범위를 벗어난 가격입니다");
+  await status(page).getByRole("button", { name: "닫기" }).click();
+  await expect(status(page)).toHaveCount(0);
+});
+
+test("결과 미확인 알림은 시간이 지나도 남고 조회로 확인하면 풀린다", async ({ page, scenario }) => {
+  await page.clock.install({ time: new Date("2026-11-18T10:00:00+09:00") });
+  ordersOn(scenario);
+  const api = tradingApi(scenario);
+  await openOrderWindow(page, scenario);
+  api.placeReply = { state: "unknown", orderNo: null };
+  api.blocked = true;
+  await cellAt(page, "buy", 70_000).dblclick();
+  await expect(status(page)).toContainText("결과를 확인하지 못했습니다");
+  await page.clock.fastForward(10_000);
+  await expect(status(page)).toContainText("결과를 확인하지 못했습니다");
+  await status(page).getByRole("button", { name: "조회로 확인" }).click();
+  await expect(status(page)).toContainText("조회로 확인했습니다");
+  await expect(win(page)).toHaveAttribute("data-writable", "");
+});

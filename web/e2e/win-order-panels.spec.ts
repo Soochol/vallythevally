@@ -2,7 +2,7 @@ import type { Locator, Page } from "@playwright/test";
 import type { TradingExecution } from "../src/api/generated/TradingExecution";
 import type { TradingHolding } from "../src/api/generated/TradingHolding";
 import { type Scenario, DEFAULT_LAYOUT_ID, expect, pollSaved, test } from "./harness";
-import { ACCOUNT, BASE, CODE, cellAt, center, chipAt, dragChip, openOrder, openOrderWindow, ordersOn, tradingApi, win, writesTo } from "./order-window";
+import { ACCOUNT, BASE, CODE, cellAt, center, chipAt, dragChip, openOrder, openOrderWindow, ordersOn, status, tradingApi, win, writesTo } from "./order-window";
 
 const HOLDING: TradingHolding = { code: CODE, name: "삼성전자", quantity: 120, sellableQuantity: 100, averagePrice: 70_040, currentPrice: BASE, evaluationProfit: -4_800, profitRateCenti: -57 };
 const FILL: TradingExecution = { orderNo: "0000010", code: CODE, name: "삼성전자", side: "buy", quantity: 5, price: 70_000, time: "093015", venue: "krx" };
@@ -194,10 +194,10 @@ const kstClock = (time: string) => new Date(`2026-11-18T${time}+09:00`);
 const SYMBOL_INFO = { code: CODE, name: "삼성전자", kind: "common", market: "kospi", nxtEnabled: false };
 
 test.describe("NXT 미거래 종목의 장 시간", () => {
-  test("보통주는 수요일 19:50에 사다리를 그리고 안내와 세션 토글이 없다", async ({ page, scenario }) => {
+  test("보통주는 수요일 19:50에 사다리를 그리고 안내와 세션 토글이 없으며 더블클릭이 요청을 보낸다", async ({ page, scenario }) => {
     await page.clock.install({ time: kstClock("19:50:00") });
     ordersOn(scenario);
-    tradingApi(scenario);
+    const api = tradingApi(scenario);
     scenario.reply(`/api/symbols/${CODE}`, { body: SYMBOL_INFO });
     await openOrderWindow(page, scenario);
     await expect(ladderRows(page)).toHaveCount(20);
@@ -205,26 +205,33 @@ test.describe("NXT 미거래 종목의 장 시간", () => {
     await expect(page.getByTestId("order-book-notice")).toHaveCount(0);
     await expect(win(page)).not.toContainText("호가 사다리 없음");
     await expect(page.getByRole("group", { name: "세션" })).toHaveCount(0);
+    await cellAt(page, "buy", 70_000).dblclick();
+    await pollSaved(() => writesTo(api, "place")).toHaveLength(1);
   });
 
-  test("보통주는 수요일 20:30에 사다리를 그리고 장 마감을 알린다", async ({ page, scenario }) => {
+  test("보통주는 수요일 20:30에 사다리를 그리고 안내 줄이 없다", async ({ page, scenario }) => {
     await page.clock.install({ time: kstClock("20:30:00") });
     ordersOn(scenario);
     tradingApi(scenario);
     scenario.reply(`/api/symbols/${CODE}`, { body: SYMBOL_INFO });
     await openOrderWindow(page, scenario);
     await expect(ladderRows(page)).toHaveCount(20);
-    await expect(page.getByTestId("order-book-notice")).toHaveText("장 마감 · 마지막 호가입니다");
+    await expect(page.getByTestId("order-book-notice")).toHaveCount(0);
+    await expect(win(page)).not.toContainText("장 마감 · 마지막 호가입니다");
   });
 
-  test("ETF는 수요일 16:30에 사다리를 그리고 거래 불가를 알린다", async ({ page, scenario }) => {
+  test("ETF는 수요일 16:30에 안내 줄 없이 사다리를 그리고 더블클릭하면 요청 없이 알림이 거래 불가를 알린다", async ({ page, scenario }) => {
     await page.clock.install({ time: kstClock("16:30:00") });
     ordersOn(scenario);
-    tradingApi(scenario);
+    const api = tradingApi(scenario);
     scenario.reply(`/api/symbols/${CODE}`, { body: { ...SYMBOL_INFO, kind: "etf" } });
     await openOrderWindow(page, scenario);
     await expect(ladderRows(page)).toHaveCount(20);
-    await expect(page.getByTestId("order-book-notice")).toHaveText("ETF·ETN은 15:30 뒤 거래되지 않습니다");
+    await expect(page.getByTestId("order-book-notice")).toHaveCount(0);
+    await cellAt(page, "buy", 70_000).dblclick();
+    await expect(status(page)).toHaveText(/ETF·ETN은 15:30 뒤 거래되지 않습니다/);
+    await expect(status(page)).toHaveAttribute("data-tone", "error");
+    expect(api.writes).toHaveLength(0);
   });
 
   test("장 마감 시각에 호가 조회가 실패하면 안내 없이 불러오지 못했다고 보인다", async ({ page, scenario }) => {
@@ -380,24 +387,44 @@ test("설정 창은 Esc와 바깥 클릭으로 닫히고 머리에 적용 범위
   await expect(page.getByTestId("order-settings")).toHaveCount(0);
 });
 
-test("주문 입력과 상태 줄은 사다리 위에, 총잔량 띠와 그 위 접수 합계 줄은 사다리 아래에 있다", async ({ page, scenario }) => {
+test("주문 입력은 두 줄로 사다리 위에, 총잔량 띠와 그 위 접수 합계 줄은 사다리 아래에 있다", async ({ page, scenario }) => {
   ordersOn(scenario);
   tradingApi(scenario);
   await openOrderWindow(page, scenario);
+  await win(page).evaluate((element) => { element.style.flex = "none"; element.style.width = "421px"; });
   const ladder = page.getByTestId("order-ladder");
   const ladderTop = await topOf(ladder);
   const ladderBottom = ladderTop + (await ladder.boundingBox())!.height;
-  const toolbar = page.getByTestId("order-explorer");
-  const quantity = page.getByRole("textbox", { name: "수량" });
-  expect(await topOf(quantity)).toBeLessThan(await topOf(toolbar));
-  expect(await topOf(toolbar)).toBeLessThan(await topOf(page.getByTestId("order-status")));
-  expect(await topOf(page.getByTestId("order-status"))).toBeLessThan(ladderTop);
-  expect(await topOf(page.getByTestId("order-estimate"))).toBeLessThan(ladderTop);
+  const firstLine = [page.getByRole("textbox", { name: "수량" }), page.getByRole("group", { name: "수량 방식" }), ...(await page.getByRole("group", { name: "수량 프리셋" }).getByRole("button").all())];
+  const secondLine = [page.getByTestId("order-estimate").locator(".."), page.getByTestId("order-explorer"), page.getByTestId("order-current"), page.getByTestId("order-settings-button")];
+  expect(firstLine).toHaveLength(6);
+  const first = await Promise.all(firstLine.map(topOf));
+  const second = await Promise.all(secondLine.map(topOf));
+  expect(new Set(first.map(Math.round)).size).toBe(1);
+  expect(new Set(second.map(Math.round)).size).toBe(1);
+  expect(second[0]!).toBeGreaterThan(first[0]!);
+  const firstRow = ladderRows(page).first();
+  await expect(page.getByTestId("order-status")).toHaveCount(0);
+  await expect(win(page)).not.toContainText("호가 칸을 더블클릭해 주문합니다");
+  const gap = (await topOf(firstRow)) - (await page.getByTestId("order-explorer").evaluate((element) => element.getBoundingClientRect().bottom));
+  expect(gap).toBeLessThan(16);
   expect(await topOf(page.getByTestId("order-total-ask"))).toBeGreaterThanOrEqual(ladderBottom);
   expect(await topOf(page.getByTestId("order-total-sell"))).toBeGreaterThanOrEqual(ladderBottom);
   expect(await topOf(page.getByTestId("order-total-sell"))).toBeLessThan(await topOf(page.getByTestId("order-total-ask")));
   await expect(page.getByTestId("order-tape")).toHaveCount(0);
   await expect(page.getByTestId("order-quote")).toHaveCount(0);
+});
+
+test("금액 방식이면 같은 줄의 프리셋이 100만·500만·1000만·5000만이다", async ({ page, scenario }) => {
+  ordersOn(scenario);
+  tradingApi(scenario);
+  await openOrderWindow(page, scenario);
+  await win(page).evaluate((element) => { element.style.flex = "none"; element.style.width = "421px"; });
+  await page.getByRole("group", { name: "수량 방식" }).getByRole("button", { name: "금액" }).click();
+  const presets = page.getByRole("group", { name: "수량 프리셋" }).getByRole("button");
+  await expect(presets).toHaveText(["100만", "500만", "1000만", "5000만"]);
+  const input = Math.round(await topOf(page.getByRole("textbox", { name: "수량" })));
+  expect((await tops(presets)).map(Math.round)).toEqual([input, input, input, input]);
 });
 
 test("정보 7항목이 사다리 1~7행과 같은 top에 있고 값이 맞다", async ({ page, scenario }) => {
