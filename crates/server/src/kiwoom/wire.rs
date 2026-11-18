@@ -270,8 +270,11 @@ pub fn screener_listing(row: &ListingRow, info: &SymbolInfo) -> Option<ScreenerL
         SymbolKind::Reit => Some(ExcludeKind::Reit),
         SymbolKind::Preferred => Some(ExcludeKind::Preferred),
         SymbolKind::Common if info.market == Market::Kosdaq && row.is_spac() => Some(ExcludeKind::Spac),
-        SymbolKind::Common | SymbolKind::Index => None,
-        SymbolKind::Etn | SymbolKind::Infrastructure | SymbolKind::MutualFund => return None,
+        SymbolKind::Common => None,
+        SymbolKind::Index => return None,
+        SymbolKind::Etn => Some(ExcludeKind::Etn),
+        SymbolKind::Infrastructure => Some(ExcludeKind::Infrastructure),
+        SymbolKind::MutualFund => Some(ExcludeKind::MutualFund),
     };
     let states = row.audit_statuses().filter_map(|(label, status)| match status {
         AuditStatus::Unknown => {
@@ -2505,12 +2508,22 @@ mod tests {
     }
 
     #[test]
-    fn etn_infrastructure_and_mutual_fund_rows_make_no_screener_listing() {
-        for (code, market_code) in [("088980", "2"), ("094800", "4"), ("520100", "60"), ("520066", "70"), ("500095", "90")] {
-            let row = ListingRow { code: code.into(), name: "가상".into(), market_code: market_code.into(), ..Default::default() };
-            let Listing::Include(info) = classify(&row) else { panic!("{code}") };
-            assert!(screener_listing(&row, &info).is_none(), "{code}");
+    fn etn_infrastructure_and_mutual_fund_rows_become_screener_listings_with_their_exclusion() {
+        let rows = serde_json::from_str::<StockListResponse>(&fixture("ka10099_0")).unwrap().list;
+        use ExcludeKind::*;
+        for (code, want) in [("520100", Etn), ("520066", Etn), ("500095", Etn), ("088980", Infrastructure), ("094800", MutualFund)] {
+            let row = rows.iter().find(|r| r.code == code).unwrap();
+            let Listing::Include(info) = classify(row) else { panic!("{code}") };
+            let listing = screener_listing(row, &info).unwrap();
+            assert_eq!((listing.market, listing.excludable_as), (api::Market::Kospi, vec![want]), "{code}");
         }
+    }
+
+    #[test]
+    fn an_etn_row_keeps_its_audit_status_beside_its_kind() {
+        let row = ListingRow { code: "520100".into(), name: "가상".into(), market_code: "60".into(), audit_info: "관리종목".into(), ..Default::default() };
+        let Listing::Include(info) = classify(&row) else { panic!() };
+        assert_eq!(screener_listing(&row, &info).unwrap().excludable_as, [ExcludeKind::Etn, ExcludeKind::Managed]);
     }
 
     #[test]

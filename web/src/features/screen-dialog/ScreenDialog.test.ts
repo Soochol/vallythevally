@@ -12,7 +12,7 @@ const NAME = 1;
 const PER_NEW_HIGH_LINE = 8;
 const ADD_LINE = 1;
 const MARKETS = 2;
-const CHIPS = 11;
+const CHIPS = 14;
 
 const markupOf = (draft: ScreenDraft, locked = false) => renderToStaticMarkup(createElement(ScreenFields, { ids: "t", draft, nameError: null, locked, onChange: () => {} }));
 

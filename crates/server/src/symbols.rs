@@ -399,7 +399,7 @@ mod tests {
         assert_eq!(d.search("삼성전자", SearchFilter::default())[0].symbol.as_wire(), "005930");
         let preferred = d.screener_listing().iter().find(|l| l.code.as_str() == "03481K").expect("스크리너 목록도 함께 받는다");
         assert_eq!((preferred.listed_on, preferred.excludable_as.clone()), (domain::KstDate::new(2021, 12, 2), vec![crate::api::ExcludeKind::Preferred]));
-        assert_eq!(d.screener_listing().len(), 15 + 11, "검색 목록에 든 주식이 모두 스크리너 목록에 든다");
+        assert_eq!(d.screener_listing().len(), 15 + 11 + 5, "검색 목록에 든 주식이 모두 스크리너 목록에 든다");
         down.store(true, Ordering::SeqCst);
         assert!(symbols.refresh(&rest, Priority::Background).await.is_err());
         assert_eq!(symbols.ready(&rest).await.unwrap().len(), 33, "실패하면 이전 목록을 쓴다");

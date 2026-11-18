@@ -536,6 +536,37 @@ async fn excluded_kinds_and_states_leave_the_universe_uncounted_even_when_audit_
 }
 
 #[tokio::test]
+async fn screener_universe_takes_etn_infrastructure_and_mutual_fund_and_each_leaves_only_with_its_own_exclusion() {
+    let days = fortnight();
+    let flat = |code: &str| stock(code, priced(&days, |_| 100));
+    let kind = |code: &str, market_code: &str| KrxStock { market_code: market_code.into(), ..flat(code) };
+    let stocks = vec![
+        flat("200010"),
+        kind("200020", "60"),
+        kind("200030", "2"),
+        kind("200040", "4"),
+        KrxStock { audit_info: "관리종목".into(), ..kind("200050", "70") },
+        KrxStock { audit_info: "거래정지".into(), ..flat("200060") },
+    ];
+    let session = loaded(KrxMarket { days: days.clone(), stocks }).await;
+    let api = &session.api;
+    let today = |codes: &[&str]| codes.iter().map(|c| hit(c, days[14])).collect::<Vec<_>>();
+    let run = |exclude: &'static [&'static str]| screen("D", &[("high", 5, 1)], exclude);
+    let ran = |exclude: &'static [&'static str]| async move {
+        let result = api.result(&run(exclude)).await;
+        (result["universe"].clone(), hits(&result))
+    };
+
+    assert_eq!(ran(&[]).await, (json!(6), today(&["200010", "200020", "200030", "200040", "200050", "200060"])), "아무것도 빼지 않으면 새 종류도 대상이다");
+    assert_eq!(ran(&["etn"]).await, (json!(4), today(&["200010", "200030", "200040", "200060"])), "ETN 빼기는 ETN 둘만 뺀다");
+    assert_eq!(ran(&["infrastructure"]).await, (json!(5), today(&["200010", "200020", "200040", "200050", "200060"])));
+    assert_eq!(ran(&["mutual_fund"]).await, (json!(5), today(&["200010", "200020", "200030", "200050", "200060"])));
+    assert_eq!(ran(&["etn", "infrastructure", "mutual_fund"]).await, (json!(2), today(&["200010", "200060"])));
+    assert_eq!(ran(&["managed", "trading_halted"]).await, (json!(4), today(&["200010", "200020", "200030", "200040"])), "새 값을 더한 뒤에도 관리종목·거래정지 비트가 같은 종목을 뺀다");
+    assert_eq!(ran(&["etf", "preferred", "reit", "spac"]).await, (json!(6), today(&["200010", "200020", "200030", "200040", "200050", "200060"])), "기존 종류 빼기는 새 종류를 건드리지 않는다");
+}
+
+#[tokio::test]
 async fn a_run_is_refused_while_recent_days_fill_and_when_the_store_lacks_the_need_day() {
     let days = last_open_days(700, day(2026, 11, 6));
     let today = days[699];
