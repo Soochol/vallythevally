@@ -3,7 +3,6 @@ import type { Bar } from "../src/api/generated/Bar";
 import type { LayoutWindow } from "../src/api/generated/LayoutWindow";
 import type { Period } from "../src/api/generated/Period";
 import { barInterval } from "../src/chart/crosshairSync";
-import { RIGHT_OFFSET } from "../src/chart/initialRange";
 import { formatBarTime, fromChartTime, toChartTime } from "../src/chart/time";
 import { installChartProbe } from "./chart-probe";
 import { type Scenario, cell, chartOf, DEFAULT_LAYOUT_ID, dragTowardPast, expect, test } from "./harness";
@@ -62,20 +61,21 @@ const dailyBars = (scenario: Scenario): Bar[] => {
 const dateBack = (scenario: Scenario, back: number) => formatBarTime(dailyBars(scenario).at(-1 - back)!.t, "D");
 const lastBarOfDate = (scenario: Scenario, date: string, period: Period = "5m") => scenario.market.jumpPage({ symbol: SYMBOL, period, date }).bars.at(-1)!.t;
 
-interface View { count: number; from: number; to: number; edgeT: number | null; shown: number }
+interface View { count: number; from: number; to: number; edgeIndex: number; edgeT: number | null; shown: number }
 
 async function viewOf(page: Page, n: number): Promise<View> {
-  return page.evaluate(({ n, offset }) => {
+  return page.evaluate(({ n }) => {
     const probe = window.chartProbes.find((p) => p.chart.chartElement().closest("section")?.getAttribute("aria-label")?.startsWith(`칸 ${n}: `));
     if (!probe) throw new Error("차트 좌표가 없습니다");
     const count = Number(probe.chart.chartElement().closest("section")?.querySelector("[data-bar-count]")?.getAttribute("data-bar-count"));
     const range = probe.chart.timeScale().getVisibleLogicalRange();
     if (!range) throw new Error("보이는 범위가 없습니다");
-    const x = probe.chart.timeScale().logicalToCoordinate((Math.round(range.to) - offset) as never);
+    const edgeIndex = Math.min(Math.round(range.to), count - 1);
+    const x = probe.chart.timeScale().logicalToCoordinate(edgeIndex as never);
     const edge = x === null ? null : probe.chart.timeScale().coordinateToTime(x);
     const time = typeof edge === "number" ? edge : null;
-    return { count, from: range.from, to: range.to, edgeT: time, shown: Math.round(range.to) - offset - Math.round(range.from) + 1 };
-  }, { n, offset: RIGHT_OFFSET }).then((v) => ({ ...v, edgeT: v.edgeT === null ? null : fromChartTime(v.edgeT as never) }));
+    return { count, from: range.from, to: range.to, edgeIndex, edgeT: time, shown: edgeIndex - Math.round(range.from) + 1 };
+  }, { n }).then((v) => ({ ...v, edgeT: v.edgeT === null ? null : fromChartTime(v.edgeT as never) }));
 }
 
 async function scrollTo(page: Page, n: number, back: number) {
@@ -243,10 +243,30 @@ test("분봉 차트가 이미 가진 날짜(어제 등)로 가면 /api/bars/jump
   const date = dateBack(scenario, 1);
   await scrollTo(page, 1, 1);
   await (await openJumpMenu(page, scenario, 6)).getByRole("menuitem", { name: `바로가기 · ${date}` }).click();
-  await expect.poll(async () => (await viewOf(page, 2)).edgeT).toBe(lastBarOfDate(scenario, date));
+  const expected = lastBarOfDate(scenario, date);
+  await expect.poll(async () => (await viewOf(page, 2)).edgeT).toBe(expected);
   expect(jumpCalls(scenario)).toEqual([]);
   await expect(badge(page, 2)).toBeHidden();
   await expect(page.locator(".ui-toast")).toContainText(`5분 차트를 ${date} 기준으로 옮겼습니다`);
+
+  const view = await viewOf(page, 2);
+  expect(view.shown).toBe(SHOW);
+  expect(view.count - 1).toBeGreaterThan(view.edgeIndex);
+  expect(Math.abs(view.to - view.edgeIndex)).toBeLessThan(0.01);
+  const hidden = await page.evaluate(({ n }) => {
+    const probe = window.chartProbes.find((p) => p.chart.chartElement().closest("section")?.getAttribute("aria-label")?.startsWith(`칸 ${n}: `));
+    const next = probe?.chart.timeScale().getVisibleLogicalRange();
+    return next ? Math.floor(next.to + 0.5 + 1e-6) : null;
+  }, { n: 2 });
+  expect(hidden).toBe(view.edgeIndex);
+
+  const box = (await chartOf(cell(page, 2)).boundingBox())!;
+  await page.mouse.move(box.x + box.width * 0.8, box.y + box.height * 0.5);
+  await page.mouse.down();
+  await page.mouse.move(box.x + box.width * 0.2, box.y + box.height * 0.5, { steps: 12 });
+  await page.mouse.up();
+  await expect.poll(async () => (await viewOf(page, 2)).to).toBeGreaterThan(view.to + 3);
+  expect((await viewOf(page, 2)).edgeT).toBeGreaterThan(expected);
 });
 
 test("다른 종목의 분봉 차트는 움직이지 않는다", async ({ page, scenario }) => {
@@ -362,4 +382,46 @@ test("주봉에서 가면 일봉 차트가 그 주 끝까지 과거 봉을 이�
   await expect(badge(page, 2)).toBeHidden();
   expect(jumpCalls(scenario)).toEqual([]);
   expect(scenario.requests.filter((r) => new URL(r.url()).searchParams.get("period") === "D" && new URL(r.url()).searchParams.has("before")).length).toBeGreaterThan(0);
+});
+
+test("모드 중 더 이른 날짜로 바로가기하면 새 기준일로 다시 받아 뱃지와 화면이 그 날짜가 된다", async ({ page, scenario }) => {
+  seed(scenario, [DAILY, MINUTE]);
+  await ready(page);
+  const first = dateBack(scenario, 8);
+  const earlier = dateBack(scenario, 9);
+  await scrollTo(page, 1, 8);
+  await cell(page, 1).focus();
+  await page.keyboard.press("Alt+KeyG");
+  await expect(badge(page, 2)).toContainText(`바로가기 · ${first}`);
+  await expect(chartOf(cell(page, 2))).toHaveAttribute("data-last-bar-t", String(lastBarOfDate(scenario, first)));
+
+  await scrollTo(page, 1, 9);
+  await cell(page, 1).focus();
+  await page.keyboard.press("Alt+KeyG");
+  await expect(badge(page, 2)).toContainText(`바로가기 · ${earlier}`);
+  expect(jumpCalls(scenario).map((q) => q.get("date"))).toEqual([first, earlier]);
+  const expected = lastBarOfDate(scenario, earlier);
+  await expect(chartOf(cell(page, 2))).toHaveAttribute("data-last-bar-t", String(expected));
+  await expect.poll(async () => (await viewOf(page, 2)).edgeT).toBe(expected);
+  expect((await viewOf(page, 2)).shown).toBe(SHOW);
+});
+
+test("모드 중 새 기준일을 받는 동안 뱃지에 앞 기준일의 수정주가 미반영 날짜가 없다", async ({ page, scenario }) => {
+  scenario.on("/api/bars/jump", (request) => {
+    const q = new URL(request.url()).searchParams;
+    const jump = scenario.market.jumpPage({ symbol: q.get("symbol")!, period: q.get("period") as Period, date: q.get("date")!, before: q.has("before") ? Number(q.get("before")) : null });
+    return { body: { ...jump, unadjustedDays: ["2026-10-28"] } };
+  });
+  seed(scenario, [DAILY, MINUTE]);
+  await ready(page);
+  await scrollTo(page, 1, 8);
+  await cell(page, 1).focus();
+  await page.keyboard.press("Alt+KeyG");
+  await expect(badge(page, 2)).toContainText("일부 날짜 수정주가 미반영");
+  scenario.hold("/api/bars/jump");
+  await scrollTo(page, 1, 9);
+  await cell(page, 1).focus();
+  await page.keyboard.press("Alt+KeyG");
+  await expect(badge(page, 2)).toContainText("받는 중");
+  await expect(badge(page, 2)).not.toContainText("수정주가 미반영");
 });

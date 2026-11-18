@@ -122,6 +122,27 @@ describe("바로가기 모드 진입", () => {
   });
 });
 
+describe("모드 중 새 기준일", () => {
+  test("받는 동안 뱃지에는 앞 기준일의 수정주가 미반영 날짜가 섞이지 않는다", async () => {
+    const h = await entered();
+    expect(h.feed.mode?.unadjustedDays).toEqual(["2026-11-02"]);
+    const entry = h.feed.enterMode("2026-11-05");
+    expect(h.feed.mode).toEqual({ date: "2026-11-05", entering: true, unadjustedDays: [] });
+    h.jumps[1]!.resolve(jump([bar(1), bar(2)], null, ["2026-10-20"]));
+    expect(await entry).toBe("entered");
+    expect(h.feed.mode).toEqual({ date: "2026-11-05", entering: false, unadjustedDays: ["2026-10-20"] });
+  });
+
+  test("새 기준일 받기가 실패하면 앞 모드와 그 날짜가 그대로다", async () => {
+    const h = await entered();
+    const entry = h.feed.enterMode("2026-11-05");
+    h.jumps[1]!.reject(new ApiRequestError("kiwoom_unavailable", "x"));
+    expect(await entry).toBe("failed");
+    expect(h.feed.mode).toEqual({ date: "2026-11-09", entering: false, unadjustedDays: ["2026-11-02"] });
+    expect(h.shown()).toEqual([10, 11]);
+  });
+});
+
 describe("바로가기 모드에 들지 않는 경우", () => {
   test("받는 도중 종목이 바뀌면 앞 응답을 버린다", async () => {
     const h = harness();

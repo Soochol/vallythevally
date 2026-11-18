@@ -20,6 +20,7 @@ export interface FitInput {
   period: Period;
   visibleBars: number | null;
   narrow: boolean;
+  rightOffset?: number;
 }
 
 export function initialRangeOf(input: FitInput, startIndex: number, endIndex: number): IRange<number> {
@@ -27,7 +28,7 @@ export function initialRangeOf(input: FitInput, startIndex: number, endIndex: nu
   const show = input.visibleBars ?? (input.narrow ? NARROW_BARS : DESKTOP_BARS);
   return whole
     ? { from: startIndex - 0.5, to: endIndex + 0.5 + Math.min(2, input.bars.length * 0.05) }
-    : { from: endIndex + 1 - show, to: endIndex + RIGHT_OFFSET };
+    : { from: endIndex + 1 - show, to: endIndex + (input.rightOffset ?? RIGHT_OFFSET) };
 }
 
 export class InitialRange {

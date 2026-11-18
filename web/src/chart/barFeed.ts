@@ -187,6 +187,7 @@ export class BarFeed {
   olderUntil(reached: (history: History) => boolean): Promise<"reached" | "exhausted" | "failed" | "stale"> {
     return new Promise((resolve) => {
       const gen = this.generation;
+      this.olderFailed = false;
       const step = (): void => {
         const h = this.history;
         if (gen !== this.generation || !h) return resolve("stale");

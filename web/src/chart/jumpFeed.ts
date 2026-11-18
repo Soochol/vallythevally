@@ -47,7 +47,7 @@ export class JumpableFeed {
 
   get mode(): JumpModeView | null {
     const shown = this.entering ?? this.active;
-    return shown ? { date: shown.date, entering: this.entering !== null, unadjustedDays: [...(this.active?.unadjusted ?? shown.unadjusted)].sort() } : null;
+    return shown ? { date: shown.date, entering: this.entering !== null, unadjustedDays: [...shown.unadjusted].sort() } : null;
   }
 
   get activeDate(): KstDate | null {

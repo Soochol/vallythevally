@@ -2,7 +2,7 @@ import { describe, expect, test } from "vitest";
 import type { Bar } from "../api/generated/Bar";
 import type { Period } from "../api/generated/Period";
 import { windowId } from "../layout/kinds";
-import { barAtRightEdge, jumpAnchor, jumpNotice, jumpRoute, type JumpChart, jumpTargets, lastBarBefore } from "./barJump";
+import { barAtRightEdge, jumpAnchor, jumpHeld, jumpNotice, jumpRoute, type JumpChart, jumpTargets, lastBarBefore } from "./barJump";
 import { barInterval } from "./crosshairSync";
 
 const kst = (text: string) => Date.parse(`${text}+09:00`) / 1000;
@@ -109,6 +109,22 @@ describe("오른쪽 끝 봉", () => {
   test("구간 끝 앞에 봉이 하나도 없으면 없음", () => {
     expect(lastBarBefore(minutes("2026-11-10", 0, 2), interval)).toBeNull();
     expect(lastBarBefore([], interval)).toBeNull();
+  });
+});
+
+describe("이미 가졌는지", () => {
+  const interval = barInterval(kst("2026-11-09T00:00:00"), "D");
+  const bars = [bar(kst("2026-11-06T10:00:00")), bar(kst("2026-11-09T10:00:00"))];
+
+  test("평소에는 구간 끝 앞의 봉이 있으면 가졌다", () => {
+    expect(jumpHeld({ bars, interval, date: "2026-11-09", modeDate: null })).toBe(true);
+    expect(jumpHeld({ bars: [bar(kst("2026-11-10T10:00:00"))], interval, date: "2026-11-09", modeDate: null })).toBe(false);
+  });
+
+  test("모드 중에는 같은 기준일일 때만 가졌다. 더 이르거나 늦은 날짜는 새 기준일이다", () => {
+    expect(jumpHeld({ bars, interval, date: "2026-11-09", modeDate: "2026-11-09" })).toBe(true);
+    expect(jumpHeld({ bars, interval, date: "2026-11-06", modeDate: "2026-11-09" })).toBe(false);
+    expect(jumpHeld({ bars, interval, date: "2026-11-12", modeDate: "2026-11-09" })).toBe(false);
   });
 });
 

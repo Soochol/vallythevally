@@ -96,6 +96,37 @@ function realtime() {
 const shown = (h: History | null) => (h ? displayBars(h).map((b) => `${b.t}:${b.c}`) : null);
 const withSeq = (p: BarsPage, seq: number | null): BarsPage => ({ ...p, seq });
 
+describe("BarFeed olderUntil", () => {
+  test("앞서 과거 받기가 실패했어도 다시 부르면 새 요청을 보낸다", async () => {
+    const { feed, calls, flush, history, events } = harness();
+    feed.open(key("005930", "D"));
+    calls[0]!.resolve(page([bar(100)], 100));
+    await flush();
+    feed.needOlder();
+    calls[1]!.reject(new ApiRequestError("kiwoom_unavailable", "x"));
+    await flush();
+    expect(events.at(-1)).toBe("olderFailed kiwoom_unavailable");
+    feed.needOlder();
+    expect(calls).toHaveLength(2);
+    const reached = feed.olderUntil((h) => h.bars[0]!.t <= 50);
+    expect(calls).toHaveLength(3);
+    expect(calls[2]!.q.before).toBe(100);
+    calls[2]!.resolve(page([bar(40), bar(60)], null));
+    expect(await reached).toBe("reached");
+    expect(history()?.bars.map((b) => b.t)).toEqual([40, 60, 100]);
+  });
+
+  test("이어 받는 중 다시 실패하면 failed를 알린다", async () => {
+    const { feed, calls, flush } = harness();
+    feed.open(key("005930", "D"));
+    calls[0]!.resolve(page([bar(100)], 100));
+    await flush();
+    const reached = feed.olderUntil(() => false);
+    calls[1]!.reject(new ApiRequestError("kiwoom_unavailable", "x"));
+    expect(await reached).toBe("failed");
+  });
+});
+
 describe("BarFeed 실시간", () => {
   test("페이지를 받기 전에 온 메시지를 쌓았다가 seq > page.seq만 차례로 적용한다", async () => {
     const { feed, calls, events, flush, history, push } = realtime();

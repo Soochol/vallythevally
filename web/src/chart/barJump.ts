@@ -59,6 +59,11 @@ export function jumpRoute(input: { period: Period; date: KstDate; today: KstDate
   return isIntraday(input.period) ? "mode" : "extend";
 }
 
+export function jumpHeld(input: { bars: readonly Bar[]; interval: BarInterval; date: KstDate; modeDate: KstDate | null }): boolean {
+  if (input.modeDate !== null) return input.date === input.modeDate;
+  return lastBarBefore(input.bars, input.interval) !== null;
+}
+
 export interface IntervalEnd {
   index: number;
   inInterval: boolean;

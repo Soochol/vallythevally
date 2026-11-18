@@ -28,7 +28,7 @@ import type { Connection, MarketSocketLike } from "../api/socket";
 import { isIndexCode, PERIOD_LABEL, symbolSub } from "../lib/symbol";
 import { type ShownVenue, venueLabel } from "../lib/venue";
 import { displayBars, type FetchPage, type History } from "./barFeed";
-import { barAtRightEdge, type JumpAnchor, jumpAnchor, type JumpOutcome, jumpRoute, kstDateOf, lastBarBefore } from "./barJump";
+import { barAtRightEdge, type JumpAnchor, jumpAnchor, jumpHeld, type JumpOutcome, jumpRoute, kstDateOf, lastBarBefore } from "./barJump";
 import { type CompareEntry, CompareLayer, compareVenue } from "./compare";
 import { CompareLegend } from "./compareLegend";
 import { CrosshairMarker } from "./crosshairMarker";
@@ -759,7 +759,7 @@ export class ChartController {
     this.feed.cancelEntering();
     const today = kstDateOf(nowSeconds());
     const modeDate = this.feed.activeDate;
-    const held = (modeDate === null || request.date <= modeDate) && lastBarBefore(this.bars, request.interval) !== null;
+    const held = jumpHeld({ bars: this.bars, interval: request.interval, date: request.date, modeDate });
     const route = jumpRoute({ period: view.period, date: request.date, today, held });
     if (route === "mode") {
       this.jumpInterval = request.interval;
@@ -847,7 +847,13 @@ export class ChartController {
     if (endT === null || this.disposed || this.el.clientWidth === 0 || this.el.clientHeight === 0) return;
     this.pendingEnd = null;
     const shown = this.bars.findIndex((bar) => bar.t > endT);
-    this.initialRange.fit({ bars: shown === -1 ? this.bars : this.bars.slice(0, shown), period: this.period(), visibleBars: this.view?.settings.visibleBars ?? null, narrow: matchMedia("(max-width: 767px)").matches });
+    this.initialRange.fit({
+      bars: shown === -1 ? this.bars : this.bars.slice(0, shown),
+      period: this.period(),
+      visibleBars: this.view?.settings.visibleBars ?? null,
+      narrow: matchMedia("(max-width: 767px)").matches,
+      rightOffset: shown === -1 ? undefined : 0,
+    });
   }
 
   private onPrepended(h: History, added: number): void {
