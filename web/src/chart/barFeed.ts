@@ -187,12 +187,16 @@ export class BarFeed {
   olderUntil(reached: (history: History) => boolean): Promise<"reached" | "exhausted" | "failed" | "stale"> {
     return new Promise((resolve) => {
       const gen = this.generation;
-      this.olderFailed = false;
+      let requested = false;
       const step = (): void => {
         const h = this.history;
         if (gen !== this.generation || !h) return resolve("stale");
         if (reached(h)) return resolve("reached");
         if (h.nextBefore === null) return resolve("exhausted");
+        if (!requested) {
+          requested = true;
+          this.olderFailed = false;
+        }
         if (this.olderFailed) return resolve("failed");
         this.olderWaiters.add(step);
         this.needOlder();

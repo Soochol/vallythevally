@@ -116,6 +116,19 @@ describe("BarFeed olderUntil", () => {
     expect(history()?.bars.map((b) => b.t)).toEqual([40, 60, 100]);
   });
 
+  test("요청 없이 조건을 이미 만족하면 앞선 과거 받기 실패는 그대로이고 스크롤은 다시 요청하지 않는다", async () => {
+    const { feed, calls, flush } = harness();
+    feed.open(key("005930", "D"));
+    calls[0]!.resolve(page([bar(100)], 100));
+    await flush();
+    feed.needOlder();
+    calls[1]!.reject(new ApiRequestError("kiwoom_unavailable", "x"));
+    await flush();
+    expect(await feed.olderUntil(() => true)).toBe("reached");
+    feed.needOlder();
+    expect(calls).toHaveLength(2);
+  });
+
   test("이어 받는 중 다시 실패하면 failed를 알린다", async () => {
     const { feed, calls, flush } = harness();
     feed.open(key("005930", "D"));

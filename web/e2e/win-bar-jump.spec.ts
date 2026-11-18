@@ -111,6 +111,7 @@ async function openJumpMenu(page: Page, scenario: Scenario, clickedBack: number)
 
 test.beforeEach(async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
+  await page.clock.setFixedTime(new Date("2026-11-09T10:00:00+09:00"));
   await page.addInitScript(installChartProbe);
 });
 
