@@ -36,6 +36,15 @@ test("잔량 증감은 같은 쪽 같은 가격의 직전 실시간 값 대비�
   expect(second.view.bids.map((l) => l.change)).toEqual([-4]);
 });
 
+test("실시간 호가는 프레임 시각을 담고 조회 호가는 시각이 없다", () => {
+  const shown = acceptSnapshot(EMPTY_BOOK, snapshot);
+  if (shown.phase !== "snapshot") throw new Error("snapshot");
+  expect(shown.view.t).toBeNull();
+  const replaced = acceptLive(shown, { ...live([[102, 5]], [[101, 6]]), t: 1_790_000_000 });
+  if (replaced.phase !== "live") throw new Error("live");
+  expect(replaced.view.t).toBe(1_790_000_000);
+});
+
 test("빈 단(null)은 건너뛴다", () => {
   const state = acceptLive(EMPTY_BOOK, live([], [[101, 6]]));
   if (state.phase !== "live") throw new Error("live");

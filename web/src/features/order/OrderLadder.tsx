@@ -42,13 +42,14 @@ interface Props {
   readonly explorer?: ExplorerScroll;
   readonly onDragging: (dragging: boolean) => void;
   readonly rowSlots?: LadderRowSlots;
+  readonly expectedPrice?: number | null;
 }
 
 type MenuState = { readonly x: number; readonly y: number; readonly group: PriceGroup | null };
 
 const SIDE_OF_SLOT: Readonly<Record<"left" | "right", OrderSide>> = { left: "sell", right: "buy" };
 
-export function OrderLadder({ rows, previousClose, groups, writable, previewQuantity, hover, onHover, actions, averagePrice, divider, explorer, onDragging, rowSlots }: Props) {
+export function OrderLadder({ rows, previousClose, groups, writable, previewQuantity, hover, onHover, actions, averagePrice, divider, explorer, onDragging, rowSlots, expectedPrice }: Props) {
   const ladder = useRef<HTMLDivElement>(null);
   const [menu, setMenu] = useState<MenuState | null>(null);
   const { view, begin } = useChipDrag(ladder, actions.drop);
@@ -135,7 +136,7 @@ export function OrderLadder({ rows, previousClose, groups, writable, previewQuan
   };
 
   const shown = exploring ? rows.slice(range.start, range.end) : rows;
-  const ladderView = <PriceLadder rows={shown} previousClose={previousClose} slots={slots} rowSlots={exploring ? undefined : rowSlots} mark={{ price: averagePrice, label: "평단가" }} firstBidIndex={exploring ? Math.max(0, (centerIndex < 0 ? rowCount : centerIndex) - range.start) : undefined} />;
+  const ladderView = <PriceLadder rows={shown} previousClose={previousClose} slots={slots} rowSlots={exploring ? undefined : rowSlots} mark={{ price: averagePrice, label: "평단가" }} expectedPrice={expectedPrice} firstBidIndex={exploring ? Math.max(0, (centerIndex < 0 ? rowCount : centerIndex) - range.start) : undefined} />;
 
   return (
     <div ref={ladder} className="od-ladder" data-testid="order-ladder" data-explorer={exploring ? "" : undefined} data-dragging={view ? "" : undefined} data-divider={divider ? "" : undefined}

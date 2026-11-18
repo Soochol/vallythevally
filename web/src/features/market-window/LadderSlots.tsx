@@ -5,7 +5,7 @@ import { formatStrength } from "./format";
 import type { LadderTrades } from "./useLadderSlots";
 import type { QuoteInfo } from "./quoteInfo";
 
-export const infoSlot = (items: readonly QuoteInfo[]) => (slot: number): ReactNode => {
+export const infoSlot = (items: readonly (QuoteInfo | null)[]) => (slot: number): ReactNode => {
   const item = items[slot];
   if (!item) return null;
   return (

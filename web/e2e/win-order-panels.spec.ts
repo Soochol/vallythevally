@@ -445,3 +445,30 @@ test("교차 호가로 위 오른쪽 칸에 매수 잔량이 있으면 그 행�
   await expect(info.filter({ hasText: "하한가" })).toContainText("49,000");
 
 });
+
+test.describe("수요일 08:55 동시호가", () => {
+  test.use({ clockStart: "20261118085500" });
+
+  test.beforeEach(async ({ page, scenario }) => {
+    await page.clock.setFixedTime(new Date(scenario.now));
+  });
+
+  test("호가주문창 상세정보란에 예상체결 두 항목이 보이고 70,000원 행이 강조된다", async ({ page, scenario }) => {
+    ordersOn(scenario);
+    tradingApi(scenario);
+    await openOrderWindow(page, scenario);
+    let sub = "";
+    await pollSaved(() => {
+      const message = scenario.live.messages.find((m) => m.type === "subscribe_feed" && m.kind === "book" && m.symbol === CODE);
+      sub = message?.type === "subscribe_feed" ? message.sub : "";
+      return sub;
+    }).not.toBe("");
+    scenario.live.emit({ type: "feed_book", sub, book: { t: scenario.now / 1000, asks: [{ price: 70_100, qty: 50 }], bids: [{ price: 70_000, qty: 80 }], totalAskQty: 50, totalBidQty: 80, expected: { price: 70_000, qty: 300 } } });
+    const info = page.getByTestId("ladder-info");
+    await expect(info.and(page.locator('[data-label="예상체결가"]')).locator("b")).toHaveText("70,000");
+    await expect(info.and(page.locator('[data-label="예상체결량"]')).locator("b")).toHaveText("300");
+    await expect(ladderRows(page).locator(".mw-px-num")).toHaveCount(20);
+    await expect(page.locator(".mw-lr[data-expected]")).toHaveCount(1);
+    await expect(page.locator(".mw-lr[data-expected]")).toContainText("70,000");
+  });
+});
