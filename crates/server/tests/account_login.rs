@@ -560,9 +560,10 @@ async fn when_the_state_file_cannot_be_removed_after_deletion_memory_and_file_st
     let dir = machine.state_path.parent().unwrap().to_owned();
     std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o500)).unwrap();
     let (status, _) = connector.post("/api/account/delete", &json!({"confirm": true})).await;
-    std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700)).unwrap();
     assert_eq!(status, 500);
     assert_eq!(connector.status().await["state"], "signed_in", "파일이 남았으니 메모리도 로그인 상태다");
+    assert!(machine.state_file().is_some());
+    std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700)).unwrap();
     connector.server.stop().await;
     let restarted = machine.run(Some(&accounts.base)).await;
     tokio::time::timeout(Duration::from_secs(10), async {
