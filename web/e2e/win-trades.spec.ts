@@ -70,7 +70,10 @@ test("당일 체결을 먼저 구독한 뒤 조회하고 겹치는 행은 실시
 
   emit(scenario, sub, [live("10:00:05", 71_500, 3_000, "krx")]);
   await expect(rows(page).first()).toContainText("10:00:05");
-  await expect(rows(page).first()).toContainText("대량");
+  await expect(rows(page).first()).not.toContainText("대량");
+  await expect(rows(page).first().locator(".tr-qty")).toHaveCSS("font-weight", "700");
+  await expect(rows(page).first().locator(".tr-qty")).toHaveText("3,000");
+  await expect(page.locator(".tr-qty-bar, .tr-big")).toHaveCount(0);
 });
 
 test("마우스를 올린 동안 목록이 밀리지 않고 새 체결 건수를 알리며 단추를 누르면 이어 붙는다", async ({ page, scenario }) => {

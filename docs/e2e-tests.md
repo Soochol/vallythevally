@@ -63,6 +63,13 @@ Playwright 설정이 `fullyParallel: true`라서 같은 파일의 시험도 서�
 
 대기, 애니메이션, 실시간 프레임, 늦은 응답을 다루는 새 시험은 부하를 흉내 내 반복으로 확인하고, 명령과 결과를 PR 본문에 적는다.
 
+재현 수단은 두 가지다.
+
+- 결정적 방법: `scenario.hold`와 `reply`로 응답을 늦추고, `clockStart`와 `page.clock`으로 가상 시간을 넘기고, 앱이 내놓는 상태·전환 완료 신호(`data-*`, `aria-*`)를 기다린다.
+- 그 실행에만 거는 제한: 아래 `VALLY_E2E_CPU_THROTTLE`이다.
+
+PC 전체에 인위적 부하를 걸지 않는다. 무한 루프, `stress`·`stress-ng`, 코어 수만큼의 바쁜 프로세스, 같은 시험 실행을 여러 벌 동시에 띄우는 것이 모두 해당한다. 이 PC는 다른 작업자와 chute 병합 검증이 함께 쓰므로 전체 부하는 그들을 함께 느리게 하고 다른 시험을 흔든다. 위 수단으로 재현하지 못하면 부하를 키우지 않고, 무엇을 시도했는지 보고하고 멈춘다.
+
 ```sh
 env VALLY_E2E_CPU_THROTTLE=4 python3 scripts/web.py e2e --repeat-each=20 --workers=6 e2e/<파일>.spec.ts:<줄>
 ```

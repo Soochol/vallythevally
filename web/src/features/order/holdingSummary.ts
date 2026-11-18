@@ -1,5 +1,5 @@
 import type { TradingHolding } from "../../api/generated/TradingHolding";
-import { formatDecimal, formatPercent } from "../../lib/format";
+import { formatPercent } from "../../lib/format";
 import type { QuantityMode } from "./orderRules";
 
 export type ProfitUnit = "won" | "percent";
@@ -43,4 +43,3 @@ export function ladderClosed(choice: SessionChoice, kstSecondOfDay: number, nxtE
 
 export const formatFillTime = (time: string): string => (/^\d{6}$/.test(time) ? `${time.slice(0, 2)}:${time.slice(2, 4)}:${time.slice(4, 6)}` : time);
 
-export const formatStrength = (strength: number | null): string => (strength === null ? "—" : `${formatDecimal(strength)}%`);

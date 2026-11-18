@@ -12,19 +12,20 @@ import { useMockEnvironment } from "../../stores/kiwoomLink";
 import { orderVenue, useLayoutStore } from "../../stores/layout";
 import { useOrderSettings, useUiStore } from "../../stores/ui";
 import { useBookFeed } from "../book/useBookFeed";
-import { buildLadder, type LadderRow } from "../market-window/ladder";
+import { basePrice, buildLadderRows, gridPrices, type LadderRow } from "../market-window/ladder";
 import { RatioBar, Segmented, Strip } from "../market-window/parts";
 import { useLinkedSymbol } from "../market-window/MarketWindowGate";
 import { formatShares } from "../market-window/format";
+import { infoSlot, tradeSlot } from "../market-window/LadderSlots";
+import { useLadderTrades, useQuoteInfo } from "../market-window/useLadderSlots";
 import { EmptyState } from "../overlay/State";
 import { openSystemSettings } from "../system-settings/open";
 import { AccountBand } from "./AccountBand";
-import { buildExplorerRows } from "./explorerRows";
 import { averageRowPrice, holdingOf, ladderClosed, type ProfitUnit, type SessionChoice, toggledUnit } from "./holdingSummary";
 import { HoldingSummary } from "./HoldingSummary";
-import { LadderTape, QuoteSummary } from "./LadderOverlays";
 import { OrderSettingsPopover } from "./OrderSettingsPopover";
-import { explorerPrices, movePrice } from "./priceRange";
+import { movePrice, tickRuleOf } from "../market-window/tick";
+import { explorerPrices } from "./priceRange";
 import { HighValueConfirm, type HighValueRequest } from "./HighValueConfirm";
 import { type HoverCell, OrderLadder } from "./OrderLadder";
 import { OrderStatusBar } from "./OrderStatusBar";
@@ -55,6 +56,12 @@ function OpenOrderList({ groups, writable, onCancel }: { groups: ReadonlyMap<str
   );
 }
 
+function useHeldWhile<T>(value: T, hold: boolean): T {
+  const [held, setHeld] = useState(value);
+  if (!hold && held !== value) setHeld(value);
+  return hold ? held : value;
+}
+
 function OrderBody({ id, code }: { id: WindowId; code: SymbolCode }) {
   const savedVenue = useLayoutStore((s) => orderVenue(s.layout, id));
   const mock = useMockEnvironment();
@@ -68,13 +75,15 @@ function OrderBody({ id, code }: { id: WindowId; code: SymbolCode }) {
   const [confirm, setConfirm] = useState<HighValueRequest | null>(null);
   const [listOpen, setListOpen] = useState(false);
   const [explorerCenter, setExplorerCenter] = useState<number | null>(null);
+  const [dragging, setDragging] = useState(false);
   const [profitUnit, setProfitUnit] = useState<ProfitUnit>("won");
   const [session, setSession] = useState<SessionChoice>("regular");
   const [now, setNow] = useState(() => Date.now());
   const settings = useOrderSettings();
   const setSettings = useUiStore((s) => s.setOrderSettings);
   const limits = useFundamentals(code).data;
-  const nxtEnabled = useSymbolInfo(code).data?.nxtEnabled ?? null;
+  const symbolInfo = useSymbolInfo(code).data;
+  const nxtEnabled = symbolInfo?.nxtEnabled ?? null;
   const accountTail = useOrdersStatus().data?.accountTail ?? null;
 
   useEffect(() => {
@@ -84,22 +93,25 @@ function OrderBody({ id, code }: { id: WindowId; code: SymbolCode }) {
 
   const view = feed.book.phase === "empty" ? null : feed.book.view;
   const bounds = { lower: limits?.lowerLimit ?? null, upper: limits?.upperLimit ?? null };
-  const liveRows = view ? buildLadder({ asks: view.asks, bids: view.bids, lastPrice: feed.lastPrice, previousClose: feed.previousClose }) : [];
-  const referencePrice = feed.lastPrice ?? feed.previousClose ?? liveRows.find((row) => row.level)?.level?.price ?? null;
+  const quotes = view ? { asks: view.asks, bids: view.bids, lastPrice: feed.lastPrice, previousClose: feed.previousClose } : null;
+  const tickRule = tickRuleOf(symbolInfo?.kind ?? null, view ? [...view.asks, ...view.bids].map((level) => level.price) : []);
+  const liveBase = quotes ? basePrice(quotes) : null;
+  const gridBase = useHeldWhile(liveBase, dragging);
+  const referencePrice = feed.lastPrice ?? feed.previousClose ?? liveBase;
   const exploring = explorerCenter !== null;
-  const shownRows: LadderRow[] = view && exploring
-    ? buildExplorerRows({ prices: explorerPrices(explorerCenter, bounds), asks: view.asks, bids: view.bids, lastPrice: feed.lastPrice, previousClose: feed.previousClose })
-    : liveRows;
+  const shownRows: LadderRow[] = quotes ? buildLadderRows(exploring ? explorerPrices(explorerCenter, bounds, tickRule) : gridPrices(gridBase, bounds, tickRule), quotes) : [];
   const rows = settings.rate ? shownRows : shownRows.map((row) => ({ ...row, rate: null }));
   const closed = ladderClosed(session, secondOfDay(now / 1000), nxtEnabled);
   const wheel = useCallback((direction: 1 | -1) => {
     if (referencePrice === null) return;
-    setExplorerCenter((center) => movePrice(center ?? referencePrice, direction * WHEEL_TICKS, bounds));
-  }, [referencePrice, bounds.lower, bounds.upper]);
+    setExplorerCenter((center) => movePrice(center ?? referencePrice, direction * WHEEL_TICKS, bounds, tickRule));
+  }, [referencePrice, bounds.lower, bounds.upper, tickRule]);
+  const info = useQuoteInfo({ code, venue, lastPrice: feed.lastPrice, previousClose: feed.previousClose, upperLimit: bounds.upper, lowerLimit: bounds.lower });
+  const trades = useLadderTrades(code, venue);
   const data = useOrderData(code, access.open, referencePrice);
   const writes = useOrderWrites(code, venue);
   const holding = holdingOf(data.balance?.holdings ?? [], code);
-  const averagePrice = settings.averageDot ? averageRowPrice(rows.map((row) => row.level?.price ?? null), holding?.averagePrice ?? null) : null;
+  const averagePrice = settings.averageDot ? averageRowPrice(rows.map((row) => row.price), holding?.averagePrice ?? null) : null;
   const writable = access.open && !data.blocked && writes.status.unknown !== true;
 
   const typed = Number(input);
@@ -137,20 +149,21 @@ function OrderBody({ id, code }: { id: WindowId; code: SymbolCode }) {
       )}
       <AccountBand accountTail={accountTail} openOrders={data.openOrders} balance={data.balance} executions={data.executions} writable={writable} mock={mock} onCancel={writes.cancelOne} />
       <HoldingSummary holding={holding} buyableAmount={data.capacity.buyableAmount} unit={profitUnit} onUnit={() => setProfitUnit(toggledUnit)} onFill={(fill) => { setMode(fill.mode); setInput(fill.input); }} />
-      <div className="od-toolbar">
-        <button type="button" className="od-tool" data-testid="order-explorer" aria-pressed={exploring} disabled={referencePrice === null} onClick={() => setExplorerCenter(exploring ? null : referencePrice)}>전체 호가</button>
-        <button type="button" className="od-tool" data-testid="order-current" disabled={!exploring} onClick={() => setExplorerCenter(null)}>현재가</button>
-        <OrderSettingsPopover settings={settings} onChange={setSettings} />
+      <div className="od-entry">
+        <QuantityRow mode={mode} input={input} estimate={estimate} venue={venue} mock={mock} sharePresets={settings.sharePresets} onMode={setMode} onInput={setInput} onVenue={(next) => setVenue(id, next)} />
+        <div className="od-toolbar">
+          <button type="button" className="od-tool" data-testid="order-explorer" aria-pressed={exploring} disabled={referencePrice === null} onClick={() => setExplorerCenter(exploring ? null : referencePrice)}>전체 호가</button>
+          <button type="button" className="od-tool" data-testid="order-current" disabled={!exploring} onClick={() => setExplorerCenter(null)}>현재가</button>
+          <OrderSettingsPopover settings={settings} onChange={setSettings} />
+        </div>
       </div>
+      <OrderStatusBar status={writes.status} queued={writes.queued} blocked={data.blocked} onUndo={writes.cancelOne} onReconcile={writes.reconcile} />
       <div className="bk-ladder od-ladder-wrap" data-stale={feed.connected ? undefined : ""} data-exploring={exploring ? "" : undefined}>
         {closed
           ? <EmptyState title="호가 사다리 없음">{session === "after" ? <p>시간외에는 호가 사다리를 보이지 않습니다</p> : <p>이 종목은 15:30 뒤 호가가 멈춥니다</p>}</EmptyState>
           : view
-            ? <OrderLadder rows={rows} previousClose={feed.previousClose} groups={data.groups} writable={writable} previewQuantity={quantityAt(unitPrice)} hover={hover} onHover={setHover} averagePrice={averagePrice} divider={settings.divider} onWheel={wheel}
-                actions={{ place, drop, cancelOne: writes.cancelOne, cancelAtPrice: writes.cancelAtPrice, cancelGroups: (targets) => targets.forEach((g) => writes.cancelAtPrice(g.side, g.price)) }}>
-                <LadderTape code={code} venue={venue} previousClose={feed.previousClose} />
-                <QuoteSummary code={code} venue={venue} lastPrice={feed.lastPrice} previousClose={feed.previousClose} upperLimit={bounds.upper} lowerLimit={bounds.lower} />
-              </OrderLadder>
+            ? <OrderLadder rows={rows} previousClose={feed.previousClose} groups={data.groups} writable={writable} previewQuantity={quantityAt(unitPrice)} hover={hover} onHover={setHover} averagePrice={averagePrice} divider={settings.divider} onWheel={wheel} onDragging={setDragging} rowSlots={{ topRight: infoSlot(info), bottomLeft: tradeSlot(trades, feed.previousClose) }}
+                actions={{ place, drop, cancelOne: writes.cancelOne, cancelAtPrice: writes.cancelAtPrice, cancelGroups: (targets) => targets.forEach((g) => writes.cancelAtPrice(g.side, g.price)) }} />
             : <EmptyState title={feed.snapshotFailed ? "호가를 불러오지 못했습니다" : "호가를 기다리는 중입니다"} />}
       </div>
       <Strip>
@@ -168,8 +181,6 @@ function OrderBody({ id, code }: { id: WindowId; code: SymbolCode }) {
         })}
       </div>
       {listOpen && <OpenOrderList groups={data.groups} writable={writable} onCancel={writes.cancelOne} />}
-      <QuantityRow mode={mode} input={input} estimate={estimate} venue={venue} mock={mock} sharePresets={settings.sharePresets} onMode={setMode} onInput={setInput} onVenue={(next) => setVenue(id, next)} />
-      <OrderStatusBar status={writes.status} queued={writes.queued} blocked={data.blocked} onUndo={writes.cancelOne} onReconcile={writes.reconcile} />
       {confirm && <HighValueConfirm request={confirm} onClose={() => setConfirm(null)} />}
     </div>
   );

@@ -10,13 +10,12 @@ import { formatPrice, MINUS } from "../../lib/format";
 import { marketSocket } from "../../stores/realtime";
 import { MarketWindowGate } from "../market-window/MarketWindowGate";
 import { formatShares, withSign } from "../market-window/format";
-import { RatioBar, Strip } from "../market-window/parts";
 import { ErrorState, EmptyState, Skeleton } from "../overlay/State";
 import { boldKeys, type ColumnWidths, eokFromMillionWon, formatEokAmount, historyRows, isNoProgramData, joinHistoryAndLive, liveRow, type ProgramLine, type ProgramRow, rowsOf, sparklinePoints, widestSoFar } from "./program";
 
 const VISIBLE_ROWS = 300;
 const SPARK_WIDTH = 100;
-const SPARK_HEIGHT = 28;
+const SPARK_HEIGHT = 16;
 
 type LiveAction = { type: "row"; row: FeedProgramRow; at: number } | { type: "gap"; at: number };
 
@@ -59,36 +58,26 @@ function Summary({ rows }: { rows: readonly ProgramRow[] }) {
   const buy = latest?.buyQty ?? 0;
   const sell = latest?.sellQty ?? 0;
   return (
-    <>
-      <div className="pg-head" data-direction={direction}>
-        <div className="pg-net">
-          <span className="pg-cap">순매수 누적</span>
-          <b data-testid="program-net-qty">{withSign(net, formatShares(Math.abs(net)))}</b>
-          <span data-testid="program-net-amount">{withSign(amount, formatEokAmount(Math.abs(amount)))}</span>
-        </div>
+    <div className="pg-head" data-direction={direction}>
+      <div className="pg-net">
+        <span className="pg-cap">순매수</span>
+        <b data-testid="program-net-qty">{withSign(net, formatShares(Math.abs(net)))}</b>
+        <span className="pg-amount" data-testid="program-net-amount">{withSign(amount, formatEokAmount(Math.abs(amount)))}</span>
         <svg className="pg-spark" viewBox={`0 0 ${SPARK_WIDTH} ${SPARK_HEIGHT}`} preserveAspectRatio="none" role="img" aria-label="순매수 누적 추이" data-testid="program-trend">
           {points && <polyline points={points} fill="none" vectorEffect="non-scaling-stroke" />}
         </svg>
       </div>
-      <Strip>
-        <span>매수 누적 <b data-testid="program-buy-qty">{formatShares(buy)}</b></span>
-        <RatioBar buy={buy} sell={sell} label={`매수 ${formatShares(buy)} · 매도 ${formatShares(sell)}`} />
-        <span>매도 누적 <b data-testid="program-sell-qty">{formatShares(sell)}</b></span>
-      </Strip>
-    </>
+      <div className="pg-totals">
+        매수 <b data-testid="program-buy-qty">{formatShares(buy)}</b> · 매도 <b data-testid="program-sell-qty">{formatShares(sell)}</b>
+      </div>
+    </div>
   );
-}
-
-function ChangeBar({ change, largest }: { change: number; largest: number }) {
-  const width = largest > 0 ? (Math.abs(change) / largest) * 100 : 0;
-  return <span className="pg-bar" data-testid="program-bar" data-direction={change > 0 ? "buy" : change < 0 ? "sell" : "none"}><i style={{ width: `${width}%` }} /></span>;
 }
 
 function Table({ lines }: { lines: readonly ProgramLine[] }) {
   const visible = useMemo(() => lines.slice(-VISIBLE_ROWS).reverse(), [lines]);
   const rows = useMemo(() => rowsOf(visible), [visible]);
   const bold = useMemo(() => boldKeys(rows), [rows]);
-  const largest = Math.max(0, ...rows.map((row) => Math.abs(row.netQtyChange)));
   const widths = useWidestColumns(rows);
   const style = { "--pg-time": `${widths[0]}ch`, "--pg-price": `${widths[1]}ch` } as CSSProperties;
   return (
@@ -103,7 +92,6 @@ function Table({ lines }: { lines: readonly ProgramLine[] }) {
               <span role="cell" className="pg-time">{line.row.time}</span>
               <span role="cell" className="pg-price">{priceText(line.row)}</span>
               <span role="cell" className="pg-change" data-testid="program-change">
-                <ChangeBar change={line.row.netQtyChange} largest={largest} />
                 <em className={line.row.netQtyChange > 0 ? "mw-up" : line.row.netQtyChange < 0 ? "mw-down" : undefined}>{changeText(line.row).replace("-", MINUS)}</em>
               </span>
             </div>
