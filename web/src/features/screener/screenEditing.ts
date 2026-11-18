@@ -273,12 +273,14 @@ export function createScreenEditing({ screens, runner }: { screens: ScreensPort;
         return true;
       },
       run: async () => {
-        const before = pick(slot);
+        const startedOn = slot.get();
+        const pinned: ChosenSlot = { get: () => startedOn, set: slot.set };
+        const before = pick(pinned);
         if (before && invalid(before, runner.runs())) return { kind: "invalid" };
         const [loaded, check] = await Promise.all([screens.load(), runner.check()]);
         if (loaded.kind === "error") return { kind: "failed", message: loaded.message };
         see(loaded.list);
-        const picked = pick(slot);
+        const picked = pick(pinned);
         if (!picked) return { kind: "none" };
         const runs = runner.runs();
         if (invalid(picked, runs)) return { kind: "invalid" };

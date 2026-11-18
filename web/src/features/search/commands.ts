@@ -2,6 +2,7 @@ import type { QueryClient } from "@tanstack/react-query";
 import { FIX_INVALID, type RunOutcome, type ScreenEditing } from "../screener/screenEditing";
 import { firstScreenerWindow, screenEditingFor } from "../screener/useScreenEditing";
 import { HOTKEYS } from "../../lib/hotkeys";
+import { DESKTOP_QUERY } from "../../lib/media";
 import { chartWindows, useLayoutStore } from "../../stores/layout";
 import { useSelectionStore } from "../../stores/selection";
 import type { SearchCommand } from "../commands/registry";
@@ -9,6 +10,8 @@ import { openIndicatorCommand } from "../indicator-command/open";
 import { pressScale } from "../indicator-dialog/compareForm";
 import { saveSnapshot } from "../snapshot/saveSnapshot";
 import { openSystemSettings } from "../system-settings/open";
+
+const onDesktop = () => typeof matchMedia === "function" && matchMedia(DESKTOP_QUERY).matches;
 
 const RUN_TOAST: Partial<Record<RunOutcome["kind"], string>> = {
   invalid: FIX_INVALID,
@@ -47,5 +50,5 @@ export const DEFAULT_SEARCH_COMMANDS: readonly SearchCommand[] = [
       default: return [];
     }
   }),
-  screenerRunCommand((client) => screenEditingFor(client, firstScreenerWindow())),
+  screenerRunCommand((client) => screenEditingFor(client, onDesktop() ? firstScreenerWindow() : null)),
 ];
