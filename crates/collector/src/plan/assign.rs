@@ -61,7 +61,7 @@ pub fn build_plan(input: &PlanInput) -> Result<PlanFile, PlanError> {
         }
         .expect("종목 수가 수집 키의 몫 합계 이하라 빈 자리가 있다");
         share.stocks.push(stock.code.to_owned());
-        share.load += stock.load;
+        share.load = share.load.saturating_add(stock.load);
     }
 
     let market_holder = shares
