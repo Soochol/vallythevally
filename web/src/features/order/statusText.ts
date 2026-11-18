@@ -20,6 +20,7 @@ export const REJECT_TEXT: Readonly<Record<OrderRejectReason, string>> = {
   sell_over_sellable: "매도 가능 수량을 넘습니다",
   buy_over_buying_power: "매수 가능 금액을 넘습니다",
   nxt_unavailable: "NXT에서 거래되지 않는 종목입니다",
+  mock_krx_only: "모의투자는 KRX 주문만 됩니다",
   order_not_found: "정정·취소할 주문을 찾지 못했습니다",
   not_sent: "키움에 보내지 못했습니다",
   kiwoom_rejected: "키움이 주문을 거절했습니다",

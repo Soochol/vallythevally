@@ -188,13 +188,14 @@ async fn serve(config: Config, token_file: TokenFile, key_file: KeyFile, account
     };
     let env_key = config.kiwoom_credentials.is_some();
     let startup = startup_key(config.kiwoom_credentials.clone(), &key_file, config.kiwoom_environment);
-    let rest = KiwoomRest::new(
+    let rest = KiwoomRest::for_environment(
         Arc::new(transport),
         match &startup.credentials {
             Some(credentials) => KiwoomAuth::new(credentials.app_key.clone(), credentials.app_secret.clone(), Some(token_file)),
             None => KiwoomAuth::keyless(Some(token_file)),
         },
         clock.clone(),
+        config.kiwoom_environment,
     );
     rest.set_access(crate::kiwoom::rest::Access::Closed);
     let symbols = Arc::new(SymbolDirectory::default());

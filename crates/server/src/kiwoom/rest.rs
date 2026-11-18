@@ -1,6 +1,7 @@
 //! 키움 조회 대기열(backend.md §4.2, §4.3). 서버 전체의 키움 REST 요청은 여기 한 곳에서 나간다.
 //!
 //! - 보내는 시각 사이를 260ms 넘게 띄운다. 토큰 발급, 다시 보내기, 연속조회 페이지도 같은 간격을 따른다.
+//! - 모의투자는 여기에 더해 같은 TR의 마지막 전송 뒤 1초를 기다린다. 기다리는 TR 뒤의 다른 TR이 먼저 나간다.
 //! - 토큰 발급이 먼저 나가고, 그다음 `Screen` > `Recovery` > `Background` 순서다.
 //! - 토큰은 보내는 순간에 읽는다(D16). 대기 중인 요청은 토큰을 쥐고 있지 않다.
 
@@ -18,11 +19,13 @@ use super::error::{self, Category, Failure, Note, Retry, Stop};
 use super::token_file::FileError;
 use super::transport::{HttpRequest, HttpResponse, Transport, TransportError};
 use super::wire::TokenResponse;
+use crate::api::KiwoomEnvironment;
 use crate::clock::Clock;
 use crate::config::Secret;
 use domain::KstTime;
 
 pub const SEND_SPACING: Duration = Duration::from_millis(260);
+const MOCK_SAME_TR_SPACING: Duration = Duration::from_secs(1);
 const RATE_LIMIT_PAUSE: Duration = Duration::from_secs(1);
 const MAX_RATE_LIMITED: u8 = 3;
 const SCREEN_RETRY_DELAYS: &[Duration] = &[Duration::from_millis(500)];
@@ -241,6 +244,7 @@ struct Queue {
     by_key: HashMap<DedupeKey, u64>,
     issue_waiters: Vec<oneshot::Sender<Result<TokenGen, KiwoomError>>>,
     last_send: Option<Instant>,
+    last_send_by_endpoint: HashMap<Endpoint, Instant>,
     pause_until: Option<Instant>,
     next_id: u64,
     stopped_paths: HashMap<Endpoint, Failure>,
@@ -251,6 +255,10 @@ struct Queue {
 impl Queue {
     fn has_market_work(&self) -> bool {
         self.lanes.iter().any(|l| !l.is_empty())
+    }
+
+    fn endpoint_ready_at(&self, endpoint: Endpoint, spacing: Duration) -> Option<Instant> {
+        self.last_send_by_endpoint.get(&endpoint).map(|sent| *sent + spacing)
     }
 
     fn requeue_front(&mut self, id: u64) {
@@ -307,6 +315,7 @@ struct Inner {
     auth: KiwoomAuth,
     clock: Clock,
     send_spacing: Duration,
+    environment: KiwoomEnvironment,
     queue: Mutex<Queue>,
     wake: Notify,
     path_stopped: Notify,
@@ -333,13 +342,25 @@ enum Step {
 impl KiwoomRest {
     /// 보내는 태스크를 하나 띄운다. tokio 런타임 안에서 부른다.
     pub fn new(transport: Arc<dyn Transport>, auth: KiwoomAuth, clock: Clock) -> Self {
-        Self::with_send_spacing(transport, auth, clock, SEND_SPACING)
+        Self::for_environment(transport, auth, clock, KiwoomEnvironment::Real)
+    }
+
+    pub fn for_environment(transport: Arc<dyn Transport>, auth: KiwoomAuth, clock: Clock, environment: KiwoomEnvironment) -> Self {
+        Self::build(transport, auth, clock, SEND_SPACING, environment)
     }
 
     pub fn with_send_spacing(transport: Arc<dyn Transport>, auth: KiwoomAuth, clock: Clock, send_spacing: Duration) -> Self {
-        let inner = Arc::new(Inner { transport, auth, clock, send_spacing, queue: Mutex::new(Queue::default()), wake: Notify::new(), path_stopped: Notify::new(), access: watch::channel(Access::Open).0 });
+        Self::build(transport, auth, clock, send_spacing, KiwoomEnvironment::Real)
+    }
+
+    pub(crate) fn build(transport: Arc<dyn Transport>, auth: KiwoomAuth, clock: Clock, send_spacing: Duration, environment: KiwoomEnvironment) -> Self {
+        let inner = Arc::new(Inner { transport, auth, clock, send_spacing, environment, queue: Mutex::new(Queue::default()), wake: Notify::new(), path_stopped: Notify::new(), access: watch::channel(Access::Open).0 });
         tokio::spawn(run(inner.clone()));
         KiwoomRest(inner)
+    }
+
+    pub fn environment(&self) -> KiwoomEnvironment {
+        self.0.environment
     }
 
     pub fn auth(&self) -> &KiwoomAuth {
@@ -588,13 +609,23 @@ impl Inner {
         if let Some(r) = ready.filter(|&r| r > now) {
             return Step::Wait(r);
         }
-        q.last_send = Some(now);
         if wants_issue {
+            if let Some(r) = self.endpoint_ready_at(&q, Endpoint::ISSUE).filter(|&r| r > now) {
+                return Step::Wait(r);
+            }
+            q.last_send = Some(now);
+            self.record_endpoint_send(&mut q, Endpoint::ISSUE, now);
             return Step::Issue;
         }
-        let Some(id) = q.lanes.iter_mut().find_map(VecDeque::pop_front) else {
-            return Step::Again;
+        let ready_job = q.lanes.iter().enumerate().find_map(|(lane, ids)| {
+            ids.iter().position(|id| self.endpoint_ready_at(&q, q.jobs[id].key.api_id).is_none_or(|r| r <= now)).map(|position| (lane, position))
+        });
+        let Some((lane, position)) = ready_job else {
+            let soonest = q.lanes.iter().flatten().filter_map(|id| self.endpoint_ready_at(&q, q.jobs[id].key.api_id)).min();
+            return soonest.map_or(Step::Again, Step::Wait);
         };
+        q.last_send = Some(now);
+        let id = q.lanes[lane].remove(position).expect("찾은 자리는 대기열에 있다");
         let Some((token, generation)) = self.auth.current(now_kst) else {
             q.requeue_front(id);
             return Step::Again;
@@ -612,6 +643,7 @@ impl Inner {
             tracing::info!(api_id = api_id.as_str(), "관문을 확인하는 요청 하나를 보냅니다");
             q.gate = Gate::Probing { probe: id, cause, misses };
         }
+        self.record_endpoint_send(&mut q, api_id, now);
         let job = q.jobs.get_mut(&id).expect("대기열의 id는 jobs에 있다");
         job.state = JobState::InFlight;
         job.sends += 1;
@@ -625,6 +657,19 @@ impl Inner {
             body: Secret::new(job.key.body.clone()),
         };
         Step::Send { id, req, generation, priority: job.priority }
+    }
+
+    fn endpoint_ready_at(&self, q: &Queue, endpoint: Endpoint) -> Option<Instant> {
+        match self.environment {
+            KiwoomEnvironment::Real => None,
+            KiwoomEnvironment::Mock => q.endpoint_ready_at(endpoint, MOCK_SAME_TR_SPACING),
+        }
+    }
+
+    fn record_endpoint_send(&self, q: &mut Queue, endpoint: Endpoint, now: Instant) {
+        if self.environment == KiwoomEnvironment::Mock {
+            q.last_send_by_endpoint.insert(endpoint, now);
+        }
     }
 
     async fn issue(&self) {
@@ -1061,6 +1106,111 @@ mod tests {
         assert_eq!(sent[0].api_id, ApiId::Au10001, "토큰 발급이 먼저 나간다");
         assert_eq!(sent.len(), 1 + 12 + 1 + 1);
         assert_at_most_4_per_second(&sent);
+    }
+
+    fn basic_info_ok() -> Result<HttpResponse, TransportError> {
+        let mut body: serde_json::Value = serde_json::from_str(include_str!("../../tests/fixtures/kiwoom/ka10001_005930_AL.json")).unwrap();
+        body["return_code"] = 0.into();
+        body["return_msg"] = "정상".into();
+        ok(body, None)
+    }
+
+    fn two_tr_transport(latency: Duration) -> Arc<FakeTransport> {
+        let tokens = token_counter();
+        Arc::new(FakeTransport::new(latency, move |s| {
+            tokens(s).unwrap_or_else(|| if s.api_id == ApiId::Ka10001 { basic_info_ok() } else { list_ok() })
+        }))
+    }
+
+    fn rest_in(fake: &Arc<FakeTransport>, environment: KiwoomEnvironment) -> KiwoomRest {
+        let clock = Clock::fake(kst(KstDate::new(2026, 11, 9).unwrap(), 9, 0, 0));
+        let auth = KiwoomAuth::new(Secret::new("k".into()), Secret::new("s".into()), None);
+        KiwoomRest::for_environment(Arc::new(fake.clone()), auth, clock, environment)
+    }
+
+    async fn basic_info(rest: &KiwoomRest, p: Priority) -> Result<(), KiwoomError> {
+        let samsung = domain::StockCode::parse("005930").unwrap();
+        rest.call(&crate::kiwoom::api::StockBasicInfo::new(samsung), None, p, MergeScope::default()).await.map(drop)
+    }
+
+    fn sent_order(fake: &FakeTransport) -> Vec<String> {
+        fake.market_sent().iter().map(|s| s.cont.clone().unwrap_or_else(|| s.api_id.as_str().to_owned())).collect()
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn mock_queue_spaces_the_same_tr_by_one_second() {
+        let fake = two_tr_transport(Duration::from_millis(10));
+        let rest = rest_in(&fake, KiwoomEnvironment::Mock);
+        rest.issue_token().await.unwrap();
+        let calls = (0..3).map(|i| call_k(&rest, i, Priority::Screen));
+        for r in futures::future::join_all(calls).await {
+            r.unwrap();
+        }
+        let sent = fake.market_sent();
+        assert_eq!(sent.len(), 3);
+        for w in sent.windows(2) {
+            assert!(w[1].at.duration_since(w[0].at) >= Duration::from_secs(1), "{:?}", w[1].at.duration_since(w[0].at));
+        }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn mock_queue_sends_other_trs_while_one_waits() {
+        let fake = two_tr_transport(Duration::from_millis(10));
+        let rest = rest_in(&fake, KiwoomEnvironment::Mock);
+        rest.issue_token().await.unwrap();
+        let (a, b, c, d) = tokio::join!(call_k(&rest, 0, Priority::Screen), call_k(&rest, 1, Priority::Screen), basic_info(&rest, Priority::Screen), async {
+            let samsung = domain::StockCode::parse("005930").unwrap();
+            rest.call(&crate::kiwoom::api::StockBasicInfo::new(samsung), Some(&cont(9)), Priority::Screen, MergeScope::default()).await.map(drop)
+        });
+        a.unwrap();
+        b.unwrap();
+        c.unwrap();
+        d.unwrap();
+        let sent = fake.market_sent();
+        let kinds: Vec<_> = sent.iter().map(|s| s.api_id).collect();
+        assert_eq!(kinds, [ApiId::Ka10099, ApiId::Ka10001, ApiId::Ka10099, ApiId::Ka10001].map(Endpoint::from));
+        assert_eq!(sent[1].at.duration_since(sent[0].at), SEND_SPACING, "기다리는 TR 뒤의 다른 TR은 전체 간격으로 먼저 나간다");
+        assert!(sent[2].at.duration_since(sent[0].at) >= Duration::from_secs(1));
+        assert!(sent[3].at.duration_since(sent[1].at) >= Duration::from_secs(1));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn mock_queue_keeps_order_priority() {
+        let fake = two_tr_transport(Duration::from_millis(10));
+        let rest = rest_in(&fake, KiwoomEnvironment::Mock);
+        rest.issue_token().await.unwrap();
+        let handles: Vec<_> = [(1, Priority::Background), (0, Priority::Order), (2, Priority::Order)]
+            .into_iter()
+            .map(|(i, p)| {
+                let rest = rest.clone();
+                tokio::spawn(async move { call_k(&rest, i, p).await.map(drop) })
+            })
+            .chain(std::iter::once({
+                let rest = rest.clone();
+                tokio::spawn(async move { basic_info(&rest, Priority::Screen).await })
+            }))
+            .collect();
+        for h in handles {
+            h.await.unwrap().unwrap();
+        }
+        let sent = fake.market_sent();
+        assert_eq!(sent_order(&fake), ["k0", "ka10001", "k2", "k1"]);
+        assert!(sent[2].at.duration_since(sent[0].at) >= Duration::from_secs(1));
+        assert!(sent[3].at.duration_since(sent[2].at) >= Duration::from_secs(1));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn real_queue_keeps_the_shared_spacing_only() {
+        let fake = two_tr_transport(Duration::from_millis(10));
+        let rest = rest_in(&fake, KiwoomEnvironment::Real);
+        rest.issue_token().await.unwrap();
+        for r in futures::future::join_all((0..3).map(|i| call_k(&rest, i, Priority::Screen))).await {
+            r.unwrap();
+        }
+        let sent = fake.market_sent();
+        for w in sent.windows(2) {
+            assert_eq!(w[1].at.duration_since(w[0].at), SEND_SPACING);
+        }
     }
 
     #[tokio::test(start_paused = true)]

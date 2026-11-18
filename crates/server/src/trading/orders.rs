@@ -8,7 +8,7 @@ use super::request::{BuyOrder, CancelOrder, LimitOrder, ModifyOrder, OrderAck, O
 use super::service::{OpenEntry, Trading, TradingError};
 use super::switch::SwitchRecord;
 use super::tick;
-use crate::api::{self, OrderCommandKind, OrderCommandState, OrderRejectReason, OrderSide};
+use crate::api::{self, KiwoomEnvironment, OrderCommandKind, OrderCommandState, OrderRejectReason, OrderSide};
 use crate::kiwoom::api::StockBasicInfo;
 use crate::kiwoom::error::{Category, Failure};
 use crate::kiwoom::rest::{Dispatch, KiwoomError, MergeScope, Page, Priority, SendOnce, Transmitted};
@@ -350,6 +350,9 @@ impl Trading {
         }
         match work {
             Work::Place { code, side, quantity, price, venue, confirmed } => {
+                if self.rest.environment() == KiwoomEnvironment::Mock && *venue != Venue::Krx {
+                    return Err(OrderRejectReason::MockKrxOnly.into());
+                }
                 let info = self.info_of(*code)?;
                 if *venue == Venue::Nxt && !info.nxt_enabled {
                     return Err(OrderRejectReason::NxtUnavailable.into());

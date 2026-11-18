@@ -8,9 +8,9 @@ use serde_json::{Value, json};
 use tower::ServiceExt;
 
 use super::journal::{BatchBegun, Begun, Prepared, PreparedBatch};
-use super::tests::{Fixture, HOST, WriteMode, enable, fixture, fixture_with, get, trading_sends};
+use super::tests::{Fixture, HOST, WriteMode, enable, fixture, fixture_in, fixture_with, get, trading_sends};
 use super::{SwitchStore, Trading};
-use crate::api::{OrderCommandKind, OrderCommandState};
+use crate::api::{KiwoomEnvironment, OrderCommandKind, OrderCommandState};
 use crate::kiwoom::api::{Endpoint, StockList};
 use crate::kiwoom::rest::{ContKey, MergeScope, Priority};
 use crate::kiwoom::stream::KiwoomStream;
@@ -224,6 +224,42 @@ async fn rejects_nxt_route_for_krx_only_symbol() {
     assert_eq!(ok["state"], "accepted");
     assert_eq!(writes(&f)[0].1["dmst_stex_tp"], "NXT");
     refused(&f, json!({"commandId": "cmd-nxt-00003", "code": "009999", "side": "buy", "quantity": 1, "price": 71_000}), "unknown_symbol").await;
+}
+
+async fn on_in(environment: KiwoomEnvironment) -> Fixture {
+    let f = fixture_in(Duration::ZERO, Duration::ZERO, environment).await;
+    assert_eq!(enable(&f.app, "01").await.0, StatusCode::OK);
+    f
+}
+
+fn venue_buy(id: &str, venue: &str) -> Value {
+    json!({"commandId": id, "code": "005930", "side": "buy", "quantity": 1, "price": 71_000, "venue": venue})
+}
+
+#[tokio::test]
+async fn mock_refuses_nxt_and_sor_orders_before_sending() {
+    let f = on_in(KiwoomEnvironment::Mock).await;
+    refused(&f, venue_buy("cmd-mock-nxt01", "nxt"), "mock_krx_only").await;
+    refused(&f, venue_buy("cmd-mock-sor01", "combined"), "mock_krx_only").await;
+    assert_eq!(writes(&f).len(), 0);
+}
+
+#[tokio::test]
+async fn mock_sends_krx_orders() {
+    let f = on_in(KiwoomEnvironment::Mock).await;
+    let (_, ok) = order(&f.app, PLACE, venue_buy("cmd-mock-krx01", "krx")).await;
+    assert_eq!(ok["state"], "accepted", "{ok}");
+    assert_eq!(writes(&f)[0].1["dmst_stex_tp"], "KRX");
+}
+
+#[tokio::test]
+async fn real_keeps_every_route() {
+    let f = on_in(KiwoomEnvironment::Real).await;
+    for (id, venue, exchange) in [("cmd-real-nxt01", "nxt", "NXT"), ("cmd-real-sor01", "combined", "SOR"), ("cmd-real-krx01", "krx", "KRX")] {
+        let (_, ok) = order(&f.app, PLACE, venue_buy(id, venue)).await;
+        assert_eq!(ok["state"], "accepted", "{venue}: {ok}");
+        assert_eq!(writes(&f).last().unwrap().1["dmst_stex_tp"], exchange);
+    }
 }
 
 #[tokio::test]
