@@ -1,4 +1,4 @@
-import { QueryClient } from "@tanstack/react-query";
+import { QueryClient, QueryObserver } from "@tanstack/react-query";
 import { expect, test } from "vitest";
 import { refetchFailedNames } from "./refetchNamesOnConnect";
 
@@ -29,4 +29,27 @@ test("오류 상태인 종목 이름 질의만 다시 받는다", async () => {
   expect(client.getQueryData(["symbols", "삼성"])).toEqual(["삼성전자"]);
   expect(loaded.state.calls).toBe(1);
   expect(other.state.calls).toBe(1);
+});
+
+test("연결 전에 나간 요청이 연결 뒤에 실패로 돌아와도 이름을 다시 받는다", async () => {
+  const client = new QueryClient();
+  let refuseBeforeConnect = (_: Error) => {};
+  let calls = 0;
+  const row = new QueryObserver(client, {
+    queryKey: ["symbol", "005930"],
+    retry: false,
+    queryFn: () => {
+      calls += 1;
+      if (calls > 1) return Promise.resolve("삼성전자");
+      return new Promise<string>((_, reject) => {
+        refuseBeforeConnect = reject;
+      });
+    },
+  });
+  const unsubscribe = row.subscribe(() => {});
+  const refetched = refetchFailedNames(client);
+  refuseBeforeConnect(new Error("not_connected"));
+  await refetched;
+  expect(row.getCurrentResult().data).toBe("삼성전자");
+  unsubscribe();
 });
