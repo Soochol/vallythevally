@@ -6,6 +6,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use serde::Serialize;
 
 use super::check::VerifyReport;
+use super::observation::{ObservationSummary, read_observation};
 use super::coverage::{CoverageInput, StockCoverage, build_coverage, read_journal, read_timelines};
 use super::{store_dir, temporary_store_dir};
 use crate::build::store::write_atomically;
@@ -55,6 +56,7 @@ pub struct CompleteFile {
     pub date: u32,
     pub verify: VerifySummary,
     pub plan: Option<PlanSummary>,
+    pub observation: ObservationSummary,
     pub stocks: Vec<StockCoverage>,
 }
 
@@ -88,6 +90,7 @@ pub fn build_complete(data_dir: &Path, date: u32, report: &VerifyReport) -> io::
         None
     };
     let journal = read_journal(data_dir, date)?;
+    let observation = read_observation(data_dir, date)?;
     let timelines = read_timelines(data_dir, date)?;
     let stocks = build_coverage(&CoverageInput { plan: plan.as_ref(), journal: &journal, timelines: &timelines, symbol_messages: &report.symbol_messages });
     Ok(CompleteFile {
@@ -103,6 +106,7 @@ pub fn build_complete(data_dir: &Path, date: u32, report: &VerifyReport) -> io::
             lines_unfinalized: report.lines.unfinalized.total,
         },
         plan: plan.as_ref().map(summarize_plan),
+        observation,
         stocks,
     })
 }

@@ -5,7 +5,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
-use domain::{KstTime, TimeOfDay};
+use domain::{KstDate, KstTime};
 use server::clock::Clock;
 use server::instance::LockError;
 use server::kiwoom::transport::Transport;
@@ -14,7 +14,7 @@ use tokio::time::{Instant, sleep_until};
 
 use super::api::{StatusApi, StatusSocket, serve};
 use super::handoff::{effective_plan, registrations_of};
-use super::journal::{Journal, JournalEvent, journal_path, kst_stamp};
+use super::journal::{Journal, JournalEvent, has_event, journal_path, kst_stamp};
 use super::process::{ChildMessage, ChildProcess, Launcher};
 use super::settings::{Settings, SocketSetting};
 use super::status::{Alert, AlertKind, DaemonStatus, DayPhase, KeyState, KeyStatus, RestProgress, Today};
@@ -102,6 +102,13 @@ impl Control {
     pub fn enter_phase(&self, phase: DayPhase) {
         let _ = self.commands.send(ControlCommand::EnterPhase(phase));
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum MarketOpenWatch {
+    Off,
+    Waiting(Instant),
+    Settled,
 }
 
 enum Inbound {
@@ -235,6 +242,7 @@ pub struct Supervisor {
     alerts: Vec<Alert>,
     handed: Option<usize>,
     housekeeping_at: Instant,
+    market_open: MarketOpenWatch,
 }
 
 fn check_inputs(inputs: &Inputs) -> Result<(), StartError> {
@@ -330,6 +338,7 @@ impl Supervisor {
             phase: DayPhase::default(),
             alerts,
             handed: None,
+            market_open: MarketOpenWatch::Off,
         })
     }
 
@@ -357,6 +366,12 @@ impl Supervisor {
     }
 
     pub async fn run(mut self, mut shutdown: watch::Receiver<bool>) {
+        if self.after_end() {
+            tracing::warn!(date = self.date, "마감 시각이 지난 뒤라 자식도 토큰도 띄우지 않고 끝냅니다");
+            self.publish_status();
+            return;
+        }
+        self.arm_market_open();
         for index in 0..self.keys.len() {
             self.acquire_token(index);
         }
@@ -391,11 +406,43 @@ impl Supervisor {
         }
     }
 
+    fn end_time(&self) -> Option<KstTime> {
+        let at = self.settings.end_at?;
+        let day = KstDate::parse_yyyymmdd(&self.date.to_string())?;
+        Some(KstTime::from_kst_civil(day, at))
+    }
+
+    fn after_end(&self) -> bool {
+        self.end_time().is_some_and(|end| self.clock.now().unix() >= end.unix())
+    }
+
     fn end_instant(&self) -> Option<Instant> {
-        let at: TimeOfDay = self.settings.end_at?;
+        let end = self.end_time()?;
+        Some(Instant::now() + Duration::from_secs((end.unix() - self.clock.now().unix()).max(0) as u64))
+    }
+
+    fn arm_market_open(&mut self) {
+        let Some(check) = self.settings.market_open_check else { return };
         let now = self.clock.now();
-        let end = KstTime::from_kst_civil(now.kst_date(), at);
-        Some(Instant::now() + Duration::from_secs((end.unix() - now.unix()).max(0) as u64))
+        let settled_before = ["market_open_seen", "market_open_missing"].iter().any(|event| has_event(&journal_path(&self.data_dir, self.date), event));
+        if settled_before {
+            self.market_open = MarketOpenWatch::Settled;
+        } else if now.unix() >= check.opens_at.unix() {
+            let reason = format!("개장({})이 지난 뒤에 시작해 0s 대조를 하지 않습니다", kst_stamp(check.opens_at));
+            self.record(JournalEvent::MarketOpenNotChecked { reason });
+            self.market_open = MarketOpenWatch::Settled;
+        } else {
+            let wait = (check.deadline.unix() - now.unix()).max(0) as u64;
+            self.market_open = MarketOpenWatch::Waiting(Instant::now() + Duration::from_secs(wait));
+        }
+    }
+
+    fn check_market_open_deadline(&mut self, now: Instant) {
+        let (MarketOpenWatch::Waiting(at), Some(check)) = (self.market_open, self.settings.market_open_check) else { return };
+        if at <= now {
+            self.market_open = MarketOpenWatch::Settled;
+            self.record(JournalEvent::MarketOpenMissing { deadline: kst_stamp(check.deadline) });
+        }
     }
 
     fn publish_status(&self) {
@@ -424,6 +471,9 @@ impl Supervisor {
 
     fn next_deadline(&self) -> Instant {
         let mut deadlines = vec![self.housekeeping_at];
+        if let MarketOpenWatch::Waiting(at) = self.market_open {
+            deadlines.push(at);
+        }
         for key in &self.keys {
             match &key.phase {
                 Phase::Backoff { until } => deadlines.push(*until),
@@ -442,6 +492,7 @@ impl Supervisor {
 
     fn on_timers(&mut self) {
         let now = Instant::now();
+        self.check_market_open_deadline(now);
         for index in 0..self.keys.len() {
             enum Due {
                 Launch,
@@ -779,7 +830,13 @@ impl Supervisor {
                     });
                 }
             }
-            Event::Unregistered { .. } | Event::MarketOpen { .. } => {}
+            Event::Unregistered { .. } => {}
+            Event::MarketOpen { .. } => {
+                if let (MarketOpenWatch::Waiting(_), Some(check)) = (self.market_open, self.settings.market_open_check) {
+                    self.market_open = MarketOpenWatch::Settled;
+                    self.record(JournalEvent::MarketOpenSeen { key, deadline: kst_stamp(check.deadline) });
+                }
+            }
             Event::Live => {
                 if let Phase::Running(running) = &mut self.keys[index].phase {
                     running.receiving = true;
@@ -864,6 +921,7 @@ fn alert_of(event: &JournalEvent) -> Option<(AlertKind, String)> {
         JournalEvent::HandoffSkipped { key, reason } => Some((AlertKind::HandoffSkipped, format!("{key}의 몫을 인계하지 않았습니다: {reason}"))),
         JournalEvent::KeyStopped { key, reason } => Some((AlertKind::KeyStopped, format!("{key}를 멈췄습니다: {reason}"))),
         JournalEvent::RegisterFailed { key, id, part, parts, reason, .. } => Some((AlertKind::RegisterFailed, format!("{key}의 등록 {id} {part}/{parts}번이 실패했습니다: {reason}"))),
+        JournalEvent::MarketOpenMissing { deadline } => Some((AlertKind::MarketOpenMissing, format!("관측일인데 {deadline}까지 0s가 오지 않았습니다"))),
         _ => None,
     }
 }
