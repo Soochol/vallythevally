@@ -4,20 +4,20 @@ import type { Drawing } from "../src/api/generated/Drawing";
 
 export interface Mirror { id: string; tool: string; selected: boolean; points: ({ x: number; y: number } | null)[]; handles: { x: number; y: number }[]; texts: string[] }
 
-export async function mirror(page: Page): Promise<Mirror[]> {
-  const json = await chartOf(cell(page)).locator(".drawing-mirror").getAttribute("data-drawings");
+export async function mirror(page: Page, n = 1): Promise<Mirror[]> {
+  const json = await chartOf(cell(page, n)).locator(".drawing-mirror").getAttribute("data-drawings");
   return JSON.parse(json ?? "[]");
 }
 
-export async function settledMirror(page: Page): Promise<Mirror[]> {
+export async function settledMirror(page: Page, n = 1): Promise<Mirror[]> {
   let last = "";
   await expect.poll(async () => {
-    const now = JSON.stringify(await mirror(page));
+    const now = JSON.stringify(await mirror(page, n));
     const same = now === last;
     last = now;
     return same;
   }).toBe(true);
-  return mirror(page);
+  return mirror(page, n);
 }
 
 export const drawings = async (scenario: Scenario): Promise<Drawing[]> => scenario.documents.drawings("IDX:001");
@@ -73,8 +73,8 @@ export async function pickTool(page: Page, group: string, label: string) {
   await expect(bar.getByRole("button", { name: label, exact: true })).toHaveAttribute("aria-pressed", "true");
 }
 
-export async function chartPoint(page: Page, fx: number, fy: number): Promise<{ x: number; y: number }> {
-  const r = (await chartOf(cell(page)).boundingBox())!;
+export async function chartPoint(page: Page, fx: number, fy: number, n = 1): Promise<{ x: number; y: number }> {
+  const r = (await chartOf(cell(page, n)).boundingBox())!;
   return { x: r.x + r.width * fx, y: r.y + r.height * fy };
 }
 

@@ -15,7 +15,7 @@ import { INPUT, StyleFields } from "./StyleFields";
 import { calendarTime, parseCalendarTime, parseSeconds } from "./timeInput";
 import type { WindowId } from "../../layout/kinds";
 
-const close = (cellId: WindowId) => { useDrawingSession.setState({ editor: null }); surfaceFor(cellId)?.focus(); };
+const close = (cellId: WindowId) => { useDrawingSession.getState().patchCell(cellId, { editor: null }); surfaceFor(cellId)?.focus(); };
 function confirm(cellId: WindowId, editor: DrawingEditor) {
   const surface = surfaceFor(cellId); if (!surface) return;
   const current = surface.sync.drawings(editor.original.symbol).find((d) => d.id === editor.original.id) ?? null;
@@ -24,22 +24,22 @@ function confirm(cellId: WindowId, editor: DrawingEditor) {
   const ui = useUiStore.getState(); ui.setDrawingPrefs({ lastStyle: { ...ui.prefs.drawing.lastStyle, [editor.draft.tool]: reusableStyle(editor.draft.style) } });
   close(cellId);
 }
-const draft = (patch: Partial<DrawingBody>) => useDrawingSession.setState((s) => s.editor ? { editor: { ...s.editor, draft: { ...s.editor.draft, ...patch } } } : s);
+const draft = (cellId: WindowId, patch: Partial<DrawingBody>) => useDrawingSession.getState().updateEditor(cellId, (editor) => ({ ...editor, draft: { ...editor.draft, ...patch } }));
 const meaningful = (text: string | null) => text?.trim() ? text : null;
 function settlePoint(cellId: WindowId, index: number) {
   const ctx = surfaceFor(cellId)?.frame().ctx;
-  useDrawingSession.setState((s) => {
-    const editor = s.editor; const typed = editor?.draft.points[index]; const before = editor?.original.points[index];
-    const setPoint = editor ? toolOf(editor.draft.tool)?.setPoint : undefined;
-    if (!editor || !typed || !before || !setPoint || !ctx) return s;
+  useDrawingSession.getState().updateEditor(cellId, (editor) => {
+    const typed = editor.draft.points[index]; const before = editor.original.points[index];
+    const setPoint = toolOf(editor.draft.tool)?.setPoint;
+    if (!typed || !before || !setPoint || !ctx) return editor;
     const points = editor.draft.points.map((p, i) => i === index ? before : p);
-    return { editor: { ...editor, draft: { ...editor.draft, points: setPoint(points, index, typed, ctx) } } };
+    return { ...editor, draft: { ...editor.draft, points: setPoint(points, index, typed, ctx) } };
   });
 }
 export function DrawingDetails({ cellId, editor, anchor }: { cellId: WindowId; editor: DrawingEditor; anchor: RefObject<HTMLElement | null> }) {
   const tool = toolOf(editor.draft.tool);
   if (!tool) return null;
-  const fields = (kind: "inputs" | "style" | "text") => <StyleFields fields={tool.settings[kind] ?? []} style={editor.draft.style} text={editor.draft.text} change={(style) => draft({ style })} setText={(text) => draft({ text: text || null })} />;
+  const fields = (kind: "inputs" | "style" | "text") => <StyleFields fields={tool.settings[kind] ?? []} style={editor.draft.style} text={editor.draft.text} change={(style) => draft(cellId, { style })} setText={(text) => draft(cellId, { text: text || null })} />;
   return <Popover data-chart-control anchor={anchor} follow placement="bottom" onClose={() => close(cellId)} className="draw-details" role="dialog" aria-label={`${tool.label} 세부 설정`}>
       <div className="draw-dialog-head"><strong>{tool.label}</strong><button type="button" className="icon-btn" aria-label="세부 설정 닫기" onClick={() => close(cellId)}><CloseIcon /></button></div>
       <div className="draw-details-body">
@@ -52,7 +52,7 @@ export function DrawingDetails({ cellId, editor, anchor }: { cellId: WindowId; e
           const value = role?.uses === "price" ? null : calendarTime(p.t);
           const name = role?.label ?? `점 ${i + 1}`;
           const fieldName = (field: string) => name === field ? field : `${name} ${field}`;
-          const update = (patch: Partial<typeof p>) => draft({ points: editor.draft.points.map((point, j) => i === j ? { ...point, ...patch } : point) });
+          const update = (patch: Partial<typeof p>) => draft(cellId, { points: editor.draft.points.map((point, j) => i === j ? { ...point, ...patch } : point) });
           return <fieldset className="draw-coordinate" key={i}><legend>{name}</legend>
             {role?.uses !== "price" && (value === null
               ? <label>시각 (Unix 초)<input aria-label={fieldName("시각 (Unix 초)")} className={INPUT} type="text" inputMode="numeric" value={p.t} onBlur={() => settlePoint(cellId, i)} onChange={(e) => { const t = parseSeconds(e.target.value); if (t !== null) update({ t }); }} /></label>
@@ -61,13 +61,13 @@ export function DrawingDetails({ cellId, editor, anchor }: { cellId: WindowId; e
           </fieldset>;
         })}
         </details>
-        <details><summary>보이기</summary><label className="draw-visibility-all"><input type="checkbox" checked={editor.draft.periods === null} onChange={(e) => draft({ periods: e.target.checked ? null : [...PERIODS] })} /> 모든 봉 주기</label>
+        <details><summary>보이기</summary><label className="draw-visibility-all"><input type="checkbox" checked={editor.draft.periods === null} onChange={(e) => draft(cellId, { periods: e.target.checked ? null : [...PERIODS] })} /> 모든 봉 주기</label>
           <div className="draw-periods">{PERIODS.map((p: Period) => <label key={p}><input type="checkbox" checked={editor.draft.periods === null || editor.draft.periods.includes(p)} onChange={(e) => {
             const current = editor.draft.periods ?? [...PERIODS]; const periods = e.target.checked ? [...current, p] : current.filter((v) => v !== p);
-            if (periods.length) draft({ periods });
+            if (periods.length) draft(cellId, { periods });
           }} />{PERIOD_LABEL[p]}</label>)}</div></details>
       </div>
-      <div className="draw-settings-foot"><button className="tb-btn" type="button" onClick={() => draft({ style: defaultObjectStyle(editor.draft) })}>기본 스타일로</button><span />
+      <div className="draw-settings-foot"><button className="tb-btn" type="button" onClick={() => draft(cellId, { style: defaultObjectStyle(editor.draft) })}>기본 스타일로</button><span />
         <button className="tb-btn" type="button" onClick={() => close(cellId)}>취소</button><button className="btn-primary" type="button" onClick={() => confirm(cellId, { ...editor, draft: { ...editor.draft, text: meaningful(editor.draft.text) } })}>확인</button></div>
   </Popover>;
 }
@@ -80,10 +80,10 @@ export function DrawingTextEditor({ cellId, editor }: { cellId: WindowId; editor
   const submit = () => typed.draft.text === meaningful(editor.original.text) ? close(cellId) : confirm(cellId, typed);
   useEffect(() => { ref.current?.focus(); ref.current?.select(); }, []);
   return <div data-chart-control ref={anchor} style={{ position: "absolute", left: Math.max(8, Math.min(at?.x ?? 80, (surface?.frame().pane.width ?? 500) - 300)), top: Math.max(8, Math.min(at?.y ?? 80, (surface?.frame().pane.height ?? 400) - 160)) }}><Popover anchor={anchor} onClose={(reason) => reason === "outside" ? submit() : close(cellId)} className="draw-text-editor" style={{ width: 300 }}>
-    <textarea ref={ref} className={INPUT} aria-label="드로잉 글자" rows={3} value={editor.draft.text ?? ""} onChange={(e) => draft({ text: e.target.value })} onKeyDown={(e) => {
+    <textarea ref={ref} className={INPUT} aria-label="드로잉 글자" rows={3} value={editor.draft.text ?? ""} onChange={(e) => draft(cellId, { text: e.target.value })} onKeyDown={(e) => {
       if (e.nativeEvent.isComposing || e.keyCode === 229) return;
       if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); submit(); }
       if (e.key === "Escape") { e.preventDefault(); close(cellId); }
-    }} /><div><span>Enter 확인 · Shift+Enter 줄바꿈</span><button className="tb-btn" onClick={() => useDrawingSession.setState({ editor: { ...typed, kind: "settings" } })}>세부 설정</button><button className="tb-btn" onClick={() => close(cellId)}>취소</button><button className="btn-primary" onClick={submit}>확인</button></div>
+    }} /><div><span>Enter 확인 · Shift+Enter 줄바꿈</span><button className="tb-btn" onClick={() => useDrawingSession.getState().patchCell(cellId, { editor: { ...typed, kind: "settings" } })}>세부 설정</button><button className="tb-btn" onClick={() => close(cellId)}>취소</button><button className="btn-primary" onClick={submit}>확인</button></div>
   </Popover></div>;
 }
