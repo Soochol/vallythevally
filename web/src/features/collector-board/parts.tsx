@@ -11,7 +11,7 @@ export function ToneDot({ tone }: { tone: Tone }) {
 }
 
 export function Status({ tone, children }: { tone: Tone; children: ReactNode }) {
-  return <span className={`inline-flex items-center gap-1.5 ${TEXT[tone]}`}><ToneDot tone={tone} />{children}</span>;
+  return <span className={`inline-flex max-w-full items-center gap-1.5 ${TEXT[tone]}`}><ToneDot tone={tone} /><span className="min-w-0 break-words [overflow-wrap:anywhere]">{children}</span></span>;
 }
 
 export function Section({ id, title, note, children }: { id: string; title: string; note?: ReactNode; children: ReactNode }) {
@@ -19,7 +19,7 @@ export function Section({ id, title, note, children }: { id: string; title: stri
     <section aria-labelledby={id} className="flex min-w-0 flex-col gap-3 rounded-m border border-line bg-surface p-4">
       <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
         <h3 id={id} className="text-m font-semibold">{title}</h3>
-        {note && <span className="text-s text-text-2">{note}</span>}
+        {note && <span className="min-w-0 break-words text-s text-text-2 [overflow-wrap:anywhere]">{note}</span>}
       </div>
       {children}
     </section>

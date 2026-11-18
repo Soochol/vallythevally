@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { alertKindLabel, bannerOf, BANNERS, bytesText, coverageRatio, daemonAlertText, dateText, keyStateOf, messageRateText, phaseLabel, receivedAtText, restText } from "./labels";
+import { alertKindLabel, bannerOf, BANNERS, bytesText, coverageRatio, daemonAlertText, dateText, dayStateOf, keyRoleLabel, keyStateOf, verdictOf, messageRateText, phaseLabel, receivedAtText, restText } from "./labels";
 
 describe("수집 현황판 표시 규칙", () => {
   test("REST 작업이 없으면 없음이고 있으면 끝난 수 / 계획한 수다", () => {
@@ -37,6 +37,18 @@ describe("수집 현황판 표시 규칙", () => {
     expect(alertKindLabel("brand_new")).toBe("brand_new");
     expect(alertKindLabel("key_stopped")).toBe("키 멈춤");
     expect(keyStateOf("brand_new" as never)).toEqual({ label: "brand_new", tone: "idle" });
+  });
+
+  test("Object.prototype의 이름인 모르는 값도 받은 값 그대로 보인다", () => {
+    for (const name of ["toString", "constructor", "__proto__", "hasOwnProperty", "valueOf"]) {
+      expect(bannerOf(name as never)).toEqual({ tone: "idle", title: name, alert: false });
+      expect(phaseLabel(name as never)).toBe(name);
+      expect(alertKindLabel(name)).toBe(name);
+      expect(keyStateOf(name as never)).toEqual({ label: name, tone: "idle" });
+      expect(dayStateOf(name as never)).toEqual({ label: name, tone: "idle" });
+      expect(keyRoleLabel(name as never)).toBe(name);
+      expect(verdictOf(name as never)).toEqual({ label: name, tone: "idle" });
+    }
   });
 
   test("날짜·시각·크기·커버리지 비율의 표기", () => {
