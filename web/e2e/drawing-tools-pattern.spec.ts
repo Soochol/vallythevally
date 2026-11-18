@@ -1,5 +1,5 @@
 import type { Page } from "@playwright/test";
-import { cell, chartOf, expect, test } from "./harness";
+import { cell, chartOf, expect, test, pollSaved } from "./harness";
 import { chartPoint, drawings, mirror, open, pickTool, expandDock } from "./drawing-probe";
 
 type At = readonly [number, number];
@@ -41,7 +41,7 @@ test("패턴 도구: 네 도구를 골라 점을 다 찍으면 저장되고, 머
     await clickAt(page, pattern.spots.slice(0, -1));
     expect(await drawings(scenario), pattern.label).toHaveLength(index);
     await clickAt(page, pattern.spots.slice(-1));
-    await expect.poll(async () => (await drawings(scenario)).length, { message: pattern.label }).toBe(index + 1);
+    await pollSaved(async () => (await drawings(scenario)).length, { message: pattern.label }).toBe(index + 1);
     const saved = (await drawings(scenario))[index]!;
     expect(saved.tool, pattern.label).toBe(pattern.tool);
     expect(saved.points, pattern.label).toHaveLength(pattern.spots.length);
@@ -55,7 +55,7 @@ test("패턴 도구: 네 도구를 골라 점을 다 찍으면 저장되고, 머
   await page.mouse.down();
   await page.mouse.move(r.x + head.x + 10, r.y + head.y - 50, { steps: 10 });
   await page.mouse.up();
-  await expect.poll(async () => (await drawings(scenario))[3]!.points[3]).not.toEqual(placed.points[3]);
+  await pollSaved(async () => (await drawings(scenario))[3]!.points[3]).not.toEqual(placed.points[3]);
   const moved = (await drawings(scenario))[3]!.points;
   expect(moved[3]!.price).toBeGreaterThan(placed.points[3]!.price);
   expect([...moved.slice(0, 3), ...moved.slice(4)]).toEqual([...placed.points.slice(0, 3), ...placed.points.slice(4)]);

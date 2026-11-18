@@ -1,6 +1,6 @@
 import type { Page } from "@playwright/test";
 import type { Quote } from "../src/api/generated/Quote";
-import { type Scenario, cell, chartOf, expect, test } from "./harness";
+import { type Scenario, cell, chartOf, expect, test, pollSaved } from "./harness";
 
 test.use({ clockStart: "20261109100000" });
 const panel = (page: Page) => page.getByRole("complementary", { name: "관심종목" });
@@ -26,7 +26,7 @@ test("실시간 시세와 봉 응답은 관심종목 줄과 차트를 바꾸고 
   const chart = chartOf(cell(page));
   const button = row(page, "005930").locator("[data-main]");
   await expect(button).toHaveAccessibleName("삼성전자 50,000 −1.96%");
-  await expect.poll(() => scenario.live.subscriptions().some(value => value.symbol === "005930")).toBe(true);
+  await pollSaved(() => scenario.live.subscriptions().some(value => value.symbol === "005930")).toBe(true);
   scenario.live.emit({ type: "quotes", venue: "combined", quotes: [quote(51_500, 500, 0.98)] });
   scenario.live.update("005930", { c: 51_500 });
   await expect(chart).toHaveAttribute("data-last-close", "51500");
@@ -70,7 +70,7 @@ test("여러 그룹의 같은 종목은 한 번만 구독하고 모든 행에 �
   const buttons = row(page, "005930").locator("[data-main]");
   await expect(buttons).toHaveCount(2);
   await expect(buttons.first()).toHaveAccessibleName("삼성전자 50,000 −1.96%");
-  await expect.poll(() => scenario.live.messages.filter((frame) => frame.type === "watch").map((frame) => frame.symbols)).toEqual([["005930"]]);
+  await pollSaved(() => scenario.live.messages.filter((frame) => frame.type === "watch").map((frame) => frame.symbols)).toEqual([["005930"]]);
   scenario.live.emit({ type: "quotes", venue: "combined", quotes: [quote(51_500, 500, 0.98)] });
   await expect(buttons.first()).toHaveAccessibleName("삼성전자 51,500 +0.98%");
   await expect(buttons.last()).toHaveAccessibleName("삼성전자 51,500 +0.98%");

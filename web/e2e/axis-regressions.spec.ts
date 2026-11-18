@@ -2,7 +2,7 @@ import type { Page } from "@playwright/test";
 import { installAxisProbe } from "./axis-probe";
 import { chartDisplayOptions, seedChartDisplay } from "./chart-display-fixture";
 import { installChartProbe } from "./chart-probe";
-import { type Scenario, cell, chartOf, expect, test } from "./harness";
+import { type Scenario, cell, chartOf, expect, test, pollSaved } from "./harness";
 import { selectOption } from "./select-option";
 
 type Axes = ReturnType<Window["axisTexts"]>;
@@ -119,7 +119,7 @@ test.describe("실시간 눈금 캐시", () => {
     await page.addInitScript(installAxisProbe);
     await page.goto("/?symbol=005930");
     await expect(cell(page)).toHaveAttribute("aria-busy", "false");
-    await expect.poll(async () => scenario.live.subscriptions().map(value => value.symbol)).toContain("005930");
+    await pollSaved(async () => scenario.live.subscriptions().map(value => value.symbol)).toContain("005930");
     await assertRendered(page);
     const volume = () => page.evaluate(() => {
       const last = window.chartProbe.chart.panes()[1]!.getSeries()[0]!.data().at(-1);

@@ -1,7 +1,7 @@
 import type { Locator, Page } from "@playwright/test";
 import type { TradingExecution } from "../src/api/generated/TradingExecution";
 import type { TradingHolding } from "../src/api/generated/TradingHolding";
-import { type Scenario, DEFAULT_LAYOUT_ID, expect, test } from "./harness";
+import { type Scenario, DEFAULT_LAYOUT_ID, expect, pollSaved, test } from "./harness";
 import { ACCOUNT, BASE, CODE, cellAt, center, chipAt, dragChip, openOrder, openOrderWindow, ordersOn, tradingApi, win, writesTo } from "./order-window";
 
 const HOLDING: TradingHolding = { code: CODE, name: "삼성전자", quantity: 120, sellableQuantity: 100, averagePrice: 70_040, currentPrice: BASE, evaluationProfit: -4_800, profitRateCenti: -57 };
@@ -29,7 +29,7 @@ test("미체결 패널이 모든 종목의 목록을 보이고 개별 취소 요
   await expect(rows).toHaveCount(2);
   await expect(rows.nth(1)).toContainText("SK하이닉스");
   await rows.first().getByRole("button", { name: "취소" }).click();
-  await expect.poll(() => writesTo(api, "cancel")).toHaveLength(1);
+  await pollSaved(() => writesTo(api, "cancel")).toHaveLength(1);
   expect(writesTo(api, "cancel")[0]!.body).toMatchObject({ orderNo: "0000001" });
   expect(writesTo(api, "cancel")[0]!.header).toBe("1");
 });
@@ -114,7 +114,7 @@ test("전체 호가에서 스크롤한 자리의 칸을 더블클릭하면 그 �
   const target = cellAt(page, "buy", 67_000);
   await expect(target).toBeVisible();
   await target.dblclick();
-  await expect.poll(() => writesTo(api, "place")).toHaveLength(1);
+  await pollSaved(() => writesTo(api, "place")).toHaveLength(1);
   expect(writesTo(api, "place")[0]!.body).toMatchObject({ code: CODE, side: "buy", price: 67_000, quantity: 10 });
 });
 
@@ -158,7 +158,7 @@ test("칩을 끄는 동안 체결이 와서 현재가가 바뀌어도 행의 가
   await expect(page.locator(".mw-lr[data-current]")).toContainText("70,300");
   expect(await prices()).toEqual(before);
   await page.mouse.up();
-  await expect.poll(() => writesTo(api, "modify")).toHaveLength(1);
+  await pollSaved(() => writesTo(api, "modify")).toHaveLength(1);
   expect(writesTo(api, "modify")[0]!.body).toMatchObject({ orderNo: "0000001", price: 69_800 });
   await expect(ladderRows(page).locator(".mw-px-num").first()).toHaveText("71,300");
 });
@@ -252,7 +252,7 @@ test("설정 ⚙의 값이 창 설정으로 저장되고 새로고침해도 유�
   await expect(page.getByRole("group", { name: "수량 프리셋" }).getByRole("button").nth(1)).toHaveText("75");
   await expect(page.getByTestId("order-ladder")).not.toHaveAttribute("data-divider", "");
   await expect(page.getByTestId("ladder-mark")).toHaveCount(0);
-  await expect.poll(() => scenario.documents.uiState()["orderSettings"]).toMatchObject({ sharePresets: [10, 75, 100, 500], amountPresets: [100, 500, 1000, 5000], averageDot: false, divider: false, rate: true });
+  await pollSaved(() => scenario.documents.uiState()["orderSettings"]).toMatchObject({ sharePresets: [10, 75, 100, 500], amountPresets: [100, 500, 1000, 5000], averageDot: false, divider: false, rate: true });
 
   await page.reload();
   await expect(win(page)).toBeVisible();
@@ -431,7 +431,7 @@ test("교차 호가로 위 오른쪽 칸에 매수 잔량이 있으면 그 행�
   tradingApi(scenario);
   await openOrderWindow(page, scenario);
   let sub = "";
-  await expect.poll(() => {
+  await pollSaved(() => {
     const message = scenario.live.messages.find((m) => m.type === "subscribe_feed" && m.kind === "book" && m.symbol === CODE);
     sub = message?.type === "subscribe_feed" ? message.sub : "";
     return sub;

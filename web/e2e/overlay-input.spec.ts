@@ -2,7 +2,7 @@ import { FinancialFixture } from "./financial-update-helpers";
 import type { Page } from "@playwright/test";
 import type { Drawing } from "../src/api/generated/Drawing";
 import type { Layout } from "../src/api/generated/Layout";
-import { cell, DEFAULT_LAYOUT_ID, expect, test, type Scenario, withFirstChart } from "./harness";
+import { cell, DEFAULT_LAYOUT_ID, expect, test, type Scenario, withFirstChart, pollSaved } from "./harness";
 import { openScreener, panel } from "./screener-page";
 import { addCondition, renameScreen, sentenceEditor } from "./sentence-editor";
 import { selectOption } from "./select-option";
@@ -21,7 +21,7 @@ async function horizontalLine(page: Page, scenario: Scenario) {
   if (!bounds) throw new Error("차트 영역이 없습니다");
   await cell(page).focus(); await page.keyboard.press("H");
   await page.mouse.click(bounds.x + bounds.width * 0.7, bounds.y + bounds.height * 0.3);
-  await expect.poll(async () => (await savedDrawings(scenario)).length).toBe(1);
+  await pollSaved(async () => (await savedDrawings(scenario)).length).toBe(1);
 }
 
 test("차트 안 굵기 메뉴의 방향키와 Esc는 드로잉 좌표·선택을 바꾸지 않는다", async ({ page, scenario }) => {
@@ -34,7 +34,7 @@ test("차트 안 굵기 메뉴의 방향키와 Esc는 드로잉 좌표·선택�
     const current = Number(await width.getAttribute("data-value"));
     await page.keyboard.press("ArrowDown");
     await expect(menu.getByRole("menuitemradio", { name: `${current % 5 + 1}px`, exact: true })).toBeFocused();
-    await expect.poll(async () => (await savedDrawings(scenario))[0]?.points).toEqual(original.points);
+    await pollSaved(async () => (await savedDrawings(scenario))[0]?.points).toEqual(original.points);
     const period = await cell(page).getAttribute("aria-label");
     await page.keyboard.press("Digit5");
     await expect(menu.getByRole("menuitemradio", { name: "5px", exact: true })).toBeFocused();
@@ -107,22 +107,22 @@ for (const source of ["선택 막대", "개체 메뉴", "차트 메뉴"] as cons
       await page.getByRole("menu", { name: "드로잉 메뉴", exact: true }).getByRole("menuitem", { name: "이 종목 드로잉 모두 지우기…", exact: true }).click();
     }
     await expect.poll(() => visibleDrawings(page)).toBe(0);
-    await expect.poll(async () => (await savedDrawings(scenario)).length).toBe(0);
+    await pollSaved(async () => (await savedDrawings(scenario)).length).toBe(0);
     const undo = page.getByRole("status").filter({ hasText: /드로잉.*지웠습니다/ }).getByRole("button", { name: "되돌리기", exact: true });
     await expect(undo).toBeEnabled();
     await cell(page).focus(); await page.keyboard.press("Control+z");
     await expect.poll(() => visibleDrawings(page)).toBe(1);
-    await expect.poll(async () => (await savedDrawings(scenario)).map((d) => ({ id: d.id, points: d.points }))).toEqual([{ id: original.id, points: original.points }]);
+    await pollSaved(async () => (await savedDrawings(scenario)).map((d) => ({ id: d.id, points: d.points }))).toEqual([{ id: original.id, points: original.points }]);
     await expect(undo).toBeDisabled(); await undo.dispatchEvent("click");
     await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
     await expect.poll(() => visibleDrawings(page)).toBe(1);
-    await expect.poll(async () => (await savedDrawings(scenario)).map((d) => ({ id: d.id, points: d.points }))).toEqual([{ id: original.id, points: original.points }]);
+    await pollSaved(async () => (await savedDrawings(scenario)).map((d) => ({ id: d.id, points: d.points }))).toEqual([{ id: original.id, points: original.points }]);
     await cell(page).focus(); await page.keyboard.press("Control+Shift+z");
     await expect.poll(() => visibleDrawings(page)).toBe(0);
-    await expect.poll(async () => (await savedDrawings(scenario)).length).toBe(0);
+    await pollSaved(async () => (await savedDrawings(scenario)).length).toBe(0);
     await expect(undo).toBeDisabled(); await undo.dispatchEvent("click");
     await expect.poll(() => visibleDrawings(page)).toBe(0);
-    await expect.poll(async () => (await savedDrawings(scenario)).length).toBe(0);
+    await pollSaved(async () => (await savedDrawings(scenario)).length).toBe(0);
   });
 }
 

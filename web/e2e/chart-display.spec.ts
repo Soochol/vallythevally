@@ -3,7 +3,7 @@ import path from "node:path";
 import { chartDisplayBars, chartDisplayOptions, seedChartDisplay } from "./chart-display-fixture";
 import { installAxisProbe } from "./axis-probe";
 import { installChartProbe } from "./chart-probe";
-import { cell, chartOf, expect } from "./harness";
+import { cell, chartOf, expect, pollSaved } from "./harness";
 import { financialTest as test } from "./financial-update-helpers";
 
 const SCREENS = path.resolve(import.meta.dirname, "../../target/ux-screens");
@@ -35,7 +35,7 @@ test("휴대폰 주기 칩은 늦은 글꼴·앞 칩·선택 칩·줄 크기 변
     await page.goto("/", { waitUntil: "domcontentloaded" });
     await expect(cell(page)).toHaveAttribute("aria-busy", "false");
     await expect(selected).toHaveAttribute("aria-pressed", "true");
-    await expect.poll(() => fontRequests).toBeGreaterThan(0);
+    await pollSaved(() => fontRequests).toBeGreaterThan(0);
     await visible("fallback font");
     releaseFonts();
     await page.evaluate(() => document.fonts.ready);

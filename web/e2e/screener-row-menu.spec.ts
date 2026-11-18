@@ -2,7 +2,7 @@ import { mkdir } from "node:fs/promises";
 import { resolve } from "node:path";
 import type { Page } from "@playwright/test";
 import { allResult } from "./fixtures/screener";
-import { cell, chartOf, DEFAULT_LAYOUT_ID, expect, type Scenario, test } from "./screener-harness";
+import { cell, chartOf, DEFAULT_LAYOUT_ID, expect, pollSaved, type Scenario, test } from "./screener-harness";
 import { openScreener, panel, rowOf, rows, runButton, updateBand, waitForUpdateToFinish } from "./screener-page";
 import { firstChart } from "./harness";
 
@@ -57,14 +57,14 @@ test("우클릭은 머리와 네 항목의 메뉴를 열고 칸의 종목을 바
   await expect(held).toContainText("이미 있음");
   await listMenu(page).getByRole("menuitem", { name: /^반도체/ }).click();
   await expect(toast(page)).toContainText(`반도체에 넣었습니다: ${first!.name}`);
-  await expect.poll(() => scenario.documents.watchlists().lists[1]!.symbols).toEqual([first!.symbol]);
+  await pollSaved(() => scenario.documents.watchlists().lists[1]!.symbols).toEqual([first!.symbol]);
 });
 
 test("비교에 추가는 활성 칸에 비교 종목을 넣고 알리며 이미 있으면 거절한다", async ({ scenario, page }) => {
   await openMenu(page, second!.symbol);
   await menu(page).getByRole("menuitem", { name: /^비교에 추가/ }).click();
   await expect(toast(page)).toContainText(`비교에 추가했습니다: ${second!.name}`);
-  await expect.poll(() => compareOf(scenario)).toEqual([second!.symbol]);
+  await pollSaved(() => compareOf(scenario)).toEqual([second!.symbol]);
   await openMenu(page, second!.symbol);
   await menu(page).getByRole("menuitem", { name: /^비교에 추가/ }).click();
   await expect(toast(page)).toContainText("이미 비교에 있습니다");

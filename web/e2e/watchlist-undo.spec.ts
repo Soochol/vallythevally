@@ -1,6 +1,6 @@
 import { writeFile } from "node:fs/promises";
 import type { Page } from "@playwright/test";
-import { type Scenario, expect, test } from "./harness";
+import { type Scenario, expect, test, pollSaved } from "./harness";
 
 const panel = (page: Page) => page.getByRole("complementary", { name: "관심종목" });
 const row = (page: Page, code: string) => panel(page).locator(`li[data-code="${code}"]`);
@@ -19,7 +19,7 @@ async function prepare(page: Page, scenario: Scenario) {
   await expect(row(page, "086520")).toContainText("에코프로");
   await row(page, "086520").click({ button: "right" });
   await page.getByRole("menuitem", { name: /^관심종목에서 빼기/ }).click();
-  await expect.poll(async () => (await serverLists(scenario))[0]!.symbols).toEqual(["005930", "005935"]);
+  await pollSaved(async () => (await serverLists(scenario))[0]!.symbols).toEqual(["005930", "005935"]);
   await expect(page.getByRole("contentinfo")).toContainText("자동 저장됨");
 }
 
@@ -48,14 +48,14 @@ test("늦은 되돌리기 조회 뒤 다른 탭 복제를 보존하며 조건부
   await expect(listButton(other)).toBeVisible();
   const held = await holdReads(page, scenario);
   await page.getByRole("button", { name: "되돌리기", exact: true }).click();
-  await expect.poll(() => held.reads).toBeGreaterThan(0);
+  await pollSaved(() => held.reads).toBeGreaterThan(0);
   await expect(page.getByRole("button", { name: "되돌리기", exact: true })).toHaveCount(0);
   await listButton(other).click();
   await other.getByRole("menuitem", { name: "복제", exact: true }).click();
-  await expect.poll(async () => (await serverLists(scenario)).length).toBe(3);
+  await pollSaved(async () => (await serverLists(scenario)).length).toBe(3);
   const before = await serverLists(scenario);
   held.release();
-  await expect.poll(async () => (await serverLists(scenario))[0]!.symbols).toEqual(["005930", "086520", "005935"]);
+  await pollSaved(async () => (await serverLists(scenario))[0]!.symbols).toEqual(["005930", "086520", "005935"]);
   const after = await serverLists(scenario);
   await writeFile(info.outputPath("slow-remote.json"), JSON.stringify({ reads: held.reads, puts: held.puts, before, after }, null, 2));
   expect(after, "A slow read must not erase the list saved while undo was waiting").toEqual([
@@ -64,7 +64,7 @@ test("늦은 되돌리기 조회 뒤 다른 탭 복제를 보존하며 조건부
   expect(held.puts).toBe(2);
   expect(held.putRevisions).toEqual(held.readRevisions.map((r) => r + 1));
   await row(page, "005935").locator("[data-main]").press("Alt+ArrowUp");
-  await expect.poll(async () => (await serverLists(scenario))[0]!.symbols).toEqual(["005930", "005935", "086520"]);
+  await pollSaved(async () => (await serverLists(scenario))[0]!.symbols).toEqual(["005930", "005935", "086520"]);
   expect((await serverLists(scenario)).slice(1)).toEqual(before.slice(1));
 });
 
@@ -75,11 +75,11 @@ test("충돌 뒤 대상 목록이 지워지면 되돌리지 않고 최신 서버
   await expect(listButton(other)).toBeVisible();
   const held = await holdReads(page, scenario);
   await page.getByRole("button", { name: "되돌리기", exact: true }).click();
-  await expect.poll(() => held.reads).toBeGreaterThan(0);
+  await pollSaved(() => held.reads).toBeGreaterThan(0);
   await listButton(other).click();
   await other.getByRole("menuitem", { name: "목록 지우기", exact: true }).click();
   await other.getByRole("dialog").getByRole("button", { name: "목록 지우기", exact: true }).click();
-  await expect.poll(async () => (await serverLists(scenario)).length).toBe(1);
+  await pollSaved(async () => (await serverLists(scenario)).length).toBe(1);
   const before = await readServer(scenario);
   held.release();
   await expect(conflict(page)).toBeVisible();
@@ -155,7 +155,7 @@ test("조건부 저장 ACK 전에 새로고침해도 옛 실패 본문을 다시
   await page.getByRole("menuitem", { name: /^관심종목에서 빼기/ }).click();
   await expect(page.getByRole("contentinfo").getByRole("alert")).toContainText("저장하지 못했습니다");
   await page.getByRole("button", { name: "되돌리기", exact: true }).click();
-  await expect.poll(() => accepted).toBe(true);
+  await pollSaved(() => accepted).toBe(true);
   await page.reload();
   release();
   await expect(row(page, "086520")).toBeVisible();
@@ -190,12 +190,12 @@ test("다른 로컬 편집이 없는 조건부 저장 성공 뒤 자동 저장�
     if (request.method() === "PUT" && request.url().endsWith("/api/watchlists")) { puts++; bodies.push(request.postDataJSON()); }
   });
   await page.getByRole("button", { name: "되돌리기", exact: true }).click();
-  await expect.poll(async () => (await serverLists(scenario))[0]!.symbols).toEqual(["005930", "086520", "005935"]);
+  await pollSaved(async () => (await serverLists(scenario))[0]!.symbols).toEqual(["005930", "086520", "005935"]);
   await expect(page.getByRole("contentinfo")).toContainText("자동 저장됨");
   expect(puts).toBe(1);
   expect(bodies[0]!.revision).toBe(before.revision + 1);
   await row(page, "005935").locator("[data-main]").press("Alt+ArrowUp");
-  await expect.poll(async () => (await serverLists(scenario))[0]!.symbols).toEqual(["005930", "005935", "086520"]);
+  await pollSaved(async () => (await serverLists(scenario))[0]!.symbols).toEqual(["005930", "005935", "086520"]);
   expect(bodies[1]!.revision).toBeGreaterThan(bodies[0]!.revision);
 });
 
@@ -203,9 +203,9 @@ test("조회 중 로컬 순서 변경을 늦은 되돌리기가 덮지 않는다
   await prepare(page, scenario);
   const held = await holdReads(page, scenario);
   await page.getByRole("button", { name: "되돌리기", exact: true }).click();
-  await expect.poll(() => held.reads).toBeGreaterThan(0);
+  await pollSaved(() => held.reads).toBeGreaterThan(0);
   await row(page, "005935").locator("[data-main]").press("Alt+ArrowUp");
-  await expect.poll(async () => (await serverLists(scenario))[0]!.symbols).toEqual(["005935", "005930"]);
+  await pollSaved(async () => (await serverLists(scenario))[0]!.symbols).toEqual(["005935", "005930"]);
   held.release();
   await page.unrouteAll({ behavior: "wait" });
   expect(await rowCodes(page)).toEqual(["005935", "005930"]);
@@ -220,11 +220,11 @@ test("느린 되돌리기를 두 번 눌러도 조건부 저장은 한 번만 �
     button.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     button.dispatchEvent(new MouseEvent("click", { bubbles: true }));
   });
-  await expect.poll(() => held.reads).toBeGreaterThan(0);
+  await pollSaved(() => held.reads).toBeGreaterThan(0);
   await expect(page.getByRole("button", { name: "되돌리기", exact: true })).toHaveCount(0);
   expect(await rowCodes(page)).toEqual(["005930", "005935"]);
   held.release();
-  await expect.poll(async () => (await serverLists(scenario))[0]!.symbols).toEqual(["005930", "086520", "005935"]);
+  await pollSaved(async () => (await serverLists(scenario))[0]!.symbols).toEqual(["005930", "086520", "005935"]);
   await page.unrouteAll({ behavior: "wait" });
   expect(held.puts).toBe(1);
   await writeFile(info.outputPath("slow-double.json"), JSON.stringify({ reads: held.reads, puts: held.puts, lists: await serverLists(scenario) }, null, 2));

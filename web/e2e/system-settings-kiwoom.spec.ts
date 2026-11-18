@@ -7,7 +7,7 @@ import type { KiwoomLinkStatus } from "../src/api/generated/KiwoomLinkStatus";
 import type { OrdersSwitchInput } from "../src/api/generated/OrdersSwitchInput";
 import type { PublicIpCheck } from "../src/api/generated/PublicIpCheck";
 import type { RegisteredIpInput } from "../src/api/generated/RegisteredIpInput";
-import { cell, expect, test, type Scenario } from "./harness";
+import { cell, expect, test, type Scenario, pollSaved } from "./harness";
 import { CONNECTED_KIWOOM } from "./fixtures/scenario";
 
 const SCREENS = path.resolve("../target/ux-screens");
@@ -231,7 +231,7 @@ test.describe("1440×900", () => {
     await panel(page).getByRole("button", { name: "내 공인 IP 확인" }).click();
     await expect(panel(page)).toContainText("203.0.113.7");
     await panel(page).getByLabel("포털에 지금 공인 IP를 등록했습니다").check();
-    await expect.poll(() => registered).toEqual([{ ip: "203.0.113.7" }]);
+    await pollSaved(() => registered).toEqual([{ ip: "203.0.113.7" }]);
     await expect(panel(page)).toContainText("마지막으로 포털에 등록한 IP");
     await expect(reconnect).toBeDisabled();
     await shot(page, "kiwoom-1440x900-blocked-8050.png");
@@ -301,7 +301,7 @@ test.describe("1440×900", () => {
     await expect(panel(page).getByLabel("반복 발급 잠금이 풀렸는지 확인했습니다")).toBeChecked();
     await expect(reconnect).toBeEnabled({ timeout: 8000 });
     await reconnect.click();
-    await expect.poll(() => bodies).toEqual([{ acknowledged: true }, { acknowledged: true }]);
+    await pollSaved(() => bodies).toEqual([{ acknowledged: true }, { acknowledged: true }]);
   });
 
   test("8050에서 확인한 뒤 키를 바꾸면 확인 칸을 다시 받는다", async ({ page, scenario }) => {

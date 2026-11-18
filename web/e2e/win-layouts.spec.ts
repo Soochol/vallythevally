@@ -1,6 +1,6 @@
 import type { Page } from "@playwright/test";
 import type { Layout } from "../src/api/generated/Layout";
-import { cell, DEFAULT_LAYOUT_ID, expect, firstChart, SEARCH_BUTTON_TITLE, test } from "./harness";
+import { cell, DEFAULT_LAYOUT_ID, expect, firstChart, SEARCH_BUTTON_TITLE, test, pollSaved } from "./harness";
 
 test.use({ clockStart: "20261109100000" });
 const topbar = (page: Page) => page.getByRole("toolbar", { name: "차트 도구 막대" });
@@ -82,7 +82,7 @@ test("새 이름 저장 전 원본에도 편집을 저장하고 이후 따로 �
   await expect(cell(page)).toHaveAttribute("aria-label", "칸 1: SK하이닉스 통합 월");
   await choose(page, "복기");
   await expect(cell(page, 2)).toHaveAttribute("aria-label", "칸 2: 에코프로 통합 주");
-  await expect.poll(() => scenario.documents.uiPrefs().lastLayoutId).toBe(copyId);
+  await pollSaved(() => scenario.documents.uiPrefs().lastLayoutId).toBe(copyId);
   await page.reload();
   await expect(trigger(page)).toHaveAccessibleName("레이아웃: 복기");
   await expect(cell(page, 2)).toHaveAttribute("aria-label", "칸 2: 에코프로 통합 주");

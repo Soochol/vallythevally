@@ -1,7 +1,7 @@
 import type { Page } from "@playwright/test";
 import { parseDrawingBody, recordKey } from "../src/chart/drawings/outbox";
 import { parseJournalRecord } from "../src/chart/drawings/journal";
-import { test, expect, cell, chartOf, type Scenario } from "./harness";
+import { test, expect, cell, chartOf, type Scenario, pollSaved } from "./harness";
 import { settledMirror } from "./drawing-probe";
 
 const mirror = (page: Page) => chartOf(cell(page)).locator(".drawing-mirror");
@@ -65,7 +65,7 @@ for (const offset of [0, -60_000]) {
       await cell(page).focus();
       await page.keyboard.press("H");
       await page.mouse.click(bounds.x + bounds.width * 0.75, bounds.y + bounds.height * 0.4);
-      await expect.poll(() => accepted).toBe(true);
+      await pollSaved(() => accepted).toBe(true);
       const [created] = await drawings(scenario);
       if (created === undefined) throw new Error("The held PUT must reach the document store before deletion");
       expect(created.revision).toBe(now);

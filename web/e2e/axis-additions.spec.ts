@@ -2,7 +2,7 @@ import { FinancialFixture } from "./financial-update-helpers";
 import type { Page } from "@playwright/test";
 import { installAxisProbe } from "./axis-probe";
 import { installChartProbe } from "./chart-probe";
-import { type Scenario, cell, chartOf, expect, test } from "./harness";
+import { type Scenario, cell, chartOf, expect, test, pollSaved } from "./harness";
 
 declare global { interface Window { axisPaints: number } }
 
@@ -98,7 +98,7 @@ test.describe("실시간 지표 추가", () => {
   test.use({ clockStart: "20261109100030" });
   test("체결이 들어오는 도중 가격 패널 지표를 추가해도 오류와 그리기 중단이 없다", async ({ page, scenario }) => {
     const errors = await open(page, scenario);
-    await expect.poll(async () => scenario.live.subscriptions().map(value => value.symbol)).toContain("005930");
+    await pollSaved(async () => scenario.live.subscriptions().map(value => value.symbol)).toContain("005930");
     await expect(async () => {
       expect(await trade(scenario, 195000)).toBeGreaterThan(0);
       await expect(chartOf(cell(page))).toHaveAttribute("data-last-close", "195000", { timeout: 500 });

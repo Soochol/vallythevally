@@ -5,7 +5,7 @@ import type { LayoutWindow } from "../src/api/generated/LayoutWindow";
 import type { Period } from "../src/api/generated/Period";
 import { fromChartTime, toChartTime } from "../src/chart/time";
 import { installChartProbe } from "./chart-probe";
-import { type Scenario, cell, chartOf, DEFAULT_LAYOUT_ID, expect, test } from "./harness";
+import { type Scenario, cell, chartOf, DEFAULT_LAYOUT_ID, expect, test, pollSaved } from "./harness";
 
 declare global {
   interface Window { pointedCrosshairTime: UTCTimestamp | null; nativeCrosshairEvents: (UTCTimestamp | null)[] }
@@ -146,7 +146,7 @@ test("십자선 연동 끄기는 즉시 지우고 저장되며 다시 켜도 이
   await expect(menu).toHaveAttribute("aria-checked", "true");
   await menu.click();
   await expect(marker(page)).toBeHidden();
-  await expect.poll(() => scenario.documents.layout().sync.crosshair).toBe(false);
+  await pollSaved(() => scenario.documents.layout().sync.crosshair).toBe(false);
   await point(page, 1, LAST);
   await expect(marker(page)).toBeHidden();
   await page.reload();
@@ -236,7 +236,7 @@ test("연동이 켜진 따르는 차트에서 추세선을 그릴 수 있다", a
   await page.mouse.down();
   await page.mouse.move(box.x + box.width * 0.8, box.y + box.height * 0.4, { steps: 10 });
   await page.mouse.up();
-  await expect.poll(() => scenario.documents.drawings("000660").length).toBe(1);
+  await pollSaved(() => scenario.documents.drawings("000660").length).toBe(1);
   expect(scenario.documents.drawings("000660")[0]?.tool).toBe("trendline");
 });
 

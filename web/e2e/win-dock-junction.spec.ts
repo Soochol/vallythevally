@@ -1,6 +1,6 @@
 import type { Locator, Page } from "@playwright/test";
 import { parsePlacement } from "../src/layout/placement";
-import { cell, DEFAULT_LAYOUT_ID, expect, test, type Scenario } from "./harness";
+import { cell, DEFAULT_LAYOUT_ID, expect, test, type Scenario, pollSaved } from "./harness";
 
 test.use({ clockStart: "20261109100000", viewport: { width: 1440, height: 860 } });
 
@@ -83,7 +83,7 @@ test("놓은 크기는 새로고침해도 그대로다", async ({ page, scenario
   await page.mouse.up();
   await page.keyboard.up("Alt");
   const placed = await sizes(page);
-  await expect.poll(() => JSON.stringify(saved(scenario))).toContain('"ratio"');
+  await pollSaved(() => JSON.stringify(saved(scenario))).toContain('"ratio"');
   await page.reload();
   await expect(cell(page)).toHaveAttribute("aria-busy", "false");
   expect(await sizes(page)).toEqual(placed);
@@ -91,7 +91,7 @@ test("놓은 크기는 새로고침해도 그대로다", async ({ page, scenario
 
 test("끄는 중 Esc는 두 경계를 끌기 전으로 돌리고 저장도 배치 기록도 만들지 않는다", async ({ page, scenario }) => {
   await openThreeGroups(page);
-  await expect.poll(() => saved(scenario)).not.toBeNull();
+  await pollSaved(() => saved(scenario)).not.toBeNull();
   const savedBefore = JSON.stringify(saved(scenario));
   const before = await sizes(page);
   await page.keyboard.down("Alt");

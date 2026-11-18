@@ -3,7 +3,7 @@ import type { Page } from "@playwright/test";
 import type { Layout } from "../src/api/generated/Layout";
 import { installFrameProbe } from "./frame-probe";
 import { parseChartSettings } from "../src/chart/settings";
-import { type Scenario, barTimes, cell, chartOf, DEFAULT_LAYOUT_ID, dragTowardPast, expect, test, firstChart, withFirstChart } from "./harness";
+import { type Scenario, barTimes, cell, chartOf, DEFAULT_LAYOUT_ID, dragTowardPast, expect, test, firstChart, withFirstChart, pollSaved } from "./harness";
 
 test.use({ clockStart: "20261109100030" });
 
@@ -27,7 +27,7 @@ const series = (page: Page) => page.evaluate(() => window.frameProbe.snapshot())
 
 async function trade(scenario: Scenario, page: Page, delivered: number[], price: number, time: string) {
   expect(await scenario.live.update("005930", { t: Date.parse(`2026-11-09T${time.slice(0,2)}:${time.slice(2,4)}:00+09:00`) / 1000, c: price, o: price, h: price, l: price, v: 1000 })).toBeGreaterThan(0);
-  await expect.poll(() => delivered.includes(price), { timeout: 2000 }).toBe(true);
+  await pollSaved(() => delivered.includes(price), { timeout: 2000 }).toBe(true);
   await expect(chartOf(cell(page))).toHaveAttribute("data-last-close", String(price), { timeout: 2000 });
 }
 
@@ -60,7 +60,7 @@ test("후행스팬이 있는 칸에서 체결을 흘려도 모든 선의 update�
   await expect(chartOf(cell(page))).toHaveAttribute("data-bar-count", String(barsBefore + 1));
   const beforeSameClose = delivered.length;
   await trade(scenario, page, delivered, 203_500, "100103");
-  await expect.poll(() => delivered.length).toBeGreaterThan(beforeSameClose);
+  await pollSaved(() => delivered.length).toBeGreaterThan(beforeSameClose);
   const updatedLast = async () => (await series(page)).filter((s) => s.type === "Custom").map((l) => Number(l.updates.at(-1)?.time) === Number(l.data.at(-1)?.time));
   await expect.poll(updatedLast).toEqual([true, true, true, true, true]);
 
@@ -131,7 +131,7 @@ for (const wasmDelay of [0, 80]) {
     await page.goto("/");
     await expect(cell(page)).toHaveAttribute("aria-busy", "false");
     await expect.poll(() => page.evaluate(() => window.volumeFrames.some(f => f.volume > 0))).toBe(true);
-    if (wasmDelay > 0) await expect.poll(() => wasmRequests).toBeGreaterThan(0);
+    if (wasmDelay > 0) await pollSaved(() => wasmRequests).toBeGreaterThan(0);
     const frames = await page.evaluate(() => window.volumeFrames);
     const symbols = scenario.requests.filter(r => new URL(r.url()).pathname === "/api/bars").map(r => new URL(r.url()).searchParams.get("symbol"));
     await test.info().attach("volume-frames", { body: JSON.stringify({ wasmDelay, frames, symbols }), contentType: "application/json" });
@@ -314,7 +314,7 @@ test.describe("체결 없던 분 뒤", () => {
     for (const [price, time, confirmedTime, confirmedPrice] of [[202_000, "100201", "10:00", 201_000], [203_000, "100301", "10:02", 202_000]] as const) {
       scenario.live.bar("005930", november9BarAt(confirmedTime, confirmedPrice), "confirmed");
       expect(await scenario.live.update("005930", { t: Date.parse(`2026-11-09T${time.slice(0,2)}:${time.slice(2,4)}:00+09:00`) / 1000, c: price, o: price, h: price, l: price, v: 1000 })).toBeGreaterThan(0);
-      await expect.poll(() => delivered.includes(price)).toBe(true);
+      await pollSaved(() => delivered.includes(price)).toBe(true);
     }
     await expect.poll(async () => (await page.evaluate(() => window.workerReplies)) - repliesBefore).toBe(delivered.length - deliveredBefore);
     await page.evaluate(() => window.frameProbe.release());
@@ -350,23 +350,23 @@ test("지표 창에서 테마 색을 고르면 토큰을, 색상표의 색을 �
   await expect(theme.getByRole("button", { name: /^테마 4 / })).toHaveAttribute("aria-pressed", "true");
   await expect(dialog.getByRole("group", { name: "선 색상", exact: true })).toContainText("테마 4");
   await dialog.getByRole("button", { name: "이동평균 단순 9 추가", exact: true }).click();
-  await expect.poll(saved).toEqual([["ind-4"]]);
+  await pollSaved(saved).toEqual([["ind-4"]]);
   await input.fill("이평 11");
   await table.getByRole("button", { name: "진한 파랑 #4A7FE0", exact: true }).click();
   await expect(table.getByRole("button", { name: "진한 파랑 #4A7FE0", exact: true })).toHaveAttribute("aria-pressed", "true");
   await expect(theme.getByRole("button", { pressed: true })).toHaveCount(0);
   await dialog.getByRole("button", { name: "이동평균 단순 11 추가", exact: true }).click();
-  await expect.poll(saved).toEqual([["ind-4"], ["#4A7FE0"]]);
+  await pollSaved(saved).toEqual([["ind-4"], ["#4A7FE0"]]);
 
   await dialog.getByRole("tab", { name: /^이 칸에 띄운 지표/ }).click();
   await dialog.getByRole("button", { name: "이동평균 단순 9 설정", exact: true }).click();
   await expect(theme.getByRole("button", { name: /^테마 4 / })).toHaveAttribute("aria-pressed", "true");
   await table.getByRole("button", { name: "분홍 #EE9DD0", exact: true }).click();
   await dialog.getByRole("button", { name: "변경 적용", exact: true }).click();
-  await expect.poll(saved).toEqual([["#EE9DD0"], ["#4A7FE0"]]);
+  await pollSaved(saved).toEqual([["#EE9DD0"], ["#4A7FE0"]]);
   await dialog.getByRole("button", { name: "이동평균 단순 11 설정", exact: true }).click();
   await expect(table.getByRole("button", { name: "진한 파랑 #4A7FE0", exact: true })).toHaveAttribute("aria-pressed", "true");
   await theme.getByRole("button", { name: /^테마 1 / }).click();
   await dialog.getByRole("button", { name: "변경 적용", exact: true }).click();
-  await expect.poll(saved).toEqual([["#EE9DD0"], ["ind-1"]]);
+  await pollSaved(saved).toEqual([["#EE9DD0"], ["ind-1"]]);
 });

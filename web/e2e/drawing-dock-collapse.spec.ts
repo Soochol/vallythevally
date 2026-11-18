@@ -1,5 +1,5 @@
 import type { Page } from "@playwright/test";
-import { cell, chartOf, expect, test, type Scenario } from "./harness";
+import { cell, chartOf, expect, test, type Scenario, pollSaved } from "./harness";
 import { chartPoint, drawingDock as dock, expandDock } from "./drawing-probe";
 
 test.use({ viewport: { width: 1440, height: 900 } });
@@ -256,7 +256,7 @@ test("연속 그리기가 켜진 채 차트에서 우클릭하면 연속 그리�
   await chartRightClick(page);
   await collapsed(page, 400);
   await expect(pill(page)).toHaveAttribute("aria-label", /지금 선택 도구/);
-  await expect.poll(() => keepSaved(scenario)).toBe(false);
+  await pollSaved(() => keepSaved(scenario)).toBe(false);
   await expect(menu(page)).toHaveCount(0);
   await chartRightClick(page);
   await expect(menu(page)).toBeVisible();
@@ -271,7 +271,7 @@ test("연속 그리기가 켜진 채 그리는 도중 우클릭하면 그리던 
   await page.mouse.click(start.x, start.y);
   await chartRightClick(page);
   await collapsed(page, 400);
-  await expect.poll(() => keepSaved(scenario)).toBe(false);
+  await pollSaved(() => keepSaved(scenario)).toBe(false);
   await expect(menu(page)).toHaveCount(0);
   expect(scenario.documents.drawings("005930")).toHaveLength(0);
 });
@@ -283,7 +283,7 @@ test("해제한 순간 포인터가 막대 위에 있으면 벗어날 때 접힌
   await dock(page).hover();
   await cell(page).focus();
   await page.keyboard.press("Escape");
-  await expect.poll(() => keepSaved(scenario)).toBe(false);
+  await pollSaved(() => keepSaved(scenario)).toBe(false);
   await page.waitForTimeout(700);
   await expanded(page);
   await page.mouse.move(5, 5);
@@ -300,7 +300,7 @@ test("연속 그리기가 켜진 채 Esc를 누르면 같은 해제가 일어나
   await page.keyboard.press("Escape");
   await collapsed(page, 400);
   await expect(pill(page)).toHaveAttribute("aria-label", /지금 선택 도구/);
-  await expect.poll(() => keepSaved(scenario)).toBe(false);
+  await pollSaved(() => keepSaved(scenario)).toBe(false);
   await expect(menu(page)).toHaveCount(0);
   expect(scenario.documents.drawings("005930")).toHaveLength(0);
 });

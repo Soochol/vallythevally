@@ -27,6 +27,8 @@ export const test = base.extend<{ scenario: Scenario; clockStart: string | null 
 });
 export { expect };
 
+export const pollSaved = <T>(generator: () => T | Promise<T>, options: { message?: string; timeout?: number } = {}) => expect.poll(generator, { ...options, intervals: [50] });
+
 export const SEARCH_BUTTON_TITLE = "종목 검색 (/ 또는 Ctrl+K)";
 
 export const cell = (page: Page, n = 1): Locator => page.getByRole("region", { name: new RegExp(`^칸 ${n}: `) });

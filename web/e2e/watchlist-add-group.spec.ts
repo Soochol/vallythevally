@@ -1,6 +1,6 @@
 import type { Page } from "@playwright/test";
 import type { WatchGroup } from "../src/api/generated/WatchGroup";
-import { type Scenario, expect, test } from "./harness";
+import { type Scenario, expect, test, pollSaved } from "./harness";
 
 const panel = (page: Page) => page.getByRole("complementary", { name: "관심종목" });
 const dialog = (page: Page) => page.getByRole("dialog", { name: "관심종목에 넣을 종목 검색" });
@@ -44,7 +44,7 @@ test("그룹 머리의 ＋로 열면 그 그룹에 넣고 창을 연 채 이어�
   await expect(dialog(page)).toBeVisible();
   await expect(input(page)).toBeFocused();
   await put(page, "035420");
-  await expect.poll(() => servedGroups(scenario)).toEqual([["반도체", ["005930"]], ["2차전지", ["000660", "035420"]]]);
+  await pollSaved(() => servedGroups(scenario)).toEqual([["반도체", ["005930"]], ["2차전지", ["000660", "035420"]]]);
   expect(served(scenario).symbols).toEqual(["005930", "086520", "000660", "035420"]);
   await dialog(page).getByRole("button", { name: "검색 닫기" }).click();
   await expect(dialog(page)).toBeHidden();
@@ -56,9 +56,9 @@ test("넣기를 되돌리면 새로 넣은 종목은 목록에서도 빠진다",
   await pill(page, "그룹 없음").click();
   await menu(page).getByRole("menuitemradio", { name: /^2차전지/ }).click();
   await put(page, "000660");
-  await expect.poll(() => servedGroups(scenario)).toEqual([["반도체", ["005930"]], ["2차전지", ["000660"]]]);
+  await pollSaved(() => servedGroups(scenario)).toEqual([["반도체", ["005930"]], ["2차전지", ["000660"]]]);
   await toast(page).getByRole("button", { name: "되돌리기" }).click();
-  await expect.poll(() => servedGroups(scenario)).toEqual([["반도체", ["005930"]], ["2차전지", []]]);
+  await pollSaved(() => servedGroups(scenario)).toEqual([["반도체", ["005930"]], ["2차전지", []]]);
   expect(served(scenario).symbols).toEqual(["005930", "086520"]);
 });
 
@@ -82,11 +82,11 @@ test("이미 목록에 있는 종목은 그룹에만 더하고 되돌리면 그 
   await input(page).press("Enter");
   await expect(toast(page)).toContainText("에코프로 · 반도체에 넣었습니다");
   await expect(other).toContainText("✓ 반도체에 있음");
-  await expect.poll(() => servedGroups(scenario)).toEqual([["반도체", ["005930", "086520"]], ["2차전지", []]]);
+  await pollSaved(() => servedGroups(scenario)).toEqual([["반도체", ["005930", "086520"]], ["2차전지", []]]);
   expect(served(scenario).symbols).toEqual(["005930", "086520"]);
 
   await toast(page).getByRole("button", { name: "되돌리기" }).click();
-  await expect.poll(() => servedGroups(scenario)).toEqual([["반도체", ["005930"]], ["2차전지", []]]);
+  await pollSaved(() => servedGroups(scenario)).toEqual([["반도체", ["005930"]], ["2차전지", []]]);
   expect(served(scenario).symbols).toEqual(["005930", "086520"]);
 });
 
@@ -134,10 +134,10 @@ test("알약에서 없는 이름을 쳐 새 그룹을 만들고 그 그룹에 �
   await filter.fill("AI");
   await menu(page).getByRole("menuitem", { name: "'AI' 새 그룹 만들고 넣을 곳으로" }).click();
   await expect(pill(page, "AI")).toBeVisible();
-  await expect.poll(() => servedGroups(scenario)).toEqual([["반도체", ["005930"]], ["2차전지", []], ["AI", []]]);
+  await pollSaved(() => servedGroups(scenario)).toEqual([["반도체", ["005930"]], ["2차전지", []], ["AI", []]]);
 
   await put(page, "000660");
-  await expect.poll(() => servedGroups(scenario)).toEqual([["반도체", ["005930"]], ["2차전지", []], ["AI", ["000660"]]]);
+  await pollSaved(() => servedGroups(scenario)).toEqual([["반도체", ["005930"]], ["2차전지", []], ["AI", ["000660"]]]);
 });
 
 test("그룹이 100개면 새 그룹 줄은 비활성이고 사유를 보인다", async ({ scenario, page }) => {
@@ -196,7 +196,7 @@ test("Ctrl+K 검색에는 알약이 없고 별은 그룹 없음에 넣는다", a
   await expect(open.getByRole("option")).toHaveAttribute("aria-disabled", "false");
   await open.getByRole("combobox").press("Control+Enter");
   await expect(open).toBeHidden();
-  await expect.poll(() => served(scenario).symbols).toEqual(["005930", "086520", "000660"]);
+  await pollSaved(() => served(scenario).symbols).toEqual(["005930", "086520", "000660"]);
   expect(servedGroups(scenario)).toEqual([["반도체", ["005930"]], ["2차전지", []]]);
 });
 

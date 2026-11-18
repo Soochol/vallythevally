@@ -2,7 +2,7 @@ import type { Page } from "@playwright/test";
 import type { Layout } from "../src/api/generated/Layout";
 import { parseChartSettings } from "../src/chart/settings";
 import { installChartProbe } from "./chart-probe";
-import { type Scenario, cell, chartOf, DEFAULT_LAYOUT_ID, expect, test, firstChart, withFirstChart } from "./harness";
+import { type Scenario, cell, chartOf, DEFAULT_LAYOUT_ID, expect, test, firstChart, withFirstChart, pollSaved } from "./harness";
 
 const VOLUME = { id: "volume", spec: { kind: "volume", maPeriod: null }, panel: "p-volume", visible: true, style: { colors: ["ind-1"], width: 1 } };
 const RSI = { id: "rsi", spec: { kind: "rsi", period: 14, signal: null }, panel: "p-rsi", visible: true, style: { colors: ["ind-2"], width: 1 } };
@@ -69,7 +69,7 @@ test("가격 패널에 겹친 거래량은 아래 20%에 자기 축으로 그리
   await expect.poll(() => paneCount(page)).toBe(1);
   await expect(priceRow(page, "volume")).toHaveCount(1);
   await expect(priceRow(page, "volume")).toContainText(/\d/);
-  await expect.poll(() => savedVolume(scenario)?.panel).toBe("price");
+  await pollSaved(() => savedVolume(scenario)?.panel).toBe("price");
   expect(saved(scenario).panels).toEqual([]);
   await popover(page).getByRole("button", { name: "설정 닫기", exact: true }).click();
   await expect(popover(page)).toHaveCount(0);
@@ -105,7 +105,7 @@ test("겹치기를 끄면 거래량 패널이 가격 패널 바로 아래 기본
   await expect.poll(() => paneCount(page)).toBe(3);
   await expect.poll(() => volumeBars(page).then((bars) => bars?.pane)).toBe(1);
   await expect(priceRow(page, "volume")).toHaveCount(0);
-  await expect.poll(() => saved(scenario).panels.map((p) => p.stretch)).toEqual([0.25, 0.4]);
+  await pollSaved(() => saved(scenario).panels.map((p) => p.stretch)).toEqual([0.25, 0.4]);
   expect(saved(scenario).panels.map((p) => p.id)).toEqual([savedVolume(scenario)!.panel, "p-rsi"]);
   const [volumeBox, rsiBox] = await Promise.all([row(page, "volume").boundingBox(), row(page, "rsi").boundingBox()]);
   expect(volumeBox!.y).toBeLessThan(rsiBox!.y);
@@ -121,7 +121,7 @@ test("막대 불투명도는 막대 색의 알파로 저장·복원된다", asyn
   await expect(opacitySlider(page)).toHaveValue("80");
   await expect(popover(page).getByText("80%", { exact: true })).toBeVisible();
   await expect.poll(() => volumeBars(page).then((bars) => bars?.alphas)).toEqual([0.8]);
-  await expect.poll(() => savedVolume(scenario)?.style.barOpacity).toBe(0.8);
+  await pollSaved(() => savedVolume(scenario)?.style.barOpacity).toBe(0.8);
   await page.reload();
   await expect(cell(page)).toHaveAttribute("aria-busy", "false");
   await expect.poll(() => volumeBars(page).then((bars) => bars?.alphas)).toEqual([0.8]);
@@ -134,12 +134,12 @@ test("범례 팝오버에서 겹치기를 켠 뒤 Esc는 별도 패널로 되돌
   await expect.poll(() => paneCount(page)).toBe(1);
   await opacitySlider(page).focus();
   await page.keyboard.press("ArrowLeft");
-  await expect.poll(() => savedVolume(scenario)?.style.barOpacity).toBe(0.37);
+  await pollSaved(() => savedVolume(scenario)?.style.barOpacity).toBe(0.37);
   await page.keyboard.press("Escape");
   await expect(popover(page)).toHaveCount(0);
   await expect.poll(() => paneCount(page)).toBe(2);
   await expect.poll(() => volumeBars(page).then((bars) => ({ pane: bars?.pane, alphas: bars?.alphas }))).toEqual({ pane: 1, alphas: [0.38] });
-  await expect.poll(() => savedVolume(scenario)?.panel).toBe("p-volume");
+  await pollSaved(() => savedVolume(scenario)?.panel).toBe("p-volume");
   expect(saved(scenario).panels).toEqual([{ id: "p-volume", stretch: 0.25 }]);
   expect(savedVolume(scenario)?.style).toEqual(VOLUME.style);
   await expect(row(page, "volume").getByRole("button", { name: /설정 열기/ })).toBeFocused();
@@ -150,12 +150,12 @@ test("겹치기를 켰다 끈 뒤 Esc는 열 때의 패널 순서와 높이로 �
   await open(page, scenario, [RSI, VOLUME], panels);
   await openPopover(page);
   await overlaySwitch(page).click();
-  await expect.poll(() => savedVolume(scenario)?.panel).toBe("price");
+  await pollSaved(() => savedVolume(scenario)?.panel).toBe("price");
   await overlaySwitch(page).click();
-  await expect.poll(() => saved(scenario).panels.map((p) => p.stretch)).toEqual([0.25, 0.4]);
+  await pollSaved(() => saved(scenario).panels.map((p) => p.stretch)).toEqual([0.25, 0.4]);
   await page.keyboard.press("Escape");
   await expect(popover(page)).toHaveCount(0);
-  await expect.poll(() => saved(scenario).panels).toEqual(panels);
+  await pollSaved(() => saved(scenario).panels).toEqual(panels);
   expect(savedVolume(scenario)?.panel).toBe("p-volume");
   await expect(row(page, "volume").getByRole("button", { name: /설정 열기/ })).toBeFocused();
 });
@@ -169,12 +169,12 @@ test("차트 옆 지표 창에서 겹치기를 건드리지 않고 Esc를 누르
   const slider = inspector.getByRole("slider", { name: "막대 불투명도", exact: true });
   await expect(slider).toBeVisible();
   await row(page, "rsi").getByRole("button", { name: "RSI 14 패널 아래로" }).dispatchEvent("click");
-  await expect.poll(() => saved(scenario).panels.map((p) => p.id)).toEqual(["p-volume", "p-rsi"]);
+  await pollSaved(() => saved(scenario).panels.map((p) => p.id)).toEqual(["p-volume", "p-rsi"]);
   await slider.focus();
   await page.keyboard.press("Escape");
   await expect(slider).toHaveCount(0);
   await row(page, "rsi").getByRole("button", { name: "RSI 14 숨기기" }).dispatchEvent("click");
-  await expect.poll(() => saved(scenario).indicators.find((i) => i.id === "rsi")?.visible).toBe(false);
+  await pollSaved(() => saved(scenario).indicators.find((i) => i.id === "rsi")?.visible).toBe(false);
   expect(saved(scenario).panels).toEqual([{ id: "p-volume", stretch: 0.3 }, { id: "p-rsi", stretch: 0.4 }]);
 });
 
@@ -189,7 +189,7 @@ test("지표 창에서 겹치기를 켜고 더한 거래량은 가격 패널에 
   await toggle.click();
   await expect.poll(() => paneCount(page)).toBe(2);
   await dialog.getByRole("button", { name: "거래량 추가", exact: true }).click();
-  await expect.poll(() => saved(scenario).indicators.map((i) => [i.spec.kind, i.panel])).toEqual([["volume", "p-volume"], ["volume", "price"]]);
+  await pollSaved(() => saved(scenario).indicators.map((i) => [i.spec.kind, i.panel])).toEqual([["volume", "p-volume"], ["volume", "price"]]);
   expect(saved(scenario).panels).toEqual([{ id: "p-volume", stretch: 0.25 }]);
   expect(await paneCount(page)).toBe(2);
 });

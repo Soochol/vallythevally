@@ -2,7 +2,7 @@ import { mkdir } from "node:fs/promises";
 import { resolve } from "node:path";
 import { parseChartSettings } from "../src/chart/settings";
 import { installFrameProbe } from "./frame-probe";
-import { cell, DEFAULT_LAYOUT_ID, expect, test, type Scenario, firstChart } from "./harness";
+import { cell, DEFAULT_LAYOUT_ID, expect, test, type Scenario, firstChart, pollSaved } from "./harness";
 
 const settings = async (scenario: Scenario) => parseChartSettings(firstChart(scenario.documents.layout(DEFAULT_LAYOUT_ID)).chartSettings);
 
@@ -21,7 +21,7 @@ test("입력창에서 Enter로 연속 추가하고 Shift+Enter로 닫은 뒤 숨
   await input.fill("rsi 9");
   await input.press("Shift+Enter");
   await expect(dialog).toBeHidden();
-  await expect.poll(async () => (await settings(scenario)).indicators.map((i) => i.spec)).toEqual([
+  await pollSaved(async () => (await settings(scenario)).indicators.map((i) => i.spec)).toEqual([
     { kind: "volume", maPeriod: null },
     { kind: "ma", method: "sma", period: 7 },
     { kind: "bollinger", period: 12, k: 2 },
@@ -31,7 +31,7 @@ test("입력창에서 Enter로 연속 추가하고 Shift+Enter로 닫은 뒤 숨
   await dialog.getByRole("button", { name: "이동평균 단순 7 숨기기", exact: true }).click();
   await dialog.getByRole("button", { name: "RSI 9 지우기", exact: true }).click();
   await page.keyboard.press("Escape");
-  await expect.poll(async () => (await settings(scenario)).indicators.map((i) => [i.spec.kind, i.visible])).toEqual([["volume", true], ["ma", false], ["bollinger", true]]);
+  await pollSaved(async () => (await settings(scenario)).indicators.map((i) => [i.spec.kind, i.visible])).toEqual([["volume", true], ["ma", false], ["bollinger", true]]);
   await page.reload();
   await expect(cell(page)).toHaveAttribute("aria-busy", "false");
   await page.getByRole("button", { name: "지표", exact: true }).click();
@@ -59,7 +59,7 @@ test("설정 검사기를 받기 전에 누른 Shift+Enter는 검사기가 준�
   await input.press("Shift+Enter");
   releaseWasm();
   await expect(dialog).toBeHidden();
-  await expect.poll(async () => (await settings(scenario)).indicators.map((i) => i.spec)).toEqual([
+  await pollSaved(async () => (await settings(scenario)).indicators.map((i) => i.spec)).toEqual([
     { kind: "volume", maPeriod: null },
     { kind: "ma", method: "sma", period: 20 },
   ]);
@@ -121,7 +121,7 @@ test("지표 창은 띄운 지표 탭으로 열고 글자를 치면 지표 추�
   await expect(tab(/^지표 추가$/)).toHaveAttribute("aria-selected", "true");
   await expect(dialog.getByRole("option", { name: "이동평균 단순 20 추가 후보", exact: true })).toHaveAttribute("aria-selected", "true");
   await input.press("Enter");
-  await expect.poll(async () => (await settings(scenario)).indicators.map((i) => i.spec.kind)).toEqual(["volume", "ma"]);
+  await pollSaved(async () => (await settings(scenario)).indicators.map((i) => i.spec.kind)).toEqual(["volume", "ma"]);
   await input.fill("");
   await expect(dialog.getByRole("listbox")).toContainText("재무지표");
   await tab(/^비교 종목$/).click();

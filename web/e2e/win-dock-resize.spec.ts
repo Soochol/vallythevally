@@ -1,6 +1,6 @@
 import type { Locator, Page } from "@playwright/test";
 import { parsePlacement } from "../src/layout/placement";
-import { cell, DEFAULT_LAYOUT_ID, expect, test, type Scenario } from "./harness";
+import { cell, DEFAULT_LAYOUT_ID, expect, test, type Scenario, pollSaved } from "./harness";
 
 test.use({ clockStart: "20261109100000", viewport: { width: 1440, height: 860 } });
 
@@ -186,7 +186,7 @@ test("바깥 경계를 오른쪽으로 끌면 안쪽 큰 묶음이 먼저 줄고
   expect(await widthOf(screener)).toBe(280);
   const stopped = await widthOf(group(page, 1));
   expect(stopped).toBeGreaterThan(outerBefore + 150);
-  await expect.poll(() => savedRatio(scenario)).not.toBe(ratioBefore);
+  await pollSaved(() => savedRatio(scenario)).not.toBe(ratioBefore);
   await page.reload();
   await expect(groups(page)).toHaveCount(3);
   expect(await widthOf(group(page, 1))).toBe(stopped);

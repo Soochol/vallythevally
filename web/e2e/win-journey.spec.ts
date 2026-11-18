@@ -6,7 +6,7 @@ import { toChartTime } from "../src/chart/time";
 import { windowId } from "../src/layout/kinds";
 import { type DockNode, parsePlacement } from "../src/layout/placement";
 import { installChartProbe } from "./chart-probe";
-import { cell, chartOf, DEFAULT_LAYOUT_ID, expect, type Scenario, test } from "./harness";
+import { cell, chartOf, DEFAULT_LAYOUT_ID, expect, type Scenario, test, pollSaved } from "./harness";
 
 test.use({ clockStart: "20261109100000", actionTimeout: 10_000 });
 test.describe.configure({ mode: "parallel" });
@@ -151,7 +151,7 @@ test("하루의 창 편집을 두 방식과 이름 저장·다시 열기·새로
   await ready(page);
   await addChart(page);
   await addChart(page);
-  await expect.poll(() => charts(scenario).length).toBe(3);
+  await pollSaved(() => charts(scenario).length).toBe(3);
   const added = charts(scenario).filter((window) => window.id !== "cell-0");
   const first = added[0], second = added[1];
   if (!first || !second) throw new Error("더한 차트 창을 찾지 못했습니다");
@@ -168,7 +168,7 @@ test("하루의 창 편집을 두 방식과 이름 저장·다시 열기·새로
   await expect(cell(page)).toHaveAttribute("aria-label", /NAVER/);
   await expect(cell(page, 2)).toHaveAttribute("aria-label", /NAVER/);
   await detach(page, "screener");
-  await expect.poll(() => placement(scenario).dock?.floats.length).toBe(1);
+  await pollSaved(() => placement(scenario).dock?.floats.length).toBe(1);
   const dock = placement(scenario).dock;
   await setMode(page, "canvas");
   await expect(frame(page, "cell-0")).toBeVisible();
@@ -177,7 +177,7 @@ test("하루의 창 편집을 두 방식과 이름 저장·다시 열기·새로
   await expect(page.getByRole("button", { name: /^가지런히/ }).getByLabel("겹친 곳")).not.toHaveText("0");
   await page.getByRole("button", { name: /^가지런히/ }).click();
   await expect(page.getByRole("button", { name: /^가지런히/ }).getByLabel("겹친 곳")).toHaveText("0");
-  await expect.poll(() => placement(scenario).canvas).not.toBeNull();
+  await pollSaved(() => placement(scenario).canvas).not.toBeNull();
   await layoutButton(page).click();
   await layoutMenu(page).getByRole("menuitem", { name: "새 이름으로 저장…", exact: true }).click();
   const dialog = page.getByRole("dialog", { name: "새 이름으로 저장", exact: true });
@@ -186,7 +186,7 @@ test("하루의 창 편집을 두 방식과 이름 저장·다시 열기·새로
   await expect(dialog).toBeHidden();
   const copy = scenario.documents.layoutSummaries().find((entry) => entry.name === "복기");
   if (!copy) throw new Error("저장한 복기 레이아웃이 없습니다");
-  await expect.poll(() => scenario.documents.layout(copy.id).windows.filter((window) => window.kind === "chart").map((window) => ({ id: window.id, symbol: window.symbol, link: window.link }))).toEqual([
+  await pollSaved(() => scenario.documents.layout(copy.id).windows.filter((window) => window.kind === "chart").map((window) => ({ id: window.id, symbol: window.symbol, link: window.link }))).toEqual([
     { id: "cell-0", symbol: "035420", link: "a" },
     { id: first.id, symbol: "035420", link: "a" },
     { id: second.id, symbol: "005930", link: null },
@@ -224,7 +224,7 @@ test("숨긴 연동 차트와 창 범위 드로잉은 떠 있는 창과 캔버�
   await page.getByRole("complementary", { name: "관심종목" }).locator('li[data-code="035420"] [data-main]').click();
   await expect(tab(page, "cell-1")).toContainText("NAVER");
   await expect(tab(page, "cell-1")).toHaveAttribute("aria-selected", "false");
-  await expect.poll(() => charts(scenario).map((window) => window.symbol)).toEqual(["035420", "035420"]);
+  await pollSaved(() => charts(scenario).map((window) => window.symbol)).toEqual(["035420", "035420"]);
   await tab(page, "cell-1").click();
   await expect(cell(page, 2)).toHaveAttribute("aria-busy", "false");
   await expect(chartOf(cell(page, 2))).toHaveAttribute("data-bar-count", /^[1-9]\d*$/);
@@ -252,7 +252,7 @@ test("숨긴 연동 차트와 창 범위 드로잉은 떠 있는 창과 캔버�
   await expect(frame(page, "cell-1")).toHaveCount(0);
   await expect(head(page, "cell-0")).toBeFocused();
   await exposed(head(page, "cell-0"));
-  await expect.poll(() => scenario.documents.drawings("035420")[0]?.scope).toEqual({ kind: "layout", layoutId: DEFAULT_LAYOUT_ID });
+  await pollSaved(() => scenario.documents.drawings("035420")[0]?.scope).toEqual({ kind: "layout", layoutId: DEFAULT_LAYOUT_ID });
   await expect(chartOf(cell(page)).locator(".drawing-mirror")).toHaveAttribute("data-drawings", new RegExp(drawingId));
 });
 
@@ -267,7 +267,7 @@ for (const mode of MODES) {
     await page.goto("/");
     await ready(page, 8);
     if (mode === "canvas") await page.getByRole("button", { name: /^가지런히/ }).click();
-    await expect.poll(() => scenario.live.subscriptions().length).toBe(8);
+    await pollSaved(() => scenario.live.subscriptions().length).toBe(8);
     expect(scenario.live.bar("005930", bar(88_800))).toBe(8);
     for (let n = 1; n <= 8; n++) await expect(chartOf(cell(page, n))).toHaveAttribute("data-last-close", "88800");
     await expect.poll(() => page.evaluate(() => window.chartProbes?.length)).toBe(8);
@@ -311,13 +311,13 @@ for (const mode of MODES) {
     if (mode === "dock") {
       await detach(page, "indicators");
       await detach(page, "screener");
-      await expect.poll(() => placement(scenario).dock?.floats.at(-1)?.window).toBe("screener");
+      await pollSaved(() => placement(scenario).dock?.floats.at(-1)?.window).toBe("screener");
       await topbar(page).getByRole("button", { name: "지표", exact: true }).click();
-      await expect.poll(() => placement(scenario).dock?.floats.at(-1)?.window).toBe("indicators");
+      await pollSaved(() => placement(scenario).dock?.floats.at(-1)?.window).toBe("indicators");
     } else {
       await head(page, "watchlist").click({ position: { x: 60, y: 17 } });
       await topbar(page).getByRole("button", { name: "지표", exact: true }).click();
-      await expect.poll(() => placement(scenario).canvas?.order.at(-1)).toBe("indicators");
+      await pollSaved(() => placement(scenario).canvas?.order.at(-1)).toBe("indicators");
     }
   });
 
@@ -327,7 +327,7 @@ for (const mode of MODES) {
     await ready(page);
     const pending = scenario.hold((url, request) => url.pathname === `/api/layouts/${DEFAULT_LAYOUT_ID}` && request.method() === "PUT");
     await topbar(page).getByRole("button", { name: "주", exact: true }).click();
-    await expect.poll(() => scenario.requests.filter((request) => request.method() === "PUT" && new URL(request.url()).pathname === `/api/layouts/${DEFAULT_LAYOUT_ID}`).length).toBeGreaterThan(0);
+    await pollSaved(() => scenario.requests.filter((request) => request.method() === "PUT" && new URL(request.url()).pathname === `/api/layouts/${DEFAULT_LAYOUT_ID}`).length).toBeGreaterThan(0);
     await pending.received;
     const source = mode === "dock" ? tab(page, "screener") : head(page, "watchlist");
     const original = await boxOf(mode === "dock" ? group(page, "screener") : frame(page, "watchlist"));
@@ -371,7 +371,7 @@ for (const mode of MODES) {
     await second.goto("/");
     await ready(second);
     await topbar(second).getByRole("button", { name: "주", exact: true }).click();
-    await expect.poll(() => charts(scenario)[0]?.period).toBe("W");
+    await pollSaved(() => charts(scenario)[0]?.period).toBe("W");
     const stale = page.waitForResponse((response) => new URL(response.url()).pathname === `/api/layouts/${DEFAULT_LAYOUT_ID}` && response.request().method() === "PUT" && response.status() === 409);
     await topbar(page).getByRole("button", { name: "월", exact: true }).click();
     expect(await (await stale).json()).toMatchObject({ error: { code: "stale_revision" } });
@@ -397,7 +397,7 @@ for (const mode of MODES) {
     if (mode === "dock") expect(before).toHaveLength(0);
     if (mode === "dock") await tab(page, "screener").click();
     else await head(page, "watchlist").press("ArrowLeft");
-    await expect.poll(() => placement(scenario)[mode]).not.toBeNull();
+    await pollSaved(() => placement(scenario)[mode]).not.toBeNull();
     expect(scenario.documents.layout().placement).toMatchObject({ v: 1 });
     const saved = placement(scenario);
     await page.reload();
@@ -490,7 +490,7 @@ test("키보드만으로 창 더하기·탭·나누기·경계·캔버스·닫�
   await page.keyboard.press("Enter");
   await page.keyboard.press("Home");
   await page.keyboard.press("Enter");
-  await expect.poll(() => charts(scenario).length).toBe(2);
+  await pollSaved(() => charts(scenario).length).toBe(2);
   const added = charts(scenario).find((window) => window.id !== "cell-0");
   if (!added) throw new Error("키보드로 더한 창이 없습니다");
   await tabTo(page, tab(page, "watchlist"));
@@ -668,7 +668,7 @@ for (const mode of MODES) {
       await exposed(page.locator(":focus"));
       await page.keyboard.press("Shift+Tab");
       await expect(head(page, closing)).toBeFocused();
-      await expect.poll(() => mode === "canvas" ? placement(scenario).canvas?.order.at(-1) : placement(scenario).dock?.floats.at(-1)?.window).toBe(closing);
+      await pollSaved(() => mode === "canvas" ? placement(scenario).canvas?.order.at(-1) : placement(scenario).dock?.floats.at(-1)?.window).toBe(closing);
       const before = placement(scenario);
       await page.keyboard.press("Delete");
       await expect(head(page, closing)).toHaveCount(0);
@@ -679,8 +679,8 @@ for (const mode of MODES) {
       await expect(undo).toBeEnabled({ timeout: 1500 });
       await undo.click();
       await expect(head(page, closing)).toBeVisible();
-      await expect.poll(() => windows(scenario).map((window) => window.id)).toEqual(original.map((window) => window.id));
-      await expect.poll(() => placement(scenario)).toEqual(before);
+      await pollSaved(() => windows(scenario).map((window) => window.id)).toEqual(original.map((window) => window.id));
+      await pollSaved(() => placement(scenario)).toEqual(before);
     });
   }
 }
@@ -695,7 +695,7 @@ test("떠 있는 차트를 닫고 가려진 교체 탭 대신 보이는 창 머�
   await page.goto("/");
   await ready(page, 2);
   await tabTo(page, head(page, "cell-1"));
-  await expect.poll(() => placement(scenario).dock?.floats.at(-1)?.window).toBe("cell-1");
+  await pollSaved(() => placement(scenario).dock?.floats.at(-1)?.window).toBe("cell-1");
   const before = placement(scenario);
   await page.keyboard.press("Delete");
   await expect(head(page, "cell-1")).toHaveCount(0);
@@ -706,8 +706,8 @@ test("떠 있는 차트를 닫고 가려진 교체 탭 대신 보이는 창 머�
   await expect(undo).toBeEnabled({ timeout: 1500 });
   await undo.click();
   await expect(head(page, "cell-1")).toBeVisible();
-  await expect.poll(() => windows(scenario).map((window) => window.id)).toEqual(original.map((window) => window.id));
-  await expect.poll(() => placement(scenario)).toEqual(before);
+  await pollSaved(() => windows(scenario).map((window) => window.id)).toEqual(original.map((window) => window.id));
+  await pollSaved(() => placement(scenario)).toEqual(before);
 });
 
 test("가로로 스크롤한 도킹 탭에서 옆 창을 닫으면 선택된 탭으로 초점을 돌린다", async ({ page, scenario }) => {

@@ -1,5 +1,5 @@
 import type { Page } from "@playwright/test";
-import { cell, chartOf, expect, test } from "./harness";
+import { cell, chartOf, expect, test, pollSaved } from "./harness";
 import { chartPoint, drawings, mirror, open, pickTool, settledMirror, expandDock } from "./drawing-probe";
 
 async function clickAt(page: Page, spots: readonly (readonly [number, number])[]) {
@@ -18,12 +18,12 @@ test("피보나치 되돌림과 확장을 놓고, 수준을 끄고, 새로고침
   await cell(page).focus();
   await page.keyboard.press("F");
   await clickAt(page, [[0.2, 0.3], [0.4, 0.6]]);
-  await expect.poll(async () => (await drawings(scenario)).map((d) => [d.tool, d.points.length])).toEqual([["fib", 2]]);
+  await pollSaved(async () => (await drawings(scenario)).map((d) => [d.tool, d.points.length])).toEqual([["fib", 2]]);
 
   await expect((await expandDock(page)).getByRole("button", { name: "피보나치·갠 도구 펼치기", exact: true })).toBeVisible();
   await pickTool(page, "피보나치·갠", "피보나치 확장");
   await clickAt(page, [[0.55, 0.65], [0.7, 0.3], [0.82, 0.5]]);
-  await expect.poll(async () => (await drawings(scenario)).map((d) => [d.tool, d.points.length]).sort()).toEqual([["fib", 2], ["fibext", 3]]);
+  await pollSaved(async () => (await drawings(scenario)).map((d) => [d.tool, d.points.length]).sort()).toEqual([["fib", 2], ["fibext", 3]]);
   const ext = (await drawings(scenario)).find((d) => d.tool === "fibext")!;
   await expect.poll(async () => (await mirror(page)).find((d) => d.id === ext.id)?.selected).toBe(true);
 
@@ -32,7 +32,7 @@ test("피보나치 되돌림과 확장을 놓고, 수준을 끄고, 새로고침
   await dialog.getByRole("checkbox", { name: "수준 2 켜기", exact: true }).uncheck();
   await dialog.getByRole("button", { name: "확인", exact: true }).click();
   const levels = async () => ((await drawings(scenario)).find((d) => d.id === ext.id)?.style as { levels: { value: number; on: boolean }[] }).levels;
-  await expect.poll(async () => (await levels()).map((l) => [l.value, l.on])).toEqual([[0, true], [0.618, false], [1, true], [1.272, true], [1.618, true], [2.618, false]]);
+  await pollSaved(async () => (await levels()).map((l) => [l.value, l.on])).toEqual([[0, true], [0.618, false], [1, true], [1.272, true], [1.618, true], [2.618, false]]);
 
   await page.keyboard.press("Escape");
   await expect.poll(async () => (await mirror(page)).some((d) => d.selected)).toBe(false);
@@ -62,7 +62,7 @@ test("피보나치 팬·시간대와 갠 팬·상자를 놓고, 핸들을 끌고
   const place = async (label: string, tool: string, spots: readonly (readonly [number, number])[]) => {
     await pickTool(page, "피보나치·갠", label);
     await clickAt(page, spots);
-    await expect.poll(async () => (await drawings(scenario)).filter((d) => d.tool === tool).map((d) => d.points.length)).toEqual([2]);
+    await pollSaved(async () => (await drawings(scenario)).filter((d) => d.tool === tool).map((d) => d.points.length)).toEqual([2]);
     const placed = await savedOf(tool);
     await expect.poll(async () => (await mirror(page)).find((d) => d.id === placed.id)?.selected).toBe(true);
     return placed;
@@ -81,13 +81,13 @@ test("피보나치 팬·시간대와 갠 팬·상자를 놓고, 핸들을 끌고
   await dialog.getByRole("checkbox", { name: "수준 2 켜기", exact: true }).uncheck();
   await dialog.getByRole("button", { name: "확인", exact: true }).click();
   const fanLevels = async () => ((await savedOf("fibfan")).style as { levels: { value: number; on: boolean }[] }).levels;
-  await expect.poll(async () => (await fanLevels()).map((l) => [l.value, l.on])).toEqual([[0, true], [0.25, false], [0.382, true], [0.5, true], [0.618, true], [0.75, true], [1, true]]);
+  await pollSaved(async () => (await fanLevels()).map((l) => [l.value, l.on])).toEqual([[0, true], [0.25, false], [0.382, true], [0.5, true], [0.618, true], [0.75, true], [1, true]]);
   expect((await savedOf("fibfan")).points).toEqual(fan.points);
 
   const time = await place("피보나치 시간대", "fibtime", [[0.3, 0.3], [0.34, 0.35]]);
   await expect.poll(async () => (await mirror(page)).find((d) => d.id === time.id)?.handles.length).toBe(2);
   await drag(time.id, 1, 40, 60);
-  await expect.poll(async () => (await savedOf("fibtime")).points[1]!.t).toBeGreaterThan(time.points[1]!.t);
+  await pollSaved(async () => (await savedOf("fibtime")).points[1]!.t).toBeGreaterThan(time.points[1]!.t);
   const timeMoved = (await savedOf("fibtime")).points;
   expect(timeMoved[0]).toEqual(time.points[0]);
   expect(timeMoved[1]!.price).toBe(time.points[1]!.price);
@@ -97,7 +97,7 @@ test("피보나치 팬·시간대와 갠 팬·상자를 놓고, 핸들을 끌고
   const box = await place("갠 상자", "gannbox", [[0.65, 0.25], [0.8, 0.5]]);
   await expect.poll(async () => (await mirror(page)).find((d) => d.id === box.id)?.handles.length).toBe(4);
   await drag(box.id, 2, 40, -50);
-  await expect.poll(async () => (await savedOf("gannbox")).points).not.toEqual(box.points);
+  await pollSaved(async () => (await savedOf("gannbox")).points).not.toEqual(box.points);
   const [boxStart, boxEnd] = (await savedOf("gannbox")).points;
   expect(boxStart!.t).toBe(box.points[0]!.t);
   expect(boxStart!.price).toBeGreaterThan(box.points[0]!.price);

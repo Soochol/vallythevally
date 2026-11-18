@@ -1,7 +1,7 @@
 import type { Locator, Page } from "@playwright/test";
 import type { LayoutWindow } from "../src/api/generated/LayoutWindow";
 import { parsePlacement } from "../src/layout/placement";
-import { cell, chartOf, DEFAULT_LAYOUT_ID, expect, test, type Scenario } from "./harness";
+import { cell, chartOf, DEFAULT_LAYOUT_ID, expect, test, type Scenario, pollSaved } from "./harness";
 
 test.use({ clockStart: "20261109100000", viewport: { width: 1440, height: 900 } });
 const tab = (page: Page, name: string) => page.getByRole("tab", { name: new RegExp(`^${name}`) });
@@ -96,7 +96,7 @@ test("크게 보기는 저장된 배치와 배치 되돌리기 가능 여부를 
   await open(page);
   await tab(page, "스크리너").click();
   await tab(page, "관심종목").click();
-  await expect.poll(() => JSON.stringify(parsePlacement(saved(scenario)).dock)).toContain('"active":"watchlist"');
+  await pollSaved(() => JSON.stringify(parsePlacement(saved(scenario)).dock)).toContain('"active":"watchlist"');
   const before = JSON.stringify(saved(scenario));
   const side = groups(page).last();
   await side.getByRole("tab").first().focus();

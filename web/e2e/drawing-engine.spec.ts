@@ -1,5 +1,5 @@
 import { selectOption, selectMinute } from "./select-option";
-import { test, expect, cell, chartOf } from "./harness";
+import { test, expect, cell, chartOf, pollSaved } from "./harness";
 import type { Page } from "@playwright/test";
 import type { Bar } from "../src/api/generated/Bar";
 import type { DrawingBody } from "../src/chart/drawings/types";
@@ -23,7 +23,7 @@ test("trendline placement, handles, settings, and persistence", async ({ page, s
   const errors: string[] = []; page.on("pageerror", (e) => errors.push(e.message));
   await open(page);
   await draw(page);
-  await expect.poll(async () => (await drawings(scenario)).length).toBe(1);
+  await pollSaved(async () => (await drawings(scenario)).length).toBe(1);
   await expect(page.getByRole("toolbar", { name: "드로잉 스타일" })).toBeVisible();
   const saved = (await drawings(scenario))[0]!;
   const xBeforePan = (await mirror(page))[0]!.points[0]!.x;
@@ -39,7 +39,7 @@ test("trendline placement, handles, settings, and persistence", async ({ page, s
 });
 
 test("drawing engine: remembered style and preferences survive reload; drawing clears hide-all", async ({ page, scenario }) => {
-  await open(page); const r = await draw(page); await expect.poll(async () => (await drawings(scenario)).length).toBe(1);
+  await open(page); const r = await draw(page); await pollSaved(async () => (await drawings(scenario)).length).toBe(1);
   await selectOption(page.getByRole("toolbar", { name: "드로잉 스타일" }).getByLabel("선 굵기"), "4");
   await page.mouse.click(r.x + r.width * 0.4, r.y + r.height * 0.6, { button: "right" });
   await page.getByRole("menu", { name: "드로잉 메뉴", exact: true }).getByRole("menuitemcheckbox", { name: "모든 드로잉 숨기기", exact: true }).click();
@@ -48,13 +48,13 @@ test("drawing engine: remembered style and preferences survive reload; drawing c
   await cell(page).focus(); await page.keyboard.press("T");
   await page.mouse.move(r.x + r.width * 0.77, r.y + r.height * 0.6); await page.mouse.down();
   await page.mouse.move(r.x + r.width * 0.86, r.y + r.height * 0.5, { steps: 10 }); await page.mouse.up();
-  await expect.poll(async () => (await drawings(scenario)).length).toBe(2);
+  await pollSaved(async () => (await drawings(scenario)).length).toBe(2);
   await expect.poll(async () => (await mirror(page)).length).toBe(2);
   const styles = (await drawings(scenario)).map((d) => d.style as { line: { width: number } });
   expect(styles.map((s) => s.line.width)).toEqual([4, 4]);
   await (await expandDock(page)).getByRole("button", { name: "자석", exact: true }).click({ button: "right" });
   await page.getByRole("menuitemradio", { name: "강", exact: true }).click();
-  await expect.poll(async () => scenario.documents.uiPrefs().drawing?.magnetStrength).toBe("strong");
+  await pollSaved(async () => scenario.documents.uiPrefs().drawing?.magnetStrength).toBe("strong");
   await page.reload(); await (await expandDock(page)).getByRole("button", { name: "자석", exact: true }).click({ button: "right" });
   await expect(page.getByRole("menuitemradio", { name: "강", exact: true })).toHaveAttribute("aria-checked", "true");
   await page.keyboard.press("Escape");
@@ -64,26 +64,26 @@ test("drawing engine: remembered style and preferences survive reload; drawing c
 test("drawing engine: handles, Shift 45°, clone, clipboard, undo and redo", async ({ page, scenario }) => {
   await open(page); await cell(page).focus(); await page.keyboard.press("G");
   const r = await draw(page, "T", true);
-  await expect.poll(async () => (await drawings(scenario)).length).toBe(1);
+  await pollSaved(async () => (await drawings(scenario)).length).toBe(1);
   const original = (await drawings(scenario))[0]!;
   const line = (await mirror(page))[0]!; const [a, b] = line.points;
   expect(a).not.toBeNull(); expect(b).not.toBeNull();
   expect(Math.abs(Math.abs(b!.x - a!.x) - Math.abs(b!.y - a!.y))).toBeLessThan(1);
   await page.mouse.move(r.x + b!.x, r.y + b!.y); await page.mouse.down();
   await page.mouse.move(r.x + b!.x + 20, r.y + b!.y - 30, { steps: 10 }); await page.mouse.up();
-  await expect.poll(async () => (await drawings(scenario))[0]!.points[1]).not.toEqual(original.points[1]);
+  await pollSaved(async () => (await drawings(scenario))[0]!.points[1]).not.toEqual(original.points[1]);
   expect((await drawings(scenario))[0]!.points[0]).toEqual(original.points[0]);
   const afterHandle = (await drawings(scenario))[0]!.points;
   const moved = (await mirror(page))[0]!; const p0 = moved.points[0]!; const p1 = moved.points[1]!;
   const x = (p0.x + p1.x) / 2; const y = (p0.y + p1.y) / 2;
   await page.keyboard.down("Control"); await page.mouse.move(r.x + x, r.y + y); await page.mouse.down();
   await page.mouse.move(r.x + x + 18, r.y + y + 24, { steps: 10 }); await page.mouse.up(); await page.keyboard.up("Control");
-  await expect.poll(async () => (await drawings(scenario)).length).toBe(2);
+  await pollSaved(async () => (await drawings(scenario)).length).toBe(2);
   expect((await drawings(scenario)).find((d) => d.id === original.id)!.points).toEqual(afterHandle);
   await cell(page).focus(); await page.keyboard.press("Control+c"); await page.keyboard.press("Control+v");
-  await expect.poll(async () => (await drawings(scenario)).length).toBe(3);
-  await page.keyboard.press("Control+z"); await expect.poll(async () => (await drawings(scenario)).length).toBe(2);
-  await page.keyboard.press("Control+y"); await expect.poll(async () => (await drawings(scenario)).length).toBe(3);
+  await pollSaved(async () => (await drawings(scenario)).length).toBe(3);
+  await page.keyboard.press("Control+z"); await pollSaved(async () => (await drawings(scenario)).length).toBe(2);
+  await page.keyboard.press("Control+y"); await pollSaved(async () => (await drawings(scenario)).length).toBe(3);
   await expect.poll(async () => (await mirror(page)).filter((d) => d.tool === "trendline").length).toBe(3);
 });
 
@@ -102,7 +102,7 @@ test("drawing engine: daily anchors keep their time and price on 60-minute bars"
     await route.fulfill({ json: { symbol: "IDX:001", venue: null, period, bars, current: null, nextBefore: null, seq: null } });
   });
   await open(page); await cell(page).focus(); await page.keyboard.press("G"); await draw(page);
-  await expect.poll(async () => (await drawings(scenario)).length).toBe(1);
+  await pollSaved(async () => (await drawings(scenario)).length).toBe(1);
   const saved = (await drawings(scenario))[0]!; const { points: before, spacing: beforeSpacing } = await capture();
   await selectMinute(page.getByRole("button", { name: "분봉" }), "60m");
   await expect(cell(page)).toHaveAttribute("aria-label", "칸 1: 코스피 60분");
@@ -117,13 +117,13 @@ test("drawing engine: daily anchors keep their time and price on 60-minute bars"
 
 test("drawing engine: lock, order and multi-selection", async ({ page, scenario }) => {
   await open(page); const r = await draw(page);
-  await expect.poll(async () => (await drawings(scenario)).length).toBe(1);
+  await pollSaved(async () => (await drawings(scenario)).length).toBe(1);
   await cell(page).focus(); await page.keyboard.press("H"); await page.mouse.click(r.x + r.width * 0.85, r.y + r.height * 0.48);
-  await expect.poll(async () => (await drawings(scenario)).length).toBe(2);
+  await pollSaved(async () => (await drawings(scenario)).length).toBe(2);
   await page.getByRole("button", { name: "잠금", exact: true }).click();
-  await expect.poll(async () => (await drawings(scenario)).find((d) => d.tool === "hline")!.locked).toBe(true);
+  await pollSaved(async () => (await drawings(scenario)).find((d) => d.tool === "hline")!.locked).toBe(true);
   await cell(page).focus(); await page.keyboard.press("Delete");
-  await expect.poll(async () => (await drawings(scenario)).length).toBe(2);
+  await pollSaved(async () => (await drawings(scenario)).length).toBe(2);
   const bodyAt = async (tool: string) => {
     const shape = (await mirror(page)).find((d) => d.tool === tool)!;
     const [from, to] = shape.points;
@@ -132,39 +132,39 @@ test("drawing engine: lock, order and multi-selection", async ({ page, scenario 
   const trend = await bodyAt("trendline"); const level = await bodyAt("hline");
   await page.mouse.click(level.x, level.y);
   await page.getByRole("button", { name: "잠금 풀기", exact: true }).click();
-  await expect.poll(async () => (await drawings(scenario)).find((d) => d.tool === "hline")!.locked).toBe(false);
+  await pollSaved(async () => (await drawings(scenario)).find((d) => d.tool === "hline")!.locked).toBe(false);
   await page.mouse.click(trend.x, trend.y);
   await page.keyboard.down("Control"); await page.mouse.click(level.x, level.y); await page.keyboard.up("Control");
   await expect.poll(async () => (await mirror(page)).filter((d) => d.selected).length).toBe(2);
   const before = await drawings(scenario);
   await cell(page).focus(); await page.keyboard.press("ArrowUp");
-  await expect.poll(async () => (await drawings(scenario)).every((d) => d.points[0]!.price !== before.find((b) => b.id === d.id)!.points[0]!.price)).toBe(true);
-  await page.keyboard.press("Control+z"); await expect.poll(async () => (await drawings(scenario)).map((d) => d.points)).toEqual(before.map((d) => d.points));
+  await pollSaved(async () => (await drawings(scenario)).every((d) => d.points[0]!.price !== before.find((b) => b.id === d.id)!.points[0]!.price)).toBe(true);
+  await page.keyboard.press("Control+z"); await pollSaved(async () => (await drawings(scenario)).map((d) => d.points)).toEqual(before.map((d) => d.points));
   await page.mouse.click(trend.x, trend.y);
   await page.getByRole("button", { name: "드로잉 더 보기" }).click();
   await page.getByRole("menuitem", { name: "맨 앞으로", exact: true }).click();
-  await expect.poll(async () => { const ds = await drawings(scenario); return ds.find((d) => d.tool === "trendline")!.z > ds.find((d) => d.tool === "hline")!.z; }).toBe(true);
+  await pollSaved(async () => { const ds = await drawings(scenario); return ds.find((d) => d.tool === "trendline")!.z > ds.find((d) => d.tool === "hline")!.z; }).toBe(true);
 });
 
 test("drawing engine: whitespace-only text in the settings dialog saves no text", async ({ page, scenario }) => {
   await open(page); await draw(page);
-  await expect.poll(async () => (await drawings(scenario)).length).toBe(1);
+  await pollSaved(async () => (await drawings(scenario)).length).toBe(1);
   await page.getByRole("button", { name: "드로잉 세부 설정" }).click();
   const dialog = page.getByRole("dialog", { name: "추세선 세부 설정" });
   await dialog.locator("summary").filter({ hasText: /^글자$/ }).click();
   await dialog.getByRole("textbox", { name: "글자", exact: true }).fill("지지");
   await dialog.getByRole("button", { name: "확인", exact: true }).click();
-  await expect.poll(async () => (await drawings(scenario))[0]!.text).toBe("지지");
+  await pollSaved(async () => (await drawings(scenario))[0]!.text).toBe("지지");
   await page.getByRole("button", { name: "드로잉 세부 설정" }).click();
   await dialog.locator("summary").filter({ hasText: /^글자$/ }).click();
   await dialog.getByRole("textbox", { name: "글자", exact: true }).fill("   ");
   await dialog.getByRole("button", { name: "확인", exact: true }).click();
-  await expect.poll(async () => (await drawings(scenario))[0]!.text).toBeNull();
+  await pollSaved(async () => (await drawings(scenario))[0]!.text).toBeNull();
 });
 
 test("drawing engine: settings preview, cancellation, coordinates and text", async ({ page, scenario }, testInfo) => {
   await open(page); await draw(page);
-  await expect.poll(async () => (await drawings(scenario)).length).toBe(1);
+  await pollSaved(async () => (await drawings(scenario)).length).toBe(1);
   const original = (await drawings(scenario))[0]!;
   await page.getByRole("button", { name: "드로잉 세부 설정" }).click();
   const dialog = page.getByRole("dialog", { name: "추세선 세부 설정" });
@@ -187,7 +187,7 @@ test("drawing engine: settings preview, cancellation, coordinates and text", asy
   await dialog.getByRole("textbox", { name: "글자", exact: true }).fill("지지 구간");
   await page.screenshot({ path: testInfo.outputPath("settings.png") });
   await dialog.getByRole("button", { name: "확인", exact: true }).click();
-  await expect.poll(async () => (await drawings(scenario))[0]!.text).toBe("지지 구간");
+  await pollSaved(async () => (await drawings(scenario))[0]!.text).toBe("지지 구간");
   expect((await drawings(scenario))[0]!.points[0]!.price).toBe(original.points[0]!.price + 10);
   expect((await drawings(scenario))[0]!.style).toMatchObject({ line: { color: "$draw" }, label: { color: "$draw" } });
   await expect.poll(async () => (await mirror(page))[0]!.texts).toContain("지지 구간");
@@ -200,14 +200,14 @@ test("drawing engine: settings preview, cancellation, coordinates and text", asy
   await expect(inline).toBeVisible();
   expect((await drawings(scenario))[0]!.text).toBe("지지 구간");
   await inline.press("Enter");
-  await expect.poll(async () => (await drawings(scenario))[0]!.text).toBe("한글 조합");
+  await pollSaved(async () => (await drawings(scenario))[0]!.text).toBe("한글 조합");
 });
 
 test("drawing engine: Alt tool aliases consume browser shortcuts and text fields keep their keys", async ({ page, scenario }) => {
   await open(page); const r = await draw(page, "Alt+t");
-  await expect.poll(async () => (await drawings(scenario)).length).toBe(1);
+  await pollSaved(async () => (await drawings(scenario)).length).toBe(1);
   await cell(page).focus(); await page.keyboard.press("Alt+h"); await page.mouse.click(r.x + r.width * 0.84, r.y + r.height * 0.5);
-  await expect.poll(async () => (await drawings(scenario)).length).toBe(2);
+  await pollSaved(async () => (await drawings(scenario)).length).toBe(2);
   await cell(page).focus();
   const prevented = await cell(page).evaluate((el) => {
     const e = new KeyboardEvent("keydown", { code: "KeyF", altKey: true, bubbles: true, cancelable: true });
@@ -224,7 +224,7 @@ test("drawing engine: Alt tool aliases consume browser shortcuts and text fields
   await dialog.locator("summary").filter({ hasText: /^글자$/ }).click();
   const input = dialog.getByRole("textbox", { name: "글자", exact: true });
   await input.fill("A"); await input.press("Control+a"); await input.press("Control+c");
-  await expect(dialog).toBeVisible(); await expect.poll(async () => (await drawings(scenario)).length).toBe(2);
+  await expect(dialog).toBeVisible(); await pollSaved(async () => (await drawings(scenario)).length).toBe(2);
 });
 
 const GROUP_LABEL: Record<Tool["group"], string> = { line: "선", fib: "피보나치·갠", shape: "도형", note: "주석", measure: "측정", pattern: "패턴" };
@@ -251,7 +251,7 @@ for (const { group, tools, name } of PICK_SLICES) {
 }
 
 test("drawing engine: phone shows persisted shapes without editing controls", async ({ page, scenario }, testInfo) => {
-  await open(page); await draw(page); await expect.poll(async () => (await drawings(scenario)).length).toBe(1);
+  await open(page); await draw(page); await pollSaved(async () => (await drawings(scenario)).length).toBe(1);
   await page.setViewportSize({ width: 390, height: 844 });
   await expect(page.getByRole("navigation", { name: "드로잉 도구" })).toBeHidden();
   await expect(page.getByRole("toolbar", { name: "드로잉 스타일" })).toBeHidden();
@@ -264,14 +264,14 @@ test("drawing engine: phone shows persisted shapes without editing controls", as
 });
 
 test("drawing engine: another tab's edit prevents undoing its content", async ({ page, context, scenario }) => {
-  await open(page); await draw(page); await expect.poll(async () => (await drawings(scenario)).length).toBe(1);
+  await open(page); await draw(page); await pollSaved(async () => (await drawings(scenario)).length).toBe(1);
   const original = (await drawings(scenario))[0]!;
   const other = await context.newPage(); await open(other);
   const line = (await settled(other))[0]!; const frame = (await chartOf(cell(other)).boundingBox())!;
   await other.mouse.click(frame.x + (line.points[0]!.x + line.points[1]!.x) / 2, frame.y + (line.points[0]!.y + line.points[1]!.y) / 2);
   await expect.poll(async () => (await mirror(other))[0]?.selected).toBe(true);
   await other.keyboard.press("ArrowUp");
-  await expect.poll(async () => (await drawings(scenario))[0]!.points).not.toEqual(original.points);
+  await pollSaved(async () => (await drawings(scenario))[0]!.points).not.toEqual(original.points);
   const changed = (await drawings(scenario))[0]!;
   await page.bringToFront(); await page.evaluate(() => window.dispatchEvent(new Event("focus")));
   await expect.poll(async () => (await mirror(page))[0]!.points[0]!.y).not.toBeNull();
@@ -283,7 +283,7 @@ test("drawing engine: another tab's edit prevents undoing its content", async ({
 });
 
 test("drawing engine: completed legacy replay is retired locally and the newer server edit wins", async ({ page, scenario }) => {
-  await open(page); await draw(page); await expect.poll(async () => (await drawings(scenario)).length).toBe(1);
+  await open(page); await draw(page); await pollSaved(async () => (await drawings(scenario)).length).toBe(1);
   await expect(page.getByText(/^자동 저장됨 /)).toBeVisible();
   const original = (await drawings(scenario))[0]!;
   const changed = { ...original, points: original.points.map((p) => ({ ...p, price: p.price + 100 })), revision: original.revision + 100 };
@@ -329,10 +329,10 @@ test("drawing engine: reload recovers an unsent edit and box selection selects b
   expect(await drawings(scenario)).toHaveLength(0);
   await page.unroute("**/api/drawings/*"); await page.reload();
   await expect(chartOf(cell(page))).toHaveAttribute("data-bar-count", /^[1-9]\d*$/);
-  await expect.poll(async () => (await drawings(scenario)).length).toBe(1);
+  await pollSaved(async () => (await drawings(scenario)).length).toBe(1);
   await expect.poll(() => page.evaluate(() => Object.keys(localStorage).filter((key) => key.startsWith("vv.unsaved.drawing.")).length)).toBe(0);
   await cell(page).focus(); await page.keyboard.press("H"); await page.mouse.click(r.x + r.width * 0.85, r.y + r.height * 0.48);
-  await expect.poll(async () => (await drawings(scenario)).length).toBe(2);
+  await pollSaved(async () => (await drawings(scenario)).length).toBe(2);
   await cell(page).focus(); await page.keyboard.down("Control");
   await page.mouse.move(r.x + r.width * 0.7, r.y + r.height * 0.16); await page.mouse.down();
   await page.mouse.move(r.x + r.width * 0.9, r.y + r.height * 0.55, { steps: 10 }); await page.mouse.up(); await page.keyboard.up("Control");

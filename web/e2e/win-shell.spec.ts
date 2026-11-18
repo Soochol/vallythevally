@@ -4,7 +4,7 @@ import type { Locator, Page } from "@playwright/test";
 import type { Bar } from "../src/api/generated/Bar";
 import type { DrawingInput } from "../src/api/generated/DrawingInput";
 import type { LayoutWindow } from "../src/api/generated/LayoutWindow";
-import { type Scenario, cell, chartOf, DEFAULT_LAYOUT_ID, expect, test } from "./harness";
+import { type Scenario, cell, chartOf, DEFAULT_LAYOUT_ID, expect, test, pollSaved } from "./harness";
 
 test.use({ clockStart: "20261109100000" });
 
@@ -85,7 +85,7 @@ test("탭을 누르면 창 내용이 바뀌고 키보드로도 옮기며 새로�
   await expect(tab(page, 2, "스크리너")).toHaveAttribute("aria-selected", "true");
   await expect(group(page, 2).getByRole("complementary", { name: "스크리너" })).toBeVisible();
   await expect(page.getByRole("complementary", { name: "관심종목" })).toHaveCount(0);
-  await expect.poll(async () => JSON.stringify(await savedDock(scenario))).toContain('"active":"screener"');
+  await pollSaved(async () => JSON.stringify(await savedDock(scenario))).toContain('"active":"screener"');
   await page.reload();
   await expect(tab(page, 2, "스크리너")).toHaveAttribute("aria-selected", "true");
   await expect(group(page, 2).getByRole("complementary", { name: "스크리너" })).toBeVisible();
@@ -116,7 +116,7 @@ test("경계를 끌면 두 묶음의 폭이 바뀌어 저장되고 최소 크기
   expect(await savedDock(scenario)).toBeUndefined();
   await page.mouse.up();
   expect(await width(group(page, 2))).toBe(before[1]! + 120);
-  await expect.poll(async () => JSON.stringify(await savedDock(scenario))).toContain('"kind":"split"');
+  await pollSaved(async () => JSON.stringify(await savedDock(scenario))).toContain('"kind":"split"');
   await page.reload();
   await expect.poll(() => width(group(page, 1))).toBe(before[0]! - 120);
   expect(await width(group(page, 2))).toBe(before[1]! + 120);
@@ -156,7 +156,7 @@ test("차트 창 두 개는 각자 봉을 그리고, 실시간 봉은 그 종목
   await expect.poll(async () => Number(await chartOf(first).getAttribute("data-bar-count"))).toBeGreaterThan(0);
   await expect.poll(async () => Number(await chartOf(second).getAttribute("data-bar-count"))).toBeGreaterThan(0);
   await expect(page.locator("[data-dock-group]")).toHaveCount(3);
-  await expect.poll(() => scenario.live.subscriptions().map((s) => s.symbol).sort()).toEqual(["000660", "005930"]);
+  await pollSaved(() => scenario.live.subscriptions().map((s) => s.symbol).sort()).toEqual(["000660", "005930"]);
   const firstClose = await chartOf(first).getAttribute("data-last-close");
   scenario.live.bar("000660", bar(NOV9, 123_400));
   await expect(chartOf(second)).toHaveAttribute("data-last-close", "123400");
@@ -240,7 +240,7 @@ test("한 묶음에 쌓인 차트 탭 가운데 고른 탭이 새로고침 뒤�
   const topbar = page.getByRole("toolbar", { name: "차트 도구 막대" });
   await tab(page, 1, "SK하이닉스").click();
   await expect(currentSymbol(topbar)).toContainText("SK하이닉스");
-  await expect.poll(async () => JSON.stringify(await savedDock(scenario))).toContain('"active":"cell-1"');
+  await pollSaved(async () => JSON.stringify(await savedDock(scenario))).toContain('"active":"cell-1"');
   await page.reload();
   await expect(cell(page, 2)).toHaveAttribute("aria-busy", "false");
   await expect(currentSymbol(topbar)).toContainText("SK하이닉스");

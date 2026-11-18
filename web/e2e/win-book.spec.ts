@@ -3,7 +3,7 @@ import type { FeedBook } from "../src/api/generated/FeedBook";
 import type { FeedKind } from "../src/api/generated/FeedKind";
 import type { LayoutWindow } from "../src/api/generated/LayoutWindow";
 import type { OrderBook } from "../src/api/generated/OrderBook";
-import { type Scenario, cell, DEFAULT_LAYOUT_ID, expect, pickDesktopVenue, test, windowTabs } from "./harness";
+import { type Scenario, cell, DEFAULT_LAYOUT_ID, expect, pickDesktopVenue, test, windowTabs, pollSaved } from "./harness";
 import { pinQuote } from "./order-window";
 
 const SETTINGS = { v: 1, style: "candle", scale: "normal", indicators: [], compare: [], panels: [] };
@@ -38,7 +38,7 @@ function liveOf(asks: [number, number][], bids: [number, number][], totals: [num
 
 async function subOf(scenario: Scenario, kind: FeedKind): Promise<string> {
   let sub = "";
-  await expect.poll(() => {
+  await pollSaved(() => {
     const message = scenario.live.messages.find((m) => m.type === "subscribe_feed" && m.kind === kind && m.symbol === CODE);
     sub = message?.type === "subscribe_feed" ? message.sub : "";
     return sub;
@@ -54,7 +54,7 @@ function replyBook(scenario: Scenario, base: number) {
 }
 
 async function tradesSubs(scenario: Scenario): Promise<string[]> {
-  await expect.poll(() => scenario.live.messages.filter((m) => m.type === "subscribe_feed" && m.kind === "trades" && m.symbol === CODE).length).toBe(2);
+  await pollSaved(() => scenario.live.messages.filter((m) => m.type === "subscribe_feed" && m.kind === "trades" && m.symbol === CODE).length).toBe(2);
   return scenario.live.messages.flatMap((m) => (m.type === "subscribe_feed" && m.kind === "trades" && m.symbol === CODE ? [m.sub] : []));
 }
 
@@ -335,7 +335,7 @@ function bookSubs(scenario: Scenario): string[] {
 async function reconnect(scenario: Scenario): Promise<string> {
   const before = bookSubs(scenario).length;
   scenario.live.close();
-  await expect.poll(() => bookSubs(scenario).length).toBe(before + 1);
+  await pollSaved(() => bookSubs(scenario).length).toBe(before + 1);
   return bookSubs(scenario).at(-1)!;
 }
 

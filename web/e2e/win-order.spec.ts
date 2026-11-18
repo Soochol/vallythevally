@@ -1,5 +1,5 @@
 import type { FeedBook } from "../src/api/generated/FeedBook";
-import { type Scenario, cell, DEFAULT_LAYOUT_ID, expect, pickDesktopVenue, test, windowTabs } from "./harness";
+import { type Scenario, cell, DEFAULT_LAYOUT_ID, expect, pickDesktopVenue, test, windowTabs, pollSaved } from "./harness";
 import { BASE, CODE, cellAt, center, chipAt, commandOf, dragChip, openOrder, openOrderWindow, ordersOn, snapshot, status, tradingApi, win, writesTo } from "./order-window";
 
 test("더블클릭이 그 가격에 지정가 신규를 내고 실시간 호가를 따른다", async ({ page, scenario }) => {
@@ -9,7 +9,7 @@ test("더블클릭이 그 가격에 지정가 신규를 내고 실시간 호가�
   await expect(page.getByTestId("order-gate")).toHaveCount(0);
 
   let sub = "";
-  await expect.poll(() => {
+  await pollSaved(() => {
     const message = scenario.live.messages.find((m) => m.type === "subscribe_feed" && m.kind === "book" && m.symbol === CODE);
     sub = message?.type === "subscribe_feed" ? message.sub : "";
     return sub;
@@ -24,7 +24,7 @@ test("더블클릭이 그 가격에 지정가 신규를 내고 실시간 호가�
   await expect(cellAt(page, "buy", 70_000).locator(".od-preview")).toHaveText("매수 10");
 
   await cellAt(page, "buy", 70_000).dblclick();
-  await expect.poll(() => writesTo(api, "place")).toHaveLength(1);
+  await pollSaved(() => writesTo(api, "place")).toHaveLength(1);
   const [place] = writesTo(api, "place");
   expect(place!.header).toBe("1");
   expect(place!.body).toMatchObject({ code: CODE, side: "buy", quantity: 10, price: 70_000, venue: "krx", confirmHighValue: false });
@@ -57,9 +57,9 @@ test("주문 경로를 고르면 요청에 실리고 창 설정으로 저장된�
   await expect(page.getByRole("group", { name: "주문 경로" }).getByRole("button", { name: "KRX" })).toHaveAttribute("aria-pressed", "true");
   await page.getByRole("group", { name: "주문 경로" }).getByRole("button", { name: "NXT" }).click();
   await cellAt(page, "buy", 70_000).dblclick();
-  await expect.poll(() => writesTo(api, "place")).toHaveLength(1);
+  await pollSaved(() => writesTo(api, "place")).toHaveLength(1);
   expect(writesTo(api, "place")[0]!.body.venue).toBe("nxt");
-  await expect.poll(() => scenario.documents.layout(DEFAULT_LAYOUT_ID).windows.find((w) => w.kind === "order")).toEqual({ id: "order", link: null, kind: "order", venue: "nxt" });
+  await pollSaved(() => scenario.documents.layout(DEFAULT_LAYOUT_ID).windows.find((w) => w.kind === "order")).toEqual({ id: "order", link: null, kind: "order", venue: "nxt" });
 });
 
 test("걸린 주문은 같은 가격 합계의 칩이고 총 접수 행이 방향별 수량과 건수를 보인다", async ({ page, scenario }) => {
@@ -82,7 +82,7 @@ test("칩을 같은 방향 칸으로 끌면 정정이고 고스트가 새 가격
   await dragChip(page, chipAt(page, "buy", 70_000), await center(cellAt(page, "buy", 69_800)), false);
   await expect(page.getByTestId("order-ghost")).toContainText("→ 69,800원");
   await page.mouse.up();
-  await expect.poll(() => writesTo(api, "modify")).toHaveLength(1);
+  await pollSaved(() => writesTo(api, "modify")).toHaveLength(1);
   expect(writesTo(api, "modify")[0]!.body).toMatchObject({ orderNo: "0000001", price: 69_800, confirmHighValue: false });
   await expect(status(page)).toContainText("접수 · 정정");
 });
@@ -100,7 +100,7 @@ test("칩을 사다리 밖으로 끌면 그 가격 일괄 취소이고 Esc는 �
   expect(scenario.requests.filter((r) => new URL(r.url()).pathname.startsWith("/api/trading/commands/"))).toHaveLength(0);
 
   await dragChip(page, chipAt(page, "buy", 70_000), { x: 5, y: 5 });
-  await expect.poll(() => writesTo(api, "cancel-batch")).toHaveLength(1);
+  await pollSaved(() => writesTo(api, "cancel-batch")).toHaveLength(1);
   expect(writesTo(api, "cancel-batch")[0]!.body).toMatchObject({ code: CODE, side: "buy", price: 70_000 });
   expect(String(writesTo(api, "cancel-batch")[0]!.body.batchId)).toMatch(/^batch-[0-9a-f-]{36}$/);
   await expect(status(page)).toContainText("취소 접수");
@@ -113,7 +113,7 @@ test("빈 곳 우클릭의 전체 취소는 가격과 방향마다 새 batchId�
   await page.getByTestId("price-ladder").locator(".mw-px").first().click({ button: "right" });
   await expect(page.getByRole("menu", { name: "주문 취소" })).toBeVisible();
   await page.getByRole("menuitem", { name: "전체 모두 취소" }).click();
-  await expect.poll(() => writesTo(api, "cancel-batch")).toHaveLength(3);
+  await pollSaved(() => writesTo(api, "cancel-batch")).toHaveLength(3);
   const batches = writesTo(api, "cancel-batch").map((w) => w.body);
   expect(batches.map((b) => `${b.side}:${b.price}`).sort()).toEqual(["buy:69900", "buy:70000", "sell:70100"]);
   expect(new Set(batches.map((b) => b.batchId)).size).toBe(3);
@@ -132,12 +132,12 @@ test("일괄 취소의 batchId는 답을 못 받은 같은 동작의 재전송�
   await cancelPrice(70_000);
   await expect(status(page)).toContainText("서버의 답을 받지 못했습니다");
   await cancelPrice(70_000);
-  await expect.poll(() => writesTo(api, "cancel-batch")).toHaveLength(2);
+  await pollSaved(() => writesTo(api, "cancel-batch")).toHaveLength(2);
   await expect(status(page)).toContainText("취소 접수");
   await cancelPrice(69_900);
-  await expect.poll(() => writesTo(api, "cancel-batch")).toHaveLength(3);
+  await pollSaved(() => writesTo(api, "cancel-batch")).toHaveLength(3);
   await cancelPrice(70_000);
-  await expect.poll(() => writesTo(api, "cancel-batch")).toHaveLength(4);
+  await pollSaved(() => writesTo(api, "cancel-batch")).toHaveLength(4);
 
   const [failed, resent, otherPrice, later] = writesTo(api, "cancel-batch").map((w) => w.body);
   expect(resent!.batchId).toBe(failed!.batchId);
@@ -156,7 +156,7 @@ test("1억원 이상 주문은 확인 상자를 눌러야 보내진다", async (
   await cellAt(page, "buy", 70_000).hover();
   await expect(page.getByTestId("order-estimate")).toHaveText("99,960,000원");
   await cellAt(page, "buy", 70_000).dblclick();
-  await expect.poll(() => writesTo(api, "place")).toHaveLength(1);
+  await pollSaved(() => writesTo(api, "place")).toHaveLength(1);
   expect(writesTo(api, "place")[0]!.body.confirmHighValue).toBe(false);
   await expect(page.getByTestId("order-confirm")).toHaveCount(0);
 
@@ -172,7 +172,7 @@ test("1억원 이상 주문은 확인 상자를 눌러야 보내진다", async (
   await dialog.getByRole("checkbox").check();
   await expect(send).toBeEnabled();
   await send.click();
-  await expect.poll(() => writesTo(api, "place")).toHaveLength(2);
+  await pollSaved(() => writesTo(api, "place")).toHaveLength(2);
   expect(writesTo(api, "place")[1]!.body).toMatchObject({ quantity: 1429, price: 70_000, confirmHighValue: true });
 });
 
@@ -212,7 +212,7 @@ test("결과 불명이면 새 주문 칸을 막고 조회로 확인하면 풀린
   expect(writesTo(api, "place")).toHaveLength(1);
 
   await status(page).getByRole("button", { name: "조회로 확인" }).click();
-  await expect.poll(() => writesTo(api, "reconcile")).toHaveLength(1);
+  await pollSaved(() => writesTo(api, "reconcile")).toHaveLength(1);
   await expect(status(page)).toContainText("조회로 확인했습니다");
   await expect(win(page)).toHaveAttribute("data-writable", "");
   await expect(cellAt(page, "buy", 69_900)).not.toHaveAttribute("data-disabled", "");
@@ -241,7 +241,7 @@ test("창 더하기 메뉴에서 호가주문 창이 열리고 하나만 만들�
   await add.click();
   await page.getByRole("menu", { name: "창 더하기" }).getByRole("menuitem", { name: /^호가주문/ }).click();
   await expect(windowTabs(page).getByRole("tab", { name: /^호가주문/ })).toHaveCount(1);
-  await expect.poll(() => scenario.documents.layout(DEFAULT_LAYOUT_ID).windows.filter((w) => w.kind === "order")).toEqual([{ id: "order", link: null, kind: "order", venue: "krx" }]);
+  await pollSaved(() => scenario.documents.layout(DEFAULT_LAYOUT_ID).windows.filter((w) => w.kind === "order")).toEqual([{ id: "order", link: null, kind: "order", venue: "krx" }]);
   await add.click();
   await expect(page.getByRole("menu", { name: "창 더하기" }).getByRole("menuitem", { name: /^호가주문/ })).toContainText("열려 있음");
 });
@@ -265,7 +265,7 @@ test("답을 못 받은 신규는 다른 종목을 보고 돌아와 다시 해�
   await expect(win(page)).toHaveAttribute("data-symbol", CODE);
   await expect(page.getByTestId("price-ladder").locator(".mw-lr")).toHaveCount(20);
   await cellAt(page, "buy", 70_000).dblclick();
-  await expect.poll(() => placeIds(scenario).length).toBe(2);
+  await pollSaved(() => placeIds(scenario).length).toBe(2);
   const [first, second] = placeIds(scenario);
   expect(second).toBe(first);
 });
@@ -283,7 +283,7 @@ test("200 응답의 본문이 끊기면 답을 못 받은 것으로 보고 같�
   await cellAt(page, "buy", 70_000).dblclick();
   await expect(status(page)).toContainText("서버의 답을 받지 못했습니다");
   await cellAt(page, "buy", 70_000).dblclick();
-  await expect.poll(() => placeIds(scenario).length).toBe(2);
+  await pollSaved(() => placeIds(scenario).length).toBe(2);
   const [first, second] = placeIds(scenario);
   expect(second).toBe(first);
 });
