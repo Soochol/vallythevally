@@ -194,7 +194,8 @@ test("뒤 차트를 Enter로 크게 보면 활성 칸과 도구 막대도 따라
   expect(saved(scenario).canvas!.rects).toEqual(before);
   await page.getByRole("navigation", { name: "창 종류" }).getByRole("button", { name: "관심종목 창 더하기" }).click();
   await expect(frame(page, "cell-0")).not.toHaveAttribute("data-maximized");
-  await expect(frame(page, "watchlist")).toHaveCSS("z-index", "3");
+  const total = await page.locator("[data-canvas-window]").count();
+  await expect(frame(page, "watchlist-2")).toHaveCSS("z-index", String(total));
 });
 
 test("실제 머리 끌기는 안내선으로 가장자리에 붙고 크기 조작은 최소 크기에서 멈춰 한 번 저장한다", async ({ page, scenario }) => {
@@ -302,8 +303,8 @@ test("창 종류와 위 막대는 가운데에 차트를 더하고 기존 창을
   expect(Math.abs(box.y + box.height / 2 - area.y - area.height / 2)).toBeLessThan(25);
   await expect(added).toHaveAttribute("data-active-cell", "");
   await dock.getByRole("button", { name: "관심종목 창 더하기" }).click();
-  await expect(page.locator("[data-canvas-window]")).toHaveCount(4);
-  await pollSaved(() => saved(scenario).canvas?.order.at(-1)).toBe("watchlist");
+  await expect(page.locator("[data-canvas-window]")).toHaveCount(5);
+  await pollSaved(() => saved(scenario).canvas?.order.at(-1)).toBe("watchlist-2");
   await page.getByRole("toolbar", { name: "차트 도구 막대" }).getByRole("button", { name: "창 더하기" }).click();
   await page.getByRole("menu", { name: "창 더하기" }).getByRole("menuitem", { name: /^차트/ }).click();
   await expect(cell(page, 4)).toHaveAttribute("aria-busy", "false");

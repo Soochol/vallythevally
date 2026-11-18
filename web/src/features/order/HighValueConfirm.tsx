@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useId, useState } from "react";
 import { DialogFrame } from "../dialog/DialogParts";
 import { formatWon } from "../market-window/format";
 
@@ -10,10 +10,11 @@ export interface HighValueRequest {
 
 export function HighValueConfirm({ request, onClose }: { request: HighValueRequest; onClose: () => void }) {
   const [checked, setChecked] = useState(false);
+  const titleId = useId();
   return (
-    <DialogFrame labelledBy="order-confirm-title" width="w-[min(420px,calc(100vw-32px))]" onClose={onClose}>
+    <DialogFrame labelledBy={titleId} width="w-[min(420px,calc(100vw-32px))]" onClose={onClose}>
       <div className="px-5 pb-2 pt-5" data-testid="order-confirm">
-        <h2 id="order-confirm-title" className="text-m font-semibold leading-snug">고액 주문 확인</h2>
+        <h2 id={titleId} className="text-m font-semibold leading-snug">고액 주문 확인</h2>
         <p className="mt-2 text-s text-text-2">{request.title}</p>
         <p className="mt-1 text-s">주문금액 <b data-testid="order-confirm-amount">{formatWon(request.amount)}</b></p>
         <label className="mt-3 flex items-center gap-2 text-s">

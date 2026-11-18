@@ -243,7 +243,7 @@ test("창 더하기 메뉴에서 호가주문 창이 열리고 하나만 만들�
   await expect(windowTabs(page).getByRole("tab", { name: /^호가주문/ })).toHaveCount(1);
   await pollSaved(() => scenario.documents.layout(DEFAULT_LAYOUT_ID).windows.filter((w) => w.kind === "order")).toEqual([{ id: "order", link: null, kind: "order", venue: "krx" }]);
   await add.click();
-  await expect(page.getByRole("menu", { name: "창 더하기" }).getByRole("menuitem", { name: /^호가주문/ })).toContainText("열려 있음");
+  await expect(page.getByRole("menu", { name: "창 더하기" }).getByRole("menuitem", { name: /^호가주문/ })).toContainText("1개 열림");
 });
 
 const placeIds = (scenario: Scenario): string[] => scenario.requests

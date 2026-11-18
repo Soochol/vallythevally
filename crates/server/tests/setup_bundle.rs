@@ -248,6 +248,21 @@ async fn an_old_layout_with_an_objects_window_is_imported_without_that_window_an
 }
 
 #[tokio::test]
+async fn a_layout_with_two_windows_of_one_kind_is_imported() {
+    let (from, into) = (machine().await, machine().await);
+    fill(&from).await;
+    let twins = [json!({"id": "trades", "link": "a", "kind": "trades"}), json!({"id": "trades-2", "link": "b", "kind": "trades"}), json!({"id": "order", "link": null, "kind": "order", "venue": "krx"}), json!({"id": "order-2", "link": "b", "kind": "order", "venue": "nxt"})];
+    let bundle = with_document(&from.export().await, "layout", LAYOUT_TWO, |d| d["body"]["windows"].as_array_mut().unwrap().extend(twins.clone()));
+
+    let (status, answer) = into.import(&bundle).await;
+    assert_eq!(status, 200, "{answer}");
+    let (_, saved) = into.get(&format!("/api/layouts/{LAYOUT_TWO}")).await;
+    let ids: Vec<_> = saved["windows"].as_array().unwrap().iter().map(|w| w["id"].as_str().unwrap()).collect();
+    assert_eq!(ids, ["cell-0", "cell-1", "watchlist", "trades", "trades-2", "order", "order-2"]);
+    assert_eq!(saved["windows"][6]["venue"], "nxt");
+}
+
+#[tokio::test]
 async fn a_hidden_drawing_in_a_bundle_is_stored_visible() {
     let (from, into) = (machine().await, machine().await);
     fill(&from).await;

@@ -936,7 +936,8 @@ mod tests {
             ("/api/layouts/L2", with(&|v| v["windows"][2]["id"] = json!("x".repeat(65))), StatusCode::BAD_REQUEST, "bad_request"),
             ("/api/layouts/L2", with(&|v| v["windows"] = json!([{"id": "watchlist", "link": null, "kind": "watchlist"}])), StatusCode::BAD_REQUEST, "bad_request"),
             ("/api/layouts/L2", with(&|v| v["windows"] = json!((0..9).map(|i| chart_window(&format!("c{i}"))).collect::<Vec<_>>())), StatusCode::BAD_REQUEST, "bad_request"),
-            ("/api/layouts/L2", with(&|v| { let mut w = windows(v); w.push(json!({"id": "watchlist2", "link": null, "kind": "watchlist"})); v["windows"] = json!(w); }), StatusCode::BAD_REQUEST, "bad_request"),
+            ("/api/layouts/L2", with(&|v| { let mut w = windows(v); w.push(json!({"id": "indicators2", "link": null, "kind": "indicators"})); v["windows"] = json!(w); }), StatusCode::BAD_REQUEST, "bad_request"),
+            ("/api/layouts/L2", with(&|v| { let mut w = vec![chart_window("c0")]; w.extend((0..50).map(|i| json!({"id": format!("trades{i}"), "link": null, "kind": "trades"}))); v["windows"] = json!(w); }), StatusCode::BAD_REQUEST, "bad_request"),
             ("/api/layouts/L2", with(&|v| v["windows"][1]["kind"] = json!("orders")), StatusCode::BAD_REQUEST, "bad_request"),
             ("/api/layouts/L2", with(&|v| v["windows"][1]["link"] = json!("k")), StatusCode::BAD_REQUEST, "bad_request"),
             ("/api/layouts/L2", with(&|v| v["windows"][2]["venue"] = json!("krx")), StatusCode::BAD_REQUEST, "bad_request"),
@@ -973,10 +974,13 @@ mod tests {
         }
         assert_eq!(put(&f.app, "/api/layouts/L4", &biggest).await.0, StatusCode::OK, "창 12개, 차트 창 8개와 배치가 저마다 64KB 아래면 받는다");
 
+        let fifty = json!({"id": "L5", "name": "오십", "sync": {}, "revision": 1, "placement": {}, "windows": std::iter::once(chart_window("c0")).chain((0..49).map(|i| json!({"id": format!("trades{i}"), "link": null, "kind": "trades"}))).collect::<Vec<_>>()});
+        assert_eq!(put(&f.app, "/api/layouts/L5", &fifty).await.0, StatusCode::OK, "창 50개는 받는다");
+
         let (s, v) = json(&f.app, "/api/layouts/nope").await;
         assert_eq!((s, code(&v)), (StatusCode::NOT_FOUND, "not_found"));
         assert_eq!(send(&f.app, "DELETE", "/api/layouts/nope", Body::empty()).await.0, StatusCode::NOT_FOUND);
-        for id in ["L2", "L3", "L4"] {
+        for id in ["L2", "L3", "L4", "L5"] {
             assert_eq!(send(&f.app, "DELETE", &format!("/api/layouts/{id}"), Body::empty()).await, (StatusCode::NO_CONTENT, Value::Null));
         }
         let (s, v) = send(&f.app, "DELETE", &format!("/api/layouts/{DEFAULT_ID}"), Body::empty()).await;

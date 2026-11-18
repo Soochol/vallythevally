@@ -1,7 +1,8 @@
 import { beforeEach, expect, test } from "vitest";
 import { workArea } from "../layout/canvas/geometry";
 import { placementForMode } from "../layout/modes";
-import { windowId } from "../layout/kinds";
+import { MAX_WINDOWS, windowId } from "../layout/kinds";
+import { byteLength, PAYLOAD_LIMIT_BYTES } from "../persist/bytes";
 import { DEFAULT_UI_PREFS } from "../persist/uiState";
 import { DEFAULT_LAYOUT, fittedDock, useLayoutStore, windowRefs } from "./layout";
 import { useUiStore } from "./ui";
@@ -89,4 +90,26 @@ test("같은 자리와 차례는 기록하지 않고 방식을 떠난 트랜잭�
   expect(state().commitCanvas({ session: 1, expected, next })).toBe(false);
   expect(state().steps).toHaveLength(0);
   expect(state().layout.placement.canvas).toBe(expected);
+});
+
+test("캔버스에서 같은 종류 창 더하기는 둘째 창을 맨 앞에 더하고 보이기는 첫 창을 앞으로 가져오며 복제는 하지 않는다", () => {
+  activate();
+  expect(state().openWindow("watchlist")).toBe("watchlist-2");
+  expect(state().layout.placement.canvas!.order.at(-1)).toBe("watchlist-2");
+  expect(state().steps).toHaveLength(1);
+  state().showWindow("watchlist");
+  expect(state().layout.windows.filter((w) => w.kind === "watchlist")).toHaveLength(2);
+  expect(state().layout.placement.canvas!.order.at(-1)).toBe("watchlist");
+  const before = state().layout.windows;
+  expect(state().duplicateWindow(windowId("watchlist"))).toBeNull();
+  expect(state().layout.windows).toBe(before);
+});
+
+test("캔버스에 창 50개를 더해도 배치 JSON은 64KB보다 작고 51번째 창은 더해지지 않는다", () => {
+  activate();
+  while (state().layout.windows.length < MAX_WINDOWS) expect(state().openWindow("trades")).not.toBeNull();
+  expect(byteLength(JSON.stringify(state().layout.placement))).toBeLessThan(PAYLOAD_LIMIT_BYTES);
+  const before = state().layout.windows;
+  expect(state().openWindow("book")).toBeNull();
+  expect(state().layout.windows).toBe(before);
 });

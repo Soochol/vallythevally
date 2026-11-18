@@ -1,10 +1,10 @@
-import { type KeyboardEvent, useState } from "react";
+import { type KeyboardEvent, useLayoutEffect, useRef, useState } from "react";
 import { useSymbolInfo } from "../../api/queries";
 import type { GroupNode } from "../../layout/dock/tree";
-import { WINDOW_KINDS, type WindowId } from "../../layout/kinds";
+import type { WindowId } from "../../layout/kinds";
 import type { Rect } from "../../layout/placement";
 import { PERIOD_LABEL } from "../../lib/symbol";
-import { chartNumber, chartWindows, useCell, useLayoutStore, type WindowState } from "../../stores/layout";
+import { chartNumber, chartWindows, useCell, useLayoutStore, useWindowName, type WindowState } from "../../stores/layout";
 import { useSelectionStore } from "../../stores/selection";
 import { CloseIcon } from "../icons";
 import { IntegratedBadge, showsIntegratedBadge } from "../market-window/parts";
@@ -14,7 +14,7 @@ import type { DockInteraction } from "./dockInteraction";
 import { WINDOW_CONTENT } from "./contents";
 import { LinkDot } from "./LinkDot";
 import { closeWindow, LAST_CHART_REASON } from "./manage";
-import { focusWithoutActivation } from "./focus";
+import { focusWithoutActivation, revealTab } from "./focus";
 
 export const tabId = (window: WindowId) => `window-tab-${window}`;
 const panelId = (group: string) => `window-panel-${group}`;
@@ -36,9 +36,13 @@ function ChartTabLabel({ id }: { id: WindowId }) {
   );
 }
 
+function OtherTabLabel({ window }: { window: WindowState }) {
+  const name = useWindowName(window);
+  return <><span className="dock-tab-name">{name}</span>{window.kind === "screener" && <ScreenerBadge />}{showsIntegratedBadge(window.kind) && <IntegratedBadge />}</>;
+}
+
 function TabLabel({ window }: { window: WindowState }) {
-  if (window.kind === "chart") return <ChartTabLabel id={window.id} />;
-  return <><span className="dock-tab-name">{WINDOW_KINDS[window.kind].name}</span>{window.kind === "screener" && <ScreenerBadge />}{showsIntegratedBadge(window.kind) && <IntegratedBadge />}</>;
+  return window.kind === "chart" ? <ChartTabLabel id={window.id} /> : <OtherTabLabel window={window} />;
 }
 
 function CloseTabButton({ id, name, reason, selected, onClosed }: { id: WindowId; name: string; reason: string | null; selected: boolean; onClosed(): void }) {
@@ -59,9 +63,12 @@ function ChartCloseButton({ id, selected, onClosed }: { id: WindowId; selected: 
   return <CloseTabButton id={id} name={`칸 ${number} ${name}`} reason={alone ? LAST_CHART_REASON : null} selected={selected} onClosed={onClosed} />;
 }
 
+function OtherCloseButton({ window, selected, onClosed }: { window: WindowState; selected: boolean; onClosed(): void }) {
+  return <CloseTabButton id={window.id} name={useWindowName(window)} reason={null} selected={selected} onClosed={onClosed} />;
+}
+
 function CloseTab({ window, selected, onClosed }: { window: WindowState; selected: boolean; onClosed(): void }) {
-  if (window.kind === "chart") return <ChartCloseButton id={window.id} selected={selected} onClosed={onClosed} />;
-  return <CloseTabButton id={window.id} name={WINDOW_KINDS[window.kind].name} reason={null} selected={selected} onClosed={onClosed} />;
+  return window.kind === "chart" ? <ChartCloseButton id={window.id} selected={selected} onClosed={onClosed} /> : <OtherCloseButton window={window} selected={selected} onClosed={onClosed} />;
 }
 
 function focusShownTab(group: string) {
@@ -82,6 +89,11 @@ export function DockGroup({ group, rect, number, interaction, maximized, onToggl
   const windows = useLayoutStore((s) => s.layout.windows);
   const activeCell = useSelectionStore((s) => s.activeCell);
   const shown = windows.find((w) => w.id === group.active);
+  const strip = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    const selected = strip.current?.querySelector<HTMLElement>('[role=tab][aria-selected=true]');
+    if (selected) revealTab(selected);
+  }, [group.active, group.tabs.length]);
   if (!shown) return null;
   const { overflow } = WINDOW_CONTENT[shown.kind];
   const select = interaction.selectTab;
@@ -97,7 +109,7 @@ export function DockGroup({ group, rect, number, interaction, maximized, onToggl
   return (
     <div data-dock-group={group.id} data-kind={shown.kind} data-active-cell={shown.id === activeCell ? "" : undefined} className="dock-group"
       style={{ left: rect.x, top: rect.y, width: rect.w, height: rect.h }}>
-      <div role="tablist" aria-label={`창 묶음 ${number}`} className="dock-tabs" onDoubleClick={(event) => { if (!(event.target instanceof Element) || !event.target.closest("button, .link-dot")) onToggleMaximize(); }}>
+      <div ref={strip} role="tablist" aria-label={`창 묶음 ${number}`} className="dock-tabs" onDoubleClick={(event) => { if (!(event.target instanceof Element) || !event.target.closest("button, .link-dot")) onToggleMaximize(); }}>
         {group.tabs.map((tab) => {
           const window = windows.find((w) => w.id === tab);
           if (!window) return null;

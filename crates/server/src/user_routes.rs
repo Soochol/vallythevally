@@ -17,7 +17,7 @@ use crate::http::{ApiFailure, AppState, symbol_list};
 use crate::screener::{RunnableScreen, parse_screen};
 use crate::userdata::{self, StoreError, wire_name};
 
-pub const MAX_WINDOWS: usize = 12;
+pub const MAX_WINDOWS: usize = 50;
 
 pub fn routes() -> Router<Arc<AppState>> {
     Router::new()
@@ -247,9 +247,9 @@ pub(crate) fn check_layout(path_id: &str, input: &LayoutInput) -> Result<Vec<Sym
     if !(1..=MAX_CHART_WINDOWS).contains(&charts) {
         return Err(ApiFailure::bad_request(format!("차트 창은 1~{MAX_CHART_WINDOWS}개여야 합니다: {charts}개")));
     }
-    let mut kinds = HashSet::new();
-    if let Some(w) = input.windows.iter().filter(|w| !w.content.is_chart()).find(|w| !kinds.insert(userdata::window_kind(&w.content))) {
-        return Err(ApiFailure::bad_request(format!("{} 창은 하나만 둘 수 있습니다", userdata::window_kind(&w.content))));
+    let mut indicators = input.windows.iter().filter(|w| matches!(w.content, WindowContent::Indicators));
+    if let (Some(_), Some(second)) = (indicators.next(), indicators.next()) {
+        return Err(ApiFailure::bad_request(format!("{} 창은 하나만 둘 수 있습니다", userdata::window_kind(&second.content))));
     }
     let mut nxt = Vec::new();
     for w in &input.windows {

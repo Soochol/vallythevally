@@ -3202,6 +3202,27 @@ mod tests {
     }
 
     #[tokio::test(start_paused = true)]
+    async fn releasing_one_of_two_feeds_of_the_same_symbol_and_kind_keeps_the_kind_registered_and_the_other_fed() {
+        let h = std_harness();
+        live(&h).await;
+        let (conn, out) = connect(&h).await;
+        subscribe_feed(&h, conn, "first", FeedKind::Book, Venue::Combined);
+        subscribe_feed(&h, conn, "second", FeedKind::Book, Venue::Combined);
+        take(&out).await;
+        let want = |kinds: &[RealType]| h.desired.borrow().get(&samsung_symbol()).cloned().unwrap_or_default() == kinds.iter().copied().collect::<BTreeSet<_>>();
+        h.hub.unsubscribe(conn, sub("first"));
+        tokio::time::sleep(Duration::from_secs(60)).await;
+        assert!(want(&[RealType::Trade, RealType::Book, RealType::AfterHours]), "남은 창이 있으면 유예가 지나도 호가 종류가 등록 목록에 남는다");
+        h.events.send(book_event(&h, 101, 10)).await.unwrap();
+        let msgs = take(&out).await;
+        let [ServerMessage::FeedBook { sub: fed, .. }] = msgs.as_slice() else { panic!("{msgs:?}") };
+        assert_eq!(fed, "second", "남은 구독만 다음 호가를 받는다");
+        h.hub.unsubscribe(conn, sub("second"));
+        tokio::time::sleep(Duration::from_secs(31)).await;
+        assert!(want(&[]), "마지막 구독까지 풀리고 유예가 지나면 종목째 빠진다");
+    }
+
+    #[tokio::test(start_paused = true)]
     async fn a_feed_for_an_index_or_an_unknown_symbol_is_an_error() {
         let h = std_harness();
         live(&h).await;

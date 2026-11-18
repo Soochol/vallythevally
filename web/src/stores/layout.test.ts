@@ -5,10 +5,12 @@ import { useSelectionStore } from "./selection";
 import { useUiStore } from "./ui";
 import { layoutDock } from "../layout/dock/geometry";
 import { groupOfWindow, listGroups } from "../layout/dock/tree";
-import { MAX_WINDOWS, windowId } from "../layout/kinds";
+import { MAX_WINDOWS, windowId, type WindowId, type WindowKind } from "../layout/kinds";
+import type { CanvasPlacement, DockNode, DockPlacement, Placement } from "../layout/placement";
+import { byteLength, PAYLOAD_LIMIT_BYTES } from "../persist/bytes";
 import type { LinkColor } from "../api/generated/LinkColor";
 import type { SymbolCode } from "../api/generated/SymbolCode";
-import { ARRANGEMENT_STEPS, type ChartWindowState, chartWindow, chartWindows, DEFAULT_LAYOUT, fittedDock, linkedWindowCount, useLayoutStore, watchedSymbol, windowRefs, type WindowState } from "./layout";
+import { ARRANGEMENT_STEPS, type ChartWindowState, chartWindow, chartWindows, DEFAULT_LAYOUT, fittedDock, linkedWindowCount, useLayoutStore, watchedSymbol, windowName, windowRefs, type WindowState } from "./layout";
 
 const state = () => useLayoutStore.getState();
 const shownTab = (kind: string) => {
@@ -424,23 +426,110 @@ test("저장하지 않은 기본 도킹의 커밋은 초기 저장 없이 원래
   expect(state().layout.placement.dock).toBeNull();
 });
 
-test("창이 열두 개이면 없는 종류와 차트는 더하지 못하고 열려 있는 종류는 그대로 고른다", () => {
-  for (const kind of ["trades", "book", "program", "brokers"] as const) state().showWindow(kind);
-  while (state().layout.windows.length < MAX_WINDOWS) expect(state().addChart(firstChart().id, room)).not.toBeNull();
+const fillWithTrades = () => {
+  while (state().layout.windows.length < MAX_WINDOWS) expect(state().openWindow("trades")).not.toBeNull();
+};
+
+test("창이 상한 50개이면 새 창과 복제는 아무것도 바꾸지 않고 열려 있는 종류는 첫 창을 고른다", () => {
+  state().showWindow("indicators");
+  fillWithTrades();
   const before = arrangement();
   expect(state().addChart(firstChart().id, room)).toBeNull();
-  state().showWindow("indicators");
+  expect(state().openWindow("book")).toBeNull();
+  expect(state().openWindow("trades")).toBeNull();
+  expect(state().duplicateWindow(windowId("trades"))).toBeNull();
   expect(arrangement()).toEqual(before);
   state().showWindow("trades");
   expect(state().layout.windows).toHaveLength(MAX_WINDOWS);
   expect(shownTab("trades")).toBe(true);
 });
 
-test("창이 열두 개라 지표 창을 더하지 못하면 인스펙터 요청을 남기지 않고 가운데 창으로 연다", () => {
-  for (const kind of ["trades", "book", "program", "brokers"] as const) state().showWindow(kind);
-  while (state().layout.windows.length < MAX_WINDOWS) state().addChart(firstChart().id, room);
+test("창이 상한 50개라 지표 창을 더하지 못하면 인스펙터 요청을 남기지 않고 가운데 창으로 연다", () => {
+  fillWithTrades();
   useSelectionStore.getState().openIndicatorInspector(firstChart().id, "add", null);
   expect(state().layout.windows.some((w) => w.kind === "indicators")).toBe(false);
   expect(useSelectionStore.getState().inspector).toBeNull();
   expect(useSelectionStore.getState().dialog).toMatchObject({ kind: "indicatorCommand", cellId: firstChart().id, mode: "add" });
+});
+
+test("같은 종류 창 더하기는 kind-2 id로 둘째 창을 만들고 그 탭을 고른다", () => {
+  state().openWindow("trades");
+  expect(state().openWindow("trades")).toBe("trades-2");
+  expect(state().layout.windows.filter((w) => w.kind === "trades")).toEqual([{ id: "trades", link: null, kind: "trades" }, { id: "trades-2", link: null, kind: "trades" }]);
+  expect(groupOfWindow(state().layout.placement.dock!.root, windowId("trades-2"))?.active).toBe("trades-2");
+  expect(state().openWindow("watchlist")).toBe("watchlist-2");
+  expect(state().layout.windows.filter((w) => w.kind === "watchlist")).toHaveLength(2);
+});
+
+test("지표 창은 하나만 더해지고 더하기를 다시 해도 그대로다", () => {
+  expect(state().openWindow("indicators")).toBe("indicators");
+  const before = arrangement();
+  expect(state().openWindow("indicators")).toBeNull();
+  expect(arrangement()).toEqual(before);
+});
+
+test("창 보이기는 같은 종류가 여럿이면 창 목록 순서의 첫 창을 고른다", () => {
+  state().openWindow("trades");
+  state().openWindow("trades");
+  expect(shownTab("trades")).toBe(false);
+  expect(groupOfWindow(state().layout.placement.dock!.root, windowId("trades-2"))?.active).toBe("trades-2");
+  state().showWindow("trades");
+  expect(groupOfWindow(state().layout.placement.dock!.root, windowId("trades"))?.active).toBe("trades");
+  const windows = state().layout.windows.length;
+  state().showWindow("trades");
+  expect(state().layout.windows).toHaveLength(windows);
+});
+
+test("복제는 연동 색과 주문 경로를 옮긴 새 창을 같은 묶음의 그 탭 바로 오른쪽에 놓고 고른다", () => {
+  state().openWindow("order");
+  state().setLink(windowId("order"), "a");
+  state().setOrderVenue(windowId("order"), "nxt");
+  const group = () => groupOfWindow(state().layout.placement.dock!.root, windowId("order"))!;
+  state().openWindow("trades", group().id);
+  expect(group().tabs.slice(-2)).toEqual(["order", "trades"]);
+  const copy = state().duplicateWindow(windowId("order"));
+  expect(copy).toBe("order-2");
+  expect(state().layout.windows.find((w) => w.id === copy)).toEqual({ id: "order-2", link: "a", kind: "order", venue: "nxt" });
+  expect(group().tabs.slice(-3)).toEqual(["order", "order-2", "trades"]);
+  expect(group().active).toBe("order-2");
+  expect(state().steps.at(-1)?.before.windows.some((w) => w.id === "order-2")).toBe(false);
+  state().undoArrangement();
+  expect(state().layout.windows.some((w) => w.id === "order-2")).toBe(false);
+});
+
+test("복제는 차트와 지표와 없는 창과 떠 있는 창에서는 아무것도 하지 않는다", () => {
+  state().showWindow("indicators");
+  const before = arrangement();
+  expect(state().duplicateWindow(firstChart().id)).toBeNull();
+  expect(state().duplicateWindow(windowId("indicators"))).toBeNull();
+  expect(state().duplicateWindow(windowId("nope"))).toBeNull();
+  expect(arrangement()).toEqual(before);
+  const dock = fittedDock(state().layout);
+  state().setDock(detachWindow(dock, windowId("watchlist"), { x: 10, y: 10, w: 300, h: 300 }));
+  expect(state().duplicateWindow(windowId("watchlist"))).toBeNull();
+});
+
+test("같은 종류가 둘 이상인 창 이름에만 창 목록 순서의 번호가 붙고 차트 이름은 그대로다", () => {
+  const refs = (...ids: [string, WindowKind][]) => ids.map(([id, kind]) => ({ id: windowId(id), kind }));
+  const windows = refs(["cell-0", "chart"], ["cell-1", "chart"], ["trades-2", "trades"], ["book", "book"], ["trades", "trades"]);
+  expect(windows.map((w) => windowName(windows, w))).toEqual(["차트", "차트", "체결 1", "10호가", "체결 2"]);
+  expect(windowName(windows.slice(0, 4), windows[2]!)).toBe("체결");
+});
+
+test("창 50개를 모두 따로 묶은 도킹 배치, 일부를 띄운 도킹 배치, 캔버스 배치를 함께 담아도 64KB보다 작다", () => {
+  const ids = Array.from({ length: MAX_WINDOWS }, (_, n) => windowId(`trades-${n + 1}-with-a-long-window-identifier`));
+  const rect = (n: number) => ({ x: 123.45678901234567 + n, y: 234.56789012345678 + n, w: 345.6789012345678, h: 456.789012345678 });
+  const tree = (docked: readonly WindowId[], from: number, to: number): DockNode => {
+    const middle = from + Math.ceil((to - from) / 2);
+    return to - from === 1
+      ? { kind: "group", id: `g${from}`, tabs: [docked[from]!], active: docked[from]! }
+      : { kind: "split", dir: from % 2 === 0 ? "row" : "column", ratio: 0.5123456789012345, first: tree(docked, from, middle), second: tree(docked, middle, to) };
+  };
+  const separate: DockPlacement = { root: tree(ids, 0, ids.length), floats: [] };
+  const mixed: DockPlacement = { root: tree(ids.slice(0, 26), 0, 26), floats: ids.slice(26).map((window, n) => ({ window, rect: rect(n) })) };
+  const canvas: CanvasPlacement = { rects: Object.fromEntries(ids.map((id, n) => [id, rect(n)])), order: ids };
+  for (const dock of [separate, mixed]) {
+    const placement: Placement = { v: 1, dock, canvas };
+    expect(byteLength(JSON.stringify(placement))).toBeLessThan(PAYLOAD_LIMIT_BYTES);
+  }
 });
