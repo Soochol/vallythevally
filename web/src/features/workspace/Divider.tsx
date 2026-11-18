@@ -9,6 +9,7 @@ import type { DockNode, DockPlacement, Rect } from "../../layout/placement";
 import { useLayoutStore } from "../../stores/layout";
 import { useSelectionStore } from "../../stores/selection";
 import { DIVIDER_REACH, reachesDivider, yieldsToContent } from "./dividerReach";
+import { DividerMenu } from "./DividerMenu";
 import { DockSizeBalloon, sharePercent, sideName, speakSize, type Point, type SideSize } from "./DockSizeBalloon";
 
 export const DIVIDER_KEY_STEP = 16;
@@ -94,6 +95,7 @@ export function Divider({ box, dock, space, onDraft }: { box: GutterBox; dock: D
   live.current = { dock, box, space, onDraft };
   const [dragging, setDragging] = useState(false);
   const [hud, setHud] = useState<Hud | null>(null);
+  const [menuAt, setMenuAt] = useState<Point | null>(null);
   const m = measure(box, space);
   const row = m.row;
   const range = m.range ?? { min: m.lead, max: m.lead };
@@ -221,7 +223,20 @@ export function Divider({ box, dock, space, onDraft }: { box: GutterBox; dock: D
     setHud({ point: null, guide: null });
     balloonTimer.current = window.setTimeout(() => setHud(null), KEYBOARD_BALLOON_MS);
   };
+  const openMenu = (x: number, y: number) => {
+    element.current?.focus({ preventScroll: true });
+    setMenuAt({ x, y });
+  };
+  const openMenuAtCenter = () => {
+    const rect = element.current?.getBoundingClientRect();
+    if (rect) openMenu(rect.left + rect.width / 2, rect.top + rect.height / 2);
+  };
   const press = (event: ReactKeyboardEvent<HTMLDivElement>) => {
+    if (event.key === "ContextMenu" || (event.key === "F10" && event.shiftKey)) {
+      event.preventDefault();
+      openMenuAtCenter();
+      return;
+    }
     if (event.altKey || event.ctrlKey || event.metaKey) return;
     const now = live.current;
     const here = measure(now.box, now.space);
@@ -258,7 +273,16 @@ export function Divider({ box, dock, space, onDraft }: { box: GutterBox; dock: D
         title="끌어서 창 크기 조절. 두 번 누르면 같은 방향 창을 고르게" data-dragging={dragging ? "" : undefined}
         style={{ left: box.rect.x, top: box.rect.y, width: box.rect.w, height: box.rect.h }}
         onPointerDown={start} onPointerMove={move} onPointerUp={(event) => finish(true, event.altKey)} onPointerCancel={() => finish(false)} onLostPointerCapture={() => finish(true)}
-        onKeyDown={press} onDoubleClick={doubleClick} />
+        onKeyDown={press} onDoubleClick={doubleClick}
+        onContextMenu={(event) => {
+          event.preventDefault();
+          if (event.clientX === 0 && event.clientY === 0) openMenuAtCenter();
+          else openMenu(event.clientX, event.clientY);
+        }} />
+      {menuAt && <DividerMenu box={box} dock={dock} space={space} root={element} at={menuAt} onClose={() => {
+        setMenuAt(null);
+        element.current?.focus({ preventScroll: true });
+      }} />}
       {hud?.guide && <div data-dock-snap-guide className="dock-snap-guide" style={{ left: hud.guide.x, top: hud.guide.y, width: hud.guide.w, height: hud.guide.h }} />}
       {hud && balloonPoint && <DockSizeBalloon lead={shown.lead} second={shown.second} area={m.px.area} point={balloonPoint} />}
     </>
