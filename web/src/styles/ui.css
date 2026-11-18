@@ -221,6 +221,13 @@ html.dock-resizing-junction, html.dock-resizing-junction * { cursor:move !import
 .chart-extreme>span { position:absolute; left:0; transform:translateX(calc(-1 * var(--size-10))); padding:var(--size-2) var(--size-8); border-radius:var(--r-s); background:var(--raised); box-shadow:0 0 0 var(--size-1) var(--line-strong); color:var(--text); font-size:var(--fs-xs); white-space:nowrap; font-variant-numeric:tabular-nums; }
 .chart-extreme[data-flip]>span { transform:translateX(calc(-100% + var(--size-10))); }
 .chart-extreme b { font-weight:600; }
+.chart-jump { position:absolute; left:var(--size-8); bottom:var(--size-34); z-index:6; display:flex; align-items:center; max-width:calc(100% - var(--size-16)); padding:var(--size-2) var(--size-4) var(--size-2) var(--size-8); border-radius:var(--r-pill); background:var(--raised); box-shadow:0 0 0 var(--size-1) var(--accent); color:var(--text); font-size:var(--fs-xs); white-space:nowrap; font-variant-numeric:tabular-nums; }
+.chart-jump[hidden] { display:none; }
+.chart-jump-date { font-weight:600; color:var(--accent); }
+.chart-jump-notes { color:var(--text-2); }
+.chart-jump-warning { color:var(--warning); }
+.chart-jump-close { display:grid; place-items:center; flex:none; width:var(--size-18); height:var(--size-18); margin-left:var(--size-4); border-radius:var(--r-pill); color:var(--text-2); font-size:var(--fs-s); line-height:1; }
+.chart-jump-close:hover, .chart-jump-close:focus-visible { background:var(--hover); color:var(--text); }
 .chart-extreme[data-extreme=high]>i { background:var(--up); }
 .chart-extreme[data-extreme=high]>span { top:calc(-1 * var(--size-30)); }
 .chart-extreme[data-extreme=high] b { color:var(--up); }

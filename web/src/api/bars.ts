@@ -1,4 +1,6 @@
 import type { BarsPage } from "./generated/BarsPage";
+import type { JumpBarsPage } from "./generated/JumpBarsPage";
+import type { KstDate } from "./generated/KstDate";
 import type { Period } from "./generated/Period";
 import type { SymbolCode } from "./generated/SymbolCode";
 import type { UnixSeconds } from "./generated/UnixSeconds";
@@ -24,4 +26,19 @@ export function fetchBarsPage(q: BarsQuery, signal?: AbortSignal): Promise<BarsP
   if (q.venue !== null) params.set("venue", q.venue);
   if (q.before !== undefined) params.set("before", String(q.before));
   return getJson<BarsPage>(`/api/bars?${params}`, signal);
+}
+
+export interface JumpQuery extends BarsQuery {
+  date: KstDate;
+}
+
+export function fetchJumpPage(q: JumpQuery, signal?: AbortSignal): Promise<JumpBarsPage> {
+  const params = new URLSearchParams({ symbol: q.symbol, period: q.period, date: q.date, limit: "500" });
+  if (q.venue !== null) params.set("venue", q.venue);
+  if (q.before !== undefined) params.set("before", String(q.before));
+  return getJson<JumpBarsPage>(`/api/bars/jump?${params}`, signal);
+}
+
+export function jumpAsBarsPage(page: JumpBarsPage): BarsPage {
+  return { symbol: page.symbol, venue: page.venue, period: page.period, bars: page.bars, current: null, nextBefore: page.nextBefore, seq: null };
 }

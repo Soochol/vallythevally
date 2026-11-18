@@ -102,6 +102,7 @@ export class BarFeed {
   private olderInFlight = false;
   private olderFailed = false;
   private abort = new AbortController();
+  private readonly olderWaiters = new Set<() => void>();
 
   constructor(
     private readonly fetchPage: FetchPage,
@@ -123,6 +124,7 @@ export class BarFeed {
     this.abort.abort();
     this.abort = new AbortController();
     const gen = ++this.generation;
+    this.settleOlder();
     this.history = null;
     this.buffer = [];
     this.seqFloor = null;
@@ -164,12 +166,14 @@ export class BarFeed {
         const { history: next, added } = prependOlder(this.history, page);
         this.history = next;
         this.listener.prepended(next, added);
+        this.settleOlder();
       },
       (e: unknown) => {
         if (gen !== this.generation) return;
         this.olderInFlight = false;
         this.olderFailed = true;
         this.listener.olderFailed(e instanceof ApiRequestError ? e : new ApiRequestError("internal", String(e)));
+        this.settleOlder();
       },
     );
   }
@@ -180,14 +184,42 @@ export class BarFeed {
     this.needOlder();
   }
 
+  olderUntil(reached: (history: History) => boolean): Promise<"reached" | "exhausted" | "failed" | "stale"> {
+    return new Promise((resolve) => {
+      const gen = this.generation;
+      let requested = false;
+      const step = (): void => {
+        const h = this.history;
+        if (gen !== this.generation || !h) return resolve("stale");
+        if (reached(h)) return resolve("reached");
+        if (h.nextBefore === null) return resolve("exhausted");
+        if (!requested) {
+          requested = true;
+          this.olderFailed = false;
+        }
+        if (this.olderFailed) return resolve("failed");
+        this.olderWaiters.add(step);
+        this.needOlder();
+      };
+      step();
+    });
+  }
+
   dispose(): void {
     this.unsubscribe?.();
     this.unsubscribe = null;
     this.generation++;
+    this.settleOlder();
     this.key = null;
     this.history = null;
     this.buffer = null;
     this.abort.abort();
+  }
+
+  private settleOlder(): void {
+    const waiters = [...this.olderWaiters];
+    this.olderWaiters.clear();
+    for (const step of waiters) step();
   }
 
   private onSocket(m: SubEvent): void {

@@ -8,7 +8,7 @@ import { toChartTime } from "./time";
 export type BarInterval = Readonly<{ start: UnixSeconds; end: UnixSeconds; period: Period }>;
 export type PointedBar = BarInterval | null;
 
-const PERIOD_ORDER: Record<Period, number> = { "1m": 1, "3m": 3, "5m": 5, "10m": 10, "15m": 15, "30m": 30, "60m": 60, D: 1440, W: 10080, M: 43200, Q: 129600, Y: 525600 };
+export const PERIOD_ORDER: Record<Period, number> = { "1m": 1, "3m": 3, "5m": 5, "10m": 10, "15m": 15, "30m": 30, "60m": 60, D: 1440, W: 10080, M: 43200, Q: 129600, Y: 525600 };
 
 export function barInterval(start: UnixSeconds, period: Period): BarInterval {
   const date = new Date(toChartTime(start) * 1000);

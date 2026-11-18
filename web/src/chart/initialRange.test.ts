@@ -30,6 +30,10 @@ describe("the first visible range", () => {
   ])("%s", (_, input, expected) => {
     expect(initialRangeOf({ bars: bars(300), ...input }, 0, 299)).toEqual(expected);
   });
+
+  test("a zero right offset puts the end bar on the right edge", () => {
+    expect(initialRangeOf({ bars: bars(300), visibleBars: 50, narrow: false, period: "D", rightOffset: 0 }, 0, 299)).toEqual({ from: 250, to: 299 });
+  });
 });
 
 describe("holding the first range", () => {
