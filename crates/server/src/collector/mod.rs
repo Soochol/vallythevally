@@ -9,7 +9,7 @@ use axum::Router;
 use axum::extract::State;
 use axum::http::{Method, Uri, header};
 use axum::response::{IntoResponse, Json, Response};
-use axum::routing::{MethodFilter, get};
+use axum::routing::{any, get};
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
@@ -76,12 +76,10 @@ pub struct CollectorStatusPage {
 pub fn routes() -> Router<Arc<AppState>> {
     Router::new()
         .route("/api/collector/access", get(access))
-        .route("/api/collector/status", get(status).on(NOT_GET, other_method))
-        .route("/api/collector/coverage", get(coverage).on(NOT_GET, other_method))
-        .route("/api/collector/disk", get(disk).on(NOT_GET, other_method))
+        .route("/api/collector/status", any(other_method).get(status))
+        .route("/api/collector/coverage", any(other_method).get(coverage))
+        .route("/api/collector/disk", any(other_method).get(disk))
 }
-
-const NOT_GET: MethodFilter = MethodFilter::POST.or(MethodFilter::PUT).or(MethodFilter::PATCH).or(MethodFilter::DELETE).or(MethodFilter::OPTIONS).or(MethodFilter::TRACE).or(MethodFilter::CONNECT);
 
 async fn other_method(State(st): State<Arc<AppState>>, method: Method, uri: Uri) -> Response {
     match allowed_board(&st) {

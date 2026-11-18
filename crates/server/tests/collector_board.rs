@@ -322,7 +322,7 @@ impl Fixture {
 
     async fn assert_other_methods_answer(&self, expected: u16, code: Option<&str>, what: &str) {
         let expected_allow = (expected == 405).then_some("GET,HEAD");
-        for method in ["POST", "PUT", "PATCH", "DELETE"] {
+        for method in ["POST", "PUT", "PATCH", "DELETE", "OPTIONS", "TRACE", "PROPFIND"] {
             for path in ["status", "coverage", "disk"] {
                 let (status, headers, body) = self.send_with_headers(method, &format!("/api/collector/{path}")).await;
                 let body: Value = serde_json::from_slice(&body).unwrap_or(Value::Null);
