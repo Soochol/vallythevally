@@ -17,19 +17,20 @@ use crate::clock::{Clock, kst};
 use crate::config::Secret;
 use crate::db::AppDb;
 use crate::http::{ApiFailure, AppState, router};
-use crate::kiwoom::api::Endpoint;
+use crate::kiwoom::api::{Endpoint, MarketRequest, StockBasicInfo, StockList};
 use crate::kiwoom::auth::KiwoomAuth;
 use crate::kiwoom::error::Category;
 use crate::kiwoom::private_file::PrivateFile;
 use crate::kiwoom::rest::testing::{FakeTransport, Sent, ok, token};
 use crate::kiwoom::rest::{Access, KiwoomError, KiwoomRest};
 use crate::kiwoom::stream::{AccountEvent, AccountFeed, AccountKind, KiwoomStream};
+use crate::kiwoom::transport::{HttpResponse, Stage, TransportError};
 use crate::symbols::SymbolDirectory;
 use crate::trading::TradingApiId;
 
-const ACCOUNT: &str = "5550123401";
+pub(super) const ACCOUNT: &str = "5550123401";
 const OTHER_ACCOUNT: &str = "5559876502";
-const HOST: &str = "127.0.0.1:7777";
+pub(super) const HOST: &str = "127.0.0.1:7777";
 
 #[derive(Clone, Default)]
 struct Logs(Arc<Mutex<Vec<u8>>>);
@@ -51,14 +52,57 @@ impl Logs {
     }
 }
 
-struct Fixture {
-    rows_account: Arc<Mutex<Option<String>>>,
-    app: Router,
-    state: Arc<AppState>,
-    fake: Arc<FakeTransport>,
-    feed: AccountFeed,
-    account: Arc<Mutex<String>>,
-    _dir: tempfile::TempDir,
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(super) enum WriteMode {
+    Accept,
+    Timeout,
+    Refused,
+    Garbage,
+    NoNumber,
+    Reject,
+}
+
+fn write_reply(mode: WriteMode) -> Result<HttpResponse, TransportError> {
+    match mode {
+        WriteMode::Accept => ok(json!({"ord_no": "0099001", "dmst_stex_tp": "KRX", "return_code": 0, "return_msg": "정상"}), None),
+        WriteMode::Timeout => Err(TransportError { stage: Stage::AwaitResponse, timed_out: true }),
+        WriteMode::Refused => Err(TransportError::refused()),
+        WriteMode::Garbage => Ok(HttpResponse { status: 200, next_key: None, body: "<html>oops</html>".into() }),
+        WriteMode::NoNumber => ok(json!({"return_code": 0, "return_msg": "정상"}), None),
+        WriteMode::Reject => ok(json!({"return_code": 20, "return_msg": "주문이 거부되었습니다"}), None),
+    }
+}
+
+fn is_write(id: TradingApiId) -> bool {
+    matches!(id, TradingApiId::Kt10000 | TradingApiId::Kt10001 | TradingApiId::Kt10002 | TradingApiId::Kt10003)
+}
+
+fn price_band_reply() -> Result<HttpResponse, TransportError> {
+    let mut body: Value = serde_json::from_str(include_str!("../../tests/fixtures/kiwoom/ka10001_005930_AL.json")).unwrap();
+    body["upl_pric"] = "+100000".into();
+    body["lst_pric"] = "-50000".into();
+    body["return_code"] = 0.into();
+    body["return_msg"] = "정상".into();
+    ok(body, None)
+}
+
+fn listed_symbols() -> Arc<SymbolDirectory> {
+    use domain::{Market, Symbol, SymbolInfo, SymbolKind};
+    let info = |code: &str, name: &str, nxt_enabled| SymbolInfo { symbol: Symbol::parse(code).unwrap(), name: name.into(), kind: SymbolKind::Common, market: Market::Kospi, nxt_enabled };
+    let symbols = Arc::new(SymbolDirectory::default());
+    symbols.replace(crate::symbols::Directory::build(vec![info("005930", "삼성전자", true), info("005935", "KRX전용", false)]));
+    symbols
+}
+
+pub(super) struct Fixture {
+    pub(super) mode: Arc<Mutex<WriteMode>>,
+    pub(super) rows_account: Arc<Mutex<Option<String>>>,
+    pub(super) app: Router,
+    pub(super) state: Arc<AppState>,
+    pub(super) fake: Arc<FakeTransport>,
+    pub(super) feed: AccountFeed,
+    pub(super) account: Arc<Mutex<String>>,
+    pub(super) _dir: tempfile::TempDir,
 }
 
 fn reply(sent: &Sent, account: &str, rows_account: &str) -> Result<crate::kiwoom::transport::HttpResponse, crate::kiwoom::transport::TransportError> {
@@ -92,42 +136,59 @@ fn reply(sent: &Sent, account: &str, rows_account: &str) -> Result<crate::kiwoom
             ], "return_code": 0, "return_msg": "정상"}),
             None,
         ),
+        TradingApiId::Kt10000 | TradingApiId::Kt10001 | TradingApiId::Kt10002 | TradingApiId::Kt10003 => unreachable!("쓰기 응답은 fixture가 WriteMode로 만든다"),
     }
 }
 
-async fn fixture() -> Fixture {
+pub(super) async fn fixture() -> Fixture {
+    fixture_with(Duration::ZERO, Duration::ZERO).await
+}
+
+pub(super) async fn fixture_with(latency: Duration, spacing: Duration) -> Fixture {
     let dir = tempfile::tempdir().unwrap();
+    let mode = Arc::new(Mutex::new(WriteMode::Accept));
+    let seen_mode = mode.clone();
     let account = Arc::new(Mutex::new(ACCOUNT.to_owned()));
     let seen_account = account.clone();
     let rows_account = Arc::new(Mutex::new(None::<String>));
     let seen_rows = rows_account.clone();
-    let fake = Arc::new(FakeTransport::new(Duration::ZERO, move |sent| {
+    let fake = Arc::new(FakeTransport::new(latency, move |sent| {
         if sent.api_id == Endpoint::ISSUE {
             return token(1);
+        }
+        if let Endpoint::Trading(id) = sent.api_id
+            && is_write(id)
+        {
+            return write_reply(*seen_mode.lock().unwrap());
+        }
+        match sent.api_id.market() {
+            Some(id) if id == StockBasicInfo::API_ID => return price_band_reply(),
+            Some(id) if id == StockList::API_ID => return ok(json!({"list": [], "return_code": 0, "return_msg": "정상"}), None),
+            _ => {}
         }
         let account = seen_account.lock().unwrap().clone();
         let rows = seen_rows.lock().unwrap().clone().unwrap_or_else(|| account.clone());
         reply(sent, &account, &rows)
     }));
     let clock = Clock::fake(kst(KstDate::new(2026, 11, 9).unwrap(), 10, 0, 0));
-    let rest = KiwoomRest::with_send_spacing(Arc::new(fake.clone()), KiwoomAuth::new(Secret::new("k".into()), Secret::new("s".into()), None), clock.clone(), Duration::ZERO);
+    let rest = KiwoomRest::with_send_spacing(Arc::new(fake.clone()), KiwoomAuth::new(Secret::new("k".into()), Secret::new("s".into()), None), clock.clone(), spacing);
     let db = AppDb::open(&dir.path().join("vally.db")).await.unwrap();
     let (stream, _desired) = KiwoomStream::detached();
     let feed = stream.account_feed();
     let (_events, receiver) = tokio::sync::mpsc::channel(8);
     let screener_store = crate::screener::store::Store::open(&dir.path().join("screener.duckdb")).unwrap();
-    let state = application(ApplicationInputs { rest: rest.clone(), clock, symbols: Arc::new(SymbolDirectory::default()), db, screener_store, stream: (stream, receiver), static_dir: dir.path().to_owned(), screener_update_on_connect: false });
+    let state = application(ApplicationInputs { rest: rest.clone(), clock, symbols: listed_symbols(), db, screener_store, stream: (stream, receiver), static_dir: dir.path().to_owned(), screener_update_on_connect: false });
     rest.set_access(Access::Open);
     state.system.bound(HOST.parse().unwrap());
     let app = router(state.clone());
-    Fixture { rows_account, app, state, fake, feed, account, _dir: dir }
+    Fixture { mode, rows_account, app, state, fake, feed, account, _dir: dir }
 }
 
-fn trading_sends(fake: &FakeTransport) -> Vec<&'static str> {
+pub(super) fn trading_sends(fake: &FakeTransport) -> Vec<&'static str> {
     fake.sent().iter().filter_map(|s| if let Endpoint::Trading(id) = s.api_id { Some(id.as_str()) } else { None }).collect()
 }
 
-async fn call(app: &Router, method: &str, uri: &str, body: Option<Value>) -> (StatusCode, Value) {
+pub(super) async fn call(app: &Router, method: &str, uri: &str, body: Option<Value>) -> (StatusCode, Value) {
     let mut req = Request::builder().method(method).uri(uri).header("host", HOST);
     let body = match body {
         Some(value) => {
@@ -142,13 +203,13 @@ async fn call(app: &Router, method: &str, uri: &str, body: Option<Value>) -> (St
     (status, serde_json::from_slice(&bytes).unwrap_or_else(|_| panic!("{uri}: JSON이 아님: {}", String::from_utf8_lossy(&bytes))))
 }
 
-async fn get(app: &Router, uri: &str) -> (StatusCode, Value) {
+pub(super) async fn get(app: &Router, uri: &str) -> (StatusCode, Value) {
     call(app, "GET", uri, None).await
 }
 
 const READS: [&str; 4] = ["/api/trading/balance", "/api/trading/open-orders", "/api/trading/orderable?code=005930&side=buy&price=71000", "/api/trading/executions"];
 
-async fn enable(app: &Router, tail: &str) -> (StatusCode, Value) {
+pub(super) async fn enable(app: &Router, tail: &str) -> (StatusCode, Value) {
     call(app, "PUT", "/api/system/orders", Some(json!({"enabled": true, "confirmAccountTail": tail}))).await
 }
 
@@ -242,7 +303,8 @@ async fn account_reads_stop_when_the_key_is_auth_blocked() {
     let rest = KiwoomRest::with_send_spacing(Arc::new(fake.clone()), KiwoomAuth::new(Secret::new("k".into()), Secret::new("s".into()), None), clock.clone(), Duration::ZERO);
     rest.set_access(Access::Open);
     let (stream, _desired) = KiwoomStream::detached();
-    let trading = Trading::new(rest.clone(), clock, SwitchStore::file(PrivateFile::new(dir.path().join("state").join("orders.json"))), stream.account_feed());
+    let db = AppDb::open(&dir.path().join("vally.db")).await.unwrap();
+    let trading = Trading::new(rest.clone(), clock, SwitchStore::file(PrivateFile::new(dir.path().join("state").join("orders.json"))), stream.account_feed(), db, Arc::new(SymbolDirectory::default()));
     trading.set_enabled(OrdersSwitchInput { enabled: true, confirm_account_tail: Some("01".into()) }).await.unwrap();
     blocked.store(true, std::sync::atomic::Ordering::SeqCst);
     let auth_blocked = |e: &TradingError| matches!(e, TradingError::Kiwoom(KiwoomError::Stopped(f)) if f.category() == Category::AuthBlocked);
@@ -372,18 +434,20 @@ async fn account_events_for_the_confirmed_account_tell_the_browser_the_account_c
     assert_eq!(f.fake.sent().len(), sent, "이벤트만으로는 아무것도 조회하지 않는다");
 }
 
-fn direct_trading(latency: Duration, store: SwitchStore) -> (Arc<Trading>, Arc<FakeTransport>, AccountFeed, Clock) {
-    direct_trading_spaced(latency, Duration::ZERO, store)
+async fn direct_trading(latency: Duration, store: SwitchStore) -> (Arc<Trading>, Arc<FakeTransport>, AccountFeed, Clock, tempfile::TempDir) {
+    direct_trading_spaced(latency, Duration::ZERO, store).await
 }
 
-fn direct_trading_spaced(latency: Duration, spacing: Duration, store: SwitchStore) -> (Arc<Trading>, Arc<FakeTransport>, AccountFeed, Clock) {
+async fn direct_trading_spaced(latency: Duration, spacing: Duration, store: SwitchStore) -> (Arc<Trading>, Arc<FakeTransport>, AccountFeed, Clock, tempfile::TempDir) {
     let fake = Arc::new(FakeTransport::new(latency, |sent| if sent.api_id == Endpoint::ISSUE { token(1) } else { reply(sent, ACCOUNT, ACCOUNT) }));
     let clock = Clock::fake(kst(KstDate::new(2026, 11, 9).unwrap(), 10, 0, 0));
     let rest = KiwoomRest::with_send_spacing(Arc::new(fake.clone()), KiwoomAuth::new(Secret::new("k".into()), Secret::new("s".into()), None), clock.clone(), spacing);
     rest.set_access(Access::Open);
     let (stream, _desired) = KiwoomStream::detached();
     let feed = stream.account_feed();
-    (Trading::new(rest, clock.clone(), store, feed.clone()), fake, feed, clock)
+    let dir = tempfile::tempdir().unwrap();
+    let db = AppDb::open(&dir.path().join("vally.db")).await.unwrap();
+    (Trading::new(rest, clock.clone(), store, feed.clone(), db, Arc::new(SymbolDirectory::default())), fake, feed, clock, dir)
 }
 
 fn confirm(tail: &str) -> OrdersSwitchInput {
@@ -392,7 +456,7 @@ fn confirm(tail: &str) -> OrdersSwitchInput {
 
 #[tokio::test]
 async fn an_off_switch_stops_a_read_that_is_already_in_flight() {
-    let (trading, fake, _feed, clock) = direct_trading(Duration::from_millis(150), SwitchStore::memory());
+    let (trading, fake, _feed, clock, _dir) = direct_trading(Duration::from_millis(150), SwitchStore::memory()).await;
     trading.set_enabled(confirm("01")).await.unwrap();
     clock.jump(120);
     let sent = trading_sends(&fake).len();
@@ -413,7 +477,7 @@ async fn realtime_registration_follows_the_switch_file_even_when_it_changes_behi
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("state").join("orders.json");
     let store = || SwitchStore::file(PrivateFile::new(path.clone()));
-    let (trading, _fake, feed, _clock) = direct_trading(Duration::ZERO, store());
+    let (trading, _fake, feed, _clock, _dir) = direct_trading(Duration::ZERO, store()).await;
     trading.set_enabled(confirm("01")).await.unwrap();
     assert!(feed.wanted());
 
@@ -433,7 +497,7 @@ async fn realtime_registration_follows_the_switch_file_even_when_it_changes_behi
 
 #[tokio::test]
 async fn enabling_while_a_stale_verification_is_in_flight_does_not_lock_the_new_account() {
-    let (trading, _fake, _feed, clock) = direct_trading(Duration::from_millis(150), SwitchStore::memory());
+    let (trading, _fake, _feed, clock, _dir) = direct_trading(Duration::from_millis(150), SwitchStore::memory()).await;
     trading.set_enabled(confirm("01")).await.unwrap();
     clock.jump(120);
     let reading = tokio::spawn({
@@ -448,7 +512,7 @@ async fn enabling_while_a_stale_verification_is_in_flight_does_not_lock_the_new_
 
 #[tokio::test]
 async fn an_off_switch_stops_a_read_that_is_still_queued_behind_the_send_spacing() {
-    let (trading, fake, _feed, clock) = direct_trading_spaced(Duration::ZERO, Duration::from_millis(300), SwitchStore::memory());
+    let (trading, fake, _feed, clock, _dir) = direct_trading_spaced(Duration::ZERO, Duration::from_millis(300), SwitchStore::memory()).await;
     trading.set_enabled(confirm("01")).await.unwrap();
     clock.jump(120);
     let sent = trading_sends(&fake).len();
@@ -467,7 +531,7 @@ async fn an_off_switch_stops_a_read_that_is_still_queued_behind_the_send_spacing
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn the_realtime_registration_matches_the_switch_right_after_every_change_even_with_readers_running() {
     let dir = tempfile::tempdir().unwrap();
-    let (trading, _fake, feed, _clock) = direct_trading(Duration::ZERO, SwitchStore::file(PrivateFile::new(dir.path().join("state").join("orders.json"))));
+    let (trading, _fake, feed, _clock, _dir) = direct_trading(Duration::ZERO, SwitchStore::file(PrivateFile::new(dir.path().join("state").join("orders.json")))).await;
     trading.set_enabled(confirm("01")).await.unwrap();
     let running = Arc::new(std::sync::atomic::AtomicBool::new(true));
     let readers: Vec<_> = (0..3)

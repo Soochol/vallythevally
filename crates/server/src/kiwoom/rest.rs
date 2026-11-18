@@ -36,6 +36,7 @@ const AUTH_GATE_WAIT: Duration = Duration::from_secs(MIN_ISSUE_INTERVAL_SECS as 
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Priority {
+    Order,
     /// 브라우저가 기다리는 요청: 봉 페이지, 서버를 켤 때의 종목 목록.
     Screen,
     /// 끊긴 구간 복구 같은 것(#4). #2에는 부르는 곳이 없다.
@@ -50,7 +51,7 @@ impl Priority {
     }
 
     fn send_budget(self) -> u8 {
-        if self == Priority::Screen { SCREEN_SEND_BUDGET } else { OTHER_SEND_BUDGET }
+        if matches!(self, Priority::Order | Priority::Screen) { SCREEN_SEND_BUDGET } else { OTHER_SEND_BUDGET }
     }
 }
 
@@ -189,6 +190,19 @@ enum JobState {
 
 pub(crate) type Admission = Arc<dyn Fn() -> bool + Send + Sync>;
 
+#[derive(Clone, Default)]
+pub(crate) struct Transmitted(Arc<std::sync::atomic::AtomicBool>);
+
+impl Transmitted {
+    pub(crate) fn happened(&self) -> bool {
+        self.0.load(std::sync::atomic::Ordering::SeqCst)
+    }
+}
+
+pub(crate) struct SendOnce {
+    pub transmitted: Transmitted,
+}
+
 pub(crate) struct Dispatch<'a> {
     pub endpoint: Endpoint,
     pub body: String,
@@ -196,9 +210,11 @@ pub(crate) struct Dispatch<'a> {
     pub priority: Priority,
     pub scope: MergeScope,
     pub admit: Option<Admission>,
+    pub once: Option<SendOnce>,
 }
 
 struct Job {
+    once: Option<SendOnce>,
     admit: Option<Admission>,
     key: DedupeKey,
     priority: Priority,
@@ -220,7 +236,7 @@ enum Gate {
 
 #[derive(Default)]
 struct Queue {
-    lanes: [VecDeque<u64>; 3],
+    lanes: [VecDeque<u64>; 4],
     jobs: HashMap<u64, Job>,
     by_key: HashMap<DedupeKey, u64>,
     issue_waiters: Vec<oneshot::Sender<Result<TokenGen, KiwoomError>>>,
@@ -246,7 +262,9 @@ impl Queue {
 
     fn finish(&mut self, id: u64, result: JobResult) {
         if let Some(job) = self.jobs.remove(&id) {
-            self.by_key.remove(&job.key);
+            if job.once.is_none() {
+                self.by_key.remove(&job.key);
+            }
             for w in job.waiters {
                 let _ = w.send(result.clone());
             }
@@ -408,13 +426,13 @@ impl KiwoomRest {
         scope: MergeScope,
     ) -> Result<Page<R::Response>, KiwoomError> {
         let body = serde_json::to_string(req).expect("요청 타입은 언제나 직렬화된다");
-        self.call_endpoint(Dispatch { endpoint: R::API_ID.into(), body, cont, priority, scope, admit: None }, |response| req.answers(response)).await
+        self.call_endpoint(Dispatch { endpoint: R::API_ID.into(), body, cont, priority, scope, admit: None, once: None }, |response| req.answers(response)).await
     }
 
     pub(crate) async fn call_endpoint<T: serde::de::DeserializeOwned>(&self, call: Dispatch<'_>, answers: impl FnOnce(&T) -> bool) -> Result<Page<T>, KiwoomError> {
-        let Dispatch { endpoint, body, cont, priority, scope, admit } = call;
+        let Dispatch { endpoint, body, cont, priority, scope, admit, once } = call;
         let key = DedupeKey { scope, api_id: endpoint, body, cont: cont.cloned() };
-        let rx = self.0.enqueue(key, priority, admit);
+        let rx = self.0.enqueue(key, priority, admit, once);
         let raw = rx.await.unwrap_or_else(|_| Err(queue_gone(endpoint)))?;
         let note = match serde_json::from_str::<T>(&raw.body) {
             Ok(body) if answers(&body) => return Ok(Page { body, next: raw.next }),
@@ -455,7 +473,7 @@ impl Inner {
         self.queue.lock().expect("대기열 잠금")
     }
 
-    fn enqueue(&self, key: DedupeKey, priority: Priority, admit: Option<Admission>) -> oneshot::Receiver<JobResult> {
+    fn enqueue(&self, key: DedupeKey, priority: Priority, admit: Option<Admission>, once: Option<SendOnce>) -> oneshot::Receiver<JobResult> {
         let (tx, rx) = oneshot::channel();
         let mut q = self.lock();
         if *self.access.borrow() == Access::Closed {
@@ -466,7 +484,7 @@ impl Inner {
             let _ = tx.send(Err(err));
             return rx;
         }
-        if let Some(&id) = q.by_key.get(&key) {
+        if let Some(&id) = q.by_key.get(&key).filter(|_| once.is_none()) {
             let job = q.jobs.get_mut(&id).expect("by_key와 jobs는 함께 바뀐다");
             job.waiters.push(tx);
             if priority < job.priority {
@@ -480,10 +498,13 @@ impl Inner {
         } else {
             let id = q.next_id;
             q.next_id += 1;
-            q.by_key.insert(key.clone(), id);
+            if once.is_none() {
+                q.by_key.insert(key.clone(), id);
+            }
             q.jobs.insert(
                 id,
                 Job {
+                    once,
                     admit,
                     key,
                     priority,
@@ -590,6 +611,9 @@ impl Inner {
         let job = q.jobs.get_mut(&id).expect("대기열의 id는 jobs에 있다");
         job.state = JobState::InFlight;
         job.sends += 1;
+        if let Some(once) = &job.once {
+            once.transmitted.0.store(true, std::sync::atomic::Ordering::SeqCst);
+        }
         let req = HttpRequest {
             api_id: job.key.api_id,
             token: Some(token),
@@ -762,6 +786,20 @@ impl Inner {
             _ => {}
         }
         let job = q.jobs.get_mut(&id).expect("send_market이 확인했다");
+        if job.once.is_some() {
+            if failure.category() == Category::TokenInvalid {
+                let _ = self.auth.invalidate(generation);
+            }
+            let err = match failure.policy().stop {
+                Stop::Path | Stop::PathOnRepeat | Stop::Gate => {
+                    tracing::warn!(api_id, "주문 쓰기가 실패했습니다. 다시 보내지 않고 경로나 관문도 닫지 않습니다: {failure}");
+                    KiwoomError::Failed(failure)
+                }
+                _ => self.settle(q, failure),
+            };
+            q.finish(id, Err(err));
+            return;
+        }
         let resend = match failure.policy().retry {
             _ if job.sends >= job.priority.send_budget() => {
                 tracing::warn!(api_id, sends = job.sends, "요청 하나의 전송 예산을 다 썼습니다");
