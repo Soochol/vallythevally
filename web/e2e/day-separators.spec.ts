@@ -5,6 +5,7 @@ import { type ChartSettings, DEFAULT_CHART_SETTINGS } from "../src/chart/setting
 import { installChartProbe } from "./chart-probe";
 import { type Scenario, cell, DEFAULT_LAYOUT_ID, expect, test, firstChart, withFirstChart, pollSaved } from "./harness";
 
+import { chooseSettingsMenu, openChartSettings } from "./chart-settings-menu";
 const KST = 32_400;
 const BARS_PER_DAY = 40;
 const DAYS = ["2026-11-04", "2026-11-05", "2026-11-06"];
@@ -37,7 +38,7 @@ async function open(page: Page) {
 }
 
 async function setSwitch(page: Page, on: boolean) {
-  if (!await popover(page).isVisible()) await toolbar(page).getByRole("button", { name: "차트 설정", exact: true }).click();
+  await openChartSettings(page, "표시");
   if (await daySwitch(page).getAttribute("aria-checked") !== String(on)) await daySwitch(page).click();
   await expect(daySwitch(page)).toHaveAttribute("aria-checked", String(on));
   await afterPaint(page);
@@ -160,17 +161,20 @@ test("지표 패널을 더하면 새 패널에도 날짜 구분선을 긋는다"
   await expectSeparatorsOnEveryPane(page, 3);
 });
 
-test("1024x768에서 날짜 구분선 스위치를 포함한 차트 설정 팝오버의 모든 조작이 창 안에 있다", async ({ page, scenario }) => {
+test("1024x768에서 날짜 구분선 스위치를 포함한 차트 설정 창의 세 메뉴 모든 조작이 창 안에 있다", async ({ page, scenario }) => {
   openMinute(scenario);
   await page.setViewportSize({ width: 1024, height: 768 });
   await open(page);
   await setSwitch(page, true);
   await expect(daySwitch(page)).toHaveAttribute("title", "분봉에서 날짜가 바뀌는 자리에 세로선");
-  for (const control of await popover(page).locator("button, input").all()) {
-    const box = (await control.boundingBox())!;
-    expect(box.x).toBeGreaterThanOrEqual(0);
-    expect(box.y).toBeGreaterThanOrEqual(0);
-    expect(box.x + box.width).toBeLessThanOrEqual(1024);
-    expect(box.y + box.height).toBeLessThanOrEqual(768);
+  for (const menu of ["봉·축", "표시", "지표 창"] as const) {
+    await chooseSettingsMenu(page, menu);
+    for (const control of await popover(page).locator("button, input").all()) {
+      const box = (await control.boundingBox())!;
+      expect(box.x).toBeGreaterThanOrEqual(0);
+      expect(box.y).toBeGreaterThanOrEqual(0);
+      expect(box.x + box.width).toBeLessThanOrEqual(1024);
+      expect(box.y + box.height).toBeLessThanOrEqual(768);
+    }
   }
 });
