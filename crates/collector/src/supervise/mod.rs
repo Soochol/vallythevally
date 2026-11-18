@@ -76,8 +76,15 @@ const DAEMON_ONLY_OPTIONS: [&str; 11] = [
     "early-period",
 ];
 
-const HOLIDAY_KEY_FILE: &str = "holiday-service-key";
+const HOLIDAY_KEY_FILE: &str = ".config/vally/holiday-service-key";
 const RUNTIME_STOP_LIMIT: std::time::Duration = std::time::Duration::from_secs(5);
+
+fn default_holiday_key_path(variables: &Variables) -> Result<PathBuf, String> {
+    match variables.get("HOME").filter(|home| !home.is_empty()) {
+        Some(home) => Ok(PathBuf::from(home).join(HOLIDAY_KEY_FILE)),
+        None => Err("HOME이 없어 특일정보 키 파일 경로를 정할 수 없습니다. --holiday-key를 주세요".to_string()),
+    }
+}
 
 fn stop_runtime(runtime: tokio::runtime::Runtime, limit: std::time::Duration) {
     runtime.shutdown_timeout(limit);
@@ -174,7 +181,13 @@ fn run_daemon(arguments: &Arguments, keys_path: &std::path::Path) -> ExitCode {
         Ok(keys) => keys,
         Err(error) => return usage_error(error),
     };
-    let holiday_key_path = arguments.value("holiday-key").map_or_else(|| state_folder.join(HOLIDAY_KEY_FILE), PathBuf::from);
+    let holiday_key_path = match arguments.value("holiday-key") {
+        Some(path) => PathBuf::from(path),
+        None => match default_holiday_key_path(&process) {
+            Ok(path) => path,
+            Err(message) => return usage_error(message),
+        },
+    };
     let executable = match std::env::current_exe() {
         Ok(path) => path,
         Err(error) => return usage_error(format_args!("실행 파일 경로를 알 수 없습니다: {error}")),
@@ -295,6 +308,13 @@ fn run_single_day(arguments: &Arguments, keys_path: &std::path::Path, date: &str
 mod tests {
     use super::*;
     use std::time::{Duration, Instant};
+
+    #[test]
+    fn holiday_key_defaults_to_the_secrets_folder_under_home() {
+        let variables = Variables::from([("HOME".to_string(), "/home/someone".to_string())]);
+        assert_eq!(default_holiday_key_path(&variables).unwrap(), PathBuf::from("/home/someone/.config/vally/holiday-service-key"));
+        assert!(default_holiday_key_path(&Variables::new()).is_err());
+    }
 
     #[test]
     fn stopping_the_runtime_gives_up_on_a_blocking_task_after_the_limit() {
