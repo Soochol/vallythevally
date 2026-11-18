@@ -973,6 +973,24 @@ async fn a_long_backlog_stops_before_the_morning_schedule_and_the_rest_waits_for
 }
 
 #[tokio::test(start_paused = true)]
+async fn a_daemon_started_after_the_close_does_not_start_todays_finalize_near_the_next_morning_schedule() {
+    let backlog = [20261110, 20261111, 20261112, 20261113];
+    let harness = Harness::start_with(
+        Config { start: kst(monday(), 21, 0, 0), hold_finalize: Duration::from_secs(3 * 3600), seed_history: false, seed_today_raw: false, ..Config::default() },
+        |data| seed_unfinalized_days(data, &[backlog.as_slice(), &[20261116]].concat()),
+    );
+    let tuesday = KstDate::new(2026, 11, 17).unwrap();
+    harness.until(kst(tuesday, 12, 0, 0)).await;
+    let started = harness.recorder.times_of("finalize");
+    let judge_at = kst(tuesday, 7, 20, 0);
+    let dates: Vec<String> = harness.finalizer.runs.lock().unwrap().iter().map(|arguments| arguments[arguments.iter().position(|argument| argument == "--date").unwrap() + 1].clone()).collect();
+    assert_eq!(dates, ["20261110", "20261111", "20261112", "20261113"], "그날(20261116) 정리는 시작하지 않는다: {started:?}");
+    assert!(started.iter().all(|time| time.unix() < judge_at.unix()), "{started:?}");
+    assert!(!harness.data().join("store").join("20261116").join("complete.json").exists());
+    harness.finish().await;
+}
+
+#[tokio::test(start_paused = true)]
 async fn the_next_day_start_finalizes_every_past_day_left_unfinalized() {
     let harness = Harness::start_with(
         Config { forced_exit: Some(1), holidays: Holidays::Listed(vec![(20261119, "임시공휴일")]), seed_history: false, seed_today_raw: true, ..Config::default() },
