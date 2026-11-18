@@ -17,6 +17,7 @@ const HOLDS_USER_DATA: &str = "SELECT
     (SELECT COUNT(*) FROM order_commands) + (SELECT COUNT(*) FROM order_batches) + (SELECT COUNT(*) FROM drawings)
   + (SELECT COUNT(*) FROM watchlist_items) + (SELECT COUNT(*) FROM watch_groups) + (SELECT COUNT(*) FROM watch_group_items)
   + (SELECT COUNT(*) FROM sync_refusals) + (SELECT COUNT(*) FROM local_owner)
+  + (SELECT COUNT(*) FROM sync_documents WHERE deleted <> 0) + (SELECT COUNT(*) FROM sync_state WHERE cursor <> 0 OR initial_done <> 0)
   + (SELECT COUNT(*) FROM layouts WHERE revision <> 0) + (SELECT COUNT(*) FROM layouts) - 1
   + (SELECT COUNT(*) FROM ui_state WHERE revision <> 0) + (SELECT COUNT(*) FROM watchlist_revision WHERE revision <> 0)
   + (SELECT COUNT(*) FROM screens WHERE revision <> 0) + (SELECT COUNT(*) FROM watchlists) - 1 > 0";
@@ -197,6 +198,8 @@ mod tests {
             "UPDATE ui_state SET revision = 1",
             "UPDATE screens SET revision = 1",
             "UPDATE watchlist_revision SET revision = 1",
+            "UPDATE sync_documents SET deleted = 1 WHERE kind = 'layout'",
+            "UPDATE sync_state SET initial_done = 1",
             "INSERT INTO watchlists (id, name, position) VALUES ('x', '둘째', 1)",
             "INSERT INTO layouts (id, name, sync, position, updated_at) VALUES ('y', '둘째', '{}', 1, 0)",
         ] {
