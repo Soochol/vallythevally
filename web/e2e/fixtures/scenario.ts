@@ -5,6 +5,7 @@ import type { BrowserContext, Request, Route, WebSocketRoute } from "@playwright
 import type { Bar } from "../../src/api/generated/Bar";
 import type { BarsPage } from "../../src/api/generated/BarsPage";
 import type { ClientMessage } from "../../src/api/generated/ClientMessage";
+import type { CollectorAccess } from "../../src/api/generated/CollectorAccess";
 import type { ConnectionStatus } from "../../src/api/generated/ConnectionStatus";
 import type { FinancialsPage } from "../../src/api/generated/FinancialsPage";
 import type { FinancialUpdatePage } from "../../src/api/generated/FinancialUpdatePage";
@@ -292,6 +293,7 @@ export class Scenario {
       }
     }
     if (path === "/api/account" && method === "GET") return { body: this.live.account };
+    if (path === "/api/collector/access" && method === "GET") return { body: { access: "off" } satisfies CollectorAccess };
     if (path === "/api/system/kiwoom" && method === "GET") return { body: this.live.kiwoomLink };
     if (path === "/api/system/orders" && method === "GET") return { body: this.live.orders };
     if (path === "/api/system/orders/check-account" && method === "POST") return { body: { accountTail: this.live.ordersAccountTail } satisfies OrdersAccountCheck };

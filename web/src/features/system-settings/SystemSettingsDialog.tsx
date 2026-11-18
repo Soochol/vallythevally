@@ -1,13 +1,15 @@
 import { type KeyboardEvent, useEffect, useId, useReducer, useRef } from "react";
+import { collectorAllowed, useCollectorAccess } from "../../api/collector";
 import { DESKTOP_QUERY, useMediaQuery } from "../../lib/media";
 import { useKiwoomLinkStore } from "../../stores/kiwoomLink";
 import { useSelectionStore } from "../../stores/selection";
 import { DialogFrame } from "../dialog/DialogParts";
 import { AccountMenuContent } from "../account/AccountMenuContent";
+import { CollectorBoard } from "../collector-board/CollectorBoard";
 import { CloseIcon } from "../icons";
 import { KiwoomMenuContent } from "./KiwoomMenuContent";
 import { linkDotTone } from "./linkDot";
-import { menuAfterKey, SYSTEM_MENUS, type SystemMenuId } from "./menus";
+import { menuAfterKey, type SystemMenuId, visibleMenus } from "./menus";
 import { focusTarget, navigate, openNavigation } from "./navigation";
 import { ReadOnlyMenuContent } from "./ReadOnlyMenuContent";
 
@@ -26,7 +28,8 @@ function SystemSettingsBody({ menu }: { menu: SystemMenuId | null }) {
   const tabId = (id: SystemMenuId) => `${ids}-tab-${id}`;
   const showList = desktop || view === "list";
   const showContent = desktop || view === "content";
-  const current = SYSTEM_MENUS.find((m) => m.id === selected)!;
+  const menus = visibleMenus(collectorAllowed(useCollectorAccess()));
+  const current = menus.find((m) => m.id === selected) ?? menus[0]!;
 
   useEffect(() => {
     const target = focusTarget({ selected, view }, desktop);
@@ -35,7 +38,7 @@ function SystemSettingsBody({ menu }: { menu: SystemMenuId | null }) {
   }, [view, desktop]);
 
   const onKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
-    const next = menuAfterKey(selected, e.key);
+    const next = menuAfterKey(current.id, e.key, menus);
     if (!next) return;
     e.preventDefault();
     dispatch({ type: "move", menu: next });
@@ -53,16 +56,16 @@ function SystemSettingsBody({ menu }: { menu: SystemMenuId | null }) {
               <button type="button" className="icon-btn hidden max-md:grid" aria-label="닫기" onClick={close}><CloseIcon /></button>
             </div>
             <div role="tablist" aria-orientation="vertical" aria-label="시스템 설정 메뉴" onKeyDown={onKeyDown} className="flex flex-col gap-0.5 max-md:gap-0">
-              {SYSTEM_MENUS.map((m) => (
+              {menus.map((m) => (
                 <button
                   key={m.id}
                   id={tabId(m.id)}
                   type="button"
                   role="tab"
                   disabled={!m.ready}
-                  aria-selected={m.id === selected}
+                  aria-selected={m.id === current.id}
                   aria-controls={showContent ? `${ids}-panel` : undefined}
-                  tabIndex={m.id === selected ? 0 : -1}
+                  tabIndex={m.id === current.id ? 0 : -1}
                   onClick={() => dispatch({ type: "choose", menu: m.id })}
                   className="flex h-9 items-center gap-2 rounded-m px-2 text-left text-text-2 hover:bg-hover hover:text-text disabled:cursor-not-allowed disabled:text-text-3 disabled:hover:bg-transparent aria-selected:bg-accent-soft aria-selected:font-semibold aria-selected:text-accent max-md:h-12 max-md:rounded-none max-md:border-t max-md:border-line max-md:px-4 max-md:aria-selected:bg-transparent max-md:aria-selected:text-text"
                 >
@@ -75,7 +78,7 @@ function SystemSettingsBody({ menu }: { menu: SystemMenuId | null }) {
           </nav>
         )}
         {showContent && (
-          <section role="tabpanel" id={`${ids}-panel`} aria-labelledby={showList ? tabId(selected) : undefined} aria-label={showList ? undefined : current.label} className="flex min-h-0 min-w-0 flex-1 flex-col">
+          <section role="tabpanel" id={`${ids}-panel`} aria-labelledby={showList ? tabId(current.id) : undefined} aria-label={showList ? undefined : current.label} className="flex min-h-0 min-w-0 flex-1 flex-col">
             <header className="flex h-12 flex-none items-center gap-2 px-5 max-md:px-2">
               {!desktop && (
                 <button type="button" className="tb-btn px-2" onClick={() => dispatch({ type: "back" })}>‹ 시스템 설정</button>
@@ -84,7 +87,7 @@ function SystemSettingsBody({ menu }: { menu: SystemMenuId | null }) {
               <button type="button" className="icon-btn flex-none" aria-label="닫기" onClick={close}><CloseIcon /></button>
             </header>
             <div className="min-h-0 flex-1 overflow-y-auto px-5 pb-5 max-md:px-4">
-              {selected === "kiwoom" ? <KiwoomMenuContent /> : selected === "account" ? <AccountMenuContent /> : selected === "general" || selected === "data" || selected === "about" ? <ReadOnlyMenuContent menu={selected} /> : null}
+              {current.id === "kiwoom" ? <KiwoomMenuContent /> : current.id === "collector" ? <CollectorBoard /> : current.id === "account" ? <AccountMenuContent /> : current.id === "general" || current.id === "data" || current.id === "about" ? <ReadOnlyMenuContent menu={current.id} /> : null}
             </div>
           </section>
         )}
