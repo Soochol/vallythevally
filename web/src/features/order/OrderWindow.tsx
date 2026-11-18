@@ -22,7 +22,7 @@ import { useLadderTrades, useQuoteInfo } from "../market-window/useLadderSlots";
 import { EmptyState } from "../overlay/State";
 import { openSystemSettings } from "../system-settings/open";
 import { AccountBand } from "./AccountBand";
-import { averageRowPrice, ETF_AFTER_HOURS_TEXT, holdingOf, isEtfAfterHours, type ProfitUnit, toggledUnit } from "./holdingSummary";
+import { averageRowPrice, ETF_ETN_AFTER_HOURS_TEXT, holdingOf, isEtfOrEtnAfterHours, type ProfitUnit, toggledUnit } from "./holdingSummary";
 import { HoldingSummary } from "./HoldingSummary";
 import { OrderSettingsPopover } from "./OrderSettingsPopover";
 import { tickRuleOf } from "../market-window/tick";
@@ -104,8 +104,8 @@ function OrderBody({ code }: { code: SymbolCode }) {
       writes.say({ tone: "error", text: REJECT_TEXT.nxt_unavailable });
       return;
     }
-    if (isEtfAfterHours(Math.floor(Date.now() / 1000), symbolInfo ?? null)) {
-      writes.say({ tone: "error", text: ETF_AFTER_HOURS_TEXT });
+    if (isEtfOrEtnAfterHours(Math.floor(Date.now() / 1000), symbolInfo ?? null)) {
+      writes.say({ tone: "error", text: ETF_ETN_AFTER_HOURS_TEXT });
       return;
     }
     const quantity = quantityAt(price);

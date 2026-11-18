@@ -561,13 +561,28 @@ async fn deleting_a_mismatched_account_leaves_the_local_owner_in_place() {
     assert_eq!((status["state"].clone(), status["localOwner"].clone()), (json!("owner_mismatch"), json!(owner)), "삭제한 계정이 소유자가 아니면 소유 표시는 그대로다");
 }
 
+struct ReadOnlyDir(PathBuf);
+
+impl ReadOnlyDir {
+    fn lock(dir: &Path) -> ReadOnlyDir {
+        std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o500)).unwrap();
+        ReadOnlyDir(dir.to_owned())
+    }
+}
+
+impl Drop for ReadOnlyDir {
+    fn drop(&mut self) {
+        let _ = std::fs::set_permissions(&self.0, std::fs::Permissions::from_mode(0o700));
+    }
+}
+
 #[tokio::test]
 async fn when_the_state_file_cannot_be_removed_after_deletion_memory_and_file_still_agree() {
     let (accounts, machine) = (Accounts::start().await, Machine::new());
     let connector = machine.run(Some(&accounts.base)).await;
     connector.login_ok(&accounts, "google").await;
     let dir = machine.state_path.parent().unwrap().to_owned();
-    std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o500)).unwrap();
+    let read_only_state_dir = ReadOnlyDir::lock(&dir);
     let (status, _) = connector.post("/api/account/delete", &json!({"confirm": true})).await;
     assert_eq!(status, 500);
     let setup_requests_before_sync = accounts.setup_requests();
@@ -576,7 +591,7 @@ async fn when_the_state_file_cannot_be_removed_after_deletion_memory_and_file_st
     assert!(accounts.setup_requests() > setup_requests_before_sync, "계정 서버가 동기화 요청을 받아야 401 경로가 돈 것이다");
     assert_eq!(connector.status().await["state"], "signed_in", "파일이 남았으니 메모리도 로그인 상태다");
     assert!(machine.state_file().is_some());
-    std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700)).unwrap();
+    drop(read_only_state_dir);
     connector.server.stop().await;
     let restarted = machine.run(Some(&accounts.base)).await;
     tokio::time::timeout(Duration::from_secs(10), async {

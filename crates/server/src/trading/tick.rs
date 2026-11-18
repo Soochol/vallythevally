@@ -1,9 +1,17 @@
 use domain::SymbolKind;
 
 pub fn tick_size(price: u64, kind: SymbolKind) -> u64 {
-    if kind == SymbolKind::Etf {
-        return if price < 2_000 { 1 } else { 5 };
+    match kind {
+        SymbolKind::Etf | SymbolKind::Etn => etf_tick_size(price),
+        SymbolKind::Index | SymbolKind::Common | SymbolKind::Preferred | SymbolKind::Reit | SymbolKind::Infrastructure | SymbolKind::MutualFund => stock_tick_size(price),
     }
+}
+
+fn etf_tick_size(price: u64) -> u64 {
+    if price < 2_000 { 1 } else { 5 }
+}
+
+fn stock_tick_size(price: u64) -> u64 {
     match price {
         0..2_000 => 1,
         2_000..5_000 => 5,
@@ -39,5 +47,25 @@ mod tests {
         assert_eq!(tick_size(12_345, SymbolKind::Etf), 5);
         assert!(!is_on_tick(12_343, SymbolKind::Etf));
         assert!(is_on_tick(12_345, SymbolKind::Etf));
+    }
+
+    #[test]
+    fn etn_ticks_follow_the_etf_table() {
+        for (price, tick) in [(1_999, 1), (2_000, 5), (6_465, 5), (12_345, 5), (600_000, 5)] {
+            assert_eq!(tick_size(price, SymbolKind::Etn), tick, "{price}");
+        }
+        assert!(is_on_tick(6_465, SymbolKind::Etn));
+        assert!(!is_on_tick(6_463, SymbolKind::Etn));
+    }
+
+    #[test]
+    fn infrastructure_mutual_fund_and_reit_ticks_follow_the_stock_table() {
+        for kind in [SymbolKind::Infrastructure, SymbolKind::MutualFund, SymbolKind::Reit] {
+            for price in [1_999, 2_000, 6_465, 12_345, 71_050, 600_000] {
+                assert_eq!(tick_size(price, kind), tick_size(price, SymbolKind::Common), "{kind:?} {price}");
+            }
+            assert!(!is_on_tick(12_345, kind));
+            assert!(is_on_tick(12_340, kind));
+        }
     }
 }

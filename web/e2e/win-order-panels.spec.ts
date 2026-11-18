@@ -234,6 +234,20 @@ test.describe("NXT 미거래 종목의 장 시간", () => {
     expect(api.writes).toHaveLength(0);
   });
 
+  test("ETN은 수요일 16:30에 안내 줄 없이 사다리를 그리고 더블클릭하면 요청 없이 알림이 거래 불가를 알린다", async ({ page, scenario }) => {
+    await page.clock.install({ time: kstClock("16:30:00") });
+    ordersOn(scenario);
+    const api = tradingApi(scenario);
+    scenario.reply(`/api/symbols/${CODE}`, { body: { ...SYMBOL_INFO, kind: "etn" } });
+    await openOrderWindow(page, scenario);
+    await expect(ladderRows(page)).toHaveCount(20);
+    await expect(page.getByTestId("order-book-notice")).toHaveCount(0);
+    await cellAt(page, "buy", 70_000).dblclick();
+    await expect(status(page)).toHaveText(/ETF·ETN은 15:30 뒤 거래되지 않습니다/);
+    await expect(status(page)).toHaveAttribute("data-tone", "error");
+    expect(api.writes).toHaveLength(0);
+  });
+
   test("장 마감 시각에 호가 조회가 실패하면 안내 없이 불러오지 못했다고 보인다", async ({ page, scenario }) => {
     await page.clock.install({ time: kstClock("20:30:00") });
     ordersOn(scenario);

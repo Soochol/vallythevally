@@ -18,6 +18,8 @@ export const KIND_LABEL: Record<SymbolKind, string> = {
   mutualFund: "뮤추얼펀드",
 };
 
+export const isEtfOrEtn = (kind: SymbolKind): boolean => kind === "etf" || kind === "etn";
+
 /** 이름 옆에 붙는 보조 글자: 주식은 코드, 지수는 `지수`. */
 export function symbolSub(code: SymbolCode, info: SymbolInfo | undefined): string {
   return info?.kind === "index" || isIndexCode(code) ? KIND_LABEL.index : code;
