@@ -1,4 +1,6 @@
-use domain::{KstDate, StockCode};
+use std::num::NonZeroU64;
+
+use domain::{KstDate, StockCode, Venue};
 use serde::{Deserialize, Deserializer, Serialize};
 
 use super::tr::TradingApiId;
@@ -248,3 +250,108 @@ impl Rows for ExecutionsReply {
 }
 
 trading_request!(Executions, Kt00007, ExecutionsReply);
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+pub enum OrderRoute {
+    #[serde(rename = "SOR")]
+    Sor,
+    #[serde(rename = "KRX")]
+    Krx,
+    #[serde(rename = "NXT")]
+    Nxt,
+}
+
+impl From<Venue> for OrderRoute {
+    fn from(venue: Venue) -> OrderRoute {
+        match venue {
+            Venue::Combined => OrderRoute::Sor,
+            Venue::Krx => OrderRoute::Krx,
+            Venue::Nxt => OrderRoute::Nxt,
+        }
+    }
+}
+
+struct LimitOrdinary;
+
+impl Serialize for LimitOrdinary {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str("0")
+    }
+}
+
+#[derive(Serialize)]
+pub struct LimitOrder {
+    dmst_stex_tp: OrderRoute,
+    stk_cd: String,
+    ord_qty: String,
+    ord_uv: String,
+    trde_tp: LimitOrdinary,
+}
+
+impl LimitOrder {
+    pub fn new(route: OrderRoute, code: StockCode, quantity: NonZeroU64, price: NonZeroU64) -> LimitOrder {
+        LimitOrder { dmst_stex_tp: route, stk_cd: code.as_str().to_owned(), ord_qty: quantity.to_string(), ord_uv: price.to_string(), trde_tp: LimitOrdinary }
+    }
+}
+
+#[derive(Serialize)]
+#[serde(transparent)]
+pub struct BuyOrder(pub LimitOrder);
+
+#[derive(Serialize)]
+#[serde(transparent)]
+pub struct SellOrder(pub LimitOrder);
+
+#[derive(Serialize)]
+pub struct ModifyOrder {
+    dmst_stex_tp: OrderRoute,
+    orig_ord_no: String,
+    stk_cd: String,
+    mdfy_qty: String,
+    mdfy_uv: String,
+}
+
+impl ModifyOrder {
+    pub fn new(route: OrderRoute, original: &OrderNumber, code: StockCode, remaining: NonZeroU64, price: NonZeroU64) -> ModifyOrder {
+        ModifyOrder { dmst_stex_tp: route, orig_ord_no: original.as_str().to_owned(), stk_cd: code.as_str().to_owned(), mdfy_qty: remaining.to_string(), mdfy_uv: price.to_string() }
+    }
+}
+
+#[derive(Serialize)]
+pub struct CancelOrder {
+    dmst_stex_tp: OrderRoute,
+    orig_ord_no: String,
+    stk_cd: String,
+    cncl_qty: String,
+}
+
+impl CancelOrder {
+    pub fn new(route: OrderRoute, original: &OrderNumber, code: StockCode, remaining: NonZeroU64) -> CancelOrder {
+        CancelOrder { dmst_stex_tp: route, orig_ord_no: original.as_str().to_owned(), stk_cd: code.as_str().to_owned(), cncl_qty: remaining.to_string() }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct OrderNumber(String);
+
+impl OrderNumber {
+    pub fn parse(text: &str) -> Option<OrderNumber> {
+        let text = text.trim();
+        (text.len() == 7 && text.bytes().all(|b| b.is_ascii_digit())).then(|| OrderNumber(text.to_owned()))
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+#[derive(Debug, Deserialize, Default)]
+pub struct OrderAck {
+    #[serde(default)]
+    pub ord_no: String,
+}
+
+trading_request!(BuyOrder, Kt10000, OrderAck);
+trading_request!(SellOrder, Kt10001, OrderAck);
+trading_request!(ModifyOrder, Kt10002, OrderAck);
+trading_request!(CancelOrder, Kt10003, OrderAck);
