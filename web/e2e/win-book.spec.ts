@@ -169,6 +169,12 @@ test("체결강도 줄이 13행, 최근 체결 행이 14행부터의 top과 같�
   const rowTops = await tops(ladderRows(page));
   expect(await tops(page.getByTestId("ladder-strength"))).toEqual([rowTops[12]]);
   expect(await tops(page.getByTestId("ladder-trade"))).toEqual(rowTops.slice(13, 15));
+  const tradeParts = await page.getByTestId("ladder-trade").evaluateAll((rows) => rows.map((row) => ({ count: row.children.length, text: row.textContent ?? "", priceRight: row.children[0]!.getBoundingClientRect().right, qtyLeft: row.children[1]!.getBoundingClientRect().left })));
+  for (const part of tradeParts) {
+    expect(part.count).toBe(2);
+    expect(part.text).not.toMatch(/\d{2}:\d{2}:\d{2}/);
+    expect(part.priceRight).toBeLessThanOrEqual(part.qtyLeft);
+  }
   await expect(page.getByTestId("book-window")).not.toContainText("대량");
   await expect(page.locator(".mw-trade [class*=bar], .mw-trade i")).toHaveCount(0);
   const columns = await page.getByTestId("ladder-trade").evaluateAll((rows) => rows.map((row) => [...row.children].map((part) => Math.round(part.getBoundingClientRect().left * 10) / 10)));

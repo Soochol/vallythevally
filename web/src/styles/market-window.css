@@ -40,9 +40,8 @@
 .mw-info span, .mw-strength { color:var(--text-3); }
 .mw-info b, .mw-strength b { color:var(--text); font-weight:600; text-align:right; }
 .mw-info b[data-tone=up] { color:var(--up); } .mw-info b[data-tone=down] { color:var(--down); }
-.mw-trade { grid-template-columns:minmax(0, 1.1fr) minmax(0, 1fr) minmax(0, 1fr); gap:var(--s2); padding-left:var(--s2); border-left:var(--size-2) solid transparent; }
+.mw-trade { grid-template-columns:minmax(0, 1fr) minmax(0, 1fr); gap:var(--s2); padding-left:var(--s2); border-left:var(--size-2) solid transparent; }
 .mw-trade[data-side=buy] { border-left-color:var(--up); } .mw-trade[data-side=sell] { border-left-color:var(--down); }
-.mw-trade-time { color:var(--text-3); }
 .mw-trade-price, .mw-trade-qty { text-align:right; }
 .mw-trade-price[data-tone=up] { color:var(--up); } .mw-trade-price[data-tone=down] { color:var(--down); }
 

@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import { direction, formatPrice } from "../../lib/format";
-import { formatSecond, type TradeRow } from "../trades/tape";
+import { type TradeRow } from "../trades/tape";
 import { formatStrength } from "./format";
 import type { LadderTrades } from "./useLadderSlots";
 import type { QuoteInfo } from "./quoteInfo";
@@ -27,7 +27,6 @@ export const tradeSlot = ({ strength, trades }: LadderTrades, previousClose: num
   if (!row) return null;
   return (
     <div className="mw-slot mw-trade" data-testid="ladder-trade" data-side={row.side} data-price={row.price}>
-      <span className="mw-trade-time">{formatSecond(row.secondOfDay)}</span>
       <span className="mw-trade-price" data-tone={priceTone(row, previousClose)}>{formatPrice(row.price, false)}</span>
       <span className="mw-trade-qty">{formatPrice(row.quantity, false)}</span>
     </div>
