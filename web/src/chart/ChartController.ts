@@ -4,7 +4,6 @@ import {
   CrosshairMode,
   type DeepPartial,
   type IChartApi,
-  type IRange,
   LineStyle,
   MismatchDirection,
   PriceScaleMode,
@@ -50,10 +49,10 @@ import type { ThemeTokens } from "./theme";
 import { chartTimeProjection, preserveTimeRange } from "./timeAxis";
 import { formatBarTime, formatTickMark, fromChartTime, isIntraday, toChartTime } from "./time";
 import type { ChartExtension, ExtensionFactory } from "./extensions";
+import { InitialRange, RIGHT_OFFSET } from "./initialRange";
 
 /** 왼쪽 끝이 이 봉 수 안으로 들어오면 과거 페이지를 받는다(frontend.md §5.7). */
 const LOAD_OLDER_WITHIN = 50;
-const RIGHT_OFFSET = 6;
 const STATUS_INTERVAL_MS = 250;
 
 const SUB_ERROR_TEXT: Record<SubErrorCode, string> = {
@@ -142,7 +141,7 @@ export class ChartController {
   private legendLeftT: UnixSeconds | null = null;
   private ready: ReadyStatus | null = null;
   private settingData = false;
-  private initialView: { range: IRange<number>; hostWidth: number; hostHeight: number } | null = null;
+  private readonly initialRange: InitialRange;
   private disposed = false;
   private extensions = new Set<ChartExtension>();
   private readonly pendingDraw = new Map<UnixSeconds, Bar>();
@@ -163,10 +162,8 @@ export class ChartController {
     this.onCorner = deps.onCorner;
     this.tokens = deps.tokens;
     this.onStatus = deps.onStatus;
-    this.hostResize = new ResizeObserver(() => {
-      const view = this.initialView;
-      if (view && (view.hostWidth !== el.clientWidth || view.hostHeight !== el.clientHeight)) this.releaseInitialView();
-    });
+    this.initialRange = new InitialRange(() => this.chart.timeScale(), () => ({ width: el.clientWidth, height: el.clientHeight }));
+    this.hostResize = new ResizeObserver(() => this.initialRange.hostResized());
     this.hostResize.observe(el);
     this.chart = createChart(el, { ...this.chartOptions(), autoSize: true });
     this.axisLabels = new AxisLabelCache(this.chart, () => this.scheduleFrame());
@@ -261,8 +258,7 @@ export class ChartController {
     });
     this.chart.timeScale().subscribeVisibleLogicalRangeChange(() => {
       const r = this.chart.timeScale().getVisibleLogicalRange();
-      const initial = this.initialView?.range;
-      if (r && initial && (Math.abs(r.from - initial.from) >= 0.001 || Math.abs(r.to - initial.to) >= 0.001)) this.releaseInitialView();
+      this.initialRange.rangeChanged(r);
       if (this.settingData) return;
       const left = this.leftT();
       const before = left === null ? -1 : this.bars.findIndex((bar) => bar.t >= left);
@@ -304,7 +300,7 @@ export class ChartController {
       this.clearPointedBar();
       this.crosshairMarker.show(null);
       this.history = null;
-      this.releaseInitialView();
+      this.initialRange.release();
       this.ready = null;
       this.legend.setNotice(null);
       this.setBars([]);
@@ -353,7 +349,7 @@ export class ChartController {
   setFinancials(page: FinancialsPage | null, message?: string): void {
     const draw = () => this.indicators.setFinancials(page, message);
     this.withDataGuard(() => {
-      if (this.initialView) {
+      if (this.initialRange.held) {
         draw();
         this.fitInitialRange();
       } else preserveTimeRange(this.chart.timeScale(), this.period(), draw);
@@ -419,7 +415,7 @@ export class ChartController {
 
   dispose(): void {
     this.disposed = true;
-    this.initialView = null;
+    this.initialRange.forget();
     this.clearPointedBar();
     this.pointedListeners.clear();
     this.el.removeEventListener("pointerleave", this.clearPointedBar);
@@ -717,28 +713,7 @@ export class ChartController {
   }
 
   private fitInitialRange(): void {
-    const bars = this.bars;
-    const first = bars[0];
-    const last = bars.at(-1);
-    if (!first || !last) return;
-    const scale = this.chart.timeScale();
-    const start = scale.timeToIndex(toChartTime(first.t), false);
-    const end = scale.timeToIndex(toChartTime(last.t), false);
-    if (start === null || end === null) return;
-    const chosen = this.view?.settings.visibleBars ?? null;
-    const whole = chosen === null && (this.period() === "Y" || this.period() === "Q");
-    const show = chosen ?? (matchMedia("(max-width: 767px)").matches ? 90 : 130);
-    const range = { from: whole ? start - 0.5 : end + 1 - show, to: end + (whole ? 0.5 + Math.min(2, bars.length * 0.05) : RIGHT_OFFSET) };
-    this.initialView = null;
-    scale.applyOptions({ lockVisibleTimeRangeOnResize: true });
-    scale.setVisibleLogicalRange(range);
-    this.initialView = { range, hostWidth: this.el.clientWidth, hostHeight: this.el.clientHeight };
-  }
-
-  private releaseInitialView(): void {
-    if (!this.initialView) return;
-    this.initialView = null;
-    this.chart.timeScale().applyOptions({ lockVisibleTimeRangeOnResize: false });
+    this.initialRange.fit({ bars: this.bars, period: this.period(), visibleBars: this.view?.settings.visibleBars ?? null, narrow: matchMedia("(max-width: 767px)").matches });
   }
 
   private onPrepended(h: History, added: number): void {
@@ -769,7 +744,7 @@ export class ChartController {
   }
 
   private onFailed(error: ApiRequestError): void {
-    this.releaseInitialView();
+    this.initialRange.release();
     this.ready = null;
     this.history = null;
     this.setBars([]);
