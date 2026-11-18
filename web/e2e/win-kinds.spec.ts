@@ -43,7 +43,7 @@ async function addWindow(page: Page, name: string) {
 test.beforeEach(async ({ page, scenario }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   for (const code of ["005930", "000660"]) {
-    scenario.reply((url) => url.pathname === `/api/symbols/${code}/order-book`, { body: { symbol: code, asks: [], bids: [], totalAskQuantity: 0, totalBidQuantity: 0, bookTime: null } });
+    scenario.reply((url) => url.pathname === `/api/symbols/${code}/order-book`, { body: { symbol: code, asks: [], bids: [], totalAskQuantity: 0, totalBidQuantity: 0, afterHoursAskQuantity: null, afterHoursBidQuantity: null, bookTime: null } });
     scenario.reply((url) => url.pathname === `/api/symbols/${code}/fundamentals`, { body: { symbol: code, upperLimit: null, lowerLimit: null } });
   }
 });

@@ -472,3 +472,28 @@ test.describe("수요일 08:55 동시호가", () => {
     await expect(page.locator(".mw-lr[data-expected]")).toContainText("70,000");
   });
 });
+
+test.describe("수요일 08:35 시간외 종가 잔량", () => {
+  test.use({ clockStart: "20261118083500" });
+
+  test.beforeEach(async ({ page, scenario }) => {
+    await page.clock.setFixedTime(new Date(scenario.now));
+  });
+
+  test("호가주문창 총잔량 띠의 숫자 자리에 시간외 잔량이 보인다", async ({ page, scenario }) => {
+    ordersOn(scenario);
+    tradingApi(scenario);
+    await openOrderWindow(page, scenario);
+    let sub = "";
+    await pollSaved(() => {
+      const message = scenario.live.messages.find((m) => m.type === "subscribe_feed" && m.kind === "book" && m.symbol === CODE);
+      sub = message?.type === "subscribe_feed" ? message.sub : "";
+      return sub;
+    }).not.toBe("");
+    await expect(page.getByTestId("order-total-ask")).toHaveAttribute("data-source", "regular");
+    scenario.live.emit({ type: "feed_after_hours", sub, totals: { t: scenario.now / 1000, askQty: 13_770, bidQty: 0 } });
+    await expect(page.getByTestId("order-total-ask")).toHaveAttribute("data-source", "after-hours");
+    await expect(page.getByTestId("order-total-ask")).toContainText("13,770주");
+    await expect(page.getByTestId("order-total-bid")).toContainText("0주");
+  });
+});
