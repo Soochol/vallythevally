@@ -1162,7 +1162,10 @@ mod tests {
             let samsung = domain::StockCode::parse("005930").unwrap();
             rest.call(&crate::kiwoom::api::StockBasicInfo::new(samsung), Some(&cont(9)), Priority::Screen, MergeScope::default()).await.map(drop)
         });
-        (a.unwrap(), b.unwrap(), c.unwrap(), d.unwrap());
+        a.unwrap();
+        b.unwrap();
+        c.unwrap();
+        d.unwrap();
         let sent = fake.market_sent();
         let kinds: Vec<_> = sent.iter().map(|s| s.api_id).collect();
         assert_eq!(kinds, [ApiId::Ka10099, ApiId::Ka10001, ApiId::Ka10099, ApiId::Ka10001].map(Endpoint::from));
