@@ -396,6 +396,36 @@ async fn files_that_finalize_does_not_read_are_left_out_of_the_fingerprint_and_k
 }
 
 #[tokio::test]
+async fn a_symlinked_key_folder_that_finalize_reads_does_not_count_as_an_unread_file() {
+    let data = data_with_first_day();
+    let real = tempdir().unwrap();
+    fs::write(real.path().join("0900.jsonl.zst"), zstd::encode_all(format!("{}\n", good_frame(NOV_3, 0)).as_bytes(), 3).unwrap()).unwrap();
+    fs::create_dir_all(raw_folder(data.path(), NOV_3)).unwrap();
+    std::os::unix::fs::symlink(real.path(), raw_folder(data.path(), NOV_3).join("collect-01")).unwrap();
+    finalize(data.path(), NOV_3);
+    put_raw_bytes(data.path(), NOV_20);
+    let calendar = calendar(data.path(), Vec::new()).await;
+
+    let report = prune_raw(data.path(), NOV_20, &calendar, &settings()).unwrap();
+
+    assert_eq!(report.deleted.iter().map(|(date, _)| *date).collect::<Vec<_>>(), [NOV_3], "{report:?}");
+    assert!(real.path().join("0900.jsonl.zst").exists(), "링크 너머 파일은 지우지 않는다");
+}
+
+#[test]
+fn a_dangling_raw_symlink_does_not_stop_finalize_and_keeps_the_day_unfinalized() {
+    let data = tempdir().unwrap();
+    write_raw_lines(data.path(), NOV_3, &[good_frame(NOV_3, 0)]);
+    std::os::unix::fs::symlink(data.path().join("없는 파일"), raw_folder(data.path(), NOV_3).join("broken.jsonl.zst")).unwrap();
+    let options = Options { data_dir: data.path().to_path_buf(), date: NOV_3, threads: 2, buckets: 16, verify_only: false, spill_budget_bytes: DEFAULT_SPILL_BUDGET_BYTES };
+
+    finalize_day(&options).expect("읽지 못한 파일 하나로 정리가 멈추지 않는다");
+
+    let verify: Value = serde_json::from_slice(&fs::read(data.path().join("store").join(NOV_3.to_string()).join("verify.json")).unwrap()).unwrap();
+    assert!(verify["lines"]["unfinalized"]["total"].as_u64().unwrap() > 0, "{verify}");
+}
+
+#[tokio::test]
 async fn a_raw_file_that_appears_after_the_plan_is_caught_right_before_the_delete() {
     let data = data_with_first_day();
     write_raw_lines(data.path(), NOV_3, &[good_frame(NOV_3, 0)]);
