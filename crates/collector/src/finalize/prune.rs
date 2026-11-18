@@ -304,10 +304,13 @@ fn directory_bytes(path: &Path) -> io::Result<u64> {
 }
 
 pub fn delete_raw_day(data_dir: &Path, target: &Path) -> io::Result<u64> {
-    Ok(remove_raw_day(data_dir, target, || None)?.expect("확인이 늘 통과한다"))
+    match remove_raw_day(data_dir, target, || None::<std::convert::Infallible>)? {
+        Ok(bytes) => Ok(bytes),
+        Err(never) => match never {},
+    }
 }
 
-fn remove_raw_day(data_dir: &Path, target: &Path, last_check: impl FnOnce() -> Option<KeepReason>) -> io::Result<Result<u64, KeepReason>> {
+fn remove_raw_day<Kept>(data_dir: &Path, target: &Path, last_check: impl FnOnce() -> Option<Kept>) -> io::Result<Result<u64, Kept>> {
     let refuse = |why: &str| io::Error::new(io::ErrorKind::InvalidInput, format!("{}는 raw/ 아래 날짜 폴더가 아니다: {why}", target.display()));
     if target.components().any(|component| component == Component::ParentDir) {
         return Err(refuse("상위 폴더 경로가 든다"));
