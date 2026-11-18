@@ -13,10 +13,11 @@ import { chartTimeProjection } from "../timeAxis";
 import { formatBarTime } from "../time";
 import { barLength, fromScreen, logicalToT, startAt, tToLogical, timelineOf, toolContext, type Frame } from "./anchor";
 import { reusableStyle } from "./objects";
-import * as clipboard from "./clipboard";
 import { DrawingLayer, VLinePaneLayer } from "./DrawingLayer";
 import { fineDemand, frameHit, placementPreview, renderItem, visible, type RenderFrame } from "./frame";
-import { idsInBox, nudge, shapeBounds, type NudgeKey } from "./geometry";
+import * as clipboard from "./clipboard";
+import { DrawingEdits, type ReorderDirection } from "./edits";
+import { idsInBox, shapeBounds, type NudgeKey } from "./geometry";
 import { holds, resolvePress, type DragAction, type Mods } from "./gestures";
 import { toolHotkey } from "./hotkeys";
 import { captures, IDLE, step, type Context, type Effect, type Input, type Interaction } from "./interaction";
@@ -24,7 +25,7 @@ import { effectiveMagnet, ohlcSource, snap } from "./magnet";
 import type { DrawingSync } from "./sync";
 import type { Shape } from "./toolSpec";
 import { toolOf } from "./tools";
-import type { DrawingBody, DrawingOp, DrawingScope, ScreenPoint } from "./types";
+import type { DrawingBody, DrawingScope, ScreenPoint } from "./types";
 import type { DrawingPoint } from "../../api/generated/DrawingPoint";
 import { modeOf, registeredModes, type ModeContext, type TransientShapes } from "./modes";
 import type { WindowId } from "../../layout/kinds";
@@ -44,8 +45,10 @@ export class DrawingSurface implements ChartExtension {
   private raf: number | null = null;
   private paneLayers: (() => void)[] = [];
   private transient: (TransientShapes & { createdAt: number }) | null = null;
+  private readonly edits: DrawingEdits;
 
   constructor(readonly host: ChartHost, readonly cellId: WindowId, readonly sync: DrawingSync) {
+    this.edits = new DrawingEdits(sync, cellId, () => { const view = host.view(); return view ? { symbol: view.symbol, scope: this.newScope() } : null; });
     this.mirror.className = "drawing-mirror"; this.mirror.setAttribute("aria-hidden", "true"); this.mirror.hidden = true;
     host.el.append(this.mirror);
     this.layer = new DrawingLayer(() => this.build());
@@ -213,13 +216,11 @@ export class DrawingSurface implements ChartExtension {
     switch (effect.kind) {
       case "select": session.select(effect.ids, effect.toggle); break;
       case "place": {
-        const view = this.host.view(); if (!view) break;
+        if (!this.host.view()) break;
         const prefs = useUiStore.getState().prefs.drawing;
-        const body: DrawingBody = { id: crypto.randomUUID(), symbol: view.symbol, tool: effect.tool.tool, points: effect.points,
-          style: prefs.lastStyle[effect.tool.tool] ?? effect.tool.defaultStyle(), text: null, locked: false, hidden: false,
-          z: Math.max(0, ...this.sync.drawings(view.symbol).map((d) => d.z)) + 1, periods: null, scope: this.newScope(), group: null, revision: 0 };
         if (prefs.hideAll) useUiStore.getState().setDrawingPrefs({ hideAll: false });
-        this.sync.commit(this.cellId, [{ kind: "create", after: body }]);
+        const body = this.edits.place(effect.tool, effect.points, prefs.lastStyle[effect.tool.tool] ?? effect.tool.defaultStyle());
+        if (!body) break;
         if (!prefs.keepDrawing && session.pinnedTool !== body.tool) session.setTool(null);
         session.select([body.id]);
         if (effect.tool.text?.editOnPlace) this.openEditor(body.id, "text");
@@ -227,7 +228,7 @@ export class DrawingSurface implements ChartExtension {
       }
       case "change": {
         if (effect.clone) this.commitClones(effect.preview);
-        else { const ops: DrawingOp[] = effect.preview.flatMap((after) => { const before = effect.originals.find((d) => d.id === after.id); return before ? [{ kind: "update" as const, before, after }] : []; }); this.sync.commit(this.cellId, ops); session.select(effect.preview.map((d) => d.id)); }
+        else { this.edits.move(effect.preview, effect.originals); session.select(effect.preview.map((d) => d.id)); }
         break;
       }
       case "box": { const f = this.frame(); session.select(idsInBox(f.items, effect.start, effect.end, f.pane)); break; }
@@ -246,13 +247,9 @@ export class DrawingSurface implements ChartExtension {
     const kind = useUiStore.getState().prefs.drawing.newScope; const layoutId = useLayoutStore.getState().layout.id;
     return kind === "symbol" ? { kind } : kind === "layout" ? { kind, layoutId } : { kind, layoutId, windowId: this.cellId };
   }
-  selected() {
-    const symbol = this.host.view()?.symbol; const ids = useDrawingSession.getState().selected;
-    return symbol ? this.sync.drawings(symbol).filter((d) => ids.includes(d.id)) : [];
-  }
+  selected() { return this.edits.selected(useDrawingSession.getState().selected); }
   updateSelected(change: (d: DrawingBody) => DrawingBody) {
-    const ops = this.selected().map((before) => ({ kind: "update" as const, before, after: change(before) }));
-    this.sync.commit(this.cellId, ops);
+    const ops = this.edits.update(useDrawingSession.getState().selected, change);
     const changed = ops.filter((op) => op.after.style !== op.before.style);
     if (changed.length) {
       const ui = useUiStore.getState(); const lastStyle = { ...ui.prefs.drawing.lastStyle };
@@ -264,8 +261,7 @@ export class DrawingSurface implements ChartExtension {
   paste() {
     const session = useDrawingSession.getState(); const view = this.host.view(); if (!view || !session.clip) return;
     const ctx = this.context().ctx;
-    const result = clipboard.paste(session.clip, { symbol: view.symbol, topZ: Math.max(0, ...this.sync.drawings(view.symbol).map((d) => d.z)), scope: this.newScope(), newId: () => crypto.randomUUID(), shiftBars: ctx.shiftBars });
-    this.sync.commit(this.cellId, result.bodies.map((after) => ({ kind: "create", after })));
+    const result = this.edits.paste(session.clip, ctx.shiftBars); if (!result) return;
     useDrawingSession.setState({ clip: result.clip }); session.select(result.bodies.map((d) => d.id));
     if (result.bodies.some((d) => d.points.some((p) => { const s = ctx.toScreen(p); return s === null || s.y < 0 || s.y > ctx.paneHeight; }))) toast("보이는 범위 밖에 붙였습니다");
   }
@@ -274,33 +270,20 @@ export class DrawingSurface implements ChartExtension {
     this.commitClones(this.selected().map((d) => ({ ...d, points: d.points.map((p) => ({ ...p, t: ctx.shiftBars(p.t, 5) ?? p.t })) })));
   }
   private commitClones(drawings: readonly DrawingBody[]) {
-    const symbol = this.host.view()?.symbol; if (!symbol) return;
-    const z = Math.max(0, ...this.sync.drawings(symbol).map((d) => d.z));
-    const clones = drawings.map((d, i) => ({ ...d, id: crypto.randomUUID(), locked: false, group: null, scope: this.newScope(), z: z + i + 1, revision: 0 }));
-    this.sync.commit(this.cellId, clones.map((after) => ({ kind: "create", after }))); useDrawingSession.getState().select(clones.map((d) => d.id));
+    if (!this.host.view()) return;
+    useDrawingSession.getState().select(this.edits.clone(drawings).map((d) => d.id));
   }
   remove(force = false) {
-    const prefs = useUiStore.getState().prefs.drawing; const selected = this.selected();
-    this.sync.commitWithUndo(this.cellId, selected.filter((d) => force || (!d.locked && !prefs.lockAll)).map((before) => ({ kind: "delete", before })), "드로잉을 지웠습니다");
+    this.edits.remove(useDrawingSession.getState().selected, { force, lockAll: useUiStore.getState().prefs.drawing.lockAll });
     useDrawingSession.getState().select([]);
   }
   openEditor(id: string, kind: "settings" | "text" = "settings") {
-    const symbol = this.host.view()?.symbol; const d = symbol ? this.sync.drawings(symbol).find((item) => item.id === id) : undefined;
+    const d = this.edits.find(id);
     if (!d) return;
     useDrawingSession.getState().select([d.id]);
     useDrawingSession.setState({ editor: { kind, original: d, draft: d }, popup: null });
   }
-  reorder(id: string, direction: "front" | "forward" | "backward" | "back", targetId?: string, dropPosition: "above" | "below" = "below") {
-    const symbol = this.host.view()?.symbol; if (!symbol) return;
-    const all = this.sync.drawings(symbol); const current = all.find((d) => d.id === id); if (!current) return;
-    const rest = all.filter((d) => d.id !== id);
-    const index = targetId ? rest.findIndex((d) => d.id === targetId) + (dropPosition === "above" ? 1 : 0) : direction === "front" ? rest.length : direction === "back" ? 0 : Math.max(0, Math.min(rest.length, all.indexOf(current) + (direction === "forward" ? 1 : -1)));
-    const lo = rest[index - 1]?.z; const hi = rest[index]?.z;
-    const z = lo === undefined ? (hi ?? 1) - 1 : hi === undefined ? lo + 1 : (lo + hi) / 2;
-    if (lo !== undefined && hi !== undefined && hi - lo < 1e-9) {
-      rest.splice(index, 0, current); this.sync.commit(this.cellId, rest.map((d, i) => ({ kind: "update", before: d, after: { ...d, z: i + 1 } })));
-    } else this.sync.commit(this.cellId, [{ kind: "update", before: current, after: { ...current, z } }]);
-  }
+  reorder(id: string, direction: ReorderDirection, targetId?: string, dropPosition: "above" | "below" = "below") { this.edits.reorder(id, direction, targetId, dropPosition); }
   selectionBounds() {
     const frame = this.frame(); const boxes = frame.items.filter((i) => useDrawingSession.getState().selected.includes(i.id)).flatMap((i) => i.shapes.map((s) => shapeBounds(s, frame.pane)));
     return boxes.length ? { x1: Math.min(...boxes.map((b) => b.x1)), x2: Math.max(...boxes.map((b) => b.x2)), y1: Math.min(...boxes.map((b) => b.y1)), y2: Math.max(...boxes.map((b) => b.y2)) } : null;
@@ -352,11 +335,8 @@ export class DrawingSurface implements ChartExtension {
     else if (ctrl && e.code === "KeyV" && session.clip) this.paste();
     else if (ctrl && (e.code === "KeyZ" || e.code === "KeyY")) this.sync.undo(this.cellId, e.code === "KeyY" || e.shiftKey);
     else if (["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(e.code) && session.selected.length) {
-      const key = e.code as NudgeKey; const f = this.projection(); const ctx = this.context(f).ctx;
-      this.sync.commit(this.cellId, this.selected().filter((d) => !d.locked && !prefs.lockAll).flatMap((before) => {
-        const points = nudge(before.points, key, { shiftBars: ctx.shiftBars, price: f.axes.price }, toolOf(before.tool)?.pointRoles);
-        return points && points.some((p, i) => p !== before.points[i]) ? [{ kind: "update" as const, before, after: { ...before, points } }] : [];
-      }));
+      const f = this.projection(); const ctx = this.context(f).ctx;
+      this.edits.nudge(session.selected, e.code as NudgeKey, { shiftBars: ctx.shiftBars, price: f.axes.price }, prefs.lockAll);
     } else handled = false;
     if (handled) { e.preventDefault(); e.stopImmediatePropagation(); this.refresh(); }
   }
