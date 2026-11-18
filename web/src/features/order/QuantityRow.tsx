@@ -3,7 +3,6 @@ import { formatWon } from "../market-window/format";
 import { Segmented } from "../market-window/parts";
 import type { QuantityMode } from "./orderRules";
 
-const SHARE_PRESETS = [10, 50, 100, 500] as const;
 const AMOUNT_PRESETS = [1_000_000, 5_000_000, 10_000_000, 50_000_000] as const;
 const MODES = [{ value: "shares", label: "주" }, { value: "amount", label: "금액" }] as const;
 const ROUTES = [{ value: "combined", label: "SOR" }, { value: "krx", label: "KRX" }, { value: "nxt", label: "NXT" }] as const;
@@ -15,13 +14,14 @@ interface Props {
   readonly input: string;
   readonly estimate: number | null;
   readonly venue: Venue;
+  readonly sharePresets: readonly number[];
   readonly onMode: (mode: QuantityMode) => void;
   readonly onInput: (input: string) => void;
   readonly onVenue: (venue: Venue) => void;
 }
 
-export function QuantityRow({ mode, input, estimate, venue, onMode, onInput, onVenue }: Props) {
-  const presets = mode === "shares" ? SHARE_PRESETS : AMOUNT_PRESETS;
+export function QuantityRow({ mode, input, estimate, venue, sharePresets, onMode, onInput, onVenue }: Props) {
+  const presets = mode === "shares" ? sharePresets : AMOUNT_PRESETS;
   return (
     <div className="od-qty" data-testid="order-quantity-row">
       <div className="od-qty-line">

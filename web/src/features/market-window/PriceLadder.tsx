@@ -11,7 +11,7 @@ export interface LadderSlots {
 const TONE = { up: "mw-up", down: "mw-down", flat: "" } as const;
 
 function Quantity({ row }: { row: LadderRow }) {
-  const level = row.level;
+  const level = row.unquoted ? null : row.level;
   const flash = level && level.change !== 0 ? (level.change > 0 ? "up" : "down") : undefined;
   return (
     <div className="mw-qty" data-side={row.side}>

@@ -5,6 +5,7 @@ import type { LayoutMode } from "../layout/modes";
 import type { MinutePeriod } from "../lib/symbol";
 import type { WatchColumn } from "../lib/watchlist";
 import type { DrawingPrefs } from "../chart/drawings/prefs";
+import type { OrderSettings } from "../features/order/orderSettings";
 import { DEFAULT_UI_PREFS, MAX_RECENT, sortColumns, type IndicatorWindow, type Theme, type UiExtra, type UiPrefs } from "../persist/uiState";
 
 interface UiStore {
@@ -23,6 +24,7 @@ interface UiStore {
   setIndicatorWindow(mode: IndicatorWindow): void;
   setLayoutMode(mode: LayoutMode): void;
   setVenue(venue: Venue): void;
+  setOrderSettings(settings: OrderSettings): void;
 }
 
 export const useUiStore = create<UiStore>()((set) => {
@@ -47,6 +49,7 @@ export const useUiStore = create<UiStore>()((set) => {
     setLastLayoutId: (id) => edit((p) => (p.lastLayoutId === id ? p : { ...p, lastLayoutId: id })),
     setActiveWatchlist: (id) => edit((p) => (p.activeWatchlistId === id ? p : { ...p, activeWatchlistId: id })),
     setLayoutMode: (layoutMode) => edit((p) => (p.layoutMode === layoutMode ? p : { ...p, layoutMode })),
+    setOrderSettings: (orderSettings) => edit((p) => (p.orderSettings === orderSettings ? p : { ...p, orderSettings })),
     setVenue: (venue) => edit((p) => (p.venue === venue ? p : { ...p, venue })),
     setIndicatorWindow: (indicatorWindow) => edit((p) => (p.indicatorWindow === indicatorWindow ? p : { ...p, indicatorWindow })),
     setDrawingPrefs: (patch) => edit((p) => ({ ...p, drawing: { ...p.drawing, ...patch } })),
@@ -67,3 +70,5 @@ export const useUiStore = create<UiStore>()((set) => {
 export const useVenue = (): Venue => useUiStore((s) => s.prefs.venue);
 
 export const useTheme = (): Theme => useUiStore((s) => s.prefs.theme);
+
+export const useOrderSettings = (): OrderSettings => useUiStore((s) => s.prefs.orderSettings);
