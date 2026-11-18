@@ -198,6 +198,7 @@ interface LayoutState {
   setLink(window: WindowId, link: LinkColor | null): void;
   setWindowList(window: WindowId, list: string | null): void;
   setWindowScreen(window: WindowId, screen: string | null): void;
+  setWindowRanking(window: WindowId, ranking: Ranking): void;
   pinSymbol(window: WindowId, code: SymbolCode | null): void;
   pickWindowSymbol(window: WindowId, activeCell: WindowId, target: SymbolTarget): SymbolChange;
   setPeriod(cellId: WindowId, p: Period): void;
@@ -443,6 +444,7 @@ export const useLayoutStore = create<LayoutState>()((set, get) => {
     },
     setWindowList: (id, list) => patchWindows((w) => (w.id === id && w.kind === "watchlist" ? withOptional(w, "list", list) : w)),
     setWindowScreen: (id, screen) => patchWindows((w) => (w.id === id && w.kind === "screener" ? withOptional(w, "screen", screen) : w)),
+    setWindowRanking: (id, ranking) => patchWindows((w) => (w.id === id && w.kind === "ranking" ? { ...w, ranking } : w)),
     pinSymbol: (id, code) =>
       patchWindows((w) => (w.id === id && PINNABLE.has(w.kind) && (code === null || !isIndexCode(code)) ? withOptional(w as PinnableWindowState | OrderWindowState, "symbol", code) : w)),
     pickWindowSymbol: (id, activeCell, target) => {

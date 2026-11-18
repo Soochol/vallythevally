@@ -23,6 +23,7 @@ import type { OrdersAccountCheck } from "../../src/api/generated/OrdersAccountCh
 import type { OrdersStatus } from "../../src/api/generated/OrdersStatus";
 import type { OrdersSwitchInput } from "../../src/api/generated/OrdersSwitchInput";
 import type { Period } from "../../src/api/generated/Period";
+import type { RankingPage } from "../../src/api/generated/RankingPage";
 import type { Screens } from "../../src/api/generated/Screens";
 import type { ServerMessage } from "../../src/api/generated/ServerMessage";
 import type { SymbolInfo } from "../../src/api/generated/SymbolInfo";
@@ -322,6 +323,7 @@ export class Scenario {
       return { body: this.market.page({ symbol, period, venue, limit: Number(url.searchParams.get("limit") ?? 500), before: url.searchParams.has("before") ? Number(url.searchParams.get("before")) : null }) };
     }
     if (/^\/api\/symbols\/[^/]+$/.test(path) && method === "GET") { const value = this.market.symbols.find(value => value.code === decodeURIComponent(path.slice("/api/symbols/".length))); return value ? { body: value } : error(404, "unknown_symbol", "종목이 없습니다"); }
+    if (path === "/api/rankings" && method === "POST") return { body: { rows: [], pages: 1, end: true, limited: false, hidden: 0, fetchedAt: Math.floor(this.now / 1000) } satisfies RankingPage };
     if (path === "/api/screener/status" && method === "GET") return { body: { lastDay: null, needDay: "2026-11-06", todayAvailable: false, fullHistory: { done: 0, total: 0 }, unconfirmed: 0, update: null } satisfies ScreenerStatus };
     if (path === "/api/financial-update" && method === "GET") return { body: { id: 0, status: "not_configured", phase: "planning", stopReason: null, nextCheckAt: null, canResume: false, automatic: false, latestCheckPending: false, historyCompletedCompanies: 0, historyFailedCompanies: 0, recentFailedCompanies: 0, historyComplete: false, fromYear: 2015, throughYear: 2026, totalSymbols: 0, processedSymbols: 0, unsupportedSymbols: 0, unverifiedSymbols: 0, unverifiedDividends: 0, totalCompanies: 0, completedCompanies: 0, failedCompanies: 0, startedAt: null, lastCheckedAt: null, failure: null, failures: [] } satisfies FinancialUpdatePage };
     if (/\/financials$/.test(path) && method === "GET") return { body: { symbol: decodeURIComponent(path.split("/")[3] ?? ""), period: url.searchParams.get("period") === "Q" ? "Q" : "Y", status: "not_collected", reason: null, failure: null, corpCode: null, fiscalMonth: null, shareClass: null, shareClassReason: null, lastCheckedAt: null, lastAttemptAt: null, disclosureFailure: null, refreshVersion: 0, disclosureVersion: 0, latestCorrections: false, progress: { total: 0, completed: 0, failed: 0, pending: 0 }, series: [] } satisfies FinancialsPage };
