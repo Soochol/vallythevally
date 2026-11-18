@@ -420,6 +420,12 @@ test("체결강도는 13행, 최근 체결은 14행부터 같은 top에 있고 �
   expect(await tops(page.getByTestId("ladder-strength"))).toEqual([rowTops[12]]);
   expect(await tops(page.getByTestId("ladder-trade"))).toEqual(rowTops.slice(13, 15));
   await expect(page.getByTestId("ladder-trade").first()).toHaveAttribute("data-price", "70100");
+  const tradeParts = await page.getByTestId("ladder-trade").evaluateAll((rows) => rows.map((row) => ({ count: row.children.length, text: row.textContent ?? "", priceRight: row.children[0]!.getBoundingClientRect().right, qtyLeft: row.children[1]!.getBoundingClientRect().left })));
+  for (const part of tradeParts) {
+    expect(part.count).toBe(2);
+    expect(part.text).not.toMatch(/\d{2}:\d{2}:\d{2}/);
+    expect(part.priceRight).toBeLessThanOrEqual(part.qtyLeft);
+  }
   lastTrade(scenario, 70_200, 3, 3, "krx");
   await expect(page.getByTestId("ladder-trade").first()).toHaveAttribute("data-price", "70200");
   await expect(win(page)).not.toContainText("대량");
