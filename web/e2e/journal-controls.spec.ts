@@ -4,7 +4,7 @@ import path from "node:path";
 import { createServer } from "vite";
 import { parseDrawingBody, recordKey, UNSAVED_PREFIX } from "../src/chart/drawings/outbox";
 import { parseJournalRecord, stageKey, STAGING_PREFIX, COMPLETION_PREFIX, completionKey } from "../src/chart/drawings/journal";
-import { test, expect, cell, chartOf, type Scenario } from "./harness";
+import { test, expect, cell, chartOf, type Scenario, pollSaved } from "./harness";
 import type {} from "./journal-probe";
 import { settledMirror } from "./drawing-probe";
 
@@ -79,7 +79,7 @@ test("frontend journal + saved documents: delayed older admission cannot replace
     expect(requests).toEqual([]);
     await page.evaluate(() => window.dispatchEvent(new Event("release-journal-control")));
     await expect(page.getByText(/^자동 저장됨 /)).toBeVisible();
-    await expect.poll(() => storedDrawings(scenario)).toEqual([]);
+    await pollSaved(() => storedDrawings(scenario)).toEqual([]);
     await expect.poll(() => pendingRecords(page)).toEqual([]);
     expect(requests).toEqual(["DELETE"]);
     await open(page);
@@ -157,7 +157,7 @@ test("frontend journal + saved documents: reload transmits the staged PUT's fixe
     if (request.method() === "PUT" && request.url().includes("/api/drawings/")) sent.push(request.postDataJSON());
   });
   await open(page);
-  await expect.poll(async () => (await storedDrawings(scenario))[0]?.style).toMatchObject({ line: { width: 3 } });
+  await pollSaved(async () => (await storedDrawings(scenario))[0]?.style).toMatchObject({ line: { width: 3 } });
   await expect.poll(() => pendingRecords(page)).toEqual([]);
   expect((await storedDrawings(scenario))[0]?.revision).toBe(staged.want.body.revision);
   expect(sent).toEqual([staged.want.body]);

@@ -4,7 +4,7 @@ import type { Locator, Page } from "@playwright/test";
 import type { Bar } from "../src/api/generated/Bar";
 import type { LayoutWindow } from "../src/api/generated/LayoutWindow";
 import { parsePlacement } from "../src/layout/placement";
-import { cell, chartOf, DEFAULT_LAYOUT_ID, expect, test, type Scenario, desktopVenueCombo, expectDesktopVenue } from "./harness";
+import { cell, chartOf, DEFAULT_LAYOUT_ID, expect, test, type Scenario, desktopVenueCombo, expectDesktopVenue, pollSaved } from "./harness";
 
 test.use({ clockStart: "20261109100000", viewport: { width: 1440, height: 900 } });
 const screens = path.resolve("../target/ux-screens");
@@ -40,8 +40,8 @@ async function dragTo(page: Page, source: Locator, destination: { x: number; y: 
 async function persistBaseline(page: Page, scenario: Scenario) {
   await tab(page, "스크리너").click();
   await tab(page, "관심종목").click();
-  await expect.poll(() => saved(scenario)).not.toBeNull();
-  await expect.poll(() => JSON.stringify(saved(scenario))).toContain('"active":"watchlist"');
+  await pollSaved(() => saved(scenario)).not.toBeNull();
+  await pollSaved(() => JSON.stringify(saved(scenario))).toContain('"active":"watchlist"');
 }
 
 async function undo(page: Page, source: Locator) {
@@ -83,8 +83,8 @@ test("스크리너를 차트 아래로 나누고 실제 미리 보기와 같은 
   expect(screener.y + screener.height).toBe(room.y + room.height);
   expect(right.x + right.width).toBe(room.x + room.width);
   await page.screenshot({ path: path.join(screens, "win-dock-placed.png") });
-  await expect.poll(() => saved(scenario)?.root.kind).toBe("split");
-  await expect.poll(() => JSON.stringify(saved(scenario))).toContain('"id":"g3"');
+  await pollSaved(() => saved(scenario)?.root.kind).toBe("split");
+  await pollSaved(() => JSON.stringify(saved(scenario))).toContain('"id":"g3"');
   await page.reload();
   await expect(groups(page)).toHaveCount(3);
   const destination = await boxOf(groupWith(page, "관심종목"));
@@ -108,7 +108,7 @@ test("전체 아래 가장자리는 전체 폭을 나누고 한 번의 배치 �
   expect(await boxOf(groupWith(page, "스크리너"))).toEqual(predicted);
   await undo(page, tab(page, "스크리너"));
   await expect(groups(page)).toHaveCount(2);
-  await expect.poll(() => saved(scenario)).toEqual(original);
+  await pollSaved(() => saved(scenario)).toEqual(original);
   await tab(page, "스크리너").press("Shift+F10");
   await expect(menu(page).getByRole("menuitem", { name: "배치 되돌리기", exact: true })).toBeDisabled();
 });
@@ -119,7 +119,7 @@ test("두 차트를 바꾸어 놓아도 같은 차트 노드·봉·드로잉·�
   await page.goto("/");
   await expect(cell(page, 2)).toHaveAttribute("aria-busy", "false");
   await expect(chartOf(cell(page, 2))).toHaveAttribute("data-bar-count", /^[1-9]\d*$/);
-  await expect.poll(() => scenario.live.subscriptions().length).toBeGreaterThanOrEqual(2);
+  await pollSaved(() => scenario.live.subscriptions().length).toBeGreaterThanOrEqual(2);
   const node = await chartOf(cell(page, 2)).elementHandle();
   if (!node) throw new Error("옮길 차트가 없습니다");
   const subscriptions = scenario.live.messages.length;
@@ -182,7 +182,7 @@ test("5px 이하는 탭 고르기이고 Esc·영역 밖 놓기·포인터 취소
   await expect(source).toHaveAttribute("aria-selected", "true");
   await tab(page, "관심종목").click();
   await expect(tab(page, "관심종목")).toHaveAttribute("aria-selected", "true");
-  await expect.poll(() => JSON.stringify(saved(scenario))).toContain('"active":"watchlist"');
+  await pollSaved(() => JSON.stringify(saved(scenario))).toContain('"active":"watchlist"');
   const original = saved(scenario);
   const chart = await boxOf(groups(page).first());
   for (const cancel of ["escape", "outside", "pointercancel"]) {
@@ -306,7 +306,7 @@ test("묶음 더하기는 차트를 그 묶음에 더하고 기존 단일 창은
   await firstGroup.getByRole("button", { name: "이 묶음에 창 더하기" }).click();
   await page.getByRole("menu", { name: "창 더하기" }).getByRole("menuitem", { name: /^지표/ }).click();
   await expect(firstGroup.locator(".dock-tabs").getByRole("tab", { name: "지표" })).toHaveAttribute("aria-selected", "true");
-  await expect.poll(() => scenario.documents.layout(DEFAULT_LAYOUT_ID).windows.filter((window) => window.kind === "indicators").length).toBe(1);
+  await pollSaved(() => scenario.documents.layout(DEFAULT_LAYOUT_ID).windows.filter((window) => window.kind === "indicators").length).toBe(1);
   await undo(page, firstGroup.locator(".dock-tabs").getByRole("tab", { name: "지표" }));
   await expect(groupWith(page, "관심종목").locator(".dock-tabs").getByRole("tab", { name: "지표" })).toBeVisible();
 });

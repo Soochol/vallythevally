@@ -1,7 +1,7 @@
 import type { Page } from "@playwright/test";
 import { parseDrawingBody, UNSAVED_PREFIX } from "../src/chart/drawings/outbox";
 import { parseJournalRecord, STAGING_PREFIX } from "../src/chart/drawings/journal";
-import { test, expect, cell, chartOf, type Scenario } from "./harness";
+import { test, expect, cell, chartOf, type Scenario, pollSaved } from "./harness";
 import { settledMirror } from "./drawing-probe";
 
 async function selectLine(page: Page) {
@@ -89,9 +89,9 @@ test("startup legacy read failure then late ACK retains revision maximum for bac
     if (!other.isClosed()) await route.fulfill({ status: response.status ?? 200, json: response.body, headers: response.headers });
   });
   try {
-    await expect.poll(() => deleteStage !== undefined).toBe(true);
+    await pollSaved(() => deleteStage !== undefined).toBe(true);
     await open(other);
-    await expect.poll(() => putStored).toBe(true);
+    await pollSaved(() => putStored).toBe(true);
     const storedBeforeDelete = await storedDrawings(scenario);
     const terminal = parseJournalRecord(deleteStage);
     if (!terminal) throw new Error("Expected reserved DELETE");
@@ -108,7 +108,7 @@ test("startup legacy read failure then late ACK retains revision maximum for bac
     expect(storedBeforeDelete[0]?.revision).toBe(legacyStage.lastRevision);
     releaseDelete();
     await deleting;
-    await expect.poll(() => storedDrawings(scenario)).toEqual([]);
+    await pollSaved(() => storedDrawings(scenario)).toEqual([]);
     await expect.poll(() => pendingRecords(page)).toEqual([]);
     const afterDelete = await page.evaluate(id => JSON.parse(localStorage.getItem(`vv.drawing.completed.${id}`) ?? "null"), original.id);
     releaseAck();
@@ -125,7 +125,7 @@ test("startup legacy read failure then late ACK retains revision maximum for bac
     await page.evaluate(clock => { Date.now = () => clock; }, acknowledged.revision - 60_000);
     await cell(page).focus();
     await page.keyboard.press("Control+z");
-    await expect.poll(async () => (await storedDrawings(scenario)).length).toBe(1);
+    await pollSaved(async () => (await storedDrawings(scenario)).length).toBe(1);
     const afterUndo = await storedDrawings(scenario);
     const evidence = { legacyStage, deleteStage, putBody, storedBeforeDelete, afterDelete, afterAck, serverAfterAck, beforeUndoKeys, afterUndo };
     console.log(JSON.stringify(evidence));

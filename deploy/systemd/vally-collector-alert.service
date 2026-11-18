@@ -3,4 +3,6 @@ Description=Vally 수집 감독 데몬이 뜻하지 않게 끝났다는 경보
 
 [Service]
 Type=oneshot
+Environment=VALLY_DISCORD_WEBHOOK=%h/.config/vally/discord-webhook
 ExecStart=/usr/bin/systemd-cat --identifier=vally-collector-alert --priority=crit /usr/bin/echo "vally-collector가 뜻하지 않게 끝났다. 모든 키의 수집이 끊겼을 수 있다. journalctl --user -u vally-collector 와 collector status 를 확인하라."
+ExecStart=%h/.local/bin/vally-collector-alert-webhook "[수집 경보] vally-collector가 뜻하지 않게 끝났다. 모든 키의 수집이 끊겼을 수 있다."

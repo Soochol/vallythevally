@@ -1,6 +1,6 @@
 import type { Bar } from "../src/api/generated/Bar";
 import type { ServerMessage } from "../src/api/generated/ServerMessage";
-import { cell, chartOf, expect, test } from "./harness";
+import { cell, chartOf, expect, test, pollSaved } from "./harness";
 
 test.use({ clockStart: "20261109100000" });
 const NOV9 = Date.parse("2026-11-09T00:00:00+09:00") / 1000;
@@ -11,7 +11,7 @@ test("일봉 현재 봉과 재연결 상태를 표시하고 연결 회복 뒤 �
   await page.goto("/?symbol=005930");
   const chart = chartOf(cell(page));
   await expect(cell(page)).toHaveAttribute("aria-busy", "false");
-  await expect.poll(() => scenario.live.subscriptions().some(value => value.symbol === "005930")).toBe(true);
+  await pollSaved(() => scenario.live.subscriptions().some(value => value.symbol === "005930")).toBe(true);
   const count = Number(await chart.getAttribute("data-bar-count"));
   scenario.live.bar("005930", bar(NOV9, 201_000));
   await expect(chart).toHaveAttribute("data-last-close", "201000");
@@ -30,7 +30,7 @@ test("확정 분봉 뒤 새 현재 봉을 받고 기존 봉과 함께 표시한�
   await page.goto("/?symbol=005930&period=1m");
   const chart = chartOf(cell(page));
   await expect(cell(page)).toHaveAttribute("aria-busy", "false");
-  await expect.poll(() => scenario.live.subscriptions().some(value => value.period === "1m")).toBe(true);
+  await pollSaved(() => scenario.live.subscriptions().some(value => value.period === "1m")).toBe(true);
   const count = Number(await chart.getAttribute("data-bar-count"));
   scenario.live.bar("005930", bar(AT_1000, 201_000));
   await expect(chart).toHaveAttribute("data-last-close", "201000");

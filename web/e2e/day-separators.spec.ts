@@ -3,7 +3,7 @@ import type { UTCTimestamp } from "lightweight-charts";
 import type { Bar } from "../src/api/generated/Bar";
 import { type ChartSettings, DEFAULT_CHART_SETTINGS } from "../src/chart/settings";
 import { installChartProbe } from "./chart-probe";
-import { type Scenario, cell, DEFAULT_LAYOUT_ID, expect, test, firstChart, withFirstChart } from "./harness";
+import { type Scenario, cell, DEFAULT_LAYOUT_ID, expect, test, firstChart, withFirstChart, pollSaved } from "./harness";
 
 const KST = 32_400;
 const BARS_PER_DAY = 40;
@@ -120,7 +120,7 @@ test("분봉에서 날짜 구분선을 켜면 가격·거래량 패널의 날짜
   expect(saved(scenario).showDaySeparators).toBe(false);
 
   await expectSeparatorsOnEveryPane(page, 2);
-  await expect.poll(() => saved(scenario).showDaySeparators).toBe(true);
+  await pollSaved(() => saved(scenario).showDaySeparators).toBe(true);
 
   await choosePeriod(page, "일", "일");
   const daily = await stableInk(page);
@@ -137,7 +137,7 @@ test("새로고침 뒤에도 날짜 구분선 스위치가 켜져 있고 구분�
   openMinute(scenario);
   await open(page);
   await setSwitch(page, true);
-  await expect.poll(() => saved(scenario).showDaySeparators).toBe(true);
+  await pollSaved(() => saved(scenario).showDaySeparators).toBe(true);
   await page.reload();
   await expect(cell(page)).toHaveAttribute("aria-busy", "false");
   await setSwitch(page, true);

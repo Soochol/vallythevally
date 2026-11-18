@@ -1,6 +1,6 @@
 import { installFrameProbe } from "./frame-probe";
 import { readFile } from "node:fs/promises";
-import { cell, chartOf, DEFAULT_LAYOUT_ID, expect, test, firstChart } from "./harness";
+import { cell, chartOf, DEFAULT_LAYOUT_ID, expect, test, firstChart, pollSaved } from "./harness";
 
 test.use({ clockStart: "20261109100030" });
 
@@ -32,7 +32,7 @@ test("색상표와 직접 고른 색·굵기 5를 지표에 적용하고 관리 
   await dialog.getByRole("button", { name: "이동평균 단순 20 추가", exact: true }).click();
   await dialog.getByRole("tab", { name: /^이 칸에 띄운 지표/ }).click();
   await expect(dialog.getByRole("button", { name: "이동평균 단순 20 설정", exact: true })).toBeVisible();
-  await expect.poll(async () => {
+  await pollSaved(async () => {
     const saved = scenario.documents.layout(DEFAULT_LAYOUT_ID);
     return (firstChart(saved).chartSettings as { indicators: { spec: { kind: string }; style: { colors: string[] } }[] }).indicators.find((i: { spec: { kind: string } }) => i.spec.kind === "ma")?.style;
   }).toMatchObject({ colors: ["#8B5CF6"], width: 5 });

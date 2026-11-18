@@ -2,7 +2,7 @@ import { parseChartSettings } from "../src/chart/settings";
 import { mkdir } from "node:fs/promises";
 import path from "node:path";
 import type { Page } from "@playwright/test";
-import { type Scenario, cell, DEFAULT_LAYOUT_ID, expect, test, firstChart } from "./harness";
+import { type Scenario, cell, DEFAULT_LAYOUT_ID, expect, test, firstChart, pollSaved } from "./harness";
 
 const panel = (page: Page) => page.getByRole("complementary", { name: "관심종목" });
 const row = (page: Page, code: string) => panel(page).locator(`li[data-code="${code}"]`);
@@ -100,7 +100,7 @@ test("되돌리기 직전 최신 조회가 실패하면 서버 목록을 바꾸�
   await page.goto("/");
   await expect(row(page, "086520")).toContainText("에코프로");
   await action(page, "086520", "관심종목에서 빼기");
-  await expect.poll(async () => scenario.documents.watchlists().lists[0]!.symbols).toEqual(["005930", "005935"]);
+  await pollSaved(async () => scenario.documents.watchlists().lists[0]!.symbols).toEqual(["005930", "005935"]);
   const before = scenario.documents.watchlists();
   await page.route("**/api/watchlists", (route) => route.request().method() === "GET"
     ? route.fulfill({ status: 503, json: { error: { code: "internal", message: "연결 실패" } } })
@@ -135,17 +135,17 @@ test("다른 탭이 복제한 목록을 유지하면서 빠진 종목만 원래 
   await page.goto("/");
   await expect(row(page, "086520")).toContainText("에코프로");
   await action(page, "086520", "관심종목에서 빼기");
-  await expect.poll(async () => scenario.documents.watchlists().lists[0]!.symbols).toEqual(["005930", "005935"]);
+  await pollSaved(async () => scenario.documents.watchlists().lists[0]!.symbols).toEqual(["005930", "005935"]);
   const other = await context.newPage();
   await other.goto("/");
   await listButton(other).click();
   await other.getByRole("menuitem", { name: "복제", exact: true }).click();
-  await expect.poll(async () => scenario.documents.watchlists().lists.length).toBe(3);
+  await pollSaved(async () => scenario.documents.watchlists().lists.length).toBe(3);
   const before = scenario.documents.watchlists();
   await page.bringToFront();
   await page.evaluate(() => window.dispatchEvent(new Event("focus")));
   await page.getByRole("button", { name: "되돌리기", exact: true }).click();
-  await expect.poll(async () => scenario.documents.watchlists().lists).toEqual([
+  await pollSaved(async () => scenario.documents.watchlists().lists).toEqual([
     { ...before.lists[0], symbols: ["005930", "086520", "005935"] }, ...before.lists.slice(1),
   ]);
 });
@@ -155,12 +155,12 @@ test("다른 탭이 같은 목록을 바꾸면 빼기 되돌리기를 비활성�
   await page.goto("/");
   await expect(row(page, "086520")).toContainText("에코프로");
   await action(page, "086520", "관심종목에서 빼기");
-  await expect.poll(async () => scenario.documents.watchlists().lists[0]!.symbols).toEqual(["005930", "005935"]);
+  await pollSaved(async () => scenario.documents.watchlists().lists[0]!.symbols).toEqual(["005930", "005935"]);
   const other = await context.newPage();
   await other.goto("/");
   await expect(row(other, "005935")).toBeVisible();
   await row(other, "005935").locator("[data-main]").press("Alt+ArrowUp");
-  await expect.poll(async () => scenario.documents.watchlists().lists[0]!.symbols).toEqual(["005935", "005930"]);
+  await pollSaved(async () => scenario.documents.watchlists().lists[0]!.symbols).toEqual(["005935", "005930"]);
   await page.bringToFront();
   await page.evaluate(() => window.dispatchEvent(new Event("focus")));
   await expect(page.getByRole("button", { name: "되돌리기", exact: true })).toBeDisabled();
@@ -185,7 +185,7 @@ test("우클릭의 열기·비교·맨 위로·복사와 키보드·끌기를 �
   await expect(cell(page)).toHaveAttribute("aria-label", /삼성전자/);
   await action(page, "086520", "비교에 추가");
   await expect(page.getByRole("status").getByText("비교에 추가했습니다: 에코프로")).toBeVisible();
-  await expect.poll(async () => parseChartSettings(firstChart(scenario.documents.layout(DEFAULT_LAYOUT_ID)).chartSettings).compare).toEqual(["086520"]);
+  await pollSaved(async () => parseChartSettings(firstChart(scenario.documents.layout(DEFAULT_LAYOUT_ID)).chartSettings).compare).toEqual(["086520"]);
   await action(page, "086520", "맨 위로");
   await expect.poll(() => codes(page)).toEqual(["086520", "005930", "005935"]);
   await expect(row(page, "086520").locator("[data-main]")).toBeFocused();
@@ -195,7 +195,7 @@ test("우클릭의 열기·비교·맨 위로·복사와 키보드·끌기를 �
   await expect.poll(() => codes(page)).toEqual(["005935", "005930", "086520"]);
   await action(page, "086520", "다른 목록에 복사");
   await page.getByRole("menu", { name: /다른 목록으로$/ }).getByRole("menuitem", { name: "반도체", exact: true }).last().click();
-  await expect.poll(async () => scenario.documents.watchlists().lists[1]!.symbols).toEqual(["086520"]);
+  await pollSaved(async () => scenario.documents.watchlists().lists[1]!.symbols).toEqual(["086520"]);
   await expect.poll(() => codes(page)).toEqual(["005935", "005930", "086520"]);
   const button = row(page, "086520").locator("[data-main]");
   await button.focus();

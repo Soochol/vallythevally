@@ -47,7 +47,7 @@ async function holdSymbolInfo(scenario: Scenario, page: Page, code: string) {
   };
 }
 
-test("업데이트 상태와 조건식 결과를 표시하고 종목을 칸의 거래소와 봉 주기대로 열며, 자료 부족을 안내하고 조건식을 고치고 지운다", async ({ screener, page }) => {
+test("업데이트 상태와 조건식 결과를 표시하고 종목을 칸의 거래소와 봉 주기대로 열며, 자료 부족을 안내하고 조건식을 고치고 지운다", async ({ scenario, screener, page }) => {
   const barRequests: string[] = [];
   page.on("request", (req) => {
     const url = new URL(req.url());
@@ -77,6 +77,7 @@ test("업데이트 상태와 조건식 결과를 표시하고 종목을 칸의 �
     await saved;
     await savedEditor(dialog);
     await expect(screenChooser(page)).toHaveText(SCREEN_NAME);
+    expect(scenario.documents.screens().screens[0]!.exclude).toContain("etf");
     await expect(panel(page).getByRole("list", { name: "조건" })).toHaveText("일봉최근20일 이내에고가60일 신고가인 봉이 있다");
     await expect(panel(page).getByText("ETF", { exact: true })).toBeVisible();
     await expect(panel(page).getByText("저장 전에도 실행할 수 있습니다")).toBeVisible();
@@ -482,16 +483,7 @@ test.describe("서버와 시계가 어긋난 브라우저", () => {
 test.describe("휴대폰 390px", () => {
   test.use({ viewport: { width: 390, height: 844 } });
 
-  test("스크리너 탭에서 찾은 행을 누르면 차트 탭으로 가서 칸의 종목만 바꾼다", async ({ scenario, page }) => {
-    await runSeededScreen(scenario, page, openPhoneScreener);
-    await rows(page).nth(1).getByRole("button").click();
-    await expect(phoneTabs(page).getByRole("button", { name: "차트" })).toHaveAttribute("aria-pressed", "true");
-    await expect(panel(page)).toBeHidden();
-    await expect(cell(page)).toHaveAttribute("aria-label", "칸 1: 가상전자우 통합 일");
-    await expect(chartOf(cell(page))).not.toHaveAttribute("data-bar-count", "0");
-  });
-
-  test("행을 누른 뒤 종목 정보를 기다리는 사이 다른 탭으로 가면, 늦게 온 정보는 차트 탭으로 끌고 가지 않고 칸도 바꾸지 않는다", async ({ scenario, page }) => {
+  test("행을 누른 뒤 종목 정보를 기다리는 사이 다른 탭으로 가면 늦게 온 정보는 차트 탭으로 끌고 가지 않고 칸도 바꾸지 않으며, 다시 찾아 누른 행은 차트 탭으로 가서 칸의 종목만 바꾼다", async ({ scenario, page }) => {
     await runSeededScreen(scenario, page, openPhoneScreener);
     const held = await holdSymbolInfo(scenario, page, "110030");
     await rows(page).nth(0).getByRole("button").click();
@@ -506,7 +498,9 @@ test.describe("휴대폰 390px", () => {
     await openPhoneScreener(page);
     await rows(page).nth(1).getByRole("button").click();
     await expect(phoneTabs(page).getByRole("button", { name: "차트" })).toHaveAttribute("aria-pressed", "true");
+    await expect(panel(page)).toBeHidden();
     await expect(cell(page)).toHaveAttribute("aria-label", "칸 1: 가상전자우 통합 일");
+    await expect(chartOf(cell(page))).not.toHaveAttribute("data-bar-count", "0");
   });
 });
 

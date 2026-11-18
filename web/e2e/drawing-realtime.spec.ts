@@ -1,7 +1,7 @@
 import { selectMinute } from "./select-option";
 import type { Page } from "@playwright/test";
 import type { Drawing } from "../src/api/generated/Drawing";
-import { type Scenario, cell, chartOf, expect, SEARCH_BUTTON_TITLE, test } from "./harness";
+import { type Scenario, cell, chartOf, expect, SEARCH_BUTTON_TITLE, test, pollSaved } from "./harness";
 
 test.use({ clockStart: "20261109100000" });
 
@@ -41,7 +41,7 @@ test("drawings survive realtime updates, series replacement, resync and controll
   const unsubscribes = () => scenario.live.messages.filter(message => message.type === "unsubscribe").length;
   await page.goto("/?symbol=005930");
   await expect(cell(page)).toHaveAttribute("aria-busy", "false");
-  await expect.poll(async () => scenario.live.subscriptions().map(value => value.symbol)).toContain("005930");
+  await pollSaved(async () => scenario.live.subscriptions().map(value => value.symbol)).toContain("005930");
   await pushPrice(scenario, page, 201_000, "100001");
 
   const chart = chartOf(cell(page));
@@ -52,7 +52,7 @@ test("drawings survive realtime updates, series replacement, resync and controll
   await page.mouse.down();
   await page.mouse.move(box.x + box.width * 0.86, box.y + box.height * 0.3, { steps: 10 });
   await page.mouse.up();
-  await expect.poll(() => drawings(scenario)).toHaveLength(1);
+  await pollSaved(() => drawings(scenario)).toHaveLength(1);
   const saved = (await drawings(scenario))[0]!;
   const expectDrawing = async (place: "loaded" | "beforeFirstBar" = "loaded") => {
     await expect(chart.locator(".drawing-mirror")).toHaveCount(1);
@@ -111,7 +111,7 @@ test("drawings survive realtime updates, series replacement, resync and controll
   await expect.poll(() => oldMirror.evaluate((element) => element.isConnected)).toBe(false);
   await expect(page).toHaveURL(/\/$/);
   await expect(cell(page)).toHaveAttribute("aria-busy", "false");
-  await expect.poll(unsubscribes).toBeGreaterThan(beforeDisposal);
+  await pollSaved(unsubscribes).toBeGreaterThan(beforeDisposal);
   await expectDrawing();
   const afterWindowListeners = await listenerTypes("window");
   const afterFontListeners = await listenerTypes("document.fonts");

@@ -1,5 +1,5 @@
 import type { Locator, Page } from "@playwright/test";
-import { cell, DEFAULT_LAYOUT_ID, expect, test } from "./harness";
+import { cell, DEFAULT_LAYOUT_ID, expect, test, pollSaved } from "./harness";
 
 test.use({ clockStart: "20261109100000", viewport: { width: 1440, height: 860 } });
 
@@ -41,7 +41,7 @@ test("좌우 경계를 우클릭해 반반을 고르면 폭 차이가 1px 안이
   await pick(page, "반반");
   await expect.poll(async () => Math.abs((await widths(page)).reduce((a, b) => a - b))).toBeLessThanOrEqual(1);
   const even = await widths(page);
-  await expect.poll(() => JSON.stringify(scenario.documents.layout(DEFAULT_LAYOUT_ID).placement)).toContain("0.5");
+  await pollSaved(() => JSON.stringify(scenario.documents.layout(DEFAULT_LAYOUT_ID).placement)).toContain("0.5");
   await undoFromDivider(page, sideways(page));
   await expect.poll(() => widths(page)).toEqual(before);
   await pick(page, "반반");

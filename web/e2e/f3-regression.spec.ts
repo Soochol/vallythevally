@@ -1,6 +1,6 @@
 import type { Page } from "@playwright/test";
 import type { Drawing } from "../src/api/generated/Drawing";
-import { test, expect, cell, chartOf, type Scenario } from "./harness";
+import { test, expect, cell, chartOf, type Scenario, pollSaved } from "./harness";
 
 interface Mirror {
   id: string;
@@ -27,7 +27,7 @@ for (const history of ["loaded", "older"] as const) {
       await page.keyboard.press("G");
       await page.keyboard.press("H");
       await page.mouse.click(box.x + box.width * 0.8, box.y + box.height * 0.5);
-      await expect.poll(async () => (await drawings(scenario)).length).toBe(1);
+      await pollSaved(async () => (await drawings(scenario)).length).toBe(1);
       const saved = (await drawings(scenario))[0]!;
       const point = saved.points[0]!;
       const first = Number(await chart.getAttribute("data-first-bar-t"));
@@ -52,9 +52,9 @@ for (const history of ["loaded", "older"] as const) {
       await page.mouse.up();
       if (clone) await page.keyboard.up("Control");
       await page.screenshot({ path: testInfo.outputPath("after-body-drag.png") });
-      await expect.poll(async () => (await drawings(scenario)).length).toBe(clone ? 2 : 1);
+      await pollSaved(async () => (await drawings(scenario)).length).toBe(clone ? 2 : 1);
       const moved = async () => (await drawings(scenario)).find((drawing) => clone ? drawing.id !== saved.id : drawing.id === saved.id);
-      await expect.poll(async () => (await moved())?.points[0]?.price).not.toBe(point.price);
+      await pollSaved(async () => (await moved())?.points[0]?.price).not.toBe(point.price);
       expect((await moved())?.points[0]?.t).toBe(timestamp);
       if (clone) expect((await drawings(scenario)).find((drawing) => drawing.id === saved.id)?.points).toEqual([{ ...point, t: timestamp }]);
       const movedId = (await moved())?.id;

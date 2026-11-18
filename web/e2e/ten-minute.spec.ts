@@ -4,7 +4,7 @@ import type { Locator, Page } from "@playwright/test";
 import type { SeriesKey } from "../src/api/bars";
 import type { Drawing } from "../src/api/generated/Drawing";
 import type { Layout } from "../src/api/generated/Layout";
-import { type Scenario, cell, chartOf, DEFAULT_LAYOUT_ID, expect, test, firstChart, withFirstChart, pickDesktopVenue } from "./harness";
+import { type Scenario, cell, chartOf, DEFAULT_LAYOUT_ID, expect, test, firstChart, withFirstChart, pickDesktopVenue, pollSaved } from "./harness";
 import { mirror } from "./drawing-probe";
 
 const TEN_MINUTES = 600;
@@ -22,7 +22,7 @@ function recordBarRequests(page: Page): SeriesKey[] {
 
 async function expectTenMinuteBars(page: Page, requested: SeriesKey[], label: string, series: SeriesKey) {
   await expect(cell(page)).toHaveAttribute("aria-label", `칸 1: ${label}`);
-  await expect.poll(() => requested.at(-1), { message: `${label}의 마지막 봉 요청` }).toEqual(series);
+  await pollSaved(() => requested.at(-1), { message: `${label}의 마지막 봉 요청` }).toEqual(series);
   await expect(cell(page)).toHaveAttribute("aria-busy", "false");
   const chart = chartOf(cell(page));
   await expect(chart).not.toHaveAttribute("data-bar-count", "0");
@@ -160,7 +160,7 @@ test.describe("휴대폰 390px", () => {
     await choose(page.getByRole("group", { name: "거래소" }), "KRX");
     await expectTenMinuteBars(page, requested, "삼성전자 KRX 10분", { symbol: "005930", venue: "krx", period: "10m" });
     await saved;
-    await expect.poll(() => scenario.documents.uiState().venue).toBe("krx");
+    await pollSaved(() => scenario.documents.uiState().venue).toBe("krx");
 
     await page.reload();
     await expect(cell(page)).toHaveAttribute("aria-label", "칸 1: 삼성전자 KRX 10분");
@@ -186,7 +186,7 @@ test.describe("실시간", () => {
     const chart = chartOf(cell(page));
     await expect(cell(page)).toHaveAttribute("aria-label", "칸 1: 삼성전자 통합 10분");
     await expect(cell(page)).toHaveAttribute("aria-busy", "false");
-    await expect.poll(async () => scenario.live.subscriptions().map(value => value.symbol)).toContain("005930");
+    await pollSaved(async () => scenario.live.subscriptions().map(value => value.symbol)).toContain("005930");
     const before = await lastBar(chart);
 
     await expect(async () => {
@@ -217,7 +217,7 @@ test.describe("분석 도구", () => {
     await page.goto("/");
     await expect(cell(page)).toHaveAttribute("aria-label", "칸 1: 삼성전자 통합 10분");
     await expect(cell(page)).toHaveAttribute("aria-busy", "false");
-    await expect.poll(() => requested).toEqual(expect.arrayContaining([
+    await pollSaved(() => requested).toEqual(expect.arrayContaining([
       { symbol: "005930", venue: "combined", period: "10m" },
       { symbol: "IDX:001", venue: null, period: "10m" },
     ]));
@@ -249,14 +249,14 @@ test.describe("분석 도구", () => {
     };
 
     await pick("분봉만");
-    await expect.poll(savedPeriods).toEqual(["1m", "3m", "5m", "10m", "15m", "30m", "60m"]);
+    await pollSaved(savedPeriods).toEqual(["1m", "3m", "5m", "10m", "15m", "30m", "60m"]);
     await choose(periods, "일");
     await expect.poll(shown).toBe(0);
     await choose(periods, "10분");
     await expect.poll(shown).toBe(1);
 
     await pick("지금 봉 주기만");
-    await expect.poll(savedPeriods).toEqual(["10m"]);
+    await pollSaved(savedPeriods).toEqual(["10m"]);
     await choose(periods, "5분");
     await expect.poll(shown).toBe(0);
     await choose(periods, "10분");

@@ -1,6 +1,6 @@
 import { mkdir } from "node:fs/promises";
 import path from "node:path";
-import { cell, expect, test } from "./harness";
+import { cell, expect, test, pollSaved } from "./harness";
 import { expandDock } from "./drawing-probe";
 
 test("공통 메뉴는 잘리지 않고 선택·키보드·포커스와 마지막 분봉 복원을 지원한다", async ({ scenario, page }) => {
@@ -42,7 +42,7 @@ test("공통 메뉴는 잘리지 않고 선택·키보드·포커스와 마지�
   await expect(cell(page)).toHaveAttribute("aria-label", /5분/);
   await page.getByRole("toolbar", { name: "차트 도구 막대" }).getByRole("button", { name: "일", exact: true }).click();
   await expect(cell(page)).toHaveAttribute("aria-label", / 일$/);
-  await expect.poll(async () => scenario.documents.uiState().lastMinute).toBe("5m");
+  await pollSaved(async () => scenario.documents.uiState().lastMinute).toBe("5m");
   await page.reload();
   await expect(minutes).toHaveText("5분");
   await minutes.click();
@@ -52,7 +52,7 @@ test("공통 메뉴는 잘리지 않고 선택·키보드·포커스와 마지�
   await magnet.click({ button: "right" });
   await page.getByRole("menuitemradio", { name: "강", exact: true }).click();
   await expect(magnet).toBeFocused();
-  await expect.poll(async () => scenario.documents.uiPrefs().drawing.magnetStrength).toBe("strong");
+  await pollSaved(async () => scenario.documents.uiPrefs().drawing.magnetStrength).toBe("strong");
   await page.reload(); await expandDock(page); await magnet.click({ button: "right" });
   await expect(page.getByRole("menuitemradio", { name: "강", exact: true })).toHaveAttribute("aria-checked", "true");
   await page.keyboard.press("Escape"); await expect(magnet).toBeFocused();
@@ -111,13 +111,13 @@ test("되돌릴 수 있는 드로잉 삭제는 공통 알림에서 복원한다"
   await cell(page).focus(); await page.keyboard.press("H");
   await page.mouse.click(bounds!.x + bounds!.width * 0.7, bounds!.y + bounds!.height * 0.3);
   const drawings = async () => scenario.documents.drawings("005930") as { id: string }[];
-  await expect.poll(async () => (await drawings()).length).toBe(1);
+  await pollSaved(async () => (await drawings()).length).toBe(1);
   const original = (await drawings())[0]!.id;
   await page.mouse.click(bounds!.x + bounds!.width * 0.2, bounds!.y + bounds!.height * 0.8, { button: "right" });
   await page.getByRole("menu", { name: "드로잉 메뉴", exact: true }).getByRole("menuitem", { name: "이 종목 드로잉 모두 지우기…", exact: true }).click();
-  await expect.poll(async () => (await drawings()).length).toBe(0);
+  await pollSaved(async () => (await drawings()).length).toBe(0);
   const toast = page.getByRole("status").filter({ hasText: "드로잉 1개를 지웠습니다" });
   await expect(toast).toBeVisible();
   await toast.getByRole("button", { name: "되돌리기", exact: true }).click();
-  await expect.poll(async () => (await drawings()).map((d) => d.id)).toEqual([original]);
+  await pollSaved(async () => (await drawings()).map((d) => d.id)).toEqual([original]);
 });

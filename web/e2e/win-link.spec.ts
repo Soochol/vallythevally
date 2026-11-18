@@ -4,7 +4,7 @@ import type { Locator, Page } from "@playwright/test";
 import type { LayoutWindow } from "../src/api/generated/LayoutWindow";
 import type { LinkColor } from "../src/api/generated/LinkColor";
 import type { Venue } from "../src/api/generated/Venue";
-import { type Scenario, cell, chartOf, DEFAULT_LAYOUT_ID, expect, SEARCH_BUTTON_TITLE, test, windowTabs, expectDesktopVenue } from "./harness";
+import { type Scenario, cell, chartOf, DEFAULT_LAYOUT_ID, expect, SEARCH_BUTTON_TITLE, test, windowTabs, expectDesktopVenue, pollSaved } from "./harness";
 
 const SCREENS = path.resolve("../target/ux-screens");
 const SETTINGS = { v: 1, style: "candle", scale: "normal", indicators: [], compare: [], panels: [] };
@@ -128,7 +128,7 @@ test("위 막대 검색으로 바꾼 종목은 같은 색의 차트로 퍼지고
 
   await chooseLink(page, dotOf(page, "screener"), "A");
   await expect(dotOf(page, "screener")).toHaveAccessibleName("연동 색: A");
-  await expect.poll(() => [savedWindow(scenario, "cell-2"), savedWindow(scenario, "screener")?.link]).toEqual([
+  await pollSaved(() => [savedWindow(scenario, "cell-2"), savedWindow(scenario, "screener")?.link]).toEqual([
     expect.objectContaining({ link: "a", symbol: "035720", period: "D" }),
     "a",
   ]);
@@ -247,7 +247,7 @@ test("견본 키보드: 열면 지금 값에 초점, 화살표·Home·End·글�
   await expect(menu).toHaveCount(0);
   await expect(dot).toBeFocused();
   await expect(dot).toHaveAccessibleName("연동 색: D");
-  await expect.poll(() => savedWindow(scenario, "cell-0")?.link).toBe("d");
+  await pollSaved(() => savedWindow(scenario, "cell-0")?.link).toBe("d");
 
   await page.keyboard.press("Enter");
   await expect(swatchNamed(page, "D · 없음")).toBeFocused();

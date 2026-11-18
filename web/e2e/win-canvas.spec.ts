@@ -5,7 +5,7 @@ import type { Bar } from "../src/api/generated/Bar";
 import type { LayoutWindow } from "../src/api/generated/LayoutWindow";
 import { windowId } from "../src/layout/kinds";
 import { parsePlacement } from "../src/layout/placement";
-import { cell, chartOf, DEFAULT_LAYOUT_ID, expect, type Scenario, test } from "./harness";
+import { cell, chartOf, DEFAULT_LAYOUT_ID, expect, type Scenario, test, pollSaved } from "./harness";
 
 test.use({ clockStart: "20261109100000" });
 const SCREENS = path.resolve("../target/ux-screens");
@@ -82,12 +82,12 @@ test("실제 도킹 자리를 보존해 전환하고 차트 인스턴스와 두 
   const lane = await boxOf(page.getByRole("navigation", { name: "창 종류" }));
   const area = await boxOf(stage(page));
   expect(lane.y).toBeGreaterThanOrEqual(area.y + area.height);
-  await expect.poll(() => scenario.documents.uiPrefs().layoutMode).toBe("canvas");
+  await pollSaved(() => scenario.documents.uiPrefs().layoutMode).toBe("canvas");
   await drag(page, header(page, "cell-0"), 100, 50);
   await drag(page, frame(page, "cell-0").locator('[data-resize-handle="ne"]'), -80, 40);
   const moved = await boxOf(frame(page, "cell-0"));
   const rectOf = () => saved(scenario).canvas?.rects[windowId("cell-0")];
-  await expect.poll(() => { const rect = rectOf(); return rect ? Math.max(Math.abs(rect.w - moved.width / area.width), Math.abs(rect.h - moved.height / area.height)) : Infinity; }).toBeLessThan(.01);
+  await pollSaved(() => { const rect = rectOf(); return rect ? Math.max(Math.abs(rect.w - moved.width / area.width), Math.abs(rect.h - moved.height / area.height)) : Infinity; }).toBeLessThan(.01);
   const canvas = saved(scenario).canvas;
   await mode(page, "도킹");
   await expect(page.locator("[data-dock-group]")).toHaveCount(2);
@@ -113,7 +113,7 @@ test("두 차트의 저장되지 않은 기본 도킹은 첫 캔버스 왕복 �
   expect(saved(scenario)).toEqual({ v: 1, dock: null, canvas: null });
   await mode(page, "캔버스");
   await expect(frame(page, "cell-1")).toBeVisible();
-  await expect.poll(() => saved(scenario).dock).not.toBeNull();
+  await pollSaved(() => saved(scenario).dock).not.toBeNull();
   await mode(page, "도킹");
   expect(await Promise.all([boxOf(cell(page)), boxOf(cell(page, 2))])).toEqual(before);
 });
@@ -150,7 +150,7 @@ test("활성 차트를 닫은 알림의 되돌리기 한 번은 남은 차트가
   await page.getByRole("status").filter({ hasText: "차트 창을 닫았습니다" }).getByRole("button", { name: "되돌리기" }).click();
   await expect(frame(page, "cell-1")).toHaveCount(1);
   expect(await boxOf(frame(page, "cell-1"))).toEqual(closing);
-  await expect.poll(() => saved(scenario).canvas).toEqual(before);
+  await pollSaved(() => saved(scenario).canvas).toEqual(before);
 });
 
 test("크게 본 차트 위에서도 창 종류와 위 막대가 기존 관심종목을 드러낸다", async ({ page, scenario }) => {
@@ -188,7 +188,7 @@ test("뒤 차트를 Enter로 크게 보면 활성 칸과 도구 막대도 따라
   await expect(frame(page, "cell-0")).toHaveAttribute("data-active-cell", "");
   await expect(frame(page, "cell-0").getByRole("navigation", { name: "드로잉 도구" })).toBeVisible();
   await page.getByRole("group", { name: "봉 주기", exact: true }).getByRole("button", { name: "주", exact: true }).click();
-  await expect.poll(() => scenario.documents.layout(DEFAULT_LAYOUT_ID).windows.find((window) => window.id === "cell-0")).toMatchObject({ period: "W" });
+  await pollSaved(() => scenario.documents.layout(DEFAULT_LAYOUT_ID).windows.find((window) => window.id === "cell-0")).toMatchObject({ period: "W" });
   expect(scenario.documents.layout(DEFAULT_LAYOUT_ID).windows.find((window) => window.id === "cell-1")).toMatchObject({ period: "D" });
   await expect(frame(page, "cell-0")).toHaveAttribute("data-maximized", "");
   expect(saved(scenario).canvas!.rects).toEqual(before);
@@ -211,7 +211,7 @@ test("실제 머리 끌기는 안내선으로 가장자리에 붙고 크기 조�
   await screenshot(page, "guides");
   await page.mouse.up();
   expect(Math.abs((await boxOf(frame(page, "cell-1"))).x - first.x)).toBeLessThanOrEqual(1);
-  await expect.poll(() => saved(scenario).canvas).not.toEqual(before);
+  await pollSaved(() => saved(scenario).canvas).not.toEqual(before);
   await page.getByRole("button", { name: /^레이아웃:/ }).click();
   await page.getByRole("menuitem", { name: "배치 되돌리기" }).click();
   expect(await boxOf(frame(page, "cell-1"))).toEqual(second);
@@ -309,7 +309,7 @@ test("창 종류와 위 막대는 가운데에 차트를 더하고 기존 창을
   await expect(added).toHaveAttribute("data-active-cell", "");
   await dock.getByRole("button", { name: "관심종목 창 더하기" }).click();
   await expect(page.locator("[data-canvas-window]")).toHaveCount(5);
-  await expect.poll(() => saved(scenario).canvas?.order.at(-1)).toBe("watchlist-2");
+  await pollSaved(() => saved(scenario).canvas?.order.at(-1)).toBe("watchlist-2");
   await page.getByRole("toolbar", { name: "차트 도구 막대" }).getByRole("button", { name: "창 더하기" }).click();
   await page.getByRole("menu", { name: "창 더하기" }).getByRole("menuitem", { name: /^차트/ }).click();
   await expect(cell(page, 4)).toHaveAttribute("aria-busy", "false");
@@ -348,7 +348,7 @@ test("머리 키보드 조작과 화면 크기 변경은 비율을 보존하고 
   await expect(frame(page, "cell-0")).not.toHaveAttribute("data-maximized");
   const current = await boxOf(frame(page, "cell-0"));
   const currentArea = await boxOf(stage(page));
-  await expect.poll(() => saved(scenario).canvas?.rects[windowId("cell-0")]?.w).toBeCloseTo(current.width / currentArea.width, 4);
+  await pollSaved(() => saved(scenario).canvas?.rects[windowId("cell-0")]?.w).toBeCloseTo(current.width / currentArea.width, 4);
   await drag(page, header(page, "cell-0"), 80, 50, false);
   await page.keyboard.press("Escape");
   await page.mouse.up();
@@ -374,7 +374,7 @@ test("겹친 차트는 맨 위만 그리기를 받고 가려진 차트도 실시
   seedCanvas(scenario);
   await page.goto("/");
   await expect(cell(page, 2)).toHaveAttribute("aria-busy", "false");
-  await expect.poll(() => scenario.live.subscriptions().map((entry) => entry.symbol).sort()).toEqual(["000660", "005930"]);
+  await pollSaved(() => scenario.live.subscriptions().map((entry) => entry.symbol).sort()).toEqual(["000660", "005930"]);
   const first = chartOf(cell(page)), second = chartOf(cell(page, 2));
   const coveredBox = await boxOf(frame(page, "cell-0")), coverBox = await boxOf(frame(page, "cell-1"));
   await drag(page, header(page, "cell-1"), coveredBox.x - coverBox.x, coveredBox.y - coverBox.y);
@@ -386,7 +386,7 @@ test("겹친 차트는 맨 위만 그리기를 받고 가려진 차트도 실시
   await page.mouse.down();
   await page.mouse.move(r.x + r.width * .4, r.y + r.height * .52, { steps: 8 });
   await page.mouse.up();
-  await expect.poll(() => scenario.documents.drawings("000660").length).toBe(1);
+  await pollSaved(() => scenario.documents.drawings("000660").length).toBe(1);
   expect(scenario.documents.drawings("005930")).toHaveLength(0);
   await cell(page, 2).focus();
   await page.keyboard.press("T");
@@ -441,7 +441,7 @@ test("도킹 설정으로 캔버스만 저장된 레이아웃을 열면 앞 차�
   await expect(groups).toHaveCount(3);
   await expect(groups.nth(0).getByRole("tab", { name: /^SK하이닉스/ })).toHaveCount(1);
   await expect(groups.nth(1).getByRole("tab", { name: /^삼성전자/ })).toHaveCount(1);
-  await expect.poll(() => saved(scenario).dock).not.toBeNull();
+  await pollSaved(() => saved(scenario).dock).not.toBeNull();
   expect(saved(scenario).canvas).toEqual(before);
   await page.reload();
   await expect(groups.nth(0).getByRole("tab", { name: /^SK하이닉스/ })).toHaveCount(1);

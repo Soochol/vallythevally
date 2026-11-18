@@ -1,5 +1,5 @@
 import type { Page } from "@playwright/test";
-import { cell, chartOf, expect, test } from "./harness";
+import { cell, chartOf, expect, test, pollSaved } from "./harness";
 import { chartPoint, drawings, open, pickTool, settledMirror } from "./drawing-probe";
 
 async function onChart(page: Page, x: number, y: number) {
@@ -35,12 +35,12 @@ test("선 위에 놓인 글자 상자를 누르면 가장 위에 그린 글자�
   await cell(page).focus(); await page.keyboard.press("G");
   await pickTool(page, "선", "추세선");
   await drag(page, [0.2, 0.5], [0.8, 0.5]);
-  await expect.poll(async () => (await drawings(scenario)).map((d) => d.tool)).toEqual(["trendline"]);
+  await pollSaved(async () => (await drawings(scenario)).map((d) => d.tool)).toEqual(["trendline"]);
   const line = (await settledMirror(page))[0]!;
   const lineY = line.points[0]!.y;
   const x = (line.points[0]!.x + line.points[1]!.x) / 2;
   await writeNote(page, await onChart(page, x, lineY - 6), "선 위 메모");
-  await expect.poll(async () => (await drawings(scenario)).map((d) => d.tool).sort()).toEqual(["text", "trendline"]);
+  await pollSaved(async () => (await drawings(scenario)).map((d) => d.tool).sort()).toEqual(["text", "trendline"]);
   const note = (await drawings(scenario)).find((d) => d.tool === "text")!;
   await deselect(page);
 
@@ -62,7 +62,7 @@ test("글자와 말풍선은 한 번 누르면 고르고, 두 번 누르면 글�
   await expect(editor).toBeFocused();
   await editor.fill("고를 말풍선"); await editor.press("Enter");
   await expect(editor).toBeHidden();
-  await expect.poll(async () => (await drawings(scenario)).map((d) => d.tool).sort()).toEqual(["callout", "text"]);
+  await pollSaved(async () => (await drawings(scenario)).map((d) => d.tool).sort()).toEqual(["callout", "text"]);
   const saved = await drawings(scenario);
   const note = saved.find((d) => d.tool === "text")!;
   const callout = saved.find((d) => d.tool === "callout")!;
@@ -99,7 +99,7 @@ test("차트 칸 밖의 시간 축을 두 번 눌러도 드로잉을 고르거�
   await cell(page).focus(); await page.keyboard.press("Shift+V");
   const middle = await chartPoint(page, 0.5, 0.5);
   await page.mouse.click(middle.x, middle.y);
-  await expect.poll(async () => (await drawings(scenario)).map((d) => d.tool)).toEqual(["vline"]);
+  await pollSaved(async () => (await drawings(scenario)).map((d) => d.tool)).toEqual(["vline"]);
   await deselect(page);
   const line = (await settledMirror(page))[0]!;
   const box = (await chartOf(cell(page)).boundingBox())!;
@@ -121,5 +121,5 @@ test("추세선을 놓는 도중 시간 축을 두 번 눌러도 놓던 점을 �
   await page.mouse.dblclick(box.x + box.width * 0.5, box.y + box.height - 8);
   const b = await chartPoint(page, 0.6, 0.5);
   await page.mouse.click(b.x, b.y);
-  await expect.poll(async () => (await drawings(scenario)).map((d) => d.tool)).toEqual(["trendline"]);
+  await pollSaved(async () => (await drawings(scenario)).map((d) => d.tool)).toEqual(["trendline"]);
 });

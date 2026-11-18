@@ -1,7 +1,7 @@
 import type { Locator, Page } from "@playwright/test";
 import type { FeedBook } from "../src/api/generated/FeedBook";
 import type { LayoutWindow } from "../src/api/generated/LayoutWindow";
-import { type Scenario, cell, DEFAULT_LAYOUT_ID, expect, test } from "./harness";
+import { type Scenario, cell, DEFAULT_LAYOUT_ID, expect, pollSaved, test } from "./harness";
 import { BASE, CODE, ordersOn, pinQuote, snapshot, tradingApi, win } from "./order-window";
 
 const SETTINGS = { v: 1, style: "candle", scale: "normal", indicators: [], compare: [], panels: [] };
@@ -72,7 +72,7 @@ test("10호가 창 둘을 연동 A·B로 두면 각자 그 색 차트의 종목�
   await expect(books).toHaveCount(2);
   await expect(books.nth(0)).toHaveAttribute("data-symbol", "005930");
   await expect(books.nth(1)).toHaveAttribute("data-symbol", "000660");
-  await expect.poll(() => bookSubs(scenario).map((s) => s.symbol).sort()).toEqual(["000660", "005930"]);
+  await pollSaved(() => bookSubs(scenario).map((s) => s.symbol).sort()).toEqual(["000660", "005930"]);
   expect(new Set(bookSubs(scenario).map((s) => s.sub)).size).toBe(2);
 });
 
@@ -80,12 +80,12 @@ test("같은 종목을 보는 10호가 창 둘 가운데 하나를 닫으면 그
   saveWindows(scenario, [{ id: "book", link: "a", kind: "book" }, { id: "book-2", link: "a", kind: "book" }], "canvas");
   await open(page);
   await expect(page.getByTestId("book-window")).toHaveCount(2);
-  await expect.poll(() => bookSubs(scenario).length).toBe(2);
+  await pollSaved(() => bookSubs(scenario).length).toBe(2);
   const subs = bookSubs(scenario).map((s) => s.sub);
 
   await closeButton(page, "10호가 2").dispatchEvent("click");
   await expect(page.getByTestId("book-window")).toHaveCount(1);
-  await expect.poll(() => unsubscribed(scenario).filter((sub) => subs.includes(sub)).length).toBe(1);
+  await pollSaved(() => unsubscribed(scenario).filter((sub) => subs.includes(sub)).length).toBe(1);
   const gone = unsubscribed(scenario).find((sub) => subs.includes(sub))!;
   const kept = subs.find((sub) => sub !== gone)!;
 
@@ -101,7 +101,7 @@ test("같은 종류 둘을 저장하고 새로 고침하면 둘 다 같은 연�
   await expect(allTabs(page).filter({ hasText: /^체결 \d/ })).toHaveCount(2);
   await chooseLink(page, "trades", "B");
   await chooseLink(page, "trades-2", "B");
-  await expect.poll(() => savedWindows(scenario, "trades").map((w) => [w.id, w.link])).toEqual([["trades", "b"], ["trades-2", "b"]]);
+  await pollSaved(() => savedWindows(scenario, "trades").map((w) => [w.id, w.link])).toEqual([["trades", "b"], ["trades-2", "b"]]);
 
   await page.reload();
   await expect(cell(page)).toHaveAttribute("aria-busy", "false");
@@ -124,12 +124,12 @@ test("탭 메뉴의 복제는 연동 색을 옮긴 둘째 탭을 그 탭 바로 
   await expect(side).toHaveText([/^관심종목/, /^스크리너/, /^체결 1/, /^체결 2/, /^10호가/]);
   await expect(tabOf(page, "trades-2")).toHaveAttribute("aria-selected", "true");
   await expect(dotOf(page, "trades-2")).toHaveAccessibleName("연동 색: B");
-  await expect.poll(() => savedWindows(scenario, "trades").map((w) => [w.id, w.link])).toEqual([["trades", "b"], ["trades-2", "b"]]);
+  await pollSaved(() => savedWindows(scenario, "trades").map((w) => [w.id, w.link])).toEqual([["trades", "b"], ["trades-2", "b"]]);
 
   await tabOf(page, "trades-2").click({ button: "right" });
   await page.getByRole("menu", { name: "창 배치" }).getByRole("menuitem", { name: "배치 되돌리기" }).click();
   await expect(side).toHaveText([/^관심종목/, /^스크리너/, /^체결/, /^10호가/]);
-  await expect.poll(() => savedWindows(scenario, "trades")).toHaveLength(1);
+  await pollSaved(() => savedWindows(scenario, "trades")).toHaveLength(1);
 });
 
 test("닫기 단추 접근성 이름은 번호가 붙고 하나를 닫으면 남은 창 이름이 번호 없이 돌아온다", async ({ page }) => {
@@ -154,7 +154,7 @@ test("지표는 메뉴에서 열려 있음이고 다시 골라도 하나다", as
   await expect(kindItem(page, "지표")).toContainText("열려 있음");
   await kindItem(page, "지표").click();
   await expect(allTabs(page).filter({ hasText: /^지표/ })).toHaveCount(1);
-  await expect.poll(() => savedWindows(scenario, "indicators")).toHaveLength(1);
+  await pollSaved(() => savedWindows(scenario, "indicators")).toHaveLength(1);
 });
 
 test("호가주문 창 둘에서 수량 칸 이름표는 각자 자기 입력칸을 가리키고 화면 안에 겹치는 id가 없다", async ({ page, scenario }) => {
@@ -183,7 +183,7 @@ test("관심종목 창 둘을 열 수 있고 저장한 뒤 새로 고쳐도 둘�
   await expect(kindItem(page, "관심종목")).toContainText("1개 열림");
   await kindItem(page, "관심종목").click();
   await expect(allTabs(page).filter({ hasText: /^관심종목 \d/ })).toHaveText([/^관심종목 1/, /^관심종목 2/]);
-  await expect.poll(() => savedWindows(scenario, "watchlist").map((w) => w.id)).toEqual(["watchlist", "watchlist-2"]);
+  await pollSaved(() => savedWindows(scenario, "watchlist").map((w) => w.id)).toEqual(["watchlist", "watchlist-2"]);
   await page.reload();
   await expect(cell(page)).toHaveAttribute("aria-busy", "false");
   await expect(allTabs(page).filter({ hasText: /^관심종목 \d/ })).toHaveCount(2);
@@ -199,7 +199,7 @@ test("창 49개가 든 레이아웃에서 하나를 더하면 50개가 되고 �
 
   await addWindow(page, "체결");
   await expect(allTabs(page)).toHaveCount(50);
-  await expect.poll(() => saved(scenario).windows.length).toBe(50);
+  await pollSaved(() => saved(scenario).windows.length).toBe(50);
 
   await addButton(page).click();
   await expect(menu(page).getByRole("menuitem")).toHaveCount(9);

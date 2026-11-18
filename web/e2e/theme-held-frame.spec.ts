@@ -2,7 +2,7 @@ import { november9BarAt } from "./fixtures/frames";
 import { selectMinute } from "./select-option";
 import type { Page } from "@playwright/test";
 import { installFrameProbe } from "./frame-probe";
-import { cell, chartOf, expect, test } from "./harness";
+import { cell, chartOf, expect, test, pollSaved } from "./harness";
 
 test.use({ clockStart: "20261109100030" });
 
@@ -27,7 +27,7 @@ test("lime dark keeps main and volume coherent when a held rollover frame resume
     await expect(async () => {
       const volume = price === 202_000 ? 3 : price === 204_000 ? 7 : quantity;
     expect(await scenario.live.update("005930", { t: Date.parse(`2026-11-09T${time.slice(0,2)}:${time.slice(2,4)}:00+09:00`) / 1000, o: price < 203_000 ? 201_000 : price < 205_000 ? 203_000 : 205_000, h: price, l: price < 203_000 ? 201_000 : price < 205_000 ? 203_000 : 205_000, c: price, v: volume })).toBeGreaterThan(0);
-      await expect.poll(() => delivered.includes(price), { timeout: 1000 }).toBe(true);
+      await pollSaved(() => delivered.includes(price), { timeout: 1000 }).toBe(true);
     }).toPass({ timeout });
   };
   const lastBars = async () => {

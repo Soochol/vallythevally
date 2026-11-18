@@ -1,5 +1,5 @@
 import type { Page } from "@playwright/test";
-import { cell, chartOf, expect, saveChartShare, test, type Scenario } from "./harness";
+import { cell, chartOf, expect, saveChartShare, test, type Scenario, pollSaved } from "./harness";
 import { installChartProbe } from "./chart-probe";
 import { chartPoint, expandDock, pickTool, settledMirror } from "./drawing-probe";
 import { TOOLS } from "../src/chart/drawings/tools";
@@ -85,7 +85,7 @@ const bottomRight = (area: Box, bar: Box) => ({ x: area.x + area.width - bar.wid
 const middle = (area: Box, bar: Box) => ({ x: area.x + (area.width - bar.width) / 2, y: area.y + (area.height - bar.height) / 2 });
 
 async function expectSavedRatios(scenario: Scenario) {
-  await expect.poll(() => savedDockAt(scenario)).toEqual({ x: expect.any(Number), y: expect.any(Number) });
+  await pollSaved(() => savedDockAt(scenario)).toEqual({ x: expect.any(Number), y: expect.any(Number) });
   const { x, y } = savedDockAt(scenario) as { x: number; y: number };
   for (const ratio of [x, y]) { expect(ratio).toBeGreaterThanOrEqual(0); expect(ratio).toBeLessThanOrEqual(1); }
 }
@@ -153,7 +153,7 @@ test("옮긴 막대에서 추세선을 골라 선을 그리고, 맨 아래에 �
   const b = await chartPoint(page, 0.3, 0.3);
   await page.mouse.move(a.x, a.y); await page.mouse.down();
   await page.mouse.move(b.x, b.y, { steps: 10 }); await page.mouse.up();
-  await expect.poll(async () => (await drawings(scenario)).map((d) => d.tool)).toEqual(["trendline"]);
+  await pollSaved(async () => (await drawings(scenario)).map((d) => d.tool)).toEqual(["trendline"]);
   await page.keyboard.press("Escape");
 
   const area = await chartArea(page);
@@ -204,7 +204,7 @@ test("막대를 가운데에 두고 위쪽 드로잉을 고르면 스타일 막�
   const b = await chartPoint(page, 0.6, 0.25);
   await page.mouse.move(a.x, a.y); await page.mouse.down();
   await page.mouse.move(b.x, b.y, { steps: 10 }); await page.mouse.up();
-  await expect.poll(async () => (await drawings(scenario)).length).toBe(1);
+  await pollSaved(async () => (await drawings(scenario)).length).toBe(1);
   await expect.poll(async () => (await settledMirror(page)).some((m) => m.selected)).toBe(true);
   const style = page.getByRole("toolbar", { name: "드로잉 스타일" });
   await expect(style).toBeVisible();
@@ -224,7 +224,7 @@ test("손잡이를 두 번 누르면 기본 자리로 돌아가고, 기본 자�
   await expandDock(page);
   await grip(page).dblclick();
   expectSameSpot(await settledDock(page), home, 1);
-  await expect.poll(() => savedDockAt(scenario)).toBeNull();
+  await pollSaved(() => savedDockAt(scenario)).toBeNull();
 
   expectSameSpot(await dragGrip(page, 10, 10), home, 1);
   await expect(dock(page)).not.toHaveAttribute("data-moved");
@@ -244,7 +244,7 @@ test("손잡이에 포커스를 두고 오른쪽 화살표를 세 번 누르면 
   expect(await visibleRange(page)).toEqual(range);
   await page.keyboard.press("Home");
   expectSameSpot(await settledDock(page), home, 1);
-  await expect.poll(() => savedDockAt(scenario)).toBeNull();
+  await pollSaved(() => savedDockAt(scenario)).toBeNull();
   await expect(grip(page)).toBeFocused();
 });
 

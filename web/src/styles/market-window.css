@@ -33,6 +33,7 @@
 .mw-px small { padding-left:var(--s2); color:var(--text-3); font-size:var(--size-10); font-weight:400; white-space:nowrap; }
 .mw-px-mark { position:absolute; top:50%; right:calc(100% + var(--size-4)); width:var(--size-5); height:var(--size-5); transform:translateY(-50%); border-radius:50%; background:var(--up); pointer-events:none; }
 .mw-lr[data-current] .mw-px { background:var(--accent-soft); box-shadow:inset 0 0 0 1.5px var(--accent); }
+.mw-lr[data-expected] { box-shadow:inset 0 0 0 1px var(--accent); }
 
 .mw-slot { display:grid; align-content:center; align-self:stretch; width:100%; min-width:0; overflow:hidden; font-size:var(--size-11); white-space:nowrap; }
 .mw-info, .mw-strength { grid-template-columns:auto minmax(0, 1fr); gap:var(--s3); }

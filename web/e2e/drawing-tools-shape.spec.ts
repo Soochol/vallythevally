@@ -1,5 +1,5 @@
 import type { Page } from "@playwright/test";
-import { cell, chartOf, expect, test } from "./harness";
+import { cell, chartOf, expect, test, pollSaved } from "./harness";
 import { chartPoint, drawings, mirror, open, pickTool, expandDock } from "./drawing-probe";
 
 const KST = 9 * 3600;
@@ -25,13 +25,13 @@ test("도형 도구: 사각형·타원·꺾은선·붓을 그리고 새로고침
   await cell(page).focus();
   await page.keyboard.press("R");
   await drag(page, [0.12, 0.25], [0.22, 0.4]);
-  await expect.poll(count).toBe(1);
+  await pollSaved(count).toBe(1);
   expect((await drawings(scenario))[0]!.tool).toBe("rect");
 
   await cell(page).focus();
   await page.keyboard.press("R");
   await drag(page, [0.28, 0.25], [0.4, 0.33], true);
-  await expect.poll(count).toBe(2);
+  await pollSaved(count).toBe(2);
   const squareId = (await drawings(scenario))[1]!.id;
   const square = (await mirror(page)).find((d) => d.id === squareId)!;
   const [a, b] = square.points;
@@ -40,7 +40,7 @@ test("도형 도구: 사각형·타원·꺾은선·붓을 그리고 새로고침
 
   await pickTool(page, "도형", "타원");
   await drag(page, [0.46, 0.25], [0.58, 0.4]);
-  await expect.poll(count).toBe(3);
+  await pollSaved(count).toBe(3);
   expect((await drawings(scenario))[2]!.tool).toBe("ellipse");
 
   await pickTool(page, "도형", "꺾은선");
@@ -48,7 +48,7 @@ test("도형 도구: 사각형·타원·꺾은선·붓을 그리고 새로고침
   for (const v of vertices) await page.mouse.click(v.x, v.y);
   const last = vertices.at(-1)!;
   await page.mouse.dblclick(last.x, last.y);
-  await expect.poll(count).toBe(4);
+  await pollSaved(count).toBe(4);
   const polyline = (await drawings(scenario))[3]!;
   expect(polyline.tool).toBe("path");
   expect(polyline.points).toHaveLength(4);
@@ -60,7 +60,7 @@ test("도형 도구: 사각형·타원·꺾은선·붓을 그리고 새로고침
   await page.mouse.down();
   for (const p of trail.slice(1)) await page.mouse.move(p.x, p.y, { steps: 40 });
   await page.mouse.up();
-  await expect.poll(count).toBe(5);
+  await pollSaved(count).toBe(5);
   const stroke = (await drawings(scenario))[4]!;
   expect(stroke.tool).toBe("brush");
   expect(stroke.points.length).toBeGreaterThan(20);
@@ -98,7 +98,7 @@ test("꺾은선: 두 번 누르는 사이 마우스가 1px 움직여도 꼭짓�
     await page.mouse.click(b!.x, b!.y);
     await page.mouse.click(x, c!.y);
     await page.mouse.click(x + 1, c!.y, { clickCount: 2 });
-    await expect.poll(async () => (await drawings(scenario)).length).toBe(i + 1);
+    await pollSaved(async () => (await drawings(scenario)).length).toBe(i + 1);
     counts.push((await drawings(scenario))[i]!.points.length);
   }
   expect(counts).toEqual(Array.from({ length: 12 }, () => 3));
@@ -115,7 +115,7 @@ test("꺾은선: 꼭짓점 사이에 차트를 확대하면 같은 화면 자리
   await page.mouse.click(b!.x + 1, b!.y);
   await page.mouse.click(c!.x, c!.y);
   await page.mouse.dblclick(c!.x, c!.y);
-  await expect.poll(async () => (await drawings(scenario)).length).toBe(1);
+  await pollSaved(async () => (await drawings(scenario)).length).toBe(1);
   expect((await drawings(scenario))[0]!.points).toHaveLength(4);
   const r = (await chartOf(cell(page)).boundingBox())!;
   const [, second] = (await mirror(page))[0]!.points;
@@ -131,7 +131,7 @@ test("삼각형: 도형 그룹 메뉴에서 골라 세 점을 찍으면 점 셋�
   for (const c of corners.slice(0, 2)) await page.mouse.click(c.x, c.y);
   expect(await drawings(scenario)).toHaveLength(0);
   await page.mouse.click(corners[2]!.x, corners[2]!.y);
-  await expect.poll(async () => (await drawings(scenario)).length).toBe(1);
+  await pollSaved(async () => (await drawings(scenario)).length).toBe(1);
   const saved = (await drawings(scenario))[0]!;
   expect(saved.tool).toBe("triangle");
   expect(saved.points).toHaveLength(3);

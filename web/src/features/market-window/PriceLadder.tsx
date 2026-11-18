@@ -3,7 +3,7 @@ import { direction, formatPercent, formatPrice } from "../../lib/format";
 import { formatShares, withSign } from "./format";
 import { type BookLevel, LADDER_ROWS, type LadderRow, ROWS_ABOVE_BASE } from "./ladder";
 
-export const TOP_RIGHT_ROWS = 7;
+export const TOP_RIGHT_ROWS = 9;
 export const BOTTOM_LEFT_ROWS = 8;
 
 export interface LadderSlots {
@@ -27,6 +27,7 @@ interface Props {
   readonly slots?: LadderSlots;
   readonly rowSlots?: LadderRowSlots;
   readonly mark?: LadderMark;
+  readonly expectedPrice?: number | null;
   readonly firstBidIndex?: number;
 }
 
@@ -60,13 +61,13 @@ function Price({ row, previousClose, mark }: { row: LadderRow; previousClose: nu
   );
 }
 
-export function PriceLadder({ rows, previousClose, slots, rowSlots, mark, firstBidIndex = ROWS_ABOVE_BASE }: Props) {
+export function PriceLadder({ rows, previousClose, slots, rowSlots, mark, expectedPrice = null, firstBidIndex = ROWS_ABOVE_BASE }: Props) {
   const columns = `${slots?.left ? "var(--size-64) " : ""}minmax(0, 1fr) var(--size-133) minmax(0, 1fr)${slots?.right ? " var(--size-64)" : ""}`;
   const firstBottomLeft = LADDER_ROWS - BOTTOM_LEFT_ROWS;
   return (
     <div className="mw-ladder" data-testid="price-ladder">
       {rows.map((row, index) => (
-        <div key={row.key} className="mw-lr" data-side={index < firstBidIndex ? "ask" : "bid"} data-current={row.current ? "" : undefined} data-empty={row.price === null ? "" : undefined} style={{ gridTemplateColumns: columns }}>
+        <div key={row.key} className="mw-lr" data-side={index < firstBidIndex ? "ask" : "bid"} data-current={row.current ? "" : undefined} data-expected={expectedPrice !== null && row.price === expectedPrice ? "" : undefined} data-empty={row.price === null ? "" : undefined} style={{ gridTemplateColumns: columns }}>
           {slots?.left?.(row)}
           {row.ask ? <Quantity side="ask" level={row.ask} ratio={row.askRatio} /> : <div className="mw-qty" data-side="ask">{index >= firstBottomLeft && rowSlots?.bottomLeft?.(index - firstBottomLeft)}</div>}
           <Price row={row} previousClose={previousClose} mark={mark} />

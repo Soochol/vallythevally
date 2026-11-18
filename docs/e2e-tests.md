@@ -32,7 +32,7 @@ grep '^e2e-durations: ' e2e.1.log | cut -d' ' -f2 | base64 -d | gunzip
 고정 시간을 기다리지 말고 기다릴 상태를 정한다.
 
 - web-first 단언: `expect(locator).toHaveAttribute(...)`, `toBeVisible()` 등
-- `expect.poll`: 값이 조건을 만족할 때까지 다시 읽는다
+- `expect.poll`: 값이 조건을 만족할 때까지 다시 읽는다. 시나리오가 저장한 상태나 요청 기록처럼 node 쪽 값만 읽을 때는 간격이 촘촘한 `pollSaved`(`harness.ts`)를 쓴다
 - `page.waitForResponse`
 - `scenario.hold`로 응답을 붙잡고 `reply`로 풀어 늦은 응답을 시험한다
 - 앱이 내놓는 `data-*` 속성(`data-value` 등)

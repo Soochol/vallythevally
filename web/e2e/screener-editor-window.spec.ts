@@ -1,6 +1,6 @@
 import type { Screen } from "../src/api/generated/Screen";
 import type { Page } from "@playwright/test";
-import { type Scenario, expect, test } from "./screener-harness";
+import { type Scenario, expect, test, pollSaved } from "./screener-harness";
 import { cell, chartOf, pickDesktopVenue } from "./screener-harness";
 import { openScreener, panel, updateBand, waitForUpdateToFinish } from "./screener-page";
 import { editorWindow } from "./sentence-editor";
@@ -72,7 +72,7 @@ test("창에서 고친 초안은 닫아도 남고 Ctrl+S로 저장하며 N으로
   await page.keyboard.press("Enter");
   await expect(editorWindow(page).getByRole("list", { name: "조건" }).getByRole("listitem")).toHaveCount(2);
   await page.keyboard.press("Control+s");
-  await expect.poll(async () => (await savedScreens(scenario))[0]).toMatchObject({ markets: ["kospi", "kosdaq"], conditions: [{ kind: "new_high" }, { kind: "rsi" }] });
+  await pollSaved(async () => (await savedScreens(scenario))[0]).toMatchObject({ markets: ["kospi", "kosdaq"], conditions: [{ kind: "new_high" }, { kind: "rsi" }] });
   await expect(panel(page).getByText("변경됨", { exact: true })).toHaveCount(0);
   await expect(editorWindow(page).getByRole("button", { name: "저장", exact: true })).toBeDisabled();
   await expect(editorWindow(page)).toBeVisible();
@@ -118,7 +118,7 @@ test("저장이 처음부터 실패하거나 충돌해도 창과 초안을 지�
   expect((await savedScreens(scenario))[0]!.name).toBe(SEEDED.name);
   await expect(nameField(page)).toHaveValue("로컬 수정");
   await save.click();
-  await expect.poll(async () => (await savedScreens(scenario))[0]!.name).toBe("로컬 수정");
+  await pollSaved(async () => (await savedScreens(scenario))[0]!.name).toBe("로컬 수정");
   await expect(editorWindow(page).getByRole("alert")).toHaveCount(0);
   await expect(editorWindow(page)).toBeVisible();
 });
@@ -143,7 +143,7 @@ test("저장한 조건식이 없을 때 새 조건식을 누르면 편집 창이
   await page.getByRole("dialog", { name: "조건 추가", exact: true }).getByRole("textbox", { name: "조건 종류 검색" }).fill("신저가");
   await page.keyboard.press("Enter");
   await editorWindow(page).getByRole("button", { name: "저장", exact: true }).click();
-  await expect.poll(async () => await savedScreens(scenario)).toMatchObject([{ name: "새 조건식", conditions: [{ kind: "new_low" }] }]);
+  await pollSaved(async () => await savedScreens(scenario)).toMatchObject([{ name: "새 조건식", conditions: [{ kind: "new_low" }] }]);
   await expect(summary(page)).toContainText("신저가");
 });
 

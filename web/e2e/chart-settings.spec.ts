@@ -2,7 +2,7 @@ import type { Page } from "@playwright/test";
 import { type ChartSettings, DEFAULT_CHART_SETTINGS, type IndicatorConfig } from "../src/chart/settings";
 import type { Bar } from "../src/api/generated/Bar";
 import { installChartProbe } from "./chart-probe";
-import { type Scenario, cell, chartOf, DEFAULT_LAYOUT_ID, expect, saveChartShare, test, firstChart, withFirstChart, pickDesktopVenue } from "./harness";
+import { type Scenario, cell, chartOf, DEFAULT_LAYOUT_ID, expect, saveChartShare, test, firstChart, withFirstChart, pickDesktopVenue, pollSaved } from "./harness";
 import { selectMinute } from "./select-option";
 
 const RIGHT_OFFSET = 6;
@@ -65,7 +65,7 @@ test("보이는 봉 수는 고른 대로 맞추고, 봉 주기를 바꿔도 유�
   await barsGroup(page).getByRole("button", { name: "240", exact: true }).click();
   await expectShownBars(page, 240);
   await expect(barsGroup(page).getByRole("button", { name: "240", exact: true })).toHaveAttribute("aria-pressed", "true");
-  await expect.poll(() => saved(scenario).visibleBars).toBe(240);
+  await pollSaved(() => saved(scenario).visibleBars).toBe(240);
 
   await choosePeriod(page, "주");
   await expectShownBars(page, 240);
@@ -78,7 +78,7 @@ test("보이는 봉 수는 고른 대로 맞추고, 봉 주기를 바꿔도 유�
   await input.press("Enter");
   await expectShownBars(page, 800);
   await expect.poll(async () => Number(await chartOf(cell(page)).getAttribute("data-bar-count"))).toBeGreaterThan(800);
-  await expect.poll(() => saved(scenario).visibleBars).toBe(800);
+  await pollSaved(() => saved(scenario).visibleBars).toBe(800);
   await expect(barsGroup(page).getByRole("button", { pressed: true })).toHaveCount(0);
 
   await page.reload();
@@ -96,7 +96,7 @@ test("보이는 봉 수는 고른 대로 맞추고, 봉 주기를 바꿔도 유�
   await barsGroup(page).getByRole("button", { name: "자동", exact: true }).click();
   await expectShownBars(page, 130);
   await expect(input).toHaveValue("");
-  await expect.poll(() => saved(scenario).visibleBars).toBeNull();
+  await pollSaved(() => saved(scenario).visibleBars).toBeNull();
 });
 
 test("화면 내 최고·최저 스위치는 보이는 봉의 최고가·최저가 꼬리표를 켜고 끄며 새로고침 뒤 복원한다", async ({ page, scenario }) => {
@@ -113,7 +113,7 @@ test("화면 내 최고·최저 스위치는 보이는 봉의 최고가·최저�
   await expect(toggle).toHaveAttribute("aria-checked", "false");
   await toggle.click();
   await expect(toggle).toHaveAttribute("aria-checked", "true");
-  await expect.poll(() => saved(scenario).showExtremes).toBe(true);
+  await pollSaved(() => saved(scenario).showExtremes).toBe(true);
 
   const expected = () => page.evaluate(() => {
     const { chart, main } = window.chartProbe;
@@ -167,7 +167,7 @@ test("화면 내 최고·최저 스위치는 보이는 봉의 최고가·최저�
   await toggle.click();
   await expect(high).toBeHidden();
   await expect(low).toBeHidden();
-  await expect.poll(() => saved(scenario).showExtremes).toBe(false);
+  await pollSaved(() => saved(scenario).showExtremes).toBe(false);
 });
 
 test("팝오버의 봉 모양과 가격 축은 활성 칸에 바로 반영한다", async ({ page, scenario }) => {
@@ -177,15 +177,15 @@ test("팝오버의 봉 모양과 가격 축은 활성 칸에 바로 반영한다
   const scale = settings.getByRole("group", { name: "가격 축" });
   await style.getByRole("button", { name: "라인", exact: true }).click();
   await expect(style.getByRole("button", { name: "라인", exact: true })).toHaveAttribute("aria-pressed", "true");
-  await expect.poll(() => saved(scenario).style).toBe("line");
+  await pollSaved(() => saved(scenario).style).toBe("line");
   await style.getByRole("button", { name: "캔들", exact: true }).click();
-  await expect.poll(() => saved(scenario).style).toBe("candle");
+  await pollSaved(() => saved(scenario).style).toBe("candle");
 
   await scale.getByRole("button", { name: "로그", exact: true }).click();
   await expect(chartOf(cell(page))).toHaveAttribute("data-price-scale", "log");
   await scale.getByRole("button", { name: "일반", exact: true }).click();
   await expect(chartOf(cell(page))).toHaveAttribute("data-price-scale", "normal");
-  await expect.poll(() => saved(scenario).scale).toBe("normal");
+  await pollSaved(() => saved(scenario).scale).toBe("normal");
 });
 
 test("비교 종목이 있으면 팝오버의 가격 축은 %로 고정한다", async ({ page, scenario }) => {
@@ -317,7 +317,7 @@ test("비교 종목이 있어 축 고정 안내가 붙어도 1280x600에서 팝�
   const choices = settings.getByRole("group", { name: "지표 창" });
   await expect(choices.getByRole("button", { name: "가운데 창", exact: true })).toHaveAttribute("aria-pressed", "true");
   await choices.getByRole("button", { name: "차트 옆", exact: true }).click();
-  await expect.poll(() => scenario.documents.uiState().indicatorWindow).toBe("inspector");
+  await pollSaved(() => scenario.documents.uiState().indicatorWindow).toBe("inspector");
 });
 
 const won = (x: number) => new Intl.NumberFormat("ko-KR", { maximumFractionDigits: 0 }).format(x);
@@ -402,13 +402,13 @@ test("범례 스위치를 끄면 통합 표시와 봉 값 줄만 한 줄로 남�
   await legendSwitch(page).click();
   await expect(legendSwitch(page)).toHaveAttribute("aria-checked", "false");
   await expectLegendOff(page);
-  await expect.poll(() => saved(scenario).showLegend).toBe(false);
+  await pollSaved(() => saved(scenario).showLegend).toBe(false);
   expect(saved(scenario)).not.toHaveProperty("showOhlc");
 
   await expect(ohlcChangeSwitch(page)).toBeEnabled();
   await ohlcChangeSwitch(page).click();
   await expect(ohlc(page).locator(":scope > span").first()).toContainText("(");
-  await expect.poll(() => saved(scenario).showOhlcChange).toBe(true);
+  await pollSaved(() => saved(scenario).showOhlcChange).toBe(true);
 
   await page.keyboard.press("Escape");
   await expectLegendOff(page);
@@ -417,7 +417,7 @@ test("범례 스위치를 끄면 통합 표시와 봉 값 줄만 한 줄로 남�
   await expect(cell(page)).toHaveAttribute("aria-label", / 5분$/);
   await expect(cell(page)).toHaveAttribute("aria-busy", "false");
   await expectLegendOff(page);
-  await expect.poll(() => firstChart(scenario.documents.layout(DEFAULT_LAYOUT_ID)).period).toBe("5m");
+  await pollSaved(() => firstChart(scenario.documents.layout(DEFAULT_LAYOUT_ID)).period).toBe("5m");
 
   await reload(page);
   await expect(cell(page)).toHaveAttribute("aria-label", /: 삼성전자 통합 5분$/);
@@ -432,7 +432,7 @@ test("범례 스위치를 끄면 통합 표시와 봉 값 줄만 한 줄로 남�
   const venue = await middle(fallbackBadge(page));
   const name = await middle(rows.name);
   expect(Math.abs(venue.y - name.y)).toBeLessThan(8);
-  await expect.poll(() => saved(scenario).showLegend).toBe(true);
+  await pollSaved(() => saved(scenario).showLegend).toBe(true);
 });
 
 test("범례를 끈 채 거래소 조회가 실패해도 위 막대에서 다른 거래소로 복구한다", async ({ page, scenario }) => {
@@ -458,7 +458,7 @@ test("showOhlc: false가 든 옛 설정은 봉 값 줄과 범례를 모두 보�
   await openSettings(page);
   await expect(legendSwitch(page)).toHaveAttribute("aria-checked", "true");
   await ohlcChangeSwitch(page).click();
-  await expect.poll(() => saved(scenario).showOhlcChange).toBe(true);
+  await pollSaved(() => saved(scenario).showOhlcChange).toBe(true);
   expect(saved(scenario)).toMatchObject({ showLegend: true });
   expect(saved(scenario)).not.toHaveProperty("showOhlc");
 });
@@ -469,7 +469,7 @@ test("범례를 끈 좁은 칸에서는 봉 값이 통합 표시 옆에서 줄�
   openWith(scenario, { showLegend: false, showOhlcChange: true });
   saveChartShare(scenario, 0.4);
   await open(page);
-  await expect.poll(() => scenario.live.subscriptions().some((s) => s.symbol === "005930")).toBe(true);
+  await pollSaved(() => scenario.live.subscriptions().some((s) => s.symbol === "005930")).toBe(true);
   scenario.live.emit({ type: "sub_error", sub: scenario.live.subscriptions().find((s) => s.symbol === "005930")!.sub, code: "realtime_limit" });
   const notice = cell(page).getByText("실시간 한도 초과: 조회 값만 보입니다", { exact: true });
   await expect(notice).toBeVisible();
@@ -499,7 +499,7 @@ test("봉 값이 그대로면 크기가 바뀌어 다시 그려도 봉 값 줄�
   openWith(scenario, { showLegend: false, showOhlcChange: true });
   saveChartShare(scenario, 0.4);
   await open(page);
-  await expect.poll(() => scenario.live.subscriptions().some((s) => s.symbol === "005930")).toBe(true);
+  await pollSaved(() => scenario.live.subscriptions().some((s) => s.symbol === "005930")).toBe(true);
   scenario.live.emit({ type: "sub_error", sub: scenario.live.subscriptions().find((s) => s.symbol === "005930")!.sub, code: "realtime_limit" });
   await expect(cell(page).getByText("실시간 한도 초과: 조회 값만 보입니다", { exact: true })).toBeVisible();
   await expect(cell(page)).toHaveAttribute("aria-busy", "false");
@@ -550,7 +550,7 @@ test("390x844에서 범례를 끄면 봉 값 줄만 남고 휴대폰 머리의 �
   await open(page);
   await openSettings(page);
   await legendSwitch(page).click();
-  await expect.poll(() => saved(scenario).showLegend).toBe(false);
+  await pollSaved(() => saved(scenario).showLegend).toBe(false);
   await page.keyboard.press("Escape");
   await page.setViewportSize({ width: 390, height: 844 });
   await expect(ohlc(page)).toBeVisible();
@@ -573,7 +573,7 @@ test("봉 값 등락률 스위치는 시·고·저·종 옆에 직전 봉 종가
   await ohlcChangeSwitch(page).click();
   await expect(ohlcChangeSwitch(page)).toHaveAttribute("aria-checked", "true");
   await expect.poll(texts).toEqual(ohlcCells(zigzagBars[last]!, zigzagBars[last - 1]!));
-  await expect.poll(() => saved(scenario).showOhlcChange).toBe(true);
+  await pollSaved(() => saved(scenario).showOhlcChange).toBe(true);
   for (const [n, v] of [[0, zigzagBars[last]!.o], [3, zigzagBars[last]!.c]] as const) {
     const change = v - zigzagBars[last - 1]!.c;
     await expect(spans.nth(n).locator("span")).toHaveClass(change > 0 ? "text-up" : change < 0 ? "text-down" : "text-text-2");
@@ -616,7 +616,7 @@ test("최고·최저 등락률을 고가·저가 대비로 바꾸면 꼬리표�
   await expect(low).toHaveText(extremeTexts[1]!);
   expect(extremeTexts[0]).toContain("(−");
   expect(extremeTexts[1]).toContain("(+");
-  await expect.poll(() => saved(scenario).extremeBasis).toBe("extreme");
+  await pollSaved(() => saved(scenario).extremeBasis).toBe("extreme");
 
   await reload(page);
   await expect(high).toHaveText(extremeTexts[0]!);
@@ -626,7 +626,7 @@ test("최고·최저 등락률을 고가·저가 대비로 바꾸면 꼬리표�
   await extremesSwitch(page).click();
   await expect(high).toBeHidden();
   for (const button of [current, extreme]) await expect(button).toBeDisabled();
-  await expect.poll(() => saved(scenario)).toMatchObject({ showExtremes: false, extremeBasis: "extreme" });
+  await pollSaved(() => saved(scenario)).toMatchObject({ showExtremes: false, extremeBasis: "extreme" });
 });
 
 test("1024x768에서 차트 설정 팝오버의 모든 조작이 창 안에 있고, 등락률이 붙은 봉 값 줄은 범례 폭 안에서 줄을 바꾼다", async ({ page }) => {
