@@ -413,7 +413,7 @@ fn a_missing_plan_file_is_a_read_error() {
 
 #[test]
 fn a_secret_file_is_refused_for_group_or_other_access_and_accepted_when_only_the_owner_can_use_it() {
-    for (mode, refused) in [(0o600, false), (0o400, false), (0o700, false), (0o640, true), (0o604, true), (0o660, true), (0o606, true), (0o610, true), (0o601, true), (0o670, true)] {
+    for (mode, refused) in [(0o600, false), (0o400, false), (0o700, false), (0o640, true), (0o604, true), (0o660, true), (0o606, true), (0o610, true), (0o601, true), (0o670, true), (0o620, true), (0o602, true), (0o622, true)] {
         let files = KeyFiles::new();
         let mut entries = good_entries(&files);
         entries[0] = files.entry(&KeySpec { mode, ..KeySpec::new("collect-01", "FAKE-APPKEY-AAAA") });
@@ -440,6 +440,9 @@ fn an_app_key_hash_must_be_sha256_prefix_and_64_lowercase_hex_characters() {
         format!("sha1:{hex}"),
         format!("sha256:{}", &hex[..63]),
         format!("sha256:{hex}0"),
+        "sha256:".to_owned(),
+        format!("sha256:g{}", &hex[1..]),
+        format!("sha256:sha256:{hex}"),
         format!("sha256:{}", hex.to_uppercase()),
         format!("sha256:{}g", &hex[..63]),
         format!("sha256:{}", " ".repeat(64)),
@@ -481,4 +484,40 @@ fn a_full_key_takes_no_more_even_when_its_load_is_the_lowest() {
         assert_eq!(key.stocks.len(), KEY_CAPACITY, "{}", key.name);
     }
     assert_eq!(check_plan(&plan), Ok(()));
+}
+
+#[test]
+fn active_keys_come_back_in_name_order_from_any_file_order() {
+    let files = KeyFiles::new();
+    let mut entries = good_entries(&files);
+    entries.reverse();
+    let list = files.load(entries, &Variables::new()).unwrap();
+    let names: Vec<&str> = list.active.iter().map(|key| key.identity.name.as_str()).collect();
+    assert_eq!(names, ["collect-01", "collect-02", "spare-01"]);
+}
+
+#[test]
+fn an_inactive_entry_with_a_bad_hash_is_refused() {
+    let files = KeyFiles::new();
+    let mut entries = good_entries(&files);
+    entries.push(json!({"name": "later-01", "active": false, "spare": false, "app_key_hash": "not-a-hash", "secret_file": "/not/yet/there.env"}));
+    let error = files.load(entries, &Variables::new()).unwrap_err();
+    assert!(matches!(&error, KeysError::BadHash(key) if key.as_str() == "later-01"), "{error}");
+}
+
+#[test]
+fn a_plan_file_with_format_version_zero_is_not_read() {
+    let data = tempfile::tempdir().unwrap();
+    let written = plan(&identities(2), &universe_of(10), &BTreeMap::new());
+    let mut other = serde_json::to_value(&written).unwrap();
+    other["format_version"] = json!(0);
+    fs::create_dir_all(plan_path(data.path(), DATE).parent().unwrap()).unwrap();
+    fs::write(plan_path(data.path(), DATE), other.to_string()).unwrap();
+    assert!(matches!(read_plan(data.path(), DATE), Err(PlanError::Read { .. })));
+}
+
+#[test]
+fn the_plan_file_is_json_under_the_plan_folder_named_by_date() {
+    let data = Path::new("/state/collector");
+    assert_eq!(plan_path(data, DATE), data.join("plan").join("20261118.json"));
 }
