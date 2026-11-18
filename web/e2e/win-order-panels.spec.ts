@@ -64,29 +64,66 @@ test("보유 요약이 값을 보이고 평가손익을 원과 퍼센트로 바�
   await expect(page.getByTestId("ladder-mark")).toHaveCount(1);
 });
 
-test("휠로 상·하한 사이를 훑고 현재가 단추로 돌아온다", async ({ page, scenario }) => {
+const scrollLadder = (page: Page, top: number | "end") => page.getByTestId("order-ladder").evaluate((element, target) => { element.scrollTop = target === "end" ? element.scrollHeight : target; }, top);
+const fullTickCount = 431;
+
+test("전체 호가는 상한부터 하한까지 스크롤하고 현재가 단추로 가운데에 돌아오며 다시 누르면 20행이다", async ({ page, scenario }) => {
   ordersOn(scenario);
   tradingApi(scenario);
   await openOrderWindow(page, scenario);
   lastTrade(scenario, BASE);
   await expect(page.getByTestId("order-current")).toBeDisabled();
-  const ladder = page.getByTestId("order-ladder");
-  const box = await ladder.boundingBox();
-  await page.mouse.move(box!.x + box!.width / 2, box!.y + box!.height / 2);
-  await page.mouse.wheel(0, -100);
-  await expect(cellAt(page, "sell", 71_500)).toBeVisible();
-  await expect(ladderRows(page)).toHaveCount(20);
+  await page.getByTestId("order-explorer").click();
   await expect(page.getByTestId("order-explorer")).toHaveAttribute("aria-pressed", "true");
-  await expect(page.getByTestId("price-ladder").locator(".mw-qty-value")).toHaveCount(15);
-  await cellAt(page, "sell", 71_500).hover();
-  await expect(cellAt(page, "sell", 71_500).locator(".od-preview")).toHaveText("매도 10");
-  for (let i = 0; i < 40; i++) await page.mouse.wheel(0, -100);
+  const ladder = page.getByTestId("order-ladder");
+  const current = cellAt(page, "buy", BASE);
+  await expect(current).toBeVisible();
+  const area = (await ladder.boundingBox())!;
+  const middle = (await current.boundingBox())!;
+  expect(Math.abs(middle.y + middle.height / 2 - (area.y + area.height / 2))).toBeLessThan(30);
+  const rendered = await ladderRows(page).count();
+  expect(rendered).toBeGreaterThan(20);
+  expect(rendered).toBeLessThan(fullTickCount);
+  expect(await ladder.evaluate((element) => element.scrollHeight)).toBeGreaterThanOrEqual(fullTickCount * 24);
+
+  await scrollLadder(page, "end");
+  await expect(cellAt(page, "buy", 49_000)).toBeVisible();
+  await scrollLadder(page, 0);
   await expect(cellAt(page, "sell", 91_000)).toBeVisible();
-  await expect(cellAt(page, "sell", 91_100)).toHaveCount(0);
+
   await page.getByTestId("order-current").click();
-  await expect(cellAt(page, "sell", 91_000)).toHaveCount(0);
+  await expect(cellAt(page, "buy", 91_000)).toHaveCount(0);
+  await expect(current).toBeVisible();
+  await expect(page.getByTestId("order-explorer")).toHaveAttribute("aria-pressed", "true");
+
+  await page.getByTestId("order-explorer").click();
   await expect(page.getByTestId("order-explorer")).toHaveAttribute("aria-pressed", "false");
+  await expect(ladderRows(page)).toHaveCount(20);
   await expect(cellAt(page, "buy", BASE)).toBeVisible();
+});
+
+test("전체 호가에서 스크롤한 자리의 칸을 더블클릭하면 그 가격으로 신규가 나간다", async ({ page, scenario }) => {
+  ordersOn(scenario);
+  const api = tradingApi(scenario);
+  await openOrderWindow(page, scenario);
+  lastTrade(scenario, BASE);
+  await page.getByTestId("order-explorer").click();
+  await expect(cellAt(page, "buy", BASE)).toBeVisible();
+  const before = await page.getByTestId("order-ladder").evaluate((element) => element.scrollTop);
+  await scrollLadder(page, before + 30 * 24);
+  const target = cellAt(page, "buy", 67_000);
+  await expect(target).toBeVisible();
+  await target.dblclick();
+  await expect.poll(() => writesTo(api, "place")).toHaveLength(1);
+  expect(writesTo(api, "place")[0]!.body).toMatchObject({ code: CODE, side: "buy", price: 67_000, quantity: 10 });
+});
+
+test("상·하한가를 받지 못하면 전체 호가 단추가 꺼지고 이유를 툴팁으로 보인다", async ({ page, scenario }) => {
+  ordersOn(scenario);
+  tradingApi(scenario);
+  await openOrderWindow(page, scenario, false, "krx", { upper: null, lower: null });
+  await expect(page.getByTestId("order-explorer")).toBeDisabled();
+  await expect(page.getByTestId("order-explorer")).toHaveAttribute("title", "상·하한가를 아직 받지 못했습니다");
 });
 
 test("평단가 점은 평단가에 가장 가까운 가격 행의 가격 칸 안 가격 숫자 왼쪽에 하나 있고 숫자 x와 행 높이는 다른 행과 같다", async ({ page, scenario }) => {

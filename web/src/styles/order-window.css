@@ -7,6 +7,8 @@
 
 .od-ladder-wrap { display:flex; flex-direction:column; min-height:var(--size-120); }
 .od-ladder { position:relative; flex:1; min-height:0; overflow:auto; }
+.od-explorer-rows { box-sizing:border-box; }
+.od-ladder[data-explorer] .mw-ladder { padding:0; }
 .od-ladder[data-dragging] { cursor:grabbing; user-select:none; }
 .od-cell { position:relative; display:flex; align-items:center; justify-content:center; width:var(--size-64); height:var(--size-20); border-radius:var(--r-s); }
 .od-cell[data-order-cell] { border:var(--size-1) solid var(--line); cursor:pointer; }

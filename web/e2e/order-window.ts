@@ -87,7 +87,7 @@ export function snapshot(base: number) {
   };
 }
 
-export async function openOrderWindow(page: Page, scenario: Scenario, withSecondChart = false, savedVenue: Venue = "krx"): Promise<void> {
+export async function openOrderWindow(page: Page, scenario: Scenario, withSecondChart = false, savedVenue: Venue = "krx", limits: { upper: number | null; lower: number | null } = { upper: 91_000, lower: 49_000 }): Promise<void> {
   const layout = scenario.documents.layout(DEFAULT_LAYOUT_ID);
   const windows: LayoutWindow[] = [
     { id: "cell-0", link: null, kind: "chart", symbol: CODE, venue: "combined", period: "D", chartSettings: SETTINGS },
@@ -97,7 +97,7 @@ export async function openOrderWindow(page: Page, scenario: Scenario, withSecond
   ];
   scenario.documents.saveLayout({ ...layout, windows, placement: {}, revision: layout.revision + 1 });
   pinQuote(scenario, CODE, BASE);
-  scenario.reply((url) => url.pathname === `/api/symbols/${CODE}/fundamentals`, { body: { symbol: CODE, upperLimit: 91_000, lowerLimit: 49_000, marketCap: null, listedShares: null, per: null, pbr: null, roe: null, eps: null, bps: null, foreignExhaustionRate: null, high52w: null, low52w: null } });
+  scenario.reply((url) => url.pathname === `/api/symbols/${CODE}/fundamentals`, { body: { symbol: CODE, upperLimit: limits.upper, lowerLimit: limits.lower, marketCap: null, listedShares: null, per: null, pbr: null, roe: null, eps: null, bps: null, foreignExhaustionRate: null, high52w: null, low52w: null } });
   scenario.reply((url) => url.pathname === `/api/symbols/${CODE}/order-book`, { body: snapshot(BASE) });
   scenario.reply((url) => url.pathname === "/api/symbols/000660/order-book", { body: { ...snapshot(BASE), symbol: "000660" } });
   scenario.reply((url) => url.pathname === "/api/symbols/000660/fundamentals", { body: { symbol: "000660", upperLimit: null, lowerLimit: null } });
