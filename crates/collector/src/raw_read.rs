@@ -46,7 +46,7 @@ pub fn read_day_by_key(data_dir: &Path, date: u32) -> io::Result<Vec<(Option<Str
     Ok(by_key.into_iter().map(|(key, files)| (key, RawDayReader::over(files))).collect())
 }
 
-fn day_files(data_dir: &Path, date: u32) -> io::Result<Vec<(Option<String>, PathBuf)>> {
+pub(crate) fn day_files(data_dir: &Path, date: u32) -> io::Result<Vec<(Option<String>, PathBuf)>> {
     let folder = raw_day_dir(data_dir, date);
     let mut files = Vec::new();
     for entry in fs::read_dir(&folder)? {

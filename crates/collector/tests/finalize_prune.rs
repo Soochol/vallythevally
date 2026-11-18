@@ -3,7 +3,7 @@ use std::num::NonZeroU32;
 use std::path::{Path, PathBuf};
 
 use collector::calendar::{Calendar, Day, cache_path, HolidayRequest, HolidayTransport, TransportError};
-use collector::finalize::{DEFAULT_SPILL_BUDGET_BYTES, KeepReason, Options, PRUNE_LOG_NAME, RetentionSettings, delete_raw_day, finalize_day, prune_raw, prune_with_cached_calendar};
+use collector::finalize::{DEFAULT_SPILL_BUDGET_BYTES, KeepReason, Options, PRUNE_LOG_NAME, RetentionSettings, delete_planned_day, delete_raw_day, finalize_day, first_complete_day, plan_prune, prune_raw, prune_with_cached_calendar, read_day_facts};
 use futures::future::BoxFuture;
 use serde_json::{Value, json};
 use server::config::Secret;
@@ -363,6 +363,58 @@ async fn a_raw_file_rewritten_or_removed_after_complete_is_not_pruned() {
         assert_eq!(log_for(data.path(), date)["reason"], json!("raw_changed_after_complete"), "{date}");
     }
     assert_eq!(log_for(data.path(), NOV_4)["examples"], json!(["day.jsonl.zst"]));
+}
+
+#[tokio::test]
+async fn files_that_finalize_does_not_read_are_left_out_of_the_fingerprint_and_keep_the_day_from_being_pruned() {
+    let data = data_with_first_day();
+    write_raw_lines(data.path(), NOV_3, &[good_frame(NOV_3, 0)]);
+    let deep = raw_folder(data.path(), NOV_3).join("collect-01").join("sub");
+    fs::create_dir_all(&deep).unwrap();
+    fs::write(deep.join("0900.jsonl.zst"), "한 단계 더 깊다").unwrap();
+    fs::write(raw_folder(data.path(), NOV_3).join("notes.txt"), "원문이 아니다").unwrap();
+    finalize(data.path(), NOV_3);
+    let complete: Value = serde_json::from_slice(&fs::read(data.path().join("store").join(NOV_3.to_string()).join("complete.json")).unwrap()).unwrap();
+    assert_eq!(complete["raw_files"].as_object().unwrap().keys().collect::<Vec<_>>(), ["day.jsonl.zst"]);
+    put_raw_bytes(data.path(), NOV_20);
+    let calendar = calendar(data.path(), Vec::new()).await;
+
+    let report = prune_raw(data.path(), NOV_20, &calendar, &settings()).unwrap();
+
+    assert!(report.deleted.is_empty(), "{report:?}");
+    assert!(deep.join("0900.jsonl.zst").exists());
+    assert!(raw_folder(data.path(), NOV_3).join("notes.txt").exists());
+    let line = log_for(data.path(), NOV_3);
+    assert_eq!(line["reason"], json!("raw_has_unread_files"));
+    assert_eq!(line["files"], json!(2));
+    assert_eq!(line["examples"], json!(["collect-01/sub/0900.jsonl.zst", "notes.txt"]));
+
+    fs::remove_dir_all(deep.parent().unwrap()).unwrap();
+    fs::remove_file(raw_folder(data.path(), NOV_3).join("notes.txt")).unwrap();
+    let report = prune_raw(data.path(), NOV_20, &calendar, &settings()).unwrap();
+    assert_eq!(report.deleted.iter().map(|(date, _)| *date).collect::<Vec<_>>(), [NOV_3], "치우면 지울 수 있다");
+}
+
+#[tokio::test]
+async fn a_raw_file_that_appears_after_the_plan_is_caught_right_before_the_delete() {
+    let data = data_with_first_day();
+    write_raw_lines(data.path(), NOV_3, &[good_frame(NOV_3, 0)]);
+    finalize(data.path(), NOV_3);
+    let calendar = calendar(data.path(), Vec::new()).await;
+    let planned = plan_prune(NOV_20, first_complete_day(data.path()).unwrap(), &[read_day_facts(data.path(), NOV_3)], &calendar, &settings());
+    assert_eq!(planned.delete, [NOV_3]);
+    let late = raw_folder(data.path(), NOV_3).join("late.jsonl.zst");
+    fs::write(&late, zstd::encode_all(format!("{}\n", good_frame(NOV_3, 900)).as_bytes(), 3).unwrap()).unwrap();
+
+    let outcome = delete_planned_day(data.path(), NOV_20, NOV_3, &calendar, &settings()).unwrap();
+
+    assert!(matches!(outcome, Err(KeepReason::RawChangedAfterComplete { files: 1, .. })), "{outcome:?}");
+    assert!(late.exists());
+    assert!(raw_folder(data.path(), NOV_3).join("day.jsonl.zst").exists());
+
+    finalize(data.path(), NOV_3);
+    assert!(delete_planned_day(data.path(), NOV_20, NOV_3, &calendar, &settings()).unwrap().is_ok());
+    assert!(!raw_exists(data.path(), NOV_3));
 }
 
 #[tokio::test]

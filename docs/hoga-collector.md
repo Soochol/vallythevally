@@ -366,7 +366,7 @@ collector finalize [--data <폴더>] --date YYYYMMDD [--threads 4] [--buckets 64
 
 - 시작할 때 두 이름 바꾸기 사이에 끊긴 흔적(`store/<YYYYMMDD>.old-*`)이 있으면 고친다. 결과는 `store/<YYYYMMDD>.tmp/`에 쓴다. 폴더가 남아 있으면 지우고 처음부터 쓴다. 대조가 통과하면 `complete.json`을 맨 마지막에 쓰고 `store/<YYYYMMDD>/`로 바꾼다. 대조가 실패하면 `complete.json` 없이 `.tmp`를 남기고 1로 끝난다.
 - `--verify-only`는 쓰지 않고 원문 줄만 다시 세어 Parquet과 대조한다. `.tmp`가 있으면 그것을, 없으면 `store/<YYYYMMDD>/`를 대조한다. `verify.json`을 새로 쓰고 `complete.json`은 건드리지 않는다. 지우기는 하지 않는다.
-- `--prune`은 대조가 통과한 뒤 `raw/` 아래 모든 날을 따져 지울 수 있는 날의 원문을 지운다. 조건과 기록은 [`collector-store-format.md`](collector-store-format.md)의 "원문 지우기"를 따른다. 오늘은 `--date`다. `complete.json`에 적힌 원문 지문(`raw_files`)과 지금 원문이 다른 날은 지우지 않는다. 지우다 실패한 날이 있으면 1이다.
+- `--prune`은 대조가 통과한 뒤 `raw/` 아래 모든 날을 따져 지울 수 있는 날의 원문을 지운다. 조건과 기록은 [`collector-store-format.md`](collector-store-format.md)의 "원문 지우기"를 따른다. 오늘은 `--date`다. `complete.json`에 적힌 원문 지문(`raw_files`)과 지금 원문이 다른 날, 정리가 읽지 않는 파일이 든 날은 지우지 않는다. 지우기 직전에 한 번 더 확인한다. 지우다 실패한 날이 있으면 1이다.
 - `--threads`는 원문을 해석하는 스레드와 버킷을 정렬해 쓰는 스레드의 수다. 상한은 이 값이다. 원문은 `raw_read::read_day` 하나가 읽고 스레드들이 줄 묶음을 나눠 받는다. 줄에 번호를 매겨 정렬 기준에 넣으므로 스레드 수가 달라도 파일이 같다.
 
 ### 하는 일
@@ -690,7 +690,7 @@ SIGTERM·SIGINT나 종료 시각(`end_at`, 기본 20:05 KST, 계획 파일의 �
 ### 시험
 
 - `tests/supervise.rs`: 가짜 자식(`Launcher`·`ChildProcess`를 구현한 in-process 가짜), 합성 `Transport`, 멈춘 tokio 시간과 `Clock::fake`로 토큰 간격, 재시작, 인계, 8050, `token_invalid`, 종료, 시작 확인, 사건 기록과 로그의 토큰 비노출을 확인한다. `python3 scripts/dev.py cargo test -p collector --test supervise`.
-- `tests/supervise_status.rs`: 상태 소켓 권한(600), 남은 소켓 파일, 응답이 `tests/fixtures/status/` 예시와 같은 모양인지, 감시 연결의 5초 하트비트와 단계 변경 즉시 전송, 읽지 않는 연결 끊기, 명령 거절, 비밀값 비노출, `collector status` 표와 "데몬 꺼짐"을 확인한다. 소켓 경로 길이 한도(SUN_LEN) 때문에 소켓만 `/tmp` 아래 짧은 임시 폴더에 둔다. `python3 scripts/dev.py cargo test -p collector --test supervise_status`.
+- `tests/supervise_status.rs`: 상태 소켓 권한(600), 남은 소켓 파일, 응답이 `tests/fixtures/status/` 예시와 같은 모양인지, 감시 연결의 5초 하트비트와 단계 변경 즉시 전송, 읽지 않는 연결 끊기, 요청 없이 붙은 연결 정리, 파일 요청이 밀려도 `status` 답하기, 두 데몬이 동시에 낡은 소켓을 열 때 하나만 얻는 것, 명령 거절, 비밀값 비노출, `collector status` 표와 "데몬 꺼짐"을 확인한다. 소켓 경로 길이 한도(SUN_LEN) 때문에 소켓만 `/tmp` 아래 짧은 임시 폴더에 둔다. `python3 scripts/dev.py cargo test -p collector --test supervise_status`.
 - `tests/supervise_process.rs`: 실제 `collector supervise`가 실제 `collect --child` 자식 둘을 루프백 WebSocket 시험 서버에 붙여 LOGIN과 REG까지 가고, 데몬을 끝내면(SIGTERM) 자식도 끝나고, 데몬을 SIGKILL로 죽여도 자식이 끝남을 확인한다. 토큰은 토큰 파일에 미리 넣어 두고 `VALLY_COLLECTOR_REST_URL`(`http://127.0.0.1…`만 받는다)을 닫힌 포트로 돌려 키움에는 아무것도 보내지 않는다. `python3 scripts/dev.py cargo test -p collector --test supervise_process`.
 
 ## 감독 데몬
@@ -712,7 +712,7 @@ SIGTERM·SIGINT나 종료 시각(`end_at`, 기본 20:05 KST, 계획 파일의 �
 | 대조 직후 | 〃 | 키를 이름순으로 한 줄로 세워 i번째 키를 (대조가 끝난 시각 + i × `reissue_spacing`)에 재발급한다 | |
 | 재발급 뒤 | 정리(`finalizing`) | `finalize --prune` 자식을 `nice -n 10 ionice -c 3`로 띄운다. 정리 완료 표시와 원문 지우기를 한다 | `store/<날짜>/complete.json`이 있다 |
 
-`phase`가 `off_hours`인 때는 쉬는 날, 07:20 전, 정리가 끝난 뒤다. 하루가 끝나면 다음 날 00:00까지 기다린 뒤 새 하루를 시작한다. 데몬이 뜰 때와 새 하루를 시작할 때마다 먼저 밀린 날을 정리한다. 원문은 있는데 `complete.json`이 없는 과거 날짜를 모두 오래된 순으로 한 번씩 정리하고, 오늘은 뺀다. 금요일 저녁에 죽은 데몬이 월요일에 뜨면 금요일분을 정리한다. 대조에 실패한 날은 그 시작에서 한 번만 시도하고 넘어가므로 같은 시작 안에서 되풀이하지 않는다. 다만 `complete.json`이 생기지 않는 날은 다음 시작마다 다시 시도하고 경보(`stage_failed`)를 다시 낸다.
+`phase`가 `off_hours`인 때는 쉬는 날, 07:20 전, 정리가 끝난 뒤다. 하루가 끝나면 다음 날 00:00까지 기다린 뒤 새 하루를 시작한다. 데몬이 뜰 때와 새 하루를 시작할 때마다 먼저 밀린 날을 정리한다. 원문은 있는데 `complete.json`이 없는 과거 날짜를 모두 오래된 순으로 한 번씩 정리하고, 오늘은 뺀다. 금요일 저녁에 죽은 데몬이 월요일에 뜨면 금요일분을 정리한다. 밀린 날 정리는 아침 일정과 겹치지 않게 시각으로 끊는다. 07:20 판단 전에 뜬 데몬은 07:20 전까지만 새 날을 시작하고, 07:20 이후(장중)에 뜬 데몬은 밀린 날을 시작하지 않고 수집을 먼저 한다. 마감 뒤에 뜬 데몬은 다음 날 07:20 전까지 한다. 끊긴 날은 다음 날 00:00 시작이나 다음 데몬 시작 때 이어서 정리한다. 이미 시작한 정리 한 건은 끊지 않으므로 그 한 건이 끝나는 시각만큼 늦을 수 있다. 대조에 실패한 날은 그 시작에서 한 번만 시도하고 넘어가므로 같은 시작 안에서 되풀이하지 않는다. 다만 `complete.json`이 생기지 않는 날은 다음 시작마다 다시 시도하고 경보(`stage_failed`)를 다시 낸다.
 
 REST용 키는 키 목록의 예비 키이고, 예비 키가 없으면 첫 활성 키를 쓰며 경보(`plan_note`)를 남긴다. 토큰은 `IssueLane`으로 받고 재시도는 세 번까지다. 상주 계층이 연 `KeyTokens`는 `Supervisor`를 띄우기 전에 놓는다(키마다 잠금이 하나이기 때문이다). 토큰 파일이 이어 주므로 아침에 받은 토큰을 `Supervisor`가 그대로 쓴다.
 
@@ -731,7 +731,7 @@ REST용 키는 키 목록의 예비 키이고, 예비 키가 없으면 첫 활�
 - 오늘 계획 파일이 있으면 다시 쓰지 않고 그것을 쓴다. 이때 종목 목록은 받지 않는다. 장중이면(`launch_at`을 넘었고 `close_at` 전이면) 바로 자식을 띄운다.
 - 마감 뒤(`close_at` 이후)에 뜨면 그날 수집(자식, 토큰, 계획 만들기, 마감 뒤 목록, 지수 대조, 재발급)을 하지 않는다. `complete.json`이 없고 그날 원문이 있으면 정리부터 한다. `complete.json`이 있으면 아무것도 하지 않는다.
 - 종목 목록을 받지 못했고 이전 목록도 없으면(`NoFallback`) 그날 수집을 접고 경보(`stage_failed`)를 남긴다. 계획을 세우지 못해도 같다.
-- 정리가 0이 아닌 종료 코드로 끝나면 경보(`stage_failed`)를 남기고 그 시작 안에서는 다시 하지 않는다. 다음 날 시작이나 다음 데몬 시작 때 정리가 안 끝난 날을 모두 다시 시도한다. 밀린 날이 많으면 시작 직후 정리가 오래 걸려 아침 일정이 늦어질 수 있다. 일정 시각이 이미 지났으면 기다리지 않고 바로 이어 간다.
+- 정리가 0이 아닌 종료 코드로 끝나면 경보(`stage_failed`)를 남기고 그 시작 안에서는 다시 하지 않는다. 다음 날 시작이나 다음 데몬 시작 때 정리가 안 끝난 날을 모두 다시 시도한다. 일정 시각이 이미 지났으면 기다리지 않고 바로 이어 간다.
 - 종료 신호는 모든 기다림, 장중 `Supervisor`, 정리 자식에 닿고 어느 단계에서든 깨끗이 끝난다.
 
 ### 설정
@@ -754,7 +754,7 @@ REST용 키는 키 목록의 예비 키이고, 예비 키가 없으면 첫 활�
 
 ### 시험
 
-`tests/supervise_day.rs`: 가짜 자식, 합성 `Transport`(`au10001`, `ka10099`, `ka20006`), 합성 `HolidayTransport`, 실제 `finalize::run`을 같은 인수로 부르는 `FinalizeRunner`, 멈춘 tokio 시간과 `Clock::fake`로 하루를 몇 초에 돌린다. 평일 하루의 순서와 시각, 쉬는 날, 판단 모름, `0s`가 오지 않음, 지수 일봉 어긋남과 실패, 개장 시각이 바뀐 날, 11:00과 21:00에 뜬 데몬, 마감 뒤에 직접 시작한 `Supervisor`, 상태 소켓의 단계별 응답과 계약 예시 모양, 종료 신호, 정리 실패와 다음 날 다시 하기, 월요일에 뜬 데몬이 금요일을 포함해 밀린 날을 오래된 순으로 정리하는 것, 보관 옵션이 지우기 판단에 닿는 것, 끝 줄바꿈 없이 잘린 사건 기록 뒤의 판단이 `complete.json`에 나오는 것을 확인한다. `python3 scripts/dev.py cargo test -p collector --test supervise_day`.
+`tests/supervise_day.rs`: 가짜 자식, 합성 `Transport`(`au10001`, `ka10099`, `ka20006`), 합성 `HolidayTransport`, 실제 `finalize::run`을 같은 인수로 부르는 `FinalizeRunner`, 멈춘 tokio 시간과 `Clock::fake`로 하루를 몇 초에 돌린다. 평일 하루의 순서와 시각, 쉬는 날, 판단 모름, `0s`가 오지 않음, 지수 일봉 어긋남과 실패, 개장 시각이 바뀐 날, 11:00과 21:00에 뜬 데몬, 마감 뒤에 직접 시작한 `Supervisor`, 상태 소켓의 단계별 응답과 계약 예시 모양, 종료 신호, 정리 실패와 다음 날 다시 하기, 월요일에 뜬 데몬이 금요일을 포함해 밀린 날을 오래된 순으로 정리하는 것, 밀린 날이 길면 07:20 앞에서 멈추고 나머지를 다음 날 시작에 정리하는 것, 보관 옵션이 지우기 판단에 닿는 것, 끝 줄바꿈 없이 잘린 사건 기록 뒤의 판단이 `complete.json`에 나오는 것을 확인한다. `python3 scripts/dev.py cargo test -p collector --test supervise_day`.
 
 ## 운영
 

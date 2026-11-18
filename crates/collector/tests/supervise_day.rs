@@ -949,6 +949,30 @@ async fn a_failing_backlog_day_is_tried_once_per_start_and_the_others_still_run(
 }
 
 #[tokio::test(start_paused = true)]
+async fn a_long_backlog_stops_before_the_morning_schedule_and_the_rest_waits_for_the_next_day() {
+    let dates = [20261109, 20261110, 20261111, 20261112, 20261113];
+    let harness = Harness::start_with(
+        Config { start: kst(monday(), 7, 0, 0), hold_finalize: Duration::from_secs(600), seed_history: false, seed_today_raw: false, ..Config::default() },
+        |data| seed_unfinalized_days(data, &dates),
+    );
+    let judge_at = kst(monday(), 7, 20, 0);
+    harness.until(kst(monday(), 12, 0, 0)).await;
+    let started = harness.recorder.times_of("finalize");
+    assert_eq!(started.len(), 2, "07:20 판단 시각 앞에서 새 날을 시작하지 않는다: {started:?}");
+    assert!(started.iter().all(|time| time.unix() < judge_at.unix()), "{started:?}");
+    let completed = |date: u32| harness.data().join("store").join(date.to_string()).join("complete.json").is_file();
+    assert_eq!(dates.iter().map(|date| completed(*date)).collect::<Vec<_>>(), [true, true, false, false, false], "오래된 날부터 정리한다");
+
+    let tuesday = KstDate::new(2026, 11, 17).unwrap();
+    harness.until(kst(tuesday, 2, 0, 0)).await;
+    let started = harness.recorder.times_of("finalize");
+    assert_eq!(started.len(), 5, "{started:?}");
+    assert!(started[2..].iter().all(|time| time.unix() >= kst(tuesday, 0, 0, 0).unix()), "남은 날은 다음 날 시작에 정리한다: {started:?}");
+    assert!(dates.iter().all(|date| completed(*date)));
+    harness.finish().await;
+}
+
+#[tokio::test(start_paused = true)]
 async fn the_next_day_start_finalizes_every_past_day_left_unfinalized() {
     let harness = Harness::start_with(
         Config { forced_exit: Some(1), holidays: Holidays::Listed(vec![(20261119, "임시공휴일")]), seed_history: false, seed_today_raw: true, ..Config::default() },

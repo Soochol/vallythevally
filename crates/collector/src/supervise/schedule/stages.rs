@@ -319,7 +319,7 @@ impl Daemon {
         Err(Halt::Failed("토큰을 받지 못했습니다".to_owned()))
     }
 
-    pub(super) async fn finalize_backlog(&mut self, today: u32, shutdown: &mut watch::Receiver<bool>) -> Result<(), DayEnd> {
+    pub(super) async fn finalize_backlog(&mut self, today: u32, start_before: KstTime, shutdown: &mut watch::Receiver<bool>) -> Result<(), DayEnd> {
         let pending = match raw_days_without_complete(&self.data_dir, today) {
             Ok(pending) => pending,
             Err(error) => {
@@ -327,7 +327,12 @@ impl Daemon {
                 return Ok(());
             }
         };
-        for date in pending {
+        let total = pending.len();
+        for (finished, date) in pending.into_iter().enumerate() {
+            if self.clock.now().unix() >= start_before.unix() {
+                tracing::warn!(left = total - finished, "밀린 날 정리를 아침 일정 앞에서 멈춥니다. 남은 날은 다음 날 시작에 이어서 정리합니다");
+                break;
+            }
             self.finalize_date(date, false, shutdown).await?;
         }
         Ok(())
