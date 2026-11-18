@@ -23,6 +23,18 @@ async fn round_trip(provider: &str) {
 }
 
 #[tokio::test]
+async fn me_reports_the_subject_the_provider_gave_at_login() {
+    for provider in ["google", "naver"] {
+        let harness = Harness::start().await;
+        harness.idp.set_subject("subject-for-me");
+        let (token, _) = harness.token_for(provider, "a").await;
+        let me: serde_json::Value = harness.me(&token).await.json().await.unwrap();
+        assert_eq!(me["provider"], provider);
+        assert_eq!(me["subject"], "subject-for-me");
+    }
+}
+
+#[tokio::test]
 async fn google_login_reaches_the_connector_and_yields_a_token() {
     round_trip("google").await;
 }

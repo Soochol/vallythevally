@@ -270,13 +270,14 @@ pub(crate) async fn authenticate(state: &AppState, headers: &HeaderMap) -> Resul
 struct MeResponse {
     id: String,
     provider: String,
+    subject: String,
     created_at: i64,
 }
 
 async fn me(State(state): Shared, headers: HeaderMap) -> Result<Json<MeResponse>, ApiError> {
     let (_, account_id) = authenticate(&state, &headers).await?;
     let account = state.store.account(&account_id).await?.ok_or_else(ApiError::unauthorized)?;
-    Ok(Json(MeResponse { id: account.id, provider: account.provider, created_at: account.created_at }))
+    Ok(Json(MeResponse { id: account.id, provider: account.provider, subject: account.subject, created_at: account.created_at }))
 }
 
 async fn revoke_token(State(state): Shared, headers: HeaderMap) -> Result<StatusCode, ApiError> {

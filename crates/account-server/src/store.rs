@@ -46,6 +46,7 @@ pub struct PendingLogin {
 pub struct AccountView {
     pub id: String,
     pub provider: String,
+    pub subject: String,
     pub created_at: i64,
 }
 
@@ -214,7 +215,7 @@ impl Store {
 
     pub async fn account(&self, account_id: &str) -> Result<Option<AccountView>, sqlx::Error> {
         let row = sqlx::query(
-            "SELECT a.id, a.created_at, i.provider FROM accounts a JOIN identities i ON i.account_id = a.id WHERE a.id = ?",
+            "SELECT a.id, a.created_at, i.provider, i.subject FROM accounts a JOIN identities i ON i.account_id = a.id WHERE a.id = ?",
         )
         .bind(account_id)
         .fetch_optional(&self.pool)
@@ -222,6 +223,7 @@ impl Store {
         Ok(row.map(|row| AccountView {
             id: row.get("id"),
             provider: row.get("provider"),
+            subject: row.get("subject"),
             created_at: row.get("created_at"),
         }))
     }
