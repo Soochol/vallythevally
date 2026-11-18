@@ -391,7 +391,7 @@ mod tests {
     use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
 
     use super::*;
-    use crate::api::{LayoutSync, LinkColor, Period, Venue};
+    use crate::api::{CrosshairScope, LayoutSync, LinkColor, Period, Venue};
 
     const DEFAULT_ID: &str = "01900000-0000-7000-8000-000000000001";
 
@@ -440,7 +440,7 @@ mod tests {
 
     fn layout_at(id: &str, name: &str, windows: Vec<LayoutWindow>, revision: i64) -> LayoutInput {
         let placement = json!({"v": 1, "windows": windows.len(), "future": {"dock": null}}).as_object().unwrap().clone();
-        LayoutInput { id: id.into(), name: name.into(), sync: LayoutSync { crosshair: false, scroll: true }, windows, placement, revision: Revision(revision) }
+        LayoutInput { id: id.into(), name: name.into(), sync: LayoutSync { crosshair: false, scroll: true, crosshair_scope: CrosshairScope::Symbol }, windows, placement, revision: Revision(revision) }
     }
 
     fn kinds(layout: &Layout) -> Vec<(&str, String, Option<LinkColor>)> {
@@ -888,7 +888,7 @@ mod tests {
         assert_eq!(saved, read);
         assert_eq!(read.windows, windows, "창의 순서, 연동 색, 차트 창의 내용을 그대로 돌려준다");
         assert_eq!(serde_json::Value::Object(read.placement.clone()), json!({"v": 1, "windows": 6, "future": {"dock": null}}), "배치는 모르는 키도 그대로");
-        assert_eq!(read.sync, LayoutSync { crosshair: false, scroll: true });
+        assert_eq!(read.sync, LayoutSync { crosshair: false, scroll: true, crosshair_scope: CrosshairScope::Symbol });
 
         let one = layout_at("L2", "둘 바꿈", vec![chart("only", "000660", Some(Venue::Krx))], 2);
         put_layout(&db, &one, UnixSeconds(200)).await.unwrap();
@@ -994,6 +994,22 @@ mod tests {
             tx.rollback().await.unwrap();
             assert_eq!(get_layout(&db, DEFAULT_ID).await.unwrap(), before);
         }
+    }
+
+    #[sqlx::test(migrations = "./migrations")]
+    async fn crosshair_scope_round_trips_and_a_stored_sync_without_it_reads_all(_: SqlitePoolOptions, opts: SqliteConnectOptions) {
+        let db = db(opts).await;
+        for (scope, revision) in [(CrosshairScope::Symbol, 1), (CrosshairScope::Link, 2), (CrosshairScope::All, 3)] {
+            let mut input = layout_at("L2", "둘", vec![chart("only", "000660", Some(Venue::Krx))], revision);
+            input.sync.crosshair_scope = scope;
+            put_layout(&db, &input, UnixSeconds(100)).await.unwrap();
+            assert_eq!(get_layout(&db, "L2").await.unwrap().sync.crosshair_scope, scope);
+        }
+        let mut tx = db.begin_write().await.unwrap();
+        sqlx::query("UPDATE layouts SET sync = ? WHERE id = ?").bind(r#"{"crosshair":true,"scroll":true}"#).bind("L2").execute(&mut *tx).await.unwrap();
+        tx.commit().await.unwrap();
+        let read = get_layout(&db, "L2").await.unwrap();
+        assert_eq!(read.sync, LayoutSync { crosshair: true, scroll: true, crosshair_scope: CrosshairScope::All });
     }
 
     #[sqlx::test(migrations = "./migrations")]

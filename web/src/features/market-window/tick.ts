@@ -1,3 +1,6 @@
+import type { SymbolKind } from "../../api/generated/SymbolKind";
+import { isEtfOrEtn } from "../../lib/symbol";
+
 export type TickRule = "stock" | "etf";
 
 const TICK_TABLE: readonly (readonly [limit: number, tick: number])[] = [
@@ -18,9 +21,9 @@ export function tickSize(price: number, rule: TickRule = "stock"): number {
   return TICK_TABLE.find(([limit]) => price < limit)?.[1] ?? TOP_TICK;
 }
 
-export function tickRuleOf(kind: string | null, prices: readonly number[]): TickRule {
+export function tickRuleOf(kind: SymbolKind | null, prices: readonly number[]): TickRule {
   const fits = (rule: TickRule): number => prices.filter((price) => price % tickSize(price, rule) === 0).length;
-  const preferred: TickRule = kind === "etf" ? "etf" : "stock";
+  const preferred: TickRule = kind !== null && isEtfOrEtn(kind) ? "etf" : "stock";
   const other: TickRule = preferred === "etf" ? "stock" : "etf";
   return fits(other) > fits(preferred) ? other : preferred;
 }

@@ -3,6 +3,7 @@ import type { SymbolKind } from "../../api/generated/SymbolKind";
 import type { UnixSeconds } from "../../api/generated/UnixSeconds";
 import { isMarketOpen } from "../../chart/time";
 import { formatPercent } from "../../lib/format";
+import { isEtfOrEtn } from "../../lib/symbol";
 import { secondOfDay } from "../trades/tape";
 import type { QuantityMode } from "./orderRules";
 
@@ -39,15 +40,15 @@ export function averageRowPrice(rowPrices: readonly (number | null)[], average: 
 const AFTER_HOURS_START_SECOND = 15 * 3600 + 30 * 60;
 const AFTER_HOURS_END_SECOND = 20 * 3600;
 
-export interface EtfSymbol {
+export interface EtfOrEtnSymbol {
   readonly kind: SymbolKind;
   readonly nxtEnabled: boolean;
 }
 
-export const ETF_AFTER_HOURS_TEXT = "ETF·ETN은 15:30 뒤 거래되지 않습니다";
+export const ETF_ETN_AFTER_HOURS_TEXT = "ETF·ETN은 15:30 뒤 거래되지 않습니다";
 
-export function isEtfAfterHours(now: UnixSeconds, symbol: EtfSymbol | null): boolean {
-  if (!isMarketOpen(now) || symbol === null || symbol.kind !== "etf" || symbol.nxtEnabled) return false;
+export function isEtfOrEtnAfterHours(now: UnixSeconds, symbol: EtfOrEtnSymbol | null): boolean {
+  if (!isMarketOpen(now) || symbol === null || !isEtfOrEtn(symbol.kind) || symbol.nxtEnabled) return false;
   const second = secondOfDay(now);
   return second >= AFTER_HOURS_START_SECOND && second < AFTER_HOURS_END_SECOND;
 }
