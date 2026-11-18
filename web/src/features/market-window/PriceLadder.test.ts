@@ -51,13 +51,13 @@ test("기준가가 0이면 가격은 상승색이 아니다", () => {
   expect(html).not.toContain("mw-down");
 });
 
-test("위 오른쪽 자리는 1~7행의 빈 매수 잔량 칸에만, 아래 왼쪽 자리는 13~20행의 빈 매도 잔량 칸에만 그린다", () => {
+test("위 오른쪽 자리는 1~9행의 빈 매수 잔량 칸에만, 아래 왼쪽 자리는 13~20행의 빈 매도 잔량 칸에만 그린다", () => {
   const rowSlots: LadderRowSlots = {
     topRight: (slot) => createElement("em", { className: "top" }, `t${slot}`),
     bottomLeft: (slot) => createElement("em", { className: "bottom" }, `b${slot}`),
   };
   const html = render({ rowSlots });
-  expect(html.match(/<em class="top">t\d<\/em>/g)).toEqual(["<em class=\"top\">t0</em>", "<em class=\"top\">t1</em>", "<em class=\"top\">t2</em>", "<em class=\"top\">t3</em>", "<em class=\"top\">t4</em>", "<em class=\"top\">t5</em>", "<em class=\"top\">t6</em>"]);
+  expect(html.match(/<em class="top">t\d<\/em>/g)).toEqual(["<em class=\"top\">t0</em>", "<em class=\"top\">t1</em>", "<em class=\"top\">t2</em>", "<em class=\"top\">t3</em>", "<em class=\"top\">t4</em>", "<em class=\"top\">t5</em>", "<em class=\"top\">t6</em>", "<em class=\"top\">t7</em>", "<em class=\"top\">t8</em>"]);
   expect(html.match(/<em class="bottom">b(\d)<\/em>/g)?.map((tag) => tag.match(/b(\d)/)![1])).toEqual(["0", "1", "2", "3", "4", "5", "6", "7"]);
 });
 
@@ -75,7 +75,7 @@ test("그 칸에 잔량이 있는 행은 자리 내용을 그리지 않는다", 
     previousClose: 70000,
     rowSlots: { topRight: (slot) => createElement("em", { className: "top" }, `t${slot}`), bottomLeft: (slot) => createElement("em", { className: "bottom" }, `b${slot}`) },
   }));
-  expect(html.match(/class="top"/g)).toHaveLength(6);
+  expect(html.match(/class="top"/g)).toHaveLength(8);
   expect(html).not.toContain("<em class=\"top\">t1</em>");
   expect(html.match(/class="bottom"/g)).toHaveLength(7);
   expect(html).not.toContain("<em class=\"bottom\">b3</em>");
@@ -86,4 +86,13 @@ test("표시 가격 하나에만 가격 숫자 앞에 점이 붙는다", () => {
   expect(html.match(/ladder-mark/g)).toHaveLength(1);
   expect(html).toContain('<span class="mw-px-num"><i class="mw-px-mark" data-testid="ladder-mark" title="평단가"></i>71,700</span>');
   expect(render({ mark: { price: 12345, label: "평단가" } })).not.toContain("ladder-mark");
+});
+
+test("예상체결가와 같은 가격의 행 하나에만 data-expected가 붙고 행 수는 그대로다", () => {
+  const html = render({ expectedPrice: 71_700 });
+  expect(html.match(/data-expected/g)).toHaveLength(1);
+  expect(html.match(/class="mw-lr"/g)).toHaveLength(20);
+  expect(html).toMatch(/data-expected=""[^>]*>.*?71,700/);
+  expect(render().match(/data-expected/g)).toBeNull();
+  expect(render({ expectedPrice: 12_345 }).match(/data-expected/g)).toBeNull();
 });

@@ -16,6 +16,8 @@ import { RatioBar, Strip } from "../market-window/parts";
 import { useLinkedSymbol } from "../market-window/MarketWindowGate";
 import { formatShares } from "../market-window/format";
 import { infoSlot, tradeSlot } from "../market-window/LadderSlots";
+import { expectedInfoItems, placeInfoItems } from "../market-window/quoteInfo";
+import { visibleExpected } from "../book/sessionWindows";
 import { useLadderTrades, useQuoteInfo } from "../market-window/useLadderSlots";
 import { EmptyState } from "../overlay/State";
 import { openSystemSettings } from "../system-settings/open";
@@ -102,6 +104,8 @@ function OrderBody({ id, code }: { id: WindowId; code: SymbolCode }) {
   const notice = view ? bookNotice(Math.floor(now / 1000), symbolInfo ?? null) : null;
   const info = useQuoteInfo({ code, venue, lastPrice: feed.lastPrice, previousClose: feed.previousClose, upperLimit: bounds.upper, lowerLimit: bounds.lower });
   const trades = useLadderTrades(code, venue);
+  const expected = view ? visibleExpected(view.t, Math.floor(now / 1000), view.expected) : null;
+  const infoSlots = placeInfoItems(rows, info, expected === null ? [] : expectedInfoItems(expected, feed.previousClose));
   const data = useOrderData(code, access.open, referencePrice);
   const writes = useOrderWrites(code, venue);
   const holding = holdingOf(data.balance?.holdings ?? [], code);
@@ -155,7 +159,7 @@ function OrderBody({ id, code }: { id: WindowId; code: SymbolCode }) {
       <div className="bk-ladder od-ladder-wrap" data-stale={feed.connected ? undefined : ""} data-exploring={explorerOn ? "" : undefined}>
         {notice && <p className="od-book-notice" data-testid="order-book-notice">{BOOK_NOTICE_TEXT[notice]}</p>}
         {view
-            ? <OrderLadder rows={rows} previousClose={feed.previousClose} groups={data.groups} writable={writable} previewQuantity={quantityAt(unitPrice)} hover={hover} onHover={setHover} averagePrice={averagePrice} divider={settings.divider} explorer={explorerOn ? { centerPrice: referencePrice, centerToken } : undefined} onDragging={setDragging} rowSlots={{ topRight: infoSlot(info), bottomLeft: tradeSlot(trades, feed.previousClose) }}
+            ? <OrderLadder rows={rows} previousClose={feed.previousClose} groups={data.groups} writable={writable} previewQuantity={quantityAt(unitPrice)} hover={hover} onHover={setHover} averagePrice={averagePrice} divider={settings.divider} explorer={explorerOn ? { centerPrice: referencePrice, centerToken } : undefined} onDragging={setDragging} expectedPrice={expected?.price ?? null} rowSlots={{ topRight: infoSlot(infoSlots), bottomLeft: tradeSlot(trades, feed.previousClose) }}
                 actions={{ place, drop, cancelOne: writes.cancelOne, cancelAtPrice: writes.cancelAtPrice, cancelGroups: (targets) => targets.forEach((g) => writes.cancelAtPrice(g.side, g.price)) }} />
             : <EmptyState title={feed.snapshotFailed ? "호가를 불러오지 못했습니다" : "호가를 기다리는 중입니다"} />}
       </div>

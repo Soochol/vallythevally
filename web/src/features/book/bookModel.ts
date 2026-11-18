@@ -3,6 +3,7 @@ import type { OrderBook } from "../../api/generated/OrderBook";
 import type { BookLevel } from "../market-window/ladder";
 
 export interface BookView {
+  readonly t: number | null;
   readonly asks: readonly BookLevel[];
   readonly bids: readonly BookLevel[];
   readonly totalAsk: number;
@@ -31,7 +32,7 @@ export function acceptSnapshot(state: BookState, book: OrderBook): BookState {
   if (state.phase === "live") return state;
   return {
     phase: "snapshot",
-    view: { asks: withChange(null, book.asks), bids: withChange(null, book.bids), totalAsk: book.totalAskQuantity, totalBid: book.totalBidQuantity, expected: null },
+    view: { asks: withChange(null, book.asks), bids: withChange(null, book.bids), totalAsk: book.totalAskQuantity, totalBid: book.totalBidQuantity, expected: null, t: null },
   };
 }
 
@@ -41,6 +42,7 @@ export function acceptLive(state: BookState, book: FeedBook): BookState {
   return {
     phase: "live",
     view: {
+      t: book.t,
       asks: withChange(previous?.asks ?? null, present(book.asks)),
       bids: withChange(previous?.bids ?? null, present(book.bids)),
       totalAsk: book.totalAskQty,
