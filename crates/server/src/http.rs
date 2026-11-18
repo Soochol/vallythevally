@@ -290,7 +290,10 @@ async fn search(State(st): State<Arc<AppState>>, Query(q): Query<HashMap<String,
             Some("preferred") => Some(domain::SymbolKind::Preferred),
             Some("etf") => Some(domain::SymbolKind::Etf),
             Some("reit") => Some(domain::SymbolKind::Reit),
-            Some(_) => return Err(ApiFailure::bad_request("kind는 index, common, preferred, etf 또는 reit이어야 합니다")),
+            Some("etn") => Some(domain::SymbolKind::Etn),
+            Some("infrastructure") => Some(domain::SymbolKind::Infrastructure),
+            Some("mutualFund") => Some(domain::SymbolKind::MutualFund),
+            Some(_) => return Err(ApiFailure::bad_request("kind는 index, common, preferred, etf, reit, etn, infrastructure 또는 mutualFund여야 합니다")),
         },
     };
     let query = q.get("q").map_or("", String::as_str);

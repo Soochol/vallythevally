@@ -15,7 +15,6 @@ pub struct ListingRow {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Listing {
     Include(SymbolInfo),
-    Exclude,
     Unknown(String),
 }
 
@@ -73,7 +72,9 @@ pub fn classify(row: &ListingRow) -> Listing {
         "6" => (SymbolKind::Reit, Market::Kospi),
         "10" if row.is_spac() => (SymbolKind::Common, Market::Kosdaq),
         "10" => (stock_kind(code), Market::Kosdaq),
-        "60" | "70" | "90" | "2" | "4" => return Listing::Exclude,
+        "60" | "70" | "90" => (SymbolKind::Etn, Market::Kospi),
+        "2" => (SymbolKind::Infrastructure, Market::Kospi),
+        "4" => (SymbolKind::MutualFund, Market::Kospi),
         other => return Listing::Unknown(format!("모르는 marketCode {other:?}({} {})", row.code, row.name)),
     };
     Listing::Include(SymbolInfo { symbol: Symbol::Stock(code), name: row.name.clone(), kind, market, nxt_enabled: row.nxt_enable == "Y" })
@@ -131,10 +132,13 @@ mod tests {
     }
 
     #[test]
-    fn products_left_out_on_purpose_are_excluded() {
-        for market_code in ["60", "70", "90", "2", "4"] {
-            assert_eq!(classify(&row("088980", market_code)), Listing::Exclude, "{market_code}");
+    fn etn_infrastructure_and_mutual_fund_market_codes_are_kospi_kinds_of_their_own() {
+        use {Market::*, SymbolKind::*};
+        for market_code in ["60", "70", "90"] {
+            assert_eq!(included(&row("520100", market_code)), (Etn, Kospi), "{market_code}");
         }
+        assert_eq!(included(&row("088980", "2")), (Infrastructure, Kospi));
+        assert_eq!(included(&row("094800", "4")), (MutualFund, Kospi));
     }
 
     #[test]

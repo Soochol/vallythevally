@@ -170,7 +170,7 @@ function SearchDialogBody({ purpose }: { purpose: SearchPurpose }) {
                 <WatchStar included={watchlist.symbols.includes(row.info.code)} disabled={!selectable} addName={putName} removeName={watchlist.name} onToggle={() => toggleOrAdd(row.info, true)} />
                 <span className="min-w-0 flex-1"><span className="font-semibold"><Marked text={row.info.name} query={query} /></span> <span className="whitespace-nowrap text-xs text-text-3"><Marked text={row.info.code} query={query} /></span></span>
                 {putGroup?.symbols.includes(row.info.code) && <span className="max-w-[9rem] flex-none truncate text-[11px] text-text-2">✓ {putGroup.name}에 있음</span>}
-                <span className="rounded-s bg-raised px-1 text-xs text-text-3 max-md:hidden">{row.info.kind === "etf" ? KIND_LABEL.etf : MARKET_LABEL[row.info.market]}</span>
+                <span className="rounded-s bg-raised px-1 text-xs text-text-3 max-md:hidden">{row.info.kind === "etf" || row.info.kind === "etn" ? KIND_LABEL[row.info.kind] : MARKET_LABEL[row.info.market]}</span>
                 <QuoteValue quote={bySymbol.get(row.info.code)} />
               </> : <><Icon size={16} path="M4 17l5-6 4 3 7-9" /><span className="flex-1"><Marked text={row.command.label} query={query} /></span>{row.command.shortcut && <kbd>{row.command.shortcut}</kbd>}</>}
             </li>

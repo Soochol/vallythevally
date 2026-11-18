@@ -108,12 +108,12 @@ fn universe_files(data: &Path) -> Vec<String> {
 }
 
 #[tokio::test(start_paused = true)]
-async fn common_preferred_and_spac_stay_while_etf_reit_etn_and_unknown_market_codes_go() {
+async fn common_preferred_and_spac_stay_while_etf_reit_etn_infrastructure_fund_and_unknown_market_codes_go() {
     let data = tempfile::tempdir().unwrap();
     let kiwoom = Kiwoom::Listing {
         kospi: vec![
             vec![plain("005930", "삼성전자"), plain("005935", "삼성전자우"), row("0000D0", "ETF종목", "8", "정상")],
-            vec![row("0030R0", "리츠종목", "6", "정상"), row("088980", "ETN종목", "60", "정상"), row("123450", "모르는종목", "77", "정상")],
+            vec![row("0030R0", "리츠종목", "6", "정상"), row("520100", "ETN종목", "60", "정상"), row("520066", "손실제한ETN", "70", "정상"), row("500095", "변동성ETN", "90", "정상"), row("088980", "인프라종목", "2", "정상"), row("094800", "펀드종목", "4", "정상"), row("123450", "모르는종목", "77", "정상")],
             vec![row("000150", "두산", "0", "관리종목"), row("000250", "투자경고주", "0", "투자경고|단기과열"), row("000350", "정지주", "0", "거래정지")],
         ],
         kosdaq: vec![vec![row("247540", "에코프로비엠", "10", "정상"), row("12345K", "가나스팩", "10", "정상")], vec![row("03481K", "코스닥우선", "10", "정상")]],
