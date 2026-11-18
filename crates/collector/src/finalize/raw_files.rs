@@ -21,12 +21,7 @@ impl RawFiles {
         let mut every = BTreeMap::new();
         collect(&raw_day_dir(data_dir, date), "", &mut every)?;
         let read = read_files(data_dir, date)?;
-        let day_dir = raw_day_dir(data_dir, date);
-        let linked_folder_read = |path: &str| {
-            let is_link = fs::symlink_metadata(day_dir.join(path)).is_ok_and(|metadata| metadata.file_type().is_symlink());
-            is_link && read.keys().any(|read_path| read_path.strip_prefix(path).is_some_and(|rest| rest.starts_with('/')))
-        };
-        Ok(every.into_keys().filter(|path| !read.contains_key(path) && !linked_folder_read(path)).collect())
+        Ok(every.into_keys().filter(|path| !read.contains_key(path)).collect())
     }
 
     pub fn paths_differing_from(&self, other: &RawFiles) -> Vec<String> {
@@ -41,7 +36,7 @@ fn read_files(data_dir: &Path, date: u32) -> io::Result<BTreeMap<String, u64>> {
     for (_, path) in day_files(data_dir, date)? {
         let relative = path.strip_prefix(&day_dir).expect("원문 파일은 날짜 폴더 아래에 있다");
         let name = relative.components().map(|part| part.as_os_str().to_string_lossy()).collect::<Vec<_>>().join("/");
-        files.insert(name, fs::symlink_metadata(&path)?.len());
+        files.insert(name, fs::metadata(&path).or_else(|_| fs::symlink_metadata(&path))?.len());
     }
     Ok(files)
 }

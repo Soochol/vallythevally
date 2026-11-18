@@ -396,7 +396,7 @@ async fn files_that_finalize_does_not_read_are_left_out_of_the_fingerprint_and_k
 }
 
 #[tokio::test]
-async fn a_symlinked_key_folder_that_finalize_reads_does_not_count_as_an_unread_file() {
+async fn a_symlinked_key_folder_is_not_a_layout_the_collector_writes_so_it_keeps_the_day() {
     let data = data_with_first_day();
     let real = tempdir().unwrap();
     fs::write(real.path().join("0900.jsonl.zst"), zstd::encode_all(format!("{}\n", good_frame(NOV_3, 0)).as_bytes(), 3).unwrap()).unwrap();
@@ -408,8 +408,28 @@ async fn a_symlinked_key_folder_that_finalize_reads_does_not_count_as_an_unread_
 
     let report = prune_raw(data.path(), NOV_20, &calendar, &settings()).unwrap();
 
-    assert_eq!(report.deleted.iter().map(|(date, _)| *date).collect::<Vec<_>>(), [NOV_3], "{report:?}");
-    assert!(real.path().join("0900.jsonl.zst").exists(), "링크 너머 파일은 지우지 않는다");
+    assert!(report.deleted.is_empty(), "{report:?}");
+    assert_eq!(log_for(data.path(), NOV_3)["reason"], json!("raw_has_unread_files"));
+    assert!(real.path().join("0900.jsonl.zst").exists());
+}
+
+#[tokio::test]
+async fn a_linked_raw_file_whose_target_grew_after_complete_is_not_pruned() {
+    let data = data_with_first_day();
+    let outside = tempdir().unwrap();
+    let target = outside.path().join("day.jsonl.zst");
+    fs::write(&target, zstd::encode_all(format!("{}\n", good_frame(NOV_3, 0)).as_bytes(), 3).unwrap()).unwrap();
+    fs::create_dir_all(raw_folder(data.path(), NOV_3)).unwrap();
+    std::os::unix::fs::symlink(&target, raw_folder(data.path(), NOV_3).join("day.jsonl.zst")).unwrap();
+    finalize(data.path(), NOV_3);
+    fs::write(&target, zstd::encode_all(format!("{}\n{}\n{}\n", good_frame(NOV_3, 0), good_frame(NOV_3, 1), good_frame(NOV_3, 2)).as_bytes(), 3).unwrap()).unwrap();
+    put_raw_bytes(data.path(), NOV_20);
+    let calendar = calendar(data.path(), Vec::new()).await;
+
+    let report = prune_raw(data.path(), NOV_20, &calendar, &settings()).unwrap();
+
+    assert!(report.deleted.is_empty(), "{report:?}");
+    assert_eq!(log_for(data.path(), NOV_3)["reason"], json!("raw_changed_after_complete"));
 }
 
 #[tokio::test]
