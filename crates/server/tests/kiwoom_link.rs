@@ -119,8 +119,11 @@ fn reject_issue(fake: &ScriptedTransport, message: &str) {
     fake.respond_with("au10001", 200, json!({"return_code": 3, "return_msg": message}));
 }
 
-async fn jump_until_reissued(server: &Server, fake: &ScriptedTransport) {
-    for _ in 0..200 {
+const SAME_DAY_JUMPS: usize = 100;
+const DAYS_OF_JUMPS: usize = 200;
+
+async fn jump_until_reissued(server: &Server, fake: &ScriptedTransport, max_jumps: usize) {
+    for _ in 0..max_jumps {
         if fake.issued() >= 2 {
             break;
         }
@@ -603,7 +606,7 @@ async fn an_8050_at_the_daily_reissue_leaves_the_link_failed_and_closed() {
     server.addr().await;
     assert_eq!(server.connect(false).await, LinkState::Connected);
     reject_issue(&fake, EIGHT_FIFTY);
-    jump_until_reissued(&server, &fake).await;
+    jump_until_reissued(&server, &fake, DAYS_OF_JUMPS).await;
     tokio::time::sleep(Duration::from_millis(500)).await;
     assert_eq!(fake.issued(), 2, "{:?}", fake.api_ids());
     assert_eq!(failure(server.link_state()).problem, Problem::AuthBlocked8050);
@@ -620,12 +623,12 @@ async fn a_connect_that_crosses_20_05_still_gets_the_daily_reissue() {
         ScriptedReply { status: 200, body: json!({"return_code": 0, "token": TOKEN, "expires_dt": "20991231000000"}), delay: Duration::ZERO },
         ScriptedReply { status: 200, body: json!({"return_code": 3, "return_msg": EIGHT_FIFTY}), delay: Duration::ZERO },
     ]);
-    fake.delay("ka10099", Duration::from_millis(2500));
+    fake.delay("ka10099", Duration::from_secs(7));
     let env = env();
-    let server = spawn(&fake, &env, &[OFF, ("VALLY_CLOCK_START", "20261109200458")]);
+    let server = spawn(&fake, &env, &[OFF, ("VALLY_CLOCK_START", "20261109200450")]);
     server.addr().await;
     assert_eq!(server.connect(false).await, LinkState::Connected);
-    jump_until_reissued(&server, &fake).await;
+    jump_until_reissued(&server, &fake, SAME_DAY_JUMPS).await;
     tokio::time::sleep(Duration::from_millis(500)).await;
     assert_eq!(fake.issued(), 2, "{:?}", fake.api_ids());
     assert_eq!(failure(server.link_state()).problem, Problem::AuthBlocked8050);
