@@ -4,13 +4,13 @@ import { useSymbolInfo } from "../../api/queries";
 import type { WindowId } from "../../layout/kinds";
 import { isIndexCode } from "../../lib/symbol";
 import { useKiwoomLinkStore } from "../../stores/kiwoomLink";
-import { useLayoutStore, watchedSymbol } from "../../stores/layout";
+import { linkedWindowSymbol, useLayoutStore } from "../../stores/layout";
 import { useSelectionStore } from "../../stores/selection";
 import { EmptyState } from "../overlay/State";
 
 export function useLinkedSymbol(id: WindowId): SymbolCode | null {
   const activeCell = useSelectionStore((s) => s.activeCell);
-  return useLayoutStore((s) => watchedSymbol(s.layout, id, activeCell));
+  return useLayoutStore((s) => linkedWindowSymbol(s.layout, id, activeCell));
 }
 
 export function MarketWindowGate({ id, children }: { id: WindowId; children(code: SymbolCode): ReactNode }) {

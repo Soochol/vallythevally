@@ -5,6 +5,7 @@ import { CloseIcon, ExpandIcon } from "../icons";
 import { IntegratedBadge, showsIntegratedBadge } from "../market-window/parts";
 import { LinkDot } from "./LinkDot";
 import { closeWindow, LAST_CHART_REASON } from "./manage";
+import { WindowSymbol } from "./WindowSymbol";
 
 function ChartTitle({ window }: { window: ChartWindowState }) {
   const name = useSymbolInfo(window.symbol).data?.name ?? window.symbol;
@@ -19,6 +20,7 @@ export function WindowHeader({ window, maximized, onMaximize, action }: HeaderPr
   return (
     <>
       {window.kind === "chart" ? <ChartTitle window={window} /> : <span className="window-title">{name}</span>}
+      <WindowSymbol window={window} selected />
       {showsIntegratedBadge(window.kind) && <IntegratedBadge />}
       <span className="window-actions"><LinkDot window={window} selected />
         {action ? <button type="button" className="window-action window-attach" aria-label={`${name} 붙이기`} title="붙이기" onClick={action.run}>붙이기</button> : <button type="button" className="window-action" aria-label={`${name} ${maximized ? "원래 크기로" : "크게 보기"}`} title={maximized ? "원래 크기로" : "크게 보기"} aria-pressed={maximized} onClick={onMaximize}><ExpandIcon size={14} /></button>}
