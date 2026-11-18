@@ -909,6 +909,29 @@ impl RealType {
 
 pub type Registrations = BTreeSet<(RealType, Symbol)>;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AccountKind {
+    OrderFill,
+    Balance,
+}
+
+impl AccountKind {
+    pub const ALL: [AccountKind; 2] = [AccountKind::OrderFill, AccountKind::Balance];
+
+    pub fn as_wire(self) -> &'static str {
+        match self {
+            AccountKind::OrderFill => "00",
+            AccountKind::Balance => "04",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AccountEvent {
+    pub kind: AccountKind,
+    pub account: Secret<String>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum WsFrame {
     /// 받은 글자 그대로 돌려보낸다.
@@ -928,6 +951,7 @@ pub enum RealItem {
     Book(Box<BookSnapshot>),
     Program(RealProgramTrade),
     Broker(BrokerSnapshot),
+    Account(AccountEvent),
     OtherType(String),
 }
 
@@ -991,6 +1015,10 @@ fn parse_real_item(entry: &Value) -> Result<RealItem, WireError> {
         "0D" => parse_book(item, values).map(|book| RealItem::Book(Box::new(book))),
         "0w" => parse_program(item, values).map(RealItem::Program),
         "0F" => parse_broker(item, values).map(RealItem::Broker),
+        "00" | "04" => {
+            let kind = if kind == "00" { AccountKind::OrderFill } else { AccountKind::Balance };
+            Ok(RealItem::Account(AccountEvent { kind, account: Secret::new(field("9201")?.trim().to_owned()) }))
+        }
         other => Ok(RealItem::OtherType(other.to_owned())),
     }
 }
@@ -1155,6 +1183,18 @@ pub fn reg_message(registrations: &Registrations) -> String {
 /// 0B와 0J를 한 REMOVE에 섞으면 105112로 실패한다(kiwoom.md §8). 그래서 종류 하나만 받는다.
 pub fn remove_message(kind: RealType, symbols: &BTreeSet<Symbol>) -> String {
     json!({"trnm": "REMOVE", "grp_no": "1", "data": [real_entry(kind, symbols.iter().copied())]}).to_string()
+}
+
+fn account_entry() -> Value {
+    json!({"item": [""], "type": AccountKind::ALL.map(AccountKind::as_wire)})
+}
+
+pub fn account_reg_message() -> String {
+    json!({"trnm": "REG", "grp_no": "1", "refresh": "1", "data": [account_entry()]}).to_string()
+}
+
+pub fn account_remove_message() -> String {
+    json!({"trnm": "REMOVE", "grp_no": "1", "data": [account_entry()]}).to_string()
 }
 
 #[cfg(test)]

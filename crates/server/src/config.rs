@@ -256,6 +256,10 @@ impl Config {
         if let Some((key, _)) = other_files.iter().find(|(_, path)| Some(*path) == config.account_state_path.as_ref()) {
             return Err(ConfigError(format!("{key}가 계정 상태 파일(VALLY_ACCOUNT_STATE_PATH)과 같은 파일입니다")));
         }
+        let order_switch_path = config.kiwoom_key_path.with_file_name(crate::trading::ORDER_SWITCH_FILE_NAME);
+        if let Some((key, _)) = other_files.iter().find(|(_, path)| **path == order_switch_path) {
+            return Err(ConfigError(format!("{key}가 주문 사용 스위치 파일({}, 키 파일과 같은 폴더)과 같은 파일입니다", crate::trading::ORDER_SWITCH_FILE_NAME)));
+        }
         if let Some((key, _)) = other_files.iter().find(|(_, path)| **path == registered_ip_path) {
             return Err(ConfigError(format!("{key}가 포털에 등록한 IP 기록 파일({REGISTERED_IP_FILE_NAME}, 키 파일과 같은 폴더)과 같은 파일입니다")));
         }
@@ -635,5 +639,15 @@ mod tests {
             assert!(error.contains(key_name) && error.contains("kiwoom-ip.json"), "{error}");
         }
         assert!(start(&[("VALLY_KIWOOM_KEY_PATH", "/state/vally/kiwoom-key.json"), ("VALLY_TOKEN_PATH", "/elsewhere/kiwoom-ip.json")]).is_ok(), "다른 폴더의 같은 이름은 겹치지 않는다");
+    }
+
+    #[test]
+    fn no_other_file_can_be_the_order_switch_file_next_to_the_key_file() {
+        let start = |pairs: &[(&str, &str)]| Config::from_vars(vars(&[]), vars(pairs), lock, token, key, account).map(|_| ());
+        for key_name in ["VALLY_TOKEN_PATH", "VALLY_LOCK_PATH", "VALLY_DB_PATH", "VALLY_SCREENER_DB_PATH", "VALLY_FINANCIAL_DB_PATH"] {
+            let error = start(&[("VALLY_KIWOOM_KEY_PATH", "/state/vally/kiwoom-key.json"), (key_name, "/state/vally/kiwoom-orders.json")]).expect_err(key_name).to_string();
+            assert!(error.contains(key_name) && error.contains("kiwoom-orders.json"), "{error}");
+        }
+        assert!(start(&[("VALLY_KIWOOM_KEY_PATH", "/state/vally/kiwoom-key.json"), ("VALLY_TOKEN_PATH", "/elsewhere/kiwoom-orders.json")]).is_ok());
     }
 }

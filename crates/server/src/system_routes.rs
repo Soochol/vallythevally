@@ -57,6 +57,13 @@ impl SystemState {
         &self.account
     }
 
+    pub fn order_switch_store(&self) -> crate::trading::SwitchStore {
+        match &self.key_file {
+            Some(key_file) => key_file.order_switch_store(),
+            None => crate::trading::SwitchStore::memory(),
+        }
+    }
+
     pub fn unconfigured() -> Self {
         SystemState { key_file: None, ip_file: None, registered_ip: Mutex::new(None), public_ip: None, env_key: false, key_file_problem: Mutex::new(None), settings: None, account: crate::account::AccountState::local_only(), bound: OnceLock::new(), bound_signal: tokio::sync::Notify::new(), write: tokio::sync::Mutex::new(()) }
     }

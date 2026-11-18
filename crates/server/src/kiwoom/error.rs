@@ -3,7 +3,7 @@ use std::fmt;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use super::api::ApiId;
+use super::api::{ApiId, Endpoint};
 use super::transport::{SEND_TIMEOUT, TransportError};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -159,8 +159,8 @@ pub enum Phase {
 }
 
 impl Phase {
-    pub fn of(api_id: ApiId) -> Phase {
-        if api_id == ApiId::Au10001 { Phase::Issue } else { Phase::Market }
+    pub fn of(api_id: Endpoint) -> Phase {
+        if api_id == Endpoint::ISSUE { Phase::Issue } else { Phase::Market }
     }
 }
 
@@ -259,7 +259,7 @@ impl fmt::Display for Note {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Failure {
     category: Category,
-    api_id: ApiId,
+    api_id: Endpoint,
     http_status: Option<u16>,
     return_code: Option<i64>,
     detail: Option<CodeKey>,
@@ -267,22 +267,22 @@ pub struct Failure {
 }
 
 impl Failure {
-    pub fn transport(api_id: ApiId, e: TransportError) -> Failure {
-        Failure { category: Transient, api_id, http_status: None, return_code: None, detail: None, note: Note::Transport(e) }
+    pub fn transport(api_id: impl Into<Endpoint>, e: TransportError) -> Failure {
+        Failure { category: Transient, api_id: api_id.into(), http_status: None, return_code: None, detail: None, note: Note::Transport(e) }
     }
 
-    pub fn queue_gone(api_id: ApiId) -> Failure {
-        Failure { category: Transient, api_id, http_status: None, return_code: None, detail: None, note: Note::QueueGone }
+    pub fn queue_gone(api_id: impl Into<Endpoint>) -> Failure {
+        Failure { category: Transient, api_id: api_id.into(), http_status: None, return_code: None, detail: None, note: Note::QueueGone }
     }
 
-    pub fn protocol(api_id: ApiId, note: Note) -> Failure {
-        Failure { category: Protocol, api_id, http_status: None, return_code: None, detail: None, note }
+    pub fn protocol(api_id: impl Into<Endpoint>, note: Note) -> Failure {
+        Failure { category: Protocol, api_id: api_id.into(), http_status: None, return_code: None, detail: None, note }
     }
 
-    pub fn schema(api_id: ApiId, envelope: Envelope, note: Note) -> Failure {
+    pub fn schema(api_id: impl Into<Endpoint>, envelope: Envelope, note: Note) -> Failure {
         Failure {
             category: Protocol,
-            api_id,
+            api_id: api_id.into(),
             http_status: Some(envelope.http_status),
             return_code: Some(envelope.return_code),
             detail: None,
@@ -291,7 +291,7 @@ impl Failure {
     }
 
     pub fn restored_auth_block(detail: CodeKey) -> Failure {
-        Failure { category: AuthBlocked, api_id: ApiId::Au10001, http_status: None, return_code: None, detail: Some(detail), note: Note::None }
+        Failure { category: AuthBlocked, api_id: Endpoint::ISSUE, http_status: None, return_code: None, detail: Some(detail), note: Note::None }
     }
 
     pub fn note(&self) -> &Note {
@@ -302,7 +302,7 @@ impl Failure {
         self.category
     }
 
-    pub fn api_id(&self) -> ApiId {
+    pub fn api_id(&self) -> Endpoint {
         self.api_id
     }
 
@@ -323,13 +323,13 @@ impl Failure {
     }
 
     pub fn surface(&self) -> Surface {
-        let issue = self.api_id == ApiId::Au10001;
+        let issue = self.api_id == Endpoint::ISSUE;
         match self.category {
             RateLimit | Transient => Surface::Unavailable,
             TokenInvalid | AuthBlocked | AuthIndeterminate => Surface::AuthFailed,
             _ if issue => Surface::AuthFailed,
             Unknown => Surface::Unavailable,
-            SymbolMismatch if matches!(self.api_id, ApiId::Ka10095 | ApiId::Ka10099) => Surface::Unavailable,
+            SymbolMismatch if matches!(self.api_id.market(), Some(ApiId::Ka10095 | ApiId::Ka10099)) => Surface::Unavailable,
             SymbolMismatch => Surface::UnknownSymbol,
             InvalidRequest | BatchLimit | Unsupported | Protocol | RealtimeCapacity | ControlRejected | SubscriptionMismatch => Surface::Internal,
         }
@@ -471,7 +471,7 @@ pub fn judge_ws_ack(reply: &serde_json::Map<String, Value>) -> Result<(), WsReje
     }
 }
 
-fn in_phase(api_id: ApiId, category: Category) -> Category {
+fn in_phase(api_id: Endpoint, category: Category) -> Category {
     match (Phase::of(api_id), category) {
         (Phase::Issue, TokenInvalid) => AuthIndeterminate,
         (_, c) => c,
@@ -484,7 +484,8 @@ pub struct Envelope {
     pub return_code: i64,
 }
 
-pub fn judge(api_id: ApiId, status: u16, body: &str) -> Result<Envelope, Failure> {
+pub fn judge(api_id: impl Into<Endpoint>, status: u16, body: &str) -> Result<Envelope, Failure> {
+    let api_id = api_id.into();
     let object = match serde_json::from_str::<Value>(body) {
         Ok(Value::Object(m)) => Some(m),
         _ => None,

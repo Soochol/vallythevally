@@ -27,7 +27,7 @@ async fn reqwest_adapter_preserves_endpoint_credentials_continuation_status_and_
     let transport = ReqwestTransport::new(format!("http://{}", listener.local_addr().unwrap())).unwrap();
     let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap(); });
 
-    let response = transport.send(HttpRequest { api_id: ApiId::Ka10081, token: Some(Secret::new("adapter-token".into())), cont: Some(ContKey::new("page-one")), body: Secret::new(r#"{"stk_cd":"005930_AL"}"#.into()) }).await.unwrap();
+    let response = transport.send(HttpRequest { api_id: ApiId::Ka10081.into(), token: Some(Secret::new("adapter-token".into())), cont: Some(ContKey::new("page-one")), body: Secret::new(r#"{"stk_cd":"005930_AL"}"#.into()) }).await.unwrap();
     let (uri, headers, body) = observed.recv().await.unwrap();
     assert_eq!(uri.path(), "/api/dostk/chart");
     assert_eq!(headers["api-id"], "ka10081");
@@ -37,7 +37,7 @@ async fn reqwest_adapter_preserves_endpoint_credentials_continuation_status_and_
     assert_eq!(body, r#"{"stk_cd":"005930_AL"}"#);
     assert_eq!((response.status, response.next_key.as_deref(), response.body.as_str()), (200, Some("page-two"), r#"{"return_code":0}"#));
 
-    let response = transport.send(HttpRequest { api_id: ApiId::Au10001, token: None, cont: None, body: Secret::new(r#"{"appkey":"adapter-key","secretkey":"adapter-secret"}"#.into()) }).await.unwrap();
+    let response = transport.send(HttpRequest { api_id: ApiId::Au10001.into(), token: None, cont: None, body: Secret::new(r#"{"appkey":"adapter-key","secretkey":"adapter-secret"}"#.into()) }).await.unwrap();
     let (uri, headers, body) = observed.recv().await.unwrap();
     assert_eq!(uri.path(), "/oauth2/token");
     assert_eq!(headers["api-id"], "au10001");

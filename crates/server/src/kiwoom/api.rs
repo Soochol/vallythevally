@@ -91,6 +91,55 @@ impl ApiId {
     }
 }
 
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub enum Endpoint {
+    Market(ApiId),
+    Trading(crate::trading::TradingApiId),
+}
+
+impl Endpoint {
+    pub const ISSUE: Endpoint = Endpoint::Market(ApiId::Au10001);
+
+    pub const fn path(self) -> &'static str {
+        match self {
+            Endpoint::Market(id) => id.path(),
+            Endpoint::Trading(id) => id.path(),
+        }
+    }
+
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Endpoint::Market(id) => id.as_str(),
+            Endpoint::Trading(id) => id.as_str(),
+        }
+    }
+
+    pub const fn market(self) -> Option<ApiId> {
+        match self {
+            Endpoint::Market(id) => Some(id),
+            Endpoint::Trading(_) => None,
+        }
+    }
+}
+
+impl From<ApiId> for Endpoint {
+    fn from(id: ApiId) -> Endpoint {
+        Endpoint::Market(id)
+    }
+}
+
+impl From<crate::trading::TradingApiId> for Endpoint {
+    fn from(id: crate::trading::TradingApiId) -> Endpoint {
+        Endpoint::Trading(id)
+    }
+}
+
+impl PartialEq<ApiId> for Endpoint {
+    fn eq(&self, other: &ApiId) -> bool {
+        self.market() == Some(*other)
+    }
+}
+
 mod sealed {
     pub trait Sealed {}
 }

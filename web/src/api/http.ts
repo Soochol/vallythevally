@@ -43,6 +43,8 @@ const API_ERROR_REASONS = [
   "updating",
   "data_changed",
   "not_connected",
+  "orders_off",
+  "account_changed",
 ] as const satisfies readonly ApiErrorReason[];
 
 const _allReasonsListed: Exclude<ApiErrorReason, (typeof API_ERROR_REASONS)[number]> extends never ? true : never = true;

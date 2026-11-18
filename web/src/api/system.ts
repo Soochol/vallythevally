@@ -4,6 +4,9 @@ import type { KiwoomLinkStatus } from "./generated/KiwoomLinkStatus";
 import type { SystemSettings } from "./generated/SystemSettings";
 import type { KiwoomConnectInput } from "./generated/KiwoomConnectInput";
 import type { KiwoomKeyInput } from "./generated/KiwoomKeyInput";
+import type { OrdersAccountCheck } from "./generated/OrdersAccountCheck";
+import type { OrdersStatus } from "./generated/OrdersStatus";
+import type { OrdersSwitchInput } from "./generated/OrdersSwitchInput";
 import type { PublicIpCheck } from "./generated/PublicIpCheck";
 import type { RegisteredIpInput } from "./generated/RegisteredIpInput";
 import { getJson, putJson, sendJson } from "./http";
@@ -46,3 +49,12 @@ export async function saveRegisteredIp(input: RegisteredIpInput): Promise<void> 
   if (current) receiveKiwoomLinkPush({ ...current, registeredIp });
 }
 export const checkPublicIp = () => sendJson<PublicIpCheck>("POST", `${KIWOOM}/ip-check`, "{}");
+
+const ORDERS = "/api/system/orders";
+export const ORDERS_QUERY_KEY = ["system", "orders"] as const;
+
+export function useOrdersStatus() {
+  return useQuery({ queryKey: ORDERS_QUERY_KEY, queryFn: ({ signal }) => getJson<OrdersStatus>(ORDERS, signal), staleTime: Infinity });
+}
+export const checkOrdersAccount = () => sendJson<OrdersAccountCheck>("POST", `${ORDERS}/check-account`, "{}");
+export const switchOrders = (input: OrdersSwitchInput) => putJson<OrdersStatus>(ORDERS, input);

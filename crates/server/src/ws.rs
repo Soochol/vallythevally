@@ -33,6 +33,7 @@ async fn serve(socket: WebSocket, st: Arc<AppState>, hub: HubHandle) {
     let mut link_changes = st.link.subscribe();
     let mut account_changes = st.system.account().subscribe();
     let mut setup_changes = st.system.account().subscribe_setup_changes();
+    let mut trading_changes = st.trading.subscribe_changes();
     hub.send_to(conn, ServerMessage::KiwoomLink { status: kiwoom_status(&st) });
     send_account(&st, &hub, conn).await;
     loop {
@@ -46,6 +47,11 @@ async fn serve(socket: WebSocket, st: Arc<AppState>, hub: HubHandle) {
             changed = setup_changes.recv() => match changed {
                 Ok(kinds) => hub.send_to(conn, ServerMessage::SetupChanged { kinds }),
                 Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => hub.send_to(conn, ServerMessage::SetupChanged { kinds: setup::DocumentKind::ALL.to_vec() }),
+                Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+            },
+            changed = trading_changes.recv() => match changed {
+                Ok(changed) => hub.send_to(conn, ServerMessage::TradingAccountChanged { account_ref: changed.account_ref }),
+                Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {}
                 Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
             },
             changed = link_changes.changed() => {

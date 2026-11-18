@@ -12,7 +12,7 @@ use std::time::Duration;
 use tokio::sync::{Notify, oneshot, watch};
 use tokio::time::Instant;
 
-use super::api::{ApiId, MarketRequest};
+use super::api::{Endpoint, MarketRequest};
 use super::auth::{AuthError, BeginIssueError, Halt, KiwoomAuth, MIN_ISSUE_INTERVAL_SECS, TokenGen};
 use super::error::{self, Category, Failure, Note, Retry, Stop};
 use super::token_file::FileError;
@@ -174,7 +174,7 @@ type JobResult = Result<RawPage, KiwoomError>;
 #[derive(Clone, PartialEq, Eq, Hash)]
 struct DedupeKey {
     scope: MergeScope,
-    api_id: ApiId,
+    api_id: Endpoint,
     body: String,
     cont: Option<ContKey>,
 }
@@ -187,7 +187,19 @@ enum JobState {
     Backoff,
 }
 
+pub(crate) type Admission = Arc<dyn Fn() -> bool + Send + Sync>;
+
+pub(crate) struct Dispatch<'a> {
+    pub endpoint: Endpoint,
+    pub body: String,
+    pub cont: Option<&'a ContKey>,
+    pub priority: Priority,
+    pub scope: MergeScope,
+    pub admit: Option<Admission>,
+}
+
 struct Job {
+    admit: Option<Admission>,
     key: DedupeKey,
     priority: Priority,
     state: JobState,
@@ -215,8 +227,8 @@ struct Queue {
     last_send: Option<Instant>,
     pause_until: Option<Instant>,
     next_id: u64,
-    stopped_paths: HashMap<ApiId, Failure>,
-    failed_once: HashSet<ApiId>,
+    stopped_paths: HashMap<Endpoint, Failure>,
+    failed_once: HashSet<Endpoint>,
     gate: Gate,
 }
 
@@ -267,7 +279,7 @@ impl Queue {
         }
     }
 
-    fn stopped(&self, api_id: ApiId) -> Option<KiwoomError> {
+    fn stopped(&self, api_id: Endpoint) -> Option<KiwoomError> {
         self.stopped_paths.get(&api_id).cloned().map(KiwoomError::Stopped)
     }
 }
@@ -347,7 +359,7 @@ impl KiwoomRest {
             if !auth.needs_issue(now) {
                 return None;
             }
-            self.stopped(ApiId::Au10001)
+            self.stopped(Endpoint::ISSUE)
                 .or_else(|| Some(KiwoomError::Gated { until: auth.issue_blocked_until(now)?, cause: GateCause::IssueInterval }))
         })
     }
@@ -359,11 +371,12 @@ impl KiwoomRest {
         }
     }
 
-    pub fn stopped(&self, api_id: ApiId) -> Option<KiwoomError> {
-        self.0.lock().stopped(api_id)
+    pub fn stopped(&self, api_id: impl Into<Endpoint>) -> Option<KiwoomError> {
+        self.0.lock().stopped(api_id.into())
     }
 
-    pub async fn until_stopped(&self, api_id: ApiId) -> KiwoomError {
+    pub async fn until_stopped(&self, api_id: impl Into<Endpoint>) -> KiwoomError {
+        let api_id = api_id.into();
         loop {
             let notified = self.0.path_stopped.notified();
             tokio::pin!(notified);
@@ -383,7 +396,7 @@ impl KiwoomRest {
         let (tx, rx) = oneshot::channel();
         self.0.lock().issue_waiters.push(tx);
         self.0.wake.notify_one();
-        rx.await.unwrap_or_else(|_| Err(queue_gone(ApiId::Au10001)))
+        rx.await.unwrap_or_else(|_| Err(queue_gone(Endpoint::ISSUE)))
     }
 
     /// 한 페이지를 받는다. `cont`가 있으면 그 연속조회 키로 다음 페이지를 받는다.
@@ -394,26 +407,27 @@ impl KiwoomRest {
         priority: Priority,
         scope: MergeScope,
     ) -> Result<Page<R::Response>, KiwoomError> {
-        let key = DedupeKey {
-            scope,
-            api_id: R::API_ID,
-            body: serde_json::to_string(req).expect("요청 타입은 언제나 직렬화된다"),
-            cont: cont.cloned(),
-        };
-        let rx = self.0.enqueue(key, priority);
-        let raw = rx.await.unwrap_or_else(|_| Err(queue_gone(R::API_ID)))?;
-        let note = match serde_json::from_str::<R::Response>(&raw.body) {
-            Ok(body) if req.answers(&body) => return Ok(Page { body, next: raw.next }),
+        let body = serde_json::to_string(req).expect("요청 타입은 언제나 직렬화된다");
+        self.call_endpoint(Dispatch { endpoint: R::API_ID.into(), body, cont, priority, scope, admit: None }, |response| req.answers(response)).await
+    }
+
+    pub(crate) async fn call_endpoint<T: serde::de::DeserializeOwned>(&self, call: Dispatch<'_>, answers: impl FnOnce(&T) -> bool) -> Result<Page<T>, KiwoomError> {
+        let Dispatch { endpoint, body, cont, priority, scope, admit } = call;
+        let key = DedupeKey { scope, api_id: endpoint, body, cont: cont.cloned() };
+        let rx = self.0.enqueue(key, priority, admit);
+        let raw = rx.await.unwrap_or_else(|_| Err(queue_gone(endpoint)))?;
+        let note = match serde_json::from_str::<T>(&raw.body) {
+            Ok(body) if answers(&body) => return Ok(Page { body, next: raw.next }),
             Ok(_) => Note::AnotherRequestsAnswer,
             Err(e) => Note::Schema { line: e.line(), column: e.column() },
         };
-        tracing::error!(api_id = R::API_ID.as_str(), %note, "키움 응답을 읽지 못했습니다");
-        let failure = Failure::schema(R::API_ID, raw.envelope, note);
+        tracing::error!(api_id = endpoint.as_str(), %note, "키움 응답을 읽지 못했습니다");
+        let failure = Failure::schema(endpoint, raw.envelope, note);
         Err(self.0.settle(&mut self.0.lock(), failure))
     }
 }
 
-fn queue_gone(api_id: ApiId) -> KiwoomError {
+fn queue_gone(api_id: Endpoint) -> KiwoomError {
     KiwoomError::Failed(Failure::queue_gone(api_id))
 }
 
@@ -441,7 +455,7 @@ impl Inner {
         self.queue.lock().expect("대기열 잠금")
     }
 
-    fn enqueue(&self, key: DedupeKey, priority: Priority) -> oneshot::Receiver<JobResult> {
+    fn enqueue(&self, key: DedupeKey, priority: Priority, admit: Option<Admission>) -> oneshot::Receiver<JobResult> {
         let (tx, rx) = oneshot::channel();
         let mut q = self.lock();
         if *self.access.borrow() == Access::Closed {
@@ -470,6 +484,7 @@ impl Inner {
             q.jobs.insert(
                 id,
                 Job {
+                    admit,
                     key,
                     priority,
                     state: JobState::Queued,
@@ -508,7 +523,7 @@ impl Inner {
         }
         let mut has_market = q.has_market_work();
         let market_needs_token = has_market && self.auth.needs_issue(now_kst);
-        if let Some(err) = q.stopped(ApiId::Au10001).filter(|_| market_needs_token || !q.issue_waiters.is_empty()) {
+        if let Some(err) = q.stopped(Endpoint::ISSUE).filter(|_| market_needs_token || !q.issue_waiters.is_empty()) {
             for w in q.issue_waiters.drain(..) {
                 let _ = w.send(Err(err.clone()));
             }
@@ -564,6 +579,10 @@ impl Inner {
             q.finish(id, Err(err));
             return Step::Again;
         }
+        if q.jobs.get(&id).and_then(|job| job.admit.as_ref()).is_some_and(|admit| !admit()) {
+            q.finish(id, Err(KiwoomError::NotConnected));
+            return Step::Again;
+        }
         if let Gate::Closed { cause, misses, .. } = std::mem::take(&mut q.gate) {
             tracing::info!(api_id = api_id.as_str(), "관문을 확인하는 요청 하나를 보냅니다");
             q.gate = Gate::Probing { probe: id, cause, misses };
@@ -584,15 +603,15 @@ impl Inner {
         let (mut q, outcome) = match self.auth.begin_issue(self.clock.now()) {
             Ok(body) => {
                 let started = Instant::now();
-                let res = self.transport.send(HttpRequest { api_id: ApiId::Au10001, token: None, cont: None, body }).await;
+                let res = self.transport.send(HttpRequest { api_id: Endpoint::ISSUE, token: None, cont: None, body }).await;
                 let judged = self.judge_issue(res, started);
                 let mut q = self.lock();
                 let outcome = match judged {
                     Ok(generation) => {
-                        q.failed_once.remove(&ApiId::Au10001);
+                        q.failed_once.remove(&Endpoint::ISSUE);
                         Ok(generation)
                     }
-                    Err(_) if !self.auth.issue_is_for_current_key() => Err(queue_gone(ApiId::Au10001)),
+                    Err(_) if !self.auth.issue_is_for_current_key() => Err(queue_gone(Endpoint::ISSUE)),
                     Err(failure) => {
                         if failure.category() == Category::RateLimit {
                             q.pause_until = Some(Instant::now() + RATE_LIMIT_PAUSE);
@@ -664,10 +683,10 @@ impl Inner {
             Ok(r) => r,
             Err(e) => {
                 tracing::warn!(api_id = "au10001", elapsed_ms, error = %e, "토큰 발급 요청이 키움에 닿지 못했습니다");
-                return Err(Failure::transport(ApiId::Au10001, e));
+                return Err(Failure::transport(Endpoint::ISSUE, e));
             }
         };
-        let judged = error::judge(ApiId::Au10001, resp.status, &resp.body);
+        let judged = error::judge(Endpoint::ISSUE, resp.status, &resp.body);
         let failed = judged.as_ref().err();
         tracing::info!(
             api_id = "au10001",
@@ -679,7 +698,7 @@ impl Inner {
             "토큰 발급 응답"
         );
         judged?;
-        let bad_token = || Failure::protocol(ApiId::Au10001, Note::BadTokenResponse);
+        let bad_token = || Failure::protocol(Endpoint::ISSUE, Note::BadTokenResponse);
         let token: TokenResponse = serde_json::from_str(&resp.body).map_err(|_| bad_token())?;
         let generation = self.auth.record_issued(token, self.clock.now()).map_err(|_| bad_token())?;
         tracing::info!(generation = generation.0, "새 토큰을 받았습니다");
@@ -799,7 +818,7 @@ impl Inner {
     }
 }
 
-fn judge_market(api_id: ApiId, priority: Priority, res: Result<HttpResponse, TransportError>, started: Instant) -> Result<RawPage, Failure> {
+fn judge_market(api_id: Endpoint, priority: Priority, res: Result<HttpResponse, TransportError>, started: Instant) -> Result<RawPage, Failure> {
     let elapsed_ms = started.elapsed().as_millis() as u64;
     let resp = match res {
         Ok(r) => r,
@@ -833,13 +852,13 @@ pub mod testing {
     use futures::future::BoxFuture;
     use tokio::time::Instant;
 
-    use super::super::api::ApiId;
+    use super::super::api::{ApiId, Endpoint};
     use super::super::transport::{HttpRequest, HttpResponse, Transport, TransportError};
 
     #[derive(Debug, Clone)]
     pub struct Sent {
         pub at: Instant,
-        pub api_id: ApiId,
+        pub api_id: Endpoint,
         pub token: Option<String>,
         pub cont: Option<String>,
         pub body: String,
@@ -908,6 +927,7 @@ mod tests {
 
     use super::testing::*;
     use super::*;
+    use crate::kiwoom::api::ApiId;
     use crate::kiwoom::error::CodeKey;
     use crate::clock::kst;
     use crate::kiwoom::api::StockList;
@@ -1232,7 +1252,7 @@ mod tests {
         ] {
             let tokens = token_counter();
             let fake = Arc::new(FakeTransport::new(Duration::ZERO, move |s| {
-                tokens(s).unwrap_or_else(|| match s.api_id {
+                tokens(s).unwrap_or_else(|| match s.api_id.market().unwrap() {
                     ApiId::Ka10099 => ok(reply.clone(), None),
                     _ => ok(json!({"return_code": 0, "stk_dt_pole_chart_qry": []}), None),
                 })
@@ -1280,7 +1300,7 @@ mod tests {
 
     #[tokio::test(start_paused = true)]
     async fn an_issue_failure_that_is_not_transient_stops_issuing_but_not_requests_with_a_valid_token() {
-        let fake = Arc::new(FakeTransport::new(Duration::ZERO, move |s| match s.api_id {
+        let fake = Arc::new(FakeTransport::new(Duration::ZERO, move |s| match s.api_id.market().unwrap() {
             ApiId::Au10001 => ok(json!({"return_code": 1, "return_msg": "알 수 없음"}), None),
             _ => list_ok(),
         }));
@@ -1296,7 +1316,7 @@ mod tests {
 
     #[tokio::test(start_paused = true)]
     async fn an_ambiguous_issue_failure_waits_ten_minutes_and_stops_after_the_second() {
-        let fake = Arc::new(FakeTransport::new(Duration::ZERO, move |s| match s.api_id {
+        let fake = Arc::new(FakeTransport::new(Duration::ZERO, move |s| match s.api_id.market().unwrap() {
             ApiId::Au10001 => ok(json!({"return_code": 3, "return_msg": "인증에 실패했습니다[8003:토큰 조회 실패]"}), None),
             _ => list_ok(),
         }));
@@ -1314,7 +1334,7 @@ mod tests {
 
     #[tokio::test(start_paused = true)]
     async fn a_broken_token_response_stops_issuing() {
-        let fake = Arc::new(FakeTransport::new(Duration::ZERO, move |s| match s.api_id {
+        let fake = Arc::new(FakeTransport::new(Duration::ZERO, move |s| match s.api_id.market().unwrap() {
             ApiId::Au10001 => ok(json!({"return_code": 0, "return_msg": "정상"}), None),
             _ => list_ok(),
         }));
