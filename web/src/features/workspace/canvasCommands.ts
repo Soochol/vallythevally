@@ -1,3 +1,4 @@
+import { equalizeAll } from "../../layout/dock/balance";
 import { tidyWindows } from "../../layout/canvas/arrange";
 import { toRatio, workArea } from "../../layout/canvas/geometry";
 import { placementForMode, type LayoutMode, type PlacementRoom } from "../../layout/modes";
@@ -26,4 +27,11 @@ export function tidyCanvas() {
   const { rects, undersized } = tidyWindows(windowRefs(state.layout.windows), area);
   state.arrange({ windows: state.layout.windows, placement: { ...state.layout.placement, canvas: { rects: Object.fromEntries(Object.entries(rects).map(([id, rect]) => [id, toRatio(rect, area)])), order: state.layout.placement.canvas?.order ?? state.layout.windows.map((window) => window.id) } } });
   if (undersized) useSelectionStore.getState().showToast(`자리가 작아 창 ${undersized}개의 최소 크기를 지킬 수 없습니다`);
+}
+
+export function equalizeDockSizes() {
+  const state = useLayoutStore.getState();
+  const room = workspacePlacementRoom();
+  const dock = state.layout.placement.dock;
+  if (room && dock) state.setDock(equalizeAll(dock, { ...room.dock, windows: windowRefs(state.layout.windows) }));
 }
