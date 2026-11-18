@@ -21,15 +21,9 @@ import { useBeforeConnect } from "../status/beforeConnect";
 import { isTypingTarget } from "../../lib/hotkeys";
 import { DESKTOP_QUERY, useMediaQuery } from "../../lib/media";
 import {
-  conditionSentence,
   dayLabel,
-  EXCLUDE_LABEL,
-  excludedInOrder,
   excludedText,
   isUpdating,
-  MARKET_LABEL,
-  marketsInOrder,
-  NO_CONDITIONS_SENTENCE,
   PHASE_LABEL,
   type RunBlock,
   runBlock,
@@ -263,7 +257,6 @@ function ScreenHeader({ windowId, screenEditing, chosen, entries, block, status,
         </button>
         <PanelMenu screen={screen} rows={rows} status={status} />
       </div>
-      <ScreenSummary screen={screen} />
       <div className="mt-2.5 flex items-center gap-2.5">
         <button
           type="button"
@@ -308,51 +301,6 @@ function ScreenPicker({ windowId, screenEditing, entries, chosen }: { windowId: 
       </button>
       {menu.open && (
         <Menu label="조건식 고르기" items={items} onClose={menu.close} root={menu.root} className="absolute left-0 top-[calc(100%+4px)] max-h-[60vh] min-w-[240px] overflow-auto" />
-      )}
-    </div>
-  );
-}
-
-function ScreenSummary({ screen }: { screen: Screen }) {
-  const markets = marketsInOrder(screen.markets);
-  const excluded = excludedInOrder(screen.exclude);
-  return (
-    <div className="mt-1.5 rounded-m border border-line bg-surface px-2.5 py-2">
-      <p className="flex flex-wrap items-center gap-1 text-xs text-text-3">
-        {markets.length === 0 && excluded.length === 0 && <span>전 종목 대상</span>}
-        {markets.length > 0 && (
-          <>
-            <span>대상</span>
-            {markets.map((m) => (
-              <span key={m} className="rounded-s bg-raised px-1.5 py-px font-[600] text-text-2">
-                {MARKET_LABEL[m]}
-              </span>
-            ))}
-          </>
-        )}
-        {markets.length > 0 && excluded.length > 0 && <span aria-hidden="true">·</span>}
-        {excluded.length > 0 && (
-          <>
-            <span>제외</span>
-            {excluded.map((k) => (
-              <span key={k} className="rounded-s border border-line px-1 py-px text-text-2">
-                {EXCLUDE_LABEL[k]}
-              </span>
-            ))}
-          </>
-        )}
-      </p>
-      {screen.conditions.length === 0 ? (
-        <p className="mt-1.5 text-s leading-[1.5]">{NO_CONDITIONS_SENTENCE}</p>
-      ) : (
-        <ol aria-label="조건" className="mt-1.5 text-s leading-[1.5]">
-          {screen.conditions.map((c, i) => (
-            <li key={i}>
-              {i > 0 && <span className="mr-1 text-xs font-[600] text-accent">그리고</span>}
-              {conditionSentence(c)}
-            </li>
-          ))}
-        </ol>
       )}
     </div>
   );

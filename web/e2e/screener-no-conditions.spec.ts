@@ -33,6 +33,10 @@ async function expectNoConditions(scope: Locator) {
   await expect(conditionList(scope)).toHaveCount(0);
 }
 
+async function expectNoSummary(page: Page) {
+  await expect(panel(page).getByLabel("조건 요약", { exact: true })).toHaveCount(0);
+}
+
 async function save(page: Page, dialog: Locator) {
   const saved = savedTo(page, "/api/screens");
   await dialog.getByRole("button", { name: "저장" }).click();
@@ -78,6 +82,7 @@ test("새 조건식은 조건 없이 열리고 마지막 줄을 빼며, 빈 조�
     await renameScreen(dialog, SCREEN_NAME);
     await save(page, dialog);
     await expect(panel(page).getByRole("button", { name: "조건식 고르기", exact: true })).toHaveText(SCREEN_NAME);
+    await expectNoSummary(page);
     await expectNoConditions(panel(page));
     await expect(panel(page).getByText("두 시장 모두")).toBeVisible();
     await expect(panel(page).getByRole("group", { name: "대상 시장", exact: true }).locator('button[aria-pressed="true"]')).toHaveCount(0);
@@ -97,13 +102,14 @@ test("새 조건식은 조건 없이 열리고 마지막 줄을 빼며, 빈 조�
     await marketChip(dialog, "코스닥").click();
     await toggleExclude(dialog, "상태", "관리종목");
     await save(page, dialog);
+    await expectNoSummary(page);
     await expectNoConditions(panel(page));
+    expect(scenario.documents.screens().screens[0]).toMatchObject({ markets: ["kosdaq"], exclude: ["managed"], conditions: [] });
 
     await page.reload();
     await openScreener(page);
     await expect(panel(page).getByRole("button", { name: "조건식 고르기", exact: true })).toHaveText(SCREEN_NAME);
-    await expectNoConditions(panel(page));
-    await expect(panel(page).getByLabel("조건 요약", { exact: true })).toContainText("코스닥 · 관리종목 제외");
+    await expectNoSummary(page);
     dialog = await editScreen(page);
     await expectNoConditions(dialog);
     await expect(marketChip(dialog, "코스닥")).toHaveAttribute("aria-pressed", "true");

@@ -1,8 +1,9 @@
 import { afterEach, expect, test, vi } from "vitest";
 import { chartWindows, DEFAULT_LAYOUT, useLayoutStore } from "../stores/layout";
 import { usePersistStore } from "../stores/persist";
-import { type Autosave, serverMayLackChart, startAutosave } from "./autosave";
+import { type Autosave, startAutosave } from "./autosave";
 import { clearUnsaved, readUnsaved, writeUnsaved } from "./unsaved";
+import { createLayoutReceipt } from "./layoutReceipt";
 
 let active: Autosave | undefined;
 afterEach(() => { active?.stop(); vi.useRealTimers(); vi.unstubAllGlobals(); });
@@ -14,7 +15,9 @@ test.each([true, false])("다음 레이아웃의 첫 저장은 새 경로와 rev
   let reject = (_e: unknown) => {};
   const sent: { path: string; body: { revision: number; id: string } }[] = [];
   const drafts: string[] = [];
+  const receipt = createLayoutReceipt();
   active = startAutosave({
+    receipt,
     put: (path, json) => {
       sent.push({ path, body: JSON.parse(json) });
       return sent.length === 1 ? new Promise<void>((a, b) => { resolve = a; reject = b; }) : Promise.resolve();
@@ -39,7 +42,7 @@ test.each([true, false])("다음 레이아웃의 첫 저장은 새 경로와 rev
   await vi.advanceTimersByTimeAsync(100_000);
   expect(usePersistStore.getState().saves.layout).toEqual(state);
   expect(drafts).toEqual(draftCalls);
-  expect(serverMayLackChart(cell)).toBe(false);
+  expect(receipt.holds("next", cell)).toBe(false);
   expect(sent).toHaveLength(2);
 });
 

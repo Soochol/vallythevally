@@ -1,6 +1,6 @@
 import { beforeEach, expect, test } from "vitest";
 import { DEFAULT_WATCHLISTS, FIRST_WATCHLIST_ID, MAX_WATCHLISTS } from "../lib/watchlist";
-import { activeWatchlist, useWatchlistStore, type WatchlistRemoval } from "./watchlist";
+import { activeWatchlist, windowWatchlist, useWatchlistStore, type WatchlistRemoval } from "./watchlist";
 
 function commit(undo: WatchlistRemoval) {
   const state = useWatchlistStore.getState();
@@ -266,4 +266,12 @@ test("이미 있거나 그룹이 지워졌으면 편집도 되돌리기도 만�
   const { undo } = s.put(FIRST_WATCHLIST_ID, "035420", null);
   s.add(FIRST_WATCHLIST_ID, "000001");
   expect(undo!.available()).toBe(false);
+});
+
+test("창의 목록이 있으면 그 목록을, 없거나 지워졌으면 앱 전체 마지막 목록을 본다", () => {
+  const lists = [...DEFAULT_WATCHLISTS, { id: "L2", name: "둘", symbols: [], groups: [] }, { id: "L3", name: "셋", symbols: [], groups: [] }];
+  expect(windowWatchlist(lists, "L2", "L3").id).toBe("L2");
+  expect(windowWatchlist(lists, null, "L3").id).toBe("L3");
+  expect(windowWatchlist(lists, "gone", "L3").id).toBe("L3");
+  expect(windowWatchlist(lists, "gone", "alsoGone").id).toBe(FIRST_WATCHLIST_ID);
 });

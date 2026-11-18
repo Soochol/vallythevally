@@ -9,6 +9,7 @@ import { checkForm } from "../indicator-dialog/indicatorForm";
 import { executeCommand } from "./execute";
 import { parseIndicatorInput } from "./parseInput";
 import { previewSettings, useIndicatorPreview } from "./preview";
+import { createLayoutReceipt } from "../../persist/layoutReceipt";
 
 let autosave: Autosave;
 let puts: unknown[];
@@ -23,7 +24,7 @@ beforeEach(() => {
   puts = [];
   useLayoutStore.getState().load(structuredClone(DEFAULT_LAYOUT));
   useIndicatorPreview.getState().set(CELL, null);
-  autosave = startAutosave({ put: async (_, json) => { puts.push(JSON.parse(json)); }, toast: () => {}, revisions: { layout: 0, ui: 0, watchlist: 0 }, unsaved: () => undefined });
+  autosave = startAutosave({ put: async (_, json) => { puts.push(JSON.parse(json)); }, toast: () => {}, revisions: { layout: 0, ui: 0, watchlist: 0 }, unsaved: () => undefined, receipt: createLayoutReceipt() });
 });
 afterEach(() => { autosave.stop(); useIndicatorPreview.getState().set(CELL, null); vi.useRealTimers(); });
 
