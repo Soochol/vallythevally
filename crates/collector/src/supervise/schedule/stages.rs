@@ -21,9 +21,9 @@ use crate::supervise::daemon::{Injected, Inputs, Supervisor, load_plan};
 use crate::supervise::journal::{JournalEvent, has_event, journal_path};
 use crate::supervise::settings::{MarketOpenCheck, Settings};
 use crate::supervise::status::{AlertKind, DayPhase, ObservationDay, ObservationVerdict};
-use crate::universe::{UniverseFile, after_close_path, collect_after_close, collect_morning, read_universe_if_present};
+use crate::universe::{Morning, UniverseFile, after_close_path, collect_after_close, collect_morning, read_universe_if_present};
 
-const FINALIZE_RETRY_NOTE: &str = "같은 날 안에는 다시 하지 않고, 다음 날 시작이나 다음 데몬 시작 때 정리가 안 끝난 날로 다시 시도합니다";
+const FINALIZE_RETRY_NOTE: &str = "같은 날 안에는 다시 하지 않고, 다음 정리 기회(다음 날 시작이나 다음 데몬 시작)에 정리가 안 끝난 날로 다시 시도합니다";
 
 struct CachedHolidaysOnly;
 
@@ -136,7 +136,17 @@ impl Daemon {
             None if plan_path(&self.data_dir, day.date).exists() => None,
             None => {
                 let fetched = self.fetch_morning(day, shutdown).await;
-                Some(self.soft("종목 목록", fetched)?.ok_or(DayEnd::Done)?)
+                let morning = self.soft("종목 목록", fetched)?.ok_or(DayEnd::Done)?;
+                if let Some(moved) = &morning.moved_aside {
+                    let message = format!(
+                        "종목 목록: 읽을 수 없는 그날 목록 파일을 {}로 옮기고 {}의 목록으로 대체했습니다: {}",
+                        moved.path.display(),
+                        morning.file.replaced.as_ref().map_or(0, |replaced| replaced.source_date),
+                        moved.cause
+                    );
+                    self.reporter.alert(AlertKind::StageFailed, message);
+                }
+                Some(morning.file)
             }
         };
         if let Some(file) = &universe {
@@ -145,11 +155,11 @@ impl Daemon {
         Ok(universe)
     }
 
-    async fn fetch_morning(&self, day: &DayRun, shutdown: &mut watch::Receiver<bool>) -> StageResult<UniverseFile> {
+    async fn fetch_morning(&self, day: &DayRun, shutdown: &mut watch::Receiver<bool>) -> StageResult<Morning> {
         let session = self.open_rest(shutdown).await?;
         let collected = collect_morning(session.rest(), &self.data_dir, day.date, kst_of(self.clock.now()));
         let morning = stoppable(shutdown, collected).await?.map_err(|error| Halt::Failed(error.to_string()))?;
-        Ok(morning.file)
+        Ok(morning)
     }
 
     pub(super) fn plan(&mut self, day: &DayRun, universe: Option<UniverseFile>) -> Result<PlanFile, DayEnd> {
@@ -330,7 +340,7 @@ impl Daemon {
         let total = pending.len();
         for (finished, date) in pending.into_iter().enumerate() {
             if self.clock.now().unix() >= start_before.unix() {
-                tracing::warn!(left = total - finished, "밀린 날 정리를 아침 일정 앞에서 멈춥니다. 남은 날은 다음 날 시작에 이어서 정리합니다");
+                tracing::warn!(left = total - finished, "밀린 날 정리를 아침 일정 앞에서 멈춥니다. 남은 날은 다음 정리 기회에 이어서 정리합니다");
                 break;
             }
             self.finalize_date(date, false, shutdown).await?;

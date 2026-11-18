@@ -1,4 +1,4 @@
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use server::kiwoom::rest::{KiwoomError, KiwoomRest, Priority};
 use server::symbols::fetch_listing_rows;
@@ -37,7 +37,7 @@ impl std::fmt::Display for UniverseError {
                 write!(formatter, " (읽을 수 없어 건너뛴 파일: {})", causes.join("; "))
             }
             UniverseError::TodayListUnreadable { date, cause, detail, .. } => {
-                write!(formatter, "{date} 목록 파일을 읽을 수 없고 새로 받은 목록도 쓰지 못해({detail}) 파일을 그대로 둡니다: {cause}")
+                write!(formatter, "{date} 목록 파일을 읽을 수 없고 새로 받은 목록도 쓰지 못하며({detail}) 대신 쓸 읽히는 이전 목록도 없어 파일을 그대로 둡니다: {cause}")
             }
             UniverseError::NoMorningList { date, cause } => write!(formatter, "{date} 아침 목록이 없습니다: {cause}"),
             UniverseError::AfterCloseFetch { detail } => write!(formatter, "마감 뒤 목록을 받지 못했습니다: {detail}"),
@@ -64,6 +64,11 @@ pub(crate) fn kst_stamp(time: KstTime) -> String {
         seconds / 60 % 60,
         seconds % 60
     )
+}
+
+fn clock_digits(time: KstTime) -> String {
+    let seconds = time.ms_of_day / 1000;
+    format!("{:02}{:02}{:02}", seconds / 3600, seconds / 60 % 60, seconds % 60)
 }
 
 fn shrank_too_much(previous_count: usize, count: usize) -> bool {
@@ -118,10 +123,17 @@ pub enum Written {
     LeftAsIs { reason: ReplaceReason, detail: String },
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MovedAside {
+    pub path: PathBuf,
+    pub cause: String,
+}
+
 #[derive(Debug)]
 pub struct Morning {
     pub file: UniverseFile,
     pub written: Written,
+    pub moved_aside: Option<MovedAside>,
     pub skipped: Vec<SkippedFile>,
     pub warnings: Vec<String>,
 }
@@ -143,6 +155,7 @@ pub async fn collect_morning(rest: &KiwoomRest, data_dir: &Path, date: u32, fetc
         tracing::warn!(date = file.date, cause = %file.cause, "읽을 수 없는 목록 파일을 건너뜁니다");
     }
     let previous = before.file;
+    let aside_stamp = clock_digits(fetched_at);
     let fetched_at = kst_stamp(fetched_at);
     let mut warnings = Vec::new();
     match fetch_stocks(rest, previous.as_ref()).await {
@@ -154,7 +167,7 @@ pub async fn collect_morning(rest: &KiwoomRest, data_dir: &Path, date: u32, fetc
                 tracing::warn!(date, %error, "그날의 rejected 파일을 지우지 못했습니다");
                 warnings.push(error.to_string());
             }
-            Ok(Morning { file, written: Written::NewList, skipped, warnings })
+            Ok(Morning { file, written: Written::NewList, moved_aside: None, skipped, warnings })
         }
         Fetched::Rejected(rejection) => {
             let rejected = RejectedFile {
@@ -171,12 +184,18 @@ pub async fn collect_morning(rest: &KiwoomRest, data_dir: &Path, date: u32, fetc
                 tracing::warn!(date, %error, "그날의 rejected 파일을 쓰지 못했습니다");
                 warnings.push(error.to_string());
             }
+            let mut moved_aside = None;
             if let Some(cause) = unreadable_today {
-                return Err(UniverseError::TodayListUnreadable { date, cause, reason: rejection.reason, detail: rejection.detail });
+                if previous.is_none() {
+                    return Err(UniverseError::TodayListUnreadable { date, cause, reason: rejection.reason, detail: rejection.detail });
+                }
+                let path = store::move_unreadable_aside(data_dir, date, aside_stamp)?;
+                tracing::warn!(date, path = %path.display(), cause = %cause, "읽을 수 없는 그날 목록 파일을 옆으로 옮기고 이전 목록으로 대체합니다");
+                moved_aside = Some(MovedAside { path, cause: cause.to_string() });
             }
             if let Some(file) = existing {
                 let written = Written::LeftAsIs { reason: rejection.reason, detail: rejection.detail };
-                return Ok(Morning { file, written, skipped, warnings });
+                return Ok(Morning { file, written, moved_aside: None, skipped, warnings });
             }
             let Some(previous) = previous else {
                 return Err(UniverseError::NoFallback { reason: rejection.reason, detail: rejection.detail, skipped });
@@ -192,7 +211,7 @@ pub async fn collect_morning(rest: &KiwoomRest, data_dir: &Path, date: u32, fetc
                 replaced: Some(replacement),
             };
             store::write_universe(data_dir, &file)?;
-            Ok(Morning { file, written: Written::ReplacementList, skipped, warnings })
+            Ok(Morning { file, written: Written::ReplacementList, moved_aside, skipped, warnings })
         }
     }
 }

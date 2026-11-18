@@ -366,18 +366,47 @@ async fn a_rejected_file_that_cannot_be_removed_is_a_warning_not_an_error() {
     assert_eq!(read_universe(data.path(), 20261118).unwrap(), outcome.file);
 }
 
+async fn broken_today_lists() -> [(&'static str, Vec<u8>); 2] {
+    let data = tempfile::tempdir().unwrap();
+    morning(data.path(), 20261118, listing(fillers(100))).await.unwrap();
+    let text = std::fs::read_to_string(data.path().join("universe/20261118.json")).unwrap();
+    let other_version = text.replace("\"format_version\": 1", "\"format_version\": 2").into_bytes();
+    [("깨진 JSON", b"{not json".to_vec()), ("다른 형식 버전", other_version)]
+}
+
 #[tokio::test(start_paused = true)]
-async fn a_failed_rerun_leaves_an_unreadable_same_day_list_untouched_and_reports_it() {
-    let broken_files: [(&str, Vec<u8>); 2] = [("깨진 JSON", b"{not json".to_vec()), ("다른 형식 버전", {
+async fn an_unreadable_today_list_is_moved_aside_and_the_day_goes_on_with_the_previous_list() {
+    for (label, bytes) in broken_today_lists().await {
+        for failing in [Kiwoom::Failing, listing(fillers(90))] {
+            let data = tempfile::tempdir().unwrap();
+            let yesterday = morning(data.path(), 20261117, listing(fillers(100))).await.unwrap();
+            std::fs::write(data.path().join("universe/20261118.json"), &bytes).unwrap();
+
+            let outcome = morning_outcome(data.path(), 20261118, failing).await.unwrap();
+
+            assert!(matches!(outcome.written, Written::ReplacementList), "{label}: {:?}", outcome.written);
+            assert_eq!(outcome.file.stocks, yesterday.stocks, "{label}");
+            assert_eq!(outcome.file.replaced.as_ref().unwrap().source_date, 20261117, "{label}");
+            let moved = outcome.moved_aside.as_ref().unwrap_or_else(|| panic!("{label}: 옮긴 파일이 결과에 없다"));
+            let name = moved.path.file_name().unwrap().to_str().unwrap();
+            assert!(name.starts_with("20261118.unreadable-") && name.ends_with(".json"), "{label}: {name}");
+            assert_eq!(std::fs::read(&moved.path).unwrap(), bytes, "{label}: 깨진 파일은 내용 그대로 옆에 남는다");
+            assert_eq!(outcome.skipped.iter().map(|file| file.date).collect::<Vec<_>>(), [20261118], "{label}");
+            assert_eq!(read_universe(data.path(), 20261118).unwrap(), outcome.file, "{label}");
+            assert!(universe_files(data.path()).contains(&"20261118.rejected.json".to_owned()), "{label}");
+
+            let again = morning_outcome(data.path(), 20261118, Kiwoom::Failing).await.unwrap();
+            assert!(matches!(again.written, Written::LeftAsIs { .. }) && again.moved_aside.is_none(), "{label}: 대체한 뒤 다시 돌려도 옮길 것이 없다");
+        }
+    }
+}
+
+#[tokio::test(start_paused = true)]
+async fn an_unreadable_today_list_without_any_previous_list_still_fails() {
+    for (label, bytes) in broken_today_lists().await {
         let data = tempfile::tempdir().unwrap();
-        morning(data.path(), 20261118, listing(fillers(100))).await.unwrap();
-        let text = std::fs::read_to_string(data.path().join("universe/20261118.json")).unwrap();
-        text.replace("\"format_version\": 1", "\"format_version\": 2").into_bytes()
-    })];
-    for (label, bytes) in broken_files {
-        let data = tempfile::tempdir().unwrap();
-        morning(data.path(), 20261117, listing(fillers(100))).await.unwrap();
         let today = data.path().join("universe/20261118.json");
+        std::fs::create_dir_all(today.parent().unwrap()).unwrap();
         std::fs::write(&today, &bytes).unwrap();
 
         let failed = morning_outcome(data.path(), 20261118, Kiwoom::Failing).await;
@@ -385,11 +414,11 @@ async fn a_failed_rerun_leaves_an_unreadable_same_day_list_untouched_and_reports
         let Err(UniverseError::TodayListUnreadable { date, reason, .. }) = &failed else { panic!("{label}: {failed:?}") };
         assert_eq!((*date, *reason), (20261118, ReplaceReason::FetchFailed), "{label}");
         assert!(failed.unwrap_err().to_string().contains("20261118.json"), "{label}");
-        assert_eq!(std::fs::read(&today).unwrap(), bytes, "{label}: 읽을 수 없는 그날 파일은 그대로다");
-        assert!(universe_files(data.path()).contains(&"20261118.rejected.json".to_owned()), "{label}");
+        assert_eq!(std::fs::read(&today).unwrap(), bytes, "{label}: 옮기지도 지우지도 않는다");
+        assert_eq!(universe_files(data.path()), ["20261118.json", "20261118.rejected.json"], "{label}");
 
         let repaired = morning_outcome(data.path(), 20261118, listing(fillers(100))).await.unwrap();
-        assert!(matches!(repaired.written, Written::NewList), "{label}: 정상 조회는 깨진 파일을 새 목록으로 바꾼다");
+        assert!(matches!(repaired.written, Written::NewList) && repaired.moved_aside.is_none(), "{label}: 정상 조회는 깨진 파일을 새 목록으로 바꾼다");
         assert_eq!(read_universe(data.path(), 20261118).unwrap(), repaired.file, "{label}");
     }
 }
