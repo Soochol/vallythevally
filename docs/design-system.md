@@ -264,6 +264,17 @@ DOM 범례는 `iconMarkup("gear" | "eye" | "eyeOff" | "close" | "up" | "down")`�
 | 빨강 | 인증 차단(8050), 키 확인, 토큰 파일, 키 파일, 경로 멈춤 |
 | 초록 | 연결됨 |
 
+## 수집 현황판
+
+`features/collector-board/`가 [ADR 0026](adr/0026-collector-supervisor-collects-common-and-preferred-stocks.md)의 수집 현황판을 그린다. 읽기 전용이라 재시작·인계 단추를 두지 않는다. 눌러서 하는 일은 브라우저 알림 허락과 불러오기 실패 뒤의 다시 시도뿐이다.
+
+- 여는 곳은 둘이고 같은 `CollectorBoard`를 그린다. 시스템 설정 창의 "수집 현황판" 메뉴(데이터 · 저장소 아래)와 주소 `/collector`다. 메뉴 항목은 `GET /api/collector/access`가 `allowed`일 때만 `visibleMenus`에 든다. `off`, `denied`, 불러오는 중, 실패는 모두 항목이 없다. `/collector`는 `allowed`가 아니면 아무것도 그리지 않고 `/`로 보낸다. 로그인이 바뀌면 권한을 다시 묻는다(`useCollectorAccess`의 키가 로그인에 달려 있다).
+- 위에서 아래로 데몬 감시 띠, 오늘의 요약, 키별 상태, 종목 목록 변동, 관측일 판단, 경보, 날짜별 커버리지, 디스크 사용량이다. 데몬 꺼짐·응답 없음·형식 버전 불일치는 `role="alert"` 경고 띠이고 마지막으로 받은 상태의 시각(커넥터가 받은 때, KST)을 함께 보인다. 데몬이 꺼져 있어도 마지막 상태를 그대로 그린다.
+- 상태는 5초마다, 커버리지와 디스크는 30초마다 다시 받는다(`api/collector.ts`). 커넥터가 정한 길은 요청 응답이고, WebSocket은 데몬 알림만 싣는다. 커버리지와 디스크는 데몬이 답하지 못하면 503이라 그 구역만 오류를 보이고 다시 시도를 둔다.
+- 종목 목록이 대체된 까닭은 상태 계약에 따로 필드가 없고 `plan_note` 경보로 온다. 그래서 종목 목록 변동 구역이 `plan_note` 경보를 "종목 목록 안내"로 함께 보인다.
+- `collector_daemon` 프레임은 `receiveCollectorDaemon`이 받는다. `down`과 `unresponsive`일 때만 화면 안 알림(`showToast`)을 띄우고, 브라우저 알림 권한이 `granted`이면 `Notification`도 띄운다. 권한은 사용자가 띠의 "브라우저 알림 허용"을 누를 때만 묻는다. 모르는 판단과 정상 복귀는 알리지 않는다.
+- 모르는 `phase`, 키 `state`, 경보 `kind`는 받은 값을 그대로 보인다(계약이 형식 버전을 올리지 않고 값을 늘릴 수 있다고 정했다).
+
 ## 랜딩
 
 `features/landing/`가 계정 모드에서 `signed_out`일 때 `App.tsx`의 `ChartRoute`에 그린다(`Landing`). 로컬 전용 모드, `owner_mismatch`, `signed_in` 화면은 바꾸지 않는다. 스타일은 `styles/landing.css`다.

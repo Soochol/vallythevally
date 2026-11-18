@@ -2,11 +2,13 @@ import type { SeriesKey } from "./bars";
 import type { AccountStatus } from "./generated/AccountStatus";
 import type { ClientMessage } from "./generated/ClientMessage";
 import type { ConnectionStatus } from "./generated/ConnectionStatus";
+import type { DaemonJudgment } from "./generated/DaemonJudgment";
 import type { DocumentKind } from "./generated/DocumentKind";
 import type { FeedKind } from "./generated/FeedKind";
 import type { KiwoomLinkStatus } from "./generated/KiwoomLinkStatus";
 import type { ServerMessage } from "./generated/ServerMessage";
 import type { SymbolCode } from "./generated/SymbolCode";
+import type { UnixSeconds } from "./generated/UnixSeconds";
 import type { Venue } from "./generated/Venue";
 
 /** 구독 하나에 오는 메시지. `resync`는 서버와 다시 연결되어 칸을 처음부터 만들어야 한다는 뜻이다(backend.md §8.3의 6). */
@@ -104,7 +106,7 @@ export class MarketSocket implements MarketSocketLike {
   private readonly quoteHandlers = new Set<(e: QuoteEvent) => void>();
   private readonly tradingAccountHandlers = new Set<() => void>();
 
-  constructor(private readonly opts: { url: () => string; connect?: Connect; onKiwoomLink?: (status: KiwoomLinkStatus) => void; onAccount?: (status: AccountStatus) => void; onSetupChanged?: (kinds: readonly DocumentKind[]) => void }) {}
+  constructor(private readonly opts: { url: () => string; connect?: Connect; onKiwoomLink?: (status: KiwoomLinkStatus) => void; onAccount?: (status: AccountStatus) => void; onSetupChanged?: (kinds: readonly DocumentKind[]) => void; onCollectorDaemon?: (judgment: DaemonJudgment, at: UnixSeconds) => void }) {}
 
   start(): void {
     if (this.running) return;
@@ -222,6 +224,8 @@ export class MarketSocket implements MarketSocketLike {
         return this.opts.onAccount?.(m.status);
       case "setup_changed":
         return this.opts.onSetupChanged?.(m.kinds);
+      case "collector_daemon":
+        return this.opts.onCollectorDaemon?.(m.judgment, m.at);
       case "trading_account_changed":
         for (const handler of this.tradingAccountHandlers) handler();
         return;

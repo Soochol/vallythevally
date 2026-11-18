@@ -5,6 +5,7 @@ import { createBrowserRouter, Navigate, RouterProvider } from "react-router";
 import { watchFinancialJob } from "./api/financialUpdate";
 import { retryDelay, shouldRetry } from "./api/retry";
 import { ChartRoute } from "./App";
+import { CollectorPage } from "./features/collector-board/CollectorPage";
 import { takeLoginFailure } from "./features/account/loginFailure";
 import { start } from "./persist/start";
 import { useAccountStore } from "./stores/account";
@@ -34,6 +35,7 @@ marketSocket.start();
 
 const router = createBrowserRouter([
   { path: "/", element: <ChartRoute /> },
+  { path: "/collector", element: <CollectorPage /> },
   { path: "*", element: <Navigate to="/" replace /> },
 ]);
 

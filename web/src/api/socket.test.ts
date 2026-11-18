@@ -84,6 +84,16 @@ describe("MarketSocket", () => {
     expect(b).toEqual([barMsg]);
   });
 
+  test("collector_daemon 프레임은 판단과 시각을 onCollectorDaemon으로 알린다", () => {
+    const transports: FakeTransport[] = [];
+    const heard: [string, number][] = [];
+    const socket = new MarketSocket({ url: () => "ws://test/api/ws", connect: (url, on) => { const t = new FakeTransport(url, on); transports.push(t); return t; }, onCollectorDaemon: (judgment, at) => heard.push([judgment, at]) });
+    socket.start();
+    transports[0]!.receive(hello());
+    transports[0]!.receive({ type: "collector_daemon", judgment: "down", at: 1_700_000_000 });
+    expect(heard).toEqual([["down", 1_700_000_000]]);
+  });
+
   test("해지하면 unsubscribe를 보낸다", () => {
     const { socket, last } = setup();
     socket.start();
