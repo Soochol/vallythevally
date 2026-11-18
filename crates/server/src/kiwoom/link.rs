@@ -148,6 +148,14 @@ impl Link {
         self.0.state.subscribe()
     }
 
+    pub async fn settled(&self) -> LinkState {
+        let mut state = self.subscribe();
+        match state.wait_for(|state| !matches!(state, LinkState::Connecting(_))).await {
+            Ok(settled) => settled.clone(),
+            Err(_) => self.state(),
+        }
+    }
+
     pub fn is_connected(&self) -> bool {
         *self.0.state.borrow() == LinkState::Connected
     }

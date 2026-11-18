@@ -24,7 +24,7 @@ use crate::http::{AppState, router};
 use crate::instance::InstanceLock;
 use crate::market::hub::{HubHandle, MarketHub};
 use crate::kiwoom::auth::{DAILY_REISSUE_AT, KiwoomAuth};
-use crate::kiwoom::link::Link;
+use crate::kiwoom::link::{Link, LinkState};
 use crate::kiwoom::rest::{KiwoomRest, Priority};
 use crate::kiwoom::stream::KiwoomStream;
 use crate::kiwoom::token_file::TokenFile;
@@ -289,7 +289,7 @@ async fn daily_reset(clock: Clock, rest: KiwoomRest, symbols: Arc<SymbolDirector
 async fn daily_token(clock: Clock, rest: KiwoomRest, link: Link) {
     loop {
         clock.sleep_until(next_daily(clock.now(), DAILY_REISSUE_AT)).await;
-        if !link.is_connected() || rest.halted().is_some() || !rest.auth().due_daily_reissue(clock.now()) {
+        if link.settled().await != LinkState::Connected || rest.halted().is_some() || !rest.auth().due_daily_reissue(clock.now()) {
             continue;
         }
         let deadline = next_daily(clock.now(), DAILY_RESET_AT);

@@ -7,7 +7,8 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
-use common::{APP_KEY, ScriptedTransport, Server, token_path};
+use common::support::ScriptedReply;
+use common::{APP_KEY, ScriptedTransport, Server, TOKEN, token_path};
 use serde_json::{Value, json};
 use server::config::Secret;
 use server::kiwoom::link::{ConnectStep, LinkFailure, LinkState, Problem};
@@ -116,6 +117,19 @@ const KEY_REJECTED: &str = "인증에 실패했습니다[8001:App Key와 Secret 
 
 fn reject_issue(fake: &ScriptedTransport, message: &str) {
     fake.respond_with("au10001", 200, json!({"return_code": 3, "return_msg": message}));
+}
+
+const SAME_DAY_JUMPS: usize = 100;
+const DAYS_OF_JUMPS: usize = 200;
+
+async fn jump_until_reissued(server: &Server, fake: &ScriptedTransport, max_jumps: usize) {
+    for _ in 0..max_jumps {
+        if fake.issued() >= 2 {
+            break;
+        }
+        server.clock().jump(601);
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
 }
 
 #[tokio::test]
@@ -592,19 +606,55 @@ async fn an_8050_at_the_daily_reissue_leaves_the_link_failed_and_closed() {
     server.addr().await;
     assert_eq!(server.connect(false).await, LinkState::Connected);
     reject_issue(&fake, EIGHT_FIFTY);
-    server.clock().jump(601);
-    for _ in 0..60 {
-        if fake.issued() >= 2 {
-            break;
-        }
-        tokio::time::sleep(Duration::from_millis(100)).await;
-    }
+    jump_until_reissued(&server, &fake, DAYS_OF_JUMPS).await;
     tokio::time::sleep(Duration::from_millis(500)).await;
     assert_eq!(fake.issued(), 2, "{:?}", fake.api_ids());
     assert_eq!(failure(server.link_state()).problem, Problem::AuthBlocked8050);
     let base = format!("http://{}", server.addr().await);
     assert_eq!(get(&base, "/api/bars?symbol=005930&period=D").await.1["error"]["reason"], "not_connected");
     assert_eq!(failure(server.connect(false).await).problem, Problem::AuthBlocked8050);
+    server.stop().await;
+}
+
+#[tokio::test]
+async fn a_connect_that_crosses_20_05_still_gets_the_daily_reissue() {
+    let fake = ScriptedTransport::new();
+    fake.script("au10001", vec![
+        ScriptedReply { status: 200, body: json!({"return_code": 0, "token": TOKEN, "expires_dt": "20991231000000"}), delay: Duration::ZERO },
+        ScriptedReply { status: 200, body: json!({"return_code": 3, "return_msg": EIGHT_FIFTY}), delay: Duration::ZERO },
+    ]);
+    fake.delay("ka10099", Duration::from_secs(7));
+    let env = env();
+    let server = spawn(&fake, &env, &[OFF, ("VALLY_CLOCK_START", "20261109200450")]);
+    server.addr().await;
+    assert_eq!(server.connect(false).await, LinkState::Connected);
+    jump_until_reissued(&server, &fake, SAME_DAY_JUMPS).await;
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    assert_eq!(fake.issued(), 2, "{:?}", fake.api_ids());
+    assert_eq!(failure(server.link_state()).problem, Problem::AuthBlocked8050);
+    server.stop().await;
+}
+
+#[tokio::test]
+async fn a_connect_that_is_dropped_after_20_05_sends_no_reissue() {
+    let fake = ScriptedTransport::new();
+    fake.delay("ka10099", Duration::from_millis(3500));
+    let env = env();
+    let server = spawn(&fake, &env, &[OFF, ("VALLY_CLOCK_START", "20261109200458")]);
+    server.addr().await;
+    let link = server.link();
+    let connecting = tokio::spawn({
+        let link = link.clone();
+        async move { link.connect(false).await }
+    });
+    let mut state = link.subscribe();
+    state.wait_for(|state| matches!(state, LinkState::Connecting(ConnectStep::Symbols))).await.unwrap();
+    tokio::time::sleep(Duration::from_secs(2)).await;
+    link.disconnect();
+    connecting.await.unwrap();
+    tokio::time::sleep(Duration::from_secs(2)).await;
+    assert_eq!(server.link_state(), LinkState::Disconnected);
+    assert_eq!(fake.issued(), 1, "{:?}", fake.api_ids());
     server.stop().await;
 }
 
