@@ -11,7 +11,7 @@ import { evaluateDock, EDGE_LABEL, type DockCommand } from "./dockCommands";
 import { focusTab, type DockInteraction } from "./dockInteraction";
 import { focusWithoutActivation } from "./focus";
 
-export function DockTabMenu({ interaction, dock, space, root }: { interaction: DockInteraction; dock: DockPlacement; space: DockSpace; root: RefObject<HTMLElement | null> }) {
+export function DockTabMenu({ interaction, dock, space, root, maximized, onToggleMaximize }: { interaction: DockInteraction; dock: DockPlacement; space: DockSpace; root: RefObject<HTMLElement | null>; maximized: string | null; onToggleMaximize(group: string): void }) {
   const acted = useRef(false);
   const menu = interaction.menu;
   const layout = useLayoutStore((s) => s.layout);
@@ -29,7 +29,7 @@ export function DockTabMenu({ interaction, dock, space, root }: { interaction: D
   };
   const edges: Edge[] = ["left", "right", "top", "bottom"];
   const items: MenuItem[] = edges.map((edge) => action(EDGE_LABEL[edge], { kind: "group-edge", window: window.id, group: source.id, edge }));
-  items.unshift({ kind: "action", label: "띄우기", disabled: !interaction.canDetach(window.id), hint: !interaction.canDetach(window.id) ? LAST_DOCKED_NOTICE : undefined, onSelect: () => { acted.current = true; interaction.detach(window.id); } }, { kind: "separator" });
+  items.unshift({ kind: "action", label: maximized === source.id ? "원래 크기로" : "크게 보기", onSelect: () => { acted.current = true; onToggleMaximize(source.id); focusTab(window.id); } }, { kind: "action", label: "띄우기", disabled: !interaction.canDetach(window.id), hint: !interaction.canDetach(window.id) ? LAST_DOCKED_NOTICE : undefined, onSelect: () => { acted.current = true; interaction.detach(window.id); } }, { kind: "separator" });
   const destinations = listGroups(dock.root).filter((group) => group.id !== source.id);
   if (destinations.length) {
     items.push({ kind: "separator" }, { kind: "heading", label: "다른 묶음으로 옮기기" });

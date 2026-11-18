@@ -16,6 +16,7 @@ import { DockFloats } from "./DockFloats";
 import { DockGroup } from "./DockGroup";
 import { DockTabMenu } from "./DockTabMenu";
 import { floatPanelId, useDockInteraction } from "./dockInteraction";
+import { useDockMaximize } from "./useDockMaximize";
 import { WindowHost } from "./WindowHost";
 import { CANVAS_DOCK_HEIGHT, DOCK_GAP, useElementSize } from "./size";
 
@@ -35,8 +36,9 @@ export function Workspace() {
   const space: DockSpace | null = area && { area, gap: DOCK_GAP, windows: refs };
   const interaction = useDockInteraction({ root, dock, space, enabled: mode === "dock" });
   const shown = draft ?? interaction.shown;
+  const maximize = useDockMaximize({ dock, enabled: mode === "dock", dragging: interaction.dragging });
   const activeCell = useSelectionStore((s) => s.activeCell);
-  const shownCharts = useMemo(() => [...listGroups(dock.root).map((group) => group.active), ...dock.floats.map((float) => float.window)].filter((id) => windows.some((w) => w.id === id && w.kind === "chart")), [dock, windows]);
+  const shownCharts = useMemo(() => [...listGroups(dock.root).filter((group) => maximize.maximized === null || group.id === maximize.maximized).map((group) => group.active), ...dock.floats.map((float) => float.window)].filter((id) => windows.some((w) => w.id === id && w.kind === "chart")), [dock, windows, maximize.maximized]);
 
   useEffect(() => {
     if (mode === "dock" && saved && dock !== saved) useLayoutStore.getState().settleDock(dock);
@@ -56,23 +58,24 @@ export function Workspace() {
   useLayoutEffect(() => () => useLayoutStore.getState().setCanvasArea(null), []);
 
   const boxes = space && layoutDock(shown.root, space.area, space.gap);
+  const maximizedGroup = boxes?.groups.find(({ group }) => group.id === maximize.maximized);
   const preview = interaction.preview;
   return (
     <main ref={root} aria-label="작업 영역" className="workspace" data-dock-dragging={interaction.dragging ? "" : undefined} onLostPointerCapture={interaction.lostCapture}>
       {mode === "canvas" && canvas && canvasArea ? <CanvasWorkspace canvas={canvas} windows={windows} area={canvasArea} /> : null}
-      {mode === "dock" && boxes?.groups.map(({ group, rect }, index) => <DockGroup key={group.id} group={group} rect={rect} number={index + 1} interaction={interaction} />)}
-      {mode === "dock" && space && boxes?.gutters.map((box) => <Divider key={box.path.join("-") || "root"} box={box} dock={dock} space={space} onDraft={setDraft} />)}
+      {mode === "dock" && boxes?.groups.map(({ group, rect }, index) => (maximizedGroup && group.id !== maximizedGroup.group.id ? null : <DockGroup key={group.id} group={group} rect={maximizedGroup && space ? { x: 0, y: 0, w: space.area.w, h: space.area.h } : rect} number={index + 1} interaction={interaction} maximized={maximizedGroup !== undefined} onToggleMaximize={() => maximize.toggle(group.id)} />))}
+      {mode === "dock" && space && !maximizedGroup && boxes?.gutters.map((box) => <Divider key={box.path.join("-") || "root"} box={box} dock={dock} space={space} onDraft={setDraft} />)}
       {mode === "dock" && area && <DockFloats dock={shown} windows={windows} area={area} interaction={interaction} />}
       <div ref={parking} hidden inert />
       {windows.map((window) => {
         const group = groupOfWindow(shown.root, window.id);
-        const panel = mode === "canvas" ? canvasPanelId(window.id) : shown.floats.some((float) => float.window === window.id) ? floatPanelId(window.id) : group?.active === window.id ? `window-panel-${group.id}` : null;
+        const panel = mode === "canvas" ? canvasPanelId(window.id) : shown.floats.some((float) => float.window === window.id) ? floatPanelId(window.id) : group?.active === window.id && (!maximizedGroup || group.id === maximizedGroup.group.id) ? `window-panel-${group.id}` : null;
         return <WindowHost key={window.id} window={window} panel={panel} parking={parking} />;
       })}
       {mode === "dock" && interaction.dragging && <div className="dock-input-shield" aria-hidden="true" />}
       {mode === "dock" && preview && preview.kind !== "unchanged" && <div data-dock-preview={preview.kind} className="dock-drop-preview" style={{ left: preview.rect.x, top: preview.rect.y, width: preview.rect.w, height: preview.rect.h }}><span>{preview.label}</span></div>}
       <div role="status" className="sr-only">{mode === "dock" && preview && preview.kind !== "unchanged" ? preview.label : ""}</div>
-      {mode === "dock" && interaction.menu && space && <DockTabMenu key={interaction.menu.window} interaction={interaction} dock={dock} space={space} root={root} />}
+      {mode === "dock" && interaction.menu && space && <DockTabMenu key={interaction.menu.window} interaction={interaction} dock={dock} space={space} root={root} maximized={maximize.maximized} onToggleMaximize={maximize.toggle} />}
     </main>
   );
 }
