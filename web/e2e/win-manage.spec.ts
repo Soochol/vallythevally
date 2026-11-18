@@ -3,7 +3,7 @@ import type { DrawingInput } from "../src/api/generated/DrawingInput";
 import type { Layout } from "../src/api/generated/Layout";
 import type { LayoutWindow } from "../src/api/generated/LayoutWindow";
 import { findSymbol } from "../dev/fakeMarket";
-import { type Scenario, cell, chartOf, DEFAULT_LAYOUT_ID, expect, test, pollSaved } from "./harness";
+import { type Scenario, cell, chartOf, DEFAULT_LAYOUT_ID, expect, fixedWait, test, pollSaved } from "./harness";
 
 test.use({ clockStart: "20261109100000" });
 
@@ -151,6 +151,11 @@ test("이 칸 범위의 드로잉이 있는 차트 창을 닫으면 같은 종�
 });
 
 const cellDrawing = (scenario: Scenario) => scenario.documents.saveDrawing({ id: "01900000-0000-7000-8000-0000000000d2", symbol: "005930", tool: "hline", points: [{ t: NOV9, price: findSymbol("005930")!.close }], style: {}, text: null, locked: false, hidden: false, periods: null, z: 1, group: null, scope: { kind: "cell", layoutId: DEFAULT_LAYOUT_ID, windowId: "cell-1" }, revision: 3 });
+const pollRetried = <T>(page: Page, generator: () => T | Promise<T>, options: { timeout?: number }) => pollSaved(async () => { await page.clock.fastForward(1_000); return generator(); }, options);
+const passRetryWindow = async (page: Page) => {
+  await page.clock.fastForward(6_000);
+  await fixedWait(page, 500, "가상 시간을 넘긴 뒤 복구 저장소 읽기와 재시도 요청이 서버에 닿을 실제 시간");
+};
 const unavailable = { status: 503, body: { error: { code: "internal", message: "잠시 끊김", reason: null, retryAt: null, manualActionRequired: false } } };
 const layoutScope = { kind: "layout", layoutId: DEFAULT_LAYOUT_ID };
 
@@ -205,6 +210,7 @@ test("저장 전에 닫은 차트 창을 되돌리면 그 창의 드로잉 편�
   cellDrawing(scenario);
   let puts = 0;
   scenario.on((url, request) => url.pathname.startsWith("/api/drawings/") && request.method() === "PUT" && puts++ === 0, () => unavailable);
+  await page.clock.install({ time: scenario.now });
   await page.goto("/");
   await expect(cell(page, 2)).toHaveAttribute("aria-busy", "false");
   await lockDrawing(page, 2);
@@ -212,7 +218,7 @@ test("저장 전에 닫은 차트 창을 되돌리면 그 창의 드로잉 편�
   await closeButton(page, "칸 2 삼성전자").click();
   await toast(page).getByRole("button", { name: "되돌리기" }).click();
   await expect(cell(page, 2)).toBeVisible();
-  await pollSaved(() => scenario.documents.drawings("005930")[0], { timeout: 15_000 }).toMatchObject({ locked: true, scope: { kind: "cell", windowId: "cell-1" } });
+  await pollRetried(page, () => scenario.documents.drawings("005930")[0], { timeout: 15_000 }).toMatchObject({ locked: true, scope: { kind: "cell", windowId: "cell-1" } });
   expect(saved(scenario).windows.filter((w) => w.kind === "chart").map((w) => w.id)).toEqual(["cell-0", "cell-1"]);
 });
 
@@ -310,7 +316,7 @@ test("앞 레이아웃 저장이 끝나기 전에 차트 창을 더하고 그 �
   await expect(cell(page, 2)).toHaveAttribute("aria-busy", "false");
   release();
   await drawLine(page, 2);
-  await pollSaved(() => scenario.documents.drawings("IDX:001").length, { timeout: 15_000 }).toBe(1);
+  await pollRetried(page, () => scenario.documents.drawings("IDX:001").length, { timeout: 15_000 }).toBe(1);
   const added = saved(scenario).windows.filter((w) => w.kind === "chart").at(-1)!;
   expect(scenario.documents.drawings("IDX:001")[0]!.scope).toEqual({ kind: "cell", layoutId: DEFAULT_LAYOUT_ID, windowId: added.id });
   await expect(drawingFailed(page)).toHaveCount(0);
@@ -320,6 +326,7 @@ test("서버가 끊긴 동안 더한 차트 창에 그리고 새로고침해도 
   drawInCells(scenario);
   let down = false;
   scenario.on((url, request) => down && (isPut("/api/layouts/")(url, request) || isPut("/api/drawings/")(url, request)), () => unavailable);
+  await page.clock.install({ time: scenario.now });
   await page.goto("/");
   await expect(cell(page)).toHaveAttribute("aria-busy", "false");
   down = true;
@@ -330,7 +337,7 @@ test("서버가 끊긴 동안 더한 차트 창에 그리고 새로고침해도 
   down = false;
   await page.reload();
   await expect(cell(page, 2)).toHaveAttribute("aria-busy", "false");
-  await pollSaved(() => scenario.documents.drawings("IDX:001").length, { timeout: 20_000 }).toBe(1);
+  await pollRetried(page, () => scenario.documents.drawings("IDX:001").length, { timeout: 20_000 }).toBe(1);
   expect(saved(scenario).windows.filter((w) => w.kind === "chart")).toHaveLength(2);
   await expect(drawingFailed(page)).toHaveCount(0);
 });
@@ -346,6 +353,7 @@ test("드로잉 저장이 오가는 중에 그 차트 창을 닫아도 실패 �
     const value: DrawingInput = request.postDataJSON();
     return scenario.documents.hasScope(value.scope) ? { body: scenario.documents.saveDrawing(value) } : { status: 400, body: { error: { code: "bad_request", message: "드로잉 범위의 차트 창이 없습니다", reason: null, retryAt: null, manualActionRequired: false } } };
   });
+  await page.clock.install({ time: scenario.now });
   await page.goto("/");
   await expect(cell(page, 2)).toHaveAttribute("aria-busy", "false");
   await lockDrawing(page, 2);
@@ -353,7 +361,7 @@ test("드로잉 저장이 오가는 중에 그 차트 창을 닫아도 실패 �
   await closeButton(page, "칸 2 삼성전자").click();
   await pollSaved(() => saved(scenario).windows.filter((w) => w.kind === "chart").length).toBe(1);
   release();
-  await pollSaved(() => scenario.documents.drawings("005930")[0], { timeout: 15_000 }).toMatchObject({ locked: true, scope: layoutScope });
+  await pollRetried(page, () => scenario.documents.drawings("005930")[0], { timeout: 15_000 }).toMatchObject({ locked: true, scope: layoutScope });
   await expect(drawingFailed(page)).toHaveCount(0);
   await expect(page.getByRole("alert").filter({ hasText: "저장하지 못했습니다" })).toHaveCount(0);
 });
@@ -368,6 +376,7 @@ for (const edit of ["새 드로잉", "탭을 고른 뒤 잠그기"] as const) {
       drawingPuts += 1;
       return { status: 400, body: { error: { code: "bad_request", message: "group: at most 100 characters", reason: null, retryAt: null, manualActionRequired: false } } };
     });
+    await page.clock.install({ time: scenario.now });
     await page.goto("/");
     await expect(cell(page, 2)).toHaveAttribute("aria-busy", "false");
     if (edit === "새 드로잉") await drawLine(page, 2);
@@ -375,7 +384,7 @@ for (const edit of ["새 드로잉", "탭을 고른 뒤 잠그기"] as const) {
       await lockDrawing(page, 2);
     }
     await expect(drawingFailed(page)).toHaveCount(1);
-    await page.waitForTimeout(6_000);
+    await passRetryWindow(page);
     expect(drawingPuts).toBe(1);
   });
 }
@@ -391,6 +400,7 @@ test("닫기 저장의 응답이 오기 전에 되돌리고 그 창에 그려도
     await gate;
     return { body };
   });
+  await page.clock.install({ time: scenario.now });
   await page.goto("/");
   await expect(cell(page, 2)).toHaveAttribute("aria-busy", "false");
   await closeButton(page, "칸 2 삼성전자").click();
@@ -400,7 +410,7 @@ test("닫기 저장의 응답이 오기 전에 되돌리고 그 창에 그려도
   await drawLine(page, 2);
   await pollSaved(() => scenario.requests.filter((r) => isPut("/api/drawings/")(new URL(r.url()), r)).length).toBeGreaterThan(0);
   release();
-  await pollSaved(() => scenario.documents.drawings("005930").map((d) => d.scope), { timeout: 15_000 }).toEqual([{ kind: "cell", layoutId: DEFAULT_LAYOUT_ID, windowId: "cell-1" }]);
+  await pollRetried(page, () => scenario.documents.drawings("005930").map((d) => d.scope), { timeout: 15_000 }).toEqual([{ kind: "cell", layoutId: DEFAULT_LAYOUT_ID, windowId: "cell-1" }]);
   await expect(drawingFailed(page)).toHaveCount(0);
 });
 
@@ -408,6 +418,7 @@ test("저장하지 못한 레이아웃 사본으로 다시 열어도 서버가 �
   twoSamsungCharts(scenario);
   drawInCells(scenario);
   scenario.on((url, request) => isPut("/api/layouts/")(url, request), () => unavailable);
+  await page.clock.install({ time: scenario.now });
   await page.goto("/");
   await expect(cell(page, 2)).toHaveAttribute("aria-busy", "false");
   await closeButton(page, "스크리너").click();
@@ -422,7 +433,7 @@ test("저장하지 못한 레이아웃 사본으로 다시 열어도 서버가 �
   await expect(tab(page, "스크리너")).toHaveCount(0);
   await drawLine(page, 2);
   await expect(drawingFailed(page)).toHaveCount(1);
-  await page.waitForTimeout(6_000);
+  await passRetryWindow(page);
   expect(drawingPuts).toBe(1);
 });
 
@@ -450,6 +461,7 @@ test("새 창 레이아웃이 서버에 닿기 전에 거절된 드로잉은 그
     if (drawingPuts === 1) await drawingGate;
     return known ? { body: scenario.documents.saveDrawing(value) } : scopeRejected;
   });
+  await page.clock.install({ time: scenario.now });
   await page.goto("/");
   await expect(cell(page)).toHaveAttribute("aria-busy", "false");
   await addWindow(page, "차트");
@@ -460,7 +472,7 @@ test("새 창 레이아웃이 서버에 닿기 전에 거절된 드로잉은 그
   releaseLayout();
   await pollSaved(() => layoutAnswered).toBe(true);
   releaseDrawing();
-  await pollSaved(() => scenario.documents.drawings("IDX:001").length, { timeout: 15_000 }).toBe(1);
+  await pollRetried(page, () => scenario.documents.drawings("IDX:001").length, { timeout: 15_000 }).toBe(1);
   await expect(drawingFailed(page)).toHaveCount(0);
 });
 
@@ -486,6 +498,7 @@ test("서버가 반영하고 연결이 끊긴 닫기 저장 뒤 되돌려 그린
     const value: DrawingInput = request.postDataJSON();
     return scenario.documents.hasScope(value.scope) ? { body: scenario.documents.saveDrawing(value) } : scopeRejected;
   });
+  await page.clock.install({ time: scenario.now });
   await page.goto("/");
   await expect(cell(page, 2)).toHaveAttribute("aria-busy", "false");
   await closeButton(page, "칸 2 삼성전자").click();
@@ -497,7 +510,7 @@ test("서버가 반영하고 연결이 끊긴 닫기 저장 뒤 되돌려 그린
   await pollSaved(() => drawingPuts).toBe(1);
   await expect(drawingFailed(page)).toHaveCount(0);
   releaseSecond();
-  await pollSaved(() => scenario.documents.drawings("005930").map((d) => d.scope), { timeout: 15_000 }).toEqual([{ kind: "cell", layoutId: DEFAULT_LAYOUT_ID, windowId: "cell-1" }]);
+  await pollRetried(page, () => scenario.documents.drawings("005930").map((d) => d.scope), { timeout: 15_000 }).toEqual([{ kind: "cell", layoutId: DEFAULT_LAYOUT_ID, windowId: "cell-1" }]);
   await expect(drawingFailed(page)).toHaveCount(0);
 });
 
@@ -530,6 +543,7 @@ test("드로잉이 서버에 머무는 사이 그 창을 닫았다 되돌려도 
     if (drawingPuts === 1) { drawingJudged = true; await drawingGate; }
     return known ? { body: scenario.documents.saveDrawing(value) } : scopeRejected;
   });
+  await page.clock.install({ time: scenario.now });
   await page.goto("/");
   await expect(cell(page, 2)).toHaveAttribute("aria-busy", "false");
   await drawLine(page, 2);
@@ -541,7 +555,7 @@ test("드로잉이 서버에 머무는 사이 그 창을 닫았다 되돌려도 
   releaseClose();
   await pollSaved(() => undoAnswered).toBe(true);
   releaseDrawing();
-  await pollSaved(() => scenario.documents.drawings("005930").map((d) => d.scope), { timeout: 15_000 }).toEqual([{ kind: "cell", layoutId: DEFAULT_LAYOUT_ID, windowId: "cell-1" }]);
+  await pollRetried(page, () => scenario.documents.drawings("005930").map((d) => d.scope), { timeout: 15_000 }).toEqual([{ kind: "cell", layoutId: DEFAULT_LAYOUT_ID, windowId: "cell-1" }]);
   await expect(drawingFailed(page)).toHaveCount(0);
 });
 
