@@ -81,6 +81,21 @@ function countPuts(page: Page) {
   return puts;
 }
 
+test("휴대폰 스크리너 머리에는 조건 목록과 대상·제외 줄이 없다", async ({ scenario, page }) => {
+  const mixed: Screen = { id: "m", name: "요약 없는 식", markets: ["kosdaq"], exclude: ["etf"], conditions: [{ kind: "new_high", period: "W", recentBars: 5, field: "close", n: 52 }] };
+  await startPhone(scenario, page, [mixed, screenOf("plain", "전 종목 식")]);
+  await expect(screenChooser(page)).toHaveAccessibleName("조건식: 요약 없는 식");
+  await expect(panel(page).getByRole("list", { name: "조건" })).toHaveCount(0);
+  await expect(panel(page).getByText("대상", { exact: true })).toHaveCount(0);
+  await expect(panel(page).getByText("제외", { exact: true })).toHaveCount(0);
+  await screenChooser(page).click();
+  await page.getByRole("menuitemradio", { name: "전 종목 식" }).click();
+  await expect(screenChooser(page)).toHaveAccessibleName("조건식: 전 종목 식");
+  await expect(panel(page).getByText("전 종목 대상")).toHaveCount(0);
+  const editing = await editChosen(page);
+  await expect(editing.getByRole("group", { name: "시장" })).toBeVisible();
+});
+
 test("휴대폰에서 고친 것이 있을 때만 저장하고, 저장하면 그 조건식을 고른 채 대화상자를 닫는다", async ({ scenario, page }) => {
   await startPhone(scenario, page, [screenOf("a", "기존 식")]);
   const editing = await editChosen(page);
