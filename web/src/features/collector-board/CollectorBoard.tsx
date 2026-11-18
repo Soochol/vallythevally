@@ -6,11 +6,20 @@ import type { CollectorUniverseChanges } from "../../api/generated/CollectorUniv
 import { useCollectorStatus } from "../../api/collector";
 import { Skeleton, ErrorState } from "../overlay/State";
 import { useNotificationAccess } from "./alerts";
+import { BoardErrorBoundary } from "./BoardErrorBoundary";
 import { CollectorStore } from "./CollectorStore";
-import { alertKindLabel, BANNERS, dateText, keyStateOf, KEY_ROLE, messageRateText, phaseLabel, receivedAtText, restText, VERDICT } from "./labels";
+import { alertKindLabel, bannerOf, dateText, keyStateOf, KEY_ROLE, messageRateText, phaseLabel, receivedAtIso, receivedAtText, restText, VERDICT } from "./labels";
 import { Cell, Empty, Section, Status, Table, toneText } from "./parts";
 
 export function CollectorBoard() {
+  return (
+    <BoardErrorBoundary>
+      <BoardContent />
+    </BoardErrorBoundary>
+  );
+}
+
+function BoardContent() {
   const status = useCollectorStatus();
   if (status.isPending) return <Skeleton label="수집 현황판을 불러오는 중" />;
   if (status.isError) return <ErrorState message="수집 현황을 불러오지 못했습니다" retry={() => void status.refetch()} />;
@@ -29,13 +38,14 @@ export function CollectorBoard() {
 }
 
 function DaemonBand({ page }: { page: CollectorStatusPage }) {
-  const banner = BANNERS[page.judgment];
+  const banner = bannerOf(page.judgment);
+  const receivedIso = page.received_at === null ? null : receivedAtIso(page.received_at);
   const notifications = useNotificationAccess();
   return (
     <div role={banner.alert ? "alert" : "status"} aria-label="감독 데몬" data-judgment={page.judgment} className={`flex flex-wrap items-center gap-x-4 gap-y-2 rounded-m border px-4 py-3 ${banner.alert ? "border-current bg-[color-mix(in_srgb,currentColor_12%,transparent)]" : "border-line bg-surface"} ${toneText(banner.tone)}`}>
       <Status tone={banner.tone}><strong className="text-m font-semibold">{banner.title}</strong></Status>
       <span className="text-s text-text-2">
-        {page.received_at === null ? "받은 상태 없음" : <>마지막으로 받은 상태 <time dateTime={new Date(page.received_at * 1000).toISOString()}>{receivedAtText(page.received_at)}</time></>}
+        {page.received_at === null ? "받은 상태 없음" : receivedIso === null ? <>마지막으로 받은 상태 {receivedAtText(page.received_at)}</> : <>마지막으로 받은 상태 <time dateTime={receivedIso}>{receivedAtText(page.received_at)}</time></>}
       </span>
       <span className="ml-auto text-s text-text-2">
         {notifications.access === "default" && <button type="button" className="tb-btn" onClick={notifications.ask}>브라우저 알림 허용</button>}
@@ -124,7 +134,7 @@ function Universe({ changes, alerts }: { changes: CollectorUniverseChanges | nul
       )}
       {notes.length > 0 && (
         <ul aria-label="종목 목록 안내" className="flex flex-col gap-1 text-m text-warning">
-          {notes.map((n, i) => <li key={`${n.at}-${i}`}>{n.message}</li>)}
+          {notes.map((n, i) => <li key={`${n.at}-${i}`} className="break-words [overflow-wrap:anywhere]">{n.message}</li>)}
         </ul>
       )}
     </Section>
@@ -138,7 +148,7 @@ function Observation({ day }: { day: CollectorStatus["observation_day"] }) {
       {day === null || verdict === null ? <Empty>아직 판단 전입니다.</Empty> : (
         <>
           <Status tone={verdict.tone}><strong className="text-m font-semibold">{verdict.label}</strong></Status>
-          {day.reasons.length === 0 ? <Empty>적힌 근거가 없습니다.</Empty> : <ul aria-label="관측일 판단 근거" className="list-disc pl-5 text-m">{day.reasons.map((r) => <li key={r}>{r}</li>)}</ul>}
+          {day.reasons.length === 0 ? <Empty>적힌 근거가 없습니다.</Empty> : <ul aria-label="관측일 판단 근거" className="list-disc pl-5 text-m">{day.reasons.map((r) => <li key={r} className="break-words [overflow-wrap:anywhere]">{r}</li>)}</ul>}
         </>
       )}
     </Section>

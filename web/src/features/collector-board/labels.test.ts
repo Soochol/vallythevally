@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { alertKindLabel, BANNERS, bytesText, coverageRatio, daemonAlertText, dateText, keyStateOf, messageRateText, phaseLabel, receivedAtText, restText } from "./labels";
+import { alertKindLabel, bannerOf, BANNERS, bytesText, coverageRatio, daemonAlertText, dateText, keyStateOf, messageRateText, phaseLabel, receivedAtText, restText } from "./labels";
 
 describe("수집 현황판 표시 규칙", () => {
   test("REST 작업이 없으면 없음이고 있으면 끝난 수 / 계획한 수다", () => {
@@ -17,6 +17,11 @@ describe("수집 현황판 표시 규칙", () => {
     expect(Object.entries(BANNERS).filter(([, b]) => b.alert).map(([j]) => j).sort()).toEqual(["down", "unresponsive", "version_mismatch"]);
     expect(BANNERS.healthy.alert).toBe(false);
     expect(BANNERS.checking.alert).toBe(false);
+  });
+
+  test("모르는 판단은 값 그대로 보이고 경고가 아니다", () => {
+    expect(bannerOf("starting" as never)).toEqual({ tone: "idle", title: "starting", alert: false });
+    expect(bannerOf("down")).toBe(BANNERS.down);
   });
 
   test("화면 안 알림 문구는 꺼짐과 응답 없음에만 있다", () => {
@@ -37,6 +42,7 @@ describe("수집 현황판 표시 규칙", () => {
   test("날짜·시각·크기·커버리지 비율의 표기", () => {
     expect(dateText(20261118)).toBe("2026-11-18");
     expect(receivedAtText(Date.parse("2026-11-18T09:30:12+09:00") / 1000)).toBe("2026-11-18 09:30:12");
+    expect(receivedAtText(9e12)).toBe("알 수 없는 시각");
     expect(bytesText(512)).toBe("512 B");
     expect(bytesText(30 * 1024 ** 3)).toBe("30.0 GB");
     expect(bytesText(2048 * 1024 ** 3)).toBe("2.0 TB");
