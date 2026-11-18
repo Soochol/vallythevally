@@ -8,6 +8,7 @@ import { HANDLE_HIT_PX } from "../../chart/drawings/geometry";
 import { ColorPicker } from "../color/ColorPicker";
 import { surfaceFor } from "../../chart/drawings/DrawingSurface";
 import { drawingSync, useDrawingVersion } from "../../chart/drawings/sync";
+import { layoutReceipt } from "../../persist/layoutReceipt";
 import { toolOf } from "../../chart/drawings/tools";
 import type { DrawingBody } from "../../chart/drawings/types";
 import { DESKTOP_QUERY, useMediaQuery } from "../../lib/media";
@@ -24,7 +25,7 @@ import { avoidDock, type Edges } from "./dockSpot";
 
 export function DrawingOverlay({ cellId }: { cellId: WindowId }) {
   const desktop = useMediaQuery(DESKTOP_QUERY);
-  const session = useDrawingSession(); const sync = drawingSync(useQueryClient()); useDrawingVersion(sync);
+  const session = useDrawingSession(); const sync = drawingSync(useQueryClient(), layoutReceipt); useDrawingVersion(sync);
   const root = useRef<HTMLDivElement>(null);
   const surface = surfaceFor(cellId);
   if (!desktop || !surface) return null;
