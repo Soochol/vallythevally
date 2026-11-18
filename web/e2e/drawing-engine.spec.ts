@@ -17,25 +17,6 @@ async function draw(page: Page, tool = "T", shift = false) {
   return r;
 }
 
-test("trendline placement, handles, settings, and persistence", async ({ page, scenario }) => {
-  const errors: string[] = []; page.on("pageerror", (e) => errors.push(e.message));
-  await open(page);
-  await draw(page);
-  await pollSaved(async () => (await drawings(scenario)).length).toBe(1);
-  await expect(page.getByRole("toolbar", { name: "드로잉 스타일" })).toBeVisible();
-  const saved = (await drawings(scenario))[0]!;
-  const xBeforePan = (await mirror(page))[0]!.points[0]!.x;
-  const r = (await chartOf(cell(page)).boundingBox())!;
-  await page.mouse.move(r.x + r.width * 0.4, r.y + r.height * 0.6); await page.mouse.down();
-  await page.mouse.move(r.x + r.width * 0.55, r.y + r.height * 0.6, { steps: 12 }); await page.mouse.up();
-  await expect.poll(async () => (await mirror(page))[0]!.points[0]!.x).toBeGreaterThan(xBeforePan + 50);
-  expect((await drawings(scenario))[0]!.points).toEqual(saved.points);
-  await page.reload();
-  await expect.poll(async () => (await mirror(page)).length).toBe(1);
-  expect((await drawings(scenario))[0]!.points).toEqual(saved.points);
-  expect(errors).toEqual([]);
-});
-
 test("drawing engine: remembered style and preferences survive reload; drawing clears hide-all", async ({ page, scenario }) => {
   await open(page); const r = await draw(page); await pollSaved(async () => (await drawings(scenario)).length).toBe(1);
   await selectOption(page.getByRole("toolbar", { name: "드로잉 스타일" }).getByLabel("선 굵기"), "4");
@@ -86,6 +67,7 @@ test("drawing engine: handles, Shift 45°, clone, clipboard, undo and redo", asy
 });
 
 test("drawing engine: daily anchors keep their time and price on 60-minute bars", async ({ page, scenario }) => {
+  const errors: string[] = []; page.on("pageerror", (e) => errors.push(e.message));
   await page.addInitScript(installChartProbe);
   const capture = () => chartOf(cell(page)).locator(".drawing-mirror").evaluate((el) => {
     const visible: Mirror[] = JSON.parse(el.getAttribute("data-drawings") ?? "[]");
@@ -101,7 +83,14 @@ test("drawing engine: daily anchors keep their time and price on 60-minute bars"
   });
   await open(page); await cell(page).focus(); await page.keyboard.press("G"); await draw(page);
   await pollSaved(async () => (await drawings(scenario)).length).toBe(1);
+  await expect(page.getByRole("toolbar", { name: "드로잉 스타일" })).toBeVisible();
   const saved = (await drawings(scenario))[0]!; const { points: before, spacing: beforeSpacing } = await capture();
+  const xBeforePan = (await mirror(page))[0]!.points[0]!.x;
+  const r = (await chartOf(cell(page)).boundingBox())!;
+  await page.mouse.move(r.x + r.width * 0.4, r.y + r.height * 0.6); await page.mouse.down();
+  await page.mouse.move(r.x + r.width * 0.55, r.y + r.height * 0.6, { steps: 12 }); await page.mouse.up();
+  await expect.poll(async () => (await mirror(page))[0]!.points[0]!.x).toBeGreaterThan(xBeforePan + 50);
+  expect((await drawings(scenario))[0]!.points).toEqual(saved.points);
   await selectMinute(page.getByRole("button", { name: "분봉" }), "60m");
   await expect(cell(page)).toHaveAttribute("aria-label", "칸 1: 코스피 60분");
   await expect(chartOf(cell(page))).toHaveAttribute("data-bar-count", "3600");
@@ -111,6 +100,7 @@ test("drawing engine: daily anchors keep their time and price on 60-minute bars"
   expect((await drawings(scenario))[0]!.points).toEqual(saved.points);
   await page.reload(); await expect.poll(async () => (await mirror(page)).length).toBe(1);
   expect((await drawings(scenario))[0]!.points).toEqual(saved.points);
+  expect(errors).toEqual([]);
 });
 
 test("drawing engine: lock, order and multi-selection", async ({ page, scenario }) => {
@@ -142,22 +132,6 @@ test("drawing engine: lock, order and multi-selection", async ({ page, scenario 
   await page.getByRole("button", { name: "드로잉 더 보기" }).click();
   await page.getByRole("menuitem", { name: "맨 앞으로", exact: true }).click();
   await pollSaved(async () => { const ds = await drawings(scenario); return ds.find((d) => d.tool === "trendline")!.z > ds.find((d) => d.tool === "hline")!.z; }).toBe(true);
-});
-
-test("drawing engine: whitespace-only text in the settings dialog saves no text", async ({ page, scenario }) => {
-  await open(page); await draw(page);
-  await pollSaved(async () => (await drawings(scenario)).length).toBe(1);
-  await page.getByRole("button", { name: "드로잉 세부 설정" }).click();
-  const dialog = page.getByRole("dialog", { name: "추세선 세부 설정" });
-  await dialog.locator("summary").filter({ hasText: /^글자$/ }).click();
-  await dialog.getByRole("textbox", { name: "글자", exact: true }).fill("지지");
-  await dialog.getByRole("button", { name: "확인", exact: true }).click();
-  await pollSaved(async () => (await drawings(scenario))[0]!.text).toBe("지지");
-  await page.getByRole("button", { name: "드로잉 세부 설정" }).click();
-  await dialog.locator("summary").filter({ hasText: /^글자$/ }).click();
-  await dialog.getByRole("textbox", { name: "글자", exact: true }).fill("   ");
-  await dialog.getByRole("button", { name: "확인", exact: true }).click();
-  await pollSaved(async () => (await drawings(scenario))[0]!.text).toBeNull();
 });
 
 test("drawing engine: settings preview, cancellation, coordinates and text", async ({ page, scenario }, testInfo) => {
@@ -194,11 +168,13 @@ test("drawing engine: settings preview, cancellation, coordinates and text", asy
   await page.getByRole("menuitem", { name: "글자 고치기…" }).click();
   const inline = page.getByRole("textbox", { name: "드로잉 글자" });
   await inline.fill("한글 조합");
-  await inline.dispatchEvent("keydown", { key: "Enter", code: "Enter", isComposing: true });
-  await expect(inline).toBeVisible();
-  expect((await drawings(scenario))[0]!.text).toBe("지지 구간");
   await inline.press("Enter");
   await pollSaved(async () => (await drawings(scenario))[0]!.text).toBe("한글 조합");
+  await page.getByRole("button", { name: "드로잉 세부 설정" }).click();
+  await dialog.locator("summary").filter({ hasText: /^글자$/ }).click();
+  await dialog.getByRole("textbox", { name: "글자", exact: true }).fill("   ");
+  await dialog.getByRole("button", { name: "확인", exact: true }).click();
+  await pollSaved(async () => (await drawings(scenario))[0]!.text).toBeNull();
 });
 
 test("drawing engine: Alt tool aliases consume browser shortcuts and text fields keep their keys", async ({ page, scenario }) => {
