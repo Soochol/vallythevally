@@ -1,6 +1,6 @@
 import type { QueryClient } from "@tanstack/react-query";
 import { FIX_INVALID, type RunOutcome, type ScreenEditing } from "../screener/screenEditing";
-import { screenEditingFor } from "../screener/useScreenEditing";
+import { firstScreenerWindow, screenEditingFor } from "../screener/useScreenEditing";
 import { HOTKEYS } from "../../lib/hotkeys";
 import { chartWindows, useLayoutStore } from "../../stores/layout";
 import { useSelectionStore } from "../../stores/selection";
@@ -47,5 +47,5 @@ export const DEFAULT_SEARCH_COMMANDS: readonly SearchCommand[] = [
       default: return [];
     }
   }),
-  screenerRunCommand(screenEditingFor),
+  screenerRunCommand((client) => screenEditingFor(client, firstScreenerWindow())),
 ];

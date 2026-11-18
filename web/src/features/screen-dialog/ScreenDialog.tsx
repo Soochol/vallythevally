@@ -8,6 +8,7 @@ import {
   NO_CONDITIONS_SENTENCE,
   UNIT,
 } from "../../lib/screener";
+import type { WindowId } from "../../layout/kinds";
 import { useSelectionStore } from "../../stores/selection";
 import { DialogFrame, Errors, Row } from "../dialog/DialogParts";
 import { ArrowIcon, CloseIcon, PlusIcon } from "../icons";
@@ -42,13 +43,13 @@ const CHIP =
   "h-9 rounded-m border border-line px-3 text-s text-text-2 hover:text-text " +
   "aria-pressed:border-accent aria-pressed:bg-accent-soft aria-pressed:font-[600] aria-pressed:text-accent max-md:h-9";
 export function ScreenDialog() {
-  const open = useSelectionStore((s) => s.dialog?.kind === "screen");
-  return open ? <ScreenDialogBody /> : null;
+  const dialog = useSelectionStore((s) => s.dialog);
+  return dialog?.kind === "screen" ? <ScreenDialogBody window={dialog.window} /> : null;
 }
 
-function ScreenDialogBody() {
+function ScreenDialogBody({ window }: { window: WindowId | null }) {
   const closeDialog = useSelectionStore((s) => s.closeDialog);
-  const { editing, view: { chosen } } = useScreenEditing();
+  const { editing, view: { chosen } } = useScreenEditing(window);
   const ids = useId();
   const nameRef = useRef<HTMLInputElement>(null);
   const formRef = useRef<HTMLFormElement>(null);

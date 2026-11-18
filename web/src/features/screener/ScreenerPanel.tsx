@@ -65,10 +65,10 @@ const FULL_RELOAD_CONFIRM =
 const toast = (text: string) => useSelectionStore.getState().showToast(text);
 const reasonOf = (e: unknown) => (e instanceof Error ? e.message : String(e));
 const showCommandError = (e: unknown) => toast(`업데이트 명령을 보내지 못했습니다: ${reasonOf(e)}`);
-const openDialog = () => useSelectionStore.getState().openScreenEditor();
-const createInDialog = (screenEditing: ScreenEditing) => {
+const openDialog = (window: WindowId | null) => useSelectionStore.getState().openScreenEditor(window);
+const createInDialog = (screenEditing: ScreenEditing, window: WindowId | null) => {
   screenEditing.create();
-  openDialog();
+  openDialog(window);
 };
 const count = (n: number) => n.toLocaleString("ko-KR");
 
@@ -97,9 +97,9 @@ function useMenuToggle() {
   return { open, toggle: () => setOpen((o) => !o), close, root, button };
 }
 
-export function ScreenerBadge() {
+export function ScreenerBadge({ id }: { id: WindowId | null }) {
   const updating = isUpdating(useStoreStatus(RAIL_POLL_MS).data);
-  const shown = shownResult(useScreenEditing().view.chosen?.run ?? null)?.rows.length;
+  const shown = shownResult(useScreenEditing(id).view.chosen?.run ?? null)?.rows.length;
   if (updating) {
     return (
       <span className="text-accent">
@@ -130,7 +130,7 @@ export function PhoneScreener() {
 }
 
 export function ScreenerPanel({ id }: { id: WindowId | null }) {
-  const { editing: screenEditing, view, query: screens } = useScreenEditing();
+  const { editing: screenEditing, view, query: screens } = useScreenEditing(id);
   const desktop = useMediaQuery(DESKTOP_QUERY);
   const { chosen } = view;
   const screen = chosen?.screen ?? null;
@@ -154,10 +154,9 @@ export function ScreenerPanel({ id }: { id: WindowId | null }) {
   };
   const createInPanel = () => {
     screenEditing.create();
-    useLayoutStore.getState().showWindow("screener");
     setEditing(true);
   };
-  const createScreen = desktop ? createInPanel : () => createInDialog(screenEditing);
+  const createScreen = desktop ? createInPanel : () => createInDialog(screenEditing, id);
   useResultKeys({ rows, active, onSelect: select, onRun: execute });
   useEffect(() => dropPendingOpen, []);
   const band = status !== undefined && showsUpdateBand(status);
@@ -171,7 +170,7 @@ export function ScreenerPanel({ id }: { id: WindowId | null }) {
           {chosen && desktop ? (
             <SentenceEditor screenEditing={screenEditing} chosen={chosen} entries={view.entries} blocked={!status || block !== null} resultActions={<PanelMenu screen={screen} rows={rows} status={status} />} editing={editing} onEditingChange={setEditing} onRun={execute} />
           ) : chosen ? (
-            <ScreenHeader screenEditing={screenEditing} chosen={chosen} entries={view.entries} block={block} status={status} rows={rows} onRun={execute} />
+            <ScreenHeader windowId={id} screenEditing={screenEditing} chosen={chosen} entries={view.entries} block={block} status={status} rows={rows} onRun={execute} />
           ) : (
             <header className="flex h-11 flex-none items-center gap-1 border-b border-line pl-3 pr-1.5">
               <h2 className="text-l font-[700]">스크리너</h2>
@@ -183,7 +182,7 @@ export function ScreenerPanel({ id }: { id: WindowId | null }) {
         </div>
         <div className="min-h-0 flex-1 overflow-y-auto">
           {screen ? (
-            <Results screen={screen} run={run} rows={rows} status={status} block={block} onRun={execute} onEdit={desktop ? () => setEditing(true) : openDialog} selected={active} onSelect={select} />
+            <Results screen={screen} run={run} rows={rows} status={status} block={block} onRun={execute} onEdit={desktop ? () => setEditing(true) : () => openDialog(id)} selected={active} onSelect={select} />
           ) : (
             <NoScreen query={screens} onCreate={createScreen} />
           )}
@@ -226,6 +225,7 @@ function useResultKeys({ rows, active, onSelect, onRun }: ResultKeys) {
 }
 
 interface HeaderProps {
+  windowId: WindowId | null;
   screenEditing: ScreenEditing;
   chosen: ChosenScreen;
   entries: readonly ScreenEntry[];
@@ -247,17 +247,17 @@ function runHint(block: RunBlock | null, status: ScreenerStatus | undefined): Re
   return "실행할 때 KRX 최신 자료를 수집합니다";
 }
 
-function ScreenHeader({ screenEditing, chosen, entries, block, status, rows, onRun }: HeaderProps) {
+function ScreenHeader({ windowId, screenEditing, chosen, entries, block, status, rows, onRun }: HeaderProps) {
   const { screen } = chosen;
   const running = chosen.run?.kind === "running";
   return (
     <header className="flex-none border-b border-line px-3 pb-3 pt-2">
       <div className="flex items-center gap-1">
         <FinancialUpdateButton className="md:hidden" />
-        <ScreenPicker screenEditing={screenEditing} entries={entries} chosen={chosen} />
+        <ScreenPicker windowId={windowId} screenEditing={screenEditing} entries={entries} chosen={chosen} />
         {chosen.dirty && <ChangedBadge />}
         <span className="flex-1" />
-        <button type="button" className="tb-btn h-7 gap-1 px-2 text-s text-text-2" title="조건식 편집" onClick={openDialog}>
+        <button type="button" className="tb-btn h-7 gap-1 px-2 text-s text-text-2" title="조건식 편집" onClick={() => openDialog(windowId)}>
           <PenIcon size={14} />
           편집
         </button>
@@ -283,13 +283,13 @@ function ScreenHeader({ screenEditing, chosen, entries, block, status, rows, onR
   );
 }
 
-function ScreenPicker({ screenEditing, entries, chosen }: { screenEditing: ScreenEditing; entries: readonly ScreenEntry[]; chosen: ChosenScreen }) {
+function ScreenPicker({ windowId, screenEditing, entries, chosen }: { windowId: WindowId | null; screenEditing: ScreenEditing; entries: readonly ScreenEntry[]; chosen: ChosenScreen }) {
   const menu = useMenuToggle();
   const name = chosen.title;
   const items: MenuItem[] = [
     ...entries.map((entry): MenuItem => ({ kind: "radio", label: entry.title, hint: entry.dirty ? CHANGED : undefined, checked: entry.source.id === chosen.source.id, onSelect: () => { dropPendingOpen(); screenEditing.choose(entry.source.id); } })),
     { kind: "separator" },
-    { kind: "action", label: "새 조건식…", onSelect: () => createInDialog(screenEditing) },
+    { kind: "action", label: "새 조건식…", onSelect: () => createInDialog(screenEditing, windowId) },
   ];
   return (
     <div ref={menu.root} className="relative -ml-1.5 min-w-0">

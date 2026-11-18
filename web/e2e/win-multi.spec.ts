@@ -3,6 +3,7 @@ import type { FeedBook } from "../src/api/generated/FeedBook";
 import type { LayoutWindow } from "../src/api/generated/LayoutWindow";
 import { type Scenario, cell, DEFAULT_LAYOUT_ID, expect, pollSaved, test } from "./harness";
 import { BASE, CODE, ordersOn, pinQuote, snapshot, tradingApi, win } from "./order-window";
+import { readyStatus, resultRows } from "./fixtures/screener";
 
 const SETTINGS = { v: 1, style: "candle", scale: "normal", indicators: [], compare: [], panels: [] };
 const WINDOW_LIMIT = "창은 50개까지 둘 수 있습니다";
@@ -233,4 +234,81 @@ test("한 묶음에 탭 20개가 있을 때 마지막 탭을 단축키나 복제
   await page.getByRole("menu", { name: "창 배치" }).getByRole("menuitem", { name: "복제" }).click();
   await expect(tabOf(page, "trades-20")).toHaveAttribute("aria-selected", "true");
   await expect(tabOf(page, "trades-20")).toBeInViewport({ ratio: 1 });
+});
+
+const SCREEN_A = { id: "scr-a", name: "조건식 가", markets: [], exclude: [], conditions: [] };
+const SCREEN_B = { id: "scr-b", name: "조건식 나", markets: [], exclude: [], conditions: [] };
+const SCREENER_WINDOWS: LayoutWindow[] = [{ id: "screener", link: null, kind: "screener" }, { id: "screener-2", link: null, kind: "screener" }];
+
+const screenerPanels = (page: Page) => page.getByRole("complementary", { name: "스크리너" });
+const screenerRows = (panel: Locator) => panel.locator("tr[data-code]");
+const screenChooser = (panel: Locator) => panel.getByRole("button", { name: "조건식 고르기", exact: true });
+const savedScreens = (scenario: Scenario) => savedWindows(scenario, "screener").map((w) => [w.id, "screen" in w ? w.screen : undefined]);
+
+async function chooseScreen(page: Page, panel: Locator, name: string) {
+  await screenChooser(panel).click();
+  await page.getByRole("menu", { name: "조건식 고르기" }).getByRole("menuitemradio", { name }).click();
+  await expect(screenChooser(panel)).toHaveText(name);
+}
+
+async function runIn(panel: Locator) {
+  await panel.getByRole("button", { name: "실행", exact: true }).click();
+}
+
+function seedScreenerWindows(scenario: Scenario, windows: LayoutWindow[] = SCREENER_WINDOWS) {
+  scenario.documents.saveScreens({ screens: [SCREEN_A, SCREEN_B], revision: 1 });
+  scenario.on("/api/screener/status", () => ({ body: readyStatus() }));
+  scenario.on("/api/screener/run", (request) => ({
+    body: request.postDataJSON().id === SCREEN_B.id
+      ? resultRows([["110040", "나종목", "당일"], ["110050", "나둘", "당일"]])
+      : resultRows([["110030", "가종목", "당일"]]),
+  }));
+  const layout = saved(scenario);
+  const rects = { "cell-0": { x: 0, y: 0, w: .3, h: .3 }, "cell-1": { x: .3, y: 0, w: .3, h: .3 }, screener: { x: .02, y: .05, w: .46, h: .9 }, "screener-2": { x: .52, y: .05, w: .46, h: .9 } };
+  scenario.documents.saveLayout({ ...layout, windows: [...charts, ...windows], placement: { v: 1, dock: null, canvas: { rects, order: ["cell-0", "cell-1", "screener", "screener-2"] } }, revision: layout.revision + 1 });
+  scenario.documents.saveUiState({ ...scenario.documents.uiState(), layoutMode: "canvas" });
+}
+
+test("스크리너 창 둘에서 각자 다른 조건식을 고르고 실행하면 결과가 각자 다르고 창마다 고른 조건식이 저장되며 새로 고쳐도 그대로다", async ({ page, scenario }) => {
+  seedScreenerWindows(scenario);
+  await open(page);
+  const panels = screenerPanels(page);
+  await expect(panels).toHaveCount(2);
+  await expect(screenChooser(panels.nth(0))).toHaveText(SCREEN_A.name);
+  await expect(screenChooser(panels.nth(1))).toHaveText(SCREEN_A.name);
+
+  await chooseScreen(page, panels.nth(1), SCREEN_B.name);
+  await expect(screenChooser(panels.nth(0))).toHaveText(SCREEN_A.name);
+  await runIn(panels.nth(0));
+  await runIn(panels.nth(1));
+  await expect(screenerRows(panels.nth(0))).toHaveCount(1);
+  await expect(screenerRows(panels.nth(1))).toHaveCount(2);
+  await expect(screenerRows(panels.nth(0)).first()).toHaveAttribute("data-code", "110030");
+  await expect(screenerRows(panels.nth(1)).first()).toHaveAttribute("data-code", "110040");
+  await pollSaved(() => savedScreens(scenario)).toEqual([["screener", undefined], ["screener-2", SCREEN_B.id]]);
+
+  await chooseScreen(page, panels.nth(0), SCREEN_A.name);
+  await pollSaved(() => savedScreens(scenario)).toEqual([["screener", SCREEN_A.id], ["screener-2", SCREEN_B.id]]);
+
+  await page.reload();
+  await expect(cell(page)).toHaveAttribute("aria-busy", "false");
+  await expect(screenChooser(screenerPanels(page).nth(0))).toHaveText(SCREEN_A.name);
+  await expect(screenChooser(screenerPanels(page).nth(1))).toHaveText(SCREEN_B.name);
+});
+
+test("둘째 스크리너 창에서 편집 창을 열면 둘째 창의 조건식이 열린다", async ({ page, scenario }) => {
+  seedScreenerWindows(scenario, [{ id: "screener", link: null, kind: "screener", screen: SCREEN_A.id }, { id: "screener-2", link: null, kind: "screener", screen: SCREEN_B.id }]);
+  await open(page);
+  const panels = screenerPanels(page);
+  await panels.nth(1).getByRole("button", { name: "편집", exact: true }).click();
+  await expect(page.getByRole("dialog", { name: "조건 편집 창", exact: true }).getByRole("textbox", { name: "조건식 이름", exact: true })).toHaveValue(SCREEN_B.name);
+  await expect(screenChooser(panels.nth(0))).toHaveText(SCREEN_A.name);
+});
+
+test("screen이 없는 옛 레이아웃의 스크리너 창은 첫 조건식을 보이고, 가리키던 조건식이 없어져도 첫 조건식을 보인다", async ({ page, scenario }) => {
+  seedScreenerWindows(scenario, [{ id: "screener", link: null, kind: "screener" }, { id: "screener-2", link: null, kind: "screener", screen: "지워진 조건식" }]);
+  await open(page);
+  const panels = screenerPanels(page);
+  await expect(screenChooser(panels.nth(0))).toHaveText(SCREEN_A.name);
+  await expect(screenChooser(panels.nth(1))).toHaveText(SCREEN_A.name);
 });
