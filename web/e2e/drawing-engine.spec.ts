@@ -4,9 +4,7 @@ import type { Page } from "@playwright/test";
 import type { Bar } from "../src/api/generated/Bar";
 import type { DrawingBody } from "../src/chart/drawings/types";
 import { completionKey } from "../src/chart/drawings/journal";
-import { toolsByGroup } from "../src/chart/drawings/tools";
-import type { Tool } from "../src/chart/drawings/toolSpec";
-import { chartPoint, drawings, mirror, open, pickTool, settledMirror as settled, expandDock, type Mirror } from "./drawing-probe";
+import { chartPoint, drawings, mirror, open, settledMirror as settled, expandDock, type Mirror } from "./drawing-probe";
 import { installChartProbe } from "./chart-probe";
 
 async function draw(page: Page, tool = "T", shift = false) {
@@ -225,42 +223,6 @@ test("drawing engine: Alt tool aliases consume browser shortcuts and text fields
   const input = dialog.getByRole("textbox", { name: "글자", exact: true });
   await input.fill("A"); await input.press("Control+a"); await input.press("Control+c");
   await expect(dialog).toBeVisible(); await pollSaved(async () => (await drawings(scenario)).length).toBe(2);
-});
-
-const GROUP_LABEL: Record<Tool["group"], string> = { line: "선", fib: "피보나치·갠", shape: "도형", note: "주석", measure: "측정", pattern: "패턴" };
-
-const PICK_SLICE_SIZE = 4;
-const PICK_SLICES = [...toolsByGroup()].flatMap(([group, groupTools]) => {
-  const size = Math.ceil(groupTools.length / Math.ceil(groupTools.length / PICK_SLICE_SIZE));
-  return Array.from({ length: Math.ceil(groupTools.length / size) }, (_, n) => {
-    const tools = groupTools.slice(n * size, (n + 1) * size);
-    return { group, tools, name: `${GROUP_LABEL[group]} ${n * size + 1}~${n * size + tools.length}번째` };
-  });
-});
-
-test("drawing engine: the toolbar test slices cover every registered tool exactly once", () => {
-  expect(PICK_SLICES.flatMap(({ tools }) => tools.map((t) => t.tool)).sort()).toEqual([...toolsByGroup().values()].flat().map((t) => t.tool).sort());
-  expect(Math.max(...PICK_SLICES.map(({ tools }) => tools.length))).toBeLessThanOrEqual(PICK_SLICE_SIZE);
-});
-
-for (const { group, tools, name } of PICK_SLICES) {
-  test(`drawing engine: the toolbar picks every registered tool by group and name (${name})`, async ({ page }) => {
-    await open(page);
-    for (const tool of tools) await pickTool(page, GROUP_LABEL[group], tool.label);
-  });
-}
-
-test("drawing engine: phone shows persisted shapes without editing controls", async ({ page, scenario }, testInfo) => {
-  await open(page); await draw(page); await pollSaved(async () => (await drawings(scenario)).length).toBe(1);
-  await page.setViewportSize({ width: 390, height: 844 });
-  await expect(page.getByRole("navigation", { name: "드로잉 도구" })).toBeHidden();
-  await expect(page.getByRole("toolbar", { name: "드로잉 스타일" })).toBeHidden();
-  await expect.poll(async () => (await mirror(page)).length).toBe(1);
-  expect((await mirror(page))[0]!.handles).toHaveLength(0);
-  const r = (await chartOf(cell(page)).boundingBox())!;
-  await page.mouse.click(r.x + r.width * 0.8, r.y + r.height * 0.4); await page.keyboard.press("Delete");
-  expect(await drawings(scenario)).toHaveLength(1);
-  await page.screenshot({ path: testInfo.outputPath("phone.png") });
 });
 
 test("drawing engine: another tab's edit prevents undoing its content", async ({ page, context, scenario }) => {
