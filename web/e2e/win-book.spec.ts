@@ -265,38 +265,44 @@ test("지수 종목이면 빈 상태를 보이고 호가를 구독하지 않는�
   expect(scenario.live.messages.filter((m) => m.type === "subscribe_feed")).toHaveLength(0);
 });
 
+const PREVIOUS_CLOSE_GAP = 1000;
+
 function quoteAt(scenario: Scenario, price: number, t: number) {
-  const base = previousClose(scenario);
-  return { ...scenario.market.quote(CODE)!, price, change: price - base, t };
+  return { ...scenario.market.quote(CODE)!, price, change: PREVIOUS_CLOSE_GAP, t };
+}
+
+async function openWithQuote(page: Page, scenario: Scenario, base: number, quote: () => ReturnType<typeof quoteAt>) {
+  bookWindow(scenario, CODE);
+  replyBook(scenario, base);
+  scenario.on((url) => url.pathname === "/api/quotes", () => ({ body: [quote()] }));
+  await page.goto("/");
+  await expect(cell(page)).toHaveAttribute("aria-busy", "false");
+  await windowTabs(page).getByRole("tab", { name: /^10호가/ }).click();
 }
 
 test("체결이 없어도 시세 조회 응답의 가격이 바뀌면 다음 조회 뒤 현재가 행이 옮겨 간다", async ({ page, scenario }) => {
-  const base = previousClose(scenario);
-  let price = base;
-  scenario.on((url) => url.pathname === "/api/quotes", () => ({ body: [quoteAt(scenario, price, scenario.now / 1000)] }));
+  let price = 70000;
   await page.clock.install({ time: scenario.now });
-  await open(page, scenario, base);
-  await expect(page.locator(".mw-lr[data-current]")).toContainText(base.toLocaleString("ko-KR"));
-  price = base - 100;
+  await openWithQuote(page, scenario, 70000, () => quoteAt(scenario, price, scenario.now / 1000));
+  await expect(page.locator(".mw-lr[data-current]")).toContainText("70,000");
+  price = 69900;
   await page.clock.fastForward(5000);
   await expect(page.locator(".mw-lr[data-current]")).toHaveCount(1);
-  await expect(page.locator(".mw-lr[data-current]")).toContainText((base - 100).toLocaleString("ko-KR"));
+  await expect(page.locator(".mw-lr[data-current]")).toContainText("69,900");
 });
 
 test("시세보다 늦은 체결이 현재가이고 더 이른 체결은 시세를 바꾸지 못한다", async ({ page, scenario }) => {
-  const base = previousClose(scenario);
   const quoteT = scenario.now / 1000;
-  scenario.on((url) => url.pathname === "/api/quotes", () => ({ body: [quoteAt(scenario, base, quoteT)] }));
-  await open(page, scenario, base);
+  await openWithQuote(page, scenario, 70000, () => quoteAt(scenario, 70000, quoteT));
   const tradeSub = await subOf(scenario, "trades");
-  await expect(page.locator(".mw-lr[data-current]")).toContainText(base.toLocaleString("ko-KR"));
+  await expect(page.locator(".mw-lr[data-current]")).toContainText("70,000");
 
-  scenario.live.emit({ type: "feed_trades", sub: tradeSub, seq: 1, trades: [{ t: quoteT - 10, price: base + 100, qty: 1, venue: null, strength: null }] });
-  await expect(page.locator(".mw-lr[data-current]")).toContainText(base.toLocaleString("ko-KR"));
+  scenario.live.emit({ type: "feed_trades", sub: tradeSub, seq: 1, trades: [{ t: quoteT - 10, price: 70100, qty: 1, venue: null, strength: null }] });
+  await expect(page.locator(".mw-lr[data-current]")).toContainText("70,000");
 
-  scenario.live.emit({ type: "feed_trades", sub: tradeSub, seq: 2, trades: [{ t: quoteT + 10, price: base + 200, qty: 1, venue: null, strength: null }] });
+  scenario.live.emit({ type: "feed_trades", sub: tradeSub, seq: 2, trades: [{ t: quoteT + 10, price: 70200, qty: 1, venue: null, strength: null }] });
   await expect(page.locator(".mw-lr[data-current]")).toHaveCount(1);
-  await expect(page.locator(".mw-lr[data-current]")).toContainText((base + 200).toLocaleString("ko-KR"));
+  await expect(page.locator(".mw-lr[data-current]")).toContainText("70,200");
 });
 
 test("구독 직후 끊김이 오면 호가가 오기 전에도 끊김을 보이고 사다리를 흐리게 한다", async ({ page, scenario }) => {
