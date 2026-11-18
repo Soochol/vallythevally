@@ -136,7 +136,6 @@ export function createUserData(seedWatchlist: string[], seedScreens: Screen[], n
           },
           { id: "watchlist", link: null, kind: "watchlist" },
           { id: "screener", link: null, kind: "screener" },
-          { id: "objects", link: null, kind: "objects" },
         ],
         placement: {},
         updatedAt: 0,

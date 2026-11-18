@@ -11,7 +11,7 @@ const ratio = (rect: Rect) => toRatio(rect, AREA);
 describe("새 창의 자리", () => {
   test("종류별 기본 크기로 작업 영역 가운데에 놓는다", () => {
     expect(placeNewWindow("chart", [], AREA)).toEqual({ x: 308, y: 98, w: 640, h: 420 });
-    for (const kind of ["watchlist", "screener", "objects", "indicators"] as const) expect(placeNewWindow(kind, [], AREA)).toEqual({ x: 468, y: 108, w: 320, h: 400 });
+    for (const kind of ["watchlist", "screener", "indicators"] as const) expect(placeNewWindow(kind, [], AREA)).toEqual({ x: 468, y: 108, w: 320, h: 400 });
   });
 
   test("같은 자리에 창이 있으면 오른쪽 아래로 24px씩 비켜 놓는다", () => {

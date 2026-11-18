@@ -2,7 +2,16 @@ import type { Page } from "@playwright/test";
 import { parseDrawingBody, UNSAVED_PREFIX } from "../src/chart/drawings/outbox";
 import { parseJournalRecord, STAGING_PREFIX } from "../src/chart/drawings/journal";
 import { test, expect, cell, chartOf, type Scenario } from "./harness";
-import { expandDock } from "./drawing-probe";
+import { settledMirror } from "./drawing-probe";
+
+async function selectLine(page: Page) {
+  const box = await chartOf(cell(page)).boundingBox();
+  const [line] = await settledMirror(page);
+  const point = line?.points.find((p) => p !== null && p !== undefined && box !== null && p.x > 0 && p.x < box.width * 0.9) ?? line?.points[0];
+  if (box === null || point === undefined || point === null) throw new Error("Expected the drawn line");
+  await page.mouse.click(box.x + (point.x > 0 && point.x < box.width * 0.9 ? point.x : box.width * 0.5), box.y + point.y);
+  await expect.poll(async () => (await settledMirror(page))[0]?.selected).toBe(true);
+}
 
 async function open(page: Page) {
   const loaded = page.waitForResponse((response) => response.url().includes("/api/drawings?") && response.request().method() === "GET");
@@ -28,7 +37,7 @@ async function pendingRecords(page: Page) {
 
 
 test("startup legacy read failure then late ACK retains revision maximum for backward-clock Undo", async ({ page, context, scenario }, info) => {
-  const original: Parameters<Scenario["documents"]["saveDrawing"]>[0] = { id: "01900000-0000-7000-8000-000000000053", symbol: "IDX:001", tool: "hline", points: [{ t: 1_700_000_000, price: 100 }], text: null, style: {}, locked: false, hidden: false, periods: null, z: 0, group: null, scope: { kind: "symbol" }, revision: 1 };
+  const original: Parameters<Scenario["documents"]["saveDrawing"]>[0] = { id: "01900000-0000-7000-8000-000000000053", symbol: "IDX:001", tool: "hline", points: [{ t: 1_700_000_000, price: 5_300 }], text: null, style: {}, locked: false, hidden: false, periods: null, z: 0, group: null, scope: { kind: "symbol" }, revision: 1 };
   scenario.documents.saveDrawing(original);
 
   await page.addInitScript(original => {
@@ -47,9 +56,7 @@ test("startup legacy read failure then late ACK retains revision maximum for bac
   await open(page);
   await expect(page.getByRole("button", { name: "다시 시도", exact: true }).first()).toBeVisible();
   expect(await page.evaluate(id => JSON.parse(localStorage.getItem(`vv.unsaved.drawing.${id}`) ?? "null"), original.id)).toMatchObject({ v: 1, lastRevision: 0, want: { kind: "put", body: { revision: 0 } } });
-  await expandDock(page);
-  await page.getByRole("button", { name: "개체 목록 열기" }).click();
-  await page.getByRole("button", { name: "고르기: 수평선" }).click();
+  await selectLine(page);
   let releaseDelete = () => {};
   const deleteGate = new Promise<void>(done => { releaseDelete = done; });
   let deleteStage: unknown;

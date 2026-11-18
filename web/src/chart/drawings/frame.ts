@@ -27,7 +27,7 @@ export function inScope(scope: DrawingScope, layoutId: string, cellId: WindowId)
   return scope.kind === "symbol" || (scope.layoutId === layoutId && (scope.kind === "layout" || scope.windowId === cellId));
 }
 export function visible(d: DrawingBody, where: { layoutId: string; cellId: WindowId; period: Period; hideAll: boolean }) {
-  return !where.hideAll && !d.hidden && inScope(d.scope, where.layoutId, where.cellId) && (d.periods === null || d.periods.includes(where.period));
+  return !where.hideAll && inScope(d.scope, where.layoutId, where.cellId) && (d.periods === null || d.periods.includes(where.period));
 }
 export function renderItem(drawing: DrawingBody, selected: boolean, ctx: ToolContext): RenderItem | null {
   const tool = toolOf(drawing.tool);

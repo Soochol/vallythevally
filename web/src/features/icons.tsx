@@ -126,13 +126,6 @@ export const FunnelIcon = ({ size }: P) => (
     <path d="M4 5h16l-6 7.5V19l-4-2v-4.5z" />
   </Icon>
 );
-export const DrawingsIcon = ({ size }: P) => (
-  <Icon size={size}>
-    <path d="M6.5 17.5 17.5 6.5" />
-    <circle cx="5" cy="19" r="2" />
-    <circle cx="19" cy="5" r="2" />
-  </Icon>
-);
 export const PenIcon = ({ size = 16 }: P) => (
   <Icon size={size}>
     <path d="M4 20l1.2-4.6L15.8 4.8a2 2 0 0 1 2.8 0l.6.6a2 2 0 0 1 0 2.8L8.6 18.8z" />
@@ -162,7 +155,6 @@ export const DRAWING_ICONS = {
   lockAll: "M7 10 V7 A5 5 0 0 1 17 7 V10 M5 10 H19 V21 H5 Z M12 14 V17",
   eye: "M2 12 Q12 -2 22 12 Q12 26 2 12 M9 12 A3 3 0 1 0 15 12 A3 3 0 1 0 9 12",
   trash: "M4 6 H20 M9 6 V3 H15 V6 M6 6 L7 21 H17 L18 6 M10 10 V17 M14 10 V17",
-  objects: "M9 5 H21 M9 12 H21 M9 19 H21 M3 4 H5 V6 H3 Z M3 11 H5 V13 H3 Z M3 18 H5 V20 H3 Z",
   settings: "M9 3 H15 L16 6 L19 7 L21 10 L19 12 L20 16 L17 19 L14 18 L12 21 L9 19 L5 19 L3 15 L5 12 L3 9 L6 6 L9 7 Z M9 12 A3 3 0 1 0 15 12 A3 3 0 1 0 9 12",
   trendline: "M4 20 L20 4",
   hline: "M3 12 H21",

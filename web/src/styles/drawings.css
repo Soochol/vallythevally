@@ -47,24 +47,6 @@
 .draw-grip { cursor:grab; color:var(--text-3); width:18px; height:28px; touch-action:none; font-size:20px; }
 .draw-grip:active { cursor:grabbing; }
 .draw-bar-sep { width:1px; height:20px; background:var(--line); margin:0 3px; }
-.drawing-objects { display:flex; min-height:0; flex:1; flex-direction:column; }
-.draw-objects-head { display:flex; align-items:center; flex-shrink:0; justify-content:space-between; padding:8px; color:var(--text-3); font-size:var(--fs-xs); }
-.draw-objects-head b { color:var(--text-2); font-weight:500; margin-left:5px; }
-.draw-objects-head>div { display:flex; gap:4px; }
-.draw-objects-elsewhere { padding:4px 12px; color:var(--text-3); font-size:var(--fs-xs); }
-.draw-object-group { display:flex; justify-content:space-between; padding:8px 12px; color:var(--text-2); font-size:var(--fs-xs); border-block:1px solid var(--line); }
-.draw-object-rename { flex:1; min-width:0; width:0; }
-.draw-object-rows { flex:1; overflow:auto; }
-.draw-object-row { display:flex; align-items:center; gap:2px; min-height:34px; padding:0 8px; border-bottom:1px solid color-mix(in srgb,var(--line) 40%,transparent); }
-.draw-object-row:hover { background:var(--raised); }
-.draw-object-row[data-selected=true] { background:var(--accent-soft); }
-.draw-object-row[data-hidden=true] { opacity:.5; }
-.draw-object-name { display:flex; align-items:center; min-width:0; flex:1; gap:10px; text-align:left; font-size:var(--fs-s); }
-.draw-object-name svg { flex-shrink:0; color:var(--text-2); }
-.draw-object-name span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-.draw-object-row .icon-btn { width:26px; height:26px; }
-.draw-object-row .icon-btn svg { width:17px; height:17px; }
-.draw-objects-foot { padding:12px; color:var(--text-3); border-top:1px solid var(--line); font-size:var(--fs-xs); }
 .draw-details { display:flex; flex-direction:column; width:380px; max-width:calc(100dvw - 16px); max-height:min(600px,calc(100dvh - 16px)); pointer-events:auto; font-size:var(--fs-s); }
 .draw-dialog-head { display:flex; flex-shrink:0; align-items:center; justify-content:space-between; padding:8px 12px; }
 .draw-details-body { min-height:0; overflow-y:auto; padding:4px 12px; }

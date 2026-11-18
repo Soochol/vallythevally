@@ -49,13 +49,13 @@ test.beforeEach(async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
 });
 
-test("기본 레이아웃은 왼쪽 묶음에 차트, 오른쪽 묶음에 관심종목·스크리너·개체 목록 탭을 겹치지 않게 놓는다", async ({ page }) => {
+test("기본 레이아웃은 왼쪽 묶음에 차트, 오른쪽 묶음에 관심종목·스크리너 탭을 겹치지 않게 놓는다", async ({ page }) => {
   await page.goto("/");
   await expect(cell(page)).toHaveAttribute("aria-busy", "false");
   await expect(page.locator("[data-dock-group]")).toHaveCount(2);
   await expect(tabs(page, 1).getByRole("tab")).toHaveCount(1);
   await expect(group(page, 1).getByRole("region", { name: /^칸 1: / })).toBeVisible();
-  await expect(tabs(page, 2).getByRole("tab")).toHaveText([/^관심종목/, /^스크리너/, /^개체 목록/]);
+  await expect(tabs(page, 2).getByRole("tab")).toHaveText([/^관심종목/, /^스크리너/]);
   await expect(tab(page, 2, "관심종목")).toHaveAttribute("aria-selected", "true");
   await expect(group(page, 2).getByRole("complementary", { name: "관심종목" })).toBeVisible();
   await expect(tabs(page, 1).getByRole("tab")).toHaveAttribute("data-active-cell", "");
@@ -91,15 +91,15 @@ test("탭을 누르면 창 내용이 바뀌고 키보드로도 옮기며 새로�
   await expect(group(page, 2).getByRole("complementary", { name: "스크리너" })).toBeVisible();
 
   await tab(page, 2, "스크리너").press("ArrowRight");
-  await expect(tab(page, 2, "개체 목록")).toBeFocused();
-  await expect(tab(page, 2, "개체 목록")).toHaveAttribute("aria-selected", "true");
-  await expect(group(page, 2).getByRole("region", { name: "개체 목록" })).toBeVisible();
+  await expect(tab(page, 2, "관심종목")).toBeFocused();
+  await expect(tab(page, 2, "관심종목")).toHaveAttribute("aria-selected", "true");
+  await expect(group(page, 2).getByRole("complementary", { name: "관심종목" })).toBeVisible();
+  await page.keyboard.press("End");
+  await expect(tab(page, 2, "스크리너")).toHaveAttribute("aria-selected", "true");
   await page.keyboard.press("Home");
   await expect(tab(page, 2, "관심종목")).toBeFocused();
-  await page.keyboard.press("End");
-  await expect(tab(page, 2, "개체 목록")).toHaveAttribute("aria-selected", "true");
-  await page.keyboard.press("ArrowRight");
-  await expect(tab(page, 2, "관심종목")).toHaveAttribute("aria-selected", "true");
+  await page.keyboard.press("ArrowLeft");
+  await expect(tab(page, 2, "스크리너")).toHaveAttribute("aria-selected", "true");
 });
 
 test("경계를 끌면 두 묶음의 폭이 바뀌어 저장되고 최소 크기에서 멈춰 알리며 화살표로도 옮긴다", async ({ page, scenario }) => {
@@ -171,7 +171,7 @@ test("차트 창 두 개는 각자 봉을 그리고, 실시간 봉은 그 종목
   await page.screenshot({ path: path.join(SCREENS, "win-shell-two-charts-1024x768.png") });
 });
 
-test("둘째 차트를 누르면 위 막대·봉 주기·관심종목·드로잉 도구 막대·개체 목록이 둘째 차트를 따른다", async ({ page, scenario }) => {
+test("둘째 차트를 누르면 위 막대·봉 주기·관심종목·드로잉 도구 막대·드로잉 수가 둘째 차트를 따른다", async ({ page, scenario }) => {
   twoCharts(scenario);
   const lists = scenario.documents.watchlists();
   scenario.documents.saveWatchlists({ lists: lists.lists.map((list, i) => (i === 0 ? { ...list, symbols: ["000810"] } : list)), revision: lists.revision + 1 });
@@ -187,9 +187,15 @@ test("둘째 차트를 누르면 위 막대·봉 주기·관심종목·드로잉
   await expect(currentSymbol(topbar)).toContainText("삼성전자");
   expect(inside(await boxOf(toolbar), await boxOf(group(page, 1)))).toBe(true);
 
-  await tab(page, 3, "개체 목록").click();
-  const objects = page.getByRole("region", { name: "개체 목록" });
-  await expect(objects).toContainText(/005930 드로잉\s*0/);
+  const chartMenu = page.getByRole("menu", { name: "드로잉 메뉴", exact: true });
+  const countDrawings = async (cellBox: Box) => {
+    await page.mouse.click(cellBox.x + cellBox.width * 0.4, cellBox.y + cellBox.height * 0.45, { button: "right" });
+    await expect(chartMenu).toBeVisible();
+  };
+  await countDrawings(await boxOf(first));
+  await expect(chartMenu).toContainText("드로잉 0개");
+  await page.keyboard.press("Escape");
+  await expect(chartMenu).toHaveCount(0);
   const area = await boxOf(second);
   await page.mouse.click(area.x + area.width / 2, area.y + area.height / 2);
   await expect(currentSymbol(topbar)).toContainText("SK하이닉스");
@@ -198,7 +204,10 @@ test("둘째 차트를 누르면 위 막대·봉 주기·관심종목·드로잉
   await expect(tab(page, 2, "SK하이닉스")).toHaveCSS("box-shadow", "none");
   await expect(group(page, 2)).toHaveAttribute("data-active-cell", "");
   await expect(tab(page, 1, "삼성전자")).not.toHaveAttribute("data-active-cell", "");
-  await expect(objects).toContainText(/000660 드로잉\s*1/);
+  await countDrawings(await boxOf(second));
+  await expect(chartMenu).toContainText("드로잉 1개");
+  await page.keyboard.press("Escape");
+  await expect(chartMenu).toHaveCount(0);
   const bar = await boxOf(toolbar);
   const chartGroup = await boxOf(group(page, 2));
   expect(inside(bar, chartGroup)).toBe(true);
@@ -290,7 +299,7 @@ test("범례 지표 설정 팝오버는 처음 열 때와 창 크기가 바뀐 �
 test("Alt+W는 관심종목 탭을 고른다", async ({ page }) => {
   await page.goto("/");
   await expect(cell(page)).toHaveAttribute("aria-busy", "false");
-  await tab(page, 2, "개체 목록").click();
+  await tab(page, 2, "스크리너").click();
   await cell(page).focus();
   await page.keyboard.press("Alt+KeyW");
   await expect(tab(page, 2, "관심종목")).toHaveAttribute("aria-selected", "true");

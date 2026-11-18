@@ -49,6 +49,7 @@ function newer(u: Unsaved | null, path: string, serverRevision: number): { value
 
 const isFields = (x: unknown): x is Record<string, unknown> => typeof x === "object" && x !== null && !Array.isArray(x);
 const WINDOW_ID = /^[A-Za-z0-9_-]{1,64}$/;
+const RETIRED_WINDOW_KIND = "objects";
 const DRAFT_LINKS: readonly unknown[] = [null, ...LINK_COLORS];
 const isWindowKind = (k: unknown): k is WindowKind => typeof k === "string" && Object.hasOwn(WINDOW_KINDS, k);
 
@@ -58,7 +59,10 @@ function isDraftWindow(w: unknown): w is LayoutWindow {
   return w.kind !== "chart" || (typeof w.symbol === "string" && typeof w.period === "string" && (w.venue === null || typeof w.venue === "string") && "chartSettings" in w);
 }
 
-function readDraftWindows(raw: unknown): LayoutWindow[] | null {
+const isRetiredWindow = (w: unknown): boolean => isFields(w) && w.kind === RETIRED_WINDOW_KIND;
+
+function readDraftWindows(draft: unknown): LayoutWindow[] | null {
+  const raw = Array.isArray(draft) ? draft.filter((w) => !isRetiredWindow(w)) : draft;
   if (!Array.isArray(raw) || raw.length === 0 || raw.length > MAX_WINDOWS || !raw.every(isDraftWindow)) return null;
   if (new Set(raw.map((w) => w.id)).size !== raw.length) return null;
   const counts = new Map<WindowKind, number>();

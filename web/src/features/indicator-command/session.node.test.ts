@@ -41,7 +41,7 @@ test("입력으로 여러 지표를 계속 추가하고 확정한 설정만 저�
   expect(settings().indicators.map((config) => config.spec.kind)).toEqual(["volume", "ma", "bollinger", "rsi", "ma"]);
   await vi.advanceTimersByTimeAsync(1100);
   expect(puts).toHaveLength(1);
-  expect(puts[0]).toMatchObject({ windows: [{ chartSettings: { indicators: [{ spec: { kind: "volume" } }, { spec: { kind: "ma", period: 20 } }, { spec: { kind: "bollinger", period: 20, k: 2 } }, { spec: { kind: "rsi", period: 14 } }, { spec: { kind: "ma", period: 20 } }] } }, { kind: "watchlist" }, { kind: "screener" }, { kind: "objects" }] });
+  expect(puts[0]).toMatchObject({ windows: [{ chartSettings: { indicators: [{ spec: { kind: "volume" } }, { spec: { kind: "ma", period: 20 } }, { spec: { kind: "bollinger", period: 20, k: 2 } }, { spec: { kind: "rsi", period: 14 } }, { spec: { kind: "ma", period: 20 } }] } }, { kind: "watchlist" }, { kind: "screener" }] });
   expect(parseChartSettings(JSON.parse(JSON.stringify(settings())))).toEqual(settings());
 });
 

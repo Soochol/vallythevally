@@ -14,7 +14,7 @@ export const AREA = area(1256, 616);
 
 export const win = (id: string, kind: WindowKind): WindowRef => ({ id: windowId(id), kind });
 
-export const WINDOWS: readonly WindowRef[] = [win("c1", "chart"), win("c2", "chart"), win("w", "watchlist"), win("s", "screener"), win("o", "objects")];
+export const WINDOWS: readonly WindowRef[] = [win("c1", "chart"), win("c2", "chart"), win("w", "watchlist"), win("s", "screener"), win("o", "trades")];
 
 export function expectHeadInArea(rect: Rect, area: Area) {
   expect(rect.y).toBeGreaterThanOrEqual(0);

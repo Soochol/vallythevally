@@ -10,7 +10,7 @@ import { canvasFromDock, dockFromCanvas, placementForMode } from "./modes";
 import type { DockPlacement, Placement } from "./placement";
 
 const a = windowId("a"), b = windowId("b"), c = windowId("c"), d = windowId("d");
-const windows: WindowList = [{ id: a, kind: "chart" }, { id: b, kind: "chart" }, { id: c, kind: "watchlist" }, { id: d, kind: "objects" }];
+const windows: WindowList = [{ id: a, kind: "chart" }, { id: b, kind: "chart" }, { id: c, kind: "watchlist" }, { id: d, kind: "trades" }];
 const room = { dock: { area: { w: 1400, h: 760 }, gap: 6 }, canvas: workArea(1400, 712)! };
 
 test("첫 캔버스는 실제 도킹 픽셀을 보존하고 같은 묶음만 24px 비켜 쌓아 고른 탭을 앞으로 놓는다", () => {

@@ -43,7 +43,7 @@ test("위 막대 섬은 창 폭을 쓰고 작업 영역은 그 아래에서 12px
   await expect(page.locator("footer")).toHaveCount(1);
   expect(await overflow(page)).toEqual([0, 0]);
   await page.screenshot({ path: info.outputPath("1440-shell.png") });
-  for (const name of [/^스크리너/, /^개체 목록$/, /^관심종목$/]) {
+  for (const name of [/^스크리너/, /^관심종목$/]) {
     await windowTabs(page).getByRole("tab", { name }).click();
     await expect(windowTabs(page).getByRole("tab", { name })).toHaveAttribute("aria-selected", "true");
     expect(await boxOf(cell(page))).toEqual(chart);

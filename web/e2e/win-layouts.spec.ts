@@ -188,7 +188,7 @@ for (const unavailable of [false, true]) {
 
 test("닫은 창과 기본 도킹 배치는 메뉴의 배치 되돌리기로 되살린다", async ({ page, scenario }) => {
   const base = scenario.documents.layout();
-  const placement = { v: 1, dock: { root: { kind: "split", dir: "row", ratio: 0.3, first: { kind: "group", id: "side", tabs: ["watchlist", "screener", "objects"], active: "watchlist" }, second: { kind: "group", id: "chart", tabs: ["cell-0"], active: "cell-0" } }, floats: [] }, canvas: null };
+  const placement = { v: 1, dock: { root: { kind: "split", dir: "row", ratio: 0.3, first: { kind: "group", id: "side", tabs: ["watchlist", "screener"], active: "watchlist" }, second: { kind: "group", id: "chart", tabs: ["cell-0"], active: "cell-0" } }, floats: [] }, canvas: null };
   scenario.documents.saveLayout({ ...base, placement, revision: 1 });
   await page.goto("/");
   await expect(cell(page)).toHaveAttribute("aria-busy", "false");
@@ -200,7 +200,7 @@ test("닫은 창과 기본 도킹 배치는 메뉴의 배치 되돌리기로 되
   const chart = await page.locator("[data-dock-group]").filter({ has: cell(page) }).boundingBox();
   const side = await page.locator("[data-dock-group]").filter({ has: page.getByRole("tab", { name: "관심종목", exact: true }) }).boundingBox();
   expect(chart!.x).toBeLessThan(side!.x);
-  await expect(page.locator("[data-dock-group]").filter({ has: page.getByRole("tab", { name: "관심종목", exact: true }) }).getByRole("tab")).toHaveText([/^관심종목/, /^스크리너/, /^개체 목록/]);
+  await expect(page.locator("[data-dock-group]").filter({ has: page.getByRole("tab", { name: "관심종목", exact: true }) }).getByRole("tab")).toHaveText([/^관심종목/, /^스크리너/]);
   await action(page, "배치 되돌리기");
   const restored = await page.locator("[data-dock-group]").filter({ has: cell(page) }).boundingBox();
   expect(restored!.x).toBeCloseTo(before!.x, 0);

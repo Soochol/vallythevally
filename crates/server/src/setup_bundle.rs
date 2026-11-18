@@ -102,6 +102,18 @@ fn typed<T: DeserializeOwned>(document: &Document) -> Result<T, ApiFailure> {
     serde_json::from_value(Value::Object(fields)).map_err(|e| refused(document, format!("본문의 JSON이 틀렸습니다: {e}")))
 }
 
+const RETIRED_WINDOW_KIND: &str = "objects";
+
+fn without_retired_windows(document: &Document) -> Document {
+    let mut document = document.clone();
+    if let Some(Value::Object(fields)) = &mut document.body
+        && let Some(Value::Array(windows)) = fields.get_mut("windows")
+    {
+        windows.retain(|window| window.get("kind").and_then(Value::as_str) != Some(RETIRED_WINDOW_KIND));
+    }
+    document
+}
+
 struct Checked {
     setup: Setup,
     nxt: Vec<Symbol>,
@@ -134,7 +146,7 @@ fn parse_document(document: &Document) -> Result<Parsed, ApiFailure> {
             Ok(Parsed::UiState(UiState(fields.clone()), Revision(document.revision)))
         }
         DocumentKind::Layout => {
-            let layout: Layout = typed(document)?;
+            let layout: Layout = typed(&without_retired_windows(document))?;
             let input = layout_input(&layout);
             let nxt = check_layout_input(&document.id, &input).map_err(|e| refused(document, e.message()))?;
             Ok(Parsed::Layout(layout, nxt))

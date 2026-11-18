@@ -122,12 +122,13 @@ test("사라진 묶음 id를 다시 써도 힌트를 되살리지 않는다", ()
   const layout = customFloat();
   writeDockOrigins(layout, new Map([[id, "g1"]]));
   state().load(layout);
+  state().showWindow("indicators");
   state().showWindow("watchlist", "g1");
   const dock = state().layout.placement.dock!;
   const moved = putTab(dock, windowId("cell-0"), "g2");
   state().setDock(putTab(moved, windowId("watchlist"), "g2"));
   expect(state().dockOrigins.size).toBe(0);
-  const reused = { ...state().layout.placement.dock!, root: { kind: "group" as const, id: "g1", tabs: [windowId("cell-0"), windowId("watchlist"), windowId("objects")], active: windowId("cell-0") } };
+  const reused = { ...state().layout.placement.dock!, root: { kind: "group" as const, id: "g1", tabs: [windowId("cell-0"), windowId("watchlist"), windowId("indicators")], active: windowId("cell-0") } };
   state().setDock(reused);
   expect(readDockOrigins(state().layout).size).toBe(0);
   state().load(structuredClone(state().layout));

@@ -11,7 +11,6 @@ import { MODES, registeredModes } from "../../chart/drawings/modes";
 import { useDrawingSession } from "../../stores/drawingSession";
 import { useSelectionStore } from "../../stores/selection";
 import { useUiStore } from "../../stores/ui";
-import { useLayoutStore } from "../../stores/layout";
 import { ownsChartKeyboard } from "../overlay/topLayer";
 import { menuIndex } from "../overlay/position";
 import { toolOf } from "../../chart/drawings/tools";
@@ -98,8 +97,7 @@ export function DrawingToolbar() {
     {MODES.filter((m) => m.id !== "demo").map((m) => <button key={m.id} className="draw-tool" data-active-tool aria-label={m.label} title={m.label} aria-pressed={mode === m.id} onClick={() => action(() => useDrawingSession.setState({ tool: null, mode: mode === m.id ? null : m.id }))}><Icon path={m.icon} /></button>)}
     <MagnetButton action={action} />
     <button className="draw-tool" aria-label="연속 그리기" title="연속 그리기" aria-pressed={prefs.keepDrawing} onClick={() => action(() => setPrefs({ keepDrawing: !prefs.keepDrawing }))}><Icon path={DRAWING_ICONS.keepDrawing} /></button>
-    <div className="draw-toolbar-end"><button className="draw-tool" aria-label="개체 목록 열기" title="개체 목록" onClick={() => useLayoutStore.getState().showWindow("objects")}><Icon path={DRAWING_ICONS.objects} /></button>
-      <button ref={helpButton} className="draw-tool" aria-label="드로잉 단축키 도움말" title="드로잉 단축키" onClick={() => setHelp(!help)}>?</button></div>
+    <div className="draw-toolbar-end"><button ref={helpButton} className="draw-tool" aria-label="드로잉 단축키 도움말" title="드로잉 단축키" onClick={() => setHelp(!help)}>?</button></div>
     {help && <Popover anchor={helpButton} follow placement="bottom" onClose={() => setHelp(false)} className="drawing-help" role="dialog" aria-label="드로잉 단축키"><div className="draw-dialog-head"><strong>드로잉 단축키</strong><button className="icon-btn" aria-label="도움말 닫기" onClick={() => setHelp(false)}><CloseIcon /></button></div>{gestureHelp(registeredModes()).map((h) => <p key={h.keys}><kbd>{h.keys}</kbd><span>{h.label}</span></p>)}</Popover>}
   </nav></DockHold.Provider>;
 }
