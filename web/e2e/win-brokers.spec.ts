@@ -87,8 +87,10 @@ test("거래소가 KRX이면 통합 값이라고 표시하고 범례를 보인�
   await openBrokers(page, scenario);
   send(scenario, FIRST);
   await expect(window_(page).getByTestId("broker-row")).toHaveCount(3);
-  await expect(window_(page).getByText("통합", { exact: true })).toHaveCount(0);
+  const tab = windowTabs(page).getByRole("tab", { name: /^거래원 입체분석/ });
+  await expect(tab.locator(".mw-integrated")).toHaveCount(0);
   await pickDesktopVenue(page, "KRX");
-  await expect(window_(page).getByText("통합", { exact: true })).toBeVisible();
+  await expect(tab.locator(".mw-integrated")).toHaveText("통합");
+  await expect(window_(page).locator(".mw-integrated")).toHaveCount(0);
   await expect(window_(page).getByLabel("범례")).toContainText("상위 5위 밖");
 });

@@ -5,7 +5,7 @@ import { formatPrice } from "../../lib/format";
 import { MarketWindowGate } from "../market-window/MarketWindowGate";
 import { buildLadder } from "../market-window/ladder";
 import { PriceLadder } from "../market-window/PriceLadder";
-import { IntegratedBadge, RatioBar, Strip } from "../market-window/parts";
+import { RatioBar, Strip } from "../market-window/parts";
 import { formatShares } from "../market-window/format";
 import { EmptyState } from "../overlay/State";
 import { useBookFeed } from "./useBookFeed";
@@ -30,7 +30,6 @@ function BookBody({ code }: { code: SymbolCode }) {
   return (
     <div className="bk" data-testid="book-window" data-symbol={code} data-connected={feed.connected ? "" : undefined}>
       <Strip>
-        <IntegratedBadge />
         <b data-testid="book-total-ask" className="mw-down">{formatShares(view.totalAsk)}</b>
         <RatioBar buy={view.totalBid} sell={view.totalAsk} sellFirst label={`매도 ${formatShares(view.totalAsk)} · 매수 ${formatShares(view.totalBid)}`} />
         <b data-testid="book-total-bid" className="mw-up">{formatShares(view.totalBid)}</b>

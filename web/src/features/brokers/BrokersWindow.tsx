@@ -7,7 +7,7 @@ import { marketSocket } from "../../stores/realtime";
 import { EmptyState } from "../overlay/State";
 import { formatClock, formatShares, withSign } from "../market-window/format";
 import { MarketWindowGate } from "../market-window/MarketWindowGate";
-import { IntegratedBadge, Strip } from "../market-window/parts";
+import { Strip } from "../market-window/parts";
 import { EMPTY_BROKER_STATE, cumulativeAt, lineSegments, reduceBrokers, sortedRows, startedAt, type BrokerGrid, type BrokerRow } from "./model";
 import "./brokers.css";
 
@@ -43,7 +43,6 @@ function BrokersBody({ code }: { code: SymbolCode }) {
     <div className="br" data-testid="brokers-window" data-symbol={code}>
       <Strip>
         <b>{name}</b>
-        <IntegratedBadge />
         <span data-testid="brokers-since">{since === null ? "스냅샷을 기다리는 중" : `${formatClock(since)}부터 받은 스냅샷만 쌓입니다`}</span>
       </Strip>
       {failed && <EmptyState title="거래원을 받지 못했습니다" />}

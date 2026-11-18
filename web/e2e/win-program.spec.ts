@@ -85,7 +85,9 @@ test("앱 전체 거래소가 KRX이면 통합 표시가 붙는다", async ({ pa
   linkStock(scenario, "005930", [point("09:00:00", 10)]);
   await openProgramWindow(page);
   await expect(rowsOf(page)).toHaveCount(1);
-  await expect(page.locator(".pg-badge .mw-integrated")).toHaveCount(0);
+  const tab = page.getByRole("tab", { name: /^프로그램 체결/ });
+  await expect(tab.locator(".mw-integrated")).toHaveCount(0);
   await pickDesktopVenue(page, "KRX");
-  await expect(page.locator(".pg-badge .mw-integrated")).toHaveText("통합");
+  await expect(tab.locator(".mw-integrated")).toHaveText("통합");
+  await expect(page.locator(".dock-panel .mw-integrated, .pg-head .mw-integrated")).toHaveCount(0);
 });

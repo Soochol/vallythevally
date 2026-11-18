@@ -50,10 +50,14 @@ async function subOf(scenario: Scenario, kind: FeedKind): Promise<string> {
   return sub;
 }
 
-async function open(page: Page, scenario: Scenario, base: number) {
-  bookWindow(scenario, CODE);
+function replyBook(scenario: Scenario, base: number) {
   scenario.reply((url) => url.pathname === "/api/symbols/005930/fundamentals", { body: { symbol: CODE, upperLimit: 91000, lowerLimit: 49000, marketCap: null, listedShares: null, per: null, pbr: null, roe: null, eps: null, bps: null, foreignExhaustionRate: null, high52w: null, low52w: null } });
   scenario.reply((url) => url.pathname === "/api/symbols/005930/order-book", { body: snapshotOf(base) });
+}
+
+async function open(page: Page, scenario: Scenario, base: number) {
+  bookWindow(scenario, CODE);
+  replyBook(scenario, base);
   await page.goto("/");
   await expect(cell(page)).toHaveAttribute("aria-busy", "false");
   await windowTabs(page).getByRole("tab", { name: /^10호가/ }).click();
@@ -119,11 +123,34 @@ test("끊기면 사다리를 흐리게 하고 끊김을 보인다", async ({ pag
   await page.screenshot({ path: "../target/ux-screens/win-book-disconnected.png" });
 });
 
-test("앱 거래소가 KRX이면 머리에 통합 표시가 있다", async ({ page, scenario }) => {
+test("앱 거래소가 KRX이면 도킹 탭에 통합 표시가 있고 본문에는 없다", async ({ page, scenario }) => {
   await open(page, scenario, 70000);
-  await expect(page.getByTitle("키움 호가·프로그램·거래원은 KRX와 NXT를 합친 값입니다")).toHaveCount(0);
+  const bookTab = windowTabs(page).getByRole("tab", { name: /^10호가/ });
+  await expect(bookTab.locator(".mw-integrated")).toHaveCount(0);
   await pickDesktopVenue(page, "KRX");
-  await expect(page.getByTitle("키움 호가·프로그램·거래원은 KRX와 NXT를 합친 값입니다")).toHaveText("통합");
+  await expect(bookTab.locator(".mw-integrated")).toHaveText("통합");
+  await expect(book(page).locator(".mw-integrated")).toHaveCount(0);
+  const tabBox = (await bookTab.boundingBox())!;
+  const badgeBox = (await bookTab.locator(".mw-integrated").boundingBox())!;
+  expect(badgeBox.x + badgeBox.width).toBeLessThanOrEqual(tabBox.x + tabBox.width);
+  await page.screenshot({ path: "../target/ux-screens/dock-tab-integrated.png" });
+  const sibling = windowTabs(page).filter({ has: page.getByRole("tab", { name: /^10호가/ }) }).getByRole("tab").filter({ hasNotText: /^10호가/ }).first();
+  await sibling.click();
+  await expect(bookTab).toHaveAttribute("aria-selected", "false");
+  await expect(bookTab.locator(".mw-integrated")).toHaveText("통합");
+});
+
+test("캔버스 배치에서 KRX이면 10호가 창에 통합 표시가 머리에 하나만 있다", async ({ page, scenario }) => {
+  bookWindow(scenario, CODE);
+  replyBook(scenario, 70000);
+  scenario.documents.saveLayout({ ...scenario.documents.layout(DEFAULT_LAYOUT_ID), placement: { v: 1, dock: null, canvas: null }, revision: scenario.documents.layout(DEFAULT_LAYOUT_ID).revision + 1 });
+  scenario.documents.saveUiState({ ...scenario.documents.uiState(), layoutMode: "canvas" });
+  await page.goto("/");
+  await expect(cell(page)).toHaveAttribute("aria-busy", "false");
+  await pickDesktopVenue(page, "KRX");
+  const frame = page.locator('[data-canvas-window="book"]');
+  await expect(frame.locator(".mw-integrated")).toHaveCount(1);
+  await expect(frame.locator(".window-head .mw-integrated")).toHaveText("통합");
 });
 
 test("지수 종목이면 빈 상태를 보이고 호가를 구독하지 않는다", async ({ page, scenario }) => {
