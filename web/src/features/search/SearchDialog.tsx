@@ -34,7 +34,10 @@ export function SearchDialog() {
 function SearchDialogBody({ purpose }: { purpose: SearchPurpose }) {
   const close = useSelectionStore((s) => s.closeDialog);
   const cellId = useSelectionStore((s) => s.activeCell);
-  const watchlist = useActiveWatchlist();
+  const activeList = useActiveWatchlist();
+  const lists = useWatchlistStore((s) => s.lists);
+  const putTarget = useSelectionStore((s) => s.putTarget);
+  const watchlist = (purpose === "watch" ? lists.find((l) => l.id === putTarget?.listId) : undefined) ?? activeList;
   const watch = useSymbolInfos(watchlist.symbols);
   const recent = useSymbolInfos(useUiStore((s) => s.prefs.recentSymbols));
   const registered = useSyncExternalStore(subscribeSearchCommands, searchCommandsSnapshot);
@@ -47,7 +50,6 @@ function SearchDialogBody({ purpose }: { purpose: SearchPurpose }) {
   const pillRef = useRef<HTMLButtonElement>(null);
   const [pinWindow] = useState(() => usePinPickStore.getState().window);
   useEffect(() => clearPinPick, []);
-  const putTarget = useSelectionStore((s) => s.putTarget);
   const putGroup = purpose === "watch" && putTarget?.listId === watchlist.id ? watchlist.groups.find((g) => g.id === putTarget.groupId) ?? null : null;
   const putName = putGroup?.name ?? watchlist.name;
   const mode = searchMode(input);

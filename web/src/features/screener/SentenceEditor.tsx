@@ -1,7 +1,5 @@
 import { type KeyboardEvent, type ReactNode, type RefObject, useLayoutEffect, useRef, useState } from "react";
-import type { Screen } from "../../api/generated/Screen";
 import { isTypingTarget } from "../../lib/hotkeys";
-import { conditionSentence, EXCLUDE_LABEL, excludedInOrder, MARKET_LABEL, marketsInOrder, NO_CONDITIONS_SENTENCE } from "../../lib/screener";
 import { Popover } from "../overlay/Popover";
 import { ChevronIcon, CloseIcon, MoreIcon, PenIcon, PlayIcon, SpinnerIcon, Icon, DRAWING_ICONS, PlusIcon, CopyIcon } from "../icons";
 import { ChangedBadge } from "./ChangedBadge";
@@ -12,7 +10,6 @@ import { type ChosenScreen, FIX_INVALID, type ScreenEditing, type ScreenEntry } 
 import { removeChosen } from "./useScreenEditing";
 import type { ScreenDraft } from "../screen-dialog/screenForm";
 
-const SUMMARY_LINES = 3;
 const KEEPS_DRAFT = "닫아도 편집 내용은 남습니다";
 const BLOCKED_HINT = "자료 상태를 확인한 뒤 실행하세요";
 const RUNS_UNSAVED = "저장 전에도 실행할 수 있습니다";
@@ -28,12 +25,6 @@ interface EditorProps {
   onRun(): void;
 }
 
-function scopeSummary(screen: Screen): string {
-  const markets = marketsInOrder(screen.markets).map((market) => MARKET_LABEL[market]).join("·") || "전 종목 대상";
-  const excluded = excludedInOrder(screen.exclude).map((kind) => EXCLUDE_LABEL[kind]).join("·");
-  return excluded ? `${markets} · ${excluded} 제외` : markets;
-}
-
 export function SentenceEditor({ screenEditing, chosen, entries, blocked, resultActions, editing, onEditingChange, onRun }: EditorProps) {
   const section = useRef<HTMLElement>(null);
   const head = useRef<HTMLDivElement>(null);
@@ -42,7 +33,6 @@ export function SentenceEditor({ screenEditing, chosen, entries, blocked, result
   const [rename, setRename] = useState<string | null>(null);
   const { draft, runnable: checked, saving: busy, canSave, nameError, alerts, flagged } = chosen;
   const running = chosen.run?.kind === "running";
-  const lines = checked.ok ? checked.screen.conditions.map(conditionSentence) : [];
   const choose = (id: string) => { dropPendingOpen(); screenEditing.choose(id); };
   const change = (update: (draft: ScreenDraft) => ScreenDraft) => screenEditing.edit(update);
   const create = (copy = false) => { dropPendingOpen(); screenEditing.create(copy); onEditingChange(true); };
@@ -75,13 +65,7 @@ export function SentenceEditor({ screenEditing, chosen, entries, blocked, result
       </form>
     </Popover>}
     {!editing && nameError && <p role="alert" className="px-3 pb-2 text-xs text-danger">{nameError}</p>}
-    <div aria-label="조건 요약" className="px-3 pb-3 text-s text-text-2">
-      {!checked.ok && <p>{FIX_INVALID}</p>}
-      {checked.ok && lines.length === 0 && <p>{NO_CONDITIONS_SENTENCE}</p>}
-      {lines.slice(0, SUMMARY_LINES).map((line, index) => <p key={index} className="truncate" title={line}>{line}</p>)}
-      {lines.length > SUMMARY_LINES && <p className="text-text-3">외 {lines.length - SUMMARY_LINES}개 조건</p>}
-      {checked.ok && <p className="truncate text-xs text-text-3" title={scopeSummary(checked.screen)}>{scopeSummary(checked.screen)}</p>}
-    </div>
+    {!checked.ok && !alerts.includes(FIX_INVALID) && <p className="px-3 pb-3 text-s text-text-2">{FIX_INVALID}</p>}
     <div data-chart-control className="flex items-center gap-2 px-3 pb-3">
       <RunButton running={running} disabled={blocked || running || busy} onRun={onRun} />
       <button ref={opener} type="button" aria-haspopup="dialog" aria-expanded={editing} className="tb-btn h-8 flex-none gap-1 border border-line px-2 text-s aria-expanded:border-accent aria-expanded:text-accent" onClick={() => onEditingChange(!editing)}><PenIcon size={14} />편집</button>

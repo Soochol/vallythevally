@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
 import { RETRY_DELAYS_MS } from "../../persist/saver";
-import { EMPTY_OUTBOX, enqueue, flushable, isFailed, latestWant, nextToSend, parseDrawingBody, parseRecord, retryFailed, settle, start, type Intent, type Outbox, type Want, wantOf } from "./outbox";
+import { EMPTY_OUTBOX, enqueue, flushable, gate, isFailed, latestWant, nextToSend, parseDrawingBody, parseRecord, retryFailed, settle, start, type Intent, type Outbox, type Want, wantOf } from "./outbox";
 import type { DrawingBody } from "./types";
 
 const body = (id: string, price: number, revision = 0): DrawingBody => ({
@@ -104,4 +104,42 @@ describe("legacy journal boundary", () => {
 test("operations select PUT or DELETE", () => {
   expect(wantOf({ kind: "create", after: body("a", 1) })).toEqual({ kind: "put", body: body("a", 1) });
   expect(wantOf({ kind: "delete", before: body("a", 1) })).toEqual(del);
+});
+
+describe("lanes held for the layout save", () => {
+  const holdAll = () => true;
+  const holdNone = () => false;
+
+  test("a held lane is neither sent nor flushed and is not a failure", () => {
+    const o = gate(enqueue(EMPTY_OUTBOX, intent("a", 1)), holdAll);
+    expect(o.lanes.get("a")?.state).toBe("held");
+    expect(nextToSend(o, Infinity)).toEqual([]);
+    expect(flushable(o)).toEqual([]);
+    expect(start(o, "a")).toBeNull();
+    expect(isFailed(o.lanes.get("a")!)).toBe(false);
+    expect(latestWant(o.lanes.get("a")!)).toEqual(intent("a", 1).want);
+  });
+
+  test("releasing a held lane sends it at once with a fresh retry budget", () => {
+    let o = send(enqueue(EMPTY_OUTBOX, intent("a", 1)), "a").outbox;
+    o = settle(o, "a", { kind: "networkError" }, 0)!.outbox;
+    o = gate(o, holdAll);
+    expect(o.lanes.get("a")?.state).toBe("held");
+    o = gate(o, holdNone);
+    expect(o.lanes.get("a")).toEqual({ state: "waiting", intent: intent("a", 1), failures: 0, retryAt: 0 });
+    expect(nextToSend(o, 0)).toEqual(["a"]);
+  });
+
+  test("a newer intent replaces the held one and is judged again", () => {
+    let o = gate(enqueue(EMPTY_OUTBOX, intent("a", 1)), holdAll);
+    o = enqueue(o, intent("a", 2));
+    o = gate(o, (i) => i.order === 1);
+    expect(nextToSend(o, 0)).toEqual(["a"]);
+    expect(send(o, "a").send).toEqual(intent("a", 2));
+  });
+
+  test("flying lanes are not held", () => {
+    const o = gate(send(enqueue(EMPTY_OUTBOX, intent("a", 1)), "a").outbox, holdAll);
+    expect(o.lanes.get("a")?.state).toBe("flying");
+  });
 });
