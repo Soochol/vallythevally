@@ -7,6 +7,7 @@ import { useSelectionStore } from "../stores/selection";
 import { useUiStore } from "../stores/ui";
 import { useWatchlistStore } from "../stores/watchlist";
 import { type Autosave, startAutosave } from "./autosave";
+import { layoutReceipt } from "./layoutReceipt";
 import { restore } from "./restore";
 import { clearUnsaved, readUnsaved } from "./unsaved";
 import { DEFAULT_UI_PREFS, type Theme } from "./uiState";
@@ -56,7 +57,7 @@ export async function boot() {
     useWatchlistStore.getState().load(restored.watchlists);
     followTheme();
     for (const target of SAVE_TARGETS) clearUnsaved(target, restored.serverRevisions[target], target === "layout" ? layoutPath(restored.layout.id) : undefined);
-    const autosave = startAutosave({ put: (path, json, o) => sendJson("PUT", path, json, o), toast, revisions: restored.revisions, serverCharts: restored.serverCharts });
+    const autosave = startAutosave({ put: (path, json, o) => sendJson("PUT", path, json, o), toast, revisions: restored.revisions, serverCharts: restored.serverCharts, receipt: layoutReceipt });
     running = autosave;
     if (restored.layoutDirty) autosave.savers.layout.changed();
     if (restored.uiDirty) autosave.savers.ui.changed();
