@@ -92,6 +92,7 @@ test("실전: 같은 unsupported 응답은 서버 문구 그대로이고 경로 
   await openRoutes(page);
   await expect(page.getByTestId("order-route-note")).toHaveCount(0);
   for (const label of ["SOR", "KRX", "NXT"]) await expect(routes(page).getByRole("button", { name: label })).toBeEnabled();
+  await page.keyboard.press("Escape");
   scenario.on((url, request) => url.pathname === "/api/trading/commands/place" && request.method() === "POST", () => ({ status: 400, body: { error: { code: "bad_request", message: "키움이 지원하지 않는 요청입니다", reason: "unsupported", retryAt: null, manualActionRequired: false } } }));
   await cellAt(page, "buy", 70_000).dblclick();
   await expect(status(page)).toContainText("거절 · 키움이 지원하지 않는 요청입니다");
