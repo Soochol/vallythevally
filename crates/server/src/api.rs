@@ -308,7 +308,6 @@ pub struct FeedBook {
     pub expected: Option<FeedExpected>,
 }
 
-/// 시간외 호가(0E)의 총잔량. 호가 구독에 `feed_book`과 함께 온다.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export)]
@@ -826,10 +825,8 @@ pub struct OrderBook {
     pub total_ask_quantity: u64,
     #[ts(type = "number")]
     pub total_bid_quantity: u64,
-    /// 시간외 매도호가 총잔량(`ovt_sel_req`). 필드가 없거나 비었거나 읽을 수 없으면 null.
     #[ts(type = "number | null")]
     pub after_hours_ask_quantity: Option<u64>,
-    /// 시간외 매수호가 총잔량(`ovt_buy_req`). 필드가 없거나 비었거나 읽을 수 없으면 null.
     #[ts(type = "number | null")]
     pub after_hours_bid_quantity: Option<u64>,
     /// 호가 기준 시각 `HH:MM:SS`(KST). 키움은 날짜를 주지 않는다. 없으면 null.

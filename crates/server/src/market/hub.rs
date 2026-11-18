@@ -1140,7 +1140,6 @@ fn won(price: Price) -> f64 {
     price.centi() as f64 / 100.0
 }
 
-/// 종목마다 KST 하루에 한 번만 참을 낸다. 날이 바뀌면 그날 것만 남긴다.
 #[derive(Debug, Default)]
 struct FirstOfDay {
     day: Option<KstDate>,

@@ -902,7 +902,6 @@ impl RealType {
         }
     }
 
-    /// 호가 구독이 잡은 종목은 시간외 총잔량(0E)도 같이 받는다.
     pub fn companion(self) -> Option<RealType> {
         (self == RealType::Book).then_some(RealType::AfterHours)
     }
@@ -953,7 +952,6 @@ pub enum WsFrame {
     Other(String),
 }
 
-/// 0E. 시간외 호가의 총잔량만 온다. 호가 단은 오지 않는다.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AfterHoursTotals {
     pub symbol: Symbol,
