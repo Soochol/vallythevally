@@ -29,6 +29,7 @@ function BrokersBody({ code }: { code: SymbolCode }) {
     if (event.type === "feed_brokers") dispatch({ type: "snapshot", brokers: event.brokers });
     else if (event.type === "feed_link") dispatch({ type: "link", live: event.live });
     else if (event.type === "resync") dispatch({ type: "resync" });
+    else if (event.type === "feed_subscribed") setFailed(false);
     else if (event.type === "sub_error") setFailed(true);
   }), [code]);
 

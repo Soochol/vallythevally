@@ -16,6 +16,7 @@ use server::api::{AccountProvider, UnixSeconds};
 use server::app::{ApplicationInputs, application_with_system};
 use server::clock::Clock;
 use server::collector::wire::{COVERAGE_REQUEST, CollectorDayState, DISK_REQUEST, Line, Reply, WATCH_REQUEST};
+use server::collector::webhook::Webhook;
 use server::collector::{CollectorBoard, DaemonJudgment, HEARTBEAT_EVERY, MAX_LINE_BYTES, MISSED_HEARTBEATS, RECONNECT_BACKOFF};
 use server::config::Secret;
 use server::db::AppDb;
@@ -28,7 +29,7 @@ use server::symbols::SymbolDirectory;
 use server::system_routes::SystemState;
 use support::ScriptedTransport;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
-use tokio::net::{UnixListener, UnixStream};
+use tokio::net::{TcpListener, UnixListener, UnixStream};
 use tokio::time::Instant;
 use tower::ServiceExt;
 
@@ -232,16 +233,106 @@ impl Drop for FakeAccount {
     }
 }
 
+const WEBHOOK_SECRET: &str = "WEBHOOK-TOKEN-do-not-print";
+
+struct FakeWebhook {
+    port: u16,
+    texts: Arc<Mutex<Vec<String>>>,
+    calls: Arc<std::sync::atomic::AtomicUsize>,
+}
+
+impl FakeWebhook {
+    async fn start(status: u16) -> FakeWebhook {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let texts: Arc<Mutex<Vec<String>>> = Arc::default();
+        let calls: Arc<std::sync::atomic::AtomicUsize> = Arc::default();
+        let (log, count) = (texts.clone(), calls.clone());
+        tokio::spawn(async move {
+            loop {
+                let Ok((mut stream, _)) = listener.accept().await else { return };
+                let mut reader = BufReader::new(&mut stream);
+                let mut length = 0usize;
+                loop {
+                    let mut line = String::new();
+                    reader.read_line(&mut line).await.unwrap();
+                    if line == "\r\n" {
+                        break;
+                    }
+                    if let Some(value) = line.to_ascii_lowercase().strip_prefix("content-length:") {
+                        length = value.trim().parse().unwrap();
+                    }
+                }
+                let mut body = vec![0u8; length];
+                tokio::io::AsyncReadExt::read_exact(&mut reader, &mut body).await.unwrap();
+                let body: Value = serde_json::from_slice(&body).unwrap();
+                count.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                if status < 300 {
+                    log.lock().unwrap().push(body["content"].as_str().unwrap().to_owned());
+                }
+                let reply = format!("HTTP/1.1 {status} Reply\r\ncontent-length: 0\r\nconnection: close\r\n\r\n");
+                stream.write_all(reply.as_bytes()).await.unwrap();
+                let _ = stream.shutdown().await;
+            }
+        });
+        FakeWebhook { port, texts, calls }
+    }
+
+    fn url_file(&self, folder: &Path) -> PathBuf {
+        let path = folder.join("discord-webhook");
+        std::fs::write(&path, format!("http://127.0.0.1:{}/api/webhooks/123/{WEBHOOK_SECRET}\n", self.port)).unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).unwrap();
+        path
+    }
+
+    fn texts(&self) -> Vec<String> {
+        self.texts.lock().unwrap().clone()
+    }
+
+    async fn wait_for_calls(&self, count: usize) {
+        for _ in 0..1000 {
+            if self.calls.load(std::sync::atomic::Ordering::SeqCst) >= count {
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        panic!("웹훅 호출이 {count}번이 되지 않았다");
+    }
+}
+
+#[derive(Clone, Default)]
+struct LogCapture(Arc<Mutex<Vec<u8>>>);
+
+impl std::io::Write for LogCapture {
+    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+        self.0.lock().unwrap().extend_from_slice(bytes);
+        Ok(bytes.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+impl<'a> tracing_subscriber::fmt::MakeWriter<'a> for LogCapture {
+    type Writer = LogCapture;
+
+    fn make_writer(&'a self) -> LogCapture {
+        self.clone()
+    }
+}
+
 struct Options {
     admins: &'static [&'static str],
     linked: bool,
     legacy_login_without_subject: bool,
     account_subject: Option<&'static str>,
+    webhook: Option<PathBuf>,
 }
 
 impl Options {
     fn allowed_board() -> Options {
-        Options { admins: ADMINS, linked: true, legacy_login_without_subject: false, account_subject: Some("1234") }
+        Options { admins: ADMINS, linked: true, legacy_login_without_subject: false, account_subject: Some("1234"), webhook: None }
     }
 }
 
@@ -277,7 +368,8 @@ impl Fixture {
         let account = if options.linked { AccountState::linked(url, AccountStateFile::new(state_file.clone(), &lock)).unwrap() } else { AccountState::local_only() };
         let sessions = account.subscribe_sessions();
         let admins: Vec<ProviderSubject> = options.admins.iter().map(|admin| ProviderSubject::parse(admin).unwrap()).collect();
-        let collector = CollectorBoard::configured(admins, Some(socket.clone()), account.is_linked());
+        let webhook = options.webhook.as_ref().and_then(|path| Webhook::load(path).unwrap());
+        let collector = CollectorBoard::configured(admins, Some(socket.clone()), account.is_linked()).map(|board| board.with_webhook(webhook));
         let system = SystemState::unconfigured().with_account(account).with_collector(collector);
 
         let clock = Clock::fake(server::kiwoom::wire::parse_kst_datetime("20261118090000").unwrap());
@@ -863,4 +955,67 @@ async fn a_saved_login_stays_without_access_while_the_account_server_still_sends
     legacy.state.system.account().refresh().await.unwrap();
     legacy.wait_for_account_change().await;
     assert_eq!(legacy.access().await, "allowed", "계정 서버가 subject를 내주기 시작하면 다음 새로 고침에서 채워진다");
+}
+
+#[tokio::test]
+async fn down_and_no_response_go_to_the_webhook_and_a_recovery_does_not() {
+    let hook = FakeWebhook::start(204).await;
+    let folder = tempfile::tempdir().unwrap();
+    let mut fixture = Fixture::start(Options { webhook: Some(hook.url_file(folder.path())), ..Options::allowed_board() }).await;
+    fixture.sign_in_as(Some("1234")).await;
+    fixture.go();
+    fixture.reached(DaemonJudgment::Down).await;
+    hook.wait_for_calls(1).await;
+    tokio::time::sleep(Duration::from_secs(60)).await;
+    assert_eq!(hook.texts().len(), 1, "꺼짐이 이어지는 동안 다시 보내지 않는다");
+
+    let mut daemon = Daemon::start(&fixture.socket, Mode::Beating);
+    fixture.reached(DaemonJudgment::Healthy).await;
+    tokio::time::sleep(Duration::from_secs(60)).await;
+    assert_eq!(hook.texts().len(), 1, "정상 복귀는 보내지 않는다");
+    daemon.stop().await;
+    fixture.reached(DaemonJudgment::Down).await;
+    hook.wait_for_calls(2).await;
+
+    let _mute = Daemon::start(&fixture.socket, Mode::Mute);
+    fixture.reached(DaemonJudgment::Unresponsive).await;
+    hook.wait_for_calls(3).await;
+    let texts = hook.texts();
+    assert_eq!(texts.len(), 3, "{texts:?}");
+    assert!(texts[0].starts_with("[수집 경보] 2026-11-18 09:") && texts[0].ends_with(" KST · 감독 데몬이 꺼져 있습니다"), "{texts:?}");
+    assert!(texts[1].ends_with("감독 데몬이 꺼져 있습니다") && texts[2].ends_with("감독 데몬이 응답하지 않습니다"), "{texts:?}");
+    assert!(texts.iter().all(|text| !text.contains(WEBHOOK_SECRET)));
+}
+
+#[tokio::test]
+async fn a_webhook_that_fails_leaves_the_judgment_alone_and_its_address_out_of_the_log() {
+    let capture = LogCapture::default();
+    let subscriber = tracing_subscriber::fmt().with_writer(capture.clone()).with_ansi(false).with_max_level(tracing::Level::TRACE).finish();
+    let _guard = tracing::subscriber::set_default(subscriber);
+    let hook = FakeWebhook::start(500).await;
+    let folder = tempfile::tempdir().unwrap();
+    let mut fixture = Fixture::start(Options { webhook: Some(hook.url_file(folder.path())), ..Options::allowed_board() }).await;
+    fixture.sign_in_as(Some("1234")).await;
+    fixture.go();
+    fixture.reached(DaemonJudgment::Down).await;
+    hook.wait_for_calls(1).await;
+    tokio::time::sleep(Duration::from_secs(1)).await;
+    assert_eq!(fixture.judgment(), DaemonJudgment::Down);
+    let logs = String::from_utf8_lossy(&capture.0.lock().unwrap()).into_owned();
+    assert!(logs.contains("수집 경보를 웹훅으로 보내지 못했습니다"), "{logs}");
+    for hidden in [WEBHOOK_SECRET, "/api/webhooks"] {
+        assert!(!logs.contains(hidden), "{hidden}가 로그에 나온다: {logs}");
+    }
+    let (_, status) = fixture.get("/api/collector/status").await;
+    assert!(!status.to_string().contains(WEBHOOK_SECRET));
+}
+
+#[tokio::test]
+async fn a_board_without_a_webhook_file_runs_as_before() {
+    let folder = tempfile::tempdir().unwrap();
+    assert!(Webhook::load(&folder.path().join("discord-webhook")).unwrap().is_none());
+    let mut fixture = Fixture::start(Options::allowed_board()).await;
+    fixture.sign_in_as(Some("1234")).await;
+    fixture.go();
+    fixture.reached(DaemonJudgment::Down).await;
 }
