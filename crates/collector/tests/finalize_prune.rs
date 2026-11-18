@@ -412,6 +412,27 @@ async fn a_symlinked_key_folder_that_finalize_reads_does_not_count_as_an_unread_
     assert!(real.path().join("0900.jsonl.zst").exists(), "링크 너머 파일은 지우지 않는다");
 }
 
+#[tokio::test]
+async fn an_unread_file_whose_lossy_name_equals_a_read_key_folder_still_keeps_the_day() {
+    use std::os::unix::ffi::OsStrExt;
+    let data = data_with_first_day();
+    write_raw_lines(data.path(), NOV_3, &[good_frame(NOV_3, 0)]);
+    let day = raw_folder(data.path(), NOV_3);
+    fs::create_dir_all(day.join("\u{FFFD}")).unwrap();
+    fs::write(day.join("\u{FFFD}").join("0900.jsonl.zst"), zstd::encode_all(format!("{}\n", good_frame(NOV_3, 1)).as_bytes(), 3).unwrap()).unwrap();
+    let stray = day.join(std::ffi::OsStr::from_bytes(b"\xff"));
+    fs::write(&stray, "원문이 아니다").unwrap();
+    finalize(data.path(), NOV_3);
+    put_raw_bytes(data.path(), NOV_20);
+    let calendar = calendar(data.path(), Vec::new()).await;
+
+    let report = prune_raw(data.path(), NOV_20, &calendar, &settings()).unwrap();
+
+    assert!(report.deleted.is_empty(), "{report:?}");
+    assert!(stray.exists());
+    assert_eq!(log_for(data.path(), NOV_3)["reason"], json!("raw_has_unread_files"));
+}
+
 #[test]
 fn a_dangling_raw_symlink_does_not_stop_finalize_and_keeps_the_day_unfinalized() {
     let data = tempdir().unwrap();

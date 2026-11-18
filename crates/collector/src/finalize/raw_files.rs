@@ -21,8 +21,12 @@ impl RawFiles {
         let mut every = BTreeMap::new();
         collect(&raw_day_dir(data_dir, date), "", &mut every)?;
         let read = read_files(data_dir, date)?;
-        let read_under = |path: &str| read.keys().any(|read_path| read_path.strip_prefix(path).is_some_and(|rest| rest.starts_with('/')));
-        Ok(every.into_keys().filter(|path| !read.contains_key(path) && !read_under(path)).collect())
+        let day_dir = raw_day_dir(data_dir, date);
+        let linked_folder_read = |path: &str| {
+            let is_link = fs::symlink_metadata(day_dir.join(path)).is_ok_and(|metadata| metadata.file_type().is_symlink());
+            is_link && read.keys().any(|read_path| read_path.strip_prefix(path).is_some_and(|rest| rest.starts_with('/')))
+        };
+        Ok(every.into_keys().filter(|path| !read.contains_key(path) && !linked_folder_read(path)).collect())
     }
 
     pub fn paths_differing_from(&self, other: &RawFiles) -> Vec<String> {
