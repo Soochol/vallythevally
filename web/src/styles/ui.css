@@ -154,6 +154,9 @@
 .dock-divider[aria-orientation=vertical]::after { inset-block:var(--size-16); left:50%; width:var(--size-2); transform:translateX(-50%); }
 .dock-divider[aria-orientation=horizontal]::after { inset-inline:var(--size-16); top:50%; height:var(--size-2); transform:translateY(-50%); }
 .dock-divider:hover::after, .dock-divider:focus-visible::after, .dock-divider[data-dragging]::after { background:var(--accent); }
+.dock-snap-guide { position:absolute; z-index:40; pointer-events:none; border-radius:var(--r-pill); background:var(--accent); }
+.dock-balloon { position:absolute; z-index:41; display:flex; gap:var(--size-8); padding:var(--size-4) var(--size-8); border-radius:var(--r-m); background:var(--glass); -webkit-backdrop-filter:var(--glass-blur); backdrop-filter:var(--glass-blur); color:var(--text); box-shadow:var(--shadow); font:var(--fs-xs)/1.4 var(--font-sans); font-variant-numeric:tabular-nums; white-space:nowrap; pointer-events:none; }
+.dock-balloon-bar { color:var(--text-3); }
 html.dock-resizing-col, html.dock-resizing-col * { cursor:col-resize !important; user-select:none !important; }
 html.dock-resizing-row, html.dock-resizing-row * { cursor:row-resize !important; user-select:none !important; }
 
