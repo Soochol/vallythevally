@@ -209,15 +209,15 @@ impl Trading {
         targets.sort();
         let cancels: Vec<Prepared> = targets.iter().map(|order_no| Prepared { command_id: format!("{}_{order_no}", input.batch_id), account_ref: account_ref.clone(), kind: OrderCommandKind::Cancel, code: None, venue: None, quantity: None, price: None, target_order_no: Some(order_no.clone()) }).collect();
         let begun = self.journal.begin_batch(&batch, &cancels, self.clock.now().unix()).await?;
-        let BatchBegun::Created(_) = begun else {
+        let BatchBegun::Created(commands) = &begun else {
             return self.batch_reply(account_ref, begun).await;
         };
         let turn = self.turn_of(&account_ref);
         {
             let _turn = turn.lock().await;
-            for cancel in &cancels {
-                let target = OrderNumber::parse(cancel.target_order_no.as_deref().expect("일괄 취소 명령은 대상 주문번호를 가진다")).expect("목록에서 읽은 주문번호는 형식을 이미 확인했다");
-                if let Err(e) = self.execute(&cancel.command_id, &account_ref, Work::Cancel { order_no: target }).await {
+            for command in commands.iter().filter(|c| c.state == OrderCommandState::Prepared) {
+                let target = OrderNumber::parse(command.target_order_no.as_deref().expect("일괄 취소 명령은 대상 주문번호를 가진다")).expect("목록에서 읽은 주문번호는 형식을 이미 확인했다");
+                if let Err(e) = self.execute(&command.command_id, &account_ref, Work::Cancel { order_no: target }).await {
                     tracing::error!(error = %e, "일괄 취소의 한 명령이 저널 오류로 끝났습니다");
                 }
             }

@@ -178,7 +178,11 @@ impl Journal {
         for cancel in cancels {
             match begin_in(&mut tx, cancel, Some(&batch.batch_id), now).await? {
                 Begun::Created(command) => commands.push(command),
-                Begun::Existing(_) | Begun::DifferentRequest => return Ok(BatchBegun::DifferentRequest),
+                Begun::Existing(command) => {
+                    sqlx::query("UPDATE order_commands SET batch_id = ? WHERE command_id = ? AND batch_id IS NULL").bind(&batch.batch_id).bind(&command.command_id).execute(&mut *tx).await?;
+                    commands.push(command);
+                }
+                Begun::DifferentRequest => return Ok(BatchBegun::DifferentRequest),
             }
         }
         tx.commit().await?;

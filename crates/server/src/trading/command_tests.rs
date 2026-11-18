@@ -321,6 +321,22 @@ async fn a_repeated_batch_returns_its_first_result_without_asking_kiwoom_again()
 }
 
 #[tokio::test]
+async fn a_batch_adopts_a_cancel_already_journaled_under_its_command_id() {
+    let f = on().await;
+    let (_, single) = order(&f.app, CANCEL, json!({"commandId": "batch-adopt-01_0012345", "orderNo": "0012345"})).await;
+    assert_eq!(single["state"], "accepted", "{single}");
+    let batch = json!({"batchId": "batch-adopt-01", "code": "005930", "side": "buy", "price": 71_000});
+    let (code, adopted) = order(&f.app, CANCEL_BATCH, batch.clone()).await;
+    assert_eq!((code, &adopted["commands"][0]["commandId"]), (StatusCode::OK, &json!("batch-adopt-01_0012345")), "{adopted}");
+    assert_eq!(writes(&f).len(), 1, "이미 나간 취소를 다시 보내지 않는다");
+    let (code, again) = order(&f.app, CANCEL_BATCH, batch).await;
+    assert_eq!((code, &again["commands"]), (StatusCode::OK, &adopted["commands"]));
+    let (code, _) = order(&f.app, CANCEL_BATCH, json!({"batchId": "batch-adopt-01", "code": "005930", "side": "sell", "price": 72_000})).await;
+    assert_eq!(code, StatusCode::BAD_REQUEST);
+    assert_eq!(writes(&f).len(), 1);
+}
+
+#[tokio::test]
 async fn writes_for_one_account_run_one_at_a_time() {
     let f = fixture_with(Duration::from_millis(150), Duration::ZERO).await;
     assert_eq!(enable(&f.app, "01").await.0, StatusCode::OK);
