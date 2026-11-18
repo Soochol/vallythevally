@@ -12,7 +12,7 @@ const ladderRows = (page: Page) => page.getByTestId("price-ladder").locator(".mw
 function lastTrade(scenario: Scenario, price: number, seq = 1, qty = 3, venue: "combined" | "krx" = "combined"): void {
   const request = scenario.live.messages.find((m) => m.type === "subscribe_feed" && m.kind === "trades" && m.venue === venue);
   if (request?.type !== "subscribe_feed") throw new Error("체결 구독이 없습니다");
-  scenario.live.emit({ type: "feed_trades", sub: request.sub, seq, trades: [{ t: 1_700_000_000 + seq, price, qty, venue: "krx", strength: 101.5 }] });
+  scenario.live.emit({ type: "feed_trades", sub: request.sub, seq, trades: [{ t: scenario.now / 1000 + seq, price, qty, venue: "krx", strength: 101.5 }] });
 }
 
 const tops = (locator: Locator) => locator.evaluateAll((elements) => elements.map((element) => Math.round(element.getBoundingClientRect().top * 10) / 10));

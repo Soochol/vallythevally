@@ -422,6 +422,10 @@ impl MarketHub {
 
     fn attach_feed(&mut self, conn: ConnId, sub: &SubId, feed: FeedSub) {
         push(&self.conns, &mut self.closing, conn, ServerMessage::FeedSubscribed { sub: sub.0.clone(), kind: feed.kind });
+        if !self.session_live {
+            let msg = ServerMessage::FeedLink { sub: sub.0.clone(), live: false, at: UnixSeconds(self.realtime_since.unix()) };
+            push(&self.conns, &mut self.closing, conn, msg);
+        }
         if feed.kind == FeedKind::Brokers
             && let Some((snapshot, received_at)) = self.broker_history.get(&feed.symbol)
         {
@@ -3079,6 +3083,28 @@ mod tests {
         let live_at = h.clock.now();
         h.events.send(StreamEvent::Live { since: live_at }).await.unwrap();
         assert_eq!(take(&out).await.into_iter().filter(|m| matches!(m, ServerMessage::FeedLink { .. })).collect::<Vec<_>>(), [link(true, live_at)]);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_feed_opened_while_the_session_is_down_hears_the_link_is_down() {
+        let h = std_harness();
+        live(&h).await;
+        let down_at = h.clock.now();
+        h.events.send(StreamEvent::Down { at: down_at }).await.unwrap();
+        settle().await;
+        let (conn, out) = connect(&h).await;
+        subscribe_feed(&h, conn, "b", FeedKind::Book, Venue::Combined);
+        let link_down = ServerMessage::FeedLink { sub: "b".into(), live: false, at: UnixSeconds(down_at.unix()) };
+        assert_eq!(take(&out).await, [feed_subscribed("b", FeedKind::Book), link_down]);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_feed_opened_while_the_session_is_live_hears_no_link() {
+        let h = std_harness();
+        live(&h).await;
+        let (conn, out) = connect(&h).await;
+        subscribe_feed(&h, conn, "b", FeedKind::Book, Venue::Combined);
+        assert_eq!(take(&out).await, [feed_subscribed("b", FeedKind::Book)]);
     }
 
     #[tokio::test(start_paused = true)]
