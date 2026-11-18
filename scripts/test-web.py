@@ -5,6 +5,7 @@ import io
 import json
 import multiprocessing
 from pathlib import Path
+import re
 import subprocess
 import sys
 import os
@@ -212,6 +213,72 @@ class WebWorkflowTest(unittest.TestCase):
         self.assertNotEqual(observations[0], observations[1])
         self.assertEqual(stale.read_text(), "old UI")
         self.assertEqual(self.build_count(), 1)
+
+    def playwright_arguments(self, arguments, cpus=32):
+        captured = []
+        def command(invoked, cwd, environment):
+            if "vite" in invoked[0]:
+                directory = Path(invoked[invoked.index("--outDir") + 1])
+                directory.mkdir(parents=True)
+                (directory / "index.html").write_text("new UI")
+            if "playwright" in invoked[0]:
+                captured.append(invoked[2:])
+        output = io.StringIO()
+        with self.commands(command), patch.object(web.os, "cpu_count", return_value=cpus), contextlib.redirect_stdout(output):
+            web.run_e2e(self.root, arguments)
+        notices = [line for line in output.getvalue().splitlines() if line.startswith("dev-web:") and "상한" in line]
+        return captured[0], notices
+
+    def worker_arguments(self, arguments):
+        return [arg for arg in arguments if arg.startswith(("--workers", "-j"))]
+
+    def test_e2e_workers_above_cap_are_reduced_with_one_notice(self):
+        for form in (["--workers=12"], ["--workers", "12"], ["-j", "12"], ["-j12"], ["--workers=2", "--workers=12"]):
+            with self.subTest(form):
+                arguments, notices = self.playwright_arguments(["e2e/example.spec.ts", *form])
+                self.assertEqual([arg for arg in arguments if arg.startswith("--workers")], ["--workers=6"])
+                self.assertNotIn("12", arguments)
+                self.assertNotIn("-j", arguments)
+                self.assertNotIn("-j12", arguments)
+                self.assertEqual(len(notices), 1)
+                self.assertIn("12", notices[0])
+                self.assertIn(str(web.MAX_E2E_WORKERS), notices[0])
+
+    def test_e2e_workers_within_cap_are_kept_without_notice(self):
+        for form in (["--workers=3"], ["-j", "3"]):
+            with self.subTest(form):
+                arguments, notices = self.playwright_arguments(["e2e/example.spec.ts", *form])
+                self.assertEqual([arg for arg in arguments if arg.startswith("--workers")], ["--workers=3"])
+                self.assertNotIn("-j", arguments)
+                self.assertEqual(notices, [])
+
+    def test_e2e_without_workers_uses_default(self):
+        arguments, notices = self.playwright_arguments(["e2e/example.spec.ts"])
+        self.assertEqual([arg for arg in arguments if arg.startswith("--workers")], ["--workers=2"])
+        self.assertEqual(notices, [])
+
+    def test_e2e_worker_percent_follows_cpu_count(self):
+        arguments, notices = self.playwright_arguments(["--workers=50%"], cpus=32)
+        self.assertEqual([arg for arg in arguments if arg.startswith("--workers")], ["--workers=6"])
+        self.assertEqual(len(notices), 1)
+        arguments, notices = self.playwright_arguments(["--workers=50%"], cpus=4)
+        self.assertEqual([arg for arg in arguments if arg.startswith("--workers")], ["--workers=2"])
+        self.assertEqual(notices, [])
+
+    def test_e2e_unreadable_workers_pass_through(self):
+        arguments, notices = self.playwright_arguments(["--workers=abc"])
+        self.assertIn("--workers=abc", arguments)
+        self.assertEqual(self.worker_arguments(arguments), ["--workers=abc"])
+        self.assertEqual(notices, [])
+        arguments, notices = self.playwright_arguments(["e2e/example.spec.ts", "--workers"])
+        self.assertEqual(arguments[-2:][0], "--workers")
+        self.assertEqual(notices, [])
+
+    def test_playwright_config_project_workers_match_cap(self):
+        config = (ROOT / "web/playwright.config.ts").read_text()
+        match = re.search(r'name: "chromium",\s*workers: (\d+)', config)
+        self.assertIsNotNone(match)
+        self.assertEqual(int(match.group(1)), web.MAX_E2E_WORKERS)
 
     def test_parallel_static_hosts_use_distinct_ports_and_cleanup_owned_processes(self):
         distribution = self.root / "dist"

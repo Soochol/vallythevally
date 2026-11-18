@@ -30,7 +30,7 @@ frozen 의존성 설치, WASM 준비와 타입 검사, 현재 UI의 Vite 빌드�
 | `results/` | Playwright 결과·실패 추적 |
 | `report/` | HTML 보고서 |
 
-도구가 출력한 경로에서 결과를 확인한다. 기본 worker는 2이며 Playwright 인수로 바꿀 수 있다. `--output`을 직접 지정하면 해당 경로를 사용하므로 동시 실행마다 다른 경로를 선택한다. 브라우저 임시 경로는 절대 경로로 정규화해 `TMPDIR`로 전달한다.
+도구가 출력한 경로에서 결과를 확인한다. 기본 worker는 2이며 Playwright 인수로 바꿀 수 있다. 한 실행의 동시 브라우저는 6개가 상한이다. `web.py`는 `--workers`·`-j`가 6을 넘으면(퍼센트는 코어 수로 계산해 비교) `--workers=6`으로 줄이고 `dev-web:` 줄로 알린다. `web.py`를 거치지 않는 직접 Playwright 실행도 `chromium` project의 `workers: 6`으로 6개를 넘지 않는다. `--output`을 직접 지정하면 해당 경로를 사용하므로 동시 실행마다 다른 경로를 선택한다. 브라우저 임시 경로는 절대 경로로 정규화해 `TMPDIR`로 전달한다.
 
 도구는 `VALLY_E2E_STATIC_DIR`로 이번 UI 빌드를 전달하고 정적 호스트를 빈 포트(`VALLY_E2E_PORT=0`)에 띄운다. 주소는 `VALLY_E2E_BASE_URL`로 Playwright에 전달한다. 종료 시 이번 호스트만 정리한다. 이전 `web/dist`는 이번 산출물로 사용하지 않는다. 직접 Playwright를 실행하는 CI는 `web/dist`와 기본 포트 4173을 사용한다. 동시 직접 실행에서는 서로 다른 `VALLY_E2E_PORT`를 지정한다.
 

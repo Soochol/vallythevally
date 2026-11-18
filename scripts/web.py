@@ -5,6 +5,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import re
 import subprocess
 import sys
 import time
@@ -14,6 +15,52 @@ import tomllib
 import dev
 import e2e_rules
 import evidence
+
+
+MAX_E2E_WORKERS = 6
+DEFAULT_E2E_WORKERS = 2
+WORKER_PERCENT = re.compile(r"(\d+(?:\.\d+)?)%")
+
+
+def requested_workers(value):
+    if value.isdecimal():
+        return int(value)
+    percent = WORKER_PERCENT.fullmatch(value)
+    if percent:
+        return max(1, int((os.cpu_count() or 1) * float(percent.group(1)) / 100))
+    return None
+
+
+def capped_worker_options(options):
+    kept = []
+    last = None
+    index = 0
+    while index < len(options):
+        option = options[index]
+        value = None
+        if option.startswith("--workers="):
+            value = option[len("--workers="):]
+        elif option in ("--workers", "-j"):
+            if index + 1 >= len(options):
+                return options
+            index += 1
+            value = options[index]
+        elif option.startswith("-j") and len(option) > 2:
+            value = option[2:]
+        else:
+            kept.append(option)
+        if value is not None:
+            last = value
+        index += 1
+    if last is None:
+        return [*kept, f"--workers={DEFAULT_E2E_WORKERS}"]
+    count = requested_workers(last)
+    if count is None:
+        return options
+    if count > MAX_E2E_WORKERS:
+        print(f"dev-web: e2e worker {last}개 요청을 상한 {MAX_E2E_WORKERS}개로 줄입니다", flush=True)
+        count = MAX_E2E_WORKERS
+    return [*kept, f"--workers={count}"]
 
 
 WASM_FILES = {"indicators.js", "indicators.d.ts", "indicators_bg.wasm", "indicators_bg.wasm.d.ts"}
@@ -212,8 +259,7 @@ def run_e2e(root, arguments):
         options = list(arguments)
         if not any(arg == "--output" or arg.startswith("--output=") for arg in options):
             options.append(f"--output={directory / 'results'}")
-        if not any(arg == "--workers" or arg.startswith(("--workers=", "-j")) for arg in options):
-            options.append("--workers=2")
+        options = capped_worker_options(options)
         record.data["results"].update(playwright_output=options, report=str(directory / "report"))
         server = None
         try:
@@ -244,7 +290,7 @@ def main():
     actions.add_parser("wasm", help="WASM 준비 또는 일치하는 로컬 산출물 재사용")
     check = actions.add_parser("check", help="의존성·WASM·타입 검사·Vitest 실행")
     check.add_argument("arguments", nargs=argparse.REMAINDER)
-    e2e = actions.add_parser("e2e", help="현재 웹 빌드·독립 정적 호스트 후 Playwright 실행 (인수 전달, 기본 worker 2)")
+    e2e = actions.add_parser("e2e", help="현재 웹 빌드·독립 정적 호스트 후 Playwright 실행 (인수 전달, 기본 worker 2, 상한 6)")
     e2e.add_argument("arguments", nargs=argparse.REMAINDER)
     doctor = actions.add_parser("doctor", help="설치·빌드·인증 없이 로컬 Chromium 진단")
     doctor.add_argument("--headed", action="store_true")
