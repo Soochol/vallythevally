@@ -342,6 +342,18 @@ impl Fixture {
         done
     }
 
+    async fn wait_until_the_browser_is_told_of_the_login(&self, browser: &mut Socket) {
+        self.in_real_time(async {
+            loop {
+                let account = next_message_of_type(browser, "account", WAIT).await.expect("로그인을 브라우저에 알리지 않았다");
+                if account["status"]["state"] == "signed_in" {
+                    break;
+                }
+            }
+        })
+        .await;
+    }
+
     async fn sign_in(&self) {
         let account = self.state.system.account();
         let now = UnixSeconds(self.state.clock.now().unix());
@@ -763,6 +775,7 @@ async fn the_browser_notice_reaches_a_connection_only_while_the_current_login_is
     assert!(next_message_of_type(&mut browser, "collector_daemon", Duration::from_secs(10)).await.is_none(), "로그인 없음에는 보내지 않는다");
 
     fixture.sign_in_as(Some("1234")).await;
+    fixture.wait_until_the_browser_is_told_of_the_login(&mut browser).await;
     let mut daemon = Daemon::start(&fixture.socket, Mode::Beating);
     fixture.reached(DaemonJudgment::Healthy).await;
     daemon.stop().await;
@@ -779,6 +792,7 @@ async fn the_browser_notice_reaches_a_connection_only_while_the_current_login_is
 
     fixture.sign_out().await;
     fixture.sign_in_as(Some("9999")).await;
+    fixture.wait_until_the_browser_is_told_of_the_login(&mut browser).await;
     let mut daemon = Daemon::start(&fixture.socket, Mode::Beating);
     fixture.reached(DaemonJudgment::Healthy).await;
     daemon.stop().await;
