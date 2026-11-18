@@ -48,6 +48,13 @@ describe("종목별 호가 단위", () => {
     expect(tickRuleOf("common", [])).toBe("stock");
   });
 
+  it("ETN은 주식 단위에 맞는 가격에서도 ETF 단위이고 인프라투자금융·뮤추얼펀드는 주식 단위다", () => {
+    const stockPrices = [70_100, 70_000, 69_900];
+    expect(tickRuleOf("etn", stockPrices)).toBe("etf");
+    expect(tickRuleOf("infrastructure", stockPrices)).toBe("stock");
+    expect(tickRuleOf("mutualFund", stockPrices)).toBe("stock");
+  });
+
   it("받은 단이 주식 단위에 맞지 않으면 종류와 상관없이 단이 빠지지 않는 단위를 고른다", () => {
     const fivePrices = [35_010, 35_015, 35_005, 35_000];
     expect(tickRuleOf(null, fivePrices)).toBe("etf");

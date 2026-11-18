@@ -79,20 +79,28 @@ fn is_write(id: TradingApiId) -> bool {
     matches!(id, TradingApiId::Kt10000 | TradingApiId::Kt10001 | TradingApiId::Kt10002 | TradingApiId::Kt10003)
 }
 
-fn price_band_reply() -> Result<HttpResponse, TransportError> {
+fn price_band_reply(requested: &str) -> Result<HttpResponse, TransportError> {
     let mut body: Value = serde_json::from_str(include_str!("../../tests/fixtures/kiwoom/ka10001_005930_AL.json")).unwrap();
-    body["upl_pric"] = "+100000".into();
-    body["lst_pric"] = "-50000".into();
+    let (upper, lower) = if requested.contains(ETN_CODE) {
+        body["stk_cd"] = format!("{ETN_CODE}_AL").into();
+        ("+10000", "-5000")
+    } else {
+        ("+100000", "-50000")
+    };
+    body["upl_pric"] = upper.into();
+    body["lst_pric"] = lower.into();
     body["return_code"] = 0.into();
     body["return_msg"] = "정상".into();
     ok(body, None)
 }
 
+pub(super) const ETN_CODE: &str = "520100";
+
 fn listed_symbols() -> Arc<SymbolDirectory> {
     use domain::{Market, Symbol, SymbolInfo, SymbolKind};
-    let info = |code: &str, name: &str, nxt_enabled| SymbolInfo { symbol: Symbol::parse(code).unwrap(), name: name.into(), kind: SymbolKind::Common, market: Market::Kospi, nxt_enabled };
+    let info = |code: &str, name: &str, kind, nxt_enabled| SymbolInfo { symbol: Symbol::parse(code).unwrap(), name: name.into(), kind, market: Market::Kospi, nxt_enabled };
     let symbols = Arc::new(SymbolDirectory::default());
-    symbols.replace(crate::symbols::Directory::build(vec![info("005930", "삼성전자", true), info("005935", "KRX전용", false)]));
+    symbols.replace(crate::symbols::Directory::build(vec![info("005930", "삼성전자", SymbolKind::Common, true), info("005935", "KRX전용", SymbolKind::Common, false), info(ETN_CODE, "합성 ETN", SymbolKind::Etn, false)]));
     symbols
 }
 
@@ -168,7 +176,7 @@ pub(super) async fn fixture_in(latency: Duration, spacing: Duration, environment
             return write_reply(*seen_mode.lock().unwrap());
         }
         match sent.api_id.market() {
-            Some(id) if id == StockBasicInfo::API_ID => return price_band_reply(),
+            Some(id) if id == StockBasicInfo::API_ID => return price_band_reply(&sent.body),
             Some(id) if id == StockList::API_ID => return ok(json!({"list": [], "return_code": 0, "return_msg": "정상"}), None),
             _ => {}
         }
