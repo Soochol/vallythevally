@@ -127,6 +127,10 @@ impl SubscriptionManager {
         self.admitted.contains(&symbol)
     }
 
+    pub fn admitted_watch(&self, conn: ConnId) -> impl Iterator<Item = Symbol> + '_ {
+        self.watch_rows.get(&conn).into_iter().flat_map(BTreeMap::keys).copied().filter(|s| self.admitted.contains(s))
+    }
+
     pub fn watchers(&self, symbol: Symbol) -> impl Iterator<Item = ConnId> + '_ {
         self.holders.get(&symbol).into_iter().flatten().filter_map(|h| match h {
             Holder::Watch { conn, .. } => Some(*conn),
