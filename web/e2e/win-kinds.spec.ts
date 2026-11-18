@@ -73,7 +73,9 @@ for (const { kind, name } of KINDS) {
     await addButton(page).click();
     await expect(kindItem(page, name)).toContainText("1개 열림");
     await kindItem(page, name).click();
-    await expect(windowTabs(page).getByRole("tab", { name: new RegExp(`^${name} \\d`) })).toHaveText([new RegExp(`^${name} 1`), new RegExp(`^${name} 2`)]);
+    await expect(windowTabs(page).getByRole("tab", { name: new RegExp(`^${name} 1`) })).toHaveCount(1);
+    await expect(windowTabs(page).getByRole("tab", { name: new RegExp(`^${name} 2`) })).toHaveCount(1);
+    await expect(windowTabs(page).getByRole("tab", { name: new RegExp(`^${name}( \\d|$)`) })).toHaveCount(2);
     await expect.poll(() => savedWindows(scenario).filter((w) => w.kind === kind).map((w) => w.id)).toEqual([kind, `${kind}-2`]);
   });
 }

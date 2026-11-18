@@ -300,12 +300,15 @@ test("묶음 더하기는 차트를 그 묶음에 더하고 기존 단일 창은
   await undo(page, firstGroup.getByRole("tab").last());
   await expect(firstGroup.getByRole("tab")).toHaveCount(1);
   expect(await chartOf(cell(page)).evaluate((node, previous) => node === previous, firstNode)).toBe(true);
+  await page.getByRole("toolbar", { name: "차트 도구 막대" }).getByRole("button", { name: "창 더하기" }).click();
+  await page.getByRole("menu", { name: "창 더하기" }).getByRole("menuitem", { name: /^지표/ }).click();
+  await expect(groupWith(page, "관심종목").locator(".dock-tabs").getByRole("tab", { name: "지표" })).toBeVisible();
   await firstGroup.getByRole("button", { name: "이 묶음에 창 더하기" }).click();
-  await page.getByRole("menu", { name: "창 더하기" }).getByRole("menuitem", { name: /^스크리너/ }).click();
-  await expect(firstGroup.getByRole("tab", { name: "스크리너" })).toHaveAttribute("aria-selected", "true");
-  await expect.poll(() => scenario.documents.layout(DEFAULT_LAYOUT_ID).windows.filter((window) => window.kind === "screener").length).toBe(1);
-  await undo(page, tab(page, "스크리너"));
-  await expect(groupWith(page, "관심종목").getByRole("tab", { name: "스크리너" })).toBeVisible();
+  await page.getByRole("menu", { name: "창 더하기" }).getByRole("menuitem", { name: /^지표/ }).click();
+  await expect(firstGroup.locator(".dock-tabs").getByRole("tab", { name: "지표" })).toHaveAttribute("aria-selected", "true");
+  await expect.poll(() => scenario.documents.layout(DEFAULT_LAYOUT_ID).windows.filter((window) => window.kind === "indicators").length).toBe(1);
+  await undo(page, firstGroup.locator(".dock-tabs").getByRole("tab", { name: "지표" }));
+  await expect(groupWith(page, "관심종목").locator(".dock-tabs").getByRole("tab", { name: "지표" })).toBeVisible();
 });
 
 test("끌 때 차트 드로잉과 관심종목·포털 도구 입력을 막고 놓은 뒤 정상 입력을 돌린다", async ({ page, scenario }) => {
