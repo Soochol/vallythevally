@@ -519,7 +519,7 @@ test("봉 값이 그대로면 크기가 바뀌어 다시 그려도 봉 값 줄�
   await page.setViewportSize({ width: 793, height: 800 });
   await expect.poll(async () => (await cell(page).locator(".chart-legend").boundingBox())!.width).toBeLessThan(wide);
   await page.clock.runFor(1000);
-  await fixedWait(page, 200, "가상 시간을 넘긴 뒤 다시 그려진 봉 값 줄이 DOM에 반영될 실제 시간");
+  await fixedWait(page, 1000, "봉 값 줄을 다시 만들지 않았음을 보려면 원래 대기만큼 실제 시간이 지나야 한다");
   expect(await page.evaluate(() => (window as unknown as { rebuiltOhlc: unknown[] }).rebuiltOhlc)).toEqual([]);
 });
 

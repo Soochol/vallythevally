@@ -28,7 +28,7 @@ const callsTo = (scenario: Scenario, method: string, pathname: string) => scenar
 
 const passTime = async (page: Page, ms: number) => {
   await page.clock.runFor(ms);
-  await fixedWait(page, 200, "가상 시간을 넘긴 뒤 브라우저가 낸 요청이 서버 기록에 닿을 실제 시간");
+  await fixedWait(page, ms, "요청이 나가지 않았음을 보려면 원래 대기만큼 실제 시간이 지나야 한다");
 };
 
 async function openKiwoom(page: Page) {
