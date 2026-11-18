@@ -964,6 +964,19 @@ async fn the_next_day_start_finalizes_every_past_day_left_unfinalized() {
 }
 
 #[tokio::test(start_paused = true)]
+async fn a_journal_line_cut_inside_a_korean_character_does_not_stop_the_complete_file() {
+    let harness = Harness::start_with(Config::default(), |data| {
+        let mut torn = br#"{"v":1,"at":"2026-11-18T06:59:58+09:00","event":"key_stopped","key":"collect-01","reason":""#.to_vec();
+        torn.extend_from_slice(&"토큰".as_bytes()[..4]);
+        std::fs::create_dir_all(journal_path(data, DATE).parent().unwrap()).unwrap();
+        std::fs::write(journal_path(data, DATE), torn).unwrap();
+    });
+    harness.until_finalize_finished(1).await;
+    assert_eq!(harness.complete()["observation"]["judgment"]["verdict"], "observed");
+    harness.finish().await;
+}
+
+#[tokio::test(start_paused = true)]
 async fn a_torn_journal_line_does_not_swallow_the_next_event() {
     let harness = Harness::start_with(Config::default(), |data| {
         let torn = r#"{"v":1,"at":"2026-11-18T06:59:58+09:00","event":"child_started","key":"collect-01","pid":4"#;

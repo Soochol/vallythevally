@@ -4,7 +4,7 @@ use std::path::Path;
 use serde::{Deserialize, Serialize};
 
 use crate::calendar::{Evidence, Mismatch};
-use crate::supervise::journal_path;
+use crate::supervise::{journal_path, read_lossy};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -74,7 +74,7 @@ enum ObservationEvent {
 }
 
 pub fn read_observation(data_dir: &Path, date: u32) -> io::Result<ObservationSummary> {
-    let text = match std::fs::read_to_string(journal_path(data_dir, date)) {
+    let text = match read_lossy(&journal_path(data_dir, date)) {
         Ok(text) => text,
         Err(error) if error.kind() == io::ErrorKind::NotFound => String::new(),
         Err(error) => return Err(error),

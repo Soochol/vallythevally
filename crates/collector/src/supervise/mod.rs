@@ -29,7 +29,7 @@ mod wire;
 
 pub use daemon::{Control, Injected, Inputs, StartError, Supervisor, load_plan};
 pub use handoff::{STOCK_TYPES, effective_plan, registrations_of};
-pub use journal::{JOURNAL_VERSION, JournalEvent, journal_path, kst_stamp};
+pub use journal::{JOURNAL_VERSION, JournalEvent, journal_path, kst_stamp, read_lossy};
 pub use process::{ChildMessage, ChildProcess, FORWARDED_VARIABLES, Launcher, Spawned, TokioLauncher};
 pub use schedule::{Daemon, DaemonInjected, DaemonInputs, DaemonStartError, DayTimes, FinalizeRunner, ProcessFinalizeRunner, ScheduleSettings, finalize_arguments, parse_clock_time};
 pub use settings::{MarketOpenCheck, Settings, SocketSetting};

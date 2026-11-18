@@ -45,8 +45,12 @@ struct Record<'a> {
     event: &'a JournalEvent,
 }
 
+pub fn read_lossy(path: &Path) -> io::Result<String> {
+    Ok(String::from_utf8_lossy(&std::fs::read(path)?).into_owned())
+}
+
 pub fn has_event(path: &Path, event: &str) -> bool {
-    let Ok(text) = std::fs::read_to_string(path) else { return false };
+    let Ok(text) = read_lossy(path) else { return false };
     text.lines().filter_map(|line| serde_json::from_str::<serde_json::Value>(line).ok()).any(|record| record["event"] == event)
 }
 
