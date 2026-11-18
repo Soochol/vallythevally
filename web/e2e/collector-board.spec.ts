@@ -246,14 +246,17 @@ test("모르는 판단 값은 값 그대로 보이고 앱이 죽지 않는다", 
   await expect(dialog(p).getByRole("table", { name: "키별 상태" })).toBeVisible();
 });
 
-test("범위 밖 received_at은 알 수 없는 시각으로 보인다", async ({ page: p, scenario }) => {
-  serve(scenario, "allowed", { ...page("healthy"), received_at: 9e12 });
-  await p.goto("/collector");
-  const band = p.getByRole("status", { name: "감독 데몬" });
-  await expect(band).toContainText("마지막으로 받은 상태 알 수 없는 시각");
-  await expect(band.locator("time")).toHaveCount(0);
-  await expect(p.getByRole("table", { name: "키별 상태" })).toBeVisible();
-});
+for (const receivedAt of [9e12, 8.64e12, 8.64e12 - 100]) {
+  test(`범위 밖 received_at ${receivedAt}은 알 수 없는 시각으로 보인다`, async ({ page: p, scenario }) => {
+    serve(scenario, "allowed", { ...page("healthy"), received_at: receivedAt });
+    await p.goto("/collector");
+    const band = p.getByRole("status", { name: "감독 데몬" });
+    await expect(band).toContainText("마지막으로 받은 상태 알 수 없는 시각");
+    await expect(band).not.toContainText("NaN");
+    await expect(band.locator("time")).toHaveCount(0);
+    await expect(p.getByRole("table", { name: "키별 상태" })).toBeVisible();
+  });
+}
 
 test("현황판을 그리다 오류가 나도 차트 화면과 설정 창의 다른 메뉴는 남는다", async ({ page: p, scenario }) => {
   const broken = { ...STATUS, keys: null } as unknown as CollectorStatus;

@@ -42,7 +42,7 @@ describe("수집 현황판 표시 규칙", () => {
   test("날짜·시각·크기·커버리지 비율의 표기", () => {
     expect(dateText(20261118)).toBe("2026-11-18");
     expect(receivedAtText(Date.parse("2026-11-18T09:30:12+09:00") / 1000)).toBe("2026-11-18 09:30:12");
-    expect(receivedAtText(9e12)).toBe("알 수 없는 시각");
+    for (const t of [9e12, 8.64e12, 8.64e12 - 100, -9e12, Number.NaN, Number.POSITIVE_INFINITY]) expect(receivedAtText(t)).toBe("알 수 없는 시각");
     expect(bytesText(512)).toBe("512 B");
     expect(bytesText(30 * 1024 ** 3)).toBe("30.0 GB");
     expect(bytesText(2048 * 1024 ** 3)).toBe("2.0 TB");

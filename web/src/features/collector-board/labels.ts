@@ -93,10 +93,9 @@ export function dateText(yyyymmdd: number): string {
 
 export const UNKNOWN_TIME = "알 수 없는 시각";
 
-export const receivedAtIso = (t: UnixSeconds): string | null => {
-  const date = new Date(t * 1000);
-  return Number.isNaN(date.getTime()) ? null : date.toISOString();
-};
+const MAX_DISPLAYABLE_SECONDS = 8.64e12 - 86400;
+
+export const receivedAtIso = (t: UnixSeconds): string | null => (Math.abs(t) <= MAX_DISPLAYABLE_SECONDS ? new Date(t * 1000).toISOString() : null);
 
 export const receivedAtText = (t: UnixSeconds): string => (receivedAtIso(t) === null ? UNKNOWN_TIME : `${formatBarTime(t, "D")} ${formatKstClockSeconds(t)}`);
 
