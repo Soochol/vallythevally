@@ -248,6 +248,7 @@ pub enum ServerMessage {
     WatchLimited { symbols: Vec<SymbolCode> },
     KiwoomLink { status: KiwoomLinkStatus },
     Account { status: AccountStatus },
+    CollectorDaemon { judgment: crate::collector::DaemonJudgment, at: UnixSeconds },
     SetupChanged { kinds: Vec<setup::DocumentKind> },
     TradingAccountChanged { account_ref: String },
 }
@@ -1516,6 +1517,8 @@ pub enum ApiErrorCode {
     /// 있는 API 경로에 틀린 메서드를 보냈다.
     MethodNotAllowed,
     AccountServerUnavailable,
+    Forbidden,
+    CollectorUnavailable,
     Internal,
 }
 

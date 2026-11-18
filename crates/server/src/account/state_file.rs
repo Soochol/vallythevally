@@ -13,6 +13,7 @@ pub struct Login {
     pub token: Secret<String>,
     pub account_id: String,
     pub provider: AccountProvider,
+    pub subject: Option<String>,
     pub signed_in_at: UnixSeconds,
 }
 
@@ -22,6 +23,8 @@ struct Saved {
     token: String,
     account_id: String,
     provider: AccountProvider,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    subject: Option<String>,
     signed_in_at: i64,
 }
 
@@ -41,11 +44,11 @@ impl AccountStateFile {
     pub fn load(&self) -> Result<Option<Login>, FileError> {
         let Some(text) = self.file.read()? else { return Ok(None) };
         let saved: Saved = serde_json::from_str(&text).map_err(|e| self.file.error(format_args!("JSON {:?} 오류, {}번째 줄", e.classify(), e.line())))?;
-        Ok(Some(Login { server_url: saved.server_url, token: Secret::new(saved.token), account_id: saved.account_id, provider: saved.provider, signed_in_at: UnixSeconds(saved.signed_in_at) }))
+        Ok(Some(Login { server_url: saved.server_url, token: Secret::new(saved.token), account_id: saved.account_id, provider: saved.provider, subject: saved.subject, signed_in_at: UnixSeconds(saved.signed_in_at) }))
     }
 
     pub fn save(&self, login: &Login) -> Result<(), FileError> {
-        let saved = Saved { server_url: login.server_url.clone(), token: login.token.expose().clone(), account_id: login.account_id.clone(), provider: login.provider, signed_in_at: login.signed_in_at.0 };
+        let saved = Saved { server_url: login.server_url.clone(), token: login.token.expose().clone(), account_id: login.account_id.clone(), provider: login.provider, subject: login.subject.clone(), signed_in_at: login.signed_in_at.0 };
         self.file.write(&serde_json::to_vec(&saved).expect("문자열과 정수만 담은 구조체"))
     }
 

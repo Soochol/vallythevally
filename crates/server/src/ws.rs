@@ -11,6 +11,7 @@ use futures::stream::SplitSink;
 use futures::{SinkExt, StreamExt};
 
 use crate::api::{ClientMessage, FeedKind, ServerMessage, SubErrorCode, SymbolCode};
+use crate::collector::DaemonNotice;
 use crate::http::AppState;
 use crate::market::hub::HubHandle;
 use crate::market::outbox::Outbox;
@@ -33,6 +34,7 @@ async fn serve(socket: WebSocket, st: Arc<AppState>, hub: HubHandle) {
     let mut link_changes = st.link.subscribe();
     let mut account_changes = st.system.account().subscribe();
     let mut setup_changes = st.system.account().subscribe_setup_changes();
+    let mut collector_notices = st.system.collector().map(|board| board.subscribe_notices());
     let mut trading_changes = st.trading.subscribe_changes();
     hub.send_to(conn, ServerMessage::KiwoomLink { status: kiwoom_status(&st) });
     send_account(&st, &hub, conn).await;
@@ -48,6 +50,11 @@ async fn serve(socket: WebSocket, st: Arc<AppState>, hub: HubHandle) {
                 Ok(kinds) => hub.send_to(conn, ServerMessage::SetupChanged { kinds }),
                 Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => hub.send_to(conn, ServerMessage::SetupChanged { kinds: setup::DocumentKind::ALL.to_vec() }),
                 Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+            },
+            notice = next_collector_notice(&mut collector_notices) => match notice {
+                Ok(notice) => send_collector_notice(&st, &hub, conn, notice),
+                Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {}
+                Err(tokio::sync::broadcast::error::RecvError::Closed) => collector_notices = None,
             },
             changed = trading_changes.recv() => match changed {
                 Ok(changed) => hub.send_to(conn, ServerMessage::TradingAccountChanged { account_ref: changed.account_ref }),
@@ -70,6 +77,20 @@ async fn serve(socket: WebSocket, st: Arc<AppState>, hub: HubHandle) {
     }
     hub.disconnect(conn);
     outbox.close();
+}
+
+async fn next_collector_notice(notices: &mut Option<tokio::sync::broadcast::Receiver<DaemonNotice>>) -> Result<DaemonNotice, tokio::sync::broadcast::error::RecvError> {
+    match notices {
+        Some(notices) => notices.recv().await,
+        None => std::future::pending().await,
+    }
+}
+
+fn send_collector_notice(st: &AppState, hub: &HubHandle, conn: ConnId, notice: DaemonNotice) {
+    let allowed = st.system.collector().is_some_and(|board| board.allows(st.system.account().signed_in_identity().as_ref()));
+    if allowed {
+        hub.send_to(conn, ServerMessage::CollectorDaemon { judgment: notice.judgment, at: notice.at });
+    }
 }
 
 async fn send_account(st: &AppState, hub: &HubHandle, conn: ConnId) {

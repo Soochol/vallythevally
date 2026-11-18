@@ -8,6 +8,8 @@ use std::process::Command;
 
 use indicators::{LineId, MaMethod, Spec as IndicatorSpec};
 use server::api::*;
+use server::collector::wire::{CollectorAlert, CollectorCoverage, CollectorCoverageDay, CollectorDayBytes, CollectorDayState, CollectorDisk, CollectorDiskUsage, CollectorFilesystem, CollectorKey, CollectorKeyRole, CollectorKeyState, CollectorObservationDay, CollectorPhase, CollectorRenamedStock, CollectorRest, CollectorStatus, CollectorStock, CollectorToday, CollectorUniverseChanges, CollectorVerdict};
+use server::collector::{CollectorAccess, CollectorAccessState, CollectorStatusPage, DaemonJudgment};
 use server::drawing_api::*;
 use ts_rs::TS;
 
@@ -62,6 +64,30 @@ fn generated_typescript_matches_the_committed_files() {
         generated::<ApiErrorBody>(),
         generated::<ApiErrorCode>(),
         generated::<ApiErrorReason>(),
+        generated::<CollectorAccess>(),
+        generated::<CollectorAccessState>(),
+        generated::<CollectorAlert>(),
+        generated::<CollectorCoverage>(),
+        generated::<CollectorCoverageDay>(),
+        generated::<CollectorDayBytes>(),
+        generated::<CollectorDayState>(),
+        generated::<CollectorDisk>(),
+        generated::<CollectorDiskUsage>(),
+        generated::<CollectorFilesystem>(),
+        generated::<CollectorKey>(),
+        generated::<CollectorKeyRole>(),
+        generated::<CollectorKeyState>(),
+        generated::<CollectorObservationDay>(),
+        generated::<CollectorPhase>(),
+        generated::<CollectorRenamedStock>(),
+        generated::<CollectorRest>(),
+        generated::<CollectorStatus>(),
+        generated::<CollectorStatusPage>(),
+        generated::<CollectorStock>(),
+        generated::<CollectorToday>(),
+        generated::<CollectorUniverseChanges>(),
+        generated::<CollectorVerdict>(),
+        generated::<DaemonJudgment>(),
         generated::<Bar>(),
         generated::<BarField>(),
         generated::<RecentBars>(),

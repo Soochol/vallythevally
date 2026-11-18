@@ -16,6 +16,8 @@ const API_ERROR_CODES = [
   "screener_not_ready",
   "method_not_allowed",
   "account_server_unavailable",
+  "forbidden",
+  "collector_unavailable",
   "internal",
 ] as const satisfies readonly ApiErrorCode[];
 

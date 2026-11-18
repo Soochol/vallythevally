@@ -6,6 +6,7 @@ pub mod api;
 pub mod app;
 pub mod bars;
 pub mod clock;
+pub mod collector;
 pub mod config;
 pub mod db;
 pub mod drawing_api;

@@ -39,6 +39,15 @@ struct TokenResponse {
 struct MeResponse {
     id: String,
     provider: AccountProvider,
+    #[serde(default)]
+    subject: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Me {
+    pub id: String,
+    pub provider: AccountProvider,
+    pub subject: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -104,10 +113,10 @@ impl AccountClient {
         Ok(Exchanged { token: Secret::new(response.token) })
     }
 
-    pub async fn me(&self, token: &Secret<String>) -> Result<(String, AccountProvider), ClientError> {
+    pub async fn me(&self, token: &Secret<String>) -> Result<Me, ClientError> {
         let bytes = self.send(self.http.get(format!("{}/v1/me", self.origin)).bearer_auth(token.expose())).await?;
         let me: MeResponse = serde_json::from_slice(&bytes).map_err(|_| ClientError::Malformed)?;
-        Ok((me.id, me.provider))
+        Ok(Me { id: me.id, provider: me.provider, subject: me.subject.filter(|subject| !subject.is_empty()) })
     }
 
     pub async fn push(&self, token: &Secret<String>, documents: &[Document]) -> Result<PushResponse, ClientError> {

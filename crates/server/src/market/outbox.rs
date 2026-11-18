@@ -165,7 +165,7 @@ fn sub_of(msg: &ServerMessage) -> Option<&str> {
         | ServerMessage::FeedProgram { .. }
         | ServerMessage::FeedBrokers { .. }
         | ServerMessage::FeedLink { .. }
-        | ServerMessage::Hello { .. } | ServerMessage::Status { .. } | ServerMessage::Quotes { .. } | ServerMessage::WatchLimited { .. } | ServerMessage::KiwoomLink { .. } | ServerMessage::Account { .. } | ServerMessage::SetupChanged { .. } | ServerMessage::TradingAccountChanged { .. } => None,
+        | ServerMessage::CollectorDaemon { .. } | ServerMessage::Hello { .. } | ServerMessage::Status { .. } | ServerMessage::Quotes { .. } | ServerMessage::WatchLimited { .. } | ServerMessage::KiwoomLink { .. } | ServerMessage::Account { .. } | ServerMessage::SetupChanged { .. } | ServerMessage::TradingAccountChanged { .. } => None,
     }
 }
 
