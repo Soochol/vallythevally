@@ -20,14 +20,16 @@ async function seed(scenario: Scenario, page: Page) {
   scenario.documents.saveScreens({ screens: [SEEDED], revision: 1 });
   await page.goto("/?symbol=005930");
   await openScreener(page);
-  await expect(summary(page)).toContainText(SENTENCE);
+  await expect(editButton(page)).toBeVisible();
 }
 
 test("패널은 요약만 보이고 편집 창은 패널 왼쪽에 떠서 패널을 눌러도 남으며 Esc로 닫으면 편집 버튼으로 돌아온다", async ({ scenario, page }, info) => {
   const errors: string[] = [];
   page.on("pageerror", (error) => errors.push(error.message));
   await seed(scenario, page);
-  await expect(summary(page)).toContainText("코스피 · ETF 제외");
+  await expect(summary(page)).toHaveCount(0);
+  await expect(panel(page).getByText(SENTENCE)).toHaveCount(0);
+  await expect(panel(page).getByText("코스피 · ETF 제외")).toHaveCount(0);
   await expect(panel(page).getByRole("group", { name: "문장형 조건식" })).toHaveCount(0);
   await expect(editButton(page)).toHaveAttribute("aria-expanded", "false");
 
@@ -36,6 +38,8 @@ test("패널은 요약만 보이고 편집 창은 패널 왼쪽에 떠서 패널
   await expect(editButton(page)).toHaveAttribute("aria-expanded", "true");
   await expect(editorWindow(page).getByRole("group", { name: "문장형 조건식" })).toBeVisible();
   await expect(nameField(page)).toHaveValue(SEEDED.name);
+  await expect(editorWindow(page).getByRole("list", { name: "조건" })).toContainText(/일봉\s*최근\s*20일 이내에\s*고가\s*60일 신고가인 봉이 있다/);
+  await expect(editorWindow(page).getByRole("group", { name: "대상 시장" }).getByRole("button", { name: "코스피", exact: true })).toHaveAttribute("aria-pressed", "true");
   const panelBox = (await panel(page).boundingBox())!;
   const windowBox = (await editorWindow(page).boundingBox())!;
   expect(windowBox.x + windowBox.width).toBeLessThanOrEqual(panelBox.x);
@@ -43,7 +47,7 @@ test("패널은 요약만 보이고 편집 창은 패널 왼쪽에 떠서 패널
   expect(windowBox.y + windowBox.height).toBeLessThanOrEqual(900);
   await page.screenshot({ path: info.outputPath("editor-window.png") });
 
-  await summary(page).click();
+  await panel(page).click({ position: { x: 4, y: 4 } });
   await expect(editorWindow(page)).toBeVisible();
   await page.keyboard.press("Escape");
   await expect(editorWindow(page)).toHaveCount(0);
@@ -60,7 +64,7 @@ test("창에서 고친 초안은 닫아도 남고 Ctrl+S로 저장하며 N으로
   await page.keyboard.press("Escape");
   await expect(editorWindow(page)).toHaveCount(0);
   await expect(panel(page).getByText("변경됨", { exact: true })).toBeVisible();
-  await expect(summary(page)).toContainText("코스피·코스닥 · ETF 제외");
+  await expect(summary(page)).toHaveCount(0);
   expect((await savedScreens(scenario))[0]!.markets).toEqual(["kospi"]);
 
   await editButton(page).click();
@@ -138,13 +142,14 @@ test("저장한 조건식이 없을 때 새 조건식을 누르면 편집 창이
   await panel(page).getByRole("button", { name: "새 조건식", exact: true }).click();
   await expect(editorWindow(page)).toBeVisible();
   await expect(nameField(page)).toHaveValue("새 조건식");
-  await expect(summary(page)).toContainText("조건 없음");
+  await expect(editorWindow(page).getByText("조건 없음 · 대상 종목 전체", { exact: true })).toBeVisible();
+  await expect(summary(page)).toHaveCount(0);
   await page.keyboard.press("n");
   await page.getByRole("dialog", { name: "조건 추가", exact: true }).getByRole("textbox", { name: "조건 종류 검색" }).fill("신저가");
   await page.keyboard.press("Enter");
   await editorWindow(page).getByRole("button", { name: "저장", exact: true }).click();
   await pollSaved(async () => await savedScreens(scenario)).toMatchObject([{ name: "새 조건식", conditions: [{ kind: "new_low" }] }]);
-  await expect(summary(page)).toContainText("신저가");
+  await expect(summary(page)).toHaveCount(0);
 });
 
 test.describe("자료가 있는 저장소", () => {

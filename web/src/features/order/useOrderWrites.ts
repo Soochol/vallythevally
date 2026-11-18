@@ -1,5 +1,5 @@
 import { useQueryClient } from "@tanstack/react-query";
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { OrderCommand } from "../../api/generated/OrderCommand";
 import type { OrderCommands } from "../../api/generated/OrderCommands";
 import type { OrderSide } from "../../api/generated/OrderSide";
@@ -8,7 +8,9 @@ import type { Venue } from "../../api/generated/Venue";
 import { cancelAction, cancelBatchAction, createLedger, modifyAction, newIdFor, placeAction, type Settlement } from "./commandLedger";
 import { cancelOrder, cancelOrdersAtPrice, modifyOrder, placeOrder, reconcileOrders } from "./orderApi";
 import { needsHighValueConfirm } from "./orderRules";
-import { IDLE_STATUS, isUnanswered, type OrderStatus, statusOfCommand, statusOfFailure } from "./statusText";
+import { isUnanswered, type OrderStatus, statusOfCommand, statusOfFailure } from "./statusText";
+
+const OK_STATUS_MS = 4_000;
 
 export const ORDER_QUERY_KEY = ["order"] as const;
 
@@ -31,7 +33,7 @@ export interface PlaceRequest {
 }
 
 export interface OrderWrites {
-  readonly status: OrderStatus;
+  readonly status: OrderStatus | null;
   readonly queued: number;
   place(request: PlaceRequest): void;
   modifyAll(orders: readonly TradingOpenOrder[], price: number): void;
@@ -39,12 +41,18 @@ export interface OrderWrites {
   cancelAtPrice(side: OrderSide, price: number): void;
   reconcile(): void;
   say(status: OrderStatus): void;
+  dismiss(): void;
 }
 
 export function useOrderWrites(code: string, venue: Venue): OrderWrites {
   const queryClient = useQueryClient();
-  const [status, setStatus] = useState<OrderStatus>(IDLE_STATUS);
+  const [status, setStatus] = useState<OrderStatus | null>(null);
   const [queued, setQueued] = useState(0);
+  useEffect(() => {
+    if (status?.tone !== "ok") return;
+    const timer = setTimeout(() => setStatus(null), OK_STATUS_MS);
+    return () => clearTimeout(timer);
+  }, [status]);
   const tail = useRef<Promise<void>>(Promise.resolve());
 
   const enqueue = useCallback(<T,>(action: string, call: (id: string) => Promise<T>, describe: (result: T) => OrderStatus) => {
@@ -95,5 +103,5 @@ export function useOrderWrites(code: string, venue: Venue): OrderWrites {
     ).finally(() => void queryClient.invalidateQueries({ queryKey: ORDER_QUERY_KEY }));
   }, [queryClient]);
 
-  return { status, queued, place, modifyAll, cancelOne, cancelAtPrice, reconcile, say: setStatus };
+  return { status, queued, place, modifyAll, cancelOne, cancelAtPrice, reconcile, say: setStatus, dismiss: () => setStatus(null) };
 }

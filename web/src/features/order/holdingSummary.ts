@@ -39,23 +39,17 @@ export function averageRowPrice(rowPrices: readonly (number | null)[], average: 
 const AFTER_HOURS_START_SECOND = 15 * 3600 + 30 * 60;
 const AFTER_HOURS_END_SECOND = 20 * 3600;
 
-export type BookNotice = "market-closed" | "etf-after-hours";
-
-export interface BookNoticeSymbol {
+export interface EtfSymbol {
   readonly kind: SymbolKind;
   readonly nxtEnabled: boolean;
 }
 
-export const BOOK_NOTICE_TEXT: Record<BookNotice, string> = {
-  "market-closed": "장 마감 · 마지막 호가입니다",
-  "etf-after-hours": "ETF·ETN은 15:30 뒤 거래되지 않습니다",
-};
+export const ETF_AFTER_HOURS_TEXT = "ETF·ETN은 15:30 뒤 거래되지 않습니다";
 
-export function bookNotice(now: UnixSeconds, symbol: BookNoticeSymbol | null): BookNotice | null {
-  if (!isMarketOpen(now)) return "market-closed";
-  if (symbol === null || symbol.kind !== "etf" || symbol.nxtEnabled) return null;
+export function isEtfAfterHours(now: UnixSeconds, symbol: EtfSymbol | null): boolean {
+  if (!isMarketOpen(now) || symbol === null || symbol.kind !== "etf" || symbol.nxtEnabled) return false;
   const second = secondOfDay(now);
-  return second >= AFTER_HOURS_START_SECOND && second < AFTER_HOURS_END_SECOND ? "etf-after-hours" : null;
+  return second >= AFTER_HOURS_START_SECOND && second < AFTER_HOURS_END_SECOND;
 }
 
 export const formatFillTime = (time: string): string => (/^\d{6}$/.test(time) ? `${time.slice(0, 2)}:${time.slice(2, 4)}:${time.slice(4, 6)}` : time);

@@ -2,11 +2,11 @@ import { type RefObject, useRef } from "react";
 import { LAST_DOCKED_NOTICE } from "../../layout/dock/floats";
 import type { DockSpace, Edge } from "../../layout/dock/geometry";
 import { groupOfWindow, listGroups } from "../../layout/dock/tree";
-import { WINDOW_KINDS } from "../../layout/kinds";
+import { allowsMany, MAX_WINDOWS } from "../../layout/kinds";
 import type { DockPlacement } from "../../layout/placement";
-import { chartNumber, chartWindows, useLayoutStore } from "../../stores/layout";
+import { chartNumber, chartWindows, useLayoutStore, windowName } from "../../stores/layout";
 import { Menu, type MenuItem } from "../menu/Menu";
-import { closeWindow, LAST_CHART_REASON } from "./manage";
+import { closeWindow, LAST_CHART_REASON, WINDOW_LIMIT_REASON } from "./manage";
 import { evaluateDock, EDGE_LABEL, type DockCommand } from "./dockCommands";
 import { focusTab, type DockInteraction } from "./dockInteraction";
 import { focusWithoutActivation } from "./focus";
@@ -21,7 +21,7 @@ export function DockTabMenu({ interaction, dock, space, root, maximized, onToggl
   const source = groupOfWindow(dock.root, menu.window);
   if (!window || !source) return null;
   const tabName = (id: typeof window.id) => Array.from(document.getElementById(`window-tab-${id}`)?.querySelectorAll(".dock-tab-name,.dock-tab-sub") ?? []).map((part) => part.textContent).join(" ");
-  const name = window.kind === "chart" ? `칸 ${chartNumber(layout, window.id)} ${document.getElementById(`window-tab-${window.id}`)?.querySelector(".dock-tab-name")?.textContent ?? window.symbol}` : WINDOW_KINDS[window.kind].name;
+  const name = window.kind === "chart" ? `칸 ${chartNumber(layout, window.id)} ${document.getElementById(`window-tab-${window.id}`)?.querySelector(".dock-tab-name")?.textContent ?? window.symbol}` : windowName(layout.windows, window);
   const action = (label: string, command: DockCommand): MenuItem => {
     const plan = evaluateDock(dock, command, space);
     const hint = plan.kind === "blocked" ? plan.label : plan.kind === "unchanged" ? "이 묶음에 다른 탭이 있어야 나눌 수 있습니다" : undefined;
@@ -30,6 +30,14 @@ export function DockTabMenu({ interaction, dock, space, root, maximized, onToggl
   const edges: Edge[] = ["left", "right", "top", "bottom"];
   const items: MenuItem[] = edges.map((edge) => action(EDGE_LABEL[edge], { kind: "group-edge", window: window.id, group: source.id, edge }));
   items.unshift({ kind: "action", label: maximized === source.id ? "원래 크기로" : "크게 보기", onSelect: () => { acted.current = true; onToggleMaximize(source.id); focusTab(window.id); } }, { kind: "action", label: "띄우기", disabled: !interaction.canDetach(window.id), hint: !interaction.canDetach(window.id) ? LAST_DOCKED_NOTICE : undefined, onSelect: () => { acted.current = true; interaction.detach(window.id); } }, { kind: "separator" });
+  if (window.kind !== "chart" && allowsMany(window.kind)) {
+    const full = layout.windows.length >= MAX_WINDOWS;
+    items.push({ kind: "separator" }, { kind: "action", label: "복제", disabled: full, hint: full ? WINDOW_LIMIT_REASON : undefined, onSelect: () => {
+      acted.current = true;
+      const copy = useLayoutStore.getState().duplicateWindow(window.id);
+      if (copy) focusTab(copy);
+    } });
+  }
   const destinations = listGroups(dock.root).filter((group) => group.id !== source.id);
   if (destinations.length) {
     items.push({ kind: "separator" }, { kind: "heading", label: "다른 묶음으로 옮기기" });

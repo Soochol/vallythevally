@@ -43,13 +43,13 @@ async function addWindow(page: Page, name: string) {
 test.beforeEach(async ({ page, scenario }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   for (const code of ["005930", "000660"]) {
-    scenario.reply((url) => url.pathname === `/api/symbols/${code}/order-book`, { body: { symbol: code, asks: [], bids: [], totalAskQuantity: 0, totalBidQuantity: 0, bookTime: null } });
+    scenario.reply((url) => url.pathname === `/api/symbols/${code}/order-book`, { body: { symbol: code, asks: [], bids: [], totalAskQuantity: 0, totalBidQuantity: 0, afterHoursAskQuantity: null, afterHoursBidQuantity: null, bookTime: null } });
     scenario.reply((url) => url.pathname === `/api/symbols/${code}/fundamentals`, { body: { symbol: code, upperLimit: null, lowerLimit: null } });
   }
 });
 
 for (const { kind, name } of KINDS) {
-  test(`${name} 창은 창 더하기에서 열리고 연동 색을 따르며 두 번째는 만들어지지 않는다`, async ({ page, scenario }) => {
+  test(`${name} 창은 창 더하기에서 열리고 연동 색을 따르며 두 번째가 만들어진다`, async ({ page, scenario }) => {
     twoLinkedCharts(scenario);
     emptyTrades(scenario);
     await page.goto("/");
@@ -71,10 +71,12 @@ for (const { kind, name } of KINDS) {
     await pollSaved(() => savedWindows(scenario).find((w) => w.kind === kind)?.link).toBe("b");
 
     await addButton(page).click();
-    await expect(kindItem(page, name)).toContainText("열려 있음");
+    await expect(kindItem(page, name)).toContainText("1개 열림");
     await kindItem(page, name).click();
-    await expect(windowTabs(page).getByRole("tab", { name: new RegExp(`^${name}`) })).toHaveCount(1);
-    expect(savedWindows(scenario).filter((w) => w.kind === kind)).toHaveLength(1);
+    await expect(windowTabs(page).getByRole("tab", { name: new RegExp(`^${name} 1`) })).toHaveCount(1);
+    await expect(windowTabs(page).getByRole("tab", { name: new RegExp(`^${name} 2`) })).toHaveCount(1);
+    await expect(windowTabs(page).getByRole("tab", { name: new RegExp(`^${name}( \\d|$)`) })).toHaveCount(2);
+    await pollSaved(() => savedWindows(scenario).filter((w) => w.kind === kind).map((w) => w.id)).toEqual([kind, `${kind}-2`]);
   });
 }
 

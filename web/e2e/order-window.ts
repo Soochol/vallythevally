@@ -83,6 +83,8 @@ export function snapshot(base: number) {
     bids: Array.from({ length: 10 }, (_, i) => ({ price: base - 100 * i, quantity: 20 + i })),
     totalAskQuantity: 1000,
     totalBidQuantity: 3000,
+    afterHoursAskQuantity: null,
+    afterHoursBidQuantity: null,
     bookTime: null,
   };
 }
@@ -101,8 +103,7 @@ export async function openOrderWindow(page: Page, scenario: Scenario, withSecond
   scenario.reply((url) => url.pathname === `/api/symbols/${CODE}/order-book`, bookFails ? { status: 503, body: { error: { code: "internal", message: "호가 조회 실패", reason: null, retryAt: null, manualActionRequired: false } } } : { body: snapshot(BASE) });
   scenario.reply((url) => url.pathname === "/api/symbols/000660/order-book", { body: { ...snapshot(BASE), symbol: "000660" } });
   scenario.reply((url) => url.pathname === "/api/symbols/000660/fundamentals", { body: { symbol: "000660", upperLimit: null, lowerLimit: null } });
-  scenario.reply((url) => url.pathname === `/api/symbols/${CODE}/trades`, { body: { symbol: CODE, venue: "krx", trades: [], skippedRows: 0 } });
-  scenario.reply((url) => url.pathname === "/api/symbols/000660/trades", { body: { symbol: "000660", venue: "krx", trades: [], skippedRows: 0 } });
+  for (const symbol of [CODE, "000660"]) scenario.on((url) => url.pathname === `/api/symbols/${symbol}/trades`, (request) => ({ body: { symbol, venue: new URL(request.url()).searchParams.get("venue") ?? "combined", trades: [], skippedRows: 0 } }));
   await page.setViewportSize({ width: 1440, height: 1500 });
   await page.goto("/");
   await expect(cell(page)).toHaveAttribute("aria-busy", "false");

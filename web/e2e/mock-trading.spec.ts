@@ -1,7 +1,8 @@
 import { CONNECTED_KIWOOM, DEFAULT_SYSTEM_SETTINGS } from "./fixtures/scenario";
 import type { KiwoomEnvironment } from "../src/api/generated/KiwoomEnvironment";
 import type { KiwoomLinkStatus } from "../src/api/generated/KiwoomLinkStatus";
-import { cell, DEFAULT_LAYOUT_ID, expect, test, type Scenario, pollSaved } from "./harness";
+import { DEFAULT_ORDER_SETTINGS } from "../src/features/order/orderSettings";
+import { cell, expect, test, type Scenario, pollSaved } from "./harness";
 import { cellAt, openOrderWindow, ordersOn, status, tradingApi, win, writesTo } from "./order-window";
 
 const DISCONNECTED: KiwoomLinkStatus = { ...CONNECTED_KIWOOM, state: "disconnected", message: "키가 저장돼 있습니다. 연결하지 않았습니다", realtimeRegistered: null, symbolCount: null };
@@ -13,7 +14,13 @@ function environmentIs(scenario: Scenario, environment: KiwoomEnvironment, link:
   scenario.reply((url) => url.pathname === "/api/system/settings", { body: { ...DEFAULT_SYSTEM_SETTINGS, environment } });
 }
 
-const routes = (page: import("@playwright/test").Page) => page.getByRole("group", { name: "주문 경로" });
+const routes = (page: import("@playwright/test").Page) => page.getByTestId("order-settings").getByRole("group", { name: "주문 경로" });
+const routeButton = (page: import("@playwright/test").Page) => page.getByTestId("order-settings-button");
+
+async function openRoutes(page: import("@playwright/test").Page): Promise<void> {
+  await routeButton(page).click();
+  await expect(page.getByTestId("order-settings")).toBeVisible();
+}
 
 for (const [name, link] of [["키움 연결됨", CONNECTED_KIWOOM], ["키움 연결 전", DISCONNECTED]] as const) {
   test(`모의: 상단 "모의투자" 표시와 탭 제목 [모의]가 ${name}에서 보인다`, async ({ page, scenario }) => {
@@ -33,23 +40,27 @@ test("실전: 모의 표시가 없고 탭 제목에 [모의]가 없다", async (
   await expect(page).not.toHaveTitle(/\[모의\]/);
 });
 
-test("모의: 계좌 띠의 모의 표시, 경로 SOR·NXT 끔과 안내, 저장된 NXT 창도 KRX로 보낸다", async ({ page, scenario }) => {
+test("모의: 계좌 띠의 모의 표시, 설정의 경로 SOR·NXT 끔과 안내, 설정 값이 NXT여도 KRX로 보낸다", async ({ page, scenario }) => {
   environmentIs(scenario, "mock");
   ordersOn(scenario);
   const api = tradingApi(scenario);
-  await openOrderWindow(page, scenario, false, "nxt");
+  scenario.documents.saveUiState({ ...scenario.documents.uiState(), orderSettings: { ...DEFAULT_ORDER_SETTINGS, venue: "nxt" } });
+  await openOrderWindow(page, scenario);
   await expect(page.getByTestId("account-mock")).toHaveText("모의");
+  await expect(routeButton(page)).toContainText("KRX");
+  await openRoutes(page);
   await expect(routes(page).getByRole("button", { name: "SOR" })).toBeDisabled();
   await expect(routes(page).getByRole("button", { name: "NXT" })).toBeDisabled();
   await expect(routes(page).getByRole("button", { name: "KRX" })).toBeEnabled();
   await expect(routes(page).getByRole("button", { name: "KRX" })).toHaveAttribute("aria-pressed", "true");
   await expect(page.getByTestId("order-route-note")).toHaveText(KRX_ONLY);
   await expect(win(page)).toHaveAttribute("data-venue", "krx");
+  await page.keyboard.press("Escape");
 
   await cellAt(page, "buy", 70_000).dblclick();
   await pollSaved(() => writesTo(api, "place")).toHaveLength(1);
   expect(writesTo(api, "place")[0]!.body.venue).toBe("krx");
-  expect(scenario.documents.layout(DEFAULT_LAYOUT_ID).windows.find((w) => w.kind === "order")).toMatchObject({ venue: "nxt" });
+  expect(scenario.documents.uiState()["orderSettings"]).toMatchObject({ venue: "nxt" });
 });
 
 test("모의: 서버가 mock_krx_only로 거절하면 상태 줄이 KRX 주문만 됨을 알린다", async ({ page, scenario }) => {
@@ -78,8 +89,10 @@ test("실전: 같은 unsupported 응답은 서버 문구 그대로이고 경로 
   tradingApi(scenario);
   await openOrderWindow(page, scenario);
   await expect(page.getByTestId("account-mock")).toHaveCount(0);
+  await openRoutes(page);
   await expect(page.getByTestId("order-route-note")).toHaveCount(0);
   for (const label of ["SOR", "KRX", "NXT"]) await expect(routes(page).getByRole("button", { name: label })).toBeEnabled();
+  await page.keyboard.press("Escape");
   scenario.on((url, request) => url.pathname === "/api/trading/commands/place" && request.method() === "POST", () => ({ status: 400, body: { error: { code: "bad_request", message: "키움이 지원하지 않는 요청입니다", reason: "unsupported", retryAt: null, manualActionRequired: false } } }));
   await cellAt(page, "buy", 70_000).dblclick();
   await expect(status(page)).toContainText("거절 · 키움이 지원하지 않는 요청입니다");

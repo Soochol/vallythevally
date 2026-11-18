@@ -1,15 +1,14 @@
 {
   "waitForTimeout": {
-    "account-login.spec.ts": 2,
-    "chart-settings.spec.ts": 1,
-    "drawing-dock-collapse.spec.ts": 14,
+    "account-login.spec.ts": 0,
+    "chart-settings.spec.ts": 0,
+    "drawing-dock-collapse.spec.ts": 2,
     "drawing-tools-all.spec.ts": 1,
     "drawing-tools-measure.spec.ts": 1,
-    "drawing-tools-pattern.spec.ts": 1,
     "drawing-tools-shape.spec.ts": 1,
     "pending-frame-series.spec.ts": 1,
-    "setup-wizard.spec.ts": 5,
-    "system-settings-kiwoom.spec.ts": 1,
-    "win-manage.spec.ts": 2
+    "setup-wizard.spec.ts": 1,
+    "system-settings-kiwoom.spec.ts": 0,
+    "win-manage.spec.ts": 0
   }
 }

@@ -20,7 +20,7 @@ export type SubEvent =
 export type QuoteEvent = Extract<ServerMessage, { type: "quotes" | "watch_limited" }> | { type: "resync" };
 
 export type FeedEvent =
-  | Extract<ServerMessage, { type: "feed_subscribed" | "feed_trades" | "feed_book" | "feed_program" | "feed_brokers" | "feed_link" | "sub_error" }>
+  | Extract<ServerMessage, { type: "feed_subscribed" | "feed_trades" | "feed_book" | "feed_after_hours" | "feed_program" | "feed_brokers" | "feed_link" | "sub_error" }>
   | { type: "resync" };
 
 export interface FeedRequest {
@@ -204,6 +204,7 @@ export class MarketSocket implements MarketSocketLike {
       case "feed_subscribed":
       case "feed_trades":
       case "feed_book":
+      case "feed_after_hours":
       case "feed_program":
       case "feed_brokers":
       case "feed_link":

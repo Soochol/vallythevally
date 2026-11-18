@@ -6,10 +6,11 @@ import type { SubErrorCode } from "../../api/generated/SubErrorCode";
 import type { SymbolCode } from "../../api/generated/SymbolCode";
 import { fetchQuotes } from "../../api/userData";
 import { marketSocket } from "../../stores/realtime";
-import { acceptLive, acceptSnapshot, EMPTY_BOOK, type BookState } from "./bookModel";
+import { acceptAfterHoursLive, acceptAfterHoursSnapshot, acceptLive, acceptSnapshot, EMPTY_BOOK, type AfterHoursState, type BookState } from "./bookModel";
 
 export interface BookFeed {
   readonly book: BookState;
+  readonly afterHours: AfterHoursState | null;
   readonly lastPrice: number | null;
   readonly previousClose: number | null;
   readonly connected: boolean;
@@ -27,13 +28,14 @@ interface LastTrade {
 interface Live {
   readonly code: SymbolCode;
   readonly book: BookState;
+  readonly afterHours: AfterHoursState | null;
   readonly lastTrade: LastTrade | null;
   readonly linkLive: boolean;
   readonly socketOpen: boolean;
   readonly rejected: SubErrorCode | null;
 }
 
-const fresh = (code: SymbolCode, socketOpen: boolean): Live => ({ code, book: EMPTY_BOOK, lastTrade: null, linkLive: true, socketOpen, rejected: null });
+const fresh = (code: SymbolCode, socketOpen: boolean): Live => ({ code, book: EMPTY_BOOK, afterHours: null, lastTrade: null, linkLive: true, socketOpen, rejected: null });
 
 export function useBookFeed(code: SymbolCode): BookFeed {
   const [live, setLive] = useState<Live>(() => fresh(code, true));
@@ -44,6 +46,7 @@ export function useBookFeed(code: SymbolCode): BookFeed {
     const stopWatch = marketSocket.watch((connection) => update((state) => ({ ...state, socketOpen: connection.socket === "open" })));
     const stopBook = marketSocket.subscribeFeed({ symbol: code, kind: "book", venue: "combined" }, (m) => {
       if (m.type === "feed_book") update((state) => ({ ...state, book: acceptLive(state.book, m.book) }));
+      else if (m.type === "feed_after_hours") update((state) => ({ ...state, afterHours: acceptAfterHoursLive(m.totals) }));
       else if (m.type === "feed_subscribed") update((state) => ({ ...state, linkLive: true, rejected: null }));
       else if (m.type === "feed_link") update((state) => ({ ...state, linkLive: m.live }));
       else if (m.type === "sub_error") update((state) => ({ ...state, rejected: m.code }));
@@ -76,9 +79,11 @@ export function useBookFeed(code: SymbolCode): BookFeed {
   });
 
   const book = snapshot.data ? acceptSnapshot(current.book, snapshot.data) : current.book;
+  const afterHours = snapshot.data ? acceptAfterHoursSnapshot(current.afterHours, snapshot.data, Math.floor(snapshot.dataUpdatedAt / 1000)) : current.afterHours;
   const quoted = quote.data ?? null;
   return {
     book,
+    afterHours,
     lastPrice: laterPrice(current.lastTrade, quoted),
     previousClose: quoted ? quoted.price - quoted.change : null,
     connected: current.socketOpen && current.linkLive,

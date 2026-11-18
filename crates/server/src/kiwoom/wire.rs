@@ -691,6 +691,8 @@ pub struct StockOrderBookResponse {
     pub bids: Vec<api::OrderBookLevel>,
     pub total_ask_quantity: u64,
     pub total_bid_quantity: u64,
+    pub after_hours_ask_quantity: Option<u64>,
+    pub after_hours_bid_quantity: Option<u64>,
     pub book_time: Option<String>,
 }
 
@@ -715,12 +717,15 @@ impl TryFrom<std::collections::HashMap<String, Value>> for StockOrderBookRespons
             }
             Ok(levels)
         };
+        let after_hours = |name: &str| fields.get(name).and_then(Value::as_str).and_then(|s| optional(s, unsigned).ok().flatten());
         let clock = text("bid_req_base_tm")?.trim();
         Ok(StockOrderBookResponse {
             asks: side("sel")?,
             bids: side("buy")?,
             total_ask_quantity: quantity("tot_sel_req")?,
             total_bid_quantity: quantity("tot_buy_req")?,
+            after_hours_ask_quantity: after_hours("ovt_sel_req"),
+            after_hours_bid_quantity: after_hours("ovt_buy_req"),
             book_time: if clock.is_empty() { None } else { Some(clock_text(clock)?) },
         })
     }
@@ -877,10 +882,11 @@ pub enum RealType {
     Book,
     Program,
     Broker,
+    AfterHours,
 }
 
 impl RealType {
-    pub const ALL: [RealType; 5] = [RealType::Trade, RealType::Index, RealType::Book, RealType::Program, RealType::Broker];
+    pub const ALL: [RealType; 6] = [RealType::Trade, RealType::Index, RealType::Book, RealType::Program, RealType::Broker, RealType::AfterHours];
 
     pub fn of(symbol: Symbol) -> RealType {
         match symbol {
@@ -896,6 +902,10 @@ impl RealType {
         }
     }
 
+    pub fn companion(self) -> Option<RealType> {
+        (self == RealType::Book).then_some(RealType::AfterHours)
+    }
+
     pub fn as_wire(self) -> &'static str {
         match self {
             RealType::Trade => "0B",
@@ -903,6 +913,7 @@ impl RealType {
             RealType::Book => "0D",
             RealType::Program => "0w",
             RealType::Broker => "0F",
+            RealType::AfterHours => "0E",
         }
     }
 }
@@ -942,6 +953,14 @@ pub enum WsFrame {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AfterHoursTotals {
+    pub symbol: Symbol,
+    pub hhmmss: TimeOfDay,
+    pub total_ask_qty: Volume,
+    pub total_bid_qty: Volume,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RealItem {
     Trade(RealTick),
     /// 0B `15`가 0: 동시호가에만 나온다(kiwoom.md 11.3). 체결이 아니라 버린다.
@@ -951,6 +970,7 @@ pub enum RealItem {
     Book(Box<BookSnapshot>),
     Program(RealProgramTrade),
     Broker(BrokerSnapshot),
+    AfterHours(AfterHoursTotals),
     Account(AccountEvent),
     OtherType(String),
 }
@@ -1015,6 +1035,7 @@ fn parse_real_item(entry: &Value) -> Result<RealItem, WireError> {
         "0D" => parse_book(item, values).map(|book| RealItem::Book(Box::new(book))),
         "0w" => parse_program(item, values).map(RealItem::Program),
         "0F" => parse_broker(item, values).map(RealItem::Broker),
+        "0E" => parse_after_hours(item, values).map(RealItem::AfterHours),
         "00" | "04" => {
             let kind = if kind == "00" { AccountKind::OrderFill } else { AccountKind::Balance };
             Ok(RealItem::Account(AccountEvent { kind, account: Secret::new(field("9201")?.trim().to_owned()) }))
@@ -1069,6 +1090,15 @@ fn parse_book(item: &str, values: &Value) -> Result<BookSnapshot, WireError> {
         total_ask_qty: Volume(fid_or(values, 121, unsigned)?),
         total_bid_qty: Volume(fid_or(values, 125, unsigned)?),
         expected,
+    })
+}
+
+fn parse_after_hours(item: &str, values: &Value) -> Result<AfterHoursTotals, WireError> {
+    Ok(AfterHoursTotals {
+        symbol: combined_stock("0E", item)?,
+        hhmmss: required_time(values, "21", "0E", item)?,
+        total_ask_qty: Volume(fid_or(values, 131, unsigned)?),
+        total_bid_qty: Volume(fid_or(values, 135, unsigned)?),
     })
 }
 
@@ -1430,6 +1460,16 @@ mod tests {
         assert_eq!(book.bids[9], api::OrderBookLevel { price: 69_100, quantity: 10_000 });
         assert_eq!((book.total_ask_quantity, book.total_bid_quantity, book.book_time.as_deref()), (55_000, 66_000, Some("15:30:00")));
         let mut body: serde_json::Value = serde_json::from_str(&fixture("ka10004_005930_AL")).unwrap();
+        assert_eq!((book.after_hours_ask_quantity, book.after_hours_bid_quantity), (None, None), "필드가 없으면 null이다");
+        body["ovt_sel_req"] = "1500".into();
+        body["ovt_buy_req"] = "0".into();
+        let with = serde_json::from_value::<StockOrderBookResponse>(body.clone()).unwrap();
+        assert_eq!((with.after_hours_ask_quantity, with.after_hours_bid_quantity), (Some(1_500), Some(0)));
+        assert_eq!((with.asks, with.bids, with.total_ask_quantity, with.book_time.as_deref()), (book.asks.clone(), book.bids.clone(), 55_000, Some("15:30:00")));
+        body["ovt_sel_req"] = "".into();
+        body["ovt_buy_req"] = "abc".into();
+        let broken = serde_json::from_value::<StockOrderBookResponse>(body.clone()).unwrap();
+        assert_eq!((broken.after_hours_ask_quantity, broken.after_hours_bid_quantity), (None, None), "비었거나 읽을 수 없으면 응답 전체가 실패하지 않고 null이다");
         body["bid_req_base_tm"] = "".into();
         assert_eq!(serde_json::from_value::<StockOrderBookResponse>(body.clone()).unwrap().book_time, None);
         body["bid_req_base_tm"] = "256100".into();
@@ -1966,6 +2006,9 @@ mod tests {
         assert_eq!(v["data"], json!([{"item": ["101"], "type": ["0J"]}]), "빈 원소는 넣지 않는다");
         let v: Value = serde_json::from_str(&reg_message(&[(RealType::Book, stock), (RealType::Program, stock), (RealType::Broker, stock)].into())).unwrap();
         assert_eq!(v["data"], json!([{"item": ["005930_AL"], "type": ["0D"]}, {"item": ["005930_AL"], "type": ["0w"]}, {"item": ["005930_AL"], "type": ["0F"]}]));
+        let v: Value = serde_json::from_str(&reg_message(&[(RealType::Book, stock), (RealType::AfterHours, stock)].into())).unwrap();
+        assert!(v["data"].as_array().unwrap().contains(&json!({"item": ["005930_AL"], "type": ["0E"]})));
+        assert_eq!(RealType::AfterHours.as_wire(), "0E");
         let v: Value = serde_json::from_str(&remove_message(RealType::Trade, &[stock].into())).unwrap();
         assert_eq!(v, json!({"trnm": "REMOVE", "grp_no": "1", "data": [{"item": ["005930_AL"], "type": ["0B"]}]}));
         let login: Value = serde_json::from_str(login_message(&Secret::new("t".into())).expose()).unwrap();
@@ -1988,6 +2031,24 @@ mod tests {
             Ok(RealItem::Book(book)) => *book,
             other => panic!("호가가 아니다: {other:?}"),
         }
+    }
+
+    fn after_hours(result: Result<RealItem, WireError>) -> AfterHoursTotals {
+        match result {
+            Ok(RealItem::AfterHours(totals)) => totals,
+            other => panic!("시간외 호가가 아니다: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parses_0e_into_after_hours_totals() {
+        let totals = after_hours(one("0E", "005930_AL", json!({"21": "083512", "131": "13770", "132": "+500", "135": "0", "136": "0"})));
+        assert_eq!(totals, AfterHoursTotals { symbol: Symbol::Stock(StockCode::parse("005930").unwrap()), hhmmss: TimeOfDay::hms(8, 35, 12).unwrap(), total_ask_qty: Volume(13_770), total_bid_qty: Volume(0) });
+        let blank = after_hours(one("0E", "005930_AL", json!({"21": "083512", "131": "13770", "135": ""})));
+        assert_eq!((blank.total_ask_qty, blank.total_bid_qty), (Volume(13_770), Volume(0)));
+        assert!(one("0E", "005930_AL", json!({"131": "1", "135": "1"})).is_err(), "호가시간이 없다");
+        assert!(one("0E", "005930_AL", json!({"21": "8:35", "131": "1", "135": "1"})).is_err(), "호가시간을 읽을 수 없다");
+        assert!(one("0E", "005930", json!({"21": "083512", "131": "1", "135": "1"})).is_err(), "_AL이 아니다");
     }
 
     #[test]

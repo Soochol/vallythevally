@@ -8,8 +8,13 @@ import type { KiwoomLinkStatus } from "../src/api/generated/KiwoomLinkStatus";
 import type { PublicIpCheck } from "../src/api/generated/PublicIpCheck";
 import type { RegisteredIpInput } from "../src/api/generated/RegisteredIpInput";
 import type { SyncStatus } from "../src/api/generated/SyncStatus";
-import { cell, chartOf, expect, test, type Scenario, pollSaved } from "./harness";
+import { cell, chartOf, expect, fixedWait, test, type Scenario, pollSaved } from "./harness";
 import { CONNECTED_KIWOOM, SYNCED } from "./fixtures/scenario";
+
+const passTime = async (page: Page, ms: number) => {
+  await page.clock.runFor(ms);
+  await fixedWait(page, ms, "요청이 나가지 않았음을 보려면 원래 대기만큼 실제 시간이 지나야 한다");
+};
 
 const SCREENS = path.resolve("../target/ux-screens");
 const LOGIN_MARKER = "vv.login-started";
@@ -361,6 +366,7 @@ test.describe("셋업 알림과 선택 대기의 경계", () => {
 
   test("저장이 끝나지 않아도 알림은 나중에로 닫을 수 있고, 저장이 끝나기 전에는 새로 고치지 않는다", async ({ page, scenario }) => {
     scenario.live.account = signedIn();
+    await page.clock.install();
     await page.goto("/?symbol=005930");
     await expect(cell(page)).toHaveAttribute("aria-busy", "false");
     const held = scenario.hold((url, request) => url.pathname.startsWith("/api/layouts/") && request.method() === "PUT");
@@ -370,7 +376,7 @@ test.describe("셋업 알림과 선택 대기의 경계", () => {
     const before = uiStateReads(scenario);
     await notice(page).getByRole("button", { name: "새로 고침" }).click();
     await expect(notice(page).getByRole("button", { name: "나중에" })).toBeEnabled();
-    await page.waitForTimeout(1500);
+    await passTime(page, 1500);
     expect(uiStateReads(scenario)).toBe(before);
     await notice(page).getByRole("button", { name: "나중에" }).click();
     await expect(notice(page)).toHaveCount(0);
@@ -379,6 +385,7 @@ test.describe("셋업 알림과 선택 대기의 경계", () => {
   test("드로잉 저장이 끝나지 않았으면 새로 고치지 않는다", async ({ page, scenario }) => {
     scenario.live.account = signedIn();
     const loaded = page.waitForResponse((response) => response.url().includes("/api/drawings?") && response.request().method() === "GET");
+    await page.clock.install();
     await page.goto("/");
     await (await loaded).finished();
     await expect(chartOf(cell(page))).toHaveAttribute("data-bar-count", /^[1-9]\d*$/);
@@ -392,12 +399,13 @@ test.describe("셋업 알림과 선택 대기의 경계", () => {
     scenario.live.emit({ type: "setup_changed", kinds: ["drawing"] });
     const before = uiStateReads(scenario);
     await notice(page).getByRole("button", { name: "새로 고침" }).click();
-    await page.waitForTimeout(1500);
+    await passTime(page, 1500);
     expect(uiStateReads(scenario)).toBe(before);
   });
 
   test("실행 중이던 탭에 needs_choice가 오면 고르기 전에 셋업을 읽지 않는다", async ({ page, scenario }) => {
     scenario.live.account = signedIn();
+    await page.clock.install();
     await page.goto("/?symbol=005930");
     await expect(cell(page)).toHaveAttribute("aria-busy", "false");
     scenario.live.setAccount({ state: "signed_out" });
@@ -405,7 +413,7 @@ test.describe("셋업 알림과 선택 대기의 경계", () => {
     const before = scenario.requests.length;
     scenario.live.setAccount(signedIn(NEEDS_CHOICE));
     await expect(wizard(page)).toBeVisible();
-    await page.waitForTimeout(1000);
+    await passTime(page, 1000);
     const reads = scenario.requests.slice(before).filter((r) => r.method() === "GET" && /^\/api\/(layouts|watchlists|ui-state|screens|drawings)/.test(new URL(r.url()).pathname));
     expect(reads).toHaveLength(0);
     await expect(cell(page)).toHaveCount(0);
@@ -413,6 +421,7 @@ test.describe("셋업 알림과 선택 대기의 경계", () => {
 
   test("새로 고침 뒤 나중에를 누르면 저장이 끝나도 쪽을 새로 고치지 않고, 다음 알림의 새로 고침은 눌린다", async ({ page, scenario }) => {
     scenario.live.account = signedIn();
+    await page.clock.install();
     await page.goto("/?symbol=005930");
     await expect(cell(page)).toHaveAttribute("aria-busy", "false");
     let release = () => {};
@@ -435,7 +444,7 @@ test.describe("셋업 알림과 선택 대기의 경계", () => {
     let loads = 0;
     page.on("load", () => { loads++; });
     release();
-    await page.waitForTimeout(1500);
+    await passTime(page, 1500);
     expect(loads).toBe(0);
     scenario.live.emit({ type: "setup_changed", kinds: ["watchlists"] });
     await expect(notice(page).getByRole("button", { name: "새로 고침" })).toBeEnabled();

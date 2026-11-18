@@ -4,9 +4,9 @@ import { moveRect, resizeRect, type Guides, type ResizeHandle } from "../../layo
 import { canDetach, detachedRect, detachWindow, floatRects, frontFloat, LAST_DOCKED_NOTICE, moveFloat } from "../../layout/dock/floats";
 import type { DockSpace } from "../../layout/dock/geometry";
 import { groupOfWindow } from "../../layout/dock/tree";
-import { WINDOW_KINDS, type WindowId } from "../../layout/kinds";
+import type { WindowId } from "../../layout/kinds";
 import type { DockPlacement, Rect } from "../../layout/placement";
-import { useLayoutStore, type WindowState } from "../../stores/layout";
+import { useLayoutStore, windowName, type WindowState } from "../../stores/layout";
 import { useSelectionStore } from "../../stores/selection";
 import { useUiStore } from "../../stores/ui";
 import { commandAt, evaluateDock, type DockCommand, type DockPlan } from "./dockCommands";
@@ -35,7 +35,7 @@ function selectTab(id: WindowId) {
 }
 function minimumNotice(window: WindowState) {
   const min = minWindowSize(window.kind);
-  useSelectionStore.getState().showToast(`${WINDOW_KINDS[window.kind].name} 창은 ${min.w}×${min.h}보다 작게 줄일 수 없습니다`);
+  useSelectionStore.getState().showToast(`${windowName(useLayoutStore.getState().layout.windows, window)} 창은 ${min.w}×${min.h}보다 작게 줄일 수 없습니다`);
 }
 
 export function useDockInteraction({ root, dock, space, enabled }: { root: RefObject<HTMLElement | null>; dock: DockPlacement; space: DockSpace | null; enabled: boolean }) {
@@ -252,7 +252,7 @@ export function useDockInteraction({ root, dock, space, enabled }: { root: RefOb
         onLostPointerCapture: lostCapture,
         onKeyDown: (event) => {
           if (!enabled || event.target !== event.currentTarget || !area || !rect) return;
-          if (event.key === "Delete" || event.key === "Backspace") { event.preventDefault(); closeWindow(window.id, WINDOW_KINDS[window.kind].name); return; }
+          if (event.key === "Delete" || event.key === "Backspace") { event.preventDefault(); closeWindow(window.id, windowName(useLayoutStore.getState().layout.windows, window)); return; }
           const offset = ARROWS[event.key];
           if (!offset || event.altKey || event.ctrlKey || event.metaKey) return;
           event.preventDefault();

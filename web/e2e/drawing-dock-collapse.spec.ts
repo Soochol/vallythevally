@@ -68,18 +68,19 @@ test("처음에는 접혀 있고 알약에 선택 도구 아이콘이 보이며 
 });
 
 test("포인터를 올리면 80ms 뒤 펼쳐지고, 벗어나면 0.4초 뒤 접히며, 그 안에 돌아오면 접히지 않는다", async ({ page }) => {
+  await page.clock.install();
   await open(page);
   await dock(page).hover();
   await expanded(page);
   await expect(dock(page).getByRole("button", { name: "추세선", exact: true })).toBeVisible();
   await page.mouse.move(5, 5);
-  await page.waitForTimeout(150);
+  await page.clock.fastForward(150);
   await expanded(page);
   await dock(page).hover();
-  await page.waitForTimeout(700);
+  await page.clock.fastForward(700);
   await expanded(page);
   await page.mouse.move(5, 5);
-  await page.waitForTimeout(150);
+  await page.clock.fastForward(150);
   await expanded(page);
   await collapsed(page);
   await expect(dock(page).getByRole("button", { name: "추세선", exact: true })).toBeHidden();
@@ -88,6 +89,7 @@ test("포인터를 올리면 80ms 뒤 펼쳐지고, 벗어나면 0.4초 뒤 접�
 for (const [name, dockAt] of [["기본 자리", null], ["옮긴 자리", { x: 0.3, y: 0.45 }], ["오른쪽으로 옮긴 자리", { x: 0.8, y: 0.2 }]] as const) {
   test(`펼칠 때 포인터가 막대 안에 남고 알약과 펼친 막대의 가로 가운데가 같다: ${name}`, async ({ page, scenario }) => {
     preset(scenario, { dockAt });
+    await page.clock.install();
     await open(page);
     await collapsed(page);
     const small = await settledBox(page);
@@ -100,7 +102,7 @@ for (const [name, dockAt] of [["기본 자리", null], ["옮긴 자리", { x: 0.
     expect(wide.y).toBeCloseTo(small.y, 0);
     expect(at.x).toBeGreaterThan(wide.x);
     expect(at.x).toBeLessThan(wide.x + wide.width);
-    await page.waitForTimeout(700);
+    await page.clock.fastForward(700);
     await expanded(page);
     await page.mouse.move(5, 5);
     await collapsed(page);
@@ -124,6 +126,7 @@ test("포인터를 올려 펼쳐도 범례의 자리와 밀도가 바뀌지 않�
 });
 
 test("도구 묶음 메뉴가 열려 있는 동안 포인터가 메뉴로 옮겨 가도 접히지 않고 닫으면 접힌다", async ({ page }) => {
+  await page.clock.install();
   await open(page);
   const bar = await expandDock(page);
   await bar.getByRole("button", { name: "선 도구 펼치기", exact: true }).click();
@@ -131,7 +134,7 @@ test("도구 묶음 메뉴가 열려 있는 동안 포인터가 메뉴로 옮겨
   await expect(list).toBeVisible();
   const box = (await list.boundingBox())!;
   await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
-  await page.waitForTimeout(900);
+  await page.clock.fastForward(900);
   await expanded(page);
   await expect(list).toBeVisible();
   await page.keyboard.press("Escape");
@@ -142,13 +145,14 @@ test("도구 묶음 메뉴가 열려 있는 동안 포인터가 메뉴로 옮겨
 });
 
 test("자석 세기 메뉴와 단축키 도움말이 열려 있는 동안 접히지 않는다", async ({ page }) => {
+  await page.clock.install();
   await open(page);
   const bar = await expandDock(page);
   await bar.getByRole("button", { name: "자석", exact: true }).click({ button: "right" });
   const strength = page.getByRole("menu", { name: "자석 세기", exact: true });
   await expect(strength).toBeVisible();
   await page.mouse.move(5, 5);
-  await page.waitForTimeout(900);
+  await page.clock.fastForward(900);
   await expanded(page);
   await page.keyboard.press("Escape");
   await expect(strength).toBeHidden();
@@ -160,7 +164,7 @@ test("자석 세기 메뉴와 단축키 도움말이 열려 있는 동안 접히
   const help = page.getByRole("dialog", { name: "드로잉 단축키", exact: true });
   await expect(help).toBeVisible();
   await page.mouse.move(5, 5);
-  await page.waitForTimeout(900);
+  await page.clock.fastForward(900);
   await expanded(page);
   await help.getByRole("button", { name: "도움말 닫기", exact: true }).click();
   await expect(help).toBeHidden();
@@ -168,6 +172,7 @@ test("자석 세기 메뉴와 단축키 도움말이 열려 있는 동안 접히
 });
 
 test("손잡이로 끄는 동안에는 접히지 않는다", async ({ page }) => {
+  await page.clock.install();
   await open(page);
   const bar = await expandDock(page);
   const grip = (await bar.getByRole("button", { name: "드로잉 도구 막대 옮기기", exact: true }).boundingBox())!;
@@ -175,7 +180,7 @@ test("손잡이로 끄는 동안에는 접히지 않는다", async ({ page }) =>
   await page.mouse.down();
   const to = await chartPoint(page, 0.2, 0.5);
   await page.mouse.move(to.x, to.y, { steps: 10 });
-  await page.waitForTimeout(900);
+  await page.clock.fastForward(900);
   await expanded(page);
   await page.mouse.up();
   await page.mouse.move(5, 5);
@@ -216,12 +221,13 @@ test("단축키로 도구를 고르면 접힌 알약의 아이콘이 바뀐다",
 });
 
 test("연속 그리기를 켜면 포인터가 벗어나도 펼친 채로 남고, 끄면 접힌다", async ({ page }) => {
+  await page.clock.install();
   await open(page);
   const bar = await expandDock(page);
   await bar.getByRole("button", { name: "연속 그리기", exact: true }).click();
   await expect(bar.getByRole("button", { name: "연속 그리기", exact: true })).toHaveAttribute("aria-pressed", "true");
   await page.mouse.move(5, 5);
-  await page.waitForTimeout(900);
+  await page.clock.fastForward(900);
   await expanded(page);
   await expandDock(page);
   await bar.getByRole("button", { name: "연속 그리기", exact: true }).click();
@@ -230,20 +236,22 @@ test("연속 그리기를 켜면 포인터가 벗어나도 펼친 채로 남고,
 });
 
 test("도구를 두 번 눌러 그 도구만 연속으로 두면 포인터가 벗어나도 펼친 채로 남는다", async ({ page }) => {
+  await page.clock.install();
   await open(page);
   const bar = await expandDock(page);
   await bar.getByRole("button", { name: "추세선", exact: true }).dblclick();
   await page.mouse.move(5, 5);
-  await page.waitForTimeout(900);
+  await page.clock.fastForward(900);
   await expanded(page);
   await page.keyboard.press("Escape");
 });
 
 test("연속 그리기를 켠 채 새로고침하면 막대는 펼친 채로 열린다", async ({ page, scenario }) => {
   preset(scenario, { keepDrawing: true });
+  await page.clock.install();
   await open(page);
   await expanded(page);
-  await page.waitForTimeout(900);
+  await page.clock.fastForward(900);
   await expanded(page);
 });
 
@@ -278,13 +286,14 @@ test("연속 그리기가 켜진 채 그리는 도중 우클릭하면 그리던 
 
 test("해제한 순간 포인터가 막대 위에 있으면 벗어날 때 접힌다", async ({ page, scenario }) => {
   preset(scenario, { keepDrawing: true });
+  await page.clock.install();
   await open(page);
   await expanded(page);
   await dock(page).hover();
   await cell(page).focus();
   await page.keyboard.press("Escape");
   await pollSaved(() => keepSaved(scenario)).toBe(false);
-  await page.waitForTimeout(700);
+  await page.clock.fastForward(700);
   await expanded(page);
   await page.mouse.move(5, 5);
   await collapsed(page);

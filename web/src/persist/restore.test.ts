@@ -111,7 +111,7 @@ test.each([
   ["모르는 종류가 있다", [{ id: "c", link: null, kind: "chart", symbol: "005930", venue: "combined", period: "M", chartSettings: {} }, { id: "x", link: null, kind: "nope" }]],
   ["차트 창에 종목이 없다", [{ id: "c", link: null, kind: "chart", venue: "combined", period: "M", chartSettings: {} }]],
   ["연동 색이 틀렸다", [{ id: "c", link: "k", kind: "chart", symbol: "005930", venue: "combined", period: "M", chartSettings: {} }]],
-  ["관심종목 창이 둘이다", [{ id: "c", link: null, kind: "chart", symbol: "005930", venue: "combined", period: "M", chartSettings: {} }, { id: "w1", link: null, kind: "watchlist" }, { id: "w2", link: null, kind: "watchlist" }]],
+  ["지표 창이 둘이다", [{ id: "c", link: null, kind: "chart", symbol: "005930", venue: "combined", period: "M", chartSettings: {} }, { id: "i1", link: null, kind: "indicators" }, { id: "i2", link: null, kind: "indicators" }]],
 ])("%s면 미저장 본문을 버리고 서버 레이아웃을 연다", async (_, windows) => {
   const draft = { id: "L1", name: "L1", sync: SYNC, windows, placement: {} };
   const r = await restore(sources({ unsaved: { layout: unsaved("/api/layouts/L1", 11, draft) } }));
@@ -134,6 +134,68 @@ test("개체 목록 창을 빼도 모르는 다른 종류가 남아 있으면 �
   const r = await restore(sources({ unsaved: { layout: unsaved("/api/layouts/L1", 11, draft) } }));
   expect(chartWindows(r.layout).map((w) => w.period)).toEqual(["D"]);
   expect(r.layoutDirty).toBe(false);
+});
+
+const draftWith = (...windows: unknown[]) => ({ id: "L1", name: "L1", sync: SYNC, windows: [{ id: "cell-0", link: null, kind: "chart", symbol: "000660", venue: "combined", period: "W", chartSettings: {} }, ...windows], placement: {} });
+
+test("같은 종류 창 둘이 든 미저장 본문은 그대로 열고 연동 색을 각자 지킨다", async () => {
+  const draft = draftWith({ id: "trades", link: "a", kind: "trades" }, { id: "trades-2", link: "b", kind: "trades" }, { id: "order", link: null, kind: "order", venue: "krx" }, { id: "order-2", link: "a", kind: "order", venue: "nxt" }, { id: "watchlist", link: null, kind: "watchlist" }, { id: "watchlist-2", link: null, kind: "watchlist" });
+  const r = await restore(sources({ unsaved: { layout: unsaved("/api/layouts/L1", 11, draft) } }));
+  expect(r.layout.windows.map((w) => [w.id, w.link])).toEqual([["cell-0", null], ["trades", "a"], ["trades-2", "b"], ["order", null], ["order-2", "a"], ["watchlist", null], ["watchlist-2", null]]);
+  expect(r.layout.windows.find((w) => w.id === "order-2")).toMatchObject({ venue: "nxt" });
+  expect([r.layoutDirty, r.revisions.layout]).toEqual([true, 11]);
+});
+
+test("창별 상태 셋은 서버 레이아웃과 미저장 본문에서 읽고 비어 있으면 필드를 두지 않는다", async () => {
+  const stored: Layout = { ...layout("L1", cell({})), windows: [cell({}), { id: "watchlist", link: null, kind: "watchlist", list: "W2" }, { id: "screener", link: null, kind: "screener" }, { id: "book", link: "a", kind: "book", symbol: "000660" }, { id: "order", link: null, kind: "order", venue: "nxt", symbol: "0000D0" }, { id: "trades", link: null, kind: "trades" }] };
+  const server = await restore(sources({ layouts: [stored] }));
+  expect(server.layout.windows.slice(1)).toEqual([
+    { id: "watchlist", link: null, kind: "watchlist", list: "W2" },
+    { id: "screener", link: null, kind: "screener" },
+    { id: "book", link: "a", kind: "book", symbol: "000660" },
+    { id: "order", link: null, kind: "order", venue: "nxt", symbol: "0000D0" },
+    { id: "trades", link: null, kind: "trades" },
+  ]);
+  const draft = draftWith({ id: "watchlist", link: null, kind: "watchlist", list: null }, { id: "screener", link: null, kind: "screener", screen: "S2" }, { id: "program", link: null, kind: "program", symbol: "005930" }, { id: "brokers", link: null, kind: "brokers", symbol: null });
+  const local = await restore(sources({ unsaved: { layout: unsaved("/api/layouts/L1", 11, draft) } }));
+  expect(local.layout.windows.slice(1)).toEqual([
+    { id: "watchlist", link: null, kind: "watchlist" },
+    { id: "screener", link: null, kind: "screener", screen: "S2" },
+    { id: "program", link: null, kind: "program", symbol: "005930" },
+    { id: "brokers", link: null, kind: "brokers" },
+  ]);
+  expect(local.layoutDirty).toBe(true);
+});
+
+test.each([
+  ["지수 종목", { id: "trades", link: null, kind: "trades", symbol: "IDX:001" }],
+  ["여섯 자리가 아닌 종목", { id: "book", link: null, kind: "book", symbol: "5930" }],
+  ["문자열이 아닌 종목", { id: "program", link: null, kind: "program", symbol: 5930 }],
+  ["호가주문의 지수 종목", { id: "order", link: null, kind: "order", venue: "krx", symbol: "IDX:101" }],
+  ["문자열이 아닌 list", { id: "watchlist", link: null, kind: "watchlist", list: 7 }],
+  ["빈 list", { id: "watchlist", link: null, kind: "watchlist", list: "" }],
+  ["문자열이 아닌 screen", { id: "screener", link: null, kind: "screener", screen: ["S1"] }],
+  ["64바이트를 넘는 screen", { id: "screener", link: null, kind: "screener", screen: "x".repeat(65) }],
+])("%s가 든 미저장 본문은 열지 않고 서버 레이아웃을 연다", async (_, bad) => {
+  const r = await restore(sources({ unsaved: { layout: unsaved("/api/layouts/L1", 11, draftWith(bad)) } }));
+  expect(chartWindows(r.layout).map((w) => w.period)).toEqual(["D"]);
+  expect(r.layoutDirty).toBe(false);
+});
+
+test("지표 창이 둘 든 미저장 본문은 열지 않는다", async () => {
+  const r = await restore(sources({ unsaved: { layout: unsaved("/api/layouts/L1", 11, draftWith({ id: "indicators", link: null, kind: "indicators" }, { id: "indicators-2", link: null, kind: "indicators" })) } }));
+  expect(chartWindows(r.layout).map((w) => w.period)).toEqual(["D"]);
+  expect(r.layoutDirty).toBe(false);
+});
+
+test("창이 50개인 미저장 본문은 열고 51개는 열지 않는다", async () => {
+  const trades = (count: number) => Array.from({ length: count }, (_, n) => ({ id: `trades-${n}`, link: null, kind: "trades" }));
+  const full = await restore(sources({ unsaved: { layout: unsaved("/api/layouts/L1", 11, draftWith(...trades(49))) } }));
+  expect(full.layout.windows).toHaveLength(50);
+  expect(full.layoutDirty).toBe(true);
+  const over = await restore(sources({ unsaved: { layout: unsaved("/api/layouts/L1", 11, draftWith(...trades(50))) } }));
+  expect(over.layout.windows).toHaveLength(3);
+  expect(over.layoutDirty).toBe(false);
 });
 
 test("차트가 아닌 창과 배치를 순서·연동 색 그대로 열고, 마이그레이션이 남긴 빈 배치는 경고 없이 읽는다", async () => {

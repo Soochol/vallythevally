@@ -9,7 +9,17 @@ describe("호가주문 설정", () => {
   });
 
   it("저장된 값을 읽는다", () => {
-    expect(parseOrderSettings({ sharePresets: [1, 2, 3, 4], amountPresets: [5, 6, 7, 8], averageDot: false, divider: false, rate: false })).toEqual({ sharePresets: [1, 2, 3, 4], amountPresets: [5, 6, 7, 8], averageDot: false, divider: false, rate: false });
+    expect(parseOrderSettings({ sharePresets: [1, 2, 3, 4], amountPresets: [5, 6, 7, 8], averageDot: false, divider: false, rate: false, venue: "nxt" })).toEqual({ sharePresets: [1, 2, 3, 4], amountPresets: [5, 6, 7, 8], averageDot: false, divider: false, rate: false, venue: "nxt" });
+  });
+
+  it("주문 경로는 옛 값에 없거나 모르는 값이면 SOR이고 KRX·NXT는 그대로 읽는다", () => {
+    expect(DEFAULT_ORDER_SETTINGS.venue).toBe("combined");
+    expect(parseOrderSettings({ sharePresets: [1, 2, 3, 4] }).venue).toBe("combined");
+    expect(parseOrderSettings({ venue: "bogus" }).venue).toBe("combined");
+    expect(parseOrderSettings({ venue: 3 }).venue).toBe("combined");
+    expect(parseOrderSettings({ venue: "combined" }).venue).toBe("combined");
+    expect(parseOrderSettings({ venue: "krx" }).venue).toBe("krx");
+    expect(parseOrderSettings({ venue: "nxt" }).venue).toBe("nxt");
   });
 
   it("프리셋은 양의 정수만 받는다", () => {

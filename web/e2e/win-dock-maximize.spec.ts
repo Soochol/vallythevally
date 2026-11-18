@@ -46,6 +46,7 @@ async function open(page: Page) {
 
 test("오른쪽 묶음 탭 줄 빈 곳을 더블클릭하면 작업 영역 전체로 커지고 Esc로 원래 두 사각형으로 돌아온다", async ({ page }) => {
   await open(page);
+  await expect(groups(page).first()).toHaveAttribute("data-active-cell", "");
   const work = await boxOf(area(page));
   const chartBefore = await boxOf(groups(page).first());
   const sideBefore = await boxOf(groups(page).last());
@@ -59,6 +60,7 @@ test("오른쪽 묶음 탭 줄 빈 곳을 더블클릭하면 작업 영역 전�
   await expect(separators(page)).toHaveCount(1);
   expect(await boxOf(groups(page).first())).toEqual(chartBefore);
   expect(await boxOf(groups(page).last())).toEqual(sideBefore);
+  await expect(groups(page).first()).toHaveAttribute("data-active-cell", "");
 });
 
 test("같은 탭 줄 빈 곳 더블클릭과 되돌림 버튼도 크게 보기를 끝낸다", async ({ page }) => {
@@ -131,16 +133,6 @@ test("차트 묶음을 크게 보고 나와도 같은 차트 노드가 이어진
   await page.keyboard.press("Escape");
   await expect(groups(page)).toHaveCount(2);
   expect(await chartOf(cell(page)).evaluate((element, previous) => element === previous, node)).toBe(true);
-});
-
-test("차트 없는 묶음을 크게 봐도 활성 칸은 그대로다", async ({ page }) => {
-  await open(page);
-  await expect(groups(page).first()).toHaveAttribute("data-active-cell", "");
-  await doubleClickEmpty(groups(page).last());
-  await expect(groups(page)).toHaveCount(1);
-  await page.keyboard.press("Escape");
-  await expect(groups(page)).toHaveCount(2);
-  await expect(groups(page).first()).toHaveAttribute("data-active-cell", "");
 });
 
 test("둘째 차트 묶음을 크게 보면 활성 칸이 둘째 차트가 되고 나와도 유지된다", async ({ page, scenario }) => {

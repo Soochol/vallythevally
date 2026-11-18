@@ -2,7 +2,7 @@ import type { WindowId } from "../../layout/kinds";
 
 const programmaticFocus = new WeakSet<HTMLElement>();
 
-function revealTab(target: HTMLElement) {
+export function revealTab(target: HTMLElement) {
   if (target.getAttribute("role") !== "tab") return;
   const strip = target.closest<HTMLElement>('[role="tablist"]');
   if (!strip) return;

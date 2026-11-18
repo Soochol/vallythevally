@@ -28,6 +28,8 @@ function snapshotOf(base: number): OrderBook {
     bids: Array.from({ length: 10 }, (_, i) => ({ price: base - 100 * i, quantity: 20 + i })),
     totalAskQuantity: 1000,
     totalBidQuantity: 3000,
+    afterHoursAskQuantity: null,
+    afterHoursBidQuantity: null,
     bookTime: null,
   };
 }
@@ -167,6 +169,12 @@ test("체결강도 줄이 13행, 최근 체결 행이 14행부터의 top과 같�
   const rowTops = await tops(ladderRows(page));
   expect(await tops(page.getByTestId("ladder-strength"))).toEqual([rowTops[12]]);
   expect(await tops(page.getByTestId("ladder-trade"))).toEqual(rowTops.slice(13, 15));
+  const tradeParts = await page.getByTestId("ladder-trade").evaluateAll((rows) => rows.map((row) => ({ count: row.children.length, text: row.textContent ?? "", priceRight: row.children[0]!.getBoundingClientRect().right, qtyLeft: row.children[1]!.getBoundingClientRect().left })));
+  for (const part of tradeParts) {
+    expect(part.count).toBe(2);
+    expect(part.text).not.toMatch(/\d{2}:\d{2}:\d{2}/);
+    expect(part.priceRight).toBeLessThanOrEqual(part.qtyLeft);
+  }
   await expect(page.getByTestId("book-window")).not.toContainText("대량");
   await expect(page.locator(".mw-trade [class*=bar], .mw-trade i")).toHaveCount(0);
   const columns = await page.getByTestId("ladder-trade").evaluateAll((rows) => rows.map((row) => [...row.children].map((part) => Math.round(part.getBoundingClientRect().left * 10) / 10)));
@@ -361,4 +369,153 @@ test("세션이 내려간 채 소켓을 다시 이으면 끊김이 그대로 보
   scenario.live.emit({ type: "feed_link", sub: resubscribed, live: false, at: 1 });
   await expect(page.getByRole("status").filter({ hasText: "끊김" })).toBeVisible();
   await expect(page.locator(".bk-ladder")).toHaveAttribute("data-stale", "");
+});
+
+test.describe("동시호가 예상체결", () => {
+  const EXPECTED = { price: 70_000, qty: 300 };
+  const info = (page: Page, label: string) => page.getByTestId("ladder-info").and(page.locator(`[data-label="${label}"]`));
+  const shape = async (page: Page) => ({
+    count: await ladderRows(page).count(),
+    firstTop: (await ladderRows(page).first().boundingBox())!.y,
+    currentTop: (await page.locator(".mw-lr[data-current]").boundingBox())!.y,
+  });
+  const frame = (scenario: Scenario, asks: [number, number][], bids: [number, number][], expected: FeedBook["expected"]): FeedBook => ({ ...liveOf(asks, bids, [90, 140]), t: scenario.now / 1000, expected });
+
+  test.beforeEach(async ({ page, scenario }) => {
+    await page.clock.setFixedTime(new Date(scenario.now));
+  });
+
+  test.describe("수요일 08:55", () => {
+    test.use({ clockStart: "20261118085500" });
+
+    test("교차가 없으면 8·9행에 두 항목과 행 강조가 보이고 사다리는 밀리지 않는다", async ({ page, scenario }) => {
+      await open(page, scenario, 70000);
+      const bookSub = await subOf(scenario, "book");
+      scenario.live.emit({ type: "feed_book", sub: bookSub, book: frame(scenario, [[70100, 50], [70200, 40]], [[70000, 80], [69900, 60]], null) });
+      await expect(page.getByTestId("book-total-bid")).toHaveText("140주");
+      await expect(page.locator("[data-expected]")).toHaveCount(0);
+      const without = await shape(page);
+
+      scenario.live.emit({ type: "feed_book", sub: bookSub, book: frame(scenario, [[70100, 50], [70200, 40]], [[70000, 80], [69900, 60]], EXPECTED) });
+      await expect(info(page, "예상체결가").locator("b")).toHaveText("70,000");
+      await expect(info(page, "예상체결량").locator("b")).toHaveText("300");
+      await expect(page.getByTestId("ladder-info")).toHaveCount(9);
+      await expect(page.locator(".mw-lr[data-expected]")).toHaveCount(1);
+      await expect(page.locator(".mw-lr[data-expected]")).toContainText("70,000");
+      const rowTops = await tops(ladderRows(page));
+      expect(await tops(page.getByTestId("ladder-info"))).toEqual(rowTops.slice(0, 9));
+      expect(await shape(page)).toEqual(without);
+    });
+
+    test("8행에 매수 잔량이 있으면 예상체결 두 항목이 상한가·하한가 자리로 올라간다", async ({ page, scenario }) => {
+      await open(page, scenario, 70000);
+      const bookSub = await subOf(scenario, "book");
+      scenario.live.emit({ type: "feed_book", sub: bookSub, book: frame(scenario, [[70100, 50], [70200, 40]], [[70200, 25], [70000, 80], [69900, 60]], EXPECTED) });
+      await expect(info(page, "예상체결가")).toBeVisible();
+      await expect(info(page, "예상체결량")).toBeVisible();
+      await expect(info(page, "상한가")).toHaveCount(0);
+      await expect(info(page, "하한가")).toHaveCount(0);
+      const rowTops = await tops(ladderRows(page));
+      expect(await tops(info(page, "예상체결가"))).toEqual([rowTops[5]]);
+      expect(await tops(info(page, "예상체결량"))).toEqual([rowTops[6]]);
+    });
+
+    test("실시간 호가가 없고 조회 호가만 있으면 예상체결 항목이 없다", async ({ page, scenario }) => {
+      await open(page, scenario, 70000);
+      await expect(ladderRows(page)).toHaveCount(20);
+      await expect(page.getByTestId("ladder-info")).toHaveCount(7);
+      await expect(info(page, "예상체결가")).toHaveCount(0);
+      await expect(page.locator("[data-expected]")).toHaveCount(0);
+    });
+  });
+
+  test.describe("수요일 10:00", () => {
+    test.use({ clockStart: "20261118100000" });
+
+    test("같은 예상체결이 와도 보이지 않고 상한가·하한가가 그대로다", async ({ page, scenario }) => {
+      await open(page, scenario, 70000);
+      const bookSub = await subOf(scenario, "book");
+      scenario.live.emit({ type: "feed_book", sub: bookSub, book: frame(scenario, [[70100, 50], [70200, 40]], [[70000, 80], [69900, 60]], EXPECTED) });
+      await expect(page.getByTestId("book-total-bid")).toHaveText("140주");
+      await expect(info(page, "예상체결가")).toHaveCount(0);
+      await expect(info(page, "예상체결량")).toHaveCount(0);
+      await expect(page.locator("[data-expected]")).toHaveCount(0);
+      await expect(info(page, "상한가")).toHaveCount(1);
+      await expect(info(page, "하한가")).toHaveCount(1);
+    });
+  });
+});
+
+test.describe("시간외 종가 잔량", () => {
+  const afterHours = (scenario: Scenario, askQty: number, bidQty: number) => ({ t: scenario.now / 1000, askQty, bidQty });
+  const unavailable = { status: 503, body: { error: { code: "internal", message: "호가 없음", reason: null, retryAt: null, manualActionRequired: false } } };
+  const strip = (page: Page) => book(page).locator(".mw-strip");
+
+  test.beforeEach(async ({ page, scenario }) => {
+    await page.clock.setFixedTime(new Date(scenario.now));
+  });
+
+  test.describe("수요일 08:35", () => {
+    test.use({ clockStart: "20261118083500" });
+
+    test("사다리가 없어도 빈 상태 아래 띠의 총잔량 자리에 시간외 잔량이 보인다", async ({ page, scenario }) => {
+      bookWindow(scenario, CODE);
+      replyBook(scenario, 70000);
+      scenario.reply((url) => url.pathname === "/api/symbols/005930/order-book", unavailable);
+      await page.goto("/");
+      await expect(cell(page)).toHaveAttribute("aria-busy", "false");
+      await windowTabs(page).getByRole("tab", { name: /^10호가/ }).click();
+      await expect(book(page).getByText("호가를 불러오지 못했습니다")).toBeVisible();
+      await expect(page.getByTestId("book-total-ask")).toHaveText("-");
+      const bookSub = await subOf(scenario, "book");
+      scenario.live.emit({ type: "feed_after_hours", sub: bookSub, totals: afterHours(scenario, 13_770, 0) });
+      await expect(page.getByTestId("book-total-ask")).toHaveAttribute("data-source", "after-hours");
+      await expect(page.getByTestId("book-total-ask")).toContainText("시간외");
+      await expect(page.getByTestId("book-total-ask")).toContainText("13,770주");
+      await expect(page.getByTestId("book-total-bid")).toContainText("0주");
+      await expect(book(page).getByText("호가를 불러오지 못했습니다")).toBeVisible();
+    });
+
+    test("조회 값이 먼저 보이고 실시간 값이 오면 실시간 값으로 바뀐다", async ({ page, scenario }) => {
+      bookWindow(scenario, CODE);
+      replyBook(scenario, 70000);
+      scenario.reply((url) => url.pathname === "/api/symbols/005930/order-book", { body: { ...snapshotOf(70000), afterHoursAskQuantity: 5000, afterHoursBidQuantity: 0 } });
+      await page.goto("/");
+      await expect(cell(page)).toHaveAttribute("aria-busy", "false");
+      await windowTabs(page).getByRole("tab", { name: /^10호가/ }).click();
+      await expect(page.getByTestId("book-total-ask")).toContainText("5,000주");
+      const bookSub = await subOf(scenario, "book");
+      scenario.live.emit({ type: "feed_after_hours", sub: bookSub, totals: afterHours(scenario, 6000, 0) });
+      await expect(page.getByTestId("book-total-ask")).toContainText("6,000주");
+    });
+
+    test("사다리와 함께 와도 숫자는 시간외 잔량이고 정규 총잔량은 title에 있으며 띠 높이는 같다", async ({ page, scenario }) => {
+      await open(page, scenario, 70000);
+      const bookSub = await subOf(scenario, "book");
+      scenario.live.emit({ type: "feed_book", sub: bookSub, book: { ...liveOf([[70100, 50]], [[70000, 80]], [90, 140]), t: scenario.now / 1000 } });
+      await expect(page.getByTestId("book-total-ask")).toHaveText("90주");
+      const before = (await strip(page).boundingBox())!;
+      scenario.live.emit({ type: "feed_after_hours", sub: bookSub, totals: afterHours(scenario, 13_770, 0) });
+      await expect(page.getByTestId("book-total-ask")).toHaveAttribute("data-source", "after-hours");
+      await expect(page.getByTestId("book-total-ask")).toContainText("13,770주");
+      await expect(page.getByTestId("book-total-ask")).toHaveAttribute("title", /정규 총잔량 매도 90주 · 매수 140주/);
+      await expect(page.getByRole("img", { name: /정규 총잔량 매도 90주 · 매수 140주/ })).toHaveCount(1);
+      const after = (await strip(page).boundingBox())!;
+      expect(after.height).toBe(before.height);
+    });
+  });
+
+  test.describe("수요일 10:00", () => {
+    test.use({ clockStart: "20261118100000" });
+
+    test("시간외 시간이 아니면 정규 총잔량이고 시간외 글자가 없다", async ({ page, scenario }) => {
+      await open(page, scenario, 70000);
+      const bookSub = await subOf(scenario, "book");
+      scenario.live.emit({ type: "feed_book", sub: bookSub, book: { ...liveOf([[70100, 50]], [[70000, 80]], [90, 140]), t: scenario.now / 1000 } });
+      scenario.live.emit({ type: "feed_after_hours", sub: bookSub, totals: afterHours(scenario, 13_770, 0) });
+      await expect(page.getByTestId("book-total-ask")).toHaveAttribute("data-source", "regular");
+      await expect(page.getByTestId("book-total-ask")).toHaveText("90주");
+      await expect(book(page)).not.toContainText("시간외");
+    });
+  });
 });

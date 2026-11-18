@@ -5,6 +5,7 @@ import { parseChartSettings } from "../src/chart/settings";
 import { installFrameProbe } from "./frame-probe";
 import { cell, DEFAULT_LAYOUT_ID, expect, test, type Scenario, firstChart, pollSaved } from "./harness";
 
+import { openChartSettings } from "./chart-settings-menu";
 const indicators = (scenario: Scenario) => parseChartSettings(firstChart(scenario.documents.layout(DEFAULT_LAYOUT_ID)).chartSettings).indicators;
 const maColors = async (scenario: Scenario) => indicators(scenario).filter((i) => i.spec.kind === "ma").map((i) => i.style.colors);
 const rail = (page: Page) => page.getByRole("tablist", { name: "창 묶음 2" });
@@ -15,8 +16,7 @@ const dialog = (page: Page) => page.getByRole("dialog", { name: "지표·비교 
 const topbar = (page: Page) => page.getByRole("toolbar", { name: "차트 도구 막대" });
 
 async function chooseWindow(page: Page, label: "가운데 창" | "차트 옆") {
-  await topbar(page).getByRole("button", { name: "차트 설정", exact: true }).click();
-  const popover = page.getByRole("dialog", { name: "차트 설정", exact: true });
+  const popover = await openChartSettings(page, "지표 창");
   const choice = popover.getByRole("group", { name: "지표 창" }).getByRole("button", { name: label, exact: true });
   await choice.click();
   await expect(choice).toHaveAttribute("aria-pressed", "true");

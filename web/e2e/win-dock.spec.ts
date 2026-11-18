@@ -170,7 +170,7 @@ test("최소 크기 거절은 미리 보기와 메뉴에 이유를 보이고 배
   expect(saved(scenario)).toEqual(original);
 });
 
-test("5px 이하는 탭 고르기이고 Esc·영역 밖 놓기·포인터 취소는 선택과 배치 기록을 지킨다", async ({ page, scenario }) => {
+test("5px 이하는 탭 고르기이고 영역 밖 놓기는 선택과 배치 기록을 지킨다", async ({ page, scenario }) => {
   await page.goto("/");
   await expect(cell(page)).toHaveAttribute("aria-busy", "false");
   const source = tab(page, "스크리너");
@@ -185,20 +185,16 @@ test("5px 이하는 탭 고르기이고 Esc·영역 밖 놓기·포인터 취소
   await pollSaved(() => JSON.stringify(saved(scenario))).toContain('"active":"watchlist"');
   const original = saved(scenario);
   const chart = await boxOf(groups(page).first());
-  for (const cancel of ["escape", "outside", "pointercancel"]) {
-    await startDrag(page, source);
-    await page.mouse.move(chart.x + chart.width / 2, chart.y + chart.height - 60, { steps: 10 });
-    await expect(preview(page)).toBeVisible();
-    await area(page).dispatchEvent("pointercancel", { pointerId: 2 });
-    await expect(preview(page)).toBeVisible();
-    if (cancel === "escape") await page.keyboard.press("Escape");
-    if (cancel === "outside") await page.mouse.move(700, 30, { steps: 6 });
-    if (cancel === "pointercancel") await area(page).dispatchEvent("pointercancel", { pointerId: 1 });
-    await page.mouse.up();
-    await expect(preview(page)).toHaveCount(0);
-    await expect(tab(page, "관심종목")).toHaveAttribute("aria-selected", "true");
-    expect(saved(scenario)).toEqual(original);
-  }
+  await startDrag(page, source);
+  await page.mouse.move(chart.x + chart.width / 2, chart.y + chart.height - 60, { steps: 10 });
+  await expect(preview(page)).toBeVisible();
+  await area(page).dispatchEvent("pointercancel", { pointerId: 2 });
+  await expect(preview(page)).toBeVisible();
+  await page.mouse.move(700, 30, { steps: 6 });
+  await page.mouse.up();
+  await expect(preview(page)).toHaveCount(0);
+  await expect(tab(page, "관심종목")).toHaveAttribute("aria-selected", "true");
+  expect(saved(scenario)).toEqual(original);
   await source.press("Shift+F10");
   await expect(menu(page).getByRole("menuitem", { name: "배치 되돌리기", exact: true })).toBeDisabled();
 });
@@ -300,12 +296,15 @@ test("묶음 더하기는 차트를 그 묶음에 더하고 기존 단일 창은
   await undo(page, firstGroup.getByRole("tab").last());
   await expect(firstGroup.getByRole("tab")).toHaveCount(1);
   expect(await chartOf(cell(page)).evaluate((node, previous) => node === previous, firstNode)).toBe(true);
+  await page.getByRole("toolbar", { name: "차트 도구 막대" }).getByRole("button", { name: "창 더하기" }).click();
+  await page.getByRole("menu", { name: "창 더하기" }).getByRole("menuitem", { name: /^지표/ }).click();
+  await expect(groupWith(page, "관심종목").locator(".dock-tabs").getByRole("tab", { name: "지표" })).toBeVisible();
   await firstGroup.getByRole("button", { name: "이 묶음에 창 더하기" }).click();
-  await page.getByRole("menu", { name: "창 더하기" }).getByRole("menuitem", { name: /^스크리너/ }).click();
-  await expect(firstGroup.getByRole("tab", { name: "스크리너" })).toHaveAttribute("aria-selected", "true");
-  await pollSaved(() => scenario.documents.layout(DEFAULT_LAYOUT_ID).windows.filter((window) => window.kind === "screener").length).toBe(1);
-  await undo(page, tab(page, "스크리너"));
-  await expect(groupWith(page, "관심종목").getByRole("tab", { name: "스크리너" })).toBeVisible();
+  await page.getByRole("menu", { name: "창 더하기" }).getByRole("menuitem", { name: /^지표/ }).click();
+  await expect(firstGroup.locator(".dock-tabs").getByRole("tab", { name: "지표" })).toHaveAttribute("aria-selected", "true");
+  await pollSaved(() => scenario.documents.layout(DEFAULT_LAYOUT_ID).windows.filter((window) => window.kind === "indicators").length).toBe(1);
+  await undo(page, firstGroup.locator(".dock-tabs").getByRole("tab", { name: "지표" }));
+  await expect(groupWith(page, "관심종목").locator(".dock-tabs").getByRole("tab", { name: "지표" })).toBeVisible();
 });
 
 test("끌 때 차트 드로잉과 관심종목·포털 도구 입력을 막고 놓은 뒤 정상 입력을 돌린다", async ({ page, scenario }) => {

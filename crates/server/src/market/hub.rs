@@ -9,7 +9,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
 use domain::{
-    Aggregator, Applied, Bucket, CLOSE_GRACE_SECS, ConfirmedBar, CurrentBar, Feed, KstTime, Ohlcv, Price, SESSION_CLOSE, SeriesKey, StockCode, Symbol,
+    Aggregator, Applied, Bucket, CLOSE_GRACE_SECS, ConfirmedBar, CurrentBar, Feed, KstDate, KstTime, Ohlcv, Price, SESSION_CLOSE, SeriesKey, StockCode, Symbol,
     TRADING_OPEN, TimeOfDay, Trade, TradeTimeError, Venue, resolve_trade_time,
 };
 use tokio::sync::{mpsc, oneshot, watch};
@@ -24,7 +24,7 @@ use crate::clock::Clock;
 use crate::kiwoom::rest::Priority;
 use crate::kiwoom::rest::KiwoomError;
 use crate::kiwoom::stream::{BookLevel, BookSnapshot, BrokerEntry, BrokerSnapshot, Exchange, KiwoomStream, RealProgramTrade, RealTick, StreamEvent, TradeSide};
-use crate::kiwoom::wire::RealType;
+use crate::kiwoom::wire::{AfterHoursTotals, RealType};
 use crate::quotes;
 use crate::symbols::Directory;
 
@@ -258,6 +258,8 @@ pub struct MarketHub {
     manager: SubscriptionManager,
     rejected: BTreeSet<Holder>,
     broker_history: BTreeMap<Symbol, (BrokerSnapshot, KstTime)>,
+    first_after_hours: FirstOfDay,
+    first_expected: FirstOfDay,
     tallies: DayTallies,
     directory: watch::Receiver<Option<Arc<Directory>>>,
     conns: HashMap<ConnId, Conn>,
@@ -287,6 +289,8 @@ impl MarketHub {
             manager: SubscriptionManager::default(),
             rejected: BTreeSet::new(),
             broker_history: BTreeMap::new(),
+            first_after_hours: FirstOfDay::default(),
+            first_expected: FirstOfDay::default(),
             tallies: DayTallies::default(),
             conns: HashMap::new(),
             keys: HashMap::new(),
@@ -803,6 +807,7 @@ impl MarketHub {
             StreamEvent::Book { book, received_at } => self.on_book(&book, received_at),
             StreamEvent::Program { row, received_at } => self.on_program(&row, received_at),
             StreamEvent::Broker { snapshot, received_at } => self.on_broker(snapshot, received_at),
+            StreamEvent::AfterHours { totals, received_at } => self.on_after_hours(&totals, received_at),
             StreamEvent::Down { at } => {
                 self.publish_feed_link(false, at);
                 let from = *self.gap_from.get_or_insert(at);
@@ -876,11 +881,27 @@ impl MarketHub {
     }
 
     fn on_book(&mut self, book: &BookSnapshot, received_at: KstTime) {
+        if let Some(expected) = book.expected
+            && self.first_expected.first(book.symbol, received_at.kst_date())
+        {
+            tracing::info!(symbol = %book.symbol.as_wire(), hhmmss = %book.hhmmss, price = %won(expected.price), qty = expected.qty.0, "예상체결 첫 수신");
+        }
         let message = feed_book(book, received_at);
         for (conn, sub) in self.feed_targets(book.symbol, FeedKind::Book) {
             if let Some(c) = self.conns.get(&conn) {
                 c.outbox.set_book(&sub, message.clone());
             }
+        }
+    }
+
+    fn on_after_hours(&mut self, totals: &AfterHoursTotals, received_at: KstTime) {
+        if self.first_after_hours.first(totals.symbol, received_at.kst_date()) {
+            tracing::info!(symbol = %totals.symbol.as_wire(), hhmmss = %totals.hhmmss, ask_qty = totals.total_ask_qty.0, bid_qty = totals.total_bid_qty.0, "0E 첫 수신");
+        }
+        let message = api::FeedAfterHoursTotals { t: feed_time(received_at, totals.hhmmss), ask_qty: totals.total_ask_qty.0, bid_qty: totals.total_bid_qty.0 };
+        for (conn, sub) in self.feed_targets(totals.symbol, FeedKind::Book) {
+            let msg = ServerMessage::FeedAfterHours { sub: sub.0, totals: message };
+            push(&self.conns, &mut self.closing, conn, msg);
         }
     }
 
@@ -1117,6 +1138,22 @@ fn spawn_verify(bars: &Arc<BarService>, tx: &mpsc::UnboundedSender<HubInput>, ke
 
 fn won(price: Price) -> f64 {
     price.centi() as f64 / 100.0
+}
+
+#[derive(Debug, Default)]
+struct FirstOfDay {
+    day: Option<KstDate>,
+    seen: BTreeSet<Symbol>,
+}
+
+impl FirstOfDay {
+    fn first(&mut self, symbol: Symbol, today: KstDate) -> bool {
+        if self.day != Some(today) {
+            self.day = Some(today);
+            self.seen.clear();
+        }
+        self.seen.insert(symbol)
+    }
 }
 
 fn feed_time(received_at: KstTime, hhmmss: TimeOfDay) -> UnixSeconds {
@@ -2931,6 +2968,11 @@ mod tests {
         StreamEvent::Program { row, received_at: h.clock.now() }
     }
 
+    fn after_hours_event(h: &Harness, symbol: Symbol, ask: u64, bid: u64) -> StreamEvent {
+        let totals = AfterHoursTotals { symbol, hhmmss: TimeOfDay::hms(8, 35, 12).unwrap(), total_ask_qty: Volume(ask), total_bid_qty: Volume(bid) };
+        StreamEvent::AfterHours { totals, received_at: h.clock.now() }
+    }
+
     fn subscribe_feed(h: &Harness, conn: ConnId, name: &str, kind: FeedKind, venue: Venue) {
         h.hub.subscribe_feed(conn, sub(name), samsung_symbol(), kind, venue);
     }
@@ -2983,6 +3025,42 @@ mod tests {
         let [ServerMessage::FeedBook { sub, book }] = msgs.as_slice() else { panic!("{msgs:?}") };
         assert_eq!(sub, "b");
         assert_eq!((book.asks[0], book.total_ask_qty, book.asks.len(), book.bids.len()), (Some(api::FeedBookLevel { price: 102.0, qty: 20 }), 20, 10, 10));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn after_hours_totals_go_to_the_book_subs_of_that_symbol_only() {
+        let h = std_harness();
+        live(&h).await;
+        let (conn, out) = connect(&h).await;
+        subscribe_feed(&h, conn, "b", FeedKind::Book, Venue::Combined);
+        subscribe_feed(&h, conn, "p", FeedKind::Program, Venue::Combined);
+        subscribe_feed(&h, conn, "t", FeedKind::Trades, Venue::Combined);
+        take(&out).await;
+        let other = Symbol::parse("000660").unwrap();
+        h.events.send(after_hours_event(&h, other, 1, 2)).await.unwrap();
+        assert!(take(&out).await.is_empty(), "다른 종목의 0E는 가지 않는다");
+        let received_at = h.clock.now();
+        h.events.send(after_hours_event(&h, samsung_symbol(), 13_770, 0)).await.unwrap();
+        let msgs = take(&out).await;
+        let [ServerMessage::FeedAfterHours { sub, totals }] = msgs.as_slice() else { panic!("{msgs:?}") };
+        assert_eq!((sub.as_str(), totals.ask_qty, totals.bid_qty), ("b", 13_770, 0));
+        assert_eq!(totals.t, feed_time(received_at, TimeOfDay::hms(8, 35, 12).unwrap()));
+        let json = serde_json::to_value(&msgs[0]).unwrap();
+        assert_eq!(json["type"], "feed_after_hours");
+        assert_eq!(json["totals"]["askQty"], 13_770);
+    }
+
+    #[test]
+    fn the_first_receipt_is_logged_once_per_symbol_per_kst_day() {
+        let (a, b) = (samsung_symbol(), Symbol::parse("000660").unwrap());
+        let (day1, day2) = (KstDate::new(2026, 11, 9).unwrap(), KstDate::new(2026, 11, 10).unwrap());
+        let mut firsts = FirstOfDay::default();
+        assert!(firsts.first(a, day1));
+        assert!(!firsts.first(a, day1), "같은 날 두 번째는 남기지 않는다");
+        assert!(firsts.first(b, day1), "다른 종목은 따로 센다");
+        assert!(firsts.first(a, day2), "날이 바뀌면 다시 남긴다");
+        assert!(!firsts.first(a, day2));
+        assert!(firsts.first(b, day2), "전날 기록은 남지 않는다");
     }
 
     #[tokio::test(start_paused = true)]
@@ -3115,12 +3193,33 @@ mod tests {
         subscribe_feed(&h, conn, "b", FeedKind::Book, Venue::Combined);
         settle().await;
         let want = |kinds: &[RealType]| h.desired.borrow().get(&samsung_symbol()).cloned().unwrap_or_default() == kinds.iter().copied().collect::<BTreeSet<_>>();
-        assert!(want(&[RealType::Trade, RealType::Book]));
+        assert!(want(&[RealType::Trade, RealType::Book, RealType::AfterHours]));
         h.hub.unsubscribe(conn, sub("b"));
         tokio::time::sleep(Duration::from_secs(29)).await;
-        assert!(want(&[RealType::Trade, RealType::Book]), "마지막 호가 창을 닫아도 30초 동안 0D를 유지한다");
+        assert!(want(&[RealType::Trade, RealType::Book, RealType::AfterHours]), "마지막 호가 창을 닫아도 30초 동안 0D와 0E를 유지한다");
         tokio::time::sleep(Duration::from_secs(2)).await;
         assert!(want(&[]), "유예가 지나면 종목째 빠진다");
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn releasing_one_of_two_feeds_of_the_same_symbol_and_kind_keeps_the_kind_registered_and_the_other_fed() {
+        let h = std_harness();
+        live(&h).await;
+        let (conn, out) = connect(&h).await;
+        subscribe_feed(&h, conn, "first", FeedKind::Book, Venue::Combined);
+        subscribe_feed(&h, conn, "second", FeedKind::Book, Venue::Combined);
+        take(&out).await;
+        let want = |kinds: &[RealType]| h.desired.borrow().get(&samsung_symbol()).cloned().unwrap_or_default() == kinds.iter().copied().collect::<BTreeSet<_>>();
+        h.hub.unsubscribe(conn, sub("first"));
+        tokio::time::sleep(Duration::from_secs(60)).await;
+        assert!(want(&[RealType::Trade, RealType::Book, RealType::AfterHours]), "남은 창이 있으면 유예가 지나도 호가 종류가 등록 목록에 남는다");
+        h.events.send(book_event(&h, 101, 10)).await.unwrap();
+        let msgs = take(&out).await;
+        let [ServerMessage::FeedBook { sub: fed, .. }] = msgs.as_slice() else { panic!("{msgs:?}") };
+        assert_eq!(fed, "second", "남은 구독만 다음 호가를 받는다");
+        h.hub.unsubscribe(conn, sub("second"));
+        tokio::time::sleep(Duration::from_secs(31)).await;
+        assert!(want(&[]), "마지막 구독까지 풀리고 유예가 지나면 종목째 빠진다");
     }
 
     #[tokio::test(start_paused = true)]

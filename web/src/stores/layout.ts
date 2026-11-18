@@ -16,9 +16,10 @@ import { fitDock, type WindowList } from "../layout/dock/fit";
 import type { Size } from "../layout/dock/geometry";
 import { placeBeside } from "../layout/dock/split";
 import { findGroup, groupOfWindow, putTab, selectTab } from "../layout/dock/tree";
-import { MAX_WINDOWS, windowId, WINDOW_KINDS, type WindowId } from "../layout/kinds";
+import { MAX_WINDOWS, windowId, WINDOW_KINDS, type WindowId, type WindowKind, type WindowRef } from "../layout/kinds";
 import type { CanvasPlacement, DockPlacement, Placement } from "../layout/placement";
 import { toward } from "../lib/josa";
+import { isIndexCode } from "../lib/symbol";
 import { readDockOrigins, writeDockOrigins } from "../persist/dockOrigins";
 import { useUiStore } from "./ui";
 
@@ -26,8 +27,12 @@ type ChartWindowWire = Extract<LayoutWindow, { kind: "chart" }>;
 export type OtherWindowKind = Exclude<LayoutWindow, { kind: "chart" }>["kind"];
 
 export type ChartWindowState = Omit<ChartWindowWire, "id" | "chartSettings" | "venue"> & { id: WindowId; chartSettings: ChartSettings };
-export type OrderWindowState = { id: WindowId; link: LinkColor | null; kind: "order"; venue: Venue };
-export type OtherWindowState = { id: WindowId; link: LinkColor | null; kind: Exclude<OtherWindowKind, "order"> } | OrderWindowState;
+export type WatchlistWindowState = { id: WindowId; link: LinkColor | null; kind: "watchlist"; list?: string };
+export type ScreenerWindowState = { id: WindowId; link: LinkColor | null; kind: "screener"; screen?: string };
+export type PinnableKind = "trades" | "book" | "program" | "brokers";
+export type PinnableWindowState = { id: WindowId; link: LinkColor | null; kind: PinnableKind; symbol?: SymbolCode };
+export type OrderWindowState = { id: WindowId; link: LinkColor | null; kind: "order"; venue: Venue; symbol?: SymbolCode };
+export type OtherWindowState = { id: WindowId; link: LinkColor | null; kind: "indicators" } | WatchlistWindowState | ScreenerWindowState | PinnableWindowState | OrderWindowState;
 
 export const DEFAULT_ORDER_VENUE: Venue = "krx";
 
@@ -35,10 +40,6 @@ export function blankWindow(id: WindowId, kind: OtherWindowKind): OtherWindowSta
   return kind === "order" ? { id, link: null, kind, venue: DEFAULT_ORDER_VENUE } : { id, link: null, kind };
 }
 
-export const orderVenue = (layout: EditableLayout, id: WindowId): Venue => {
-  const window = layout.windows.find((w) => w.id === id);
-  return window?.kind === "order" ? window.venue : DEFAULT_ORDER_VENUE;
-};
 export type WindowState = ChartWindowState | OtherWindowState;
 
 export type EditableLayout = { id: string; name: string; sync: LayoutSync; windows: WindowState[]; placement: Placement };
@@ -51,6 +52,15 @@ export const chartWindow = (layout: EditableLayout, id: WindowId): ChartWindowSt
   chartWindows(layout).find((w) => w.id === id) ?? chartWindows(layout)[0]!;
 
 export const chartNumber = (layout: EditableLayout, id: WindowId): number => chartWindows(layout).findIndex((w) => w.id === id) + 1;
+
+export function windowName(windows: readonly WindowRef[], window: WindowRef): string {
+  const { name } = WINDOW_KINDS[window.kind];
+  if (window.kind === "chart") return name;
+  const sameKind = windows.filter((w) => w.kind === window.kind);
+  return sameKind.length > 1 ? `${name} ${sameKind.findIndex((w) => w.id === window.id) + 1}` : name;
+}
+
+export const useWindowName = (window: WindowRef): string => useLayoutStore((s) => windowName(s.layout.windows, window));
 
 export function windowRefs(windows: readonly WindowState[]): WindowList {
   const [first, ...rest] = windows.map(({ id, kind }) => ({ id, kind }));
@@ -122,6 +132,14 @@ export type DockRoom = { area: Size; gap: number };
 
 let lastStepId = 0;
 
+const PINNABLE: ReadonlySet<WindowKind> = new Set<WindowKind>(["trades", "book", "program", "brokers", "order"]);
+
+function withOptional<W, K extends string>(w: W, key: K, value: string | null): W {
+  if ((w as Record<string, unknown>)[key] === (value ?? undefined)) return w;
+  const { [key]: _old, ...rest } = w as Record<string, unknown>;
+  return (value === null ? rest : { ...rest, [key]: value }) as W;
+}
+
 export const DEFAULT_LAYOUT_ID = "01900000-0000-7000-8000-000000000001";
 export const DEFAULT_LAYOUT: EditableLayout = {
   id: DEFAULT_LAYOUT_ID,
@@ -156,12 +174,16 @@ interface LayoutState {
   settleDock(dock: DockPlacement): void;
   selectTab(window: WindowId): void;
   showWindow(kind: OtherWindowKind, targetGroup?: string): void;
+  openWindow(kind: OtherWindowKind, targetGroup?: string): WindowId | null;
+  duplicateWindow(window: WindowId): WindowId | null;
   addChart(from: WindowId, room: DockRoom | null, targetGroup?: string): WindowId | null;
   closeWindow(id: WindowId, replacement?: WindowId): boolean;
   setSymbol(cellId: WindowId, target: SymbolTarget): SymbolChange;
   sendSymbol(sender: WindowId | null, cellId: WindowId, target: SymbolTarget): SymbolChange;
   setLink(window: WindowId, link: LinkColor | null): void;
-  setOrderVenue(window: WindowId, venue: Venue): void;
+  setWindowList(window: WindowId, list: string | null): void;
+  setWindowScreen(window: WindowId, screen: string | null): void;
+  pinSymbol(window: WindowId, code: SymbolCode | null): void;
   setPeriod(cellId: WindowId, p: Period): void;
   setStyle(cellId: WindowId, s: ChartStyle): void;
   setScale(cellId: WindowId, s: PriceScale): void;
@@ -308,26 +330,47 @@ export const useLayoutStore = create<LayoutState>()((set, get) => {
     },
     showWindow: (kind, targetGroup) => {
       const { windows, placement } = get().layout;
+      const shown = windows.find((w) => w.kind === kind);
+      if (!shown) {
+        get().openWindow(kind, targetGroup);
+        return;
+      }
       const canvasArea = get().canvasArea;
-      if (!windows.some((w) => w.kind === kind) && windows.length >= MAX_WINDOWS) return;
       if (canvasActive() && canvasArea) {
-        const shown = windows.find((w) => w.kind === kind);
-        const id = shown?.id ?? freeWindowId(windows, kind);
-        const next = shown ? windows : [...windows, blankWindow(id, kind)];
-        arrangeCanvas(next, bringToFront(fitCanvas(placement.canvas, windowRefs(next), canvasArea), id));
+        arrangeCanvas(windows, bringToFront(fitCanvas(placement.canvas, windowRefs(windows), canvasArea), shown.id));
         return;
       }
       const dock = fittedDock(get().layout);
       if (targetGroup && !findGroup(dock.root, targetGroup)) return;
-      const shown = windows.find((w) => w.kind === kind);
-      if (shown) {
-        if (targetGroup && groupOfWindow(dock.root, shown.id)?.id !== targetGroup) arrangeDock(windows, putTab(dock, shown.id, targetGroup));
-        else get().selectTab(shown.id);
-        return;
-      }
+      if (targetGroup && groupOfWindow(dock.root, shown.id)?.id !== targetGroup) arrangeDock(windows, putTab(dock, shown.id, targetGroup));
+      else get().selectTab(shown.id);
+    },
+    openWindow: (kind, targetGroup) => {
+      const { windows, placement } = get().layout;
+      if (windows.length >= MAX_WINDOWS || windows.filter((w) => w.kind === kind).length >= WINDOW_KINDS[kind].maxCount) return null;
       const id = freeWindowId(windows, kind);
       const next = [...windows, blankWindow(id, kind)];
+      const canvasArea = get().canvasArea;
+      if (canvasActive() && canvasArea) {
+        arrangeCanvas(next, bringToFront(fitCanvas(placement.canvas, windowRefs(next), canvasArea), id));
+        return id;
+      }
+      const dock = fittedDock(get().layout);
+      if (targetGroup && !findGroup(dock.root, targetGroup)) return null;
       arrangeDock(next, targetGroup ? putTab(dock, id, targetGroup) : selectTab(fitDock(placement.dock, windowRefs(next)), id));
+      return id;
+    },
+    duplicateWindow: (window) => {
+      const { layout } = get();
+      const source = layout.windows.find((w) => w.id === window);
+      if (!source || source.kind === "chart" || canvasActive() || layout.windows.length >= MAX_WINDOWS) return null;
+      if (layout.windows.filter((w) => w.kind === source.kind).length >= WINDOW_KINDS[source.kind].maxCount) return null;
+      const dock = fittedDock(layout);
+      const group = groupOfWindow(dock.root, window);
+      if (!group) return null;
+      const id = freeWindowId(layout.windows, source.kind);
+      arrangeDock([...layout.windows, { ...source, id }], putTab(dock, id, group.id, group.tabs.indexOf(window) + 1));
+      return id;
     },
     addChart: (from, room, targetGroup) => {
       const { layout } = get();
@@ -380,7 +423,10 @@ export const useLayoutStore = create<LayoutState>()((set, get) => {
         return isChartWindow(w) && leader ? follow({ ...w, link }, leader) : { ...w, link };
       });
     },
-    setOrderVenue: (id, venue) => patchWindows((w) => (w.id === id && w.kind === "order" && w.venue !== venue ? { ...w, venue } : w)),
+    setWindowList: (id, list) => patchWindows((w) => (w.id === id && w.kind === "watchlist" ? withOptional(w, "list", list) : w)),
+    setWindowScreen: (id, screen) => patchWindows((w) => (w.id === id && w.kind === "screener" ? withOptional(w, "screen", screen) : w)),
+    pinSymbol: (id, code) =>
+      patchWindows((w) => (w.id === id && PINNABLE.has(w.kind) && (code === null || !isIndexCode(code)) ? withOptional(w as PinnableWindowState | OrderWindowState, "symbol", code) : w)),
     setPeriod: (cellId, period) => patchCell(cellId, (c) => (c.period === period ? c : { ...c, period })),
     setStyle: (cellId, style) => patchSetting(cellId, "style", style),
     setScale: (cellId, scale) => patchSetting(cellId, "scale", scale),

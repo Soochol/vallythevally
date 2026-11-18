@@ -6,7 +6,7 @@ import type { SymbolCode } from "./SymbolCode";
  * `GET /api/symbols/:code/order-book` → 통합 시세(ka10004)의 10호가. 지수는 400 `bad_request`.
  * 매도·매수 모두 1호가부터 순서대로이고, 키움이 가격을 주지 않은 단은 빠진다.
  */
-export type OrderBook = { symbol: SymbolCode, asks: Array<OrderBookLevel>, bids: Array<OrderBookLevel>, totalAskQuantity: number, totalBidQuantity: number, 
+export type OrderBook = { symbol: SymbolCode, asks: Array<OrderBookLevel>, bids: Array<OrderBookLevel>, totalAskQuantity: number, totalBidQuantity: number, afterHoursAskQuantity: number | null, afterHoursBidQuantity: number | null, 
 /**
  * 호가 기준 시각 `HH:MM:SS`(KST). 키움은 날짜를 주지 않는다. 없으면 null.
  */

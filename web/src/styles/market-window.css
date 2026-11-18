@@ -33,15 +33,15 @@
 .mw-px small { padding-left:var(--s2); color:var(--text-3); font-size:var(--size-10); font-weight:400; white-space:nowrap; }
 .mw-px-mark { position:absolute; top:50%; right:calc(100% + var(--size-4)); width:var(--size-5); height:var(--size-5); transform:translateY(-50%); border-radius:50%; background:var(--up); pointer-events:none; }
 .mw-lr[data-current] .mw-px { background:var(--accent-soft); box-shadow:inset 0 0 0 1.5px var(--accent); }
+.mw-lr[data-expected] { box-shadow:inset 0 0 0 1px var(--accent); }
 
 .mw-slot { display:grid; align-content:center; align-self:stretch; width:100%; min-width:0; overflow:hidden; font-size:var(--size-11); white-space:nowrap; }
 .mw-info, .mw-strength { grid-template-columns:auto minmax(0, 1fr); gap:var(--s3); }
 .mw-info span, .mw-strength { color:var(--text-3); }
 .mw-info b, .mw-strength b { color:var(--text); font-weight:600; text-align:right; }
 .mw-info b[data-tone=up] { color:var(--up); } .mw-info b[data-tone=down] { color:var(--down); }
-.mw-trade { grid-template-columns:minmax(0, 1.1fr) minmax(0, 1fr) minmax(0, 1fr); gap:var(--s2); padding-left:var(--s2); border-left:var(--size-2) solid transparent; }
+.mw-trade { grid-template-columns:minmax(0, 1fr) minmax(0, 1fr); gap:var(--s2); padding-left:var(--s2); border-left:var(--size-2) solid transparent; }
 .mw-trade[data-side=buy] { border-left-color:var(--up); } .mw-trade[data-side=sell] { border-left-color:var(--down); }
-.mw-trade-time { color:var(--text-3); }
 .mw-trade-price, .mw-trade-qty { text-align:right; }
 .mw-trade-price[data-tone=up] { color:var(--up); } .mw-trade-price[data-tone=down] { color:var(--down); }
 
@@ -80,3 +80,5 @@
 .pg-price { text-align:right; }
 .pg-tr[data-bold] .pg-change em { font-weight:800; }
 .pg-gap { padding:var(--s2) var(--s4); border-top:var(--size-1) dashed var(--line-strong); border-bottom:var(--size-1) dashed var(--line-strong); color:var(--text-3); font-size:var(--fs-xs); text-align:center; }
+.mw-total-tag { line-height:0; margin-right:var(--s2); color:var(--warning); font-size:var(--fs-xs); font-weight:500; }
+.mw-strip b[data-source="after-hours"] { color:var(--warning); }
