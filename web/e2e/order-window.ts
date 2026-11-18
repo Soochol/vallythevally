@@ -5,6 +5,7 @@ import type { OrderSide } from "../src/api/generated/OrderSide";
 import type { TradingOpenOrder } from "../src/api/generated/TradingOpenOrder";
 import type { TradingExecution } from "../src/api/generated/TradingExecution";
 import type { TradingHolding } from "../src/api/generated/TradingHolding";
+import type { Venue } from "../src/api/generated/Venue";
 import { type Scenario, cell, DEFAULT_LAYOUT_ID, expect, windowTabs } from "./harness";
 
 export const SETTINGS = { v: 1, style: "candle", scale: "normal", indicators: [], compare: [], panels: [] };
@@ -75,13 +76,13 @@ export function snapshot(base: number) {
   };
 }
 
-export async function openOrderWindow(page: Page, scenario: Scenario, withSecondChart = false): Promise<void> {
+export async function openOrderWindow(page: Page, scenario: Scenario, withSecondChart = false, savedVenue: Venue = "krx"): Promise<void> {
   const layout = scenario.documents.layout(DEFAULT_LAYOUT_ID);
   const windows: LayoutWindow[] = [
     { id: "cell-0", link: null, kind: "chart", symbol: CODE, venue: "combined", period: "D", chartSettings: SETTINGS },
     ...(withSecondChart ? [{ id: "cell-1", link: null, kind: "chart", symbol: "000660", venue: "combined", period: "D", chartSettings: SETTINGS } satisfies LayoutWindow] : []),
     ...layout.windows.filter((w) => w.kind !== "chart"),
-    { id: "order", link: null, kind: "order", venue: "krx" },
+    { id: "order", link: null, kind: "order", venue: savedVenue },
   ];
   scenario.documents.saveLayout({ ...layout, windows, placement: {}, revision: layout.revision + 1 });
   scenario.reply((url) => url.pathname === `/api/symbols/${CODE}/fundamentals`, { body: { symbol: CODE, upperLimit: 91_000, lowerLimit: 49_000, marketCap: null, listedShares: null, per: null, pbr: null, roe: null, eps: null, bps: null, foreignExhaustionRate: null, high52w: null, low52w: null } });
