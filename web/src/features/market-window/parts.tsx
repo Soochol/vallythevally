@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import { useVenue } from "../../stores/ui";
+import { formatShares } from "./format";
 import { ratioSplit } from "./ladder";
 import type { WindowKind } from "../../layout/kinds";
 
@@ -12,6 +13,15 @@ export function RatioBar({ buy, sell, sellFirst, label }: { buy: number; sell: n
   const sellPart = <i key="sell" className="mw-ratio-sell" style={{ width: `${split.sell}%` }} />;
   const buyPart = <i key="buy" className="mw-ratio-buy" style={{ width: `${split.buy}%` }} />;
   return <div className="mw-ratio" role="img" aria-label={label} title={label}>{sellFirst ? [sellPart, buyPart] : [buyPart, sellPart]}</div>;
+}
+
+export function TotalFigure({ testId, tone, value, afterHours, description }: { testId: string; tone: "up" | "down"; value: number | null; afterHours: boolean; description: string | null }) {
+  return (
+    <b data-testid={testId} className={tone === "up" ? "mw-up" : "mw-down"} data-source={afterHours ? "after-hours" : "regular"} title={description ?? undefined}>
+      {afterHours && <small className="mw-total-tag">시간외</small>}
+      {value === null ? "-" : formatShares(value)}
+    </b>
+  );
 }
 
 export interface SegmentOption<T extends string> {

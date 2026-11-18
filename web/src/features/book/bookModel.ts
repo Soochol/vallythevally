@@ -1,6 +1,10 @@
 import type { FeedBook } from "../../api/generated/FeedBook";
+import type { FeedAfterHoursTotals } from "../../api/generated/FeedAfterHoursTotals";
 import type { OrderBook } from "../../api/generated/OrderBook";
+import type { UnixSeconds } from "../../api/generated/UnixSeconds";
+import { formatShares } from "../market-window/format";
 import type { BookLevel } from "../market-window/ladder";
+import type { AfterHoursTotals } from "./sessionWindows";
 
 export interface BookView {
   readonly t: number | null;
@@ -50,4 +54,36 @@ export function acceptLive(state: BookState, book: FeedBook): BookState {
       expected: book.expected,
     },
   };
+}
+
+export type AfterHoursState =
+  | { readonly source: "snapshot"; readonly totals: AfterHoursTotals }
+  | { readonly source: "live"; readonly totals: AfterHoursTotals };
+
+export function acceptAfterHoursSnapshot(state: AfterHoursState | null, book: OrderBook, fetchedAt: UnixSeconds): AfterHoursState | null {
+  if (state?.source === "live") return state;
+  if (book.afterHoursAskQuantity === null && book.afterHoursBidQuantity === null) return null;
+  return { source: "snapshot", totals: { t: fetchedAt, askQty: book.afterHoursAskQuantity ?? 0, bidQty: book.afterHoursBidQuantity ?? 0 } };
+}
+
+export function acceptAfterHoursLive(totals: FeedAfterHoursTotals): AfterHoursState {
+  return { source: "live", totals };
+}
+
+export interface RegularTotals {
+  readonly ask: number;
+  readonly bid: number;
+}
+
+export interface StripTotals {
+  readonly ask: number | null;
+  readonly bid: number | null;
+  readonly source: "regular" | "afterHours";
+  readonly description: string | null;
+}
+
+export function stripTotals(regular: RegularTotals | null, afterHours: AfterHoursTotals | null): StripTotals {
+  if (afterHours === null) return { ask: regular?.ask ?? null, bid: regular?.bid ?? null, source: "regular", description: null };
+  const regularNote = regular === null ? "" : ` · 정규 총잔량 매도 ${formatShares(regular.ask)} · 매수 ${formatShares(regular.bid)}`;
+  return { ask: afterHours.askQty, bid: afterHours.bidQty, source: "afterHours", description: `시간외 종가 잔량${regularNote}` };
 }

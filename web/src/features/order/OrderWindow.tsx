@@ -12,12 +12,13 @@ import { orderVenue, useLayoutStore } from "../../stores/layout";
 import { useOrderSettings, useUiStore } from "../../stores/ui";
 import { useBookFeed } from "../book/useBookFeed";
 import { basePrice, buildLadderRows, gridPrices, type LadderRow } from "../market-window/ladder";
-import { RatioBar, Strip } from "../market-window/parts";
+import { RatioBar, Strip, TotalFigure } from "../market-window/parts";
 import { useLinkedSymbol } from "../market-window/MarketWindowGate";
 import { formatShares } from "../market-window/format";
 import { infoSlot, tradeSlot } from "../market-window/LadderSlots";
 import { expectedInfoItems, placeInfoItems } from "../market-window/quoteInfo";
-import { visibleExpected } from "../book/sessionWindows";
+import { stripTotals } from "../book/bookModel";
+import { visibleAfterHours, visibleExpected } from "../book/sessionWindows";
 import { useLadderTrades, useQuoteInfo } from "../market-window/useLadderSlots";
 import { EmptyState } from "../overlay/State";
 import { openSystemSettings } from "../system-settings/open";
@@ -106,6 +107,7 @@ function OrderBody({ id, code }: { id: WindowId; code: SymbolCode }) {
   const trades = useLadderTrades(code, venue);
   const expected = view ? visibleExpected(view.t, Math.floor(now / 1000), view.expected) : null;
   const infoSlots = placeInfoItems(rows, info, expected === null ? [] : expectedInfoItems(expected, feed.previousClose));
+  const totals = stripTotals(view && { ask: view.totalAsk, bid: view.totalBid }, visibleAfterHours(feed.afterHours?.totals ?? null, Math.floor(now / 1000)));
   const data = useOrderData(code, access.open, referencePrice);
   const writes = useOrderWrites(code, venue);
   const holding = holdingOf(data.balance?.holdings ?? [], code);
@@ -164,9 +166,9 @@ function OrderBody({ id, code }: { id: WindowId; code: SymbolCode }) {
             : <EmptyState title={feed.snapshotFailed ? "호가를 불러오지 못했습니다" : "호가를 기다리는 중입니다"} />}
       </div>
       <Strip>
-        <b data-testid="order-total-ask" className="mw-down">{view ? formatShares(view.totalAsk) : "-"}</b>
-        <RatioBar buy={view?.totalBid ?? 0} sell={view?.totalAsk ?? 0} sellFirst label="총잔량 매도·매수 비율" />
-        <b data-testid="order-total-bid" className="mw-up">{view ? formatShares(view.totalBid) : "-"}</b>
+        <TotalFigure testId="order-total-ask" tone="down" value={totals.ask} afterHours={totals.source === "afterHours"} description={totals.description} />
+        <RatioBar buy={totals.bid ?? 0} sell={totals.ask ?? 0} sellFirst label={totals.description ?? "총잔량 매도·매수 비율"} />
+        <TotalFigure testId="order-total-bid" tone="up" value={totals.bid} afterHours={totals.source === "afterHours"} description={totals.description} />
       </Strip>
       <div className="od-totals">
         {SIDES.map((side) => {

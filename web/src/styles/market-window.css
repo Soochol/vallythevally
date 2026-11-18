@@ -81,3 +81,5 @@
 .pg-price { text-align:right; }
 .pg-tr[data-bold] .pg-change em { font-weight:800; }
 .pg-gap { padding:var(--s2) var(--s4); border-top:var(--size-1) dashed var(--line-strong); border-bottom:var(--size-1) dashed var(--line-strong); color:var(--text-3); font-size:var(--fs-xs); text-align:center; }
+.mw-total-tag { line-height:0; margin-right:var(--s2); color:var(--warning); font-size:var(--fs-xs); font-weight:500; }
+.mw-strip b[data-source="after-hours"] { color:var(--warning); }
