@@ -124,7 +124,7 @@ impl Daemon {
         let socket = match supervisor.status_socket.take() {
             Some(SocketSetting { path, required }) => match StatusSocket::bind(&path) {
                 Ok(socket) => Some(socket),
-                Err(error) if required => return Err(DaemonStartError::StatusSocket { path, error }),
+                Err(error) if required || error.kind() == std::io::ErrorKind::AddrInUse => return Err(DaemonStartError::StatusSocket { path, error }),
                 Err(error) => {
                     tracing::error!(path = %path.display(), %error, "상태 소켓을 열 수 없어 상태 API 없이 수집을 이어 갑니다");
                     None
@@ -199,8 +199,7 @@ impl Daemon {
     }
 
     async fn stages(&mut self, day: &mut DayRun, shutdown: &mut watch::Receiver<bool>) -> Result<(), DayEnd> {
-        let yesterday = date_number(day.day.add_days(-1));
-        self.finalize_date(yesterday, false, shutdown).await?;
+        self.finalize_backlog(day.date, shutdown).await?;
         if self.clock.now().unix() >= day.times.close.unix() {
             return self.after_close_start(day, shutdown).await;
         }

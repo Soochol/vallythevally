@@ -5,13 +5,14 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use collector::finalize::RetentionSettings;
 use collector::calendar::{HolidayRequest, HolidayTransport, TransportError as HolidayError};
 use collector::keys::{ActiveKey, KeyIdentity, KeyRole};
 use collector::plan::{InputSummary, KeyShare, MARKET_TYPES, PlanFile, read_plan, write_plan};
 use collector::protocol::{Command, Event, KeyName, SessionState};
 use collector::supervise::{
-    ChildMessage, ChildProcess, Daemon, DaemonInjected, DaemonInputs, DaemonStatus, DayPhase, FinalizeRunner, Injected, Inputs, Launcher, ScheduleSettings,
-    Settings, SocketSetting, Spawned, Supervisor, journal_path,
+    ChildMessage, ChildProcess, Daemon, DaemonInjected, DaemonInputs, DaemonStartError, DaemonStatus, DayPhase, FinalizeRunner, Injected, Inputs, Launcher, ScheduleSettings,
+    Settings, SocketSetting, Spawned, Supervisor, journal_path, schedule_from_arguments,
 };
 use domain::{KstDate, KstTime};
 use futures::future::BoxFuture;
@@ -398,7 +399,11 @@ fn seed_history(data: &Path) {
     );
     write(&data.join("store").join(FIRST_COMPLETE_DATE.to_string()).join("complete.json"), &complete_json(FIRST_COMPLETE_DATE, json!([])));
     write_raw_day(data, OLD_DATE);
-    write(&data.join("store").join(OLD_DATE.to_string()).join("complete.json"), &complete_json(OLD_DATE, json!([])));
+    let old_raw_bytes = std::fs::metadata(data.join("raw").join(OLD_DATE.to_string()).join("day.jsonl.zst")).unwrap().len();
+    write(
+        &data.join("store").join(OLD_DATE.to_string()).join("complete.json"),
+        &json!({"format_version": 1, "date": OLD_DATE, "verify": {"passed": true}, "raw_files": {"day.jsonl.zst": old_raw_bytes}, "stocks": []}).to_string(),
+    );
     write(&data.join("store").join(OLD_DATE.to_string()).join("verify.json"), &json!({"passed": true, "lines": {"unfinalized": {"total": 0, "kinds": {}}}}).to_string());
 }
 
@@ -845,6 +850,149 @@ async fn the_next_day_finalizes_a_day_whose_finalize_failed() {
     harness.finish().await;
 }
 
+fn prune_log_of(data: &Path, date: u32) -> Value {
+    let text = std::fs::read_to_string(data.join("store").join("prune.log.jsonl")).unwrap_or_default();
+    text.lines().map(|line| serde_json::from_str::<Value>(line).unwrap()).find(|line| line["date"] == json!(date)).unwrap_or_else(|| panic!("{date}의 지우기 기록이 없다: {text}"))
+}
+
+fn daemon_arguments(extra: &[&str]) -> Vec<String> {
+    ["--keys", "somewhere"].iter().chain(extra).map(|argument| (*argument).to_owned()).collect()
+}
+
+fn exit_code_text(code: ExitCode) -> String {
+    format!("{code:?}")
+}
+
+#[test]
+fn supervise_retention_options_reach_the_finalize_arguments_and_bad_values_exit_with_2() {
+    let schedule = schedule_from_arguments(&daemon_arguments(&["--keep-early", "20", "--keep", "3", "--early-period", "5"])).unwrap();
+    assert_eq!(schedule.retention, RetentionSettings { early_keep: 20.try_into().unwrap(), steady_keep: 3.try_into().unwrap(), early_period: 5 });
+    assert_eq!(schedule_from_arguments(&daemon_arguments(&[])).unwrap().retention, RetentionSettings::default());
+    for bad in [&["--keep-early", "0"][..], &["--keep", "0"], &["--keep", "x"], &["--early-period", "-1"], &["--early-period", ""]] {
+        assert!(schedule_from_arguments(&daemon_arguments(bad)).is_err(), "{bad:?}");
+        assert_eq!(exit_code_text(collector::supervise::run(&daemon_arguments(bad))), exit_code_text(ExitCode::from(2)), "{bad:?}");
+    }
+    let with_date = daemon_arguments(&["--date", "20261118", "--keep", "3"]);
+    assert_eq!(exit_code_text(collector::supervise::run(&with_date)), exit_code_text(ExitCode::from(2)));
+}
+
+#[tokio::test(start_paused = true)]
+async fn supervise_retention_options_reach_prune() {
+    let cases: [(&[&str], u64); 2] = [(&["--keep-early", "20", "--early-period", "20"], 20), (&["--keep", "8", "--early-period", "0"], 8)];
+    for (options, keep_days) in cases {
+        let schedule = schedule_from_arguments(&daemon_arguments(options)).unwrap();
+        let harness = Harness::start(Config { schedule, ..Config::default() });
+        harness.until_finalize_finished(1).await;
+        assert!(harness.data().join("raw").join(OLD_DATE.to_string()).exists(), "{options:?}: 기본 값이면 지웠을 원문이 보관 기간 안이라 남는다");
+        let line = prune_log_of(&harness.data(), OLD_DATE);
+        assert_eq!(line["action"], "kept", "{options:?}");
+        assert_eq!(line["reason"], "within_retention", "{options:?}");
+        assert_eq!(line["keep_observation_days"], json!(keep_days), "{options:?}");
+        harness.finish().await;
+    }
+}
+
+fn monday() -> KstDate {
+    KstDate::new(2026, 11, 16).unwrap()
+}
+
+fn seed_unfinalized_days(data: &Path, dates: &[u32]) {
+    for date in dates {
+        write_raw_day(data, *date);
+    }
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_daemon_started_on_monday_finalizes_friday() {
+    let harness = Harness::start_with(Config { start: kst(monday(), 7, 0, 0), seed_history: false, seed_today_raw: false, ..Config::default() }, |data| {
+        seed_unfinalized_days(data, &[20261113]);
+    });
+    harness.until_finalize_finished(1).await;
+    let runs = harness.finalizer.runs.lock().unwrap().clone();
+    assert_eq!(runs.len(), 1, "{runs:?}");
+    assert!(runs[0].windows(2).any(|pair| pair == ["--date", "20261113"]), "{runs:?}");
+    assert!(harness.data().join("store").join("20261113").join("complete.json").is_file());
+    assert!(!harness.data().join("store").join("20261116").join("complete.json").exists(), "오늘은 정리하지 않는다");
+    harness.finish().await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_daemon_finalizes_every_unfinalized_past_day_oldest_first_and_skips_today() {
+    let dates = [20261110, 20261112, 20261113];
+    let harness = Harness::start_with(Config { start: kst(monday(), 7, 0, 0), seed_history: false, seed_today_raw: false, ..Config::default() }, |data| {
+        seed_unfinalized_days(data, &[20261113, 20261110, 20261112, 20261116, 20261117]);
+        write(&data.join("store").join("20261117").join("complete.json"), &complete_json(20261117, json!([])));
+    });
+    harness.until_finalize_finished(3).await;
+    harness.until(kst(monday(), 7, 10, 0)).await;
+    let runs = harness.finalizer.runs.lock().unwrap().clone();
+    let finalized: Vec<&str> = runs.iter().map(|arguments| arguments[arguments.iter().position(|argument| argument == "--date").unwrap() + 1].as_str()).collect();
+    assert_eq!(finalized, ["20261110", "20261112", "20261113"], "{runs:?}");
+    for date in dates {
+        assert!(harness.data().join("store").join(date.to_string()).join("complete.json").is_file(), "{date}");
+    }
+    assert!(!harness.data().join("store").join("20261116").join("complete.json").exists());
+    harness.finish().await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_failing_backlog_day_is_tried_once_per_start_and_the_others_still_run() {
+    let harness = Harness::start_with(
+        Config { start: kst(monday(), 7, 0, 0), seed_history: false, seed_today_raw: false, forced_exit: Some(1), ..Config::default() },
+        |data| seed_unfinalized_days(data, &[20261112, 20261113]),
+    );
+    harness.until_finalize_finished(2).await;
+    harness.until(kst(monday(), 7, 10, 0)).await;
+    assert_eq!(harness.finalizer.runs.lock().unwrap().len(), 2, "한 번 시작에 날마다 한 번만 시도한다");
+    assert!(harness.alert_kinds().iter().filter(|kind| *kind == "stage_failed").count() >= 2);
+    harness.finish().await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn the_next_day_start_finalizes_every_past_day_left_unfinalized() {
+    let harness = Harness::start_with(
+        Config { forced_exit: Some(1), holidays: Holidays::Listed(vec![(20261119, "임시공휴일")]), seed_history: false, seed_today_raw: true, ..Config::default() },
+        |data| seed_unfinalized_days(data, &[20261112]),
+    );
+    harness.until_finalize_finished(2).await;
+    harness.until(kst(KstDate::new(2026, 11, 19).unwrap(), 0, 5, 0)).await;
+    harness.until_finalize_finished(4).await;
+    let runs = harness.finalizer.runs.lock().unwrap().clone();
+    let dates: Vec<&str> = runs[2..].iter().map(|arguments| arguments[arguments.iter().position(|argument| argument == "--date").unwrap() + 1].as_str()).collect();
+    assert_eq!(dates, ["20261112", "20261118"], "{runs:?}");
+    harness.finish().await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_journal_line_cut_inside_a_korean_character_does_not_stop_the_complete_file() {
+    let harness = Harness::start_with(Config::default(), |data| {
+        let mut torn = br#"{"v":1,"at":"2026-11-18T06:59:58+09:00","event":"key_stopped","key":"collect-01","reason":""#.to_vec();
+        torn.extend_from_slice(&"토큰".as_bytes()[..4]);
+        std::fs::create_dir_all(journal_path(data, DATE).parent().unwrap()).unwrap();
+        std::fs::write(journal_path(data, DATE), torn).unwrap();
+    });
+    harness.until_finalize_finished(1).await;
+    assert_eq!(harness.complete()["observation"]["judgment"]["verdict"], "observed");
+    harness.finish().await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_torn_journal_line_does_not_swallow_the_next_event() {
+    let harness = Harness::start_with(Config::default(), |data| {
+        let torn = r#"{"v":1,"at":"2026-11-18T06:59:58+09:00","event":"child_started","key":"collect-01","pid":4"#;
+        write(&journal_path(data, DATE), torn);
+    });
+    harness.until_finalize_finished(1).await;
+    let complete = harness.complete();
+    assert_eq!(complete["observation"]["judgment"]["verdict"], "observed", "{}", complete["observation"]);
+    assert_eq!(complete["observation"]["market_open"]["state"], "seen");
+    assert_eq!(complete["observation"]["index_check"]["result"], "agrees");
+    let text = std::fs::read_to_string(journal_path(&harness.data(), DATE)).unwrap();
+    assert!(text.lines().next().unwrap().ends_with("\"pid\":4"), "잘린 줄은 제 줄로 남는다");
+    assert!(text.ends_with('\n'));
+    harness.finish().await;
+}
+
 struct Client {
     reader: BufReader<OwnedReadHalf>,
     writer: OwnedWriteHalf,
@@ -1060,4 +1208,30 @@ async fn a_restart_after_a_missing_zero_s_keeps_the_missing_result() {
     let complete = second.complete();
     assert_eq!(complete["observation"]["market_open"]["state"], "missing", "다시 뜬 데몬이 이미 적힌 0s 없음을 덮으면 안 된다");
     second.finish().await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_second_daemon_on_a_live_status_socket_does_not_start_even_without_an_explicit_socket_option() {
+    let harness = Harness::start(Config { socket: true, ..Config::default() });
+    let other_folder = tempfile::tempdir().unwrap();
+    write(&other_folder.path().join("holiday-key"), SERVICE_KEY);
+    let second = Daemon::start(
+        DaemonInputs {
+            keys: active_keys(other_folder.path()),
+            data_dir: other_folder.path().join("data"),
+            supervisor: Settings { status_socket: Some(SocketSetting { path: harness.socket(), required: false }), ..Settings::default() },
+            schedule: Config::default().schedule,
+            holiday_key_path: other_folder.path().join("holiday-key"),
+        },
+        DaemonInjected {
+            launcher: harness.launcher.clone(),
+            transport: harness.kiwoom.clone(),
+            holidays: harness.holidays.clone(),
+            finalizer: harness.finalizer.clone(),
+            clock: harness.clock.clone(),
+        },
+    );
+    let Err(DaemonStartError::StatusSocket { error, .. }) = second else { panic!("살아 있는 소켓을 두고 시작했다") };
+    assert_eq!(error.kind(), std::io::ErrorKind::AddrInUse);
+    assert!(Client::connect(&harness.socket()).await.status().await["type"] == "status");
 }

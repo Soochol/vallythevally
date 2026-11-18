@@ -366,7 +366,7 @@ collector finalize [--data <폴더>] --date YYYYMMDD [--threads 4] [--buckets 64
 
 - 시작할 때 두 이름 바꾸기 사이에 끊긴 흔적(`store/<YYYYMMDD>.old-*`)이 있으면 고친다. 결과는 `store/<YYYYMMDD>.tmp/`에 쓴다. 폴더가 남아 있으면 지우고 처음부터 쓴다. 대조가 통과하면 `complete.json`을 맨 마지막에 쓰고 `store/<YYYYMMDD>/`로 바꾼다. 대조가 실패하면 `complete.json` 없이 `.tmp`를 남기고 1로 끝난다.
 - `--verify-only`는 쓰지 않고 원문 줄만 다시 세어 Parquet과 대조한다. `.tmp`가 있으면 그것을, 없으면 `store/<YYYYMMDD>/`를 대조한다. `verify.json`을 새로 쓰고 `complete.json`은 건드리지 않는다. 지우기는 하지 않는다.
-- `--prune`은 대조가 통과한 뒤 `raw/` 아래 모든 날을 따져 지울 수 있는 날의 원문을 지운다. 조건과 기록은 [`collector-store-format.md`](collector-store-format.md)의 "원문 지우기"를 따른다. 오늘은 `--date`다. 지우다 실패한 날이 있으면 1이다.
+- `--prune`은 대조가 통과한 뒤 `raw/` 아래 모든 날을 따져 지울 수 있는 날의 원문을 지운다. 조건과 기록은 [`collector-store-format.md`](collector-store-format.md)의 "원문 지우기"를 따른다. 오늘은 `--date`다. `complete.json`에 적힌 원문 지문(`raw_files`)과 지금 원문이 다른 날은 지우지 않는다. 지우다 실패한 날이 있으면 1이다.
 - `--threads`는 원문을 해석하는 스레드와 버킷을 정렬해 쓰는 스레드의 수다. 상한은 이 값이다. 원문은 `raw_read::read_day` 하나가 읽고 스레드들이 줄 묶음을 나눠 받는다. 줄에 번호를 매겨 정렬 기준에 넣으므로 스레드 수가 달라도 파일이 같다.
 
 ### 하는 일
@@ -393,7 +393,7 @@ universe/<YYYYMMDD>.rejected.json   쓰지 않기로 한 목록(진단용)
 universe/<YYYYMMDD>.after.json      마감 뒤 목록과 아침 목록의 차이
 ```
 
-모든 파일은 임시 파일에 쓴 뒤 이름을 바꿔 놓는다. 같은 날짜로 다시 돌려 정상 목록을 받으면 그날 파일을 새로 쓰고 그날의 `rejected.json`을 지운다(지우지 못하면 오류가 아니라 경고다). 전날 목록은 그날보다 이른 날짜 가운데 가장 늦은 `<YYYYMMDD>.json`이고, 읽을 수 없는 파일은 지우거나 고치지 않고 건너뛰어 그보다 앞선 읽히는 파일을 쓴다. 건너뛴 파일과 까닭은 `collect_morning`의 결과(`Morning::skipped`)와 로그에 남고, 3% 검사의 비교 대상도 같은 목록이다.
+모든 파일은 임시 파일에 쓴 뒤 이름을 바꿔 놓는다. 같은 날짜로 다시 돌려 정상 목록을 받으면 그날 파일을 새로 쓰고 그날의 `rejected.json`을 지운다(지우지 못하면 오류가 아니라 경고다). 전날 목록은 그날보다 이른 날짜 가운데 가장 늦은 `<YYYYMMDD>.json`이고, 읽을 수 없는 파일은 지우거나 고치지 않고 건너뛰어 그보다 앞선 읽히는 파일을 쓴다. 건너뛴 파일과 까닭은 `collect_morning`의 결과(`Morning::skipped`)와 로그에 남고, 대신 쓸 이전 목록이 없어 `NoFallback`으로 끝날 때도 그 오류(`skipped`)에 들어 있다. 3% 검사의 비교 대상도 같은 목록이다.
 
 ### 받기와 가르기
 
@@ -416,7 +416,7 @@ universe/<YYYYMMDD>.after.json      마감 뒤 목록과 아침 목록의 차이
 
 ### 검사
 
-아래 경우에는 받은 목록을 그날 목록으로 쓰지 않는다. 그날 목록 파일이 이미 있으면 그대로 둔다. 없을 때만 가장 최근 읽히는 이전 목록의 `stocks`를 그날 파일에 쓰고(`diff`는 비고 `warnings`는 그 목록의 것이다) `replaced`에 까닭을 적는다. 받은 목록은 `<YYYYMMDD>.rejected.json`에 남긴다(`reason`, `detail`, `previous_count`, `stocks`, `warnings`). 결과의 `Morning::written`이 새 목록(`NewList`), 대체(`ReplacementList`), 그대로 둠(`LeftAsIs`, 거부 까닭 포함) 중 무엇을 했는지 알린다.
+아래 경우에는 받은 목록을 그날 목록으로 쓰지 않는다. 그날 목록 파일이 이미 있으면 그대로 둔다. 그날 파일이 있는데 깨졌거나 형식 버전이 달라 읽을 수 없으면 그것도 덮지 않고 그대로 둔 채 `UniverseError::TodayListUnreadable`로 끝낸다(감독 데몬에서는 `stage_failed` 경보가 되고 그날 수집은 사람이 그 파일을 고치거나 지운 뒤 다시 돌려야 한다). 그날 파일을 새로 받은 정상 목록으로 바꾸는 것은 막지 않는다. 그날 파일이 없을 때만 가장 최근 읽히는 이전 목록의 `stocks`를 그날 파일에 쓰고(`diff`는 비고 `warnings`는 그 목록의 것이다) `replaced`에 까닭을 적는다. 받은 목록은 `<YYYYMMDD>.rejected.json`에 남긴다(`reason`, `detail`, `previous_count`, `stocks`, `warnings`). 결과의 `Morning::written`이 새 목록(`NewList`), 대체(`ReplacementList`), 그대로 둠(`LeftAsIs`, 거부 까닭 포함) 중 무엇을 했는지 알린다.
 
 | `reason` | 경우 |
 |---|---|
@@ -424,7 +424,7 @@ universe/<YYYYMMDD>.after.json      마감 뒤 목록과 아침 목록의 차이
 | `shrunk` | 종목 수가 가장 최근 목록보다 3% 넘게 줄었다. 정확히 3%는 쓴다 |
 | `cut_off` | 연속조회가 쪽 수 상한에 닿았는데 다음 쪽이 남았다 |
 
-대신 쓸 이전 목록이 없으면 `rejected.json`만 쓰고 `UniverseError::NoFallback`을 낸다.
+대신 쓸 이전 목록이 없으면 `rejected.json`만 쓰고 `UniverseError::NoFallback`을 낸다. `rejected.json`을 쓰지 못해도 오류로 끝내지 않는다. 경고(`Morning::warnings`와 로그)로 남기고 위 결과를 그대로 낸다.
 
 ### 마감 뒤 목록
 
@@ -432,7 +432,7 @@ universe/<YYYYMMDD>.after.json      마감 뒤 목록과 아침 목록의 차이
 
 ### 시험
 
-`crates/collector/tests/universe.rs`가 합성 `Transport`로 여러 쪽 응답을 주고 가르기, 차이 다섯 종류, 3% 경계, 조회 실패·끊긴 목록의 대체와 `rejected.json`, 같은 날 재실행이 좋은 목록을 덮지 않는 것, 읽히지 않는 최근 파일을 건너뛰는 것, 정상 재실행이 `rejected.json`을 지우는 것, 마감 뒤 목록이 그날 파일을 바꾸지 않는 것을 고정한다.
+`crates/collector/tests/universe.rs`가 합성 `Transport`로 여러 쪽 응답을 주고 가르기, 차이 다섯 종류, 3% 경계, 조회 실패·끊긴 목록의 대체와 `rejected.json`, 같은 날 재실행이 좋은 목록을 덮지 않는 것, 읽히지 않는 최근 파일을 건너뛰는 것, 정상 재실행이 `rejected.json`을 지우는 것, 읽을 수 없는 그날 파일이 조회 실패 뒤에도 그대로 남는 것, `NoFallback`에 건너뛴 파일이 들어 있는 것, `rejected.json` 쓰기 실패가 경고인 것, 마감 뒤 목록이 그날 파일을 바꾸지 않는 것을 고정한다.
 
 ## serve와 복기 화면
 
@@ -658,7 +658,7 @@ data/hoga/calendar/
 
 ### 사건 기록 `plan/<YYYYMMDD>.events.jsonl`
 
-사건 하나가 한 줄이고 데이터 폴더의 계획 파일 옆에 덧붙는다. 모든 줄에 `v`(형식 버전, 지금 1), `at`(KST 시각 `YYYY-MM-DDTHH:MM:SS+09:00`), `event`가 있다. `finalize-complete`가 이 기록으로 커버리지에 인계를 반영한다.
+사건 하나가 한 줄이고 데이터 폴더의 계획 파일 옆에 덧붙는다. 모든 줄에 `v`(형식 버전, 지금 1), `at`(KST 시각 `YYYY-MM-DDTHH:MM:SS+09:00`), `event`가 있다. `finalize-complete`가 이 기록으로 커버리지에 인계를 반영한다. 데몬이 기록을 열 때 파일이 비어 있지 않고 끝에 줄바꿈이 없으면(`kill -9` 직후처럼 쓰다 끊긴 줄) 먼저 줄바꿈을 써서 새 사건이 잘린 줄에 붙지 않게 한다. 읽는 쪽은 JSON으로 읽히지 않는 줄을 건너뛴다.
 
 | `event` | 필드 | 뜻 |
 |---|---|---|
@@ -712,7 +712,7 @@ SIGTERM·SIGINT나 종료 시각(`end_at`, 기본 20:05 KST, 계획 파일의 �
 | 대조 직후 | 〃 | 키를 이름순으로 한 줄로 세워 i번째 키를 (대조가 끝난 시각 + i × `reissue_spacing`)에 재발급한다 | |
 | 재발급 뒤 | 정리(`finalizing`) | `finalize --prune` 자식을 `nice -n 10 ionice -c 3`로 띄운다. 정리 완료 표시와 원문 지우기를 한다 | `store/<날짜>/complete.json`이 있다 |
 
-`phase`가 `off_hours`인 때는 쉬는 날, 07:20 전, 정리가 끝난 뒤다. 하루가 끝나면 다음 날 00:00까지 기다린 뒤 새 하루를 시작하고 그때 전날 정리가 안 끝났으면(원문은 있고 `complete.json`은 없다) 먼저 정리한다.
+`phase`가 `off_hours`인 때는 쉬는 날, 07:20 전, 정리가 끝난 뒤다. 하루가 끝나면 다음 날 00:00까지 기다린 뒤 새 하루를 시작한다. 데몬이 뜰 때와 새 하루를 시작할 때마다 먼저 밀린 날을 정리한다. 원문은 있는데 `complete.json`이 없는 과거 날짜를 모두 오래된 순으로 한 번씩 정리하고, 오늘은 뺀다. 금요일 저녁에 죽은 데몬이 월요일에 뜨면 금요일분을 정리한다. 대조에 실패한 날은 그 시작에서 한 번만 시도하고 넘어가므로 같은 시작 안에서 되풀이하지 않는다. 다만 `complete.json`이 생기지 않는 날은 다음 시작마다 다시 시도하고 경보(`stage_failed`)를 다시 낸다.
 
 REST용 키는 키 목록의 예비 키이고, 예비 키가 없으면 첫 활성 키를 쓰며 경보(`plan_note`)를 남긴다. 토큰은 `IssueLane`으로 받고 재시도는 세 번까지다. 상주 계층이 연 `KeyTokens`는 `Supervisor`를 띄우기 전에 놓는다(키마다 잠금이 하나이기 때문이다). 토큰 파일이 이어 주므로 아침에 받은 토큰을 `Supervisor`가 그대로 쓴다.
 
@@ -731,7 +731,7 @@ REST용 키는 키 목록의 예비 키이고, 예비 키가 없으면 첫 활�
 - 오늘 계획 파일이 있으면 다시 쓰지 않고 그것을 쓴다. 이때 종목 목록은 받지 않는다. 장중이면(`launch_at`을 넘었고 `close_at` 전이면) 바로 자식을 띄운다.
 - 마감 뒤(`close_at` 이후)에 뜨면 그날 수집(자식, 토큰, 계획 만들기, 마감 뒤 목록, 지수 대조, 재발급)을 하지 않는다. `complete.json`이 없고 그날 원문이 있으면 정리부터 한다. `complete.json`이 있으면 아무것도 하지 않는다.
 - 종목 목록을 받지 못했고 이전 목록도 없으면(`NoFallback`) 그날 수집을 접고 경보(`stage_failed`)를 남긴다. 계획을 세우지 못해도 같다.
-- 정리가 0이 아닌 종료 코드로 끝나면 경보(`stage_failed`)를 남기고 다시 하지 않는다. 다음 날 시작이나 다음 데몬 시작 때 한 번 다시 한다.
+- 정리가 0이 아닌 종료 코드로 끝나면 경보(`stage_failed`)를 남기고 그 시작 안에서는 다시 하지 않는다. 다음 날 시작이나 다음 데몬 시작 때 정리가 안 끝난 날을 모두 다시 시도한다. 밀린 날이 많으면 시작 직후 정리가 오래 걸려 아침 일정이 늦어질 수 있다. 일정 시각이 이미 지났으면 기다리지 않고 바로 이어 간다.
 - 종료 신호는 모든 기다림, 장중 `Supervisor`, 정리 자식에 닿고 어느 단계에서든 깨끗이 끝난다.
 
 ### 설정
@@ -746,13 +746,15 @@ REST용 키는 키 목록의 예비 키이고, 예비 키가 없으면 첫 활�
 | `reissue_spacing` | 30초 | `--reissue-spacing-secs N` |
 | `finalize_threads` | 2 | `--finalize-threads N` |
 | 서비스 키 파일 | `<상태 폴더>/holiday-service-key` | `--holiday-key <경로>` |
-| `retention` | `RetentionSettings` 기본 | (옵션 없음) |
+| 원문 보관, 처음 기간 | 7관측일 | `--keep-early N`(1 이상) |
+| 원문 보관, 그 뒤 | 1관측일 | `--keep N`(1 이상) |
+| 처음 기간의 길이 | 10관측일 | `--early-period N`(0 이상) |
 
-시각은 `judge_at < plan_at < launch_at < close_at`이어야 한다. 이 옵션들은 `--date`와 함께 쓸 수 없다.
+시각은 `judge_at < plan_at < launch_at < close_at`이어야 한다. 보관 옵션 세 개는 `finalize --prune`에 그대로 넘어가 원문을 지울 날을 가른다(조건은 [`collector-store-format.md`](collector-store-format.md)의 "원문 지우기"). 잘못된 값은 시작 오류(종료 코드 2)다. 이 옵션들은 `--date`와 함께 쓸 수 없다.
 
 ### 시험
 
-`tests/supervise_day.rs`: 가짜 자식, 합성 `Transport`(`au10001`, `ka10099`, `ka20006`), 합성 `HolidayTransport`, 실제 `finalize::run`을 같은 인수로 부르는 `FinalizeRunner`, 멈춘 tokio 시간과 `Clock::fake`로 하루를 몇 초에 돌린다. 평일 하루의 순서와 시각, 쉬는 날, 판단 모름, `0s`가 오지 않음, 지수 일봉 어긋남과 실패, 개장 시각이 바뀐 날, 11:00과 21:00에 뜬 데몬, 마감 뒤에 직접 시작한 `Supervisor`, 상태 소켓의 단계별 응답과 계약 예시 모양, 종료 신호, 정리 실패와 다음 날 다시 하기를 확인한다. `python3 scripts/dev.py cargo test -p collector --test supervise_day`.
+`tests/supervise_day.rs`: 가짜 자식, 합성 `Transport`(`au10001`, `ka10099`, `ka20006`), 합성 `HolidayTransport`, 실제 `finalize::run`을 같은 인수로 부르는 `FinalizeRunner`, 멈춘 tokio 시간과 `Clock::fake`로 하루를 몇 초에 돌린다. 평일 하루의 순서와 시각, 쉬는 날, 판단 모름, `0s`가 오지 않음, 지수 일봉 어긋남과 실패, 개장 시각이 바뀐 날, 11:00과 21:00에 뜬 데몬, 마감 뒤에 직접 시작한 `Supervisor`, 상태 소켓의 단계별 응답과 계약 예시 모양, 종료 신호, 정리 실패와 다음 날 다시 하기, 월요일에 뜬 데몬이 금요일을 포함해 밀린 날을 오래된 순으로 정리하는 것, 보관 옵션이 지우기 판단에 닿는 것, 끝 줄바꿈 없이 잘린 사건 기록 뒤의 판단이 `complete.json`에 나오는 것을 확인한다. `python3 scripts/dev.py cargo test -p collector --test supervise_day`.
 
 ## 운영
 
@@ -768,6 +770,7 @@ REST용 키는 키 목록의 예비 키이고, 예비 키가 없으면 첫 활�
 - 유닛은 자식에 `nice`·`ionice`를 거는 데몬의 동작을 막지 않는다. `finalize` 자식은 `nice -n 10 ionice -c 3`로 뜨므로 `nice`와 `ionice`(util-linux)가 `PATH`에 있어야 한다. 없으면 데몬이 경보를 남기고 그대로 띄운다.
 - `OOMPolicy=continue`는 정리 자식이 메모리 부족으로 죽어도 데몬과 다른 자식을 함께 내리지 않게 한다.
 - 시각은 모두 KST다. PC의 시간대와 상관없다.
+- 원문 보관 기간(기본: 처음 10관측일은 7관측일, 그 뒤는 1관측일)은 `ExecStart=` 줄 끝에 `--keep-early 7 --keep 1 --early-period 10` 꼴로 더해 바꾼다. 유닛은 기본 값을 쓰므로 그대로 둬도 된다. 바꾸면 `systemctl --user daemon-reload` 뒤 데몬을 다시 띄운다. 값이 틀리면 데몬은 종료 코드 2로 뜨지 않고, 유닛은 이를 다시 띄우지 않는다.
 
 ### 설치
 

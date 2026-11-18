@@ -11,6 +11,7 @@ use crate::calendar::ReqwestHolidayTransport;
 use crate::collect::child::is_loopback_ws;
 use crate::collect::config::{Variables, default_state_folder, process_variables};
 use crate::collect::start::{KIWOOM_BASE_URL, forward_termination_signals, init_logging};
+use crate::finalize::RetentionSettings;
 use crate::keys::KeyList;
 
 mod api;
@@ -28,7 +29,7 @@ mod wire;
 
 pub use daemon::{Control, Injected, Inputs, StartError, Supervisor, load_plan};
 pub use handoff::{STOCK_TYPES, effective_plan, registrations_of};
-pub use journal::{JOURNAL_VERSION, JournalEvent, journal_path, kst_stamp};
+pub use journal::{JOURNAL_VERSION, JournalEvent, journal_path, kst_stamp, read_lossy};
 pub use process::{ChildMessage, ChildProcess, FORWARDED_VARIABLES, Launcher, Spawned, TokioLauncher};
 pub use schedule::{Daemon, DaemonInjected, DaemonInputs, DaemonStartError, DayTimes, FinalizeRunner, ProcessFinalizeRunner, ScheduleSettings, finalize_arguments, parse_clock_time};
 pub use settings::{MarketOpenCheck, Settings, SocketSetting};
@@ -54,14 +55,29 @@ const SPEC: ArgSpec = ArgSpec {
         "reissue-spacing-secs",
         "finalize-threads",
         "holiday-key",
+        "keep-early",
+        "keep",
+        "early-period",
     ],
     flag_options: &[],
 };
 
-const DAEMON_ONLY_OPTIONS: [&str; 8] =
-    ["judge-at", "plan-at", "launch-at", "close-at", "open-grace-minutes", "reissue-spacing-secs", "finalize-threads", "holiday-key"];
+const DAEMON_ONLY_OPTIONS: [&str; 11] = [
+    "judge-at",
+    "plan-at",
+    "launch-at",
+    "close-at",
+    "open-grace-minutes",
+    "reissue-spacing-secs",
+    "finalize-threads",
+    "holiday-key",
+    "keep-early",
+    "keep",
+    "early-period",
+];
 
 const HOLIDAY_KEY_FILE: &str = "holiday-service-key";
+const RUNTIME_STOP_LIMIT: std::time::Duration = std::time::Duration::from_secs(5);
 
 pub fn rest_base_url(variables: &Variables) -> Result<String, String> {
     let Some(url) = variables.get(REST_URL_VARIABLE).filter(|url| !url.is_empty()) else {
@@ -117,8 +133,14 @@ fn parse_schedule(arguments: &Arguments) -> Result<ScheduleSettings, String> {
     if let Some(threads) = number("finalize-threads")? {
         schedule.finalize_threads = threads as usize;
     }
+    schedule.retention = RetentionSettings::from_arguments(arguments)?;
     schedule.check()?;
     Ok(schedule)
+}
+
+pub fn schedule_from_arguments(raw_arguments: &[String]) -> Result<ScheduleSettings, String> {
+    let arguments = Arguments::parse(raw_arguments, &SPEC).map_err(|error| error.to_string())?;
+    parse_schedule(&arguments)
 }
 
 fn run_daemon(arguments: &Arguments, keys_path: &std::path::Path) -> ExitCode {
@@ -158,7 +180,7 @@ fn run_daemon(arguments: &Arguments, keys_path: &std::path::Path) -> ExitCode {
         Ok(runtime) => runtime,
         Err(error) => return usage_error(format_args!("실행 환경을 만들지 못했습니다: {error}")),
     };
-    runtime.block_on(async {
+    let code = runtime.block_on(async {
         let transport = match ReqwestTransport::new(rest_url) {
             Ok(transport) => transport,
             Err(error) => return usage_error(format_args!("HTTP 클라이언트를 만들지 못했습니다: {error}")),
@@ -192,7 +214,9 @@ fn run_daemon(arguments: &Arguments, keys_path: &std::path::Path) -> ExitCode {
         tokio::spawn(forward_termination_signals(stop));
         daemon.run(shutdown).await;
         ExitCode::SUCCESS
-    })
+    });
+    runtime.shutdown_timeout(RUNTIME_STOP_LIMIT);
+    code
 }
 
 fn run_single_day(arguments: &Arguments, keys_path: &std::path::Path, date: &str) -> ExitCode {
@@ -237,7 +261,7 @@ fn run_single_day(arguments: &Arguments, keys_path: &std::path::Path, date: &str
         Ok(runtime) => runtime,
         Err(error) => return usage_error(format_args!("실행 환경을 만들지 못했습니다: {error}")),
     };
-    runtime.block_on(async {
+    let code = runtime.block_on(async {
         let transport = match ReqwestTransport::new(rest_url) {
             Ok(transport) => transport,
             Err(error) => return usage_error(format_args!("HTTP 클라이언트를 만들지 못했습니다: {error}")),
@@ -258,5 +282,7 @@ fn run_single_day(arguments: &Arguments, keys_path: &std::path::Path, date: &str
         tokio::spawn(forward_termination_signals(stop));
         supervisor.run(shutdown).await;
         ExitCode::SUCCESS
-    })
+    });
+    runtime.shutdown_timeout(RUNTIME_STOP_LIMIT);
+    code
 }

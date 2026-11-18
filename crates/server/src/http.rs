@@ -111,6 +111,11 @@ impl ApiFailure {
             T::Off | T::FileUnusable(_) => with_reason(Conflict, api::ApiErrorReason::OrdersOff),
             T::AccountChanged => with_reason(Conflict, api::ApiErrorReason::AccountChanged),
             T::TailMismatch | T::BadRequest(_) => ApiFailure::bad_request(e.to_string()),
+            T::CommandNotFound => ApiFailure::new(NotFound, e.to_string()),
+            T::Journal(_) => {
+                tracing::error!(reason = %e, "주문 명령 저널 오류");
+                ApiFailure::new(Internal, "명령 저널을 쓰거나 읽지 못했습니다. 명령 상태를 조회해 확인하세요")
+            }
             T::Unreadable(_) => {
                 tracing::error!(reason = %e, "키움 계좌 응답을 읽지 못했습니다");
                 with_reason(KiwoomUnavailable, api::ApiErrorReason::Protocol)

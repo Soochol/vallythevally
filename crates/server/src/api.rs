@@ -1705,6 +1705,141 @@ pub struct TradingExecutions {
     pub executions: Vec<TradingExecution>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum OrderCommandKind {
+    Buy,
+    Sell,
+    Modify,
+    Cancel,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum OrderCommandState {
+    Prepared,
+    Sending,
+    Accepted,
+    Rejected,
+    Unknown,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum OrderRejectReason {
+    OrdersOff,
+    NotConnected,
+    AuthBlocked,
+    AccountChanged,
+    UnknownPending,
+    InvalidOrder,
+    UnknownSymbol,
+    HighValueUnconfirmed,
+    OverSingleOrderCap,
+    OffTick,
+    OutOfLimit,
+    LimitsUnavailable,
+    SellOverSellable,
+    BuyOverBuyingPower,
+    NxtUnavailable,
+    OrderNotFound,
+    NotSent,
+    KiwoomRejected,
+    KiwoomUnavailable,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct OrderCommand {
+    pub command_id: String,
+    pub account_ref: String,
+    pub kind: OrderCommandKind,
+    pub code: Option<String>,
+    pub venue: Option<Venue>,
+    #[ts(type = "number | null")]
+    pub quantity: Option<u64>,
+    #[ts(type = "number | null")]
+    pub price: Option<u64>,
+    pub target_order_no: Option<String>,
+    pub state: OrderCommandState,
+    pub reason: Option<OrderRejectReason>,
+    pub order_no: Option<String>,
+    pub reconciled: bool,
+    pub created_at: UnixSeconds,
+    pub updated_at: UnixSeconds,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct OrderPlaceInput {
+    pub command_id: String,
+    pub code: String,
+    pub side: OrderSide,
+    #[ts(type = "number")]
+    pub quantity: u64,
+    #[ts(type = "number")]
+    pub price: u64,
+    pub venue: Option<Venue>,
+    #[serde(default)]
+    pub confirm_high_value: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct OrderModifyInput {
+    pub command_id: String,
+    pub order_no: String,
+    #[ts(type = "number")]
+    pub price: u64,
+    #[serde(default)]
+    pub confirm_high_value: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct OrderCancelInput {
+    pub command_id: String,
+    pub order_no: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct OrderCancelBatchInput {
+    pub batch_id: String,
+    pub code: String,
+    pub side: OrderSide,
+    #[ts(type = "number")]
+    pub price: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct OrderCommands {
+    pub account_ref: String,
+    pub blocked: bool,
+    pub commands: Vec<OrderCommand>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct OrderReconciliation {
+    pub account_ref: String,
+    #[ts(type = "number")]
+    pub cleared: u64,
+    pub open_orders: Vec<TradingOpenOrder>,
+    pub executions: Vec<TradingExecution>,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -3,8 +3,9 @@ use std::sync::Arc;
 
 use axum::Router;
 use axum::body::Body;
-use axum::extract::{Query, State};
-use axum::middleware;
+use axum::extract::{Path, Query, Request, State};
+use axum::middleware::{self, Next};
+use axum::response::{IntoResponse, Response};
 use axum::response::Json;
 use axum::routing::{get, post};
 use domain::StockCode;
@@ -13,9 +14,28 @@ use crate::api::{self, OrderSide};
 use crate::http::{ApiFailure, AppState};
 
 const BODY_LIMIT: usize = 1024;
+pub const ORDER_HEADER: &str = "x-vally-order";
+
+async fn require_order_header(req: Request, next: Next) -> Response {
+    if req.method() != axum::http::Method::GET && req.headers().get(ORDER_HEADER).and_then(|v| v.to_str().ok()) != Some("1") {
+        tracing::warn!(path = req.uri().path(), "주문 쓰기 요청에 X-Vally-Order 헤더가 없어 거절했습니다");
+        return ApiFailure::bad_request("이 요청은 받지 않습니다: X-Vally-Order: 1 헤더가 없습니다").into_response();
+    }
+    next.run(req).await
+}
 
 pub fn routes(state: Arc<AppState>) -> Router<Arc<AppState>> {
+    let commands = Router::new()
+        .route("/api/trading/commands", get(commands))
+        .route("/api/trading/commands/{id}", get(command))
+        .route("/api/trading/commands/place", post(place))
+        .route("/api/trading/commands/modify", post(modify))
+        .route("/api/trading/commands/cancel", post(cancel))
+        .route("/api/trading/commands/cancel-batch", post(cancel_batch))
+        .route("/api/trading/commands/reconcile", post(reconcile))
+        .layer(middleware::from_fn(require_order_header));
     Router::new()
+        .merge(commands)
         .route("/api/system/orders", get(status).put(switch))
         .route("/api/system/orders/check-account", post(check_account))
         .route("/api/trading/balance", get(balance))
@@ -63,4 +83,46 @@ async fn orderable(State(st): State<Arc<AppState>>, Query(q): Query<HashMap<Stri
 
 async fn executions(State(st): State<Arc<AppState>>) -> Result<Json<api::TradingExecutions>, ApiFailure> {
     st.trading.executions().await.map(Json).map_err(ApiFailure::trading)
+}
+
+async fn read_json<T: serde::de::DeserializeOwned>(body: Body) -> Result<T, ApiFailure> {
+    let bytes = axum::body::to_bytes(body, BODY_LIMIT).await.map_err(|_| ApiFailure::bad_request("본문 형식이 올바르지 않습니다"))?;
+    serde_json::from_slice(&bytes).map_err(|_| ApiFailure::bad_request("본문 형식이 올바르지 않습니다"))
+}
+
+async fn place(State(st): State<Arc<AppState>>, body: Body) -> Result<Json<api::OrderCommand>, ApiFailure> {
+    let input: api::OrderPlaceInput = read_json(body).await?;
+    tracing::info!(side = ?input.side, "신규 주문 요청을 받았습니다");
+    st.trading.place(input).await.map(Json).map_err(ApiFailure::trading)
+}
+
+async fn modify(State(st): State<Arc<AppState>>, body: Body) -> Result<Json<api::OrderCommand>, ApiFailure> {
+    let input: api::OrderModifyInput = read_json(body).await?;
+    tracing::info!("정정 요청을 받았습니다");
+    st.trading.modify(input).await.map(Json).map_err(ApiFailure::trading)
+}
+
+async fn cancel(State(st): State<Arc<AppState>>, body: Body) -> Result<Json<api::OrderCommand>, ApiFailure> {
+    let input: api::OrderCancelInput = read_json(body).await?;
+    tracing::info!("취소 요청을 받았습니다");
+    st.trading.cancel(input).await.map(Json).map_err(ApiFailure::trading)
+}
+
+async fn cancel_batch(State(st): State<Arc<AppState>>, body: Body) -> Result<Json<api::OrderCommands>, ApiFailure> {
+    let input: api::OrderCancelBatchInput = read_json(body).await?;
+    tracing::info!("가격별 일괄 취소 요청을 받았습니다");
+    st.trading.cancel_batch(input).await.map(Json).map_err(ApiFailure::trading)
+}
+
+async fn reconcile(State(st): State<Arc<AppState>>) -> Result<Json<api::OrderReconciliation>, ApiFailure> {
+    tracing::info!("결과 불명 명령을 조회로 대조하라는 요청을 받았습니다");
+    st.trading.reconcile().await.map(Json).map_err(ApiFailure::trading)
+}
+
+async fn commands(State(st): State<Arc<AppState>>) -> Result<Json<api::OrderCommands>, ApiFailure> {
+    st.trading.commands().await.map(Json).map_err(ApiFailure::trading)
+}
+
+async fn command(State(st): State<Arc<AppState>>, Path(id): Path<String>) -> Result<Json<api::OrderCommand>, ApiFailure> {
+    st.trading.command(&id).await.map(Json).map_err(ApiFailure::trading)
 }

@@ -5,6 +5,7 @@
   "days": [
     { "date": 20261118, "state": "in_progress", "verified": null, "planned_stocks": null, "received_stocks": null },
     { "date": 20261117, "state": "complete", "verified": true, "planned_stocks": 2600, "received_stocks": 2590 },
-    { "date": 20261116, "state": "incomplete", "verified": null, "planned_stocks": null, "received_stocks": null }
+    { "date": 20261116, "state": "incomplete", "verified": null, "planned_stocks": null, "received_stocks": null },
+    { "date": 20261115, "state": "verify_failed", "verified": null, "planned_stocks": null, "received_stocks": null }
   ]
 }

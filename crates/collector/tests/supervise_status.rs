@@ -161,16 +161,24 @@ struct World {
 
 impl World {
     fn try_start(plan: PlanFile, silent: &[&str], prepare_socket: impl FnOnce(&Path)) -> Result<World, StartError> {
-        let folder = tempfile::tempdir().unwrap();
         let sockets = short_folder();
         prepare_socket(sockets.path());
         let socket = sockets.path().join("run").join("supervise.sock");
+        World::launch(plan, silent, sockets, socket, true)
+    }
+
+    fn try_start_on(plan: PlanFile, socket: &Path, required: bool) -> Result<World, StartError> {
+        World::launch(plan, &[], short_folder(), socket.to_owned(), required)
+    }
+
+    fn launch(plan: PlanFile, silent: &[&str], sockets: tempfile::TempDir, socket: PathBuf, required: bool) -> Result<World, StartError> {
+        let folder = tempfile::tempdir().unwrap();
         let injected = Injected {
             launcher: Arc::new(BeatingLauncher { silent: silent.iter().map(|name| (*name).to_owned()).collect() }),
             transport: Arc::new(FakeTransport { counter: AtomicUsize::new(0) }),
             clock: Clock::fake(kst(KstDate::new(2026, 11, 18).unwrap(), 9, 0, 0)),
         };
-        let settings = Settings { status_socket: Some(SocketSetting { path: socket.clone(), required: true }), end_at: None, ..Settings::default() };
+        let settings = Settings { status_socket: Some(SocketSetting { path: socket.clone(), required }), end_at: None, ..Settings::default() };
         let keys = active_keys_for(folder.path(), &plan);
         let supervisor = Supervisor::start(Inputs { plan, keys, data_dir: folder.path().join("data"), settings }, injected)?;
         let (status, control) = (supervisor.status(), supervisor.control());
@@ -272,6 +280,14 @@ fn leftover_socket_at(sockets: &Path) {
     std::fs::create_dir_all(socket.parent().unwrap()).unwrap();
     drop(std::os::unix::net::UnixListener::bind(&socket).unwrap());
     assert!(socket.exists());
+    let refused = || std::os::unix::net::UnixStream::connect(&socket).is_err_and(|error| error.kind() == io::ErrorKind::ConnectionRefused);
+    for _ in 0..200 {
+        if refused() {
+            return;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    panic!("닫은 소켓이 계속 연결을 받는다");
 }
 
 #[tokio::test(start_paused = true)]
@@ -302,8 +318,7 @@ async fn each_reply_has_the_shape_of_its_fixture() {
     let world = World::start(plan_for(2, 3, 2));
     sleep(Duration::from_secs(30)).await;
     let data = world.data();
-    std::fs::create_dir_all(data.join("store/20261117/0B")).unwrap();
-    std::fs::write(data.join("store/20261117/complete.json"), r#"{"verified":true,"planned_stocks":6,"received_stocks":6}"#).unwrap();
+    finalize_a_day(&data, 20261117, true);
     std::fs::create_dir_all(data.join("raw/20261117/collect-01")).unwrap();
     std::fs::write(data.join("raw/20261117/collect-01/a.zst"), "12345").unwrap();
     let mut client = world.connect().await;
@@ -315,6 +330,10 @@ async fn each_reply_has_the_shape_of_its_fixture() {
         let reply = client.ask(fixture_line(request).trim()).await;
         same_shape(&fixture(expected), &reply, expected);
     }
+    let coverage = client.ask(fixture_line("request-coverage.json").trim()).await;
+    let complete_day = coverage["days"].as_array().unwrap().iter().find(|day| day["date"] == 20261117).unwrap();
+    assert_eq!(complete_day["state"], "complete");
+    same_shape(&fixture("reply-coverage.json")["days"][1], complete_day, "coverage의 complete 날");
     let status = client.ask(fixture_line("request-status.json").trim()).await;
     assert_eq!(status["status"]["alerts"][0]["kind"], "excluded");
     assert_eq!(status["status"]["today"]["excluded_stocks"], 2);
@@ -605,5 +624,254 @@ async fn the_coverage_summarizes_the_complete_json_that_finalize_really_writes()
     let day = |date: u64| days.iter().find(|day| day["date"] == date).unwrap().clone();
     assert_eq!(day(20261117), json!({"date": 20261117, "state": "complete", "verified": true, "planned_stocks": 5, "received_stocks": 2}));
     assert_eq!(day(20261116), json!({"date": 20261116, "state": "complete", "verified": true, "planned_stocks": null, "received_stocks": 2}));
+    world.finish().await;
+}
+
+fn coverage_day(reply: &Value, date: u64) -> Value {
+    reply["days"].as_array().unwrap().iter().find(|day| day["date"] == date).unwrap_or_else(|| panic!("{date}가 없다: {reply}")).clone()
+}
+
+fn only_state(date: u64, state: &str) -> Value {
+    json!({"date": date, "state": state, "verified": null, "planned_stocks": null, "received_stocks": null})
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_day_whose_verification_failed_is_told_apart_from_a_day_in_progress() {
+    let world = World::start(plan_for(2, 3, 0));
+    let store = world.data().join("store");
+    std::fs::create_dir_all(store.join("20261118.tmp/0B")).unwrap();
+    std::fs::create_dir_all(store.join("20261117.tmp")).unwrap();
+    std::fs::write(store.join("20261117.tmp/verify.json"), r#"{"format_version":1,"date":20261117,"passed":false,"mismatch_count":3,"mismatches":[]}"#).unwrap();
+    std::fs::create_dir_all(store.join("20261116.tmp")).unwrap();
+    std::fs::write(store.join("20261116.tmp/verify.json"), r#"{"format_version":1,"date":20261116,"passed":true,"mismatch_count":0,"mismatches":[]}"#).unwrap();
+    std::fs::create_dir_all(store.join("20261115.tmp")).unwrap();
+    std::fs::write(store.join("20261115.tmp/verify.json"), r#"{"format_version":1,"da"#).unwrap();
+    let mut client = world.connect().await;
+    let reply = client.ask(fixture_line("request-coverage.json").trim()).await;
+    assert_eq!(coverage_day(&reply, 20261117), only_state(20261117, "verify_failed"));
+    assert_eq!(coverage_day(&reply, 20261118), only_state(20261118, "in_progress"));
+    assert_eq!(coverage_day(&reply, 20261116), only_state(20261116, "in_progress"));
+    assert_eq!(coverage_day(&reply, 20261115), only_state(20261115, "in_progress"));
+    world.finish().await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_day_being_swapped_by_a_refinalize_is_not_cached_as_incomplete() {
+    let world = World::start(plan_for(2, 3, 0));
+    let store = world.data().join("store");
+    std::fs::create_dir_all(store.join("20261117/0B")).unwrap();
+    std::fs::create_dir_all(store.join("20261117.old-1/0B")).unwrap();
+    std::fs::create_dir_all(store.join("20261116/0B")).unwrap();
+    let mut client = world.connect().await;
+
+    let during = client.ask(fixture_line("request-coverage.json").trim()).await;
+    assert_eq!(coverage_day(&during, 20261117), only_state(20261117, "in_progress"), "갈아 끼우는 중에는 완료 표시가 없어도 미완이 아니다");
+    assert_eq!(coverage_day(&during, 20261116), only_state(20261116, "incomplete"), "그냥 완료 표시가 없는 날은 미완이다");
+
+    std::fs::remove_dir_all(store.join("20261117.old-1")).unwrap();
+    finalize_a_day(&world.data(), 20261117, true);
+    let after = client.ask(fixture_line("request-coverage.json").trim()).await;
+    assert_eq!(coverage_day(&after, 20261117)["state"], "complete", "갈아 끼우는 중의 답은 캐시에 남지 않는다: {after}");
+    world.finish().await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_complete_json_of_another_format_version_or_without_one_is_unreadable() {
+    let world = World::start(plan_for(2, 3, 0));
+    finalize_a_day(&world.data(), 20261117, true);
+    finalize_a_day(&world.data(), 20261116, false);
+    finalize_a_day(&world.data(), 20261115, false);
+    let rewrite = |date: u32, edit: &dyn Fn(String) -> String| {
+        let path = world.data().join(format!("store/{date}/complete.json"));
+        std::fs::write(&path, edit(std::fs::read_to_string(&path).unwrap())).unwrap();
+    };
+    rewrite(20261116, &|text| text.replace("\"format_version\": 1", "\"format_version\": 2"));
+    rewrite(20261115, &|text| text.replace("\"format_version\": 1,", ""));
+    let mut client = world.connect().await;
+    let reply = client.ask(fixture_line("request-coverage.json").trim()).await;
+    assert_eq!(coverage_day(&reply, 20261117)["state"], "complete");
+    assert_eq!(coverage_day(&reply, 20261116), only_state(20261116, "unreadable"));
+    assert_eq!(coverage_day(&reply, 20261115), only_state(20261115, "unreadable"));
+    world.finish().await;
+}
+
+fn fake_daemon_answering(socket: &Path, answer: &'static str) -> std::thread::JoinHandle<()> {
+    let listener = std::os::unix::net::UnixListener::bind(socket).unwrap();
+    std::thread::spawn(move || {
+        let (stream, _) = listener.accept().unwrap();
+        let mut request = String::new();
+        std::io::BufRead::read_line(&mut std::io::BufReader::new(&stream), &mut request).unwrap();
+        std::io::Write::write_all(&mut &stream, answer.as_bytes()).unwrap();
+    })
+}
+
+#[test]
+fn collector_status_refuses_a_reply_of_another_format_version() {
+    let folder = short_folder();
+    let socket = folder.path().join("fake.sock");
+    let daemon = fake_daemon_answering(&socket, "{\"v\":2,\"type\":\"snapshot\",\"anything\":1}\n");
+    let (code, stdout, _) = collector_status(&["--socket", socket.to_str().unwrap()]);
+    daemon.join().unwrap();
+    assert_eq!(code, Some(1));
+    assert!(stdout.contains("형식 버전 불일치") && stdout.contains("v2"), "{stdout}");
+}
+
+#[test]
+fn collector_status_still_reads_a_reply_of_its_own_format_version() {
+    let folder = short_folder();
+    let socket = folder.path().join("fake.sock");
+    let daemon = fake_daemon_answering(
+        &socket,
+        concat!(r#"{"v":1,"type":"status","sent_at":"2026-11-18T09:00:05+09:00","status":{"date":20261118,"phase":"collecting","today":{"planned_stocks":0,"receiving_stocks":0,"register_failed_batches":0,"#,
+            r#""disconnected_stocks":0,"handed_off_stocks":0,"excluded_stocks":0},"keys":[],"universe_changes":null,"observation_day":null,"alerts":[]}}"#, "\n"),
+    );
+    let (code, stdout, stderr) = collector_status(&["--socket", socket.to_str().unwrap()]);
+    daemon.join().unwrap();
+    assert_eq!(code, Some(0), "{stderr}");
+    assert!(stdout.contains("수집 상태 20261118"), "{stdout}");
+}
+
+#[tokio::test(start_paused = true)]
+async fn the_alert_list_keeps_the_newest_200_even_when_the_plan_alone_brings_more() {
+    let mut plan = plan_for(2, 3, 0);
+    plan.alerts = (0..250).map(|number| format!("계획 알림 {number}")).collect();
+    let world = World::try_start(plan, &["collect-02"], |_| {}).unwrap();
+    let mut client = world.connect().await;
+    let alerts = |reply: &Value| reply["status"]["alerts"].as_array().unwrap().iter().map(|alert| alert["message"].as_str().unwrap().to_owned()).collect::<Vec<_>>();
+
+    let first = alerts(&client.ask(r#"{"v":1,"type":"status"}"#).await);
+    assert_eq!((first.len(), first[0].as_str(), first[199].as_str()), (200, "계획 알림 50", "계획 알림 249"));
+
+    sleep(Duration::from_secs(200)).await;
+    let later = alerts(&client.ask(r#"{"v":1,"type":"status"}"#).await);
+    assert_eq!(later.len(), 200, "{later:?}");
+    assert!(later.iter().any(|message| message.contains("인계했습니다")), "새 경보는 남고 오래된 것이 밀려난다");
+    assert!(!later.contains(&"계획 알림 50".to_owned()) && later.contains(&"계획 알림 249".to_owned()), "{later:?}");
+    world.finish().await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_second_daemon_on_a_live_socket_fails_to_start_and_leaves_the_first_socket_alone() {
+    let first = World::start(plan_for(2, 3, 0));
+    sleep(Duration::from_secs(20)).await;
+    for required in [true, false] {
+        let second = World::try_start_on(plan_for(2, 3, 0), &first.socket, required);
+        let Err(StartError::StatusSocket { error, .. }) = second else { panic!("살아 있는 소켓을 두고 시작했다(required={required})") };
+        assert_eq!(error.kind(), io::ErrorKind::AddrInUse, "{error}");
+    }
+    let mut client = first.connect().await;
+    assert_eq!(client.ask(r#"{"v":1,"type":"status"}"#).await["type"], "status", "첫 데몬의 소켓은 그대로 답한다");
+    first.finish().await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn connections_that_stall_on_half_a_line_are_closed_and_give_their_slots_back() {
+    let world = World::start(plan_for(2, 3, 0));
+    sleep(Duration::from_secs(20)).await;
+    let mut stalled = Vec::new();
+    for _ in 0..16 {
+        let mut client = world.connect().await;
+        client.send(r#"{"v":1,"ty"#).await;
+        stalled.push(client);
+    }
+    sleep(Duration::from_secs(1)).await;
+    let mut crowded = world.connect().await;
+    assert_eq!(error_code(&crowded.read().await), "too_many_connections");
+
+    sleep(Duration::from_secs(15)).await;
+    for client in &mut stalled {
+        let mut rest = Vec::new();
+        timeout(Duration::from_secs(30), client.reader.read_to_end(&mut rest)).await.expect("반쪽 줄에서 멈춘 연결은 끊긴다").unwrap();
+        assert!(String::from_utf8_lossy(&rest).contains("bad_request"), "{}", String::from_utf8_lossy(&rest));
+    }
+    let mut healthy = world.connect().await;
+    assert_eq!(healthy.ask(r#"{"v":1,"type":"status"}"#).await["type"], "status");
+    world.finish().await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_burst_of_requests_in_one_write_is_answered_in_order_and_keeps_the_connection() {
+    let world = World::start(plan_for(2, 3, 0));
+    sleep(Duration::from_secs(20)).await;
+    let mut client = world.connect().await;
+    let burst: String = (0..300).map(|number| if number % 100 == 99 { "{\"v\":1,\"type\":\"nonsense\"}\n" } else { "{\"v\":1,\"type\":\"status\"}\n" }).collect();
+    client.send(&burst).await;
+    for number in 0..300 {
+        let reply = client.read().await;
+        let expected = if number % 100 == 99 { "error" } else { "status" };
+        assert_eq!(reply["type"], expected, "{number}번째 응답");
+    }
+    assert_eq!(client.ask(r#"{"v":1,"type":"status"}"#).await["type"], "status");
+    world.finish().await;
+}
+
+struct StuckRead {
+    fifo: PathBuf,
+}
+
+impl Drop for StuckRead {
+    fn drop(&mut self) {
+        use std::os::unix::fs::OpenOptionsExt;
+        for _ in 0..8 {
+            if std::fs::OpenOptions::new().write(true).custom_flags(rustix::fs::OFlags::NONBLOCK.bits() as i32).open(&self.fifo).is_err() {
+                return;
+            }
+        }
+    }
+}
+
+impl StuckRead {
+    fn at(world: &World, date: u32) -> StuckRead {
+        let folder = world.data().join(format!("store/{date}.tmp"));
+        std::fs::create_dir_all(&folder).unwrap();
+        let fifo = folder.join("verify.json");
+        assert!(Command::new("mkfifo").arg(&fifo).status().unwrap().success());
+        StuckRead { fifo }
+    }
+
+    fn release(&self, content: &str) {
+        std::fs::write(&self.fifo, content).unwrap();
+    }
+}
+
+#[tokio::test]
+async fn a_status_request_is_answered_while_four_file_replies_are_still_being_read() {
+    let world = World::start(plan_for(2, 3, 0));
+    let stuck = StuckRead::at(&world, 20261117);
+    let mut client = world.connect().await;
+    for _ in 0..4 {
+        client.send(&fixture_line("request-coverage.json")).await;
+    }
+    client.send("{\"v\":1,\"type\":\"status\"}\n").await;
+    client.send(&fixture_line("request-coverage.json")).await;
+    assert_eq!(client.read().await["type"], "status", "읽기 끝나지 않은 파일 응답 4개 뒤에 보낸 status가 먼저 온다");
+
+    stuck.release(r#"{"passed":false}"#);
+    for _ in 0..5 {
+        let reply = client.read().await;
+        assert_eq!(reply["type"], "coverage");
+        assert_eq!(coverage_day(&reply, 20261117)["state"], "verify_failed");
+    }
+    world.finish().await;
+}
+
+#[tokio::test]
+async fn a_slow_disk_read_keeps_the_reply_for_a_client_that_half_closed_and_its_result_is_kept_for_the_next_asker() {
+    let world = World::start(plan_for(2, 3, 0));
+    let stuck = StuckRead::at(&world, 20261117);
+    let mut half_closed = world.connect().await;
+    half_closed.send(&fixture_line("request-coverage.json")).await;
+    half_closed.writer.shutdown().await.unwrap();
+    let mut impatient = world.connect().await;
+    impatient.send(&fixture_line("request-coverage.json")).await;
+    drop(impatient);
+    sleep(Duration::from_secs(8)).await;
+
+    stuck.release(r#"{"passed":false}"#);
+    let reply = half_closed.read().await;
+    assert_eq!(coverage_day(&reply, 20261117)["state"], "verify_failed", "5초를 넘긴 읽기도 응답을 잃지 않는다");
+    let mut next = world.connect().await;
+    let again = next.ask(fixture_line("request-coverage.json").trim()).await;
+    assert_eq!(coverage_day(&again, 20261117)["state"], "verify_failed", "떠난 요청이 시작한 읽기의 결과도 캐시에 남는다");
     world.finish().await;
 }
