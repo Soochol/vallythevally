@@ -263,6 +263,32 @@ async fn a_layout_with_two_windows_of_one_kind_is_imported() {
 }
 
 #[tokio::test]
+async fn a_layout_with_window_state_fields_is_imported_and_a_bad_pin_is_refused() {
+    let (from, into) = (machine().await, machine().await);
+    fill(&from).await;
+    let stateful = [
+        json!({"id": "watchlist-2", "link": null, "kind": "watchlist", "list": "지워진목록"}),
+        json!({"id": "screener", "link": null, "kind": "screener", "screen": "S1"}),
+        json!({"id": "book", "link": "a", "kind": "book", "symbol": "005930"}),
+        json!({"id": "order", "link": null, "kind": "order", "venue": "krx", "symbol": "000660"}),
+    ];
+    let bundle = with_document(&from.export().await, "layout", LAYOUT_TWO, |d| d["body"]["windows"].as_array_mut().unwrap().extend(stateful.clone()));
+    let (status, answer) = into.import(&bundle).await;
+    assert_eq!(status, 200, "{answer}");
+    let (_, saved) = into.get(&format!("/api/layouts/{LAYOUT_TWO}")).await;
+    let windows = saved["windows"].as_array().unwrap();
+    assert_eq!(windows[3], stateful[0]);
+    assert_eq!(windows[4], stateful[1]);
+    assert_eq!(windows[5], stateful[2]);
+    assert_eq!(windows[6], stateful[3]);
+
+    let index_pin = with_document(&bundle, "layout", LAYOUT_TWO, |d| d["body"]["windows"][5]["symbol"] = json!("IDX:001"));
+    let (status, answer) = into.import(&index_pin).await;
+    assert_eq!(status, 400, "{answer}");
+    assert!(answer["error"]["message"].as_str().unwrap().contains(LAYOUT_TWO));
+}
+
+#[tokio::test]
 async fn a_hidden_drawing_in_a_bundle_is_stored_visible() {
     let (from, into) = (machine().await, machine().await);
     fill(&from).await;

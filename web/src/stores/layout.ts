@@ -16,9 +16,10 @@ import { fitDock, type WindowList } from "../layout/dock/fit";
 import type { Size } from "../layout/dock/geometry";
 import { placeBeside } from "../layout/dock/split";
 import { findGroup, groupOfWindow, putTab, selectTab } from "../layout/dock/tree";
-import { MAX_WINDOWS, windowId, WINDOW_KINDS, type WindowId, type WindowRef } from "../layout/kinds";
+import { MAX_WINDOWS, windowId, WINDOW_KINDS, type WindowId, type WindowKind, type WindowRef } from "../layout/kinds";
 import type { CanvasPlacement, DockPlacement, Placement } from "../layout/placement";
 import { toward } from "../lib/josa";
+import { isIndexCode } from "../lib/symbol";
 import { readDockOrigins, writeDockOrigins } from "../persist/dockOrigins";
 import { useUiStore } from "./ui";
 
@@ -26,8 +27,12 @@ type ChartWindowWire = Extract<LayoutWindow, { kind: "chart" }>;
 export type OtherWindowKind = Exclude<LayoutWindow, { kind: "chart" }>["kind"];
 
 export type ChartWindowState = Omit<ChartWindowWire, "id" | "chartSettings" | "venue"> & { id: WindowId; chartSettings: ChartSettings };
-export type OrderWindowState = { id: WindowId; link: LinkColor | null; kind: "order"; venue: Venue };
-export type OtherWindowState = { id: WindowId; link: LinkColor | null; kind: Exclude<OtherWindowKind, "order"> } | OrderWindowState;
+export type WatchlistWindowState = { id: WindowId; link: LinkColor | null; kind: "watchlist"; list?: string };
+export type ScreenerWindowState = { id: WindowId; link: LinkColor | null; kind: "screener"; screen?: string };
+export type PinnableKind = "trades" | "book" | "program" | "brokers";
+export type PinnableWindowState = { id: WindowId; link: LinkColor | null; kind: PinnableKind; symbol?: SymbolCode };
+export type OrderWindowState = { id: WindowId; link: LinkColor | null; kind: "order"; venue: Venue; symbol?: SymbolCode };
+export type OtherWindowState = { id: WindowId; link: LinkColor | null; kind: "indicators" } | WatchlistWindowState | ScreenerWindowState | PinnableWindowState | OrderWindowState;
 
 export const DEFAULT_ORDER_VENUE: Venue = "krx";
 
@@ -131,6 +136,14 @@ export type DockRoom = { area: Size; gap: number };
 
 let lastStepId = 0;
 
+const PINNABLE: ReadonlySet<WindowKind> = new Set<WindowKind>(["trades", "book", "program", "brokers", "order"]);
+
+function withOptional<W, K extends string>(w: W, key: K, value: string | null): W {
+  if ((w as Record<string, unknown>)[key] === (value ?? undefined)) return w;
+  const { [key]: _old, ...rest } = w as Record<string, unknown>;
+  return (value === null ? rest : { ...rest, [key]: value }) as W;
+}
+
 export const DEFAULT_LAYOUT_ID = "01900000-0000-7000-8000-000000000001";
 export const DEFAULT_LAYOUT: EditableLayout = {
   id: DEFAULT_LAYOUT_ID,
@@ -173,6 +186,9 @@ interface LayoutState {
   sendSymbol(sender: WindowId | null, cellId: WindowId, target: SymbolTarget): SymbolChange;
   setLink(window: WindowId, link: LinkColor | null): void;
   setOrderVenue(window: WindowId, venue: Venue): void;
+  setWindowList(window: WindowId, list: string | null): void;
+  setWindowScreen(window: WindowId, screen: string | null): void;
+  pinSymbol(window: WindowId, code: SymbolCode | null): void;
   setPeriod(cellId: WindowId, p: Period): void;
   setStyle(cellId: WindowId, s: ChartStyle): void;
   setScale(cellId: WindowId, s: PriceScale): void;
@@ -413,6 +429,10 @@ export const useLayoutStore = create<LayoutState>()((set, get) => {
       });
     },
     setOrderVenue: (id, venue) => patchWindows((w) => (w.id === id && w.kind === "order" && w.venue !== venue ? { ...w, venue } : w)),
+    setWindowList: (id, list) => patchWindows((w) => (w.id === id && w.kind === "watchlist" ? withOptional(w, "list", list) : w)),
+    setWindowScreen: (id, screen) => patchWindows((w) => (w.id === id && w.kind === "screener" ? withOptional(w, "screen", screen) : w)),
+    pinSymbol: (id, code) =>
+      patchWindows((w) => (w.id === id && PINNABLE.has(w.kind) && (code === null || !isIndexCode(code)) ? withOptional(w as PinnableWindowState | OrderWindowState, "symbol", code) : w)),
     setPeriod: (cellId, period) => patchCell(cellId, (c) => (c.period === period ? c : { ...c, period })),
     setStyle: (cellId, style) => patchSetting(cellId, "style", style),
     setScale: (cellId, scale) => patchSetting(cellId, "scale", scale),

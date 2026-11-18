@@ -146,6 +146,42 @@ test("같은 종류 창 둘이 든 미저장 본문은 그대로 열고 연동 �
   expect([r.layoutDirty, r.revisions.layout]).toEqual([true, 11]);
 });
 
+test("창별 상태 셋은 서버 레이아웃과 미저장 본문에서 읽고 비어 있으면 필드를 두지 않는다", async () => {
+  const stored: Layout = { ...layout("L1", cell({})), windows: [cell({}), { id: "watchlist", link: null, kind: "watchlist", list: "W2" }, { id: "screener", link: null, kind: "screener" }, { id: "book", link: "a", kind: "book", symbol: "000660" }, { id: "order", link: null, kind: "order", venue: "nxt", symbol: "0000D0" }, { id: "trades", link: null, kind: "trades" }] };
+  const server = await restore(sources({ layouts: [stored] }));
+  expect(server.layout.windows.slice(1)).toEqual([
+    { id: "watchlist", link: null, kind: "watchlist", list: "W2" },
+    { id: "screener", link: null, kind: "screener" },
+    { id: "book", link: "a", kind: "book", symbol: "000660" },
+    { id: "order", link: null, kind: "order", venue: "nxt", symbol: "0000D0" },
+    { id: "trades", link: null, kind: "trades" },
+  ]);
+  const draft = draftWith({ id: "watchlist", link: null, kind: "watchlist", list: null }, { id: "screener", link: null, kind: "screener", screen: "S2" }, { id: "program", link: null, kind: "program", symbol: "005930" }, { id: "brokers", link: null, kind: "brokers", symbol: null });
+  const local = await restore(sources({ unsaved: { layout: unsaved("/api/layouts/L1", 11, draft) } }));
+  expect(local.layout.windows.slice(1)).toEqual([
+    { id: "watchlist", link: null, kind: "watchlist" },
+    { id: "screener", link: null, kind: "screener", screen: "S2" },
+    { id: "program", link: null, kind: "program", symbol: "005930" },
+    { id: "brokers", link: null, kind: "brokers" },
+  ]);
+  expect(local.layoutDirty).toBe(true);
+});
+
+test.each([
+  ["지수 종목", { id: "trades", link: null, kind: "trades", symbol: "IDX:001" }],
+  ["여섯 자리가 아닌 종목", { id: "book", link: null, kind: "book", symbol: "5930" }],
+  ["문자열이 아닌 종목", { id: "program", link: null, kind: "program", symbol: 5930 }],
+  ["호가주문의 지수 종목", { id: "order", link: null, kind: "order", venue: "krx", symbol: "IDX:101" }],
+  ["문자열이 아닌 list", { id: "watchlist", link: null, kind: "watchlist", list: 7 }],
+  ["빈 list", { id: "watchlist", link: null, kind: "watchlist", list: "" }],
+  ["문자열이 아닌 screen", { id: "screener", link: null, kind: "screener", screen: ["S1"] }],
+  ["64바이트를 넘는 screen", { id: "screener", link: null, kind: "screener", screen: "x".repeat(65) }],
+])("%s가 든 미저장 본문은 열지 않고 서버 레이아웃을 연다", async (_, bad) => {
+  const r = await restore(sources({ unsaved: { layout: unsaved("/api/layouts/L1", 11, draftWith(bad)) } }));
+  expect(chartWindows(r.layout).map((w) => w.period)).toEqual(["D"]);
+  expect(r.layoutDirty).toBe(false);
+});
+
 test("지표 창이 둘 든 미저장 본문은 열지 않는다", async () => {
   const r = await restore(sources({ unsaved: { layout: unsaved("/api/layouts/L1", 11, draftWith({ id: "indicators", link: null, kind: "indicators" }, { id: "indicators-2", link: null, kind: "indicators" })) } }));
   expect(chartWindows(r.layout).map((w) => w.period)).toEqual(["D"]);
