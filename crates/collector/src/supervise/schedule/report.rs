@@ -2,6 +2,7 @@ use server::clock::Clock;
 use tokio::sync::watch;
 
 use crate::supervise::journal::kst_stamp;
+use crate::supervise::webhook::AlertWebhook;
 use crate::supervise::status::{Alert, AlertKind, DaemonStatus, DayPhase, ObservationDay};
 use crate::universe::Diff;
 
@@ -16,12 +17,25 @@ pub(super) struct Reporter {
     observation_day: Option<ObservationDay>,
     own_alerts: Vec<Alert>,
     supervised: Option<DaemonStatus>,
+    webhook: Option<AlertWebhook>,
+    announced_supervised: Vec<Alert>,
+    notes_flushed: bool,
 }
 
 impl Reporter {
     pub(super) fn new(clock: Clock, date: u32) -> Reporter {
         let sender = watch::channel(DaemonStatus { date, phase: DayPhase::OffHours, ..DaemonStatus::default() }).0;
-        Reporter { sender, clock, date, phase: DayPhase::OffHours, universe_changes: None, observation_day: None, own_alerts: Vec::new(), supervised: None }
+        Reporter { sender, clock, date, phase: DayPhase::OffHours, universe_changes: None, observation_day: None, own_alerts: Vec::new(), supervised: None, webhook: None, announced_supervised: Vec::new(), notes_flushed: false }
+    }
+
+    pub(super) fn use_webhook(&mut self, webhook: Option<AlertWebhook>) {
+        self.webhook = webhook;
+    }
+
+    pub(super) fn close_day(&self) {
+        if let Some(webhook) = &self.webhook {
+            webhook.close_day(self.date);
+        }
     }
 
     pub(super) fn subscribe(&self) -> watch::Receiver<DaemonStatus> {
@@ -35,6 +49,8 @@ impl Reporter {
         self.observation_day = None;
         self.own_alerts.clear();
         self.supervised = None;
+        self.announced_supervised.clear();
+        self.notes_flushed = false;
         self.publish();
     }
 
@@ -58,13 +74,28 @@ impl Reporter {
     }
 
     pub(super) fn supervised(&mut self, status: DaemonStatus) {
+        if let Some(webhook) = &self.webhook {
+            let fresh: Vec<Alert> = status.alerts.iter().filter(|alert| !self.announced_supervised.contains(alert)).cloned().collect();
+            for alert in fresh {
+                webhook.alert(self.date, &alert);
+                self.announced_supervised.push(alert);
+            }
+            if !self.notes_flushed {
+                webhook.flush_notes(self.date);
+                self.notes_flushed = true;
+            }
+        }
         self.supervised = Some(status);
         self.publish();
     }
 
     pub(super) fn alert(&mut self, kind: AlertKind, message: String) {
         tracing::warn!(?kind, %message, "데몬 경보");
-        self.own_alerts.push(Alert { at: kst_stamp(self.clock.now()), kind, message });
+        let alert = Alert { at: kst_stamp(self.clock.now()), kind, message };
+        if let Some(webhook) = &self.webhook {
+            webhook.alert(self.date, &alert);
+        }
+        self.own_alerts.push(alert);
         self.publish();
     }
 

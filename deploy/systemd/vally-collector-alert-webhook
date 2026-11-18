@@ -1,0 +1,25 @@
+#!/bin/sh
+set -u
+file=${VALLY_DISCORD_WEBHOOK:-${HOME:-}/.config/vally/discord-webhook}
+message=${1:-}
+if [ -z "$message" ]; then
+    echo "vally-collector-alert-webhook: 보낼 메시지가 없습니다" >&2
+    exit 2
+fi
+[ -e "$file" ] || exit 0
+mode=$(stat -c %a "$file") || exit 1
+if [ $((0$mode & 077)) -ne 0 ]; then
+    echo "vally-collector-alert-webhook: $file 의 권한이 $mode 라 쓰지 않습니다. chmod 600 $file" >&2
+    exit 1
+fi
+address=$(tr -d '"\\\r\n' <"$file")
+case $address in
+    http://* | https://*) ;;
+    *)
+        echo "vally-collector-alert-webhook: $file 의 내용이 http나 https 주소가 아닙니다" >&2
+        exit 1
+        ;;
+esac
+text=$(printf %s "$message" | sed 's/\\/\\\\/g; s/"/\\"/g')
+body=$(printf '{"content":"%s","allowed_mentions":{"parse":[]}}' "$text")
+printf 'url = "%s"\n' "$address" | curl --config - --silent --show-error --fail --max-time 10 --retry 3 --retry-max-time 60 --header 'Content-Type: application/json' --data "$body" --output /dev/null

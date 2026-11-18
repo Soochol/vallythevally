@@ -8,6 +8,7 @@
 |---|---|
 | `VALLY_COLLECTOR_SOCKET` | 감독 데몬의 unix socket 경로(`collector supervise --socket`과 같은 값) |
 | `VALLY_COLLECTOR_ADMINS` | 수집 관리 계정 허용 목록. `provider:subject`를 쉼표로 나열한다. provider는 `google`이나 `naver`다. subject는 공급자가 정한 계정 번호이고 공백이 없다 |
+| `VALLY_COLLECTOR_WEBHOOK` | 디스코드 웹훅 주소 파일 경로. 없으면 `~/.config/vally/discord-webhook`. 파일이 없으면 웹훅 보내기만 꺼진다(아래 "알림") |
 
 형식이 틀린 항목이 있으면 서버가 시작하지 않는다. 허용 목록을 적었는데 소켓 경로가 없어도 시작하지 않는다.
 
@@ -52,6 +53,8 @@ subject는 계정 서버의 `GET /v1/me` 응답의 `subject` 필드에서 온다
 ## 알림
 
 판단이 `down`이나 `unresponsive`로 바뀔 때 한 번 알린다. 정상 복귀와 `down` 안에서의 재시도는 알리지 않는다. 알림은 브라우저의 `/api/ws` 연결로 `{"type":"collector_daemon","judgment":"down","at":<unix 초>}`를 보낸다. 보낼 때 로그인한 계정이 허용 목록에 있어야 하고, 아니면 그 연결에는 보내지 않는다. 연결을 연 시점의 로그인은 보지 않는다.
+
+같은 시점(`down`이나 `unresponsive`로 바뀔 때)에 디스코드 웹훅으로도 보낸다. 웹훅 주소 파일(기본 `~/.config/vally/discord-webhook`, `VALLY_COLLECTOR_WEBHOOK`으로 바꾼다)이 있고 현황판이 켜져 있을 때만 보내며, 브라우저 알림과 달리 로그인한 계정과 상관없이 간다. 정상 복귀는 보내지 않는다. 파일이 없으면 웹훅 보내기만 꺼진다. 권한이 600보다 넓거나 주소 형식이 아니면 서버가 시작하지 않는다. 보내기가 실패해도 판단과 현황판은 그대로이고 경고 로그만 남는다. 주소는 로그, 오류, 상태 API 어디에도 나오지 않는다. 자세한 규칙은 [`hoga-collector.md`](hoga-collector.md)의 "디스코드 경보"를 따른다.
 
 ## 라우트
 

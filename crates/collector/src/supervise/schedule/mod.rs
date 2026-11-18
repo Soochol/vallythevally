@@ -15,6 +15,7 @@ use super::process::Launcher;
 use super::settings::{Settings, SocketSetting};
 use super::status::{AlertKind, DaemonStatus, DayPhase};
 use super::tokens::IssueLane;
+use super::webhook::AlertWebhook;
 use crate::calendar::{Calendar, HolidayTransport, Judgment};
 use crate::finalize::{COMPLETE_FILE_NAME, store_dir};
 use crate::keys::ActiveKey;
@@ -150,6 +151,11 @@ impl Daemon {
         })
     }
 
+    pub fn with_webhook(mut self, webhook: Option<AlertWebhook>) -> Daemon {
+        self.reporter.use_webhook(webhook);
+        self
+    }
+
     pub fn status(&self) -> watch::Receiver<DaemonStatus> {
         self.reporter.subscribe()
     }
@@ -192,6 +198,7 @@ impl Daemon {
         match outcome {
             Err(DayEnd::Stopped) => Err(Halt::Stopped),
             Ok(()) | Err(DayEnd::Done) => {
+                self.reporter.close_day();
                 self.reporter.phase(DayPhase::OffHours);
                 Ok(())
             }
