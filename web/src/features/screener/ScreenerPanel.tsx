@@ -1,6 +1,6 @@
 import { FinancialUpdateButton } from "../financial-update/FinancialUpdateButton";
 import { SentenceEditor } from "./SentenceEditor";
-import { firstScreenerWindow, useScreenEditing } from "./useScreenEditing";
+import { useScreenEditing } from "./useScreenEditing";
 import { CHANGED, ChangedBadge } from "./ChangedBadge";
 import { type ChosenScreen, FIX_INVALID, type ScreenEditing, type ScreenEntry } from "./screenEditing";
 import { confirmAction } from "../overlay/Confirm";
@@ -56,12 +56,22 @@ const BADGE_MAX = 999;
 const FULL_RELOAD_CONFIRM =
   "모든 종목의 전체 이력을 처음부터 다시 받습니다. 2시간 가까이 걸릴 수 있고, 최근 관측일을 채우는 동안에는 실행할 수 없습니다. 받는 동안에도 차트는 그대로 쓸 수 있습니다.";
 
+const mountedWindows: WindowId[] = [];
 let lastTouchedWindow: WindowId | null = null;
 const ownsKeys = (id: WindowId | null) => {
   if (id === null) return true;
-  const touched = lastTouchedWindow !== null && useLayoutStore.getState().layout.windows.some((w) => w.id === lastTouchedWindow);
-  return (touched ? lastTouchedWindow : firstScreenerWindow()) === id;
+  const touched = lastTouchedWindow !== null && mountedWindows.includes(lastTouchedWindow);
+  return (touched ? lastTouchedWindow : mountedWindows[0]) === id;
 };
+function useMountedWindow(id: WindowId | null) {
+  useEffect(() => {
+    if (id === null) return;
+    mountedWindows.push(id);
+    return () => {
+      mountedWindows.splice(mountedWindows.indexOf(id), 1);
+    };
+  }, [id]);
+}
 
 const toast = (text: string) => useSelectionStore.getState().showToast(text);
 const reasonOf = (e: unknown) => (e instanceof Error ? e.message : String(e));
@@ -158,6 +168,7 @@ export function ScreenerPanel({ id }: { id: WindowId | null }) {
     setEditing(true);
   };
   const createScreen = desktop ? createInPanel : () => createInDialog(screenEditing, id);
+  useMountedWindow(id);
   useResultKeys({ rows, active, onSelect: select, onRun: execute }, () => ownsKeys(id));
   useEffect(() => dropPendingOpen, []);
   const band = status !== undefined && showsUpdateBand(status);

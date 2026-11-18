@@ -256,7 +256,7 @@ async function runIn(panel: Locator) {
   await panel.getByRole("button", { name: "실행", exact: true }).click();
 }
 
-function seedScreenerWindows(scenario: Scenario, windows: LayoutWindow[] = SCREENER_WINDOWS) {
+function seedScreenerWindows(scenario: Scenario, windows: LayoutWindow[] = SCREENER_WINDOWS, mode: "dock" | "canvas" = "canvas") {
   const ran: string[] = [];
   scenario.documents.saveScreens({ screens: [SCREEN_A, SCREEN_B], revision: 1 });
   scenario.on("/api/screener/status", () => ({ body: readyStatus() }));
@@ -265,6 +265,10 @@ function seedScreenerWindows(scenario: Scenario, windows: LayoutWindow[] = SCREE
     ran.push(id);
     return { body: id === SCREEN_B.id ? resultRows([["110040", "나종목", "당일"], ["110050", "나둘", "당일"]]) : resultRows([["110030", "가종목", "당일"]]) };
   });
+  if (mode === "dock") {
+    saveWindows(scenario, windows, "dock");
+    return ran;
+  }
   const layout = saved(scenario);
   const rects = { "cell-0": { x: 0, y: 0, w: .3, h: .3 }, "cell-1": { x: .3, y: 0, w: .3, h: .3 }, screener: { x: .02, y: .05, w: .46, h: .9 }, "screener-2": { x: .52, y: .05, w: .46, h: .9 } };
   scenario.documents.saveLayout({ ...layout, windows: [...charts, ...windows], placement: { v: 1, dock: null, canvas: { rects, order: ["cell-0", "cell-1", "screener", "screener-2"] } }, revision: layout.revision + 1 });
@@ -413,6 +417,19 @@ test("Ctrl+Enter는 마지막으로 만진 스크리너 창의 조건식을 실�
   await expect.poll(() => ran).toEqual([SCREEN_B.id]);
   await screenChooser(panels.nth(0)).click();
   await page.keyboard.press("Escape");
+  await page.keyboard.press("Control+Enter");
+  await expect.poll(() => ran).toEqual([SCREEN_B.id, SCREEN_A.id]);
+});
+
+test("독 모드에서 가려진 첫 스크리너 탭이 있어도 보이는 스크리너 창이 Ctrl+Enter를 받는다", async ({ page, scenario }) => {
+  const ran = seedScreenerWindows(scenario, [{ id: "screener", link: null, kind: "screener", screen: SCREEN_A.id }, { id: "screener-2", link: null, kind: "screener", screen: SCREEN_B.id }], "dock");
+  await open(page);
+  await tabOf(page, "screener-2").click();
+  await expect(screenChooser(screenerPanels(page))).toHaveText(SCREEN_B.name);
+  await page.keyboard.press("Control+Enter");
+  await expect.poll(() => ran).toEqual([SCREEN_B.id]);
+  await tabOf(page, "screener").click();
+  await expect(screenChooser(screenerPanels(page))).toHaveText(SCREEN_A.name);
   await page.keyboard.press("Control+Enter");
   await expect.poll(() => ran).toEqual([SCREEN_B.id, SCREEN_A.id]);
 });
