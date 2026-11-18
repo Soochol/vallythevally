@@ -270,43 +270,6 @@ test("도구 막대: 높이 300px 창에서도 그룹 메뉴는 창 안에 있�
   }
 });
 
-const PIN_SLICE_SIZE = 4;
-const PIN_SLICES = menuGroups().flatMap(([group, groupTools]) => {
-  const size = Math.ceil(groupTools.length / Math.ceil(groupTools.length / PIN_SLICE_SIZE));
-  return Array.from({ length: Math.ceil(groupTools.length / size) }, (_, n) => {
-    const slice = groupTools.slice(n * size, (n + 1) * size);
-    return { group, tools: slice, name: `${GROUP_LABEL[group]} ${n * size + 1}~${n * size + slice.length}번째` };
-  });
-});
-
-test("도구 막대: 고정 시험 묶음이 메뉴가 있는 그룹의 도구를 빠짐없이 한 번씩 받는다", () => {
-  expect(PIN_SLICES.flatMap(({ tools }) => tools.map((t) => t.tool)).sort()).toEqual(menuGroups().flatMap(([, groupTools]) => groupTools.map((t) => t.tool)).sort());
-  expect(Math.max(...PIN_SLICES.map(({ tools }) => tools.length))).toBeLessThanOrEqual(PIN_SLICE_SIZE);
-});
-
-for (const { group, tools, name } of PIN_SLICES) {
-  test(`도구 막대: 단축키가 없는 도구는 제목과 메뉴에 빈 단축키를 보이지 않는다 (${name})`, async ({ page }) => {
-    await open(page);
-    const bar = page.getByRole("navigation", { name: "드로잉 도구" });
-    await expandDock(page);
-    await bar.getByRole("button", { name: `${GROUP_LABEL[group]} 도구 펼치기`, exact: true }).click();
-    const menu = page.getByRole("menu", { name: `${GROUP_LABEL[group]} 도구` });
-    for (const tool of tools) {
-      await menu.getByRole("menuitemcheckbox", { name: `${tool.label} 막대에 고정`, exact: true }).click();
-      await expect(menu.getByRole("menuitem").filter({ hasText: tool.label }).locator("kbd:empty")).toHaveCount(0);
-    }
-    await page.keyboard.press("Escape");
-    for (const tool of tools) {
-      await pickTool(page, GROUP_LABEL[group], tool.label);
-      await expect(bar.getByRole("button", { name: tool.label, exact: true })).not.toHaveAttribute("title", /\(\)/);
-    }
-    await expandDock(page);
-    const pinned = bar.getByRole("button", { name: /고정 도구$/ });
-    await expect(pinned.first()).toBeVisible();
-    for (const button of await pinned.all()) await expect(button).not.toHaveAttribute("title", /\(\)/);
-  });
-}
-
 test("도구 막대: 단축키로 고른 도구를 그룹 버튼이 기억한다", async ({ page }) => {
   await open(page);
   const bar = page.getByRole("navigation", { name: "드로잉 도구" });

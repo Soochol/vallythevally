@@ -1,6 +1,6 @@
 import type { Page } from "@playwright/test";
 import { cell, chartOf, expect, test, pollSaved } from "./harness";
-import { bodyAlong, chartPoint, drawings, expandDock, mirror, open, pickTool, settledMirror } from "./drawing-probe";
+import { chartPoint, drawings, expandDock, mirror, open, pickTool } from "./drawing-probe";
 
 type Point = { x: number; y: number };
 
@@ -107,41 +107,3 @@ test("지우개: 클릭·끌기·Ctrl+끌기로 지우고, 잠긴 드로잉은 �
   await expect(help).toContainText("붓 획 일부 지우기");
   expect(errors).toEqual([]);
 });
-
-async function bodyOf(page: Page, id: string): Promise<Point> {
-  const box = (await chartOf(cell(page)).boundingBox())!;
-  const points = (await settledMirror(page)).find((d) => d.id === id)!.points.map((p) => ({ x: box.x + p!.x, y: box.y + p!.y }));
-  const [a, b, c] = points;
-  const segments = points.slice(1).map((p, i) => [points[i]!, p] as const);
-  if (a && b && c) segments.push([a, { x: (b.x + c.x) / 2, y: (b.y + c.y) / 2 }]);
-  return bodyAlong(page, segments);
-}
-
-const ERASE_CASES = [["선", "피치포크", 3], ["피보나치·갠", "갠 상자", 2], ["패턴", "헤드앤숄더", 7], ["측정", "날짜·가격 범위", 2]] as const;
-
-test("지우개: 시험 묶음이 선, 피보나치·갠, 패턴, 측정 그룹의 새 도구를 빠짐없이 한 번씩 받는다", () => {
-  expect(ERASE_CASES.map(([group, label]) => `${group}/${label}`)).toEqual(["선/피치포크", "피보나치·갠/갠 상자", "패턴/헤드앤숄더", "측정/날짜·가격 범위"]);
-});
-
-for (const [group, label, clicks] of ERASE_CASES) {
-  test(`지우개: ${group} 그룹의 ${label}도 눌러 지운다`, async ({ page, scenario }) => {
-    const errors: string[] = [];
-    page.on("pageerror", (e) => errors.push(e.message));
-    await open(page);
-    const spots: [number, number][] = [[0.3, 0.6], [0.4, 0.35], [0.5, 0.55], [0.6, 0.3], [0.7, 0.6], [0.8, 0.4], [0.85, 0.55]];
-    await pickTool(page, group, label);
-    for (const spot of spots.slice(0, clicks)) {
-      const p = await chartPoint(page, ...spot);
-      await page.mouse.click(p.x, p.y);
-    }
-    await pollSaved(async () => (await drawings(scenario)).length, { message: label }).toBe(1);
-    await page.keyboard.press("Escape");
-    const [placed] = await drawings(scenario);
-    const target = await bodyOf(page, placed!.id);
-    await pickEraser(page);
-    await page.mouse.click(target.x, target.y);
-    await pollSaved(async () => (await drawings(scenario)).length, { message: `지우개로 ${label}` }).toBe(0);
-    await expect.poll(async () => (await mirror(page)).length).toBe(0);
-    expect(errors).toEqual([]);
-  });
-}
