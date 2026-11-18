@@ -301,4 +301,36 @@ mod tests {
     fn only_down_and_unresponsive_warrant_a_notice() {
         assert_eq!([Checking, Down, Unresponsive, Healthy, VersionMismatch].map(DaemonJudgment::warrants_notice), [false, true, true, false, false]);
     }
+
+    async fn lines_after_sending(bytes: Vec<u8>) -> Lines {
+        let (mut sender, receiver) = UnixStream::pair().unwrap();
+        tokio::spawn(async move { sender.write_all(&bytes).await.unwrap() });
+        Lines::new(receiver.into_split().0)
+    }
+
+    fn bytes_of_length_then(length: usize, end: &[u8]) -> Vec<u8> {
+        let mut bytes = vec![b'a'; length];
+        bytes.extend_from_slice(end);
+        bytes
+    }
+
+    #[tokio::test]
+    async fn a_line_of_exactly_the_limit_is_returned_without_its_newline() {
+        let mut lines = lines_after_sending(bytes_of_length_then(MAX_LINE_BYTES, b"\nnext\n")).await;
+        assert_eq!(lines.next().await.unwrap().map(|line| line.len()), Some(MAX_LINE_BYTES));
+        assert_eq!(lines.next().await.unwrap(), Some(b"next".to_vec()));
+        assert_eq!(lines.next().await.unwrap(), None);
+    }
+
+    #[tokio::test]
+    async fn a_line_one_byte_over_the_limit_is_an_error_even_with_its_newline() {
+        let mut lines = lines_after_sending(bytes_of_length_then(MAX_LINE_BYTES + 1, b"\n")).await;
+        assert_eq!(lines.next().await.unwrap_err().kind(), io::ErrorKind::InvalidData);
+    }
+
+    #[tokio::test]
+    async fn a_partial_line_of_exactly_the_limit_at_the_end_of_the_stream_is_dropped_as_a_closed_stream() {
+        let mut lines = lines_after_sending(bytes_of_length_then(MAX_LINE_BYTES, b"")).await;
+        assert_eq!(lines.next().await.unwrap(), None);
+    }
 }
