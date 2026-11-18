@@ -11,7 +11,7 @@ mod store;
 
 pub use diff::{Diff, Named, Renamed, diff};
 pub use model::{AfterCloseFile, Entry, FORMAT_VERSION, MarketName, RejectedFile, ReplaceReason, Replacement, StockKind, UniverseFile};
-pub use store::{SkippedFile, StoreError, read_universe};
+pub use store::{SkippedFile, StoreError, after_close_path, read_universe, read_universe_if_present, universe_path};
 
 const MAX_SHRINK_PERCENT: usize = 3;
 

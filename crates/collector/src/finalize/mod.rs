@@ -17,12 +17,14 @@ mod chunk;
 mod complete;
 mod coverage;
 mod merge;
+mod observation;
 mod prune;
 mod scan;
 pub mod schema;
 
 pub use complete::{COMPLETE_FILE_NAME, COMPLETE_FORMAT_VERSION, CompleteFile, publish_store, recover_interrupted_swap};
 pub use coverage::{CoverageInput, Gap, Handoff, JournalFact, KeyTimeline, KeyTimelines, StockCoverage, build_coverage};
+pub use observation::{IndexCheckResult, IndexCheckSummary, JudgedVerdict, JudgmentSummary, MarketOpenSummary, ObservationSummary, TreatedAs};
 pub use prune::{
     CompleteState, DayFacts, KeepReason, PRUNE_LOG_NAME, PruneReport, PrunePlan, RetentionSettings, UnfinalizedCount, delete_raw_day,
     first_complete_day, plan_prune, prune_raw, read_day_facts,
@@ -116,18 +118,22 @@ impl HolidayTransport for CachedHolidaysOnly {
     }
 }
 
+pub fn prune_with_cached_calendar(data_dir: &Path, date: u32, settings: &RetentionSettings) -> io::Result<PruneReport> {
+    let runtime = tokio::runtime::Builder::new_current_thread().build()?;
+    let today = Day::from_yyyymmdd(date).ok_or_else(|| io::Error::other("날짜가 아니다"))?;
+    let first_day = first_complete_day(data_dir)?.and_then(Day::from_yyyymmdd).unwrap_or(today);
+    let calendar = runtime.block_on(Calendar::load_from_year(
+        data_dir,
+        &CachedHolidaysOnly,
+        &Secret::new(String::new()),
+        today.unix_ms_at_kst(20, 0),
+        first_day.year(),
+    ));
+    prune_raw(data_dir, date, &calendar, settings)
+}
+
 fn prune_after_finalize(options: &Options, settings: &RetentionSettings) -> ExitCode {
-    let outcome = tokio::runtime::Builder::new_current_thread().build().and_then(|runtime| {
-        let today = Day::from_yyyymmdd(options.date).ok_or_else(|| io::Error::other("날짜가 아니다"))?;
-        let calendar = runtime.block_on(Calendar::load(
-            &options.data_dir,
-            &CachedHolidaysOnly,
-            &Secret::new(String::new()),
-            today.unix_ms_at_kst(20, 0),
-        ));
-        prune_raw(&options.data_dir, options.date, &calendar, settings)
-    });
-    match outcome {
+    match prune_with_cached_calendar(&options.data_dir, options.date, settings) {
         Ok(report) => {
             println!("finalize: 원문 지우기 {}일 지움, {}일 남김, {}일 실패", report.deleted.len(), report.kept.len(), report.failed.len());
             if report.failed.is_empty() { ExitCode::SUCCESS } else { ExitCode::FAILURE }

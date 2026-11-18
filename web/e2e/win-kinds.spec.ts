@@ -14,10 +14,14 @@ const addButton = (page: Page) => page.getByRole("toolbar", { name: "차트 도�
 const kindItem = (page: Page, name: string) => page.getByRole("menu", { name: "창 더하기" }).getByRole("menuitem", { name: new RegExp(`^${name}`) });
 const tabOf = (page: Page, id: string) => windowTabs(page).locator(`[role=tab][data-window-id="${id}"]`);
 const dotOf = (page: Page, id: string) => windowTabs(page).locator(`[role=tab][data-window-id="${id}"] + .link-dot`);
-const READY_BODIES: Readonly<Record<string, string>> = { program: "program-window", brokers: "brokers-window" };
+const READY_BODIES: Readonly<Record<string, string>> = { program: "program-window", brokers: "brokers-window", trades: "trades-window" };
 const preparing = (page: Page) => page.getByTestId("market-window-preparing");
 const body = (page: Page, kind: string) => page.getByTestId(READY_BODIES[kind] ?? "market-window-preparing");
 const savedWindows = (scenario: Scenario) => scenario.documents.layout(DEFAULT_LAYOUT_ID).windows;
+
+function emptyTrades(scenario: Scenario) {
+  scenario.reply((url) => /^\/api\/symbols\/[^/]+\/trades$/.test(url.pathname), { body: { symbol: "005930", venue: "combined", trades: [], skippedRows: 0 } });
+}
 
 function twoLinkedCharts(scenario: Scenario) {
   scenario.reply((url) => url.pathname.endsWith("/program-trades"), { body: { symbol: "005930", points: [{ time: "09:00:00", price: 70_000, buyQuantity: 10, sellQuantity: 4, netQuantity: 6, buyAmount: 700_000_000, sellAmount: 280_000_000, netAmount: 420_000_000 }], skippedRows: 0 } });
@@ -42,12 +46,14 @@ test.beforeEach(async ({ page }) => {
 for (const { kind, name } of KINDS) {
   test(`${name} 창은 창 더하기에서 열리고 연동 색을 따르며 두 번째는 만들어지지 않는다`, async ({ page, scenario }) => {
     twoLinkedCharts(scenario);
+    emptyTrades(scenario);
     await page.goto("/");
     await expect(cell(page)).toHaveAttribute("aria-busy", "false");
 
     await addWindow(page, name);
     await expect(tabOf(page, kind)).toHaveAccessibleName(new RegExp(`^${name}`));
     if (!(kind in READY_BODIES)) await expect(preparing(page)).toContainText(`${name} 준비 중`);
+    if (kind === "brokers") await expect(body(page, kind)).toContainText("삼성전자");
     await expect(body(page, kind)).toHaveAttribute("data-symbol", "005930");
     await expect(dotOf(page, kind)).toHaveAccessibleName("연동 색: 끔");
     await expect.poll(() => savedWindows(scenario).filter((w) => w.kind === kind)).toEqual([{ id: kind, link: null, kind }]);
@@ -55,6 +61,7 @@ for (const { kind, name } of KINDS) {
     await dotOf(page, kind).click();
     await page.getByRole("menu", { name: "연동 색" }).getByRole("menuitemradio", { name: /^B/ }).click();
     await expect(dotOf(page, kind)).toHaveAccessibleName("연동 색: B");
+    if (kind === "brokers") await expect(body(page, kind)).toContainText("SK하이닉스");
     await expect(body(page, kind)).toHaveAttribute("data-symbol", "000660");
     await expect.poll(() => savedWindows(scenario).find((w) => w.kind === kind)?.link).toBe("b");
 
@@ -76,6 +83,7 @@ test("지수 종목을 따르는 시세 창은 주식만 보인다고 알린다"
 
 test("새 종류 넷을 레이아웃에 저장하면 다시 열어도 그대로 있다", async ({ page, scenario }) => {
   twoLinkedCharts(scenario);
+  emptyTrades(scenario);
   await page.goto("/");
   await expect(cell(page)).toHaveAttribute("aria-busy", "false");
   for (const { name } of KINDS) await addWindow(page, name);

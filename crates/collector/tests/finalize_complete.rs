@@ -487,3 +487,88 @@ fn a_rejected_registration_answer_does_not_end_the_handoff_gap() {
 
     assert_eq!(stock(&complete_json(data.path()), "000050")["gaps"], json!([{"from_ms": base_ms() + 5000, "to_ms": base_ms() + 30_000}]));
 }
+
+fn finalized_day_with_events(lines: &[Value]) -> Value {
+    let data = tempdir().unwrap();
+    let mut flat = RawWriter::new(data.path());
+    flat.write(&RawLine::Frame { recv_ms: base_ms() + 1000, text: &real("000010") }).unwrap();
+    flat.close().unwrap();
+    if !lines.is_empty() {
+        write_events(data.path(), lines);
+    }
+    assert!(finalize_day(&options(data.path())).unwrap().passed);
+    complete_json(data.path())["observation"].clone()
+}
+
+fn judged(verdict: &str, open_minute: Value, treated_as: &str) -> Value {
+    json!({"v": 1, "at": "2026-11-17T07:30:00+09:00", "event": "observation_judged", "day": DATE, "verdict": verdict, "open_minute": open_minute, "treated_as": treated_as,
+        "evidence": [{"input": "weekday", "finding": "open", "detail": "화요일이다"}]})
+}
+
+#[test]
+fn a_day_without_observation_events_records_that_nothing_was_recorded() {
+    let observation = finalized_day_with_events(&[]);
+    assert_eq!(
+        observation,
+        json!({"judgment": null, "market_open": {"state": "not_recorded"}, "index_check": {"result": "not_recorded", "mismatch": null, "detail": null}})
+    );
+}
+
+#[test]
+fn a_journal_with_only_other_events_records_nothing_for_observation() {
+    let observation = finalized_day_with_events(&[json!({"v": 1, "at": "2026-11-17T09:00:06+09:00", "event": "key_stopped", "key": "collect-02", "reason": "x"})]);
+    assert_eq!(observation["judgment"], Value::Null);
+    assert_eq!(observation["market_open"], json!({"state": "not_recorded"}));
+}
+
+#[test]
+fn an_observed_day_with_the_open_seen_and_the_index_agreeing() {
+    let observation = finalized_day_with_events(&[
+        judged("observed", json!(540), "observed"),
+        json!({"v": 1, "at": "2026-11-17T09:00:02+09:00", "event": "market_open_seen", "key": "collect-01", "deadline": "2026-11-17T09:10:00+09:00"}),
+        json!({"v": 1, "at": "2026-11-17T20:10:00+09:00", "event": "index_checked", "result": "agrees", "mismatch": null, "detail": "지수 일봉이 있다"}),
+    ]);
+    assert_eq!(
+        observation["judgment"],
+        json!({"day": DATE, "verdict": "observed", "open_minute": 540, "treated_as": "observed", "evidence": [{"input": "weekday", "finding": "open", "detail": "화요일이다"}]})
+    );
+    assert_eq!(observation["market_open"], json!({"state": "seen", "key": "collect-01", "deadline": "2026-11-17T09:10:00+09:00"}));
+    assert_eq!(observation["index_check"], json!({"result": "agrees", "mismatch": null, "detail": "지수 일봉이 있다"}));
+}
+
+#[test]
+fn an_unknown_judgment_run_as_observed_keeps_both_the_verdict_and_how_it_was_treated() {
+    let observation = finalized_day_with_events(&[judged("unknown", Value::Null, "observed")]);
+    assert_eq!(observation["judgment"]["verdict"], json!("unknown"));
+    assert_eq!(observation["judgment"]["open_minute"], Value::Null);
+    assert_eq!(observation["judgment"]["treated_as"], json!("observed"));
+}
+
+#[test]
+fn a_day_whose_open_never_came_records_the_missed_deadline_and_the_last_missing_wins() {
+    let observation = finalized_day_with_events(&[
+        json!({"v": 1, "at": "2026-11-17T09:10:00+09:00", "event": "market_open_missing", "deadline": "2026-11-17T09:10:00+09:00"}),
+        json!({"v": 1, "at": "2026-11-17T09:15:00+09:00", "event": "market_open_missing", "deadline": "2026-11-17T09:15:00+09:00"}),
+    ]);
+    assert_eq!(observation["market_open"], json!({"state": "missing", "deadline": "2026-11-17T09:15:00+09:00"}));
+}
+
+#[test]
+fn a_seen_open_wins_over_a_later_missing_one_and_a_start_after_the_open_is_not_checked() {
+    let seen_first = finalized_day_with_events(&[
+        json!({"v": 1, "at": "x", "event": "market_open_seen", "key": "collect-01", "deadline": "2026-11-17T09:10:00+09:00"}),
+        json!({"v": 1, "at": "x", "event": "market_open_missing", "deadline": "2026-11-17T09:20:00+09:00"}),
+    ]);
+    assert_eq!(seen_first["market_open"]["state"], json!("seen"));
+    let not_checked = finalized_day_with_events(&[json!({"v": 1, "at": "x", "event": "market_open_not_checked", "reason": "개장 뒤에 시작했다"})]);
+    assert_eq!(not_checked["market_open"], json!({"state": "not_checked", "reason": "개장 뒤에 시작했다"}));
+}
+
+#[test]
+fn an_index_candle_mismatch_is_recorded_with_its_kind_and_the_last_check_wins() {
+    let observation = finalized_day_with_events(&[
+        json!({"v": 1, "at": "x", "event": "index_checked", "result": "failed", "mismatch": null, "detail": "받지 못했다"}),
+        json!({"v": 1, "at": "x", "event": "index_checked", "result": "disagrees", "mismatch": "observed_without_index_candle", "detail": "일봉이 없다"}),
+    ]);
+    assert_eq!(observation["index_check"], json!({"result": "disagrees", "mismatch": "observed_without_index_candle", "detail": "일봉이 없다"}));
+}
