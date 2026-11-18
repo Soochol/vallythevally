@@ -346,3 +346,178 @@ fn the_app_server_key_is_refused_from_the_process_or_its_env_file() {
     assert!(matches!(&error, KeysError::AppServerKey { key, .. } if key.as_str() == "spare-01"), "{error}");
     assert_no_secret(&error);
 }
+
+#[test]
+fn the_excluded_and_unregistered_lists_are_in_code_order_whatever_the_universe_order() {
+    let mut stocks: Vec<Entry> = (0..600).map(|number| entry(&code(number), true)).collect();
+    stocks.extend([entry("999993", false), entry("999991", false), entry("999992", false)]);
+    stocks.reverse();
+    stocks.rotate_left(111);
+    let plan = plan(&identities(3), &universe(stocks), &BTreeMap::new());
+    let expected_excluded: Vec<String> = (570..600).map(code).collect();
+    assert_eq!(plan.excluded, expected_excluded);
+    assert_eq!(plan.unregistered, ["999991", "999992", "999993"]);
+}
+
+#[test]
+fn a_key_takes_exactly_its_share_of_190_stocks() {
+    assert_eq!(KEY_CAPACITY, 190);
+    let full = plan(&identities(1), &universe_of(190), &BTreeMap::new());
+    let collecting = full.keys.iter().find(|key| key.role == KeyRole::Collecting).unwrap();
+    assert_eq!(collecting.stocks.len(), 190);
+    assert!(full.excluded.is_empty() && full.alerts.is_empty());
+    let over = plan(&identities(1), &universe_of(191), &BTreeMap::new());
+    assert_eq!(over.excluded, [code(190)]);
+    assert_eq!(over.keys.iter().map(|key| key.stocks.len()).max(), Some(190));
+}
+
+#[test]
+fn the_check_allows_190_stocks_on_a_key_and_rejects_191() {
+    let mut plan = plan(&identities(2), &universe_of(10), &BTreeMap::new());
+    plan.keys[0].stocks = (0..190).map(code).collect();
+    plan.keys[1].stocks.clear();
+    assert_eq!(check_plan(&plan), Ok(()));
+    plan.keys[0].stocks.push(code(190));
+    assert!(matches!(check_plan(&plan), Err(Violation::KeyOverCapacity { stocks: 191, .. })));
+}
+
+#[test]
+fn summing_loads_past_u64_does_not_panic_and_saturates() {
+    let keys = identities(1);
+    let universe = universe_of(3);
+    let messages = BTreeMap::from([(code(0), u64::MAX), (code(1), u64::MAX), (code(2), 5)]);
+    let plan = plan(&keys, &universe, &messages);
+    let collecting = plan.keys.iter().find(|key| key.role == KeyRole::Collecting).unwrap();
+    assert_eq!(collecting.stocks.len(), 3);
+    assert_eq!(collecting.load, u64::MAX);
+    assert_eq!(check_plan(&plan), Ok(()));
+}
+
+#[test]
+fn a_plan_file_with_another_format_version_is_not_read() {
+    let data = tempfile::tempdir().unwrap();
+    let written = plan(&identities(2), &universe_of(10), &BTreeMap::new());
+    let mut other = serde_json::to_value(&written).unwrap();
+    other["format_version"] = json!(2);
+    fs::create_dir_all(plan_path(data.path(), DATE).parent().unwrap()).unwrap();
+    fs::write(plan_path(data.path(), DATE), other.to_string()).unwrap();
+    let error = read_plan(data.path(), DATE).unwrap_err();
+    assert!(matches!(&error, PlanError::Read { cause, .. } if cause.contains('2')), "{error}");
+}
+
+#[test]
+fn a_missing_plan_file_is_a_read_error() {
+    let data = tempfile::tempdir().unwrap();
+    assert!(matches!(read_plan(data.path(), DATE), Err(PlanError::Read { .. })));
+}
+
+#[test]
+fn a_secret_file_is_refused_for_group_or_other_access_and_accepted_when_only_the_owner_can_use_it() {
+    for (mode, refused) in [(0o600, false), (0o400, false), (0o700, false), (0o640, true), (0o604, true), (0o660, true), (0o606, true), (0o610, true), (0o601, true), (0o670, true), (0o620, true), (0o602, true), (0o622, true)] {
+        let files = KeyFiles::new();
+        let mut entries = good_entries(&files);
+        entries[0] = files.entry(&KeySpec { mode, ..KeySpec::new("collect-01", "FAKE-APPKEY-AAAA") });
+        let result = files.load(entries, &Variables::new());
+        match (refused, result) {
+            (false, Ok(_)) => {}
+            (true, Err(KeysError::SecretFile { problem, .. })) => assert_eq!(problem, collector::keys::SecretFileProblem::Mode(mode), "{mode:o}"),
+            (_, other) => panic!("{mode:o}: {other:?}"),
+        }
+    }
+}
+
+#[test]
+fn an_app_key_hash_must_be_sha256_prefix_and_64_lowercase_hex_characters() {
+    let valid = format!("sha256:{}", "0123456789abcdef".repeat(4));
+    let files = KeyFiles::new();
+    let mut entries = good_entries(&files);
+    entries[0]["app_key_hash"] = json!(valid);
+    let error = files.load(entries, &Variables::new()).unwrap_err();
+    assert!(matches!(error, KeysError::HashMismatch(_)), "형식은 맞아 키와의 대조까지 간다: {error}");
+    let hex = "0123456789abcdef".repeat(4);
+    let bad = [
+        hex.clone(),
+        format!("sha1:{hex}"),
+        format!("sha256:{}", &hex[..63]),
+        format!("sha256:{hex}0"),
+        "sha256:".to_owned(),
+        format!("sha256:g{}", &hex[1..]),
+        format!("sha256:sha256:{hex}"),
+        format!("sha256:{}", hex.to_uppercase()),
+        format!("sha256:{}g", &hex[..63]),
+        format!("sha256:{}", " ".repeat(64)),
+        String::new(),
+    ];
+    for hash in bad {
+        let mut entries = good_entries(&files);
+        entries[0]["app_key_hash"] = json!(hash);
+        let error = files.load(entries, &Variables::new()).unwrap_err();
+        assert!(matches!(&error, KeysError::BadHash(key) if key.as_str() == "collect-01"), "{hash:?}: {error}");
+    }
+}
+
+#[test]
+fn a_secret_token_or_lock_path_must_be_absolute() {
+    let files = KeyFiles::new();
+    for field in ["secret_file", "token_path", "lock_path"] {
+        let mut entries = good_entries(&files);
+        entries[1][field] = json!("relative/path");
+        let error = files.load(entries, &Variables::new()).unwrap_err();
+        assert!(matches!(&error, KeysError::BadPath { key, path } if key.as_str() == "collect-02" && path == Path::new("relative/path")), "{field}: {error}");
+    }
+    let mut entries = good_entries(&files);
+    entries[1]["token_path"] = json!("/custom/token.json");
+    entries[1]["lock_path"] = json!("/custom/collector.lock");
+    let list = files.load(entries, &Variables::new()).unwrap();
+    assert_eq!(list.active[1].token_path, Path::new("/custom/token.json"));
+    assert_eq!(list.active[1].lock_path, Path::new("/custom/collector.lock"));
+}
+
+#[test]
+fn a_full_key_takes_no_more_even_when_its_load_is_the_lowest() {
+    let keys = vec![identity("collect-01", KeyRole::Collecting), identity("collect-02", KeyRole::Collecting), identity("spare-01", KeyRole::Spare)];
+    let mut messages: BTreeMap<String, u64> = (1..380).map(|number| (code(number), 1)).collect();
+    messages.insert(code(0), 1000);
+    let plan = plan(&keys, &universe_of(380), &messages);
+    assert!(plan.excluded.is_empty());
+    for key in plan.keys.iter().filter(|key| key.role == KeyRole::Collecting) {
+        assert_eq!(key.stocks.len(), KEY_CAPACITY, "{}", key.name);
+    }
+    assert_eq!(check_plan(&plan), Ok(()));
+}
+
+#[test]
+fn active_keys_come_back_in_name_order_from_any_file_order() {
+    let files = KeyFiles::new();
+    let mut entries = good_entries(&files);
+    entries.reverse();
+    let list = files.load(entries, &Variables::new()).unwrap();
+    let names: Vec<&str> = list.active.iter().map(|key| key.identity.name.as_str()).collect();
+    assert_eq!(names, ["collect-01", "collect-02", "spare-01"]);
+}
+
+#[test]
+fn an_inactive_entry_with_a_bad_hash_is_refused() {
+    let files = KeyFiles::new();
+    let mut entries = good_entries(&files);
+    entries.push(json!({"name": "later-01", "active": false, "spare": false, "app_key_hash": "not-a-hash", "secret_file": "/not/yet/there.env"}));
+    let error = files.load(entries, &Variables::new()).unwrap_err();
+    assert!(matches!(&error, KeysError::BadHash(key) if key.as_str() == "later-01"), "{error}");
+}
+
+#[test]
+fn a_plan_file_with_format_version_zero_is_not_read() {
+    let data = tempfile::tempdir().unwrap();
+    let written = plan(&identities(2), &universe_of(10), &BTreeMap::new());
+    let mut other = serde_json::to_value(&written).unwrap();
+    other["format_version"] = json!(0);
+    fs::create_dir_all(plan_path(data.path(), DATE).parent().unwrap()).unwrap();
+    fs::write(plan_path(data.path(), DATE), other.to_string()).unwrap();
+    assert!(matches!(read_plan(data.path(), DATE), Err(PlanError::Read { .. })));
+}
+
+#[test]
+fn the_plan_file_is_json_under_the_plan_folder_named_by_date() {
+    let data = Path::new("/state/collector");
+    assert_eq!(plan_path(data, DATE), data.join("plan").join("20261118.json"));
+}
