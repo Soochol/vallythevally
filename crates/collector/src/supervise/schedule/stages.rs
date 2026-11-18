@@ -14,7 +14,7 @@ use super::{Daemon, DayEnd, DayRun, Halt, StageResult, date_number, stoppable};
 use crate::calendar::{
     Calendar, CrossCheck, DEFAULT_OPEN_MINUTE, Day, HolidayRequest, HolidayTransport, Judgment, Mismatch, TransportError, Verdict, cross_check, read_service_key,
 };
-use crate::finalize::{COMPLETE_FILE_NAME, IndexCheckResult, JudgedVerdict, TreatedAs, store_dir};
+use crate::finalize::{COMPLETE_FILE_NAME, IndexCheckResult, JudgedVerdict, TreatedAs, raw_days_without_complete, store_dir};
 use crate::plan::{PlanFile, PlanInput, build_plan, plan_path, write_plan};
 use crate::raw_write::raw_day_dir;
 use crate::supervise::daemon::{Injected, Inputs, Supervisor, load_plan};
@@ -23,7 +23,7 @@ use crate::supervise::settings::{MarketOpenCheck, Settings};
 use crate::supervise::status::{AlertKind, DayPhase, ObservationDay, ObservationVerdict};
 use crate::universe::{UniverseFile, after_close_path, collect_after_close, collect_morning, read_universe_if_present};
 
-const FINALIZE_RETRY_NOTE: &str = "자동으로 다시 하지 않고 다음 날 시작이나 다음 데몬 시작 때 다시 시도합니다";
+const FINALIZE_RETRY_NOTE: &str = "같은 날 안에는 다시 하지 않고, 다음 날 시작이나 다음 데몬 시작 때 정리가 안 끝난 날로 다시 시도합니다";
 
 struct CachedHolidaysOnly;
 
@@ -317,6 +317,20 @@ impl Daemon {
             }
         }
         Err(Halt::Failed("토큰을 받지 못했습니다".to_owned()))
+    }
+
+    pub(super) async fn finalize_backlog(&mut self, today: u32, shutdown: &mut watch::Receiver<bool>) -> Result<(), DayEnd> {
+        let pending = match raw_days_without_complete(&self.data_dir, today) {
+            Ok(pending) => pending,
+            Err(error) => {
+                self.reporter.alert(AlertKind::StageFailed, format!("정리: 밀린 날을 찾지 못했습니다: {error}"));
+                return Ok(());
+            }
+        };
+        for date in pending {
+            self.finalize_date(date, false, shutdown).await?;
+        }
+        Ok(())
     }
 
     pub(super) async fn finalize(&mut self, day: &DayRun, collected: bool, shutdown: &mut watch::Receiver<bool>) -> Result<(), DayEnd> {

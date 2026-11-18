@@ -88,24 +88,25 @@ fn the_check_catches_order_and_account_ids_outside_trading() {
     }
 }
 
-const TRADING_API_IDS: [&str; 5] = ["ka00001", "kt00018", "ka10075", "kt00010", "kt00007"];
+const TRADING_API_IDS: [&str; 9] = ["ka00001", "kt00018", "ka10075", "kt00010", "kt00007", "kt10000", "kt10001", "kt10002", "kt10003"];
 
 #[test]
-fn trading_api_ids_are_exactly_the_account_reads() {
+fn trading_api_ids_are_exactly_the_account_reads_and_the_four_order_writes() {
     let sources = server_sources();
     let seen: BTreeSet<String> = sources.iter().filter(|s| s.in_trading()).flat_map(|s| api_ids(&s.text)).collect();
     let want: BTreeSet<String> = TRADING_API_IDS.iter().map(|id| (*id).to_owned()).collect();
     assert_eq!(seen, want, "trading 안의 api-id가 ADR 0029의 목록과 다릅니다");
-    assert!(sources.iter().filter(|s| s.in_trading()).all(|s| !s.text.contains(&banned_paths()[0])), "주문 쓰기 경로는 아직 넣지 않습니다");
+    assert!(sources.iter().any(|s| s.in_trading() && s.text.contains(&banned_paths()[0])), "trading 안에서 주문 경로를 찾지 못했습니다");
 }
 
 #[test]
 fn trading_list_check_notices_a_missing_and_an_extra_id() {
     let listed = |text: &str| api_ids(text).into_iter().collect::<BTreeSet<String>>();
     let want: BTreeSet<String> = TRADING_API_IDS.iter().map(|id| (*id).to_owned()).collect();
-    assert_ne!(listed("ka00001 kt00018 ka10075 kt00010"), want, "빠진 id를 알아채야 한다");
-    assert_ne!(listed(&["ka00001 kt00018 ka10075 kt00010 kt00007 ", "kt", "10000"].concat()), want, "더해진 id를 알아채야 한다");
-    assert_eq!(listed("ka00001 kt00018 ka10075 kt00010 kt00007"), want);
+    let all = TRADING_API_IDS.join(" ");
+    assert_ne!(listed("ka00001 kt00018 ka10075 kt00010 kt00007 kt10000 kt10001 kt10002"), want, "빠진 id를 알아채야 한다");
+    assert_ne!(listed(&format!("{all} kt10004")), want, "더해진 id를 알아채야 한다");
+    assert_eq!(listed(&all), want);
 }
 
 /// 키움 api-id 모양(영문 2자 + 숫자 5자리) 낱말을 모두 찾는다.

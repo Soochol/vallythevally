@@ -199,8 +199,7 @@ impl Daemon {
     }
 
     async fn stages(&mut self, day: &mut DayRun, shutdown: &mut watch::Receiver<bool>) -> Result<(), DayEnd> {
-        let yesterday = date_number(day.day.add_days(-1));
-        self.finalize_date(yesterday, false, shutdown).await?;
+        self.finalize_backlog(day.date, shutdown).await?;
         if self.clock.now().unix() >= day.times.close.unix() {
             return self.after_close_start(day, shutdown).await;
         }

@@ -72,11 +72,38 @@ fn put_raw_bytes(data: &Path, date: u32) {
     fs::write(folder.join("0900.jsonl.zst"), format!("원문 {date}")).unwrap();
 }
 
-fn put_store(data: &Path, date: u32, passed: bool, unfinalized: Value) {
+fn raw_files_of(folder: &Path, prefix: &str, files: &mut serde_json::Map<String, Value>) {
+    let Ok(entries) = fs::read_dir(folder) else { return };
+    for entry in entries {
+        let entry = entry.unwrap();
+        let name = format!("{prefix}{}", entry.file_name().to_str().unwrap());
+        if entry.file_type().unwrap().is_dir() {
+            raw_files_of(&entry.path(), &format!("{name}/"), files);
+        } else {
+            files.insert(name, json!(entry.metadata().unwrap().len()));
+        }
+    }
+}
+
+fn raw_fingerprint(data: &Path, date: u32) -> Value {
+    let mut files = serde_json::Map::new();
+    raw_files_of(&raw_folder(data, date), "", &mut files);
+    Value::Object(files)
+}
+
+fn put_store_with(data: &Path, date: u32, passed: bool, unfinalized: Value, raw_files: Option<Value>) {
     let folder = data.join("store").join(date.to_string());
     fs::create_dir_all(&folder).unwrap();
-    fs::write(folder.join("complete.json"), json!({"format_version": 1, "date": date, "verify": {"passed": passed}}).to_string()).unwrap();
+    let mut complete = json!({"format_version": 1, "date": date, "verify": {"passed": passed}});
+    if let Some(raw_files) = raw_files {
+        complete["raw_files"] = raw_files;
+    }
+    fs::write(folder.join("complete.json"), complete.to_string()).unwrap();
     fs::write(folder.join("verify.json"), json!({"passed": passed, "lines": {"unfinalized": unfinalized}}).to_string()).unwrap();
+}
+
+fn put_store(data: &Path, date: u32, passed: bool, unfinalized: Value) {
+    put_store_with(data, date, passed, unfinalized, Some(raw_fingerprint(data, date)));
 }
 
 fn clean_day(data: &Path, date: u32) {
@@ -256,7 +283,7 @@ async fn retention_values_come_from_settings() {
     for date in [NOV_3, NOV_4, NOV_5] {
         clean_day(data.path(), date);
     }
-    put_raw_bytes(data.path(), NOV_2);
+    clean_day(data.path(), NOV_2);
     let calendar = calendar(data.path(), Vec::new()).await;
 
     prune_raw(data.path(), NOV_5, &calendar, &small_settings()).unwrap();
@@ -289,6 +316,79 @@ async fn an_unknown_observation_day_keeps_the_raw() {
 
     assert!(raw_exists(data.path(), NOV_3));
     assert!(matches!(report.kept[0].1, KeepReason::ObservationUnknown { .. }));
+}
+
+#[tokio::test]
+async fn raw_grown_after_complete_is_not_pruned() {
+    let data = data_with_first_day();
+    write_raw_lines(data.path(), NOV_3, &[good_frame(NOV_3, 0)]);
+    finalize(data.path(), NOV_3);
+    let complete_before = fs::read(data.path().join("store").join(NOV_3.to_string()).join("complete.json")).unwrap();
+    fs::write(raw_folder(data.path(), NOV_3).join("late.jsonl.zst"), zstd::encode_all(format!("{}\n", good_frame(NOV_3, 900)).as_bytes(), 3).unwrap()).unwrap();
+    put_raw_bytes(data.path(), NOV_20);
+    let calendar = calendar(data.path(), Vec::new()).await;
+
+    let report = prune_raw(data.path(), NOV_20, &calendar, &settings()).unwrap();
+
+    assert!(report.deleted.is_empty(), "{report:?}");
+    assert!(raw_folder(data.path(), NOV_3).join("late.jsonl.zst").exists());
+    assert!(raw_folder(data.path(), NOV_3).join("day.jsonl.zst").exists());
+    let line = log_for(data.path(), NOV_3);
+    assert_eq!(line["action"], json!("kept"));
+    assert_eq!(line["reason"], json!("raw_changed_after_complete"));
+    assert_eq!(line["files"], json!(1));
+    assert_eq!(line["examples"], json!(["late.jsonl.zst"]));
+    assert_eq!(fs::read(data.path().join("store").join(NOV_3.to_string()).join("complete.json")).unwrap(), complete_before);
+
+    finalize(data.path(), NOV_3);
+    let report = prune_raw(data.path(), NOV_20, &calendar, &settings()).unwrap();
+    assert_eq!(report.deleted.iter().map(|(date, _)| *date).collect::<Vec<_>>(), [NOV_3], "다시 정리하면 늘어난 원문까지 정리돼 지운다");
+}
+
+#[tokio::test]
+async fn a_raw_file_rewritten_or_removed_after_complete_is_not_pruned() {
+    let data = data_with_first_day();
+    write_raw_lines(data.path(), NOV_3, &[good_frame(NOV_3, 0)]);
+    finalize(data.path(), NOV_3);
+    write_raw_lines(data.path(), NOV_4, &[good_frame(NOV_4, 0)]);
+    finalize(data.path(), NOV_4);
+    write_raw_lines(data.path(), NOV_3, &[good_frame(NOV_3, 0), good_frame(NOV_3, 1)]);
+    fs::remove_file(raw_folder(data.path(), NOV_4).join("day.jsonl.zst")).unwrap();
+    let calendar = calendar(data.path(), Vec::new()).await;
+
+    prune_raw(data.path(), NOV_20, &calendar, &settings()).unwrap();
+
+    for date in [NOV_3, NOV_4] {
+        assert!(raw_exists(data.path(), date), "{date}");
+        assert_eq!(log_for(data.path(), date)["reason"], json!("raw_changed_after_complete"), "{date}");
+    }
+    assert_eq!(log_for(data.path(), NOV_4)["examples"], json!(["day.jsonl.zst"]));
+}
+
+#[tokio::test]
+async fn a_complete_without_a_raw_fingerprint_keeps_the_raw() {
+    let data = data_with_first_day();
+    put_raw_bytes(data.path(), NOV_3);
+    put_store_with(data.path(), NOV_3, true, json!({"total": 0, "kinds": {}}), None);
+    let calendar = calendar(data.path(), Vec::new()).await;
+
+    let report = prune_raw(data.path(), NOV_20, &calendar, &settings()).unwrap();
+
+    assert!(report.deleted.is_empty());
+    assert!(raw_exists(data.path(), NOV_3));
+    assert_eq!(log_for(data.path(), NOV_3)["reason"], json!("raw_fingerprint_missing"));
+}
+
+#[test]
+fn a_finalized_day_records_the_raw_files_and_their_sizes() {
+    let data = tempdir().unwrap();
+    write_raw_lines(data.path(), NOV_3, &[good_frame(NOV_3, 0)]);
+    put_raw_bytes(data.path(), NOV_3);
+    finalize(data.path(), NOV_3);
+    let complete: Value = serde_json::from_slice(&fs::read(data.path().join("store").join(NOV_3.to_string()).join("complete.json")).unwrap()).unwrap();
+    assert_eq!(complete["raw_files"], raw_fingerprint(data.path(), NOV_3));
+    assert_eq!(complete["raw_files"]["collect-01/0900.jsonl.zst"], json!(format!("원문 {NOV_3}").len()));
+    assert!(complete["raw_files"]["day.jsonl.zst"].as_u64().unwrap() > 0);
 }
 
 struct Offline;
