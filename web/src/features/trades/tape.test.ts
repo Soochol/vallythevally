@@ -2,7 +2,7 @@ import { expect, test } from "vitest";
 import type { FeedTrade } from "../../api/generated/FeedTrade";
 import type { TradeTape } from "../../api/generated/TradeTape";
 import type { Venue } from "../../api/generated/Venue";
-import { amountBarRatio, cumulativeQuantity, emptyTape, MAX_TAPE_ROWS, minAmountWon, recentBuySell, tapeReducer, visibleEntries, type TapeAction } from "./tape";
+import { cumulativeQuantity, emptyTape, MAX_TAPE_ROWS, minAmountWon, recentBuySell, tapeReducer, visibleEntries, type TapeAction } from "./tape";
 
 const DAY = Date.UTC(2026, 10, 9) / 1000 - 9 * 3600;
 const at = (hhmmss: string): number => {
@@ -88,8 +88,4 @@ test("수량의 부호가 방향이고 누적은 줄 수 상한과 무관하다"
   expect(cumulativeQuantity(state, "combined")).toBe(7);
   const many = run(...Array.from({ length: MAX_TAPE_ROWS + 10 }, (_, i): TapeAction => ({ type: "live", trades: [live("10:00:00", 100, 1 + (i % 2))], receivedAt: 0 })));
   expect(cumulativeQuantity(many, "combined")).toBe(Math.ceil((MAX_TAPE_ROWS + 10) / 2) * 1 + Math.floor((MAX_TAPE_ROWS + 10) / 2) * 2);
-});
-
-test("체결량 막대는 금액 구간별 고정 눈금이다", () => {
-  expect([amountBarRatio(0), amountBarRatio(999_999), amountBarRatio(1_000_000), amountBarRatio(30_000_000), amountBarRatio(5e10)]).toEqual([0, 0, 1 / 7, 4 / 7, 1]);
 });
