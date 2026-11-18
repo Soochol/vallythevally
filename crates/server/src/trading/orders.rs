@@ -124,7 +124,7 @@ fn valid_command_id(id: &str) -> bool {
 }
 
 fn positive(value: u64, what: &'static str) -> Result<NonZeroU64, TradingError> {
-    NonZeroU64::new(value).ok_or(TradingError::BadRequest(what))
+    NonZeroU64::new(value).filter(|v| i64::try_from(v.get()).is_ok()).ok_or(TradingError::BadRequest(what))
 }
 
 impl Trading {
@@ -154,7 +154,7 @@ impl Trading {
             return Err(TradingError::BadRequest("command_id는 영문자·숫자·`-`·`_` 8~64자여야 합니다"));
         }
         let code = StockCode::parse(&input.code).map_err(|_| TradingError::BadRequest("종목코드가 올바르지 않습니다"))?;
-        let (quantity, price) = (positive(input.quantity, "수량은 0보다 커야 합니다")?, positive(input.price, "가격은 0보다 커야 합니다")?);
+        let (quantity, price) = (positive(input.quantity, "수량은 0보다 크고 너무 크지 않아야 합니다")?, positive(input.price, "가격은 0보다 크고 너무 크지 않아야 합니다")?);
         let venue = input.venue.map_or(Venue::Krx, Into::into);
         let account_ref = Self::account_ref_of_record(self.enabled_record()?)?;
         let kind = match input.side {
@@ -171,7 +171,7 @@ impl Trading {
             return Err(TradingError::BadRequest("command_id는 영문자·숫자·`-`·`_` 8~64자여야 합니다"));
         }
         let order_no = OrderNumber::parse(&input.order_no).ok_or(TradingError::BadRequest("주문번호는 7자리 숫자여야 합니다"))?;
-        let price = positive(input.price, "가격은 0보다 커야 합니다")?;
+        let price = positive(input.price, "가격은 0보다 크고 너무 크지 않아야 합니다")?;
         let account_ref = Self::account_ref_of_record(self.enabled_record()?)?;
         let prepared = Prepared { command_id: input.command_id, account_ref, kind: OrderCommandKind::Modify, code: None, venue: None, quantity: None, price: Some(price.get()), target_order_no: Some(order_no.as_str().to_owned()) };
         self.run_one(prepared, Work::Modify { order_no, price, confirmed: input.confirm_high_value }).await
@@ -192,9 +192,14 @@ impl Trading {
             return Err(TradingError::BadRequest("batch_id는 영문자·숫자·`-`·`_` 8~64자여야 합니다"));
         }
         let code = StockCode::parse(&input.code).map_err(|_| TradingError::BadRequest("종목코드가 올바르지 않습니다"))?;
-        positive(input.price, "가격은 0보다 커야 합니다")?;
-        self.ready().await?;
+        positive(input.price, "가격은 0보다 크고 너무 크지 않아야 합니다")?;
+        let this = self.clone();
         let account_ref = Self::account_ref_of_record(self.enabled_record()?)?;
+        tokio::spawn(async move { this.cancel_batch_detached(input, code, account_ref).await }).await.map_err(|_| TradingError::Journal("일괄 취소 작업이 끝나지 못했습니다".to_owned()))?
+    }
+
+    async fn cancel_batch_detached(self: &Arc<Self>, input: api::OrderCancelBatchInput, code: StockCode, account_ref: String) -> Result<api::OrderCommands, TradingError> {
+        self.ready().await?;
         let (_, entries) = self.open_entries(Priority::Order).await?;
         let mut targets: Vec<String> = entries.into_iter().filter(|e| e.order.code == code.as_str() && e.order.side == input.side && e.order.price == input.price && e.order.open_quantity > 0).map(|e| e.order.order_no).collect();
         targets.sort();
@@ -213,25 +218,18 @@ impl Trading {
                 Begun::DifferentRequest => return Err(TradingError::BadRequest("같은 batch_id가 다른 내용으로 왔습니다")),
             }
         }
-        let this = self.clone();
         let turn = self.turn_of(&account_ref);
-        let ids: Vec<String> = created.iter().map(|(id, _)| id.clone()).collect();
-        let account = account_ref.clone();
-        tokio::spawn(async move {
+        {
             let _turn = turn.lock().await;
             for (id, work) in created {
-                if let Err(e) = this.execute(&id, &account, work).await {
+                if let Err(e) = self.execute(&id, &account_ref, work).await {
                     tracing::error!(error = %e, "일괄 취소의 한 명령이 저널 오류로 끝났습니다");
                 }
             }
-            this.notify(account);
-        })
-        .await
-        .map_err(|_| TradingError::Journal("일괄 취소 작업이 끝나지 못했습니다".to_owned()))?;
+        }
+        self.notify(account_ref.clone());
         for command in &mut commands {
-            if ids.contains(&command.command_id)
-                && let Some(done) = self.journal.get(&command.command_id).await?
-            {
+            if let Some(done) = self.journal.get(&command.command_id).await? {
                 *command = done;
             }
         }
@@ -266,22 +264,22 @@ impl Trading {
     }
 
     async fn run_one(self: &Arc<Self>, prepared: Prepared, work: Work) -> Result<api::OrderCommand, TradingError> {
+        let this = self.clone();
+        tokio::spawn(async move { this.run_one_detached(prepared, work).await }).await.map_err(|_| TradingError::Journal("명령 작업이 끝나지 못했습니다".to_owned()))?
+    }
+
+    async fn run_one_detached(self: &Arc<Self>, prepared: Prepared, work: Work) -> Result<api::OrderCommand, TradingError> {
         self.ready().await?;
         let command = match self.journal.begin(&prepared, self.clock.now().unix()).await? {
             Begun::Created(command) => command,
             Begun::Existing(command) => return Ok(command),
             Begun::DifferentRequest => return Err(TradingError::BadRequest("같은 command_id가 다른 내용으로 왔습니다")),
         };
-        let this = self.clone();
         let turn = self.turn_of(&command.account_ref);
-        tokio::spawn(async move {
-            let _turn = turn.lock().await;
-            let done = this.execute(&command.command_id, &command.account_ref, work).await;
-            this.notify(command.account_ref.clone());
-            done
-        })
-        .await
-        .map_err(|_| TradingError::Journal("명령 작업이 끝나지 못했습니다".to_owned()))?
+        let _turn = turn.lock().await;
+        let done = self.execute(&command.command_id, &command.account_ref, work).await;
+        self.notify(command.account_ref.clone());
+        done
     }
 
     async fn execute(&self, command_id: &str, account_ref: &str, work: Work) -> Result<api::OrderCommand, TradingError> {

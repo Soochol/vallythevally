@@ -432,6 +432,7 @@ impl KiwoomRest {
     pub(crate) async fn call_endpoint<T: serde::de::DeserializeOwned>(&self, call: Dispatch<'_>, answers: impl FnOnce(&T) -> bool) -> Result<Page<T>, KiwoomError> {
         let Dispatch { endpoint, body, cont, priority, scope, admit, once } = call;
         let key = DedupeKey { scope, api_id: endpoint, body, cont: cont.cloned() };
+        let once_requested = once.is_some();
         let rx = self.0.enqueue(key, priority, admit, once);
         let raw = rx.await.unwrap_or_else(|_| Err(queue_gone(endpoint)))?;
         let note = match serde_json::from_str::<T>(&raw.body) {
@@ -441,6 +442,9 @@ impl KiwoomRest {
         };
         tracing::error!(api_id = endpoint.as_str(), %note, "키움 응답을 읽지 못했습니다");
         let failure = Failure::schema(endpoint, raw.envelope, note);
+        if once_requested {
+            return Err(KiwoomError::Failed(failure));
+        }
         Err(self.0.settle(&mut self.0.lock(), failure))
     }
 }

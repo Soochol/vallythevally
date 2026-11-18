@@ -356,7 +356,7 @@ async fn write_requires_the_order_header() {
 #[tokio::test]
 async fn malformed_commands_are_refused_before_the_journal() {
     let f = on().await;
-    for body in [buy("short", 1, 71_000), buy("cmd-bad-0001", 0, 71_000), buy("cmd-bad-0002", 1, 0), json!({"commandId": "cmd-bad-0003", "code": "abc", "side": "buy", "quantity": 1, "price": 71_000}), json!({"commandId": "cmd bad 0004", "code": "005930", "side": "buy", "quantity": 1, "price": 71_000})] {
+    for body in [buy("short", 1, 71_000), buy("cmd-bad-0001", 0, 71_000), buy("cmd-bad-0002", 1, 0), buy("cmd-bad-0005", 1, 1 << 63), buy("cmd-bad-0006", u64::MAX, 71_000), json!({"commandId": "cmd-bad-0003", "code": "abc", "side": "buy", "quantity": 1, "price": 71_000}), json!({"commandId": "cmd bad 0004", "code": "005930", "side": "buy", "quantity": 1, "price": 71_000})] {
         let (code, _) = order(&f.app, PLACE, body.clone()).await;
         assert_eq!(code, StatusCode::BAD_REQUEST, "{body}");
     }
@@ -372,4 +372,32 @@ async fn the_journal_never_holds_the_account_number() {
     let rows: Vec<String> = sqlx::query_scalar("SELECT account_ref || command_id || fingerprint || COALESCE(order_no, '') FROM order_commands").fetch_all(f.state.db.read()).await.unwrap();
     assert!(!rows.is_empty());
     assert!(rows.iter().all(|row| !row.contains("5550123401")), "{rows:?}");
+}
+
+#[tokio::test]
+async fn an_unreadable_reply_leaves_unknown_but_does_not_close_the_write_path() {
+    let f = on().await;
+    *f.mode.lock().unwrap() = WriteMode::NullNumber;
+    let (_, unknown) = order(&f.app, PLACE, buy("cmd-null-0001", 1, 71_000)).await;
+    assert_eq!(unknown["state"], "unknown");
+    order(&f.app, RECONCILE, json!({})).await;
+    *f.mode.lock().unwrap() = WriteMode::Accept;
+    let (_, next) = order(&f.app, PLACE, buy("cmd-null-0002", 1, 71_000)).await;
+    assert_eq!(next["state"], "accepted", "{next}");
+}
+
+#[tokio::test]
+async fn a_dropped_http_request_does_not_strand_the_command() {
+    let f = fixture_with(Duration::from_millis(30), Duration::ZERO).await;
+    assert_eq!(enable(&f.app, "01").await.0, StatusCode::OK);
+    for (i, wait) in [0u64, 1, 5, 20, 60].into_iter().enumerate() {
+        let id = format!("cmd-drop-{i:04}");
+        let _ = tokio::time::timeout(Duration::from_millis(wait), order(&f.app, PLACE, buy(&id, 1, 71_000))).await;
+        tokio::time::sleep(Duration::from_millis(800)).await;
+        let (_, command) = order(&f.app, PLACE, buy(&id, 1, 71_000)).await;
+        assert!(command["state"] == "accepted" || command["state"] == "rejected" && command["reason"] == "not_sent", "{wait}ms: {command}");
+        assert_ne!(command["state"], "prepared", "{wait}ms");
+    }
+    let accepted = writes(&f).len();
+    assert!(accepted <= 5, "같은 id는 한 번만 나간다: {accepted}");
 }

@@ -59,6 +59,7 @@ pub(super) enum WriteMode {
     Refused,
     Garbage,
     NoNumber,
+    NullNumber,
     Reject,
 }
 
@@ -69,6 +70,7 @@ fn write_reply(mode: WriteMode) -> Result<HttpResponse, TransportError> {
         WriteMode::Refused => Err(TransportError::refused()),
         WriteMode::Garbage => Ok(HttpResponse { status: 200, next_key: None, body: "<html>oops</html>".into() }),
         WriteMode::NoNumber => ok(json!({"return_code": 0, "return_msg": "정상"}), None),
+        WriteMode::NullNumber => ok(json!({"ord_no": null, "return_code": 0, "return_msg": "정상"}), None),
         WriteMode::Reject => ok(json!({"return_code": 20, "return_msg": "주문이 거부되었습니다"}), None),
     }
 }
