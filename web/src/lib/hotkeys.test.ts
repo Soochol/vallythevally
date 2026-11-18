@@ -1,5 +1,6 @@
 import { expect, test } from "vitest";
-import { type KeyLike, matchHotkey } from "./hotkeys";
+import { TOOL_HOTKEYS } from "../chart/drawings/hotkeys";
+import { HOTKEYS, type KeyLike, matchHotkey } from "./hotkeys";
 
 const key = (code: string, mods: Partial<KeyLike> = {}): KeyLike => ({
   code,
@@ -61,4 +62,20 @@ test("I는 데스크톱과 휴대폰 모두 지표 대화상자를 연다", () =
   expect(matchHotkey(key("KeyI"), "phone")).toEqual({ kind: "indicators" });
   expect(matchHotkey(key("KeyI", { shiftKey: true }), "desktop")).toBeNull();
   expect(matchHotkey(key("KeyI", { ctrlKey: true }), "desktop")).toBeNull();
+});
+
+test("Alt+G는 바로가기다. G·Shift+G(드로잉 자석)와 다른 수식키 조합은 아니다", () => {
+  expect(matchHotkey(key("KeyG", { altKey: true }), "desktop")).toEqual({ kind: "jump" });
+  expect(matchHotkey(key("KeyG", { altKey: true }), "phone")).toEqual({ kind: "jump" });
+  expect(matchHotkey(key("KeyG"), "desktop")).toBeNull();
+  expect(matchHotkey(key("KeyG", { shiftKey: true }), "desktop")).toBeNull();
+  expect(matchHotkey(key("KeyG", { altKey: true, shiftKey: true }), "desktop")).toBeNull();
+  expect(matchHotkey(key("KeyG", { altKey: true, ctrlKey: true }), "desktop")).toBeNull();
+});
+
+test("Alt+G는 다른 단축키·드로잉 도구 단축키와 겹치지 않는다", () => {
+  const same = HOTKEYS.filter((h) => h.match(key("KeyG", { altKey: true })));
+  expect(same.map((h) => h.keys)).toEqual(["Alt+G"]);
+  expect(new Set(HOTKEYS.map((h) => h.keys)).size).toBe(HOTKEYS.length);
+  expect(TOOL_HOTKEYS.filter((h) => h.code === "KeyG" && h.alt)).toEqual([]);
 });

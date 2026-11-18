@@ -13,9 +13,10 @@ import {
 } from "lightweight-charts";
 import { AxisLabelCache } from "./axisLabelCache";
 import { axisPriceFormat, type AxisGeometry } from "./axisFormat";
-import { fetchBarsPage } from "../api/bars";
+import { fetchBarsPage, fetchJumpPage } from "../api/bars";
 import type { Bar } from "../api/generated/Bar";
 import type { FinancialsPage } from "../api/generated/FinancialsPage";
+import type { KstDate } from "../api/generated/KstDate";
 import type { Period } from "../api/generated/Period";
 import type { SubErrorCode } from "../api/generated/SubErrorCode";
 import type { SymbolCode } from "../api/generated/SymbolCode";
@@ -26,14 +27,17 @@ import { formatPrice } from "../lib/format";
 import type { Connection, MarketSocketLike } from "../api/socket";
 import { isIndexCode, PERIOD_LABEL, symbolSub } from "../lib/symbol";
 import { type ShownVenue, venueLabel } from "../lib/venue";
-import { BarFeed, displayBars, type FetchPage, type History } from "./barFeed";
+import { displayBars, type FetchPage, type History } from "./barFeed";
+import { barAtRightEdge, type JumpAnchor, jumpAnchor, type JumpOutcome, jumpRoute, kstDateOf, lastBarBefore } from "./barJump";
 import { type CompareEntry, CompareLayer, compareVenue } from "./compare";
 import { CompareLegend } from "./compareLegend";
 import { CrosshairMarker } from "./crosshairMarker";
-import { barInterval, crosshairVisible, type PointedBar } from "./crosshairSync";
+import { type BarInterval, barInterval, crosshairVisible, type PointedBar } from "./crosshairSync";
 import { DaySeparators } from "./daySeparators";
 import { extremeChange, type ExtremeTag, ExtremeTags } from "./extremeTags";
 import { FineBars } from "./fineBars";
+import { JumpBadge } from "./jumpBadge";
+import { type FetchJump, JumpableFeed } from "./jumpFeed";
 import { type Extreme, findExtremes } from "./extremes";
 import { type OpenPort, openIndicatorPort } from "./indicators/client";
 import { IndicatorLayer } from "./indicators/layer";
@@ -70,6 +74,11 @@ const PRICE_MODE: Record<PriceScale, PriceScaleMode> = {
   percent: PriceScaleMode.Percentage,
 };
 
+export interface JumpRequest {
+  date: KstDate;
+  interval: BarInterval;
+}
+
 export interface CellView {
   symbol: SymbolCode;
   venue: ShownVenue | null;
@@ -101,6 +110,7 @@ export interface ControllerDeps {
   tokens: ThemeTokens;
   onStatus: (s: CellStatus) => void;
   fetchPage?: FetchPage;
+  fetchJump?: FetchJump;
   /** 없으면 실시간 없이 조회한 봉만 그린다. */
   socket?: MarketSocketLike;
   indicators?: OpenPort;
@@ -129,7 +139,11 @@ export class ChartController {
   private readonly pointedListeners = new Set<(bar: PointedBar) => void>();
   private pointerOwnsCrosshair = false;
   get venueAnchor(): HTMLElement { return this.legend.venueAnchor; }
-  private readonly feed: BarFeed;
+  private readonly feed: JumpableFeed;
+  private readonly badge: JumpBadge;
+  private jumpToken = 0;
+  private jumpInterval: BarInterval | null = null;
+  private pendingEnd: UnixSeconds | null = null;
   private readonly fineBars: FineBars;
   private readonly onStatus: (s: CellStatus) => void;
   private tokens: ThemeTokens;
@@ -163,7 +177,10 @@ export class ChartController {
     this.tokens = deps.tokens;
     this.onStatus = deps.onStatus;
     this.initialRange = new InitialRange(() => this.chart.timeScale(), () => ({ width: el.clientWidth, height: el.clientHeight }));
-    this.hostResize = new ResizeObserver(() => this.initialRange.hostResized());
+    this.hostResize = new ResizeObserver(() => {
+      this.initialRange.hostResized();
+      if (this.pendingEnd !== null) requestAnimationFrame(() => this.flushPendingEnd());
+    });
     this.hostResize.observe(el);
     this.chart = createChart(el, { ...this.chartOptions(), autoSize: true });
     this.axisLabels = new AxisLabelCache(this.chart, () => this.scheduleFrame());
@@ -178,6 +195,7 @@ export class ChartController {
       readViewport: () => ({ pricePane: this.paneBounds()[0] ?? null, axisWidth: this.chart.priceScale("right").width() }),
     });
     this.extremeTags = new ExtremeTags(el);
+    this.badge = new JumpBadge(el, () => this.feed.endMode());
     this.daySeparators = new DaySeparators(this.chart, {
       shown: () => this.view !== null && this.view.settings.showDaySeparators && isIntraday(this.view.period),
       bars: () => this.bars,
@@ -206,6 +224,7 @@ export class ChartController {
       const width = this.axisWidth();
       if (this.chart.options().rightPriceScale.minimumWidth !== width) this.chart.priceScale("right").applyOptions({ minimumWidth: width });
       this.indicators.applyStretch();
+      this.badge.setBottom(this.chart.timeScale().height());
       this.reportCorner();
       this.scheduleFrame();
     });
@@ -218,10 +237,13 @@ export class ChartController {
       deps.onPanelStretch?.(now);
       this.scheduleFrame();
     });
-    this.feed = new BarFeed(
+    this.feed = new JumpableFeed(
       deps.fetchPage ?? fetchBarsPage,
+      deps.fetchJump ?? fetchJumpPage,
       {
         reset: (h) => this.onReset(h),
+        jumpEntered: (h) => this.onJumpEntered(h),
+        modeChanged: () => this.onModeChanged(),
         prepended: (h, added) => this.onPrepended(h, added),
         failed: (e) => this.onFailed(e),
         olderFailed: (e) => this.patchReady({ olderError: e, olderLoading: false }),
@@ -306,6 +328,7 @@ export class ChartController {
       this.setBars([]);
       this.indicators.clear();
       this.onStatus({ kind: "loading" });
+      this.pendingEnd = null;
       this.feed.open({ symbol: next.symbol, venue: next.venue, period: next.period });
       this.fineBars.open({ symbol: next.symbol, venue: next.venue, period: next.period });
     }
@@ -317,7 +340,8 @@ export class ChartController {
     if (prev && prev.settings.visibleBars !== next.settings.visibleBars) this.fitInitialRange();
     if (prev?.settings.showExtremes !== next.settings.showExtremes || prev?.settings.extremeBasis !== next.settings.extremeBasis) this.scheduleFrame();
     this.indicators.setPreview(next.previewIndicator ?? null);
-    this.compare.setCodes(compareEntries(next), { period: next.period, venueFor: (code) => compareVenue(code, next) });
+    this.syncCompare();
+    this.renderBadge();
     this.daySeparators.sync();
     this.legend.setDisplay(next.settings);
     this.requestLegendSources("base", "indicators", "compare");
@@ -429,6 +453,7 @@ export class ChartController {
     this.hostResize.disconnect();
     this.unwatch();
     this.feed.dispose();
+    this.badge.dispose();
     this.fineBars.dispose();
     this.compare.dispose();
     this.indicators.dispose();
@@ -681,6 +706,7 @@ export class ChartController {
   }
 
   private onReset(h: History): void {
+    this.pendingEnd = null;
     this.history = h;
     this.hoverIndex = null;
     this.financialHoverTime = null;
@@ -716,6 +742,114 @@ export class ChartController {
     this.initialRange.fit({ bars: this.bars, period: this.period(), visibleBars: this.view?.settings.visibleBars ?? null, narrow: matchMedia("(max-width: 767px)").matches });
   }
 
+  private rightEdgeT(): UnixSeconds | null {
+    const r = this.chart.timeScale().getVisibleLogicalRange();
+    if (!r || this.bars.length === 0) return null;
+    return chartTimeProjection(this.chart.timeScale(), this.period()).toTime(Math.floor(r.to + 0.5 + 1e-6));
+  }
+
+  jumpAnchor(): JumpAnchor | null {
+    return jumpAnchor(barAtRightEdge(this.bars, this.rightEdgeT()), this.period());
+  }
+
+  async jumpTo(request: JumpRequest): Promise<JumpOutcome> {
+    const view = this.view;
+    if (!view || this.disposed) return "cancelled";
+    const token = ++this.jumpToken;
+    this.feed.cancelEntering();
+    const today = kstDateOf(nowSeconds());
+    const modeDate = this.feed.activeDate;
+    const held = (modeDate === null || request.date <= modeDate) && lastBarBefore(this.bars, request.interval) !== null;
+    const route = jumpRoute({ period: view.period, date: request.date, today, held });
+    if (route === "mode") {
+      this.jumpInterval = request.interval;
+      const entry = await this.feed.enterMode(request.date);
+      return entry === "entered" && token === this.jumpToken ? this.endingOutcome(request.interval) : entry === "entered" ? "cancelled" : entry;
+    }
+    if (route === "view" && request.date >= today && modeDate !== null) {
+      this.feed.endMode();
+      return "moved";
+    }
+    const reaches = route === "extend" ? (bars: readonly Bar[]) => lastBarBefore(bars, request.interval) !== null : request.date >= today ? (bars: readonly Bar[]) => (bars[0]?.t ?? Infinity) <= request.interval.start : null;
+    if (reaches) {
+      const reached = await this.feed.olderUntil((h) => reaches(displayBars(h)));
+      if (reached === "stale" || token !== this.jumpToken) return "cancelled";
+      if (route === "extend" && lastBarBefore(this.bars, request.interval) === null) return reached === "failed" ? "failed" : "empty";
+    }
+    const outcome = this.endingOutcome(request.interval);
+    if (outcome === "empty") return outcome;
+    const end = lastBarBefore(this.bars, request.interval);
+    if (end) this.fitEndingAt(this.bars[end.index]!.t);
+    return outcome;
+  }
+
+  private endingOutcome(interval: BarInterval): JumpOutcome {
+    const end = lastBarBefore(this.bars, interval);
+    return end === null ? "empty" : end.inInterval ? "moved" : "previous";
+  }
+
+  private onJumpEntered(h: History): void {
+    this.pendingEnd = null;
+    this.initialRange.release();
+    this.history = h;
+    this.hoverIndex = null;
+    this.financialHoverTime = null;
+    this.realtimeSeen = false;
+    this.stalledAt = null;
+    const bars = displayBars(h);
+    this.withDataGuard(() => {
+      this.setBars(bars);
+      this.indicators.reset(h);
+    });
+    const latest = bars[bars.length - 1];
+    if (latest) {
+      this.ready = { kind: "ready", latest, prev: bars[bars.length - 2] ?? null, isCurrent: false, olderError: null, olderLoading: false, intradayEnd: false };
+      this.onStatus(this.ready);
+    }
+    const end = this.jumpInterval ? lastBarBefore(bars, this.jumpInterval) : null;
+    if (end) this.fitEndingAt(bars[end.index]!.t);
+    this.compare.coverFrom(this.leftT());
+    this.renderLegend();
+    this.updateIntradayEnd();
+  }
+
+  private onModeChanged(): void {
+    this.syncCompare();
+    this.renderBadge();
+  }
+
+  private syncCompare(): void {
+    const view = this.view;
+    if (!view) return;
+    const shown = this.feed.activeDate === null ? compareEntries(view) : [];
+    this.compare.setCodes(shown, { period: view.period, venueFor: (code) => compareVenue(code, view) });
+  }
+
+  private renderBadge(): void {
+    const mode = this.feed.mode;
+    const view = this.view;
+    if (!mode || !view) return this.badge.show(null);
+    this.badge.show({
+      date: mode.date,
+      receiving: mode.entering || this.ready?.olderLoading === true,
+      unadjustedDays: mode.unadjustedDays,
+      compareHidden: this.feed.activeDate !== null && compareEntries(view).length > 0,
+    });
+  }
+
+  private fitEndingAt(endT: UnixSeconds): void {
+    this.pendingEnd = endT;
+    this.flushPendingEnd();
+  }
+
+  private flushPendingEnd(): void {
+    const endT = this.pendingEnd;
+    if (endT === null || this.disposed || this.el.clientWidth === 0 || this.el.clientHeight === 0) return;
+    this.pendingEnd = null;
+    const shown = this.bars.findIndex((bar) => bar.t > endT);
+    this.initialRange.fit({ bars: shown === -1 ? this.bars : this.bars.slice(0, shown), period: this.period(), visibleBars: this.view?.settings.visibleBars ?? null, narrow: matchMedia("(max-width: 767px)").matches });
+  }
+
   private onPrepended(h: History, added: number): void {
     this.patchReady({ olderLoading: false });
     this.history = h;
@@ -734,6 +868,7 @@ export class ChartController {
     if (!this.ready) return;
     this.ready = { ...this.ready, ...patch };
     this.onStatus(this.ready);
+    this.renderBadge();
   }
 
   private updateIntradayEnd(): void {

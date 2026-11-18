@@ -8,6 +8,7 @@ import type { ClientMessage } from "../../src/api/generated/ClientMessage";
 import type { CollectorAccess } from "../../src/api/generated/CollectorAccess";
 import type { ConnectionStatus } from "../../src/api/generated/ConnectionStatus";
 import type { FinancialsPage } from "../../src/api/generated/FinancialsPage";
+import type { JumpBarsPage } from "../../src/api/generated/JumpBarsPage";
 import type { FinancialUpdatePage } from "../../src/api/generated/FinancialUpdatePage";
 import type { AccountStatus } from "../../src/api/generated/AccountStatus";
 import type { KiwoomLinkStatus } from "../../src/api/generated/KiwoomLinkStatus";
@@ -123,6 +124,11 @@ export class MarketFixtures {
     const resolved = resolveVenue(info, venue ?? null);
     if ("error" in resolved) throw new Error(resolved.error);
     return clone(barsPage(info, resolved.venue, period, before === null ? Math.max(1, limit - 1) : limit, before, this.now));
+  }
+  jumpPage({ symbol, period = "1m", venue, date, limit = 500, before = null }: { symbol: string; period?: Period; venue?: Venue | null; date: string; limit?: number; before?: number | null }): JumpBarsPage {
+    const dayEnd = Date.parse(`${date}T00:00:00+09:00`) / 1000 + 86400;
+    const page = this.page({ symbol, period, venue, limit, before: before ?? dayEnd });
+    return { symbol: page.symbol, venue: page.venue, period: page.period, date, bars: page.bars, nextBefore: page.nextBefore, unadjustedDays: [] };
   }
   quote(symbol: string, venue: Venue = "combined") { const info = fixtureSymbol(symbol); return info ? quoteOf(info, this.now, venue) : null; }
   search(query: string, options: { market?: string | null; kind?: string | null } = {}): SymbolInfo[] {
@@ -321,6 +327,15 @@ export class Scenario {
       if (symbol === "999999" || value?.fail === "unknown_symbol") return error(404, "unknown_symbol", `종목 ${symbol}을 찾을 수 없습니다`);
       if (value?.fail === "kiwoom_unavailable") return error(503, "kiwoom_unavailable", "조회가 응답하지 않습니다");
       return { body: this.market.page({ symbol, period, venue, limit: Number(url.searchParams.get("limit") ?? 500), before: url.searchParams.has("before") ? Number(url.searchParams.get("before")) : null }) };
+    }
+    if (path === "/api/bars/jump" && method === "GET") {
+      const symbol = url.searchParams.get("symbol") ?? "";
+      const period = url.searchParams.get("period") ?? "";
+      const venue = url.searchParams.get("venue");
+      const date = url.searchParams.get("date") ?? "";
+      if (!isPeriod(period) || !/^\d{4}-\d{2}-\d{2}$/.test(date)) return error(400, "bad_request", "Invalid period or date");
+      if (venue !== null && venue !== "combined" && venue !== "krx" && venue !== "nxt") return error(400, "bad_request", "Invalid venue");
+      return { body: this.market.jumpPage({ symbol, period, venue, date, limit: Number(url.searchParams.get("limit") ?? 500), before: url.searchParams.has("before") ? Number(url.searchParams.get("before")) : null }) };
     }
     if (/^\/api\/symbols\/[^/]+$/.test(path) && method === "GET") { const value = this.market.symbols.find(value => value.code === decodeURIComponent(path.slice("/api/symbols/".length))); return value ? { body: value } : error(404, "unknown_symbol", "종목이 없습니다"); }
     if (path === "/api/rankings" && method === "POST") return { body: { rows: [], pages: 1, end: true, limited: false, hidden: 0, fetchedAt: Math.floor(this.now / 1000) } satisfies RankingPage };

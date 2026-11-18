@@ -7,6 +7,7 @@ import { PERIODS } from "../lib/symbol";
 import { chartWindows, useLayoutStore } from "../stores/layout";
 import { useSelectionStore } from "../stores/selection";
 import { pressScale } from "./indicator-dialog/compareForm";
+import { jumpToBar } from "./jump/jumpToBar";
 import { saveSnapshot } from "./snapshot/saveSnapshot";
 import { openSystemSettings } from "./system-settings/open";
 import { wizardVisible, useWizardStore } from "./setup-wizard/wizardOpen";
@@ -48,6 +49,8 @@ export function useHotkeys() {
         }
         case "snapshot":
           return saveSnapshot(cellId, action.mode);
+        case "jump":
+          return void jumpToBar(cellId);
         case "toggleLog": {
           const next = pressScale(cell.chartSettings, "log");
           return next && layout.setScale(cellId, next);
