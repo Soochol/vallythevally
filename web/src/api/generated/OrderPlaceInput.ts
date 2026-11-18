@@ -2,8 +2,4 @@
 import type { OrderSide } from "./OrderSide";
 import type { Venue } from "./Venue";
 
-export type OrderPlaceInput = { commandId: string, code: string, side: OrderSide, quantity: number, price: number, 
-/**
- * 비우면 KRX다.
- */
-venue: Venue | null, confirmHighValue: boolean, };
+export type OrderPlaceInput = { commandId: string, code: string, side: OrderSide, quantity: number, price: number, venue: Venue | null, confirmHighValue: boolean, };
