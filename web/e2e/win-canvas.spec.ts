@@ -86,7 +86,8 @@ test("실제 도킹 자리를 보존해 전환하고 차트 인스턴스와 두 
   await drag(page, header(page, "cell-0"), 100, 50);
   await drag(page, frame(page, "cell-0").locator('[data-resize-handle="ne"]'), -80, 40);
   const moved = await boxOf(frame(page, "cell-0"));
-  await expect.poll(() => saved(scenario).canvas?.rects[windowId("cell-0")]?.x).toBeGreaterThan(0);
+  const rectOf = () => saved(scenario).canvas?.rects[windowId("cell-0")];
+  await expect.poll(() => { const rect = rectOf(); return rect ? Math.max(Math.abs(rect.w - moved.width / area.width), Math.abs(rect.h - moved.height / area.height)) : Infinity; }).toBeLessThan(.01);
   const canvas = saved(scenario).canvas;
   await mode(page, "도킹");
   await expect(page.locator("[data-dock-group]")).toHaveCount(2);
