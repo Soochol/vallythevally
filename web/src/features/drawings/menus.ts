@@ -14,7 +14,6 @@ import type { Period } from "../../api/generated/Period";
 import { useDrawingSession } from "../../stores/drawingSession";
 import { useUiStore } from "../../stores/ui";
 import type { MenuItem } from "../menu/Menu";
-import { DRAWING_COMMANDS } from "../../chart/drawings/commands";
 
 const action = (label: string, onSelect: () => void): MenuItem => ({ kind: "action", label, onSelect });
 const glyph = (path: string) => createElement(Icon, { path, size: 14 });
@@ -57,7 +56,6 @@ export function drawingMenu(surface: DrawingSurface, empty = false, at: ScreenPo
   return [
     action("세부 설정…", () => surface.openEditor(first.id)), action("복사", () => surface.copy()), action("복제", () => surface.clone()),
     ...(toolOf(first.tool)?.text ? [action("글자 고치기…", () => surface.openEditor(first.id, "text"))] : []),
-    ...DRAWING_COMMANDS.filter((c) => c.available(selected)).map((c) => action(c.label, () => c.run(surface))),
     { kind: "separator" }, action(locked ? "잠금 풀기" : "잠금", () => surface.updateSelected((d) => ({ ...d, locked: !locked }))),
     { kind: "heading", label: "순서" },
     ...([ ["맨 앞으로", "front"], ["앞으로", "forward"], ["뒤로", "backward"], ["맨 뒤로", "back"] ] as const).map(([label, direction]) => action(label, () => surface.reorder(first.id, direction))),
