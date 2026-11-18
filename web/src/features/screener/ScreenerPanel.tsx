@@ -1,6 +1,6 @@
 import { FinancialUpdateButton } from "../financial-update/FinancialUpdateButton";
 import { SentenceEditor } from "./SentenceEditor";
-import { useScreenEditing } from "./useScreenEditing";
+import { firstScreenerWindow, useScreenEditing } from "./useScreenEditing";
 import { CHANGED, ChangedBadge } from "./ChangedBadge";
 import { type ChosenScreen, FIX_INVALID, type ScreenEditing, type ScreenEntry } from "./screenEditing";
 import { confirmAction } from "../overlay/Confirm";
@@ -55,6 +55,13 @@ const RAIL_POLL_MS = 10_000;
 const BADGE_MAX = 999;
 const FULL_RELOAD_CONFIRM =
   "모든 종목의 전체 이력을 처음부터 다시 받습니다. 2시간 가까이 걸릴 수 있고, 최근 관측일을 채우는 동안에는 실행할 수 없습니다. 받는 동안에도 차트는 그대로 쓸 수 있습니다.";
+
+let lastTouchedWindow: WindowId | null = null;
+const ownsKeys = (id: WindowId | null) => {
+  if (id === null) return true;
+  const touched = lastTouchedWindow !== null && useLayoutStore.getState().layout.windows.some((w) => w.id === lastTouchedWindow);
+  return (touched ? lastTouchedWindow : firstScreenerWindow()) === id;
+};
 
 const toast = (text: string) => useSelectionStore.getState().showToast(text);
 const reasonOf = (e: unknown) => (e instanceof Error ? e.message : String(e));
@@ -151,12 +158,12 @@ export function ScreenerPanel({ id }: { id: WindowId | null }) {
     setEditing(true);
   };
   const createScreen = desktop ? createInPanel : () => createInDialog(screenEditing, id);
-  useResultKeys({ rows, active, onSelect: select, onRun: execute });
+  useResultKeys({ rows, active, onSelect: select, onRun: execute }, () => ownsKeys(id));
   useEffect(() => dropPendingOpen, []);
   const band = status !== undefined && showsUpdateBand(status);
   const offline = useBeforeConnect() !== null;
   return (
-    <aside aria-label="스크리너" data-chart-control className="flex min-h-0 min-w-0 flex-1 flex-col">
+    <aside aria-label="스크리너" data-chart-control className="flex min-h-0 min-w-0 flex-1 flex-col" onPointerDownCapture={() => { lastTouchedWindow = id; }} onFocusCapture={() => { lastTouchedWindow = id; }}>
       {offline && status?.lastDay && <p className="flex-none border-b border-line px-3 py-1.5 text-xs text-text-2">저장된 일봉 {status.lastDay.slice(5).replace("-", "/")}까지 · 오늘 시세는 연결 뒤에 합칩니다</p>}
       <div className="flex min-h-0 min-w-0 flex-1 flex-col">
         <div className="max-h-[50%] flex-none overflow-y-auto">
@@ -210,9 +217,11 @@ export function handleResultKey(event: ScreenerKeyEvent, { rows, active, onSelec
   if (code) onSelect(code);
 }
 
-function useResultKeys({ rows, active, onSelect, onRun }: ResultKeys) {
+function useResultKeys({ rows, active, onSelect, onRun }: ResultKeys, owns: () => boolean) {
   useEffect(() => {
-    const onKey = (event: KeyboardEvent) => handleResultKey(event, { rows, active, onSelect, onRun });
+    const onKey = (event: KeyboardEvent) => {
+      if (owns()) handleResultKey(event, { rows, active, onSelect, onRun });
+    };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [rows, active, onSelect, onRun]);
