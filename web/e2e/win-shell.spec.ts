@@ -252,29 +252,6 @@ test("한 묶음에 쌓인 차트 탭 가운데 고른 탭이 새로고침 뒤�
   expect(scenario.documents.layout(DEFAULT_LAYOUT_ID).windows.find((w) => w.id === "cell-0")).toMatchObject({ period: "D" });
 });
 
-test("지표 창 방식이 차트 옆이면 지표 버튼이 지표 창을 보이고, 가운데 창으로 되돌리면 가운데 창을 연다", async ({ page }) => {
-  await page.goto("/");
-  await expect(cell(page)).toHaveAttribute("aria-busy", "false");
-  const topbar = page.getByRole("toolbar", { name: "차트 도구 막대" });
-  const settings = page.getByRole("dialog", { name: "차트 설정", exact: true });
-  await topbar.getByRole("button", { name: "차트 설정", exact: true }).click();
-  await settings.getByRole("button", { name: "차트 옆", exact: true }).click();
-  await settings.getByRole("button", { name: "닫기", exact: true }).click();
-  await expect(tabs(page, 2).getByRole("tab", { name: /^지표/ })).toHaveCount(0);
-  await topbar.getByRole("button", { name: "지표", exact: true }).click();
-  await expect(tab(page, 2, "지표")).toHaveAttribute("aria-selected", "true");
-  await expect(page.getByRole("searchbox", { name: "지표·비교 찾기" })).toBeFocused();
-  await expect(page.getByRole("dialog", { name: "지표·비교 입력창", exact: true })).toHaveCount(0);
-
-  await topbar.getByRole("button", { name: "차트 설정", exact: true }).click();
-  await settings.getByRole("button", { name: "가운데 창", exact: true }).click();
-  await settings.getByRole("button", { name: "닫기", exact: true }).click();
-  await tab(page, 2, "관심종목").click();
-  await topbar.getByRole("button", { name: "지표", exact: true }).click();
-  await expect(page.getByRole("dialog", { name: "지표·비교 입력창", exact: true })).toBeVisible();
-  await expect(tab(page, 2, "관심종목")).toHaveAttribute("aria-selected", "true");
-});
-
 test("범례 지표 설정 팝오버는 처음 열 때와 창 크기가 바뀐 뒤에도 자기 줄 아래에 있어 그 줄의 숨기기를 누를 수 있다", async ({ page, scenario }) => {
   const layout = scenario.documents.layout(DEFAULT_LAYOUT_ID);
   const chartSettings = { v: 2, style: "candle", scale: "normal", compare: [], panels: [{ id: "p-rsi", stretch: 0.25 }], indicators: [

@@ -55,10 +55,9 @@ function twoCharts(scenario: Scenario) {
   scenario.documents.saveLayout({ ...layout, windows, placement: {}, revision: layout.revision + 1 });
 }
 
-test("메뉴로 띄운 스크리너는 불투명한 창으로 탭 위에 남고 새로고침과 붙이기가 이어진다", async ({ page, scenario }) => {
+test("메뉴로 띄운 스크리너는 불투명한 창으로 탭 위에 남고 새로고침 뒤에도 같은 자리다", async ({ page, scenario }) => {
   await page.goto("/");
   await expect(cell(page)).toHaveAttribute("aria-busy", "false");
-  const origin = await tab(page, "스크리너").locator("xpath=ancestor::*[@data-dock-group]").getAttribute("data-dock-group");
   await detach(page);
   const before = await boxOf(frame(page));
   await pollSaved(() => saved(scenario).dock?.floats.length).toBe(1);
@@ -68,10 +67,6 @@ test("메뉴로 띄운 스크리너는 불투명한 창으로 탭 위에 남고 
   await page.reload();
   await expect(frame(page)).toBeVisible();
   expect(await boxOf(frame(page))).toEqual(before);
-  await frame(page).getByRole("button", { name: "스크리너 붙이기" }).click();
-  await expect(frame(page)).toHaveCount(0);
-  await expect(tab(page, "스크리너")).toHaveAttribute("aria-selected", "true");
-  expect(await tab(page, "스크리너").locator("xpath=ancestor::*[@data-dock-group]").getAttribute("data-dock-group")).toBe(origin);
 });
 
 test("머리 이동은 가장자리에 달라붙고 크기·키보드 조작과 되돌리기는 한 단계씩 저장한다", async ({ page, scenario }) => {
@@ -328,6 +323,8 @@ test("새로고침 뒤에도 붙이기는 살아 있는 사용자 묶음으로 �
   await page.reload();
   await expect(frame(page)).toBeVisible();
   await frame(page).getByRole("button", { name: "스크리너 붙이기" }).click();
+  await expect(frame(page)).toHaveCount(0);
+  await expect(tab(page, "스크리너")).toHaveAttribute("aria-selected", "true");
   expect(await tab(page, "스크리너").locator("xpath=ancestor::*[@data-dock-group]").getAttribute("data-dock-group")).toBe(origin);
   await detach(page);
   const side = await boxOf(groups(page).filter({ has: tab(page, "관심종목") }));
