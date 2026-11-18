@@ -91,13 +91,13 @@ button.od-cellbtn:hover:not(:disabled) { background:var(--hover); }
 .od-settings-flag { display:flex; align-items:center; gap:var(--s3); color:var(--text); }
 
 .od-ladder[data-divider] .mw-lr[data-side=ask] + .mw-lr[data-side=bid] { border-top:var(--size-1) solid var(--line-strong); }
-.od-avg { position:absolute; right:var(--size-2); top:50%; z-index:1; width:var(--size-5); height:var(--size-5); transform:translateY(-50%); border-radius:50%; background:var(--accent); pointer-events:none; }
-.od-tape { position:absolute; bottom:0; left:var(--size-64); width:calc(50% - var(--size-64) - var(--size-42)); max-height:50%; overflow:hidden; background:color-mix(in srgb, var(--surface) 88%, transparent); font-size:var(--size-11); pointer-events:none; }
+
+.od-tape { position:absolute; bottom:0; left:calc(var(--size-64) + var(--s4)); width:calc(50% - var(--size-64) - var(--size-72)); max-height:50%; overflow:hidden; background:color-mix(in srgb, var(--surface) 88%, transparent); font-size:var(--size-11); pointer-events:none; }
 .od-tape .tr-tape { overflow:hidden; }
 .od-tape .tr-row { padding-block:0; font-size:var(--size-11); }
 .od-tape-strength { padding:0 var(--s3); color:var(--text-3); font-size:var(--size-10); }
 .od-tape-strength b { color:var(--text); }
-.od-quote { position:absolute; top:0; right:var(--size-64); width:calc(50% - var(--size-64) - var(--size-42)); margin:0; padding:0 var(--s3); background:color-mix(in srgb, var(--surface) 88%, transparent); font-size:var(--size-11); font-variant-numeric:tabular-nums; pointer-events:none; }
+.od-quote { position:absolute; top:0; right:calc(var(--size-64) + var(--s4)); width:calc(50% - var(--size-64) - var(--size-72)); margin:0; padding:0 var(--s3); background:color-mix(in srgb, var(--surface) 88%, transparent); font-size:var(--size-11); font-variant-numeric:tabular-nums; pointer-events:none; }
 .od-quote div { display:flex; justify-content:space-between; gap:var(--s3); }
 .od-quote dt { color:var(--text-3); } .od-quote dd { margin:0; }
 .od-quote dd[data-tone=up] { color:var(--up); } .od-quote dd[data-tone=down] { color:var(--down); }

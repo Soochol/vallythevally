@@ -5,8 +5,8 @@ import { fetchQuotes } from "../../api/userData";
 import { formatChange, formatPercent, formatPrice, formatVolume } from "../../lib/format";
 import { marketSocket } from "../../stores/realtime";
 import { TradeRow } from "../trades/TradeRow";
-import { recentTradeRows, RECENT_TRADE_ROWS } from "./recentTrades";
-import { formatStrength } from "./holdingSummary";
+import { formatStrength } from "../market-window/format";
+import { recentTradeRows } from "../market-window/recentTrades";
 import { useTradeTape } from "../trades/useTradeTape";
 import "../trades/trades.css";
 
@@ -39,6 +39,7 @@ interface QuoteProps {
 }
 
 const QUOTE_POLL_MS = 5000;
+const RECENT_TRADE_ROWS = 9;
 
 export function QuoteSummary({ code, venue, lastPrice, previousClose, upperLimit, lowerLimit }: QuoteProps) {
   const quote = useQuery({ queryKey: ["order-quote", code, venue], queryFn: async ({ signal }) => (await fetchQuotes([code], venue, signal))[0] ?? null, refetchInterval: QUOTE_POLL_MS, staleTime: 0, retry: false }).data ?? null;
