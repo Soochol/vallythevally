@@ -9,7 +9,7 @@ use crate::calendar::Day;
 use crate::plan::PlanFile;
 use crate::protocol::{REGISTER_BATCH_SIZE, STOCK_ITEM_SUFFIX};
 use crate::raw_read::{RawContent, RawItem, read_day_by_key};
-use crate::supervise::journal_path;
+use crate::supervise::{journal_path, read_lossy};
 
 const STOCKS_BATCH_SUFFIX: &str = "-stocks";
 const HANDOFF_BATCH_PREFIX: &str = "handoff-";
@@ -82,7 +82,7 @@ pub struct CoverageInput<'a> {
 }
 
 pub fn read_journal(data_dir: &Path, date: u32) -> io::Result<Vec<JournalFact>> {
-    let text = match std::fs::read_to_string(journal_path(data_dir, date)) {
+    let text = match read_lossy(&journal_path(data_dir, date)) {
         Ok(text) => text,
         Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
         Err(error) => return Err(error),

@@ -7,7 +7,9 @@ use std::path::{Component, Path};
 use serde::{Deserialize, Serialize};
 
 use super::complete::COMPLETE_FILE_NAME;
+use super::raw_files::RawFiles;
 use super::{VERIFY_FILE_NAME, store_dir};
+use crate::args::Arguments;
 use crate::calendar::{Calendar, Day};
 use crate::raw_write::raw_day_dir;
 
@@ -15,6 +17,7 @@ pub const PRUNE_LOG_NAME: &str = "prune.log.jsonl";
 const RAW_FOLDER: &str = "raw";
 const STORE_FOLDER: &str = "store";
 const DATE_FOLDER_LEN: usize = 8;
+const CHANGED_EXAMPLES: usize = 5;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct RetentionSettings {
@@ -33,12 +36,39 @@ impl Default for RetentionSettings {
     }
 }
 
+impl RetentionSettings {
+    pub fn from_arguments(arguments: &Arguments) -> Result<RetentionSettings, String> {
+        let defaults = RetentionSettings::default();
+        let number = |name: &str, default: u32| -> Result<u32, String> {
+            let Some(text) = arguments.value(name) else { return Ok(default) };
+            text.parse::<u32>().map_err(|_| format!("--{name}은 0 이상의 정수여야 합니다: {text:?}"))
+        };
+        let positive = |name: &str, default: NonZeroU32| -> Result<NonZeroU32, String> {
+            NonZeroU32::new(number(name, default.get())?).ok_or_else(|| format!("--{name}은 1 이상이어야 합니다"))
+        };
+        Ok(RetentionSettings {
+            early_keep: positive("keep-early", defaults.early_keep)?,
+            steady_keep: positive("keep", defaults.steady_keep)?,
+            early_period: number("early-period", defaults.early_period)?,
+        })
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CompleteState {
     Missing,
     Unreadable,
     Verified,
     Failed,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RawState {
+    Unchecked,
+    Same,
+    NotRecorded,
+    Changed { files: u64, examples: Vec<String> },
+    Unreadable { detail: String },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -52,6 +82,7 @@ pub struct DayFacts {
     pub date: u32,
     pub complete: CompleteState,
     pub unfinalized: UnfinalizedCount,
+    pub raw: RawState,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -62,6 +93,9 @@ pub enum KeepReason {
     VerificationFailed,
     UnfinalizedCountMissing,
     Unfinalized { total: u64, kinds: BTreeMap<String, u64> },
+    RawFingerprintMissing,
+    RawChangedAfterComplete { files: u64, examples: Vec<String> },
+    RawUnreadable { detail: String },
     WithinRetention { keep_observation_days: u32 },
     ObservationUnknown { detail: String },
 }
@@ -98,6 +132,7 @@ struct LogLine<'a> {
 #[derive(Deserialize)]
 struct CompleteMarker {
     verify: CompleteVerify,
+    raw_files: Option<RawFiles>,
 }
 
 #[derive(Deserialize)]
@@ -158,6 +193,12 @@ fn decide(today: u32, facts: &DayFacts, keep_days: &Result<NonZeroU32, KeepReaso
         }
         UnfinalizedCount::Counted { .. } => {}
     }
+    match &facts.raw {
+        RawState::Unchecked | RawState::Same => {}
+        RawState::NotRecorded => return Err(KeepReason::RawFingerprintMissing),
+        RawState::Changed { files, examples } => return Err(KeepReason::RawChangedAfterComplete { files: *files, examples: examples.clone() }),
+        RawState::Unreadable { detail } => return Err(KeepReason::RawUnreadable { detail: detail.clone() }),
+    }
     let keep = keep_days.clone()?;
     let unknown = |detail: String| KeepReason::ObservationUnknown { detail };
     let day = Day::from_yyyymmdd(facts.date).ok_or_else(|| unknown(format!("{}는 날짜가 아니다", facts.date)))?;
@@ -191,15 +232,31 @@ pub fn first_complete_day(data_dir: &Path) -> io::Result<Option<u32>> {
     Ok(stored.into_iter().find(|date| store_dir(data_dir, *date).join(COMPLETE_FILE_NAME).is_file()))
 }
 
+pub fn raw_days_without_complete(data_dir: &Path, before: u32) -> io::Result<Vec<u32>> {
+    let raw_days = date_folders(&data_dir.join(RAW_FOLDER))?;
+    Ok(raw_days.into_iter().filter(|date| *date < before && !store_dir(data_dir, *date).join(COMPLETE_FILE_NAME).is_file()).collect())
+}
+
+fn raw_state(data_dir: &Path, date: u32, recorded: Option<RawFiles>) -> RawState {
+    let Some(recorded) = recorded else { return RawState::NotRecorded };
+    match RawFiles::of_day(data_dir, date) {
+        Err(error) => RawState::Unreadable { detail: error.to_string() },
+        Ok(now) => match recorded.paths_differing_from(&now) {
+            differing if differing.is_empty() => RawState::Same,
+            differing => RawState::Changed { files: differing.len() as u64, examples: differing.into_iter().take(CHANGED_EXAMPLES).collect() },
+        },
+    }
+}
+
 pub fn read_day_facts(data_dir: &Path, date: u32) -> DayFacts {
     let folder = store_dir(data_dir, date);
-    let complete = match fs::read(folder.join(COMPLETE_FILE_NAME)) {
-        Err(error) if error.kind() == io::ErrorKind::NotFound => CompleteState::Missing,
-        Err(_) => CompleteState::Unreadable,
+    let (complete, recorded_raw) = match fs::read(folder.join(COMPLETE_FILE_NAME)) {
+        Err(error) if error.kind() == io::ErrorKind::NotFound => (CompleteState::Missing, None),
+        Err(_) => (CompleteState::Unreadable, None),
         Ok(bytes) => match serde_json::from_slice::<CompleteMarker>(&bytes) {
-            Ok(marker) if marker.verify.passed => CompleteState::Verified,
-            Ok(_) => CompleteState::Failed,
-            Err(_) => CompleteState::Unreadable,
+            Ok(marker) if marker.verify.passed => (CompleteState::Verified, marker.raw_files),
+            Ok(_) => (CompleteState::Failed, None),
+            Err(_) => (CompleteState::Unreadable, None),
         },
     };
     let verify = fs::read(folder.join(VERIFY_FILE_NAME)).ok().and_then(|bytes| serde_json::from_slice::<VerifyLines>(&bytes).ok());
@@ -207,7 +264,8 @@ pub fn read_day_facts(data_dir: &Path, date: u32) -> DayFacts {
         (CompleteState::Verified, Some(false)) => CompleteState::Failed,
         (complete, _) => complete,
     };
-    DayFacts { date, complete, unfinalized: unfinalized_of(verify) }
+    let raw = if complete == CompleteState::Verified { raw_state(data_dir, date, recorded_raw) } else { RawState::Unchecked };
+    DayFacts { date, complete, unfinalized: unfinalized_of(verify), raw }
 }
 
 fn unfinalized_of(verify: Option<VerifyLines>) -> UnfinalizedCount {

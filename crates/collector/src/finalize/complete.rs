@@ -7,6 +7,7 @@ use serde::Serialize;
 
 use super::check::VerifyReport;
 use super::observation::{ObservationSummary, read_observation};
+use super::raw_files::RawFiles;
 use super::coverage::{CoverageInput, StockCoverage, build_coverage, read_journal, read_timelines};
 use super::{store_dir, temporary_store_dir};
 use crate::build::store::write_atomically;
@@ -57,6 +58,7 @@ pub struct CompleteFile {
     pub verify: VerifySummary,
     pub plan: Option<PlanSummary>,
     pub observation: ObservationSummary,
+    pub raw_files: RawFiles,
     pub stocks: Vec<StockCoverage>,
 }
 
@@ -83,7 +85,7 @@ fn summarize_plan(plan: &PlanFile) -> PlanSummary {
     }
 }
 
-pub fn build_complete(data_dir: &Path, date: u32, report: &VerifyReport) -> io::Result<CompleteFile> {
+pub fn build_complete(data_dir: &Path, date: u32, report: &VerifyReport, raw_files: RawFiles) -> io::Result<CompleteFile> {
     let plan = if plan_path(data_dir, date).exists() {
         Some(read_plan(data_dir, date).map_err(|error| io::Error::other(error.to_string()))?)
     } else {
@@ -107,6 +109,7 @@ pub fn build_complete(data_dir: &Path, date: u32, report: &VerifyReport) -> io::
         },
         plan: plan.as_ref().map(summarize_plan),
         observation,
+        raw_files,
         stocks,
     })
 }

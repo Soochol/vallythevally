@@ -1,6 +1,5 @@
 use std::fs;
 use std::io;
-use std::num::NonZeroU32;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
@@ -19,6 +18,7 @@ mod coverage;
 mod merge;
 mod observation;
 mod prune;
+mod raw_files;
 mod scan;
 pub mod schema;
 
@@ -27,8 +27,9 @@ pub use coverage::{CoverageInput, Gap, Handoff, JournalFact, KeyTimeline, KeyTim
 pub use observation::{IndexCheckResult, IndexCheckSummary, JudgedVerdict, JudgmentSummary, MarketOpenSummary, ObservationSummary, TreatedAs};
 pub use prune::{
     CompleteState, DayFacts, KeepReason, PRUNE_LOG_NAME, PruneReport, PrunePlan, RetentionSettings, UnfinalizedCount, delete_raw_day,
-    first_complete_day, plan_prune, prune_raw, read_day_facts,
+    RawState, first_complete_day, plan_prune, prune_raw, raw_days_without_complete, read_day_facts,
 };
+pub use raw_files::RawFiles;
 pub use check::{Mismatch, StatJson, VERIFY_FILE_NAME, VerifyReport, bucket_count_of, verify_store};
 pub use merge::{ROW_GROUP_ROWS, WrittenFile, bucket_file};
 pub use scan::{RowStat, Tally, Unfinalized};
@@ -164,19 +165,7 @@ fn parse_retention(arguments: &Arguments) -> Result<Option<RetentionSettings>, S
     if !arguments.flag("prune") {
         return if given { Err("--keep-early, --keep, --early-period는 --prune과 함께 쓴다".to_owned()) } else { Ok(None) };
     }
-    let defaults = RetentionSettings::default();
-    let number = |name: &str, default: u32| -> Result<u32, String> {
-        let Some(text) = arguments.value(name) else { return Ok(default) };
-        text.parse::<u32>().map_err(|_| format!("--{name}은 0 이상의 정수여야 합니다: {text:?}"))
-    };
-    let positive = |name: &str, default: NonZeroU32| -> Result<NonZeroU32, String> {
-        NonZeroU32::new(number(name, default.get())?).ok_or_else(|| format!("--{name}은 1 이상이어야 합니다"))
-    };
-    Ok(Some(RetentionSettings {
-        early_keep: positive("keep-early", defaults.early_keep)?,
-        steady_keep: positive("keep", defaults.steady_keep)?,
-        early_period: number("early-period", defaults.early_period)?,
-    }))
+    RetentionSettings::from_arguments(arguments).map(Some)
 }
 
 fn bounded(arguments: &Arguments, name: &str, default: usize, max: usize) -> Result<usize, String> {
@@ -199,18 +188,19 @@ pub fn finalize_day(options: &Options) -> io::Result<VerifyReport> {
         return verify_store(&store_dir, options.date, buckets, options.threads, &tally);
     }
     recover_interrupted_swap(&options.data_dir, options.date)?;
+    let raw_files = RawFiles::of_day(&options.data_dir, options.date)?;
     let written = write_store(options)?;
     let report = verify_store(&written.store_dir, options.date, options.buckets, options.threads, &written.tally)?;
-    seal_day(options, &report)?;
+    seal_day(options, &report, raw_files)?;
     Ok(report)
 }
 
-pub fn seal_day(options: &Options, report: &VerifyReport) -> io::Result<bool> {
+pub fn seal_day(options: &Options, report: &VerifyReport, raw_files: RawFiles) -> io::Result<bool> {
     if !report.passed {
         return Ok(false);
     }
     let temporary = temporary_store_dir(&options.data_dir, options.date);
-    complete::write_complete(&temporary, &complete::build_complete(&options.data_dir, options.date, report)?)?;
+    complete::write_complete(&temporary, &complete::build_complete(&options.data_dir, options.date, report, raw_files)?)?;
     publish_store(&options.data_dir, options.date)?;
     Ok(true)
 }
