@@ -673,6 +673,9 @@ pub enum SymbolKind {
     Preferred,
     Etf,
     Reit,
+    Etn,
+    Infrastructure,
+    MutualFund,
 }
 
 impl From<domain::SymbolKind> for SymbolKind {
@@ -683,6 +686,9 @@ impl From<domain::SymbolKind> for SymbolKind {
             domain::SymbolKind::Preferred => SymbolKind::Preferred,
             domain::SymbolKind::Etf => SymbolKind::Etf,
             domain::SymbolKind::Reit => SymbolKind::Reit,
+            domain::SymbolKind::Etn => SymbolKind::Etn,
+            domain::SymbolKind::Infrastructure => SymbolKind::Infrastructure,
+            domain::SymbolKind::MutualFund => SymbolKind::MutualFund,
         }
     }
 }

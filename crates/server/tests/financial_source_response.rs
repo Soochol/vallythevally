@@ -11,6 +11,9 @@ fn symbols() -> Arc<SymbolDirectory> {
     symbols.replace(Directory::build(vec![
         SymbolInfo { symbol: Symbol::parse("005930").unwrap(), name: "합성 회사".into(), kind: SymbolKind::Common, market: Market::Kospi, nxt_enabled: false },
         SymbolInfo { symbol: Symbol::parse("102780").unwrap(), name: "합성 ETF".into(), kind: SymbolKind::Etf, market: Market::Kospi, nxt_enabled: false },
+        SymbolInfo { symbol: Symbol::parse("520100").unwrap(), name: "합성 ETN".into(), kind: SymbolKind::Etn, market: Market::Kospi, nxt_enabled: false },
+        SymbolInfo { symbol: Symbol::parse("088980").unwrap(), name: "합성 인프라".into(), kind: SymbolKind::Infrastructure, market: Market::Kospi, nxt_enabled: false },
+        SymbolInfo { symbol: Symbol::parse("094800").unwrap(), name: "합성 뮤추얼펀드".into(), kind: SymbolKind::MutualFund, market: Market::Kospi, nxt_enabled: false },
     ]));
     symbols
 }
@@ -66,9 +69,9 @@ async fn source_http_preserves_all_record_fields_and_nested_tags_without_configu
 
 #[tokio::test]
 async fn unsupported_product_http_returns_before_storage_failure_or_update() {
-    for method in ["GET", "POST"] {
+    for (method, code) in ["GET", "POST"].into_iter().flat_map(|method| ["102780", "520100", "088980", "094800"].map(|code| (method, code))) {
         let service = Financials::with_store(None, Err(Failure::Storage), Clock::fake(domain::KstTime::from_unix(300)));
-        let response = routes(service, symbols()).oneshot(Request::builder().method(method).uri("/api/symbols/102780/financial-source").body(Body::empty()).unwrap()).await.unwrap();
+        let response = routes(service, symbols()).oneshot(Request::builder().method(method).uri(format!("/api/symbols/{code}/financial-source")).body(Body::empty()).unwrap()).await.unwrap();
         assert_eq!(response.status(), StatusCode::OK);
         let actual: Value = serde_json::from_slice(&to_bytes(response.into_body(), usize::MAX).await.unwrap()).unwrap();
         assert_eq!(actual, json!({

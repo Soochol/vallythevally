@@ -80,6 +80,8 @@ export const linkLabel = (link: LinkColor): string => link.toUpperCase();
 export const linkedWindowCount = (windows: readonly WindowState[], link: LinkColor, except: WindowId): number =>
   windows.filter((w) => w.link === link && w.id !== except).length;
 
+const PINNABLE: ReadonlySet<WindowKind> = new Set<WindowKind>(["trades", "book", "program", "brokers", "order"]);
+
 export type SymbolTarget = Pick<SymbolInfo, "code"> & { name?: string };
 export type SymbolChange = { changed: WindowId[]; notice: string | null };
 
@@ -94,10 +96,17 @@ function linkedCharts(layout: EditableLayout, cellId: WindowId): ChartWindowStat
 const senderLink = (layout: EditableLayout, sender: WindowId | null): LinkColor | null =>
   sender === null ? null : (layout.windows.find((w) => w.id === sender)?.link ?? null);
 
+export const isPinnableWindow = (w: WindowState): w is PinnableWindowState | OrderWindowState => PINNABLE.has(w.kind);
+
 export function watchedSymbol(layout: EditableLayout, sender: WindowId | null, activeCell: WindowId): SymbolCode | null {
   const link = senderLink(layout, sender);
   if (link === null) return chartWindow(layout, activeCell).symbol;
   return chartWindows(layout).find((w) => w.link === link)?.symbol ?? null;
+}
+
+export function linkedWindowSymbol(layout: EditableLayout, id: WindowId, activeCell: WindowId): SymbolCode | null {
+  const window = layout.windows.find((w) => w.id === id);
+  return (window && isPinnableWindow(window) ? window.symbol : undefined) ?? watchedSymbol(layout, id, activeCell);
 }
 
 function follow(chart: ChartWindowState, leader: ChartWindowState): ChartWindowState {
@@ -137,7 +146,6 @@ export type DockRoom = { area: Size; gap: number };
 
 let lastStepId = 0;
 
-const PINNABLE: ReadonlySet<WindowKind> = new Set<WindowKind>(["trades", "book", "program", "brokers", "order"]);
 
 function withOptional<W, K extends string>(w: W, key: K, value: string | null): W {
   if ((w as Record<string, unknown>)[key] === (value ?? undefined)) return w;
@@ -189,6 +197,7 @@ interface LayoutState {
   setWindowList(window: WindowId, list: string | null): void;
   setWindowScreen(window: WindowId, screen: string | null): void;
   pinSymbol(window: WindowId, code: SymbolCode | null): void;
+  pickWindowSymbol(window: WindowId, activeCell: WindowId, target: SymbolTarget): SymbolChange;
   setPeriod(cellId: WindowId, p: Period): void;
   setStyle(cellId: WindowId, s: ChartStyle): void;
   setScale(cellId: WindowId, s: PriceScale): void;
@@ -425,6 +434,7 @@ export const useLayoutStore = create<LayoutState>()((set, get) => {
       const leader = link === null ? undefined : chartWindows(get().layout).find((c) => c.id !== id && c.link === link);
       patchWindows((w) => {
         if (w.id !== id || w.link === link || WINDOW_KINDS[w.kind].link === "none") return w;
+        if (link !== null && isPinnableWindow(w) && w.symbol !== undefined) return withOptional({ ...w, link }, "symbol", null);
         return isChartWindow(w) && leader ? follow({ ...w, link }, leader) : { ...w, link };
       });
     },
@@ -432,6 +442,15 @@ export const useLayoutStore = create<LayoutState>()((set, get) => {
     setWindowScreen: (id, screen) => patchWindows((w) => (w.id === id && w.kind === "screener" ? withOptional(w, "screen", screen) : w)),
     pinSymbol: (id, code) =>
       patchWindows((w) => (w.id === id && PINNABLE.has(w.kind) && (code === null || !isIndexCode(code)) ? withOptional(w as PinnableWindowState | OrderWindowState, "symbol", code) : w)),
+    pickWindowSymbol: (id, activeCell, target) => {
+      const picked = get().layout.windows.find((w) => w.id === id);
+      if (!picked || !isPinnableWindow(picked)) return { changed: [], notice: null };
+      if (picked.link === null) {
+        get().pinSymbol(id, target.code);
+        return { changed: [id], notice: null };
+      }
+      return get().sendSymbol(id, activeCell, target);
+    },
     setPeriod: (cellId, period) => patchCell(cellId, (c) => (c.period === period ? c : { ...c, period })),
     setStyle: (cellId, style) => patchSetting(cellId, "style", style),
     setScale: (cellId, scale) => patchSetting(cellId, "scale", scale),

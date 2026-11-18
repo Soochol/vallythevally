@@ -513,3 +513,75 @@ test("성공한 뒤의 실행이 거부되면 실패를 알리고 앞의 결과�
   expect(chosen().run?.kind).toBe("done");
   expect(shownResult(chosen().run)).toEqual(result);
 });
+
+const second: Screen = { id: "b", name: "거래량", markets: [], exclude: [], conditions: [] };
+const slotOf = (initial: string | null = null) => {
+  let chosen = initial;
+  return { get: () => chosen, set: (id: string | null) => { chosen = id; } };
+};
+const twoWindows = () => {
+  const opened2 = opened({ revision: 1, screens: [source, second] });
+  const slotA = slotOf();
+  const slotB = slotOf();
+  return { ...opened2, slotA, slotB, windowA: opened2.editing.over(slotA), windowB: opened2.editing.over(slotB) };
+};
+
+test("창 둘이 서로 다른 조건식을 고르고 각자 그 조건식을 실행한다", async () => {
+  const { windowA, windowB, slotB, sent } = twoWindows();
+  expect(windowA.view().chosen?.source.id).toBe("a");
+  expect(windowB.view().chosen?.source.id).toBe("a");
+  windowB.choose("b");
+  expect(slotB.get()).toBe("b");
+  expect(windowA.view().chosen?.source.id).toBe("a");
+  expect(windowB.view().chosen?.source.id).toBe("b");
+  await windowB.run();
+  await windowA.run();
+  expect(sent.map((screen) => screen.id)).toEqual(["b", "a"]);
+});
+
+test("창 둘이 같은 조건식을 고르면 같은 초안과 같은 실행 결과를 본다", async () => {
+  const { windowA, windowB } = twoWindows();
+  windowA.choose("b");
+  windowB.choose("b");
+  windowA.edit((draft) => ({ ...draft, name: "거래량 급증" }));
+  expect(windowB.view().chosen?.draft.name).toBe("거래량 급증");
+  expect(windowB.view().chosen?.dirty).toBe(true);
+  await windowA.run();
+  expect(windowB.view().chosen?.run?.kind).toBe("done");
+});
+
+test("창에서 새 조건식을 만들면 그 창의 선택만 바뀐다", () => {
+  const { windowA, windowB, slotA } = twoWindows();
+  windowA.create();
+  expect(slotA.get()).not.toBeNull();
+  expect(windowA.view().chosen?.stored).toBe(false);
+  expect(windowB.view().chosen?.source.id).toBe("a");
+});
+
+test("고른 조건식이 지워지면 그 조건식을 고른 창들은 첫 조건식으로 돌아간다", async () => {
+  const { windowA, windowB, slotA, slotB, server } = twoWindows();
+  windowA.choose("b");
+  windowB.choose("b");
+  expect(await windowA.remove()).toBe(true);
+  expect(server.stored().screens.map((screen) => screen.id)).toEqual(["a"]);
+  expect(windowA.view().chosen?.source.id).toBe("a");
+  expect(windowB.view().chosen?.source.id).toBe("a");
+  expect(slotA.get()).toBe("a");
+  expect(slotB.get()).toBe("b");
+});
+
+test("창이 가리키는 조건식이 목록에 없으면 첫 조건식을 보인다", () => {
+  const { editing } = opened({ revision: 1, screens: [source, second] });
+  expect(editing.over(slotOf("없는 id")).view().chosen?.source.id).toBe("a");
+});
+
+test("창의 선택이 바뀌면 같은 상태여도 새 뷰를 낸다", () => {
+  const { editing } = opened({ revision: 1, screens: [source, second] });
+  const slot = slotOf();
+  const window = editing.over(slot);
+  const before = window.view();
+  expect(window.view()).toBe(before);
+  slot.set("b");
+  expect(window.view()).not.toBe(before);
+  expect(window.view().chosen?.source.id).toBe("b");
+});

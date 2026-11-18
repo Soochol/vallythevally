@@ -18,7 +18,8 @@ use crate::db::AppDb;
 use crate::drawing_api::{Drawing, DrawingInput, DrawingScope};
 use crate::drawings::{self, DrawingError};
 use crate::http::{ApiFailure, AppState};
-use crate::user_routes::{check_layout_input, check_nxt_traded, check_screens, check_watchlists, read_json};
+use crate::setup_documents::{check_drawing, check_layout_input, check_nxt_traded, check_screens, check_watchlists};
+use crate::user_routes::read_json;
 use crate::sync_log::{self, Direction};
 use crate::userdata::{self, StoreError};
 
@@ -131,12 +132,12 @@ fn parse_document(document: &Document) -> Result<Parsed, ApiFailure> {
     match document.kind {
         DocumentKind::Watchlists => {
             let watchlists: Watchlists = typed(document)?;
-            check_watchlists(&watchlists).map_err(|e| refused(document, e.message()))?;
+            check_watchlists(&watchlists).map_err(|e| refused(document, e.reason()))?;
             Ok(Parsed::Watchlists(watchlists))
         }
         DocumentKind::Screens => {
             let screens: Screens = typed(document)?;
-            check_screens(&screens).map_err(|e| refused(document, e.message()))?;
+            check_screens(&screens).map_err(|e| refused(document, e.reason()))?;
             Ok(Parsed::Screens(screens))
         }
         DocumentKind::UiState => {
@@ -148,12 +149,12 @@ fn parse_document(document: &Document) -> Result<Parsed, ApiFailure> {
         DocumentKind::Layout => {
             let layout: Layout = typed(&without_retired_windows(document))?;
             let input = layout_input(&layout);
-            let nxt = check_layout_input(&document.id, &input).map_err(|e| refused(document, e.message()))?;
+            let nxt = check_layout_input(&document.id, &input).map_err(|e| refused(document, e.reason()))?;
             Ok(Parsed::Layout(layout, nxt))
         }
         DocumentKind::Drawing => {
             let drawing: Drawing = typed(document)?;
-            drawings::check_drawing(&document.id, &drawing_input(&drawing)).map_err(|e| refused(document, e.message()))?;
+            check_drawing(&document.id, &drawing_input(&drawing)).map_err(|e| refused(document, e.reason()))?;
             Ok(Parsed::Drawing(drawing))
         }
     }
@@ -299,7 +300,7 @@ pub(crate) async fn reset_to_default(db: &AppDb, owner: &str) -> Result<(), ApiF
 async fn import(State(st): State<Arc<AppState>>, body: Body) -> Result<Json<Value>, ApiFailure> {
     let bundle: Bundle = read_json(body, BUNDLE_LIMIT, "셋업 묶음").await?;
     let Checked { setup, nxt } = check_bundle(&bundle)?;
-    check_nxt_traded(&st, &nxt).await?;
+    check_nxt_traded(&st, &nxt).await??;
     replace_all(&st.db, &setup, UnixSeconds(st.clock.now().unix())).await?;
     tracing::info!(documents = bundle.documents.len(), "셋업 묶음을 가져왔습니다");
     Ok(Json(json!({ "documents": bundle.documents.len() })))
@@ -420,10 +421,9 @@ pub(crate) async fn apply_received(st: &AppState, document: &Document, over_equa
         }
     };
     if let Some(Parsed::Layout(_, nxt)) = &parsed
-        && let Err(e) = check_nxt_traded(st, nxt).await
-        && matches!(e.code(), ApiErrorCode::BadRequest)
+        && let Ok(Err(refusal)) = check_nxt_traded(st, nxt).await
     {
-        return finish_refused(&st.db, document, e.message().to_owned(), over_equal).await;
+        return finish_refused(&st.db, document, refusal.reason(), over_equal).await;
     }
     let mut tx = st.db.begin_write().await?;
     let known = sync_log::recorded_revision(&mut tx, document.kind, &document.id).await?;

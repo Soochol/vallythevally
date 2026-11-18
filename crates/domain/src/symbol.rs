@@ -164,7 +164,7 @@ impl Feed {
     }
 }
 
-/// 검색에서 같은 순위일 때 이 순서로 앞에 둔다(D5): Index > Common > Preferred > Etf > Reit.
+/// 검색에서 같은 순위일 때 이 순서로 앞에 둔다(D5): Index > Common > Preferred > Etf > Reit > Etn > Infrastructure > MutualFund.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum SymbolKind {
     Index,
@@ -172,6 +172,9 @@ pub enum SymbolKind {
     Preferred,
     Etf,
     Reit,
+    Etn,
+    Infrastructure,
+    MutualFund,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -239,8 +242,8 @@ mod tests {
 
     #[test]
     fn kind_order_matches_search_tie_break() {
-        let mut kinds = [SymbolKind::Reit, SymbolKind::Etf, SymbolKind::Common, SymbolKind::Index, SymbolKind::Preferred];
+        let mut kinds = [SymbolKind::MutualFund, SymbolKind::Infrastructure, SymbolKind::Etn, SymbolKind::Reit, SymbolKind::Etf, SymbolKind::Common, SymbolKind::Index, SymbolKind::Preferred];
         kinds.sort();
-        assert_eq!(kinds, [SymbolKind::Index, SymbolKind::Common, SymbolKind::Preferred, SymbolKind::Etf, SymbolKind::Reit]);
+        assert_eq!(kinds, [SymbolKind::Index, SymbolKind::Common, SymbolKind::Preferred, SymbolKind::Etf, SymbolKind::Reit, SymbolKind::Etn, SymbolKind::Infrastructure, SymbolKind::MutualFund]);
     }
 }

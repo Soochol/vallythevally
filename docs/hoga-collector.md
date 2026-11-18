@@ -400,7 +400,7 @@ universe/<YYYYMMDD>.after.json      마감 뒤 목록과 아침 목록의 차이
 `mrkt_tp` 0과 10을 연속조회 끝까지 부른다(`server::symbols::fetch_listing_rows`, 서버의 `fetch_directory`와 같은 호출이다). 시장마다 쪽 수 상한(`MAX_LIST_PAGES`)에 닿았는데 다음 쪽이 남아 있으면 끊긴 목록이다. 행은 `domain::classify`로 가른다.
 
 - 보통주와 우선주를 남긴다. 스팩(`ListingRow::is_spac`)은 종류 `spac`으로 남는다.
-- ETF·리츠·ETN 등 `Exclude` 행은 넣지 않는다. 규칙에 없는 `marketCode` 행도 넣지 않고 `warnings`에 적는다. 모르는 `auditInfo` 상태와 겹치는 종목코드도 `warnings`에 적는다.
+- ETF·리츠·ETN·인프라투자금융·뮤추얼펀드 행은 넣지 않는다. 규칙에 없는 `marketCode` 행도 넣지 않고 `warnings`에 적는다. 모르는 `auditInfo` 상태와 겹치는 종목코드도 `warnings`에 적는다.
 - `auditInfo`에 거래정지가 있으면 목록에는 두고 `registered`를 `false`로 한다. 관리종목·투자경고 같은 다른 상태는 `registered`가 `true`다. 계획이 쓸 "등록할 종목"은 `UniverseFile::registrable()`이다. 목록을 읽는 함수는 `read_universe`다.
 
 ### 그날 목록 파일

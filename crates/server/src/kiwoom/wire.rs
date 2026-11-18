@@ -8,7 +8,7 @@ use domain::{AuditStatus, Bucket, IndexCode, KstDate, KstTime, ListingRow, Marke
 use serde::Deserialize;
 use serde_json::{Value, json};
 
-use super::api::kiwoom_stock_code;
+use super::api::{InvestorUnit, kiwoom_stock_code};
 use crate::api::{self, ExcludeKind};
 use super::error::{WsRejection, judge_ws_ack};
 use super::stream::{BOOK_DEPTH, BookLevel, BookSnapshot, BrokerEntry, BrokerSnapshot, DayTotals, ExpectedTrade, Exchange, RealProgramTrade, RealTick, TradeSide};
@@ -271,6 +271,7 @@ pub fn screener_listing(row: &ListingRow, info: &SymbolInfo) -> Option<ScreenerL
         SymbolKind::Preferred => Some(ExcludeKind::Preferred),
         SymbolKind::Common if info.market == Market::Kosdaq && row.is_spac() => Some(ExcludeKind::Spac),
         SymbolKind::Common | SymbolKind::Index => None,
+        SymbolKind::Etn | SymbolKind::Infrastructure | SymbolKind::MutualFund => return None,
     };
     let states = row.audit_statuses().filter_map(|(label, status)| match status {
         AuditStatus::Unknown => {
@@ -834,6 +835,659 @@ impl StockProgramTradesResponse {
                 net_amount: million_won(&r.prm_netprps_amt)?,
             })
         }, "ka90008")
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct RankRow<T> {
+    pub code: StockCode,
+    pub name: String,
+    pub columns: T,
+}
+
+fn without_commas(s: &str) -> String {
+    s.chars().filter(|c| *c != ',').collect()
+}
+
+fn rank_price(s: &str) -> Result<u64, WireError> {
+    unsigned(&without_commas(s))
+}
+
+fn rank_count(s: &str) -> Result<u64, WireError> {
+    unsigned(&without_commas(s))
+}
+
+fn rank_signed(s: &str) -> Result<i64, WireError> {
+    signed_quantity(&without_commas(s))
+}
+
+fn rank_rate(s: &str) -> Result<f64, WireError> {
+    decimal(&without_commas(s))
+}
+
+fn rank_won(s: &str) -> Result<i64, WireError> {
+    million_won(&without_commas(s))
+}
+
+fn rank_position(s: &str) -> Result<Option<u32>, WireError> {
+    optional(s, |s| s.trim().parse().map_err(|_| WireError(format!("순위가 아닙니다: {s:?}"))))
+}
+
+fn rank_code(s: &str) -> Result<StockCode, WireError> {
+    let bare = s.trim();
+    let bare = bare.strip_suffix("_NX").or_else(|| bare.strip_suffix("_AL")).unwrap_or(bare);
+    StockCode::parse(bare).map_err(|e| WireError(format!("{e}: {s:?}")))
+}
+
+fn rank_rows<R, T>(rows: &[R], identity: impl Fn(&R) -> (&str, &str), read: impl Fn(&R) -> Result<T, WireError>, api_id: &str) -> ParsedRows<RankRow<T>> {
+    collect_rows(rows, |r| {
+        let (code, name) = identity(r);
+        Ok(RankRow { code: rank_code(code)?, name: name.trim().to_owned(), columns: read(r)? })
+    }, api_id)
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Deserialize)]
+#[serde(default)]
+struct TradeValueWireRow {
+    stk_cd: String,
+    stk_nm: String,
+    now_rank: String,
+    pred_rank: String,
+    cur_prc: String,
+    flu_rt: String,
+    now_trde_qty: String,
+    trde_prica: String,
+}
+
+#[derive(Debug, PartialEq, Deserialize)]
+pub struct TradeValueRankingResponse {
+    trde_prica_upper: Vec<TradeValueWireRow>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct TradeValueColumns {
+    pub price: u64,
+    pub change_rate: f64,
+    pub trade_value_won: i64,
+    pub volume: u64,
+    pub rank: Option<u32>,
+    pub previous_rank: Option<u32>,
+}
+
+impl TradeValueRankingResponse {
+    pub fn rows(&self) -> ParsedRows<RankRow<TradeValueColumns>> {
+        rank_rows(&self.trde_prica_upper, |r| (&r.stk_cd, &r.stk_nm), |r| {
+            Ok(TradeValueColumns {
+                price: rank_price(&r.cur_prc)?,
+                change_rate: rank_rate(&r.flu_rt)?,
+                trade_value_won: rank_won(&r.trde_prica)?,
+                volume: rank_count(&r.now_trde_qty)?,
+                rank: rank_position(&r.now_rank)?,
+                previous_rank: rank_position(&r.pred_rank)?,
+            })
+        }, "ka10032")
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Deserialize)]
+#[serde(default)]
+struct TradingVolumeWireRow {
+    stk_cd: String,
+    stk_nm: String,
+    cur_prc: String,
+    flu_rt: String,
+    trde_qty: String,
+    pred_rt: String,
+    trde_tern_rt: String,
+}
+
+#[derive(Debug, PartialEq, Deserialize)]
+pub struct TradingVolumeRankingResponse {
+    tdy_trde_qty_upper: Vec<TradingVolumeWireRow>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct TradingVolumeColumns {
+    pub price: u64,
+    pub change_rate: f64,
+    pub volume: u64,
+    pub previous_day_ratio: f64,
+    pub turnover_rate: f64,
+}
+
+impl TradingVolumeRankingResponse {
+    pub fn rows(&self) -> ParsedRows<RankRow<TradingVolumeColumns>> {
+        rank_rows(&self.tdy_trde_qty_upper, |r| (&r.stk_cd, &r.stk_nm), |r| {
+            Ok(TradingVolumeColumns {
+                price: rank_price(&r.cur_prc)?,
+                change_rate: rank_rate(&r.flu_rt)?,
+                volume: rank_count(&r.trde_qty)?,
+                previous_day_ratio: rank_rate(&r.pred_rt)?,
+                turnover_rate: rank_rate(&r.trde_tern_rt)?,
+            })
+        }, "ka10030")
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Deserialize)]
+#[serde(default)]
+struct VolumeSurgeWireRow {
+    stk_cd: String,
+    stk_nm: String,
+    cur_prc: String,
+    flu_rt: String,
+    now_trde_qty: String,
+    sdnin_qty: String,
+    sdnin_rt: String,
+}
+
+#[derive(Debug, PartialEq, Deserialize)]
+pub struct VolumeSurgeRankingResponse {
+    trde_qty_sdnin: Vec<VolumeSurgeWireRow>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct VolumeSurgeColumns {
+    pub price: u64,
+    pub change_rate: f64,
+    pub surge_rate: f64,
+    pub surge_volume: i64,
+    pub volume: u64,
+}
+
+impl VolumeSurgeRankingResponse {
+    pub fn rows(&self) -> ParsedRows<RankRow<VolumeSurgeColumns>> {
+        rank_rows(&self.trde_qty_sdnin, |r| (&r.stk_cd, &r.stk_nm), |r| {
+            Ok(VolumeSurgeColumns {
+                price: rank_price(&r.cur_prc)?,
+                change_rate: rank_rate(&r.flu_rt)?,
+                surge_rate: rank_rate(&r.sdnin_rt)?,
+                surge_volume: rank_signed(&r.sdnin_qty)?,
+                volume: rank_count(&r.now_trde_qty)?,
+            })
+        }, "ka10023")
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Deserialize)]
+#[serde(default)]
+struct PriceChangeWireRow {
+    stk_cd: String,
+    stk_nm: String,
+    cur_prc: String,
+    pred_pre: String,
+    flu_rt: String,
+    now_trde_qty: String,
+}
+
+#[derive(Debug, PartialEq, Deserialize)]
+pub struct PriceChangeRankingResponse {
+    pred_pre_flu_rt_upper: Vec<PriceChangeWireRow>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct PriceChangeColumns {
+    pub price: u64,
+    pub change_rate: f64,
+    pub change_won: i64,
+    pub volume: u64,
+}
+
+impl PriceChangeRankingResponse {
+    pub fn rows(&self) -> ParsedRows<RankRow<PriceChangeColumns>> {
+        rank_rows(&self.pred_pre_flu_rt_upper, |r| (&r.stk_cd, &r.stk_nm), |r| {
+            Ok(PriceChangeColumns {
+                price: rank_price(&r.cur_prc)?,
+                change_rate: rank_rate(&r.flu_rt)?,
+                change_won: rank_signed(&r.pred_pre)?,
+                volume: rank_count(&r.now_trde_qty)?,
+            })
+        }, "ka10027")
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Deserialize)]
+#[serde(default)]
+struct ExpectedExecutionWireRow {
+    stk_cd: String,
+    stk_nm: String,
+    exp_cntr_pric: String,
+    flu_rt: String,
+    exp_cntr_qty: String,
+}
+
+#[derive(Debug, PartialEq, Deserialize)]
+pub struct ExpectedExecutionRankingResponse {
+    exp_cntr_flu_rt_upper: Vec<ExpectedExecutionWireRow>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ExpectedExecutionColumns {
+    pub expected_price: u64,
+    pub expected_change_rate: f64,
+    pub expected_volume: u64,
+}
+
+impl ExpectedExecutionRankingResponse {
+    pub fn rows(&self) -> ParsedRows<RankRow<ExpectedExecutionColumns>> {
+        rank_rows(&self.exp_cntr_flu_rt_upper, |r| (&r.stk_cd, &r.stk_nm), |r| {
+            Ok(ExpectedExecutionColumns {
+                expected_price: rank_price(&r.exp_cntr_pric)?,
+                expected_change_rate: rank_rate(&r.flu_rt)?,
+                expected_volume: rank_count(&r.exp_cntr_qty)?,
+            })
+        }, "ka10029")
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Deserialize)]
+#[serde(default)]
+struct InvestorNetWireRow {
+    stk_cd: String,
+    stk_nm: String,
+    sel_qty: String,
+    buy_qty: String,
+    netslmt: String,
+}
+
+#[derive(Debug, PartialEq, Deserialize)]
+pub struct InvestorNetRankingResponse {
+    opmr_invsr_trde_upper: Vec<InvestorNetWireRow>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct InvestorNetColumns {
+    pub net: i64,
+    pub bought: i64,
+    pub sold: i64,
+}
+
+impl InvestorNetRankingResponse {
+    pub fn rows(&self, unit: InvestorUnit) -> ParsedRows<RankRow<InvestorNetColumns>> {
+        let read = |s: &str| match unit {
+            InvestorUnit::Amount => rank_won(s),
+            InvestorUnit::Quantity => rank_signed(s),
+        };
+        rank_rows(&self.opmr_invsr_trde_upper, |r| (&r.stk_cd, &r.stk_nm), |r| {
+            Ok(InvestorNetColumns { net: read(&r.netslmt)?, bought: read(&r.buy_qty)?.abs(), sold: read(&r.sel_qty)?.abs() })
+        }, "ka10065")
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Deserialize)]
+#[serde(default)]
+struct ForeignStreakWireRow {
+    stk_cd: String,
+    stk_nm: String,
+    cur_prc: String,
+    dm1: String,
+    dm2: String,
+    dm3: String,
+    tot: String,
+    limit_exh_rt: String,
+}
+
+#[derive(Debug, PartialEq, Deserialize)]
+pub struct ForeignStreakRankingResponse {
+    for_cont_nettrde_upper: Vec<ForeignStreakWireRow>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ForeignStreakColumns {
+    pub price: u64,
+    pub day_before_1: i64,
+    pub day_before_2: i64,
+    pub day_before_3: i64,
+    pub total: i64,
+    pub limit_exhaustion_rate: f64,
+}
+
+impl ForeignStreakRankingResponse {
+    pub fn rows(&self) -> ParsedRows<RankRow<ForeignStreakColumns>> {
+        rank_rows(&self.for_cont_nettrde_upper, |r| (&r.stk_cd, &r.stk_nm), |r| {
+            Ok(ForeignStreakColumns {
+                price: rank_price(&r.cur_prc)?,
+                day_before_1: rank_signed(&r.dm1)?,
+                day_before_2: rank_signed(&r.dm2)?,
+                day_before_3: rank_signed(&r.dm3)?,
+                total: rank_signed(&r.tot)?,
+                limit_exhaustion_rate: rank_rate(&r.limit_exh_rt)?,
+            })
+        }, "ka10035")
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Deserialize)]
+#[serde(default)]
+struct ProgramNetWireRow {
+    stk_cd: String,
+    stk_nm: String,
+    cur_prc: String,
+    flu_rt: String,
+    prm_sell_amt: String,
+    prm_buy_amt: String,
+    prm_netprps_amt: String,
+}
+
+#[derive(Debug, PartialEq, Deserialize)]
+pub struct ProgramNetRankingResponse {
+    prm_netprps_upper_50: Vec<ProgramNetWireRow>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ProgramNetColumns {
+    pub price: u64,
+    pub change_rate: f64,
+    pub net_won: i64,
+    pub bought_won: i64,
+    pub sold_won: i64,
+}
+
+impl ProgramNetRankingResponse {
+    pub fn rows(&self) -> ParsedRows<RankRow<ProgramNetColumns>> {
+        rank_rows(&self.prm_netprps_upper_50, |r| (&r.stk_cd, &r.stk_nm), |r| {
+            Ok(ProgramNetColumns {
+                price: rank_price(&r.cur_prc)?,
+                change_rate: rank_rate(&r.flu_rt)?,
+                net_won: rank_won(&r.prm_netprps_amt)?,
+                bought_won: rank_won(&r.prm_buy_amt)?.abs(),
+                sold_won: rank_won(&r.prm_sell_amt)?.abs(),
+            })
+        }, "ka90003")
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Deserialize)]
+#[serde(default)]
+struct OrderBookBalanceWireRow {
+    stk_cd: String,
+    stk_nm: String,
+    cur_prc: String,
+    tot_sel_req: String,
+    tot_buy_req: String,
+    netprps_req: String,
+    buy_rt: String,
+}
+
+#[derive(Debug, PartialEq, Deserialize)]
+pub struct OrderBookBalanceRankingResponse {
+    bid_req_upper: Vec<OrderBookBalanceWireRow>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct OrderBookBalanceColumns {
+    pub price: u64,
+    pub total_sell: u64,
+    pub total_buy: u64,
+    pub net_buy: i64,
+    pub buy_ratio: f64,
+}
+
+impl OrderBookBalanceRankingResponse {
+    pub fn rows(&self) -> ParsedRows<RankRow<OrderBookBalanceColumns>> {
+        rank_rows(&self.bid_req_upper, |r| (&r.stk_cd, &r.stk_nm), |r| {
+            Ok(OrderBookBalanceColumns {
+                price: rank_price(&r.cur_prc)?,
+                total_sell: rank_count(&r.tot_sel_req)?,
+                total_buy: rank_count(&r.tot_buy_req)?,
+                net_buy: rank_signed(&r.netprps_req)?,
+                buy_ratio: rank_rate(&r.buy_rt)?,
+            })
+        }, "ka10020")
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Deserialize)]
+#[serde(default)]
+struct CreditRatioWireRow {
+    stk_cd: String,
+    stk_nm: String,
+    cur_prc: String,
+    flu_rt: String,
+    crd_rt: String,
+    now_trde_qty: String,
+}
+
+#[derive(Debug, PartialEq, Deserialize)]
+pub struct CreditRatioRankingResponse {
+    crd_rt_upper: Vec<CreditRatioWireRow>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct CreditRatioColumns {
+    pub price: u64,
+    pub change_rate: f64,
+    pub credit_ratio: f64,
+    pub volume: u64,
+}
+
+impl CreditRatioRankingResponse {
+    pub fn rows(&self) -> ParsedRows<RankRow<CreditRatioColumns>> {
+        rank_rows(&self.crd_rt_upper, |r| (&r.stk_cd, &r.stk_nm), |r| {
+            Ok(CreditRatioColumns {
+                price: rank_price(&r.cur_prc)?,
+                change_rate: rank_rate(&r.flu_rt)?,
+                credit_ratio: rank_rate(&r.crd_rt)?,
+                volume: rank_count(&r.now_trde_qty)?,
+            })
+        }, "ka10033")
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Deserialize)]
+#[serde(default)]
+struct MostViewedWireRow {
+    stk_cd: String,
+    stk_nm: String,
+    past_curr_prc: String,
+    base_comp_chgr: String,
+    rank_chg: String,
+    rank_chg_sign: String,
+}
+
+#[derive(Debug, PartialEq, Deserialize)]
+pub struct MostViewedRankingResponse {
+    item_inq_rank: Vec<MostViewedWireRow>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct MostViewedColumns {
+    pub base_price: u64,
+    pub base_change_rate: f64,
+    pub rank_change: i32,
+}
+
+fn rank_change(magnitude: &str, sign: &str) -> Result<i32, WireError> {
+    let Some(places) = rank_position(magnitude)? else { return Ok(0) };
+    let places = i32::try_from(places).map_err(|_| WireError(format!("순위 변동이 너무 큽니다: {magnitude:?}")))?;
+    match sign.trim() {
+        "-" => Ok(-places),
+        "+" | "" => Ok(places),
+        other => Err(WireError(format!("순위 변동 부호가 아닙니다: {other:?}"))),
+    }
+}
+
+impl MostViewedRankingResponse {
+    pub fn rows(&self) -> ParsedRows<RankRow<MostViewedColumns>> {
+        rank_rows(&self.item_inq_rank, |r| (&r.stk_cd, &r.stk_nm), |r| {
+            Ok(MostViewedColumns {
+                base_price: rank_price(&r.past_curr_prc)?,
+                base_change_rate: rank_rate(&r.base_comp_chgr)?,
+                rank_change: rank_change(&r.rank_chg, &r.rank_chg_sign)?,
+            })
+        }, "ka00198")
+    }
+}
+
+#[cfg(test)]
+mod rank_tests {
+    use super::*;
+
+    fn parse<R: serde::de::DeserializeOwned>(body: Value) -> R {
+        serde_json::from_value(body).unwrap()
+    }
+
+    fn code(s: &str) -> StockCode {
+        StockCode::parse(s).unwrap()
+    }
+
+    #[test]
+    fn trade_value_rows_read_won_rates_ranks_and_convert_million_won() {
+        let r: TradeValueRankingResponse = parse(json!({"trde_prica_upper": [
+            {"stk_cd": "005930", "stk_nm": "삼성전자", "now_rank": "1", "pred_rank": "3", "cur_prc": "-71,200", "pred_pre_sig": "5", "flu_rt": "-3.21", "now_trde_qty": "1,234,567", "trde_prica": "88,000"},
+            {"stk_cd": "000660_NX", "stk_nm": "SK하이닉스", "now_rank": "2", "pred_rank": "", "cur_prc": "--500", "flu_rt": "+29.97", "now_trde_qty": "10", "trde_prica": "1"},
+            {"stk_cd": "bad", "stk_nm": "읽을 수 없음", "cur_prc": "1"},
+        ]}));
+        let parsed = r.rows();
+        assert_eq!(parsed.skipped, 1);
+        assert_eq!(parsed.rows.len(), 2);
+        assert_eq!(parsed.rows[0], RankRow {
+            code: code("005930"),
+            name: "삼성전자".into(),
+            columns: TradeValueColumns { price: 71_200, change_rate: -3.21, trade_value_won: 88_000_000_000, volume: 1_234_567, rank: Some(1), previous_rank: Some(3) },
+        });
+        assert_eq!(parsed.rows[1].code, code("000660"));
+        assert_eq!(parsed.rows[1].columns.price, 500);
+        assert_eq!(parsed.rows[1].columns.change_rate, 29.97);
+        assert_eq!(parsed.rows[1].columns.previous_rank, None);
+        assert_eq!(parsed.rows[1].columns.trade_value_won, 1_000_000);
+    }
+
+    #[test]
+    fn empty_lists_are_empty_and_a_missing_list_is_an_error() {
+        let r: TradeValueRankingResponse = parse(json!({"trde_prica_upper": []}));
+        assert_eq!(r.rows(), ParsedRows { rows: vec![], skipped: 0 });
+        assert!(serde_json::from_value::<TradeValueRankingResponse>(json!({"return_code": 0})).is_err());
+    }
+
+    #[test]
+    fn trading_volume_rows_read_previous_day_ratio_and_turnover() {
+        let r: TradingVolumeRankingResponse = parse(json!({"tdy_trde_qty_upper": [
+            {"stk_cd": "005930_AL", "stk_nm": "삼성전자", "cur_prc": "+71200", "flu_rt": "+1.50", "trde_qty": "5,000", "pred_rt": "-12.50", "trde_tern_rt": "0.31", "trde_amt": "300"},
+            {"stk_cd": "", "stk_nm": "코드 없음", "cur_prc": "1", "flu_rt": "0", "trde_qty": "1", "pred_rt": "0", "trde_tern_rt": "0"},
+        ]}));
+        let parsed = r.rows();
+        assert_eq!(parsed.skipped, 1);
+        assert_eq!(parsed.rows[0].code, code("005930"));
+        assert_eq!(parsed.rows[0].columns, TradingVolumeColumns { price: 71_200, change_rate: 1.5, volume: 5_000, previous_day_ratio: -12.5, turnover_rate: 0.31 });
+    }
+
+    #[test]
+    fn volume_surge_rows_keep_the_sign_of_the_surge() {
+        let r: VolumeSurgeRankingResponse = parse(json!({"trde_qty_sdnin": [
+            {"stk_cd": "035720", "stk_nm": "카카오", "cur_prc": "-48,500", "flu_rt": "-3.21", "now_trde_qty": "900,000", "sdnin_qty": "-300,000", "sdnin_rt": "-25.00"},
+            {"stk_cd": "035420", "stk_nm": "NAVER", "cur_prc": "+200,000", "flu_rt": "+1.00", "now_trde_qty": "2,000", "sdnin_qty": "+1,500", "sdnin_rt": "+300.00"},
+        ]}));
+        let parsed = r.rows();
+        assert_eq!(parsed.skipped, 0);
+        assert_eq!(parsed.rows[0].columns, VolumeSurgeColumns { price: 48_500, change_rate: -3.21, surge_rate: -25.0, surge_volume: -300_000, volume: 900_000 });
+        assert_eq!(parsed.rows[1].columns.surge_volume, 1_500);
+        assert_eq!(parsed.rows[1].columns.surge_rate, 300.0);
+    }
+
+    #[test]
+    fn price_change_rows_read_a_lower_limit_price_as_its_magnitude_and_the_change_as_negative() {
+        let r: PriceChangeRankingResponse = parse(json!({"pred_pre_flu_rt_upper": [
+            {"stk_cd": "123456", "stk_nm": "하한", "cur_prc": "--500", "pred_pre_sig": "4", "pred_pre": "--215", "flu_rt": "-30.00", "now_trde_qty": "1,000"},
+            {"stk_cd": "654321_NX", "stk_nm": "상승", "cur_prc": "+1,300", "pred_pre": "+300", "flu_rt": "+29.97", "now_trde_qty": "2,000"},
+            {"stk_cd": "111111", "stk_nm": "깨진 값", "cur_prc": "abc", "pred_pre": "0", "flu_rt": "0", "now_trde_qty": "0"},
+        ]}));
+        let parsed = r.rows();
+        assert_eq!(parsed.skipped, 1);
+        assert_eq!(parsed.rows[0].columns, PriceChangeColumns { price: 500, change_rate: -30.0, change_won: -215, volume: 1_000 });
+        assert_eq!(parsed.rows[1].code, code("654321"));
+        assert_eq!(parsed.rows[1].columns, PriceChangeColumns { price: 1_300, change_rate: 29.97, change_won: 300, volume: 2_000 });
+    }
+
+    #[test]
+    fn expected_execution_rows_read_the_expected_price_rate_and_quantity() {
+        let r: ExpectedExecutionRankingResponse = parse(json!({"exp_cntr_flu_rt_upper": [
+            {"stk_cd": "005930", "stk_nm": "삼성전자", "exp_cntr_pric": "+72,000", "base_pric": "71,200", "flu_rt": "+1.12", "exp_cntr_qty": "35,000"},
+            {"stk_cd": "000660", "stk_nm": "수량 없음", "exp_cntr_pric": "1,000", "flu_rt": "0.00", "exp_cntr_qty": ""},
+        ]}));
+        let parsed = r.rows();
+        assert_eq!(parsed.skipped, 1);
+        assert_eq!(parsed.rows[0].columns, ExpectedExecutionColumns { expected_price: 72_000, expected_change_rate: 1.12, expected_volume: 35_000 });
+    }
+
+    #[test]
+    fn investor_net_rows_convert_amounts_to_won_and_leave_quantities() {
+        let r: InvestorNetRankingResponse = parse(json!({"opmr_invsr_trde_upper": [
+            {"stk_cd": "005930", "stk_nm": "삼성전자", "sel_qty": "-1,200", "buy_qty": "+3,400", "netslmt": "+2,200"},
+            {"stk_cd": "000660", "stk_nm": "SK하이닉스", "sel_qty": "-500", "buy_qty": "+100", "netslmt": "-400"},
+            {"stk_cd": "x", "stk_nm": "깨짐", "sel_qty": "0", "buy_qty": "0", "netslmt": "0"},
+        ]}));
+        let amounts = r.rows(InvestorUnit::Amount);
+        assert_eq!(amounts.skipped, 1);
+        assert_eq!(amounts.rows[0].columns, InvestorNetColumns { net: 2_200_000_000, bought: 3_400_000_000, sold: 1_200_000_000 });
+        assert_eq!(amounts.rows[1].columns.net, -400_000_000);
+        let shares = r.rows(InvestorUnit::Quantity);
+        assert_eq!(shares.rows[0].columns, InvestorNetColumns { net: 2_200, bought: 3_400, sold: 1_200 });
+        assert_eq!(shares.rows[1].columns.net, -400);
+    }
+
+    #[test]
+    fn foreign_streak_rows_read_daily_shares_with_their_signs() {
+        let r: ForeignStreakRankingResponse = parse(json!({"for_cont_nettrde_upper": [
+            {"stk_cd": "005930_AL", "stk_nm": "삼성전자", "cur_prc": "-71,200", "pred_pre_sig": "5", "dm1": "+1,000", "dm2": "-200", "dm3": "+30", "tot": "+830", "limit_exh_rt": "+52.31"},
+        ]}));
+        let parsed = r.rows();
+        assert_eq!(parsed.skipped, 0);
+        assert_eq!(parsed.rows[0].columns, ForeignStreakColumns { price: 71_200, day_before_1: 1_000, day_before_2: -200, day_before_3: 30, total: 830, limit_exhaustion_rate: 52.31 });
+    }
+
+    #[test]
+    fn program_net_rows_convert_million_won_to_won() {
+        let r: ProgramNetRankingResponse = parse(json!({"prm_netprps_upper_50": [
+            {"rank": "1", "stk_cd": "005930_NX", "stk_nm": "삼성전자", "cur_prc": "+71,200", "flu_sig": "2", "pred_pre": "+200", "flu_rt": "+0.28", "acc_trde_qty": "1,000", "prm_sell_amt": "-100", "prm_buy_amt": "+1,100", "prm_netprps_amt": "+1,000"},
+            {"rank": "2", "stk_cd": "000660", "stk_nm": "SK하이닉스", "cur_prc": "300,000", "flu_rt": "-1.00", "prm_sell_amt": "900", "prm_buy_amt": "100", "prm_netprps_amt": "-800"},
+            {"rank": "3", "stk_cd": "000001", "stk_nm": "금액 없음", "cur_prc": "1", "flu_rt": "0", "prm_sell_amt": "", "prm_buy_amt": "", "prm_netprps_amt": ""},
+        ]}));
+        let parsed = r.rows();
+        assert_eq!(parsed.skipped, 1);
+        assert_eq!(parsed.rows[0].code, code("005930"));
+        assert_eq!(parsed.rows[0].columns, ProgramNetColumns { price: 71_200, change_rate: 0.28, net_won: 1_000_000_000, bought_won: 1_100_000_000, sold_won: 100_000_000 });
+        assert_eq!(parsed.rows[1].columns.net_won, -800_000_000);
+        assert_eq!(parsed.rows[1].columns.change_rate, -1.0);
+    }
+
+    #[test]
+    fn order_book_balance_rows_read_remaining_quantities_and_the_buy_ratio() {
+        let r: OrderBookBalanceRankingResponse = parse(json!({"bid_req_upper": [
+            {"stk_cd": "005930", "stk_nm": "삼성전자", "cur_prc": "-71,200", "pred_pre": "-800", "trde_qty": "100", "tot_sel_req": "1,000", "tot_buy_req": "4,000", "netprps_req": "+3,000", "buy_rt": "80.00"},
+            {"stk_cd": "000660", "stk_nm": "SK하이닉스", "cur_prc": "300,000", "tot_sel_req": "5,000", "tot_buy_req": "1,000", "netprps_req": "-4,000", "buy_rt": "16.67"},
+        ]}));
+        let parsed = r.rows();
+        assert_eq!(parsed.skipped, 0);
+        assert_eq!(parsed.rows[0].columns, OrderBookBalanceColumns { price: 71_200, total_sell: 1_000, total_buy: 4_000, net_buy: 3_000, buy_ratio: 80.0 });
+        assert_eq!(parsed.rows[1].columns.net_buy, -4_000);
+    }
+
+    #[test]
+    fn credit_ratio_rows_read_the_ratio_and_volume() {
+        let r: CreditRatioRankingResponse = parse(json!({"crd_rt_upper": [
+            {"stk_infr": "", "stk_cd": "005930", "stk_nm": "삼성전자", "cur_prc": "+71,200", "flu_rt": "+0.50", "crd_rt": "+12.34", "now_trde_qty": "1,000"},
+            {"stk_cd": "0059", "stk_nm": "짧은 코드", "cur_prc": "1", "flu_rt": "0", "crd_rt": "0", "now_trde_qty": "0"},
+        ]}));
+        let parsed = r.rows();
+        assert_eq!(parsed.skipped, 1);
+        assert_eq!(parsed.rows[0].columns, CreditRatioColumns { price: 71_200, change_rate: 0.5, credit_ratio: 12.34, volume: 1_000 });
+    }
+
+    #[test]
+    fn most_viewed_rows_read_rank_change_from_its_sign_and_treat_blank_as_unchanged() {
+        let r: MostViewedRankingResponse = parse(json!({"item_inq_rank": [
+            {"stk_cd": "005930", "stk_nm": "삼성전자", "bigd_rank": "1", "rank_chg": "3", "rank_chg_sign": "+", "past_curr_prc": "-71,200", "base_comp_sign": "5", "base_comp_chgr": "-1.25"},
+            {"stk_cd": "000660_AL", "stk_nm": "SK하이닉스", "bigd_rank": "2", "rank_chg": "2", "rank_chg_sign": "-", "past_curr_prc": "+300,000", "base_comp_chgr": "+0.10"},
+            {"stk_cd": "035720", "stk_nm": "카카오", "bigd_rank": "0", "rank_chg": "", "rank_chg_sign": "", "past_curr_prc": "48,500", "base_comp_chgr": "0.00"},
+            {"stk_cd": "", "stk_nm": "코드 없음", "past_curr_prc": "1", "base_comp_chgr": "0"},
+        ]}));
+        let parsed = r.rows();
+        assert_eq!(parsed.skipped, 1);
+        assert_eq!(parsed.rows[0].columns, MostViewedColumns { base_price: 71_200, base_change_rate: -1.25, rank_change: 3 });
+        assert_eq!(parsed.rows[1].columns.rank_change, -2);
+        assert_eq!(parsed.rows[1].code, code("000660"));
+        assert_eq!(parsed.rows[2].columns.rank_change, 0);
     }
 }
 
@@ -1747,8 +2401,10 @@ mod tests {
         assert_eq!(kind_of(&l, "0000D0"), Some((Etf, Kospi)));
         assert_eq!(kind_of(&l, "102780"), Some((Etf, Kospi)));
         assert_eq!(kind_of(&l, "0030R0"), Some((Reit, Kospi)));
-        for excluded in ["088980", "094800", "520100", "500095", "520066"] {
-            assert_eq!(kind_of(&l, excluded), None, "{excluded}");
+        assert_eq!(kind_of(&l, "088980"), Some((Infrastructure, Kospi)));
+        assert_eq!(kind_of(&l, "094800"), Some((MutualFund, Kospi)));
+        for etn in ["520100", "500095", "520066"] {
+            assert_eq!(kind_of(&l, etn), Some((Etn, Kospi)), "{etn}");
         }
         assert!(l.iter().all(|(_, x)| !matches!(x, Listing::Unknown(_))));
     }
@@ -1846,6 +2502,15 @@ mod tests {
         assert_eq!(kinds("12345K", "가나스팩", "10"), [Spac]);
         assert_eq!(kinds("005930", "가나스팩", "0"), [], "스팩 제외는 코스닥 보통주에만 붙는다");
         assert_eq!(kinds("005930", "가상", "0"), []);
+    }
+
+    #[test]
+    fn etn_infrastructure_and_mutual_fund_rows_make_no_screener_listing() {
+        for (code, market_code) in [("088980", "2"), ("094800", "4"), ("520100", "60"), ("520066", "70"), ("500095", "90")] {
+            let row = ListingRow { code: code.into(), name: "가상".into(), market_code: market_code.into(), ..Default::default() };
+            let Listing::Include(info) = classify(&row) else { panic!("{code}") };
+            assert!(screener_listing(&row, &info).is_none(), "{code}");
+        }
     }
 
     #[test]

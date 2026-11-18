@@ -14,6 +14,7 @@ import type { DockInteraction } from "./dockInteraction";
 import { WINDOW_CONTENT } from "./contents";
 import { LinkDot } from "./LinkDot";
 import { closeWindow, LAST_CHART_REASON } from "./manage";
+import { WindowSymbol } from "./WindowSymbol";
 import { focusWithoutActivation, revealTab } from "./focus";
 
 export const tabId = (window: WindowId) => `window-tab-${window}`;
@@ -38,7 +39,7 @@ function ChartTabLabel({ id }: { id: WindowId }) {
 
 function OtherTabLabel({ window }: { window: WindowState }) {
   const name = useWindowName(window);
-  return <><span className="dock-tab-name">{name}</span>{window.kind === "screener" && <ScreenerBadge />}{showsIntegratedBadge(window.kind) && <IntegratedBadge />}</>;
+  return <><span className="dock-tab-name">{name}</span>{window.kind === "screener" && <ScreenerBadge id={window.id} />}{showsIntegratedBadge(window.kind) && <IntegratedBadge />}</>;
 }
 
 function TabLabel({ window }: { window: WindowState }) {
@@ -123,6 +124,7 @@ export function DockGroup({ group, rect, number, interaction, maximized, onToggl
                 <TabLabel window={window} />
               </button>
               <LinkDot window={window} selected={selected} />
+              <WindowSymbol window={window} selected={selected} />
               <CloseTab window={window} selected={selected} onClosed={() => focusShownTab(group.id)} />
             </span>
           );

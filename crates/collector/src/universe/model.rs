@@ -96,7 +96,6 @@ pub fn classify_rows(rows: &[ListingRow]) -> Classified {
     for row in rows {
         let info = match classify(row) {
             Listing::Include(info) => info,
-            Listing::Exclude => continue,
             Listing::Unknown(why) => {
                 warnings.push(why);
                 continue;
@@ -106,7 +105,7 @@ pub fn classify_rows(rows: &[ListingRow]) -> Classified {
             SymbolKind::Common if row.is_spac() => StockKind::Spac,
             SymbolKind::Common => StockKind::Common,
             SymbolKind::Preferred => StockKind::Preferred,
-            SymbolKind::Etf | SymbolKind::Reit | SymbolKind::Index => continue,
+            SymbolKind::Etf | SymbolKind::Reit | SymbolKind::Etn | SymbolKind::Infrastructure | SymbolKind::MutualFund | SymbolKind::Index => continue,
         };
         let market = match info.market {
             Market::Kospi => MarketName::Kospi,

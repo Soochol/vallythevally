@@ -570,6 +570,10 @@ async fn when_the_state_file_cannot_be_removed_after_deletion_memory_and_file_st
     std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o500)).unwrap();
     let (status, _) = connector.post("/api/account/delete", &json!({"confirm": true})).await;
     assert_eq!(status, 500);
+    let setup_requests_before_sync = accounts.setup_requests();
+    let (sync_status, _) = connector.post("/api/account/sync", &json!({})).await;
+    assert_eq!(sync_status, 409, "401을 받은 동기화는 로그인 상태가 아니라고 답한다");
+    assert!(accounts.setup_requests() > setup_requests_before_sync, "계정 서버가 동기화 요청을 받아야 401 경로가 돈 것이다");
     assert_eq!(connector.status().await["state"], "signed_in", "파일이 남았으니 메모리도 로그인 상태다");
     assert!(machine.state_file().is_some());
     std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700)).unwrap();

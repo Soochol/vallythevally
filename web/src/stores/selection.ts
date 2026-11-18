@@ -18,7 +18,7 @@ export type IndicatorCommandMode = "current" | "add" | "compare";
 export type Dialog =
   | { kind: "search"; purpose: SearchPurpose }
   | { kind: "indicatorCommand"; cellId: WindowId; mode: IndicatorCommandMode; indicatorId: string | null }
-  | { kind: "screen" }
+  | { kind: "screen"; window: WindowId | null }
   | { kind: "financial-update" }
   | { kind: "system-settings"; menu: SystemMenuId | null };
 export type InspectorRequest = { cellId: WindowId; mode: IndicatorCommandMode; indicatorId: string | null };
@@ -38,7 +38,7 @@ interface SelectionState {
   openIndicatorDialog(cellId: WindowId, mode: IndicatorCommandMode, indicatorId: string | null): void;
   openIndicatorInspector(cellId: WindowId, mode: IndicatorCommandMode, indicatorId: string | null): void;
   takeInspectorRequest(): InspectorRequest | null;
-  openScreenEditor(): void;
+  openScreenEditor(window: WindowId | null): void;
   openFinancialUpdate(): void;
   openSystemSettings(menu: SystemMenuId | null): void;
   closeDialog(): void;
@@ -75,7 +75,7 @@ export const useSelectionStore = create<SelectionState>()((set, get) => ({
     if (request) set({ inspector: null });
     return request;
   },
-  openScreenEditor: () => set({ dialog: { kind: "screen" } }),
+  openScreenEditor: (window) => set({ dialog: { kind: "screen", window } }),
   openFinancialUpdate: () => set({ dialog: { kind: "financial-update" } }),
   openSystemSettings: (menu) => set({ dialog: { kind: "system-settings", menu } }),
   closeDialog: () => set({ dialog: null }),

@@ -13,6 +13,9 @@ export const KIND_LABEL: Record<SymbolKind, string> = {
   preferred: "우선주",
   etf: "ETF",
   reit: "리츠",
+  etn: "ETN",
+  infrastructure: "인프라",
+  mutualFund: "뮤추얼펀드",
 };
 
 /** 이름 옆에 붙는 보조 글자: 주식은 코드, 지수는 `지수`. */

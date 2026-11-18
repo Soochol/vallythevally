@@ -380,3 +380,17 @@ test("+종목으로 연 검색에서도 별이 같은 일을 하고 창은 열�
   await expect(watchlist.locator('li[data-code="005930"]')).toHaveCount(0);
   await expect(cell(page)).toHaveAttribute("aria-label", before!);
 });
+
+test("종류가 ETN인 종목은 검색 결과에 종류 이름 ETN과 함께 보인다", async ({ page, scenario }) => {
+  const etn = { code: "520100", name: "합성 레버리지 ETN", market: "kospi", kind: "etn", nxtEnabled: false };
+  scenario.on("/api/symbols", request => ({ body: (new URL(request.url()).searchParams.get("q") ?? "") === "520100" ? [etn] : [] }));
+  scenario.reply("/api/symbols/520100", { body: etn });
+  await page.goto("/");
+  await expect(cell(page)).toHaveAttribute("aria-busy", "false");
+  await page.getByTitle(SEARCH_BUTTON_TITLE).click();
+  const dialog = page.getByRole("dialog", { name: "종목 검색" });
+  await dialog.getByRole("combobox", { name: "종목 검색" }).fill("520100");
+  const row = dialog.getByRole("option").filter({ hasText: "520100" });
+  await expect(row).toHaveAttribute("aria-disabled", "false");
+  await expect(row.getByText("ETN", { exact: true })).toBeVisible();
+});
