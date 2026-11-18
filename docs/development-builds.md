@@ -45,7 +45,7 @@ flock "$(git rev-parse --path-format=absolute --git-common-dir)/compile.lock" en
 cargo test --locked -p server --test contract
 ```
 
-시간에 민감한 Rust 서버 시험의 부하·타이밍 재현도 PC 전체에 부하를 걸지 않고 다음 수단으로 한다. 결정적 방법은 합성 transport의 `delay`(`crates/server/tests/support/mod.rs`, 시험에서 `fake.delay`)로 응답을 늦추고, `VALLY_CLOCK_START`와 `clock().jump`로 시계를 옮기는 것이다. 그 실행에만 거는 제한은 실행만 코어 몇 개에 묶는 것이다. 먼저 제한 없이 한 번 돌려 컴파일해 둔 뒤 다음처럼 돌린다. 필요하면 `RUST_TEST_THREADS`를 함께 정한다. 컴파일까지 묶으면 컴파일만 느려진다.
+시간에 민감한 Rust 서버 시험의 부하·타이밍 재현도 PC 전체에 부하를 걸지 않고 다음 수단으로 한다. 결정적 방법은 합성 transport의 `delay`(`crates/server/tests/support/mod.rs`, 시험에서 `fake.delay`)로 응답을 늦추고, `fake.hold`로 조건에 맞는 요청을 붙잡았다가 시험이 `arrived`를 기다린 뒤 `release`로 풀고, `VALLY_CLOCK_START`와 `clock().jump`로 시계를 옮기는 것이다. 그 실행에만 거는 제한은 실행만 코어 몇 개에 묶는 것이다. 먼저 제한 없이 한 번 돌려 컴파일해 둔 뒤 다음처럼 돌린다. 필요하면 `RUST_TEST_THREADS`를 함께 정한다. 컴파일까지 묶으면 컴파일만 느려진다.
 
 ```sh
 taskset -c 0-1 python3 scripts/dev.py cargo test -p server --test <이름>
