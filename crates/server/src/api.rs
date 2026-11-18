@@ -215,6 +215,7 @@ pub enum ServerMessage {
         trades: Vec<FeedTrade>,
     },
     FeedBook { sub: String, book: FeedBook },
+    FeedAfterHours { sub: String, totals: FeedAfterHoursTotals },
     FeedProgram { sub: String, row: FeedProgramRow },
     FeedBrokers { sub: String, brokers: FeedBrokers },
     FeedLink { sub: String, live: bool, at: UnixSeconds },
@@ -305,6 +306,17 @@ pub struct FeedBook {
     #[ts(type = "number")]
     pub total_bid_qty: u64,
     pub expected: Option<FeedExpected>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct FeedAfterHoursTotals {
+    pub t: UnixSeconds,
+    #[ts(type = "number")]
+    pub ask_qty: u64,
+    #[ts(type = "number")]
+    pub bid_qty: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
@@ -813,6 +825,10 @@ pub struct OrderBook {
     pub total_ask_quantity: u64,
     #[ts(type = "number")]
     pub total_bid_quantity: u64,
+    #[ts(type = "number | null")]
+    pub after_hours_ask_quantity: Option<u64>,
+    #[ts(type = "number | null")]
+    pub after_hours_bid_quantity: Option<u64>,
     /// 호가 기준 시각 `HH:MM:SS`(KST). 키움은 날짜를 주지 않는다. 없으면 null.
     pub book_time: Option<String>,
 }

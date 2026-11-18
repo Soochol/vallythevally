@@ -28,6 +28,8 @@ function snapshotOf(base: number): OrderBook {
     bids: Array.from({ length: 10 }, (_, i) => ({ price: base - 100 * i, quantity: 20 + i })),
     totalAskQuantity: 1000,
     totalBidQuantity: 3000,
+    afterHoursAskQuantity: null,
+    afterHoursBidQuantity: null,
     bookTime: null,
   };
 }
@@ -434,6 +436,80 @@ test.describe("동시호가 예상체결", () => {
       await expect(page.locator("[data-expected]")).toHaveCount(0);
       await expect(info(page, "상한가")).toHaveCount(1);
       await expect(info(page, "하한가")).toHaveCount(1);
+    });
+  });
+});
+
+test.describe("시간외 종가 잔량", () => {
+  const afterHours = (scenario: Scenario, askQty: number, bidQty: number) => ({ t: scenario.now / 1000, askQty, bidQty });
+  const unavailable = { status: 503, body: { error: { code: "internal", message: "호가 없음", reason: null, retryAt: null, manualActionRequired: false } } };
+  const strip = (page: Page) => book(page).locator(".mw-strip");
+
+  test.beforeEach(async ({ page, scenario }) => {
+    await page.clock.setFixedTime(new Date(scenario.now));
+  });
+
+  test.describe("수요일 08:35", () => {
+    test.use({ clockStart: "20261118083500" });
+
+    test("사다리가 없어도 빈 상태 아래 띠의 총잔량 자리에 시간외 잔량이 보인다", async ({ page, scenario }) => {
+      bookWindow(scenario, CODE);
+      replyBook(scenario, 70000);
+      scenario.reply((url) => url.pathname === "/api/symbols/005930/order-book", unavailable);
+      await page.goto("/");
+      await expect(cell(page)).toHaveAttribute("aria-busy", "false");
+      await windowTabs(page).getByRole("tab", { name: /^10호가/ }).click();
+      await expect(book(page).getByText("호가를 불러오지 못했습니다")).toBeVisible();
+      await expect(page.getByTestId("book-total-ask")).toHaveText("-");
+      const bookSub = await subOf(scenario, "book");
+      scenario.live.emit({ type: "feed_after_hours", sub: bookSub, totals: afterHours(scenario, 13_770, 0) });
+      await expect(page.getByTestId("book-total-ask")).toHaveAttribute("data-source", "after-hours");
+      await expect(page.getByTestId("book-total-ask")).toContainText("시간외");
+      await expect(page.getByTestId("book-total-ask")).toContainText("13,770주");
+      await expect(page.getByTestId("book-total-bid")).toContainText("0주");
+      await expect(book(page).getByText("호가를 불러오지 못했습니다")).toBeVisible();
+    });
+
+    test("조회 값이 먼저 보이고 실시간 값이 오면 실시간 값으로 바뀐다", async ({ page, scenario }) => {
+      bookWindow(scenario, CODE);
+      replyBook(scenario, 70000);
+      scenario.reply((url) => url.pathname === "/api/symbols/005930/order-book", { body: { ...snapshotOf(70000), afterHoursAskQuantity: 5000, afterHoursBidQuantity: 0 } });
+      await page.goto("/");
+      await expect(cell(page)).toHaveAttribute("aria-busy", "false");
+      await windowTabs(page).getByRole("tab", { name: /^10호가/ }).click();
+      await expect(page.getByTestId("book-total-ask")).toContainText("5,000주");
+      const bookSub = await subOf(scenario, "book");
+      scenario.live.emit({ type: "feed_after_hours", sub: bookSub, totals: afterHours(scenario, 6000, 0) });
+      await expect(page.getByTestId("book-total-ask")).toContainText("6,000주");
+    });
+
+    test("사다리와 함께 와도 숫자는 시간외 잔량이고 정규 총잔량은 title에 있으며 띠 높이는 같다", async ({ page, scenario }) => {
+      await open(page, scenario, 70000);
+      const bookSub = await subOf(scenario, "book");
+      scenario.live.emit({ type: "feed_book", sub: bookSub, book: { ...liveOf([[70100, 50]], [[70000, 80]], [90, 140]), t: scenario.now / 1000 } });
+      await expect(page.getByTestId("book-total-ask")).toHaveText("90주");
+      const before = (await strip(page).boundingBox())!;
+      scenario.live.emit({ type: "feed_after_hours", sub: bookSub, totals: afterHours(scenario, 13_770, 0) });
+      await expect(page.getByTestId("book-total-ask")).toHaveAttribute("data-source", "after-hours");
+      await expect(page.getByTestId("book-total-ask")).toContainText("13,770주");
+      await expect(page.getByTestId("book-total-ask")).toHaveAttribute("title", /정규 총잔량 매도 90주 · 매수 140주/);
+      await expect(page.getByRole("img", { name: /정규 총잔량 매도 90주 · 매수 140주/ })).toHaveCount(1);
+      const after = (await strip(page).boundingBox())!;
+      expect(after.height).toBe(before.height);
+    });
+  });
+
+  test.describe("수요일 10:00", () => {
+    test.use({ clockStart: "20261118100000" });
+
+    test("시간외 시간이 아니면 정규 총잔량이고 시간외 글자가 없다", async ({ page, scenario }) => {
+      await open(page, scenario, 70000);
+      const bookSub = await subOf(scenario, "book");
+      scenario.live.emit({ type: "feed_book", sub: bookSub, book: { ...liveOf([[70100, 50]], [[70000, 80]], [90, 140]), t: scenario.now / 1000 } });
+      scenario.live.emit({ type: "feed_after_hours", sub: bookSub, totals: afterHours(scenario, 13_770, 0) });
+      await expect(page.getByTestId("book-total-ask")).toHaveAttribute("data-source", "regular");
+      await expect(page.getByTestId("book-total-ask")).toHaveText("90주");
+      await expect(book(page)).not.toContainText("시간외");
     });
   });
 });

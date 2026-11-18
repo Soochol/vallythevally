@@ -174,7 +174,8 @@ impl SubscriptionManager {
     fn kinds_to_receive(&self, symbol: Symbol) -> BTreeSet<RealType> {
         let held = self.holders.get(&symbol).into_iter().flatten().filter_map(Holder::feed_kind);
         let in_grace = self.kind_released_at.keys().filter(|(s, _)| *s == symbol).map(|(_, kind)| *kind);
-        std::iter::once(RealType::of(symbol)).chain(held).chain(in_grace).collect()
+        let feeds: Vec<RealType> = held.chain(in_grace).collect();
+        std::iter::once(RealType::of(symbol)).chain(feeds.iter().copied()).chain(feeds.iter().filter_map(|kind| kind.companion())).collect()
     }
 
     fn make_room(&mut self, rank: Rank) -> bool {
@@ -484,14 +485,18 @@ mod tests {
         plan.feeds.get(&stock(i)).cloned().unwrap_or_default()
     }
 
+    fn with_book() -> BTreeSet<RealType> {
+        BTreeSet::from([RealType::Trade, RealType::Book, RealType::AfterHours])
+    }
+
     #[test]
     fn book_holder_adds_book_type_for_its_symbol_only() {
         let mut m = SubscriptionManager::default();
         m.set_watch(ConnId(1), stocks(0..2), t(0));
         m.hold(stock(0), feed(2, "b", RealType::Book));
         let plan = m.plan(t(0));
-        assert_eq!(kinds(&plan, 0), BTreeSet::from([RealType::Trade, RealType::Book]));
-        assert_eq!(kinds(&plan, 1), BTreeSet::from([RealType::Trade]), "관심종목 종목에는 0D가 들지 않는다");
+        assert_eq!(kinds(&plan, 0), with_book());
+        assert_eq!(kinds(&plan, 1), BTreeSet::from([RealType::Trade]), "관심종목 종목에는 0D와 0E가 들지 않는다");
     }
 
     #[test]
@@ -519,13 +524,25 @@ mod tests {
     }
 
     #[test]
+    fn adding_a_book_feed_to_a_full_plan_keeps_the_slots_and_rejects_nothing_more() {
+        let mut m = SubscriptionManager::default();
+        fill(&mut m, REALTIME_LIMIT);
+        let before = m.plan(t(0));
+        assert_eq!((before.realtime.len(), before.rejected.len()), (REALTIME_LIMIT, 0));
+        m.hold(stock(0), feed(2, "b", RealType::Book));
+        let plan = m.plan(t(1));
+        assert_eq!((plan.realtime.len(), plan.rejected.len()), (REALTIME_LIMIT, 0));
+        assert_eq!(kinds(&plan, 0), with_book());
+    }
+
+    #[test]
     fn released_feed_type_is_kept_for_the_grace_period() {
         let mut m = SubscriptionManager::default();
         m.hold(stock(0), cell(1, "chart"));
         m.hold(stock(0), feed(2, "b", RealType::Book));
         m.plan(t(0));
         m.release(stock(0), &feed(2, "b", RealType::Book), t(0));
-        assert_eq!(kinds(&m.plan(t(29)), 0), BTreeSet::from([RealType::Trade, RealType::Book]), "30초 유예 동안 0D를 유지한다");
+        assert_eq!(kinds(&m.plan(t(29)), 0), with_book(), "30초 유예 동안 0D와 0E를 유지한다");
         assert_eq!(kinds(&m.plan(t(30)), 0), BTreeSet::from([RealType::Trade]));
     }
 
@@ -536,7 +553,7 @@ mod tests {
         m.hold(stock(0), feed(2, "b", RealType::Book));
         m.plan(t(0));
         m.release(stock(0), &feed(1, "a", RealType::Book), t(0));
-        assert_eq!(kinds(&m.plan(t(100)), 0), BTreeSet::from([RealType::Trade, RealType::Book]));
+        assert_eq!(kinds(&m.plan(t(100)), 0), with_book());
     }
 
     #[test]
@@ -547,7 +564,7 @@ mod tests {
         m.plan(t(0));
         m.release(stock(0), &feed(2, "b", RealType::Book), t(0));
         m.hold(stock(0), feed(3, "b2", RealType::Book));
-        assert_eq!(kinds(&m.plan(t(60)), 0), BTreeSet::from([RealType::Trade, RealType::Book]));
+        assert_eq!(kinds(&m.plan(t(60)), 0), with_book());
     }
 
     #[test]

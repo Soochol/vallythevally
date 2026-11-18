@@ -83,6 +83,8 @@ export function snapshot(base: number) {
     bids: Array.from({ length: 10 }, (_, i) => ({ price: base - 100 * i, quantity: 20 + i })),
     totalAskQuantity: 1000,
     totalBidQuantity: 3000,
+    afterHoursAskQuantity: null,
+    afterHoursBidQuantity: null,
     bookTime: null,
   };
 }
