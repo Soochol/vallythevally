@@ -54,6 +54,7 @@ const isWindowKind = (k: unknown): k is WindowKind => typeof k === "string" && O
 
 function isDraftWindow(w: unknown): w is LayoutWindow {
   if (!isFields(w) || typeof w.id !== "string" || !WINDOW_ID.test(w.id) || !DRAFT_LINKS.includes(w.link) || !isWindowKind(w.kind)) return false;
+  if (w.kind === "order") return w.venue === "combined" || w.venue === "krx" || w.venue === "nxt";
   return w.kind !== "chart" || (typeof w.symbol === "string" && typeof w.period === "string" && (w.venue === null || typeof w.venue === "string") && "chartSettings" in w);
 }
 
@@ -139,6 +140,7 @@ async function openLayout(src: RestoreSources, id: string | null): Promise<Layou
 }
 
 function restoreWindow(raw: LayoutWindow): WindowState {
+  if (raw.kind === "order") return { id: windowId(raw.id), link: raw.link, kind: raw.kind, venue: raw.venue };
   if (raw.kind !== "chart") return { id: windowId(raw.id), link: raw.link, kind: raw.kind };
   const { venue: _venue, ...chart } = raw;
   return { ...chart, id: windowId(raw.id), chartSettings: parseChartSettings(raw.chartSettings) };

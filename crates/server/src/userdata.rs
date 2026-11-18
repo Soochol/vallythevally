@@ -185,6 +185,11 @@ fn read_window(r: &SqliteRow) -> Result<LayoutWindow, StoreError> {
                 chart_settings: serde_json::from_str(&chart_settings).map_err(|e| corrupt("chart_settings", e))?,
             }
         }
+        "order" => {
+            let venue: Option<String> = r.get("venue");
+            let Some(venue) = venue else { return Err(corrupt("호가주문 창", id.as_str())) };
+            WindowContent::Order { venue: from_wire_name("venue", venue)? }
+        }
         _ => serde_json::from_value(serde_json::json!({ "kind": kind })).map_err(|e| corrupt("창 종류", e))?,
     };
     Ok(LayoutWindow { id, link: link.map(|l| from_wire_name("link", l)).transpose()?, content })
@@ -267,8 +272,9 @@ pub(crate) async fn store_layout(tx: &mut SqliteConnection, input: &LayoutInput,
     for (position, w) in input.windows.iter().enumerate() {
         let (symbol, venue, period, chart_settings) = match &w.content {
             WindowContent::Chart { feed, period, chart_settings } => {
-                (Some(feed.0.symbol().as_wire()), feed.0.venue().map(|v| v.as_wire()), Some(wire_name(period)), Some(chart_settings.to_string()))
+                (Some(feed.0.symbol().as_wire()), feed.0.venue().map(|v| v.as_wire().to_owned()), Some(wire_name(period)), Some(chart_settings.to_string()))
             }
+            WindowContent::Order { venue } => (None, Some(wire_name(venue)), None, None),
             WindowContent::Watchlist
             | WindowContent::Screener
             | WindowContent::Objects
@@ -697,7 +703,7 @@ mod tests {
     }
 
     fn market_windows() -> Vec<LayoutWindow> {
-        vec![side(WindowContent::Trades), side(WindowContent::Book), side(WindowContent::Program), side(WindowContent::Brokers)]
+        vec![side(WindowContent::Trades), side(WindowContent::Book), side(WindowContent::Program), side(WindowContent::Brokers), side(WindowContent::Order { venue: Venue::Nxt })]
     }
 
     #[sqlx::test(migrations = "./migrations")]
@@ -707,10 +713,11 @@ mod tests {
         windows.extend(market_windows());
         windows[1].link = Some(LinkColor::A);
         windows[4].link = Some(LinkColor::J);
+        windows[5].link = Some(LinkColor::B);
         put_layout(&db, &layout("L2", "시세 창", windows.clone()), UnixSeconds(100)).await.unwrap();
         let read = get_layout(&db, "L2").await.unwrap();
         assert_eq!(read.windows, windows);
-        assert_eq!(kinds(&read).iter().map(|(_, kind, _)| kind.as_str()).collect::<Vec<_>>(), ["chart", "trades", "book", "program", "brokers"]);
+        assert_eq!(kinds(&read).iter().map(|(_, kind, _)| kind.as_str()).collect::<Vec<_>>(), ["chart", "trades", "book", "program", "brokers", "order"]);
     }
 
     #[test]
@@ -718,7 +725,7 @@ mod tests {
         let mut windows = vec![chart("c", "005930", Some(Venue::Krx))];
         windows.extend(market_windows());
         assert!(crate::user_routes::check_layout("L2", &layout("L2", "넷", windows.clone())).is_ok());
-        for kind in [WindowContent::Trades, WindowContent::Book, WindowContent::Program, WindowContent::Brokers] {
+        for kind in [WindowContent::Trades, WindowContent::Book, WindowContent::Program, WindowContent::Brokers, WindowContent::Order { venue: Venue::Krx }] {
             let mut twice = windows.clone();
             twice.push(LayoutWindow { id: window_id("again"), link: None, content: kind.clone() });
             assert!(crate::user_routes::check_layout("L2", &layout("L2", "둘", twice)).is_err(), "{kind:?}");

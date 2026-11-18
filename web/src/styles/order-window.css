@@ -1,0 +1,52 @@
+.od { display:flex; flex:1; flex-direction:column; min-height:0; overflow:hidden; }
+.od-gate { display:flex; align-items:center; gap:var(--s3); padding:var(--s3) var(--s4); background:color-mix(in srgb, var(--warning) 14%, transparent); color:var(--text); font-size:var(--fs-xs); }
+.od-gate span { flex:1; }
+.od-link { color:var(--accent); font-size:var(--fs-xs); font-weight:600; }
+.od-link:hover { text-decoration:underline; }
+.od-link:disabled { color:var(--text-3); text-decoration:none; }
+
+.od-ladder-wrap { display:flex; flex-direction:column; min-height:var(--size-120); }
+.od-ladder { position:relative; flex:1; min-height:0; overflow:auto; }
+.od-ladder[data-dragging] { cursor:grabbing; user-select:none; }
+.od-cell { position:relative; display:flex; align-items:center; justify-content:center; width:var(--size-64); height:var(--size-20); border-radius:var(--r-s); }
+.od-cell[data-order-cell] { border:var(--size-1) solid var(--line); cursor:pointer; }
+.od-cell[data-order-cell][data-side=sell] { background:color-mix(in srgb, var(--down) 7%, transparent); }
+.od-cell[data-order-cell][data-side=buy] { background:color-mix(in srgb, var(--up) 7%, transparent); }
+.od-cell[data-order-cell]:hover:not([data-disabled]) { border-color:var(--line-strong); }
+.od-cell[data-disabled] { cursor:not-allowed; opacity:.45; }
+.od-cell[data-target] { box-shadow:inset 0 0 0 2px var(--accent); }
+.od-preview { color:var(--text-2); font-size:var(--size-10); font-weight:600; pointer-events:none; white-space:nowrap; }
+.od-chip { width:100%; height:100%; border-radius:var(--r-s); font-size:var(--size-11); font-weight:700; cursor:grab; touch-action:none; color:var(--text); }
+.od-chip[data-side=sell] { background:color-mix(in srgb, var(--down) 38%, transparent); }
+.od-chip[data-side=buy] { background:color-mix(in srgb, var(--up) 38%, transparent); }
+.od-chip[data-dragging] { opacity:.4; }
+.od-ghost { position:fixed; z-index:60; transform:translate(var(--size-10), var(--size-10)); padding:var(--size-2) var(--s3); border-radius:var(--r-m); background:var(--raised); box-shadow:0 2px 10px rgb(0 0 0 / .35); color:var(--text); font-size:var(--fs-xs); pointer-events:none; white-space:nowrap; }
+.od-ghost[data-side=sell] b { color:var(--down); } .od-ghost[data-side=buy] b { color:var(--up); }
+
+.od-totals { display:flex; flex:none; gap:var(--s3); padding:var(--s3) var(--s4); border-top:var(--size-1) solid var(--line); }
+.od-total { flex:1; padding:var(--s2) var(--s3); border-radius:var(--r-m); background:var(--raised); color:var(--text-2); font-size:var(--fs-xs); text-align:left; }
+.od-total:hover { background:var(--hover); }
+.od-total[data-side=sell] b { color:var(--down); } .od-total[data-side=buy] b { color:var(--up); }
+.od-list { flex:none; max-height:var(--size-84); margin:0; padding:var(--s2) var(--s4); overflow:auto; list-style:none; font-size:var(--fs-xs); }
+.od-list li { display:flex; align-items:center; gap:var(--s4); height:var(--size-24); }
+.od-list li[data-side=sell] > span:first-child { color:var(--down); } .od-list li[data-side=buy] > span:first-child { color:var(--up); }
+.od-list li button { margin-left:auto; }
+.od-list-empty { margin:0; color:var(--text-3); }
+
+.od-qty { display:flex; flex:none; flex-direction:column; gap:var(--s3); padding:var(--s3) var(--s4); border-top:var(--size-1) solid var(--line); }
+.od-qty-line { display:flex; align-items:center; gap:var(--s3); flex-wrap:wrap; }
+.od-qty-label { color:var(--text-3); font-size:var(--fs-xs); }
+.od-qty-input { width:var(--size-120); height:var(--size-26); padding:0 var(--s3); border:var(--size-1) solid var(--line-strong); border-radius:var(--r-m); background:transparent; color:var(--text); font-size:var(--fs-s); text-align:right; font-variant-numeric:tabular-nums; }
+.od-qty-input:focus { border-color:var(--accent); outline:0; }
+.od-presets { display:flex; gap:var(--s2); }
+.od-preset { height:var(--size-24); padding:0 var(--s3); border-radius:var(--r-s); background:var(--raised); color:var(--text-2); font-size:var(--fs-xs); }
+.od-preset:hover { background:var(--hover); color:var(--text); }
+.od-estimate { color:var(--text-3); font-size:var(--fs-xs); }
+.od-estimate b { color:var(--text); font-weight:600; }
+
+.od-status { display:flex; flex:none; align-items:center; gap:var(--s3); min-height:var(--size-28); padding:var(--s2) var(--s4); border-top:var(--size-1) solid var(--line); color:var(--text-2); font-size:var(--fs-xs); }
+.od-status-text { flex:1; }
+.od-status[data-tone=ok] .od-status-text { color:var(--success); }
+.od-status[data-tone=error] .od-status-text { color:var(--danger); }
+.od-status[data-tone=warn] .od-status-text { color:var(--warning); }
+.od-queue { color:var(--text-3); }

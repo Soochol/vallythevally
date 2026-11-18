@@ -2,6 +2,7 @@ import type { ComponentType } from "react";
 import type { WindowId, WindowKind } from "../../layout/kinds";
 import { BookWindow } from "../book/BookWindow";
 import { BrokersWindow } from "../brokers/BrokersWindow";
+import { OrderWindow } from "../order/OrderWindow";
 import { ObjectList } from "../drawings/ObjectList";
 import { IndicatorInspector } from "../indicator-inspector/IndicatorInspector";
 import { ProgramWindow } from "../program/ProgramWindow";
@@ -22,4 +23,5 @@ export const WINDOW_CONTENT: { readonly [K in WindowKind]: WindowContent } = {
   book: { Content: BookWindow, overflow: "hidden" },
   program: { Content: ProgramWindow, overflow: "hidden" },
   brokers: { Content: BrokersWindow, overflow: "hidden" },
+  order: { Content: OrderWindow, overflow: "hidden" },
 };

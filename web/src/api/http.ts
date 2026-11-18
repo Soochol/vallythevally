@@ -124,6 +124,7 @@ export async function deleteJson(path: string, opts: SendOptions = {}): Promise<
 export interface SendOptions {
   signal?: AbortSignal;
   keepalive?: boolean;
+  headers?: Record<string, string>;
 }
 
 export async function sendJson<T>(method: "PUT" | "POST" | "DELETE", path: string, json: string, opts: SendOptions = {}): Promise<T> {
@@ -132,7 +133,7 @@ export async function sendJson<T>(method: "PUT" | "POST" | "DELETE", path: strin
     body: json,
     signal: opts.signal,
     keepalive: opts.keepalive,
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", ...opts.headers },
   });
   return (await res.json()) as T;
 }
