@@ -159,6 +159,10 @@
 .dock-balloon-bar { color:var(--text-3); }
 html.dock-resizing-col, html.dock-resizing-col * { cursor:col-resize !important; user-select:none !important; }
 html.dock-resizing-row, html.dock-resizing-row * { cursor:row-resize !important; user-select:none !important; }
+.dock-junction { position:absolute; z-index:21; touch-action:none; cursor:move; border-radius:var(--size-2); }
+.dock-junction:hover, .dock-junction[data-dragging] { background:var(--accent); }
+.dock-junction-line { position:absolute; z-index:20; pointer-events:none; border-radius:var(--r-pill); background:var(--accent); }
+html.dock-resizing-junction, html.dock-resizing-junction * { cursor:move !important; user-select:none !important; }
 
 .financial-status-dot {
   display: block;

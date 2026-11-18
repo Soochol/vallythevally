@@ -2,7 +2,7 @@ import type { Rect } from "../../layout/placement";
 
 export const DIVIDER_REACH = 3;
 
-const YIELDS_TO = 'button, a, input, select, textarea, summary, [role=tab], [role=menu], [role=menuitem], [role=slider], [role=separator], .window-frame, .dock-input-shield';
+const YIELDS_TO = 'button, a, input, select, textarea, summary, [role=tab], [role=menu], [role=menuitem], [role=slider], [role=separator], [data-dock-junction], .window-frame, .dock-input-shield';
 
 export function reachesDivider(point: { x: number; y: number }, rect: Rect, row: boolean, reach: number = DIVIDER_REACH): boolean {
   const across = row ? point.x : point.y;
