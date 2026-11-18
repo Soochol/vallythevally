@@ -16,6 +16,8 @@ pub struct HttpRequest {
     pub body: Secret<String>,
 }
 
+pub const NEXT_KEY_ABSENT: &str = "";
+
 #[derive(Debug, Clone)]
 pub struct HttpResponse {
     pub status: u16,
@@ -105,7 +107,7 @@ impl Transport for ReqwestTransport {
             let resp = builder.send().await.map_err(|e| TransportError::of(Stage::AwaitResponse, &e))?;
             let status = resp.status().as_u16();
             let header = |name: &str| resp.headers().get(name).and_then(|v| v.to_str().ok()).unwrap_or("").to_owned();
-            let next_key = (header("cont-yn") == "Y").then(|| header("next-key")).filter(|k| !k.is_empty());
+            let next_key = (header("cont-yn") == "Y").then(|| header("next-key"));
             let body = resp.text().await.map_err(|e| TransportError::of(Stage::ReadBody, &e))?;
             Ok(HttpResponse { status, next_key, body })
         })

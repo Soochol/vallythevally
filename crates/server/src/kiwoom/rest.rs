@@ -86,6 +86,7 @@ pub enum MergeScope {
 pub struct Page<T> {
     pub body: T,
     pub next: Option<ContKey>,
+    pub continues_without_key: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -219,6 +220,7 @@ impl From<Halt> for KiwoomError {
 struct RawPage {
     body: Arc<str>,
     next: Option<ContKey>,
+    continues_without_key: bool,
     envelope: error::Envelope,
 }
 
@@ -507,7 +509,7 @@ impl KiwoomRest {
         let rx = self.0.enqueue(key, priority, admit, once);
         let raw = rx.await.unwrap_or_else(|_| Err(queue_gone(endpoint)))?;
         let note = match serde_json::from_str::<T>(&raw.body) {
-            Ok(body) if answers(&body) => return Ok(Page { body, next: raw.next }),
+            Ok(body) if answers(&body) => return Ok(Page { body, next: raw.next, continues_without_key: raw.continues_without_key }),
             Ok(_) => Note::AnotherRequestsAnswer,
             Err(e) => Note::Schema { line: e.line(), column: e.column() },
         };
@@ -976,7 +978,10 @@ fn judge_market(api_id: Endpoint, priority: Priority, res: Result<HttpResponse, 
         detail = ?failed.and_then(Failure::detail),
         "키움 조회"
     );
-    judged.map(|envelope| RawPage { body: resp.body.into(), next: resp.next_key.map(ContKey), envelope })
+    judged.map(|envelope| {
+        let continues_without_key = resp.next_key.as_deref() == Some(super::transport::NEXT_KEY_ABSENT);
+        RawPage { body: resp.body.into(), next: resp.next_key.filter(|key| key != super::transport::NEXT_KEY_ABSENT).map(ContKey), continues_without_key, envelope }
+    })
 }
 
 #[cfg(test)]

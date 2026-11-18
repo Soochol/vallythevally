@@ -22,6 +22,7 @@ pub mod kiwoom;
 pub mod market;
 pub mod public_ip;
 pub mod quotes;
+pub mod rankings;
 pub mod screener;
 pub mod setup_bundle;
 pub mod symbols;
