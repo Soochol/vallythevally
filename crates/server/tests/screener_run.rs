@@ -8,6 +8,7 @@ use std::time::{Duration, Instant};
 
 use common::{ScriptedTransport, Server};
 use domain::{KstDate, Ohlcv, Price, StockCode, Volume, Weekday};
+use common::support::Call;
 use common::support::krx::{DailyAnswer, KrxBar, KrxMarket, KrxStock};
 use indicators::{Columns, LineId, MaMethod, Spec, ValidSpec};
 use serde_json::{Value, json};
@@ -190,6 +191,14 @@ impl Api {
     }
 }
 
+fn backfill_request(call: &Call) -> bool {
+    call.api_id == "ka10081" && call.next_key.is_some()
+}
+
+fn backfill_of(code: &'static str) -> impl Fn(&Call) -> bool {
+    move |call| backfill_request(call) && call.body["stk_cd"].as_str().is_some_and(|stk| stk.starts_with(code))
+}
+
 fn boot(fake: &ScriptedTransport, dir: &Path, clock_start: &str) -> Server {
     Server::spawn_with(fake, &dir.join("run/server.lock"), dir, &[("VALLY_CLOCK_START", OsStr::new(clock_start))])
 }
@@ -275,10 +284,11 @@ async fn an_unfilled_history_is_history_short_until_backfill_and_a_pre_1985_list
     let dir = tempfile::tempdir().unwrap();
     let server = boot(&fake, dir.path(), &at(today, "2030"));
     let api = Api::of(&server).await;
-    fake.delay("ka10081", Duration::from_millis(300));
+    let backfill = fake.hold("과거 이어 받기", backfill_request);
     api.update().await;
-    api.wait_for("과거 이어 받기", |s| s["update"]["phase"] == "backfill").await;
+    backfill.arrived().await;
     api.cancel().await;
+    backfill.release();
     let cut = api.status().await;
     assert_eq!((cut["lastDay"].clone(), cut["fullHistory"].clone()), (json!(today.to_string()), json!({"done": 1, "total": 2})), "최근 600관측일만 받은 채 멈췄다");
 
@@ -594,19 +604,23 @@ async fn a_partly_stored_first_week_or_month_is_history_short_until_backfill_fil
     let weekly = |n: u32| screen("W", &[("high", n, 1)], &[]);
     let monthly = |n: u32| screen("M", &[("high", n, 1)], &[]);
 
-    fake.delay("ka10081", Duration::from_secs(1));
+    let backfill = fake.hold("과거 이어 받기", backfill_request);
     api.update().await;
-    api.wait_for("과거 이어 받기", |s| s["update"]["phase"] == "backfill").await;
+    backfill.arrived().await;
     api.cancel().await;
+    backfill.release();
     assert_eq!(api.status().await["fullHistory"], json!({"done": 0, "total": 2}));
     assert_eq!(judged(&api.result(&weekly(121)).await), (excluded(0, 2), vec![]), "필요한 첫 주의 7-15·16·17이 저장되지 않았다");
     assert_eq!(judged(&api.result(&weekly(120)).await), (excluded(0, 0), vec![hit("200020", day(2026, 11, 2))]), "필요한 첫 주가 7-22 주면 다 저장돼 있다");
     assert_eq!(judged(&api.result(&monthly(29)).await), (excluded(0, 2), vec![]), "필요한 첫 달의 7-01~17이 저장되지 않았다");
     assert_eq!(judged(&api.result(&monthly(28)).await), (excluded(0, 0), vec![hit("200020", day(2026, 11, 1))]));
 
+    let second_backfill = fake.hold("200020의 과거 이어 받기", backfill_of("200020"));
     api.update().await;
+    second_backfill.arrived().await;
     api.wait_for("200010의 과거", |s| s["fullHistory"]["done"] == 1).await;
     api.cancel().await;
+    second_backfill.release();
     assert_eq!(judged(&api.result(&weekly(121)).await), (excluded(0, 1), vec![]), "200010이 7-15를 저장했어도 200020은 7-18부터다");
     assert_eq!(judged(&api.result(&monthly(29)).await), (excluded(0, 1), vec![]));
 
@@ -667,12 +681,13 @@ async fn a_delisted_stocks_old_bars_do_not_fill_in_the_unstored_start_of_a_new_l
     server.stop().await;
 
     fake.set_krx_market(KrxMarket { days, stocks: vec![new_listing] });
-    fake.delay("ka10081", Duration::from_secs(1));
+    let backfill = fake.hold("과거 이어 받기", backfill_request);
     let server = boot(&fake, dir.path(), &at(today, "2030"));
     let api = Api::of(&server).await;
     api.update().await;
-    api.wait_for("과거 이어 받기", |s| s["update"]["phase"] == "backfill").await;
+    backfill.arrived().await;
     api.cancel().await;
+    backfill.release();
     assert_eq!(api.status().await["fullHistory"], json!({"done": 0, "total": 1}), "상장폐지된 200030은 목록에서 빠지고 2024-05 봉만 남았다");
     let judged = |r: &Value| (r["universe"].clone(), r["excluded"].clone(), hits(r));
     let cases = [
@@ -1030,10 +1045,11 @@ async fn history_short_needs_the_earliest_first_needed_day_over_lines_of_every_p
     let dir = tempfile::tempdir().unwrap();
     let server = boot(&fake, dir.path(), &at(today, "2030"));
     let api = Api::of(&server).await;
-    fake.delay("ka10081", Duration::from_millis(300));
+    let backfill = fake.hold("과거 이어 받기", backfill_request);
     api.update().await;
-    api.wait_for("과거 이어 받기", |s| s["update"]["phase"] == "backfill").await;
+    backfill.arrived().await;
     api.cancel().await;
+    backfill.release();
     assert_eq!(api.status().await["fullHistory"], json!({"done": 1, "total": 2}), "200010은 최근 600관측일만 받았다");
 
     let anything = || value_range("D", 1, "close", Some(0.0), None);
@@ -2053,10 +2069,18 @@ async fn intraday_midnight_during_collection_returns_an_error_without_rows() {
     let Loaded { _fake: fake, _dir: dir, _server: server, .. } = intraday_session(today, 1, "1200").await;
     server.stop().await;
     fake.set_quote_rows(vec![summary_row("300000", today, 120, 150, 3000, 17)]);
-    fake.delay("ka10095", Duration::from_millis(1500));
-    let server = Server::spawn_with(&fake, &dir.path().join("run/server.lock"), dir.path(), &[("VALLY_CLOCK_START", OsStr::new("20261109235959"))]);
+    let collection = fake.hold("요약 수집", |call| call.api_id == "ka10095");
+    let server = Server::spawn_with(&fake, &dir.path().join("run/server.lock"), dir.path(), &[("VALLY_CLOCK_START", OsStr::new("20261109235500"))]);
     let api = Api::of(&server).await;
-    let (status, body) = api.run(&every(vec![])).await;
+    let screen = every(vec![]);
+    let cross_midnight = async {
+        collection.arrived().await;
+        assert_eq!(server.clock().now().kst_date(), today, "수집이 시작될 때는 아직 자정 전이다");
+        server.clock().jump(600);
+        assert_eq!(server.clock().now().kst_date(), today.add_days(1), "수집이 도는 동안 자정을 넘는다");
+        collection.release();
+    };
+    let ((status, body), ()) = tokio::join!(api.run(&screen), cross_midnight);
     assert_eq!((status, body["error"]["reason"].clone()), (409, json!("data_changed")));
     assert!(body["rows"].is_null());
     server.stop().await;
@@ -2068,14 +2092,21 @@ async fn intraday_backfill_committing_during_collection_invalidates_the_same_upd
     let days = last_open_days(700, today);
     let fake = ScriptedTransport::new();
     fake.set_krx_market(KrxMarket { days: days.clone(), stocks: vec![stock("300000", priced(&days, |_| 100))] });
-    fake.delay("ka10081", Duration::from_millis(500));
+    let backfill = fake.hold("과거 이어 받기", backfill_request);
     let dir = tempfile::tempdir().unwrap();
     let server = boot(&fake, dir.path(), &at(today, "2030"));
     let api = Api::of(&server).await;
     api.update().await;
-    api.wait_for("과거 이어 받기", |s| s["update"]["phase"] == "backfill").await;
-    fake.delay("ka10095", Duration::from_millis(1000));
-    let (status, body) = api.run(&every(vec![])).await;
+    backfill.arrived().await;
+    let collection = fake.hold("요약 수집", |call| call.api_id == "ka10095");
+    let screen = every(vec![]);
+    let commit_while_collecting = async {
+        collection.arrived().await;
+        backfill.release();
+        api.wait_for("과거 이어 받기 커밋", |s| s["fullHistory"]["done"] == 1).await;
+        collection.release();
+    };
+    let ((status, body), ()) = tokio::join!(api.run(&screen), commit_while_collecting);
     assert_eq!((status, body["error"]["reason"].clone()), (409, json!("data_changed")));
     assert!(body["rows"].is_null());
     assert_eq!(api.settled().await["fullHistory"], json!({"done": 1, "total": 1}));
@@ -2333,10 +2364,19 @@ async fn regression_223_pre0800_evidence_expires_when_collection_crosses_0800() 
     let Loaded { _fake: fake, _dir: dir, _server: server, .. } = intraday_session(today, 1, "0755").await;
     server.stop().await;
     fake.set_quote_rows(vec![summary_row("300000", day(2026, 11, 6), 100, 100, 1000, 1)]);
-    fake.delay("ka10095", Duration::from_millis(1500));
-    let server = Server::spawn_with(&fake, &dir.path().join("run/server.lock"), dir.path(), &[("VALLY_CLOCK_START", OsStr::new("20261109075959"))]);
+    let collection = fake.hold("요약 수집", |call| call.api_id == "ka10095");
+    let server = Server::spawn_with(&fake, &dir.path().join("run/server.lock"), dir.path(), &[("VALLY_CLOCK_START", OsStr::new("20261109075500"))]);
     let api = Api::of(&server).await;
-    let result = api.result(&every(vec![])).await;
+    let screen = every(vec![]);
+    let cross_0800 = async {
+        collection.arrived().await;
+        let eight = 8 * 3600;
+        assert!(server.clock().now().kst_time_of_day().secs() < eight, "수집이 시작될 때는 아직 08:00 전이다");
+        server.clock().jump(600);
+        assert!(server.clock().now().kst_time_of_day().secs() >= eight, "수집이 도는 동안 08:00을 넘는다");
+        collection.release();
+    };
+    let (result, ()) = tokio::join!(api.result(&screen), cross_0800);
     assert_eq!(result["missingSummary"], 1);
     assert!(hits(&result).is_empty());
     server.stop().await;
