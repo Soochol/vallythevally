@@ -38,7 +38,7 @@ function install(next: RestoredLayout) {
   const autosave = layoutAutosave();
   flushSync(() => usePersistStore.getState().setPhase({ kind: "restoring" }));
   useSelectionStore.setState({ activeCell: chartWindows(next.layout)[0]!.id, dialog: null, inspector: null, toast: null });
-  useDrawingSession.setState({ selected: [], editor: null, popup: null, toolbarAt: null });
+  useDrawingSession.getState().clearCells();
   useIndicatorPreview.setState({ current: null });
   useLayoutStore.getState().load(next.layout);
   autosave.replaceLayout(next.layout, next.revision, next.serverCharts);

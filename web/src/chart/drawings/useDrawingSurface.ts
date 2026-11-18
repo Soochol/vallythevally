@@ -12,7 +12,7 @@ export function useDrawingSurface(controller: RefObject<ChartController | null>,
   const client = useQueryClient(); const cell = useCell(cellId);
   useEffect(() => controller.current?.attach((host) => new DrawingSurface(host, cellId, drawingSync(client, layoutReceipt))), [controller, cellId, client]);
   useEffect(() => {
-    useDrawingSession.getState().select([]); surfaceFor(cellId)?.reset();
+    useDrawingSession.getState().select(cellId, []); surfaceFor(cellId)?.reset();
     void drawingSync(client, layoutReceipt).load(cell.symbol);
   }, [cell.symbol, cell.period, cellId, client]);
 }

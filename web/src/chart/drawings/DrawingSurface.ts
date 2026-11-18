@@ -4,7 +4,7 @@ import { formatPrice } from "../../lib/format";
 import { isTypingTarget } from "../../lib/hotkeys";
 import { DESKTOP_QUERY } from "../../lib/media";
 import { isIndexCode } from "../../lib/symbol";
-import { useDrawingSession } from "../../stores/drawingSession";
+import { cellDrawing, useDrawingSession } from "../../stores/drawingSession";
 import { useLayoutStore } from "../../stores/layout";
 import { useSelectionStore } from "../../stores/selection";
 import { useUiStore } from "../../stores/ui";
@@ -85,7 +85,8 @@ export class DrawingSurface implements ChartExtension {
     this.cleanup.push(() => window.removeEventListener("keydown", key, true), () => window.removeEventListener("blur", blur));
     this.cleanup.push(sync.subscribe(() => this.refresh()));
     this.cleanup.push(host.fineBars.subscribe(() => this.refresh()));
-    this.cleanup.push(useDrawingSession.subscribe((s, old) => { if (s.tool !== old.tool || s.mode !== old.mode) this.reset(); this.refresh(); }));
+    this.cleanup.push(useDrawingSession.subscribe((s, old) => { if (this.isActive() && (s.tool !== old.tool || s.mode !== old.mode)) this.reset(); this.refresh(); }));
+    this.cleanup.push(useSelectionStore.subscribe((s, old) => { if (old.activeCell === this.cellId && s.activeCell !== this.cellId) this.reset(); }));
     this.cleanup.push(useUiStore.subscribe(() => this.refresh()));
     const media = matchMedia(DESKTOP_QUERY); const resize = () => { this.reset(); this.refresh(); };
     media.addEventListener("change", resize); this.cleanup.push(() => media.removeEventListener("change", resize));
@@ -122,12 +123,15 @@ export class DrawingSurface implements ChartExtension {
       axes: { time: { coordinateOf: (i) => ts.logicalToCoordinate(i as Logical), indexAt: (x) => ts.coordinateToLogical(x), barSpacing: ts.options().barSpacing, projection: chartTimeProjection(ts, period) },
         price: { toY: (p) => h.series().priceToCoordinate(p), toPrice: (y) => h.series().coordinateToPrice(y) } } };
   }
+  private isActive() { return useSelectionStore.getState().activeCell === this.cellId; }
+  private cell() { return cellDrawing(useDrawingSession.getState(), this.cellId); }
+  private liveTool() { const { tool, mode } = useDrawingSession.getState(); return this.isActive() ? { tool, mode } : { tool: null, mode: null }; }
   private context(frame = this.projection()): Context {
-    const session = useDrawingSession.getState(); const prefs = useUiStore.getState().prefs.drawing;
+    const live = this.liveTool(); const prefs = useUiStore.getState().prefs.drawing;
     const view = this.host.view();
     const ctx = toolContext(frame, { price: (p) => formatPrice(p, isIndexCode(view?.symbol ?? "")), time: (t) => formatBarTime(t, frame.timeline.period) });
-    return { tool: session.tool === null ? null : toolOf(session.tool) ?? null, selected: session.selected,
-      drawings: view ? this.sync.drawings(view.symbol) : [], lockAll: prefs.lockAll, registeredModes: registeredModes(), mode: session.mode, ctx,
+    return { tool: live.tool === null ? null : toolOf(live.tool) ?? null, selected: this.cell().selected,
+      drawings: view ? this.sync.drawings(view.symbol) : [], lockAll: prefs.lockAll, registeredModes: registeredModes(), mode: live.mode, ctx,
       point: (at, action, mods) => this.point(frame, at, action, mods) };
   }
   private point(frame: Frame, at: ScreenPoint, action: DragAction, mods: Mods) {
@@ -145,7 +149,7 @@ export class DrawingSurface implements ChartExtension {
   }
   private build(): RenderFrame {
     const f = this.projection(); const c = this.context(f); const view = this.host.view();
-    const session = useDrawingSession.getState(); const prefs = useUiStore.getState().prefs.drawing;
+    const cell = this.cell(); const prefs = useUiStore.getState().prefs.drawing;
     const editable = matchMedia(DESKTOP_QUERY).matches;
     const layoutId = useLayoutStore.getState().layout.id;
     const where = { layoutId, cellId: this.cellId, period: view?.period ?? "D", hideAll: prefs.hideAll };
@@ -156,9 +160,9 @@ export class DrawingSurface implements ChartExtension {
       drawings = this.state.action === "clone" ? [...drawings, ...preview.map((d) => ({ ...d, id: `${d.id}:preview` }))]
         : drawings.map((d) => preview.find((p) => p.id === d.id) ?? d);
     }
-    if (session.editor && session.editor.draft.symbol === view?.symbol) drawings = drawings.map((d) => d.id === session.editor?.draft.id ? session.editor.draft : d);
+    if (cell.editor && cell.editor.draft.symbol === view?.symbol) drawings = drawings.map((d) => d.id === cell.editor?.draft.id ? cell.editor.draft : d);
     const items = drawings.filter((d) => visible(d, where))
-      .map((d) => renderItem(d, editable && session.selected.includes(d.id), c.ctx)).filter((item) => item !== null);
+      .map((d) => renderItem(d, editable && cell.selected.includes(d.id), c.ctx)).filter((item) => item !== null);
     const preview: Shape[] = [];
     if (this.state.kind === "placing" || this.state.kind === "drawing") preview.push(...placementPreview(this.state, prefs.lastStyle[this.state.tool.tool] ?? this.state.tool.defaultStyle(), c.ctx));
     if (this.state.kind === "mode") preview.push(...(modeOf(this.state.mode)?.preview(this.state.path, this.modeContext({ items, ctx: c.ctx })) ?? []));
@@ -168,18 +172,18 @@ export class DrawingSurface implements ChartExtension {
       if (elapsed >= this.transient.fadeMs) this.transient = null;
       else transient = { shapes: this.transient.shapes, opacity: Math.max(0, 1 - Math.max(0, elapsed) / Math.max(1, this.transient.fadeMs)) };
     }
-    this.mirror.dataset.drawings = JSON.stringify(items.map((i) => ({ id: i.id, tool: i.drawing.tool, selected: session.selected.includes(i.id), points: i.drawing.points.map(c.ctx.toScreen), handles: i.handles, texts: i.shapes.flatMap((s) => (s.kind === "text" ? [s.text] : [])) })));
+    this.mirror.dataset.drawings = JSON.stringify(items.map((i) => ({ id: i.id, tool: i.drawing.tool, selected: cell.selected.includes(i.id), points: i.drawing.points.map(c.ctx.toScreen), handles: i.handles, texts: i.shapes.flatMap((s) => (s.kind === "text" ? [s.text] : [])) })));
     return { items, preview, transient, box: this.state.kind === "box" ? this.state : null, pane: f.pane, ctx: c.ctx, editable };
   }
 
   private inPane(frame: RenderFrame, at: ScreenPoint) { return at.x >= 0 && at.y >= 0 && at.x < frame.pane.width && at.y < frame.pane.height; }
   private local(e: MouseEvent): ScreenPoint { const r = this.host.el.getBoundingClientRect(); return { x: e.clientX - r.left, y: e.clientY - r.top }; }
   private onPointer(e: PointerEvent, kind: "down" | "move" | "up") {
-    if (!matchMedia(DESKTOP_QUERY).matches || (kind === "down" && e.button !== 0) || useDrawingSession.getState().editor) return;
+    if (!matchMedia(DESKTOP_QUERY).matches || (kind === "down" && e.button !== 0) || this.cell().editor) return;
     if (this.pointer !== null && this.pointer !== e.pointerId) return;
     const at = this.local(e); const frame = this.frame();
     if (kind === "down" && !this.inPane(frame, at)) return;
-    if (kind === "down") { this.focus(); useDrawingSession.setState({ popup: null }); }
+    if (kind === "down") { this.focus(); useDrawingSession.getState().patchCell(this.cellId, { popup: null }); }
     const hit = frameHit(frame, at);
     const wasCaptured = captures(this.state);
     if (kind === "down") {
@@ -191,8 +195,8 @@ export class DrawingSurface implements ChartExtension {
     if (wasCaptured || capturedHere || captures(this.state) || this.pointer !== null) { e.preventDefault(); e.stopImmediatePropagation(); }
     if (kind === "up") this.release();
     if (kind === "move") {
-      const session = useDrawingSession.getState(); const aiming = this.state.kind === "mode" || session.mode === "eraser";
-      this.host.el.style.cursor = captures(this.state) && !aiming ? "grabbing" : session.tool || aiming ? "crosshair" : hit.kind === "handle" ? "grab" : hit.kind === "body" ? "move" : "";
+      const live = this.liveTool(); const aiming = this.state.kind === "mode" || live.mode === "eraser";
+      this.host.el.style.cursor = captures(this.state) && !aiming ? "grabbing" : live.tool || aiming ? "crosshair" : hit.kind === "handle" ? "grab" : hit.kind === "body" ? "move" : "";
     }
   }
   private capture(id: number) {
@@ -214,24 +218,24 @@ export class DrawingSurface implements ChartExtension {
   private effect(effect: Effect) {
     const session = useDrawingSession.getState();
     switch (effect.kind) {
-      case "select": session.select(effect.ids, effect.toggle); break;
+      case "select": session.select(this.cellId, effect.ids, effect.toggle); break;
       case "place": {
         if (!this.host.view()) break;
         const prefs = useUiStore.getState().prefs.drawing;
         if (prefs.hideAll) useUiStore.getState().setDrawingPrefs({ hideAll: false });
         const body = this.edits.place(effect.tool, effect.points, prefs.lastStyle[effect.tool.tool] ?? effect.tool.defaultStyle());
         if (!body) break;
-        if (!prefs.keepDrawing && session.pinnedTool !== body.tool) session.setTool(null);
-        session.select([body.id]);
+        if (!prefs.keepDrawing && session.pinnedTool !== body.tool) session.setTool(this.cellId, null);
+        session.select(this.cellId, [body.id]);
         if (effect.tool.text?.editOnPlace) this.openEditor(body.id, "text");
         break;
       }
       case "change": {
         if (effect.clone) this.commitClones(effect.preview);
-        else { this.edits.move(effect.preview, effect.originals); session.select(effect.preview.map((d) => d.id)); }
+        else { this.edits.move(effect.preview, effect.originals); session.select(this.cellId, effect.preview.map((d) => d.id)); }
         break;
       }
-      case "box": { const f = this.frame(); session.select(idsInBox(f.items, effect.start, effect.end, f.pane)); break; }
+      case "box": { const f = this.frame(); session.select(this.cellId, idsInBox(f.items, effect.start, effect.end, f.pane)); break; }
       case "mode": {
         const result = modeOf(effect.mode)?.finish(effect.path, effect.action === "erasePartial", this.modeContext(this.frame()));
         if (result) { this.sync.commit(this.cellId, result.ops); if (result.transient) this.transient = { ...result.transient, createdAt: performance.now() }; }
@@ -247,9 +251,9 @@ export class DrawingSurface implements ChartExtension {
     const kind = useUiStore.getState().prefs.drawing.newScope; const layoutId = useLayoutStore.getState().layout.id;
     return kind === "symbol" ? { kind } : kind === "layout" ? { kind, layoutId } : { kind, layoutId, windowId: this.cellId };
   }
-  selected() { return this.edits.selected(useDrawingSession.getState().selected); }
+  selected() { return this.edits.selected(this.cell().selected); }
   updateSelected(change: (d: DrawingBody) => DrawingBody) {
-    const ops = this.edits.update(useDrawingSession.getState().selected, change);
+    const ops = this.edits.update(this.cell().selected, change);
     const changed = ops.filter((op) => op.after.style !== op.before.style);
     if (changed.length) {
       const ui = useUiStore.getState(); const lastStyle = { ...ui.prefs.drawing.lastStyle };
@@ -262,7 +266,7 @@ export class DrawingSurface implements ChartExtension {
     const session = useDrawingSession.getState(); const view = this.host.view(); if (!view || !session.clip) return;
     const ctx = this.context().ctx;
     const result = this.edits.paste(session.clip, ctx.shiftBars); if (!result) return;
-    useDrawingSession.setState({ clip: result.clip }); session.select(result.bodies.map((d) => d.id));
+    useDrawingSession.setState({ clip: result.clip }); session.select(this.cellId, result.bodies.map((d) => d.id));
     if (result.bodies.some((d) => d.points.some((p) => { const s = ctx.toScreen(p); return s === null || s.y < 0 || s.y > ctx.paneHeight; }))) toast("보이는 범위 밖에 붙였습니다");
   }
   clone() {
@@ -271,21 +275,22 @@ export class DrawingSurface implements ChartExtension {
   }
   private commitClones(drawings: readonly DrawingBody[]) {
     if (!this.host.view()) return;
-    useDrawingSession.getState().select(this.edits.clone(drawings).map((d) => d.id));
+    useDrawingSession.getState().select(this.cellId, this.edits.clone(drawings).map((d) => d.id));
   }
   remove(force = false) {
-    this.edits.remove(useDrawingSession.getState().selected, { force, lockAll: useUiStore.getState().prefs.drawing.lockAll });
-    useDrawingSession.getState().select([]);
+    this.edits.remove(this.cell().selected, { force, lockAll: useUiStore.getState().prefs.drawing.lockAll });
+    useDrawingSession.getState().select(this.cellId, []);
   }
   openEditor(id: string, kind: "settings" | "text" = "settings") {
     const d = this.edits.find(id);
     if (!d) return;
-    useDrawingSession.getState().select([d.id]);
-    useDrawingSession.setState({ editor: { kind, original: d, draft: d }, popup: null });
+    const session = useDrawingSession.getState();
+    session.select(this.cellId, [d.id]);
+    session.patchCell(this.cellId, { editor: { kind, original: d, draft: d }, popup: null });
   }
   reorder(id: string, direction: ReorderDirection, targetId?: string, dropPosition: "above" | "below" = "below") { this.edits.reorder(id, direction, targetId, dropPosition); }
   selectionBounds() {
-    const frame = this.frame(); const boxes = frame.items.filter((i) => useDrawingSession.getState().selected.includes(i.id)).flatMap((i) => i.shapes.map((s) => shapeBounds(s, frame.pane)));
+    const frame = this.frame(); const selected = this.cell().selected; const boxes = frame.items.filter((i) => selected.includes(i.id)).flatMap((i) => i.shapes.map((s) => shapeBounds(s, frame.pane)));
     return boxes.length ? { x1: Math.min(...boxes.map((b) => b.x1)), x2: Math.max(...boxes.map((b) => b.x2)), y1: Math.min(...boxes.map((b) => b.y1)), y2: Math.max(...boxes.map((b) => b.y2)) } : null;
   }
   pointAt(client: ScreenPoint): { price: number; t: DrawingPoint["t"] | null } | null {
@@ -304,7 +309,7 @@ export class DrawingSurface implements ChartExtension {
   private keepsDrawing() { return useUiStore.getState().prefs.drawing.keepDrawing || useDrawingSession.getState().pinnedTool !== null; }
   private endDrawingRun() {
     const session = useDrawingSession.getState();
-    this.input({ kind: "cancel" }); this.release(); session.setTool(null); session.select([]); useDrawingSession.setState({ popup: null });
+    this.input({ kind: "cancel" }); this.release(); session.setTool(this.cellId, null);
     if (useUiStore.getState().prefs.drawing.keepDrawing) useUiStore.getState().setDrawingPrefs({ keepDrawing: false });
     this.focus();
   }
@@ -314,29 +319,29 @@ export class DrawingSurface implements ChartExtension {
     if (this.keepsDrawing()) { this.endDrawingRun(); return; }
     this.reset(); this.focus();
     const hit = frameHit(this.frame(), this.local(e)); const id = hit.kind === "empty" ? null : hit.id;
-    const session = useDrawingSession.getState(); if (id && !session.selected.includes(id)) session.select([id]);
-    useDrawingSession.setState({ popup: { cellId: this.cellId, x: e.clientX, y: e.clientY, id, fromChart: true } });
+    const session = useDrawingSession.getState(); if (id && !this.cell().selected.includes(id)) session.select(this.cellId, [id]);
+    session.patchCell(this.cellId, { popup: { x: e.clientX, y: e.clientY, id, fromChart: true } });
   }
   private onKey(e: KeyboardEvent) {
     if (e.composedPath().some((target) => target instanceof Element && target.hasAttribute("data-chart-control"))) return;
-    if (ownsChartKeyboard(e) || !matchMedia(DESKTOP_QUERY).matches || isTypingTarget(e.target) || e.isComposing || useDrawingSession.getState().editor || useSelectionStore.getState().dialog) return;
+    if (ownsChartKeyboard(e) || !matchMedia(DESKTOP_QUERY).matches || isTypingTarget(e.target) || e.isComposing || this.cell().editor || useSelectionStore.getState().dialog) return;
     if (!this.host.el.parentElement?.contains(document.activeElement)) return;
-    const session = useDrawingSession.getState(); const ui = useUiStore.getState(); const prefs = ui.prefs.drawing;
+    const session = useDrawingSession.getState(); const selected = this.cell().selected; const ui = useUiStore.getState(); const prefs = ui.prefs.drawing;
     const ctrl = e.ctrlKey || e.metaKey;
     const tool = toolHotkey(e);
     let handled = true;
-    if (tool) { if (toolOf(tool.tool)) session.setTool(tool.tool); }
-    else if (e.code === "KeyV" && !ctrl && !e.altKey && !e.shiftKey) session.setTool(null);
+    if (tool) { if (toolOf(tool.tool)) session.setTool(this.cellId, tool.tool); }
+    else if (e.code === "KeyV" && !ctrl && !e.altKey && !e.shiftKey) session.setTool(this.cellId, null);
     else if (e.code === "KeyG" && !ctrl && !e.altKey) ui.setDrawingPrefs(e.shiftKey ? { magnetStrength: prefs.magnetStrength === "weak" ? "strong" : "weak" } : { magnet: !prefs.magnet });
     else if (e.code === "KeyH" && ctrl && e.altKey) ui.setDrawingPrefs({ hideAll: !prefs.hideAll });
     else if (e.code === "Escape") this.endDrawingRun();
-    else if ((e.code === "Delete" || e.code === "Backspace") && session.selected.length) this.remove();
-    else if (ctrl && e.code === "KeyC" && session.selected.length) this.copy();
+    else if ((e.code === "Delete" || e.code === "Backspace") && selected.length) this.remove();
+    else if (ctrl && e.code === "KeyC" && selected.length) this.copy();
     else if (ctrl && e.code === "KeyV" && session.clip) this.paste();
     else if (ctrl && (e.code === "KeyZ" || e.code === "KeyY")) this.sync.undo(this.cellId, e.code === "KeyY" || e.shiftKey);
-    else if (["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(e.code) && session.selected.length) {
+    else if (["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(e.code) && selected.length) {
       const f = this.projection(); const ctx = this.context(f).ctx;
-      this.edits.nudge(session.selected, e.code as NudgeKey, { shiftBars: ctx.shiftBars, price: f.axes.price }, prefs.lockAll);
+      this.edits.nudge(selected, e.code as NudgeKey, { shiftBars: ctx.shiftBars, price: f.axes.price }, prefs.lockAll);
     } else handled = false;
     if (handled) { e.preventDefault(); e.stopImmediatePropagation(); this.refresh(); }
   }

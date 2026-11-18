@@ -8,7 +8,7 @@ import { TOOL_HOTKEYS } from "../../chart/drawings/hotkeys";
 import { toolsByGroup } from "../../chart/drawings/tools";
 import type { Tool } from "../../chart/drawings/toolSpec";
 import { MODES, registeredModes } from "../../chart/drawings/modes";
-import { useDrawingSession } from "../../stores/drawingSession";
+import { cellDrawing, useDrawingSession } from "../../stores/drawingSession";
 import { useSelectionStore } from "../../stores/selection";
 import { useUiStore } from "../../stores/ui";
 import { ownsChartKeyboard } from "../overlay/topLayer";
@@ -56,14 +56,14 @@ export function DrawingToolbar() {
   useEffect(() => { const tool = active && toolOf(active); if (tool) setLastTools((s) => ({ ...s, [tool.group]: tool })); }, [active]);
   useEffect(() => {
     const key = (e: KeyboardEvent) => {
-      if (!ownsChartKeyboard(e) && e.code === "Slash" && e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey && !e.isComposing && !isTypingTarget(e.target) && e.target instanceof HTMLElement && e.target.closest("section[aria-label^='칸 ']") && !useDrawingSession.getState().editor) { e.preventDefault(); setHelp((v) => !v); }
+      if (!ownsChartKeyboard(e) && e.code === "Slash" && e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey && !e.isComposing && !isTypingTarget(e.target) && e.target instanceof HTMLElement && e.target.closest("section[aria-label^='칸 ']") && !cellDrawing(useDrawingSession.getState(), useSelectionStore.getState().activeCell).editor) { e.preventDefault(); setHelp((v) => !v); }
     };
     window.addEventListener("keydown", key); return () => window.removeEventListener("keydown", key);
   }, []);
-  const setTool = (tool: Tool) => { useDrawingSession.getState().setTool(tool.tool); surfaceFor(cellId)?.focus(); };
+  const setTool = (tool: Tool) => { useDrawingSession.getState().setTool(cellId, tool.tool); surfaceFor(cellId)?.focus(); };
   const setPrefs = useUiStore.getState().setDrawingPrefs;
   const action = (f: () => void) => { f(); surfaceFor(cellId)?.focus(); };
-  const pinnedButton = (tool: Tool) => <button key={tool.tool} className="draw-tool" data-active-tool aria-label={`${tool.label} 고정 도구`} title={toolTitle(tool, "고정")} aria-pressed={active === tool.tool} onClick={() => setTool(tool)} onDoubleClick={() => action(() => useDrawingSession.getState().setTool(tool.tool, true))}><Icon path={tool.icon} /></button>;
+  const pinnedButton = (tool: Tool) => <button key={tool.tool} className="draw-tool" data-active-tool aria-label={`${tool.label} 고정 도구`} title={toolTitle(tool, "고정")} aria-pressed={active === tool.tool} onClick={() => setTool(tool)} onDoubleClick={() => action(() => useDrawingSession.getState().setTool(cellId, tool.tool, true))}><Icon path={tool.icon} /></button>;
   const folded = pinnedTools.slice(shownPins);
   const current = mode ? MODES.find((m) => m.id === mode) : active ? toolOf(active) : undefined;
   const currentLabel = current?.label ?? "선택 도구";
@@ -80,11 +80,11 @@ export function DrawingToolbar() {
         else if (!dock.nudge(e.key)) return;
         e.preventDefault(); e.stopPropagation();
       }}><Icon path={DRAWING_ICONS.grip} /></button>
-    <button className="draw-tool" data-active-tool aria-label="선택 도구" title="선택 (V)" aria-pressed={active === null && mode === null} onClick={() => action(() => useDrawingSession.getState().setTool(null))}><Icon path={DRAWING_ICONS.pointer} /></button>
+    <button className="draw-tool" data-active-tool aria-label="선택 도구" title="선택 (V)" aria-pressed={active === null && mode === null} onClick={() => action(() => useDrawingSession.getState().setTool(cellId, null))}><Icon path={DRAWING_ICONS.pointer} /></button>
     {[...toolsByGroup()].map(([group, tools]) => {
       const t = tools.find((tool) => tool.tool === active) ?? lastTools[group] ?? tools[0]!;
       return <div className="draw-group" key={group}>
-      <button className="draw-tool" data-active-tool title={toolTitle(t, pinned === t.tool ? "연속" : undefined)} aria-label={t.label} aria-pressed={active === t.tool} onClick={() => setTool(t)} onDoubleClick={() => action(() => useDrawingSession.getState().setTool(t.tool, true))}><Icon path={t.icon} /></button>
+      <button className="draw-tool" data-active-tool title={toolTitle(t, pinned === t.tool ? "연속" : undefined)} aria-label={t.label} aria-pressed={active === t.tool} onClick={() => setTool(t)} onDoubleClick={() => action(() => useDrawingSession.getState().setTool(cellId, t.tool, true))}><Icon path={t.icon} /></button>
       {tools.length > 1 && <ToolGroup label={`${GROUP_LABEL[group]} 도구`} tools={tools} onChoose={setTool} />}
     </div>; })}
     {pinnedTools.length > 0 && <div ref={pinnedRun} className="draw-pinned">
