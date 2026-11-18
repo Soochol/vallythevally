@@ -8,7 +8,6 @@ import { useOrdersStatus } from "../../api/system";
 import { formatPrice } from "../../lib/format";
 import { isIndexCode } from "../../lib/symbol";
 import { useMockEnvironment } from "../../stores/kiwoomLink";
-import { orderVenue, useLayoutStore } from "../../stores/layout";
 import { useOrderSettings, useUiStore } from "../../stores/ui";
 import { useBookFeed } from "../book/useBookFeed";
 import { basePrice, buildLadderRows, gridPrices, type LadderRow } from "../market-window/ladder";
@@ -32,6 +31,7 @@ import { HighValueConfirm, type HighValueRequest } from "./HighValueConfirm";
 import { type HoverCell, OrderLadder } from "./OrderLadder";
 import { OrderTotals } from "./OrderTotals";
 import { OrderStatusBar } from "./OrderStatusBar";
+import { REJECT_TEXT } from "./statusText";
 import { QuantityRow } from "./QuantityRow";
 import { capacityProblem, type DragOutcome, needsHighValueConfirm, type PriceGroup, quantityOf, type QuantityMode, SIDE_LABEL } from "./orderRules";
 import { useOrderAccess, useOrderData } from "./useOrderData";
@@ -46,11 +46,8 @@ function useHeldWhile<T>(value: T, hold: boolean): T {
   return hold ? held : value;
 }
 
-function OrderBody({ id, code }: { id: WindowId; code: SymbolCode }) {
-  const savedVenue = useLayoutStore((s) => orderVenue(s.layout, id));
+function OrderBody({ code }: { code: SymbolCode }) {
   const mock = useMockEnvironment();
-  const venue: Venue = mock ? "krx" : savedVenue;
-  const setVenue = useLayoutStore((s) => s.setOrderVenue);
   const feed = useBookFeed(code);
   const access = useOrderAccess();
   const [mode, setMode] = useState<QuantityMode>("shares");
@@ -63,9 +60,11 @@ function OrderBody({ id, code }: { id: WindowId; code: SymbolCode }) {
   const [profitUnit, setProfitUnit] = useState<ProfitUnit>("won");
   const [now, setNow] = useState(() => Date.now());
   const settings = useOrderSettings();
+  const venue: Venue = mock ? "krx" : settings.venue;
   const setSettings = useUiStore((s) => s.setOrderSettings);
   const limits = useFundamentals(code).data;
   const symbolInfo = useSymbolInfo(code).data;
+  const nxtNotTraded = venue === "nxt" && symbolInfo?.nxtEnabled === false;
   const accountTail = useOrdersStatus().data?.accountTail ?? null;
 
   useEffect(() => {
@@ -102,6 +101,10 @@ function OrderBody({ id, code }: { id: WindowId; code: SymbolCode }) {
   const estimate = unitPrice > 0 && quantityAt(unitPrice) > 0 ? unitPrice * quantityAt(unitPrice) : null;
 
   const place = (side: OrderSide, price: number) => {
+    if (nxtNotTraded) {
+      writes.say({ tone: "error", text: REJECT_TEXT.nxt_unavailable });
+      return;
+    }
     const quantity = quantityAt(price);
     const problem = capacityProblem(side, price, quantity, data.capacity);
     if (problem) {
@@ -132,11 +135,11 @@ function OrderBody({ id, code }: { id: WindowId; code: SymbolCode }) {
       <AccountBand accountTail={accountTail} openOrders={data.openOrders} balance={data.balance} executions={data.executions} writable={writable} mock={mock} onCancel={writes.cancelOne} />
       <HoldingSummary holding={holding} buyableAmount={data.capacity.buyableAmount} unit={profitUnit} onUnit={() => setProfitUnit(toggledUnit)} onFill={(fill) => { setMode(fill.mode); setInput(fill.input); }} />
       <div className="od-entry">
-        <QuantityRow mode={mode} input={input} estimate={estimate} venue={venue} mock={mock} sharePresets={settings.sharePresets} amountPresets={settings.amountPresets} onMode={setMode} onInput={setInput} onVenue={(next) => setVenue(id, next)} />
+        <QuantityRow mode={mode} input={input} estimate={estimate} sharePresets={settings.sharePresets} amountPresets={settings.amountPresets} onMode={setMode} onInput={setInput} />
         <div className="od-toolbar">
           <button type="button" className="od-tool" data-testid="order-explorer" aria-pressed={explorerOn} disabled={referencePrice === null || fullPrices === null} title={fullPrices === null ? EXPLORER_UNAVAILABLE : undefined} onClick={() => { if (!explorerOn) setCenterToken((token) => token + 1); setExploring(!explorerOn); }}>전체 호가</button>
           <button type="button" className="od-tool" data-testid="order-current" disabled={!explorerOn} onClick={() => setCenterToken((token) => token + 1)}>현재가</button>
-          <OrderSettingsPopover settings={settings} holding={holding !== null} onChange={setSettings} />
+          <OrderSettingsPopover settings={settings} venue={venue} mock={mock} nxtNotTraded={nxtNotTraded} holding={holding !== null} onChange={setSettings} />
         </div>
       </div>
       <OrderStatusBar status={writes.status} queued={writes.queued} blocked={data.blocked} onUndo={writes.cancelOne} onReconcile={writes.reconcile} />
@@ -162,5 +165,5 @@ export function OrderWindow({ id }: { id: WindowId }) {
   const code = useLinkedSymbol(id);
   if (code === null) return <EmptyState title="연동된 종목이 없습니다" />;
   if (isIndexCode(code)) return <EmptyState title="이 창은 주식만 보입니다" />;
-  return <OrderBody key={code} id={id} code={code} />;
+  return <OrderBody key={code} code={code} />;
 }

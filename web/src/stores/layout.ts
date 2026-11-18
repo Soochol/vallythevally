@@ -35,10 +35,6 @@ export function blankWindow(id: WindowId, kind: OtherWindowKind): OtherWindowSta
   return kind === "order" ? { id, link: null, kind, venue: DEFAULT_ORDER_VENUE } : { id, link: null, kind };
 }
 
-export const orderVenue = (layout: EditableLayout, id: WindowId): Venue => {
-  const window = layout.windows.find((w) => w.id === id);
-  return window?.kind === "order" ? window.venue : DEFAULT_ORDER_VENUE;
-};
 export type WindowState = ChartWindowState | OtherWindowState;
 
 export type EditableLayout = { id: string; name: string; sync: LayoutSync; windows: WindowState[]; placement: Placement };
@@ -172,7 +168,6 @@ interface LayoutState {
   setSymbol(cellId: WindowId, target: SymbolTarget): SymbolChange;
   sendSymbol(sender: WindowId | null, cellId: WindowId, target: SymbolTarget): SymbolChange;
   setLink(window: WindowId, link: LinkColor | null): void;
-  setOrderVenue(window: WindowId, venue: Venue): void;
   setPeriod(cellId: WindowId, p: Period): void;
   setStyle(cellId: WindowId, s: ChartStyle): void;
   setScale(cellId: WindowId, s: PriceScale): void;
@@ -412,7 +407,6 @@ export const useLayoutStore = create<LayoutState>()((set, get) => {
         return isChartWindow(w) && leader ? follow({ ...w, link }, leader) : { ...w, link };
       });
     },
-    setOrderVenue: (id, venue) => patchWindows((w) => (w.id === id && w.kind === "order" && w.venue !== venue ? { ...w, venue } : w)),
     setPeriod: (cellId, period) => patchCell(cellId, (c) => (c.period === period ? c : { ...c, period })),
     setStyle: (cellId, style) => patchSetting(cellId, "style", style),
     setScale: (cellId, scale) => patchSetting(cellId, "scale", scale),
