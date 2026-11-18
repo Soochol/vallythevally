@@ -10,9 +10,12 @@ const FILL: TradingExecution = { orderNo: "0000010", code: CODE, name: "삼성�
 const ladderRows = (page: Page) => page.getByTestId("price-ladder").locator(".mw-lr");
 
 function lastTrade(scenario: Scenario, price: number, seq = 1, qty = 3, venue: "combined" | "krx" = "combined"): void {
-  const request = scenario.live.messages.find((m) => m.type === "subscribe_feed" && m.kind === "trades" && m.venue === venue);
-  if (request?.type !== "subscribe_feed") throw new Error("체결 구독이 없습니다");
-  scenario.live.emit({ type: "feed_trades", sub: request.sub, seq, trades: [{ t: scenario.now / 1000 + seq, price, qty, venue: "krx", strength: 101.5 }] });
+  const requests = scenario.live.messages.filter((m) => m.type === "subscribe_feed" && m.kind === "trades" && m.venue === venue);
+  if (requests.length === 0) throw new Error("체결 구독이 없습니다");
+  for (const request of requests) {
+    if (request.type !== "subscribe_feed") continue;
+    scenario.live.emit({ type: "feed_trades", sub: request.sub, seq, trades: [{ t: scenario.now / 1000 + seq, price, qty, venue: "krx", strength: 101.5 }] });
+  }
 }
 
 const tops = (locator: Locator) => locator.evaluateAll((elements) => elements.map((element) => Math.round(element.getBoundingClientRect().top * 10) / 10));
@@ -412,8 +415,8 @@ test("체결강도는 13행, 최근 체결은 14행부터 같은 top에 있고 �
   ordersOn(scenario);
   tradingApi(scenario);
   await openOrderWindow(page, scenario);
-  lastTrade(scenario, 70_000, 1, 3, "krx");
-  lastTrade(scenario, 70_100, 2, 1_200_000, "krx");
+  lastTrade(scenario, 70_000, 1, 3);
+  lastTrade(scenario, 70_100, 2, 1_200_000);
   await expect(page.getByTestId("ladder-trade")).toHaveCount(2);
   await expect(page.getByTestId("ladder-strength")).toContainText("101.50%");
   const rowTops = await tops(ladderRows(page));
@@ -426,7 +429,7 @@ test("체결강도는 13행, 최근 체결은 14행부터 같은 top에 있고 �
     expect(part.text).not.toMatch(/\d{2}:\d{2}:\d{2}/);
     expect(part.priceRight).toBeLessThanOrEqual(part.qtyLeft);
   }
-  lastTrade(scenario, 70_200, 3, 3, "krx");
+  lastTrade(scenario, 70_200, 3, 3);
   await expect(page.getByTestId("ladder-trade").first()).toHaveAttribute("data-price", "70200");
   await expect(win(page)).not.toContainText("대량");
   await expect(page.locator(".mw-trade i")).toHaveCount(0);

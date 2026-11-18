@@ -1,5 +1,7 @@
+import type { Page } from "@playwright/test";
 import type { FeedBook } from "../src/api/generated/FeedBook";
 import { type Scenario, cell, DEFAULT_LAYOUT_ID, expect, pickDesktopVenue, test, windowTabs, pollSaved } from "./harness";
+import { DEFAULT_ORDER_SETTINGS } from "../src/features/order/orderSettings";
 import { BASE, CODE, cellAt, center, chipAt, commandOf, dragChip, openOrder, openOrderWindow, ordersOn, snapshot, status, tradingApi, win, writesTo } from "./order-window";
 
 test("더블클릭이 그 가격에 지정가 신규를 내고 실시간 호가를 따른다", async ({ page, scenario }) => {
@@ -27,7 +29,7 @@ test("더블클릭이 그 가격에 지정가 신규를 내고 실시간 호가�
   await pollSaved(() => writesTo(api, "place")).toHaveLength(1);
   const [place] = writesTo(api, "place");
   expect(place!.header).toBe("1");
-  expect(place!.body).toMatchObject({ code: CODE, side: "buy", quantity: 10, price: 70_000, venue: "krx", confirmHighValue: false });
+  expect(place!.body).toMatchObject({ code: CODE, side: "buy", quantity: 10, price: 70_000, venue: "combined", confirmHighValue: false });
   expect(String(place!.body.commandId)).toMatch(/^cmd-[0-9a-f-]{36}$/);
   await expect(status(page)).toContainText("접수 · 매수 10주 70,000원");
   await expect(status(page).getByRole("button", { name: "되돌리기" })).toBeVisible();
@@ -50,16 +52,77 @@ test("같은 동작을 중복해서 더블클릭해도 명령은 하나다", asy
   expect(placed).toHaveLength(1);
 });
 
-test("주문 경로를 고르면 요청에 실리고 창 설정으로 저장된다", async ({ page, scenario }) => {
+const routeButton = (page: Page) => page.getByTestId("order-settings-button");
+const NXT_NOT_TRADED = "NXT에서 거래되지 않는 종목입니다";
+
+function nxtSettingOn(scenario: Scenario, nxtEnabled?: boolean): void {
+  scenario.documents.saveUiState({ ...scenario.documents.uiState(), orderSettings: { ...DEFAULT_ORDER_SETTINGS, venue: "nxt" } });
+  if (nxtEnabled !== undefined) scenario.reply(`/api/symbols/${CODE}`, { body: { code: CODE, name: "삼성전자", kind: "common", market: "kospi", nxtEnabled } });
+}
+
+test("기본 주문 경로는 SOR이다: 창에 저장된 KRX는 읽지 않고 입력 줄에 주문 경로 묶음이 없다", async ({ page, scenario }) => {
+  ordersOn(scenario);
+  const api = tradingApi(scenario);
+  await openOrderWindow(page, scenario, false, "krx");
+  await expect(routeButton(page)).toContainText("SOR");
+  await expect(routeButton(page)).toHaveAccessibleName("호가주문 설정 · 주문 경로 SOR");
+  await expect(page.getByRole("group", { name: "주문 경로" })).toHaveCount(0);
+  await cellAt(page, "buy", 70_000).dblclick();
+  await pollSaved(() => writesTo(api, "place")).toHaveLength(1);
+  expect(writesTo(api, "place")[0]!.body.venue).toBe("combined");
+});
+
+test("설정에서 주문 경로를 NXT로 바꾸면 단추와 요청에 실리고 앱 설정으로 저장되며 창 설정은 그대로다", async ({ page, scenario }) => {
   ordersOn(scenario);
   const api = tradingApi(scenario);
   await openOrderWindow(page, scenario);
-  await expect(page.getByRole("group", { name: "주문 경로" }).getByRole("button", { name: "KRX" })).toHaveAttribute("aria-pressed", "true");
-  await page.getByRole("group", { name: "주문 경로" }).getByRole("button", { name: "NXT" }).click();
+  await routeButton(page).click();
+  await expect(page.getByTestId("order-settings")).toBeVisible();
+  await expect(routeButton(page)).toHaveAttribute("aria-expanded", "true");
+  const routes = page.getByTestId("order-settings").getByRole("group", { name: "주문 경로" });
+  await expect(routes.getByRole("button", { name: "SOR" })).toHaveAttribute("aria-pressed", "true");
+  await routes.getByRole("button", { name: "NXT" }).click();
+  await expect(routeButton(page)).toContainText("NXT");
+  await expect(routeButton(page)).toHaveAccessibleName("호가주문 설정 · 주문 경로 NXT");
+  await page.keyboard.press("Escape");
   await cellAt(page, "buy", 70_000).dblclick();
   await pollSaved(() => writesTo(api, "place")).toHaveLength(1);
   expect(writesTo(api, "place")[0]!.body.venue).toBe("nxt");
-  await pollSaved(() => scenario.documents.layout(DEFAULT_LAYOUT_ID).windows.find((w) => w.kind === "order")).toEqual({ id: "order", link: null, kind: "order", venue: "nxt" });
+  await pollSaved(() => scenario.documents.uiState()["orderSettings"]).toMatchObject({ venue: "nxt" });
+  await page.reload();
+  await expect(win(page)).toBeVisible();
+  await expect(routeButton(page)).toContainText("NXT");
+  expect(scenario.documents.layout(DEFAULT_LAYOUT_ID).windows.find((w) => w.kind === "order")).toEqual({ id: "order", link: null, kind: "order", venue: "krx" });
+});
+
+test("NXT에서 거래되지 않는 종목은 경로가 NXT일 때 단추에 경고가 있고 신규를 보내지 않으며 SOR로 바꾸면 보낸다", async ({ page, scenario }) => {
+  ordersOn(scenario);
+  const api = tradingApi(scenario);
+  nxtSettingOn(scenario, false);
+  await openOrderWindow(page, scenario);
+  await expect(routeButton(page)).toHaveAttribute("data-warn", "");
+  await expect(routeButton(page)).toHaveAttribute("title", NXT_NOT_TRADED);
+  await cellAt(page, "buy", 70_000).dblclick();
+  await expect(status(page)).toContainText(NXT_NOT_TRADED);
+  expect(writesTo(api, "place")).toHaveLength(0);
+  await routeButton(page).click();
+  await page.getByTestId("order-settings").getByRole("group", { name: "주문 경로" }).getByRole("button", { name: "SOR" }).click();
+  await expect(routeButton(page)).not.toHaveAttribute("data-warn", "");
+  await page.keyboard.press("Escape");
+  await cellAt(page, "buy", 70_000).dblclick();
+  await pollSaved(() => writesTo(api, "place")).toHaveLength(1);
+  expect(writesTo(api, "place")[0]!.body.venue).toBe("combined");
+});
+
+test("NXT에서 거래되는 종목은 경로가 NXT여도 경고 없이 신규를 보낸다", async ({ page, scenario }) => {
+  ordersOn(scenario);
+  const api = tradingApi(scenario);
+  nxtSettingOn(scenario, true);
+  await openOrderWindow(page, scenario);
+  await expect(routeButton(page)).not.toHaveAttribute("data-warn", "");
+  await cellAt(page, "buy", 70_000).dblclick();
+  await pollSaved(() => writesTo(api, "place")).toHaveLength(1);
+  expect(writesTo(api, "place")[0]!.body.venue).toBe("nxt");
 });
 
 test("걸린 주문은 같은 가격 합계의 칩이고 총 접수 행이 방향별 수량과 건수를 보인다", async ({ page, scenario }) => {
