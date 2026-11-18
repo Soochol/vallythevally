@@ -73,7 +73,7 @@ async function editorMarkup(editing: boolean, invalid = false) {
     runner: { runs: () => ({}), check: async () => ({ kind: "ready" }), run: async () => {} },
   });
   if (invalid) {
-    screenEditing.edit((draft) => ({ ...draft, name: "" }));
+    screenEditing.edit((draft) => ({ ...draft, name: "", conditions: draft.conditions.map((condition) => ({ ...condition, recentBars: "" })) }));
     await screenEditing.run();
   }
   const { entries, chosen } = screenEditing.view();
@@ -85,10 +85,11 @@ async function editorMarkup(editing: boolean, invalid = false) {
   return markup;
 }
 
-test("패널은 조건 요약과 실행·편집만 보이고 문장 편집은 편집 창에서 연다", async () => {
+test("패널은 실행·편집만 보이고 문장 편집은 편집 창에서 연다", async () => {
   const closed = await editorMarkup(false);
-  expect(closed).toContain("52주 신고가");
-  expect(closed).toContain("코스피 · ETF 제외");
+  expect(closed).not.toContain("52주 신고가");
+  expect(closed).not.toContain("코스피 · ETF 제외");
+  expect(closed).not.toContain('aria-label="조건 요약"');
   expect(closed).toContain('aria-haspopup="dialog" aria-expanded="false"');
   expect(closed).toContain('aria-keyshortcuts="Control+Enter Meta+Enter"');
   expect(closed).not.toContain('aria-label="문장형 조건식"');
@@ -106,6 +107,7 @@ test("패널은 조건 요약과 실행·편집만 보이고 문장 편집은 �
 test("검증에 실패하면 닫힌 패널과 편집 창에 오류를 한 번씩 보인다", async () => {
   const closed = await editorMarkup(false, true);
   expect([...closed.matchAll(/이름을 넣으세요/g)]).toHaveLength(1);
+  expect([...closed.matchAll(/조건식의 잘못된 값을 고쳐 주세요/g)]).toHaveLength(1);
   expect(closed).not.toContain('aria-label="문장형 조건식"');
   const open = await editorMarkup(true, true);
   expect([...open.matchAll(/이름을 넣으세요/g)]).toHaveLength(1);

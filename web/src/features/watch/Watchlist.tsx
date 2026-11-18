@@ -39,7 +39,7 @@ import { quoteBook } from "../../stores/realtime";
 import { useSelectionStore } from "../../stores/selection";
 import { useUiStore, useVenue } from "../../stores/ui";
 import { VenueFallbackBadge } from "../venue/VenuePicker";
-import { useActiveWatchlist, useWatchlistStore } from "../../stores/watchlist";
+import { chooseWatchlist, useWatchlistStore, useWindowWatchlist } from "../../stores/watchlist";
 import { ArrowIcon, ChevronIcon, CloseIcon, CopyIcon, ListIcon, MoreIcon, PlusIcon } from "../icons";
 import { Menu, type MenuItem } from "../menu/Menu";
 import { addRowToCompare, symbolRowMenuItems } from "../list/symbolRowMenu";
@@ -95,7 +95,7 @@ export function WatchPanel({ id }: { id: WindowId }) {
   const width = useElementSize(root)?.w ?? null;
   return (
     <aside ref={root} aria-label="관심종목" className="flex min-h-0 min-w-0 flex-1 flex-col">
-      <WatchHead onNaming={onNaming} />
+      <WatchHead window={id} onNaming={onNaming} />
       <WatchList variant="desktop" sender={id} editing={false} naming={naming} onNaming={onNaming} width={width} />
     </aside>
   );
@@ -108,7 +108,7 @@ export function PhoneWatch() {
   if (!shown) return null;
   return (
     <section aria-label="관심종목" className="fixed inset-x-0 bottom-[56px] top-0 z-30 flex flex-col bg-bg md:hidden">
-      <WatchHead onNaming={onNaming}>
+      <WatchHead window={null} onNaming={onNaming}>
         <FinancialUpdateButton />
         <button type="button" className="tb-btn h-9 text-s" aria-pressed={editing} onClick={() => setEditing(!editing)}>
           {editing ? "완료" : "편집"}
@@ -127,8 +127,13 @@ function startGroup(list: Watchlist, onNaming: GroupNaming["onNaming"], codes?: 
   onNaming(id);
 }
 
-function WatchHead({ children, onNaming }: { children?: React.ReactNode; onNaming: GroupNaming["onNaming"] }) {
-  const list = useActiveWatchlist();
+function putGroupIn(list: Watchlist): string | null {
+  const target = useSelectionStore.getState().putTarget;
+  return target?.listId === list.id ? target.groupId : null;
+}
+
+function WatchHead({ window, children, onNaming }: { window: WindowId | null; children?: React.ReactNode; onNaming: GroupNaming["onNaming"] }) {
+  const list = useWindowWatchlist(window);
   const openSearch = useSelectionStore((s) => s.openSearch);
   const [naming, setNaming] = useState<Naming | null>(null);
   const offline = useBeforeConnect() !== null;
@@ -136,10 +141,10 @@ function WatchHead({ children, onNaming }: { children?: React.ReactNode; onNamin
     <div className="flex h-9 flex-none items-center gap-1 border-b border-line pl-1.5 pr-1 max-md:h-12">
       <h2 className="sr-only">관심종목</h2>
       {naming ? (
-        <NameInput naming={naming} onDone={() => setNaming(null)} />
+        <NameInput window={window} naming={naming} onDone={() => setNaming(null)} />
       ) : (
         <>
-          <ListMenu list={list} onName={setNaming} onNaming={onNaming} />
+          <ListMenu window={window} list={list} onName={setNaming} onNaming={onNaming} />
           <span className="flex-none text-s text-text-3">{list.symbols.length}종목</span>
           {offline && <span className="min-w-0 shrink-[8] truncate text-xs text-text-3">저장된 목록 · 시세 없음</span>}
           <span className="flex-1" />
@@ -149,7 +154,7 @@ function WatchHead({ children, onNaming }: { children?: React.ReactNode; onNamin
             title={`${list.name}에 넣기 (종목 검색)`}
             aria-label="관심종목에 넣기"
             aria-haspopup="dialog"
-            onClick={() => openSearch("watch")}
+            onClick={() => openSearch("watch", { listId: list.id, groupId: putGroupIn(list) })}
           >
             <span className="text-accent"><PlusIcon size={14} /></span>
             종목
@@ -161,7 +166,7 @@ function WatchHead({ children, onNaming }: { children?: React.ReactNode; onNamin
   );
 }
 
-function ListMenu({ list, onName, onNaming }: { list: Watchlist; onName(n: Naming): void; onNaming: GroupNaming["onNaming"] }) {
+function ListMenu({ window, list, onName, onNaming }: { window: WindowId | null; list: Watchlist; onName(n: Naming): void; onNaming: GroupNaming["onNaming"] }) {
   const lists = useWatchlistStore((s) => s.lists);
   const columns = useUiStore((s) => s.prefs.watchColumns);
   const [open, setOpen] = useState(false);
@@ -177,12 +182,12 @@ function ListMenu({ list, onName, onNaming }: { list: Watchlist; onName(n: Namin
     const i = lists.findIndex((l) => l.id === list.id);
     const next = lists[i - 1] ?? lists[i + 1];
     useWatchlistStore.getState().removeList(list.id);
-    if (next) useUiStore.getState().setActiveWatchlist(next.id);
+    if (next) chooseWatchlist(window, next.id);
   };
   const ui = useUiStore.getState();
   const items: MenuItem[] = [
     { kind: "heading", label: "목록" },
-    ...lists.map((l): MenuItem => ({ kind: "radio", label: l.name, hint: `${l.symbols.length}`, checked: l.id === list.id, onSelect: () => ui.setActiveWatchlist(l.id) })),
+    ...lists.map((l): MenuItem => ({ kind: "radio", label: l.name, hint: `${l.symbols.length}`, checked: l.id === list.id, onSelect: () => chooseWatchlist(window, l.id) })),
     { kind: "separator" },
     { kind: "action", label: "새 그룹", icon: <PlusIcon />, disabled: list.groups.length >= MAX_WATCH_GROUPS, onSelect: () => startGroup(list, onNaming) },
     { kind: "action", label: "새 목록", icon: <PlusIcon />, disabled: lists.length >= MAX_WATCHLISTS, onSelect: () => onName({ kind: "create" }) },
@@ -190,7 +195,7 @@ function ListMenu({ list, onName, onNaming }: { list: Watchlist; onName(n: Namin
     { kind: "action", label: "복제", icon: <CopyIcon />, disabled: lists.length >= MAX_WATCHLISTS, onSelect: () => {
       const id = crypto.randomUUID();
       useWatchlistStore.getState().duplicate(list.id, id);
-      ui.setActiveWatchlist(id);
+      chooseWatchlist(window, id);
     } },
     { kind: "separator" },
     { kind: "heading", label: "열" },
@@ -218,7 +223,7 @@ function ListMenu({ list, onName, onNaming }: { list: Watchlist; onName(n: Namin
   );
 }
 
-function NameInput({ naming, onDone }: { naming: Naming; onDone(): void }) {
+function NameInput({ window, naming, onDone }: { window: WindowId | null; naming: Naming; onDone(): void }) {
   const lists = useWatchlistStore((s) => s.lists);
   const self = naming.kind === "rename" ? naming.id : null;
   const [value, setValue] = useState(() => (naming.kind === "rename" ? (lists.find((l) => l.id === naming.id)?.name ?? "") : nextListName(lists)));
@@ -234,7 +239,7 @@ function NameInput({ naming, onDone }: { naming: Naming; onDone(): void }) {
     else {
       const id = crypto.randomUUID();
       useWatchlistStore.getState().create(id, name);
-      useUiStore.getState().setActiveWatchlist(id);
+      chooseWatchlist(window, id);
     }
     onDone();
   };
@@ -277,7 +282,7 @@ function NameInput({ naming, onDone }: { naming: Naming; onDone(): void }) {
 }
 
 function WatchList({ variant, sender, editing, naming, onNaming, width = null }: { variant: WatchVariant; sender: WindowId | null; editing: boolean; width?: number | null } & GroupNaming) {
-  const list = useActiveWatchlist();
+  const list = useWindowWatchlist(sender);
   const panelPrefix = useId();
   const symbols = list.symbols;
   const chosen = useUiStore((s) => s.prefs.watchColumns);
@@ -447,7 +452,7 @@ function WatchList({ variant, sender, editing, naming, onNaming, width = null }:
           </span>
         ))}
       </div>
-      {symbols.length === 0 && <EmptyState title={`${list.name}에 종목이 없습니다`} action="종목 넣기" onAction={() => useSelectionStore.getState().openSearch("watch")} />}
+      {symbols.length === 0 && <EmptyState title={`${list.name}에 종목이 없습니다`} action="종목 넣기" onAction={() => useSelectionStore.getState().openSearch("watch", { listId: list.id, groupId: putGroupIn(list) })} />}
       {list.groups.length === 0 ? (
         <div ref={(el) => { scroller.current = el; }} className={scrollClass} onDragLeave={leave}>
           <ul aria-label={list.name}>{rows(sections[0]!)}</ul>

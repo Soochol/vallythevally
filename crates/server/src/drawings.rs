@@ -348,7 +348,7 @@ mod tests {
         let kept = upsert_drawing(&db, input("K", "005930", 0.0, cell("L", "left"), 10), UnixSeconds(1)).await.unwrap();
         upsert_drawing(&db, input("W", "005930", 1.0, cell("L", "right"), 20), UnixSeconds(1)).await.unwrap();
 
-        let watchlist = LayoutWindow { id: window_id("right"), link: None, content: WindowContent::Watchlist };
+        let watchlist = LayoutWindow { id: window_id("right"), link: None, content: WindowContent::Watchlist { list: None } };
         userdata::put_layout(&db, &layout("L", vec![chart_window("left"), watchlist], 2), UnixSeconds(5)).await.unwrap();
         let listed = list_drawings_of(&db, "005930").await.unwrap();
         assert_eq!(listed[0], kept, "남은 차트 창의 드로잉은 그대로다");

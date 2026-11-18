@@ -17,6 +17,7 @@ export interface Intent {
 
 export type Lane =
   | { readonly state: "waiting"; readonly intent: Intent; readonly failures: number; readonly retryAt: number }
+  | { readonly state: "held"; readonly intent: Intent }
   | { readonly state: "flying"; readonly sent: Intent; readonly next: Intent | null; readonly failures: number };
 
 export interface Outbox { readonly lanes: ReadonlyMap<DrawingId, Lane> }
@@ -50,6 +51,15 @@ export function enqueue(o: Outbox, intent: Intent): Outbox {
 
 export function nextToSend(o: Outbox, now: number): DrawingId[] {
   return [...o.lanes].filter(([, l]) => l.state === "waiting" && l.retryAt <= now).map(([id]) => id);
+}
+
+export function gate(o: Outbox, holds: (intent: Intent) => boolean): Outbox {
+  let out = o;
+  for (const [id, lane] of o.lanes) {
+    if (lane.state === "waiting" && holds(lane.intent)) out = withLane(out, id, { state: "held", intent: lane.intent });
+    else if (lane.state === "held" && !holds(lane.intent)) out = withLane(out, id, { state: "waiting", intent: lane.intent, failures: 0, retryAt: 0 });
+  }
+  return out;
 }
 
 export function start(o: Outbox, id: DrawingId): { outbox: Outbox; send: Intent } | null {
@@ -95,7 +105,7 @@ export function pause(o: Outbox, id: DrawingId): Outbox {
   return lane?.state === "waiting" ? withLane(o, id, { ...lane, retryAt: Infinity }) : o;
 }
 export const isFailed = (lane: Lane): boolean => lane.state === "waiting" && lane.retryAt === Infinity;
-export function latestIntent(lane: Lane): Intent { return lane.state === "waiting" ? lane.intent : (lane.next ?? lane.sent); }
+export function latestIntent(lane: Lane): Intent { return lane.state === "flying" ? (lane.next ?? lane.sent) : lane.intent; }
 export function latestWant(lane: Lane): Want { return latestIntent(lane).want; }
 export function flushable(o: Outbox): DrawingId[] { return [...o.lanes].filter(([, l]) => l.state === "waiting").map(([id]) => id); }
 

@@ -496,6 +496,63 @@ test("복제는 연동 색을 옮긴 새 창을 같은 묶음의 그 탭 바로 
   expect(state().layout.windows.some((w) => w.id === "order-2")).toBe(false);
 });
 
+test("창별 상태 setter 셋은 그 종류의 창에만 값을 쓰고 null이면 값을 지운다", () => {
+  state().openWindow("watchlist");
+  state().openWindow("trades");
+  state().openWindow("order");
+  const find = (id: string) => state().layout.windows.find((w) => w.id === id)!;
+  state().setWindowList(windowId("watchlist-2"), "L-반도체");
+  state().setWindowScreen(windowId("screener"), "S-고가");
+  state().pinSymbol(windowId("trades"), "005930");
+  state().pinSymbol(windowId("order"), "000660");
+  expect(find("watchlist-2")).toEqual({ id: "watchlist-2", link: null, kind: "watchlist", list: "L-반도체" });
+  expect(find("watchlist")).toEqual({ id: "watchlist", link: null, kind: "watchlist" });
+  expect(find("screener")).toEqual({ id: "screener", link: null, kind: "screener", screen: "S-고가" });
+  expect(find("trades")).toEqual({ id: "trades", link: null, kind: "trades", symbol: "005930" });
+  expect(find("order")).toEqual({ id: "order", link: null, kind: "order", venue: "krx", symbol: "000660" });
+  const revision = state().revision;
+  state().setWindowList(windowId("watchlist-2"), "L-반도체");
+  expect(state().revision).toBe(revision);
+  state().setWindowList(windowId("watchlist-2"), null);
+  state().setWindowScreen(windowId("screener"), null);
+  state().pinSymbol(windowId("trades"), null);
+  expect(find("watchlist-2")).toEqual({ id: "watchlist-2", link: null, kind: "watchlist" });
+  expect(find("screener")).toEqual({ id: "screener", link: null, kind: "screener" });
+  expect(find("trades")).toEqual({ id: "trades", link: null, kind: "trades" });
+});
+
+test("창별 상태 setter는 다른 종류의 창 id와 없는 id에는 아무것도 바꾸지 않고, 고정 종목은 지수를 받지 않는다", () => {
+  state().openWindow("trades");
+  state().showWindow("indicators");
+  const before = arrangement();
+  const revision = state().revision;
+  state().setWindowList(windowId("screener"), "L1");
+  state().setWindowList(windowId("nope"), "L1");
+  state().setWindowScreen(windowId("watchlist"), "S1");
+  state().pinSymbol(windowId("watchlist"), "005930");
+  state().pinSymbol(windowId("screener"), "005930");
+  state().pinSymbol(windowId("indicators"), "005930");
+  state().pinSymbol(firstChart().id, "005930");
+  state().pinSymbol(windowId("trades"), "IDX:001");
+  expect(arrangement()).toEqual(before);
+  expect(state().revision).toBe(revision);
+});
+
+test("복제는 창별 상태(목록, 조건식, 고정 종목)도 옮기고 복제본을 바꿔도 원본은 그대로다", () => {
+  state().openWindow("order");
+  state().pinSymbol(windowId("order"), "005930");
+  state().setWindowList(windowId("watchlist"), "L-등락");
+  const orderCopy = state().duplicateWindow(windowId("order"));
+  const listCopy = state().duplicateWindow(windowId("watchlist"));
+  const find = (id: string | null) => state().layout.windows.find((w) => w.id === id);
+  expect(find(orderCopy)).toMatchObject({ kind: "order", venue: "krx", symbol: "005930" });
+  expect(find(listCopy)).toMatchObject({ kind: "watchlist", list: "L-등락" });
+  state().pinSymbol(windowId(orderCopy!), null);
+  state().setWindowList(windowId(listCopy!), "L-다른");
+  expect(find("order")).toMatchObject({ symbol: "005930" });
+  expect(find("watchlist")).toMatchObject({ list: "L-등락" });
+});
+
 test("복제는 차트와 지표와 없는 창과 떠 있는 창에서는 아무것도 하지 않는다", () => {
   state().showWindow("indicators");
   const before = arrangement();

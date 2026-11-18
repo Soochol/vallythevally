@@ -30,6 +30,8 @@ import {
   ungroup,
 } from "../lib/watchlist";
 import { useUiStore } from "./ui";
+import { useLayoutStore } from "./layout";
+import type { WindowId } from "../layout/kinds";
 import type { ToastUndo } from "./selection";
 
 const applied = (result: DropResult, unchanged: Watchlist): Watchlist => ("list" in result ? result.list : unchanged);
@@ -159,4 +161,23 @@ export function useActiveWatchlist(): Watchlist {
   const lists = useWatchlistStore((s) => s.lists);
   const activeId = useUiStore((s) => s.prefs.activeWatchlistId);
   return activeWatchlist(lists, activeId);
+}
+
+export function windowWatchlist(lists: readonly Watchlist[], windowList: string | null, activeId: string | null): Watchlist {
+  return lists.find((l) => l.id === windowList) ?? activeWatchlist(lists, activeId);
+}
+
+const listOfWindow = (windows: readonly { id: string; kind: string; list?: string | null }[], window: WindowId | null): string | null =>
+  window === null ? null : windows.find((w) => w.id === window && w.kind === "watchlist")?.list ?? null;
+
+export function useWindowWatchlist(window: WindowId | null): Watchlist {
+  const lists = useWatchlistStore((s) => s.lists);
+  const activeId = useUiStore((s) => s.prefs.activeWatchlistId);
+  const windowList = useLayoutStore((s) => listOfWindow(s.layout.windows, window));
+  return windowWatchlist(lists, windowList, activeId);
+}
+
+export function chooseWatchlist(window: WindowId | null, id: string) {
+  if (window !== null) useLayoutStore.getState().setWindowList(window, id);
+  useUiStore.getState().setActiveWatchlist(id);
 }

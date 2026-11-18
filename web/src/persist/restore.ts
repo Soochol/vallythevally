@@ -53,8 +53,19 @@ const RETIRED_WINDOW_KIND = "objects";
 const DRAFT_LINKS: readonly unknown[] = [null, ...LINK_COLORS];
 const isWindowKind = (k: unknown): k is WindowKind => typeof k === "string" && Object.hasOwn(WINDOW_KINDS, k);
 
+const STOCK_CODE = /^[0-9A-Z]{6}$/;
+const MAX_WATCHLIST_ID_BYTES = 64;
+const MAX_SCREEN_ID_BYTES = 64;
+const absent = (v: unknown): boolean => v === undefined || v === null;
+const isId = (v: unknown, maxBytes: number): v is string => typeof v === "string" && v.length > 0 && new TextEncoder().encode(v).length <= maxBytes;
+const isPin = (v: unknown): boolean => absent(v) || (typeof v === "string" && STOCK_CODE.test(v));
+const PINNABLE_KINDS: readonly WindowKind[] = ["trades", "book", "program", "brokers", "order"];
+
 function isDraftWindow(w: unknown): w is LayoutWindow {
   if (!isFields(w) || typeof w.id !== "string" || !WINDOW_ID.test(w.id) || !DRAFT_LINKS.includes(w.link) || !isWindowKind(w.kind)) return false;
+  if (w.kind === "watchlist") return absent(w.list) || isId(w.list, MAX_WATCHLIST_ID_BYTES);
+  if (w.kind === "screener") return absent(w.screen) || isId(w.screen, MAX_SCREEN_ID_BYTES);
+  if (PINNABLE_KINDS.includes(w.kind) && !isPin(w.symbol)) return false;
   if (w.kind === "order") return w.venue === "combined" || w.venue === "krx" || w.venue === "nxt";
   return w.kind !== "chart" || (typeof w.symbol === "string" && typeof w.period === "string" && (w.venue === null || typeof w.venue === "string") && "chartSettings" in w);
 }
@@ -143,9 +154,27 @@ async function openLayout(src: RestoreSources, id: string | null): Promise<Layou
   return first ? src.layout(first.id) : null;
 }
 
+const optional = <K extends string>(key: K, value: string | null | undefined): { [P in K]?: string } => (typeof value === "string" ? ({ [key]: value } as { [P in K]?: string }) : {});
+
 function restoreWindow(raw: LayoutWindow): WindowState {
-  if (raw.kind === "order") return { id: windowId(raw.id), link: raw.link, kind: raw.kind, venue: raw.venue };
-  if (raw.kind !== "chart") return { id: windowId(raw.id), link: raw.link, kind: raw.kind };
+  const base = { id: windowId(raw.id), link: raw.link };
+  switch (raw.kind) {
+    case "order":
+      return { ...base, kind: raw.kind, venue: raw.venue, ...optional("symbol", raw.symbol) };
+    case "watchlist":
+      return { ...base, kind: raw.kind, ...optional("list", raw.list) };
+    case "screener":
+      return { ...base, kind: raw.kind, ...optional("screen", raw.screen) };
+    case "trades":
+    case "book":
+    case "program":
+    case "brokers":
+      return { ...base, kind: raw.kind, ...optional("symbol", raw.symbol) };
+    case "indicators":
+      return { ...base, kind: raw.kind };
+    case "chart":
+      break;
+  }
   const { venue: _venue, ...chart } = raw;
   return { ...chart, id: windowId(raw.id), chartSettings: parseChartSettings(raw.chartSettings) };
 }

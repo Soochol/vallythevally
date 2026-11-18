@@ -69,60 +69,15 @@ impl Server {
                     _ = stopped => {},
                     _ = async move {
             let value = |key: &str| overrides.get(key).map(String::as_str);
-            let parent = lock.parent().unwrap();
+            let config = harness_config(&overrides, &lock, &static_dir);
             let instance = server::instance::InstanceLock::acquire(&lock).unwrap();
-            let token_path = value("VALLY_TOKEN_PATH").map(PathBuf::from).unwrap_or_else(|| token_path(&lock));
-            let clock = value("VALLY_CLOCK_START").map(|at| server::clock::Clock::fake(server::kiwoom::wire::parse_kst_datetime(at).unwrap())).unwrap_or_else(server::clock::Clock::system);
-            let environment = if value("VALLY_KIWOOM_ENV") == Some("mock") { server::api::KiwoomEnvironment::Mock } else { server::api::KiwoomEnvironment::Real };
-            let token_file = server::kiwoom::token_file::TokenFile::new(token_path.clone(), &instance).with_environment(environment);
-            let key_file = server::kiwoom::key_file::KeyFile::new(value("VALLY_KIWOOM_KEY_PATH").map(PathBuf::from).unwrap_or_else(|| lock.with_file_name("kiwoom-key.json")), &instance).with_environment(environment);
-            let (key_name, secret_name) = if environment == server::api::KiwoomEnvironment::Mock { ("VALLY_KIWOOM_MOCK_APP_KEY", "VALLY_KIWOOM_MOCK_APP_SECRET") } else { ("VALLY_KIWOOM_APP_KEY", "VALLY_KIWOOM_APP_SECRET") };
-            let env_key = match value(key_name) {
-                Some("") => None,
-                key => Some(server::config::KiwoomCredentials { app_key: server::config::Secret::new(key.unwrap_or(APP_KEY).into()), app_secret: server::config::Secret::new(value(secret_name).unwrap_or(APP_SECRET).into()) }),
-            };
-            let has_env_key = env_key.is_some();
-            let startup_key = server::kiwoom::key_file::startup_key(env_key, &key_file, environment);
-            let auth = match startup_key.credentials {
-                Some(credentials) => server::kiwoom::auth::KiwoomAuth::new(credentials.app_key, credentials.app_secret, Some(token_file)),
-                None => server::kiwoom::auth::KiwoomAuth::keyless(Some(token_file)),
-            };
-            let rest = server::kiwoom::rest::KiwoomRest::with_send_spacing(transport.transport(), auth, clock.clone(), std::time::Duration::from_millis(value("KIWOOM_SEND_SPACING_MILLIS").map_or(1, |millis| millis.parse().unwrap())));
-            let db = server::db::AppDb::open_in(&parent.join("vally.db"), environment).await.unwrap();
-            let store_path = parent.join("screener.duckdb");
-            let dispatcher = tracing::dispatcher::get_default(Clone::clone);
-            let store = tokio::task::spawn_blocking(move || tracing::dispatcher::with_default(&dispatcher, || server::screener::store::Store::open(&store_path).unwrap())).await.unwrap();
-            let symbols = Arc::new(server::symbols::SymbolDirectory::default());
-            let (stream, stream_events, _desired) = match value("VALLY_KIWOOM_WS_URL") {
-                Some(url) => {
-                    let (stream, events) = server::kiwoom::stream::KiwoomStream::spawn(url.into(), rest.clone(), clock.clone());
-                    (stream, events, None)
-                }
-                None => {
-                    let (stream, desired) = server::kiwoom::stream::KiwoomStream::detached();
-                    (stream, stream_events, Some(desired))
-                }
-            };
-            let path = |p: &Path| p.display().to_string();
-            let account_path = value("VALLY_ACCOUNT_STATE_PATH").map(PathBuf::from).unwrap_or_else(|| lock.with_file_name("account.json"));
-            let account_url = value("VALLY_ACCOUNT_SERVER_URL").map(|url| server::account::AccountServerUrl::parse(url).unwrap());
-            let settings = server::api::SystemSettings {
-                environment, bind: "127.0.0.1:0".into(), log_filter: "server=trace".into(), static_dir: path(&static_dir), db_path: path(&parent.join("vally.db")), screener_db_path: path(&parent.join("screener.duckdb")),
-                financial_db_path: path(&parent.join("financials.db")), screener_update_on_start: value("VALLY_SCREENER_UPDATE_ON_START") == Some("on"), financial_automatic: value("VALLY_FINANCIAL_AUTOMATIC") == Some("on"),
-                opendart_key_present: value("OPENDART_API_KEY").is_some_and(|key| !key.is_empty()), token_path: path(&token_path), key_path: path(key_file.path()), lock_path: path(&lock),
-                kiwoom_target: server::system_routes::kiwoom_target(value("VALLY_KIWOOM_BASE_URL").unwrap_or("http://127.0.0.1:1")), server_version: env!("CARGO_PKG_VERSION").into(),
-                account_server_url: account_url.as_ref().map(|url| url.as_str().to_owned()), account_state_path: Some(path(&account_path)),
-            };
-            let mut system = server::system_routes::SystemState::new(key_file, has_env_key, startup_key.file_problem, settings);
-            if let Some(url) = account_url {
-                system = system.with_account(server::account::AccountState::linked(url, server::account::AccountStateFile::new(account_path, &instance)).unwrap());
-            }
-            if let Some(url) = value("VALLY_PUBLIC_IP_URL") {
-                system = system.with_public_ip(Arc::new(server::public_ip::ReqwestPublicIp::new(url.into()).unwrap()));
-            }
-            let state = server::app::application_with_system(server::app::ApplicationInputs { rest: rest.clone(), clock: clock.clone(), symbols: symbols.clone(), db, screener_store: store, stream: (stream, stream_events), static_dir, screener_update_on_connect: value("VALLY_SCREENER_UPDATE_ON_START") == Some("on") }, system);
+            let millis = |key: &str| std::time::Duration::from_millis(value(key).map_or(1, |millis| millis.parse().unwrap()));
+            let stream = if value("VALLY_KIWOOM_WS_URL").is_some() { server::app::StreamSource::Connect } else { server::app::StreamSource::Detached(stream_events) };
+            let adapters = server::app::Adapters { kiwoom: transport.transport(), stream, kiwoom_spacing: Some(millis("KIWOOM_SEND_SPACING_MILLIS")), dart_spacing: Some(millis("DART_SPACING_MILLIS")) };
+            let started = server::app::start(&config, &instance, adapters).await.unwrap();
+            let state = started.state.clone();
             let mut background = tokio::task::JoinSet::new();
-            publish.set(Control { link: state.link.clone(), runtime: tokio::runtime::Handle::current(), clock: clock.clone() }).ok();
+            publish.set(Control { link: state.link.clone(), runtime: tokio::runtime::Handle::current(), clock: state.clock.clone() }).ok();
             if value("VALLY_KIWOOM_CONNECT") == Some("start") {
                 state.link.connect_at_start();
             } else if value("VALLY_KIWOOM_CONNECT") != Some("off") {
@@ -130,19 +85,10 @@ impl Server {
                 background.spawn(async move { link.connect(false).await; });
                 state.link.subscribe().wait_for(|state| matches!(state, LinkState::NoKey | LinkState::Connected | LinkState::Failed(_) | LinkState::Connecting(ConnectStep::IssueInterval(_) | ConnectStep::Symbols | ConnectStep::Realtime))).await.unwrap();
             }
-            background.spawn(server::app::daily_maintenance(state.clone()));
-            background.spawn(server::account::sync::run(state.clone()));
-            let financial_path = value("VALLY_FINANCIAL_DB_PATH").map(PathBuf::from).unwrap_or_else(|| parent.join("financials.db"));
-            let financial_store = server::financials::store::Store::open(&financial_path).await;
-            let client = value("OPENDART_API_KEY").filter(|key| !key.is_empty()).map(|key| server::financials::client::Client::with_spacing(server::config::Secret::new(key.into()), value("VALLY_DART_BASE_URL").expect("DART tests require loopback URL").into(), value("VALLY_KIND_BASE_URL").expect("KIND tests require loopback URL").into(), std::time::Duration::from_millis(value("DART_SPACING_MILLIS").map_or(1, |millis| millis.parse().unwrap()))).unwrap());
-            let financials = server::financials::Financials::with_store(client, financial_store, clock);
-            let automatic = (value("VALLY_FINANCIAL_AUTOMATIC") == Some("on")).then(|| financials.start_automatic(symbols.clone()));
-            let bound = state.clone();
-            let app = server::http::router(state).merge(server::financials::routes(financials, symbols));
-            let listener = tokio::net::TcpListener::bind(format!("{}:0", value("SERVER_BIND_IP").unwrap_or("127.0.0.1"))).await.unwrap();
-            bound.system.bound(listener.local_addr().unwrap());
-            address.send_replace(Some(listener.local_addr().unwrap()));
-            let automatic = automatic.map(AbortOnDrop);
+            address.send_replace(Some(started.listener.local_addr().unwrap()));
+            let automatic = started.automatic.map(AbortOnDrop);
+            let listener = started.listener;
+            let app = started.router;
             axum::serve(listener, app).await.unwrap();
             drop(automatic);
                     } => {},
@@ -200,6 +146,39 @@ impl Drop for Server {
         if let Some(shutdown) = self.shutdown.take() { let _ = shutdown.send(()); }
         if let Some(thread) = self.thread.take() { let _ = thread.join(); }
     }
+}
+
+const HARNESS_ONLY: [&str; 5] = ["KIWOOM_SEND_SPACING_MILLIS", "DART_SPACING_MILLIS", "SERVER_RUNTIME_THREADS", "SERVER_BIND_IP", "VALLY_KIWOOM_CONNECT"];
+
+fn harness_config(overrides: &std::collections::HashMap<String, String>, lock: &Path, static_dir: &Path) -> server::config::Config {
+    let parent = lock.parent().unwrap();
+    let path = |p: &Path| p.display().to_string();
+    let value = |key: &str| overrides.get(key).map(String::as_str);
+    let mut vars: std::collections::BTreeMap<String, String> = [
+        ("VALLY_LOCK_PATH", path(lock)),
+        ("VALLY_TOKEN_PATH", path(&token_path(lock))),
+        ("VALLY_KIWOOM_KEY_PATH", path(&lock.with_file_name("kiwoom-key.json"))),
+        ("VALLY_ACCOUNT_STATE_PATH", path(&lock.with_file_name("account.json"))),
+        ("VALLY_DB_PATH", path(&parent.join("vally.db"))),
+        ("VALLY_SCREENER_DB_PATH", path(&parent.join("screener.duckdb"))),
+        ("VALLY_STATIC_DIR", path(static_dir)),
+        ("VALLY_BIND", format!("{}:0", value("SERVER_BIND_IP").unwrap_or("127.0.0.1"))),
+        ("VALLY_LOG", "server=trace".into()),
+        ("VALLY_KIWOOM_BASE_URL", "http://127.0.0.1:1".into()),
+        ("VALLY_KIWOOM_WS_URL", "ws://127.0.0.1:1".into()),
+        ("VALLY_PUBLIC_IP_URL", "http://127.0.0.1:1".into()),
+        ("VALLY_SCREENER_UPDATE_ON_START", "off".into()),
+        ("VALLY_FINANCIAL_AUTOMATIC", "off".into()),
+    ].into_iter().map(|(key, value)| (key.to_owned(), value)).collect();
+    let (key_name, secret_name) = if value("VALLY_KIWOOM_ENV") == Some("mock") { ("VALLY_KIWOOM_MOCK_APP_KEY", "VALLY_KIWOOM_MOCK_APP_SECRET") } else { ("VALLY_KIWOOM_APP_KEY", "VALLY_KIWOOM_APP_SECRET") };
+    vars.insert(key_name.into(), APP_KEY.into());
+    vars.insert(secret_name.into(), APP_SECRET.into());
+    vars.extend(overrides.iter().filter(|(key, _)| !HARNESS_ONLY.contains(&key.as_str())).map(|(key, value)| (key.clone(), value.clone())));
+    if value(key_name) == Some("") { vars.insert(secret_name.into(), String::new()); }
+    if value("OPENDART_API_KEY").is_some_and(|key| !key.is_empty()) {
+        assert!(value("VALLY_DART_BASE_URL").is_some() && value("VALLY_KIND_BASE_URL").is_some(), "DART tests require loopback URL");
+    }
+    server::config::Config::from_values(vars).unwrap().0
 }
 
 struct AbortOnDrop(tokio::task::JoinHandle<()>);

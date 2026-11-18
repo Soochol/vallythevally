@@ -1,6 +1,6 @@
-import { useDrawingSave } from "../chart/drawings/sync";
-import { saveAllAndWait } from "./autosave";
-import type { SaveState } from "./saver";
+import { useDrawingSave } from "../../chart/drawings/sync";
+import { saveAllAndWait } from "../../persist/autosave";
+import type { SaveState } from "../../persist/saver";
 
 export const SAVE_WAIT_MS = 10_000;
 
