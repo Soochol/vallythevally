@@ -2,9 +2,18 @@ import { selectOption } from "./select-option";
 import { test, expect, cell, chartOf, type Scenario, pollSaved } from './harness';
 import type { Page } from '@playwright/test';
 import type { Drawing } from '../src/api/generated/Drawing';
-import { expandDock } from "./drawing-probe";
+import { settledMirror } from "./drawing-probe";
 
 const drawings = async (scenario: Scenario): Promise<Drawing[]> => scenario.documents.drawings("IDX:001");
+async function selectLine(page: Page) {
+  const box = await chartOf(cell(page)).boundingBox();
+  const [line] = await settledMirror(page);
+  const point = line?.points.find((p) => p !== null && p !== undefined && box !== null && p.x > 0 && p.x < box.width * 0.9) ?? line?.points[0];
+  if (box === null || point === undefined || point === null) throw new Error("Expected the drawn line");
+  await page.mouse.click(box.x + (point.x > 0 && point.x < box.width * 0.9 ? point.x : box.width * 0.5), box.y + point.y);
+  await expect.poll(async () => (await settledMirror(page))[0]?.selected).toBe(true);
+}
+
 async function mirror(page: Page) {
   return JSON.parse(await chartOf(cell(page)).locator('.drawing-mirror').getAttribute('data-drawings') ?? '[]');
 }
@@ -50,9 +59,7 @@ test('server accepted extreme timestamp must not blank settings', async ({page,s
   scenario.documents.saveDrawing(body);
 
   await page.reload(); await expect.poll(async ()=>(await mirror(page)).length).toBe(1);
-  await expandDock(page);
-  await page.getByRole('button',{name:'개체 목록 열기'}).click();
-  await page.getByRole('button',{name:'고르기: 수평선'}).click();
+  await selectLine(page);
   await page.getByRole('button',{name:'드로잉 세부 설정',exact:true}).click();
   const errors:string[]=[];page.on('pageerror',e=>errors.push(e.message));
   await page.locator('summary').filter({hasText:/^좌표$/}).click();
@@ -80,9 +87,7 @@ test('late PUT response must not allow undo to delete newer other-tab work', asy
   const initial=(await drawings(scenario))[0]!;
   const other=await page.context().newPage();
   await other.goto("/"); await expect.poll(async ()=>(await mirror(other)).length).toBe(1);
-  await expandDock(other);
-  await other.getByRole('button',{name:'개체 목록 열기'}).click();
-  await other.getByRole('button',{name:'고르기: 수평선'}).click();
+  await selectLine(other);
   await selectOption(other.getByRole('toolbar',{name:'드로잉 스타일'}).getByLabel('선 굵기'), '4');
   await pollSaved(async ()=>(await drawings(scenario))[0]?.style).toMatchObject({line:{width:4}});
   const remote=(await drawings(scenario))[0]!;
@@ -109,9 +114,7 @@ test('visible extreme timestamp has a safe numeric editor and preserves unrelate
   scenario.documents.saveDrawing({...d,tool:'trendline',points:[{...point,t:Number.MAX_SAFE_INTEGER},{...point,t:point.t+86400}],revision:d.revision+100});
 
   await page.reload(); await expect.poll(async ()=>(await mirror(page)).length).toBe(1);
-  await expandDock(page);
-  await page.getByRole('button',{name:'개체 목록 열기'}).click();
-  await page.getByRole('button',{name:'고르기: 추세선'}).click();
+  await selectLine(page);
   await page.getByRole('button',{name:'드로잉 세부 설정',exact:true}).click();
   await page.locator('summary').filter({hasText:/^좌표$/}).click();
   const seconds=page.getByRole('textbox',{name:'시작 시각 (Unix 초)'});

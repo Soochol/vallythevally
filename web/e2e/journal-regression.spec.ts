@@ -2,9 +2,18 @@ import type { Page } from "@playwright/test";
 import { parseDrawingBody, recordKey } from "../src/chart/drawings/outbox";
 import { parseJournalRecord } from "../src/chart/drawings/journal";
 import { test, expect, cell, chartOf, type Scenario, pollSaved } from "./harness";
-import { expandDock } from "./drawing-probe";
+import { settledMirror } from "./drawing-probe";
 
 const mirror = (page: Page) => chartOf(cell(page)).locator(".drawing-mirror");
+
+async function selectLine(page: Page) {
+  const box = await chartOf(cell(page)).boundingBox();
+  const [line] = await settledMirror(page);
+  const point = line?.points.find((p) => p !== null && p !== undefined && box !== null && p.x > 0 && p.x < box.width * 0.9) ?? line?.points[0];
+  if (box === null || point === undefined || point === null) throw new Error("Expected the drawn line");
+    await page.mouse.click(box.x + (point.x > 0 && point.x < box.width * 0.9 ? point.x : box.width * 0.5), box.y + point.y);
+  await expect.poll(async () => (await settledMirror(page))[0]?.selected).toBe(true);
+}
 
 async function open(page: Page, url: string) {
   const loaded = page.waitForResponse((response) => response.url().includes("/api/drawings?") && response.request().method() === "GET");
@@ -84,9 +93,7 @@ for (const offset of [0, -60_000]) {
           return nativeFetch(input, init);
         };
       });
-      await expandDock(other);
-      await other.getByRole("button", { name: "개체 목록 열기" }).click();
-      await other.getByRole("button", { name: "고르기: 수평선" }).click();
+      await selectLine(other);
       await other.getByRole("button", { name: "드로잉 지우기", exact: true }).click();
       await expect(other.locator("html")).toHaveAttribute("data-blocked-drawing-deletes", /^[1-9]\d*$/);
       await expect(mirror(other)).toHaveAttribute("data-drawings", "[]");

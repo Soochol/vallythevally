@@ -3,9 +3,18 @@ import type { Page } from "@playwright/test";
 import { parseDrawingBody, UNSAVED_PREFIX } from "../src/chart/drawings/outbox";
 import { parseJournalRecord, COMPLETION_PREFIX, completionKey, STAGING_PREFIX } from "../src/chart/drawings/journal";
 import { test, expect, cell, chartOf, type Scenario, pollSaved } from "./harness";
-import { expandDock } from "./drawing-probe";
+import { settledMirror } from "./drawing-probe";
 
 const width = (page: Page) => page.getByRole("toolbar", { name: "드로잉 스타일" }).getByLabel("선 굵기");
+
+async function selectLine(page: Page) {
+  const box = await chartOf(cell(page)).boundingBox();
+  const [line] = await settledMirror(page);
+  const point = line?.points.find((p) => p !== null && p !== undefined && box !== null && p.x > 0 && p.x < box.width * 0.9) ?? line?.points[0];
+  if (box === null || point === undefined || point === null) throw new Error("Expected the drawn line");
+    await page.mouse.click(box.x + (point.x > 0 && point.x < box.width * 0.9 ? point.x : box.width * 0.5), box.y + point.y);
+  await expect.poll(async () => (await settledMirror(page))[0]?.selected).toBe(true);
+}
 
 async function open(page: Page) {
   const loaded = page.waitForResponse((response) => response.url().includes("/api/drawings?") && response.request().method() === "GET");
@@ -49,12 +58,8 @@ test("frontend journal + saved documents: first publication of an older never-se
   const [original] = await storedDrawings(scenario);
   if (!original) throw new Error("Expected seeded line");
   const other = await context.newPage(); await open(other);
-  await expandDock(page);
-  await page.getByRole("button", {name: "개체 목록 열기"}).click();
-  await page.getByRole("button", {name: "고르기: 수평선"}).click();
-  await expandDock(other);
-  await other.getByRole("button", {name: "개체 목록 열기"}).click();
-  await other.getByRole("button", {name: "고르기: 수평선"}).click();
+  await selectLine(page);
+  await selectLine(other);
   let release = () => {}; let held = false; let olderRecord: unknown;
   const gate = new Promise<void>((resolve) => { release = resolve; });
   await page.route("**/__parent-stage-gate", async (route) => { olderRecord = route.request().postDataJSON(); held = true; await gate; await route.fulfill({status: 200, body: "released"}); });
@@ -119,9 +124,7 @@ test("frontend journal + saved documents: native launch holds the id lock only u
   const other = await context.newPage();
   await open(other);
   for (const tab of [page, other]) {
-    await expandDock(tab);
-    await tab.getByRole("button", { name: "개체 목록 열기" }).click();
-    await tab.getByRole("button", { name: "고르기: 수평선" }).click();
+    await selectLine(tab);
   }
   let releasePut = () => {};
   let releaseDelete = () => {};
@@ -201,9 +204,7 @@ test("frontend journal + saved documents: a warm Storage task paused before diag
   const other = await context.newPage();
   await open(other);
   for (const tab of [page, other]) {
-    await expandDock(tab);
-    await tab.getByRole("button", { name: "개체 목록 열기" }).click();
-    await tab.getByRole("button", { name: "고르기: 수평선" }).click();
+    await selectLine(tab);
   }
   let release = () => {};
   let held = false;

@@ -35,13 +35,28 @@ export async function expandDock(page: Page) {
   await bar.hover();
   await expect(pill).toHaveAttribute("aria-expanded", "true");
   await expect(bar.getByRole("button", { name: "드로잉 도구 막대 옮기기", exact: true })).toBeVisible();
-  let last = "";
-  await expect.poll(async () => {
-    const now = JSON.stringify(await bar.boundingBox());
-    const same = now === last;
-    last = now;
-    return same;
-  }, { intervals: [30, 30, 60, 100] }).toBe(true);
+  const settled = await bar.evaluate((el, limits) => new Promise<boolean>((resolve) => {
+    const read = () => {
+      const r = el.getBoundingClientRect();
+      return `${r.x},${r.y},${r.width},${r.height}`;
+    };
+    let rect = read();
+    let sameSince = -1;
+    const startedAt = performance.now();
+    const onFrame = () => {
+      const now = performance.now();
+      const next = read();
+      if (next !== rect || sameSince < 0) {
+        rect = next;
+        sameSince = now;
+      }
+      if (now - sameSince >= limits.stableMs) resolve(true);
+      else if (now - startedAt > limits.giveUpMs) resolve(false);
+      else requestAnimationFrame(onFrame);
+    };
+    requestAnimationFrame(onFrame);
+  }), { stableMs: 30, giveUpMs: 14000 });
+  if (!settled) throw new Error("드로잉 도구 막대가 멈추지 않았습니다: 14초 동안 사각형이 30ms 이상 같은 값으로 이어지지 않았습니다");
   return bar;
 }
 

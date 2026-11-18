@@ -16,10 +16,10 @@ test("scope filters by layout and chart window without tying drawings to a venue
   expect(inScope({ kind: "cell", layoutId: "layout", windowId: "cell-1" }, "layout", windowId("cell-1"))).toBe(true);
   expect(inScope({ kind: "cell", layoutId: "layout", windowId: "cell-1" }, "layout", windowId("cell-0"))).toBe(false);
 });
-test("hidden state and visible periods filter independently of scope", () => {
+test("the hidden field does not hide a drawing and visible periods filter independently of scope", () => {
   expect(visible(d, where)).toBe(true);
   expect(visible({ ...d, locked: true }, where)).toBe(true);
-  expect(visible({ ...d, hidden: true }, where)).toBe(false);
+  expect(visible({ ...d, hidden: true }, where)).toBe(true);
   expect(visible(d, { ...where, hideAll: true })).toBe(false);
   expect(visible({ ...d, periods: ["60m"] }, where)).toBe(false);
   expect(visible({ ...d, periods: ["D", "W"] }, where)).toBe(true);

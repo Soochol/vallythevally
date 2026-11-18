@@ -11,7 +11,7 @@ import { useUiStore } from "../../stores/ui";
 import type { ChartExtension, ChartHost } from "../extensions";
 import { chartTimeProjection } from "../timeAxis";
 import { formatBarTime } from "../time";
-import { barLength, fromScreen, logicalToT, startAt, tToLogical, timelineOf, toolContext, xToLogical, type Frame } from "./anchor";
+import { barLength, fromScreen, logicalToT, startAt, tToLogical, timelineOf, toolContext, type Frame } from "./anchor";
 import { reusableStyle } from "./objects";
 import * as clipboard from "./clipboard";
 import { DrawingLayer, VLinePaneLayer } from "./DrawingLayer";
@@ -300,18 +300,6 @@ export class DrawingSurface implements ChartExtension {
     if (lo !== undefined && hi !== undefined && hi - lo < 1e-9) {
       rest.splice(index, 0, current); this.sync.commit(this.cellId, rest.map((d, i) => ({ kind: "update", before: d, after: { ...d, z: i + 1 } })));
     } else this.sync.commit(this.cellId, [{ kind: "update", before: current, after: { ...current, z } }]);
-  }
-  reveal(id: string) {
-    const symbol = this.host.view()?.symbol; if (!symbol) return;
-    const d = this.sync.drawings(symbol).find((item) => item.id === id); if (!d || d.hidden) return;
-    const f = this.projection(); const ctx = this.context(f).ctx;
-    const point = d.points[0]; const screen = point ? ctx.toScreen(point) : null;
-    const logical = screen ? xToLogical(f.axes.time, screen.x) : null;
-    if (screen && logical !== null && logical >= 0 && (screen.x < 0 || screen.x > ctx.paneWidth)) {
-      const range = this.host.chart.timeScale().getVisibleLogicalRange();
-      if (range) { const half = (range.to - range.from) / 2; this.host.chart.timeScale().setVisibleLogicalRange({ from: logical - half, to: logical + half }); }
-    }
-    this.focus();
   }
   selectionBounds() {
     const frame = this.frame(); const boxes = frame.items.filter((i) => useDrawingSession.getState().selected.includes(i.id)).flatMap((i) => i.shapes.map((s) => shapeBounds(s, frame.pane)));

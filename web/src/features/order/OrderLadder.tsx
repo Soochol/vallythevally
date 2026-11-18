@@ -1,4 +1,4 @@
-import { type ReactNode, useEffect, useRef, useState } from "react";
+import { type ReactNode, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { OrderSide } from "../../api/generated/OrderSide";
 import { formatPrice } from "../../lib/format";
 import { Menu, type MenuItem } from "../menu/Menu";
@@ -6,12 +6,18 @@ import type { LadderRow } from "../market-window/ladder";
 import { type LadderRowSlots, PriceLadder } from "../market-window/PriceLadder";
 import { formatShares } from "../market-window/format";
 import { dragGhostText, groupKey, type PriceGroup, previewText, SIDE_LABEL } from "./orderRules";
+import { LADDER_ROW_HEIGHT_PX, type RowRange, scrollTopToCenter, visibleRowRange } from "./priceRange";
 import { useChipDrag } from "./useChipDrag";
 import type { DragOutcome } from "./orderRules";
 
 export interface HoverCell {
   readonly side: OrderSide;
   readonly price: number;
+}
+
+export interface ExplorerScroll {
+  readonly centerPrice: number | null;
+  readonly centerToken: number;
 }
 
 export interface LadderActions {
@@ -33,7 +39,7 @@ interface Props {
   readonly actions: LadderActions;
   readonly averagePrice: number | null;
   readonly divider: boolean;
-  readonly onWheel?: (direction: 1 | -1) => void;
+  readonly explorer?: ExplorerScroll;
   readonly onDragging: (dragging: boolean) => void;
   readonly rowSlots?: LadderRowSlots;
 }
@@ -42,7 +48,7 @@ type MenuState = { readonly x: number; readonly y: number; readonly group: Price
 
 const SIDE_OF_SLOT: Readonly<Record<"left" | "right", OrderSide>> = { left: "sell", right: "buy" };
 
-export function OrderLadder({ rows, previousClose, groups, writable, previewQuantity, hover, onHover, actions, averagePrice, divider, onWheel, onDragging, rowSlots }: Props) {
+export function OrderLadder({ rows, previousClose, groups, writable, previewQuantity, hover, onHover, actions, averagePrice, divider, explorer, onDragging, rowSlots }: Props) {
   const ladder = useRef<HTMLDivElement>(null);
   const [menu, setMenu] = useState<MenuState | null>(null);
   const { view, begin } = useChipDrag(ladder, actions.drop);
@@ -50,17 +56,36 @@ export function OrderLadder({ rows, previousClose, groups, writable, previewQuan
 
   useEffect(() => { onDragging(dragging); }, [dragging, onDragging]);
 
-  useEffect(() => {
+  const exploring = explorer !== undefined;
+  const [range, setRange] = useState<RowRange>({ start: 0, end: 0 });
+  const rowCount = rows.length;
+  const centerPrice = explorer?.centerPrice ?? null;
+  const centerToken = explorer?.centerToken;
+  const centerIndex = centerPrice === null ? -1 : rows.findIndex((row) => row.price !== null && row.price <= centerPrice);
+
+  const measureRange = useCallback(() => {
     const element = ladder.current;
-    if (!element || !onWheel) return;
-    const handle = (event: WheelEvent) => {
-      if (event.deltaY === 0) return;
-      event.preventDefault();
-      onWheel(event.deltaY < 0 ? 1 : -1);
-    };
-    element.addEventListener("wheel", handle, { passive: false });
-    return () => element.removeEventListener("wheel", handle);
-  }, [onWheel]);
+    if (!element) return;
+    const next = visibleRowRange(element.scrollTop, element.clientHeight, rowCount);
+    setRange((prev) => (prev.start === next.start && prev.end === next.end ? prev : next));
+  }, [rowCount]);
+
+  useLayoutEffect(() => {
+    if (!exploring) return;
+    measureRange();
+    const element = ladder.current;
+    if (!element || typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(measureRange);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [exploring, measureRange]);
+
+  useLayoutEffect(() => {
+    const element = ladder.current;
+    if (!exploring || !element || centerIndex < 0) return;
+    element.scrollTop = scrollTopToCenter(centerIndex, element.clientHeight);
+    measureRange();
+  }, [exploring, centerToken]);
 
   const cell = (slot: "left" | "right") => (row: LadderRow): ReactNode => {
     const side = SIDE_OF_SLOT[slot];
@@ -109,10 +134,16 @@ export function OrderLadder({ rows, previousClose, groups, writable, previewQuan
     return [entry("매수 모두 취소", side("buy")), entry("매도 모두 취소", side("sell")), entry("전체 모두 취소", all)];
   };
 
+  const shown = exploring ? rows.slice(range.start, range.end) : rows;
+  const ladderView = <PriceLadder rows={shown} previousClose={previousClose} slots={slots} rowSlots={exploring ? undefined : rowSlots} mark={{ price: averagePrice, label: "평단가" }} firstBidIndex={exploring ? Math.max(0, (centerIndex < 0 ? rowCount : centerIndex) - range.start) : undefined} />;
+
   return (
-    <div ref={ladder} className="od-ladder" data-testid="order-ladder" data-dragging={view ? "" : undefined} data-divider={divider ? "" : undefined}
+    <div ref={ladder} className="od-ladder" data-testid="order-ladder" data-explorer={exploring ? "" : undefined} data-dragging={view ? "" : undefined} data-divider={divider ? "" : undefined}
+      onScroll={exploring ? measureRange : undefined}
       onContextMenu={(e) => { e.preventDefault(); setMenu({ x: e.clientX, y: e.clientY, group: null }); }}>
-      <PriceLadder rows={rows} previousClose={previousClose} slots={slots} rowSlots={rowSlots} mark={{ price: averagePrice, label: "평단가" }} />
+      {exploring
+        ? <div className="od-explorer-rows" data-testid="order-explorer-rows" style={{ paddingTop: range.start * LADDER_ROW_HEIGHT_PX, paddingBottom: (rowCount - range.end) * LADDER_ROW_HEIGHT_PX }}>{ladderView}</div>
+        : ladderView}
       {view && <div className="od-ghost" data-testid="order-ghost" data-side={view.group.side} style={{ left: view.x, top: view.y }}>
         <b>{view.group.quantity.toLocaleString("ko-KR")}</b> {dragGhostText(view.target, view.group)}
       </div>}

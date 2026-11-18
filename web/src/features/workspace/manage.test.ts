@@ -63,12 +63,12 @@ test("닫기 알림의 되돌리기는 창을 돌리고, 알림 뒤 다른 배�
   expect(layout().windows.some((w) => w.id === "screener")).toBe(true);
   expect(toast.undo!.available()).toBe(false);
 
-  closeWindow(windowId("objects"), "개체 목록");
+  closeWindow(windowId("watchlist"), "관심종목");
   const later = useSelectionStore.getState().toast!.undo!;
   addWindow("chart", room);
   expect(later.available()).toBe(false);
   later.run();
-  expect(layout().windows.some((w) => w.id === "objects")).toBe(false);
+  expect(layout().windows.some((w) => w.id === "watchlist")).toBe(false);
 });
 
 test("활성 칸을 닫을 때 첫 차트가 다른 탭 뒤에 숨어 있으면 그 탭을 골라 보인다", () => {

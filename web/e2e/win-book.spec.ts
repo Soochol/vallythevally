@@ -59,7 +59,7 @@ async function tradesSubs(scenario: Scenario): Promise<string[]> {
 }
 
 async function emitTrade(scenario: Scenario, seq: number, price: number, qty: number) {
-  for (const sub of await tradesSubs(scenario)) scenario.live.emit({ type: "feed_trades", sub, seq, trades: [{ t: 1_700_000_000 + seq, price, qty, venue: null, strength: 101.5 }] });
+  for (const sub of await tradesSubs(scenario)) scenario.live.emit({ type: "feed_trades", sub, seq, trades: [{ t: scenario.now / 1000 + seq, price, qty, venue: null, strength: 101.5 }] });
 }
 
 const tops = (locator: Locator) => locator.evaluateAll((elements) => elements.map((element) => Math.round(element.getBoundingClientRect().top * 10) / 10));
@@ -263,4 +263,87 @@ test("지수 종목이면 빈 상태를 보이고 호가를 구독하지 않는�
   await windowTabs(page).getByRole("tab", { name: /^10호가/ }).click();
   await expect(page.getByText("이 창은 주식만 보입니다")).toBeVisible();
   expect(scenario.live.messages.filter((m) => m.type === "subscribe_feed")).toHaveLength(0);
+});
+
+const PREVIOUS_CLOSE_GAP = 1000;
+
+function quoteAt(scenario: Scenario, price: number, t: number) {
+  return { ...scenario.market.quote(CODE)!, price, change: PREVIOUS_CLOSE_GAP, t };
+}
+
+async function openWithQuote(page: Page, scenario: Scenario, base: number, quote: () => ReturnType<typeof quoteAt>) {
+  bookWindow(scenario, CODE);
+  replyBook(scenario, base);
+  scenario.on((url) => url.pathname === "/api/quotes", () => ({ body: [quote()] }));
+  await page.goto("/");
+  await expect(cell(page)).toHaveAttribute("aria-busy", "false");
+  await windowTabs(page).getByRole("tab", { name: /^10호가/ }).click();
+}
+
+test("체결이 없어도 시세 조회 응답의 가격이 바뀌면 다음 조회 뒤 현재가 행이 옮겨 간다", async ({ page, scenario }) => {
+  let price = 70000;
+  await page.clock.install({ time: scenario.now });
+  await openWithQuote(page, scenario, 70000, () => quoteAt(scenario, price, scenario.now / 1000));
+  await expect(page.locator(".mw-lr[data-current]")).toContainText("70,000");
+  price = 69900;
+  await page.clock.fastForward(5000);
+  await expect(page.locator(".mw-lr[data-current]")).toHaveCount(1);
+  await expect(page.locator(".mw-lr[data-current]")).toContainText("69,900");
+});
+
+test("시세보다 늦은 체결이 현재가이고 더 이른 체결은 시세를 바꾸지 못한다", async ({ page, scenario }) => {
+  const quoteT = scenario.now / 1000;
+  await openWithQuote(page, scenario, 70000, () => quoteAt(scenario, 70000, quoteT));
+  const tradeSub = await subOf(scenario, "trades");
+  await expect(page.locator(".mw-lr[data-current]")).toContainText("70,000");
+
+  scenario.live.emit({ type: "feed_trades", sub: tradeSub, seq: 1, trades: [{ t: quoteT - 10, price: 70100, qty: 1, venue: null, strength: null }] });
+  await expect(page.locator(".mw-lr[data-current]")).toContainText("70,000");
+
+  scenario.live.emit({ type: "feed_trades", sub: tradeSub, seq: 2, trades: [{ t: quoteT + 10, price: 70200, qty: 1, venue: null, strength: null }] });
+  await expect(page.locator(".mw-lr[data-current]")).toHaveCount(1);
+  await expect(page.locator(".mw-lr[data-current]")).toContainText("70,200");
+});
+
+test("구독 직후 끊김이 오면 호가가 오기 전에도 끊김을 보이고 사다리를 흐리게 한다", async ({ page, scenario }) => {
+  await open(page, scenario, 70000);
+  const bookSub = await subOf(scenario, "book");
+  scenario.live.emit({ type: "feed_link", sub: bookSub, live: false, at: 1 });
+  await expect(page.getByRole("status").filter({ hasText: "끊김" })).toBeVisible();
+  await expect(page.locator(".bk-ladder")).toHaveAttribute("data-stale", "");
+});
+
+function bookSubs(scenario: Scenario): string[] {
+  return scenario.live.messages.flatMap((m) => (m.type === "subscribe_feed" && m.kind === "book" && m.symbol === CODE ? [m.sub] : []));
+}
+
+async function reconnect(scenario: Scenario): Promise<string> {
+  const before = bookSubs(scenario).length;
+  scenario.live.close();
+  await pollSaved(() => bookSubs(scenario).length).toBe(before + 1);
+  return bookSubs(scenario).at(-1)!;
+}
+
+test("끊김을 들은 창이 소켓을 다시 이었을 때 세션이 살아 있으면 끊김이 풀린다", async ({ page, scenario }) => {
+  await open(page, scenario, 70000);
+  scenario.live.emit({ type: "feed_link", sub: await subOf(scenario, "book"), live: false, at: 1 });
+  await expect(page.getByRole("status").filter({ hasText: "끊김" })).toBeVisible();
+
+  const resubscribed = await reconnect(scenario);
+  scenario.live.emit({ type: "feed_subscribed", sub: resubscribed, kind: "book" });
+  await expect(book(page)).toHaveAttribute("data-connected", "");
+  await expect(page.getByRole("status").filter({ hasText: "끊김" })).toHaveCount(0);
+  await expect(page.locator(".bk-ladder")).not.toHaveAttribute("data-stale", "");
+});
+
+test("세션이 내려간 채 소켓을 다시 이으면 끊김이 그대로 보인다", async ({ page, scenario }) => {
+  await open(page, scenario, 70000);
+  scenario.live.emit({ type: "feed_link", sub: await subOf(scenario, "book"), live: false, at: 1 });
+  await expect(page.getByRole("status").filter({ hasText: "끊김" })).toBeVisible();
+
+  const resubscribed = await reconnect(scenario);
+  scenario.live.emit({ type: "feed_subscribed", sub: resubscribed, kind: "book" });
+  scenario.live.emit({ type: "feed_link", sub: resubscribed, live: false, at: 1 });
+  await expect(page.getByRole("status").filter({ hasText: "끊김" })).toBeVisible();
+  await expect(page.locator(".bk-ladder")).toHaveAttribute("data-stale", "");
 });

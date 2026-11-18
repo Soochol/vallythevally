@@ -6,7 +6,7 @@ import { dockMinSize, dropTarget, heldMinSize, layoutDock, moveDivider, tabsMinS
 const ref = (id: string, kind: WindowKind): WindowRef => ({ id: windowId(id), kind });
 const group = (id: string, tabs: string[]): DockNode => ({ kind: "group", id, tabs: tabs.map(windowId), active: windowId(tabs[0] ?? "") });
 
-const windows = [ref("c1", "chart"), ref("c2", "chart"), ref("w", "watchlist"), ref("s", "screener"), ref("o", "objects")];
+const windows = [ref("c1", "chart"), ref("c2", "chart"), ref("w", "watchlist"), ref("s", "screener"), ref("o", "trades")];
 const space: DockSpace = { area: { w: 1256, h: 684 }, gap: 6, windows };
 
 const tree: DockNode = {
@@ -47,7 +47,7 @@ test("1256×684 영역에서 묶음과 경계가 빈틈도 겹침도 없이 영�
 
 test("묶음의 최소 크기는 탭 최소 크기의 큰 값에 창 머리를 더하고, 나눔은 간격과 함께 더한다", () => {
   expect(dockMinSize(group("g3", ["w", "s"]), space)).toEqual({ w: 280, h: 240 + 34 });
-  expect(dockMinSize(tree, space)).toEqual({ w: 280 + 280 + 6, h: Math.max(194 + 194 + 6, 274 + 174 + 6) });
+  expect(dockMinSize(tree, space)).toEqual({ w: 280 + 280 + 6, h: Math.max(194 + 194 + 6, 274 + 234 + 6) });
 });
 
 test("경계를 옮기면 비율이 바뀌고, 최소 크기에 닿으면 멈췄다고 알린다", () => {

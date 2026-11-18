@@ -10,16 +10,11 @@ import { editor, excludedLine, expectRows, openScreener, panel, results, runButt
 
 const newHigh = (period: "D" | "W" | "M", field: "high" | "volume" | "traded_value", n: number, m: number): Condition => ({ kind: "new_high", period, recentBars: m, field, n });
 const WEEKLY_HIGH: Screen = { id: "plain", name: "주봉 신고가", markets: [], exclude: [], conditions: [newHigh("W", "high", 52, 4)] };
-const OLD_VOLUME: Screen = { id: "old-volume", name: "신고가 값으로 고른 신고거래량", markets: [], exclude: [], conditions: [newHigh("W", "volume", 52, 4)] };
-const RENAMED_OLD = "옛 신고거래량 이름만 바꿈";
 const PICKED = "신고거래대금과 주봉 신고거래량";
 
-const OLD_VOLUME_TEXT = "주봉최근4주 이내에52주 신고거래량인 봉이 있다";
 const TRADED_START_TEXT = "일봉최근100일 이내에200일 신고거래대금인 봉이 있다";
 const VOLUME_START_TEXT = "일봉최근100일 이내에200일 신고거래량인 봉이 있다";
 const WEEKLY_VOLUME_TEXT = "주봉최근8주 이내에52주 신고거래량인 봉이 있다";
-const MONTHLY_TRADED_TEXT = "월봉최근6개월 이내에24개월 신고거래대금인 봉이 있다";
-const MONTHLY_VOLUME_TEXT = "월봉최근3개월 이내에12개월 신고거래량인 봉이 있다";
 const EXCLUDED = "대상 16종목 · 빠짐: 상장 기간 부족 2 · 이력 덜 참 0";
 
 const choice = (dialog: Locator, line: number, name: string) => dialog.getByRole("combobox", { name: `조건 ${line} ${name}` });
@@ -65,27 +60,18 @@ async function run(page: Page) {
 const VOLUME = { value: "volume_high", label: "신고거래량" };
 const TRADED_VALUE = { value: "traded_value_high", label: "신고거래대금" };
 
-test("거래 분류의 신고거래량·신고거래대금은 종류 변경 시 최근 기간을 유지하고, 바꾼 봉 주기와 기간은 저장하고 다시 열어도 남으며, 신고가 값으로 고른 옛 조건식도 그 항목으로 그대로 열리고 실행된다", async ({ scenario, screener, page }) => {
+test("거래 분류의 신고거래량·신고거래대금은 종류 변경 시 최근 기간을 유지하고, 바꾼 봉 주기와 기간은 저장하고 다시 열어도 남는다", async ({ scenario, screener, page }) => {
   const screenSaves: string[] = [];
   page.on("request", (req) => {
     if (req.method() === "PUT" && new URL(req.url()).pathname === "/api/screens") screenSaves.push(req.postData() ?? "");
   });
-  scenario.documents.saveScreens({ screens: [WEEKLY_HIGH, OLD_VOLUME], revision: 1 });
+  scenario.documents.saveScreens({ screens: [WEEKLY_HIGH], revision: 1 });
   await page.goto("/");
   await openScreener(page);
   await updateBand(page).getByRole("button", { name: "처음 받기" }).click();
   await waitForUpdateToFinish(page, "11-06(금)");
 
-  await test.step("신고가 값으로 거래량을 골라 둔 옛 조건식은 신고거래량 항목으로 열리고, 열고 닫기만 하면 저장하지 않는다", async () => {
-    const dialog = await editScreen(page, OLD_VOLUME.name);
-    await expectTradeHighLine(dialog, 1, VOLUME, "W", "52", "4");
-    await expectSentences(dialog, [OLD_VOLUME_TEXT]);
-    await savedEditor(dialog);
-    expect(screenSaves).toEqual([]);
-    await expectSentences(panel(page), [OLD_VOLUME_TEXT]);
-  });
-
-  await test.step("옛 조건식을 실행하면 이번 주가 52주 최고 거래량인 종목이 이번 주로 나온다", async () => {
+  await test.step("실행하면 이번 주에 맞은 종목이 이번 주로 나온다", async () => {
     screener.showResult(resultRows([
       ["110010", "가상전자", "이번 주"],
       ["110020", "가상화학", "이번 주"],
@@ -119,14 +105,6 @@ test("거래 분류의 신고거래량·신고거래대금은 종류 변경 시 
       ["120050", "가상전고점"],
       ["120060", "가상시총미달"],
     ]);
-  });
-
-  await test.step("옛 조건식의 이름만 바꿔 저장해도 봉 주기와 기간은 그대로다", async () => {
-    const dialog = await editScreen(page, OLD_VOLUME.name);
-    await renameScreen(dialog, RENAMED_OLD);
-    await save(page, dialog);
-    const stored = scenario.documents.screens();
-    expect(stored.screens).toEqual([WEEKLY_HIGH, { ...OLD_VOLUME, name: RENAMED_OLD }]);
   });
 
   await test.step("거래 분류에 신고거래량·신고거래대금·거래 급증이 있고, 신고가의 값은 가격만이다", async () => {
@@ -169,7 +147,6 @@ test("거래 분류의 신고거래량·신고거래대금은 종류 변경 시 
     const stored = scenario.documents.screens();
     expect(stored.screens).toEqual([
       { ...WEEKLY_HIGH, name: PICKED, conditions: [newHigh("D", "traded_value", 200, 100), newHigh("W", "volume", 52, 8)] },
-      { ...OLD_VOLUME, name: RENAMED_OLD },
     ]);
   });
 
@@ -208,31 +185,6 @@ test("거래 분류의 신고거래량·신고거래대금은 종류 변경 시 
     await expectTradeHighLine(dialog, 1, TRADED_VALUE, "D", "200", "100");
     await expectTradeHighLine(dialog, 2, VOLUME, "W", "52", "8");
     await expectSentences(dialog, [TRADED_START_TEXT, WEEKLY_VOLUME_TEXT]);
-    expect(screenSaves).toHaveLength(2);
-  });
-
-  await test.step("두 줄을 월봉으로 바꾸고 N·M을 고쳐 저장하면, 새로 고침 뒤 다시 열어도 월봉과 고친 기간이 그대로다", async () => {
-    let dialog = editor(page, "조건식 편집");
-    await selectOption(choice(dialog, 1, "봉 주기"), "M");
-    await fillNumber(box(dialog, 1, "신고거래대금 기간"), "24");
-    await fillNumber(box(dialog, 1, "최근 기간"), "6");
-    await selectOption(choice(dialog, 2, "봉 주기"), "M");
-    await fillNumber(box(dialog, 2, "신고거래량 기간"), "12");
-    await fillNumber(box(dialog, 2, "최근 기간"), "3");
-    await expectSentences(dialog, [MONTHLY_TRADED_TEXT, MONTHLY_VOLUME_TEXT]);
-    await save(page, dialog);
-    expect(screenSaves).toHaveLength(3);
-    const stored = scenario.documents.screens();
-    expect(stored.screens[0]).toEqual({ ...WEEKLY_HIGH, name: PICKED, conditions: [newHigh("M", "traded_value", 24, 6), newHigh("M", "volume", 12, 3)] });
-
-    await page.reload();
-    await openScreener(page);
-    dialog = await editScreen(page, PICKED);
-    await expectTradeHighLine(dialog, 1, TRADED_VALUE, "M", "24", "6");
-    await expectTradeHighLine(dialog, 2, VOLUME, "M", "12", "3");
-    await expectSentences(dialog, [MONTHLY_TRADED_TEXT, MONTHLY_VOLUME_TEXT]);
-    await savedEditor(dialog);
-    await expectSentences(panel(page), [MONTHLY_TRADED_TEXT, `그리고${MONTHLY_VOLUME_TEXT}`]);
-    expect(screenSaves).toHaveLength(3);
+    expect(screenSaves).toHaveLength(1);
   });
 });

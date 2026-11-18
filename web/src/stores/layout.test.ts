@@ -35,8 +35,8 @@ test("탭 고르기는 맞춘 배치에 고른 탭을 남기고 저장 순서를
 });
 
 test("창 보이기는 있는 창의 탭을 고르고, 없는 창은 더해 기본 자리의 탭으로 고른다", () => {
-  state().showWindow("objects");
-  expect(shownTab("objects")).toBe(true);
+  state().showWindow("screener");
+  expect(shownTab("screener")).toBe(true);
   const windows = state().layout.windows.length;
   state().showWindow("indicators");
   expect(state().layout.windows).toHaveLength(windows + 1);
@@ -50,7 +50,7 @@ test("창 보이기는 있는 창의 탭을 고르고, 없는 창은 더해 기�
 
 test("새 창 id는 이미 쓰는 id를 피한다", () => {
   const layout = structuredClone(DEFAULT_LAYOUT);
-  layout.windows = layout.windows.map((w) => (w.kind === "objects" ? { ...w, id: windowId("indicators") } : w));
+  layout.windows = layout.windows.map((w) => (w.kind === "screener" ? { ...w, id: windowId("indicators") } : w));
   useLayoutStore.setState({ layout });
   state().showWindow("indicators");
   expect(state().layout.windows.filter((w) => w.kind === "indicators")).toEqual([{ id: "indicators-2", link: null, kind: "indicators" }]);
@@ -77,7 +77,6 @@ function linked(...extra: WindowState[]) {
     chart("b1", "b", "035420", "5m"),
     { id: windowId("watchlist"), link: null, kind: "watchlist" },
     { id: windowId("screener"), link: null, kind: "screener" },
-    { id: windowId("objects"), link: null, kind: "objects" },
     ...extra,
   ];
   useLayoutStore.setState({ layout, revision: 0 });
@@ -130,15 +129,14 @@ test("차트의 색을 이미 쓰는 색으로 바꾸면 그 색의 종목을 �
   expect(state().revision).toBe(3);
 });
 
-test("같은 연동 색을 쓰는 다른 창만 센다. 연동 색은 개체 목록과 지표 창에는 붙지 않는다", () => {
+test("같은 연동 색을 쓰는 다른 창만 센다. 연동 색은 지표 창에는 붙지 않는다", () => {
   const windows = [{ id: windowId("x"), link: "a" }, { id: windowId("y"), link: "a" }, { id: windowId("z"), link: "b" }, { id: windowId("w"), link: null }, { id: windowId("v"), link: "j" }] as WindowState[];
   expect([linkedWindowCount(windows, "a", windowId("x")), linkedWindowCount(windows, "b", windowId("x")), linkedWindowCount(windows, "c", windowId("x")), linkedWindowCount(windows, "j", windowId("x"))]).toEqual([1, 1, 0, 1]);
   linked({ id: windowId("indicators"), link: null, kind: "indicators" });
-  state().setLink(windowId("objects"), "a");
   state().setLink(windowId("indicators"), "a");
   state().setLink(windowId("watchlist"), "b");
   expect(state().layout.windows.filter((w) => w.kind !== "chart").map((w) => [w.id, w.link])).toEqual([
-    ["watchlist", "b"], ["screener", null], ["objects", null], ["indicators", null],
+    ["watchlist", "b"], ["screener", null], ["indicators", null],
   ]);
   expect(state().revision).toBe(1);
 });
@@ -235,7 +233,7 @@ test("마지막 차트 창은 닫지 않는다", () => {
 });
 
 test("묶음의 마지막 탭을 닫으면 묶음이 사라지고 이웃이 자리를 채운다", () => {
-  for (const id of ["watchlist", "screener", "objects"]) expect(state().closeWindow(windowId(id))).toBe(true);
+  for (const id of ["watchlist", "screener"]) expect(state().closeWindow(windowId(id))).toBe(true);
   expect(state().layout.windows.map((w) => w.kind)).toEqual(["chart"]);
   expect(state().layout.placement.dock!.root).toEqual({ kind: "group", id: "g1", tabs: [firstChart().id], active: firstChart().id });
 });

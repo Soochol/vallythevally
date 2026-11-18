@@ -57,7 +57,7 @@ test("캔버스에서 창 더하기·보이기·닫기는 활성 배치만 한 �
   expect(state().layout.placement.canvas!.order.at(-1)).toBe(id);
   const canvas = state().layout.placement.canvas!;
   state().showWindow("watchlist");
-  expect(state().layout.windows).toHaveLength(5);
+  expect(state().layout.windows).toHaveLength(4);
   expect(state().steps).toHaveLength(2);
   expect(state().layout.placement.canvas!.order.at(-1)).toBe("watchlist");
   state().selectTab(id);

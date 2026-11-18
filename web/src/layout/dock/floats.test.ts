@@ -6,7 +6,7 @@ import { attachFloat, canDetach, closeDockWindow, detachedRect, detachWindow, fl
 import { groupOfWindow, listGroups, putTab } from "./tree";
 
 const a = windowId("a"), b = windowId("b"), c = windowId("c"), d = windowId("d");
-const windows: WindowList = [{ id: a, kind: "chart" }, { id: b, kind: "chart" }, { id: c, kind: "screener" }, { id: d, kind: "objects" }];
+const windows: WindowList = [{ id: a, kind: "chart" }, { id: b, kind: "chart" }, { id: c, kind: "screener" }, { id: d, kind: "trades" }];
 const rect = { x: .2, y: .1, w: .3, h: .4 };
 const all = (dock: ReturnType<typeof defaultDock>) => [...listGroups(dock.root).flatMap((group) => group.tabs), ...dock.floats.map((float) => float.window)];
 

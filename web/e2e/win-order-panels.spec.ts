@@ -12,7 +12,7 @@ const ladderRows = (page: Page) => page.getByTestId("price-ladder").locator(".mw
 function lastTrade(scenario: Scenario, price: number, seq = 1, qty = 3, venue: "combined" | "krx" = "combined"): void {
   const request = scenario.live.messages.find((m) => m.type === "subscribe_feed" && m.kind === "trades" && m.venue === venue);
   if (request?.type !== "subscribe_feed") throw new Error("체결 구독이 없습니다");
-  scenario.live.emit({ type: "feed_trades", sub: request.sub, seq, trades: [{ t: 1_700_000_000 + seq, price, qty, venue: "krx", strength: 101.5 }] });
+  scenario.live.emit({ type: "feed_trades", sub: request.sub, seq, trades: [{ t: scenario.now / 1000 + seq, price, qty, venue: "krx", strength: 101.5 }] });
 }
 
 const tops = (locator: Locator) => locator.evaluateAll((elements) => elements.map((element) => Math.round(element.getBoundingClientRect().top * 10) / 10));
@@ -64,29 +64,66 @@ test("보유 요약이 값을 보이고 평가손익을 원과 퍼센트로 바�
   await expect(page.getByTestId("ladder-mark")).toHaveCount(1);
 });
 
-test("휠로 상·하한 사이를 훑고 현재가 단추로 돌아온다", async ({ page, scenario }) => {
+const scrollLadder = (page: Page, top: number | "end") => page.getByTestId("order-ladder").evaluate((element, target) => { element.scrollTop = target === "end" ? element.scrollHeight : target; }, top);
+const fullTickCount = 431;
+
+test("전체 호가는 상한부터 하한까지 스크롤하고 현재가 단추로 가운데에 돌아오며 다시 누르면 20행이다", async ({ page, scenario }) => {
   ordersOn(scenario);
   tradingApi(scenario);
   await openOrderWindow(page, scenario);
   lastTrade(scenario, BASE);
   await expect(page.getByTestId("order-current")).toBeDisabled();
-  const ladder = page.getByTestId("order-ladder");
-  const box = await ladder.boundingBox();
-  await page.mouse.move(box!.x + box!.width / 2, box!.y + box!.height / 2);
-  await page.mouse.wheel(0, -100);
-  await expect(cellAt(page, "sell", 71_500)).toBeVisible();
-  await expect(ladderRows(page)).toHaveCount(20);
+  await page.getByTestId("order-explorer").click();
   await expect(page.getByTestId("order-explorer")).toHaveAttribute("aria-pressed", "true");
-  await expect(page.getByTestId("price-ladder").locator(".mw-qty-value")).toHaveCount(15);
-  await cellAt(page, "sell", 71_500).hover();
-  await expect(cellAt(page, "sell", 71_500).locator(".od-preview")).toHaveText("매도 10");
-  for (let i = 0; i < 40; i++) await page.mouse.wheel(0, -100);
+  const ladder = page.getByTestId("order-ladder");
+  const current = cellAt(page, "buy", BASE);
+  await expect(current).toBeVisible();
+  const area = (await ladder.boundingBox())!;
+  const middle = (await current.boundingBox())!;
+  expect(Math.abs(middle.y + middle.height / 2 - (area.y + area.height / 2))).toBeLessThan(30);
+  const rendered = await ladderRows(page).count();
+  expect(rendered).toBeGreaterThan(20);
+  expect(rendered).toBeLessThan(fullTickCount);
+  expect(await ladder.evaluate((element) => element.scrollHeight)).toBeGreaterThanOrEqual(fullTickCount * 24);
+
+  await scrollLadder(page, "end");
+  await expect(cellAt(page, "buy", 49_000)).toBeVisible();
+  await scrollLadder(page, 0);
   await expect(cellAt(page, "sell", 91_000)).toBeVisible();
-  await expect(cellAt(page, "sell", 91_100)).toHaveCount(0);
+
   await page.getByTestId("order-current").click();
-  await expect(cellAt(page, "sell", 91_000)).toHaveCount(0);
+  await expect(cellAt(page, "buy", 91_000)).toHaveCount(0);
+  await expect(current).toBeVisible();
+  await expect(page.getByTestId("order-explorer")).toHaveAttribute("aria-pressed", "true");
+
+  await page.getByTestId("order-explorer").click();
   await expect(page.getByTestId("order-explorer")).toHaveAttribute("aria-pressed", "false");
+  await expect(ladderRows(page)).toHaveCount(20);
   await expect(cellAt(page, "buy", BASE)).toBeVisible();
+});
+
+test("전체 호가에서 스크롤한 자리의 칸을 더블클릭하면 그 가격으로 신규가 나간다", async ({ page, scenario }) => {
+  ordersOn(scenario);
+  const api = tradingApi(scenario);
+  await openOrderWindow(page, scenario);
+  lastTrade(scenario, BASE);
+  await page.getByTestId("order-explorer").click();
+  await expect(cellAt(page, "buy", BASE)).toBeVisible();
+  const before = await page.getByTestId("order-ladder").evaluate((element) => element.scrollTop);
+  await scrollLadder(page, before + 30 * 24);
+  const target = cellAt(page, "buy", 67_000);
+  await expect(target).toBeVisible();
+  await target.dblclick();
+  await pollSaved(() => writesTo(api, "place")).toHaveLength(1);
+  expect(writesTo(api, "place")[0]!.body).toMatchObject({ code: CODE, side: "buy", price: 67_000, quantity: 10 });
+});
+
+test("상·하한가를 받지 못하면 전체 호가 단추가 꺼지고 이유를 툴팁으로 보인다", async ({ page, scenario }) => {
+  ordersOn(scenario);
+  tradingApi(scenario);
+  await openOrderWindow(page, scenario, false, "krx", { upper: null, lower: null });
+  await expect(page.getByTestId("order-explorer")).toBeDisabled();
+  await expect(page.getByTestId("order-explorer")).toHaveAttribute("title", "상·하한가를 아직 받지 못했습니다");
 });
 
 test("평단가 점은 평단가에 가장 가까운 가격 행의 가격 칸 안 가격 숫자 왼쪽에 하나 있고 숫자 x와 행 높이는 다른 행과 같다", async ({ page, scenario }) => {
@@ -150,17 +187,53 @@ test("계좌 실시간 메시지가 오면 조회를 다시 읽는다", async ({
   expect(countOf("executions")).toBeGreaterThan(before.executions);
 });
 
-test("시간외를 고르면 호가 사다리 없음 빈 상태이고 정규장으로 돌아온다", async ({ page, scenario }) => {
-  ordersOn(scenario);
-  tradingApi(scenario);
-  await openOrderWindow(page, scenario);
-  await expect(page.getByTestId("order-total-ask")).toHaveText("1,000주");
-  await expect(page.getByTestId("order-total-bid")).toHaveText("3,000주");
-  await page.getByRole("group", { name: "세션" }).getByRole("button", { name: "시간외" }).click();
-  await expect(win(page)).toContainText("호가 사다리 없음");
-  await expect(page.getByTestId("price-ladder")).toHaveCount(0);
-  await page.getByRole("group", { name: "세션" }).getByRole("button", { name: "정규장" }).click();
-  await expect(ladderRows(page)).toHaveCount(20);
+const kstClock = (time: string) => new Date(`2026-11-18T${time}+09:00`);
+const SYMBOL_INFO = { code: CODE, name: "삼성전자", kind: "common", market: "kospi", nxtEnabled: false };
+
+test.describe("NXT 미거래 종목의 장 시간", () => {
+  test("보통주는 수요일 19:50에 사다리를 그리고 안내와 세션 토글이 없다", async ({ page, scenario }) => {
+    await page.clock.install({ time: kstClock("19:50:00") });
+    ordersOn(scenario);
+    tradingApi(scenario);
+    scenario.reply(`/api/symbols/${CODE}`, { body: SYMBOL_INFO });
+    await openOrderWindow(page, scenario);
+    await expect(ladderRows(page)).toHaveCount(20);
+    await expect(page.getByTestId("order-total-ask")).toHaveText("1,000주");
+    await expect(page.getByTestId("order-book-notice")).toHaveCount(0);
+    await expect(win(page)).not.toContainText("호가 사다리 없음");
+    await expect(page.getByRole("group", { name: "세션" })).toHaveCount(0);
+  });
+
+  test("보통주는 수요일 20:30에 사다리를 그리고 장 마감을 알린다", async ({ page, scenario }) => {
+    await page.clock.install({ time: kstClock("20:30:00") });
+    ordersOn(scenario);
+    tradingApi(scenario);
+    scenario.reply(`/api/symbols/${CODE}`, { body: SYMBOL_INFO });
+    await openOrderWindow(page, scenario);
+    await expect(ladderRows(page)).toHaveCount(20);
+    await expect(page.getByTestId("order-book-notice")).toHaveText("장 마감 · 마지막 호가입니다");
+  });
+
+  test("ETF는 수요일 16:30에 사다리를 그리고 거래 불가를 알린다", async ({ page, scenario }) => {
+    await page.clock.install({ time: kstClock("16:30:00") });
+    ordersOn(scenario);
+    tradingApi(scenario);
+    scenario.reply(`/api/symbols/${CODE}`, { body: { ...SYMBOL_INFO, kind: "etf" } });
+    await openOrderWindow(page, scenario);
+    await expect(ladderRows(page)).toHaveCount(20);
+    await expect(page.getByTestId("order-book-notice")).toHaveText("ETF·ETN은 15:30 뒤 거래되지 않습니다");
+  });
+
+  test("장 마감 시각에 호가 조회가 실패하면 안내 없이 불러오지 못했다고 보인다", async ({ page, scenario }) => {
+    await page.clock.install({ time: kstClock("20:30:00") });
+    ordersOn(scenario);
+    tradingApi(scenario);
+    scenario.reply(`/api/symbols/${CODE}`, { body: SYMBOL_INFO });
+    await openOrderWindow(page, scenario, false, "krx", undefined, true);
+    await expect(win(page)).toContainText("호가를 불러오지 못했습니다");
+    await expect(page.getByTestId("order-book-notice")).toHaveCount(0);
+    await expect(page.getByTestId("price-ladder")).toHaveCount(0);
+  });
 });
 
 test("설정 ⚙의 값이 창 설정으로 저장되고 새로고침해도 유지된다", async ({ page, scenario }) => {

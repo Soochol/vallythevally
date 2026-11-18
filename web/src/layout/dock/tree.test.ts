@@ -15,7 +15,7 @@ const c2 = ref("c2", "chart");
 const c3 = ref("c3", "chart");
 const w = ref("w", "watchlist");
 const s = ref("s", "screener");
-const o = ref("o", "objects");
+const o = ref("o", "trades");
 const i = ref("i", "indicators");
 const space: DockSpace = { area: { w: 1256, h: 684 }, gap: 6, windows: [c1, c2, w, s, o, i] };
 

@@ -142,7 +142,7 @@ pub(crate) async fn store_drawing(tx: &mut SqliteConnection, input: &DrawingInpu
     .bind(&input.text)
     .bind(input.style.to_string())
     .bind(i64::from(input.locked))
-    .bind(i64::from(input.hidden))
+    .bind(0_i64)
     .bind(input.periods.as_ref().map(|p| serde_json::to_string(p).expect("봉 주기는 언제나 직렬화된다")))
     .bind(input.z)
     .bind(&input.group)
@@ -341,6 +341,17 @@ mod tests {
     }
 
     #[sqlx::test(migrations = "./migrations")]
+    async fn a_hidden_drawing_is_saved_and_read_back_as_visible(_: SqlitePoolOptions, opts: SqliteConnectOptions) {
+        let db = AppDb::connect(opts).await.unwrap();
+        let mut hidden = input("A", "005930", 0.0, DrawingScope::Symbol, 1);
+        hidden.hidden = true;
+        let saved = upsert_drawing(&db, hidden, UnixSeconds(1)).await.unwrap();
+        assert!(!saved.hidden, "응답도 보이는 드로잉이다");
+        let read = list_drawings_of(&db, "005930").await.unwrap();
+        assert!(!read[0].hidden, "숨김으로 들어와도 보이는 채로 저장한다");
+    }
+
+    #[sqlx::test(migrations = "./migrations")]
     async fn scope_must_name_an_existing_layout_and_chart_window(_: SqlitePoolOptions, opts: SqliteConnectOptions) {
         let db = AppDb::connect(opts).await.unwrap();
         for scope in [
@@ -348,7 +359,6 @@ mod tests {
             cell("nope", "cell-0"),
             cell(DEFAULT_ID, "cell-1"),
             cell(DEFAULT_ID, "watchlist"),
-            cell(DEFAULT_ID, "objects"),
         ] {
             let err = upsert_drawing(&db, input("A", "005930", 0.0, scope.clone(), 1), UnixSeconds(1)).await.unwrap_err();
             assert!(matches!(err, DrawingError::MissingScope(_)), "{scope:?}: {err:?}");

@@ -140,7 +140,7 @@ pub struct DrawingInput {
 
 impl DrawingInput {
     pub fn saved_at(self, updated_at: UnixSeconds) -> Drawing {
-        let DrawingInput { id, symbol, tool, points, text, style, locked, hidden, periods, z, group, scope, revision } = self;
-        Drawing { id, symbol, tool, points, text, style, locked, hidden, periods, z, group, scope, revision, updated_at }
+        let DrawingInput { id, symbol, tool, points, text, style, locked, hidden: _, periods, z, group, scope, revision } = self;
+        Drawing { id, symbol, tool, points, text, style, locked, hidden: false, periods, z, group, scope, revision, updated_at }
     }
 }

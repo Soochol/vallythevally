@@ -5,7 +5,7 @@ import { MAX_WINDOWS, WINDOW_KIND_LIST, WINDOW_KINDS, type WindowKind } from "..
 import type { CanvasPlacement } from "../../layout/placement";
 import { windowRefs, type WindowState } from "../../stores/layout";
 import { useSelectionStore } from "../../stores/selection";
-import { BookIcon, BrokersIcon, ChartIcon, DrawingsIcon, FunnelIcon, IndicatorIcon, ListIcon, OrderIcon, ProgramIcon, TradesIcon } from "../icons";
+import { BookIcon, BrokersIcon, ChartIcon, FunnelIcon, IndicatorIcon, ListIcon, OrderIcon, ProgramIcon, TradesIcon } from "../icons";
 import { canvasPanelId, useCanvasInteraction } from "./canvasInteraction";
 import { tidyCanvas } from "./canvasCommands";
 import { WINDOW_CONTENT } from "./contents";
@@ -13,7 +13,7 @@ import { addWindow, CHART_LIMIT_REASON, WINDOW_LIMIT_REASON, workspaceRoom } fro
 import { WindowFrame } from "./WindowFrame";
 import { WindowHeader } from "./WindowHeader";
 
-const KIND_ICONS: Record<WindowKind, ({ size }: { size?: number }) => ReactNode> = { chart: ChartIcon, watchlist: ListIcon, screener: FunnelIcon, objects: DrawingsIcon, indicators: IndicatorIcon, trades: TradesIcon, book: BookIcon, program: ProgramIcon, brokers: BrokersIcon, order: OrderIcon };
+const KIND_ICONS: Record<WindowKind, ({ size }: { size?: number }) => ReactNode> = { chart: ChartIcon, watchlist: ListIcon, screener: FunnelIcon, indicators: IndicatorIcon, trades: TradesIcon, book: BookIcon, program: ProgramIcon, brokers: BrokersIcon, order: OrderIcon };
 
 export function CanvasWorkspace({ canvas, windows, area }: { canvas: CanvasPlacement; windows: readonly WindowState[]; area: Area }) {
   const interaction = useCanvasInteraction(canvas, windows, area);

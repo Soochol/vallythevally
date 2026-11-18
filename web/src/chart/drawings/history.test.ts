@@ -32,6 +32,10 @@ describe("sameContent", () => {
     expect(sameContent(a, null)).toBe(false);
     expect(sameContent(null, null)).toBe(true);
   });
+
+  test("서버가 언제나 false로 돌려주는 hidden은 비교하지 않는다", () => {
+    expect(sameContent({ ...body("a", 100), hidden: true }, body("a", 100))).toBe(true);
+  });
 });
 
 describe("record", () => {

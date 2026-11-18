@@ -1053,7 +1053,6 @@ pub enum WindowContent {
     },
     Watchlist,
     Screener,
-    Objects,
     Indicators,
     Trades,
     Book,

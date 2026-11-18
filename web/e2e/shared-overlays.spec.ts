@@ -113,9 +113,8 @@ test("되돌릴 수 있는 드로잉 삭제는 공통 알림에서 복원한다"
   const drawings = async () => scenario.documents.drawings("005930") as { id: string }[];
   await pollSaved(async () => (await drawings()).length).toBe(1);
   const original = (await drawings())[0]!.id;
-  await expandDock(page);
-  await page.getByRole("button", { name: "개체 목록 열기", exact: true }).click();
-  await page.getByRole("button", { name: "이 종목 드로잉 모두 지우기", exact: true }).click();
+  await page.mouse.click(bounds!.x + bounds!.width * 0.2, bounds!.y + bounds!.height * 0.8, { button: "right" });
+  await page.getByRole("menu", { name: "드로잉 메뉴", exact: true }).getByRole("menuitem", { name: "이 종목 드로잉 모두 지우기…", exact: true }).click();
   await pollSaved(async () => (await drawings()).length).toBe(0);
   const toast = page.getByRole("status").filter({ hasText: "드로잉 1개를 지웠습니다" });
   await expect(toast).toBeVisible();

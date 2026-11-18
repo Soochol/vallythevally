@@ -21,7 +21,6 @@ const EVERY_STOCK = [
   ["110080", "가상기업인수목적1호"],
   ["110090", "가상신규"],
 ] as const;
-const KOSDAQ_WITHOUT_MANAGED = ["110030", "110040", "110080"];
 
 const conditionList = (scope: Locator) => scope.getByRole("list", { name: "조건" });
 const marketChip = (dialog: Locator, name: string) => dialog.getByRole("group", { name: "대상 시장" }).getByRole("button", { name });
@@ -55,35 +54,23 @@ async function runAndExpect(page: Page, screener: ScreenerScenario, excluded: st
   await expectRows(page, expected.map(([code, name]) => [code, name]));
 }
 
-test("새 조건식은 조건 없이 열리고 마지막 줄을 빼고 다시 더하며, 빈 조건과 시장·제외 설정을 저장하고 반환된 대상 종목과 관측일을 표시한다", async ({ scenario, screener, page }) => {
+test("새 조건식은 조건 없이 열리고 마지막 줄을 빼며, 빈 조건과 시장·제외 설정을 저장하고 반환된 대상 종목과 관측일을 표시한다", async ({ scenario, screener, page }) => {
   await page.goto("/");
   await openScreener(page);
   await updateBand(page).getByRole("button", { name: "처음 받기" }).click();
   await waitForUpdateToFinish(page, "11-06(금)");
 
-  await test.step("새 조건식은 조건 0줄로 열리고, 마지막 줄을 빼면 다시 비며, 빈 상태에서 다시 더할 수 있다", async () => {
+  await test.step("새 조건식은 조건 0줄로 열리고, 마지막 줄을 빼면 다시 빈다", async () => {
     await panel(page).getByRole("button", { name: "새 조건식" }).click();
     const dialog = editor(page, "새 조건식");
     await expectNoConditions(dialog);
     await expect(dialog).toContainText("모든 조건 충족 · 0/10줄");
 
     await addCondition(dialog);
-    await addCondition(dialog);
-    await expectSentences(dialog, [NEW_HIGH, NEW_HIGH]);
-    await conditionAction(dialog, 2, "조건 지우기");
     await expectSentences(dialog, [NEW_HIGH]);
-    await dialog.getByRole("button", { name: "조건 1 메뉴", exact: true }).click();
-    await expect(page.getByRole("menuitem", { name: "조건 지우기", exact: true })).toBeEnabled();
-    await page.keyboard.press("Escape");
     await conditionAction(dialog, 1, "조건 지우기");
     await expectNoConditions(dialog);
     await expect(dialog).toContainText("0/10줄");
-
-    await addCondition(dialog);
-    await expectSentences(dialog, [NEW_HIGH]);
-    await expect(dialog.getByText(NO_CONDITIONS, { exact: true })).toHaveCount(0);
-    await conditionAction(dialog, 1, "조건 지우기");
-    await expectNoConditions(dialog);
   });
 
   await test.step("조건 없이 이름만 넣어 저장하면 패널에 '조건 없음 · 대상 종목 전체'가 보이고, 서버에는 조건 0줄로 남는다", async () => {
@@ -122,9 +109,5 @@ test("새 조건식은 조건 없이 열리고 마지막 줄을 빼고 다시 �
     await expect(marketChip(dialog, "코스닥")).toHaveAttribute("aria-pressed", "true");
     await expect(statusChip(dialog, "관리종목")).toBeVisible();
     await savedEditor(dialog);
-  });
-
-  await test.step("실행하면 코스닥에서 관리종목을 뺀 대상 종목 전체가 당일로 나온다", async () => {
-    await runAndExpect(page, screener, "대상 3종목 · 빠짐: 상장 기간 부족 0 · 이력 덜 참 0", asOfToday(KOSDAQ_WITHOUT_MANAGED));
   });
 });

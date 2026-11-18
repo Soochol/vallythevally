@@ -17,10 +17,17 @@ export interface BookFeed {
   readonly snapshotFailed: boolean;
 }
 
+const QUOTE_REFRESH_MS = 5000;
+
+interface LastTrade {
+  readonly price: number;
+  readonly t: number;
+}
+
 interface Live {
   readonly code: SymbolCode;
   readonly book: BookState;
-  readonly lastTrade: number | null;
+  readonly lastTrade: LastTrade | null;
   readonly linkLive: boolean;
   readonly socketOpen: boolean;
   readonly rejected: SubErrorCode | null;
@@ -37,12 +44,13 @@ export function useBookFeed(code: SymbolCode): BookFeed {
     const stopWatch = marketSocket.watch((connection) => update((state) => ({ ...state, socketOpen: connection.socket === "open" })));
     const stopBook = marketSocket.subscribeFeed({ symbol: code, kind: "book", venue: "combined" }, (m) => {
       if (m.type === "feed_book") update((state) => ({ ...state, book: acceptLive(state.book, m.book) }));
+      else if (m.type === "feed_subscribed") update((state) => ({ ...state, linkLive: true }));
       else if (m.type === "feed_link") update((state) => ({ ...state, linkLive: m.live }));
       else if (m.type === "sub_error") update((state) => ({ ...state, rejected: m.code }));
       else if (m.type === "resync") update((state) => ({ ...state, rejected: null }));
     });
     const stopTrades = marketSocket.subscribeFeed({ symbol: code, kind: "trades", venue: "combined" }, (m) => {
-      if (m.type === "feed_trades") update((state) => ({ ...state, lastTrade: m.trades.at(-1)?.price ?? state.lastTrade }));
+      if (m.type === "feed_trades") update((state) => ({ ...state, lastTrade: m.trades.at(-1) ?? state.lastTrade }));
     });
     return () => {
       stopWatch();
@@ -61,6 +69,7 @@ export function useBookFeed(code: SymbolCode): BookFeed {
   const quote = useQuery({
     queryKey: ["book-quote", code],
     queryFn: async ({ signal }) => (await fetchQuotes([code], "combined", signal))[0] ?? null,
+    refetchInterval: QUOTE_REFRESH_MS,
     staleTime: 0,
     gcTime: 0,
     retry: false,
@@ -70,10 +79,15 @@ export function useBookFeed(code: SymbolCode): BookFeed {
   const quoted = quote.data ?? null;
   return {
     book,
-    lastPrice: current.lastTrade ?? quoted?.price ?? null,
+    lastPrice: laterPrice(current.lastTrade, quoted),
     previousClose: quoted ? quoted.price - quoted.change : null,
     connected: current.socketOpen && current.linkLive,
     rejected: current.rejected,
     snapshotFailed: snapshot.isError && current.book.phase === "empty",
   };
+}
+
+function laterPrice(trade: LastTrade | null, quote: { readonly price: number; readonly t: number } | null): number | null {
+  if (trade && quote) return trade.t >= quote.t ? trade.price : quote.price;
+  return trade?.price ?? quote?.price ?? null;
 }

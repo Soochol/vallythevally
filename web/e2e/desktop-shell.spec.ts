@@ -23,7 +23,7 @@ test("한 줄 셸과 탭은 작은 창에서도 넘치지 않고 휴대폰 경�
     expect((await page.getByRole("toolbar", { name: "차트 도구 막대" }).boundingBox())?.y).toBe(12);
     await expect(page.locator("footer").last()).toBeInViewport({ ratio: 1 });
     await expect(page.getByRole("navigation", { name: "드로잉 도구" })).toBeInViewport({ ratio: 1 });
-    for (const name of ["스크리너", "개체 목록", "관심종목"]) {
+    for (const name of ["스크리너", "관심종목"]) {
       await tabs(page).getByRole("tab", { name: new RegExp(`^${name}`) }).click();
       await expect(tabs(page).getByRole("tab", { name: new RegExp(`^${name}`) })).toHaveAttribute("aria-selected", "true");
       await expect.poll(() => page.evaluate(() => [document.documentElement.scrollWidth - innerWidth, document.documentElement.scrollHeight - innerHeight])).toEqual([0, 0]);
@@ -57,7 +57,7 @@ test("상태 막대는 연결·저장·서버 시계와 공유 재무 조회의 
   await expect(footer.getByLabel("재무 수집 상태")).toContainText("3/10");
   await expect(footer.getByLabel("재무 수집 상태")).toContainText("실패 1");
   await expect(footer.getByRole("progressbar", { name: "재무 수집 진행률" })).toHaveAttribute("value", "3");
-  await tabs(page).getByRole("tab", { name: "개체 목록", exact: true }).click();
+  await tabs(page).getByRole("tab", { name: "스크리너", exact: true }).click();
   await expect(footer).toContainText("자동 저장됨");
   financial.status = "partial_failure";
   update.status = "partial_failure";

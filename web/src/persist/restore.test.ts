@@ -30,7 +30,6 @@ const cell = (over: Partial<ChartWindow>): ChartWindow => ({
 const SIDE_WINDOWS: LayoutWindow[] = [
   { id: "watchlist", link: null, kind: "watchlist" },
   { id: "screener", link: null, kind: "screener" },
-  { id: "objects", link: null, kind: "objects" },
 ];
 const SYNC = { crosshair: true, scroll: true };
 const layout = (id: string, ...cells: ChartWindow[]): Layout => ({ id, name: id, sync: SYNC, windows: [...cells, ...SIDE_WINDOWS], placement: {}, updatedAt: 1, revision: 10 });
@@ -120,6 +119,23 @@ test.each([
   expect(r.layoutDirty).toBe(false);
 });
 
+test("옛 미저장 본문의 개체 목록 창은 그 창만 빼고 열고 다시 저장한다", async () => {
+  const chart = { id: "cell-0", link: null, kind: "chart", symbol: "000660", venue: "combined", period: "W", chartSettings: {} };
+  const draft = { id: "L1", name: "L1", sync: SYNC, windows: [chart, { id: "watchlist", link: null, kind: "watchlist" }, { id: "objects", link: null, kind: "objects" }], placement: {} };
+  const r = await restore(sources({ unsaved: { layout: unsaved("/api/layouts/L1", 11, draft) } }));
+  expect(r.layout.windows.map((w) => w.kind)).toEqual(["chart", "watchlist"]);
+  expect(chartWindows(r.layout)[0]).toMatchObject({ symbol: "000660", period: "W" });
+  expect([r.layoutDirty, r.revisions.layout]).toEqual([true, 11]);
+});
+
+test("개체 목록 창을 빼도 모르는 다른 종류가 남아 있으면 미저장 본문을 버린다", async () => {
+  const chart = { id: "cell-0", link: null, kind: "chart", symbol: "000660", venue: "combined", period: "W", chartSettings: {} };
+  const draft = { id: "L1", name: "L1", sync: SYNC, windows: [chart, { id: "objects", link: null, kind: "objects" }, { id: "x", link: null, kind: "nope" }], placement: {} };
+  const r = await restore(sources({ unsaved: { layout: unsaved("/api/layouts/L1", 11, draft) } }));
+  expect(chartWindows(r.layout).map((w) => w.period)).toEqual(["D"]);
+  expect(r.layoutDirty).toBe(false);
+});
+
 test("차트가 아닌 창과 배치를 순서·연동 색 그대로 열고, 마이그레이션이 남긴 빈 배치는 경고 없이 읽는다", async () => {
   const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
   const windows: LayoutWindow[] = [cell({ id: "cell-0", link: "a" }), { id: "watchlist", link: "j", kind: "watchlist" }, cell({ id: "cell-1", symbol: "IDX:001", venue: null }), ...SIDE_WINDOWS.slice(1)];
@@ -130,7 +146,6 @@ test("차트가 아닌 창과 배치를 순서·연동 색 그대로 열고, 마
     ["watchlist", "watchlist", "j"],
     ["cell-1", "chart", null],
     ["screener", "screener", null],
-    ["objects", "objects", null],
   ]);
   expect(r.layout.placement).toEqual({ v: 1, dock: null, canvas: null });
   expect(warn).not.toHaveBeenCalled();

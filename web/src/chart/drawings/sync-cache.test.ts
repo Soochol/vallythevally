@@ -3,7 +3,6 @@ import { afterEach, expect, test, vi } from "vitest";
 import { usePersistStore } from "../../stores/persist";
 import { useSelectionStore } from "../../stores/selection";
 import { windowId } from "../../layout/kinds";
-import { renameObject } from "./objects";
 import { hline } from "./tools/hline";
 import { copy, paste } from "./clipboard";
 import { DrawingSync } from "./sync";
@@ -129,7 +128,7 @@ test("drawing edits, clone, object visibility and delete-toast Undo keep persist
     const before = current(); sync.commit(CELL, [{ kind: "update", before, after: change(before) }]);
     await vi.waitFor(() => expect(sync.save.kind).toBe("saved"));
   };
-  await edit((d) => renameObject(d, "지지선"));
+  await edit((d) => ({ ...d, style: { ...(d.style as object), objectName: "지지선" } }));
   await edit((d) => ({ ...d, style: hline.bar.lineColor?.set(d.style, "#123456") }));
   await edit((d) => ({ ...d, style: hline.bar.width?.set(d.style, 5) }));
   await edit((d) => ({ ...d, style: hline.bar.dash?.set(d.style, "dotted"), locked: true }));
@@ -138,8 +137,8 @@ test("drawing edits, clone, object visibility and delete-toast Undo keep persist
   sync.commit(CELL, clone.bodies.map((after) => ({ kind: "create", after })));
   await vi.waitFor(() => expect(sync.save.kind).toBe("saved"));
   expect(remote.get("clone")).toMatchObject({ locked: false, z: 2, style: { objectName: "지지선", line: { color: "#123456", width: 5, dash: "dotted" } } });
-  await edit((d) => ({ ...d, hidden: true, locked: false, z: 3 }));
-  expect(remote.get(body.id)).toMatchObject({ hidden: true, locked: false, z: 3 });
+  await edit((d) => ({ ...d, locked: false, z: 3 }));
+  expect(remote.get(body.id)).toMatchObject({ locked: false, z: 3 });
   const before = current();
   sync.commitWithUndo(CELL, [{ kind: "delete", before }], "드로잉을 지웠습니다");
   await vi.waitFor(() => expect(sync.save.kind).toBe("saved"));
@@ -148,7 +147,7 @@ test("drawing edits, clone, object visibility and delete-toast Undo keep persist
   expect(undo?.available()).toBe(true);
   undo?.run();
   await vi.waitFor(() => expect(sync.save.kind).toBe("saved"));
-  expect(remote.get(body.id)).toMatchObject({ hidden: true, z: 3, style: { objectName: "지지선", line: { color: "#123456", width: 5, dash: "dotted" } } });
+  expect(remote.get(body.id)).toMatchObject({ z: 3, style: { objectName: "지지선", line: { color: "#123456", width: 5, dash: "dotted" } } });
   expect(undo?.available()).toBe(false);
   await sync.load(body.symbol);
   expect(sync.drawings(body.symbol).map((d) => d.id)).toEqual(["clone", body.id]);

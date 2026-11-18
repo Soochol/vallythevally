@@ -345,19 +345,19 @@ test("떠 있는 창끼리 달라붙고 머리 클릭은 앞 차례만 한 번 �
   const room = await boxOf(area(page));
   const initial = await boxOf(frame(page));
   await shiftMove(page, "screener", room.x + 200 - initial.x, 100);
-  await detach(page, "개체 목록", "objects");
+  await detach(page, "관심종목", "watchlist");
   const screener = await boxOf(frame(page));
-  const objects = await boxOf(frame(page, "objects"));
-  await shiftMove(page, "objects", screener.x + screener.width + 6 - objects.x + 5, screener.y - objects.y, false);
+  const watchlist = await boxOf(frame(page, "watchlist"));
+  await shiftMove(page, "watchlist", screener.x + screener.width + 6 - watchlist.x + 5, screener.y - watchlist.y, false);
   await expect(page.locator('[data-dock-guide="x"]')).toBeVisible();
   await page.mouse.up();
   await page.keyboard.up("Shift");
-  expect((await boxOf(frame(page, "objects"))).x).toBe(screener.x + screener.width + 6);
-  await pollSaved(() => saved(scenario).dock?.floats.at(-1)?.window).toBe("objects");
+  expect((await boxOf(frame(page, "watchlist"))).x).toBe(screener.x + screener.width + 6);
+  await pollSaved(() => saved(scenario).dock?.floats.at(-1)?.window).toBe("watchlist");
   await head(page).click({ position: { x: 60, y: 17 } });
   await pollSaved(() => saved(scenario).dock?.floats.at(-1)?.window).toBe("screener");
   await undo(page);
-  await pollSaved(() => saved(scenario).dock?.floats.at(-1)?.window).toBe("objects");
+  await pollSaved(() => saved(scenario).dock?.floats.at(-1)?.window).toBe("watchlist");
 });
 
 test("놓을 때 실제 포인터 위치와 Shift 상태로 다시 판정한다", async ({ page }) => {
@@ -393,7 +393,7 @@ test("마지막 도킹 보조 창을 닫아도 나머지 떠 있는 창은 자�
 test("머리의 연동 색 점을 누르면 색 변경과 함께 떠 있는 차트를 활성화하고 앞으로 올린다", async ({ page, scenario }) => {
   twoCharts(scenario);
   const layout = scenario.documents.layout(DEFAULT_LAYOUT_ID);
-  scenario.documents.saveLayout({ ...layout, revision: layout.revision + 1, placement: { v: 1, canvas: null, dock: { root: { kind: "group", id: "g1", tabs: ["cell-0", "watchlist", "objects"], active: "cell-0" }, floats: [{ window: "cell-1", rect: { x: .05, y: .1, w: .5, h: .5 } }, { window: "screener", rect: { x: .6, y: .25, w: .25, h: .5 } }] } } });
+  scenario.documents.saveLayout({ ...layout, revision: layout.revision + 1, placement: { v: 1, canvas: null, dock: { root: { kind: "group", id: "g1", tabs: ["cell-0", "watchlist"], active: "cell-0" }, floats: [{ window: "cell-1", rect: { x: .05, y: .1, w: .5, h: .5 } }, { window: "screener", rect: { x: .6, y: .25, w: .25, h: .5 } }] } } });
   await page.goto("/");
   await expect(cell(page, 2)).toHaveAttribute("aria-busy", "false");
   await cell(page).click({ position: { x: 50, y: 20 } });
@@ -408,7 +408,7 @@ test("머리의 연동 색 점을 누르면 색 변경과 함께 떠 있는 차�
 
 test("화면에서 최소 크기로 커진 떠 있는 창은 캔버스로 전환해도 머리와 위치가 같다", async ({ page, scenario }) => {
   const layout = scenario.documents.layout(DEFAULT_LAYOUT_ID);
-  scenario.documents.saveLayout({ ...layout, revision: layout.revision + 1, placement: { v: 1, canvas: null, dock: { root: { kind: "group", id: "g1", tabs: ["cell-0", "watchlist", "objects"], active: "cell-0" }, floats: [{ window: "screener", rect: { x: .8, y: .8, w: .12, h: .12 } }] } } });
+  scenario.documents.saveLayout({ ...layout, revision: layout.revision + 1, placement: { v: 1, canvas: null, dock: { root: { kind: "group", id: "g1", tabs: ["cell-0", "watchlist"], active: "cell-0" }, floats: [{ window: "screener", rect: { x: .8, y: .8, w: .12, h: .12 } }] } } });
   await page.goto("/");
   await expect(cell(page)).toHaveAttribute("aria-busy", "false");
   const before = await boxOf(frame(page));

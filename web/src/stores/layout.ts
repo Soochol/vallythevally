@@ -131,7 +131,6 @@ export const DEFAULT_LAYOUT: EditableLayout = {
     { id: windowId("cell-0"), link: null, kind: "chart", symbol: "IDX:001", period: "D", chartSettings: DEFAULT_CHART_SETTINGS },
     { id: windowId("watchlist"), link: null, kind: "watchlist" },
     { id: windowId("screener"), link: null, kind: "screener" },
-    { id: windowId("objects"), link: null, kind: "objects" },
   ],
   placement: { v: 1, dock: null, canvas: null },
 };

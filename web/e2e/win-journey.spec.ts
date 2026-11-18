@@ -192,9 +192,9 @@ test("하루의 창 편집을 두 방식과 이름 저장·다시 열기·새로
     { id: second.id, symbol: "005930", link: null },
   ]);
   const expected = scenario.documents.layout(copy.id);
-  expect(expected.windows.map((window) => window.kind)).toEqual(["chart", "watchlist", "screener", "objects", "chart", "chart"]);
+  expect(expected.windows.map((window) => window.kind)).toEqual(["chart", "watchlist", "screener", "chart", "chart"]);
   expect(parsePlacement(expected.placement).dock).toEqual(dock);
-  expect(parsePlacement(expected.placement).canvas?.order).toHaveLength(6);
+  expect(parsePlacement(expected.placement).canvas?.order).toHaveLength(5);
   await chooseLayout(page, "기본");
   await chooseLayout(page, "복기");
   await page.reload();
@@ -216,7 +216,7 @@ test("하루의 창 편집을 두 방식과 이름 저장·다시 열기·새로
 test("숨긴 연동 차트와 창 범위 드로잉은 떠 있는 창과 캔버스를 거쳐 같은 창을 따른다", async ({ page, scenario }, testInfo) => {
   seed(scenario);
   const base = scenario.documents.layout();
-  scenario.documents.saveLayout({ ...base, windows: base.windows.map((window) => ["cell-0", "cell-1", "watchlist"].includes(window.id) ? { ...window, link: "a" } : window), placement: { v: 1, canvas: null, dock: { root: { kind: "split", dir: "row", ratio: .72, first: { kind: "group", id: "charts", tabs: ["cell-0", "cell-1"], active: "cell-0" }, second: { kind: "group", id: "side", tabs: ["watchlist", "screener", "objects"], active: "watchlist" } }, floats: [] } } });
+  scenario.documents.saveLayout({ ...base, windows: base.windows.map((window) => ["cell-0", "cell-1", "watchlist"].includes(window.id) ? { ...window, link: "a" } : window), placement: { v: 1, canvas: null, dock: { root: { kind: "split", dir: "row", ratio: .72, first: { kind: "group", id: "charts", tabs: ["cell-0", "cell-1"], active: "cell-0" }, second: { kind: "group", id: "side", tabs: ["watchlist", "screener"], active: "watchlist" } }, floats: [] } } });
   const drawingId = "01900000-0000-7000-8000-0000000000d8";
   scenario.documents.saveDrawing({ id: drawingId, symbol: "035420", tool: "hline", points: [{ t: NOV9, price: 70_000 }], style: {}, text: null, locked: false, hidden: false, periods: null, z: 1, group: null, scope: { kind: "cell", layoutId: DEFAULT_LAYOUT_ID, windowId: "cell-1" }, revision: 1 });
   await page.goto("/");
@@ -342,9 +342,13 @@ for (const mode of MODES) {
     const moved = await boxOf(mode === "dock" ? group(page, "screener") : frame(page, "watchlist"));
     expect(moved).not.toEqual(original);
     await expect(page.getByRole("contentinfo")).toContainText("저장하지 못했습니다");
-    if (mode === "canvas") await page.getByRole("navigation", { name: "창 종류" }).getByRole("button", { name: "개체 목록 창 더하기" }).click();
-    await page.getByRole("button", { name: "개체 목록 닫기", exact: true }).click();
-    await expect.poll(() => page.getByRole("button", { name: "개체 목록 닫기", exact: true }).count()).toBe(0);
+    if (mode === "canvas") await page.getByRole("navigation", { name: "창 종류" }).getByRole("button", { name: "지표 창 더하기" }).click();
+    else {
+      await topbar(page).getByRole("button", { name: "창 더하기", exact: true }).click();
+      await page.getByRole("menu", { name: "창 더하기" }).getByRole("menuitem", { name: /^지표/ }).click();
+    }
+    await page.getByRole("button", { name: "지표 닫기", exact: true }).click();
+    await expect.poll(() => page.getByRole("button", { name: "지표 닫기", exact: true }).count()).toBe(0);
     await expect(page.getByRole("contentinfo")).toContainText("저장하지 못했습니다");
     scenario.on((url, request) => url.pathname === `/api/layouts/${DEFAULT_LAYOUT_ID}` && request.method() === "PUT", (request) => ({ body: scenario.documents.saveLayout(request.postDataJSON()) }));
     await page.getByRole("contentinfo").getByRole("button", { name: "다시 시도" }).click();
@@ -644,7 +648,7 @@ for (const mode of MODES) {
     test(`${mode}: 가려진 차트가 있는 창 닫기는 보이는 초점과 한 번의 되돌리기를 보존한다 (${closing})`, async ({ page, scenario }) => {
       const base = scenario.documents.layout();
       const rect = { x: .15, y: .12, w: .6, h: .7 };
-      const original: LayoutWindow[] = [chartWindow("cell-0"), { id: "objects", kind: "objects", link: null }, { id: "screener", kind: "screener", link: null }, ...(closing === "cell-1" ? [chartWindow("cell-1")] : []), { id: "watchlist", kind: "watchlist", link: null }];
+      const original: LayoutWindow[] = [chartWindow("cell-0"), { id: "indicators", kind: "indicators", link: null }, { id: "screener", kind: "screener", link: null }, ...(closing === "cell-1" ? [chartWindow("cell-1")] : []), { id: "watchlist", kind: "watchlist", link: null }];
       scenario.documents.saveLayout({ ...base, windows: original, placement: {
         v: 1,
         canvas: { rects: Object.fromEntries(original.map((window) => [window.id, rect])), order: original.map((window) => window.id) },
@@ -655,7 +659,7 @@ for (const mode of MODES) {
       await ready(page, closing === "cell-1" ? 2 : 1);
       await tabTo(page, head(page, closing));
       await exposed(head(page, closing));
-      await tabTo(page, head(page, "objects").getByRole("button", { name: "개체 목록 닫기", exact: true }), "Shift+Tab");
+      await tabTo(page, head(page, "indicators").getByRole("button", { name: "지표 닫기", exact: true }), "Shift+Tab");
       await exposed(page.locator(":focus"));
       await tabTo(page, head(page, closing));
       await exposed(head(page, closing));
@@ -735,18 +739,18 @@ for (const mode of MODES) {
   test(`${mode}: 키보드에서 뒤 창의 크기 조작으로 넘어가 취소해도 순서와 기록은 같다`, async ({ page, scenario }) => {
     const base = scenario.documents.layout();
     const rear = { x: .05, y: .1, w: .4, h: .6 }, front = { x: .55, y: .2, w: .4, h: .6 };
-    scenario.documents.saveLayout({ ...base, windows: [chartWindow("cell-0"), { id: "objects", kind: "objects", link: null }, { id: "screener", kind: "screener", link: null }], placement: {
-      v: 1, canvas: { rects: { "cell-0": rear, objects: rear, screener: front }, order: ["cell-0", "objects", "screener"] },
-      dock: { root: { kind: "group", id: "chart", tabs: ["cell-0"], active: "cell-0" }, floats: [{ window: "objects", rect: rear }, { window: "screener", rect: front }] },
+    scenario.documents.saveLayout({ ...base, windows: [chartWindow("cell-0"), { id: "indicators", kind: "indicators", link: null }, { id: "screener", kind: "screener", link: null }], placement: {
+      v: 1, canvas: { rects: { "cell-0": rear, indicators: rear, screener: front }, order: ["cell-0", "indicators", "screener"] },
+      dock: { root: { kind: "group", id: "chart", tabs: ["cell-0"], active: "cell-0" }, floats: [{ window: "indicators", rect: rear }, { window: "screener", rect: front }] },
     } });
     scenario.documents.saveUiState({ ...scenario.documents.uiState(), layoutMode: mode });
     await page.goto("/");
     await ready(page);
     await tabTo(page, layoutButton(page));
-    const beforeStyle = await frame(page, "objects").getAttribute("style");
+    const beforeStyle = await frame(page, "indicators").getAttribute("style");
     if (!beforeStyle) throw new Error("창의 배치가 없습니다");
     const before = placement(scenario);
-    const handle = await boxOf(frame(page, "objects").locator('[data-resize-handle="se"]'));
+    const handle = await boxOf(frame(page, "indicators").locator('[data-resize-handle="se"]'));
     await page.mouse.move(handle.x + handle.width / 2, handle.y + handle.height / 2);
     await page.mouse.down();
     await page.mouse.move(handle.x + 40, handle.y + 40, { steps: 5 });
@@ -756,7 +760,7 @@ for (const mode of MODES) {
     await page.keyboard.press("Escape");
     await page.mouse.up();
     await expect(stage).not.toHaveAttribute(dragging);
-    await expect(frame(page, "objects")).toHaveAttribute("style", beforeStyle);
+    await expect(frame(page, "indicators")).toHaveAttribute("style", beforeStyle);
     expect(placement(scenario)).toEqual(before);
     await layoutButton(page).click();
     await expect(layoutMenu(page).getByRole("menuitem", { name: "배치 되돌리기", exact: true })).toBeDisabled();

@@ -94,7 +94,7 @@ function FloatingBar({ cellId }: { cellId: WindowId }) {
     };
     follow(); return () => cancelAnimationFrame(raf);
   }, [surface]);
-  if (!selected.length || selected.every((d) => d.hidden) || hideAll) return null;
+  if (!selected.length || hideAll) return null;
   const first = selected[0]!; const tool = toolOf(first.tool); if (!tool) return null;
   const common = (field: keyof typeof tool.bar) => selected.every((d) => toolOf(d.tool)?.bar[field] !== undefined);
   const change = (update: (d: DrawingBody) => DrawingBody) => {
