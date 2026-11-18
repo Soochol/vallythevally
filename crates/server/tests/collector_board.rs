@@ -15,7 +15,7 @@ use server::account::{AccountServerUrl, AccountState, AccountStateFile, Complete
 use server::api::{AccountProvider, UnixSeconds};
 use server::app::{ApplicationInputs, application_with_system};
 use server::clock::Clock;
-use server::collector::wire::{COVERAGE_REQUEST, DISK_REQUEST, Line, Reply, WATCH_REQUEST};
+use server::collector::wire::{COVERAGE_REQUEST, CollectorDayState, DISK_REQUEST, Line, Reply, WATCH_REQUEST};
 use server::collector::{CollectorBoard, DaemonJudgment, HEARTBEAT_EVERY, MAX_LINE_BYTES, MISSED_HEARTBEATS, RECONNECT_BACKOFF};
 use server::config::Secret;
 use server::db::AppDb;
@@ -405,7 +405,8 @@ fn every_example_message_reads_as_a_connector_type() {
     let Reply::Heartbeat(heartbeat) = read("reply-heartbeat.json") else { panic!("heartbeat") };
     assert_eq!(heartbeat.sequence, 12);
     let Reply::Coverage(coverage) = read("reply-coverage.json") else { panic!("coverage") };
-    assert_eq!(coverage.days.len(), 3);
+    assert_eq!(coverage.days.len(), 4);
+    assert!(coverage.days.iter().all(|day| day.state != CollectorDayState::Unknown), "예시의 날짜 상태는 모두 이름 있는 값으로 읽힌다");
     assert_eq!(coverage.days[1].planned_stocks, Some(2600));
     let Reply::Disk(disk) = read("reply-disk.json") else { panic!("disk") };
     assert_eq!((disk.disk.filesystem.map(|fs| fs.free_bytes), disk.disk.raw.len(), disk.disk.store.len()), (Some(812_345_678_901), 2, 1));
@@ -436,6 +437,15 @@ fn every_phase_the_contract_names_reads_as_itself() {
     }
 }
 
+#[test]
+fn every_day_state_the_contract_names_reads_as_itself() {
+    for state in ["complete", "incomplete", "in_progress", "verify_failed", "unreadable"] {
+        let line = format!(r#"{{"v":1,"type":"coverage","sent_at":"x","days":[{{"date":20261115,"state":"{state}","verified":null,"planned_stocks":null,"received_stocks":null}}]}}"#);
+        let Line::Reply(Reply::Coverage(coverage)) = Line::parse(line.as_bytes()) else { panic!("{state}") };
+        assert_eq!(serde_json::to_value(coverage.days[0].state).unwrap(), state);
+    }
+}
+
 #[tokio::test]
 async fn an_allowed_account_reads_the_daemon_status_coverage_and_disk() {
     let mut fixture = Fixture::start(Options::allowed_board()).await;
@@ -454,8 +464,8 @@ async fn an_allowed_account_reads_the_daemon_status_coverage_and_disk() {
     assert!(body["received_at"].as_i64().unwrap() > 1_700_000_000);
 
     let (status, body) = fixture.get("/api/collector/coverage").await;
-    assert_eq!((status, body["days"].as_array().map(Vec::len)), (200, Some(3)), "{body}");
-    assert_eq!((body["days"][0]["state"].as_str(), body["days"][1]["verified"].as_bool()), (Some("in_progress"), Some(true)));
+    assert_eq!((status, body["days"].as_array().map(Vec::len)), (200, Some(4)), "{body}");
+    assert_eq!((body["days"][0]["state"].as_str(), body["days"][1]["verified"].as_bool(), body["days"][3]["state"].as_str()), (Some("in_progress"), Some(true), Some("verify_failed")));
     let (status, body) = fixture.get("/api/collector/disk").await;
     assert_eq!((status, body["disk"]["filesystem"]["free_bytes"].as_u64()), (200, Some(812_345_678_901)), "{body}");
 

@@ -141,6 +141,7 @@ pub enum CollectorDayState {
     Complete,
     Incomplete,
     InProgress,
+    VerifyFailed,
     Unreadable,
     #[serde(other)]
     Unknown,
