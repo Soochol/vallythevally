@@ -1,5 +1,6 @@
 import type { Locator, Page } from "@playwright/test";
 import type { FeedBook } from "../src/api/generated/FeedBook";
+import type { Quote } from "../src/api/generated/Quote";
 import type { LayoutWindow } from "../src/api/generated/LayoutWindow";
 import { type Scenario, cell, DEFAULT_LAYOUT_ID, expect, pollSaved, test } from "./harness";
 import { BASE, CODE, ordersOn, pinQuote, snapshot, tradingApi, win } from "./order-window";
@@ -233,4 +234,92 @@ test("한 묶음에 탭 20개가 있을 때 마지막 탭을 단축키나 복제
   await page.getByRole("menu", { name: "창 배치" }).getByRole("menuitem", { name: "복제" }).click();
   await expect(tabOf(page, "trades-20")).toHaveAttribute("aria-selected", "true");
   await expect(tabOf(page, "trades-20")).toBeInViewport({ ratio: 1 });
+});
+
+const watchPanels = (page: Page) => page.getByRole("complementary", { name: "관심종목" });
+const watchListButton = (page: Page, index: number) => watchPanels(page).nth(index).getByRole("button", { name: /^관심종목 목록:/ });
+const watchRow = (page: Page, index: number, code: string) => watchPanels(page).nth(index).locator(`li[data-code="${code}"]`);
+const savedLists = (scenario: Scenario) => scenario.documents.watchlists().lists.map((l) => [l.id, l.symbols]);
+const watchWindowLists = (scenario: Scenario) => savedWindows(scenario, "watchlist").map((w) => (w.kind === "watchlist" ? w.list ?? null : null));
+
+function seedWatch(scenario: Scenario, windows: { id: string; list?: string }[], active: string) {
+  scenario.documents.saveWatchlists({
+    revision: 100,
+    lists: [
+      { id: "A", name: "가", symbols: ["005930"], groups: [] },
+      { id: "B", name: "나", symbols: ["000660"], groups: [] },
+      { id: "C", name: "다", symbols: [], groups: [] },
+    ],
+  });
+  saveWindows(scenario, windows.map((w) => ({ id: w.id, link: null, kind: "watchlist" as const, ...(w.list === undefined ? {} : { list: w.list }) })), "canvas");
+  scenario.documents.saveUiState({ ...scenario.documents.uiState(), layoutMode: "canvas", activeWatchlistId: active });
+}
+
+async function chooseWatchList(page: Page, index: number, name: string) {
+  await watchListButton(page, index).dispatchEvent("click");
+  await page.getByRole("menu", { name: "관심종목 목록" }).getByRole("menuitemradio", { name: new RegExp(`^${name}`) }).dispatchEvent("click");
+}
+
+test("관심종목 창 둘에서 각자 다른 목록을 고르면 둘이 다른 목록을 보이고 창마다 그 목록이 저장되며 새로 고쳐도 그대로다", async ({ page, scenario }) => {
+  seedWatch(scenario, [{ id: "watchlist" }, { id: "watchlist-2" }], "A");
+  await open(page);
+  await chooseWatchList(page, 1, "나");
+  await chooseWatchList(page, 0, "가");
+  await expect(watchListButton(page, 0)).toHaveAccessibleName("관심종목 목록: 가");
+  await expect(watchListButton(page, 1)).toHaveAccessibleName("관심종목 목록: 나");
+  await expect(watchRow(page, 0, "005930")).toHaveCount(1);
+  await expect(watchRow(page, 1, "000660")).toHaveCount(1);
+  await expect(watchRow(page, 0, "000660")).toHaveCount(0);
+  await pollSaved(() => watchWindowLists(scenario)).toEqual(["A", "B"]);
+  await page.reload();
+  await expect(cell(page)).toHaveAttribute("aria-busy", "false");
+  await expect(watchListButton(page, 0)).toHaveAccessibleName("관심종목 목록: 가");
+  await expect(watchListButton(page, 1)).toHaveAccessibleName("관심종목 목록: 나");
+});
+
+test("list가 없는 옛 레이아웃의 관심종목 창은 앱 전체 마지막 목록을 보인다", async ({ page, scenario }) => {
+  seedWatch(scenario, [{ id: "watchlist" }, { id: "watchlist-2" }], "B");
+  await open(page);
+  await expect(watchListButton(page, 0)).toHaveAccessibleName("관심종목 목록: 나");
+  await expect(watchListButton(page, 1)).toHaveAccessibleName("관심종목 목록: 나");
+});
+
+test("둘째 창의 ＋ 검색으로 고른 종목은 둘째 창의 목록에만 들어간다", async ({ page, scenario }) => {
+  seedWatch(scenario, [{ id: "watchlist", list: "A" }, { id: "watchlist-2", list: "B" }], "A");
+  await open(page);
+  await watchPanels(page).nth(1).getByRole("button", { name: "관심종목에 넣기" }).dispatchEvent("click");
+  const dialog = page.getByRole("dialog", { name: "관심종목에 넣을 종목 검색" });
+  await expect(dialog.getByRole("button", { name: "넣을 곳: 그룹 없음" })).toBeVisible();
+  const input = dialog.getByRole("combobox", { name: "종목 검색" });
+  await input.fill("035420");
+  await expect(dialog.getByRole("option").filter({ hasText: "035420" })).toHaveAttribute("aria-disabled", "false");
+  await input.press("Enter");
+  await expect(page.locator(".ui-toast")).toContainText("나에 넣었습니다");
+  await pollSaved(() => savedLists(scenario)).toEqual([["A", ["005930"]], ["B", ["000660", "035420"]], ["C", []]]);
+  await dialog.getByRole("button", { name: "검색 닫기" }).click();
+  await expect(watchRow(page, 1, "035420")).toHaveCount(1);
+  await expect(watchRow(page, 0, "035420")).toHaveCount(0);
+});
+
+test("한 창이 보던 목록을 다른 창이 지우면 그 창은 앱 전체 마지막 목록을 보인다", async ({ page, scenario }) => {
+  seedWatch(scenario, [{ id: "watchlist", list: "A" }, { id: "watchlist-2", list: "B" }], "A");
+  await open(page);
+  await chooseWatchList(page, 0, "나");
+  await watchListButton(page, 0).dispatchEvent("click");
+  await page.getByRole("menu", { name: "관심종목 목록" }).getByRole("menuitem", { name: "목록 지우기" }).dispatchEvent("click");
+  await page.getByRole("button", { name: "목록 지우기", exact: true }).last().click();
+  await pollSaved(() => savedLists(scenario).map(([id]) => id)).toEqual(["A", "C"]);
+  await expect(watchListButton(page, 0)).toHaveAccessibleName("관심종목 목록: 가");
+  await expect(watchListButton(page, 1)).toHaveAccessibleName("관심종목 목록: 가");
+});
+
+test("두 창의 목록에 있는 종목이 모두 구독되고 각 창의 현재가가 실시간으로 바뀐다", async ({ page, scenario }) => {
+  seedWatch(scenario, [{ id: "watchlist", list: "A" }, { id: "watchlist-2", list: "B" }], "A");
+  await open(page);
+  const watched = () => scenario.live.messages.flatMap((m) => (m.type === "watch" ? [[...m.symbols].sort()] : [])).at(-1);
+  await pollSaved(watched).toEqual(["000660", "005930"]);
+  const quote = (symbol: string, price: number): Quote => ({ symbol, price, change: 500, changeRate: 0.5, volume: 1_000, t: 1794186000, source: "realtime", venue: "combined" });
+  scenario.live.emit({ type: "quotes", venue: "combined", quotes: [quote("005930", 51_500), quote("000660", 201_500)] });
+  await expect(watchRow(page, 0, "005930")).toContainText("51,500");
+  await expect(watchRow(page, 1, "000660")).toContainText("201,500");
 });
