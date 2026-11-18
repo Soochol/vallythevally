@@ -32,6 +32,7 @@ import { PhoneWatch } from "./features/watch/Watchlist";
 import { usePersistStore } from "./stores/persist";
 import { useSelectionStore } from "./stores/selection";
 import { useUiStore } from "./stores/ui";
+import { DrawingToolbar } from "./features/drawings/DrawingToolbar";
 import { Workspace } from "./features/workspace/Workspace";
 import { DESKTOP_QUERY, useMediaQuery } from "./lib/media";
 import type { WindowId } from "./layout/kinds";
@@ -89,7 +90,10 @@ function ChartScreen() {
       <PhoneHeader cell={cell} info={info} status={status} />
       <PeriodChips cell={cell} />
       {desktop ? (
-        <Workspace />
+        <div className="flex min-h-0 min-w-0 flex-1">
+          <DrawingToolbar />
+          <Workspace />
+        </div>
       ) : (
         <main aria-label="칸" className="grid min-h-0 min-w-0 grid-cols-1 grid-rows-1 [grid-area:grid]">
           <ChartCell key={cellId} cellId={cellId} status={status} onStatus={(next) => setPhoneStatus({ cellId, status: next })} />

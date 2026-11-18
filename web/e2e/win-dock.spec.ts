@@ -113,7 +113,7 @@ test("전체 아래 가장자리는 전체 폭을 나누고 한 번의 배치 �
   await expect(menu(page).getByRole("menuitem", { name: "배치 되돌리기", exact: true })).toBeDisabled();
 });
 
-test("두 차트를 바꾸어 놓아도 같은 차트 노드·봉·드로잉·구독이 이어지고 도구 막대가 옮겨진다", async ({ page, scenario }) => {
+test("두 차트를 바꾸어 놓아도 같은 차트 노드·봉·드로잉·구독이 이어지고 도구 막대는 창 밖 왼쪽에 그대로 있다", async ({ page, scenario }) => {
   twoCharts(scenario);
   scenario.documents.saveDrawing({ id: "01900000-0000-7000-8000-0000000000d1", symbol: "000660", tool: "hline", points: [{ t: NOV9, price: 100_000 }], style: {}, text: null, locked: false, hidden: false, periods: null, z: 1, group: null, scope: { kind: "cell", layoutId: DEFAULT_LAYOUT_ID, windowId: "cell-1" }, revision: 1 });
   await page.goto("/");
@@ -135,9 +135,7 @@ test("두 차트를 바꾸어 놓아도 같은 차트 노드·봉·드로잉·�
   await expect(chartOf(cell(page, 2)).locator(".drawing-mirror")).toHaveAttribute("data-drawings", /0000000000d1/);
   await expect(groupWith(page, "SK하이닉스")).toHaveAttribute("data-active-cell", "");
   const toolbar = await boxOf(page.getByRole("navigation", { name: "드로잉 도구" }));
-  expect(toolbar.x).toBeGreaterThanOrEqual(left.x);
-  expect(toolbar.x + toolbar.width).toBeLessThanOrEqual(left.x + left.width);
-  expect(toolbar.y).toBeGreaterThan(left.y);
+  expect(toolbar.x + toolbar.width).toBeLessThanOrEqual(Math.min(left.x, right.x));
 });
 
 test("최소 크기 거절은 미리 보기와 메뉴에 이유를 보이고 배치 기록을 만들지 않는다", async ({ page, scenario }) => {

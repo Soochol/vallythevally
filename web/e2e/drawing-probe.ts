@@ -31,32 +31,7 @@ export const drawingDock = (page: Page) => page.getByRole("navigation", { name: 
 
 export async function expandDock(page: Page) {
   const bar = drawingDock(page);
-  const pill = bar.locator(".draw-pill");
-  await bar.hover();
-  await expect(pill).toHaveAttribute("aria-expanded", "true");
-  await expect(bar.getByRole("button", { name: "드로잉 도구 막대 옮기기", exact: true })).toBeVisible();
-  const settled = await bar.evaluate((el, limits) => new Promise<boolean>((resolve) => {
-    const read = () => {
-      const r = el.getBoundingClientRect();
-      return `${r.x},${r.y},${r.width},${r.height}`;
-    };
-    let rect = read();
-    let sameSince = -1;
-    const startedAt = performance.now();
-    const onFrame = () => {
-      const now = performance.now();
-      const next = read();
-      if (next !== rect || sameSince < 0) {
-        rect = next;
-        sameSince = now;
-      }
-      if (now - sameSince >= limits.stableMs) resolve(true);
-      else if (now - startedAt > limits.giveUpMs) resolve(false);
-      else requestAnimationFrame(onFrame);
-    };
-    requestAnimationFrame(onFrame);
-  }), { stableMs: 30, giveUpMs: 14000 });
-  if (!settled) throw new Error("드로잉 도구 막대가 멈추지 않았습니다: 14초 동안 사각형이 30ms 이상 같은 값으로 이어지지 않았습니다");
+  await expect(bar.getByRole("button", { name: "선택 도구", exact: true })).toBeVisible();
   return bar;
 }
 
@@ -69,7 +44,6 @@ export async function pickTool(page: Page, group: string, label: string) {
   } else {
     await bar.getByRole("button", { name: label, exact: true }).click();
   }
-  await expandDock(page);
   await expect(bar.getByRole("button", { name: label, exact: true })).toHaveAttribute("aria-pressed", "true");
 }
 

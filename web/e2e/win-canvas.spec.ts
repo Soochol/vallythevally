@@ -175,7 +175,7 @@ test("크게 본 차트 위에서도 창 종류와 위 막대가 기존 관심�
   }
 });
 
-test("뒤 차트를 Enter로 크게 보면 활성 칸과 도구 막대도 따라가고 다음 창 요청이 크게 보기를 끝낸다", async ({ page, scenario }) => {
+test("뒤 차트를 Enter로 크게 보면 활성 칸이 따라가고 도구 막대는 창 밖에 그대로 있으며 다음 창 요청이 크게 보기를 끝낸다", async ({ page, scenario }) => {
   seedCanvas(scenario);
   await page.goto("/");
   await expect(cell(page, 2)).toHaveAttribute("aria-busy", "false");
@@ -186,7 +186,8 @@ test("뒤 차트를 Enter로 크게 보면 활성 칸과 도구 막대도 따라
   await page.keyboard.press("Enter");
   await expect(frame(page, "cell-0")).toHaveAttribute("data-maximized", "");
   await expect(frame(page, "cell-0")).toHaveAttribute("data-active-cell", "");
-  await expect(frame(page, "cell-0").getByRole("navigation", { name: "드로잉 도구" })).toBeVisible();
+  await expect(page.getByRole("navigation", { name: "드로잉 도구" })).toBeVisible();
+  await expect(frame(page, "cell-0").getByRole("navigation", { name: "드로잉 도구" })).toHaveCount(0);
   await page.getByRole("group", { name: "봉 주기", exact: true }).getByRole("button", { name: "주", exact: true }).click();
   await pollSaved(() => scenario.documents.layout(DEFAULT_LAYOUT_ID).windows.find((window) => window.id === "cell-0")).toMatchObject({ period: "W" });
   expect(scenario.documents.layout(DEFAULT_LAYOUT_ID).windows.find((window) => window.id === "cell-1")).toMatchObject({ period: "D" });
@@ -259,8 +260,7 @@ test("겹친 창을 누르면 앞으로 오고 가지런히·기본 배치·크�
   await frame(page, "cell-0").getByRole("button", { name: "차트 크게 보기" }).click();
   await expect(frame(page, "cell-0")).toHaveAttribute("data-maximized", "");
   await cell(page).focus();
-  const tools = frame(page, "cell-0").getByRole("navigation", { name: "드로잉 도구" });
-  await tools.hover();
+  const tools = page.getByRole("navigation", { name: "드로잉 도구" });
   await tools.getByRole("button", { name: "드로잉 단축키 도움말" }).click();
   await expect(page.getByRole("dialog", { name: "드로잉 단축키" })).toBeVisible();
   await page.keyboard.press("Escape");
@@ -395,16 +395,12 @@ test("겹친 차트는 맨 위만 그리기를 받고 가려진 차트도 실시
   await drag(page, header(page, "cell-1"), 400, 200);
   await expect(first).toHaveAttribute("data-last-close", "56700");
   await header(page, "cell-0").click({ position: { x: 60, y: 17 } });
-  const toolbar = frame(page, "cell-0").getByRole("navigation", { name: "드로잉 도구" });
+  const toolbar = page.getByRole("navigation", { name: "드로잉 도구" });
   await expect(toolbar).toBeVisible();
   const toolbarBox = await boxOf(toolbar), frameBox = await boxOf(frame(page, "cell-0"));
-  expect(toolbarBox.x).toBeGreaterThanOrEqual(frameBox.x);
-  expect(toolbarBox.x + toolbarBox.width).toBeLessThanOrEqual(frameBox.x + frameBox.width + 1);
-  await toolbar.hover();
+  expect(toolbarBox.x + toolbarBox.width).toBeLessThanOrEqual(frameBox.x);
   await expect(toolbar.getByRole("button", { name: "드로잉 단축키 도움말" })).toBeVisible();
-  const settledToolbarBox = await boxOf(toolbar);
-  expect(settledToolbarBox.x).toBeGreaterThanOrEqual(frameBox.x);
-  expect(settledToolbarBox.x + settledToolbarBox.width).toBeLessThanOrEqual(frameBox.x + frameBox.width + 1);
+  expect(await boxOf(toolbar)).toEqual(toolbarBox);
   await toolbar.getByRole("button", { name: "드로잉 단축키 도움말" }).click();
   const popup = page.getByRole("dialog", { name: "드로잉 단축키" });
   await expect(popup).toBeVisible();

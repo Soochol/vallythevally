@@ -3,27 +3,24 @@ import { DEFAULT_DRAWING_PREFS, parseDrawingPrefs } from "./prefs";
 
 const saved = { magnet: false, magnetStrength: "strong", keepDrawing: true, pinnedTools: ["trendline"], newScope: "cell" };
 
-test("dockAt이 없는 저장값은 기본 자리로 읽고 다른 드로잉 설정은 그대로다", () => {
+test("toolbarHidden이 없는 저장값은 막대를 보이는 것으로 읽고 다른 드로잉 설정은 그대로다", () => {
   const prefs = parseDrawingPrefs(saved);
-  expect(prefs.dockAt).toBeNull();
+  expect(prefs.toolbarHidden).toBe(false);
   expect(prefs).toMatchObject(saved);
-  expect(DEFAULT_DRAWING_PREFS.dockAt).toBeNull();
+  expect(DEFAULT_DRAWING_PREFS.toolbarHidden).toBe(false);
+});
+
+test("저장한 toolbarHidden은 그대로 읽고 불리언이 아니면 보이는 것으로 읽는다", () => {
+  expect(parseDrawingPrefs({ ...saved, toolbarHidden: true }).toolbarHidden).toBe(true);
+  expect(parseDrawingPrefs({ ...saved, toolbarHidden: "yes" }).toolbarHidden).toBe(false);
 });
 
 test.each([
-  ["x가 문자열", { x: "0.5", y: 0.2 }],
-  ["x가 범위 밖", { x: 1.2, y: 0.2 }],
-  ["y가 음수", { x: 0.5, y: -0.1 }],
-  ["x가 NaN", { x: Number.NaN, y: 0.2 }],
-  ["y가 없음", { x: 0.5 }],
-  ["배열", [0.5, 0.2]],
-])("모양이 틀린 dockAt(%s)은 기본 자리로 읽고 다른 드로잉 설정은 그대로다", (_, dockAt) => {
+  ["옛 비율 자리", { x: 0.8, y: 0.8 }],
+  ["모양이 틀린 값", "left"],
+  ["null", null],
+])("옛 설정의 dockAt(%s)은 읽기를 실패시키지 않고 결과에서 빠진다", (_, dockAt) => {
   const prefs = parseDrawingPrefs({ ...saved, dockAt });
-  expect(prefs.dockAt).toBeNull();
   expect(prefs).toMatchObject(saved);
-});
-
-test("0~1의 두 수인 dockAt은 그대로 읽는다", () => {
-  expect(parseDrawingPrefs({ ...saved, dockAt: { x: 0, y: 1 } }).dockAt).toEqual({ x: 0, y: 1 });
-  expect(parseDrawingPrefs({ ...saved, dockAt: { x: 0.25, y: 0.6, extra: 3 } }).dockAt).toEqual({ x: 0.25, y: 0.6 });
+  expect(prefs).not.toHaveProperty("dockAt");
 });
