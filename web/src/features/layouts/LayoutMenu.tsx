@@ -1,4 +1,5 @@
 import { type RefObject, useId, useLayoutEffect, useRef } from "react";
+import type { CrosshairScope } from "../../api/generated/CrosshairScope";
 import { useUiStore } from "../../stores/ui";
 import { equalizeDockSizes, setLayoutMode } from "../workspace/canvasCommands";
 import { useLayoutStore } from "../../stores/layout";
@@ -8,6 +9,8 @@ import { ChevronIcon } from "../icons";
 import { Menu, type MenuItem } from "../menu/Menu";
 import { layoutCommands, useLayoutsStore } from "./controller";
 import { acknowledgeLayoutMenuFocus, layoutMenu, type LayoutNaming, useLayoutMenuPresentation } from "./presentation";
+
+const CROSSHAIR_SCOPES: readonly (readonly [CrosshairScope, string])[] = [["all", "모든 차트"], ["symbol", "같은 종목"], ["link", "같은 연동 색"]];
 
 export function LayoutMenu() {
   const root = useRef<HTMLDivElement>(null);
@@ -34,7 +37,10 @@ export function LayoutMenu() {
     { kind: "action", label: "이름 바꾸기…", onSelect: () => layoutMenu.startNaming("rename") },
     { kind: "action", label: "지우기", disabled: layouts.length <= 1, danger: true, onSelect: () => { void layoutMenu.confirmDelete(); } },
     { kind: "separator" },
-    { kind: "check", label: "십자선 연동", checked: layout.sync.crosshair, onSelect: () => useLayoutStore.getState().setCrosshairSync(!layout.sync.crosshair) },
+    { kind: "heading", label: "십자선 연동" },
+    { kind: "radio", label: "끔", checked: !layout.sync.crosshair, onSelect: () => useLayoutStore.getState().setCrosshairSync(false) },
+    ...CROSSHAIR_SCOPES.map(([scope, label]): MenuItem => ({ kind: "radio", label, checked: layout.sync.crosshair && layout.sync.crosshairScope === scope, onSelect: () => useLayoutStore.getState().setCrosshairScope(scope) })),
+    { kind: "separator" },
     { kind: "action", label: "기본 배치로", onSelect: layoutCommands.resetPlacement },
     { kind: "action", label: "크기 모두 고르게", disabled: mode !== "dock" || !layout.placement.dock, onSelect: equalizeDockSizes },
     { kind: "action", label: "배치 되돌리기", disabled: !canUndo, onSelect: () => useLayoutStore.getState().undoArrangement() },

@@ -939,12 +939,25 @@ pub struct Watchlists {
 
 /// 칸 동기화. 저장된 값에 키가 빠져 있으면 true로 읽는다.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
 #[ts(export)]
 pub struct LayoutSync {
     #[serde(default = "yes")]
     pub crosshair: bool,
     #[serde(default = "yes")]
     pub scroll: bool,
+    #[serde(default)]
+    pub crosshair_scope: CrosshairScope,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "lowercase")]
+#[ts(export)]
+pub enum CrosshairScope {
+    #[default]
+    All,
+    Symbol,
+    Link,
 }
 
 const fn yes() -> bool {
@@ -2259,7 +2272,7 @@ mod tests {
             "revision": 1_794_152_040_123_i64
         });
         let layout: LayoutInput = serde_json::from_value(body.clone()).unwrap();
-        assert_eq!(layout.sync, LayoutSync { crosshair: true, scroll: false });
+        assert_eq!(layout.sync, LayoutSync { crosshair: true, scroll: false, crosshair_scope: CrosshairScope::All });
         assert_eq!(layout.windows[0].link, Some(LinkColor::A));
         let WindowContent::Chart { feed, chart_settings, .. } = &layout.windows[0].content else { panic!("{:?}", layout.windows[0]) };
         assert_eq!(feed.0, domain::Feed::Stock(domain::StockCode::parse("005930").unwrap(), domain::Venue::Nxt));
@@ -2267,7 +2280,7 @@ mod tests {
         assert_eq!(layout.windows[1].content, WindowContent::Watchlist { list: None });
         assert_eq!(layout.revision, Revision(1_794_152_040_123), "Date.now() 크기의 ms도 정확히 받는다");
         let mut expected = body.clone();
-        expected["sync"] = json!({"crosshair": true, "scroll": false});
+        expected["sync"] = json!({"crosshair": true, "scroll": false, "crosshairScope": "all"});
         assert_eq!(serde_json::to_value(&layout).unwrap(), expected);
         for bad_id in ["", "a b", "창", &"x".repeat(65)] {
             let mut bad = body.clone();

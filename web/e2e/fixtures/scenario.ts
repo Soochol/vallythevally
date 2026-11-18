@@ -54,7 +54,7 @@ export type WatchlistSeed = Omit<Watchlist, "groups"> & Partial<Pick<Watchlist, 
 const matches = (match: Matcher, request: Request) => typeof match === "string" ? new URL(request.url()).pathname === match : match(new URL(request.url()), request);
 
 export class UserDocuments {
-  private layouts = new Map<string, Layout>([[DEFAULT_LAYOUT_ID, { id: DEFAULT_LAYOUT_ID, name: "기본", sync: { crosshair: true, scroll: true }, windows: [{ id: "cell-0", link: null, kind: "chart", symbol: "IDX:001", venue: null, period: "D", chartSettings: { v: 1, style: "candle", scale: "normal", indicators: [], compare: [], panels: [] } }, { id: "watchlist", link: null, kind: "watchlist" }, { id: "screener", link: null, kind: "screener" }], placement: {}, updatedAt: 0, revision: 0 }]]);
+  private layouts = new Map<string, Layout>([[DEFAULT_LAYOUT_ID, { id: DEFAULT_LAYOUT_ID, name: "기본", sync: { crosshair: true, scroll: true, crosshairScope: "all" }, windows: [{ id: "cell-0", link: null, kind: "chart", symbol: "IDX:001", venue: null, period: "D", chartSettings: { v: 1, style: "candle", scale: "normal", indicators: [], compare: [], panels: [] } }, { id: "watchlist", link: null, kind: "watchlist" }, { id: "screener", link: null, kind: "screener" }], placement: {}, updatedAt: 0, revision: 0 }]]);
   private watchlistValue: Watchlists = { lists: [{ id: FIRST_WATCHLIST_ID, name: "기본", symbols: [], groups: [] }], revision: 0 };
   private screenValue: Screens = { screens: [], revision: 0 };
   private uiValue: UiState = { lastLayoutId: DEFAULT_LAYOUT_ID, theme: "dark", revision: 0 };
@@ -64,7 +64,7 @@ export class UserDocuments {
   layout(id = DEFAULT_LAYOUT_ID): Layout {
     const value = this.layouts.get(id);
     if (!value) throw new Error(`Missing layout fixture: ${id}`);
-    return clone(value);
+    return { ...clone(value), sync: { ...value.sync, crosshairScope: value.sync.crosshairScope ?? "all" } };
   }
   layoutSummaries() { return [...this.layouts.values()].map(({ id, name, updatedAt }) => ({ id, name, updatedAt })); }
   saveLayout(value: LayoutInput): Layout {

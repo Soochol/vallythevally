@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import type { LayoutSync } from "../api/generated/LayoutSync";
 import type { LayoutWindow } from "../api/generated/LayoutWindow";
+import type { CrosshairScope } from "../api/generated/CrosshairScope";
 import type { LinkColor } from "../api/generated/LinkColor";
 import type { Period } from "../api/generated/Period";
 import type { Ranking } from "../api/generated/Ranking";
@@ -157,7 +158,7 @@ export const DEFAULT_LAYOUT_ID = "01900000-0000-7000-8000-000000000001";
 export const DEFAULT_LAYOUT: EditableLayout = {
   id: DEFAULT_LAYOUT_ID,
   name: "기본",
-  sync: { crosshair: true, scroll: true },
+  sync: { crosshair: true, scroll: true, crosshairScope: "all" },
   windows: [
     { id: windowId("cell-0"), link: null, kind: "chart", symbol: "IDX:001", period: "D", chartSettings: DEFAULT_CHART_SETTINGS },
     { id: windowId("watchlist"), link: null, kind: "watchlist" },
@@ -181,6 +182,7 @@ interface LayoutState {
   load(layout: EditableLayout): void;
   rename(name: string): void;
   setCrosshairSync(enabled: boolean): void;
+  setCrosshairScope(scope: CrosshairScope): void;
   arrange(next: Arrangement): void;
   undoArrangement(): void;
   setDock(dock: DockPlacement): void;
@@ -315,6 +317,7 @@ export const useLayoutStore = create<LayoutState>()((set, get) => {
     load: (layout) => set((s) => ({ layout, dockOrigins: readDockOrigins(layout), steps: [], session: s.session + 1 })),
     rename: (name) => set((s) => s.layout.name === name ? s : { layout: { ...s.layout, name }, revision: s.revision + 1 }),
     setCrosshairSync: (enabled) => set((s) => s.layout.sync.crosshair === enabled ? s : { layout: { ...s.layout, sync: { ...s.layout.sync, crosshair: enabled } }, revision: s.revision + 1 }),
+    setCrosshairScope: (scope) => set((s) => s.layout.sync.crosshair && s.layout.sync.crosshairScope === scope ? s : { layout: { ...s.layout, sync: { ...s.layout.sync, crosshair: true, crosshairScope: scope } }, revision: s.revision + 1 }),
     arrange,
     undoArrangement: () =>
       set((s) => {

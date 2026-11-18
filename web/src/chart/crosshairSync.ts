@@ -1,4 +1,6 @@
 import type { Bar } from "../api/generated/Bar";
+import type { CrosshairScope } from "../api/generated/CrosshairScope";
+import type { LinkColor } from "../api/generated/LinkColor";
 import type { Period } from "../api/generated/Period";
 import type { UnixSeconds } from "../api/generated/UnixSeconds";
 import { toChartTime } from "./time";
@@ -19,6 +21,14 @@ export function barInterval(start: UnixSeconds, period: Period): BarInterval {
     default: date.setUTCMinutes(date.getUTCMinutes() + PERIOD_ORDER[period]);
   }
   return { start, end: start + date.getTime() / 1000 - toChartTime(start), period };
+}
+
+export function crosshairGroupKey(scope: CrosshairScope, layoutKey: string, cell: { symbol: string; link: LinkColor | null }): string | null {
+  switch (scope) {
+    case "all": return layoutKey;
+    case "symbol": return `${layoutKey}:symbol:${cell.symbol}`;
+    case "link": return cell.link === null ? null : `${layoutKey}:link:${cell.link}`;
+  }
 }
 
 export function matchingBarTime(source: BarInterval, follower: { period: Period; bars: readonly Pick<Bar, "t">[] }): UnixSeconds | null {

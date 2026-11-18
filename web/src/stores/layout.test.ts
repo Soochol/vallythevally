@@ -348,7 +348,7 @@ test("십자선 연동은 scroll과 배치 기록을 지키고 바뀔 때만 저
   const steps = state().steps;
   const revision = state().revision;
   state().setCrosshairSync(false);
-  expect(state().layout.sync).toEqual({ crosshair: false, scroll: sync.scroll });
+  expect(state().layout.sync).toEqual({ crosshair: false, scroll: sync.scroll, crosshairScope: sync.crosshairScope });
   expect(state().layout.windows).toBe(windows);
   expect(state().layout.placement).toBe(placement);
   expect(state().steps).toBe(steps);
@@ -670,4 +670,28 @@ test("관심종목·스크리너의 보이는 종목은 창 종목이 아니라 
   expect(watchedSymbol(layout(), windowId("watchlist"), windowId("b1"))).toBe("035420");
   expect(watchedSymbol(layout(), windowId("trades"), windowId("b1"))).toBe("035420");
   expect(watchedSymbol(layout(), null, windowId("off"))).toBe("000660");
+});
+
+test("십자선 연동 범위를 고르면 켜지고 범위가 정해지며, 끄면 범위는 남고, 같은 값은 저장 순서를 올리지 않는다", () => {
+  state().setDock(fittedDock(state().layout));
+  const { windows, placement, sync } = state().layout;
+  const steps = state().steps;
+  const revision = state().revision;
+  state().setCrosshairSync(false);
+  state().setCrosshairScope("symbol");
+  expect(state().layout.sync).toEqual({ crosshair: true, scroll: sync.scroll, crosshairScope: "symbol" });
+  expect(state().revision).toBe(revision + 2);
+  state().setCrosshairScope("symbol");
+  expect(state().revision).toBe(revision + 2);
+  state().setCrosshairSync(false);
+  expect(state().layout.sync).toEqual({ crosshair: false, scroll: sync.scroll, crosshairScope: "symbol" });
+  expect(state().revision).toBe(revision + 3);
+  state().setCrosshairScope("symbol");
+  expect(state().layout.sync).toEqual({ crosshair: true, scroll: sync.scroll, crosshairScope: "symbol" });
+  expect(state().revision).toBe(revision + 4);
+  state().setCrosshairScope("link");
+  expect(state().layout.sync.crosshairScope).toBe("link");
+  expect(state().layout.windows).toBe(windows);
+  expect(state().layout.placement).toBe(placement);
+  expect(state().steps).toBe(steps);
 });

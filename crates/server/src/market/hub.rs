@@ -482,22 +482,16 @@ impl MarketHub {
     }
 
     fn sync_day_volumes(&mut self, now: KstTime) {
-        let wanted: BTreeSet<StockCode> = match &*self.directory.borrow() {
-            Some(dir) => self
-                .conns
-                .values()
-                .filter(|c| c.watch_venue != Venue::Combined)
-                .flat_map(|c| {
-                    let mut seen = HashSet::new();
-                    c.requested_watch.iter().filter(|s| dir.get(**s).is_some() && seen.insert(**s)).take(super::subscriptions::REALTIME_LIMIT).collect::<Vec<_>>()
-                })
-                .filter_map(|s| match s {
-                    Symbol::Stock(code) if dir.get(*s).is_some_and(|info| info.nxt_enabled) => Some(*code),
-                    _ => None,
-                })
-                .collect(),
-            None => BTreeSet::new(),
-        };
+        let wanted: BTreeSet<StockCode> = self
+            .conns
+            .iter()
+            .filter(|(_, c)| c.watch_venue != Venue::Combined)
+            .flat_map(|(conn, _)| self.manager.admitted_watch(*conn))
+            .filter_map(|s| match s {
+                Symbol::Stock(code) if self.nxt_enabled(s) => Some(code),
+                _ => None,
+            })
+            .collect();
         let due = self.tallies.take_due(&wanted, now);
         for chunk in due.chunks(quotes::DAY_VOLUME_CHUNK) {
             let (bars, tx) = (self.bars.clone(), self.tx.clone());
@@ -1015,8 +1009,8 @@ impl MarketHub {
                 self.hold_listed_watch_rows(conn, now);
             }
         }
-        self.sync_day_volumes(now);
         self.replan(now);
+        self.sync_day_volumes(now);
         let manager = &self.manager;
         self.keys.retain(|key, ks| {
             !ks.subs.is_empty()
@@ -2705,12 +2699,23 @@ mod tests {
         h.fake.market_sent().into_iter().filter(|s| s.api_id == ApiId::Ka10095).map(|s| s.body).collect()
     }
 
+    async fn day_volume_asked(h: &Harness, count: usize) {
+        for _ in 0..300 {
+            if day_volume_requests(h).len() >= count {
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        panic!("거래소별 거래량을 {count}번 묻지 않았다: {:?}", day_volume_requests(h));
+    }
+
     #[tokio::test(start_paused = true)]
     async fn watch_in_krx_moves_only_on_krx_fills_with_the_krx_day_volume() {
         let h = std_harness();
         let (conn, out) = connect(&h).await;
         live(&h).await;
         h.hub.watch(conn, vec![samsung().feed.symbol()], Venue::Krx);
+        day_volume_asked(&h, 1).await;
         settle().await;
         assert_eq!(day_volume_requests(&h), [r#"{"stk_cd":"005930_AL|005930|005930_NX"}"#], "통합·KRX·NXT 누적을 한 요청으로 묻는다");
         h.events.send(fill(&h, SAMSUNG, (9, 0, 51), 112, Some(Exchange::Krx), 5, (12, 1_005))).await.unwrap();
@@ -2728,6 +2733,7 @@ mod tests {
         let (conn, out) = connect(&h).await;
         live(&h).await;
         h.hub.watch(conn, vec![samsung().feed.symbol()], Venue::Nxt);
+        day_volume_asked(&h, 1).await;
         settle().await;
         h.events.send(fill(&h, SAMSUNG, (9, 0, 51), 112, Some(Exchange::Krx), 5, (12, 1_005))).await.unwrap();
         assert_eq!(quote_messages(take(&out).await), vec![], "KRX 체결은 NXT 시세를 움직이지 않는다");
@@ -2807,6 +2813,7 @@ mod tests {
         let (conn, out) = connect(&h).await;
         live(&h).await;
         h.hub.watch(conn, vec![samsung().feed.symbol()], Venue::Krx);
+        day_volume_asked(&h, 1).await;
         tokio::time::sleep(Duration::from_millis(50)).await;
         h.events.send(fill(&h, SAMSUNG, (9, 0, 50), 110, Some(Exchange::Krx), 3, (10, 998))).await.unwrap();
         h.events.send(fill(&h, SAMSUNG, (9, 0, 50), 110, Some(Exchange::Nxt), 2, (10, 1_000))).await.unwrap();
@@ -2867,6 +2874,7 @@ mod tests {
         live(&h).await;
         *h.day_volumes.lock().unwrap() = HashMap::from([("005930_AL".to_owned(), 1_000), ("005930".to_owned(), 1_000)]);
         h.hub.watch(conn, vec![samsung().feed.symbol()], Venue::Krx);
+        day_volume_asked(&h, 1).await;
         settle().await;
         h.events.send(fill(&h, SAMSUNG, (9, 0, 51), 112, Some(Exchange::Krx), 5, (12, 1_005))).await.unwrap();
         assert_eq!(quote_messages(take(&out).await), vec![quotes_msg(api::Venue::Krx, vec![venue_quote(SAMSUNG, api::Venue::Krx, 112.0, 12.0, 1_005, at(9, 0, 51))])]);
@@ -2879,6 +2887,7 @@ mod tests {
         live(&h).await;
         *h.day_volumes.lock().unwrap() = HashMap::from([("005930_AL".to_owned(), 1_000), ("005930".to_owned(), 900)]);
         h.hub.watch(conn, vec![samsung().feed.symbol()], Venue::Krx);
+        day_volume_asked(&h, 1).await;
         settle().await;
         h.events.send(fill(&h, SAMSUNG, (9, 0, 51), 112, Some(Exchange::Krx), 5, (12, 1_005))).await.unwrap();
         assert_eq!(quote_messages(take(&out).await), vec![]);
@@ -2890,6 +2899,7 @@ mod tests {
         let (conn, out) = connect(&h).await;
         live(&h).await;
         h.hub.watch(conn, vec![samsung().feed.symbol()], Venue::Krx);
+        day_volume_asked(&h, 1).await;
         settle().await;
         h.events.send(fill(&h, SAMSUNG, (9, 0, 51), 112, Some(Exchange::Krx), 5, (12, 1_005))).await.unwrap();
         assert_eq!(quote_messages(take(&out).await).len(), 1);
@@ -2909,6 +2919,7 @@ mod tests {
         live(&h).await;
         let list = vec![samsung().feed.symbol()];
         h.hub.watch(conn, list.clone(), Venue::Nxt);
+        day_volume_asked(&h, 1).await;
         settle().await;
         h.hub.watch(conn, list, Venue::Combined);
         settle().await;
@@ -2916,6 +2927,23 @@ mod tests {
         h.events.send(fill(&h, SAMSUNG, (9, 0, 51), 112, Some(Exchange::Nxt), 5, (12, 1_005))).await.unwrap();
         assert_eq!(quote_messages(take(&out).await), vec![quotes_msg(api::Venue::Combined, vec![venue_quote(SAMSUNG, api::Venue::Combined, 112.0, 12.0, 1_005, at(9, 0, 51))])]);
         assert_eq!(day_volume_requests(&h).len(), 1);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_watch_row_pushed_out_of_realtime_does_not_ask_for_its_day_volume() {
+        let h = std_harness();
+        let (conn, out) = connect(&h).await;
+        live(&h).await;
+        h.hub.subscribe(conn, sub("a"), key(NOT_ON_NXT, Venue::Combined));
+        let mut rows = fillers(REALTIME_LIMIT - 1);
+        rows.push(samsung().feed.symbol());
+        h.hub.watch(conn, rows, Venue::Krx);
+        tokio::time::sleep(Duration::from_secs(3)).await;
+        assert!(out.take(true).messages.contains(&limited(&[SAMSUNG.to_owned()])), "칸이 한 자리를 쓰니 맨 아랫줄 삼성전자가 넘친다");
+        assert_eq!(day_volume_requests(&h), Vec::<String>::new(), "실시간 자리를 받지 못한 줄은 거래소별 거래량을 묻지 않는다");
+        h.hub.unsubscribe(conn, sub("a"));
+        tokio::time::sleep(Duration::from_secs(3)).await;
+        assert_eq!(day_volume_requests(&h), [r#"{"stk_cd":"005930_AL|005930|005930_NX"}"#], "자리가 나면 그때 묻는다");
     }
 
     fn samsung_symbol() -> Symbol {

@@ -5,8 +5,9 @@ pub mod krx;
 pub mod summary;
 
 use std::collections::{HashMap, VecDeque};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use futures::future::BoxFuture;
 use serde_json::{Value, json};
 use server::kiwoom::transport::{HttpRequest, HttpResponse, Transport, TransportError};
@@ -50,9 +51,39 @@ pub struct Observed {
     pub calls: Mutex<Vec<Call>>,
 }
 
+const HOLD_WAIT: Duration = Duration::from_secs(30);
+
+struct HeldRequests {
+    label: String,
+    matches: Box<dyn Fn(&Call) -> bool + Send + Sync>,
+    arrived: AtomicUsize,
+    gate: tokio::sync::Semaphore,
+}
+
+#[derive(Clone)]
+pub struct Hold {
+    held: Arc<HeldRequests>,
+    seen: Arc<Observed>,
+}
+
+impl Hold {
+    pub async fn arrived(&self) {
+        let deadline = Instant::now() + HOLD_WAIT;
+        while self.held.arrived.load(Ordering::SeqCst) == 0 {
+            if Instant::now() >= deadline {
+                panic!("붙잡을 요청 `{}`이 {}초 안에 도착하지 않았습니다. 지금까지 보낸 요청: {:?}", self.held.label, HOLD_WAIT.as_secs(), self.seen.calls.lock().unwrap().iter().map(|call| (&call.api_id, &call.next_key)).collect::<Vec<_>>());
+            }
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+    }
+
+    pub fn release(&self) { self.held.gate.close(); }
+}
+
 #[derive(Clone, Default)]
 pub struct ScriptedTransport {
     replies: Arc<Mutex<Replies>>,
+    holds: Arc<Mutex<Vec<Arc<HeldRequests>>>>,
     pub seen: Arc<Observed>,
 }
 
@@ -63,6 +94,11 @@ impl ScriptedTransport {
     pub fn respond_with_for_key(&self, id: &str, key: &str, status: u16, body: Value) { self.replies.lock().unwrap().continuations.insert((id.into(), key.into()), (status, body)); }
     pub fn script(&self, id: &str, replies: Vec<ScriptedReply>) { self.replies.lock().unwrap().scripts.insert(id.into(), replies.into()); }
     pub fn delay(&self, id: &str, delay: Duration) { self.replies.lock().unwrap().delays.insert(id.into(), delay); }
+    pub fn hold(&self, label: &str, matches: impl Fn(&Call) -> bool + Send + Sync + 'static) -> Hold {
+        let held = Arc::new(HeldRequests { label: label.into(), matches: Box::new(matches), arrived: AtomicUsize::new(0), gate: tokio::sync::Semaphore::new(0) });
+        self.holds.lock().unwrap().push(held.clone());
+        Hold { held, seen: self.seen.clone() }
+    }
     pub fn set_quote_rows(&self, rows: Vec<Value>) { self.replies.lock().unwrap().quotes = Some(rows); }
     pub fn set_krx_market(&self, market: KrxMarket) { self.replies.lock().unwrap().market = Some(market); }
     pub fn reject_token(&self, token: &str) { self.replies.lock().unwrap().rejected.push(token.into()); }
@@ -76,13 +112,13 @@ impl ScriptedTransport {
     pub fn requests(&self) -> usize { self.seen.calls.lock().unwrap().len() }
     pub fn issued(&self) -> usize { self.api_ids().iter().filter(|id| *id == "au10001").count() }
 
-    fn reply(&self, req: &HttpRequest) -> (Duration, HttpResponse) {
+    fn reply(&self, req: &HttpRequest, call: &Call) -> (Duration, HttpResponse) {
         let id = req.api_id.as_str();
-        let body: Value = serde_json::from_str(req.body.expose()).unwrap();
-        let next = req.cont.as_ref().map(|key| key.as_str().to_owned());
+        let body = call.body.clone();
+        let next = call.next_key.clone();
         self.seen.api_ids.lock().unwrap().push(id.into());
         self.seen.authorizations.lock().unwrap().push(req.token.as_ref().map(|token| format!("Bearer {}", token.expose())).unwrap_or_default());
-        self.seen.calls.lock().unwrap().push(Call { api_id: id.into(), body: body.clone(), next_key: next.clone() });
+        self.seen.calls.lock().unwrap().push(call.clone());
         let mut replies = self.replies.lock().unwrap();
         if let Some(reply) = replies.scripts.get_mut(id).and_then(VecDeque::pop_front) {
             let mut response = response(reply.body, false);
@@ -147,8 +183,12 @@ impl ScriptedTransport {
 
 impl Transport for ScriptedTransport {
     fn send(&self, req: HttpRequest) -> BoxFuture<'static, Result<HttpResponse, TransportError>> {
-        let (delay, response) = self.reply(&req);
+        let call = Call { api_id: req.api_id.as_str().into(), body: serde_json::from_str(req.body.expose()).unwrap(), next_key: req.cont.as_ref().map(|key| key.as_str().to_owned()) };
+        let (delay, response) = self.reply(&req, &call);
+        let held = self.holds.lock().unwrap().iter().find(|held| !held.gate.is_closed() && (held.matches)(&call)).cloned();
+        if let Some(held) = &held { held.arrived.fetch_add(1, Ordering::SeqCst); }
         Box::pin(async move {
+            if let Some(held) = held { let _ = held.gate.acquire().await; }
             if !delay.is_zero() { tokio::time::sleep(delay).await; }
             Ok(response)
         })

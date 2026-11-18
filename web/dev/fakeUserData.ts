@@ -123,7 +123,7 @@ export function createUserData(seedWatchlist: string[], seedScreens: Screen[], n
       {
         id: DEFAULT_LAYOUT_ID,
         name: "기본",
-        sync: { crosshair: true, scroll: true },
+        sync: { crosshair: true, scroll: true, crosshairScope: "all" },
         windows: [
           {
             id: "cell-0",
