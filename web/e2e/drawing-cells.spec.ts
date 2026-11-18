@@ -46,7 +46,7 @@ async function ready(page: Page, scenario: Scenario, first: Period = "D", second
 
 const styleBar = (page: Page, n: number): Locator => cell(page, n).getByRole("toolbar", { name: "드로잉 스타일", exact: true });
 const grip = (page: Page, n: number) => styleBar(page, n).getByRole("button", { name: "스타일 막대 옮기기", exact: true });
-const dockOf = (page: Page, n: number): Locator => page.getByRole("tabpanel").filter({ has: cell(page, n) }).getByRole("navigation", { name: "드로잉 도구", exact: true });
+const activeGroup = (page: Page, n: number): Locator => page.locator("[data-dock-group]").filter({ has: cell(page, n) });
 const textBox = (page: Page) => page.getByRole("textbox", { name: "드로잉 글자" });
 const barsPlaced = (page: Page, n: number) => styleBar(page, n).evaluate((el) => { const r = el.getBoundingClientRect(); return `${Math.round(r.x)},${Math.round(r.y)}`; });
 
@@ -130,8 +130,8 @@ test("다른 칸을 누르면 고른 도구가 풀려 그 누름은 선택으로
   await expect(dock.getByRole("button", { name: "추세선", exact: true })).toHaveAttribute("aria-pressed", "true");
   const at = await chartPoint(page, 0.5, 0.5, 2);
   await page.mouse.click(at.x, at.y);
-  await expect(dockOf(page, 2)).toBeVisible();
-  await expect(dockOf(page, 1)).toHaveCount(0);
+  await expect(activeGroup(page, 2)).toHaveAttribute("data-active-cell", "");
+  await expect(activeGroup(page, 1)).not.toHaveAttribute("data-active-cell");
   const active = await expandDock(page);
   await expect(active.getByRole("button", { name: "선택 도구", exact: true })).toHaveAttribute("aria-pressed", "true");
   await page.mouse.click(at.x + 60, at.y - 40);
@@ -148,10 +148,10 @@ test("칸 1에서 첫 점만 찍고 칸 2를 누르면 그리던 것이 취소�
   await page.mouse.move(first.x + 80, first.y - 60, { steps: 4 });
   const other = await chartPoint(page, 0.5, 0.5, 2);
   await page.mouse.click(other.x, other.y);
-  await expect(dockOf(page, 2)).toBeVisible();
+  await expect(activeGroup(page, 2)).toHaveAttribute("data-active-cell", "");
   const again = await chartPoint(page, 0.6, 0.3, 1);
   await page.mouse.click(again.x, again.y);
-  await expect(dockOf(page, 1)).toBeVisible();
+  await expect(activeGroup(page, 1)).toHaveAttribute("data-active-cell", "");
   const dock = await expandDock(page);
   await expect(dock.getByRole("button", { name: "선택 도구", exact: true })).toHaveAttribute("aria-pressed", "true");
   await expect.poll(async () => (await settledMirror(page, 1)).length).toBe(0);
@@ -163,7 +163,7 @@ test("칸 1의 봉 주기를 바꿔도 칸 2의 선택과 스타일 막대는 �
   await trendline(page, 2);
   const at = await chartPoint(page, 0.9, 0.1, 1);
   await page.mouse.click(at.x, at.y);
-  await expect(dockOf(page, 1)).toBeVisible();
+  await expect(activeGroup(page, 1)).toHaveAttribute("data-active-cell", "");
   await page.getByRole("toolbar", { name: "차트 도구 막대" }).getByRole("button", { name: "월", exact: true }).click();
   await expect(cell(page, 1)).toHaveAttribute("aria-label", /월/);
   await expect(chartOf(cell(page, 1))).toHaveAttribute("data-bar-count", /^[1-9]\d*$/);
@@ -177,7 +177,7 @@ test("칸 2를 눌러도 칸 1의 선택은 남고 칸 2에서 Delete를 눌러�
   await expect(styleBar(page, 1)).toBeVisible();
   const at = await chartPoint(page, 0.9, 0.1, 2);
   await page.mouse.click(at.x, at.y);
-  await expect(dockOf(page, 2)).toBeVisible();
+  await expect(activeGroup(page, 2)).toHaveAttribute("data-active-cell", "");
   await expect(styleBar(page, 1)).toBeVisible();
   await expect.poll(async () => (await settledMirror(page, 1)).map((m) => m.selected)).toEqual([true]);
   await expect(styleBar(page, 2)).toHaveCount(0);

@@ -9,7 +9,6 @@ type At = readonly [number, number];
 async function collapseDock(page: Page) {
   await page.mouse.move(5, 5);
   await cell(page).focus();
-  await expect(page.getByRole("navigation", { name: "드로잉 도구" }).locator(".draw-pill")).toHaveAttribute("aria-expanded", "false");
   let last = "";
   await expect.poll(async () => {
     const now = JSON.stringify(await page.getByRole("navigation", { name: "드로잉 도구" }).boundingBox());
@@ -185,52 +184,32 @@ for (const slice of SLICES) {
 }
 
 for (const width of [1280, 1024, 800]) {
-  test(`도구 막대: 창 폭 ${width}px에서 차트 안에 머물고 모든 버튼과 그룹 메뉴에 닿는다`, async ({ page, scenario }) => {
-    if (width === 800) saveChartShare(scenario, 0.5);
+  test(`도구 막대: 창 폭 ${width}px에서 차트 밖 왼쪽에 머물고 모든 버튼과 그룹 메뉴에 닿는다`, async ({ page }) => {
     await page.setViewportSize({ width, height: 800 });
     await open(page);
     const bar = page.getByRole("navigation", { name: "드로잉 도구" });
     const chart = (await chartOf(cell(page)).boundingBox())!;
-    const pill = (await bar.boundingBox())!;
-    expect(pill.x).toBeGreaterThanOrEqual(chart.x);
-    expect(pill.x + pill.width).toBeLessThanOrEqual(chart.x + chart.width);
-    await expandDock(page);
     const box = (await bar.boundingBox())!;
-    expect(box.x).toBeGreaterThanOrEqual(chart.x);
-    expect(box.x + box.width).toBeLessThanOrEqual(chart.x + chart.width);
-    const overflow = await bar.evaluate((el) => el.scrollWidth - el.clientWidth);
-    if (width === 800) {
-      expect(overflow).toBeGreaterThan(0);
-      const help = bar.getByRole("button", { name: "드로잉 단축키 도움말", exact: true });
-      await expect(help).not.toBeInViewport({ ratio: 1 });
-      await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
-      await page.mouse.wheel(overflow + 50, 0);
-      await expect.poll(() => bar.evaluate((el) => el.scrollLeft)).toBe(overflow);
-      const own = (await help.boundingBox())!;
-      expect(own.x + own.width).toBeLessThanOrEqual(box.x + box.width + 1);
-      await help.click();
-      await expect(page.getByRole("dialog", { name: "드로잉 단축키" })).toBeInViewport({ ratio: 1 });
-      await page.keyboard.press("Escape");
-    } else expect(overflow).toBe(0);
+    expect(box.x + box.width).toBeLessThanOrEqual(chart.x);
+    expect(await bar.evaluate((el) => [el.scrollWidth - el.clientWidth, el.scrollHeight - el.clientHeight])).toEqual([0, 0]);
     const buttons = bar.getByRole("button");
     for (let i = 0; i < await buttons.count(); i++) {
-      const button = buttons.nth(i);
-      await button.scrollIntoViewIfNeeded();
-      const own = (await button.boundingBox())!;
-      expect(own.x, await button.getAttribute("aria-label") ?? "").toBeGreaterThanOrEqual(box.x - 1);
-      expect(own.x + own.width, await button.getAttribute("aria-label") ?? "").toBeLessThanOrEqual(box.x + box.width + 1);
+      const own = (await buttons.nth(i).boundingBox())!;
+      const name = await buttons.nth(i).getAttribute("aria-label") ?? "";
+      expect(own.x, name).toBeGreaterThanOrEqual(box.x - 1);
+      expect(own.x + own.width, name).toBeLessThanOrEqual(box.x + box.width + 1);
+      expect(own.y, name).toBeGreaterThanOrEqual(box.y - 1);
+      expect(own.y + own.height, name).toBeLessThanOrEqual(box.y + box.height + 1);
     }
     expect((await bar.boundingBox())!).toEqual(box);
     const viewport = page.viewportSize()!;
     for (const group of menuGroups().map(([g]) => GROUP_LABEL[g])) {
-      await expandDock(page);
       const toggle = bar.getByRole("button", { name: `${group} 도구 펼치기`, exact: true });
-      await toggle.scrollIntoViewIfNeeded();
       await toggle.click();
       const menu = page.getByRole("menu", { name: `${group} 도구` });
       await expect(menu).toBeVisible();
       const m = (await menu.boundingBox())!;
-      expect(m.x, group).toBeGreaterThanOrEqual(0);
+      expect(m.x, group).toBeGreaterThanOrEqual(box.x + box.width);
       expect(m.y, group).toBeGreaterThanOrEqual(0);
       expect(m.x + m.width, group).toBeLessThanOrEqual(viewport.width);
       expect(m.y + m.height, group).toBeLessThanOrEqual(viewport.height);
@@ -282,7 +261,7 @@ test("도구 막대: 단축키로 고른 도구를 그룹 버튼이 기억한다
   await expect(bar.getByRole("button", { name: "수평 반직선", exact: true })).toBeVisible();
 });
 
-test("작은 막대: 위쪽 드로잉을 골라도 도크를 가리지 않는다", async ({ page, scenario }) => {
+test("작은 막대: 위쪽 드로잉을 골라도 스타일 막대가 도구 막대를 가리지 않고 차트 안에 뜬다", async ({ page, scenario }) => {
   await page.setViewportSize({ width: 1280, height: 800 });
   await open(page);
   await page.evaluate(() => {
@@ -301,8 +280,8 @@ test("작은 막대: 위쪽 드로잉을 골라도 도크를 가리지 않는다
   for (const top of [0.16, 0.18, 0.2]) {
     await pickTool(page, "선", "추세선"); await clickAt(page, [[0.3, top], [0.4, top + 0.08]]);
     await expect.poll(async () => (await mirror(page)).filter((d) => d.selected).length).toBe(1);
-    const dock = (await page.getByRole("navigation", { name: "드로잉 도구" }).boundingBox())!;
-    await expect.poll(async () => (await page.getByRole("toolbar", { name: "드로잉 스타일" }).boundingBox())!.y, { message: `${top}` }).toBeGreaterThanOrEqual(dock.y + dock.height);
+    const chartTop = (await chartOf(cell(page)).boundingBox())!.y;
+    await expect.poll(async () => (await page.getByRole("toolbar", { name: "드로잉 스타일" }).boundingBox())!.y, { message: `${top}` }).toBeGreaterThanOrEqual(chartTop);
     const style = page.getByRole("toolbar", { name: "드로잉 스타일" });
     await cell(page).focus(); await page.keyboard.press("Control+Alt+h");
     await expect(style).toBeHidden();

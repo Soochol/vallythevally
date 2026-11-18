@@ -69,15 +69,12 @@ async function geometry(page: Page) {
         if (!element) throw new Error("차트 패널이 없습니다");
         return { ...rect(element), right: body.getBoundingClientRect().left + chart.timeScale().width(), stretch: pane.getStretchFactor() };
       });
-      const host = body.closest("section")?.parentElement;
-      const toolbar = host?.querySelector(".drawing-toolbar");
       const chartBox = chart.chartElement().getBoundingClientRect();
       const timeAxis = { x: chartBox.x, y: chartBox.bottom - chart.timeScale().height(), right: chartBox.right, bottom: chartBox.bottom };
       return {
         body: rect(body), panes, timeAxis,
         rows: { head: { box: rect(head), text: head.textContent, texts: textRects(head) }, price: { box: rect(price), text: price.textContent, texts: textRects(price) }, ohlc: { box: rect(ohlc), text: ohlc.textContent, texts: textRects(ohlc) } },
         volume: { box: rect(volume), text: volume.textContent, texts: textRects(volume), commands: [...volume.querySelectorAll("button[data-indicator-command]:not([hidden])")].map((button) => ({ label: button.getAttribute("aria-label"), ...rect(button) })) },
-        toolbar: toolbar ? rect(toolbar) : null,
       };
     });
   });
@@ -88,7 +85,6 @@ const contained = (box: Box, pane: Box) => box.x >= pane.x - 0.5 && box.y >= pan
 const disjoint = (a: Box, b: Box) => a.right <= b.x + 0.5 || b.right <= a.x + 0.5 || a.bottom <= b.y + 0.5 || b.bottom <= a.y + 0.5;
 
 function readable(charts: Awaited<ReturnType<typeof geometry>>) {
-  expect(charts.filter((chart) => chart.toolbar !== null)).toHaveLength(1);
   for (const [index, chart] of charts.entries()) {
     const pane = chart.panes[0];
     const volumePane = chart.panes[1];
@@ -114,7 +110,6 @@ function readable(charts: Awaited<ReturnType<typeof geometry>>) {
     const volumeBoxes = [...chart.volume.texts, ...chart.volume.commands];
     for (const box of [...priceBoxes, ...volumeBoxes]) expect.soft(disjoint(box, chart.timeAxis), `chart ${index + 1} text and controls clear time axis`).toBe(true);
     for (const priceBox of priceBoxes) for (const volumeBox of volumeBoxes) expect.soft(disjoint(priceBox, volumeBox), `chart ${index + 1} price and volume text and controls do not overlap`).toBe(true);
-    if (chart.toolbar) for (const box of [...Object.values(chart.rows).flatMap((row) => row.texts), ...chart.volume.texts, ...chart.volume.commands]) expect.soft(disjoint(box, chart.toolbar), `chart ${index + 1} toolbar clears text and controls`).toBe(true);
   }
 }
 
@@ -142,14 +137,14 @@ const storedDocuments = (scenario: Scenario) => JSON.stringify({ layout: scenari
 
 const storedPresentation = (scenario: Scenario) => JSON.stringify({ placement: scenario.documents.layout().placement, charts: scenario.documents.layout().windows.filter((window) => window.kind === "chart").map((window) => window.chartSettings), drawing: scenario.documents.uiPrefs().drawing });
 
-for (const pinned of [false, true]) test(`minimum canvas toolbar retains help, movement and ${pinned ? "full pinned tools" : "default tools"}`, async ({ page, scenario }, testInfo) => {
+for (const pinned of [false, true]) test(`short canvas rail retains help and ${pinned ? "folded pinned tools" : "default tools"} without touching saved state`, async ({ page, scenario }) => {
   const base = scenario.documents.layout();
   scenario.documents.saveLayout({ ...base, revision: base.revision + 1,
     windows: [{ id: "cell-0", kind: "chart", link: null, symbol: "005930", venue: "combined", period: "D", chartSettings: SETTINGS }],
     placement: { v: 1, dock: null, canvas: { rects: { "cell-0": { x: .02, y: .02, w: .28, h: .32 } }, order: ["cell-0"] } },
   });
   const state = scenario.documents.uiState();
-  scenario.documents.saveUiState({ ...state, layoutMode: "canvas", drawing: { ...scenario.documents.uiPrefs().drawing, pinnedTools: pinned ? TOOLS.map((tool) => tool.tool) : [], dockAt: null } });
+  scenario.documents.saveUiState({ ...state, layoutMode: "canvas", drawing: { ...scenario.documents.uiPrefs().drawing, pinnedTools: pinned ? TOOLS.map((tool) => tool.tool) : [] } });
   await page.addInitScript(installChartProbe);
   await page.setViewportSize({ width: 1024, height: 768 });
   await page.goto("/");
@@ -157,36 +152,22 @@ for (const pinned of [false, true]) test(`minimum canvas toolbar retains help, m
   await quietPresentation(page);
   const saved = storedPresentation(scenario);
   const documents = storedDocuments(scenario);
-  const dock = page.getByRole("navigation", { name: "드로잉 도구" });
-  const grip = dock.getByRole("button", { name: "드로잉 도구 막대 옮기기", exact: true });
+  const dock = await expandDock(page);
   const help = dock.getByRole("button", { name: "드로잉 단축키 도움말", exact: true });
-  await expandDock(page);
-  const boxes = await dock.evaluate((bar) => {
-    const style = getComputedStyle(bar);
-    const grip = bar.querySelector(".draw-grip");
-    const tools = [...bar.querySelectorAll(".draw-tool")];
-    if (!grip || tools.length === 0) throw new Error("도구와 손잡이가 없습니다");
-    return { toolbar: bar.getBoundingClientRect().toJSON(), grip: grip.getBoundingClientRect().toJSON(), tools: tools.map((tool) => tool.getBoundingClientRect().toJSON()), minimum: grip.getBoundingClientRect().width + Math.max(...tools.map((tool) => tool.getBoundingClientRect().width)) + parseFloat(style.columnGap) + parseFloat(style.paddingLeft) + parseFloat(style.paddingRight) + parseFloat(style.borderLeftWidth) + parseFloat(style.borderRightWidth) };
-  });
-  await writeFile(testInfo.outputPath("minimum-toolbar-rectangles.json"), JSON.stringify({ boxes, charts: await geometry(page) }, null, 2));
-  await page.screenshot({ path: testInfo.outputPath("minimum-canvas-chart.png") });
-  expect.soft(boxes.toolbar.width).toBeGreaterThanOrEqual(boxes.minimum);
-  const fullyActionable = async (button: ReturnType<typeof dock.getByRole>) => {
-    await button.scrollIntoViewIfNeeded();
+  const fullyInside = async (button: ReturnType<typeof dock.getByRole>) => {
     await expect.poll(() => button.evaluate((element) => {
       const bar = element.closest("nav")?.getBoundingClientRect();
       const box = element.getBoundingClientRect();
-      return bar !== undefined && box.left >= bar.left && box.right <= bar.right && box.top >= bar.top && box.bottom <= bar.bottom && [[box.left + 1, box.top + box.height / 2], [box.right - 1, box.top + box.height / 2], [box.left + box.width / 2, box.top + 1], [box.left + box.width / 2, box.bottom - 1]].every(([x, y]) => x !== undefined && y !== undefined && element.contains(document.elementFromPoint(x, y)));
+      return bar !== undefined && box.left >= bar.left && box.right <= bar.right && box.top >= bar.top && box.bottom <= bar.bottom && element.contains(document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2));
     })).toBe(true);
   };
-  await fullyActionable(help);
+  await fullyInside(help);
   await help.click();
   await expect(page.getByRole("dialog", { name: "드로잉 단축키", exact: true })).toBeVisible();
   await page.getByRole("button", { name: "도움말 닫기", exact: true }).click();
   if (pinned) {
     const folded = dock.getByRole("button", { name: "고정 도구 펼치기", exact: true });
-    await expandDock(page);
-    await fullyActionable(folded);
+    await fullyInside(folded);
     await folded.click();
     const last = TOOLS.at(-1);
     if (!last) throw new Error("고정 도구가 없습니다");
@@ -202,48 +183,18 @@ for (const pinned of [false, true]) test(`minimum canvas toolbar retains help, m
   await expect(cell(page)).toHaveAttribute("aria-label", "칸 1: 삼성전자 통합 일");
   await pollSaved(() => scenario.documents.uiState().venue).toBe("combined");
   await settle(page, 1);
-  await expandDock(page);
-  const afterVenue = storedPresentation(scenario);
-  const afterVenueDocuments = storedDocuments(scenario);
-  await fullyActionable(grip);
-  const home = await dock.boundingBox();
-  const handle = await grip.boundingBox();
-  if (!home || !handle) throw new Error("도구 막대가 없습니다");
-  const from = { x: handle.x + handle.width / 2, y: handle.y + handle.height / 2 };
-  await page.mouse.move(from.x, from.y);
-  await page.mouse.down();
-  await page.mouse.move(from.x + 1, from.y + 1);
-  await grip.dispatchEvent("pointercancel");
-  await page.mouse.up();
-  await settle(page, 1);
-  expect(await dock.boundingBox()).toEqual(home);
-  expect(storedPresentation(scenario)).toBe(afterVenue);
-  expect(storedDocuments(scenario)).toBe(afterVenueDocuments);
-  await page.mouse.move(from.x, from.y);
-  await page.mouse.down();
-  await page.mouse.move(from.x, from.y + 60, { steps: 8 });
-  await page.mouse.up();
-  await settle(page, 1);
-  await pollSaved(() => scenario.documents.uiPrefs().drawing.dockAt).not.toBeNull();
-  const moved = await dock.boundingBox();
-  const prefs = scenario.documents.uiPrefs().drawing;
-  await page.reload();
-  await settle(page, 1);
-  await expandDock(page);
-  expect(await dock.boundingBox()).toEqual(moved);
-  expect(scenario.documents.uiPrefs().drawing).toEqual(prefs);
-  await expandDock(page);
-  await fullyActionable(help);
+  await fullyInside(help);
   await help.click();
   await expect(page.getByRole("dialog", { name: "드로잉 단축키", exact: true })).toBeVisible();
 });
+
 
 async function quietPresentation(page: Page) {
   await page.mouse.move(0, 0);
   await expect.poll(() => page.evaluate(async () => {
     let mutations = 0;
     const observer = new MutationObserver((records) => { mutations += records.length; });
-    for (const host of document.querySelectorAll("[data-chart-overlay-host]")) observer.observe(host, { attributes: true, attributeFilter: ["data-legend-density", "data-legend-beside", "style"] });
+    for (const host of document.querySelectorAll("[data-chart-overlay-host]")) observer.observe(host, { attributes: true, attributeFilter: ["data-legend-density", "style"] });
     for (let n = 0; n < 12; n++) await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
     observer.disconnect();
     return mutations;
@@ -344,11 +295,11 @@ test("tall normal charts and repeated resize restore geometry and saved presenta
   await testInfo.attach("tall-normal", { path, contentType: "image/png" });
 });
 
-test("full pinned toolbar restores normal capacity, focus, scroll and saved state after compact resize", async ({ page, scenario }) => {
+test("full pinned rail restores its capacity and saved state after a short resize", async ({ page, scenario }) => {
   await page.addInitScript(installChartProbe);
   seed(scenario);
   const state = scenario.documents.uiState();
-  scenario.documents.saveUiState({ ...state, drawing: { ...scenario.documents.uiPrefs().drawing, pinnedTools: TOOLS.map((tool) => tool.tool), dockAt: null }, revision: state.revision + 1 });
+  scenario.documents.saveUiState({ ...state, drawing: { ...scenario.documents.uiPrefs().drawing, pinnedTools: TOOLS.map((tool) => tool.tool) }, revision: state.revision + 1 });
   await page.setViewportSize({ width: 1440, height: 1600 });
   await page.goto("/");
   await settle(page, 4);
@@ -366,19 +317,8 @@ test("full pinned toolbar restores normal capacity, focus, scroll and saved stat
     await quietPresentation(page);
     readable(await geometry(page));
     expect(await dock.locator(".draw-pinned [data-active-tool]").count()).toBeLessThan(capacity);
-    await expandDock(page);
     const help = dock.getByRole("button", { name: "드로잉 단축키 도움말", exact: true });
-    await help.scrollIntoViewIfNeeded();
-    await help.focus();
-    await expect(help).toBeFocused();
-    const scroll = await dock.evaluate((element) => element.scrollLeft);
-    expect(scroll).toBeGreaterThan(0);
-    await page.evaluate(() => document.fonts.dispatchEvent(new Event("loadingdone")));
-    await quietPresentation(page);
-    await expect(help).toBeFocused();
-    expect(await dock.evaluate((element) => element.scrollLeft)).toBe(scroll);
-    await help.blur();
-    await expect(dock.locator(".draw-pill")).toHaveAttribute("aria-expanded", "false");
+    await expect(help).toBeVisible();
     await page.setViewportSize({ width: 1440, height: 1600 });
     await settle(page, 4);
     await quietPresentation(page);
@@ -389,170 +329,39 @@ test("full pinned toolbar restores normal capacity, focus, scroll and saved stat
   }
 });
 
-test("saved moved toolbar retains coordinate meaning through compact resize and restore", async ({ page, scenario }) => {
-  await page.addInitScript(installChartProbe);
-  seed(scenario);
-  const state = scenario.documents.uiState();
-  scenario.documents.saveUiState({ ...state, drawing: { ...scenario.documents.uiPrefs().drawing, dockAt: { x: 0.6, y: 0.5 } }, revision: state.revision + 1 });
-  await page.setViewportSize({ width: 1440, height: 900 });
-  await page.goto("/");
-  await settle(page, 4);
-  await quietPresentation(page);
-  const dock = page.getByRole("navigation", { name: "드로잉 도구" });
-  await expect(dock).toHaveAttribute("data-moved", "true");
-  const normal = await dock.boundingBox();
-  const saved = storedPresentation(scenario);
-  const documents = storedDocuments(scenario);
-  const coordinateMeaning = () => dock.evaluate((bar) => {
-    const area = bar.parentElement?.getBoundingClientRect();
-    const box = bar.getBoundingClientRect();
-    if (!area) throw new Error("도구 막대 영역이 없습니다");
-    return { left: box.left - area.left, top: box.top - area.top, expectedLeft: Math.max(8, Math.min(0.6 * area.width - box.width / 2, area.width - box.width - 8)), expectedTop: Math.max(8, Math.min(0.5 * area.height, area.height - box.height - 8)) };
-  });
-  for (const size of [...SIZES, SIZES[0]]) {
-    if (!size) throw new Error("화면 크기가 없습니다");
-    await page.setViewportSize(size);
-    await settle(page, 4);
-    await quietPresentation(page);
-    const spot = await coordinateMeaning();
-    expect(spot.left).toBeCloseTo(spot.expectedLeft, 0);
-    expect(spot.top).toBeCloseTo(spot.expectedTop, 0);
-    expect(storedPresentation(scenario)).toBe(saved);
-    expect(storedDocuments(scenario)).toBe(documents);
-  }
-  expect(await dock.boundingBox()).toEqual(normal);
-});
-
-for (const medium of [false, true]) test(medium ? "medium height toolbar drag, cancel, snap and keyboard nudge retain the current home" : "compact toolbar drag, cancel, snap and keyboard nudge retain the current home", async ({ page, scenario }, testInfo) => {
-  await page.addInitScript(installChartProbe);
-  const count = medium ? 1 : 4;
-  seed(scenario, count);
-  if (medium) {
-    const base = scenario.documents.layout();
-    scenario.documents.saveLayout({ ...base, windows: base.windows.filter((window) => window.kind === "chart"), placement: { v: 1, dock: null, canvas: { rects: { "cell-0": { x: .02, y: .02, w: .65, h: .38 } }, order: ["cell-0"] } } });
-    scenario.documents.saveUiState({ ...scenario.documents.uiState(), layoutMode: "canvas" });
-  }
-  await page.setViewportSize({ width: 1024, height: 768 });
-  await page.goto("/");
-  await settle(page, count);
-  await quietPresentation(page);
-  const dock = page.getByRole("navigation", { name: "드로잉 도구" });
-  const grip = dock.getByRole("button", { name: "드로잉 도구 막대 옮기기", exact: true });
-  await expandDock(page);
-  const box = await dock.boundingBox();
-  const handle = await grip.boundingBox();
-  if (!box || !handle) throw new Error("도구 막대가 없습니다");
-  const from = { x: handle.x + handle.width / 2, y: handle.y + handle.height / 2 };
-  const saved = storedPresentation(scenario);
-  await page.mouse.move(from.x, from.y);
-  await page.mouse.down();
-  await page.mouse.move(from.x + 1, from.y + 1);
-  await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
-  const during = await dock.boundingBox();
-  await writeFile(testInfo.outputPath("compact-drag-rectangles.json"), JSON.stringify({ before: box, during }, null, 2));
-  if (!during) throw new Error("끄는 도구 막대가 없습니다");
-  expect.soft(during.width).toBe(box.width);
-  expect.soft(during.x).toBeCloseTo(box.x + 1, 0);
-  expect.soft(during.y).toBeCloseTo(box.y + 1, 0);
-  await grip.dispatchEvent("pointercancel");
-  await page.mouse.up();
-  await settle(page, count);
-  expect(await dock.boundingBox()).toEqual(box);
-  expect(storedPresentation(scenario)).toBe(saved);
-  await page.mouse.move(from.x, from.y);
-  await page.mouse.down();
-  await page.mouse.move(from.x + 5, from.y + 5);
-  await page.mouse.up();
-  await settle(page, count);
-  await expect(dock).not.toHaveAttribute("data-moved");
-  expect(await dock.boundingBox()).toEqual(box);
-  expect(storedPresentation(scenario)).toBe(saved);
-  await grip.focus();
-  await page.keyboard.press("ArrowRight");
-  await settle(page, count);
-  const nudged = await dock.boundingBox();
-  if (!nudged) throw new Error("옮긴 도구 막대가 없습니다");
-  expect(nudged.x).toBeCloseTo(box.x + 16, 0);
-  await page.keyboard.press("Home");
-  await settle(page, count);
-  expect(await dock.boundingBox()).toEqual(box);
-  await pollSaved(() => scenario.documents.uiPrefs().drawing.dockAt).toBeNull();
-  await page.mouse.move(from.x, from.y);
-  await page.mouse.down();
-  await page.mouse.move(from.x - 100, from.y + 20, { steps: 8 });
-  await page.mouse.up();
-  await settle(page, count);
-  const persisted = await dock.boundingBox();
-  await pollSaved(() => scenario.documents.uiPrefs().drawing.dockAt).not.toBeNull();
-  const prefs = scenario.documents.uiPrefs().drawing;
-  expect(prefs.dockAt).not.toBeNull();
-  await page.reload();
-  await settle(page, count);
-  await expandDock(page);
-  expect(await dock.boundingBox()).toEqual(persisted);
-  expect(scenario.documents.uiPrefs().drawing).toEqual(prefs);
-  const movedHandle = await grip.boundingBox();
-  if (!movedHandle) throw new Error("옮긴 도구 손잡이가 없습니다");
-  await page.mouse.move(movedHandle.x + movedHandle.width / 2, movedHandle.y + movedHandle.height / 2);
-  await page.mouse.down();
-  await page.mouse.move(from.x, from.y, { steps: 8 });
-  await page.mouse.up();
-  await settle(page, count);
-  expect(await dock.boundingBox()).toEqual(box);
-  await pollSaved(() => scenario.documents.uiPrefs().drawing.dockAt).toBeNull();
-});
-
-test("native pinned boundary keeps stable frames and real help", async ({ page, scenario }, testInfo) => {
+test("rail fold boundary keeps stable frames and real help", async ({ page, scenario }, testInfo) => {
   await page.addInitScript(installChartProbe);
   seed(scenario, 1);
   const base = scenario.documents.layout();
   scenario.documents.saveLayout({ ...base, windows: base.windows.filter((window) => window.kind === "chart"), placement: { v: 1, dock: null, canvas: { rects: { "cell-0": { x: .02, y: .02, w: .5, h: .38 } }, order: ["cell-0"] } } });
-  scenario.documents.saveUiState({ ...scenario.documents.uiState(), layoutMode: "canvas", drawing: { ...scenario.documents.uiPrefs().drawing, pinnedTools: TOOLS.map((tool) => tool.tool), dockAt: null } });
+  scenario.documents.saveUiState({ ...scenario.documents.uiState(), layoutMode: "canvas", drawing: { ...scenario.documents.uiPrefs().drawing, pinnedTools: TOOLS.map((tool) => tool.tool) } });
   await page.setViewportSize({ width: 1015, height: 768 });
   await page.goto("/");
   await settle(page, 1);
   const dock = page.getByRole("navigation", { name: "드로잉 도구" });
   const folded = dock.getByRole("button", { name: "고정 도구 펼치기", exact: true });
   await expandDock(page);
-  await folded.scrollIntoViewIfNeeded();
-  const foldedBox = await folded.boundingBox();
   await folded.click();
   await expect(page.getByRole("menu", { name: "고정 도구", exact: true })).toBeVisible();
   await page.keyboard.press("Escape");
-  await page.setViewportSize({ width: 1016, height: 768 });
-  const frames = await page.evaluate(async () => {
-    const frames = [];
-    for (let i = 0; i < 60; i++) {
-      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
-      const bar = document.querySelector<HTMLElement>(".drawing-toolbar");
-      const host = bar?.parentElement;
-      frames.push({ toolbar: bar?.getBoundingClientRect().toJSON(), density: host?.dataset.legendDensity, capacity: host?.style.getPropertyValue("--legend-dock-width"), ohlc: host?.querySelector("[data-ohlc]")?.textContent });
-    }
-    return frames;
-  });
-  await writeFile(testInfo.outputPath("minimal-frames.json"), JSON.stringify({ foldedBox, frames }, null, 2));
-  await page.screenshot({ path: testInfo.outputPath("minimal.png") });
-  expect.soft(new Set(frames.slice(15).map((frame) => JSON.stringify(frame.toolbar))).size).toBe(1);
-  await expandDock(page);
-  const help = dock.getByRole("button", { name: "드로잉 단축키 도움말", exact: true });
-  await help.scrollIntoViewIfNeeded();
-  await help.click();
-  await expect(page.getByRole("dialog", { name: "드로잉 단축키", exact: true })).toBeVisible();
-  await page.getByRole("button", { name: "도움말 닫기", exact: true }).click();
-  await expandDock(page);
   const repeated = [];
-  for (const width of [1015, 1016, 1024, 1016]) {
-    await page.setViewportSize({ width, height: 768 });
+  for (const height of [768, 769, 800, 769]) {
+    await page.setViewportSize({ width: 1015, height });
     const frames = await page.evaluate(async () => {
       const samples = [];
       for (let i = 0; i < 60; i++) {
         await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
-        samples.push(document.querySelector(".drawing-toolbar")?.getBoundingClientRect().toJSON());
+        samples.push({ rail: document.querySelector(".drawing-toolbar")?.getBoundingClientRect().toJSON(), pinned: document.querySelectorAll(".drawing-toolbar .draw-pinned [data-active-tool]").length });
       }
       return samples;
     });
     expect(new Set(frames.slice(15).map((frame) => JSON.stringify(frame))).size).toBe(1);
-    repeated.push({ width, frames });
+    repeated.push({ height, frames });
   }
-  await writeFile(testInfo.outputPath("repeated-native-frames.json"), JSON.stringify(repeated, null, 2));
+  await writeFile(testInfo.outputPath("repeated-rail-frames.json"), JSON.stringify(repeated, null, 2));
+  const help = dock.getByRole("button", { name: "드로잉 단축키 도움말", exact: true });
+  await help.click();
+  await expect(page.getByRole("dialog", { name: "드로잉 단축키", exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "도움말 닫기", exact: true }).click();
 });
+

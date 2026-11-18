@@ -200,7 +200,6 @@ test("날짜·가격 범위, 기준봉 VWAP, 구간 거래량 프로파일을 �
   const shot = () => page.screenshot({ clip: pane, mask: [page.getByRole("navigation", { name: "드로잉 도구" }), cell(page).locator(".chart-legend")] });
   await expect.poll(() => textsOf(page, profile.id)).toEqual([expect.stringMatching(/^\d+분봉 기준$/)]);
   await page.mouse.move(5, 5);
-  await expect(drawingDock(page).locator(".draw-pill")).toHaveAttribute("aria-expanded", "false");
   let lastDock = "";
   await expect.poll(async () => {
     const now = JSON.stringify(await drawingDock(page).boundingBox());

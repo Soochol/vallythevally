@@ -68,24 +68,10 @@ test("legend samples current inputs, skips duplicate geometry and retains conten
     legend.setNotice(null);
     await frames();
     result.push(counts());
-    const toolbar = document.querySelector<HTMLElement>(".drawing-toolbar");
-    if (!toolbar) throw new Error("도구 막대가 없습니다");
-    const normal = toolbar.dataset.dockNormal;
-    toolbar.dataset.dockNormal = "invalid";
-    await frames();
-    const invalid = legend.presentation.kind;
-    result.push(counts());
-    legend.fit("geometry");
-    await frames();
-    result.push(counts());
-    if (normal === undefined) delete toolbar.dataset.dockNormal;
-    else toolbar.dataset.dockNormal = normal;
-    await frames();
-    const recovered = legend.presentation.kind;
     legend.presentationHost.readViewport = original;
     legend.fit("geometry");
     await frames();
-    return { result, invalid, recovered };
+    return { result };
   });
   const delta = (first: number, last: number) => {
     const before = phases.result[first];
@@ -94,11 +80,9 @@ test("legend samples current inputs, skips duplicate geometry and retains conten
     return { checks: after.checks - before.checks, projections: after.projections - before.projections };
   };
   expect(delta(0, 1)).toEqual({ checks: 1, projections: 0 });
-  for (const [first, last] of [[1, 2], [2, 3], [4, 5], [5, 6], [7, 8], [9, 10]] satisfies [number, number][]) expect(delta(first, last).projections).toBe(1);
+  for (const [first, last] of [[1, 2], [2, 3], [4, 5], [5, 6], [7, 8]] satisfies [number, number][]) expect(delta(first, last).projections).toBe(1);
   expect(delta(3, 4)).toEqual({ checks: 1, projections: 0 });
   expect(delta(6, 7)).toEqual({ checks: 0, projections: 0 });
-  expect(phases.invalid).toBe("invalidated");
-  expect(phases.recovered).toBe("settled");
   const fonts = await page.evaluate(async () => {
     const probe = window.legendGeometryProbe;
     const family = getComputedStyle(document.body).fontFamily;

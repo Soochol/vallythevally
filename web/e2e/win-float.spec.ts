@@ -159,7 +159,7 @@ test("Shift 전환은 포인터가 멈춰 있어도 미리 보기를 바꾸며 �
   await expect(tab(page, "스크리너")).toBeVisible();
 });
 
-test("띄운 차트는 같은 노드·봉·드로잉·구독을 유지하고 활성 칸과 도구 막대가 창을 따른다", async ({ page, scenario }) => {
+test("띄운 차트는 같은 노드·봉·드로잉·구독을 유지하고 활성 칸이 창을 따르고 도구 막대는 창 밖에 그대로 있다", async ({ page, scenario }) => {
   twoCharts(scenario);
   const drawingId = "01900000-0000-7000-8000-0000000000d1";
   scenario.documents.saveDrawing({ id: drawingId, symbol: "000660", tool: "hline", points: [{ t: NOV9, price: 100000 }], style: {}, text: null, locked: false, hidden: false, periods: null, z: 1, group: null, scope: { kind: "cell", layoutId: DEFAULT_LAYOUT_ID, windowId: "cell-1" }, revision: 1 });
@@ -179,11 +179,10 @@ test("띄운 차트는 같은 노드·봉·드로잉·구독을 유지하고 활
   await expect(chartOf(cell(page, 2)).locator(".drawing-mirror")).toHaveAttribute("data-drawings", new RegExp(drawingId));
   await head(page, "cell-1").click({ position: { x: 60, y: 17 } });
   await expect(frame(page, "cell-1")).toHaveAttribute("data-active-cell", "");
-  const toolbar = await boxOf(frame(page, "cell-1").getByRole("navigation", { name: "드로잉 도구" }));
+  await expect(frame(page, "cell-1").getByRole("navigation", { name: "드로잉 도구" })).toHaveCount(0);
+  const toolbar = await boxOf(page.getByRole("navigation", { name: "드로잉 도구" }));
   const floated = await boxOf(frame(page, "cell-1"));
-  expect(toolbar.x).toBeGreaterThanOrEqual(floated.x);
-  expect(toolbar.x + toolbar.width).toBeLessThanOrEqual(floated.x + floated.width + 1);
-  expect(toolbar.y).toBeGreaterThan(floated.y);
+  expect(toolbar.x + toolbar.width).toBeLessThanOrEqual(floated.x);
   await shiftMove(page, "cell-1", 250 - floated.x, 160 - floated.y);
   const visible = await boxOf(frame(page, "cell-1"));
   expect(visible.y + visible.height).toBeLessThan((await boxOf(area(page))).y + (await boxOf(area(page))).height);

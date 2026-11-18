@@ -1,7 +1,6 @@
-import type { BrowserContext, Locator, Page } from "@playwright/test";
+import type { BrowserContext, Page } from "@playwright/test";
 import { cell, chartOf, expect, test, type Scenario } from "./harness";
 import { TOOLS } from "../src/chart/drawings/tools";
-import { expandDock } from "./drawing-probe";
 
 test.use({ clockStart: "20261109100030" });
 
@@ -13,7 +12,7 @@ const SYMBOLS = ["005930", "IDX:001"];
 
 const unsavedKeys = (page: Page) => page.evaluate(() => Object.keys(localStorage).filter((key) => key.startsWith("vv.unsaved.")));
 
-async function load(context: BrowserContext, scenario: Scenario, width: number, symbol: string, pinned: readonly string[]): Promise<Page> {
+async function load(context: BrowserContext, scenario: Scenario, height: number, symbol: string, pinned: readonly string[]): Promise<Page> {
   for (const open of context.pages()) {
     await expect.poll(() => unsavedKeys(open)).toEqual([]);
     await open.close();
@@ -21,7 +20,7 @@ async function load(context: BrowserContext, scenario: Scenario, width: number, 
   const state = scenario.documents.uiState();
   scenario.documents.saveUiState({ ...state, drawing: { ...scenario.documents.uiPrefs().drawing, pinnedTools: pinned }, revision: state.revision + 1 });
   const page = await context.newPage();
-  await page.setViewportSize({ width, height: 900 });
+  await page.setViewportSize({ width: 1440, height });
   await page.goto(`/?symbol=${symbol}`);
   await expect(cell(page)).toHaveAttribute("aria-busy", "false");
   await settled(page);
@@ -49,52 +48,31 @@ async function settled(page: Page) {
   }).toBe(true);
 }
 
-async function resizedFrame(page: Page, width: number, menu: Locator, anchor: Locator) {
-  const lefts = await page.evaluateHandle(([menu, anchor, width]) => ({
-    painted: new Promise<{ menu: number; anchor: number }>((resolve) => {
-      const observer = new ResizeObserver(() => {
-        if (innerWidth !== width) return;
-        observer.disconnect();
-        resolve({ menu: Math.round(menu.getBoundingClientRect().left), anchor: Math.round(anchor.getBoundingClientRect().left) });
-      });
-      observer.observe(document.documentElement);
-    }),
-  }), [await menu.elementHandle(), await anchor.elementHandle(), width] as const);
-  await page.setViewportSize({ width, height: 900 });
-  return lefts.evaluate((frame) => frame.painted);
-}
-
 const startsWith = (text: string) => new RegExp(`^${text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`);
 const meets = (a: Box, b: Box) => a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom;
 
-for (const symbol of SYMBOLS) for (const width of [1440, 1280, 1024]) {
-  test(`고정 도구: ${symbol} 창 폭 ${width}px에서 고정 도구 ${PINNED_COUNTS.join("·")}개는 범례를 밀거나 가리지 않고 넘치지 않으며 모두 고를 수 있다`, async ({ context, scenario }) => {
-    const before = await legendRows(await load(context, scenario, width, symbol, []));
+for (const symbol of SYMBOLS) for (const height of [900, 768, 700]) {
+  test(`고정 도구: ${symbol} 창 높이 ${height}px에서 고정 도구 ${PINNED_COUNTS.join("·")}개는 범례를 밀거나 가리지 않고 넘치지 않으며 모두 고를 수 있다`, async ({ context, scenario }) => {
+    const before = await legendRows(await load(context, scenario, height, symbol, []));
     for (const count of PINNED_COUNTS) {
       const pinned = TOOLS.slice(0, count);
-      const page = await load(context, scenario, width, symbol, pinned.map((t) => t.tool));
+      const page = await load(context, scenario, height, symbol, pinned.map((t) => t.tool));
       const label = `고정 ${count}개`;
       expect(await legendRows(page), `${label}: 범례 위치`).toEqual(before);
-      const pill = (await dock(page).boundingBox())!;
-      const pillBox = { left: pill.x, top: pill.y, right: pill.x + pill.width, bottom: pill.y + pill.height };
-      for (const row of await legendRows(page)) expect(meets(pillBox, row), `${label}: 접힌 알약과 범례 줄 겹침`).toBe(false);
-      await expandDock(page);
-      expect(await legendRows(page), `${label}: 펼친 뒤 범례 위치`).toEqual(before);
       const bar = (await dock(page).boundingBox())!;
       const barBox = { left: bar.x, top: bar.y, right: bar.x + bar.width, bottom: bar.y + bar.height };
-      expect(await dock(page).evaluate((el) => el.scrollWidth - el.clientWidth), `${label}: 도구 막대 넘침`).toBe(0);
+      for (const row of await legendRows(page)) expect(meets(barBox, row), `${label}: 막대와 범례 줄 겹침`).toBe(false);
+      expect(await dock(page).evaluate((el) => [el.scrollWidth - el.clientWidth, el.scrollHeight - el.clientHeight]), `${label}: 도구 막대 넘침`).toEqual([0, 0]);
       const chart = (await chartOf(cell(page)).boundingBox())!;
-      expect(barBox.left, label).toBeGreaterThanOrEqual(chart.x);
-      const axis = (await cell(page).getByRole("combobox", { name: "가격축 방식" }).boundingBox())!;
-      expect(barBox.right, `${label}: 가격축 쪽 끝`).toBeLessThanOrEqual(axis.x + axis.width);
+      expect(barBox.right, label).toBeLessThanOrEqual(chart.x);
 
       const shown = dock(page).getByRole("button", { name: /고정 도구$/ });
       const inline = await shown.count();
       expect(inline, `${label}: 막대에 보이는 고정 도구`).toBeGreaterThanOrEqual(1);
       for (let i = 0; i < inline; i++) {
         const own = (await shown.nth(i).boundingBox())!;
-        expect(own.x, label).toBeGreaterThanOrEqual(barBox.left);
-        expect(own.x + own.width, label).toBeLessThanOrEqual(barBox.right);
+        expect(own.y, label).toBeGreaterThanOrEqual(barBox.top);
+        expect(own.y + own.height, label).toBeLessThanOrEqual(barBox.bottom);
       }
       await expect(shown.first()).toHaveAccessibleName(`${pinned[0]!.label} 고정 도구`);
       const folded = pinned.slice(inline);
@@ -113,9 +91,8 @@ for (const symbol of SYMBOLS) for (const width of [1440, 1280, 1024]) {
   });
 }
 
-test("고정 도구: 접힌 메뉴는 첫 도구에 포커스를 두고 별표 없이 열리며, 창 폭이 바뀌어도 메뉴가 점 아래에 머문다", async ({ context, scenario }) => {
-  const page = await load(context, scenario, 1100, "005930", TOOLS.slice(0, 14).map((t) => t.tool));
-  await expandDock(page);
+test("고정 도구: 접힌 메뉴는 첫 도구에 포커스를 두고 별표 없이 막대 오른쪽으로 열리며, 창 높이가 바뀌어도 막대 오른쪽에 머문다", async ({ context, scenario }) => {
+  const page = await load(context, scenario, 900, "005930", TOOLS.slice(0, 14).map((t) => t.tool));
   const dot = dock(page).getByRole("button", { name: "고정 도구 펼치기", exact: true });
   await dot.focus();
   await page.keyboard.press("Enter");
@@ -123,13 +100,12 @@ test("고정 도구: 접힌 메뉴는 첫 도구에 포커스를 두고 별표 �
   await expect(menu.getByRole("menuitem").first()).toBeFocused();
   await expect(menu.getByRole("menuitemcheckbox")).toHaveCount(0);
   expect(new Set(await menu.getByRole("menuitem").evaluateAll((items) => items.map((item) => Math.round(item.querySelector("svg")!.getBoundingClientRect().left)))).size, "접힌 메뉴의 아이콘 왼쪽 끝").toBe(1);
-  const leftOf = (box: { x: number } | null) => Math.round(box!.x);
-  await expect.poll(async () => leftOf(await menu.boundingBox())).toBe(leftOf(await dot.boundingBox()));
-  const narrowed = await resizedFrame(page, 1024, menu, dot);
-  expect(narrowed.menu, "창 폭을 줄인 프레임의 접힌 메뉴").toBe(narrowed.anchor);
-  await expect.poll(async () => leftOf(await menu.boundingBox()) - leftOf(await dot.boundingBox())).toBe(0);
+  const besideRail = async () => { const rail = (await dock(page).boundingBox())!; const open = (await menu.boundingBox())!; return open.x >= rail.x + rail.width - 1; };
+  await expect.poll(besideRail).toBe(true);
+  await page.setViewportSize({ width: 1440, height: 700 });
+  await expect(menu).toBeVisible();
+  await expect.poll(besideRail).toBe(true);
   await page.keyboard.press("Escape");
-  await expandDock(page);
   const group = dock(page).getByRole("button", { name: "선 도구 펼치기", exact: true });
   await group.click();
   const lines = page.getByRole("menu", { name: "선 도구", exact: true });
@@ -137,7 +113,7 @@ test("고정 도구: 접힌 메뉴는 첫 도구에 포커스를 두고 별표 �
   const starred = await star.isChecked();
   await star.click();
   await expect(star).toBeChecked({ checked: !starred });
-  const widened = await resizedFrame(page, 1100, lines, group);
-  expect(widened.menu, "창 폭을 늘린 프레임의 선 도구 메뉴").toBe(widened.anchor);
-  await expect.poll(async () => leftOf(await lines.boundingBox()) - leftOf(await group.boundingBox())).toBe(0);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  const rail = (await dock(page).boundingBox())!;
+  await expect.poll(async () => (await lines.boundingBox())!.x >= rail.x + rail.width - 1).toBe(true);
 });

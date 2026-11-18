@@ -4,7 +4,6 @@ import { Icon, DRAWING_ICONS, CopyIcon, MoreIcon } from "../icons";
 import { useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
 import { drawingColor } from "../../chart/drawings/DrawingLayer";
-import { HANDLE_HIT_PX } from "../../chart/drawings/geometry";
 import { ColorPicker } from "../color/ColorPicker";
 import { surfaceFor } from "../../chart/drawings/DrawingSurface";
 import { drawingSync, useDrawingVersion } from "../../chart/drawings/sync";
@@ -19,8 +18,6 @@ import { DashInput, WidthInput } from "./StyleFields";
 import { drawingMenu } from "./menus";
 import { DrawingDetails, DrawingTextEditor } from "./DrawingDetails";
 import type { WindowId } from "../../layout/kinds";
-import { OVERLAY_GAP } from "../overlay/position";
-import { avoidDock, type Edges } from "./dockSpot";
 
 
 export function DrawingOverlay({ cellId }: { cellId: WindowId }) {
@@ -39,16 +36,6 @@ export function DrawingOverlay({ cellId }: { cellId: WindowId }) {
     {cell.editor?.kind === "text" && <DrawingTextEditor cellId={cellId} editor={cell.editor} />}
   </div>;
 }
-
-function dockBox(bar: HTMLElement | null): (Edges & { moved: boolean }) | null {
-  const dock = bar?.closest("[role=tabpanel]")?.querySelector<HTMLElement>(".drawing-toolbar");
-  const overlay = bar?.parentElement;
-  if (!dock?.offsetParent || !overlay) return null;
-  const own = dock.getBoundingClientRect(); const origin = overlay.getBoundingClientRect();
-  return { moved: dock.hasAttribute("data-moved"), left: own.left - origin.left, top: own.top - origin.top, right: own.right - origin.left, bottom: own.bottom - origin.top };
-}
-
-const DOCK_CLEARANCE = 8;
 
 function FloatingBar({ cellId }: { cellId: WindowId }) {
   const surface = surfaceFor(cellId)!; const cell = useDrawingSession((s) => cellDrawing(s, cellId));
@@ -78,20 +65,13 @@ function FloatingBar({ cellId }: { cellId: WindowId }) {
       const left = Math.max(8, Math.min(saved?.x ?? (bounds ? (bounds.x1 + bounds.x2 - w) / 2 : 20), pane.width - w - 8));
       const above = bounds ? bounds.y1 - h - 14 : 60;
       const below = (bounds?.y2 ?? 60) + 14;
-      const dock = dockBox(root.current);
       const lowest = pane.height - h - 8;
-      const top = Math.max(48, (dock?.bottom ?? 0) + 8);
-      const avoided = !saved && dock?.moved ? avoidDock(left, [above + OVERLAY_GAP, below + OVERLAY_GAP], { width: w, height: h }, pane, dock, {
-        bounds: bounds && { left: bounds.x1 - HANDLE_HIT_PX, top: bounds.y1 - HANDLE_HIT_PX, right: bounds.x2 + HANDLE_HIT_PX, bottom: bounds.y2 + HANDLE_HIT_PX },
-        handles: frame.items.flatMap((item) => item.handles).map(({ x, y }) => ({ left: x - HANDLE_HIT_PX, top: y - HANDLE_HIT_PX, right: x + HANDLE_HIT_PX, bottom: y + HANDLE_HIT_PX })),
-      }, DOCK_CLEARANCE, 8) : null;
-      const x = avoided?.left ?? left;
-      const y = avoided ? avoided.top - OVERLAY_GAP
-        : saved ? Math.max(8, Math.min(saved.y, lowest))
+      const top = 48;
+      const y = saved ? Math.max(8, Math.min(saved.y, lowest))
         : Math.max(top, Math.min(Math.max(top, above < top ? below : above), lowest));
-      const last = lastSpot.current; lastSpot.current = { x, y };
-      setPosition((old) => old && Math.abs(old.x - x) < 0.5 && Math.abs(old.y - y) < 0.5 ? old : { x, y });
-      if (last && Math.abs(last.x - x) < 0.5 && Math.abs(last.y - y) < 0.5) setShown(true);
+      const last = lastSpot.current; lastSpot.current = { x: left, y };
+      setPosition((old) => old && Math.abs(old.x - left) < 0.5 && Math.abs(old.y - y) < 0.5 ? old : { x: left, y });
+      if (last && Math.abs(last.x - left) < 0.5 && Math.abs(last.y - y) < 0.5) setShown(true);
     };
     follow(); return () => cancelAnimationFrame(raf);
   }, [surface, cellId]);
