@@ -165,6 +165,11 @@ impl Config {
         Config::from_vars(file, process, default_lock_path, default_token_path, default_kiwoom_key_path, default_account_state_path)
     }
 
+    pub fn from_values(vars: BTreeMap<String, String>) -> Result<(Config, ConfigWarnings), ConfigError> {
+        let missing = |key: &'static str| move || Err(ConfigError(format!("{key}를 적어야 합니다")));
+        Config::from_vars(BTreeMap::new(), vars, missing("VALLY_LOCK_PATH"), missing("VALLY_TOKEN_PATH"), missing("VALLY_KIWOOM_KEY_PATH"), missing("VALLY_ACCOUNT_STATE_PATH"))
+    }
+
     /// 파일 값 위에 프로세스 값을 덮어 설정을 만든다.
     fn from_vars(
         file: BTreeMap<String, String>,
