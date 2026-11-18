@@ -496,6 +496,26 @@ test("복제는 연동 색을 옮긴 새 창을 같은 묶음의 그 탭 바로 
   expect(state().layout.windows.some((w) => w.id === "order-2")).toBe(false);
 });
 
+test("새 순위 창은 앱 전체 거래소와 거래대금·시장 전체·ETF·ETN 빼기 켬으로 시작하고 복제는 설정까지 옮긴다", () => {
+  try {
+    useUiStore.getState().setVenue("nxt");
+    const id = state().openWindow("ranking");
+    expect(id).toBe("ranking");
+    const expected = { kind: "tradeAmount", market: "all", venue: "nxt", excludes: { etfEtn: true, preferred: false }, excludeManaged: false };
+    expect(state().layout.windows.find((w) => w.id === id)).toEqual({ id: "ranking", link: null, kind: "ranking", ranking: expected });
+    expect(state().openWindow("ranking")).toBe("ranking-2");
+    state().setLink(windowId("ranking"), "a");
+    const copy = state().duplicateWindow(windowId("ranking"));
+    expect(copy).toBe("ranking-3");
+    expect(state().layout.windows.find((w) => w.id === copy)).toEqual({ id: "ranking-3", link: "a", kind: "ranking", ranking: expected });
+    useUiStore.getState().setVenue("combined");
+    state().openWindow("ranking");
+    expect(state().layout.windows.find((w) => w.id === "ranking-4")).toMatchObject({ ranking: { venue: "combined" } });
+  } finally {
+    useUiStore.getState().setVenue("combined");
+  }
+});
+
 test("창별 상태 setter 셋은 그 종류의 창에만 값을 쓰고 null이면 값을 지운다", () => {
   state().openWindow("watchlist");
   state().openWindow("trades");

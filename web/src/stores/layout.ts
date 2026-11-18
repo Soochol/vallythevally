@@ -4,6 +4,7 @@ import type { LayoutWindow } from "../api/generated/LayoutWindow";
 import type { CrosshairScope } from "../api/generated/CrosshairScope";
 import type { LinkColor } from "../api/generated/LinkColor";
 import type { Period } from "../api/generated/Period";
+import type { Ranking } from "../api/generated/Ranking";
 import type { Venue } from "../api/generated/Venue";
 import type { IndicatorSpec, Placement as IndicatorPlacement } from "../chart/indicators/kinds";
 import type { SymbolInfo } from "../api/generated/SymbolInfo";
@@ -17,6 +18,7 @@ import { fitDock, type WindowList } from "../layout/dock/fit";
 import type { Size } from "../layout/dock/geometry";
 import { placeBeside } from "../layout/dock/split";
 import { findGroup, groupOfWindow, putTab, selectTab } from "../layout/dock/tree";
+import { defaultRanking } from "../layout/ranking";
 import { MAX_WINDOWS, windowId, WINDOW_KINDS, type WindowId, type WindowKind, type WindowRef } from "../layout/kinds";
 import type { CanvasPlacement, DockPlacement, Placement } from "../layout/placement";
 import { toward } from "../lib/josa";
@@ -33,12 +35,15 @@ export type ScreenerWindowState = { id: WindowId; link: LinkColor | null; kind: 
 export type PinnableKind = "trades" | "book" | "program" | "brokers";
 export type PinnableWindowState = { id: WindowId; link: LinkColor | null; kind: PinnableKind; symbol?: SymbolCode };
 export type OrderWindowState = { id: WindowId; link: LinkColor | null; kind: "order"; venue: Venue; symbol?: SymbolCode };
-export type OtherWindowState = { id: WindowId; link: LinkColor | null; kind: "indicators" } | WatchlistWindowState | ScreenerWindowState | PinnableWindowState | OrderWindowState;
+export type RankingWindowState = { id: WindowId; link: LinkColor | null; kind: "ranking"; ranking: Ranking };
+export type OtherWindowState = { id: WindowId; link: LinkColor | null; kind: "indicators" } | WatchlistWindowState | ScreenerWindowState | PinnableWindowState | OrderWindowState | RankingWindowState;
 
 export const DEFAULT_ORDER_VENUE: Venue = "krx";
 
-export function blankWindow(id: WindowId, kind: OtherWindowKind): OtherWindowState {
-  return kind === "order" ? { id, link: null, kind, venue: DEFAULT_ORDER_VENUE } : { id, link: null, kind };
+export function blankWindow(id: WindowId, kind: OtherWindowKind, venue: Venue): OtherWindowState {
+  if (kind === "order") return { id, link: null, kind, venue: DEFAULT_ORDER_VENUE };
+  if (kind === "ranking") return { id, link: null, kind, ranking: defaultRanking(venue) };
+  return { id, link: null, kind };
 }
 
 export type WindowState = ChartWindowState | OtherWindowState;
@@ -361,7 +366,7 @@ export const useLayoutStore = create<LayoutState>()((set, get) => {
       const { windows, placement } = get().layout;
       if (windows.length >= MAX_WINDOWS || windows.filter((w) => w.kind === kind).length >= WINDOW_KINDS[kind].maxCount) return null;
       const id = freeWindowId(windows, kind);
-      const next = [...windows, blankWindow(id, kind)];
+      const next = [...windows, blankWindow(id, kind, useUiStore.getState().prefs.venue)];
       const canvasArea = get().canvasArea;
       if (canvasActive() && canvasArea) {
         arrangeCanvas(next, bringToFront(fitCanvas(placement.canvas, windowRefs(next), canvasArea), id));

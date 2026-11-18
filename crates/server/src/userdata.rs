@@ -192,6 +192,10 @@ fn read_window(r: &SqliteRow) -> Result<LayoutWindow, StoreError> {
         }
         "watchlist" => WindowContent::Watchlist { list: r.get("list") },
         "screener" => WindowContent::Screener { screen: r.get("screen") },
+        "ranking" => {
+            let Some(ranking) = r.get::<Option<String>, _>("ranking") else { return Err(corrupt("순위 창", id.as_str())) };
+            WindowContent::Ranking { ranking: serde_json::from_str(&ranking).map_err(|e| corrupt("순위 창", e))? }
+        }
         "trades" | "book" | "program" | "brokers" => {
             let symbol: Option<String> = r.get("symbol");
             serde_json::from_value(serde_json::json!({ "kind": kind, "symbol": symbol })).map_err(|e| corrupt("창 종류", e))?
@@ -276,7 +280,7 @@ pub(crate) async fn store_layout(tx: &mut SqliteConnection, input: &LayoutInput,
     sync_log::saved(tx, DocumentKind::Layout, &input.id, input.revision.0).await?;
     sqlx::query("DELETE FROM layout_windows WHERE layout_id = ?").bind(&input.id).execute(&mut *tx).await?;
     for (position, w) in input.windows.iter().enumerate() {
-        let (symbol, venue, period, chart_settings, list, screen) = match &w.content {
+        let (symbol, venue, period, chart_settings, list, screen, ranking) = match &w.content {
             WindowContent::Chart { feed, period, chart_settings } => (
                 Some(feed.0.symbol().as_wire()),
                 feed.0.venue().map(|v| v.as_wire().to_owned()),
@@ -284,17 +288,19 @@ pub(crate) async fn store_layout(tx: &mut SqliteConnection, input: &LayoutInput,
                 Some(chart_settings.to_string()),
                 None,
                 None,
+                None,
             ),
-            WindowContent::Order { venue, symbol } => (symbol.as_ref().map(|s| s.0.clone()), Some(wire_name(venue)), None, None, None, None),
-            WindowContent::Watchlist { list } => (None, None, None, None, list.clone(), None),
-            WindowContent::Screener { screen } => (None, None, None, None, None, screen.clone()),
+            WindowContent::Order { venue, symbol } => (symbol.as_ref().map(|s| s.0.clone()), Some(wire_name(venue)), None, None, None, None, None),
+            WindowContent::Watchlist { list } => (None, None, None, None, list.clone(), None, None),
+            WindowContent::Screener { screen } => (None, None, None, None, None, screen.clone(), None),
+            WindowContent::Ranking { ranking } => (None, None, None, None, None, None, Some(serde_json::to_string(ranking).expect("Ranking은 언제나 직렬화된다"))),
             WindowContent::Trades { symbol } | WindowContent::Book { symbol } | WindowContent::Program { symbol } | WindowContent::Brokers { symbol } => {
-                (symbol.as_ref().map(|s| s.0.clone()), None, None, None, None, None)
+                (symbol.as_ref().map(|s| s.0.clone()), None, None, None, None, None, None)
             }
-            WindowContent::Indicators => (None, None, None, None, None, None),
+            WindowContent::Indicators => (None, None, None, None, None, None, None),
         };
         sqlx::query(
-            "INSERT INTO layout_windows (layout_id, id, position, kind, link, symbol, venue, period, chart_settings, list, screen) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO layout_windows (layout_id, id, position, kind, link, symbol, venue, period, chart_settings, list, screen, ranking) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         )
         .bind(&input.id)
         .bind(w.id.as_str())
@@ -307,6 +313,7 @@ pub(crate) async fn store_layout(tx: &mut SqliteConnection, input: &LayoutInput,
         .bind(chart_settings)
         .bind(list)
         .bind(screen)
+        .bind(ranking)
         .execute(&mut *tx)
         .await?;
     }
@@ -391,7 +398,10 @@ mod tests {
     use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
 
     use super::*;
-    use crate::api::{CrosshairScope, LayoutSync, LinkColor, Period, Venue};
+    use crate::api::{
+        BalanceSort, CrosshairScope, Excludes, ExpectedSort, LayoutSync, LinkColor, Market, MinTradeAmount, NetDirection, Period, Ranking, RankingInvestor, RankingMarket, SurgeBaseline, SurgeSort, TradeUnit,
+        TradingSession, Venue, ViewSpan,
+    };
 
     const DEFAULT_ID: &str = "01900000-0000-7000-8000-000000000001";
 
@@ -918,8 +928,163 @@ mod tests {
         assert_eq!(kinds(&read).iter().map(|(_, kind, _)| kind.as_str()).collect::<Vec<_>>(), ["chart", "trades", "book", "program", "brokers", "order"]);
     }
 
+    fn every_ranking() -> Vec<Ranking> {
+        let excludes = Excludes { etf_etn: true, preferred: false };
+        let kept = Excludes { etf_etn: false, preferred: true };
+        vec![
+            Ranking::TradeAmount { market: RankingMarket::All, venue: Venue::Krx, excludes, exclude_managed: false },
+            Ranking::TradeVolume { market: RankingMarket::Kospi, venue: Venue::Nxt, session: TradingSession::AfterHours, excludes: kept, exclude_managed: true },
+            Ranking::Turnover { market: RankingMarket::Kosdaq, venue: Venue::Combined, excludes, exclude_managed: true },
+            Ranking::VolumeSurge { market: RankingMarket::All, venue: Venue::Krx, baseline: SurgeBaseline::Minutes5, sort: SurgeSort::DropRate, excludes, exclude_managed: false },
+            Ranking::Gainers { market: RankingMarket::Kospi, venue: Venue::Krx, include_limit: true, min_trade_amount: MinTradeAmount::AtLeast1Billion, excludes, exclude_managed: true },
+            Ranking::Losers { market: RankingMarket::Kosdaq, venue: Venue::Nxt, include_limit: false, min_trade_amount: MinTradeAmount::AtLeast10Billion, excludes: kept, exclude_managed: false },
+            Ranking::Expected { market: RankingMarket::All, venue: Venue::Combined, sort: ExpectedSort::Losers, excludes, exclude_managed: true },
+            Ranking::InvestorNetBuy { market: RankingMarket::Kosdaq, investor: RankingInvestor::PensionFund, direction: NetDirection::NetSell, unit: TradeUnit::Quantity, excludes },
+            Ranking::ForeignStreak { market: RankingMarket::Kospi, venue: Venue::Krx, direction: NetDirection::NetSell, excludes: kept },
+            Ranking::Program { market: Market::Kosdaq, venue: Venue::Nxt, direction: NetDirection::NetBuy, excludes },
+            Ranking::BidAskBalance { market: Market::Kospi, venue: Venue::Combined, sort: BalanceSort::SellRatio, excludes, exclude_managed: true },
+            Ranking::CreditRatio { market: RankingMarket::All, venue: Venue::Krx, excludes: kept, exclude_managed: false },
+            Ranking::MostViewed { span: ViewSpan::Hour1, excludes },
+        ]
+    }
+
+    fn ranking_window(id: &str, ranking: Ranking) -> LayoutWindow {
+        LayoutWindow { id: window_id(id), link: Some(LinkColor::C), content: WindowContent::Ranking { ranking } }
+    }
+
+    #[sqlx::test(migrations = "./migrations")]
+    async fn every_ranking_kind_round_trips_through_a_layout_with_its_conditions(_: SqlitePoolOptions, opts: SqliteConnectOptions) {
+        let db = db(opts).await;
+        let rankings = every_ranking();
+        assert_eq!(rankings.len(), 13);
+        let kinds_seen: std::collections::BTreeSet<_> = rankings.iter().map(|r| serde_json::to_value(r).unwrap()["kind"].as_str().unwrap().to_owned()).collect();
+        assert_eq!(kinds_seen.len(), 13, "순위 종류마다 하나씩이다");
+        let mut windows = vec![chart("c", "005930", Some(Venue::Krx))];
+        windows.extend(rankings.iter().enumerate().map(|(n, ranking)| ranking_window(&format!("ranking-{n}"), *ranking)));
+        put_layout(&db, &layout("L2", "순위 창", windows.clone()), UnixSeconds(100)).await.unwrap();
+        let read = get_layout(&db, "L2").await.unwrap();
+        assert_eq!(read.windows, windows);
+        assert!(kinds(&read).iter().skip(1).all(|(_, kind, link)| kind == "ranking" && *link == Some(LinkColor::C)));
+        let stored: Vec<(String, Option<String>)> = sqlx::query_as("SELECT kind, ranking FROM layout_windows WHERE layout_id = 'L2' AND kind <> 'chart' ORDER BY position").fetch_all(db.read()).await.unwrap();
+        assert_eq!(stored.len(), 13);
+        assert!(stored.iter().all(|(kind, ranking)| kind == "ranking" && ranking.is_some()));
+
+        let replaced = vec![chart("c", "005930", Some(Venue::Krx)), side(WindowContent::Trades { symbol: None })];
+        put_layout(&db, &layout_at("L2", "순위 창", replaced.clone(), 2), UnixSeconds(101)).await.unwrap();
+        assert_eq!(get_layout(&db, "L2").await.unwrap().windows, replaced);
+        let leftovers: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM layout_windows WHERE ranking IS NOT NULL").fetch_one(db.read()).await.unwrap();
+        assert_eq!(leftovers, 0, "순위 창을 바꿔 치우면 순위 열도 남지 않는다");
+    }
+
+    #[sqlx::test(migrations = "./migrations")]
+    async fn a_stored_ranking_that_cannot_be_read_makes_the_layout_read_fail_as_corrupt(_: SqlitePoolOptions, opts: SqliteConnectOptions) {
+        let db = db(opts).await;
+        let windows = vec![chart("c", "005930", Some(Venue::Krx)), ranking_window("r", every_ranking().remove(0))];
+        put_layout(&db, &layout("L2", "손상", windows), UnixSeconds(100)).await.unwrap();
+        for broken in [r#"{"kind":"nope"}"#, r#"{"kind":"tradeAmount"}"#, r#"{"kind":"tradeAmount","market":"all","venue":"krx","excludes":{"etfEtn":true,"preferred":false},"excludeManaged":"yes"}"#, "[]", "null", "7"] {
+            let mut tx = db.begin_write().await.unwrap();
+            sqlx::query("UPDATE layout_windows SET ranking = ? WHERE layout_id = 'L2' AND id = 'r'").bind(broken).execute(&mut *tx).await.unwrap();
+            tx.commit().await.unwrap();
+            let err = get_layout(&db, "L2").await.unwrap_err();
+            assert!(matches!(&err, StoreError::Db(e) if e.0.contains("순위 창")), "{broken}: {err:?}");
+        }
+    }
+
+    #[sqlx::test(migrations = "./migrations")]
+    async fn layout_db_checks_that_only_ranking_windows_carry_a_ranking(_: SqlitePoolOptions, opts: SqliteConnectOptions) {
+        let db = db(opts).await;
+        let ranking = serde_json::to_string(&every_ranking()[0]).unwrap();
+        let mut tx = db.begin_write().await.unwrap();
+        sqlx::query("INSERT INTO layouts (id, name, sync, placement, position, updated_at, revision) VALUES ('L2', '검사', '{}', '{}', 1, 1, 1)").execute(&mut *tx).await.unwrap();
+        tx.commit().await.unwrap();
+        for (kind, ranking) in [
+            ("ranking", None),
+            ("watchlist", Some(ranking.as_str())),
+            ("chart", Some(ranking.as_str())),
+            ("trades", Some(ranking.as_str())),
+            ("ranking", Some("{not json")),
+        ] {
+            let mut tx = db.begin_write().await.unwrap();
+            let err = sqlx::query("INSERT INTO layout_windows (layout_id, id, position, kind, ranking) VALUES ('L2', 'x', 0, ?, ?)").bind(kind).bind(ranking).execute(&mut *tx).await.unwrap_err();
+            assert!(matches!(&err, sqlx::Error::Database(e) if e.message().contains("CHECK")), "{kind} {ranking:?}: {err:?}");
+            tx.rollback().await.unwrap();
+        }
+        let mut tx = db.begin_write().await.unwrap();
+        sqlx::query("INSERT INTO layout_windows (layout_id, id, position, kind, ranking) VALUES ('L2', 'x', 0, 'ranking', ?)").bind(&ranking).execute(&mut *tx).await.unwrap();
+        for (symbol, venue, list) in [(Some("005930"), None, None), (None, Some("krx"), None), (None, None, Some("L1"))] {
+            let err = sqlx::query("UPDATE layout_windows SET symbol = ?, venue = ?, list = ? WHERE layout_id = 'L2' AND id = 'x'").bind(symbol).bind(venue).bind(list).execute(&mut *tx).await.unwrap_err();
+            assert!(matches!(&err, sqlx::Error::Database(e) if e.message().contains("CHECK")), "{symbol:?} {venue:?} {list:?}: {err:?}");
+        }
+        tx.rollback().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn ranking_window_migration_keeps_every_existing_window_and_its_state() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("vally.db");
+        let windows = stateful_windows();
+        {
+            let pool = SqlitePoolOptions::new().connect_with(SqliteConnectOptions::new().filename(&path).create_if_missing(true).foreign_keys(true)).await.unwrap();
+            sqlx::migrate!("./migrations").run_to(20, &pool).await.unwrap();
+            sqlx::query("INSERT INTO layouts (id, name, sync, position, updated_at, revision) VALUES ('L3', '셋', '{}', 1, 50, 7)").execute(&pool).await.unwrap();
+            for (position, w) in windows.iter().enumerate() {
+                let (symbol, venue, period, chart_settings, list, screen) = match &w.content {
+                    WindowContent::Chart { feed, period, chart_settings } => (Some(feed.0.symbol().as_wire()), feed.0.venue().map(|v| v.as_wire().to_owned()), Some(wire_name(period)), Some(chart_settings.to_string()), None, None),
+                    WindowContent::Order { venue, symbol } => (symbol.as_ref().map(|s| s.0.clone()), Some(wire_name(venue)), None, None, None, None),
+                    WindowContent::Watchlist { list } => (None, None, None, None, list.clone(), None),
+                    WindowContent::Screener { screen } => (None, None, None, None, None, screen.clone()),
+                    WindowContent::Trades { symbol } | WindowContent::Book { symbol } | WindowContent::Program { symbol } | WindowContent::Brokers { symbol } => (symbol.as_ref().map(|s| s.0.clone()), None, None, None, None, None),
+                    WindowContent::Indicators | WindowContent::Ranking { .. } => unreachable!(),
+                };
+                sqlx::query("INSERT INTO layout_windows (layout_id, id, position, kind, link, symbol, venue, period, chart_settings, list, screen) VALUES ('L3', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+                    .bind(w.id.as_str()).bind(position as i64).bind(window_kind(&w.content)).bind(w.link.as_ref().map(wire_name)).bind(symbol).bind(venue).bind(period).bind(chart_settings).bind(list).bind(screen)
+                    .execute(&pool).await.unwrap();
+            }
+            pool.close().await;
+        }
+        let db = AppDb::open(&path).await.unwrap();
+        assert_eq!(get_layout(&db, "L3").await.unwrap().windows, windows);
+        let ranked: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM layout_windows WHERE ranking IS NOT NULL").fetch_one(db.read()).await.unwrap();
+        assert_eq!(ranked, 0);
+        let check = SqlitePoolOptions::new().connect_with(SqliteConnectOptions::new().filename(&path).foreign_keys(true)).await.unwrap();
+        assert!(sqlx::query("PRAGMA foreign_key_check").fetch_all(&check).await.unwrap().is_empty());
+        check.close().await;
+
+        let mut with_ranking = windows.clone();
+        with_ranking.push(ranking_window("ranking", every_ranking().remove(4)));
+        put_layout(&db, &layout_at("L3", "셋", with_ranking.clone(), 8), UnixSeconds(100)).await.unwrap();
+        assert_eq!(get_layout(&db, "L3").await.unwrap().windows, with_ranking);
+    }
+
+    #[test]
+    fn check_layout_accepts_ranking_windows_up_to_the_window_limit() {
+        let mut windows = vec![chart("c", "005930", Some(Venue::Krx))];
+        windows.extend(every_ranking().into_iter().enumerate().map(|(n, ranking)| ranking_window(&format!("ranking-{n}"), ranking)));
+        assert!(crate::setup_documents::check_layout("L2", &layout("L2", "순위", windows)).is_ok());
+    }
+
+    #[test]
+    fn a_ranking_window_body_without_its_conditions_is_rejected() {
+        let body = |window: serde_json::Value| json!({"id": "L2", "name": "둘", "sync": {}, "revision": 1, "placement": {}, "windows": [window]});
+        assert!(serde_json::from_value::<LayoutInput>(body(json!({"id": "r", "link": null, "kind": "ranking"}))).is_err());
+        assert!(serde_json::from_value::<LayoutInput>(body(json!({"id": "r", "link": null, "kind": "ranking", "ranking": {"kind": "nope"}}))).is_err());
+        let ok = json!({"id": "r", "link": "a", "kind": "ranking", "ranking": {"kind": "mostViewed", "span": "minute1", "excludes": {"etfEtn": true, "preferred": false}}});
+        assert!(serde_json::from_value::<LayoutInput>(body(ok)).is_ok());
+        let kospi_only = json!({"id": "r", "link": null, "kind": "ranking", "ranking": {"kind": "program", "market": "all", "venue": "krx", "direction": "netBuy", "excludes": {"etfEtn": true, "preferred": false}}});
+        assert!(serde_json::from_value::<LayoutInput>(body(kospi_only)).is_err(), "프로그램 순위에는 시장 전체가 없다");
+    }
+
     fn same_kind_contents() -> Vec<WindowContent> {
-        vec![WindowContent::Watchlist { list: None }, WindowContent::Screener { screen: None }, WindowContent::Trades { symbol: None }, WindowContent::Book { symbol: None }, WindowContent::Program { symbol: None }, WindowContent::Brokers { symbol: None }, WindowContent::Order { venue: Venue::Krx, symbol: None }]
+        vec![
+            WindowContent::Watchlist { list: None },
+            WindowContent::Screener { screen: None },
+            WindowContent::Trades { symbol: None },
+            WindowContent::Book { symbol: None },
+            WindowContent::Program { symbol: None },
+            WindowContent::Brokers { symbol: None },
+            WindowContent::Order { venue: Venue::Krx, symbol: None },
+            WindowContent::Ranking { ranking: every_ranking().remove(0) },
+        ]
     }
 
     fn windows_of(kinds: &[WindowContent], extra_ids: &str) -> Vec<LayoutWindow> {
@@ -957,14 +1122,15 @@ mod tests {
         let db = db(opts).await;
         let mut windows = windows_of(&same_kind_contents(), "2");
         windows[1].link = Some(LinkColor::A);
-        let last = windows.len() - 1;
-        windows[last] = LayoutWindow { id: window_id("order-2"), link: Some(LinkColor::J), content: WindowContent::Order { venue: Venue::Nxt, symbol: None } };
+        let second_order = windows.iter().position(|w| w.id.as_str() == "order-2").unwrap();
+        windows[second_order] = LayoutWindow { id: window_id("order-2"), link: Some(LinkColor::J), content: WindowContent::Order { venue: Venue::Nxt, symbol: None } };
         put_layout(&db, &layout("L2", "같은 종류", windows.clone()), UnixSeconds(100)).await.unwrap();
         let read = get_layout(&db, "L2").await.unwrap();
         assert_eq!(read.windows, windows);
         let kinds = kinds(&read);
         assert_eq!(kinds.iter().filter(|(_, kind, _)| kind == "trades").count(), 2);
         assert_eq!(kinds.iter().filter(|(_, kind, _)| kind == "order").count(), 2);
+        assert_eq!(kinds.iter().filter(|(_, kind, _)| kind == "ranking").count(), 2);
     }
 
     #[sqlx::test(migrations = "./migrations")]
