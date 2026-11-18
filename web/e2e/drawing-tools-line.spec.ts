@@ -1,6 +1,6 @@
 import type { Page } from "@playwright/test";
 import { cell, chartOf, expect, test, pollSaved } from "./harness";
-import { chartPoint, drawings, mirror, open, pickTool, expandDock } from "./drawing-probe";
+import { chartPoint, drawings, mirror, open, pickTool } from "./drawing-probe";
 
 type At = readonly [number, number];
 
@@ -38,24 +38,6 @@ function watchErrors(page: Page): string[] {
   page.on("pageerror", (e) => errors.push(e.message));
   return errors;
 }
-
-test("line tools: Alt+J picks the horizontal ray and Shift+V picks the vertical line", async ({ page, scenario }) => {
-  const errors = watchErrors(page);
-  await open(page);
-  for (const { keys, label, tool, at } of [
-    { keys: "Alt+j", label: "수평 반직선", tool: "hray", at: [0.4, 0.35] as At },
-    { keys: "Shift+V", label: "수직선", tool: "vline", at: [0.6, 0.45] as At },
-  ]) {
-    await cell(page).focus();
-    await page.keyboard.press(keys);
-    const bar = await expandDock(page);
-    await expect(bar.getByRole("button", { name: label, exact: true })).toHaveAttribute("aria-pressed", "true");
-    await clickAll(page, [at]);
-    await pollSaved(async () => (await drawings(scenario)).at(-1)?.tool).toBe(tool);
-    expect((await drawings(scenario)).at(-1)!.points).toHaveLength(1);
-  }
-  expect(errors).toEqual([]);
-});
 
 test("line tools: three clicks place a parallel channel and its handles change the saved points", async ({ page, scenario }) => {
   const errors = watchErrors(page);

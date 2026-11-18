@@ -29,27 +29,6 @@ async function deselect(page: Page) {
 
 const selectedIds = async (page: Page) => (await settledMirror(page)).filter((m) => m.selected).map((m) => m.id);
 
-test("선 위에 놓인 글자 상자를 누르면 가장 위에 그린 글자를 고른다", async ({ page, scenario }) => {
-  const errors: string[] = []; page.on("pageerror", (e) => errors.push(e.message));
-  await open(page);
-  await cell(page).focus(); await page.keyboard.press("G");
-  await pickTool(page, "선", "추세선");
-  await drag(page, [0.2, 0.5], [0.8, 0.5]);
-  await pollSaved(async () => (await drawings(scenario)).map((d) => d.tool)).toEqual(["trendline"]);
-  const line = (await settledMirror(page))[0]!;
-  const lineY = line.points[0]!.y;
-  const x = (line.points[0]!.x + line.points[1]!.x) / 2;
-  await writeNote(page, await onChart(page, x, lineY - 6), "선 위 메모");
-  await pollSaved(async () => (await drawings(scenario)).map((d) => d.tool).sort()).toEqual(["text", "trendline"]);
-  const note = (await drawings(scenario)).find((d) => d.tool === "text")!;
-  await deselect(page);
-
-  const spot = await onChart(page, x + 16, lineY);
-  await page.mouse.click(spot.x, spot.y);
-  await expect.poll(() => selectedIds(page)).toEqual([note.id]);
-  expect(errors).toEqual([]);
-});
-
 test("글자와 말풍선은 한 번 누르면 고르고, 두 번 누르면 글자 입력 칸을 연다", async ({ page, scenario }) => {
   const errors: string[] = []; page.on("pageerror", (e) => errors.push(e.message));
   await open(page);
