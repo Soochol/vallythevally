@@ -80,7 +80,7 @@ pub struct Today {
     pub excluded_stocks: usize,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum AlertKind {
     Excluded,
@@ -93,6 +93,27 @@ pub enum AlertKind {
     ObservationUnknown,
     IndexMismatch,
     StageFailed,
+}
+
+impl AlertKind {
+    pub fn label(self) -> &'static str {
+        match self {
+            AlertKind::Excluded => "수집 제외",
+            AlertKind::PlanNote => "계획 메모",
+            AlertKind::Handoff => "인계",
+            AlertKind::HandoffSkipped => "인계 건너뜀",
+            AlertKind::KeyStopped => "키 멈춤",
+            AlertKind::RegisterFailed => "등록 실패",
+            AlertKind::MarketOpenMissing => "장 시작 확인 실패",
+            AlertKind::ObservationUnknown => "관측일 판단 모름",
+            AlertKind::IndexMismatch => "지수 대조 불일치",
+            AlertKind::StageFailed => "단계 실패",
+        }
+    }
+
+    pub fn is_note(self) -> bool {
+        matches!(self, AlertKind::Excluded | AlertKind::PlanNote)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

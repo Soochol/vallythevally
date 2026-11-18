@@ -1,4 +1,5 @@
 mod watch;
+pub mod webhook;
 pub mod wire;
 
 use std::path::PathBuf;
@@ -15,6 +16,7 @@ use ts_rs::TS;
 
 pub use self::watch::{ASK_TIMEOUT, CONNECT_TIMEOUT, DaemonJudgment, DaemonNotice, HEARTBEAT_EVERY, MAX_LINE_BYTES, MISSED_HEARTBEATS, RECONNECT_BACKOFF};
 use self::watch::{Answer, AskFailure, Question, Watcher};
+use self::webhook::Webhook;
 use self::wire::{CollectorCoverage, CollectorDisk, CollectorStatus};
 use crate::account::ProviderSubject;
 use crate::api::{ApiErrorCode, UnixSeconds};
@@ -26,6 +28,7 @@ pub struct CollectorBoard {
     admins: Vec<ProviderSubject>,
     socket: PathBuf,
     watcher: Watcher,
+    webhook: Option<Arc<Webhook>>,
 }
 
 impl CollectorBoard {
@@ -33,7 +36,12 @@ impl CollectorBoard {
         if admins.is_empty() || !account_linked {
             return None;
         }
-        Some(CollectorBoard { admins, socket: socket?, watcher: Watcher::new() })
+        Some(CollectorBoard { admins, socket: socket?, watcher: Watcher::new(), webhook: None })
+    }
+
+    pub fn with_webhook(mut self, webhook: Option<Webhook>) -> CollectorBoard {
+        self.webhook = webhook.map(Arc::new);
+        self
     }
 
     pub fn allows(&self, identity: Option<&ProviderSubject>) -> bool {
@@ -144,7 +152,31 @@ async fn disk(State(st): State<Arc<AppState>>) -> Result<Json<CollectorDisk>, Ap
 
 pub async fn run(st: Arc<AppState>) {
     let Some(board) = st.system.collector() else { return };
-    tokio::join!(watch::watch_forever(&board.socket, &board.watcher, &st.clock), fill_missing_subject(st.system.account()));
+    let announced = board.webhook.clone().map(|webhook| (webhook, board.subscribe_notices()));
+    tokio::join!(watch::watch_forever(&board.socket, &board.watcher, &st.clock), fill_missing_subject(st.system.account()), announce_to_webhook(announced));
+}
+
+fn webhook_text(notice: &DaemonNotice) -> String {
+    let what = match notice.judgment {
+        DaemonJudgment::Down => "감독 데몬이 꺼져 있습니다",
+        _ => "감독 데몬이 응답하지 않습니다",
+    };
+    format!("[수집 경보] {} · {what}", domain::KstTime::from_unix(notice.at.0))
+}
+
+async fn announce_to_webhook(announced: Option<(Arc<Webhook>, tokio::sync::broadcast::Receiver<DaemonNotice>)>) {
+    let Some((webhook, mut notices)) = announced else { return };
+    loop {
+        match notices.recv().await {
+            Ok(notice) => {
+                if let Err(failure) = webhook.send(&webhook_text(&notice)).await {
+                    tracing::warn!(%failure, "수집 경보를 웹훅으로 보내지 못했습니다");
+                }
+            }
+            Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {}
+            Err(tokio::sync::broadcast::error::RecvError::Closed) => return,
+        }
+    }
 }
 
 async fn fill_missing_subject(account: &crate::account::AccountState) {
