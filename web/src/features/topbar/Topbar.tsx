@@ -1,5 +1,6 @@
 import { useRef, useState } from "react";
-import { ChartSettingsPopover } from "../chart-settings/ChartSettingsPopover";
+import { ChartSettingsDialog } from "../chart-settings/ChartSettingsDialog";
+import { type ChartSettingsMenuId, FIRST_CHART_SETTINGS_MENU } from "../chart-settings/menus";
 import { FinancialUpdateButton } from "../financial-update/FinancialUpdateButton";
 import { MinuteMenu } from "./MinuteMenu";
 import { MockBadge } from "./MockBadge";
@@ -26,6 +27,7 @@ export function Topbar() {
   const { setPeriod } = useLayoutStore.getState();
   const settingsButton = useRef<HTMLButtonElement>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [settingsMenu, setSettingsMenu] = useState<ChartSettingsMenuId>(FIRST_CHART_SETTINGS_MENU);
 
   return (
     <header role="toolbar" aria-label="차트 도구 막대" className="desktop-topbar ui-island relative z-20 mx-[var(--island-gap)] mt-[var(--island-gap)] h-[var(--island-h)] flex-none rounded-l max-md:hidden">
@@ -44,7 +46,7 @@ export function Topbar() {
       <button type="button" className="tb-btn" aria-label="비교" aria-haspopup={opensDialog ? "dialog" : undefined} title="비교 종목" onClick={() => openIndicatorCommand(cellId, "compare")}><CompareIcon /><span className="max-lg:hidden">비교</span></button>
       <span className="tb-sep" />
       <button ref={settingsButton} type="button" className="tb-btn aria-expanded:bg-accent-soft aria-expanded:font-semibold aria-expanded:text-accent" aria-label="차트 설정" aria-haspopup="dialog" aria-expanded={settingsOpen} onClick={() => setSettingsOpen((open) => !open)}><SlidersIcon /><span className="max-xl:hidden">차트 설정</span></button>
-      {settingsOpen && <ChartSettingsPopover cellId={cellId} anchor={settingsButton} onClose={() => setSettingsOpen(false)} />}
+      {settingsOpen && <ChartSettingsDialog cellId={cellId} menu={settingsMenu} onMenu={setSettingsMenu} onClose={() => setSettingsOpen(false)} />}
       <div className="topbar-search-slot">
         <button type="button" className="shell-search" aria-haspopup="dialog" aria-label="종목·지표·명령 찾기" title="종목 검색 (/ 또는 Ctrl+K)" onClick={() => openSearch()}>
           <SearchIcon size={14} />
