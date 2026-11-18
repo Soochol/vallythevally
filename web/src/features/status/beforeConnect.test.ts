@@ -3,7 +3,7 @@ import type { KiwoomLinkStatus } from "../../api/generated/KiwoomLinkStatus";
 import { beforeConnect } from "./beforeConnect";
 
 const link = (patch: Partial<KiwoomLinkStatus>): KiwoomLinkStatus => ({
-  keySource: "file", appKeyTail: "1234", credentialId: null, state: "disconnected", problem: null, message: "서버 문장", retryAt: null, needsAcknowledgement: false,
+  environment: "real", keySource: "file", appKeyTail: "1234", credentialId: null, state: "disconnected", problem: null, message: "서버 문장", retryAt: null, needsAcknowledgement: false,
   step: null, tokenExpiresAt: null, realtimeRegistered: null, symbolCount: null, registeredIp: null, atStart: "connects", ...patch,
 });
 

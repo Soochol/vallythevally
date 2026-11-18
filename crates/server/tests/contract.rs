@@ -140,6 +140,7 @@ fn generated_typescript_matches_the_committed_files() {
         generated::<KiwoomAtStart>(),
         generated::<KiwoomConnectInput>(),
         generated::<KiwoomConnectStep>(),
+        generated::<KiwoomEnvironment>(),
         generated::<KiwoomKeyInput>(),
         generated::<PublicIpCheck>(),
         generated::<RegisteredIp>(),

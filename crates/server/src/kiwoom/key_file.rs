@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 
 use super::ip_file::RegisteredIpFile;
 use super::private_file::{FileError, PrivateFile};
+use crate::api::KiwoomEnvironment;
 use crate::config::{KiwoomCredentials, Secret};
 use crate::instance::InstanceLock;
 
@@ -16,11 +17,17 @@ struct Stored {
 
 pub struct KeyFile {
     file: PrivateFile,
+    environment: KiwoomEnvironment,
 }
 
 impl KeyFile {
     pub fn new(path: PathBuf, _held: &InstanceLock) -> Self {
-        KeyFile { file: PrivateFile::new(path) }
+        KeyFile { file: PrivateFile::new(path), environment: KiwoomEnvironment::Real }
+    }
+
+    pub fn with_environment(mut self, environment: KiwoomEnvironment) -> Self {
+        self.environment = environment;
+        self
     }
 
     pub fn path(&self) -> &Path {
@@ -32,7 +39,7 @@ impl KeyFile {
     }
 
     pub fn order_switch_store(&self) -> crate::trading::SwitchStore {
-        crate::trading::SwitchStore::file(PrivateFile::new(self.path().with_file_name(crate::trading::ORDER_SWITCH_FILE_NAME)))
+        crate::trading::SwitchStore::file(PrivateFile::new(self.path().with_file_name(crate::trading::ORDER_SWITCH_FILE_NAME)), self.environment)
     }
 
     pub fn load(&self) -> Result<Option<KiwoomCredentials>, FileError> {
@@ -59,8 +66,8 @@ pub struct StartupKey {
     pub file_problem: Option<FileError>,
 }
 
-pub fn startup_key(env: Option<KiwoomCredentials>, file: &KeyFile) -> StartupKey {
-    if env.is_some() {
+pub fn startup_key(env: Option<KiwoomCredentials>, file: &KeyFile, environment: KiwoomEnvironment) -> StartupKey {
+    if env.is_some() || environment == KiwoomEnvironment::Mock {
         return StartupKey { credentials: env, file_problem: None };
     }
     match file.load() {
@@ -147,10 +154,14 @@ mod tests {
         let (_dir, _lock, file) = temp_key_file();
         file.save(&credentials("FAKE-APPKEY-file", "FAKE-SECRET-file")).unwrap();
         std::fs::set_permissions(file.path(), std::fs::Permissions::from_mode(0o644)).unwrap();
-        let from_env = startup_key(Some(credentials("FAKE-APPKEY-env", "FAKE-SECRET-env")), &file);
+        let from_env = startup_key(Some(credentials("FAKE-APPKEY-env", "FAKE-SECRET-env")), &file, KiwoomEnvironment::Real);
         assert_eq!(from_env.credentials.unwrap().app_key.expose(), "FAKE-APPKEY-env");
         assert!(from_env.file_problem.is_none(), "환경 키가 있으면 파일을 읽지 않으므로 문제도 모른다");
-        let from_file = startup_key(None, &file);
+        let from_file = startup_key(None, &file, KiwoomEnvironment::Real);
         assert!(from_file.credentials.is_none() && from_file.file_problem.is_some());
+        let mock = startup_key(None, &file, KiwoomEnvironment::Mock);
+        assert!(mock.credentials.is_none() && mock.file_problem.is_none(), "모의 서버는 키 파일을 읽지 않으므로 문제도 모른다");
+        std::fs::set_permissions(file.path(), std::fs::Permissions::from_mode(0o600)).unwrap();
+        assert!(startup_key(None, &file, KiwoomEnvironment::Mock).credentials.is_none(), "읽을 수 있는 키 파일이 있어도 모의 서버는 쓰지 않는다");
     }
 }

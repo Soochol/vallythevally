@@ -306,7 +306,7 @@ async fn account_reads_stop_when_the_key_is_auth_blocked() {
     rest.set_access(Access::Open);
     let (stream, _desired) = KiwoomStream::detached();
     let db = AppDb::open(&dir.path().join("vally.db")).await.unwrap();
-    let trading = Trading::new(rest.clone(), clock, SwitchStore::file(PrivateFile::new(dir.path().join("state").join("orders.json"))), stream.account_feed(), db, Arc::new(SymbolDirectory::default()));
+    let trading = Trading::new(rest.clone(), clock, SwitchStore::file(PrivateFile::new(dir.path().join("state").join("orders.json")), crate::api::KiwoomEnvironment::Real), stream.account_feed(), db, Arc::new(SymbolDirectory::default()));
     trading.set_enabled(OrdersSwitchInput { enabled: true, confirm_account_tail: Some("01".into()) }).await.unwrap();
     blocked.store(true, std::sync::atomic::Ordering::SeqCst);
     let auth_blocked = |e: &TradingError| matches!(e, TradingError::Kiwoom(KiwoomError::Stopped(f)) if f.category() == Category::AuthBlocked);
@@ -478,7 +478,7 @@ async fn realtime_registration_follows_the_switch_file_even_when_it_changes_behi
     use std::os::unix::fs::PermissionsExt;
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("state").join("orders.json");
-    let store = || SwitchStore::file(PrivateFile::new(path.clone()));
+    let store = || SwitchStore::file(PrivateFile::new(path.clone()), crate::api::KiwoomEnvironment::Real);
     let (trading, _fake, feed, _clock, _dir) = direct_trading(Duration::ZERO, store()).await;
     trading.set_enabled(confirm("01")).await.unwrap();
     assert!(feed.wanted());
@@ -533,7 +533,7 @@ async fn an_off_switch_stops_a_read_that_is_still_queued_behind_the_send_spacing
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn the_realtime_registration_matches_the_switch_right_after_every_change_even_with_readers_running() {
     let dir = tempfile::tempdir().unwrap();
-    let (trading, _fake, feed, _clock, _dir) = direct_trading(Duration::ZERO, SwitchStore::file(PrivateFile::new(dir.path().join("state").join("orders.json")))).await;
+    let (trading, _fake, feed, _clock, _dir) = direct_trading(Duration::ZERO, SwitchStore::file(PrivateFile::new(dir.path().join("state").join("orders.json")), crate::api::KiwoomEnvironment::Real)).await;
     trading.set_enabled(confirm("01")).await.unwrap();
     let running = Arc::new(std::sync::atomic::AtomicBool::new(true));
     let readers: Vec<_> = (0..3)

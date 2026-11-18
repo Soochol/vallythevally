@@ -3,6 +3,11 @@ use std::io::{Read, Write};
 use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 
+use serde::de::DeserializeOwned;
+use serde::{Deserialize, Serialize};
+
+use crate::api::KiwoomEnvironment;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FileError(String);
 
@@ -72,6 +77,19 @@ impl PrivateFile {
         write().map_err(|e| self.error(e))
     }
 
+    pub fn stored_environment(&self) -> Result<Option<KiwoomEnvironment>, FileError> {
+        let text = match std::fs::read_to_string(&self.path) {
+            Ok(text) => text,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+            Err(e) => return Err(self.error(e)),
+        };
+        Ok(serde_json::from_str::<EnvironmentOnly>(&text).ok().map(|only| only.environment))
+    }
+
+    pub fn error_for_other_environment(&self, stored: KiwoomEnvironment, current: KiwoomEnvironment) -> FileError {
+        self.error(format_args!("투자구분 {}의 파일이라 {} 서버는 읽지도 쓰지도 않습니다", stored.as_str(), current.as_str()))
+    }
+
     pub fn remove(&self) -> Result<(), FileError> {
         match std::fs::remove_file(&self.path) {
             Ok(()) => Ok(()),
@@ -79,4 +97,33 @@ impl PrivateFile {
             Err(e) => Err(self.error(e)),
         }
     }
+}
+
+#[derive(Serialize)]
+struct StampedRef<'a, T> {
+    environment: KiwoomEnvironment,
+    #[serde(flatten)]
+    value: &'a T,
+}
+
+#[derive(Deserialize)]
+struct Stamped<T> {
+    #[serde(default)]
+    environment: KiwoomEnvironment,
+    #[serde(flatten)]
+    value: T,
+}
+
+#[derive(Deserialize)]
+struct EnvironmentOnly {
+    #[serde(default)]
+    environment: KiwoomEnvironment,
+}
+
+pub fn render_stamped<T: Serialize>(environment: KiwoomEnvironment, value: &T) -> Vec<u8> {
+    serde_json::to_vec(&StampedRef { environment, value }).expect("문자열과 숫자만 담은 구조체")
+}
+
+pub fn parse_stamped<T: DeserializeOwned>(text: &str) -> serde_json::Result<(KiwoomEnvironment, T)> {
+    serde_json::from_str::<Stamped<T>>(text).map(|stamped| (stamped.environment, stamped.value))
 }

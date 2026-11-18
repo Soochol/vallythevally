@@ -22,6 +22,7 @@
   - 꺼져 있으면 `trading`은 계좌 TR도 주문 TR도 보내지 않고, 00·04도 등록하지 않는다. 예외는 켜기 확인 한 가지다. 사용자가 "켜기"를 눌러 시작한 계좌 확인과, 그 확인을 받아 켜는 요청이 각각 `ka00001`을 한 번 보낸다. 조회 HTTP와 실시간 세션은 꺼진 동안 이 요청을 보내지 못한다.
   - 계좌가 확인한 계좌와 달라지면 그 계좌의 조회를 막고, 사용자가 다시 켜서 확인해야 푼다.
 - **키와 토큰**: ADR 0004의 키 하나, 토큰 하나, WebSocket 세션 하나를 그대로 쓴다. 00·04 등록은 시세와 같은 세션에서 하고, 종목마다 받을 종류를 정하는 [ADR 0028](0028-server-streams-book-program-and-broker-for-the-symbols-new-windows-open.md)의 집합과는 따로 켜고 끈다. 모의투자 키는 쓰지 않는다.
+  - (2026-11-18 개정) 모의투자는 [ADR 0030](0030-kiwoom-mock-trading-runs-as-its-own-server-process.md).
 - **조회**
   - 계좌 확인은 60초 동안 한 번이다. 키움이 연결됨이 아니거나 인증이 막혀 있으면 [ADR 0009](0009-kiwoom-errors-closed-categories.md)의 닫힌 범주로 답한다(`not_connected`, `auth_blocked` 같은 사유).
   - 잔고는 `kt00018` 개별·KRX만 읽고 KRX와 NXT 잔고를 더하지 않는다. 신용 행과 보유 수량 0 행은 보이지 않는다.

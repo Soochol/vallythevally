@@ -448,10 +448,29 @@ pub enum KiwoomLinkProblem {
     KeyFileUnusable,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub enum KiwoomEnvironment {
+    #[default]
+    Real,
+    Mock,
+}
+
+impl KiwoomEnvironment {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            KiwoomEnvironment::Real => "real",
+            KiwoomEnvironment::Mock => "mock",
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export)]
 pub struct KiwoomLinkStatus {
+    pub environment: KiwoomEnvironment,
     pub key_source: KeySource,
     pub app_key_tail: Option<String>,
     pub credential_id: Option<String>,
@@ -614,6 +633,7 @@ pub struct AccountConfirm {
 #[serde(rename_all = "camelCase")]
 #[ts(export)]
 pub struct SystemSettings {
+    pub environment: KiwoomEnvironment,
     pub bind: String,
     pub log_filter: String,
     pub static_dir: String,

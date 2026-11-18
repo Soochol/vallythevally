@@ -2,9 +2,10 @@
 import type { KeySource } from "./KeySource";
 import type { KiwoomAtStart } from "./KiwoomAtStart";
 import type { KiwoomConnectStep } from "./KiwoomConnectStep";
+import type { KiwoomEnvironment } from "./KiwoomEnvironment";
 import type { KiwoomLinkProblem } from "./KiwoomLinkProblem";
 import type { KiwoomLinkState } from "./KiwoomLinkState";
 import type { RegisteredIp } from "./RegisteredIp";
 import type { UnixSeconds } from "./UnixSeconds";
 
-export type KiwoomLinkStatus = { keySource: KeySource, appKeyTail: string | null, credentialId: string | null, state: KiwoomLinkState, problem: KiwoomLinkProblem | null, message: string, retryAt: UnixSeconds | null, needsAcknowledgement: boolean, step: KiwoomConnectStep | null, tokenExpiresAt: UnixSeconds | null, realtimeRegistered: number | null, symbolCount: number | null, registeredIp: RegisteredIp | null, atStart: KiwoomAtStart | null, };
+export type KiwoomLinkStatus = { environment: KiwoomEnvironment, keySource: KeySource, appKeyTail: string | null, credentialId: string | null, state: KiwoomLinkState, problem: KiwoomLinkProblem | null, message: string, retryAt: UnixSeconds | null, needsAcknowledgement: boolean, step: KiwoomConnectStep | null, tokenExpiresAt: UnixSeconds | null, realtimeRegistered: number | null, symbolCount: number | null, registeredIp: RegisteredIp | null, atStart: KiwoomAtStart | null, };

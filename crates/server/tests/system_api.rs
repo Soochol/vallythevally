@@ -240,6 +240,85 @@ async fn an_environment_key_wins_and_the_screen_cannot_change_it() {
     assert_eq!(fake.requests(), 0);
 }
 
+const MOCK_APP_KEY: &str = "FAKE-MOCK-APPKEY-system-2H5N";
+const MOCK_APP_SECRET: &str = "FAKE-MOCK-SECRET-system-8V3C";
+const MOCK: [(&str, &str); 3] = [("VALLY_KIWOOM_ENV", "mock"), ("VALLY_KIWOOM_MOCK_APP_KEY", MOCK_APP_KEY), ("VALLY_KIWOOM_MOCK_APP_SECRET", MOCK_APP_SECRET)];
+
+#[tokio::test]
+async fn mock_server_refuses_key_save_and_delete() {
+    let (env, fake) = (Env::new(), ScriptedTransport::new());
+    let server = env.spawn(&fake, &MOCK);
+    let client = Client::of(&server).await;
+    let (put_status, put_body) = client.put_key(APP_KEY, APP_SECRET).await;
+    let (delete_status, delete_body) = client.delete_key().await;
+    assert_eq!((put_status, delete_status), (409, 409));
+    for body in [put_body, delete_body] {
+        assert_eq!(body["error"]["code"], "conflict");
+        assert!(body["error"]["message"].as_str().unwrap().contains("VALLY_KIWOOM_MOCK_APP_KEY"), "{body}");
+        assert_no_secret("거절 응답", &body.to_string());
+    }
+    assert!(!env.key_path.exists(), "모의 서버는 키 파일을 쓰지 않는다");
+    assert!(!env.key_path.parent().unwrap().exists());
+    assert_eq!(fake.requests(), 0);
+
+    let keyless = Env::new();
+    let server = keyless.spawn(&fake, &[("VALLY_KIWOOM_ENV", "mock"), ("VALLY_KIWOOM_MOCK_APP_KEY", "")]);
+    let client = Client::of(&server).await;
+    assert_eq!(client.put_key(APP_KEY, APP_SECRET).await.0, 409, "모의 키가 없어도 화면에서는 저장하지 못한다");
+    assert!(!keyless.key_path.exists());
+    assert_eq!(client.get("/api/system/kiwoom").await.1["state"], "noKey");
+}
+
+#[tokio::test]
+async fn mock_server_connects_with_the_mock_key_only() {
+    let (env, fake) = (Env::new(), ScriptedTransport::new());
+    let real = env.spawn(&fake, &[]);
+    let client = Client::of(&real).await;
+    assert_eq!(client.put_key(APP_KEY, APP_SECRET).await.0, 200);
+    assert_eq!(client.until_state("connected").await["keySource"], "file");
+    real.stop().await;
+    let key_file_before = std::fs::read(&env.key_path).unwrap();
+    let issued_before = fake.seen.token_bodies.lock().unwrap().len();
+
+    let mock_env = Env { key_path: env.key_path.clone(), ..Env::new() };
+    let server = mock_env.spawn(&fake, &MOCK);
+    let client = Client::of(&server).await;
+    let (status, connected) = client.connect(false).await;
+    assert_eq!((status, connected["state"].as_str(), connected["keySource"].as_str(), connected["appKeyTail"].as_str()), (200, Some("connected"), Some("env"), Some("2H5N")), "{connected}");
+    let bodies = fake.seen.token_bodies.lock().unwrap().clone();
+    assert_eq!(bodies.len(), issued_before + 1, "{bodies:?}");
+    assert_eq!((bodies[issued_before]["appkey"].as_str(), bodies[issued_before]["secretkey"].as_str()), (Some(MOCK_APP_KEY), Some(MOCK_APP_SECRET)), "발급 요청은 모의 키만 담는다");
+    assert_eq!(std::fs::read(&env.key_path).unwrap(), key_file_before, "모의 서버는 실전 키 파일을 읽지도 쓰지도 않는다");
+    assert_no_secret("연결 응답", &connected.to_string());
+    let logs = server.stop().await;
+    assert!(!logs.contains(MOCK_APP_KEY) && !logs.contains(MOCK_APP_SECRET), "{logs}");
+
+    let keyless = Env { key_path: env.key_path.clone(), ..Env::new() };
+    let server = keyless.spawn(&fake, &[("VALLY_KIWOOM_ENV", "mock"), ("VALLY_KIWOOM_MOCK_APP_KEY", "")]);
+    let client = Client::of(&server).await;
+    let (_, status) = client.get("/api/system/kiwoom").await;
+    assert_eq!((status["keySource"].as_str(), status["state"].as_str()), (Some("none"), Some("noKey")), "모의 키가 없으면 키 파일이 있어도 키 없이 켠다: {status}");
+}
+
+#[tokio::test]
+async fn link_status_and_settings_carry_the_environment() {
+    let (env, fake) = (Env::new(), ScriptedTransport::new());
+    let real = env.spawn(&fake, &[]);
+    let client = Client::of(&real).await;
+    assert_eq!(client.get("/api/system/kiwoom").await.1["environment"], "real");
+    assert_eq!(client.get("/api/system/settings").await.1["environment"], "real");
+    real.stop().await;
+
+    let mock_env = Env::new();
+    let server = mock_env.spawn(&fake, &MOCK);
+    let client = Client::of(&server).await;
+    assert_eq!(client.get("/api/system/kiwoom").await.1["environment"], "mock");
+    assert_eq!(client.get("/api/system/settings").await.1["environment"], "mock");
+    let mut seen = String::new();
+    let (mut ws, _) = tokio_tungstenite::connect_async(format!("ws://{}/api/ws", client.base.trim_start_matches("http://"))).await.unwrap();
+    assert_eq!(next_link_message(&mut ws, &mut seen).await["environment"], "mock", "WebSocket의 kiwoom_link도 투자구분을 싣는다");
+}
+
 #[tokio::test]
 async fn saving_a_key_connects_by_itself_and_answers_without_waiting() {
     let (env, fake) = (Env::new(), ScriptedTransport::new());

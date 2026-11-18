@@ -68,8 +68,8 @@ pub fn main() -> ExitCode {
             return ExitCode::from(1);
         }
     };
-    let token_file = TokenFile::new(config.token_path.clone(), &lock);
-    let key_file = KeyFile::new(config.kiwoom_key_path.clone(), &lock);
+    let token_file = TokenFile::new(config.token_path.clone(), &lock).with_environment(config.kiwoom_environment);
+    let key_file = KeyFile::new(config.kiwoom_key_path.clone(), &lock).with_environment(config.kiwoom_environment);
     let account_file = config.account_state_path.clone().map(|path| AccountStateFile::new(path, &lock));
     let code = runtime.block_on(serve(config, token_file, key_file, account_file));
     drop(lock);
@@ -133,7 +133,8 @@ pub async fn daily_maintenance(state: Arc<AppState>) {
 }
 
 async fn serve(config: Config, token_file: TokenFile, key_file: KeyFile, account_file: Option<AccountStateFile>) -> ExitCode {
-    let db = match AppDb::open(&config.db_path).await {
+    tracing::info!(environment = config.kiwoom_environment.as_str(), host = %crate::system_routes::kiwoom_target(&config.kiwoom_base_url).host.as_deref().unwrap_or("loopback"), "키움 투자구분으로 켭니다");
+    let db = match AppDb::open_in(&config.db_path, config.kiwoom_environment).await {
         Ok(db) => db,
         Err(e) => {
             tracing::error!(path = %config.db_path.display(), error = %e, "사용자 자료 DB를 열 수 없습니다");
@@ -186,7 +187,7 @@ async fn serve(config: Config, token_file: TokenFile, key_file: KeyFile, account
         }
     };
     let env_key = config.kiwoom_credentials.is_some();
-    let startup = startup_key(config.kiwoom_credentials.clone(), &key_file);
+    let startup = startup_key(config.kiwoom_credentials.clone(), &key_file, config.kiwoom_environment);
     let rest = KiwoomRest::new(
         Arc::new(transport),
         match &startup.credentials {

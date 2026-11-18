@@ -2,7 +2,8 @@ use std::sync::Mutex;
 
 use serde::{Deserialize, Serialize};
 
-use crate::kiwoom::private_file::{FileError, PrivateFile};
+use crate::api::KiwoomEnvironment;
+use crate::kiwoom::private_file::{FileError, PrivateFile, parse_stamped, render_stamped};
 
 pub const ORDER_SWITCH_FILE_NAME: &str = "kiwoom-orders.json";
 
@@ -22,13 +23,13 @@ pub struct SwitchRecord {
 }
 
 pub enum SwitchStore {
-    File(PrivateFile),
+    File { file: PrivateFile, environment: KiwoomEnvironment },
     Memory(Mutex<Option<SwitchRecord>>),
 }
 
 impl SwitchStore {
-    pub fn file(file: PrivateFile) -> SwitchStore {
-        SwitchStore::File(file)
+    pub fn file(file: PrivateFile, environment: KiwoomEnvironment) -> SwitchStore {
+        SwitchStore::File { file, environment }
     }
 
     pub fn memory() -> SwitchStore {
@@ -38,9 +39,12 @@ impl SwitchStore {
     pub fn load(&self) -> Result<Option<SwitchRecord>, FileError> {
         match self {
             SwitchStore::Memory(record) => Ok(record.lock().expect("주문 스위치 잠금").clone()),
-            SwitchStore::File(file) => {
+            SwitchStore::File { file, environment } => {
                 let Some(text) = file.read()? else { return Ok(None) };
-                let record: SwitchRecord = serde_json::from_str(&text).map_err(|e| file.error(format_args!("JSON {:?} 오류, {}번째 줄", e.classify(), e.line())))?;
+                let (stored, record): (KiwoomEnvironment, SwitchRecord) = parse_stamped(&text).map_err(|e| file.error(format_args!("JSON {:?} 오류, {}번째 줄", e.classify(), e.line())))?;
+                if stored != *environment {
+                    return Ok(None);
+                }
                 if record.salt.is_empty() || (record.enabled && (record.account_ref.is_none() || record.account_tail.is_none())) {
                     return Err(file.error("켜져 있는데 확인한 계좌가 없어 쓰지 않습니다"));
                 }
@@ -55,9 +59,14 @@ impl SwitchStore {
                 *slot.lock().expect("주문 스위치 잠금") = Some(record.clone());
                 Ok(())
             }
-            SwitchStore::File(file) => {
+            SwitchStore::File { file, environment } => {
                 file.read()?;
-                file.write(&serde_json::to_vec(record).expect("문자열과 불리언만 담은 구조체"))
+                if let Some(stored) = file.stored_environment()?
+                    && stored != *environment
+                {
+                    return Err(file.error_for_other_environment(stored, *environment));
+                }
+                file.write(&render_stamped(*environment, record))
             }
         }
     }
@@ -82,7 +91,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let state = dir.path().join("state");
         let path = state.join(ORDER_SWITCH_FILE_NAME);
-        let store = SwitchStore::file(PrivateFile::new(path.clone()));
+        let store = SwitchStore::file(PrivateFile::new(path.clone()), KiwoomEnvironment::Real);
         assert_eq!(store.load().unwrap(), None);
         store.save(&record(true)).unwrap();
         assert_eq!(std::fs::metadata(&path).unwrap().permissions().mode() & 0o777, 0o600);
@@ -108,7 +117,7 @@ mod tests {
         let state = dir.path().join("state");
         std::fs::create_dir(&state).unwrap();
         open_up(&state, 0o755);
-        let store = SwitchStore::file(PrivateFile::new(state.join(ORDER_SWITCH_FILE_NAME)));
+        let store = SwitchStore::file(PrivateFile::new(state.join(ORDER_SWITCH_FILE_NAME)), KiwoomEnvironment::Real);
         assert!(store.save(&record(true)).is_err());
         assert!(!state.join(ORDER_SWITCH_FILE_NAME).exists());
     }
@@ -116,8 +125,39 @@ mod tests {
     #[test]
     fn an_enabled_switch_without_a_confirmed_account_is_refused() {
         let dir = tempfile::tempdir().unwrap();
-        let store = SwitchStore::file(PrivateFile::new(dir.path().join("s").join(ORDER_SWITCH_FILE_NAME)));
+        let store = SwitchStore::file(PrivateFile::new(dir.path().join("s").join(ORDER_SWITCH_FILE_NAME)), KiwoomEnvironment::Real);
         store.save(&SwitchRecord { enabled: true, salt: "00".into(), account_ref: None, account_tail: None, confirm_won: None, cap_won: None }).unwrap();
         assert!(store.load().is_err());
+    }
+
+    #[test]
+    fn a_switch_file_from_the_other_environment_reads_as_off() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("state").join(ORDER_SWITCH_FILE_NAME);
+        let real = SwitchStore::file(PrivateFile::new(path.clone()), KiwoomEnvironment::Real);
+        real.save(&record(true)).unwrap();
+        assert!(std::fs::read_to_string(&path).unwrap().contains("\"environment\":\"real\""));
+        let before = std::fs::read(&path).unwrap();
+
+        let mock = SwitchStore::file(PrivateFile::new(path.clone()), KiwoomEnvironment::Mock);
+        assert_eq!(mock.load().unwrap(), None, "다른 투자구분의 켜진 스위치는 꺼진 것으로 본다");
+        let err = mock.save(&record(true)).unwrap_err().to_string();
+        assert!(err.contains("real") && err.contains("mock"), "{err}");
+        assert_eq!(std::fs::read(&path).unwrap(), before, "쓰지 않았으므로 그대로다");
+        assert_eq!(real.load().unwrap(), Some(record(true)));
+    }
+
+    #[test]
+    fn a_switch_file_without_the_environment_mark_is_real() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("state").join(ORDER_SWITCH_FILE_NAME);
+        let real = SwitchStore::file(PrivateFile::new(path.clone()), KiwoomEnvironment::Real);
+        real.save(&record(false)).unwrap();
+        let text = std::fs::read_to_string(&path).unwrap().replace("\"environment\":\"real\",", "");
+        assert!(!text.contains("environment"));
+        std::fs::write(&path, text).unwrap();
+        assert_eq!(real.load().unwrap(), Some(record(false)));
+        let mock = SwitchStore::file(PrivateFile::new(path), KiwoomEnvironment::Mock);
+        assert_eq!(mock.load().unwrap(), None);
     }
 }

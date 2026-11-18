@@ -40,7 +40,7 @@ test.each<[string, Connection, number, Omit<ReturnType<typeof connectionView>, "
 });
 
 const link = (patch: Partial<KiwoomLinkStatus>): KiwoomLinkStatus => ({
-  keySource: "file", appKeyTail: "1234", credentialId: null, state: "connected", problem: null, message: "서버 문장", retryAt: null, needsAcknowledgement: false,
+  environment: "real", keySource: "file", appKeyTail: "1234", credentialId: null, state: "connected", problem: null, message: "서버 문장", retryAt: null, needsAcknowledgement: false,
   step: null, tokenExpiresAt: null, realtimeRegistered: null, symbolCount: null, registeredIp: null, atStart: "connects", ...patch,
 });
 
