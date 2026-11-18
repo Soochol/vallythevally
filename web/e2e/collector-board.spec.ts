@@ -127,6 +127,19 @@ test("권한이 꺼짐이거나 없음이면 메뉴 항목이 없다", async ({ 
   }
 });
 
+test("설정 창을 다시 열면 권한을 다시 묻고 바뀐 권한을 따른다", async ({ page: p, scenario }) => {
+  serve(scenario, "allowed");
+  await openSettings(p);
+  await expect(menuItem(p)).toBeVisible();
+  await p.keyboard.press("Escape");
+  await expect(dialog(p)).toHaveCount(0);
+
+  scenario.reply("/api/collector/access", { body: { access: "denied" } });
+  await systemButton(p).click();
+  await expect(dialog(p).getByRole("tab", { name: "계정" })).toBeVisible();
+  await expect(menuItem(p)).toHaveCount(0);
+});
+
 test("권한이 없으면 주소로 직접 열어도 현황판을 그리지 않고 차트로 돌아간다", async ({ page: p, scenario }) => {
   serve(scenario, "denied");
   await p.goto("/collector");

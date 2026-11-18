@@ -21,7 +21,6 @@ export function useCollectorAccess() {
     queryKey: ["collector", "access", login],
     queryFn: ({ signal }) => getJson<CollectorAccess>(`${COLLECTOR}/access`, signal),
     enabled: login !== null,
-    staleTime: Infinity,
   });
 }
 
