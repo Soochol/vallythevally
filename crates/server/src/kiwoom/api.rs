@@ -43,13 +43,40 @@ pub enum ApiId {
     Ka10003,
     /// 종목시간별프로그램매매추이
     Ka90008,
+    Ka10032,
+    Ka10030,
+    Ka10023,
+    Ka10027,
+    Ka10029,
+    Ka10065,
+    Ka10035,
+    Ka10020,
+    Ka10033,
+    Ka90003,
+    Ka00198,
 }
 
 impl ApiId {
     pub const fn path(self) -> &'static str {
         match self {
             ApiId::Au10001 => "/oauth2/token",
-            ApiId::Ka10099 | ApiId::Ka10100 | ApiId::Ka10095 | ApiId::Ka10001 | ApiId::Ka10059 | ApiId::Ka10003 => "/api/dostk/stkinfo",
+            ApiId::Ka10099
+            | ApiId::Ka10100
+            | ApiId::Ka10095
+            | ApiId::Ka10001
+            | ApiId::Ka10059
+            | ApiId::Ka10003
+            | ApiId::Ka90003
+            | ApiId::Ka00198 => "/api/dostk/stkinfo",
+            ApiId::Ka10032
+            | ApiId::Ka10030
+            | ApiId::Ka10023
+            | ApiId::Ka10027
+            | ApiId::Ka10029
+            | ApiId::Ka10065
+            | ApiId::Ka10035
+            | ApiId::Ka10020
+            | ApiId::Ka10033 => "/api/dostk/rkinfo",
             ApiId::Ka10004 | ApiId::Ka90008 => "/api/dostk/mrkcond",
             ApiId::Ka10008 => "/api/dostk/frgnistt",
             ApiId::Ka10080
@@ -87,6 +114,17 @@ impl ApiId {
             ApiId::Ka10004 => "ka10004",
             ApiId::Ka10003 => "ka10003",
             ApiId::Ka90008 => "ka90008",
+            ApiId::Ka10032 => "ka10032",
+            ApiId::Ka10030 => "ka10030",
+            ApiId::Ka10023 => "ka10023",
+            ApiId::Ka10027 => "ka10027",
+            ApiId::Ka10029 => "ka10029",
+            ApiId::Ka10065 => "ka10065",
+            ApiId::Ka10035 => "ka10035",
+            ApiId::Ka10020 => "ka10020",
+            ApiId::Ka10033 => "ka10033",
+            ApiId::Ka90003 => "ka90003",
+            ApiId::Ka00198 => "ka00198",
         }
     }
 }
@@ -442,6 +480,543 @@ impl MarketRequest for StockProgramTrades {
     type Response = wire::StockProgramTradesResponse;
 }
 
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum RankMarket {
+    All,
+    Kospi,
+    Kosdaq,
+}
+
+impl RankMarket {
+    const fn code(self) -> &'static str {
+        match self {
+            RankMarket::All => "000",
+            RankMarket::Kospi => "001",
+            RankMarket::Kosdaq => "101",
+        }
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum ListedMarket {
+    Kospi,
+    Kosdaq,
+}
+
+impl ListedMarket {
+    const fn order_book_code(self) -> &'static str {
+        match self {
+            ListedMarket::Kospi => "001",
+            ListedMarket::Kosdaq => "101",
+        }
+    }
+
+    const fn program_code(self) -> &'static str {
+        match self {
+            ListedMarket::Kospi => "P00101",
+            ListedMarket::Kosdaq => "P10102",
+        }
+    }
+}
+
+const fn exchange_code(venue: Venue) -> &'static str {
+    match venue {
+        Venue::Krx => "1",
+        Venue::Nxt => "2",
+        Venue::Combined => "3",
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum ManagedIssues {
+    Include,
+    Exclude,
+}
+
+impl ManagedIssues {
+    const fn condition(self) -> &'static str {
+        match self {
+            ManagedIssues::Include => "0",
+            ManagedIssues::Exclude => "1",
+        }
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum LimitMoves {
+    Include,
+    Exclude,
+}
+
+impl LimitMoves {
+    const fn code(self) -> &'static str {
+        match self {
+            LimitMoves::Include => "1",
+            LimitMoves::Exclude => "0",
+        }
+    }
+}
+
+macro_rules! market_request {
+    ($name:ident, $api:ident, $resp:ty) => {
+        impl sealed::Sealed for $name {}
+        impl MarketRequest for $name {
+            const API_ID: ApiId = ApiId::$api;
+            type Response = $resp;
+        }
+    };
+}
+
+#[derive(Serialize)]
+pub struct TradeValueRanking {
+    mrkt_tp: &'static str,
+    mang_stk_incls: &'static str,
+    stex_tp: &'static str,
+}
+
+impl TradeValueRanking {
+    pub fn new(market: RankMarket, venue: Venue, managed: ManagedIssues) -> Self {
+        let mang_stk_incls = match managed {
+            ManagedIssues::Include => "1",
+            ManagedIssues::Exclude => "0",
+        };
+        TradeValueRanking { mrkt_tp: market.code(), mang_stk_incls, stex_tp: exchange_code(venue) }
+    }
+}
+
+market_request!(TradeValueRanking, Ka10032, wire::TradeValueRankingResponse);
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum VolumeOrder {
+    Volume,
+    Turnover,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum TradingSession {
+    All,
+    Regular,
+    PreMarket,
+    AfterMarket,
+}
+
+impl TradingSession {
+    const fn code(self) -> &'static str {
+        match self {
+            TradingSession::All => "0",
+            TradingSession::Regular => "1",
+            TradingSession::PreMarket => "2",
+            TradingSession::AfterMarket => "3",
+        }
+    }
+}
+
+#[derive(Serialize)]
+pub struct TradingVolumeRanking {
+    mrkt_tp: &'static str,
+    sort_tp: &'static str,
+    mang_stk_incls: &'static str,
+    crd_tp: &'static str,
+    trde_qty_tp: &'static str,
+    pric_tp: &'static str,
+    trde_prica_tp: &'static str,
+    mrkt_open_tp: &'static str,
+    stex_tp: &'static str,
+}
+
+impl TradingVolumeRanking {
+    pub fn new(order: VolumeOrder, market: RankMarket, venue: Venue, session: TradingSession, managed: ManagedIssues) -> Self {
+        let sort_tp = match order {
+            VolumeOrder::Volume => "1",
+            VolumeOrder::Turnover => "2",
+        };
+        let mang_stk_incls = match managed {
+            ManagedIssues::Include => "0",
+            ManagedIssues::Exclude => "1",
+        };
+        TradingVolumeRanking {
+            mrkt_tp: market.code(),
+            sort_tp,
+            mang_stk_incls,
+            crd_tp: "0",
+            trde_qty_tp: "0",
+            pric_tp: "0",
+            trde_prica_tp: "0",
+            mrkt_open_tp: session.code(),
+            stex_tp: exchange_code(venue),
+        }
+    }
+}
+
+market_request!(TradingVolumeRanking, Ka10030, wire::TradingVolumeRankingResponse);
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum SurgeBaseline {
+    PreviousDay,
+    OneMinute,
+    FiveMinutes,
+    TenMinutes,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum SurgeOrder {
+    Volume,
+    Rate,
+    DropRate,
+}
+
+#[derive(Serialize)]
+pub struct VolumeSurgeRanking {
+    mrkt_tp: &'static str,
+    sort_tp: &'static str,
+    tm_tp: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    tm: Option<&'static str>,
+    trde_qty_tp: &'static str,
+    stk_cnd: &'static str,
+    pric_tp: &'static str,
+    stex_tp: &'static str,
+}
+
+impl VolumeSurgeRanking {
+    pub fn new(market: RankMarket, venue: Venue, baseline: SurgeBaseline, order: SurgeOrder, managed: ManagedIssues) -> Self {
+        let (tm_tp, tm) = match baseline {
+            SurgeBaseline::PreviousDay => ("2", None),
+            SurgeBaseline::OneMinute => ("1", Some("1")),
+            SurgeBaseline::FiveMinutes => ("1", Some("5")),
+            SurgeBaseline::TenMinutes => ("1", Some("10")),
+        };
+        let sort_tp = match order {
+            SurgeOrder::Volume => "1",
+            SurgeOrder::Rate => "2",
+            SurgeOrder::DropRate => "4",
+        };
+        VolumeSurgeRanking {
+            mrkt_tp: market.code(),
+            sort_tp,
+            tm_tp,
+            tm,
+            trde_qty_tp: "5",
+            stk_cnd: managed.condition(),
+            pric_tp: "0",
+            stex_tp: exchange_code(venue),
+        }
+    }
+}
+
+market_request!(VolumeSurgeRanking, Ka10023, wire::VolumeSurgeRankingResponse);
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum PriceDirection {
+    Rising,
+    Falling,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum MinimumTradeValue {
+    Any,
+    OneHundredMillion,
+    OneBillion,
+    TenBillion,
+}
+
+impl MinimumTradeValue {
+    const fn code(self) -> &'static str {
+        match self {
+            MinimumTradeValue::Any => "0",
+            MinimumTradeValue::OneHundredMillion => "10",
+            MinimumTradeValue::OneBillion => "100",
+            MinimumTradeValue::TenBillion => "1000",
+        }
+    }
+}
+
+#[derive(Serialize)]
+pub struct PriceChangeRanking {
+    mrkt_tp: &'static str,
+    sort_tp: &'static str,
+    trde_qty_cnd: &'static str,
+    stk_cnd: &'static str,
+    crd_cnd: &'static str,
+    updown_incls: &'static str,
+    pric_cnd: &'static str,
+    trde_prica_cnd: &'static str,
+    stex_tp: &'static str,
+}
+
+impl PriceChangeRanking {
+    pub fn new(direction: PriceDirection, market: RankMarket, venue: Venue, limit_moves: LimitMoves, minimum_value: MinimumTradeValue, managed: ManagedIssues) -> Self {
+        let sort_tp = match direction {
+            PriceDirection::Rising => "1",
+            PriceDirection::Falling => "3",
+        };
+        PriceChangeRanking {
+            mrkt_tp: market.code(),
+            sort_tp,
+            trde_qty_cnd: "0000",
+            stk_cnd: managed.condition(),
+            crd_cnd: "0",
+            updown_incls: limit_moves.code(),
+            pric_cnd: "0",
+            trde_prica_cnd: minimum_value.code(),
+            stex_tp: exchange_code(venue),
+        }
+    }
+}
+
+market_request!(PriceChangeRanking, Ka10027, wire::PriceChangeRankingResponse);
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum ExpectedOrder {
+    Rising,
+    Falling,
+}
+
+#[derive(Serialize)]
+pub struct ExpectedExecutionRanking {
+    mrkt_tp: &'static str,
+    sort_tp: &'static str,
+    trde_qty_cnd: &'static str,
+    stk_cnd: &'static str,
+    crd_cnd: &'static str,
+    pric_cnd: &'static str,
+    stex_tp: &'static str,
+}
+
+impl ExpectedExecutionRanking {
+    pub fn new(order: ExpectedOrder, market: RankMarket, venue: Venue, managed: ManagedIssues) -> Self {
+        let sort_tp = match order {
+            ExpectedOrder::Rising => "1",
+            ExpectedOrder::Falling => "4",
+        };
+        ExpectedExecutionRanking {
+            mrkt_tp: market.code(),
+            sort_tp,
+            trde_qty_cnd: "0",
+            stk_cnd: managed.condition(),
+            crd_cnd: "0",
+            pric_cnd: "0",
+            stex_tp: exchange_code(venue),
+        }
+    }
+}
+
+market_request!(ExpectedExecutionRanking, Ka10029, wire::ExpectedExecutionRankingResponse);
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum InvestorGroup {
+    Foreigner,
+    ForeignFirm,
+    FinancialInvestment,
+    InvestmentTrust,
+    OtherFinance,
+    Bank,
+    Insurance,
+    Pension,
+    State,
+    OtherCorporation,
+    Institution,
+}
+
+impl InvestorGroup {
+    const fn code(self) -> &'static str {
+        match self {
+            InvestorGroup::Foreigner => "9000",
+            InvestorGroup::ForeignFirm => "9100",
+            InvestorGroup::FinancialInvestment => "1000",
+            InvestorGroup::InvestmentTrust => "3000",
+            InvestorGroup::OtherFinance => "5000",
+            InvestorGroup::Bank => "4000",
+            InvestorGroup::Insurance => "2000",
+            InvestorGroup::Pension => "6000",
+            InvestorGroup::State => "7000",
+            InvestorGroup::OtherCorporation => "7100",
+            InvestorGroup::Institution => "9999",
+        }
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum NetSide {
+    Buying,
+    Selling,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum InvestorUnit {
+    Amount,
+    Quantity,
+}
+
+#[derive(Serialize)]
+pub struct InvestorNetRanking {
+    trde_tp: &'static str,
+    mrkt_tp: &'static str,
+    orgn_tp: &'static str,
+    amt_qty_tp: &'static str,
+}
+
+impl InvestorNetRanking {
+    pub fn new(investor: InvestorGroup, side: NetSide, unit: InvestorUnit, market: RankMarket) -> Self {
+        let trde_tp = match side {
+            NetSide::Buying => "1",
+            NetSide::Selling => "2",
+        };
+        let amt_qty_tp = match unit {
+            InvestorUnit::Amount => "1",
+            InvestorUnit::Quantity => "2",
+        };
+        InvestorNetRanking { trde_tp, mrkt_tp: market.code(), orgn_tp: investor.code(), amt_qty_tp }
+    }
+}
+
+market_request!(InvestorNetRanking, Ka10065, wire::InvestorNetRankingResponse);
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum StreakSide {
+    Buying,
+    Selling,
+}
+
+#[derive(Serialize)]
+pub struct ForeignStreakRanking {
+    mrkt_tp: &'static str,
+    trde_tp: &'static str,
+    base_dt_tp: &'static str,
+    stex_tp: &'static str,
+}
+
+impl ForeignStreakRanking {
+    pub fn new(side: StreakSide, market: RankMarket, venue: Venue) -> Self {
+        let trde_tp = match side {
+            StreakSide::Buying => "2",
+            StreakSide::Selling => "1",
+        };
+        ForeignStreakRanking { mrkt_tp: market.code(), trde_tp, base_dt_tp: "0", stex_tp: exchange_code(venue) }
+    }
+}
+
+market_request!(ForeignStreakRanking, Ka10035, wire::ForeignStreakRankingResponse);
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum ProgramSide {
+    NetBuying,
+    NetSelling,
+}
+
+#[derive(Serialize)]
+pub struct ProgramNetRanking {
+    trde_upper_tp: &'static str,
+    amt_qty_tp: &'static str,
+    mrkt_tp: &'static str,
+    stex_tp: &'static str,
+}
+
+impl ProgramNetRanking {
+    pub fn new(side: ProgramSide, market: ListedMarket, venue: Venue) -> Self {
+        let trde_upper_tp = match side {
+            ProgramSide::NetBuying => "2",
+            ProgramSide::NetSelling => "1",
+        };
+        ProgramNetRanking { trde_upper_tp, amt_qty_tp: "1", mrkt_tp: market.program_code(), stex_tp: exchange_code(venue) }
+    }
+}
+
+market_request!(ProgramNetRanking, Ka90003, wire::ProgramNetRankingResponse);
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum BalanceOrder {
+    NetBuyBalance,
+    NetSellBalance,
+    BuyRatio,
+    SellRatio,
+}
+
+#[derive(Serialize)]
+pub struct OrderBookBalanceRanking {
+    mrkt_tp: &'static str,
+    sort_tp: &'static str,
+    trde_qty_tp: &'static str,
+    stk_cnd: &'static str,
+    crd_cnd: &'static str,
+    stex_tp: &'static str,
+}
+
+impl OrderBookBalanceRanking {
+    pub fn new(order: BalanceOrder, market: ListedMarket, venue: Venue, managed: ManagedIssues) -> Self {
+        let sort_tp = match order {
+            BalanceOrder::NetBuyBalance => "1",
+            BalanceOrder::NetSellBalance => "2",
+            BalanceOrder::BuyRatio => "3",
+            BalanceOrder::SellRatio => "4",
+        };
+        OrderBookBalanceRanking {
+            mrkt_tp: market.order_book_code(),
+            sort_tp,
+            trde_qty_tp: "0000",
+            stk_cnd: managed.condition(),
+            crd_cnd: "0",
+            stex_tp: exchange_code(venue),
+        }
+    }
+}
+
+market_request!(OrderBookBalanceRanking, Ka10020, wire::OrderBookBalanceRankingResponse);
+
+#[derive(Serialize)]
+pub struct CreditRatioRanking {
+    mrkt_tp: &'static str,
+    trde_qty_tp: &'static str,
+    stk_cnd: &'static str,
+    updown_incls: &'static str,
+    crd_cnd: &'static str,
+    stex_tp: &'static str,
+}
+
+impl CreditRatioRanking {
+    pub fn new(market: RankMarket, venue: Venue, managed: ManagedIssues) -> Self {
+        CreditRatioRanking {
+            mrkt_tp: market.code(),
+            trde_qty_tp: "0",
+            stk_cnd: managed.condition(),
+            updown_incls: LimitMoves::Include.code(),
+            crd_cnd: "0",
+            stex_tp: exchange_code(venue),
+        }
+    }
+}
+
+market_request!(CreditRatioRanking, Ka10033, wire::CreditRatioRankingResponse);
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum ViewWindow {
+    ThirtySeconds,
+    OneMinute,
+    TenMinutes,
+    OneHour,
+    Today,
+}
+
+#[derive(Serialize)]
+pub struct MostViewedRanking {
+    qry_tp: &'static str,
+}
+
+impl MostViewedRanking {
+    pub fn new(window: ViewWindow) -> Self {
+        let qry_tp = match window {
+            ViewWindow::ThirtySeconds => "5",
+            ViewWindow::OneMinute => "1",
+            ViewWindow::TenMinutes => "2",
+            ViewWindow::OneHour => "3",
+            ViewWindow::Today => "4",
+        };
+        MostViewedRanking { qry_tp }
+    }
+}
+
+market_request!(MostViewedRanking, Ka00198, wire::MostViewedRankingResponse);
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -541,5 +1116,138 @@ mod tests {
         assert_eq!(ApiId::Au10001.path(), "/oauth2/token");
         assert_eq!(ApiId::Ka10099.path(), "/api/dostk/stkinfo");
         assert_eq!(ApiId::Ka20007.path(), "/api/dostk/chart");
+    }
+
+    fn body(request: impl Serialize) -> serde_json::Value {
+        serde_json::to_value(request).unwrap()
+    }
+
+    #[test]
+    fn ranking_paths_follow_the_tr_family() {
+        let rkinfo = [ApiId::Ka10032, ApiId::Ka10030, ApiId::Ka10023, ApiId::Ka10027, ApiId::Ka10029, ApiId::Ka10065, ApiId::Ka10035, ApiId::Ka10020, ApiId::Ka10033];
+        assert!(rkinfo.iter().all(|id| id.path() == "/api/dostk/rkinfo"));
+        assert_eq!(ApiId::Ka90003.path(), "/api/dostk/stkinfo");
+        assert_eq!(ApiId::Ka00198.path(), "/api/dostk/stkinfo");
+        let names: Vec<_> = rkinfo.iter().chain([ApiId::Ka90003, ApiId::Ka00198].iter()).map(|id| id.as_str()).collect();
+        assert_eq!(names, ["ka10032", "ka10030", "ka10023", "ka10027", "ka10029", "ka10065", "ka10035", "ka10020", "ka10033", "ka90003", "ka00198"]);
+        assert_eq!(<TradeValueRanking as MarketRequest>::API_ID, ApiId::Ka10032);
+        assert_eq!(<MostViewedRanking as MarketRequest>::API_ID, ApiId::Ka00198);
+        assert_eq!(<ProgramNetRanking as MarketRequest>::API_ID, ApiId::Ka90003);
+    }
+
+    #[test]
+    fn trade_value_and_trading_volume_send_opposite_managed_issue_codes() {
+        assert_eq!(
+            body(TradeValueRanking::new(RankMarket::All, Venue::Combined, ManagedIssues::Exclude)),
+            json!({"mrkt_tp": "000", "mang_stk_incls": "0", "stex_tp": "3"})
+        );
+        assert_eq!(body(TradeValueRanking::new(RankMarket::Kospi, Venue::Krx, ManagedIssues::Include))["mang_stk_incls"], "1");
+        assert_eq!(
+            body(TradingVolumeRanking::new(VolumeOrder::Volume, RankMarket::Kosdaq, Venue::Nxt, TradingSession::Regular, ManagedIssues::Exclude)),
+            json!({"mrkt_tp": "101", "sort_tp": "1", "mang_stk_incls": "1", "crd_tp": "0", "trde_qty_tp": "0", "pric_tp": "0", "trde_prica_tp": "0", "mrkt_open_tp": "1", "stex_tp": "2"})
+        );
+        assert_eq!(body(TradingVolumeRanking::new(VolumeOrder::Turnover, RankMarket::All, Venue::Krx, TradingSession::All, ManagedIssues::Include))["sort_tp"], "2");
+        assert_eq!(body(TradingVolumeRanking::new(VolumeOrder::Turnover, RankMarket::All, Venue::Krx, TradingSession::All, ManagedIssues::Include))["mang_stk_incls"], "0");
+        let sessions: Vec<_> = [TradingSession::All, TradingSession::Regular, TradingSession::PreMarket, TradingSession::AfterMarket]
+            .map(|s| body(TradingVolumeRanking::new(VolumeOrder::Volume, RankMarket::All, Venue::Krx, s, ManagedIssues::Include))["mrkt_open_tp"].as_str().unwrap().to_owned())
+            .into();
+        assert_eq!(sessions, ["0", "1", "2", "3"]);
+    }
+
+    #[test]
+    fn volume_surge_baseline_is_previous_day_or_minutes() {
+        assert_eq!(
+            body(VolumeSurgeRanking::new(RankMarket::All, Venue::Krx, SurgeBaseline::PreviousDay, SurgeOrder::Rate, ManagedIssues::Include)),
+            json!({"mrkt_tp": "000", "sort_tp": "2", "tm_tp": "2", "trde_qty_tp": "5", "stk_cnd": "0", "pric_tp": "0", "stex_tp": "1"})
+        );
+        assert_eq!(
+            body(VolumeSurgeRanking::new(RankMarket::Kospi, Venue::Combined, SurgeBaseline::FiveMinutes, SurgeOrder::Volume, ManagedIssues::Exclude)),
+            json!({"mrkt_tp": "001", "sort_tp": "1", "tm_tp": "1", "tm": "5", "trde_qty_tp": "5", "stk_cnd": "1", "pric_tp": "0", "stex_tp": "3"})
+        );
+        let minutes: Vec<_> = [SurgeBaseline::OneMinute, SurgeBaseline::FiveMinutes, SurgeBaseline::TenMinutes]
+            .map(|b| body(VolumeSurgeRanking::new(RankMarket::All, Venue::Krx, b, SurgeOrder::DropRate, ManagedIssues::Include))["tm"].as_str().unwrap().to_owned())
+            .into();
+        assert_eq!(minutes, ["1", "5", "10"]);
+        assert_eq!(body(VolumeSurgeRanking::new(RankMarket::All, Venue::Krx, SurgeBaseline::OneMinute, SurgeOrder::DropRate, ManagedIssues::Include))["sort_tp"], "4");
+    }
+
+    #[test]
+    fn price_change_and_expected_execution_bodies() {
+        assert_eq!(
+            body(PriceChangeRanking::new(PriceDirection::Rising, RankMarket::All, Venue::Krx, LimitMoves::Include, MinimumTradeValue::Any, ManagedIssues::Exclude)),
+            json!({"mrkt_tp": "000", "sort_tp": "1", "trde_qty_cnd": "0000", "stk_cnd": "1", "crd_cnd": "0", "updown_incls": "1", "pric_cnd": "0", "trde_prica_cnd": "0", "stex_tp": "1"})
+        );
+        let falling = body(PriceChangeRanking::new(PriceDirection::Falling, RankMarket::Kosdaq, Venue::Nxt, LimitMoves::Exclude, MinimumTradeValue::TenBillion, ManagedIssues::Include));
+        assert_eq!((falling["sort_tp"].as_str(), falling["updown_incls"].as_str(), falling["trde_prica_cnd"].as_str(), falling["stk_cnd"].as_str()), (Some("3"), Some("0"), Some("1000"), Some("0")));
+        let floors: Vec<_> = [MinimumTradeValue::OneHundredMillion, MinimumTradeValue::OneBillion]
+            .map(|m| body(PriceChangeRanking::new(PriceDirection::Rising, RankMarket::All, Venue::Krx, LimitMoves::Include, m, ManagedIssues::Include))["trde_prica_cnd"].as_str().unwrap().to_owned())
+            .into();
+        assert_eq!(floors, ["10", "100"]);
+        assert_eq!(
+            body(ExpectedExecutionRanking::new(ExpectedOrder::Falling, RankMarket::Kospi, Venue::Combined, ManagedIssues::Exclude)),
+            json!({"mrkt_tp": "001", "sort_tp": "4", "trde_qty_cnd": "0", "stk_cnd": "1", "crd_cnd": "0", "pric_cnd": "0", "stex_tp": "3"})
+        );
+        assert_eq!(body(ExpectedExecutionRanking::new(ExpectedOrder::Rising, RankMarket::All, Venue::Krx, ManagedIssues::Include))["sort_tp"], "1");
+    }
+
+    #[test]
+    fn investor_net_body_has_no_exchange_and_maps_every_investor_group() {
+        assert_eq!(
+            body(InvestorNetRanking::new(InvestorGroup::Foreigner, NetSide::Buying, InvestorUnit::Amount, RankMarket::All)),
+            json!({"trde_tp": "1", "mrkt_tp": "000", "orgn_tp": "9000", "amt_qty_tp": "1"})
+        );
+        assert_eq!(body(InvestorNetRanking::new(InvestorGroup::Pension, NetSide::Selling, InvestorUnit::Quantity, RankMarket::Kosdaq)), json!({"trde_tp": "2", "mrkt_tp": "101", "orgn_tp": "6000", "amt_qty_tp": "2"}));
+        let groups = [
+            InvestorGroup::Foreigner,
+            InvestorGroup::ForeignFirm,
+            InvestorGroup::FinancialInvestment,
+            InvestorGroup::InvestmentTrust,
+            InvestorGroup::OtherFinance,
+            InvestorGroup::Bank,
+            InvestorGroup::Insurance,
+            InvestorGroup::Pension,
+            InvestorGroup::State,
+            InvestorGroup::OtherCorporation,
+            InvestorGroup::Institution,
+        ];
+        let codes: Vec<_> = groups.map(|g| body(InvestorNetRanking::new(g, NetSide::Buying, InvestorUnit::Amount, RankMarket::All))["orgn_tp"].as_str().unwrap().to_owned()).into();
+        assert_eq!(codes, ["9000", "9100", "1000", "3000", "5000", "4000", "2000", "6000", "7000", "7100", "9999"]);
+    }
+
+    #[test]
+    fn foreign_streak_and_program_bodies() {
+        assert_eq!(
+            body(ForeignStreakRanking::new(StreakSide::Buying, RankMarket::Kospi, Venue::Krx)),
+            json!({"mrkt_tp": "001", "trde_tp": "2", "base_dt_tp": "0", "stex_tp": "1"})
+        );
+        assert_eq!(body(ForeignStreakRanking::new(StreakSide::Selling, RankMarket::All, Venue::Combined))["trde_tp"], "1");
+        assert_eq!(
+            body(ProgramNetRanking::new(ProgramSide::NetBuying, ListedMarket::Kosdaq, Venue::Combined)),
+            json!({"trde_upper_tp": "2", "amt_qty_tp": "1", "mrkt_tp": "P10102", "stex_tp": "3"})
+        );
+        let kospi = body(ProgramNetRanking::new(ProgramSide::NetSelling, ListedMarket::Kospi, Venue::Nxt));
+        assert_eq!((kospi["trde_upper_tp"].as_str(), kospi["mrkt_tp"].as_str(), kospi["stex_tp"].as_str()), (Some("1"), Some("P00101"), Some("2")));
+    }
+
+    #[test]
+    fn order_book_credit_and_most_viewed_bodies() {
+        assert_eq!(
+            body(OrderBookBalanceRanking::new(BalanceOrder::NetBuyBalance, ListedMarket::Kospi, Venue::Krx, ManagedIssues::Exclude)),
+            json!({"mrkt_tp": "001", "sort_tp": "1", "trde_qty_tp": "0000", "stk_cnd": "1", "crd_cnd": "0", "stex_tp": "1"})
+        );
+        let orders: Vec<_> = [BalanceOrder::NetBuyBalance, BalanceOrder::NetSellBalance, BalanceOrder::BuyRatio, BalanceOrder::SellRatio]
+            .map(|o| body(OrderBookBalanceRanking::new(o, ListedMarket::Kosdaq, Venue::Krx, ManagedIssues::Include))["sort_tp"].as_str().unwrap().to_owned())
+            .into();
+        assert_eq!(orders, ["1", "2", "3", "4"]);
+        assert_eq!(body(OrderBookBalanceRanking::new(BalanceOrder::BuyRatio, ListedMarket::Kosdaq, Venue::Nxt, ManagedIssues::Include))["mrkt_tp"], "101");
+        assert_eq!(
+            body(CreditRatioRanking::new(RankMarket::All, Venue::Combined, ManagedIssues::Exclude)),
+            json!({"mrkt_tp": "000", "trde_qty_tp": "0", "stk_cnd": "1", "updown_incls": "1", "crd_cnd": "0", "stex_tp": "3"})
+        );
+        let windows: Vec<_> = [ViewWindow::ThirtySeconds, ViewWindow::OneMinute, ViewWindow::TenMinutes, ViewWindow::OneHour, ViewWindow::Today]
+            .map(|w| body(MostViewedRanking::new(w))["qry_tp"].as_str().unwrap().to_owned())
+            .into();
+        assert_eq!(windows, ["5", "1", "2", "3", "4"]);
+        assert_eq!(body(MostViewedRanking::new(ViewWindow::Today)), json!({"qry_tp": "4"}));
     }
 }
