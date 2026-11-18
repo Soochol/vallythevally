@@ -13,7 +13,7 @@ use sha2::{Digest, Sha256};
 
 pub use state_file::AccountStateFile;
 
-use self::client::{AccountClient, ClientError};
+use self::client::{AccountClient, ClientError, Me};
 use self::pending::PendingLogins;
 use self::state_file::Login;
 use crate::api::{AccountProvider, AccountStatus, UnixSeconds};
@@ -39,6 +39,27 @@ impl AccountServerUrl {
 
     pub fn as_str(&self) -> &str {
         self.0.as_str().trim_end_matches('/')
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProviderSubject {
+    pub provider: AccountProvider,
+    pub subject: String,
+}
+
+impl ProviderSubject {
+    pub fn parse(value: &str) -> Result<Self, String> {
+        let (provider, subject) = value.split_once(':').ok_or_else(|| format!("provider:subject 형식이 아닙니다: {value}"))?;
+        let provider = match provider {
+            "google" => AccountProvider::Google,
+            "naver" => AccountProvider::Naver,
+            other => return Err(format!("모르는 provider입니다(google이나 naver): {other}")),
+        };
+        if subject.is_empty() || subject.chars().any(|c| c.is_whitespace() || c.is_control()) {
+            return Err(format!("subject가 비었거나 공백·제어 문자를 담았습니다: {value}"));
+        }
+        Ok(ProviderSubject { provider, subject: subject.to_owned() })
     }
 }
 
@@ -235,14 +256,15 @@ impl AccountState {
         }
         let code = query.code.filter(|code| !code.is_empty()).ok_or(FailedLogin::BadRequest)?;
         let exchanged = linked.client.exchange(&code, &pending.verifier).await.map_err(FailedLogin::of_client)?;
-        let (account_id, provider) = match linked.client.me(&exchanged.token).await {
+        let me = match linked.client.me(&exchanged.token).await {
             Ok(me) => me,
             Err(e) => {
                 let _ = linked.client.revoke(&exchanged.token).await;
                 return Err(FailedLogin::of_client(e));
             }
         };
-        let login = Login { server_url: linked.url.as_str().to_owned(), token: exchanged.token, account_id, provider, signed_in_at: now };
+        let provider = me.provider;
+        let login = Login { server_url: linked.url.as_str().to_owned(), token: exchanged.token, account_id: me.id, provider, subject: me.subject, signed_in_at: now };
         let _write = self.write.lock().await;
         let previous = lock(&linked.login).clone();
         if let Err(e) = linked.file.save(&login) {
@@ -277,7 +299,7 @@ impl AccountState {
         let _write = self.write.lock().await;
         let login = lock(&linked.login).clone().ok_or(Refusal::NotSignedIn)?;
         match linked.client.me(&login.token).await {
-            Ok((account_id, _)) if account_id == login.account_id => Ok(()),
+            Ok(me) if me.id == login.account_id => self.remember_subject(linked, &login, me),
             Ok(_) | Err(ClientError::Rejected(401)) => {
                 tracing::warn!("계정 서버가 저장된 토큰을 받지 않아 로그아웃 상태로 돌립니다");
                 linked.file.remove().map_err(|e| {
@@ -290,6 +312,32 @@ impl AccountState {
             }
             Err(e) => Err(Refusal::ServerUnavailable(e)),
         }
+    }
+
+    fn remember_subject(&self, linked: &Linked, login: &Login, me: Me) -> Result<(), Refusal> {
+        let Some(subject) = me.subject.filter(|_| login.subject.is_none()) else { return Ok(()) };
+        let filled = Login { subject: Some(subject), ..login.clone() };
+        let mut current = lock(&linked.login);
+        if current.as_ref().is_none_or(|current| current.token.expose() != login.token.expose()) {
+            return Ok(());
+        }
+        linked.file.save(&filled).map_err(|e| {
+            tracing::error!(error = %e, "계정 상태 파일에 subject를 쓰지 못했습니다");
+            Refusal::Storage
+        })?;
+        *current = Some(filled);
+        drop(current);
+        self.session_changed();
+        Ok(())
+    }
+
+    pub fn signed_in_identity(&self) -> Option<ProviderSubject> {
+        let login = lock(&self.linked_mode()?.login).clone()?;
+        Some(ProviderSubject { provider: login.provider, subject: login.subject? })
+    }
+
+    pub fn is_signed_in_without_subject(&self) -> bool {
+        self.linked_mode().is_some_and(|linked| lock(&linked.login).as_ref().is_some_and(|login| login.subject.is_none()))
     }
 
     pub async fn logout(&self) -> Result<(), Refusal> {

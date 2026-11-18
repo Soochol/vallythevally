@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 
 use domain::KstTime;
 
-use crate::account::AccountServerUrl;
+use crate::account::{AccountServerUrl, ProviderSubject};
 use crate::kiwoom::wire::parse_kst_datetime;
 
 /// Debug와 Display 모두 "[가림]"만 낸다. 값은 `expose()`로만 꺼낸다(§11.3).
@@ -110,6 +110,8 @@ const KNOWN_KEYS: &[&str] = &[
     "VALLY_FINANCIAL_AUTOMATIC",
     "VALLY_ACCOUNT_SERVER_URL",
     "VALLY_ACCOUNT_STATE_PATH",
+    "VALLY_COLLECTOR_SOCKET",
+    "VALLY_COLLECTOR_ADMINS",
 ];
 
 #[derive(Debug, Clone)]
@@ -137,6 +139,8 @@ pub struct Config {
     pub financial_automatic: bool,
     pub account_server_url: Option<AccountServerUrl>,
     pub account_state_path: Option<PathBuf>,
+    pub collector_socket: Option<PathBuf>,
+    pub collector_admins: Vec<ProviderSubject>,
 }
 
 /// 설정을 읽으며 모은 경고. 로그를 켜기 전에 읽으므로 호출자가 나중에 남긴다.
@@ -204,6 +208,11 @@ impl Config {
             (None, Some(_)) => Some(default_account()?),
             (None, None) => default_account().ok(),
         };
+        let collector_admins = parse_collector_admins(vars.get("VALLY_COLLECTOR_ADMINS").map_or("", String::as_str))?;
+        let collector_socket = present("VALLY_COLLECTOR_SOCKET").map(PathBuf::from);
+        if !collector_admins.is_empty() && collector_socket.is_none() {
+            return Err(ConfigError("VALLY_COLLECTOR_ADMINS를 적으면 VALLY_COLLECTOR_SOCKET(감독 데몬의 unix socket 경로)도 적어야 합니다".into()));
+        }
         let config = Config {
             kiwoom_credentials,
             kiwoom_base_url,
@@ -232,6 +241,8 @@ impl Config {
             },
             account_server_url,
             account_state_path,
+            collector_socket,
+            collector_admins,
             financial_automatic: match vars.get("VALLY_FINANCIAL_AUTOMATIC").map(String::as_str) {
                 None | Some("on") => true,
                 Some("off") => false,
@@ -302,6 +313,20 @@ fn default_lock_path() -> Result<PathBuf, ConfigError> {
         .map_err(|e| ConfigError(format!("사용자 번호를 알 수 없어 잠금 파일 경로를 정할 수 없습니다: {e}")))?
         .uid();
     Ok(PathBuf::from(format!("/tmp/vallythevally-{uid}/server.lock")))
+}
+
+fn parse_collector_admins(value: &str) -> Result<Vec<ProviderSubject>, ConfigError> {
+    if value.trim().is_empty() {
+        return Ok(Vec::new());
+    }
+    let mut admins: Vec<ProviderSubject> = Vec::new();
+    for entry in value.split(',') {
+        let admin = ProviderSubject::parse(entry.trim()).map_err(|e| ConfigError(format!("VALLY_COLLECTOR_ADMINS: {e}")))?;
+        if !admins.contains(&admin) {
+            admins.push(admin);
+        }
+    }
+    Ok(admins)
 }
 
 fn default_token_path() -> Result<PathBuf, ConfigError> {
@@ -601,6 +626,26 @@ mod tests {
         for bad in ["http://account.example.com", "http://localhost:8090", "https://account.example.com/v1", "https://u:p@account.example.com", "account.example.com"] {
             assert!(start(&[("VALLY_ACCOUNT_SERVER_URL", bad)]).is_err(), "{bad}");
         }
+    }
+
+    #[test]
+    fn the_collector_allow_list_is_provider_colon_subject_pairs_and_a_bad_entry_stops_the_start() {
+        let start = |pairs: &[(&str, &str)]| Config::from_vars(vars(&[]), vars(pairs), lock, token, key, account).map(|(config, _)| config);
+        let socket = ("VALLY_COLLECTOR_SOCKET", "/run/collector/supervise.sock");
+        let none = start(&[]).unwrap();
+        assert!(none.collector_admins.is_empty() && none.collector_socket.is_none(), "설정이 없으면 현황판은 꺼진다");
+        assert!(start(&[("VALLY_COLLECTOR_ADMINS", " ")]).unwrap().collector_admins.is_empty());
+        let listed = start(&[socket, ("VALLY_COLLECTOR_ADMINS", "google:1234, naver:abc:def ,google:1234")]).unwrap();
+        let names: Vec<(crate::api::AccountProvider, &str)> = listed.collector_admins.iter().map(|admin| (admin.provider, admin.subject.as_str())).collect();
+        assert_eq!(names, [(crate::api::AccountProvider::Google, "1234"), (crate::api::AccountProvider::Naver, "abc:def")], "같은 항목은 한 번만 센다");
+        assert_eq!(listed.collector_socket, Some(PathBuf::from("/run/collector/supervise.sock")));
+        for bad in ["1234", "kakao:1234", "google:", ":1234", "google:1234,", ",google:1234", "google:12 34", "Google:1234"] {
+            let error = start(&[socket, ("VALLY_COLLECTOR_ADMINS", bad)]).expect_err(bad).to_string();
+            assert!(error.contains("VALLY_COLLECTOR_ADMINS"), "{error}");
+        }
+        let error = start(&[("VALLY_COLLECTOR_ADMINS", "google:1234")]).expect_err("소켓 없이 허용 목록만").to_string();
+        assert!(error.contains("VALLY_COLLECTOR_SOCKET"), "{error}");
+        assert!(start(&[socket]).is_ok(), "소켓만 있고 허용 목록이 비어도 시작한다(꺼짐)");
     }
 
     #[test]

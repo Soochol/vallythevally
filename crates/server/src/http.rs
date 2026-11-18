@@ -53,6 +53,7 @@ pub fn router(state: Arc<AppState>) -> Router {
         .merge(crate::intraday_feed::routes())
         .merge(crate::system_routes::routes(state.clone()))
         .merge(crate::account_routes::routes(state.clone()))
+        .merge(crate::collector::routes())
         .route("/api", any(api_not_found))
         .route("/api/{*rest}", any(api_not_found))
         .method_not_allowed_fallback(method_not_allowed)
@@ -128,6 +129,8 @@ pub fn status_of(code: api::ApiErrorCode) -> StatusCode {
         KiwoomUnavailable => StatusCode::SERVICE_UNAVAILABLE,
         // 키움이 우리 인증을 거절했다. 다시 시도해도 낫지 않으므로 503이 아니라 502로 둔다.
         KiwoomAuthFailed | AccountServerUnavailable => StatusCode::BAD_GATEWAY,
+        Forbidden => StatusCode::FORBIDDEN,
+        CollectorUnavailable => StatusCode::SERVICE_UNAVAILABLE,
         Conflict | StaleRevision | ScreenerNotReady => StatusCode::CONFLICT,
         PayloadTooLarge => StatusCode::PAYLOAD_TOO_LARGE,
         MethodNotAllowed => StatusCode::METHOD_NOT_ALLOWED,

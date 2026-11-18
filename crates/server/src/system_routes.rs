@@ -28,6 +28,7 @@ pub struct SystemState {
     key_file_problem: Mutex<Option<String>>,
     settings: Option<api::SystemSettings>,
     account: crate::account::AccountState,
+    collector: Option<crate::collector::CollectorBoard>,
     bound: OnceLock<std::net::SocketAddr>,
     bound_signal: tokio::sync::Notify,
     write: tokio::sync::Mutex<()>,
@@ -40,7 +41,7 @@ impl SystemState {
             tracing::warn!(error = %e, "등록한 IP 기록을 읽지 못했습니다. 없는 것으로 봅니다");
             None
         });
-        SystemState { key_file: Some(key_file), ip_file: Some(ip_file), registered_ip: Mutex::new(registered_ip), public_ip: None, env_key, key_file_problem: Mutex::new(key_file_problem.map(|e| e.to_string())), settings: Some(settings), account: crate::account::AccountState::local_only(), bound: OnceLock::new(), bound_signal: tokio::sync::Notify::new(), write: tokio::sync::Mutex::new(()) }
+        SystemState { key_file: Some(key_file), ip_file: Some(ip_file), registered_ip: Mutex::new(registered_ip), public_ip: None, env_key, key_file_problem: Mutex::new(key_file_problem.map(|e| e.to_string())), settings: Some(settings), account: crate::account::AccountState::local_only(), collector: None, bound: OnceLock::new(), bound_signal: tokio::sync::Notify::new(), write: tokio::sync::Mutex::new(()) }
     }
 
     pub fn with_public_ip(mut self, transport: Arc<dyn PublicIpTransport>) -> Self {
@@ -53,12 +54,21 @@ impl SystemState {
         self
     }
 
+    pub fn with_collector(mut self, collector: Option<crate::collector::CollectorBoard>) -> Self {
+        self.collector = collector;
+        self
+    }
+
+    pub fn collector(&self) -> Option<&crate::collector::CollectorBoard> {
+        self.collector.as_ref()
+    }
+
     pub fn account(&self) -> &crate::account::AccountState {
         &self.account
     }
 
     pub fn unconfigured() -> Self {
-        SystemState { key_file: None, ip_file: None, registered_ip: Mutex::new(None), public_ip: None, env_key: false, key_file_problem: Mutex::new(None), settings: None, account: crate::account::AccountState::local_only(), bound: OnceLock::new(), bound_signal: tokio::sync::Notify::new(), write: tokio::sync::Mutex::new(()) }
+        SystemState { key_file: None, ip_file: None, registered_ip: Mutex::new(None), public_ip: None, env_key: false, key_file_problem: Mutex::new(None), settings: None, account: crate::account::AccountState::local_only(), collector: None, bound: OnceLock::new(), bound_signal: tokio::sync::Notify::new(), write: tokio::sync::Mutex::new(()) }
     }
 
     pub fn bound(&self, addr: std::net::SocketAddr) {
