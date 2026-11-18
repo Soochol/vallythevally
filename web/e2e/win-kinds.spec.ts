@@ -49,7 +49,7 @@ test.beforeEach(async ({ page, scenario }) => {
 });
 
 for (const { kind, name } of KINDS) {
-  test(`${name} 창은 창 더하기에서 열리고 연동 색을 따르며 두 번째는 만들어지지 않는다`, async ({ page, scenario }) => {
+  test(`${name} 창은 창 더하기에서 열리고 연동 색을 따르며 두 번째가 만들어진다`, async ({ page, scenario }) => {
     twoLinkedCharts(scenario);
     emptyTrades(scenario);
     await page.goto("/");
@@ -71,10 +71,10 @@ for (const { kind, name } of KINDS) {
     await expect.poll(() => savedWindows(scenario).find((w) => w.kind === kind)?.link).toBe("b");
 
     await addButton(page).click();
-    await expect(kindItem(page, name)).toContainText("열려 있음");
+    await expect(kindItem(page, name)).toContainText("1개 열림");
     await kindItem(page, name).click();
-    await expect(windowTabs(page).getByRole("tab", { name: new RegExp(`^${name}`) })).toHaveCount(1);
-    expect(savedWindows(scenario).filter((w) => w.kind === kind)).toHaveLength(1);
+    await expect(windowTabs(page).getByRole("tab", { name: new RegExp(`^${name} \\d`) })).toHaveText([new RegExp(`^${name} 1`), new RegExp(`^${name} 2`)]);
+    await expect.poll(() => savedWindows(scenario).filter((w) => w.kind === kind).map((w) => w.id)).toEqual([kind, `${kind}-2`]);
   });
 }
 

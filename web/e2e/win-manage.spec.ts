@@ -36,13 +36,13 @@ async function addWindow(page: Page, name: string) {
 function expectServerRules(layout: Layout) {
   const ids = layout.windows.map((w) => w.id);
   expect(ids.length).toBeGreaterThanOrEqual(1);
-  expect(ids.length).toBeLessThanOrEqual(12);
+  expect(ids.length).toBeLessThanOrEqual(50);
   expect(new Set(ids).size).toBe(ids.length);
   for (const id of ids) expect(id).toMatch(/^[A-Za-z0-9_-]{1,64}$/);
   const charts = layout.windows.filter((w) => w.kind === "chart").length;
   expect(charts).toBeGreaterThanOrEqual(1);
   expect(charts).toBeLessThanOrEqual(8);
-  for (const kind of ["watchlist", "screener", "indicators"]) expect(layout.windows.filter((w) => w.kind === kind).length).toBeLessThanOrEqual(1);
+  expect(layout.windows.filter((w) => w.kind === "indicators").length).toBeLessThanOrEqual(1);
 }
 
 function twoSamsungCharts(scenario: Scenario) {
@@ -88,7 +88,7 @@ test("창 더하기에서 지표를 고르면 지표 창이 생기고, 다시 �
   await expect(cell(page)).toHaveAttribute("aria-busy", "false");
   await addButton(page).click();
   await expect(kindItem(page, "지표")).not.toContainText("열려 있음");
-  await expect(kindItem(page, "관심종목")).toContainText("열려 있음");
+  await expect(kindItem(page, "관심종목")).toContainText("1개 열림");
   await kindItem(page, "지표").click();
   await expect(tab(page, "지표")).toHaveAttribute("aria-selected", "true");
   await expect(windowTabs(page)).toHaveCount(4);
