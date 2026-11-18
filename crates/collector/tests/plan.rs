@@ -562,11 +562,11 @@ fn a_stock_with_a_count_of_one_goes_by_load_and_a_stock_with_no_count_goes_by_st
 }
 
 #[test]
-fn a_stock_with_no_count_goes_to_the_lighter_key_when_stock_counts_are_equal() {
-    let messages = loads(&[(0, 100), (1, 3)]);
-    let plan = plan(&two_collecting_keys(), &universe_of(3), &messages);
-    assert_eq!(share_of(&plan, "collect-01").stocks, codes(&[0]));
-    assert_eq!(share_of(&plan, "collect-02").stocks, codes(&[1, 2]));
+fn a_stock_that_sent_nothing_yesterday_is_placed_like_one_with_no_count() {
+    let messages = loads(&[(0, 100), (1, 3), (2, 3), (3, 3), (4, 1), (5, 0)]);
+    let plan = plan(&two_collecting_keys(), &universe_of(6), &messages);
+    assert_eq!(share_of(&plan, "collect-01").stocks, codes(&[0, 5]));
+    assert_eq!(share_of(&plan, "collect-02").stocks, codes(&[1, 2, 3, 4]));
 }
 
 #[test]
