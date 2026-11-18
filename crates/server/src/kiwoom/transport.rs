@@ -16,10 +16,12 @@ pub struct HttpRequest {
     pub body: Secret<String>,
 }
 
+pub const NEXT_KEY_ABSENT: &str = "";
+
 #[derive(Debug, Clone)]
 pub struct HttpResponse {
     pub status: u16,
-    /// 응답 헤더 `cont-yn: Y`일 때의 `next-key`. 아니면 None. 키 없이 Y이면 빈 문자열이다.
+    /// 응답 헤더 `cont-yn: Y`일 때의 `next-key`. 아니면 None.
     pub next_key: Option<String>,
     pub body: String,
 }

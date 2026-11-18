@@ -150,6 +150,7 @@ impl Demand {
         let mut call = Box::pin(rest.call(request, cont, priority, MergeScope::default()));
         loop {
             tokio::select! {
+                biased;
                 result = &mut call => return result,
                 Ok(()) = self.best.changed() => {
                     let best = *self.best.borrow_and_update();

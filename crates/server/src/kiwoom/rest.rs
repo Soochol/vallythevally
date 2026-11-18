@@ -979,8 +979,8 @@ fn judge_market(api_id: Endpoint, priority: Priority, res: Result<HttpResponse, 
         "키움 조회"
     );
     judged.map(|envelope| {
-        let continues_without_key = resp.next_key.as_deref() == Some("");
-        RawPage { body: resp.body.into(), next: resp.next_key.filter(|key| !key.is_empty()).map(ContKey), continues_without_key, envelope }
+        let continues_without_key = resp.next_key.as_deref() == Some(super::transport::NEXT_KEY_ABSENT);
+        RawPage { body: resp.body.into(), next: resp.next_key.filter(|key| key != super::transport::NEXT_KEY_ABSENT).map(ContKey), continues_without_key, envelope }
     })
 }
 

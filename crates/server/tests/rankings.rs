@@ -648,3 +648,37 @@ async fn before_kiwoom_is_connected_a_ranking_answers_not_connected() {
     }
     assert!(h.fake.calls().is_empty());
 }
+
+async fn post_to(app: Router, ranking: Ranking, pages: u8, trigger: &'static str) -> (u16, Value) {
+    let body = json!({"ranking": serde_json::to_value(ranking).unwrap(), "pages": pages, "trigger": trigger});
+    let request = Request::post("/api/rankings").header("content-type", "application/json").body(Body::from(body.to_string())).unwrap();
+    let response = app.oneshot(request).await.unwrap();
+    let status = response.status().as_u16();
+    (status, serde_json::from_slice(&response.into_body().collect().await.unwrap().to_bytes()).unwrap())
+}
+
+#[tokio::test]
+async fn a_user_joining_just_as_the_refresh_answer_lands_does_not_call_kiwoom_twice() {
+    let h = Harness::start(true).await;
+    h.fake.respond_with("ka10032", 200, trade_amount_page(&["000001"], None));
+    let mut per_round = Vec::new();
+    h.fake.delay("ka10032", Duration::from_millis(100));
+    for _ in 0..16 {
+        let before = h.calls("ka10032").len();
+        let held = h.fake.hold("refresh 1페이지", |c| c.api_id == "ka10032");
+        let walker = tokio::spawn(post_to(h.app.clone(), trade_amount(KEEP_ALL), 1, "refresh"));
+        held.arrived().await;
+        held.release();
+        let app = h.app.clone();
+        let user = tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(100)).await;
+            post_to(app, trade_amount(KEEP_ALL), 1, "user").await
+        });
+        let refresh = walker.await.unwrap();
+        let user = user.await.unwrap();
+        assert_eq!((refresh.0, user.0), (200, 200));
+        per_round.push(h.calls("ka10032").len() - before);
+        h.clock.jump(8);
+    }
+    assert!(per_round.iter().all(|&n| n == 1), "라운드마다 ka10032 호출 수: {per_round:?}");
+}
