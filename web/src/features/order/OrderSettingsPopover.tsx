@@ -1,8 +1,19 @@
 import { useEffect, useRef, useState } from "react";
+import type { Venue } from "../../api/generated/Venue";
+import { GearIcon } from "../icons";
+import { Segmented } from "../market-window/parts";
 import { type OrderSettings, type PresetKind, SHARE_PRESET_COUNT, withPresetOf } from "./orderSettings";
+import { MOCK_KRX_ONLY_TEXT, REJECT_TEXT } from "./statusText";
+
+const ROUTES = [{ value: "combined", label: "SOR" }, { value: "krx", label: "KRX" }, { value: "nxt", label: "NXT" }] as const;
+const MOCK_DISABLED_ROUTES: readonly Venue[] = ["combined", "nxt"];
+const routeLabel = (venue: Venue): string => ROUTES.find((route) => route.value === venue)!.label;
 
 interface Props {
   readonly settings: OrderSettings;
+  readonly venue: Venue;
+  readonly mock: boolean;
+  readonly nxtNotTraded: boolean;
   readonly holding: boolean;
   readonly onChange: (settings: OrderSettings) => void;
 }
@@ -46,7 +57,7 @@ function PresetInput({ settings, kind, index, label, onChange }: PresetInputProp
   );
 }
 
-export function OrderSettingsPopover({ settings, holding, onChange }: Props) {
+export function OrderSettingsPopover({ settings, venue, mock, nxtNotTraded, holding, onChange }: Props) {
   const [open, setOpen] = useState(false);
   const root = useRef<HTMLDivElement>(null);
 
@@ -64,10 +75,18 @@ export function OrderSettingsPopover({ settings, holding, onChange }: Props) {
 
   return (
     <div className="od-settings" ref={root}>
-      <button type="button" className="od-gear" data-testid="order-settings-button" aria-label="호가주문 설정" aria-expanded={open} onClick={() => setOpen((was) => !was)}>⚙</button>
+      <button type="button" className="od-gear" data-testid="order-settings-button" aria-label={`호가주문 설정 · 주문 경로 ${routeLabel(venue)}`} aria-expanded={open} data-warn={nxtNotTraded ? "" : undefined} title={nxtNotTraded ? REJECT_TEXT.nxt_unavailable : undefined} onClick={() => setOpen((was) => !was)}>
+        <span className="od-gear-route">{routeLabel(venue)}</span>
+        <GearIcon size={14} />
+      </button>
       {open && (
         <div className="od-settings-pop" role="dialog" aria-label="호가주문 설정" data-testid="order-settings">
           <p className="od-settings-head">모든 호가주문창에 적용</p>
+          <fieldset>
+            <legend>주문 경로</legend>
+            <Segmented label="주문 경로" options={ROUTES} value={venue} disabled={mock ? MOCK_DISABLED_ROUTES : undefined} onChange={(next) => onChange({ ...settings, venue: next })} />
+            {mock && <p className="od-route-note" data-testid="order-route-note">{MOCK_KRX_ONLY_TEXT}</p>}
+          </fieldset>
           {PRESET_GROUPS.map(({ kind, legend, ariaPrefix }) => (
             <fieldset key={kind}>
               <legend>{legend}</legend>

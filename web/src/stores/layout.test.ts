@@ -480,16 +480,15 @@ test("창 보이기는 같은 종류가 여럿이면 창 목록 순서의 첫 �
   expect(state().layout.windows).toHaveLength(windows);
 });
 
-test("복제는 연동 색과 주문 경로를 옮긴 새 창을 같은 묶음의 그 탭 바로 오른쪽에 놓고 고른다", () => {
+test("복제는 연동 색을 옮긴 새 창을 같은 묶음의 그 탭 바로 오른쪽에 놓고 고른다", () => {
   state().openWindow("order");
   state().setLink(windowId("order"), "a");
-  state().setOrderVenue(windowId("order"), "nxt");
   const group = () => groupOfWindow(state().layout.placement.dock!.root, windowId("order"))!;
   state().openWindow("trades", group().id);
   expect(group().tabs.slice(-2)).toEqual(["order", "trades"]);
   const copy = state().duplicateWindow(windowId("order"));
   expect(copy).toBe("order-2");
-  expect(state().layout.windows.find((w) => w.id === copy)).toEqual({ id: "order-2", link: "a", kind: "order", venue: "nxt" });
+  expect(state().layout.windows.find((w) => w.id === copy)).toEqual({ id: "order-2", link: "a", kind: "order", venue: "krx" });
   expect(group().tabs.slice(-3)).toEqual(["order", "order-2", "trades"]);
   expect(group().active).toBe("order-2");
   expect(state().steps.at(-1)?.before.windows.some((w) => w.id === "order-2")).toBe(false);

@@ -40,10 +40,6 @@ export function blankWindow(id: WindowId, kind: OtherWindowKind): OtherWindowSta
   return kind === "order" ? { id, link: null, kind, venue: DEFAULT_ORDER_VENUE } : { id, link: null, kind };
 }
 
-export const orderVenue = (layout: EditableLayout, id: WindowId): Venue => {
-  const window = layout.windows.find((w) => w.id === id);
-  return window?.kind === "order" ? window.venue : DEFAULT_ORDER_VENUE;
-};
 export type WindowState = ChartWindowState | OtherWindowState;
 
 export type EditableLayout = { id: string; name: string; sync: LayoutSync; windows: WindowState[]; placement: Placement };
@@ -185,7 +181,6 @@ interface LayoutState {
   setSymbol(cellId: WindowId, target: SymbolTarget): SymbolChange;
   sendSymbol(sender: WindowId | null, cellId: WindowId, target: SymbolTarget): SymbolChange;
   setLink(window: WindowId, link: LinkColor | null): void;
-  setOrderVenue(window: WindowId, venue: Venue): void;
   setWindowList(window: WindowId, list: string | null): void;
   setWindowScreen(window: WindowId, screen: string | null): void;
   pinSymbol(window: WindowId, code: SymbolCode | null): void;
@@ -428,7 +423,6 @@ export const useLayoutStore = create<LayoutState>()((set, get) => {
         return isChartWindow(w) && leader ? follow({ ...w, link }, leader) : { ...w, link };
       });
     },
-    setOrderVenue: (id, venue) => patchWindows((w) => (w.id === id && w.kind === "order" && w.venue !== venue ? { ...w, venue } : w)),
     setWindowList: (id, list) => patchWindows((w) => (w.id === id && w.kind === "watchlist" ? withOptional(w, "list", list) : w)),
     setWindowScreen: (id, screen) => patchWindows((w) => (w.id === id && w.kind === "screener" ? withOptional(w, "screen", screen) : w)),
     pinSymbol: (id, code) =>

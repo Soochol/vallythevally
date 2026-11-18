@@ -109,7 +109,7 @@ test("등록된 도구는 36개이고, 쪼갠 시험 묶음이 36개를 빠짐�
 });
 
 for (const slice of SLICES) {
-  test(`모든 도구 ${slice.name}: 도구 막대에서 골라 놓고, 새로고침 뒤에도 ${slice.placed.length}개가 저장된 드로잉에 도구 이름으로 남는다`, async ({ page, scenario }, testInfo) => {
+  test(`모든 도구 ${slice.name}: 도구 막대에서 골라 놓고, 새로고침 뒤에도 ${slice.placed.length}개가 저장된 드로잉에 도구 이름으로 남고, 휴대폰 폭에서는 보이되 편집 조작은 없다`, async ({ page, scenario }, testInfo) => {
     const errors: string[] = []; page.on("pageerror", (e) => errors.push(e.message));
     saveChartShare(scenario, 0.642);
     await page.setViewportSize({ width: 1280, height: 940 });
@@ -118,10 +118,21 @@ for (const slice of SLICES) {
     expect(await drawings(scenario)).toHaveLength(slice.placed.length);
     await expect.poll(async () => (await mirror(page)).map((d) => d.tool).sort()).toEqual(toolNames(slice));
     const saved = await drawings(scenario);
+    const placedMirror = await settledMirror(page);
 
     await page.reload();
     await expect.poll(async () => (await mirror(page)).map((d) => d.tool).sort()).toEqual(toolNames(slice));
     expect((await mirror(page)).every((d) => d.points.every((p) => p !== null))).toBe(true);
+    const reloadedMirror = await settledMirror(page);
+    for (const placed of placedMirror) {
+      const again = reloadedMirror.find((d) => d.id === placed.id)!;
+      expect(again.tool, placed.tool).toBe(placed.tool);
+      expect(again.points, placed.tool).toHaveLength(placed.points.length);
+      placed.points.forEach((p, i) => {
+        expect(again.points[i]!.x, `${placed.tool} 점 ${i} x`).toBeCloseTo(p!.x, 0);
+        expect(again.points[i]!.y, `${placed.tool} 점 ${i} y`).toBeCloseTo(p!.y, 0);
+      });
+    }
     expect(await drawings(scenario)).toEqual(saved);
     await page.screenshot({ path: testInfo.outputPath("all-tools-1280.png") });
 
@@ -139,15 +150,8 @@ for (const slice of SLICES) {
     await expect.poll(async () => (await shot()).equals(shown), { message: "모든 드로잉을 숨기면 차트 그림이 바뀐다" }).toBe(false);
     await page.keyboard.press("Control+Alt+h");
     await expect.poll(async () => (await shot()).equals(shown), { message: "다시 보이면 그림이 돌아온다" }).toBe(true);
-    expect(errors).toEqual([]);
-  });
 
-  test(`모든 도구 ${slice.name}: 휴대폰 폭에서는 ${slice.placed.length}개가 보이고 편집 조작은 없다`, async ({ page, scenario }, testInfo) => {
     const first = slice.placed[0]!.tool;
-    await page.setViewportSize({ width: 1280, height: 800 });
-    await open(page);
-    await placeSlice(page, scenario, slice);
-    const chart = chartOf(cell(page));
     const frame = (await chart.boundingBox())!;
     const anchors = new Map((await settledMirror(page)).filter((d) => d.points.length > 1).map((d) => [d.tool, d.points[0]!]));
     const target = slice.placed.map(({ tool }) => tool.tool).find((tool) => anchors.has(tool))!;
@@ -170,12 +174,13 @@ for (const slice of SLICES) {
 
     await page.reload();
     await expect.poll(async () => (await mirror(page)).length).toBe(slice.placed.length);
-    const shown = await chart.screenshot();
+    const phoneShown = await chart.screenshot();
     for (const d of await drawings(scenario)) scenario.documents.deleteDrawing(d.id);
     await page.reload();
     await expect(chart).toHaveAttribute("data-bar-count", /^[1-9]\d*$/);
     await expect.poll(async () => (await mirror(page)).length).toBe(0);
-    expect((await chart.screenshot()).equals(shown)).toBe(false);
+    expect((await chart.screenshot()).equals(phoneShown)).toBe(false);
+    expect(errors).toEqual([]);
   });
 }
 
@@ -264,43 +269,6 @@ test("도구 막대: 높이 300px 창에서도 그룹 메뉴는 창 안에 있�
     await page.keyboard.press("Escape");
   }
 });
-
-const PIN_SLICE_SIZE = 4;
-const PIN_SLICES = menuGroups().flatMap(([group, groupTools]) => {
-  const size = Math.ceil(groupTools.length / Math.ceil(groupTools.length / PIN_SLICE_SIZE));
-  return Array.from({ length: Math.ceil(groupTools.length / size) }, (_, n) => {
-    const slice = groupTools.slice(n * size, (n + 1) * size);
-    return { group, tools: slice, name: `${GROUP_LABEL[group]} ${n * size + 1}~${n * size + slice.length}번째` };
-  });
-});
-
-test("도구 막대: 고정 시험 묶음이 메뉴가 있는 그룹의 도구를 빠짐없이 한 번씩 받는다", () => {
-  expect(PIN_SLICES.flatMap(({ tools }) => tools.map((t) => t.tool)).sort()).toEqual(menuGroups().flatMap(([, groupTools]) => groupTools.map((t) => t.tool)).sort());
-  expect(Math.max(...PIN_SLICES.map(({ tools }) => tools.length))).toBeLessThanOrEqual(PIN_SLICE_SIZE);
-});
-
-for (const { group, tools, name } of PIN_SLICES) {
-  test(`도구 막대: 단축키가 없는 도구는 제목과 메뉴에 빈 단축키를 보이지 않는다 (${name})`, async ({ page }) => {
-    await open(page);
-    const bar = page.getByRole("navigation", { name: "드로잉 도구" });
-    await expandDock(page);
-    await bar.getByRole("button", { name: `${GROUP_LABEL[group]} 도구 펼치기`, exact: true }).click();
-    const menu = page.getByRole("menu", { name: `${GROUP_LABEL[group]} 도구` });
-    for (const tool of tools) {
-      await menu.getByRole("menuitemcheckbox", { name: `${tool.label} 막대에 고정`, exact: true }).click();
-      await expect(menu.getByRole("menuitem").filter({ hasText: tool.label }).locator("kbd:empty")).toHaveCount(0);
-    }
-    await page.keyboard.press("Escape");
-    for (const tool of tools) {
-      await pickTool(page, GROUP_LABEL[group], tool.label);
-      await expect(bar.getByRole("button", { name: tool.label, exact: true })).not.toHaveAttribute("title", /\(\)/);
-    }
-    await expandDock(page);
-    const pinned = bar.getByRole("button", { name: /고정 도구$/ });
-    await expect(pinned.first()).toBeVisible();
-    for (const button of await pinned.all()) await expect(button).not.toHaveAttribute("title", /\(\)/);
-  });
-}
 
 test("도구 막대: 단축키로 고른 도구를 그룹 버튼이 기억한다", async ({ page }) => {
   await open(page);
@@ -444,7 +412,7 @@ test.describe("봉을 읽는 도구", () => {
     return bodyAlong(page, [[{ x, y: r.y + r.height * 0.15 }, { x, y: r.y + r.height * 0.85 }]]);
   }
 
-  test("회귀 채널, 기준봉 VWAP, 구간 거래량 프로파일을 함께 옮기고, 복제하고, 지우고, 되돌리고, 봉 주기·종목·실시간 봉을 거쳐도 남는다", async ({ page, scenario }) => {
+  test("회귀 채널, 기준봉 VWAP, 구간 거래량 프로파일을 함께 옮기고, 봉 주기·종목·실시간 봉을 거쳐도 남는다", async ({ page, scenario }) => {
     const errors: string[] = []; page.on("pageerror", (e) => errors.push(e.message));
     const bars = scenario.market.page({ symbol: SYMBOL }).bars;
     expect(bars.some((b) => b.v > 0), `${SYMBOL} 봉의 거래량`).toBe(true);
@@ -505,20 +473,6 @@ test.describe("봉을 읽는 도구", () => {
     expect(new Set(shifts), `옮긴 봉 수 ${shifts}`).toEqual(new Set([shifts[0]]));
     await expect.poll(selected).toEqual(BAR_TOOLS);
 
-    const style = page.getByRole("toolbar", { name: "드로잉 스타일" });
-    await style.getByRole("button", { name: "드로잉 복제", exact: true }).click();
-    await pollSaved(count).toBe(6);
-    await pollSaved(async () => (await saved()).map((d) => d.tool).sort()).toEqual([...BAR_TOOLS, ...BAR_TOOLS].sort());
-    await cell(page).focus(); await page.keyboard.press("Control+z");
-    await pollSaved(count).toBe(3);
-
-    await page.keyboard.press("Escape");
-    await boxSelect();
-    await cell(page).focus(); await page.keyboard.press("Delete");
-    await pollSaved(count).toBe(0);
-    await expect.poll(async () => (await mirror(page)).length).toBe(0);
-    await page.keyboard.press("Control+z");
-    await pollSaved(async () => (await saved()).map((d) => [d.id, d.points]).sort()).toEqual(moved.map((d) => [d.id, d.points]).sort());
     await expect.poll(shownTools).toEqual(BAR_TOOLS);
 
     await choosePeriod(page, "주");

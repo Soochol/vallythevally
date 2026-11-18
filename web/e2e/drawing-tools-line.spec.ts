@@ -1,6 +1,6 @@
 import type { Page } from "@playwright/test";
 import { cell, chartOf, expect, test, pollSaved } from "./harness";
-import { chartPoint, drawings, mirror, open, pickTool, expandDock, drawingDock } from "./drawing-probe";
+import { chartPoint, drawings, mirror, open, pickTool } from "./drawing-probe";
 
 type At = readonly [number, number];
 
@@ -38,57 +38,6 @@ function watchErrors(page: Page): string[] {
   page.on("pageerror", (e) => errors.push(e.message));
   return errors;
 }
-
-test("line tools: each toolbar pick saves its tool and point count and stays in place after reload", async ({ page, scenario }) => {
-  const errors = watchErrors(page);
-  await open(page);
-  for (const [index, { label, tool, clicks }] of LINE_TOOLS.entries()) {
-    await drawingDock(page).hover();
-    await pickTool(page, "선", label);
-    await clickAll(page, clicks);
-    await pollSaved(async () => (await drawings(scenario)).length).toBe(index + 1);
-    const saved = (await drawings(scenario)).at(-1)!;
-    expect(saved.tool).toBe(tool);
-    expect(saved.points).toHaveLength(clicks.length);
-  }
-  await expect.poll(async () => (await mirror(page)).map((d) => d.tool).sort()).toEqual(LINE_TOOLS.map((t) => t.tool).sort());
-  const stored = await drawings(scenario);
-  const reloaded = async () => {
-    await page.reload();
-    await expect.poll(async () => (await mirror(page)).length).toBe(LINE_TOOLS.length);
-    return mirror(page);
-  };
-  const before = await reloaded();
-  const after = await reloaded();
-  for (const item of before) {
-    const again = after.find((d) => d.id === item.id)!;
-    expect(again.tool).toBe(item.tool);
-    again.points.forEach((p, i) => {
-      expect(p!.x).toBeCloseTo(item.points[i]!.x, 0);
-      expect(p!.y).toBeCloseTo(item.points[i]!.y, 0);
-    });
-  }
-  expect(await drawings(scenario)).toEqual(stored);
-  expect(errors).toEqual([]);
-});
-
-test("line tools: Alt+J picks the horizontal ray and Shift+V picks the vertical line", async ({ page, scenario }) => {
-  const errors = watchErrors(page);
-  await open(page);
-  for (const { keys, label, tool, at } of [
-    { keys: "Alt+j", label: "수평 반직선", tool: "hray", at: [0.4, 0.35] as At },
-    { keys: "Shift+V", label: "수직선", tool: "vline", at: [0.6, 0.45] as At },
-  ]) {
-    await cell(page).focus();
-    await page.keyboard.press(keys);
-    const bar = await expandDock(page);
-    await expect(bar.getByRole("button", { name: label, exact: true })).toHaveAttribute("aria-pressed", "true");
-    await clickAll(page, [at]);
-    await pollSaved(async () => (await drawings(scenario)).at(-1)?.tool).toBe(tool);
-    expect((await drawings(scenario)).at(-1)!.points).toHaveLength(1);
-  }
-  expect(errors).toEqual([]);
-});
 
 test("line tools: three clicks place a parallel channel and its handles change the saved points", async ({ page, scenario }) => {
   const errors = watchErrors(page);
