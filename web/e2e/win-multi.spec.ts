@@ -5,6 +5,7 @@ import type { Quote } from "../src/api/generated/Quote";
 import type { LayoutWindow } from "../src/api/generated/LayoutWindow";
 import { type Scenario, cell, DEFAULT_LAYOUT_ID, expect, pollSaved, test } from "./harness";
 import { BASE, CODE, ordersOn, pinQuote, snapshot, tradingApi, win } from "./order-window";
+import { readyStatus, resultRows } from "./fixtures/screener";
 
 const SETTINGS = { v: 1, style: "candle", scale: "normal", indicators: [], compare: [], panels: [] };
 const WINDOW_LIMIT = "창은 50개까지 둘 수 있습니다";
@@ -439,4 +440,113 @@ test("두 창의 목록에 있는 종목이 모두 구독되고 각 창의 현�
   scenario.live.emit({ type: "quotes", venue: "combined", quotes: [quote("005930", 51_500), quote("000660", 201_500)] });
   await expect(watchRow(page, 0, "005930")).toContainText("51,500");
   await expect(watchRow(page, 1, "000660")).toContainText("201,500");
+});
+
+const SCREEN_A = { id: "scr-a", name: "조건식 가", markets: [], exclude: [], conditions: [] };
+const SCREEN_B = { id: "scr-b", name: "조건식 나", markets: [], exclude: [], conditions: [] };
+const SCREENER_WINDOWS: LayoutWindow[] = [{ id: "screener", link: null, kind: "screener" }, { id: "screener-2", link: null, kind: "screener" }];
+
+const screenerPanels = (page: Page) => page.getByRole("complementary", { name: "스크리너" });
+const screenerRows = (panel: Locator) => panel.locator("tr[data-code]");
+const screenChooser = (panel: Locator) => panel.getByRole("button", { name: "조건식 고르기", exact: true });
+const savedScreens = (scenario: Scenario) => savedWindows(scenario, "screener").map((w) => [w.id, "screen" in w ? w.screen : undefined]);
+
+async function chooseScreen(page: Page, panel: Locator, name: string) {
+  await screenChooser(panel).click();
+  await page.getByRole("menu", { name: "조건식 고르기" }).getByRole("menuitemradio", { name }).click();
+  await expect(screenChooser(panel)).toHaveText(name);
+}
+
+async function runIn(panel: Locator) {
+  await panel.getByRole("button", { name: "실행", exact: true }).click();
+}
+
+function seedScreenerWindows(scenario: Scenario, windows: LayoutWindow[] = SCREENER_WINDOWS, mode: "dock" | "canvas" = "canvas") {
+  const ran: string[] = [];
+  scenario.documents.saveScreens({ screens: [SCREEN_A, SCREEN_B], revision: 1 });
+  scenario.on("/api/screener/status", () => ({ body: readyStatus() }));
+  scenario.on("/api/screener/run", (request) => {
+    const id: string = request.postDataJSON().id;
+    ran.push(id);
+    return { body: id === SCREEN_B.id ? resultRows([["110040", "나종목", "당일"], ["110050", "나둘", "당일"]]) : resultRows([["110030", "가종목", "당일"]]) };
+  });
+  if (mode === "dock") {
+    saveWindows(scenario, windows, "dock");
+    return ran;
+  }
+  const layout = saved(scenario);
+  const rects = { "cell-0": { x: 0, y: 0, w: .3, h: .3 }, "cell-1": { x: .3, y: 0, w: .3, h: .3 }, screener: { x: .02, y: .05, w: .46, h: .9 }, "screener-2": { x: .52, y: .05, w: .46, h: .9 } };
+  scenario.documents.saveLayout({ ...layout, windows: [...charts, ...windows], placement: { v: 1, dock: null, canvas: { rects, order: ["cell-0", "cell-1", "screener", "screener-2"] } }, revision: layout.revision + 1 });
+  scenario.documents.saveUiState({ ...scenario.documents.uiState(), layoutMode: "canvas" });
+  return ran;
+}
+
+test("스크리너 창 둘에서 각자 다른 조건식을 고르고 실행하면 결과가 각자 다르고 창마다 고른 조건식이 저장되며 새로 고쳐도 그대로다", async ({ page, scenario }) => {
+  seedScreenerWindows(scenario);
+  await open(page);
+  const panels = screenerPanels(page);
+  await expect(panels).toHaveCount(2);
+  await expect(screenChooser(panels.nth(0))).toHaveText(SCREEN_A.name);
+  await expect(screenChooser(panels.nth(1))).toHaveText(SCREEN_A.name);
+
+  await chooseScreen(page, panels.nth(1), SCREEN_B.name);
+  await expect(screenChooser(panels.nth(0))).toHaveText(SCREEN_A.name);
+  await runIn(panels.nth(0));
+  await runIn(panels.nth(1));
+  await expect(screenerRows(panels.nth(0))).toHaveCount(1);
+  await expect(screenerRows(panels.nth(1))).toHaveCount(2);
+  await expect(screenerRows(panels.nth(0)).first()).toHaveAttribute("data-code", "110030");
+  await expect(screenerRows(panels.nth(1)).first()).toHaveAttribute("data-code", "110040");
+  await pollSaved(() => savedScreens(scenario)).toEqual([["screener", undefined], ["screener-2", SCREEN_B.id]]);
+
+  await chooseScreen(page, panels.nth(0), SCREEN_A.name);
+  await pollSaved(() => savedScreens(scenario)).toEqual([["screener", SCREEN_A.id], ["screener-2", SCREEN_B.id]]);
+
+  await page.reload();
+  await expect(cell(page)).toHaveAttribute("aria-busy", "false");
+  await expect(screenChooser(screenerPanels(page).nth(0))).toHaveText(SCREEN_A.name);
+  await expect(screenChooser(screenerPanels(page).nth(1))).toHaveText(SCREEN_B.name);
+});
+
+test("둘째 스크리너 창에서 편집 창을 열면 둘째 창의 조건식이 열린다", async ({ page, scenario }) => {
+  seedScreenerWindows(scenario, [{ id: "screener", link: null, kind: "screener", screen: SCREEN_A.id }, { id: "screener-2", link: null, kind: "screener", screen: SCREEN_B.id }]);
+  await open(page);
+  const panels = screenerPanels(page);
+  await panels.nth(1).getByRole("button", { name: "편집", exact: true }).click();
+  await expect(page.getByRole("dialog", { name: "조건 편집 창", exact: true }).getByRole("textbox", { name: "조건식 이름", exact: true })).toHaveValue(SCREEN_B.name);
+  await expect(screenChooser(panels.nth(0))).toHaveText(SCREEN_A.name);
+});
+
+test("screen이 없는 옛 레이아웃의 스크리너 창은 첫 조건식을 보이고, 가리키던 조건식이 없어져도 첫 조건식을 보인다", async ({ page, scenario }) => {
+  seedScreenerWindows(scenario, [{ id: "screener", link: null, kind: "screener" }, { id: "screener-2", link: null, kind: "screener", screen: "지워진 조건식" }]);
+  await open(page);
+  const panels = screenerPanels(page);
+  await expect(screenChooser(panels.nth(0))).toHaveText(SCREEN_A.name);
+  await expect(screenChooser(panels.nth(1))).toHaveText(SCREEN_A.name);
+});
+
+test("Ctrl+Enter는 마지막으로 만진 스크리너 창의 조건식을 실행한다", async ({ page, scenario }) => {
+  const ran = seedScreenerWindows(scenario);
+  await open(page);
+  const panels = screenerPanels(page);
+  await chooseScreen(page, panels.nth(1), SCREEN_B.name);
+  await page.keyboard.press("Control+Enter");
+  await expect.poll(() => ran).toEqual([SCREEN_B.id]);
+  await screenChooser(panels.nth(0)).click();
+  await page.keyboard.press("Escape");
+  await page.keyboard.press("Control+Enter");
+  await expect.poll(() => ran).toEqual([SCREEN_B.id, SCREEN_A.id]);
+});
+
+test("독 모드에서 가려진 첫 스크리너 탭이 있어도 보이는 스크리너 창이 Ctrl+Enter를 받는다", async ({ page, scenario }) => {
+  const ran = seedScreenerWindows(scenario, [{ id: "screener", link: null, kind: "screener", screen: SCREEN_A.id }, { id: "screener-2", link: null, kind: "screener", screen: SCREEN_B.id }], "dock");
+  await open(page);
+  await tabOf(page, "screener-2").click();
+  await expect(screenChooser(screenerPanels(page))).toHaveText(SCREEN_B.name);
+  await page.keyboard.press("Control+Enter");
+  await expect.poll(() => ran).toEqual([SCREEN_B.id]);
+  await tabOf(page, "screener").click();
+  await expect(screenChooser(screenerPanels(page))).toHaveText(SCREEN_A.name);
+  await page.keyboard.press("Control+Enter");
+  await expect.poll(() => ran).toEqual([SCREEN_B.id, SCREEN_A.id]);
 });

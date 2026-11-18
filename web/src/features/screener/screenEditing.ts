@@ -53,6 +53,11 @@ export interface ScreenEditingView {
 
 export type RunOutcome = { kind: "ran" | "none" | "invalid" | "blocked" | "busy" } | { kind: "failed"; message: string };
 
+export interface ChosenSlot {
+  get(): string | null;
+  set(id: string | null): void;
+}
+
 export interface ScreenEditing {
   view(): ScreenEditingView;
   subscribe(listener: () => void): () => void;
@@ -62,6 +67,10 @@ export interface ScreenEditing {
   save(): Promise<boolean>;
   remove(): Promise<boolean>;
   run(): Promise<RunOutcome>;
+}
+
+export interface ScreenEditingHub extends ScreenEditing {
+  over(slot: ChosenSlot): ScreenEditing;
 }
 
 type Saving = { kind: "idle" } | { kind: "saving" } | { kind: "failed"; message: string };
@@ -77,7 +86,6 @@ interface EditState {
 
 interface State {
   list: Screens | null;
-  chosen: string | null;
   edits: Readonly<Record<string, EditState>>;
 }
 
@@ -113,28 +121,40 @@ const sources = (list: Screens, edits: Edits): Screen[] => [
   ...Object.values(edits).filter((edit) => isDirty(edit) && !list.screens.some((screen) => screen.id === edit.source.id)).map((edit) => edit.source),
 ];
 
-export function createScreenEditing({ screens, runner }: { screens: ScreensPort; runner: ScreenRunner }): ScreenEditing {
-  let state: State = { list: null, chosen: null, edits: {} };
-  let shown: { state: State; runs: Runs; view: ScreenEditingView } | null = null;
+export function createScreenEditing({ screens, runner }: { screens: ScreensPort; runner: ScreenRunner }): ScreenEditingHub {
+  let state: State = { list: null, edits: {} };
+  let ownChosen: string | null = null;
   const listeners = new Set<() => void>();
+  const notify = () => {
+    for (const listener of listeners) listener();
+  };
   const set = (next: State) => {
     state = next;
-    for (const listener of listeners) listener();
+    notify();
+  };
+  const ownSlot: ChosenSlot = {
+    get: () => ownChosen,
+    set: (id) => {
+      ownChosen = id;
+      notify();
+    },
   };
   const keep = (id: string, edit: EditState) => set({ ...state, edits: { ...state.edits, [id]: edit } });
   const see = (list: Screens) => {
     if (!state.list || list.revision > state.list.revision) set({ ...state, list });
   };
-  const discard = (id: string) => {
+  const discard = (id: string, slot: ChosenSlot) => {
     const edits = Object.fromEntries(Object.entries(state.edits).filter(([key]) => key !== id));
     const next = state.list ? sources(state.list, edits)[0] : undefined;
-    set({ ...state, edits, chosen: next?.id ?? null });
+    set({ ...state, edits });
+    slot.set(next?.id ?? null);
   };
-  const pick = (): Picked | null => {
+  const pick = (slot: ChosenSlot): Picked | null => {
     const { list } = state;
     if (!list) return null;
     const all = sources(list, state.edits);
-    const source = all.find((screen) => screen.id === state.chosen) ?? all[0];
+    const chosenId = slot.get();
+    const source = all.find((screen) => screen.id === chosenId) ?? all[0];
     return source ? { list, source, edit: current(list, source, state.edits) } : null;
   };
   const chosenOf = ({ list, source, edit }: Picked, runs: Runs): ChosenScreen => {
@@ -159,14 +179,14 @@ export function createScreenEditing({ screens, runner }: { screens: ScreensPort;
       alerts: [listError, notice].filter((message): message is string => message !== null),
     };
   };
-  const viewOf = (runs: Runs): ScreenEditingView => {
+  const viewOf = (slot: ChosenSlot, runs: Runs): ScreenEditingView => {
     const { list } = state;
     if (!list) return { entries: [], chosen: null };
     const entries = sources(list, state.edits).map((source): ScreenEntry => {
       const edit = current(list, source, state.edits);
       return { source, name: edit.form.name, title: titleOf(edit.form.name), conditions: edit.form.conditions.length, dirty: isDirty(edit) };
     });
-    const picked = pick();
+    const picked = pick(slot);
     return { entries, chosen: picked && chosenOf(picked, runs) };
   };
   const invalid = (picked: Picked, runs: Runs) => {
@@ -175,99 +195,107 @@ export function createScreenEditing({ screens, runner }: { screens: ScreensPort;
     return true;
   };
   screens.watch(see);
-  return {
-    view: () => {
-      const runs = runner.runs();
-      if (shown?.state !== state || shown.runs !== runs) shown = { state, runs, view: viewOf(runs) };
-      return shown.view;
-    },
-    subscribe: (listener) => {
-      listeners.add(listener);
-      return () => listeners.delete(listener);
-    },
-    choose: (id) => set({ ...state, chosen: id }),
-    edit: (update) => {
-      const picked = pick();
-      if (picked && picked.edit.saving.kind !== "saving") keep(picked.source.id, { ...picked.edit, form: update(picked.edit.form) });
-    },
-    create: (copy = false) => {
-      const { list } = state;
-      if (!list) return;
-      const id = crypto.randomUUID();
-      const source: Screen = { id, name: "새 조건식", conditions: [], markets: [], exclude: [] };
-      const from = copy ? pick()?.edit.form : undefined;
-      const form = from ? { ...structuredClone(from), name: `${from.name} 복사` } : draftOf(source);
-      set({ ...state, chosen: id, edits: { ...state.edits, [id]: { ...fresh(list, source), form, initial: null } } });
-    },
-    save: async () => {
-      const picked = pick();
-      if (!picked || !canSave(picked.edit)) return false;
-      const { source, edit } = picked;
-      const known = latest(picked.list, edit);
-      const checked = checkDraft(edit.form, source.id, known.screens);
-      if (!checked.ok) {
-        keep(source.id, { ...edit, tried: true });
-        return false;
-      }
-      keep(source.id, { ...edit, saving: { kind: "saving" } });
-      const outcome = await screens.put(withScreen(known.screens, checked.screen), edit.base.revision);
-      if (outcome.kind === "error") {
-        keep(source.id, { ...edit, saving: failed(`저장하지 못했습니다: ${outcome.message}`) });
-        return false;
-      }
-      if (outcome.kind === "stale") {
-        see(outcome.latest);
-        keep(source.id, { ...edit, base: outcome.latest, saving: failed(STALE_SAVE) });
-        return false;
-      }
-      see(outcome.saved);
-      keep(source.id, { ...edit, source: checked.screen, base: state.list ?? outcome.saved, initial: edit.form, saving: { kind: "idle" }, tried: false });
-      return true;
-    },
-    remove: async () => {
-      const picked = pick();
-      if (!picked || picked.edit.saving.kind === "saving") return false;
-      const { source, edit } = picked;
-      if (edit.initial === null) {
-        discard(source.id);
+  const over = (slot: ChosenSlot): ScreenEditing => {
+    let shown: { state: State; runs: Runs; chosenId: string | null; view: ScreenEditingView } | null = null;
+    return {
+      view: () => {
+        const runs = runner.runs();
+        const chosenId = slot.get();
+        if (shown?.state !== state || shown.runs !== runs || shown.chosenId !== chosenId) shown = { state, runs, chosenId, view: viewOf(slot, runs) };
+        return shown.view;
+      },
+      subscribe: (listener) => {
+        listeners.add(listener);
+        return () => listeners.delete(listener);
+      },
+      choose: (id) => slot.set(id),
+      edit: (update) => {
+        const picked = pick(slot);
+        if (picked && picked.edit.saving.kind !== "saving") keep(picked.source.id, { ...picked.edit, form: update(picked.edit.form) });
+      },
+      create: (copy = false) => {
+        const { list } = state;
+        if (!list) return;
+        const id = crypto.randomUUID();
+        const source: Screen = { id, name: "새 조건식", conditions: [], markets: [], exclude: [] };
+        const from = copy ? pick(slot)?.edit.form : undefined;
+        const form = from ? { ...structuredClone(from), name: `${from.name} 복사` } : draftOf(source);
+        set({ ...state, edits: { ...state.edits, [id]: { ...fresh(list, source), form, initial: null } } });
+        slot.set(id);
+      },
+      save: async () => {
+        const picked = pick(slot);
+        if (!picked || !canSave(picked.edit)) return false;
+        const { source, edit } = picked;
+        const known = latest(picked.list, edit);
+        const checked = checkDraft(edit.form, source.id, known.screens);
+        if (!checked.ok) {
+          keep(source.id, { ...edit, tried: true });
+          return false;
+        }
+        keep(source.id, { ...edit, saving: { kind: "saving" } });
+        const outcome = await screens.put(withScreen(known.screens, checked.screen), edit.base.revision);
+        if (outcome.kind === "error") {
+          keep(source.id, { ...edit, saving: failed(`저장하지 못했습니다: ${outcome.message}`) });
+          return false;
+        }
+        if (outcome.kind === "stale") {
+          see(outcome.latest);
+          keep(source.id, { ...edit, base: outcome.latest, saving: failed(STALE_SAVE) });
+          return false;
+        }
+        see(outcome.saved);
+        keep(source.id, { ...edit, source: checked.screen, base: state.list ?? outcome.saved, initial: edit.form, saving: { kind: "idle" }, tried: false });
         return true;
-      }
-      const known = latest(picked.list, edit);
-      keep(source.id, { ...edit, saving: { kind: "saving" } });
-      const outcome = await screens.put(known.screens.filter((screen) => screen.id !== source.id), edit.base.revision);
-      if (outcome.kind === "error") {
-        keep(source.id, { ...edit, saving: failed(`삭제하지 못했습니다: ${outcome.message}`) });
-        return false;
-      }
-      if (outcome.kind === "stale") {
-        see(outcome.latest);
-        keep(source.id, { ...edit, base: outcome.latest, saving: failed(STALE_DELETE) });
-        return false;
-      }
-      see(outcome.saved);
-      discard(source.id);
-      return true;
-    },
-    run: async () => {
-      const before = pick();
-      if (before && invalid(before, runner.runs())) return { kind: "invalid" };
-      const [loaded, check] = await Promise.all([screens.load(), runner.check()]);
-      if (loaded.kind === "error") return { kind: "failed", message: loaded.message };
-      see(loaded.list);
-      const picked = pick();
-      if (!picked) return { kind: "none" };
-      const runs = runner.runs();
-      if (invalid(picked, runs)) return { kind: "invalid" };
-      if (check.kind === "error") return { kind: "failed", message: check.message };
-      if (check.kind === "blocked") return { kind: "blocked" };
-      const chosen = chosenOf(picked, runs);
-      if (chosen.run?.kind === "running") return { kind: "busy" };
-      try {
-        await runner.run(chosen.screen);
-        return { kind: "ran" };
-      } catch (e) {
-        return { kind: "failed", message: reason(e) };
-      }
-    },
+      },
+      remove: async () => {
+        const picked = pick(slot);
+        if (!picked || picked.edit.saving.kind === "saving") return false;
+        const { source, edit } = picked;
+        if (edit.initial === null) {
+          discard(source.id, slot);
+          return true;
+        }
+        const known = latest(picked.list, edit);
+        keep(source.id, { ...edit, saving: { kind: "saving" } });
+        const outcome = await screens.put(known.screens.filter((screen) => screen.id !== source.id), edit.base.revision);
+        if (outcome.kind === "error") {
+          keep(source.id, { ...edit, saving: failed(`삭제하지 못했습니다: ${outcome.message}`) });
+          return false;
+        }
+        if (outcome.kind === "stale") {
+          see(outcome.latest);
+          keep(source.id, { ...edit, base: outcome.latest, saving: failed(STALE_DELETE) });
+          return false;
+        }
+        see(outcome.saved);
+        discard(source.id, slot);
+        return true;
+      },
+      run: async () => {
+        const startedOn = slot.get();
+        const pinned: ChosenSlot = { get: () => startedOn, set: slot.set };
+        const before = pick(pinned);
+        if (before && invalid(before, runner.runs())) return { kind: "invalid" };
+        const [loaded, check] = await Promise.all([screens.load(), runner.check()]);
+        if (loaded.kind === "error") return { kind: "failed", message: loaded.message };
+        see(loaded.list);
+        const picked = pick(pinned);
+        if (!picked) return { kind: "none" };
+        const runs = runner.runs();
+        if (invalid(picked, runs)) return { kind: "invalid" };
+        if (check.kind === "error") return { kind: "failed", message: check.message };
+        if (check.kind === "blocked") return { kind: "blocked" };
+        const chosen = chosenOf(picked, runs);
+        if (chosen.run?.kind === "running") return { kind: "busy" };
+        try {
+          await runner.run(chosen.screen);
+          return { kind: "ran" };
+        } catch (e) {
+          return { kind: "failed", message: reason(e) };
+        }
+      },
+    };
   };
+  return { ...over(ownSlot), over };
 }

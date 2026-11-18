@@ -39,7 +39,7 @@ function ChartTabLabel({ id }: { id: WindowId }) {
 
 function OtherTabLabel({ window }: { window: WindowState }) {
   const name = useWindowName(window);
-  return <><span className="dock-tab-name">{name}</span>{window.kind === "screener" && <ScreenerBadge />}{showsIntegratedBadge(window.kind) && <IntegratedBadge />}</>;
+  return <><span className="dock-tab-name">{name}</span>{window.kind === "screener" && <ScreenerBadge id={window.id} />}{showsIntegratedBadge(window.kind) && <IntegratedBadge />}</>;
 }
 
 function TabLabel({ window }: { window: WindowState }) {
