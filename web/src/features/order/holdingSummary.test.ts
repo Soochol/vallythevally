@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { TradingHolding } from "../../api/generated/TradingHolding";
-import { averageRowPrice, formatFillTime, holdingOf, isEtfAfterHours, profitText, sellableFill, toggledUnit } from "./holdingSummary";
+import { averageRowPrice, formatFillTime, holdingOf, isEtfOrEtnAfterHours, profitText, sellableFill, toggledUnit } from "./holdingSummary";
 
 const HOLDING: TradingHolding = { code: "005930", name: "삼성전자", quantity: 120, sellableQuantity: 100, averagePrice: 70_050, currentPrice: 70_000, evaluationProfit: -6_000, profitRateCenti: -71 };
 
@@ -48,23 +48,34 @@ describe("평단가 점", () => {
   });
 });
 
-describe("ETF 장 시간", () => {
+describe("ETF·ETN 장 시간", () => {
   const kst = (iso: string) => Math.floor(Date.parse(`${iso}+09:00`) / 1000);
   const COMMON = { kind: "common", nxtEnabled: false } as const;
   const ETF = { kind: "etf", nxtEnabled: false } as const;
   it("보통주는 수요일 19:50에도 해당하지 않는다", () => {
-    expect(isEtfAfterHours(kst("2026-11-18T19:50:00"), COMMON)).toBe(false);
+    expect(isEtfOrEtnAfterHours(kst("2026-11-18T19:50:00"), COMMON)).toBe(false);
   });
   it("수요일 16:30 NXT 미거래 ETF는 해당하고 15:29와 20:00에는 해당하지 않는다", () => {
-    expect(isEtfAfterHours(kst("2026-11-18T16:30:00"), ETF)).toBe(true);
-    expect(isEtfAfterHours(kst("2026-11-18T15:29:00"), ETF)).toBe(false);
-    expect(isEtfAfterHours(kst("2026-11-18T20:00:00"), ETF)).toBe(false);
+    expect(isEtfOrEtnAfterHours(kst("2026-11-18T16:30:00"), ETF)).toBe(true);
+    expect(isEtfOrEtnAfterHours(kst("2026-11-18T15:29:00"), ETF)).toBe(false);
+    expect(isEtfOrEtnAfterHours(kst("2026-11-18T20:00:00"), ETF)).toBe(false);
   });
   it("NXT 거래 ETF는 해당하지 않는다", () => {
-    expect(isEtfAfterHours(kst("2026-11-18T16:30:00"), { kind: "etf", nxtEnabled: true })).toBe(false);
+    expect(isEtfOrEtnAfterHours(kst("2026-11-18T16:30:00"), { kind: "etf", nxtEnabled: true })).toBe(false);
   });
   it("종목 정보가 없으면 해당하지 않는다", () => {
-    expect(isEtfAfterHours(kst("2026-11-18T16:30:00"), null)).toBe(false);
+    expect(isEtfOrEtnAfterHours(kst("2026-11-18T16:30:00"), null)).toBe(false);
+  });
+  it("NXT 미거래 ETN은 수요일 16:30에 해당하고 15:29와 20:00에는 해당하지 않는다", () => {
+    const etn = { kind: "etn", nxtEnabled: false } as const;
+    expect(isEtfOrEtnAfterHours(kst("2026-11-18T16:30:00"), etn)).toBe(true);
+    expect(isEtfOrEtnAfterHours(kst("2026-11-18T15:29:00"), etn)).toBe(false);
+    expect(isEtfOrEtnAfterHours(kst("2026-11-18T20:00:00"), etn)).toBe(false);
+  });
+  it("NXT 거래 ETN과 인프라투자금융·뮤추얼펀드는 16:30에 해당하지 않는다", () => {
+    expect(isEtfOrEtnAfterHours(kst("2026-11-18T16:30:00"), { kind: "etn", nxtEnabled: true })).toBe(false);
+    expect(isEtfOrEtnAfterHours(kst("2026-11-18T16:30:00"), { kind: "infrastructure", nxtEnabled: false })).toBe(false);
+    expect(isEtfOrEtnAfterHours(kst("2026-11-18T16:30:00"), { kind: "mutualFund", nxtEnabled: false })).toBe(false);
   });
 });
 

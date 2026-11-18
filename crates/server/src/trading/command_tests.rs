@@ -8,7 +8,7 @@ use serde_json::{Value, json};
 use tower::ServiceExt;
 
 use super::journal::{BatchBegun, Begun, Prepared, PreparedBatch};
-use super::tests::{Fixture, HOST, WriteMode, enable, fixture, fixture_in, fixture_with, get, trading_sends};
+use super::tests::{ETN_CODE, Fixture, HOST, WriteMode, enable, fixture, fixture_in, fixture_with, get, trading_sends};
 use super::{SwitchStore, Trading};
 use crate::api::{KiwoomEnvironment, OrderCommandKind, OrderCommandState};
 use crate::kiwoom::api::{Endpoint, StockList};
@@ -198,6 +198,16 @@ async fn rejects_off_tick_or_out_of_limit_price() {
     refused(&f, buy("cmd-tick-0001", 1, 71_050), "off_tick").await;
     refused(&f, buy("cmd-tick-0002", 1, 101_000), "out_of_limit").await;
     refused(&f, buy("cmd-tick-0003", 1, 49_900), "out_of_limit").await;
+}
+
+#[tokio::test]
+async fn an_etn_order_uses_the_etf_tick_table() {
+    let f = on().await;
+    let etn_buy = |id: &str, price: u64| json!({"commandId": id, "code": ETN_CODE, "side": "buy", "quantity": 1, "price": price});
+    refused(&f, etn_buy("cmd-etn-0001", 6_463), "off_tick").await;
+    let (_, accepted) = order(&f.app, PLACE, etn_buy("cmd-etn-0002", 6_465)).await;
+    assert_eq!(accepted["state"], "accepted", "{accepted}");
+    assert_eq!(writes(&f), vec![("kt10000", json!({"dmst_stex_tp": "KRX", "stk_cd": "520100", "ord_qty": "1", "ord_uv": "6465", "trde_tp": "0"}))]);
 }
 
 #[tokio::test]
