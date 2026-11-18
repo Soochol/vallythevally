@@ -944,7 +944,6 @@ pub struct LayoutSync {
     pub crosshair_scope: CrosshairScope,
 }
 
-/// 십자선 연동이 묶는 차트의 범위. 저장된 값에 키가 빠져 있으면 모든 차트로 읽는다.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "lowercase")]
 #[ts(export)]
