@@ -147,6 +147,10 @@ pub(super) async fn fixture() -> Fixture {
 }
 
 pub(super) async fn fixture_with(latency: Duration, spacing: Duration) -> Fixture {
+    fixture_in(latency, spacing, crate::api::KiwoomEnvironment::Real).await
+}
+
+pub(super) async fn fixture_in(latency: Duration, spacing: Duration, environment: crate::api::KiwoomEnvironment) -> Fixture {
     let dir = tempfile::tempdir().unwrap();
     let mode = Arc::new(Mutex::new(WriteMode::Accept));
     let seen_mode = mode.clone();
@@ -173,7 +177,7 @@ pub(super) async fn fixture_with(latency: Duration, spacing: Duration) -> Fixtur
         reply(sent, &account, &rows)
     }));
     let clock = Clock::fake(kst(KstDate::new(2026, 11, 9).unwrap(), 10, 0, 0));
-    let rest = KiwoomRest::with_send_spacing(Arc::new(fake.clone()), KiwoomAuth::new(Secret::new("k".into()), Secret::new("s".into()), None), clock.clone(), spacing);
+    let rest = KiwoomRest::build(Arc::new(fake.clone()), KiwoomAuth::new(Secret::new("k".into()), Secret::new("s".into()), None), clock.clone(), spacing, environment);
     let db = AppDb::open(&dir.path().join("vally.db")).await.unwrap();
     let (stream, _desired) = KiwoomStream::detached();
     let feed = stream.account_feed();

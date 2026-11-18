@@ -1773,6 +1773,7 @@ pub enum OrderRejectReason {
     SellOverSellable,
     BuyOverBuyingPower,
     NxtUnavailable,
+    MockKrxOnly,
     OrderNotFound,
     NotSent,
     KiwoomRejected,
