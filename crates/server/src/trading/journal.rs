@@ -140,7 +140,7 @@ async fn recorded_batch(conn: &mut SqliteConnection, batch: &PreparedBatch) -> R
     if stored != batch.fingerprint() {
         return Ok(Some(BatchBegun::DifferentRequest));
     }
-    let rows = sqlx::query("SELECT * FROM order_commands WHERE batch_id = ? ORDER BY rowid").bind(&batch.batch_id).fetch_all(&mut *conn).await?;
+    let rows = sqlx::query("SELECT * FROM order_commands WHERE batch_id = ? ORDER BY command_id").bind(&batch.batch_id).fetch_all(&mut *conn).await?;
     Ok(Some(BatchBegun::Existing(rows.iter().map(command_of).collect::<Result<_, _>>()?)))
 }
 

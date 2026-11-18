@@ -7,7 +7,7 @@ use http_body_util::BodyExt;
 use serde_json::{Value, json};
 use tower::ServiceExt;
 
-use super::journal::{Begun, Prepared};
+use super::journal::{BatchBegun, Begun, Prepared, PreparedBatch};
 use super::tests::{Fixture, HOST, WriteMode, enable, fixture, fixture_with, get, trading_sends};
 use super::{SwitchStore, Trading};
 use crate::api::{OrderCommandKind, OrderCommandState};
@@ -334,6 +334,19 @@ async fn a_batch_adopts_a_cancel_already_journaled_under_its_command_id() {
     let (code, _) = order(&f.app, CANCEL_BATCH, json!({"batchId": "batch-adopt-01", "code": "005930", "side": "sell", "price": 72_000})).await;
     assert_eq!(code, StatusCode::BAD_REQUEST);
     assert_eq!(writes(&f).len(), 1);
+}
+
+#[tokio::test]
+async fn a_repeated_batch_lists_adopted_and_new_commands_in_the_first_order() {
+    let f = on().await;
+    let journal = &f.state.trading.journal;
+    let cancel = |order_no: &str| Prepared { command_id: format!("batch-order-01_{order_no}"), account_ref: "x".into(), kind: OrderCommandKind::Cancel, code: None, venue: None, quantity: None, price: None, target_order_no: Some(order_no.into()) };
+    let batch = PreparedBatch { batch_id: "batch-order-01".into(), account_ref: "x".into(), code: "005930".into(), side: crate::api::OrderSide::Buy, price: 71_000 };
+    journal.begin(&cancel("0000002"), 1).await.unwrap();
+    let BatchBegun::Created(first) = journal.begin_batch(&batch, &[cancel("0000001"), cancel("0000002")], 2).await.unwrap() else { panic!("새 배치") };
+    let Some(BatchBegun::Existing(again)) = journal.existing_batch(&batch).await.unwrap() else { panic!("기록된 배치") };
+    let ids = |commands: &[crate::api::OrderCommand]| commands.iter().map(|c| c.command_id.clone()).collect::<Vec<_>>();
+    assert_eq!(ids(&again), ids(&first));
 }
 
 #[tokio::test]
