@@ -10,6 +10,7 @@ const rows = buildLadder({
   lastPrice: 71500,
   previousClose: 70000,
   bounds: { lower: null, upper: null },
+  tickRule: "stock",
 });
 const render = (props: Partial<Parameters<typeof PriceLadder>[0]> = {}) => renderToStaticMarkup(createElement(PriceLadder, { rows, previousClose: 70000, ...props }));
 
@@ -67,6 +68,7 @@ test("그 칸에 잔량이 있는 행은 자리 내용을 그리지 않는다", 
     lastPrice: 70000,
     previousClose: 70000,
     bounds: { lower: null, upper: null },
+  tickRule: "stock",
   });
   const html = renderToStaticMarkup(createElement(PriceLadder, {
     rows: crossed,

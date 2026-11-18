@@ -3,7 +3,7 @@ import { basePrice, buildLadder, buildLadderRows, gridPrices, LADDER_ROWS, ratio
 
 const NO_BOUNDS = { lower: null, upper: null };
 const level = (price: number, quantity: number, change = 0): BookLevel => ({ price, quantity, change });
-const build = (input: Partial<Parameters<typeof buildLadder>[0]>) => buildLadder({ asks: [], bids: [], lastPrice: null, previousClose: null, bounds: NO_BOUNDS, ...input });
+const build = (input: Partial<Parameters<typeof buildLadder>[0]>) => buildLadder({ asks: [], bids: [], lastPrice: null, previousClose: null, bounds: NO_BOUNDS, tickRule: "stock", ...input });
 const prices = (rows: ReturnType<typeof buildLadder>) => rows.map((row) => row.price);
 const rowAt = (rows: ReturnType<typeof buildLadder>, price: number) => rows.find((row) => row.price === price)!;
 
@@ -87,8 +87,8 @@ test("잔량에 NaN·음수가 있어도 나머지 막대는 정상이고 그 �
 });
 
 test("격자 가격 목록은 기준이 없으면 모두 비고 있으면 내림차순이다", () => {
-  expect(gridPrices(null, NO_BOUNDS)).toEqual(Array(LADDER_ROWS).fill(null));
-  const listed = gridPrices(70_000, NO_BOUNDS) as number[];
+  expect(gridPrices(null, NO_BOUNDS, "stock")).toEqual(Array(LADDER_ROWS).fill(null));
+  const listed = gridPrices(70_000, NO_BOUNDS, "stock") as number[];
   expect(listed).toEqual([...listed].sort((a, b) => b - a));
 });
 
@@ -100,4 +100,32 @@ test("가격 목록을 직접 주면 그 가격으로 행을 만든다", () => {
 test("매수·매도 비율은 합이 100이고 둘 다 0이면 반반이다", () => {
   expect(ratioSplit(3, 1)).toEqual({ buy: 75, sell: 25 });
   expect(ratioSplit(0, 0)).toEqual({ buy: 50, sell: 50 });
+});
+
+test("ETF 호가 단위(2,000원 이상 5원)로 만든 격자에 받은 스무 단이 모두 자기 행에 있다", () => {
+  const asks = Array.from({ length: 10 }, (_, i) => level(35_010 + 5 * i, 100 + i));
+  const bids = Array.from({ length: 10 }, (_, i) => level(35_005 - 5 * i, 200 + i));
+  const rows = build({ asks, bids, lastPrice: 35_005, tickRule: "etf" });
+  expect(prices(rows)[0]).toBe(35_055);
+  expect(prices(rows)[10]).toBe(35_005);
+  expect(prices(rows)[19]).toBe(34_960);
+  expect(rows.filter((row) => row.ask || row.bid)).toHaveLength(20);
+  expect(rows.filter((row) => row.ask && row.bid)).toHaveLength(0);
+});
+
+test("기준 가격이 0·NaN·음수이면 매수 1호가, 그것도 못 쓰면 기준가로 넘어간다", () => {
+  const bids = [level(70_000, 3), level(69_900, 4)];
+  for (const lastPrice of [0, Number.NaN, -100]) {
+    expect(basePrice({ asks: [], bids, lastPrice, previousClose: 69_000 })).toBe(70_000);
+    expect(basePrice({ asks: [], bids: [], lastPrice, previousClose: 69_000 })).toBe(69_000);
+    expect(basePrice({ asks: [], bids: [], lastPrice, previousClose: Number.NaN })).toBeNull();
+  }
+  expect(basePrice({ asks: [], bids: [level(Number.NaN, 1), level(0, 1), level(69_900, 4)], lastPrice: null, previousClose: null })).toBe(69_900);
+  expect(prices(build({ bids, lastPrice: 0 }))[10]).toBe(70_000);
+});
+
+test("같은 가격의 단이 둘이면 잔량과 증감을 합친다", () => {
+  const rows = build({ asks: [level(70_100, 5, 1), level(70_100, 7, 2)], bids: [], lastPrice: 70_000 });
+  expect(rowAt(rows, 70_100).ask).toEqual({ price: 70_100, quantity: 12, change: 3 });
+  expect(rowAt(rows, 70_100).askRatio).toBe(1);
 });

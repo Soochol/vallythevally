@@ -1,4 +1,4 @@
-import { stepPrice, type PriceBounds, withinBounds } from "./tick";
+import { stepPrice, type PriceBounds, type TickRule, withinBounds } from "./tick";
 
 export const LADDER_ROWS = 20;
 export const ROWS_ABOVE_BASE = 10;
@@ -29,27 +29,31 @@ export interface LadderQuotes {
 
 export interface LadderInput extends LadderQuotes {
   readonly bounds: PriceBounds;
+  readonly tickRule: TickRule;
 }
+
+const usablePrice = (price: number | null): price is number => price !== null && Number.isFinite(price) && price > 0;
 
 export function basePrice({ bids, lastPrice, previousClose }: LadderQuotes): number | null {
-  if (lastPrice !== null) return lastPrice;
-  if (bids.length > 0) return Math.max(...bids.map((level) => level.price));
-  return previousClose;
+  if (usablePrice(lastPrice)) return lastPrice;
+  const bestBid = Math.max(0, ...bids.map((level) => level.price).filter(usablePrice));
+  if (bestBid > 0) return bestBid;
+  return usablePrice(previousClose) ? previousClose : null;
 }
 
-export function gridPrices(base: number | null, bounds: PriceBounds): (number | null)[] {
+export function gridPrices(base: number | null, bounds: PriceBounds, rule: TickRule): (number | null)[] {
   if (base === null) return Array<null>(LADDER_ROWS).fill(null);
   const listed = (price: number): number | null => (withinBounds(price, bounds) ? price : null);
   const above: (number | null)[] = [];
   let price = base;
   for (let tick = 0; tick < ROWS_ABOVE_BASE; tick++) {
-    price = stepPrice(price, 1);
+    price = stepPrice(price, 1, rule);
     above.unshift(listed(price));
   }
   const below: (number | null)[] = [listed(base)];
   price = base;
   for (let tick = 1; tick < LADDER_ROWS - ROWS_ABOVE_BASE; tick++) {
-    price = stepPrice(price, -1);
+    price = stepPrice(price, -1, rule);
     below.push(listed(price));
   }
   return [...above, ...below];
@@ -57,9 +61,18 @@ export function gridPrices(base: number | null, bounds: PriceBounds): (number | 
 
 const usableQuantity = (level: BookLevel | null): number => (level !== null && Number.isFinite(level.quantity) && level.quantity > 0 ? level.quantity : 0);
 
+function levelsByPrice(levels: readonly BookLevel[]): Map<number, BookLevel> {
+  const byPrice = new Map<number, BookLevel>();
+  for (const level of levels) {
+    const same = byPrice.get(level.price);
+    byPrice.set(level.price, same ? { price: level.price, quantity: same.quantity + level.quantity, change: same.change + level.change } : level);
+  }
+  return byPrice;
+}
+
 export function buildLadderRows(prices: readonly (number | null)[], { asks, bids, lastPrice, previousClose }: LadderQuotes): LadderRow[] {
-  const asksAt = new Map(asks.map((level) => [level.price, level]));
-  const bidsAt = new Map(bids.map((level) => [level.price, level]));
+  const asksAt = levelsByPrice(asks);
+  const bidsAt = levelsByPrice(bids);
   const priced = prices.map((price) => ({ price, ask: price === null ? null : asksAt.get(price) ?? null, bid: price === null ? null : bidsAt.get(price) ?? null }));
   const largest = Math.max(0, ...priced.flatMap(({ ask, bid }) => [usableQuantity(ask), usableQuantity(bid)]));
   const ratio = (level: BookLevel | null): number => (largest > 0 ? usableQuantity(level) / largest : 0);
@@ -76,7 +89,7 @@ export function buildLadderRows(prices: readonly (number | null)[], { asks, bids
 }
 
 export function buildLadder(input: LadderInput): LadderRow[] {
-  return buildLadderRows(gridPrices(basePrice(input), input.bounds), input);
+  return buildLadderRows(gridPrices(basePrice(input), input.bounds, input.tickRule), input);
 }
 
 export interface RatioSplit {

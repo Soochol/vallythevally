@@ -191,6 +191,31 @@ test("교차 가격 행 하나에 매도·매수 잔량이 함께 있고 현재�
   expect(new Set(shown).size).toBe(shown.length);
 });
 
+test("ETF는 5원 호가 단위 격자로 받은 스무 단이 모두 자기 행에 보인다", async ({ page, scenario }) => {
+  const etf = "0000D0";
+  bookWindow(scenario, etf);
+  scenario.reply((url) => url.pathname === `/api/symbols/${etf}/fundamentals`, { body: { symbol: etf, upperLimit: 45_500, lowerLimit: 24_500, marketCap: null, listedShares: null, per: null, pbr: null, roe: null, eps: null, bps: null, foreignExhaustionRate: null, high52w: null, low52w: null } });
+  scenario.reply((url) => url.pathname === `/api/symbols/${etf}/order-book`, { body: {
+    symbol: etf,
+    asks: Array.from({ length: 10 }, (_, i) => ({ price: 35_010 + 5 * i, quantity: 100 + i })),
+    bids: Array.from({ length: 10 }, (_, i) => ({ price: 35_005 - 5 * i, quantity: 200 + i })),
+    totalAskQuantity: 1000,
+    totalBidQuantity: 1000,
+    bookTime: null,
+  } });
+  scenario.reply((url) => url.pathname === `/api/symbols/${etf}/trades`, { body: { symbol: etf, venue: "combined", trades: [], skippedRows: 0 } });
+  pinQuote(scenario, etf, 35_005, 5);
+  await page.goto("/");
+  await expect(cell(page)).toHaveAttribute("aria-busy", "false");
+  await windowTabs(page).getByRole("tab", { name: /^10호가/ }).click();
+  await expect(ladderRows(page)).toHaveCount(20);
+  await expect(ladderRows(page).locator(".mw-qty-value")).toHaveCount(20);
+  const shown = await ladderRows(page).locator(".mw-px-num").allTextContents();
+  expect(shown[0]).toBe("35,055");
+  expect(shown[10]).toBe("35,005");
+  expect(shown[19]).toBe("34,960");
+});
+
 test("끊기면 사다리를 흐리게 하고 끊김을 보인다", async ({ page, scenario }) => {
   await open(page, scenario, 70000);
   const bookSub = await subOf(scenario, "book");

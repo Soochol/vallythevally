@@ -23,7 +23,7 @@ import { averageRowPrice, holdingOf, ladderClosed, type ProfitUnit, type Session
 import { HoldingSummary } from "./HoldingSummary";
 import { LadderTape, QuoteSummary } from "./LadderOverlays";
 import { OrderSettingsPopover } from "./OrderSettingsPopover";
-import { movePrice } from "../market-window/tick";
+import { movePrice, tickRuleOf } from "../market-window/tick";
 import { explorerPrices } from "./priceRange";
 import { HighValueConfirm, type HighValueRequest } from "./HighValueConfirm";
 import { type HoverCell, OrderLadder } from "./OrderLadder";
@@ -81,7 +81,8 @@ function OrderBody({ id, code }: { id: WindowId; code: SymbolCode }) {
   const settings = useOrderSettings();
   const setSettings = useUiStore((s) => s.setOrderSettings);
   const limits = useFundamentals(code).data;
-  const nxtEnabled = useSymbolInfo(code).data?.nxtEnabled ?? null;
+  const symbolInfo = useSymbolInfo(code).data;
+  const nxtEnabled = symbolInfo?.nxtEnabled ?? null;
   const accountTail = useOrdersStatus().data?.accountTail ?? null;
 
   useEffect(() => {
@@ -92,17 +93,18 @@ function OrderBody({ id, code }: { id: WindowId; code: SymbolCode }) {
   const view = feed.book.phase === "empty" ? null : feed.book.view;
   const bounds = { lower: limits?.lowerLimit ?? null, upper: limits?.upperLimit ?? null };
   const quotes = view ? { asks: view.asks, bids: view.bids, lastPrice: feed.lastPrice, previousClose: feed.previousClose } : null;
+  const tickRule = tickRuleOf(symbolInfo?.kind ?? null, view ? [...view.asks, ...view.bids].map((level) => level.price) : []);
   const liveBase = quotes ? basePrice(quotes) : null;
   const gridBase = useHeldWhile(liveBase, dragging);
   const referencePrice = feed.lastPrice ?? feed.previousClose ?? liveBase;
   const exploring = explorerCenter !== null;
-  const shownRows: LadderRow[] = quotes ? buildLadderRows(exploring ? explorerPrices(explorerCenter, bounds) : gridPrices(gridBase, bounds), quotes) : [];
+  const shownRows: LadderRow[] = quotes ? buildLadderRows(exploring ? explorerPrices(explorerCenter, bounds, tickRule) : gridPrices(gridBase, bounds, tickRule), quotes) : [];
   const rows = settings.rate ? shownRows : shownRows.map((row) => ({ ...row, rate: null }));
   const closed = ladderClosed(session, secondOfDay(now / 1000), nxtEnabled);
   const wheel = useCallback((direction: 1 | -1) => {
     if (referencePrice === null) return;
-    setExplorerCenter((center) => movePrice(center ?? referencePrice, direction * WHEEL_TICKS, bounds));
-  }, [referencePrice, bounds.lower, bounds.upper]);
+    setExplorerCenter((center) => movePrice(center ?? referencePrice, direction * WHEEL_TICKS, bounds, tickRule));
+  }, [referencePrice, bounds.lower, bounds.upper, tickRule]);
   const data = useOrderData(code, access.open, referencePrice);
   const writes = useOrderWrites(code, venue);
   const holding = holdingOf(data.balance?.holdings ?? [], code);
