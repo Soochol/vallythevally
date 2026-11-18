@@ -35,6 +35,7 @@ pub struct AppState {
     pub system: crate::system_routes::SystemState,
     pub registered: tokio::sync::watch::Receiver<crate::kiwoom::stream::DesiredFeeds>,
     pub trading: Arc<crate::trading::Trading>,
+    pub rankings: crate::rankings::RankingCache,
 }
 
 pub fn router(state: Arc<AppState>) -> Router {
@@ -51,6 +52,7 @@ pub fn router(state: Arc<AppState>) -> Router {
         .merge(crate::screener::routes())
         .merge(crate::investors::routes())
         .merge(crate::intraday_feed::routes())
+        .merge(crate::rankings::routes())
         .merge(crate::system_routes::routes(state.clone()))
         .merge(crate::account_routes::routes(state.clone()))
         .merge(crate::collector::routes())
@@ -106,6 +108,12 @@ impl ApiFailure {
                 with_reason(KiwoomUnavailable, api::ApiErrorReason::Protocol)
             }
         }
+    }
+
+    pub(crate) fn kiwoom_protocol(message: impl Into<String>) -> Self {
+        let message = message.into();
+        tracing::error!(reason = %message, "키움 응답이 약속과 다릅니다");
+        ApiFailure { reason: Some(api::ApiErrorReason::Protocol), ..ApiFailure::new(api::ApiErrorCode::KiwoomUnavailable, message) }
     }
 
     fn list_not_ready(now: KstTime) -> Self {
@@ -178,6 +186,7 @@ pub(crate) enum Lookup {
     ProgramTrades,
     ScreenerUpdate,
     ScreenerRun,
+    Rankings,
 }
 
 impl Lookup {
@@ -194,6 +203,7 @@ impl Lookup {
             Lookup::ProgramTrades => "당일 프로그램매매",
             Lookup::ScreenerUpdate => "스크리너 업데이트",
             Lookup::ScreenerRun => "스크리너 실행",
+            Lookup::Rankings => "순위",
         }
     }
 

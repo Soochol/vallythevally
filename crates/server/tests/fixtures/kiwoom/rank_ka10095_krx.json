@@ -1,0 +1,29 @@
+{
+ "_source": "합성 값. 필드 이름과 모양만 docs/plans/ranking-window.md의 순위 TR 표를 따른다. 종목과 숫자는 지어낸 것이다",
+ "_headers": {
+  "cont-yn": "N",
+  "next-key": ""
+ },
+ "atn_stk_infr": [
+  {
+   "stk_cd": "005930",
+   "cur_prc": "-71200",
+   "base_pric": "70000",
+   "pred_pre_sig": "2",
+   "trde_qty": "1000",
+   "cntr_tm": "153000",
+   "dt": "20261109"
+  },
+  {
+   "stk_cd": "000660",
+   "cur_prc": "+120500",
+   "base_pric": "120000",
+   "pred_pre_sig": "2",
+   "trde_qty": "1000",
+   "cntr_tm": "153000",
+   "dt": "20261109"
+  }
+ ],
+ "return_code": 0,
+ "return_msg": "정상적으로 처리되었습니다"
+}

@@ -28,6 +28,7 @@ pub struct ScriptedReply {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Call {
     pub api_id: String,
+    pub path: String,
     pub body: Value,
     pub next_key: Option<String>,
 }
@@ -183,7 +184,7 @@ impl ScriptedTransport {
 
 impl Transport for ScriptedTransport {
     fn send(&self, req: HttpRequest) -> BoxFuture<'static, Result<HttpResponse, TransportError>> {
-        let call = Call { api_id: req.api_id.as_str().into(), body: serde_json::from_str(req.body.expose()).unwrap(), next_key: req.cont.as_ref().map(|key| key.as_str().to_owned()) };
+        let call = Call { api_id: req.api_id.as_str().into(), path: req.api_id.path().into(), body: serde_json::from_str(req.body.expose()).unwrap(), next_key: req.cont.as_ref().map(|key| key.as_str().to_owned()) };
         let (delay, response) = self.reply(&req, &call);
         let held = self.holds.lock().unwrap().iter().find(|held| !held.gate.is_closed() && (held.matches)(&call)).cloned();
         if let Some(held) = &held { held.arrived.fetch_add(1, Ordering::SeqCst); }
@@ -207,6 +208,6 @@ fn response(mut body: Value, last: bool) -> HttpResponse {
     let headers = object.remove("_headers").unwrap_or(Value::Null);
     let status = object.remove("_status").and_then(|s| s.as_u64()).unwrap_or(200) as u16;
     object.retain(|key, _| !key.starts_with('_'));
-    let next_key = (!last && headers["cont-yn"] == "Y").then(|| headers["next-key"].as_str().unwrap_or("").to_owned()).filter(|key| !key.is_empty());
+    let next_key = (!last && headers["cont-yn"] == "Y").then(|| headers["next-key"].as_str().unwrap_or("").to_owned());
     HttpResponse { status, next_key, body: body.to_string() }
 }

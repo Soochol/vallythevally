@@ -1,0 +1,31 @@
+{
+ "_source": "합성 값. 필드 이름과 모양만 docs/plans/ranking-window.md의 순위 TR 표를 따른다. 종목과 숫자는 지어낸 것이다",
+ "_headers": {
+  "cont-yn": "N",
+  "next-key": ""
+ },
+ "item_inq_rank": [
+  {
+   "stk_cd": "005930",
+   "stk_nm": "삼성전자",
+   "bigd_rank": "1",
+   "rank_chg": "3",
+   "rank_chg_sign": "+",
+   "past_curr_prc": "-71200",
+   "base_comp_sign": "5",
+   "base_comp_chgr": "-1.25"
+  },
+  {
+   "stk_cd": "000660",
+   "stk_nm": "SK하이닉스",
+   "bigd_rank": "2",
+   "rank_chg": "2",
+   "rank_chg_sign": "-",
+   "past_curr_prc": "+120500",
+   "base_comp_sign": "2",
+   "base_comp_chgr": "+0.10"
+  }
+ ],
+ "return_code": 0,
+ "return_msg": "정상적으로 처리되었습니다"
+}
