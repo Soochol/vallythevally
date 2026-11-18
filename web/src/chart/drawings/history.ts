@@ -11,7 +11,7 @@ export interface History {
 
 export const EMPTY_HISTORY: History = { past: [], future: [] };
 
-const VERSION_KEYS: ReadonlySet<string> = new Set(["revision", "updatedAt"]);
+const UNCOMPARED_KEYS: ReadonlySet<string> = new Set(["revision", "updatedAt", "hidden"]);
 
 function canonical(value: unknown, skip: ReadonlySet<string> = new Set()): string {
   if (Array.isArray(value)) return `[${value.map((v) => canonical(v)).join(",")}]`;
@@ -26,7 +26,7 @@ function canonical(value: unknown, skip: ReadonlySet<string> = new Set()): strin
 
 export function sameContent(a: DrawingBody | null, b: DrawingBody | null): boolean {
   if (a === null || b === null) return a === b;
-  return canonical(a, VERSION_KEYS) === canonical(b, VERSION_KEYS);
+  return canonical(a, UNCOMPARED_KEYS) === canonical(b, UNCOMPARED_KEYS);
 }
 
 function opOf(before: DrawingBody | null, after: DrawingBody | null): DrawingOp | null {
