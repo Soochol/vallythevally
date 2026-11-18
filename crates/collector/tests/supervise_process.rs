@@ -17,7 +17,7 @@ use tokio::process::{Child, Command};
 use tokio::time::{sleep, timeout};
 use tokio_tungstenite::tungstenite::Message;
 
-const DATE: u32 = 20261118;
+const DATE: u32 = 20991231;
 const WAIT: Duration = Duration::from_secs(40);
 const KEYS: [(&str, bool); 2] = [("collect-01", false), ("spare-01", true)];
 
@@ -110,7 +110,7 @@ fn set_up() -> Setup {
     let plan = PlanFile {
         format_version: 1,
         date: DATE,
-        created_at: "2026-11-18T07:35:00+09:00".to_owned(),
+        created_at: "2099-12-31T07:35:00+09:00".to_owned(),
         input: InputSummary { active_keys: 2, universe_replaced: None },
         keys: shares,
         excluded: Vec::new(),

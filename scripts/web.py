@@ -3,9 +3,11 @@ import argparse
 import contextlib
 import hashlib
 import json
+import math
 import os
 from pathlib import Path
 import re
+import shutil
 import subprocess
 import sys
 import time
@@ -20,6 +22,85 @@ import evidence
 MAX_E2E_WORKERS = 6
 DEFAULT_E2E_WORKERS = 2
 WORKER_PERCENT = re.compile(r"(\d+(?:\.\d+)?)%")
+KEPT_PASSED_RUNS = 5
+KEPT_FAILED_RUNS = 10
+STALE_RUN_SECONDS = 6 * 60 * 60
+RUN_DIRECTORY_NAME = re.compile(r"([a-z0-9]+)-.+")
+
+
+def run_directory_state(directory, now):
+    modified = directory.stat().st_mtime
+    manifest_path = directory / "manifest.json"
+    try:
+        manifest = json.loads(manifest_path.read_text())
+        status = manifest["status"]
+        manifest_modified = manifest_path.stat().st_mtime
+    except (OSError, ValueError, KeyError, TypeError, RecursionError):
+        status, manifest_modified = None, modified
+    started = manifest.get("started_at") if status is not None and isinstance(manifest, dict) else None
+    order = modified
+    if isinstance(started, (int, float)):
+        with contextlib.suppress(OverflowError):
+            if math.isfinite(started):
+                order = started
+    if status == "passed":
+        return "passed", order
+    if status in (None, "running"):
+        return ("failed" if now - manifest_modified > STALE_RUN_SECONDS else "protected"), order
+    return "failed", order
+
+
+def web_runs_to_prune(root, now):
+    parent = root / "target/web-runs"
+    runs = {}
+    with os.scandir(parent) as entries:
+        for entry in entries:
+            kind = RUN_DIRECTORY_NAME.fullmatch(entry.name)
+            if not kind or entry.is_symlink() or not entry.is_dir(follow_symlinks=False):
+                continue
+            try:
+                state, order = run_directory_state(Path(entry.path), now)
+            except OSError:
+                continue
+            runs.setdefault((kind.group(1), state), []).append((order, Path(entry.path)))
+    pruned = []
+    for (_, state), directories in runs.items():
+        kept = {"passed": KEPT_PASSED_RUNS, "failed": KEPT_FAILED_RUNS}.get(state)
+        if kept is not None:
+            pruned.extend(path for _, path in sorted(directories, key=lambda run: run[0], reverse=True)[kept:])
+    return pruned
+
+
+def directory_bytes(directory):
+    total = 0
+    for base, _, names in os.walk(directory):
+        for name in names:
+            with contextlib.suppress(OSError):
+                total += os.lstat(os.path.join(base, name)).st_size
+    return total
+
+
+def prune_web_runs(root):
+    removed = 0
+    freed = 0
+    try:
+        for directory in web_runs_to_prune(root, time.time()):
+            size = directory_bytes(directory)
+            try:
+                shutil.rmtree(directory)
+            except FileNotFoundError:
+                continue
+            except OSError as error:
+                print(f"dev-web: 경고: web-runs 정리 실패 {directory.name}: {evidence.clean(str(error))}", file=sys.stderr, flush=True)
+                continue
+            removed += 1
+            freed += size
+    except FileNotFoundError:
+        return
+    except OSError as error:
+        print(f"dev-web: 경고: web-runs 정리 실패: {evidence.clean(str(error))}", file=sys.stderr, flush=True)
+    if removed:
+        print(f"dev-web: target/web-runs 정리: {removed}개 삭제 (약 {freed / 2**20:.0f}MiB). 종류마다 통과 {KEPT_PASSED_RUNS}개·실패 {KEPT_FAILED_RUNS}개만 남긴다", file=sys.stderr, flush=True)
 
 
 def requested_workers(value):
@@ -205,6 +286,7 @@ def prepare_web(root, environment):
 
 
 def check_web(root, arguments):
+    prune_web_runs(root)
     with evidence.Run(root, "check", ["web.py", "check", *arguments]) as record:
         record.plan("e2e-rules", "dependencies", "wasm", "types", "vitest")
         with record.step("e2e-rules"):
@@ -250,6 +332,7 @@ def prepare_e2e(root, environment, record):
 
 
 def run_e2e(root, arguments):
+    prune_web_runs(root)
     with evidence.Run(root, "e2e", ["web.py", "e2e", *arguments]) as record:
         directory = record.directory
         record.plan("dependencies", "wasm", "types", "ui", "static", "playwright")
@@ -305,6 +388,8 @@ def main():
         parser.error(f"알 수 없는 인수: {' '.join(leading_options)}")
     arguments = [*leading_options, *getattr(args, "arguments", [])]
     root = Path(__file__).resolve().parent.parent
+    if args.action in ("wasm", "doctor", "live"):
+        prune_web_runs(root)
     if args.action == "wasm":
         with evidence.Run(root, "wasm", sys.argv):
             ensure_wasm(root, environment_for(root, root / "target/web-tmp"))

@@ -330,6 +330,29 @@ class WebWorkflowTest(unittest.TestCase):
         self.assertEqual(manifest["steps"]["static"]["status"], "failed")
         self.assertEqual(manifest["steps"]["playwright"]["status"], "not_run")
 
+    def test_e2e_prunes_before_creating_its_run_directory(self):
+        runs = self.root / "target/web-runs"
+        runs.mkdir(parents=True)
+        for index in range(7):
+            directory = runs / f"e2e-pass{index}"
+            directory.mkdir()
+            (directory / "manifest.json").write_text(json.dumps({"status": "passed", "started_at": index}))
+        seen = []
+        original = web.evidence.Run
+        def observing_run(*arguments, **options):
+            seen.append({path.name for path in runs.iterdir()})
+            return original(*arguments, **options)
+        def command(arguments, cwd, environment):
+            if "vite" in arguments[0]:
+                directory = Path(arguments[arguments.index("--outDir") + 1])
+                directory.mkdir(parents=True)
+                (directory / "index.html").write_text("new UI")
+        with self.commands(command), patch.object(web.evidence, "Run", observing_run), contextlib.redirect_stdout(io.StringIO()):
+            web.run_e2e(self.root, [])
+        self.assertEqual(seen, [{f"e2e-pass{index}" for index in range(2, 7)}])
+        current = {path.name for path in runs.iterdir()} - seen[0]
+        self.assertEqual(len(current), 1)
+
     def latest_manifest(self):
         path = next((self.root / "target/web-runs").glob("e2e-*/manifest.json"))
         return json.loads(path.read_text())
@@ -431,6 +454,146 @@ class WebWorkflowTest(unittest.TestCase):
                     web.run_e2e(self.root, [])
                 manifests = [json.loads(path.read_text()) for path in (self.root / "target/web-runs").glob("e2e-*/manifest.json")]
                 self.assertTrue(all(manifest["status"] == "failed" for manifest in manifests))
+
+
+class WebRunsRetentionTest(unittest.TestCase):
+    HOUR = 60 * 60
+
+    def setUp(self):
+        temporary = ROOT / "target/web-workflow-tests"
+        temporary.mkdir(parents=True, exist_ok=True)
+        self.directory = tempfile.TemporaryDirectory(dir=temporary)
+        self.addCleanup(self.directory.cleanup)
+        self.root = Path(self.directory.name)
+        self.runs = self.root / "target/web-runs"
+        self.runs.mkdir(parents=True)
+
+    def make(self, name, status="passed", started_at=None, age=0, manifest=True):
+        directory = self.runs / name
+        directory.mkdir()
+        (directory / "payload.bin").write_bytes(b"x" * 1024)
+        if manifest:
+            data = {"status": status}
+            if started_at is not None:
+                data["started_at"] = started_at
+            (directory / "manifest.json").write_text(json.dumps(data))
+        past = time.time() - age
+        for path in (directory / "manifest.json", directory):
+            if path.exists():
+                os.utime(path, (past, past))
+        return directory
+
+    def names(self):
+        return {path.name for path in self.runs.iterdir()}
+
+    def prune(self):
+        output = io.StringIO()
+        errors = io.StringIO()
+        with contextlib.redirect_stdout(output), contextlib.redirect_stderr(errors):
+            web.prune_web_runs(self.root)
+        return output.getvalue(), errors.getvalue()
+
+    def test_keeps_newest_passed_and_failed_per_kind(self):
+        for index in range(7):
+            self.make(f"e2e-pass{index}", "passed", started_at=1000 + index)
+        for index in range(12):
+            self.make(f"e2e-fail{index}", "failed", started_at=2000 + index)
+        for index in range(3):
+            self.make(f"check-pass{index}", "passed", started_at=3000 + index)
+        output, errors = self.prune()
+        expected = {f"e2e-pass{index}" for index in range(2, 7)} | {f"e2e-fail{index}" for index in range(2, 12)} | {f"check-pass{index}" for index in range(3)}
+        self.assertEqual(self.names(), expected)
+        self.assertIn("dev-web: target/web-runs 정리: 4개 삭제", errors)
+        self.assertEqual(output, "")
+
+    def test_nothing_to_remove_prints_nothing(self):
+        self.make("e2e-a", "passed", started_at=1)
+        self.assertEqual(self.prune(), ("", ""))
+
+    def test_manifest_without_started_at_is_ordered_by_folder_time(self):
+        for index in range(7):
+            self.make(f"e2e-old{index}", "passed", age=(100 - index) * self.HOUR)
+        self.prune()
+        self.assertEqual(self.names(), {f"e2e-old{index}" for index in range(2, 7)})
+
+    def test_started_at_wins_over_folder_time(self):
+        for index in range(6):
+            self.make(f"e2e-run{index}", "passed", started_at=1000 + index, age=index * self.HOUR)
+        self.prune()
+        self.assertEqual(self.names(), {f"e2e-run{index}" for index in range(1, 6)})
+
+    def test_unreadable_started_at_and_manifest_fall_back_to_folder_time(self):
+        for index in range(5):
+            self.make(f"e2e-pass{index}", "passed", started_at=1000 + index, age=100 * self.HOUR)
+        nan = self.make("e2e-nan", "passed", age=self.HOUR)
+        (nan / "manifest.json").write_text('{"status": "passed", "started_at": NaN}')
+        deep = self.make("e2e-deep", "passed", age=2 * self.HOUR)
+        (deep / "manifest.json").write_text("[" * 200000)
+        huge = self.make("e2e-huge", "passed", age=3 * self.HOUR)
+        (huge / "manifest.json").write_text('{"status": "passed", "started_at": ' + "9" * 400 + "}")
+        self.make("e2e-pass5", "passed", started_at=1005, age=100 * self.HOUR)
+        self.prune()
+        self.assertEqual(self.names(), {"e2e-pass5", "e2e-pass4", "e2e-pass3", "e2e-nan", "e2e-huge", "e2e-deep"})
+
+    def test_recent_running_and_manifestless_are_protected_and_uncounted(self):
+        for index in range(10):
+            self.make(f"e2e-fail{index}", "failed", started_at=100 + index)
+        self.make("e2e-running", "running", started_at=1, age=self.HOUR)
+        self.make("e2e-bare", manifest=False, age=self.HOUR)
+        self.prune()
+        self.assertEqual(len(self.names()), 12)
+
+    def test_stale_running_and_manifestless_count_as_failed(self):
+        for index in range(10):
+            self.make(f"e2e-fail{index}", "failed", started_at=time.time() + index)
+        self.make("e2e-running", "running", started_at=1, age=7 * self.HOUR)
+        self.make("e2e-bare", manifest=False, age=7 * self.HOUR)
+        self.make("e2e-broken", age=7 * self.HOUR)
+        (self.runs / "e2e-broken/manifest.json").write_text("{not json")
+        os.utime(self.runs / "e2e-broken/manifest.json", (time.time() - 7 * self.HOUR,) * 2)
+        os.utime(self.runs / "e2e-broken", (time.time() - 7 * self.HOUR,) * 2)
+        self.prune()
+        self.assertEqual(self.names(), {f"e2e-fail{index}" for index in range(10)})
+
+    def test_links_files_other_names_and_dev_runs_are_untouched(self):
+        outside = self.root / "outside"
+        outside.mkdir()
+        (outside / "keep.txt").write_text("outside")
+        for index in range(8):
+            self.make(f"e2e-pass{index}", "passed", started_at=index)
+        (self.runs / "e2e-link").symlink_to(outside, target_is_directory=True)
+        (self.runs / "e2e-file").write_text("file")
+        self.make("notes", "passed", started_at=0)
+        self.make("-nokind", "passed", started_at=0)
+        self.make("e2e-", "passed", started_at=0)
+        dev_runs = self.root / "target/dev-runs"
+        dev_runs.mkdir()
+        for index in range(8):
+            (dev_runs / f"dev-build-{index}").mkdir()
+        self.prune()
+        self.assertEqual(self.names(), {f"e2e-pass{index}" for index in range(3, 8)} | {"e2e-link", "e2e-file", "notes", "-nokind", "e2e-"})
+        self.assertEqual((outside / "keep.txt").read_text(), "outside")
+        self.assertEqual(len(list(dev_runs.iterdir())), 8)
+
+    def test_removal_error_warns_and_continues(self):
+        for index in range(7):
+            self.make(f"e2e-pass{index}", "passed", started_at=index)
+        with patch.object(web.shutil, "rmtree", side_effect=PermissionError("denied")):
+            output, errors = self.prune()
+        self.assertEqual(len(self.names()), 7)
+        self.assertEqual(output, "")
+        self.assertEqual(errors.count("dev-web: 경고:"), 2)
+
+    def test_directory_removed_by_another_process_is_not_an_error(self):
+        for index in range(7):
+            self.make(f"e2e-pass{index}", "passed", started_at=index)
+        with patch.object(web.shutil, "rmtree", side_effect=FileNotFoundError):
+            output, errors = self.prune()
+        self.assertEqual((output, errors), ("", ""))
+
+    def test_missing_web_runs_directory_is_not_an_error(self):
+        self.runs.rmdir()
+        self.assertEqual(self.prune(), ("", ""))
 
 
 class E2eRulesTest(unittest.TestCase):
