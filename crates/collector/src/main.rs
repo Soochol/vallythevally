@@ -5,7 +5,7 @@ use collector::{build, collect, finalize, serve, supervise, verify};
 fn main() -> ExitCode {
     let arguments: Vec<String> = std::env::args().skip(1).collect();
     let Some((command, rest)) = arguments.split_first() else {
-        eprintln!("사용법: collector <collect|build|verify|serve|finalize|supervise> [--data <폴더>] ...");
+        eprintln!("사용법: collector <collect|build|verify|serve|finalize|supervise|status> [--data <폴더>] ...");
         return ExitCode::from(2);
     };
     match command.as_str() {
@@ -15,6 +15,7 @@ fn main() -> ExitCode {
         "serve" => serve::run(rest),
         "finalize" => finalize::run(rest),
         "supervise" => supervise::run(rest),
+        "status" => supervise::run_status(rest),
         unknown => {
             eprintln!("알 수 없는 하위 명령입니다: {unknown}");
             ExitCode::from(2)

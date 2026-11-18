@@ -28,13 +28,24 @@ impl Calendar {
         service_key: &Secret<String>,
         now_unix_ms: i64,
     ) -> Calendar {
+        let this_year = KstTime::from_unix_ms(now_unix_ms).date / 10_000;
+        Calendar::load_from_year(data_dir, transport, service_key, now_unix_ms, this_year as u16 - 1).await
+    }
+
+    pub async fn load_from_year(
+        data_dir: &Path,
+        transport: &dyn HolidayTransport,
+        service_key: &Secret<String>,
+        now_unix_ms: i64,
+        first_year: u16,
+    ) -> Calendar {
         let calendar_dir = data_dir.join(CALENDAR_DIR);
         let overrides = Overrides::load(&calendar_dir.join(OVERRIDES_FILE));
         if let Err(error) = &overrides {
             tracing::warn!(%error, "관측일 수정 파일을 쓸 수 없다");
         }
         let mut years = BTreeMap::new();
-        for year in wanted_years(now_unix_ms) {
+        for year in wanted_years(now_unix_ms, first_year) {
             let loaded = load_year(&calendar_dir, transport, service_key, year, now_unix_ms).await;
             years.insert(year, loaded);
         }
@@ -186,6 +197,10 @@ impl Calendar {
         Evidence { input: EvidenceInput::Overrides, finding, detail }
     }
 
+    pub fn open_minute_of(&self, day: Day) -> u16 {
+        self.open_minute(day).0
+    }
+
     fn open_minute(&self, day: Day) -> (u16, Evidence) {
         let observed = |minute: u16, detail: String| {
             (minute, Evidence { input: EvidenceInput::OpenTime, finding: Finding::Open, detail })
@@ -222,15 +237,12 @@ impl Calendar {
     }
 }
 
-fn wanted_years(now_unix_ms: i64) -> Vec<u16> {
+fn wanted_years(now_unix_ms: i64, first_year: u16) -> Vec<u16> {
     let today = KstTime::from_unix_ms(now_unix_ms).date;
     let year = (today / 10_000) as u16;
     let month = today / 100 % 100;
-    let mut years = vec![year - 1, year];
-    if month == 12 {
-        years.push(year + 1);
-    }
-    years
+    let last_year = if month == 12 { year + 1 } else { year };
+    (first_year.min(year - 1)..=last_year).collect()
 }
 
 fn weekday_evidence(day: Day) -> Evidence {

@@ -43,6 +43,10 @@ impl KeyTokens {
         Ok(KeyTokens { rest: KiwoomRest::new(transport, auth, clock.clone()), clock, _lock: lock })
     }
 
+    pub fn rest(&self) -> &KiwoomRest {
+        &self.rest
+    }
+
     pub fn current(&self) -> Option<(Secret<String>, u64)> {
         self.rest.auth().current(self.clock.now()).map(|(token, TokenGen(generation))| (token, generation))
     }

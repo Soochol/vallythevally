@@ -1,5 +1,6 @@
 mod day;
 mod holidays;
+mod http;
 mod judgment;
 mod observation;
 mod overrides;
@@ -9,6 +10,7 @@ pub use holidays::{
     BadResponse, CachedHolidays, FetchFailure, Holiday, HolidayRequest, HolidayTransport,
     HolidayYear, Provenance, ServiceKeyError, TransportError, cache_path, read_service_key,
 };
+pub use http::{HOLIDAY_BASE_URL, ReqwestHolidayTransport};
 pub use judgment::{
     CrossCheck, DEFAULT_OPEN_MINUTE, Evidence, EvidenceInput, Finding, Judgment, Mismatch, Verdict,
     cross_check,

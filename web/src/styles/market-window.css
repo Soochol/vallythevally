@@ -45,3 +45,32 @@
 .bk-ladder { flex:1; transition:opacity .2s ease; }
 .bk-ladder[data-stale] { opacity:.4; }
 .bk-notice { margin-left:auto; padding:0 var(--s3); border-radius:var(--r-pill); background:var(--raised); color:var(--text-2); font-weight:600; }
+.pg { display:flex; flex:1; flex-direction:column; min-height:0; font-variant-numeric:tabular-nums; }
+.pg-head { display:flex; align-items:flex-end; justify-content:space-between; gap:var(--s4); padding:var(--s4) var(--s4) var(--s3); }
+.pg-net { display:flex; flex-direction:column; gap:var(--size-2); min-width:0; color:var(--text-2); font-size:var(--fs-s); }
+.pg-net b { font-size:var(--fs-title); font-weight:700; line-height:1.1; color:var(--text); }
+.pg-cap { color:var(--text-3); font-size:var(--fs-xs); }
+.pg-head[data-direction=up] .pg-net b, .pg-head[data-direction=up] .pg-net span:last-child { color:var(--up); }
+.pg-head[data-direction=down] .pg-net b, .pg-head[data-direction=down] .pg-net span:last-child { color:var(--down); }
+.pg-spark { flex:1; min-width:var(--size-60); max-width:var(--size-220); height:var(--size-32); overflow:visible; }
+.pg-spark polyline { stroke:var(--text-3); stroke-width:1.5; }
+.pg-head[data-direction=up] .pg-spark polyline { stroke:var(--up); }
+.pg-head[data-direction=down] .pg-spark polyline { stroke:var(--down); }
+.pg-table { display:flex; flex:1; flex-direction:column; min-height:0; font-size:var(--size-13); }
+.pg-body { flex:1; min-height:0; overflow-y:auto; }
+.pg-tr { display:grid; grid-template-columns:minmax(var(--pg-time), max-content) minmax(var(--pg-price), max-content) 1fr; align-items:center; gap:var(--s4); height:var(--size-24); padding:0 var(--s4); }
+.pg-tr:hover { background:var(--hover); }
+.pg-th { color:var(--text-3); font-size:var(--fs-xs); border-bottom:var(--size-1) solid var(--line); }
+.pg-th:hover { background:transparent; }
+.pg-price { text-align:right; }
+.pg-change { position:relative; display:flex; align-items:center; justify-content:flex-end; height:100%; }
+.pg-change em { position:relative; z-index:1; padding:0 var(--size-4); font-style:normal; }
+.pg-tr[data-bold] .pg-change em { font-weight:800; }
+.pg-bar { position:absolute; inset:var(--size-4) 0; }
+.pg-bar::before { content:""; position:absolute; top:0; bottom:0; left:50%; width:var(--size-1); background:var(--line-strong); }
+.pg-bar i { position:absolute; top:0; bottom:0; max-width:50%; border-radius:3px; }
+.pg-bar[data-direction=buy] i { left:50%; background:var(--up-vol); }
+.pg-bar[data-direction=sell] i { right:50%; background:var(--down-vol); }
+.pg-gap { padding:var(--s2) var(--s4); border-top:var(--size-1) dashed var(--line-strong); border-bottom:var(--size-1) dashed var(--line-strong); color:var(--text-3); font-size:var(--fs-xs); text-align:center; }
+.pg-badge { margin-left:var(--s2); }
+.window-head:has(.mw-integrated) ~ .window-panel .pg-badge { display:none; }

@@ -5,6 +5,8 @@ use std::path::{Path, PathBuf};
 use domain::KstTime;
 use serde::Serialize;
 
+use crate::calendar::{Evidence, Mismatch};
+use crate::finalize::{IndexCheckResult, JudgedVerdict, TreatedAs};
 use crate::plan::plan_path;
 use crate::protocol::{KeyName, RealType};
 
@@ -28,6 +30,11 @@ pub enum JournalEvent {
     RegisterFailed { key: KeyName, id: String, part: u32, parts: u32, items: usize, reason: String, return_code: Option<i64>, detail: Option<u16> },
     TokenIssued { key: KeyName, generation: u64 },
     TokenInvalid { key: KeyName, generation: u64 },
+    ObservationJudged { day: u32, verdict: JudgedVerdict, open_minute: Option<u16>, treated_as: TreatedAs, evidence: Vec<Evidence> },
+    MarketOpenSeen { key: KeyName, deadline: String },
+    MarketOpenMissing { deadline: String },
+    MarketOpenNotChecked { reason: String },
+    IndexChecked { result: IndexCheckResult, mismatch: Option<Mismatch>, detail: Option<String> },
 }
 
 #[derive(Serialize)]
@@ -36,6 +43,11 @@ struct Record<'a> {
     at: String,
     #[serde(flatten)]
     event: &'a JournalEvent,
+}
+
+pub fn has_event(path: &Path, event: &str) -> bool {
+    let Ok(text) = std::fs::read_to_string(path) else { return false };
+    text.lines().filter_map(|line| serde_json::from_str::<serde_json::Value>(line).ok()).any(|record| record["event"] == event)
 }
 
 pub fn kst_stamp(time: KstTime) -> String {

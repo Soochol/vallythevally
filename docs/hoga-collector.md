@@ -519,7 +519,7 @@ data/hoga/calendar/
 ```
 
 - 특일정보는 올해와 지난해를 받고 12월에는 내년도 받는다. 올해(와 내년) 캐시는 받은 달이 이번 달이 아니면 다시 받고, 지난해 캐시는 다시 받지 않는다. 받기가 실패하면 캐시를 쓰고 근거에 그렇게 적는다. 캐시도 없으면 그 해의 날짜는 "모름"이다. 공휴일이 0건인 응답은 잘못된 응답으로 보고 캐시에 쓰지 않는다.
-- 서비스 키는 파일 한 개에 적고 `read_service_key`가 `Secret`으로 읽는다. 캐시, 근거, 오류 문구에 나오지 않는다. 실제 HTTP는 `HolidayTransport`를 구현해 주입한다.
+- 서비스 키는 파일 한 개에 적고 `read_service_key`가 `Secret`으로 읽는다. 캐시, 근거, 오류 문구에 나오지 않는다. 실제 HTTP는 `ReqwestHolidayTransport`(`calendar/http.rs`)가 한다. 기본 주소는 `https://apis.data.go.kr/B090041/openapi/service/SpcdeInfoService`이고 `with_base_url`로 바꿔 시험 서버에 붙인다. 요청은 `getRestDeInfo`에 `solYear`, `_type=json`, `numOfRows=100`, `ServiceKey`를 쿼리로 보낸다(`solMonth`는 보내지 않아 한 해를 한 번에 받는다). 키가 든 URL은 오류 문구와 로그에 남기지 않는다(reqwest 오류에서 URL을 떼고, 리다이렉트는 따라가지 않는다). 키 파일에는 공공데이터포털의 Decoding 키를 적는다. 요청을 만들 때 값을 URL 인코딩하므로 Encoding 키를 적으면 이중으로 인코딩돼 서비스 오류가 난다. 실제 HTTP를 구현해 주입할 수도 있다(`HolidayTransport`).
 - 수정 파일 형식이다. `date`는 YYYYMMDD 숫자, `reason`은 근거에 그대로 보인다. 같은 날을 두 번 적을 수 없다. 형식이 틀리면 쉬는 날이 아닌 날의 판단이 "모름"이다.
 
   ```json
@@ -531,6 +531,37 @@ data/hoga/calendar/
 
 - `Calendar::judge`는 `Judgment`(관측일 여부, 개장 분, 근거 목록)를 낸다. `next_observation_day`, `observation_days_after`, `observation_days_before`가 관측일을 센다. `cross_check`는 지수 일봉의 날짜 목록과 그날 판단을 대조한다. 목록이 비었거나 그날이 목록의 가장 이른 날짜보다 앞이면 판단하지 않는다. 마지막 일봉 뒤의 날은 일봉이 없는 것으로 보므로 마감 뒤에 부른다.
 - 시험은 `python3 scripts/dev.py cargo test -p collector --test calendar`와 `--lib calendar`다. 합성 응답만 쓴다.
+
+## 특일정보 첫 실제 호출 확인
+
+`ReqwestHolidayTransport`의 응답 해석(`response.body.items.item`, `locdate`, `isHoliday`, `dateName`, `totalCount`)은 공공데이터포털 관례를 가정한 것이고 실제 응답으로 확인한 적이 없다. 처음 켜기 전에 사람이 한 번 직접 불러 아래를 비교한다. 자동 시험과 자동 작업은 이 호출을 하지 않는다.
+
+1. **키를 파일에 둔다.** 화면에 찍히거나 셸 기록에 남지 않게 입력 없이 읽는다. 권한은 600이고 저장소 밖에 둔다.
+
+   ```sh
+   install -m 600 /dev/null ~/.config/holiday-service-key
+   read -rs HOLIDAY_KEY && printf '%s' "$HOLIDAY_KEY" > ~/.config/holiday-service-key; unset HOLIDAY_KEY
+   ```
+2. **한 해를 한 번 부른다.** 키는 `curl`이 파일에서 읽어 인코딩하므로 명령줄에도 남지 않는다. 응답은 `-o`로 파일에만 쓰고 화면에 찍지 않는다. 오류 출력에 URL이 나올 수 있으니 `-sS` 대신 `-s`를 쓰고 상태 코드만 본다.
+
+   ```sh
+   curl -s -G -o holidays-2026.json -w '%{http_code}\n' \
+     --data-urlencode 'solYear=2026' --data-urlencode '_type=json' --data-urlencode 'numOfRows=100' \
+     --data-urlencode 'ServiceKey@'"$HOME"/.config/holiday-service-key \
+     https://apis.data.go.kr/B090041/openapi/service/SpcdeInfoService/getRestDeInfo
+   ```
+
+   `200`이 아니거나 파일이 JSON이 아니면 여기서 멈춘다. 파일에 키가 들어 있지 않은지 `grep -cF -f ~/.config/holiday-service-key holidays-2026.json`으로 확인하고, 서비스 오류 응답이 키를 되돌려 보냈다면 파일을 지운다. 파일은 저장소 밖이나 작업 폴더의 무시되는 위치에 둔다.
+3. **모양을 비교한다.** `jq '.response.header, .response.body.totalCount, (.response.body.items.item | type)' holidays-2026.json`로 아래를 확인한다.
+   - `header.resultCode`가 `"00"`이다.
+   - `items.item`이 배열이고 `totalCount`가 배열 길이와 같다. 한 해에 1건뿐인 경우는 없으므로 객체가 나오면 가정과 다른 것이다.
+   - 각 항목의 `locdate`가 `YYYYMMDD` 숫자(문자열이어도 읽는다), `isHoliday`가 `"Y"`, `dateName`이 문자열이다.
+   - 날짜가 모두 2026년이고, 1월 1일·삼일절 대체공휴일 등 알려진 날이 있다. 달력과 대조한다.
+   - 같은 날이 두 항목으로 나오면(공휴일이 일요일과 겹칠 때) 판단 모듈이 이름을 `, `로 합친다.
+4. **한 항목과 0건 모양을 확인한다.** `solMonth`를 더해 공휴일이 하나뿐인 달(예: `solMonth=01`)과 없는 달(예: `solMonth=07`)을 부르고 `items.item`이 객체, `items`가 빈 문자열(또는 비었음)로 오는지 본다. 가정과 다르면 `parse_holiday_response`와 이 문서를 고친다.
+5. **수집 쪽에서 확인한다.** 가정과 같으면 `collector`가 받은 뒤 `data/hoga/calendar/holidays-2026.json`의 `holidays`가 위 응답의 `isHoliday`가 `Y`인 항목과 같은지 본다. 로그에 키나 URL이 없는지도 한 번 훑는다.
+
+다르면 키와 URL을 어디에도 붙여 넣지 말고 달라진 필드 이름과 타입만 적어 알린다. 확인이 끝나면 `holidays-2026.json`과 키 파일 안의 값이 남아 있지 않게 정리한다.
 
 ## 키 목록 설정
 
@@ -581,7 +612,9 @@ data/hoga/calendar/
 
 ## supervise
 
-`collector supervise --date YYYYMMDD --keys <키 목록 설정> [--state <폴더>] [--data <폴더>]`는 감독 데몬([ADR 0026](adr/0026-collector-supervisor-collects-common-and-preferred-stocks.md))이다. 그날 계획(`plan/<YYYYMMDD>.json`)을 받아 수집 키마다 `collect --child` 자식을 띄우고, 토큰을 발급하고, 감시하고, 다시 띄우고, 인계한다. 지금은 장중 수집 하나를 돌린다. 상태 API와 07:20~마감 뒤 하루 일정은 뒤 작업이 이 입구를 바꾼다. 코드는 `collector::supervise`다.
+`collector supervise --date YYYYMMDD --keys <키 목록 설정> [--state <폴더>] [--data <폴더>]`는 감독 데몬([ADR 0026](adr/0026-collector-supervisor-collects-common-and-preferred-stocks.md))이다. 그날 계획(`plan/<YYYYMMDD>.json`)을 받아 수집 키마다 `collect --child` 자식을 띄우고, 토큰을 발급하고, 감시하고, 다시 띄우고, 인계한다. 이 입구(`--date`)는 그날 하나를 돌리는 시험용이다. 운영은 `--date` 없이 계속 도는 [감독 데몬](#감독-데몬)이 하루 일정 안에서 같은 `Supervisor`를 부른다. 코드는 `collector::supervise`다.
+
+`--socket`은 읽기 전용 상태 API의 unix socket 경로다(기본은 `--state` 폴더 아래 `supervise.sock`, 계약은 [수집 감독 데몬 상태 API](collector-status-api.md)). `collector status`는 그 소켓에 한 번 물어 표로 찍는다.
 
 `--state`는 키마다 기본 토큰·잠금 파일 경로의 바탕 폴더다. 없으면 `collect`와 같은 규칙(`$XDG_STATE_HOME` 또는 `$HOME/.local/state` 아래 `vallythevally/collector`)이다. 종료 코드는 0(SIGTERM·SIGINT 또는 종료 시각으로 끝남), 1(시작하지 못함), 2(인수·설정 오류)다.
 
@@ -599,7 +632,7 @@ data/hoga/calendar/
 - 키마다 `KiwoomAuth`·`KiwoomRest` 하나를 쓴다. 토큰 파일에 아직 쓸 수 있는 토큰이 있으면 새로 발급하지 않고 그것을 쓴다. 한 키의 발급 사이는 10분(`KiwoomAuth`), 만료 10분 전에는 다시 받는다.
 - 키 사이 발급 간격은 설정값 `token_spacing`이고 기본 5초다. 발급 요청은 한 줄(`IssueLane`)로 세워 이 간격을 지킨다. 예비 키 토큰도 장 시작에 미리 받는다.
 - 자식의 `token_invalid`를 받으면 그 세대를 무효로 하고 10분 간격이 지난 뒤 새 토큰을 보낸다. 그 사이 자식은 `waiting_for_token`으로 하트비트를 계속 낸다. 이미 더 새 토큰이 있으면 그것을 다시 보낸다.
-- `Control::reissue_token_at(키, 시각)`이 키마다 다른 시각에 재발급하는 입구다. 20:05 재발급의 엇갈림은 하루 일정 작업이 이 입구로 건다.
+- `Control::reissue_token_at(키, 시각)`이 장중에 키마다 다른 시각에 재발급하는 입구다. 마감 뒤 재발급의 엇갈림은 이 입구가 아니라 상주 계층이 자기 `KeyTokens`로 한다(감독 데몬 절).
 - 8050이나 그 밖의 발급 정지(앱키 거절, 토큰 파일을 읽을 수 없음)를 받은 키는 멈춤이다. 8050은 사건 기록에 `8050`이 든 까닭으로 남는다.
 - 토큰 값과 앱키는 사건 기록과 로그에 쓰지 않는다.
 
@@ -638,6 +671,11 @@ data/hoga/calendar/
 | `register_failed` | `key`, `id`, `part`, `parts`, `items`, `reason`, `return_code`, `detail` | 등록 묶음이 거절됐다. 같은 묶음의 재전송 거절은 한 번만 적는다 |
 | `token_issued` | `key`, `generation` | 토큰을 새로 받았다(값은 적지 않는다) |
 | `token_invalid` | `key`, `generation` | 자식이 그 세대의 토큰이 무효라고 알렸다 |
+| `observation_judged` | `day`, `verdict`(`observed`·`closed`·`unknown`), `open_minute`, `treated_as`(`observed`·`closed`), `evidence` | 상주 계층의 그날 관측일 판단. 판단은 07:20과 데몬을 다시 띄울 때마다 다시 하므로 여러 줄이면 마지막이 맞다 |
+| `market_open_seen` | `key`, `deadline` | 처음 온 `market_open`. `deadline`은 대조 마감 시각 |
+| `market_open_missing` | `deadline` | 마감 시각까지 `market_open`이 없었다 |
+| `market_open_not_checked` | `reason` | 개장 뒤에 시작해 대조하지 않았다 |
+| `index_checked` | `result`(`agrees`·`disagrees`·`undetermined`·`failed`), `mismatch`, `detail` | 마감 뒤 코스피 지수 일봉 대조 |
 
 ### 상태 모양과 로그
 
@@ -645,12 +683,74 @@ data/hoga/calendar/
 
 ### 끝내기
 
-SIGTERM·SIGINT나 종료 시각(`end_at`, 기본 20:05 KST)이면 모든 자식에 `shutdown`을 보낸다. `shutdown_grace`(10초) 뒤에도 남은 자식은 SIGTERM, 다시 10초 뒤 SIGKILL로 끝낸다. 데몬을 SIGKILL로 죽여도 자식의 `PR_SET_PDEATHSIG`가 자식을 끝낸다.
+SIGTERM·SIGINT나 종료 시각(`end_at`, 기본 20:05 KST, 계획 파일의 날짜 기준)이면 모든 자식에 `shutdown`을 보낸다. 시작한 시각이 이미 종료 시각 뒤이면 토큰도 요청하지 않고 자식도 띄우지 않고 곧장 끝난다(`--date` 입구도 같다). `shutdown_grace`(10초) 뒤에도 남은 자식은 SIGTERM, 다시 10초 뒤 SIGKILL로 끝낸다. 데몬을 SIGKILL로 죽여도 자식의 `PR_SET_PDEATHSIG`가 자식을 끝낸다.
 
 ### 시험
 
 - `tests/supervise.rs`: 가짜 자식(`Launcher`·`ChildProcess`를 구현한 in-process 가짜), 합성 `Transport`, 멈춘 tokio 시간과 `Clock::fake`로 토큰 간격, 재시작, 인계, 8050, `token_invalid`, 종료, 시작 확인, 사건 기록과 로그의 토큰 비노출을 확인한다. `python3 scripts/dev.py cargo test -p collector --test supervise`.
+- `tests/supervise_status.rs`: 상태 소켓 권한(600), 남은 소켓 파일, 응답이 `tests/fixtures/status/` 예시와 같은 모양인지, 감시 연결의 5초 하트비트와 단계 변경 즉시 전송, 읽지 않는 연결 끊기, 명령 거절, 비밀값 비노출, `collector status` 표와 "데몬 꺼짐"을 확인한다. 소켓 경로 길이 한도(SUN_LEN) 때문에 소켓만 `/tmp` 아래 짧은 임시 폴더에 둔다. `python3 scripts/dev.py cargo test -p collector --test supervise_status`.
 - `tests/supervise_process.rs`: 실제 `collector supervise`가 실제 `collect --child` 자식 둘을 루프백 WebSocket 시험 서버에 붙여 LOGIN과 REG까지 가고, 데몬을 끝내면(SIGTERM) 자식도 끝나고, 데몬을 SIGKILL로 죽여도 자식이 끝남을 확인한다. 토큰은 토큰 파일에 미리 넣어 두고 `VALLY_COLLECTOR_REST_URL`(`http://127.0.0.1…`만 받는다)을 닫힌 포트로 돌려 키움에는 아무것도 보내지 않는다. `python3 scripts/dev.py cargo test -p collector --test supervise_process`.
+
+## 감독 데몬
+
+`collector supervise --keys <키 목록 설정> [--data <폴더>] [--state <폴더>] [--socket <경로>]`(`--date` 없이)는 날마다 정해진 순서로 일하며 계속 돈다. 하루짜리 `Supervisor`는 그대로 두고 그 위에 상주 계층(`supervise::Daemon`)이 하루를 단계 열로 돌린다. 상태 소켓은 데몬 하나가 평생 하나를 열어 장 밖에도 열려 있다. 시각 판단은 모두 주입한 `Clock`으로 한다.
+
+### 하루 순서
+
+각 단계는 이미 끝났는지 파일과 사건 기록으로 알아내므로 데몬이 중간에 떠도 같은 상태로 모인다. 시각은 설정값이고 아래가 기본이다.
+
+| 시각 | 단계(상태 `phase`) | 하는 일 | 이미 끝난 것으로 보는 조건 |
+|---|---|---|---|
+| 07:20 | 판단(`off_hours`) | 특일정보와 수정 파일로 그날 관측일을 판단하고 `observation_judged`를 적는다 | 항상 다시 한다 |
+| 07:20 뒤 | 종목 목록(`morning_prep`) | 예비 키 토큰으로 `ka10099`를 받아 `universe/<날짜>.json`을 쓴다 | 그 파일이 있다 |
+| 07:35 | 계획(`morning_prep`) | 직전 관측일 `store/<날짜>/complete.json`의 종목별 `messages` 합을 부하로 계획을 세워 `plan/<날짜>.json`을 쓴다(없으면 빈 부하) | 그 파일이 있다. 있으면 읽어 쓰고 다시 쓰지 않는다 |
+| 07:55 | 장중(`collecting`) | `Supervisor`로 자식 띄우기, 토큰, 등록, 감시, 인계 | 20:05가 지났으면 건너뛴다 |
+| 20:05 | 마감 뒤 처리(`after_close`) | 자식을 끄고 마감 뒤 목록(`universe/<날짜>.after.json`)을 받는다 | 그 파일이 있다 |
+| 목록 직후 | 〃 | 예비 키로 코스피 지수 일봉(`ka20006`) 한 쪽을 받아 그날 봉이 있는지 판단과 견준다(`index_checked`) | 사건 기록에 `index_checked`가 있다 |
+| 대조 직후 | 〃 | 키를 이름순으로 한 줄로 세워 i번째 키를 (대조가 끝난 시각 + i × `reissue_spacing`)에 재발급한다 | |
+| 재발급 뒤 | 정리(`finalizing`) | `finalize --prune` 자식을 `nice -n 10 ionice -c 3`로 띄운다. 정리 완료 표시와 원문 지우기를 한다 | `store/<날짜>/complete.json`이 있다 |
+
+`phase`가 `off_hours`인 때는 쉬는 날, 07:20 전, 정리가 끝난 뒤다. 하루가 끝나면 다음 날 00:00까지 기다린 뒤 새 하루를 시작하고 그때 전날 정리가 안 끝났으면(원문은 있고 `complete.json`은 없다) 먼저 정리한다.
+
+REST용 키는 키 목록의 예비 키이고, 예비 키가 없으면 첫 활성 키를 쓰며 경보(`plan_note`)를 남긴다. 토큰은 `IssueLane`으로 받고 재시도는 세 번까지다. 상주 계층이 연 `KeyTokens`는 `Supervisor`를 띄우기 전에 놓는다(키마다 잠금이 하나이기 때문이다). 토큰 파일이 이어 주므로 아침에 받은 토큰을 `Supervisor`가 그대로 쓴다.
+
+### 관측일이 아닌 날, 판단 모름
+
+- 판단이 쉬는 날이면 그날 단계를 돌리지 않는다. 상태는 `off_hours`이고 `observation_day.reasons`에 근거가 보이며 자식, `ka10099`, 계획·목록 파일이 없다.
+- 판단이 모름이면 관측일로 보고 돈다. 경보 `observation_unknown`에 근거 문장을 담고 사건 기록의 `treated_as`에 `observed`를 적는다. `observation_day.verdict`는 `unknown` 그대로이고 `reasons` 끝에 "관측일로 보고 돌린다"가 붙는다.
+- 특일정보 서비스 키 파일(`--holiday-key`)을 읽지 못해도 데몬은 뜬다. 그날은 캐시만 쓰고 경보(`stage_failed`)를 낸다.
+
+### `0s` 대조
+
+관측일로 본 날 `Supervisor`가 자식의 `market_open`을 기다린다. 마감 시각은 판단의 개장 시각(수정 파일로 바뀐 날은 그 시각)에 `market_open_grace`(기본 10분)를 더한 시각이다. 처음 온 `market_open`은 `market_open_seen`으로, 마감 시각까지 못 받으면 `market_open_missing`과 경보로 남긴다. 개장 시각 뒤에 `Supervisor`가 시작하면(11:00에 뜸 같은 경우) 그 개장의 `market_open`은 받을 수 없으므로 `market_open_not_checked`만 적고 경보는 내지 않는다.
+
+### 중간에 뜬 데몬
+
+- 오늘 계획 파일이 있으면 다시 쓰지 않고 그것을 쓴다. 이때 종목 목록은 받지 않는다. 장중이면(`launch_at`을 넘었고 `close_at` 전이면) 바로 자식을 띄운다.
+- 마감 뒤(`close_at` 이후)에 뜨면 그날 수집(자식, 토큰, 계획 만들기, 마감 뒤 목록, 지수 대조, 재발급)을 하지 않는다. `complete.json`이 없고 그날 원문이 있으면 정리부터 한다. `complete.json`이 있으면 아무것도 하지 않는다.
+- 종목 목록을 받지 못했고 이전 목록도 없으면(`NoFallback`) 그날 수집을 접고 경보(`stage_failed`)를 남긴다. 계획을 세우지 못해도 같다.
+- 정리가 0이 아닌 종료 코드로 끝나면 경보(`stage_failed`)를 남기고 다시 하지 않는다. 다음 날 시작이나 다음 데몬 시작 때 한 번 다시 한다.
+- 종료 신호는 모든 기다림, 장중 `Supervisor`, 정리 자식에 닿고 어느 단계에서든 깨끗이 끝난다.
+
+### 설정
+
+| 설정 | 기본 | 옵션 |
+|---|---|---|
+| `judge_at` | 07:20 | `--judge-at HH:MM` |
+| `plan_at` | 07:35 | `--plan-at HH:MM` |
+| `launch_at` | 07:55 | `--launch-at HH:MM` |
+| `close_at` | 20:05 | `--close-at HH:MM` |
+| `market_open_grace` | 10분 | `--open-grace-minutes N` |
+| `reissue_spacing` | 30초 | `--reissue-spacing-secs N` |
+| `finalize_threads` | 2 | `--finalize-threads N` |
+| 서비스 키 파일 | `<상태 폴더>/holiday-service-key` | `--holiday-key <경로>` |
+| `retention` | `RetentionSettings` 기본 | (옵션 없음) |
+
+시각은 `judge_at < plan_at < launch_at < close_at`이어야 한다. 이 옵션들은 `--date`와 함께 쓸 수 없다.
+
+### 시험
+
+`tests/supervise_day.rs`: 가짜 자식, 합성 `Transport`(`au10001`, `ka10099`, `ka20006`), 합성 `HolidayTransport`, 실제 `finalize::run`을 같은 인수로 부르는 `FinalizeRunner`, 멈춘 tokio 시간과 `Clock::fake`로 하루를 몇 초에 돌린다. 평일 하루의 순서와 시각, 쉬는 날, 판단 모름, `0s`가 오지 않음, 지수 일봉 어긋남과 실패, 개장 시각이 바뀐 날, 11:00과 21:00에 뜬 데몬, 마감 뒤에 직접 시작한 `Supervisor`, 상태 소켓의 단계별 응답과 계약 예시 모양, 종료 신호, 정리 실패와 다음 날 다시 하기를 확인한다. `python3 scripts/dev.py cargo test -p collector --test supervise_day`.
 
 ## 실제 수집 절차
 

@@ -1,11 +1,24 @@
+use std::path::PathBuf;
 use std::time::Duration;
 
-use domain::TimeOfDay;
+use domain::{KstTime, TimeOfDay};
 
 const END_OF_DAY: TimeOfDay = match TimeOfDay::hms(20, 5, 0) {
     Some(time) => time,
     None => unreachable!(),
 };
+
+#[derive(Debug, Clone)]
+pub struct SocketSetting {
+    pub path: PathBuf,
+    pub required: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct MarketOpenCheck {
+    pub opens_at: KstTime,
+    pub deadline: KstTime,
+}
 
 #[derive(Debug, Clone)]
 pub struct Settings {
@@ -16,6 +29,9 @@ pub struct Settings {
     pub shutdown_grace: Duration,
     pub housekeeping_every: Duration,
     pub end_at: Option<TimeOfDay>,
+    pub status_socket: Option<SocketSetting>,
+    pub watch_every: Duration,
+    pub market_open_check: Option<MarketOpenCheck>,
 }
 
 impl Default for Settings {
@@ -28,6 +44,9 @@ impl Default for Settings {
             shutdown_grace: Duration::from_secs(10),
             housekeeping_every: Duration::from_secs(60),
             end_at: Some(END_OF_DAY),
+            status_socket: None,
+            watch_every: Duration::from_secs(5),
+            market_open_check: None,
         }
     }
 }
