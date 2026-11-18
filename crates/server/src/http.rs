@@ -135,10 +135,6 @@ impl ApiFailure {
         &self.message
     }
 
-    pub(crate) fn code(&self) -> api::ApiErrorCode {
-        self.code
-    }
-
     pub(crate) fn bad_request(message: impl Into<String>) -> Self {
         ApiFailure::new(api::ApiErrorCode::BadRequest, message)
     }

@@ -772,13 +772,13 @@ mod tests {
     #[test]
     fn two_windows_of_a_kind_are_accepted_except_for_indicators_which_stay_single() {
         let twice = windows_of(&same_kind_contents(), "2");
-        assert!(crate::user_routes::check_layout("L2", &layout("L2", "둘", twice)).is_ok());
+        assert!(crate::setup_documents::check_layout("L2", &layout("L2", "둘", twice)).is_ok());
 
         let mut one_indicator = windows_of(&[], "2");
         one_indicator.push(side(WindowContent::Indicators));
-        assert!(crate::user_routes::check_layout("L2", &layout("L2", "하나", one_indicator.clone())).is_ok());
+        assert!(crate::setup_documents::check_layout("L2", &layout("L2", "하나", one_indicator.clone())).is_ok());
         one_indicator.push(LayoutWindow { id: window_id("indicators-2"), link: None, content: WindowContent::Indicators });
-        assert!(crate::user_routes::check_layout("L2", &layout("L2", "둘", one_indicator)).is_err());
+        assert!(crate::setup_documents::check_layout("L2", &layout("L2", "둘", one_indicator)).is_err());
     }
 
     #[test]
@@ -788,8 +788,8 @@ mod tests {
             windows.extend((1..count).map(|n| LayoutWindow { id: window_id(&format!("trades-{n}")), link: None, content: WindowContent::Trades }));
             layout("L2", "많음", windows)
         };
-        assert!(crate::user_routes::check_layout("L2", &layout_of(50)).is_ok());
-        assert!(crate::user_routes::check_layout("L2", &layout_of(51)).is_err());
+        assert!(crate::setup_documents::check_layout("L2", &layout_of(50)).is_ok());
+        assert!(crate::setup_documents::check_layout("L2", &layout_of(51)).is_err());
     }
 
     #[sqlx::test(migrations = "./migrations")]

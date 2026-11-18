@@ -27,6 +27,7 @@ pub mod symbols;
 mod sync_log;
 pub mod system_routes;
 pub mod trading;
+pub mod setup_documents;
 pub mod user_routes;
 pub mod userdata;
 pub mod write_guard;
