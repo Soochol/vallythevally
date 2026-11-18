@@ -3,6 +3,7 @@ import type { Bar } from "../src/api/generated/Bar";
 import type { LayoutWindow } from "../src/api/generated/LayoutWindow";
 import type { Period } from "../src/api/generated/Period";
 import { type Scenario, cell, chartOf, DEFAULT_LAYOUT_ID, expect, pollSaved, test } from "./harness";
+import { TOOLS } from "../src/chart/drawings/tools";
 import { chartPoint, drawingDock, settledMirror } from "./drawing-probe";
 
 test.use({ clockStart: "20261109100000" });
@@ -105,6 +106,20 @@ test("숨기면 보이기 손잡이만 남고 작업 영역이 넓어지며 새�
   await rail(page).getByRole("button", { name: "드로잉 도구 막대 보이기", exact: true }).click();
   await expect(rail(page).getByRole("button", { name: "추세선", exact: true })).toBeVisible();
   await expect.poll(async () => (await workspace(page).boundingBox())!.width).toBe(narrow);
+});
+
+test("짧은 창에서도 고정 도구는 마지막 칸에 접혀 눌러 고를 수 있다", async ({ page, scenario }) => {
+  seedCharts(scenario);
+  const state = scenario.documents.uiState();
+  scenario.documents.saveUiState({ ...state, drawing: { ...scenario.documents.uiPrefs().drawing, pinnedTools: TOOLS.slice(0, 6).map((tool) => tool.tool) }, revision: state.revision + 1 });
+  await page.setViewportSize({ width: 1600, height: 400 });
+  await page.goto("/");
+  await expect(rail(page).getByRole("button", { name: "드로잉 단축키 도움말", exact: true })).toBeAttached();
+  const first = TOOLS[0]!;
+  await rail(page).getByRole("button", { name: `${first.label} 고정 도구`, exact: true }).click();
+  await expect(rail(page).getByRole("button", { name: `${first.label} 고정 도구`, exact: true })).toHaveAttribute("aria-pressed", "true");
+  await rail(page).getByRole("button", { name: "고정 도구 펼치기", exact: true }).click();
+  await expect(page.getByRole("menu", { name: "고정 도구", exact: true })).toBeVisible();
 });
 
 test("옛 설정의 dockAt이 있어도 막대가 보이고 오류가 없다", async ({ page, scenario }) => {
