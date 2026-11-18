@@ -308,7 +308,7 @@ impl Supervisor {
         let status_socket = match &settings.status_socket {
             Some(SocketSetting { path, required }) => match StatusSocket::bind(path) {
                 Ok(socket) => Some(socket),
-                Err(error) if *required => return Err(StartError::StatusSocket { path: path.clone(), error }),
+                Err(error) if *required || error.kind() == io::ErrorKind::AddrInUse => return Err(StartError::StatusSocket { path: path.clone(), error }),
                 Err(error) => {
                     tracing::error!(path = %path.display(), %error, "상태 소켓을 열 수 없어 상태 API 없이 수집을 이어 갑니다");
                     None
@@ -317,7 +317,8 @@ impl Supervisor {
             None => None,
         };
         let date = plan.date;
-        let alerts = plan_alerts(&plan);
+        let mut alerts = plan_alerts(&plan);
+        alerts.drain(..alerts.len().saturating_sub(ALERT_LIMIT));
         Ok(Supervisor {
             date,
             data_dir,
@@ -355,9 +356,7 @@ impl Supervisor {
         self.journal.append(at, &event);
         if let Some((kind, message)) = alert_of(&event) {
             self.alerts.push(Alert { at: kst_stamp(at), kind, message });
-            if self.alerts.len() > ALERT_LIMIT {
-                self.alerts.remove(0);
-            }
+            self.alerts.drain(..self.alerts.len().saturating_sub(ALERT_LIMIT));
         }
     }
 

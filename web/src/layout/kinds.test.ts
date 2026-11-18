@@ -1,8 +1,8 @@
 import { expect, test } from "vitest";
 import { allowsMany, WINDOW_KIND_LIST, WINDOW_KINDS } from "./kinds";
 
-test("창 종류는 아홉 가지이고 차트만 여러 개를 둘 수 있다", () => {
-  expect(WINDOW_KIND_LIST).toEqual(["chart", "watchlist", "screener", "objects", "indicators", "trades", "book", "program", "brokers"]);
+test("창 종류는 열 가지이고 차트만 여러 개를 둘 수 있다", () => {
+  expect(WINDOW_KIND_LIST).toEqual(["chart", "watchlist", "screener", "objects", "indicators", "trades", "book", "program", "brokers", "order"]);
   expect(WINDOW_KIND_LIST.filter(allowsMany)).toEqual(["chart"]);
   expect(WINDOW_KINDS.chart.maxCount).toBe(8);
 });
@@ -18,6 +18,7 @@ test("차트와 시세 창은 연동 색을 따르고 관심종목·스크리너
     ["book", "side", "follows"],
     ["program", "side", "follows"],
     ["brokers", "wide", "follows"],
+    ["order", "wide", "follows"],
   ]);
 });
 

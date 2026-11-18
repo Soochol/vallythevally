@@ -22,7 +22,7 @@ mod raw_files;
 mod scan;
 pub mod schema;
 
-pub use complete::{COMPLETE_FILE_NAME, COMPLETE_FORMAT_VERSION, CompleteFile, publish_store, recover_interrupted_swap};
+pub use complete::{COMPLETE_FILE_NAME, COMPLETE_FORMAT_VERSION, CompleteFile, REPLACED_SUFFIX, publish_store, recover_interrupted_swap};
 pub use coverage::{CoverageInput, Gap, Handoff, JournalFact, KeyTimeline, KeyTimelines, StockCoverage, build_coverage};
 pub use observation::{IndexCheckResult, IndexCheckSummary, JudgedVerdict, JudgmentSummary, MarketOpenSummary, ObservationSummary, TreatedAs};
 pub use prune::{

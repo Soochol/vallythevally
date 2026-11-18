@@ -23,7 +23,7 @@ axum = "0.8"
 brotli = "9"
 futures = "0.3"
 reqwest = { version = "0.13", default-features = false, features = ["rustls", "query"] }
-rustix = { version = "1", features = ["process", "fs"] }
+rustix = { version = "1", features = ["process", "fs", "net"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["float_roundtrip", "raw_value"] }
 tempfile = "3"

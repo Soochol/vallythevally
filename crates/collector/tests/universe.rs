@@ -365,3 +365,62 @@ async fn a_rejected_file_that_cannot_be_removed_is_a_warning_not_an_error() {
     assert!(outcome.warnings[0].contains("rejected.json"), "{:?}", outcome.warnings);
     assert_eq!(read_universe(data.path(), 20261118).unwrap(), outcome.file);
 }
+
+#[tokio::test(start_paused = true)]
+async fn a_failed_rerun_leaves_an_unreadable_same_day_list_untouched_and_reports_it() {
+    let broken_files: [(&str, Vec<u8>); 2] = [("깨진 JSON", b"{not json".to_vec()), ("다른 형식 버전", {
+        let data = tempfile::tempdir().unwrap();
+        morning(data.path(), 20261118, listing(fillers(100))).await.unwrap();
+        let text = std::fs::read_to_string(data.path().join("universe/20261118.json")).unwrap();
+        text.replace("\"format_version\": 1", "\"format_version\": 2").into_bytes()
+    })];
+    for (label, bytes) in broken_files {
+        let data = tempfile::tempdir().unwrap();
+        morning(data.path(), 20261117, listing(fillers(100))).await.unwrap();
+        let today = data.path().join("universe/20261118.json");
+        std::fs::write(&today, &bytes).unwrap();
+
+        let failed = morning_outcome(data.path(), 20261118, Kiwoom::Failing).await;
+
+        let Err(UniverseError::TodayListUnreadable { date, reason, .. }) = &failed else { panic!("{label}: {failed:?}") };
+        assert_eq!((*date, *reason), (20261118, ReplaceReason::FetchFailed), "{label}");
+        assert!(failed.unwrap_err().to_string().contains("20261118.json"), "{label}");
+        assert_eq!(std::fs::read(&today).unwrap(), bytes, "{label}: 읽을 수 없는 그날 파일은 그대로다");
+        assert!(universe_files(data.path()).contains(&"20261118.rejected.json".to_owned()), "{label}");
+
+        let repaired = morning_outcome(data.path(), 20261118, listing(fillers(100))).await.unwrap();
+        assert!(matches!(repaired.written, Written::NewList), "{label}: 정상 조회는 깨진 파일을 새 목록으로 바꾼다");
+        assert_eq!(read_universe(data.path(), 20261118).unwrap(), repaired.file, "{label}");
+    }
+}
+
+#[tokio::test(start_paused = true)]
+async fn the_no_fallback_error_names_the_files_that_were_skipped() {
+    let data = tempfile::tempdir().unwrap();
+    morning(data.path(), 20261117, listing(fillers(100))).await.unwrap();
+    std::fs::write(data.path().join("universe/20261117.json"), "{not json").unwrap();
+
+    let failed = morning_outcome(data.path(), 20261118, Kiwoom::Failing).await.unwrap_err();
+
+    let UniverseError::NoFallback { reason, skipped, .. } = &failed else { panic!("{failed:?}") };
+    assert_eq!(*reason, ReplaceReason::FetchFailed);
+    assert_eq!(skipped.len(), 1);
+    assert_eq!(skipped[0].date, 20261117);
+    assert!(skipped[0].cause.contains("20261117.json"), "{}", skipped[0].cause);
+    assert!(failed.to_string().contains("20261117.json"), "{failed}");
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_rejected_file_that_cannot_be_written_is_a_warning_and_the_outcome_still_comes() {
+    let data = tempfile::tempdir().unwrap();
+    let yesterday = morning(data.path(), 20261117, listing(fillers(100))).await.unwrap();
+    std::fs::create_dir(data.path().join("universe/20261118.rejected.json")).unwrap();
+
+    let outcome = morning_outcome(data.path(), 20261118, Kiwoom::Failing).await.unwrap();
+
+    assert!(matches!(outcome.written, Written::ReplacementList), "{:?}", outcome.written);
+    assert_eq!(outcome.file.stocks, yesterday.stocks);
+    assert_eq!(outcome.warnings.len(), 1);
+    assert!(outcome.warnings[0].contains("rejected.json"), "{:?}", outcome.warnings);
+    assert_eq!(read_universe(data.path(), 20261118).unwrap(), outcome.file);
+}

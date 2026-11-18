@@ -77,6 +77,7 @@ const DAEMON_ONLY_OPTIONS: [&str; 11] = [
 ];
 
 const HOLIDAY_KEY_FILE: &str = "holiday-service-key";
+const RUNTIME_STOP_LIMIT: std::time::Duration = std::time::Duration::from_secs(5);
 
 pub fn rest_base_url(variables: &Variables) -> Result<String, String> {
     let Some(url) = variables.get(REST_URL_VARIABLE).filter(|url| !url.is_empty()) else {
@@ -179,7 +180,7 @@ fn run_daemon(arguments: &Arguments, keys_path: &std::path::Path) -> ExitCode {
         Ok(runtime) => runtime,
         Err(error) => return usage_error(format_args!("실행 환경을 만들지 못했습니다: {error}")),
     };
-    runtime.block_on(async {
+    let code = runtime.block_on(async {
         let transport = match ReqwestTransport::new(rest_url) {
             Ok(transport) => transport,
             Err(error) => return usage_error(format_args!("HTTP 클라이언트를 만들지 못했습니다: {error}")),
@@ -213,7 +214,9 @@ fn run_daemon(arguments: &Arguments, keys_path: &std::path::Path) -> ExitCode {
         tokio::spawn(forward_termination_signals(stop));
         daemon.run(shutdown).await;
         ExitCode::SUCCESS
-    })
+    });
+    runtime.shutdown_timeout(RUNTIME_STOP_LIMIT);
+    code
 }
 
 fn run_single_day(arguments: &Arguments, keys_path: &std::path::Path, date: &str) -> ExitCode {
@@ -258,7 +261,7 @@ fn run_single_day(arguments: &Arguments, keys_path: &std::path::Path, date: &str
         Ok(runtime) => runtime,
         Err(error) => return usage_error(format_args!("실행 환경을 만들지 못했습니다: {error}")),
     };
-    runtime.block_on(async {
+    let code = runtime.block_on(async {
         let transport = match ReqwestTransport::new(rest_url) {
             Ok(transport) => transport,
             Err(error) => return usage_error(format_args!("HTTP 클라이언트를 만들지 못했습니다: {error}")),
@@ -279,5 +282,7 @@ fn run_single_day(arguments: &Arguments, keys_path: &std::path::Path, date: &str
         tokio::spawn(forward_termination_signals(stop));
         supervisor.run(shutdown).await;
         ExitCode::SUCCESS
-    })
+    });
+    runtime.shutdown_timeout(RUNTIME_STOP_LIMIT);
+    code
 }
