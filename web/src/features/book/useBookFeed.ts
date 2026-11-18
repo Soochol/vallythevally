@@ -44,7 +44,7 @@ export function useBookFeed(code: SymbolCode): BookFeed {
     const stopWatch = marketSocket.watch((connection) => update((state) => ({ ...state, socketOpen: connection.socket === "open" })));
     const stopBook = marketSocket.subscribeFeed({ symbol: code, kind: "book", venue: "combined" }, (m) => {
       if (m.type === "feed_book") update((state) => ({ ...state, book: acceptLive(state.book, m.book) }));
-      else if (m.type === "feed_subscribed") update((state) => ({ ...state, linkLive: true }));
+      else if (m.type === "feed_subscribed") update((state) => ({ ...state, linkLive: true, rejected: null }));
       else if (m.type === "feed_link") update((state) => ({ ...state, linkLive: m.live }));
       else if (m.type === "sub_error") update((state) => ({ ...state, rejected: m.code }));
       else if (m.type === "resync") update((state) => ({ ...state, rejected: null }));

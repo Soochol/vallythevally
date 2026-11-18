@@ -313,6 +313,21 @@ test("구독 직후 끊김이 오면 호가가 오기 전에도 끊김을 보이
   await expect(page.locator(".bk-ladder")).toHaveAttribute("data-stale", "");
 });
 
+test("자리 부족 안내는 같은 구독의 구독 복구에서만 사라지고 다른 구독의 응답은 지우지 않는다", async ({ page, scenario }) => {
+  await open(page, scenario, 70000);
+  const bookSub = await subOf(scenario, "book");
+  const tradesSub = (await tradesSubs(scenario))[0]!;
+  const notice = page.getByRole("status").filter({ hasText: "실시간 자리가 부족" });
+  scenario.live.emit({ type: "sub_error", sub: bookSub, code: "realtime_limit" });
+  await expect(notice).toBeVisible();
+
+  scenario.live.emit({ type: "feed_subscribed", sub: tradesSub, kind: "trades" });
+  await expect(notice).toBeVisible();
+
+  scenario.live.emit({ type: "feed_subscribed", sub: bookSub, kind: "book" });
+  await expect(notice).toHaveCount(0);
+});
+
 function bookSubs(scenario: Scenario): string[] {
   return scenario.live.messages.flatMap((m) => (m.type === "subscribe_feed" && m.kind === "book" && m.symbol === CODE ? [m.sub] : []));
 }
