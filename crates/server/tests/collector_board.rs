@@ -309,17 +309,25 @@ impl Fixture {
     }
 
     async fn send(&self, method: &str, path: &str) -> (u16, Vec<u8>) {
+        let (status, _, body) = self.send_with_headers(method, path).await;
+        (status, body)
+    }
+
+    async fn send_with_headers(&self, method: &str, path: &str) -> (u16, axum::http::HeaderMap, Vec<u8>) {
         let response = self.app.clone().oneshot(Request::builder().method(method).uri(path).body(Body::empty()).unwrap()).await.unwrap();
         let status = response.status().as_u16();
-        (status, response.into_body().collect().await.unwrap().to_bytes().to_vec())
+        let headers = response.headers().clone();
+        (status, headers, response.into_body().collect().await.unwrap().to_bytes().to_vec())
     }
 
     async fn assert_other_methods_answer(&self, expected: u16, code: Option<&str>, what: &str) {
+        let expected_allow = (expected == 405).then_some("GET,HEAD");
         for method in ["POST", "PUT", "PATCH", "DELETE"] {
             for path in ["status", "coverage", "disk"] {
-                let (status, body) = self.send(method, &format!("/api/collector/{path}")).await;
+                let (status, headers, body) = self.send_with_headers(method, &format!("/api/collector/{path}")).await;
                 let body: Value = serde_json::from_slice(&body).unwrap_or(Value::Null);
                 assert_eq!((status, body["error"]["code"].as_str()), (expected, code), "{what} {method} {path}: {body}");
+                assert_eq!(headers.get("allow").map(|value| value.to_str().unwrap()), expected_allow, "{what} {method} {path}: Allow");
             }
         }
     }
@@ -698,7 +706,7 @@ async fn a_line_one_byte_over_the_limit_drops_the_connection() {
 }
 
 #[tokio::test]
-async fn a_connection_that_heard_a_heartbeat_reconnects_after_one_second_not_after_the_grown_gap() {
+async fn a_connection_that_heard_a_heartbeat_reconnects_after_one_second_then_grows_from_the_start_of_the_steps() {
     let mut fixture = Fixture::start(Options::allowed_board()).await;
     fixture.sign_in_as(Some("1234")).await;
     fixture.go();
@@ -710,9 +718,10 @@ async fn a_connection_that_heard_a_heartbeat_reconnects_after_one_second_not_aft
 
     daemon.stop().await;
     let lost = Instant::now();
+    tokio::time::sleep(Duration::from_secs(5)).await;
     let daemon = Daemon::start(&fixture.socket, Mode::Beating);
     daemon.wait_for_connections(1).await;
-    assert_elapsed(lost.elapsed(), RECONNECT_BACKOFF[0], "하트비트를 들은 연결 뒤에는 간격이 1초부터 다시 시작한다");
+    assert_elapsed(lost.elapsed(), RECONNECT_BACKOFF[0] + RECONNECT_BACKOFF[1] + RECONNECT_BACKOFF[2], "하트비트를 들은 연결 뒤 시도 간격은 1, 2, 5초다");
 }
 
 #[tokio::test]

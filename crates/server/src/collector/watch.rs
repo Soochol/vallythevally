@@ -157,15 +157,13 @@ fn silence_limit() -> Duration {
 }
 
 pub async fn watch_forever(socket: &Path, watcher: &Watcher, clock: &crate::clock::Clock) {
-    let mut sessions_without_heartbeat = 0usize;
+    let mut waits_since_heartbeat = 0usize;
     loop {
         if watch_once(socket, watcher, clock).await {
-            sessions_without_heartbeat = 0;
-        } else {
-            sessions_without_heartbeat += 1;
+            waits_since_heartbeat = 0;
         }
-        let step = sessions_without_heartbeat.saturating_sub(1).min(RECONNECT_BACKOFF.len() - 1);
-        tokio::time::sleep(RECONNECT_BACKOFF[step]).await;
+        tokio::time::sleep(RECONNECT_BACKOFF[waits_since_heartbeat.min(RECONNECT_BACKOFF.len() - 1)]).await;
+        waits_since_heartbeat += 1;
     }
 }
 
