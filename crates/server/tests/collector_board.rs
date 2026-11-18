@@ -59,6 +59,7 @@ enum Mode {
     Mute,
     NewerVersion,
     EndlessLine,
+    StatusOfBytes(usize),
 }
 
 struct Daemon {
@@ -112,6 +113,11 @@ impl Drop for Daemon {
 }
 
 fn status_line(mode: Mode) -> String {
+    if let Mode::StatusOfBytes(length) = mode {
+        let text = fixture_text("reply-status.json").trim().replace('\n', " ");
+        let padding = " ".repeat(length - text.len());
+        return format!("{text}{padding}\n");
+    }
     let mut status = fixture_value("reply-status.json");
     if mode == Mode::BeatingOffHours {
         status["status"]["phase"] = json!("off_hours");
@@ -298,9 +304,24 @@ impl Fixture {
     }
 
     async fn get(&self, path: &str) -> (u16, Value) {
-        let response = self.app.clone().oneshot(Request::get(path).body(Body::empty()).unwrap()).await.unwrap();
+        let (status, body) = self.send("GET", path).await;
+        (status, serde_json::from_slice(&body).unwrap())
+    }
+
+    async fn send(&self, method: &str, path: &str) -> (u16, Vec<u8>) {
+        let response = self.app.clone().oneshot(Request::builder().method(method).uri(path).body(Body::empty()).unwrap()).await.unwrap();
         let status = response.status().as_u16();
-        (status, serde_json::from_slice(&response.into_body().collect().await.unwrap().to_bytes()).unwrap())
+        (status, response.into_body().collect().await.unwrap().to_bytes().to_vec())
+    }
+
+    async fn assert_other_methods_answer(&self, expected: u16, code: Option<&str>, what: &str) {
+        for method in ["POST", "PUT", "PATCH", "DELETE"] {
+            for path in ["status", "coverage", "disk"] {
+                let (status, body) = self.send(method, &format!("/api/collector/{path}")).await;
+                let body: Value = serde_json::from_slice(&body).unwrap_or(Value::Null);
+                assert_eq!((status, body["error"]["code"].as_str()), (expected, code), "{what} {method} {path}: {body}");
+            }
+        }
     }
 
     async fn access(&self) -> String {
@@ -472,6 +493,8 @@ async fn an_allowed_account_reads_the_daemon_status_coverage_and_disk() {
     let requests = daemon.requests();
     assert_eq!(requests.iter().map(|line| serde_json::from_str::<Value>(line).unwrap()["type"].as_str().unwrap().to_owned()).collect::<Vec<_>>(), ["watch", "coverage", "disk"], "커넥터는 읽기 요청만 보낸다");
     assert_eq!(serde_json::from_str::<Value>(&requests[0]).unwrap(), fixture_value("request-watch.json"));
+    fixture.assert_other_methods_answer(405, Some("method_not_allowed"), "허용된 계정").await;
+    assert_eq!(daemon.requests().len(), 3, "GET이 아닌 요청은 데몬에 닿지 않는다");
 }
 
 #[tokio::test]
@@ -490,6 +513,7 @@ async fn an_account_off_the_list_and_no_login_get_403_and_the_daemon_is_not_aske
         assert_eq!((status, body["error"]["code"].as_str()), (403, Some("forbidden")), "목록에 없는 계정 {path}: {body}");
     }
     assert_eq!(fixture.access().await, "denied");
+    fixture.assert_other_methods_answer(403, Some("forbidden"), "목록에 없는 계정").await;
     assert!(!daemon.requests().iter().any(|line| line.contains("coverage") || line.contains("disk")), "인가가 먼저다. 거절한 요청은 데몬에 닿지 않는다");
 
     fixture.accounts.answer_me_with(Some("1234"));
@@ -520,6 +544,7 @@ async fn assert_board_is_off(mut fixture: Fixture, name: &str) {
         let (status, body) = fixture.get(&format!("/api/collector/{path}")).await;
         assert_eq!((status, body["error"]["code"].as_str()), (404, Some("not_found")), "{name} {path}: {body}");
     }
+    fixture.assert_other_methods_answer(404, Some("not_found"), name).await;
     tokio::time::sleep(HEARTBEAT_EVERY * 20).await;
     assert!(daemon.requests().is_empty(), "{name}: 감시 태스크가 돌지 않는다");
 }
@@ -622,6 +647,47 @@ async fn the_wait_between_tries_stops_growing_at_thirty_seconds() {
     let daemon = Daemon::start(&fixture.socket, Mode::Beating);
     daemon.wait_for_connections(1).await;
     assert_elapsed(first_try.elapsed(), Duration::from_secs(1 + 2 + 5 + 10 + 30 + 30 + 30), "마지막 간격 30초를 되풀이한다");
+}
+
+#[tokio::test]
+async fn a_line_exactly_at_the_limit_is_read() {
+    let mut fixture = Fixture::start(Options::allowed_board()).await;
+    let daemon = Daemon::start(&fixture.socket, Mode::StatusOfBytes(MAX_LINE_BYTES));
+    fixture.sign_in_as(Some("1234")).await;
+    fixture.go();
+    fixture.reached(DaemonJudgment::Healthy).await;
+    let (_, body) = fixture.get("/api/collector/status").await;
+    assert_eq!(body["status"]["date"].as_u64(), Some(20261118), "한도와 같은 길이의 줄은 읽는다: {body}");
+    assert_eq!(daemon.requests().len(), 1, "연결이 끊기지 않았다");
+}
+
+#[tokio::test]
+async fn a_line_one_byte_over_the_limit_drops_the_connection() {
+    let mut fixture = Fixture::start(Options::allowed_board()).await;
+    let daemon = Daemon::start(&fixture.socket, Mode::StatusOfBytes(MAX_LINE_BYTES + 1));
+    fixture.sign_in_as(Some("1234")).await;
+    fixture.go();
+    daemon.wait_for_connections(2).await;
+    let (_, body) = fixture.get("/api/collector/status").await;
+    assert_eq!((body["judgment"].as_str() != Some("healthy"), body["status"].is_null()), (true, true), "한도보다 1바이트 긴 줄은 읽지 않고 연결을 끊는다: {body}");
+}
+
+#[tokio::test]
+async fn a_connection_that_heard_a_heartbeat_reconnects_after_one_second_not_after_the_grown_gap() {
+    let mut fixture = Fixture::start(Options::allowed_board()).await;
+    fixture.sign_in_as(Some("1234")).await;
+    fixture.go();
+    fixture.reached(DaemonJudgment::Down).await;
+    tokio::time::sleep(Duration::from_secs(4)).await;
+    let mut daemon = Daemon::start(&fixture.socket, Mode::Beating);
+    daemon.wait_for_connections(1).await;
+    fixture.reached(DaemonJudgment::Healthy).await;
+
+    daemon.stop().await;
+    let lost = Instant::now();
+    let daemon = Daemon::start(&fixture.socket, Mode::Beating);
+    daemon.wait_for_connections(1).await;
+    assert_elapsed(lost.elapsed(), RECONNECT_BACKOFF[0], "하트비트를 들은 연결 뒤에는 간격이 1초부터 다시 시작한다");
 }
 
 #[tokio::test]
