@@ -145,6 +145,28 @@ test("보이는 차트 창이 없는 레이아웃에는 막대가 없고 차트 
   await expect(rail(page).getByRole("button", { name: "추세선", exact: true })).toBeVisible();
 });
 
+test("도움말을 연 채 차트가 화면에서 빠졌다 돌아와도 도움말은 다시 뜨지 않는다", async ({ page, scenario }) => {
+  const layout = scenario.documents.layout(DEFAULT_LAYOUT_ID);
+  const chart: LayoutWindow = { id: "cell-0", link: null, kind: "chart", symbol: "005930", venue: "combined", period: "D", chartSettings: SETTINGS };
+  const watchlist = layout.windows.find((w) => w.kind === "watchlist")!;
+  const root = { kind: "group", id: "g1", tabs: ["watchlist", "cell-0"], active: "cell-0" };
+  scenario.documents.saveLayout({ ...layout, windows: [chart, watchlist], placement: { v: 1, dock: { root, floats: [] }, canvas: null }, revision: layout.revision + 1 });
+  await page.goto("/");
+  await expect(rail(page).getByRole("button", { name: "추세선", exact: true })).toBeVisible();
+  await cell(page).focus();
+  await page.keyboard.press("Shift+Slash");
+  const help = page.getByRole("dialog", { name: "드로잉 단축키", exact: true });
+  await expect(help).toBeVisible();
+  await page.getByRole("tab", { name: /^관심종목/ }).first().focus();
+  await page.keyboard.press("Enter");
+  await expect(rail(page)).toHaveCount(0);
+  await expect(help).toHaveCount(0);
+  await page.getByRole("tab", { name: /^삼성전자/ }).first().focus();
+  await page.keyboard.press("Enter");
+  await expect(rail(page).getByRole("button", { name: "추세선", exact: true })).toBeVisible();
+  await expect(help).toHaveCount(0);
+});
+
 test("휴대폰 폭에는 막대가 없다", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto("/");

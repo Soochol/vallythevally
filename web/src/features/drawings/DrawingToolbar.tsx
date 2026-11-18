@@ -62,6 +62,7 @@ export function DrawingToolbar() {
   const cellId = useSelectionStore((s) => s.activeCell);
   const [help, setHelp] = useState(false);
   const helpAnchor = useRef<HTMLButtonElement>(null);
+  useEffect(() => { if (!shown) setHelp(false); }, [shown]);
   useEffect(() => {
     if (!shown) return;
     const key = (e: KeyboardEvent) => {
