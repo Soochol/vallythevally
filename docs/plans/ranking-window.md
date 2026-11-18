@@ -18,6 +18,10 @@
 
 > 버리지 않게하자.
 
+그 뒤 스크리너 대상 종목에 이 종류들을 넣을지 묻자 사용자가 답했다.
+
+> 스크리너 대상에 넣고 필터링 뱃지 넣어서 하자.
+
 ## 확정된 결정
 
 사용자가 미리보기의 기본값을 그대로 승인했다.
@@ -44,6 +48,7 @@
 5. **넣지 않는 것**: 거래원 계열(ka10038·39·40·42·53), ELW 순위, 다음 판 후보(ka10031, ka10098, ka10034, ka10036, ka10037, ka90009, ka10062, ka10021, ka10022).
 6. **끝 순위까지 이어 보기**: 키움 연속조회(응답 헤더 `cont-yn: Y`와 `next-key`)로 다음 페이지를 받아 끝 순위까지 이어 보인다. 마지막 페이지(`cont-yn: N`)에서는 끝났다고 보인다.
 7. **앱 종목 목록이 ETN·인프라투자금융·뮤추얼펀드를 버리지 않는다.** ka10099 `marketCode` 60·70·90(ETN, 손실제한 ETN, 변동성 ETN), 2(인프라투자금융), 4(뮤추얼펀드) 행을 앱 종목 목록에 넣는다. 검색하고 차트로 열 수 있고, 순위 창에서도 빠지지 않는다. 수집기의 수집 종목 목록(ADR 0026)은 바꾸지 않는다. ADR 0026은 ETF·ETN을 수집에서 빼기로 한 사용자 결정이다.
+8. **스크리너 대상 종목에도 세 종류를 넣고, 빼기 칩을 더한다.** 스크리너 조건 창의 "종류" 빼기 묶음에 ETN·인프라·뮤추얼펀드 칩을 ETF·우선주·리츠·스팩과 같은 모양으로 더한다.
 
 ## 순위별 조건과 열
 
@@ -95,7 +100,7 @@ ETF·ETN 빼기와 우선주 빼기는 모든 순위에 둔다. 관리종목 빼
 9. **한 창의 요청은 언제나 하나다.** 더 보기·조건 바꾸기·갱신이 겹치면 가장 나중 요청의 응답만 쓰고 앞의 응답은 버린다. 갱신 도중 더 보기를 누르면 더 보기가 이긴다.
 10. **휴대폰 화면에는 넣지 않는다.** 휴대폰은 창 배치와 상관없는 자기 화면을 쓰고, 이번 요청은 작업 영역의 창이다.
 11. **장 밖에서도 똑같이 부른다.** 키움이 장 밖에 직전 순위를 주는지, 빈 목록을 주는지 실측하지 못했다(실제 키움을 부르지 않는다). 빈 목록이면 "순위가 비어 있습니다"를 보인다. 시간표로 막는 규칙은 실측 뒤에 정한다.
-12. **작업은 다섯이다.** 앱 종목 목록의 새 종류(`symbol-kinds`), 창 종류와 타입(`rank-kind`), 키움 TR(`rank-tr`), 서버 서비스(`rank-service`), 창 화면(`rank-window`). 창 종류와 타입을 먼저 넣어야 화면 작업의 e2e가 생성 DTO로 응답을 만들 수 있다. 서버 서비스는 ETF·ETN 빼기에 새 ETN 종류를 쓰므로 `symbol-kinds` 뒤에 둔다. 화면과 서버 서비스는 나란히 간다.
+12. **작업은 여섯이다.** 앱 종목 목록의 새 종류(`symbol-kinds`), 스크리너 대상 종목의 새 종류(`screener-kinds`), 창 종류와 타입(`rank-kind`), 키움 TR(`rank-tr`), 서버 서비스(`rank-service`), 창 화면(`rank-window`). 스크리너는 `symbol-kinds`에서 나눴다. 앱 목록 판정과 저장된 스크린 마이그레이션을 한 PR에 섞지 않기 위해서다. 창 종류와 타입을 먼저 넣어야 화면 작업의 e2e가 생성 DTO로 응답을 만들 수 있다. 서버 서비스는 ETF·ETN 빼기에 새 ETN 종류를 쓰므로 `symbol-kinds` 뒤에 둔다. 화면과 서버 서비스는 나란히 간다.
 
 ## 앱 종목 목록의 새 종류 (작업 `symbol-kinds`)
 
@@ -107,7 +112,7 @@ ETF·ETN 빼기와 우선주 빼기는 모든 순위에 둔다. 관리종목 빼
 | 종류 하나로 묶을지 | — | 셋으로 나눈다. 검색 미리보기가 종류 이름(`KIND_LABEL`)을 보이고, 순위 창의 "ETF·ETN 빼기"는 ETN만 골라야 한다 | 스스로 정한 결정 5 |
 | 검색 같은 순위의 차례(D5) | Index > Common > Preferred > Etf > Reit | 끝에 Etn > Infrastructure > MutualFund를 붙인다. 지금 종류끼리의 차례는 그대로다 | `crates/domain/src/symbol.rs` `kind_order_matches_search_tie_break` |
 | 수집기 | `crates/collector/src/universe/model.rs`가 같은 `classify`를 쓰고 Etf·Reit·Index를 건너뛴다 | 새 종류 셋도 건너뛴다. 수집 종목 목록은 지금과 똑같다 | ADR 0026 |
-| 스크리너 목록 | `wire::screener_listing`이 앱 목록의 모든 주식을 스크리너 목록에 넣는다 | 새 종류 셋은 넣지 않는다(사용자가 정해야 하는 결정 1의 기본값). 스크리너 대상 종목과 빼기 종류(`ExcludeKind`)는 지금과 같다 | ETN만 수백 종목이라 스크리너 업데이트가 그만큼 일봉을 더 받는다 |
+| 스크리너 목록 | `wire::screener_listing`이 앱 목록의 모든 주식을 스크리너 목록에 넣는다 | `symbol-kinds`에서는 새 종류 셋을 넣지 않아 스크리너 결과가 그대로다. 뒤 작업 `screener-kinds`가 넣는다(확정된 결정 8, 아래 절) | 한 PR에서 한 가지 동작만 바뀌게 나눈다 |
 | 재무지표 | 보통주·우선주가 아니면 미지원(`financials/routes.rs`, `updates.rs`) | 그대로. ETN 등은 "없는 종목"이 아니라 미지원 상품으로 답한다. `docs/financial-indicators-api.md`의 ETN 문장을 고친다 | 같은 파일 |
 | 차트·실시간·현재가 | 종목코드 6자리면 종류와 상관없이 같은 TR(ka10081 등, 0B)을 쓴다 | 그대로. 새 종류에도 봉 요청이 접미사 규칙대로 나가는지 합성 시험으로 확인한다 | `kiwoom_stock_code`, `effective_venue` |
 | 생성 TS 타입 | `SymbolKind`가 다섯 값 | 여덟 값. `KIND_LABEL`(`web/src/lib/symbol.ts`)은 `Record`라 타입 검사가 누락을 알린다. 검색 목록의 칸 표시는 ETF처럼 ETN에도 종류 이름을 보인다 | `SearchDialog.tsx` |
@@ -115,11 +120,27 @@ ETF·ETN 빼기와 우선주 빼기는 모든 순위에 둔다. 관리종목 빼
 
 실제 키움이 ETN·인프라·뮤추얼펀드의 봉과 현재가를 보통주와 같은 TR로 주는지는 실측하지 못했다(실제 키움을 부르지 않는다). 주지 않으면 그 종목 차트에 기존 키움 실패가 보인다. 이것은 기존 실패 처리 안의 일이라 이번에 따로 막지 않는다.
 
+## 스크리너 대상 종목의 새 종류 (작업 `screener-kinds`)
+
+확정된 결정 8을 구현하며 조사한 것과 정한 것이다.
+
+- **빼기 종류**: 서버 `ExcludeKind`(`crates/server/src/api.rs`)에 ETN, 인프라투자금융, 뮤추얼펀드 세 값을 **열거형 맨 끝에** 더한다. 스크리너 저장소(DuckDB)는 빼기 종류를 열거형 순번의 비트(`screener/store.rs` `exclusion_mask`, `1 << kind as u16`)로 저장한다. 중간에 끼우면 저장된 관리종목·투자경고 등의 비트가 한 칸씩 밀린다. 값은 14개가 되어 `u16`에 들어간다. 조건 창의 칩 차례는 웹의 `EXCLUDE_LABEL` 키 차례가 정하므로, 화면에서는 스팩 뒤에 둔다.
+- **스크리너 목록**: `wire::screener_listing`이 새 종류 셋에도 행을 만들고 `excludable_as`에 맞는 빼기 종류를 넣는다. 시장은 코스피다.
+- **조건 창**: `web/src/features/screen-dialog/screenForm.ts`의 `EXCLUDE_GROUP`에서 세 값을 "kind" 묶음에 넣고, `web/src/lib/screener.ts` `EXCLUDE_LABEL`에 "ETN", "인프라", "뮤추얼펀드"를 더한다. 두 표는 `Record<ExcludeKind, …>`라 타입 검사가 누락을 알린다. 칩 모양은 지금 칩과 같다.
+- **새 스크린**: 지금처럼 빼기 없이 시작한다(`screenForm.ts`, `screenEditing.ts`의 `exclude: []`).
+- **저장된 스크린**: DB 마이그레이션 하나로 `screens.list`의 모든 스크린 `exclude`에 세 값을 더하고 `revision`을 올린다. 업데이트 뒤 기존 스크린 결과에 ETN 등 수백 종목이 갑자기 끼지 않게 하기 위해서다. 사용자는 칩을 꺼서 넣을 수 있다. 선례는 `0008_screen_recent_periods.sql`(JSON을 고치고 `revision`을 올림)과 `crates/server/tests/screens.rs`의 `saved_ranges_become_recent_periods_once_including_nonzero_starts_and_the_largest_end`다. 읽을 때 채우는 방식은 쓰지 않는다. 읽을 때는 사용자가 일부러 칩을 끈 스크린과 옛 스크린을 가를 수 없다. 이 변경 전에 내보낸 설치 묶음을 나중에 가져오거나 옛 앱의 계정 동기화로 들어온 스크린은 채우지 않는다. 0008도 그랬다.
+- **비용**: 스크리너 업데이트는 앱 서버의 키움 키 하나와 REST 거버너(초당 4회, `Priority::Background`)를 쓴다. 수집기 키(ADR 0026)는 쓰지 않으므로 수집 키 한도와 무관하다. 대상 종목은 지금 약 3,960(ADR 0010)이고, 늘어나는 수는 ETN 약 400(어림값이며 실측하지 않았다. 실제 수는 아침 ka10099 목록이 정한다)과 인프라·뮤추얼펀드 몇 종목이다. 약 10%다.
+  - 매일: 최근 채우기는 ka10095로 100종목씩 받으므로 하루 약 4번(1초 남짓) 더 부른다. 저장된 봉과 어긋나 이어 받는 종목만 ka10081을 더 부른다.
+  - 처음 한 번: 새 종목마다 ka10081로 전체 이력을 받는다(`whole_history`, 한 종목 100페이지 상한). ETN은 2014년 뒤 상장이라 이력이 짧다. 한 종목에 1~6페이지로 어림하면 400~2,400번, 초당 4회로 2~10분이다. 동시에 2종목(`IN_FLIGHT`)이고 `Background`라 차트·주문을 밀어내지 않는다.
+  - 디스크 저장소도 약 10% 커진다.
+  - 한도와 시간 모두 지금 업데이트의 범위 안이라 사용자 결정으로 올리지 않는다.
+
 ## 작업
 
 | ID | 내용 | 방식 | 순서 |
 |---|---|---|---|
 | `symbol-kinds` | 앱 종목 목록에 ETN·인프라투자금융·뮤추얼펀드 종류를 더한다. 검색·차트·생성 TS 타입·검색 표시. 수집기와 스크리너 목록은 지금 결과를 지킨다 | `poteto`: 앱 종목 목록과 스크리너 목록(데이터)의 경계, 수집기와 함께 쓰는 판정 | 먼저 |
+| `screener-kinds` | 스크리너 목록에 새 종류 셋, `ExcludeKind` 세 값, 저장된 스크린 마이그레이션, 조건 창의 빼기 칩, GLOSSARY **대상 종목** | `poteto`: 저장된 사용자 자료(스크린)의 마이그레이션과 디스크 저장소의 빼기 비트 | `symbol-kinds`·`rank-kind` 뒤 |
 | `rank-kind` | 서버 `WindowContent::Ranking`과 `Ranking` 타입, 요청·응답 DTO, 레이아웃 저장(마이그레이션), 웹 창 종류 등록과 빈 창, GLOSSARY "순위 창" | `poteto`: 레이아웃 저장 형식과 DB 마이그레이션(상태 저장·데이터) | 먼저 |
 | `rank-tr` | 키움 TR 11개의 요청 타입, `ApiId`와 경로 `/api/dostk/rkinfo`, 응답 해석 | `basic`: 기존 TR 모양을 따르는 덧붙임이고 상태·동시성이 없다 | 먼저 |
 | `rank-service` | `POST /api/rankings`, 스냅숏 캐시와 걷기, 중복 빼기, 서버 거르기, 목록에 없는 줄 표시, ka10095 채우기, 우선순위, 서버 문서 | `poteto`: 공유 캐시와 같은 키 걷기 합치기(동시성), 여러 모듈에 걸친 새 설계 | `symbol-kinds`·`rank-kind`·`rank-tr` 뒤 |
@@ -127,7 +148,7 @@ ETF·ETN 빼기와 우선주 빼기는 모든 순위에 둔다. 관리종목 빼
 
 ```
 1단: symbol-kinds ─┬─ rank-kind ─┬─ rank-tr          (셋 병렬)
-2단: rank-service (셋 뒤)   rank-window (rank-kind 뒤)   (둘 병렬)
+2단: rank-service (셋 뒤)   rank-window (rank-kind 뒤)   screener-kinds (symbol-kinds·rank-kind 뒤)   (셋 병렬)
 ```
 
 순차로 둔 이유:
@@ -135,6 +156,8 @@ ETF·ETN 빼기와 우선주 빼기는 모든 순위에 둔다. 관리종목 빼
 - `rank-service` → `symbol-kinds`: ETF·ETN 빼기가 새 ETN 종류로 거른다. 한쪽이 다른 쪽의 결과를 쓴다.
 - `rank-service` → `rank-kind`: `Ranking` 타입과 응답 DTO를 쓴다.
 - `rank-service` → `rank-tr`: TR 요청 타입과 해석한 행을 쓴다.
+- `screener-kinds` → `symbol-kinds`: 새 `SymbolKind` 셋을 스크리너 목록으로 옮긴다. 같은 `screener_listing` 분기를 다시 짠다.
+- `screener-kinds` → `rank-kind`: 둘 다 새 DB 마이그레이션을 더한다. 같은 번호가 나지 않게 `rank-kind`의 마이그레이션이 들어간 뒤 다음 번호를 쓴다.
 - `rank-window` → `rank-kind`: 생성된 TS 타입(`Ranking`, `RankingPage`)으로 화면과 e2e 응답을 만들고, 등록된 빈 창을 채운다. 종류 판정은 서버가 하므로 `symbol-kinds`를 기다리지 않는다.
 
 1단에서 같은 파일에 각자 몇 줄 더하는 곳(세 지시서에 그 파일은 최소 변경으로 하라고 적었다):
@@ -143,7 +166,7 @@ ETF·ETN 빼기와 우선주 빼기는 모든 순위에 둔다. 관리종목 빼
 - `crates/server/src/kiwoom/wire.rs`: `symbol-kinds`는 `screener_listing`의 종류 분기와 ka10099 시험, `rank-tr`는 순위 응답 해석을 더한다.
 - `web/src/api/generated/`: 각자 자기 타입 파일만 다시 만든다.
 
-2단의 `rank-service`는 서버, `rank-window`는 `web/`와 `docs/design-system.md`만 고친다. `rank-service`가 응답 DTO의 필드를 바꿔야 하면 `rank-window`와 어긋나므로, DTO 모양은 `rank-kind`에서 굳히고 2단에서는 바꾸지 않는다(두 지시서에 적었다).
+2단의 `rank-service`는 서버의 순위 모듈, `rank-window`는 `web/src/features/ranking/`·`web/e2e/win-ranking.spec.ts`·`docs/design-system.md`의 순위 창 절, `screener-kinds`는 스크리너 목록·`ExcludeKind`·스크린 마이그레이션·`web/src/features/screen-dialog/`·`web/src/lib/screener.ts`를 고친다. `crates/server/src/api.rs`는 `screener-kinds`가 `ExcludeKind`에 세 값만 더하는 최소 변경이다. 같은 단계의 순위 DTO와 겹치지 않는다. `rank-service`가 응답 DTO의 필드를 바꿔야 하면 `rank-window`와 어긋나므로, DTO 모양은 `rank-kind`에서 굳히고 2단에서는 바꾸지 않는다(두 지시서에 적었다).
 
 ## 범위 밖
 
@@ -160,7 +183,9 @@ ETF·ETN 빼기와 우선주 빼기는 모든 순위에 둔다. 관리종목 빼
 
 `symbol-kinds`는 ka10099 판정 시험(`products_left_out_on_purpose_are_excluded`, `exchange_list_is_filtered_by_market_code`, `symbols.rs`의 "ETN·인프라·뮤추얼펀드 다섯 행은 빠진다")을 새 규칙에 맞게 바꾼다. 사용자가 바꾸기로 한 규칙(확정된 결정 7)이므로 검증 약화가 아니다.
 
-1. **스크리너 대상 종목에 ETN·인프라투자금융·뮤추얼펀드를 넣을지.** 기본값: 넣지 않는다. 스크리너 목록과 빼기 종류는 지금과 같다. 넣으면 스크리너 업데이트가 수백 종목의 일봉을 더 받고, 스크리너 조건 창에 빼기 종류(ETN 등)를 더해야 한다. 넣기를 원하면 `symbol-kinds` 지시서를 고친다.
+1. 스크리너 대상 종목에 세 종류를 넣는 것은 사용자가 정했다(확정된 결정 8). 그에 딸린 다음 두 기본값은 플래너가 정했다. 다르게 원하면 알려 주면 지시서를 고친다.
+   - 새로 만드는 스크린은 지금처럼 빼기 없이 시작한다. 새 종류도 빼지 않는다.
+   - 이미 저장된 스크린은 새 빼기 셋을 켠 상태로 옮긴다. 업데이트 뒤 결과가 갑자기 늘지 않는다.
 
 미리보기와 다르게 정한 것이 둘 있다. 다르게 원하면 알려 주면 지시서를 고친다.
 
