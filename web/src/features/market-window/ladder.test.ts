@@ -1,80 +1,103 @@
 import { expect, test } from "vitest";
-import { buildLadder, LADDER_DEPTH, ratioSplit, type BookLevel } from "./ladder";
+import { basePrice, buildLadder, buildLadderRows, gridPrices, LADDER_ROWS, ratioSplit, type BookLevel } from "./ladder";
 
+const NO_BOUNDS = { lower: null, upper: null };
 const level = (price: number, quantity: number, change = 0): BookLevel => ({ price, quantity, change });
-const run = (from: number, step: number, count: number, quantity: (i: number) => number): BookLevel[] =>
-  Array.from({ length: count }, (_, i) => level(from + step * i, quantity(i)));
-const prices = (rows: ReturnType<typeof buildLadder>, side: "ask" | "bid") => rows.filter((r) => r.side === side).map((r) => r.level?.price ?? null);
+const build = (input: Partial<Parameters<typeof buildLadder>[0]>) => buildLadder({ asks: [], bids: [], lastPrice: null, previousClose: null, bounds: NO_BOUNDS, ...input });
+const prices = (rows: ReturnType<typeof buildLadder>) => rows.map((row) => row.price);
+const rowAt = (rows: ReturnType<typeof buildLadder>, price: number) => rows.find((row) => row.price === price)!;
 
-test("호가가 10단보다 적어도 행은 매도 10·매수 10으로 스무 개다", () => {
-  const rows = buildLadder({ asks: [level(101, 5)], bids: [level(100, 7), level(99, 3)], lastPrice: 100, previousClose: 100 });
-  expect(rows).toHaveLength(2 * LADDER_DEPTH);
-  expect(rows.filter((r) => r.side === "ask")).toHaveLength(LADDER_DEPTH);
-  expect(rows.filter((r) => r.side === "bid")).toHaveLength(LADDER_DEPTH);
-  expect(rows.filter((r) => r.level === null)).toHaveLength(2 * LADDER_DEPTH - 3);
+test("기준 가격 위 10틱과 아래 10행(기준 포함)의 가격이 나온다", () => {
+  const rows = build({ lastPrice: 70_000 });
+  expect(rows).toHaveLength(LADDER_ROWS);
+  expect(prices(rows)).toEqual([
+    71_000, 70_900, 70_800, 70_700, 70_600, 70_500, 70_400, 70_300, 70_200, 70_100,
+    70_000, 69_900, 69_800, 69_700, 69_600, 69_500, 69_400, 69_300, 69_200, 69_100,
+  ]);
 });
 
-test("빈 자리는 가격에서 먼 쪽에 둔다: 매도는 위, 매수는 아래", () => {
-  const rows = buildLadder({ asks: [level(101, 5)], bids: [level(100, 7)], lastPrice: null, previousClose: null });
-  expect(rows[LADDER_DEPTH - 1]!.level?.price).toBe(101);
-  expect(rows[LADDER_DEPTH]!.level?.price).toBe(100);
-  expect(rows[0]!.level).toBeNull();
-  expect(rows.at(-1)!.level).toBeNull();
+test("틱 경계(20,000원 아래 10원, 위 50원)를 넘는 격자가 맞는 틱으로 이어진다", () => {
+  const rows = build({ lastPrice: 20_000 });
+  expect(prices(rows)).toEqual([
+    20_500, 20_450, 20_400, 20_350, 20_300, 20_250, 20_200, 20_150, 20_100, 20_050,
+    20_000, 19_990, 19_980, 19_970, 19_960, 19_950, 19_940, 19_930, 19_920, 19_910,
+  ]);
 });
 
-test("교차 호가(매수 1호가 ≥ 매도 1호가)에서도 매도·매수 행은 각각 가격 내림차순이다", () => {
-  const rows = buildLadder({ asks: run(100, 1, 10, () => 1), bids: run(95, 1, 10, () => 1).map((l) => ({ ...l, price: l.price + 5 })), lastPrice: 102, previousClose: 100 });
-  const asks = prices(rows, "ask") as number[];
-  const bids = prices(rows, "bid") as number[];
-  expect(bids[0]!).toBeGreaterThanOrEqual(asks.at(-1)!);
-  expect(asks).toEqual([...asks].sort((a, b) => b - a));
-  expect(bids).toEqual([...bids].sort((a, b) => b - a));
+test("교차 호가(매도 1호가 ≤ 매수 1호가)는 같은 가격 행에 매도·매수 잔량이 함께 있고 같은 가격 행이 둘이 아니다", () => {
+  const rows = build({ asks: [level(70_000, 30), level(70_100, 20)], bids: [level(70_100, 25), level(70_000, 15)], lastPrice: 70_100 });
+  const shown = prices(rows).filter((price) => price !== null);
+  expect(new Set(shown).size).toBe(shown.length);
+  expect([rowAt(rows, 70_100).ask?.quantity, rowAt(rows, 70_100).bid?.quantity]).toEqual([20, 25]);
+  expect([rowAt(rows, 70_000).ask?.quantity, rowAt(rows, 70_000).bid?.quantity]).toEqual([30, 15]);
+  expect(rows.filter((row) => row.current).map((row) => row.price)).toEqual([70_100]);
 });
 
-test("입력 순서가 뒤섞여도 정렬하고 가격에 가장 가까운 10단만 남긴다", () => {
-  const rows = buildLadder({ asks: run(101, 1, 12, () => 1).reverse(), bids: run(80, 1, 12, () => 1), lastPrice: null, previousClose: null });
-  expect(prices(rows, "ask")).toEqual([110, 109, 108, 107, 106, 105, 104, 103, 102, 101]);
-  expect(prices(rows, "bid")).toEqual([91, 90, 89, 88, 87, 86, 85, 84, 83, 82]);
+test("상한·하한 밖의 행은 빈 행이다", () => {
+  const nearUpper = build({ lastPrice: 70_800, bounds: { lower: 49_000, upper: 71_000 } });
+  expect(prices(nearUpper).slice(0, 10)).toEqual([null, null, null, null, null, null, null, null, 71_000, 70_900]);
+  const nearLower = build({ lastPrice: 50_000, bounds: { lower: 49_900, upper: 91_000 } });
+  expect(prices(nearLower).slice(-10)).toEqual([50_000, 49_950, 49_900, null, null, null, null, null, null, null]);
+  expect(nearUpper.filter((row) => row.price === null).every((row) => row.ask === null && row.bid === null && row.rate === null)).toBe(true);
+});
+
+test("현재가가 없으면 매수 1호가, 그것도 없으면 기준가가 기준이다", () => {
+  const quotes = { asks: [level(70_100, 5)], bids: [level(69_800, 3), level(70_000, 7)], previousClose: 69_000 };
+  expect(basePrice({ ...quotes, lastPrice: 70_500 })).toBe(70_500);
+  expect(basePrice({ ...quotes, lastPrice: null })).toBe(70_000);
+  expect(basePrice({ asks: quotes.asks, bids: [], lastPrice: null, previousClose: 69_000 })).toBe(69_000);
+  expect(basePrice({ asks: [], bids: [], lastPrice: null, previousClose: null })).toBeNull();
+  expect(prices(build({ ...quotes, lastPrice: null }))[10]).toBe(70_000);
+  expect(prices(build({ lastPrice: null })).every((price) => price === null)).toBe(true);
+});
+
+test("받은 단 가운데 격자에 들지 않는 가격은 행에 없다", () => {
+  const rows = build({ asks: [level(71_000, 1), level(71_100, 2)], bids: [level(69_100, 3), level(69_000, 4), level(70_050, 5)], lastPrice: 70_000 });
+  expect(rows.some((row) => row.ask?.price === 71_100 || row.bid?.price === 69_000)).toBe(false);
+  expect(rows.filter((row) => row.ask || row.bid).map((row) => row.price)).toEqual([71_000, 69_100]);
 });
 
 test("막대 비율은 보이는 행의 최대 잔량 기준이다", () => {
-  const rows = buildLadder({ asks: [level(101, 50), level(102, 400)], bids: [level(100, 200)], lastPrice: null, previousClose: null });
-  const ratio = (price: number) => rows.find((r) => r.level?.price === price)!.barRatio;
-  expect([ratio(101), ratio(102), ratio(100)]).toEqual([0.125, 1, 0.5]);
-  expect(rows.filter((r) => r.level === null).every((r) => r.barRatio === 0)).toBe(true);
+  const rows = build({ asks: [level(70_100, 50), level(70_200, 400)], bids: [level(70_000, 200)], lastPrice: 70_000 });
+  expect([rowAt(rows, 70_100).askRatio, rowAt(rows, 70_200).askRatio, rowAt(rows, 70_000).bidRatio]).toEqual([0.125, 1, 0.5]);
+  expect(rows.filter((row) => !row.ask && !row.bid).every((row) => row.askRatio === 0 && row.bidRatio === 0)).toBe(true);
 });
 
-test("11번째 이후 먼 호가는 보이지 않으므로 막대 기준에 들지 않는다", () => {
-  const far = run(101, 1, 11, (i) => (i === 10 ? 1_000_000 : 10));
-  const rows = buildLadder({ asks: far, bids: [], lastPrice: null, previousClose: null });
-  expect(Math.max(...rows.map((r) => r.barRatio))).toBe(1);
-  expect(rows.find((r) => r.level?.price === 101)!.barRatio).toBe(1);
+test("격자 밖 먼 호가는 막대 기준에 들지 않는다", () => {
+  const rows = build({ asks: [level(70_100, 10), level(75_000, 1_000_000)], bids: [], lastPrice: 70_000 });
+  expect(rowAt(rows, 70_100).askRatio).toBe(1);
 });
 
-test("현재가 행만 표시하고 등락률은 전일 종가 기준이다", () => {
-  const rows = buildLadder({ asks: [level(101, 5)], bids: [level(100, 7)], lastPrice: 100, previousClose: 80 });
-  expect(rows.filter((r) => r.current).map((r) => r.level?.price)).toEqual([100]);
-  expect(rows.find((r) => r.level?.price === 100)!.rate).toBe(25);
-  expect(rows.find((r) => r.level?.price === 101)!.rate).toBe(26.25);
+test("현재가 행만 표시하고 등락률은 전일 종가 기준으로 값이 있는 모든 행에 있다", () => {
+  const rows = build({ lastPrice: 70_000, previousClose: 56_000 });
+  expect(rows.filter((row) => row.current).map((row) => row.price)).toEqual([70_000]);
+  expect(rowAt(rows, 70_000).rate).toBe(25);
+  expect(rowAt(rows, 70_100).rate).toBeCloseTo(25.1786, 3);
+  expect(rows.every((row) => row.rate !== null)).toBe(true);
 });
 
-test("전일 종가가 없으면 등락률도 없다", () => {
-  const rows = buildLadder({ asks: [level(101, 5)], bids: [], lastPrice: null, previousClose: null });
-  expect(rows.every((r) => r.rate === null)).toBe(true);
+test("전일 종가가 없으면 등락률도 없고 빈 행도 등락률이 없다", () => {
+  const rows = build({ lastPrice: 70_000, bounds: { lower: 69_000, upper: 70_300 } });
+  expect(rows.every((row) => row.rate === null)).toBe(true);
+});
+
+test("잔량에 NaN·음수가 있어도 나머지 막대는 정상이고 그 행은 0이다", () => {
+  const rows = build({ asks: [level(70_100, Number.NaN), level(70_200, -5)], bids: [level(70_000, 8), level(69_900, 4)], lastPrice: 70_000 });
+  expect([rowAt(rows, 70_200).askRatio, rowAt(rows, 70_100).askRatio, rowAt(rows, 70_000).bidRatio, rowAt(rows, 69_900).bidRatio]).toEqual([0, 0, 1, 0.5]);
+});
+
+test("격자 가격 목록은 기준이 없으면 모두 비고 있으면 내림차순이다", () => {
+  expect(gridPrices(null, NO_BOUNDS)).toEqual(Array(LADDER_ROWS).fill(null));
+  const listed = gridPrices(70_000, NO_BOUNDS) as number[];
+  expect(listed).toEqual([...listed].sort((a, b) => b - a));
+});
+
+test("가격 목록을 직접 주면 그 가격으로 행을 만든다", () => {
+  const rows = buildLadderRows([70_300, 70_200, null], { asks: [level(70_200, 40)], bids: [], lastPrice: 70_300, previousClose: 70_000 });
+  expect(rows.map((row) => [row.price, row.ask?.quantity ?? null, row.current])).toEqual([[70_300, null, true], [70_200, 40, false], [null, null, false]]);
 });
 
 test("매수·매도 비율은 합이 100이고 둘 다 0이면 반반이다", () => {
   expect(ratioSplit(3, 1)).toEqual({ buy: 75, sell: 25 });
   expect(ratioSplit(0, 0)).toEqual({ buy: 50, sell: 50 });
-});
-
-test("교차·동일가 호가에서도 현재가 행은 하나만 강조한다", () => {
-  const rows = buildLadder({ asks: [level(100, 5), level(101, 5)], bids: [level(100, 7), level(99, 3)], lastPrice: 100, previousClose: 100 });
-  expect(rows.filter((r) => r.current)).toHaveLength(1);
-});
-
-test("잔량에 NaN·음수가 있어도 나머지 막대는 정상이고 그 행은 0이다", () => {
-  const rows = buildLadder({ asks: [level(101, Number.NaN), level(102, -5)], bids: [level(100, 8), level(99, 4)], lastPrice: 100, previousClose: 100 });
-  const ratios = rows.filter((r) => r.level).map((r) => [r.level!.price, r.barRatio]);
-  expect(ratios).toEqual([[102, 0], [101, 0], [100, 1], [99, 0.5]]);
 });
