@@ -14,7 +14,7 @@ const addButton = (page: Page) => page.getByRole("toolbar", { name: "차트 도�
 const kindItem = (page: Page, name: string) => page.getByRole("menu", { name: "창 더하기" }).getByRole("menuitem", { name: new RegExp(`^${name}`) });
 const tabOf = (page: Page, id: string) => windowTabs(page).locator(`[role=tab][data-window-id="${id}"]`);
 const dotOf = (page: Page, id: string) => windowTabs(page).locator(`[role=tab][data-window-id="${id}"] + .link-dot`);
-const READY_BODIES: Readonly<Record<string, string>> = { program: "program-window", brokers: "brokers-window", trades: "trades-window" };
+const READY_BODIES: Readonly<Record<string, string>> = { program: "program-window", brokers: "brokers-window", trades: "trades-window", book: "book-window" };
 const preparing = (page: Page) => page.getByTestId("market-window-preparing");
 const body = (page: Page, kind: string) => page.getByTestId(READY_BODIES[kind] ?? "market-window-preparing");
 const savedWindows = (scenario: Scenario) => scenario.documents.layout(DEFAULT_LAYOUT_ID).windows;
@@ -39,8 +39,12 @@ async function addWindow(page: Page, name: string) {
   await kindItem(page, name).click();
 }
 
-test.beforeEach(async ({ page }) => {
+test.beforeEach(async ({ page, scenario }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
+  for (const code of ["005930", "000660"]) {
+    scenario.reply((url) => url.pathname === `/api/symbols/${code}/order-book`, { body: { symbol: code, asks: [], bids: [], totalAskQuantity: 0, totalBidQuantity: 0, bookTime: null } });
+    scenario.reply((url) => url.pathname === `/api/symbols/${code}/fundamentals`, { body: { symbol: code, upperLimit: null, lowerLimit: null } });
+  }
 });
 
 for (const { kind, name } of KINDS) {
