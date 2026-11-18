@@ -52,7 +52,7 @@ fn screens(list: Vec<Value>, revision: i64) -> Value {
 
 fn every_kind() -> Value {
     json!(["etf", "preferred", "reit", "spac", "managed", "investment_caution_alert", "investment_warning",
-           "investment_danger", "investment_caution", "short_term_overheated", "trading_halted"])
+           "investment_danger", "investment_caution", "short_term_overheated", "trading_halted", "etn", "infrastructure", "mutual_fund"])
 }
 
 fn example(kind: &str) -> Value {
@@ -202,7 +202,7 @@ async fn each_screen_rule_and_a_stale_revision_rejects_the_save() {
         ("u32를 넘는 m", condition(json!(u32::MAX), json!(u64::from(u32::MAX) + 2)), 400, "bad_request"),
         ("겹친 제외", edit(&|s| s["exclude"] = json!(["etf", "spac", "etf"])), 400, "bad_request"),
         ("겹친 상태 제외", edit(&|s| s["exclude"] = json!(["trading_halted", "managed", "trading_halted"])), 400, "bad_request"),
-        ("모르는 제외", edit(&|s| s["exclude"] = json!(["etn"])), 400, "bad_request"),
+        ("모르는 제외", edit(&|s| s["exclude"] = json!(["etn_x"])), 400, "bad_request"),
         ("겹친 시장", edit(&|s| s["markets"] = json!(["kosdaq", "kospi", "kosdaq"])), 400, "bad_request"),
         ("모르는 시장", edit(&|s| s["markets"] = json!(["konex"])), 400, "bad_request"),
         ("시장 목록 없음", edit(&|s| s["markets"] = Value::Null), 400, "bad_request"),
@@ -299,6 +299,12 @@ async fn saved_before_condition_kinds(tmp: &tempfile::TempDir, list: &Value, rev
     run.join("server.lock")
 }
 
+const NEW_KINDS: [&str; 3] = ["etn", "infrastructure", "mutual_fund"];
+
+fn with_new_kinds(old: &[&str]) -> Value {
+    json!(old.iter().chain(NEW_KINDS.iter()).collect::<Vec<_>>())
+}
+
 fn old_new_high(id: &str) -> Value {
     json!({"name": "신고가", "period": "D", "conditions": [{"field": "high", "n": 200, "m": 1}], "exclude": [], "id": id})
 }
@@ -315,18 +321,18 @@ async fn a_list_saved_in_the_old_format_comes_back_in_the_new_format_with_the_re
     let server = Server::spawn(&fake, &lock, tmp.path());
     let api = ScreensApi::of(&server).await;
     let migrated = screens(vec![
-        json!({"id": "01900000-0000-7000-8000-0000000000a1", "name": "신고가", "markets": [], "exclude": [], "conditions": [new_high("D", "high", 200, 1)]}),
-        json!({"id": "S2", "name": "주봉 둘", "markets": [], "exclude": ["etf", "trading_halted"], "conditions": [new_high("W", "close", 52, 4), new_high("W", "volume", 26, 1)]}),
-    ], 1_794_222_949_880);
-    assert_eq!(api.get().await, (200, migrated.clone()), "봉 주기는 줄마다 옮기고, 줄은 신고가 종류가 되고, 시장은 빈 목록이며, revision은 1 오른다");
+        json!({"id": "01900000-0000-7000-8000-0000000000a1", "name": "신고가", "markets": [], "exclude": NEW_KINDS, "conditions": [new_high("D", "high", 200, 1)]}),
+        json!({"id": "S2", "name": "주봉 둘", "markets": [], "exclude": with_new_kinds(&["etf", "trading_halted"]), "conditions": [new_high("W", "close", 52, 4), new_high("W", "volume", 26, 1)]}),
+    ], 1_794_222_949_881);
+    assert_eq!(api.get().await, (200, migrated.clone()), "봉 주기는 줄마다 옮기고, 줄은 신고가 종류가 되고, 시장은 빈 목록이며, 새 빼기 셋이 붙고, revision은 2 오른다");
 
-    let late = screens(vec![screen("S9", "옛 탭")], 1_794_222_949_880);
+    let late = screens(vec![screen("S9", "옛 탭")], 1_794_222_949_881);
     assert_eq!(api.put(late.to_string()).await.1["error"]["code"], json!("stale_revision"), "옮기기 전 revision 다음 번호로 보낸 저장은 막힌다");
     assert_eq!(api.get().await, (200, migrated));
     server.stop().await;
 
     let server = Server::spawn(&fake, &lock, tmp.path());
-    assert_eq!(ScreensApi::of(&server).await.get().await.1["revision"], json!(1_794_222_949_880_i64), "다시 켜도 한 번만 옮긴다");
+    assert_eq!(ScreensApi::of(&server).await.get().await.1["revision"], json!(1_794_222_949_881_i64), "다시 켜도 한 번만 옮긴다");
     server.stop().await;
 }
 
@@ -337,7 +343,7 @@ async fn a_list_saved_at_the_largest_revision_is_moved_and_keeps_that_revision()
     let lock = saved_before_condition_kinds(&tmp, &json!([old_new_high("S1")]), i64::MAX).await;
     let server = Server::spawn(&fake, &lock, tmp.path());
     let api = ScreensApi::of(&server).await;
-    let migrated = screens(vec![json!({"id": "S1", "name": "신고가", "markets": [], "exclude": [], "conditions": [new_high("D", "high", 200, 1)]})], i64::MAX);
+    let migrated = screens(vec![json!({"id": "S1", "name": "신고가", "markets": [], "exclude": NEW_KINDS, "conditions": [new_high("D", "high", 200, 1)]})], i64::MAX);
     assert_eq!(api.get().await, (200, migrated.clone()), "revision이 i64 최댓값이면 올리지 않고 서버가 켜진다");
     assert_eq!(api.put(screens(vec![screen("S9", "덮어쓰기")], i64::MAX).to_string()).await.1["error"]["code"], json!("stale_revision"), "그 뒤의 저장도 덮어쓰지 못한다");
     assert_eq!(api.get().await, (200, migrated));
@@ -358,8 +364,12 @@ async fn old_migrates_every_saved_kind_once_preserving_order_values_and_revision
     }
     let mut list: Vec<Value> = expected_lines.chunks(10).enumerate().map(|(i, lines)| json!({"id": format!("S{i}"), "name": format!("모든 조건 보존 {i}"), "markets": ["kosdaq", "kospi"], "exclude": ["etf", "managed"], "conditions": lines})).collect();
     list.push(screen_of("empty", "빈 조건", vec![]));
-    let expected = screens(list, 79);
+    let mut expected = screens(list, 80);
     let mut old = expected["screens"].clone();
+    for screen in expected["screens"].as_array_mut().unwrap() {
+        let kept: Vec<String> = serde_json::from_value(screen["exclude"].clone()).unwrap();
+        screen["exclude"] = with_new_kinds(&kept.iter().map(String::as_str).collect::<Vec<_>>());
+    }
     for condition in old.as_array_mut().unwrap().iter_mut().flat_map(|screen| screen["conditions"].as_array_mut().unwrap()) {
         if condition["kind"] != "market_cap" {
             let count = condition["recentBars"].as_u64().unwrap();
@@ -377,9 +387,9 @@ async fn old_migrates_every_saved_kind_once_preserving_order_values_and_revision
     let api = ScreensApi::of(&server).await;
     assert_eq!(api.get().await, (200, expected.clone()));
     assert_eq!(api.put(expected.to_string()).await.1["error"]["code"], "stale_revision");
-    assert_eq!(api.put(screens(old.as_array().unwrap().clone(), 80).to_string()).await.0, 400, "옛 M 본문은 다시 저장할 수 없다");
+    assert_eq!(api.put(screens(old.as_array().unwrap().clone(), 81).to_string()).await.0, 400, "옛 M 본문은 다시 저장할 수 없다");
     let mut edited = expected.clone();
-    edited["revision"] = json!(80);
+    edited["revision"] = json!(81);
     edited["screens"][0]["conditions"][0]["recentBars"] = json!(9);
     assert_eq!(api.put(edited.to_string()).await, (200, edited.clone()));
     server.stop().await;
@@ -443,20 +453,82 @@ async fn saved_ranges_become_recent_periods_once_including_nonzero_starts_and_th
         old.push(line);
     }
     let list = |lines: Vec<Value>| lines.chunks(10).enumerate().map(|(i, lines)| json!({"id": format!("S{i}"), "name": format!("보존 {i}"), "markets": ["kosdaq", "kospi"], "exclude": ["etf"], "conditions": lines})).collect::<Vec<_>>();
+    let migrated_list = |lines: Vec<Value>| list(lines).into_iter().map(|mut screen| { screen["exclude"] = with_new_kinds(&["etf"]); screen }).collect::<Vec<_>>();
     let pool = SqlitePoolOptions::new().connect_with(SqliteConnectOptions::new().filename(run.join("vally.db")).create_if_missing(true)).await.unwrap();
     sqlx::migrate!("./migrations").run_to(7, &pool).await.unwrap();
     sqlx::query("UPDATE screens SET list = ?, revision = 77").bind(json!(list(old)).to_string()).execute(&pool).await.unwrap();
     pool.close().await;
     let server = Server::spawn(&fake, &run.join("server.lock"), tmp.path());
     let api = ScreensApi::of(&server).await;
-    let expected = screens(list(expected), 78);
+    let expected = screens(migrated_list(expected), 79);
     assert_eq!(api.get().await, (200, expected.clone()));
     assert_eq!(api.put(expected.to_string()).await.0, 409);
     let mut edited = expected.clone();
-    edited["revision"] = json!(79);
+    edited["revision"] = json!(80);
     assert_eq!(api.put(edited.to_string()).await, (200, edited.clone()));
     server.stop().await;
     let server = Server::spawn(&fake, &run.join("server.lock"), tmp.path());
     assert_eq!(ScreensApi::of(&server).await.get().await, (200, edited));
+    server.stop().await;
+}
+
+async fn migrated_to(run: &std::path::Path, version: i64, saved: Option<(Vec<Value>, i64)>) {
+    let pool = SqlitePoolOptions::new().connect_with(SqliteConnectOptions::new().filename(run.join("vally.db")).create_if_missing(true)).await.unwrap();
+    sqlx::migrate!("./migrations").run_to(version, &pool).await.unwrap();
+    if let Some((list, revision)) = saved {
+        sqlx::query("UPDATE screens SET list = ?, revision = ?").bind(json!(list).to_string()).bind(revision).execute(&pool).await.unwrap();
+    }
+    pool.close().await;
+}
+
+fn quiet_run_dir(tmp: &tempfile::TempDir) -> std::path::PathBuf {
+    let run = tmp.path().join("run");
+    std::fs::DirBuilder::new().mode(0o700).create(&run).unwrap();
+    run
+}
+
+#[tokio::test]
+async fn saved_screens_gain_the_three_new_exclusions_once_without_repeating_or_touching_other_fields() {
+    let fake = ScriptedTransport::new();
+    let tmp = tempfile::tempdir().unwrap();
+    let run = quiet_run_dir(&tmp);
+    let screen = |id: &str, exclude: Value| json!({"id": id, "name": format!("보존 {id}"), "markets": ["kosdaq"], "exclude": exclude, "conditions": [example("new_high"), example("market_cap")]});
+    let before = vec![screen("S0", json!([])), screen("S1", json!(["etf", "managed", "etn"])), screen("S2", every_kind())];
+    migrated_to(&run, 21, Some((before, 40))).await;
+    let server = Server::spawn(&fake, &run.join("server.lock"), tmp.path());
+    let api = ScreensApi::of(&server).await;
+    let new_three = ["etn", "infrastructure", "mutual_fund"];
+    let want = screens(vec![
+        screen("S0", json!(new_three)),
+        screen("S1", json!(["etf", "managed", "etn", "infrastructure", "mutual_fund"])),
+        screen("S2", every_kind()),
+    ], 41);
+    assert_eq!(api.get().await, (200, want.clone()));
+    server.stop().await;
+    let server = Server::spawn(&fake, &run.join("server.lock"), tmp.path());
+    assert_eq!(ScreensApi::of(&server).await.get().await, (200, want), "다시 띄워도 다시 더하지 않는다");
+    server.stop().await;
+}
+
+#[tokio::test]
+async fn without_saved_screens_the_new_exclusions_leave_the_revision_alone() {
+    let fake = ScriptedTransport::new();
+    let tmp = tempfile::tempdir().unwrap();
+    let run = quiet_run_dir(&tmp);
+    migrated_to(&run, 21, Some((vec![], 5))).await;
+    let server = Server::spawn(&fake, &run.join("server.lock"), tmp.path());
+    assert_eq!(ScreensApi::of(&server).await.get().await, (200, screens(vec![], 5)));
+    server.stop().await;
+}
+
+#[tokio::test]
+async fn a_screen_with_the_new_exclusions_is_saved_and_read_back_unchanged() {
+    let fake = ScriptedTransport::new();
+    let tmp = tempfile::tempdir().unwrap();
+    let server = Server::spawn(&fake, &tmp.path().join("server.lock"), tmp.path());
+    let api = ScreensApi::of(&server).await;
+    let sent = screens(vec![json!({"id": "S1", "name": "종류 빼기", "markets": [], "exclude": ["etn", "infrastructure", "mutual_fund"], "conditions": [example("new_high")]})], 1);
+    assert_eq!(api.put(sent.to_string()).await, (200, sent.clone()));
+    assert_eq!(api.get().await, (200, sent));
     server.stop().await;
 }

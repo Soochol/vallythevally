@@ -378,8 +378,8 @@ test("조건 줄은 마지막 줄까지 뺄 수 있고, 빈 조건식에 다시 
   expect(removeCondition(draft, second).conditions.map((c) => c.key)).not.toContain(second);
 });
 
-test("제외 칩은 종류 넷과 상태 일곱으로 나뉘고, 한 번 더 누르면 풀린다", () => {
-  expect(excludesIn("kind")).toEqual(["etf", "preferred", "reit", "spac"]);
+test("제외 칩은 종류 일곱과 상태 일곱으로 나뉘고, 한 번 더 누르면 풀린다", () => {
+  expect(excludesIn("kind")).toEqual(["etf", "preferred", "reit", "spac", "etn", "infrastructure", "mutual_fund"]);
   expect(excludesIn("status")).toEqual([
     "managed",
     "investment_caution_alert",
