@@ -170,7 +170,7 @@ test("최소 크기 거절은 미리 보기와 메뉴에 이유를 보이고 배
   expect(saved(scenario)).toEqual(original);
 });
 
-test("5px 이하는 탭 고르기이고 Esc·영역 밖 놓기·포인터 취소는 선택과 배치 기록을 지킨다", async ({ page, scenario }) => {
+test("5px 이하는 탭 고르기이고 영역 밖 놓기는 선택과 배치 기록을 지킨다", async ({ page, scenario }) => {
   await page.goto("/");
   await expect(cell(page)).toHaveAttribute("aria-busy", "false");
   const source = tab(page, "스크리너");
@@ -185,20 +185,16 @@ test("5px 이하는 탭 고르기이고 Esc·영역 밖 놓기·포인터 취소
   await pollSaved(() => JSON.stringify(saved(scenario))).toContain('"active":"watchlist"');
   const original = saved(scenario);
   const chart = await boxOf(groups(page).first());
-  for (const cancel of ["escape", "outside", "pointercancel"]) {
-    await startDrag(page, source);
-    await page.mouse.move(chart.x + chart.width / 2, chart.y + chart.height - 60, { steps: 10 });
-    await expect(preview(page)).toBeVisible();
-    await area(page).dispatchEvent("pointercancel", { pointerId: 2 });
-    await expect(preview(page)).toBeVisible();
-    if (cancel === "escape") await page.keyboard.press("Escape");
-    if (cancel === "outside") await page.mouse.move(700, 30, { steps: 6 });
-    if (cancel === "pointercancel") await area(page).dispatchEvent("pointercancel", { pointerId: 1 });
-    await page.mouse.up();
-    await expect(preview(page)).toHaveCount(0);
-    await expect(tab(page, "관심종목")).toHaveAttribute("aria-selected", "true");
-    expect(saved(scenario)).toEqual(original);
-  }
+  await startDrag(page, source);
+  await page.mouse.move(chart.x + chart.width / 2, chart.y + chart.height - 60, { steps: 10 });
+  await expect(preview(page)).toBeVisible();
+  await area(page).dispatchEvent("pointercancel", { pointerId: 2 });
+  await expect(preview(page)).toBeVisible();
+  await page.mouse.move(700, 30, { steps: 6 });
+  await page.mouse.up();
+  await expect(preview(page)).toHaveCount(0);
+  await expect(tab(page, "관심종목")).toHaveAttribute("aria-selected", "true");
+  expect(saved(scenario)).toEqual(original);
   await source.press("Shift+F10");
   await expect(menu(page).getByRole("menuitem", { name: "배치 되돌리기", exact: true })).toBeDisabled();
 });

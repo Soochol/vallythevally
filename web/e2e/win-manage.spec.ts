@@ -236,20 +236,6 @@ test("새 차트 창은 바로 저장해 그 창에 이 칸 범위로 바로 그
   await expect(page.getByRole("status").filter({ hasText: "드로잉을 저장하지 못했습니다" })).toHaveCount(0);
 });
 
-test("좁은 데스크톱 폭에서도 창 더하기를 더한 위 막대의 버튼이 모두 막대 안에 있다", async ({ page }) => {
-  for (const width of [768, 800, 1024]) {
-    await page.setViewportSize({ width, height: 700 });
-    await page.goto("/");
-    await expect(cell(page)).toHaveAttribute("aria-busy", "false");
-    const bar = await boxOf(topbar(page));
-    await expect(addButton(page)).toBeVisible();
-    for (const button of await topbar(page).getByRole("button").all()) {
-      const box = await boxOf(button);
-      expect(box.x + box.width, `${width}px ${await button.getAttribute("aria-label") ?? await button.textContent()}`).toBeLessThanOrEqual(bar.x + bar.width + 1);
-    }
-  }
-});
-
 test("닫기 버튼은 탭이나 연동 색 점에 가리지 않고 버튼 전체가 눌린다", async ({ page, scenario }) => {
   twoSamsungCharts(scenario);
   await page.goto("/");

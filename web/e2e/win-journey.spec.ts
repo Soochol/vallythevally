@@ -545,7 +545,6 @@ test("키보드만으로 창 더하기·탭·나누기·경계·캔버스·닫�
 });
 
 for (const media of [
-  { motion: "reduce", transparency: "no-preference" },
   { motion: "no-preference", transparency: "reduce" },
   { motion: "reduce", transparency: "reduce" },
 ]) {

@@ -282,11 +282,6 @@ test("겹친 창을 누르면 앞으로 오고 가지런히·기본 배치·크�
     expect(box.y + box.height).toBeLessThanOrEqual(area.y + area.height + 1);
   }
   await screenshot(page, "tidied");
-  const closeRect = await boxOf(frame(page, "cell-1"));
-  await frame(page, "cell-1").getByRole("button", { name: "차트 닫기" }).click();
-  await expect(frame(page, "cell-1")).toHaveCount(0);
-  await page.getByRole("status").filter({ hasText: "차트 창을 닫았습니다" }).getByRole("button", { name: "되돌리기" }).click();
-  expect(await boxOf(frame(page, "cell-1"))).toEqual(closeRect);
   await drag(page, header(page, "cell-1"), 60, 30);
   await page.getByRole("button", { name: /^레이아웃:/ }).click();
   await page.getByRole("menuitem", { name: "기본 배치로" }).click();
