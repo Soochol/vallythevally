@@ -2,7 +2,7 @@ import type { Page } from "@playwright/test";
 import type { FeedProgramRow } from "../src/api/generated/FeedProgramRow";
 import type { LayoutWindow } from "../src/api/generated/LayoutWindow";
 import type { ProgramTradePoint } from "../src/api/generated/ProgramTradePoint";
-import { type Scenario, cell, DEFAULT_LAYOUT_ID, expect, pickDesktopVenue, test } from "./harness";
+import { type Scenario, cell, DEFAULT_LAYOUT_ID, expect, pickDesktopVenue, test, pollSaved } from "./harness";
 
 const SETTINGS = { v: 1, style: "candle", scale: "normal", indicators: [], compare: [], panels: [] };
 const kstSeconds = (clock: string) => Date.parse(`2026-11-09T${clock}+09:00`) / 1000;
@@ -27,7 +27,7 @@ async function openProgramWindow(page: Page) {
 }
 
 async function emitLive(scenario: Scenario, frame: (sub: string) => Parameters<Scenario["live"]["emit"]>[0]) {
-  await expect.poll(() => scenario.live.messages.some((m) => m.type === "subscribe_feed" && m.kind === "program")).toBe(true);
+  await pollSaved(() => scenario.live.messages.some((m) => m.type === "subscribe_feed" && m.kind === "program")).toBe(true);
   const subscribe = scenario.live.messages.find((m) => m.type === "subscribe_feed" && m.kind === "program");
   if (subscribe?.type !== "subscribe_feed") throw new Error("프로그램 구독이 없습니다");
   scenario.live.emit(frame(subscribe.sub));

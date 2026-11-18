@@ -3,7 +3,7 @@ import { selectMinute } from "./select-option";
 import type { Page } from "@playwright/test";
 import type { Drawing } from "../src/api/generated/Drawing";
 import { installFrameProbe } from "./frame-probe";
-import { type Scenario, cell, chartOf, expect, test } from "./harness";
+import { type Scenario, cell, chartOf, expect, test, pollSaved } from "./harness";
 
 test.use({ clockStart: "20261109100030" });
 
@@ -41,14 +41,14 @@ test("replacement consumes queued rollover in both real series and retains newer
   await page.mouse.down();
   await page.mouse.move(box.x + box.width * 0.86, box.y + box.height * 0.3, { steps: 10 });
   await page.mouse.up();
-  await expect.poll(() => savedDrawings(scenario)).toHaveLength(1);
+  await pollSaved(() => savedDrawings(scenario)).toHaveLength(1);
   const saved = (await savedDrawings(scenario))[0]!;
   await selectMinute(page.getByRole("button", { name: "분봉" }), "1m");
   await expect(cell(page)).toHaveAttribute("aria-busy", "false");
   const trade = async (price: number, time: string, _quantity: number) => {
     const volume = price === 201_000 ? 1 : price === 202_000 ? 3 : price === 203_000 ? 3 : price === 204_000 ? 7 : price === 205_000 ? 12 : price === 206_000 ? 6 : 13;
     expect(await scenario.live.update("005930", { t: Date.parse(`2026-11-09T${time.slice(0,2)}:${time.slice(2,4)}:00+09:00`) / 1000, o: price < 203_000 ? 201_000 : price < 206_000 ? 203_000 : 206_000, h: price, l: price < 203_000 ? 201_000 : price < 206_000 ? 203_000 : 206_000, c: price, v: volume })).toBeGreaterThan(0);
-    await expect.poll(() => delivered.includes(price), { timeout: 1000 }).toBe(true);
+    await pollSaved(() => delivered.includes(price), { timeout: 1000 }).toBe(true);
   };
   await expect(async () => {
     await trade(201_000, "100001", 1);

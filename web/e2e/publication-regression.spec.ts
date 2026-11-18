@@ -2,7 +2,7 @@ import { selectOption } from "./select-option";
 import type { Page } from "@playwright/test";
 import { parseDrawingBody, UNSAVED_PREFIX } from "../src/chart/drawings/outbox";
 import { parseJournalRecord, COMPLETION_PREFIX, completionKey, STAGING_PREFIX } from "../src/chart/drawings/journal";
-import { test, expect, cell, chartOf, type Scenario } from "./harness";
+import { test, expect, cell, chartOf, type Scenario, pollSaved } from "./harness";
 import { expandDock } from "./drawing-probe";
 
 const width = (page: Page) => page.getByRole("toolbar", { name: "드로잉 스타일" }).getByLabel("선 굵기");
@@ -81,7 +81,7 @@ test("frontend journal + saved documents: first publication of an older never-se
   });
   const editing = selectOption(width(page), "4", {timeout: 30000});
   try {
-    await expect.poll(() => held).toBe(true);
+    await pollSaved(() => held).toBe(true);
     expect(transport).toEqual([]);
     await other.getByRole("button", {name: "드로잉 지우기", exact: true}).click();
     await expect(other.getByText(/^자동 저장됨 /)).toBeVisible();
@@ -164,7 +164,7 @@ test("frontend journal + saved documents: native launch holds the id lock only u
   const editing = selectOption(width(page), "4", { timeout: 30000 });
   let deleting: Promise<void> | undefined;
   try {
-    await expect.poll(() => putHeld).toBe(true);
+    await pollSaved(() => putHeld).toBe(true);
     expect(transport).toEqual([]);
     deleting = other.getByRole("button", { name: "드로잉 지우기", exact: true }).click();
     await expect.poll(() => other.evaluate(async id => (await navigator.locks.query()).pending?.filter(lock => lock.name === `vv.drawing.journal.${id}`).length, original.id)).toBeGreaterThan(0);
@@ -172,7 +172,7 @@ test("frontend journal + saved documents: native launch holds the id lock only u
     expect(await storedDrawings(scenario)).toEqual([original]);
     releasePut();
     await editing;
-    await expect.poll(() => deleteHeld && putStored).toBe(true);
+    await pollSaved(() => deleteHeld && putStored).toBe(true);
     expect(transport).toEqual(["PUT"]);
     expect((await storedDrawings(scenario))[0]?.style).toMatchObject({ line: { width: 4 } });
     releaseDelete();
@@ -247,7 +247,7 @@ test("frontend journal + saved documents: a warm Storage task paused before diag
   }, STAGING_PREFIX);
   const editing = selectOption(width(page), "4", { timeout: 30000 });
   try {
-    await expect.poll(() => held).toBe(true);
+    await pollSaved(() => held).toBe(true);
     expect(transport).toEqual([]);
     await other.getByRole("button", { name: "드로잉 지우기", exact: true }).click();
     await expect(other.getByText(/^자동 저장됨 /)).toBeVisible();

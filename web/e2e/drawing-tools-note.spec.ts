@@ -1,5 +1,5 @@
 import type { Page } from "@playwright/test";
-import { cell, expect, test } from "./harness";
+import { cell, expect, test, pollSaved } from "./harness";
 import { chartPoint, drawings, mirror, open, pickTool, expandDock } from "./drawing-probe";
 
 async function drag(page: Page, from: [number, number], to: [number, number]) {
@@ -20,21 +20,21 @@ test("주석 도구: 글자·말풍선·가격 라벨·화살표를 놓고 새�
   await click(page, [0.7, 0.3]);
   const editor = page.getByRole("textbox", { name: "드로잉 글자" });
   await expect(editor).toBeFocused();
-  await expect.poll(async () => (await drawings(scenario)).map((d) => d.tool)).toEqual(["text"]);
+  await pollSaved(async () => (await drawings(scenario)).map((d) => d.tool)).toEqual(["text"]);
   await editor.fill("한글 메모");
   await editor.dispatchEvent("keydown", { key: "Enter", code: "Enter", isComposing: true });
   await expect(editor).toBeVisible();
   expect((await drawings(scenario))[0]!.text).toBeNull();
   await editor.press("Enter");
   await expect(editor).toBeHidden();
-  await expect.poll(async () => (await drawings(scenario)).find((d) => d.tool === "text")?.text).toBe("한글 메모");
+  await pollSaved(async () => (await drawings(scenario)).find((d) => d.tool === "text")?.text).toBe("한글 메모");
 
   await pickTool(page, "주석", "말풍선");
   await drag(page, [0.55, 0.65], [0.65, 0.5]);
   await expect(editor).toBeFocused();
   await editor.fill("실적 발표");
   await editor.press("Enter");
-  await expect.poll(async () => (await drawings(scenario)).find((d) => d.tool === "callout")).toMatchObject({ text: "실적 발표", points: [expect.anything(), expect.anything()] });
+  await pollSaved(async () => (await drawings(scenario)).find((d) => d.tool === "callout")).toMatchObject({ text: "실적 발표", points: [expect.anything(), expect.anything()] });
 
   await pickTool(page, "주석", "가격 라벨");
   await click(page, [0.8, 0.6]);
@@ -45,7 +45,7 @@ test("주석 도구: 글자·말풍선·가격 라벨·화살표를 놓고 새�
   await page.keyboard.press("Escape");
   await pickTool(page, "주석", "화살표");
   await drag(page, [0.82, 0.75], [0.9, 0.65]);
-  await expect.poll(async () => (await drawings(scenario)).map((d) => d.tool).sort()).toEqual(["arrow", "callout", "pricelabel", "text"]);
+  await pollSaved(async () => (await drawings(scenario)).map((d) => d.tool).sort()).toEqual(["arrow", "callout", "pricelabel", "text"]);
   const saved = await drawings(scenario);
   expect(saved.find((d) => d.tool === "pricelabel")!.points).toHaveLength(1);
   expect(saved.find((d) => d.tool === "arrow")!.points).toHaveLength(2);
@@ -87,7 +87,7 @@ test("주석 도구: 공백뿐인 글자는 자리 표시로 남고, 바깥을 �
   await editor.fill("바깥 누르기");
   await page.getByRole("region", { name: "개체 목록" }).click();
   await expect(editor).toBeHidden();
-  await expect.poll(async () => (await drawings(scenario)).map((d) => d.text)).toContain("바깥 누르기");
+  await pollSaved(async () => (await drawings(scenario)).map((d) => d.text)).toContain("바깥 누르기");
   await cell(page).focus(); await page.keyboard.press("X");
   await click(page, [0.3, 0.75]);
   await editor.fill("버릴 글자");
@@ -99,7 +99,7 @@ test("주석 도구: 공백뿐인 글자는 자리 표시로 남고, 바깥을 �
   await editor.fill("  ");
   await page.locator(".draw-text-editor").getByRole("button", { name: "세부 설정", exact: true }).click();
   await page.getByRole("dialog", { name: "글자 세부 설정" }).getByRole("button", { name: "확인", exact: true }).click();
-  await expect.poll(async () => (await drawings(scenario)).filter((d) => d.tool === "text").map((d) => d.text ?? "").sort()).toEqual(["", "", "", "바깥 누르기"]);
+  await pollSaved(async () => (await drawings(scenario)).filter((d) => d.tool === "text").map((d) => d.text ?? "").sort()).toEqual(["", "", "", "바깥 누르기"]);
 
   await pickTool(page, "주석", "말풍선");
   await drag(page, [0.55, 0.65], [0.65, 0.5]);
@@ -110,6 +110,6 @@ test("주석 도구: 공백뿐인 글자는 자리 표시로 남고, 바깥을 �
   await expect(dialog).toBeVisible();
   await dialog.getByRole("checkbox", { name: "테두리", exact: true }).uncheck();
   await dialog.getByRole("button", { name: "확인", exact: true }).click();
-  await expect.poll(async () => (await drawings(scenario)).find((d) => d.tool === "callout")).toMatchObject({ text: "배당", style: { border: false } });
+  await pollSaved(async () => (await drawings(scenario)).find((d) => d.tool === "callout")).toMatchObject({ text: "배당", style: { border: false } });
   expect(errors).toEqual([]);
 });

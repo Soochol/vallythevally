@@ -4,7 +4,7 @@ import type { Locator, Page } from "@playwright/test";
 import type { Bar } from "../src/api/generated/Bar";
 import type { LayoutWindow } from "../src/api/generated/LayoutWindow";
 import { parsePlacement } from "../src/layout/placement";
-import { cell, chartOf, DEFAULT_LAYOUT_ID, expect, test, type Scenario } from "./harness";
+import { cell, chartOf, DEFAULT_LAYOUT_ID, expect, test, type Scenario, pollSaved } from "./harness";
 
 test.use({ clockStart: "20261109100000", viewport: { width: 1440, height: 900 } });
 const tab = (page: Page, name: string) => page.getByRole("tab", { name: new RegExp(`^${name}`) });
@@ -61,7 +61,7 @@ test("메뉴로 띄운 스크리너는 불투명한 창으로 탭 위에 남고 
   const origin = await tab(page, "스크리너").locator("xpath=ancestor::*[@data-dock-group]").getAttribute("data-dock-group");
   await detach(page);
   const before = await boxOf(frame(page));
-  await expect.poll(() => saved(scenario).dock?.floats.length).toBe(1);
+  await pollSaved(() => saved(scenario).dock?.floats.length).toBe(1);
   const persisted = saved(scenario).dock!.floats[0]!.rect;
   expect(persisted.w).toBeCloseTo(before.width / (await boxOf(area(page))).width, 4);
   expect(await frame(page).locator(".window-panel").evaluate((el) => getComputedStyle(el).backgroundColor)).not.toBe("rgba(0, 0, 0, 0)");
@@ -103,7 +103,7 @@ test("머리 이동은 가장자리에 달라붙고 크기·키보드 조작과 
   expect((await boxOf(frame(page))).x).toBe(original.x - 16);
   await page.keyboard.press("Shift+ArrowRight");
   expect((await boxOf(frame(page))).width).toBe(original.width + 16);
-  await expect.poll(() => saved(scenario).dock?.floats[0]?.rect.w).toBeCloseTo((original.width + 16) / room.width, 4);
+  await pollSaved(() => saved(scenario).dock?.floats[0]?.rect.w).toBeCloseTo((original.width + 16) / room.width, 4);
   const persisted = saved(scenario).dock;
   await page.setViewportSize({ width: 1100, height: 760 });
   await expect(head(page)).toBeVisible();
@@ -125,7 +125,7 @@ test("떠 있는 머리를 차트 아래로 놓아 붙이고 한 번 되돌리�
   await expect(frame(page)).toHaveCount(0);
   const group = groups(page).filter({ has: tab(page, "스크리너") });
   expect(await boxOf(group)).toEqual(predicted);
-  await expect.poll(() => saved(scenario).dock?.floats.length).toBe(0);
+  await pollSaved(() => saved(scenario).dock?.floats.length).toBe(0);
   await undo(page);
   expect(await boxOf(frame(page))).toEqual(original);
 });
@@ -170,7 +170,7 @@ test("띄운 차트는 같은 노드·봉·드로잉·구독을 유지하고 활
   scenario.documents.saveDrawing({ id: drawingId, symbol: "000660", tool: "hline", points: [{ t: NOV9, price: 100000 }], style: {}, text: null, locked: false, hidden: false, periods: null, z: 1, group: null, scope: { kind: "cell", layoutId: DEFAULT_LAYOUT_ID, windowId: "cell-1" }, revision: 1 });
   await page.goto("/");
   await expect(cell(page, 2)).toHaveAttribute("aria-busy", "false");
-  await expect.poll(() => scenario.live.subscriptions().length).toBeGreaterThanOrEqual(2);
+  await pollSaved(() => scenario.live.subscriptions().length).toBeGreaterThanOrEqual(2);
   const node = await chartOf(cell(page, 2)).elementHandle();
   if (!node) throw new Error("띄울 차트가 없습니다");
   const subscriptions = scenario.live.messages.length;
@@ -221,7 +221,7 @@ test("떠 있는 창은 가려진 차트 입력을 막고 가리지 않은 차�
   await page.mouse.down();
   await page.mouse.move(chart.x + 160, chart.y + chart.height * .52, { steps: 8 });
   await page.mouse.up();
-  await expect.poll(() => scenario.documents.drawings("005930").length).toBe(1);
+  await pollSaved(() => scenario.documents.drawings("005930").length).toBe(1);
 });
 
 test("띄우기 되돌리기와 기본 배치로는 모두 붙이고 첫 캔버스 전환은 자리와 앞 차례를 보존한다", async ({ page, scenario }) => {
@@ -243,7 +243,7 @@ test("띄우기 되돌리기와 기본 배치로는 모두 붙이고 첫 캔버�
   const canvas = page.locator('[data-canvas-window="screener"]');
   await expect(canvas).toBeVisible();
   expect(await boxOf(canvas)).toEqual(before);
-  await expect.poll(() => saved(scenario).canvas?.order.at(-1)).toBe("screener");
+  await pollSaved(() => saved(scenario).canvas?.order.at(-1)).toBe("screener");
 });
 
 test("마지막 도킹 창의 띄우기는 비활성이고 Shift 끌기도 거절한다", async ({ page, scenario }) => {
@@ -272,7 +272,7 @@ test("작은 나누기 거절은 떠 있던 위치와 기록을 그대로 둔다
   await expect(cell(page)).toHaveAttribute("aria-busy", "false");
   await detach(page);
   const before = await boxOf(frame(page));
-  await expect.poll(() => saved(scenario).dock?.floats.length).toBe(1);
+  await pollSaved(() => saved(scenario).dock?.floats.length).toBe(1);
   const persisted = saved(scenario).dock;
   const chart = await boxOf(groups(page).first());
   await start(page, head(page));
@@ -291,7 +291,7 @@ test("취소·캡처 상실·초점 상실·영역 변경은 떠 있는 창의 �
   await expect(cell(page)).toHaveAttribute("aria-busy", "false");
   await detach(page);
   const before = await boxOf(frame(page));
-  await expect.poll(() => saved(scenario).dock?.floats.length).toBe(1);
+  await pollSaved(() => saved(scenario).dock?.floats.length).toBe(1);
   for (const reason of ["Escape", "pointercancel", "capture", "blur"]) {
     await shiftMove(page, "screener", -100, 80, false);
     await expect(area(page)).toHaveAttribute("data-dock-dragging", "");
@@ -353,11 +353,11 @@ test("떠 있는 창끼리 달라붙고 머리 클릭은 앞 차례만 한 번 �
   await page.mouse.up();
   await page.keyboard.up("Shift");
   expect((await boxOf(frame(page, "objects"))).x).toBe(screener.x + screener.width + 6);
-  await expect.poll(() => saved(scenario).dock?.floats.at(-1)?.window).toBe("objects");
+  await pollSaved(() => saved(scenario).dock?.floats.at(-1)?.window).toBe("objects");
   await head(page).click({ position: { x: 60, y: 17 } });
-  await expect.poll(() => saved(scenario).dock?.floats.at(-1)?.window).toBe("screener");
+  await pollSaved(() => saved(scenario).dock?.floats.at(-1)?.window).toBe("screener");
   await undo(page);
-  await expect.poll(() => saved(scenario).dock?.floats.at(-1)?.window).toBe("objects");
+  await pollSaved(() => saved(scenario).dock?.floats.at(-1)?.window).toBe("objects");
 });
 
 test("놓을 때 실제 포인터 위치와 Shift 상태로 다시 판정한다", async ({ page }) => {
@@ -403,7 +403,7 @@ test("머리의 연동 색 점을 누르면 색 변경과 함께 떠 있는 차�
   await chooseLink(page, link, "C");
   await expect(link).toHaveAccessibleName("연동 색: C");
   await expect(frame(page, "cell-1")).toHaveAttribute("data-active-cell", "");
-  await expect.poll(() => saved(scenario).dock?.floats.at(-1)?.window).toBe("cell-1");
+  await pollSaved(() => saved(scenario).dock?.floats.at(-1)?.window).toBe("cell-1");
 });
 
 test("화면에서 최소 크기로 커진 떠 있는 창은 캔버스로 전환해도 머리와 위치가 같다", async ({ page, scenario }) => {

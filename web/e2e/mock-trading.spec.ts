@@ -1,7 +1,7 @@
 import { CONNECTED_KIWOOM, DEFAULT_SYSTEM_SETTINGS } from "./fixtures/scenario";
 import type { KiwoomEnvironment } from "../src/api/generated/KiwoomEnvironment";
 import type { KiwoomLinkStatus } from "../src/api/generated/KiwoomLinkStatus";
-import { cell, DEFAULT_LAYOUT_ID, expect, test, type Scenario } from "./harness";
+import { cell, DEFAULT_LAYOUT_ID, expect, test, type Scenario, pollSaved } from "./harness";
 import { cellAt, openOrderWindow, ordersOn, status, tradingApi, win, writesTo } from "./order-window";
 
 const DISCONNECTED: KiwoomLinkStatus = { ...CONNECTED_KIWOOM, state: "disconnected", message: "키가 저장돼 있습니다. 연결하지 않았습니다", realtimeRegistered: null, symbolCount: null };
@@ -47,7 +47,7 @@ test("모의: 계좌 띠의 모의 표시, 경로 SOR·NXT 끔과 안내, 저장
   await expect(win(page)).toHaveAttribute("data-venue", "krx");
 
   await cellAt(page, "buy", 70_000).dblclick();
-  await expect.poll(() => writesTo(api, "place")).toHaveLength(1);
+  await pollSaved(() => writesTo(api, "place")).toHaveLength(1);
   expect(writesTo(api, "place")[0]!.body.venue).toBe("krx");
   expect(scenario.documents.layout(DEFAULT_LAYOUT_ID).windows.find((w) => w.kind === "order")).toMatchObject({ venue: "nxt" });
 });

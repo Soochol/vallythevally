@@ -1,6 +1,6 @@
 import type { Page } from "@playwright/test";
 import type { Screen } from "../src/api/generated/Screen";
-import { cell, expect, SEARCH_BUTTON_TITLE, test, type Scenario } from "./harness";
+import { cell, expect, SEARCH_BUTTON_TITLE, test, type Scenario, pollSaved } from "./harness";
 import { expandDock } from "./drawing-probe";
 import { openScreener, panel } from "./screener-page";
 import { expandEditor, screenAction, sentenceEditor } from "./sentence-editor";
@@ -88,7 +88,7 @@ test("조건 문장은 번호 배지와 알약 낱말로 보이고 지우기 확
   await expect(confirm.getByRole("button", { name: "확인", exact: true })).toHaveCount(0);
   await expect(confirm.getByRole("button", { name: "취소", exact: true })).toBeFocused();
   await confirm.getByRole("button", { name: "조건식 지우기", exact: true }).click();
-  await expect.poll(() => scenario.documents.screens().screens).toEqual([]);
+  await pollSaved(() => scenario.documents.screens().screens).toEqual([]);
 });
 
 test("고른 드로잉의 작은 막대는 설정·복제·잠금·지우기 순서다", async ({ page }) => {

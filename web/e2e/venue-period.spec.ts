@@ -1,7 +1,7 @@
 import { selectMinute } from "./select-option";
 import type { Locator, Page } from "@playwright/test";
 import type { SeriesKey } from "../src/api/bars";
-import { cell, chartOf, expect, test, pickDesktopVenue, expectDesktopVenue } from "./harness";
+import { cell, chartOf, expect, test, pickDesktopVenue, expectDesktopVenue, pollSaved } from "./harness";
 
 function recordBarRequests(page: Page): SeriesKey[] {
   const seen: SeriesKey[] = [];
@@ -22,7 +22,7 @@ function watchCell(page: Page, symbol: string) {
 
 async function expectCellShows(page: Page, requested: SeriesKey[], label: string, series: SeriesKey) {
   await expect(cell(page)).toHaveAttribute("aria-label", `칸 1: ${label}`);
-  await expect.poll(() => requested.at(-1), { message: `${label}의 마지막 봉 요청` }).toEqual(series);
+  await pollSaved(() => requested.at(-1), { message: `${label}의 마지막 봉 요청` }).toEqual(series);
   await expect(cell(page)).toHaveAttribute("aria-busy", "false");
   await expect(chartOf(cell(page))).not.toHaveAttribute("data-bar-count", "0");
 }

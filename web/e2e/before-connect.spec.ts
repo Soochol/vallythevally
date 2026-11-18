@@ -2,7 +2,7 @@ import type { Page } from "@playwright/test";
 import type { KiwoomLinkStatus } from "../src/api/generated/KiwoomLinkStatus";
 import { CONNECTED_KIWOOM } from "./fixtures/scenario";
 import { readyStatus } from "./fixtures/screener";
-import { cell, expect, test, type Scenario } from "./screener-harness";
+import { cell, expect, test, type Scenario, pollSaved } from "./screener-harness";
 import { openScreener, panel, results, rows, runButton, storeLine } from "./screener-page";
 
 const NOT_CONNECTED = { status: 503, body: { error: { code: "kiwoom_unavailable", message: "키움에 연결하지 않았습니다", reason: "not_connected", retryAt: null, manualActionRequired: false } } };
@@ -97,7 +97,7 @@ test("연결 안 함(끊어 둠): 차트 카드의 연결이 acknowledged false�
   await expect(guide(page)).toContainText("연결하면 다음부터 서버를 켤 때 자동으로 연결합니다");
   await expect(statusBar(page)).toContainText("연결을 끊어 두었습니다");
   await guide(page).getByRole("button", { name: "연결", exact: true }).click();
-  await expect.poll(() => connectCalls(scenario).length).toBe(1);
+  await pollSaved(() => connectCalls(scenario).length).toBe(1);
   expect(connectCalls(scenario)[0]!.postDataJSON()).toEqual({ acknowledged: false });
   await expect(dialog(page)).toHaveCount(0);
 });
@@ -108,7 +108,7 @@ test("연결 안 함(시작 때 연결): 상태 줄의 키움에 연결 단추�
   await open(page);
   await expect(statusBar(page)).toContainText("키는 저장됨 · 연결하지 않았습니다");
   await statusBar(page).getByRole("button", { name: "키움에 연결" }).click();
-  await expect.poll(() => connectCalls(scenario).length).toBe(1);
+  await pollSaved(() => connectCalls(scenario).length).toBe(1);
   expect(connectCalls(scenario)[0]!.postDataJSON()).toEqual({ acknowledged: false });
   await expect(dialog(page)).toHaveCount(0);
 });

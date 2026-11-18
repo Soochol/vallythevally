@@ -5,7 +5,7 @@ import type { Layout } from "../src/api/generated/Layout";
 import { parseChartSettings } from "../src/chart/settings";
 import { installChartProbe } from "./chart-probe";
 import { installFrameProbe } from "./frame-probe";
-import { type Scenario, cell, DEFAULT_LAYOUT_ID, expect, test, firstChart, withFirstChart } from "./harness";
+import { type Scenario, cell, DEFAULT_LAYOUT_ID, expect, test, firstChart, withFirstChart, pollSaved } from "./harness";
 
 async function settings(scenario: Scenario) {
   const layout: Layout = scenario.documents.layout(DEFAULT_LAYOUT_ID);
@@ -62,12 +62,12 @@ test("범례 설정은 기간·색·굵기를 즉시 그리고 Esc로 처음 값
   await expect(swatch).toHaveAttribute("aria-pressed", "true");
   await popup.getByRole("group", { name: "굵기", exact: true }).getByRole("button", { name: "5", exact: true }).click();
   await expect.poll(() => maLine(page).then((line) => line?.style)).toEqual({ color, width: 5 });
-  await expect.poll(async () => (await settings(scenario)).indicators[0]?.style).toEqual({ colors: [color], width: 5 });
+  await pollSaved(async () => (await settings(scenario)).indicators[0]?.style).toEqual({ colors: [color], width: 5 });
   await page.keyboard.press("Escape");
   await expect(popup).toHaveCount(0);
   await expect.poll(() => maLine(page).then((line) => ({ data: line?.data, style: line?.style }))).toEqual({ data: original?.data, style: original?.style });
-  await expect.poll(async () => (await settings(scenario)).indicators[0]?.spec).toEqual({ kind: "ma", method: "sma", period: 5 });
-  await expect.poll(async () => (await settings(scenario)).indicators[0]?.style).toEqual({ colors: ["#C7F36B"], width: 1 });
+  await pollSaved(async () => (await settings(scenario)).indicators[0]?.spec).toEqual({ kind: "ma", method: "sma", period: 5 });
+  await pollSaved(async () => (await settings(scenario)).indicators[0]?.style).toEqual({ colors: ["#C7F36B"], width: 1 });
   await expect(row(page, "ma").getByRole("button", { name: /설정 열기/ })).toBeFocused();
 });
 
@@ -76,13 +76,13 @@ test("높이와 접기를 저장하고 새로고침해 복원하며 접힌 패�
   const before = await heights(page);
   await resize(page);
   await expect.poll(() => heights(page).then((values) => values[1]! - before[1]!)).toBeGreaterThan(35);
-  await expect.poll(async () => (await settings(scenario)).panels[0]?.stretch).toBeGreaterThan(0.25);
+  await pollSaved(async () => (await settings(scenario)).panels[0]?.stretch).toBeGreaterThan(0.25);
   const resized = await heights(page);
   await row(page, "volume").hover();
   await row(page, "volume").getByRole("button", { name: /패널 접기/ }).click();
   await expect.poll(() => heights(page).then((values) => values[1])).toBeLessThanOrEqual(31);
   await expect(row(page, "volume")).toContainText(/거래량.*\d/);
-  await expect.poll(async () => (await settings(scenario)).panels[0]?.collapsed).toBe(true);
+  await pollSaved(async () => (await settings(scenario)).panels[0]?.collapsed).toBe(true);
 
   await page.reload();
   await expect(row(page, "volume").getByRole("button", { name: /패널 펼치기/ })).toHaveAttribute("aria-expanded", "false");
@@ -118,7 +118,7 @@ for (const key of ["T", "H"]) {
     await resize(page);
     await row(page, "rsi").hover();
     await row(page, "rsi").getByRole("button", { name: /패널 접기/ }).click();
-    await expect.poll(async () => (await settings(scenario)).panels[1]?.collapsed).toBe(true);
+    await pollSaved(async () => (await settings(scenario)).panels[1]?.collapsed).toBe(true);
     expect(scenario.documents.drawings("005930")).toEqual(before);
     expect(mutations).toEqual([]);
     await page.reload();
@@ -136,7 +136,7 @@ test("손잡이 화살표는 고른 드로잉을 움직이지 않고 범례에�
   await page.keyboard.press("H");
   await page.mouse.click(box.x + box.width * 0.7, box.y + 250);
   await expect(page.getByRole("toolbar", { name: "드로잉 스타일" })).toBeVisible();
-  await expect.poll(async () => scenario.documents.drawings("005930").length).toBe(1);
+  await pollSaved(async () => scenario.documents.drawings("005930").length).toBe(1);
   const before = scenario.documents.drawings("005930");
   const mutations: string[] = [];
   page.on("request", (request) => { if (new URL(request.url()).pathname.startsWith("/api/drawings") && request.method() !== "GET") mutations.push(request.method()); });
@@ -144,7 +144,7 @@ test("손잡이 화살표는 고른 드로잉을 움직이지 않고 범례에�
   await cell(page).locator('[data-panel-resize="p-volume"]').focus();
   await page.keyboard.press("ArrowUp");
   await expect.poll(() => heights(page).then((values) => values[1]! - height)).toBeGreaterThan(10);
-  await expect.poll(async () => (await settings(scenario)).panels[0]?.stretch).toBeGreaterThan(0.25);
+  await pollSaved(async () => (await settings(scenario)).panels[0]?.stretch).toBeGreaterThan(0.25);
   expect(scenario.documents.drawings("005930")).toEqual(before);
   expect(mutations).toEqual([]);
   await row(page, "ma").getByRole("button", { name: /설정 열기/ }).focus();
@@ -170,11 +170,11 @@ for (const [id, label, period] of [["rsi", "아래 패널 지표", "9"], ["ma", 
     await row(page, id).getByRole("button", { name: /설정 열기/ }).click();
     const popup = page.getByRole("dialog", { name: /설정$/ });
     await popup.getByRole("textbox", { name: "기간", exact: true }).fill(period);
-    await expect.poll(async () => (await settings(scenario)).indicators.find((i) => i.id === id)?.spec).toMatchObject({ period: Number(period) });
+    await pollSaved(async () => (await settings(scenario)).indicators.find((i) => i.id === id)?.spec).toMatchObject({ period: Number(period) });
     await row(page, id).getByRole("button", { name: /숨기기/ }).click();
     await expect(popup).toHaveCount(0);
     await expect(row(page, id).getByRole("button", { name: /보이기/ })).toHaveCount(1);
-    await expect.poll(async () => (await settings(scenario)).indicators.find((i) => i.id === id)).toMatchObject({ visible: false, spec: { period: Number(period) } });
+    await pollSaved(async () => (await settings(scenario)).indicators.find((i) => i.id === id)).toMatchObject({ visible: false, spec: { period: Number(period) } });
   });
 }
 

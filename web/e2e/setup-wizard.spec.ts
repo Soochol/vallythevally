@@ -8,7 +8,7 @@ import type { KiwoomLinkStatus } from "../src/api/generated/KiwoomLinkStatus";
 import type { PublicIpCheck } from "../src/api/generated/PublicIpCheck";
 import type { RegisteredIpInput } from "../src/api/generated/RegisteredIpInput";
 import type { SyncStatus } from "../src/api/generated/SyncStatus";
-import { cell, chartOf, expect, test, type Scenario } from "./harness";
+import { cell, chartOf, expect, test, type Scenario, pollSaved } from "./harness";
 import { CONNECTED_KIWOOM, SYNCED } from "./fixtures/scenario";
 
 const SCREENS = path.resolve("../target/ux-screens");
@@ -181,7 +181,7 @@ for (const viewport of [{ name: "1440×900", width: 1440, height: 900, tag: "des
       await wizard(page).getByRole("button", { name: "계정 셋업으로 덮어쓰기" }).click();
       await expect(wizard(page)).toContainText("계정의 셋업을 이 PC로 받았습니다.");
       expect(sent).toEqual([{ choice: "take_account" }]);
-      await expect.poll(() => setupCalls(scenario).length).toBeGreaterThan(0);
+      await pollSaved(() => setupCalls(scenario).length).toBeGreaterThan(0);
       await wizard(page).getByRole("button", { name: "닫기" }).click();
       await expect(cell(page)).toHaveAttribute("aria-busy", "false");
     });
@@ -216,7 +216,7 @@ for (const viewport of [{ name: "1440×900", width: 1440, height: 900, tag: "des
       expect(setupCalls(scenario)).toHaveLength(before);
 
       await notice.getByRole("button", { name: "새로 고침" }).click();
-      await expect.poll(() => setupCalls(scenario).length).toBeGreaterThan(before);
+      await pollSaved(() => setupCalls(scenario).length).toBeGreaterThan(before);
     });
 
     test("마법사는 계정 메뉴에서 다시 열 수 있고, 계정 메뉴가 동기화 값을 보이며 지금 동기화가 요청을 보낸다", async ({ page, scenario }) => {

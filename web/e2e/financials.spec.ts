@@ -6,7 +6,7 @@ import type { Layout } from "../src/api/generated/Layout";
 import type { Scenario } from "./fixtures/scenario";
 import { parseChartSettings, type ChartSettings } from "../src/chart/settings";
 import { installFrameProbe } from "./frame-probe";
-import { cell, chartOf, DEFAULT_LAYOUT_ID, expect, SEARCH_BUTTON_TITLE, firstChart, withFirstChart, pickDesktopVenue } from "./harness";
+import { cell, chartOf, DEFAULT_LAYOUT_ID, expect, SEARCH_BUTTON_TITLE, firstChart, withFirstChart, pickDesktopVenue, pollSaved } from "./harness";
 
 const METRICS = ["revenue", "operating_income", "owner_roe", "investing_cash_flow", "dps", "debt_ratio"] as const;
 const LABELS = ["매출액", "영업이익", "지배주주 ROE", "투자활동 현금흐름", "DPS", "부채비율"];
@@ -72,7 +72,7 @@ for (const phone of [false, true]) test.describe(phone ? "휴대폰 재무지표
       await page.mouse.down();
       await page.mouse.move(box.x + box.width * 0.6, box.y + box.height / 2 - 15, { steps: 5 });
       await page.mouse.up();
-      await expect.poll(async () => {
+      await pollSaved(async () => {
         const saved: Layout = await scenario.documents.layout(DEFAULT_LAYOUT_ID);
         return parseChartSettings(firstChart(saved).chartSettings).panels.some((p) => p.stretch !== 0.25);
       }).toBe(true);
@@ -82,7 +82,7 @@ for (const phone of [false, true]) test.describe(phone ? "휴대폰 재무지표
     const revenue = page.locator("[data-indicator-row]").filter({ hasText: /^매출액/ });
     await revenue.getByRole("button", { name: /패널 아래로/ }).click({ force: true });
     await revenue.getByRole("button", { name: /숨기기/ }).click({ force: true });
-    await expect.poll(async () => {
+    await pollSaved(async () => {
       const saved: Layout = await scenario.documents.layout(DEFAULT_LAYOUT_ID);
       const settings = parseChartSettings(firstChart(saved).chartSettings);
       return settings.indicators.find((i) => i.spec.kind === "revenue")?.visible;
@@ -210,7 +210,7 @@ test.describe("재무지원 경계", () => {
     await seed(scenario, "Q");
     await page.addInitScript(installFrameProbe);
     await page.goto("/");
-      await expect.poll(async () => (await data(financial, "005930", "Q")).status).toBe("ready");
+      await pollSaved(async () => (await data(financial, "005930", "Q")).status).toBe("ready");
     await expect(row(page, "revenue")).toContainText("3월 결산");
     await expect(page.locator("[data-indicator-row]").filter({ hasText: "3월 결산" })).toHaveCount(1);
     await row(page, "debt_ratio").locator("summary").click();

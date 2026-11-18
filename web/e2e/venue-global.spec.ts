@@ -1,7 +1,7 @@
 import type { Locator, Page } from "@playwright/test";
 import type { LayoutWindow } from "../src/api/generated/LayoutWindow";
 import type { Venue } from "../src/api/generated/Venue";
-import { type Scenario, cell, chartOf, DEFAULT_LAYOUT_ID, expect, SEARCH_BUTTON_TITLE, test, pickDesktopVenue, desktopVenueCombo, expectDesktopVenue } from "./harness";
+import { type Scenario, cell, chartOf, DEFAULT_LAYOUT_ID, expect, SEARCH_BUTTON_TITLE, test, pickDesktopVenue, desktopVenueCombo, expectDesktopVenue, pollSaved } from "./harness";
 
 const SETTINGS = { v: 2, style: "candle", scale: "normal", indicators: [], compare: [], panels: [] };
 const LEGEND_OFF = { ...SETTINGS, showLegend: false };
@@ -80,7 +80,7 @@ test.describe("데스크톱", () => {
     await expect(menu).toHaveCount(0);
     await expectDesktopVenue(page, "KRX");
     await drawn(cell(page, 1), /^칸 1: 삼성전자 KRX 일$/);
-    await expect.poll(() => savedVenue(scenario)).toBe("krx");
+    await pollSaved(() => savedVenue(scenario)).toBe("krx");
     await expect(desktopVenueCombo(page)).toBeFocused();
 
     await page.keyboard.press("ArrowDown");
@@ -102,16 +102,16 @@ test.describe("데스크톱", () => {
     await expectDesktopVenue(page, "KRX");
     await drawn(cell(page, 1), /^칸 1: 삼성전자 KRX 일$/);
     await drawn(cell(page, 2), /^칸 2: SK하이닉스 KRX 일$/);
-    await expect.poll(() => [lastRequest(seen, "005930")?.venue, lastRequest(seen, "000660")?.venue, lastRequest(seen, "000810")?.venue]).toEqual(["krx", "krx", "krx"]);
-    await expect.poll(() => scenario.live.subscriptions().filter((s) => s.venue === "krx").map((s) => s.symbol).sort()).toEqual(["000660", "000810", "005930"]);
-    await expect.poll(() => savedVenue(scenario)).toBe("krx");
+    await pollSaved(() => [lastRequest(seen, "005930")?.venue, lastRequest(seen, "000660")?.venue, lastRequest(seen, "000810")?.venue]).toEqual(["krx", "krx", "krx"]);
+    await pollSaved(() => scenario.live.subscriptions().filter((s) => s.venue === "krx").map((s) => s.symbol).sort()).toEqual(["000660", "000810", "005930"]);
+    await pollSaved(() => savedVenue(scenario)).toBe("krx");
   });
 
   test("새로고침해도 KRX가 남고 다른 레이아웃으로 바꿔도 KRX다", async ({ page, scenario }) => {
     await page.goto("/?symbol=005930");
     await drawn(cell(page), /^칸 1: 삼성전자 통합 일$/);
     await pickDesktopVenue(page, "KRX");
-    await expect.poll(() => savedVenue(scenario)).toBe("krx");
+    await pollSaved(() => savedVenue(scenario)).toBe("krx");
     await page.reload();
     await drawn(cell(page), /^칸 1: 삼성전자 KRX 일$/);
     await expectDesktopVenue(page, "KRX");
@@ -137,7 +137,7 @@ test.describe("데스크톱", () => {
     await drawn(cell(page, 1), /^칸 1: 삼성전자 NXT 일$/);
     await drawn(cell(page, 2), /^칸 2: 삼성전자우 통합 일$/);
     await drawn(cell(page, 3), /^칸 3: 코스피 일$/);
-    await expect.poll(() => [lastRequest(seen, "005930")?.venue, lastRequest(seen, "005935")?.venue, lastRequest(seen, "IDX:001")?.venue]).toEqual(["nxt", "combined", null]);
+    await pollSaved(() => [lastRequest(seen, "005930")?.venue, lastRequest(seen, "005935")?.venue, lastRequest(seen, "IDX:001")?.venue]).toEqual(["nxt", "combined", null]);
     await expect(fallbackBadge(cell(page, 2))).toHaveAttribute("title", "NXT에서 거래되지 않는 종목이라 통합 시세로 보입니다");
     await expect(fallbackBadge(cell(page, 1))).toHaveCount(0);
     await expect(fallbackBadge(cell(page, 3))).toHaveCount(0);
@@ -165,14 +165,14 @@ test.describe("데스크톱", () => {
     await drawn(cell(page, 2), /^칸 2: SK하이닉스 통합 일$/);
     await expectDesktopVenue(page, "통합");
     await page.getByRole("toolbar", { name: "차트 도구 막대" }).getByRole("group", { name: "봉 주기" }).getByRole("button", { name: "주", exact: true }).click();
-    await expect.poll(() => scenario.documents.layout(DEFAULT_LAYOUT_ID).windows.filter((w) => w.kind === "chart").map((w) => w.kind === "chart" ? w.venue : undefined)).toEqual(["combined", "combined", null]);
+    await pollSaved(() => scenario.documents.layout(DEFAULT_LAYOUT_ID).windows.filter((w) => w.kind === "chart").map((w) => w.kind === "chart" ? w.venue : undefined)).toEqual(["combined", "combined", null]);
   });
 
   test("주소의 venue는 위 막대를 바꾸고, venue가 없으면 그대로 둔다", async ({ page, scenario }) => {
     await page.goto("/?symbol=005930&venue=krx");
     await drawn(cell(page), /^칸 1: 삼성전자 KRX 일$/);
     await expectDesktopVenue(page, "KRX");
-    await expect.poll(() => savedVenue(scenario)).toBe("krx");
+    await pollSaved(() => savedVenue(scenario)).toBe("krx");
     await page.goto("/?symbol=000660");
     await drawn(cell(page), /^칸 1: SK하이닉스 KRX 일$/);
     await expectDesktopVenue(page, "KRX");
@@ -205,7 +205,7 @@ test.describe("휴대폰 390px", () => {
     await venueButton(page, "KRX").click();
     await drawn(cell(page), /^칸 1: 삼성전자 KRX 일$/);
     expect(lastRequest(seen, "005930")?.venue).toBe("krx");
-    await expect.poll(() => savedVenue(scenario)).toBe("krx");
+    await pollSaved(() => savedVenue(scenario)).toBe("krx");
   });
 });
 

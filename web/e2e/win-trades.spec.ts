@@ -4,7 +4,7 @@ import type { FeedTrade } from "../src/api/generated/FeedTrade";
 import type { LayoutWindow } from "../src/api/generated/LayoutWindow";
 import type { TradePrint } from "../src/api/generated/TradePrint";
 import type { Venue } from "../src/api/generated/Venue";
-import { type Scenario, cell, DEFAULT_LAYOUT_ID, expect, pickDesktopVenue, test } from "./harness";
+import { type Scenario, cell, DEFAULT_LAYOUT_ID, expect, pickDesktopVenue, test, pollSaved } from "./harness";
 
 const SETTINGS = { v: 1, style: "candle", scale: "normal", indicators: [], compare: [], panels: [] };
 const at = (clock: string): number => Date.parse(`2026-11-09T${clock}+09:00`) / 1000;
@@ -44,7 +44,7 @@ async function openTradesWindow(page: Page, scenario: Scenario): Promise<string>
   await page.getByRole("menu", { name: "창 더하기" }).getByRole("menuitem", { name: /^체결/ }).click();
   await expect(page.getByTestId("trades-window")).toBeVisible();
   await page.mouse.move(2, 2);
-  await expect.poll(() => feedSub(scenario)).toBeDefined();
+  await pollSaved(() => feedSub(scenario)).toBeDefined();
   return feedSub(scenario)!;
 }
 
@@ -106,7 +106,7 @@ test("KRX를 고르면 NXT 체결이 보이지 않는다", async ({ page, scenar
   await expect(page.getByText("−20")).toHaveCount(0);
 
   await pickDesktopVenue(page, "KRX");
-  await expect.poll(() => feedRequests(scenario).at(-1)).toMatchObject({ venue: "krx" });
+  await pollSaved(() => feedRequests(scenario).at(-1)).toMatchObject({ venue: "krx" });
   await expect(rows(page)).toHaveCount(2);
   const krxSub = feedSub(scenario)!;
   expect(krxSub).not.toBe(sub);

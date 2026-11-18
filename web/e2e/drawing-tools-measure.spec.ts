@@ -1,7 +1,7 @@
 import type { Page } from "@playwright/test";
 import { isMinutePeriod } from "../src/lib/symbol";
 import { isVenue } from "../src/lib/venue";
-import { cell, chartOf, expect, test, type Scenario } from "./harness";
+import { cell, chartOf, expect, test, type Scenario, pollSaved } from "./harness";
 import { chartPoint, drawings, mirror, open, pickTool, settledMirror, expandDock, drawingDock } from "./drawing-probe";
 
 async function dragBetween(page: Page, from: [number, number], to: [number, number]) {
@@ -33,19 +33,19 @@ test("측정 그룹 네 도구를 골라 놓고, 포지션 목표가 핸들을 �
 
   await pickTool(page, "측정", "가격 범위");
   await dragBetween(page, [0.55, 0.3], [0.62, 0.45]);
-  await expect.poll(async () => (await drawings(scenario)).length).toBe(1);
+  await pollSaved(async () => (await drawings(scenario)).length).toBe(1);
 
   await pickTool(page, "측정", "날짜 범위");
   await dragBetween(page, [0.66, 0.6], [0.74, 0.7]);
-  await expect.poll(async () => (await drawings(scenario)).length).toBe(2);
+  await pollSaved(async () => (await drawings(scenario)).length).toBe(2);
 
   await pickTool(page, "측정", "매도 포지션");
   await clickAt(page, [0.3, 0.5]);
-  await expect.poll(async () => (await drawings(scenario)).length).toBe(3);
+  await pollSaved(async () => (await drawings(scenario)).length).toBe(3);
 
   await pickTool(page, "측정", "매수 포지션");
   await clickAt(page, [0.45, 0.5]);
-  await expect.poll(async () => (await drawings(scenario)).length).toBe(4);
+  await pollSaved(async () => (await drawings(scenario)).length).toBe(4);
 
   expect((await savedOf(scenario, "pricerange")).points).toHaveLength(2);
   expect((await savedOf(scenario, "daterange")).points).toHaveLength(2);
@@ -67,7 +67,7 @@ test("측정 그룹 네 도구를 골라 놓고, 포지션 목표가 핸들을 �
   await page.mouse.down();
   await page.mouse.move(r.x + handle.x, r.y + handle.y - 40, { steps: 10 });
   await page.mouse.up();
-  await expect.poll(async () => (await savedOf(scenario, "long")).points[1]!.price).toBeGreaterThan(target!.price);
+  await pollSaved(async () => (await savedOf(scenario, "long")).points[1]!.price).toBeGreaterThan(target!.price);
   const dragged = await savedOf(scenario, "long");
   expect(dragged.points[0]).toEqual(entry);
   expect(dragged.points[2]).toEqual(stop);
@@ -92,7 +92,7 @@ test("포지션 세부 설정: 목표가와 손절가를 진입가 반대쪽에 
   await open(page);
   await pickTool(page, "측정", "매수 포지션");
   await clickAt(page, [0.45, 0.5]);
-  await expect.poll(async () => (await drawings(scenario)).length).toBe(1);
+  await pollSaved(async () => (await drawings(scenario)).length).toBe(1);
   const [entry, target, stop] = (await savedOf(scenario, "long")).points;
   await page.getByRole("button", { name: "드로잉 세부 설정" }).click();
   const dialog = page.getByRole("dialog", { name: "매수 포지션 세부 설정" });
@@ -100,12 +100,12 @@ test("포지션 세부 설정: 목표가와 손절가를 진입가 반대쪽에 
   await dialog.getByLabel("목표 가격").fill(String(entry!.price - 100));
   await dialog.getByLabel("손절 가격").fill(String(entry!.price + 100));
   await dialog.getByRole("button", { name: "확인", exact: true }).click();
-  await expect.poll(async () => (await savedOf(scenario, "long")).points).toEqual([entry, { ...target, price: entry!.price }, { ...stop, price: entry!.price }]);
+  await pollSaved(async () => (await savedOf(scenario, "long")).points).toEqual([entry, { ...target, price: entry!.price }, { ...stop, price: entry!.price }]);
   await page.getByRole("button", { name: "드로잉 세부 설정" }).click();
   await dialog.locator("summary").filter({ hasText: /^좌표$/ }).click();
   await dialog.getByLabel("목표 시각", { exact: true }).fill(await dialog.getByLabel("진입 시각", { exact: true }).inputValue());
   await dialog.getByRole("button", { name: "확인", exact: true }).click();
-  await expect.poll(async () => (await savedOf(scenario, "long")).points[1]!.t).not.toBe(target!.t);
+  await pollSaved(async () => (await savedOf(scenario, "long")).points[1]!.t).not.toBe(target!.t);
   expect((await savedOf(scenario, "long")).points[1]!.t).toBeGreaterThan(entry!.t);
 });
 
@@ -140,29 +140,29 @@ test("날짜·가격 범위, 기준봉 VWAP, 구간 거래량 프로파일을 �
 
   await pickTool(page, "측정", "날짜·가격 범위");
   await dragBetween(page, [0.2, 0.3], [0.32, 0.45]);
-  await expect.poll(async () => (await saved()).length).toBe(1);
+  await pollSaved(async () => (await saved()).length).toBe(1);
   expect((await one("datepricerange")).points).toHaveLength(2);
 
   await pickTool(page, "측정", "기준봉 VWAP");
   await clickAt(page, [0.4, 0.5]);
-  await expect.poll(async () => (await saved()).length).toBe(2);
+  await pollSaved(async () => (await saved()).length).toBe(2);
   const anchored = await one("avwap");
   expect(anchored.points).toHaveLength(1);
   const vwapMirror = (await mirror(page)).find((m) => m.id === anchored.id)!;
   expect(vwapMirror.selected).toBe(true);
   expect(vwapMirror.handles).toHaveLength(1);
   await dragHandle(page, vwapMirror.handles[0]!, { x: 60, y: -50 });
-  await expect.poll(async () => (await one("avwap")).points[0]!.t).toBeGreaterThan(anchored.points[0]!.t);
+  await pollSaved(async () => (await one("avwap")).points[0]!.t).toBeGreaterThan(anchored.points[0]!.t);
   expect((await one("avwap")).points[0]!.price).toBe(anchored.points[0]!.price);
   await page.getByRole("button", { name: "드로잉 세부 설정" }).click();
   const vwapSettings = page.getByRole("dialog", { name: "기준봉 VWAP 세부 설정" });
   await vwapSettings.getByLabel("가격 라벨", { exact: true }).uncheck();
   await vwapSettings.getByRole("button", { name: "확인", exact: true }).click();
-  await expect.poll(async () => (await one("avwap")).style).toMatchObject({ priceLabel: false });
+  await pollSaved(async () => (await one("avwap")).style).toMatchObject({ priceLabel: false });
 
   await pickTool(page, "측정", "구간 거래량 프로파일");
   await dragBetween(page, [0.55, 0.5], [0.85, 0.5]);
-  await expect.poll(async () => (await saved()).length).toBe(3);
+  await pollSaved(async () => (await saved()).length).toBe(3);
   const profile = await one("volprofile");
   expect(profile.points).toHaveLength(2);
   expect(profile.points[1]!.t).toBeGreaterThan(profile.points[0]!.t);
@@ -171,7 +171,7 @@ test("날짜·가격 범위, 기준봉 VWAP, 구간 거래량 프로파일을 �
   expect(profileMirror.selected).toBe(true);
   expect(profileMirror.handles).toHaveLength(2);
   await dragHandle(page, profileMirror.handles[1]!, { x: -50, y: 40 });
-  await expect.poll(async () => (await one("volprofile")).points[1]!.t).toBeLessThan(profile.points[1]!.t);
+  await pollSaved(async () => (await one("volprofile")).points[1]!.t).toBeLessThan(profile.points[1]!.t);
   const dragged = await one("volprofile");
   expect(dragged.points[0]).toEqual(profile.points[0]);
   expect(dragged.points[1]!.price).toBe(profile.points[1]!.price);
@@ -184,7 +184,7 @@ test("날짜·가격 범위, 기준봉 VWAP, 구간 거래량 프로파일을 �
   }
   await settings.getByLabel("POC 가격 라벨", { exact: true }).uncheck();
   await settings.getByRole("button", { name: "확인", exact: true }).click();
-  await expect.poll(async () => (await one("volprofile")).style).toMatchObject({ rows: 12, widthPercent: 25, valuePercent: 35, pocLabel: false });
+  await pollSaved(async () => (await one("volprofile")).style).toMatchObject({ rows: 12, widthPercent: 25, valuePercent: 35, pocLabel: false });
 
   await cell(page).focus();
   await page.keyboard.press("Escape");
@@ -253,7 +253,7 @@ async function placeProfile(page: Page, scenario: Scenario) {
   expect(fineRequests(scenario)).toEqual([]);
   await pickTool(page, "측정", "구간 거래량 프로파일");
   await dragBetween(page, [0.55, 0.5], [0.85, 0.5]);
-  await expect.poll(async () => scenario.documents.drawings(FINE_SYMBOL).length).toBe(1);
+  await pollSaved(async () => scenario.documents.drawings(FINE_SYMBOL).length).toBe(1);
   return scenario.documents.drawings(FINE_SYMBOL)[0]!;
 }
 
@@ -279,8 +279,8 @@ test("일봉 차트의 구간 거래량 프로파일은 분봉을 받아 계산�
   await page.waitForTimeout(500);
   expect(fineRequests(scenario)).toHaveLength(sent);
   await page.mouse.up();
-  await expect.poll(async () => scenario.documents.drawings(FINE_SYMBOL)[0]!.points[0]!.t).toBeLessThan(profile.points[0]!.t);
-  await expect.poll(() => fineRequests(scenario).length).toBeGreaterThan(sent);
+  await pollSaved(async () => scenario.documents.drawings(FINE_SYMBOL)[0]!.points[0]!.t).toBeLessThan(profile.points[0]!.t);
+  await pollSaved(() => fineRequests(scenario).length).toBeGreaterThan(sent);
   await expect.poll(() => textsOf(page, profile.id)).toEqual([expect.stringMatching(/^\d+분봉 기준$/)]);
   const pages = fineRequests(scenario).map((u) => `${u.searchParams.get("period")} ${u.searchParams.get("before")}`);
   expect(new Set(pages).size).toBe(pages.length);
@@ -289,7 +289,7 @@ test("일봉 차트의 구간 거래량 프로파일은 분봉을 받아 계산�
   const settings = page.getByRole("dialog", { name: "구간 거래량 프로파일 세부 설정" });
   await settings.getByLabel("계산 기준 라벨", { exact: true }).uncheck();
   await settings.getByRole("button", { name: "확인", exact: true }).click();
-  await expect.poll(async () => scenario.documents.drawings(FINE_SYMBOL)[0]!.style).toMatchObject({ basisLabel: false });
+  await pollSaved(async () => scenario.documents.drawings(FINE_SYMBOL)[0]!.style).toMatchObject({ basisLabel: false });
   await expect.poll(() => textsOf(page, profile.id)).toEqual([]);
   expect(errors).toEqual([]);
 });
@@ -299,7 +299,7 @@ test("분봉을 받지 못하면 구간 거래량 프로파일을 일봉으로 �
   page.on("pageerror", (e) => errors.push(e.message));
   scenario.reply(isFineBars, { status: 503, body: { error: { code: "kiwoom_unavailable", message: "조회가 응답하지 않습니다", reason: null, retryAt: null, manualActionRequired: false } } });
   const profile = await placeProfile(page, scenario);
-  await expect.poll(() => fineRequests(scenario).length).toBeGreaterThan(0);
+  await pollSaved(() => fineRequests(scenario).length).toBeGreaterThan(0);
   await expect.poll(() => textsOf(page, profile.id)).toEqual(["일봉 기준 · 분봉을 받지 못함"]);
   const shown = (await mirror(page)).find((m) => m.id === profile.id)!;
   expect(shown.handles).toHaveLength(2);

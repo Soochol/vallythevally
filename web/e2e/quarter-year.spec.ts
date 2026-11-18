@@ -5,7 +5,7 @@ import type { Drawing } from "../src/api/generated/Drawing";
 import type { Layout } from "../src/api/generated/Layout";
 import type { Period } from "../src/api/generated/Period";
 import { installFrameProbe } from "./frame-probe";
-import { type Scenario, cell, chartOf, DEFAULT_LAYOUT_ID, dragTowardPast, expect, test, firstChart, withFirstChart } from "./harness";
+import { type Scenario, cell, chartOf, DEFAULT_LAYOUT_ID, dragTowardPast, expect, test, firstChart, withFirstChart, pollSaved } from "./harness";
 
 test.use({ clockStart: "20261109100030" });
 
@@ -78,7 +78,7 @@ for (const phone of [false, true]) {
           const chart = chartOf(cell(page));
           await expect(chart).toHaveAttribute("data-last-bar-t", String(data.current!.t));
           await expect(chart).toHaveAttribute("data-last-close", String(data.current!.c));
-          await expect.poll(() => scenario.live.subscriptions().map(value => value.symbol)).toContain(symbol);
+          await pollSaved(() => scenario.live.subscriptions().map(value => value.symbol)).toContain(symbol);
           const price = index ? "6001.23" : "210123";
           await expect(async () => {
             expect(await scenario.live.update(index ? "IDX:001" : "005930", { c: Math.abs(Number(`+${price}`)), v: Math.abs(Number("1000")) })).toBeGreaterThan(0);
@@ -87,7 +87,7 @@ for (const phone of [false, true]) {
           await expect(chart).toHaveAttribute("data-last-bar-t", String(data.current!.t));
         }
         expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBe(0);
-        await expect.poll(async () => {
+        await pollSaved(async () => {
           const stored: Layout = scenario.documents.layout(DEFAULT_LAYOUT_ID);
           return firstChart(stored).period;
         }).toBe("Y");

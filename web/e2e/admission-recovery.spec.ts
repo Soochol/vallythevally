@@ -2,7 +2,7 @@ import { selectOption } from "./select-option";
 import type { Page } from "@playwright/test";
 import { parseJournalRecord, STAGING_PREFIX } from "../src/chart/drawings/journal";
 import { parseDrawingBody } from "../src/chart/drawings/outbox";
-import { test, expect, cell, chartOf, type Scenario } from "./harness";
+import { test, expect, cell, chartOf, type Scenario, pollSaved } from "./harness";
 import { expandDock } from "./drawing-probe";
 
 const mirror = (page: Page) => chartOf(cell(page)).locator(".drawing-mirror");
@@ -61,7 +61,7 @@ for (const edits of ["put", "delete", "put-put", "put-delete"] as const) {
     await cell(page).focus();
     await page.keyboard.press("H");
     await page.mouse.click(bounds.x + bounds.width * 0.75, bounds.y + bounds.height * 0.4);
-    await expect.poll(async () => (await drawings(scenario)).length).toBe(1);
+    await pollSaved(async () => (await drawings(scenario)).length).toBe(1);
     const [original] = await drawings(scenario);
     if (original === undefined) throw new Error("Expected the seeded drawing");
     await expect(page.getByText(/^자동 저장됨 /)).toBeVisible();
@@ -103,11 +103,11 @@ for (const edits of ["put", "delete", "put-put", "put-delete"] as const) {
       const recovered = await context.newPage();
       await open(recovered);
       if (deleted) {
-        await expect.poll(() => drawings(scenario)).toEqual([]);
+        await pollSaved(() => drawings(scenario)).toEqual([]);
         await expect(mirror(recovered)).toHaveAttribute("data-drawings", "[]");
       } else {
         const expectedWidth = edits === "put-put" ? 4 : 3;
-        await expect.poll(async () => (await drawings(scenario))[0]?.style).toMatchObject({ line: { width: expectedWidth } });
+        await pollSaved(async () => (await drawings(scenario))[0]?.style).toMatchObject({ line: { width: expectedWidth } });
         await selectLine(recovered);
         await expect(width(recovered)).toHaveAttribute("data-value", String(expectedWidth));
       }

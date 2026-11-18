@@ -4,7 +4,7 @@ import path from "node:path";
 import type { Locator } from "@playwright/test";
 import type { ScreenerResult } from "../src/api/generated/ScreenerResult";
 import { panel, rows, runButton, updateBand, waitForUpdateToFinish } from "./screener-page";
-import { barTimes, cell, chartOf, dragTowardPast, expect, SEARCH_BUTTON_TITLE, test } from "./harness";
+import { barTimes, cell, chartOf, dragTowardPast, expect, SEARCH_BUTTON_TITLE, test, pollSaved } from "./harness";
 
 test("초성으로 찾은 종목을 열고 과거로 끌면 과거 봉이 앞에 붙는다", async ({ page }) => {
   await page.goto("/");
@@ -255,12 +255,12 @@ test("화면에 보이는 결과만 묶어서 시세를 묻고 스크롤하면 �
   const dialog = page.getByRole("dialog", { name: "종목 검색" });
   await dialog.getByRole("combobox").fill("batch");
   await expect(dialog.getByRole("option")).toHaveCount(30);
-  await expect.poll(() => batches.length).toBe(1);
+  await pollSaved(() => batches.length).toBe(1);
   expect(batches[0]).toContain("990000");
   expect(batches[0]).not.toContain("990029");
   expect(batches[0]!.length).toBeLessThan(30);
   await dialog.getByRole("listbox").evaluate((node) => { node.scrollTop = node.scrollHeight; });
-  await expect.poll(() => batches.length).toBe(2);
+  await pollSaved(() => batches.length).toBe(2);
   expect(batches[1]).toContain("990029");
   expect(batches[1]).not.toContain("990000");
 });

@@ -1,7 +1,7 @@
 import { createServer } from "node:http";
 import type { BrowserContext } from "@playwright/test";
 import type { LayoutInput } from "../src/api/generated/LayoutInput";
-import { cell, DEFAULT_LAYOUT_ID, expect, test, firstChart } from "./harness";
+import { cell, DEFAULT_LAYOUT_ID, expect, test, firstChart, pollSaved } from "./harness";
 
 async function useLayoutEndpoint(context: BrowserContext, origin: string): Promise<void> {
   await context.addInitScript(origin => {
@@ -52,7 +52,7 @@ test("앞 저장이 끝나기 전에 탭을 닫아도 마지막 편집이 HTTP�
     await periods.getByRole("button", { name: "월", exact: true }).click();
     await context.unrouteAll({ behavior: "ignoreErrors" });
     await page.close();
-    await expect.poll(() => firstChart(stored).period).toBe("M");
+    await pollSaved(() => firstChart(stored).period).toBe("M");
     release();
     const fresh = await browser.newContext({ baseURL });
     try {

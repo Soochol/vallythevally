@@ -1,6 +1,6 @@
 import type { Page } from "@playwright/test";
 import type { LayoutWindow } from "../src/api/generated/LayoutWindow";
-import { type Scenario, cell, DEFAULT_LAYOUT_ID, expect, test, windowTabs } from "./harness";
+import { type Scenario, cell, DEFAULT_LAYOUT_ID, expect, test, windowTabs, pollSaved } from "./harness";
 
 const SETTINGS = { v: 1, style: "candle", scale: "normal", indicators: [], compare: [], panels: [] };
 const KINDS = [
@@ -60,14 +60,14 @@ for (const { kind, name } of KINDS) {
     if (kind === "brokers") await expect(body(page, kind)).toContainText("삼성전자");
     await expect(body(page, kind)).toHaveAttribute("data-symbol", "005930");
     await expect(dotOf(page, kind)).toHaveAccessibleName("연동 색: 끔");
-    await expect.poll(() => savedWindows(scenario).filter((w) => w.kind === kind)).toEqual([{ id: kind, link: null, kind }]);
+    await pollSaved(() => savedWindows(scenario).filter((w) => w.kind === kind)).toEqual([{ id: kind, link: null, kind }]);
 
     await dotOf(page, kind).click();
     await page.getByRole("menu", { name: "연동 색" }).getByRole("menuitemradio", { name: /^B/ }).click();
     await expect(dotOf(page, kind)).toHaveAccessibleName("연동 색: B");
     if (kind === "brokers") await expect(body(page, kind)).toContainText("SK하이닉스");
     await expect(body(page, kind)).toHaveAttribute("data-symbol", "000660");
-    await expect.poll(() => savedWindows(scenario).find((w) => w.kind === kind)?.link).toBe("b");
+    await pollSaved(() => savedWindows(scenario).find((w) => w.kind === kind)?.link).toBe("b");
 
     await addButton(page).click();
     await expect(kindItem(page, name)).toContainText("열려 있음");
@@ -91,7 +91,7 @@ test("새 종류 넷을 레이아웃에 저장하면 다시 열어도 그대로 
   await page.goto("/");
   await expect(cell(page)).toHaveAttribute("aria-busy", "false");
   for (const { name } of KINDS) await addWindow(page, name);
-  await expect.poll(() => savedWindows(scenario).map((w) => w.kind).sort()).toEqual(["brokers", "book", "chart", "chart", "objects", "program", "screener", "trades", "watchlist"].sort());
+  await pollSaved(() => savedWindows(scenario).map((w) => w.kind).sort()).toEqual(["brokers", "book", "chart", "chart", "objects", "program", "screener", "trades", "watchlist"].sort());
   await page.reload();
   for (const { kind } of KINDS) await expect(tabOf(page, kind)).toHaveCount(1);
 });

@@ -1,5 +1,5 @@
 import type { Page } from "@playwright/test";
-import { cell, chartOf, expect, saveChartShare, SEARCH_BUTTON_TITLE, test, type Scenario } from "./harness";
+import { cell, chartOf, expect, saveChartShare, SEARCH_BUTTON_TITLE, test, type Scenario, pollSaved } from "./harness";
 import { bodyAlong, chartPoint, drawings, expandDock, mirror, open, pickTool } from "./drawing-probe";
 import { TOOLS, toolsByGroup } from "../src/chart/drawings/tools";
 import type { Tool } from "../src/chart/drawings/toolSpec";
@@ -91,7 +91,7 @@ async function placeSlice(page: Page, scenario: Scenario, slice: Slice) {
       await editor.press("Enter");
       await expect(editor).toBeHidden();
     }
-    await expect.poll(async () => (await drawings(scenario)).length, { message: tool.label }).toBe(count + 1);
+    await pollSaved(async () => (await drawings(scenario)).length, { message: tool.label }).toBe(count + 1);
     const saved = (await drawings(scenario)).at(-1)!;
     expect(saved.tool, tool.label).toBe(tool.tool);
     checkPoints(saved.points.length);
@@ -357,14 +357,14 @@ test("작은 막대: 위쪽 드로잉을 골라도 도크를 가리지 않는다
 test("작은 막대: 이 봉 주기에 그려지지 않는 드로잉을 골라도 막대와 세부 설정이 보인다", async ({ page, scenario }) => {
   await open(page);
   await pickTool(page, "선", "추세선"); await clickAt(page, [[0.3, 0.5], [0.4, 0.4]]);
-  await expect.poll(async () => (await drawings(scenario)).length).toBe(1);
+  await pollSaved(async () => (await drawings(scenario)).length).toBe(1);
   await page.getByRole("button", { name: "드로잉 세부 설정", exact: true }).click();
   const dialog = page.getByRole("dialog", { name: "추세선 세부 설정" });
   await dialog.locator("summary").filter({ hasText: /^보이기$/ }).click();
   await dialog.getByRole("checkbox", { name: "모든 봉 주기", exact: true }).uncheck();
   await dialog.getByRole("checkbox", { name: "일", exact: true }).uncheck();
   await dialog.getByRole("button", { name: "확인", exact: true }).click();
-  await expect.poll(async () => (await drawings(scenario))[0]!.periods?.includes("D")).toBe(false);
+  await pollSaved(async () => (await drawings(scenario))[0]!.periods?.includes("D")).toBe(false);
   await page.keyboard.press("Escape");
   await expect.poll(async () => (await mirror(page)).length).toBe(0);
   await expandDock(page); await page.getByRole("button", { name: "개체 목록 열기", exact: true }).click();
@@ -385,7 +385,7 @@ test("여러 도구: 다른 그룹의 드로잉 셋을 상자로 골라 함께 �
   await page.getByRole("textbox", { name: "드로잉 글자" }).press("Enter");
   await pickTool(page, "도형", "타원"); await clickAt(page, [[0.42, 0.4], [0.5, 0.3]]);
   await pickTool(page, "선", "추세선"); await clickAt(page, [[0.3, 0.4], [0.38, 0.32]]);
-  await expect.poll(count).toBe(3);
+  await pollSaved(count).toBe(3);
   await page.keyboard.press("Escape");
 
   const style = page.getByRole("toolbar", { name: "드로잉 스타일" });
@@ -409,23 +409,23 @@ test("여러 도구: 다른 그룹의 드로잉 셋을 상자로 골라 함께 �
   const grab = { x: r.x + a!.x, y: r.y + (a!.y + b!.y) / 2 };
   await page.mouse.move(grab.x, grab.y); await page.mouse.down();
   await page.mouse.move(grab.x + 40, grab.y + 60, { steps: 10 }); await page.mouse.up();
-  await expect.poll(async () => (await drawings(scenario)).every((d) => d.points[0]!.price !== before.find((x) => x.id === d.id)!.points[0]!.price)).toBe(true);
+  await pollSaved(async () => (await drawings(scenario)).every((d) => d.points[0]!.price !== before.find((x) => x.id === d.id)!.points[0]!.price)).toBe(true);
 
   await style.getByRole("button", { name: "드로잉 복제", exact: true }).click();
-  await expect.poll(count).toBe(6);
+  await pollSaved(count).toBe(6);
   await cell(page).focus(); await page.keyboard.press("Control+z");
-  await expect.poll(count).toBe(3);
+  await pollSaved(count).toBe(3);
 
   await boxSelect([0.2, 0.1], [0.72, 0.62]);
   await cell(page).focus(); await page.keyboard.press("Delete");
-  await expect.poll(count).toBe(0);
+  await pollSaved(count).toBe(0);
   await page.keyboard.press("Control+z");
-  await expect.poll(async () => (await drawings(scenario)).map((d) => d.tool).sort()).toEqual(["callout", "ellipse", "trendline"]);
+  await pollSaved(async () => (await drawings(scenario)).map((d) => d.tool).sort()).toEqual(["callout", "ellipse", "trendline"]);
   await page.keyboard.press("Control+z");
-  await expect.poll(async () => (await drawings(scenario)).map((d) => d.points)).toEqual(before.map((d) => d.points));
+  await pollSaved(async () => (await drawings(scenario)).map((d) => d.points)).toEqual(before.map((d) => d.points));
 
   await pickTool(page, "측정", "날짜 범위"); await clickAt(page, [[0.74, 0.7], [0.8, 0.7]]);
-  await expect.poll(count).toBe(4);
+  await pollSaved(count).toBe(4);
   await expandDock(page); await page.getByRole("button", { name: "개체 목록 열기", exact: true }).click();
   const list = page.getByRole("region", { name: "개체 목록" });
   await list.getByRole("button", { name: "고르기: 말풍선", exact: true }).click();
@@ -502,14 +502,14 @@ test.describe("봉을 읽는 도구", () => {
 
     await page.goto(`/?symbol=${SYMBOL}`);
     await expect(chartOf(cell(page))).toHaveAttribute("data-bar-count", /^[1-9]\d*$/);
-    await expect.poll(async () => scenario.live.subscriptions().map((s) => s.symbol)).toContain(SYMBOL);
+    await pollSaved(async () => scenario.live.subscriptions().map((s) => s.symbol)).toContain(SYMBOL);
 
     await pickTool(page, "선", "회귀 채널"); await clickAt(page, [[0.25, 0.5], [0.4, 0.5]]);
-    await expect.poll(count).toBe(1);
+    await pollSaved(count).toBe(1);
     await pickTool(page, "측정", "기준봉 VWAP"); await clickAt(page, [[0.48, 0.5]]);
-    await expect.poll(count).toBe(2);
+    await pollSaved(count).toBe(2);
     await pickTool(page, "측정", "구간 거래량 프로파일"); await clickAt(page, [[0.56, 0.5], [0.7, 0.5]]);
-    await expect.poll(count).toBe(3);
+    await pollSaved(count).toBe(3);
     await page.keyboard.press("Escape");
     await expect.poll(selected).toEqual([]);
 
@@ -527,7 +527,7 @@ test.describe("봉을 읽는 도구", () => {
     const grab = await bodyPoint(page, avwapId);
     await page.mouse.move(grab.x, grab.y); await page.mouse.down();
     await page.mouse.move(grab.x + 60, grab.y, { steps: 10 }); await page.mouse.up();
-    await expect.poll(async () => (await saved()).every((d) => d.points[0]!.t !== before.find((x) => x.id === d.id)!.points[0]!.t)).toBe(true);
+    await pollSaved(async () => (await saved()).every((d) => d.points[0]!.t !== before.find((x) => x.id === d.id)!.points[0]!.t)).toBe(true);
     const moved = await saved();
     const shifts = moved.flatMap((d) => d.points.map((p, i) => barOf(p.t) - barOf(before.find((x) => x.id === d.id)!.points[i]!.t)));
     expect(shifts[0]).toBeGreaterThan(0);
@@ -536,18 +536,18 @@ test.describe("봉을 읽는 도구", () => {
 
     const style = page.getByRole("toolbar", { name: "드로잉 스타일" });
     await style.getByRole("button", { name: "드로잉 복제", exact: true }).click();
-    await expect.poll(count).toBe(6);
-    await expect.poll(async () => (await saved()).map((d) => d.tool).sort()).toEqual([...BAR_TOOLS, ...BAR_TOOLS].sort());
+    await pollSaved(count).toBe(6);
+    await pollSaved(async () => (await saved()).map((d) => d.tool).sort()).toEqual([...BAR_TOOLS, ...BAR_TOOLS].sort());
     await cell(page).focus(); await page.keyboard.press("Control+z");
-    await expect.poll(count).toBe(3);
+    await pollSaved(count).toBe(3);
 
     await page.keyboard.press("Escape");
     await boxSelect();
     await cell(page).focus(); await page.keyboard.press("Delete");
-    await expect.poll(count).toBe(0);
+    await pollSaved(count).toBe(0);
     await expect.poll(async () => (await mirror(page)).length).toBe(0);
     await page.keyboard.press("Control+z");
-    await expect.poll(async () => (await saved()).map((d) => [d.id, d.points]).sort()).toEqual(moved.map((d) => [d.id, d.points]).sort());
+    await pollSaved(async () => (await saved()).map((d) => [d.id, d.points]).sort()).toEqual(moved.map((d) => [d.id, d.points]).sort());
     await expect.poll(shownTools).toEqual(BAR_TOOLS);
 
     await choosePeriod(page, "주");

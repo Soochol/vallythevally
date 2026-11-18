@@ -5,7 +5,7 @@ import { toChartTime } from "../src/chart/time";
 import { TOOLS } from "../src/chart/drawings/tools";
 import { installChartProbe } from "./chart-probe";
 import { expandDock } from "./drawing-probe";
-import { cell, chartOf, expect, type Scenario, test, pickDesktopVenue, expectDesktopVenue } from "./harness";
+import { cell, chartOf, expect, type Scenario, test, pickDesktopVenue, expectDesktopVenue, pollSaved } from "./harness";
 
 test.use({ clockStart: "20261109100000", actionTimeout: 10_000 });
 
@@ -196,11 +196,11 @@ for (const pinned of [false, true]) test(`minimum canvas toolbar retains help, m
   expect(storedDocuments(scenario)).toBe(documents);
   await pickDesktopVenue(page, "KRX");
   await expect(cell(page)).toHaveAttribute("aria-label", "칸 1: 삼성전자 KRX 일");
-  await expect.poll(() => scenario.documents.layout().windows.find((window) => window.kind === "chart")?.venue).toBe("combined");
-  await expect.poll(() => scenario.documents.uiState().venue).toBe("krx");
+  await pollSaved(() => scenario.documents.layout().windows.find((window) => window.kind === "chart")?.venue).toBe("combined");
+  await pollSaved(() => scenario.documents.uiState().venue).toBe("krx");
   await pickDesktopVenue(page, "통합");
   await expect(cell(page)).toHaveAttribute("aria-label", "칸 1: 삼성전자 통합 일");
-  await expect.poll(() => scenario.documents.uiState().venue).toBe("combined");
+  await pollSaved(() => scenario.documents.uiState().venue).toBe("combined");
   await settle(page, 1);
   await expandDock(page);
   const afterVenue = storedPresentation(scenario);
@@ -224,7 +224,7 @@ for (const pinned of [false, true]) test(`minimum canvas toolbar retains help, m
   await page.mouse.move(from.x, from.y + 60, { steps: 8 });
   await page.mouse.up();
   await settle(page, 1);
-  await expect.poll(() => scenario.documents.uiPrefs().drawing.dockAt).not.toBeNull();
+  await pollSaved(() => scenario.documents.uiPrefs().drawing.dockAt).not.toBeNull();
   const moved = await dock.boundingBox();
   const prefs = scenario.documents.uiPrefs().drawing;
   await page.reload();
@@ -476,14 +476,14 @@ for (const medium of [false, true]) test(medium ? "medium height toolbar drag, c
   await page.keyboard.press("Home");
   await settle(page, count);
   expect(await dock.boundingBox()).toEqual(box);
-  await expect.poll(() => scenario.documents.uiPrefs().drawing.dockAt).toBeNull();
+  await pollSaved(() => scenario.documents.uiPrefs().drawing.dockAt).toBeNull();
   await page.mouse.move(from.x, from.y);
   await page.mouse.down();
   await page.mouse.move(from.x - 100, from.y + 20, { steps: 8 });
   await page.mouse.up();
   await settle(page, count);
   const persisted = await dock.boundingBox();
-  await expect.poll(() => scenario.documents.uiPrefs().drawing.dockAt).not.toBeNull();
+  await pollSaved(() => scenario.documents.uiPrefs().drawing.dockAt).not.toBeNull();
   const prefs = scenario.documents.uiPrefs().drawing;
   expect(prefs.dockAt).not.toBeNull();
   await page.reload();
@@ -499,7 +499,7 @@ for (const medium of [false, true]) test(medium ? "medium height toolbar drag, c
   await page.mouse.up();
   await settle(page, count);
   expect(await dock.boundingBox()).toEqual(box);
-  await expect.poll(() => scenario.documents.uiPrefs().drawing.dockAt).toBeNull();
+  await pollSaved(() => scenario.documents.uiPrefs().drawing.dockAt).toBeNull();
 });
 
 test("native pinned boundary keeps stable frames and real help", async ({ page, scenario }, testInfo) => {

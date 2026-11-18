@@ -1,5 +1,5 @@
 import type { Page } from "@playwright/test";
-import { cell, chartOf, expect, test } from "./harness";
+import { cell, chartOf, expect, test, pollSaved } from "./harness";
 import { bodyAlong, chartPoint, drawings, expandDock, mirror, open, pickTool, settledMirror } from "./drawing-probe";
 
 type Point = { x: number; y: number };
@@ -39,9 +39,9 @@ test("지우개: 클릭·끌기·Ctrl+끌기로 지우고, 잠긴 드로잉은 �
   const ids = async () => (await drawings(scenario)).map((d) => d.id).sort();
 
   await trendline(page, [0.15, 0.35], [0.3, 0.25]);
-  await expect.poll(async () => (await drawings(scenario)).length).toBe(1);
+  await pollSaved(async () => (await drawings(scenario)).length).toBe(1);
   await trendline(page, [0.45, 0.35], [0.6, 0.25]);
-  await expect.poll(async () => (await drawings(scenario)).length).toBe(2);
+  await pollSaved(async () => (await drawings(scenario)).length).toBe(2);
   const [first, second] = (await drawings(scenario)).map((d) => d.id);
   if (!first || !second) throw new Error("추세선 둘이 저장되지 않았습니다");
   const both = await ids();
@@ -52,41 +52,41 @@ test("지우개: 클릭·끌기·Ctrl+끌기로 지우고, 잠긴 드로잉은 �
   await expect(page.getByRole("button", { name: "선택 도구", exact: true })).toHaveAttribute("aria-pressed", "false");
   const firstMiddle = await middleOf(page, first);
   await page.mouse.click(firstMiddle.x, firstMiddle.y);
-  await expect.poll(ids).toEqual([second]);
+  await pollSaved(ids).toEqual([second]);
   await expandDock(page);
   await expect(eraserButton(page)).toHaveAttribute("aria-pressed", "false");
   await page.keyboard.press("Control+z");
-  await expect.poll(ids).toEqual(both);
+  await pollSaved(ids).toEqual(both);
 
   await pickEraser(page);
   await drag(page, await middleOf(page, first), await middleOf(page, second), 30);
-  await expect.poll(ids).toEqual([]);
+  await pollSaved(ids).toEqual([]);
   await page.keyboard.press("Control+z");
-  await expect.poll(ids).toEqual(both);
+  await pollSaved(ids).toEqual(both);
 
   const box = (await chartOf(cell(page)).boundingBox())!;
   const target = await middleOf(page, first);
   await page.mouse.click(target.x, target.y);
   await page.getByRole("toolbar", { name: "드로잉 스타일" }).getByRole("button", { name: "잠금", exact: true }).click();
-  await expect.poll(async () => (await drawings(scenario)).find((d) => d.id === first)?.locked).toBe(true);
+  await pollSaved(async () => (await drawings(scenario)).find((d) => d.id === first)?.locked).toBe(true);
   await pickEraser(page);
   await page.mouse.click(target.x, target.y);
   await pickEraser(page);
   await drag(page, await middleOf(page, first), await middleOf(page, second), 30);
-  await expect.poll(ids).toEqual([first]);
+  await pollSaved(ids).toEqual([first]);
   await expandDock(page);
   await expect(eraserButton(page)).toHaveAttribute("aria-pressed", "false");
 
   await pickTool(page, "도형", "붓");
   await drag(page, await chartPoint(page, 0.2, 0.7), await chartPoint(page, 0.6, 0.7), 60);
-  await expect.poll(async () => (await drawings(scenario)).filter((d) => d.tool === "brush").length).toBe(1);
+  await pollSaved(async () => (await drawings(scenario)).filter((d) => d.tool === "brush").length).toBe(1);
   const [stroke] = (await drawings(scenario)).filter((d) => d.tool === "brush");
   if (!stroke) throw new Error("붓 획이 저장되지 않았습니다");
   await pickEraser(page);
   await page.keyboard.down("Control");
   await drag(page, await chartPoint(page, 0.4, 0.6), await chartPoint(page, 0.4, 0.8));
   await page.keyboard.up("Control");
-  await expect.poll(async () => (await drawings(scenario)).filter((d) => d.tool === "brush").length).toBe(2);
+  await pollSaved(async () => (await drawings(scenario)).filter((d) => d.tool === "brush").length).toBe(2);
   const pieces = (await drawings(scenario)).filter((d) => d.tool === "brush");
   expect(pieces.map((d) => d.id)).toContain(stroke.id);
   expect(pieces.reduce((n, d) => n + d.points.length, 0)).toBeLessThan(stroke.points.length);
@@ -98,7 +98,7 @@ test("지우개: 클릭·끌기·Ctrl+끌기로 지우고, 잠긴 드로잉은 �
   await drag(page, { x: box.x + box.width * 0.65, y: box.y + box.height * 0.5 }, { x: box.x + box.width * 0.85, y: box.y + box.height * 0.55 });
   await page.keyboard.up("Alt");
   expect((await mirror(page)).map((d) => d.points)).toEqual(before.map((d) => d.points));
-  await expect.poll(async () => drawings(scenario)).toEqual(saved);
+  await pollSaved(async () => drawings(scenario)).toEqual(saved);
 
   await expandDock(page);
   await page.getByRole("button", { name: "드로잉 단축키 도움말", exact: true }).click();
@@ -134,13 +134,13 @@ for (const [group, label, clicks] of ERASE_CASES) {
       const p = await chartPoint(page, ...spot);
       await page.mouse.click(p.x, p.y);
     }
-    await expect.poll(async () => (await drawings(scenario)).length, { message: label }).toBe(1);
+    await pollSaved(async () => (await drawings(scenario)).length, { message: label }).toBe(1);
     await page.keyboard.press("Escape");
     const [placed] = await drawings(scenario);
     const target = await bodyOf(page, placed!.id);
     await pickEraser(page);
     await page.mouse.click(target.x, target.y);
-    await expect.poll(async () => (await drawings(scenario)).length, { message: `지우개로 ${label}` }).toBe(0);
+    await pollSaved(async () => (await drawings(scenario)).length, { message: `지우개로 ${label}` }).toBe(0);
     await expect.poll(async () => (await mirror(page)).length).toBe(0);
     expect(errors).toEqual([]);
   });

@@ -4,7 +4,7 @@ import type { ChartSettings } from "../src/chart/settings";
 import type { Layout } from "../src/api/generated/Layout";
 import { installChartProbe } from "./chart-probe";
 import { installFrameProbe } from "./frame-probe";
-import { cell, chartOf, DEFAULT_LAYOUT_ID, expect, test, withFirstChart } from "./harness";
+import { cell, chartOf, DEFAULT_LAYOUT_ID, expect, test, withFirstChart, pollSaved } from "./harness";
 
 declare global {
   interface Window {
@@ -39,7 +39,7 @@ test("같은 가격의 체결·worker 프레임은 거래량 축만 무효화하
   await page.addInitScript(installFrameProbe);
   await page.goto("/");
   await expect(cell(page)).toHaveAttribute("aria-busy", "false");
-  await expect.poll(async () => scenario.live.subscriptions().map(value => value.symbol)).toContain("005930");
+  await pollSaved(async () => scenario.live.subscriptions().map(value => value.symbol)).toContain("005930");
   await expect.poll(() => page.evaluate(() => window.frameProbe.snapshot().filter((series) => series.data.length > 0).length >= 5)).toBe(true);
   const volume = () => page.evaluate(() => {
     const last = window.frameProbe.snapshot().find((series) => series.type === "Histogram")?.data.at(-1);

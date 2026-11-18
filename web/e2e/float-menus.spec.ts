@@ -1,5 +1,5 @@
 import type { Page } from "@playwright/test";
-import { cell, expect, test, firstChart, withFirstChart } from "./harness";
+import { cell, expect, test, firstChart, withFirstChart, pollSaved } from "./harness";
 
 test.use({ clockStart: "20261109100030", viewport: { width: 1440, height: 900 } });
 
@@ -85,7 +85,7 @@ test("분봉 버튼은 마지막 분봉으로 바로 바꾸고, 분봉일 때 �
   await page.keyboard.press("KeyD");
   await expect(cell(page)).toHaveAttribute("aria-label", / 일$/);
   await expect(minutes).toHaveText("60분");
-  await expect.poll(async () => scenario.documents.uiState().lastMinute).toBe("60m");
+  await pollSaved(async () => scenario.documents.uiState().lastMinute).toBe("60m");
   await page.reload();
   await expect(minutes).toHaveText("60분");
   await minutes.click();
@@ -102,11 +102,11 @@ test("옛 저장값의 고정 분봉은 꺼내지 않고 버리며, 열 때 활�
   const minutes = toolbar(page).getByRole("button", { name: "분봉", exact: true });
   await expect(toolbar(page).getByRole("group", { name: "봉 주기" }).getByRole("button")).toHaveText(["10분", "일", "주", "월", "분기", "연"]);
   await expect(minutes).toHaveAttribute("aria-pressed", "true");
-  await expect.poll(async () => scenario.documents.uiState().lastMinute).toBe("10m");
+  await pollSaved(async () => scenario.documents.uiState().lastMinute).toBe("10m");
   expect(scenario.documents.uiState()).not.toHaveProperty("pinnedMinutes");
   await toolbar(page).getByRole("button", { name: "일", exact: true }).click();
   await expect(cell(page)).toHaveAttribute("aria-label", / 일$/);
-  await expect.poll(async () => firstChart(scenario.documents.layout()).period).toBe("D");
+  await pollSaved(async () => firstChart(scenario.documents.layout()).period).toBe("D");
   await page.reload();
   await expect(minutes).toHaveText("10분");
   await expect(minutes).toHaveAttribute("aria-pressed", "false");

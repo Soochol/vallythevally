@@ -1,5 +1,5 @@
 import { selectOption } from "./select-option";
-import { test, expect, cell, chartOf, type Scenario } from './harness';
+import { test, expect, cell, chartOf, type Scenario, pollSaved } from './harness';
 import type { Page } from '@playwright/test';
 import type { Drawing } from '../src/api/generated/Drawing';
 import { expandDock } from "./drawing-probe";
@@ -20,7 +20,7 @@ async function draw(page: Page) {
 
 test('first slow GET must retain preexisting drawings after creation', async ({page,scenario}, info) => {
   await open(page); await draw(page);
-  await expect.poll(async () => (await drawings(scenario)).length).toBe(1);
+  await pollSaved(async () => (await drawings(scenario)).length).toBe(1);
   const existing=(await drawings(scenario))[0]!;
   let release!:()=>void; const gate=new Promise<void>(resolve=>release=resolve);
   let started=false;
@@ -32,9 +32,9 @@ test('first slow GET must retain preexisting drawings after creation', async ({p
   });
   await page.reload();
   await expect(chartOf(cell(page))).toHaveAttribute('data-bar-count',/^[1-9]\d*$/);
-  await expect.poll(()=>started).toBe(true);
+  await pollSaved(()=>started).toBe(true);
   await draw(page);
-  await expect.poll(async ()=>(await drawings(scenario)).length).toBe(2);
+  await pollSaved(async ()=>(await drawings(scenario)).length).toBe(2);
   release();
   await expect.poll(async ()=>(await mirror(page)).length).toBe(2);
   console.log('SLOW_GET',JSON.stringify({existing:existing.id,server:(await drawings(scenario)).map(d=>d.id),visible:await mirror(page)}));
@@ -44,7 +44,7 @@ test('first slow GET must retain preexisting drawings after creation', async ({p
 
 test('server accepted extreme timestamp must not blank settings', async ({page,scenario}, info)=>{
   await open(page); await draw(page);
-  await expect.poll(async ()=>(await drawings(scenario)).length).toBe(1);
+  await pollSaved(async ()=>(await drawings(scenario)).length).toBe(1);
   const d=(await drawings(scenario))[0]!;
   const body={...d,points:[{...d.points[0]!,t:9007199254740991}],revision:d.revision+100};
   scenario.documents.saveDrawing(body);
@@ -63,7 +63,7 @@ test('server accepted extreme timestamp must not blank settings', async ({page,s
   await expect(page.getByRole('dialog')).toBeVisible();
   await page.getByRole('spinbutton',{name:'가격',exact:true}).fill('5500');
   await page.getByRole('button',{name:'확인',exact:true}).click();
-  await expect.poll(async ()=>(await drawings(scenario))[0]?.points[0]?.price).toBe(5500);
+  await pollSaved(async ()=>(await drawings(scenario))[0]?.points[0]?.price).toBe(5500);
   expect((await drawings(scenario))[0]?.points[0]?.t).toBe(9007199254740991);
   expect(errors).toEqual([]);
 });
@@ -84,7 +84,7 @@ test('late PUT response must not allow undo to delete newer other-tab work', asy
   await other.getByRole('button',{name:'개체 목록 열기'}).click();
   await other.getByRole('button',{name:'고르기: 수평선'}).click();
   await selectOption(other.getByRole('toolbar',{name:'드로잉 스타일'}).getByLabel('선 굵기'), '4');
-  await expect.poll(async ()=>(await drawings(scenario))[0]?.style).toMatchObject({line:{width:4}});
+  await pollSaved(async ()=>(await drawings(scenario))[0]?.style).toMatchObject({line:{width:4}});
   const remote=(await drawings(scenario))[0]!;
   await page.bringToFront();
   const loaded=page.waitForResponse(r=>r.url().includes('/api/drawings?')&&r.request().method()==='GET');
@@ -103,7 +103,7 @@ test('late PUT response must not allow undo to delete newer other-tab work', asy
 
 test('visible extreme timestamp has a safe numeric editor and preserves unrelated edits', async ({page,scenario}) => {
   await open(page); await draw(page);
-  await expect.poll(async ()=>(await drawings(scenario)).length).toBe(1);
+  await pollSaved(async ()=>(await drawings(scenario)).length).toBe(1);
   const d=(await drawings(scenario))[0]!;
   const point=d.points[0]!;
   scenario.documents.saveDrawing({...d,tool:'trendline',points:[{...point,t:Number.MAX_SAFE_INTEGER},{...point,t:point.t+86400}],revision:d.revision+100});
@@ -120,6 +120,6 @@ test('visible extreme timestamp has a safe numeric editor and preserves unrelate
   await expect(seconds).toHaveValue(String(Number.MAX_SAFE_INTEGER));
   await page.getByRole('spinbutton',{name:'시작 가격'}).fill('5600');
   await page.getByRole('button',{name:'확인',exact:true}).click();
-  await expect.poll(async ()=>(await drawings(scenario))[0]?.points[0]?.price).toBe(5600);
+  await pollSaved(async ()=>(await drawings(scenario))[0]?.points[0]?.price).toBe(5600);
   expect((await drawings(scenario))[0]?.points[0]?.t).toBe(Number.MAX_SAFE_INTEGER);
 });

@@ -1,5 +1,5 @@
 import { fillNumber, renameScreen, expandEditor, savedEditor, addCondition, toggleExclude } from "./sentence-editor";
-import { expect, test } from "./screener-harness";
+import { expect, test, pollSaved } from "./screener-harness";
 
 test.use({ clockStart: "20261109100030" });
 
@@ -16,7 +16,7 @@ test("스크리너 창에서 실제 조건식 편집창을 열어 조건·시장
   await page.screenshot({ path: info.outputPath("screener-editor.png"), fullPage: true });
   await dialog.getByRole("button", { name: "저장", exact: true }).click();
   await savedEditor(dialog);
-  await expect.poll(async () => scenario.documents.screens().screens[0]).toMatchObject({ name: "라임 UI 조건식", markets: ["kospi"], exclude: ["etf"], conditions: [{ kind: "new_high", n: 60 }] });
+  await pollSaved(async () => scenario.documents.screens().screens[0]).toMatchObject({ name: "라임 UI 조건식", markets: ["kospi"], exclude: ["etf"], conditions: [{ kind: "new_high", n: 60 }] });
   await expandEditor(page);
   const editing = page.getByRole("region", { name: "조건식 편집", exact: true });
   await expect(editing.getByRole("button", { name: "조건 1 신고가 기간", exact: true })).toHaveText("60");

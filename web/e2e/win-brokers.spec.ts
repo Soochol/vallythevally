@@ -1,7 +1,7 @@
 import type { Page } from "@playwright/test";
 import type { FeedBrokers } from "../src/api/generated/FeedBrokers";
 import type { LayoutWindow } from "../src/api/generated/LayoutWindow";
-import { type Scenario, cell, DEFAULT_LAYOUT_ID, expect, pickDesktopVenue, test, windowTabs } from "./harness";
+import { type Scenario, cell, DEFAULT_LAYOUT_ID, expect, pickDesktopVenue, test, windowTabs, pollSaved } from "./harness";
 
 const SETTINGS = { v: 1, style: "candle", scale: "normal", indicators: [], compare: [], panels: [] };
 const at = (clock: string) => Date.parse(`2026-11-09T${clock}+09:00`) / 1000;
@@ -27,7 +27,7 @@ async function openBrokers(page: Page, scenario: Scenario) {
   await page.getByRole("toolbar", { name: "차트 도구 막대" }).getByRole("button", { name: "창 더하기" }).click();
   await page.getByRole("menu", { name: "창 더하기" }).getByRole("menuitem", { name: /^거래원 입체분석/ }).click();
   await expect(windowTabs(page).getByRole("tab", { name: /^거래원 입체분석/ })).toHaveCount(1);
-  await expect.poll(() => scenario.live.messages.some((m) => m.type === "subscribe_feed" && m.kind === "brokers")).toBe(true);
+  await pollSaved(() => scenario.live.messages.some((m) => m.type === "subscribe_feed" && m.kind === "brokers")).toBe(true);
 }
 
 function send(scenario: Scenario, brokers: FeedBrokers) {
