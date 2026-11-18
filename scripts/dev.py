@@ -256,11 +256,14 @@ def compile_command(root, command, environment):
     evidence.command(["flock", str(lock), *command], root, environment)
 
 
+DEFAULT_TEST_THREADS = "8"
+
+
 def run_cargo(root, command, environment):
     if command[1] == "test" and "--no-run" not in command:
         at = command.index("--") if "--" in command else len(command)
         compile_command(root, [*command[:at], "--no-run", *command[at:]], environment)
-        evidence.command(command, root, environment)
+        evidence.command(command, root, {"RUST_TEST_THREADS": DEFAULT_TEST_THREADS, **environment})
     else:
         compile_command(root, command, environment)
 
