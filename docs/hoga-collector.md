@@ -538,22 +538,23 @@ data/hoga/calendar/
 
 `ReqwestHolidayTransport`의 응답 해석(`response.body.items.item`, `locdate`, `isHoliday`, `dateName`, `totalCount`)은 공공데이터포털 관례를 가정한 것이고 실제 응답으로 확인한 적이 없다. 처음 켜기 전에 사람이 한 번 직접 불러 아래를 비교한다. 자동 시험과 자동 작업은 이 호출을 하지 않는다.
 
-1. **키를 파일에 둔다.** 화면에 찍히거나 셸 기록에 남지 않게 입력 없이 읽는다. 권한은 600이고 저장소 밖에 둔다.
+1. **키를 파일에 둔다.** 공공데이터포털이 주는 키 가운데 **Decoding 키**를 넣는다. Encoding 키는 다시 인코딩돼 `SERVICE_KEY_IS_NOT_REGISTERED_ERROR`(403)가 난다. 화면에 찍히거나 셸 기록에 남지 않게 입력 없이 읽는다. 폴더 권한은 700, 파일 권한은 600이고 저장소 밖에 둔다.
 
    ```sh
-   install -m 600 /dev/null ~/.config/holiday-service-key
-   read -rs HOLIDAY_KEY && printf '%s' "$HOLIDAY_KEY" > ~/.config/holiday-service-key; unset HOLIDAY_KEY
+   install -d -m 700 ~/.config/vally
+   install -m 600 /dev/null ~/.config/vally/holiday-service-key
+   read -rs HOLIDAY_KEY && printf '%s' "$HOLIDAY_KEY" > ~/.config/vally/holiday-service-key; unset HOLIDAY_KEY
    ```
 2. **한 해를 한 번 부른다.** 키는 `curl`이 파일에서 읽어 인코딩하므로 명령줄에도 남지 않는다. 응답은 `-o`로 파일에만 쓰고 화면에 찍지 않는다. 오류 출력에 URL이 나올 수 있으니 `-sS` 대신 `-s`를 쓰고 상태 코드만 본다.
 
    ```sh
    curl -s -G -o holidays-2026.json -w '%{http_code}\n' \
      --data-urlencode 'solYear=2026' --data-urlencode '_type=json' --data-urlencode 'numOfRows=100' \
-     --data-urlencode 'ServiceKey@'"$HOME"/.config/holiday-service-key \
+     --data-urlencode 'ServiceKey@'"$HOME"/.config/vally/holiday-service-key \
      https://apis.data.go.kr/B090041/openapi/service/SpcdeInfoService/getRestDeInfo
    ```
 
-   `200`이 아니거나 파일이 JSON이 아니면 여기서 멈춘다. 파일에 키가 들어 있지 않은지 `grep -cF -f ~/.config/holiday-service-key holidays-2026.json`으로 확인하고, 서비스 오류 응답이 키를 되돌려 보냈다면 파일을 지운다. 파일은 저장소 밖이나 작업 폴더의 무시되는 위치에 둔다.
+   `200`이 아니거나 파일이 JSON이 아니면 여기서 멈춘다. 파일에 키가 들어 있지 않은지 `grep -cF -f ~/.config/vally/holiday-service-key holidays-2026.json`으로 확인하고, 서비스 오류 응답이 키를 되돌려 보냈다면 파일을 지운다. 파일은 저장소 밖이나 작업 폴더의 무시되는 위치에 둔다.
 3. **모양을 비교한다.** `jq '.response.header, .response.body.totalCount, (.response.body.items.item | type)' holidays-2026.json`로 아래를 확인한다.
    - `header.resultCode`가 `"00"`이다.
    - `items.item`이 배열이고 `totalCount`가 배열 길이와 같다. 한 해에 1건뿐인 경우는 없으므로 객체가 나오면 가정과 다른 것이다.
@@ -562,6 +563,8 @@ data/hoga/calendar/
    - 같은 날이 두 항목으로 나오면(공휴일이 일요일과 겹칠 때) 판단 모듈이 이름을 `, `로 합친다.
 4. **한 항목과 0건 모양을 확인한다.** `solMonth`를 더해 공휴일이 하나뿐인 달(예: `solMonth=01`)과 없는 달(예: `solMonth=07`)을 부르고 `items.item`이 객체, `items`가 빈 문자열(또는 비었음)로 오는지 본다. 가정과 다르면 `parse_holiday_response`와 이 문서를 고친다.
 5. **수집 쪽에서 확인한다.** 가정과 같으면 `collector`가 받은 뒤 `data/hoga/calendar/holidays-2026.json`의 `holidays`가 위 응답의 `isHoliday`가 `Y`인 항목과 같은지 본다. 로그에 키나 URL이 없는지도 한 번 훑는다.
+
+2026-11-18에 사람이 한 번 불러 확인했다. 한 해 조회는 `items.item`이 배열이고 `totalCount`가 배열 길이와 같았다. 한 건인 달은 `items.item`이 객체, 0건인 달은 `items`가 `""`, `locdate`는 숫자로 위 가정과 같았다.
 
 다르면 키와 URL을 어디에도 붙여 넣지 말고 달라진 필드 이름과 타입만 적어 알린다. 확인이 끝나면 `holidays-2026.json`과 키 파일 안의 값이 남아 있지 않게 정리한다.
 
@@ -745,7 +748,7 @@ REST용 키는 키 목록의 예비 키이고, 예비 키가 없으면 첫 활�
 | `market_open_grace` | 10분 | `--open-grace-minutes N` |
 | `reissue_spacing` | 30초 | `--reissue-spacing-secs N` |
 | `finalize_threads` | 2 | `--finalize-threads N` |
-| 서비스 키 파일 | `<상태 폴더>/holiday-service-key` | `--holiday-key <경로>` |
+| 서비스 키 파일 | `~/.config/vally/holiday-service-key` | `--holiday-key <경로>` |
 | 원문 보관, 처음 기간 | 7관측일 | `--keep-early N`(1 이상) |
 | 원문 보관, 그 뒤 | 1관측일 | `--keep N`(1 이상) |
 | 처음 기간의 길이 | 10관측일 | `--early-period N`(0 이상) |
