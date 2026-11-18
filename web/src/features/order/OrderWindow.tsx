@@ -149,7 +149,7 @@ function OrderBody({ id, code }: { id: WindowId; code: SymbolCode }) {
       <div className="od-toolbar">
         <button type="button" className="od-tool" data-testid="order-explorer" aria-pressed={exploring} disabled={referencePrice === null} onClick={() => setExplorerCenter(exploring ? null : referencePrice)}>전체 호가</button>
         <button type="button" className="od-tool" data-testid="order-current" disabled={!exploring} onClick={() => setExplorerCenter(null)}>현재가</button>
-        <OrderSettingsPopover settings={settings} onChange={setSettings} />
+        <OrderSettingsPopover settings={settings} holding={holding !== null} onChange={setSettings} />
       </div>
       <div className="bk-ladder od-ladder-wrap" data-stale={feed.connected ? undefined : ""} data-exploring={exploring ? "" : undefined}>
         {closed
@@ -177,7 +177,7 @@ function OrderBody({ id, code }: { id: WindowId; code: SymbolCode }) {
         })}
       </div>
       {listOpen && <OpenOrderList groups={data.groups} writable={writable} onCancel={writes.cancelOne} />}
-      <QuantityRow mode={mode} input={input} estimate={estimate} venue={venue} mock={mock} sharePresets={settings.sharePresets} onMode={setMode} onInput={setInput} onVenue={(next) => setVenue(id, next)} />
+      <QuantityRow mode={mode} input={input} estimate={estimate} venue={venue} mock={mock} sharePresets={settings.sharePresets} amountPresets={settings.amountPresets} onMode={setMode} onInput={setInput} onVenue={(next) => setVenue(id, next)} />
       <OrderStatusBar status={writes.status} queued={writes.queued} blocked={data.blocked} onUndo={writes.cancelOne} onReconcile={writes.reconcile} />
       {confirm && <HighValueConfirm request={confirm} onClose={() => setConfirm(null)} />}
     </div>

@@ -168,7 +168,7 @@ test("설정 ⚙의 값이 창 설정으로 저장되고 새로고침해도 유�
   await expect(page.getByTestId("order-ladder")).toHaveAttribute("data-divider", "");
   await expect(page.getByTestId("ladder-mark")).toHaveCount(1);
   await page.getByTestId("order-settings-button").click();
-  const preset = page.getByRole("textbox", { name: "프리셋 2" });
+  const preset = page.getByRole("textbox", { name: "프리셋 2", exact: true });
   await preset.fill("75");
   await preset.blur();
   await page.getByRole("checkbox", { name: "구분선" }).uncheck();
@@ -176,7 +176,7 @@ test("설정 ⚙의 값이 창 설정으로 저장되고 새로고침해도 유�
   await expect(page.getByRole("group", { name: "수량 프리셋" }).getByRole("button").nth(1)).toHaveText("75");
   await expect(page.getByTestId("order-ladder")).not.toHaveAttribute("data-divider", "");
   await expect(page.getByTestId("ladder-mark")).toHaveCount(0);
-  await expect.poll(() => scenario.documents.uiState()["orderSettings"]).toMatchObject({ sharePresets: [10, 75, 100, 500], averageDot: false, divider: false, rate: true });
+  await expect.poll(() => scenario.documents.uiState()["orderSettings"]).toMatchObject({ sharePresets: [10, 75, 100, 500], amountPresets: [100, 500, 1000, 5000], averageDot: false, divider: false, rate: true });
 
   await page.reload();
   await expect(win(page)).toBeVisible();
@@ -184,4 +184,118 @@ test("설정 ⚙의 값이 창 설정으로 저장되고 새로고침해도 유�
   await expect(page.getByTestId("order-ladder")).not.toHaveAttribute("data-divider", "");
   await expect(page.getByTestId("ladder-mark")).toHaveCount(0);
   expect(scenario.documents.layout(DEFAULT_LAYOUT_ID).windows.some((w) => w.kind === "order")).toBe(true);
+});
+
+const openSettings = async (page: Page) => {
+  await page.getByTestId("order-settings-button").click();
+  await expect(page.getByTestId("order-settings")).toBeVisible();
+};
+
+test("등락률 표시를 끄면 사다리 어느 행에도 등락률이 없고 켜면 가격이 있는 모든 행에 있다", async ({ page, scenario }) => {
+  ordersOn(scenario);
+  tradingApi(scenario);
+  await openOrderWindow(page, scenario);
+  const rates = ladderRows(page).locator(".mw-px small");
+  await expect(ladderRows(page)).toHaveCount(20);
+  await expect(rates).toHaveCount(20);
+  await openSettings(page);
+  await page.getByRole("checkbox", { name: "등락률 표시" }).uncheck();
+  await expect(rates).toHaveCount(0);
+  await page.getByRole("checkbox", { name: "등락률 표시" }).check();
+  await expect(rates).toHaveCount(20);
+});
+
+test("보유가 없으면 평단가 점 옆에 안내가 보이고 보유가 있으면 점이 가격 숫자 왼쪽에 있으며 끄면 사라진다", async ({ page, scenario }) => {
+  ordersOn(scenario);
+  tradingApi(scenario);
+  await openOrderWindow(page, scenario);
+  await openSettings(page);
+  await expect(page.getByTestId("order-settings")).toContainText("보유 종목일 때 보입니다");
+  await expect(page.getByTestId("ladder-mark")).toHaveCount(0);
+});
+
+test("보유가 있으면 안내가 없고 평단가 점이 가격 칸 안 가격 숫자 왼쪽에 있으며 끄면 점이 없다", async ({ page, scenario }) => {
+  ordersOn(scenario);
+  tradingApi(scenario).holdings = [HOLDING];
+  await openOrderWindow(page, scenario);
+  await openSettings(page);
+  await expect(page.getByTestId("order-settings")).not.toContainText("보유 종목일 때 보입니다");
+  const mark = page.getByTestId("price-ladder").locator(".mw-px").getByTestId("ladder-mark");
+  await expect(mark).toHaveCount(1);
+  const dot = (await mark.boundingBox())!;
+  const number = (await ladderRows(page).filter({ has: page.getByTestId("ladder-mark") }).locator(".mw-px-num").boundingBox())!;
+  expect(dot.x + dot.width).toBeLessThanOrEqual(number.x);
+  await page.getByRole("checkbox", { name: "평단가 점" }).uncheck();
+  await expect(page.getByTestId("ladder-mark")).toHaveCount(0);
+});
+
+test("구분선을 켜면 행 사이마다 선이 있고 가운데 선은 색이 다르며 끄면 없고 행 높이는 24px로 같다", async ({ page, scenario }) => {
+  ordersOn(scenario);
+  tradingApi(scenario);
+  await openOrderWindow(page, scenario);
+  const lineColors = () => ladderRows(page).evaluateAll((rows) => rows.map((row) => {
+    const shadow = getComputedStyle(row).boxShadow;
+    return shadow === "none" ? null : shadow;
+  }));
+  const heights = () => ladderRows(page).evaluateAll((rows) => rows.map((row) => row.getBoundingClientRect().height));
+  await expect(ladderRows(page)).toHaveCount(20);
+  const on = await lineColors();
+  expect(on[0]).toBeNull();
+  const lines = on.slice(1);
+  expect(lines.every((line) => line !== null)).toBe(true);
+  expect(lines).toHaveLength(19);
+  const middle = on[10]!;
+  expect(lines.filter((line) => line !== middle)).toHaveLength(18);
+  expect(new Set(await heights())).toEqual(new Set([24]));
+  await openSettings(page);
+  await page.getByRole("checkbox", { name: "구분선" }).uncheck();
+  expect((await lineColors()).every((line) => line === null)).toBe(true);
+  expect(new Set(await heights())).toEqual(new Set([24]));
+});
+
+test("프리셋 2에 75를 입력하고 Enter를 누르면 단추가 바로 75가 되고 새로고침해도 유지되며 틀린 값은 되돌린다", async ({ page, scenario }) => {
+  ordersOn(scenario);
+  tradingApi(scenario);
+  await openOrderWindow(page, scenario);
+  await openSettings(page);
+  const preset = page.getByRole("textbox", { name: "프리셋 2", exact: true });
+  const buttons = page.getByRole("group", { name: "수량 프리셋" }).getByRole("button");
+  await preset.fill("75");
+  await expect(buttons.nth(1)).toHaveText("75");
+  await preset.press("Enter");
+  await page.reload();
+  await expect(win(page)).toBeVisible();
+  await expect(buttons.nth(1)).toHaveText("75");
+  await openSettings(page);
+  await preset.fill("0");
+  await expect(buttons.nth(1)).toHaveText("75");
+  await preset.blur();
+  await expect(preset).toHaveValue("75");
+});
+
+test("금액 프리셋을 바꾸면 금액 모드의 프리셋 단추가 그 값을 보이고 누르면 수량 칸이 그 금액이 된다", async ({ page, scenario }) => {
+  ordersOn(scenario);
+  tradingApi(scenario);
+  await openOrderWindow(page, scenario);
+  await openSettings(page);
+  await page.getByRole("textbox", { name: "금액 프리셋 1" }).fill("200");
+  await page.keyboard.press("Escape");
+  await page.getByRole("button", { name: "금액" }).click();
+  const buttons = page.getByRole("group", { name: "수량 프리셋" }).getByRole("button");
+  await expect(buttons).toHaveText(["200만", "500만", "1000만", "5000만"]);
+  await buttons.first().click();
+  await expect(page.getByRole("textbox", { name: "수량" })).toHaveValue("2000000");
+});
+
+test("설정 창은 Esc와 바깥 클릭으로 닫히고 머리에 적용 범위를 적는다", async ({ page, scenario }) => {
+  ordersOn(scenario);
+  tradingApi(scenario);
+  await openOrderWindow(page, scenario);
+  await openSettings(page);
+  await expect(page.getByTestId("order-settings")).toContainText("모든 호가주문창에 적용");
+  await page.keyboard.press("Escape");
+  await expect(page.getByTestId("order-settings")).toHaveCount(0);
+  await openSettings(page);
+  await page.getByTestId("order-total-sell").click();
+  await expect(page.getByTestId("order-settings")).toHaveCount(0);
 });
