@@ -472,6 +472,7 @@ mod tests {
         app: Router,
         fake: Arc<FakeTransport>,
         hub: HubHandle,
+        clock: Clock,
         _events: tokio::sync::mpsc::Sender<StreamEvent>,
         _dir: tempfile::TempDir,
     }
@@ -550,6 +551,7 @@ mod tests {
             ], "return_code": 0}), None)
         }));
         let clock = Clock::fake(kst(KstDate::new(2026, 11, 9).unwrap(), 0, 34, 0));
+        let fixture_clock = clock.clone();
         let rest = KiwoomRest::new(Arc::new(fake.clone()), KiwoomAuth::new(Secret::new("k".into()), Secret::new("s".into()), None), clock.clone());
         let symbols = Arc::new(SymbolDirectory::default());
         if loaded {
@@ -566,7 +568,7 @@ mod tests {
         rest.set_access(crate::kiwoom::rest::Access::Open);
         let hub = state.hub.clone();
         let app = router(state);
-        Fixture { app, fake, hub, _events: events, _dir: dir }
+        Fixture { app, fake, hub, clock: fixture_clock, _events: events, _dir: dir }
     }
 
     async fn get(app: &Router, uri: &str) -> (StatusCode, axum::http::HeaderMap, Vec<u8>) {
@@ -866,9 +868,12 @@ mod tests {
         let ids: Vec<&str> = v["windows"].as_array().unwrap().iter().map(|w| w["id"].as_str().unwrap()).collect();
         assert_eq!((ids, v["placement"].clone()), (vec!["cell-0", "watchlist", "screener"], json!({})));
 
+        let before = f.clock.now().unix();
         let (s, saved) = put(&f.app, "/api/layouts/L2", &two_charts("005930")).await;
+        let after = f.clock.now().unix();
         assert_eq!(s, StatusCode::OK, "{saved}");
-        assert_eq!(saved["updatedAt"], 1_794_152_040, "서버 시계(2026-11-09 00:34 KST)");
+        let updated = saved["updatedAt"].as_i64().unwrap();
+        assert!(before >= 1_794_152_040 && (before..=after).contains(&updated), "서버 시계(2026-11-09 00:34 KST부터): {before}..={after}에 {updated}");
         assert_eq!(saved["sync"], json!({"crosshair": false, "scroll": true, "crosshairScope": "all"}), "빠진 키는 true, 범위는 모든 차트");
         assert_eq!((&saved["windows"], &saved["placement"]), (&two_charts("005930")["windows"], &two_charts("005930")["placement"]), "보낸 순서와 모양 그대로");
         assert_eq!(json(&f.app, "/api/layouts/L2").await, (StatusCode::OK, saved));
