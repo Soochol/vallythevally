@@ -17,7 +17,6 @@ export type MinAmountKey = (typeof MIN_AMOUNT_OPTIONS)[number]["value"];
 
 export const minAmountWon = (key: MinAmountKey): number => MIN_AMOUNT_OPTIONS.find((o) => o.value === key)!.won;
 
-const AMOUNT_SCALE_WON = [1_000_000, 5_000_000, 10_000_000, 30_000_000, 100_000_000, 300_000_000, 1_000_000_000] as const;
 
 export type TradeSide = "buy" | "sell" | "none";
 export type TradeOrigin = "history" | "live";
@@ -107,11 +106,6 @@ const sideOf = (signedQuantity: number): TradeSide => (signedQuantity > 0 ? "buy
 export const amountWon = (row: Pick<TradeRow, "price" | "quantity">): number => row.price * row.quantity;
 
 export const isBigTrade = (row: Pick<TradeRow, "price" | "quantity">): boolean => amountWon(row) >= BIG_TRADE_WON;
-
-export function amountBarRatio(won: number): number {
-  const steps = AMOUNT_SCALE_WON.filter((limit) => won >= limit).length;
-  return steps / AMOUNT_SCALE_WON.length;
-}
 
 export function matchesVenue(row: TradeRow, venue: Venue): boolean {
   if (venue === "combined") return true;
