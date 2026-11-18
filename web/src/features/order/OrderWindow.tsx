@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { OrderSide } from "../../api/generated/OrderSide";
 import type { Venue } from "../../api/generated/Venue";
 import type { SymbolCode } from "../../api/generated/SymbolCode";
@@ -24,8 +24,8 @@ import { AccountBand } from "./AccountBand";
 import { averageRowPrice, holdingOf, ladderClosed, type ProfitUnit, type SessionChoice, toggledUnit } from "./holdingSummary";
 import { HoldingSummary } from "./HoldingSummary";
 import { OrderSettingsPopover } from "./OrderSettingsPopover";
-import { movePrice, tickRuleOf } from "../market-window/tick";
-import { explorerPrices } from "./priceRange";
+import { tickRuleOf } from "../market-window/tick";
+import { fullRangePrices } from "./priceRange";
 import { HighValueConfirm, type HighValueRequest } from "./HighValueConfirm";
 import { type HoverCell, OrderLadder } from "./OrderLadder";
 import { OrderStatusBar } from "./OrderStatusBar";
@@ -35,7 +35,7 @@ import { useOrderAccess, useOrderData } from "./useOrderData";
 import { useOrderWrites } from "./useOrderWrites";
 
 const SIDES: readonly OrderSide[] = ["sell", "buy"];
-const WHEEL_TICKS = 5;
+const EXPLORER_UNAVAILABLE = "상·하한가를 아직 받지 못했습니다";
 const CLOCK_MS = 30_000;
 const SESSIONS: readonly { readonly value: SessionChoice; readonly label: string }[] = [{ value: "regular", label: "정규장" }, { value: "after", label: "시간외" }];
 
@@ -74,7 +74,8 @@ function OrderBody({ id, code }: { id: WindowId; code: SymbolCode }) {
   const [hover, setHover] = useState<HoverCell | null>(null);
   const [confirm, setConfirm] = useState<HighValueRequest | null>(null);
   const [listOpen, setListOpen] = useState(false);
-  const [explorerCenter, setExplorerCenter] = useState<number | null>(null);
+  const [exploring, setExploring] = useState(false);
+  const [centerToken, setCenterToken] = useState(0);
   const [dragging, setDragging] = useState(false);
   const [profitUnit, setProfitUnit] = useState<ProfitUnit>("won");
   const [session, setSession] = useState<SessionChoice>("regular");
@@ -98,14 +99,11 @@ function OrderBody({ id, code }: { id: WindowId; code: SymbolCode }) {
   const liveBase = quotes ? basePrice(quotes) : null;
   const gridBase = useHeldWhile(liveBase, dragging);
   const referencePrice = feed.lastPrice ?? feed.previousClose ?? liveBase;
-  const exploring = explorerCenter !== null;
-  const shownRows: LadderRow[] = quotes ? buildLadderRows(exploring ? explorerPrices(explorerCenter, bounds, tickRule) : gridPrices(gridBase, bounds, tickRule), quotes) : [];
+  const fullPrices = useMemo(() => fullRangePrices({ lower: bounds.lower, upper: bounds.upper }, tickRule), [bounds.lower, bounds.upper, tickRule]);
+  const explorerOn = exploring && fullPrices !== null;
+  const shownRows: LadderRow[] = quotes ? buildLadderRows(explorerOn ? fullPrices : gridPrices(gridBase, bounds, tickRule), quotes) : [];
   const rows = settings.rate ? shownRows : shownRows.map((row) => ({ ...row, rate: null }));
   const closed = ladderClosed(session, secondOfDay(now / 1000), nxtEnabled);
-  const wheel = useCallback((direction: 1 | -1) => {
-    if (referencePrice === null) return;
-    setExplorerCenter((center) => movePrice(center ?? referencePrice, direction * WHEEL_TICKS, bounds, tickRule));
-  }, [referencePrice, bounds.lower, bounds.upper, tickRule]);
   const info = useQuoteInfo({ code, venue, lastPrice: feed.lastPrice, previousClose: feed.previousClose, upperLimit: bounds.upper, lowerLimit: bounds.lower });
   const trades = useLadderTrades(code, venue);
   const data = useOrderData(code, access.open, referencePrice);
@@ -152,17 +150,17 @@ function OrderBody({ id, code }: { id: WindowId; code: SymbolCode }) {
       <div className="od-entry">
         <QuantityRow mode={mode} input={input} estimate={estimate} venue={venue} mock={mock} sharePresets={settings.sharePresets} amountPresets={settings.amountPresets} onMode={setMode} onInput={setInput} onVenue={(next) => setVenue(id, next)} />
         <div className="od-toolbar">
-          <button type="button" className="od-tool" data-testid="order-explorer" aria-pressed={exploring} disabled={referencePrice === null} onClick={() => setExplorerCenter(exploring ? null : referencePrice)}>전체 호가</button>
-          <button type="button" className="od-tool" data-testid="order-current" disabled={!exploring} onClick={() => setExplorerCenter(null)}>현재가</button>
+          <button type="button" className="od-tool" data-testid="order-explorer" aria-pressed={explorerOn} disabled={referencePrice === null || fullPrices === null} title={fullPrices === null ? EXPLORER_UNAVAILABLE : undefined} onClick={() => { if (!explorerOn) setCenterToken((token) => token + 1); setExploring(!explorerOn); }}>전체 호가</button>
+          <button type="button" className="od-tool" data-testid="order-current" disabled={!explorerOn} onClick={() => setCenterToken((token) => token + 1)}>현재가</button>
           <OrderSettingsPopover settings={settings} holding={holding !== null} onChange={setSettings} />
         </div>
       </div>
       <OrderStatusBar status={writes.status} queued={writes.queued} blocked={data.blocked} onUndo={writes.cancelOne} onReconcile={writes.reconcile} />
-      <div className="bk-ladder od-ladder-wrap" data-stale={feed.connected ? undefined : ""} data-exploring={exploring ? "" : undefined}>
+      <div className="bk-ladder od-ladder-wrap" data-stale={feed.connected ? undefined : ""} data-exploring={explorerOn ? "" : undefined}>
         {closed
           ? <EmptyState title="호가 사다리 없음">{session === "after" ? <p>시간외에는 호가 사다리를 보이지 않습니다</p> : <p>이 종목은 15:30 뒤 호가가 멈춥니다</p>}</EmptyState>
           : view
-            ? <OrderLadder rows={rows} previousClose={feed.previousClose} groups={data.groups} writable={writable} previewQuantity={quantityAt(unitPrice)} hover={hover} onHover={setHover} averagePrice={averagePrice} divider={settings.divider} onWheel={wheel} onDragging={setDragging} rowSlots={{ topRight: infoSlot(info), bottomLeft: tradeSlot(trades, feed.previousClose) }}
+            ? <OrderLadder rows={rows} previousClose={feed.previousClose} groups={data.groups} writable={writable} previewQuantity={quantityAt(unitPrice)} hover={hover} onHover={setHover} averagePrice={averagePrice} divider={settings.divider} explorer={explorerOn ? { centerPrice: referencePrice, centerToken } : undefined} onDragging={setDragging} rowSlots={{ topRight: infoSlot(info), bottomLeft: tradeSlot(trades, feed.previousClose) }}
                 actions={{ place, drop, cancelOne: writes.cancelOne, cancelAtPrice: writes.cancelAtPrice, cancelGroups: (targets) => targets.forEach((g) => writes.cancelAtPrice(g.side, g.price)) }} />
             : <EmptyState title={feed.snapshotFailed ? "호가를 불러오지 못했습니다" : "호가를 기다리는 중입니다"} />}
       </div>
