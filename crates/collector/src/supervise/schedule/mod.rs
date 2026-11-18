@@ -202,7 +202,7 @@ impl Daemon {
         let backlog_until = if self.clock.now().unix() < day.times.close.unix() { day.times.judge } else { self.schedule.times_of(day.day.add_days(1)).judge };
         self.finalize_backlog(day.date, backlog_until, shutdown).await?;
         if self.clock.now().unix() >= day.times.close.unix() {
-            return self.after_close_start(day, shutdown).await;
+            return self.after_close_start(day, backlog_until, shutdown).await;
         }
         self.wait(shutdown, day.times.judge).await?;
         self.judge(day, shutdown).await?;
@@ -220,11 +220,15 @@ impl Daemon {
         self.finalize(day, true, shutdown).await
     }
 
-    async fn after_close_start(&mut self, day: &mut DayRun, shutdown: &mut watch::Receiver<bool>) -> Result<(), DayEnd> {
+    async fn after_close_start(&mut self, day: &mut DayRun, start_before: KstTime, shutdown: &mut watch::Receiver<bool>) -> Result<(), DayEnd> {
         if store_dir(&self.data_dir, day.date).join(COMPLETE_FILE_NAME).is_file() {
             return Ok(());
         }
         self.judge(day, shutdown).await?;
+        if self.clock.now().unix() >= start_before.unix() {
+            tracing::warn!(date = day.date, "그날 정리를 아침 일정 앞에서 시작하지 않습니다. 다음 날 시작에 밀린 날로 정리합니다");
+            return Ok(());
+        }
         self.finalize(day, false, shutdown).await
     }
 
