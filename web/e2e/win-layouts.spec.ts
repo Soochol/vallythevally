@@ -6,6 +6,7 @@ test.use({ clockStart: "20261109100000" });
 const topbar = (page: Page) => page.getByRole("toolbar", { name: "차트 도구 막대" });
 const trigger = (page: Page) => topbar(page).getByRole("button", { name: /^레이아웃:/ });
 const menu = (page: Page) => page.getByRole("menu", { name: "레이아웃", exact: true });
+const layoutRadios = (page: Page) => menu(page).getByRole("menuitemradio").filter({ hasNotText: /^(끔|모든 차트|같은 종목|같은 연동 색)$/ });
 const inspector = (page: Page) => page.getByRole("region", { name: "지표", exact: true });
 async function choose(page: Page, name: string) {
   await trigger(page).click();
@@ -64,7 +65,7 @@ test("새 이름 저장 전 원본에도 편집을 저장하고 이후 따로 �
   expect(scenario.documents.layout(DEFAULT_LAYOUT_ID).windows.filter((window) => window.kind === "chart")).toHaveLength(2);
   const copyId = scenario.documents.layoutSummaries().find((entry) => entry.name === "복기")!.id;
   await trigger(page).click();
-  await expect(menu(page).getByRole("menuitemradio")).toHaveText(["기본", "복기"]);
+  await expect(layoutRadios(page)).toHaveText(["기본", "복기"]);
   await expect(menu(page).getByRole("menuitemradio", { name: "복기", exact: true })).toHaveAttribute("aria-checked", "true");
   await page.keyboard.press("Escape");
 
@@ -113,7 +114,7 @@ test("이름 규칙과 서버 거절을 표시하고 이름 바꾸기·지우기
   await page.getByRole("button", { name: "레이아웃 지우기", exact: true }).click();
   await expect(trigger(page)).toHaveAccessibleName("레이아웃: 기본");
   await trigger(page).click();
-  await expect(menu(page).getByRole("menuitemradio")).toHaveText(["기본"]);
+  await expect(layoutRadios(page)).toHaveText(["기본"]);
   await expect(menu(page).getByRole("menuitem", { name: "지우기", exact: true })).toBeDisabled();
 });
 

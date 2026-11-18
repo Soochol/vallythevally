@@ -84,8 +84,9 @@ function readDraftWindows(draft: unknown): LayoutWindow[] | null {
 
 function asLayout(v: Record<string, unknown>, stored: Layout): Layout | null {
   const windows = readDraftWindows(v.windows);
-  const ok = v.id === stored.id && typeof v.name === "string" && windows !== null && isFields(v.placement) && isFields(v.sync);
-  return ok ? ({ ...stored, ...v, windows } as Layout) : null;
+  const { sync } = v;
+  const ok = v.id === stored.id && typeof v.name === "string" && windows !== null && isFields(v.placement) && isFields(sync);
+  return ok ? ({ ...stored, ...v, sync: { ...stored.sync, ...sync }, windows } as Layout) : null;
 }
 
 export async function restore(src: RestoreSources): Promise<Restored> {

@@ -1,6 +1,6 @@
 import { expect, test } from "vitest";
 import type { Period } from "../api/generated/Period";
-import { barInterval, CrosshairSync, matchingBarTime, type PointedBar } from "./crosshairSync";
+import { barInterval, CrosshairSync, crosshairGroupKey, matchingBarTime, type PointedBar } from "./crosshairSync";
 
 const t = (date: string) => Date.parse(`${date}+09:00`) / 1000;
 const day = t("2026-11-09T00:00:00");
@@ -109,4 +109,26 @@ test("숨긴 창과 다른 레이아웃 세션은 제외하고 다시 연결해�
   sync.connect("1:layout", a, a.element);
   sync.connect("1:layout", b, b.element);
   expect(b.seen.at(-1)).toBeNull();
+});
+
+test("모든 차트는 종목과 연동 색에 상관없이 같은 열쇠다", () => {
+  const key = crosshairGroupKey("all", "7:L1", { symbol: "005930", link: "a" });
+  expect(crosshairGroupKey("all", "7:L1", { symbol: "000660", link: null })).toBe(key);
+  expect(crosshairGroupKey("all", "7:L2", { symbol: "005930", link: "a" })).not.toBe(key);
+});
+
+test("같은 종목은 종목코드가 같을 때만 같은 열쇠이고 연동 색은 보지 않는다", () => {
+  const key = crosshairGroupKey("symbol", "7:L1", { symbol: "005930", link: "a" });
+  expect(crosshairGroupKey("symbol", "7:L1", { symbol: "005930", link: null })).toBe(key);
+  expect(crosshairGroupKey("symbol", "7:L1", { symbol: "000660", link: "a" })).not.toBe(key);
+  expect(crosshairGroupKey("symbol", "7:L2", { symbol: "005930", link: "a" })).not.toBe(key);
+  expect(key).not.toBe(crosshairGroupKey("all", "7:L1", { symbol: "005930", link: "a" }));
+});
+
+test("같은 연동 색은 색이 같을 때만 같은 열쇠이고 색이 꺼지면 연결하지 않는다", () => {
+  const key = crosshairGroupKey("link", "7:L1", { symbol: "005930", link: "a" });
+  expect(key).not.toBeNull();
+  expect(crosshairGroupKey("link", "7:L1", { symbol: "000660", link: "a" })).toBe(key);
+  expect(crosshairGroupKey("link", "7:L1", { symbol: "005930", link: "b" })).not.toBe(key);
+  expect(crosshairGroupKey("link", "7:L1", { symbol: "005930", link: null })).toBeNull();
 });

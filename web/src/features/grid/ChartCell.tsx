@@ -7,7 +7,7 @@ import { financialRequest } from "../../chart/indicators/shown";
 import { useSymbolInfo, useSymbolInfos } from "../../api/queries";
 import { type CellStatus, ChartController } from "../../chart/ChartController";
 import type { IndicatorCommand } from "../../chart/indicators/legendRows";
-import { crosshairSync } from "../../chart/crosshairSync";
+import { crosshairGroupKey, crosshairSync } from "../../chart/crosshairSync";
 import { readThemeTokens } from "../../chart/theme";
 import { PERIOD_LABEL } from "../../lib/symbol";
 import { shownVenue, venueLabel } from "../../lib/venue";
@@ -61,7 +61,7 @@ export function ChartCell({ cellId, status, onStatus }: Props) {
   const cell = useCell(cellId);
   const layoutId = useLayoutStore((s) => s.layout.id);
   const layoutSession = useLayoutStore((s) => s.session);
-  const crosshairEnabled = useLayoutStore((s) => s.layout.sync.crosshair);
+  const crosshairScope = useLayoutStore((s) => s.layout.sync.crosshair ? s.layout.sync.crosshairScope : null);
   const { settings: chartSettings, preview } = useShownSettings(cellId, cell.chartSettings);
   const info = useSymbolInfo(cell.symbol).data;
   const appVenue = useVenue();
@@ -110,9 +110,11 @@ export function ChartCell({ cellId, status, onStatus }: Props) {
   useEffect(() => attachController(cellId, ctl.current!), [cellId]);
 
   useEffect(() => {
-    if (!crosshairEnabled || !ctl.current || !chartEl.current) return;
-    return crosshairSync.connect(`${layoutSession}:${layoutId}`, ctl.current, chartEl.current);
-  }, [cellId, layoutId, layoutSession, crosshairEnabled]);
+    if (crosshairScope === null || !ctl.current || !chartEl.current) return;
+    const key = crosshairGroupKey(crosshairScope, `${layoutSession}:${layoutId}`, cell);
+    if (key === null) return;
+    return crosshairSync.connect(key, ctl.current, chartEl.current);
+  }, [cellId, layoutId, layoutSession, crosshairScope, cell.symbol, cell.link]);
 
   useEffect(() => {
     ctl.current?.apply({ symbol: cell.symbol, venue, period: cell.period, settings: chartSettings, info, previewIndicator: preview?.id ?? null, compareNames });
