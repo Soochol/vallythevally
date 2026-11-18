@@ -83,7 +83,8 @@ impl PrivateFile {
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
             Err(e) => return Err(self.error(e)),
         };
-        Ok(serde_json::from_str::<EnvironmentOnly>(&text).ok().map(|only| only.environment))
+        let only: EnvironmentOnly = serde_json::from_str(&text).map_err(|e| self.error(format_args!("투자구분 표시를 읽을 수 없어 쓰지 않습니다. JSON {:?} 오류, {}번째 줄", e.classify(), e.line())))?;
+        Ok(Some(only.environment))
     }
 
     pub fn error_for_other_environment(&self, stored: KiwoomEnvironment, current: KiwoomEnvironment) -> FileError {
@@ -126,4 +127,34 @@ pub fn render_stamped<T: Serialize>(environment: KiwoomEnvironment, value: &T) -
 
 pub fn parse_stamped<T: DeserializeOwned>(text: &str) -> serde_json::Result<(KiwoomEnvironment, T)> {
     serde_json::from_str::<Stamped<T>>(text).map(|stamped| (stamped.environment, stamped.value))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn file_with(text: Option<&str>) -> (tempfile::TempDir, PrivateFile) {
+        let dir = tempfile::tempdir().unwrap();
+        let file = PrivateFile::new(dir.path().join("state.json"));
+        if let Some(text) = text {
+            std::fs::write(file.path(), text).unwrap();
+        }
+        (dir, file)
+    }
+
+    #[test]
+    fn a_missing_file_has_no_environment_and_a_missing_field_is_real() {
+        assert_eq!(file_with(None).1.stored_environment(), Ok(None));
+        assert_eq!(file_with(Some(r#"{"last_request_at":7}"#)).1.stored_environment(), Ok(Some(KiwoomEnvironment::Real)));
+        assert_eq!(file_with(Some(r#"{"environment":"mock"}"#)).1.stored_environment(), Ok(Some(KiwoomEnvironment::Mock)));
+    }
+
+    #[test]
+    fn an_unreadable_environment_mark_is_an_error_without_the_contents() {
+        for text in [r#"{"environment":"paper","secret":"FAKE-SECRET-mark"#, r#"{"environment":"paper","secret":"FAKE-SECRET-mark"}"#, r#"{"environment":null}"#, ""] {
+            let (_dir, file) = file_with(Some(text));
+            let err = file.stored_environment().err().unwrap_or_else(|| panic!("{text:?}")).to_string();
+            assert!(err.contains("state.json") && !err.contains("FAKE-"), "{err}");
+        }
+    }
 }
