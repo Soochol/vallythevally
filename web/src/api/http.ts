@@ -1,4 +1,5 @@
 import { useKiwoomStore } from "../stores/kiwoom";
+import { isMockEnvironment } from "../stores/kiwoomLink";
 import { useServerClock } from "../stores/serverClock";
 import type { ApiErrorCode } from "./generated/ApiErrorCode";
 import type { ApiErrorReason } from "./generated/ApiErrorReason";
@@ -52,6 +53,8 @@ const API_ERROR_REASONS = [
 const _allReasonsListed: Exclude<ApiErrorReason, (typeof API_ERROR_REASONS)[number]> extends never ? true : never = true;
 void _allReasonsListed;
 
+const MOCK_UNSUPPORTED_TEXT = "모의투자에서 지원하지 않는 기능입니다";
+
 export interface Resume {
   reason: ApiErrorReason | null;
   retryAt: UnixSeconds | null;
@@ -101,7 +104,10 @@ async function parseError(res: Response): Promise<ApiRequestError> {
       if (typeof err === "object" && err !== null) {
         const fields = err as { code?: unknown; message?: unknown; reason?: unknown; retryAt?: unknown; manualActionRequired?: unknown };
         const { code, message } = fields;
-        if (isApiErrorCode(code) && typeof message === "string") return new ApiRequestError(code, message, readResume(fields));
+        if (isApiErrorCode(code) && typeof message === "string") {
+          const resume = readResume(fields);
+          return new ApiRequestError(code, resume.reason === "unsupported" && isMockEnvironment() ? MOCK_UNSUPPORTED_TEXT : message, resume);
+        }
       }
     }
   } catch {

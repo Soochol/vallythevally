@@ -1,5 +1,6 @@
 import { useReducer } from "react";
 import type { KiwoomLinkStatus } from "../../api/generated/KiwoomLinkStatus";
+import type { SystemSettings } from "../../api/generated/SystemSettings";
 import { deleteKiwoomKey, saveKiwoomKey, useSystemSettings } from "../../api/system";
 import { confirmAction } from "../overlay/Confirm";
 import { canSaveKey, EMPTY_KEY_FORM, keyFormReducer, keyLocked, keySaveNote, maskedAppKey } from "./kiwoomPanel";
@@ -11,6 +12,7 @@ export function KiwoomKeyForm({ status, command, onSaved, onOpenIpHelp }: { stat
   const [form, dispatch] = useReducer(keyFormReducer, EMPTY_KEY_FORM);
   const target = useSystemSettings().data?.kiwoomTarget;
   if (!status) return null;
+  if (status.environment === "mock") return <MockKeyNotice target={target} />;
   const locked = keyLocked(status);
   const stored = status.keySource !== "none";
   const inputs = !stored || form.editing;
@@ -88,5 +90,15 @@ function ReadOnlyRow({ label, value }: { label: string; value: string }) {
       <span className="w-16 flex-none text-text-2">{label}</span>
       <span className="min-w-0 break-all font-mono text-text">{value}</span>
     </div>
+  );
+}
+
+function MockKeyNotice({ target }: { target: SystemSettings["kiwoomTarget"] | undefined }) {
+  return (
+    <section aria-label="키움 키" className="flex flex-col gap-3 rounded-m border border-line bg-surface p-4">
+      <h3 className="text-m font-semibold">키</h3>
+      <p className="text-s text-text-3">접속 대상: {target ? `${target.kind === "kiwoom" ? "키움 모의투자" : "로컬 시험 서버"}${target.host ? ` · ${target.host}` : ""} (고정)` : "—"}</p>
+      <p className="text-m text-text" data-testid="mock-key-notice">모의투자 키는 환경 설정(VALLY_KIWOOM_MOCK_APP_KEY)에서만 받습니다</p>
+    </section>
   );
 }

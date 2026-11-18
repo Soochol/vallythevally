@@ -15,4 +15,7 @@ export const useKiwoomLinkStore = create<KiwoomLinkStore>()((set) => ({
   receiveSnapshot: (status, pushesAtRequest) => set((s) => (s.pushes === pushesAtRequest ? { status } : s)),
 }));
 
+export const isMockEnvironment = (): boolean => useKiwoomLinkStore.getState().status?.environment === "mock";
+export const useMockEnvironment = (): boolean => useKiwoomLinkStore((s) => s.status?.environment === "mock");
+
 export const receiveKiwoomLinkPush = (status: KiwoomLinkStatus) => useKiwoomLinkStore.getState().receivePush(status);

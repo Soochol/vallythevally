@@ -2,10 +2,13 @@ import type { Venue } from "../../api/generated/Venue";
 import { formatWon } from "../market-window/format";
 import { Segmented } from "../market-window/parts";
 import type { QuantityMode } from "./orderRules";
+import { MOCK_KRX_ONLY_TEXT } from "./statusText";
 
 const AMOUNT_PRESETS = [1_000_000, 5_000_000, 10_000_000, 50_000_000] as const;
 const MODES = [{ value: "shares", label: "주" }, { value: "amount", label: "금액" }] as const;
 const ROUTES = [{ value: "combined", label: "SOR" }, { value: "krx", label: "KRX" }, { value: "nxt", label: "NXT" }] as const;
+
+const MOCK_DISABLED_ROUTES: readonly Venue[] = ["combined", "nxt"];
 
 const presetLabel = (mode: QuantityMode, value: number): string => (mode === "shares" ? String(value) : `${value / 10_000}만`);
 
@@ -14,13 +17,14 @@ interface Props {
   readonly input: string;
   readonly estimate: number | null;
   readonly venue: Venue;
+  readonly mock: boolean;
   readonly sharePresets: readonly number[];
   readonly onMode: (mode: QuantityMode) => void;
   readonly onInput: (input: string) => void;
   readonly onVenue: (venue: Venue) => void;
 }
 
-export function QuantityRow({ mode, input, estimate, venue, sharePresets, onMode, onInput, onVenue }: Props) {
+export function QuantityRow({ mode, input, estimate, venue, mock, sharePresets, onMode, onInput, onVenue }: Props) {
   const presets = mode === "shares" ? sharePresets : AMOUNT_PRESETS;
   return (
     <div className="od-qty" data-testid="order-quantity-row">
@@ -33,8 +37,9 @@ export function QuantityRow({ mode, input, estimate, venue, sharePresets, onMode
         <div className="od-presets" role="group" aria-label="수량 프리셋">
           {presets.map((value) => <button key={value} type="button" className="od-preset" onClick={() => onInput(String(value))}>{presetLabel(mode, value)}</button>)}
         </div>
-        <Segmented label="주문 경로" options={ROUTES} value={venue} onChange={onVenue} />
+        <Segmented label="주문 경로" options={ROUTES} value={venue} disabled={mock ? MOCK_DISABLED_ROUTES : undefined} onChange={onVenue} />
       </div>
+      {mock && <p className="od-route-note" data-testid="order-route-note">{MOCK_KRX_ONLY_TEXT}</p>}
       <div className="od-estimate">예상 주문금액 <b data-testid="order-estimate">{estimate === null ? "-" : formatWon(estimate)}</b></div>
     </div>
   );

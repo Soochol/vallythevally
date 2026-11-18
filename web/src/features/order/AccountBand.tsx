@@ -21,6 +21,7 @@ interface Props {
   readonly balance: TradingBalance | null;
   readonly executions: readonly TradingExecution[];
   readonly writable: boolean;
+  readonly mock: boolean;
   readonly onCancel: (orderNo: string) => void;
 }
 
@@ -75,13 +76,14 @@ function FillsPanel({ executions }: { executions: readonly TradingExecution[] })
   );
 }
 
-export function AccountBand({ accountTail, openOrders, balance, executions, writable, onCancel }: Props) {
+export function AccountBand({ accountTail, openOrders, balance, executions, writable, mock, onCancel }: Props) {
   const [panel, setPanel] = useState<PanelKind | null>(null);
   const counts: Record<PanelKind, number> = { open: openOrders.length, holdings: balance?.holdings.length ?? 0, fills: executions.length };
   return (
     <div className="od-account" data-testid="order-account">
       <div className="od-account-bar">
         <span className="od-account-label" data-testid="account-label">계좌 {accountTail === null ? "—" : `··${accountTail}`}</span>
+        {mock && <span className="od-account-mock" data-testid="account-mock">모의</span>}
         {TABS.map(({ kind, label }) => (
           <button key={kind} type="button" className="od-tab" data-testid={`account-tab-${kind}`} aria-expanded={panel === kind} onClick={() => setPanel((open) => (open === kind ? null : kind))}>
             {label} <b>{counts[kind]}</b>

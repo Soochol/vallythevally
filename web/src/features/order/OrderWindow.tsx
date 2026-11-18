@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import type { OrderSide } from "../../api/generated/OrderSide";
+import type { Venue } from "../../api/generated/Venue";
 import type { SymbolCode } from "../../api/generated/SymbolCode";
 import type { WindowId } from "../../layout/kinds";
 import { useFundamentals, useSymbolInfo } from "../../api/queries";
@@ -7,6 +8,7 @@ import { useOrdersStatus } from "../../api/system";
 import { secondOfDay } from "../trades/tape";
 import { formatPrice } from "../../lib/format";
 import { isIndexCode } from "../../lib/symbol";
+import { useMockEnvironment } from "../../stores/kiwoomLink";
 import { orderVenue, useLayoutStore } from "../../stores/layout";
 import { useOrderSettings, useUiStore } from "../../stores/ui";
 import { useBookFeed } from "../book/useBookFeed";
@@ -54,7 +56,9 @@ function OpenOrderList({ groups, writable, onCancel }: { groups: ReadonlyMap<str
 }
 
 function OrderBody({ id, code }: { id: WindowId; code: SymbolCode }) {
-  const venue = useLayoutStore((s) => orderVenue(s.layout, id));
+  const savedVenue = useLayoutStore((s) => orderVenue(s.layout, id));
+  const mock = useMockEnvironment();
+  const venue: Venue = mock ? "krx" : savedVenue;
   const setVenue = useLayoutStore((s) => s.setOrderVenue);
   const feed = useBookFeed(code);
   const access = useOrderAccess();
@@ -131,7 +135,7 @@ function OrderBody({ id, code }: { id: WindowId; code: SymbolCode }) {
           <button type="button" className="od-link" onClick={() => openSystemSettings("kiwoom")}>시스템 설정 열기</button>
         </div>
       )}
-      <AccountBand accountTail={accountTail} openOrders={data.openOrders} balance={data.balance} executions={data.executions} writable={writable} onCancel={writes.cancelOne} />
+      <AccountBand accountTail={accountTail} openOrders={data.openOrders} balance={data.balance} executions={data.executions} writable={writable} mock={mock} onCancel={writes.cancelOne} />
       <HoldingSummary holding={holding} buyableAmount={data.capacity.buyableAmount} unit={profitUnit} onUnit={() => setProfitUnit(toggledUnit)} onFill={(fill) => { setMode(fill.mode); setInput(fill.input); }} />
       <div className="od-toolbar">
         <button type="button" className="od-tool" data-testid="order-explorer" aria-pressed={exploring} disabled={referencePrice === null} onClick={() => setExplorerCenter(exploring ? null : referencePrice)}>전체 호가</button>
@@ -164,7 +168,7 @@ function OrderBody({ id, code }: { id: WindowId; code: SymbolCode }) {
         })}
       </div>
       {listOpen && <OpenOrderList groups={data.groups} writable={writable} onCancel={writes.cancelOne} />}
-      <QuantityRow mode={mode} input={input} estimate={estimate} venue={venue} sharePresets={settings.sharePresets} onMode={setMode} onInput={setInput} onVenue={(next) => setVenue(id, next)} />
+      <QuantityRow mode={mode} input={input} estimate={estimate} venue={venue} mock={mock} sharePresets={settings.sharePresets} onMode={setMode} onInput={setInput} onVenue={(next) => setVenue(id, next)} />
       <OrderStatusBar status={writes.status} queued={writes.queued} blocked={data.blocked} onUndo={writes.cancelOne} onReconcile={writes.reconcile} />
       {confirm && <HighValueConfirm request={confirm} onClose={() => setConfirm(null)} />}
     </div>

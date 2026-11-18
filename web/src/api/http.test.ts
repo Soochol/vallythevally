@@ -1,5 +1,7 @@
 import { afterEach, expect, test, vi } from "vitest";
 import { useKiwoomStore } from "../stores/kiwoom";
+import { useKiwoomLinkStore } from "../stores/kiwoomLink";
+import type { KiwoomLinkStatus } from "./generated/KiwoomLinkStatus";
 import { serverNow, useServerClock } from "../stores/serverClock";
 import { ApiRequestError, getJson } from "./http";
 
@@ -7,6 +9,7 @@ afterEach(() => {
   vi.unstubAllGlobals();
   vi.useRealTimers();
   useKiwoomStore.setState({ stopped: null, notice: null });
+  useKiwoomLinkStore.setState({ status: null });
   useServerClock.setState({ serverTimeOrigin: null });
 });
 
@@ -105,4 +108,14 @@ test("Date 헤더가 없는 응답은 서버의 지금을 바꾸지 않고, 표�
   reply(200, {});
   await getJson("/api/screener/status");
   expect(serverNowSeen()).toBe(sentAt - 60_000);
+});
+
+test("사유 unsupported는 모의투자에서만 모의 문구로 바꾼다", async () => {
+  const body = { error: { code: "bad_request", message: "키움이 지원하지 않는 요청입니다", reason: "unsupported", retryAt: null, manualActionRequired: false } };
+  reply(400, body);
+  await expect(getJson("/api/x")).rejects.toMatchObject({ message: "키움이 지원하지 않는 요청입니다" });
+  useKiwoomLinkStore.setState({ status: { environment: "real" } as KiwoomLinkStatus });
+  await expect(getJson("/api/x")).rejects.toMatchObject({ message: "키움이 지원하지 않는 요청입니다" });
+  useKiwoomLinkStore.setState({ status: { environment: "mock" } as KiwoomLinkStatus });
+  await expect(getJson("/api/x")).rejects.toMatchObject({ code: "bad_request", reason: "unsupported", message: "모의투자에서 지원하지 않는 기능입니다" });
 });

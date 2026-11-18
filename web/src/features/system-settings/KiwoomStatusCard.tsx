@@ -40,6 +40,7 @@ export function KiwoomStatusCard({ status, view, confirmations, onConfirm, busy,
         <span aria-hidden="true" className="conn-dot" data-tone={linkDotTone(status)} />
         <h3 className="text-m font-semibold">{TITLES[view.stage]}</h3>
       </div>
+      {status?.environment === "mock" && <p className="text-s text-warning" data-testid="kiwoom-environment">투자구분 · 모의투자</p>}
       {status && <p className="text-m leading-relaxed text-text-2">{status.message}</p>}
       {status && view.stage === "connecting" && <Steps step={status.step} />}
       {status && view.stage === "connected" && <ConnectedFacts status={status} />}

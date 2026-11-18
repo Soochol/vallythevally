@@ -2,6 +2,7 @@ import { useRef, useState } from "react";
 import { ChartSettingsPopover } from "../chart-settings/ChartSettingsPopover";
 import { FinancialUpdateButton } from "../financial-update/FinancialUpdateButton";
 import { MinuteMenu } from "./MinuteMenu";
+import { MockBadge } from "./MockBadge";
 import { periodKey } from "../../lib/hotkeys";
 import { useSymbolInfo } from "../../api/queries";
 import { PERIOD_LABEL, PERIODS, symbolSub } from "../../lib/symbol";
@@ -29,6 +30,7 @@ export function Topbar() {
   return (
     <header role="toolbar" aria-label="차트 도구 막대" className="desktop-topbar ui-island relative z-20 mx-[var(--island-gap)] mt-[var(--island-gap)] h-[var(--island-h)] flex-none rounded-l max-md:hidden">
       <span className="app-brand" title="vallythevally"><BrandIcon /><span>vally</span></span>
+      <MockBadge />
       <span className="tb-sep" />
       <div role="group" aria-label="봉 주기" className="flex flex-none items-center gap-px">
         <MinuteMenu value={cell.period} onChange={(period) => setPeriod(cellId, period)} />
