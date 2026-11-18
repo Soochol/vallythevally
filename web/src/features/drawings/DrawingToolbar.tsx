@@ -21,7 +21,7 @@ import { DOCK_STEP, clampSpot, settleSpot, spotOf, type Size, type Spot } from "
 import { DockHold, useDockExpansion, useHoldDockOpen } from "./dockExpansion";
 
 const hotkeysOf = (tool: DrawingTool) => TOOL_HOTKEYS.filter((h) => h.tool === tool).map((h) => h.keys);
-function toolTitle(tool: Tool, note?: string) {
+export function toolTitle(tool: Tool, note?: string) {
   const keys = hotkeysOf(tool.tool).join(" / ");
   return [keys ? `${tool.label} (${keys})` : tool.label, note].filter(Boolean).join(" · ");
 }
