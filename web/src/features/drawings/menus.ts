@@ -59,7 +59,6 @@ export function drawingMenu(surface: DrawingSurface, empty = false, at: ScreenPo
     ...(toolOf(first.tool)?.text ? [action("글자 고치기…", () => surface.openEditor(first.id, "text"))] : []),
     ...DRAWING_COMMANDS.filter((c) => c.available(selected)).map((c) => action(c.label, () => c.run(surface))),
     { kind: "separator" }, action(locked ? "잠금 풀기" : "잠금", () => surface.updateSelected((d) => ({ ...d, locked: !locked }))),
-    action("숨기기", () => { surface.updateSelected((d) => ({ ...d, hidden: true })); session.select([]); }),
     { kind: "heading", label: "순서" },
     ...([ ["맨 앞으로", "front"], ["앞으로", "forward"], ["뒤로", "backward"], ["맨 뒤로", "back"] ] as const).map(([label, direction]) => action(label, () => surface.reorder(first.id, direction))),
     { kind: "heading", label: "보이는 봉 주기" }, action("모든 봉 주기", () => periods(null)),

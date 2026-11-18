@@ -659,7 +659,6 @@ mod tests {
             {"id": "watchlist", "link": "b", "kind": "watchlist"},
             {"id": "left", "link": null, "kind": "chart", "symbol": "IDX:101", "venue": null, "period": "D", "chartSettings": {}},
             {"id": "screener", "link": null, "kind": "screener"},
-            {"id": "objects", "link": null, "kind": "objects"},
             {"id": "indicators", "link": null, "kind": "indicators"}
         ]})
     }
@@ -908,7 +907,7 @@ mod tests {
         let (s, v) = json(&f.app, &format!("/api/layouts/{DEFAULT_ID}")).await;
         assert_eq!((s, v["windows"][0]["symbol"].as_str(), v["sync"].clone()), (StatusCode::OK, Some("IDX:001"), json!({"crosshair": true, "scroll": true})));
         let ids: Vec<&str> = v["windows"].as_array().unwrap().iter().map(|w| w["id"].as_str().unwrap()).collect();
-        assert_eq!((ids, v["placement"].clone()), (vec!["cell-0", "watchlist", "screener", "objects"], json!({})));
+        assert_eq!((ids, v["placement"].clone()), (vec!["cell-0", "watchlist", "screener"], json!({})));
 
         let (s, saved) = put(&f.app, "/api/layouts/L2", &two_charts("005930")).await;
         assert_eq!(s, StatusCode::OK, "{saved}");
@@ -969,7 +968,7 @@ mod tests {
             w["chartSettings"] = json!({"pad": "x".repeat(65_000)});
             biggest["windows"].as_array_mut().unwrap().push(w);
         }
-        for kind in ["watchlist", "screener", "objects", "indicators"] {
+        for kind in ["watchlist", "screener", "trades", "indicators"] {
             biggest["windows"].as_array_mut().unwrap().push(json!({"id": kind, "link": "c", "kind": kind}));
         }
         assert_eq!(put(&f.app, "/api/layouts/L4", &biggest).await.0, StatusCode::OK, "창 12개, 차트 창 8개와 배치가 저마다 64KB 아래면 받는다");

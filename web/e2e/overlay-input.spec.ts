@@ -1,4 +1,3 @@
-import { expandDock } from "./drawing-probe";
 import { FinancialFixture } from "./financial-update-helpers";
 import type { Page } from "@playwright/test";
 import type { Drawing } from "../src/api/generated/Drawing";
@@ -92,15 +91,11 @@ for (const outside of ["배경", "부모 제목", "부모 닫기 버튼"] as con
   });
 }
 
-for (const source of ["전체 막대", "선택 막대", "개체 메뉴", "차트 메뉴"] as const) {
+for (const source of ["선택 막대", "개체 메뉴", "차트 메뉴"] as const) {
   test(`${source}의 삭제 알림은 Ctrl+Z 후 다른 작업을 되돌리지 않는다`, async ({ page, scenario }) => {
     await horizontalLine(page, scenario);
     const original = (await savedDrawings(scenario))[0]!;
-    if (source === "전체 막대") {
-      await (await expandDock(page)).getByRole("button", { name: "개체 목록 열기", exact: true }).click();
-      await page.getByRole("button", { name: "이 종목 드로잉 모두 지우기", exact: true }).click();
-    }
-    else if (source === "선택 막대") await page.getByRole("button", { name: "드로잉 지우기", exact: true }).click();
+    if (source === "선택 막대") await page.getByRole("button", { name: "드로잉 지우기", exact: true }).click();
     else if (source === "개체 메뉴") {
       await page.getByRole("button", { name: "드로잉 더 보기", exact: true }).click();
       await page.getByRole("menu", { name: "드로잉 메뉴", exact: true }).getByRole("menuitem", { name: "지우기", exact: true }).click();

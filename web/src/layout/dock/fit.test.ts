@@ -14,7 +14,7 @@ const c2 = ref("c2", "chart");
 const c3 = ref("c3", "chart");
 const w = ref("w", "watchlist");
 const s = ref("s", "screener");
-const o = ref("o", "objects");
+const o = ref("o", "trades");
 
 test("기본 배치는 차트를 왼쪽에, 나머지를 오른쪽 묶음의 탭으로 72:28에 둔다", () => {
   expect(defaultDock([c1, w, s, o])).toEqual({ root: row(0.72, group("g1", ["c1"]), group("g2", ["w", "s", "o"])), floats: [] });

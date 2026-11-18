@@ -277,7 +277,6 @@ pub(crate) async fn store_layout(tx: &mut SqliteConnection, input: &LayoutInput,
             WindowContent::Order { venue } => (None, Some(wire_name(venue)), None, None),
             WindowContent::Watchlist
             | WindowContent::Screener
-            | WindowContent::Objects
             | WindowContent::Indicators
             | WindowContent::Trades
             | WindowContent::Book
@@ -570,7 +569,6 @@ mod tests {
                 ("cell-1", "chart".into(), Some(LinkColor::A)),
                 ("watchlist", "watchlist".into(), None),
                 ("screener", "screener".into(), None),
-                ("objects", "objects".into(), None),
             ]
         );
         assert_eq!(
@@ -579,7 +577,7 @@ mod tests {
         );
         assert!(matches!(&migrated.windows[1].content, WindowContent::Chart { feed: crate::api::ChartFeed(domain::Feed::Index(code)), period: Period::Week, .. } if code.as_str() == "101"));
         assert_eq!((migrated.placement.is_empty(), migrated.revision, migrated.updated_at), (true, Revision(7), UnixSeconds(50)));
-        assert_eq!(kinds(&get_layout(&db, DEFAULT_ID).await.unwrap()).len(), 4, "기본 레이아웃도 차트 창 하나와 오른쪽 창 셋");
+        assert_eq!(kinds(&get_layout(&db, DEFAULT_ID).await.unwrap()).len(), 3, "기본 레이아웃도 차트 창 하나와 오른쪽 창 둘");
 
         let drawings = crate::drawings::list_drawings_of(&db, "IDX:101").await.unwrap();
         let scopes: Vec<_> = drawings.iter().map(|d| (d.id.as_str(), d.scope.clone(), d.revision)).collect();
@@ -593,6 +591,46 @@ mod tests {
             ],
             "slot 1은 창 cell-1, 없는 칸을 가리키던 드로잉은 이 레이아웃으로 넓힌다"
         );
+    }
+
+    #[tokio::test]
+    async fn objects_window_migration_drops_only_that_window_and_unhides_drawings_keeping_revisions() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("vally.db");
+        {
+            let pool = SqlitePoolOptions::new().connect_with(SqliteConnectOptions::new().filename(&path).create_if_missing(true).foreign_keys(true)).await.unwrap();
+            sqlx::migrate!("./migrations").run_to(18, &pool).await.unwrap();
+            sqlx::query("INSERT INTO layouts (id, name, sync, position, updated_at, revision) VALUES ('L3', '셋', '{}', 1, 50, 7)").execute(&pool).await.unwrap();
+            for (position, id, kind) in [(0, "c", "chart"), (1, "w", "watchlist"), (2, "s", "screener"), (3, "o", "objects")] {
+                let (symbol, period, settings) = if kind == "chart" { (Some("005930"), Some("D"), Some("{}")) } else { (None, None, None) };
+                let venue = if kind == "chart" { Some("combined") } else { None };
+                sqlx::query("INSERT INTO layout_windows (layout_id, id, position, kind, symbol, venue, period, chart_settings) VALUES ('L3', ?, ?, ?, ?, ?, ?, ?)")
+                    .bind(id).bind(position).bind(kind).bind(symbol).bind(venue).bind(period).bind(settings).execute(&pool).await.unwrap();
+            }
+            sqlx::query(
+                "INSERT INTO drawings (id, symbol, tool, points, style, locked, hidden, z, scope, layout_id, window_id, updated_at, revision) VALUES
+                 ('D1', '005930', 'hline', '[{\"t\":1,\"price\":2}]', '{}', 0, 1, 0, 'cell', 'L3', 'c', 40, 41),
+                 ('D2', '005930', 'hline', '[{\"t\":1,\"price\":2}]', '{}', 1, 0, 1, 'layout', 'L3', NULL, 40, 42)",
+            )
+            .execute(&pool).await.unwrap();
+            pool.close().await;
+        }
+        let db = AppDb::open(&path).await.unwrap();
+        let migrated = get_layout(&db, "L3").await.unwrap();
+        assert_eq!(kinds(&migrated), [("c", "chart".into(), None), ("w", "watchlist".into(), None), ("s", "screener".into(), None)], "개체 목록 창만 없어진다");
+        let drawings = crate::drawings::list_drawings_of(&db, "005930").await.unwrap();
+        let seen: Vec<_> = drawings.iter().map(|d| (d.id.as_str(), d.hidden, d.locked, d.revision)).collect();
+        assert_eq!(seen, [("D1", false, false, Revision(41)), ("D2", false, true, Revision(42))], "숨겼던 드로잉도 보이고 revision은 그대로다");
+        assert_eq!(drawings[0].scope, crate::drawing_api::DrawingScope::Cell { layout_id: "L3".into(), window_id: window_id("c") });
+    }
+
+    #[test]
+    fn a_layout_body_with_an_objects_window_is_rejected_as_an_unknown_kind() {
+        let body = json!({"id": "L2", "name": "둘", "sync": {}, "revision": 1, "placement": {}, "windows": [
+            {"id": "c", "link": null, "kind": "chart", "symbol": "005930", "venue": "krx", "period": "D", "chartSettings": {}},
+            {"id": "o", "link": null, "kind": "objects"}
+        ]});
+        assert!(serde_json::from_value::<LayoutInput>(body).is_err());
     }
 
     #[tokio::test]
@@ -673,7 +711,7 @@ mod tests {
         assert_eq!(seeded.name, "기본");
         assert_eq!(
             kinds(&seeded),
-            [("cell-0", "chart".into(), None), ("watchlist", "watchlist".into(), None), ("screener", "screener".into(), None), ("objects", "objects".into(), None)]
+            [("cell-0", "chart".into(), None), ("watchlist", "watchlist".into(), None), ("screener", "screener".into(), None)]
         );
         assert!(matches!(&seeded.windows[0].content, WindowContent::Chart { feed: crate::api::ChartFeed(domain::Feed::Index(code)), .. } if code.as_str() == "001"));
         assert!(seeded.placement.is_empty());
@@ -684,7 +722,7 @@ mod tests {
         screener.link = Some(LinkColor::C);
         let mut last = chart("last", "000660", Some(Venue::Krx));
         last.link = Some(LinkColor::J);
-        let windows = vec![screener, linked, side(WindowContent::Indicators), chart("left", "IDX:101", None), side(WindowContent::Objects), last];
+        let windows = vec![screener, linked, side(WindowContent::Indicators), chart("left", "IDX:101", None), side(WindowContent::Trades), last];
         let saved = put_layout(&db, &layout("L2", "둘", windows.clone()), UnixSeconds(100)).await.unwrap();
         let read = get_layout(&db, "L2").await.unwrap();
         assert_eq!(saved, read);

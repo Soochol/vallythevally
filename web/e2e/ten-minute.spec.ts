@@ -5,7 +5,7 @@ import type { SeriesKey } from "../src/api/bars";
 import type { Drawing } from "../src/api/generated/Drawing";
 import type { Layout } from "../src/api/generated/Layout";
 import { type Scenario, cell, chartOf, DEFAULT_LAYOUT_ID, expect, test, firstChart, withFirstChart, pickDesktopVenue } from "./harness";
-import { expandDock } from "./drawing-probe";
+import { mirror } from "./drawing-probe";
 
 const TEN_MINUTES = 600;
 
@@ -241,13 +241,13 @@ test.describe("분석 도구", () => {
     await expect.poll(shown).toBe(1);
     const periods = page.getByRole("toolbar", { name: "차트 도구 막대" }).getByRole("group", { name: "봉 주기" });
     const pick = async (item: string) => {
-      await page.getByRole("region", { name: "개체 목록" }).getByRole("button", { name: "고르기: 수평선" }).click();
+      const line = (await mirror(page))[0]!.points[0]!;
+      const box = (await chartOf(cell(page)).boundingBox())!;
+      await page.mouse.click(box.x + box.width / 2, box.y + line.y);
       await page.getByRole("button", { name: "드로잉 더 보기" }).click();
       await page.getByRole("menuitem", { name: item, exact: true }).click();
     };
 
-    await expandDock(page);
-    await page.getByRole("button", { name: "개체 목록 열기" }).click();
     await pick("분봉만");
     await expect.poll(savedPeriods).toEqual(["1m", "3m", "5m", "10m", "15m", "30m", "60m"]);
     await choose(periods, "일");

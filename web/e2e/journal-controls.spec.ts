@@ -6,7 +6,7 @@ import { parseDrawingBody, recordKey, UNSAVED_PREFIX } from "../src/chart/drawin
 import { parseJournalRecord, stageKey, STAGING_PREFIX, COMPLETION_PREFIX, completionKey } from "../src/chart/drawings/journal";
 import { test, expect, cell, chartOf, type Scenario } from "./harness";
 import type {} from "./journal-probe";
-import { expandDock } from "./drawing-probe";
+import { settledMirror } from "./drawing-probe";
 
 const mirror = (page: Page) => chartOf(cell(page)).locator(".drawing-mirror");
 const width = (page: Page) => page.getByRole("toolbar", { name: "드로잉 스타일" }).getByLabel("선 굵기");
@@ -24,6 +24,15 @@ async function createLine(page: Page) {
   await cell(page).focus();
   await page.keyboard.press("H");
   await page.mouse.click(bounds.x + bounds.width * 0.75, bounds.y + bounds.height * 0.4);
+}
+
+async function selectLine(page: Page) {
+  const box = await chartOf(cell(page)).boundingBox();
+  const [line] = await settledMirror(page);
+  const point = line?.points[0];
+  if (box === null || point === undefined || point === null) throw new Error("Expected the drawn line");
+    await page.mouse.click(box.x + (point.x > 0 && point.x < box.width * 0.9 ? point.x : box.width * 0.5), box.y + point.y);
+  await expect.poll(async () => (await settledMirror(page))[0]?.selected).toBe(true);
 }
 
 async function storedDrawings(scenario: Scenario) {
@@ -59,9 +68,7 @@ test("frontend journal + saved documents: delayed older admission cannot replace
     });
   }), original.id);
   try {
-    await expandDock(page);
-    await page.getByRole("button", { name: "개체 목록 열기" }).click();
-    await page.getByRole("button", { name: "고르기: 수평선" }).click();
+    await selectLine(page);
     await selectOption(width(page), "3");
     await expect(width(page)).toHaveAttribute("data-value", "3");
     await page.getByRole("button", { name: "드로잉 지우기", exact: true }).click();
@@ -138,9 +145,7 @@ test("frontend journal + saved documents: reload transmits the staged PUT's fixe
       return nativeFetch(input, init);
     };
   });
-  await expandDock(page);
-  await page.getByRole("button", { name: "개체 목록 열기" }).click();
-  await page.getByRole("button", { name: "고르기: 수평선" }).click();
+  await selectLine(page);
   await selectOption(width(page), "3");
   await expect(page.locator("html")).toHaveAttribute("data-held-drawing-put", "true");
   const raw = await page.evaluate((id) => localStorage.getItem(`vv.unsaved.drawing.${id}`), original.id);

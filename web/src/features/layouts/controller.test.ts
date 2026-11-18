@@ -104,7 +104,7 @@ test.each([false, true])("지우기 결과를 확인할 수 없으면 저장을 
     expect(sent).toHaveLength(0);
   } else {
     expect(install).not.toHaveBeenCalled();
-    expect(sent.at(-1)).toMatchObject({ id: DEFAULT_LAYOUT.id, windows: [{ period: "W" }, {}, {}, {}] });
+    expect(sent.at(-1)).toMatchObject({ id: DEFAULT_LAYOUT.id, windows: [{ period: "W" }, {}, {}] });
   }
 });
 
@@ -120,7 +120,7 @@ test("다음 레이아웃을 읽는 동안의 편집도 바꾸기 전에 원래 
   reading.resolve(stored("next"));
   await opening;
   expect(sent).toHaveLength(1);
-  expect(sent[0]).toMatchObject({ id: DEFAULT_LAYOUT.id, windows: [{ period: "W" }, {}, {}, {}] });
+  expect(sent[0]).toMatchObject({ id: DEFAULT_LAYOUT.id, windows: [{ period: "W" }, {}, {}] });
   expect(install).toHaveBeenCalledOnce();
 });
 
@@ -153,7 +153,7 @@ test("삭제는 진행 중 PUT을 모두 기다리고 DELETE 동안 저장을 �
   deletion.reject(new Error("범위 드로잉"));
   await rejected;
   await vi.advanceTimersByTimeAsync(0);
-  expect(sent.at(-1)).toMatchObject({ windows: [{ period: "Q" }, {}, {}, {}] });
+  expect(sent.at(-1)).toMatchObject({ windows: [{ period: "Q" }, {}, {}] });
   expect(install).not.toHaveBeenCalled();
 });
 
@@ -170,7 +170,7 @@ test("이름 바꾸기 거절은 제안 이름을 자동 저장하지 않고 도
   await vi.advanceTimersByTimeAsync(0);
   expect(useLayoutStore.getState().layout.name).toBe("기본");
   expect(useLayoutStore.getState().steps).toHaveLength(1);
-  expect(sent.at(-1)).toMatchObject({ name: "기본", windows: [{ period: "W" }, {}, {}] });
+  expect(sent.at(-1)).toMatchObject({ name: "기본", windows: [{ period: "W" }, {}] });
 });
 
 test("거래소 확인을 기다리는 동안의 편집도 마지막 장벽으로 저장한다", async () => {
@@ -183,7 +183,7 @@ test("거래소 확인을 기다리는 동안의 편집도 마지막 장벽으�
   useLayoutStore.getState().setPeriod(CELL, "W");
   normalized.resolve(await restoreLayout(stored("next"), { unsaved: () => null }));
   await opening;
-  expect(sent.at(-1)).toMatchObject({ id: DEFAULT_LAYOUT.id, windows: [{ period: "W" }, {}, {}, {}] });
+  expect(sent.at(-1)).toMatchObject({ id: DEFAULT_LAYOUT.id, windows: [{ period: "W" }, {}, {}] });
   expect(install).toHaveBeenCalledOnce();
 });
 
@@ -241,6 +241,6 @@ test("이름 바꾸기 성공은 도중 편집을 지키고 서버가 받은 번
   await renaming;
   await vi.advanceTimersByTimeAsync(0);
   expect(useLayoutStore.getState().layout.name).toBe("새 이름");
-  expect(sent.at(-1)).toMatchObject({ name: "새 이름", windows: [{ period: "W" }, {}, {}, {}] });
+  expect(sent.at(-1)).toMatchObject({ name: "새 이름", windows: [{ period: "W" }, {}, {}] });
   expect(sent.at(-1)!.revision).toBeGreaterThan(revision);
 });

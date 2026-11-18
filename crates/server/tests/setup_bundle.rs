@@ -227,6 +227,37 @@ async fn a_bundle_with_one_bad_document_is_refused_whole_and_names_the_document(
 }
 
 #[tokio::test]
+async fn an_old_layout_with_an_objects_window_is_imported_without_that_window_and_other_unknown_kinds_are_still_refused() {
+    let (from, into) = (machine().await, machine().await);
+    fill(&from).await;
+    let bundle = from.export().await;
+    let objects = json!({"id": "objects", "link": null, "kind": "objects"});
+    let old = with_document(&bundle, "layout", LAYOUT_TWO, |d| d["body"]["windows"].as_array_mut().unwrap().push(objects.clone()));
+
+    let (status, answer) = into.import(&old).await;
+    assert_eq!(status, 200, "{answer}");
+    let (_, saved) = into.get(&format!("/api/layouts/{LAYOUT_TWO}")).await;
+    let kinds: Vec<_> = saved["windows"].as_array().unwrap().iter().map(|w| w["kind"].as_str().unwrap()).collect();
+    assert_eq!(kinds, ["chart", "chart", "watchlist"], "개체 목록 창만 빠진 채 저장된다");
+    assert_eq!(into.snapshot().await, from.snapshot().await);
+
+    let unknown = with_document(&bundle, "layout", LAYOUT_TWO, |d| d["body"]["windows"].as_array_mut().unwrap().push(json!({"id": "x", "link": null, "kind": "nope"})));
+    let (status, answer) = into.import(&unknown).await;
+    assert_eq!(status, 400, "{answer}");
+    assert!(answer["error"]["message"].as_str().unwrap().contains(LAYOUT_TWO));
+}
+
+#[tokio::test]
+async fn a_hidden_drawing_in_a_bundle_is_stored_visible() {
+    let (from, into) = (machine().await, machine().await);
+    fill(&from).await;
+    let bundle = with_document(&from.export().await, "drawing", "D1", |d| d["body"]["hidden"] = json!(true));
+    assert_eq!(into.import(&bundle).await.0, 200);
+    let (_, stored) = into.get("/api/drawings?symbol=005930").await;
+    assert!(stored.as_array().unwrap().iter().all(|d| d["hidden"] == json!(false)), "{stored}");
+}
+
+#[tokio::test]
 async fn the_bundle_never_carries_kiwoom_keys_tokens_the_registered_ip_or_the_opendart_key() {
     let machine = machine().await;
     fill(&machine).await;

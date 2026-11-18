@@ -55,7 +55,7 @@ test("관심종목의 연동 색에 따라 종목을 그 색의 차트, 활성 �
   await expect(watchDot).toHaveAccessibleName("연동 색: 끔");
   await expect(dotOf(page, "cell-0")).toHaveAccessibleName("연동 색: A");
   await expect(dotOf(page, "cell-2")).toHaveAccessibleName("연동 색: 끔");
-  await expect(dotOf(page, "objects")).toHaveCount(0);
+  await expect(dotOf(page, "screener")).toHaveAccessibleName("연동 색: 끔");
 
   await tabOf(page, "watchlist").focus();
   await page.keyboard.press("Tab");

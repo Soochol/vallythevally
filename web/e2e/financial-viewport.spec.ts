@@ -66,8 +66,15 @@ async function open(page: Page, scenario: Scenario) {
   await held.received;
   await expect(chartOf(cell(page))).toHaveAttribute("data-bar-count", "20");
   await expect.poll(() => page.evaluate(() => Boolean(window.chartProbe) && window.financialViewportProbe.hasController())).toBe(true);
-  await page.getByRole("tab", { name: /^개체 목록/ }).click();
   return held;
+}
+
+async function selectMarker(page: Page) {
+  const box = (await chartOf(cell(page)).boundingBox())!;
+  const [from, to] = (await mirror(page)).find((drawing) => drawing.id === markerId)!.points;
+  const y = box.height * 0.1;
+  const x = from!.x! + ((y - from!.y!) * (to!.x! - from!.x!)) / (to!.y! - from!.y!);
+  await page.mouse.click(box.x + x, box.y + y);
 }
 
 async function delivered(page: Page, version: number) {
@@ -85,8 +92,9 @@ for (const limit of ["minimum", "maximum"] satisfies Limit[]) financialTest(`a w
   for (const order of ["correction painted", "correction pending"]) {
     const held = await open(page, scenario);
     await page.evaluate(() => window.financialViewportProbe.hold());
-    await page.getByRole("button", { name: "고르기: 반직선", exact: true }).click();
+    await selectMarker(page);
     await page.evaluate(() => window.financialViewportProbe.release());
+    await expect.poll(async () => (await mirror(page)).find((drawing) => drawing.id === markerId)?.selected).toBe(true);
     await viewport(page);
     held.reply({ body: financialPage(financial, "append", 1) });
     await delivered(page, 1);
