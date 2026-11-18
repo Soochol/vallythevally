@@ -13,7 +13,7 @@ use tokio_tungstenite::connect_async;
 use super::error::{Category, CodeKey, WsRejection, classify};
 use super::rest::{Access, KiwoomRest};
 pub use super::wire::{AccountEvent, AccountKind};
-use super::wire::{self, RealItem, RealType, Registrations, WsControl, WsFrame};
+use super::wire::{self, AfterHoursTotals, RealItem, RealType, Registrations, WsControl, WsFrame};
 use crate::clock::Clock;
 
 /// 0B `9081`. `_AL` 한 흐름이 KRX와 NXT 체결을 함께 준다(kiwoom.md 11.1, 11.2).
@@ -113,6 +113,7 @@ pub enum StreamEvent {
     Book { book: Box<BookSnapshot>, received_at: KstTime },
     Program { row: RealProgramTrade, received_at: KstTime },
     Broker { snapshot: BrokerSnapshot, received_at: KstTime },
+    AfterHours { totals: AfterHoursTotals, received_at: KstTime },
     /// 세션이 LOGIN을 마치고 원하는 집합을 모두 REG 했다.
     Live { since: KstTime },
     /// 세션이 끊겼다. 다음 Live까지는 체결이 빠졌을 수 있다.
@@ -784,6 +785,7 @@ impl Session {
                 Ok(RealItem::Book(book)) => StreamEvent::Book { book, received_at },
                 Ok(RealItem::Program(row)) => StreamEvent::Program { row, received_at },
                 Ok(RealItem::Broker(snapshot)) => StreamEvent::Broker { snapshot, received_at },
+                Ok(RealItem::AfterHours(totals)) => StreamEvent::AfterHours { totals, received_at },
                 Ok(RealItem::Account(event)) => {
                     let _ = self.account.events.send(event);
                     continue;
