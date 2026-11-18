@@ -12,7 +12,7 @@ const ladderRows = (page: Page) => page.getByTestId("price-ladder").locator(".mw
 function lastTrade(scenario: Scenario, price: number): void {
   const request = scenario.live.messages.find((m) => m.type === "subscribe_feed" && m.kind === "trades" && m.venue === "combined");
   if (request?.type !== "subscribe_feed") throw new Error("체결 구독이 없습니다");
-  scenario.live.emit({ type: "feed_trades", sub: request.sub, seq: 1, trades: [{ t: 1_700_000_000, price, qty: 3, venue: "krx", strength: 101.5 }] });
+  scenario.live.emit({ type: "feed_trades", sub: request.sub, seq: 1, trades: [{ t: scenario.now / 1000, price, qty: 3, venue: "krx", strength: 101.5 }] });
 }
 
 test("미체결 패널이 모든 종목의 목록을 보이고 개별 취소 요청을 보낸다", async ({ page, scenario }) => {
