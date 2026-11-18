@@ -98,7 +98,7 @@ test("휴대폰에서 고친 것이 있을 때만 저장하고, 저장하면 그
   expect((await stored(scenario)).screens).toMatchObject([{ id: "a", name: "기존 식" }, { name: "휴대폰 식", markets: ["kospi"], conditions: [] }]);
 });
 
-test("휴대폰에서 저장이 충돌하면 문구와 초안을 남기고, 다시 저장하면 다른 기기의 식을 지키며 덮어쓴다", async ({ scenario, page }) => {
+test("휴대폰에서 저장이 충돌하면 문구와 초안을 남기고 다시 저장하면 덮어쓰며, 이어 서버 오류로 실패해도 대화상자와 초안과 문구가 남고 다시 저장하면 성공한다", async ({ scenario, page }) => {
   await startPhone(scenario, page, [screenOf("a", "기존 식")]);
   const dialog = await editChosen(page);
   await nameField(dialog).fill("휴대폰 수정");
@@ -107,12 +107,28 @@ test("휴대폰에서 저장이 충돌하면 문구와 초안을 남기고, 다�
   await expect(dialog.getByRole("alert")).toContainText(STALE);
   await expect(nameField(dialog)).toHaveValue("휴대폰 수정");
   expect((await stored(scenario)).screens.map((screen) => screen.name)).toEqual(["다른 기기 수정", "다른 기기 식"]);
-  const saved = savedTo(page, "/api/screens");
+  const overwritten = savedTo(page, "/api/screens");
   await dialog.getByRole("button", { name: "저장", exact: true }).click();
-  await saved;
+  await overwritten;
   await expect(dialog).toBeHidden();
   await expect(screenChooser(page)).toHaveAccessibleName("조건식: 휴대폰 수정");
   expect((await stored(scenario)).screens.map((screen) => [screen.id, screen.name])).toEqual([["a", "휴대폰 수정"], ["b", "다른 기기 식"]]);
+
+  const failing = await editChosen(page);
+  await nameField(failing).fill("실패 뒤 저장");
+  await failNextPut(page);
+  await failing.getByRole("button", { name: "저장", exact: true }).click();
+  await expect(failing.getByRole("alert")).toContainText("저장하지 못했습니다");
+  await expect(nameField(failing)).toHaveValue("실패 뒤 저장");
+  await expect(failing.getByRole("button", { name: "저장", exact: true })).toBeEnabled();
+  expect((await stored(scenario)).screens.map((screen) => screen.name)).toEqual(["휴대폰 수정", "다른 기기 식"]);
+  const retried = savedTo(page, "/api/screens");
+  await failing.getByRole("button", { name: "저장", exact: true }).click();
+  await retried;
+  await expect(failing).toBeHidden();
+  await expect(screenChooser(page)).toHaveAccessibleName("조건식: 실패 뒤 저장");
+  await expect(unsaved(page)).toHaveCount(0);
+  expect((await stored(scenario)).screens.map((screen) => screen.name)).toEqual(["실패 뒤 저장", "다른 기기 식"]);
 });
 
 test("휴대폰에서 50개가 찬 목록의 새 조건식은 저장을 시도한 뒤 오류를 보이고 보내지 않으며, 닫아도 변경됨으로 남는다", async ({ scenario, page }) => {
@@ -184,25 +200,6 @@ test("조건식 초안은 휴대폰과 데스크톱 폭을 넘나들어도 남�
   const reopened = await editChosen(page);
   await expect(nameField(reopened)).toHaveValue("데스크톱 초안");
   expect((await stored(scenario)).screens.map((screen) => screen.name)).toEqual(["첫째"]);
-});
-
-test("휴대폰에서 저장이 서버 오류로 실패하면 대화상자와 초안과 문구가 남고, 다시 저장하면 성공한다", async ({ scenario, page }) => {
-  await startPhone(scenario, page, [screenOf("a", "기존 식")]);
-  const dialog = await editChosen(page);
-  await nameField(dialog).fill("실패 뒤 저장");
-  await failNextPut(page);
-  await dialog.getByRole("button", { name: "저장", exact: true }).click();
-  await expect(dialog.getByRole("alert")).toContainText("저장하지 못했습니다");
-  await expect(nameField(dialog)).toHaveValue("실패 뒤 저장");
-  await expect(dialog.getByRole("button", { name: "저장", exact: true })).toBeEnabled();
-  expect((await stored(scenario)).screens.map((screen) => screen.name)).toEqual(["기존 식"]);
-  const saved = savedTo(page, "/api/screens");
-  await dialog.getByRole("button", { name: "저장", exact: true }).click();
-  await saved;
-  await expect(dialog).toBeHidden();
-  await expect(screenChooser(page)).toHaveAccessibleName("조건식: 실패 뒤 저장");
-  await expect(unsaved(page)).toHaveCount(0);
-  expect((await stored(scenario)).screens.map((screen) => screen.name)).toEqual(["실패 뒤 저장"]);
 });
 
 test("휴대폰에서 삭제가 서버 오류로 실패하면 대화상자와 문구가 남고, 다시 지우면 다음 조건식을 고른다", async ({ scenario, page }) => {
