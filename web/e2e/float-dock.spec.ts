@@ -1,6 +1,6 @@
 import type { Locator, Page } from "@playwright/test";
-import { cell, expect, test } from "./harness";
-import { expandDock } from "./drawing-probe";
+import { cell, chartOf, expect, pollSaved, test } from "./harness";
+import { chartPoint, expandDock, settledMirror } from "./drawing-probe";
 
 test.use({ clockStart: "20261109100030", viewport: { width: 1440, height: 900 } });
 
@@ -57,6 +57,48 @@ test("좁고 낮은 창에서도 막대는 창 안에 있고 가격축 방식 �
     await page.keyboard.press("Escape");
     expect(await page.evaluate(() => [document.documentElement.scrollWidth - innerWidth, document.documentElement.scrollHeight - innerHeight])).toEqual([0, 0]);
   }
+});
+
+async function trendlineAt(page: Page, from: [number, number], to: [number, number]) {
+  await cell(page).focus();
+  await page.keyboard.press("T");
+  const a = await chartPoint(page, ...from); const b = await chartPoint(page, ...to);
+  await page.mouse.move(a.x, a.y); await page.mouse.down();
+  await page.mouse.move(b.x, b.y, { steps: 10 }); await page.mouse.up();
+  await expect.poll(async () => (await settledMirror(page)).some((m) => m.selected)).toBe(true);
+  return { a, b };
+}
+
+test("위쪽 드로잉을 고르면 스타일 막대가 드로잉 가까이 위에 놓이고 도구 막대와 겹치지 않는다", async ({ page, scenario }, info) => {
+  await open(page);
+  const { a, b } = await trendlineAt(page, [0.35, 0.2], [0.6, 0.25]);
+  await pollSaved(() => scenario.documents.drawings("005930").length).toBe(1);
+  const style = page.getByRole("toolbar", { name: "드로잉 스타일" });
+  await expect(style).toBeVisible();
+  const styleBox = await boxOf(style);
+  const top = Math.min(a.y, b.y);
+  expect(styleBox.y + styleBox.height).toBeLessThanOrEqual(top);
+  expect(top - (styleBox.y + styleBox.height)).toBeLessThan(40);
+  const rail = await boxOf(dock(page));
+  expect(styleBox.x).toBeGreaterThanOrEqual(rail.x + rail.width);
+  await page.screenshot({ path: info.outputPath("1440-style-bar.png") });
+});
+
+test.describe("선택한 드로잉이 있는 1024×330 짧은 칸", () => {
+  test.use({ viewport: { width: 1024, height: 330 } });
+
+  test("스타일 막대는 칸 안에 머문다", async ({ page }) => {
+    await open(page);
+    await expect(chartOf(cell(page))).toHaveAttribute("data-bar-count", /^[1-9]\d*$/);
+    await trendlineAt(page, [0.3, 0.3], [0.6, 0.6]);
+    const style = page.getByRole("toolbar", { name: "드로잉 스타일" });
+    await expect(style).toBeVisible();
+    await page.mouse.move(4, 4);
+    await expect.poll(async () => {
+      const bar = await boxOf(style); const chart = await boxOf(chartOf(cell(page)));
+      return bar.x >= chart.x && bar.y >= chart.y && bar.x + bar.width <= chart.x + chart.width && bar.y + bar.height <= chart.y + chart.height;
+    }).toBe(true);
+  });
 });
 
 test.describe("휴대폰", () => {

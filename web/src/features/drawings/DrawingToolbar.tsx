@@ -58,30 +58,36 @@ function chartShown(layout: EditableLayout, mode: "dock" | "canvas") {
 export function DrawingToolbar() {
   const mode = useUiStore((s) => s.prefs.layoutMode);
   const shown = useLayoutStore((s) => chartShown(s.layout, mode));
-  const prefs = useUiStore((s) => s.prefs.drawing);
+  const hidden = useUiStore((s) => s.prefs.drawing.toolbarHidden);
+  const cellId = useSelectionStore((s) => s.activeCell);
+  const [help, setHelp] = useState(false);
+  const helpAnchor = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    if (!shown) return;
+    const key = (e: KeyboardEvent) => {
+      if (!ownsChartKeyboard(e) && e.code === "Slash" && e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey && !e.isComposing && !isTypingTarget(e.target) && e.target instanceof HTMLElement && e.target.closest("section[aria-label^='칸 ']") && !cellDrawing(useDrawingSession.getState(), useSelectionStore.getState().activeCell).editor) { e.preventDefault(); setHelp((v) => !v); }
+    };
+    window.addEventListener("keydown", key); return () => window.removeEventListener("keydown", key);
+  }, [shown]);
   if (!shown) return null;
-  if (prefs.toolbarHidden) return <nav data-chart-control aria-label="드로잉 도구" className="drawing-toolbar drawing-toolbar-hidden max-md:hidden">
-    <button type="button" className="draw-rail-handle" aria-label="드로잉 도구 막대 보이기" title="드로잉 도구 막대 보이기" onClick={() => setToolbarHidden(false)}><span aria-hidden="true">›</span></button>
+  const helpDialog = help && <Popover anchor={helpAnchor} follow placement="right" onClose={() => setHelp(false)} className="drawing-help" role="dialog" aria-label="드로잉 단축키"><div className="draw-dialog-head"><strong>드로잉 단축키</strong><button className="icon-btn" aria-label="도움말 닫기" onClick={() => setHelp(false)}><CloseIcon /></button></div>{gestureHelp(registeredModes()).map((h) => <p key={h.keys}><kbd>{h.keys}</kbd><span>{h.label}</span></p>)}</Popover>;
+  if (hidden) return <nav data-chart-control aria-label="드로잉 도구" className="drawing-toolbar drawing-toolbar-hidden max-md:hidden">
+    <button ref={helpAnchor} type="button" className="draw-rail-handle" aria-label="드로잉 도구 막대 보이기" title="드로잉 도구 막대 보이기" onClick={() => { setToolbarHidden(false); surfaceFor(cellId)?.focus(); }}><span aria-hidden="true">›</span></button>
+    {helpDialog}
   </nav>;
-  return <DrawingRail />;
+  return <DrawingRail help={help} setHelp={setHelp} helpAnchor={helpAnchor} helpDialog={helpDialog} />;
 }
 
-function DrawingRail() {
+interface RailHelp { help: boolean; setHelp(open: boolean): void; helpAnchor: React.RefObject<HTMLButtonElement | null>; helpDialog: React.ReactNode }
+
+function DrawingRail({ help, setHelp, helpAnchor, helpDialog }: RailHelp) {
   const active = useDrawingSession((s) => s.tool); const mode = useDrawingSession((s) => s.mode); const pinned = useDrawingSession((s) => s.pinnedTool);
   const prefs = useUiStore((s) => s.prefs.drawing); const cellId = useSelectionStore((s) => s.activeCell);
-  const [help, setHelp] = useState(false);
-  const helpButton = useRef<HTMLButtonElement>(null);
   const pinnedRun = useRef<HTMLDivElement>(null);
   const pinnedTools = prefs.pinnedTools.flatMap((id) => toolOf(id) ?? []);
   const shownPins = usePinnedRoom(pinnedRun, pinnedTools.length);
   const [lastTools, setLastTools] = useState<Partial<Record<Tool["group"], Tool>>>({});
   useEffect(() => { const tool = active && toolOf(active); if (tool) setLastTools((s) => ({ ...s, [tool.group]: tool })); }, [active]);
-  useEffect(() => {
-    const key = (e: KeyboardEvent) => {
-      if (!ownsChartKeyboard(e) && e.code === "Slash" && e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey && !e.isComposing && !isTypingTarget(e.target) && e.target instanceof HTMLElement && e.target.closest("section[aria-label^='칸 ']") && !cellDrawing(useDrawingSession.getState(), useSelectionStore.getState().activeCell).editor) { e.preventDefault(); setHelp((v) => !v); }
-    };
-    window.addEventListener("keydown", key); return () => window.removeEventListener("keydown", key);
-  }, []);
   const setTool = (tool: Tool) => { useDrawingSession.getState().setTool(cellId, tool.tool); surfaceFor(cellId)?.focus(); };
   const setPrefs = useUiStore.getState().setDrawingPrefs;
   const action = (f: () => void) => { f(); surfaceFor(cellId)?.focus(); };
@@ -106,10 +112,10 @@ function DrawingRail() {
     <MagnetButton action={action} />
     <button className="draw-tool" aria-label="연속 그리기" title="연속 그리기" aria-pressed={prefs.keepDrawing} onClick={() => action(() => setPrefs({ keepDrawing: !prefs.keepDrawing }))}><Icon path={DRAWING_ICONS.keepDrawing} /></button>
     <div className="draw-toolbar-end">
-      <button ref={helpButton} className="draw-tool" aria-label="드로잉 단축키 도움말" title="드로잉 단축키" onClick={() => setHelp(!help)}>?</button>
+      <button ref={helpAnchor} className="draw-tool" aria-label="드로잉 단축키 도움말" title="드로잉 단축키" onClick={() => setHelp(!help)}>?</button>
       <button className="draw-tool" aria-label="드로잉 도구 막대 숨기기" title="드로잉 도구 막대 숨기기" onClick={() => action(() => setToolbarHidden(true))}><CloseIcon /></button>
     </div>
-    {help && <Popover anchor={helpButton} follow placement="right" onClose={() => setHelp(false)} className="drawing-help" role="dialog" aria-label="드로잉 단축키"><div className="draw-dialog-head"><strong>드로잉 단축키</strong><button className="icon-btn" aria-label="도움말 닫기" onClick={() => setHelp(false)}><CloseIcon /></button></div>{gestureHelp(registeredModes()).map((h) => <p key={h.keys}><kbd>{h.keys}</kbd><span>{h.label}</span></p>)}</Popover>}
+    {helpDialog}
   </nav>;
 }
 
