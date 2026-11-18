@@ -26,6 +26,8 @@ export const BANNERS: Record<DaemonJudgment, Banner> = {
   version_mismatch: { tone: "warn", title: "감독 데몬과 상태 형식 버전이 달라 상태를 읽지 못합니다", alert: true },
 };
 
+export const bannerOf = (judgment: DaemonJudgment): Banner => BANNERS[judgment] ?? { tone: "idle", title: String(judgment), alert: false };
+
 export const PHASE_LABEL: Record<CollectorPhase, string> = {
   off_hours: "장 밖 대기",
   morning_prep: "아침 준비",
@@ -89,7 +91,13 @@ export function dateText(yyyymmdd: number): string {
   return `${s.slice(0, 4)}-${s.slice(4, 6)}-${s.slice(6, 8)}`;
 }
 
-export const receivedAtText = (t: UnixSeconds): string => `${formatBarTime(t, "D")} ${formatKstClockSeconds(t)}`;
+export const UNKNOWN_TIME = "알 수 없는 시각";
+
+const MAX_DISPLAYABLE_SECONDS = 8.64e12 - 86400;
+
+export const receivedAtIso = (t: UnixSeconds): string | null => (Math.abs(t) <= MAX_DISPLAYABLE_SECONDS ? new Date(t * 1000).toISOString() : null);
+
+export const receivedAtText = (t: UnixSeconds): string => (receivedAtIso(t) === null ? UNKNOWN_TIME : `${formatBarTime(t, "D")} ${formatKstClockSeconds(t)}`);
 
 const UNITS = ["B", "KB", "MB", "GB", "TB"] as const;
 

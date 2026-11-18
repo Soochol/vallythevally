@@ -235,6 +235,41 @@ test("커버리지와 디스크를 받지 못해도 나머지 구역은 보이�
   await expect(p.getByRole("region", { name: "디스크 사용량" })).toContainText("800 GB");
 });
 
+test("모르는 판단 값은 값 그대로 보이고 앱이 죽지 않는다", async ({ page: p, scenario }) => {
+  serve(scenario, "allowed", page("starting" as DaemonJudgment));
+  await openSettings(p);
+  await menuItem(p).click();
+  const band = dialog(p).getByRole("status", { name: "감독 데몬" });
+  await expect(band).toContainText("starting");
+  await expect(band).toHaveAttribute("data-judgment", "starting");
+  await expect(p.getByText("Unexpected Application Error")).toHaveCount(0);
+  await expect(dialog(p).getByRole("table", { name: "키별 상태" })).toBeVisible();
+});
+
+for (const receivedAt of [9e12, 8.64e12, 8.64e12 - 100]) {
+  test(`범위 밖 received_at ${receivedAt}은 알 수 없는 시각으로 보인다`, async ({ page: p, scenario }) => {
+    serve(scenario, "allowed", { ...page("healthy"), received_at: receivedAt });
+    await p.goto("/collector");
+    const band = p.getByRole("status", { name: "감독 데몬" });
+    await expect(band).toContainText("마지막으로 받은 상태 알 수 없는 시각");
+    await expect(band).not.toContainText("NaN");
+    await expect(band.locator("time")).toHaveCount(0);
+    await expect(p.getByRole("table", { name: "키별 상태" })).toBeVisible();
+  });
+}
+
+test("현황판을 그리다 오류가 나도 차트 화면과 설정 창의 다른 메뉴는 남는다", async ({ page: p, scenario }) => {
+  const broken = { ...STATUS, keys: null } as unknown as CollectorStatus;
+  serve(scenario, "allowed", page("healthy", broken));
+  await openSettings(p);
+  await menuItem(p).click();
+  await expect(dialog(p).getByRole("alert")).toContainText("수집 현황판을 그리지 못했습니다");
+  await expect(p.getByText("Unexpected Application Error")).toHaveCount(0);
+  await expect(cell(p)).toBeVisible();
+  await dialog(p).getByRole("tab", { name: "계정" }).click();
+  await expect(dialog(p).getByRole("tabpanel")).not.toContainText("수집 현황판을 그리지 못했습니다");
+});
+
 test.describe("360px 폭", () => {
   test.use({ viewport: { width: 360, height: 800 } });
 
@@ -243,5 +278,19 @@ test.describe("360px 폭", () => {
     await p.goto("/collector");
     await expect(p.getByRole("table", { name: "키별 상태" })).toBeVisible();
     await expect.poll(() => p.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBe(0);
+  });
+
+  test("공백 없는 긴 낱말이 있어도 현황판 main이 가로로 넘치지 않는다", async ({ page: p, scenario }) => {
+    const long = "가".repeat(120) + "A".repeat(120);
+    const status: CollectorStatus = {
+      ...STATUS,
+      observation_day: { verdict: "observed", reasons: [long] },
+      alerts: [{ at: "2026-11-18T07:35:00+09:00", kind: "plan_note", message: long }],
+    };
+    serve(scenario, "allowed", page("healthy", status));
+    await p.goto("/collector");
+    await expect(p.getByRole("list", { name: "관측일 판단 근거" })).toContainText(long);
+    await expect(p.getByRole("list", { name: "종목 목록 안내" })).toContainText(long);
+    await expect.poll(() => p.locator("main").evaluate((main) => main.scrollWidth - main.clientWidth)).toBe(0);
   });
 });
