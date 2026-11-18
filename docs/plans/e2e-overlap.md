@@ -2,7 +2,7 @@
 
 작성일 2026-11-18. 승인 시점의 기록이며 구현 중 바뀐 것은 반영하지 않는다.
 
-기준: `origin/main` 59834fae.
+기준: `origin/main` 8ce3e799.
 
 ## 사용자가 풀려는 문제
 
@@ -25,7 +25,7 @@
 플랜을 쓰며 확인한 것이다.
 
 - 앞 조사 보고서 `/home/dev/.claude/orch/reports/e2e-audit/e2e-audit.md`와 같은 폴더의 `tests.csv`(시험별 중앙값), `files.csv`(파일별 합), `runs/`(실행별 단계 시간), 집계 스크립트가 있다. `tests.csv`의 `file:line`은 9df69c27 무렵의 줄이다.
-- `win-dock-resize.spec.ts`와 `win-dock-junction.spec.ts`(#569)는 그 기록 뒤에 생겨 `tests.csv`에 없다. 그래서 위 표의 `win-*`는 17개이고, 지금 `origin/main`에는 19개가 있다. 대상 spec은 모두 46개다.
+- `win-dock-resize.spec.ts`, `win-dock-junction.spec.ts`(#569), `win-dock-presets.spec.ts`(#570)는 그 기록 뒤에 생겨 `tests.csv`에 없다. 그래서 위 표의 `win-*`는 17개이고, 지금 `origin/main`에는 20개가 있다. 대상 spec은 모두 47개다.
 - `web/src`에 Vitest 단위 시험 파일이 191개 있다. 대상 영역에 해당하는 것도 많다. 예: `web/src/chart/drawings/*.test.ts`, `web/src/layout/dock/*.test.ts`, `web/src/layout/canvas/*.test.ts`, `web/src/lib/screener.test.ts`, `web/src/stores/screener.test.ts`, `web/src/api/screener.test.ts`.
 - 화면 크기로 매개변수화한 시험이 있다. 예: `screener-current.spec.ts`의 `for (const width of [1440, 1024, 390, 360, 320])`, `screener-height.spec.ts`의 `surfaces`, `screener-phone.spec.ts` 전체, `screener.spec.ts`의 "휴대폰 390px"·"좁은 휴대폰" 묶음.
 - `docs/e2e-tests.md`는 시험을 쓰는 법(한 시험 한 동작, 30초 예산, 상태 기다리기, 독립성)을 정한다. 하지만 무엇을 e2e로 확인하고 무엇을 단위 시험으로 확인하는지는 적혀 있지 않다. `docs/web-checks.md`와 `docs/plans/e2e-standard.md`에도 없다.
@@ -41,12 +41,12 @@
 ## 스스로 정한 결정과 이유
 
 1. **읽기 전용 검사용 worktree(`checkout: origin/main`)로 띄운다.** 보고서의 줄 번호를 한 커밋에 고정하기 위해서다. `checkout` 없이 띄우면 사용자의 주 checkout(`/home/dev/code/vallythevally`)에서 뜨는데, 그 폴더가 어느 브랜치에 있는지 알 수 없다. 시험을 돌리거나 빌드하지 않으므로 worktree에 산출물은 생기지 않는다.
-2. **시간은 `tests.csv`를 쓰고, 줄 번호는 제목으로 맞춘다.** `tests.csv`의 줄은 옛 커밋 기준이다. 보고서의 줄은 검사용 worktree의 것으로 쓰고, 시간은 파일과 제목이 같은 `tests.csv` 행에서 가져온다. 제목이 바뀌었거나 새로 생긴 시험(`win-dock-junction.spec.ts` 등)은 시간을 "기록 없음"으로 적는다. 절감을 추측해 채우지 않는다.
+2. **시간은 `tests.csv`를 쓰고, 줄 번호는 제목으로 맞춘다.** `tests.csv`의 줄은 옛 커밋 기준이다. 보고서의 줄은 검사용 worktree의 것으로 쓰고, 시간은 파일과 제목이 같은 `tests.csv` 행에서 가져온다. 제목이 바뀌었거나 새로 생긴 시험(위 세 spec 등)은 시간을 "기록 없음"으로 적는다. 절감을 추측해 채우지 않는다.
 3. **"잃는 것 없음"에는 근거 줄을 요구한다.** 요청이 가장 신경 쓰는 칸이다. 같은 것을 확인하는 다른 e2e 시험이나 단위 시험의 파일:줄을 적지 못하면 "잃는 것 없음"이라고 쓰지 않는다. 단위 시험으로 옮기는 후보는 지금 같은 것을 확인하는 단위 시험이 있는지(있으면 파일:줄), 없으면 새로 써야 하는 단위 시험이 부를 함수(파일:줄)를 적는다.
 4. **시험 일부만 줄이는 후보의 절감은 [추정]으로 적는다.** 여정 시험에서 단언 몇 개만 빼는 경우는 시험 하나의 시간이 다 줄지 않는다. 앞 조사 폴더의 `runs/`에 단계 시간이 있으면 그 값을 쓰고, 없으면 [추정]으로 표시한다. 벽시계 절감은 앞 조사와 같이 합 절감을 6으로 나눠 적는다.
 5. **e2e 기준이 문서에 없다는 점을 보고서에 밝히고, 이번 조사에 쓴 기준을 적는다.** 요청의 5번(저장소 문서의 기준에 비춰 과한 것)은 기준이 문서에 있어야 판단할 수 있다. 지금 문서에는 "한 시험 한 동작"과 30초 예산만 있다. 그래서 작업자는 그 두 기준으로 판단하고, 그 밖에 쓴 기준(예: 브라우저·서버 없이 함수 하나로 확인할 수 있는 규칙은 단위 시험으로 확인한다)은 보고서 머리에 적는다. 문서에 기준을 더할지는 사용자가 정한다(아래).
 6. **병행 중인 e2e-speedup 플랜과 겹치지 않는다.** e2e-speedup은 `web/e2e`의 poll·대기를 고친다. 이 조사는 읽기만 한다. 다만 그 플랜이 머지되면 시험 시간이 줄어 이번 절감 값도 작아질 수 있다. 보고서는 절감이 `tests.csv`(e2e-speedup 전) 기준임을 밝히고, 추천 묶음이 e2e-speedup과 같은 파일을 고치게 되면 그 파일을 적는다.
-7. **작업은 하나로 둔다.** 세 영역을 나눠 병렬로 조사하면 영역을 넘는 중복(예: `win-journey`와 `screener*`가 같은 스크리너 경로를 확인)을 놓친다. 요청도 조사 작업 하나다. spec 46개, 시험 약 430개를 읽어야 하므로 프로필은 implementer로 둔다.
+7. **작업은 하나로 둔다.** 세 영역을 나눠 병렬로 조사하면 영역을 넘는 중복(예: `win-journey`와 `screener*`가 같은 스크리너 경로를 확인)을 놓친다. 요청도 조사 작업 하나다. spec 47개, 시험 약 430개를 읽어야 하므로 프로필은 implementer로 둔다.
 
 ## 작업
 
