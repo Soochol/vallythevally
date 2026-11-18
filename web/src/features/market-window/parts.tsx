@@ -27,7 +27,7 @@ export function Segmented<T extends string>({ label, options, value, onChange }:
   );
 }
 
-const INTEGRATED_KINDS: readonly WindowKind[] = ["book", "program", "brokers"];
+const INTEGRATED_KINDS: readonly WindowKind[] = ["book", "program", "brokers", "order"];
 
 export const showsIntegratedBadge = (kind: WindowKind): boolean => INTEGRATED_KINDS.includes(kind);
 

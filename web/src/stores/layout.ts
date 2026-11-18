@@ -3,6 +3,7 @@ import type { LayoutSync } from "../api/generated/LayoutSync";
 import type { LayoutWindow } from "../api/generated/LayoutWindow";
 import type { LinkColor } from "../api/generated/LinkColor";
 import type { Period } from "../api/generated/Period";
+import type { Venue } from "../api/generated/Venue";
 import type { IndicatorSpec, Placement as IndicatorPlacement } from "../chart/indicators/kinds";
 import type { SymbolInfo } from "../api/generated/SymbolInfo";
 import type { SymbolCode } from "../api/generated/SymbolCode";
@@ -25,7 +26,19 @@ type ChartWindowWire = Extract<LayoutWindow, { kind: "chart" }>;
 export type OtherWindowKind = Exclude<LayoutWindow, { kind: "chart" }>["kind"];
 
 export type ChartWindowState = Omit<ChartWindowWire, "id" | "chartSettings" | "venue"> & { id: WindowId; chartSettings: ChartSettings };
-export type OtherWindowState = { id: WindowId; link: LinkColor | null; kind: OtherWindowKind };
+export type OrderWindowState = { id: WindowId; link: LinkColor | null; kind: "order"; venue: Venue };
+export type OtherWindowState = { id: WindowId; link: LinkColor | null; kind: Exclude<OtherWindowKind, "order"> } | OrderWindowState;
+
+export const DEFAULT_ORDER_VENUE: Venue = "krx";
+
+export function blankWindow(id: WindowId, kind: OtherWindowKind): OtherWindowState {
+  return kind === "order" ? { id, link: null, kind, venue: DEFAULT_ORDER_VENUE } : { id, link: null, kind };
+}
+
+export const orderVenue = (layout: EditableLayout, id: WindowId): Venue => {
+  const window = layout.windows.find((w) => w.id === id);
+  return window?.kind === "order" ? window.venue : DEFAULT_ORDER_VENUE;
+};
 export type WindowState = ChartWindowState | OtherWindowState;
 
 export type EditableLayout = { id: string; name: string; sync: LayoutSync; windows: WindowState[]; placement: Placement };
@@ -149,6 +162,7 @@ interface LayoutState {
   setSymbol(cellId: WindowId, target: SymbolTarget): SymbolChange;
   sendSymbol(sender: WindowId | null, cellId: WindowId, target: SymbolTarget): SymbolChange;
   setLink(window: WindowId, link: LinkColor | null): void;
+  setOrderVenue(window: WindowId, venue: Venue): void;
   setPeriod(cellId: WindowId, p: Period): void;
   setStyle(cellId: WindowId, s: ChartStyle): void;
   setScale(cellId: WindowId, s: PriceScale): void;
@@ -300,7 +314,7 @@ export const useLayoutStore = create<LayoutState>()((set, get) => {
       if (canvasActive() && canvasArea) {
         const shown = windows.find((w) => w.kind === kind);
         const id = shown?.id ?? freeWindowId(windows, kind);
-        const next = shown ? windows : [...windows, { id, link: null, kind }];
+        const next = shown ? windows : [...windows, blankWindow(id, kind)];
         arrangeCanvas(next, bringToFront(fitCanvas(placement.canvas, windowRefs(next), canvasArea), id));
         return;
       }
@@ -313,7 +327,7 @@ export const useLayoutStore = create<LayoutState>()((set, get) => {
         return;
       }
       const id = freeWindowId(windows, kind);
-      const next = [...windows, { id, link: null, kind }];
+      const next = [...windows, blankWindow(id, kind)];
       arrangeDock(next, targetGroup ? putTab(dock, id, targetGroup) : selectTab(fitDock(placement.dock, windowRefs(next)), id));
     },
     addChart: (from, room, targetGroup) => {
@@ -367,6 +381,7 @@ export const useLayoutStore = create<LayoutState>()((set, get) => {
         return isChartWindow(w) && leader ? follow({ ...w, link }, leader) : { ...w, link };
       });
     },
+    setOrderVenue: (id, venue) => patchWindows((w) => (w.id === id && w.kind === "order" && w.venue !== venue ? { ...w, venue } : w)),
     setPeriod: (cellId, period) => patchCell(cellId, (c) => (c.period === period ? c : { ...c, period })),
     setStyle: (cellId, style) => patchSetting(cellId, "style", style),
     setScale: (cellId, scale) => patchSetting(cellId, "scale", scale),

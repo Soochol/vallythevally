@@ -1038,6 +1038,14 @@ pub enum WindowContent {
     Book,
     Program,
     Brokers,
+    Order {
+        #[serde(default = "default_order_venue")]
+        venue: Venue,
+    },
+}
+
+fn default_order_venue() -> Venue {
+    Venue::Krx
 }
 
 impl WindowContent {
