@@ -12,6 +12,7 @@ use std::sync::{Arc, Mutex};
 use domain::{BarSource, Bucket, ConfirmedBar, Feed, KstDate, KstTime, Ohlcv, Period, SeriesKey, Venue, Volume};
 
 use crate::clock::Clock;
+use crate::jump_bars::{JumpPage, JumpTable};
 use crate::kiwoom::api::{
     DailyChart, IndexDailyChart, IndexMinuteChart, IndexMonthlyChart, IndexWeeklyChart, IndexYearlyChart, MarketRequest, MinuteChart, MonthlyChart, WeeklyChart, YearlyChart,
 };
@@ -24,7 +25,7 @@ pub const DEFAULT_LIMIT: usize = 500;
 pub const MAX_LIMIT: usize = 1000;
 /// `next-key`는 15분 묵혀도 통했다(kiwoom.md §10.3). 그보다 오래되면 오늘부터 다시 따라간다.
 /// 지수 분봉만 가진 가장 이른 봉의 날짜로 건너뛴다.
-const CONT_FRESH_SECS: i64 = 15 * 60;
+pub(crate) const CONT_FRESH_SECS: i64 = 15 * 60;
 pub const IDLE_EVICT_SECS: i64 = 10 * 60;
 
 /// 시리즈를 새로 만들 때마다 받는 번호. 내렸다가 다시 만들면 바뀐다.
@@ -112,11 +113,11 @@ struct Series {
 }
 
 #[derive(Clone)]
-struct Cont {
-    key: ContKey,
+pub(crate) struct Cont {
+    pub(crate) key: ContKey,
     /// 이 키를 낸 조회의 `base_dt`. 이어 받을 때도 같은 본문을 보낸다.
-    base: KstDate,
-    received_at: KstTime,
+    pub(crate) base: KstDate,
+    pub(crate) received_at: KstTime,
     pending_months: Vec<KiwoomBar>,
     months_before: Option<KstTime>,
 }
@@ -175,20 +176,25 @@ pub struct BarService {
     next_id: AtomicU64,
     /// 07:45 비우기마다 오른다. 키움 조회의 합치기 범위다.
     resets: AtomicU64,
+    jumps: JumpTable,
 }
 
-struct Fetched {
-    rows: Vec<KiwoomBar>,
-    next: Option<Cont>,
+pub(crate) struct Fetched {
+    pub(crate) rows: Vec<KiwoomBar>,
+    pub(crate) next: Option<Cont>,
 }
 
 impl BarService {
     pub fn new(rest: KiwoomRest, symbols: Arc<SymbolDirectory>, clock: Clock) -> Self {
-        BarService { rest, symbols, clock, slots: Mutex::new(HashMap::new()), next_id: AtomicU64::new(1), resets: AtomicU64::new(0) }
+        BarService { rest, symbols, clock, slots: Mutex::new(HashMap::new()), next_id: AtomicU64::new(1), resets: AtomicU64::new(0), jumps: JumpTable::default() }
     }
 
     pub fn rest(&self) -> &KiwoomRest {
         &self.rest
+    }
+
+    pub(crate) fn now(&self) -> KstTime {
+        self.clock.now()
     }
 
     pub fn directory_updates(&self) -> tokio::sync::watch::Receiver<Option<Arc<Directory>>> {
@@ -229,6 +235,10 @@ impl BarService {
         Ok(build_page(&s, before, limit))
     }
 
+    pub async fn jump_page(&self, key: SeriesKey, date: KstDate, before: Option<KstTime>, limit: usize) -> Result<JumpPage, BarError> {
+        self.jumps.page(self, key, date, before, limit, Priority::Screen).await
+    }
+
     /// 실시간 집계기를 시작하거나 끊긴 구간을 메울 때 부른다. 언제나 키움 최신 페이지를 새로 받는다.
     /// 그사이 기다리던 `page` 요청은 이 결과를 같이 쓴다. 받은 확정 봉은 같은 `t`의 실시간 봉을 덮는다.
     pub async fn seed(&self, key: SeriesKey, prio: Priority) -> Result<Seed, BarError> {
@@ -266,7 +276,7 @@ impl BarService {
         Appended::Appended
     }
 
-    async fn check(&self, key: SeriesKey) -> Result<(), BarError> {
+    pub(crate) async fn check(&self, key: SeriesKey) -> Result<(), BarError> {
         let dir = self.symbols.ready(&self.rest).await?;
         let Some(info) = dir.get(key.feed.symbol()) else {
             return Err(BarError::UnknownSymbol);
@@ -288,6 +298,7 @@ impl BarService {
             slots.clear();
             n
         };
+        self.jumps.clear();
         tracing::info!(count = n, "시세 캐시를 모두 비웠습니다");
     }
 
@@ -297,10 +308,15 @@ impl BarService {
         self.slots.lock().expect("slots 잠금").retain(|key, slot| {
             held.contains(key) || now - slot.last_access.load(Ordering::SeqCst) < IDLE_EVICT_SECS || slot.series.try_lock().is_err()
         });
+        self.jumps.evict_idle(now);
     }
 
     pub fn series_count(&self) -> usize {
         self.slots.lock().expect("slots 잠금").len()
+    }
+
+    pub fn jump_series_count(&self) -> usize {
+        self.jumps.len()
     }
 
     /// 시리즈를 만드는 것은 요청뿐이다.
@@ -441,7 +457,7 @@ impl BarService {
         }
     }
 
-    async fn fetch_direct(&self, key: SeriesKey, base: KstDate, cont: Option<&ContKey>, prio: Priority) -> Result<Fetched, BarError> {
+    pub(crate) async fn fetch_direct(&self, key: SeriesKey, base: KstDate, cont: Option<&ContKey>, prio: Priority) -> Result<Fetched, BarError> {
         const MINUTE: &str = "달력 봉이 아니면 분봉이다";
         let p = key.period;
         match key.feed {
@@ -509,7 +525,7 @@ fn split_current(rows: &[KiwoomBar], now: KstTime) -> (Vec<ConfirmedBar>, Option
 }
 
 /// 두 오름차순 목록을 합친다. 같은 시작 시각이면 `new`가 이긴다.
-fn merge(old: Vec<ConfirmedBar>, new: Vec<ConfirmedBar>) -> Vec<ConfirmedBar> {
+pub(crate) fn merge(old: Vec<ConfirmedBar>, new: Vec<ConfirmedBar>) -> Vec<ConfirmedBar> {
     let mut all = new;
     all.extend(old);
     all.sort_by_key(|b| b.bucket.start());
@@ -517,16 +533,18 @@ fn merge(old: Vec<ConfirmedBar>, new: Vec<ConfirmedBar>) -> Vec<ConfirmedBar> {
     all
 }
 
-fn build_page(s: &Series, before: Option<KstTime>, limit: usize) -> BarPage {
-    let end = before.map_or(s.bars.len(), |b| s.bars.partition_point(|x| x.bucket.start() < b));
+pub(crate) fn window(held: &[ConfirmedBar], reached_origin: bool, before: Option<KstTime>, limit: usize) -> (Vec<ConfirmedBar>, Option<KstTime>) {
+    let end = before.map_or(held.len(), |b| held.partition_point(|x| x.bucket.start() < b));
     let start = end.saturating_sub(limit);
-    let bars = s.bars[start..end].to_vec();
-    let more = start > 0 || !s.reached_origin;
-    BarPage {
-        next_before: bars.first().filter(|_| more).map(|b| b.bucket.start()),
-        current: if before.is_none() { s.current } else { None },
-        bars,
-    }
+    let bars = held[start..end].to_vec();
+    let more = start > 0 || !reached_origin;
+    let next_before = bars.first().filter(|_| more).map(|b| b.bucket.start());
+    (bars, next_before)
+}
+
+fn build_page(s: &Series, before: Option<KstTime>, limit: usize) -> BarPage {
+    let (bars, next_before) = window(&s.bars, s.reached_origin, before, limit);
+    BarPage { next_before, current: if before.is_none() { s.current } else { None }, bars }
 }
 
 #[cfg(test)]

@@ -43,6 +43,7 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/api/symbols/{code}", get(symbol))
         .route("/api/symbols/{code}/fundamentals", get(fundamentals))
         .route("/api/bars", get(bars))
+        .route("/api/bars/jump", get(jump_bars))
         .route("/api/quotes", get(quotes))
         .route("/api/ws", get(crate::ws::upgrade))
         .merge(crate::user_routes::routes())
@@ -321,6 +322,21 @@ async fn bars(State(st): State<Arc<AppState>>, Query(q): Query<HashMap<String, S
         current,
         next_before: page.next_before.map(|t| api::UnixSeconds(t.unix())),
         seq,
+    }))
+}
+
+async fn jump_bars(State(st): State<Arc<AppState>>, Query(q): Query<HashMap<String, String>>) -> Result<Json<api::JumpBarsPage>, ApiFailure> {
+    let query = parse_bars_query(&q)?;
+    let date: api::KstDate = q.get("date").ok_or_else(|| ApiFailure::bad_request("date가 없습니다"))?.parse().map_err(ApiFailure::bad_request)?;
+    let page = st.bars.jump_page(query.key, date.0, query.before, query.limit).await.map_err(|e| Lookup::Bars.failure(e, st.clock.now()))?;
+    Ok(Json(api::JumpBarsPage {
+        symbol: api::SymbolCode(query.key.feed.symbol().as_wire()),
+        venue: query.key.feed.venue().map(api::Venue::from),
+        period: query.key.period.into(),
+        date,
+        bars: page.bars.iter().map(api::Bar::from).collect(),
+        next_before: page.next_before.map(|t| api::UnixSeconds(t.unix())),
+        unadjusted_days: page.unadjusted_days.into_iter().map(api::KstDate).collect(),
     }))
 }
 

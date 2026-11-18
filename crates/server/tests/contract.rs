@@ -92,6 +92,7 @@ fn generated_typescript_matches_the_committed_files() {
         generated::<BarField>(),
         generated::<RecentBars>(),
         generated::<BarsPage>(),
+        generated::<JumpBarsPage>(),
         generated::<BollingerBand>(),
         generated::<BollingerTest>(),
         generated::<Bound>(),

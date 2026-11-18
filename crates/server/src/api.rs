@@ -172,6 +172,19 @@ pub struct BarsPage {
     pub seq: Option<u64>,
 }
 
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct JumpBarsPage {
+    pub symbol: SymbolCode,
+    pub venue: Option<Venue>,
+    pub period: Period,
+    pub date: KstDate,
+    pub bars: Vec<Bar>,
+    pub next_before: Option<UnixSeconds>,
+    pub unadjusted_days: Vec<KstDate>,
+}
+
 /// `/api/ws` 브라우저 → 서버. `sub`는 브라우저가 정하는 연결 안에서 유일한 문자열이다.
 /// `venue` 규칙은 `GET /api/bars`와 같다(주식에서 빼면 combined, 지수에 주면 bad_request).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
