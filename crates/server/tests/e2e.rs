@@ -39,7 +39,7 @@ async fn serves_symbols_and_bars_from_injected_transport_and_never_logs_secrets(
     }
     let codes: Vec<&str> = found.as_array().expect("검색 결과").iter().map(|s| s["code"].as_str().unwrap()).collect();
     assert!(codes.contains(&"005930") && codes.contains(&"005935") && codes.len() >= 8, "{codes:?}");
-    assert!(!codes.contains(&"520100"), "ETN은 목록에 없다");
+    assert!(codes.contains(&"520100"), "ETN도 목록에 있다");
 
     let (status, info) = get(&client, &base, "/api/symbols/005930").await;
     assert_eq!((status, info["name"].as_str()), (200, Some("삼성전자")));
@@ -378,5 +378,29 @@ async fn a_ten_minute_failure_at_the_first_page_or_a_later_page_stops_only_that_
     assert_eq!((status, &later_page["error"]["reason"]), (500, &Value::from("invalid_request")), "{later_page}");
     let (status, again) = get(&client, &base, newest_path).await;
     assert_eq!((status, &again["bars"]), (200, &newest["bars"]), "이어 받기 실패 뒤에도 최신 봉은 그대로 받는다: {again}");
+    server.stop().await;
+}
+
+#[tokio::test]
+async fn an_etn_opens_as_a_symbol_and_its_bars_are_requested_by_its_code() {
+    let fake = ScriptedTransport::new();
+    let tmp = tempfile::tempdir().unwrap();
+    let server = Server::spawn(&fake, &tmp.path().join("run/server.lock"), &static_dir(tmp.path()));
+    let base = format!("http://{}", server.addr().await);
+    let client = reqwest::Client::new();
+
+    let (status, info) = get_after_symbol_list(&client, &base, "/api/symbols/520100").await;
+    assert_eq!((status, info["kind"].as_str(), info["market"].as_str()), (200, Some("etn"), Some("kospi")), "{info}");
+    let (status, found) = get(&client, &base, "/api/symbols?q=088980&kind=infrastructure").await;
+    assert_eq!((status, found[0]["code"].as_str()), (200, Some("088980")), "{found}");
+    let (status, none) = get(&client, &base, "/api/symbols?q=088980&kind=etn").await;
+    assert_eq!((status, none.as_array().map(Vec::len)), (200, Some(0)), "{none}");
+
+    fake.script("ka10081", vec![common::support::ScriptedReply { status: 200, delay: Duration::ZERO, body: serde_json::json!({"return_code": 0, "stk_cd": "520100_AL", "stk_dt_pole_chart_qry": [{"dt": "20261106", "cur_prc": "6465", "open_pric": "6400", "high_pric": "6500", "low_pric": "6300", "trde_qty": "1000", "trde_prica": "6", "upd_rt": ""}]}) }]);
+    let (status, bars) = get(&client, &base, "/api/bars?symbol=520100&period=D").await;
+    assert_eq!(status, 200, "{bars}");
+    let requested: Vec<String> = fake.calls().into_iter().filter(|call| call.api_id == "ka10081").map(|call| call.body["stk_cd"].as_str().unwrap().to_owned()).collect();
+    assert_eq!(requested.len(), 1);
+    assert!(requested[0].starts_with("520100"), "{requested:?}");
     server.stop().await;
 }

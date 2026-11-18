@@ -232,7 +232,6 @@ pub async fn fetch_directory(rest: &KiwoomRest, priority: Priority) -> Result<Di
                 screener_listing.extend(wire::screener_listing(row, &info));
                 stocks.push(info);
             }
-            Listing::Exclude => {}
             Listing::Unknown(why) => unknown.push(why),
         }
     }
@@ -392,7 +391,10 @@ mod tests {
         let symbols = SymbolDirectory::default();
         symbols.refresh(&rest, Priority::Screen).await.unwrap();
         let d = symbols.ready(&rest).await.unwrap();
-        assert_eq!(d.len(), 2 + 15 + 11, "ETN·인프라·뮤추얼펀드 다섯 행은 빠진다");
+        assert_eq!(d.len(), 2 + 15 + 11 + 5, "ETN·인프라·뮤추얼펀드 다섯 행도 든다");
+        assert_eq!(d.search("맥쿼리인프라", SearchFilter::default())[0].symbol.as_wire(), "088980");
+        let etn = d.search("레버리지", SearchFilter { kind: Some(SymbolKind::Etn), ..SearchFilter::default() });
+        assert!(!etn.is_empty() && etn.iter().all(|i| i.kind == SymbolKind::Etn), "{etn:?}");
         assert_eq!(d.search("03481K", SearchFilter::default())[0].kind, SymbolKind::Preferred);
         assert_eq!(d.search("삼성전자", SearchFilter::default())[0].symbol.as_wire(), "005930");
         let preferred = d.screener_listing().iter().find(|l| l.code.as_str() == "03481K").expect("스크리너 목록도 함께 받는다");
@@ -400,7 +402,7 @@ mod tests {
         assert_eq!(d.screener_listing().len(), 15 + 11, "검색 목록에 든 주식이 모두 스크리너 목록에 든다");
         down.store(true, Ordering::SeqCst);
         assert!(symbols.refresh(&rest, Priority::Background).await.is_err());
-        assert_eq!(symbols.ready(&rest).await.unwrap().len(), 28, "실패하면 이전 목록을 쓴다");
+        assert_eq!(symbols.ready(&rest).await.unwrap().len(), 33, "실패하면 이전 목록을 쓴다");
     }
 
     #[tokio::test(start_paused = true)]

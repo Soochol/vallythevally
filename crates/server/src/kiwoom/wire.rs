@@ -271,6 +271,7 @@ pub fn screener_listing(row: &ListingRow, info: &SymbolInfo) -> Option<ScreenerL
         SymbolKind::Preferred => Some(ExcludeKind::Preferred),
         SymbolKind::Common if info.market == Market::Kosdaq && row.is_spac() => Some(ExcludeKind::Spac),
         SymbolKind::Common | SymbolKind::Index => None,
+        SymbolKind::Etn | SymbolKind::Infrastructure | SymbolKind::MutualFund => return None,
     };
     let states = row.audit_statuses().filter_map(|(label, status)| match status {
         AuditStatus::Unknown => {
@@ -2400,8 +2401,10 @@ mod tests {
         assert_eq!(kind_of(&l, "0000D0"), Some((Etf, Kospi)));
         assert_eq!(kind_of(&l, "102780"), Some((Etf, Kospi)));
         assert_eq!(kind_of(&l, "0030R0"), Some((Reit, Kospi)));
-        for excluded in ["088980", "094800", "520100", "500095", "520066"] {
-            assert_eq!(kind_of(&l, excluded), None, "{excluded}");
+        assert_eq!(kind_of(&l, "088980"), Some((Infrastructure, Kospi)));
+        assert_eq!(kind_of(&l, "094800"), Some((MutualFund, Kospi)));
+        for etn in ["520100", "500095", "520066"] {
+            assert_eq!(kind_of(&l, etn), Some((Etn, Kospi)), "{etn}");
         }
         assert!(l.iter().all(|(_, x)| !matches!(x, Listing::Unknown(_))));
     }
@@ -2499,6 +2502,15 @@ mod tests {
         assert_eq!(kinds("12345K", "가나스팩", "10"), [Spac]);
         assert_eq!(kinds("005930", "가나스팩", "0"), [], "스팩 제외는 코스닥 보통주에만 붙는다");
         assert_eq!(kinds("005930", "가상", "0"), []);
+    }
+
+    #[test]
+    fn etn_infrastructure_and_mutual_fund_rows_make_no_screener_listing() {
+        for (code, market_code) in [("088980", "2"), ("094800", "4"), ("520100", "60"), ("520066", "70"), ("500095", "90")] {
+            let row = ListingRow { code: code.into(), name: "가상".into(), market_code: market_code.into(), ..Default::default() };
+            let Listing::Include(info) = classify(&row) else { panic!("{code}") };
+            assert!(screener_listing(&row, &info).is_none(), "{code}");
+        }
     }
 
     #[test]
