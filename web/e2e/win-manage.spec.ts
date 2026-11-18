@@ -152,10 +152,6 @@ test("이 칸 범위의 드로잉이 있는 차트 창을 닫으면 같은 종�
 
 const cellDrawing = (scenario: Scenario) => scenario.documents.saveDrawing({ id: "01900000-0000-7000-8000-0000000000d2", symbol: "005930", tool: "hline", points: [{ t: NOV9, price: findSymbol("005930")!.close }], style: {}, text: null, locked: false, hidden: false, periods: null, z: 1, group: null, scope: { kind: "cell", layoutId: DEFAULT_LAYOUT_ID, windowId: "cell-1" }, revision: 3 });
 const pollRetried = <T>(page: Page, generator: () => T | Promise<T>, options: { timeout?: number }) => pollSaved(async () => { await page.clock.fastForward(1_000); return generator(); }, options);
-const passRetryWindow = async (page: Page) => {
-  await page.clock.fastForward(6_000);
-  await fixedWait(page, 500, "가상 시간을 넘긴 뒤 복구 저장소 읽기와 재시도 요청이 서버에 닿을 실제 시간");
-};
 const unavailable = { status: 503, body: { error: { code: "internal", message: "잠시 끊김", reason: null, retryAt: null, manualActionRequired: false } } };
 const layoutScope = { kind: "layout", layoutId: DEFAULT_LAYOUT_ID };
 
@@ -376,7 +372,6 @@ for (const edit of ["새 드로잉", "탭을 고른 뒤 잠그기"] as const) {
       drawingPuts += 1;
       return { status: 400, body: { error: { code: "bad_request", message: "group: at most 100 characters", reason: null, retryAt: null, manualActionRequired: false } } };
     });
-    await page.clock.install({ time: scenario.now });
     await page.goto("/");
     await expect(cell(page, 2)).toHaveAttribute("aria-busy", "false");
     if (edit === "새 드로잉") await drawLine(page, 2);
@@ -384,7 +379,7 @@ for (const edit of ["새 드로잉", "탭을 고른 뒤 잠그기"] as const) {
       await lockDrawing(page, 2);
     }
     await expect(drawingFailed(page)).toHaveCount(1);
-    await passRetryWindow(page);
+    await fixedWait(page, 6_000, "재시도 지연 5초보다 긴 실제 시간 동안 재시도 PUT이 가지 않아야 한다");
     expect(drawingPuts).toBe(1);
   });
 }
@@ -418,7 +413,6 @@ test("저장하지 못한 레이아웃 사본으로 다시 열어도 서버가 �
   twoSamsungCharts(scenario);
   drawInCells(scenario);
   scenario.on((url, request) => isPut("/api/layouts/")(url, request), () => unavailable);
-  await page.clock.install({ time: scenario.now });
   await page.goto("/");
   await expect(cell(page, 2)).toHaveAttribute("aria-busy", "false");
   await closeButton(page, "스크리너").click();
@@ -433,7 +427,7 @@ test("저장하지 못한 레이아웃 사본으로 다시 열어도 서버가 �
   await expect(tab(page, "스크리너")).toHaveCount(0);
   await drawLine(page, 2);
   await expect(drawingFailed(page)).toHaveCount(1);
-  await passRetryWindow(page);
+  await fixedWait(page, 6_000, "재시도 지연 5초보다 긴 실제 시간 동안 재시도 PUT이 가지 않아야 한다");
   expect(drawingPuts).toBe(1);
 });
 
