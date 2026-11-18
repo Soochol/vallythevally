@@ -131,10 +131,18 @@ for (const { width, height } of surfaces) {
     await expect(metadata(page)).toHaveText(original!);
     await panel(page).getByRole("alert").scrollIntoViewIfNeeded();
     await expect(panel(page).getByRole("alert")).toBeInViewport();
-    if (width >= 768) await expandEditor(page);
-    await panel(page).getByRole("list", { name: "조건", exact: true }).scrollIntoViewIfNeeded();
-    await expect(panel(page).getByRole("list", { name: "조건", exact: true }).getByRole("listitem")).toHaveCount(3);
-    await closeEditorWindow(page);
+    if (width >= 768) {
+      await expandEditor(page);
+      await panel(page).getByRole("list", { name: "조건", exact: true }).scrollIntoViewIfNeeded();
+      await expect(panel(page).getByRole("list", { name: "조건", exact: true }).getByRole("listitem")).toHaveCount(3);
+      await closeEditorWindow(page);
+    } else {
+      await panel(page).getByRole("button", { name: "편집", exact: true }).click();
+      const phoneEditor = page.getByRole("dialog", { name: "조건식 편집", exact: true });
+      await expect(phoneEditor.getByRole("list", { name: "조건", exact: true }).getByRole("listitem")).toHaveCount(3);
+      await phoneEditor.getByRole("button", { name: "닫기", exact: true }).click();
+      await expect(phoneEditor).toBeHidden();
+    }
     const menuToggle = panel(page).getByRole("button", { name: "스크리너 메뉴", exact: true });
     await menuToggle.click();
     await expect(page.getByRole("menu", { name: "스크리너 메뉴" }).getByRole("menuitem", { name: /^새 목록/ })).toBeEnabled();
