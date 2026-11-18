@@ -552,11 +552,15 @@ async fn a_run_is_refused_while_recent_days_fill_and_when_the_store_lacks_the_ne
     assert_eq!(refusal(api.run(&unconditioned).await), (409, json!("screener_not_ready"), json!("missing_day")), "조건 0줄이어도 빈 저장소에서는 막힌다");
     assert_eq!(refusal(api.run(&every(vec![with_recent(new_high["conditions"][0].clone(), 0)])).await), (400, json!("bad_request"), Value::Null), "최근 기간은 1 이상이다");
 
-    fake.delay("ka10081", Duration::from_millis(500));
+    let recent = fake.hold("최근 채우기", |call| call.api_id == "ka10081" && call.next_key.is_none());
+    let backfill = fake.hold("과거 이어 받기", backfill_request);
     api.update().await;
+    recent.arrived().await;
     api.wait_for("최근 채우기", |s| s["update"]["phase"] == "recent").await;
     assert_eq!(refusal(api.run(&new_high).await), (409, json!("screener_not_ready"), json!("updating")));
     assert_eq!(refusal(api.run(&unconditioned).await), (409, json!("screener_not_ready"), json!("updating")), "조건 0줄이어도 최근 채우기 중에는 막힌다");
+    recent.release();
+    backfill.arrived().await;
     api.wait_for("과거 이어 받기", |s| s["update"]["phase"] == "backfill").await;
     let during_backfill = api.result(&new_high).await;
     assert_eq!((during_backfill["asOf"].clone(), hits(&during_backfill)), (json!(today.to_string()), vec![hit("200010", today), hit("200020", today)]), "과거 이어 받기 중에는 실행된다");
@@ -566,6 +570,7 @@ async fn a_run_is_refused_while_recent_days_fill_and_when_the_store_lacks_the_ne
         (excluded(0, 0), vec![hit("200010", today), hit("200020", today)]),
         "조건 0줄은 과거 봉을 요구하지 않아 과거가 덜 찬 종목도 이력 덜 참이 아니다"
     );
+    backfill.release();
     fake.reset();
     api.settled().await;
     server.stop().await;
@@ -2050,13 +2055,13 @@ async fn intraday_adjustment_and_same_day_history_updates_abort_the_whole_result
     drop(session);
     let session = intraday_session(today, 1, "1200").await;
     session._fake.set_quote_rows(vec![summary_row("300000", today, 120, 150, 3000, 17)]);
-    session._fake.delay("ka10095", Duration::from_millis(500));
-    let seen = session._fake.calls().iter().filter(|call| call.api_id == "ka10095").count();
+    let collection = session._fake.hold("요약 수집", |call| call.api_id == "ka10095");
     let request = every(vec![]);
     let running = session.api.run(&request);
     let update = async {
-        while session._fake.calls().iter().filter(|call| call.api_id == "ka10095").count() == seen { tokio::time::sleep(Duration::from_millis(5)).await; }
+        collection.arrived().await;
         session.api.update().await;
+        collection.release();
     };
     let ((status, body), _) = tokio::join!(running, update);
     assert_eq!(status, 409, "{body}");
@@ -2306,13 +2311,14 @@ async fn regression_223_adjustment_refetch_missing_midway_recovers_or_excludes_a
     let server = boot(&fake, dir.path(), &at(today, "1200"));
     let api = Api::of(&server).await;
     assert_eq!(api.run(&every(vec![])).await.0, 409);
-    fake.delay("ka10081", Duration::from_secs(5));
+    let refetch = fake.hold("수정 이력 재수집", |call| call.api_id == "ka10081");
     api.update().await;
+    refetch.arrived().await;
     api.wait_for("수정 이력 재수집", |s| s["update"]["phase"] == "backfill").await;
     api.cancel().await;
+    refetch.release();
     assert_eq!(api.run(&every(vec![])).await.0, 409, "취소로 수정 확인 필요를 해제하지 않는다");
     server.stop().await;
-    fake.delay("ka10081", Duration::ZERO);
     let server = boot(&fake, dir.path(), &at(today, "1200"));
     let api = Api::of(&server).await;
     fake.script("ka10081", vec![common::support::ScriptedReply { status: 200, body: json!({"return_code": 2, "return_msg": "[1501:입력 오류]"}), delay: Duration::ZERO }]);
