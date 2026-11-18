@@ -6,7 +6,7 @@ use std::time::Duration;
 
 use super::api::SOCKET_FILE_NAME;
 use super::status::{DaemonStatus, ObservationVerdict};
-use super::wire::{MAX_REPLY_BYTES, Reply, ReplyBody, Request, RequestKind};
+use super::wire::{API_VERSION, MAX_REPLY_BYTES, Reply, ReplyBody, Request, RequestKind};
 use crate::args::{ArgSpec, Arguments};
 use crate::collect::config::{Variables, default_state_folder, process_variables};
 
@@ -28,6 +28,7 @@ pub fn socket_path(arguments: &Arguments, process: &Variables) -> Result<PathBuf
 pub enum AskError {
     DaemonOff,
     NoAnswer,
+    VersionMismatch(u64),
     Unexpected(String),
 }
 
@@ -50,7 +51,13 @@ fn ask(socket: &Path) -> Result<Reply, AskError> {
     if line.is_empty() {
         return Err(AskError::NoAnswer);
     }
-    serde_json::from_str(&line).map_err(|error| AskError::Unexpected(format!("응답을 읽을 수 없습니다: {error}")))
+    let value: serde_json::Value = serde_json::from_str(&line).map_err(|error| AskError::Unexpected(format!("응답을 읽을 수 없습니다: {error}")))?;
+    match value.get("v").and_then(serde_json::Value::as_u64) {
+        Some(version) if version == u64::from(API_VERSION) => {}
+        Some(version) => return Err(AskError::VersionMismatch(version)),
+        None => return Err(AskError::Unexpected("응답에 형식 버전 v가 없습니다".to_owned())),
+    }
+    serde_json::from_value(value).map_err(|error| AskError::Unexpected(format!("응답을 읽을 수 없습니다: {error}")))
 }
 
 pub fn run(raw_arguments: &[String]) -> ExitCode {
@@ -81,6 +88,10 @@ pub fn run(raw_arguments: &[String]) -> ExitCode {
         }
         Err(AskError::NoAnswer) => {
             println!("데몬 응답 없음 ({}에 연결됐지만 {}초 안에 답이 없습니다)", socket.display(), ANSWER_TIMEOUT.as_secs());
+            ExitCode::FAILURE
+        }
+        Err(AskError::VersionMismatch(version)) => {
+            println!("형식 버전 불일치 (데몬은 v{version}, 이 명령은 v{API_VERSION}만 읽습니다. 데몬과 collector 실행 파일의 버전을 맞추세요)");
             ExitCode::FAILURE
         }
         Err(AskError::Unexpected(message)) => {
