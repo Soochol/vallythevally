@@ -901,14 +901,14 @@ mod tests {
         let (s, v) = json(&f.app, "/api/layouts").await;
         assert_eq!((s, v), (StatusCode::OK, json!([{"id": DEFAULT_ID, "name": "기본", "updatedAt": 0}])));
         let (s, v) = json(&f.app, &format!("/api/layouts/{DEFAULT_ID}")).await;
-        assert_eq!((s, v["windows"][0]["symbol"].as_str(), v["sync"].clone()), (StatusCode::OK, Some("IDX:001"), json!({"crosshair": true, "scroll": true})));
+        assert_eq!((s, v["windows"][0]["symbol"].as_str(), v["sync"].clone()), (StatusCode::OK, Some("IDX:001"), json!({"crosshair": true, "scroll": true, "crosshairScope": "all"})));
         let ids: Vec<&str> = v["windows"].as_array().unwrap().iter().map(|w| w["id"].as_str().unwrap()).collect();
         assert_eq!((ids, v["placement"].clone()), (vec!["cell-0", "watchlist", "screener"], json!({})));
 
         let (s, saved) = put(&f.app, "/api/layouts/L2", &two_charts("005930")).await;
         assert_eq!(s, StatusCode::OK, "{saved}");
         assert_eq!(saved["updatedAt"], 1_794_152_040, "서버 시계(2026-11-09 00:34 KST)");
-        assert_eq!(saved["sync"], json!({"crosshair": false, "scroll": true}), "빠진 키는 true");
+        assert_eq!(saved["sync"], json!({"crosshair": false, "scroll": true, "crosshairScope": "all"}), "빠진 키는 true, 범위는 모든 차트");
         assert_eq!((&saved["windows"], &saved["placement"]), (&two_charts("005930")["windows"], &two_charts("005930")["placement"]), "보낸 순서와 모양 그대로");
         assert_eq!(json(&f.app, "/api/layouts/L2").await, (StatusCode::OK, saved));
         assert_eq!(put(&f.app, "/api/layouts/L3", &json!({"id": "L3", "name": "폐지", "sync": {}, "revision": 1, "placement": {}, "windows": [
