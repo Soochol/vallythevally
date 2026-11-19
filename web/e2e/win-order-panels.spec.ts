@@ -474,7 +474,7 @@ test("체결강도는 13행, 체결은 14행부터 같은 top에 있고 새 체�
     expect(part.text).not.toMatch(/\d{2}:\d{2}:\d{2}/);
     expect(part.priceRight).toBeLessThanOrEqual(part.qtyLeft);
   }
-  const columns = await page.getByTestId("ladder-trade").evaluateAll((rows) => rows.map((row) => [...row.children].map((part) => Math.round(part.getBoundingClientRect().left * 10) / 10)));
+  const columns = await page.getByTestId("ladder-trade").evaluateAll((rows) => rows.map((row) => [row.children[0]!.getBoundingClientRect().left, row.children[1]!.getBoundingClientRect().right].map((x) => Math.round(x * 10) / 10)));
   expect(columns[0]).toEqual(columns[1]);
   lastTrade(scenario, 70_200, 3, 3);
   await expect(page.getByTestId("ladder-trade").first()).toHaveAttribute("data-price", "70200");
@@ -482,55 +482,54 @@ test("체결강도는 13행, 체결은 14행부터 같은 top에 있고 새 체�
   await expect(page.locator(".mw-trade i")).toHaveCount(0);
 });
 
-const orderGroup = (page: Page) => page.locator("[data-dock-group]").filter({ has: win(page) });
-const widthOfGroup = async (locator: Locator) => (await locator.boundingBox())!.width;
+type TradePart = { price: string | null; shown: string | null; fontSize: string; qtyScrollWidth: number; qtyClientWidth: number; qtyLeft: number; qtyRight: number; boxLeft: number; boxRight: number; priceLeft: number; priceRight: number; qtyZ: string; priceZ: string; qtyBackground: string; topAtOverlap: string | null };
 
-async function squeezeOrderWindow(page: Page, toward: number): Promise<void> {
-  const handle = (await page.getByRole("separator", { name: "좌우 창 경계" }).first().boundingBox())!;
-  const at = { x: handle.x + handle.width / 2, y: handle.y + handle.height / 2 };
-  await page.keyboard.down("Alt");
-  await page.mouse.move(at.x, at.y);
-  await page.mouse.down();
-  await page.mouse.move(toward, at.y, { steps: 10 });
-  await page.mouse.up();
-  await page.keyboard.up("Alt");
-}
+const readTradeParts = (page: Page): Promise<TradePart[]> => page.getByTestId("ladder-trade").evaluateAll((rows) => rows.map((row) => {
+  const [price, qty] = [row.children[0]!, row.children[1]!];
+  const box = row.parentElement!.getBoundingClientRect();
+  const [priceRect, qtyRect] = [price.getBoundingClientRect(), qty.getBoundingClientRect()];
+  const priceText = document.createRange();
+  priceText.selectNodeContents(price.firstChild!);
+  const priceRight = priceText.getBoundingClientRect().right;
+  const overlaps = priceRight > qtyRect.left;
+  const probe = overlaps ? document.elementFromPoint(qtyRect.left + 1, qtyRect.top + qtyRect.height / 2) : null;
+  return { price: price.textContent, shown: qty.textContent, fontSize: getComputedStyle(qty).fontSize, qtyScrollWidth: qty.scrollWidth, qtyClientWidth: qty.clientWidth, qtyLeft: qtyRect.left, qtyRight: qtyRect.right, boxLeft: box.left, boxRight: box.right, priceLeft: priceRect.left, priceRight, qtyZ: getComputedStyle(qty).zIndex, priceZ: getComputedStyle(price).zIndex, qtyBackground: getComputedStyle(qty).backgroundColor, topAtOverlap: probe === null ? null : probe === qty ? "qty" : "other" };
+}));
 
-const MILLION_TRADES: [number, number][] = [[70_000, 600], [1_234_000, 9_999_999], [9_999_000, 999_999], [70_100, 9_999], [70_200, 12_345], [70_300, 7]];
+const OVERLAP_TRADES: [number, number][] = [[70_000, 7], [70_100, 600], [70_200, 9_999], [70_300, 12_345], [70_400, 999_999], [70_500, 9_999_999]];
 
-test("호가주문창은 경계를 끌어도 최소 폭 552px 아래로 줄지 않고 그 폭에서 백만 단위 가격·수량이 겹치거나 잘리지 않으며 행끼리 열이 정렬된다", async ({ page, scenario }) => {
+test("421px 호가주문창에서 수량은 쉼표 숫자 그대로 끝까지 상자 안에 보이고 겹친 가격 위에 불투명 배경으로 놓이며 열이 정렬된다", async ({ page, scenario }) => {
   ordersOn(scenario);
-  const api = tradingApi(scenario);
+  tradingApi(scenario);
   await openOrderWindow(page, scenario);
-  await squeezeOrderWindow(page, 0);
-  await expect.poll(() => widthOfGroup(orderGroup(page))).toBe(552);
-  await squeezeOrderWindow(page, 0);
-  expect(await widthOfGroup(orderGroup(page))).toBe(552);
-  MILLION_TRADES.forEach(([price, qty], index) => lastTrade(scenario, price, index + 1, qty));
-  await expect(page.getByTestId("ladder-trade")).toHaveCount(MILLION_TRADES.length);
-  const parts = await page.getByTestId("ladder-trade").evaluateAll((rows) => rows.map((row) => {
-    const [price, qty] = [row.children[0]!, row.children[1]!];
-    const textRect = (node: Element) => {
-      const range = document.createRange();
-      range.selectNodeContents(node.firstChild!);
-      return range.getBoundingClientRect();
-    };
-    const box = row.parentElement!.getBoundingClientRect();
-    const [priceText, qtyText] = [textRect(price), textRect(qty)];
-    return { price: price.textContent, shown: qty.textContent, fontSize: getComputedStyle(qty).fontSize, priceLeft: priceText.left, priceRight: priceText.right, qtyLeft: qtyText.left, qtyRight: qtyText.right, boxLeft: box.left, boxRight: box.right, boxWidth: box.width, lefts: [price.getBoundingClientRect().left, qty.getBoundingClientRect().left], qtyBoxRight: qty.getBoundingClientRect().right };
-  }));
-  expect(parts.map((part) => part.shown)).toEqual(["7", "12,345", "9,999", "999,999", "9,999,999", "600"]);
-  expect(parts.map((part) => part.price)).toEqual(["70,300", "70,200", "70,100", "9,999,000", "1,234,000", "70,000"]);
+  await win(page).evaluate((element) => { element.style.flex = "none"; element.style.width = "421px"; });
+  OVERLAP_TRADES.forEach(([price, qty], index) => lastTrade(scenario, price, index + 1, qty));
+  await expect(page.getByTestId("ladder-trade")).toHaveCount(OVERLAP_TRADES.length);
+  const parts = await readTradeParts(page);
+  expect(parts.map((part) => part.shown)).toEqual(["9,999,999", "999,999", "12,345", "9,999", "600", "7"]);
   for (const part of parts) {
     const note = JSON.stringify(part);
     expect(part.fontSize).toBe("11px");
-    expect(part.priceLeft, note).toBeGreaterThanOrEqual(part.boxLeft);
+    expect(part.qtyScrollWidth, note).toBeLessThanOrEqual(part.qtyClientWidth);
+    expect(part.qtyLeft, note).toBeGreaterThanOrEqual(part.boxLeft);
     expect(part.qtyRight, note).toBeLessThanOrEqual(part.boxRight);
-    expect(part.priceRight, note).toBeLessThan(part.qtyLeft);
+    expect(Number(part.qtyZ), note).toBeGreaterThan(Number(part.priceZ === "auto" ? 0 : part.priceZ));
+    expect(part.qtyBackground, note).toBe("rgb(20, 25, 20)");
+    if (part.topAtOverlap !== null) expect(part.topAtOverlap, note).toBe("qty");
   }
-  expect(new Set(parts.map((part) => part.lefts.join())).size).toBe(1);
-  expect(new Set(parts.map((part) => Math.round(part.qtyBoxRight * 10))).size).toBe(1);
-  await page.screenshot({ path: "../target/ux-screens/order-min-width.png" });
+  expect(parts.filter((part) => part.topAtOverlap !== null).length).toBeGreaterThan(0);
+  expect(new Set(parts.map((part) => Math.round(part.priceLeft * 10))).size).toBe(1);
+  expect(new Set(parts.map((part) => Math.round(part.qtyRight * 10))).size).toBe(1);
+  await page.screenshot({ path: "../target/ux-screens/order-421.png" });
+});
+
+test("체결 상자 아래 8행에서도 매도 주문 칸 더블클릭은 주문을 보낸다", async ({ page, scenario }) => {
+  ordersOn(scenario);
+  const api = tradingApi(scenario);
+  await openOrderWindow(page, scenario);
+  await win(page).evaluate((element) => { element.style.flex = "none"; element.style.width = "421px"; });
+  lastTrade(scenario, 70_000, 1, 3);
+  await expect(page.getByTestId("ladder-trade")).toHaveCount(1);
   const lowest = ladderRows(page).nth(19).locator('[data-order-cell][data-side="sell"]');
   const lowestPrice = Number(await lowest.getAttribute("data-price"));
   await lowest.dblclick();
@@ -538,7 +537,7 @@ test("호가주문창은 경계를 끌어도 최소 폭 552px 아래로 줄지 �
   expect(writesTo(api, "place")[0]!.body).toMatchObject({ code: CODE, side: "sell", price: lowestPrice });
 });
 
-test("호가주문창이 넓으면 체결 수량을 쉼표 숫자 전체로 보이고 행끼리 열이 정렬된다", async ({ page, scenario }) => {
+test("호가주문창이 넓으면 가격과 수량이 겹치지 않고 둘 다 쉼표 숫자 전체로 보인다", async ({ page, scenario }) => {
   ordersOn(scenario);
   tradingApi(scenario);
   await openOrderWindow(page, scenario);
@@ -546,13 +545,12 @@ test("호가주문창이 넓으면 체결 수량을 쉼표 숫자 전체로 보�
   lastTrade(scenario, 70_000, 1, 999_999);
   lastTrade(scenario, 70_100, 2, 12_345);
   await expect(page.getByTestId("ladder-trade")).toHaveCount(2);
-  const rows = await page.getByTestId("ladder-trade").evaluateAll((items) => items.map((row) => {
-    const visible = row.children[1]!;
-    return { shown: visible.textContent, left: [...row.children].map((part) => Math.round(part.getBoundingClientRect().left * 10) / 10), priceRight: row.children[0]!.getBoundingClientRect().right, qtyLeft: visible.getBoundingClientRect().left };
-  }));
-  expect(rows.map((row) => row.shown)).toEqual(["12,345", "999,999"]);
-  expect(rows[0]!.left).toEqual(rows[1]!.left);
-  for (const row of rows) expect(row.priceRight).toBeLessThan(row.qtyLeft);
+  const parts = await readTradeParts(page);
+  expect(parts.map((part) => part.shown)).toEqual(["12,345", "999,999"]);
+  for (const part of parts) {
+    expect(part.priceRight).toBeLessThan(part.qtyLeft);
+    expect(part.topAtOverlap).toBeNull();
+  }
 });
 
 test("창을 열면 지난 체결을 pages=1로 받아 보이고 종목을 바꾸면 새 종목으로 같은 요청을 한 번 하고 그 체결을 보인다", async ({ page, scenario }) => {
@@ -595,7 +593,7 @@ test("단일가 호가에서 호가주문창은 6호가만 가운데 선 위·�
   await expect(page.getByTestId("ladder-info")).toHaveCount(7);
 
   await ladderRows(page).nth(0).locator("[data-empty]").first().dblclick();
-  await ladderRows(page).nth(19).locator("[data-empty]").last().dblclick();
+  await ladderRows(page).nth(19).locator("[data-empty]").first().dblclick();
   await cellAt(page, "buy", 69_500).dblclick();
   await pollSaved(() => writesTo(api, "place")).toHaveLength(1);
   expect(writesTo(api, "place")[0]!.body).toMatchObject({ code: CODE, side: "buy", price: 69_500 });

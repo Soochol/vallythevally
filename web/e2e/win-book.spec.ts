@@ -264,11 +264,8 @@ test("체결강도 줄이 13행, 체결 행이 14행부터의 top에 24px 간격
   }
   await expect(page.getByTestId("book-window")).not.toContainText("대량");
   await expect(page.locator(".mw-trade [class*=bar], .mw-trade i")).toHaveCount(0);
-  const columns = await page.getByTestId("ladder-trade").evaluateAll((rows) => rows.map((row) => [...row.children].map((part) => Math.round(part.getBoundingClientRect().left * 10) / 10)));
+  const columns = await page.getByTestId("ladder-trade").evaluateAll((rows) => rows.map((row) => [row.children[0]!.getBoundingClientRect().left, row.children[1]!.getBoundingClientRect().right].map((x) => Math.round(x * 10) / 10)));
   expect(columns[0]).toEqual(columns[1]);
-  expect(columns[0]![1]).toBeGreaterThan(columns[0]![0]!);
-  const qtyRights = await page.getByTestId("ladder-trade").evaluateAll((rows) => rows.map((row) => Math.round(row.children[1]!.getBoundingClientRect().right * 10) / 10));
-  expect(qtyRights[0]).toBe(qtyRights[1]);
   await emitTrade(scenario, 3, 70200, 5);
   await expect(page.getByTestId("ladder-trade").first()).toHaveAttribute("data-price", "70200");
   await expect(page.getByTestId("ladder-trade").nth(1)).toHaveAttribute("data-price", "70100");
@@ -344,50 +341,32 @@ test("창을 열면 지난 체결을 pages=1로 한 번 받아 실시간 없이 
   expect(asked.map((url) => url.searchParams.get("pages"))).toEqual(["1"]);
 });
 
-const bookGroup = (page: Page) => page.locator("[data-dock-group]").filter({ has: book(page) });
-
-async function squeezeBookWindow(page: Page): Promise<void> {
-  const handle = (await page.getByRole("separator", { name: "좌우 창 경계" }).first().boundingBox())!;
-  const at = { x: handle.x + handle.width / 2, y: handle.y + handle.height / 2 };
-  await page.keyboard.down("Alt");
-  await page.mouse.move(at.x, at.y);
-  await page.mouse.down();
-  await page.mouse.move(1440, at.y, { steps: 10 });
-  await page.mouse.up();
-  await page.keyboard.up("Alt");
-}
-
-test("10호가창은 경계를 끌어도 최소 폭 424px 아래로 줄지 않고 그 폭에서 백만 단위 가격·수량이 겹치거나 잘리지 않으며 행끼리 열이 정렬된다", async ({ page, scenario }) => {
+test("10호가창의 좁은 상자에서도 수량은 7자리까지 끝까지 보이고 겹친 가격 위에 놓인다", async ({ page, scenario }) => {
   await open(page, scenario, 70000);
-  await squeezeBookWindow(page);
-  await expect.poll(async () => (await bookGroup(page).boundingBox())!.width).toBe(424);
-  await squeezeBookWindow(page);
-  expect((await bookGroup(page).boundingBox())!.width).toBe(424);
-  const trades: [number, number][] = [[70_000, 600], [1_234_000, 9_999_999], [9_999_000, 999_999], [70_100, 9_999], [70_200, 12_345], [70_300, 7]];
+  const trades: [number, number][] = [[70_000, 7], [70_100, 600], [70_200, 9_999], [70_300, 12_345], [1_234_000, 999_999], [9_999_000, 9_999_999]];
   for (const [index, [price, qty]] of trades.entries()) await emitTrade(scenario, index + 1, price, qty);
   await expect(page.getByTestId("ladder-trade")).toHaveCount(trades.length);
   const parts = await page.getByTestId("ladder-trade").evaluateAll((rows) => rows.map((row) => {
     const [price, qty] = [row.children[0]!, row.children[1]!];
-    const textRect = (node: Element) => {
-      const range = document.createRange();
-      range.selectNodeContents(node.firstChild!);
-      return range.getBoundingClientRect();
-    };
     const box = row.parentElement!.getBoundingClientRect();
-    const [priceText, qtyText] = [textRect(price), textRect(qty)];
-    return { price: price.textContent, shown: qty.textContent, fontSize: getComputedStyle(qty).fontSize, priceLeft: priceText.left, priceRight: priceText.right, qtyLeft: qtyText.left, qtyRight: qtyText.right, boxLeft: box.left, boxRight: box.right, lefts: [price.getBoundingClientRect().left, qty.getBoundingClientRect().left], qtyBoxRight: qty.getBoundingClientRect().right };
+    const qtyRect = qty.getBoundingClientRect();
+    const priceText = document.createRange();
+    priceText.selectNodeContents(price.firstChild!);
+    const overlaps = priceText.getBoundingClientRect().right > qtyRect.left;
+    const probe = overlaps ? document.elementFromPoint(qtyRect.left + 1, qtyRect.top + qtyRect.height / 2) : null;
+    return { shown: qty.textContent, fontSize: getComputedStyle(qty).fontSize, scroll: qty.scrollWidth <= qty.clientWidth, inside: qtyRect.left >= box.left && qtyRect.right <= box.right, background: getComputedStyle(qty).backgroundColor, top: probe === null ? null : probe === qty ? "qty" : "other", priceLeft: Math.round(price.getBoundingClientRect().left * 10), qtyRight: Math.round(qtyRect.right * 10) };
   }));
-  expect(parts.map((part) => part.shown)).toEqual(["7", "12,345", "9,999", "999,999", "9,999,999", "600"]);
+  expect(parts.map((part) => part.shown)).toEqual(["9,999,999", "999,999", "12,345", "9,999", "600", "7"]);
   for (const part of parts) {
     const note = JSON.stringify(part);
     expect(part.fontSize).toBe("11px");
-    expect(part.priceLeft, note).toBeGreaterThanOrEqual(part.boxLeft);
-    expect(part.qtyRight, note).toBeLessThanOrEqual(part.boxRight);
-    expect(part.priceRight, note).toBeLessThan(part.qtyLeft);
+    expect(part.scroll, note).toBe(true);
+    expect(part.inside, note).toBe(true);
+    expect(part.background, note).toBe("rgb(20, 25, 20)");
+    if (part.top !== null) expect(part.top, note).toBe("qty");
   }
-  expect(new Set(parts.map((part) => part.lefts.join())).size).toBe(1);
-  expect(new Set(parts.map((part) => Math.round(part.qtyBoxRight * 10))).size).toBe(1);
-  await page.screenshot({ path: "../target/ux-screens/book-min-width.png" });
+  expect(new Set(parts.map((part) => part.priceLeft)).size).toBe(1);
+  expect(new Set(parts.map((part) => part.qtyRight)).size).toBe(1);
 });
 
 test("교차 가격 행 하나에 매도·매수 잔량이 함께 있고 현재가 행은 하나다", async ({ page, scenario }) => {

@@ -20,10 +20,10 @@ export const WINDOW_KINDS = Object.freeze({
   screener: { name: "스크리너", minSize: { w: 280, h: 240 }, maxCount: MAX_WINDOWS, link: "sends", home: "side" },
   indicators: { name: "지표", minSize: { w: 300, h: 200 }, maxCount: 1, link: "none", home: "side" },
   trades: { name: "체결", minSize: { w: 220, h: 200 }, maxCount: MAX_WINDOWS, link: "follows", home: "side" },
-  book: { name: "10호가", minSize: { w: 424, h: 300 }, maxCount: MAX_WINDOWS, link: "follows", home: "side" },
+  book: { name: "10호가", minSize: { w: 280, h: 300 }, maxCount: MAX_WINDOWS, link: "follows", home: "side" },
   program: { name: "프로그램 체결", minSize: { w: 260, h: 240 }, maxCount: MAX_WINDOWS, link: "follows", home: "side" },
   brokers: { name: "거래원 입체분석", minSize: { w: 360, h: 300 }, maxCount: MAX_WINDOWS, link: "follows", home: "wide" },
-  order: { name: "호가주문", minSize: { w: 552, h: 520 }, maxCount: MAX_WINDOWS, link: "follows", home: "wide" },
+  order: { name: "호가주문", minSize: { w: 420, h: 520 }, maxCount: MAX_WINDOWS, link: "follows", home: "wide" },
   ranking: { name: "순위", minSize: { w: 320, h: 240 }, maxCount: MAX_WINDOWS, link: "sends", home: "side" },
 } as const satisfies Record<LayoutWindow["kind"], WindowKindSpec>);
 
