@@ -550,6 +550,10 @@ for (const width of [421, 900]) {
       await expect(input).toHaveValue(shown);
       expect(await input.evaluate((element: HTMLInputElement) => element.scrollWidth <= element.clientWidth)).toBe(true);
     }
+    await expect(page.getByTestId("order-estimate-quantity")).toHaveText("714");
+    const clipped = (locator: Locator) => locator.evaluate((element) => element.scrollWidth > element.clientWidth);
+    expect(await clipped(page.getByTestId("order-estimate").locator(".."))).toBe(false);
+    expect(await clipped(page.locator(".od-estimate-amount"))).toBe(false);
     await presets.first().click();
     await expect(page.getByTestId("order-estimate-quantity")).toHaveText("14");
     await expect(page.getByTestId("order-estimate")).toHaveText("980,000원");
@@ -558,6 +562,25 @@ for (const width of [421, 900]) {
     expect(writesTo(api, "place")[0]!.body).toMatchObject({ side: "buy", price: BASE, quantity: 14 });
   });
 }
+
+test("금액 칸은 쉼표를 건너뛰어 지우고 가운데에 넣어도 커서가 제자리에 있다", async ({ page, scenario }) => {
+  ordersOn(scenario);
+  tradingApi(scenario);
+  await openOrderWindow(page, scenario);
+  await page.getByRole("group", { name: "수량 방식" }).getByRole("button", { name: "금액" }).click();
+  const input = page.getByRole("textbox", { name: "금액" });
+  await input.fill("1000000");
+  await input.evaluate((element: HTMLInputElement) => element.setSelectionRange(6, 6));
+  await page.keyboard.press("Backspace");
+  await page.keyboard.press("Backspace");
+  await expect(input).toHaveValue("100,000");
+  await input.fill("100000");
+  await input.evaluate((element: HTMLInputElement) => element.setSelectionRange(1, 1));
+  await page.keyboard.type("55");
+  await expect(input).toHaveValue("15,500,000");
+  await input.fill("12345678901234567890");
+  await expect(input).toHaveValue("12,345,678,901,234,567,890");
+});
 
 test("수량 방식은 칸 이름이 수량이고 예상 주문금액 줄에 수량을 따로 보이지 않는다", async ({ page, scenario }) => {
   ordersOn(scenario);
