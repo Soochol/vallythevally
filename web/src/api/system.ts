@@ -4,6 +4,7 @@ import type { KiwoomLinkStatus } from "./generated/KiwoomLinkStatus";
 import type { SystemSettings } from "./generated/SystemSettings";
 import type { KiwoomConnectInput } from "./generated/KiwoomConnectInput";
 import type { KiwoomKeyInput } from "./generated/KiwoomKeyInput";
+import type { KiwoomUsage } from "./generated/KiwoomUsage";
 import type { OrdersAccountCheck } from "./generated/OrdersAccountCheck";
 import type { OrdersStatus } from "./generated/OrdersStatus";
 import type { OrdersSwitchInput } from "./generated/OrdersSwitchInput";
@@ -58,3 +59,7 @@ export function useOrdersStatus() {
 }
 export const checkOrdersAccount = () => sendJson<OrdersAccountCheck>("POST", `${ORDERS}/check-account`, "{}");
 export const switchOrders = (input: OrdersSwitchInput) => putJson<OrdersStatus>(ORDERS, input);
+
+export function useKiwoomUsage(refreshMs: number) {
+  return useQuery({ queryKey: ["system", "kiwoom-usage"], queryFn: ({ signal }) => getJson<KiwoomUsage>(`${KIWOOM}/usage`, signal), refetchInterval: refreshMs, staleTime: 0 });
+}

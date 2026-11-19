@@ -515,6 +515,37 @@ pub struct KiwoomLinkStatus {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export)]
+pub struct KiwoomUsage {
+    pub last_minute_started_at: Option<UnixSeconds>,
+    pub total_rate_limited: u32,
+    pub trs: Vec<KiwoomUsageTr>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct KiwoomUsageTr {
+    pub api_id: String,
+    pub limit: u32,
+    pub last_minute: KiwoomUsageMinute,
+    pub total_sent: u32,
+    pub total_rate_limited: u32,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct KiwoomUsageMinute {
+    pub sent: u32,
+    pub max_per_second: u32,
+    pub max_wait_ms: u32,
+    pub rate_limited: u32,
+    pub resent: u32,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
 pub struct RegisteredIp {
     pub ip: String,
     pub at: UnixSeconds,

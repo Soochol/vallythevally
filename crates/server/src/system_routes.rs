@@ -15,6 +15,7 @@ use crate::kiwoom::ip_file::RegisteredIpFile;
 use crate::kiwoom::key_file::KeyFile;
 use crate::kiwoom::link::{ConnectStep, LinkState, Problem};
 use crate::kiwoom::private_file::FileError;
+use crate::kiwoom::rest::Usage;
 use crate::public_ip::{self, PublicIpTransport};
 
 const BODY_LIMIT: usize = 4096;
@@ -167,6 +168,7 @@ fn is_loopback_host(host: &str) -> bool {
 pub fn routes(state: Arc<AppState>) -> Router<Arc<AppState>> {
     Router::new()
         .route("/api/system/kiwoom", get(get_kiwoom))
+        .route("/api/system/kiwoom/usage", get(get_kiwoom_usage))
         .route("/api/system/kiwoom/key", put(put_key).delete(delete_key))
         .route("/api/system/kiwoom/connect", post(connect))
         .route("/api/system/kiwoom/disconnect", post(disconnect))
@@ -197,6 +199,35 @@ fn key_file_of(system: &SystemState) -> Result<&KeyFile, ApiFailure> {
 
 async fn get_kiwoom(State(st): State<Arc<AppState>>) -> Json<KiwoomLinkStatus> {
     Json(kiwoom_status(&st))
+}
+
+async fn get_kiwoom_usage(State(st): State<Arc<AppState>>) -> Json<api::KiwoomUsage> {
+    Json(kiwoom_usage(&st.rest.usage()))
+}
+
+fn kiwoom_usage(usage: &Usage) -> api::KiwoomUsage {
+    let saturating = |n: u64| u32::try_from(n).unwrap_or(u32::MAX);
+    api::KiwoomUsage {
+        last_minute_started_at: usage.last_minute_started_at.map(|t| UnixSeconds(t.unix())),
+        total_rate_limited: saturating(usage.total_rate_limited),
+        trs: usage
+            .trs
+            .iter()
+            .map(|tr| api::KiwoomUsageTr {
+                api_id: tr.api_id.to_owned(),
+                limit: tr.limit,
+                last_minute: api::KiwoomUsageMinute {
+                    sent: tr.last_minute.sent,
+                    max_per_second: tr.last_minute.max_per_second,
+                    max_wait_ms: u32::try_from(tr.last_minute.max_wait.as_millis()).unwrap_or(u32::MAX),
+                    rate_limited: tr.last_minute.rate_limited,
+                    resent: tr.last_minute.resent,
+                },
+                total_sent: saturating(tr.total_sent),
+                total_rate_limited: saturating(tr.total_rate_limited),
+            })
+            .collect(),
+    }
 }
 
 async fn put_key(State(st): State<Arc<AppState>>, body: Body) -> Result<Json<KiwoomLinkStatus>, ApiFailure> {

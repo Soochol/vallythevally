@@ -341,6 +341,34 @@ async fn saving_a_key_connects_by_itself_and_answers_without_waiting() {
 }
 
 #[tokio::test]
+async fn the_kiwoom_usage_is_empty_before_connecting_and_totals_grow_with_calls_without_any_secret() {
+    let (env, fake) = (Env::new(), ScriptedTransport::new());
+    let server = env.spawn(&fake, &[]);
+    let client = Client::of(&server).await;
+    let (status, before) = client.get("/api/system/kiwoom/usage").await;
+    assert_eq!((status, &before), (200, &json!({"lastMinuteStartedAt": null, "totalRateLimited": 0, "trs": []})));
+    assert_eq!(fake.requests(), 0, "사용률 조회는 키움을 부르지 않는다");
+
+    client.put_key(APP_KEY, APP_SECRET).await;
+    client.until_state("connected").await;
+    fake.respond_with("ka10001", 429, json!({"return_code": 5, "return_msg": "허용된 요청 개수를 초과하였습니다[1700:허용된 API 요청 개수를 초과하였습니다.]"}));
+    client.get("/api/symbols/005930/fundamentals").await;
+    let (status, usage) = client.get("/api/system/kiwoom/usage").await;
+    assert_eq!(status, 200);
+    let row = usage["trs"].as_array().unwrap().iter().find(|tr| tr["apiId"] == "ka10001").unwrap_or_else(|| panic!("{usage}"));
+    assert!(row["totalSent"].as_u64().unwrap() > 0 && row["totalRateLimited"].as_u64().unwrap() > 0, "{row}");
+    assert_eq!(row["totalSent"], fake.api_ids().iter().filter(|id| *id == "ka10001").count(), "누적 전송 수는 가짜 키움이 받은 수와 같다");
+    assert_eq!(row["limit"], 5);
+    assert_eq!(usage["totalRateLimited"], row["totalRateLimited"]);
+    let before_reading = fake.requests();
+    client.get("/api/system/kiwoom/usage").await;
+    assert_eq!(fake.requests(), before_reading);
+    for secret in [APP_KEY, APP_SECRET, token_for(APP_KEY).as_str(), "005930"] {
+        assert!(!usage.to_string().contains(secret), "사용률 응답에 {secret}가 있다: {usage}");
+    }
+}
+
+#[tokio::test]
 async fn deleting_and_saving_again_waits_out_the_issue_interval_and_then_connects_by_itself() {
     let (env, fake) = (Env::new(), ScriptedTransport::new());
     let server = env.spawn(&fake, &[("VALLY_CLOCK_START", "20261109100000")]);

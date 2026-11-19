@@ -4,6 +4,8 @@ import type { Page } from "@playwright/test";
 import type { KiwoomConnectInput } from "../src/api/generated/KiwoomConnectInput";
 import type { KiwoomKeyInput } from "../src/api/generated/KiwoomKeyInput";
 import type { KiwoomLinkStatus } from "../src/api/generated/KiwoomLinkStatus";
+import type { KiwoomUsage } from "../src/api/generated/KiwoomUsage";
+import type { KiwoomUsageTr } from "../src/api/generated/KiwoomUsageTr";
 import type { OrdersSwitchInput } from "../src/api/generated/OrdersSwitchInput";
 import type { PublicIpCheck } from "../src/api/generated/PublicIpCheck";
 import type { RegisteredIpInput } from "../src/api/generated/RegisteredIpInput";
@@ -30,6 +32,13 @@ const passTime = async (page: Page, ms: number) => {
   await page.clock.runFor(ms);
   await fixedWait(page, ms, "요청이 나가지 않았음을 보려면 원래 대기만큼 실제 시간이 지나야 한다");
 };
+
+const USAGE_PATH = "/api/system/kiwoom/usage";
+const usageTr = (apiId: string, minute: Partial<KiwoomUsageTr["lastMinute"]> = {}, rest: Partial<KiwoomUsageTr> = {}): KiwoomUsageTr => ({
+  apiId, limit: 5, totalSent: 100, totalRateLimited: 0, ...rest,
+  lastMinute: { sent: 12, maxPerSecond: 1, maxWaitMs: 0, rateLimited: 0, resent: 0, ...minute },
+});
+const usageCard = (page: Page) => panel(page).getByRole("region", { name: "호출 한도" });
 
 async function openKiwoom(page: Page) {
   await page.goto("/?symbol=005930");
@@ -471,6 +480,76 @@ test.describe("1440×900", () => {
     await expect(orders.getByRole("alert")).toContainText("확인한 계좌 끝 2자리가 계좌와 다릅니다");
     await orders.getByRole("button", { name: "취소" }).click();
     await expect(orders).toContainText("주문 사용 꺼짐");
+  });
+
+  test("호출 한도 카드: 줄을 표로 보이고 한도에 닿은 줄과 제한 응답이 있는 줄을 글자로도 표시한다", async ({ page, scenario }) => {
+    const usage: KiwoomUsage = {
+      lastMinuteStartedAt: serverSeconds(scenario) - 90,
+      totalRateLimited: 3,
+      trs: [
+        usageTr("ka10003", { sent: 19, maxPerSecond: 5, maxWaitMs: 1050 }),
+        usageTr("ka10075", { sent: 12, maxPerSecond: 1 }),
+        usageTr("ka10080", { sent: 4, maxPerSecond: 3, rateLimited: 1, resent: 1 }, { totalRateLimited: 3 }),
+        usageTr("ka99999", { sent: 1, maxPerSecond: 1 }),
+      ],
+    };
+    scenario.live.kiwoomUsage = usage;
+    await openKiwoom(page);
+    const card = usageCard(page);
+    await expect(card).toBeVisible();
+    await expect(card).toContainText(/지난 1분\(\d\d:\d\d\)/);
+    await expect(card.getByTestId("usage-total-limited")).toHaveText("서버를 켠 뒤 제한 응답 3건");
+    await expect(card.getByRole("columnheader")).toHaveText(["TR", "1분 전송", "1초 최대", "기다림 최대", "제한 응답"]);
+    const rows = card.getByRole("row");
+    await expect(rows).toHaveCount(5);
+    const busy = rows.filter({ hasText: "ka10003" });
+    await expect(busy).toContainText("체결");
+    await expect(busy).toContainText("한도에 닿음");
+    await expect(busy.getByRole("cell")).toHaveText(["19", "5 / 5", "1,050ms", "0"]);
+    await expect(busy).not.toHaveAttribute("data-warning", /.*/);
+    await expect(rows.filter({ hasText: "ka10075" })).not.toContainText("한도에 닿음");
+    const limited = rows.filter({ hasText: "ka10080" });
+    await expect(limited).toHaveAttribute("data-warning", "true");
+    await expect(limited).toContainText("제한 응답 있음");
+    await expect(limited.getByRole("cell")).toHaveText(["4", "3 / 5", "0ms", "1"]);
+    const unknown = rows.filter({ hasText: "ka99999" });
+    await expect(unknown.getByRole("rowheader")).toHaveText("ka99999");
+    await card.scrollIntoViewIfNeeded();
+    await shot(page, "kiwoom-1440x900-usage.png");
+  });
+
+  test("호출 한도 카드: 줄이 없으면 빈 상태 문구를 보이고, 1분이 지나기 전에는 1분 뒤부터 보인다고 알린다", async ({ page, scenario }) => {
+    scenario.live.kiwoomUsage = { lastMinuteStartedAt: null, totalRateLimited: 0, trs: [] };
+    await openKiwoom(page);
+    await expect(usageCard(page)).toContainText("1분 뒤부터 보입니다");
+    await expect(usageCard(page).getByRole("table")).toHaveCount(0);
+    scenario.live.kiwoomUsage = { lastMinuteStartedAt: serverSeconds(scenario), totalRateLimited: 0, trs: [] };
+    await page.getByRole("tab", { name: /^일반/ }).click();
+    await page.getByRole("tab", { name: /^키움 연결/ }).click();
+    await expect(usageCard(page)).toContainText("지난 1분에 보낸 키움 조회가 없습니다");
+    await expect(usageCard(page).getByTestId("usage-total-limited")).toHaveText("서버를 켠 뒤 제한 응답 0건");
+  });
+
+  test("호출 한도 카드: 보이는 동안 10초마다 경로를 다시 읽고 닫으면 멈춘다", async ({ page, scenario }) => {
+    await page.clock.install();
+    scenario.live.kiwoomUsage = { lastMinuteStartedAt: serverSeconds(scenario), totalRateLimited: 0, trs: [usageTr("ka10095", { sent: 14 })] };
+    await openKiwoom(page);
+    await expect(usageCard(page).getByRole("row").filter({ hasText: "ka10095" }).getByRole("cell").first()).toHaveText("14");
+    const calls = () => callsTo(scenario, "GET", USAGE_PATH).length;
+    const first = calls();
+    expect(first).toBeGreaterThan(0);
+    scenario.live.kiwoomUsage = { ...scenario.live.kiwoomUsage, trs: [usageTr("ka10095", { sent: 15 })] };
+    await page.clock.runFor(9_000);
+    await fixedWait(page, 300, "10초 전에는 다시 읽지 않았음을 보려면 요청이 나갈 만큼 실제 시간이 지나야 한다");
+    expect(calls()).toBe(first);
+    await page.clock.runFor(1_500);
+    await expect.poll(calls).toBe(first + 1);
+    await expect(usageCard(page).getByRole("row").filter({ hasText: "ka10095" }).getByRole("cell").first()).toHaveText("15");
+    await page.keyboard.press("Escape");
+    await expect(dialog(page)).toHaveCount(0);
+    await page.clock.runFor(30_000);
+    await fixedWait(page, 300, "카드를 닫은 뒤 요청이 나가지 않았음을 보려면 요청이 나갈 만큼 실제 시간이 지나야 한다");
+    expect(calls()).toBe(first + 1);
   });
 });
 
