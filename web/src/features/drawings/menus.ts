@@ -14,31 +14,34 @@ import { defaultObjectStyle } from "../../chart/drawings/objects";
 import { toolOf } from "../../chart/drawings/tools";
 import type { Period } from "../../api/generated/Period";
 import { useDrawingSession } from "../../stores/drawingSession";
-import { useUiStore } from "../../stores/ui";
+import { shortcutPreferringAlt, shortcutOf, toolActionId } from "../../lib/hotkeys";
+import { currentActionKeys, useUiStore } from "../../stores/ui";
 import type { MenuItem } from "../menu/Menu";
 
 const action = (label: string, onSelect: () => void): MenuItem => ({ kind: "action", label, onSelect });
 const glyph = (path: string) => createElement(Icon, { path, size: 14 });
 
 function jumpItems(surface: DrawingSurface): MenuItem[] {
+  const keys = currentActionKeys();
   const anchor = controllerFor(surface.cellId)?.jumpAnchor();
-  return anchor ? [{ kind: "action", label: anchor.label, icon: glyph("M4 12h13M12 6l6 6-6 6M21 5v14"), hint: "Alt+G", onSelect: () => void jumpToBar(surface.cellId) }] : [];
+  return anchor ? [{ kind: "action", label: anchor.label, icon: glyph("M4 12h13M12 6l6 6-6 6M21 5v14"), hint: shortcutOf(keys, "jump"), onSelect: () => void jumpToBar(surface.cellId) }] : [];
 }
 
 function chartItems(surface: DrawingSurface, at: ScreenPoint): MenuItem[] {
   const view = surface.host.view(); const point = surface.pointAt(at);
   if (!view || !point) return [];
+  const keys = currentActionKeys();
   const toast = useSelectionStore.getState().showToast;
   const watchlist = activeWatchlist(useWatchlistStore.getState().lists, useUiStore.getState().prefs.activeWatchlistId);
   return [
     { kind: "heading", label: [formatPrice(point.price, isIndexCode(view.symbol)), ...(point.t === null ? [] : [formatBarTime(point.t, view.period)])].join(" · ") },
-    { kind: "action", label: "이 가격에 수평선", icon: glyph(DRAWING_ICONS.hline), hint: "Alt+H", onSelect: () => surface.placeHorizontalLine(at) },
+    { kind: "action", label: "이 가격에 수평선", icon: glyph(DRAWING_ICONS.hline), hint: shortcutPreferringAlt(keys, toolActionId("hline")), onSelect: () => surface.placeHorizontalLine(at) },
     { kind: "action", label: "관심종목에 넣기", icon: createElement(PlusIcon), disabled: watchlist.symbols.includes(view.symbol), onSelect: () => { useWatchlistStore.getState().add(watchlist.id, view.symbol); toast(`${watchlist.name}에 넣었습니다`); } },
     { kind: "action", label: "축 자동 맞춤", icon: createElement(ExpandIcon, { size: 14 }), onSelect: () => surface.fitPriceScale() },
     ...jumpItems(surface),
     { kind: "separator" },
-    ...(canCopyImage() ? [{ kind: "action" as const, label: "차트 이미지 복사", icon: createElement(CopyIcon, { size: 14 }), hint: "Alt+Shift+S", onSelect: () => void saveSnapshot(surface.cellId, "copy") }] : []),
-    { kind: "action", label: "차트 이미지 내려받기", icon: createElement(CameraIcon, { size: 14 }), hint: "Alt+S", onSelect: () => void saveSnapshot(surface.cellId, "download") },
+    ...(canCopyImage() ? [{ kind: "action" as const, label: "차트 이미지 복사", icon: createElement(CopyIcon, { size: 14 }), hint: shortcutOf(keys, "snapshotCopy"), onSelect: () => void saveSnapshot(surface.cellId, "copy") }] : []),
+    { kind: "action", label: "차트 이미지 내려받기", icon: createElement(CameraIcon, { size: 14 }), hint: shortcutOf(keys, "snapshotDownload"), onSelect: () => void saveSnapshot(surface.cellId, "download") },
     { kind: "separator" },
   ];
 }

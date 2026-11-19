@@ -18,7 +18,7 @@ import type { SymbolCode } from "../../api/generated/SymbolCode";
 import type { UpdatePhase } from "../../api/generated/UpdatePhase";
 import { useScreenerStatus, useUpdateCommands } from "../../api/screener";
 import { useBeforeConnect } from "../status/beforeConnect";
-import { isTypingTarget } from "../../lib/hotkeys";
+import { isTypingTarget } from "../../lib/typingTarget";
 import { DESKTOP_QUERY, useMediaQuery } from "../../lib/media";
 import {
   dayLabel,

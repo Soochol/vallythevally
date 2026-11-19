@@ -1,5 +1,5 @@
 import { type KeyboardEvent, type ReactNode, type RefObject, useLayoutEffect, useRef, useState } from "react";
-import { isTypingTarget } from "../../lib/hotkeys";
+import { isTypingTarget } from "../../lib/typingTarget";
 import { Popover } from "../overlay/Popover";
 import { ChevronIcon, CloseIcon, MoreIcon, PenIcon, PlayIcon, SpinnerIcon, Icon, DRAWING_ICONS, PlusIcon, CopyIcon } from "../icons";
 import { ChangedBadge } from "./ChangedBadge";

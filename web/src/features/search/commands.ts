@@ -1,7 +1,7 @@
 import type { QueryClient } from "@tanstack/react-query";
 import { FIX_INVALID, type RunOutcome, type ScreenEditing } from "../screener/screenEditing";
 import { firstScreenerWindow, screenEditingFor } from "../screener/useScreenEditing";
-import { HOTKEYS } from "../../lib/hotkeys";
+import { HOTKEY_ACTIONS, shortcutOf, type ActionKeys } from "../../lib/hotkeys";
 import { DESKTOP_QUERY } from "../../lib/media";
 import { chartWindows, useLayoutStore } from "../../stores/layout";
 import { useSelectionStore } from "../../stores/selection";
@@ -34,19 +34,20 @@ export const screenerRunCommand = (editingOf: (client: QueryClient) => Pick<Scre
   },
 });
 
-export const DEFAULT_SEARCH_COMMANDS: readonly SearchCommand[] = [
-  ...HOTKEYS.flatMap(({ label, keys, action }): SearchCommand[] => {
+export const defaultSearchCommands = (keys: ActionKeys): readonly SearchCommand[] => [
+  ...HOTKEY_ACTIONS.flatMap(({ id: actionId, name: label, effect: action }): SearchCommand[] => {
+    const shortcut = shortcutOf(keys, actionId);
     switch (action.kind) {
-      case "indicators": return [{ id: "indicators", label, shortcut: keys, run: ({ cellId }) => openIndicatorCommand(cellId) }];
-      case "toggleLog": return [{ id: "log", label, shortcut: keys, run: ({ cellId }) => {
+      case "indicators": return [{ id: "indicators", label, shortcut, run: ({ cellId }) => openIndicatorCommand(cellId) }];
+      case "toggleLog": return [{ id: "log", label, shortcut, run: ({ cellId }) => {
         const layout = useLayoutStore.getState();
         const cell = chartWindows(layout.layout).find((c) => c.id === cellId);
         const next = cell && pressScale(cell.chartSettings, "log");
         if (next) layout.setScale(cellId, next);
       } }];
-      case "showWatchlist": return [{ id: "watch-panel", label, shortcut: keys, run: () => useLayoutStore.getState().showWindow("watchlist") }];
-      case "systemSettings": return [{ id: "system-settings", label, keywords: "설정 키움 연결 키 system", shortcut: keys, run: () => openSystemSettings() }];
-      case "snapshot": return [{ id: `snapshot-${action.mode}`, label, shortcut: keys, run: ({ cellId }) => saveSnapshot(cellId, action.mode) }];
+      case "showWatchlist": return [{ id: "watch-panel", label, shortcut, run: () => useLayoutStore.getState().showWindow("watchlist") }];
+      case "systemSettings": return [{ id: "system-settings", label, keywords: "설정 키움 연결 키 system", shortcut, run: () => openSystemSettings() }];
+      case "snapshot": return [{ id: `snapshot-${action.mode}`, label, shortcut, run: ({ cellId }) => saveSnapshot(cellId, action.mode) }];
       default: return [];
     }
   }),

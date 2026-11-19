@@ -1,13 +1,13 @@
 import { ownsChartKeyboard } from "../../features/overlay/topLayer";
 import type { Logical } from "lightweight-charts";
 import { formatPrice } from "../../lib/format";
-import { isTypingTarget } from "../../lib/hotkeys";
+import { isTypingTarget } from "../../lib/typingTarget";
 import { DESKTOP_QUERY } from "../../lib/media";
 import { isIndexCode } from "../../lib/symbol";
 import { cellDrawing, useDrawingSession } from "../../stores/drawingSession";
 import { useLayoutStore } from "../../stores/layout";
 import { useSelectionStore } from "../../stores/selection";
-import { useUiStore } from "../../stores/ui";
+import { currentActionKeys, useUiStore } from "../../stores/ui";
 import type { ChartExtension, ChartHost } from "../extensions";
 import { chartTimeProjection } from "../timeAxis";
 import { formatBarTime } from "../time";
@@ -19,7 +19,7 @@ import * as clipboard from "./clipboard";
 import { DrawingEdits, type ReorderDirection } from "./edits";
 import { idsInBox, shapeBounds, type NudgeKey } from "./geometry";
 import { holds, resolvePress, type DragAction, type Mods } from "./gestures";
-import { toolHotkey } from "./hotkeys";
+import { matchDrawingHotkey, type DrawingHotkey } from "../../lib/hotkeys";
 import { captures, IDLE, step, type Context, type Effect, type Input, type Interaction } from "./interaction";
 import { effectiveMagnet, ohlcSource, snap } from "./magnet";
 import type { DrawingSync } from "./sync";
@@ -322,18 +322,23 @@ export class DrawingSurface implements ChartExtension {
     const session = useDrawingSession.getState(); if (id && !this.cell().selected.includes(id)) session.select(this.cellId, [id]);
     session.patchCell(this.cellId, { popup: { x: e.clientX, y: e.clientY, id, fromChart: true } });
   }
+  private runHotkey(hotkey: DrawingHotkey) {
+    const session = useDrawingSession.getState(); const ui = useUiStore.getState(); const prefs = ui.prefs.drawing;
+    if (hotkey.kind === "tool") { if (toolOf(hotkey.tool)) session.setTool(this.cellId, hotkey.tool); }
+    else if (hotkey.kind === "select") session.setTool(this.cellId, null);
+    else if (hotkey.kind === "magnet") ui.setDrawingPrefs({ magnet: !prefs.magnet });
+    else if (hotkey.kind === "magnetStrength") ui.setDrawingPrefs({ magnetStrength: prefs.magnetStrength === "weak" ? "strong" : "weak" });
+    else ui.setDrawingPrefs({ hideAll: !prefs.hideAll });
+  }
   private onKey(e: KeyboardEvent) {
     if (e.composedPath().some((target) => target instanceof Element && target.hasAttribute("data-chart-control"))) return;
     if (ownsChartKeyboard(e) || !matchMedia(DESKTOP_QUERY).matches || isTypingTarget(e.target) || e.isComposing || this.cell().editor || useSelectionStore.getState().dialog) return;
     if (!this.host.el.parentElement?.contains(document.activeElement)) return;
     const session = useDrawingSession.getState(); const selected = this.cell().selected; const ui = useUiStore.getState(); const prefs = ui.prefs.drawing;
     const ctrl = e.ctrlKey || e.metaKey;
-    const tool = toolHotkey(e);
+    const hotkey = matchDrawingHotkey(e, currentActionKeys());
     let handled = true;
-    if (tool) { if (toolOf(tool.tool)) session.setTool(this.cellId, tool.tool); }
-    else if (e.code === "KeyV" && !ctrl && !e.altKey && !e.shiftKey) session.setTool(this.cellId, null);
-    else if (e.code === "KeyG" && !ctrl && !e.altKey) ui.setDrawingPrefs(e.shiftKey ? { magnetStrength: prefs.magnetStrength === "weak" ? "strong" : "weak" } : { magnet: !prefs.magnet });
-    else if (e.code === "KeyH" && ctrl && e.altKey) ui.setDrawingPrefs({ hideAll: !prefs.hideAll });
+    if (hotkey) this.runHotkey(hotkey);
     else if (e.code === "Escape") this.endDrawingRun();
     else if ((e.code === "Delete" || e.code === "Backspace") && selected.length) this.remove();
     else if (ctrl && e.code === "KeyC" && selected.length) this.copy();

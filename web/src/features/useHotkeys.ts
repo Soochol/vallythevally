@@ -1,6 +1,7 @@
 import { ownsChartKeyboard } from "./overlay/topLayer";
 import { useEffect } from "react";
-import { isTypingTarget, matchHotkey } from "../lib/hotkeys";
+import { matchHotkey } from "../lib/hotkeys";
+import { isTypingTarget } from "../lib/typingTarget";
 import { DESKTOP_QUERY } from "../lib/media";
 import { openIndicatorCommand } from "./indicator-command/open";
 import { PERIODS } from "../lib/symbol";
@@ -12,6 +13,7 @@ import { saveSnapshot } from "./snapshot/saveSnapshot";
 import { openSystemSettings } from "./system-settings/open";
 import { wizardVisible, useWizardStore } from "./setup-wizard/wizardOpen";
 import { useAccountStore } from "../stores/account";
+import { currentActionKeys } from "../stores/ui";
 
 /** 화면 전체의 단축키. 대화상자가 열려 있거나 입력칸에 초점이 있으면 쓰지 않는다. */
 export function useHotkeys() {
@@ -25,7 +27,7 @@ export function useHotkeys() {
         return;
       }
       if (isTypingTarget(e.target)) return;
-      const action = matchHotkey(e, matchMedia(DESKTOP_QUERY).matches ? "desktop" : "phone");
+      const action = matchHotkey(e, matchMedia(DESKTOP_QUERY).matches ? "desktop" : "phone", currentActionKeys());
       if (!action) return;
       e.preventDefault();
       if (action.kind === "systemSettings") return openSystemSettings();
