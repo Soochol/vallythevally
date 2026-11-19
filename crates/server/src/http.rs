@@ -37,6 +37,7 @@ pub struct AppState {
     pub trading: Arc<crate::trading::Trading>,
     pub rankings: crate::rankings::RankingCache,
     pub market_overview: crate::market_overview::MarketOverview,
+    pub etf: crate::etf::EtfBook,
 }
 
 pub fn router(state: Arc<AppState>) -> Router {

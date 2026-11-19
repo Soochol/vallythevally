@@ -111,6 +111,8 @@ const KNOWN_KEYS: &[&str] = &[
     "OPENDART_API_KEY",
     "VALLY_DART_BASE_URL",
     "VALLY_KIND_BASE_URL",
+    "VALLY_NAVER_BASE_URL",
+    "VALLY_ETF_PDF_DIR",
     "VALLY_PUBLIC_IP_URL",
     "VALLY_FINANCIAL_DB_PATH",
     "VALLY_MARKET_SAMPLES_DIR",
@@ -143,6 +145,8 @@ pub struct Config {
     pub opendart_api_key: Option<Secret<String>>,
     pub dart_base_url: String,
     pub kind_base_url: String,
+    pub naver_base_url: String,
+    pub etf_pdf_dir: PathBuf,
     pub public_ip_url: String,
     pub financial_db_path: PathBuf,
     pub market_samples_dir: PathBuf,
@@ -228,6 +232,7 @@ impl Config {
         }
         let dart_base_url = public_or_loopback("VALLY_DART_BASE_URL", url("VALLY_DART_BASE_URL"), "https://opendart.fss.or.kr")?;
         let kind_base_url = public_or_loopback("VALLY_KIND_BASE_URL", url("VALLY_KIND_BASE_URL"), "https://kind.krx.co.kr")?;
+        let naver_base_url = public_or_loopback("VALLY_NAVER_BASE_URL", url("VALLY_NAVER_BASE_URL"), "https://stock.naver.com")?;
         let public_ip_url = public_or_loopback("VALLY_PUBLIC_IP_URL", url("VALLY_PUBLIC_IP_URL"), "https://api.ipify.org")?;
         let account_server_url = url("VALLY_ACCOUNT_SERVER_URL").map(|value| AccountServerUrl::parse(&value).map_err(|e| ConfigError(format!("VALLY_ACCOUNT_SERVER_URL: {e}")))).transpose()?;
         if mock && account_server_url.is_some() {
@@ -287,6 +292,8 @@ impl Config {
             opendart_api_key: vars.get("OPENDART_API_KEY").filter(|s| !s.is_empty()).cloned().map(Secret::new),
             dart_base_url,
             kind_base_url,
+            naver_base_url,
+            etf_pdf_dir: vars.get("VALLY_ETF_PDF_DIR").map(PathBuf::from).unwrap_or_else(|| db_path.with_file_name("etf-pdf")),
             public_ip_url,
             financial_db_path: vars.get("VALLY_FINANCIAL_DB_PATH").map(PathBuf::from).unwrap_or_else(|| db_path.with_file_name("financials.db")),
             market_samples_dir: vars.get("VALLY_MARKET_SAMPLES_DIR").map(PathBuf::from).unwrap_or_else(|| db_path.with_file_name("market-samples")),
@@ -470,6 +477,25 @@ mod tests {
 
     fn account() -> Result<PathBuf, ConfigError> {
         Ok(PathBuf::from("/nonexistent/account.json"))
+    }
+
+    #[test]
+    fn etf_collection_defaults_to_the_real_source_beside_the_user_db_and_accepts_only_loopback_overrides() {
+        let file = vars(&[("VALLY_DB_PATH", "isolated/user.db")]);
+        let (config, warnings) = Config::from_vars(file.clone(), vars(&REAL), lock, token, key, account).unwrap();
+        assert!(warnings.is_empty());
+        assert_eq!(config.naver_base_url, "https://stock.naver.com");
+        assert_eq!(config.etf_pdf_dir, PathBuf::from("isolated/etf-pdf"));
+        let mut process = vars(&REAL);
+        process.insert("VALLY_NAVER_BASE_URL".into(), "http://127.0.0.1:19/".into());
+        process.insert("VALLY_ETF_PDF_DIR".into(), "elsewhere/pdf".into());
+        let (config, _) = Config::from_vars(file.clone(), process, lock, token, key, account).unwrap();
+        assert_eq!((config.naver_base_url.as_str(), config.etf_pdf_dir), ("http://127.0.0.1:19", PathBuf::from("elsewhere/pdf")));
+        for endpoint in ["https://example.com", "https://stock.naver.com.evil.test", "http://stock.naver.com"] {
+            let mut process = vars(&REAL);
+            process.insert("VALLY_NAVER_BASE_URL".into(), endpoint.into());
+            assert!(Config::from_vars(file.clone(), process, lock, token, key, account).is_err(), "{endpoint}");
+        }
     }
 
     #[test]
