@@ -292,6 +292,35 @@ for (const id of ["watchlist", "cell-0"]) {
   });
 }
 
+for (const link of [null, "a"] as const) {
+  test(`도킹 탭 10호가·호가주문: 연동 ${link ?? "끔"}이어도 종목 이름이 점과 겹치지 않고 탭 단추 밖에 놓인다`, async ({ page, scenario }) => {
+    const layout = scenario.documents.layout(DEFAULT_LAYOUT_ID);
+    const windows: LayoutWindow[] = [
+      chart("cell-0", "a", "005930", "D"),
+      ...layout.windows.filter((w) => w.kind !== "chart"),
+      { id: "book", link, kind: "book" },
+      { id: "order", link, kind: "order", venue: "combined" },
+    ];
+    scenario.documents.saveLayout({ ...layout, windows, placement: {}, revision: layout.revision + 1 });
+    scenario.reply((url) => url.pathname === "/api/symbols/005930/order-book", { status: 503, body: { error: { code: "internal", message: "호가 없음", reason: null, retryAt: null, manualActionRequired: false } } });
+    scenario.reply((url) => url.pathname === "/api/symbols/005930/fundamentals", { body: { symbol: "005930", upperLimit: null, lowerLimit: null } });
+    scenario.reply((url) => url.pathname === "/api/symbols/005930/trades", { body: { symbol: "005930", venue: "combined", trades: [], skippedRows: 0 } });
+    await page.goto("/");
+    for (const id of ["book", "order"]) {
+      await tabOf(page, id).click();
+      const group = windowTabs(page).locator(`.dock-tab-group:has([data-window-id="${id}"])`);
+      const name = group.locator(".window-symbol-name");
+      await expect(name).toBeVisible();
+      const dot = await boxOf(dotOf(page, id));
+      const label = await boxOf(name);
+      const tab = await boxOf(tabOf(page, id));
+      expect(label.x).toBeGreaterThanOrEqual(dot.x + dot.width);
+      expect(label.x - (dot.x + dot.width)).toBeGreaterThan(0);
+      expect(label.x).toBeGreaterThan(tab.x + tab.width);
+    }
+  });
+}
+
 test("가장 좁은 데스크톱 폭 768px에서도 견본 팝오버가 화면 안에 든다", async ({ page, scenario }) => {
   linkedCharts(scenario);
   await page.setViewportSize({ width: 768, height: 740 });
