@@ -445,8 +445,12 @@ impl MarketHub {
             if let Some(c) = self.conns.get_mut(&conn) {
                 c.feeds.insert(sub.clone(), feed);
             }
+            let was_rejected = self.rejected.contains(&old.holder(conn, &sub));
             self.release_feed(conn, &sub, old, now);
             self.manager.hold(feed.symbol, feed.holder(conn, &sub));
+            if was_rejected {
+                self.rejected.insert(feed.holder(conn, &sub));
+            }
         }
     }
 
@@ -3291,6 +3295,25 @@ mod tests {
         tokio::time::sleep(Duration::from_secs(33)).await;
         assert_eq!(desired_kinds(&h, off_nxt), BTreeSet::from([RealType::Trade, RealType::Book, RealType::AfterHours]));
         assert_eq!(crate::kiwoom::stream::seats(&h.desired.borrow()), 1);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_rejected_krx_book_that_moves_to_the_combined_code_with_the_directory_is_announced() {
+        let h = std_harness_before_the_directory();
+        live(&h).await;
+        let (conn, out) = connect(&h).await;
+        for i in 0..REALTIME_LIMIT - 1 {
+            h.hub.subscribe_feed(conn, sub(&format!("f{i}")), Symbol::parse(&listed_filler(i)).unwrap(), FeedKind::Trades, Venue::Krx);
+        }
+        let off_nxt = Symbol::parse(NOT_ON_NXT).unwrap();
+        h.hub.subscribe_feed(conn, sub("k"), off_nxt, FeedKind::Book, Venue::Krx);
+        settle().await;
+        assert!(out.take(true).messages.contains(&sub_error("k", SubErrorCode::RealtimeLimit)));
+        h.symbols.replace(listed_directory());
+        tokio::time::sleep(Duration::from_secs(2)).await;
+        let msgs = out.take(true).messages;
+        assert!(msgs.contains(&feed_subscribed("k", FeedKind::Book)), "{msgs:?}");
+        assert!(!msgs.contains(&sub_error("k", SubErrorCode::RealtimeLimit)), "{msgs:?}");
     }
 
     #[tokio::test(start_paused = true)]
