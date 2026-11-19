@@ -107,6 +107,21 @@ describe("기본 키는 지금의 단축키와 같다", () => {
     expect(drawing(key("KeyH", { metaKey: true, altKey: true }))).toEqual({ kind: "hideAll" });
   });
 
+  test("Ctrl+K와 모든 드로잉 숨기기는 지금처럼 Shift가 눌려 있어도 먹는다", () => {
+    expect(global(key("KeyK", { ctrlKey: true, shiftKey: true }))).toEqual({ kind: "search" });
+    expect(global(key("KeyK", { metaKey: true, shiftKey: true }), "phone")).toEqual({ kind: "search" });
+    expect(drawing(key("KeyH", { ctrlKey: true, altKey: true, shiftKey: true }))).toEqual({ kind: "hideAll" });
+    expect(global(key("KeyK", { ctrlKey: true, altKey: true, shiftKey: true }))).toBeNull();
+    expect(drawing(key("KeyH", { ctrlKey: true, shiftKey: true }))).toBeNull();
+  });
+
+  test("Shift를 무시하는 키도 다른 동작이 그 조합을 쓰면 그 동작이 이긴다", () => {
+    const keys = actualKeys({ "tool:text": ["Ctrl+Shift+KeyK"] });
+    expect(matchHotkey(key("KeyK", { ctrlKey: true, shiftKey: true }), "desktop", keys)).toBeNull();
+    expect(matchDrawingHotkey(key("KeyK", { ctrlKey: true, shiftKey: true }), keys)).toEqual({ kind: "tool", tool: "text" });
+    expect(matchHotkey(key("KeyK", { ctrlKey: true }), "desktop", keys)).toEqual({ kind: "search" });
+  });
+
   test("지금 단축키가 아니던 키는 아무 동작도 찾지 않는다", () => {
     for (const e of [key("KeyQ"), key("KeyQ", { altKey: true }), key("KeyG", { altKey: true, ctrlKey: true })]) {
       expect(findAction(e, DEFAULT_KEYS, "desktop")).toBeNull();
@@ -141,6 +156,7 @@ describe("키 글자", () => {
     expect(parseKey("KeyZZ")).toBeNull();
     expect(parseKey("")).toBeNull();
     expect(parseKey(3)).toBeNull();
+    for (const name of ["constructor", "toString", "valueOf", "hasOwnProperty", "__proto__"]) expect(parseKey(name), name).toBeNull();
   });
 
   test("검색 칸 제목은 앞 키 둘을 보이고, 키가 없으면 글자와 괄호를 뺀다", () => {

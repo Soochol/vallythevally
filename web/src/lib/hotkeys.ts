@@ -117,7 +117,7 @@ const CODE_LABEL: Readonly<Record<string, string>> = {
   ControlLeft: "Ctrl", ControlRight: "Ctrl", AltLeft: "Alt", AltRight: "Alt", ShiftLeft: "Shift", ShiftRight: "Shift", MetaLeft: "⌘", MetaRight: "⌘",
 };
 
-const isKnownCode = (code: string) => /^(Key[A-Z]|Digit\d|Numpad\d|F([1-9]|1[0-2]))$/.test(code) || code in CODE_LABEL;
+const isKnownCode = (code: string) => /^(Key[A-Z]|Digit\d|Numpad\d|F([1-9]|1[0-2]))$/.test(code) || Object.hasOwn(CODE_LABEL, code);
 
 const codeLabel = (code: string) => CODE_LABEL[code] ?? code.replace(/^(Key|Digit)/, "").replace(/^Numpad/, "Num ");
 
@@ -187,8 +187,17 @@ function keyIndex(keys: ActionKeys): ReadonlyMap<KeyString, HotkeyActionDef> {
 
 export const ownerOf = (keys: ActionKeys, key: KeyString): HotkeyActionDef | undefined => keyIndex(keys).get(key);
 
+const SHIFT_IGNORED_WITH_CTRL: ReadonlySet<string> = new Set(["search", "hideAll"]);
+
+function ownerIgnoringShift(e: KeyLike, keys: ActionKeys): HotkeyActionDef | undefined {
+  const combo = comboOf(e);
+  if (!combo.ctrl || !combo.shift) return undefined;
+  const owner = ownerOf(keys, keyStringOf({ ...combo, shift: false }));
+  return owner && SHIFT_IGNORED_WITH_CTRL.has(owner.id) ? owner : undefined;
+}
+
 export function findAction(e: KeyLike, keys: ActionKeys, layout: Layout): HotkeyActionDef | null {
-  const found = ownerOf(keys, keyOf(e));
+  const found = ownerOf(keys, keyOf(e)) ?? ownerIgnoringShift(e, keys);
   return found && (layout === "desktop" || !found.desktopOnly) ? found : null;
 }
 
