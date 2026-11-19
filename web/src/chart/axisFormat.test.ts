@@ -1,5 +1,5 @@
 import { expect, test, vi } from "vitest";
-import { axisPriceFormat, distinctAxisTicks, financialAxisUnit, fitAxisValue, formatAxisTicks, formatAxisValue } from "./axisFormat";
+import { axisPriceFormat, distinctAxisTicks, financialAxisUnit, fitAxisValue, formatAxisTicks, formatAxisValue, MIN_AXIS_FONT_SIZE, priceAxisFontSize } from "./axisFormat";
 
 test.each([
   [-48_054_251_000_000, "KRW", "−48.1조"],
@@ -132,5 +132,44 @@ test("맞는 첫 포맷 후보 뒤의 숫자 변환은 계산하지 않는다", 
   } finally {
     locale.mockRestore();
     Object.defineProperty(Intl.NumberFormat.prototype, "format", descriptor);
+  }
+});
+
+function stubCanvasText(glyphEm: number) {
+  let font = "";
+  const context = {
+    set font(value: string) { font = value; },
+    measureText: (text: string) => ({ width: text.length * Number.parseFloat(font) * glyphEm }),
+  };
+  vi.stubGlobal("document", { createElement: () => ({ getContext: () => context, setAttribute: () => undefined }), body: { append: () => undefined }, documentElement: {} });
+  vi.stubGlobal("getComputedStyle", () => ({ getPropertyValue: (name: string) => name === "--fs-xs" ? "11px" : "sans-serif" }));
+  return { mockRestore: () => vi.unstubAllGlobals() };
+}
+
+test("가격 글자는 7자리 가격이 맞을 때까지만 줄고 6자리 이하는 기본 크기를 지킨다", () => {
+  const canvas = stubCanvasText(0.55);
+  try {
+    expect(priceAxisFontSize(193_400, 11)).toBe(11);
+    expect(priceAxisFontSize(1_160_000, 11)).toBeLessThan(11);
+    expect(priceAxisFontSize(1_160_000, 11)).toBeGreaterThanOrEqual(MIN_AXIS_FONT_SIZE);
+    expect(priceAxisFontSize(9_990_000, 11)).toBe(priceAxisFontSize(1_160_000, 11));
+    expect(priceAxisFontSize(123_456_789, 11)).toBe(11);
+  } finally {
+    canvas.mockRestore();
+  }
+});
+
+test("가격 눈금은 현재 글자 크기로 폭을 재고 줄어든 글자에서 쉼표 숫자를 남긴다", () => {
+  const canvas = stubCanvasText(0.55);
+  let size = 11;
+  try {
+    const geometry = { fontSize: () => size, toCoordinate: () => null, lastCoordinates: () => [] };
+    const values = [1_160_000, 1_200_000, 1_240_000];
+    expect(axisPriceFormat("price", 1, geometry).tickmarksFormatter(values)).toEqual(["116만", "120만", "124만"]);
+    size = priceAxisFontSize(1_240_000, 11);
+    expect(axisPriceFormat("price", 1, geometry).tickmarksFormatter(values)).toEqual(["1,160,000", "1,200,000", "1,240,000"]);
+    expect(axisPriceFormat("price", 1, geometry).formatter(1_160_000)).toBe("1,160,000");
+  } finally {
+    canvas.mockRestore();
   }
 });

@@ -6,6 +6,7 @@ export type AxisUnit = "price" | "index" | "volume" | "KRW" | "%" | "원/주" | 
 export interface AxisGeometry {
   toCoordinate(value: number): number | null;
   lastCoordinates(): number[];
+  fontSize?(): number;
   formatted?(): void;
   failed?(error: unknown): void;
 }
@@ -140,20 +141,62 @@ export function formatAxisTicks(values: number[], labels: string[], geometry: Ax
   return result;
 }
 
+export const AXIS_WIDTH = 72;
+export const MIN_AXIS_FONT_SIZE = 9;
+const axisBudget = (fontSize: number) => AXIS_WIDTH - (11 + fontSize * 5 / 6);
+
+let measureContext: CanvasRenderingContext2D | null | undefined;
+function attachedMeasureContext(): CanvasRenderingContext2D | null {
+  if (measureContext === undefined) {
+    const canvas = document.createElement("canvas");
+    canvas.hidden = true;
+    canvas.setAttribute("aria-hidden", "true");
+    document.body.append(canvas);
+    measureContext = canvas.getContext("2d");
+  }
+  return measureContext;
+}
+
+function axisMeasurer(): { baseSize: number; widthAt(text: string, fontSize: number): number } | null {
+  if (typeof document === "undefined") return null;
+  const context = attachedMeasureContext();
+  if (!context) return null;
+  const styles = getComputedStyle(document.documentElement);
+  const family = styles.getPropertyValue("--font-sans") || "sans-serif";
+  return {
+    baseSize: Number.parseFloat(styles.getPropertyValue("--fs-xs")) || 11,
+    widthAt(text, fontSize) {
+      context.font = `${fontSize}px ${family}`;
+      return context.measureText(text.replace(/[1-9]/g, "0")).width;
+    },
+  };
+}
+
+export function priceAxisFontSize(maxPrice: number, baseSize: number): number {
+  const measurer = axisMeasurer();
+  if (!measurer || !Number.isFinite(maxPrice)) return baseSize;
+  const widest = numberText(Math.ceil(Math.abs(maxPrice)), 0, true);
+  const fitsAt = (size: number) => measurer.widthAt(widest, size) <= axisBudget(size);
+  if (fitsAt(baseSize)) return baseSize;
+  for (let size = baseSize - 0.5; size >= MIN_AXIS_FONT_SIZE; size -= 0.5) if (fitsAt(size)) return size;
+  return baseSize;
+}
+
 export function axisPriceFormat(unit: AxisUnit, minMove: number, geometry?: AxisGeometry) {
-  const context = typeof document === "undefined" ? null : document.createElement("canvas").getContext("2d");
-  const styles = typeof document === "undefined" ? null : getComputedStyle(document.documentElement);
-  const fontSize = Number.parseFloat(styles?.getPropertyValue("--fs-xs") ?? "") || 11;
-  if (context) context.font = `${fontSize}px ${styles?.getPropertyValue("--font-sans") ?? "sans-serif"}`;
-  const budget = 72 - (11 + fontSize * 5 / 6);
-  const fits = (text: string) => !context || context.measureText(text.replace(/[1-9]/g, "0")).width <= budget;
+  const measurer = axisMeasurer();
+  const baseSize = measurer?.baseSize ?? 11;
+  const fontSize = () => geometry?.fontSize?.() ?? baseSize;
+  const fits = (text: string) => {
+    const size = fontSize();
+    return !measurer || measurer.widthAt(text, size) <= axisBudget(size);
+  };
   return {
     type: "custom", minMove,
     formatter: (value: number) => fitAxisValue(value, unit, fits),
     tickmarksFormatter: (values: number[]) => {
       let labels = distinctAxisTicks(values, unit, fits);
       try {
-        labels = formatAxisTicks(values, labels, geometry, fontSize);
+        labels = formatAxisTicks(values, labels, geometry, fontSize());
       } catch (error) {
         if (geometry?.failed) geometry.failed(error);
         else console.error("Axis label collision check failed", error);
