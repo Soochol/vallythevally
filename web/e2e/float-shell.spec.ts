@@ -28,7 +28,10 @@ test("위 막대 섬은 창 폭을 쓰고 작업 영역은 그 아래에서 12px
   expect(bar).toMatchObject({ x: GAP, y: GAP, width: 1440 - GAP * 2, height: 48 });
   const rail = await boxOf(page.getByRole("navigation", { name: "드로잉 도구" }));
   expect(rail).toMatchObject({ x: GAP, y: area.y, height: area.height });
-  expect(area).toMatchObject({ x: rail.x + rail.width + GAP, y: GAP * 2 + 48, width: 1440 - GAP * 2 - rail.width - GAP });
+  const pages = await boxOf(page.getByRole("navigation", { name: "페이지 메뉴" }));
+  expect(pages).toMatchObject({ x: 1440 - GAP - pages.width, y: area.y, height: area.height });
+  expect(area).toMatchObject({ x: rail.x + rail.width + GAP, y: GAP * 2 + 48, width: 1440 - GAP * 2 - rail.width - GAP - pages.width - GAP });
+  expect(area.x + area.width + GAP).toBe(pages.x);
   expect(strip).toMatchObject({ x: 0, width: 1440, height: 28 });
   expect(strip.y + strip.height).toBe(900);
   expect(area.y + area.height).toBe(strip.y - GAP);
