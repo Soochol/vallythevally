@@ -18,12 +18,13 @@ interface Props {
   readonly onChange: (settings: OrderSettings) => void;
 }
 
-const FLAGS = [
+const FLAGS: readonly { readonly key: "averageDot" | "divider" | "rate" | "skipSpreadGap" | "maskAccount"; readonly label: string; readonly title?: string }[] = [
   { key: "averageDot", label: "평단가 점" },
   { key: "divider", label: "구분선" },
   { key: "rate", label: "등락률 표시" },
+  { key: "skipSpreadGap", label: "호가 사이 빈 가격 건너뛰기", title: "매도·매수 1호가 사이가 벌어지면 빈 가격 행을 건너뛰어 매도 10단·매수 10단을 채웁니다. 10호가창에도 적용" },
   { key: "maskAccount", label: "계좌번호 가리기" },
-] as const;
+];
 
 const PRESET_GROUPS = [
   { kind: "sharePresets", legend: "수량 프리셋", ariaPrefix: "프리셋" },
@@ -98,8 +99,8 @@ export function OrderSettingsPopover({ settings, venue, mock, nxtNotTraded, hold
               </div>
             </fieldset>
           ))}
-          {FLAGS.map(({ key, label }) => (
-            <label key={key} className="od-settings-flag">
+          {FLAGS.map(({ key, label, title }) => (
+            <label key={key} className="od-settings-flag" title={title}>
               <input type="checkbox" checked={settings[key]} onChange={(e) => onChange({ ...settings, [key]: e.target.checked })} />
               {label}
               {key === "averageDot" && !holding && <small>보유 종목일 때 보입니다</small>}

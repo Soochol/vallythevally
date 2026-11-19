@@ -87,7 +87,7 @@ function OrderBody({ code }: { code: SymbolCode }) {
   const quotes = view ? { asks: view.asks, bids: view.bids, lastPrice: feed.lastPrice, previousClose: feed.previousClose } : null;
   const tickRule = tickRuleOf(symbolInfo?.kind ?? null, view ? [...view.asks, ...view.bids].map((level) => level.price) : []);
   const liveBase = quotes ? basePrice(quotes) : null;
-  const liveLadder = quotes ? defaultLadderPrices({ ...quotes, bounds, tickRule }) : null;
+  const liveLadder = quotes ? defaultLadderPrices({ ...quotes, bounds, tickRule, skipSpreadGap: settings.skipSpreadGap }) : null;
   const heldLadder = useHeldWhile(liveLadder, dragging, sameLadderPrices);
   const referencePrice = feed.lastPrice ?? feed.previousClose ?? liveBase;
   const fullPrices = useMemo(() => fullRangePrices({ lower: bounds.lower, upper: bounds.upper }, tickRule), [bounds.lower, bounds.upper, tickRule]);

@@ -79,7 +79,7 @@ test.beforeEach(async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
 });
 
-test("스냅샷 20행이 현재가 중심 격자로 먼저 보이고 상·하한가와 기준가가 정보 자리에 있다", async ({ page, scenario }) => {
+test("스냅샷 20행이 매도 1호가 기준 격자로 먼저 보이고 상·하한가와 기준가가 정보 자리에 있다", async ({ page, scenario }) => {
   await open(page, scenario, 70000);
   await expect(ladderRows(page)).toHaveCount(20);
   await expect(ladderRows(page).locator(".mw-px-num")).toHaveText([
@@ -99,6 +99,58 @@ test("스냅샷 20행이 현재가 중심 격자로 먼저 보이고 상·하한
 
 const AUCTION_ASKS: [number, number][] = [[819_000, 934], [820_000, 1_533], [821_000, 418]];
 const AUCTION_BIDS: [number, number][] = [[818_000, 3_012], [817_000, 61], [816_000, 57]];
+
+const CAPTURE_LAST = 196_400;
+
+async function openWithAskAtLast(page: Page, scenario: Scenario, wideBy = 0) {
+  bookWindow(scenario, CODE);
+  replyBook(scenario, CAPTURE_LAST);
+  scenario.reply((url) => url.pathname === "/api/symbols/005930/fundamentals", { body: { symbol: CODE, upperLimit: 255_000, lowerLimit: 137_000, marketCap: null, listedShares: null, per: null, pbr: null, roe: null, eps: null, bps: null, foreignExhaustionRate: null, high52w: null, low52w: null } });
+  scenario.reply((url) => url.pathname === "/api/symbols/005930/order-book", { body: {
+    ...snapshotOf(CAPTURE_LAST),
+    asks: Array.from({ length: 10 }, (_, i) => ({ price: CAPTURE_LAST + 100 * i, quantity: 10 + i })),
+    bids: Array.from({ length: 10 }, (_, i) => ({ price: CAPTURE_LAST - 100 - wideBy - 100 * i, quantity: 20 + i })),
+  } });
+  await page.goto("/");
+  await expect(cell(page)).toHaveAttribute("aria-busy", "false");
+  await windowTabs(page).getByRole("tab", { name: /^10호가/ }).click();
+}
+
+const MID_SLOT = (page: Page, side: "ask" | "bid") => ladderRows(page).locator(`.mw-qty[data-side=${side}] .mw-qty-value`);
+
+test("매도 1호가가 현재가와 같아도 매도 10단은 가운데 선 위, 매수 10단은 아래에 모두 보인다", async ({ page, scenario }) => {
+  await openWithAskAtLast(page, scenario);
+  const prices = ladderRows(page).locator(".mw-px-num");
+  await expect(prices).toHaveCount(20);
+  await expect(prices.nth(0)).toHaveText("197,300");
+  await expect(prices.nth(9)).toHaveText("196,400");
+  await expect(prices.nth(10)).toHaveText("196,300");
+  await expect(prices.nth(19)).toHaveText("195,400");
+  await expect(MID_SLOT(page, "ask")).toHaveCount(10);
+  await expect(MID_SLOT(page, "bid")).toHaveCount(10);
+  await expect(ladderRows(page).nth(9).locator(".mw-qty[data-side=ask] .mw-qty-value")).toHaveCount(1);
+  await expect(ladderRows(page).nth(10).locator(".mw-qty[data-side=bid] .mw-qty-value")).toHaveCount(1);
+  await expect(page.locator(".mw-lr[data-current]")).toContainText("196,400");
+});
+
+test("호가 사이 빈 가격 건너뛰기가 켜져 있으면 10호가창도 벌어진 호가에서 매수 1호가를 가운데 선 바로 아래 행에 둔다", async ({ page, scenario }) => {
+  scenario.documents.saveUiState({ ...scenario.documents.uiState(), orderSettings: { skipSpreadGap: true } });
+  await openWithAskAtLast(page, scenario, 200);
+  const prices = ladderRows(page).locator(".mw-px-num");
+  await expect(prices.nth(9)).toHaveText("196,400");
+  await expect(prices.nth(10)).toHaveText("196,100");
+  await expect(prices.nth(19)).toHaveText("195,200");
+  await expect(MID_SLOT(page, "bid")).toHaveCount(10);
+  await expect(MID_SLOT(page, "ask")).toHaveCount(10);
+});
+
+test("호가 사이 빈 가격 건너뛰기가 꺼져 있으면 10호가창은 벌어진 호가에서 빈 가격 행을 둔다", async ({ page, scenario }) => {
+  await openWithAskAtLast(page, scenario, 200);
+  const prices = ladderRows(page).locator(".mw-px-num");
+  await expect(prices.nth(10)).toHaveText("196,300");
+  await expect(ladderRows(page).nth(10).locator(".mw-qty-value")).toHaveCount(0);
+  await expect(MID_SLOT(page, "bid")).toHaveCount(8);
+});
 
 test("동시호가 6호가는 매도 3단이 가운데 선 위, 매수 3단이 아래 행에 놓이고 정보 일곱 칸이 모두 보인다", async ({ page, scenario }) => {
   await open(page, scenario, 810_000);
@@ -133,7 +185,7 @@ test("교차 동시호가 6호가에서 같은 가격이 두 행에 있어도 �
   await expect(page.locator(".mw-lr[data-current]")).toContainText("70,100");
 });
 
-test("동시호가 6호가 뒤에 10단 호가가 오면 현재가 가운데 격자로 돌아간다", async ({ page, scenario }) => {
+test("동시호가 6호가 뒤에 10단 호가가 오면 매도 1호가 기준 격자로 돌아간다", async ({ page, scenario }) => {
   bookWindow(scenario, CODE);
   replyBook(scenario, 810_000);
   scenario.reply((url) => url.pathname === "/api/symbols/005930/fundamentals", { body: { symbol: CODE, upperLimit: 1_053_000, lowerLimit: 567_000, marketCap: null, listedShares: null, per: null, pbr: null, roe: null, eps: null, bps: null, foreignExhaustionRate: null, high52w: null, low52w: null } });
@@ -215,7 +267,7 @@ test("첫 실시간 호가가 스냅샷을 대신하고 체결이 현재가 행�
   await emitTrade(scenario, 1, 70100, 3);
   await expect(page.locator(".mw-lr[data-current]")).toHaveCount(1);
   await expect(page.locator(".mw-lr[data-current]")).toContainText("70,100");
-  await expect(ladderRows(page).locator(".mw-px-num").nth(10)).toHaveText("70,100");
+  await expect(ladderRows(page).locator(".mw-px-num").nth(9)).toHaveText("70,100");
 
   scenario.live.emit({ type: "feed_book", sub: bookSub, book: liveOf([[70100, 70], [70200, 40], [70300, 30], [70400, 20]], [[70000, 80], [69900, 10]], [110, 90]) });
   const ask = page.locator(".mw-qty[data-side=ask]").filter({ has: page.locator(".mw-qty-change") });
@@ -272,7 +324,7 @@ const tokenColor = (page: Page, token: string) => page.evaluate((name) => {
 const tradeRow = (page: Page, price: number) => page.locator(`[data-testid=ladder-trade][data-price="${price}"]`);
 const ladderPrice = (page: Page, price: number) => ladderRows(page).filter({ has: page.locator(".mw-px-num", { hasText: new RegExp(`^${price.toLocaleString("en-US")}$`) }) }).locator(".mw-px");
 
-test("체결강도 줄이 13행, 체결 행이 14행부터의 top에 24px 간격으로 있고 왼쪽 테두리와 대량 글자·막대가 없으며 새 체결이 맨 위에 온다", async ({ page, scenario }) => {
+test("체결강도 줄이 11행, 체결 행이 12행부터의 top에 24px 간격으로 있고 왼쪽 테두리와 대량 글자·막대가 없으며 새 체결이 맨 위에 온다", async ({ page, scenario }) => {
   await open(page, scenario, 70000);
   const before = await tops(ladderRows(page));
   await emitTrade(scenario, 1, 70000, 3);
@@ -282,8 +334,8 @@ test("체결강도 줄이 13행, 체결 행이 14행부터의 top에 24px 간격
   await expect(page.getByTestId("ladder-strength")).toContainText("101.50%");
   const rowTops = await tops(ladderRows(page));
   expect(rowTops).toEqual(before);
-  expect(await tops(page.getByTestId("ladder-strength"))).toEqual([rowTops[12]]);
-  expect(await tops(page.getByTestId("ladder-trade"))).toEqual(rowTops.slice(13, 15));
+  expect(await tops(page.getByTestId("ladder-strength"))).toEqual([rowTops[10]]);
+  expect(await tops(page.getByTestId("ladder-trade"))).toEqual(rowTops.slice(11, 13));
   const tradeParts = await page.getByTestId("ladder-trade").evaluateAll((rows) => rows.map((row) => ({ count: row.children.length, text: row.textContent ?? "", border: getComputedStyle(row).borderLeftWidth, priceRight: row.children[0]!.getBoundingClientRect().right, qtyLeft: row.children[1]!.getBoundingClientRect().left })));
   for (const part of tradeParts) {
     expect(part.count).toBe(2);

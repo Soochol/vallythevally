@@ -52,19 +52,20 @@ test("기준가가 0이면 가격은 상승색이 아니다", () => {
   expect(html).not.toContain("mw-down");
 });
 
-test("위 오른쪽 자리는 1~9행의 빈 매수 잔량 칸에만 그리고, 아래 왼쪽 자리는 13~20행을 덮는 상자 하나로 그린다", () => {
+test("위 오른쪽 자리는 1~9행의 빈 매수 잔량 칸에만 그리고, 아래 왼쪽 자리는 11~20행을 덮는 상자 하나로 그린다", () => {
   const rowSlots: LadderRowSlots = {
     topRight: (slot) => createElement("em", { className: "top" }, `t${slot}`),
     bottomLeft: (rowCount) => createElement("em", { className: "bottom" }, `b${rowCount}`),
   };
   const html = render({ rowSlots });
-  expect(html).toContain("top:calc(var(--s1) + 12 * var(--size-24));height:calc(8 * var(--size-24))");
+  expect(tradeBoxStart(rows)).toBe(10);
+  expect(html).toContain("top:calc(var(--s1) + 10 * var(--size-24));height:calc(10 * var(--size-24))");
   expect(html.match(/<em class="top">t\d<\/em>/g)).toEqual(["<em class=\"top\">t0</em>", "<em class=\"top\">t1</em>", "<em class=\"top\">t2</em>", "<em class=\"top\">t3</em>", "<em class=\"top\">t4</em>", "<em class=\"top\">t5</em>", "<em class=\"top\">t6</em>", "<em class=\"top\">t7</em>", "<em class=\"top\">t8</em>"]);
-  expect(html.match(/<em class="bottom">b\d<\/em>/g)).toEqual(['<em class="bottom">b8</em>']);
+  expect(html.match(/<em class="bottom">b\d+<\/em>/g)).toEqual(['<em class="bottom">b10</em>']);
   expect(html.indexOf('class="bottom"')).toBeGreaterThan(html.indexOf("mw-box-layer"));
 });
 
-test("13~20행 가운데 매도 잔량이 있는 행은 상자가 가리지 않고 그 아래 행부터 상자를 줄인다", () => {
+test("11~20행 가운데 매도 잔량이 있는 행은 상자가 가리지 않고 그 아래 행부터 상자를 줄인다", () => {
   const crossed = buildLadder({
     asks: [{ price: 71000, quantity: 5, change: 0 }, { price: 70100, quantity: 7, change: 0 }, { price: 69500, quantity: 2, change: 0 }],
     bids: [{ price: 70900, quantity: 9, change: 0 }, { price: 69100, quantity: 3, change: 0 }],

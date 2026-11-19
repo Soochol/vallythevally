@@ -12,17 +12,18 @@ export interface OrderSettings {
   readonly averageDot: boolean;
   readonly divider: boolean;
   readonly rate: boolean;
+  readonly skipSpreadGap: boolean;
   readonly maskAccount: boolean;
   readonly venue: Venue;
 }
 
-export const DEFAULT_ORDER_SETTINGS: OrderSettings = { sharePresets: [10, 50, 100, 500], amountPresets: [100, 500, 1_000, 5_000], averageDot: true, divider: true, rate: true, maskAccount: true, venue: "combined" };
+export const DEFAULT_ORDER_SETTINGS: OrderSettings = { sharePresets: [10, 50, 100, 500], amountPresets: [100, 500, 1_000, 5_000], averageDot: true, divider: true, rate: true, skipSpreadGap: false, maskAccount: true, venue: "combined" };
 
 const isPreset = (x: unknown): x is number => typeof x === "number" && Number.isInteger(x) && x > 0 && x <= MAX_PRESET_SHARES;
 
 export function parseOrderSettings(raw: unknown): OrderSettings {
   if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return DEFAULT_ORDER_SETTINGS;
-  const { sharePresets, amountPresets, averageDot, divider, rate, maskAccount, venue } = raw as Record<string, unknown>;
+  const { sharePresets, amountPresets, averageDot, divider, rate, skipSpreadGap, maskAccount, venue } = raw as Record<string, unknown>;
   const flag = (value: unknown, fallback: boolean) => (typeof value === "boolean" ? value : fallback);
   return {
     sharePresets: Array.isArray(sharePresets) && sharePresets.length === SHARE_PRESET_COUNT && sharePresets.every(isPreset) ? sharePresets : DEFAULT_ORDER_SETTINGS.sharePresets,
@@ -30,6 +31,7 @@ export function parseOrderSettings(raw: unknown): OrderSettings {
     averageDot: flag(averageDot, DEFAULT_ORDER_SETTINGS.averageDot),
     divider: flag(divider, DEFAULT_ORDER_SETTINGS.divider),
     rate: flag(rate, DEFAULT_ORDER_SETTINGS.rate),
+    skipSpreadGap: flag(skipSpreadGap, DEFAULT_ORDER_SETTINGS.skipSpreadGap),
     maskAccount: flag(maskAccount, DEFAULT_ORDER_SETTINGS.maskAccount),
     venue: typeof venue === "string" && isVenue(venue) ? venue : DEFAULT_ORDER_SETTINGS.venue,
   };

@@ -2,7 +2,7 @@ import type { Locator, Page } from "@playwright/test";
 import type { TradingExecution } from "../src/api/generated/TradingExecution";
 import type { TradingHolding } from "../src/api/generated/TradingHolding";
 import { type Scenario, cell, DEFAULT_LAYOUT_ID, expect, pollSaved, test } from "./harness";
-import { ACCOUNT, BASE, CODE, cellAt, center, chipAt, dragChip, openOrder, openOrderWindow, ordersOn, status, tradingApi, win, writesTo } from "./order-window";
+import { ACCOUNT, askAtLastSnapshot, BASE, CODE, cellAt, center, chipAt, dragChip, openOrder, openOrderWindow, ordersOn, status, tradingApi, win, writesTo } from "./order-window";
 
 const HOLDING: TradingHolding = { code: CODE, name: "삼성전자", quantity: 120, sellableQuantity: 100, averagePrice: 70_040, currentPrice: BASE, evaluationProfit: -4_800, profitRateCenti: -57 };
 const FILL: TradingExecution = { orderNo: "0000010", code: CODE, name: "삼성전자", side: "buy", quantity: 5, price: 70_000, time: "093015", venue: "krx" };
@@ -242,7 +242,7 @@ test("평단가 점은 평단가에 가장 가까운 가격 행의 가격 칸 �
   expect(new Set(heights)).toEqual(new Set([24]));
 });
 
-test("칩을 끄는 동안 체결이 와서 현재가가 바뀌어도 행의 가격이 움직이지 않고 놓으면 새 현재가 중심이 된다", async ({ page, scenario }) => {
+test("칩을 끄는 동안 매도 1호가가 바뀌어도 행의 가격이 움직이지 않고 놓으면 새 매도 1호가 기준이 된다", async ({ page, scenario }) => {
   ordersOn(scenario);
   const api = tradingApi(scenario, [openOrder("0000001", "buy", 70_000, 5)]);
   await openOrderWindow(page, scenario);
@@ -251,13 +251,15 @@ test("칩을 끄는 동안 체결이 와서 현재가가 바뀌어도 행의 가
   expect(before[0]).toBe("71,000");
   await dragChip(page, chipAt(page, "buy", 70_000), await center(cellAt(page, "buy", 69_800)), false);
   await expect(page.getByTestId("order-ghost")).toBeVisible();
-  lastTrade(scenario, 70_300);
-  await expect(page.locator(".mw-lr[data-current]")).toContainText("70,300");
+  const movedAsks = Array.from({ length: 10 }, (_, i) => ({ price: 70_300 + 100 * i, qty: 10 + i }));
+  const movedBids = Array.from({ length: 10 }, (_, i) => ({ price: 70_200 - 100 * i, qty: 20 + i }));
+  await emitSingleBook(scenario, movedAsks, movedBids);
   expect(await prices()).toEqual(before);
   await page.mouse.up();
   await pollSaved(() => writesTo(api, "modify")).toHaveLength(1);
   expect(writesTo(api, "modify")[0]!.body).toMatchObject({ orderNo: "0000001", price: 69_800 });
-  await expect(ladderRows(page).locator(".mw-px-num").first()).toHaveText("71,300");
+  await expect(ladderRows(page).locator(".mw-px-num").first()).toHaveText("71,200");
+  await expect(ladderRows(page).locator(".mw-px-num").nth(9)).toHaveText("70,300");
 });
 
 test("계좌 실시간 메시지가 오면 조회를 다시 읽는다", async ({ page, scenario }) => {
@@ -322,7 +324,7 @@ test.describe("NXT 미거래 종목의 장 시간", () => {
     await openOrderWindow(page, scenario);
     await expect(ladderRows(page)).toHaveCount(20);
     await expect(page.getByTestId("order-book-notice")).toHaveCount(0);
-    await cellAt(page, "buy", 70_000).dblclick();
+    await ladderRows(page).nth(10).locator('[data-order-cell][data-side="buy"]').dblclick();
     await expect(status(page)).toHaveText(/ETF·ETN은 15:30 뒤 거래되지 않습니다/);
     await expect(status(page)).toHaveAttribute("data-tone", "error");
     expect(api.writes).toHaveLength(0);
@@ -336,7 +338,7 @@ test.describe("NXT 미거래 종목의 장 시간", () => {
     await openOrderWindow(page, scenario);
     await expect(ladderRows(page)).toHaveCount(20);
     await expect(page.getByTestId("order-book-notice")).toHaveCount(0);
-    await cellAt(page, "buy", 70_000).dblclick();
+    await ladderRows(page).nth(10).locator('[data-order-cell][data-side="buy"]').dblclick();
     await expect(status(page)).toHaveText(/ETF·ETN은 15:30 뒤 거래되지 않습니다/);
     await expect(status(page)).toHaveAttribute("data-tone", "error");
     expect(api.writes).toHaveLength(0);
@@ -424,28 +426,104 @@ test("보유가 있으면 안내가 없고 평단가 점이 가격 칸 안 가�
   await expect(page.getByTestId("ladder-mark")).toHaveCount(0);
 });
 
-test("구분선을 켜면 행 사이마다 선이 있고 가운데 선은 색이 다르며 끄면 없고 행 높이는 24px로 같다", async ({ page, scenario }) => {
+const stripAt = (page: Page, box: { x: number; y: number; width: number }, down: number) => page.screenshot({ clip: { x: Math.round(box.x) + 2, y: Math.round(box.y) + down, width: Math.max(1, Math.round(box.width) - 4), height: 1 } });
+const hasLineOnTop = async (page: Page, box: { x: number; y: number; width: number }) => !(await stripAt(page, box, 0)).equals(await stripAt(page, box, 1));
+const boxOfCell = async (locator: Locator) => (await locator.boundingBox())!;
+
+test("구분선을 켜도 상세 정보란과 체결 상자 안에는 가로줄이 없고 주문·가격 칸 사이에는 있으며 끄면 어디에도 없다", async ({ page, scenario }) => {
   ordersOn(scenario);
   tradingApi(scenario);
   await openOrderWindow(page, scenario);
-  const lineColors = () => ladderRows(page).evaluateAll((rows) => rows.map((row) => {
+  const rowShadows = () => ladderRows(page).evaluateAll((rows) => rows.map((row) => {
     const shadow = getComputedStyle(row).boxShadow;
     return shadow === "none" ? null : shadow;
   }));
   const heights = () => ladderRows(page).evaluateAll((rows) => rows.map((row) => row.getBoundingClientRect().height));
+  const infoCell = (row: number) => ladderRows(page).nth(row).locator(".mw-qty[data-side=bid]");
+  const askCell = (row: number) => ladderRows(page).nth(row).locator(".mw-qty[data-side=ask]");
+  const priceCell = (row: number) => ladderRows(page).nth(row).locator(".mw-px");
+  const orderCell = (row: number) => ladderRows(page).nth(row).locator(".od-cell").first();
+  const boxLayer = page.getByTestId("ladder-box-layer").locator(".mw-box");
+  const underRowTop = async (cellLocator: Locator, row: number) => ({ ...(await boxOfCell(cellLocator)), y: (await boxOfCell(ladderRows(page).nth(row))).y });
   await expect(ladderRows(page)).toHaveCount(20);
-  const on = await lineColors();
+  await expect(page.getByTestId("ladder-info")).toHaveCount(7);
+
+  const on = await rowShadows();
   expect(on[0]).toBeNull();
   const lines = on.slice(1);
   expect(lines.every((line) => line !== null)).toBe(true);
-  expect(lines).toHaveLength(19);
   const middle = on[10]!;
   expect(lines.filter((line) => line !== middle)).toHaveLength(18);
   expect(new Set(await heights())).toEqual(new Set([24]));
+
+  for (const row of [1, 3, 6]) {
+    await expect(ladderRows(page).nth(row).getByTestId("ladder-info")).toHaveCount(1);
+    expect(await hasLineOnTop(page, await boxOfCell(infoCell(row))), `정보 칸 ${row}행`).toBe(false);
+    expect(await hasLineOnTop(page, await boxOfCell(askCell(row))), `매도 잔량 칸 ${row}행`).toBe(true);
+    expect(await hasLineOnTop(page, await underRowTop(priceCell(row), row)), `가격 칸 ${row}행`).toBe(true);
+    expect(await hasLineOnTop(page, await boxOfCell(orderCell(row))), `주문 칸 ${row}행`).toBe(true);
+  }
+  expect(await hasLineOnTop(page, await boxOfCell(infoCell(12))), "정보 칸이 없는 행의 매수 잔량 칸").toBe(true);
+  const layer = await boxOfCell(boxLayer);
+  expect(await hasLineOnTop(page, layer), "체결 상자 위 가장자리의 가운데 선").toBe(true);
+  for (const row of [11, 13, 17]) {
+    const rowTop = (await boxOfCell(ladderRows(page).nth(row))).y;
+    expect(await hasLineOnTop(page, { x: layer.x, y: rowTop, width: layer.width }), `체결 상자 안 ${row}행 위`).toBe(false);
+    expect(await hasLineOnTop(page, await underRowTop(priceCell(row), row)), `${row}행 가격 칸`).toBe(true);
+  }
+
   await openSettings(page);
   await page.getByRole("checkbox", { name: "구분선" }).uncheck();
-  expect((await lineColors()).every((line) => line === null)).toBe(true);
+  expect((await rowShadows()).every((line) => line === null)).toBe(true);
   expect(new Set(await heights())).toEqual(new Set([24]));
+  await page.keyboard.press("Escape");
+  for (const row of [1, 3, 6, 13]) {
+    expect(await hasLineOnTop(page, await boxOfCell(infoCell(row))), `끈 뒤 매수 잔량 칸 ${row}행`).toBe(false);
+    expect(await hasLineOnTop(page, await boxOfCell(askCell(row))), `끈 뒤 매도 잔량 칸 ${row}행`).toBe(false);
+    expect(await hasLineOnTop(page, await underRowTop(priceCell(row), row)), `끈 뒤 가격 칸 ${row}행`).toBe(false);
+  }
+  expect(await hasLineOnTop(page, await boxOfCell(boxLayer)), "끈 뒤 체결 상자 위").toBe(false);
+});
+
+test("호가주문창도 매도 1호가가 현재가와 같으면 매도 10단·매수 10단이 가운데 선 양쪽에 모두 보인다", async ({ page, scenario }) => {
+  ordersOn(scenario);
+  tradingApi(scenario);
+  await openOrderWindow(page, scenario, false, "krx", undefined, false, askAtLastSnapshot());
+  const prices = ladderRows(page).locator(".mw-px-num");
+  await expect(prices.nth(0)).toHaveText("70,900");
+  await expect(prices.nth(9)).toHaveText("70,000");
+  await expect(prices.nth(10)).toHaveText("69,900");
+  await expect(prices.nth(19)).toHaveText("69,000");
+  await expect(ladderRows(page).locator(".mw-qty[data-side=ask] .mw-qty-value")).toHaveCount(10);
+  await expect(ladderRows(page).locator(".mw-qty[data-side=bid] .mw-qty-value")).toHaveCount(10);
+  for (let row = 0; row < 10; row++) await expect(ladderRows(page).nth(row).locator(".mw-qty[data-side=ask] .mw-qty-value")).toHaveCount(1);
+  for (let row = 10; row < 20; row++) await expect(ladderRows(page).nth(row).locator(".mw-qty[data-side=bid] .mw-qty-value")).toHaveCount(1);
+  await expect(page.locator(".mw-lr[data-current]")).toContainText("70,000");
+});
+
+test("호가 사이 빈 가격 건너뛰기를 켜면 벌어진 호가에서도 매도 10단·매수 10단이 모두 보이고 설정이 저장되며 끄면 빈 가격 행이 돌아온다", async ({ page, scenario }) => {
+  ordersOn(scenario);
+  tradingApi(scenario);
+  await openOrderWindow(page, scenario, false, "krx", undefined, false, askAtLastSnapshot(200));
+  const prices = ladderRows(page).locator(".mw-px-num");
+  const bids = ladderRows(page).locator(".mw-qty[data-side=bid] .mw-qty-value");
+  await expect(prices.nth(10)).toHaveText("69,900");
+  await expect(bids).toHaveCount(8);
+  await openSettings(page);
+  const option = page.getByRole("checkbox", { name: "호가 사이 빈 가격 건너뛰기" });
+  await expect(option).not.toBeChecked();
+  await expect(option.locator("xpath=..")).toHaveAttribute("title", /10호가창에도 적용/);
+  await option.check();
+  await expect(prices.nth(9)).toHaveText("70,000");
+  await expect(prices.nth(10)).toHaveText("69,700");
+  await expect(prices.nth(19)).toHaveText("68,800");
+  await expect(bids).toHaveCount(10);
+  await expect(ladderRows(page).locator(".mw-qty[data-side=ask] .mw-qty-value")).toHaveCount(10);
+  await pollSaved(() => scenario.documents.uiState()["orderSettings"]).toMatchObject({ skipSpreadGap: true });
+  await option.uncheck();
+  await expect(prices.nth(10)).toHaveText("69,900");
+  await expect(bids).toHaveCount(8);
+  await pollSaved(() => scenario.documents.uiState()["orderSettings"]).toMatchObject({ skipSpreadGap: false });
 });
 
 test("프리셋 2에 75를 입력하고 Enter를 누르면 단추가 바로 75가 되고 새로고침해도 유지되며 틀린 값은 되돌린다", async ({ page, scenario }) => {
@@ -633,7 +711,7 @@ test("정보 7항목이 사다리 1~7행과 같은 top에 있고 값이 맞다",
   expect(await tops(info)).toEqual((await tops(ladderRows(page))).slice(0, 7));
 });
 
-test("체결강도는 13행, 체결은 14행부터 같은 top에 있고 새 체결이 맨 위이며 왼쪽 테두리와 대량 글자·막대가 없다", async ({ page, scenario }) => {
+test("체결강도는 11행, 체결은 12행부터 같은 top에 있고 새 체결이 맨 위이며 왼쪽 테두리와 대량 글자·막대가 없다", async ({ page, scenario }) => {
   ordersOn(scenario);
   tradingApi(scenario);
   await openOrderWindow(page, scenario);
@@ -644,8 +722,8 @@ test("체결강도는 13행, 체결은 14행부터 같은 top에 있고 새 체�
   await expect(page.getByTestId("ladder-strength")).toContainText("101.50%");
   const rowTops = await tops(ladderRows(page));
   expect(rowTops).toEqual(before);
-  expect(await tops(page.getByTestId("ladder-strength"))).toEqual([rowTops[12]]);
-  expect(await tops(page.getByTestId("ladder-trade"))).toEqual(rowTops.slice(13, 15));
+  expect(await tops(page.getByTestId("ladder-strength"))).toEqual([rowTops[10]]);
+  expect(await tops(page.getByTestId("ladder-trade"))).toEqual(rowTops.slice(11, 13));
   await expect(page.getByTestId("ladder-trade").first()).toHaveAttribute("data-price", "70100");
   const tradeParts = await page.getByTestId("ladder-trade").evaluateAll((rows) => rows.map((row) => ({ count: row.children.length, text: row.textContent ?? "", border: getComputedStyle(row).borderLeftWidth, priceRight: row.children[0]!.getBoundingClientRect().right, qtyLeft: row.children[1]!.getBoundingClientRect().left })));
   for (const part of tradeParts) {
@@ -705,7 +783,7 @@ test("421px 호가주문창에서 수량은 쉼표 숫자 그대로 끝까지 �
   await page.screenshot({ path: "../target/ux-screens/order-421.png" });
 });
 
-test("체결 상자 아래 8행에서도 매도 주문 칸 더블클릭은 주문을 보낸다", async ({ page, scenario }) => {
+test("체결 상자 아래 10행에서도 매도 주문 칸 더블클릭은 주문을 보낸다", async ({ page, scenario }) => {
   ordersOn(scenario);
   const api = tradingApi(scenario);
   await openOrderWindow(page, scenario);

@@ -1,10 +1,9 @@
 import type { ReactNode } from "react";
 import { direction, formatPercent, formatPrice } from "../../lib/format";
 import { formatQuantity, withSign } from "./format";
-import { type BookLevel, LADDER_ROWS, type LadderRow, ROWS_ABOVE_BASE } from "./ladder";
+import { type BookLevel, type LadderRow, ROWS_ABOVE_BASE } from "./ladder";
 
 export const TOP_RIGHT_ROWS = 9;
-export const BOTTOM_LEFT_ROWS = 8;
 
 export interface LadderSlots {
   readonly left?: (row: LadderRow) => ReactNode;
@@ -51,7 +50,7 @@ export const priceTone = (price: number, previousClose: number | null): "up" | "
   previousClose === null || !(previousClose > 0) ? "flat" : direction(price - previousClose);
 
 export function tradeBoxStart(rows: readonly LadderRow[]): number {
-  let start = LADDER_ROWS - BOTTOM_LEFT_ROWS;
+  let start = ROWS_ABOVE_BASE;
   rows.forEach((row, index) => {
     if (index >= start && row.ask) start = index + 1;
   });
