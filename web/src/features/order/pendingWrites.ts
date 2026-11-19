@@ -15,7 +15,7 @@ export type PendingWrite = Stamped & (
   | { readonly kind: "canceling"; readonly key: string; readonly orderNo: string }
   | { readonly kind: "canceling-price"; readonly key: string; readonly side: OrderSide; readonly price: number }
   | { readonly kind: "modifying"; readonly key: string; readonly orderNo: string }
-  | { readonly kind: "placed"; readonly order: TradingOpenOrder }
+  | { readonly kind: "placed"; readonly order: TradingOpenOrder; readonly replaces?: string }
   | { readonly kind: "gone"; readonly orderNo: string }
 );
 
@@ -36,7 +36,7 @@ export function settleAgainstOpenOrders(writes: readonly PendingWrite[], code: s
   const listed = new Set(fetched.orders.map((order) => order.orderNo));
   return writes.filter((write) => {
     if (write.code !== code) return true;
-    if (write.kind === "placed") return fetched.at < write.since;
+    if (write.kind === "placed") return fetched.at < write.since || (!listed.has(write.order.orderNo) && write.replaces !== undefined && listed.has(write.replaces));
     if (write.kind === "gone") return listed.has(write.orderNo);
     return true;
   });

@@ -155,3 +155,9 @@ test("다른 종목의 표시는 무시한다", () => {
   expect(groups.get("buy:70000")?.quantity).toBe(5);
   expect(groups.get("buy:70000")?.pending).toBeUndefined();
 });
+
+test("접수한 신규를 곧바로 취소하면 재조회 전에도 그 칩에서 뺀다", () => {
+  const placed = order("0000099", "buy", 70_000, 10);
+  const writes: PendingWrite[] = [{ ...stamped, kind: "placed", order: placed }, { ...stamped, kind: "gone", orderNo: "0000099" }];
+  expect(groupWithPending([], writes, "005930").size).toBe(0);
+});

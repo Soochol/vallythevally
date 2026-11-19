@@ -125,7 +125,7 @@ export function useOrderWrites(code: string, venue: Venue): OrderWrites {
         settled: (command) => {
           if (command.state !== "accepted") return [];
           const replaced: PendingDraft = { kind: "gone", code, orderNo: order.orderNo };
-          return command.orderNo === null ? [replaced] : [replaced, { kind: "placed", code, order: openOrderOf(command.orderNo, code, order.venue, order.side, price, order.openQuantity) }];
+          return command.orderNo === null ? [replaced] : [replaced, { kind: "placed", code, replaces: order.orderNo, order: openOrderOf(command.orderNo, code, order.venue, order.side, price, order.openQuantity) }];
         },
       });
     }

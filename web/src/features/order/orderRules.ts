@@ -45,7 +45,7 @@ export function groupWithPending(orders: readonly TradingOpenOrder[], writes: re
   const listed = new Set(orders.map((order) => order.orderNo));
   const visible = [
     ...orders.filter((order) => !gone.has(order.orderNo)),
-    ...mine.flatMap((write) => write.kind === "placed" && !listed.has(write.order.orderNo) ? [write.order] : []),
+    ...mine.flatMap((write) => write.kind === "placed" && !listed.has(write.order.orderNo) && !gone.has(write.order.orderNo) ? [write.order] : []),
   ];
   const groups = new Map(groupOpenOrders(visible, code));
   const mark = (key: string, state: PendingState) => {

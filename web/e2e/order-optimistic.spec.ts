@@ -154,9 +154,46 @@ test("보내는 중 칩은 끌거나 우클릭으로 취소할 수 없다", asyn
   await dragChip(page, chip, { x: 5, y: 5 }, false);
   await expect(page.getByTestId("order-ghost")).toHaveCount(0);
   await page.mouse.up();
+  await page.getByTestId("price-ladder").locator(".mw-px").first().click({ button: "right" });
+  await expect(page.getByRole("menuitem", { name: "전체 모두 취소" })).toBeDisabled();
+  await page.keyboard.press("Escape");
   await expect(chip).toHaveAttribute("data-pending", "sending");
   expect(writesTo(api, "cancel-batch")).toHaveLength(0);
   expect(writesTo(api, "cancel")).toHaveLength(0);
   place.reply({ body: commandOf("buy") });
   await expect(status(page)).toContainText("접수 · 매수 10 · 70,000원");
+});
+
+test("접수한 신규를 곧바로 취소하면 취소 접수에서 재조회 전에 칩이 사라진다", async ({ page, scenario }) => {
+  await ready(page, scenario);
+  const place = holdWrite(scenario, "place");
+  await cellAt(page, "buy", BASE).dblclick();
+  await place.received;
+  const refetch = holdOpenOrders(scenario);
+  place.reply({ body: commandOf("buy", { orderNo: "0000099" }) });
+  await expect(chipAt(page, "buy", BASE)).toHaveText("10");
+  await notPending(chipAt(page, "buy", BASE));
+  const cancel = holdWrite(scenario, "cancel");
+  await chipAt(page, "buy", BASE).click({ button: "right" });
+  await page.getByRole("menuitem", { name: "10 취소" }).click();
+  await cancel.received;
+  await expect(chipAt(page, "buy", BASE)).toHaveAttribute("data-pending", "canceling");
+  cancel.reply({ body: commandOf("cancel", { targetOrderNo: "0000099" }) });
+  await expect(chipAt(page, "buy", BASE)).toHaveCount(0);
+  refetch.reply(openOrdersBody([]));
+});
+
+test("정정이 접수된 뒤 재조회가 원래 주문을 아직 돌려줘도 새 칸에 칩이 남는다", async ({ page, scenario }) => {
+  await ready(page, scenario, [openOrder("0000001", "buy", BASE, 5)]);
+  const modify = holdWrite(scenario, "modify");
+  await dragChip(page, chipAt(page, "buy", BASE), await center(cellAt(page, "buy", BASE - 200)));
+  await modify.received;
+  const refetch = holdOpenOrders(scenario);
+  modify.reply({ body: commandOf("modify", { price: BASE - 200, targetOrderNo: "0000001", orderNo: "0000050" }) });
+  await refetch.received;
+  await expect(chipAt(page, "buy", BASE - 200)).toHaveText("5");
+  refetch.reply(openOrdersBody([openOrder("0000001", "buy", BASE, 5)]));
+  await expect(status(page)).toContainText("접수 · 정정");
+  await expect(chipAt(page, "buy", BASE - 200)).toHaveText("5");
+  await expect(chipAt(page, "buy", BASE)).toHaveCount(0);
 });

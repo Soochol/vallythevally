@@ -113,3 +113,13 @@ test("구독자는 바뀔 때마다 알림을 받고 같은 내용이면 받지 
   store.clear();
   expect(calls).toBe(1);
 });
+
+test("정정으로 생긴 접수 기억은 재조회가 원래 주문을 아직 돌려주는 동안 유지하고 원래 주문이 사라지면 버린다", () => {
+  const { store } = clocked();
+  store.begin({ kind: "modifying", key: "m", code: "005930", orderNo: "0000001" });
+  store.resolve("m", [{ kind: "gone", code: "005930", orderNo: "0000001" }, { kind: "placed", code: "005930", replaces: "0000001", order: order("0000050", 69_800, 5) }]);
+  store.observe("005930", { orders: [order("0000001")], at: 2_000 });
+  expect(store.snapshot().map((write) => write.kind)).toEqual(["gone", "placed"]);
+  store.observe("005930", { orders: [], at: 3_000 });
+  expect(store.snapshot()).toEqual([]);
+});

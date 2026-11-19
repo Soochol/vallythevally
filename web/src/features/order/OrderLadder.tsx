@@ -115,7 +115,7 @@ export function OrderLadder({ rows, previousClose, groups, writable, previewQuan
   };
   const slots = { left: cell("left"), right: cell("right") };
 
-  const all = [...groups.values()];
+  const all = [...groups.values()].filter((group) => !group.pending);
   const items = (state: MenuState): OrderListItem[] => {
     const { group } = state;
     if (group) {
