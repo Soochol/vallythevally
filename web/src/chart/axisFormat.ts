@@ -12,6 +12,10 @@ export interface AxisGeometry {
 
 const KOREAN = [[1e12, "조"], [1e8, "억"], [1e4, "만"]] as const;
 const INTERNATIONAL = [[1e12, "T"], [1e9, "B"], [1e6, "M"], [1e3, "K"]] as const;
+const VOLUME_SCALES = [[1e9, "B"], [1e6, "M"], [1e3, "K"]] as const;
+const MAN = 1e4;
+const groupedUnit = (unit: AxisUnit) => unit === "price" || unit === "index";
+const volumeScale = (v: number) => VOLUME_SCALES.find(([scale]) => v >= scale);
 const numberFormats = new Map<number, Intl.NumberFormat>();
 function numberText(value: number, digits: number, grouped: boolean): string {
   const key = digits + (grouped ? 100 : 0);
@@ -37,31 +41,52 @@ export function financialAxisUnit(metric: FinancialMetric, currency: string | nu
 export function formatAxisValue(value: number, unit: AxisUnit, precision?: number): string {
   if (!Number.isFinite(value)) return "—";
   const v = Math.abs(value);
-  const korean = unit === "KRW" || unit === "volume";
-  const compact = (korean ? KOREAN : INTERNATIONAL).find(([scale]) => v >= scale && (unit !== "price" && unit !== "index" || scale >= 1e6));
+  if (groupedUnit(unit)) return signed(value, numberText(v, precision ?? (unit === "price" ? 0 : 2), true));
+  if (unit === "volume") return volumeLabel(value, volumeScale(v), precision ?? (v >= 1e3 ? 2 : 0));
+  const compact = (unit === "KRW" ? KOREAN : INTERNATIONAL).find(([scale]) => v >= scale);
   if (compact) {
     const [scale, label] = compact;
     const digits = precision ?? (label === "조" ? 1 : label === "만" ? 0 : 2);
-    const number = unit === "price" ? (v / scale).toFixed(digits) : decimal(v / scale, digits);
-    return signed(value, `${number}${label}${suffix(unit)}`);
+    return signed(value, `${decimal(v / scale, digits)}${label}${suffix(unit)}`);
   }
-  const digits = precision ?? (unit === "price" || unit === "volume" ? 0 : 2);
-  return signed(value, numberText(v, digits, true) + suffix(unit));
+  return signed(value, numberText(v, precision ?? 2, true) + suffix(unit));
 }
 
-type TickNotation = "compact" | "international" | "plain" | "scientific";
+function volumeLabel(value: number, scale: (typeof VOLUME_SCALES)[number] | undefined, digits: number): string {
+  if (!Number.isFinite(value)) return "—";
+  const v = Math.abs(value);
+  if (v === 0) return "0";
+  return signed(value, scale ? `${decimal(v / scale[0], digits)}${scale[1]}` : numberText(v, digits, true));
+}
+
+function commonVolumeTicks(values: number[], fits: (text: string) => boolean): string[] | null {
+  const scale = volumeScale(Math.max(0, ...values.filter(Number.isFinite).map(Math.abs)));
+  for (let digits = 0; digits <= 6; digits++) {
+    const labels = values.map((value) => volumeLabel(value, scale, digits));
+    if (labels.every(fits) && new Set(labels).size === values.length) return labels;
+  }
+  return null;
+}
+
+type TickNotation = "compact" | "man" | "international" | "plain" | "scientific";
 function tickValue(value: number, unit: AxisUnit, precision: number | undefined, notation: TickNotation): string {
   if (!Number.isFinite(value)) return "—";
   if (notation === "compact") return formatAxisValue(value, unit, precision);
+  if (notation === "man") return Math.abs(value) < MAN ? formatAxisValue(value, unit, precision) : signed(value, `${numberText(Math.abs(value) / MAN, precision ?? 0, true)}만${suffix(unit)}`);
   if (notation === "plain") return signed(value, decimal(Math.abs(value), precision ?? 2) + suffix(unit));
   if (notation === "scientific") return scientific(value, precision ?? 2) + suffix(unit);
   const compact = INTERNATIONAL.find(([scale]) => Math.abs(value) >= scale);
   return compact ? signed(value, `${decimal(Math.abs(value) / compact[0], precision ?? 2)}${compact[1]}${suffix(unit)}`) : tickValue(value, unit, precision, "plain");
 }
 
+const candidateNotations = (unit: AxisUnit): TickNotation[] =>
+  groupedUnit(unit) ? ["compact", "man", "plain", "scientific"] : unit === "volume" ? ["compact", "plain", "scientific"] : ["compact", "plain", "international", "scientific"];
+const distinctNotations = (unit: AxisUnit): TickNotation[] =>
+  groupedUnit(unit) ? ["compact", "man", "plain", "scientific"] : unit === "volume" ? ["compact", "plain", "scientific"] : ["compact", "international", "plain", "scientific"];
+
 function* axisCandidates(value: number, unit: AxisUnit): Generator<string> {
   yield formatAxisValue(value, unit);
-  for (const notation of ["compact", "plain", "international", "scientific"] as const) {
+  for (const notation of candidateNotations(unit)) {
     for (let precision = 2; precision >= 0; precision--) yield tickValue(value, unit, precision, notation);
   }
   if (unit === "원/주" && Math.abs(value) >= 100 && Math.abs(value) < 1000) {
@@ -75,11 +100,15 @@ export function fitAxisValue(value: number, unit: AxisUnit, fits: (text: string)
 }
 
 export function distinctAxisTicks(values: number[], unit: AxisUnit, fits: (text: string) => boolean): string[] {
+  if (unit === "volume") {
+    const common = commonVolumeTicks(values, fits);
+    if (common) return common;
+  }
   const defaults = values.map((value) => formatAxisValue(value, unit));
   let best = defaults.every(fits) ? defaults : null;
   let distinct = best ? new Set(best).size : 0;
   if (distinct === values.length) return defaults;
-  for (const notation of ["compact", "international", "plain", "scientific"] as const) {
+  for (const notation of distinctNotations(unit)) {
     for (const precision of PRECISIONS) {
       if (notation === "compact" && precision === undefined) continue;
       const labels = values.map((value) => tickValue(value, unit, precision, notation));
