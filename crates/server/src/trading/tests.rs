@@ -620,3 +620,76 @@ async fn the_realtime_registration_matches_the_switch_right_after_every_change_e
         reader.join().unwrap();
     }
 }
+
+const ACCOUNT_NUMBER_URI: &str = "/api/trading/account-number";
+
+#[tokio::test]
+async fn the_account_number_query_returns_the_confirmed_number_uncached_and_keeps_it_out_of_logs_and_other_responses() {
+    let logs = Logs::default();
+    let writer = logs.clone();
+    let subscriber = tracing_subscriber::fmt().with_writer(move || writer.clone()).with_ansi(false).with_max_level(tracing::Level::TRACE).finish();
+    let _guard = tracing::subscriber::set_default(subscriber);
+    let f = fixture().await;
+    assert_eq!(enable(&f.app, "01").await.0, StatusCode::OK);
+    let sent = trading_sends(&f.fake).len();
+    let response = f.app.clone().oneshot(Request::builder().method("GET").uri(ACCOUNT_NUMBER_URI).header("host", HOST).body(Body::empty()).unwrap()).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response.headers().get("cache-control").and_then(|v| v.to_str().ok()), Some("no-store"));
+    let body: Value = serde_json::from_slice(&response.into_body().collect().await.unwrap().to_bytes()).unwrap();
+    assert_eq!(body, json!({"accountNumber": ACCOUNT}));
+    assert_eq!(trading_sends(&f.fake).len(), sent, "확인된 계좌는 다시 묻지 않는다");
+    let mut others = vec![get(&f.app, "/api/system/orders").await.1];
+    for uri in READS {
+        others.push(get(&f.app, uri).await.1);
+    }
+    let others = others.iter().map(Value::to_string).collect::<Vec<_>>().join("\n");
+    assert!(!others.contains(ACCOUNT), "다른 조회 응답에 계좌번호가 있다");
+    assert!(!logs.text().contains(ACCOUNT), "서버 로그에 계좌번호가 있다");
+    assert!(!logs.text().is_empty(), "로그를 실제로 수집했다");
+}
+
+#[tokio::test]
+async fn the_account_number_query_after_the_verification_expired_asks_kiwoom_once_more() {
+    let f = fixture().await;
+    assert_eq!(enable(&f.app, "01").await.0, StatusCode::OK);
+    f.state.clock.jump(120);
+    let sent = trading_sends(&f.fake).len();
+    let (code, body) = get(&f.app, ACCOUNT_NUMBER_URI).await;
+    assert_eq!((code, body), (StatusCode::OK, json!({"accountNumber": ACCOUNT})));
+    assert_eq!(trading_sends(&f.fake)[sent..], ["ka00001"]);
+}
+
+#[tokio::test]
+async fn the_account_number_query_fails_closed_without_asking_kiwoom_when_orders_are_off() {
+    let f = fixture().await;
+    let (code, body) = get(&f.app, ACCOUNT_NUMBER_URI).await;
+    assert_eq!((code, body["error"]["reason"].clone()), (StatusCode::CONFLICT, json!("orders_off")));
+    assert!(body.get("accountNumber").is_none());
+    assert!(f.fake.sent().is_empty(), "꺼져 있으면 키움에 아무것도 보내지 않는다");
+}
+
+#[tokio::test]
+async fn the_account_number_query_refuses_a_changed_account() {
+    let f = fixture().await;
+    assert_eq!(enable(&f.app, "01").await.0, StatusCode::OK);
+    f.state.clock.jump(120);
+    *f.account.lock().unwrap() = OTHER_ACCOUNT.to_owned();
+    let (code, body) = get(&f.app, ACCOUNT_NUMBER_URI).await;
+    assert_eq!((code, body["error"]["reason"].clone()), (StatusCode::CONFLICT, json!("account_changed")));
+    assert!(!body.to_string().contains(OTHER_ACCOUNT) && !body.to_string().contains(ACCOUNT));
+    let sent = trading_sends(&f.fake).len();
+    assert_eq!(get(&f.app, ACCOUNT_NUMBER_URI).await.0, StatusCode::CONFLICT);
+    assert_eq!(trading_sends(&f.fake).len(), sent, "막힌 뒤에는 다시 묻지 않는다");
+}
+
+#[tokio::test]
+async fn the_account_number_query_needs_a_connected_link() {
+    let f = fixture().await;
+    assert_eq!(enable(&f.app, "01").await.0, StatusCode::OK);
+    f.state.clock.jump(120);
+    f.state.rest.set_access(Access::Closed);
+    let sent = f.fake.sent().len();
+    let (code, body) = get(&f.app, ACCOUNT_NUMBER_URI).await;
+    assert_eq!((code, body["error"]["reason"].clone()), (StatusCode::SERVICE_UNAVAILABLE, json!("not_connected")));
+    assert_eq!(f.fake.sent().len(), sent);
+}

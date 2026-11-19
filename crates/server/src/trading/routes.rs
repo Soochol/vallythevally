@@ -5,6 +5,7 @@ use axum::Router;
 use axum::body::Body;
 use axum::extract::{Path, Query, Request, State};
 use axum::middleware::{self, Next};
+use axum::http::{HeaderValue, header};
 use axum::response::{IntoResponse, Response};
 use axum::response::Json;
 use axum::routing::{get, post};
@@ -38,6 +39,7 @@ pub fn routes(state: Arc<AppState>) -> Router<Arc<AppState>> {
         .merge(commands)
         .route("/api/system/orders", get(status).put(switch))
         .route("/api/system/orders/check-account", post(check_account))
+        .route("/api/trading/account-number", get(account_number))
         .route("/api/trading/balance", get(balance))
         .route("/api/trading/open-orders", get(open_orders))
         .route("/api/trading/orderable", get(orderable))
@@ -59,6 +61,13 @@ async fn switch(State(st): State<Arc<AppState>>, body: Body) -> Result<Json<api:
 async fn check_account(State(st): State<Arc<AppState>>) -> Result<Json<api::OrdersAccountCheck>, ApiFailure> {
     tracing::info!("주문 사용을 켜기 전에 계좌를 확인하라는 요청을 받았습니다");
     st.trading.check_account().await.map(Json).map_err(ApiFailure::trading)
+}
+
+async fn account_number(State(st): State<Arc<AppState>>) -> Result<Response, ApiFailure> {
+    let number = st.trading.confirmed_account_number().await.map_err(ApiFailure::trading)?;
+    let mut response = Json(number).into_response();
+    response.headers_mut().insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
+    Ok(response)
 }
 
 async fn balance(State(st): State<Arc<AppState>>) -> Result<Json<api::TradingBalance>, ApiFailure> {
