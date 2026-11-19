@@ -203,3 +203,27 @@ test("레이아웃 메뉴의 배치 다시 하기는 되돌린 뒤에만 켜지�
   await expect(redo()).toBeDisabled();
   await expect(area(page)).toBeVisible();
 });
+
+test("떠 있는 창 머리에서 탭으로 돌아오거나 탭에서 떠 있는 창으로 바뀌어도 초점을 탭 밖으로 옮기지 않는다", async ({ page }) => {
+  const header = page.locator('[data-window-header="screener"]');
+  const activeIsBody = () => page.evaluate(() => document.activeElement === document.body);
+  await open(page);
+  await tab(page, "스크리너").click({ button: "right" });
+  await page.getByRole("menu", { name: "창 배치" }).getByRole("menuitem", { name: "띄우기", exact: true }).click();
+  await expect(header).toBeVisible();
+  await header.focus();
+  await page.keyboard.press("Control+z");
+  await expect(header).toHaveCount(0);
+  await expect(tab(page, "스크리너")).toBeVisible();
+  await expect(tab(page, "스크리너")).not.toBeFocused();
+  expect(await activeIsBody()).toBe(true);
+  await page.keyboard.press("Control+y");
+  await expect(header).toBeVisible();
+  await page.getByRole("button", { name: "스크리너 붙이기" }).click();
+  await expect(header).toHaveCount(0);
+  await tab(page, "스크리너").focus();
+  await page.keyboard.press("Control+z");
+  await expect(header).toBeVisible();
+  await expect(header).not.toBeFocused();
+  expect(await activeIsBody()).toBe(true);
+});

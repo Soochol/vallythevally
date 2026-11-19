@@ -1,7 +1,9 @@
 import { useEffect } from "react";
 import { DESKTOP_QUERY } from "../../lib/media";
 import { isTypingTarget } from "../../lib/typingTarget";
-import { useLayoutStore } from "../../stores/layout";
+import { groupOfWindow } from "../../layout/dock/tree";
+import { windowId } from "../../layout/kinds";
+import { fittedDock, useLayoutStore } from "../../stores/layout";
 import { useSelectionStore } from "../../stores/selection";
 import { useAccountStore } from "../../stores/account";
 import { ownsChartKeyboard } from "../overlay/topLayer";
@@ -41,10 +43,8 @@ const sceneOf = (e: KeyboardEvent): ArrangementKeyScene => ({
   gestureRunning: GESTURE_CLASSES.some((name) => document.documentElement.classList.contains(name)),
 });
 
-const focusedWindow = () => {
-  const active = document.activeElement;
-  return active?.closest<HTMLElement>('[role="tab"][data-window-id]')?.dataset.windowId ?? active?.closest<HTMLElement>("[data-window-header]")?.dataset.windowHeader ?? null;
-};
+const focusedTab = () => document.activeElement?.closest<HTMLElement>('[role="tab"][data-window-id]')?.dataset.windowId ?? null;
+const isDocked = (id: string) => groupOfWindow(fittedDock(useLayoutStore.getState().layout).root, windowId(id)) !== null;
 
 export function useArrangementKeys() {
   useEffect(() => {
@@ -53,15 +53,14 @@ export function useArrangementKeys() {
       if (!command) return;
       e.preventDefault();
       const layout = useLayoutStore.getState();
-      const focused = focusedWindow();
+      const focused = focusedTab();
       const available = command === "undo" ? layout.steps.length > 0 : layout.redos.length > 0;
       if (command === "undo") layout.undoArrangement();
       else layout.redoArrangement();
       const toast = useSelectionStore.getState().showToast;
       if (!available) return toast(command === "undo" ? "되돌릴 배치 변경이 없습니다" : "다시 할 배치 변경이 없습니다");
       toast(command === "undo" ? "배치를 되돌렸습니다" : "배치를 다시 했습니다");
-      const kept = focused === null ? undefined : useLayoutStore.getState().layout.windows.find((w) => w.id === focused);
-      if (kept) focusTab(kept.id);
+      if (focused !== null && isDocked(focused)) focusTab(windowId(focused));
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
