@@ -2,7 +2,7 @@ use std::sync::Mutex;
 
 use serde::{Deserialize, Serialize};
 
-use crate::api::KiwoomEnvironment;
+use crate::api::{KiwoomEnvironment, MarginPolicy};
 use crate::kiwoom::private_file::{FileError, PrivateFile, parse_stamped, render_stamped};
 
 pub const ORDER_SWITCH_FILE_NAME: &str = "kiwoom-orders.json";
@@ -20,6 +20,8 @@ pub struct SwitchRecord {
     pub confirm_won: Option<u64>,
     #[serde(default)]
     pub cap_won: Option<u64>,
+    #[serde(default)]
+    pub margin_policy: MarginPolicy,
 }
 
 pub enum SwitchStore {
@@ -79,7 +81,7 @@ mod tests {
     use super::*;
 
     fn record(enabled: bool) -> SwitchRecord {
-        SwitchRecord { enabled, salt: "00ff".into(), account_ref: Some("ref".into()), account_tail: Some("01".into()), confirm_won: None, cap_won: None }
+        SwitchRecord { enabled, salt: "00ff".into(), account_ref: Some("ref".into()), account_tail: Some("01".into()), confirm_won: None, cap_won: None, margin_policy: MarginPolicy::CashOnly }
     }
 
     fn open_up(path: &std::path::Path, mode: u32) {
@@ -126,7 +128,7 @@ mod tests {
     fn an_enabled_switch_without_a_confirmed_account_is_refused() {
         let dir = tempfile::tempdir().unwrap();
         let store = SwitchStore::file(PrivateFile::new(dir.path().join("s").join(ORDER_SWITCH_FILE_NAME)), KiwoomEnvironment::Real);
-        store.save(&SwitchRecord { enabled: true, salt: "00".into(), account_ref: None, account_tail: None, confirm_won: None, cap_won: None }).unwrap();
+        store.save(&SwitchRecord { enabled: true, salt: "00".into(), account_ref: None, account_tail: None, confirm_won: None, cap_won: None, margin_policy: MarginPolicy::CashOnly }).unwrap();
         assert!(store.load().is_err());
     }
 
@@ -159,6 +161,23 @@ mod tests {
         assert_eq!(real.load().unwrap(), Some(record(false)));
         let mock = SwitchStore::file(PrivateFile::new(path), KiwoomEnvironment::Mock);
         assert_eq!(mock.load().unwrap(), None);
+    }
+
+    #[test]
+    fn a_switch_file_without_a_margin_policy_reads_as_cash_only_and_a_saved_policy_is_kept() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("state").join(ORDER_SWITCH_FILE_NAME);
+        let store = SwitchStore::file(PrivateFile::new(path.clone()), KiwoomEnvironment::Real);
+        store.save(&record(true)).unwrap();
+        let text = std::fs::read_to_string(&path).unwrap();
+        let without = text.replace(",\"marginPolicy\":\"cash_only\"", "");
+        assert_ne!(without, text, "정책 칸을 지웠다: {text}");
+        std::fs::write(&path, without).unwrap();
+        assert_eq!(store.load().unwrap().map(|r| r.margin_policy), Some(MarginPolicy::CashOnly));
+
+        store.save(&SwitchRecord { margin_policy: MarginPolicy::AllowMargin, ..record(true) }).unwrap();
+        let reopened = SwitchStore::file(PrivateFile::new(path), KiwoomEnvironment::Real);
+        assert_eq!(reopened.load().unwrap().map(|r| r.margin_policy), Some(MarginPolicy::AllowMargin));
     }
 
     #[test]

@@ -81,6 +81,39 @@ fn is_write(id: TradingApiId) -> bool {
     matches!(id, TradingApiId::Kt10000 | TradingApiId::Kt10001 | TradingApiId::Kt10002 | TradingApiId::Kt10003)
 }
 
+fn zero_filled(value: u64) -> String {
+    format!("{value:015}")
+}
+
+pub(super) fn orderable_reply(overrides: Value) -> Value {
+    let amount = zero_filled;
+    let mut reply = json!({
+        "stk_profa_rt": "40.00%", "profa_rt": "40.00%", "aplc_rt": "40.00%",
+        "min_ord_alow_amt": amount(1_000_000), "min_ord_alowq": amount(14),
+        "profa_20ord_alow_amt": amount(5_000_000), "profa_20ord_alowq": amount(70),
+        "profa_30ord_alow_amt": amount(3_300_000), "profa_30ord_alowq": amount(46),
+        "profa_40ord_alow_amt": amount(2_500_000), "profa_40ord_alowq": amount(35),
+        "profa_50ord_alow_amt": amount(2_000_000), "profa_50ord_alowq": amount(28),
+        "profa_60ord_alow_amt": amount(1_600_000), "profa_60ord_alowq": amount(22),
+        "profa_100ord_alow_amt": amount(1_000_000), "profa_100ord_alowq": amount(14),
+        "entr": amount(1_500_000), "uncla": amount(0),
+        "return_code": 0, "return_msg": "정상"
+    });
+    for (key, value) in overrides.as_object().expect("덮어쓸 칸은 객체로 준다") {
+        reply[key] = value.clone();
+    }
+    reply
+}
+
+pub(super) fn cash_600k_margin_1_5m() -> Value {
+    orderable_reply(json!({
+        "min_ord_alow_amt": zero_filled(600_000), "min_ord_alowq": zero_filled(8),
+        "profa_40ord_alow_amt": zero_filled(1_500_000), "profa_40ord_alowq": zero_filled(21),
+        "profa_100ord_alow_amt": zero_filled(800_000), "profa_100ord_alowq": zero_filled(11),
+        "entr": zero_filled(1_200_000), "uncla": zero_filled(50_000)
+    }))
+}
+
 fn price_band_reply(requested: &str, limits: &(String, String)) -> Result<HttpResponse, TransportError> {
     let mut body: Value = serde_json::from_str(include_str!("../../tests/fixtures/kiwoom/ka10001_005930_AL.json")).unwrap();
     let (upper, lower) = if requested.contains(ETN_CODE) {
@@ -144,7 +177,7 @@ fn reply(sent: &Sent, account: &str, rows_account: &str) -> Result<crate::kiwoom
             ], "return_code": 0, "return_msg": "정상"}),
             None,
         ),
-        TradingApiId::Kt00010 => ok(json!({"profa_100ord_alow_amt": "000000001000000", "profa_100ord_alowq": "000000000000014", "ord_alowa": "000000009999999", "return_code": 0, "return_msg": "정상"}), None),
+        TradingApiId::Kt00011 => ok(orderable_reply(json!({})), None),
         TradingApiId::Kt00007 => ok(
             json!({"acnt_ord_cntr_prps_dtl": [
                 {"ord_no": "0012345", "stk_cd": "A005930", "stk_nm": "삼성전자", "trde_tp": "보통", "io_tp_nm": "현금매수", "cntr_qty": "0000000003", "cntr_uv": "0000071000", "ord_tm": "09:30:01", "cnfm_tm": "09:30:02", "dmst_stex_tp": "KRX"},
@@ -187,9 +220,9 @@ pub(super) async fn fixture_in(latency: Duration, spacing: Duration, environment
         {
             return write_reply(*seen_mode.lock().unwrap());
         }
-        if sent.api_id == Endpoint::Trading(TradingApiId::Kt00010) {
-            let side = serde_json::from_str::<Value>(&sent.body).ok().and_then(|body| body["trde_tp"].as_str().map(str::to_owned));
-            if let Some(scripted) = side.and_then(|side| seen_orderable.lock().unwrap().get(&side).cloned()) {
+        if sent.api_id == Endpoint::Trading(TradingApiId::Kt00011) {
+            let price = serde_json::from_str::<Value>(&sent.body).ok().and_then(|body| body["uv"].as_str().map(str::to_owned));
+            if let Some(scripted) = price.and_then(|price| seen_orderable.lock().unwrap().get(&price).cloned()) {
                 return ok(scripted, None);
             }
         }
@@ -424,33 +457,33 @@ async fn account_reads_are_parsed_into_the_browser_contract() {
     let body_of = |tr: &str| bodies.iter().find(|(id, _)| *id == tr).map(|(_, b)| b.clone()).unwrap();
     assert_eq!(body_of("kt00018"), json!({"qry_tp": "2", "dmst_stex_tp": "KRX"}));
     assert_eq!(body_of("ka10075"), json!({"all_stk_tp": "0", "trde_tp": "0", "stk_cd": "", "stex_tp": "0"}));
-    assert_eq!(body_of("kt00010"), json!({"stk_cd": "005930", "trde_tp": "2", "uv": "71000"}));
+    assert_eq!(body_of("kt00011"), json!({"stk_cd": "005930", "uv": "71000"}));
     assert_eq!(body_of("kt00007")["qry_tp"], "4");
     assert_eq!(body_of("kt00007")["ord_dt"], "20261109");
     assert_eq!(f.fake.sent().iter().filter(|s| s.api_id == Endpoint::Trading(TradingApiId::Ka00001)).count(), 1, "계좌 확인은 60초 동안 한 번이다");
 }
 
 fn orderable_sends(f: &Fixture) -> usize {
-    f.fake.sent().iter().filter(|s| s.api_id == Endpoint::Trading(TradingApiId::Kt00010)).count()
+    f.fake.sent().iter().filter(|s| s.api_id == Endpoint::Trading(TradingApiId::Kt00011)).count()
 }
 
 #[tokio::test]
 async fn a_business_rejection_fails_only_that_request_and_stops_no_path() {
     let f = fixture().await;
     assert_eq!(enable(&f.app, "01").await.0, StatusCode::OK);
-    f.orderable_replies.lock().unwrap().insert("1".into(), json!({"return_code": 20, "return_msg": "[2000](571455:합성 매도 사유 FAKE-SECRET-sell)"}));
+    f.orderable_replies.lock().unwrap().insert("70000".into(), json!({"return_code": 20, "return_msg": "[2000](571455:합성 매도 사유 FAKE-SECRET-sell)"}));
     let code = domain::StockCode::parse("005930").unwrap();
-    let (sell, buy) = tokio::join!(f.state.trading.orderable(code, OrderSide::Sell, 71_000), f.state.trading.orderable(code, OrderSide::Buy, 71_000));
+    let (sell, buy) = tokio::join!(f.state.trading.orderable(code, OrderSide::Sell, 70_000), f.state.trading.orderable(code, OrderSide::Buy, 71_000));
     assert_eq!(buy.unwrap().quantity, 14, "같은 경로의 매수 조회는 성공한다");
     let Err(TradingError::Kiwoom(ref error @ KiwoomError::Failed(ref failure))) = sell else { panic!("{sell:?}") };
     assert_eq!((failure.category(), failure.vendor_reason().map(|r| r.number())), (Category::BusinessRejected, Some(571455)));
     assert!(!error.manual_action_required());
     let shown = error.shown();
     assert_eq!((shown.code, shown.reason, shown.manual_action_required), (crate::api::ApiErrorCode::KiwoomUnavailable, crate::api::ApiErrorReason::BusinessRejected, false));
-    assert!(f.state.rest.stopped(Endpoint::Trading(TradingApiId::Kt00010)).is_none() && f.state.rest.halted().is_none());
+    assert!(f.state.rest.stopped(Endpoint::Trading(TradingApiId::Kt00011)).is_none() && f.state.rest.halted().is_none());
     let sent = orderable_sends(&f);
     assert_eq!(sent, 2, "매도·매수가 각각 한 번 나갔다");
-    assert!(matches!(f.state.trading.orderable(code, OrderSide::Sell, 71_000).await, Err(TradingError::Kiwoom(KiwoomError::Failed(_)))));
+    assert!(matches!(f.state.trading.orderable(code, OrderSide::Sell, 70_000).await, Err(TradingError::Kiwoom(KiwoomError::Failed(_)))));
     assert_eq!(orderable_sends(&f), sent + 1, "거절된 뒤에도 다시 키움으로 나간다");
 }
 
@@ -458,7 +491,7 @@ async fn a_business_rejection_fails_only_that_request_and_stops_no_path() {
 async fn a_business_rejection_reaches_the_browser_as_a_reason_not_a_stop() {
     let f = fixture().await;
     assert_eq!(enable(&f.app, "01").await.0, StatusCode::OK);
-    f.orderable_replies.lock().unwrap().insert("2".into(), json!({"return_code": 20, "return_msg": "[2000](571489:합성 휴장 FAKE-SECRET-closed)"}));
+    f.orderable_replies.lock().unwrap().insert("71000".into(), json!({"return_code": 20, "return_msg": "[2000](571489:합성 휴장 FAKE-SECRET-closed)"}));
     let (status, body) = get(&f.app, "/api/trading/orderable?code=005930&side=buy&price=71000").await;
     assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE, "{body}");
     assert_eq!((body["error"]["reason"].clone(), body["error"]["manualActionRequired"].clone(), body["error"]["code"].clone()), (json!("business_rejected"), json!(false), json!("kiwoom_unavailable")));
@@ -468,6 +501,88 @@ async fn a_business_rejection_reaches_the_browser_as_a_reason_not_a_stop() {
     let (again, _) = get(&f.app, "/api/trading/orderable?code=005930&side=buy&price=71000").await;
     assert_eq!(again, StatusCode::SERVICE_UNAVAILABLE);
     assert_eq!(orderable_sends(&f), 2, "첫 거절 뒤에도 다음 요청이 키움으로 나간다");
+}
+
+const ORDERABLE_71000: &str = "/api/trading/orderable?code=005930&side=buy&price=71000";
+const MARGIN: &str = "/api/system/orders/margin";
+
+#[tokio::test]
+async fn orderable_reads_kt00011_cash_and_margin() {
+    let f = fixture().await;
+    assert_eq!(enable(&f.app, "01").await.0, StatusCode::OK);
+    f.orderable_replies.lock().unwrap().insert("71000".into(), cash_600k_margin_1_5m());
+    let (status, orderable) = get(&f.app, ORDERABLE_71000).await;
+    assert_eq!(status, StatusCode::OK, "{orderable}");
+    let expected = json!({
+        "policy": "cash_only", "amount": 600_000, "quantity": 8, "cashAmount": 600_000, "cashQuantity": 8,
+        "marginAmount": 1_500_000, "marginQuantity": 21, "deposit": 1_200_000, "unpaid": 50_000,
+        "stockRate": 40.0, "accountRate": 40.0, "appliedRate": 40.0, "code": "005930", "side": "buy", "price": 71_000
+    });
+    for (key, value) in expected.as_object().unwrap() {
+        assert_eq!(&orderable[key], value, "{key}: {orderable}");
+    }
+    let orderable_sends: Vec<_> = f.fake.sent().iter().filter(|s| s.api_id == Endpoint::Trading(TradingApiId::Kt00011)).map(|s| serde_json::from_str::<Value>(&s.body).unwrap()).collect();
+    assert_eq!(orderable_sends, [json!({"stk_cd": "005930", "uv": "71000"})], "kt00011을 한 번만 보낸다");
+    assert_eq!(trading_sends(&f.fake).iter().filter(|id| id.ends_with("00010")).count(), 0, "주문인출가능금액 조회는 나가지 않는다");
+
+    assert_eq!(call(&f.app, "PUT", MARGIN, Some(json!({"policy": "allow_margin"}))).await.0, StatusCode::OK);
+    let (_, allowed) = get(&f.app, ORDERABLE_71000).await;
+    assert_eq!((allowed["policy"].clone(), allowed["amount"].clone(), allowed["quantity"].clone(), allowed["cashAmount"].clone()), (json!("allow_margin"), json!(1_500_000), json!(21), json!(600_000)));
+}
+
+#[tokio::test]
+async fn unknown_applied_rate_reads_as_no_margin_limit() {
+    let f = fixture().await;
+    assert_eq!(enable(&f.app, "01").await.0, StatusCode::OK);
+    assert_eq!(call(&f.app, "PUT", MARGIN, Some(json!({"policy": "allow_margin"}))).await.0, StatusCode::OK);
+    for applied in ["70.00%", "", "n/a", "%"] {
+        f.orderable_replies.lock().unwrap().insert("71000".into(), orderable_reply(json!({"aplc_rt": applied})));
+        let (_, orderable) = get(&f.app, ORDERABLE_71000).await;
+        assert_eq!((orderable["marginAmount"].clone(), orderable["marginQuantity"].clone(), orderable["amount"].clone()), (Value::Null, Value::Null, json!(1_000_000)), "aplc_rt={applied:?}: {orderable}");
+        assert_eq!(orderable["appliedRate"], if applied == "70.00%" { json!(70.0) } else { Value::Null }, "{applied:?}");
+    }
+}
+
+#[tokio::test]
+async fn negative_amounts_read_as_zero() {
+    let f = fixture().await;
+    assert_eq!(enable(&f.app, "01").await.0, StatusCode::OK);
+    f.orderable_replies.lock().unwrap().insert("71000".into(), orderable_reply(json!({
+        "min_ord_alow_amt": "-000000000000500", "min_ord_alowq": "-000000000000001",
+        "profa_40ord_alow_amt": "-000000000002500", "profa_40ord_alowq": "-000000000000002",
+        "entr": "-000000000001000", "uncla": "-000000000000010"
+    })));
+    let (status, orderable) = get(&f.app, ORDERABLE_71000).await;
+    assert_eq!(status, StatusCode::OK, "{orderable}");
+    for key in ["amount", "quantity", "cashAmount", "cashQuantity", "marginAmount", "marginQuantity", "deposit", "unpaid"] {
+        assert_eq!(orderable[key], json!(0), "{key}: {orderable}");
+    }
+}
+
+#[tokio::test]
+async fn margin_policy_defaults_to_cash_only_and_survives_reenable() {
+    let f = fixture().await;
+    assert_eq!(get(&f.app, MARGIN).await, (StatusCode::OK, json!({"policy": "cash_only"})), "꺼져 있으면 cash_only");
+    assert_eq!(enable(&f.app, "01").await.0, StatusCode::OK);
+    assert_eq!(get(&f.app, MARGIN).await.1, json!({"policy": "cash_only"}), "저장된 값이 없으면 cash_only");
+    assert_eq!(call(&f.app, "PUT", MARGIN, Some(json!({"policy": "allow_margin"}))).await, (StatusCode::OK, json!({"policy": "allow_margin"})));
+    assert_eq!(get(&f.app, MARGIN).await.1, json!({"policy": "allow_margin"}));
+    assert_eq!(call(&f.app, "PUT", "/api/system/orders", Some(json!({"enabled": false}))).await.0, StatusCode::OK);
+    assert_eq!(get(&f.app, MARGIN).await.1, json!({"policy": "cash_only"}), "꺼져 있는 동안은 cash_only로 보인다");
+    assert_eq!(enable(&f.app, "01").await.0, StatusCode::OK);
+    assert_eq!(get(&f.app, MARGIN).await.1, json!({"policy": "allow_margin"}), "다시 켜도 저장된 정책이 남는다");
+    assert_eq!(call(&f.app, "PUT", MARGIN, Some(json!({"policy": "cash_only"}))).await.1, json!({"policy": "cash_only"}));
+    assert_eq!(call(&f.app, "PUT", MARGIN, Some(json!({"policy": "bogus"}))).await.0, StatusCode::BAD_REQUEST);
+    assert_eq!(get(&f.app, MARGIN).await.1, json!({"policy": "cash_only"}));
+}
+
+#[tokio::test]
+async fn margin_policy_write_refused_when_orders_off() {
+    let f = fixture().await;
+    let (status, body) = call(&f.app, "PUT", MARGIN, Some(json!({"policy": "allow_margin"}))).await;
+    assert_eq!((status, body["error"]["reason"].clone()), (StatusCode::CONFLICT, json!("orders_off")), "{body}");
+    assert_eq!(get(&f.app, MARGIN).await.1, json!({"policy": "cash_only"}));
+    assert!(f.fake.sent().is_empty(), "꺼져 있으면 키움 전송이 없다: {:?}", f.fake.sent().iter().map(|s| s.api_id).collect::<Vec<_>>());
 }
 
 #[tokio::test]

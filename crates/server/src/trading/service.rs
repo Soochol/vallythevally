@@ -7,7 +7,7 @@ use domain::{StockCode, Venue};
 use sha2::{Digest, Sha256};
 use tokio::sync::broadcast;
 
-use super::request::{AccountNumber, Balance, Executions, OpenOrders, Orderable, Rows, TradingRequest};
+use super::request::{AccountNumber, Balance, Executions, OpenOrders, Orderable, OrderableReply, Rows, TradingRequest};
 use super::switch::{SwitchRecord, SwitchStore};
 use crate::api::{self, OrderSide};
 use crate::clock::Clock;
@@ -271,10 +271,10 @@ impl Trading {
         if tail_of(number.expose()) != tail.trim() {
             return Err(TradingError::TailMismatch);
         }
-        let (confirm_won, cap_won) = saved.as_ref().map_or((None, None), |r| (r.confirm_won, r.cap_won));
+        let (confirm_won, cap_won, margin_policy) = saved.as_ref().map_or((None, None, api::MarginPolicy::default()), |r| (r.confirm_won, r.cap_won, r.margin_policy));
         let salt = saved.map_or_else(new_salt, |r| r.salt);
         let account_ref = account_ref_of(&salt, number.expose());
-        let record = SwitchRecord { enabled: true, salt, account_ref: Some(account_ref.clone()), account_tail: Some(tail_of(number.expose())), confirm_won, cap_won };
+        let record = SwitchRecord { enabled: true, salt, account_ref: Some(account_ref.clone()), account_tail: Some(tail_of(number.expose())), confirm_won, cap_won, margin_policy };
         let switch = self.switch_lock.lock().expect("스위치 잠금");
         self.store.save(&record).map_err(|e| TradingError::FileUnusable(e.to_string()))?;
         *self.lock() = State { mismatch: false, verified: Some(Verified { number, account_ref, at: self.clock.now().unix() }) };
@@ -394,8 +394,22 @@ impl Trading {
 
     pub(super) async fn orderable_at(&self, code: StockCode, order_side: OrderSide, order_price: u64, priority: Priority) -> Result<api::TradingOrderable, TradingError> {
         let account = self.verified(priority).await?;
-        let reply = self.read(&Orderable::new(code, order_side, order_price), None, priority).await?.body;
-        Ok(api::TradingOrderable { account_ref: account.account_ref, code: code.as_str().to_owned(), side: order_side, price: order_price, amount: unsigned(&reply.profa_100ord_alow_amt)?, quantity: unsigned(&reply.profa_100ord_alowq)? })
+        let reply = self.read(&Orderable::new(code, order_price), None, priority).await?.body;
+        let policy = self.enabled_record()?.margin_policy;
+        orderable_of(account.account_ref, code, order_side, order_price, policy, &reply)
+    }
+
+    pub fn margin_policy(&self) -> api::OrdersMargin {
+        api::OrdersMargin { policy: self.enabled_record().map_or_else(|_| api::MarginPolicy::default(), |record| record.margin_policy) }
+    }
+
+    pub async fn set_margin_policy(&self, input: api::OrdersMargin) -> Result<api::OrdersMargin, TradingError> {
+        let _write = self.write.lock().await;
+        let record = self.enabled_record()?;
+        let switch = self.switch_lock.lock().expect("스위치 잠금");
+        self.store.save(&SwitchRecord { margin_policy: input.policy, ..record }).map_err(|e| TradingError::FileUnusable(e.to_string()))?;
+        drop(switch);
+        Ok(input)
     }
 
     pub async fn executions(&self) -> Result<api::TradingExecutions, TradingError> {
@@ -468,6 +482,44 @@ pub(super) struct OpenEntry {
 
 fn integer(text: &str) -> Result<i64, TradingError> {
     text.trim().parse::<i64>().map_err(|_| TradingError::Unreadable("숫자가 아닌 값"))
+}
+
+fn orderable_of(account_ref: String, code: StockCode, side: OrderSide, order_price: u64, policy: api::MarginPolicy, reply: &OrderableReply) -> Result<api::TradingOrderable, TradingError> {
+    let (cash_amount, cash_quantity) = (non_negative(&reply.min_ord_alow_amt)?, non_negative(&reply.min_ord_alowq)?);
+    let (stock_rate, account_rate, applied_rate) = (percent(&reply.stk_profa_rt), percent(&reply.profa_rt), percent(&reply.aplc_rt));
+    let margin = applied_rate.and_then(|rate| reply.margin_columns(rate)).and_then(|(amount, quantity)| Some((non_negative(amount).ok()?, non_negative(quantity).ok()?)));
+    let (amount, quantity) = match (policy, margin) {
+        (api::MarginPolicy::AllowMargin, Some(limit)) => limit,
+        _ => (cash_amount, cash_quantity),
+    };
+    Ok(api::TradingOrderable {
+        account_ref,
+        code: code.as_str().to_owned(),
+        side,
+        price: order_price,
+        amount,
+        quantity,
+        policy,
+        cash_amount,
+        cash_quantity,
+        margin_amount: margin.map(|(amount, _)| amount),
+        margin_quantity: margin.map(|(_, quantity)| quantity),
+        deposit: non_negative(&reply.entr)?,
+        unpaid: non_negative(&reply.uncla)?,
+        stock_rate,
+        account_rate,
+        applied_rate,
+    })
+}
+
+fn non_negative(text: &str) -> Result<u64, TradingError> {
+    integer(text).map(|value| u64::try_from(value).unwrap_or(0))
+}
+
+fn percent(text: &str) -> Option<f64> {
+    let text = text.trim();
+    let end = text.find(|c: char| !(c.is_ascii_digit() || c == '.')).unwrap_or(text.len());
+    text[..end].parse::<f64>().ok().filter(|value| value.is_finite())
 }
 
 fn unsigned(text: &str) -> Result<u64, TradingError> {

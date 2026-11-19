@@ -160,6 +160,8 @@ fn generated_typescript_matches_the_committed_files() {
         generated::<LayoutSync>(),
         generated::<LayoutWindow>(),
         generated::<LinkColor>(),
+        generated::<MarginPolicy>(),
+        generated::<OrdersMargin>(),
         generated::<TradingAccountNumber>(),
         generated::<TradingBalance>(),
         generated::<TradingExecution>(),

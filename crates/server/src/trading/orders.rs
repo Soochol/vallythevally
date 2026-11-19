@@ -38,6 +38,14 @@ enum Work {
     Cancel { order_no: OrderNumber, listed: Option<OpenEntry> },
 }
 
+struct ResolvedTarget {
+    code: StockCode,
+    venue: Venue,
+    remaining: NonZeroU64,
+    side: OrderSide,
+    price: u64,
+}
+
 enum Outbound {
     Buy(BuyOrder),
     Sell(SellOrder),
@@ -388,7 +396,7 @@ impl Trading {
                 })
             }
             Work::Modify { order_no, price, confirmed } => {
-                let (code, venue, remaining) = self.resolve_target(command_id, order_no, true, None).await?;
+                let ResolvedTarget { code, venue, remaining, side, price: original_price } = self.resolve_target(command_id, order_no, true, None).await?;
                 let info = self.info_of(code)?;
                 if venue == Venue::Nxt && !info.nxt_enabled {
                     return Err(OrderRejectReason::NxtUnavailable.into());
@@ -396,11 +404,17 @@ impl Trading {
                 let amount = price.get().checked_mul(remaining.get()).ok_or(OrderRejectReason::InvalidOrder)?;
                 check_terms(price.get(), amount, info.kind, *confirmed, limits)?;
                 self.check_price_band(code, price.get()).await?;
+                if side == OrderSide::Buy && price.get() > original_price {
+                    let added = (price.get() - original_price).checked_mul(remaining.get()).ok_or(OrderRejectReason::InvalidOrder)?;
+                    if added > self.orderable_at(code, OrderSide::Buy, price.get(), Priority::Order).await?.amount {
+                        return Err(OrderRejectReason::BuyOverBuyingPower.into());
+                    }
+                }
                 Ok(Outbound::Modify(ModifyOrder::new(OrderRoute::from(venue), order_no, code, remaining, *price)))
             }
             Work::Cancel { order_no, listed } => {
-                let (code, venue, remaining) = self.resolve_target(command_id, order_no, false, listed.clone()).await?;
-                Ok(Outbound::Cancel(CancelOrder::new(OrderRoute::from(venue), order_no, code, remaining)))
+                let target = self.resolve_target(command_id, order_no, false, listed.clone()).await?;
+                Ok(Outbound::Cancel(CancelOrder::new(OrderRoute::from(target.venue), order_no, target.code, target.remaining)))
             }
         }
     }
@@ -414,7 +428,7 @@ impl Trading {
         Ok(entries.into_iter().find(|e| e.order.order_no == order_no.as_str()))
     }
 
-    async fn resolve_target(&self, command_id: &str, order_no: &OrderNumber, needs_limit_order: bool, listed: Option<OpenEntry>) -> Result<(StockCode, Venue, NonZeroU64), Stop> {
+    async fn resolve_target(&self, command_id: &str, order_no: &OrderNumber, needs_limit_order: bool, listed: Option<OpenEntry>) -> Result<ResolvedTarget, Stop> {
         let found = match listed {
             Some(entry) => {
                 self.verified(Priority::Order).await?;
@@ -430,7 +444,7 @@ impl Trading {
         let remaining = NonZeroU64::new(entry.order.open_quantity).ok_or(OrderRejectReason::OrderNotFound)?;
         let venue: Venue = entry.order.venue.into();
         self.journal.resolve_target(command_id, code.as_str(), venue, remaining.get(), self.clock.now().unix()).await?;
-        Ok((code, venue, remaining))
+        Ok(ResolvedTarget { code, venue, remaining, side: entry.order.side, price: entry.order.price })
     }
 
     async fn fetch_price_band(&self, code: StockCode) -> Result<PriceBand, Stop> {

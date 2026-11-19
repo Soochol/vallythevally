@@ -6,7 +6,7 @@ pub enum TradingApiId {
     Ka00001,
     Kt00018,
     Ka10075,
-    Kt00010,
+    Kt00011,
     Kt00007,
     Kt10000,
     Kt10001,
@@ -17,7 +17,7 @@ pub enum TradingApiId {
 impl TradingApiId {
     pub const fn path(self) -> &'static str {
         match self {
-            TradingApiId::Ka00001 | TradingApiId::Kt00018 | TradingApiId::Ka10075 | TradingApiId::Kt00010 | TradingApiId::Kt00007 => ACCOUNT_PATH,
+            TradingApiId::Ka00001 | TradingApiId::Kt00018 | TradingApiId::Ka10075 | TradingApiId::Kt00011 | TradingApiId::Kt00007 => ACCOUNT_PATH,
             TradingApiId::Kt10000 | TradingApiId::Kt10001 | TradingApiId::Kt10002 | TradingApiId::Kt10003 => ORDER_PATH,
         }
     }
@@ -27,7 +27,7 @@ impl TradingApiId {
             TradingApiId::Ka00001 => "ka00001",
             TradingApiId::Kt00018 => "kt00018",
             TradingApiId::Ka10075 => "ka10075",
-            TradingApiId::Kt00010 => "kt00010",
+            TradingApiId::Kt00011 => "kt00011",
             TradingApiId::Kt00007 => "kt00007",
             TradingApiId::Kt10000 => "kt10000",
             TradingApiId::Kt10001 => "kt10001",

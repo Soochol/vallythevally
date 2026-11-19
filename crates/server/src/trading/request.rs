@@ -4,7 +4,6 @@ use domain::{KstDate, StockCode, Venue};
 use serde::{Deserialize, Deserializer, Serialize};
 
 use super::tr::TradingApiId;
-use crate::api::OrderSide;
 use crate::config::Secret;
 
 mod sealed {
@@ -170,29 +169,73 @@ trading_request!(OpenOrders, Ka10075, OpenOrdersReply);
 #[derive(Serialize)]
 pub struct Orderable {
     stk_cd: String,
-    trde_tp: &'static str,
     uv: String,
 }
 
 impl Orderable {
-    pub fn new(code: StockCode, side: OrderSide, price: u64) -> Orderable {
-        let trde_tp = match side {
-            OrderSide::Sell => "1",
-            OrderSide::Buy => "2",
-        };
-        Orderable { stk_cd: code.as_str().to_owned(), trde_tp, uv: price.to_string() }
+    pub fn new(code: StockCode, price: u64) -> Orderable {
+        Orderable { stk_cd: code.as_str().to_owned(), uv: price.to_string() }
     }
 }
 
 #[derive(Debug, Deserialize, Default)]
 pub struct OrderableReply {
     #[serde(default)]
+    pub stk_profa_rt: String,
+    #[serde(default)]
+    pub profa_rt: String,
+    #[serde(default)]
+    pub aplc_rt: String,
+    #[serde(default)]
+    pub min_ord_alow_amt: String,
+    #[serde(default)]
+    pub min_ord_alowq: String,
+    #[serde(default)]
+    pub profa_20ord_alow_amt: String,
+    #[serde(default)]
+    pub profa_20ord_alowq: String,
+    #[serde(default)]
+    pub profa_30ord_alow_amt: String,
+    #[serde(default)]
+    pub profa_30ord_alowq: String,
+    #[serde(default)]
+    pub profa_40ord_alow_amt: String,
+    #[serde(default)]
+    pub profa_40ord_alowq: String,
+    #[serde(default)]
+    pub profa_50ord_alow_amt: String,
+    #[serde(default)]
+    pub profa_50ord_alowq: String,
+    #[serde(default)]
+    pub profa_60ord_alow_amt: String,
+    #[serde(default)]
+    pub profa_60ord_alowq: String,
+    #[serde(default)]
     pub profa_100ord_alow_amt: String,
     #[serde(default)]
     pub profa_100ord_alowq: String,
+    #[serde(default)]
+    pub entr: String,
+    #[serde(default)]
+    pub uncla: String,
 }
 
-trading_request!(Orderable, Kt00010, OrderableReply);
+impl OrderableReply {
+    pub fn margin_columns(&self, applied_rate: f64) -> Option<(&str, &str)> {
+        let columns = match applied_rate {
+            20.0 => (&self.profa_20ord_alow_amt, &self.profa_20ord_alowq),
+            30.0 => (&self.profa_30ord_alow_amt, &self.profa_30ord_alowq),
+            40.0 => (&self.profa_40ord_alow_amt, &self.profa_40ord_alowq),
+            50.0 => (&self.profa_50ord_alow_amt, &self.profa_50ord_alowq),
+            60.0 => (&self.profa_60ord_alow_amt, &self.profa_60ord_alowq),
+            100.0 => (&self.profa_100ord_alow_amt, &self.profa_100ord_alowq),
+            _ => return None,
+        };
+        Some((columns.0, columns.1))
+    }
+}
+
+trading_request!(Orderable, Kt00011, OrderableReply);
 
 #[derive(Serialize)]
 pub struct Executions {
