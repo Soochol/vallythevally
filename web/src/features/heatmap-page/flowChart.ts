@@ -7,6 +7,7 @@ const HOUR_SECONDS = 3600;
 const STEPS = [0.1, 0.2, 0.5, 1, 2, 5, 10, 20] as const;
 const WIDEST_STEP = 50;
 const MAX_TICKS = 7;
+const FLOAT_TOLERANCE = 1e-9;
 const MIN_PADDING = 0.3;
 const MIN_X_SPAN = 600;
 
@@ -24,8 +25,8 @@ export function rateExtent(rates: readonly number[]): Extent {
 
 export function rateTicks({ min, max }: Extent): number[] {
   const step = STEPS.find((s) => (max - min) / s <= MAX_TICKS) ?? WIDEST_STEP;
-  const first = Math.ceil(min / step - 1e-9);
-  const last = Math.floor(max / step + 1e-9);
+  const first = Math.ceil(min / step - FLOAT_TOLERANCE);
+  const last = Math.floor(max / step + FLOAT_TOLERANCE);
   return Array.from({ length: last - first + 1 }, (_, i) => Math.round((first + i) * step * 100) / 100);
 }
 
