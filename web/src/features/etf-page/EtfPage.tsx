@@ -5,7 +5,7 @@ import type { EtfDataStatus } from "../../api/generated/EtfDataStatus";
 import { PageFrame } from "../pages/PageFrame";
 import { EtfDetail, tabOf } from "./EtfDetail";
 import { EtfList } from "./EtfList";
-import { NO_FILTER, type FundFilter } from "./etfModel";
+import { BASKET_LIMIT, NO_FILTER, type FundFilter, parseBasket } from "./etfModel";
 import "./etfPage.css";
 
 const SOURCE_LABEL: Record<EtfDataStatus["source"], string> = { snapshot: "스냅샷", collected: "수집" };
@@ -20,12 +20,39 @@ export function EtfPage() {
   const funds = useEtfFunds();
   const [params, setParams] = useSearchParams();
   const [filter, setFilter] = useState<FundFilter>(NO_FILTER);
+  const [basketNotice, setBasketNotice] = useState<string | null>(null);
   const code = params.get("code");
   const tab = tabOf(params.get("tab"));
+  const basket = parseBasket(params.get("basket"));
+  const stock = params.get("stock");
   const list = funds.data?.funds ?? null;
   const selected = list?.find((fund) => fund.code === code) ?? null;
-  const select = (next: string) => setParams({ code: next, tab });
-  const pickTab = (next: typeof tab) => setParams(code === null ? { tab: next } : { code, tab: next });
+  const go = (next: { code?: string | null; tab?: typeof tab; basket?: readonly string[]; stock?: string | null }) => {
+    const target = {
+      code: next.code === undefined ? code : next.code,
+      tab: next.tab ?? tab,
+      basket: next.basket ?? basket,
+      stock: next.stock === undefined ? stock : next.stock,
+    };
+    const query = new URLSearchParams();
+    if (target.code !== null) query.set("code", target.code);
+    query.set("tab", target.tab);
+    if (target.basket.length > 0) query.set("basket", target.basket.join(","));
+    if (target.stock !== null) query.set("stock", target.stock);
+    setParams(query);
+  };
+  const toggleBasket = (next: string) => {
+    if (basket.includes(next)) {
+      setBasketNotice(null);
+      go({ basket: basket.filter((entry) => entry !== next) });
+    } else if (basket.length >= BASKET_LIMIT) {
+      setBasketNotice(`비교 바구니는 ${BASKET_LIMIT}개까지 담을 수 있습니다. 하나를 빼고 담으세요`);
+    } else {
+      setBasketNotice(null);
+      go({ basket: [...basket, next] });
+    }
+  };
+  const standalone = code === null && (tab === "overlap" || tab === "reverse");
   return (
     <PageFrame title="ETF" freshness={<Freshness status={(selected ?? list?.[0])?.status ?? null} />}>
       {funds.isPending && <div className="etf-empty" role="status">ETF 목록을 불러오는 중입니다</div>}
@@ -37,10 +64,20 @@ export function EtfPage() {
       )}
       {list && (
         <div className="etf-layout">
-          <EtfList funds={list} selected={code} filter={filter} onFilter={setFilter} onSelect={select} />
+          <EtfList funds={list} selected={code} filter={filter} onFilter={setFilter} onSelect={(next) => go({ code: next })} basket={basket} basketNotice={basketNotice} onToggleBasket={toggleBasket} />
           <div className="etf-main">
-            {selected ? (
-              <EtfDetail fund={selected} tab={tab} onTab={pickTab} />
+            {selected || standalone ? (
+              <EtfDetail
+                fund={selected}
+                funds={list}
+                tab={tab}
+                basket={basket}
+                stock={stock}
+                onTab={(next) => go({ tab: next })}
+                onRemoveFromBasket={toggleBasket}
+                onStock={(next) => go({ stock: next })}
+                onOpenFund={(next) => go({ code: next, tab: "holdings" })}
+              />
             ) : code !== null ? (
               <div className="etf-empty" role="alert">
                 <strong>찾을 수 없음</strong>

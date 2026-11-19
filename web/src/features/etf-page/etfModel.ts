@@ -1,4 +1,5 @@
 import type { EtfFundSummary } from "../../api/generated/EtfFundSummary";
+import type { EtfHolding } from "../../api/generated/EtfHolding";
 import type { EtfStyle } from "../../api/generated/EtfStyle";
 
 export type StyleFilter = EtfStyle | "all";
@@ -103,4 +104,32 @@ export function cumulativeCurve(weightsBps: readonly number[]): CurvePoint[] {
     sum += weight;
     return { rank: index + 1, cumulativeBps: sum };
   });
+}
+
+export const BASKET_LIMIT = 4;
+
+export type WeightedHolding = Pick<EtfHolding, "code" | "name" | "weightBps">;
+
+export interface CommonHolding {
+  code: string;
+  name: string;
+  weightABps: number;
+  weightBBps: number;
+}
+
+export function commonHoldings(a: readonly WeightedHolding[], b: readonly WeightedHolding[]): CommonHolding[] {
+  const weightsB = new Map(b.map((holding) => [holding.code, holding.weightBps]));
+  return a
+    .flatMap((holding) => {
+      const weightBBps = weightsB.get(holding.code);
+      return weightBBps === undefined ? [] : [{ code: holding.code, name: holding.name, weightABps: holding.weightBps, weightBBps }];
+    })
+    .toSorted((x, y) => Math.min(y.weightABps, y.weightBBps) - Math.min(x.weightABps, x.weightBBps));
+}
+
+export const overlapBps = (a: readonly WeightedHolding[], b: readonly WeightedHolding[]): number =>
+  commonHoldings(a, b).reduce((sum, holding) => sum + Math.min(holding.weightABps, holding.weightBBps), 0);
+
+export function parseBasket(value: string | null): string[] {
+  return [...new Set((value ?? "").split(",").filter((code) => code !== ""))].slice(0, BASKET_LIMIT);
 }
