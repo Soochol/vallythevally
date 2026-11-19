@@ -1697,6 +1697,22 @@ pub struct OrdersStatus {
     pub message: String,
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum MarginPolicy {
+    #[default]
+    CashOnly,
+    AllowMargin,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct OrdersMargin {
+    pub policy: MarginPolicy,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export)]
@@ -1781,7 +1797,7 @@ pub struct TradingOpenOrders {
     pub orders: Vec<TradingOpenOrder>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export)]
 pub struct TradingOrderable {
@@ -1794,6 +1810,22 @@ pub struct TradingOrderable {
     pub amount: u64,
     #[ts(type = "number")]
     pub quantity: u64,
+    pub policy: MarginPolicy,
+    #[ts(type = "number")]
+    pub cash_amount: u64,
+    #[ts(type = "number")]
+    pub cash_quantity: u64,
+    #[ts(type = "number | null")]
+    pub margin_amount: Option<u64>,
+    #[ts(type = "number | null")]
+    pub margin_quantity: Option<u64>,
+    #[ts(type = "number")]
+    pub deposit: u64,
+    #[ts(type = "number")]
+    pub unpaid: u64,
+    pub stock_rate: Option<f64>,
+    pub account_rate: Option<f64>,
+    pub applied_rate: Option<f64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]

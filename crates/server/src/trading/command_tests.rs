@@ -8,7 +8,7 @@ use serde_json::{Value, json};
 use tower::ServiceExt;
 
 use super::journal::{BatchBegun, Begun, Prepared, PreparedBatch};
-use super::tests::{ACCOUNT, DEFAULT_BAND, ETN_CODE, Fixture, HOST, WriteMode, enable, fixture, fixture_in, fixture_with, get, trading_sends};
+use super::tests::{ACCOUNT, DEFAULT_BAND, ETN_CODE, Fixture, HOST, WriteMode, call, cash_600k_margin_1_5m, enable, fixture, fixture_in, fixture_with, get, orderable_reply, trading_sends};
 use super::{SwitchStore, Trading};
 use crate::api::{KiwoomEnvironment, OrderCommandKind, OrderCommandState};
 use crate::kiwoom::api::{Endpoint, MarketRequest, StockBasicInfo, StockList};
@@ -239,6 +239,82 @@ async fn rejects_buy_over_buying_power() {
     refused(&f, buy("cmd-power-0001", 15, 71_000), "buy_over_buying_power").await;
     let (_, ok) = order(&f.app, PLACE, buy("cmd-power-0002", 14, 71_000)).await;
     assert_eq!(ok["state"], "accepted");
+}
+
+async fn script_orderable(f: &Fixture, price: u64, reply: Value) {
+    f.orderable_replies.lock().unwrap().insert(price.to_string(), reply);
+}
+
+async fn set_policy(f: &Fixture, policy: &str) {
+    assert_eq!(call(&f.app, "PUT", "/api/system/orders/margin", Some(json!({"policy": policy}))).await.0, StatusCode::OK);
+}
+
+#[tokio::test]
+async fn buy_over_cash_is_refused_when_cash_only() {
+    let f = on().await;
+    script_orderable(&f, 71_000, cash_600k_margin_1_5m()).await;
+    refused(&f, buy("cmd-cash-over01", 9, 71_000), "buy_over_buying_power").await;
+    assert!(!sent_ids(&f).contains(&"kt10000"), "거절된 매수는 kt10000을 보내지 않는다");
+    let (_, fits) = order(&f.app, PLACE, buy("cmd-cash-fits01", 8, 71_000)).await;
+    assert_eq!(fits["state"], "accepted", "{fits}");
+}
+
+#[tokio::test]
+async fn buy_over_cash_within_margin_is_sent_when_margin_allowed() {
+    let f = on().await;
+    script_orderable(&f, 71_000, cash_600k_margin_1_5m()).await;
+    set_policy(&f, "allow_margin").await;
+    let (_, sent) = order(&f.app, PLACE, buy("cmd-margin-ok01", 9, 71_000)).await;
+    assert_eq!(sent["state"], "accepted", "{sent}");
+    assert_eq!(writes(&f), vec![("kt10000", json!({"dmst_stex_tp": "KRX", "stk_cd": "005930", "ord_qty": "9", "ord_uv": "71000", "trde_tp": "0"}))]);
+}
+
+#[tokio::test]
+async fn buy_over_margin_is_refused_when_margin_allowed() {
+    let f = on().await;
+    script_orderable(&f, 71_000, cash_600k_margin_1_5m()).await;
+    set_policy(&f, "allow_margin").await;
+    refused(&f, buy("cmd-margin-over", 22, 71_000), "buy_over_buying_power").await;
+    let (_, fits) = order(&f.app, PLACE, buy("cmd-margin-fits", 21, 71_000)).await;
+    assert_eq!(fits["state"], "accepted", "{fits}");
+}
+
+#[tokio::test]
+async fn unknown_applied_rate_falls_back_to_cash() {
+    let f = on().await;
+    script_orderable(&f, 71_000, orderable_reply(json!({"aplc_rt": "70.00%", "min_ord_alow_amt": "000000000600000", "min_ord_alowq": "000000000000008"}))).await;
+    set_policy(&f, "allow_margin").await;
+    let (_, orderable) = get(&f.app, "/api/trading/orderable?code=005930&side=buy&price=71000").await;
+    assert_eq!((orderable["marginAmount"].clone(), orderable["amount"].clone()), (Value::Null, json!(600_000)));
+    refused(&f, buy("cmd-unknown-rate", 9, 71_000), "buy_over_buying_power").await;
+    script_orderable(&f, 71_000, orderable_reply(json!({"aplc_rt": "읽을 수 없음", "min_ord_alow_amt": "000000000600000", "min_ord_alowq": "000000000000008"}))).await;
+    refused(&f, buy("cmd-unread-rate1", 9, 71_000), "buy_over_buying_power").await;
+}
+
+fn count_of(f: &Fixture, id: &str) -> usize {
+    sent_ids(f).iter().filter(|sent| **sent == id).count()
+}
+
+#[tokio::test]
+async fn raising_buy_modify_checks_added_amount() {
+    let f = on().await;
+    script_orderable(&f, 72_000, orderable_reply(json!({"min_ord_alow_amt": "000000000006999", "min_ord_alowq": "000000000000000"}))).await;
+    let (_, over) = order(&f.app, MODIFY, json!({"commandId": "cmd-raise-over1", "orderNo": "0012345", "price": 72_000})).await;
+    assert_eq!((over["state"].clone(), over["reason"].clone()), (json!("rejected"), json!("buy_over_buying_power")), "잔량 7 × 1,000원 = 7,000원이 6,999원을 넘는다: {over}");
+    assert_eq!((count_of(&f, "kt00011"), count_of(&f, "kt10002")), (1, 0));
+
+    script_orderable(&f, 72_000, orderable_reply(json!({"min_ord_alow_amt": "000000000007000", "min_ord_alowq": "000000000000000"}))).await;
+    let (_, fits) = order(&f.app, MODIFY, json!({"commandId": "cmd-raise-fits1", "orderNo": "0012345", "price": 72_000})).await;
+    assert_eq!(fits["state"], "accepted", "{fits}");
+    assert_eq!((count_of(&f, "kt00011"), count_of(&f, "kt10002")), (2, 1));
+
+    let (_, sell_up) = order(&f.app, MODIFY, json!({"commandId": "cmd-sell-up001", "orderNo": "0012346", "price": 73_000})).await;
+    let (_, buy_down) = order(&f.app, MODIFY, json!({"commandId": "cmd-buy-down01", "orderNo": "0012345", "price": 70_900})).await;
+    let (_, buy_same) = order(&f.app, MODIFY, json!({"commandId": "cmd-buy-same01", "orderNo": "0012345", "price": 71_000})).await;
+    for done in [sell_up, buy_down, buy_same] {
+        assert_eq!(done["state"], "accepted", "{done}");
+    }
+    assert_eq!((count_of(&f, "kt00011"), count_of(&f, "kt10002")), (2, 4), "매도 정정과 가격을 내리거나 같은 정정은 kt00011을 보내지 않는다");
 }
 
 #[tokio::test]
@@ -554,7 +630,7 @@ async fn place_with_remembered_band_skips_basic_info() {
     let before = sent_ids(&f).len();
     let (_, bought) = order(&f.app, PLACE, buy("cmd-band-buy01", 3, 71_000)).await;
     assert_eq!(bought["state"], "accepted", "{bought}");
-    assert_eq!(sent_since(&f, before), ["kt00010", "kt10000"]);
+    assert_eq!(sent_since(&f, before), ["kt00011", "kt10000"]);
     let before = sent_ids(&f).len();
     let (_, sold) = order(&f.app, PLACE, sell("cmd-band-sell1", 2, 71_000)).await;
     assert_eq!(sold["state"], "accepted", "{sold}");
@@ -567,7 +643,7 @@ async fn an_order_alone_remembers_the_band_for_the_next_one() {
     let before = sent_ids(&f).len();
     order(&f.app, PLACE, buy("cmd-band-solo1", 1, 71_000)).await;
     order(&f.app, PLACE, buy("cmd-band-solo2", 1, 71_000)).await;
-    assert_eq!(sent_since(&f, before), [BASIC_INFO, "kt00010", "kt10000", "kt00010", "kt10000"]);
+    assert_eq!(sent_since(&f, before), [BASIC_INFO, "kt00011", "kt10000", "kt00011", "kt10000"]);
 }
 
 #[tokio::test]
@@ -582,7 +658,7 @@ async fn price_band_is_fetched_again_on_a_new_kst_day() {
     assert_eq!(sent_since(&f, before).iter().filter(|id| **id == BASIC_INFO).count(), 1);
     let before = sent_ids(&f).len();
     order(&f.app, PLACE, buy("cmd-day-00003", 1, 71_000)).await;
-    assert_eq!(sent_since(&f, before), ["kt00010", "kt10000"], "새 날짜의 값은 다시 기억한다");
+    assert_eq!(sent_since(&f, before), ["kt00011", "kt10000"], "새 날짜의 값은 다시 기억한다");
 }
 
 #[tokio::test]
@@ -608,14 +684,14 @@ async fn out_of_remembered_band_fetches_once_before_refusing() {
     let before = sent_ids(&f).len();
     let (_, inside_new) = order(&f.app, PLACE, buy("cmd-out-00001", 1, 110_000)).await;
     assert_eq!(inside_new["state"], "accepted", "{inside_new}");
-    assert_eq!(sent_since(&f, before), [BASIC_INFO, "kt00010", "kt10000"]);
+    assert_eq!(sent_since(&f, before), [BASIC_INFO, "kt00011", "kt10000"]);
     let before = sent_ids(&f).len();
     refused(&f, buy("cmd-out-00002", 1, 140_000), "out_of_limit").await;
     assert_eq!(sent_since(&f, before), [BASIC_INFO], "새 값으로도 밖이면 한 번 조회하고 거절한다");
     let before = sent_ids(&f).len();
     let (_, inside_old) = order(&f.app, PLACE, buy("cmd-out-00003", 1, 71_000)).await;
     assert_eq!(inside_old["state"], "accepted", "{inside_old}");
-    assert_eq!(sent_since(&f, before), ["kt00010", "kt10000"], "새로 받은 값이 기억을 바꿨다");
+    assert_eq!(sent_since(&f, before), ["kt00011", "kt10000"], "새로 받은 값이 기억을 바꿨다");
 }
 
 #[tokio::test]
@@ -626,7 +702,7 @@ async fn cancel_with_recent_open_orders_sends_only_kt10003() {
     let before = sent_ids(&f).len();
     let (_, modified) = order(&f.app, MODIFY, json!({"commandId": "cmd-fast-mod01", "orderNo": "0012345", "price": 71_100})).await;
     assert_eq!((modified["state"].clone(), modified["quantity"].clone()), (json!("accepted"), json!(7)), "{modified}");
-    assert_eq!(sent_since(&f, before), ["kt10002"]);
+    assert_eq!(sent_since(&f, before), ["kt00011", "kt10002"], "가격을 올리는 매수 정정은 미체결을 다시 조회하지 않고 매수 가능만 조회한다");
     get(&f.app, OPEN_ORDERS).await;
     let before = sent_ids(&f).len();
     let (_, cancelled) = order(&f.app, CANCEL, json!({"commandId": "cmd-fast-can01", "orderNo": "0012346"})).await;
@@ -731,11 +807,12 @@ async fn order_latency_probe() {
         assert_eq!(enable(&f.app, "01").await.0, StatusCode::OK);
         let tag = format!("{latency_ms}-{spacing_ms}");
         let actions: Vec<(&str, Vec<&str>)> = vec![
-            ("매수", vec!["kt00010", "kt10000"]),
+            ("매수", vec!["kt00011", "kt10000"]),
             ("매도", vec!["kt00018", "kt10001"]),
             ("단건 취소", vec!["kt10003"]),
             ("같은 가격 3건 일괄 취소", vec!["ka10075", "kt10003", "kt10003", "kt10003"]),
             ("정정 1건", vec!["kt10002"]),
+            ("가격을 올리는 매수 정정", vec!["kt00011", "kt10002"]),
         ];
         for (index, (name, expected)) in actions.into_iter().enumerate() {
             *f.open_rows.lock().unwrap() = (name == "같은 가격 3건 일괄 취소").then(|| same_price_rows(&["0020001", "0020002", "0020003"]));
@@ -749,7 +826,8 @@ async fn order_latency_probe() {
                 "매도" => order(&f.app, PLACE, sell(&format!("cmd-probe-{tag}-{index}"), 2, 71_000)).await,
                 "단건 취소" => order(&f.app, CANCEL, json!({"commandId": format!("cmd-probe-{tag}-{index}"), "orderNo": "0012346"})).await,
                 "같은 가격 3건 일괄 취소" => order(&f.app, CANCEL_BATCH, json!({"batchId": format!("batch-probe-{tag}"), "code": "005930", "side": "buy", "price": 71_000})).await,
-                _ => order(&f.app, MODIFY, json!({"commandId": format!("cmd-probe-{tag}-{index}"), "orderNo": "0012345", "price": 71_100})).await,
+                "가격을 올리는 매수 정정" => order(&f.app, MODIFY, json!({"commandId": format!("cmd-probe-{tag}-{index}"), "orderNo": "0012345", "price": 71_100})).await,
+                _ => order(&f.app, MODIFY, json!({"commandId": format!("cmd-probe-{tag}-{index}"), "orderNo": "0012345", "price": 70_900})).await,
             };
             let elapsed = started.elapsed();
             assert!(reply.to_string().contains("accepted"), "{name}: {reply}");

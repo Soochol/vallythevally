@@ -38,6 +38,7 @@ pub fn routes(state: Arc<AppState>) -> Router<Arc<AppState>> {
     Router::new()
         .merge(commands)
         .route("/api/system/orders", get(status).put(switch))
+        .route("/api/system/orders/margin", get(margin_policy).put(set_margin_policy))
         .route("/api/system/orders/check-account", post(check_account))
         .route("/api/trading/account-number", get(account_number))
         .route("/api/trading/balance", get(balance))
@@ -56,6 +57,16 @@ async fn switch(State(st): State<Arc<AppState>>, body: Body) -> Result<Json<api:
     let input: api::OrdersSwitchInput = serde_json::from_slice(&bytes).map_err(|_| ApiFailure::bad_request("본문 형식이 올바르지 않습니다"))?;
     tracing::info!(enabled = input.enabled, "주문 사용 스위치를 바꾸라는 요청을 받았습니다");
     st.trading.set_enabled(input).await.map(Json).map_err(ApiFailure::trading)
+}
+
+async fn margin_policy(State(st): State<Arc<AppState>>) -> Json<api::OrdersMargin> {
+    Json(st.trading.margin_policy())
+}
+
+async fn set_margin_policy(State(st): State<Arc<AppState>>, body: Body) -> Result<Json<api::OrdersMargin>, ApiFailure> {
+    let input: api::OrdersMargin = read_json(body).await?;
+    tracing::info!(policy = ?input.policy, "주문 미수 정책을 바꾸라는 요청을 받았습니다");
+    st.trading.set_margin_policy(input).await.map(Json).map_err(ApiFailure::trading)
 }
 
 async fn check_account(State(st): State<Arc<AppState>>) -> Result<Json<api::OrdersAccountCheck>, ApiFailure> {

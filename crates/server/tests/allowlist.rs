@@ -88,7 +88,7 @@ fn the_check_catches_order_and_account_ids_outside_trading() {
     }
 }
 
-const TRADING_API_IDS: [&str; 9] = ["ka00001", "kt00018", "ka10075", "kt00010", "kt00007", "kt10000", "kt10001", "kt10002", "kt10003"];
+const TRADING_API_IDS: [&str; 9] = ["ka00001", "kt00018", "ka10075", "kt00011", "kt00007", "kt10000", "kt10001", "kt10002", "kt10003"];
 
 #[test]
 fn trading_api_ids_are_exactly_the_account_reads_and_the_four_order_writes() {
@@ -104,9 +104,11 @@ fn trading_list_check_notices_a_missing_and_an_extra_id() {
     let listed = |text: &str| api_ids(text).into_iter().collect::<BTreeSet<String>>();
     let want: BTreeSet<String> = TRADING_API_IDS.iter().map(|id| (*id).to_owned()).collect();
     let all = TRADING_API_IDS.join(" ");
-    assert_ne!(listed("ka00001 kt00018 ka10075 kt00010 kt00007 kt10000 kt10001 kt10002"), want, "빠진 id를 알아채야 한다");
+    assert_ne!(listed("ka00001 kt00018 ka10075 kt00011 kt00007 kt10000 kt10001 kt10002"), want, "빠진 id를 알아채야 한다");
     assert_ne!(listed(&format!("{all} kt10004")), want, "더해진 id를 알아채야 한다");
     assert_eq!(listed(&all), want);
+    assert!(!want.contains("kt00010"), "kt00010은 허용 목록에 없다");
+    assert_ne!(listed(&all.replace("kt00011", "kt00010")), want, "kt00011 대신 kt00010이 들어오면 알아채야 한다");
 }
 
 /// 키움 api-id 모양(영문 2자 + 숫자 5자리) 낱말을 모두 찾는다.
