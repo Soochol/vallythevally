@@ -8,7 +8,7 @@ use super::{EtfDataSource, EtfDataStatus, EtfStyle};
 use crate::api::KstDate;
 
 const SCHEMA_VERSION: u32 = 1;
-const MAX_WEIGHT_BPS: u32 = 10_000;
+pub const MAX_WEIGHT_BPS: u32 = 10_000;
 pub const MAX_WEIGHT_SUM_BPS: u32 = 11_000;
 const TOP_HOLDINGS: usize = 5;
 
@@ -139,6 +139,25 @@ impl Catalog {
         self.funds.push(fund);
     }
 
+    pub fn overlaid(&self, collected: &HashMap<StockCode, CollectedFund>, attempts: &HashMap<StockCode, Attempt>) -> Catalog {
+        let mut names: HashMap<String, String> = self.stock_names.iter().map(|(code, name)| (code.as_str().to_owned(), name.clone())).collect();
+        for pdf in collected.values() {
+            for holding in &pdf.holdings {
+                names.entry(holding.code.as_str().to_owned()).or_insert_with(|| holding.name.clone());
+            }
+        }
+        let mut catalog = Catalog::default();
+        for fund in &self.funds {
+            let attempt = attempts.get(&fund.code);
+            let merged = match collected.get(&fund.code) {
+                Some(pdf) => pdf.applied_to(fund, attempt),
+                None => Fund { status: EtfDataStatus { last_attempt_at: attempt.map(|a| a.at), refresh_failed: attempt.is_some_and(|a| a.failed), ..fund.status.clone() }, ..fund.clone() },
+            };
+            catalog.insert(merged, &names);
+        }
+        catalog
+    }
+
     pub fn funds(&self) -> &[Fund] {
         &self.funds
     }
@@ -195,9 +214,43 @@ fn validated(raw: RawFund, names: &HashMap<String, String>, status: &EtfDataStat
     if sum == 0 || sum > u64::from(MAX_WEIGHT_SUM_BPS) {
         return Err(format!("비중 합이 허용 범위(1~{MAX_WEIGHT_SUM_BPS}bp)를 벗어납니다: {sum}bps"));
     }
+    let (holdings, top_weight_bpss, effective_holdings) = shaped(holdings);
+    Ok(Fund { code, name: raw.name, issuer: raw.issuer, style, benchmark: raw.benchmark, holdings, top_weight_bpss, effective_holdings, status: status.clone() })
+}
+
+fn shaped(mut holdings: Vec<Holding>) -> (Vec<Holding>, u32, f64) {
     holdings.sort_by(|a, b| b.weight_bps.cmp(&a.weight_bps).then(a.code.cmp(&b.code)));
+    let sum: u64 = holdings.iter().map(|h| u64::from(h.weight_bps)).sum();
     let top_weight_bpss = holdings.iter().take(TOP_HOLDINGS).map(|h| h.weight_bps).sum();
     let sum_of_squares: u64 = holdings.iter().map(|h| u64::from(h.weight_bps).pow(2)).sum();
     let effective_holdings = (sum * sum) as f64 / sum_of_squares as f64;
-    Ok(Fund { code, name: raw.name, issuer: raw.issuer, style, benchmark: raw.benchmark, holdings, top_weight_bpss, effective_holdings, status: status.clone() })
+    (holdings, top_weight_bpss, effective_holdings)
+}
+
+#[derive(Debug, Clone)]
+pub struct CollectedHolding {
+    pub code: StockCode,
+    pub name: String,
+    pub weight_bps: u32,
+}
+
+#[derive(Debug, Clone)]
+pub struct CollectedFund {
+    pub as_of: domain::KstDate,
+    pub holdings: Vec<CollectedHolding>,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct Attempt {
+    pub at: crate::api::UnixSeconds,
+    pub day: domain::KstDate,
+    pub failed: bool,
+}
+
+impl CollectedFund {
+    fn applied_to(&self, fund: &Fund, attempt: Option<&Attempt>) -> Fund {
+        let (holdings, top_weight_bpss, effective_holdings) = shaped(self.holdings.iter().map(|h| Holding { code: h.code, weight_bps: h.weight_bps }).collect());
+        let status = EtfDataStatus { source: EtfDataSource::Collected, holdings_as_of: KstDate(self.as_of), last_attempt_at: attempt.map(|a| a.at), refresh_failed: attempt.is_some_and(|a| a.failed) };
+        Fund { holdings, top_weight_bpss, effective_holdings, status, ..fund.clone() }
+    }
 }

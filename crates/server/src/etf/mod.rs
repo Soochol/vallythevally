@@ -1,4 +1,5 @@
 mod catalog;
+mod collect;
 mod ma;
 
 use std::sync::Arc;
@@ -14,6 +15,7 @@ use ts_rs::TS;
 use crate::api::{self, KstDate, UnixSeconds};
 use crate::http::{ApiFailure, AppState};
 use ma::MaCache;
+pub use collect::{EtfBook, start as start_collection};
 pub use catalog::{Catalog, Fund, Holding, Loaded, MAX_WEIGHT_SUM_BPS, Rejection};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -125,7 +127,6 @@ pub fn routes() -> Router<Arc<AppState>> {
         .route("/api/etf/funds", get(funds))
         .route("/api/etf/funds/{code}", get(fund))
         .route("/api/etf/stocks/{code}", get(stock))
-        .layer(Extension(Arc::new(Catalog::embedded())))
         .layer(Extension(Arc::new(MaCache::default())))
 }
 
@@ -152,11 +153,13 @@ fn stock_name(st: &AppState, catalog: &Catalog, code: StockCode) -> Option<Strin
     listed.or_else(|| catalog.stock_name(code).map(str::to_owned))
 }
 
-async fn funds(Extension(catalog): Extension<Arc<Catalog>>) -> Json<EtfFundList> {
+async fn funds(State(st): State<Arc<AppState>>) -> Json<EtfFundList> {
+    let catalog = st.etf.catalog();
     Json(EtfFundList { funds: catalog.funds().iter().map(summary).collect() })
 }
 
-async fn fund(State(st): State<Arc<AppState>>, Extension(catalog): Extension<Arc<Catalog>>, Extension(cache): Extension<Arc<MaCache>>, Path(code): Path<String>) -> Result<Json<EtfFundDetail>, ApiFailure> {
+async fn fund(State(st): State<Arc<AppState>>, Extension(cache): Extension<Arc<MaCache>>, Path(code): Path<String>) -> Result<Json<EtfFundDetail>, ApiFailure> {
+    let catalog = st.etf.catalog();
     let fund = catalog.fund(code_in(&code)?).ok_or_else(|| ApiFailure::new(api::ApiErrorCode::NotFound, format!("없는 ETF입니다: {code}")))?;
     let ma = cache.snapshot(&st.screener, || catalog.stock_codes()).await;
     let holdings = fund
@@ -167,7 +170,8 @@ async fn fund(State(st): State<Arc<AppState>>, Extension(catalog): Extension<Arc
     Ok(Json(EtfFundDetail { fund: summary(fund), holdings, ma_as_of: ma.as_of.map(KstDate) }))
 }
 
-async fn stock(State(st): State<Arc<AppState>>, Extension(catalog): Extension<Arc<Catalog>>, Extension(cache): Extension<Arc<MaCache>>, Path(code): Path<String>) -> Result<Json<EtfStockHolders>, ApiFailure> {
+async fn stock(State(st): State<Arc<AppState>>, Extension(cache): Extension<Arc<MaCache>>, Path(code): Path<String>) -> Result<Json<EtfStockHolders>, ApiFailure> {
+    let catalog = st.etf.catalog();
     let stock = code_in(&code)?;
     let ma = cache.snapshot(&st.screener, || catalog.stock_codes()).await;
     let holders = catalog.holders(stock).into_iter().map(|(fund, weight_bps)| EtfStockHolder { fund: summary(fund), weight_bps }).collect();
