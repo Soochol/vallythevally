@@ -236,7 +236,7 @@ fn run_daemon(arguments: &Arguments, keys_path: &std::path::Path) -> ExitCode {
             holiday_key_path,
         };
         let daemon = match Daemon::start(inputs, injected) {
-            Ok(daemon) => daemon.with_webhook(webhook.map(AlertWebhook::spawn)),
+            Ok(daemon) => daemon.with_webhook(webhook.map(|webhook| AlertWebhook::spawn(webhook, &state_folder))),
             Err(error) => {
                 eprintln!("supervise: 시작하지 못했습니다: {error}");
                 return ExitCode::FAILURE;

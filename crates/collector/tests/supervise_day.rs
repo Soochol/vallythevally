@@ -1361,7 +1361,11 @@ impl FakeWebhook {
     }
 
     fn webhook(&self, folder: &Path) -> AlertWebhook {
-        AlertWebhook::spawn(Webhook::load(&FakeWebhook::url_file(folder, self.port)).unwrap().unwrap())
+        AlertWebhook::spawn(Webhook::load(&FakeWebhook::url_file(folder, self.port)).unwrap().unwrap(), folder)
+    }
+
+    fn webhook_again(folder: &Path) -> AlertWebhook {
+        AlertWebhook::spawn(Webhook::load(&folder.join("discord-webhook")).unwrap().unwrap(), folder)
     }
 
     fn texts(&self) -> Vec<String> {
@@ -1482,7 +1486,7 @@ async fn a_webhook_that_answers_with_an_error_does_not_stop_the_day_and_its_addr
 async fn a_webhook_nobody_listens_on_does_not_stop_the_day_and_its_address_stays_out_of_the_log() {
     let closed_port = TcpListener::bind("127.0.0.1:0").await.unwrap().local_addr().unwrap().port();
     let folder = tempfile::tempdir().unwrap();
-    let webhook = AlertWebhook::spawn(Webhook::load(&FakeWebhook::url_file(folder.path(), closed_port)).unwrap().unwrap());
+    let webhook = AlertWebhook::spawn(Webhook::load(&FakeWebhook::url_file(folder.path(), closed_port)).unwrap().unwrap(), folder.path());
     the_day_runs_to_the_complete_file_while_the_webhook_fails(webhook, WEBHOOK_SECRET).await;
 }
 
@@ -1502,4 +1506,51 @@ async fn plan_notes_go_out_once_as_one_batch_when_collection_starts() {
     let batches: Vec<String> = hook.texts().into_iter().filter(|text| text.starts_with("[수집 계획]")).collect();
     assert_eq!(batches, ["[수집 계획] 알릴 내용 2건\n- 예비 키 용량이 빠듯합니다\n- 인계할 몫이 큽니다"]);
     harness.finish().await;
+}
+
+fn with_plan_notes(data: &Path) {
+    let mut plan = day_plan();
+    plan.alerts = vec!["예비 키 용량이 빠듯합니다".to_owned()];
+    write_plan(data, &plan).unwrap();
+}
+
+async fn run_the_failing_day_with_notes(webhook: AlertWebhook) {
+    let harness = Harness::start_with(Config { start: at(11, 0, 0), candles: Candles::Failing, webhook: Some(webhook), ..Config::default() }, with_plan_notes);
+    harness.until_finalize_finished(1).await;
+    harness.until(at(23, 0, 0)).await;
+    harness.finish().await;
+}
+
+fn count_containing(texts: &[String], needle: &str) -> usize {
+    texts.iter().filter(|text| text.contains(needle)).count()
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_daemon_restarted_the_same_day_does_not_send_the_same_alert_kind_or_plan_notes_again() {
+    let hook = FakeWebhook::start(Vec::new(), Answer::Accept).await;
+    let folder = tempfile::tempdir().unwrap();
+    run_the_failing_day_with_notes(hook.webhook(folder.path())).await;
+    let first = hook.texts();
+    assert_eq!(count_containing(&first, "· 단계 실패 ·"), 1, "{first:?}");
+    assert_eq!(count_containing(&first, "[수집 계획]"), 1, "{first:?}");
+    run_the_failing_day_with_notes(FakeWebhook::webhook_again(folder.path())).await;
+    let all = hook.texts();
+    assert_eq!(count_containing(&all, "· 단계 실패 ·"), 1, "{all:?}");
+    assert_eq!(count_containing(&all, "[수집 계획]"), 1, "{all:?}");
+    assert!(folder.path().join("webhook-ledger.json").exists());
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_broken_ledger_file_does_not_stop_the_daemon_and_the_alerts_are_sent() {
+    let hook = FakeWebhook::start(Vec::new(), Answer::Accept).await;
+    let folder = tempfile::tempdir().unwrap();
+    std::fs::write(folder.path().join("webhook-ledger.json"), "{깨진 기록").unwrap();
+    let (logs, _guard) = LogCapture::capture();
+    run_the_failing_day_with_notes(hook.webhook(folder.path())).await;
+    let texts = hook.texts();
+    assert_eq!(count_containing(&texts, "· 단계 실패 ·"), 1, "{texts:?}");
+    assert_eq!(count_containing(&texts, "[수집 계획]"), 1, "{texts:?}");
+    let log = logs.text();
+    assert!(log.contains("웹훅 전송 기록이 깨져 있어"), "{log}");
+    assert!(!log.contains(WEBHOOK_SECRET), "{log}");
 }
