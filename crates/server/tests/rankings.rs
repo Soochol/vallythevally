@@ -682,3 +682,174 @@ async fn a_user_joining_just_as_the_refresh_answer_lands_does_not_call_kiwoom_tw
     }
     assert!(per_round.iter().all(|&n| n == 1), "라운드마다 ka10032 호출 수: {per_round:?}");
 }
+
+fn two_pages() -> [Value; 2] {
+    [trade_amount_page(&["000001"], Some("K2")), trade_amount_page(&["000002"], None)]
+}
+
+async fn walker_dropped_while_holding(held_key: Option<&'static str>) {
+    let h = Harness::start(true).await;
+    chain(&h.fake, "ka10032", &two_pages());
+    let held = h.fake.hold("붙잡은 페이지", move |c| c.api_id == "ka10032" && c.next_key.as_deref() == held_key);
+    let walker = tokio::spawn(post_to(h.app.clone(), trade_amount(KEEP_ALL), 2, "user"));
+    held.arrived().await;
+    let waiter = tokio::spawn(post_to(h.app.clone(), trade_amount(KEEP_ALL), 2, "user"));
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    walker.abort();
+    assert!(walker.await.unwrap_err().is_cancelled());
+    held.release();
+    let (status, body) = waiter.await.unwrap();
+    assert_eq!(status, 200, "{body}");
+    assert_eq!(codes_of(&body), ["000001", "000002"]);
+    assert_eq!(h.continuation_keys("ka10032"), [None, Some("K2".to_owned())], "기다리던 요청은 1페이지부터 다시 걷지 않는다");
+}
+
+#[tokio::test]
+async fn a_walk_goes_on_for_a_waiting_request_when_the_request_that_started_it_is_dropped_on_page_one() {
+    walker_dropped_while_holding(None).await;
+}
+
+#[tokio::test]
+async fn a_walk_goes_on_for_a_waiting_request_when_the_request_that_started_it_is_dropped_on_page_two() {
+    walker_dropped_while_holding(Some("K2")).await;
+}
+
+#[tokio::test]
+async fn a_failed_walk_gives_every_waiting_request_the_same_error_and_the_next_request_walks_again() {
+    let h = Harness::start(true).await;
+    h.fake.respond_with("ka10032", 200, trade_amount_page(&["000001"], Some("K2")));
+    h.fake.respond_with_for_key("ka10032", "K2", 200, refused_key());
+    let held = h.fake.hold("첫 페이지", |c| c.api_id == "ka10032");
+    let release = async {
+        held.arrived().await;
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        held.release();
+    };
+    let (a, b, ()) = tokio::join!(h.ask(trade_amount(KEEP_ALL), 2, "user"), h.ask(trade_amount(KEEP_ALL), 2, "user"), release);
+    assert_ne!(a.0, 200, "{a:?}");
+    assert_eq!(a, b, "같은 상태와 같은 오류 본문");
+    assert_eq!(h.continuation_keys("ka10032"), [None, Some("K2".to_owned())]);
+    chain(&h.fake, "ka10032", &two_pages());
+    let page = h.show(trade_amount(KEEP_ALL), 2).await;
+    assert_eq!(codes_of(&page), ["000001", "000002"]);
+    assert_eq!(h.continuation_keys("ka10032"), [None, Some("K2".to_owned()), None, Some("K2".to_owned())], "실패한 걷기는 캐시에 남지 않아 새 요청은 1페이지부터다");
+}
+
+#[tokio::test]
+async fn a_request_dropped_with_nobody_waiting_leaves_no_partial_result_behind() {
+    let h = Harness::start(true).await;
+    chain(&h.fake, "ka10032", &two_pages());
+    let held = h.fake.hold("첫 페이지", |c| c.api_id == "ka10032");
+    let walker = tokio::spawn(post_to(h.app.clone(), trade_amount(KEEP_ALL), 2, "user"));
+    held.arrived().await;
+    walker.abort();
+    assert!(walker.await.unwrap_err().is_cancelled());
+    held.release();
+    for _ in 0..100 {
+        if h.calls("ka10032").len() >= 2 {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    let page = h.show(trade_amount(KEEP_ALL), 2).await;
+    assert_eq!(codes_of(&page), ["000001", "000002"]);
+    assert_eq!(ranks_of(&page), [1, 2]);
+    assert_eq!((page["pages"].clone(), page["end"].clone()), (json!(2), json!(true)));
+}
+
+fn unreadable_row(code: &str) -> Value {
+    json!({"stk_cd": code, "stk_nm": format!("키움{code}"), "now_rank": "1", "pred_rank": "1", "cur_prc": "abc", "flu_rt": "0.5", "now_trde_qty": "10", "trde_prica": "1"})
+}
+
+fn oversized_row(code: &str) -> Value {
+    json!({"stk_cd": code, "stk_nm": format!("키움{code}"), "now_rank": "1", "pred_rank": "1", "cur_prc": "1000", "flu_rt": "0.5", "now_trde_qty": "18446744073709551615", "trde_prica": "1"})
+}
+
+fn good_row(code: &str) -> Value {
+    trade_amount_page(&[code], None)["trde_prica_upper"][0].clone()
+}
+
+fn trade_amount_rows(rows: Vec<Value>, next: Option<&str>) -> Value {
+    json!({"_headers": headers(next), "trde_prica_upper": rows, "return_code": 0, "return_msg": "정상적으로 처리되었습니다"})
+}
+
+fn assert_protocol_failure(status: u16, body: &Value) {
+    assert_eq!((status, &body["error"]["code"], &body["error"]["reason"]), (503, &json!("kiwoom_unavailable"), &json!("protocol")), "{body}");
+}
+
+#[tokio::test]
+async fn a_page_whose_rows_are_all_unreadable_is_a_protocol_error_that_is_not_cached() {
+    let h = Harness::start(true).await;
+    h.fake.respond_with("ka10032", 200, trade_amount_rows(vec![unreadable_row("000001")], None));
+    for _ in 0..2 {
+        let (status, body) = h.ask(trade_amount(KEEP_ALL), 1, "user").await;
+        assert_protocol_failure(status, &body);
+    }
+    assert_eq!(h.continuation_keys("ka10032"), [None, None], "실패는 캐시에 없어 다시 요청하면 키움을 다시 부른다");
+}
+
+#[tokio::test]
+async fn a_page_whose_rows_are_all_too_large_is_a_protocol_error_too() {
+    let h = Harness::start(true).await;
+    h.fake.respond_with("ka10032", 200, trade_amount_rows(vec![oversized_row("000001"), unreadable_row("000002")], None));
+    let (status, body) = h.ask(trade_amount(KEEP_ALL), 1, "user").await;
+    assert_protocol_failure(status, &body);
+}
+
+#[tokio::test]
+async fn an_unreadable_second_page_is_an_error_and_leaves_no_partial_result() {
+    let h = Harness::start(true).await;
+    chain(&h.fake, "ka10032", &[trade_amount_page(&["000001"], Some("K2")), trade_amount_rows(vec![unreadable_row("000002")], None)]);
+    for _ in 0..2 {
+        let (status, body) = h.ask(trade_amount(KEEP_ALL), 2, "user").await;
+        assert_protocol_failure(status, &body);
+    }
+    assert_eq!(h.continuation_keys("ka10032"), [None, Some("K2".to_owned()), None, Some("K2".to_owned())]);
+}
+
+#[tokio::test]
+async fn a_page_with_some_unreadable_rows_keeps_the_readable_ones() {
+    let h = Harness::start(true).await;
+    h.fake.respond_with("ka10032", 200, trade_amount_rows(vec![unreadable_row("000001"), good_row("000002")], None));
+    let page = h.show(trade_amount(KEEP_ALL), 1).await;
+    assert_eq!(codes_of(&page), ["000002"]);
+}
+
+#[tokio::test]
+async fn an_empty_page_is_an_empty_end_not_an_error() {
+    let h = Harness::start(true).await;
+    h.fake.respond_with("ka10032", 200, trade_amount_rows(vec![], None));
+    let page = h.show(trade_amount(KEEP_ALL), 1).await;
+    assert_eq!((page["rows"].clone(), page["end"].clone()), (json!([]), json!(true)));
+}
+
+#[tokio::test]
+async fn net_buying_leaves_price_and_change_rate_empty_for_a_stock_quoted_at_zero_won() {
+    let h = Harness::start(true).await;
+    script_every_ranking_tr(&h.fake);
+    let mut quotes = fixture("rank_ka10095_krx");
+    quotes["atn_stk_infr"][0]["cur_prc"] = json!("0");
+    h.fake.respond_with("ka10095", 200, quotes);
+    let page = h.show(investor_net_buy(TradeUnit::Amount), 1).await;
+    let (zero, other) = (&page["rows"][0], &page["rows"][1]);
+    assert_eq!((&zero["code"], &zero["price"], &zero["changeRate"]), (&json!("005930"), &Value::Null, &Value::Null), "{zero}");
+    assert_eq!((&other["code"], &other["price"]), (&json!("000660"), &json!(120_500)), "{other}");
+}
+
+#[tokio::test]
+async fn a_request_joining_a_continued_walk_after_its_snapshot_went_stale_gets_a_fresh_page_one() {
+    let h = Harness::start(true).await;
+    chain(&h.fake, "ka10032", &two_pages());
+    let first = h.show(trade_amount(KEEP_ALL), 1).await;
+    let held = h.fake.hold("2페이지", |c| c.api_id == "ka10032" && c.next_key.as_deref() == Some("K2"));
+    let deep = tokio::spawn(post_to(h.app.clone(), trade_amount(KEEP_ALL), 2, "user"));
+    held.arrived().await;
+    h.clock.jump(8);
+    let late = tokio::spawn(post_to(h.app.clone(), trade_amount(KEEP_ALL), 1, "user"));
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    held.release();
+    let (deep, late) = (deep.await.unwrap(), late.await.unwrap());
+    assert_eq!((deep.0, late.0), (200, 200));
+    assert_eq!(deep.1["fetchedAt"], first["fetchedAt"], "이어 받은 스냅숏의 받은 시각은 처음 받은 때 그대로다");
+    assert!(late.1["fetchedAt"].as_i64().unwrap() > first["fetchedAt"].as_i64().unwrap(), "8초 지나 온 요청은 새로 받는다");
+}

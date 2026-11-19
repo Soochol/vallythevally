@@ -15,11 +15,13 @@ const FRESH_SECS: i64 = 8;
 const IDLE_SECS: i64 = 60;
 const MAX_PAGES: usize = MAX_RANKING_PAGES as usize;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum WalkError {
     Kiwoom(KiwoomError),
     KeyRepeated,
     KeyMissing,
+    PageUnreadable,
+    WalkLost,
 }
 
 impl From<KiwoomError> for WalkError {
@@ -164,10 +166,38 @@ impl Demand {
     }
 }
 
+type Outcome = Result<Snapshot, WalkError>;
+
+#[derive(Default)]
+struct SlotState {
+    snapshot: Option<Snapshot>,
+    flight: Option<watch::Receiver<Option<Outcome>>>,
+}
+
 struct Slot {
-    snapshot: tokio::sync::Mutex<Option<Snapshot>>,
+    state: Mutex<SlotState>,
     wants: Wants,
     last_read: AtomicI64,
+}
+
+struct Landing {
+    slot: Arc<Slot>,
+    outcome: watch::Sender<Option<Outcome>>,
+    result: Option<Outcome>,
+}
+
+impl Drop for Landing {
+    fn drop(&mut self) {
+        let result = self.result.take().unwrap_or(Err(WalkError::WalkLost));
+        {
+            let mut state = self.slot.state.lock().expect("순위 캐시 잠금");
+            state.flight = None;
+            if let Ok(snapshot) = &result {
+                state.snapshot = Some(snapshot.clone());
+            }
+        }
+        self.outcome.send_replace(Some(result));
+    }
 }
 
 #[derive(Default)]
@@ -179,6 +209,20 @@ fn key_was_refused(error: &KiwoomError) -> bool {
     matches!(error, KiwoomError::Failed(failure) if matches!(failure.category(), Category::InvalidRequest | Category::Unknown))
 }
 
+async fn walk_snapshot(base: Option<Snapshot>, wanted: usize, query: &Query, rest: &KiwoomRest, clock: &Clock, demand: &mut Demand) -> Outcome {
+    if let Some(base) = base {
+        let mut walk = base.walk.clone();
+        match walk.advance_to(wanted, query, rest, demand).await {
+            Ok(()) => return Ok(Snapshot { walk, fetched_at: base.fetched_at }),
+            Err(WalkError::Kiwoom(e)) if key_was_refused(&e) => tracing::info!(reason = %e, "키움이 남긴 연속조회 키를 받지 않아 1페이지부터 다시 받습니다"),
+            Err(e) => return Err(e),
+        }
+    }
+    let mut walk = Walk::start();
+    walk.advance_to(wanted, query, rest, demand).await?;
+    Ok(Snapshot { walk, fetched_at: clock.now() })
+}
+
 impl RankingCache {
     pub fn slots(&self) -> usize {
         self.slots.lock().expect("순위 캐시 잠금").len()
@@ -187,39 +231,44 @@ impl RankingCache {
     fn slot(&self, key: QueryKey, now: KstTime) -> Arc<Slot> {
         let mut slots = self.slots.lock().expect("순위 캐시 잠금");
         slots.retain(|_, slot| Arc::strong_count(slot) > 1 || now.unix() - slot.last_read.load(Ordering::SeqCst) < IDLE_SECS);
-        let slot = slots.entry(key).or_insert_with(|| Arc::new(Slot { snapshot: tokio::sync::Mutex::new(None), wants: Wants::new(), last_read: AtomicI64::new(now.unix()) }));
+        let slot = slots.entry(key).or_insert_with(|| Arc::new(Slot { state: Mutex::default(), wants: Wants::new(), last_read: AtomicI64::new(now.unix()) }));
         slot.last_read.store(now.unix(), Ordering::SeqCst);
         slot.clone()
     }
 
-    pub async fn serve(&self, query: &Query, wanted: usize, priority: Priority, rest: &KiwoomRest, clock: &Clock) -> Result<Served, WalkError> {
+    pub async fn serve(&self, query: Query, wanted: usize, priority: Priority, rest: &KiwoomRest, clock: &Clock) -> Result<Served, WalkError> {
         let slot = self.slot(query.key(), clock.now());
         let _want = slot.wants.add(priority);
-        let mut held = slot.snapshot.lock().await;
-        let mut demand = Demand { best: slot.wants.best.subscribe() };
-        let now = clock.now();
-        slot.last_read.store(now.unix(), Ordering::SeqCst);
-
-        if let Some(snapshot) = held.as_mut().filter(|snapshot| snapshot.is_fresh(now)) {
-            if snapshot.walk.covers(wanted) {
-                return Ok(snapshot.served(wanted));
-            }
-            let mut walk = snapshot.walk.clone();
-            match walk.advance_to(wanted, query, rest, &mut demand).await {
-                Ok(()) => {
-                    snapshot.walk = walk;
+        let query = Arc::new(query);
+        loop {
+            let now = clock.now();
+            slot.last_read.store(now.unix(), Ordering::SeqCst);
+            let (mut flight, started) = {
+                let mut state = slot.state.lock().expect("순위 캐시 잠금");
+                let fresh = state.snapshot.clone().filter(|snapshot| snapshot.is_fresh(now));
+                if let Some(snapshot) = fresh.as_ref().filter(|snapshot| snapshot.walk.covers(wanted)) {
                     return Ok(snapshot.served(wanted));
                 }
-                Err(WalkError::Kiwoom(e)) if key_was_refused(&e) => tracing::info!(reason = %e, "키움이 남긴 연속조회 키를 받지 않아 1페이지부터 다시 받습니다"),
-                Err(e) => return Err(e),
+                match &state.flight {
+                    Some(flight) => (flight.clone(), false),
+                    None => {
+                        let (outcome, flight) = watch::channel(None);
+                        state.flight = Some(flight.clone());
+                        let landing = Landing { slot: slot.clone(), outcome, result: None };
+                        let (query, rest, clock) = (query.clone(), rest.clone(), clock.clone());
+                        let mut demand = Demand { best: slot.wants.best.subscribe() };
+                        tokio::spawn(async move {
+                            let mut landing = landing;
+                            landing.result = Some(walk_snapshot(fresh, wanted, &query, &rest, &clock, &mut demand).await);
+                        });
+                        (flight, true)
+                    }
+                }
+            };
+            let landed = flight.wait_for(Option::is_some).await.map_err(|_| WalkError::WalkLost)?.clone().expect("착지한 걷기에는 결과가 있다")?;
+            if landed.walk.covers(wanted) && (started || landed.is_fresh(clock.now())) {
+                return Ok(landed.served(wanted));
             }
         }
-
-        let mut walk = Walk::start();
-        walk.advance_to(wanted, query, rest, &mut demand).await?;
-        let snapshot = Snapshot { walk, fetched_at: clock.now() };
-        let served = snapshot.served(wanted);
-        *held = Some(snapshot);
-        Ok(served)
     }
 }
