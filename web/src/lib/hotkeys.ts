@@ -138,13 +138,16 @@ export function parseKey(key: unknown): KeyCombo | null {
 }
 
 const LOCKED_CODES: ReadonlySet<string> = new Set(["Escape", "Tab", "Enter", "NumpadEnter", "Delete", "Backspace", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "F5", ...MODIFIER_CODES]);
-const LOCKED_CTRL_CODES: ReadonlySet<string> = new Set(["KeyC", "KeyV", "KeyZ", "KeyY", "KeyW", "KeyT", "KeyN", "KeyR", "KeyL"]);
+const CHART_CTRL_CODES: ReadonlySet<string> = new Set(["KeyC", "KeyV", "KeyZ", "KeyY"]);
+const BROWSER_CTRL_CODES: ReadonlySet<string> = new Set(["KeyW", "KeyT", "KeyN", "KeyR", "KeyL"]);
 
 export function isLockedKey({ code, ctrl, alt, shift }: KeyCombo): boolean {
-  return LOCKED_CODES.has(code) || (ctrl && !alt && (shift ? code === "KeyZ" : LOCKED_CTRL_CODES.has(code)));
+  if (LOCKED_CODES.has(code)) return true;
+  if (ctrl) return CHART_CTRL_CODES.has(code) || (!alt && !shift && BROWSER_CTRL_CODES.has(code));
+  return shift && !alt && code === "Slash";
 }
 
-export const LOCKED_KEY_LABELS: readonly string[] = ["Esc", "Tab", "Enter", "Delete", "Backspace", "방향키", "Ctrl+C", "Ctrl+V", "Ctrl+Z", "Ctrl+Y", "Ctrl+Shift+Z", "Ctrl+W", "Ctrl+T", "Ctrl+N", "Ctrl+R", "Ctrl+L", "F5", "Ctrl·Alt·Shift만 누른 것"];
+export const LOCKED_KEY_LABELS: readonly string[] = ["Esc", "Tab", "Enter", "Delete", "Backspace", "방향키", "Ctrl+C", "Ctrl+V", "Ctrl+Z", "Ctrl+Y", "Ctrl+Shift+Z", "Shift+/", "Ctrl+W", "Ctrl+T", "Ctrl+N", "Ctrl+R", "Ctrl+L", "F5", "Ctrl·Alt·Shift만 누른 것"];
 
 const isBindableKey = (key: unknown): key is KeyString => {
   const combo = parseKey(key);
@@ -157,7 +160,11 @@ export function keyLabel(key: KeyString): string {
   return [combo.ctrl && "Ctrl", combo.alt && "Alt", combo.shift && "Shift", codeLabel(combo.code)].filter(Boolean).join("+");
 }
 
-export const keyCapsLabel = (key: KeyString): string => keyLabel(key).replaceAll("+", " ");
+export function keyCapsLabel(key: KeyString): string {
+  const combo = parseKey(key);
+  if (!combo) return key;
+  return [combo.ctrl && "Ctrl", combo.alt && "Alt", combo.shift && "Shift", codeLabel(combo.code)].filter(Boolean).join(" ");
+}
 
 const sameList = (a: readonly string[], b: readonly string[]) => a.length === b.length && a.every((k, i) => k === b[i]);
 

@@ -2,7 +2,7 @@ import { describe, expect, test } from "vitest";
 import { TOOLS } from "../chart/drawings/tools";
 import { PERIODS } from "./symbol";
 import {
-  actualKeys, addKey, DEFAULT_KEYS, findAction, HOTKEY_ACTIONS, hotkeyAction, keyLabel, keyOf, matchDrawingHotkey, matchHotkey,
+  actualKeys, addKey, DEFAULT_KEYS, findAction, HOTKEY_ACTIONS, hotkeyAction, keyCapsLabel, keyLabel, keyOf, matchDrawingHotkey, matchHotkey,
   moveKey, parseKey, periodActionId, removeKey, resetAction, resetAllActions, searchTitle, toolActionId, type KeyLike, type HotkeyOverrides,
 } from "./hotkeys";
 
@@ -183,6 +183,20 @@ describe("키 더하기", () => {
       expect(addKey({}, periodActionId("10m"), k).kind, k).toBe("locked");
     }
     expect(addKey({}, periodActionId("10m"), "Ctrl+Shift+KeyW").kind).toBe("added");
+  });
+
+  test("차트의 고정 분기가 먼저 가로채는 키도 더하지 않는다", () => {
+    for (const k of ["Ctrl+Alt+KeyZ", "Ctrl+Shift+KeyC", "Ctrl+Shift+KeyV", "Ctrl+Shift+KeyY", "Ctrl+Alt+KeyC", "Shift+Slash"]) {
+      expect(addKey({}, "search", k).kind, k).toBe("locked");
+    }
+    expect(addKey({}, "search", "Alt+Shift+Slash").kind).toBe("added");
+  });
+
+  test("숫자패드 키는 글자가 보이고 + 키도 지워지지 않는다", () => {
+    expect(keyCapsLabel("NumpadAdd")).toBe("Num +");
+    expect(keyCapsLabel("Alt+Shift+NumpadAdd")).toBe("Alt Shift Num +");
+    expect(keyCapsLabel("Ctrl+KeyK")).toBe("Ctrl K");
+    expect(keyLabel("Alt+NumpadAdd")).toBe("Alt+Num +");
   });
 
   test("이 동작이 이미 가진 키는 이미 있다고 알린다", () => {

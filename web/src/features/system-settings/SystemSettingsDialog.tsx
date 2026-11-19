@@ -7,6 +7,8 @@ import { DialogFrame } from "../dialog/DialogParts";
 import { AccountMenuContent } from "../account/AccountMenuContent";
 import { CollectorBoard } from "../collector-board/CollectorBoard";
 import { CloseIcon } from "../icons";
+import { HotkeysMenuContent } from "./HotkeysMenuContent";
+import { cancelHotkeyRecording } from "./hotkeyRecording";
 import { KiwoomMenuContent } from "./KiwoomMenuContent";
 import { linkDotTone } from "./linkDot";
 import { menuAfterKey, type SystemMenuId, visibleMenus } from "./menus";
@@ -46,7 +48,7 @@ function SystemSettingsBody({ menu }: { menu: SystemMenuId | null }) {
   };
 
   return (
-    <DialogFrame labelledBy={`${ids}-title`} width="h-[min(680px,calc(100dvh-48px))] w-[min(940px,calc(100vw-48px))] max-md:h-[85dvh]" onClose={close}>
+    <DialogFrame labelledBy={`${ids}-title`} width="h-[min(680px,calc(100dvh-48px))] w-[min(940px,calc(100vw-48px))] max-md:h-[85dvh]" onClose={(reason) => { if (reason !== "outside" && cancelHotkeyRecording()) return; close(); }}>
       <div className="flex min-h-0 flex-1 max-md:flex-col">
         <h2 id={`${ids}-title`} className="sr-only">시스템 설정</h2>
         {showList && (
@@ -87,7 +89,7 @@ function SystemSettingsBody({ menu }: { menu: SystemMenuId | null }) {
               <button type="button" className="icon-btn flex-none" aria-label="닫기" onClick={close}><CloseIcon /></button>
             </header>
             <div className="min-h-0 flex-1 overflow-y-auto px-5 pb-5 max-md:px-4">
-              {current.id === "kiwoom" ? <KiwoomMenuContent /> : current.id === "collector" ? <CollectorBoard /> : current.id === "account" ? <AccountMenuContent /> : current.id === "general" || current.id === "data" || current.id === "about" ? <ReadOnlyMenuContent menu={current.id} /> : null}
+              {current.id === "kiwoom" ? <KiwoomMenuContent /> : current.id === "collector" ? <CollectorBoard /> : current.id === "account" ? <AccountMenuContent /> : current.id === "hotkeys" ? <HotkeysMenuContent /> : current.id === "general" || current.id === "data" || current.id === "about" ? <ReadOnlyMenuContent menu={current.id} /> : null}
             </div>
           </section>
         )}

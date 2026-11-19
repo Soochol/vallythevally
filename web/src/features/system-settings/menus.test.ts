@@ -4,7 +4,8 @@ import { menuAfterKey, visibleMenus } from "./menus";
 describe("세로 탭 키보드", () => {
   test("↑↓는 준비 중인 메뉴를 건너뛰고 끝에서 멈춘다", () => {
     expect(menuAfterKey("kiwoom", "ArrowDown")).toBe("general");
-    expect(menuAfterKey("general", "ArrowDown")).toBe("data");
+    expect(menuAfterKey("general", "ArrowDown")).toBe("hotkeys");
+    expect(menuAfterKey("hotkeys", "ArrowDown")).toBe("data");
     expect(menuAfterKey("data", "ArrowDown")).toBe("account");
     expect(menuAfterKey("account", "ArrowDown")).toBe("about");
     expect(menuAfterKey("about", "ArrowDown")).toBe("about");

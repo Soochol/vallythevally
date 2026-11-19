@@ -1,6 +1,7 @@
 export const SYSTEM_MENUS = [
   { id: "kiwoom", label: "키움 연결", ready: true },
   { id: "general", label: "일반", ready: true },
+  { id: "hotkeys", label: "단축키", ready: true },
   { id: "telegram", label: "알림 · 텔레그램", ready: false },
   { id: "dart", label: "재무자료 · DART", ready: false },
   { id: "data", label: "데이터 · 저장소", ready: true },
