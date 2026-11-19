@@ -243,14 +243,14 @@ impl RankingCache {
         loop {
             let now = clock.now();
             slot.last_read.store(now.unix(), Ordering::SeqCst);
-            let mut flight = {
+            let (mut flight, started) = {
                 let mut state = slot.state.lock().expect("순위 캐시 잠금");
                 let fresh = state.snapshot.clone().filter(|snapshot| snapshot.is_fresh(now));
                 if let Some(snapshot) = fresh.as_ref().filter(|snapshot| snapshot.walk.covers(wanted)) {
                     return Ok(snapshot.served(wanted));
                 }
                 match &state.flight {
-                    Some(flight) => flight.clone(),
+                    Some(flight) => (flight.clone(), false),
                     None => {
                         let (outcome, flight) = watch::channel(None);
                         state.flight = Some(flight.clone());
@@ -261,12 +261,12 @@ impl RankingCache {
                             let mut landing = landing;
                             landing.result = Some(walk_snapshot(fresh, wanted, &query, &rest, &clock, &mut demand).await);
                         });
-                        flight
+                        (flight, true)
                     }
                 }
             };
             let landed = flight.wait_for(Option::is_some).await.map_err(|_| WalkError::WalkLost)?.clone().expect("착지한 걷기에는 결과가 있다")?;
-            if landed.walk.covers(wanted) {
+            if landed.walk.covers(wanted) && (started || landed.is_fresh(clock.now())) {
                 return Ok(landed.served(wanted));
             }
         }

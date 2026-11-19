@@ -835,3 +835,21 @@ async fn net_buying_leaves_price_and_change_rate_empty_for_a_stock_quoted_at_zer
     assert_eq!((&zero["code"], &zero["price"], &zero["changeRate"]), (&json!("005930"), &Value::Null, &Value::Null), "{zero}");
     assert_eq!((&other["code"], &other["price"]), (&json!("000660"), &json!(120_500)), "{other}");
 }
+
+#[tokio::test]
+async fn a_request_joining_a_continued_walk_after_its_snapshot_went_stale_gets_a_fresh_page_one() {
+    let h = Harness::start(true).await;
+    chain(&h.fake, "ka10032", &two_pages());
+    let first = h.show(trade_amount(KEEP_ALL), 1).await;
+    let held = h.fake.hold("2페이지", |c| c.api_id == "ka10032" && c.next_key.as_deref() == Some("K2"));
+    let deep = tokio::spawn(post_to(h.app.clone(), trade_amount(KEEP_ALL), 2, "user"));
+    held.arrived().await;
+    h.clock.jump(8);
+    let late = tokio::spawn(post_to(h.app.clone(), trade_amount(KEEP_ALL), 1, "user"));
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    held.release();
+    let (deep, late) = (deep.await.unwrap(), late.await.unwrap());
+    assert_eq!((deep.0, late.0), (200, 200));
+    assert_eq!(deep.1["fetchedAt"], first["fetchedAt"], "이어 받은 스냅숏의 받은 시각은 처음 받은 때 그대로다");
+    assert!(late.1["fetchedAt"].as_i64().unwrap() > first["fetchedAt"].as_i64().unwrap(), "8초 지나 온 요청은 새로 받는다");
+}
