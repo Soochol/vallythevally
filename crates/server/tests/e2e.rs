@@ -382,6 +382,25 @@ async fn a_ten_minute_failure_at_the_first_page_or_a_later_page_stops_only_that_
 }
 
 #[tokio::test]
+async fn the_mutual_fund_kind_filter_matches_only_the_camel_case_name() {
+    let fake = ScriptedTransport::new();
+    let tmp = tempfile::tempdir().unwrap();
+    let server = Server::spawn(&fake, &tmp.path().join("run/server.lock"), &static_dir(tmp.path()));
+    let base = format!("http://{}", server.addr().await);
+    let client = reqwest::Client::new();
+
+    let (status, found) = get_after_symbol_list(&client, &base, "/api/symbols?q=094800&kind=mutualFund").await;
+    assert_eq!((status, found[0]["code"].as_str(), found[0]["kind"].as_str()), (200, Some("094800"), Some("mutualFund")), "{found}");
+    let (status, none) = get_after_symbol_list(&client, &base, "/api/symbols?q=094800&kind=etn").await;
+    assert_eq!((status, none.as_array().map(Vec::len)), (200, Some(0)), "{none}");
+    for wrong in ["mutualfund", "MutualFund", "mutual_fund"] {
+        let (status, err) = get_after_symbol_list(&client, &base, &format!("/api/symbols?q=094800&kind={wrong}")).await;
+        assert_eq!((status, err["error"]["code"].as_str()), (400, Some("bad_request")), "{wrong}: {err}");
+    }
+    server.stop().await;
+}
+
+#[tokio::test]
 async fn an_etn_opens_as_a_symbol_and_its_bars_are_requested_by_its_code() {
     let fake = ScriptedTransport::new();
     let tmp = tempfile::tempdir().unwrap();

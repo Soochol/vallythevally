@@ -532,3 +532,100 @@ async fn a_screen_with_the_new_exclusions_is_saved_and_read_back_unchanged() {
     assert_eq!(api.get().await, (200, sent));
     server.stop().await;
 }
+
+async fn stored_after_migrating(run: &std::path::Path, list: &str, revision: i64, start: i64) -> (Value, i64) {
+    let pool = SqlitePoolOptions::new().connect_with(SqliteConnectOptions::new().filename(run.join("vally.db")).create_if_missing(true)).await.unwrap();
+    sqlx::migrate!("./migrations").run_to(start, &pool).await.unwrap();
+    sqlx::query("UPDATE screens SET list = ?, revision = ?").bind(list).bind(revision).execute(&pool).await.unwrap();
+    sqlx::migrate!("./migrations").run(&pool).await.unwrap();
+    let (stored, revision): (String, i64) = sqlx::query_as("SELECT list, revision FROM screens").fetch_one(&pool).await.unwrap();
+    pool.close().await;
+    (serde_json::from_str(&stored).unwrap(), revision)
+}
+
+fn stored_screen(id: &str, exclude: Option<Value>) -> Value {
+    let mut screen = json!({"id": id, "name": format!("손상 {id}"), "markets": ["kosdaq"], "conditions": []});
+    if let Some(exclude) = exclude {
+        screen["exclude"] = exclude;
+    }
+    screen
+}
+
+#[tokio::test]
+async fn screens_left_without_the_new_exclusions_by_a_null_in_their_exclude_gain_them_once() {
+    let tmp = tempfile::tempdir().unwrap();
+    let run = quiet_run_dir(&tmp);
+    let list = json!([
+        stored_screen("null", Some(Value::Null)),
+        stored_screen("only-null-item", Some(json!([null]))),
+        stored_screen("null-last", Some(json!(["etf", null]))),
+        stored_screen("null-first", Some(json!([null, "etn"]))),
+        stored_screen("healthy", Some(json!(["etf"]))),
+    ]);
+    let (migrated, revision) = stored_after_migrating(&run, &list.to_string(), 40, 22).await;
+    assert_eq!(migrated, json!([
+        stored_screen("null", Some(json!(["etn", "infrastructure", "mutual_fund"]))),
+        stored_screen("only-null-item", Some(json!([null, "etn", "infrastructure", "mutual_fund"]))),
+        stored_screen("null-last", Some(json!(["etf", null, "etn", "infrastructure", "mutual_fund"]))),
+        stored_screen("null-first", Some(json!([null, "etn", "infrastructure", "mutual_fund"]))),
+        stored_screen("healthy", Some(json!(["etf"]))),
+    ]), "null 항목은 자리에 남고 빠진 세 값만 뒤에 붙으며, 손상되지 않은 스크린은 사용자가 뺀 값까지 그대로다");
+    assert_eq!(revision, 41);
+
+    let again_tmp = tempfile::tempdir().unwrap();
+    let again = stored_after_migrating(&quiet_run_dir(&again_tmp), &migrated.to_string(), 41, 23).await;
+    assert_eq!(again, (migrated, 41), "더한 뒤에는 다시 바꾸지 않는다");
+}
+
+#[tokio::test]
+async fn a_null_exclude_saved_before_the_new_exclusions_ends_with_all_three_after_both_migrations() {
+    let tmp = tempfile::tempdir().unwrap();
+    let run = quiet_run_dir(&tmp);
+    let list = json!([stored_screen("null", Some(Value::Null)), stored_screen("missing", None)]);
+    let (migrated, revision) = stored_after_migrating(&run, &list.to_string(), 7, 21).await;
+    assert_eq!(migrated, json!([
+        stored_screen("null", Some(json!([null, "etn", "infrastructure", "mutual_fund"]))),
+        stored_screen("missing", Some(json!(["etn", "infrastructure", "mutual_fund"]))),
+    ]));
+    assert_eq!(revision, 9);
+}
+
+#[tokio::test]
+async fn entries_and_excludes_that_are_not_what_the_exclusion_migration_edits_stay_as_they_were() {
+    let tmp = tempfile::tempdir().unwrap();
+    let run = quiet_run_dir(&tmp);
+    let list = json!([
+        "문자열 항목",
+        7,
+        ["배열"],
+        null,
+        true,
+        stored_screen("string-exclude", Some(json!("etf"))),
+        stored_screen("object-exclude", Some(json!({"a": null}))),
+        stored_screen("number-exclude", Some(json!(3))),
+        stored_screen("broken", Some(json!([null]))),
+    ]);
+    let (migrated, revision) = stored_after_migrating(&run, &list.to_string(), 40, 22).await;
+    let mut want = list.as_array().unwrap().clone();
+    want[8] = stored_screen("broken", Some(json!([null, "etn", "infrastructure", "mutual_fund"])));
+    assert_eq!(migrated, json!(want));
+    assert_eq!(revision, 41);
+}
+
+#[tokio::test]
+async fn nothing_changes_and_the_revision_stays_when_no_saved_exclude_holds_a_null() {
+    let tmp = tempfile::tempdir().unwrap();
+    let run = quiet_run_dir(&tmp);
+    let list = json!([stored_screen("a", Some(json!([]))), stored_screen("b", Some(json!(["etf"]))), stored_screen("c", None)]);
+    assert_eq!(stored_after_migrating(&run, &list.to_string(), 40, 22).await, (list, 40));
+}
+
+#[tokio::test]
+async fn a_null_exclude_at_the_largest_revision_is_fixed_and_keeps_that_revision() {
+    let tmp = tempfile::tempdir().unwrap();
+    let run = quiet_run_dir(&tmp);
+    let list = json!([stored_screen("null", Some(Value::Null))]);
+    let (migrated, revision) = stored_after_migrating(&run, &list.to_string(), i64::MAX, 22).await;
+    assert_eq!(migrated, json!([stored_screen("null", Some(json!(["etn", "infrastructure", "mutual_fund"])))]));
+    assert_eq!(revision, i64::MAX);
+}
