@@ -316,9 +316,11 @@ impl SendWindow {
         }
     }
 
-    fn record(&mut self, now: Instant) {
+    fn record(&mut self, now: Instant) -> Instant {
         self.forget_expired(now);
+        let oldest = self.sent.front().copied().unwrap_or(now);
         self.sent.push_back(now);
+        oldest
     }
 
     fn ready_at(&self, now: Instant, limited: bool) -> Option<Instant> {
@@ -328,9 +330,12 @@ impl SendWindow {
         full.into_iter().chain(self.held_until).max().filter(|&r| r > now)
     }
 
-    fn hold_until_oldest_leaves(&mut self, now: Instant) {
-        self.forget_expired(now);
-        self.held_until = self.sent.front().map(|&t| t + Self::span());
+    fn hold_until_oldest_leaves(&mut self, oldest_at_send: Option<Instant>, now: Instant) {
+        let oldest = oldest_at_send.or_else(|| {
+            self.forget_expired(now);
+            self.sent.front().copied()
+        });
+        self.held_until = self.held_until.into_iter().chain(oldest.map(|t| t + Self::span())).max();
     }
 
     fn set_limit(&mut self, limit: u32) -> bool {
@@ -359,6 +364,7 @@ struct Job {
     transport_failures: usize,
     resent_after_invalid_token: bool,
     window_blocked_since: Option<Instant>,
+    window_oldest_at_send: Option<Instant>,
     total_blocked_since: Option<Instant>,
 }
 
@@ -623,7 +629,7 @@ async fn report_counters(inner: Arc<Inner>) {
     loop {
         ticks.tick().await;
         let counters = std::mem::take(&mut inner.lock().counters);
-        let mut lines: Vec<_> = counters.into_iter().filter(|(_, c)| c.sent > 0).map(|(endpoint, c)| (endpoint.as_str(), c)).collect();
+        let mut lines: Vec<_> = counters.into_iter().filter(|(_, c)| c.sent > 0 || c.rate_limited > 0 || c.resent > 0).map(|(endpoint, c)| (endpoint.as_str(), c)).collect();
         lines.sort_by_key(|(api_id, _)| *api_id);
         for (api_id, c) in lines {
             let max_wait_ms = c.max_wait.as_millis() as u64;
@@ -706,6 +712,7 @@ impl Inner {
                     transport_failures: 0,
                     resent_after_invalid_token: false,
                     window_blocked_since: None,
+                    window_oldest_at_send: None,
                     total_blocked_since: None,
                 },
             );
@@ -830,8 +837,9 @@ impl Inner {
         let waited = job.window_blocked_since.take().map(|since| now.duration_since(since));
         let total_waited = job.total_blocked_since.take().map(|since| now.duration_since(since));
         let resent = job.rate_limited > 0;
-        self.record_send(&mut q, api_id, now, (waited, total_waited), resent);
+        let oldest_in_window = self.record_send(&mut q, api_id, now, (waited, total_waited), resent);
         let job = q.jobs.get_mut(&id).expect("대기열의 id는 jobs에 있다");
+        job.window_oldest_at_send = Some(oldest_in_window);
         job.state = JobState::InFlight;
         job.sends += 1;
         if let Some(once) = &job.once {
@@ -874,11 +882,11 @@ impl Inner {
         held.into_iter().chain(same_tr).max()
     }
 
-    fn record_send(&self, q: &mut Queue, endpoint: Endpoint, now: Instant, waited: (Option<Duration>, Option<Duration>), resent: bool) {
+    fn record_send(&self, q: &mut Queue, endpoint: Endpoint, now: Instant, waited: (Option<Duration>, Option<Duration>), resent: bool) -> Instant {
         if matches!(self.pacing, Pacing::SharedSpacing(_)) && self.environment == KiwoomEnvironment::Mock {
             q.last_send_by_endpoint.insert(endpoint, now);
         }
-        q.window(endpoint, self.default_limit()).record(now);
+        let oldest_in_window = q.window(endpoint, self.default_limit()).record(now);
         if endpoint != Endpoint::ISSUE
             && let Some(total) = q.total.as_mut()
         {
@@ -889,9 +897,10 @@ impl Inner {
         counter.resent += u32::from(resent);
         counter.max_wait = counter.max_wait.max(waited.0.unwrap_or_default());
         counter.max_total_wait = counter.max_total_wait.max(waited.1.unwrap_or_default());
+        oldest_in_window
     }
 
-    fn note_rate_limited(&self, q: &mut Queue, failure: &Failure) {
+    fn note_rate_limited(&self, q: &mut Queue, failure: &Failure, oldest_at_send: Option<Instant>) {
         let endpoint = failure.api_id();
         q.counters.entry(endpoint).or_default().rate_limited += 1;
         let window = q.window(endpoint, self.default_limit());
@@ -900,7 +909,7 @@ impl Inner {
         {
             tracing::warn!(api_id = endpoint.as_str(), limit, "키움이 알려 준 초당 한도로 이 TR의 한도를 바꿉니다");
         }
-        window.hold_until_oldest_leaves(Instant::now());
+        window.hold_until_oldest_leaves(oldest_at_send, Instant::now());
     }
 
     async fn issue(&self) {
@@ -918,7 +927,7 @@ impl Inner {
                     Err(_) if !self.auth.issue_is_for_current_key() => Err(queue_gone(Endpoint::ISSUE)),
                     Err(failure) => {
                         if failure.category() == Category::RateLimit {
-                            self.note_rate_limited(&mut q, &failure);
+                            self.note_rate_limited(&mut q, &failure, None);
                         }
                         Err(self.settle(&mut q, failure))
                     }
@@ -1022,7 +1031,8 @@ impl Inner {
         if let Err(failure) = &outcome
             && failure.category() == Category::RateLimit
         {
-            self.note_rate_limited(&mut q, failure);
+            let oldest_at_send = q.jobs.get(&id).and_then(|job| job.window_oldest_at_send);
+            self.note_rate_limited(&mut q, failure, oldest_at_send);
         }
         match outcome {
             Ok(page) => {
@@ -1039,11 +1049,17 @@ impl Inner {
         self.wake.notify_one();
     }
 
+    fn resends_order_write(&self, job: &Job, failure: &Failure) -> bool {
+        job.once.is_some() && failure.category() == Category::RateLimit && failure.http_status() == Some(429) && job.rate_limited < self.order_resends
+    }
+
     fn probe_failed(self: &Arc<Self>, q: &mut Queue, id: u64, generation: TokenGen, failure: Failure) {
         let Gate::Probing { cause, misses, .. } = std::mem::take(&mut q.gate) else {
             unreachable!("send_market이 확인 요청임을 확인했다")
         };
+        let order_write_resends = q.jobs.get(&id).is_some_and(|job| self.resends_order_write(job, &failure));
         let err = match (cause.policy().stop, failure.policy().stop) {
+            _ if order_write_resends => return self.market_failed(q, id, generation, failure),
             (Stop::Gate, Stop::Gate) => self.close_gate(q, failure, misses + 1),
             (Stop::AuthGate, Stop::AuthGate) => {
                 tracing::error!(api_id = failure.api_id().as_str(), "{failure}. 10분 뒤 확인도 실패해 조회와 토큰 발급을 멈춥니다");
@@ -1064,8 +1080,7 @@ impl Inner {
         }
         let job = q.jobs.get_mut(&id).expect("send_market이 확인했다");
         if job.once.is_some() {
-            let rate_limited_by_http = failure.category() == Category::RateLimit && failure.http_status() == Some(429);
-            if rate_limited_by_http && job.rate_limited < self.order_resends {
+            if self.resends_order_write(job, &failure) {
                 job.rate_limited += 1;
                 tracing::warn!(api_id, resends = job.rate_limited, "주문 쓰기가 요청 개수 초과를 받아 창이 비는 시각에 같은 요청을 다시 보냅니다");
                 q.requeue_front(id);
@@ -2426,5 +2441,71 @@ mod tests {
         .await;
         let at: Vec<_> = fake.market_sent().iter().map(|s| (s.body.clone(), s.at.duration_since(origin).as_millis() as u64)).collect();
         assert_eq!(at, [("w0".to_owned(), 0), ("w1".to_owned(), 0), ("a".to_owned(), 0), ("b".to_owned(), 1050)]);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_limit_response_resends_when_the_window_of_its_own_send_frees() {
+        let limited = std::sync::atomic::AtomicBool::new(false);
+        let fake = fake_with(Duration::from_millis(30), move |s| if s.body == "b" && !limited.swap(true, Ordering::SeqCst) { limited_with(Some(5)) } else { list_ok() });
+        let rest = real_rest(&fake).await;
+        let origin = Instant::now();
+        let (a, b) = tokio::join!(call_at(&rest, 0, ApiId::Ka10080, "a"), call_at(&rest, 1020, ApiId::Ka10080, "b"));
+        a.unwrap();
+        b.unwrap();
+        let timeline: Vec<_> = fake.market_sent().iter().map(|s| (s.body.clone(), s.at.duration_since(origin).as_millis() as u64)).collect();
+        assert_eq!(timeline, [("a".to_owned(), 0), ("b".to_owned(), 1020), ("b".to_owned(), 1050)]);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_slow_limit_response_resends_when_it_arrives() {
+        let limited = std::sync::atomic::AtomicBool::new(false);
+        let fake = fake_with(Duration::from_millis(1200), move |s| if s.body == "a" && !limited.swap(true, Ordering::SeqCst) { limited_with(Some(5)) } else { list_ok() });
+        let rest = real_rest(&fake).await;
+        let origin = Instant::now();
+        let (a, c) = tokio::join!(call_at(&rest, 0, ApiId::Ka10080, "a"), call_at(&rest, 500, ApiId::Ka10080, "c"));
+        a.unwrap();
+        c.unwrap();
+        let timeline: Vec<_> = fake.market_sent().iter().map(|s| (s.body.clone(), s.at.duration_since(origin).as_millis() as u64)).collect();
+        assert_eq!(timeline, [("a".to_owned(), 0), ("c".to_owned(), 500), ("a".to_owned(), 1200)]);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn an_order_write_that_probes_the_gate_is_resent_on_429_without_closing_the_gate() {
+        let write_limited = std::sync::atomic::AtomicBool::new(false);
+        let fake = fake_with(Duration::ZERO, move |s| {
+            if s.api_id == Endpoint::from(ApiId::Ka10001) {
+                return limited_with(Some(5));
+            }
+            if s.api_id == Endpoint::from(TradingApiId::Kt10000) && !write_limited.swap(true, Ordering::SeqCst) {
+                return limited_with(Some(5));
+            }
+            list_ok()
+        });
+        let rest = real_rest(&fake).await;
+        assert_eq!(category(tr_call(&rest, ApiId::Ka10001, "k", Priority::Screen).await.err()), Some(Category::RateLimit));
+        assert!(rest.gate_until().is_some());
+        tokio::time::sleep(GATE_WAIT + Duration::from_secs(1)).await;
+        the_write(&rest).await.unwrap();
+        assert_eq!(sent_of(&fake, TradingApiId::Kt10000).len(), 2);
+        assert_eq!(rest.gate_until(), None);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_limit_response_that_arrives_in_a_later_minute_is_still_counted() {
+        let logs = capture_logs();
+        let fake = fake_with(Duration::from_millis(200), |s| if s.api_id == Endpoint::from(ApiId::Ka10080) { limited_with(None) } else { list_ok() });
+        let rest = rest_in(&fake, KiwoomEnvironment::Real);
+        rest.issue_token().await.unwrap();
+        tokio::time::sleep(Duration::from_millis(57_500)).await;
+        tr_call(&rest, ApiId::Ka10080, "a", Priority::Screen).await.unwrap_err();
+        assert_eq!(fake.market_sent().len(), 3);
+        tokio::time::sleep(Duration::from_secs(130)).await;
+        let limited: u32 = logs
+            .counter_lines()
+            .iter()
+            .filter(|l| l.contains("api_id=\"ka10080\""))
+            .map(|l| l.split(" rate_limited=").nth(1).unwrap().split(' ').next().unwrap().parse::<u32>().unwrap())
+            .sum();
+        assert_eq!(limited, 3);
     }
 }
