@@ -93,6 +93,8 @@ DuckDB는 release 바이너리에 포함되므로 개발 캐시나 별도 `libdu
 
 새 버전은 orch의 `deploy run --repo vallythevally`로 올린다. chute가 머지한 커밋을 받아 release 빌드, 화면 빌드, 백업, 재시작, `http://127.0.0.1:8080/api/screener/status` 확인을 차례로 한다. 단계 명령은 orch 스킬의 `deploy.json`에 있다. 개발 폴더에서 실계좌 `.env`로 서버를 따로 띄우거나 `vally-server` 프로세스를 이름으로 끄지 않는다. 상대 경로 기본값 때문에 개발 폴더의 `data/`에 빈 DB가 생기고, 서비스의 서버도 함께 꺼진다. 개발 중 확인은 목업 서버(`127.0.0.1:8081`, `data/mock`)로 한다.
 
+실서버를 Tailscale 망의 서버 PC에서 돌리는 구성의 준비·이전·배포·되돌리기는 [서버 PC 실서버 운영](server-operations.md)에 있다.
+
 ## 공유 범위와 무효화
 
 캐시는 `git worktree list`의 첫 번째 주 worktree 안에 있는 `target/dev-cache`를 사용한다. 같은 Git 저장소의 worktree들은 이 위치를 찾는다. 주 worktree를 지울 때 캐시도 지워질 수 있으므로 독립된 작업 폴더의 절대 경로를 `VALLY_DEV_CACHE_DIR`로 지정할 수 있다. worktree별 Cargo `target`은 계속 분리한다.
