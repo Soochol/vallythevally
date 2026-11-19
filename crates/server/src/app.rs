@@ -119,7 +119,7 @@ pub fn application_with_system(inputs: ApplicationInputs, system: SystemState) -
     let trading = crate::trading::Trading::new(rest.clone(), clock.clone(), system.order_switch_store(), stream.account_feed(), db.clone(), symbols.clone());
     let hub = MarketHub::spawn(bars.clone(), stream, events, clock.clone());
     let link = Link::new(rest.clone(), symbols.clone(), screener.clone(), clock.clone(), screener_update_on_connect);
-    Arc::new(AppState { symbols, bars, rest, db, clock, static_dir, hub, screener, link, system, registered, trading, rankings: Default::default() })
+    Arc::new(AppState { symbols, bars, rest, db, clock, static_dir, hub, screener, link, system, registered, trading, rankings: Default::default(), market_overview: Default::default() })
 }
 
 pub async fn daily_maintenance(state: Arc<AppState>) {
@@ -278,6 +278,7 @@ pub async fn start(config: &Config, lock: &InstanceLock, adapters: Adapters) -> 
     tokio::spawn(daily_maintenance(state.clone()));
     tokio::spawn(crate::account::sync::run(state.clone()));
     tokio::spawn(crate::collector::run(state.clone()));
+    crate::market_overview::start(state.clone(), config.market_samples_dir.clone());
 
     let financial_store = crate::financials::store::Store::open(&config.financial_db_path).await;
     if let Err(failure) = financial_store { tracing::warn!(?failure, "재무 저장소를 열 수 없습니다"); }
