@@ -297,9 +297,9 @@ curl -sS --max-time 5 http://<서버 PC의 Tailscale IP>:8080/api/screener/statu
 | 스크립트 | 하는 일 | 환경 변수(기본값) |
 |---|---|---|
 | `deploy/server-build` | `ORCH_DEPLOY_SHA`가 있고 checkout HEAD와 다르면 `cargo`를 부르지 않고 실패한다. 같으면 공용 `compile.lock`(`git rev-parse --git-common-dir` 아래)을 `flock`으로 잡고 `cargo build --locked --release -p server`를 한다 | `VALLY_CARGO_BIN`(`$HOME/.cargo/bin`): PATH 앞에 더할 cargo 폴더. `VALLY_BUILD_JOBS`(`4`): `CARGO_BUILD_JOBS` |
-| `deploy/web-build` | `web/`에서 `pnpm install --frozen-lockfile` 뒤 `pnpm build` | `VALLY_NODE_BIN`(필수): node와 pnpm이 있는 폴더. 없으면 0이 아닌 코드로 멈추고 찾는 법을 알린다. `VALLY_CARGO_BIN`, `VALLY_BUILD_JOBS`는 위와 같다 |
+| `deploy/web-build` | `web/`에서 `pnpm install --frozen-lockfile` 뒤 `pnpm build` | `VALLY_NODE_BIN`(필수): node와 pnpm이 있는 폴더로, `~` 없는 절대 경로다. 없거나 그 폴더에 `pnpm`이 없으면 0이 아닌 코드로 멈추고 찾는 법을 알린다. `VALLY_CARGO_BIN`, `VALLY_BUILD_JOBS`는 위와 같다 |
 | `deploy/backup` | `vally.db`를 SQLite backup API로 떠서 `integrity_check`가 `ok`일 때만 fsync 뒤 원자 교체로 남기고, 보관 개수를 넘는 오래된 백업을 지운다. 원본이 없으면 경로를 알리고 실패한다 | `VALLY_DATA_DIR`(`$HOME/vally-data`): 원본 `server/vally.db`, 보관 폴더 `backups/`. `VALLY_BACKUP_KEEP`(`30`): 1 이상 |
-| `deploy/restart` | 서비스를 재시작하고, 서비스가 active이고 확인 주소가 응답할 때까지 1초마다 본다. 기다림 안에 안 되면 `journalctl` 안내와 함께 실패한다 | `VALLY_SERVICE`(`vally-server.service`), `VALLY_HEALTH_URL`(`http://127.0.0.1:8080/api/screener/status`), `VALLY_RESTART_WAIT`(`120`초) |
+| `deploy/restart` | 서비스를 재시작하고, 서비스가 active이고 확인 주소가 응답할 때까지 1초마다 본다. 기다림 안에 안 되면 `journalctl` 안내와 함께 실패한다 | `VALLY_SERVICE`(`vally-server.service`), `VALLY_HEALTH_URL`(`http://127.0.0.1:8080/api/screener/status`), `VALLY_RESTART_WAIT`(`120`초, 1 이상의 정수. 아니면 재시작 전에 멈춘다) |
 
 Node와 pnpm은 fnm으로 깔려 있어 비대화형 ssh의 PATH에 없다. `ls ~/.local/share/fnm/node-versions`로 버전을 찾고 `~/.local/share/fnm/node-versions/v<버전>/installation/bin`을 `VALLY_NODE_BIN`으로 orch 설정의 `env`에 넣는다.
 
