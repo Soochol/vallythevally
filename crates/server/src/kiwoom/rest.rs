@@ -7,7 +7,7 @@
 //! - 주문 쓰기도 제한 응답(HTTP 429)이면 최대 `ORDER_RATE_LIMIT_RESENDS`번 다시 보낸다. 그 밖의 실패는 다시 보내지 않는다.
 //! - 1분마다 TR별 전송·제한 응답·다시 보낸 수와 창 때문에 기다린 가장 긴 시간을 로그 한 줄씩 남긴다.
 //! - 시험용 손잡이(`with_send_spacing`)로 만든 대기열은 창 대신 모든 전송 사이 최소 간격을 둔다. 모의투자는 거기에 같은 TR 1초를 더한다.
-//! - 토큰 발급이 먼저 나가고, 그다음 `Screen` > `Recovery` > `Background` 순서다.
+//! - 토큰 발급이 먼저 나가고, 그다음 `Order` > `Screen` > `ScreenBulk` > `Recovery` > `Background` 순서다.
 //! - 토큰은 보내는 순간에 읽는다(D16). 대기 중인 요청은 토큰을 쥐고 있지 않다.
 
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -35,6 +35,8 @@ const REAL_SENDS_PER_WINDOW: u32 = 5;
 const MOCK_SENDS_PER_WINDOW: u32 = 1;
 const MOCK_SAME_TR_SPACING: Duration = Duration::from_secs(1);
 const TOTAL_PER_SECOND_LIMIT: Option<u32> = None;
+const SCREEN_RESERVED_SLOTS: u32 = 2;
+const SCREEN_ACTIVITY_SPAN: Duration = Duration::from_secs(10);
 const MAX_RATE_LIMITED: u8 = 3;
 const ORDER_RATE_LIMIT_RESENDS: u8 = 2;
 const COUNTER_REPORT_PERIOD: Duration = Duration::from_secs(60);
@@ -52,6 +54,7 @@ pub enum Priority {
     Order,
     /// 브라우저가 기다리는 요청: 봉 페이지, 서버를 켤 때의 종목 목록.
     Screen,
+    ScreenBulk,
     /// 끊긴 구간 복구 같은 것(#4). #2에는 부르는 곳이 없다.
     Recovery,
     /// 07:45 종목 목록 갱신 같은 것. 앞의 둘이 비었을 때만 나간다.
@@ -64,7 +67,15 @@ impl Priority {
     }
 
     fn send_budget(self) -> u8 {
-        if matches!(self, Priority::Order | Priority::Screen) { SCREEN_SEND_BUDGET } else { OTHER_SEND_BUDGET }
+        if matches!(self, Priority::Order | Priority::Screen | Priority::ScreenBulk) { SCREEN_SEND_BUDGET } else { OTHER_SEND_BUDGET }
+    }
+
+    fn retry_delays(self) -> &'static [Duration] {
+        if matches!(self, Priority::Screen | Priority::ScreenBulk) { SCREEN_RETRY_DELAYS } else { OTHER_RETRY_DELAYS }
+    }
+
+    fn uses_reserved_slots(self) -> bool {
+        matches!(self, Priority::Order | Priority::Screen)
     }
 }
 
@@ -298,11 +309,27 @@ struct SendWindow {
     sent: VecDeque<Instant>,
     limit: u32,
     held_until: Option<Instant>,
+    last_screen_send: Option<Instant>,
 }
 
 impl SendWindow {
     fn new(limit: u32) -> Self {
-        SendWindow { sent: VecDeque::new(), limit, held_until: None }
+        SendWindow { sent: VecDeque::new(), limit, held_until: None, last_screen_send: None }
+    }
+
+    fn reserved_slots(&self) -> u32 {
+        SCREEN_RESERVED_SLOTS.min(self.limit.saturating_sub(1))
+    }
+
+    fn screen_active_until(&self, now: Instant) -> Option<Instant> {
+        self.last_screen_send.map(|t| t + SCREEN_ACTIVITY_SPAN).filter(|&until| until > now)
+    }
+
+    fn slot_free_at(&self, now: Instant, cap: u32) -> Option<Instant> {
+        let cap = cap.max(1) as usize;
+        let first_live = self.sent.partition_point(|&t| t + Self::span() <= now);
+        let live = self.sent.len() - first_live;
+        (live >= cap).then(|| self.sent[first_live + live - cap] + Self::span())
     }
 
     fn span() -> Duration {
@@ -315,18 +342,23 @@ impl SendWindow {
         }
     }
 
-    fn record(&mut self, now: Instant) -> Instant {
+    fn record(&mut self, now: Instant, serves_screen: bool) -> Instant {
         self.forget_expired(now);
         let oldest = self.sent.front().copied().unwrap_or(now);
         self.sent.push_back(now);
+        if serves_screen {
+            self.last_screen_send = Some(now);
+        }
         oldest
     }
 
-    fn ready_at(&self, now: Instant, limited: bool) -> Option<Instant> {
-        let first_live = self.sent.partition_point(|&t| t + Self::span() <= now);
-        let live = self.sent.len() - first_live;
-        let full = (limited && live >= self.limit as usize).then(|| self.sent[first_live + live - self.limit as usize] + Self::span());
-        full.into_iter().chain(self.held_until).max().filter(|&r| r > now)
+    fn ready_at(&self, now: Instant, limited: bool, priority: Priority) -> Option<Instant> {
+        let full = limited.then(|| self.slot_free_at(now, self.limit)).flatten();
+        let ready = match self.screen_active_until(now).filter(|_| limited && !priority.uses_reserved_slots()) {
+            Some(reserve_lifts) => self.slot_free_at(now, self.limit - self.reserved_slots()).map(|beyond_reserve| beyond_reserve.min(reserve_lifts.max(full.unwrap_or(now)))),
+            None => full,
+        };
+        ready.into_iter().chain(self.held_until).max().filter(|&r| r > now)
     }
 
     fn hold_until_oldest_leaves(&mut self, oldest_at_send: Option<Instant>, now: Instant) {
@@ -368,6 +400,10 @@ struct Job {
 }
 
 impl Job {
+    fn slot(&self) -> (Endpoint, Priority) {
+        (self.key.api_id, self.priority)
+    }
+
     fn is_abandoned(&self) -> bool {
         self.once.is_none() && self.state == JobState::Queued && self.waiters.iter().all(|w| w.is_closed())
     }
@@ -383,7 +419,7 @@ enum Gate {
 
 #[derive(Default)]
 struct Queue {
-    lanes: [VecDeque<u64>; 4],
+    lanes: [VecDeque<u64>; 5],
     jobs: HashMap<u64, Job>,
     by_key: HashMap<DedupeKey, u64>,
     issue_waiters: Vec<oneshot::Sender<Result<TokenGen, KiwoomError>>>,
@@ -813,11 +849,11 @@ impl Inner {
             return Step::Wait(r);
         }
         if wants_issue {
-            if let Some(r) = self.endpoint_ready_at(&q, Endpoint::ISSUE, now) {
+            if let Some(r) = self.endpoint_ready_at(&q, Endpoint::ISSUE, Priority::Order, now) {
                 return Step::Wait(r);
             }
             q.last_send = Some(now);
-            self.record_send(&mut q, Endpoint::ISSUE, now, (None, None), false);
+            self.record_send(&mut q, Endpoint::ISSUE, false, now, (None, None), false);
             return Step::Issue;
         }
         let blocked: Vec<(u64, bool)> = q
@@ -826,8 +862,8 @@ impl Inner {
             .flatten()
             .copied()
             .filter_map(|id| {
-                let endpoint = q.jobs[&id].key.api_id;
-                self.endpoint_ready_at(&q, endpoint, now).map(|_| (id, self.tr_ready_at(&q, endpoint, now).is_some()))
+                let (endpoint, priority) = q.jobs[&id].slot();
+                self.endpoint_ready_at(&q, endpoint, priority, now).map(|_| (id, self.tr_ready_at(&q, endpoint, priority, now).is_some()))
             })
             .collect();
         for (id, by_tr) in blocked {
@@ -835,10 +871,10 @@ impl Inner {
             if by_tr { &mut job.window_blocked_since } else { &mut job.total_blocked_since }.get_or_insert(now);
         }
         let ready_job = q.lanes.iter().enumerate().find_map(|(lane, ids)| {
-            ids.iter().position(|id| self.endpoint_ready_at(&q, q.jobs[id].key.api_id, now).is_none()).map(|position| (lane, position))
+            ids.iter().position(|id| self.job_ready_at(&q, &q.jobs[id], now).is_none()).map(|position| (lane, position))
         });
         let Some((lane, position)) = ready_job else {
-            let soonest = q.lanes.iter().flatten().filter_map(|id| self.endpoint_ready_at(&q, q.jobs[id].key.api_id, now)).min();
+            let soonest = q.lanes.iter().flatten().filter_map(|id| self.job_ready_at(&q, &q.jobs[id], now)).min();
             return soonest.map_or(Step::Again, Step::Wait);
         };
         q.last_send = Some(now);
@@ -864,7 +900,8 @@ impl Inner {
         let waited = job.window_blocked_since.take().map(|since| now.duration_since(since));
         let total_waited = job.total_blocked_since.take().map(|since| now.duration_since(since));
         let resent = job.rate_limited > 0;
-        let oldest_in_window = self.record_send(&mut q, api_id, now, (waited, total_waited), resent);
+        let serves_screen = job.priority.uses_reserved_slots();
+        let oldest_in_window = self.record_send(&mut q, api_id, serves_screen, now, (waited, total_waited), resent);
         let job = q.jobs.get_mut(&id).expect("대기열의 id는 jobs에 있다");
         job.window_oldest_at_send = Some(oldest_in_window);
         job.state = JobState::InFlight;
@@ -888,20 +925,25 @@ impl Inner {
         }
     }
 
-    fn endpoint_ready_at(&self, q: &Queue, endpoint: Endpoint, now: Instant) -> Option<Instant> {
-        self.tr_ready_at(q, endpoint, now).into_iter().chain(self.total_ready_at(q, endpoint, now)).max()
+    fn job_ready_at(&self, q: &Queue, job: &Job, now: Instant) -> Option<Instant> {
+        let (endpoint, priority) = job.slot();
+        self.endpoint_ready_at(q, endpoint, priority, now)
     }
 
-    fn total_ready_at(&self, q: &Queue, endpoint: Endpoint, now: Instant) -> Option<Instant> {
+    fn endpoint_ready_at(&self, q: &Queue, endpoint: Endpoint, priority: Priority, now: Instant) -> Option<Instant> {
+        self.tr_ready_at(q, endpoint, priority, now).into_iter().chain(self.total_ready_at(q, endpoint, priority, now)).max()
+    }
+
+    fn total_ready_at(&self, q: &Queue, endpoint: Endpoint, priority: Priority, now: Instant) -> Option<Instant> {
         if endpoint == Endpoint::ISSUE || !matches!(self.pacing, Pacing::PerTr) {
             return None;
         }
-        q.total.as_ref().and_then(|total| total.ready_at(now, true))
+        q.total.as_ref().and_then(|total| total.ready_at(now, true, priority))
     }
 
-    fn tr_ready_at(&self, q: &Queue, endpoint: Endpoint, now: Instant) -> Option<Instant> {
+    fn tr_ready_at(&self, q: &Queue, endpoint: Endpoint, priority: Priority, now: Instant) -> Option<Instant> {
         let window = q.windows.get(&WindowKey::of(endpoint));
-        let held = window.and_then(|w| w.ready_at(now, matches!(self.pacing, Pacing::PerTr)));
+        let held = window.and_then(|w| w.ready_at(now, matches!(self.pacing, Pacing::PerTr), priority));
         let same_tr = match (&self.pacing, self.environment) {
             (Pacing::SharedSpacing(_), KiwoomEnvironment::Mock) => q.last_send_by_endpoint.get(&endpoint).map(|sent| *sent + MOCK_SAME_TR_SPACING).filter(|&r| r > now),
             _ => None,
@@ -909,15 +951,15 @@ impl Inner {
         held.into_iter().chain(same_tr).max()
     }
 
-    fn record_send(&self, q: &mut Queue, endpoint: Endpoint, now: Instant, waited: (Option<Duration>, Option<Duration>), resent: bool) -> Instant {
+    fn record_send(&self, q: &mut Queue, endpoint: Endpoint, serves_screen: bool, now: Instant, waited: (Option<Duration>, Option<Duration>), resent: bool) -> Instant {
         if matches!(self.pacing, Pacing::SharedSpacing(_)) && self.environment == KiwoomEnvironment::Mock {
             q.last_send_by_endpoint.insert(endpoint, now);
         }
-        let oldest_in_window = q.window(endpoint, self.default_limit()).record(now);
+        let oldest_in_window = q.window(endpoint, self.default_limit()).record(now, serves_screen);
         if endpoint != Endpoint::ISSUE
             && let Some(total) = q.total.as_mut()
         {
-            total.record(now);
+            total.record(now, serves_screen);
         }
         let counter = q.counters.entry(endpoint).or_default();
         counter.sent += 1;
@@ -1158,8 +1200,7 @@ impl Inner {
                 }
             }
             Retry::Backoff => {
-                let delays = if job.priority == Priority::Screen { SCREEN_RETRY_DELAYS } else { OTHER_RETRY_DELAYS };
-                if let Some(&delay) = delays.get(job.transport_failures) {
+                if let Some(&delay) = job.priority.retry_delays().get(job.transport_failures) {
                     job.transport_failures += 1;
                     job.state = JobState::Backoff;
                     let inner = self.clone();
@@ -2113,7 +2154,7 @@ mod tests {
         let sent = fake.market_sent();
         let order: Vec<_> = sent.iter().map(|s| s.body.clone()).collect();
         assert_eq!(order, ["s1", "s2", "s3", "s4", "s5", "other", "s6", "b1", "b2", "b3", "b4", "b5"]);
-        assert_eq!(at_ms(&sent, origin), [0, 0, 0, 0, 0, 0, 1050, 1050, 1050, 1050, 1050, 2100]);
+        assert_eq!(at_ms(&sent, origin), [0, 0, 0, 0, 0, 0, 1050, 1050, 1050, 2100, 2100, 2100], "화면이 쓰는 TR이라 배경은 창의 3칸까지만 쓴다");
     }
 
     #[tokio::test(start_paused = true)]
@@ -2700,5 +2741,252 @@ mod tests {
         let sent = sent_of(&fake, ApiId::Ka10080);
         assert_eq!(sent.iter().map(|s| s.body.as_str()).collect::<Vec<_>>(), ["w0", "w1", "w2", "w3", "w4", "live"]);
         assert_eq!(at_ms(&sent[5..], origin), [1050]);
+    }
+
+    fn spawn_with(rest: &KiwoomRest, api: impl Into<Endpoint>, body: &str, priority: Priority) -> Pending {
+        let (rest, api, body) = (rest.clone(), api.into(), body.to_owned());
+        tokio::spawn(async move { tr_call(&rest, api, &body, priority).await })
+    }
+
+    async fn finish(pending: Vec<Pending>) {
+        for p in pending {
+            p.await.unwrap().unwrap();
+        }
+    }
+
+    fn sent_at(fake: &FakeTransport, origin: Instant) -> Vec<(String, u64)> {
+        fake.market_sent().iter().map(|s| (s.body.clone(), s.at.duration_since(origin).as_millis() as u64)).collect()
+    }
+
+    fn timeline(entries: &[(&str, u64)]) -> Vec<(String, u64)> {
+        entries.iter().map(|(body, at)| ((*body).to_owned(), *at)).collect()
+    }
+
+    fn backgrounds(rest: &KiwoomRest, count: usize) -> Vec<Pending> {
+        (0..count).map(|i| spawn_with(rest, ApiId::Ka10080, &format!("b{i}"), Priority::Background)).collect()
+    }
+
+    #[test]
+    fn the_reserve_is_two_slots_but_never_the_whole_limit() {
+        let reserved: Vec<_> = [5, 4, 3, 2, 1].map(|limit| SendWindow::new(limit).reserved_slots()).into();
+        assert_eq!(reserved, [2, 2, 2, 1, 0]);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn background_alone_uses_the_whole_window() {
+        let fake = fake_with(Duration::ZERO, |_| list_ok());
+        let rest = real_rest(&fake).await;
+        let origin = Instant::now();
+        finish(backgrounds(&rest, 6)).await;
+        assert_eq!(at_ms(&fake.market_sent(), origin), [0, 0, 0, 0, 0, 1050]);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn background_leaves_two_slots_while_the_screen_uses_the_tr() {
+        let fake = fake_with(Duration::ZERO, |_| list_ok());
+        let rest = real_rest(&fake).await;
+        let origin = Instant::now();
+        tr_call(&rest, ApiId::Ka10080, "s", Priority::Screen).await.unwrap();
+        finish(backgrounds(&rest, 6)).await;
+        assert_eq!(sent_at(&fake, origin), timeline(&[("s", 0), ("b0", 0), ("b1", 0), ("b2", 1050), ("b3", 1050), ("b4", 1050), ("b5", 2100)]));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn screen_requests_use_the_reserved_slots_and_the_third_waits_for_the_window() {
+        let fake = fake_with(Duration::ZERO, |_| list_ok());
+        let rest = real_rest(&fake).await;
+        let origin = Instant::now();
+        tr_call(&rest, ApiId::Ka10080, "s", Priority::Screen).await.unwrap();
+        let mut pending = backgrounds(&rest, 6);
+        tokio::time::sleep(Duration::from_millis(10)).await;
+        pending.extend((0..3).map(|i| spawn_with(&rest, ApiId::Ka10080, &format!("x{i}"), Priority::Screen)));
+        finish(pending).await;
+        let sent = sent_at(&fake, origin);
+        let at = |body: &str| sent.iter().find(|(b, _)| b == body).unwrap().1;
+        assert_eq!([at("b0"), at("b1")], [0, 0]);
+        assert_eq!([at("x0"), at("x1")], [10, 10], "넣은 시각에 나간다");
+        assert_eq!(at("x2"), 1050, "창이 비는 시각에 나간다");
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn order_queries_use_the_reserved_slots_too() {
+        let fake = fake_with(Duration::ZERO, |_| list_ok());
+        let rest = real_rest(&fake).await;
+        let origin = Instant::now();
+        tr_call(&rest, ApiId::Ka10080, "s", Priority::Screen).await.unwrap();
+        let mut pending = backgrounds(&rest, 4);
+        tokio::time::sleep(Duration::from_millis(10)).await;
+        pending.extend((0..2).map(|i| spawn_with(&rest, ApiId::Ka10080, &format!("o{i}"), Priority::Order)));
+        finish(pending).await;
+        let sent = sent_at(&fake, origin);
+        let at = |body: &str| sent.iter().find(|(b, _)| b == body).unwrap().1;
+        assert_eq!([at("o0"), at("o1")], [10, 10]);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn the_reserve_lifts_ten_seconds_after_the_last_screen_send_and_screen_pays_for_it_once() {
+        let fake = fake_with(Duration::ZERO, |_| list_ok());
+        let rest = real_rest(&fake).await;
+        let origin = Instant::now();
+        tr_call(&rest, ApiId::Ka10080, "s", Priority::Screen).await.unwrap();
+        tokio::time::sleep(SCREEN_ACTIVITY_SPAN).await;
+        let pending = backgrounds(&rest, 6);
+        tokio::time::sleep(Duration::from_millis(10)).await;
+        let late_screen = spawn_with(&rest, ApiId::Ka10080, "late", Priority::Screen);
+        finish(pending).await;
+        late_screen.await.unwrap().unwrap();
+        let sent = sent_at(&fake, origin);
+        let at = |body: &str| sent.iter().find(|(b, _)| b == body).unwrap().1;
+        assert_eq!([at("b0"), at("b1"), at("b2"), at("b3"), at("b4")], [10_000; 5], "10초가 지나면 배경이 다시 5건을 보낸다");
+        assert_eq!(at("late"), 11_050, "배경이 5칸을 채운 직후의 화면 요청은 창이 비는 시각까지 기다린다");
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_reserve_that_ends_before_a_slot_frees_lets_the_request_go_when_it_ends() {
+        let fake = fake_with(Duration::ZERO, |_| list_ok());
+        let rest = real_rest(&fake).await;
+        let origin = Instant::now();
+        tr_call(&rest, ApiId::Ka10080, "s", Priority::Screen).await.unwrap();
+        tokio::time::sleep(SCREEN_ACTIVITY_SPAN - Duration::from_millis(100)).await;
+        finish(backgrounds(&rest, 4)).await;
+        let bodies = sent_at(&fake, origin);
+        assert_eq!(bodies, timeline(&[("s", 0), ("b0", 9900), ("b1", 9900), ("b2", 9900), ("b3", 10_000)]));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn lanes_go_screen_then_screen_bulk_then_recovery_then_background() {
+        let fake = fake_with(Duration::ZERO, |_| list_ok());
+        let rest = real_rest(&fake).await;
+        let origin = Instant::now();
+        finish((0..5).map(|i| spawn_with(&rest, ApiId::Ka10080, &format!("f{i}"), Priority::Screen)).collect()).await;
+        tokio::time::sleep(Duration::from_millis(10)).await;
+        finish(vec![
+            spawn_with(&rest, ApiId::Ka10080, "background", Priority::Background),
+            spawn_with(&rest, ApiId::Ka10080, "recovery", Priority::Recovery),
+            spawn_with(&rest, ApiId::Ka10080, "bulk", Priority::ScreenBulk),
+            spawn_with(&rest, ApiId::Ka10080, "screen", Priority::Screen),
+        ])
+        .await;
+        let sent = sent_at(&fake, origin);
+        assert_eq!(sent[5..], timeline(&[("screen", 1050), ("bulk", 1050), ("recovery", 1050), ("background", 2100)])[..]);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_screen_request_that_joins_a_waiting_bulk_request_takes_the_reserved_slots() {
+        let fake = fake_with(Duration::ZERO, |_| list_ok());
+        let rest = real_rest(&fake).await;
+        let origin = Instant::now();
+        tr_call(&rest, ApiId::Ka10080, "s", Priority::Screen).await.unwrap();
+        let mut pending = backgrounds(&rest, 2);
+        tokio::time::sleep(Duration::from_millis(10)).await;
+        pending.push(spawn_with(&rest, ApiId::Ka10080, "shared", Priority::ScreenBulk));
+        tokio::time::sleep(Duration::from_millis(10)).await;
+        pending.push(spawn_with(&rest, ApiId::Ka10080, "shared", Priority::Screen));
+        finish(pending).await;
+        let shared: Vec<_> = sent_at(&fake, origin).into_iter().filter(|(body, _)| body == "shared").collect();
+        assert_eq!(shared, timeline(&[("shared", 20)]));
+    }
+
+    async fn bulk_after_a_limit_response(allowance: u32) -> Vec<u64> {
+        let limited = std::sync::atomic::AtomicBool::new(false);
+        let fake = fake_with(Duration::ZERO, move |s| if s.body == "x2" && !limited.swap(true, Ordering::SeqCst) { limited_with(Some(allowance)) } else { list_ok() });
+        let rest = real_rest(&fake).await;
+        all_ok((0..3).map(|i| tr_call(&rest, ApiId::Ka10080, &format!("x{i}"), Priority::Screen)).collect()).await;
+        tokio::time::sleep(Duration::from_secs(3)).await;
+        let origin = Instant::now();
+        tr_call(&rest, ApiId::Ka10080, "s", Priority::Screen).await.unwrap();
+        finish(backgrounds(&rest, 3)).await;
+        let sent = sent_of(&fake, ApiId::Ka10080).into_iter().filter(|s| s.body.starts_with('b')).collect::<Vec<_>>();
+        at_ms(&sent, origin)
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn the_reserve_follows_a_limit_that_the_response_changed() {
+        assert_eq!(bulk_after_a_limit_response(3).await, [1050, 2100, 3150], "유량=3이면 뒤쪽 단계는 창에 1건까지");
+        assert_eq!(bulk_after_a_limit_response(2).await, [1050, 2100, 3150], "유량=2면 1건까지");
+        assert_eq!(bulk_after_a_limit_response(1).await, [1050, 2100, 3150], "유량=1이면 예약 없이 한도 1건");
+        assert_eq!(bulk_after_a_limit_response(4).await, [0, 1050, 1050], "유량=4면 2건까지");
+    }
+
+    async fn total_window_rest(fake: &Arc<FakeTransport>) -> KiwoomRest {
+        let auth = KiwoomAuth::new(Secret::new("k".into()), Secret::new("s".into()), None);
+        let clock = Clock::fake(kst(KstDate::new(2026, 11, 9).unwrap(), 9, 0, 0));
+        let rest = KiwoomRest::start(Arc::new(fake.clone()), auth, clock, Pacing::PerTr, KiwoomEnvironment::Real, ORDER_RATE_LIMIT_RESENDS, Some(5));
+        rest.issue_token().await.unwrap();
+        rest
+    }
+
+    const BACKGROUND_TRS: [ApiId; 5] = [ApiId::Ka10081, ApiId::Ka10004, ApiId::Ka10095, ApiId::Ka10003, ApiId::Ka10001];
+
+    #[tokio::test(start_paused = true)]
+    async fn the_total_window_keeps_two_slots_for_screen_sends_on_any_tr() {
+        let fake = fake_with(Duration::ZERO, |_| list_ok());
+        let rest = total_window_rest(&fake).await;
+        let origin = Instant::now();
+        tr_call(&rest, ApiId::Ka10080, "s", Priority::Screen).await.unwrap();
+        finish(BACKGROUND_TRS.iter().map(|api| spawn_with(&rest, *api, "x", Priority::Background)).collect()).await;
+        assert_eq!(at_ms(&fake.market_sent(), origin), [0, 0, 0, 1050, 1050, 1050]);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn the_total_window_gives_background_all_five_without_screen_sends() {
+        let fake = fake_with(Duration::ZERO, |_| list_ok());
+        let rest = total_window_rest(&fake).await;
+        let origin = Instant::now();
+        finish(BACKGROUND_TRS.iter().map(|api| spawn_with(&rest, *api, "x", Priority::Background)).collect()).await;
+        assert_eq!(at_ms(&fake.market_sent(), origin), [0; 5]);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn the_spacing_knob_queue_has_no_reserve_but_keeps_the_lane_order() {
+        let fake = fake_with(Duration::ZERO, |_| list_ok());
+        let rest = settled_rest(&fake, true).await;
+        finish(vec![
+            spawn_with(&rest, ApiId::Ka10080, "background", Priority::Background),
+            spawn_with(&rest, ApiId::Ka10080, "recovery", Priority::Recovery),
+            spawn_with(&rest, ApiId::Ka10080, "bulk", Priority::ScreenBulk),
+            spawn_with(&rest, ApiId::Ka10080, "screen", Priority::Screen),
+        ])
+        .await;
+        let sent = fake.market_sent();
+        assert_eq!(sent.iter().map(|s| s.body.as_str()).collect::<Vec<_>>(), ["screen", "bulk", "recovery", "background"]);
+        for w in sent.windows(2) {
+            assert_eq!(w[1].at.duration_since(w[0].at), SEND_SPACING);
+        }
+    }
+
+    const TRADE_PAGES: usize = 16;
+
+    async fn trade_walk_with_a_symbol_switch(later_pages: Priority) -> Vec<(String, u64)> {
+        let fake = fake_with(Duration::from_millis(10), |_| list_ok());
+        let rest = real_rest(&fake).await;
+        let origin = Instant::now();
+        let rest = &rest;
+        let walk = async {
+            for page in 1..=TRADE_PAGES {
+                let priority = if page == 1 { Priority::Screen } else { later_pages };
+                tr_call(rest, ApiId::Ka10003, &format!("a{page:02}"), priority).await.unwrap();
+            }
+        };
+        let first_page = |body: &'static str, after_ms: u64| async move {
+            tokio::time::sleep(Duration::from_millis(after_ms)).await;
+            tr_call(rest, ApiId::Ka10003, body, Priority::Screen).await.unwrap();
+        };
+        tokio::join!(walk, first_page("b01", 300), first_page("c01", 600));
+        sent_at(&fake, origin)
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn probe_trade_walk_second_pages_before_and_after_screen_bulk() {
+        let before = trade_walk_with_a_symbol_switch(Priority::Screen).await;
+        let after = trade_walk_with_a_symbol_switch(Priority::ScreenBulk).await;
+        for (label, sent) in [("둘째 쪽부터 화면(지금)", &before), ("둘째 쪽부터 화면 뒤쪽", &after)] {
+            let at = |body: &str| sent.iter().find(|(b, _)| b == body).unwrap().1;
+            println!("체결 연속조회 {label}: A 첫 쪽 {}ms, B 첫 쪽(300ms에 넣음) {}ms, C 첫 쪽(600ms에 넣음) {}ms, A {TRADE_PAGES}쪽 {}ms", at("a01"), at("b01"), at("c01"), at(&format!("a{TRADE_PAGES:02}")));
+            println!("체결 연속조회 {label}: 전송 시각 {sent:?}");
+        }
+        let at = |sent: &[(String, u64)], body: &str| sent.iter().find(|(b, _)| b == body).unwrap().1;
+        assert_eq!([at(&after, "b01"), at(&after, "c01")], [300, 600], "새 동작은 B와 C의 첫 쪽이 넣은 시각에 나간다");
+        assert!(at(&before, "b01") >= 1050, "지금 동작은 B의 첫 쪽이 창이 빌 때까지 기다린다: {}ms", at(&before, "b01"));
     }
 }

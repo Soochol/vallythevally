@@ -82,7 +82,8 @@ async fn program_trades(State(st): State<Arc<AppState>>, Path(code): Path<String
     let mut seen_keys = HashSet::new();
     let mut cont: Option<ContKey> = None;
     for _ in 0..MAX_PAGES {
-        let page = st.rest.call(&req, cont.as_ref(), Priority::Screen, MergeScope::default()).await.map_err(|e| Lookup::ProgramTrades.failure(e.into(), st.clock.now()))?;
+        let priority = if cont.is_none() { Priority::Screen } else { Priority::ScreenBulk };
+        let page = st.rest.call(&req, cont.as_ref(), priority, MergeScope::default()).await.map_err(|e| Lookup::ProgramTrades.failure(e.into(), st.clock.now()))?;
         let parsed = page.body.points();
         points.extend(parsed.rows);
         skipped_rows += parsed.skipped;
@@ -103,7 +104,8 @@ async fn walk_trades(rest: &KiwoomRest, req: &StockTrades, code: StockCode, limi
     let mut seen_keys = HashSet::new();
     let mut cont: Option<ContKey> = None;
     for _ in 0..max_pages {
-        let page = rest.call(req, cont.as_ref(), Priority::Screen, MergeScope::default()).await?;
+        let priority = if cont.is_none() { Priority::Screen } else { Priority::ScreenBulk };
+        let page = rest.call(req, cont.as_ref(), priority, MergeScope::default()).await?;
         let parsed = page.body.trades();
         trades.extend(parsed.rows);
         skipped += parsed.skipped;
