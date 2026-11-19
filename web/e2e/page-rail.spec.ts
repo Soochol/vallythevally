@@ -93,6 +93,8 @@ test("다른 페이지에서 누른 키는 숨은 작업 영역에 닿지 않는
   await railLink(page, "시장 종합").click();
   await expect(page.getByRole("main", { name: "시장 종합", exact: true })).toBeVisible();
   await page.keyboard.press("Escape");
+  await page.getByRole("button", { name: /^보낼 연동 색/ }).focus();
+  await page.keyboard.press("Escape");
   await railLink(page, "작업 영역").click();
   await expect(workspace(page)).toBeVisible();
   await expect(groups).toHaveCount(1);
