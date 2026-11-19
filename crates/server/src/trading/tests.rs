@@ -693,3 +693,13 @@ async fn the_account_number_query_needs_a_connected_link() {
     assert_eq!((code, body["error"]["reason"].clone()), (StatusCode::SERVICE_UNAVAILABLE, json!("not_connected")));
     assert_eq!(f.fake.sent().len(), sent);
 }
+
+#[tokio::test]
+async fn the_account_number_query_refuses_a_foreign_host() {
+    let f = fixture().await;
+    assert_eq!(enable(&f.app, "01").await.0, StatusCode::OK);
+    let response = f.app.clone().oneshot(Request::builder().method("GET").uri(ACCOUNT_NUMBER_URI).header("host", "evil.example:7777").body(Body::empty()).unwrap()).await.unwrap();
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    let body = String::from_utf8_lossy(&response.into_body().collect().await.unwrap().to_bytes()).into_owned();
+    assert!(!body.contains(ACCOUNT), "낯선 Host의 요청에 번호가 나갔다: {body}");
+}

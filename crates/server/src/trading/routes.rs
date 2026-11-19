@@ -63,7 +63,8 @@ async fn check_account(State(st): State<Arc<AppState>>) -> Result<Json<api::Orde
     st.trading.check_account().await.map(Json).map_err(ApiFailure::trading)
 }
 
-async fn account_number(State(st): State<Arc<AppState>>) -> Result<Response, ApiFailure> {
+async fn account_number(State(st): State<Arc<AppState>>, request: Request) -> Result<Response, ApiFailure> {
+    crate::write_guard::check_host(&st, request.headers(), request.uri())?;
     let number = st.trading.confirmed_account_number().await.map_err(ApiFailure::trading)?;
     let mut response = Json(number).into_response();
     response.headers_mut().insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
