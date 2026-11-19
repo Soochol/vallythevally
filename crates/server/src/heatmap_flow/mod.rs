@@ -114,11 +114,11 @@ async fn flow(State(st): State<Arc<AppState>>, Extension(cache): Extension<Arc<F
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::kiwoom::rest::SEND_SPACING;
+    use crate::kiwoom::rest::same_tr_burst_duration;
 
     #[test]
     fn the_symbol_limit_costs_at_most_a_third_of_the_refresh_interval_in_kiwoom_calls() {
-        assert!(SEND_SPACING * MAX_SYMBOLS as u32 <= std::time::Duration::from_secs(REFRESH_SECS) / 3);
+        assert!(same_tr_burst_duration(MAX_SYMBOLS) <= std::time::Duration::from_secs(REFRESH_SECS) / 3);
         assert!(FRESH_SECS < REFRESH_SECS as i64);
     }
 }

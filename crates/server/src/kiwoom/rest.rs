@@ -29,7 +29,6 @@ use crate::clock::Clock;
 use crate::config::Secret;
 use domain::KstTime;
 
-pub const SEND_SPACING: Duration = Duration::from_millis(260);
 const SEND_WINDOW: Duration = Duration::from_secs(1);
 const WINDOW_MARGIN: Duration = Duration::from_millis(50);
 const REAL_SENDS_PER_WINDOW: u32 = 5;
@@ -621,6 +620,11 @@ impl KiwoomRest {
         }
         Err(self.0.settle(&mut self.0.lock(), failure))
     }
+}
+
+pub fn same_tr_burst_duration(calls: usize) -> Duration {
+    let windows_after_the_first = calls.div_ceil(REAL_SENDS_PER_WINDOW as usize).saturating_sub(1);
+    (SEND_WINDOW + WINDOW_MARGIN) * windows_after_the_first as u32
 }
 
 async fn report_counters(inner: Arc<Inner>) {
@@ -1269,6 +1273,8 @@ mod tests {
     use super::testing::*;
     use super::*;
     use crate::trading::TradingApiId;
+
+    const SEND_SPACING: Duration = Duration::from_millis(260);
     use crate::kiwoom::api::ApiId;
     use crate::kiwoom::error::CodeKey;
     use crate::clock::kst;
