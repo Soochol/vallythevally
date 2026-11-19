@@ -214,7 +214,7 @@ impl SubscriptionManager {
         }
         wanting.sort();
         for (rank, s, kind) in wanting {
-            if self.seats_fit(1, rank, Some(s)) {
+            if self.admitted.contains(&s) && self.seats_fit(1, rank, Some(s)) {
                 self.admitted_venue.insert((s, kind));
                 self.released_at.remove(&s);
             }
@@ -904,6 +904,26 @@ mod tests {
         m.release(stock(500), &feed(3, "n", RealType::Book), t(1));
         m.hold(stock(500), feed(3, "n", RealType::BookNxt));
         assert!(m.plan(t(1)).realtime.contains(&stock(500)), "옛 코드는 30초 유예 뒤에 놓는다");
+    }
+
+    #[test]
+    fn a_symbol_evicted_while_the_venue_places_are_handed_out_gets_no_place_and_leaves_the_plan_stable() {
+        let mut m = SubscriptionManager::default();
+        fill(&mut m, REALTIME_LIMIT - 5);
+        m.hold(stock(500), cell(9, "a"));
+        m.hold(stock(500), feed(9, "an", RealType::BookNxt));
+        m.hold(stock(501), feed(3, "sk", RealType::BookKrx));
+        m.hold(stock(502), cell(5, "b"));
+        assert_eq!(seats(&m.plan(t(0))), REALTIME_LIMIT);
+        m.hold(stock(501), feed(4, "sn", RealType::BookNxt));
+        m.plan(t(1));
+        m.release(stock(501), &feed(3, "sk", RealType::BookKrx), t(2));
+        m.plan(t(2));
+        m.hold(stock(500), feed(9, "ak", RealType::BookKrx));
+        m.hold(stock(502), feed(5, "bn", RealType::BookNxt));
+        let first = m.plan(t(3));
+        let second = m.plan(t(3));
+        assert_eq!(first, second, "seats first={} second={}", seats(&first), seats(&second));
     }
 
     #[test]
