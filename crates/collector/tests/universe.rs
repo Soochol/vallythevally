@@ -4,7 +4,7 @@ use std::time::Duration;
 
 use collector::kst::KstTime;
 use collector::universe::{
-    Entry, Morning, ReplaceReason, StockKind, UniverseError, UniverseFile, Written, collect_after_close, collect_morning, read_universe,
+    Entry, Morning, ReplaceReason, StockKind, StoreError, UniverseError, UniverseFile, Written, collect_after_close, collect_morning, read_universe,
 };
 use domain::KstDate;
 use futures::future::BoxFuture;
@@ -398,6 +398,74 @@ async fn an_unreadable_today_list_is_moved_aside_and_the_day_goes_on_with_the_pr
             let again = morning_outcome(data.path(), 20261118, Kiwoom::Failing).await.unwrap();
             assert!(matches!(again.written, Written::LeftAsIs { .. }) && again.moved_aside.is_none(), "{label}: 대체한 뒤 다시 돌려도 옮길 것이 없다");
         }
+    }
+}
+
+#[derive(Clone)]
+struct BlockPathWhenLogged(std::path::PathBuf);
+
+impl std::io::Write for BlockPathWhenLogged {
+    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+        let _ = std::fs::create_dir(&self.0);
+        Ok(bytes.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+impl<'a> tracing_subscriber::fmt::MakeWriter<'a> for BlockPathWhenLogged {
+    type Writer = BlockPathWhenLogged;
+
+    fn make_writer(&'a self) -> BlockPathWhenLogged {
+        self.clone()
+    }
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_replacement_that_cannot_be_written_after_the_move_still_names_the_moved_file() {
+    for (label, bytes) in broken_today_lists().await {
+        let data = tempfile::tempdir().unwrap();
+        morning(data.path(), 20261117, listing(fillers(100))).await.unwrap();
+        let today = data.path().join("universe/20261118.json");
+        std::fs::write(&today, &bytes).unwrap();
+        let blocker = tracing_subscriber::fmt().with_writer(BlockPathWhenLogged(today.clone())).with_max_level(tracing::Level::WARN).finish();
+        let _blocking = tracing::subscriber::set_default(blocker);
+
+        let failed = morning_outcome(data.path(), 20261118, Kiwoom::Failing).await.unwrap_err();
+
+        let UniverseError::ReplacementNotWritten { moved, cause } = &failed else { panic!("{label}: {failed:?}") };
+        let name = moved.path.file_name().unwrap().to_str().unwrap();
+        assert!(name.starts_with("20261118.unreadable-") && name.ends_with(".json"), "{label}: {name}");
+        assert_eq!(std::fs::read(&moved.path).unwrap(), bytes, "{label}: 옮긴 파일은 내용 그대로 남는다");
+        assert!(matches!(cause, StoreError::Write { path, .. } if *path == today), "{label}: {cause:?}");
+        assert!(failed.to_string().contains(name), "{label}: 경보에 실릴 오류 문장에 옮긴 경로가 있다: {failed}");
+    }
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_valid_today_list_that_cannot_be_opened_stays_where_it_is_and_the_morning_fails_naming_it() {
+    use std::os::unix::fs::PermissionsExt;
+    for failing in [Kiwoom::Failing, listing(fillers(90))] {
+        let data = tempfile::tempdir().unwrap();
+        morning(data.path(), 20261117, listing(fillers(100))).await.unwrap();
+        morning(data.path(), 20261118, listing(fillers(100))).await.unwrap();
+        let today = data.path().join("universe/20261118.json");
+        let original = std::fs::read(&today).unwrap();
+        std::fs::set_permissions(&today, std::fs::Permissions::from_mode(0o000)).unwrap();
+        if std::fs::read(&today).is_ok() {
+            return;
+        }
+
+        let failed = morning_outcome(data.path(), 20261118, failing).await.unwrap_err();
+
+        std::fs::set_permissions(&today, std::fs::Permissions::from_mode(0o644)).unwrap();
+        let UniverseError::Store(StoreError::Read { path, .. }) = &failed else { panic!("{failed:?}") };
+        assert_eq!(*path, today);
+        assert!(failed.to_string().contains("20261118.json"), "{failed}");
+        assert_eq!(std::fs::read(&today).unwrap(), original, "열지 못한 파일은 옮기지도 바꾸지도 않는다");
+        assert_eq!(universe_files(data.path()), ["20261117.json", "20261118.json"]);
     }
 }
 
