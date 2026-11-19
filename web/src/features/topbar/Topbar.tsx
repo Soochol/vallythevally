@@ -34,6 +34,7 @@ export function Topbar() {
       <span className="app-brand" title="vallythevally"><BrandIcon /><span>vally</span></span>
       <MockBadge />
       <span className="tb-sep" />
+      <VenuePicker variant="desktop" />
       <div role="group" aria-label="봉 주기" className="flex flex-none items-center gap-px">
         <MinuteMenu value={cell.period} onChange={(period) => setPeriod(cellId, period)} />
         {PERIODS.filter((p) => !p.endsWith("m")).map((p) => (
@@ -59,7 +60,6 @@ export function Topbar() {
           <kbd>Ctrl K</kbd>
         </button>
       </div>
-      <VenuePicker variant="desktop" />
       <span className="tb-sep" />
       <LayoutMenu />
       <AddWindowMenu />
