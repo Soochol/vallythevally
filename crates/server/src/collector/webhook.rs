@@ -87,7 +87,10 @@ fn transport_failure(error: reqwest::Error) -> SendFailure {
 
 fn wait_from(header: Option<&str>, body: &[u8]) -> Duration {
     let seconds = serde_json::from_slice::<RateLimitBody>(body).ok().and_then(|body| body.retry_after).or_else(|| header.and_then(|text| text.trim().parse::<f64>().ok()));
-    seconds.and_then(|seconds| Duration::try_from_secs_f64(seconds).ok()).unwrap_or(FALLBACK_WAIT)
+    match seconds {
+        Some(seconds) if seconds >= 0.0 => Duration::try_from_secs_f64(seconds).unwrap_or(Duration::MAX),
+        _ => FALLBACK_WAIT,
+    }
 }
 
 fn payload(text: &str) -> String {
@@ -158,6 +161,14 @@ mod tests {
         assert_eq!(wait_from(Some("3"), b"not json"), Duration::from_secs(3));
         assert_eq!(wait_from(None, b""), FALLBACK_WAIT);
         assert_eq!(wait_from(Some("-1"), b""), FALLBACK_WAIT);
+    }
+
+    #[test]
+    fn a_wait_beyond_what_a_duration_holds_counts_as_longer_than_the_limit() {
+        for body in [br#"{"retry_after": 1e300}"#.as_slice(), br#"{"retry_after": 1e19}"#] {
+            assert!(wait_from(None, body) > LONGEST_WAIT);
+        }
+        assert!(wait_from(Some("1e300"), b"") > LONGEST_WAIT);
     }
 
     #[test]

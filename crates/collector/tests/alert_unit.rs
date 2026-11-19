@@ -50,6 +50,7 @@ fn serve(answers: Vec<&'static str>) -> Hook {
 
 const ACCEPTED: &str = "HTTP/1.1 204 No Content\r\ncontent-length: 0\r\nconnection: close\r\n\r\n";
 const RATE_LIMITED: &str = "HTTP/1.1 429 Too Many Requests\r\nretry-after: 1\r\ncontent-length: 0\r\nconnection: close\r\n\r\n";
+const RATE_LIMITED_FOR_HOURS: &str = "HTTP/1.1 429 Too Many Requests\r\nretry-after: 9999\r\ncontent-length: 0\r\nconnection: close\r\n\r\n";
 const NOT_FOUND: &str = "HTTP/1.1 404 Not Found\r\ncontent-length: 0\r\nconnection: close\r\n\r\n";
 
 struct Run {
@@ -153,4 +154,46 @@ fn a_refusing_webhook_fails_the_script_without_printing_the_address() {
     assert!(!run.output.status.success());
     let printed = everything_printed(&run);
     assert!(!printed.contains(SECRET) && !printed.contains("/api/webhooks"), "{printed}");
+}
+
+#[test]
+fn a_rate_limit_that_will_not_lift_fails_the_script() {
+    let folder = tempfile::tempdir().unwrap();
+    let hook = serve(vec![RATE_LIMITED_FOR_HOURS]);
+    let run = run_script(folder.path(), "메시지", Some((&address(hook.port), 0o600)));
+    assert!(!run.output.status.success(), "보내지 못했는데 성공으로 끝났다");
+    let printed = everything_printed(&run);
+    assert!(printed.contains("보내지 못했습니다") && !printed.contains(SECRET) && !printed.contains("/api/webhooks"), "{printed}");
+    assert_eq!(hook.requests.lock().unwrap().len(), 1);
+}
+
+#[test]
+fn newlines_tabs_and_control_characters_in_the_message_stay_valid_json() {
+    let folder = tempfile::tempdir().unwrap();
+    let hook = serve(vec![ACCEPTED]);
+    let message = "첫 줄\n둘째\t줄\r\n\u{1}끝 \"따옴표\" \\";
+    let run = run_script(folder.path(), message, Some((&address(hook.port), 0o600)));
+    assert!(run.output.status.success(), "{}", String::from_utf8_lossy(&run.output.stderr));
+    assert_eq!(hook.requests.lock().unwrap()[0].1["content"], message);
+}
+
+#[test]
+fn an_address_file_with_several_lines_stops_the_script_before_any_request() {
+    let folder = tempfile::tempdir().unwrap();
+    let hook = serve(vec![ACCEPTED]);
+    let text = format!("{}http://127.0.0.1:9/other/SECOND-TOKEN\n", address(hook.port));
+    let run = run_script(folder.path(), "메시지", Some((&text, 0o600)));
+    assert!(!run.output.status.success());
+    let printed = everything_printed(&run);
+    assert!(printed.contains("여러 줄") && !printed.contains(SECRET) && !printed.contains("SECOND-TOKEN"), "{printed}");
+    assert!(hook.requests.lock().unwrap().is_empty());
+}
+
+#[test]
+fn trailing_blank_lines_in_the_address_file_are_fine() {
+    let folder = tempfile::tempdir().unwrap();
+    let hook = serve(vec![ACCEPTED]);
+    let text = format!("{}\n  \n", address(hook.port));
+    let run = run_script(folder.path(), "메시지", Some((&text, 0o600)));
+    assert!(run.output.status.success(), "{}", String::from_utf8_lossy(&run.output.stderr));
 }

@@ -173,7 +173,7 @@ async fn announce_to_webhook(announced: Option<(Arc<Webhook>, tokio::sync::broad
                     tracing::warn!(%failure, "수집 경보를 웹훅으로 보내지 못했습니다");
                 }
             }
-            Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {}
+            Err(tokio::sync::broadcast::error::RecvError::Lagged(skipped)) => tracing::warn!(skipped, "수집 경보 알림을 건너뛰었습니다"),
             Err(tokio::sync::broadcast::error::RecvError::Closed) => return,
         }
     }
@@ -192,5 +192,50 @@ async fn fill_missing_subject(account: &crate::account::AccountState) {
         } else if sessions.changed().await.is_err() {
             return;
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::io::Write;
+    use std::os::unix::fs::PermissionsExt;
+    use std::sync::Mutex;
+
+    use super::watch::{DaemonJudgment, DaemonNotice};
+    use super::*;
+
+    #[derive(Clone, Default)]
+    struct LogCapture(Arc<Mutex<Vec<u8>>>);
+
+    impl Write for LogCapture {
+        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+            self.0.lock().unwrap().extend_from_slice(bytes);
+            Ok(bytes.len())
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    #[tokio::test]
+    async fn notices_the_queue_dropped_are_counted_in_a_warning() {
+        let capture = LogCapture::default();
+        let writer = capture.clone();
+        let subscriber = tracing_subscriber::fmt().with_writer(move || writer.clone()).with_ansi(false).finish();
+        let _guard = tracing::subscriber::set_default(subscriber);
+        let folder = tempfile::tempdir().unwrap();
+        let path = folder.path().join("discord-webhook");
+        std::fs::write(&path, "http://127.0.0.1:9/api/webhooks/1/token\n").unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).unwrap();
+        let webhook = Arc::new(Webhook::load(&path).unwrap().unwrap());
+        let (sender, receiver) = tokio::sync::broadcast::channel(2);
+        for second in 0..5 {
+            sender.send(DaemonNotice { judgment: DaemonJudgment::Down, at: UnixSeconds(second) }).unwrap();
+        }
+        drop(sender);
+        announce_to_webhook(Some((webhook, receiver))).await;
+        let logs = String::from_utf8_lossy(&capture.0.lock().unwrap()).into_owned();
+        assert!(logs.contains("수집 경보 알림을 건너뛰었습니다") && logs.contains("skipped=3"), "{logs}");
     }
 }
