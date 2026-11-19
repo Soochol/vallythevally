@@ -90,7 +90,7 @@ impl Harness {
     }
 
     fn script_market_overview(&self) {
-        self.fake.respond_with("ka10051", 200, sector_flows(&[("001_AL", "종합(KOSPI)", "-8787", "+6473", "+1893"), ("013_AL", "전기전자", "-100", "+50", "+25")]));
+        self.fake.respond_with("ka10051", 200, sector_flows(&[("001_AL", "종합(KOSPI)", "-8787", "+6473", "+1893"), ("013_AL", "전기전자", "-100", "+50", "+25"), ("101_AL", "종합(KOSDAQ)", "+11", "-22", "+33")]));
         self.fake.respond_with("ka90005", 200, program_minutes(&[("103905", "+345603"), ("103859", "+342625")]));
     }
 
@@ -358,7 +358,9 @@ async fn samples_are_taken_every_minute_of_the_regular_session_for_both_markets(
     assert_eq!(body["points"][0], json!({"at": at(MONDAY, 9, 0, 0).unix(), "individualEok": -8787, "foreignEok": 6473, "institutionEok": 1893, "programEok": 3456.03}));
     assert_eq!(body["day"], "2026-11-09");
     assert!(body["context"]["receivedAt"].is_i64());
-    assert_eq!(h.ok("/api/market-overview/flow/intraday?market=kosdaq").await["points"].as_array().unwrap().len(), 3);
+    let kosdaq = h.ok("/api/market-overview/flow/intraday?market=kosdaq").await;
+    assert_eq!(kosdaq["points"].as_array().unwrap().len(), 3);
+    assert_eq!((&kosdaq["points"][0]["individualEok"], &kosdaq["points"][0]["foreignEok"], &kosdaq["points"][0]["institutionEok"]), (&json!(11), &json!(-22), &json!(33)));
 }
 
 #[tokio::test]
@@ -479,4 +481,19 @@ async fn sampling_yields_to_what_the_screen_waits_for() {
     let order: Vec<_> = h.market_calls().into_iter().skip(before).map(|c| c.api_id).collect();
     assert_eq!(order.len(), 5, "{order:?}");
     assert!(order.iter().position(|id| id == "ka20003").unwrap() <= 1, "화면이 기다리는 요청이 뒤쪽 표본 호출보다 먼저 나간다: {order:?}");
+}
+
+#[tokio::test]
+async fn a_sample_written_after_a_torn_last_line_survives_the_next_restart() {
+    let dir = tempfile::tempdir().unwrap();
+    let sample = json!({"at": at(MONDAY, 10, 0, 0).unix(), "received_at": 0, "market": "kospi", "value": {"kind": "investors", "individual_eok": 1, "foreign_eok": 2, "institution_eok": 3}}).to_string();
+    std::fs::write(dir.path().join("20261109.jsonl"), format!("{sample}\n{{\"at\": 17")).unwrap();
+    {
+        let first = Harness::start_with_samples(at(MONDAY, 10, 0, 30), dir.path()).await;
+        first.minute().await;
+    }
+    tokio::time::resume();
+    let second = Harness::start_with_samples(at(MONDAY, 10, 1, 30), dir.path()).await;
+    let body = second.ok("/api/market-overview/flow/intraday?market=kospi").await;
+    assert_eq!(body["points"][1]["individualEok"], -8787, "{body}");
 }

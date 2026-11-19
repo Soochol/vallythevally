@@ -67,7 +67,7 @@
 
 ### `flow/intraday`
 
-오늘(관측일)의 누적선이다. 키움을 부르지 않고 서버가 1분마다 쌓은 표본에서 만든다. `points`는 분 시작 시각(`at`, Unix 초) 순이고, 값은 그날 처음부터의 누적이다. 분마다 `individualEok`, `foreignEok`, `institutionEok`(`ka10051`)과 `programEok`(`ka90005` 전체, 억원)가 있다. 그 분에 한 TR이 실패했으면 그 TR의 값만 `null`이다. 정규장 밖이거나 표본이 없으면 `points`는 빈 배열이다. 관측일은 07:45에 바뀐다.
+오늘(관측일)의 누적선이다. 키움을 부르지 않고 서버가 1분마다 쌓은 표본에서 만든다. `points`는 분 시작 시각(`at`, Unix 초) 순이고, 값은 그날 처음부터의 누적이다. 분마다 `individualEok`, `foreignEok`, `institutionEok`(`ka10051`)과 `programEok`(`ka90005` 전체, 억원)가 있다. 그 분에 한 TR이 실패했으면 그 TR의 값만 `null`이다. 표본은 정규장에만 쌓이므로 표본이 없으면 `points`는 빈 배열이다. 장이 끝난 뒤에도 그날 표본은 다음 관측일 07:45까지 남는다.
 
 ### `turnover`
 

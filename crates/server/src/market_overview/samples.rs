@@ -135,6 +135,11 @@ async fn read_day(dir: &Path, day: KstDate) -> Vec<Sample> {
             return Vec::new();
         }
     };
+    if !text.is_empty() && !text.ends_with('\n') {
+        if let Err(e) = terminate_line(dir, day).await {
+            tracing::error!(path = %dir.display(), error = %e, "끊긴 마지막 줄을 닫지 못했습니다");
+        }
+    }
     let mut samples = Vec::new();
     for line in text.lines().filter(|line| !line.trim().is_empty()) {
         match serde_json::from_str::<Sample>(line) {
@@ -143,6 +148,12 @@ async fn read_day(dir: &Path, day: KstDate) -> Vec<Sample> {
         }
     }
     samples
+}
+
+async fn terminate_line(dir: &Path, day: KstDate) -> std::io::Result<()> {
+    let mut file = tokio::fs::OpenOptions::new().append(true).open(dir.join(file_name(day))).await?;
+    file.write_all(b"\n").await?;
+    file.flush().await
 }
 
 async fn append(dir: &Path, day: KstDate, sample: &Sample) -> std::io::Result<()> {
