@@ -1,5 +1,6 @@
 import { expect, test } from "vitest";
-import { basePrice, buildLadder, buildLadderRows, gridPrices, LADDER_ROWS, ratioSplit, type BookLevel } from "./ladder";
+import { basePrice, buildDefaultLadder, buildLadder, buildLadderRows, defaultLadderPrices, gridPrices, isSinglePriceBook, LADDER_ROWS, ratioSplit, type BookLevel } from "./ladder";
+import { expectedInfoItems, placeInfoItems, quoteInfoItems } from "./quoteInfo";
 
 const NO_BOUNDS = { lower: null, upper: null };
 const level = (price: number, quantity: number, change = 0): BookLevel => ({ price, quantity, change });
@@ -128,4 +129,85 @@ test("같은 가격의 단이 둘이면 잔량과 증감을 합친다", () => {
   const rows = build({ asks: [level(70_100, 5, 1), level(70_100, 7, 2)], bids: [], lastPrice: 70_000 });
   expect(rowAt(rows, 70_100).ask).toEqual({ price: 70_100, quantity: 12, change: 3 });
   expect(rowAt(rows, 70_100).askRatio).toBe(1);
+});
+
+const CAPTURE_ASKS = [level(821_000, 418), level(820_000, 1_533), level(819_000, 934)];
+const CAPTURE_BIDS = [level(818_000, 3_012), level(817_000, 61), level(816_000, 57)];
+const auction = (input: Partial<Parameters<typeof buildDefaultLadder>[0]> = {}) => buildDefaultLadder({ asks: CAPTURE_ASKS, bids: CAPTURE_BIDS, lastPrice: 810_000, previousClose: 810_000, bounds: { lower: 567_000, upper: 1_053_000 }, tickRule: "stock", ...input });
+
+test("동시호가 캡처: 매도 3단은 가운데 선 위, 매수 3단은 아래 행에 놓이고 나머지 행은 비어 있다", () => {
+  const rows = auction();
+  expect(rows).toHaveLength(LADDER_ROWS);
+  expect(prices(rows).slice(7, 13)).toEqual([821_000, 820_000, 819_000, 818_000, 817_000, 816_000]);
+  expect([...prices(rows).slice(0, 7), ...prices(rows).slice(13)].every((price) => price === null)).toBe(true);
+  expect(rows.slice(7, 10).map((row) => [row.ask?.quantity, row.bid])).toEqual([[418, null], [1_533, null], [934, null]]);
+  expect(rows.slice(10, 13).map((row) => [row.ask, row.bid?.quantity])).toEqual([[null, 3_012], [null, 61], [null, 57]]);
+});
+
+test("동시호가 캡처: 정보 일곱 칸과 예상체결 두 칸이 하나도 가려지지 않는다", () => {
+  const info = quoteInfoItems({ price: 810_000, previousClose: 810_000, volume: 0, upperLimit: 1_053_000, lowerLimit: 567_000 });
+  const slots = placeInfoItems(auction(), info, expectedInfoItems({ price: 819_000, qty: 100 }, 810_000));
+  expect(slots.filter((slot) => slot !== null).map((slot) => slot!.label)).toEqual([...info.map((item) => item.label), "예상체결가", "예상체결량"]);
+});
+
+test("교차 호가(매도 1호가 70,000, 매수 1호가 70,100)도 매도는 선 위, 매수는 선 아래이고 행 키가 겹치지 않는다", () => {
+  const rows = auction({ asks: [level(70_000, 5), level(70_100, 6), level(70_200, 7)], bids: [level(70_100, 8), level(70_000, 9), level(69_900, 10)], lastPrice: 70_000, previousClose: 70_000, bounds: NO_BOUNDS });
+  expect(prices(rows).slice(7, 13)).toEqual([70_200, 70_100, 70_000, 70_100, 70_000, 69_900]);
+  expect(rows.slice(7, 10).map((row) => [row.ask?.quantity, row.bid])).toEqual([[7, null], [6, null], [5, null]]);
+  expect(rows.slice(10, 13).map((row) => [row.ask, row.bid?.quantity])).toEqual([[null, 8], [null, 9], [null, 10]]);
+  expect(new Set(rows.map((row) => row.key)).size).toBe(LADDER_ROWS);
+});
+
+test("한쪽만 있는 호가(매도 0단·매수 2단)도 단일가 호가이고 매수가 선 아래에 놓인다", () => {
+  const quotes = { asks: [], bids: [level(70_000, 5), level(69_900, 6)], lastPrice: 70_000, previousClose: 70_000 };
+  expect(isSinglePriceBook(quotes)).toBe(true);
+  const rows = auction({ ...quotes, bounds: NO_BOUNDS });
+  expect(prices(rows).slice(9, 13)).toEqual([null, 70_000, 69_900, null]);
+  expect(rows.filter((row) => row.price !== null && row.bid)).toHaveLength(2);
+});
+
+test("호가가 아예 없으면 단일가 호가가 아니고 기존 격자 규칙을 따른다", () => {
+  expect(isSinglePriceBook({ asks: [], bids: [], lastPrice: 70_000, previousClose: null })).toBe(false);
+  expect(prices(auction({ asks: [], bids: [], lastPrice: 70_000, bounds: NO_BOUNDS }))).toEqual(prices(build({ lastPrice: 70_000 })));
+});
+
+test("가격 없는 단은 단으로 세지 않는다", () => {
+  const asks = [level(70_100, 1), level(0, 0), level(Number.NaN, 0), level(70_200, 1), level(70_300, 1), level(70_400, 1)];
+  expect(isSinglePriceBook({ asks: asks.slice(0, 3), bids: [], lastPrice: 70_000, previousClose: null })).toBe(true);
+  expect(isSinglePriceBook({ asks, bids: [], lastPrice: 70_000, previousClose: null })).toBe(false);
+});
+
+test("10단 호가(매도 4단 이상 또는 매수 4단 이상)는 기존 현재가 가운데 격자와 같은 행이다", () => {
+  const four = [level(70_100, 1), level(70_200, 2), level(70_300, 3), level(70_400, 4)];
+  const threeBids = [level(70_000, 5), level(69_900, 6), level(69_800, 7)];
+  for (const quotes of [{ asks: four, bids: threeBids }, { asks: threeBids.map((l) => level(l.price + 500, l.quantity)), bids: four.map((l) => level(l.price - 600, l.quantity)) }]) {
+    const input = { ...quotes, lastPrice: 70_000, previousClose: 69_000 };
+    expect(isSinglePriceBook(input)).toBe(false);
+    expect(auction({ ...input, bounds: NO_BOUNDS })).toEqual(build(input));
+    expect(defaultLadderPrices({ ...input, bounds: NO_BOUNDS, tickRule: "stock" }).sidesSplit).toBe(false);
+  }
+  const full = { asks: Array.from({ length: 10 }, (_, i) => level(70_100 + 100 * i, 10)), bids: Array.from({ length: 10 }, (_, i) => level(70_000 - 100 * i, 10)), lastPrice: 70_000, previousClose: 69_000 };
+  expect(auction({ ...full, bounds: NO_BOUNDS })).toEqual(build(full));
+});
+
+test("예상체결가가 6호가 가격이면 그 행 가격이 목록에 있어 같은 가격으로 찾을 수 있다", () => {
+  const rows = auction();
+  expect(rows.filter((row) => row.price === 819_000)).toHaveLength(1);
+  expect(rows.findIndex((row) => row.price === 819_000)).toBe(9);
+});
+
+test("단일가 행의 가격 목록을 붙잡고 새 호가로 다시 그리면 가격은 그대로이고 잔량만 바뀐다", () => {
+  const held = defaultLadderPrices({ asks: CAPTURE_ASKS, bids: CAPTURE_BIDS, lastPrice: 810_000, previousClose: 810_000, bounds: NO_BOUNDS, tickRule: "stock" });
+  const next = { asks: [level(821_000, 1), level(820_000, 2), level(819_500, 3)], bids: [level(818_000, 4), level(817_500, 5)], lastPrice: 810_000, previousClose: 810_000 };
+  const rows = buildLadderRows(held.prices, next, held.sidesSplit);
+  expect(prices(rows)).toEqual(held.prices);
+  expect(rows.slice(7, 10).map((row) => row.ask?.quantity ?? null)).toEqual([1, 2, null]);
+  expect(rows.slice(10, 13).map((row) => row.bid?.quantity ?? null)).toEqual([4, null, null]);
+});
+
+test("교차 단일가 호가에서 같은 가격이 두 행에 있으면 현재가 표시는 첫 행에만 붙고 뒤 행은 반복으로 표시된다", () => {
+  const rows = auction({ asks: [level(70_000, 5), level(70_100, 6), level(70_200, 7)], bids: [level(70_100, 8), level(70_000, 9), level(69_900, 10)], lastPrice: 70_100, previousClose: 70_000, bounds: NO_BOUNDS });
+  expect(rows.filter((row) => row.current).map((row) => rows.indexOf(row))).toEqual([8]);
+  expect(rows.map((row, index) => [index, row.repeat]).filter(([, repeat]) => repeat)).toEqual([[10, true], [11, true]]);
+  expect(buildLadder({ asks: [], bids: [], lastPrice: 70_000, previousClose: null, bounds: NO_BOUNDS, tickRule: "stock" }).some((row) => row.repeat)).toBe(false);
 });

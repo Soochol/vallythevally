@@ -10,7 +10,7 @@ import { isIndexCode } from "../../lib/symbol";
 import { useMockEnvironment } from "../../stores/kiwoomLink";
 import { useOrderSettings, useUiStore } from "../../stores/ui";
 import { useBookFeed } from "../book/useBookFeed";
-import { basePrice, buildLadderRows, gridPrices, type LadderRow } from "../market-window/ladder";
+import { basePrice, buildLadderRows, defaultLadderPrices, type LadderPrices, type LadderRow } from "../market-window/ladder";
 import { RatioBar, Strip, TotalFigure } from "../market-window/parts";
 import { useLinkedSymbol } from "../market-window/MarketWindowGate";
 import { formatShares } from "../market-window/format";
@@ -40,11 +40,14 @@ import { useOrderWrites } from "./useOrderWrites";
 const EXPLORER_UNAVAILABLE = "상·하한가를 아직 받지 못했습니다";
 const CLOCK_MS = 30_000;
 
-function useHeldWhile<T>(value: T, hold: boolean): T {
+function useHeldWhile<T>(value: T, hold: boolean, same: (a: T, b: T) => boolean = Object.is): T {
   const [held, setHeld] = useState(value);
-  if (!hold && held !== value) setHeld(value);
+  if (!hold && !same(held, value)) setHeld(value);
   return hold ? held : value;
 }
+
+const sameLadderPrices = (a: LadderPrices | null, b: LadderPrices | null): boolean =>
+  a === b || (a !== null && b !== null && a.sidesSplit === b.sidesSplit && a.prices.length === b.prices.length && a.prices.every((price, row) => price === b.prices[row]));
 
 function OrderBody({ code }: { code: SymbolCode }) {
   const mock = useMockEnvironment();
@@ -77,11 +80,12 @@ function OrderBody({ code }: { code: SymbolCode }) {
   const quotes = view ? { asks: view.asks, bids: view.bids, lastPrice: feed.lastPrice, previousClose: feed.previousClose } : null;
   const tickRule = tickRuleOf(symbolInfo?.kind ?? null, view ? [...view.asks, ...view.bids].map((level) => level.price) : []);
   const liveBase = quotes ? basePrice(quotes) : null;
-  const gridBase = useHeldWhile(liveBase, dragging);
+  const liveLadder = quotes ? defaultLadderPrices({ ...quotes, bounds, tickRule }) : null;
+  const heldLadder = useHeldWhile(liveLadder, dragging, sameLadderPrices);
   const referencePrice = feed.lastPrice ?? feed.previousClose ?? liveBase;
   const fullPrices = useMemo(() => fullRangePrices({ lower: bounds.lower, upper: bounds.upper }, tickRule), [bounds.lower, bounds.upper, tickRule]);
   const explorerOn = exploring && fullPrices !== null;
-  const shownRows: LadderRow[] = quotes ? buildLadderRows(explorerOn ? fullPrices : gridPrices(gridBase, bounds, tickRule), quotes) : [];
+  const shownRows: LadderRow[] = quotes && heldLadder ? (explorerOn ? buildLadderRows(fullPrices, quotes) : buildLadderRows(heldLadder.prices, quotes, heldLadder.sidesSplit)) : [];
   const rows = settings.rate ? shownRows : shownRows.map((row) => ({ ...row, rate: null }));
   const info = useQuoteInfo({ code, venue, lastPrice: feed.lastPrice, previousClose: feed.previousClose, upperLimit: bounds.upper, lowerLimit: bounds.lower });
   const trades = useLadderTrades(code, venue);
