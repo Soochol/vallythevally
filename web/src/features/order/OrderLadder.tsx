@@ -5,6 +5,7 @@ import type { LadderRow } from "../market-window/ladder";
 import { type LadderRowSlots, PriceLadder } from "../market-window/PriceLadder";
 import { formatShares } from "../market-window/format";
 import { groupKey, type PriceGroup, previewText, SIDE_LABEL } from "./orderRules";
+import { PENDING_TEXT } from "./statusText";
 import { LADDER_ROW_HEIGHT_PX, type RowRange, scrollTopToCenter, visibleRowRange } from "./priceRange";
 import { OrderList, type OrderListItem } from "./OrderList";
 import type { OrderDrag } from "./useOrderDrag";
@@ -102,10 +103,10 @@ export function OrderLadder({ rows, previousClose, groups, writable, previewQuan
         onPointerLeave={() => onHover(null)}
       >
         {group && !row.repeat
-          ? <button type="button" className="od-chip" data-testid="order-chip" data-side={side} data-price={price} data-dragging={view?.source.kind === "chip" && view.source.group === group ? "" : undefined}
-              aria-label={`${SIDE_LABEL[side]} ${formatPrice(price, false)}원 ${formatShares(group.quantity)} 주문`}
-              onPointerDown={(e) => { if (writable) begin({ source: { kind: "chip", group }, origin: null }, e); }}
-              onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); setMenu({ x: e.clientX, y: e.clientY, group }); }}>
+          ? <button type="button" className="od-chip" data-testid="order-chip" data-side={side} data-price={price} data-dragging={view?.source.kind === "chip" && view.source.group === group ? "" : undefined} data-pending={group.pending}
+              aria-label={`${SIDE_LABEL[side]} ${formatPrice(price, false)}원 ${formatShares(group.quantity)} 주문${group.pending ? ` ${PENDING_TEXT[group.pending]}` : ""}`}
+              onPointerDown={(e) => { if (writable && !group.pending) begin({ source: { kind: "chip", group }, origin: null }, e); }}
+              onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); if (!group.pending) setMenu({ x: e.clientX, y: e.clientY, group }); }}>
               {group.quantity.toLocaleString("ko-KR")}
             </button>
           : hovered && writable && previewQuantity > 0 && <span className="od-preview">{previewText(side, previewQuantity)}</span>}

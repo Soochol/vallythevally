@@ -1,6 +1,7 @@
 import { expect, test } from "vitest";
 import type { TradingOpenOrder } from "../../api/generated/TradingOpenOrder";
-import { capacityProblem, type DragSource, type DragTarget, dragGhostText, dragQuantity, dragSide, groupOpenOrders, HIGH_VALUE_WON, judgeDrag, needsHighValueConfirm, type PriceGroup, quantityOf, sideTotal } from "./orderRules";
+import type { PendingWrite } from "./pendingWrites";
+import { capacityProblem, type DragSource, type DragTarget, dragGhostText, dragQuantity, dragSide, groupOpenOrders, groupWithPending, HIGH_VALUE_WON, judgeDrag, needsHighValueConfirm, type PriceGroup, quantityOf, sideTotal } from "./orderRules";
 
 const order = (orderNo: string, side: "buy" | "sell", price: number, openQuantity: number, code = "005930"): TradingOpenOrder => ({
   orderNo, code, name: "삼성전자", side, quantity: openQuantity, price, openQuantity, status: "접수", orderedAt: "090000", originalOrderNo: null, venue: "krx",
@@ -100,4 +101,57 @@ test("가능 수량·금액을 넘는 주문은 보내기 전에 막는다", () 
   expect(capacityProblem("buy", 71_000, 14, capacity)).toBeNull();
   expect(capacityProblem("buy", 71_000, 0, capacity)).toBe("수량을 입력하세요");
   expect(capacityProblem("buy", 71_000, 1_000, { sellableQuantity: null, buyableAmount: null })).toBeNull();
+});
+
+const stamped = { code: "005930", since: 0 } as const;
+
+test("접수한 신규 주문은 재조회에 없어도 칩에 더하고 재조회에 나타나면 재조회 값을 쓴다", () => {
+  const placed = order("0000099", "buy", 70_000, 10);
+  const writes: PendingWrite[] = [{ ...stamped, kind: "placed", order: placed }];
+  const shown = groupWithPending([], writes, "005930").get("buy:70000");
+  expect(shown?.quantity).toBe(10);
+  expect(shown?.pending).toBeUndefined();
+  const listed = order("0000099", "buy", 70_000, 4);
+  const groups = groupWithPending([listed], writes, "005930");
+  expect(groups.get("buy:70000")?.quantity).toBe(4);
+  expect(groups.get("buy:70000")?.orders).toEqual([listed]);
+});
+
+test("접수한 취소의 주문은 재조회가 아직 돌려줘도 빼고 남은 수량이 0이면 칩을 지운다", () => {
+  const gone = (orderNo: string): PendingWrite => ({ ...stamped, kind: "gone", orderNo });
+  const orders = [order("0000001", "buy", 70_000, 5), order("0000002", "buy", 70_000, 7)];
+  expect(groupWithPending(orders, [gone("0000001")], "005930").get("buy:70000")?.quantity).toBe(7);
+  expect(groupWithPending(orders, [gone("0000001"), gone("0000002")], "005930").size).toBe(0);
+});
+
+test("보내는 중 표시는 빈 칸에 방향·수량의 칩을 그리고 합계에는 넣지 않는다", () => {
+  const writes: PendingWrite[] = [{ ...stamped, kind: "sending", key: "k", side: "sell", price: 70_100, quantity: 3 }];
+  const groups = groupWithPending([], writes, "005930");
+  expect(groups.get("sell:70100")).toEqual({ side: "sell", price: 70_100, quantity: 3, orders: [], pending: "sending" });
+  expect(sideTotal(groups, "sell")).toEqual({ quantity: 0, count: 0 });
+});
+
+test("취소 중·정정 중 표시는 대상 주문의 칩에 붙고 가격 단위 표시는 그 가격 칩 전체에 붙는다", () => {
+  const orders = [order("0000001", "buy", 70_000, 5), order("0000002", "buy", 69_900, 7), order("0000003", "sell", 70_100, 2)];
+  const writes: PendingWrite[] = [
+    { ...stamped, kind: "canceling", key: "a", orderNo: "0000001" },
+    { ...stamped, kind: "modifying", key: "b", orderNo: "0000002" },
+    { ...stamped, kind: "canceling-price", key: "c", side: "sell", price: 70_100 },
+  ];
+  const groups = groupWithPending(orders, writes, "005930");
+  expect(groups.get("buy:70000")?.pending).toBe("canceling");
+  expect(groups.get("buy:69900")?.pending).toBe("modifying");
+  expect(groups.get("sell:70100")?.pending).toBe("canceling");
+});
+
+test("다른 종목의 표시는 무시한다", () => {
+  const writes: PendingWrite[] = [
+    { code: "000660", since: 0, kind: "sending", key: "k", side: "buy", price: 70_000, quantity: 10 },
+    { code: "000660", since: 0, kind: "gone", orderNo: "0000001" },
+    { code: "000660", since: 0, kind: "placed", order: { ...order("0000099", "buy", 70_000, 10), code: "000660" } },
+  ];
+  const groups = groupWithPending([order("0000001", "buy", 70_000, 5)], writes, "005930");
+  expect([...groups.keys()]).toEqual(["buy:70000"]);
+  expect(groups.get("buy:70000")?.quantity).toBe(5);
+  expect(groups.get("buy:70000")?.pending).toBeUndefined();
 });

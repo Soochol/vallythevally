@@ -1,6 +1,7 @@
 import type { OrderSide } from "../../api/generated/OrderSide";
 import type { TradingOpenOrder } from "../../api/generated/TradingOpenOrder";
 import { formatPrice } from "../../lib/format";
+import type { PendingState, PendingWrite } from "./pendingWrites";
 
 export const HIGH_VALUE_WON = 100_000_000;
 
@@ -15,6 +16,7 @@ export interface PriceGroup {
   readonly price: number;
   readonly quantity: number;
   readonly orders: readonly TradingOpenOrder[];
+  readonly pending?: PendingState;
 }
 
 export const groupKey = (side: OrderSide, price: number): string => `${side}:${price}`;
@@ -33,6 +35,41 @@ export function groupOpenOrders(orders: readonly TradingOpenOrder[], code: strin
   }));
 }
 
+const PENDING_RANK: Readonly<Record<PendingState, number>> = { sending: 3, canceling: 2, modifying: 1 };
+
+const strongest = (a: PendingState | undefined, b: PendingState): PendingState => (a === undefined || PENDING_RANK[b] > PENDING_RANK[a] ? b : a);
+
+export function groupWithPending(orders: readonly TradingOpenOrder[], writes: readonly PendingWrite[], code: string): ReadonlyMap<string, PriceGroup> {
+  const mine = writes.filter((write) => write.code === code);
+  const gone = new Set(mine.flatMap((write) => write.kind === "gone" ? [write.orderNo] : []));
+  const listed = new Set(orders.map((order) => order.orderNo));
+  const visible = [
+    ...orders.filter((order) => !gone.has(order.orderNo)),
+    ...mine.flatMap((write) => write.kind === "placed" && !listed.has(write.order.orderNo) ? [write.order] : []),
+  ];
+  const groups = new Map(groupOpenOrders(visible, code));
+  const mark = (key: string, state: PendingState) => {
+    const group = groups.get(key);
+    if (group) groups.set(key, { ...group, pending: strongest(group.pending, state) });
+  };
+  const keyOfOrder = (orderNo: string): string | null => {
+    const order = visible.find((candidate) => candidate.orderNo === orderNo);
+    return order ? groupKey(order.side, order.price) : null;
+  };
+  for (const write of mine) {
+    if (write.kind === "canceling" || write.kind === "modifying") {
+      const key = keyOfOrder(write.orderNo);
+      if (key !== null) mark(key, write.kind);
+    } else if (write.kind === "canceling-price") mark(groupKey(write.side, write.price), "canceling");
+  }
+  for (const write of mine) {
+    if (write.kind !== "sending") continue;
+    const key = groupKey(write.side, write.price);
+    if (!groups.has(key)) groups.set(key, { side: write.side, price: write.price, quantity: write.quantity, orders: [], pending: "sending" });
+  }
+  return groups;
+}
+
 export interface SideTotal {
   readonly quantity: number;
   readonly count: number;
@@ -41,7 +78,7 @@ export interface SideTotal {
 export function sideTotal(groups: ReadonlyMap<string, PriceGroup>, side: OrderSide): SideTotal {
   let quantity = 0;
   let count = 0;
-  for (const group of groups.values()) if (group.side === side) {
+  for (const group of groups.values()) if (group.side === side && group.pending !== "sending") {
     quantity += group.quantity;
     count += group.orders.length;
   }
