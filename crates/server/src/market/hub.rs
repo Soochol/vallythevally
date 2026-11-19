@@ -3317,6 +3317,25 @@ mod tests {
     }
 
     #[tokio::test(start_paused = true)]
+    async fn a_full_house_book_moved_to_the_nxt_code_by_the_directory_keeps_the_old_code_for_the_grace() {
+        let h = std_harness_before_the_directory();
+        live(&h).await;
+        let (conn, out) = connect(&h).await;
+        for i in 0..REALTIME_LIMIT - 1 {
+            h.hub.subscribe(conn, sub(&format!("f{i}")), key(&listed_filler(i), Venue::Combined));
+        }
+        subscribe_feed(&h, conn, "n", FeedKind::Book, Venue::Nxt);
+        settle().await;
+        assert_eq!(crate::kiwoom::stream::seats(&h.desired.borrow()), REALTIME_LIMIT);
+        assert!(desired_kinds(&h, samsung_symbol()).contains(&RealType::Book));
+        out.take(true);
+        h.symbols.replace(listed_directory());
+        tokio::time::sleep(Duration::from_secs(2)).await;
+        let msgs = out.take(true).messages;
+        assert!(desired_kinds(&h, samsung_symbol()).contains(&RealType::Book), "옛 통합 0D는 30초 유예 뒤 REMOVE: desired={:?} msgs={msgs:?}", desired_kinds(&h, samsung_symbol()));
+    }
+
+    #[tokio::test(start_paused = true)]
     async fn a_venue_book_over_the_limit_is_rejected_and_comes_back_when_a_place_frees() {
         let h = std_harness();
         live(&h).await;
