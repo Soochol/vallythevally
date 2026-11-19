@@ -1,14 +1,13 @@
-import { type ReactNode, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { type ReactNode, type RefObject, useCallback, useLayoutEffect, useState } from "react";
 import type { OrderSide } from "../../api/generated/OrderSide";
 import { formatPrice } from "../../lib/format";
-import { Menu, type MenuItem } from "../menu/Menu";
 import type { LadderRow } from "../market-window/ladder";
 import { type LadderRowSlots, PriceLadder } from "../market-window/PriceLadder";
 import { formatShares } from "../market-window/format";
-import { dragGhostText, groupKey, type PriceGroup, previewText, SIDE_LABEL } from "./orderRules";
+import { groupKey, type PriceGroup, previewText, SIDE_LABEL } from "./orderRules";
 import { LADDER_ROW_HEIGHT_PX, type RowRange, scrollTopToCenter, visibleRowRange } from "./priceRange";
-import { useChipDrag } from "./useChipDrag";
-import type { DragOutcome } from "./orderRules";
+import { OrderList, type OrderListItem } from "./OrderList";
+import type { OrderDrag } from "./useOrderDrag";
 
 export interface HoverCell {
   readonly side: OrderSide;
@@ -22,7 +21,6 @@ export interface ExplorerScroll {
 
 export interface LadderActions {
   place(side: OrderSide, price: number): void;
-  drop(group: PriceGroup, outcome: DragOutcome): void;
   cancelOne(orderNo: string): void;
   cancelAtPrice(side: OrderSide, price: number): void;
   cancelGroups(groups: readonly PriceGroup[]): void;
@@ -40,7 +38,8 @@ interface Props {
   readonly averagePrice: number | null;
   readonly divider: boolean;
   readonly explorer?: ExplorerScroll;
-  readonly onDragging: (dragging: boolean) => void;
+  readonly ladder: RefObject<HTMLDivElement | null>;
+  readonly drag: OrderDrag;
   readonly rowSlots?: LadderRowSlots;
   readonly expectedPrice?: number | null;
 }
@@ -49,13 +48,9 @@ type MenuState = { readonly x: number; readonly y: number; readonly group: Price
 
 const SIDE_OF_SLOT: Readonly<Record<"left" | "right", OrderSide>> = { left: "sell", right: "buy" };
 
-export function OrderLadder({ rows, previousClose, groups, writable, previewQuantity, hover, onHover, actions, averagePrice, divider, explorer, onDragging, rowSlots, expectedPrice }: Props) {
-  const ladder = useRef<HTMLDivElement>(null);
+export function OrderLadder({ rows, previousClose, groups, writable, previewQuantity, hover, onHover, actions, averagePrice, divider, explorer, ladder, drag, rowSlots, expectedPrice }: Props) {
   const [menu, setMenu] = useState<MenuState | null>(null);
-  const { view, begin } = useChipDrag(ladder, actions.drop);
-  const dragging = view !== null;
-
-  useEffect(() => { onDragging(dragging); }, [dragging, onDragging]);
+  const { view, begin } = drag;
 
   const exploring = explorer !== undefined;
   const [range, setRange] = useState<RowRange>({ start: 0, end: 0 });
@@ -107,9 +102,9 @@ export function OrderLadder({ rows, previousClose, groups, writable, previewQuan
         onPointerLeave={() => onHover(null)}
       >
         {group && !row.repeat
-          ? <button type="button" className="od-chip" data-testid="order-chip" data-side={side} data-price={price} data-dragging={view?.group === group ? "" : undefined}
+          ? <button type="button" className="od-chip" data-testid="order-chip" data-side={side} data-price={price} data-dragging={view?.source.kind === "chip" && view.source.group === group ? "" : undefined}
               aria-label={`${SIDE_LABEL[side]} ${formatPrice(price, false)}원 ${formatShares(group.quantity)} 주문`}
-              onPointerDown={(e) => { if (writable) begin(group, e); }}
+              onPointerDown={(e) => { if (writable) begin({ source: { kind: "chip", group }, origin: null }, e); }}
               onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); setMenu({ x: e.clientX, y: e.clientY, group }); }}>
               {group.quantity.toLocaleString("ko-KR")}
             </button>
@@ -120,18 +115,18 @@ export function OrderLadder({ rows, previousClose, groups, writable, previewQuan
   const slots = { left: cell("left"), right: cell("right") };
 
   const all = [...groups.values()];
-  const items = (state: MenuState): MenuItem[] => {
+  const items = (state: MenuState): OrderListItem[] => {
     const { group } = state;
     if (group) {
       return [
         { kind: "heading", label: `${formatPrice(group.price, false)}원 ${SIDE_LABEL[group.side]} 주문` },
-        ...group.orders.map((order): MenuItem => ({ kind: "action", label: `${order.openQuantity.toLocaleString("ko-KR")} 취소`, disabled: !writable, onSelect: () => actions.cancelOne(order.orderNo) })),
+        ...group.orders.map((order): OrderListItem => ({ kind: "order", label: `${order.openQuantity.toLocaleString("ko-KR")} 취소`, order, disabled: !writable, onSelect: () => actions.cancelOne(order.orderNo) })),
         { kind: "separator" },
         { kind: "action", label: "이 가격 모두 취소", danger: true, disabled: !writable, onSelect: () => actions.cancelAtPrice(group.side, group.price) },
       ];
     }
     const side = (s: OrderSide) => all.filter((g) => g.side === s);
-    const entry = (label: string, targets: readonly PriceGroup[]): MenuItem => ({ kind: "action", label, danger: true, disabled: !writable || targets.length === 0, onSelect: () => actions.cancelGroups(targets) });
+    const entry = (label: string, targets: readonly PriceGroup[]): OrderListItem => ({ kind: "action", label, danger: true, disabled: !writable || targets.length === 0, onSelect: () => actions.cancelGroups(targets) });
     return [entry("매수 모두 취소", side("buy")), entry("매도 모두 취소", side("sell")), entry("전체 모두 취소", all)];
   };
 
@@ -145,10 +140,7 @@ export function OrderLadder({ rows, previousClose, groups, writable, previewQuan
       {exploring
         ? <div className="od-explorer-rows" data-testid="order-explorer-rows" style={{ paddingTop: range.start * LADDER_ROW_HEIGHT_PX, paddingBottom: (rowCount - range.end) * LADDER_ROW_HEIGHT_PX }}>{ladderView}</div>
         : ladderView}
-      {view && <div className="od-ghost" data-testid="order-ghost" data-side={view.group.side} style={{ left: view.x, top: view.y }}>
-        <b>{view.group.quantity.toLocaleString("ko-KR")}</b> {dragGhostText(view.target, view.group)}
-      </div>}
-      {menu && <Menu label={menu.group ? "주문 목록" : "주문 취소"} root={ladder} style={{ left: menu.x, top: menu.y }} items={items(menu)} onClose={() => setMenu(null)} />}
+      {menu && <OrderList label={menu.group ? "주문 목록" : "주문 취소"} root={ladder} point={{ x: menu.x, y: menu.y }} drag={drag} items={items(menu)} onClose={() => setMenu(null)} />}
     </div>
   );
 }

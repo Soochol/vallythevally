@@ -1,5 +1,6 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { OrderSide } from "../../api/generated/OrderSide";
+import type { TradingOpenOrder } from "../../api/generated/TradingOpenOrder";
 import type { Venue } from "../../api/generated/Venue";
 import type { SymbolCode } from "../../api/generated/SymbolCode";
 import type { WindowId } from "../../layout/kinds";
@@ -28,13 +29,15 @@ import { OrderSettingsPopover } from "./OrderSettingsPopover";
 import { tickRuleOf } from "../market-window/tick";
 import { fullRangePrices } from "./priceRange";
 import { HighValueConfirm, type HighValueRequest } from "./HighValueConfirm";
+import { DragGhost } from "./DragGhost";
 import { type HoverCell, OrderLadder } from "./OrderLadder";
 import { OrderTotals } from "./OrderTotals";
 import { OrderStatusBar } from "./OrderStatusBar";
 import { REJECT_TEXT } from "./statusText";
 import { OrderEstimate, QuantityRow } from "./QuantityRow";
-import { capacityProblem, type DragOutcome, needsHighValueConfirm, type PriceGroup, quantityOf, type QuantityMode, SIDE_LABEL } from "./orderRules";
+import { capacityProblem, type DragOutcome, type DragSource, needsHighValueConfirm, quantityOf, type QuantityMode, SIDE_LABEL } from "./orderRules";
 import { useOrderAccess, useOrderData } from "./useOrderData";
+import { useOrderDrag } from "./useOrderDrag";
 import { useOrderWrites } from "./useOrderWrites";
 
 const EXPLORER_UNAVAILABLE = "상·하한가를 아직 받지 못했습니다";
@@ -59,7 +62,9 @@ function OrderBody({ code }: { code: SymbolCode }) {
   const [confirm, setConfirm] = useState<HighValueRequest | null>(null);
   const [exploring, setExploring] = useState(false);
   const [centerToken, setCenterToken] = useState(0);
-  const [dragging, setDragging] = useState(false);
+  const ladder = useRef<HTMLDivElement>(null);
+  const drag = useOrderDrag(ladder, (source, outcome) => drop(source, outcome));
+  const dragging = drag.view !== null;
   const [profitUnit, setProfitUnit] = useState<ProfitUnit>("won");
   const [now, setNow] = useState(() => Date.now());
   const settings = useOrderSettings();
@@ -123,12 +128,21 @@ function OrderBody({ code }: { code: SymbolCode }) {
     else send(false);
   };
 
-  const drop = (group: PriceGroup, outcome: DragOutcome) => {
-    if (outcome.kind === "cancel") writes.cancelAtPrice(group.side, group.price);
-    if (outcome.kind !== "modify") return;
-    const run = () => writes.modifyAll(group.orders, outcome.price);
-    if (group.orders.some((order) => needsHighValueConfirm(outcome.price, order.openQuantity))) setConfirm({ title: `${SIDE_LABEL[group.side]} 정정 · ${formatPrice(group.price, false)}원 → ${formatPrice(outcome.price, false)}원`, amount: outcome.price * group.quantity, run });
+  const modifyOrders = (side: OrderSide, price: number, orders: readonly TradingOpenOrder[], to: number) => {
+    const run = () => writes.modifyAll(orders, to);
+    if (orders.some((order) => needsHighValueConfirm(to, order.openQuantity))) setConfirm({ title: `${SIDE_LABEL[side]} 정정 · ${formatPrice(price, false)}원 → ${formatPrice(to, false)}원`, amount: to * orders.reduce((sum, order) => sum + order.openQuantity, 0), run });
     else run();
+  };
+
+  const drop = (source: DragSource, outcome: DragOutcome) => {
+    if (outcome.kind === "abort") return;
+    if (source.kind === "chip") {
+      if (outcome.kind === "cancel") writes.cancelAtPrice(source.group.side, source.group.price);
+      else modifyOrders(source.group.side, source.group.price, source.group.orders, outcome.price);
+    } else if (source.kind === "order") {
+      if (outcome.kind === "cancel") writes.cancelOne(source.order.orderNo);
+      else modifyOrders(source.order.side, source.order.price, [source.order], outcome.price);
+    } else source.groups.forEach((group) => writes.cancelAtPrice(group.side, group.price));
   };
 
   return (
@@ -152,17 +166,18 @@ function OrderBody({ code }: { code: SymbolCode }) {
       </div>
       <div className="bk-ladder od-ladder-wrap" data-stale={feed.connected ? undefined : ""} data-exploring={explorerOn ? "" : undefined}>
         {view
-            ? <OrderLadder rows={rows} previousClose={feed.previousClose} groups={data.groups} writable={writable} previewQuantity={quantityAt(unitPrice)} hover={hover} onHover={setHover} averagePrice={averagePrice} divider={settings.divider} explorer={explorerOn ? { centerPrice: referencePrice, centerToken } : undefined} onDragging={setDragging} expectedPrice={expected?.price ?? null} rowSlots={{ topRight: infoSlot(infoSlots), bottomLeft: tradeSlot(trades, feed.previousClose) }}
-                actions={{ place, drop, cancelOne: writes.cancelOne, cancelAtPrice: writes.cancelAtPrice, cancelGroups: (targets) => targets.forEach((g) => writes.cancelAtPrice(g.side, g.price)) }} />
+            ? <OrderLadder rows={rows} previousClose={feed.previousClose} groups={data.groups} writable={writable} previewQuantity={quantityAt(unitPrice)} hover={hover} onHover={setHover} averagePrice={averagePrice} divider={settings.divider} explorer={explorerOn ? { centerPrice: referencePrice, centerToken } : undefined} ladder={ladder} drag={drag} expectedPrice={expected?.price ?? null} rowSlots={{ topRight: infoSlot(infoSlots), bottomLeft: tradeSlot(trades, feed.previousClose) }}
+                actions={{ place, cancelOne: writes.cancelOne, cancelAtPrice: writes.cancelAtPrice, cancelGroups: (targets) => targets.forEach((g) => writes.cancelAtPrice(g.side, g.price)) }} />
             : <EmptyState title={feed.snapshotFailed ? "호가를 불러오지 못했습니다" : "호가를 기다리는 중입니다"} />}
         <OrderStatusBar status={writes.status} queued={writes.queued} blocked={data.blocked} onUndo={writes.cancelOne} onReconcile={writes.reconcile} onDismiss={writes.dismiss} />
       </div>
-      <OrderTotals groups={data.groups} writable={writable} actions={writes} />
+      <OrderTotals groups={data.groups} writable={writable} actions={writes} drag={drag} />
       <Strip>
         <TotalFigure testId="order-total-ask" tone="down" value={totals.ask} afterHours={totals.source === "afterHours"} description={totals.description} />
         <RatioBar buy={totals.bid ?? 0} sell={totals.ask ?? 0} sellFirst label={totals.description ?? "총잔량 매도·매수 비율"} />
         <TotalFigure testId="order-total-bid" tone="up" value={totals.bid} afterHours={totals.source === "afterHours"} description={totals.description} />
       </Strip>
+      {drag.view && <DragGhost view={drag.view} />}
       {confirm && <HighValueConfirm request={confirm} onClose={() => setConfirm(null)} />}
     </div>
   );

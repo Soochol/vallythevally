@@ -30,6 +30,10 @@
 .od-total[data-side=sell] { background:color-mix(in srgb, var(--down) 7%, transparent); }
 .od-total[data-side=buy] { background:color-mix(in srgb, var(--up) 7%, transparent); }
 .od-total:hover { border-color:var(--line-strong); }
+.od-total:not([data-empty]) { cursor:grab; touch-action:none; }
+.od-total[data-dragging] { opacity:.4; }
+.od-list-order { cursor:grab; touch-action:none; }
+.od-list-order:disabled { cursor:not-allowed; }
 .od-total[data-empty] { opacity:.45; }
 .od-list-empty { margin:0; color:var(--text-3); }
 

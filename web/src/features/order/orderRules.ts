@@ -48,9 +48,15 @@ export function sideTotal(groups: ReadonlyMap<string, PriceGroup>, side: OrderSi
   return { quantity, count };
 }
 
+export type DragSource =
+  | { readonly kind: "chip"; readonly group: PriceGroup }
+  | { readonly kind: "order"; readonly order: TradingOpenOrder }
+  | { readonly kind: "total"; readonly side: OrderSide; readonly groups: readonly PriceGroup[] };
+
 export type DragTarget =
   | { readonly kind: "cell"; readonly side: OrderSide; readonly price: number }
   | { readonly kind: "ladder" }
+  | { readonly kind: "origin" }
   | { readonly kind: "outside" };
 
 export type DragOutcome =
@@ -59,24 +65,37 @@ export type DragOutcome =
   | { readonly kind: "abort" };
 
 export interface DragJudgement {
-  readonly chipSide: OrderSide;
-  readonly chipPrice: number;
+  readonly source: DragSource;
   readonly target: DragTarget;
   readonly escaped: boolean;
 }
 
-export function judgeDrag({ chipSide, chipPrice, target, escaped }: DragJudgement): DragOutcome {
+export const dragSide = (source: DragSource): OrderSide =>
+  source.kind === "chip" ? source.group.side : source.kind === "order" ? source.order.side : source.side;
+
+export const dragQuantity = (source: DragSource): number =>
+  source.kind === "chip" ? source.group.quantity : source.kind === "order" ? source.order.openQuantity : source.groups.reduce((sum, group) => sum + group.quantity, 0);
+
+const dragOrderCount = (source: DragSource): number =>
+  source.kind === "chip" ? source.group.orders.length : source.kind === "order" ? 1 : source.groups.reduce((sum, group) => sum + group.orders.length, 0);
+
+export function judgeDrag({ source, target, escaped }: DragJudgement): DragOutcome {
   if (escaped) return { kind: "abort" };
   if (target.kind === "outside") return { kind: "cancel" };
-  if (target.kind === "cell" && target.side === chipSide && target.price !== chipPrice) return { kind: "modify", price: target.price };
+  if (source.kind === "total") return { kind: "abort" };
+  const { side, price } = source.kind === "chip" ? source.group : source.order;
+  if (target.kind === "cell" && target.side === side && target.price !== price) return { kind: "modify", price: target.price };
   return { kind: "abort" };
 }
 
-export const dragGhostText = (target: DragTarget, chip: { side: OrderSide; price: number }): string => {
-  if (target.kind === "outside") return "놓으면 취소";
-  if (target.kind === "cell" && target.side === chip.side && target.price !== chip.price) return `→ ${formatPrice(target.price, false)}원`;
-  return "";
-};
+export function dragGhostText(target: DragTarget, source: DragSource): string {
+  const outcome = judgeDrag({ source, target, escaped: false });
+  if (outcome.kind === "modify") return `→ ${formatPrice(outcome.price, false)}원`;
+  if (outcome.kind === "abort") return "";
+  if (source.kind === "chip") return `놓으면 ${formatPrice(source.group.price, false)}원 ${SIDE_LABEL[source.group.side]} ${dragOrderCount(source)}건 취소`;
+  if (source.kind === "order") return "놓으면 이 주문 취소";
+  return `놓으면 ${SIDE_LABEL[source.side]} ${dragOrderCount(source)}건 모두 취소`;
+}
 
 export const previewText = (side: OrderSide, quantity: number): string => `${SIDE_LABEL[side]} ${quantity}`;
 

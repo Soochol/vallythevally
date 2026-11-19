@@ -265,7 +265,7 @@ test("칩을 사다리 밖으로 끌면 그 가격 일괄 취소이고 Esc는 �
   await openOrderWindow(page, scenario);
 
   await dragChip(page, chipAt(page, "buy", 69_900), { x: 5, y: 5 }, false);
-  await expect(page.getByTestId("order-ghost")).toContainText("놓으면 취소");
+  await expect(page.getByTestId("order-ghost")).toContainText("놓으면 69,900원 매수 1건 취소");
   await page.keyboard.press("Escape");
   await page.mouse.up();
   await expect(page.getByTestId("order-ghost")).toHaveCount(0);
@@ -568,4 +568,131 @@ test("결과 미확인 알림은 시간이 지나도 남고 조회로 확인하�
   await status(page).getByRole("button", { name: "조회로 확인" }).click();
   await expect(status(page)).toContainText("조회로 확인했습니다");
   await expect(win(page)).toHaveAttribute("data-writable", "");
+});
+
+const commandRequests = (scenario: { requests: { url(): string }[] }) => scenario.requests.filter((r) => new URL(r.url()).pathname.startsWith("/api/trading/commands/"));
+const SAMPLE = () => [openOrder("0000001", "buy", 70_000, 5), openOrder("0000002", "buy", 70_000, 7), openOrder("0000003", "buy", 69_900, 3), openOrder("0000004", "sell", 70_100, 4)];
+
+test("같은 가격 두 건의 칩을 사다리 밖에 놓으면 고스트가 건수를 알리고 그 가격 일괄 취소가 한 번 나간다", async ({ page, scenario }) => {
+  ordersOn(scenario);
+  const api = tradingApi(scenario, SAMPLE());
+  await openOrderWindow(page, scenario);
+  await dragChip(page, chipAt(page, "buy", 70_000), { x: 5, y: 5 }, false);
+  await expect(page.getByTestId("order-ghost")).toContainText("놓으면 70,000원 매수 2건 취소");
+  await page.mouse.up();
+  await pollSaved(() => writesTo(api, "cancel-batch")).toHaveLength(1);
+  expect(writesTo(api, "cancel-batch")[0]!.body).toMatchObject({ code: CODE, side: "buy", price: 70_000 });
+  expect(writesTo(api, "cancel")).toHaveLength(0);
+});
+
+test("칩 우클릭 목록의 주문 항목을 사다리 밖으로 끌면 목록이 닫히고 그 주문 하나만 취소한다", async ({ page, scenario }) => {
+  ordersOn(scenario);
+  const api = tradingApi(scenario, SAMPLE());
+  await openOrderWindow(page, scenario);
+  await chipAt(page, "buy", 70_000).click({ button: "right" });
+  const menu = page.getByRole("menu", { name: "주문 목록" });
+  await dragChip(page, menu.getByRole("menuitem", { name: "7 취소" }), { x: 5, y: 5 }, false);
+  await expect(menu).toHaveCount(0);
+  await expect(page.getByTestId("order-ghost")).toContainText("놓으면 이 주문 취소");
+  await page.mouse.up();
+  await pollSaved(() => writesTo(api, "cancel")).toHaveLength(1);
+  expect(writesTo(api, "cancel")[0]!.body).toMatchObject({ orderNo: "0000002" });
+  expect(writesTo(api, "cancel-batch")).toHaveLength(0);
+  await expect(menu).toHaveCount(0);
+});
+
+test("칩 우클릭 목록의 주문 항목을 같은 방향 다른 가격 칸에 놓으면 그 주문만 정정한다", async ({ page, scenario }) => {
+  ordersOn(scenario);
+  const api = tradingApi(scenario, SAMPLE());
+  await openOrderWindow(page, scenario);
+  await chipAt(page, "buy", 70_000).click({ button: "right" });
+  await dragChip(page, page.getByRole("menu", { name: "주문 목록" }).getByRole("menuitem", { name: "7 취소" }), await center(cellAt(page, "buy", 70_300)), false);
+  await expect(page.getByTestId("order-ghost")).toContainText("→ 70,300원");
+  await page.mouse.up();
+  await pollSaved(() => writesTo(api, "modify")).toHaveLength(1);
+  expect(writesTo(api, "modify")[0]!.body).toMatchObject({ orderNo: "0000002", price: 70_300 });
+  expect(writesTo(api, "cancel")).toHaveLength(0);
+});
+
+test("목록 항목을 누르기만 하면 지금처럼 그 주문 하나를 취소한다", async ({ page, scenario }) => {
+  ordersOn(scenario);
+  const api = tradingApi(scenario, SAMPLE());
+  await openOrderWindow(page, scenario);
+  await chipAt(page, "buy", 70_000).click({ button: "right" });
+  await page.getByRole("menu", { name: "주문 목록" }).getByRole("menuitem", { name: "5 취소" }).click();
+  await pollSaved(() => writesTo(api, "cancel")).toHaveLength(1);
+  expect(writesTo(api, "cancel")[0]!.body).toMatchObject({ orderNo: "0000001" });
+});
+
+test("매수 합계 칸을 사다리 밖으로 끌면 매수 가격마다 일괄 취소가 하나씩 나가고 매도는 나가지 않는다", async ({ page, scenario }) => {
+  ordersOn(scenario);
+  const api = tradingApi(scenario, SAMPLE());
+  await openOrderWindow(page, scenario);
+  await dragChip(page, page.getByTestId("order-total-buy"), { x: 5, y: 5 }, false);
+  await expect(page.getByTestId("order-ghost")).toContainText("놓으면 매수 3건 모두 취소");
+  await page.mouse.up();
+  await pollSaved(() => writesTo(api, "cancel-batch")).toHaveLength(2);
+  expect(writesTo(api, "cancel-batch").map((w) => `${w.body.side}:${w.body.price}`).sort()).toEqual(["buy:69900", "buy:70000"]);
+  await expect(page.getByRole("menu", { name: "매수 접수 주문" })).toHaveCount(0);
+});
+
+test("합계 칸을 조금 끌었다가 그 칸 위나 사다리 칸 위에서 놓으면 요청이 없고 목록도 열리지 않는다", async ({ page, scenario }) => {
+  ordersOn(scenario);
+  tradingApi(scenario, SAMPLE());
+  await openOrderWindow(page, scenario);
+  const total = page.getByTestId("order-total-buy");
+  await dragChip(page, total, await center(total));
+  await dragChip(page, total, await center(cellAt(page, "buy", 69_800)));
+  await dragChip(page, total, await center(cellAt(page, "sell", 70_200)));
+  expect(commandRequests(scenario)).toHaveLength(0);
+  await expect(page.getByRole("menu", { name: "매수 접수 주문" })).toHaveCount(0);
+  await expect(page.getByTestId("order-ghost")).toHaveCount(0);
+});
+
+test("합계 칸 목록의 주문 항목을 사다리 밖으로 끌면 그 주문 하나만 취소한다", async ({ page, scenario }) => {
+  ordersOn(scenario);
+  const api = tradingApi(scenario, SAMPLE());
+  await openOrderWindow(page, scenario);
+  await page.getByTestId("order-total-buy").click();
+  const menu = page.getByRole("menu", { name: "매수 접수 주문" });
+  await dragChip(page, menu.getByRole("menuitem", { name: "70,000원 · 7" }), { x: 5, y: 5 });
+  await pollSaved(() => writesTo(api, "cancel")).toHaveLength(1);
+  expect(writesTo(api, "cancel")[0]!.body).toMatchObject({ orderNo: "0000002" });
+  expect(writesTo(api, "cancel-batch")).toHaveLength(0);
+  await expect(menu).toHaveCount(0);
+});
+
+test("합계 칸이나 목록 항목을 끄는 중 Esc를 누르면 고스트가 사라지고 요청이 없다", async ({ page, scenario }) => {
+  ordersOn(scenario);
+  tradingApi(scenario, SAMPLE());
+  await openOrderWindow(page, scenario);
+  await dragChip(page, page.getByTestId("order-total-buy"), { x: 5, y: 5 }, false);
+  await expect(page.getByTestId("order-ghost")).toBeVisible();
+  await page.keyboard.press("Escape");
+  await page.mouse.up();
+  await expect(page.getByTestId("order-ghost")).toHaveCount(0);
+
+  await chipAt(page, "buy", 70_000).click({ button: "right" });
+  await dragChip(page, page.getByRole("menu", { name: "주문 목록" }).getByRole("menuitem", { name: "7 취소" }), { x: 5, y: 5 }, false);
+  await expect(page.getByTestId("order-ghost")).toBeVisible();
+  await page.keyboard.press("Escape");
+  await page.mouse.up();
+  await expect(page.getByTestId("order-ghost")).toHaveCount(0);
+  expect(commandRequests(scenario)).toHaveLength(0);
+});
+
+test("주문 사용이 막혀 있으면 합계 칸과 목록 항목을 끌어도 요청이 없다", async ({ page, scenario }) => {
+  ordersOn(scenario);
+  const api = tradingApi(scenario, SAMPLE());
+  await openOrderWindow(page, scenario);
+  api.placeReply = { state: "unknown", orderNo: null };
+  api.blocked = true;
+  await cellAt(page, "buy", 69_800).dblclick();
+  await expect(win(page)).not.toHaveAttribute("data-writable", "");
+  const before = api.writes.length;
+  await dragChip(page, page.getByTestId("order-total-buy"), { x: 5, y: 5 });
+  await page.getByTestId("order-total-buy").click();
+  await dragChip(page, page.getByRole("menu", { name: "매수 접수 주문" }).getByRole("menuitem", { name: "70,000원 · 7" }), { x: 5, y: 5 });
+  await expect(page.getByTestId("order-ghost")).toHaveCount(0);
+  expect(api.writes).toHaveLength(before);
 });
