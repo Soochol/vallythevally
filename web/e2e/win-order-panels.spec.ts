@@ -492,8 +492,10 @@ const readTradeParts = (page: Page): Promise<TradePart[]> => page.getByTestId("l
   priceText.selectNodeContents(price.firstChild!);
   const priceRight = priceText.getBoundingClientRect().right;
   const overlaps = priceRight > qtyRect.left;
-  const probe = overlaps ? document.elementFromPoint(qtyRect.left + 1, qtyRect.top + qtyRect.height / 2) : null;
-  return { price: price.textContent, shown: qty.textContent, fontSize: getComputedStyle(qty).fontSize, qtyScrollWidth: qty.scrollWidth, qtyClientWidth: qty.clientWidth, qtyLeft: qtyRect.left, qtyRight: qtyRect.right, boxLeft: box.left, boxRight: box.right, priceLeft: priceRect.left, priceRight, qtyZ: getComputedStyle(qty).zIndex, priceZ: getComputedStyle(price).zIndex, qtyBackground: getComputedStyle(qty).backgroundColor, topAtOverlap: probe === null ? null : probe === qty ? "qty" : "other" };
+  const point = [qtyRect.left + 1, qtyRect.top + qtyRect.height / 2] as const;
+  const stack = overlaps ? document.elementsFromPoint(point[0], point[1]) : [];
+  const topAtOverlap = !overlaps ? null : !stack.includes(row) ? "offscreen" : stack[0] === qty ? "qty" : "other";
+  return { price: price.textContent, shown: qty.textContent, fontSize: getComputedStyle(qty).fontSize, qtyScrollWidth: qty.scrollWidth, qtyClientWidth: qty.clientWidth, qtyLeft: qtyRect.left, qtyRight: qtyRect.right, boxLeft: box.left, boxRight: box.right, priceLeft: priceRect.left, priceRight, qtyZ: getComputedStyle(qty).zIndex, priceZ: getComputedStyle(price).zIndex, qtyBackground: getComputedStyle(qty).backgroundColor, topAtOverlap };
 }));
 
 const OVERLAP_TRADES: [number, number][] = [[70_000, 7], [70_100, 600], [70_200, 9_999], [70_300, 12_345], [70_400, 999_999], [70_500, 9_999_999]];
@@ -515,9 +517,9 @@ test("421px 호가주문창에서 수량은 쉼표 숫자 그대로 끝까지 �
     expect(part.qtyRight, note).toBeLessThanOrEqual(part.boxRight);
     expect(Number(part.qtyZ), note).toBeGreaterThan(Number(part.priceZ === "auto" ? 0 : part.priceZ));
     expect(part.qtyBackground, note).toBe("rgb(20, 25, 20)");
-    if (part.topAtOverlap !== null) expect(part.topAtOverlap, note).toBe("qty");
+    if (part.topAtOverlap !== null && part.topAtOverlap !== "offscreen") expect(part.topAtOverlap, note).toBe("qty");
   }
-  expect(parts.filter((part) => part.topAtOverlap !== null).length).toBeGreaterThan(0);
+  expect(parts.filter((part) => part.topAtOverlap === "qty").length).toBeGreaterThan(0);
   expect(new Set(parts.map((part) => Math.round(part.priceLeft * 10))).size).toBe(1);
   expect(new Set(parts.map((part) => Math.round(part.qtyRight * 10))).size).toBe(1);
   await page.screenshot({ path: "../target/ux-screens/order-421.png" });
