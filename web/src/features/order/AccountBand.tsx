@@ -2,12 +2,15 @@ import { useQuery } from "@tanstack/react-query";
 import { useRef, useState } from "react";
 import type { TradingBalance } from "../../api/generated/TradingBalance";
 import type { TradingExecution } from "../../api/generated/TradingExecution";
+import type { MarginPolicy } from "../../api/generated/MarginPolicy";
 import type { TradingOpenOrder } from "../../api/generated/TradingOpenOrder";
 import { formatPrice } from "../../lib/format";
 import { Popover } from "../overlay/Popover";
 import { formatQuantity } from "../market-window/format";
 import { formatFillTime, profitText } from "./holdingSummary";
 import { fetchAccountNumber } from "./orderApi";
+import { POLICY_LABEL } from "./funds";
+import { listAnchorRect, listWidthIn, listWindowOf } from "./listPopover";
 import { SIDE_LABEL } from "./orderRules";
 
 type PanelKind = "open" | "holdings" | "fills";
@@ -26,6 +29,7 @@ interface Props {
   readonly executions: readonly TradingExecution[];
   readonly writable: boolean;
   readonly mock: boolean;
+  readonly policy: MarginPolicy | null;
   readonly onCancel: (orderNo: string) => void;
 }
 
@@ -81,10 +85,6 @@ function FillsPanel({ executions }: { executions: readonly TradingExecution[] })
 }
 
 const isTab = (target: Node) => target instanceof Element && target.closest(".od-tab") !== null;
-const LIST_MAX_WIDTH = 360;
-const LIST_MARGIN = 8;
-const windowOf = (opener: HTMLElement | null) => opener?.closest(".od")?.getBoundingClientRect();
-const listWidthIn = (window: DOMRect) => Math.min(window.width - 2 * LIST_MARGIN, LIST_MAX_WIDTH);
 const BROKER = "키움";
 const ACCOUNT_NUMBER_KEY = ["trading", "account-number"] as const;
 const groupedAccountNumber = (digits: string) => `${digits.slice(0, 4)}-${digits.slice(4, 8)}-${digits.slice(8)}`;
@@ -103,24 +103,18 @@ function AccountLabel({ accountTail, maskAccount }: { accountTail: string | null
   return <RevealedAccountLabel masked={masked} />;
 }
 
-export function AccountBand({ accountTail, maskAccount, openOrders, balance, executions, writable, mock, onCancel }: Props) {
+export function AccountBand({ accountTail, maskAccount, openOrders, balance, executions, writable, mock, policy, onCancel }: Props) {
   const [panel, setPanel] = useState<PanelKind | null>(null);
   const opener = useRef<HTMLElement | null>(null);
   const counts: Record<PanelKind, number> = { open: openOrders.length, holdings: balance?.holdings.length ?? 0, fills: executions.length };
-  const listAnchor = () => {
-    const tab = opener.current?.getBoundingClientRect();
-    const window = windowOf(opener.current);
-    if (!tab || !window) return undefined;
-    const left = Math.max(window.left + LIST_MARGIN, Math.min(tab.left, window.right - LIST_MARGIN - listWidthIn(window)));
-    return { left, right: left, top: tab.top, bottom: tab.bottom };
-  };
-  const listWindow = windowOf(opener.current);
+  const listWindow = listWindowOf(opener.current);
   const label = TABS.find((tab) => tab.kind === panel)?.label;
   return (
     <div className="od-account" data-testid="order-account">
       <div className="od-account-bar">
         <AccountLabel accountTail={accountTail} maskAccount={maskAccount} />
         {mock && <span className="od-account-mock" data-testid="account-mock">모의</span>}
+        {policy !== null && <span className="od-policy" data-testid="margin-policy" data-policy={policy}>{POLICY_LABEL[policy]}</span>}
         {TABS.map(({ kind, label }) => (
           <button key={kind} type="button" className="od-tab" data-testid={`account-tab-${kind}`} aria-expanded={panel === kind} onClick={(e) => { opener.current = e.currentTarget; setPanel((open) => (open === kind ? null : kind)); }}>
             {label} <b>{counts[kind]}</b>
@@ -128,7 +122,7 @@ export function AccountBand({ accountTail, maskAccount, openOrders, balance, exe
         ))}
       </div>
       {panel !== null && (
-        <Popover key={panel} anchor={opener} anchorRect={listAnchor} style={listWindow && { width: listWidthIn(listWindow) }} releasesClick={isTab} onClose={() => setPanel(null)} role="dialog" aria-label={label} className="od-list-pop" data-testid="account-panel" data-panel={panel}>
+        <Popover key={panel} anchor={opener} anchorRect={() => listAnchorRect(opener.current)} style={listWindow && { width: listWidthIn(listWindow) }} releasesClick={isTab} onClose={() => setPanel(null)} role="dialog" aria-label={label} className="od-list-pop" data-testid="account-panel" data-panel={panel}>
           {panel === "open" && <OpenPanel orders={openOrders} writable={writable} onCancel={onCancel} />}
           {panel === "holdings" && <HoldingsPanel balance={balance} />}
           {panel === "fills" && <FillsPanel executions={executions} />}

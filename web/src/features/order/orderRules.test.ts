@@ -1,7 +1,8 @@
 import { expect, test } from "vitest";
 import type { TradingOpenOrder } from "../../api/generated/TradingOpenOrder";
+import type { TradingOrderable } from "../../api/generated/TradingOrderable";
 import type { PendingWrite } from "./pendingWrites";
-import { capacityProblem, type DragSource, type DragTarget, dragGhostText, dragQuantity, dragSide, groupOpenOrders, groupWithPending, HIGH_VALUE_WON, judgeDrag, needsHighValueConfirm, type PriceGroup, quantityOf, sideTotal } from "./orderRules";
+import { type BuyingPower, buyBlock, buyingPowerOf, buyPreview, capacityProblem, type DragSource, estimateNote, marginOf, maxBuyQuantity, modifyBuyProblem, type DragTarget, dragGhostText, dragQuantity, dragSide, groupOpenOrders, groupWithPending, HIGH_VALUE_WON, judgeDrag, needsHighValueConfirm, type PriceGroup, quantityOf, sideTotal } from "./orderRules";
 
 const order = (orderNo: string, side: "buy" | "sell", price: number, openQuantity: number, code = "005930"): TradingOpenOrder => ({
   orderNo, code, name: "삼성전자", side, quantity: openQuantity, price, openQuantity, status: "접수", orderedAt: "090000", originalOrderNo: null, venue: "krx",
@@ -93,14 +94,70 @@ test("금액 방식은 가격으로 나눈 몫을 수량으로 쓴다", () => {
   expect(quantityOf("amount", 500, 71_000)).toBe(0);
 });
 
-test("가능 수량·금액을 넘는 주문은 보내기 전에 막는다", () => {
-  const capacity = { sellableQuantity: 10, buyableAmount: 1_000_000 };
-  expect(capacityProblem("sell", 71_000, 11, capacity)).toBe("매도 가능 수량(10)을 넘습니다");
-  expect(capacityProblem("sell", 71_000, 10, capacity)).toBeNull();
-  expect(capacityProblem("buy", 71_000, 15, capacity)).toContain("매수 가능 금액");
-  expect(capacityProblem("buy", 71_000, 14, capacity)).toBeNull();
-  expect(capacityProblem("buy", 71_000, 0, capacity)).toBe("수량을 입력하세요");
-  expect(capacityProblem("buy", 71_000, 1_000, { sellableQuantity: null, buyableAmount: null })).toBeNull();
+test("수량이 없거나 매도 가능 수량을 넘는 주문은 보내기 전에 막는다", () => {
+  const capacity = { sellableQuantity: 10, buying: null };
+  expect(capacityProblem("sell", 11, capacity)).toBe("매도 가능 수량(10)을 넘습니다");
+  expect(capacityProblem("sell", 10, capacity)).toBeNull();
+  expect(capacityProblem("buy", 1_000_000, capacity)).toBeNull();
+  expect(capacityProblem("buy", 0, capacity)).toBe("수량을 입력하세요");
+  expect(capacityProblem("sell", 1_000, { sellableQuantity: null, buying: null })).toBeNull();
+});
+
+const cashOnly: BuyingPower = { policy: "cash_only", amount: 1_000_000, cashAmount: 1_000_000 };
+const allowMargin: BuyingPower = { policy: "allow_margin", amount: 3_000_000, cashAmount: 1_000_000 };
+
+test("막기 정책은 현금을 넘는 매수에 최대 수량을 알려 주고 한도 안이면 통과시킨다", () => {
+  expect(buyBlock(71_000, 14, cashOnly)).toBeNull();
+  expect(buyBlock(71_000, 15, cashOnly)).toEqual({ text: "현금 주문가능 1,000,000원을 넘습니다 (미수 막음) · 최대 14주", maxQuantity: 14 });
+  expect(maxBuyQuantity(71_000, 1_000_000)).toBe(14);
+});
+
+test("현금이 가격보다 작으면 살 수 있는 수량이 없다", () => {
+  const poor: BuyingPower = { policy: "cash_only", amount: 50_000, cashAmount: 50_000 };
+  expect(buyBlock(71_000, 1, poor)).toEqual({ text: "현금 주문가능 50,000원을 넘습니다 (미수 막음) · 살 수 있는 수량이 없습니다", maxQuantity: 0 });
+  expect(buyBlock(71_000, 1, { policy: "cash_only", amount: 0, cashAmount: 0 })?.maxQuantity).toBe(0);
+});
+
+test("허용 정책은 현금을 넘어도 미수 포함 한도 안이면 보내고 그 한도를 넘으면 막는다", () => {
+  expect(buyBlock(71_000, 20, allowMargin)).toBeNull();
+  expect(buyPreview(71_000, 20, allowMargin)).toBe("margin");
+  expect(marginOf(71_000 * 20, allowMargin)).toBe(420_000);
+  expect(buyPreview(71_000, 14, allowMargin)).toBeNull();
+  expect(buyBlock(71_000, 43, allowMargin)).toEqual({ text: "미수 포함 주문가능 3,000,000원을 넘습니다 · 최대 42주", maxQuantity: 42 });
+});
+
+test("미수 포함 한도를 모르면 허용에서도 한도는 현금 값이라 미수가 생기지 않는다", () => {
+  const unknownMargin: BuyingPower = { policy: "allow_margin", amount: 1_000_000, cashAmount: 1_000_000 };
+  expect(buyPreview(71_000, 14, unknownMargin)).toBeNull();
+  expect(buyPreview(71_000, 15, unknownMargin)).toBe("over");
+});
+
+test("정책을 모르거나 수량이 없으면 미리보기도 막음도 없다", () => {
+  expect(buyPreview(71_000, 1_000, null)).toBeNull();
+  expect(buyBlock(71_000, 1_000, null)).toBeNull();
+  expect(buyPreview(71_000, 0, cashOnly)).toBeNull();
+  expect(estimateNote(9_999_999, null)).toBeNull();
+  expect(marginOf(9_999_999, cashOnly)).toBe(0);
+});
+
+test("예상 주문금액 줄은 초과액과 미수 금액을 정책에 맞게 알린다", () => {
+  expect(estimateNote(900_000, cashOnly)).toBeNull();
+  expect(estimateNote(1_300_000, cashOnly)).toEqual({ tone: "over", text: "현금 300,000원 초과" });
+  expect(estimateNote(1_500_000, allowMargin)).toEqual({ tone: "margin", text: "미수 약 500,000원 생김" });
+  expect(estimateNote(3_100_000, allowMargin)).toEqual({ tone: "over", text: "미수 포함 한도 100,000원 초과" });
+});
+
+test("매수 정정은 가격을 올려 늘어난 금액만 한도로 검사한다", () => {
+  expect(modifyBuyProblem(70_000, 71_000, 400, cashOnly)).toBeNull();
+  expect(modifyBuyProblem(70_000, 71_000, 1_001, cashOnly)).toBe("정정으로 늘어난 1,001,000원이 현금 주문가능 1,000,000원을 넘습니다 (미수 막음)");
+  expect(modifyBuyProblem(71_000, 70_000, 1_000_000, cashOnly)).toBeNull();
+  expect(modifyBuyProblem(70_000, 71_000, 1_000_000, null)).toBeNull();
+});
+
+test("조회 응답에서 한도를 뽑고 없으면 모른다", () => {
+  expect(buyingPowerOf(null)).toBeNull();
+  const orderable = { policy: "allow_margin", amount: 3, cashAmount: 1 } as TradingOrderable;
+  expect(buyingPowerOf(orderable)).toEqual({ policy: "allow_margin", amount: 3, cashAmount: 1 });
 });
 
 const stamped = { code: "005930", since: 0 } as const;

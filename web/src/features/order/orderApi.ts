@@ -11,7 +11,9 @@ import type { TradingBalance } from "../../api/generated/TradingBalance";
 import type { TradingExecutions } from "../../api/generated/TradingExecutions";
 import type { TradingOpenOrders } from "../../api/generated/TradingOpenOrders";
 import type { TradingOrderable } from "../../api/generated/TradingOrderable";
-import { getJson, sendJson } from "../../api/http";
+import type { MarginPolicy } from "../../api/generated/MarginPolicy";
+import type { OrdersMargin } from "../../api/generated/OrdersMargin";
+import { getJson, putJson, sendJson } from "../../api/http";
 
 const ORDER_HEADERS = { "X-Vally-Order": "1" };
 const COMMANDS = "/api/trading/commands";
@@ -31,3 +33,5 @@ export const fetchOrderable = (code: string, side: OrderSide, price: number, sig
 export const fetchBalance = (signal?: AbortSignal) => getJson<TradingBalance>("/api/trading/balance", signal);
 export const fetchExecutions = (signal?: AbortSignal) => getJson<TradingExecutions>("/api/trading/executions", signal);
 export const fetchAccountNumber = (signal?: AbortSignal) => getJson<TradingAccountNumber>("/api/trading/account-number", signal);
+
+export const putMarginPolicy = (policy: MarginPolicy) => putJson<OrdersMargin>("/api/system/orders/margin", { policy });

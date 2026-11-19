@@ -36,7 +36,7 @@ import { OrderTotals } from "./OrderTotals";
 import { OrderStatusBar } from "./OrderStatusBar";
 import { REJECT_TEXT } from "./statusText";
 import { OrderEstimate, QuantityRow } from "./QuantityRow";
-import { capacityProblem, type DragOutcome, type DragSource, needsHighValueConfirm, quantityOf, type QuantityMode, SIDE_LABEL } from "./orderRules";
+import { buyBlock, buyPreview, capacityProblem, type DragOutcome, estimateNote, marginOf, modifyBuyProblem, type DragSource, needsHighValueConfirm, orderAmount, quantityOf, type QuantityMode, SIDE_LABEL } from "./orderRules";
 import { useOrderAccess, useOrderData } from "./useOrderData";
 import { useOrderDrag } from "./useOrderDrag";
 import { useOrderWrites } from "./useOrderWrites";
@@ -120,17 +120,32 @@ function OrderBody({ code }: { code: SymbolCode }) {
       return;
     }
     const quantity = quantityAt(price);
-    const problem = capacityProblem(side, price, quantity, data.capacity);
+    const problem = capacityProblem(side, quantity, data.capacity);
     if (problem) {
       writes.say({ tone: "error", text: problem });
       return;
     }
-    const send = (confirmHighValue: boolean) => writes.place({ side, price, quantity, confirmHighValue });
+    const block = side === "buy" ? buyBlock(price, quantity, data.capacity.buying) : null;
+    if (block) {
+      writes.say({ tone: "error", text: block.text, action: block.maxQuantity > 0 ? { label: `${block.maxQuantity.toLocaleString("ko-KR")}주로 보내기`, run: () => submit(side, price, block.maxQuantity) } : undefined });
+      return;
+    }
+    submit(side, price, quantity);
+  };
+
+  const submit = (side: OrderSide, price: number, quantity: number) => {
+    const margin = side === "buy" ? marginOf(orderAmount(price, quantity), data.capacity.buying) : 0;
+    const send = (confirmHighValue: boolean) => writes.place({ side, price, quantity, confirmHighValue, margin });
     if (needsHighValueConfirm(price, quantity)) setConfirm({ title: `${SIDE_LABEL[side]} ${formatQuantity(quantity)} · ${formatPrice(price, false)}원`, amount: price * quantity, run: () => send(true) });
     else send(false);
   };
 
   const modifyOrders = (side: OrderSide, price: number, orders: readonly TradingOpenOrder[], to: number) => {
+    const problem = side === "buy" ? modifyBuyProblem(price, to, orders.reduce((sum, order) => sum + order.openQuantity, 0), data.capacity.buying) : null;
+    if (problem) {
+      writes.say({ tone: "error", text: problem });
+      return;
+    }
     const run = () => writes.modifyAll(orders, to);
     if (orders.some((order) => needsHighValueConfirm(to, order.openQuantity))) setConfirm({ title: `${SIDE_LABEL[side]} 정정 · ${formatPrice(price, false)}원 → ${formatPrice(to, false)}원`, amount: to * orders.reduce((sum, order) => sum + order.openQuantity, 0), run });
     else run();
@@ -155,12 +170,12 @@ function OrderBody({ code }: { code: SymbolCode }) {
           <button type="button" className="od-link" onClick={() => openSystemSettings("kiwoom")}>시스템 설정 열기</button>
         </div>
       )}
-      <AccountBand accountTail={accountTail} maskAccount={settings.maskAccount} openOrders={data.openOrders} balance={data.balance} executions={data.executions} writable={writable} mock={mock} onCancel={writes.cancelOne} />
-      <HoldingSummary holding={holding} buyableAmount={data.capacity.buyableAmount} buyableProblem={data.buyableProblem} unit={profitUnit} onUnit={() => setProfitUnit(toggledUnit)} onFill={(fill) => { setMode(fill.mode); setInput(fill.input); }} />
+      <AccountBand accountTail={accountTail} maskAccount={settings.maskAccount} openOrders={data.openOrders} balance={data.balance} executions={data.executions} writable={writable} mock={mock} policy={data.orderable?.policy ?? null} onCancel={writes.cancelOne} />
+      <HoldingSummary holding={holding} orderable={data.orderable} buyableProblem={data.buyableProblem} unit={profitUnit} onUnit={() => setProfitUnit(toggledUnit)} onFill={(fill) => { setMode(fill.mode); setInput(fill.input); }} />
       <div className="od-entry">
         <QuantityRow mode={mode} input={input} sharePresets={settings.sharePresets} amountPresets={settings.amountPresets} onMode={setMode} onInput={setInput} />
         <div className="od-toolbar">
-          <OrderEstimate estimate={estimate} shares={mode === "amount" && estimate !== null ? quantityAt(unitPrice) : null} />
+          <OrderEstimate estimate={estimate} shares={mode === "amount" && estimate !== null ? quantityAt(unitPrice) : null} note={estimate !== null && hover?.side !== "sell" ? estimateNote(estimate, data.capacity.buying) : null} />
           <button type="button" className="od-tool" data-testid="order-explorer" aria-pressed={explorerOn} disabled={referencePrice === null || fullPrices === null} title={fullPrices === null ? EXPLORER_UNAVAILABLE : undefined} onClick={() => { if (!explorerOn) setCenterToken((token) => token + 1); setExploring(!explorerOn); }}>전체 호가</button>
           <button type="button" className="od-tool" data-testid="order-current" disabled={!explorerOn} onClick={() => setCenterToken((token) => token + 1)}>현재가</button>
           <OrderSettingsPopover settings={settings} venue={orderVenue} mock={mock} nxtNotTraded={nxtNotTraded} holding={holding !== null} onChange={setSettings} />
@@ -168,7 +183,7 @@ function OrderBody({ code }: { code: SymbolCode }) {
       </div>
       <div className="bk-ladder od-ladder-wrap" data-stale={feed.connected ? undefined : ""} data-exploring={explorerOn ? "" : undefined}>
         {view
-            ? <OrderLadder rows={rows} previousClose={feed.previousClose} groups={data.groups} writable={writable} previewQuantity={quantityAt(unitPrice)} hover={hover} onHover={setHover} averagePrice={averagePrice} divider={settings.divider} explorer={explorerOn ? { centerPrice: referencePrice, centerToken } : undefined} ladder={ladder} drag={drag} expectedPrice={expected?.price ?? null} rowSlots={{ topRight: infoSlot(infoSlots), bottomLeft: tradeSlot(trades, feed.previousClose) }}
+            ? <OrderLadder rows={rows} previousClose={feed.previousClose} groups={data.groups} writable={writable} previewQuantity={quantityAt(unitPrice)} buyPreview={(price) => buyPreview(price, quantityAt(price), data.capacity.buying)} hover={hover} onHover={setHover} averagePrice={averagePrice} divider={settings.divider} explorer={explorerOn ? { centerPrice: referencePrice, centerToken } : undefined} ladder={ladder} drag={drag} expectedPrice={expected?.price ?? null} rowSlots={{ topRight: infoSlot(infoSlots), bottomLeft: tradeSlot(trades, feed.previousClose) }}
                 actions={{ place, cancelOne: writes.cancelOne, cancelAtPrice: writes.cancelAtPrice, cancelGroups: (targets) => targets.forEach((g) => writes.cancelAtPrice(g.side, g.price)) }} />
             : <EmptyState title={feed.snapshotFailed ? "호가를 불러오지 못했습니다" : "호가를 기다리는 중입니다"} />}
         <OrderStatusBar status={writes.status} queued={writes.queued} blocked={data.blocked} onUndo={writes.cancelOne} onReconcile={writes.reconcile} onDismiss={writes.dismiss} />

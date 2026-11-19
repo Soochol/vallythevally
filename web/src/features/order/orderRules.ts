@@ -1,5 +1,7 @@
+import type { MarginPolicy } from "../../api/generated/MarginPolicy";
 import type { OrderSide } from "../../api/generated/OrderSide";
 import type { TradingOpenOrder } from "../../api/generated/TradingOpenOrder";
+import type { TradingOrderable } from "../../api/generated/TradingOrderable";
 import { formatPrice } from "../../lib/format";
 import type { PendingState, PendingWrite } from "./pendingWrites";
 
@@ -144,14 +146,73 @@ export function quantityOf(mode: QuantityMode, input: number, price: number): nu
   return price > 0 ? Math.floor(input / price) : 0;
 }
 
-export interface Capacity {
-  readonly sellableQuantity: number | null;
-  readonly buyableAmount: number | null;
+export interface BuyingPower {
+  readonly policy: MarginPolicy;
+  readonly amount: number;
+  readonly cashAmount: number;
 }
 
-export function capacityProblem(side: OrderSide, price: number, quantity: number, capacity: Capacity): string | null {
+export interface Capacity {
+  readonly sellableQuantity: number | null;
+  readonly buying: BuyingPower | null;
+}
+
+export const buyingPowerOf = (orderable: TradingOrderable | null): BuyingPower | null =>
+  orderable === null ? null : { policy: orderable.policy, amount: orderable.amount, cashAmount: orderable.cashAmount };
+
+export const maxBuyQuantity = (price: number, amount: number): number => (price > 0 ? Math.floor(amount / price) : 0);
+
+const LIMIT_NAME: Readonly<Record<MarginPolicy, string>> = { cash_only: "현금 주문가능", allow_margin: "미수 포함 주문가능" };
+
+export const marginOf = (won: number, buying: BuyingPower | null): number =>
+  buying !== null && buying.policy === "allow_margin" ? Math.max(0, won - buying.cashAmount) : 0;
+
+export type BuyPreview = "over" | "margin";
+
+export function buyPreview(price: number, quantity: number, buying: BuyingPower | null): BuyPreview | null {
+  if (buying === null || !(quantity > 0)) return null;
+  const won = orderAmount(price, quantity);
+  if (won > buying.amount) return "over";
+  return marginOf(won, buying) > 0 ? "margin" : null;
+}
+
+export interface BuyBlock {
+  readonly text: string;
+  readonly maxQuantity: number;
+}
+
+const overText = (buying: BuyingPower): string =>
+  `${LIMIT_NAME[buying.policy]} ${buying.amount.toLocaleString("ko-KR")}원을 넘습니다${buying.policy === "cash_only" ? " (미수 막음)" : ""}`;
+
+export function buyBlock(price: number, quantity: number, buying: BuyingPower | null): BuyBlock | null {
+  if (buyPreview(price, quantity, buying) !== "over") return null;
+  const maxQuantity = maxBuyQuantity(price, buying!.amount);
+  return { text: `${overText(buying!)} · ${maxQuantity > 0 ? `최대 ${maxQuantity.toLocaleString("ko-KR")}주` : "살 수 있는 수량이 없습니다"}`, maxQuantity };
+}
+
+export function modifyBuyProblem(fromPrice: number, toPrice: number, openQuantity: number, buying: BuyingPower | null): string | null {
+  if (buying === null || toPrice <= fromPrice) return null;
+  const added = (toPrice - fromPrice) * openQuantity;
+  return added > buying.amount ? `정정으로 늘어난 ${added.toLocaleString("ko-KR")}원이 ${overText(buying)}` : null;
+}
+
+export interface EstimateNote {
+  readonly tone: BuyPreview;
+  readonly text: string;
+}
+
+export function estimateNote(won: number, buying: BuyingPower | null): EstimateNote | null {
+  if (buying === null) return null;
+  if (won > buying.amount) {
+    const over = (won - buying.amount).toLocaleString("ko-KR");
+    return { tone: "over", text: buying.policy === "cash_only" ? `현금 ${over}원 초과` : `미수 포함 한도 ${over}원 초과` };
+  }
+  const margin = marginOf(won, buying);
+  return margin > 0 ? { tone: "margin", text: `미수 약 ${margin.toLocaleString("ko-KR")}원 생김` } : null;
+}
+
+export function capacityProblem(side: OrderSide, quantity: number, capacity: Capacity): string | null {
   if (!(quantity > 0)) return "수량을 입력하세요";
   if (side === "sell" && capacity.sellableQuantity !== null && quantity > capacity.sellableQuantity) return `매도 가능 수량(${capacity.sellableQuantity.toLocaleString("ko-KR")})을 넘습니다`;
-  if (side === "buy" && capacity.buyableAmount !== null && orderAmount(price, quantity) > capacity.buyableAmount) return `매수 가능 금액 ${capacity.buyableAmount.toLocaleString("ko-KR")}원을 넘습니다`;
   return null;
 }

@@ -4,7 +4,7 @@ import { formatPrice } from "../../lib/format";
 import type { LadderRow } from "../market-window/ladder";
 import { type LadderRowSlots, PriceLadder } from "../market-window/PriceLadder";
 import { formatShares } from "../market-window/format";
-import { groupKey, type PriceGroup, previewText, SIDE_LABEL } from "./orderRules";
+import { type BuyPreview, groupKey, type PriceGroup, previewText, SIDE_LABEL } from "./orderRules";
 import { PENDING_TEXT } from "./statusText";
 import { LADDER_ROW_HEIGHT_PX, type RowRange, scrollTopToCenter, visibleRowRange } from "./priceRange";
 import { OrderList, type OrderListItem } from "./OrderList";
@@ -33,6 +33,7 @@ interface Props {
   readonly groups: ReadonlyMap<string, PriceGroup>;
   readonly writable: boolean;
   readonly previewQuantity: number;
+  readonly buyPreview: (price: number) => BuyPreview | null;
   readonly hover: HoverCell | null;
   readonly onHover: (cell: HoverCell | null) => void;
   readonly actions: LadderActions;
@@ -49,7 +50,7 @@ type MenuState = { readonly x: number; readonly y: number; readonly group: Price
 
 const SIDE_OF_SLOT: Readonly<Record<"left" | "right", OrderSide>> = { left: "sell", right: "buy" };
 
-export function OrderLadder({ rows, previousClose, groups, writable, previewQuantity, hover, onHover, actions, averagePrice, divider, explorer, ladder, drag, rowSlots, expectedPrice }: Props) {
+export function OrderLadder({ rows, previousClose, groups, writable, previewQuantity, buyPreview, hover, onHover, actions, averagePrice, divider, explorer, ladder, drag, rowSlots, expectedPrice }: Props) {
   const [menu, setMenu] = useState<MenuState | null>(null);
   const { view, begin } = drag;
 
@@ -109,7 +110,7 @@ export function OrderLadder({ rows, previousClose, groups, writable, previewQuan
               onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); if (!group.pending) setMenu({ x: e.clientX, y: e.clientY, group }); }}>
               {group.quantity.toLocaleString("ko-KR")}
             </button>
-          : hovered && writable && previewQuantity > 0 && <span className="od-preview">{previewText(side, previewQuantity)}</span>}
+          : hovered && writable && previewQuantity > 0 && <span className="od-preview" data-testid="order-preview" data-over={side === "buy" && buyPreview(price) === "over" ? "" : undefined} data-margin={side === "buy" && buyPreview(price) === "margin" ? "" : undefined}>{previewText(side, previewQuantity)}</span>}
       </div>
     );
   };
