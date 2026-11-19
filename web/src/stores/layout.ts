@@ -172,6 +172,7 @@ interface LayoutState {
   revision: number;
   session: number;
   steps: readonly ArrangementStep[];
+  redos: readonly ArrangementStep[];
   dockOrigins: DockOrigins;
   commitDock(edit: { session: number; expected: DockPlacement | null; next: DockPlacement }): boolean;
   attachFloat(window: WindowId): void;
@@ -185,6 +186,7 @@ interface LayoutState {
   setCrosshairScope(scope: CrosshairScope): void;
   arrange(next: Arrangement): void;
   undoArrangement(): void;
+  redoArrangement(): void;
   setDock(dock: DockPlacement): void;
   settleDock(dock: DockPlacement): void;
   selectTab(window: WindowId): void;
@@ -221,6 +223,18 @@ interface LayoutState {
   removeCompare(cellId: WindowId, code: SymbolCode): void;
 }
 
+function returnTo(s: Pick<LayoutState, "layout" | "revision">, step: ArrangementStep) {
+  const current = new Map(s.layout.windows.map((w) => [w.id, w]));
+  const leaders = new Map<LinkColor, ChartWindowState>();
+  for (const chart of chartWindows(s.layout)) if (chart.link !== null && !leaders.has(chart.link)) leaders.set(chart.link, chart);
+  const restore = (w: WindowState): WindowState => {
+    const leader = isChartWindow(w) && w.link !== null ? leaders.get(w.link) : undefined;
+    return leader && isChartWindow(w) ? follow(w, leader) : w;
+  };
+  const windows = step.before.windows.map((w) => current.get(w.id) ?? restore(w));
+  return { dockOrigins: step.dockOrigins, layout: { ...s.layout, windows, placement: step.before.placement }, revision: s.revision + 1 };
+}
+
 export const useLayoutStore = create<LayoutState>()((set, get) => {
   const canvasActive = () => useUiStore.getState().prefs.layoutMode === "canvas" && get().canvasArea !== null;
   const arrangeCanvas = (windows: WindowState[], canvas: CanvasPlacement) => {
@@ -234,7 +248,7 @@ export const useLayoutStore = create<LayoutState>()((set, get) => {
     set((s) => {
       if (windows === s.layout.windows && placement === s.layout.placement) return s;
       const step = { id: ++lastStepId, dockOrigins: s.dockOrigins, before: { windows: s.layout.windows, placement: s.layout.placement } };
-      return { dockOrigins: reconcileOrigins(fittedDock(s.layout), placement.dock, s.dockOrigins), layout: { ...s.layout, windows, placement }, steps: [...s.steps, step].slice(-ARRANGEMENT_STEPS), revision: s.revision + 1 };
+      return { dockOrigins: reconcileOrigins(fittedDock(s.layout), placement.dock, s.dockOrigins), layout: { ...s.layout, windows, placement }, steps: [...s.steps, step].slice(-ARRANGEMENT_STEPS), redos: [], revision: s.revision + 1 };
     });
   const arrangeDock = (windows: WindowState[], dock: DockPlacement) => {
     const { layout } = get();
@@ -272,6 +286,7 @@ export const useLayoutStore = create<LayoutState>()((set, get) => {
     revision: 0,
     session: 0,
     steps: [],
+    redos: [],
     dockOrigins: new Map(),
     commitDock: ({ session, expected, next }) => {
       const state = get();
@@ -290,7 +305,7 @@ export const useLayoutStore = create<LayoutState>()((set, get) => {
       if (placement === s.layout.placement) return s;
       const initializedDock = s.layout.placement.dock === null && placement.dock !== null;
       const initializedCanvas = s.layout.placement.canvas === null && placement.canvas !== null;
-      const steps = initializedDock || initializedCanvas ? s.steps.map((step) => ({
+      const fill = (step: ArrangementStep): ArrangementStep => ({
         ...step,
         before: {
           ...step.before,
@@ -300,8 +315,10 @@ export const useLayoutStore = create<LayoutState>()((set, get) => {
             canvas: initializedCanvas && step.before.placement.canvas === null ? placement.canvas : step.before.placement.canvas,
           },
         },
-      })) : s.steps;
-      return { dockOrigins: reconcileOrigins(s.layout.placement.dock, placement.dock, s.dockOrigins), layout: { ...s.layout, placement }, steps, revision: s.revision + 1 };
+      });
+      const steps = initializedDock || initializedCanvas ? s.steps.map(fill) : s.steps;
+      const redos = initializedDock || initializedCanvas ? s.redos.map(fill) : s.redos;
+      return { dockOrigins: reconcileOrigins(s.layout.placement.dock, placement.dock, s.dockOrigins), layout: { ...s.layout, placement }, steps, redos, revision: s.revision + 1 };
     }),
     commitCanvas: ({ session, expected, next }) => {
       const state = get();
@@ -315,7 +332,7 @@ export const useLayoutStore = create<LayoutState>()((set, get) => {
       arrangeCanvas(state.layout.windows, next);
       return true;
     },
-    load: (layout) => set((s) => ({ layout, dockOrigins: readDockOrigins(layout), steps: [], session: s.session + 1 })),
+    load: (layout) => set((s) => ({ layout, dockOrigins: readDockOrigins(layout), steps: [], redos: [], session: s.session + 1 })),
     rename: (name) => set((s) => s.layout.name === name ? s : { layout: { ...s.layout, name }, revision: s.revision + 1 }),
     setCrosshairSync: (enabled) => set((s) => s.layout.sync.crosshair === enabled ? s : { layout: { ...s.layout, sync: { ...s.layout.sync, crosshair: enabled } }, revision: s.revision + 1 }),
     setCrosshairScope: (scope) => set((s) => s.layout.sync.crosshair && s.layout.sync.crosshairScope === scope ? s : { layout: { ...s.layout, sync: { ...s.layout.sync, crosshair: true, crosshairScope: scope } }, revision: s.revision + 1 }),
@@ -324,15 +341,15 @@ export const useLayoutStore = create<LayoutState>()((set, get) => {
       set((s) => {
         const step = s.steps.at(-1);
         if (!step) return s;
-        const current = new Map(s.layout.windows.map((w) => [w.id, w]));
-        const leaders = new Map<LinkColor, ChartWindowState>();
-        for (const chart of chartWindows(s.layout)) if (chart.link !== null && !leaders.has(chart.link)) leaders.set(chart.link, chart);
-        const restore = (w: WindowState): WindowState => {
-          const leader = isChartWindow(w) && w.link !== null ? leaders.get(w.link) : undefined;
-          return leader && isChartWindow(w) ? follow(w, leader) : w;
-        };
-        const windows = step.before.windows.map((w) => current.get(w.id) ?? restore(w));
-        return { dockOrigins: step.dockOrigins, layout: { ...s.layout, windows, placement: step.before.placement }, steps: s.steps.slice(0, -1), revision: s.revision + 1 };
+        const redo = { id: ++lastStepId, dockOrigins: s.dockOrigins, before: { windows: s.layout.windows, placement: s.layout.placement } };
+        return { ...returnTo(s, step), steps: s.steps.slice(0, -1), redos: [...s.redos, redo].slice(-ARRANGEMENT_STEPS) };
+      }),
+    redoArrangement: () =>
+      set((s) => {
+        const redo = s.redos.at(-1);
+        if (!redo) return s;
+        const step = { id: ++lastStepId, dockOrigins: s.dockOrigins, before: { windows: s.layout.windows, placement: s.layout.placement } };
+        return { ...returnTo(s, redo), steps: [...s.steps, step].slice(-ARRANGEMENT_STEPS), redos: s.redos.slice(0, -1) };
       }),
     setDock: (dock) => arrangeDock(get().layout.windows, dock),
     settleDock: settle,

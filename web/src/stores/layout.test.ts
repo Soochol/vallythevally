@@ -19,7 +19,7 @@ const shownTab = (kind: string) => {
   return id !== undefined && placement.dock !== null && groupOfWindow(placement.dock.root, id)?.active === id;
 };
 
-beforeEach(() => useLayoutStore.setState({ layout: structuredClone(DEFAULT_LAYOUT), revision: 0, steps: [] }));
+beforeEach(() => useLayoutStore.setState({ layout: structuredClone(DEFAULT_LAYOUT), revision: 0, steps: [], redos: [] }));
 
 const room = { area: { w: 1256, h: 684 }, gap: 6 };
 const firstChart = () => chartWindows(state().layout)[0]!;
@@ -694,4 +694,94 @@ test("십자선 연동 범위를 고르면 켜지고 범위가 정해지며, 끄
   expect(state().layout.windows).toBe(windows);
   expect(state().layout.placement).toBe(placement);
   expect(state().steps).toBe(steps);
+});
+
+test("배치를 두 번 바꾸고 되돌리기 두 번, 다시 하기 두 번이면 그때마다 창 목록·배치·dockOrigins가 같다", () => {
+  state().showWindow("indicators");
+  const first = { ...arrangement(), origins: state().dockOrigins };
+  expect(state().closeWindow(windowId("screener"))).toBe(true);
+  const second = { ...arrangement(), origins: state().dockOrigins };
+  state().undoArrangement();
+  state().undoArrangement();
+  expect(state().redos).toHaveLength(2);
+  state().redoArrangement();
+  expect({ ...arrangement(), origins: state().dockOrigins }).toEqual(first);
+  state().redoArrangement();
+  expect({ ...arrangement(), origins: state().dockOrigins }).toEqual(second);
+  expect(state().redos).toHaveLength(0);
+  expect(state().steps).toHaveLength(2);
+  const revision = state().revision;
+  state().redoArrangement();
+  expect(state().revision).toBe(revision);
+});
+
+test("되돌린 뒤 새 배치 변경이나 load는 다시 하기를 비우고, 탭 고르기와 settleDock은 비우지 않는다", () => {
+  state().showWindow("indicators");
+  state().undoArrangement();
+  expect(state().redos).toHaveLength(1);
+  state().selectTab(windowId("screener"));
+  state().settleDock(fittedDock(state().layout));
+  expect(state().redos).toHaveLength(1);
+  state().closeWindow(windowId("screener"));
+  expect(state().redos).toHaveLength(0);
+  state().undoArrangement();
+  expect(state().redos).toHaveLength(1);
+  state().load(structuredClone(DEFAULT_LAYOUT));
+  expect(state().redos).toHaveLength(0);
+});
+
+test("창 닫기를 되돌린 뒤 다시 하면 그 창이 다시 닫힌다", () => {
+  expect(state().closeWindow(windowId("screener"))).toBe(true);
+  state().undoArrangement();
+  expect(state().layout.windows.some((w) => w.id === "screener")).toBe(true);
+  state().redoArrangement();
+  expect(state().layout.windows.some((w) => w.id === "screener")).toBe(false);
+  expect(groupOfWindow(state().layout.placement.dock!.root, windowId("screener"))).toBeNull();
+});
+
+test("닫기를 되돌린 뒤 남은 차트의 종목을 바꾸고 다시 하면 남은 차트는 바꾼 종목을 유지한다", () => {
+  linked();
+  expect(state().closeWindow(windowId("a2"))).toBe(true);
+  state().undoArrangement();
+  state().setSymbol(windowId("a1"), SK);
+  state().redoArrangement();
+  expect(state().layout.windows.some((w) => w.id === "a2")).toBe(false);
+  expect(chartWindows(state().layout).find((w) => w.id === "a1")?.symbol).toBe(SK.code);
+});
+
+test("다시 하기로 돌아오는 연동 차트는 지금 같은 색인 차트의 종목을 따른다", () => {
+  linked();
+  const added = state().addChart(windowId("a1"), room)!;
+  state().undoArrangement();
+  state().setSymbol(windowId("a1"), SK);
+  state().redoArrangement();
+  expect(chartWindows(state().layout).find((w) => w.id === added)?.symbol).toBe(SK.code);
+  expect(chartWindows(state().layout).find((w) => w.id === "off")?.symbol).toBe("000660");
+});
+
+test("빈 배치에서 시작한 기록을 되돌린 뒤 settlePlacement로 처음 배치를 만들고 다시 하면 빈 배치로 돌아가지 않는다", () => {
+  useUiStore.getState().setLayoutMode("dock");
+  state().load(structuredClone(DEFAULT_LAYOUT));
+  const dock = fittedDock(state().layout);
+  const floated = detachWindow(dock, windowId("screener"), { x: .2, y: .2, w: .3, h: .4 });
+  state().commitDock({ session: state().session, expected: null, next: floated });
+  state().undoArrangement();
+  expect(state().layout.placement.dock).toBeNull();
+  expect(state().redos).toHaveLength(1);
+  const settled = { ...state().layout.placement, dock };
+  state().settlePlacement(settled);
+  state().redoArrangement();
+  expect(state().layout.placement.dock).toEqual(floated);
+  state().undoArrangement();
+  expect(state().layout.placement.dock).toEqual(dock);
+});
+
+test(`다시 하기 기록도 최근 ${ARRANGEMENT_STEPS}단계만 남긴다`, () => {
+  for (let n = 0; n < ARRANGEMENT_STEPS + 3; n += 1) {
+    const dock = fittedDock(state().layout);
+    if (dock.root.kind !== "split") throw new Error("기본 배치가 나뉘어 있지 않습니다");
+    state().setDock({ ...dock, root: { ...dock.root, ratio: 0.3 + n * 0.01 } });
+  }
+  for (let n = 0; n < ARRANGEMENT_STEPS + 3; n += 1) state().undoArrangement();
+  expect(state().redos).toHaveLength(ARRANGEMENT_STEPS);
 });
