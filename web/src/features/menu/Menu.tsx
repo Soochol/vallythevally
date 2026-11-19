@@ -1,4 +1,4 @@
-import { type ReactNode, type RefObject, useEffect, useRef } from "react";
+import { type ReactNode, type RefObject, useEffect, useId, useRef } from "react";
 import { Popover } from "../overlay/Popover";
 import { menuIndex, type Placement } from "../overlay/position";
 import { CheckIcon } from "../icons";
@@ -8,9 +8,10 @@ export type MenuItem =
   | { kind: "check"; label: string; value?: string; checked: boolean; onSelect(): void }
   | { kind: "action"; label: string; icon?: ReactNode; hint?: string; disabled?: boolean; danger?: boolean; onSelect(): void }
   | { kind: "heading"; label: string }
+  | { kind: "group"; label: string; labelShown: boolean; items: readonly Focusable[] }
   | { kind: "separator" };
 
-type Focusable = Extract<MenuItem, { onSelect(): void }>;
+type Focusable = Extract<MenuItem, { kind: "radio" | "check" | "action" }>;
 
 const ROLE = { radio: "menuitemradio", check: "menuitemcheckbox", action: "menuitem" } as const;
 
@@ -94,7 +95,9 @@ export function Menu({ label, items, onClose, root, className, placement, style,
             </div>
           );
         }
-        return <MenuButton key={i} item={item} onClose={onClose} register={(el) => buttons.current.push(el)} />;
+        const register = (el: HTMLButtonElement | null) => buttons.current.push(el);
+        if (item.kind === "group") return <MenuGroup key={i} item={item} onClose={onClose} register={register} />;
+        return <MenuButton key={i} item={item} onClose={onClose} register={register} />;
       })}
       {children}
     </Popover>
@@ -107,6 +110,22 @@ function MenuFilterInput({ filter }: { filter: MenuFilter }) {
   return <input ref={input} type="text" aria-label={filter.label} placeholder={filter.placeholder} value={filter.value} autoComplete="off" spellCheck={false}
     onChange={(e) => filter.onChange(e.target.value)}
     className="mb-1 h-8 flex-none rounded-m border border-line bg-transparent px-2 text-s text-text outline-none placeholder:text-text-3 focus:border-accent max-md:h-10" />;
+}
+
+function MenuGroup({ item, onClose, register }: { item: Extract<MenuItem, { kind: "group" }>; onClose: Props["onClose"]; register(el: HTMLButtonElement | null): void }) {
+  const labelId = useId();
+  return (
+    <div role="group" className="flex flex-col" {...(item.labelShown ? { "aria-labelledby": labelId } : { "aria-label": item.label })}>
+      {item.labelShown && (
+        <div id={labelId} className="px-2 pb-0.5 pt-1 text-xs text-text-3">
+          {item.label}
+        </div>
+      )}
+      {item.items.map((entry, i) => (
+        <MenuButton key={i} item={entry} onClose={onClose} register={register} />
+      ))}
+    </div>
+  );
 }
 
 function MenuButton({ item, onClose, register }: { item: Focusable; onClose: Props["onClose"]; register(el: HTMLButtonElement | null): void }) {

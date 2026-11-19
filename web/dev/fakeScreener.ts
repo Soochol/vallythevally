@@ -35,7 +35,7 @@ const ONE_PAGE_DAYS = 600;
 const CLOSE_HOUR_KST = 20;
 const BARS_PER_YEAR: Record<ScreenPeriod, number> = { D: 250, W: 52, M: 12 };
 const DAYS_PER_BAR: Record<ScreenPeriod, number> = { D: 1, W: 5, M: 21 };
-const EXCLUDED_KIND: Partial<Record<ExcludeKind, SymbolKind>> = { etf: "etf", preferred: "preferred", reit: "reit" };
+const EXCLUDED_KIND: Partial<Record<ExcludeKind, SymbolKind>> = { etf: "etf", preferred: "preferred", reit: "reit", etn: "etn", infrastructure: "infrastructure", mutual_fund: "mutualFund" };
 const KIWOOM_DOWN: ApiErrorBody = {
   code: "kiwoom_unavailable",
   message: "키움 조회가 응답하지 않습니다. 잠시 뒤 다시 시도하세요.",

@@ -301,7 +301,7 @@ const isSyllable = (c: string) => c >= "가" && c <= "힣";
 const choseongOf = (name: string) =>
   [...name].map((c) => (isSyllable(c) ? CHO[Math.floor((c.charCodeAt(0) - 0xac00) / 588)] : c)).join("");
 export const normalize = (q: string) => q.trim().replace(/\s+/g, "").toUpperCase();
-const KIND_ORDER = ["index", "common", "preferred", "etf", "reit"];
+const KIND_ORDER = ["index", "common", "preferred", "etf", "reit", "etn", "infrastructure", "mutualFund"];
 const charClass = (c: string) => (isSyllable(c) ? 0 : /[A-Z]/i.test(c) ? 1 : /[0-9]/.test(c) ? 2 : 3);
 function compareNames(a: string, b: string) {
   const x = [...a], y = [...b];

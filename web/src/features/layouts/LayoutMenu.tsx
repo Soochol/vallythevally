@@ -10,6 +10,8 @@ import { Menu, type MenuItem } from "../menu/Menu";
 import { layoutCommands, useLayoutsStore } from "./controller";
 import { acknowledgeLayoutMenuFocus, layoutMenu, type LayoutNaming, useLayoutMenuPresentation } from "./presentation";
 
+type Focusable = Extract<MenuItem, { kind: "radio" }>;
+
 const CROSSHAIR_SCOPES: readonly (readonly [CrosshairScope, string])[] = [["all", "모든 차트"], ["symbol", "같은 종목"], ["link", "같은 연동 색"]];
 
 export function LayoutMenu() {
@@ -31,15 +33,16 @@ export function LayoutMenu() {
     if (document.activeElement === target) acknowledgeLayoutMenuFocus(focus.revision);
   }, [focus, busy, offline]);
   const items: MenuItem[] = [
-    ...layouts.map((entry): MenuItem => ({ kind: "radio", label: entry.name, value: entry.id, checked: entry.id === layout.id, onSelect: () => { void layoutMenu.select(entry.id); } })),
+    { kind: "group", label: "레이아웃 목록", labelShown: false, items: layouts.map((entry): Focusable => ({ kind: "radio", label: entry.name, value: entry.id, checked: entry.id === layout.id, onSelect: () => { void layoutMenu.select(entry.id); } })) },
     { kind: "separator" },
     { kind: "action", label: "새 이름으로 저장…", onSelect: () => layoutMenu.startNaming("saveAs") },
     { kind: "action", label: "이름 바꾸기…", onSelect: () => layoutMenu.startNaming("rename") },
     { kind: "action", label: "지우기", disabled: layouts.length <= 1, danger: true, onSelect: () => { void layoutMenu.confirmDelete(); } },
     { kind: "separator" },
-    { kind: "heading", label: "십자선 연동" },
-    { kind: "radio", label: "끔", checked: !layout.sync.crosshair, onSelect: () => useLayoutStore.getState().setCrosshairSync(false) },
-    ...CROSSHAIR_SCOPES.map(([scope, label]): MenuItem => ({ kind: "radio", label, checked: layout.sync.crosshair && layout.sync.crosshairScope === scope, onSelect: () => useLayoutStore.getState().setCrosshairScope(scope) })),
+    { kind: "group", label: "십자선 연동", labelShown: true, items: [
+      { kind: "radio", label: "끔", checked: !layout.sync.crosshair, onSelect: () => useLayoutStore.getState().setCrosshairSync(false) },
+      ...CROSSHAIR_SCOPES.map(([scope, label]): Focusable => ({ kind: "radio", label, checked: layout.sync.crosshair && layout.sync.crosshairScope === scope, onSelect: () => useLayoutStore.getState().setCrosshairScope(scope) })),
+    ] },
     { kind: "separator" },
     { kind: "action", label: "기본 배치로", onSelect: layoutCommands.resetPlacement },
     { kind: "action", label: "크기 모두 고르게", disabled: mode !== "dock" || !layout.placement.dock, onSelect: equalizeDockSizes },

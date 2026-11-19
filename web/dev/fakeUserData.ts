@@ -37,6 +37,9 @@ const EXCLUDE_KINDS: readonly string[] = [
   "investment_caution",
   "short_term_overheated",
   "trading_halted",
+  "etn",
+  "infrastructure",
+  "mutual_fund",
 ] satisfies ExcludeKind[];
 const MAX_WINDOWS = 12;
 const MAX_CHART_WINDOWS = 8;

@@ -6,7 +6,9 @@ test.use({ clockStart: "20261109100000" });
 const topbar = (page: Page) => page.getByRole("toolbar", { name: "차트 도구 막대" });
 const trigger = (page: Page) => topbar(page).getByRole("button", { name: /^레이아웃:/ });
 const menu = (page: Page) => page.getByRole("menu", { name: "레이아웃", exact: true });
-const layoutRadios = (page: Page) => menu(page).getByRole("menuitemradio").filter({ hasNotText: /^(끔|모든 차트|같은 종목|같은 연동 색)$/ });
+const listGroup = (page: Page) => menu(page).getByRole("group", { name: "레이아웃 목록", exact: true });
+const crosshairGroup = (page: Page) => menu(page).getByRole("group", { name: "십자선 연동", exact: true });
+const layoutRadios = (page: Page) => listGroup(page).getByRole("menuitemradio");
 const inspector = (page: Page) => page.getByRole("region", { name: "지표", exact: true });
 async function choose(page: Page, name: string) {
   await trigger(page).click();
@@ -234,6 +236,66 @@ test("레이아웃 메뉴를 키보드로 열고 이동·선택·닫기와 초�
   await page.keyboard.press("Tab");
   await expect(menu(page)).toBeHidden();
   await expect(topbar(page).getByRole("button", { name: "창 더하기", exact: true })).toBeFocused();
+});
+
+const SECOND_LAYOUT = "01900000-0000-7000-8000-0000000000b1";
+const CROSSHAIR_CHOICES = ["끔", "모든 차트", "같은 종목", "같은 연동 색"];
+
+test("레이아웃 목록과 십자선 연동은 각자 라디오 묶음이고 체크는 묶음마다 하나다", async ({ page, scenario }) => {
+  scenario.documents.saveLayout({ ...scenario.documents.layout(), id: SECOND_LAYOUT, name: "복기", revision: 1 });
+  await page.goto("/");
+  await expect(cell(page)).toHaveAttribute("aria-busy", "false");
+  await trigger(page).click();
+  await expect(layoutRadios(page)).toHaveText(["기본", "복기"]);
+  await expect(crosshairGroup(page).getByRole("menuitemradio")).toHaveText(CROSSHAIR_CHOICES);
+  await expect(menu(page).getByRole("menuitemradio")).toHaveCount(6);
+  await expect(listGroup(page).locator('[aria-checked="true"]')).toHaveText(["기본"]);
+  await expect(crosshairGroup(page).locator('[aria-checked="true"]')).toHaveText(["모든 차트"]);
+  await crosshairGroup(page).getByRole("menuitemradio", { name: "같은 종목", exact: true }).click();
+  await trigger(page).click();
+  await expect(listGroup(page).locator('[aria-checked="true"]')).toHaveText(["기본"]);
+  await expect(crosshairGroup(page).locator('[aria-checked="true"]')).toHaveText(["같은 종목"]);
+  await listGroup(page).getByRole("menuitemradio", { name: "복기", exact: true }).click();
+  await expect(trigger(page)).toHaveAccessibleName("레이아웃: 복기");
+  await trigger(page).click();
+  await expect(listGroup(page).locator('[aria-checked="true"]')).toHaveText(["복기"]);
+  await expect(crosshairGroup(page).locator('[aria-checked="true"]')).toHaveCount(1);
+});
+
+test("↓↑는 레이아웃 목록 묶음을 넘어 십자선 연동 묶음의 라디오까지 가고 돌아온다", async ({ page, scenario }) => {
+  scenario.documents.saveLayout({ ...scenario.documents.layout(), id: SECOND_LAYOUT, name: "복기", revision: 1 });
+  await page.goto("/");
+  await expect(cell(page)).toHaveAttribute("aria-busy", "false");
+  await trigger(page).focus();
+  await page.keyboard.press("Enter");
+  const list = (name: string) => listGroup(page).getByRole("menuitemradio", { name, exact: true });
+  const crosshair = (name: string) => crosshairGroup(page).getByRole("menuitemradio", { name, exact: true });
+  const item = (name: string) => menu(page).getByRole("menuitem", { name, exact: true });
+  await expect(list("기본")).toBeFocused();
+  await page.keyboard.press("ArrowDown");
+  await expect(list("복기")).toBeFocused();
+  await page.keyboard.press("ArrowDown");
+  await expect(item("새 이름으로 저장…")).toBeFocused();
+  for (const name of ["이름 바꾸기…", "지우기"]) {
+    await page.keyboard.press("ArrowDown");
+    await expect(item(name)).toBeFocused();
+  }
+  for (const name of CROSSHAIR_CHOICES) {
+    await page.keyboard.press("ArrowDown");
+    await expect(crosshair(name)).toBeFocused();
+  }
+  await page.keyboard.press("ArrowDown");
+  await expect(item("기본 배치로")).toBeFocused();
+  for (const name of [...CROSSHAIR_CHOICES].reverse()) {
+    await page.keyboard.press("ArrowUp");
+    await expect(crosshair(name)).toBeFocused();
+  }
+  for (const name of ["지우기", "이름 바꾸기…", "새 이름으로 저장…"]) {
+    await page.keyboard.press("ArrowUp");
+    await expect(item(name)).toBeFocused();
+  }
+  await page.keyboard.press("ArrowUp");
+  await expect(list("복기")).toBeFocused();
 });
 
 test("레이아웃 목록을 읽지 못해도 버튼에 초점을 돌려 키보드로 다시 연다", async ({ page, scenario }) => {

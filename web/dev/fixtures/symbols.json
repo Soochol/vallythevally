@@ -31,6 +31,9 @@
     { "code": "229200", "name": "KODEX 코스닥150", "kind": "etf", "market": "kospi", "nxtEnabled": false, "close": 16885, "volume": 5300000, "years": 7 },
     { "code": "395400", "name": "SK리츠", "kind": "reit", "market": "kospi", "nxtEnabled": false, "close": 5260, "volume": 390000, "years": 4 },
     { "code": "330590", "name": "롯데리츠", "kind": "reit", "market": "kospi", "nxtEnabled": false, "close": 4315, "volume": 610000, "years": 5 },
+    { "code": "520100", "name": "가짜지수연동ETN", "kind": "etn", "market": "kospi", "nxtEnabled": false, "close": 10250, "volume": 210000, "years": 3 },
+    { "code": "088980", "name": "가짜인프라투융자", "kind": "infrastructure", "market": "kospi", "nxtEnabled": false, "close": 6120, "volume": 150000, "years": 5 },
+    { "code": "094800", "name": "가짜뮤추얼펀드", "kind": "mutualFund", "market": "kospi", "nxtEnabled": false, "close": 8830, "volume": 90000, "years": 4 },
     { "code": "555555", "name": "조회실패시험", "kind": "common", "market": "kospi", "nxtEnabled": true, "close": 10000, "volume": 1000, "years": 1, "fail": "kiwoom_unavailable" },
     { "code": "888888", "name": "상장폐지시험", "kind": "common", "market": "kosdaq", "nxtEnabled": false, "close": 1000, "volume": 1000, "years": 1, "fail": "unknown_symbol" }
   ]

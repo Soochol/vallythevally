@@ -148,6 +148,9 @@ async function chooseCrosshair(page: Page, name: string) {
 async function expectCrosshairChoice(page: Page, name: string) {
   await layoutButton(page).click();
   await expect(radio(page, name)).toHaveAttribute("aria-checked", "true");
+  const group = page.getByRole("group", { name: "십자선 연동", exact: true });
+  await expect(group.getByRole("menuitemradio")).toHaveText(["끔", "모든 차트", "같은 종목", "같은 연동 색"]);
+  await expect(group.locator('[aria-checked="true"]')).toHaveText([name]);
   for (const other of ["끔", "모든 차트", "같은 종목", "같은 연동 색"].filter((n) => n !== name)) await expect(radio(page, other)).toHaveAttribute("aria-checked", "false");
   await page.keyboard.press("Escape");
 }
