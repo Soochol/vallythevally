@@ -844,7 +844,7 @@ impl Conn {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use std::pin::Pin;
     use std::sync::{Arc, Mutex, atomic::{AtomicUsize, Ordering}};
     use std::task::{Context, Poll};
@@ -880,7 +880,7 @@ mod tests {
         }
     }
 
-    fn install_global_log_capture() {
+    pub(crate) fn install_global_log_capture() {
         static INSTALLED: std::sync::Once = std::sync::Once::new();
         INSTALLED.call_once(|| {
             let subscriber = tracing_subscriber::fmt().with_writer(|| CapturedLogs).with_ansi(false).with_max_level(tracing::Level::TRACE).finish();
@@ -888,11 +888,11 @@ mod tests {
         });
     }
 
-    fn start_capturing_logs_of_this_thread() {
+    pub(crate) fn start_capturing_logs_of_this_thread() {
         CAPTURED_LOGS.with(|logs| *logs.borrow_mut() = Some(Vec::new()));
     }
 
-    fn logs_captured_on_this_thread() -> String {
+    pub(crate) fn logs_captured_on_this_thread() -> String {
         CAPTURED_LOGS.with(|logs| String::from_utf8(logs.borrow().clone().expect("로그 수집이 시작되지 않았다")).unwrap())
     }
 

@@ -15,6 +15,12 @@ pub enum TradingApiId {
 }
 
 impl TradingApiId {
+    pub const ORDER_WRITES: [TradingApiId; 4] = [TradingApiId::Kt10000, TradingApiId::Kt10001, TradingApiId::Kt10002, TradingApiId::Kt10003];
+
+    pub fn is_order_write(self) -> bool {
+        Self::ORDER_WRITES.contains(&self)
+    }
+
     pub const fn path(self) -> &'static str {
         match self {
             TradingApiId::Ka00001 | TradingApiId::Kt00018 | TradingApiId::Ka10075 | TradingApiId::Kt00011 | TradingApiId::Kt00007 => ACCOUNT_PATH,
@@ -35,4 +41,12 @@ impl TradingApiId {
             TradingApiId::Kt10003 => "kt10003",
         }
     }
+}
+
+#[cfg(test)]
+impl TradingApiId {
+    pub(crate) const BALANCE_READ: TradingApiId = TradingApiId::Kt00018;
+    pub(crate) const FILLS_READ: TradingApiId = TradingApiId::Kt00007;
+    pub(crate) const OPEN_ORDERS_READ: TradingApiId = TradingApiId::Ka10075;
+    pub(crate) const BUYABLE_READ: TradingApiId = TradingApiId::Kt00011;
 }
