@@ -6,6 +6,8 @@ import { useSendSymbol } from "../pages/sendSymbol";
 import { CumulativeCurve } from "./CumulativeCurve";
 import { HoldingsTable } from "./HoldingsTable";
 import { Treemap } from "./Treemap";
+import { OverlapTab } from "./OverlapTab";
+import { ReverseTab } from "./ReverseTab";
 import { formatPercent } from "./etfModel";
 
 export const TABS = [
@@ -71,24 +73,42 @@ function HoldingsTab({ code }: { code: string }) {
 }
 
 interface EtfDetailProps {
-  fund: EtfFundSummary;
+  fund: EtfFundSummary | null;
+  funds: readonly EtfFundSummary[];
   tab: TabId;
+  basket: readonly string[];
+  stock: string | null;
   onTab: (tab: TabId) => void;
+  onRemoveFromBasket: (code: string) => void;
+  onStock: (code: string | null) => void;
+  onOpenFund: (code: string) => void;
 }
 
-export function EtfDetail({ fund, tab, onTab }: EtfDetailProps) {
+function Panel({ fund, funds, tab, basket, stock, onRemoveFromBasket, onStock, onOpenFund }: EtfDetailProps) {
+  if (tab === "overlap") return <OverlapTab basket={basket} funds={funds} onRemove={onRemoveFromBasket} />;
+  if (tab === "reverse") return <ReverseTab stock={stock} onStock={onStock} onOpenFund={onOpenFund} />;
+  if (tab === "holdings" && fund) return <HoldingsTab code={fund.code} />;
+  return <div className="etf-empty" role="status">준비 중입니다</div>;
+}
+
+export function EtfDetail(props: EtfDetailProps) {
+  const { fund, tab, onTab } = props;
   return (
-    <section className="etf-detail" aria-label={`${fund.name} 상세`}>
-      <header className="etf-hero">
-        <h2>{fund.name}</h2>
-        <div className="etf-chips">
-          <span>{fund.code}</span>
-          <span>{fund.style === "active" ? "액티브" : "패시브"}</span>
-          <span>{fund.issuer}</span>
-          {fund.benchmark !== "" && <span>{fund.benchmark}</span>}
-        </div>
-      </header>
-      <SummaryCells fund={fund} />
+    <section className="etf-detail" aria-label={fund ? `${fund.name} 상세` : "ETF 상세"}>
+      {fund && (
+        <>
+          <header className="etf-hero">
+            <h2>{fund.name}</h2>
+            <div className="etf-chips">
+              <span>{fund.code}</span>
+              <span>{fund.style === "active" ? "액티브" : "패시브"}</span>
+              <span>{fund.issuer}</span>
+              {fund.benchmark !== "" && <span>{fund.benchmark}</span>}
+            </div>
+          </header>
+          <SummaryCells fund={fund} />
+        </>
+      )}
       <div role="tablist" aria-label="ETF 상세" className="etf-tabs">
         {TABS.map((entry) => (
           <button key={entry.id} type="button" role="tab" id={`etf-tab-${entry.id}`} aria-selected={tab === entry.id} aria-controls="etf-panel" onClick={() => onTab(entry.id)}>
@@ -97,7 +117,7 @@ export function EtfDetail({ fund, tab, onTab }: EtfDetailProps) {
         ))}
       </div>
       <div role="tabpanel" id="etf-panel" aria-labelledby={`etf-tab-${tab}`} className="etf-panel">
-        {tab === "holdings" ? <HoldingsTab code={fund.code} /> : <div className="etf-empty" role="status">준비 중입니다</div>}
+        <Panel {...props} />
       </div>
     </section>
   );

@@ -1,5 +1,5 @@
 import type { EtfFundSummary } from "../../api/generated/EtfFundSummary";
-import { type FundFilter, type StyleFilter, filterFunds, formatPercent, issuersOf } from "./etfModel";
+import { BASKET_LIMIT, type FundFilter, type StyleFilter, filterFunds, formatPercent, issuersOf } from "./etfModel";
 
 const STYLE_CHOICES: readonly { id: StyleFilter; label: string }[] = [
   { id: "all", label: "전체" },
@@ -13,9 +13,12 @@ interface EtfListProps {
   filter: FundFilter;
   onFilter: (filter: FundFilter) => void;
   onSelect: (code: string) => void;
+  basket: readonly string[];
+  basketNotice: string | null;
+  onToggleBasket: (code: string) => void;
 }
 
-export function EtfList({ funds, selected, filter, onFilter, onSelect }: EtfListProps) {
+export function EtfList({ funds, selected, filter, onFilter, onSelect, basket, basketNotice, onToggleBasket }: EtfListProps) {
   const shown = filterFunds(funds, filter);
   return (
     <aside className="etf-rail" aria-label="ETF 목록">
@@ -40,9 +43,13 @@ export function EtfList({ funds, selected, filter, onFilter, onSelect }: EtfList
           {issuersOf(funds).map((issuer) => <option key={issuer} value={issuer}>{issuer}</option>)}
         </select>
       </div>
+      <div className="etf-basket" role="status">
+        비교 바구니 {basket.length}/{BASKET_LIMIT}
+      </div>
+      {basketNotice !== null && <div className="etf-basket-notice" role="alert">{basketNotice}</div>}
       <ul className="etf-list" aria-label="ETF">
         {shown.map((fund) => (
-          <li key={fund.code}>
+          <li key={fund.code} className="etf-item">
             <button type="button" className="etf-fund" data-code={fund.code} aria-pressed={fund.code === selected} onClick={() => onSelect(fund.code)}>
               <span className="etf-fund-name">{fund.name}</span>
               <span className="etf-fund-code">{fund.code}</span>
@@ -54,6 +61,7 @@ export function EtfList({ funds, selected, filter, onFilter, onSelect }: EtfList
                 </span>
               </span>
             </button>
+            <input type="checkbox" className="etf-basket-box" aria-label={`${fund.name} 비교 바구니에 담기`} data-basket-code={fund.code} checked={basket.includes(fund.code)} onChange={() => onToggleBasket(fund.code)} />
           </li>
         ))}
         {shown.length === 0 && <li className="etf-empty">조건에 맞는 ETF가 없습니다</li>}

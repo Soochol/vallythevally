@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { EtfFundSummary } from "../../api/generated/EtfFundSummary";
-import { cumulativeCurve, filterFunds, issuersOf, NO_FILTER, squarify } from "./etfModel";
+import { commonHoldings, cumulativeCurve, filterFunds, issuersOf, NO_FILTER, overlapBps, parseBasket, squarify } from "./etfModel";
 
 const fund = (code: string, name: string, style: EtfFundSummary["style"], issuer: string): EtfFundSummary => ({
   code, name, issuer, style, benchmark: "", holdingsCount: 1, top5WeightBps: 100, effectiveHoldings: 1,
@@ -69,5 +69,40 @@ describe("cumulativeCurve", () => {
       { rank: 3, cumulativeBps: 3400 },
     ]);
     expect(cumulativeCurve([])).toEqual([]);
+  });
+});
+
+describe("overlapBps", () => {
+  const holdings = (entries: readonly (readonly [string, number])[]) => entries.map(([code, weightBps]) => ({ code, name: code, weightBps }));
+  const A = holdings([["a", 5000], ["b", 3000], ["c", 2000]]);
+  const B = holdings([["b", 4500], ["c", 500], ["d", 5000]]);
+
+  it("같은 ETF끼리는 100%다", () => {
+    expect(overlapBps(A, A)).toBe(10_000);
+  });
+  it("공통 종목이 없으면 0이다", () => {
+    expect(overlapBps(A, holdings([["x", 6000], ["y", 4000]]))).toBe(0);
+  });
+  it("3종목 손계산: b는 min(3000,4500)=3000, c는 min(2000,500)=500이라 3500bp", () => {
+    expect(overlapBps(A, B)).toBe(3500);
+    expect(overlapBps(B, A)).toBe(3500);
+  });
+  it("bp 정수끼리만 더해 소수 비중의 부동소수 오차가 없다", () => {
+    const tenths = holdings([["a", 1], ["b", 2], ["c", 7]]);
+    expect(overlapBps(tenths, holdings([["a", 1], ["b", 2], ["c", 7]]))).toBe(10);
+    expect(Number.isInteger(overlapBps(A, B))).toBe(true);
+  });
+  it("공통 종목은 겹침이 큰 순이고 양쪽 비중을 함께 준다", () => {
+    expect(commonHoldings(A, B)).toEqual([
+      { code: "b", name: "b", weightABps: 3000, weightBBps: 4500 },
+      { code: "c", name: "c", weightABps: 2000, weightBBps: 500 },
+    ]);
+  });
+});
+
+describe("parseBasket", () => {
+  it("중복과 빈 값을 버리고 4개까지만 남긴다", () => {
+    expect(parseBasket(null)).toEqual([]);
+    expect(parseBasket("a,,b,a,c,d,e,f")).toEqual(["a", "b", "c", "d"]);
   });
 });

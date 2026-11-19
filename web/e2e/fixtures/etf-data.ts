@@ -3,6 +3,7 @@ import type { EtfFundDetail } from "../../src/api/generated/EtfFundDetail";
 import type { EtfFundList } from "../../src/api/generated/EtfFundList";
 import type { EtfFundSummary } from "../../src/api/generated/EtfFundSummary";
 import type { EtfHolding } from "../../src/api/generated/EtfHolding";
+import type { EtfStockHolders } from "../../src/api/generated/EtfStockHolders";
 import type { EtfMaStates } from "../../src/api/generated/EtfMaStates";
 import type { FixtureReply } from "./scenario";
 
@@ -19,18 +20,21 @@ const MEGA_TECH: EtfHolding[] = [
   holding("028260", "삼성물산", 500),
   holding("086520", "에코프로", 300),
   holding("0222D0", "합성종목", 100),
+  holding("005380", "현대차", 2400),
 ];
 
 const SEMICONDUCTOR: EtfHolding[] = [
   holding("005930", "삼성전자", 3100),
   holding("000660", "SK하이닉스", 2600),
   holding("086520", "에코프로", 400),
+  holding("402340", "SK스퀘어", 3900),
 ];
 
 const NASDAQ: EtfHolding[] = [
   holding("035420", "NAVER", 1500),
   holding("051910", "LG화학", 1200),
   holding("000270", "기아", 800),
+  holding("005380", "현대차", 6500),
 ];
 
 const effectiveHoldings = (holdings: readonly EtfHolding[]) => {
@@ -71,9 +75,20 @@ export const withEtfMa = (code: string, ma: EtfMaStates): EtfFundDetail => {
 
 const notFound = (code: string): FixtureReply => ({ status: 404, body: { error: { code: "not_found", message: `ETF ${code} 없음`, reason: null, retryAt: null, manualActionRequired: false } } satisfies ApiError });
 
+export const etfHoldersOf = (code: string): EtfStockHolders => {
+  const holders = ETF_DETAILS.flatMap((detail) => {
+    const found = detail.holdings.find((h) => h.code === code);
+    return found ? [{ fund: detail.fund, weightBps: found.weightBps }] : [];
+  });
+  const name = ETF_DETAILS.flatMap((detail) => detail.holdings).find((h) => h.code === code)?.name ?? null;
+  return { code, name, ma: NO_MA, holders };
+};
+
 export function etfBaseline(path: string, method: string): FixtureReply | null {
   if (method !== "GET") return null;
   if (path === "/api/etf/funds") return { body: ETF_FUNDS };
+  const stock = /^\/api\/etf\/stocks\/([^/]+)$/.exec(path);
+  if (stock) return { body: etfHoldersOf(decodeURIComponent(stock[1]!)) };
   const match = /^\/api\/etf\/funds\/([^/]+)$/.exec(path);
   if (!match) return null;
   const code = decodeURIComponent(match[1]!);
