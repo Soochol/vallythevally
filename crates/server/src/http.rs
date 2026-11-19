@@ -284,7 +284,9 @@ async fn fundamentals(State(st): State<Arc<AppState>>, Path(code): Path<String>)
     if symbol_list(&st).await?.get(Symbol::Stock(stock)).is_none() {
         return Err(ApiFailure::new(api::ApiErrorCode::UnknownSymbol, format!("없는 종목입니다: {code}")));
     }
-    Ok(Json(crate::fundamentals::fundamentals(&st.rest, stock).await.map_err(|e| Lookup::Fundamentals.failure(e, st.clock.now()))?))
+    let fundamentals = crate::fundamentals::fundamentals(&st.rest, stock).await.map_err(|e| Lookup::Fundamentals.failure(e, st.clock.now()))?;
+    st.trading.remember_price_band(stock, fundamentals.upper_limit, fundamentals.lower_limit);
+    Ok(Json(fundamentals))
 }
 
 struct BarsQuery {

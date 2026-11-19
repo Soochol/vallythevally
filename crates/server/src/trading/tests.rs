@@ -81,13 +81,13 @@ fn is_write(id: TradingApiId) -> bool {
     matches!(id, TradingApiId::Kt10000 | TradingApiId::Kt10001 | TradingApiId::Kt10002 | TradingApiId::Kt10003)
 }
 
-fn price_band_reply(requested: &str) -> Result<HttpResponse, TransportError> {
+fn price_band_reply(requested: &str, limits: &(String, String)) -> Result<HttpResponse, TransportError> {
     let mut body: Value = serde_json::from_str(include_str!("../../tests/fixtures/kiwoom/ka10001_005930_AL.json")).unwrap();
     let (upper, lower) = if requested.contains(ETN_CODE) {
         body["stk_cd"] = format!("{ETN_CODE}_AL").into();
         ("+10000", "-5000")
     } else {
-        ("+100000", "-50000")
+        (limits.0.as_str(), limits.1.as_str())
     };
     body["upl_pric"] = upper.into();
     body["lst_pric"] = lower.into();
@@ -97,6 +97,7 @@ fn price_band_reply(requested: &str) -> Result<HttpResponse, TransportError> {
 }
 
 pub(super) const ETN_CODE: &str = "520100";
+pub(super) const DEFAULT_BAND: [&str; 2] = ["+100000", "-50000"];
 
 fn listed_symbols() -> Arc<SymbolDirectory> {
     use domain::{Market, Symbol, SymbolInfo, SymbolKind};
@@ -109,6 +110,8 @@ fn listed_symbols() -> Arc<SymbolDirectory> {
 pub(super) struct Fixture {
     pub(super) mode: Arc<Mutex<WriteMode>>,
     pub(super) rows_account: Arc<Mutex<Option<String>>>,
+    pub(super) band_limits: Arc<Mutex<(String, String)>>,
+    pub(super) open_rows: Arc<Mutex<Option<Value>>>,
     pub(super) orderable_replies: Arc<Mutex<std::collections::HashMap<String, Value>>>,
     pub(super) app: Router,
     pub(super) state: Arc<AppState>,
@@ -169,6 +172,10 @@ pub(super) async fn fixture_in(latency: Duration, spacing: Duration, environment
     let seen_account = account.clone();
     let rows_account = Arc::new(Mutex::new(None::<String>));
     let seen_rows = rows_account.clone();
+    let band_limits = Arc::new(Mutex::new(DEFAULT_BAND.map(str::to_owned).into()));
+    let seen_band = band_limits.clone();
+    let open_rows = Arc::new(Mutex::new(None::<Value>));
+    let seen_open_rows = open_rows.clone();
     let orderable_replies = Arc::new(Mutex::new(std::collections::HashMap::<String, Value>::new()));
     let seen_orderable = orderable_replies.clone();
     let fake = Arc::new(FakeTransport::new(latency, move |sent| {
@@ -186,8 +193,13 @@ pub(super) async fn fixture_in(latency: Duration, spacing: Duration, environment
                 return ok(scripted, None);
             }
         }
+        if sent.api_id == Endpoint::Trading(TradingApiId::Ka10075)
+            && let Some(rows) = seen_open_rows.lock().unwrap().clone()
+        {
+            return ok(json!({"oso": rows, "return_code": 0, "return_msg": "정상"}), None);
+        }
         match sent.api_id.market() {
-            Some(id) if id == StockBasicInfo::API_ID => return price_band_reply(&sent.body),
+            Some(id) if id == StockBasicInfo::API_ID => return price_band_reply(&sent.body, &seen_band.lock().unwrap()),
             Some(id) if id == StockList::API_ID => return ok(json!({"list": [], "return_code": 0, "return_msg": "정상"}), None),
             _ => {}
         }
@@ -206,7 +218,7 @@ pub(super) async fn fixture_in(latency: Duration, spacing: Duration, environment
     rest.set_access(Access::Open);
     state.system.bound(HOST.parse().unwrap());
     let app = router(state.clone());
-    Fixture { mode, rows_account, orderable_replies, app, state, fake, feed, account, _dir: dir }
+    Fixture { mode, rows_account, band_limits, open_rows, orderable_replies, app, state, fake, feed, account, _dir: dir }
 }
 
 pub(super) fn trading_sends(fake: &FakeTransport) -> Vec<&'static str> {

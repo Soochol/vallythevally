@@ -1,4 +1,5 @@
 mod journal;
+mod memory;
 mod orders;
 mod request;
 mod routes;
