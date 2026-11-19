@@ -330,7 +330,7 @@ pub fn kiwoom_status(st: &AppState) -> KiwoomLinkStatus {
             status.state = KiwoomLinkState::Connected;
             status.message = "키움에 연결됨".to_owned();
             status.token_expires_at = st.rest.auth().token_expires_at().map(|t| UnixSeconds(t.unix()));
-            status.realtime_registered = Some(count(st.registered.borrow().len()));
+            status.realtime_registered = Some(count(crate::kiwoom::stream::seats(&st.registered.borrow())));
             status.symbol_count = st.symbols.updates().borrow().as_ref().map(|directory| count(directory.len()));
         }
         LinkState::Failed(failure) => {

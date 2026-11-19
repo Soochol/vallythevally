@@ -1540,10 +1540,33 @@ pub enum RealType {
     Program,
     Broker,
     AfterHours,
+    BookKrx,
+    BookNxt,
 }
 
 impl RealType {
-    pub const ALL: [RealType; 6] = [RealType::Trade, RealType::Index, RealType::Book, RealType::Program, RealType::Broker, RealType::AfterHours];
+    pub const ALL: [RealType; 8] =
+        [RealType::Trade, RealType::Index, RealType::Book, RealType::Program, RealType::Broker, RealType::AfterHours, RealType::BookKrx, RealType::BookNxt];
+
+    pub fn book(venue: Venue) -> RealType {
+        match venue {
+            Venue::Combined => RealType::Book,
+            Venue::Krx => RealType::BookKrx,
+            Venue::Nxt => RealType::BookNxt,
+        }
+    }
+
+    pub fn has_own_code(self) -> bool {
+        matches!(self, RealType::BookKrx | RealType::BookNxt)
+    }
+
+    fn item_venue(self) -> Venue {
+        match self {
+            RealType::BookKrx => Venue::Krx,
+            RealType::BookNxt => Venue::Nxt,
+            _ => Venue::Combined,
+        }
+    }
 
     pub fn of(symbol: Symbol) -> RealType {
         match symbol {
@@ -1560,14 +1583,14 @@ impl RealType {
     }
 
     pub fn companion(self) -> Option<RealType> {
-        (self == RealType::Book).then_some(RealType::AfterHours)
+        matches!(self, RealType::Book | RealType::BookKrx | RealType::BookNxt).then_some(RealType::AfterHours)
     }
 
     pub fn as_wire(self) -> &'static str {
         match self {
             RealType::Trade => "0B",
             RealType::Index => "0J",
-            RealType::Book => "0D",
+            RealType::Book | RealType::BookKrx | RealType::BookNxt => "0D",
             RealType::Program => "0w",
             RealType::Broker => "0F",
             RealType::AfterHours => "0E",
@@ -1706,6 +1729,15 @@ fn combined_stock(kind: &str, item: &str) -> Result<Symbol, WireError> {
     StockCode::parse(code).map(Symbol::Stock).map_err(|e| WireError(format!("{e}: {item:?}")))
 }
 
+fn book_item(item: &str) -> Result<(Symbol, Venue), WireError> {
+    let (code, venue) = match (item.strip_suffix("_AL"), item.strip_suffix("_NX")) {
+        (Some(code), _) => (code, Venue::Combined),
+        (_, Some(code)) => (code, Venue::Nxt),
+        _ => (item, Venue::Krx),
+    };
+    StockCode::parse(code).map(|code| (Symbol::Stock(code), venue)).map_err(|e| WireError(format!("{e}: {item:?}")))
+}
+
 fn fid_or<T: Default>(values: &Value, fid: impl fmt::Display, read: fn(&str) -> Result<T, WireError>) -> Result<T, WireError> {
     let text = match values.get(fid.to_string()) {
         Some(Value::String(text)) => text.trim().to_owned(),
@@ -1739,8 +1771,10 @@ fn parse_book(item: &str, values: &Value) -> Result<BookSnapshot, WireError> {
         let qty = fid_or(values, 24, unsigned).ok()?;
         Some(ExpectedTrade { price, qty: Volume(qty) })
     })();
+    let (symbol, venue) = book_item(item)?;
     Ok(BookSnapshot {
-        symbol: combined_stock("0D", item)?,
+        symbol,
+        venue,
         hhmmss: required_time(values, "21", "0D", item)?,
         asks: book_side(values, 40, 60)?,
         bids: book_side(values, 50, 70)?,
@@ -1842,16 +1876,16 @@ fn level_centi(abs: &str) -> Option<u64> {
     int.checked_mul(100)?.checked_add(frac)
 }
 
-/// REG·REMOVE의 `item`. 주식은 거래소와 상관없이 `_AL` 하나만 받는다(ADR 0007).
-fn real_item_code(symbol: Symbol) -> String {
+/// REG·REMOVE의 `item`. 주식은 `_AL` 하나만 받고, 거래소 호가(ADR 0032)만 자기 거래소 코드를 쓴다(ADR 0007).
+fn real_item_code(kind: RealType, symbol: Symbol) -> String {
     match symbol {
-        Symbol::Stock(code) => kiwoom_stock_code(code, Venue::Combined),
+        Symbol::Stock(code) => kiwoom_stock_code(code, kind.item_venue()),
         Symbol::Index(index) => index.as_str().to_owned(),
     }
 }
 
 fn real_entry(kind: RealType, symbols: impl Iterator<Item = Symbol>) -> Value {
-    json!({"item": symbols.map(real_item_code).collect::<Vec<_>>(), "type": [kind.as_wire()]})
+    json!({"item": symbols.map(|symbol| real_item_code(kind, symbol)).collect::<Vec<_>>(), "type": [kind.as_wire()]})
 }
 
 pub fn login_message(token: &Secret<String>) -> Secret<String> {
@@ -2730,6 +2764,36 @@ mod tests {
     }
 
     #[test]
+    fn the_book_item_code_says_which_venue_it_is() {
+        let samsung = Symbol::Stock(StockCode::parse("005930").unwrap());
+        let venue_of = |item: &str| {
+            let book = book(one("0D", item, book_values()));
+            (book.symbol, book.venue)
+        };
+        assert_eq!(venue_of("005930_AL"), (samsung, Venue::Combined));
+        assert_eq!(venue_of("005930"), (samsung, Venue::Krx));
+        assert_eq!(venue_of("005930_NX"), (samsung, Venue::Nxt));
+        assert!(one("0E", "005930_NX", json!({"21": "083512", "131": "1", "135": "1"})).is_err(), "0E는 통합 코드만 받는다");
+    }
+
+    #[test]
+    fn venue_books_register_and_remove_their_own_item_code() {
+        let stock = Symbol::Stock(StockCode::parse("005930").unwrap());
+        let registrations: Registrations = [(RealType::Trade, stock), (RealType::BookKrx, stock), (RealType::BookNxt, stock), (RealType::AfterHours, stock)].into();
+        let v: Value = serde_json::from_str(&reg_message(&registrations)).unwrap();
+        assert_eq!(v["data"], json!([
+            {"item": ["005930_AL"], "type": ["0B"]},
+            {"item": ["005930_AL"], "type": ["0E"]},
+            {"item": ["005930"], "type": ["0D"]},
+            {"item": ["005930_NX"], "type": ["0D"]},
+        ]));
+        let v: Value = serde_json::from_str(&remove_message(RealType::BookNxt, &[stock].into())).unwrap();
+        assert_eq!(v["data"], json!([{"item": ["005930_NX"], "type": ["0D"]}]));
+        assert!(RealType::BookKrx.has_own_code() && RealType::BookNxt.has_own_code() && !RealType::Book.has_own_code());
+        assert_eq!((RealType::BookKrx.companion(), RealType::Trade.companion()), (Some(RealType::AfterHours), None));
+    }
+
+    #[test]
     fn parses_book_frame_into_ten_levels() {
         let book = book(one("0D", "005930_AL", book_values()));
         let level = |won: u64, qty: u64| Some(BookLevel { price: Price::from_centi(won * 100).unwrap(), qty: Volume(qty) });
@@ -2763,11 +2827,12 @@ mod tests {
     }
 
     #[test]
-    fn a_book_frame_needs_a_time_a_combined_code_and_readable_numbers() {
+    fn a_book_frame_needs_a_time_a_stock_code_and_readable_numbers() {
         let mut no_time = book_values();
         no_time.as_object_mut().unwrap().remove("21");
         assert!(one("0D", "005930_AL", no_time).is_err());
-        assert!(one("0D", "005930", book_values()).is_err());
+        assert!(one("0D", "5930", book_values()).is_err());
+        assert!(one("0D", "005930_XX", book_values()).is_err());
         let mut garbage = book_values();
         garbage["61"] = json!("x");
         assert!(one("0D", "005930_AL", garbage).is_err());

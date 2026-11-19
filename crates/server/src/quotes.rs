@@ -23,6 +23,13 @@ pub fn effective_venue(requested: Venue, nxt_enabled: bool) -> Venue {
     }
 }
 
+pub fn effective_book_venue(requested: Venue, nxt_enabled: Option<bool>) -> Venue {
+    match (requested, nxt_enabled) {
+        (Venue::Nxt, Some(true)) | (Venue::Krx, Some(true) | None) => requested,
+        _ => Venue::Combined,
+    }
+}
+
 /// `symbols`는 중복이 없어야 한다. 값을 얻은 종목만 요청 순서대로 돌려준다.
 pub async fn quotes(rest: &KiwoomRest, bars: &BarService, directory: Option<&Directory>, symbols: &[Symbol], requested: Venue) -> Result<Vec<api::Quote>, BarError> {
     let stocks: Vec<(StockCode, Venue)> = symbols

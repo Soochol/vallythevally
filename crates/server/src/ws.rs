@@ -134,7 +134,7 @@ fn on_text(hub: &HubHandle, outbox: &Outbox, conn: ConnId, text: &str) {
         }
         Ok(ClientMessage::SubscribeFeed { sub, symbol, kind, venue }) => match Symbol::parse(&symbol.0) {
             Ok(symbol) => {
-                let venue = if kind == FeedKind::Trades { venue.map_or(domain::Venue::Combined, Into::into) } else { domain::Venue::Combined };
+                let venue = if matches!(kind, FeedKind::Trades | FeedKind::Book) { venue.map_or(domain::Venue::Combined, Into::into) } else { domain::Venue::Combined };
                 hub.subscribe_feed(conn, SubId(sub), symbol, kind, venue);
             }
             Err(_) => {

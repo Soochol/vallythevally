@@ -1,6 +1,6 @@
 //! 구독 관리자(backend.md §5.3). 순수하다. 같은 상태와 같은 `now`면 언제나 같은 계획을 낸다.
 //!
-//! 키움 쪽 구독 단위는 종목이다.
+//! 키움 쪽 구독 단위는 종목이다. 자리는 등록 코드마다 하나라서, 거래소 호가(KRX·NXT 0D)를 받는 종목은 통합 코드 자리에 그 거래소 코드 자리를 더 쓴다(ADR 0032).
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -12,7 +12,7 @@ use crate::kiwoom::wire::RealType;
 
 /// 보유자가 모두 빠진 종목을 이만큼 더 받는다. 칸의 종목을 바꿨다가 바로 돌아와도 다시 받기를 기다리지 않는다.
 pub const RELEASE_GRACE_SECS: i64 = 30;
-/// 키움 접속 전체 한도. 0B 종목과 0J 지수를 더해서 센다(kiwoom.md §10.7).
+/// 키움 접속 전체 한도. 0B 종목과 0J 지수, 거래소 호가 코드를 더해서 센다(kiwoom.md §10.7).
 pub const REALTIME_LIMIT: usize = 200;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -38,7 +38,7 @@ impl Rank {
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct Plan {
-    /// 키움에 REG 할 집합. 크기 ≤ REALTIME_LIMIT.
+    /// 키움에 REG 할 종목 집합. 자리 수(`kiwoom::stream::seats(&feeds)`) ≤ REALTIME_LIMIT.
     pub realtime: BTreeSet<Symbol>,
     pub feeds: DesiredFeeds,
     pub rejected: BTreeSet<Holder>,
@@ -52,6 +52,7 @@ pub struct SubscriptionManager {
     released_at: BTreeMap<Symbol, KstTime>,
     kind_released_at: BTreeMap<(Symbol, RealType), KstTime>,
     admitted: BTreeSet<Symbol>,
+    admitted_venue: BTreeSet<(Symbol, RealType)>,
     watch_rows: BTreeMap<ConnId, BTreeMap<Symbol, usize>>,
 }
 
@@ -75,7 +76,7 @@ impl SubscriptionManager {
         if !self.admitted.contains(&symbol) {
             return;
         }
-        if was_held && let Some(kind) = h.feed_kind() && !self.kind_is_held(symbol, kind) {
+        if was_held && let Some(kind) = h.feed_kind() && !self.kind_is_held(symbol, kind) && self.has_kind_seat(symbol, kind) {
             self.kind_released_at.insert((symbol, kind), now);
         }
         if left_empty {
@@ -85,6 +86,26 @@ impl SubscriptionManager {
 
     fn kind_is_held(&self, symbol: Symbol, kind: RealType) -> bool {
         self.holders.get(&symbol).into_iter().flatten().any(|h| h.feed_kind() == Some(kind))
+    }
+
+    fn has_kind_seat(&self, symbol: Symbol, kind: RealType) -> bool {
+        !kind.has_own_code() || self.admitted_venue.contains(&(symbol, kind))
+    }
+
+    fn has_seat(&self, symbol: Symbol, holder: &Holder) -> bool {
+        self.admitted.contains(&symbol) && holder.feed_kind().is_none_or(|kind| self.has_kind_seat(symbol, kind))
+    }
+
+    fn held_venue_kinds(&self, symbol: Symbol) -> BTreeSet<RealType> {
+        self.holders.get(&symbol).into_iter().flatten().filter_map(Holder::feed_kind).filter(|kind| kind.has_own_code()).collect()
+    }
+
+    fn venue_kind_wanted(&self, symbol: Symbol, kind: RealType) -> bool {
+        self.kind_is_held(symbol, kind) || self.kind_released_at.contains_key(&(symbol, kind))
+    }
+
+    fn seats_used(&self) -> usize {
+        self.admitted.len() + self.admitted_venue.len()
     }
 
     /// 유예 없이 놓는다. 키움에 없는 종목처럼 받을 이유가 없는 보유자에 쓴다.
@@ -160,44 +181,111 @@ impl SubscriptionManager {
             self.admitted.remove(&s);
         }
         self.kind_released_at.retain(|_, at| at.plus_secs(RELEASE_GRACE_SECS) > now);
+        self.admitted_venue = self.admitted_venue.iter().copied().filter(|&(s, kind)| self.admitted.contains(&s) && self.venue_kind_wanted(s, kind)).collect();
         let mut candidates: Vec<(Rank, Symbol)> =
             self.holders.keys().filter(|s| !self.admitted.contains(s)).map(|s| (self.rank(*s), *s)).collect();
         candidates.sort();
         for (rank, s) in candidates {
-            if self.admitted.len() >= REALTIME_LIMIT && !self.make_room(rank) {
+            let venue_kinds = self.held_venue_kinds(s);
+            if !self.seats_fit(1 + venue_kinds.len(), rank) {
                 continue;
             }
             self.admitted.insert(s);
+            self.admitted_venue.extend(venue_kinds.into_iter().map(|kind| (s, kind)));
         }
-        let rejected = self.holders.iter().filter(|(s, _)| !self.admitted.contains(s)).flat_map(|(_, hs)| hs.iter().cloned()).collect();
-        self.kind_released_at.retain(|(s, _), _| self.admitted.contains(s));
+        let mut wanting: Vec<(Rank, Symbol, RealType)> = Vec::new();
+        for &s in &self.admitted {
+            let seatless = self.held_venue_kinds(s).into_iter().filter(|kind| !self.admitted_venue.contains(&(s, *kind)));
+            wanting.extend(seatless.map(|kind| (self.rank(s), s, kind)));
+        }
+        wanting.sort();
+        for (rank, s, kind) in wanting {
+            if self.seats_fit(1, rank) {
+                self.admitted_venue.insert((s, kind));
+            }
+        }
+        let rejected = self.holders.iter().flat_map(|(s, hs)| hs.iter().filter(|h| !self.has_seat(*s, h)).cloned()).collect();
+        let mut kind_released_at = std::mem::take(&mut self.kind_released_at);
+        kind_released_at.retain(|&(s, kind), _| self.admitted.contains(&s) && self.has_kind_seat(s, kind));
+        self.kind_released_at = kind_released_at;
         let feeds = self.admitted.iter().map(|&s| (s, self.kinds_to_receive(s))).collect();
         Plan { realtime: self.admitted.clone(), feeds, rejected }
     }
 
     fn kinds_to_receive(&self, symbol: Symbol) -> BTreeSet<RealType> {
-        let held = self.holders.get(&symbol).into_iter().flatten().filter_map(Holder::feed_kind);
-        let in_grace = self.kind_released_at.keys().filter(|(s, _)| *s == symbol).map(|(_, kind)| *kind);
+        let held = self.holders.get(&symbol).into_iter().flatten().filter(|h| self.has_seat(symbol, h)).filter_map(Holder::feed_kind);
+        let in_grace = self.kind_released_at.keys().filter(|(s, kind)| *s == symbol && self.has_kind_seat(symbol, *kind)).map(|(_, kind)| *kind);
         let feeds: Vec<RealType> = held.chain(in_grace).collect();
         std::iter::once(RealType::of(symbol)).chain(feeds.iter().copied()).chain(feeds.iter().filter_map(|kind| kind.companion())).collect()
     }
 
-    fn make_room(&mut self, rank: Rank) -> bool {
-        let out = self.oldest_in_grace().or_else(|| {
-            self.admitted
-                .iter()
-                .filter(|s| self.holders.contains_key(s))
-                .map(|s| (self.rank(*s), *s))
-                .filter(|(r, _)| r.is_watch_only() && *r > rank)
-                .max()
-                .map(|(_, s)| s)
-        });
-        let Some(s) = out else {
+    fn seats_fit(&mut self, cost: usize, rank: Rank) -> bool {
+        let needed = (self.seats_used() + cost).saturating_sub(REALTIME_LIMIT);
+        needed == 0 || self.make_room(rank, needed)
+    }
+
+    fn make_room(&mut self, rank: Rank, needed: usize) -> bool {
+        let mut victims = Vec::new();
+        let mut freed = 0;
+        for victim in self.eviction_order(rank) {
+            freed += self.seats_freed_by(victim);
+            victims.push(victim);
+            if freed >= needed {
+                break;
+            }
+        }
+        if freed < needed {
             return false;
-        };
-        self.released_at.remove(&s);
-        self.admitted.remove(&s);
+        }
+        for victim in victims {
+            self.evict(victim);
+        }
         true
+    }
+
+    fn eviction_order(&self, rank: Rank) -> Vec<Eviction> {
+        let mut graces: Vec<(KstTime, Symbol, Option<RealType>)> = self.released_at.iter().map(|(s, at)| (*at, *s, None)).collect();
+        graces.extend(
+            self.kind_released_at
+                .iter()
+                .filter(|((s, kind), _)| kind.has_own_code() && !self.released_at.contains_key(s) && self.admitted_venue.contains(&(*s, *kind)))
+                .map(|((s, kind), at)| (*at, *s, Some(*kind))),
+        );
+        graces.sort();
+        let mut watch_only: Vec<(Rank, Symbol)> = self
+            .admitted
+            .iter()
+            .filter(|s| self.holders.contains_key(s))
+            .map(|s| (self.rank(*s), *s))
+            .filter(|(r, _)| r.is_watch_only() && *r > rank)
+            .collect();
+        watch_only.sort_by(|a, b| b.cmp(a));
+        graces
+            .into_iter()
+            .map(|(_, s, kind)| kind.map_or(Eviction::Symbol(s), |kind| Eviction::Venue(s, kind)))
+            .chain(watch_only.into_iter().map(|(_, s)| Eviction::Symbol(s)))
+            .collect()
+    }
+
+    fn seats_freed_by(&self, victim: Eviction) -> usize {
+        match victim {
+            Eviction::Symbol(s) => 1 + self.admitted_venue.iter().filter(|(x, _)| *x == s).count(),
+            Eviction::Venue(..) => 1,
+        }
+    }
+
+    fn evict(&mut self, victim: Eviction) {
+        match victim {
+            Eviction::Symbol(s) => {
+                self.released_at.remove(&s);
+                self.admitted.remove(&s);
+                self.admitted_venue.retain(|(x, _)| *x != s);
+            }
+            Eviction::Venue(s, kind) => {
+                self.kind_released_at.remove(&(s, kind));
+                self.admitted_venue.remove(&(s, kind));
+            }
+        }
     }
 
     fn rank(&self, symbol: Symbol) -> Rank {
@@ -211,10 +299,12 @@ impl SubscriptionManager {
             .min()
             .expect("보유자가 있는 종목")
     }
+}
 
-    fn oldest_in_grace(&self) -> Option<Symbol> {
-        self.released_at.iter().min_by_key(|(s, at)| (**at, **s)).map(|(s, _)| *s)
-    }
+#[derive(Debug, Clone, Copy)]
+enum Eviction {
+    Symbol(Symbol),
+    Venue(Symbol, RealType),
 }
 
 impl Holder {
@@ -580,5 +670,118 @@ mod tests {
         assert!(m.plan(t(30)).feeds.is_empty());
         m.hold(stock(0), cell(2, "chart"));
         assert_eq!(kinds(&m.plan(t(31)), 0), BTreeSet::from([RealType::Trade]));
+    }
+
+    fn seats(plan: &Plan) -> usize {
+        crate::kiwoom::stream::seats(&plan.feeds)
+    }
+
+    #[test]
+    fn a_venue_book_costs_a_second_place_and_keeps_trades_on_the_combined_code() {
+        let mut m = SubscriptionManager::default();
+        m.hold(stock(0), feed(1, "k", RealType::BookKrx));
+        m.hold(stock(1), feed(1, "a", RealType::Book));
+        let plan = m.plan(t(0));
+        assert_eq!(kinds(&plan, 0), BTreeSet::from([RealType::Trade, RealType::BookKrx, RealType::AfterHours]));
+        assert_eq!(kinds(&plan, 1), with_book());
+        assert_eq!(seats(&plan), 3);
+        assert!(plan.rejected.is_empty());
+    }
+
+    #[test]
+    fn krx_and_nxt_books_of_one_symbol_take_two_extra_places() {
+        let mut m = SubscriptionManager::default();
+        m.hold(stock(0), feed(1, "k", RealType::BookKrx));
+        m.hold(stock(0), feed(2, "n", RealType::BookNxt));
+        assert_eq!(seats(&m.plan(t(0))), 3);
+    }
+
+    #[test]
+    fn a_venue_book_on_a_full_house_is_rejected_without_pushing_out_a_held_symbol() {
+        let mut m = SubscriptionManager::default();
+        fill(&mut m, REALTIME_LIMIT);
+        let before = m.plan(t(0));
+        m.hold(stock(0), feed(2, "n", RealType::BookNxt));
+        let plan = m.plan(t(1));
+        assert_eq!(plan.realtime, before.realtime);
+        assert_eq!(plan.rejected, BTreeSet::from([feed(2, "n", RealType::BookNxt)]));
+        assert_eq!(kinds(&plan, 0), BTreeSet::from([RealType::Trade]), "자리를 못 받은 보유자는 0D도 0E도 부르지 않는다");
+        assert_eq!(seats(&plan), REALTIME_LIMIT);
+    }
+
+    #[test]
+    fn a_rejected_venue_book_recovers_when_a_symbol_in_grace_frees_a_place() {
+        let mut m = SubscriptionManager::default();
+        fill(&mut m, REALTIME_LIMIT);
+        m.plan(t(0));
+        m.hold(stock(0), feed(2, "n", RealType::BookNxt));
+        assert_eq!(m.plan(t(1)).rejected.len(), 1);
+        m.release(stock(7), &cell(1, "s7"), t(2));
+        let plan = m.plan(t(2));
+        assert!(plan.rejected.is_empty());
+        assert!(!plan.realtime.contains(&stock(7)));
+        assert!(kinds(&plan, 0).contains(&RealType::BookNxt));
+        assert_eq!(seats(&plan), REALTIME_LIMIT);
+    }
+
+    #[test]
+    fn a_venue_book_takes_the_place_of_the_last_watch_row() {
+        let mut m = SubscriptionManager::default();
+        m.set_watch(ConnId(1), stocks(0..REALTIME_LIMIT), t(0));
+        m.plan(t(0));
+        m.hold(stock(0), feed(2, "n", RealType::BookNxt));
+        let plan = m.plan(t(1));
+        assert!(plan.rejected.contains(&watch(1, REALTIME_LIMIT - 1)));
+        assert!(!plan.rejected.contains(&feed(2, "n", RealType::BookNxt)));
+        assert_eq!(seats(&plan), REALTIME_LIMIT);
+    }
+
+    #[test]
+    fn a_new_symbol_that_needs_two_places_is_rejected_whole_when_only_one_is_left() {
+        let mut m = SubscriptionManager::default();
+        fill(&mut m, REALTIME_LIMIT - 1);
+        m.hold(stock(500), feed(2, "n", RealType::BookNxt));
+        let plan = m.plan(t(0));
+        assert!(!plan.realtime.contains(&stock(500)), "통합 자리만 받고 거래소 자리를 못 받은 채로 남지 않는다");
+        assert_eq!(plan.rejected, BTreeSet::from([feed(2, "n", RealType::BookNxt)]));
+        assert_eq!(seats(&plan), REALTIME_LIMIT - 1);
+    }
+
+    #[test]
+    fn the_last_holder_of_a_venue_book_leaving_drops_its_code_after_the_grace_and_keeps_the_rest() {
+        let mut m = SubscriptionManager::default();
+        m.hold(stock(0), feed(1, "a", RealType::Book));
+        m.hold(stock(0), feed(2, "n", RealType::BookNxt));
+        m.plan(t(0));
+        m.release(stock(0), &feed(2, "n", RealType::BookNxt), t(0));
+        assert!(kinds(&m.plan(t(29)), 0).contains(&RealType::BookNxt));
+        assert_eq!(kinds(&m.plan(t(30)), 0), with_book());
+        assert_eq!(seats(&m.plan(t(30))), 1);
+    }
+
+    #[test]
+    fn a_venue_book_resubscribed_within_the_grace_keeps_its_place() {
+        let mut m = SubscriptionManager::default();
+        m.hold(stock(0), feed(1, "n", RealType::BookNxt));
+        m.plan(t(0));
+        m.release(stock(0), &feed(1, "n", RealType::BookNxt), t(0));
+        m.hold(stock(0), feed(2, "n2", RealType::BookNxt));
+        let plan = m.plan(t(60));
+        assert!(kinds(&plan, 0).contains(&RealType::BookNxt));
+        assert_eq!(seats(&plan), 2);
+    }
+
+    #[test]
+    fn a_venue_book_in_grace_gives_its_place_to_a_new_symbol_before_a_held_one_moves() {
+        let mut m = SubscriptionManager::default();
+        fill(&mut m, REALTIME_LIMIT - 1);
+        m.hold(stock(0), feed(2, "n", RealType::BookNxt));
+        assert_eq!(seats(&m.plan(t(0))), REALTIME_LIMIT);
+        m.release(stock(0), &feed(2, "n", RealType::BookNxt), t(1));
+        m.hold(stock(500), cell(3, "new"));
+        let plan = m.plan(t(2));
+        assert!(plan.realtime.contains(&stock(500)) && plan.rejected.is_empty());
+        assert!(!kinds(&plan, 0).contains(&RealType::BookNxt));
+        assert_eq!(seats(&plan), REALTIME_LIMIT);
     }
 }

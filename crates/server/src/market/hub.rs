@@ -218,14 +218,14 @@ struct FeedSub {
 
 impl FeedSub {
     fn holder(&self, conn: ConnId, sub: &SubId) -> Holder {
-        Holder::Feed { conn, sub: sub.clone(), kind: real_type(self.kind) }
+        Holder::Feed { conn, sub: sub.clone(), kind: real_type(self.kind, self.venue) }
     }
 }
 
-fn real_type(kind: FeedKind) -> RealType {
+fn real_type(kind: FeedKind, venue: Venue) -> RealType {
     match kind {
         FeedKind::Trades => RealType::Trade,
-        FeedKind::Book => RealType::Book,
+        FeedKind::Book => RealType::book(venue),
         FeedKind::Program => RealType::Program,
         FeedKind::Brokers => RealType::Broker,
     }
@@ -406,6 +406,10 @@ impl MarketHub {
             push(&self.conns, &mut self.closing, conn, ServerMessage::SubError { sub: sub.0, code });
             return;
         }
+        let feed = match feed.kind {
+            FeedKind::Book => FeedSub { venue: quotes::effective_book_venue(feed.venue, self.directory.borrow().as_ref().and_then(|dir| dir.get(feed.symbol)).map(|info| info.nxt_enabled)), ..feed },
+            _ => feed,
+        };
         let old_cell = self.conns.get_mut(&conn).and_then(|c| c.subs.remove(&sub));
         let old_feed = self.conns.get_mut(&conn).and_then(|c| c.feeds.insert(sub.clone(), feed));
         if let Some(key) = old_cell {
@@ -897,7 +901,9 @@ impl MarketHub {
         }
         let message = feed_book(book, received_at);
         for (conn, sub) in self.feed_targets(book.symbol, FeedKind::Book) {
-            if let Some(c) = self.conns.get(&conn) {
+            if let Some(c) = self.conns.get(&conn)
+                && c.feeds[&sub].venue == book.venue
+            {
                 c.outbox.set_book(&sub, message.clone());
             }
         }
@@ -2982,6 +2988,7 @@ mod tests {
         asks[0] = Some(BookLevel { price: won(ask), qty: Volume(qty) });
         let book = BookSnapshot {
             symbol: samsung_symbol(),
+            venue: Venue::Combined,
             hhmmss: TimeOfDay::hms(9, 0, 50).unwrap(),
             asks,
             bids: [None; crate::kiwoom::stream::BOOK_DEPTH],
@@ -3128,6 +3135,115 @@ mod tests {
         tokio::time::sleep(Duration::from_secs(60)).await;
         settle().await;
         assert!(!logs.text().contains("0D 프레임 카운터"), "{}", logs.text());
+    }
+
+    fn book_event_on(h: &Harness, venue: Venue, ask: u64, qty: u64) -> StreamEvent {
+        let StreamEvent::Book { mut book, received_at } = book_event(h, ask, qty) else {
+            unreachable!("book_event는 Book이다")
+        };
+        book.venue = venue;
+        StreamEvent::Book { book, received_at }
+    }
+
+    fn desired_kinds(h: &Harness, symbol: Symbol) -> BTreeSet<RealType> {
+        h.desired.borrow().get(&symbol).cloned().unwrap_or_default()
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_krx_book_on_an_nxt_symbol_registers_its_own_code_and_keeps_trades_combined() {
+        let h = std_harness();
+        live(&h).await;
+        let (conn, _out) = connect(&h).await;
+        subscribe_feed(&h, conn, "k", FeedKind::Book, Venue::Krx);
+        settle().await;
+        assert_eq!(desired_kinds(&h, samsung_symbol()), BTreeSet::from([RealType::Trade, RealType::BookKrx, RealType::AfterHours]));
+        assert_eq!(crate::kiwoom::stream::seats(&h.desired.borrow()), 2);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_book_on_a_symbol_off_nxt_reuses_the_combined_code_for_krx_and_nxt() {
+        let h = std_harness();
+        live(&h).await;
+        let (conn, _out) = connect(&h).await;
+        let off_nxt = Symbol::parse(NOT_ON_NXT).unwrap();
+        h.hub.subscribe_feed(conn, sub("k"), off_nxt, FeedKind::Book, Venue::Krx);
+        h.hub.subscribe_feed(conn, sub("n"), off_nxt, FeedKind::Book, Venue::Nxt);
+        settle().await;
+        assert_eq!(desired_kinds(&h, off_nxt), BTreeSet::from([RealType::Trade, RealType::Book, RealType::AfterHours]));
+        assert_eq!(crate::kiwoom::stream::seats(&h.desired.borrow()), 1);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_book_frame_goes_only_to_the_subs_of_its_own_venue() {
+        let h = std_harness();
+        live(&h).await;
+        let (conn, out) = connect(&h).await;
+        subscribe_feed(&h, conn, "all", FeedKind::Book, Venue::Combined);
+        subscribe_feed(&h, conn, "krx", FeedKind::Book, Venue::Krx);
+        subscribe_feed(&h, conn, "nxt", FeedKind::Book, Venue::Nxt);
+        take(&out).await;
+        assert_eq!(desired_kinds(&h, samsung_symbol()), BTreeSet::from([RealType::Trade, RealType::Book, RealType::BookKrx, RealType::BookNxt, RealType::AfterHours]));
+        let fed = |msgs: Vec<ServerMessage>| -> Vec<String> { msgs.into_iter().filter_map(|m| if let ServerMessage::FeedBook { sub, .. } = m { Some(sub) } else { None }).collect() };
+        h.events.send(book_event_on(&h, Venue::Nxt, 101, 10)).await.unwrap();
+        assert_eq!(fed(take(&out).await), ["nxt"]);
+        h.events.send(book_event_on(&h, Venue::Combined, 102, 10)).await.unwrap();
+        assert_eq!(fed(take(&out).await), ["all"]);
+        h.events.send(book_event_on(&h, Venue::Krx, 103, 10)).await.unwrap();
+        assert_eq!(fed(take(&out).await), ["krx"]);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn the_last_holder_of_a_venue_book_leaving_drops_only_that_code_after_the_grace() {
+        let h = std_harness();
+        live(&h).await;
+        let (conn, _out) = connect(&h).await;
+        subscribe_feed(&h, conn, "all", FeedKind::Book, Venue::Combined);
+        subscribe_feed(&h, conn, "nxt", FeedKind::Book, Venue::Nxt);
+        settle().await;
+        h.hub.unsubscribe(conn, sub("nxt"));
+        tokio::time::sleep(Duration::from_secs(29)).await;
+        assert!(desired_kinds(&h, samsung_symbol()).contains(&RealType::BookNxt), "유예 안에는 거래소 코드 0D를 유지한다");
+        tokio::time::sleep(Duration::from_secs(2)).await;
+        assert_eq!(desired_kinds(&h, samsung_symbol()), BTreeSet::from([RealType::Trade, RealType::Book, RealType::AfterHours]));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_venue_book_resubscribed_within_the_grace_is_not_dropped() {
+        let h = std_harness();
+        live(&h).await;
+        let (conn, _out) = connect(&h).await;
+        subscribe_feed(&h, conn, "nxt", FeedKind::Book, Venue::Nxt);
+        settle().await;
+        h.hub.unsubscribe(conn, sub("nxt"));
+        tokio::time::sleep(Duration::from_secs(10)).await;
+        subscribe_feed(&h, conn, "nxt2", FeedKind::Book, Venue::Nxt);
+        tokio::time::sleep(Duration::from_secs(60)).await;
+        assert!(desired_kinds(&h, samsung_symbol()).contains(&RealType::BookNxt));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_venue_book_over_the_limit_is_rejected_and_comes_back_when_a_place_frees() {
+        let h = std_harness();
+        live(&h).await;
+        let (conn, out) = connect(&h).await;
+        for i in 0..REALTIME_LIMIT - 1 {
+            h.hub.subscribe(conn, sub(&format!("f{i}")), key(&listed_filler(i), Venue::Combined));
+        }
+        h.hub.subscribe(conn, sub("a"), samsung());
+        settle().await;
+        out.take(true);
+        subscribe_feed(&h, conn, "nxt", FeedKind::Book, Venue::Nxt);
+        settle().await;
+        let msgs = out.take(true).messages;
+        assert!(msgs.contains(&sub_error("nxt", SubErrorCode::RealtimeLimit)), "{msgs:?}");
+        assert!(!msgs.contains(&feed_subscribed("nxt", FeedKind::Book)));
+        assert_eq!(crate::kiwoom::stream::seats(&h.desired.borrow()), REALTIME_LIMIT);
+        h.hub.unsubscribe(conn, sub("f0"));
+        tokio::time::sleep(Duration::from_secs(2)).await;
+        let msgs = out.take(true).messages;
+        assert!(msgs.contains(&feed_subscribed("nxt", FeedKind::Book)), "유예 중인 종목의 자리를 받아 같은 sub로 다시 알린다: {msgs:?}");
+        assert!(desired_kinds(&h, samsung_symbol()).contains(&RealType::BookNxt));
+        assert_eq!(crate::kiwoom::stream::seats(&h.desired.borrow()), REALTIME_LIMIT);
     }
 
     #[tokio::test(start_paused = true)]

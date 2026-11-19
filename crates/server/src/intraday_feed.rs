@@ -12,7 +12,7 @@ use crate::bars::BarError;
 use crate::http::{ApiFailure, AppState, Lookup, symbol_list, venue_param};
 use crate::kiwoom::api::{MarketRequest, StockOrderBook, StockProgramTrades, StockTrades};
 use crate::kiwoom::rest::{ContKey, KiwoomRest, MergeScope, Priority};
-use crate::quotes::effective_venue;
+use crate::quotes::{effective_book_venue, effective_venue};
 
 pub const DEFAULT_TRADE_LIMIT: usize = 200;
 pub const MAX_TRADE_LIMIT: usize = 500;
@@ -39,9 +39,12 @@ fn symbol_code(stock: StockCode) -> api::SymbolCode {
     api::SymbolCode(Symbol::Stock(stock).as_wire())
 }
 
-async fn order_book(State(st): State<Arc<AppState>>, Path(code): Path<String>) -> Result<Json<api::OrderBook>, ApiFailure> {
+async fn order_book(State(st): State<Arc<AppState>>, Path(code): Path<String>, Query(q): Query<HashMap<String, String>>) -> Result<Json<api::OrderBook>, ApiFailure> {
+    let requested = venue_param(&q)?.unwrap_or(Venue::Combined);
     let stock = listed_stock(&st, &code).await?;
-    let page = st.rest.call(&StockOrderBook::new(stock), None, Priority::Screen, MergeScope::default()).await.map_err(|e| Lookup::OrderBook.failure(e.into(), st.clock.now()))?;
+    let nxt_enabled = symbol_list(&st).await?.get(Symbol::Stock(stock)).map(|info| info.nxt_enabled);
+    let venue = effective_book_venue(requested, nxt_enabled);
+    let page = st.rest.call(&StockOrderBook::new(stock, venue), None, Priority::Screen, MergeScope::default()).await.map_err(|e| Lookup::OrderBook.failure(e.into(), st.clock.now()))?;
     let book = page.body;
     Ok(Json(api::OrderBook {
         symbol: symbol_code(stock),

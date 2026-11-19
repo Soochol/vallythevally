@@ -186,7 +186,7 @@ pub struct JumpBarsPage {
 }
 
 /// `/api/ws` 브라우저 → 서버. `sub`는 브라우저가 정하는 연결 안에서 유일한 문자열이다.
-/// `venue` 규칙은 `GET /api/bars`와 같다(주식에서 빼면 combined, 지수에 주면 bad_request).
+/// `venue` 규칙은 `GET /api/bars`와 같다(주식에서 빼면 combined, 지수에 주면 bad_request). 구독 하나의 `venue`는 체결(`trades`)과 호가(`book`)에만 쓰고, 나머지 종류는 통합이다.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(tag = "type", rename_all = "snake_case", rename_all_fields = "camelCase")]
 #[ts(export)]
@@ -831,7 +831,7 @@ pub struct OrderBookLevel {
     pub quantity: u64,
 }
 
-/// `GET /api/symbols/:code/order-book` → 통합 시세(ka10004)의 10호가. 지수는 400 `bad_request`.
+/// `GET /api/symbols/:code/order-book?venue=` → ka10004의 10호가. `venue`는 `combined`(기본)·`krx`·`nxt`다. NXT에서 거래되지 않는 종목은 어느 값이든 통합 호가다. 지수는 400 `bad_request`.
 /// 매도·매수 모두 1호가부터 순서대로이고, 키움이 가격을 주지 않은 단은 빠진다.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
