@@ -59,7 +59,6 @@ impl fmt::Display for ConfigError {
 
 impl std::error::Error for ConfigError {}
 
-/// 서버가 자기 이름으로 받는 Tailscale MagicDNS 전체 이름. 소문자로 맞춘 정확한 이름만 담는다.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct TailnetHosts(Vec<String>);
 
