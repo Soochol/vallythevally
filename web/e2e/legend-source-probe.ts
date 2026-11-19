@@ -74,7 +74,7 @@ export async function installLegendSourceProbe(page: Page, holdWorkers = false):
     const response = await route.fetch();
     let body = await response.text();
     if (!body.includes("priceLegendValues()")) return route.fulfill({ response, body });
-    const measurement = /function \w+\((\w+)\)\{(?=(?:let|const) \w+=\1\.map\(\(\{element:\w+\}\)=>getComputedStyle\(\w+\)\))/g;
+    const measurement = /function [\w$]+\(([\w$]+)\)\{(?=(?:let|const) [\w$]+=\1\.map\(\(\{element:[\w$]+\}\)=>getComputedStyle\([\w$]+\)\))/g;
     expect([...body.matchAll(measurement)]).toHaveLength(1);
     body = body.replace(measurement, (match, fields: string) => `${match}for(const field of ${fields})window.legendSources.rawAlternatives.set(field.element,Array.from(field.alternatives));`);
     const entries = [
