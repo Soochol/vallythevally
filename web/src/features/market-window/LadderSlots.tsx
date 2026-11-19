@@ -3,7 +3,8 @@ import { formatPrice } from "../../lib/format";
 import { formatStrength } from "./format";
 import type { InfoPager, LadderTrades } from "./useLadderSlots";
 import { priceTone } from "./PriceLadder";
-import { INFO_PAGES, type QuoteInfo } from "./quoteInfo";
+import type { LadderRow } from "./ladder";
+import { firstShownInfoSlot, INFO_PAGES, type QuoteInfo } from "./quoteInfo";
 
 const pagerLabel = (page: number): string => `정보 ${page + 1}/${INFO_PAGES.length}쪽, 눌러서 다음 쪽`;
 
@@ -15,25 +16,28 @@ function PageDots({ page }: { page: number }) {
   );
 }
 
-export const infoSlot = (items: readonly (QuoteInfo | null)[], pager: InfoPager) => (slot: number): ReactNode => {
-  const item = items[slot];
-  if (!item) return <div className="mw-slot mw-info-fill" onClick={pager.next} />;
-  if (slot > 0) {
+export const infoSlot = (items: readonly (QuoteInfo | null)[], pager: InfoPager, rows: readonly LadderRow[]) => {
+  const pagerSlot = firstShownInfoSlot(rows, items);
+  return (slot: number): ReactNode => {
+    const item = items[slot];
+    if (!item) return <div className="mw-slot mw-info-fill" onClick={pager.next} />;
+    if (slot !== pagerSlot) {
+      return (
+        <div className="mw-slot mw-info" data-testid="ladder-info" data-label={item.label} onClick={pager.next}>
+          <span>{item.label}</span>
+          <b data-tone={item.tone ?? undefined}>{item.value}</b>
+        </div>
+      );
+    }
     return (
-      <div className="mw-slot mw-info" data-testid="ladder-info" data-label={item.label} onClick={pager.next}>
+      <div className="mw-slot mw-info" data-testid="ladder-info" data-label={item.label} data-pager="" role="button" tabIndex={0} aria-label={pagerLabel(pager.page)} onClick={pager.next}
+        onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); pager.next(); } }}>
         <span>{item.label}</span>
+        <PageDots page={pager.page} />
         <b data-tone={item.tone ?? undefined}>{item.value}</b>
       </div>
     );
-  }
-  return (
-    <div className="mw-slot mw-info" data-testid="ladder-info" data-label={item.label} data-pager="" role="button" tabIndex={0} aria-label={pagerLabel(pager.page)} onClick={pager.next}
-      onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); pager.next(); } }}>
-      <span>{item.label}</span>
-      <PageDots page={pager.page} />
-      <b data-tone={item.tone ?? undefined}>{item.value}</b>
-    </div>
-  );
+  };
 };
 
 export const scrollAction = (scrollTop: number): "hold" | "release" => (scrollTop > 0 ? "hold" : "release");

@@ -89,6 +89,9 @@ export function expectedInfoItems(expected: ExpectedFillInput, previousClose: nu
   ];
 }
 
+export const firstShownInfoSlot = (rows: readonly LadderRow[], slots: readonly (QuoteInfo | null)[]): number =>
+  slots.findIndex((item, slot) => item !== null && rows[slot]?.bid == null);
+
 export function expectedItemsOnPage(page: InfoPage, expected: ExpectedFillInput | null, previousClose: number | null): QuoteInfo[] {
   return page === 0 && expected !== null ? expectedInfoItems(expected, previousClose) : [];
 }

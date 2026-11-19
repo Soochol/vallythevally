@@ -1,6 +1,6 @@
 import { expect, test } from "vitest";
 import { buildLadder } from "./ladder";
-import { expectedInfoItems, expectedItemsOnPage, nextInfoPage, placeInfoItems, quoteInfoItems } from "./quoteInfo";
+import { expectedInfoItems, expectedItemsOnPage, firstShownInfoSlot, nextInfoPage, placeInfoItems, quoteInfoItems } from "./quoteInfo";
 
 const known = {
   price: 70_300,
@@ -103,4 +103,12 @@ test("예상체결 항목은 1쪽에만 있고 2쪽과 예상체결이 없을 �
 
 test("2쪽 8항목은 예상체결이 없으므로 1~8행을 차지하고 9행은 비어 있다", () => {
   expect(labels(placeInfoItems(rowsWithBidAt(), quoteInfoItems(1, known), []))).toEqual(["상한가", "하한가", "52주 최고", "52주 최저", "시가총액", "PER", "PBR", "외국인소진율", null]);
+});
+
+test("키보드 초점 칸은 그려지는 첫 정보 칸이고 맨 윗행에 매수 잔량이 있으면 그 다음 칸이다", () => {
+  const plain = rowsWithBidAt();
+  expect(firstShownInfoSlot(plain, placeInfoItems(plain, base, []))).toBe(0);
+  const crossed = rowsWithBidAt(1);
+  expect(crossed[0]!.bid).not.toBeNull();
+  expect(firstShownInfoSlot(crossed, placeInfoItems(crossed, base, []))).toBe(1);
 });
