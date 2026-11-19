@@ -17,6 +17,7 @@ export interface LadderRow {
   readonly askRatio: number;
   readonly bidRatio: number;
   readonly current: boolean;
+  readonly repeat: boolean;
   readonly rate: number | null;
 }
 
@@ -110,16 +111,22 @@ export function buildLadderRows(prices: readonly (number | null)[], { asks, bids
   }));
   const largest = Math.max(0, ...priced.flatMap(({ ask, bid }) => [usableQuantity(ask), usableQuantity(bid)]));
   const ratio = (level: BookLevel | null): number => (largest > 0 ? usableQuantity(level) / largest : 0);
-  return priced.map(({ price, ask, bid }, index) => ({
-    key: price === null ? `blank-${index}` : sidesSplit ? `${index < ROWS_ABOVE_BASE ? "ask" : "bid"}-${price}` : `p-${price}`,
-    price,
-    ask,
-    bid,
-    askRatio: ratio(ask),
-    bidRatio: ratio(bid),
-    current: price !== null && price === lastPrice,
-    rate: price !== null && previousClose !== null && previousClose > 0 ? ((price - previousClose) / previousClose) * 100 : null,
-  }));
+  const shown = new Set<number>();
+  return priced.map(({ price, ask, bid }, index) => {
+    const repeat = price !== null && shown.has(price);
+    if (price !== null) shown.add(price);
+    return {
+      key: price === null ? `blank-${index}` : sidesSplit ? `${index < ROWS_ABOVE_BASE ? "ask" : "bid"}-${price}` : `p-${price}`,
+      price,
+      ask,
+      bid,
+      askRatio: ratio(ask),
+      bidRatio: ratio(bid),
+      current: price !== null && price === lastPrice && !repeat,
+      repeat,
+      rate: price !== null && previousClose !== null && previousClose > 0 ? ((price - previousClose) / previousClose) * 100 : null,
+    };
+  });
 }
 
 export function buildLadder(input: LadderInput): LadderRow[] {

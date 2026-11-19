@@ -106,7 +106,7 @@ export function OrderLadder({ rows, previousClose, groups, writable, previewQuan
         onPointerEnter={() => onHover({ side, price })}
         onPointerLeave={() => onHover(null)}
       >
-        {group
+        {group && !row.repeat
           ? <button type="button" className="od-chip" data-testid="order-chip" data-side={side} data-price={price} data-dragging={view?.group === group ? "" : undefined}
               aria-label={`${SIDE_LABEL[side]} ${formatPrice(price, false)}원 ${formatShares(group.quantity)} 주문`}
               onPointerDown={(e) => { if (writable) begin(group, e); }}

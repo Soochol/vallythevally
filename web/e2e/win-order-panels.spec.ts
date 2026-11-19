@@ -526,6 +526,20 @@ test("단일가 호가에서 칩을 끄는 도중 단 가격이 바뀌어도 놓
   expect(writesTo(api, "modify")[0]!.body).toMatchObject({ orderNo: "0000001", price: 69_400 });
 });
 
+test("교차 단일가 호가에서 같은 가격이 두 행에 있어도 주문 하나는 칩 하나이고 두 행 모두 그 가격으로 주문 칸이 열린다", async ({ page, scenario }) => {
+  ordersOn(scenario);
+  const api = tradingApi(scenario, [openOrder("0000001", "sell", 70_000, 5)]);
+  await openOrderWindow(page, scenario);
+  await emitSingleBook(scenario, [{ price: 70_000, qty: 5 }, { price: 70_100, qty: 6 }, { price: 70_200, qty: 7 }], [{ price: 70_100, qty: 8 }, { price: 70_000, qty: 9 }, { price: 69_900, qty: 10 }]);
+  await expect(ladderRows(page).locator(".mw-px-num")).toHaveCount(6);
+  await expect(page.getByTestId("order-chip")).toHaveCount(1);
+  await expect(page.getByTestId("order-chip")).toHaveAttribute("data-price", "70000");
+  await expect(page.locator(".mw-lr[data-current]")).toHaveCount(1);
+  await cellAt(page, "buy", 70_100).last().dblclick();
+  await pollSaved(() => writesTo(api, "place")).toHaveLength(1);
+  expect(writesTo(api, "place")[0]!.body).toMatchObject({ side: "buy", price: 70_100 });
+});
+
 test("교차 호가로 위 오른쪽 칸에 매수 잔량이 있으면 그 행은 잔량을 보이고 그 정보 항목은 보이지 않는다", async ({ page, scenario }) => {
   ordersOn(scenario);
   tradingApi(scenario);

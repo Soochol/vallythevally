@@ -204,3 +204,10 @@ test("단일가 행의 가격 목록을 붙잡고 새 호가로 다시 그리면
   expect(rows.slice(7, 10).map((row) => row.ask?.quantity ?? null)).toEqual([1, 2, null]);
   expect(rows.slice(10, 13).map((row) => row.bid?.quantity ?? null)).toEqual([4, null, null]);
 });
+
+test("교차 단일가 호가에서 같은 가격이 두 행에 있으면 현재가 표시는 첫 행에만 붙고 뒤 행은 반복으로 표시된다", () => {
+  const rows = auction({ asks: [level(70_000, 5), level(70_100, 6), level(70_200, 7)], bids: [level(70_100, 8), level(70_000, 9), level(69_900, 10)], lastPrice: 70_100, previousClose: 70_000, bounds: NO_BOUNDS });
+  expect(rows.filter((row) => row.current).map((row) => rows.indexOf(row))).toEqual([8]);
+  expect(rows.map((row, index) => [index, row.repeat]).filter(([, repeat]) => repeat)).toEqual([[10, true], [11, true]]);
+  expect(buildLadder({ asks: [], bids: [], lastPrice: 70_000, previousClose: null, bounds: NO_BOUNDS, tickRule: "stock" }).some((row) => row.repeat)).toBe(false);
+});

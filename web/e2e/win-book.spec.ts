@@ -122,6 +122,16 @@ test("동시호가 6호가는 매도 3단이 가운데 선 위, 매수 3단이 �
   for (const label of ["현재가", "전일대비", "등락률", "거래량", "기준가", "상한가", "하한가"]) await expect(info.filter({ hasText: label })).toBeVisible();
 });
 
+test("교차 동시호가 6호가에서 같은 가격이 두 행에 있어도 현재가 행은 하나다", async ({ page, scenario }) => {
+  await open(page, scenario, 70_000);
+  const bookSub = await subOf(scenario, "book");
+  scenario.live.emit({ type: "feed_book", sub: bookSub, book: liveOf([[70_000, 30], [70_100, 20], [70_200, 10]], [[70_100, 25], [70_000, 15], [69_900, 5]], [60, 45]) });
+  await emitTrade(scenario, 1, 70_100, 1);
+  await expect(ladderRows(page).locator(".mw-px-num")).toHaveCount(6);
+  await expect(page.locator(".mw-lr[data-current]")).toHaveCount(1);
+  await expect(page.locator(".mw-lr[data-current]")).toContainText("70,100");
+});
+
 test("동시호가 6호가 뒤에 10단 호가가 오면 현재가 가운데 격자로 돌아간다", async ({ page, scenario }) => {
   bookWindow(scenario, CODE);
   replyBook(scenario, 810_000);

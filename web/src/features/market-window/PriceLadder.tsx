@@ -53,7 +53,7 @@ function Price({ row, previousClose, mark }: { row: LadderRow; previousClose: nu
   return (
     <div className={`mw-px ${TONE[tone]}`}>
       <span className="mw-px-num">
-        {mark?.price === row.price && <i className="mw-px-mark" data-testid="ladder-mark" title={mark.label} />}
+        {mark?.price === row.price && !row.repeat && <i className="mw-px-mark" data-testid="ladder-mark" title={mark.label} />}
         {formatPrice(row.price, false)}
       </span>
       {row.rate !== null && <small>{formatPercent(row.rate)}</small>}
@@ -67,7 +67,7 @@ export function PriceLadder({ rows, previousClose, slots, rowSlots, mark, expect
   return (
     <div className="mw-ladder" data-testid="price-ladder">
       {rows.map((row, index) => (
-        <div key={row.key} className="mw-lr" data-side={index < firstBidIndex ? "ask" : "bid"} data-current={row.current ? "" : undefined} data-expected={expectedPrice !== null && row.price === expectedPrice ? "" : undefined} data-empty={row.price === null ? "" : undefined} style={{ gridTemplateColumns: columns }}>
+        <div key={row.key} className="mw-lr" data-side={index < firstBidIndex ? "ask" : "bid"} data-current={row.current ? "" : undefined} data-expected={expectedPrice !== null && row.price === expectedPrice && !row.repeat ? "" : undefined} data-empty={row.price === null ? "" : undefined} style={{ gridTemplateColumns: columns }}>
           {slots?.left?.(row)}
           {row.ask ? <Quantity side="ask" level={row.ask} ratio={row.askRatio} /> : <div className="mw-qty" data-side="ask">{index >= firstBottomLeft && rowSlots?.bottomLeft?.(index - firstBottomLeft)}</div>}
           <Price row={row} previousClose={previousClose} mark={mark} />
