@@ -16,7 +16,7 @@ pub struct SwitchRecord {
     pub account_ref: Option<String>,
     #[serde(default, rename = "accountNumberTail")]
     pub account_tail: Option<String>,
-    #[serde(default, rename = "accountTail", skip_serializing)]
+    #[serde(default, rename = "accountTail", skip_serializing_if = "Option::is_none")]
     pub legacy_product_tail: Option<String>,
     #[serde(default)]
     pub confirm_won: Option<u64>,

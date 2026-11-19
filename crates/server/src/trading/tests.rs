@@ -922,3 +922,17 @@ async fn a_legacy_switch_record_that_cannot_be_written_stays_unusable() {
     assert!(matches!(error, TradingError::FileUnusable(_)), "{error:?}");
     assert_eq!(std::fs::read_to_string(&path).unwrap(), before);
 }
+
+#[tokio::test]
+async fn changing_the_margin_policy_keeps_a_legacy_switch_record_usable() {
+    let state = tempfile::tempdir().unwrap();
+    let (store, path) = legacy_switch_store(state.path());
+    enable_then_rewrite_as_legacy(&path).await;
+
+    let (trading, ..) = direct_trading_with_example(store).await;
+    trading.set_margin_policy(crate::api::OrdersMargin { policy: crate::api::MarginPolicy::AllowMargin }).await.unwrap();
+    let status = trading.status();
+    assert_eq!((status.state, status.account_tail), (crate::api::OrdersState::On, None));
+    trading.balance().await.unwrap();
+    assert_eq!(trading.status().account_tail.as_deref(), Some("78"));
+}
