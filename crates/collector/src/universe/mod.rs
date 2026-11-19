@@ -20,6 +20,7 @@ pub enum UniverseError {
     Store(StoreError),
     NoFallback { reason: ReplaceReason, detail: String, skipped: Vec<SkippedFile> },
     TodayListUnreadable { date: u32, cause: StoreError, reason: ReplaceReason, detail: String },
+    ReplacementNotWritten { moved: MovedAside, cause: StoreError },
     NoMorningList { date: u32, cause: StoreError },
     AfterCloseFetch { detail: String },
 }
@@ -39,6 +40,12 @@ impl std::fmt::Display for UniverseError {
             UniverseError::TodayListUnreadable { date, cause, detail, .. } => {
                 write!(formatter, "{date} 목록 파일을 읽을 수 없고 새로 받은 목록도 쓰지 못하며({detail}) 대신 쓸 읽히는 이전 목록도 없어 파일을 그대로 둡니다: {cause}")
             }
+            UniverseError::ReplacementNotWritten { moved, cause } => write!(
+                formatter,
+                "읽을 수 없는 그날 목록 파일을 {}로 옮겼지만 이전 목록으로 대체하지 못했습니다({}): {cause}",
+                moved.path.display(),
+                moved.cause
+            ),
             UniverseError::NoMorningList { date, cause } => write!(formatter, "{date} 아침 목록이 없습니다: {cause}"),
             UniverseError::AfterCloseFetch { detail } => write!(formatter, "마감 뒤 목록을 받지 못했습니다: {detail}"),
         }
@@ -143,6 +150,7 @@ pub async fn collect_morning(rest: &KiwoomRest, data_dir: &Path, date: u32, fetc
     let mut unreadable_today = None;
     let existing = match store::read_universe_if_present(data_dir, date) {
         Ok(existing) => existing,
+        Err(error @ StoreError::Read { .. }) => return Err(error.into()),
         Err(error) => {
             skipped.push(SkippedFile { date, cause: error.to_string() });
             unreadable_today = Some(error);
@@ -210,7 +218,12 @@ pub async fn collect_morning(rest: &KiwoomRest, data_dir: &Path, date: u32, fetc
                 diff: Diff::default(),
                 replaced: Some(replacement),
             };
-            store::write_universe(data_dir, &file)?;
+            if let Err(cause) = store::write_universe(data_dir, &file) {
+                return Err(match moved_aside {
+                    Some(moved) => UniverseError::ReplacementNotWritten { moved, cause },
+                    None => cause.into(),
+                });
+            }
             Ok(Morning { file, written: Written::ReplacementList, moved_aside, skipped, warnings })
         }
     }

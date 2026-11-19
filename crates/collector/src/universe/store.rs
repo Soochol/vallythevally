@@ -13,13 +13,14 @@ const FOLDER: &str = "universe";
 #[derive(Debug)]
 pub enum StoreError {
     Read { path: PathBuf, cause: String },
+    Malformed { path: PathBuf, cause: String },
     Write { path: PathBuf, cause: io::Error },
 }
 
 impl std::fmt::Display for StoreError {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            StoreError::Read { path, cause } => write!(formatter, "{}를 읽을 수 없습니다: {cause}", path.display()),
+            StoreError::Read { path, cause } | StoreError::Malformed { path, cause } => write!(formatter, "{}를 읽을 수 없습니다: {cause}", path.display()),
             StoreError::Write { path, cause } => write!(formatter, "{}를 쓸 수 없습니다: {cause}", path.display()),
         }
     }
@@ -36,9 +37,8 @@ pub fn universe_path(data_dir: &Path, date: u32) -> PathBuf {
 }
 
 fn read_json<T: DeserializeOwned>(path: &Path) -> Result<T, StoreError> {
-    let read_error = |cause: String| StoreError::Read { path: path.to_owned(), cause };
-    let bytes = fs::read(path).map_err(|error| read_error(error.to_string()))?;
-    serde_json::from_slice(&bytes).map_err(|error| read_error(error.to_string()))
+    let bytes = fs::read(path).map_err(|error| StoreError::Read { path: path.to_owned(), cause: error.to_string() })?;
+    serde_json::from_slice(&bytes).map_err(|error| StoreError::Malformed { path: path.to_owned(), cause: error.to_string() })
 }
 
 fn write_json<T: Serialize>(path: PathBuf, value: &T) -> Result<(), StoreError> {
@@ -51,7 +51,7 @@ pub fn read_universe(data_dir: &Path, date: u32) -> Result<UniverseFile, StoreEr
     let path = universe_path(data_dir, date);
     let file: UniverseFile = read_json(&path)?;
     if file.format_version != FORMAT_VERSION {
-        return Err(StoreError::Read { path, cause: format!("형식 버전 {}은 지원하지 않습니다", file.format_version) });
+        return Err(StoreError::Malformed { path, cause: format!("형식 버전 {}은 지원하지 않습니다", file.format_version) });
     }
     Ok(file)
 }
