@@ -33,15 +33,34 @@ export function useTradeTape(socket: Pick<MarketSocketLike, "subscribeFeed">, co
       else if (event.type === "feed_subscribed") setFeedError(null);
       else if (event.type === "sub_error") setFeedError(event.code);
     });
-    getJson<TradeTape>(tradeHistoryPath(code, venue, historyPages), controller.signal).then(
-      (tape) => {
-        dispatch({ type: "history", tape });
-        setHistory("ready");
-      },
-      () => {
+    const settle = (tape: TradeTape) => {
+      dispatch({ type: "history", tape });
+      setHistory("ready");
+    };
+    const fetchTape = (pages?: number) => getJson<TradeTape>(tradeHistoryPath(code, venue, pages), controller.signal);
+    if (historyPages !== undefined) {
+      fetchTape(historyPages).then(settle, () => {
         if (!controller.signal.aborted) setHistory("failed");
-      },
-    );
+      });
+    } else {
+      let fullSettled = false;
+      fetchTape(1).then(
+        (tape) => {
+          if (!fullSettled) settle(tape);
+        },
+        () => {},
+      );
+      fetchTape().then(
+        (tape) => {
+          fullSettled = true;
+          settle(tape);
+        },
+        () => {
+          fullSettled = true;
+          if (!controller.signal.aborted) setHistory("failed");
+        },
+      );
+    }
     return () => {
       controller.abort();
       unsubscribe();

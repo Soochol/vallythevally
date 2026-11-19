@@ -25,6 +25,14 @@ test("조회와 실시간이 겹치면 첫 실시간 체결 시각 이상인 조
   expect(times(liveFirst)).toEqual(["l202", "h101"]);
 });
 
+test("조회가 두 번 들어오면 뒤의 것으로 바뀌고 실시간 행과 겹치지 않는다", () => {
+  const firstPage = tapeOf([print("10:00:03", 103, 1)]);
+  const full = tapeOf([print("10:00:03", 103, 1), print("10:00:02", 102, 1), print("10:00:01", 101, 1)]);
+  expect(times(run({ type: "history", tape: firstPage }, { type: "history", tape: full }))).toEqual(["h103", "h102", "h101"]);
+  const withLive = run({ type: "live", trades: [live("10:00:02", 202, 5)], receivedAt: 0 }, { type: "history", tape: firstPage }, { type: "history", tape: full });
+  expect(times(withLive)).toEqual(["l202", "h101"]);
+});
+
 test("500줄을 넘으면 오래된 줄부터 버린다", () => {
   const frames: TapeAction[] = Array.from({ length: MAX_TAPE_ROWS + 20 }, (_, i) => ({ type: "live", trades: [live("10:00:00", 1000 + i, 1)], receivedAt: 0 }));
   const entries = visibleEntries(run(...frames), "combined", 0).entries;

@@ -142,3 +142,69 @@ test("끊김과 이어짐은 목록에 구분 줄 하나로 보이고 최소 금
   await expect(rows(page)).toHaveCount(1);
   await expect(rows(page).first()).toContainText("71,100");
 });
+
+const TRADES_PATH = "/api/symbols/005930/trades";
+const isFirstPage = (url: URL) => url.pathname === TRADES_PATH && url.searchParams.get("pages") === "1";
+const isFullTape = (url: URL) => url.pathname === TRADES_PATH && !url.searchParams.has("pages");
+const FIRST_PAGE: TradePrint[] = [print("10:00:03", 71_300, 20, "krx"), print("10:00:02", 71_200, 15, "krx")];
+const tradesBody = (trades: TradePrint[]) => ({ body: { symbol: "005930", venue: "combined", trades, skippedRows: 0 } });
+
+test("첫 쪽이 오면 전체 조회를 기다리지 않고 행을 그리고 전체가 오면 그것으로 바꾼다", async ({ page, scenario }) => {
+  const full = scenario.hold(isFullTape);
+  scenario.reply(isFirstPage, tradesBody(FIRST_PAGE));
+  await openTradesWindow(page, scenario);
+  await expect(rows(page)).toHaveCount(2);
+  await expect(page.getByTestId("trades-window")).not.toContainText("불러오는 중");
+
+  full.reply(tradesBody(TODAY));
+  await expect(rows(page)).toHaveCount(4);
+  await expect(rows(page).last()).toContainText("09:59:59");
+});
+
+test("전체 조회가 실패하면 실패 문구를 띄우되 첫 쪽 행은 남긴다", async ({ page, scenario }) => {
+  scenario.reply(isFirstPage, tradesBody(FIRST_PAGE));
+  scenario.reply(isFullTape, { status: 503, body: { error: { code: "internal", message: "서버가 응답하지 못했습니다", reason: null, retryAt: null, manualActionRequired: false } } });
+  await openTradesWindow(page, scenario);
+  await expect(page.getByRole("alert").filter({ hasText: "당일 체결을 불러오지 못했습니다" })).toBeVisible();
+  await expect(rows(page)).toHaveCount(2);
+});
+
+test("첫 쪽을 받은 뒤 종목을 바꾸면 앞 종목의 전체 응답이 풀려도 새 종목 체결창에 들어가지 않는다", async ({ page, scenario }) => {
+  const full = scenario.hold(isFullTape);
+  scenario.reply(isFirstPage, tradesBody(FIRST_PAGE));
+  scenario.reply((url) => url.pathname === "/api/symbols/000660/trades", { body: { symbol: "000660", venue: "combined", trades: [print("10:00:01", 190_000, 5, "krx")], skippedRows: 0 } });
+  const layout = scenario.documents.layout(DEFAULT_LAYOUT_ID);
+  const chart = (id: string, symbol: string): LayoutWindow => ({ id, link: null, kind: "chart", symbol, venue: "combined", period: "D", chartSettings: SETTINGS });
+  const windows: LayoutWindow[] = [chart("cell-0", "005930"), chart("cell-1", "000660"), ...layout.windows.filter((w) => w.kind !== "chart")];
+  scenario.documents.saveLayout({ ...layout, windows, placement: {}, revision: layout.revision + 1 });
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto("/");
+  await expect(cell(page)).toHaveAttribute("aria-busy", "false");
+  await addButton(page).click();
+  await page.getByRole("menu", { name: "창 더하기" }).getByRole("menuitem", { name: /^체결/ }).click();
+  await expect(page.getByTestId("trades-window")).toHaveAttribute("data-symbol", "005930");
+  await expect(rows(page)).toHaveCount(2);
+  await full.received;
+
+  await cell(page, 2).click();
+  await expect(page.getByTestId("trades-window")).toHaveAttribute("data-symbol", "000660");
+  await expect(rows(page)).toHaveCount(1);
+  full.reply(tradesBody(TODAY));
+  await expect(rows(page)).toHaveCount(1);
+  await expect(page.getByTestId("trades-window")).not.toContainText("71,");
+});
+
+test("체결창은 /api/quotes 대신 당일 요약을 한 번 읽고 10초가 지나도 다시 부르지 않으며 전일 종가 대비 색을 보인다", async ({ page, scenario }) => {
+  tradesOf(scenario, "combined");
+  scenario.reply((url) => url.pathname === "/api/symbols/005930/day-summary", { body: { symbol: "005930", venue: "combined", price: 71_300, previousClose: 71_200, open: null, high: null, low: null, volume: null, tradeValueWon: null, t: null } });
+  await page.clock.install({ time: scenario.now });
+  await openTradesWindow(page, scenario);
+  await expect(rows(page)).toHaveCount(4);
+  const count = (path: string) => scenario.requests.filter((r) => new URL(r.url()).pathname === path).length;
+  await pollSaved(() => count("/api/symbols/005930/day-summary")).toBe(1);
+  await expect(rows(page).first().locator(".tr-price")).toHaveAttribute("data-dir", "up");
+  await expect(rows(page).nth(3).locator(".tr-price")).toHaveAttribute("data-dir", "down");
+  await page.clock.fastForward(10_000);
+  expect(count("/api/symbols/005930/day-summary")).toBe(1);
+  expect(count("/api/quotes")).toBe(0);
+});

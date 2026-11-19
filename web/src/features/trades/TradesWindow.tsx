@@ -2,7 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import type { SymbolCode } from "../../api/generated/SymbolCode";
 import type { Venue } from "../../api/generated/Venue";
-import { fetchQuotes } from "../../api/userData";
+import { daySummaryQueryKey, fetchDaySummary } from "../../api/userData";
 import type { WindowId } from "../../layout/kinds";
 import { formatDecimal } from "../../lib/format";
 import { marketSocket } from "../../stores/realtime";
@@ -23,9 +23,8 @@ export function TradesWindow({ id }: { id: WindowId }) {
 }
 
 function usePreviousClose(code: SymbolCode, venue: Venue): number | null {
-  const quote = useQuery({ queryKey: ["trade-window-quote", code, venue], queryFn: ({ signal }) => fetchQuotes([code], venue, signal), staleTime: 60_000 });
-  const first = quote.data?.[0];
-  return first === undefined ? null : first.price - first.change;
+  const summary = useQuery({ queryKey: daySummaryQueryKey(code, venue), queryFn: ({ signal }) => fetchDaySummary(code, venue, signal), staleTime: 60_000 });
+  return summary.data?.previousClose ?? null;
 }
 
 function TradesBody({ code, venue }: { code: SymbolCode; venue: Venue }) {
