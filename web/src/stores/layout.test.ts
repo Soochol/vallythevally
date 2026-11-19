@@ -97,11 +97,11 @@ test("같은 색의 차트 창 하나의 종목을 바꾸면 그 색의 차트�
     off: ["000660", "D"],
     b1: ["035420", "5m"],
   });
-  expect(change).toEqual({ changed: ["a1", "a2"], notice: "연동 A: 차트 2개가 SK하이닉스로 바뀌었습니다" });
+  expect(change).toEqual({ changed: ["a1", "a2"], notice: null });
   expect(state().revision).toBe(1);
 });
 
-test("색이 다른 차트와 색이 꺼진 차트는 함께 바뀌지 않고, 한 창만 바뀌면 알리지 않는다", () => {
+test("색이 다른 차트와 색이 꺼진 차트는 함께 바뀌지 않고, 알리지 않는다", () => {
   linked();
   expect(state().setSymbol(windowId("off"), SAMSUNG)).toEqual({ changed: ["off"], notice: null });
   expect(state().setSymbol(windowId("b1"), SK)).toEqual({ changed: ["b1"], notice: null });
@@ -113,10 +113,10 @@ test("색이 다른 차트와 색이 꺼진 차트는 함께 바뀌지 않고, �
   });
 });
 
-test("여러 차트가 함께 바뀐 알림은 받침에 맞는 조사를 쓰고, 이름을 모르면 종목 코드를 쓴다", () => {
+test("여러 차트가 함께 바뀌어도 알림을 돌려주지 않고, 이미 그 종목이면 바뀐 차트가 없다", () => {
   linked();
-  expect(state().setSymbol(windowId("a1"), { code: "051910", name: "LG화학" }).notice).toBe("연동 A: 차트 2개가 LG화학으로 바뀌었습니다");
-  expect(state().setSymbol(windowId("a1"), { code: "000270" }).notice).toBe("연동 A: 차트 2개가 000270으로 바뀌었습니다");
+  expect(state().setSymbol(windowId("a1"), { code: "051910", name: "LG화학" })).toEqual({ changed: ["a1", "a2"], notice: null });
+  expect(state().setSymbol(windowId("a1"), { code: "000270" })).toEqual({ changed: ["a1", "a2"], notice: null });
   expect(state().setSymbol(windowId("a1"), { code: "000270" })).toEqual({ changed: [], notice: null });
 });
 
@@ -143,11 +143,11 @@ test("같은 연동 색을 쓰는 다른 창만 센다. 연동 색은 지표 창
   expect(state().revision).toBe(1);
 });
 
-test("색 A인 보내는 창이 종목을 보내면 A인 차트만 바뀌고, A인 차트가 없으면 아무것도 바꾸지 않고 알림 문구를 돌려준다", () => {
+test("색 A인 보내는 창이 종목을 보내면 A인 차트만 바뀌고, A인 차트가 없으면 아무것도 바꾸지 않고 알림도 없다", () => {
   linked();
   state().setLink(windowId("watchlist"), "a");
   const revision = state().revision;
-  expect(state().sendSymbol(windowId("watchlist"), windowId("off"), SK)).toEqual({ changed: ["a1", "a2"], notice: "연동 A: 차트 2개가 SK하이닉스로 바뀌었습니다" });
+  expect(state().sendSymbol(windowId("watchlist"), windowId("off"), SK)).toEqual({ changed: ["a1", "a2"], notice: null });
   expect(shown()).toMatchObject({ a1: ["000660", "D"], a2: ["000660", "W"], off: ["000660", "D"], b1: ["035420", "5m"] });
   expect(state().sendSymbol(windowId("watchlist"), windowId("off"), SAMSUNG).changed).toEqual(["a1", "a2"]);
   expect(shown().off).toEqual(["000660", "D"]);
@@ -155,7 +155,7 @@ test("색 A인 보내는 창이 종목을 보내면 A인 차트만 바뀌고, A�
   state().setLink(windowId("screener"), "c");
   const before = state().layout;
   const after = state().revision;
-  expect(state().sendSymbol(windowId("screener"), windowId("off"), SK)).toEqual({ changed: [], notice: "연동 C를 따르는 차트가 없습니다. 차트의 연동 색을 C로 맞추세요" });
+  expect(state().sendSymbol(windowId("screener"), windowId("off"), SK)).toEqual({ changed: [], notice: null });
   expect(state().layout).toBe(before);
   expect(state().revision).toBe(after);
   expect(after).toBeGreaterThan(revision);

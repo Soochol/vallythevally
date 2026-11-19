@@ -48,7 +48,7 @@ test.beforeEach(async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
 });
 
-test("관심종목의 연동 색에 따라 종목을 그 색의 차트, 활성 칸으로 보내고 따르는 차트가 없으면 알린다", async ({ page, scenario }) => {
+test("관심종목의 연동 색에 따라 종목을 그 색의 차트, 활성 칸으로 보내고 따르는 차트가 없으면 아무것도 바꾸지 않는다", async ({ page, scenario }) => {
   linkedCharts(scenario);
   await ready(page);
   const watchDot = dotOf(page, "watchlist");
@@ -71,9 +71,9 @@ test("관심종목의 연동 색에 따라 종목을 그 색의 차트, 활성 �
   await row(page, "035420").click();
   await expect(tabOf(page, "cell-0").locator(".dock-tab-flash")).toBeAttached();
   await expect(tabOf(page, "cell-1").locator(".dock-tab-flash")).toBeAttached();
-  await expect(toast(page, "연동 A: 차트 2개가 NAVER로 바뀌었습니다")).toBeVisible();
   await drawn(cell(page, 1), /^칸 1: NAVER .* 일$/);
   await drawn(cell(page, 2), /^칸 2: NAVER .* 주$/);
+  await expect(toast(page, "연동")).toHaveCount(0);
   await expect(cell(page, 3)).toHaveAttribute("aria-label", /^칸 3: SK하이닉스 .* 일$/);
   await expect(tabOf(page, "cell-2").locator(".dock-tab-flash")).toHaveCount(0);
   await expect(row(page, "035420")).toHaveAttribute("aria-current", "true");
@@ -86,10 +86,10 @@ test("관심종목의 연동 색에 따라 종목을 그 색의 차트, 활성 �
   await expect(watchDot).toHaveAccessibleName("연동 색: B");
   await expect(row(page, "035420")).not.toHaveAttribute("aria-current", "true");
   await row(page, "051910").click();
-  await expect(toast(page, "연동 B를 따르는 차트가 없습니다. 차트의 연동 색을 B로 맞추세요")).toBeVisible();
   await expect(cell(page, 1)).toHaveAttribute("aria-label", /^칸 1: NAVER /);
   await expect(cell(page, 2)).toHaveAttribute("aria-label", /^칸 2: NAVER /);
   await expect(cell(page, 3)).toHaveAttribute("aria-label", /^칸 3: SK하이닉스 /);
+  await expect(toast(page, "연동")).toHaveCount(0);
 
   await chooseLink(page, watchDot, "끔");
   await expect(watchDot).toHaveAccessibleName("연동 색: 끔");
@@ -113,9 +113,9 @@ test("위 막대 검색으로 바꾼 종목은 같은 색의 차트로 퍼지고
   const kakao = dialog.getByRole("option").filter({ hasText: "035720" });
   await expect(kakao).toHaveAttribute("aria-disabled", "false");
   await kakao.click();
-  await expect(toast(page, "연동 A: 차트 2개가 카카오로 바뀌었습니다")).toBeVisible();
   await drawn(cell(page, 1), /^칸 1: 카카오 .* 일$/);
   await drawn(cell(page, 2), /^칸 2: 카카오 .* 주$/);
+  await expect(toast(page, "연동")).toHaveCount(0);
   await expect(cell(page, 3)).toHaveAttribute("aria-label", /^칸 3: SK하이닉스 .* 일$/);
 
   const thirdDot = dotOf(page, "cell-2");
@@ -142,18 +142,18 @@ test("위 막대 검색으로 바꾼 종목은 같은 색의 차트로 퍼지고
   await expect(tabOf(page, "cell-2").locator(".dock-tab-flash")).toHaveCount(0);
 });
 
-test("주소로 연 종목은 같은 색의 차트로 퍼지고, venue는 앱 전체 거래소를 바꾸며 연동 알림만 보인다", async ({ page, scenario }) => {
+test("주소로 연 종목은 같은 색의 차트로 퍼지고, venue는 앱 전체 거래소를 바꾼다", async ({ page, scenario }) => {
   linkedCharts(scenario, "nxt");
   await page.goto("/?symbol=000660");
-  await expect(toast(page, "연동 A: 차트 2개가 SK하이닉스로 바뀌었습니다")).toBeVisible();
   await drawn(cell(page, 1), /^칸 1: SK하이닉스 통합 일$/);
   await drawn(cell(page, 2), /^칸 2: SK하이닉스 통합 주$/);
+  await expect(toast(page, "연동")).toHaveCount(0);
 
   await page.goto("/?symbol=005935&venue=nxt");
-  await expect(toast(page, "연동 A: 차트 2개가 삼성전자우로 바뀌었습니다")).toBeVisible();
   await expectDesktopVenue(page, "NXT");
   await drawn(cell(page, 1), /^칸 1: 삼성전자우 통합 일$/);
   await drawn(cell(page, 2), /^칸 2: 삼성전자우 통합 주$/);
+  await expect(toast(page, "연동")).toHaveCount(0);
   await expect(cell(page, 3)).toHaveAttribute("aria-label", /^칸 3: SK하이닉스 /);
 });
 
