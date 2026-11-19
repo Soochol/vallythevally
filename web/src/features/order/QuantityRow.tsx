@@ -20,7 +20,17 @@ interface Props {
 
 export function QuantityRow({ presetKind, input, sharePresets, amountPresets, referencePrice, onPresetKind, onInput }: Props) {
   const inputId = useId();
-  const change = (event: ChangeEvent<HTMLInputElement>) => onInput(event.target.value.replace(/[^0-9]/g, ""));
+  const change = (event: ChangeEvent<HTMLInputElement>) => {
+    const { value, selectionStart } = event.target;
+    const digits = value.replace(/[^0-9]/g, "");
+    if (digits === input) {
+      const target = event.target;
+      const caret = value.slice(0, selectionStart ?? value.length).replace(/[^0-9]/g, "").length;
+      queueMicrotask(() => target.setSelectionRange(caret, caret));
+      return;
+    }
+    onInput(digits);
+  };
   const amountKind = presetKind === "amountPresets";
   const noPrice = amountKind && (referencePrice === null || !(referencePrice > 0));
   const fillAmount = (won: number) => onInput(String(quantityForAmount(won, referencePrice) ?? 0));

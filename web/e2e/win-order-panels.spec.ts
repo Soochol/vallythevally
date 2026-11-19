@@ -598,6 +598,23 @@ test("금액 방식이어도 칸 이름은 수량이고 예상 주문금액 줄�
   await expect(page.getByTestId("order-estimate")).toHaveText("980,000원");
 });
 
+test("수량 칸 가운데에 숫자 아닌 글자를 쳐도 커서가 제자리에 있고 싼 종목의 큰 수량도 칸 안에 다 보인다", async ({ page, scenario }) => {
+  ordersOn(scenario);
+  tradingApi(scenario);
+  await openOrderWindow(page, scenario);
+  lastTrade(scenario, 1_000);
+  const field = quantityField(page);
+  await field.fill("1234");
+  await field.evaluate((element: HTMLInputElement) => element.setSelectionRange(2, 2));
+  await page.keyboard.type("a");
+  await page.keyboard.type("5");
+  await expect(field).toHaveValue("12534");
+  await presetKindButton(page, "금액").click();
+  await amountPresetButtons(page).last().click();
+  await expect(field).toHaveValue("50000");
+  expect(await field.evaluate((element: HTMLInputElement) => element.scrollWidth <= element.clientWidth)).toBe(true);
+});
+
 test("수량·금액 단추는 프리셋 묶음만 바꾸고 수량 칸 값은 그대로다", async ({ page, scenario }) => {
   ordersOn(scenario);
   tradingApi(scenario);
