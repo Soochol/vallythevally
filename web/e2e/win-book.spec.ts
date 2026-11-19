@@ -362,12 +362,18 @@ test("체결강도 줄이 11행, 체결 행이 12행부터의 top에 24px 간격
   expect(rowTops).toEqual(before);
   expect(await tops(page.getByTestId("ladder-strength"))).toEqual([rowTops[10]]);
   expect(await tops(page.getByTestId("ladder-trade"))).toEqual(rowTops.slice(11, 13));
-  const tradeParts = await page.getByTestId("ladder-trade").evaluateAll((rows) => rows.map((row) => ({ count: row.children.length, text: row.textContent ?? "", border: getComputedStyle(row).borderLeftWidth, priceRight: row.children[0]!.getBoundingClientRect().right, qtyLeft: row.children[1]!.getBoundingClientRect().left })));
+  const tradeParts = await page.getByTestId("ladder-trade").evaluateAll((rows) => rows.map((row) => ({ count: row.children.length, text: row.textContent ?? "", border: getComputedStyle(row).borderLeftWidth, qtyTopAtOverlap: (() => {
+    const qtyRect = row.children[1]!.getBoundingClientRect();
+    const priceText = document.createRange();
+    priceText.selectNodeContents(row.children[0]!.firstChild!);
+    if (priceText.getBoundingClientRect().right <= qtyRect.left) return "none";
+    return document.elementFromPoint(qtyRect.left + 1, qtyRect.top + qtyRect.height / 2) === row.children[1] ? "qty" : "other";
+  })() })));
   for (const part of tradeParts) {
     expect(part.count).toBe(2);
     expect(part.border).toBe("0px");
     expect(part.text).not.toMatch(/\d{2}:\d{2}:\d{2}/);
-    expect(part.priceRight).toBeLessThanOrEqual(part.qtyLeft);
+    expect(["none", "qty"], JSON.stringify(part)).toContain(part.qtyTopAtOverlap);
   }
   await expect(page.getByTestId("book-window")).not.toContainText("대량");
   await expect(page.locator(".mw-trade [class*=bar], .mw-trade i")).toHaveCount(0);
