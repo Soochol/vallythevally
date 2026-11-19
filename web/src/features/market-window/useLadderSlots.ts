@@ -6,11 +6,10 @@ import { marketSocket } from "../../stores/realtime";
 import type { TradeRow } from "../trades/tape";
 import { useTradeTape } from "../trades/useTradeTape";
 import { quoteInfoItems, type QuoteInfo } from "./quoteInfo";
-import { recentTradeRows } from "./recentTrades";
-import { BOTTOM_LEFT_ROWS } from "./PriceLadder";
+import { tradeRows } from "./recentTrades";
 
 const QUOTE_POLL_MS = 5000;
-const TRADE_ROWS = BOTTOM_LEFT_ROWS - 1;
+const HISTORY_PAGES = 1;
 
 export interface QuoteInfoSource {
   readonly code: SymbolCode;
@@ -29,9 +28,11 @@ export function useQuoteInfo({ code, venue, lastPrice, previousClose, upperLimit
 export interface LadderTrades {
   readonly strength: number | null;
   readonly trades: readonly TradeRow[];
+  readonly hold: () => void;
+  readonly release: () => void;
 }
 
 export function useLadderTrades(code: SymbolCode, venue: Venue): LadderTrades {
-  const { state } = useTradeTape(marketSocket, code, venue);
-  return { strength: state.strength, trades: recentTradeRows(state, state.historyVenue ?? venue, TRADE_ROWS) };
+  const { state, dispatch } = useTradeTape(marketSocket, code, venue, HISTORY_PAGES);
+  return { strength: state.strength, trades: tradeRows(state, state.historyVenue ?? venue), hold: () => dispatch({ type: "hold" }), release: () => dispatch({ type: "release" }) };
 }

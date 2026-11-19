@@ -3,6 +3,7 @@ import type { FeedBook } from "../src/api/generated/FeedBook";
 import type { FeedKind } from "../src/api/generated/FeedKind";
 import type { LayoutWindow } from "../src/api/generated/LayoutWindow";
 import type { OrderBook } from "../src/api/generated/OrderBook";
+import type { TradePrint } from "../src/api/generated/TradePrint";
 import { type Scenario, cell, DEFAULT_LAYOUT_ID, expect, pickDesktopVenue, test, windowTabs, pollSaved } from "./harness";
 import { pinQuote } from "./order-window";
 
@@ -48,11 +49,11 @@ async function subOf(scenario: Scenario, kind: FeedKind): Promise<string> {
   return sub;
 }
 
-function replyBook(scenario: Scenario, base: number) {
+function replyBook(scenario: Scenario, base: number, change = 1000, history: TradePrint[] = []) {
   scenario.reply((url) => url.pathname === "/api/symbols/005930/fundamentals", { body: { symbol: CODE, upperLimit: 91000, lowerLimit: 49000, marketCap: null, listedShares: null, per: null, pbr: null, roe: null, eps: null, bps: null, foreignExhaustionRate: null, high52w: null, low52w: null } });
   scenario.reply((url) => url.pathname === "/api/symbols/005930/order-book", { body: snapshotOf(base) });
-  scenario.reply((url) => url.pathname === "/api/symbols/005930/trades", { body: { symbol: CODE, venue: "combined", trades: [], skippedRows: 0 } });
-  pinQuote(scenario, CODE, base, 1000);
+  scenario.reply((url) => url.pathname === "/api/symbols/005930/trades", { body: { symbol: CODE, venue: "combined", trades: history, skippedRows: 0 } });
+  pinQuote(scenario, CODE, base, change);
 }
 
 async function tradesSubs(scenario: Scenario): Promise<string[]> {
@@ -66,9 +67,9 @@ async function emitTrade(scenario: Scenario, seq: number, price: number, qty: nu
 
 const tops = (locator: Locator) => locator.evaluateAll((elements) => elements.map((element) => Math.round(element.getBoundingClientRect().top * 10) / 10));
 
-async function open(page: Page, scenario: Scenario, base: number) {
+async function open(page: Page, scenario: Scenario, base: number, change = 1000, history: TradePrint[] = []) {
   bookWindow(scenario, CODE);
-  replyBook(scenario, base);
+  replyBook(scenario, base, change, history);
   await page.goto("/");
   await expect(cell(page)).toHaveAttribute("aria-busy", "false");
   await windowTabs(page).getByRole("tab", { name: /^10호가/ }).click();
@@ -226,29 +227,116 @@ test("첫 실시간 호가가 스냅샷을 대신하고 체결이 현재가 행�
   await expect(ratio).toBeVisible();
 });
 
-test("체결강도 줄이 13행, 최근 체결 행이 14행부터의 top과 같고 대량 글자와 막대가 없으며 새 체결이 맨 위에 온다", async ({ page, scenario }) => {
+async function emitTrades(scenario: Scenario, seq: number, trades: [price: number, qty: number][]) {
+  for (const sub of await tradesSubs(scenario)) scenario.live.emit({ type: "feed_trades", sub, seq, trades: trades.map(([price, qty], index) => ({ t: scenario.now / 1000 + seq + index / 100, price, qty, venue: null, strength: 101.5 })) });
+}
+
+const colorOf = (locator: Locator) => locator.evaluate((element) => getComputedStyle(element).color);
+const tokenColor = (page: Page, token: string) => page.evaluate((name) => {
+  const probe = document.createElement("i");
+  probe.style.color = `var(${name})`;
+  document.body.append(probe);
+  const color = getComputedStyle(probe).color;
+  probe.remove();
+  return color;
+}, token);
+const tradeRow = (page: Page, price: number) => page.locator(`[data-testid=ladder-trade][data-price="${price}"]`);
+const ladderPrice = (page: Page, price: number) => ladderRows(page).filter({ has: page.locator(".mw-px-num", { hasText: new RegExp(`^${price.toLocaleString("en-US")}$`) }) }).locator(".mw-px");
+
+test("체결강도 줄이 13행, 체결 행이 14행부터의 top에 24px 간격으로 있고 왼쪽 테두리와 대량 글자·막대가 없으며 새 체결이 맨 위에 온다", async ({ page, scenario }) => {
   await open(page, scenario, 70000);
+  const before = await tops(ladderRows(page));
   await emitTrade(scenario, 1, 70000, 3);
   await emitTrade(scenario, 2, 70100, 1_200_000);
   await expect(page.getByTestId("ladder-trade")).toHaveCount(2);
   await expect(page.getByTestId("ladder-trade").first()).toHaveAttribute("data-price", "70100");
   await expect(page.getByTestId("ladder-strength")).toContainText("101.50%");
   const rowTops = await tops(ladderRows(page));
+  expect(rowTops).toEqual(before);
   expect(await tops(page.getByTestId("ladder-strength"))).toEqual([rowTops[12]]);
   expect(await tops(page.getByTestId("ladder-trade"))).toEqual(rowTops.slice(13, 15));
-  const tradeParts = await page.getByTestId("ladder-trade").evaluateAll((rows) => rows.map((row) => ({ count: row.children.length, text: row.textContent ?? "", priceRight: row.children[0]!.getBoundingClientRect().right, qtyLeft: row.children[1]!.getBoundingClientRect().left })));
+  const tradeParts = await page.getByTestId("ladder-trade").evaluateAll((rows) => rows.map((row) => ({ count: row.children.length, text: row.textContent ?? "", border: getComputedStyle(row).borderLeftWidth, priceRight: row.children[0]!.getBoundingClientRect().right, qtyLeft: row.children[1]!.getBoundingClientRect().left })));
   for (const part of tradeParts) {
     expect(part.count).toBe(2);
+    expect(part.border).toBe("0px");
     expect(part.text).not.toMatch(/\d{2}:\d{2}:\d{2}/);
     expect(part.priceRight).toBeLessThanOrEqual(part.qtyLeft);
   }
   await expect(page.getByTestId("book-window")).not.toContainText("대량");
   await expect(page.locator(".mw-trade [class*=bar], .mw-trade i")).toHaveCount(0);
-  const columns = await page.getByTestId("ladder-trade").evaluateAll((rows) => rows.map((row) => [...row.children].map((part) => Math.round(part.getBoundingClientRect().left * 10) / 10)));
-  expect(columns[0]).toEqual(columns[1]);
   await emitTrade(scenario, 3, 70200, 5);
   await expect(page.getByTestId("ladder-trade").first()).toHaveAttribute("data-price", "70200");
   await expect(page.getByTestId("ladder-trade").nth(1)).toHaveAttribute("data-price", "70100");
+});
+
+test("체결 수량은 매수 상승색·매도 하락색·방향 없음 기본색이고 가격은 같은 가격의 사다리 가격 칸과 같은 색이다", async ({ page, scenario }) => {
+  await open(page, scenario, 70000, 0);
+  await emitTrades(scenario, 1, [[70100, -4], [69900, 5], [70000, 6], [70200, 0]]);
+  await expect(page.getByTestId("ladder-trade")).toHaveCount(4);
+  const [up, down, text] = await Promise.all([tokenColor(page, "--up"), tokenColor(page, "--down"), tokenColor(page, "--text")]);
+  expect(up).not.toBe(down);
+  expect(await colorOf(tradeRow(page, 70100).locator(".mw-trade-qty"))).toBe(down);
+  expect(await colorOf(tradeRow(page, 69900).locator(".mw-trade-qty"))).toBe(up);
+  expect(await colorOf(tradeRow(page, 70000).locator(".mw-trade-qty"))).toBe(up);
+  const noSide = await colorOf(tradeRow(page, 70200).locator(".mw-trade-qty"));
+  expect([up, down]).not.toContain(noSide);
+  const priceColors = new Map<number, string>();
+  for (const price of [70100, 69900, 70000]) {
+    const traded = await colorOf(tradeRow(page, price).locator(".mw-trade-price"));
+    expect(traded).toBe(await colorOf(ladderPrice(page, price)));
+    priceColors.set(price, traded);
+  }
+  expect(priceColors.get(70100)).toBe(up);
+  expect(priceColors.get(69900)).toBe(down);
+  expect(priceColors.get(70000)).not.toBe(up);
+  expect(priceColors.get(70000)).not.toBe(down);
+  expect(text).toBeTruthy();
+});
+
+test("체결이 8건보다 많으면 상자 안에서 스크롤되고 스크롤바가 보이며 체결강도 줄은 제자리다", async ({ page, scenario }) => {
+  await open(page, scenario, 70000);
+  await emitTrades(scenario, 1, Array.from({ length: 14 }, (_, i) => [70000 + i, 1 + i]));
+  await expect(page.getByTestId("ladder-trade")).toHaveCount(14);
+  const box = page.getByTestId("ladder-trades");
+  const metrics = await box.evaluate((element) => ({ scroll: element.scrollHeight, client: element.clientHeight, overflowY: getComputedStyle(element).overflowY, barWidth: getComputedStyle(element, "::-webkit-scrollbar").width, barHidden: getComputedStyle(element).scrollbarWidth === "none" }));
+  expect(metrics.scroll).toBeGreaterThan(metrics.client);
+  expect(metrics).toMatchObject({ overflowY: "auto", barWidth: "5px", barHidden: false });
+  const strengthTop = await tops(page.getByTestId("ladder-strength"));
+  const rowTops = await tops(ladderRows(page));
+  await box.evaluate((element) => { element.scrollTop = 72; });
+  expect(await tops(page.getByTestId("ladder-strength"))).toEqual(strengthTop);
+  expect(await tops(ladderRows(page))).toEqual(rowTops);
+});
+
+test("스크롤을 내린 동안 새 체결이 와도 보던 행이 그대로이고 맨 위로 올리면 새 체결이 맨 위에 보인다", async ({ page, scenario }) => {
+  await open(page, scenario, 70000);
+  await emitTrades(scenario, 1, Array.from({ length: 14 }, (_, i) => [70000 + i, 1 + i]));
+  await expect(page.getByTestId("ladder-trade")).toHaveCount(14);
+  const box = page.getByTestId("ladder-trades");
+  await box.evaluate((element) => { element.scrollTop = 72; });
+  await expect(box).toHaveAttribute("data-held", "");
+  const seen = () => box.evaluate((element) => {
+    const top = element.getBoundingClientRect().top;
+    const visible = [...element.children].find((row) => row.getBoundingClientRect().bottom > top + 1);
+    return visible?.getAttribute("data-price") ?? null;
+  });
+  const first = await seen();
+  expect(first).toBe("70010");
+  await emitTrades(scenario, 2, [[70001, 9]]);
+  await expect(page.getByTestId("ladder-trade")).toHaveCount(14);
+  expect(await seen()).toBe(first);
+  await box.evaluate((element) => { element.scrollTop = 0; });
+  await expect(box).not.toHaveAttribute("data-held", "");
+  await expect(page.getByTestId("ladder-trade")).toHaveCount(15);
+  await expect(page.getByTestId("ladder-trade").first()).toHaveAttribute("data-price", "70001");
+});
+
+test("창을 열면 지난 체결을 pages=1로 한 번 받아 실시간 없이 보이고 지난 체결 요청에 limit도 싣는다", async ({ page, scenario }) => {
+  await open(page, scenario, 70000, 1000, [{ time: "09:30:02", price: 70100, quantity: 7, exchange: "krx" }, { time: "09:30:01", price: 70000, quantity: -3, exchange: "krx" }]);
+  await expect(page.getByTestId("ladder-trade")).toHaveCount(2);
+  await expect(page.getByTestId("ladder-trade").first()).toHaveAttribute("data-price", "70100");
+  const asked = scenario.requests.map((r) => new URL(r.url())).filter((url) => url.pathname === `/api/symbols/${CODE}/trades`);
+  expect(asked.map((url) => url.searchParams.get("pages"))).toEqual(["1"]);
 });
 
 test("교차 가격 행 하나에 매도·매수 잔량이 함께 있고 현재가 행은 하나다", async ({ page, scenario }) => {

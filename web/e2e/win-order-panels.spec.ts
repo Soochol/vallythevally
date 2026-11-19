@@ -1,7 +1,7 @@
 import type { Locator, Page } from "@playwright/test";
 import type { TradingExecution } from "../src/api/generated/TradingExecution";
 import type { TradingHolding } from "../src/api/generated/TradingHolding";
-import { type Scenario, DEFAULT_LAYOUT_ID, expect, pollSaved, test } from "./harness";
+import { type Scenario, cell, DEFAULT_LAYOUT_ID, expect, pollSaved, test } from "./harness";
 import { ACCOUNT, BASE, CODE, cellAt, center, chipAt, dragChip, openOrder, openOrderWindow, ordersOn, status, tradingApi, win, writesTo } from "./order-window";
 
 const HOLDING: TradingHolding = { code: CODE, name: "삼성전자", quantity: 120, sellableQuantity: 100, averagePrice: 70_040, currentPrice: BASE, evaluationProfit: -4_800, profitRateCenti: -57 };
@@ -453,21 +453,24 @@ test("정보 7항목이 사다리 1~7행과 같은 top에 있고 값이 맞다",
   expect(await tops(info)).toEqual((await tops(ladderRows(page))).slice(0, 7));
 });
 
-test("체결강도는 13행, 최근 체결은 14행부터 같은 top에 있고 새 체결이 맨 위이며 대량 글자와 막대가 없다", async ({ page, scenario }) => {
+test("체결강도는 13행, 체결은 14행부터 같은 top에 있고 새 체결이 맨 위이며 왼쪽 테두리와 대량 글자·막대가 없다", async ({ page, scenario }) => {
   ordersOn(scenario);
   tradingApi(scenario);
   await openOrderWindow(page, scenario);
+  const before = await tops(ladderRows(page));
   lastTrade(scenario, 70_000, 1, 3);
   lastTrade(scenario, 70_100, 2, 1_200_000);
   await expect(page.getByTestId("ladder-trade")).toHaveCount(2);
   await expect(page.getByTestId("ladder-strength")).toContainText("101.50%");
   const rowTops = await tops(ladderRows(page));
+  expect(rowTops).toEqual(before);
   expect(await tops(page.getByTestId("ladder-strength"))).toEqual([rowTops[12]]);
   expect(await tops(page.getByTestId("ladder-trade"))).toEqual(rowTops.slice(13, 15));
   await expect(page.getByTestId("ladder-trade").first()).toHaveAttribute("data-price", "70100");
-  const tradeParts = await page.getByTestId("ladder-trade").evaluateAll((rows) => rows.map((row) => ({ count: row.children.length, text: row.textContent ?? "", priceRight: row.children[0]!.getBoundingClientRect().right, qtyLeft: row.children[1]!.getBoundingClientRect().left })));
+  const tradeParts = await page.getByTestId("ladder-trade").evaluateAll((rows) => rows.map((row) => ({ count: row.children.length, text: row.textContent ?? "", border: getComputedStyle(row).borderLeftWidth, priceRight: row.children[0]!.getBoundingClientRect().right, qtyLeft: row.children[1]!.getBoundingClientRect().left })));
   for (const part of tradeParts) {
     expect(part.count).toBe(2);
+    expect(part.border).toBe("0px");
     expect(part.text).not.toMatch(/\d{2}:\d{2}:\d{2}/);
     expect(part.priceRight).toBeLessThanOrEqual(part.qtyLeft);
   }
@@ -475,6 +478,39 @@ test("체결강도는 13행, 최근 체결은 14행부터 같은 top에 있고 �
   await expect(page.getByTestId("ladder-trade").first()).toHaveAttribute("data-price", "70200");
   await expect(win(page)).not.toContainText("대량");
   await expect(page.locator(".mw-trade i")).toHaveCount(0);
+});
+
+test("421px 호가주문창에서 모든 체결 행의 가격 글자가 수량 글자와 겹치지 않고 잘리지 않는다", async ({ page, scenario }) => {
+  ordersOn(scenario);
+  tradingApi(scenario);
+  await openOrderWindow(page, scenario);
+  await win(page).evaluate((element) => { element.style.flex = "none"; element.style.width = "421px"; });
+  const quantities = [600, 1_234, 7, 9_999];
+  quantities.forEach((qty, index) => lastTrade(scenario, 70_000 + 100 * index, index + 1, qty));
+  await expect(page.getByTestId("ladder-trade")).toHaveCount(quantities.length);
+  const parts = await page.getByTestId("ladder-trade").evaluateAll((rows) => rows.map((row) => {
+    const [price, qty] = [row.children[0]!, row.children[1]!];
+    return { priceRight: price.getBoundingClientRect().right, qtyLeft: qty.getBoundingClientRect().left, priceClipped: price.scrollWidth > price.clientWidth, qtyClipped: qty.scrollWidth > qty.clientWidth };
+  }));
+  for (const part of parts) {
+    expect(part.priceRight).toBeLessThan(part.qtyLeft);
+    expect(part.priceClipped).toBe(false);
+    expect(part.qtyClipped).toBe(false);
+  }
+});
+
+test("창을 열면 지난 체결을 pages=1로 받아 보이고 종목을 바꾸면 새 종목으로 같은 요청을 한 번 하고 그 체결을 보인다", async ({ page, scenario }) => {
+  ordersOn(scenario);
+  tradingApi(scenario);
+  await openOrderWindow(page, scenario, true);
+  const tradeRequests = (code: string) => scenario.requests.map((r) => new URL(r.url())).filter((url) => url.pathname === `/api/symbols/${code}/trades`);
+  expect(tradeRequests(CODE).map((url) => url.searchParams.get("pages"))).toEqual(["1"]);
+  scenario.on((url) => url.pathname === "/api/symbols/000660/trades", () => ({ body: { symbol: "000660", venue: "krx", trades: [{ time: "09:31:02", price: 110_000, quantity: 5, exchange: "krx" }, { time: "09:31:01", price: 109_900, quantity: -2, exchange: "krx" }], skippedRows: 0 } }));
+  await cell(page, 2).click();
+  await expect(win(page)).toHaveAttribute("data-symbol", "000660");
+  await expect(page.getByTestId("ladder-trade")).toHaveCount(2);
+  await expect(page.getByTestId("ladder-trade").first()).toHaveAttribute("data-price", "110000");
+  expect(tradeRequests("000660").map((url) => url.searchParams.get("pages"))).toEqual(["1"]);
 });
 
 const SINGLE_PRICE_ASKS = [{ price: 69_600, qty: 50 }, { price: 69_700, qty: 40 }, { price: 69_800, qty: 30 }];
