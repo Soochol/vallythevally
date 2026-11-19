@@ -29,10 +29,10 @@ test("차트 우클릭은 누른 가격과 날짜를 머리에 두고 차트 동
   await openChartMenu(page);
   await expect(chartMenu(page).getByRole("menuitem", { name: /^바로가기 · / })).toHaveText(jumpLabel);
   await expect(chartMenu(page).getByRole("presentation").first()).toHaveText(/^[\d,]+( · \d{4}-\d{2}-\d{2})?$/);
-  await expect(chartMenu(page).getByRole("menuitem")).toHaveText([/이 가격에 수평선/, /관심종목에 넣기/, /축 자동 맞춤/, "바로가기 · 2026-11-09Alt+G", /차트 이미지 복사/, /차트 이미지 내려받기/, /이 종목 드로잉 모두 지우기…/]);
+  await expect(chartMenu(page).getByRole("menuitem")).toHaveText([/이 가격에 수평선/, /관심종목에 넣기/, /축 자동 맞춤/, "바로가기 · 2026-11-09Alt+G", /차트 이미지 복사/, /차트 이미지 내려받기/, /일 이상 드로잉 모두 지우기…/]);
   await expect(chartMenu(page).getByRole("menuitem", { name: "붙여넣기" })).toHaveCount(0);
   await expect(chartMenu(page)).toContainText("드로잉 0개");
-  await expect(chartMenu(page).getByRole("menuitem", { name: /이 종목 드로잉 모두 지우기/ })).toBeDisabled();
+  await expect(chartMenu(page).getByRole("menuitem", { name: /일 이상 드로잉 모두 지우기/ })).toBeDisabled();
   await page.screenshot({ path: info.outputPath("1440-chart-menu.png") });
 
   await chartMenu(page).getByRole("menuitem", { name: /이 가격에 수평선/ }).click();
@@ -44,7 +44,7 @@ test("차트 우클릭은 누른 가격과 날짜를 머리에 두고 차트 동
   await expect(page.getByRole("complementary", { name: "관심종목" }).locator("li[data-code='005930']")).toBeVisible();
   await openChartMenu(page, 0.4, 0.6);
   await expect(chartMenu(page).getByRole("menuitem", { name: /관심종목에 넣기/ })).toBeDisabled();
-  await chartMenu(page).getByRole("menuitem", { name: /이 종목 드로잉 모두 지우기/ }).click();
+  await chartMenu(page).getByRole("menuitem", { name: /일 이상 드로잉 모두 지우기/ }).click();
   await expect.poll(async () => (await drawings(page)).length).toBe(0);
 });
 

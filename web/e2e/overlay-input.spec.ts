@@ -104,7 +104,7 @@ for (const source of ["선택 막대", "개체 메뉴", "차트 메뉴"] as cons
       const bounds = await cell(page).boundingBox();
       if (!bounds) throw new Error("차트 영역이 없습니다");
       await page.mouse.click(bounds.x + bounds.width * 0.2, bounds.y + bounds.height * 0.15, { button: "right" });
-      await page.getByRole("menu", { name: "드로잉 메뉴", exact: true }).getByRole("menuitem", { name: "이 종목 드로잉 모두 지우기…", exact: true }).click();
+      await page.getByRole("menu", { name: "드로잉 메뉴", exact: true }).getByRole("menuitem", { name: "일 이상 드로잉 모두 지우기…", exact: true }).click();
     }
     await expect.poll(() => visibleDrawings(page)).toBe(0);
     await pollSaved(async () => (await savedDrawings(scenario)).length).toBe(0);

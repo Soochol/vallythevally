@@ -1,5 +1,7 @@
 import type { SymbolCode } from "../../api/generated/SymbolCode";
+import type { Period } from "../../api/generated/Period";
 import type { UnixSeconds } from "../../api/generated/UnixSeconds";
+import { periodGroup } from "./periodGroup";
 import type { DrawingBody, DrawingId, DrawingPoint, DrawingScope } from "./types";
 
 export const PASTE_SHIFT_BARS = 5;
@@ -19,6 +21,7 @@ export interface PasteTarget {
   symbol: SymbolCode;
   topZ: number;
   scope: DrawingScope;
+  period: Period;
   newId(): DrawingId;
   shiftBars(t: UnixSeconds, n: number): UnixSeconds | null;
 }
@@ -45,6 +48,7 @@ export function paste(clip: Clip, target: PasteTarget): { bodies: DrawingBody[];
     group: null,
     z: target.topZ + i + 1,
     scope: target.scope,
+    periods: periodGroup(target.period),
     revision: 0,
   }));
   return { bodies, clip: sameSymbol ? { ...clip, pastes: clip.pastes + 1 } : clip };

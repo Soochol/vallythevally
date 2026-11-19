@@ -1,7 +1,9 @@
 import type { DrawingPoint } from "../../api/generated/DrawingPoint";
+import type { Period } from "../../api/generated/Period";
 import type { WindowId } from "../../layout/kinds";
 import * as clipboard from "./clipboard";
 import { nudge, type NudgeContext, type NudgeKey } from "./geometry";
+import { periodGroup } from "./periodGroup";
 import type { Tool } from "./toolSpec";
 import { toolOf } from "./tools";
 import type { DrawingBody, DrawingOp, DrawingScope } from "./types";
@@ -15,6 +17,7 @@ export interface DrawingStore {
 export interface EditTarget {
   readonly symbol: string;
   readonly scope: DrawingScope;
+  readonly period: Period;
 }
 
 export type ReorderDirection = "front" | "forward" | "backward" | "back";
@@ -45,7 +48,7 @@ export class DrawingEdits {
     const target = this.target();
     if (!target) return null;
     const body: DrawingBody = { id: this.newId(), symbol: target.symbol, tool: tool.tool, points, style, text: null, locked: false, hidden: false,
-      z: topZ(this.store.drawings(target.symbol)) + 1, periods: null, scope: target.scope, group: null, revision: 0 };
+      z: topZ(this.store.drawings(target.symbol)) + 1, periods: periodGroup(target.period), scope: target.scope, group: null, revision: 0 };
     this.store.commit(this.cellId, [{ kind: "create", after: body }]);
     return body;
   }
@@ -62,7 +65,7 @@ export class DrawingEdits {
   paste(clip: clipboard.Clip, shiftBars: NudgeContext["shiftBars"]): ReturnType<typeof clipboard.paste> | null {
     const target = this.target();
     if (!target) return null;
-    const result = clipboard.paste(clip, { symbol: target.symbol, topZ: topZ(this.store.drawings(target.symbol)), scope: target.scope, newId: this.newId, shiftBars });
+    const result = clipboard.paste(clip, { symbol: target.symbol, topZ: topZ(this.store.drawings(target.symbol)), scope: target.scope, period: target.period, newId: this.newId, shiftBars });
     this.store.commit(this.cellId, result.bodies.map((after) => ({ kind: "create", after })));
     return result;
   }

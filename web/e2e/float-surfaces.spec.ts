@@ -73,7 +73,7 @@ test("드로잉 삭제 알림의 되돌리기는 Ctrl+Z 표시를 화면에만 �
   await page.mouse.click(box.x + box.width * 0.4, box.y + box.height * 0.6, { button: "right" });
   await page.getByRole("menu", { name: "드로잉 메뉴", exact: true }).getByRole("menuitem", { name: /이 가격에 수평선/ }).click();
   await page.mouse.click(box.x + box.width * 0.4, box.y + box.height * 0.25, { button: "right" });
-  await page.getByRole("menu", { name: "드로잉 메뉴", exact: true }).getByRole("menuitem", { name: /이 종목 드로잉 모두 지우기/ }).click();
+  await page.getByRole("menu", { name: "드로잉 메뉴", exact: true }).getByRole("menuitem", { name: /일 이상 드로잉 모두 지우기/ }).click();
   const undo = page.getByRole("status").getByRole("button", { name: "되돌리기", exact: true });
   await expect(undo).toBeVisible();
   await expect(undo.locator("kbd")).toHaveText("Ctrl+Z");

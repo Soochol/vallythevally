@@ -29,6 +29,7 @@ const target = (symbol: string): PasteTarget => {
     symbol,
     topZ: 10,
     scope: { kind: "layout", layoutId: "L1" },
+    period: "D",
     newId: () => `new-${++n}`,
     shiftBars: (t, bars) => (t < 0 ? null : t + bars * BAR),
   };
@@ -43,13 +44,19 @@ describe("붙여넣기", () => {
   const clip = copy([body("b", 3), body("a", 1)], "005930");
   if (clip === null) throw new Error("clip");
 
-  test("새 id, 잠금 풂, 그룹 없음, 맨 위 z, 새 드로잉 범위. 스타일·글자·봉 주기는 그대로", () => {
+  test("새 id, 잠금 풂, 그룹 없음, 맨 위 z, 새 드로잉 범위. 스타일·글자는 그대로, 봉 주기는 붙인 칸의 묶음", () => {
     const { bodies } = paste(clip, target("000660"));
     expect(bodies.map((b) => [b.id, b.z, b.locked, b.group, b.symbol])).toEqual([
       ["new-1", 11, false, null, "000660"],
       ["new-2", 12, false, null, "000660"],
     ]);
-    expect(bodies[0]).toMatchObject({ text: "메모", periods: ["D"], style: body("a", 1).style, scope: { kind: "layout", layoutId: "L1" }, revision: 0 });
+    expect(bodies[0]).toMatchObject({ text: "메모", periods: ["D", "W", "M", "Q", "Y"], style: body("a", 1).style, scope: { kind: "layout", layoutId: "L1" }, revision: 0 });
+  });
+
+  test("일 이상 묶음 클립을 분봉 칸에 붙이면 분봉 묶음이다", () => {
+    const daily = copy([body("a", 1, { periods: ["D", "W", "M", "Q", "Y"] })], "005930")!;
+    const { bodies } = paste(daily, { ...target("005930"), period: "5m" });
+    expect(bodies[0]?.periods).toEqual(["1m", "3m", "5m", "10m", "15m", "30m", "60m"]);
   });
 
   test("z 순서를 지킨다", () => {
