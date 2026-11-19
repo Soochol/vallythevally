@@ -300,14 +300,12 @@ test("휴대폰의 중복 소속 삭제 버튼은 선택한 그룹만 빼고 마
   expect(served(scenario).symbols).toContain("086520");
 });
 
-test("그룹 머리 이름은 종목 이름보다 작지 않고 굵기 700이며 그룹 안 종목 이름은 그룹 이름에 맞춰 들여쓴다", async ({ scenario, page }) => {
+test("그룹 머리 이름은 굵기 600이고 그룹 안 종목 이름은 그룹 이름에 맞춰 들여쓴다", async ({ scenario, page }) => {
   await seed(scenario, [{ id: "g1", name: "반도체", symbols: ["005930", "000660"] }]);
   await open(page);
   const groupName = groupHead(page, "반도체").locator("span.truncate");
   const stockName = row(page, "005930").locator("b");
-  const size = (locator: typeof groupName) => locator.evaluate((el) => parseFloat(getComputedStyle(el).fontSize));
-  expect(await size(groupName)).toBeGreaterThanOrEqual(await size(stockName) - 1);
-  expect(await groupName.evaluate((el) => getComputedStyle(el).fontWeight)).toBe("700");
+  expect(await groupName.evaluate((el) => getComputedStyle(el).fontWeight)).toBe("600");
   const left = async (locator: typeof groupName) => (await locator.evaluate((el) => {
     const range = document.createRange();
     range.selectNodeContents(el);
@@ -477,4 +475,23 @@ test("그룹이 가득 차면 새 그룹 칸 위에서 앞서 가리키던 놓�
   await expect.poll(fill).toBe(idle);
   await page.mouse.up();
   await expect(ungroupedRow(page, "000660")).toBeVisible();
+});
+
+test("그룹 머리 이름은 바탕 없이 11px --text-2로 보이고 종목 이름은 더 밝은 --text-name이다", async ({ scenario, page }) => {
+  await seed(scenario, [{ id: "A", name: "첫째", symbols: ["005935", "086520"] }]);
+  await open(page);
+  const colors = await page.evaluate(() => {
+    const root = getComputedStyle(document.documentElement);
+    const probe = (token: string) => { const el = document.createElement("i"); el.style.color = `var(${token})`; document.body.append(el); const c = getComputedStyle(el).color; el.remove(); return c; };
+    return { text2: probe("--text-2"), name: probe("--text-name"), raw: root.getPropertyValue("--text-name").trim() };
+  });
+  expect(colors.raw.toLowerCase()).toBe("#d3dacc");
+  const head = headBox(page, "첫째");
+  const label = groupHead(page, "첫째").locator("span.truncate");
+  await expect(label).toHaveCSS("color", colors.text2);
+  await expect(label).toHaveCSS("font-size", "11px");
+  await expect(head).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
+  const name = row(page, "086520").locator("b");
+  await expect(name).toHaveCSS("color", colors.name);
+  expect(colors.name).not.toBe(colors.text2);
 });
