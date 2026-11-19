@@ -69,13 +69,19 @@ test("목록 popover가 단추에 붙어 사다리를 밀지 않고 Esc·바깥 
   await expect(page.getByTestId("account-holding")).toContainText("삼성전자");
   expect(await topOf(FIRST_LADDER_ROW(page))).toBe(before);
   const box = (await panel.boundingBox())!;
-  const viewport = page.viewportSize()!;
+  const windowBox = (await win(page).boundingBox())!;
   expect(box.width).toBeLessThanOrEqual(360);
   expect(box.height).toBeLessThanOrEqual(240);
-  expect(box.x).toBeGreaterThanOrEqual(0);
-  expect(box.x + box.width).toBeLessThanOrEqual(viewport.width);
+  expect(box.x).toBeGreaterThanOrEqual(windowBox.x);
+  expect(box.x + box.width).toBeLessThanOrEqual(windowBox.x + windowBox.width);
   expect((await holdingsTab.boundingBox())!.y + (await holdingsTab.boundingBox())!.height).toBeLessThanOrEqual(box.y);
 
+  await page.keyboard.press("Escape");
+  await expect(panel).toHaveCount(0);
+
+  await page.getByTestId("account-tab-fills").click();
+  const fillsBox = (await panel.boundingBox())!;
+  expect(fillsBox.x + fillsBox.width).toBeLessThanOrEqual(windowBox.x + windowBox.width);
   await page.keyboard.press("Escape");
   await expect(panel).toHaveCount(0);
 

@@ -81,6 +81,10 @@ function FillsPanel({ executions }: { executions: readonly TradingExecution[] })
 }
 
 const isTab = (target: Node) => target instanceof Element && target.closest(".od-tab") !== null;
+const LIST_MAX_WIDTH = 360;
+const LIST_MARGIN = 8;
+const windowOf = (opener: HTMLElement | null) => opener?.closest(".od")?.getBoundingClientRect();
+const listWidthIn = (window: DOMRect) => Math.min(window.width - 2 * LIST_MARGIN, LIST_MAX_WIDTH);
 const BROKER = "키움";
 const ACCOUNT_NUMBER_KEY = ["trading", "account-number"] as const;
 const groupedAccountNumber = (digits: string) => `${digits.slice(0, 4)}-${digits.slice(4, 8)}-${digits.slice(8)}`;
@@ -103,6 +107,14 @@ export function AccountBand({ accountTail, maskAccount, openOrders, balance, exe
   const [panel, setPanel] = useState<PanelKind | null>(null);
   const opener = useRef<HTMLElement | null>(null);
   const counts: Record<PanelKind, number> = { open: openOrders.length, holdings: balance?.holdings.length ?? 0, fills: executions.length };
+  const listAnchor = () => {
+    const tab = opener.current?.getBoundingClientRect();
+    const window = windowOf(opener.current);
+    if (!tab || !window) return undefined;
+    const left = Math.max(window.left + LIST_MARGIN, Math.min(tab.left, window.right - LIST_MARGIN - listWidthIn(window)));
+    return { left, right: left, top: tab.top, bottom: tab.bottom };
+  };
+  const listWindow = windowOf(opener.current);
   const label = TABS.find((tab) => tab.kind === panel)?.label;
   return (
     <div className="od-account" data-testid="order-account">
@@ -116,7 +128,7 @@ export function AccountBand({ accountTail, maskAccount, openOrders, balance, exe
         ))}
       </div>
       {panel !== null && (
-        <Popover key={panel} anchor={opener} releasesClick={isTab} onClose={() => setPanel(null)} role="dialog" aria-label={label} className="od-list-pop" data-testid="account-panel" data-panel={panel}>
+        <Popover key={panel} anchor={opener} anchorRect={listAnchor} style={listWindow && { width: listWidthIn(listWindow) }} releasesClick={isTab} onClose={() => setPanel(null)} role="dialog" aria-label={label} className="od-list-pop" data-testid="account-panel" data-panel={panel}>
           {panel === "open" && <OpenPanel orders={openOrders} writable={writable} onCancel={onCancel} />}
           {panel === "holdings" && <HoldingsPanel balance={balance} />}
           {panel === "fills" && <FillsPanel executions={executions} />}
