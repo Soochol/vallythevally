@@ -54,6 +54,11 @@ pub enum ApiId {
     Ka10033,
     Ka90003,
     Ka00198,
+    Ka20003,
+    Ka10051,
+    Ka90005,
+    Ka90010,
+    Ka10131,
 }
 
 impl ApiId {
@@ -77,8 +82,9 @@ impl ApiId {
             | ApiId::Ka10035
             | ApiId::Ka10020
             | ApiId::Ka10033 => "/api/dostk/rkinfo",
-            ApiId::Ka10004 | ApiId::Ka90008 => "/api/dostk/mrkcond",
-            ApiId::Ka10008 => "/api/dostk/frgnistt",
+            ApiId::Ka10004 | ApiId::Ka90008 | ApiId::Ka90005 | ApiId::Ka90010 => "/api/dostk/mrkcond",
+            ApiId::Ka10008 | ApiId::Ka10131 => "/api/dostk/frgnistt",
+            ApiId::Ka20003 | ApiId::Ka10051 => "/api/dostk/sect",
             ApiId::Ka10080
             | ApiId::Ka10081
             | ApiId::Ka10082
@@ -125,6 +131,11 @@ impl ApiId {
             ApiId::Ka10033 => "ka10033",
             ApiId::Ka90003 => "ka90003",
             ApiId::Ka00198 => "ka00198",
+            ApiId::Ka20003 => "ka20003",
+            ApiId::Ka10051 => "ka10051",
+            ApiId::Ka90005 => "ka90005",
+            ApiId::Ka90010 => "ka90010",
+            ApiId::Ka10131 => "ka10131",
         }
     }
 }
@@ -515,6 +526,20 @@ impl ListedMarket {
         match self {
             ListedMarket::Kospi => "P00101",
             ListedMarket::Kosdaq => "P10102",
+        }
+    }
+
+    const fn sector_code(self) -> &'static str {
+        match self {
+            ListedMarket::Kospi => "0",
+            ListedMarket::Kosdaq => "1",
+        }
+    }
+
+    pub const fn index_code(self) -> IndexCode {
+        match self {
+            ListedMarket::Kospi => IndexCode::KOSPI,
+            ListedMarket::Kosdaq => IndexCode::KOSDAQ,
         }
     }
 }
@@ -1017,6 +1042,99 @@ impl MostViewedRanking {
 
 market_request!(MostViewedRanking, Ka00198, wire::MostViewedRankingResponse);
 
+#[derive(Serialize)]
+pub struct AllIndices {
+    mrkt_tp: &'static str,
+    inds_cd: String,
+}
+
+impl AllIndices {
+    pub fn new(market: ListedMarket) -> Self {
+        AllIndices { mrkt_tp: market.sector_code(), inds_cd: market.index_code().as_str().to_owned() }
+    }
+}
+
+market_request!(AllIndices, Ka20003, wire::AllIndicesResponse);
+
+const SECTOR_NET_AMOUNT: &str = "0";
+
+#[derive(Serialize)]
+pub struct SectorInvestorNet {
+    mrkt_tp: &'static str,
+    amt_qty_tp: &'static str,
+    base_dt: String,
+    stex_tp: &'static str,
+}
+
+impl SectorInvestorNet {
+    pub fn new(market: ListedMarket, day: KstDate) -> Self {
+        SectorInvestorNet { mrkt_tp: market.sector_code(), amt_qty_tp: SECTOR_NET_AMOUNT, base_dt: day.yyyymmdd(), stex_tp: exchange_code(Venue::Combined) }
+    }
+}
+
+market_request!(SectorInvestorNet, Ka10051, wire::SectorInvestorNetResponse);
+
+const PROGRAM_AMOUNT: &str = "1";
+
+#[derive(Serialize)]
+struct ProgramTrendBody {
+    date: String,
+    amt_qty_tp: &'static str,
+    mrkt_tp: &'static str,
+    min_tic_tp: &'static str,
+    stex_tp: &'static str,
+}
+
+impl ProgramTrendBody {
+    fn new(market: ListedMarket, day: KstDate, min_tic_tp: &'static str) -> Self {
+        ProgramTrendBody { date: day.yyyymmdd(), amt_qty_tp: PROGRAM_AMOUNT, mrkt_tp: market.program_code(), min_tic_tp, stex_tp: exchange_code(Venue::Combined) }
+    }
+}
+
+#[derive(Serialize)]
+pub struct ProgramTrendByMinute(ProgramTrendBody);
+
+impl ProgramTrendByMinute {
+    pub fn new(market: ListedMarket, today: KstDate) -> Self {
+        ProgramTrendByMinute(ProgramTrendBody::new(market, today, "0"))
+    }
+}
+
+market_request!(ProgramTrendByMinute, Ka90005, wire::ProgramTrendByMinuteResponse);
+
+#[derive(Serialize)]
+pub struct ProgramTrendByDay(ProgramTrendBody);
+
+impl ProgramTrendByDay {
+    pub fn new(market: ListedMarket, today: KstDate) -> Self {
+        ProgramTrendByDay(ProgramTrendBody::new(market, today, "1"))
+    }
+}
+
+market_request!(ProgramTrendByDay, Ka90010, wire::ProgramTrendByDayResponse);
+
+#[derive(Serialize)]
+pub struct InstitutionForeignStreak {
+    dt: &'static str,
+    mrkt_tp: &'static str,
+    netslmt_tp: &'static str,
+    stk_inds_tp: &'static str,
+    amt_qty_tp: &'static str,
+    stex_tp: &'static str,
+}
+
+impl InstitutionForeignStreak {
+    pub fn new(side: StreakSide, market: ListedMarket) -> Self {
+        let netslmt_tp = match side {
+            StreakSide::Buying => "2",
+            StreakSide::Selling => "1",
+        };
+        InstitutionForeignStreak { dt: "1", mrkt_tp: market.order_book_code(), netslmt_tp, stk_inds_tp: "0", amt_qty_tp: "0", stex_tp: exchange_code(Venue::Combined) }
+    }
+}
+
+market_request!(InstitutionForeignStreak, Ka10131, wire::InstitutionForeignStreakResponse);
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1228,6 +1346,19 @@ mod tests {
         );
         let kospi = body(ProgramNetRanking::new(ProgramSide::NetSelling, ListedMarket::Kospi, Venue::Nxt));
         assert_eq!((kospi["trde_upper_tp"].as_str(), kospi["mrkt_tp"].as_str(), kospi["stex_tp"].as_str()), (Some("1"), Some("P00101"), Some("2")));
+    }
+
+    #[test]
+    fn market_overview_bodies_use_each_trs_own_market_codes() {
+        assert_eq!(body(AllIndices::new(ListedMarket::Kospi)), json!({"mrkt_tp": "0", "inds_cd": "001"}));
+        assert_eq!(body(AllIndices::new(ListedMarket::Kosdaq)), json!({"mrkt_tp": "1", "inds_cd": "101"}));
+        assert_eq!(body(SectorInvestorNet::new(ListedMarket::Kosdaq, today())), json!({"mrkt_tp": "1", "amt_qty_tp": "0", "base_dt": "20261109", "stex_tp": "3"}));
+        assert_eq!(body(ProgramTrendByMinute::new(ListedMarket::Kospi, today())), json!({"date": "20261109", "amt_qty_tp": "1", "mrkt_tp": "P00101", "min_tic_tp": "0", "stex_tp": "3"}));
+        assert_eq!(body(ProgramTrendByDay::new(ListedMarket::Kosdaq, today())), json!({"date": "20261109", "amt_qty_tp": "1", "mrkt_tp": "P10102", "min_tic_tp": "1", "stex_tp": "3"}));
+        assert_eq!(
+            body(InstitutionForeignStreak::new(StreakSide::Selling, ListedMarket::Kosdaq)),
+            json!({"dt": "1", "mrkt_tp": "101", "netslmt_tp": "1", "stk_inds_tp": "0", "amt_qty_tp": "0", "stex_tp": "3"})
+        );
     }
 
     #[test]

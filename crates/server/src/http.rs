@@ -36,6 +36,7 @@ pub struct AppState {
     pub registered: tokio::sync::watch::Receiver<crate::kiwoom::stream::DesiredFeeds>,
     pub trading: Arc<crate::trading::Trading>,
     pub rankings: crate::rankings::RankingCache,
+    pub market_overview: crate::market_overview::MarketOverview,
 }
 
 pub fn router(state: Arc<AppState>) -> Router {
@@ -55,6 +56,7 @@ pub fn router(state: Arc<AppState>) -> Router {
         .merge(crate::investors::routes())
         .merge(crate::intraday_feed::routes())
         .merge(crate::rankings::routes())
+        .merge(crate::market_overview::routes())
         .merge(crate::etf::routes())
         .merge(crate::system_routes::routes(state.clone()))
         .merge(crate::account_routes::routes(state.clone()))
@@ -190,6 +192,7 @@ pub(crate) enum Lookup {
     ScreenerUpdate,
     ScreenerRun,
     Rankings,
+    MarketOverview,
 }
 
 impl Lookup {
@@ -207,6 +210,7 @@ impl Lookup {
             Lookup::ScreenerUpdate => "스크리너 업데이트",
             Lookup::ScreenerRun => "스크리너 실행",
             Lookup::Rankings => "순위",
+            Lookup::MarketOverview => "시장 종합",
         }
     }
 

@@ -1357,6 +1357,324 @@ impl MostViewedRankingResponse {
     }
 }
 
+fn signed_decimal(s: &str) -> Result<f64, WireError> {
+    let text = without_commas(s);
+    let magnitude = decimal(text.trim().trim_start_matches(['+', '-']))?;
+    Ok(if text.trim().starts_with('-') { -magnitude } else { magnitude })
+}
+
+fn sector_code(s: &str) -> String {
+    s.trim().strip_suffix("_AL").unwrap_or(s.trim()).to_owned()
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct IndexBreadthRow {
+    pub code: String,
+    pub name: String,
+    pub level: f64,
+    pub change_rate: f64,
+    pub rising: u64,
+    pub flat: u64,
+    pub falling: u64,
+    pub upper_limit: u64,
+    pub lower_limit: u64,
+    pub trade_million_won: u64,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Deserialize)]
+#[serde(default)]
+struct IndexBreadthWireRow {
+    stk_cd: String,
+    stk_nm: String,
+    cur_prc: String,
+    flu_rt: String,
+    rising: String,
+    stdns: String,
+    fall: String,
+    upl: String,
+    lst: String,
+    trde_prica: String,
+}
+
+#[derive(Debug, PartialEq, Deserialize)]
+pub struct AllIndicesResponse {
+    #[serde(default)]
+    all_inds_idex: Vec<IndexBreadthWireRow>,
+}
+
+impl AllIndicesResponse {
+    pub fn rows(&self) -> ParsedRows<IndexBreadthRow> {
+        collect_rows(&self.all_inds_idex, |r| {
+            let count = |s: &str| optional(s, |s| unsigned(&without_commas(s))).map(Option::unwrap_or_default);
+            Ok(IndexBreadthRow {
+                code: sector_code(&r.stk_cd),
+                name: r.stk_nm.trim().to_owned(),
+                level: signed_decimal(&r.cur_prc)?.abs(),
+                change_rate: signed_decimal(&r.flu_rt)?,
+                rising: count(&r.rising)?,
+                flat: count(&r.stdns)?,
+                falling: count(&r.fall)?,
+                upper_limit: count(&r.upl)?,
+                lower_limit: count(&r.lst)?,
+                trade_million_won: count(&r.trde_prica)?,
+            })
+        }, "ka20003")
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct SectorInvestorRow {
+    pub code: String,
+    pub name: String,
+    pub level: f64,
+    pub change_rate: f64,
+    pub individual_eok: i64,
+    pub foreign_eok: i64,
+    pub institution_eok: i64,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Deserialize)]
+#[serde(default)]
+struct SectorInvestorWireRow {
+    inds_cd: String,
+    inds_nm: String,
+    cur_prc: String,
+    flu_rt: String,
+    ind_netprps: String,
+    frgnr_netprps: String,
+    orgn_netprps: String,
+}
+
+#[derive(Debug, PartialEq, Deserialize)]
+pub struct SectorInvestorNetResponse {
+    #[serde(default)]
+    inds_netprps: Vec<SectorInvestorWireRow>,
+}
+
+const CENTI: f64 = 100.0;
+
+impl SectorInvestorNetResponse {
+    pub fn rows(&self) -> ParsedRows<SectorInvestorRow> {
+        collect_rows(&self.inds_netprps, |r| {
+            if r.inds_cd.trim().is_empty() {
+                return Err(WireError("업종 코드가 없습니다".into()));
+            }
+            Ok(SectorInvestorRow {
+                code: sector_code(&r.inds_cd),
+                name: r.inds_nm.trim().to_owned(),
+                level: signed_decimal(&r.cur_prc)?.abs() / CENTI,
+                change_rate: signed_decimal(&r.flu_rt)? / CENTI,
+                individual_eok: rank_signed(&r.ind_netprps)?,
+                foreign_eok: rank_signed(&r.frgnr_netprps)?,
+                institution_eok: rank_signed(&r.orgn_netprps)?,
+            })
+        }, "ka10051")
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ProgramNetMillionWon {
+    pub arbitrage: i64,
+    pub non_arbitrage: i64,
+    pub total: i64,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Deserialize)]
+#[serde(default)]
+struct ProgramTrendWireRow {
+    cntr_tm: String,
+    dfrt_trde_netprps: String,
+    ndiffpro_trde_netprps: String,
+    all_netprps: String,
+}
+
+impl ProgramTrendWireRow {
+    fn net(&self) -> Result<ProgramNetMillionWon, WireError> {
+        Ok(ProgramNetMillionWon {
+            arbitrage: rank_signed(&self.dfrt_trde_netprps)?,
+            non_arbitrage: rank_signed(&self.ndiffpro_trde_netprps)?,
+            total: rank_signed(&self.all_netprps)?,
+        })
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ProgramMinuteRow {
+    pub time: TimeOfDay,
+    pub net: ProgramNetMillionWon,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ProgramDayRow {
+    pub day: KstDate,
+    pub net: ProgramNetMillionWon,
+}
+
+#[derive(Debug, PartialEq, Deserialize)]
+pub struct ProgramTrendByMinuteResponse {
+    #[serde(default)]
+    prm_trde_trnsn: Vec<ProgramTrendWireRow>,
+}
+
+impl ProgramTrendByMinuteResponse {
+    pub fn rows(&self) -> ParsedRows<ProgramMinuteRow> {
+        collect_rows(&self.prm_trde_trnsn, |r| {
+            let time = hhmmss(r.cntr_tm.trim())?;
+            Ok(ProgramMinuteRow { time, net: r.net()? })
+        }, "ka90005")
+    }
+}
+
+#[derive(Debug, PartialEq, Deserialize)]
+pub struct ProgramTrendByDayResponse {
+    #[serde(default)]
+    prm_trde_trnsn: Vec<ProgramTrendWireRow>,
+}
+
+impl ProgramTrendByDayResponse {
+    pub fn rows(&self) -> ParsedRows<ProgramDayRow> {
+        collect_rows(&self.prm_trde_trnsn, |r| {
+            let day = r.cntr_tm.trim().get(..8).and_then(KstDate::parse_yyyymmdd).ok_or_else(|| WireError(format!("cntr_tm이 날짜가 아닙니다: {:?}", r.cntr_tm)))?;
+            Ok(ProgramDayRow { day, net: r.net()? })
+        }, "ka90010")
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct StreakColumns {
+    pub days: i64,
+    pub net_million_won: i64,
+    pub net_shares: i64,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct InstitutionForeignStreakRow {
+    pub code: StockCode,
+    pub name: String,
+    pub foreign: StreakColumns,
+    pub institution: StreakColumns,
+    pub period_change_rate: f64,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Deserialize)]
+#[serde(default)]
+struct StreakWireRow {
+    stk_cd: String,
+    stk_nm: String,
+    frgnr_cont_netprps_dys: String,
+    frgnr_cont_netprps_qty: String,
+    frgnr_cont_netprps_amt: String,
+    orgn_cont_netprps_dys: String,
+    orgn_cont_netprps_qty: String,
+    orgn_cont_netprps_amt: String,
+    prid_stkpc_flu_rt: String,
+}
+
+#[derive(Debug, PartialEq, Deserialize)]
+pub struct InstitutionForeignStreakResponse {
+    #[serde(default)]
+    orgn_frgnr_cont_trde_prst: Vec<StreakWireRow>,
+}
+
+impl InstitutionForeignStreakResponse {
+    pub fn rows(&self) -> ParsedRows<InstitutionForeignStreakRow> {
+        collect_rows(&self.orgn_frgnr_cont_trde_prst, |r| {
+            let columns = |days: &str, shares: &str, amount: &str| -> Result<StreakColumns, WireError> {
+                Ok(StreakColumns { days: rank_signed(days)?, net_million_won: rank_signed(amount)?, net_shares: rank_signed(shares)? })
+            };
+            Ok(InstitutionForeignStreakRow {
+                code: rank_code(&r.stk_cd)?,
+                name: r.stk_nm.trim().to_owned(),
+                foreign: columns(&r.frgnr_cont_netprps_dys, &r.frgnr_cont_netprps_qty, &r.frgnr_cont_netprps_amt)?,
+                institution: columns(&r.orgn_cont_netprps_dys, &r.orgn_cont_netprps_qty, &r.orgn_cont_netprps_amt)?,
+                period_change_rate: signed_decimal(&r.prid_stkpc_flu_rt)?,
+            })
+        }, "ka10131")
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct IndexTradeDay {
+    pub day: KstDate,
+    pub trade_million_won: u64,
+}
+
+pub fn index_trade_days(body: IndexDailyChartResponse) -> ParsedRows<IndexTradeDay> {
+    let rows = body.into_rows();
+    let mut parsed = collect_rows(&rows, |r| {
+        let day = KstDate::parse_yyyymmdd(&r.dt).ok_or_else(|| WireError(format!("dt가 날짜가 아닙니다: {:?}", r.dt)))?;
+        Ok(IndexTradeDay { day, trade_million_won: rank_count(&r.trde_prica)? })
+    }, "ka20006");
+    parsed.rows.sort_by_key(|row| row.day);
+    parsed.rows.dedup_by_key(|row| row.day);
+    parsed
+}
+
+#[cfg(test)]
+mod market_overview_tests {
+    use super::*;
+
+    fn parse<R: serde::de::DeserializeOwned>(body: Value) -> R {
+        serde_json::from_value(body).unwrap()
+    }
+
+    #[test]
+    fn index_rows_read_decimal_levels_and_breadth() {
+        let body: AllIndicesResponse = parse(json!({"all_inds_idex": [
+            {"stk_cd": "001", "stk_nm": "종합(KOSPI)", "cur_prc": "-6613.59", "flu_rt": "-0.67", "rising": "410", "stdns": "52", "fall": "+498", "upl": "3", "lst": "0", "trde_prica": "13,485,976"},
+            {"stk_cd": "", "stk_nm": "", "cur_prc": "x"}
+        ]}));
+        let rows = body.rows();
+        assert_eq!(rows.skipped, 1);
+        let row = &rows.rows[0];
+        assert_eq!((row.code.as_str(), row.level, row.change_rate), ("001", 6613.59, -0.67));
+        assert_eq!((row.rising, row.flat, row.falling, row.upper_limit, row.lower_limit, row.trade_million_won), (410, 52, 498, 3, 0, 13_485_976));
+    }
+
+    #[test]
+    fn sector_investor_rows_are_hundredfold_integers_with_al_suffix() {
+        let body: SectorInvestorNetResponse = parse(json!({"inds_netprps": [
+            {"inds_cd": "101_AL", "inds_nm": "종합(KOSDAQ)", "cur_prc": "-77903", "flu_rt": "-282", "ind_netprps": "-8787", "frgnr_netprps": "+6473", "orgn_netprps": "--12"}
+        ]}));
+        let row = &body.rows().rows[0];
+        assert_eq!((row.code.as_str(), row.level, row.change_rate), ("101", 779.03, -2.82));
+        assert_eq!((row.individual_eok, row.foreign_eok, row.institution_eok), (-8787, 6473, -12));
+    }
+
+    #[test]
+    fn program_rows_fold_double_signs_and_dates() {
+        let minutes: ProgramTrendByMinuteResponse = parse(json!({"prm_trde_trnsn": [
+            {"cntr_tm": "103905", "dfrt_trde_netprps": "+25634", "ndiffpro_trde_netprps": "--528475", "all_netprps": "--502841"},
+            {"cntr_tm": "bad", "all_netprps": "1"}
+        ]}));
+        let rows = minutes.rows();
+        assert_eq!(rows.skipped, 1);
+        assert_eq!(rows.rows[0], ProgramMinuteRow { time: TimeOfDay::hms(10, 39, 5).unwrap(), net: ProgramNetMillionWon { arbitrage: 25_634, non_arbitrage: -528_475, total: -502_841 } });
+        let days: ProgramTrendByDayResponse = parse(json!({"prm_trde_trnsn": [{"cntr_tm": "20260805000000", "dfrt_trde_netprps": "1", "ndiffpro_trde_netprps": "2", "all_netprps": "3"}]}));
+        assert_eq!(days.rows().rows[0].day, KstDate::new(2026, 8, 5).unwrap());
+    }
+
+    #[test]
+    fn streak_rows_keep_each_actors_sign() {
+        let body: InstitutionForeignStreakResponse = parse(json!({"orgn_frgnr_cont_trde_prst": [
+            {"stk_cd": "005930_AL", "stk_nm": "삼성전자", "frgnr_cont_netprps_dys": "-2", "frgnr_cont_netprps_qty": "--100", "frgnr_cont_netprps_amt": "--940483",
+             "orgn_cont_netprps_dys": "+7", "orgn_cont_netprps_qty": "55", "orgn_cont_netprps_amt": "1000", "prid_stkpc_flu_rt": "-1.25"}
+        ]}));
+        let row = &body.rows().rows[0];
+        assert_eq!((row.foreign.days, row.foreign.net_million_won, row.foreign.net_shares), (-2, -940_483, -100));
+        assert_eq!((row.institution.days, row.period_change_rate), (7, -1.25));
+    }
+
+    #[test]
+    fn index_trade_days_are_ascending_millions() {
+        let body: IndexDailyChartResponse = parse(json!({"inds_dt_pole_qry": [
+            {"dt": "20261106", "trde_prica": "300"}, {"dt": "20261105", "trde_prica": "200"}
+        ]}));
+        let days = index_trade_days(body).rows;
+        assert_eq!(days.iter().map(|d| (d.day.yyyymmdd(), d.trade_million_won)).collect::<Vec<_>>(), [("20261105".to_owned(), 200), ("20261106".to_owned(), 300)]);
+    }
+}
+
 #[cfg(test)]
 mod rank_tests {
     use super::*;

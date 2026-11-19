@@ -21,6 +21,7 @@ pub mod investors;
 pub mod jump_bars;
 pub mod kiwoom;
 pub mod market;
+pub mod market_overview;
 pub mod public_ip;
 pub mod quotes;
 pub mod rankings;
