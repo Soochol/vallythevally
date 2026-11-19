@@ -145,7 +145,7 @@ test("동시호가 캡처: 매도 3단은 가운데 선 위, 매수 3단은 아�
 });
 
 test("동시호가 캡처: 정보 일곱 칸과 예상체결 두 칸이 하나도 가려지지 않는다", () => {
-  const info = quoteInfoItems({ price: 810_000, previousClose: 810_000, volume: 0, upperLimit: 1_053_000, lowerLimit: 567_000 });
+  const info = quoteInfoItems(0, { price: 810_000, previousClose: 810_000, summary: { open: null, high: null, low: null, volume: 0, tradeValueWon: null }, fundamentals: null });
   const slots = placeInfoItems(auction(), info, expectedInfoItems({ price: 819_000, qty: 100 }, 810_000));
   expect(slots.filter((slot) => slot !== null).map((slot) => slot!.label)).toEqual([...info.map((item) => item.label), "예상체결가", "예상체결량"]);
 });

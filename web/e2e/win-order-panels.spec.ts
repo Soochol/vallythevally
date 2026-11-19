@@ -2,7 +2,7 @@ import type { Locator, Page } from "@playwright/test";
 import type { TradingExecution } from "../src/api/generated/TradingExecution";
 import type { TradingHolding } from "../src/api/generated/TradingHolding";
 import { type Scenario, cell, DEFAULT_LAYOUT_ID, expect, pollSaved, test } from "./harness";
-import { ACCOUNT, askAtLastSnapshot, BASE, CODE, cellAt, center, chipAt, dragChip, openOrder, openOrderWindow, ordersOn, status, tradingApi, win, writesTo } from "./order-window";
+import { ACCOUNT, askAtLastSnapshot, BASE, CODE, cellAt, center, chipAt, dragChip, INFO_PAGE_1, INFO_PAGE_2, INFO_PAGE_2_VALUES, infoLabels, infoPager, infoValues, openOrder, openOrderWindow, ordersOn, status, tradingApi, win, writesTo } from "./order-window";
 
 const HOLDING: TradingHolding = { code: CODE, name: "삼성전자", quantity: 120, sellableQuantity: 100, averagePrice: 70_040, currentPrice: BASE, evaluationProfit: -4_800, profitRateCenti: -57 };
 const FILL: TradingExecution = { orderNo: "0000010", code: CODE, name: "삼성전자", side: "buy", quantity: 5, price: 70_000, time: "093015", venue: "krx" };
@@ -643,7 +643,7 @@ test("금액 프리셋을 누른 뒤 현재가가 바뀌어도 수량 칸은 그
   await amountPresetButtons(page).first().click();
   await expect(quantityField(page)).toHaveValue("14");
   lastTrade(scenario, BASE + 1_000, 2);
-  await expect(page.getByTestId("ladder-info").filter({ hasText: "현재가" })).toContainText("71,000");
+  await expect(page.getByTestId("ladder-info").filter({ hasText: "전일대비" })).toContainText("+1,000 +1.43%");
   await expect(quantityField(page)).toHaveValue("14");
   await cellAt(page, "buy", BASE + 1_000).dblclick();
   await pollSaved(() => writesTo(api, "place")).toHaveLength(1);
@@ -735,10 +735,60 @@ test("정보 7항목이 사다리 1~7행과 같은 top에 있고 값이 맞다",
   await openOrderWindow(page, scenario);
   const info = page.getByTestId("ladder-info");
   await expect(info).toHaveCount(7);
-  await expect(info.filter({ hasText: "현재가" })).toContainText("70,000");
-  await expect(info.filter({ hasText: "상한가" })).toContainText("91,000");
-  await expect(info.filter({ hasText: "하한가" })).toContainText("49,000");
+  await expect(infoLabels(page)).toHaveText(INFO_PAGE_1);
+  await expect(infoValues(page)).toHaveText(["69,900", "70,400", "69,400", "70,000", "0 0.00%", "123만", "864억"]);
   expect(await tops(info)).toEqual((await tops(ladderRows(page))).slice(0, 7));
+});
+
+test("정보란을 누르면 2쪽으로 바뀌고 다시 누르면 1쪽이다", async ({ page, scenario }) => {
+  ordersOn(scenario);
+  tradingApi(scenario);
+  await openOrderWindow(page, scenario);
+  await expect(infoPager(page)).toHaveAccessibleName("정보 1/2쪽, 눌러서 다음 쪽");
+  await expect(infoLabels(page)).toHaveText(INFO_PAGE_1);
+
+  await page.getByTestId("ladder-info").nth(4).click();
+  await expect(infoPager(page)).toHaveAccessibleName("정보 2/2쪽, 눌러서 다음 쪽");
+  await expect(infoLabels(page)).toHaveText(INFO_PAGE_2);
+  await expect(infoValues(page)).toHaveText(INFO_PAGE_2_VALUES);
+  expect(await tops(page.getByTestId("ladder-info"))).toEqual((await tops(ladderRows(page))).slice(0, 8));
+
+  await infoPager(page).click();
+  await expect(infoLabels(page)).toHaveText(INFO_PAGE_1);
+
+  await infoPager(page).focus();
+  await page.keyboard.press("Enter");
+  await expect(infoLabels(page)).toHaveText(INFO_PAGE_2);
+  await page.keyboard.press("Space");
+  await expect(infoLabels(page)).toHaveText(INFO_PAGE_1);
+});
+
+test("정보란에서 고른 쪽은 종목이 바뀌어도 유지된다", async ({ page, scenario }) => {
+  ordersOn(scenario);
+  tradingApi(scenario);
+  await openOrderWindow(page, scenario, true);
+  await infoPager(page).click();
+  await expect(infoLabels(page)).toHaveText(INFO_PAGE_2);
+  await cell(page, 2).click();
+  await expect(win(page)).toHaveAttribute("data-symbol", "000660");
+  await expect(infoPager(page)).toHaveAccessibleName("정보 2/2쪽, 눌러서 다음 쪽");
+  await expect(infoLabels(page)).toHaveText(INFO_PAGE_2);
+  await cell(page, 1).click();
+  await expect(win(page)).toHaveAttribute("data-symbol", CODE);
+  await expect(infoLabels(page)).toHaveText(INFO_PAGE_2);
+});
+
+test("호가주문창에서 정보란을 더블클릭해도 주문 요청이 없다", async ({ page, scenario }) => {
+  ordersOn(scenario);
+  const api = tradingApi(scenario);
+  await openOrderWindow(page, scenario);
+  const info = page.getByTestId("ladder-info");
+  await info.first().dblclick();
+  await info.last().dblclick();
+  await expect(infoLabels(page)).toHaveText(INFO_PAGE_1);
+  await expect(page.getByTestId("order-ladder")).not.toHaveAttribute("data-dragging", "");
+  expect(scenario.requests.filter((request) => request.method() !== "GET" && new URL(request.url()).pathname.startsWith("/api/trading/"))).toEqual([]);
+  expect(writesTo(api, "place")).toHaveLength(0);
 });
 
 test("체결강도는 11행, 체결은 12행부터 같은 top에 있고 새 체결이 맨 위이며 왼쪽 테두리와 대량 글자·막대가 없다", async ({ page, scenario }) => {
@@ -936,8 +986,8 @@ test("교차 호가로 위 오른쪽 칸에 매수 잔량이 있으면 그 행�
   await expect(crossed.getByTestId("ladder-info")).toHaveCount(0);
   const info = page.getByTestId("ladder-info");
   await expect(info).toHaveCount(6);
-  await expect(info.filter({ hasText: "하한가" })).toContainText("49,000");
-
+  await expect(info.filter({ hasText: "기준가" })).toHaveCount(0);
+  await expect(info.filter({ hasText: "거래대금" })).toContainText("864억");
 });
 
 test.describe("수요일 08:55 동시호가", () => {

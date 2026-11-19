@@ -27,6 +27,8 @@ import type { Period } from "../../src/api/generated/Period";
 import type { RankingPage } from "../../src/api/generated/RankingPage";
 import type { Screens } from "../../src/api/generated/Screens";
 import type { ServerMessage } from "../../src/api/generated/ServerMessage";
+import type { Quote } from "../../src/api/generated/Quote";
+import type { SymbolDaySummary } from "../../src/api/generated/SymbolDaySummary";
 import type { SymbolInfo } from "../../src/api/generated/SymbolInfo";
 import type { UiState } from "../../src/api/generated/UiState";
 import type { Venue } from "../../src/api/generated/Venue";
@@ -136,6 +138,13 @@ export class MarketFixtures {
     return [...search(query), ...extra].filter(value => (!options.market || value.market === options.market) && (!options.kind || value.kind === options.kind));
   }
 }
+
+export const DAY_SUMMARY_VOLUME = 1_234_567;
+
+export const daySummaryOf = (quote: Quote): SymbolDaySummary => ({
+  symbol: quote.symbol, venue: quote.venue ?? "combined", price: quote.price, open: quote.price - 100, high: quote.price + 400, low: quote.price - 600,
+  volume: DAY_SUMMARY_VOLUME, tradeValueWon: Math.round(quote.price * DAY_SUMMARY_VOLUME), t: quote.t,
+});
 
 export const CONNECTED_KIWOOM: KiwoomLinkStatus = {
   environment: "real", keySource: "file", appKeyTail: "1234", registeredIp: null, credentialId: null, state: "connected", problem: null, message: "키움에 연결되어 있습니다",
@@ -316,6 +325,15 @@ export class Scenario {
       const venue = url.searchParams.get("venue") ?? "combined";
       if (venue !== "combined" && venue !== "krx" && venue !== "nxt") return error(400, "bad_request", "Invalid venue");
       return { body: (url.searchParams.get("symbols") ?? "").split(",").flatMap(symbol => { const quote = this.market.quote(symbol, venue); return quote ? [quote] : []; }) };
+    }
+    const daySummary = /^\/api\/symbols\/([^/]+)\/day-summary$/.exec(path);
+    if (daySummary && method === "GET") {
+      const symbol = decodeURIComponent(daySummary[1]!);
+      const venue = url.searchParams.get("venue") ?? "combined";
+      if (venue !== "combined" && venue !== "krx" && venue !== "nxt") return error(400, "bad_request", "Invalid venue");
+      if (symbol.startsWith("IDX:")) return error(400, "bad_request", "지수에는 종목 당일 요약이 없습니다");
+      const quote = this.market.quote(symbol, venue);
+      return { body: quote ? daySummaryOf(quote) : { symbol, venue, price: null, open: null, high: null, low: null, volume: null, tradeValueWon: null, t: null } satisfies SymbolDaySummary };
     }
     if (path === "/api/bars" && method === "GET") {
       const symbol = url.searchParams.get("symbol") ?? "";

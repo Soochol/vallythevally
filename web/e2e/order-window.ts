@@ -9,12 +9,21 @@ import type { TradingExecution } from "../src/api/generated/TradingExecution";
 import type { TradingOrderable } from "../src/api/generated/TradingOrderable";
 import type { TradingHolding } from "../src/api/generated/TradingHolding";
 import type { Venue } from "../src/api/generated/Venue";
+import { daySummaryOf } from "./fixtures/scenario";
 import { type Scenario, cell, DEFAULT_LAYOUT_ID, expect, windowTabs } from "./harness";
 
 export const SETTINGS = { v: 1, style: "candle", scale: "normal", indicators: [], compare: [], panels: [] };
 export const CODE = "005930";
 export const ACCOUNT = "synthetic-account";
 export const BASE = 70_000;
+export const FUNDAMENTAL_FIGURES = { marketCap: 82_400_000_000, listedShares: null, per: 14.21, pbr: 1.1, roe: null, eps: null, bps: null, foreignExhaustionRate: 54.12, high52w: 88_000, low52w: 51_000 };
+
+export const INFO_PAGE_1 = ["시가", "고가", "저가", "기준가", "전일대비", "거래량", "거래대금"];
+export const INFO_PAGE_2 = ["상한가", "하한가", "52주 최고", "52주 최저", "시가총액", "PER", "PBR", "외국인소진율"];
+export const INFO_PAGE_2_VALUES = ["91,000", "49,000", "88,000", "51,000", "824억", "14.21배", "1.10배", "54.12%"];
+export const infoLabels = (page: Page): Locator => page.getByTestId("ladder-info").locator(":scope > span:first-child");
+export const infoValues = (page: Page): Locator => page.getByTestId("ladder-info").locator(":scope > b");
+export const infoPager = (page: Page): Locator => page.getByRole("button", { name: /^정보 \d\/2쪽, 눌러서 다음 쪽$/ });
 
 export type Write = { path: string; body: Record<string, unknown>; header: string | undefined };
 
@@ -58,6 +67,15 @@ export function pinQuote(scenario: Scenario, symbol: string, price: number, chan
       const quote = scenario.market.quote(code, venue);
       return quote ? [code === symbol ? { ...quote, price: priceByVenue[venue] ?? price, change } : quote] : [];
     }) };
+  });
+  pinDaySummary(scenario, symbol, price, change, priceByVenue);
+}
+
+function pinDaySummary(scenario: Scenario, symbol: string, price: number, change: number, priceByVenue: Partial<Record<Venue, number>>): void {
+  scenario.on((url) => url.pathname === `/api/symbols/${symbol}/day-summary`, (request) => {
+    const venue = (new URL(request.url()).searchParams.get("venue") ?? "combined") as Venue;
+    const quote = scenario.market.quote(symbol, venue);
+    return { body: quote ? daySummaryOf({ ...quote, price: priceByVenue[venue] ?? price, change }) : null };
   });
 }
 
@@ -150,7 +168,7 @@ export async function openOrderWindow(page: Page, scenario: Scenario, withSecond
   ];
   scenario.documents.saveLayout({ ...layout, windows, placement: {}, revision: layout.revision + 1 });
   pinQuote(scenario, CODE, BASE);
-  scenario.reply((url) => url.pathname === `/api/symbols/${CODE}/fundamentals`, { body: { symbol: CODE, upperLimit: limits.upper, lowerLimit: limits.lower, marketCap: null, listedShares: null, per: null, pbr: null, roe: null, eps: null, bps: null, foreignExhaustionRate: null, high52w: null, low52w: null } });
+  scenario.reply((url) => url.pathname === `/api/symbols/${CODE}/fundamentals`, { body: { symbol: CODE, upperLimit: limits.upper, lowerLimit: limits.lower, ...FUNDAMENTAL_FIGURES } });
   scenario.reply((url) => url.pathname === `/api/symbols/${CODE}/order-book`, bookFails ? { status: 503, body: { error: { code: "internal", message: "호가 조회 실패", reason: null, retryAt: null, manualActionRequired: false } } } : { body: book });
   scenario.reply((url) => url.pathname === "/api/symbols/000660/order-book", { body: { ...snapshot(BASE), symbol: "000660" } });
   scenario.reply((url) => url.pathname === "/api/symbols/000660/fundamentals", { body: { symbol: "000660", upperLimit: null, lowerLimit: null } });

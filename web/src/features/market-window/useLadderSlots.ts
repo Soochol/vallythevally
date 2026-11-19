@@ -1,11 +1,13 @@
 import { useQuery } from "@tanstack/react-query";
+import { useState } from "react";
+import type { Fundamentals } from "../../api/generated/Fundamentals";
 import type { SymbolCode } from "../../api/generated/SymbolCode";
 import type { Venue } from "../../api/generated/Venue";
-import { fetchQuotes } from "../../api/userData";
+import { fetchDaySummary } from "../../api/userData";
 import { marketSocket } from "../../stores/realtime";
 import type { TradeRow } from "../trades/tape";
 import { useTradeTape } from "../trades/useTradeTape";
-import { quoteInfoItems, type QuoteInfo } from "./quoteInfo";
+import { type InfoPage, nextInfoPage, quoteInfoItems, type QuoteInfo } from "./quoteInfo";
 import { tradeRows } from "./recentTrades";
 
 const QUOTE_POLL_MS = 5000;
@@ -16,13 +18,23 @@ export interface QuoteInfoSource {
   readonly venue: Venue;
   readonly lastPrice: number | null;
   readonly previousClose: number | null;
-  readonly upperLimit: number | null;
-  readonly lowerLimit: number | null;
+  readonly fundamentals: Fundamentals | undefined;
+  readonly page: InfoPage;
 }
 
-export function useQuoteInfo({ code, venue, lastPrice, previousClose, upperLimit, lowerLimit }: QuoteInfoSource): QuoteInfo[] {
-  const quote = useQuery({ queryKey: ["ladder-quote", code, venue], queryFn: async ({ signal }) => (await fetchQuotes([code], venue, signal))[0] ?? null, refetchInterval: QUOTE_POLL_MS, staleTime: 0, retry: false }).data ?? null;
-  return quoteInfoItems({ price: lastPrice ?? quote?.price ?? null, previousClose, volume: quote?.volume ?? null, upperLimit, lowerLimit });
+export function useQuoteInfo({ code, venue, lastPrice, previousClose, fundamentals, page }: QuoteInfoSource): QuoteInfo[] {
+  const summary = useQuery({ queryKey: ["ladder-day-summary", code, venue], queryFn: ({ signal }) => fetchDaySummary(code, venue, signal), refetchInterval: QUOTE_POLL_MS, staleTime: 0, retry: false }).data ?? null;
+  return quoteInfoItems(page, { price: lastPrice ?? summary?.price ?? null, previousClose, summary, fundamentals: fundamentals ?? null });
+}
+
+export interface InfoPager {
+  readonly page: InfoPage;
+  readonly next: () => void;
+}
+
+export function useInfoPager(): InfoPager {
+  const [page, setPage] = useState<InfoPage>(0);
+  return { page, next: () => setPage(nextInfoPage) };
 }
 
 export interface LadderTrades {
