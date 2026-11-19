@@ -11,7 +11,7 @@ use super::journal::{BatchBegun, Begun, Prepared, PreparedBatch};
 use super::tests::{ACCOUNT, DEFAULT_BAND, ETN_CODE, Fixture, HOST, WriteMode, enable, fixture, fixture_in, fixture_with, get, trading_sends};
 use super::{SwitchStore, Trading};
 use crate::api::{KiwoomEnvironment, OrderCommandKind, OrderCommandState};
-use crate::kiwoom::api::{Endpoint, StockList};
+use crate::kiwoom::api::{Endpoint, MarketRequest, StockBasicInfo, StockList};
 use crate::kiwoom::rest::{ContKey, MergeScope, Priority};
 use crate::config::Secret;
 use crate::kiwoom::stream::{AccountEvent, AccountKind, KiwoomStream};
@@ -521,6 +521,7 @@ async fn a_dropped_http_request_does_not_strand_the_command() {
     assert!(accepted <= 5, "같은 id는 한 번만 나간다: {accepted}");
 }
 
+const BASIC_INFO: &str = Endpoint::Market(StockBasicInfo::API_ID).as_str();
 const FUNDAMENTALS: &str = "/api/symbols/005930/fundamentals";
 const OPEN_ORDERS: &str = "/api/trading/open-orders";
 
@@ -549,7 +550,7 @@ async fn place_with_remembered_band_skips_basic_info() {
     let f = on().await;
     let before = sent_ids(&f).len();
     remember_band(&f).await;
-    assert_eq!(sent_since(&f, before), ["ka10001"]);
+    assert_eq!(sent_since(&f, before), [BASIC_INFO]);
     let before = sent_ids(&f).len();
     let (_, bought) = order(&f.app, PLACE, buy("cmd-band-buy01", 3, 71_000)).await;
     assert_eq!(bought["state"], "accepted", "{bought}");
@@ -566,7 +567,7 @@ async fn an_order_alone_remembers_the_band_for_the_next_one() {
     let before = sent_ids(&f).len();
     order(&f.app, PLACE, buy("cmd-band-solo1", 1, 71_000)).await;
     order(&f.app, PLACE, buy("cmd-band-solo2", 1, 71_000)).await;
-    assert_eq!(sent_since(&f, before), ["ka10001", "kt00010", "kt10000", "kt00010", "kt10000"]);
+    assert_eq!(sent_since(&f, before), [BASIC_INFO, "kt00010", "kt10000", "kt00010", "kt10000"]);
 }
 
 #[tokio::test]
@@ -578,7 +579,7 @@ async fn price_band_is_fetched_again_on_a_new_kst_day() {
     let before = sent_ids(&f).len();
     let (_, next_day) = order(&f.app, PLACE, buy("cmd-day-00002", 1, 71_000)).await;
     assert_eq!(next_day["state"], "accepted", "{next_day}");
-    assert_eq!(sent_since(&f, before).iter().filter(|id| **id == "ka10001").count(), 1);
+    assert_eq!(sent_since(&f, before).iter().filter(|id| **id == BASIC_INFO).count(), 1);
     let before = sent_ids(&f).len();
     order(&f.app, PLACE, buy("cmd-day-00003", 1, 71_000)).await;
     assert_eq!(sent_since(&f, before), ["kt00010", "kt10000"], "새 날짜의 값은 다시 기억한다");
@@ -592,7 +593,7 @@ async fn missing_limits_still_refuse_with_limits_unavailable() {
         remember_band(&f).await;
         let before = sent_ids(&f).len();
         refused(&f, buy(&format!("cmd-miss-000{round}"), 1, 71_000), "limits_unavailable").await;
-        assert_eq!(sent_since(&f, before), ["ka10001"], "상한·하한이 없으면 기억하지 않아 주문에서 다시 묻고, 확인이 막으니 다른 조회도 쓰기도 없다: {upper:?} {lower:?}");
+        assert_eq!(sent_since(&f, before), [BASIC_INFO], "상한·하한이 없으면 기억하지 않아 주문에서 다시 묻고, 확인이 막으니 다른 조회도 쓰기도 없다: {upper:?} {lower:?}");
     }
     set_band(&f, DEFAULT_BAND[0], DEFAULT_BAND[1]);
     let (_, accepted) = order(&f.app, PLACE, buy("cmd-miss-0009", 1, 71_000)).await;
@@ -607,10 +608,10 @@ async fn out_of_remembered_band_fetches_once_before_refusing() {
     let before = sent_ids(&f).len();
     let (_, inside_new) = order(&f.app, PLACE, buy("cmd-out-00001", 1, 110_000)).await;
     assert_eq!(inside_new["state"], "accepted", "{inside_new}");
-    assert_eq!(sent_since(&f, before), ["ka10001", "kt00010", "kt10000"]);
+    assert_eq!(sent_since(&f, before), [BASIC_INFO, "kt00010", "kt10000"]);
     let before = sent_ids(&f).len();
     refused(&f, buy("cmd-out-00002", 1, 140_000), "out_of_limit").await;
-    assert_eq!(sent_since(&f, before), ["ka10001"], "새 값으로도 밖이면 한 번 조회하고 거절한다");
+    assert_eq!(sent_since(&f, before), [BASIC_INFO], "새 값으로도 밖이면 한 번 조회하고 거절한다");
     let before = sent_ids(&f).len();
     let (_, inside_old) = order(&f.app, PLACE, buy("cmd-out-00003", 1, 71_000)).await;
     assert_eq!(inside_old["state"], "accepted", "{inside_old}");
