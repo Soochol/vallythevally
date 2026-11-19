@@ -59,6 +59,39 @@ impl fmt::Display for ConfigError {
 
 impl std::error::Error for ConfigError {}
 
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct TailnetHosts(Vec<String>);
+
+impl TailnetHosts {
+    pub fn parse(value: &str) -> Result<Self, ConfigError> {
+        if value.trim().is_empty() {
+            return Ok(TailnetHosts::default());
+        }
+        let mut names: Vec<String> = Vec::new();
+        for entry in value.split(',') {
+            let name = entry.trim().to_ascii_lowercase();
+            if !is_magic_dns_name(&name) {
+                return Err(ConfigError(format!("VALLY_TAILNET_HOSTS는 server.<tailnet>.ts.net 같은 MagicDNS 전체 이름을 쉼표로 구분해 적습니다. 포트, 스킴, 경로, 와일드카드, IP, 빈 항목은 안 됩니다: {entry:?}")));
+            }
+            if !names.contains(&name) {
+                names.push(name);
+            }
+        }
+        Ok(TailnetHosts(names))
+    }
+
+    pub fn contains(&self, host: &str) -> bool {
+        self.0.iter().any(|name| name.eq_ignore_ascii_case(host))
+    }
+}
+
+fn is_magic_dns_name(name: &str) -> bool {
+    let Some(machine_and_tailnet) = name.strip_suffix(".ts.net") else { return false };
+    let mut labels = machine_and_tailnet.split('.');
+    let valid_label = |label: &str| !label.is_empty() && !label.starts_with('-') && !label.ends_with('-') && label.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-');
+    labels.clone().count() >= 2 && labels.all(valid_label)
+}
+
 /// 받는 주소. 루프백만 받는다.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct BindAddr(SocketAddr);
@@ -104,6 +137,7 @@ const KNOWN_KEYS: &[&str] = &[
     "VALLY_TOKEN_PATH",
     "VALLY_KIWOOM_KEY_PATH",
     "VALLY_BIND",
+    "VALLY_TAILNET_HOSTS",
     "VALLY_TELEGRAM_BOT_TOKEN",
     "VALLY_TELEGRAM_CHAT_ID",
     "VALLY_STATIC_DIR",
@@ -136,6 +170,7 @@ pub struct Config {
     pub token_path: PathBuf,
     pub kiwoom_key_path: PathBuf,
     pub bind: BindAddr,
+    pub tailnet_hosts: TailnetHosts,
     pub static_dir: PathBuf,
     /// 사용자 자료 SQLite 파일(§7.1). 상대 경로면 서버 작업 디렉터리 기준.
     pub db_path: PathBuf,
@@ -271,6 +306,7 @@ impl Config {
                 None => state_default(default_key())?,
             },
             bind: BindAddr::parse(vars.get("VALLY_BIND").map_or(default_bind, String::as_str))?,
+            tailnet_hosts: TailnetHosts::parse(vars.get("VALLY_TAILNET_HOSTS").map_or("", String::as_str))?,
             static_dir: PathBuf::from(vars.get("VALLY_STATIC_DIR").map_or("web/dist", String::as_str)),
             screener_db_path: PathBuf::from(vars.get("VALLY_SCREENER_DB_PATH").map_or(default_screener_db, String::as_str)),
             screener_update_on_start: match vars.get("VALLY_SCREENER_UPDATE_ON_START").map(String::as_str) {
@@ -655,6 +691,35 @@ mod tests {
         for bad in ["0.0.0.0:8080", "192.168.0.2:8080", "[::]:8080", "100.64.0.1:80", "localhost:8080", "127.0.0.1"] {
             assert!(BindAddr::parse(bad).is_err(), "{bad}");
         }
+    }
+
+    #[test]
+    fn tailnet_hosts_are_empty_by_default_and_normalized_when_given() {
+        let hosts = |pairs: &[(&str, &str)]| Config::from_vars(vars(&[("VALLY_KIWOOM_APP_KEY", KEY), ("VALLY_KIWOOM_APP_SECRET", SECRET)]), vars(&[&REAL[..], pairs].concat()), lock, token, key, account).map(|(config, _)| config.tailnet_hosts);
+        assert_eq!(hosts(&[]).unwrap(), TailnetHosts::default());
+        assert_eq!(hosts(&[("VALLY_TAILNET_HOSTS", "")]).unwrap(), TailnetHosts::default());
+        assert_eq!(hosts(&[("VALLY_TAILNET_HOSTS", "  ")]).unwrap(), TailnetHosts::default());
+        let given = hosts(&[("VALLY_TAILNET_HOSTS", " Server.Example-Tailnet.ts.net , phone.example-tailnet.ts.net ,server.example-tailnet.ts.net")]).unwrap();
+        assert_eq!(given, TailnetHosts(vec!["server.example-tailnet.ts.net".into(), "phone.example-tailnet.ts.net".into()]));
+        assert!(given.contains("SERVER.example-tailnet.ts.net") && given.contains("phone.example-tailnet.ts.net"));
+        assert!(!given.contains("other.example-tailnet.ts.net") && !given.contains("server.example-tailnet.ts.net:443") && !given.contains("server.example-tailnet.ts.net."));
+        assert!(!TailnetHosts::default().contains("server.example-tailnet.ts.net"));
+    }
+
+    #[test]
+    fn tailnet_hosts_reject_everything_but_full_magic_dns_names() {
+        for bad in [
+            "server.example.com", "server.example-tailnet.ts.net:443", "https://server.example-tailnet.ts.net", "server.example-tailnet.ts.net/path", "*.example-tailnet.ts.net", "*", "100.64.0.1", "127.0.0.1", "[::1]",
+            "a.ts.net,,b.example-tailnet.ts.net", "a.example-tailnet.ts.net,", ",a.example-tailnet.ts.net", "ts.net", ".ts.net", "x.ts.net", "-a.example-tailnet.ts.net", "a-.example-tailnet.ts.net", "a..example-tailnet.ts.net", "a b.example-tailnet.ts.net",
+            "서버.example-tailnet.ts.net", "server.example-tailnet.ts.net.", "server.example-tailnet.ts.net.evil.example", "server_1.example-tailnet.ts.net", "a.example-tailnet.ts.net a.example-tailnet.ts.net",
+        ] {
+            assert!(TailnetHosts::parse(bad).is_err(), "{bad}");
+        }
+        for ok in ["a.b.ts.net", "server.example-tailnet.ts.net", "a1.b-2.c.ts.net"] {
+            assert!(TailnetHosts::parse(ok).is_ok(), "{ok}");
+        }
+        let started = Config::from_vars(vars(&[("VALLY_KIWOOM_APP_KEY", KEY), ("VALLY_KIWOOM_APP_SECRET", SECRET)]), vars(&[&REAL[..], &[("VALLY_TAILNET_HOSTS", "*.example-tailnet.ts.net")]].concat()), lock, token, key, account);
+        assert!(started.is_err_and(|e| e.0.contains("VALLY_TAILNET_HOSTS")));
     }
 
     #[test]

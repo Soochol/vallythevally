@@ -31,6 +31,7 @@ pub struct SystemState {
     account: crate::account::AccountState,
     collector: Option<crate::collector::CollectorBoard>,
     bound: OnceLock<std::net::SocketAddr>,
+    tailnet_hosts: crate::config::TailnetHosts,
     bound_signal: tokio::sync::Notify,
     write: tokio::sync::Mutex<()>,
 }
@@ -42,7 +43,7 @@ impl SystemState {
             tracing::warn!(error = %e, "등록한 IP 기록을 읽지 못했습니다. 없는 것으로 봅니다");
             None
         });
-        SystemState { environment: settings.environment, key_file: Some(key_file), ip_file: Some(ip_file), registered_ip: Mutex::new(registered_ip), public_ip: None, env_key, key_file_problem: Mutex::new(key_file_problem.map(|e| e.to_string())), settings: Some(settings), account: crate::account::AccountState::local_only(), collector: None, bound: OnceLock::new(), bound_signal: tokio::sync::Notify::new(), write: tokio::sync::Mutex::new(()) }
+        SystemState { environment: settings.environment, key_file: Some(key_file), ip_file: Some(ip_file), registered_ip: Mutex::new(registered_ip), public_ip: None, env_key, key_file_problem: Mutex::new(key_file_problem.map(|e| e.to_string())), settings: Some(settings), account: crate::account::AccountState::local_only(), collector: None, bound: OnceLock::new(), tailnet_hosts: Default::default(), bound_signal: tokio::sync::Notify::new(), write: tokio::sync::Mutex::new(()) }
     }
 
     pub fn environment(&self) -> KiwoomEnvironment {
@@ -57,6 +58,15 @@ impl SystemState {
     pub fn with_account(mut self, account: crate::account::AccountState) -> Self {
         self.account = account;
         self
+    }
+
+    pub fn with_tailnet_hosts(mut self, tailnet_hosts: crate::config::TailnetHosts) -> Self {
+        self.tailnet_hosts = tailnet_hosts;
+        self
+    }
+
+    pub(crate) fn tailnet_hosts(&self) -> &crate::config::TailnetHosts {
+        &self.tailnet_hosts
     }
 
     pub fn with_collector(mut self, collector: Option<crate::collector::CollectorBoard>) -> Self {
@@ -80,7 +90,7 @@ impl SystemState {
     }
 
     pub fn unconfigured() -> Self {
-        SystemState { environment: KiwoomEnvironment::Real, key_file: None, ip_file: None, registered_ip: Mutex::new(None), public_ip: None, env_key: false, key_file_problem: Mutex::new(None), settings: None, account: crate::account::AccountState::local_only(), collector: None, bound: OnceLock::new(), bound_signal: tokio::sync::Notify::new(), write: tokio::sync::Mutex::new(()) }
+        SystemState { environment: KiwoomEnvironment::Real, key_file: None, ip_file: None, registered_ip: Mutex::new(None), public_ip: None, env_key: false, key_file_problem: Mutex::new(None), settings: None, account: crate::account::AccountState::local_only(), collector: None, bound: OnceLock::new(), tailnet_hosts: Default::default(), bound_signal: tokio::sync::Notify::new(), write: tokio::sync::Mutex::new(()) }
     }
 
     pub fn bound(&self, addr: std::net::SocketAddr) {

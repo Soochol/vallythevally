@@ -272,7 +272,7 @@ pub async fn start(config: &Config, lock: &InstanceLock, adapters: Adapters) -> 
         };
         collector = Some(board.with_webhook(webhook));
     }
-    let system = SystemState::new(key_file, env_key, startup.file_problem, crate::api::SystemSettings::from_config(config)).with_public_ip(Arc::new(public_ip)).with_account(account).with_collector(collector);
+    let system = SystemState::new(key_file, env_key, startup.file_problem, crate::api::SystemSettings::from_config(config)).with_public_ip(Arc::new(public_ip)).with_account(account).with_collector(collector).with_tailnet_hosts(config.tailnet_hosts.clone());
     let state = application_with_system(ApplicationInputs { rest: rest.clone(), clock: clock.clone(), symbols: symbols.clone(), db, screener_store, stream, static_dir: config.static_dir.clone(), screener_update_on_connect: config.screener_update_on_start }, system);
     state.system.bound(bound_addr);
     tokio::spawn(daily_maintenance(state.clone()));
