@@ -138,7 +138,7 @@ test.describe("실시간 눈금 캐시", () => {
     for (const cumulative of [16_000_000, 18_000_000]) {
       expect(await scenario.live.update("005930", { c: Math.abs(Number("+1297000")), v: Math.abs(Number(String(cumulative))) })).toBeGreaterThan(0);
       await expect.poll(volume).toBe(cumulative);
-      await expect.poll(() => page.evaluate(() => window.axisTexts().flatMap((axis) => axis.texts).map((label) => label.text))).toContain(`${cumulative / 10000}만`);
+      await expect.poll(() => page.evaluate(() => window.axisTexts().flatMap((axis) => axis.texts).map((label) => label.text))).toContain(`${cumulative / 1_000_000}M`);
       expect(await page.evaluate(() => window.chartProbe.chart.panes()[1]!.priceScale("right").getVisibleRange())).toEqual(before);
       await assertRendered(page);
     }

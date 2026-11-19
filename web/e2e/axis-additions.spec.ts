@@ -15,7 +15,10 @@ function installPaintCounter() {
   };
 }
 
-async function open(page: Page, scenario: Scenario, period = "D") {
+type BarShape = (daysAgo: number) => { price: number; volume: number };
+const DEFAULT_SHAPE: BarShape = (daysAgo) => ({ price: 190500 - daysAgo * 100, volume: 1000000 });
+
+async function open(page: Page, scenario: Scenario, period = "D", shape: BarShape = DEFAULT_SHAPE) {
   const errors: string[] = [];
   page.on("pageerror", (error) => errors.push(error.message));
   page.on("console", (message) => { if (message.type() === "error") errors.push(message.text()); });
@@ -23,7 +26,10 @@ async function open(page: Page, scenario: Scenario, period = "D") {
   await page.addInitScript(installAxisProbe);
   await page.addInitScript(installPaintCounter);
   if (period === "D") {
-    const bars = Array.from({ length: 130 }, (_, i) => ({ t: Date.parse("2026-11-06T00:00:00+09:00") / 1000 - (129 - i) * 86400, o: 190000 - (129 - i) * 100, h: 191000 - (129 - i) * 100, l: 189000 - (129 - i) * 100, c: 190500 - (129 - i) * 100, v: 1000000 }));
+    const bars = Array.from({ length: 130 }, (_, i) => {
+      const { price, volume } = shape(129 - i);
+      return { t: Date.parse("2026-11-06T00:00:00+09:00") / 1000 - (129 - i) * 86400, o: price - 500, h: price + 500, l: price - 1000, c: price, v: volume };
+    });
     scenario.reply("/api/bars", { body: { symbol: "005930", venue: "combined", period: "D", bars, current: null, nextBefore: null, seq: null } });
   }
   if (period === "Y") new FinancialFixture(scenario);
@@ -90,6 +96,32 @@ test("비교 종목 추가 뒤 오류 없이 차트를 계속 그리고 축 폭 
   await expect(page.locator('[data-compare-row="006400"]')).toBeVisible();
   await expect.poll(() => plotted(page)).toBe(before + 1);
   await assertDrawing(page, errors);
+});
+
+const axisLabels = (page: Page, pane: number) => page.evaluate((index) => window.axisTexts().filter((axis) => axis.width === 72)[index]?.texts.map((label) => label.text) ?? [], pane);
+
+test.describe("축 표기 규칙", () => {
+  test("100만 원대 가격축은 쉼표 숫자나 만 단위이고 영문 M이 없다", async ({ page, scenario }) => {
+    const errors = await open(page, scenario, "D", (daysAgo) => ({ price: 1_440_000 - daysAgo * 2000, volume: 1000000 }));
+    await expect.poll(() => axisLabels(page, 0).then((labels) => labels.length)).toBeGreaterThan(2);
+    const labels = await axisLabels(page, 0);
+    for (const label of labels) {
+      expect(label).not.toMatch(/[KMBT]/);
+      expect(label).toMatch(/^[\d,]+(\.\d)?만?$/);
+    }
+    expect(new Set(labels).size).toBe(labels.length);
+    expect(errors).toEqual([]);
+  });
+
+  test("거래량 3천만~2억 자료의 거래량축은 M 단위 하나이고 만·억이 없다", async ({ page, scenario }) => {
+    const errors = await open(page, scenario, "D", (daysAgo) => ({ price: 190500 - daysAgo * 100, volume: 30_000_000 + (129 - daysAgo) * 1_300_000 }));
+    await expect.poll(() => axisLabels(page, 1).then((labels) => labels.length)).toBeGreaterThan(1);
+    const labels = (await axisLabels(page, 1)).slice(0, -1).filter((label) => label !== "0");
+    expect(labels.length).toBeGreaterThan(0);
+    for (const label of labels) expect(label).toMatch(/^\d+(\.\d+)?M$/);
+    for (const label of await axisLabels(page, 1)) expect(label).not.toMatch(/[만억조]/);
+    expect(errors).toEqual([]);
+  });
 });
 
 const trade = (scenario: Scenario, price: number) => scenario.live.update("005930", { c: Math.abs(Number(`+${price}`)), v: Math.abs(Number("1000")) });
