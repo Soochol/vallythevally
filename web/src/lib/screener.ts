@@ -29,7 +29,7 @@ const CURRENT_BAR: Record<ScreenPeriod, string> = { D: "당일", W: "이번 주"
 export const FIELD_LABEL: Record<BarField, string> = { open: "시가", high: "고가", low: "저가", close: "종가", volume: "거래량", traded_value: "거래대금" };
 export const NEW_HIGH_NAME: Record<BarField, string> = { open: "신고가", high: "신고가", low: "신고가", close: "신고가", volume: "신고거래량", traded_value: "신고거래대금" };
 export const NEW_LOW_NAME: Record<BarField, string> = { open: "신저가", high: "신저가", low: "신저가", close: "신저가", volume: "신저거래량", traded_value: "신저거래대금" };
-export const VALUE_UNIT: Record<BarField, string> = { open: "원", high: "원", low: "원", close: "원", volume: "주", traded_value: "억 원" };
+export const VALUE_UNIT: Record<BarField, string> = { open: "원", high: "원", low: "원", close: "원", volume: "", traded_value: "억 원" };
 
 export type ConditionKind = Condition["kind"];
 
@@ -103,7 +103,7 @@ const VALUE_TEXT: Record<BarField, (n: number) => string> = {
   high: won,
   low: won,
   close: won,
-  volume: (n) => `${decimal(n)}주`,
+  volume: (n) => decimal(n),
   traded_value: eokWon,
 };
 

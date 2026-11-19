@@ -5,7 +5,7 @@ import { MINUS } from "../../lib/format";
 import type { WindowId } from "../../layout/kinds";
 import { marketSocket } from "../../stores/realtime";
 import { EmptyState } from "../overlay/State";
-import { formatClock, formatShares, withSign } from "../market-window/format";
+import { formatClock, formatQuantity, withSign } from "../market-window/format";
 import { MarketWindowGate } from "../market-window/MarketWindowGate";
 import { Strip } from "../market-window/parts";
 import { EMPTY_BROKER_STATE, cumulativeAt, lineSegments, reduceBrokers, sortedRows, startedAt, type BrokerGrid, type BrokerRow } from "./model";
@@ -75,7 +75,7 @@ function Legend() {
   );
 }
 
-const signed = (value: number) => withSign(value, formatShares(Math.abs(value)).replace("-", MINUS));
+const signed = (value: number) => withSign(value, formatQuantity(Math.abs(value)).replace("-", MINUS));
 
 function Heatmap({ grid, rows, index, selected, onSelect }: { grid: BrokerGrid; rows: readonly BrokerRow[]; index: number; selected: string | null; onSelect(code: string): void }) {
   const canvas = useRef<HTMLCanvasElement>(null);

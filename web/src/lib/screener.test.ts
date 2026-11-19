@@ -61,7 +61,7 @@ test("신저가 문장은 값에 따라 신저가·신저거래량·신저거래
 
 test("값 범위 문장은 값의 단위로 한쪽이나 두 끝을 적는다", () => {
   expect(conditionSentence({ kind: "value_range", period: "M", recentBars: 2, field: "close", min: 1000, max: 5000 })).toBe("월봉 최근 2개월 이내 종가가 1,000원 이상 5,000원 이하인 봉이 있다");
-  expect(conditionSentence({ kind: "value_range", period: "D", recentBars: 1, field: "volume", min: null, max: 10_000 })).toBe("일봉 최근 1일 이내 거래량이 10,000주 이하인 봉이 있다");
+  expect(conditionSentence({ kind: "value_range", period: "D", recentBars: 1, field: "volume", min: null, max: 10_000 })).toBe("일봉 최근 1일 이내 거래량이 10,000 이하인 봉이 있다");
   expect(conditionSentence({ kind: "value_range", period: "W", recentBars: 3, field: "traded_value", min: 50_000_000, max: 25_000_000_000 })).toBe("주봉 최근 3주 이내 거래대금이 0.5억 원 이상 250억 원 이하인 봉이 있다");
 });
 

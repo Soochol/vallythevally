@@ -49,16 +49,16 @@ test("거래원 창은 처음 스냅샷 묶음과 실시간 스냅샷을 행으�
   await expect(window_(page).getByTestId("brokers-since")).toContainText("09:30:00부터");
   await expect(window_(page).getByTestId("broker-row")).toHaveText(["키움", "삼성", "미래"]);
   const cumulative = window_(page).getByTestId("broker-cumulative");
-  await expect(cumulative).toHaveText(["+400주", "−120주", "+60주"]);
+  await expect(cumulative).toHaveText(["+400", "−120", "+60"]);
 
   send(scenario, LIVE);
   await expect(window_(page).getByTestId("broker-row")).toHaveText(["키움", "한투", "삼성", "미래"]);
-  await expect(cumulative).toHaveText(["+700주", "−500주", "−130주", "+60주"]);
+  await expect(cumulative).toHaveText(["+700", "−500", "−130", "+60"]);
 
   const slider = window_(page).getByRole("slider", { name: "기준 시각" });
   await slider.fill("0");
   await expect(window_(page).getByTestId("brokers-time")).toHaveText("09:30:00");
-  await expect(cumulative).toHaveText(["+100주", "-", "−90주", "+40주"]);
+  await expect(cumulative).toHaveText(["+100", "-", "−90", "+40"]);
 });
 
 test("행을 누르면 그 거래원의 누적선이 열리고 숫자는 캔버스 안에 있다", async ({ page, scenario }) => {

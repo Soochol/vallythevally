@@ -54,6 +54,7 @@ test("당일 체결을 먼저 구독한 뒤 조회하고 겹치는 행은 실시
   tradesOf(scenario, "combined");
   const sub = await openTradesWindow(page, scenario);
   await expect(rows(page)).toHaveCount(4);
+  await expect(page.getByTestId("trade-cumulative")).toHaveText("744");
   await expect(rows(page).first()).toContainText("10:00:03");
   expect(feedRequests(scenario)[0]).toMatchObject({ symbol: "005930", kind: "trades", venue: "combined" });
 

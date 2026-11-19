@@ -76,10 +76,10 @@ export function columnsFor(ranking: Ranking): readonly Column[] {
     case "foreignStreak":
       return [
         PRICE,
-        figure("foreignStreak", "netD1", "D-1(주)", (f) => signedSharesCell(f.netD1)),
-        figure("foreignStreak", "netD2", "D-2(주)", (f) => signedSharesCell(f.netD2)),
-        figure("foreignStreak", "netD3", "D-3(주)", (f) => signedSharesCell(f.netD3)),
-        figure("foreignStreak", "netTotal", "합계(주)", (f) => signedSharesCell(f.netTotal)),
+        figure("foreignStreak", "netD1", "D-1", (f) => signedSharesCell(f.netD1)),
+        figure("foreignStreak", "netD2", "D-2", (f) => signedSharesCell(f.netD2)),
+        figure("foreignStreak", "netD3", "D-3", (f) => signedSharesCell(f.netD3)),
+        figure("foreignStreak", "netTotal", "합계", (f) => signedSharesCell(f.netTotal)),
         figure("foreignStreak", "limitExhaustionRate", "한도소진율", (f) => percentCell(f.limitExhaustionRate)),
       ];
     case "program":

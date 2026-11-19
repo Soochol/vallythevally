@@ -9,7 +9,7 @@ import type { WindowId } from "../../layout/kinds";
 import { formatPrice, MINUS } from "../../lib/format";
 import { marketSocket } from "../../stores/realtime";
 import { MarketWindowGate } from "../market-window/MarketWindowGate";
-import { formatShares, withSign } from "../market-window/format";
+import { formatQuantity, withSign } from "../market-window/format";
 import { ErrorState, EmptyState, Skeleton } from "../overlay/State";
 import { boldKeys, type ColumnWidths, eokFromMillionWon, formatEokAmount, historyRows, isNoProgramData, joinHistoryAndLive, liveRow, type ProgramLine, type ProgramRow, rowsOf, sparklinePoints, widestSoFar } from "./program";
 
@@ -61,14 +61,14 @@ function Summary({ rows }: { rows: readonly ProgramRow[] }) {
     <div className="pg-head" data-direction={direction}>
       <div className="pg-net">
         <span className="pg-cap">순매수</span>
-        <b data-testid="program-net-qty">{withSign(net, formatShares(Math.abs(net)))}</b>
+        <b data-testid="program-net-qty">{withSign(net, formatQuantity(Math.abs(net)))}</b>
         <span className="pg-amount" data-testid="program-net-amount">{withSign(amount, formatEokAmount(Math.abs(amount)))}</span>
         <svg className="pg-spark" viewBox={`0 0 ${SPARK_WIDTH} ${SPARK_HEIGHT}`} preserveAspectRatio="none" role="img" aria-label="순매수 누적 추이" data-testid="program-trend">
           {points && <polyline points={points} fill="none" vectorEffect="non-scaling-stroke" />}
         </svg>
       </div>
       <div className="pg-totals">
-        매수 <b data-testid="program-buy-qty">{formatShares(buy)}</b> · 매도 <b data-testid="program-sell-qty">{formatShares(sell)}</b>
+        매수 <b data-testid="program-buy-qty">{formatQuantity(buy)}</b> · 매도 <b data-testid="program-sell-qty">{formatQuantity(sell)}</b>
       </div>
     </div>
   );
@@ -82,7 +82,7 @@ function Table({ lines }: { lines: readonly ProgramLine[] }) {
   const style = { "--pg-time": `${widths[0]}ch`, "--pg-price": `${widths[1]}ch` } as CSSProperties;
   return (
     <div className="pg-table" role="table" aria-label="프로그램 체결" style={style}>
-      <div className="pg-tr pg-th" role="row"><span role="columnheader">시각</span><span role="columnheader">현재가</span><span role="columnheader">순매수 증감(주)</span></div>
+      <div className="pg-tr pg-th" role="row"><span role="columnheader">시각</span><span role="columnheader">현재가</span><span role="columnheader">순매수 증감</span></div>
       <div className="pg-body">
         {visible.map((line) =>
           line.kind === "gap" ? (
