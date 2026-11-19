@@ -12,7 +12,7 @@ import {
   type UTCTimestamp,
 } from "lightweight-charts";
 import { AxisLabelCache } from "./axisLabelCache";
-import { axisPriceFormat, type AxisGeometry } from "./axisFormat";
+import { axisPriceFormat, priceAxisFontSize, type AxisGeometry } from "./axisFormat";
 import { fetchBarsPage, fetchJumpPage } from "../api/bars";
 import type { Bar } from "../api/generated/Bar";
 import type { FinancialsPage } from "../api/generated/FinancialsPage";
@@ -497,6 +497,7 @@ export class ChartController {
 
   private priceAxisGeometry(percent = false): AxisGeometry {
     return {
+      fontSize: () => this.chart.options().layout.fontSize,
       formatted: () => this.axisLabels.record(this.main.api.getPane()),
       failed: (error) => this.axisLabels.failed(this.main.api.getPane(), error),
       toCoordinate: (value) => {
@@ -628,10 +629,17 @@ export class ChartController {
     this.flushPendingDraw();
     this.compare.flush(this.bars);
     this.indicators.flush();
+    this.fitAxisFontSize();
     if (this.axisLabels.refresh(time)) this.scheduleFrame();
     this.renderLegend();
     this.renderExtremes();
     this.crosshairMarker.refresh();
+  }
+
+  private fitAxisFontSize(): void {
+    const range = this.view && shownScale(this.view.settings) !== "percent" ? this.main.api.priceScale().getVisibleRange() : null;
+    const size = range ? priceAxisFontSize(Math.max(Math.abs(range.from), Math.abs(range.to)), this.tokens.fontSize) : this.tokens.fontSize;
+    if (this.chart.options().layout.fontSize !== size) this.chart.applyOptions({ layout: { fontSize: size } });
   }
 
   private renderExtremes(): void {
