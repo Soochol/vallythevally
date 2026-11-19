@@ -559,7 +559,7 @@ for (const media of [
     await drag(page, tab(page, "screener"), { x: target.x + target.width / 2, y: target.y + target.height - 40 }, false);
     const preview = page.locator("[data-dock-preview]");
     await expect(preview).toBeVisible();
-    await expect(preview.locator("span")).not.toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
+    await expect(preview.locator(".dock-drop-caption").filter({ has: page.locator("[data-dock-preview-label]") })).not.toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
     await shot(page, testInfo, "reduced-dock-preview");
     await page.keyboard.press("Escape");
     await page.mouse.up();
