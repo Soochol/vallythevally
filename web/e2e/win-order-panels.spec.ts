@@ -308,7 +308,7 @@ test("등락률 표시를 끄면 사다리 어느 행에도 등락률이 없고 
 
 test("보유가 없으면 평단가 점 옆에 안내가 보이고 보유가 있으면 점이 가격 숫자 왼쪽에 있으며 끄면 사라진다", async ({ page, scenario }) => {
   ordersOn(scenario);
-  tradingApi(scenario);
+  tradingApi(scenario).holdings = [];
   await openOrderWindow(page, scenario);
   await openSettings(page);
   await expect(page.getByTestId("order-settings")).toContainText("보유 종목일 때 보입니다");

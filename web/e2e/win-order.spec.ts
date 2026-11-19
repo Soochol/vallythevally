@@ -2,7 +2,7 @@ import type { Locator, Page } from "@playwright/test";
 import type { FeedBook } from "../src/api/generated/FeedBook";
 import { type Scenario, cell, DEFAULT_LAYOUT_ID, expect, pickDesktopVenue, test, windowTabs, pollSaved } from "./harness";
 import { DEFAULT_ORDER_SETTINGS } from "../src/features/order/orderSettings";
-import { BASE, CODE, cellAt, center, chipAt, commandOf, dragChip, openOrder, openOrderWindow, ordersOn, snapshot, status, tradingApi, win, writesTo } from "./order-window";
+import { BASE, CODE, HELD, cellAt, center, chipAt, commandOf, dragChip, openOrder, openOrderWindow, ordersOn, snapshot, status, tradingApi, win, writesTo } from "./order-window";
 
 test("더블클릭이 그 가격에 지정가 신규를 내고 실시간 호가를 따른다", async ({ page, scenario }) => {
   ordersOn(scenario);
@@ -336,11 +336,47 @@ test("서버가 거절한 사유를 상태 줄에 그대로 보인다", async ({
 test("가능 수량·금액을 넘는 주문은 보내기 전에 상태 줄이 막는다", async ({ page, scenario }) => {
   ordersOn(scenario);
   const api = tradingApi(scenario);
+  api.holdings = [{ ...HELD, quantity: 120, sellableQuantity: 100 }];
   await openOrderWindow(page, scenario);
-  await page.getByLabel("수량", { exact: true }).fill("100001");
+  await page.getByLabel("수량", { exact: true }).fill("101");
   await cellAt(page, "sell", 70_100).dblclick();
-  await expect(status(page)).toContainText("매도 가능 수량(100,000)을 넘습니다");
+  await expect(status(page)).toContainText("매도 가능 수량(100)을 넘습니다");
   expect(api.writes).toHaveLength(0);
+  await page.getByLabel("수량", { exact: true }).fill("100");
+  await cellAt(page, "sell", 70_100).dblclick();
+  await pollSaved(() => writesTo(api, "place")).toHaveLength(1);
+  expect(writesTo(api, "place")[0]!.body).toMatchObject({ side: "sell", quantity: 100 });
+
+  await page.getByLabel("수량", { exact: true }).fill("10000");
+  await cellAt(page, "buy", 70_000).dblclick();
+  await expect(status(page)).toContainText("매수 가능 금액 500,000,000원을 넘습니다");
+  expect(writesTo(api, "place")).toHaveLength(1);
+});
+
+test("보유가 없는 종목의 매도는 매도 가능 수량 0으로 막히고 매도 가능 조회를 보내지 않는다", async ({ page, scenario }) => {
+  ordersOn(scenario);
+  const api = tradingApi(scenario);
+  api.holdings = [];
+  await openOrderWindow(page, scenario);
+  await expect(page.getByTestId("summary-buyable")).toContainText("원");
+  expect(api.orderableQueries).toContain("buy");
+  expect(api.orderableQueries).not.toContain("sell");
+  await page.getByLabel("수량", { exact: true }).fill("1");
+  await cellAt(page, "sell", 70_100).dblclick();
+  await expect(status(page)).toContainText("매도 가능 수량(0)을 넘습니다");
+  expect(api.writes).toHaveLength(0);
+});
+
+test("매수 가능 조회가 거절되면 칸이 -로 남고 거절 문장을 title로 보이며 상태 막대는 조용하다", async ({ page, scenario }) => {
+  ordersOn(scenario);
+  const api = tradingApi(scenario);
+  const message = "키움이 이 조회를 거절했습니다(kt00010, HTTP 200, return_code 20, 상세 [2000](571489)): 장이 열리지 않는 날입니다";
+  api.buyableFailure = { status: 503, body: { error: { code: "kiwoom_unavailable", message, reason: "business_rejected", retryAt: null, manualActionRequired: false } } };
+  await openOrderWindow(page, scenario);
+  const buyable = page.getByTestId("summary-buyable");
+  await expect(buyable).toHaveAttribute("title", message);
+  await expect(buyable.locator("b")).toHaveText("-");
+  await expect(page.getByText("키움 조회 멈춤")).toHaveCount(0);
 });
 
 test("결과 불명이면 새 주문 칸을 막고 조회로 확인하면 풀린다", async ({ page, scenario }) => {
