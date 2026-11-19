@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import { useVenue } from "../../stores/ui";
-import { formatShares } from "./format";
+import { formatQuantity } from "./format";
 import { ratioSplit } from "./ladder";
 import type { WindowKind } from "../../layout/kinds";
 
@@ -19,7 +19,7 @@ export function TotalFigure({ testId, tone, value, afterHours, description }: { 
   return (
     <b data-testid={testId} className={tone === "up" ? "mw-up" : "mw-down"} data-source={afterHours ? "after-hours" : "regular"} title={description ?? undefined}>
       {afterHours && <small className="mw-total-tag">시간외</small>}
-      {value === null ? "-" : formatShares(value)}
+      {value === null ? "-" : formatQuantity(value)}
     </b>
   );
 }

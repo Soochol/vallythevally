@@ -125,7 +125,7 @@ export function OrderLadder({ rows, previousClose, groups, writable, previewQuan
     if (group) {
       return [
         { kind: "heading", label: `${formatPrice(group.price, false)}원 ${SIDE_LABEL[group.side]} 주문` },
-        ...group.orders.map((order): MenuItem => ({ kind: "action", label: `${order.openQuantity.toLocaleString("ko-KR")}주 취소`, disabled: !writable, onSelect: () => actions.cancelOne(order.orderNo) })),
+        ...group.orders.map((order): MenuItem => ({ kind: "action", label: `${order.openQuantity.toLocaleString("ko-KR")} 취소`, disabled: !writable, onSelect: () => actions.cancelOne(order.orderNo) })),
         { kind: "separator" },
         { kind: "action", label: "이 가격 모두 취소", danger: true, disabled: !writable, onSelect: () => actions.cancelAtPrice(group.side, group.price) },
       ];

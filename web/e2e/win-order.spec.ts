@@ -31,8 +31,38 @@ test("더블클릭이 그 가격에 지정가 신규를 내고 실시간 호가�
   expect(place!.header).toBe("1");
   expect(place!.body).toMatchObject({ code: CODE, side: "buy", quantity: 10, price: 70_000, venue: "combined", confirmHighValue: false });
   expect(String(place!.body.commandId)).toMatch(/^cmd-[0-9a-f-]{36}$/);
-  await expect(status(page)).toContainText("접수 · 매수 10주 70,000원");
+  await expect(status(page)).toContainText("접수 · 매수 10 · 70,000원");
   await expect(status(page).getByRole("button", { name: "되돌리기" })).toBeVisible();
+});
+
+test("잔량이 바뀌면 증감 글자가 잔량 칸 바깥 끝에 서고 주문 칸과 겹치지 않는다", async ({ page, scenario }) => {
+  ordersOn(scenario);
+  tradingApi(scenario);
+  await openOrderWindow(page, scenario);
+  let sub = "";
+  await pollSaved(() => {
+    const message = scenario.live.messages.find((m) => m.type === "subscribe_feed" && m.kind === "book" && m.symbol === CODE);
+    sub = message?.type === "subscribe_feed" ? message.sub : "";
+    return sub;
+  }).not.toBe("");
+  const first: FeedBook = { t: 1, asks: [{ price: 70_100, qty: 50 }], bids: [{ price: 70_000, qty: 80 }], totalAskQty: 50, totalBidQty: 80, expected: null };
+  scenario.live.emit({ type: "feed_book", sub, book: first });
+  await expect(page.getByTestId("price-ladder").locator(".mw-qty-value")).toHaveCount(2);
+  scenario.live.emit({ type: "feed_book", sub, book: { ...first, t: 2, asks: [{ price: 70_100, qty: 70 }], bids: [{ price: 70_000, qty: 30 }] } });
+  const ladder = page.getByTestId("price-ladder");
+  const ask = ladder.locator(".mw-qty[data-side=ask]").filter({ has: page.locator(".mw-qty-change") });
+  const bid = ladder.locator(".mw-qty[data-side=bid]").filter({ has: page.locator(".mw-qty-change") });
+  await expect(ask.locator(".mw-qty-change")).toHaveText("+20");
+  await expect(bid.locator(".mw-qty-change")).toHaveText("−50");
+  const askCell = (await ask.boundingBox())!;
+  const askChange = (await ask.locator(".mw-qty-change").boundingBox())!;
+  expect(askChange.x - askCell.x).toBeLessThanOrEqual(6);
+  const bidCell = (await bid.boundingBox())!;
+  const bidChange = (await bid.locator(".mw-qty-change").boundingBox())!;
+  expect(bidCell.x + bidCell.width - (bidChange.x + bidChange.width)).toBeLessThanOrEqual(6);
+  const overlaps = (a: { x: number; width: number }, b: { x: number; width: number }) => a.x < b.x + b.width && b.x < a.x + a.width;
+  expect(overlaps(askChange, (await cellAt(page, "sell", 70_100).boundingBox())!)).toBe(false);
+  expect(overlaps(bidChange, (await cellAt(page, "buy", 70_000).boundingBox())!)).toBe(false);
 });
 
 test("같은 동작을 중복해서 더블클릭해도 명령은 하나다", async ({ page, scenario }) => {
@@ -46,7 +76,7 @@ test("같은 동작을 중복해서 더블클릭해도 명령은 하나다", asy
   await target.dblclick();
   await expect(page.getByTestId("order-queue")).toHaveText("줄 서는 중 · 1건");
   held.reply({ body: commandOf("sell", { price: 70_100 }) });
-  await expect(status(page)).toContainText("접수 · 매도 10주 70,100원");
+  await expect(status(page)).toContainText("접수 · 매도 10 · 70,100원");
   expect(api.writes).toHaveLength(0);
   const placed = scenario.requests.filter((r) => new URL(r.url()).pathname === "/api/trading/commands/place");
   expect(placed).toHaveLength(1);
@@ -168,8 +198,8 @@ test("접수 합계 칸을 누르면 주문 메뉴가 열려 주문 하나 또�
   await total.click();
   const menu = page.getByRole("menu", { name: "매수 접수 주문" });
   await expect(menu).toContainText("매수 접수 2건");
-  await expect(menu.getByRole("menuitem")).toHaveText(["70,000원 · 5주", "70,000원 · 7주", "매수 모두 취소"]);
-  await menu.getByRole("menuitem", { name: "70,000원 · 5주" }).click();
+  await expect(menu.getByRole("menuitem")).toHaveText(["70,000원 · 5", "70,000원 · 7", "매수 모두 취소"]);
+  await menu.getByRole("menuitem", { name: "70,000원 · 5" }).click();
   await pollSaved(() => writesTo(api, "cancel")).toHaveLength(1);
   expect(writesTo(api, "cancel")[0]!.body).toMatchObject({ orderNo: "0000001" });
   await total.click();
@@ -309,7 +339,7 @@ test("가능 수량·금액을 넘는 주문은 보내기 전에 상태 줄이 �
   await openOrderWindow(page, scenario);
   await page.getByLabel("수량", { exact: true }).fill("100001");
   await cellAt(page, "sell", 70_100).dblclick();
-  await expect(status(page)).toContainText("매도 가능 수량 100,000주를 넘습니다");
+  await expect(status(page)).toContainText("매도 가능 수량(100,000)을 넘습니다");
   expect(api.writes).toHaveLength(0);
 });
 
@@ -354,7 +384,7 @@ test("쓰기가 막혀 있으면 접수 합계 메뉴의 취소 항목이 꺼져
   await expect(win(page)).not.toHaveAttribute("data-writable", "");
   const before = api.writes.length;
   await page.getByTestId("order-total-buy").click();
-  await expect(page.getByRole("menuitem", { name: "70,000원 · 5주" })).toBeDisabled();
+  await expect(page.getByRole("menuitem", { name: "70,000원 · 5" })).toBeDisabled();
   await expect(page.getByRole("menuitem", { name: "매수 모두 취소" })).toBeDisabled();
   expect(api.writes).toHaveLength(before);
 });
@@ -440,7 +470,7 @@ test("접수 알림은 사다리를 움직이지 않고 4초 뒤 사라진다", 
   const before = await ladderFirstRowTop(page);
   await cellAt(page, "buy", 70_000).dblclick();
   await expect(status(page)).toHaveAttribute("data-tone", "ok");
-  await expect(status(page)).toContainText("접수 · 매수 10주 70,000원");
+  await expect(status(page)).toContainText("접수 · 매수 10 · 70,000원");
   expect(await ladderFirstRowTop(page)).toBe(before);
   await page.clock.fastForward(5_000);
   await expect(status(page)).toHaveCount(0);

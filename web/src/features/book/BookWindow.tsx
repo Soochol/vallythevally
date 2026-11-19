@@ -8,7 +8,7 @@ import { expectedInfoItems, placeInfoItems } from "../market-window/quoteInfo";
 import { infoSlot, tradeSlot } from "../market-window/LadderSlots";
 import { PriceLadder } from "../market-window/PriceLadder";
 import { RatioBar, Strip, TotalFigure } from "../market-window/parts";
-import { formatShares } from "../market-window/format";
+import { formatQuantity } from "../market-window/format";
 import { useLadderTrades, useQuoteInfo } from "../market-window/useLadderSlots";
 import { EmptyState } from "../overlay/State";
 import { stripTotals } from "./bookModel";
@@ -49,7 +49,7 @@ function BookBody({ code }: { code: SymbolCode }) {
       <div className="bk-ladder" data-stale={feed.connected ? undefined : ""}>{ladder}</div>
       <Strip divided>
         <TotalFigure testId="book-total-ask" tone="down" value={totals.ask} afterHours={afterHours} description={totals.description} />
-        <RatioBar buy={totals.bid ?? 0} sell={totals.ask ?? 0} sellFirst label={totals.description ?? `매도 ${formatShares(totals.ask ?? 0)} · 매수 ${formatShares(totals.bid ?? 0)}`} />
+        <RatioBar buy={totals.bid ?? 0} sell={totals.ask ?? 0} sellFirst label={totals.description ?? `매도 ${formatQuantity(totals.ask ?? 0)} · 매수 ${formatQuantity(totals.bid ?? 0)}`} />
         <TotalFigure testId="book-total-bid" tone="up" value={totals.bid} afterHours={afterHours} description={totals.description} />
       </Strip>
     </div>

@@ -27,7 +27,7 @@ function OrderTotalCell({ side, groups, writable, actions }: { side: OrderSide; 
       { kind: "heading", label: `${SIDE_LABEL[side]} 접수 ${total.count}건` },
       ...sideGroups.flatMap((group) => group.orders.map((order): MenuItem => ({
         kind: "action",
-        label: `${formatPrice(order.price, false)}원 · ${order.openQuantity.toLocaleString("ko-KR")}주`,
+        label: `${formatPrice(order.price, false)}원 · ${order.openQuantity.toLocaleString("ko-KR")}`,
         disabled: !writable,
         onSelect: () => actions.cancelOne(order.orderNo),
       }))),

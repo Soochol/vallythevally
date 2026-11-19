@@ -1,5 +1,9 @@
 import { expect, test } from "vitest";
-import { formatEokWon, formatShares, formatWon, withSign } from "./format";
+import { formatEokWon, formatQuantity, formatShares, formatWon, withSign } from "./format";
+
+test("수량 형식은 천 단위 쉼표만 쓰고 단위를 붙이지 않는다", () => {
+  expect(formatQuantity(1234567)).toBe("1,234,567");
+});
 
 test("수량은 주, 금액은 원과 억원으로 쓴다", () => {
   expect(formatShares(1234567)).toBe("1,234,567주");

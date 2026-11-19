@@ -95,7 +95,7 @@ export interface Capacity {
 
 export function capacityProblem(side: OrderSide, price: number, quantity: number, capacity: Capacity): string | null {
   if (!(quantity > 0)) return "수량을 입력하세요";
-  if (side === "sell" && capacity.sellableQuantity !== null && quantity > capacity.sellableQuantity) return `매도 가능 수량 ${capacity.sellableQuantity.toLocaleString("ko-KR")}주를 넘습니다`;
+  if (side === "sell" && capacity.sellableQuantity !== null && quantity > capacity.sellableQuantity) return `매도 가능 수량(${capacity.sellableQuantity.toLocaleString("ko-KR")})을 넘습니다`;
   if (side === "buy" && capacity.buyableAmount !== null && orderAmount(price, quantity) > capacity.buyableAmount) return `매수 가능 금액 ${capacity.buyableAmount.toLocaleString("ko-KR")}원을 넘습니다`;
   return null;
 }

@@ -93,7 +93,7 @@ test("같은 종목을 보는 10호가 창 둘 가운데 하나를 닫으면 그
   const kept = subs.find((sub) => sub !== gone)!;
 
   scenario.live.emit({ type: "feed_book", sub: kept, book: liveBook(70_000, 50) });
-  await expect(page.getByTestId("book-total-bid")).toHaveText("100주");
+  await expect(page.getByTestId("book-total-bid")).toHaveText("100");
   expect(unsubscribed(scenario).filter((sub) => subs.includes(sub))).toEqual([gone]);
 });
 

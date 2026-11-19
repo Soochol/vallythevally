@@ -13,7 +13,7 @@ import { useBookFeed } from "../book/useBookFeed";
 import { basePrice, buildLadderRows, defaultLadderPrices, type LadderPrices, type LadderRow } from "../market-window/ladder";
 import { RatioBar, Strip, TotalFigure } from "../market-window/parts";
 import { useLinkedSymbol } from "../market-window/MarketWindowGate";
-import { formatShares } from "../market-window/format";
+import { formatQuantity } from "../market-window/format";
 import { infoSlot, tradeSlot } from "../market-window/LadderSlots";
 import { expectedInfoItems, placeInfoItems } from "../market-window/quoteInfo";
 import { stripTotals } from "../book/bookModel";
@@ -119,7 +119,7 @@ function OrderBody({ code }: { code: SymbolCode }) {
       return;
     }
     const send = (confirmHighValue: boolean) => writes.place({ side, price, quantity, confirmHighValue });
-    if (needsHighValueConfirm(price, quantity)) setConfirm({ title: `${SIDE_LABEL[side]} ${formatShares(quantity)} · ${formatPrice(price, false)}원`, amount: price * quantity, run: () => send(true) });
+    if (needsHighValueConfirm(price, quantity)) setConfirm({ title: `${SIDE_LABEL[side]} ${formatQuantity(quantity)} · ${formatPrice(price, false)}원`, amount: price * quantity, run: () => send(true) });
     else send(false);
   };
 

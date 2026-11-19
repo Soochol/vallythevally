@@ -4,7 +4,7 @@ import { Segmented } from "../market-window/parts";
 import type { QuantityMode } from "./orderRules";
 import { AMOUNT_UNIT_WON } from "./orderSettings";
 
-const MODES = [{ value: "shares", label: "주" }, { value: "amount", label: "금액" }] as const;
+const MODES = [{ value: "shares", label: "수량" }, { value: "amount", label: "금액" }] as const;
 
 const presetLabel = (mode: QuantityMode, value: number): string => (mode === "shares" ? String(value) : `${value / 10_000}만`);
 

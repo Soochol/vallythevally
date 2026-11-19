@@ -24,9 +24,10 @@
 .mw-qty-bar { position:absolute; top:var(--size-2); bottom:var(--size-2); overflow:hidden; border-radius:3px; transition:width .3s ease; }
 .mw-qty[data-side=ask] .mw-qty-bar { right:0; background:var(--down-vol); }
 .mw-qty[data-side=bid] .mw-qty-bar { left:0; background:var(--up-vol); }
-.mw-qty-glow { position:absolute; inset:0; opacity:0; background:color-mix(in srgb, var(--text) 45%, transparent); pointer-events:none; }
+.mw-qty-glow { position:absolute; inset:0; opacity:0; background:color-mix(in srgb, var(--text) 15%, transparent); pointer-events:none; }
 .mw-qty-value { position:relative; z-index:1; padding:0 var(--size-5); white-space:nowrap; }
 .mw-qty-change { position:relative; z-index:1; font-size:var(--size-10); font-weight:700; white-space:nowrap; pointer-events:none; animation:mw-change 1.4s ease-out forwards; }
+.mw-qty[data-side=ask] .mw-qty-change { margin-right:auto; padding-left:var(--size-5); } .mw-qty[data-side=bid] .mw-qty-change { margin-left:auto; padding-right:var(--size-5); }
 .mw-qty-change[data-flash=up] { color:var(--up); } .mw-qty-change[data-flash=down] { color:var(--down); }
 .mw-px { display:grid; grid-template-columns:minmax(0, 1fr) var(--size-48); align-items:center; height:var(--size-20); padding:0 var(--s2); border-radius:var(--size-5); font-weight:600; }
 .mw-px-num { position:relative; justify-self:end; padding-right:var(--s2); }
