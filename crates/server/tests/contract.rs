@@ -141,6 +141,7 @@ fn generated_typescript_matches_the_committed_files() {
         generated::<ForeignHoldingDay>(),
         generated::<FullHistory>(),
         generated::<Fundamentals>(),
+        generated::<SymbolDaySummary>(),
         generated::<OrderBook>(),
         generated::<OrderBookLevel>(),
         generated::<ProgramTradePoint>(),

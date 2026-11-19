@@ -2,6 +2,7 @@ import type { Layout } from "./generated/Layout";
 import type { LayoutSummary } from "./generated/LayoutSummary";
 import type { Quote } from "./generated/Quote";
 import type { SymbolCode } from "./generated/SymbolCode";
+import type { SymbolDaySummary } from "./generated/SymbolDaySummary";
 import type { Venue } from "./generated/Venue";
 import type { Watchlists } from "./generated/Watchlists";
 import { getJson } from "./http";
@@ -25,3 +26,6 @@ export async function fetchQuotes(symbols: readonly SymbolCode[], venue: Venue, 
   );
   return pages.flat();
 }
+
+export const fetchDaySummary = (code: SymbolCode, venue: Venue, signal?: AbortSignal) =>
+  getJson<SymbolDaySummary>(`/api/symbols/${encodeURIComponent(code)}/day-summary?venue=${venue}`, signal);

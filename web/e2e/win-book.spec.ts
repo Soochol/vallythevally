@@ -5,7 +5,7 @@ import type { LayoutWindow } from "../src/api/generated/LayoutWindow";
 import type { OrderBook } from "../src/api/generated/OrderBook";
 import type { TradePrint } from "../src/api/generated/TradePrint";
 import { type Scenario, cell, DEFAULT_LAYOUT_ID, expect, pickDesktopVenue, test, windowTabs, pollSaved } from "./harness";
-import { feedSubscriptions, nxtTraded, pinQuote, requestedVenues, venueScene } from "./order-window";
+import { feedSubscriptions, FUNDAMENTAL_FIGURES, INFO_PAGE_1, INFO_PAGE_2, INFO_PAGE_2_VALUES, infoLabels, infoPager, infoValues, nxtTraded, pinQuote, requestedVenues, venueScene } from "./order-window";
 
 const SETTINGS = { v: 1, style: "candle", scale: "normal", indicators: [], compare: [], panels: [] };
 const CODE = "005930";
@@ -50,7 +50,7 @@ async function subOf(scenario: Scenario, kind: FeedKind): Promise<string> {
 }
 
 function replyBook(scenario: Scenario, base: number, change = 1000, history: TradePrint[] = []) {
-  scenario.reply((url) => url.pathname === "/api/symbols/005930/fundamentals", { body: { symbol: CODE, upperLimit: 91000, lowerLimit: 49000, marketCap: null, listedShares: null, per: null, pbr: null, roe: null, eps: null, bps: null, foreignExhaustionRate: null, high52w: null, low52w: null } });
+  scenario.reply((url) => url.pathname === "/api/symbols/005930/fundamentals", { body: { symbol: CODE, upperLimit: 91000, lowerLimit: 49000, ...FUNDAMENTAL_FIGURES } });
   scenario.reply((url) => url.pathname === "/api/symbols/005930/order-book", { body: snapshotOf(base) });
   scenario.reply((url) => url.pathname === "/api/symbols/005930/trades", { body: { symbol: CODE, venue: "combined", trades: history, skippedRows: 0 } });
   pinQuote(scenario, CODE, base, change);
@@ -79,7 +79,7 @@ test.beforeEach(async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
 });
 
-test("스냅샷 20행이 매도 1호가 기준 격자로 먼저 보이고 상·하한가와 기준가가 정보 자리에 있다", async ({ page, scenario }) => {
+test("스냅샷 20행이 매도 1호가 기준 격자로 먼저 보이고 시가·고가·저가와 기준가가 1쪽 정보 자리에 있다", async ({ page, scenario }) => {
   await open(page, scenario, 70000);
   await expect(ladderRows(page)).toHaveCount(20);
   await expect(ladderRows(page).locator(".mw-px-num")).toHaveText([
@@ -89,12 +89,38 @@ test("스냅샷 20행이 매도 1호가 기준 격자로 먼저 보이고 상·�
   await expect(ladderRows(page).locator(".mw-qty-value")).toHaveCount(20);
   const info = page.getByTestId("ladder-info");
   await expect(info).toHaveCount(7);
-  await expect(info.filter({ hasText: "상한가" })).toContainText("91,000");
-  await expect(info.filter({ hasText: "하한가" })).toContainText("49,000");
-  await expect(info.filter({ hasText: "기준가" })).toContainText("69,000");
-  await expect(info.filter({ hasText: "현재가" })).toContainText("70,000");
-  await expect(info.filter({ hasText: "전일대비" })).toContainText("+1,000");
+  await expect(infoLabels(page)).toHaveText(INFO_PAGE_1);
+  await expect(infoValues(page)).toHaveText(["69,900", "70,400", "69,400", "69,000", "+1,000 +1.45%", "123만", "864억"]);
+  await expect(info.filter({ hasText: "전일대비" }).locator("b")).toHaveAttribute("data-tone", "up");
   await expect(page.getByTestId("book-total-ask")).toHaveText("1,000");
+});
+
+test("정보란을 누르면 2쪽으로 바뀌고 다시 누르면 1쪽이다", async ({ page, scenario }) => {
+  await open(page, scenario, 70000);
+  await expect(infoPager(page)).toHaveAccessibleName("정보 1/2쪽, 눌러서 다음 쪽");
+  await expect(infoLabels(page)).toHaveText(INFO_PAGE_1);
+
+  await page.getByTestId("ladder-info").nth(3).click();
+  await expect(infoPager(page)).toHaveAccessibleName("정보 2/2쪽, 눌러서 다음 쪽");
+  await expect(page.getByTestId("ladder-info")).toHaveCount(8);
+  await expect(infoLabels(page)).toHaveText(INFO_PAGE_2);
+  await expect(infoValues(page)).toHaveText(INFO_PAGE_2_VALUES);
+  const rowTops = await tops(ladderRows(page));
+  expect(await tops(page.getByTestId("ladder-info"))).toEqual(rowTops.slice(0, 8));
+  await expect(page.getByTestId("ladder-info").filter({ hasText: "하한가" }).locator("b")).toHaveAttribute("data-tone", "down");
+
+  await infoPager(page).click();
+  await expect(infoPager(page)).toHaveAccessibleName("정보 1/2쪽, 눌러서 다음 쪽");
+  await expect(infoLabels(page)).toHaveText(INFO_PAGE_1);
+});
+
+test("정보란은 초점이 가면 Enter와 Space로도 쪽이 바뀐다", async ({ page, scenario }) => {
+  await open(page, scenario, 70000);
+  await infoPager(page).focus();
+  await page.keyboard.press("Enter");
+  await expect(infoLabels(page)).toHaveText(INFO_PAGE_2);
+  await page.keyboard.press("Space");
+  await expect(infoLabels(page)).toHaveText(INFO_PAGE_1);
 });
 
 const AUCTION_ASKS: [number, number][] = [[819_000, 934], [820_000, 1_533], [821_000, 418]];
@@ -172,7 +198,7 @@ test("동시호가 6호가는 매도 3단이 가운데 선 위, 매수 3단이 �
   await expect(ladderRows(page).locator(".mw-qty-value")).toHaveCount(6);
   const info = page.getByTestId("ladder-info");
   await expect(info).toHaveCount(7);
-  for (const label of ["현재가", "전일대비", "등락률", "거래량", "기준가", "상한가", "하한가"]) await expect(info.filter({ hasText: label })).toBeVisible();
+  for (const label of INFO_PAGE_1) await expect(info.filter({ hasText: label })).toBeVisible();
 });
 
 test("교차 동시호가 6호가에서 같은 가격이 두 행에 있어도 현재가 행은 하나다", async ({ page, scenario }) => {
@@ -773,17 +799,33 @@ test.describe("동시호가 예상체결", () => {
       expect(await shape(page)).toEqual(without);
     });
 
-    test("8행에 매수 잔량이 있으면 예상체결 두 항목이 상한가·하한가 자리로 올라간다", async ({ page, scenario }) => {
+    test("8행에 매수 잔량이 있으면 예상체결 두 항목이 거래량·거래대금 자리로 올라간다", async ({ page, scenario }) => {
       await open(page, scenario, 70000);
       const bookSub = await subOf(scenario, "book");
       scenario.live.emit({ type: "feed_book", sub: bookSub, book: frame(scenario, [[70100, 50], [70200, 40], [70300, 30], [70400, 20]], [[70200, 25], [70000, 80], [69900, 60]], EXPECTED) });
       await expect(info(page, "예상체결가")).toBeVisible();
       await expect(info(page, "예상체결량")).toBeVisible();
-      await expect(info(page, "상한가")).toHaveCount(0);
-      await expect(info(page, "하한가")).toHaveCount(0);
+      await expect(info(page, "거래량")).toHaveCount(0);
+      await expect(info(page, "거래대금")).toHaveCount(0);
       const rowTops = await tops(ladderRows(page));
       expect(await tops(info(page, "예상체결가"))).toEqual([rowTops[5]]);
       expect(await tops(info(page, "예상체결량"))).toEqual([rowTops[6]]);
+    });
+
+    test("동시호가 예상체결 줄은 1쪽에만 붙는다", async ({ page, scenario }) => {
+      await open(page, scenario, 70000);
+      const bookSub = await subOf(scenario, "book");
+      scenario.live.emit({ type: "feed_book", sub: bookSub, book: frame(scenario, [[70100, 50], [70200, 40]], [[70000, 80], [69900, 60]], EXPECTED) });
+      await expect(info(page, "예상체결가")).toBeVisible();
+      await expect(info(page, "예상체결량")).toBeVisible();
+      await infoPager(page).click();
+      await expect(infoLabels(page)).toHaveText(INFO_PAGE_2);
+      await expect(info(page, "예상체결가")).toHaveCount(0);
+      await expect(info(page, "예상체결량")).toHaveCount(0);
+      await expect(page.locator(".mw-lr[data-expected]")).toHaveCount(1);
+      await infoPager(page).click();
+      await expect(info(page, "예상체결가")).toBeVisible();
+      await expect(infoLabels(page)).toHaveText([...INFO_PAGE_1, "예상체결가", "예상체결량"]);
     });
 
     test("실시간 호가가 없고 조회 호가만 있으면 예상체결 항목이 없다", async ({ page, scenario }) => {
@@ -798,7 +840,7 @@ test.describe("동시호가 예상체결", () => {
   test.describe("수요일 10:00", () => {
     test.use({ clockStart: "20261118100000" });
 
-    test("같은 예상체결이 와도 보이지 않고 상한가·하한가가 그대로다", async ({ page, scenario }) => {
+    test("같은 예상체결이 와도 보이지 않고 1쪽 일곱 칸이 그대로다", async ({ page, scenario }) => {
       await open(page, scenario, 70000);
       const bookSub = await subOf(scenario, "book");
       scenario.live.emit({ type: "feed_book", sub: bookSub, book: frame(scenario, [[70100, 50], [70200, 40]], [[70000, 80], [69900, 60]], EXPECTED) });
@@ -806,8 +848,7 @@ test.describe("동시호가 예상체결", () => {
       await expect(info(page, "예상체결가")).toHaveCount(0);
       await expect(info(page, "예상체결량")).toHaveCount(0);
       await expect(page.locator("[data-expected]")).toHaveCount(0);
-      await expect(info(page, "상한가")).toHaveCount(1);
-      await expect(info(page, "하한가")).toHaveCount(1);
+      await expect(page.getByTestId("ladder-info")).toHaveCount(7);
     });
   });
 });

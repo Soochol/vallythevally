@@ -460,13 +460,46 @@ fn parse_krx_quote_row(r: &QuoteRow) -> Result<KrxDayQuote, WireError> {
     Ok(KrxDayQuote { code, day, ohlcv, traded: MillionWon(unsigned(&r.trde_prica)?), base: stock_price(&r.base_pric)? })
 }
 
-fn parse_quote_row(r: &QuoteRow) -> Result<StockQuote, WireError> {
-    let (code, venue) = match (r.stk_cd.strip_suffix("_AL"), r.stk_cd.strip_suffix("_NX")) {
+fn quote_row_code(stk_cd: &str) -> Result<(StockCode, Venue), WireError> {
+    let (code, venue) = match (stk_cd.strip_suffix("_AL"), stk_cd.strip_suffix("_NX")) {
         (Some(code), _) => (code, Venue::Combined),
         (_, Some(code)) => (code, Venue::Nxt),
-        _ => (r.stk_cd.as_str(), Venue::Krx),
+        _ => (stk_cd, Venue::Krx),
     };
-    let code = StockCode::parse(code).map_err(|e| WireError(format!("{e}: {:?}", r.stk_cd)))?;
+    let code = StockCode::parse(code).map_err(|e| WireError(format!("{e}: {stk_cd:?}")))?;
+    Ok((code, venue))
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct DaySummaryRow {
+    pub price_won: Option<u64>,
+    pub open_won: Option<u64>,
+    pub high_won: Option<u64>,
+    pub low_won: Option<u64>,
+    pub volume: Option<u64>,
+    pub trade_value_won: Option<u64>,
+    pub at: Option<KstTime>,
+}
+
+pub fn parse_day_summary(body: StockQuotesResponse, code: StockCode, venue: Venue) -> DaySummaryRow {
+    let present = |s: &str| unsigned(s).ok().filter(|n| *n > 0);
+    body.atn_stk_infr
+        .iter()
+        .find(|r| quote_row_code(&r.stk_cd).is_ok_and(|row| row == (code, venue)))
+        .map(|r| DaySummaryRow {
+            price_won: present(&r.cur_prc),
+            open_won: present(&r.open_pric),
+            high_won: present(&r.high_pric),
+            low_won: present(&r.low_pric),
+            volume: present(&r.trde_qty),
+            trade_value_won: present(&r.trde_prica).and_then(|million| million.checked_mul(WON_PER_MILLION as u64)),
+            at: parse_kst_datetime(&format!("{}{}", r.dt, r.cntr_tm)),
+        })
+        .unwrap_or_default()
+}
+
+fn parse_quote_row(r: &QuoteRow) -> Result<StockQuote, WireError> {
+    let (code, venue) = quote_row_code(&r.stk_cd)?;
     let won = |s: &str| unsigned(s)?.checked_mul(100).ok_or_else(|| WireError(format!("가격이 너무 큽니다: {s:?}")));
     let (price_centi, base_centi) = (won(&r.cur_prc)?, won(&r.base_pric)?);
     let at = parse_kst_datetime(&format!("{}{}", r.dt, r.cntr_tm)).ok_or_else(|| WireError(format!("dt·cntr_tm이 시각이 아닙니다: {:?} {:?}", r.dt, r.cntr_tm)))?;
@@ -2251,6 +2284,27 @@ mod tests {
         assert_eq!((mismatch[0].price_centi, mismatch[0].base_centi), (10_000, 9_000), "방향이 어긋나도 계산한 값을 쓴다");
         let venues = parse_quotes(StockQuotesResponse { atn_stk_infr: vec![row("005930", "2"), row("005930_NX", "2"), QuoteRow { cntr_tm: "99".into(), ..row("000660_AL", "2") }] });
         assert_eq!(venues.iter().map(|q| (q.code.as_str(), q.venue)).collect::<Vec<_>>(), [("005930", Venue::Krx), ("005930", Venue::Nxt)], "접미사가 거래소를 정하고, 시각을 읽지 못한 행은 빠진다");
+    }
+
+    #[test]
+    fn day_summary_reads_open_high_low_volume_and_traded_value_in_won_and_nulls_zero_or_empty() {
+        let body: StockQuotesResponse = serde_json::from_str(&fixture("ka10095_synthetic")).unwrap();
+        let code = StockCode::parse("005930").unwrap();
+        let row = parse_day_summary(body, code, Venue::Combined);
+        let at = KstTime::from_kst_civil(KstDate::parse_yyyymmdd("20261106").unwrap(), TimeOfDay::hms(19, 59, 59).unwrap());
+        assert_eq!(
+            row,
+            DaySummaryRow { price_won: Some(50_000), open_won: Some(51_200), high_won: Some(51_500), low_won: Some(49_800), volume: Some(1_234_567), trade_value_won: Some(61_728_000_000), at: Some(at) },
+            "부호를 떼고, 거래대금은 백만원을 원으로 바꾼다"
+        );
+        let pre_market = QuoteRow {
+            stk_cd: "005930".into(), cur_prc: "51000".into(), base_pric: "51000".into(), trde_qty: "0".into(), trde_prica: "0".into(),
+            open_pric: "0".into(), high_pric: "".into(), low_pric: "0".into(), dt: "20261106".into(), cntr_tm: "".into(), ..QuoteRow::default()
+        };
+        let row = parse_day_summary(StockQuotesResponse { atn_stk_infr: vec![pre_market] }, code, Venue::Krx);
+        assert_eq!(row, DaySummaryRow { price_won: Some(51_000), ..DaySummaryRow::default() }, "0이나 빈 값은 None이다");
+        let body: StockQuotesResponse = serde_json::from_str(&fixture("ka10095_synthetic")).unwrap();
+        assert_eq!(parse_day_summary(body, code, Venue::Nxt), DaySummaryRow::default(), "다른 거래소의 행은 읽지 않는다");
     }
 
     #[test]

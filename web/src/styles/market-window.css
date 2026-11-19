@@ -41,6 +41,12 @@
 .mw-info span, .mw-strength { color:var(--text-3); }
 .mw-info b, .mw-strength b { color:var(--text); font-weight:600; text-align:right; }
 .mw-info b[data-tone=up] { color:var(--up); } .mw-info b[data-tone=down] { color:var(--down); }
+.mw-info, .mw-info-fill { cursor:pointer; user-select:none; }
+.mw-info[data-pager] { grid-template-columns:auto auto minmax(0, 1fr); }
+.mw-info[data-pager]:focus-visible { outline:var(--size-1) solid var(--accent); outline-offset:calc(-1 * var(--size-1)); }
+.mw-info-dots { display:flex; align-items:center; gap:var(--size-3); }
+.mw-info-dots i { width:var(--size-5); height:var(--size-5); border-radius:50%; background:var(--text-3); opacity:.4; }
+.mw-info-dots i[data-current] { background:var(--accent); opacity:1; }
 .mw-box-layer { position:absolute; z-index:2; left:0; right:0; display:grid; box-sizing:border-box; padding:0 var(--s4); pointer-events:none; }
 .mw-box { grid-column:1; min-width:0; min-height:0; pointer-events:auto; }
 .mw-tbox { display:flex; flex-direction:column; height:100%; }

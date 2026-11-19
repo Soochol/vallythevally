@@ -5,12 +5,12 @@ import { useOrderSettings } from "../../stores/ui";
 import { MarketWindowGate } from "../market-window/MarketWindowGate";
 import { buildDefaultLadder } from "../market-window/ladder";
 import { tickRuleOf } from "../market-window/tick";
-import { expectedInfoItems, placeInfoItems } from "../market-window/quoteInfo";
+import { expectedItemsOnPage, placeInfoItems } from "../market-window/quoteInfo";
 import { infoSlot, tradeSlot } from "../market-window/LadderSlots";
 import { PriceLadder } from "../market-window/PriceLadder";
 import { RatioBar, Strip, TotalFigure } from "../market-window/parts";
 import { formatQuantity } from "../market-window/format";
-import { useLadderTrades, useQuoteInfo } from "../market-window/useLadderSlots";
+import { type InfoPager, useInfoPager, useLadderTrades, useQuoteInfo } from "../market-window/useLadderSlots";
 import { useShownVenue } from "../market-window/useShownVenue";
 import { EmptyState } from "../overlay/State";
 import { stripTotals } from "./bookModel";
@@ -25,14 +25,14 @@ const REJECTION: Record<string, string> = {
   bad_request: "호가를 구독하지 못했습니다",
 };
 
-function BookBody({ code }: { code: SymbolCode }) {
+function BookBody({ code, pager }: { code: SymbolCode; pager: InfoPager }) {
   const venue = useShownVenue(code);
   const { skipSpreadGap } = useOrderSettings();
   const feed = useBookFeed(code, venue);
   const limits = useFundamentals(code).data;
   const kind = useSymbolInfo(code).data?.kind ?? null;
   const bounds = { lower: limits?.lowerLimit ?? null, upper: limits?.upperLimit ?? null };
-  const info = useQuoteInfo({ code, venue, lastPrice: feed.lastPrice, previousClose: feed.previousClose, upperLimit: bounds.upper, lowerLimit: bounds.lower });
+  const info = useQuoteInfo({ code, venue, lastPrice: feed.lastPrice, previousClose: feed.previousClose, fundamentals: limits, page: pager.page });
   const trades = useLadderTrades(code, venue);
   const now = useNowMs();
   const nowSeconds = Math.floor(now / 1000);
@@ -44,8 +44,8 @@ function BookBody({ code }: { code: SymbolCode }) {
     if (view === null) return <EmptyState title={feed.snapshotFailed ? "호가를 불러오지 못했습니다" : "호가를 기다리는 중입니다"} />;
     const rows = buildDefaultLadder({ asks: view.asks, bids: view.bids, lastPrice: feed.lastPrice, previousClose: feed.previousClose, bounds, skipSpreadGap, tickRule: tickRuleOf(kind, [...view.asks, ...view.bids].map((level) => level.price)) });
     const expected = visibleExpected(view.t, nowSeconds, view.expected);
-    const infoSlots = placeInfoItems(rows, info, expected === null ? [] : expectedInfoItems(expected, feed.previousClose));
-    return <PriceLadder rows={rows} previousClose={feed.previousClose} expectedPrice={expected?.price ?? null} rowSlots={{ topRight: infoSlot(infoSlots), bottomLeft: tradeSlot(trades, feed.previousClose) }} />;
+    const infoSlots = placeInfoItems(rows, info, expectedItemsOnPage(pager.page, expected, feed.previousClose));
+    return <PriceLadder rows={rows} previousClose={feed.previousClose} expectedPrice={expected?.price ?? null} rowSlots={{ topRight: infoSlot(infoSlots, pager, rows), bottomLeft: tradeSlot(trades, feed.previousClose) }} />;
   })();
   return (
     <div className="bk" data-testid="book-window" data-symbol={code} data-connected={feed.connected ? "" : undefined}>
@@ -61,5 +61,6 @@ function BookBody({ code }: { code: SymbolCode }) {
 }
 
 export function BookWindow({ id }: { id: WindowId }) {
-  return <MarketWindowGate id={id}>{(code) => <BookBody key={code} code={code} />}</MarketWindowGate>;
+  const pager = useInfoPager();
+  return <MarketWindowGate id={id}>{(code) => <BookBody key={code} code={code} pager={pager} />}</MarketWindowGate>;
 }
