@@ -12,6 +12,7 @@ import type { JumpBarsPage } from "../../src/api/generated/JumpBarsPage";
 import type { FinancialUpdatePage } from "../../src/api/generated/FinancialUpdatePage";
 import type { AccountStatus } from "../../src/api/generated/AccountStatus";
 import type { KiwoomLinkStatus } from "../../src/api/generated/KiwoomLinkStatus";
+import type { KiwoomUsage } from "../../src/api/generated/KiwoomUsage";
 import type { ScreenerStatus } from "../../src/api/generated/ScreenerStatus";
 import type { SyncStatus } from "../../src/api/generated/SyncStatus";
 import type { SystemSettings } from "../../src/api/generated/SystemSettings";
@@ -174,6 +175,7 @@ export class LiveFrames {
   account: AccountStatus = { state: "local_only" };
   orders: OrdersStatus = { state: "off", accountRef: null, accountTail: null, message: "주문 사용이 꺼져 있습니다" };
   ordersAccountTail = "01";
+  kiwoomUsage: KiwoomUsage = { lastMinuteStartedAt: null, totalRateLimited: 0, trs: [] };
   constructor(private readonly now: number, private readonly market: MarketFixtures) { this.state = { realtime: "live", since: Math.floor(now / 1000), backfilling: false }; }
   connect(socket: WebSocketRoute) {
     const subscriptions = new Map<string, Subscription>();
@@ -313,6 +315,7 @@ export class Scenario {
     if (path === "/api/account" && method === "GET") return { body: this.live.account };
     if (path === "/api/collector/access" && method === "GET") return { body: { access: "off" } satisfies CollectorAccess };
     if (path === "/api/system/kiwoom" && method === "GET") return { body: this.live.kiwoomLink };
+    if (path === "/api/system/kiwoom/usage" && method === "GET") return { body: this.live.kiwoomUsage };
     if (path === "/api/system/orders" && method === "GET") return { body: this.live.orders };
     if (path === "/api/system/orders/check-account" && method === "POST") return { body: { accountTail: this.live.ordersAccountTail } satisfies OrdersAccountCheck };
     if (path === "/api/system/orders" && method === "PUT") {

@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { KiwoomIpHelp } from "./KiwoomIpHelp";
 import { KiwoomOrdersCard } from "./KiwoomOrdersCard";
+import { KiwoomUsageCard } from "./KiwoomUsageCard";
 import { KiwoomKeyForm } from "./KiwoomKeyForm";
 import { KiwoomStatusCard } from "./KiwoomStatusCard";
 import { useKiwoomPanel } from "./useKiwoomPanel";
@@ -23,6 +24,7 @@ export function KiwoomMenuContent() {
       {panel.command.error && <p role="alert" className="text-m text-danger">{panel.command.error}</p>}
       <KiwoomKeyForm status={panel.status} command={panel.command} onSaved={panel.clearConfirmations} onOpenIpHelp={() => setIpHelpRequests((n) => n + 1)} />
       <KiwoomOrdersCard />
+      <KiwoomUsageCard />
       <KiwoomIpHelp status={panel.status} openByItself={panel.view.ipHelpOpensByItself} openRequests={ipHelpRequests} checked={panel.checkedIp} onChecked={panel.setCheckedIp} command={panel.ipCommand} />
       {panel.ipCommand.error && <p role="alert" className="text-m text-danger">{panel.ipCommand.error}</p>}
     </div>
