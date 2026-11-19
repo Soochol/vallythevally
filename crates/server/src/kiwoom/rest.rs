@@ -1,7 +1,12 @@
 //! 키움 조회 대기열(backend.md §4.2, §4.3). 서버 전체의 키움 REST 요청은 여기 한 곳에서 나간다.
 //!
-//! - 보내는 시각 사이를 260ms 넘게 띄운다. 토큰 발급, 다시 보내기, 연속조회 페이지도 같은 간격을 따른다.
-//! - 모의투자는 여기에 더해 같은 TR의 마지막 전송 뒤 1초를 기다린다. 기다리는 TR 뒤의 다른 TR이 먼저 나간다.
+//! - TR(api-id)마다 최근 1초 전송 수를 센다. 한도(실전 5, 모의 1) 미만이면 곧바로 보내고, 찼으면 창 안 가장 오래된 전송 + 1초 + 여유(`WINDOW_MARGIN`)에 보낸다. TR 사이에는 간격이 없다.
+//!   주문 쓰기 네 TR(`kt10000`~`kt10003`)은 한 창으로 센다. 토큰 발급, 다시 보내기, 연속조회 페이지도 같은 창에 센다.
+//! - `TOTAL_PER_SECOND_LIMIT`을 켜면 TR별 창과 별개로 모든 TR의 합계 창도 지킨다. 기본은 꺼져 있다.
+//! - 제한 응답은 그 TR(주문 쓰기면 묶음)만 창이 비는 시각까지 붙잡고 같은 요청을 그때 다시 보낸다. 응답의 `유량=N`이 그 TR의 한도가 된다. 대기열 전체는 멈추지 않는다.
+//! - 주문 쓰기도 제한 응답(HTTP 429)이면 최대 `ORDER_RATE_LIMIT_RESENDS`번 다시 보낸다. 그 밖의 실패는 다시 보내지 않는다.
+//! - 1분마다 TR별 전송·제한 응답·다시 보낸 수와 창 때문에 기다린 가장 긴 시간을 로그 한 줄씩 남긴다.
+//! - 시험용 손잡이(`with_send_spacing`)로 만든 대기열은 창 대신 모든 전송 사이 최소 간격을 둔다. 모의투자는 거기에 같은 TR 1초를 더한다.
 //! - 토큰 발급이 먼저 나가고, 그다음 `Screen` > `Recovery` > `Background` 순서다.
 //! - 토큰은 보내는 순간에 읽는다(D16). 대기 중인 요청은 토큰을 쥐고 있지 않다.
 
@@ -14,6 +19,7 @@ use tokio::sync::{Notify, oneshot, watch};
 use tokio::time::Instant;
 
 use super::api::{Endpoint, MarketRequest};
+use crate::trading::TradingApiId;
 use super::auth::{AuthError, BeginIssueError, Halt, KiwoomAuth, MIN_ISSUE_INTERVAL_SECS, TokenGen};
 use super::error::{self, Category, Failure, Note, Retry, Stop, Surface};
 use super::token_file::FileError;
@@ -24,10 +30,15 @@ use crate::clock::Clock;
 use crate::config::Secret;
 use domain::KstTime;
 
-pub const SEND_SPACING: Duration = Duration::from_millis(260);
+const SEND_WINDOW: Duration = Duration::from_secs(1);
+const WINDOW_MARGIN: Duration = Duration::from_millis(50);
+const REAL_SENDS_PER_WINDOW: u32 = 5;
+const MOCK_SENDS_PER_WINDOW: u32 = 1;
 const MOCK_SAME_TR_SPACING: Duration = Duration::from_secs(1);
-const RATE_LIMIT_PAUSE: Duration = Duration::from_secs(1);
+const TOTAL_PER_SECOND_LIMIT: Option<u32> = None;
 const MAX_RATE_LIMITED: u8 = 3;
+const ORDER_RATE_LIMIT_RESENDS: u8 = 2;
+const COUNTER_REPORT_PERIOD: Duration = Duration::from_secs(60);
 const SCREEN_RETRY_DELAYS: &[Duration] = &[Duration::from_millis(500)];
 const OTHER_RETRY_DELAYS: &[Duration] = &[Duration::from_secs(1), Duration::from_secs(2), Duration::from_secs(4)];
 const SCREEN_SEND_BUDGET: u8 = 4;
@@ -269,6 +280,73 @@ pub(crate) struct Dispatch<'a> {
     pub once: Option<SendOnce>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+enum WindowKey {
+    Tr(Endpoint),
+    OrderWrites,
+}
+
+impl WindowKey {
+    fn of(endpoint: Endpoint) -> Self {
+        match endpoint {
+            Endpoint::Trading(TradingApiId::Kt10000 | TradingApiId::Kt10001 | TradingApiId::Kt10002 | TradingApiId::Kt10003) => WindowKey::OrderWrites,
+            other => WindowKey::Tr(other),
+        }
+    }
+}
+
+struct SendWindow {
+    sent: VecDeque<Instant>,
+    limit: u32,
+    held_until: Option<Instant>,
+}
+
+impl SendWindow {
+    fn new(limit: u32) -> Self {
+        SendWindow { sent: VecDeque::new(), limit, held_until: None }
+    }
+
+    fn span() -> Duration {
+        SEND_WINDOW + WINDOW_MARGIN
+    }
+
+    fn forget_expired(&mut self, now: Instant) {
+        while self.sent.front().is_some_and(|&t| t + Self::span() <= now) {
+            self.sent.pop_front();
+        }
+    }
+
+    fn record(&mut self, now: Instant) {
+        self.forget_expired(now);
+        self.sent.push_back(now);
+    }
+
+    fn ready_at(&self, now: Instant, limited: bool) -> Option<Instant> {
+        let first_live = self.sent.partition_point(|&t| t + Self::span() <= now);
+        let live = self.sent.len() - first_live;
+        let full = (limited && live >= self.limit as usize).then(|| self.sent[first_live + live - self.limit as usize] + Self::span());
+        full.into_iter().chain(self.held_until).max().filter(|&r| r > now)
+    }
+
+    fn hold_until_oldest_leaves(&mut self, now: Instant) {
+        self.forget_expired(now);
+        self.held_until = self.sent.front().map(|&t| t + Self::span());
+    }
+
+    fn set_limit(&mut self, limit: u32) -> bool {
+        std::mem::replace(&mut self.limit, limit) != limit
+    }
+}
+
+#[derive(Default)]
+struct TrCounter {
+    sent: u32,
+    rate_limited: u32,
+    resent: u32,
+    max_wait: Duration,
+    max_total_wait: Duration,
+}
+
 struct Job {
     once: Option<SendOnce>,
     admit: Option<Admission>,
@@ -280,6 +358,8 @@ struct Job {
     rate_limited: u8,
     transport_failures: usize,
     resent_after_invalid_token: bool,
+    window_blocked_since: Option<Instant>,
+    total_blocked_since: Option<Instant>,
 }
 
 #[derive(Default)]
@@ -298,7 +378,9 @@ struct Queue {
     issue_waiters: Vec<oneshot::Sender<Result<TokenGen, KiwoomError>>>,
     last_send: Option<Instant>,
     last_send_by_endpoint: HashMap<Endpoint, Instant>,
-    pause_until: Option<Instant>,
+    windows: HashMap<WindowKey, SendWindow>,
+    total: Option<SendWindow>,
+    counters: HashMap<Endpoint, TrCounter>,
     next_id: u64,
     stopped_paths: HashMap<Endpoint, Failure>,
     failed_once: HashSet<Endpoint>,
@@ -310,8 +392,8 @@ impl Queue {
         self.lanes.iter().any(|l| !l.is_empty())
     }
 
-    fn endpoint_ready_at(&self, endpoint: Endpoint, spacing: Duration) -> Option<Instant> {
-        self.last_send_by_endpoint.get(&endpoint).map(|sent| *sent + spacing)
+    fn window(&mut self, endpoint: Endpoint, default_limit: u32) -> &mut SendWindow {
+        self.windows.entry(WindowKey::of(endpoint)).or_insert_with(|| SendWindow::new(default_limit))
     }
 
     fn requeue_front(&mut self, id: u64) {
@@ -363,12 +445,19 @@ impl Queue {
     }
 }
 
+enum Pacing {
+    PerTr,
+    SharedSpacing(Duration),
+}
+
 struct Inner {
     transport: Arc<dyn Transport>,
     auth: KiwoomAuth,
     clock: Clock,
-    send_spacing: Duration,
+    pacing: Pacing,
     environment: KiwoomEnvironment,
+    order_resends: u8,
+    total_limit: Option<u32>,
     queue: Mutex<Queue>,
     wake: Notify,
     path_stopped: Notify,
@@ -399,7 +488,7 @@ impl KiwoomRest {
     }
 
     pub fn for_environment(transport: Arc<dyn Transport>, auth: KiwoomAuth, clock: Clock, environment: KiwoomEnvironment) -> Self {
-        Self::build(transport, auth, clock, SEND_SPACING, environment)
+        Self::start(transport, auth, clock, Pacing::PerTr, environment, ORDER_RATE_LIMIT_RESENDS, TOTAL_PER_SECOND_LIMIT)
     }
 
     pub fn with_send_spacing(transport: Arc<dyn Transport>, auth: KiwoomAuth, clock: Clock, send_spacing: Duration) -> Self {
@@ -407,8 +496,13 @@ impl KiwoomRest {
     }
 
     pub(crate) fn build(transport: Arc<dyn Transport>, auth: KiwoomAuth, clock: Clock, send_spacing: Duration, environment: KiwoomEnvironment) -> Self {
-        let inner = Arc::new(Inner { transport, auth, clock, send_spacing, environment, queue: Mutex::new(Queue::default()), wake: Notify::new(), path_stopped: Notify::new(), access: watch::channel(Access::Open).0 });
+        Self::start(transport, auth, clock, Pacing::SharedSpacing(send_spacing), environment, ORDER_RATE_LIMIT_RESENDS, TOTAL_PER_SECOND_LIMIT)
+    }
+
+    fn start(transport: Arc<dyn Transport>, auth: KiwoomAuth, clock: Clock, pacing: Pacing, environment: KiwoomEnvironment, order_resends: u8, total_limit: Option<u32>) -> Self {
+        let inner = Arc::new(Inner { transport, auth, clock, pacing, environment, order_resends, total_limit, queue: Mutex::new(Queue { total: total_limit.map(SendWindow::new), ..Queue::default() }), wake: Notify::new(), path_stopped: Notify::new(), access: watch::channel(Access::Open).0 });
         tokio::spawn(run(inner.clone()));
+        tokio::spawn(report_counters(inner.clone()));
         KiwoomRest(inner)
     }
 
@@ -523,6 +617,25 @@ impl KiwoomRest {
     }
 }
 
+async fn report_counters(inner: Arc<Inner>) {
+    let mut ticks = tokio::time::interval_at(Instant::now() + COUNTER_REPORT_PERIOD, COUNTER_REPORT_PERIOD);
+    ticks.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    loop {
+        ticks.tick().await;
+        let counters = std::mem::take(&mut inner.lock().counters);
+        let mut lines: Vec<_> = counters.into_iter().filter(|(_, c)| c.sent > 0).map(|(endpoint, c)| (endpoint.as_str(), c)).collect();
+        lines.sort_by_key(|(api_id, _)| *api_id);
+        for (api_id, c) in lines {
+            let max_wait_ms = c.max_wait.as_millis() as u64;
+            if inner.total_limit.is_some() {
+                tracing::info!(api_id, sent = c.sent, rate_limited = c.rate_limited, resent = c.resent, max_wait_ms, max_total_wait_ms = c.max_total_wait.as_millis() as u64, "키움 대기열 1분 계수");
+            } else {
+                tracing::info!(api_id, sent = c.sent, rate_limited = c.rate_limited, resent = c.resent, max_wait_ms, "키움 대기열 1분 계수");
+            }
+        }
+    }
+}
+
 fn queue_gone(api_id: Endpoint) -> KiwoomError {
     KiwoomError::Failed(Failure::queue_gone(api_id))
 }
@@ -592,6 +705,8 @@ impl Inner {
                     rate_limited: 0,
                     transport_failures: 0,
                     resent_after_invalid_token: false,
+                    window_blocked_since: None,
+                    total_blocked_since: None,
                 },
             );
             q.lanes[priority.lane()].push_back(id);
@@ -658,23 +773,38 @@ impl Inner {
         if !wants_issue && !has_market {
             return Step::Idle;
         }
-        let ready = q.last_send.map(|t| t + self.send_spacing).into_iter().chain(q.pause_until).max();
-        if let Some(r) = ready.filter(|&r| r > now) {
+        if let Pacing::SharedSpacing(spacing) = self.pacing
+            && let Some(r) = q.last_send.map(|t| t + spacing).filter(|&r| r > now)
+        {
             return Step::Wait(r);
         }
         if wants_issue {
-            if let Some(r) = self.endpoint_ready_at(&q, Endpoint::ISSUE).filter(|&r| r > now) {
+            if let Some(r) = self.endpoint_ready_at(&q, Endpoint::ISSUE, now) {
                 return Step::Wait(r);
             }
             q.last_send = Some(now);
-            self.record_endpoint_send(&mut q, Endpoint::ISSUE, now);
+            self.record_send(&mut q, Endpoint::ISSUE, now, (None, None), false);
             return Step::Issue;
         }
+        let blocked: Vec<(u64, bool)> = q
+            .lanes
+            .iter()
+            .flatten()
+            .copied()
+            .filter_map(|id| {
+                let endpoint = q.jobs[&id].key.api_id;
+                self.endpoint_ready_at(&q, endpoint, now).map(|_| (id, self.tr_ready_at(&q, endpoint, now).is_some()))
+            })
+            .collect();
+        for (id, by_tr) in blocked {
+            let job = q.jobs.get_mut(&id).expect("대기열의 id는 jobs에 있다");
+            if by_tr { &mut job.window_blocked_since } else { &mut job.total_blocked_since }.get_or_insert(now);
+        }
         let ready_job = q.lanes.iter().enumerate().find_map(|(lane, ids)| {
-            ids.iter().position(|id| self.endpoint_ready_at(&q, q.jobs[id].key.api_id).is_none_or(|r| r <= now)).map(|position| (lane, position))
+            ids.iter().position(|id| self.endpoint_ready_at(&q, q.jobs[id].key.api_id, now).is_none()).map(|position| (lane, position))
         });
         let Some((lane, position)) = ready_job else {
-            let soonest = q.lanes.iter().flatten().filter_map(|id| self.endpoint_ready_at(&q, q.jobs[id].key.api_id)).min();
+            let soonest = q.lanes.iter().flatten().filter_map(|id| self.endpoint_ready_at(&q, q.jobs[id].key.api_id, now)).min();
             return soonest.map_or(Step::Again, Step::Wait);
         };
         q.last_send = Some(now);
@@ -696,7 +826,11 @@ impl Inner {
             tracing::info!(api_id = api_id.as_str(), "관문을 확인하는 요청 하나를 보냅니다");
             q.gate = Gate::Probing { probe: id, cause, misses };
         }
-        self.record_endpoint_send(&mut q, api_id, now);
+        let job = q.jobs.get_mut(&id).expect("대기열의 id는 jobs에 있다");
+        let waited = job.window_blocked_since.take().map(|since| now.duration_since(since));
+        let total_waited = job.total_blocked_since.take().map(|since| now.duration_since(since));
+        let resent = job.rate_limited > 0;
+        self.record_send(&mut q, api_id, now, (waited, total_waited), resent);
         let job = q.jobs.get_mut(&id).expect("대기열의 id는 jobs에 있다");
         job.state = JobState::InFlight;
         job.sends += 1;
@@ -712,17 +846,61 @@ impl Inner {
         Step::Send { id, req, generation, priority: job.priority }
     }
 
-    fn endpoint_ready_at(&self, q: &Queue, endpoint: Endpoint) -> Option<Instant> {
+    fn default_limit(&self) -> u32 {
         match self.environment {
-            KiwoomEnvironment::Real => None,
-            KiwoomEnvironment::Mock => q.endpoint_ready_at(endpoint, MOCK_SAME_TR_SPACING),
+            KiwoomEnvironment::Real => REAL_SENDS_PER_WINDOW,
+            KiwoomEnvironment::Mock => MOCK_SENDS_PER_WINDOW,
         }
     }
 
-    fn record_endpoint_send(&self, q: &mut Queue, endpoint: Endpoint, now: Instant) {
-        if self.environment == KiwoomEnvironment::Mock {
+    fn endpoint_ready_at(&self, q: &Queue, endpoint: Endpoint, now: Instant) -> Option<Instant> {
+        self.tr_ready_at(q, endpoint, now).into_iter().chain(self.total_ready_at(q, endpoint, now)).max()
+    }
+
+    fn total_ready_at(&self, q: &Queue, endpoint: Endpoint, now: Instant) -> Option<Instant> {
+        if endpoint == Endpoint::ISSUE || !matches!(self.pacing, Pacing::PerTr) {
+            return None;
+        }
+        q.total.as_ref().and_then(|total| total.ready_at(now, true))
+    }
+
+    fn tr_ready_at(&self, q: &Queue, endpoint: Endpoint, now: Instant) -> Option<Instant> {
+        let window = q.windows.get(&WindowKey::of(endpoint));
+        let held = window.and_then(|w| w.ready_at(now, matches!(self.pacing, Pacing::PerTr)));
+        let same_tr = match (&self.pacing, self.environment) {
+            (Pacing::SharedSpacing(_), KiwoomEnvironment::Mock) => q.last_send_by_endpoint.get(&endpoint).map(|sent| *sent + MOCK_SAME_TR_SPACING).filter(|&r| r > now),
+            _ => None,
+        };
+        held.into_iter().chain(same_tr).max()
+    }
+
+    fn record_send(&self, q: &mut Queue, endpoint: Endpoint, now: Instant, waited: (Option<Duration>, Option<Duration>), resent: bool) {
+        if matches!(self.pacing, Pacing::SharedSpacing(_)) && self.environment == KiwoomEnvironment::Mock {
             q.last_send_by_endpoint.insert(endpoint, now);
         }
+        q.window(endpoint, self.default_limit()).record(now);
+        if endpoint != Endpoint::ISSUE
+            && let Some(total) = q.total.as_mut()
+        {
+            total.record(now);
+        }
+        let counter = q.counters.entry(endpoint).or_default();
+        counter.sent += 1;
+        counter.resent += u32::from(resent);
+        counter.max_wait = counter.max_wait.max(waited.0.unwrap_or_default());
+        counter.max_total_wait = counter.max_total_wait.max(waited.1.unwrap_or_default());
+    }
+
+    fn note_rate_limited(&self, q: &mut Queue, failure: &Failure) {
+        let endpoint = failure.api_id();
+        q.counters.entry(endpoint).or_default().rate_limited += 1;
+        let window = q.window(endpoint, self.default_limit());
+        if let Some(limit) = failure.rate_allowance()
+            && window.set_limit(limit)
+        {
+            tracing::warn!(api_id = endpoint.as_str(), limit, "키움이 알려 준 초당 한도로 이 TR의 한도를 바꿉니다");
+        }
+        window.hold_until_oldest_leaves(Instant::now());
     }
 
     async fn issue(&self) {
@@ -740,7 +918,7 @@ impl Inner {
                     Err(_) if !self.auth.issue_is_for_current_key() => Err(queue_gone(Endpoint::ISSUE)),
                     Err(failure) => {
                         if failure.category() == Category::RateLimit {
-                            q.pause_until = Some(Instant::now() + RATE_LIMIT_PAUSE);
+                            self.note_rate_limited(&mut q, &failure);
                         }
                         Err(self.settle(&mut q, failure))
                     }
@@ -841,6 +1019,11 @@ impl Inner {
             return;
         }
         let probe = matches!(q.gate, Gate::Probing { probe, .. } if probe == id);
+        if let Err(failure) = &outcome
+            && failure.category() == Category::RateLimit
+        {
+            self.note_rate_limited(&mut q, failure);
+        }
         match outcome {
             Ok(page) => {
                 if probe {
@@ -861,12 +1044,7 @@ impl Inner {
             unreachable!("send_market이 확인 요청임을 확인했다")
         };
         let err = match (cause.policy().stop, failure.policy().stop) {
-            (Stop::Gate, Stop::Gate) => {
-                if failure.category() == Category::RateLimit {
-                    q.pause_until = Some(Instant::now() + RATE_LIMIT_PAUSE);
-                }
-                self.close_gate(q, failure, misses + 1)
-            }
+            (Stop::Gate, Stop::Gate) => self.close_gate(q, failure, misses + 1),
             (Stop::AuthGate, Stop::AuthGate) => {
                 tracing::error!(api_id = failure.api_id().as_str(), "{failure}. 10분 뒤 확인도 실패해 조회와 토큰 발급을 멈춥니다");
                 self.auth.halt(failure.clone(), self.clock.now());
@@ -880,15 +1058,19 @@ impl Inner {
     fn market_failed(self: &Arc<Self>, q: &mut Queue, id: u64, generation: TokenGen, failure: Failure) {
         let api_id = failure.api_id().as_str();
         match failure.category() {
-            Category::RateLimit => {
-                tracing::warn!(api_id, "요청 개수 초과. 260ms 간격이 모자랐습니다. 대기열을 1초 멈춥니다");
-                q.pause_until = Some(Instant::now() + RATE_LIMIT_PAUSE);
-            }
+            Category::RateLimit => tracing::warn!(api_id, "요청 개수 초과 응답을 받았습니다. 이 TR만 창이 비는 시각까지 붙잡고 대기열 전체는 멈추지 않습니다"),
             Category::InvalidRequest | Category::BatchLimit => tracing::error!(api_id, "{failure}. 우리 코드의 버그입니다"),
             _ => {}
         }
         let job = q.jobs.get_mut(&id).expect("send_market이 확인했다");
         if job.once.is_some() {
+            let rate_limited_by_http = failure.category() == Category::RateLimit && failure.http_status() == Some(429);
+            if rate_limited_by_http && job.rate_limited < self.order_resends {
+                job.rate_limited += 1;
+                tracing::warn!(api_id, resends = job.rate_limited, "주문 쓰기가 요청 개수 초과를 받아 창이 비는 시각에 같은 요청을 다시 보냅니다");
+                q.requeue_front(id);
+                return;
+            }
             if failure.category() == Category::TokenInvalid {
                 let _ = self.auth.invalidate(generation);
             }
@@ -1126,28 +1308,27 @@ mod tests {
         move |s: &Sent| (s.api_id == ApiId::Au10001).then(|| token(n.fetch_add(1, Ordering::SeqCst) + 1))
     }
 
-    fn assert_at_most_4_per_second(sent: &[Sent]) {
+    const SHARED_SPACING: Duration = Duration::from_millis(260);
+
+    fn assert_at_most_per_second(sent: &[Sent], limit: usize) {
         for (i, a) in sent.iter().enumerate() {
             let in_window = sent[i..].iter().take_while(|b| b.at.duration_since(a.at) <= Duration::from_secs(1)).count();
-            assert!(in_window <= 4, "{}번째 전송부터 1초 안에 {in_window}번", i);
-        }
-        for w in sent.windows(2) {
-            assert!(w[1].at.duration_since(w[0].at) >= SEND_SPACING);
+            assert!(in_window <= limit, "{}번째 전송부터 1초 안에 {in_window}번", i);
         }
     }
 
     #[tokio::test(start_paused = true)]
-    async fn spacing_holds_across_token_retries_and_continuations() {
+    async fn the_window_holds_across_token_retries_and_continuations() {
         let tokens = token_counter();
-        let failures = AtomicUsize::new(0);
+        let (k3_failures, k5_failures) = (AtomicUsize::new(0), AtomicUsize::new(0));
         let fake = Arc::new(FakeTransport::new(Duration::from_millis(30), move |s| {
             if let Some(t) = tokens(s) {
                 return t;
             }
-            if s.cont.as_deref() == Some("k3") && failures.fetch_add(1, Ordering::SeqCst) < 1 {
+            if s.cont.as_deref() == Some("k3") && k3_failures.fetch_add(1, Ordering::SeqCst) < 1 {
                 return status(503, json!({}));
             }
-            if s.cont.as_deref() == Some("k5") && failures.fetch_add(1, Ordering::SeqCst) < 2 {
+            if s.cont.as_deref() == Some("k5") && k5_failures.fetch_add(1, Ordering::SeqCst) < 1 {
                 return status(429, json!({"return_code": 5, "return_msg": "초과[1700:유량=5]"}));
             }
             list_ok()
@@ -1162,7 +1343,7 @@ mod tests {
         let sent = fake.sent();
         assert_eq!(sent[0].api_id, ApiId::Au10001, "토큰 발급이 먼저 나간다");
         assert_eq!(sent.len(), 1 + 12 + 1 + 1);
-        assert_at_most_4_per_second(&sent);
+        assert_at_most_per_second(&fake.market_sent(), 5);
     }
 
     fn basic_info_ok() -> Result<HttpResponse, TransportError> {
@@ -1206,7 +1387,7 @@ mod tests {
         let sent = fake.market_sent();
         assert_eq!(sent.len(), 3);
         for w in sent.windows(2) {
-            assert!(w[1].at.duration_since(w[0].at) >= Duration::from_secs(1), "{:?}", w[1].at.duration_since(w[0].at));
+            assert!(w[1].at.duration_since(w[0].at) >= SEND_WINDOW + WINDOW_MARGIN, "{:?}", w[1].at.duration_since(w[0].at));
         }
     }
 
@@ -1226,9 +1407,9 @@ mod tests {
         let sent = fake.market_sent();
         let kinds: Vec<_> = sent.iter().map(|s| s.api_id).collect();
         assert_eq!(kinds, [ApiId::Ka10099, ApiId::Ka10001, ApiId::Ka10099, ApiId::Ka10001].map(Endpoint::from));
-        assert_eq!(sent[1].at.duration_since(sent[0].at), SEND_SPACING, "기다리는 TR 뒤의 다른 TR은 전체 간격으로 먼저 나간다");
-        assert!(sent[2].at.duration_since(sent[0].at) >= Duration::from_secs(1));
-        assert!(sent[3].at.duration_since(sent[1].at) >= Duration::from_secs(1));
+        assert_eq!(sent[1].at, sent[0].at, "기다리는 TR 뒤의 다른 TR은 기다리지 않고 먼저 나간다");
+        assert_eq!(sent[2].at.duration_since(sent[0].at), Duration::from_millis(1050));
+        assert_eq!(sent[3].at.duration_since(sent[1].at), Duration::from_millis(1050));
     }
 
     #[tokio::test(start_paused = true)]
@@ -1252,22 +1433,43 @@ mod tests {
         }
         let sent = fake.market_sent();
         assert_eq!(sent_order(&fake), ["k0", "ka10001", "k2", "k1"]);
-        assert!(sent[2].at.duration_since(sent[0].at) >= Duration::from_secs(1));
-        assert!(sent[3].at.duration_since(sent[2].at) >= Duration::from_secs(1));
+        assert_eq!(sent[2].at.duration_since(sent[0].at), Duration::from_millis(1050));
+        assert_eq!(sent[3].at.duration_since(sent[2].at), Duration::from_millis(1050));
     }
 
     #[tokio::test(start_paused = true)]
-    async fn real_queue_keeps_the_shared_spacing_only() {
+    async fn the_spacing_knob_queue_spaces_every_send_by_that_interval() {
         let fake = two_tr_transport(Duration::from_millis(10));
-        let rest = rest_in(&fake, KiwoomEnvironment::Real);
+        let auth = KiwoomAuth::new(Secret::new("k".into()), Secret::new("s".into()), None);
+        let clock = Clock::fake(kst(KstDate::new(2026, 11, 9).unwrap(), 9, 0, 0));
+        let rest = KiwoomRest::with_send_spacing(Arc::new(fake.clone()), auth, clock, SHARED_SPACING);
         rest.issue_token().await.unwrap();
-        for r in futures::future::join_all((0..3).map(|i| call_k(&rest, i, Priority::Screen))).await {
-            r.unwrap();
-        }
-        let sent = fake.market_sent();
+        let (a, b, c) = tokio::join!(call_k(&rest, 0, Priority::Screen), basic_info(&rest, Priority::Screen), call_k(&rest, 1, Priority::Screen));
+        a.unwrap();
+        b.unwrap();
+        c.unwrap();
+        let sent = fake.sent();
         for w in sent.windows(2) {
-            assert_eq!(w[1].at.duration_since(w[0].at), SEND_SPACING);
+            assert_eq!(w[1].at.duration_since(w[0].at), SHARED_SPACING, "손잡이 대기열은 토큰 발급과 TR이 달라도 모든 전송 사이를 그 간격으로 띄운다");
         }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn the_spacing_knob_mock_queue_keeps_the_same_tr_second() {
+        let fake = two_tr_transport(Duration::from_millis(10));
+        let auth = KiwoomAuth::new(Secret::new("k".into()), Secret::new("s".into()), None);
+        let clock = Clock::fake(kst(KstDate::new(2026, 11, 9).unwrap(), 9, 0, 0));
+        let rest = KiwoomRest::build(Arc::new(fake.clone()), auth, clock, SHARED_SPACING, KiwoomEnvironment::Mock);
+        rest.issue_token().await.unwrap();
+        let (a, b, c) = tokio::join!(call_k(&rest, 0, Priority::Screen), call_k(&rest, 1, Priority::Screen), basic_info(&rest, Priority::Screen));
+        a.unwrap();
+        b.unwrap();
+        c.unwrap();
+        let sent = fake.market_sent();
+        let kinds: Vec<_> = sent.iter().map(|s| s.api_id).collect();
+        assert_eq!(kinds, [ApiId::Ka10099, ApiId::Ka10001, ApiId::Ka10099].map(Endpoint::from));
+        assert_eq!(sent[1].at.duration_since(sent[0].at), SHARED_SPACING);
+        assert!(sent[2].at.duration_since(sent[0].at) >= Duration::from_secs(1));
     }
 
     #[tokio::test(start_paused = true)]
@@ -1312,43 +1514,38 @@ mod tests {
     }
 
     #[tokio::test(start_paused = true)]
-    async fn rate_limit_pauses_the_whole_queue_and_fails_after_three() {
+    async fn a_rate_limited_tr_fails_after_three_and_closes_the_shared_gate_without_pausing_other_trs() {
         let tokens = token_counter();
         let fake = Arc::new(FakeTransport::new(Duration::ZERO, move |s| {
             if let Some(t) = tokens(s) {
                 return t;
             }
             if s.cont.as_deref() == Some("k0") {
-                return status(429, json!({"return_code": 5, "return_msg": "허용된 요청 개수를 초과하였습니다[1700:유량=5]"}));
+                return rate_limited();
             }
             list_ok()
         }));
         let rest = rest(&fake);
-        let (a, b) = tokio::join!(
-            call_k(&rest, 0, Priority::Screen),
-            call_k(&rest, 1, Priority::Screen)
-        );
+        let (a, other) = tokio::join!(call_k(&rest, 0, Priority::Screen), tr_call(&rest, ApiId::Ka10001, "other", Priority::Screen));
         assert_eq!(category(a.err()), Some(Category::RateLimit));
-        assert!(matches!(b, Err(KiwoomError::Gated { .. })), "세 번째 429 뒤 공유 관문이 닫혀 뒤의 요청도 기다린다: {b:?}");
-        let sent = fake.market_sent();
-        assert!(sent.iter().all(|s| s.cont.as_deref() == Some("k0")));
-        let k0: Vec<_> = sent.iter().filter(|s| s.cont.as_deref() == Some("k0")).collect();
+        other.unwrap();
+        let k0: Vec<_> = fake.market_sent().into_iter().filter(|s| s.cont.as_deref() == Some("k0")).collect();
         assert_eq!(k0.len(), 3);
-        let first = k0[0].at;
-        let after: Vec<_> = sent.iter().filter(|s| s.at > first).collect();
-        assert!(after.iter().all(|s| s.at.duration_since(first) >= RATE_LIMIT_PAUSE), "429 뒤 1초 동안 아무것도 나가지 않는다");
-        assert_eq!(after[0].cont.as_deref(), Some("k0"), "같은 요청을 맨 앞에 다시 넣는다");
+        assert_eq!(at_ms(&k0, k0[0].at), [0, 1050, 2100], "429 뒤 그 TR의 창이 비는 시각에 같은 요청을 다시 보낸다");
+        let ka10001 = fake.market_sent().into_iter().find(|s| s.api_id == ApiId::Ka10001).unwrap();
+        assert_eq!(ka10001.at, k0[0].at, "다른 TR은 429를 받은 TR을 기다리지 않는다");
+        assert!(matches!(call_k(&rest, 1, Priority::Screen).await, Err(KiwoomError::Gated { .. })), "세 번째 429 뒤 공유 관문이 닫힌다");
     }
 
     #[tokio::test(start_paused = true)]
-    async fn the_third_rate_limit_also_pauses_the_whole_queue() {
+    async fn the_third_rate_limit_closes_the_gate_for_thirty_seconds() {
         let tokens = token_counter();
         let fake = Arc::new(FakeTransport::new(Duration::ZERO, move |s| {
             if let Some(t) = tokens(s) {
                 return t;
             }
             if s.body.contains("\"0\"") {
-                return status(429, json!({"return_code": 5, "return_msg": "허용된 요청 개수를 초과하였습니다[1700:유량=5]"}));
+                return rate_limited();
             }
             list_ok()
         }));
@@ -1791,5 +1988,443 @@ mod tests {
             assert_eq!((shown.retry_at, shown.manual_action_required), (error.retry_at(), error.manual_action_required()), "{error}");
         }
         assert_eq!(KiwoomError::Gated { until, cause: GateCause::IssueInterval }.shown().retry_at, Some(until));
+    }
+
+    fn at_ms(sent: &[Sent], origin: Instant) -> Vec<u64> {
+        sent.iter().map(|s| s.at.duration_since(origin).as_millis() as u64).collect()
+    }
+
+    fn sent_of(fake: &FakeTransport, api: impl Into<Endpoint>) -> Vec<Sent> {
+        let api = api.into();
+        fake.market_sent().into_iter().filter(|s| s.api_id == api).collect()
+    }
+
+    fn fake_with(latency: Duration, handler: impl Fn(&Sent) -> Result<HttpResponse, TransportError> + Send + Sync + 'static) -> Arc<FakeTransport> {
+        let tokens = token_counter();
+        Arc::new(FakeTransport::new(latency, move |s| tokens(s).unwrap_or_else(|| handler(s))))
+    }
+
+    fn limited_with(allowance: Option<u32>) -> Result<HttpResponse, TransportError> {
+        let counted = allowance.map(|n| format!(" 유량={n}, API ID=ka10080")).unwrap_or_default();
+        status(429, json!({"return_code": 5, "return_msg": format!("허용된 요청 개수를 초과하였습니다[1700:허용된 API 요청 개수를 초과하였습니다.{counted}]")}))
+    }
+
+    type Call<'a> = futures::future::BoxFuture<'a, Result<(), KiwoomError>>;
+
+    fn tr_call<'a>(rest: &'a KiwoomRest, api: impl Into<Endpoint>, body: &str, priority: Priority) -> Call<'a> {
+        let dispatch = Dispatch { endpoint: api.into(), body: body.to_owned(), cont: None, priority, scope: MergeScope::default(), admit: None, once: None };
+        Box::pin(async move { rest.call_endpoint(dispatch, |_: &serde_json::Value| true).await.map(drop) })
+    }
+
+    fn write_call<'a>(rest: &'a KiwoomRest, api: TradingApiId, body: &str, admit: Option<Admission>) -> Call<'a> {
+        let dispatch = Dispatch {
+            endpoint: api.into(),
+            body: body.to_owned(),
+            cont: None,
+            priority: Priority::Order,
+            scope: MergeScope::default(),
+            admit,
+            once: Some(SendOnce { transmitted: Transmitted::default() }),
+        };
+        Box::pin(async move { rest.call_endpoint(dispatch, |_: &serde_json::Value| true).await.map(drop) })
+    }
+
+    async fn all_ok(calls: Vec<Call<'_>>) {
+        for r in futures::future::join_all(calls).await {
+            r.unwrap();
+        }
+    }
+
+    async fn real_rest(fake: &Arc<FakeTransport>) -> KiwoomRest {
+        let rest = rest_in(fake, KiwoomEnvironment::Real);
+        rest.issue_token().await.unwrap();
+        rest
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn one_tr_sends_five_at_once_and_the_sixth_when_its_window_frees() {
+        let fake = fake_with(Duration::ZERO, |_| list_ok());
+        let rest = real_rest(&fake).await;
+        let origin = Instant::now();
+        all_ok((0..12).map(|i| tr_call(&rest, ApiId::Ka10080, &format!("b{i}"), Priority::Screen)).collect()).await;
+        let sent = fake.market_sent();
+        assert_eq!(at_ms(&sent, origin), [0, 0, 0, 0, 0, 1050, 1050, 1050, 1050, 1050, 2100, 2100]);
+        assert_at_most_per_second(&sent, 5);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_full_tr_does_not_hold_back_other_trs_and_keeps_priority_inside_the_tr() {
+        let fake = fake_with(Duration::ZERO, |_| list_ok());
+        let rest = real_rest(&fake).await;
+        let origin = Instant::now();
+        let screen = |i: usize| tr_call(&rest, ApiId::Ka10080, &format!("s{i}"), Priority::Screen);
+        let background = |i: usize| tr_call(&rest, ApiId::Ka10080, &format!("b{i}"), Priority::Background);
+        let mut calls: Vec<Call> = (1..=5).map(screen).collect();
+        calls.extend((1..=5).map(background));
+        calls.push(screen(6));
+        calls.push(tr_call(&rest, ApiId::Ka10081, "other", Priority::Background));
+        all_ok(calls).await;
+        let sent = fake.market_sent();
+        let order: Vec<_> = sent.iter().map(|s| s.body.clone()).collect();
+        assert_eq!(order, ["s1", "s2", "s3", "s4", "s5", "other", "s6", "b1", "b2", "b3", "b4", "b5"]);
+        assert_eq!(at_ms(&sent, origin), [0, 0, 0, 0, 0, 0, 1050, 1050, 1050, 1050, 1050, 2100]);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn an_order_goes_before_a_screen_request_of_the_same_tr() {
+        let fake = fake_with(Duration::ZERO, |_| list_ok());
+        let rest = real_rest(&fake).await;
+        let origin = Instant::now();
+        all_ok((0..4).map(|i| tr_call(&rest, ApiId::Ka10001, &format!("e{i}"), Priority::Screen)).collect()).await;
+        tokio::time::sleep(Duration::from_millis(10)).await;
+        all_ok(vec![tr_call(&rest, ApiId::Ka10001, "screen", Priority::Screen), tr_call(&rest, ApiId::Ka10001, "order", Priority::Order)]).await;
+        let sent = fake.market_sent();
+        let last: Vec<_> = sent[4..].iter().map(|s| (s.body.as_str(), s.at.duration_since(origin).as_millis() as u64)).collect();
+        assert_eq!(last, [("order", 10), ("screen", 1050)]);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn the_four_order_write_trs_share_one_window_and_queries_do_not_wait() {
+        let fake = fake_with(Duration::ZERO, |_| list_ok());
+        let rest = real_rest(&fake).await;
+        let origin = Instant::now();
+        let writes = [TradingApiId::Kt10000, TradingApiId::Kt10001, TradingApiId::Kt10002, TradingApiId::Kt10003, TradingApiId::Kt10000, TradingApiId::Kt10001];
+        let mut calls: Vec<Call> = vec![tr_call(&rest, ApiId::Ka10001, "screen-same-lane", Priority::Screen), tr_call(&rest, TradingApiId::Kt00018, "account", Priority::Screen)];
+        calls.extend(writes.iter().enumerate().map(|(i, api)| write_call(&rest, *api, &format!("w{i}"), None)));
+        all_ok(calls).await;
+        let sent = fake.market_sent();
+        let writes_at: Vec<_> = sent.iter().filter(|s| s.body.starts_with('w')).map(|s| (s.body.as_str(), s.at.duration_since(origin).as_millis() as u64)).collect();
+        assert_eq!(writes_at, [("w0", 0), ("w1", 0), ("w2", 0), ("w3", 0), ("w4", 0), ("w5", 1050)]);
+        let queries: Vec<_> = sent.iter().filter(|s| !s.body.starts_with('w')).map(|s| s.at.duration_since(origin).as_millis() as u64).collect();
+        assert_eq!(queries, [0, 0]);
+        assert_eq!(sent.iter().position(|s| s.body == "w0"), Some(0), "주문 요청이 먼저 나간다");
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn mock_queue_counts_the_order_writes_as_one_window_of_one() {
+        let fake = fake_with(Duration::from_millis(10), |_| list_ok());
+        let rest = rest_in(&fake, KiwoomEnvironment::Mock);
+        rest.issue_token().await.unwrap();
+        let origin = Instant::now();
+        all_ok(vec![
+            write_call(&rest, TradingApiId::Kt10000, "w0", None),
+            write_call(&rest, TradingApiId::Kt10001, "w1", None),
+            tr_call(&rest, ApiId::Ka10001, "q", Priority::Screen),
+        ])
+        .await;
+        let at: Vec<_> = fake.market_sent().iter().map(|s| (s.body.clone(), s.at.duration_since(origin).as_millis() as u64)).collect();
+        assert_eq!(at, [("w0".to_owned(), 0), ("q".to_owned(), 0), ("w1".to_owned(), 1050)]);
+    }
+
+    async fn call_at(rest: &KiwoomRest, after_ms: u64, api: ApiId, body: &str) -> Result<(), KiwoomError> {
+        tokio::time::sleep(Duration::from_millis(after_ms)).await;
+        tr_call(rest, api, body, Priority::Screen).await
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_rate_limited_request_is_sent_again_when_its_window_frees_while_other_trs_keep_going() {
+        let limited = std::sync::atomic::AtomicBool::new(false);
+        let fake = fake_with(Duration::ZERO, move |s| if s.body == "c" && !limited.swap(true, Ordering::SeqCst) { limited_with(Some(5)) } else { list_ok() });
+        let rest = real_rest(&fake).await;
+        let origin = Instant::now();
+        let (a, b, c, d) = tokio::join!(call_at(&rest, 0, ApiId::Ka10080, "a"), call_at(&rest, 100, ApiId::Ka10080, "b"), call_at(&rest, 200, ApiId::Ka10080, "c"), call_at(&rest, 300, ApiId::Ka10081, "d"));
+        a.unwrap();
+        b.unwrap();
+        c.unwrap();
+        d.unwrap();
+        let sent = fake.market_sent();
+        let timeline: Vec<_> = sent.iter().map(|s| (s.body.as_str(), s.at.duration_since(origin).as_millis() as u64)).collect();
+        assert_eq!(timeline, [("a", 0), ("b", 100), ("c", 200), ("d", 300), ("c", 1050)]);
+    }
+
+    async fn window_after_a_limit_response(allowance: Option<u32>) -> (Vec<u64>, Vec<u64>) {
+        let limited = std::sync::atomic::AtomicBool::new(false);
+        let fake = fake_with(Duration::ZERO, move |s| if s.body == "x2" && !limited.swap(true, Ordering::SeqCst) { limited_with(allowance) } else { list_ok() });
+        let rest = real_rest(&fake).await;
+        all_ok((0..3).map(|i| tr_call(&rest, ApiId::Ka10080, &format!("x{i}"), Priority::Screen)).collect()).await;
+        tokio::time::sleep(Duration::from_secs(3)).await;
+        let origin = Instant::now();
+        let mut calls: Vec<Call> = (0..6).map(|i| tr_call(&rest, ApiId::Ka10080, &format!("w{i}"), Priority::Screen)).collect();
+        calls.extend((0..6).map(|i| tr_call(&rest, ApiId::Ka10081, &format!("y{i}"), Priority::Screen)));
+        all_ok(calls).await;
+        let after = |api: ApiId| at_ms(&sent_of(&fake, api).into_iter().filter(|s| s.at >= origin).collect::<Vec<_>>(), origin);
+        (after(ApiId::Ka10080), after(ApiId::Ka10081))
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_limit_response_with_a_count_changes_only_that_trs_limit() {
+        let (limited, other) = window_after_a_limit_response(Some(2)).await;
+        assert_eq!(limited, [0, 0, 1050, 1050, 2100, 2100], "유량=2 뒤 그 TR은 최근 1초 2건까지");
+        assert_eq!(other, [0, 0, 0, 0, 0, 1050], "다른 TR의 한도는 그대로");
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_limit_response_without_a_count_keeps_the_limit() {
+        let (limited, _) = window_after_a_limit_response(None).await;
+        assert_eq!(limited, [0, 0, 0, 0, 0, 1050]);
+    }
+
+    fn write_fake(replies: Vec<Result<HttpResponse, TransportError>>) -> Arc<FakeTransport> {
+        Arc::new(FakeTransport::new(Duration::ZERO, replies_for_writes(replies)))
+    }
+
+    fn replies_for_writes(seq: Vec<Result<HttpResponse, TransportError>>) -> impl Fn(&Sent) -> Result<HttpResponse, TransportError> {
+        replies(seq)
+    }
+
+    fn the_write(rest: &KiwoomRest) -> Call<'_> {
+        write_call(rest, TradingApiId::Kt10000, "order", None)
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn an_order_write_that_is_rate_limited_is_sent_again_when_the_bundle_window_frees() {
+        let fake = write_fake(vec![limited_with(Some(5)), list_ok()]);
+        let rest = real_rest(&fake).await;
+        let origin = Instant::now();
+        the_write(&rest).await.unwrap();
+        assert_eq!(at_ms(&fake.market_sent(), origin), [0, 1050]);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn an_order_write_fails_with_the_rate_limit_after_three_sends() {
+        let fake = write_fake(vec![limited_with(Some(5)), limited_with(Some(5)), limited_with(Some(5)), list_ok()]);
+        let rest = real_rest(&fake).await;
+        let origin = Instant::now();
+        let err = the_write(&rest).await.unwrap_err();
+        assert_eq!(at_ms(&fake.market_sent(), origin), [0, 1050, 2100]);
+        assert!(matches!(err, KiwoomError::Failed(_)), "{err:?}");
+        assert_eq!(category(Some(err)), Some(Category::RateLimit));
+        assert_eq!(rest.gate_until(), None, "주문 쓰기는 관문을 닫지 않는다");
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn an_order_write_is_sent_once_when_the_resend_switch_is_off() {
+        let fake = write_fake(vec![limited_with(Some(5)), list_ok()]);
+        let auth = KiwoomAuth::new(Secret::new("k".into()), Secret::new("s".into()), None);
+        let clock = Clock::fake(kst(KstDate::new(2026, 11, 9).unwrap(), 9, 0, 0));
+        let rest = KiwoomRest::start(Arc::new(fake.clone()), auth, clock, Pacing::PerTr, KiwoomEnvironment::Real, 0, None);
+        rest.issue_token().await.unwrap();
+        assert_eq!(category(the_write(&rest).await.err()), Some(Category::RateLimit));
+        assert_eq!(fake.market_sent().len(), 1);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn an_order_write_checks_admission_again_before_sending_again() {
+        let fake = write_fake(vec![limited_with(Some(5)), list_ok()]);
+        let rest = real_rest(&fake).await;
+        let checks = Arc::new(AtomicUsize::new(0));
+        let admit: Admission = {
+            let checks = checks.clone();
+            Arc::new(move || checks.fetch_add(1, Ordering::SeqCst) == 0)
+        };
+        let err = write_call(&rest, TradingApiId::Kt10000, "order", Some(admit)).await.unwrap_err();
+        assert_eq!(err, KiwoomError::NotConnected);
+        assert_eq!(fake.market_sent().len(), 1);
+        assert_eq!(checks.load(Ordering::SeqCst), 2);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn an_order_write_is_not_sent_again_for_any_other_failure() {
+        let unreadable = || ok(json!("not an object"), None);
+        let rate_limited_in_200 = || ok(json!({"return_code": 5, "return_msg": "초과[1700:유량=5]"}), None);
+        let temporarily_down = || ok(json!({"return_code": 1, "return_msg": "점검[1999:일시 장애]"}), None);
+        let failures = [Err(TransportError::refused()), unavailable(), temporarily_down(), unreadable(), rate_limited_in_200()];
+        for failure in failures {
+            let fake = write_fake(vec![failure.clone(), list_ok()]);
+            let rest = real_rest(&fake).await;
+            assert!(the_write(&rest).await.is_err(), "{failure:?}");
+            assert_eq!(fake.market_sent().len(), 1, "{failure:?}");
+        }
+    }
+
+    struct Logs;
+
+    fn capture_logs() -> Logs {
+        crate::kiwoom::stream::tests::install_global_log_capture();
+        crate::kiwoom::stream::tests::start_capturing_logs_of_this_thread();
+        Logs
+    }
+
+    impl Logs {
+        fn text(&self) -> String {
+            crate::kiwoom::stream::tests::logs_captured_on_this_thread()
+        }
+
+        fn counter_lines(&self) -> Vec<String> {
+            self.text().lines().filter(|l| l.contains("키움 대기열 1분 계수")).map(str::to_owned).collect()
+        }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn the_queue_logs_per_tr_counts_every_minute_and_skips_idle_trs() {
+        let logs = capture_logs();
+        let limited = std::sync::atomic::AtomicBool::new(false);
+        let fake = fake_with(Duration::ZERO, move |s| if s.body == "secret-a2" && !limited.swap(true, Ordering::SeqCst) { limited_with(None) } else { list_ok() });
+        let rest = real_rest(&fake).await;
+        let mut calls: Vec<Call> = (0..6).map(|i| tr_call(&rest, ApiId::Ka10080, &format!("secret-a{i}"), Priority::Screen)).collect();
+        calls.push(tr_call(&rest, ApiId::Ka10081, "secret-x", Priority::Screen));
+        all_ok(calls).await;
+        tokio::time::sleep(Duration::from_secs(61)).await;
+        let first = logs.counter_lines();
+        let find = |api: &str| first.iter().find(|l| l.contains(&format!("api_id=\"{api}\""))).unwrap_or_else(|| panic!("{api}: {first:?}")).to_owned();
+        let numbers = |line: String| line.split(" sent=").nth(1).unwrap().to_owned();
+        assert_eq!(numbers(find("ka10080")), "7 rate_limited=1 resent=1 max_wait_ms=1050");
+        assert_eq!(numbers(find("ka10081")), "1 rate_limited=0 resent=0 max_wait_ms=0");
+        assert_eq!(numbers(find("au10001")), "1 rate_limited=0 resent=0 max_wait_ms=0");
+        assert_eq!(first.len(), 3);
+        tokio::time::sleep(Duration::from_secs(60)).await;
+        assert_eq!(logs.counter_lines().len(), 3, "보낸 것이 없는 1분에는 줄이 없다");
+        tr_call(&rest, ApiId::Ka10081, "secret-y", Priority::Screen).await.unwrap();
+        tokio::time::sleep(Duration::from_secs(60)).await;
+        let all = logs.counter_lines();
+        assert_eq!(all.len(), 4, "{all:?}");
+        assert!(all[3].contains("api_id=\"ka10081\"") && all[3].contains("sent=1 "), "{}", all[3]);
+        let text = logs.text();
+        assert!(!text.contains("secret-") && !text.contains("tok-"), "로그에 본문이나 토큰이 없다");
+    }
+
+    struct Timed {
+        label: &'static str,
+        enqueued_ms: u64,
+        done_ms: u64,
+    }
+
+    fn timed<'a>(origin: Instant, label: &'static str, after_ms: u64, call: Call<'a>) -> futures::future::BoxFuture<'a, Timed> {
+        Box::pin(async move {
+            tokio::time::sleep(Duration::from_millis(after_ms)).await;
+            let enqueued_ms = Instant::now().duration_since(origin).as_millis() as u64;
+            call.await.unwrap();
+            Timed { label, enqueued_ms, done_ms: Instant::now().duration_since(origin).as_millis() as u64 }
+        })
+    }
+
+    async fn settled_rest(fake: &Arc<FakeTransport>, shared_spacing: bool) -> KiwoomRest {
+        let auth = KiwoomAuth::new(Secret::new("k".into()), Secret::new("s".into()), None);
+        let clock = Clock::fake(kst(KstDate::new(2026, 11, 9).unwrap(), 9, 0, 0));
+        let rest = if shared_spacing {
+            KiwoomRest::with_send_spacing(Arc::new(fake.clone()), auth, clock, SHARED_SPACING)
+        } else {
+            KiwoomRest::new(Arc::new(fake.clone()), auth, clock)
+        };
+        rest.issue_token().await.unwrap();
+        tokio::time::sleep(Duration::from_secs(2)).await;
+        rest
+    }
+
+    async fn symbol_switch(shared_spacing: bool) -> (Vec<Timed>, usize) {
+        let fake = fake_with(Duration::from_millis(30), |_| list_ok());
+        let rest = settled_rest(&fake, shared_spacing).await;
+        let origin = Instant::now();
+        let screen = |label: &'static str, api: Endpoint, body: &'static str, after_ms: u64| timed(origin, label, after_ms, tr_call(&rest, api, body, Priority::Screen));
+        let calls = vec![
+            screen("ka10081", ApiId::Ka10081.into(), "chart", 0),
+            screen("ka10080", ApiId::Ka10080.into(), "minute", 0),
+            screen("ka10004", ApiId::Ka10004.into(), "book", 0),
+            screen("ka10095", ApiId::Ka10095.into(), "quote", 0),
+            screen("ka10003", ApiId::Ka10003.into(), "ticks", 0),
+            screen("ka10001", ApiId::Ka10001.into(), "info", 0),
+            screen("kt00011", TradingApiId::Kt00011.into(), "buyable", 0),
+            screen("ka10095 again", ApiId::Ka10095.into(), "quote", 50),
+        ];
+        let timeline = futures::future::join_all(calls).await;
+        let sends = fake.market_sent().len();
+        for t in &timeline {
+            println!("종목 전환 {} {:<14} 넣음 {:>5}ms 끝남 {:>5}ms", if shared_spacing { "지금(260ms)" } else { "새 규칙   " }, t.label, t.enqueued_ms, t.done_ms);
+        }
+        (timeline, sends)
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn probe_symbol_switch_before_and_after_the_window_queue() {
+        let (before, before_sends) = symbol_switch(true).await;
+        let (after, after_sends) = symbol_switch(false).await;
+        let slowest = |t: &[Timed]| t.iter().map(|t| t.done_ms).max().unwrap();
+        assert!(slowest(&before) > 1500, "지금 동작은 마지막 완료가 1.5초를 넘는다: {}ms", slowest(&before));
+        assert_eq!(before_sends, 7, "지금은 아직 줄에 있는 같은 ka10095를 합친다");
+        assert_eq!(after_sends, 8);
+        for t in &after {
+            assert!(t.done_ms - t.enqueued_ms <= 35, "{}: 넣은 뒤 {}ms", t.label, t.done_ms - t.enqueued_ms);
+        }
+    }
+
+    async fn one_order(shared_spacing: bool) -> (Vec<Timed>, u64) {
+        let fake = fake_with(Duration::from_millis(30), |_| list_ok());
+        let rest = settled_rest(&fake, shared_spacing).await;
+        let origin = Instant::now();
+        let account = |label: &'static str, api: TradingApiId| timed(origin, label, 0, tr_call(&rest, api, label, Priority::Screen));
+        let steps = async {
+            let rest = &rest;
+            let mut done = Vec::new();
+            done.push(timed(origin, "ka10001", 0, tr_call(rest, ApiId::Ka10001, "price band", Priority::Order)).await);
+            done.push(timed(origin, "kt00011", 0, tr_call(rest, TradingApiId::Kt00011, "buyable", Priority::Order)).await);
+            done.push(timed(origin, "kt10000", 0, write_call(rest, TradingApiId::Kt10000, "buy", None)).await);
+            done
+        };
+        let (mut timeline, chain) = tokio::join!(futures::future::join_all(vec![account("kt00018", TradingApiId::Kt00018), account("kt00007", TradingApiId::Kt00007), account("ka10075", TradingApiId::Ka10075)]), steps);
+        timeline.extend(chain);
+        let write_sent = fake.market_sent().into_iter().find(|s| s.api_id == Endpoint::from(TradingApiId::Kt10000)).unwrap().at.duration_since(origin).as_millis() as u64;
+        for t in &timeline {
+            println!("주문 1건 {} {:<8} 넣음 {:>4}ms 끝남 {:>4}ms", if shared_spacing { "지금(260ms)" } else { "새 규칙   " }, t.label, t.enqueued_ms, t.done_ms);
+        }
+        (timeline, write_sent)
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn probe_one_order_before_and_after_the_window_queue() {
+        let (_, before_write_sent) = one_order(true).await;
+        let (after, after_write_sent) = one_order(false).await;
+        assert!(before_write_sent >= 520, "지금 동작은 쓰기가 520ms 이후에 나간다: {before_write_sent}ms");
+        let write = after.iter().find(|t| t.label == "kt10000").unwrap();
+        assert!(write.done_ms <= 95, "새 동작은 쓰기 완료가 약 90ms: {}ms", write.done_ms);
+        assert_eq!(after_write_sent, 60);
+    }
+
+    async fn seven_trs_with_total_limit(total_limit: Option<u32>) -> (Vec<u64>, Vec<String>) {
+        let fake = fake_with(Duration::ZERO, |_| list_ok());
+        let auth = KiwoomAuth::new(Secret::new("k".into()), Secret::new("s".into()), None);
+        let clock = Clock::fake(kst(KstDate::new(2026, 11, 9).unwrap(), 9, 0, 0));
+        let logs = capture_logs();
+        let rest = KiwoomRest::start(Arc::new(fake.clone()), auth, clock, Pacing::PerTr, KiwoomEnvironment::Real, ORDER_RATE_LIMIT_RESENDS, total_limit);
+        rest.issue_token().await.unwrap();
+        let origin = Instant::now();
+        let trs = [ApiId::Ka10081, ApiId::Ka10080, ApiId::Ka10004, ApiId::Ka10095, ApiId::Ka10003, ApiId::Ka10001, ApiId::Ka10100];
+        all_ok(trs.iter().map(|api| tr_call(&rest, *api, "x", Priority::Screen)).collect()).await;
+        tokio::time::sleep(Duration::from_secs(61)).await;
+        (at_ms(&fake.market_sent(), origin), logs.counter_lines())
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn the_total_window_is_off_by_default_and_seven_trs_go_at_once() {
+        let (at, lines) = seven_trs_with_total_limit(None).await;
+        assert_eq!(at, [0; 7]);
+        assert!(lines.iter().all(|l| !l.contains("max_total_wait_ms")), "{lines:?}");
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn the_total_window_sends_five_at_once_and_the_rest_when_it_frees() {
+        let (at, lines) = seven_trs_with_total_limit(Some(5)).await;
+        assert_eq!(at, [0, 0, 0, 0, 0, 1050, 1050]);
+        let waited: Vec<_> = lines.iter().filter(|l| l.contains("max_total_wait_ms=1050")).collect();
+        assert_eq!(waited.len(), 2, "{lines:?}");
+        assert!(lines.iter().filter(|l| l.contains("au10001")).all(|l| l.contains("max_total_wait_ms=0")), "토큰 발급은 합계에 세지 않는다");
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn the_total_window_counts_order_writes_and_the_tr_window_still_applies() {
+        let fake = fake_with(Duration::ZERO, |_| list_ok());
+        let auth = KiwoomAuth::new(Secret::new("k".into()), Secret::new("s".into()), None);
+        let clock = Clock::fake(kst(KstDate::new(2026, 11, 9).unwrap(), 9, 0, 0));
+        let rest = KiwoomRest::start(Arc::new(fake.clone()), auth, clock, Pacing::PerTr, KiwoomEnvironment::Real, ORDER_RATE_LIMIT_RESENDS, Some(3));
+        rest.issue_token().await.unwrap();
+        let origin = Instant::now();
+        all_ok(vec![
+            write_call(&rest, TradingApiId::Kt10000, "w0", None),
+            write_call(&rest, TradingApiId::Kt10001, "w1", None),
+            tr_call(&rest, ApiId::Ka10001, "a", Priority::Screen),
+            tr_call(&rest, ApiId::Ka10001, "b", Priority::Screen),
+        ])
+        .await;
+        let at: Vec<_> = fake.market_sent().iter().map(|s| (s.body.clone(), s.at.duration_since(origin).as_millis() as u64)).collect();
+        assert_eq!(at, [("w0".to_owned(), 0), ("w1".to_owned(), 0), ("a".to_owned(), 0), ("b".to_owned(), 1050)]);
     }
 }

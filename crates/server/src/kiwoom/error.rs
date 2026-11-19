@@ -293,20 +293,21 @@ pub struct Failure {
     return_code: Option<i64>,
     detail: Option<CodeKey>,
     vendor_reason: Option<VendorReason>,
+    rate_allowance: Option<u32>,
     note: Note,
 }
 
 impl Failure {
     pub fn transport(api_id: impl Into<Endpoint>, e: TransportError) -> Failure {
-        Failure { category: Transient, api_id: api_id.into(), http_status: None, return_code: None, detail: None, vendor_reason: None, note: Note::Transport(e) }
+        Failure { category: Transient, api_id: api_id.into(), http_status: None, return_code: None, detail: None, vendor_reason: None, rate_allowance: None, note: Note::Transport(e) }
     }
 
     pub fn queue_gone(api_id: impl Into<Endpoint>) -> Failure {
-        Failure { category: Transient, api_id: api_id.into(), http_status: None, return_code: None, detail: None, vendor_reason: None, note: Note::QueueGone }
+        Failure { category: Transient, api_id: api_id.into(), http_status: None, return_code: None, detail: None, vendor_reason: None, rate_allowance: None, note: Note::QueueGone }
     }
 
     pub fn protocol(api_id: impl Into<Endpoint>, note: Note) -> Failure {
-        Failure { category: Protocol, api_id: api_id.into(), http_status: None, return_code: None, detail: None, vendor_reason: None, note }
+        Failure { category: Protocol, api_id: api_id.into(), http_status: None, return_code: None, detail: None, vendor_reason: None, rate_allowance: None, note }
     }
 
     pub fn schema(api_id: impl Into<Endpoint>, envelope: Envelope, note: Note) -> Failure {
@@ -317,12 +318,13 @@ impl Failure {
             return_code: Some(envelope.return_code),
             detail: None,
             vendor_reason: None,
+            rate_allowance: None,
             note,
         }
     }
 
     pub fn restored_auth_block(detail: CodeKey) -> Failure {
-        Failure { category: AuthBlocked, api_id: Endpoint::ISSUE, http_status: None, return_code: None, detail: Some(detail), vendor_reason: None, note: Note::None }
+        Failure { category: AuthBlocked, api_id: Endpoint::ISSUE, http_status: None, return_code: None, detail: Some(detail), vendor_reason: None, rate_allowance: None, note: Note::None }
     }
 
     pub fn note(&self) -> &Note {
@@ -351,6 +353,10 @@ impl Failure {
 
     pub fn vendor_reason(&self) -> Option<VendorReason> {
         self.vendor_reason
+    }
+
+    pub fn rate_allowance(&self) -> Option<u32> {
+        self.rate_allowance
     }
 
     pub fn policy(&self) -> Policy {
@@ -537,6 +543,12 @@ pub struct Envelope {
     pub return_code: i64,
 }
 
+fn read_rate_allowance(msg: &str) -> Option<u32> {
+    let after = msg.split_once("유량=")?.1;
+    let digits: String = after.chars().take_while(char::is_ascii_digit).collect();
+    digits.parse().ok().filter(|&n| n > 0)
+}
+
 pub fn judge(api_id: impl Into<Endpoint>, status: u16, body: &str) -> Result<Envelope, Failure> {
     let api_id = api_id.into();
     let object = match serde_json::from_str::<Value>(body) {
@@ -558,6 +570,7 @@ pub fn judge(api_id: impl Into<Endpoint>, status: u16, body: &str) -> Result<Env
                 },
                 detail: None,
                 vendor_reason: None,
+                rate_allowance: None,
                 note: Note::MalformedReturnMessage,
             });
         }
@@ -594,6 +607,7 @@ pub fn judge(api_id: impl Into<Endpoint>, status: u16, body: &str) -> Result<Env
         },
         detail: detail.map(Rest),
         vendor_reason: detail.and_then(|d| vendor_reason(msg, d)),
+        rate_allowance: if category == RateLimit { read_rate_allowance(msg) } else { None },
         note,
     })
 }

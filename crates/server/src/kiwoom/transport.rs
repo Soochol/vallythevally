@@ -91,6 +91,7 @@ impl ReqwestTransport {
 
 impl Transport for ReqwestTransport {
     fn send(&self, req: HttpRequest) -> BoxFuture<'static, Result<HttpResponse, TransportError>> {
+        let api_id = req.api_id;
         let mut builder = self
             .client
             .post(format!("{}{}", self.base_url, req.api_id.path()))
@@ -108,6 +109,10 @@ impl Transport for ReqwestTransport {
             let status = resp.status().as_u16();
             let header = |name: &str| resp.headers().get(name).and_then(|v| v.to_str().ok()).unwrap_or("").to_owned();
             let next_key = (header("cont-yn") == "Y").then(|| header("next-key"));
+            let retry_after = header("retry-after");
+            if status == 429 && !retry_after.is_empty() {
+                tracing::warn!(api_id = api_id.as_str(), retry_after, "키움이 429 응답에 Retry-After를 보냈습니다");
+            }
             let body = resp.text().await.map_err(|e| TransportError::of(Stage::ReadBody, &e))?;
             Ok(HttpResponse { status, next_key, body })
         })
