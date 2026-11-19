@@ -70,14 +70,48 @@ function levelsByPrice(levels: readonly BookLevel[]): Map<number, BookLevel> {
   return byPrice;
 }
 
-export function buildLadderRows(prices: readonly (number | null)[], { asks, bids, lastPrice, previousClose }: LadderQuotes): LadderRow[] {
+const SINGLE_PRICE_MAX_LEVELS = 3;
+
+const pricedLevels = (levels: readonly BookLevel[]): BookLevel[] => levels.filter((level) => usablePrice(level.price));
+
+export function isSinglePriceBook({ asks, bids }: LadderQuotes): boolean {
+  const askCount = pricedLevels(asks).length;
+  const bidCount = pricedLevels(bids).length;
+  return askCount <= SINGLE_PRICE_MAX_LEVELS && bidCount <= SINGLE_PRICE_MAX_LEVELS && askCount + bidCount > 0;
+}
+
+function singlePricePrices({ asks, bids }: LadderQuotes): (number | null)[] {
+  const distinct = (levels: readonly BookLevel[]) => [...new Set(pricedLevels(levels).map((level) => level.price))];
+  const askPrices = distinct(asks).sort((a, b) => a - b);
+  const bidPrices = distinct(bids).sort((a, b) => b - a);
+  const prices = Array<number | null>(LADDER_ROWS).fill(null);
+  askPrices.forEach((price, rank) => { prices[ROWS_ABOVE_BASE - 1 - rank] = price; });
+  bidPrices.forEach((price, rank) => { prices[ROWS_ABOVE_BASE + rank] = price; });
+  return prices;
+}
+
+export interface LadderPrices {
+  readonly prices: readonly (number | null)[];
+  readonly sidesSplit: boolean;
+}
+
+export function defaultLadderPrices(input: LadderInput): LadderPrices {
+  if (isSinglePriceBook(input)) return { prices: singlePricePrices(input), sidesSplit: true };
+  return { prices: gridPrices(basePrice(input), input.bounds, input.tickRule), sidesSplit: false };
+}
+
+export function buildLadderRows(prices: readonly (number | null)[], { asks, bids, lastPrice, previousClose }: LadderQuotes, sidesSplit = false): LadderRow[] {
   const asksAt = levelsByPrice(asks);
   const bidsAt = levelsByPrice(bids);
-  const priced = prices.map((price) => ({ price, ask: price === null ? null : asksAt.get(price) ?? null, bid: price === null ? null : bidsAt.get(price) ?? null }));
+  const priced = prices.map((price, index) => ({
+    price,
+    ask: price === null || (sidesSplit && index >= ROWS_ABOVE_BASE) ? null : asksAt.get(price) ?? null,
+    bid: price === null || (sidesSplit && index < ROWS_ABOVE_BASE) ? null : bidsAt.get(price) ?? null,
+  }));
   const largest = Math.max(0, ...priced.flatMap(({ ask, bid }) => [usableQuantity(ask), usableQuantity(bid)]));
   const ratio = (level: BookLevel | null): number => (largest > 0 ? usableQuantity(level) / largest : 0);
   return priced.map(({ price, ask, bid }, index) => ({
-    key: price === null ? `blank-${index}` : `p-${price}`,
+    key: price === null ? `blank-${index}` : sidesSplit ? `${index < ROWS_ABOVE_BASE ? "ask" : "bid"}-${price}` : `p-${price}`,
     price,
     ask,
     bid,
@@ -90,6 +124,11 @@ export function buildLadderRows(prices: readonly (number | null)[], { asks, bids
 
 export function buildLadder(input: LadderInput): LadderRow[] {
   return buildLadderRows(gridPrices(basePrice(input), input.bounds, input.tickRule), input);
+}
+
+export function buildDefaultLadder(input: LadderInput): LadderRow[] {
+  const { prices, sidesSplit } = defaultLadderPrices(input);
+  return buildLadderRows(prices, input, sidesSplit);
 }
 
 export interface RatioSplit {

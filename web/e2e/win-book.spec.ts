@@ -96,6 +96,50 @@ test("스냅샷 20행이 현재가 중심 격자로 먼저 보이고 상·하한
   await expect(page.getByTestId("book-total-ask")).toHaveText("1,000주");
 });
 
+const AUCTION_ASKS: [number, number][] = [[819_000, 934], [820_000, 1_533], [821_000, 418]];
+const AUCTION_BIDS: [number, number][] = [[818_000, 3_012], [817_000, 61], [816_000, 57]];
+
+test("동시호가 6호가는 매도 3단이 가운데 선 위, 매수 3단이 아래 행에 놓이고 정보 일곱 칸이 모두 보인다", async ({ page, scenario }) => {
+  await open(page, scenario, 810_000);
+  const bookSub = await subOf(scenario, "book");
+  scenario.live.emit({ type: "feed_book", sub: bookSub, book: liveOf(AUCTION_ASKS, AUCTION_BIDS, [2_885, 3_130]) });
+  await expect(page.getByTestId("book-total-bid")).toHaveText("3,130주");
+  await expect(ladderRows(page)).toHaveCount(20);
+  const priceAt = (row: number) => ladderRows(page).nth(row).locator(".mw-px-num");
+  await expect(priceAt(7)).toHaveText("821,000");
+  await expect(priceAt(8)).toHaveText("820,000");
+  await expect(priceAt(9)).toHaveText("819,000");
+  await expect(priceAt(10)).toHaveText("818,000");
+  await expect(priceAt(11)).toHaveText("817,000");
+  await expect(priceAt(12)).toHaveText("816,000");
+  await expect(ladderRows(page).locator(".mw-px-num")).toHaveCount(6);
+  await expect(ladderRows(page).nth(7).locator(".mw-qty[data-side=ask] .mw-qty-value")).toHaveText("418주");
+  const bids = page.locator('.mw-lr[data-side="bid"] .mw-qty[data-side=bid] .mw-qty-value');
+  await expect(bids).toHaveText(["3,012주", "61주", "57주"]);
+  await expect(ladderRows(page).locator(".mw-qty-value")).toHaveCount(6);
+  const info = page.getByTestId("ladder-info");
+  await expect(info).toHaveCount(7);
+  for (const label of ["현재가", "전일대비", "등락률", "거래량", "기준가", "상한가", "하한가"]) await expect(info.filter({ hasText: label })).toBeVisible();
+});
+
+test("동시호가 6호가 뒤에 10단 호가가 오면 현재가 가운데 격자로 돌아간다", async ({ page, scenario }) => {
+  bookWindow(scenario, CODE);
+  replyBook(scenario, 810_000);
+  scenario.reply((url) => url.pathname === "/api/symbols/005930/fundamentals", { body: { symbol: CODE, upperLimit: 1_053_000, lowerLimit: 567_000, marketCap: null, listedShares: null, per: null, pbr: null, roe: null, eps: null, bps: null, foreignExhaustionRate: null, high52w: null, low52w: null } });
+  await page.goto("/");
+  await expect(cell(page)).toHaveAttribute("aria-busy", "false");
+  await windowTabs(page).getByRole("tab", { name: /^10호가/ }).click();
+  const bookSub = await subOf(scenario, "book");
+  scenario.live.emit({ type: "feed_book", sub: bookSub, book: liveOf(AUCTION_ASKS, AUCTION_BIDS, [2_885, 3_130]) });
+  await expect(ladderRows(page).locator(".mw-px-num")).toHaveCount(6);
+  const asks = Array.from({ length: 10 }, (_, i): [number, number] => [811_000 + 1_000 * i, 10 + i]);
+  const bids = Array.from({ length: 10 }, (_, i): [number, number] => [810_000 - 1_000 * i, 20 + i]);
+  scenario.live.emit({ type: "feed_book", sub: bookSub, book: liveOf(asks, bids, [1_000, 3_000]) });
+  await expect(ladderRows(page).locator(".mw-px-num")).toHaveCount(20);
+  await expect(page.locator(".mw-lr[data-current]")).toHaveCount(1);
+  await expect(page.locator(".mw-lr[data-current]")).toContainText("810,000");
+});
+
 test("사다리 스무 행의 높이가 같고 가격 칸의 왼쪽 x가 현재가 행을 포함해 모두 같다", async ({ page, scenario }) => {
   await open(page, scenario, 70000);
   await expect(page.locator(".mw-lr[data-current]")).toHaveCount(1);
@@ -124,16 +168,16 @@ test("첫 실시간 호가가 스냅샷을 대신하고 체결이 현재가 행�
   await expect(ladderRows(page)).toHaveCount(20);
   const bookSub = await subOf(scenario, "book");
 
-  scenario.live.emit({ type: "feed_book", sub: bookSub, book: liveOf([[70100, 50], [70200, 40]], [[70000, 80], [69900, 60]], [90, 140]) });
+  scenario.live.emit({ type: "feed_book", sub: bookSub, book: liveOf([[70100, 50], [70200, 40], [70300, 30], [70400, 20]], [[70000, 80], [69900, 60]], [90, 140]) });
   await expect(page.getByTestId("book-total-bid")).toHaveText("140주");
-  await expect(ladderRows(page).locator(".mw-qty-value")).toHaveCount(4);
+  await expect(ladderRows(page).locator(".mw-qty-value")).toHaveCount(6);
 
   await emitTrade(scenario, 1, 70100, 3);
   await expect(page.locator(".mw-lr[data-current]")).toHaveCount(1);
   await expect(page.locator(".mw-lr[data-current]")).toContainText("70,100");
   await expect(ladderRows(page).locator(".mw-px-num").nth(10)).toHaveText("70,100");
 
-  scenario.live.emit({ type: "feed_book", sub: bookSub, book: liveOf([[70100, 70], [70200, 40]], [[70000, 80], [69900, 10]], [110, 90]) });
+  scenario.live.emit({ type: "feed_book", sub: bookSub, book: liveOf([[70100, 70], [70200, 40], [70300, 30], [70400, 20]], [[70000, 80], [69900, 10]], [110, 90]) });
   const ask = page.locator(".mw-qty[data-side=ask]").filter({ has: page.locator(".mw-qty-change") });
   const bid = page.locator(".mw-qty[data-side=bid]").filter({ has: page.locator(".mw-qty-change") });
   await expect(ask.locator(".mw-qty-change")).toHaveText("+20주");
@@ -187,7 +231,7 @@ test("체결강도 줄이 13행, 최근 체결 행이 14행부터의 top과 같�
 test("교차 가격 행 하나에 매도·매수 잔량이 함께 있고 현재가 행은 하나다", async ({ page, scenario }) => {
   await open(page, scenario, 70000);
   const bookSub = await subOf(scenario, "book");
-  scenario.live.emit({ type: "feed_book", sub: bookSub, book: liveOf([[70000, 30], [70100, 20]], [[70100, 25], [70000, 15]], [50, 40]) });
+  scenario.live.emit({ type: "feed_book", sub: bookSub, book: liveOf([[70000, 30], [70100, 20], [70200, 10], [70300, 5]], [[70100, 25], [70000, 15]], [65, 40]) });
   await emitTrade(scenario, 1, 70100, 1);
   await expect(page.locator(".mw-lr[data-current]")).toHaveCount(1);
   const crossed = ladderRows(page).filter({ has: page.locator(".mw-px-num", { hasText: /^70,100$/ }) });
@@ -410,7 +454,7 @@ test.describe("동시호가 예상체결", () => {
     test("8행에 매수 잔량이 있으면 예상체결 두 항목이 상한가·하한가 자리로 올라간다", async ({ page, scenario }) => {
       await open(page, scenario, 70000);
       const bookSub = await subOf(scenario, "book");
-      scenario.live.emit({ type: "feed_book", sub: bookSub, book: frame(scenario, [[70100, 50], [70200, 40]], [[70200, 25], [70000, 80], [69900, 60]], EXPECTED) });
+      scenario.live.emit({ type: "feed_book", sub: bookSub, book: frame(scenario, [[70100, 50], [70200, 40], [70300, 30], [70400, 20]], [[70200, 25], [70000, 80], [69900, 60]], EXPECTED) });
       await expect(info(page, "예상체결가")).toBeVisible();
       await expect(info(page, "예상체결량")).toBeVisible();
       await expect(info(page, "상한가")).toHaveCount(0);

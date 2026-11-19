@@ -477,6 +477,55 @@ test("체결강도는 13행, 최근 체결은 14행부터 같은 top에 있고 �
   await expect(page.locator(".mw-trade i")).toHaveCount(0);
 });
 
+const SINGLE_PRICE_ASKS = [{ price: 69_600, qty: 50 }, { price: 69_700, qty: 40 }, { price: 69_800, qty: 30 }];
+const SINGLE_PRICE_BIDS = [{ price: 69_500, qty: 80 }, { price: 69_400, qty: 60 }, { price: 69_300, qty: 40 }];
+
+async function emitSingleBook(scenario: Scenario, asks: typeof SINGLE_PRICE_ASKS, bids: typeof SINGLE_PRICE_BIDS): Promise<void> {
+  let sub = "";
+  await pollSaved(() => {
+    const message = scenario.live.messages.find((m) => m.type === "subscribe_feed" && m.kind === "book" && m.symbol === CODE);
+    sub = message?.type === "subscribe_feed" ? message.sub : "";
+    return sub;
+  }).not.toBe("");
+  scenario.live.emit({ type: "feed_book", sub, book: { t: 1, asks, bids, totalAskQty: 0, totalBidQty: 0, expected: null } });
+}
+
+test("단일가 호가에서 호가주문창은 6호가만 가운데 선 위·아래에 그리고 가격 있는 행의 주문 칸만 더블클릭 주문이 나간다", async ({ page, scenario }) => {
+  ordersOn(scenario);
+  const api = tradingApi(scenario);
+  await openOrderWindow(page, scenario);
+  await emitSingleBook(scenario, SINGLE_PRICE_ASKS, SINGLE_PRICE_BIDS);
+  await expect(ladderRows(page).locator(".mw-px-num")).toHaveCount(6);
+  await expect(ladderRows(page).nth(7).locator(".mw-px-num")).toHaveText("69,800");
+  await expect(ladderRows(page).nth(9).locator(".mw-px-num")).toHaveText("69,600");
+  await expect(ladderRows(page).nth(10).locator(".mw-px-num")).toHaveText("69,500");
+  await expect(ladderRows(page).nth(12).locator(".mw-px-num")).toHaveText("69,300");
+  await expect(page.getByTestId("ladder-info")).toHaveCount(7);
+
+  await ladderRows(page).nth(0).locator("[data-empty]").first().dblclick();
+  await ladderRows(page).nth(19).locator("[data-empty]").first().dblclick();
+  await cellAt(page, "buy", 69_500).dblclick();
+  await pollSaved(() => writesTo(api, "place")).toHaveLength(1);
+  expect(writesTo(api, "place")[0]!.body).toMatchObject({ code: CODE, side: "buy", price: 69_500 });
+});
+
+test("단일가 호가에서 칩을 끄는 도중 단 가격이 바뀌어도 놓은 행의 정정 가격은 끌기 시작 때 그 행의 가격이다", async ({ page, scenario }) => {
+  ordersOn(scenario);
+  const api = tradingApi(scenario, [openOrder("0000001", "buy", 69_500, 5)]);
+  await openOrderWindow(page, scenario);
+  await emitSingleBook(scenario, SINGLE_PRICE_ASKS, SINGLE_PRICE_BIDS);
+  await expect(chipAt(page, "buy", 69_500)).toBeVisible();
+  await dragChip(page, chipAt(page, "buy", 69_500), await center(cellAt(page, "buy", 69_400)), false);
+  await expect(page.getByTestId("order-ghost")).toContainText("→ 69,400원");
+  await emitSingleBook(scenario, SINGLE_PRICE_ASKS.map((l) => ({ ...l, price: l.price + 100 })), [{ price: 69_600, qty: 11 }, { price: 69_500, qty: 777 }, { price: 69_400, qty: 22 }]);
+  await expect(ladderRows(page).nth(10).locator(".mw-qty[data-side=bid] .mw-qty-value")).toHaveText("777주");
+  await expect(ladderRows(page).nth(10).locator(".mw-px-num")).toHaveText("69,500");
+  await expect(ladderRows(page).nth(11).locator(".mw-px-num")).toHaveText("69,400");
+  await page.mouse.up();
+  await pollSaved(() => writesTo(api, "modify")).toHaveLength(1);
+  expect(writesTo(api, "modify")[0]!.body).toMatchObject({ orderNo: "0000001", price: 69_400 });
+});
+
 test("교차 호가로 위 오른쪽 칸에 매수 잔량이 있으면 그 행은 잔량을 보이고 그 정보 항목은 보이지 않는다", async ({ page, scenario }) => {
   ordersOn(scenario);
   tradingApi(scenario);
@@ -487,7 +536,7 @@ test("교차 호가로 위 오른쪽 칸에 매수 잔량이 있으면 그 행�
     sub = message?.type === "subscribe_feed" ? message.sub : "";
     return sub;
   }).not.toBe("");
-  scenario.live.emit({ type: "feed_book", sub, book: { t: 1, asks: [{ price: 70_100, qty: 50 }], bids: [{ price: 70_700, qty: 33 }, { price: 70_000, qty: 80 }], totalAskQty: 50, totalBidQty: 113, expected: null } });
+  scenario.live.emit({ type: "feed_book", sub, book: { t: 1, asks: [{ price: 70_100, qty: 50 }, { price: 70_200, qty: 40 }, { price: 70_300, qty: 30 }, { price: 70_400, qty: 20 }], bids: [{ price: 70_700, qty: 33 }, { price: 70_000, qty: 80 }], totalAskQty: 140, totalBidQty: 113, expected: null } });
   const crossed = ladderRows(page).filter({ has: page.locator(".mw-px-num", { hasText: /^70,700$/ }) });
   await expect(crossed.locator(".mw-qty[data-side=bid] .mw-qty-value")).toHaveText("33주");
   await expect(crossed.getByTestId("ladder-info")).toHaveCount(0);
@@ -514,7 +563,7 @@ test.describe("수요일 08:55 동시호가", () => {
       sub = message?.type === "subscribe_feed" ? message.sub : "";
       return sub;
     }).not.toBe("");
-    scenario.live.emit({ type: "feed_book", sub, book: { t: scenario.now / 1000, asks: [{ price: 70_100, qty: 50 }], bids: [{ price: 70_000, qty: 80 }], totalAskQty: 50, totalBidQty: 80, expected: { price: 70_000, qty: 300 } } });
+    scenario.live.emit({ type: "feed_book", sub, book: { t: scenario.now / 1000, asks: [{ price: 70_100, qty: 50 }, { price: 70_200, qty: 40 }, { price: 70_300, qty: 30 }, { price: 70_400, qty: 20 }], bids: [{ price: 70_000, qty: 80 }], totalAskQty: 140, totalBidQty: 80, expected: { price: 70_000, qty: 300 } } });
     const info = page.getByTestId("ladder-info");
     await expect(info.and(page.locator('[data-label="예상체결가"]')).locator("b")).toHaveText("70,000");
     await expect(info.and(page.locator('[data-label="예상체결량"]')).locator("b")).toHaveText("300");
