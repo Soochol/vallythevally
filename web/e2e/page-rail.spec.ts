@@ -159,14 +159,14 @@ test.describe("종목 보내기", () => {
   test("고른 연동 색의 차트에 종목이 열리고 주소가 작업 영역이 된다", async ({ page, scenario }) => {
     const ui = scenario.documents.uiState();
     scenario.documents.saveUiState({ ...ui, pageLink: "b", recentSymbols: ["028260"], revision: ui.revision + 1 });
-    await page.goto("/etf");
+    await page.goto("/market");
     await expect(page.getByRole("button", { name: "보낼 연동 색: B" })).toBeVisible();
     await page.getByRole("button", { name: "삼성물산", exact: true }).click();
     await expect(page).toHaveURL(/\/$/);
     await expect(cell(page, 2)).toHaveAttribute("aria-label", /^칸 2: 삼성물산/);
     await expect(cell(page, 1)).toHaveAttribute("aria-label", /^칸 1: 삼성전자/);
     await page.goBack();
-    await expect(page).toHaveURL(/\/etf$/);
+    await expect(page).toHaveURL(/\/market$/);
   });
 
   test("연동 색 고르기는 화면 설정에 남고, 고른 색의 차트가 없으면 활성 차트에 열린다", async ({ page, scenario }) => {
