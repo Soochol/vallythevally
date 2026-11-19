@@ -98,7 +98,7 @@ function FillsPanel({ executions, goTo }: { executions: readonly TradingExecutio
 const isTab = (target: Node) => target instanceof Element && target.closest(".od-tab") !== null;
 const BROKER = "키움";
 const ACCOUNT_NUMBER_KEY = ["trading", "account-number"] as const;
-const groupedAccountNumber = (digits: string) => `${digits.slice(0, 4)}-${digits.slice(4, 8)}-${digits.slice(8)}`;
+const groupedAccountNumber = (digits: string) => `${digits.slice(0, 4)}-${digits.slice(4, 8)}`;
 
 function RevealedAccountLabel({ masked }: { masked: string }) {
   const lookup = useQuery({ queryKey: ACCOUNT_NUMBER_KEY, queryFn: ({ signal }) => fetchAccountNumber(signal), gcTime: 0, staleTime: Infinity, retry: false, refetchOnWindowFocus: false });
@@ -109,7 +109,7 @@ function RevealedAccountLabel({ masked }: { masked: string }) {
 
 function AccountLabel({ accountTail, maskAccount }: { accountTail: string | null; maskAccount: boolean }) {
   if (accountTail === null) return <span className="od-account-label" data-testid="account-label">{BROKER} —</span>;
-  const masked = `${BROKER} ****-****-${accountTail}`;
+  const masked = `${BROKER} ****-**${accountTail}`;
   if (maskAccount) return <span className="od-account-label" data-testid="account-label">{masked}</span>;
   return <RevealedAccountLabel masked={masked} />;
 }

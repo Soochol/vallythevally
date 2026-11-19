@@ -27,7 +27,7 @@ test("미체결 패널이 모든 종목의 목록을 보이고 개별 취소 요
   ordersOn(scenario);
   const api = tradingApi(scenario, [openOrder("0000001", "buy", 70_000, 5), { ...openOrder("0000002", "sell", 71_000, 7), code: "000660", name: "SK하이닉스" }]);
   await openOrderWindow(page, scenario);
-  await expect(page.getByTestId("account-label")).toHaveText("키움 ****-****-01");
+  await expect(page.getByTestId("account-label")).toHaveText("키움 ****-**01");
   await expect(page.getByTestId("account-tab-open")).toContainText("2");
   await page.getByTestId("account-tab-open").click();
   await expect(page.getByTestId("account-panel")).toBeVisible();
@@ -103,26 +103,41 @@ test("목록 popover가 단추에 붙어 사다리를 밀지 않고 Esc·바깥 
   await expect(panel).toHaveCount(0);
 });
 
-test("계좌번호 가리기는 기본 켜짐이고 켠 동안 조회하지 않으며 끄면 4-4-2로 보이고 다시 켜면 가린다", async ({ page, scenario }) => {
+test("계좌번호 가리기는 기본 켜짐이고 켠 동안 조회하지 않으며 끄면 앞 8자리가 4-4로 보이고 다시 켜면 가린다", async ({ page, scenario }) => {
   ordersOn(scenario);
   tradingApi(scenario);
   let lookups = 0;
-  scenario.on((url) => url.pathname === "/api/trading/account-number", () => { lookups += 1; return { body: { accountNumber: "1234567801" } }; });
+  scenario.on((url) => url.pathname === "/api/trading/account-number", () => { lookups += 1; return { body: { accountNumber: "1234567810" } }; });
   await openOrderWindow(page, scenario);
   const label = page.getByTestId("account-label");
-  await expect(label).toHaveText("키움 ****-****-01");
+  await expect(label).toHaveText("키움 ****-**01");
   await page.getByTestId("order-settings-button").click();
   const mask = page.getByRole("checkbox", { name: "계좌번호 가리기" });
   await expect(mask).toBeChecked();
   expect(lookups).toBe(0);
 
   await mask.uncheck();
-  await expect(label).toHaveText("키움 1234-5678-01");
+  await expect(label).toHaveText("키움 1234-5678");
   expect(lookups).toBe(1);
 
   await mask.check();
-  await expect(label).toHaveText("키움 ****-****-01");
+  await expect(label).toHaveText("키움 ****-**01");
   expect(lookups).toBe(1);
+});
+
+test("끝 2자리를 모르는 옛 켜짐 기록이면 계좌 줄이 키움 —를 보이고 가리기를 꺼도 조회하지 않는다", async ({ page, scenario }) => {
+  ordersOn(scenario);
+  scenario.live.orders = { ...scenario.live.orders, accountTail: null };
+  tradingApi(scenario);
+  let lookups = 0;
+  scenario.on((url) => url.pathname === "/api/trading/account-number", () => { lookups += 1; return { body: { accountNumber: "1234567810" } }; });
+  await openOrderWindow(page, scenario);
+  const label = page.getByTestId("account-label");
+  await expect(label).toHaveText("키움 —");
+  await page.getByTestId("order-settings-button").click();
+  await page.getByRole("checkbox", { name: "계좌번호 가리기" }).uncheck();
+  await expect(label).toHaveText("키움 —");
+  expect(lookups).toBe(0);
 });
 
 test("계좌번호 조회가 실패하면 가린 모양과 실패 title을 보인다", async ({ page, scenario }) => {
@@ -134,7 +149,7 @@ test("계좌번호 조회가 실패하면 가린 모양과 실패 title을 보�
   await page.getByRole("checkbox", { name: "계좌번호 가리기" }).uncheck();
   const label = page.getByTestId("account-label");
   await expect(label).toHaveAttribute("title", "계좌번호를 읽지 못했습니다");
-  await expect(label).toHaveText("키움 ****-****-01");
+  await expect(label).toHaveText("키움 ****-**01");
 });
 
 test("보유 요약이 값을 보이고 평가손익을 원과 퍼센트로 바꾸며 매입수량이 매도 가능 수량을 채운다", async ({ page, scenario }) => {

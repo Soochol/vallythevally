@@ -22,6 +22,7 @@ const VERIFY_TTL_SECS: i64 = 60;
 const MAX_PAGES: usize = 100;
 const ACCOUNT_DIGITS: usize = 10;
 const TAIL_DIGITS: usize = 2;
+const USER_VISIBLE_DIGITS: usize = 8;
 const SALT_BYTES: usize = 16;
 const REF_HEX_CHARS: usize = 24;
 
@@ -115,7 +116,7 @@ fn account_ref_of(salt: &str, number: &str) -> String {
 }
 
 fn tail_of(number: &str) -> String {
-    number[number.len() - TAIL_DIGITS..].to_owned()
+    number[USER_VISIBLE_DIGITS - TAIL_DIGITS..USER_VISIBLE_DIGITS].to_owned()
 }
 
 fn new_salt() -> String {
@@ -274,7 +275,7 @@ impl Trading {
         let (confirm_won, cap_won, margin_policy) = saved.as_ref().map_or((None, None, api::MarginPolicy::default()), |r| (r.confirm_won, r.cap_won, r.margin_policy));
         let salt = saved.map_or_else(new_salt, |r| r.salt);
         let account_ref = account_ref_of(&salt, number.expose());
-        let record = SwitchRecord { enabled: true, salt, account_ref: Some(account_ref.clone()), account_tail: Some(tail_of(number.expose())), confirm_won, cap_won, margin_policy };
+        let record = SwitchRecord { enabled: true, salt, account_ref: Some(account_ref.clone()), account_tail: Some(tail_of(number.expose())), legacy_product_tail: None, confirm_won, cap_won, margin_policy };
         let switch = self.switch_lock.lock().expect("스위치 잠금");
         self.store.save(&record).map_err(|e| TradingError::FileUnusable(e.to_string()))?;
         *self.lock() = State { mismatch: false, verified: Some(Verified { number, account_ref, at: self.clock.now().unix() }) };
@@ -299,8 +300,12 @@ impl Trading {
         let number = self.account_number(true, priority).await?;
         let record = self.enabled_record()?;
         let account_ref = account_ref_of(&record.salt, number.expose());
+        let same_account = record.account_ref.as_deref() == Some(account_ref.as_str());
+        if same_account && record.account_tail.is_none() {
+            self.fill_account_tail(&account_ref, tail_of(number.expose()))?;
+        }
         let mut state = self.lock();
-        if record.account_ref.as_deref() != Some(account_ref.as_str()) {
+        if !same_account {
             state.mismatch = true;
             state.verified = None;
             return Err(TradingError::AccountChanged);
@@ -308,6 +313,17 @@ impl Trading {
         let verified = Verified { number, account_ref, at: now };
         state.verified = Some(verified.clone());
         Ok(verified)
+    }
+
+    fn fill_account_tail(&self, account_ref: &str, tail: String) -> Result<(), TradingError> {
+        let _switch = self.switch_lock.lock().expect("스위치 잠금");
+        let file_unusable = |e: crate::kiwoom::private_file::FileError| TradingError::FileUnusable(e.to_string());
+        match self.store.load().map_err(file_unusable)? {
+            Some(record) if record.enabled && record.account_tail.is_none() && record.account_ref.as_deref() == Some(account_ref) => {
+                self.store.save(&SwitchRecord { account_tail: Some(tail), legacy_product_tail: None, ..record }).map_err(file_unusable)
+            }
+            _ => Ok(()),
+        }
     }
 
     fn own_row(verified: &Verified, row_account: Option<&Secret<String>>) -> Result<(), TradingError> {
