@@ -1,7 +1,7 @@
 //! 키움 조회 대기열(backend.md §4.2, §4.3). 서버 전체의 키움 REST 요청은 여기 한 곳에서 나간다.
 //!
 //! - TR(api-id)마다 최근 1초 전송 수를 센다. 한도(실전 5, 모의 1) 미만이면 곧바로 보내고, 찼으면 창 안 가장 오래된 전송 + 1초 + 여유(`WINDOW_MARGIN`)에 보낸다. TR 사이에는 간격이 없다.
-//!   주문 쓰기 네 TR(`kt10000`~`kt10003`)은 한 창으로 센다. 토큰 발급, 다시 보내기, 연속조회 페이지도 같은 창에 센다.
+//!   주문 쓰기 네 TR은 한 창으로 센다. 토큰 발급, 다시 보내기, 연속조회 페이지도 같은 창에 센다.
 //! - `TOTAL_PER_SECOND_LIMIT`을 켜면 TR별 창과 별개로 모든 TR의 합계 창도 지킨다. 기본은 꺼져 있다.
 //! - 제한 응답은 그 TR(주문 쓰기면 묶음)만 창이 비는 시각까지 붙잡고 같은 요청을 그때 다시 보낸다. 응답의 `유량=N`이 그 TR의 한도가 된다. 대기열 전체는 멈추지 않는다.
 //! - 주문 쓰기도 제한 응답(HTTP 429)이면 최대 `ORDER_RATE_LIMIT_RESENDS`번 다시 보낸다. 그 밖의 실패는 다시 보내지 않는다.
@@ -19,7 +19,6 @@ use tokio::sync::{Notify, oneshot, watch};
 use tokio::time::Instant;
 
 use super::api::{Endpoint, MarketRequest};
-use crate::trading::TradingApiId;
 use super::auth::{AuthError, BeginIssueError, Halt, KiwoomAuth, MIN_ISSUE_INTERVAL_SECS, TokenGen};
 use super::error::{self, Category, Failure, Note, Retry, Stop, Surface};
 use super::token_file::FileError;
@@ -289,7 +288,7 @@ enum WindowKey {
 impl WindowKey {
     fn of(endpoint: Endpoint) -> Self {
         match endpoint {
-            Endpoint::Trading(TradingApiId::Kt10000 | TradingApiId::Kt10001 | TradingApiId::Kt10002 | TradingApiId::Kt10003) => WindowKey::OrderWrites,
+            Endpoint::Trading(id) if id.is_order_write() => WindowKey::OrderWrites,
             other => WindowKey::Tr(other),
         }
     }
@@ -1268,6 +1267,7 @@ mod tests {
 
     use super::testing::*;
     use super::*;
+    use crate::trading::TradingApiId;
     use crate::kiwoom::api::ApiId;
     use crate::kiwoom::error::CodeKey;
     use crate::clock::kst;
@@ -1323,6 +1323,8 @@ mod tests {
         move |s: &Sent| (s.api_id == ApiId::Au10001).then(|| token(n.fetch_add(1, Ordering::SeqCst) + 1))
     }
 
+    const BUY_WRITE: TradingApiId = TradingApiId::ORDER_WRITES[0];
+    const SELL_WRITE: TradingApiId = TradingApiId::ORDER_WRITES[1];
     const SHARED_SPACING: Duration = Duration::from_millis(260);
 
     fn assert_at_most_per_second(sent: &[Sent], limit: usize) {
@@ -2103,8 +2105,9 @@ mod tests {
         let fake = fake_with(Duration::ZERO, |_| list_ok());
         let rest = real_rest(&fake).await;
         let origin = Instant::now();
-        let writes = [TradingApiId::Kt10000, TradingApiId::Kt10001, TradingApiId::Kt10002, TradingApiId::Kt10003, TradingApiId::Kt10000, TradingApiId::Kt10001];
-        let mut calls: Vec<Call> = vec![tr_call(&rest, ApiId::Ka10001, "screen-same-lane", Priority::Screen), tr_call(&rest, TradingApiId::Kt00018, "account", Priority::Screen)];
+        let [buy, sell, revise, cancel] = TradingApiId::ORDER_WRITES;
+        let writes = [buy, sell, revise, cancel, buy, sell];
+        let mut calls: Vec<Call> = vec![tr_call(&rest, ApiId::Ka10001, "screen-same-lane", Priority::Screen), tr_call(&rest, TradingApiId::BALANCE_READ, "account", Priority::Screen)];
         calls.extend(writes.iter().enumerate().map(|(i, api)| write_call(&rest, *api, &format!("w{i}"), None)));
         all_ok(calls).await;
         let sent = fake.market_sent();
@@ -2122,8 +2125,8 @@ mod tests {
         rest.issue_token().await.unwrap();
         let origin = Instant::now();
         all_ok(vec![
-            write_call(&rest, TradingApiId::Kt10000, "w0", None),
-            write_call(&rest, TradingApiId::Kt10001, "w1", None),
+            write_call(&rest, BUY_WRITE, "w0", None),
+            write_call(&rest, SELL_WRITE, "w1", None),
             tr_call(&rest, ApiId::Ka10001, "q", Priority::Screen),
         ])
         .await;
@@ -2188,7 +2191,7 @@ mod tests {
     }
 
     fn the_write(rest: &KiwoomRest) -> Call<'_> {
-        write_call(rest, TradingApiId::Kt10000, "order", None)
+        write_call(rest, BUY_WRITE, "order", None)
     }
 
     #[tokio::test(start_paused = true)]
@@ -2232,7 +2235,7 @@ mod tests {
             let checks = checks.clone();
             Arc::new(move || checks.fetch_add(1, Ordering::SeqCst) == 0)
         };
-        let err = write_call(&rest, TradingApiId::Kt10000, "order", Some(admit)).await.unwrap_err();
+        let err = write_call(&rest, BUY_WRITE, "order", Some(admit)).await.unwrap_err();
         assert_eq!(err, KiwoomError::NotConnected);
         assert_eq!(fake.market_sent().len(), 1);
         assert_eq!(checks.load(Ordering::SeqCst), 2);
@@ -2338,7 +2341,7 @@ mod tests {
             screen("ka10095", ApiId::Ka10095.into(), "quote", 0),
             screen("ka10003", ApiId::Ka10003.into(), "ticks", 0),
             screen("ka10001", ApiId::Ka10001.into(), "info", 0),
-            screen("kt00011", TradingApiId::Kt00011.into(), "buyable", 0),
+            screen(TradingApiId::BUYABLE_READ.as_str(), TradingApiId::BUYABLE_READ.into(), "buyable", 0),
             screen("ka10095 again", ApiId::Ka10095.into(), "quote", 50),
         ];
         let timeline = futures::future::join_all(calls).await;
@@ -2366,18 +2369,18 @@ mod tests {
         let fake = fake_with(Duration::from_millis(30), |_| list_ok());
         let rest = settled_rest(&fake, shared_spacing).await;
         let origin = Instant::now();
-        let account = |label: &'static str, api: TradingApiId| timed(origin, label, 0, tr_call(&rest, api, label, Priority::Screen));
+        let account = |api: TradingApiId| timed(origin, api.as_str(), 0, tr_call(&rest, api, api.as_str(), Priority::Screen));
         let steps = async {
             let rest = &rest;
             let mut done = Vec::new();
             done.push(timed(origin, "ka10001", 0, tr_call(rest, ApiId::Ka10001, "price band", Priority::Order)).await);
-            done.push(timed(origin, "kt00011", 0, tr_call(rest, TradingApiId::Kt00011, "buyable", Priority::Order)).await);
-            done.push(timed(origin, "kt10000", 0, write_call(rest, TradingApiId::Kt10000, "buy", None)).await);
+            done.push(timed(origin, TradingApiId::BUYABLE_READ.as_str(), 0, tr_call(rest, TradingApiId::BUYABLE_READ, "buyable", Priority::Order)).await);
+            done.push(timed(origin, BUY_WRITE.as_str(), 0, write_call(rest, BUY_WRITE, "buy", None)).await);
             done
         };
-        let (mut timeline, chain) = tokio::join!(futures::future::join_all(vec![account("kt00018", TradingApiId::Kt00018), account("kt00007", TradingApiId::Kt00007), account("ka10075", TradingApiId::Ka10075)]), steps);
+        let (mut timeline, chain) = tokio::join!(futures::future::join_all(vec![account(TradingApiId::BALANCE_READ), account(TradingApiId::FILLS_READ), account(TradingApiId::OPEN_ORDERS_READ)]), steps);
         timeline.extend(chain);
-        let write_sent = fake.market_sent().into_iter().find(|s| s.api_id == Endpoint::from(TradingApiId::Kt10000)).unwrap().at.duration_since(origin).as_millis() as u64;
+        let write_sent = fake.market_sent().into_iter().find(|s| s.api_id == Endpoint::from(BUY_WRITE)).unwrap().at.duration_since(origin).as_millis() as u64;
         for t in &timeline {
             println!("주문 1건 {} {:<8} 넣음 {:>4}ms 끝남 {:>4}ms", if shared_spacing { "지금(260ms)" } else { "새 규칙   " }, t.label, t.enqueued_ms, t.done_ms);
         }
@@ -2389,7 +2392,7 @@ mod tests {
         let (_, before_write_sent) = one_order(true).await;
         let (after, after_write_sent) = one_order(false).await;
         assert!(before_write_sent >= 520, "지금 동작은 쓰기가 520ms 이후에 나간다: {before_write_sent}ms");
-        let write = after.iter().find(|t| t.label == "kt10000").unwrap();
+        let write = after.iter().find(|t| t.label == BUY_WRITE.as_str()).unwrap();
         assert!(write.done_ms <= 95, "새 동작은 쓰기 완료가 약 90ms: {}ms", write.done_ms);
         assert_eq!(after_write_sent, 60);
     }
@@ -2433,8 +2436,8 @@ mod tests {
         rest.issue_token().await.unwrap();
         let origin = Instant::now();
         all_ok(vec![
-            write_call(&rest, TradingApiId::Kt10000, "w0", None),
-            write_call(&rest, TradingApiId::Kt10001, "w1", None),
+            write_call(&rest, BUY_WRITE, "w0", None),
+            write_call(&rest, SELL_WRITE, "w1", None),
             tr_call(&rest, ApiId::Ka10001, "a", Priority::Screen),
             tr_call(&rest, ApiId::Ka10001, "b", Priority::Screen),
         ])
@@ -2476,7 +2479,7 @@ mod tests {
             if s.api_id == Endpoint::from(ApiId::Ka10001) {
                 return limited_with(Some(5));
             }
-            if s.api_id == Endpoint::from(TradingApiId::Kt10000) && !write_limited.swap(true, Ordering::SeqCst) {
+            if s.api_id == Endpoint::from(BUY_WRITE) && !write_limited.swap(true, Ordering::SeqCst) {
                 return limited_with(Some(5));
             }
             list_ok()
@@ -2486,7 +2489,7 @@ mod tests {
         assert!(rest.gate_until().is_some());
         tokio::time::sleep(GATE_WAIT + Duration::from_secs(1)).await;
         the_write(&rest).await.unwrap();
-        assert_eq!(sent_of(&fake, TradingApiId::Kt10000).len(), 2);
+        assert_eq!(sent_of(&fake, BUY_WRITE).len(), 2);
         assert_eq!(rest.gate_until(), None);
     }
 
