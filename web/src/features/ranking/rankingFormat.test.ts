@@ -13,9 +13,9 @@ test("금액은 억으로 줄이고 100억부터는 소수 없이 보인다", ()
 test("부호 있는 금액과 수량은 양수에 +를 붙이고 0에는 붙이지 않는다", () => {
   expect(signedEok(500_000_000)).toBe("+5.00억");
   expect(signedEok(0)).toBe("0.00억");
-  expect(signedShares(-3_000)).toBe("−3,000주");
-  expect(signedShares(25_000)).toBe("+3만주");
-  expect(signedShares(0)).toBe("0주");
+  expect(signedShares(-3_000)).toBe("−3,000");
+  expect(signedShares(25_000)).toBe("+3만");
+  expect(signedShares(0)).toBe("0");
 });
 
 test("부호 색은 양수 up, 음수 down, 0 flat이다", () => {

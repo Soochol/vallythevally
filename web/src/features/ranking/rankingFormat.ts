@@ -20,7 +20,7 @@ export function formatEok(won: number): string {
 
 export const signedEok = (won: number): string => (won > 0 ? "+" : "") + formatEok(won);
 
-export const signedShares = (shares: number): string => withSign(shares, `${formatVolume(Math.abs(shares))}주`);
+export const signedShares = (shares: number): string => withSign(shares, formatVolume(Math.abs(shares)));
 
 export const toneOf = (value: number): Tone => direction(value);
 

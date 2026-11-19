@@ -9,7 +9,7 @@ import { marketSocket } from "../../stores/realtime";
 import { useVenue } from "../../stores/ui";
 import { MarketWindowGate } from "../market-window/MarketWindowGate";
 import { RatioBar, Segmented, Strip } from "../market-window/parts";
-import { formatShares } from "../market-window/format";
+import { formatQuantity } from "../market-window/format";
 import { TradeRow } from "./TradeRow";
 import { cumulativeQuantity, formatSecond, MIN_AMOUNT_OPTIONS, minAmountWon, recentBuySell, visibleEntries, type MinAmountKey } from "./tape";
 import { useTradeTape } from "./useTradeTape";
@@ -43,7 +43,7 @@ function TradesBody({ code, venue }: { code: SymbolCode; venue: Venue }) {
       <Strip>
         <span>체결강도 <b data-testid="trade-strength">{state.strength === null ? "—" : `${formatDecimal(state.strength)}%`}</b></span>
         <RatioBar buy={split.buy} sell={split.sell} label="최근 체결의 매수·매도 비율" />
-        <span>누적 <b data-testid="trade-cumulative">{formatShares(cumulativeQuantity(state, effectiveVenue))}</b></span>
+        <span>누적 <b data-testid="trade-cumulative">{formatQuantity(cumulativeQuantity(state, effectiveVenue))}</b></span>
       </Strip>
       <Strip>
         <span>최소 금액</span>

@@ -174,9 +174,9 @@ function RangeBoxes({ ui, keys: [minKey, maxKey], unit, width, min, max, onChang
   if (ui.sentence) {
     const mode = min !== "" && max !== "" ? "range" : max !== "" ? "max" : "min";
     return <>
-      {mode !== "max" && <><NumberBox ui={ui} field={minKey} value={min} width={width} onChange={(v) => onChange(v, max)} /><span>{unit}</span></>}
+      {mode !== "max" && <><NumberBox ui={ui} field={minKey} value={min} width={width} onChange={(v) => onChange(v, max)} />{unit && <span>{unit}</span>}</>}
       {mode === "range" && <span>~</span>}
-      {mode !== "min" && <><NumberBox ui={ui} field={maxKey} value={max} width={width} onChange={(v) => onChange(min, v)} /><span>{unit}</span></>}
+      {mode !== "min" && <><NumberBox ui={ui} field={maxKey} value={max} width={width} onChange={(v) => onChange(min, v)} />{unit && <span>{unit}</span>}</>}
       <Choice label={`${ui.label} 비교`} value={mode} options={[["min", "이상"], ["max", "이하"], ["range", "범위"]]} onChange={(next) => onChange(next === "max" ? "" : min || max, next === "min" ? "" : max || min)} />
     </>;
   }
@@ -184,11 +184,11 @@ function RangeBoxes({ ui, keys: [minKey, maxKey], unit, width, min, max, onChang
     <>
       <Together>
         <NumberBox ui={ui} field={minKey} value={min} width={width} onChange={(v) => onChange(v, max)} />
-        <span>{unit} 이상</span>
+        <span>{`${unit} 이상`.trim()}</span>
       </Together>
       <Together>
         <NumberBox ui={ui} field={maxKey} value={max} width={width} onChange={(v) => onChange(min, v)} />
-        <span>{unit} 이하</span>
+        <span>{`${unit} 이하`.trim()}</span>
       </Together>
     </>
   );

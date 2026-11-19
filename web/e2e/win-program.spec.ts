@@ -39,7 +39,8 @@ test("조회 행 뒤에 실시간 행이 붙고 겹치는 조회 행은 사라�
   linkStock(scenario, "005930", [point("09:00:00", 10), point("09:01:00", 30), point("09:02:00", 20)]);
   await openProgramWindow(page);
   await expect(rowsOf(page)).toHaveCount(3);
-  await expect(page.getByTestId("program-net-qty")).toHaveText("+20주");
+  await expect(page.getByTestId("program-net-qty")).toHaveText("+20");
+  await expect(page.getByRole("columnheader")).toHaveText(["시각", "현재가", "순매수 증감"]);
 
   await emitLive(scenario, (sub) => ({ type: "feed_program", sub, row: liveRow("09:02:00", 25, 5, 1_050) }));
   await emitLive(scenario, (sub) => ({ type: "feed_program", sub, row: liveRow("09:03:00", 15, -10, 1_050) }));
@@ -51,10 +52,10 @@ test("조회 행 뒤에 실시간 행이 붙고 겹치는 조회 행은 사라�
     "history 09:01:00",
     "history 09:00:00",
   ]);
-  await expect(page.getByTestId("program-net-qty")).toHaveText("+15주");
+  await expect(page.getByTestId("program-net-qty")).toHaveText("+15");
   await expect(page.getByTestId("program-net-amount")).toHaveText("+10.50억원");
-  await expect(page.getByTestId("program-buy-qty")).toHaveText("5,000주");
-  await expect(page.getByTestId("program-sell-qty")).toHaveText("3,000주");
+  await expect(page.getByTestId("program-buy-qty")).toHaveText("5,000");
+  await expect(page.getByTestId("program-sell-qty")).toHaveText("3,000");
   await expect(page.locator(".pg-bar, .mw-ratio")).toHaveCount(0);
   const sellChange = rowsOf(page).nth(0).getByTestId("program-change").locator("em");
   const buyChange = rowsOf(page).nth(1).getByTestId("program-change").locator("em");

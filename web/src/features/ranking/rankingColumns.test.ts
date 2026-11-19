@@ -26,7 +26,7 @@ test("순위 종류마다 플랜 표의 열 이름을 그 차례로 보인다", 
   expect(labels("losers")).toEqual(labels("gainers"));
   expect(labels("expected")).toEqual(["예상체결가", "예상 등락률", "예상체결량"]);
   expect(labels("investorNetBuy")).toEqual(["현재가", "등락률", "순매수", "매수", "매도"]);
-  expect(labels("foreignStreak")).toEqual(["현재가", "D-1(주)", "D-2(주)", "D-3(주)", "합계(주)", "한도소진율"]);
+  expect(labels("foreignStreak")).toEqual(["현재가", "D-1", "D-2", "D-3", "합계", "한도소진율"]);
   expect(labels("program")).toEqual(["현재가", "등락률", "순매수", "매수", "매도"]);
   expect(labels("bidAskBalance")).toEqual(["현재가", "총매도잔량", "총매수잔량", "순매수잔량", "매수비율"]);
   expect(labels("creditRatio")).toEqual(["현재가", "등락률", "신용비율", "거래량"]);
@@ -39,7 +39,7 @@ test("투자자별 순매수는 단위에 따라 금액은 억, 수량은 주로
   const amounts = row({ kind: "netAmounts", net: -250_000_000, buy: 1_000_000_000, sell: 1_250_000_000 });
   const quantities = row({ kind: "netQuantities", net: 12_000, buy: 30_000, sell: 18_000 });
   expect(amount.slice(2).map((c) => c.cell(amounts).text)).toEqual(["−2.50억", "10.00억", "12.50억"]);
-  expect(quantity.slice(2).map((c) => c.cell(quantities).text)).toEqual(["+1만주", "3만", "2만"]);
+  expect(quantity.slice(2).map((c) => c.cell(quantities).text)).toEqual(["+1만", "3만", "2만"]);
   expect(amount[2]!.cell(amounts).tone).toBe("down");
   expect(quantity[2]!.cell(quantities).tone).toBe("up");
 });

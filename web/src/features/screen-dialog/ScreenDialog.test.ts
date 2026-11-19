@@ -97,6 +97,23 @@ test("줄 아래에는 그 줄의 봉 주기로 쓴 문장이 붙고, 거래대�
   expect(markup).toMatch(/<button[^>]*aria-pressed="false"[^>]*>코스닥<\/button>/);
 });
 
+test("거래량 값 범위 줄은 숫자 칸 뒤에 단위 글자도 빈 단위 칸도 그리지 않는다", () => {
+  const screen: Screen = {
+    id: "s",
+    name: "거래량",
+    markets: ["kospi"],
+    exclude: [],
+    conditions: [
+      { kind: "value_range", period: "D", recentBars: 1, field: "volume", min: 100_000, max: 5_000_000 },
+      { kind: "value_range", period: "D", recentBars: 1, field: "traded_value", min: 10_000_000_000, max: 20_000_000_000 },
+    ],
+  };
+  const markup = markupOf(draftOf(screen));
+  expect(markup).toContain("거래량이 100,000 이상 5,000,000 이하인 봉이 있다");
+  expect(markup).not.toContain("<span></span>");
+  expect(markup).toContain("억 원");
+});
+
 test("잘못된 칸은 그 칸에 표시되고 줄 아래에 칸 이름과 이유가 붙으며, 그 줄의 문장은 보이지 않는다", () => {
   const draft = draftOf({ id: "s", name: "s", markets: [], exclude: [], conditions: [{ kind: "macd", period: "D", recentBars: 1, fast: 12, slow: 26, signal: 9, test: { kind: "signal_cross", direction: "up" } }] });
   const line = draft.conditions[0]!;
