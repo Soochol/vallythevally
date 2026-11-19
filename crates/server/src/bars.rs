@@ -219,7 +219,7 @@ impl BarService {
                 }
             }
             Some(before) => {
-                if s.current.is_some_and(|c| c.bucket.is_confirmed_at(self.clock.now())) {
+                if s.current.is_some_and(|c| c.bucket.start() < before && c.bucket.is_confirmed_at(self.clock.now())) {
                     self.refresh_latest_unless_shared(&slot, seen_latest, key, &mut s, prio).await?;
                 }
                 while s.bars.partition_point(|b| b.bucket.start() < before) < limit && !s.reached_origin {
@@ -847,6 +847,9 @@ mod tests {
         assert_eq!(h.chart_calls().len(), 1, "확정되기 전에는 과거 페이지가 키움을 부르지 않는다");
 
         h.clock.jump(11 * 3600);
+        let below_current = h.bars.page(k, Some(midnight(date(2026, 11, 6))), 3).await.unwrap();
+        assert_eq!(below_current.bars.last().unwrap().bucket.start(), midnight(date(2026, 11, 5)));
+        assert_eq!(h.chart_calls().len(), 1, "확정된 진행 중 봉이 요청 구간 밖이면 키움을 부르지 않는다");
         let after_confirm = h.bars.page(k, Some(before), 3).await.unwrap();
         assert_eq!(after_confirm.bars.last().unwrap().bucket.start(), midnight(date(2026, 11, 6)), "확정된 봉이 결과에 든다");
         assert_eq!(h.chart_calls().len(), 2, "최신 페이지를 한 번 다시 받는다");
