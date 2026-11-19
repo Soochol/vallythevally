@@ -135,10 +135,8 @@ async fn read_day(dir: &Path, day: KstDate) -> Vec<Sample> {
             return Vec::new();
         }
     };
-    if !text.is_empty() && !text.ends_with('\n') {
-        if let Err(e) = terminate_line(dir, day).await {
-            tracing::error!(path = %dir.display(), error = %e, "끊긴 마지막 줄을 닫지 못했습니다");
-        }
+    if !text.is_empty() && !text.ends_with('\n') && let Err(e) = terminate_line(dir, day).await {
+        tracing::error!(path = %dir.display(), error = %e, "끊긴 마지막 줄을 닫지 못했습니다");
     }
     let mut samples = Vec::new();
     for line in text.lines().filter(|line| !line.trim().is_empty()) {
