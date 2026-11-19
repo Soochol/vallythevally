@@ -189,3 +189,18 @@ test("매수 칩을 더 높은 가격으로 끌어 늘어난 금액이 한도를
   await expect(status(page)).toContainText("정정으로 늘어난 1,000원이 현금 주문가능 500원을 넘습니다 (미수 막음)");
   expect(api.writes).toHaveLength(0);
 });
+
+test("막힌 뒤 정책이 막기로 바뀌면 낡은 최대 수량 단추도 지금 한도로 다시 검사해 보내지 않는다", async ({ page, scenario }) => {
+  const api = await ready(page, scenario, { ...CASH_700K, marginAmount: 3_000_000, marginQuantity: 42 }, "allow_margin");
+  await expect(buyable(page).locator("b")).toHaveText("3,000,000원");
+  await quantity(page).fill("43");
+  await cellAt(page, "buy", BASE).dblclick();
+  await expect(page.getByTestId("order-status-action")).toHaveText("42주로 보내기");
+  await openFunds(page);
+  await page.getByRole("button", { name: "미수 막기" }).click();
+  await expect(buyable(page)).toHaveAttribute("data-policy", "cash_only");
+  await page.keyboard.press("Escape");
+  await page.getByTestId("order-status-action").click();
+  await expect(status(page)).toContainText("현금 주문가능 700,000원을 넘습니다 (미수 막음) · 최대 10주");
+  expect(api.writes).toHaveLength(0);
+});

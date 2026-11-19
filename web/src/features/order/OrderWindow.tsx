@@ -110,7 +110,9 @@ function OrderBody({ code }: { code: SymbolCode }) {
   const quantityAt = (price: number) => quantityOf(mode, typed, price);
   const estimate = unitPrice > 0 && quantityAt(unitPrice) > 0 ? unitPrice * quantityAt(unitPrice) : null;
 
-  const place = (side: OrderSide, price: number) => {
+  const latestPlace = useRef<(side: OrderSide, price: number, cappedQuantity?: number) => void>(() => undefined);
+
+  const place = (side: OrderSide, price: number, cappedQuantity?: number) => {
     if (nxtNotTraded) {
       writes.say({ tone: "error", text: REJECT_TEXT.nxt_unavailable });
       return;
@@ -119,7 +121,7 @@ function OrderBody({ code }: { code: SymbolCode }) {
       writes.say({ tone: "error", text: ETF_ETN_AFTER_HOURS_TEXT });
       return;
     }
-    const quantity = quantityAt(price);
+    const quantity = cappedQuantity ?? quantityAt(price);
     const problem = capacityProblem(side, quantity, data.capacity);
     if (problem) {
       writes.say({ tone: "error", text: problem });
@@ -127,11 +129,13 @@ function OrderBody({ code }: { code: SymbolCode }) {
     }
     const block = side === "buy" ? buyBlock(price, quantity, data.capacity.buying) : null;
     if (block) {
-      writes.say({ tone: "error", text: block.text, action: block.maxQuantity > 0 ? { label: `${block.maxQuantity.toLocaleString("ko-KR")}주로 보내기`, run: () => submit(side, price, block.maxQuantity) } : undefined });
+      writes.say({ tone: "error", text: block.text, action: block.maxQuantity > 0 ? { label: `${block.maxQuantity.toLocaleString("ko-KR")}주로 보내기`, run: () => latestPlace.current(side, price, block.maxQuantity) } : undefined });
       return;
     }
     submit(side, price, quantity);
   };
+
+  latestPlace.current = place;
 
   const submit = (side: OrderSide, price: number, quantity: number) => {
     const margin = side === "buy" ? marginOf(orderAmount(price, quantity), data.capacity.buying) : 0;
