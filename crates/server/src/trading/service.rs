@@ -234,6 +234,11 @@ impl Trading {
         Ok(api::OrdersAccountCheck { account_tail: tail_of(number.expose()) })
     }
 
+    pub async fn confirmed_account_number(&self) -> Result<api::TradingAccountNumber, TradingError> {
+        let account = self.verified(Priority::Screen).await?;
+        Ok(api::TradingAccountNumber { account_number: account.number.expose().clone() })
+    }
+
     pub async fn set_enabled(&self, input: api::OrdersSwitchInput) -> Result<api::OrdersStatus, TradingError> {
         let _write = self.write.lock().await;
         if !input.enabled {

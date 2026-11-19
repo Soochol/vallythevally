@@ -1704,6 +1704,13 @@ pub struct OrdersAccountCheck {
     pub account_tail: String,
 }
 
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct TradingAccountNumber {
+    pub account_number: String,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export)]
