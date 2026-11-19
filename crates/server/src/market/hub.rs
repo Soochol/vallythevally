@@ -70,7 +70,7 @@ impl HubHandle {
     }
 
     pub fn subscribe_feed(&self, conn: ConnId, sub: SubId, symbol: Symbol, kind: FeedKind, venue: Venue) {
-        self.send(HubInput::SubscribeFeed { conn, sub, feed: FeedSub { symbol, kind, venue } });
+        self.send(HubInput::SubscribeFeed { conn, sub, feed: FeedSub { symbol, kind, venue, requested_venue: venue } });
     }
 
     pub fn unsubscribe(&self, conn: ConnId, sub: SubId) {
@@ -214,6 +214,7 @@ struct FeedSub {
     symbol: Symbol,
     kind: FeedKind,
     venue: Venue,
+    requested_venue: Venue,
 }
 
 impl FeedSub {
@@ -407,7 +408,7 @@ impl MarketHub {
             return;
         }
         let feed = match feed.kind {
-            FeedKind::Book => FeedSub { venue: quotes::effective_book_venue(feed.venue, self.directory.borrow().as_ref().and_then(|dir| dir.get(feed.symbol)).map(|info| info.nxt_enabled)), ..feed },
+            FeedKind::Book => FeedSub { venue: self.effective_book_venue(feed), ..feed },
             _ => feed,
         };
         let old_cell = self.conns.get_mut(&conn).and_then(|c| c.subs.remove(&sub));
@@ -423,6 +424,33 @@ impl MarketHub {
         self.replan(now);
         if !self.rejected.contains(&holder) {
             self.attach_feed(conn, &sub, feed);
+        }
+    }
+
+    fn effective_book_venue(&self, feed: FeedSub) -> Venue {
+        quotes::effective_book_venue(feed.requested_venue, self.directory.borrow().as_ref().and_then(|dir| dir.get(feed.symbol)).map(|info| info.nxt_enabled))
+    }
+
+    fn resettle_book_venues(&mut self, now: KstTime) {
+        let moved: Vec<(ConnId, SubId, FeedSub, Venue)> = self
+            .conns
+            .iter()
+            .flat_map(|(&conn, c)| c.feeds.iter().map(move |(sub, &feed)| (conn, sub, feed)))
+            .filter(|(_, _, feed)| feed.kind == FeedKind::Book)
+            .map(|(conn, sub, feed)| (conn, sub.clone(), feed, self.effective_book_venue(feed)))
+            .filter(|(_, _, feed, venue)| feed.venue != *venue)
+            .collect();
+        for (conn, sub, old, venue) in moved {
+            let feed = FeedSub { venue, ..old };
+            if let Some(c) = self.conns.get_mut(&conn) {
+                c.feeds.insert(sub.clone(), feed);
+            }
+            let was_rejected = self.rejected.contains(&old.holder(conn, &sub));
+            self.release_feed(conn, &sub, old, now);
+            self.manager.hold(feed.symbol, feed.holder(conn, &sub));
+            if was_rejected {
+                self.rejected.insert(feed.holder(conn, &sub));
+            }
         }
     }
 
@@ -1025,6 +1053,7 @@ impl MarketHub {
         }
         if self.directory.has_changed().unwrap_or(false) {
             self.directory.borrow_and_update();
+            self.resettle_book_venues(now);
             let conns: Vec<ConnId> = self.conns.keys().copied().collect();
             for conn in conns {
                 self.hold_listed_watch_rows(conn, now);
@@ -1325,6 +1354,19 @@ mod tests {
     }
 
     fn period_harness(start: KstTime, chart: Chart, latency: Duration, period: Period) -> Harness {
+        let harness = period_harness_without_directory(start, chart, latency, period);
+        harness.symbols.replace(listed_directory());
+        harness
+    }
+
+    fn listed_directory() -> Directory {
+        let stock = |code: &str, nxt_enabled| SymbolInfo { symbol: Symbol::parse(code).unwrap(), name: code.into(), kind: SymbolKind::Common, market: Market::Kospi, nxt_enabled };
+        let mut listed = vec![stock(SAMSUNG, true), stock(NOT_ON_NXT, false)];
+        listed.extend((0..REALTIME_LIMIT).map(|i| stock(&listed_filler(i), false)));
+        Directory::build(listed)
+    }
+
+    fn period_harness_without_directory(start: KstTime, chart: Chart, latency: Duration, period: Period) -> Harness {
         let chart = Arc::new(Mutex::new(chart));
         let script = chart.clone();
         let day_volumes = Arc::new(Mutex::new(HashMap::from([
@@ -1388,10 +1430,6 @@ mod tests {
         let clock = Clock::fake(start);
         let rest = KiwoomRest::new(Arc::new(fake.clone()), KiwoomAuth::new(Secret::new("k".into()), Secret::new("s".into()), None), clock.clone());
         let symbols = Arc::new(SymbolDirectory::default());
-        let stock = |code: &str, nxt_enabled| SymbolInfo { symbol: Symbol::parse(code).unwrap(), name: code.into(), kind: SymbolKind::Common, market: Market::Kospi, nxt_enabled };
-        let mut listed = vec![stock(SAMSUNG, true), stock(NOT_ON_NXT, false)];
-        listed.extend((0..REALTIME_LIMIT).map(|i| stock(&listed_filler(i), false)));
-        symbols.replace(Directory::build(listed));
         let bars = Arc::new(BarService::new(rest, symbols.clone(), clock.clone()));
         let (stream, desired) = KiwoomStream::detached();
         let (events, rx) = mpsc::channel(64);
@@ -3219,6 +3257,82 @@ mod tests {
         subscribe_feed(&h, conn, "nxt2", FeedKind::Book, Venue::Nxt);
         tokio::time::sleep(Duration::from_secs(60)).await;
         assert!(desired_kinds(&h, samsung_symbol()).contains(&RealType::BookNxt));
+    }
+
+    fn std_harness_before_the_directory() -> Harness {
+        period_harness_without_directory(at(9, 0, 50), morning_chart(), Duration::ZERO, Period::M1)
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn an_nxt_book_subscribed_before_the_directory_loads_moves_to_the_nxt_code_once_it_loads() {
+        let h = std_harness_before_the_directory();
+        live(&h).await;
+        let (conn, out) = connect(&h).await;
+        subscribe_feed(&h, conn, "n", FeedKind::Book, Venue::Nxt);
+        settle().await;
+        assert_eq!(desired_kinds(&h, samsung_symbol()), BTreeSet::from([RealType::Trade, RealType::Book, RealType::AfterHours]), "종목 정보가 없는 동안 NXT는 통합으로 받는다");
+        h.symbols.replace(listed_directory());
+        tokio::time::sleep(Duration::from_secs(2)).await;
+        assert!(desired_kinds(&h, samsung_symbol()).contains(&RealType::BookNxt));
+        tokio::time::sleep(Duration::from_secs(31)).await;
+        assert_eq!(desired_kinds(&h, samsung_symbol()), BTreeSet::from([RealType::Trade, RealType::BookNxt, RealType::AfterHours]), "통합 0D는 유예 뒤에 놓는다");
+        out.take(true);
+        h.events.send(book_event_on(&h, Venue::Nxt, 101, 10)).await.unwrap();
+        let fed: Vec<String> = take(&out).await.into_iter().filter_map(|m| if let ServerMessage::FeedBook { sub, .. } = m { Some(sub) } else { None }).collect();
+        assert_eq!(fed, ["n"], "옮긴 뒤에는 NXT 호가를 받는다");
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_krx_book_of_a_symbol_off_nxt_subscribed_before_the_directory_loads_moves_to_the_combined_code_once_it_loads() {
+        let h = std_harness_before_the_directory();
+        live(&h).await;
+        let (conn, _out) = connect(&h).await;
+        let off_nxt = Symbol::parse(NOT_ON_NXT).unwrap();
+        h.hub.subscribe_feed(conn, sub("k"), off_nxt, FeedKind::Book, Venue::Krx);
+        settle().await;
+        assert_eq!(desired_kinds(&h, off_nxt), BTreeSet::from([RealType::Trade, RealType::BookKrx, RealType::AfterHours]));
+        h.symbols.replace(listed_directory());
+        tokio::time::sleep(Duration::from_secs(33)).await;
+        assert_eq!(desired_kinds(&h, off_nxt), BTreeSet::from([RealType::Trade, RealType::Book, RealType::AfterHours]));
+        assert_eq!(crate::kiwoom::stream::seats(&h.desired.borrow()), 1);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_rejected_krx_book_that_moves_to_the_combined_code_with_the_directory_is_announced() {
+        let h = std_harness_before_the_directory();
+        live(&h).await;
+        let (conn, out) = connect(&h).await;
+        for i in 0..REALTIME_LIMIT - 1 {
+            h.hub.subscribe_feed(conn, sub(&format!("f{i}")), Symbol::parse(&listed_filler(i)).unwrap(), FeedKind::Trades, Venue::Krx);
+        }
+        let off_nxt = Symbol::parse(NOT_ON_NXT).unwrap();
+        h.hub.subscribe_feed(conn, sub("k"), off_nxt, FeedKind::Book, Venue::Krx);
+        settle().await;
+        assert!(out.take(true).messages.contains(&sub_error("k", SubErrorCode::RealtimeLimit)));
+        h.symbols.replace(listed_directory());
+        tokio::time::sleep(Duration::from_secs(2)).await;
+        let msgs = out.take(true).messages;
+        assert!(msgs.contains(&feed_subscribed("k", FeedKind::Book)), "{msgs:?}");
+        assert!(!msgs.contains(&sub_error("k", SubErrorCode::RealtimeLimit)), "{msgs:?}");
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_full_house_book_moved_to_the_nxt_code_by_the_directory_keeps_the_old_code_for_the_grace() {
+        let h = std_harness_before_the_directory();
+        live(&h).await;
+        let (conn, out) = connect(&h).await;
+        for i in 0..REALTIME_LIMIT - 1 {
+            h.hub.subscribe(conn, sub(&format!("f{i}")), key(&listed_filler(i), Venue::Combined));
+        }
+        subscribe_feed(&h, conn, "n", FeedKind::Book, Venue::Nxt);
+        settle().await;
+        assert_eq!(crate::kiwoom::stream::seats(&h.desired.borrow()), REALTIME_LIMIT);
+        assert!(desired_kinds(&h, samsung_symbol()).contains(&RealType::Book));
+        out.take(true);
+        h.symbols.replace(listed_directory());
+        tokio::time::sleep(Duration::from_secs(2)).await;
+        let msgs = out.take(true).messages;
+        assert!(desired_kinds(&h, samsung_symbol()).contains(&RealType::Book), "옛 통합 0D는 30초 유예 뒤 REMOVE: desired={:?} msgs={msgs:?}", desired_kinds(&h, samsung_symbol()));
     }
 
     #[tokio::test(start_paused = true)]
