@@ -666,8 +666,8 @@ mod tests {
             v,
             json!([
                 {"symbol": "IDX:001", "price": 2500.5, "change": 0.5, "volume": 4321, "t": 1_793_890_800, "source": "polled", "venue": null},
-                {"symbol": "000660", "price": 120_500.0, "change": 500.0, "volume": 765_432, "t": 1_793_890_800 + 15 * 3600 + 30 * 60, "source": "polled", "venue": "combined"},
-                {"symbol": "005930", "price": 50_000.0, "change": -1_000.0, "volume": 1_234_567, "t": 1_793_890_800 + 71_999, "source": "polled", "venue": "combined"},
+                {"symbol": "000660", "price": 120_500.0, "change": 500.0, "volume": 765_432, "t": 1_793_890_800 + 15 * 3600 + 30 * 60, "source": "polled", "venue": "combined", "tradedMillionWon": 92_234},
+                {"symbol": "005930", "price": 50_000.0, "change": -1_000.0, "volume": 1_234_567, "t": 1_793_890_800 + 71_999, "source": "polled", "venue": "combined", "tradedMillionWon": 61_728},
                 {"symbol": "IDX:101", "price": 899.0, "change": -1.0, "volume": 77, "t": 1_794_150_000, "source": "polled", "venue": null},
             ]),
             "요청 순서. 없는 지수, 빈 행, 중복은 빠진다. IDX:101은 진행 중인 오늘 봉과 그 앞 확정 봉"

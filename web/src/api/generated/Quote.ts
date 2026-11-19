@@ -25,4 +25,8 @@ volume: number, t: UnixSeconds, source: QuoteSource,
 /**
  * 이 값을 만든 거래소. 요청이 NXT인데 그 종목이 NXT에서 거래되지 않으면 요청과 달리 통합이다. 지수면 null.
  */
-venue: Venue | null, };
+venue: Venue | null, 
+/**
+ * 당일 누적 거래대금, 백만원(ka10095 `trde_prica`). REST 주식 시세에만 있고 지수와 실시간 프레임에는 없다.
+ */
+tradedMillionWon?: number, };

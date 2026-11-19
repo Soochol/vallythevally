@@ -264,6 +264,7 @@ mod tests {
             t: UnixSeconds(0),
             source: crate::api::QuoteSource::Realtime,
             venue: Some(Venue::Combined),
+            traded_million_won: None,
         };
         out.set_quote(quote("005930", 1.0));
         out.set_quote(quote("000660", 5.0));
@@ -292,6 +293,7 @@ mod tests {
             t: UnixSeconds(0),
             source: crate::api::QuoteSource::Realtime,
             venue: Some(Venue::Combined),
+            traded_million_won: None,
         };
         out.set_quote(quote(1.0));
         out.set_quote_venue(Venue::Combined);
