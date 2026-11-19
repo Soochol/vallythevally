@@ -102,6 +102,20 @@ async fn a_kiwoom_rejection_is_final_and_does_not_block_the_account() {
 }
 
 #[tokio::test]
+async fn a_kiwoom_business_rejection_of_a_write_is_final_not_unknown() {
+    let f = on().await;
+    *f.mode.lock().unwrap() = WriteMode::BusinessReject;
+    let (_, rejected) = order(&f.app, PLACE, buy("cmd-biz-0001", 1, 71_000)).await;
+    assert_eq!((rejected["state"].clone(), rejected["reason"].clone()), (json!("rejected"), json!("kiwoom_rejected")), "{rejected}");
+    let (_, list) = get(&f.app, "/api/trading/commands").await;
+    assert_eq!(list["blocked"], false, "확정 거절은 쓰기를 막지 않는다");
+    *f.mode.lock().unwrap() = WriteMode::Accept;
+    let (_, next) = order(&f.app, PLACE, buy("cmd-biz-0002", 1, 71_000)).await;
+    assert_eq!(next["state"], "accepted");
+    assert_eq!(writes(&f).len(), 2);
+}
+
+#[tokio::test]
 async fn same_command_id_does_not_create_a_second_order() {
     let f = on().await;
     let (_, first) = order(&f.app, PLACE, buy("cmd-same-0001", 1, 71_000)).await;

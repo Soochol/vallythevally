@@ -61,6 +61,7 @@ pub(super) enum WriteMode {
     NoNumber,
     NullNumber,
     Reject,
+    BusinessReject,
 }
 
 fn write_reply(mode: WriteMode) -> Result<HttpResponse, TransportError> {
@@ -72,6 +73,7 @@ fn write_reply(mode: WriteMode) -> Result<HttpResponse, TransportError> {
         WriteMode::NoNumber => ok(json!({"return_code": 0, "return_msg": "정상"}), None),
         WriteMode::NullNumber => ok(json!({"ord_no": null, "return_code": 0, "return_msg": "정상"}), None),
         WriteMode::Reject => ok(json!({"return_code": 20, "return_msg": "주문이 거부되었습니다"}), None),
+        WriteMode::BusinessReject => ok(json!({"return_code": 20, "return_msg": "[2000](508975:합성 가격 밴드 사유)"}), None),
     }
 }
 
@@ -107,6 +109,7 @@ fn listed_symbols() -> Arc<SymbolDirectory> {
 pub(super) struct Fixture {
     pub(super) mode: Arc<Mutex<WriteMode>>,
     pub(super) rows_account: Arc<Mutex<Option<String>>>,
+    pub(super) orderable_replies: Arc<Mutex<std::collections::HashMap<String, Value>>>,
     pub(super) app: Router,
     pub(super) state: Arc<AppState>,
     pub(super) fake: Arc<FakeTransport>,
@@ -166,6 +169,8 @@ pub(super) async fn fixture_in(latency: Duration, spacing: Duration, environment
     let seen_account = account.clone();
     let rows_account = Arc::new(Mutex::new(None::<String>));
     let seen_rows = rows_account.clone();
+    let orderable_replies = Arc::new(Mutex::new(std::collections::HashMap::<String, Value>::new()));
+    let seen_orderable = orderable_replies.clone();
     let fake = Arc::new(FakeTransport::new(latency, move |sent| {
         if sent.api_id == Endpoint::ISSUE {
             return token(1);
@@ -174,6 +179,12 @@ pub(super) async fn fixture_in(latency: Duration, spacing: Duration, environment
             && is_write(id)
         {
             return write_reply(*seen_mode.lock().unwrap());
+        }
+        if sent.api_id == Endpoint::Trading(TradingApiId::Kt00010) {
+            let side = serde_json::from_str::<Value>(&sent.body).ok().and_then(|body| body["trde_tp"].as_str().map(str::to_owned));
+            if let Some(scripted) = side.and_then(|side| seen_orderable.lock().unwrap().get(&side).cloned()) {
+                return ok(scripted, None);
+            }
         }
         match sent.api_id.market() {
             Some(id) if id == StockBasicInfo::API_ID => return price_band_reply(&sent.body),
@@ -195,7 +206,7 @@ pub(super) async fn fixture_in(latency: Duration, spacing: Duration, environment
     rest.set_access(Access::Open);
     state.system.bound(HOST.parse().unwrap());
     let app = router(state.clone());
-    Fixture { mode, rows_account, app, state, fake, feed, account, _dir: dir }
+    Fixture { mode, rows_account, orderable_replies, app, state, fake, feed, account, _dir: dir }
 }
 
 pub(super) fn trading_sends(fake: &FakeTransport) -> Vec<&'static str> {
@@ -405,6 +416,46 @@ async fn account_reads_are_parsed_into_the_browser_contract() {
     assert_eq!(body_of("kt00007")["qry_tp"], "4");
     assert_eq!(body_of("kt00007")["ord_dt"], "20261109");
     assert_eq!(f.fake.sent().iter().filter(|s| s.api_id == Endpoint::Trading(TradingApiId::Ka00001)).count(), 1, "계좌 확인은 60초 동안 한 번이다");
+}
+
+fn orderable_sends(f: &Fixture) -> usize {
+    f.fake.sent().iter().filter(|s| s.api_id == Endpoint::Trading(TradingApiId::Kt00010)).count()
+}
+
+#[tokio::test]
+async fn a_business_rejection_fails_only_that_request_and_stops_no_path() {
+    let f = fixture().await;
+    assert_eq!(enable(&f.app, "01").await.0, StatusCode::OK);
+    f.orderable_replies.lock().unwrap().insert("1".into(), json!({"return_code": 20, "return_msg": "[2000](571455:합성 매도 사유 FAKE-SECRET-sell)"}));
+    let code = domain::StockCode::parse("005930").unwrap();
+    let (sell, buy) = tokio::join!(f.state.trading.orderable(code, OrderSide::Sell, 71_000), f.state.trading.orderable(code, OrderSide::Buy, 71_000));
+    assert_eq!(buy.unwrap().quantity, 14, "같은 경로의 매수 조회는 성공한다");
+    let Err(TradingError::Kiwoom(ref error @ KiwoomError::Failed(ref failure))) = sell else { panic!("{sell:?}") };
+    assert_eq!((failure.category(), failure.vendor_reason().map(|r| r.number())), (Category::BusinessRejected, Some(571455)));
+    assert!(!error.manual_action_required());
+    let shown = error.shown();
+    assert_eq!((shown.code, shown.reason, shown.manual_action_required), (crate::api::ApiErrorCode::KiwoomUnavailable, crate::api::ApiErrorReason::BusinessRejected, false));
+    assert!(f.state.rest.stopped(Endpoint::Trading(TradingApiId::Kt00010)).is_none() && f.state.rest.halted().is_none());
+    let sent = orderable_sends(&f);
+    assert_eq!(sent, 2, "매도·매수가 각각 한 번 나갔다");
+    assert!(matches!(f.state.trading.orderable(code, OrderSide::Sell, 71_000).await, Err(TradingError::Kiwoom(KiwoomError::Failed(_)))));
+    assert_eq!(orderable_sends(&f), sent + 1, "거절된 뒤에도 다시 키움으로 나간다");
+}
+
+#[tokio::test]
+async fn a_business_rejection_reaches_the_browser_as_a_reason_not_a_stop() {
+    let f = fixture().await;
+    assert_eq!(enable(&f.app, "01").await.0, StatusCode::OK);
+    f.orderable_replies.lock().unwrap().insert("2".into(), json!({"return_code": 20, "return_msg": "[2000](571489:합성 휴장 FAKE-SECRET-closed)"}));
+    let (status, body) = get(&f.app, "/api/trading/orderable?code=005930&side=buy&price=71000").await;
+    assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE, "{body}");
+    assert_eq!((body["error"]["reason"].clone(), body["error"]["manualActionRequired"].clone(), body["error"]["code"].clone()), (json!("business_rejected"), json!(false), json!("kiwoom_unavailable")));
+    let message = body["error"]["message"].as_str().unwrap();
+    assert!(message.contains("571489") && message.contains("장이 열리지 않는 날"), "{message}");
+    assert!(!message.contains("다시 켤") && !message.contains("멈") && !message.contains("FAKE-SECRET"), "{message}");
+    let (again, _) = get(&f.app, "/api/trading/orderable?code=005930&side=buy&price=71000").await;
+    assert_eq!(again, StatusCode::SERVICE_UNAVAILABLE);
+    assert_eq!(orderable_sends(&f), 2, "첫 거절 뒤에도 다음 요청이 키움으로 나간다");
 }
 
 #[tokio::test]

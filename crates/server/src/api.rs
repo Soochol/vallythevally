@@ -1637,6 +1637,7 @@ pub enum ApiErrorReason {
     TokenFile,
     SymbolMismatch,
     InvalidRequest,
+    BusinessRejected,
     Unsupported,
     UnknownFailure,
     Protocol,

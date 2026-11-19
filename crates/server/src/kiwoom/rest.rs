@@ -165,6 +165,7 @@ impl KiwoomError {
             Category::AuthBlocked => R::AuthBlocked,
             Category::AuthIndeterminate => R::AuthIndeterminate,
             Category::InvalidRequest | Category::BatchLimit => R::InvalidRequest,
+            Category::BusinessRejected => R::BusinessRejected,
             Category::SymbolMismatch => R::SymbolMismatch,
             Category::Unsupported => R::Unsupported,
             Category::Protocol => R::Protocol,
@@ -976,6 +977,7 @@ fn judge_market(api_id: Endpoint, priority: Priority, res: Result<HttpResponse, 
         category = ?failed.map(Failure::category),
         return_code = ?failed.and_then(Failure::return_code),
         detail = ?failed.and_then(Failure::detail),
+        reason = ?failed.and_then(Failure::vendor_reason),
         "키움 조회"
     );
     judged.map(|envelope| {
@@ -1777,6 +1779,7 @@ mod tests {
             (rejected(8003), C::KiwoomAuthFailed, R::AuthIndeterminate),
             (rejected(1901), C::UnknownSymbol, R::SymbolMismatch),
             (rejected(1501), C::Internal, R::InvalidRequest),
+            (rejected(2000), C::KiwoomUnavailable, R::BusinessRejected),
             (transport(Stage::AwaitResponse, true), C::KiwoomUnavailable, R::KiwoomTimeout),
             (transport(Stage::Connect, false), C::KiwoomUnavailable, R::KiwoomUnreachable),
             (KiwoomError::NotConnected, C::KiwoomUnavailable, R::NotConnected),

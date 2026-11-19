@@ -38,6 +38,7 @@ const API_ERROR_REASONS = [
   "token_file",
   "symbol_mismatch",
   "invalid_request",
+  "business_rejected",
   "unsupported",
   "unknown_failure",
   "protocol",
