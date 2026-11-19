@@ -161,6 +161,15 @@ test("색 A인 보내는 창이 종목을 보내면 A인 차트만 바뀌고, A�
   expect(after).toBeGreaterThan(revision);
 });
 
+test("페이지가 색 A로 보내면 A인 차트가 바뀌고, 그 색의 차트가 없거나 색이 꺼져 있으면 활성 칸의 차트가 바뀐다", () => {
+  linked();
+  expect(state().sendSymbolToLink("a", windowId("off"), SK)).toEqual({ changed: ["a1", "a2"], notice: null });
+  expect(shown().off).toEqual(["000660", "D"]);
+  expect(state().sendSymbolToLink("c", windowId("off"), SAMSUNG)).toEqual({ changed: ["off"], notice: null });
+  expect(state().sendSymbolToLink(null, windowId("b1"), SAMSUNG)).toEqual({ changed: ["b1"], notice: null });
+  expect(shown()).toMatchObject({ a1: ["000660", "D"], a2: ["000660", "W"], off: ["005930", "D"], b1: ["005930", "5m"] });
+});
+
 test("색이 꺼진 보내는 창과 휴대폰 목록은 활성 칸을 바꾸고, 활성 칸에 색이 있으면 그 색의 차트도 함께 바꾼다", () => {
   linked();
   expect(state().sendSymbol(windowId("watchlist"), windowId("off"), SAMSUNG)).toEqual({ changed: ["off"], notice: null });

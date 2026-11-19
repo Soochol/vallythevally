@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useMediaQuery } from "../../lib/media";
 import { useAccountStore } from "../../stores/account";
+import { PageShortcuts } from "./PageShortcuts";
 import { LandingBar } from "./LandingBar";
 import { ScrollStory } from "./ScrollStory";
 import { SERVER_NOTES } from "./slides";
@@ -9,6 +10,7 @@ import { useScrollStory } from "./useScrollStory";
 const REDUCED_MOTION_QUERY = "(prefers-reduced-motion: reduce)";
 
 export function Landing() {
+  const signedOut = useAccountStore((s) => s.status?.state === "signed_out");
   const [failure] = useState(() => useAccountStore.getState().loginFailure);
   useEffect(() => useAccountStore.getState().showLoginFailure(null), []);
   const reduced = useMediaQuery(REDUCED_MOTION_QUERY);
@@ -18,9 +20,10 @@ export function Landing() {
 
   return (
     <div ref={container} data-testid="landing" className="landing">
-      <LandingBar initialFailure={failure} />
+      <LandingBar initialFailure={failure} signedOut={signedOut} />
       <main>
         <ScrollStory reduced={reduced} storyRef={story} />
+        {!signedOut && <PageShortcuts />}
         <section aria-label="키와 개인정보" className="landing-note-wrap">
           <div className="landing-note">
             <h2 className="landing-note-title">서버에 가는 것은<br />셋업뿐입니다.</h2>

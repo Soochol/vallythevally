@@ -187,3 +187,30 @@ export const GearIcon = ({ size = 16 }: P) => (
     <path d="M12 2.8v2.4M12 18.8v2.4M2.8 12h2.4M18.8 12h2.4M5.5 5.5l1.7 1.7M16.8 16.8l1.7 1.7M5.5 18.5l1.7-1.7M16.8 7.2l1.7-1.7" />
   </Icon>
 );
+
+export const WorkspaceIcon = ({ size }: P) => (
+  <Icon size={size}>
+    <rect x="3" y="4" width="18" height="16" rx="2" />
+    <path d="M12 4v16M3 12h9" />
+  </Icon>
+);
+export const MarketIcon = ({ size }: P) => (
+  <Icon size={size}>
+    <path d="M3 17l5-6 4 3 4-6 5 5" />
+    <path d="M3 21h18" />
+  </Icon>
+);
+export const HeatmapIcon = ({ size }: P) => (
+  <Icon size={size}>
+    <rect x="3" y="3" width="8" height="10" rx="1.5" />
+    <rect x="13" y="3" width="8" height="6" rx="1.5" />
+    <rect x="13" y="11" width="8" height="10" rx="1.5" />
+    <rect x="3" y="15" width="8" height="6" rx="1.5" />
+  </Icon>
+);
+export const EtfIcon = ({ size }: P) => (
+  <Icon size={size}>
+    <circle cx="12" cy="12" r="8" />
+    <path d="M12 4v8l6 4" />
+  </Icon>
+);

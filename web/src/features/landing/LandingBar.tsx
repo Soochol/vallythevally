@@ -1,4 +1,6 @@
 import { useRef, useState } from "react";
+import { Link } from "react-router";
+import { pathOfPage } from "../page-rail/pages";
 import { LoginPopover } from "./LoginPopover";
 import { useLoginStart } from "./useLoginStart";
 
@@ -11,7 +13,7 @@ function LogoMark() {
   );
 }
 
-export function LandingBar({ initialFailure }: { initialFailure: string | null }) {
+export function LandingBar({ initialFailure, signedOut }: { initialFailure: string | null; signedOut: boolean }) {
   const [open, setOpen] = useState(initialFailure !== null);
   const button = useRef<HTMLButtonElement>(null);
   const { leaving, error, login } = useLoginStart();
@@ -21,10 +23,14 @@ export function LandingBar({ initialFailure }: { initialFailure: string | null }
         <LogoMark />
         vally
       </span>
-      <button ref={button} type="button" aria-expanded={open} className="landing-login" onClick={() => setOpen((value) => !value)}>
-        로그인
-      </button>
-      {open && <LoginPopover anchor={button} failure={initialFailure} leaving={leaving} error={error} onLogin={(provider) => void login(provider)} onClose={() => setOpen(false)} />}
+      {signedOut ? (
+        <button ref={button} type="button" aria-expanded={open} className="landing-login" onClick={() => setOpen((value) => !value)}>
+          로그인
+        </button>
+      ) : (
+        <Link to={pathOfPage("workspace")} className="landing-login">작업 영역 열기</Link>
+      )}
+      {signedOut && open && <LoginPopover anchor={button} failure={initialFailure} leaving={leaving} error={error} onLogin={(provider) => void login(provider)} onClose={() => setOpen(false)} />}
     </header>
   );
 }

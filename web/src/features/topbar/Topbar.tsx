@@ -2,6 +2,7 @@ import { useRef, useState } from "react";
 import { ChartSettingsDialog } from "../chart-settings/ChartSettingsDialog";
 import { type ChartSettingsMenuId, FIRST_CHART_SETTINGS_MENU } from "../chart-settings/menus";
 import { FinancialUpdateButton } from "../financial-update/FinancialUpdateButton";
+import { BrandLink } from "../page-rail/BrandLink";
 import { MinuteMenu } from "./MinuteMenu";
 import { MockBadge } from "./MockBadge";
 import { keyCapsLabel, keyTitle, periodActionId, searchTitle } from "../../lib/hotkeys";
@@ -11,7 +12,7 @@ import { useCell, useLayoutStore } from "../../stores/layout";
 import { useSelectionStore } from "../../stores/selection";
 import { useActionKeys, useUiStore } from "../../stores/ui";
 import { openIndicatorCommand } from "../indicator-command/open";
-import { BrandIcon, IndicatorIcon, SearchIcon, SlidersIcon, CompareIcon } from "../icons";
+import { IndicatorIcon, SearchIcon, SlidersIcon, CompareIcon } from "../icons";
 import { LayoutMenu } from "../layouts/LayoutMenu";
 import { VenuePicker } from "../venue/VenuePicker";
 import { SystemButton } from "../system-settings/SystemButton";
@@ -32,7 +33,7 @@ export function Topbar() {
 
   return (
     <header role="toolbar" aria-label="차트 도구 막대" className="desktop-topbar ui-island relative z-20 mx-[var(--island-gap)] mt-[var(--island-gap)] h-[var(--island-h)] flex-none rounded-l max-md:hidden">
-      <span className="app-brand" title="vallythevally"><BrandIcon /><span>vally</span></span>
+      <BrandLink />
       <MockBadge />
       <span className="tb-sep" />
       <VenuePicker variant="desktop" />
