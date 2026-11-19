@@ -54,7 +54,7 @@ cd ~/apps/vallythevally
 git checkout main
 ```
 
-Node와 pnpm은 fnm으로 깔려 있어 비대화형 ssh의 PATH에 없다(`bash -lc`에서만 보인다). cargo는 `~/.cargo/bin`에 있다. 아래 배포 스크립트는 fnm 설치 경로 `~/.local/share/fnm/node-versions/v<버전>/installation/bin`을 PATH에 직접 넣는다. 버전은 `ls ~/.local/share/fnm/node-versions`로 확인한다.
+Node와 pnpm은 fnm으로 깔려 있어 비대화형 ssh의 PATH에 없다(`bash -lc`에서만 보인다). cargo는 `~/.cargo/bin`에 있다. 배포 스크립트(`deploy/web-build`)는 fnm 설치 경로 `~/.local/share/fnm/node-versions/v<버전>/installation/bin`을 `VALLY_NODE_BIN`으로 받아 PATH에 넣는다. 버전은 `ls ~/.local/share/fnm/node-versions`로 확인한다.
 
 최초 빌드는 개발 문서의 명령과 같다.
 
@@ -288,177 +288,52 @@ curl -sS --max-time 5 http://<서버 PC의 Tailscale IP>:8080/api/screener/statu
 
 ## 배포(orch deploy)
 
-`orch deploy`는 개발 PC의 배포 checkout `~/apps/vallythevally`를 pull해 대상 SHA를 고정하고, `deploy.json`의 명령을 차례로 부른다. 명령은 개발 PC의 `~/.local/bin/vally-deploy-{server-build,web-build,backup,restart}`다. 서버 PC로 옮긴 뒤에는 이 네 개가 같은 이름의 서버 PC 스크립트를 `ssh -o BatchMode=yes`로 부르는 얇은 래퍼가 된다. `orch.py`는 고치지 않는다.
+배포 스크립트는 이 저장소의 `deploy/`에 있고 대상 SHA의 checkout에서 돈다. `orch deploy`가 대상 SHA를 정해 checkout을 pull하고, 단계마다 `deploy.json`의 `steps`·`restart`·`after`를 차례로 부른다. 스크립트는 fetch·merge를 하지 않는다. checkout 맞춤은 orch의 몫이고, `server-build`는 orch가 주는 `ORCH_DEPLOY_SHA`가 checkout HEAD와 같은지만 한 번 더 본다. 스크립트는 자기 위치(`deploy/`의 부모)를 checkout 뿌리로 쓰므로 checkout 경로를 박지 않는다.
 
-```
-orch deploy run
-  └ 개발 PC 배포 checkout pull, 대상 SHA 고정
-  └ 개발 PC vally-deploy-server-build ──ssh──▶ 서버 PC vally-deploy-server-build <SHA>
-  └ 개발 PC vally-deploy-web-build    ──ssh──▶ 서버 PC vally-deploy-web-build
-  └ 개발 PC vally-deploy-backup       ──ssh──▶ 서버 PC vally-deploy-backup
-  └ 개발 PC vally-deploy-restart      ──ssh──▶ 서버 PC vally-deploy-restart
-```
+**전환 전까지는 지금의 개발 PC `~/.local/bin/vally-deploy-{server-build,web-build,backup,restart}` 래퍼가 그대로 쓰인다.** 아래 스크립트는 저장소에 올라가 있을 뿐 `orch deploy`가 아직 부르지 않는다. 래퍼를 `host` 설정과 이 스크립트로 바꾸는 전환과 되돌리기 순서는 orch 저장소 `docs/deploy.md`를 따른다. 실계좌 서버라 전환 시각과 첫 원격 배포는 사용자가 따로 승인한다.
 
-### 기존 스크립트 보관
+### 스크립트와 환경 변수
 
-개발 PC의 기존 스크립트를 `*.local`로 옮겨 두고 래퍼를 새로 둔다. 되돌릴 때 제자리로 돌린다.
+| 스크립트 | 하는 일 | 환경 변수(기본값) |
+|---|---|---|
+| `deploy/server-build` | `ORCH_DEPLOY_SHA`가 있고 checkout HEAD와 다르면 `cargo`를 부르지 않고 실패한다. 같으면 공용 `compile.lock`(`git rev-parse --git-common-dir` 아래)을 `flock`으로 잡고 `cargo build --locked --release -p server`를 한다 | `VALLY_CARGO_BIN`(`$HOME/.cargo/bin`): PATH 앞에 더할 cargo 폴더. `VALLY_BUILD_JOBS`(`4`): `CARGO_BUILD_JOBS` |
+| `deploy/web-build` | `web/`에서 `pnpm install --frozen-lockfile` 뒤 `pnpm build` | `VALLY_NODE_BIN`(필수): node와 pnpm이 있는 폴더로, `~` 없는 절대 경로다. 없거나 그 폴더에 `pnpm`이 없으면 0이 아닌 코드로 멈추고 찾는 법을 알린다. `VALLY_CARGO_BIN`, `VALLY_BUILD_JOBS`는 위와 같다 |
+| `deploy/backup` | `vally.db`를 SQLite backup API로 떠서 `integrity_check`가 `ok`일 때만 fsync 뒤 원자 교체로 남기고, 보관 개수를 넘는 오래된 백업을 지운다. 원본이 없으면 경로를 알리고 실패한다 | `VALLY_DATA_DIR`(`$HOME/vally-data`): 원본 `server/vally.db`, 보관 폴더 `backups/`. `VALLY_BACKUP_KEEP`(`30`): 1 이상 |
+| `deploy/restart` | 서비스를 재시작하고, 서비스가 active이고 확인 주소가 응답할 때까지 1초마다 본다. 기다림 안에 안 되면 `journalctl` 안내와 함께 실패한다 | `VALLY_SERVICE`(`vally-server.service`), `VALLY_HEALTH_URL`(`http://127.0.0.1:8080/api/screener/status`), `VALLY_RESTART_WAIT`(`120`초, 1 이상의 정수. 아니면 재시작 전에 멈춘다) |
 
-```sh
-cd ~/.local/bin
-for name in server-build web-build backup restart; do mv vally-deploy-$name vally-deploy-$name.local; done
-```
+Node와 pnpm은 fnm으로 깔려 있어 비대화형 ssh의 PATH에 없다. `ls ~/.local/share/fnm/node-versions`로 버전을 찾고 `~/.local/share/fnm/node-versions/v<버전>/installation/bin`을 `VALLY_NODE_BIN`으로 orch 설정의 `env`에 넣는다.
 
-### 서버 PC 스크립트
+### orch PC별 설정
 
-서버 PC의 `~/.local/bin/`에 둔다(`chmod 755`). 경로는 모두 `$HOME` 기준이다.
+orch를 돌리는 PC의 `~/.claude/orch/deploy.json`이다. 아래는 서버 PC에 ssh로 배포하는 예이고 `<...>`는 자리 표시 값이다. 항목의 뜻은 orch 저장소 `docs/deploy.md`에 있다.
 
-`vally-deploy-server-build`는 인자로 받은 SHA로 원격 checkout을 맞춘다. 40자리 SHA가 아니거나, 작업 트리가 깨끗하지 않거나, `git fetch origin` 뒤 `git merge --ff-only <SHA>`를 하고도 HEAD가 그 SHA가 아니면 0이 아닌 코드로 멈춘다.
-
-```sh
-#!/bin/sh
-set -eu
-export PATH="$HOME/.cargo/bin:/usr/bin:/bin"
-sha="${1:?사용법: vally-deploy-server-build <40자리 SHA>}"
-case "$sha" in
-    *[!0-9a-f]*) echo "vally-deploy-server-build: SHA 형식이 아닙니다" >&2; exit 2 ;;
-esac
-if [ "${#sha}" -ne 40 ]; then
-    echo "vally-deploy-server-build: SHA는 40자리여야 합니다" >&2
-    exit 2
-fi
-cd "$HOME/apps/vallythevally"
-if [ -n "$(git status --porcelain)" ]; then
-    echo "vally-deploy-server-build: 배포 checkout에 커밋하지 않은 변경이 있습니다" >&2
-    exit 1
-fi
-git fetch origin
-git merge --ff-only "$sha"
-if [ "$(git rev-parse HEAD)" != "$sha" ]; then
-    echo "vally-deploy-server-build: HEAD가 대상 SHA가 아닙니다" >&2
-    exit 1
-fi
-lock="$(git rev-parse --path-format=absolute --git-common-dir)/compile.lock"
-exec flock "$lock" env CARGO_BUILD_JOBS=4 cargo build --locked --release -p server
+```json
+{"repos": {"vallythevally": {
+  "hold": true,
+  "source": "<orch PC의 저장소 폴더>",
+  "branch": "main",
+  "host": "<사용자>@<서버 PC 주소>",
+  "cwd": "<서버 PC 홈>/apps/vallythevally",
+  "env": {"VALLY_NODE_BIN": "<서버 PC 홈>/.local/share/fnm/node-versions/v<버전>/installation/bin"},
+  "steps": [
+    {"name": "server-build", "run": ["deploy/server-build"], "timeout": 5400},
+    {"name": "web-build", "run": ["deploy/web-build"]},
+    {"name": "backup", "run": ["deploy/backup"]}
+  ],
+  "restart": ["deploy/restart"],
+  "after": [
+    {"name": "status", "run": ["systemctl", "--user", "is-active", "vally-server.service"]},
+    {"name": "logs", "run": ["journalctl", "--user", "-u", "vally-server.service", "-n", "200", "--no-pager"]}
+  ],
+  "check": {"url": "https://server.<tailnet>.ts.net/api/screener/status", "status": [200], "wait": 30},
+  "timeout": 3600
+}}}
 ```
 
-`vally-deploy-web-build`는 fnm 설치 경로를 PATH에 직접 넣는다. `node_version`을 서버 PC에 깔린 버전으로 맞춘다.
+- `host`가 없으면 같은 PC의 checkout에서 돈다. 이때 `cwd`는 그 PC의 경로이고 `VALLY_DATA_DIR`처럼 다른 PC와 다른 값은 모두 `env`에 둔다.
+- `run`의 `deploy/...`는 `cwd` 기준이라 대상 SHA의 스크립트가 돈다.
+- 서버 PC가 아닌 PC에서도 `env`와 `host`·`cwd`만 바꾸면 같은 스크립트를 쓴다. 서비스 이름과 확인 주소가 다르면 `VALLY_SERVICE`와 `VALLY_HEALTH_URL`을 `env`에 더한다.
 
-```sh
-#!/bin/sh
-set -eu
-node_version=v<버전>
-export PATH="$HOME/.local/share/fnm/node-versions/$node_version/installation/bin:$HOME/.cargo/bin:$HOME/.local/bin:/usr/bin:/bin"
-export CARGO_BUILD_JOBS=4
-cd "$HOME/apps/vallythevally/web"
-pnpm install --frozen-lockfile
-exec pnpm build
-```
-
-`vally-deploy-backup`는 `vally.db`를 SQLite backup API로 떠서 최근 30개를 남긴다.
-
-```python
-#!/usr/bin/env python3
-import os
-import sqlite3
-import sys
-import time
-from pathlib import Path
-
-source_path = Path.home() / "vally-data/server/vally.db"
-folder = Path.home() / "vally-data/backups"
-keep = 30
-
-if not source_path.is_file():
-    sys.exit(f"vally-deploy-backup: {source_path}가 없습니다. 서버 데이터 위치를 확인하세요")
-folder.mkdir(parents=True, exist_ok=True)
-target = folder / f"vally-{time.strftime('%Y%m%d-%H%M%S')}.db"
-partial = target.with_name(target.name + ".part")
-source = sqlite3.connect(f"file:{source_path}?mode=rw", uri=True)
-copy = sqlite3.connect(partial)
-try:
-    source.backup(copy)
-    verdict = copy.execute("pragma integrity_check").fetchone()[0]
-finally:
-    copy.close()
-    source.close()
-if verdict != "ok":
-    partial.unlink()
-    sys.exit(f"vally-deploy-backup: 백업 사본의 integrity_check가 {verdict}입니다. 원본 DB를 확인하세요")
-with open(partial, "rb") as written:
-    os.fsync(written.fileno())
-os.replace(partial, target)
-directory = os.open(folder, os.O_RDONLY)
-os.fsync(directory)
-os.close(directory)
-backups = sorted(folder.glob("vally-*.db"))
-for old in backups[:-keep]:
-    old.unlink()
-print(f"{target} ({target.stat().st_size} bytes), 보관 {min(len(backups), keep)}개")
-```
-
-`vally-deploy-restart`는 재시작 뒤 120초까지 서버가 응답하기를 기다린다.
-
-```sh
-#!/bin/sh
-set -eu
-systemctl --user restart vally-server.service
-waited=0
-while [ "$waited" -lt 120 ]; do
-    if systemctl --user is-active --quiet vally-server.service && curl -fsS -o /dev/null --max-time 2 http://127.0.0.1:8080/api/screener/status; then
-        echo "vally-server가 ${waited}초 만에 응답합니다"
-        exit 0
-    fi
-    waited=$((waited + 1))
-    sleep 1
-done
-echo "vally-server가 120초 안에 응답하지 않았습니다. journalctl --user -u vally-server.service 를 확인하세요" >&2
-exit 1
-```
-
-### 개발 PC 래퍼
-
-개발 PC의 `~/.local/bin/`에 같은 이름으로 두고 `chmod 755`한다. `ssh`의 원격 명령 문자열은 서버 PC 셸이 풀기 때문에 `~`는 서버 PC의 홈이다.
-
-`vally-deploy-server-build`는 배포 checkout의 HEAD를 SHA로 넘긴다. `orch deploy`가 이미 대상 SHA로 맞춰 둔 checkout이다.
-
-```sh
-#!/bin/sh
-set -eu
-sha="$(git -C "$HOME/apps/vallythevally" rev-parse HEAD)"
-exec ssh -o BatchMode=yes <서버 PC> "~/.local/bin/vally-deploy-server-build $sha"
-```
-
-나머지 셋은 이름만 다르다.
-
-```sh
-#!/bin/sh
-set -eu
-exec ssh -o BatchMode=yes <서버 PC> "~/.local/bin/vally-deploy-web-build"
-```
-
-```sh
-#!/bin/sh
-set -eu
-exec ssh -o BatchMode=yes <서버 PC> "~/.local/bin/vally-deploy-backup"
-```
-
-```sh
-#!/bin/sh
-set -eu
-exec ssh -o BatchMode=yes <서버 PC> "~/.local/bin/vally-deploy-restart"
-```
-
-### deploy.json 변경
-
-`deploy.json`은 orch 저장소(`~/.claude/skills/orch`)의 파일이라 이 저장소에서는 고치지 않는다. 오케스트레이터가 orch 저장소에서 `vallythevally`의 세 값만 바꿔 커밋한다. `cwd`, `source`, `branch`와 네 빌드·백업·재시작 명령 경로는 그대로다(래퍼가 같은 경로에 있다).
-
-| 키 | 값 |
-|---|---|
-| `status` | `["ssh", "-o", "BatchMode=yes", "<서버 PC>", "systemctl", "--user", "is-active", "vally-server.service"]` |
-| `logs` | `["ssh", "-o", "BatchMode=yes", "<서버 PC>", "journalctl", "--user", "-u", "vally-server.service", "-n", "200", "--no-pager"]` |
-| `http_url` | `https://server.<tailnet>.ts.net/api/screener/status` |
-
-그 저장소의 `docs/deploy.md` "운영 명령 제안과 미확인 값" 표에서 재시작 호스트를 "서버 PC, 스크립트가 ssh로 실행"으로 고친다. 그 뒤 `orch deploy resume`으로 보류를 풀고 첫 `orch deploy run`은 사용자 승인 뒤에 한다.
 
 ### Tailscale SSH 위험
 

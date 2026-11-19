@@ -1,0 +1,40 @@
+#!/usr/bin/env python3
+import os
+import sqlite3
+import sys
+import time
+from pathlib import Path
+
+data_dir = Path(os.environ.get("VALLY_DATA_DIR") or Path.home() / "vally-data")
+keep = int(os.environ.get("VALLY_BACKUP_KEEP") or 30)
+if keep < 1:
+    sys.exit(f"vally-deploy backup: VALLY_BACKUP_KEEP은 1 이상이어야 합니다({keep})")
+source_path = data_dir / "server/vally.db"
+folder = data_dir / "backups"
+
+if not source_path.is_file():
+    sys.exit(f"vally-deploy backup: {source_path}가 없습니다. 서버 데이터 위치(VALLY_DATA_DIR)를 확인하세요")
+folder.mkdir(parents=True, exist_ok=True)
+target = folder / f"vally-{time.strftime('%Y%m%d-%H%M%S')}.db"
+partial = target.with_name(target.name + ".part")
+source = sqlite3.connect(f"{source_path.resolve().as_uri()}?mode=rw", uri=True)
+copy = sqlite3.connect(partial)
+try:
+    source.backup(copy)
+    verdict = copy.execute("pragma integrity_check").fetchone()[0]
+finally:
+    copy.close()
+    source.close()
+if verdict != "ok":
+    partial.unlink()
+    sys.exit(f"vally-deploy backup: 백업 사본의 integrity_check가 {verdict}입니다. 원본 DB를 확인하세요")
+with open(partial, "rb") as written:
+    os.fsync(written.fileno())
+os.replace(partial, target)
+directory = os.open(folder, os.O_RDONLY)
+os.fsync(directory)
+os.close(directory)
+backups = sorted(folder.glob("vally-*.db"))
+for old in backups[:-keep]:
+    old.unlink()
+print(f"{target} ({target.stat().st_size} bytes), 보관 {min(len(backups), keep)}개")
