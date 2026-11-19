@@ -56,6 +56,7 @@ pub fn router(state: Arc<AppState>) -> Router {
         .merge(crate::intraday_feed::routes())
         .merge(crate::rankings::routes())
         .merge(crate::market_overview::routes())
+        .merge(crate::etf::routes())
         .merge(crate::system_routes::routes(state.clone()))
         .merge(crate::account_routes::routes(state.clone()))
         .merge(crate::collector::routes())

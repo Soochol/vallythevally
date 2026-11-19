@@ -140,7 +140,7 @@ export const askAtLastSnapshot = (spreadGap = 0): ReturnType<typeof snapshot> =>
   bids: Array.from({ length: 10 }, (_, i) => ({ price: BASE - 100 - spreadGap - 100 * i, quantity: 20 + i })),
 });
 
-export async function openOrderWindow(page: Page, scenario: Scenario, withSecondChart = false, savedVenue: Venue = "krx", limits: { upper: number | null; lower: number | null } = { upper: 91_000, lower: 49_000 }, bookFails = false, book: ReturnType<typeof snapshot> = snapshot(BASE)): Promise<void> {
+export async function openOrderWindow(page: Page, scenario: Scenario, withSecondChart = false, savedVenue: Venue = "krx", limits: { upper: number | null; lower: number | null } = { upper: 91_000, lower: 49_000 }, bookFails = false, book: ReturnType<typeof snapshot> = snapshot(BASE), arrange: (windows: LayoutWindow[]) => LayoutWindow[] = (windows) => windows): Promise<void> {
   const layout = scenario.documents.layout(DEFAULT_LAYOUT_ID);
   const windows: LayoutWindow[] = [
     { id: "cell-0", link: null, kind: "chart", symbol: CODE, venue: "combined", period: "D", chartSettings: SETTINGS },
@@ -148,7 +148,7 @@ export async function openOrderWindow(page: Page, scenario: Scenario, withSecond
     ...layout.windows.filter((w) => w.kind !== "chart"),
     { id: "order", link: null, kind: "order", venue: savedVenue },
   ];
-  scenario.documents.saveLayout({ ...layout, windows, placement: {}, revision: layout.revision + 1 });
+  scenario.documents.saveLayout({ ...layout, windows: arrange(windows), placement: {}, revision: layout.revision + 1 });
   pinQuote(scenario, CODE, BASE);
   scenario.reply((url) => url.pathname === `/api/symbols/${CODE}/fundamentals`, { body: { symbol: CODE, upperLimit: limits.upper, lowerLimit: limits.lower, marketCap: null, listedShares: null, per: null, pbr: null, roe: null, eps: null, bps: null, foreignExhaustionRate: null, high52w: null, low52w: null } });
   scenario.reply((url) => url.pathname === `/api/symbols/${CODE}/order-book`, bookFails ? { status: 503, body: { error: { code: "internal", message: "호가 조회 실패", reason: null, retryAt: null, manualActionRequired: false } } } : { body: book });

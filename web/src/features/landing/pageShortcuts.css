@@ -1,0 +1,8 @@
+.landing-shortcuts-wrap { max-width: 1440px; margin: 0 auto; padding: clamp(var(--size-24), 4vw, var(--size-64)) clamp(var(--size-16), 5vw, var(--size-72)) 0; }
+.landing-shortcuts { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr)); gap: var(--size-16); margin: 0; padding: 0; list-style: none; }
+.landing-shortcut {
+  display: flex; flex-direction: column; gap: var(--size-8); height: 100%; padding: var(--size-24); border-radius: var(--r-xl);
+  background: var(--surface); box-shadow: 0 0 0 1px var(--line); color: var(--text-2); font-size: var(--fs-m); line-height: 1.6;
+}
+.landing-shortcut strong { color: var(--text); font-size: var(--fs-l); }
+.landing-shortcut:hover { box-shadow: 0 0 0 1px var(--accent); }

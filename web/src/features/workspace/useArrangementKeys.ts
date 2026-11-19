@@ -46,8 +46,9 @@ const sceneOf = (e: KeyboardEvent): ArrangementKeyScene => ({
 const focusedTab = () => document.activeElement?.closest<HTMLElement>('[role="tab"][data-window-id]')?.dataset.windowId ?? null;
 const isDocked = (id: string) => groupOfWindow(fittedDock(useLayoutStore.getState().layout).root, windowId(id)) !== null;
 
-export function useArrangementKeys() {
+export function useArrangementKeys(enabled: boolean) {
   useEffect(() => {
+    if (!enabled) return;
     const onKey = (e: KeyboardEvent) => {
       const command = arrangementKeyCommand(e, sceneOf(e));
       if (!command) return;
@@ -64,5 +65,5 @@ export function useArrangementKeys() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, []);
+  }, [enabled]);
 }

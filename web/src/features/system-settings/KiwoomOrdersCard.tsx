@@ -37,7 +37,7 @@ export function KiwoomOrdersCard() {
       <p className="text-m text-text">{statusLine(status)}</p>
       {checkedTail !== null && (
         <div className="flex flex-col gap-2">
-          <p className="text-m text-text-2">키움이 알려 준 계좌 끝 2자리: <span className="font-mono text-text">{checkedTail}</span></p>
+          <p className="text-m text-text-2">키움이 알려 준 계좌번호(8자리) 끝 2자리: <span className="font-mono text-text">{checkedTail}</span></p>
           <label className="flex items-start gap-2 text-m">
             <input type="checkbox" className="mt-1" checked={accountConfirmed} onChange={(e) => setAccountConfirmed(e.target.checked)} />
             이 계좌가 맞습니다

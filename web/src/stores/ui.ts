@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import type { Venue } from "../api/generated/Venue";
 import type { SymbolCode } from "../api/generated/SymbolCode";
+import type { LinkColor } from "../api/generated/LinkColor";
 import type { LayoutMode } from "../layout/modes";
 import type { MinutePeriod } from "../lib/symbol";
 import type { WatchColumn } from "../lib/watchlist";
@@ -27,6 +28,7 @@ interface UiStore {
   setVenue(venue: Venue): void;
   setOrderSettings(settings: OrderSettings): void;
   setHotkeys(hotkeys: HotkeyOverrides): void;
+  setPageLink(link: LinkColor | null): void;
 }
 
 export const useUiStore = create<UiStore>()((set) => {
@@ -53,6 +55,7 @@ export const useUiStore = create<UiStore>()((set) => {
     setLayoutMode: (layoutMode) => edit((p) => (p.layoutMode === layoutMode ? p : { ...p, layoutMode })),
     setOrderSettings: (orderSettings) => edit((p) => (p.orderSettings === orderSettings ? p : { ...p, orderSettings })),
     setHotkeys: (hotkeys) => edit((p) => (p.hotkeys === hotkeys ? p : { ...p, hotkeys })),
+    setPageLink: (pageLink) => edit((p) => (p.pageLink === pageLink ? p : { ...p, pageLink })),
     setVenue: (venue) => edit((p) => (p.venue === venue ? p : { ...p, venue })),
     setIndicatorWindow: (indicatorWindow) => edit((p) => (p.indicatorWindow === indicatorWindow ? p : { ...p, indicatorWindow })),
     setDrawingPrefs: (patch) => edit((p) => ({ ...p, drawing: { ...p.drawing, ...patch } })),

@@ -28,8 +28,8 @@ use crate::kiwoom::transport::{HttpResponse, Stage, TransportError};
 use crate::symbols::SymbolDirectory;
 use crate::trading::TradingApiId;
 
-pub(super) const ACCOUNT: &str = "5550123401";
-const OTHER_ACCOUNT: &str = "5559876502";
+pub(super) const ACCOUNT: &str = "5550120110";
+const OTHER_ACCOUNT: &str = "5559870210";
 pub(super) const HOST: &str = "127.0.0.1:7777";
 
 #[derive(Clone, Default)]
@@ -631,7 +631,11 @@ async fn direct_trading(latency: Duration, store: SwitchStore) -> (Arc<Trading>,
 }
 
 async fn direct_trading_spaced(latency: Duration, spacing: Duration, store: SwitchStore) -> (Arc<Trading>, Arc<FakeTransport>, AccountFeed, Clock, tempfile::TempDir) {
-    let fake = Arc::new(FakeTransport::new(latency, |sent| if sent.api_id == Endpoint::ISSUE { token(1) } else { reply(sent, ACCOUNT, ACCOUNT) }));
+    trading_of_account(ACCOUNT, latency, spacing, store).await
+}
+
+async fn trading_of_account(account: &'static str, latency: Duration, spacing: Duration, store: SwitchStore) -> (Arc<Trading>, Arc<FakeTransport>, AccountFeed, Clock, tempfile::TempDir) {
+    let fake = Arc::new(FakeTransport::new(latency, move |sent| if sent.api_id == Endpoint::ISSUE { token(1) } else { reply(sent, account, account) }));
     let clock = Clock::fake(kst(KstDate::new(2026, 11, 9).unwrap(), 10, 0, 0));
     let rest = KiwoomRest::with_send_spacing(Arc::new(fake.clone()), KiwoomAuth::new(Secret::new("k".into()), Secret::new("s".into()), None), clock.clone(), spacing);
     rest.set_access(Access::Open);
@@ -829,4 +833,106 @@ async fn the_account_number_query_refuses_a_foreign_host() {
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
     let body = String::from_utf8_lossy(&response.into_body().collect().await.unwrap().to_bytes()).into_owned();
     assert!(!body.contains(ACCOUNT), "낯선 Host의 요청에 번호가 나갔다: {body}");
+}
+
+const EIGHT_DIGIT_EXAMPLE: &str = "1234567810";
+
+#[tokio::test]
+async fn the_account_tail_is_the_last_two_of_the_eight_digits_users_know() {
+    let f = fixture().await;
+    *f.account.lock().unwrap() = EIGHT_DIGIT_EXAMPLE.to_owned();
+    let (code, check) = call(&f.app, "POST", "/api/system/orders/check-account", Some(json!({}))).await;
+    assert_eq!((code, check), (StatusCode::OK, json!({"accountTail": "78"})));
+
+    let (code, body) = enable(&f.app, "10").await;
+    assert_eq!(code, StatusCode::BAD_REQUEST, "상품 구분 두 자리는 맞지 않는다: {body}");
+    assert!(!f.feed.wanted());
+
+    let (code, on) = enable(&f.app, "78").await;
+    assert_eq!(code, StatusCode::OK, "{on}");
+    let status: OrdersStatus = serde_json::from_value(on).unwrap();
+    assert_eq!((status.state, status.account_tail.as_deref()), (crate::api::OrdersState::On, Some("78")));
+}
+
+fn legacy_switch_store(dir: &std::path::Path) -> (SwitchStore, std::path::PathBuf) {
+    let path = dir.join("state").join("orders.json");
+    (SwitchStore::file(PrivateFile::new(path.clone()), crate::api::KiwoomEnvironment::Real), path)
+}
+
+async fn enable_then_rewrite_as_legacy(path: &std::path::Path) {
+    let (trading, ..) = direct_trading_with_example(SwitchStore::file(PrivateFile::new(path.to_owned()), crate::api::KiwoomEnvironment::Real)).await;
+    trading.set_enabled(confirm("78")).await.unwrap();
+    let text = std::fs::read_to_string(path).unwrap();
+    let legacy = text.replace("\"accountNumberTail\":\"78\"", "\"accountTail\":\"10\"");
+    assert_ne!(text, legacy, "{text}");
+    std::fs::write(path, legacy).unwrap();
+}
+
+async fn direct_trading_with_example(store: SwitchStore) -> (Arc<Trading>, Arc<FakeTransport>, AccountFeed, Clock, tempfile::TempDir) {
+    trading_of_account(EIGHT_DIGIT_EXAMPLE, Duration::ZERO, Duration::ZERO, store).await
+}
+
+#[tokio::test]
+async fn a_switch_record_from_before_the_eight_digit_tail_shows_no_tail_until_the_next_account_check() {
+    let state = tempfile::tempdir().unwrap();
+    let (store, path) = legacy_switch_store(state.path());
+    enable_then_rewrite_as_legacy(&path).await;
+
+    let (trading, fake, _feed, clock, _dir) = direct_trading_with_example(store).await;
+    let status = trading.status();
+    assert_eq!((status.state, status.account_tail), (crate::api::OrdersState::On, None), "옛 기록의 끝 2자리는 새 뜻이 아니라 보이지 않는다");
+
+    trading.balance().await.unwrap();
+    assert_eq!(trading.status().account_tail.as_deref(), Some("78"), "계좌 확인이 맞으면 새 끝 2자리로 채운다");
+    let text = std::fs::read_to_string(&path).unwrap();
+    assert!(text.contains("\"accountNumberTail\":\"78\"") && !text.contains("\"accountTail\""), "{text}");
+    assert!(!text.contains(EIGHT_DIGIT_EXAMPLE), "{text}");
+    let sent = trading_sends(&fake).len();
+    clock.jump(1);
+    trading.balance().await.unwrap();
+    assert_eq!(trading_sends(&fake)[sent..], ["kt00018"], "채운 뒤에는 계좌를 다시 묻지 않고 기록도 그대로다");
+}
+
+#[tokio::test]
+async fn a_legacy_switch_record_is_not_filled_for_a_different_account() {
+    let state = tempfile::tempdir().unwrap();
+    let (store, path) = legacy_switch_store(state.path());
+    enable_then_rewrite_as_legacy(&path).await;
+    let before = std::fs::read_to_string(&path).unwrap();
+
+    let (trading, ..) = trading_of_account(OTHER_ACCOUNT, Duration::ZERO, Duration::ZERO, store).await;
+    let error = trading.balance().await.unwrap_err();
+    assert!(matches!(error, TradingError::AccountChanged), "{error:?}");
+    let status = trading.status();
+    assert_eq!((status.state, status.account_tail), (crate::api::OrdersState::AccountChanged, None));
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), before, "다른 계좌면 기록을 채우지 않는다");
+}
+
+#[tokio::test]
+async fn a_legacy_switch_record_that_cannot_be_written_stays_unusable() {
+    use std::os::unix::fs::PermissionsExt;
+    let state = tempfile::tempdir().unwrap();
+    let (store, path) = legacy_switch_store(state.path());
+    enable_then_rewrite_as_legacy(&path).await;
+    let before = std::fs::read_to_string(&path).unwrap();
+    std::fs::set_permissions(path.parent().unwrap(), std::fs::Permissions::from_mode(0o755)).unwrap();
+
+    let (trading, ..) = direct_trading_with_example(store).await;
+    let error = trading.balance().await.unwrap_err();
+    assert!(matches!(error, TradingError::FileUnusable(_)), "{error:?}");
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), before);
+}
+
+#[tokio::test]
+async fn changing_the_margin_policy_keeps_a_legacy_switch_record_usable() {
+    let state = tempfile::tempdir().unwrap();
+    let (store, path) = legacy_switch_store(state.path());
+    enable_then_rewrite_as_legacy(&path).await;
+
+    let (trading, ..) = direct_trading_with_example(store).await;
+    trading.set_margin_policy(crate::api::OrdersMargin { policy: crate::api::MarginPolicy::AllowMargin }).await.unwrap();
+    let status = trading.status();
+    assert_eq!((status.state, status.account_tail), (crate::api::OrdersState::On, None));
+    trading.balance().await.unwrap();
+    assert_eq!(trading.status().account_tail.as_deref(), Some("78"));
 }

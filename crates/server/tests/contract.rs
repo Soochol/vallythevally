@@ -12,6 +12,7 @@ use server::collector::wire::{CollectorAlert, CollectorCoverage, CollectorCovera
 use server::collector::{CollectorAccess, CollectorAccessState, CollectorStatusPage, DaemonJudgment};
 use server::drawing_api::*;
 use server::market_overview::*;
+use server::etf::*;
 use ts_rs::TS;
 
 const DIR: &str = "web/src/api/generated";
@@ -107,6 +108,17 @@ fn generated_typescript_matches_the_committed_files() {
         generated::<DrawingTool>(),
         generated::<ClientMessage>(),
         generated::<ConnectionStatus>(),
+        generated::<EtfDataSource>(),
+        generated::<EtfDataStatus>(),
+        generated::<EtfFundDetail>(),
+        generated::<EtfFundList>(),
+        generated::<EtfFundSummary>(),
+        generated::<EtfHolding>(),
+        generated::<EtfMaState>(),
+        generated::<EtfMaStates>(),
+        generated::<EtfStockHolder>(),
+        generated::<EtfStockHolders>(),
+        generated::<EtfStyle>(),
         generated::<ExcludeKind>(),
         generated::<Extreme>(),
         generated::<FinancialBasis>(),

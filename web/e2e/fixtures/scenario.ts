@@ -32,6 +32,7 @@ import type { UiState } from "../../src/api/generated/UiState";
 import type { Venue } from "../../src/api/generated/Venue";
 import type { Watchlist } from "../../src/api/generated/Watchlist";
 import type { Watchlists } from "../../src/api/generated/Watchlists";
+import { etfBaseline } from "./etf-data";
 import { barsPage, findSymbol, publicInfo, quoteOf, resolveVenue, search, SYMBOLS } from "../../dev/fakeMarket";
 
 export const DEFAULT_LAYOUT_ID = "01900000-0000-7000-8000-000000000001";
@@ -338,6 +339,8 @@ export class Scenario {
       return { body: this.market.jumpPage({ symbol, period, venue, date, limit: Number(url.searchParams.get("limit") ?? 500), before: url.searchParams.has("before") ? Number(url.searchParams.get("before")) : null }) };
     }
     if (/^\/api\/symbols\/[^/]+$/.test(path) && method === "GET") { const value = this.market.symbols.find(value => value.code === decodeURIComponent(path.slice("/api/symbols/".length))); return value ? { body: value } : error(404, "unknown_symbol", "종목이 없습니다"); }
+    const etf = etfBaseline(path, method);
+    if (etf) return etf;
     if (path === "/api/rankings" && method === "POST") return { body: { rows: [], pages: 1, end: true, limited: false, hidden: 0, fetchedAt: Math.floor(this.now / 1000) } satisfies RankingPage };
     if (path === "/api/screener/status" && method === "GET") return { body: { lastDay: null, needDay: "2026-11-06", todayAvailable: false, fullHistory: { done: 0, total: 0 }, unconfirmed: 0, update: null } satisfies ScreenerStatus };
     if (path === "/api/financial-update" && method === "GET") return { body: { id: 0, status: "not_configured", phase: "planning", stopReason: null, nextCheckAt: null, canResume: false, automatic: false, latestCheckPending: false, historyCompletedCompanies: 0, historyFailedCompanies: 0, recentFailedCompanies: 0, historyComplete: false, fromYear: 2015, throughYear: 2026, totalSymbols: 0, processedSymbols: 0, unsupportedSymbols: 0, unverifiedSymbols: 0, unverifiedDividends: 0, totalCompanies: 0, completedCompanies: 0, failedCompanies: 0, startedAt: null, lastCheckedAt: null, failure: null, failures: [] } satisfies FinancialUpdatePage };

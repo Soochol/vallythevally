@@ -54,7 +54,7 @@ function useHeldWhile<T>(value: T, hold: boolean, same: (a: T, b: T) => boolean 
 const sameLadderPrices = (a: LadderPrices | null, b: LadderPrices | null): boolean =>
   a === b || (a !== null && b !== null && a.sidesSplit === b.sidesSplit && a.prices.length === b.prices.length && a.prices.every((price, row) => price === b.prices[row]));
 
-function OrderBody({ code }: { code: SymbolCode }) {
+function OrderBody({ id, code }: { id: WindowId; code: SymbolCode }) {
   const mock = useMockEnvironment();
   const quoteVenue = useShownVenue(code);
   const feed = useBookFeed(code, quoteVenue);
@@ -174,7 +174,7 @@ function OrderBody({ code }: { code: SymbolCode }) {
           <button type="button" className="od-link" onClick={() => openSystemSettings("kiwoom")}>시스템 설정 열기</button>
         </div>
       )}
-      <AccountBand accountTail={accountTail} maskAccount={settings.maskAccount} openOrders={data.openOrders} balance={data.balance} executions={data.executions} writable={writable} mock={mock} policy={data.orderable?.policy ?? null} onCancel={writes.cancelOne} />
+      <AccountBand windowId={id} accountTail={accountTail} maskAccount={settings.maskAccount} openOrders={data.openOrders} balance={data.balance} executions={data.executions} writable={writable} mock={mock} policy={data.orderable?.policy ?? null} onCancel={writes.cancelOne} />
       <HoldingSummary holding={holding} orderable={data.orderable} buyableProblem={data.buyableProblem} unit={profitUnit} onUnit={() => setProfitUnit(toggledUnit)} onFill={setInput} />
       <div className="od-entry">
         <QuantityRow presetKind={presetKind} input={input} sharePresets={settings.sharePresets} amountPresets={settings.amountPresets} referencePrice={referencePrice} onPresetKind={setPresetKind} onInput={setInput} />
@@ -208,5 +208,5 @@ export function OrderWindow({ id }: { id: WindowId }) {
   const code = useLinkedSymbol(id);
   if (code === null) return <EmptyState title="연동된 종목이 없습니다" />;
   if (isIndexCode(code)) return <EmptyState title="이 창은 주식만 보입니다" />;
-  return <OrderBody key={code} code={code} />;
+  return <OrderBody key={code} id={id} code={code} />;
 }

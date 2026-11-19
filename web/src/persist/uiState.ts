@@ -1,6 +1,8 @@
 import { isMinutePeriod, type MinutePeriod } from "../lib/symbol";
 import type { Venue } from "../api/generated/Venue";
 import type { SymbolCode } from "../api/generated/SymbolCode";
+import type { LinkColor } from "../api/generated/LinkColor";
+import { LINK_COLORS } from "../api/linkColors";
 import type { UiState } from "../api/generated/UiState";
 import { isVenue } from "../lib/venue";
 import { DEFAULT_WATCH_COLUMNS, WATCH_COLUMNS, type WatchColumn } from "../lib/watchlist";
@@ -30,6 +32,7 @@ export interface UiPrefs {
   venue: Venue;
   orderSettings: OrderSettings;
   hotkeys: HotkeyOverrides;
+  pageLink: LinkColor | null;
 }
 
 export type UiExtra = Record<string, unknown>;
@@ -48,6 +51,7 @@ export const DEFAULT_UI_PREFS: UiPrefs = {
   venue: "combined",
   orderSettings: DEFAULT_ORDER_SETTINGS,
   hotkeys: NO_HOTKEY_OVERRIDES,
+  pageLink: "a",
 };
 
 const isStringArray = (x: unknown): x is string[] => Array.isArray(x) && x.every((s) => typeof s === "string");
@@ -59,7 +63,7 @@ export function parseUiState(raw: unknown): { prefs: UiPrefs; extra: UiExtra } {
     console.warn("UiState가 객체가 아니어서 기본값으로 엽니다", raw);
     return { prefs: DEFAULT_UI_PREFS, extra: {} };
   }
-  const { rightPanel: _rightPanel, panelWidth: _panelWidth, rightPanelWidth: _rightPanelWidth, lastLayoutId, theme, watchCollapsed: _watchCollapsed, recentSymbols, activeWatchlistId, watchColumns, drawing, lastMinute, pinnedMinutes: _pinnedMinutes, collapsedWatchGroups, indicatorWindow, layoutMode, venue, orderSettings, hotkeys, revision: _revision, ...extra } = raw as Record<string, unknown>;
+  const { rightPanel: _rightPanel, panelWidth: _panelWidth, rightPanelWidth: _rightPanelWidth, lastLayoutId, theme, watchCollapsed: _watchCollapsed, recentSymbols, activeWatchlistId, watchColumns, drawing, lastMinute, pinnedMinutes: _pinnedMinutes, collapsedWatchGroups, indicatorWindow, layoutMode, venue, orderSettings, hotkeys, pageLink, revision: _revision, ...extra } = raw as Record<string, unknown>;
   const bad: string[] = [];
   const pick = <T>(key: string, value: unknown, ok: (x: unknown) => x is T, fallback: T, missingOk = false): T => {
     if (ok(value)) return value;
@@ -82,6 +86,7 @@ export function parseUiState(raw: unknown): { prefs: UiPrefs; extra: UiExtra } {
     venue: pick("venue", venue, (x): x is Venue => typeof x === "string" && isVenue(x), DEFAULT_UI_PREFS.venue, true),
     orderSettings: parseOrderSettings(orderSettings),
     hotkeys: parsedHotkeys.hotkeys,
+    pageLink: pick("pageLink", pageLink, (x): x is LinkColor | null => x === null || (typeof x === "string" && (LINK_COLORS as string[]).includes(x)), DEFAULT_UI_PREFS.pageLink, true),
     lastMinute: pick("lastMinute", lastMinute, (x): x is MinutePeriod => typeof x === "string" && isMinutePeriod(x), DEFAULT_UI_PREFS.lastMinute, true),
     collapsedWatchGroups: [...new Set(pick("collapsedWatchGroups", collapsedWatchGroups, isStringArray, [], true))],
   };

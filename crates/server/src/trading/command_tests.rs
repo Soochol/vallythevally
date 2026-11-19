@@ -68,7 +68,7 @@ async fn an_accepted_buy_sends_one_limit_order_and_records_the_order_number() {
     assert_eq!(writes(&f), vec![("kt10000", json!({"dmst_stex_tp": "KRX", "stk_cd": "005930", "ord_qty": "3", "ord_uv": "71000", "trde_tp": "0"}))]);
     let (_, stored) = get(&f.app, "/api/trading/commands/cmd-buy-0001").await;
     assert_eq!(stored, command);
-    assert!(!command.to_string().contains("5550123401"), "저널과 응답에는 계좌번호가 없다");
+    assert!(!command.to_string().contains("5550120110"), "저널과 응답에는 계좌번호가 없다");
     let sell = json!({"commandId": "cmd-sell-001", "code": "005930", "side": "sell", "quantity": 2, "price": 71_000, "venue": "combined"});
     let (_, command) = order(&f.app, PLACE, sell).await;
     assert_eq!(command["state"], "accepted");
@@ -566,7 +566,7 @@ async fn the_journal_never_holds_the_account_number() {
     order(&f.app, PLACE, buy("cmd-priv-0001", 1, 71_000)).await;
     let rows: Vec<String> = sqlx::query_scalar("SELECT account_ref || command_id || fingerprint || COALESCE(order_no, '') FROM order_commands").fetch_all(f.state.db.read()).await.unwrap();
     assert!(!rows.is_empty());
-    assert!(rows.iter().all(|row| !row.contains("5550123401")), "{rows:?}");
+    assert!(rows.iter().all(|row| !row.contains("5550120110")), "{rows:?}");
 }
 
 #[tokio::test]
