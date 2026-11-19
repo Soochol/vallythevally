@@ -13,9 +13,11 @@ import { useVenue } from "../../stores/ui";
 import { useWatchlistStore } from "../../stores/watchlist";
 import { EmptyState } from "../overlay/State";
 import { PageFrame } from "../pages/PageFrame";
+import { HeatmapFlow } from "./HeatmapFlow";
 import { HeatmapGroup } from "./HeatmapGroup";
 import { HeatmapToolbar } from "./HeatmapToolbar";
 import { hasTradedValue, snapshotRows } from "./arrange";
+import { groupColor } from "./groupColors";
 import { parseSettings, withSettings, type HeatmapSettings } from "./settings";
 import "./heatmapPage.css";
 
@@ -25,13 +27,14 @@ export interface HeatmapSection {
   key: string;
   title: string;
   symbols: readonly SymbolCode[];
+  color: string;
 }
 
 export function heatmapSections(lists: readonly Watchlist[]): HeatmapSection[] {
   const several = lists.length > 1;
-  return lists.flatMap((list) =>
-    list.groups.map((group: WatchGroup) => ({ key: group.id, title: several ? `${list.name} · ${group.name}` : group.name, symbols: group.symbols })),
-  );
+  return lists
+    .flatMap((list) => list.groups.map((group: WatchGroup) => ({ key: group.id, title: several ? `${list.name} · ${group.name}` : group.name, symbols: group.symbols })))
+    .map((section, index) => ({ ...section, color: groupColor(index) }));
 }
 
 function useBookTick(codes: readonly SymbolCode[]): number {
@@ -75,12 +78,12 @@ export function HeatmapPage() {
   return (
     <PageFrame title="히트맵" freshness={freshness}>
       <HeatmapToolbar settings={settings} onChange={change} tradedKnown={!settled || tradedKnown} />
-      {settings.view === "flow" ? (
-        <div className="hm-preparing" role="status">흐름 비교는 준비 중입니다</div>
-      ) : sections.length === 0 ? (
+      {sections.length === 0 ? (
         <EmptyState title="관심종목 그룹이 없습니다">
           <p className="hm-empty-hint">히트맵은 관심종목 그룹마다 지도를 그립니다. 작업 영역의 관심종목 창에서 ‘새 그룹’을 만들고 종목을 넣으면 여기에 나타납니다.</p>
         </EmptyState>
+      ) : settings.view === "flow" ? (
+        <HeatmapFlow sections={sections} names={nameOf} venue={venue} />
       ) : (
         <div className="hm-groups">
           {sections.map((section) => (

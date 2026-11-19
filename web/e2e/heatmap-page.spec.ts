@@ -60,16 +60,6 @@ test("크기 기준과 정렬은 주소에 남고 정렬 기준을 글자로 보
   await expect(page).not.toHaveURL(/size=/);
 });
 
-test("흐름 비교 보기는 준비 중이고 주소에 남는다", async ({ page, scenario }) => {
-  seedHeatmapGroups(scenario, table());
-  await page.goto("/heatmap");
-  await main(page).getByRole("tab", { name: "흐름 비교" }).click();
-  await expect(main(page).getByText("흐름 비교는 준비 중입니다")).toBeVisible();
-  await expect(page).toHaveURL(/view=flow/);
-  await main(page).getByRole("tab", { name: "보드" }).click();
-  await expect(group(page, "반도체")).toBeVisible();
-});
-
 test("실시간 프레임은 칸 색을 바로 바꾸지만 자리는 1분이 지나야 바뀐다", async ({ page, scenario }) => {
   const rows = table();
   seedHeatmapGroups(scenario, rows);
