@@ -89,7 +89,7 @@ fn kiwoom_reason(e: &KiwoomError) -> OrderRejectReason {
 fn kiwoom_said_no(failure: &Failure) -> bool {
     let refusing = matches!(
         failure.category(),
-        Category::RateLimit | Category::TokenInvalid | Category::AuthBlocked | Category::InvalidRequest | Category::SymbolMismatch | Category::BatchLimit | Category::Unsupported | Category::Unknown
+        Category::RateLimit | Category::TokenInvalid | Category::AuthBlocked | Category::InvalidRequest | Category::SymbolMismatch | Category::BatchLimit | Category::BusinessRejected | Category::Unsupported | Category::Unknown
     );
     match failure.http_status() {
         Some(429) => true,

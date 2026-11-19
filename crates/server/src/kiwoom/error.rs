@@ -40,6 +40,7 @@ pub enum Category {
     RealtimeCapacity,
     ControlRejected,
     SubscriptionMismatch,
+    BusinessRejected,
     Unknown,
     Protocol,
 }
@@ -107,6 +108,7 @@ pub const CODE_TABLE: &[(CodeKey, Rule)] = &[
     (Rest(8104), Known(Unsupported, Official)),
     (Rest(8200), Known(Unsupported, Official)),
     (Rest(1634), Known(BatchLimit, Observed)),
+    (Rest(2000), Known(BusinessRejected, Reported)),
     (WsControl(1), Known(ControlRejected, Official)),
     (WsControl(8005), Known(TokenInvalid, Official)),
     (WsControl(8031), Known(AuthBlocked, Official)),
@@ -202,14 +204,14 @@ pub const fn policy(phase: Phase, category: Category) -> Policy {
         (Phase::Market, Transient) => p(Backoff, Gate),
         (Phase::Market, TokenInvalid) => p(RefreshTokenOnce, Nothing),
         (Phase::Market, AuthIndeterminate) => p(Never, AuthGate),
-        (Phase::Market, InvalidRequest | SymbolMismatch | BatchLimit) => p(Never, Nothing),
+        (Phase::Market, InvalidRequest | SymbolMismatch | BatchLimit | BusinessRejected) => p(Never, Nothing),
         (Phase::Market, Unsupported | Unknown | Protocol) => p(Never, Path),
         (Phase::Market, RealtimeCapacity | ControlRejected | SubscriptionMismatch) => p(Never, Path),
         (Phase::Issue, RateLimit | Transient) => p(Never, IssueInterval),
         (Phase::Issue, TokenInvalid | AuthIndeterminate) => p(Never, PathOnRepeat),
         (
             Phase::Issue,
-            InvalidRequest | SymbolMismatch | BatchLimit | Unsupported | Unknown | Protocol | RealtimeCapacity | ControlRejected | SubscriptionMismatch,
+            InvalidRequest | SymbolMismatch | BatchLimit | BusinessRejected | Unsupported | Unknown | Protocol | RealtimeCapacity | ControlRejected | SubscriptionMismatch,
         ) => p(Never, Path),
     }
 }
@@ -256,6 +258,34 @@ impl fmt::Display for Note {
     }
 }
 
+/// `[NNNN](RRRRRR:…)`의 괄호 안 여섯 자리. 숫자만 담고 뒤따르는 키움 문장은 버린다.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct VendorReason(u32);
+
+const KNOWN_VENDOR_REASONS: &[(u32, &str)] = &[
+    (571489, "장이 열리지 않는 날입니다"),
+    (571455, "매도할 잔고가 부족합니다(보유하지 않은 종목)"),
+    (508975, "주문 가격이 가격 범위를 벗어났습니다"),
+    (503721, "신용계좌 전용 조회입니다"),
+    (501307, "거래소 구분이 올바르지 않습니다"),
+];
+
+impl VendorReason {
+    pub fn number(self) -> u32 {
+        self.0
+    }
+
+    pub fn known_text(self) -> Option<&'static str> {
+        KNOWN_VENDOR_REASONS.iter().find(|(number, _)| *number == self.0).map(|(_, text)| *text)
+    }
+}
+
+impl fmt::Display for VendorReason {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Failure {
     category: Category,
@@ -263,20 +293,21 @@ pub struct Failure {
     http_status: Option<u16>,
     return_code: Option<i64>,
     detail: Option<CodeKey>,
+    vendor_reason: Option<VendorReason>,
     note: Note,
 }
 
 impl Failure {
     pub fn transport(api_id: impl Into<Endpoint>, e: TransportError) -> Failure {
-        Failure { category: Transient, api_id: api_id.into(), http_status: None, return_code: None, detail: None, note: Note::Transport(e) }
+        Failure { category: Transient, api_id: api_id.into(), http_status: None, return_code: None, detail: None, vendor_reason: None, note: Note::Transport(e) }
     }
 
     pub fn queue_gone(api_id: impl Into<Endpoint>) -> Failure {
-        Failure { category: Transient, api_id: api_id.into(), http_status: None, return_code: None, detail: None, note: Note::QueueGone }
+        Failure { category: Transient, api_id: api_id.into(), http_status: None, return_code: None, detail: None, vendor_reason: None, note: Note::QueueGone }
     }
 
     pub fn protocol(api_id: impl Into<Endpoint>, note: Note) -> Failure {
-        Failure { category: Protocol, api_id: api_id.into(), http_status: None, return_code: None, detail: None, note }
+        Failure { category: Protocol, api_id: api_id.into(), http_status: None, return_code: None, detail: None, vendor_reason: None, note }
     }
 
     pub fn schema(api_id: impl Into<Endpoint>, envelope: Envelope, note: Note) -> Failure {
@@ -286,12 +317,13 @@ impl Failure {
             http_status: Some(envelope.http_status),
             return_code: Some(envelope.return_code),
             detail: None,
+            vendor_reason: None,
             note,
         }
     }
 
     pub fn restored_auth_block(detail: CodeKey) -> Failure {
-        Failure { category: AuthBlocked, api_id: Endpoint::ISSUE, http_status: None, return_code: None, detail: Some(detail), note: Note::None }
+        Failure { category: AuthBlocked, api_id: Endpoint::ISSUE, http_status: None, return_code: None, detail: Some(detail), vendor_reason: None, note: Note::None }
     }
 
     pub fn note(&self) -> &Note {
@@ -318,6 +350,10 @@ impl Failure {
         self.detail
     }
 
+    pub fn vendor_reason(&self) -> Option<VendorReason> {
+        self.vendor_reason
+    }
+
     pub fn policy(&self) -> Policy {
         policy(Phase::of(self.api_id), self.category)
     }
@@ -328,7 +364,7 @@ impl Failure {
             RateLimit | Transient => Surface::Unavailable,
             TokenInvalid | AuthBlocked | AuthIndeterminate => Surface::AuthFailed,
             _ if issue => Surface::AuthFailed,
-            Unknown => Surface::Unavailable,
+            Unknown | BusinessRejected => Surface::Unavailable,
             SymbolMismatch if matches!(self.api_id.market(), Some(ApiId::Ka10095 | ApiId::Ka10099)) => Surface::Unavailable,
             SymbolMismatch => Surface::UnknownSymbol,
             InvalidRequest | BatchLimit | Unsupported | Protocol | RealtimeCapacity | ControlRejected | SubscriptionMismatch => Surface::Internal,
@@ -344,7 +380,10 @@ impl Failure {
             parts.push(format!("return_code {rc}"));
         }
         if let Some(d) = self.detail {
-            parts.push(format!("상세 {d}"));
+            match self.vendor_reason {
+                Some(reason) => parts.push(format!("상세 {d}({reason})")),
+                None => parts.push(format!("상세 {d}")),
+            }
         }
         parts.join(", ")
     }
@@ -378,6 +417,10 @@ impl fmt::Display for Failure {
                 _ => write!(f, "키움이 일시적으로 응답하지 못했습니다({ev})"),
             },
             InvalidRequest | BatchLimit => write!(f, "키움이 요청을 거절했습니다({ev}){note}"),
+            BusinessRejected => match self.vendor_reason.and_then(VendorReason::known_text) {
+                Some(text) => write!(f, "키움이 이 조회를 거절했습니다({ev}){note}. {text}"),
+                None => write!(f, "키움이 이 조회를 거절했습니다({ev}){note}"),
+            },
             SymbolMismatch => write!(f, "키움에 종목이나 시장 정보가 없습니다({ev})"),
             Unsupported => write!(f, "키움이 이 계좌에서 지원하지 않는 API입니다({ev}). 이 조회를 멈췄습니다"),
             Unknown => write!(f, "키움이 알 수 없는 실패를 돌려줬습니다({ev}){note}. 운영자가 확인하고 서버를 다시 켤 때까지 이 경로로 보내지 않습니다"),
@@ -420,6 +463,18 @@ pub fn rest_details(msg: &str) -> Vec<u16> {
         }
     }
     found
+}
+
+/// `[NNNN]` 바로 뒤에 `(` + 정확히 여섯 자리 ASCII 숫자 + `:` 또는 `)`가 올 때만 그 숫자를 읽는다.
+pub fn vendor_reason(msg: &str, detail: u16) -> Option<VendorReason> {
+    let bytes = msg.as_bytes();
+    let head = format!("[{detail:04}](");
+    msg.match_indices(&head).find_map(|(i, _)| {
+        let start = i + head.len();
+        let digits = bytes.get(start..start + 6)?;
+        let closed = matches!(bytes.get(start + 6), Some(b':' | b')'));
+        (closed && digits.iter().all(u8::is_ascii_digit)).then(|| VendorReason(std::str::from_utf8(digits).expect("ASCII 숫자").parse().expect("여섯 자리")))
+    })
 }
 
 /// WebSocket `return_msg`의 상세 코드. REST와 같은 `[NNNN`에 더해 `CODE=NNNN`도 읽는다(docs/kiwoom-ws-errors.md §2).
@@ -504,6 +559,7 @@ pub fn judge(api_id: impl Into<Endpoint>, status: u16, body: &str) -> Result<Env
                     _ => None,
                 },
                 detail: None,
+                vendor_reason: None,
                 note: Note::MalformedReturnMessage,
             });
         }
@@ -539,6 +595,7 @@ pub fn judge(api_id: impl Into<Endpoint>, status: u16, body: &str) -> Result<Env
             _ => None,
         },
         detail: detail.map(Rest),
+        vendor_reason: detail.and_then(|d| vendor_reason(msg, d)),
         note,
     })
 }
@@ -596,6 +653,7 @@ mod tests {
         (8104, Unsupported),
         (8200, Unsupported),
         (1634, BatchLimit),
+        (2000, BusinessRejected),
     ];
 
     const EXPECTED_WS: &[(u32, Category)] = &[
@@ -625,7 +683,7 @@ mod tests {
         }
         let rest_rows = CODE_TABLE.iter().filter(|(k, _)| matches!(k, Rest(_))).count();
         let official = CODE_TABLE.iter().filter(|(k, r)| matches!(k, Rest(_)) && matches!(r, Known(_, Official))).count();
-        assert_eq!((rest_rows, official), (EXPECTED_REST.len(), 37), "공식 37개와 실측 1634");
+        assert_eq!((rest_rows, official), (EXPECTED_REST.len(), 37), "공식 37개와 실측 1634·2000");
         for &(code, want) in EXPECTED_REST {
             assert_eq!(classify(Rest(code)), want, "[{code}]");
         }
@@ -751,6 +809,66 @@ mod tests {
     fn conflicting_details_prefer_auth_blocked_then_fail_as_protocol() {
         assert_eq!(category(ApiId::Ka10081, 200, r#"{"return_code": 5, "return_msg": "[1700:a][8050:b]"}"#), Some(AuthBlocked));
         assert_eq!(category(ApiId::Ka10081, 200, r#"{"return_code": 5, "return_msg": "[1700:a][8005:b]"}"#), Some(Protocol));
+    }
+
+    fn business_rejection(msg: &str) -> Failure {
+        let body = json!({"return_code": 20, "return_msg": msg}).to_string();
+        judge(Endpoint::Trading(crate::trading::TradingApiId::Kt00010), 200, &body).unwrap_err()
+    }
+
+    #[test]
+    fn a_business_rejection_keeps_the_inner_reason_number_and_stops_nothing() {
+        let cases = [
+            ("[2000](571455:합성 매도 사유)", Some(571455)),
+            ("[2000](571489:합성 휴장 사유)", Some(571489)),
+            ("[2000](599999:표에 없는 합성 사유)", Some(599999)),
+            ("[2000](503721)", Some(503721)),
+            ("[2000]", None),
+            ("[2000:합성 사유]", None),
+            ("[2000](57148:합성)", None),
+            ("[2000](5714890:합성)", None),
+            ("[2000] (571489:합성)", None),
+            ("[2000](５７１４８９:합성)", None),
+            ("[2000](57148a:합성)", None),
+            ("[2000](571489", None),
+        ];
+        for (msg, want) in cases {
+            let f = business_rejection(msg);
+            assert_eq!((f.category(), f.detail(), f.vendor_reason().map(VendorReason::number)), (BusinessRejected, Some(Rest(2000)), want), "{msg}");
+            assert_eq!((f.policy(), f.surface()), (p_never_nothing(), Surface::Unavailable), "{msg}");
+        }
+        let sell = business_rejection("[2000](571455:합성)");
+        assert_eq!((sell.http_status(), sell.return_code()), (Some(200), Some(20)));
+        assert!(sell.to_string().contains("상세 [2000](571455)"), "{sell}");
+    }
+
+    fn p_never_nothing() -> Policy {
+        Policy { retry: Retry::Never, stop: Stop::Nothing }
+    }
+
+    #[test]
+    fn a_business_rejection_while_issuing_stops_the_path() {
+        let body = r#"{"return_code": 20, "return_msg": "[2000](571489:합성)"}"#;
+        let f = judge(ApiId::Au10001, 200, body).unwrap_err();
+        assert_eq!((f.category(), f.policy().stop, f.surface()), (BusinessRejected, Stop::Path, Surface::AuthFailed));
+        assert_eq!(policy(Phase::Market, BusinessRejected), p_never_nothing());
+    }
+
+    #[test]
+    fn a_business_rejection_says_what_we_know_and_never_echoes_the_message() {
+        let secret = "FAKE-SECRET-err-3333";
+        let f = business_rejection(&format!("[2000](571455:{secret})"));
+        let text = f.to_string();
+        assert!(!format!("{f} {f:?}").contains(secret), "{f:?}");
+        assert!(text.contains("571455") && text.contains("매도할 잔고"), "{text}");
+        for stop_words in ["다시 켤", "운영자", "멈"] {
+            assert!(!text.contains(stop_words), "{stop_words}: {text}");
+        }
+        let unlisted = business_rejection(&format!("[2000](599999:{secret})")).to_string();
+        assert!(unlisted.starts_with("키움이 이 조회를 거절했습니다(") && unlisted.contains("599999") && !unlisted.contains(secret), "{unlisted}");
+        for (number, _) in KNOWN_VENDOR_REASONS {
+            assert!(VendorReason(*number).known_text().is_some());
+        }
     }
 
     #[test]
