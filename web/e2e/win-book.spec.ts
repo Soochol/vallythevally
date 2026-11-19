@@ -264,6 +264,11 @@ test("체결강도 줄이 13행, 체결 행이 14행부터의 top에 24px 간격
   }
   await expect(page.getByTestId("book-window")).not.toContainText("대량");
   await expect(page.locator(".mw-trade [class*=bar], .mw-trade i")).toHaveCount(0);
+  const columns = await page.getByTestId("ladder-trade").evaluateAll((rows) => rows.map((row) => [...row.children].map((part) => Math.round(part.getBoundingClientRect().left * 10) / 10)));
+  expect(columns[0]).toEqual(columns[1]);
+  expect(columns[0]![1]).toBeGreaterThan(columns[0]![0]!);
+  const qtyRights = await page.getByTestId("ladder-trade").evaluateAll((rows) => rows.map((row) => Math.round(row.children[1]!.getBoundingClientRect().right * 10) / 10));
+  expect(qtyRights[0]).toBe(qtyRights[1]);
   await emitTrade(scenario, 3, 70200, 5);
   await expect(page.getByTestId("ladder-trade").first()).toHaveAttribute("data-price", "70200");
   await expect(page.getByTestId("ladder-trade").nth(1)).toHaveAttribute("data-price", "70100");

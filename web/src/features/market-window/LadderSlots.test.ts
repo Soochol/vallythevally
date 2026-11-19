@@ -20,6 +20,12 @@ test("체결 행은 방향을 data-side로 싣고 수량 색은 그 값으로 �
   expect(html).not.toContain("border-left");
 });
 
+test("체결 수량은 쉼표 숫자 전체와 1만 이상은 만 단위 줄임을 함께 싣는다", () => {
+  const html = renderBox([{ ...trade(70100, "buy"), quantity: 999_999 }, { ...trade(70000, "buy"), quantity: 9_999 }], 70000);
+  expect(html).toContain('<span class="mw-qty-full">999,999</span><span class="mw-qty-short">100만</span>');
+  expect(html).toContain('<span class="mw-qty-full">9,999</span><span class="mw-qty-short">9,999</span>');
+});
+
 test("체결 가격 색은 사다리 가격 칸과 같은 함수로 정해져 매수·매도와 상관없다", () => {
   const html = renderBox([trade(70100, "sell"), trade(69900, "buy"), trade(70000, "buy")], 70000);
   expect([70100, 69900, 70000].map((price) => priceToneOf(html, price))).toEqual(["up", "down", "flat"]);

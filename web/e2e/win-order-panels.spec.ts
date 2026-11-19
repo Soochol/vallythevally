@@ -474,29 +474,54 @@ test("체결강도는 13행, 체결은 14행부터 같은 top에 있고 새 체�
     expect(part.text).not.toMatch(/\d{2}:\d{2}:\d{2}/);
     expect(part.priceRight).toBeLessThanOrEqual(part.qtyLeft);
   }
+  const columns = await page.getByTestId("ladder-trade").evaluateAll((rows) => rows.map((row) => [...row.children].map((part) => Math.round(part.getBoundingClientRect().left * 10) / 10)));
+  expect(columns[0]).toEqual(columns[1]);
   lastTrade(scenario, 70_200, 3, 3);
   await expect(page.getByTestId("ladder-trade").first()).toHaveAttribute("data-price", "70200");
   await expect(win(page)).not.toContainText("대량");
   await expect(page.locator(".mw-trade i")).toHaveCount(0);
 });
 
-test("421px 호가주문창에서 모든 체결 행의 가격 글자가 수량 글자와 겹치지 않고 잘리지 않는다", async ({ page, scenario }) => {
+test("421px 호가주문창에서 6자리 수량까지 가격과 겹치지 않고 상자 안에서 잘리지 않으며 행끼리 열이 정렬된다", async ({ page, scenario }) => {
   ordersOn(scenario);
   tradingApi(scenario);
   await openOrderWindow(page, scenario);
   await win(page).evaluate((element) => { element.style.flex = "none"; element.style.width = "421px"; });
-  const quantities = [600, 1_234, 7, 9_999];
+  const quantities = [600, 9_999, 12_345, 99_999, 999_999, 7];
   quantities.forEach((qty, index) => lastTrade(scenario, 70_000 + 100 * index, index + 1, qty));
   await expect(page.getByTestId("ladder-trade")).toHaveCount(quantities.length);
   const parts = await page.getByTestId("ladder-trade").evaluateAll((rows) => rows.map((row) => {
     const [price, qty] = [row.children[0]!, row.children[1]!];
-    return { priceRight: price.getBoundingClientRect().right, qtyLeft: qty.getBoundingClientRect().left, priceClipped: price.scrollWidth > price.clientWidth, qtyClipped: qty.scrollWidth > qty.clientWidth };
+    const visible = [...qty.children].find((part) => getComputedStyle(part).display !== "none")!;
+    const scroller = row.parentElement!.getBoundingClientRect();
+    const text = visible.getBoundingClientRect();
+    return { shown: visible.textContent, priceRight: price.getBoundingClientRect().right, qtyLeft: text.left, qtyRight: text.right, priceLeft: price.getBoundingClientRect().left, boxLeft: scroller.left, boxRight: scroller.right - (row.parentElement!.offsetWidth - row.parentElement!.clientWidth), qtyBoxRight: qty.getBoundingClientRect().right };
   }));
   for (const part of parts) {
-    expect(part.priceRight).toBeLessThan(part.qtyLeft);
-    expect(part.priceClipped).toBe(false);
-    expect(part.qtyClipped).toBe(false);
+    expect(part.priceRight, JSON.stringify(part)).toBeLessThan(part.qtyLeft);
+    expect(part.priceLeft, JSON.stringify(part)).toBeGreaterThanOrEqual(part.boxLeft);
+    expect(part.qtyRight, JSON.stringify(part)).toBeLessThanOrEqual(part.boxRight + 0.5);
   }
+  expect(parts.map((part) => part.shown)).toEqual(["7", "100만", "10만", "1만", "9,999", "600"]);
+  const rights = new Set(parts.map((part) => Math.round(part.qtyBoxRight * 10)));
+  expect(rights.size).toBe(1);
+});
+
+test("호가주문창이 넓으면 체결 수량을 쉼표 숫자 전체로 보이고 행끼리 열이 정렬된다", async ({ page, scenario }) => {
+  ordersOn(scenario);
+  tradingApi(scenario);
+  await openOrderWindow(page, scenario);
+  await win(page).evaluate((element) => { element.style.flex = "none"; element.style.width = "900px"; });
+  lastTrade(scenario, 70_000, 1, 999_999);
+  lastTrade(scenario, 70_100, 2, 12_345);
+  await expect(page.getByTestId("ladder-trade")).toHaveCount(2);
+  const rows = await page.getByTestId("ladder-trade").evaluateAll((items) => items.map((row) => {
+    const visible = [...row.children[1]!.children].find((part) => getComputedStyle(part).display !== "none")!;
+    return { shown: visible.textContent, left: [...row.children].map((part) => Math.round(part.getBoundingClientRect().left * 10) / 10), priceRight: row.children[0]!.getBoundingClientRect().right, qtyLeft: visible.getBoundingClientRect().left };
+  }));
+  expect(rows.map((row) => row.shown)).toEqual(["12,345", "999,999"]);
+  expect(rows[0]!.left).toEqual(rows[1]!.left);
+  for (const row of rows) expect(row.priceRight).toBeLessThan(row.qtyLeft);
 });
 
 test("창을 열면 지난 체결을 pages=1로 받아 보이고 종목을 바꾸면 새 종목으로 같은 요청을 한 번 하고 그 체결을 보인다", async ({ page, scenario }) => {

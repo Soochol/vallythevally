@@ -48,9 +48,15 @@
 .mw-tscroll { flex:1; min-height:0; overflow-y:auto; overflow-x:hidden; }
 .mw-tscroll::-webkit-scrollbar { width:var(--size-5); }
 .mw-tscroll::-webkit-scrollbar-thumb { border-radius:var(--size-3); background:color-mix(in srgb, var(--text) 28%, transparent); }
-.mw-trade { display:flex; align-items:center; justify-content:space-between; flex:none; gap:var(--size-2); height:var(--size-24); padding:0 var(--size-2); font-size:var(--size-10); }
-.mw-trade-price { flex:none; }
-.mw-trade-qty { min-width:0; overflow:hidden; text-overflow:ellipsis; text-align:right; }
+.mw-tbox { container-type:inline-size; }
+.mw-trade { display:grid; grid-template-columns:minmax(0, 54fr) minmax(0, 46fr); align-items:center; flex:none; height:var(--size-24); padding:0 var(--size-1); font-size:9px; }
+.mw-trade-price, .mw-trade-qty { text-align:right; }
+.mw-qty-full { display:none; }
+@container (min-width:111px) {
+  .mw-trade { grid-template-columns:minmax(0, 1fr) minmax(0, 1fr); gap:var(--size-2); padding:0 var(--size-2); font-size:var(--size-11); }
+  .mw-qty-full { display:inline; }
+  .mw-qty-short { display:none; }
+}
 .mw-trade-price[data-tone=up] { color:var(--up); } .mw-trade-price[data-tone=down] { color:var(--down); }
 .mw-trade[data-side=buy] .mw-trade-qty { color:var(--up); } .mw-trade[data-side=sell] .mw-trade-qty { color:var(--down); }
 
