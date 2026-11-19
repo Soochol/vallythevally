@@ -34,7 +34,7 @@ async fn rankings(State(st): State<Arc<AppState>>, body: Body) -> Result<Json<ap
         api::RankingTrigger::Refresh => Priority::Background,
     };
     let (query, excludes) = query::plan(request.ranking);
-    let served = st.rankings.serve(&query, usize::from(u8::from(request.pages)), priority, &st.rest, &st.clock).await.map_err(|e| failure(e, &st))?;
+    let served = st.rankings.serve(query, usize::from(u8::from(request.pages)), priority, &st.rest, &st.clock).await.map_err(|e| failure(e, &st))?;
     let directory = symbol_list(&st).await?;
     present(served, excludes, &directory).map(Json).map_err(|e| Lookup::Rankings.failure(e, st.clock.now()))
 }
@@ -44,6 +44,11 @@ fn failure(error: WalkError, st: &AppState) -> ApiFailure {
         WalkError::Kiwoom(e) => Lookup::Rankings.failure(e.into(), st.clock.now()),
         WalkError::KeyRepeated => ApiFailure::kiwoom_protocol("키움 순위의 연속조회 키가 되풀이돼 끝까지 받지 못했습니다"),
         WalkError::KeyMissing => ApiFailure::kiwoom_protocol("키움 순위가 다음 페이지가 있다고 하면서 연속조회 키를 주지 않았습니다"),
+        WalkError::PageUnreadable => ApiFailure::kiwoom_protocol("키움 순위 페이지의 행을 하나도 읽지 못했습니다"),
+        WalkError::WalkLost => {
+            tracing::error!("순위 걷기가 결과를 내지 못하고 끝났습니다");
+            ApiFailure::new(api::ApiErrorCode::Internal, "서버 내부 오류입니다")
+        }
     }
 }
 

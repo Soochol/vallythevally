@@ -2,14 +2,14 @@ use std::collections::HashMap;
 
 use domain::{StockCode, Venue};
 
-use super::cache::Demand;
+use super::cache::{Demand, WalkError};
 use crate::api::{self, Percent, RankingFigures, Shares, Won};
 use crate::kiwoom::api::{
     BalanceOrder, CreditRatioRanking, ExpectedExecutionRanking, ExpectedOrder, ForeignStreakRanking, InvestorGroup, InvestorNetRanking, InvestorUnit, LimitMoves, ListedMarket, ManagedIssues,
     MarketRequest, MinimumTradeValue, MostViewedRanking, NetSide, OrderBookBalanceRanking, PriceChangeRanking, PriceDirection, ProgramNetRanking, ProgramSide, RankMarket, StockQuotes, StreakSide,
     SurgeBaseline, SurgeOrder, TradeValueRanking, TradingSession, TradingVolumeRanking, ViewWindow, VolumeOrder, VolumeSurgeRanking,
 };
-use crate::kiwoom::rest::{ContKey, KiwoomError, KiwoomRest};
+use crate::kiwoom::rest::{ContKey, KiwoomRest};
 use crate::kiwoom::wire::{CreditRatioColumns, ExpectedExecutionColumns, ForeignStreakColumns, InvestorNetColumns, MostViewedColumns, OrderBookBalanceColumns, ParsedRows, PriceChangeColumns, ProgramNetColumns, RankRow, TradeValueColumns, TradingVolumeColumns, VolumeSurgeColumns, parse_quotes};
 
 #[derive(Debug, Clone, PartialEq)]
@@ -220,7 +220,7 @@ impl Query {
         }
     }
 
-    pub async fn fetch(&self, rest: &KiwoomRest, cont: Option<&ContKey>, demand: &mut Demand) -> Result<FetchedPage, KiwoomError> {
+    pub async fn fetch(&self, rest: &KiwoomRest, cont: Option<&ContKey>, demand: &mut Demand) -> Result<FetchedPage, WalkError> {
         match self {
             Query::TradeAmount(r) => page(rest, r, cont, demand, |body| rows(body.rows(), trade_amount)).await,
             Query::TradeVolume(r) => page(rest, r, cont, demand, |body| rows(body.rows(), trade_volume)).await,
@@ -242,9 +242,18 @@ impl Query {
     }
 }
 
-async fn page<R: MarketRequest>(rest: &KiwoomRest, request: &R, cont: Option<&ContKey>, demand: &mut Demand, read: impl FnOnce(R::Response) -> Vec<RawRow>) -> Result<FetchedPage, KiwoomError> {
+async fn page<R: MarketRequest>(rest: &KiwoomRest, request: &R, cont: Option<&ContKey>, demand: &mut Demand, read: impl FnOnce(R::Response) -> ReadRows) -> Result<FetchedPage, WalkError> {
     let page = demand.call(rest, request, cont).await?;
-    Ok(FetchedPage { rows: read(page.body), next: page.next, continues_without_key: page.continues_without_key })
+    let read = read(page.body);
+    if read.all_unreadable {
+        return Err(WalkError::PageUnreadable);
+    }
+    Ok(FetchedPage { rows: read.rows, next: page.next, continues_without_key: page.continues_without_key })
+}
+
+struct ReadRows {
+    rows: Vec<RawRow>,
+    all_unreadable: bool,
 }
 
 struct Fields {
@@ -253,8 +262,9 @@ struct Fields {
     figures: Option<RankingFigures>,
 }
 
-fn rows<C>(parsed: ParsedRows<RankRow<C>>, read: impl Fn(&C) -> Fields) -> Vec<RawRow> {
-    parsed
+fn rows<C>(parsed: ParsedRows<RankRow<C>>, read: impl Fn(&C) -> Fields) -> ReadRows {
+    let received = parsed.rows.len() + parsed.skipped as usize;
+    let rows: Vec<RawRow> = parsed
         .rows
         .into_iter()
         .filter_map(|row| {
@@ -265,7 +275,8 @@ fn rows<C>(parsed: ParsedRows<RankRow<C>>, read: impl Fn(&C) -> Fields) -> Vec<R
             };
             Some(RawRow { code: row.code, name: row.name, price: price.and_then(won), change_rate: change_rate.map(Percent), figures })
         })
-        .collect()
+        .collect();
+    ReadRows { all_unreadable: received > 0 && rows.is_empty(), rows }
 }
 
 fn won(value: u64) -> Option<Won> {
@@ -410,7 +421,7 @@ async fn fill_quotes(rest: &KiwoomRest, rows: &mut [RawRow], demand: &mut Demand
     };
     let quotes: HashMap<StockCode, (Won, Percent)> = parse_quotes(page.body)
         .into_iter()
-        .filter(|quote| quote.venue == Venue::Krx && quote.base_centi > 0)
+        .filter(|quote| quote.venue == Venue::Krx && quote.price_centi > 0 && quote.base_centi > 0)
         .filter_map(|quote| {
             let price = i64::try_from(quote.price_centi / 100).ok()?;
             let rate = (quote.price_centi as f64 - quote.base_centi as f64) / quote.base_centi as f64 * 100.0;
