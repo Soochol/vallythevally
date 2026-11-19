@@ -1,6 +1,6 @@
 import type { TradingHolding } from "../../api/generated/TradingHolding";
 import { formatPrice } from "../../lib/format";
-import { formatShares, formatWon } from "../market-window/format";
+import { formatQuantity, formatWon } from "../market-window/format";
 import { type ProfitUnit, profitText, sellableFill, type QuantityFill } from "./holdingSummary";
 
 interface Props {
@@ -17,7 +17,7 @@ export function HoldingSummary({ holding, buyableAmount, unit, onUnit, onFill }:
   return (
     <div className="od-summary" data-testid="order-summary">
       <button type="button" className="od-cellbtn" data-testid="summary-quantity" disabled={fill === null} title="매도 가능 수량을 수량 칸에 채웁니다" onClick={() => fill && onFill(fill)}>
-        <small>매입수량</small><b>{holding === null ? "-" : formatShares(holding.quantity)}</b>
+        <small>매입수량</small><b>{holding === null ? "-" : formatQuantity(holding.quantity)}</b>
       </button>
       <div className="od-cellbtn" data-testid="summary-average"><small>매입평단가</small><b>{holding === null ? "-" : formatPrice(holding.averagePrice, false)}</b></div>
       <button type="button" className="od-cellbtn" data-testid="summary-profit" data-tone={tone} title="원과 % 사이를 바꿉니다" onClick={onUnit}>

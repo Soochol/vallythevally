@@ -38,11 +38,12 @@ test("모든 행의 열 정의가 같고 왼쪽·오른쪽 칸은 slot이 있을
 
 test("잔량이 늘면 상승, 줄면 하락 증감 글자를 부호와 함께 잔량 칸 안에 보인다", () => {
   const html = render();
-  expect(html).toContain('class="mw-qty-change" data-flash="up">+40주');
-  expect(html).toContain('class="mw-qty-change" data-flash="down">−20주');
+  expect(html).toContain('class="mw-qty-change" data-flash="up">+40');
+  expect(html).toContain('class="mw-qty-change" data-flash="down">−20');
   expect(html).not.toContain("mw-qty-delta");
-  expect(html).toMatch(/mw-qty-change" data-flash="up">\+40주<\/span><span class="mw-qty-value">300주/);
-  expect(html).toMatch(/mw-qty-value">450주<\/span><span class="mw-qty-change" data-flash="down">/);
+  expect(html).not.toContain("주");
+  expect(html).toMatch(/mw-qty-change" data-flash="up">\+40<\/span><span class="mw-qty-value">300/);
+  expect(html).toMatch(/mw-qty-value">450<\/span><span class="mw-qty-change" data-flash="down">/);
 });
 
 test("기준가가 0이면 가격은 상승색이 아니다", () => {

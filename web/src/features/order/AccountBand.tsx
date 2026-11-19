@@ -3,7 +3,7 @@ import type { TradingBalance } from "../../api/generated/TradingBalance";
 import type { TradingExecution } from "../../api/generated/TradingExecution";
 import type { TradingOpenOrder } from "../../api/generated/TradingOpenOrder";
 import { formatPrice } from "../../lib/format";
-import { formatShares } from "../market-window/format";
+import { formatQuantity } from "../market-window/format";
 import { formatFillTime, profitText } from "./holdingSummary";
 import { SIDE_LABEL } from "./orderRules";
 
@@ -34,7 +34,7 @@ function OpenPanel({ orders, writable, onCancel }: { orders: readonly TradingOpe
           <span className="od-side">{SIDE_LABEL[order.side]}</span>
           <span className="od-name">{order.name}</span>
           <b>{formatPrice(order.price, false)}원</b>
-          <span>{formatShares(order.openQuantity)}</span>
+          <span>{formatQuantity(order.openQuantity)}</span>
           <button type="button" className="od-link" disabled={!writable} onClick={() => onCancel(order.orderNo)}>취소</button>
         </li>
       ))}
@@ -50,7 +50,7 @@ function HoldingsPanel({ balance }: { balance: TradingBalance | null }) {
       {holdings.map((holding) => (
         <li key={holding.code} data-testid="account-holding">
           <span className="od-name">{holding.name}</span>
-          <span>{formatShares(holding.quantity)}</span>
+          <span>{formatQuantity(holding.quantity)}</span>
           <span>평단 {formatPrice(holding.averagePrice, false)}</span>
           <b data-tone={holding.evaluationProfit > 0 ? "up" : holding.evaluationProfit < 0 ? "down" : undefined}>{profitText(holding, "won")}</b>
         </li>
@@ -69,7 +69,7 @@ function FillsPanel({ executions }: { executions: readonly TradingExecution[] })
           <span className="od-side">{SIDE_LABEL[fill.side]}</span>
           <span className="od-name">{fill.name}</span>
           <b>{formatPrice(fill.price, false)}원</b>
-          <span>{formatShares(fill.quantity)}</span>
+          <span>{formatQuantity(fill.quantity)}</span>
         </li>
       ))}
     </ul>

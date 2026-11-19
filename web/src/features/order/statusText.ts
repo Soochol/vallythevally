@@ -39,10 +39,11 @@ export interface OrderStatus {
 }
 
 const describe = (command: OrderCommand): string => {
-  const price = command.price !== null ? ` ${formatPrice(command.price, false)}원` : "";
-  const quantity = command.quantity !== null ? ` ${command.quantity.toLocaleString("ko-KR")}주` : "";
+  const price = command.price !== null ? `${formatPrice(command.price, false)}원` : null;
+  const quantity = command.quantity !== null ? command.quantity.toLocaleString("ko-KR") : null;
   const side = command.kind === "buy" || command.kind === "sell" ? SIDE_LABEL[command.kind] : command.kind === "modify" ? "정정" : "취소";
-  return `${side}${quantity}${price}`;
+  const figures = [quantity, price].filter((figure) => figure !== null).join(" · ");
+  return figures === "" ? side : `${side} ${figures}`;
 };
 
 export function statusOfCommand(command: OrderCommand): OrderStatus {

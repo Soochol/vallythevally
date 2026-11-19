@@ -77,7 +77,7 @@ test("사다리가 비어 있어도 시간외 잔량을 둘 수 있다", () => {
 test("띠는 시간외 잔량이 있으면 그 숫자와 정규 총잔량 설명을 보인다", () => {
   const strip = stripTotals({ ask: 90, bid: 140 }, { t: 1, askQty: 13_770, bidQty: 0 });
   expect(strip).toMatchObject({ ask: 13_770, bid: 0, source: "afterHours" });
-  expect(strip.description).toContain("정규 총잔량 매도 90주 · 매수 140주");
+  expect(strip.description).toContain("정규 총잔량 매도 90 · 매수 140");
 });
 
 test("띠는 시간외 잔량이 없으면 정규 총잔량이다", () => {

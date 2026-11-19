@@ -25,7 +25,7 @@ const FLAGS = [
 ] as const;
 
 const PRESET_GROUPS = [
-  { kind: "sharePresets", legend: "수량 프리셋 (주)", ariaPrefix: "프리셋" },
+  { kind: "sharePresets", legend: "수량 프리셋", ariaPrefix: "프리셋" },
   { kind: "amountPresets", legend: "금액 프리셋 (만원)", ariaPrefix: "금액 프리셋" },
 ] as const;
 

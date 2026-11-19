@@ -93,7 +93,7 @@ test("스냅샷 20행이 현재가 중심 격자로 먼저 보이고 상·하한
   await expect(info.filter({ hasText: "기준가" })).toContainText("69,000");
   await expect(info.filter({ hasText: "현재가" })).toContainText("70,000");
   await expect(info.filter({ hasText: "전일대비" })).toContainText("+1,000");
-  await expect(page.getByTestId("book-total-ask")).toHaveText("1,000주");
+  await expect(page.getByTestId("book-total-ask")).toHaveText("1,000");
 });
 
 const AUCTION_ASKS: [number, number][] = [[819_000, 934], [820_000, 1_533], [821_000, 418]];
@@ -103,7 +103,7 @@ test("동시호가 6호가는 매도 3단이 가운데 선 위, 매수 3단이 �
   await open(page, scenario, 810_000);
   const bookSub = await subOf(scenario, "book");
   scenario.live.emit({ type: "feed_book", sub: bookSub, book: liveOf(AUCTION_ASKS, AUCTION_BIDS, [2_885, 3_130]) });
-  await expect(page.getByTestId("book-total-bid")).toHaveText("3,130주");
+  await expect(page.getByTestId("book-total-bid")).toHaveText("3,130");
   await expect(ladderRows(page)).toHaveCount(20);
   const priceAt = (row: number) => ladderRows(page).nth(row).locator(".mw-px-num");
   await expect(priceAt(7)).toHaveText("821,000");
@@ -113,9 +113,9 @@ test("동시호가 6호가는 매도 3단이 가운데 선 위, 매수 3단이 �
   await expect(priceAt(11)).toHaveText("817,000");
   await expect(priceAt(12)).toHaveText("816,000");
   await expect(ladderRows(page).locator(".mw-px-num")).toHaveCount(6);
-  await expect(ladderRows(page).nth(7).locator(".mw-qty[data-side=ask] .mw-qty-value")).toHaveText("418주");
+  await expect(ladderRows(page).nth(7).locator(".mw-qty[data-side=ask] .mw-qty-value")).toHaveText("418");
   const bids = page.locator('.mw-lr[data-side="bid"] .mw-qty[data-side=bid] .mw-qty-value');
-  await expect(bids).toHaveText(["3,012주", "61주", "57주"]);
+  await expect(bids).toHaveText(["3,012", "61", "57"]);
   await expect(ladderRows(page).locator(".mw-qty-value")).toHaveCount(6);
   const info = page.getByTestId("ladder-info");
   await expect(info).toHaveCount(7);
@@ -179,7 +179,7 @@ test("첫 실시간 호가가 스냅샷을 대신하고 체결이 현재가 행�
   const bookSub = await subOf(scenario, "book");
 
   scenario.live.emit({ type: "feed_book", sub: bookSub, book: liveOf([[70100, 50], [70200, 40], [70300, 30], [70400, 20]], [[70000, 80], [69900, 60]], [90, 140]) });
-  await expect(page.getByTestId("book-total-bid")).toHaveText("140주");
+  await expect(page.getByTestId("book-total-bid")).toHaveText("140");
   await expect(ladderRows(page).locator(".mw-qty-value")).toHaveCount(6);
 
   await emitTrade(scenario, 1, 70100, 3);
@@ -190,8 +190,8 @@ test("첫 실시간 호가가 스냅샷을 대신하고 체결이 현재가 행�
   scenario.live.emit({ type: "feed_book", sub: bookSub, book: liveOf([[70100, 70], [70200, 40], [70300, 30], [70400, 20]], [[70000, 80], [69900, 10]], [110, 90]) });
   const ask = page.locator(".mw-qty[data-side=ask]").filter({ has: page.locator(".mw-qty-change") });
   const bid = page.locator(".mw-qty[data-side=bid]").filter({ has: page.locator(".mw-qty-change") });
-  await expect(ask.locator(".mw-qty-change")).toHaveText("+20주");
-  await expect(bid.locator(".mw-qty-change")).toHaveText("−50주");
+  await expect(ask.locator(".mw-qty-change")).toHaveText("+20");
+  await expect(bid.locator(".mw-qty-change")).toHaveText("−50");
   const within = async (cell: Locator, inner: Locator) => {
     const outer = (await cell.boundingBox())!;
     const box = (await inner.boundingBox())!;
@@ -205,11 +205,24 @@ test("첫 실시간 호가가 스냅샷을 대신하고 체결이 현재가 행�
   const askChange = (await ask.locator(".mw-qty-change").boundingBox())!;
   const askValue = (await ask.locator(".mw-qty-value").boundingBox())!;
   expect(askChange.x + askChange.width).toBeLessThanOrEqual(askValue.x + 1);
+  const askCell = (await ask.boundingBox())!;
+  expect(askChange.x - askCell.x).toBeLessThanOrEqual(6);
   const bidChange = (await bid.locator(".mw-qty-change").boundingBox())!;
   const bidValue = (await bid.locator(".mw-qty-value").boundingBox())!;
   expect(bidValue.x + bidValue.width).toBeLessThanOrEqual(bidChange.x + 1);
+  const bidCell = (await bid.boundingBox())!;
+  expect(bidCell.x + bidCell.width - (bidChange.x + bidChange.width)).toBeLessThanOrEqual(6);
+  await expect(ladderRows(page).locator(".mw-qty-value").filter({ hasText: "주" })).toHaveCount(0);
+  const glowAlpha = await ask.locator(".mw-qty-glow").evaluate((glow) => {
+    const color = getComputedStyle(glow).backgroundColor;
+    const slash = color.match(/\/\s*([\d.]+)\s*\)/);
+    if (slash) return Number(slash[1]);
+    const parts = color.match(/rgba\(([^)]+)\)/);
+    return parts ? Number(parts[1]!.split(",")[3]) : 1;
+  });
+  expect(glowAlpha).toBeLessThanOrEqual(0.2);
   await expect(page.locator(".mw-qty-delta")).toHaveCount(0);
-  const ratio = page.getByRole("img", { name: /^매도 110주 · 매수 90주$/ });
+  const ratio = page.getByRole("img", { name: /^매도 110 · 매수 90$/ });
   await expect(ratio).toBeVisible();
 });
 
@@ -246,8 +259,8 @@ test("교차 가격 행 하나에 매도·매수 잔량이 함께 있고 현재�
   await expect(page.locator(".mw-lr[data-current]")).toHaveCount(1);
   const crossed = ladderRows(page).filter({ has: page.locator(".mw-px-num", { hasText: /^70,100$/ }) });
   await expect(crossed).toHaveCount(1);
-  await expect(crossed.locator(".mw-qty[data-side=ask] .mw-qty-value")).toHaveText("20주");
-  await expect(crossed.locator(".mw-qty[data-side=bid] .mw-qty-value")).toHaveText("25주");
+  await expect(crossed.locator(".mw-qty[data-side=ask] .mw-qty-value")).toHaveText("20");
+  await expect(crossed.locator(".mw-qty[data-side=bid] .mw-qty-value")).toHaveText("25");
   await expect(page.locator(".mw-lr[data-current]")).toContainText("70,100");
   const shown = await ladderRows(page).locator(".mw-px-num").allTextContents();
   expect(new Set(shown).size).toBe(shown.length);
@@ -446,7 +459,7 @@ test.describe("동시호가 예상체결", () => {
       await open(page, scenario, 70000);
       const bookSub = await subOf(scenario, "book");
       scenario.live.emit({ type: "feed_book", sub: bookSub, book: frame(scenario, [[70100, 50], [70200, 40]], [[70000, 80], [69900, 60]], null) });
-      await expect(page.getByTestId("book-total-bid")).toHaveText("140주");
+      await expect(page.getByTestId("book-total-bid")).toHaveText("140");
       await expect(page.locator("[data-expected]")).toHaveCount(0);
       const without = await shape(page);
 
@@ -490,7 +503,7 @@ test.describe("동시호가 예상체결", () => {
       await open(page, scenario, 70000);
       const bookSub = await subOf(scenario, "book");
       scenario.live.emit({ type: "feed_book", sub: bookSub, book: frame(scenario, [[70100, 50], [70200, 40]], [[70000, 80], [69900, 60]], EXPECTED) });
-      await expect(page.getByTestId("book-total-bid")).toHaveText("140주");
+      await expect(page.getByTestId("book-total-bid")).toHaveText("140");
       await expect(info(page, "예상체결가")).toHaveCount(0);
       await expect(info(page, "예상체결량")).toHaveCount(0);
       await expect(page.locator("[data-expected]")).toHaveCount(0);
@@ -525,8 +538,8 @@ test.describe("시간외 종가 잔량", () => {
       scenario.live.emit({ type: "feed_after_hours", sub: bookSub, totals: afterHours(scenario, 13_770, 0) });
       await expect(page.getByTestId("book-total-ask")).toHaveAttribute("data-source", "after-hours");
       await expect(page.getByTestId("book-total-ask")).toContainText("시간외");
-      await expect(page.getByTestId("book-total-ask")).toContainText("13,770주");
-      await expect(page.getByTestId("book-total-bid")).toContainText("0주");
+      await expect(page.getByTestId("book-total-ask")).toContainText("13,770");
+      await expect(page.getByTestId("book-total-bid")).toContainText("0");
       await expect(book(page).getByText("호가를 불러오지 못했습니다")).toBeVisible();
     });
 
@@ -537,23 +550,23 @@ test.describe("시간외 종가 잔량", () => {
       await page.goto("/");
       await expect(cell(page)).toHaveAttribute("aria-busy", "false");
       await windowTabs(page).getByRole("tab", { name: /^10호가/ }).click();
-      await expect(page.getByTestId("book-total-ask")).toContainText("5,000주");
+      await expect(page.getByTestId("book-total-ask")).toContainText("5,000");
       const bookSub = await subOf(scenario, "book");
       scenario.live.emit({ type: "feed_after_hours", sub: bookSub, totals: afterHours(scenario, 6000, 0) });
-      await expect(page.getByTestId("book-total-ask")).toContainText("6,000주");
+      await expect(page.getByTestId("book-total-ask")).toContainText("6,000");
     });
 
     test("사다리와 함께 와도 숫자는 시간외 잔량이고 정규 총잔량은 title에 있으며 띠 높이는 같다", async ({ page, scenario }) => {
       await open(page, scenario, 70000);
       const bookSub = await subOf(scenario, "book");
       scenario.live.emit({ type: "feed_book", sub: bookSub, book: { ...liveOf([[70100, 50]], [[70000, 80]], [90, 140]), t: scenario.now / 1000 } });
-      await expect(page.getByTestId("book-total-ask")).toHaveText("90주");
+      await expect(page.getByTestId("book-total-ask")).toHaveText("90");
       const before = (await strip(page).boundingBox())!;
       scenario.live.emit({ type: "feed_after_hours", sub: bookSub, totals: afterHours(scenario, 13_770, 0) });
       await expect(page.getByTestId("book-total-ask")).toHaveAttribute("data-source", "after-hours");
-      await expect(page.getByTestId("book-total-ask")).toContainText("13,770주");
-      await expect(page.getByTestId("book-total-ask")).toHaveAttribute("title", /정규 총잔량 매도 90주 · 매수 140주/);
-      await expect(page.getByRole("img", { name: /정규 총잔량 매도 90주 · 매수 140주/ })).toHaveCount(1);
+      await expect(page.getByTestId("book-total-ask")).toContainText("13,770");
+      await expect(page.getByTestId("book-total-ask")).toHaveAttribute("title", /정규 총잔량 매도 90 · 매수 140/);
+      await expect(page.getByRole("img", { name: /정규 총잔량 매도 90 · 매수 140/ })).toHaveCount(1);
       const after = (await strip(page).boundingBox())!;
       expect(after.height).toBe(before.height);
     });
@@ -568,7 +581,7 @@ test.describe("시간외 종가 잔량", () => {
       scenario.live.emit({ type: "feed_book", sub: bookSub, book: { ...liveOf([[70100, 50]], [[70000, 80]], [90, 140]), t: scenario.now / 1000 } });
       scenario.live.emit({ type: "feed_after_hours", sub: bookSub, totals: afterHours(scenario, 13_770, 0) });
       await expect(page.getByTestId("book-total-ask")).toHaveAttribute("data-source", "regular");
-      await expect(page.getByTestId("book-total-ask")).toHaveText("90주");
+      await expect(page.getByTestId("book-total-ask")).toHaveText("90");
       await expect(book(page)).not.toContainText("시간외");
     });
   });

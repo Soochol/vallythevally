@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import { direction, formatPercent, formatPrice } from "../../lib/format";
-import { formatShares, withSign } from "./format";
+import { formatQuantity, withSign } from "./format";
 import { type BookLevel, LADDER_ROWS, type LadderRow, ROWS_ABOVE_BASE } from "./ladder";
 
 export const TOP_RIGHT_ROWS = 9;
@@ -35,8 +35,8 @@ const TONE = { up: "mw-up", down: "mw-down", flat: "" } as const;
 
 function Quantity({ side, level, ratio }: { side: "ask" | "bid"; level: BookLevel; ratio: number }) {
   const flash = level.change === 0 ? undefined : level.change > 0 ? "up" : "down";
-  const value = <span key="value" className="mw-qty-value">{formatShares(level.quantity)}</span>;
-  const change = flash && <span key={`${level.quantity}:${level.change}`} className="mw-qty-change" data-flash={flash}>{withSign(level.change, formatShares(Math.abs(level.change)))}</span>;
+  const value = <span key="value" className="mw-qty-value">{formatQuantity(level.quantity)}</span>;
+  const change = flash && <span key={`${level.quantity}:${level.change}`} className="mw-qty-change" data-flash={flash}>{withSign(level.change, formatQuantity(Math.abs(level.change)))}</span>;
   return (
     <div className="mw-qty" data-side={side}>
       <i className="mw-qty-bar" style={{ width: `${ratio * 100}%` }}>

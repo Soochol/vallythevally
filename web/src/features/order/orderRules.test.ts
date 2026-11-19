@@ -60,7 +60,7 @@ test("금액 방식은 가격으로 나눈 몫을 수량으로 쓴다", () => {
 
 test("가능 수량·금액을 넘는 주문은 보내기 전에 막는다", () => {
   const capacity = { sellableQuantity: 10, buyableAmount: 1_000_000 };
-  expect(capacityProblem("sell", 71_000, 11, capacity)).toContain("매도 가능 수량");
+  expect(capacityProblem("sell", 71_000, 11, capacity)).toBe("매도 가능 수량(10)을 넘습니다");
   expect(capacityProblem("sell", 71_000, 10, capacity)).toBeNull();
   expect(capacityProblem("buy", 71_000, 15, capacity)).toContain("매수 가능 금액");
   expect(capacityProblem("buy", 71_000, 14, capacity)).toBeNull();

@@ -54,7 +54,7 @@ test("보유 요약이 값을 보이고 평가손익을 원과 퍼센트로 바�
   ordersOn(scenario);
   tradingApi(scenario).holdings = [HOLDING];
   await openOrderWindow(page, scenario);
-  await expect(page.getByTestId("summary-quantity")).toContainText("120주");
+  await expect(page.getByTestId("summary-quantity")).toContainText("120");
   await expect(page.getByTestId("summary-average")).toContainText("70,040");
   await expect(page.getByTestId("summary-profit")).toContainText("−4,800원");
   await expect(page.getByTestId("summary-buyable")).toContainText("500,000,000원");
@@ -63,7 +63,7 @@ test("보유 요약이 값을 보이고 평가손익을 원과 퍼센트로 바�
   await page.getByRole("button", { name: "금액" }).click();
   await page.getByTestId("summary-quantity").click();
   await expect(page.getByRole("textbox", { name: "수량" })).toHaveValue("100");
-  await expect(page.getByRole("group", { name: "수량 방식" }).getByRole("button", { name: "주" })).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByRole("group", { name: "수량 방식" }).getByRole("button", { name: "수량" })).toHaveAttribute("aria-pressed", "true");
   await expect(page.getByTestId("ladder-mark")).toHaveCount(1);
 });
 
@@ -201,7 +201,7 @@ test.describe("NXT 미거래 종목의 장 시간", () => {
     scenario.reply(`/api/symbols/${CODE}`, { body: SYMBOL_INFO });
     await openOrderWindow(page, scenario);
     await expect(ladderRows(page)).toHaveCount(20);
-    await expect(page.getByTestId("order-total-ask")).toHaveText("1,000주");
+    await expect(page.getByTestId("order-total-ask")).toHaveText("1,000");
     await expect(page.getByTestId("order-book-notice")).toHaveCount(0);
     await expect(win(page)).not.toContainText("호가 사다리 없음");
     await expect(page.getByRole("group", { name: "세션" })).toHaveCount(0);
@@ -518,7 +518,7 @@ test("단일가 호가에서 칩을 끄는 도중 단 가격이 바뀌어도 놓
   await dragChip(page, chipAt(page, "buy", 69_500), await center(cellAt(page, "buy", 69_400)), false);
   await expect(page.getByTestId("order-ghost")).toContainText("→ 69,400원");
   await emitSingleBook(scenario, SINGLE_PRICE_ASKS.map((l) => ({ ...l, price: l.price + 100 })), [{ price: 69_600, qty: 11 }, { price: 69_500, qty: 777 }, { price: 69_400, qty: 22 }]);
-  await expect(ladderRows(page).nth(10).locator(".mw-qty[data-side=bid] .mw-qty-value")).toHaveText("777주");
+  await expect(ladderRows(page).nth(10).locator(".mw-qty[data-side=bid] .mw-qty-value")).toHaveText("777");
   await expect(ladderRows(page).nth(10).locator(".mw-px-num")).toHaveText("69,500");
   await expect(ladderRows(page).nth(11).locator(".mw-px-num")).toHaveText("69,400");
   await page.mouse.up();
@@ -552,7 +552,7 @@ test("교차 호가로 위 오른쪽 칸에 매수 잔량이 있으면 그 행�
   }).not.toBe("");
   scenario.live.emit({ type: "feed_book", sub, book: { t: 1, asks: [{ price: 70_100, qty: 50 }, { price: 70_200, qty: 40 }, { price: 70_300, qty: 30 }, { price: 70_400, qty: 20 }], bids: [{ price: 70_700, qty: 33 }, { price: 70_000, qty: 80 }], totalAskQty: 140, totalBidQty: 113, expected: null } });
   const crossed = ladderRows(page).filter({ has: page.locator(".mw-px-num", { hasText: /^70,700$/ }) });
-  await expect(crossed.locator(".mw-qty[data-side=bid] .mw-qty-value")).toHaveText("33주");
+  await expect(crossed.locator(".mw-qty[data-side=bid] .mw-qty-value")).toHaveText("33");
   await expect(crossed.getByTestId("ladder-info")).toHaveCount(0);
   const info = page.getByTestId("ladder-info");
   await expect(info).toHaveCount(6);
@@ -607,7 +607,7 @@ test.describe("수요일 08:35 시간외 종가 잔량", () => {
     await expect(page.getByTestId("order-total-ask")).toHaveAttribute("data-source", "regular");
     scenario.live.emit({ type: "feed_after_hours", sub, totals: { t: scenario.now / 1000, askQty: 13_770, bidQty: 0 } });
     await expect(page.getByTestId("order-total-ask")).toHaveAttribute("data-source", "after-hours");
-    await expect(page.getByTestId("order-total-ask")).toContainText("13,770주");
-    await expect(page.getByTestId("order-total-bid")).toContainText("0주");
+    await expect(page.getByTestId("order-total-ask")).toContainText("13,770");
+    await expect(page.getByTestId("order-total-bid")).toContainText("0");
   });
 });
