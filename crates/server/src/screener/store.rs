@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::fmt;
 use std::num::NonZeroU64;
 use std::path::Path;
@@ -60,6 +60,12 @@ pub struct Tail {
     pub code: StockCode,
     pub listed_on: Option<KstDate>,
     pub last: Option<(KstDate, Price)>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RecentCloses {
+    pub latest_day: Option<KstDate>,
+    pub closes: HashMap<StockCode, Vec<Price>>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -141,7 +147,7 @@ impl Store {
         self.conn.lock().expect("스크리너 저장소 잠금")
     }
 
-    pub(super) fn generation(&self) -> u64 {
+    pub fn generation(&self) -> u64 {
         let _conn = self.conn();
         self.generation.load(Ordering::SeqCst)
     }
@@ -224,6 +230,22 @@ impl Store {
             Ok(Tail { code: stock_code(&code)?, listed_on: listed_on.map(date_of), last })
         })
         .collect()
+    }
+
+    pub fn recent_closes(&self, codes: &[StockCode], count: usize) -> Result<RecentCloses, StoreError> {
+        let conn = self.conn();
+        let latest_day = conn.query_row("SELECT max(day) FROM daily", [], |row| row.get::<_, Option<i32>>(0))?.map(date_of);
+        let mut closes = HashMap::new();
+        let Some(latest_day) = latest_day else { return Ok(RecentCloses { latest_day, closes }) };
+        let mut stmt = conn.prepare("SELECT day, close FROM daily WHERE code = ? ORDER BY day DESC LIMIT ?")?;
+        for &code in codes {
+            let rows = stmt.query_map(params![code.as_str(), count as u64], |row| Ok((row.get::<_, i32>(0)?, row.get::<_, u64>(1)?)))?;
+            let newest_first = rows.collect::<Result<Vec<_>, _>>()?;
+            if newest_first.first().is_some_and(|(day, _)| date_of(*day) == latest_day) {
+                closes.insert(code, newest_first.into_iter().map(|(_, close)| price_of(close)).collect::<Result<Vec<_>, _>>()?);
+            }
+        }
+        Ok(RecentCloses { latest_day: Some(latest_day), closes })
     }
 
     pub fn bars_from(&self, code: StockCode, from: KstDate) -> Result<Vec<DayBar>, StoreError> {

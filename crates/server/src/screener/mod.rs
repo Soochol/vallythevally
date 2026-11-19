@@ -135,6 +135,14 @@ impl Screener {
         tokio::task::spawn_blocking(move || f(&store)).await.map_err(|e| StoreError(format!("저장소 작업이 끝나지 못했습니다: {e}")))?
     }
 
+    pub fn store_generation(&self) -> u64 {
+        self.store.generation()
+    }
+
+    pub async fn recent_closes(&self, codes: Vec<domain::StockCode>, count: usize) -> Result<store::RecentCloses, StoreError> {
+        self.with_store(move |store| store.recent_closes(&codes, count)).await
+    }
+
     pub fn start(self: &Arc<Self>, full: bool) {
         let mut run = self.run();
         if matches!(*run, Run::Running { .. }) {

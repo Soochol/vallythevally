@@ -52,11 +52,12 @@ const summary = (base: Pick<EtfFundSummary, "code" | "name" | "issuer" | "style"
 const SNAPSHOT_STATUS = { source: "snapshot", holdingsAsOf: "2026-10-30", lastAttemptAt: null, refreshFailed: false } as const;
 
 export const ETF_DETAILS: readonly EtfFundDetail[] = [
-  { fund: summary({ code: "444200", name: "SOL 코리아메가테크액티브", issuer: "신한자산운용", style: "active", benchmark: "KRX 메가테크", status: SNAPSHOT_STATUS }, MEGA_TECH), holdings: MEGA_TECH },
-  { fund: summary({ code: "091160", name: "KODEX 반도체", issuer: "삼성자산운용", style: "passive", benchmark: "KRX 반도체", status: SNAPSHOT_STATUS }, SEMICONDUCTOR), holdings: SEMICONDUCTOR },
+  { fund: summary({ code: "444200", name: "SOL 코리아메가테크액티브", issuer: "신한자산운용", style: "active", benchmark: "KRX 메가테크", status: SNAPSHOT_STATUS }, MEGA_TECH), holdings: MEGA_TECH, maAsOf: null },
+  { fund: summary({ code: "091160", name: "KODEX 반도체", issuer: "삼성자산운용", style: "passive", benchmark: "KRX 반도체", status: SNAPSHOT_STATUS }, SEMICONDUCTOR), holdings: SEMICONDUCTOR, maAsOf: null },
   {
     fund: summary({ code: "426030", name: "TIME 미국나스닥100액티브", issuer: "타임폴리오자산운용", style: "active", benchmark: "나스닥100", status: { source: "collected", holdingsAsOf: "2026-11-17", lastAttemptAt: 1_795_000_000, refreshFailed: true } }, NASDAQ),
     holdings: NASDAQ,
+    maAsOf: null,
   },
 ];
 
@@ -81,7 +82,7 @@ export const etfHoldersOf = (code: string): EtfStockHolders => {
     return found ? [{ fund: detail.fund, weightBps: found.weightBps }] : [];
   });
   const name = ETF_DETAILS.flatMap((detail) => detail.holdings).find((h) => h.code === code)?.name ?? null;
-  return { code, name, ma: NO_MA, holders };
+  return { code, name, ma: NO_MA, maAsOf: null, holders };
 };
 
 export function etfBaseline(path: string, method: string): FixtureReply | null {

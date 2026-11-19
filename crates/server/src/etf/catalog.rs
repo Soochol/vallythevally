@@ -153,6 +153,10 @@ impl Catalog {
         holders
     }
 
+    pub fn stock_codes(&self) -> Vec<StockCode> {
+        self.holders.keys().copied().collect()
+    }
+
     pub fn stock_name(&self, stock: StockCode) -> Option<&str> {
         self.stock_names.get(&stock).map(String::as_str)
     }
