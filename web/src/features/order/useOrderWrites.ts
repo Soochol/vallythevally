@@ -10,7 +10,7 @@ import { cancelAction, cancelBatchAction, createLedger, modifyAction, newIdFor, 
 import { cancelOrder, cancelOrdersAtPrice, modifyOrder, placeOrder, reconcileOrders } from "./orderApi";
 import { needsHighValueConfirm } from "./orderRules";
 import { type PendingDraft, pendingWrites } from "./pendingWrites";
-import { isUnanswered, type OrderStatus, statusOfCanceling, statusOfCommand, statusOfFailure, statusOfModifying, statusOfSending } from "./statusText";
+import { isUnanswered, type OrderStatus, statusOfCanceling, statusOfCommand, statusOfFailure, statusOfModifying, statusOfSending, withMargin } from "./statusText";
 
 const OK_STATUS_MS = 4_000;
 
@@ -43,6 +43,7 @@ export interface PlaceRequest {
   readonly price: number;
   readonly quantity: number;
   readonly confirmHighValue: boolean;
+  readonly margin?: number;
 }
 
 export interface OrderWrites {
@@ -65,7 +66,7 @@ export function useOrderWrites(code: string, venue: Venue): OrderWrites {
   const [status, setStatus] = useState<OrderStatus | null>(null);
   const [queued, setQueued] = useState(0);
   useEffect(() => {
-    if (status?.tone !== "ok") return;
+    if (status?.tone !== "ok" && status?.fades !== true) return;
     const timer = setTimeout(() => setStatus(null), OK_STATUS_MS);
     return () => clearTimeout(timer);
   }, [status]);
@@ -105,7 +106,7 @@ export function useOrderWrites(code: string, venue: Venue): OrderWrites {
       mark: { kind: "sending", key: action, code, side: r.side, price: r.price, quantity: r.quantity },
       starting: statusOfSending(r.side, r.quantity, r.price),
       call: (commandId) => placeOrder({ commandId, code, side: r.side, quantity: r.quantity, price: r.price, venue, confirmHighValue: r.confirmHighValue }),
-      describe: statusOfCommand,
+      describe: (command) => withMargin(statusOfCommand(command), r.margin ?? 0),
       settled: (command) => {
         const orderNo = acceptedOrderNo(command);
         return orderNo === null ? [] : [{ kind: "placed", code, order: openOrderOf(orderNo, code, venue, r.side, r.price, r.quantity) }];

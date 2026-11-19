@@ -1,7 +1,7 @@
 import { type ChangeEvent, type KeyboardEvent, useId, useLayoutEffect, useRef } from "react";
 import { formatQuantity, formatWon } from "../market-window/format";
 import { Segmented } from "../market-window/parts";
-import type { QuantityMode } from "./orderRules";
+import type { EstimateNote, QuantityMode } from "./orderRules";
 import { AMOUNT_UNIT_WON } from "./orderSettings";
 
 const MODES = [{ value: "shares", label: "수량" }, { value: "amount", label: "금액" }] as const;
@@ -80,12 +80,13 @@ export function QuantityRow({ mode, input, sharePresets, amountPresets, onMode, 
 interface EstimateProps {
   readonly estimate: number | null;
   readonly shares: number | null;
+  readonly note: EstimateNote | null;
 }
 
-export function OrderEstimate({ estimate, shares }: EstimateProps) {
+export function OrderEstimate({ estimate, shares, note }: EstimateProps) {
   return (
     <div className="od-estimate">
-      <span className="od-estimate-amount" title={estimate === null ? undefined : `예상 주문금액 ${formatWon(estimate)}`}>예상 주문금액 <b data-testid="order-estimate">{estimate === null ? "-" : formatWon(estimate)}</b></span>
+      <span className="od-estimate-amount" title={estimate === null ? undefined : `예상 주문금액 ${formatWon(estimate)}`}>예상 주문금액 <b data-testid="order-estimate">{estimate === null ? "-" : formatWon(estimate)}</b>{note && <span className="od-estimate-note" data-testid="order-estimate-note" data-tone={note.tone}> · {note.text}</span>}</span>
       {shares !== null && <span className="od-estimate-shares">수량 <b data-testid="order-estimate-quantity">{formatQuantity(shares)}</b></span>}
     </div>
   );

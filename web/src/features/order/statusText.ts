@@ -6,6 +6,8 @@ import { formatPrice } from "../../lib/format";
 import { SIDE_LABEL } from "./orderRules";
 import type { PendingState } from "./pendingWrites";
 
+export const MARGIN_SETTLEMENT_TEXT = "결제일(D+2)까지 입금";
+
 export const MOCK_KRX_ONLY_TEXT = "모의투자는 KRX 주문만 됩니다";
 
 export const REJECT_TEXT: Readonly<Record<OrderRejectReason, string>> = {
@@ -38,6 +40,8 @@ export interface OrderStatus {
   readonly text: string;
   readonly undoOrderNo?: string;
   readonly unknown?: boolean;
+  readonly fades?: boolean;
+  readonly action?: { readonly label: string; readonly run: () => void };
 }
 
 const describe = (command: OrderCommand): string => {
@@ -59,6 +63,11 @@ export function statusOfCommand(command: OrderCommand): OrderStatus {
     default:
       return { tone: "info", text: `줄 서는 중 · ${describe(command)}` };
   }
+}
+
+export function withMargin(status: OrderStatus, margin: number): OrderStatus {
+  if (margin <= 0 || status.tone !== "ok") return status;
+  return { ...status, tone: "warn", fades: true, text: `${status.text} · 미수 약 ${margin.toLocaleString("ko-KR")}원, ${MARGIN_SETTLEMENT_TEXT}` };
 }
 
 export const PENDING_TEXT: Readonly<Record<PendingState, string>> = { sending: "보내는 중", canceling: "취소 중", modifying: "정정 중" };

@@ -2,9 +2,11 @@ import type { Locator, Page } from "@playwright/test";
 import type { FeedKind } from "../src/api/generated/FeedKind";
 import type { LayoutWindow } from "../src/api/generated/LayoutWindow";
 import type { OrderCommand } from "../src/api/generated/OrderCommand";
+import type { MarginPolicy } from "../src/api/generated/MarginPolicy";
 import type { OrderSide } from "../src/api/generated/OrderSide";
 import type { TradingOpenOrder } from "../src/api/generated/TradingOpenOrder";
 import type { TradingExecution } from "../src/api/generated/TradingExecution";
+import type { TradingOrderable } from "../src/api/generated/TradingOrderable";
 import type { TradingHolding } from "../src/api/generated/TradingHolding";
 import type { Venue } from "../src/api/generated/Venue";
 import { type Scenario, cell, DEFAULT_LAYOUT_ID, expect, windowTabs } from "./harness";
@@ -25,6 +27,10 @@ export interface Api {
   holdings: TradingHolding[];
   orderableQueries: string[];
   buyableFailure: { status: number; body: unknown } | null;
+  policy: MarginPolicy;
+  orderable: Partial<TradingOrderable>;
+  policyWrites: Record<string, unknown>[];
+  policyFailure: { status: number; body: unknown } | null;
   executions: TradingExecution[];
 }
 
@@ -75,7 +81,7 @@ export function ordersOn(scenario: Scenario): void {
 }
 
 export function tradingApi(scenario: Scenario, open: TradingOpenOrder[] = []): Api {
-  const api: Api = { open, blocked: false, writes: [], placeReply: {}, batchFailures: 0, holdings: [HELD], orderableQueries: [], buyableFailure: null, executions: [] };
+  const api: Api = { open, blocked: false, writes: [], placeReply: {}, batchFailures: 0, holdings: [HELD], orderableQueries: [], buyableFailure: null, policy: "cash_only", orderable: {}, policyWrites: [], policyFailure: null, executions: [] };
   const apiError = (message: string) => ({ status: 503, body: { error: { code: "internal", message, reason: null, retryAt: null, manualActionRequired: false } } });
   scenario.on((url) => url.pathname === "/api/trading/open-orders", () => ({ body: { accountRef: ACCOUNT, orders: api.open } }));
   scenario.on((url) => url.pathname === "/api/trading/balance", () => ({ body: { accountRef: ACCOUNT, holdings: api.holdings, totalPurchase: 0, totalEvaluation: 0, totalProfit: 0 } }));
@@ -85,7 +91,21 @@ export function tradingApi(scenario: Scenario, open: TradingOpenOrder[] = []): A
     const side = new URL(request.url()).searchParams.get("side") ?? "";
     api.orderableQueries.push(side);
     if (side === "buy" && api.buyableFailure) return api.buyableFailure;
-    return { body: { accountRef: ACCOUNT, code: CODE, side, price: BASE, amount: 500_000_000, quantity: 100_000 } };
+    const figures = { amount: 0, quantity: 0, cashAmount: 500_000_000, cashQuantity: 100_000, marginAmount: 1_500_000_000, marginQuantity: 300_000, ...api.orderable };
+    const margined = api.policy === "allow_margin" && figures.marginAmount !== null && figures.marginQuantity !== null;
+    const body: TradingOrderable = {
+      accountRef: ACCOUNT, code: CODE, side: side as OrderSide, price: BASE, deposit: 520_000_000, unpaid: 0, stockRate: 100, accountRate: 40, appliedRate: 100, ...figures,
+      policy: api.policy, amount: margined ? figures.marginAmount! : figures.cashAmount, quantity: margined ? figures.marginQuantity! : figures.cashQuantity,
+    };
+    return { body };
+  });
+  scenario.on((url) => url.pathname === "/api/system/orders/margin", (request) => {
+    if (request.method() === "GET") return { body: { policy: api.policy } };
+    const input = request.postDataJSON() as Record<string, unknown>;
+    api.policyWrites.push(input);
+    if (api.policyFailure) return api.policyFailure;
+    api.policy = input.policy as MarginPolicy;
+    return { body: { policy: api.policy } };
   });
   scenario.on((url, request) => url.pathname.startsWith("/api/trading/commands/") && request.method() === "POST", (request) => {
     const path = new URL(request.url()).pathname;

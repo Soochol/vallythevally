@@ -376,7 +376,7 @@ test("가능 수량·금액을 넘는 주문은 보내기 전에 상태 줄이 �
 
   await page.getByLabel("수량", { exact: true }).fill("10000");
   await cellAt(page, "buy", 70_000).dblclick();
-  await expect(status(page)).toContainText("매수 가능 금액 500,000,000원을 넘습니다");
+  await expect(status(page)).toContainText("현금 주문가능 500,000,000원을 넘습니다 (미수 막음) · 최대 7,142주");
   expect(writesTo(api, "place")).toHaveLength(1);
 });
 

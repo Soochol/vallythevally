@@ -6,14 +6,16 @@ import type { TradingExecution } from "../../api/generated/TradingExecution";
 import type { TradingOpenOrder } from "../../api/generated/TradingOpenOrder";
 import { marketSocket } from "../../stores/realtime";
 import { useKiwoomLinkStore } from "../../stores/kiwoomLink";
-import type { Capacity } from "./orderRules";
-import { groupWithPending, type PriceGroup } from "./orderRules";
+import type { TradingOrderable } from "../../api/generated/TradingOrderable";
+import { buyingPowerOf, type Capacity, groupWithPending, type PriceGroup } from "./orderRules";
 import { pendingWrites } from "./pendingWrites";
 import { fetchBalance, fetchCommands, fetchExecutions, fetchOpenOrders, fetchOrderable } from "./orderApi";
 import { holdingOf } from "./holdingSummary";
 import { ORDER_QUERY_KEY } from "./useOrderWrites";
 
 const POLL_MS = 5000;
+
+export const ORDERABLE_QUERY_KEY = [...ORDER_QUERY_KEY, "orderable"] as const;
 
 export interface OrderAccess {
   readonly open: boolean;
@@ -33,6 +35,7 @@ export interface OrderBoardData {
   readonly groups: ReadonlyMap<string, PriceGroup>;
   readonly blocked: boolean;
   readonly capacity: Capacity;
+  readonly orderable: TradingOrderable | null;
   readonly buyableProblem: string | null;
   readonly openOrders: readonly TradingOpenOrder[];
   readonly balance: TradingBalance | null;
@@ -61,7 +64,7 @@ export function useOrderData(code: string, open: boolean, referencePrice: number
   const executions = useQuery({ queryKey: [...ORDER_QUERY_KEY, "executions"], queryFn: ({ signal }) => fetchExecutions(signal), enabled: open, refetchInterval: POLL_MS * 3, staleTime: POLL_MS, retry: false });
   useRefreshOnAccountChange(open);
   const orderableEnabled = open && referencePrice !== null;
-  const buyable = useQuery({ queryKey: [...ORDER_QUERY_KEY, "orderable", code, "buy"], queryFn: ({ signal }) => fetchOrderable(code, "buy", referencePrice!, signal), enabled: orderableEnabled, refetchInterval: POLL_MS * 3, staleTime: POLL_MS, retry: false });
+  const buyable = useQuery({ queryKey: [...ORDERABLE_QUERY_KEY, code, "buy"], queryFn: ({ signal }) => fetchOrderable(code, "buy", referencePrice!, signal), enabled: orderableEnabled, refetchInterval: POLL_MS * 3, staleTime: POLL_MS, retry: false });
   const orders = openOrders.data?.orders;
   const writes = useSyncExternalStore(pendingWrites.subscribe, pendingWrites.snapshot);
   const fetchedAt = openOrders.dataUpdatedAt;
@@ -73,7 +76,8 @@ export function useOrderData(code: string, open: boolean, referencePrice: number
     openOrders: orders ?? NONE,
     balance: balance.data ?? null,
     executions: executions.data?.executions ?? NONE,
-    capacity: { sellableQuantity: sellableQuantityOf(balance.data ?? null, code), buyableAmount: buyable.data?.amount ?? null },
+    orderable: buyable.data ?? null,
+    capacity: { sellableQuantity: sellableQuantityOf(balance.data ?? null, code), buying: buyingPowerOf(buyable.data ?? null) },
     buyableProblem: buyable.error?.message ?? null,
   };
 }

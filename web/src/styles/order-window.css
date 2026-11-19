@@ -110,3 +110,26 @@ button.od-cellbtn:hover:not(:disabled) { background:var(--hover); }
 .od-ladder[data-divider] .mw-lr[data-side=ask] + .mw-lr[data-side=bid] { box-shadow:inset 0 var(--size-1) 0 var(--text-3); }
 
 .od-ladder-wrap[data-exploring] { box-shadow:inset 0 0 0 var(--size-1) var(--accent); }
+
+.od-policy { padding:var(--size-1) var(--s2); border:var(--size-1) solid var(--success); border-radius:var(--r-m); color:var(--success); font-size:var(--fs-xs); font-weight:700; }
+.od-policy[data-policy=allow_margin] { border-color:var(--warning); color:var(--warning); }
+.od-cellbtn[data-policy=allow_margin] b { color:var(--warning); }
+.od-cellbtn small { display:flex; align-items:center; gap:var(--s2); }
+.od-unpaid-dot { flex:none; width:var(--size-5); height:var(--size-5); border-radius:50%; background:var(--danger); }
+.od-preview[data-over] { color:var(--danger); text-decoration:line-through; }
+.od-preview[data-margin] { color:var(--warning); }
+.od-estimate-note { color:var(--warning); }
+.od-estimate-note[data-tone=over] { color:var(--danger); }
+.ui-popover.od-funds { max-height:none; }
+.od-funds-title { margin:0 0 var(--s2); color:var(--text-2); font-size:var(--fs-xs); font-weight:600; }
+.od-funds-rows li[data-danger] b, .od-funds-rows li[data-danger] .od-name { color:var(--danger); }
+.od-funds-toggle { display:flex; gap:var(--s2); margin-top:var(--s3); }
+.od-funds-option { flex:1; padding:var(--s2) var(--s3); border-radius:var(--r-m); background:var(--raised); color:var(--text-2); font-size:var(--fs-xs); }
+.od-funds-option[aria-pressed=true] { background:var(--hover); color:var(--text); font-weight:700; }
+.od-funds-option:disabled:not([aria-pressed=true]) { color:var(--text-3); cursor:default; }
+.od-funds-note { margin:var(--s3) 0 0; color:var(--text-3); font-size:var(--fs-xs); }
+.od-funds-note[data-tone=error] { color:var(--danger); }
+.od-funds-confirm { margin-top:var(--s3); padding:var(--s3); border-radius:var(--r-m); background:color-mix(in srgb, var(--warning) 14%, transparent); color:var(--text); font-size:var(--fs-xs); }
+.od-funds-confirm p { margin:0 0 var(--s3); }
+.od-funds-confirm-actions { display:flex; justify-content:flex-end; gap:var(--s4); }
+.od-funds-confirm .od-link[data-danger] { color:var(--warning); }
