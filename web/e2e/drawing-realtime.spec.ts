@@ -1,4 +1,5 @@
 import { selectMinute } from "./select-option";
+import { showOnAllPeriods } from "./drawing-probe";
 import type { Page } from "@playwright/test";
 import type { Drawing } from "../src/api/generated/Drawing";
 import { type Scenario, cell, chartOf, expect, SEARCH_BUTTON_TITLE, test, pollSaved } from "./harness";
@@ -53,6 +54,8 @@ test("drawings survive realtime updates, series replacement, resync and controll
   await page.mouse.move(box.x + box.width * 0.86, box.y + box.height * 0.3, { steps: 10 });
   await page.mouse.up();
   await pollSaved(() => drawings(scenario)).toHaveLength(1);
+  await showOnAllPeriods(page);
+  await pollSaved(async () => (await drawings(scenario))[0]?.periods).toBeNull();
   const saved = (await drawings(scenario))[0]!;
   const expectDrawing = async (place: "loaded" | "beforeFirstBar" = "loaded") => {
     await expect(chart.locator(".drawing-mirror")).toHaveCount(1);

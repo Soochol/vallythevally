@@ -12,7 +12,7 @@ const body = (id: string, z: number, extra: Partial<DrawingBody> = {}): DrawingB
   locked: false, hidden: false, periods: null, z, group: "g", scope: { kind: "symbol" }, revision: 4, ...extra,
 });
 
-function setup(drawings: DrawingBody[], target: EditTarget | null = { symbol: "005930", scope: SCOPE }) {
+function setup(drawings: DrawingBody[], target: EditTarget | null = { symbol: "005930", scope: SCOPE, period: "D" }) {
   const commits: { ops: readonly DrawingOp[]; undo?: string }[] = [];
   const store: DrawingStore = {
     drawings: (symbol) => drawings.filter((d) => d.symbol === symbol).sort((a, b) => a.z - b.z),
@@ -32,6 +32,24 @@ describe("new drawings take the top z and the target scope", () => {
     const placed = edits.place(toolOf("hline")!, [{ t: 60, price: 50 }], { v: 2 });
     expect(placed).toMatchObject({ id: "new-1", tool: "hline", z: 8, scope: SCOPE, locked: false, group: null, revision: 0, style: { v: 2 } });
     expect(commits).toEqual([{ ops: [{ kind: "create", after: placed }] }]);
+  });
+
+  test("placing stores the period group of the target period", () => {
+    const minutes = setup([], { symbol: "005930", scope: SCOPE, period: "3m" }).edits.place(toolOf("hline")!, [{ t: 60, price: 50 }], {});
+    const dailyAndUp = setup([], { symbol: "005930", scope: SCOPE, period: "W" }).edits.place(toolOf("hline")!, [{ t: 60, price: 50 }], {});
+    expect(minutes?.periods).toEqual(["1m", "3m", "5m", "10m", "15m", "30m", "60m"]);
+    expect(dailyAndUp?.periods).toEqual(["D", "W", "M", "Q", "Y"]);
+  });
+
+  test("clones keep the original periods", () => {
+    const { edits } = setup([]);
+    expect(edits.clone([body("a", 1, { periods: null }), body("b", 2, { periods: ["D"] })]).map((d) => d.periods)).toEqual([null, ["D"]]);
+  });
+
+  test("paste stores the period group of the target period", () => {
+    const { edits } = setup([], { symbol: "005930", scope: SCOPE, period: "5m" });
+    const result = edits.paste(clipboard.copy([body("a", 1, { periods: ["D", "W", "M", "Q", "Y"] })], "005930")!, shiftBars)!;
+    expect(result.bodies[0]?.periods).toEqual(["1m", "3m", "5m", "10m", "15m", "30m", "60m"]);
   });
 
   test("clones keep their order above the top, unlocked and ungrouped", () => {

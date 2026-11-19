@@ -13,7 +13,7 @@ test("저장된 이름은 글자·스타일을 보존하고 도구 스타일 파
   const clip = copy([named], drawing.symbol);
   expect(clip).not.toBeNull();
   if (!clip) throw new Error("복사할 드로잉이 필요합니다");
-  const result = paste(clip, { symbol: "000660", scope: { kind: "symbol" }, topZ: 3, newId: () => "copy", shiftBars: (t) => t });
+  const result = paste(clip, { symbol: "000660", scope: { kind: "symbol" }, period: "D", topZ: 3, newId: () => "copy", shiftBars: (t) => t });
   expect(result.bodies[0]).toMatchObject({ id: "copy", symbol: "000660", style: { objectName: "지지선", future: 7 }, text: "차트 글자" });
 });
 

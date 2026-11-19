@@ -3,7 +3,7 @@ import type { DrawingSurface } from "../../chart/drawings/DrawingSurface";
 import type { ScreenPoint } from "../../chart/drawings/types";
 import { formatBarTime } from "../../chart/time";
 import { formatPrice } from "../../lib/format";
-import { isIndexCode } from "../../lib/symbol";
+import { isIndexCode, isMinutePeriod } from "../../lib/symbol";
 import { useSelectionStore } from "../../stores/selection";
 import { activeWatchlist, useWatchlistStore } from "../../stores/watchlist";
 import { CameraIcon, CopyIcon, DRAWING_ICONS, ExpandIcon, Icon, PlusIcon } from "../icons";
@@ -11,7 +11,10 @@ import { canCopyImage, saveSnapshot } from "../snapshot/saveSnapshot";
 import { controllerFor } from "../grid/controllers";
 import { jumpToBar } from "../jump/jumpToBar";
 import { defaultObjectStyle } from "../../chart/drawings/objects";
+import { inScope } from "../../chart/drawings/frame";
+import { periodGroup } from "../../chart/drawings/periodGroup";
 import { toolOf } from "../../chart/drawings/tools";
+import { useLayoutStore } from "../../stores/layout";
 import type { Period } from "../../api/generated/Period";
 import { useDrawingSession } from "../../stores/drawingSession";
 import { shortcutPreferringAlt, shortcutOf, toolActionId } from "../../lib/hotkeys";
@@ -50,15 +53,19 @@ export function drawingMenu(surface: DrawingSurface, empty = false, at: ScreenPo
   const session = useDrawingSession.getState(); const prefs = useUiStore.getState().prefs.drawing;
   const selected = surface.selected();
   if (empty) {
-    const symbol = surface.host.view()?.symbol;
-    const removable = symbol ? surface.sync.drawings(symbol).filter((d) => !d.locked && !prefs.lockAll) : [];
+    const view = surface.host.view(); const symbol = view?.symbol;
+    const layoutId = useLayoutStore.getState().layout.id;
+    const all = symbol ? surface.sync.drawings(symbol) : [];
+    const here = view ? all.filter((d) => inScope(d.scope, layoutId, surface.cellId) && (d.periods === null || d.periods.includes(view.period))) : [];
+    const removable = here.filter((d) => !d.locked && !prefs.lockAll);
+    const group = view && isMinutePeriod(view.period) ? "분봉" : "일 이상";
     return [
       ...(at ? chartItems(surface, at) : []),
-      { kind: "heading", label: `드로잉 ${symbol ? surface.sync.drawings(symbol).length : 0}개` },
+      { kind: "heading", label: here.length === all.length ? `드로잉 ${here.length}개` : `드로잉 ${here.length}개 · 모든 봉 주기 ${all.length}개` },
       ...(session.clip ? [action("붙여넣기", () => surface.paste())] : []),
       { kind: "check", label: "모든 드로잉 숨기기", checked: prefs.hideAll, onSelect: () => useUiStore.getState().setDrawingPrefs({ hideAll: !useUiStore.getState().prefs.drawing.hideAll }) },
       { kind: "check", label: "모든 드로잉 잠그기", checked: prefs.lockAll, onSelect: () => useUiStore.getState().setDrawingPrefs({ lockAll: !useUiStore.getState().prefs.drawing.lockAll }) },
-      { kind: "action", label: "이 종목 드로잉 모두 지우기…", icon: glyph(DRAWING_ICONS.trash), danger: true, disabled: removable.length === 0, onSelect: () => surface.sync.commitWithUndo(surface.cellId, removable.map((before) => ({ kind: "delete", before })), `드로잉 ${removable.length}개를 지웠습니다`) },
+      { kind: "action", label: `${group} 드로잉 모두 지우기…`, icon: glyph(DRAWING_ICONS.trash), danger: true, disabled: removable.length === 0, onSelect: () => surface.sync.commitWithUndo(surface.cellId, removable.map((before) => ({ kind: "delete", before })), `드로잉 ${removable.length}개를 지웠습니다`) },
     ];
   }
   const first = selected[0]; if (!first) return [];
@@ -71,7 +78,7 @@ export function drawingMenu(surface: DrawingSurface, empty = false, at: ScreenPo
     { kind: "heading", label: "순서" },
     ...([ ["맨 앞으로", "front"], ["앞으로", "forward"], ["뒤로", "backward"], ["맨 뒤로", "back"] ] as const).map(([label, direction]) => action(label, () => surface.reorder(first.id, direction))),
     { kind: "heading", label: "보이는 봉 주기" }, action("모든 봉 주기", () => periods(null)),
-    action("분봉만", () => periods(["1m", "3m", "5m", "10m", "15m", "30m", "60m"])), action("일·주·월만", () => periods(["D", "W", "M"])),
+    action("분봉만", () => periods(periodGroup("1m"))), action("일 이상만", () => periods(periodGroup("D"))),
     action("지금 봉 주기만", () => periods([surface.host.view()?.period ?? "D"])),
     { kind: "separator" }, action("기본 스타일로", () => surface.updateSelected((d) => ({ ...d, style: defaultObjectStyle(d) }))),
     { kind: "action", label: "지우기", icon: glyph(DRAWING_ICONS.trash), danger: true, onSelect: () => surface.remove(true) },

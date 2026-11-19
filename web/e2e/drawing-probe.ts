@@ -70,3 +70,8 @@ export async function bodyAlong(page: Page, segments: readonly (readonly [Screen
   }
   throw new Error("드로잉의 몸통을 찾지 못했습니다");
 }
+
+export async function showOnAllPeriods(page: Page) {
+  await page.getByRole("button", { name: "드로잉 더 보기", exact: true }).click();
+  await page.getByRole("menu", { name: "드로잉 메뉴", exact: true }).getByRole("menuitem", { name: "모든 봉 주기", exact: true }).click();
+}

@@ -147,7 +147,7 @@ test("drawing edits, clone, object visibility and delete-toast Undo keep persist
   await edit((d) => ({ ...d, style: hline.bar.width?.set(d.style, 5) }));
   await edit((d) => ({ ...d, style: hline.bar.dash?.set(d.style, "dotted"), locked: true }));
   const clip = copy([current()], body.symbol); if (!clip) throw new Error("복사할 드로잉이 필요합니다");
-  const clone = paste(clip, { symbol: body.symbol, scope: body.scope, topZ: 1, newId: () => "clone", shiftBars: (t, n) => t + n });
+  const clone = paste(clip, { symbol: body.symbol, scope: body.scope, period: "D", topZ: 1, newId: () => "clone", shiftBars: (t, n) => t + n });
   sync.commit(CELL, clone.bodies.map((after) => ({ kind: "create", after })));
   await vi.waitFor(() => expect(sync.save.kind).toBe("saved"));
   expect(remote.get("clone")).toMatchObject({ locked: false, z: 2, style: { objectName: "지지선", line: { color: "#123456", width: 5, dash: "dotted" } } });

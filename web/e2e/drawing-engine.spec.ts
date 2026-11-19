@@ -4,7 +4,7 @@ import type { Page } from "@playwright/test";
 import type { Bar } from "../src/api/generated/Bar";
 import type { DrawingBody } from "../src/chart/drawings/types";
 import { completionKey } from "../src/chart/drawings/journal";
-import { chartPoint, drawings, mirror, open, settledMirror as settled, expandDock, type Mirror } from "./drawing-probe";
+import { chartPoint, drawings, mirror, open, settledMirror as settled, expandDock, showOnAllPeriods, type Mirror } from "./drawing-probe";
 import { installChartProbe } from "./chart-probe";
 
 async function draw(page: Page, tool = "T", shift = false) {
@@ -84,6 +84,8 @@ test("drawing engine: daily anchors keep their time and price on 60-minute bars"
   await open(page); await cell(page).focus(); await page.keyboard.press("G"); await draw(page);
   await pollSaved(async () => (await drawings(scenario)).length).toBe(1);
   await expect(page.getByRole("toolbar", { name: "드로잉 스타일" })).toBeVisible();
+  await showOnAllPeriods(page);
+  await pollSaved(async () => (await drawings(scenario))[0]?.periods).toBeNull();
   const saved = (await drawings(scenario))[0]!; const { points: before, spacing: beforeSpacing } = await capture();
   const xBeforePan = (await mirror(page))[0]!.points[0]!.x;
   const r = (await chartOf(cell(page)).boundingBox())!;

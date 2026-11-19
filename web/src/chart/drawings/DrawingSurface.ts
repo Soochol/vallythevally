@@ -48,7 +48,7 @@ export class DrawingSurface implements ChartExtension {
   private readonly edits: DrawingEdits;
 
   constructor(readonly host: ChartHost, readonly cellId: WindowId, readonly sync: DrawingSync) {
-    this.edits = new DrawingEdits(sync, cellId, () => { const view = host.view(); return view ? { symbol: view.symbol, scope: this.newScope() } : null; });
+    this.edits = new DrawingEdits(sync, cellId, () => { const view = host.view(); return view ? { symbol: view.symbol, scope: this.newScope(), period: view.period } : null; });
     this.mirror.className = "drawing-mirror"; this.mirror.setAttribute("aria-hidden", "true"); this.mirror.hidden = true;
     host.el.append(this.mirror);
     this.layer = new DrawingLayer(() => this.build());
