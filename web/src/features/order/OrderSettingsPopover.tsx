@@ -22,6 +22,7 @@ const FLAGS = [
   { key: "averageDot", label: "평단가 점" },
   { key: "divider", label: "구분선" },
   { key: "rate", label: "등락률 표시" },
+  { key: "maskAccount", label: "계좌번호 가리기" },
 ] as const;
 
 const PRESET_GROUPS = [

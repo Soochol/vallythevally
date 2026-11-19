@@ -1,10 +1,13 @@
-import { useState } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { useRef, useState } from "react";
 import type { TradingBalance } from "../../api/generated/TradingBalance";
 import type { TradingExecution } from "../../api/generated/TradingExecution";
 import type { TradingOpenOrder } from "../../api/generated/TradingOpenOrder";
 import { formatPrice } from "../../lib/format";
+import { Popover } from "../overlay/Popover";
 import { formatQuantity } from "../market-window/format";
 import { formatFillTime, profitText } from "./holdingSummary";
+import { fetchAccountNumber } from "./orderApi";
 import { SIDE_LABEL } from "./orderRules";
 
 type PanelKind = "open" | "holdings" | "fills";
@@ -17,6 +20,7 @@ const TABS: readonly { readonly kind: PanelKind; readonly label: string }[] = [
 
 interface Props {
   readonly accountTail: string | null;
+  readonly maskAccount: boolean;
   readonly openOrders: readonly TradingOpenOrder[];
   readonly balance: TradingBalance | null;
   readonly executions: readonly TradingExecution[];
@@ -76,26 +80,59 @@ function FillsPanel({ executions }: { executions: readonly TradingExecution[] })
   );
 }
 
-export function AccountBand({ accountTail, openOrders, balance, executions, writable, mock, onCancel }: Props) {
+const isTab = (target: Node) => target instanceof Element && target.closest(".od-tab") !== null;
+const LIST_MAX_WIDTH = 360;
+const LIST_MARGIN = 8;
+const windowOf = (opener: HTMLElement | null) => opener?.closest(".od")?.getBoundingClientRect();
+const listWidthIn = (window: DOMRect) => Math.min(window.width - 2 * LIST_MARGIN, LIST_MAX_WIDTH);
+const BROKER = "키움";
+const ACCOUNT_NUMBER_KEY = ["trading", "account-number"] as const;
+const groupedAccountNumber = (digits: string) => `${digits.slice(0, 4)}-${digits.slice(4, 8)}-${digits.slice(8)}`;
+
+function RevealedAccountLabel({ masked }: { masked: string }) {
+  const lookup = useQuery({ queryKey: ACCOUNT_NUMBER_KEY, queryFn: ({ signal }) => fetchAccountNumber(signal), gcTime: 0, staleTime: Infinity, retry: false, refetchOnWindowFocus: false });
+  const failure = lookup.isError ? (lookup.error instanceof Error ? lookup.error.message : "계좌번호를 불러오지 못했습니다") : undefined;
+  const text = lookup.data ? `${BROKER} ${groupedAccountNumber(lookup.data.accountNumber)}` : masked;
+  return <span className="od-account-label" data-testid="account-label" title={failure}>{text}</span>;
+}
+
+function AccountLabel({ accountTail, maskAccount }: { accountTail: string | null; maskAccount: boolean }) {
+  if (accountTail === null) return <span className="od-account-label" data-testid="account-label">{BROKER} —</span>;
+  const masked = `${BROKER} ****-****-${accountTail}`;
+  if (maskAccount) return <span className="od-account-label" data-testid="account-label">{masked}</span>;
+  return <RevealedAccountLabel masked={masked} />;
+}
+
+export function AccountBand({ accountTail, maskAccount, openOrders, balance, executions, writable, mock, onCancel }: Props) {
   const [panel, setPanel] = useState<PanelKind | null>(null);
+  const opener = useRef<HTMLElement | null>(null);
   const counts: Record<PanelKind, number> = { open: openOrders.length, holdings: balance?.holdings.length ?? 0, fills: executions.length };
+  const listAnchor = () => {
+    const tab = opener.current?.getBoundingClientRect();
+    const window = windowOf(opener.current);
+    if (!tab || !window) return undefined;
+    const left = Math.max(window.left + LIST_MARGIN, Math.min(tab.left, window.right - LIST_MARGIN - listWidthIn(window)));
+    return { left, right: left, top: tab.top, bottom: tab.bottom };
+  };
+  const listWindow = windowOf(opener.current);
+  const label = TABS.find((tab) => tab.kind === panel)?.label;
   return (
     <div className="od-account" data-testid="order-account">
       <div className="od-account-bar">
-        <span className="od-account-label" data-testid="account-label">계좌 {accountTail === null ? "—" : `··${accountTail}`}</span>
+        <AccountLabel accountTail={accountTail} maskAccount={maskAccount} />
         {mock && <span className="od-account-mock" data-testid="account-mock">모의</span>}
         {TABS.map(({ kind, label }) => (
-          <button key={kind} type="button" className="od-tab" data-testid={`account-tab-${kind}`} aria-expanded={panel === kind} onClick={() => setPanel((open) => (open === kind ? null : kind))}>
+          <button key={kind} type="button" className="od-tab" data-testid={`account-tab-${kind}`} aria-expanded={panel === kind} onClick={(e) => { opener.current = e.currentTarget; setPanel((open) => (open === kind ? null : kind)); }}>
             {label} <b>{counts[kind]}</b>
           </button>
         ))}
       </div>
       {panel !== null && (
-        <div className="od-account-panel" data-testid="account-panel" data-panel={panel}>
+        <Popover key={panel} anchor={opener} anchorRect={listAnchor} style={listWindow && { width: listWidthIn(listWindow) }} releasesClick={isTab} onClose={() => setPanel(null)} role="dialog" aria-label={label} className="od-list-pop" data-testid="account-panel" data-panel={panel}>
           {panel === "open" && <OpenPanel orders={openOrders} writable={writable} onCancel={onCancel} />}
           {panel === "holdings" && <HoldingsPanel balance={balance} />}
           {panel === "fills" && <FillsPanel executions={executions} />}
-        </div>
+        </Popover>
       )}
     </div>
   );

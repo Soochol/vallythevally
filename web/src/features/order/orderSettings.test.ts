@@ -9,7 +9,15 @@ describe("호가주문 설정", () => {
   });
 
   it("저장된 값을 읽는다", () => {
-    expect(parseOrderSettings({ sharePresets: [1, 2, 3, 4], amountPresets: [5, 6, 7, 8], averageDot: false, divider: false, rate: false, venue: "nxt" })).toEqual({ sharePresets: [1, 2, 3, 4], amountPresets: [5, 6, 7, 8], averageDot: false, divider: false, rate: false, venue: "nxt" });
+    expect(parseOrderSettings({ sharePresets: [1, 2, 3, 4], amountPresets: [5, 6, 7, 8], averageDot: false, divider: false, rate: false, maskAccount: false, venue: "nxt" })).toEqual({ sharePresets: [1, 2, 3, 4], amountPresets: [5, 6, 7, 8], averageDot: false, divider: false, rate: false, maskAccount: false, venue: "nxt" });
+  });
+
+  it("계좌번호 가리기는 기본이 켜짐이고 옛 저장값에 없거나 깨졌으면 켜짐이다", () => {
+    expect(DEFAULT_ORDER_SETTINGS.maskAccount).toBe(true);
+    expect(parseOrderSettings({ sharePresets: [1, 2, 3, 4] }).maskAccount).toBe(true);
+    expect(parseOrderSettings({ maskAccount: "no" }).maskAccount).toBe(true);
+    expect(parseOrderSettings({ maskAccount: false }).maskAccount).toBe(false);
+    expect(parseOrderSettings({ maskAccount: true }).maskAccount).toBe(true);
   });
 
   it("주문 경로는 옛 값에 없거나 모르는 값이면 SOR이고 KRX·NXT는 그대로 읽는다", () => {

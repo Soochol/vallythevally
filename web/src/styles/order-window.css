@@ -58,7 +58,7 @@
 .od-tab { padding:var(--s2) var(--s3); border-radius:var(--r-m); background:var(--raised); color:var(--text-2); font-size:var(--fs-xs); }
 .od-tab:hover, .od-tab[aria-expanded=true] { background:var(--hover); color:var(--text); }
 .od-tab b { color:var(--text); }
-.od-account-panel { max-height:var(--size-120); padding:var(--s2) var(--s4); overflow:auto; border-top:var(--size-1) solid var(--line); font-size:var(--fs-xs); }
+.ui-popover.od-list-pop { max-height:var(--size-240); padding:var(--s2) var(--s4); font-size:var(--fs-xs); }
 .od-rows { margin:0; padding:0; list-style:none; }
 .od-rows li { display:flex; align-items:center; gap:var(--s4); height:var(--size-24); font-variant-numeric:tabular-nums; }
 .od-rows li button { margin-left:auto; }
