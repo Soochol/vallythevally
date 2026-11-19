@@ -367,6 +367,12 @@ struct Job {
     total_blocked_since: Option<Instant>,
 }
 
+impl Job {
+    fn is_abandoned(&self) -> bool {
+        self.once.is_none() && self.state == JobState::Queued && self.waiters.iter().all(|w| w.is_closed())
+    }
+}
+
 #[derive(Default)]
 enum Gate {
     #[default]
@@ -415,6 +421,22 @@ impl Queue {
             }
             for w in job.waiters {
                 let _ = w.send(result.clone());
+            }
+        }
+    }
+
+    fn drop_abandoned(&mut self) {
+        let abandoned: Vec<u64> = self.lanes.iter().flatten().copied().filter(|id| self.jobs[id].is_abandoned()).collect();
+        if abandoned.is_empty() {
+            return;
+        }
+        for lane in &mut self.lanes {
+            lane.retain(|id| !abandoned.contains(id));
+        }
+        for id in abandoned {
+            if let Some(job) = self.jobs.remove(&id) {
+                self.by_key.remove(&job.key);
+                tracing::debug!(api_id = job.key.api_id.as_str(), "기다리는 쪽이 모두 떠난 요청을 보내지 않고 뺍니다");
             }
         }
     }
@@ -746,6 +768,7 @@ impl Inner {
             }
             return Step::Idle;
         }
+        q.drop_abandoned();
         let mut has_market = q.has_market_work();
         let market_needs_token = has_market && self.auth.needs_issue(now_kst);
         if let Some(err) = q.stopped(Endpoint::ISSUE).filter(|_| market_needs_token || !q.issue_waiters.is_empty()) {
@@ -2516,5 +2539,166 @@ mod tests {
             .map(|l| l.split(" rate_limited=").nth(1).unwrap().split(' ').next().unwrap().parse::<u32>().unwrap())
             .sum();
         assert_eq!(limited, 3);
+    }
+
+    type Pending = tokio::task::JoinHandle<Result<(), KiwoomError>>;
+
+    fn spawn_call(rest: &KiwoomRest, api: impl Into<Endpoint>, body: &str) -> Pending {
+        let (rest, api, body) = (rest.clone(), api.into(), body.to_owned());
+        tokio::spawn(async move { tr_call(&rest, api, &body, Priority::Screen).await })
+    }
+
+    async fn leave(pending: Pending) {
+        pending.abort();
+        let _ = pending.await;
+    }
+
+    fn sent_bodies(fake: &FakeTransport, api: ApiId) -> Vec<String> {
+        sent_of(fake, api).into_iter().map(|s| s.body).collect()
+    }
+
+    const SCREEN_TRS: [ApiId; 3] = [ApiId::Ka10081, ApiId::Ka10080, ApiId::Ka10004];
+
+    async fn fast_symbol_switch(leave_the_old_symbol: bool) -> (Vec<(String, u64)>, u64) {
+        let fake = fake_with(Duration::from_millis(30), |_| list_ok());
+        let rest = real_rest(&fake).await;
+        let origin = Instant::now();
+        let mut previous: Vec<Pending> = Vec::new();
+        for symbol in 0..15 {
+            let current: Vec<Pending> = SCREEN_TRS.iter().map(|api| spawn_call(&rest, *api, &format!("s{symbol:02}"))).collect();
+            tokio::task::yield_now().await;
+            for old in previous.drain(..) {
+                if leave_the_old_symbol {
+                    leave(old).await;
+                } else {
+                    drop(old);
+                }
+            }
+            previous = current;
+            if symbol < 14 {
+                tokio::time::sleep(Duration::from_millis(50)).await;
+            }
+        }
+        for last in previous {
+            last.await.unwrap().unwrap();
+        }
+        let done = Instant::now().duration_since(origin).as_millis() as u64;
+        let sent = fake.market_sent().iter().map(|s| (s.body.clone(), s.at.duration_since(origin).as_millis() as u64)).collect();
+        (sent, done)
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn probe_fast_symbol_switch_before_and_after_dropping_abandoned_requests() {
+        let (kept, kept_done) = fast_symbol_switch(false).await;
+        let (dropped, dropped_done) = fast_symbol_switch(true).await;
+        for (label, sent, done) in [("버리지 않음", &kept, kept_done), ("떠난 요청 뺌", &dropped, dropped_done)] {
+            let last: Vec<_> = sent.iter().filter(|(body, _)| body == "s14").map(|(_, at)| *at).collect();
+            println!("빠른 종목 전환 {label}: 전송 {}건, 마지막 종목 전송 {last:?}ms, 마지막 완료 {done}ms", sent.len());
+        }
+        assert!(kept_done > 2000, "받는 쪽을 버리지 않으면 마지막 완료가 2초를 넘는다: {kept_done}ms");
+        assert_eq!(dropped.len(), 18);
+        let first_five: Vec<_> = dropped.iter().filter(|(body, _)| body.as_str() < "s05").collect();
+        assert_eq!(first_five.len(), 15);
+        assert!(dropped.iter().all(|(body, _)| body.as_str() < "s05" || body == "s14"), "6~14번째 종목의 요청은 나가지 않는다: {dropped:?}");
+        assert_eq!(dropped.iter().filter(|(body, _)| body == "s14").map(|(_, at)| *at).collect::<Vec<_>>(), [1050; 3]);
+        assert_eq!(dropped_done, 1080);
+    }
+
+    async fn full_window_of_ka10080(rest: &KiwoomRest) -> Vec<Pending> {
+        let sent = (0..5).map(|i| spawn_call(rest, ApiId::Ka10080, &format!("full{i}"))).collect();
+        tokio::task::yield_now().await;
+        sent
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_request_one_window_left_but_another_still_waits_is_sent_for_the_one_that_stays() {
+        let fake = fake_with(Duration::ZERO, |_| list_ok());
+        let rest = real_rest(&fake).await;
+        let origin = Instant::now();
+        full_window_of_ka10080(&rest).await;
+        let leaves = spawn_call(&rest, ApiId::Ka10080, "shared");
+        let stays = spawn_call(&rest, ApiId::Ka10080, "shared");
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        leave(leaves).await;
+        stays.await.unwrap().unwrap();
+        let shared: Vec<_> = sent_of(&fake, ApiId::Ka10080).into_iter().filter(|s| s.body == "shared").collect();
+        assert_eq!(at_ms(&shared, origin), [1050]);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn an_order_write_whose_waiters_left_is_still_sent() {
+        let fake = fake_with(Duration::ZERO, |_| list_ok());
+        let rest = real_rest(&fake).await;
+        let origin = Instant::now();
+        let spawn_write = |api: TradingApiId, body: String| {
+            let rest = rest.clone();
+            tokio::spawn(async move { write_call(&rest, api, &body, None).await })
+        };
+        let first_five: Vec<_> = (0..5).map(|i| spawn_write(BUY_WRITE, format!("w{i}"))).collect();
+        tokio::task::yield_now().await;
+        let sixth = spawn_write(SELL_WRITE, "w5".to_owned());
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        leave(sixth).await;
+        for done in first_five {
+            done.await.unwrap().unwrap();
+        }
+        tokio::time::sleep(Duration::from_secs(2)).await;
+        let writes: Vec<_> = fake.market_sent().into_iter().filter(|s| s.body.starts_with('w')).collect();
+        assert_eq!(writes.len(), 6, "{writes:?}");
+        assert_eq!(at_ms(&writes[5..], origin), [1050]);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_request_whose_waiters_left_after_it_was_sent_is_cleaned_up_and_the_next_one_goes() {
+        let fake = fake_with(Duration::from_millis(30), |_| list_ok());
+        let rest = real_rest(&fake).await;
+        let origin = Instant::now();
+        let in_flight = spawn_call(&rest, ApiId::Ka10080, "a");
+        tokio::time::sleep(Duration::from_millis(10)).await;
+        leave(in_flight).await;
+        spawn_call(&rest, ApiId::Ka10080, "b").await.unwrap().unwrap();
+        assert_eq!(sent_bodies(&fake, ApiId::Ka10080), ["a", "b"]);
+        assert_eq!(at_ms(&fake.market_sent(), origin), [0, 10]);
+        let again = spawn_call(&rest, ApiId::Ka10080, "a");
+        again.await.unwrap().unwrap();
+        assert_eq!(sent_bodies(&fake, ApiId::Ka10080), ["a", "b", "a"], "정리됐으니 같은 요청이 새로 나간다");
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_request_whose_waiters_left_while_it_rests_is_not_sent_again() {
+        let tokens = token_counter();
+        let fake = Arc::new(FakeTransport::new(Duration::ZERO, move |s| tokens(s).unwrap_or_else(|| Err(TransportError::refused()))));
+        let rest = rest(&fake);
+        rest.issue_token().await.unwrap();
+        let resting = spawn_call(&rest, ApiId::Ka10080, "a");
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        assert_eq!(fake.market_sent().len(), 1);
+        leave(resting).await;
+        tokio::time::sleep(Duration::from_secs(5)).await;
+        assert_eq!(fake.market_sent().len(), 1);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn an_abandoned_request_does_not_take_a_slot_of_its_tr_window() {
+        let fake = fake_with(Duration::ZERO, |_| list_ok());
+        let rest = real_rest(&fake).await;
+        let origin = Instant::now();
+        let mut staggered = Vec::new();
+        for i in 0..5 {
+            staggered.push(spawn_call(&rest, ApiId::Ka10080, &format!("w{i}")));
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+        let abandoned = spawn_call(&rest, ApiId::Ka10080, "abandoned");
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        let live = spawn_call(&rest, ApiId::Ka10080, "live");
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        leave(abandoned).await;
+        live.await.unwrap().unwrap();
+        for done in staggered {
+            done.await.unwrap().unwrap();
+        }
+        let sent = sent_of(&fake, ApiId::Ka10080);
+        assert_eq!(sent.iter().map(|s| s.body.as_str()).collect::<Vec<_>>(), ["w0", "w1", "w2", "w3", "w4", "live"]);
+        assert_eq!(at_ms(&sent[5..], origin), [1050]);
     }
 }
