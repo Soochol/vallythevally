@@ -422,15 +422,15 @@ impl MarketRequest for StockInvestorNetShares {
     type Response = wire::StockInvestorNetSharesResponse;
 }
 
-/// ka10004. 호가는 통합 시세(`_AL`)로만 묻는다.
+/// ka10004. 거래소는 종목코드 접미사로 고른다.
 #[derive(Serialize)]
 pub struct StockOrderBook {
     stk_cd: String,
 }
 
 impl StockOrderBook {
-    pub fn new(code: StockCode) -> Self {
-        StockOrderBook { stk_cd: kiwoom_stock_code(code, Venue::Combined) }
+    pub fn new(code: StockCode, venue: Venue) -> Self {
+        StockOrderBook { stk_cd: kiwoom_stock_code(code, venue) }
     }
 }
 
@@ -1099,9 +1099,10 @@ mod tests {
     }
 
     #[test]
-    fn feed_bodies_ask_for_the_combined_book_and_programs_and_todays_trades() {
+    fn feed_bodies_ask_for_the_book_by_venue_and_programs_and_todays_trades() {
         let c = StockCode::parse("005930").unwrap();
-        assert_eq!(serde_json::to_value(StockOrderBook::new(c)).unwrap(), json!({"stk_cd": "005930_AL"}));
+        assert_eq!(serde_json::to_value(StockOrderBook::new(c, Venue::Combined)).unwrap(), json!({"stk_cd": "005930_AL"}));
+        assert_eq!(serde_json::to_value(StockOrderBook::new(c, Venue::Krx)).unwrap(), json!({"stk_cd": "005930"}));
         assert_eq!(serde_json::to_value(StockTrades::new(c, Venue::Nxt)).unwrap(), json!({"stk_cd": "005930_NX"}));
         assert_eq!(serde_json::to_value(StockProgramTrades::new(c, today())).unwrap(), json!({"stk_cd": "005930_AL", "date": "20261109", "amt_qty_tp": "2"}));
         assert_eq!((<StockOrderBook as MarketRequest>::API_ID.as_str(), ApiId::Ka10004.path()), ("ka10004", "/api/dostk/mrkcond"));

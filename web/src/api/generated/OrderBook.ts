@@ -3,7 +3,7 @@ import type { OrderBookLevel } from "./OrderBookLevel";
 import type { SymbolCode } from "./SymbolCode";
 
 /**
- * `GET /api/symbols/:code/order-book` → 통합 시세(ka10004)의 10호가. 지수는 400 `bad_request`.
+ * `GET /api/symbols/:code/order-book?venue=` → ka10004의 10호가. `venue`는 `combined`(기본)·`krx`·`nxt`다. NXT에서 거래되지 않는 종목은 어느 값이든 통합 호가다. 지수는 400 `bad_request`.
  * 매도·매수 모두 1호가부터 순서대로이고, 키움이 가격을 주지 않은 단은 빠진다.
  */
 export type OrderBook = { symbol: SymbolCode, asks: Array<OrderBookLevel>, bids: Array<OrderBookLevel>, totalAskQuantity: number, totalBidQuantity: number, afterHoursAskQuantity: number | null, afterHoursBidQuantity: number | null, 

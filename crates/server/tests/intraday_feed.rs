@@ -73,7 +73,7 @@ impl Fixture {
 const FEEDS: [(&str, &str); 3] = [("order-book", "ka10004"), ("trades", "ka10003"), ("program-trades", "ka90008")];
 
 #[tokio::test]
-async fn the_order_book_is_read_from_one_combined_request() {
+async fn the_order_book_is_read_from_one_combined_request_by_default() {
     let f = Fixture::start(true).await;
     f.fake.respond_with("ka10004", 200, fixture("ka10004_005930_AL"));
     let (status, body) = f.get("/api/symbols/005930/order-book").await;
@@ -84,6 +84,32 @@ async fn the_order_book_is_read_from_one_combined_request() {
     assert_eq!((&body["totalAskQuantity"], &body["totalBidQuantity"], &body["bookTime"]), (&json!(55_000), &json!(66_000), &json!("15:30:00")));
     let calls = f.calls("ka10004");
     assert_eq!(calls.iter().map(|c| c.body.clone()).collect::<Vec<_>>(), [json!({"stk_cd": "005930_AL"})]);
+}
+
+#[tokio::test]
+async fn the_order_book_asks_for_the_requested_venue_code() {
+    let f = Fixture::start(true).await;
+    f.fake.respond_with("ka10004", 200, fixture("ka10004_005930_AL"));
+    for query in ["?venue=krx", "?venue=nxt", "?venue=combined", ""] {
+        let (status, body) = f.get(&format!("/api/symbols/005930/order-book{query}")).await;
+        assert_eq!(status, 200, "{query}: {body}");
+    }
+    let asked: Vec<_> = f.calls("ka10004").into_iter().map(|c| c.body["stk_cd"].as_str().unwrap().to_owned()).collect();
+    assert_eq!(asked, ["005930", "005930_NX", "005930_AL", "005930_AL"]);
+}
+
+#[tokio::test]
+async fn the_order_book_of_a_symbol_off_nxt_is_always_the_combined_book() {
+    let f = Fixture::start(true).await;
+    f.fake.respond_with("ka10004", 200, fixture("ka10004_005930_AL"));
+    for venue in ["krx", "nxt", "combined"] {
+        let (status, body) = f.get(&format!("/api/symbols/005935/order-book?venue={venue}")).await;
+        assert_eq!(status, 200, "{venue}: {body}");
+    }
+    let asked: Vec<_> = f.calls("ka10004").into_iter().map(|c| c.body["stk_cd"].as_str().unwrap().to_owned()).collect();
+    assert_eq!(asked, ["005935_AL", "005935_AL", "005935_AL"]);
+    let (status, body) = f.get("/api/symbols/005930/order-book?venue=tokyo").await;
+    assert_eq!((status, &body["error"]["code"]), (400, &json!("bad_request")));
 }
 
 #[tokio::test]

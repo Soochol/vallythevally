@@ -3,7 +3,7 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::time::Duration;
 
-use domain::{IndexCode, KstTime, Price, Symbol, TimeOfDay, Volume};
+use domain::{IndexCode, KstTime, Price, Symbol, TimeOfDay, Venue, Volume};
 use futures::{Sink, SinkExt, Stream, StreamExt, future::BoxFuture};
 use tokio::sync::{broadcast, mpsc, watch};
 use tokio::time::{Instant, sleep_until, timeout};
@@ -69,6 +69,7 @@ pub struct ExpectedTrade {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct BookSnapshot {
     pub symbol: Symbol,
+    pub venue: Venue,
     pub hhmmss: TimeOfDay,
     pub asks: [Option<BookLevel>; BOOK_DEPTH],
     pub bids: [Option<BookLevel>; BOOK_DEPTH],
@@ -126,6 +127,10 @@ pub type DesiredFeeds = BTreeMap<Symbol, BTreeSet<RealType>>;
 
 pub fn trades_only(symbols: BTreeSet<Symbol>) -> DesiredFeeds {
     symbols.into_iter().map(|symbol| (symbol, BTreeSet::from([RealType::of(symbol)]))).collect()
+}
+
+pub fn seats(desired: &DesiredFeeds) -> usize {
+    desired.values().map(|kinds| 1 + kinds.iter().filter(|kind| kind.has_own_code()).count()).sum()
 }
 
 fn registrations(desired: &DesiredFeeds) -> Registrations {
@@ -1425,6 +1430,53 @@ mod tests {
         stream.set_desired(feeds(&[(samsung(), &[RealType::Trade])]));
         until("0F가 해지됐다", || peer.controls(0).len() == 4).await;
         assert_eq!(peer.messages(0)[3]["data"], json!([{"item": ["005930_AL"], "type": ["0F"]}]));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_venue_book_registers_its_own_code_while_trades_stay_on_the_combined_code() {
+        let peer = Peer::ok();
+        let (stream, mut events) = peer.start_feeds(feeds(&[(samsung(), &[RealType::Trade])]));
+        assert!(matches!(next(&mut events).await, StreamEvent::Live { .. }));
+        stream.set_desired(feeds(&[(samsung(), &[RealType::Trade, RealType::BookKrx, RealType::AfterHours])]));
+        until("거래소 0D가 등록됐다", || peer.controls(0).len() == 3).await;
+        assert_eq!(peer.messages(0)[2]["data"], json!([{"item": ["005930_AL"], "type": ["0E"]}, {"item": ["005930"], "type": ["0D"]}]));
+        stream.set_desired(feeds(&[(samsung(), &[RealType::Trade, RealType::BookKrx, RealType::BookNxt, RealType::AfterHours])]));
+        until("NXT 0D가 더해졌다", || peer.controls(0).len() == 4).await;
+        assert_eq!(peer.messages(0)[3]["data"], json!([{"item": ["005930_NX"], "type": ["0D"]}]));
+        stream.set_desired(feeds(&[(samsung(), &[RealType::Trade, RealType::BookNxt, RealType::AfterHours])]));
+        until("KRX 0D만 해지됐다", || peer.controls(0).len() == 5).await;
+        assert_eq!(peer.controls(0), ["LOGIN", "REG", "REG", "REG", "REMOVE"]);
+        assert_eq!(peer.messages(0)[4], json!({"trnm": "REMOVE", "grp_no": "1", "data": [{"item": ["005930"], "type": ["0D"]}]}));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn reconnect_registers_the_venue_books_again() {
+        let peer = Peer::ok();
+        let (_stream, mut events) = peer.start_feeds(feeds(&[(samsung(), &[RealType::Trade, RealType::BookKrx, RealType::BookNxt])]));
+        assert!(matches!(next(&mut events).await, StreamEvent::Live { .. }));
+        assert_eq!(peer.messages(0)[1]["data"], json!([
+            {"item": ["005930_AL"], "type": ["0B"]},
+            {"item": ["005930"], "type": ["0D"]},
+            {"item": ["005930_NX"], "type": ["0D"]},
+        ]));
+        peer.drop_session(0);
+        assert!(matches!(next(&mut events).await, StreamEvent::Down { .. }));
+        assert!(matches!(next(&mut events).await, StreamEvent::Live { .. }));
+        assert_eq!(peer.messages(0), peer.messages(1));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn book_frames_of_each_code_become_events_with_their_venue() {
+        let peer = Peer::ok();
+        let (_stream, mut events) = peer.start_feeds(feeds(&[(samsung(), &[RealType::Trade, RealType::Book, RealType::BookKrx, RealType::BookNxt])]));
+        assert!(matches!(next(&mut events).await, StreamEvent::Live { .. }));
+        peer.real(0, vec![book_frame("005930_AL"), book_frame("005930"), book_frame("005930_NX")]);
+        let mut venues = Vec::new();
+        for _ in 0..3 {
+            let StreamEvent::Book { book, .. } = next(&mut events).await else { panic!("호가가 아니다") };
+            venues.push((book.symbol, book.venue));
+        }
+        assert_eq!(venues, [(samsung(), Venue::Combined), (samsung(), Venue::Krx), (samsung(), Venue::Nxt)]);
     }
 
     #[test]
