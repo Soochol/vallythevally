@@ -811,7 +811,7 @@ mod tests {
 
     fn business_rejection(msg: &str) -> Failure {
         let body = json!({"return_code": 20, "return_msg": msg}).to_string();
-        judge(Endpoint::Trading(crate::trading::TradingApiId::Kt00010), 200, &body).unwrap_err()
+        judge(ApiId::Ka10081, 200, &body).unwrap_err()
     }
 
     #[test]
