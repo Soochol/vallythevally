@@ -31,7 +31,8 @@ interface Props {
 export function QuantityRow({ mode, input, sharePresets, amountPresets, onMode, onInput }: Props) {
   const inputId = useId();
   const label = mode === "shares" ? "수량" : "금액";
-  const shown = mode === "amount" ? groupedDigits(input) : input;
+  const display = (digits: string): string => (mode === "amount" ? groupedDigits(digits) : digits);
+  const shown = display(input);
   const field = useRef<HTMLInputElement>(null);
   const digitsBeforeCaret = useRef<number | null>(null);
   useLayoutEffect(() => {
@@ -42,8 +43,16 @@ export function QuantityRow({ mode, input, sharePresets, amountPresets, onMode, 
   }, [shown]);
   const change = (event: ChangeEvent<HTMLInputElement>) => {
     const { value, selectionStart } = event.target;
-    digitsBeforeCaret.current = value.slice(0, selectionStart ?? value.length).replace(/[^0-9]/g, "").length;
-    onInput(value.replace(/[^0-9]/g, ""));
+    const digits = value.replace(/[^0-9]/g, "");
+    const digitsBefore = value.slice(0, selectionStart ?? value.length).replace(/[^0-9]/g, "").length;
+    if (display(digits) === shown) {
+      const target = event.target;
+      const caret = caretAfterDigits(shown, digitsBefore);
+      queueMicrotask(() => target.setSelectionRange(caret, caret));
+      return;
+    }
+    digitsBeforeCaret.current = digitsBefore;
+    onInput(digits);
   };
   const skipComma = (event: KeyboardEvent<HTMLInputElement>) => {
     const { value, selectionStart, selectionEnd } = event.currentTarget;

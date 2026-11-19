@@ -578,6 +578,11 @@ test("금액 칸은 쉼표를 건너뛰어 지우고 가운데에 넣어도 커�
   await input.evaluate((element: HTMLInputElement) => element.setSelectionRange(1, 1));
   await page.keyboard.type("55");
   await expect(input).toHaveValue("15,500,000");
+  await input.fill("1234567");
+  await input.evaluate((element: HTMLInputElement) => element.setSelectionRange(3, 3));
+  await page.keyboard.type("a");
+  await expect(input).toHaveValue("1,234,567");
+  expect(await input.evaluate((element: HTMLInputElement) => element.selectionStart)).toBe(3);
   await input.fill("12345678901234567890");
   await expect(input).toHaveValue("12,345,678,901,234,567,890");
 });

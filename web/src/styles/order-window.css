@@ -42,7 +42,7 @@
 .od-presets { display:flex; gap:var(--s2); }
 .od-preset { height:var(--size-28); padding:0 var(--s2); border-radius:var(--r-s); background:var(--raised); color:var(--text-2); font-size:var(--fs-xs); }
 .od-preset:hover { background:var(--hover); color:var(--text); }
-.od-estimate { display:flex; flex:1; gap:var(--s2); line-height:var(--size-24); min-width:0; white-space:nowrap; color:var(--text-3); font-size:var(--fs-xs); }
+.od-estimate { display:flex; flex:1; flex-wrap:wrap; column-gap:var(--s2); line-height:var(--size-24); min-width:0; white-space:nowrap; color:var(--text-3); font-size:var(--fs-xs); }
 .od-estimate-amount { min-width:0; overflow:hidden; text-overflow:ellipsis; }
 .od-estimate-shares { flex:none; }
 .od-estimate b { color:var(--text); font-weight:600; }
