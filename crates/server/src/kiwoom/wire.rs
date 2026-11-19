@@ -358,6 +358,8 @@ pub struct StockQuote {
     /// 기준가(`base_pric`). 등락은 현재가 − 기준가다(backend.md §4.6 "현재가의 등락").
     pub base_centi: u64,
     pub volume: Volume,
+    /// 당일 누적 거래대금, 백만원. 행에 없거나 읽지 못하면 None.
+    pub traded: Option<MillionWon>,
     pub at: KstTime,
 }
 
@@ -479,7 +481,7 @@ fn parse_quote_row(r: &QuoteRow) -> Result<StockQuote, WireError> {
     if signalled != Some(computed) {
         tracing::warn!(stk_cd = %r.stk_cd, cur_prc = %r.cur_prc, base_pric = %r.base_pric, pred_pre_sig = %r.pred_pre_sig, "등락 방향 필드가 현재가 − 기준가와 맞지 않습니다. 계산한 값을 씁니다");
     }
-    Ok(StockQuote { code, venue, price_centi, base_centi, volume: Volume(unsigned(&r.trde_qty)?), at })
+    Ok(StockQuote { code, venue, price_centi, base_centi, volume: Volume(unsigned(&r.trde_qty)?), traded: unsigned(&r.trde_prica).ok().map(MillionWon), at })
 }
 
 #[derive(Deserialize)]

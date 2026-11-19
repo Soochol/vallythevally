@@ -777,6 +777,10 @@ pub struct Quote {
     pub source: QuoteSource,
     /// 이 값을 만든 거래소. 요청이 NXT인데 그 종목이 NXT에서 거래되지 않으면 요청과 달리 통합이다. 지수면 null.
     pub venue: Option<Venue>,
+    /// 당일 누적 거래대금, 백만원(ka10095 `trde_prica`). REST 주식 시세에만 있고 지수와 실시간 프레임에는 없다.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional, type = "number")]
+    pub traded_million_won: Option<u64>,
 }
 
 /// `GET /api/symbols/:code/fundamentals` → 주식의 기본 정보(ka10001, 통합 시세). 지수는 400 `bad_request`.
@@ -2359,6 +2363,7 @@ mod tests {
             t: UnixSeconds(1_794_131_999),
             source: QuoteSource::Polled,
             venue: Some(Venue::Krx),
+            traded_million_won: None,
         };
         assert_eq!(
             serde_json::to_value(&q).unwrap(),
@@ -2421,6 +2426,7 @@ mod tests {
                         t: UnixSeconds(4),
                         source: QuoteSource::Realtime,
                         venue: Some(Venue::Combined),
+                        traded_million_won: None,
                     }],
                 },
                 json!({"type": "quotes", "venue": "nxt", "quotes": [{"symbol": "005930", "price": 71_200.0, "change": 200.0, "changeRate": 0.5, "volume": 9, "t": 4, "source": "realtime", "venue": "combined"}]}),

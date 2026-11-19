@@ -49,7 +49,7 @@ pub async fn quotes(rest: &KiwoomRest, bars: &BarService, directory: Option<&Dir
             let asked: HashMap<StockCode, Venue> = chunk.iter().copied().collect();
             out.extend(parse_quotes(page.body).into_iter().filter(|q| asked.get(&q.code) == Some(&q.venue)).map(|q| {
                 let symbol = Symbol::Stock(q.code);
-                (symbol, quote(symbol, Some(q.venue), q.price_centi, q.base_centi, q.volume.0, q.at.unix(), api::QuoteSource::Polled))
+                (symbol, api::Quote { traded_million_won: q.traded.map(|t| t.0), ..quote(symbol, Some(q.venue), q.price_centi, q.base_centi, q.volume.0, q.at.unix(), api::QuoteSource::Polled) })
             }));
         }
         Ok::<_, BarError>(out)
@@ -125,6 +125,7 @@ fn quote(symbol: Symbol, venue: Option<Venue>, price_centi: u64, base_centi: u64
         t: api::UnixSeconds(t),
         source,
         venue: venue.map(Into::into),
+        traded_million_won: None,
     }
 }
 

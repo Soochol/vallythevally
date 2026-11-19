@@ -1496,6 +1496,7 @@ mod tests {
                 t: UnixSeconds(t.unix()),
                 source: api::QuoteSource::Realtime,
                 venue: Some(api::Venue::Combined),
+                traded_million_won: None,
             }],
         }
     }
@@ -2746,6 +2747,7 @@ mod tests {
             t: UnixSeconds(t.unix()),
             source: api::QuoteSource::Realtime,
             venue: Some(venue),
+            traded_million_won: None,
         }
     }
 
