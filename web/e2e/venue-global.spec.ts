@@ -53,6 +53,24 @@ test.describe("데스크톱", () => {
     for (const n of [1, 2]) await expect(cell(page, n).getByRole("button", { name: /^(KRX|NXT|통합)/ })).toHaveCount(0);
   });
 
+  for (const width of [1440, 1180]) {
+    test(`위 막대의 거래소 묶음은 분봉 버튼 바로 왼쪽에 있다 (${width}px)`, async ({ page }) => {
+      await page.setViewportSize({ width, height: 860 });
+      await page.goto("/");
+      const bar = page.getByRole("toolbar", { name: "차트 도구 막대" });
+      const venue = await bar.locator(".venue-picker").boundingBox();
+      const minute = await bar.getByRole("button", { name: "분봉" }).boundingBox();
+      const search = await bar.getByRole("button", { name: "종목·지표·명령 찾기" }).boundingBox();
+      expect(venue!.x + venue!.width).toBeLessThanOrEqual(minute!.x);
+      expect(minute!.x - (venue!.x + venue!.width)).toBeLessThanOrEqual(16);
+      expect(search!.x).toBeGreaterThan(venue!.x + venue!.width);
+      const between = await bar.getByRole("button").evaluateAll((buttons, edges) =>
+        buttons.filter((b) => { const r = b.getBoundingClientRect(); return r.left >= edges.left && r.right <= edges.right; }).length,
+        { left: venue!.x + venue!.width, right: minute!.x });
+      expect(between).toBe(0);
+    });
+  }
+
   test("펼친 메뉴에 머리와 세 항목과 설명이 보인다", async ({ page, scenario }) => {
     seedCharts(scenario, [chart("cell-0", "005930", "combined")]);
     await page.goto("/");
