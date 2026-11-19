@@ -44,7 +44,8 @@ export function QuantityRow({ mode, input, sharePresets, amountPresets, onMode, 
   const change = (event: ChangeEvent<HTMLInputElement>) => {
     const { value, selectionStart } = event.target;
     const digits = value.replace(/[^0-9]/g, "");
-    const digitsBefore = value.slice(0, selectionStart ?? value.length).replace(/[^0-9]/g, "").length;
+    const strippedZeros = mode === "amount" ? digits.length - digits.replace(/^0+(?=\d)/, "").length : 0;
+    const digitsBefore = Math.max(0, value.slice(0, selectionStart ?? value.length).replace(/[^0-9]/g, "").length - strippedZeros);
     if (display(digits) === shown) {
       const target = event.target;
       const caret = caretAfterDigits(shown, digitsBefore);
@@ -84,7 +85,7 @@ interface EstimateProps {
 export function OrderEstimate({ estimate, shares }: EstimateProps) {
   return (
     <div className="od-estimate">
-      <span className="od-estimate-amount">예상 주문금액 <b data-testid="order-estimate">{estimate === null ? "-" : formatWon(estimate)}</b></span>
+      <span className="od-estimate-amount" title={estimate === null ? undefined : `예상 주문금액 ${formatWon(estimate)}`}>예상 주문금액 <b data-testid="order-estimate">{estimate === null ? "-" : formatWon(estimate)}</b></span>
       {shares !== null && <span className="od-estimate-shares">수량 <b data-testid="order-estimate-quantity">{formatQuantity(shares)}</b></span>}
     </div>
   );

@@ -583,8 +583,33 @@ test("금액 칸은 쉼표를 건너뛰어 지우고 가운데에 넣어도 커�
   await page.keyboard.type("a");
   await expect(input).toHaveValue("1,234,567");
   expect(await input.evaluate((element: HTMLInputElement) => element.selectionStart)).toBe(3);
+  await input.fill("1234");
+  await input.evaluate((element: HTMLInputElement) => element.setSelectionRange(0, 0));
+  await page.keyboard.type("0");
+  await page.keyboard.type("9");
+  await expect(input).toHaveValue("91,234");
   await input.fill("12345678901234567890");
   await expect(input).toHaveValue("12,345,678,901,234,567,890");
+});
+
+test("421px에서 큰 금액을 넣어도 호가를 가리키는 동안 툴바 높이와 사다리 위치가 변하지 않는다", async ({ page, scenario }) => {
+  ordersOn(scenario);
+  tradingApi(scenario);
+  await openOrderWindow(page, scenario);
+  lastTrade(scenario, BASE);
+  await win(page).evaluate((element) => { element.style.flex = "none"; element.style.width = "421px"; });
+  await page.getByRole("group", { name: "수량 방식" }).getByRole("button", { name: "금액" }).click();
+  await page.getByRole("textbox", { name: "금액" }).fill("70000000");
+  const toolbar = page.locator(".od-toolbar");
+  const heights = new Set<number>();
+  const rowTops = new Set<number>();
+  for (const price of [BASE + 1_000, BASE - 900, BASE + 1_000]) {
+    await cellAt(page, "buy", price).hover();
+    heights.add(Math.round((await toolbar.boundingBox())!.height));
+    rowTops.add(Math.round(await topOf(ladderRows(page).first())));
+  }
+  expect(heights.size).toBe(1);
+  expect(rowTops.size).toBe(1);
 });
 
 test("수량 방식은 칸 이름이 수량이고 예상 주문금액 줄에 수량을 따로 보이지 않는다", async ({ page, scenario }) => {
