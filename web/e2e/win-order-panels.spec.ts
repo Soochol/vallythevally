@@ -25,9 +25,10 @@ test("미체결 패널이 모든 종목의 목록을 보이고 개별 취소 요
   ordersOn(scenario);
   const api = tradingApi(scenario, [openOrder("0000001", "buy", 70_000, 5), { ...openOrder("0000002", "sell", 71_000, 7), code: "000660", name: "SK하이닉스" }]);
   await openOrderWindow(page, scenario);
-  await expect(page.getByTestId("account-label")).toHaveText("계좌 ··01");
+  await expect(page.getByTestId("account-label")).toHaveText("키움 ****-****-01");
   await expect(page.getByTestId("account-tab-open")).toContainText("2");
   await page.getByTestId("account-tab-open").click();
+  await expect(page.getByTestId("account-panel")).toBeVisible();
   const rows = page.getByTestId("account-open-order");
   await expect(rows).toHaveCount(2);
   await expect(rows.nth(1)).toContainText("SK하이닉스");
@@ -48,6 +49,84 @@ test("보유종목과 내 체결 패널이 목록을 보인다", async ({ page, 
   await page.getByTestId("account-tab-fills").click();
   await expect(page.getByTestId("account-fill")).toContainText("09:30:15");
   await expect(page.getByTestId("account-fill")).toContainText("매수");
+});
+
+const FIRST_LADDER_ROW = (page: Page) => ladderRows(page).first();
+
+test("목록 popover가 단추에 붙어 사다리를 밀지 않고 Esc·바깥 누르기·같은 단추로 닫히며 다른 단추로 바뀐다", async ({ page, scenario }) => {
+  ordersOn(scenario);
+  const api = tradingApi(scenario, [openOrder("0000001", "buy", 70_000, 5)]);
+  api.holdings = [HOLDING];
+  api.executions = [FILL];
+  await openOrderWindow(page, scenario);
+  const before = await topOf(FIRST_LADDER_ROW(page));
+  const panel = page.getByTestId("account-panel");
+  const holdingsTab = page.getByTestId("account-tab-holdings");
+
+  await holdingsTab.click();
+  await expect(panel).toBeVisible();
+  await expect(panel).toHaveAttribute("role", "dialog");
+  await expect(page.getByTestId("account-holding")).toContainText("삼성전자");
+  expect(await topOf(FIRST_LADDER_ROW(page))).toBe(before);
+  const box = (await panel.boundingBox())!;
+  const viewport = page.viewportSize()!;
+  expect(box.width).toBeLessThanOrEqual(360);
+  expect(box.height).toBeLessThanOrEqual(240);
+  expect(box.x).toBeGreaterThanOrEqual(0);
+  expect(box.x + box.width).toBeLessThanOrEqual(viewport.width);
+  expect((await holdingsTab.boundingBox())!.y + (await holdingsTab.boundingBox())!.height).toBeLessThanOrEqual(box.y);
+
+  await page.keyboard.press("Escape");
+  await expect(panel).toHaveCount(0);
+
+  await holdingsTab.click();
+  await expect(panel).toBeVisible();
+  await holdingsTab.click();
+  await expect(panel).toHaveCount(0);
+
+  await holdingsTab.click();
+  await expect(panel).toBeVisible();
+  await page.getByTestId("account-tab-fills").click();
+  await expect(panel).toHaveAttribute("data-panel", "fills");
+  await expect(page.getByTestId("account-fill")).toContainText("09:30:15");
+  await expect(page.getByTestId("account-holding")).toHaveCount(0);
+
+  await page.getByTestId("order-account").click({ position: { x: 4, y: 4 } });
+  await expect(panel).toHaveCount(0);
+});
+
+test("계좌번호 가리기는 기본 켜짐이고 켠 동안 조회하지 않으며 끄면 4-4-2로 보이고 다시 켜면 가린다", async ({ page, scenario }) => {
+  ordersOn(scenario);
+  tradingApi(scenario);
+  let lookups = 0;
+  scenario.on((url) => url.pathname === "/api/trading/account-number", () => { lookups += 1; return { body: { accountNumber: "1234567801" } }; });
+  await openOrderWindow(page, scenario);
+  const label = page.getByTestId("account-label");
+  await expect(label).toHaveText("키움 ****-****-01");
+  await page.getByTestId("order-settings-button").click();
+  const mask = page.getByRole("checkbox", { name: "계좌번호 가리기" });
+  await expect(mask).toBeChecked();
+  expect(lookups).toBe(0);
+
+  await mask.uncheck();
+  await expect(label).toHaveText("키움 1234-5678-01");
+  expect(lookups).toBe(1);
+
+  await mask.check();
+  await expect(label).toHaveText("키움 ****-****-01");
+  expect(lookups).toBe(1);
+});
+
+test("계좌번호 조회가 실패하면 가린 모양과 실패 title을 보인다", async ({ page, scenario }) => {
+  ordersOn(scenario);
+  tradingApi(scenario);
+  scenario.on((url) => url.pathname === "/api/trading/account-number", () => ({ status: 503, body: { error: { code: "internal", message: "계좌번호를 읽지 못했습니다", reason: null, retryAt: null, manualActionRequired: false } } }));
+  await openOrderWindow(page, scenario);
+  await page.getByTestId("order-settings-button").click();
+  await page.getByRole("checkbox", { name: "계좌번호 가리기" }).uncheck();
+  const label = page.getByTestId("account-label");
+  await expect(label).toHaveAttribute("title", "계좌번호를 읽지 못했습니다");
+  await expect(label).toHaveText("키움 ****-****-01");
 });
 
 test("보유 요약이 값을 보이고 평가손익을 원과 퍼센트로 바꾸며 매입수량이 매도 가능 수량을 채운다", async ({ page, scenario }) => {
@@ -285,7 +364,7 @@ test("설정 ⚙의 값이 창 설정으로 저장되고 새로고침해도 유�
   await expect(page.getByRole("group", { name: "수량 프리셋" }).getByRole("button").nth(1)).toHaveText("75");
   await expect(page.getByTestId("order-ladder")).not.toHaveAttribute("data-divider", "");
   await expect(page.getByTestId("ladder-mark")).toHaveCount(0);
-  await pollSaved(() => scenario.documents.uiState()["orderSettings"]).toMatchObject({ sharePresets: [10, 75, 100, 500], amountPresets: [100, 500, 1000, 5000], averageDot: false, divider: false, rate: true });
+  await pollSaved(() => scenario.documents.uiState()["orderSettings"]).toMatchObject({ sharePresets: [10, 75, 100, 500], amountPresets: [100, 500, 1000, 5000], averageDot: false, divider: false, rate: true, maskAccount: true });
 
   await page.reload();
   await expect(win(page)).toBeVisible();

@@ -6,6 +6,7 @@ import type { OrderModifyInput } from "../../api/generated/OrderModifyInput";
 import type { OrderPlaceInput } from "../../api/generated/OrderPlaceInput";
 import type { OrderReconciliation } from "../../api/generated/OrderReconciliation";
 import type { OrderSide } from "../../api/generated/OrderSide";
+import type { TradingAccountNumber } from "../../api/generated/TradingAccountNumber";
 import type { TradingBalance } from "../../api/generated/TradingBalance";
 import type { TradingExecutions } from "../../api/generated/TradingExecutions";
 import type { TradingOpenOrders } from "../../api/generated/TradingOpenOrders";
@@ -29,3 +30,4 @@ export const fetchOrderable = (code: string, side: OrderSide, price: number, sig
   getJson<TradingOrderable>(`/api/trading/orderable?code=${encodeURIComponent(code)}&side=${side}&price=${price}`, signal);
 export const fetchBalance = (signal?: AbortSignal) => getJson<TradingBalance>("/api/trading/balance", signal);
 export const fetchExecutions = (signal?: AbortSignal) => getJson<TradingExecutions>("/api/trading/executions", signal);
+export const fetchAccountNumber = (signal?: AbortSignal) => getJson<TradingAccountNumber>("/api/trading/account-number", signal);
