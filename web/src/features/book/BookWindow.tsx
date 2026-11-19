@@ -10,6 +10,7 @@ import { PriceLadder } from "../market-window/PriceLadder";
 import { RatioBar, Strip, TotalFigure } from "../market-window/parts";
 import { formatQuantity } from "../market-window/format";
 import { useLadderTrades, useQuoteInfo } from "../market-window/useLadderSlots";
+import { useShownVenue } from "../market-window/useShownVenue";
 import { EmptyState } from "../overlay/State";
 import { stripTotals } from "./bookModel";
 import { visibleAfterHours, visibleExpected } from "./sessionWindows";
@@ -24,12 +25,13 @@ const REJECTION: Record<string, string> = {
 };
 
 function BookBody({ code }: { code: SymbolCode }) {
-  const feed = useBookFeed(code);
+  const venue = useShownVenue(code);
+  const feed = useBookFeed(code, venue);
   const limits = useFundamentals(code).data;
   const kind = useSymbolInfo(code).data?.kind ?? null;
   const bounds = { lower: limits?.lowerLimit ?? null, upper: limits?.upperLimit ?? null };
-  const info = useQuoteInfo({ code, venue: "combined", lastPrice: feed.lastPrice, previousClose: feed.previousClose, upperLimit: bounds.upper, lowerLimit: bounds.lower });
-  const trades = useLadderTrades(code, "combined");
+  const info = useQuoteInfo({ code, venue, lastPrice: feed.lastPrice, previousClose: feed.previousClose, upperLimit: bounds.upper, lowerLimit: bounds.lower });
+  const trades = useLadderTrades(code, venue);
   const now = useNowMs();
   const nowSeconds = Math.floor(now / 1000);
   const view = feed.book.phase === "empty" ? null : feed.book.view;

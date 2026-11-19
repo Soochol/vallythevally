@@ -2,8 +2,8 @@ import { CONNECTED_KIWOOM, DEFAULT_SYSTEM_SETTINGS } from "./fixtures/scenario";
 import type { KiwoomEnvironment } from "../src/api/generated/KiwoomEnvironment";
 import type { KiwoomLinkStatus } from "../src/api/generated/KiwoomLinkStatus";
 import { DEFAULT_ORDER_SETTINGS } from "../src/features/order/orderSettings";
-import { cell, expect, test, type Scenario, pollSaved } from "./harness";
-import { cellAt, openOrderWindow, ordersOn, status, tradingApi, win, writesTo } from "./order-window";
+import { cell, expect, pickDesktopVenue, test, type Scenario, pollSaved } from "./harness";
+import { cellAt, feedSubscriptions, openOrderWindow, ordersOn, status, tradingApi, venueScene, win, writesTo } from "./order-window";
 
 const DISCONNECTED: KiwoomLinkStatus = { ...CONNECTED_KIWOOM, state: "disconnected", message: "키가 저장돼 있습니다. 연결하지 않았습니다", realtimeRegistered: null, symbolCount: null };
 const KRX_ONLY = "모의투자는 KRX 주문만 됩니다";
@@ -61,6 +61,24 @@ test("모의: 계좌 띠의 모의 표시, 설정의 경로 SOR·NXT 끔과 안�
   await pollSaved(() => writesTo(api, "place")).toHaveLength(1);
   expect(writesTo(api, "place")[0]!.body.venue).toBe("krx");
   expect(scenario.documents.uiState()["orderSettings"]).toMatchObject({ venue: "nxt" });
+});
+
+test("모의: 주문 경로 SOR·NXT는 꺼진 채로이고 시세는 위 막대 거래소를 따른다", async ({ page, scenario }) => {
+  environmentIs(scenario, "mock");
+  ordersOn(scenario);
+  tradingApi(scenario);
+  await openOrderWindow(page, scenario);
+  venueScene(scenario, { nxt: 65_000 });
+  await expect(win(page)).toHaveAttribute("data-quote-venue", "combined");
+  await pickDesktopVenue(page, "NXT");
+  await pollSaved(() => feedSubscriptions(scenario, "trades", "nxt").length).toBe(2);
+  await expect(win(page)).toHaveAttribute("data-quote-venue", "nxt");
+  await expect(win(page)).toHaveAttribute("data-venue", "krx");
+  expect(feedSubscriptions(scenario, "trades", "krx")).toHaveLength(0);
+  await expect(page.getByTestId("price-ladder").locator(".mw-px-num").first()).toHaveText("66,000");
+  await openRoutes(page);
+  await expect(routes(page).getByRole("button", { name: "SOR" })).toBeDisabled();
+  await expect(routes(page).getByRole("button", { name: "NXT" })).toBeDisabled();
 });
 
 test("모의: 서버가 mock_krx_only로 거절하면 상태 줄이 KRX 주문만 됨을 알린다", async ({ page, scenario }) => {

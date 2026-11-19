@@ -1,4 +1,5 @@
 import type { Locator, Page } from "@playwright/test";
+import type { FeedKind } from "../src/api/generated/FeedKind";
 import type { LayoutWindow } from "../src/api/generated/LayoutWindow";
 import type { OrderCommand } from "../src/api/generated/OrderCommand";
 import type { OrderSide } from "../src/api/generated/OrderSide";
@@ -43,16 +44,31 @@ export const commandOf = (kind: OrderCommand["kind"], patch: Partial<OrderComman
   commandId: "cmd-synthetic-0001", accountRef: ACCOUNT, kind, code: CODE, venue: "krx", quantity: 10, price: BASE, targetOrderNo: null, state: "accepted", reason: null, orderNo: "0000099", reconciled: false, createdAt: 1, updatedAt: 1, ...patch,
 });
 
-export function pinQuote(scenario: Scenario, symbol: string, price: number, change = 0): void {
+export function pinQuote(scenario: Scenario, symbol: string, price: number, change = 0, priceByVenue: Partial<Record<Venue, number>> = {}): void {
   scenario.on((url) => url.pathname === "/api/quotes", (request) => {
     const query = new URL(request.url()).searchParams;
     const venue = (query.get("venue") ?? "combined") as Venue;
     return { body: (query.get("symbols") ?? "").split(",").flatMap((code) => {
       const quote = scenario.market.quote(code, venue);
-      return quote ? [code === symbol ? { ...quote, price, change } : quote] : [];
+      return quote ? [code === symbol ? { ...quote, price: priceByVenue[venue] ?? price, change } : quote] : [];
     }) };
   });
 }
+
+export function venueScene(scenario: Scenario, basePerVenue: Partial<Record<Venue, number>>, change = 0): void {
+  pinQuote(scenario, CODE, BASE, change, basePerVenue);
+  scenario.on((url) => url.pathname === `/api/symbols/${CODE}/order-book`, (request) => ({ body: snapshot(basePerVenue[(new URL(request.url()).searchParams.get("venue") ?? "combined") as Venue] ?? BASE) }));
+}
+
+export function nxtTraded(scenario: Scenario, nxtEnabled: boolean): void {
+  scenario.reply(`/api/symbols/${CODE}`, { body: { code: CODE, name: "삼성전자", kind: "common", market: "kospi", nxtEnabled } });
+}
+
+export const feedSubscriptions = (scenario: Scenario, kind: FeedKind, venue: Venue) =>
+  scenario.live.messages.filter((m) => m.type === "subscribe_feed" && m.kind === kind && m.symbol === CODE && m.venue === venue);
+
+export const requestedVenues = (scenario: Scenario, path: string): (string | null)[] =>
+  scenario.requests.map((request) => new URL(request.url())).filter((url) => url.pathname === path).map((url) => url.searchParams.get("venue"));
 
 export function ordersOn(scenario: Scenario): void {
   scenario.live.orders = { state: "on", accountRef: ACCOUNT, accountTail: "01", message: "주문 사용이 켜져 있습니다" };

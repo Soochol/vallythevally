@@ -4,6 +4,7 @@ import { getJson } from "../../api/http";
 import type { OrderBook } from "../../api/generated/OrderBook";
 import type { SubErrorCode } from "../../api/generated/SubErrorCode";
 import type { SymbolCode } from "../../api/generated/SymbolCode";
+import type { Venue } from "../../api/generated/Venue";
 import { fetchQuotes } from "../../api/userData";
 import { marketSocket } from "../../stores/realtime";
 import { acceptAfterHoursLive, acceptAfterHoursSnapshot, acceptLive, acceptSnapshot, EMPTY_BOOK, type AfterHoursState, type BookState } from "./bookModel";
@@ -27,6 +28,7 @@ interface LastTrade {
 
 interface Live {
   readonly code: SymbolCode;
+  readonly venue: Venue;
   readonly book: BookState;
   readonly afterHours: AfterHoursState | null;
   readonly lastTrade: LastTrade | null;
@@ -35,16 +37,18 @@ interface Live {
   readonly rejected: SubErrorCode | null;
 }
 
-const fresh = (code: SymbolCode, socketOpen: boolean): Live => ({ code, book: EMPTY_BOOK, afterHours: null, lastTrade: null, linkLive: true, socketOpen, rejected: null });
+const fresh = (code: SymbolCode, venue: Venue, socketOpen: boolean): Live => ({ code, venue, book: EMPTY_BOOK, afterHours: null, lastTrade: null, linkLive: true, socketOpen, rejected: null });
 
-export function useBookFeed(code: SymbolCode): BookFeed {
-  const [live, setLive] = useState<Live>(() => fresh(code, true));
-  const current = live.code === code ? live : fresh(code, live.socketOpen);
+const isCurrent = (state: Live, code: SymbolCode, venue: Venue) => state.code === code && state.venue === venue;
+
+export function useBookFeed(code: SymbolCode, venue: Venue): BookFeed {
+  const [live, setLive] = useState<Live>(() => fresh(code, venue, true));
+  const current = isCurrent(live, code, venue) ? live : fresh(code, venue, live.socketOpen);
 
   useEffect(() => {
-    const update = (change: (state: Live) => Live) => setLive((state) => change(state.code === code ? state : fresh(code, state.socketOpen)));
+    const update = (change: (state: Live) => Live) => setLive((state) => change(isCurrent(state, code, venue) ? state : fresh(code, venue, state.socketOpen)));
     const stopWatch = marketSocket.watch((connection) => update((state) => ({ ...state, socketOpen: connection.socket === "open" })));
-    const stopBook = marketSocket.subscribeFeed({ symbol: code, kind: "book", venue: "combined" }, (m) => {
+    const stopBook = marketSocket.subscribeFeed({ symbol: code, kind: "book", venue }, (m) => {
       if (m.type === "feed_book") update((state) => ({ ...state, book: acceptLive(state.book, m.book) }));
       else if (m.type === "feed_after_hours") update((state) => ({ ...state, afterHours: acceptAfterHoursLive(m.totals) }));
       else if (m.type === "feed_subscribed") update((state) => ({ ...state, linkLive: true, rejected: null }));
@@ -52,7 +56,7 @@ export function useBookFeed(code: SymbolCode): BookFeed {
       else if (m.type === "sub_error") update((state) => ({ ...state, rejected: m.code }));
       else if (m.type === "resync") update((state) => ({ ...state, rejected: null }));
     });
-    const stopTrades = marketSocket.subscribeFeed({ symbol: code, kind: "trades", venue: "combined" }, (m) => {
+    const stopTrades = marketSocket.subscribeFeed({ symbol: code, kind: "trades", venue }, (m) => {
       if (m.type === "feed_trades") update((state) => ({ ...state, lastTrade: m.trades.at(-1) ?? state.lastTrade }));
     });
     return () => {
@@ -60,18 +64,18 @@ export function useBookFeed(code: SymbolCode): BookFeed {
       stopBook();
       stopTrades();
     };
-  }, [code]);
+  }, [code, venue]);
 
   const snapshot = useQuery({
-    queryKey: ["order-book", code],
-    queryFn: ({ signal }) => getJson<OrderBook>(`/api/symbols/${encodeURIComponent(code)}/order-book`, signal),
+    queryKey: ["order-book", code, venue],
+    queryFn: ({ signal }) => getJson<OrderBook>(`/api/symbols/${encodeURIComponent(code)}/order-book?venue=${venue}`, signal),
     staleTime: 0,
     gcTime: 0,
     retry: false,
   });
   const quote = useQuery({
-    queryKey: ["book-quote", code],
-    queryFn: async ({ signal }) => (await fetchQuotes([code], "combined", signal))[0] ?? null,
+    queryKey: ["book-quote", code, venue],
+    queryFn: async ({ signal }) => (await fetchQuotes([code], venue, signal))[0] ?? null,
     refetchInterval: QUOTE_REFRESH_MS,
     staleTime: 0,
     gcTime: 0,

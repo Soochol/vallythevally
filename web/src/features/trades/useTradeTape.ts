@@ -15,6 +15,13 @@ export function useTradeTape(socket: Pick<MarketSocketLike, "subscribeFeed">, co
   const [state, dispatch] = useReducer(tapeReducer, emptyTape);
   const [history, setHistory] = useState<HistoryStatus>("loading");
   const [feedError, setFeedError] = useState<string | null>(null);
+  const [source, setSource] = useState({ code, venue });
+  if (source.code !== code || source.venue !== venue) {
+    setSource({ code, venue });
+    dispatch({ type: "reset" });
+    setHistory("loading");
+    setFeedError(null);
+  }
 
   useEffect(() => {
     const controller = new AbortController();

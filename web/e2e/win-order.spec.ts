@@ -2,7 +2,7 @@ import type { Locator, Page } from "@playwright/test";
 import type { FeedBook } from "../src/api/generated/FeedBook";
 import { type Scenario, cell, DEFAULT_LAYOUT_ID, expect, pickDesktopVenue, test, windowTabs, pollSaved } from "./harness";
 import { DEFAULT_ORDER_SETTINGS } from "../src/features/order/orderSettings";
-import { BASE, CODE, HELD, cellAt, center, chipAt, commandOf, dragChip, openOrder, openOrderWindow, ordersOn, snapshot, status, tradingApi, win, writesTo } from "./order-window";
+import { BASE, CODE, HELD, cellAt, center, chipAt, commandOf, dragChip, feedSubscriptions, nxtTraded, openOrder, openOrderWindow, ordersOn, requestedVenues, snapshot, status, tradingApi, venueScene, win, writesTo } from "./order-window";
 
 test("더블클릭이 그 가격에 지정가 신규를 내고 실시간 호가를 따른다", async ({ page, scenario }) => {
   ordersOn(scenario);
@@ -511,14 +511,70 @@ test("200 응답의 본문이 끊기면 답을 못 받은 것으로 보고 같�
   expect(second).toBe(first);
 });
 
-test("앱 거래소가 KRX이면 호가주문 도킹 탭에 통합 표시가 있고 본문에는 없다", async ({ page, scenario }) => {
+test("위 막대를 NXT로 바꾸면 호가주문창의 호가·체결 구독이 nxt이고 사다리가 NXT 장면이며 주문 경로 SOR은 그대로다", async ({ page, scenario }) => {
+  ordersOn(scenario);
+  const api = tradingApi(scenario);
+  nxtTraded(scenario, true);
+  await openOrderWindow(page, scenario);
+  venueScene(scenario, { nxt: 65_000 });
+  await expect(win(page)).toHaveAttribute("data-quote-venue", "combined");
+  await pickDesktopVenue(page, "NXT");
+  await pollSaved(() => feedSubscriptions(scenario, "book", "nxt").length).toBe(1);
+  await pollSaved(() => feedSubscriptions(scenario, "trades", "nxt").length).toBe(2);
+  await expect(win(page)).toHaveAttribute("data-quote-venue", "nxt");
+  await expect(page.getByTestId("price-ladder").locator(".mw-px-num").first()).toHaveText("66,000");
+  await expect(page.locator(".mw-lr[data-current]")).toContainText("65,000");
+  await expect(routeButton(page)).toContainText("SOR");
+  await expect(win(page)).toHaveAttribute("data-venue", "combined");
+  await cellAt(page, "buy", 65_000).dblclick();
+  await pollSaved(() => writesTo(api, "place")).toHaveLength(1);
+  expect(writesTo(api, "place")[0]!.body.venue).toBe("combined");
+});
+
+test("⚙에서 주문 경로를 KRX로 바꿔도 호가·체결 구독은 다시 일어나지 않고 주문은 KRX 경로로 나간다", async ({ page, scenario }) => {
+  ordersOn(scenario);
+  const api = tradingApi(scenario);
+  await openOrderWindow(page, scenario);
+  await pollSaved(() => feedSubscriptions(scenario, "book", "combined").length).toBe(1);
+  const messagesBefore = scenario.live.messages.length;
+  const quoteVenuesBefore = requestedVenues(scenario, `/api/symbols/${CODE}/order-book`);
+  await routeButton(page).click();
+  await page.getByTestId("order-settings").getByRole("group", { name: "주문 경로" }).getByRole("button", { name: "KRX" }).click();
+  await expect(routeButton(page)).toContainText("KRX");
+  await page.keyboard.press("Escape");
+  await expect(win(page)).toHaveAttribute("data-venue", "krx");
+  await expect(win(page)).toHaveAttribute("data-quote-venue", "combined");
+  await cellAt(page, "buy", 70_000).dblclick();
+  await pollSaved(() => writesTo(api, "place")).toHaveLength(1);
+  expect(writesTo(api, "place")[0]!.body.venue).toBe("krx");
+  expect(scenario.live.messages.slice(messagesBefore).filter((m) => m.type === "subscribe_feed" || m.type === "unsubscribe")).toEqual([]);
+  expect(requestedVenues(scenario, `/api/symbols/${CODE}/order-book`)).toEqual(quoteVenuesBefore);
+});
+
+test("NXT에서 거래되지 않는 종목을 NXT로 보면 호가주문창은 통합으로 구독하고 도킹 탭에 통합 표시가 있고 본문에는 없다", async ({ page, scenario }) => {
   ordersOn(scenario);
   tradingApi(scenario);
+  nxtTraded(scenario, false);
   await openOrderWindow(page, scenario);
   const tab = windowTabs(page).getByRole("tab", { name: /^호가주문/ });
   await expect(tab.locator(".mw-integrated")).toHaveCount(0);
-  await pickDesktopVenue(page, "KRX");
+  await pickDesktopVenue(page, "NXT");
   await expect(tab.locator(".mw-integrated")).toHaveText("통합");
+  await expect(win(page).locator(".mw-integrated")).toHaveCount(0);
+  await expect(win(page)).toHaveAttribute("data-quote-venue", "combined");
+  expect(feedSubscriptions(scenario, "book", "nxt")).toHaveLength(0);
+  expect(feedSubscriptions(scenario, "trades", "nxt")).toHaveLength(0);
+});
+
+test("NXT에서 거래되는 종목을 KRX로 보면 호가주문 도킹 탭에 통합 표시가 없다", async ({ page, scenario }) => {
+  ordersOn(scenario);
+  tradingApi(scenario);
+  nxtTraded(scenario, true);
+  await openOrderWindow(page, scenario);
+  const tab = windowTabs(page).getByRole("tab", { name: /^호가주문/ });
+  await pickDesktopVenue(page, "KRX");
+  await pollSaved(() => feedSubscriptions(scenario, "book", "krx").length).toBe(1);
+  await expect(tab.locator(".mw-integrated")).toHaveCount(0);
   await expect(win(page).locator(".mw-integrated")).toHaveCount(0);
 });
 
