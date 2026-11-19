@@ -793,6 +793,8 @@ pub struct SymbolDaySummary {
     pub symbol: SymbolCode,
     pub venue: Venue,
     pub price: Option<f64>,
+    /// 전일 종가(ka10095 기준가), 원.
+    pub previous_close: Option<f64>,
     pub open: Option<f64>,
     pub high: Option<f64>,
     pub low: Option<f64>,

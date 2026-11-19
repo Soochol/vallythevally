@@ -493,6 +493,22 @@ test("답을 못 받은 신규는 다른 종목을 보고 돌아와 다시 해�
   expect(second).toBe(first);
 });
 
+const daySummaryRequests = (scenario: Scenario, symbol: string) => scenario.requests.filter((r) => new URL(r.url()).pathname === `/api/symbols/${symbol}/day-summary`).length;
+const quotesRequests = (scenario: Scenario) => scenario.requests.filter((r) => new URL(r.url()).pathname === "/api/quotes").length;
+
+test("종목을 바꾸면 호가주문창의 당일 요약 조회는 한 번이고 /api/quotes는 부르지 않는다", async ({ page, scenario }) => {
+  await page.clock.install({ time: new Date("2026-11-18T10:00:00+09:00") });
+  await openOrderWindow(page, scenario, true);
+  const quotesBefore = quotesRequests(scenario);
+  await cell(page, 2).click();
+  await expect(win(page)).toHaveAttribute("data-symbol", "000660");
+  await pollSaved(() => daySummaryRequests(scenario, "000660")).toBe(1);
+  expect(quotesRequests(scenario)).toBe(quotesBefore);
+  await page.clock.fastForward(5_000);
+  await pollSaved(() => daySummaryRequests(scenario, "000660")).toBe(2);
+  expect(quotesRequests(scenario)).toBe(quotesBefore);
+});
+
 test("200 응답의 본문이 끊기면 답을 못 받은 것으로 보고 같은 commandId로 다시 보낸다", async ({ page, scenario }) => {
   ordersOn(scenario);
   tradingApi(scenario);

@@ -143,7 +143,7 @@ export class MarketFixtures {
 export const DAY_SUMMARY_VOLUME = 1_234_567;
 
 export const daySummaryOf = (quote: Quote): SymbolDaySummary => ({
-  symbol: quote.symbol, venue: quote.venue ?? "combined", price: quote.price, open: quote.price - 100, high: quote.price + 400, low: quote.price - 600,
+  symbol: quote.symbol, venue: quote.venue ?? "combined", price: quote.price, previousClose: quote.price - quote.change, open: quote.price - 100, high: quote.price + 400, low: quote.price - 600,
   volume: DAY_SUMMARY_VOLUME, tradeValueWon: Math.round(quote.price * DAY_SUMMARY_VOLUME), t: quote.t,
 });
 
@@ -334,7 +334,7 @@ export class Scenario {
       if (venue !== "combined" && venue !== "krx" && venue !== "nxt") return error(400, "bad_request", "Invalid venue");
       if (symbol.startsWith("IDX:")) return error(400, "bad_request", "지수에는 종목 당일 요약이 없습니다");
       const quote = this.market.quote(symbol, venue);
-      return { body: quote ? daySummaryOf(quote) : { symbol, venue, price: null, open: null, high: null, low: null, volume: null, tradeValueWon: null, t: null } satisfies SymbolDaySummary };
+      return { body: quote ? daySummaryOf(quote) : { symbol, venue, price: null, previousClose: null, open: null, high: null, low: null, volume: null, tradeValueWon: null, t: null } satisfies SymbolDaySummary };
     }
     if (path === "/api/bars" && method === "GET") {
       const symbol = url.searchParams.get("symbol") ?? "";

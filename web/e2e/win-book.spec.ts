@@ -5,6 +5,7 @@ import type { LayoutWindow } from "../src/api/generated/LayoutWindow";
 import type { OrderBook } from "../src/api/generated/OrderBook";
 import type { TradePrint } from "../src/api/generated/TradePrint";
 import { type Scenario, cell, DEFAULT_LAYOUT_ID, expect, pickDesktopVenue, test, windowTabs, pollSaved } from "./harness";
+import { daySummaryOf } from "./fixtures/scenario";
 import { feedSubscriptions, FUNDAMENTAL_FIGURES, INFO_PAGE_1, INFO_PAGE_2, INFO_PAGE_2_VALUES, infoLabels, infoPager, infoValues, nxtTraded, pinQuote, requestedVenues, venueScene } from "./order-window";
 
 const SETTINGS = { v: 1, style: "candle", scale: "normal", indicators: [], compare: [], panels: [] };
@@ -674,11 +675,23 @@ function quoteAt(scenario: Scenario, price: number, t: number) {
 async function openWithQuote(page: Page, scenario: Scenario, base: number, quote: () => ReturnType<typeof quoteAt>) {
   bookWindow(scenario, CODE);
   replyBook(scenario, base);
-  scenario.on((url) => url.pathname === "/api/quotes", () => ({ body: [quote()] }));
+  scenario.on((url) => url.pathname === `/api/symbols/${CODE}/day-summary`, () => ({ body: daySummaryOf(quote()) }));
   await page.goto("/");
   await expect(cell(page)).toHaveAttribute("aria-busy", "false");
   await windowTabs(page).getByRole("tab", { name: /^10호가/ }).click();
 }
+
+test("10호가창의 당일 요약 조회는 한 번이고 /api/quotes는 부르지 않으며 5초 새로 고침도 한 번이다", async ({ page, scenario }) => {
+  await page.clock.install({ time: scenario.now });
+  await openWithQuote(page, scenario, 70000, () => quoteAt(scenario, 70000, scenario.now / 1000));
+  const summaries = () => scenario.requests.filter((r) => new URL(r.url()).pathname === `/api/symbols/${CODE}/day-summary`).length;
+  const quotes = () => scenario.requests.filter((r) => new URL(r.url()).pathname === "/api/quotes").length;
+  await pollSaved(summaries).toBe(1);
+  const quotesBefore = quotes();
+  await page.clock.fastForward(5000);
+  await pollSaved(summaries).toBe(2);
+  expect(quotes()).toBe(quotesBefore);
+});
 
 test("체결이 없어도 시세 조회 응답의 가격이 바뀌면 다음 조회 뒤 현재가 행이 옮겨 간다", async ({ page, scenario }) => {
   let price = 70000;
