@@ -177,17 +177,101 @@ test("가격 없는 단은 단으로 세지 않는다", () => {
   expect(isSinglePriceBook({ asks, bids: [], lastPrice: 70_000, previousClose: null })).toBe(false);
 });
 
-test("10단 호가(매도 4단 이상 또는 매수 4단 이상)는 기존 현재가 가운데 격자와 같은 행이다", () => {
+test("10단 호가(매도 4단 이상 또는 매수 4단 이상)도 매도 1호가가 가운데 선 바로 위 행이다", () => {
   const four = [level(70_100, 1), level(70_200, 2), level(70_300, 3), level(70_400, 4)];
   const threeBids = [level(70_000, 5), level(69_900, 6), level(69_800, 7)];
-  for (const quotes of [{ asks: four, bids: threeBids }, { asks: threeBids.map((l) => level(l.price + 500, l.quantity)), bids: four.map((l) => level(l.price - 600, l.quantity)) }]) {
-    const input = { ...quotes, lastPrice: 70_000, previousClose: 69_000 };
-    expect(isSinglePriceBook(input)).toBe(false);
-    expect(auction({ ...input, bounds: NO_BOUNDS })).toEqual(build(input));
-    expect(defaultLadderPrices({ ...input, bounds: NO_BOUNDS, tickRule: "stock" }).sidesSplit).toBe(false);
-  }
+  const input = { asks: four, bids: threeBids, lastPrice: 70_000, previousClose: 69_000 };
+  expect(isSinglePriceBook(input)).toBe(false);
+  expect(auction({ ...input, bounds: NO_BOUNDS })).toEqual(build(input));
+  expect(defaultLadderPrices({ ...input, bounds: NO_BOUNDS, tickRule: "stock" }).sidesSplit).toBe(false);
   const full = { asks: Array.from({ length: 10 }, (_, i) => level(70_100 + 100 * i, 10)), bids: Array.from({ length: 10 }, (_, i) => level(70_000 - 100 * i, 10)), lastPrice: 70_000, previousClose: 69_000 };
   expect(auction({ ...full, bounds: NO_BOUNDS })).toEqual(build(full));
+});
+
+const CAPTURE_TEN_ASKS = Array.from({ length: 10 }, (_, i) => level(196_400 + 100 * i, 100 + i));
+const CAPTURE_TEN_BIDS = Array.from({ length: 10 }, (_, i) => level(196_300 - 100 * i, 200 + i));
+const captured = (input: Partial<Parameters<typeof buildDefaultLadder>[0]> = {}) => auction({ asks: CAPTURE_TEN_ASKS, bids: CAPTURE_TEN_BIDS, lastPrice: 196_400, previousClose: 195_000, bounds: NO_BOUNDS, ...input });
+
+test("매도 1호가가 현재가와 같아도 매도 10단은 가운데 선 위, 매수 10단은 아래 행에 든다", () => {
+  const rows = captured();
+  expect(prices(rows)[0]).toBe(197_300);
+  expect(prices(rows)[9]).toBe(196_400);
+  expect(prices(rows)[10]).toBe(196_300);
+  expect(prices(rows)[19]).toBe(195_400);
+  expect(rows.slice(0, 10).every((row) => row.ask !== null && row.bid === null)).toBe(true);
+  expect(rows.slice(10).every((row) => row.bid !== null && row.ask === null)).toBe(true);
+  expect(rows.filter((row) => row.current).map((row) => row.price)).toEqual([196_400]);
+});
+
+test("현재가가 매수 1호가면 행 배치가 지금과 같다", () => {
+  const rows = captured({ lastPrice: 196_300 });
+  expect(prices(rows)).toEqual(prices(build({ lastPrice: 196_300 })));
+  expect(rows.filter((row) => row.current).map((row) => row.price)).toEqual([196_300]);
+});
+
+test("호가 사이가 벌어지면 빈 가격 행을 두고 매수 단이 그만큼 아래로 밀린다", () => {
+  const rows = captured({ bids: CAPTURE_TEN_BIDS.map((l) => level(l.price - 200, l.quantity)) });
+  expect(prices(rows)[9]).toBe(196_400);
+  expect(prices(rows)[10]).toBe(196_300);
+  expect([rows[10]!.bid, rows[11]!.bid]).toEqual([null, null]);
+  expect(rows[12]!.bid?.price).toBe(196_100);
+  expect(prices(rows)[19]).toBe(195_400);
+  expect(rows.filter((row) => row.bid)).toHaveLength(8);
+});
+
+test("매도 호가가 없으면 매수 1호가를 가운데 선 바로 아래 행에 둔다", () => {
+  const rows = captured({ asks: [], lastPrice: 196_300 });
+  expect(prices(rows)[10]).toBe(196_300);
+  expect(prices(rows)[0]).toBe(197_300);
+  expect(prices(rows)[19]).toBe(195_400);
+  expect(rows[10]!.bid?.price).toBe(196_300);
+});
+
+test("호가가 하나도 없으면 현재가, 없으면 전일종가를 가운데 선 바로 아래 행에 둔다", () => {
+  expect(prices(captured({ asks: [], bids: [], lastPrice: 196_000 }))[10]).toBe(196_000);
+  expect(prices(captured({ asks: [], bids: [], lastPrice: null, previousClose: 195_000 }))[10]).toBe(195_000);
+  expect(prices(captured({ asks: [], bids: [], lastPrice: null, previousClose: null })).every((price) => price === null)).toBe(true);
+});
+
+test("교차 호가는 매도 1호가를 기준으로 그리고 같은 가격 행에 양쪽 잔량을 붙인다", () => {
+  const asks = Array.from({ length: 10 }, (_, i) => level(196_400 + 100 * i, 100 + i));
+  const bids = Array.from({ length: 10 }, (_, i) => level(196_500 - 100 * i, 200 + i));
+  const rows = captured({ asks, bids, lastPrice: 196_500 });
+  expect(prices(rows)[9]).toBe(196_400);
+  expect(prices(rows)[8]).toBe(196_500);
+  expect([rows[9]!.ask?.quantity, rows[9]!.bid?.quantity]).toEqual([100, 201]);
+  expect([rows[8]!.ask?.quantity, rows[8]!.bid?.quantity]).toEqual([101, 200]);
+  expect(rows.filter((row) => row.current).map((row) => row.price)).toEqual([196_500]);
+});
+
+test("상·하한가 밖 행은 비운다", () => {
+  const nearUpper = captured({ bounds: { lower: 150_000, upper: 196_800 } });
+  expect(prices(nearUpper).slice(0, 10)).toEqual([null, null, null, null, null, 196_800, 196_700, 196_600, 196_500, 196_400]);
+  const nearLower = captured({ bounds: { lower: 195_900, upper: 250_000 } });
+  expect(prices(nearLower).slice(10)).toEqual([196_300, 196_200, 196_100, 196_000, 195_900, null, null, null, null, null]);
+});
+
+const skipGap = (input: Partial<Parameters<typeof buildDefaultLadder>[0]> = {}) => captured({ skipSpreadGap: true, ...input });
+const WIDE_BIDS = CAPTURE_TEN_BIDS.map((l) => level(l.price - 200, l.quantity));
+
+test("호가 사이 빈 가격 건너뛰기를 켜면 벌어진 호가에서 매수 1호가가 가운데 선 바로 아래 행에 온다", () => {
+  const rows = skipGap({ bids: WIDE_BIDS });
+  expect(prices(rows)[9]).toBe(196_400);
+  expect(prices(rows)[10]).toBe(196_100);
+  expect(prices(rows)[19]).toBe(195_200);
+  expect(rows.slice(10).every((row) => row.bid !== null)).toBe(true);
+  expect(rows.slice(0, 10).every((row) => row.ask !== null)).toBe(true);
+});
+
+test("호가 사이 빈 가격 건너뛰기를 켜도 붙은 호가·교차 호가·한쪽 호가 없음은 꺼짐과 같다", () => {
+  const crossed = { bids: Array.from({ length: 10 }, (_, i) => level(196_500 - 100 * i, 200 + i)), lastPrice: 196_500 };
+  const cases = [{}, crossed, { asks: [], lastPrice: 196_300 }, { bids: [] }];
+  for (const input of cases) expect(skipGap(input)).toEqual(captured(input));
+  expect(skipGap({ bids: WIDE_BIDS })).not.toEqual(captured({ bids: WIDE_BIDS }));
+});
+
+test("호가 사이 빈 가격 건너뛰기를 켜도 단일가 호가는 그대로다", () => {
+  expect(skipGap({ asks: CAPTURE_ASKS, bids: CAPTURE_BIDS })).toEqual(captured({ asks: CAPTURE_ASKS, bids: CAPTURE_BIDS }));
 });
 
 test("예상체결가가 6호가 가격이면 그 행 가격이 목록에 있어 같은 가격으로 찾을 수 있다", () => {

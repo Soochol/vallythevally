@@ -1,6 +1,7 @@
 import type { SymbolCode } from "../../api/generated/SymbolCode";
 import { useFundamentals, useSymbolInfo } from "../../api/queries";
 import type { WindowId } from "../../layout/kinds";
+import { useOrderSettings } from "../../stores/ui";
 import { MarketWindowGate } from "../market-window/MarketWindowGate";
 import { buildDefaultLadder } from "../market-window/ladder";
 import { tickRuleOf } from "../market-window/tick";
@@ -26,6 +27,7 @@ const REJECTION: Record<string, string> = {
 
 function BookBody({ code }: { code: SymbolCode }) {
   const venue = useShownVenue(code);
+  const { skipSpreadGap } = useOrderSettings();
   const feed = useBookFeed(code, venue);
   const limits = useFundamentals(code).data;
   const kind = useSymbolInfo(code).data?.kind ?? null;
@@ -40,7 +42,7 @@ function BookBody({ code }: { code: SymbolCode }) {
   const notice = feed.rejected ? REJECTION[feed.rejected] : feed.connected ? null : "끊김";
   const ladder = (() => {
     if (view === null) return <EmptyState title={feed.snapshotFailed ? "호가를 불러오지 못했습니다" : "호가를 기다리는 중입니다"} />;
-    const rows = buildDefaultLadder({ asks: view.asks, bids: view.bids, lastPrice: feed.lastPrice, previousClose: feed.previousClose, bounds, tickRule: tickRuleOf(kind, [...view.asks, ...view.bids].map((level) => level.price)) });
+    const rows = buildDefaultLadder({ asks: view.asks, bids: view.bids, lastPrice: feed.lastPrice, previousClose: feed.previousClose, bounds, skipSpreadGap, tickRule: tickRuleOf(kind, [...view.asks, ...view.bids].map((level) => level.price)) });
     const expected = visibleExpected(view.t, nowSeconds, view.expected);
     const infoSlots = placeInfoItems(rows, info, expected === null ? [] : expectedInfoItems(expected, feed.previousClose));
     return <PriceLadder rows={rows} previousClose={feed.previousClose} expectedPrice={expected?.price ?? null} rowSlots={{ topRight: infoSlot(infoSlots), bottomLeft: tradeSlot(trades, feed.previousClose) }} />;
