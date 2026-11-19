@@ -29,6 +29,7 @@ use crate::clock::Clock;
 use crate::config::Secret;
 use domain::KstTime;
 
+pub const SEND_SPACING: Duration = Duration::from_millis(260);
 const SEND_WINDOW: Duration = Duration::from_secs(1);
 const WINDOW_MARGIN: Duration = Duration::from_millis(50);
 const REAL_SENDS_PER_WINDOW: u32 = 5;
@@ -1325,7 +1326,6 @@ mod tests {
 
     const BUY_WRITE: TradingApiId = TradingApiId::ORDER_WRITES[0];
     const SELL_WRITE: TradingApiId = TradingApiId::ORDER_WRITES[1];
-    const SHARED_SPACING: Duration = Duration::from_millis(260);
 
     fn assert_at_most_per_second(sent: &[Sent], limit: usize) {
         for (i, a) in sent.iter().enumerate() {
@@ -1459,7 +1459,7 @@ mod tests {
         let fake = two_tr_transport(Duration::from_millis(10));
         let auth = KiwoomAuth::new(Secret::new("k".into()), Secret::new("s".into()), None);
         let clock = Clock::fake(kst(KstDate::new(2026, 11, 9).unwrap(), 9, 0, 0));
-        let rest = KiwoomRest::with_send_spacing(Arc::new(fake.clone()), auth, clock, SHARED_SPACING);
+        let rest = KiwoomRest::with_send_spacing(Arc::new(fake.clone()), auth, clock, SEND_SPACING);
         rest.issue_token().await.unwrap();
         let (a, b, c) = tokio::join!(call_k(&rest, 0, Priority::Screen), basic_info(&rest, Priority::Screen), call_k(&rest, 1, Priority::Screen));
         a.unwrap();
@@ -1467,7 +1467,7 @@ mod tests {
         c.unwrap();
         let sent = fake.sent();
         for w in sent.windows(2) {
-            assert_eq!(w[1].at.duration_since(w[0].at), SHARED_SPACING, "손잡이 대기열은 토큰 발급과 TR이 달라도 모든 전송 사이를 그 간격으로 띄운다");
+            assert_eq!(w[1].at.duration_since(w[0].at), SEND_SPACING, "손잡이 대기열은 토큰 발급과 TR이 달라도 모든 전송 사이를 그 간격으로 띄운다");
         }
     }
 
@@ -1476,7 +1476,7 @@ mod tests {
         let fake = two_tr_transport(Duration::from_millis(10));
         let auth = KiwoomAuth::new(Secret::new("k".into()), Secret::new("s".into()), None);
         let clock = Clock::fake(kst(KstDate::new(2026, 11, 9).unwrap(), 9, 0, 0));
-        let rest = KiwoomRest::build(Arc::new(fake.clone()), auth, clock, SHARED_SPACING, KiwoomEnvironment::Mock);
+        let rest = KiwoomRest::build(Arc::new(fake.clone()), auth, clock, SEND_SPACING, KiwoomEnvironment::Mock);
         rest.issue_token().await.unwrap();
         let (a, b, c) = tokio::join!(call_k(&rest, 0, Priority::Screen), call_k(&rest, 1, Priority::Screen), basic_info(&rest, Priority::Screen));
         a.unwrap();
@@ -1485,7 +1485,7 @@ mod tests {
         let sent = fake.market_sent();
         let kinds: Vec<_> = sent.iter().map(|s| s.api_id).collect();
         assert_eq!(kinds, [ApiId::Ka10099, ApiId::Ka10001, ApiId::Ka10099].map(Endpoint::from));
-        assert_eq!(sent[1].at.duration_since(sent[0].at), SHARED_SPACING);
+        assert_eq!(sent[1].at.duration_since(sent[0].at), SEND_SPACING);
         assert!(sent[2].at.duration_since(sent[0].at) >= Duration::from_secs(1));
     }
 
@@ -2320,7 +2320,7 @@ mod tests {
         let auth = KiwoomAuth::new(Secret::new("k".into()), Secret::new("s".into()), None);
         let clock = Clock::fake(kst(KstDate::new(2026, 11, 9).unwrap(), 9, 0, 0));
         let rest = if shared_spacing {
-            KiwoomRest::with_send_spacing(Arc::new(fake.clone()), auth, clock, SHARED_SPACING)
+            KiwoomRest::with_send_spacing(Arc::new(fake.clone()), auth, clock, SEND_SPACING)
         } else {
             KiwoomRest::new(Arc::new(fake.clone()), auth, clock)
         };
