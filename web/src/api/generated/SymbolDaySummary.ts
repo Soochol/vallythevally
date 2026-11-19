@@ -8,7 +8,11 @@ import type { Venue } from "./Venue";
  * `venue`는 `combined`(기본), `krx`, `nxt`다. 요청이 NXT인데 그 종목이 NXT에서 거래되지 않으면 통합으로 묻고 `venue`에 통합이 온다.
  * 장 전처럼 키움이 0이나 빈 값을 준 항목과 행이 없는 종목의 모든 항목은 null이다.
  */
-export type SymbolDaySummary = { symbol: SymbolCode, venue: Venue, price: number | null, open: number | null, high: number | null, low: number | null, 
+export type SymbolDaySummary = { symbol: SymbolCode, venue: Venue, price: number | null, 
+/**
+ * 전일 종가(ka10095 기준가), 원.
+ */
+previousClose: number | null, open: number | null, high: number | null, low: number | null, 
 /**
  * 당일 누적.
  */

@@ -719,7 +719,7 @@ mod tests {
         assert_eq!(asked(&f), r#"{"stk_cd":"005930_AL"}"#);
         assert_eq!(
             v,
-            json!({"symbol": "005930", "venue": "combined", "price": 50_000.0, "open": 51_200.0, "high": 51_500.0, "low": 49_800.0, "volume": 1_234_567,
+            json!({"symbol": "005930", "venue": "combined", "price": 50_000.0, "previousClose": 51_000.0, "open": 51_200.0, "high": 51_500.0, "low": 49_800.0, "volume": 1_234_567,
                    "tradeValueWon": 61_728_000_000u64, "t": 1_793_890_800 + 71_999})
         );
         let (_, v) = json(&f.app, "/api/symbols/005930/day-summary?venue=krx").await;
@@ -731,7 +731,7 @@ mod tests {
         let (s, v) = json(&f.app, "/api/symbols/005935/day-summary").await;
         assert_eq!(
             (s, v),
-            (StatusCode::OK, json!({"symbol": "005935", "venue": "combined", "price": null, "open": null, "high": null, "low": null, "volume": null, "tradeValueWon": null, "t": null})),
+            (StatusCode::OK, json!({"symbol": "005935", "venue": "combined", "price": null, "previousClose": null, "open": null, "high": null, "low": null, "volume": null, "tradeValueWon": null, "t": null})),
             "행이 없으면 모든 항목이 null이다"
         );
         let before = f.fake.market_sent().len();

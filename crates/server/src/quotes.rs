@@ -85,6 +85,7 @@ pub async fn day_summary(rest: &KiwoomRest, code: StockCode, requested: Venue, n
         symbol: api::SymbolCode(Symbol::Stock(code).as_wire()),
         venue: venue.into(),
         price: won(row.price_won),
+        previous_close: won(row.base_won),
         open: won(row.open_won),
         high: won(row.high_won),
         low: won(row.low_won),

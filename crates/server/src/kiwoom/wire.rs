@@ -473,6 +473,7 @@ fn quote_row_code(stk_cd: &str) -> Result<(StockCode, Venue), WireError> {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct DaySummaryRow {
     pub price_won: Option<u64>,
+    pub base_won: Option<u64>,
     pub open_won: Option<u64>,
     pub high_won: Option<u64>,
     pub low_won: Option<u64>,
@@ -488,6 +489,7 @@ pub fn parse_day_summary(body: StockQuotesResponse, code: StockCode, venue: Venu
         .find(|r| quote_row_code(&r.stk_cd).is_ok_and(|row| row == (code, venue)))
         .map(|r| DaySummaryRow {
             price_won: present(&r.cur_prc),
+            base_won: present(&r.base_pric),
             open_won: present(&r.open_pric),
             high_won: present(&r.high_pric),
             low_won: present(&r.low_pric),
@@ -2612,15 +2614,15 @@ mod tests {
         let at = KstTime::from_kst_civil(KstDate::parse_yyyymmdd("20261106").unwrap(), TimeOfDay::hms(19, 59, 59).unwrap());
         assert_eq!(
             row,
-            DaySummaryRow { price_won: Some(50_000), open_won: Some(51_200), high_won: Some(51_500), low_won: Some(49_800), volume: Some(1_234_567), trade_value_won: Some(61_728_000_000), at: Some(at) },
-            "부호를 떼고, 거래대금은 백만원을 원으로 바꾼다"
+            DaySummaryRow { price_won: Some(50_000), base_won: Some(51_000), open_won: Some(51_200), high_won: Some(51_500), low_won: Some(49_800), volume: Some(1_234_567), trade_value_won: Some(61_728_000_000), at: Some(at) },
+            "부호를 떼고, 기준가는 전일 종가이며, 거래대금은 백만원을 원으로 바꾼다"
         );
         let pre_market = QuoteRow {
             stk_cd: "005930".into(), cur_prc: "51000".into(), base_pric: "51000".into(), trde_qty: "0".into(), trde_prica: "0".into(),
             open_pric: "0".into(), high_pric: "".into(), low_pric: "0".into(), dt: "20261106".into(), cntr_tm: "".into(), ..QuoteRow::default()
         };
         let row = parse_day_summary(StockQuotesResponse { atn_stk_infr: vec![pre_market] }, code, Venue::Krx);
-        assert_eq!(row, DaySummaryRow { price_won: Some(51_000), ..DaySummaryRow::default() }, "0이나 빈 값은 None이다");
+        assert_eq!(row, DaySummaryRow { price_won: Some(51_000), base_won: Some(51_000), ..DaySummaryRow::default() }, "0이나 빈 값은 None이다");
         let body: StockQuotesResponse = serde_json::from_str(&fixture("ka10095_synthetic")).unwrap();
         assert_eq!(parse_day_summary(body, code, Venue::Nxt), DaySummaryRow::default(), "다른 거래소의 행은 읽지 않는다");
     }

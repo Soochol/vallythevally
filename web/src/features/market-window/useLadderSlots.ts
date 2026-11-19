@@ -3,14 +3,13 @@ import { useState } from "react";
 import type { Fundamentals } from "../../api/generated/Fundamentals";
 import type { SymbolCode } from "../../api/generated/SymbolCode";
 import type { Venue } from "../../api/generated/Venue";
-import { fetchDaySummary } from "../../api/userData";
+import { daySummaryQuery } from "../../api/userData";
 import { marketSocket } from "../../stores/realtime";
 import type { TradeRow } from "../trades/tape";
 import { useTradeTape } from "../trades/useTradeTape";
 import { type InfoPage, nextInfoPage, quoteInfoItems, type QuoteInfo } from "./quoteInfo";
 import { tradeRows } from "./recentTrades";
 
-const QUOTE_POLL_MS = 5000;
 const HISTORY_PAGES = 1;
 
 export interface QuoteInfoSource {
@@ -23,7 +22,7 @@ export interface QuoteInfoSource {
 }
 
 export function useQuoteInfo({ code, venue, lastPrice, previousClose, fundamentals, page }: QuoteInfoSource): QuoteInfo[] {
-  const summary = useQuery({ queryKey: ["ladder-day-summary", code, venue], queryFn: ({ signal }) => fetchDaySummary(code, venue, signal), refetchInterval: QUOTE_POLL_MS, staleTime: 0, retry: false }).data ?? null;
+  const summary = useQuery(daySummaryQuery(code, venue)).data ?? null;
   return quoteInfoItems(page, { price: lastPrice ?? summary?.price ?? null, previousClose, summary, fundamentals: fundamentals ?? null });
 }
 

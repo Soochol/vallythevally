@@ -27,5 +27,17 @@ export async function fetchQuotes(symbols: readonly SymbolCode[], venue: Venue, 
   return pages.flat();
 }
 
+export const DAY_SUMMARY_REFRESH_MS = 5000;
+
+export const daySummaryQueryKey = (code: SymbolCode, venue: Venue) => ["day-summary", code, venue] as const;
+
+export const daySummaryQuery = (code: SymbolCode, venue: Venue) => ({
+  queryKey: daySummaryQueryKey(code, venue),
+  queryFn: ({ signal }: { signal: AbortSignal }) => fetchDaySummary(code, venue, signal),
+  refetchInterval: DAY_SUMMARY_REFRESH_MS,
+  staleTime: 0,
+  retry: false,
+});
+
 export const fetchDaySummary = (code: SymbolCode, venue: Venue, signal?: AbortSignal) =>
   getJson<SymbolDaySummary>(`/api/symbols/${encodeURIComponent(code)}/day-summary?venue=${venue}`, signal);
