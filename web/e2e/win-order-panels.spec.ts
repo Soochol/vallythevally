@@ -609,6 +609,11 @@ test("수량 칸 가운데에 숫자 아닌 글자를 쳐도 커서가 제자리
   await page.keyboard.type("a");
   await page.keyboard.type("5");
   await expect(field).toHaveValue("12534");
+  await field.fill("1234");
+  await field.evaluate((element: HTMLInputElement) => element.setSelectionRange(1, 3));
+  await page.keyboard.type("a");
+  await expect(field).toHaveValue("14");
+  expect(await field.evaluate((element: HTMLInputElement) => element.selectionStart)).toBe(1);
   await presetKindButton(page, "금액").click();
   await amountPresetButtons(page).last().click();
   await expect(field).toHaveValue("50000");
