@@ -762,3 +762,41 @@ async fn order_latency_probe() {
     println!("{}", table.join("\n"));
     assert!(mismatches.is_empty(), "{mismatches:#?}");
 }
+
+#[tokio::test]
+async fn turning_orders_off_and_on_drops_the_recent_open_orders() {
+    let f = on().await;
+    get(&f.app, OPEN_ORDERS).await;
+    let (code, _) = super::tests::call(&f.app, "PUT", "/api/system/orders", Some(json!({"enabled": false}))).await;
+    assert_eq!(code, StatusCode::OK);
+    *f.open_rows.lock().unwrap() = Some(json!([]));
+    assert_eq!(enable(&f.app, "01").await.0, StatusCode::OK);
+    let before = sent_ids(&f).len();
+    let (_, cancelled) = order(&f.app, CANCEL, json!({"commandId": "cmd-offon-0001", "orderNo": "0012345"})).await;
+    assert_eq!((cancelled["state"].clone(), cancelled["reason"].clone()), (json!("rejected"), json!("order_not_found")), "{cancelled}");
+    assert_eq!(sent_since(&f, before), ["ka10075"]);
+}
+
+#[tokio::test]
+async fn a_batch_waiting_for_the_turn_lists_after_the_write_ahead_of_it() {
+    let f = fixture_with(Duration::from_millis(300), Duration::ZERO).await;
+    assert_eq!(enable(&f.app, "01").await.0, StatusCode::OK);
+    *f.open_rows.lock().unwrap() = Some(same_price_rows(&["0020001", "0020002"]));
+    get(&f.app, OPEN_ORDERS).await;
+    let single = tokio::spawn({
+        let app = f.app.clone();
+        async move { order(&app, CANCEL, json!({"commandId": "cmd-turn-single", "orderNo": "0020001"})).await }
+    });
+    tokio::time::sleep(Duration::from_millis(30)).await;
+    let batch = tokio::spawn({
+        let app = f.app.clone();
+        async move { order(&app, CANCEL_BATCH, json!({"batchId": "batch-turn-0001", "code": "005930", "side": "buy", "price": 71_000})).await }
+    });
+    tokio::time::sleep(Duration::from_millis(120)).await;
+    *f.open_rows.lock().unwrap() = Some(same_price_rows(&["0020002"]));
+    assert_eq!(single.await.unwrap().1["state"], "accepted");
+    let (_, batch) = batch.await.unwrap();
+    assert_eq!(batch["commands"].as_array().unwrap().len(), 1, "{batch}");
+    let cancelled: Vec<Value> = writes(&f).into_iter().map(|(_, body)| body["orig_ord_no"].clone()).collect();
+    assert_eq!(cancelled, [json!("0020001"), json!("0020002")], "이미 취소 접수된 주문에 다시 보내지 않는다");
+}

@@ -252,6 +252,7 @@ impl Trading {
 
     pub async fn set_enabled(&self, input: api::OrdersSwitchInput) -> Result<api::OrdersStatus, TradingError> {
         let _write = self.write.lock().await;
+        self.recent_open.forget();
         if !input.enabled {
             *self.lock() = State::default();
             let switch = self.switch_lock.lock().expect("스위치 잠금");

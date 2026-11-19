@@ -206,6 +206,8 @@ impl Trading {
         if let Some(recorded) = self.journal.existing_batch(&batch).await? {
             return self.batch_reply(account_ref, recorded).await;
         }
+        let turn = self.turn_of(&account_ref);
+        let _turn = turn.lock().await;
         let (_, entries) = self.open_entries(Priority::Order).await?;
         let listed: HashMap<String, OpenEntry> = entries.into_iter().filter(|e| e.order.code == code.as_str() && e.order.side == input.side && e.order.price == input.price && e.order.open_quantity > 0).map(|e| (e.order.order_no.clone(), e)).collect();
         let mut targets: Vec<String> = listed.keys().cloned().collect();
@@ -215,15 +217,11 @@ impl Trading {
         let BatchBegun::Created(commands) = &begun else {
             return self.batch_reply(account_ref, begun).await;
         };
-        let turn = self.turn_of(&account_ref);
-        {
-            let _turn = turn.lock().await;
-            for command in commands.iter().filter(|c| c.state == OrderCommandState::Prepared) {
-                let target = OrderNumber::parse(command.target_order_no.as_deref().expect("일괄 취소 명령은 대상 주문번호를 가진다")).expect("목록에서 읽은 주문번호는 형식을 이미 확인했다");
-                let listed = listed.get(target.as_str()).cloned();
-                if let Err(e) = self.execute(&command.command_id, &account_ref, Work::Cancel { order_no: target, listed }).await {
-                    tracing::error!(error = %e, "일괄 취소의 한 명령이 저널 오류로 끝났습니다");
-                }
+        for command in commands.iter().filter(|c| c.state == OrderCommandState::Prepared) {
+            let target = OrderNumber::parse(command.target_order_no.as_deref().expect("일괄 취소 명령은 대상 주문번호를 가진다")).expect("목록에서 읽은 주문번호는 형식을 이미 확인했다");
+            let listed = listed.get(target.as_str()).cloned();
+            if let Err(e) = self.execute(&command.command_id, &account_ref, Work::Cancel { order_no: target, listed }).await {
+                tracing::error!(error = %e, "일괄 취소의 한 명령이 저널 오류로 끝났습니다");
             }
         }
         self.notify(account_ref.clone());
