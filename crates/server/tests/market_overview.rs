@@ -75,7 +75,7 @@ impl Harness {
         let fake = ScriptedTransport::new();
         let clock = Clock::fake(clock_at);
         let auth = KiwoomAuth::new(Secret::new("FAKE_KEY".into()), Secret::new("FAKE_SECRET".into()), None);
-        let rest = KiwoomRest::new(fake.transport(), auth, clock.clone());
+        let rest = KiwoomRest::with_send_spacing(fake.transport(), auth, clock.clone(), Duration::from_millis(260));
         let tmp = tempfile::tempdir().unwrap();
         let db = AppDb::open(&tmp.path().join("db.sqlite")).await.unwrap();
         let (stream, _desired) = KiwoomStream::detached();
