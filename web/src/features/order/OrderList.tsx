@@ -26,6 +26,7 @@ export function OrderList({ label, items, drag, root, point, placement, onClose 
   const trigger = useRef<HTMLElement | null>(point ? null : root.current?.tagName === "BUTTON" ? root.current : root.current?.querySelector<HTMLElement>("button") ?? null);
   const focusTarget = useRef<HTMLElement | null>(point ? (document.activeElement instanceof HTMLElement ? document.activeElement : null) : trigger.current);
   const buttons = useRef<(HTMLButtonElement | null)[]>([]);
+  const typed = useRef({ text: "", at: 0 });
 
   const onKeyDown = (e: React.KeyboardEvent) => {
     e.stopPropagation();
@@ -35,12 +36,18 @@ export function OrderList({ label, items, drag, root, point, placement, onClose 
       e.preventDefault();
       all[menuIndex(all.map((b) => b.textContent ?? ""), all.findIndex((el) => el === document.activeElement), e.key)]?.focus();
     } else if (e.key === "Tab") onClose();
+    else if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && e.key !== " ") {
+      e.preventDefault();
+      const now = Date.now();
+      typed.current = { text: now - typed.current.at < 600 ? typed.current.text + e.key : e.key, at: now };
+      all[menuIndex(all.map((b) => b.textContent?.trim() ?? ""), all.findIndex((el) => el === document.activeElement), e.key, typed.current.text)]?.focus();
+    }
   };
 
   buttons.current = [];
   const register = (el: HTMLButtonElement | null) => { buttons.current.push(el); };
   return (
-    <Popover anchor={trigger} point={point} placement={placement} focusTarget={focusTarget} onClose={onClose} role="menu" aria-label={label} onKeyDown={onKeyDown}
+    <Popover anchor={trigger} point={point} placement={placement} focusTarget={focusTarget} onClose={(reason) => { if (reason === "escape") drag.abort(); onClose(); }} role="menu" aria-label={label} onKeyDown={onKeyDown}
       className="z-40 flex min-w-[120px] flex-col whitespace-nowrap p-1">
       {items.map((item, i) => {
         if (item.kind === "separator") return <div key={i} role="separator" className="my-1 border-t border-line" />;

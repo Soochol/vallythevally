@@ -696,3 +696,55 @@ test("주문 사용이 막혀 있으면 합계 칸과 목록 항목을 끌어도
   await expect(page.getByTestId("order-ghost")).toHaveCount(0);
   expect(api.writes).toHaveLength(before);
 });
+
+test("목록이 열린 채 항목이나 합계 칸을 누르고 Esc를 누르면 끌기가 중단되어 이어 끌어도 요청이 없다", async ({ page, scenario }) => {
+  ordersOn(scenario);
+  tradingApi(scenario, SAMPLE());
+  await openOrderWindow(page, scenario);
+  await chipAt(page, "buy", 70_000).click({ button: "right" });
+  const item = page.getByRole("menu", { name: "주문 목록" }).getByRole("menuitem", { name: "7 취소" });
+  const from = await center(item);
+  await page.mouse.move(from.x, from.y);
+  await page.mouse.down();
+  await page.keyboard.press("Escape");
+  await page.mouse.move(5, 5, { steps: 6 });
+  await page.mouse.up();
+  await expect(page.getByTestId("order-ghost")).toHaveCount(0);
+
+  const total = page.getByTestId("order-total-buy");
+  await total.click();
+  const at = await center(total);
+  await page.mouse.move(at.x, at.y);
+  await page.mouse.down();
+  await page.keyboard.press("Escape");
+  await page.mouse.move(5, 5, { steps: 6 });
+  await expect(page.getByTestId("order-ghost")).toHaveCount(0);
+  await page.mouse.up();
+  expect(commandRequests(scenario)).toHaveLength(0);
+});
+
+test("합계 칸을 끌다가 Esc로 중단하고 그 칸 위에서 놓아도 목록이 열리지 않는다", async ({ page, scenario }) => {
+  ordersOn(scenario);
+  tradingApi(scenario, SAMPLE());
+  await openOrderWindow(page, scenario);
+  const total = page.getByTestId("order-total-buy");
+  await dragChip(page, total, { x: 5, y: 5 }, false);
+  await expect(page.getByTestId("order-ghost")).toBeVisible();
+  await page.keyboard.press("Escape");
+  const at = await center(total);
+  await page.mouse.move(at.x, at.y, { steps: 6 });
+  await page.mouse.up();
+  await expect(page.getByRole("menu", { name: "매수 접수 주문" })).toHaveCount(0);
+  expect(commandRequests(scenario)).toHaveLength(0);
+});
+
+test("주문 목록에서 글자 키로 항목을 찾아 이동한다", async ({ page, scenario }) => {
+  ordersOn(scenario);
+  tradingApi(scenario, SAMPLE());
+  await openOrderWindow(page, scenario);
+  await chipAt(page, "buy", 70_000).click({ button: "right" });
+  const menu = page.getByRole("menu", { name: "주문 목록" });
+  await menu.getByRole("menuitem", { name: "5 취소" }).focus();
+  await page.keyboard.press("7");
+  await expect(menu.getByRole("menuitem", { name: "7 취소" })).toBeFocused();
+});

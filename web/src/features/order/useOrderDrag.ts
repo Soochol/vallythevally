@@ -18,6 +18,7 @@ export interface DragStart {
 export interface OrderDrag {
   readonly view: DragView | null;
   begin(start: DragStart, event: React.PointerEvent): void;
+  abort(): void;
 }
 
 const MOVE_THRESHOLD_PX = 4;
@@ -41,6 +42,7 @@ function swallowNextClick(): void {
 export function useOrderDrag(ladder: RefObject<HTMLElement | null>, onDrop: (source: DragSource, outcome: DragOutcome) => void): OrderDrag {
   const [view, setView] = useState<DragView | null>(null);
   const stop = useRef<(() => void) | null>(null);
+  const aborting = useRef<(() => void) | null>(null);
   const drop = useRef(onDrop);
   useEffect(() => { drop.current = onDrop; });
   useEffect(() => () => stop.current?.(), []);
@@ -51,13 +53,17 @@ export function useOrderDrag(ladder: RefObject<HTMLElement | null>, onDrop: (sou
     const area = ladder.current;
     const start = { x: event.clientX, y: event.clientY };
     let moved = false;
+    let finished = false;
     let target: DragTarget = { kind: "ladder" };
     const finish = (escaped: boolean) => {
+      if (finished) return;
+      finished = true;
       stop.current?.();
       stop.current = null;
       setView(null);
       if (!moved) return;
-      swallowNextClick();
+      if (escaped) window.addEventListener("pointerup", swallowNextClick, { once: true });
+      else swallowNextClick();
       drop.current(source, judgeDrag({ source, target, escaped }));
     };
     const onMove = (e: PointerEvent) => {
@@ -82,7 +88,10 @@ export function useOrderDrag(ladder: RefObject<HTMLElement | null>, onDrop: (sou
       window.removeEventListener("pointerup", onUp);
       window.removeEventListener("keydown", onKey, true);
     };
+    aborting.current = () => finish(true);
   }, [ladder]);
 
-  return { view, begin };
+  const abort = useCallback(() => aborting.current?.(), []);
+
+  return { view, begin, abort };
 }
