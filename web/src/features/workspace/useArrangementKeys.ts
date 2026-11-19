@@ -46,7 +46,6 @@ const focusedWindow = () => {
   return active?.closest<HTMLElement>('[role="tab"][data-window-id]')?.dataset.windowId ?? active?.closest<HTMLElement>("[data-window-header]")?.dataset.windowHeader ?? null;
 };
 
-/** 화면 전체의 배치 되돌리기(Ctrl+Z)·다시 하기(Ctrl+Shift+Z, Ctrl+Y). 차트 칸 안은 드로잉, 입력칸은 브라우저가 맡는다. */
 export function useArrangementKeys() {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
