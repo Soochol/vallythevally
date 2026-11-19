@@ -3,6 +3,9 @@ set -eu
 service="${VALLY_SERVICE:-vally-server.service}"
 health_url="${VALLY_HEALTH_URL:-http://127.0.0.1:8080/api/screener/status}"
 limit="${VALLY_RESTART_WAIT:-120}"
+case "$limit" in
+    ''|*[!0-9]*|0) echo "vally-deploy restart: VALLY_RESTART_WAIT은 1 이상의 정수여야 합니다($limit)" >&2; exit 2 ;;
+esac
 systemctl --user restart "$service"
 waited=0
 while [ "$waited" -lt "$limit" ]; do

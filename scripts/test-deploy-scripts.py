@@ -91,6 +91,12 @@ class WebBuildTest(DeployScriptCase):
         self.assertIn("deploy.json", result.stderr)
         self.assertEqual(self.recorded(), [])
 
+    def test_node_bin_without_pnpm_fails_even_when_another_pnpm_is_on_path(self):
+        result = self.run_script("web-build", VALLY_NODE_BIN=str(self.node_bin))
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn(str(self.node_bin), result.stderr)
+        self.assertEqual(self.recorded(), [])
+
     def test_runs_install_then_build_in_web_folder(self):
         for name in ["pnpm"]:
             (self.stubs / name).rename(self.node_bin / name)
@@ -141,6 +147,16 @@ class BackupTest(DeployScriptCase):
         self.assertIn(str(self.data / "server/vally.db"), result.stderr)
         self.assertFalse(self.folder.exists())
 
+    def test_data_folder_with_uri_special_characters_is_backed_up(self):
+        special = Path(self.temp.name) / "data#1?x"
+        shutil.move(self.data, special)
+        result = self.run_script("backup", VALLY_DATA_DIR=str(special))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        [copy_path] = list((special / "backups").glob("vally-*.db"))
+        copy = sqlite3.connect(copy_path)
+        self.assertEqual(copy.execute("select code from watch").fetchall(), [("005930",)])
+        copy.close()
+
     def test_rejects_keep_below_one(self):
         result = self.run_script("backup", VALLY_DATA_DIR=str(self.data), VALLY_BACKUP_KEEP="0")
         self.assertNotEqual(result.returncode, 0)
@@ -174,6 +190,14 @@ echo $((count + 1)) > "{counter}"
         self.assertIn("systemctl --user is-active --quiet demo.service", calls)
         self.assertGreaterEqual(sum(call.startswith("curl") for call in calls), 2)
         self.assertTrue(all("http://127.0.0.1:1/health" in call for call in calls if call.startswith("curl")))
+
+    def test_invalid_wait_fails_before_restarting(self):
+        self.stub_flaky("systemctl", 0, restart_ok=True)
+        for wait in ["0", "abc", "1.5"]:
+            result = self.run_script("restart", VALLY_RESTART_WAIT=wait)
+            self.assertEqual(result.returncode, 2, wait)
+            self.assertIn("VALLY_RESTART_WAIT", result.stderr)
+        self.assertEqual(self.recorded(), [])
 
     def test_fails_with_journal_guidance_when_never_healthy(self):
         self.stub_flaky("systemctl", 0, restart_ok=True)

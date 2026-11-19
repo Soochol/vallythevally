@@ -17,7 +17,7 @@ if not source_path.is_file():
 folder.mkdir(parents=True, exist_ok=True)
 target = folder / f"vally-{time.strftime('%Y%m%d-%H%M%S')}.db"
 partial = target.with_name(target.name + ".part")
-source = sqlite3.connect(f"file:{source_path}?mode=rw", uri=True)
+source = sqlite3.connect(f"{source_path.resolve().as_uri()}?mode=rw", uri=True)
 copy = sqlite3.connect(partial)
 try:
     source.backup(copy)
