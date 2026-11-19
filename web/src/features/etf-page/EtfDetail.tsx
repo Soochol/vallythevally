@@ -4,6 +4,7 @@ import type { EtfFundSummary } from "../../api/generated/EtfFundSummary";
 import type { EtfHolding } from "../../api/generated/EtfHolding";
 import { useSendSymbol } from "../pages/sendSymbol";
 import { CumulativeCurve } from "./CumulativeCurve";
+import { HistoryTab } from "./HistoryTab";
 import { HoldingsTable } from "./HoldingsTable";
 import { Treemap } from "./Treemap";
 import { OverlapTab } from "./OverlapTab";
@@ -78,16 +79,19 @@ interface EtfDetailProps {
   tab: TabId;
   basket: readonly string[];
   stock: string | null;
+  pair: string | null;
+  onPair: (after: string) => void;
   onTab: (tab: TabId) => void;
   onRemoveFromBasket: (code: string) => void;
   onStock: (code: string | null) => void;
   onOpenFund: (code: string) => void;
 }
 
-function Panel({ fund, funds, tab, basket, stock, onRemoveFromBasket, onStock, onOpenFund }: EtfDetailProps) {
+function Panel({ fund, funds, tab, basket, stock, pair, onPair, onRemoveFromBasket, onStock, onOpenFund }: EtfDetailProps) {
   if (tab === "overlap") return <OverlapTab basket={basket} funds={funds} onRemove={onRemoveFromBasket} />;
   if (tab === "reverse") return <ReverseTab stock={stock} onStock={onStock} onOpenFund={onOpenFund} />;
   if (tab === "holdings" && fund) return <HoldingsTab code={fund.code} />;
+  if (tab === "history" && fund) return <HistoryTab code={fund.code} pair={pair} onPair={onPair} />;
   return <div className="etf-empty" role="status">준비 중입니다</div>;
 }
 

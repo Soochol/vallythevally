@@ -1,6 +1,6 @@
 use std::collections::{BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex, RwLock};
+use std::sync::{Arc, Mutex, OnceLock, RwLock};
 use std::time::Duration;
 
 use domain::{KstDate, KstTime, StockCode, Symbol, SymbolKind, TimeOfDay};
@@ -19,15 +19,16 @@ const COLLECT_AT: TimeOfDay = match TimeOfDay::hms(12, 10, 0) {
 const CALL_SPACING: Duration = Duration::from_millis(500);
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 const MAX_BODY_BYTES: usize = 4 * 1024 * 1024;
-const STORED_SCHEMA_VERSION: u32 = 1;
-const PDF_DIR: &str = "pdf";
+pub(super) const STORED_SCHEMA_VERSION: u32 = 1;
+pub(super) const PDF_DIR: &str = "pdf";
 const ATTEMPTS_FILE: &str = "attempts.json";
-const RAW_SUFFIX: &str = ".raw.json";
+pub(super) const RAW_SUFFIX: &str = ".raw.json";
 
 pub struct EtfBook {
     base: Arc<Catalog>,
     current: RwLock<Arc<Catalog>>,
     state: Mutex<Collected>,
+    pdf_dir: OnceLock<PathBuf>,
 }
 
 #[derive(Default)]
@@ -39,13 +40,17 @@ struct Collected {
 impl Default for EtfBook {
     fn default() -> Self {
         let base = Arc::new(Catalog::embedded());
-        EtfBook { current: RwLock::new(base.clone()), base, state: Mutex::default() }
+        EtfBook { current: RwLock::new(base.clone()), base, state: Mutex::default(), pdf_dir: OnceLock::new() }
     }
 }
 
 impl EtfBook {
     pub fn catalog(&self) -> Arc<Catalog> {
         self.current.read().expect("ETF 목록 잠금").clone()
+    }
+
+    pub fn pdf_dir(&self) -> Option<&Path> {
+        self.pdf_dir.get().map(PathBuf::as_path)
     }
 
     fn publish(&self) {
@@ -81,20 +86,20 @@ impl EtfBook {
 
 #[derive(Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct StoredPdf {
-    schema_version: u32,
-    code: String,
-    as_of: String,
-    holdings: Vec<StoredHolding>,
+pub(super) struct StoredPdf {
+    pub(super) schema_version: u32,
+    pub(super) code: String,
+    pub(super) as_of: String,
+    pub(super) holdings: Vec<StoredHolding>,
 }
 
 #[derive(Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct StoredHolding {
-    code: String,
-    name: String,
-    cu_quantity: f64,
-    weight_bps: u32,
+pub(super) struct StoredHolding {
+    pub(super) code: String,
+    pub(super) name: String,
+    pub(super) cu_quantity: f64,
+    pub(super) weight_bps: u32,
 }
 
 #[derive(Deserialize)]
@@ -201,7 +206,7 @@ impl Naver {
     }
 }
 
-fn pdf_dir(dir: &Path, day: KstDate) -> PathBuf {
+pub(super) fn pdf_dir(dir: &Path, day: KstDate) -> PathBuf {
     dir.join(PDF_DIR).join(day.yyyymmdd())
 }
 
@@ -285,6 +290,7 @@ async fn read_stored(path: &Path, code: &str, day: KstDate) -> Result<CollectedF
 }
 
 pub fn start(state: Arc<AppState>, dir: PathBuf, base_url: String) -> tokio::task::JoinHandle<()> {
+    state.etf.pdf_dir.set(dir.clone()).ok();
     tokio::spawn(async move {
         match Naver::new(base_url) {
             Ok(naver) => run(state, dir, naver).await,

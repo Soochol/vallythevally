@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { EtfFundSummary } from "../../api/generated/EtfFundSummary";
-import { commonHoldings, cumulativeCurve, filterFunds, issuersOf, NO_FILTER, overlapBps, parseBasket, squarify } from "./etfModel";
+import type { EtfChangePair } from "../../api/generated/EtfChangePair";
+import { commonHoldings, cumulativeCurve, filterFunds, formatRealChange, formatScale, issuersOf, NO_FILTER, overlapBps, pairOf, parseBasket, squarify } from "./etfModel";
 
 const fund = (code: string, name: string, style: EtfFundSummary["style"], issuer: string): EtfFundSummary => ({
   code, name, issuer, style, benchmark: "", holdingsCount: 1, top5WeightBps: 100, effectiveHoldings: 1,
@@ -104,5 +105,24 @@ describe("parseBasket", () => {
   it("중복과 빈 값을 버리고 4개까지만 남긴다", () => {
     expect(parseBasket(null)).toEqual([]);
     expect(parseBasket("a,,b,a,c,d,e,f")).toEqual(["a", "b", "c", "d"]);
+  });
+});
+
+describe("편입 변경 표시", () => {
+  const pair = (before: string, after: string): EtfChangePair => ({ before, after, commonScale: 1, added: 0, removed: 0, increased: 0, decreased: 0 });
+  const pairs = [pair("2026-11-14", "2026-11-18"), pair("2026-11-10", "2026-11-14")];
+
+  it("고른 쌍이 없거나 목록에 없으면 가장 최근 쌍을 쓴다", () => {
+    expect(pairOf(pairs, "2026-11-14")).toBe(pairs[1]);
+    expect(pairOf(pairs, null)).toBe(pairs[0]);
+    expect(pairOf(pairs, "2020-01-01")).toBe(pairs[0]);
+    expect(pairOf([], null)).toBeNull();
+  });
+
+  it("실질 증감은 부호와 소수 첫째 자리 퍼센트로, 공통 배율은 소수 셋째 자리로 적는다", () => {
+    expect(formatRealChange(0.1234)).toBe("+12.3%");
+    expect(formatRealChange(-0.0159)).toBe("-1.6%");
+    expect(formatScale(0.9402730375)).toBe("×0.940");
+    expect(formatScale(null)).toBe("-");
   });
 });

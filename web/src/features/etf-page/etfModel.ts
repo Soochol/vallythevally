@@ -1,3 +1,4 @@
+import type { EtfChangePair } from "../../api/generated/EtfChangePair";
 import type { EtfFundSummary } from "../../api/generated/EtfFundSummary";
 import type { EtfHolding } from "../../api/generated/EtfHolding";
 import type { EtfStyle } from "../../api/generated/EtfStyle";
@@ -133,3 +134,11 @@ export const overlapBps = (a: readonly WeightedHolding[], b: readonly WeightedHo
 export function parseBasket(value: string | null): string[] {
   return [...new Set((value ?? "").split(",").filter((code) => code !== ""))].slice(0, BASKET_LIMIT);
 }
+
+export const pairOf = (pairs: readonly EtfChangePair[], after: string | null): EtfChangePair | null => pairs.find((pair) => pair.after === after) ?? pairs[0] ?? null;
+
+export const formatScale = (scale: number | null): string => (scale === null ? "-" : `×${scale.toFixed(3)}`);
+
+export const formatRealChange = (change: number): string => `${change > 0 ? "+" : ""}${(change * 100).toFixed(1)}%`;
+
+export const formatQuantity = (quantity: number | null): string => (quantity === null ? "-" : quantity.toLocaleString("en-US", { maximumFractionDigits: 4 }));

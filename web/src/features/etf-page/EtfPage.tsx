@@ -25,20 +25,23 @@ export function EtfPage() {
   const tab = tabOf(params.get("tab"));
   const basket = parseBasket(params.get("basket"));
   const stock = params.get("stock");
+  const pair = params.get("pair");
   const list = funds.data?.funds ?? null;
   const selected = list?.find((fund) => fund.code === code) ?? null;
-  const go = (next: { code?: string | null; tab?: typeof tab; basket?: readonly string[]; stock?: string | null }) => {
+  const go = (next: { code?: string | null; tab?: typeof tab; basket?: readonly string[]; stock?: string | null; pair?: string | null }) => {
     const target = {
       code: next.code === undefined ? code : next.code,
       tab: next.tab ?? tab,
       basket: next.basket ?? basket,
       stock: next.stock === undefined ? stock : next.stock,
+      pair: next.pair === undefined ? (next.code === undefined ? pair : null) : next.pair,
     };
     const query = new URLSearchParams();
     if (target.code !== null) query.set("code", target.code);
     query.set("tab", target.tab);
     if (target.basket.length > 0) query.set("basket", target.basket.join(","));
     if (target.stock !== null) query.set("stock", target.stock);
+    if (target.pair !== null) query.set("pair", target.pair);
     setParams(query);
   };
   const toggleBasket = (next: string) => {
@@ -73,6 +76,8 @@ export function EtfPage() {
                 tab={tab}
                 basket={basket}
                 stock={stock}
+                pair={pair}
+                onPair={(next) => go({ pair: next })}
                 onTab={(next) => go({ tab: next })}
                 onRemoveFromBasket={toggleBasket}
                 onStock={(next) => go({ stock: next })}

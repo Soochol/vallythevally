@@ -94,3 +94,18 @@
 .etf-stock-results button { display: flex; gap: var(--size-8); padding: var(--size-5) var(--size-10); border-radius: var(--r-m); background: var(--raised); font-size: var(--fs-s); }
 .etf-stock-results button[aria-pressed="true"] { background: var(--accent-soft); }
 .etf-card h3 .etf-row-name { margin-left: var(--size-8); color: var(--accent); }
+.etf-timeline { display: flex; flex-wrap: wrap; gap: var(--size-5); margin: 0; padding: 0; list-style: none; }
+.etf-timeline button { display: flex; flex-direction: column; gap: 2px; padding: var(--size-5) var(--size-10); border-radius: var(--r-m); background: var(--raised); text-align: left; font-size: var(--fs-xs); }
+.etf-timeline button[aria-pressed="true"] { background: var(--accent-soft); box-shadow: 0 0 0 1px var(--accent); }
+.etf-pair-range { font-family: var(--mono); font-size: var(--fs-s); }
+.etf-pair-counts { display: flex; gap: var(--size-8); color: var(--text-3); }
+.etf-pair-counts [data-kind="added"], .etf-pair-counts [data-kind="increased"] { color: var(--up); }
+.etf-pair-counts [data-kind="removed"], .etf-pair-counts [data-kind="decreased"] { color: var(--down); }
+.etf-scale { color: var(--text); font-family: var(--mono); }
+.etf-note { margin: 0; color: var(--text-3); font-size: var(--fs-xs); }
+.etf-table td[data-direction="up"] { color: var(--up); }
+.etf-table td[data-direction="down"] { color: var(--down); }
+.etf-table tr[data-kind="unchanged"] { opacity: 0.55; }
+.etf-kind[data-kind="added"], .etf-kind[data-kind="increased"] { color: var(--up); }
+.etf-kind[data-kind="removed"], .etf-kind[data-kind="decreased"] { color: var(--down); }
+.etf-kind[data-kind="unchanged"] { color: var(--text-3); }

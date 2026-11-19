@@ -358,7 +358,7 @@ export class Scenario {
       return { body: this.market.jumpPage({ symbol, period, venue, date, limit: Number(url.searchParams.get("limit") ?? 500), before: url.searchParams.has("before") ? Number(url.searchParams.get("before")) : null }) };
     }
     if (/^\/api\/symbols\/[^/]+$/.test(path) && method === "GET") { const value = this.market.symbols.find(value => value.code === decodeURIComponent(path.slice("/api/symbols/".length))); return value ? { body: value } : error(404, "unknown_symbol", "종목이 없습니다"); }
-    const etf = etfBaseline(path, method);
+    const etf = etfBaseline(path, method, url.searchParams);
     if (etf) return etf;
     const marketOverview = marketOverviewBaseline(url, method);
     if (marketOverview) return marketOverview;

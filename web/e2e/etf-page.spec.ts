@@ -116,10 +116,9 @@ test("없는 코드로 오면 목록과 '찾을 수 없음' 안내가 보인다"
   await expect(page.getByText("찾을 수 없음", { exact: true })).toHaveCount(0);
 });
 
-test("겹침·편입 변경·역추적 탭은 자리만 있고 탭은 주소에 남는다", async ({ page }) => {
+test("편입 변경 탭은 주소에 남고 구성 탭으로 돌아올 수 있다", async ({ page }) => {
   await page.goto("/etf?code=444200&tab=history");
   await expect(page.getByRole("tab", { name: "편입 변경" })).toHaveAttribute("aria-selected", "true");
-  await expect(page.getByRole("tabpanel")).toContainText("준비 중");
   await page.getByRole("tab", { name: "구성" }).click();
   await expect(page).toHaveURL(/tab=holdings/);
   await expect(page.getByRole("group", { name: "구성 종목 트리맵" })).toBeVisible();
