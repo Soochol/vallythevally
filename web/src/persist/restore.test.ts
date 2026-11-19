@@ -183,6 +183,9 @@ test.each([
   ["순위 설정이 없는 순위 창", { id: "ranking", link: null, kind: "ranking" }],
   ["모르는 순위 종류", { id: "ranking", link: null, kind: "ranking", ranking: { kind: "nope" } }],
   ["객체가 아닌 순위 설정", { id: "ranking", link: null, kind: "ranking", ranking: "tradeAmount" }],
+  ["필드가 빠진 순위 설정", { id: "ranking", link: null, kind: "ranking", ranking: { kind: "tradeAmount" } }],
+  ["모르는 시장의 순위 설정", { id: "ranking", link: null, kind: "ranking", ranking: { kind: "tradeAmount", market: "zzz", venue: "krx", excludes: { etfEtn: true, preferred: false }, excludeManaged: false } }],
+  ["시장이 전체인 프로그램 순위", { id: "ranking", link: null, kind: "ranking", ranking: { kind: "program", market: "all", venue: "krx", direction: "netBuy", excludes: { etfEtn: true, preferred: false } } }],
   ["문자열이 아닌 screen", { id: "screener", link: null, kind: "screener", screen: ["S1"] }],
   ["64바이트를 넘는 screen", { id: "screener", link: null, kind: "screener", screen: "x".repeat(65) }],
 ])("%s가 든 미저장 본문은 열지 않고 서버 레이아웃을 연다", async (_, bad) => {
