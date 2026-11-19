@@ -1325,6 +1325,19 @@ mod tests {
     }
 
     fn period_harness(start: KstTime, chart: Chart, latency: Duration, period: Period) -> Harness {
+        let harness = period_harness_without_directory(start, chart, latency, period);
+        harness.symbols.replace(listed_directory());
+        harness
+    }
+
+    fn listed_directory() -> Directory {
+        let stock = |code: &str, nxt_enabled| SymbolInfo { symbol: Symbol::parse(code).unwrap(), name: code.into(), kind: SymbolKind::Common, market: Market::Kospi, nxt_enabled };
+        let mut listed = vec![stock(SAMSUNG, true), stock(NOT_ON_NXT, false)];
+        listed.extend((0..REALTIME_LIMIT).map(|i| stock(&listed_filler(i), false)));
+        Directory::build(listed)
+    }
+
+    fn period_harness_without_directory(start: KstTime, chart: Chart, latency: Duration, period: Period) -> Harness {
         let chart = Arc::new(Mutex::new(chart));
         let script = chart.clone();
         let day_volumes = Arc::new(Mutex::new(HashMap::from([
@@ -1388,10 +1401,6 @@ mod tests {
         let clock = Clock::fake(start);
         let rest = KiwoomRest::new(Arc::new(fake.clone()), KiwoomAuth::new(Secret::new("k".into()), Secret::new("s".into()), None), clock.clone());
         let symbols = Arc::new(SymbolDirectory::default());
-        let stock = |code: &str, nxt_enabled| SymbolInfo { symbol: Symbol::parse(code).unwrap(), name: code.into(), kind: SymbolKind::Common, market: Market::Kospi, nxt_enabled };
-        let mut listed = vec![stock(SAMSUNG, true), stock(NOT_ON_NXT, false)];
-        listed.extend((0..REALTIME_LIMIT).map(|i| stock(&listed_filler(i), false)));
-        symbols.replace(Directory::build(listed));
         let bars = Arc::new(BarService::new(rest, symbols.clone(), clock.clone()));
         let (stream, desired) = KiwoomStream::detached();
         let (events, rx) = mpsc::channel(64);
@@ -3219,6 +3228,44 @@ mod tests {
         subscribe_feed(&h, conn, "nxt2", FeedKind::Book, Venue::Nxt);
         tokio::time::sleep(Duration::from_secs(60)).await;
         assert!(desired_kinds(&h, samsung_symbol()).contains(&RealType::BookNxt));
+    }
+
+    fn std_harness_before_the_directory() -> Harness {
+        period_harness_without_directory(at(9, 0, 50), morning_chart(), Duration::ZERO, Period::M1)
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn an_nxt_book_subscribed_before_the_directory_loads_moves_to_the_nxt_code_once_it_loads() {
+        let h = std_harness_before_the_directory();
+        live(&h).await;
+        let (conn, out) = connect(&h).await;
+        subscribe_feed(&h, conn, "n", FeedKind::Book, Venue::Nxt);
+        settle().await;
+        assert_eq!(desired_kinds(&h, samsung_symbol()), BTreeSet::from([RealType::Trade, RealType::Book, RealType::AfterHours]), "종목 정보가 없는 동안 NXT는 통합으로 받는다");
+        h.symbols.replace(listed_directory());
+        tokio::time::sleep(Duration::from_secs(2)).await;
+        assert!(desired_kinds(&h, samsung_symbol()).contains(&RealType::BookNxt));
+        tokio::time::sleep(Duration::from_secs(31)).await;
+        assert_eq!(desired_kinds(&h, samsung_symbol()), BTreeSet::from([RealType::Trade, RealType::BookNxt, RealType::AfterHours]), "통합 0D는 유예 뒤에 놓는다");
+        out.take(true);
+        h.events.send(book_event_on(&h, Venue::Nxt, 101, 10)).await.unwrap();
+        let fed: Vec<String> = take(&out).await.into_iter().filter_map(|m| if let ServerMessage::FeedBook { sub, .. } = m { Some(sub) } else { None }).collect();
+        assert_eq!(fed, ["n"], "옮긴 뒤에는 NXT 호가를 받는다");
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_krx_book_of_a_symbol_off_nxt_subscribed_before_the_directory_loads_moves_to_the_combined_code_once_it_loads() {
+        let h = std_harness_before_the_directory();
+        live(&h).await;
+        let (conn, _out) = connect(&h).await;
+        let off_nxt = Symbol::parse(NOT_ON_NXT).unwrap();
+        h.hub.subscribe_feed(conn, sub("k"), off_nxt, FeedKind::Book, Venue::Krx);
+        settle().await;
+        assert_eq!(desired_kinds(&h, off_nxt), BTreeSet::from([RealType::Trade, RealType::BookKrx, RealType::AfterHours]));
+        h.symbols.replace(listed_directory());
+        tokio::time::sleep(Duration::from_secs(33)).await;
+        assert_eq!(desired_kinds(&h, off_nxt), BTreeSet::from([RealType::Trade, RealType::Book, RealType::AfterHours]));
+        assert_eq!(crate::kiwoom::stream::seats(&h.desired.borrow()), 1);
     }
 
     #[tokio::test(start_paused = true)]

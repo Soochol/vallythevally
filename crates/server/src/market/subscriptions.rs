@@ -843,6 +843,20 @@ mod tests {
     }
 
     #[test]
+    fn probe_last_served_holder_leaving_beside_a_rejected_venue_book_keeps_grace() {
+        let mut m = SubscriptionManager::default();
+        fill(&mut m, REALTIME_LIMIT - 1);
+        m.hold(stock(500), cell(2, "chart"));
+        m.hold(stock(500), feed(3, "n", RealType::BookNxt));
+        let plan = m.plan(t(0));
+        assert_eq!(plan.rejected, BTreeSet::from([feed(3, "n", RealType::BookNxt)]));
+        m.release(stock(500), &cell(2, "chart"), t(1));
+        assert!(m.plan(t(1)).realtime.contains(&stock(500)), "30초 유예 동안 계속 받는다");
+        assert!(m.plan(t(30)).realtime.contains(&stock(500)));
+        assert!(!m.plan(t(31)).realtime.contains(&stock(500)), "유예가 지나면 해지한다");
+    }
+
+    #[test]
     fn the_same_state_with_venue_graces_gives_the_same_plan() {
         let mut m = SubscriptionManager::default();
         m.set_watch(ConnId(1), stocks(0..REALTIME_LIMIT - 1), t(0));
