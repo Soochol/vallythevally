@@ -482,7 +482,7 @@ test("체결강도는 13행, 체결은 14행부터 같은 top에 있고 새 체�
   await expect(page.locator(".mw-trade i")).toHaveCount(0);
 });
 
-test("421px 호가주문창에서 6자리 수량까지 가격과 겹치지 않고 상자 안에서 잘리지 않으며 행끼리 열이 정렬된다", async ({ page, scenario }) => {
+test("421px 호가주문창에서 수량은 쉼표 숫자 그대로 6자리까지 상자 안에 다 보이고 짧은 수량은 가격과 겹치지 않으며 행끼리 열이 정렬된다", async ({ page, scenario }) => {
   ordersOn(scenario);
   tradingApi(scenario);
   await openOrderWindow(page, scenario);
@@ -492,19 +492,23 @@ test("421px 호가주문창에서 6자리 수량까지 가격과 겹치지 않�
   await expect(page.getByTestId("ladder-trade")).toHaveCount(quantities.length);
   const parts = await page.getByTestId("ladder-trade").evaluateAll((rows) => rows.map((row) => {
     const [price, qty] = [row.children[0]!, row.children[1]!];
-    const visible = [...qty.children].find((part) => getComputedStyle(part).display !== "none")!;
+    const range = document.createRange();
+    range.selectNodeContents(qty.firstChild!);
+    const text = range.getBoundingClientRect();
     const scroller = row.parentElement!.getBoundingClientRect();
-    const text = visible.getBoundingClientRect();
-    return { shown: visible.textContent, priceRight: price.getBoundingClientRect().right, qtyLeft: text.left, qtyRight: text.right, priceLeft: price.getBoundingClientRect().left, boxLeft: scroller.left, boxRight: scroller.right - (row.parentElement!.offsetWidth - row.parentElement!.clientWidth), qtyBoxRight: qty.getBoundingClientRect().right };
+    const priceRange = document.createRange();
+    priceRange.selectNodeContents(price.firstChild!);
+    return { shown: qty.textContent, fontSize: getComputedStyle(qty).fontSize, priceTextRight: priceRange.getBoundingClientRect().right, qtyTextLeft: text.left, qtyTextRight: text.right, boxLeft: scroller.left, boxRight: scroller.right, lefts: [price.getBoundingClientRect().left, qty.getBoundingClientRect().left], qtyBoxRight: qty.getBoundingClientRect().right };
   }));
+  expect(parts.map((part) => part.shown)).toEqual(["7", "999,999", "99,999", "12,345", "9,999", "600"]);
   for (const part of parts) {
-    expect(part.priceRight, JSON.stringify(part)).toBeLessThan(part.qtyLeft);
-    expect(part.priceLeft, JSON.stringify(part)).toBeGreaterThanOrEqual(part.boxLeft);
-    expect(part.qtyRight, JSON.stringify(part)).toBeLessThanOrEqual(part.boxRight + 0.5);
+    expect(part.fontSize).toBe("11px");
+    expect(part.qtyTextLeft, JSON.stringify(part)).toBeGreaterThanOrEqual(part.boxLeft);
+    expect(part.qtyTextRight, JSON.stringify(part)).toBeLessThanOrEqual(part.boxRight);
   }
-  expect(parts.map((part) => part.shown)).toEqual(["7", "100만", "10만", "1만", "9,999", "600"]);
-  const rights = new Set(parts.map((part) => Math.round(part.qtyBoxRight * 10)));
-  expect(rights.size).toBe(1);
+  for (const part of parts.filter((item) => item.shown!.length <= 3)) expect(part.priceTextRight, JSON.stringify(part)).toBeLessThanOrEqual(part.qtyTextLeft);
+  expect(new Set(parts.map((part) => part.lefts.join())).size).toBe(1);
+  expect(new Set(parts.map((part) => Math.round(part.qtyBoxRight * 10))).size).toBe(1);
 });
 
 test("호가주문창이 넓으면 체결 수량을 쉼표 숫자 전체로 보이고 행끼리 열이 정렬된다", async ({ page, scenario }) => {
@@ -516,7 +520,7 @@ test("호가주문창이 넓으면 체결 수량을 쉼표 숫자 전체로 보�
   lastTrade(scenario, 70_100, 2, 12_345);
   await expect(page.getByTestId("ladder-trade")).toHaveCount(2);
   const rows = await page.getByTestId("ladder-trade").evaluateAll((items) => items.map((row) => {
-    const visible = [...row.children[1]!.children].find((part) => getComputedStyle(part).display !== "none")!;
+    const visible = row.children[1]!;
     return { shown: visible.textContent, left: [...row.children].map((part) => Math.round(part.getBoundingClientRect().left * 10) / 10), priceRight: row.children[0]!.getBoundingClientRect().right, qtyLeft: visible.getBoundingClientRect().left };
   }));
   expect(rows.map((row) => row.shown)).toEqual(["12,345", "999,999"]);

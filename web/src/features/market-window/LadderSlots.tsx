@@ -1,5 +1,5 @@
 import { type ReactNode, useEffect, useRef, useState } from "react";
-import { formatPrice, formatVolume } from "../../lib/format";
+import { formatPrice } from "../../lib/format";
 import { formatStrength } from "./format";
 import type { LadderTrades } from "./useLadderSlots";
 import { priceTone } from "./PriceLadder";
@@ -40,10 +40,7 @@ function TradeBox({ trades, strength, hold, release, previousClose }: LadderTrad
         {trades.map((row) => (
           <div key={row.key} className="mw-slot mw-trade" data-testid="ladder-trade" data-side={row.side} data-price={row.price}>
             <span className="mw-trade-price" data-tone={priceTone(row.price, previousClose)}>{formatPrice(row.price, false)}</span>
-            <span className="mw-trade-qty">
-              <span className="mw-qty-full">{formatPrice(row.quantity, false)}</span>
-              <span className="mw-qty-short">{formatVolume(row.quantity)}</span>
-            </span>
+            <span className="mw-trade-qty">{formatPrice(row.quantity, false)}</span>
           </div>
         ))}
       </div>
