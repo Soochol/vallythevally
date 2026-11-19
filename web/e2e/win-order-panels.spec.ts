@@ -55,6 +55,7 @@ test("보유 요약이 값을 보이고 평가손익을 원과 퍼센트로 바�
   tradingApi(scenario).holdings = [HOLDING];
   await openOrderWindow(page, scenario);
   await expect(page.getByTestId("summary-quantity")).toContainText("120");
+  await expect(page.getByTestId("summary-quantity")).toHaveAttribute("title", "매입총금액 8,404,800원");
   await expect(page.getByTestId("summary-average")).toContainText("70,040");
   await expect(page.getByTestId("summary-profit")).toContainText("−4,800원");
   await expect(page.getByTestId("summary-buyable")).toContainText("500,000,000원");
@@ -65,6 +66,14 @@ test("보유 요약이 값을 보이고 평가손익을 원과 퍼센트로 바�
   await expect(page.getByRole("textbox", { name: "수량" })).toHaveValue("100");
   await expect(page.getByRole("group", { name: "수량 방식" }).getByRole("button", { name: "수량" })).toHaveAttribute("aria-pressed", "true");
   await expect(page.getByTestId("ladder-mark")).toHaveCount(1);
+});
+
+test("보유가 없는 종목의 매입수량 칸에는 툴팁이 없다", async ({ page, scenario }) => {
+  ordersOn(scenario);
+  tradingApi(scenario).holdings = [];
+  await openOrderWindow(page, scenario);
+  await expect(page.getByTestId("summary-quantity")).toContainText("-");
+  await expect(page.getByTestId("summary-quantity")).not.toHaveAttribute("title", /.+/);
 });
 
 const scrollLadder = (page: Page, top: number | "end") => page.getByTestId("order-ladder").evaluate((element, target) => { element.scrollTop = target === "end" ? element.scrollHeight : target; }, top);

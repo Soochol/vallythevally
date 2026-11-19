@@ -4,6 +4,7 @@ import type { UnixSeconds } from "../../api/generated/UnixSeconds";
 import { isMarketOpen } from "../../chart/time";
 import { formatPercent } from "../../lib/format";
 import { isEtfOrEtn } from "../../lib/symbol";
+import { formatWon } from "../market-window/format";
 import { secondOfDay } from "../trades/tape";
 import type { QuantityMode } from "./orderRules";
 
@@ -29,6 +30,8 @@ export function sellableFill(holding: TradingHolding | null): QuantityFill | nul
   if (holding === null || !(holding.sellableQuantity > 0)) return null;
   return { mode: "shares", input: String(holding.sellableQuantity) };
 }
+
+export const costTitle = (holding: TradingHolding | null): string | undefined => (holding === null ? undefined : `매입총금액 ${formatWon(Math.round(holding.averagePrice * holding.quantity))}`);
 
 export function averageRowPrice(rowPrices: readonly (number | null)[], average: number | null): number | null {
   if (average === null || !(average > 0)) return null;
