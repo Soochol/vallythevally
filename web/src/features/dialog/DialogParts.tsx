@@ -29,7 +29,7 @@ function onDialogKeyDown(e: React.KeyboardEvent<HTMLElement>, close: () => void)
 interface FrameProps {
   labelledBy: string;
   width: string;
-  onClose(): void;
+  onClose(reason?: "escape" | "outside"): void;
   panelRef?: Ref<HTMLDivElement>;
   variant?: "command";
   children: ReactNode;

@@ -54,6 +54,8 @@ test("방향키와 Home·End로 메뉴를 옮기고 준비 중 메뉴는 고를 
   await expect(menu(page, "일반")).toBeFocused();
   await expect(menu(page, "일반")).toHaveAttribute("aria-selected", "true");
   await page.keyboard.press("ArrowDown");
+  await expect(menu(page, "단축키")).toBeFocused();
+  await page.keyboard.press("ArrowDown");
   await expect(menu(page, "데이터 · 저장소")).toBeFocused();
   await page.keyboard.press("End");
   await expect(menu(page, "정보")).toBeFocused();
