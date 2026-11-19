@@ -1,7 +1,7 @@
 import type { TradingHolding } from "../../api/generated/TradingHolding";
 import { formatPrice } from "../../lib/format";
 import { formatQuantity, formatWon } from "../market-window/format";
-import { type ProfitUnit, profitText, sellableFill, type QuantityFill } from "./holdingSummary";
+import { costTitle, type ProfitUnit, profitText, sellableFill, type QuantityFill } from "./holdingSummary";
 
 interface Props {
   readonly holding: TradingHolding | null;
@@ -17,7 +17,7 @@ export function HoldingSummary({ holding, buyableAmount, buyableProblem, unit, o
   const tone = holding === null ? undefined : holding.evaluationProfit > 0 ? "up" : holding.evaluationProfit < 0 ? "down" : undefined;
   return (
     <div className="od-summary" data-testid="order-summary">
-      <button type="button" className="od-cellbtn" data-testid="summary-quantity" disabled={fill === null} title="매도 가능 수량을 수량 칸에 채웁니다" onClick={() => fill && onFill(fill)}>
+      <button type="button" className="od-cellbtn" data-testid="summary-quantity" disabled={fill === null} title={costTitle(holding)} onClick={() => fill && onFill(fill)}>
         <small>매입수량</small><b>{holding === null ? "-" : formatQuantity(holding.quantity)}</b>
       </button>
       <div className="od-cellbtn" data-testid="summary-average"><small>매입평단가</small><b>{holding === null ? "-" : formatPrice(holding.averagePrice, false)}</b></div>

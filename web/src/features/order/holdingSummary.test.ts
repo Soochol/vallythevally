@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { TradingHolding } from "../../api/generated/TradingHolding";
-import { averageRowPrice, formatFillTime, holdingOf, isEtfOrEtnAfterHours, profitText, sellableFill, toggledUnit } from "./holdingSummary";
+import { averageRowPrice, costTitle, formatFillTime, holdingOf, isEtfOrEtnAfterHours, profitText, sellableFill, toggledUnit } from "./holdingSummary";
 
 const HOLDING: TradingHolding = { code: "005930", name: "삼성전자", quantity: 120, sellableQuantity: 100, averagePrice: 70_050, currentPrice: 70_000, evaluationProfit: -6_000, profitRateCenti: -71 };
 
@@ -20,6 +20,16 @@ describe("평가손익", () => {
   it("이익은 + 부호가 붙는다", () => {
     expect(profitText({ ...HOLDING, evaluationProfit: 3_000, profitRateCenti: 150 }, "won")).toBe("+3,000원");
     expect(profitText({ ...HOLDING, profitRateCenti: 150 }, "percent")).toBe("+1.50%");
+  });
+});
+
+describe("매입수량 툴팁", () => {
+  it("평단가 × 매입수량을 매입총금액으로 보인다", () => {
+    expect(costTitle({ ...HOLDING, averagePrice: 70_040 })).toBe("매입총금액 8,404,800원");
+  });
+
+  it("보유가 없으면 툴팁이 없다", () => {
+    expect(costTitle(null)).toBeUndefined();
   });
 });
 
