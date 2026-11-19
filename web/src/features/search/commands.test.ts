@@ -3,7 +3,8 @@ import { beforeEach, expect, test } from "vitest";
 import { windowId } from "../../layout/kinds";
 import { useSelectionStore } from "../../stores/selection";
 import type { RunOutcome } from "../screener/screenEditing";
-import { DEFAULT_SEARCH_COMMANDS, screenerRunCommand } from "./commands";
+import { DEFAULT_KEYS } from "../../lib/hotkeys";
+import { defaultSearchCommands, screenerRunCommand } from "./commands";
 
 const client = new QueryClient();
 
@@ -27,5 +28,5 @@ test("스크리너 실행 명령은 실행 결과마다 알맞은 안내를 띄�
 test("스크리너 실행 명령은 휴대폰 스크리너 탭을 연다", async () => {
   await toastAfter({ kind: "ran" });
   expect(useSelectionStore.getState().phoneTab).toBe("screener");
-  expect(DEFAULT_SEARCH_COMMANDS.some((command) => command.id === "screener-run")).toBe(true);
+  expect(defaultSearchCommands(DEFAULT_KEYS).some((command) => command.id === "screener-run")).toBe(true);
 });

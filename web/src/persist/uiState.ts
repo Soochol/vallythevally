@@ -4,6 +4,7 @@ import type { SymbolCode } from "../api/generated/SymbolCode";
 import type { UiState } from "../api/generated/UiState";
 import { isVenue } from "../lib/venue";
 import { DEFAULT_WATCH_COLUMNS, WATCH_COLUMNS, type WatchColumn } from "../lib/watchlist";
+import { NO_HOTKEY_OVERRIDES, parseHotkeys, type HotkeyOverrides } from "../lib/hotkeys";
 import { DEFAULT_DRAWING_PREFS, parseDrawingPrefs, type DrawingPrefs } from "../chart/drawings/prefs";
 
 import type { LayoutMode } from "../layout/modes";
@@ -28,6 +29,7 @@ export interface UiPrefs {
   layoutMode: LayoutMode;
   venue: Venue;
   orderSettings: OrderSettings;
+  hotkeys: HotkeyOverrides;
 }
 
 export type UiExtra = Record<string, unknown>;
@@ -45,6 +47,7 @@ export const DEFAULT_UI_PREFS: UiPrefs = {
   layoutMode: "dock",
   venue: "combined",
   orderSettings: DEFAULT_ORDER_SETTINGS,
+  hotkeys: NO_HOTKEY_OVERRIDES,
 };
 
 const isStringArray = (x: unknown): x is string[] => Array.isArray(x) && x.every((s) => typeof s === "string");
@@ -56,7 +59,7 @@ export function parseUiState(raw: unknown): { prefs: UiPrefs; extra: UiExtra } {
     console.warn("UiState가 객체가 아니어서 기본값으로 엽니다", raw);
     return { prefs: DEFAULT_UI_PREFS, extra: {} };
   }
-  const { rightPanel: _rightPanel, panelWidth: _panelWidth, rightPanelWidth: _rightPanelWidth, lastLayoutId, theme, watchCollapsed: _watchCollapsed, recentSymbols, activeWatchlistId, watchColumns, drawing, lastMinute, pinnedMinutes: _pinnedMinutes, collapsedWatchGroups, indicatorWindow, layoutMode, venue, orderSettings, revision: _revision, ...extra } = raw as Record<string, unknown>;
+  const { rightPanel: _rightPanel, panelWidth: _panelWidth, rightPanelWidth: _rightPanelWidth, lastLayoutId, theme, watchCollapsed: _watchCollapsed, recentSymbols, activeWatchlistId, watchColumns, drawing, lastMinute, pinnedMinutes: _pinnedMinutes, collapsedWatchGroups, indicatorWindow, layoutMode, venue, orderSettings, hotkeys, revision: _revision, ...extra } = raw as Record<string, unknown>;
   const bad: string[] = [];
   const pick = <T>(key: string, value: unknown, ok: (x: unknown) => x is T, fallback: T, missingOk = false): T => {
     if (ok(value)) return value;
@@ -65,6 +68,8 @@ export function parseUiState(raw: unknown): { prefs: UiPrefs; extra: UiExtra } {
   };
   pick("theme", theme, (x): x is Theme => x === "dark" || x === "light", DEFAULT_UI_PREFS.theme);
   const windowMode = pick("indicatorWindow", indicatorWindow, (x): x is IndicatorWindow => x === "dialog" || x === "inspector", "dialog", true);
+  const parsedHotkeys = parseHotkeys(hotkeys);
+  if (!parsedHotkeys.clean) bad.push("hotkeys");
   const prefs: UiPrefs = {
     lastLayoutId: pick("lastLayoutId", lastLayoutId, (x): x is string | null => x === null || typeof x === "string", null),
     theme: "dark",
@@ -76,6 +81,7 @@ export function parseUiState(raw: unknown): { prefs: UiPrefs; extra: UiExtra } {
     layoutMode: pick("layoutMode", layoutMode, (x): x is LayoutMode => x === "dock" || x === "canvas", "dock", true),
     venue: pick("venue", venue, (x): x is Venue => typeof x === "string" && isVenue(x), DEFAULT_UI_PREFS.venue, true),
     orderSettings: parseOrderSettings(orderSettings),
+    hotkeys: parsedHotkeys.hotkeys,
     lastMinute: pick("lastMinute", lastMinute, (x): x is MinutePeriod => typeof x === "string" && isMinutePeriod(x), DEFAULT_UI_PREFS.lastMinute, true),
     collapsedWatchGroups: [...new Set(pick("collapsedWatchGroups", collapsedWatchGroups, isStringArray, [], true))],
   };

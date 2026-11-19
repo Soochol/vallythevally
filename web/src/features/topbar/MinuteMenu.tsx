@@ -1,8 +1,8 @@
 import { useRef, useState } from "react";
 import type { Period } from "../../api/generated/Period";
 import { isMinutePeriod, MINUTE_PERIODS, PERIOD_LABEL } from "../../lib/symbol";
-import { matchHotkey, periodKey } from "../../lib/hotkeys";
-import { useUiStore } from "../../stores/ui";
+import { matchHotkey, periodActionId, shortcutOf } from "../../lib/hotkeys";
+import { useActionKeys, useUiStore } from "../../stores/ui";
 import { CheckIcon, ChevronIcon } from "../icons";
 import { Popover } from "../overlay/Popover";
 import { menuIndex } from "../overlay/position";
@@ -10,6 +10,7 @@ export function MinuteMenu({ value, onChange }: { value: Period; onChange(value:
   const [open, setOpen] = useState(false);
   const trigger = useRef<HTMLButtonElement>(null);
   const lastMinute = useUiStore((s) => s.prefs.lastMinute);
+  const keys = useActionKeys();
   const minute = isMinutePeriod(value);
   const choose = (period: Period) => { onChange(period); setOpen(false); };
   return <>
@@ -21,14 +22,14 @@ export function MinuteMenu({ value, onChange }: { value: Period; onChange(value:
         const index = buttons.findIndex((b) => b === document.activeElement);
         buttons[menuIndex(buttons.map((b) => b.textContent ?? ""), index, e.key === "ArrowRight" ? "ArrowDown" : e.key === "ArrowLeft" ? "ArrowUp" : e.key)]?.focus();
       } else {
-        const action = matchHotkey(e, "desktop");
+        const action = matchHotkey(e, "desktop", keys);
         if (action?.kind === "period" && isMinutePeriod(action.period)) {
           e.preventDefault(); e.stopPropagation(); choose(action.period);
         }
       }
     }}>
-      {MINUTE_PERIODS.map((p) => <button key={p} type="button" role="menuitemradio" data-option-value={p} aria-checked={value === p} aria-keyshortcuts={periodKey(p)} onClick={() => choose(p)}>
-        <CheckIcon /><span>{PERIOD_LABEL[p]}</span>{periodKey(p) && <kbd aria-hidden="true">{periodKey(p)}</kbd>}
+      {MINUTE_PERIODS.map((p) => <button key={p} type="button" role="menuitemradio" data-option-value={p} aria-checked={value === p} aria-keyshortcuts={shortcutOf(keys, periodActionId(p))} onClick={() => choose(p)}>
+        <CheckIcon /><span>{PERIOD_LABEL[p]}</span>{shortcutOf(keys, periodActionId(p)) && <kbd aria-hidden="true">{shortcutOf(keys, periodActionId(p))}</kbd>}
       </button>)}
     </Popover>}
   </>;

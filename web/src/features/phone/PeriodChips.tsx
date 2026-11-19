@@ -1,7 +1,9 @@
 import { useCallback, useLayoutEffect, useId, useRef, useState } from "react";
 import type { Period } from "../../api/generated/Period";
+import { keyTitle } from "../../lib/hotkeys";
 import { PERIOD_LABEL } from "../../lib/symbol";
 import { type ChartWindowState, useLayoutStore } from "../../stores/layout";
+import { useActionKeys } from "../../stores/ui";
 import { openIndicatorCommand } from "../indicator-command/open";
 import { IndicatorIcon } from "../icons";
 import { RadioMenu } from "../menu/RadioMenu";
@@ -18,6 +20,7 @@ const CHIP =
 
 export function PeriodChips({ cell }: { cell: ChartWindowState }) {
   const setPeriod = useLayoutStore((s) => s.setPeriod);
+  const keys = useActionKeys();
   const [menuOpen, setMenuOpen] = useState(false);
   const root = useRef<HTMLDivElement>(null);
   const navigation = useRef<HTMLElement>(null);
@@ -102,7 +105,7 @@ export function PeriodChips({ cell }: { cell: ChartWindowState }) {
         type="button"
         aria-haspopup="dialog"
         aria-label="지표"
-        title="지표 (I)"
+        title={keyTitle("지표", keys, "indicators")}
         className="mb-2 mr-3 grid h-[36px] w-[44px] flex-none place-items-center rounded-full border border-line text-text"
         onClick={() => openIndicatorCommand(cell.id)}
       >

@@ -7,7 +7,8 @@ import { screensQuery } from "../../api/screener";
 import { windowId } from "../../layout/kinds";
 import { DEFAULT_LAYOUT, useLayoutStore } from "../../stores/layout";
 import { useScreenerStore } from "../../stores/screener";
-import { DEFAULT_SEARCH_COMMANDS } from "../search/commands";
+import { DEFAULT_KEYS } from "../../lib/hotkeys";
+import { defaultSearchCommands } from "../search/commands";
 import { screenEditingFor } from "./useScreenEditing";
 
 const A: Screen = { id: "a", name: "신고가", markets: [], exclude: [], conditions: [] };
@@ -51,7 +52,7 @@ test("폰에서 명령으로 실행하면 폰이 고른 조건식을 실행한�
   const phone = screenEditingFor(queryClient, null);
   phone.choose("b");
   expect(phone.view().chosen?.source.id).toBe("b");
-  const command = DEFAULT_SEARCH_COMMANDS.find((c) => c.id === "screener-run")!;
+  const command = defaultSearchCommands(DEFAULT_KEYS).find((c) => c.id === "screener-run")!;
   await command.run({ queryClient, cellId: windowId("cell-0") });
   expect(sent).toEqual(["b"]);
 });

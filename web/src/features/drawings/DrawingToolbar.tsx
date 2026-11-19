@@ -4,7 +4,6 @@ import { Icon, DRAWING_ICONS, CloseIcon, StarIcon } from "../icons";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { surfaceFor } from "../../chart/drawings/DrawingSurface";
 import { gestureHelp } from "../../chart/drawings/gestures";
-import { TOOL_HOTKEYS } from "../../chart/drawings/hotkeys";
 import { toolsByGroup } from "../../chart/drawings/tools";
 import type { Tool } from "../../chart/drawings/toolSpec";
 import { MODES, registeredModes } from "../../chart/drawings/modes";
@@ -12,17 +11,16 @@ import { cellDrawing, useDrawingSession } from "../../stores/drawingSession";
 import { listGroups } from "../../layout/dock/tree";
 import { chartWindows, fittedDock, useLayoutStore, type EditableLayout } from "../../stores/layout";
 import { useSelectionStore } from "../../stores/selection";
-import { useUiStore } from "../../stores/ui";
+import { useActionKeys, useUiStore } from "../../stores/ui";
 import { ownsChartKeyboard } from "../overlay/topLayer";
 import { menuIndex } from "../overlay/position";
 import { toolOf } from "../../chart/drawings/tools";
-import { isTypingTarget } from "../../lib/hotkeys";
-import type { DrawingTool } from "../../chart/drawings/types";
+import { isTypingTarget } from "../../lib/typingTarget";
+import { allShortcutsOf, keyTitle, shortcutOf, toolActionId, type ActionKeys } from "../../lib/hotkeys";
 
-const hotkeysOf = (tool: DrawingTool) => TOOL_HOTKEYS.filter((h) => h.tool === tool).map((h) => h.keys);
-export function toolTitle(tool: Tool, note?: string) {
-  const keys = hotkeysOf(tool.tool).join(" / ");
-  return [keys ? `${tool.label} (${keys})` : tool.label, note].filter(Boolean).join(" · ");
+export function toolTitle(tool: Tool, keys: ActionKeys, note?: string) {
+  const shortcuts = allShortcutsOf(keys, toolActionId(tool.tool));
+  return [shortcuts ? `${tool.label} (${shortcuts})` : tool.label, note].filter(Boolean).join(" · ");
 }
 
 const GROUP_LABEL = { line: "선", fib: "피보나치·갠", shape: "도형", note: "주석", measure: "측정", pattern: "패턴" };
@@ -84,6 +82,7 @@ interface RailHelp { help: boolean; setHelp(open: boolean): void; helpAnchor: Re
 function DrawingRail({ help, setHelp, helpAnchor, helpDialog }: RailHelp) {
   const active = useDrawingSession((s) => s.tool); const mode = useDrawingSession((s) => s.mode); const pinned = useDrawingSession((s) => s.pinnedTool);
   const prefs = useUiStore((s) => s.prefs.drawing); const cellId = useSelectionStore((s) => s.activeCell);
+  const keys = useActionKeys();
   const pinnedRun = useRef<HTMLDivElement>(null);
   const pinnedTools = prefs.pinnedTools.flatMap((id) => toolOf(id) ?? []);
   const shownPins = usePinnedRoom(pinnedRun, pinnedTools.length);
@@ -92,25 +91,25 @@ function DrawingRail({ help, setHelp, helpAnchor, helpDialog }: RailHelp) {
   const setTool = (tool: Tool) => { useDrawingSession.getState().setTool(cellId, tool.tool); surfaceFor(cellId)?.focus(); };
   const setPrefs = useUiStore.getState().setDrawingPrefs;
   const action = (f: () => void) => { f(); surfaceFor(cellId)?.focus(); };
-  const pinnedButton = (tool: Tool) => <button key={tool.tool} className="draw-tool" data-active-tool aria-label={`${tool.label} 고정 도구`} title={toolTitle(tool, "고정")} aria-pressed={active === tool.tool} onClick={() => setTool(tool)} onDoubleClick={() => action(() => useDrawingSession.getState().setTool(cellId, tool.tool, true))}><Icon path={tool.icon} /></button>;
+  const pinnedButton = (tool: Tool) => <button key={tool.tool} className="draw-tool" data-active-tool aria-label={`${tool.label} 고정 도구`} title={toolTitle(tool, keys, "고정")} aria-pressed={active === tool.tool} onClick={() => setTool(tool)} onDoubleClick={() => action(() => useDrawingSession.getState().setTool(cellId, tool.tool, true))}><Icon path={tool.icon} /></button>;
   const folded = pinnedTools.slice(shownPins);
   return <nav data-chart-control aria-label="드로잉 도구" className="drawing-toolbar ui-island max-md:hidden">
-    <button className="draw-tool" data-active-tool aria-label="선택 도구" title="선택 (V)" aria-pressed={active === null && mode === null} onClick={() => action(() => useDrawingSession.getState().setTool(cellId, null))}><Icon path={DRAWING_ICONS.pointer} /></button>
+    <button className="draw-tool" data-active-tool aria-label="선택 도구" title={keyTitle("선택", keys, "select")} aria-pressed={active === null && mode === null} onClick={() => action(() => useDrawingSession.getState().setTool(cellId, null))}><Icon path={DRAWING_ICONS.pointer} /></button>
     {[...toolsByGroup()].map(([group, tools]) => {
       const t = tools.find((tool) => tool.tool === active) ?? lastTools[group] ?? tools[0]!;
       return <div className="draw-group" key={group}>
-      <button className="draw-tool" data-active-tool title={toolTitle(t, pinned === t.tool ? "연속" : undefined)} aria-label={t.label} aria-pressed={active === t.tool} onClick={() => setTool(t)} onDoubleClick={() => action(() => useDrawingSession.getState().setTool(cellId, t.tool, true))}><Icon path={t.icon} /></button>
-      {tools.length > 1 && <ToolGroup label={`${GROUP_LABEL[group]} 도구`} tools={tools} onChoose={setTool} />}
+      <button className="draw-tool" data-active-tool title={toolTitle(t, keys, pinned === t.tool ? "연속" : undefined)} aria-label={t.label} aria-pressed={active === t.tool} onClick={() => setTool(t)} onDoubleClick={() => action(() => useDrawingSession.getState().setTool(cellId, t.tool, true))}><Icon path={t.icon} /></button>
+      {tools.length > 1 && <ToolGroup label={`${GROUP_LABEL[group]} 도구`} tools={tools} keys={keys} onChoose={setTool} />}
     </div>; })}
     <div ref={pinnedRun} className="draw-pinned">
       {pinnedTools.length > 0 && pinnedTools.slice(0, shownPins - 1).map(pinnedButton)}
       {pinnedTools.length > 0 && (folded.length > 0
-        ? <div className="draw-group">{pinnedButton(pinnedTools[shownPins - 1]!)}<ToolGroup label="고정 도구" tools={folded} onChoose={setTool} pinnable={false} /></div>
+        ? <div className="draw-group">{pinnedButton(pinnedTools[shownPins - 1]!)}<ToolGroup label="고정 도구" tools={folded} keys={keys} onChoose={setTool} pinnable={false} /></div>
         : pinnedButton(pinnedTools[shownPins - 1]!))}
     </div>
     <div className="draw-separator" />
     {MODES.filter((m) => m.id !== "demo").map((m) => <button key={m.id} className="draw-tool" data-active-tool aria-label={m.label} title={m.label} aria-pressed={mode === m.id} onClick={() => action(() => useDrawingSession.setState({ tool: null, mode: mode === m.id ? null : m.id }))}><Icon path={m.icon} /></button>)}
-    <MagnetButton action={action} />
+    <MagnetButton action={action} keys={keys} />
     <button className="draw-tool" aria-label="연속 그리기" title="연속 그리기" aria-pressed={prefs.keepDrawing} onClick={() => action(() => setPrefs({ keepDrawing: !prefs.keepDrawing }))}><Icon path={DRAWING_ICONS.keepDrawing} /></button>
     <div className="draw-toolbar-end">
       <button ref={helpAnchor} className="draw-tool" aria-label="드로잉 단축키 도움말" title="드로잉 단축키" onClick={() => setHelp(!help)}>?</button>
@@ -120,7 +119,7 @@ function DrawingRail({ help, setHelp, helpAnchor, helpDialog }: RailHelp) {
   </nav>;
 }
 
-function ToolGroup({ label, tools, onChoose, pinnable = true }: { label: string; tools: readonly Tool[]; onChoose(tool: Tool): void; pinnable?: boolean }) {
+function ToolGroup({ label, tools, keys, onChoose, pinnable = true }: { label: string; tools: readonly Tool[]; keys: ActionKeys; onChoose(tool: Tool): void; pinnable?: boolean }) {
   const [open, setOpen] = useState(false);
   const trigger = useRef<HTMLButtonElement>(null);
   const pinned = useUiStore((s) => s.prefs.drawing.pinnedTools);
@@ -144,13 +143,13 @@ function ToolGroup({ label, tools, onChoose, pinnable = true }: { label: string;
       buttons[menuIndex(buttons.map((b) => b.getAttribute("aria-label") ?? b.textContent ?? ""), index, e.key, letters ? typed.current.text : "")]?.focus();
     }}>
       {tools.map((tool) => <div className="draw-tool-choice" key={tool.tool}>
-        <button type="button" role="menuitem" onClick={() => { onChoose(tool); setOpen(false); }}><Icon path={tool.icon} size={16} /><span>{tool.label}</span>{hotkeysOf(tool.tool)[0] && <kbd>{hotkeysOf(tool.tool)[0]}</kbd>}</button>
+        <button type="button" role="menuitem" onClick={() => { onChoose(tool); setOpen(false); }}><Icon path={tool.icon} size={16} /><span>{tool.label}</span>{shortcutOf(keys, toolActionId(tool.tool)) && <kbd>{shortcutOf(keys, toolActionId(tool.tool))}</kbd>}</button>
         {pinnable && <button type="button" role="menuitemcheckbox" aria-label={`${tool.label} 막대에 고정`} aria-checked={pinned.includes(tool.tool)} title="막대에 고정" onClick={() => useUiStore.getState().setDrawingPrefs({ pinnedTools: pinned.includes(tool.tool) ? pinned.filter((id) => id !== tool.tool) : [...pinned, tool.tool] })}><StarIcon size={16} /></button>}
       </div>)}
     </Popover>}
   </div>;
 }
-function MagnetButton({ action }: { action(f: () => void): void }) {
+function MagnetButton({ action, keys }: { action(f: () => void): void; keys: ActionKeys }) {
   const prefs = useUiStore((s) => s.prefs.drawing);
   const [open, setOpen] = useState(false);
   const root = useRef<HTMLDivElement>(null);
@@ -159,7 +158,7 @@ function MagnetButton({ action }: { action(f: () => void): void }) {
   const clear = () => { if (timer.current) clearTimeout(timer.current); timer.current = null; };
   useEffect(() => clear, []);
   return <div ref={root}>
-    <button className="draw-tool" aria-label="자석" title="자석 켜기/끄기 (G), 세기 바꾸기 (Shift+G) · 우클릭 또는 길게 누르기" aria-pressed={prefs.magnet} aria-haspopup="menu" aria-expanded={open}
+    <button className="draw-tool" aria-label="자석" title={`${keyTitle("자석 켜기/끄기", keys, "magnet")}, ${keyTitle("세기 바꾸기", keys, "magnetStrength")} · 우클릭 또는 길게 누르기`} aria-pressed={prefs.magnet} aria-haspopup="menu" aria-expanded={open}
       onContextMenu={(e) => { e.preventDefault(); held.current = true; setOpen(true); }}
       onPointerDown={(e) => { if (e.button !== 0) return; held.current = false; timer.current = setTimeout(() => { held.current = true; setOpen(true); }, 500); }}
       onPointerUp={clear} onPointerCancel={clear} onPointerLeave={clear}

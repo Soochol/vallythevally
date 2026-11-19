@@ -6,7 +6,7 @@ import { compareRefusal } from "../../chart/settings";
 import { isIndexCode, KIND_LABEL, MARKET_LABEL } from "../../lib/symbol";
 import { chartWindows, useLayoutStore } from "../../stores/layout";
 import { type SearchPurpose, useSelectionStore } from "../../stores/selection";
-import { useUiStore } from "../../stores/ui";
+import { useActionKeys, useUiStore } from "../../stores/ui";
 import { useActiveWatchlist, useWatchlistStore } from "../../stores/watchlist";
 import { removalUndo } from "../watch/removalUndo";
 import { PutTargetPill } from "./PutTargetPill";
@@ -15,7 +15,7 @@ import { type SearchCommand, searchCommandsSnapshot, subscribeSearchCommands } f
 import { CloseIcon, Icon, ICON_PATHS, SearchIcon } from "../icons";
 import { CommandFrame } from "../commands/CommandFrame";
 import { EmptyState, ErrorState, Skeleton } from "../overlay/State";
-import { DEFAULT_SEARCH_COMMANDS } from "./commands";
+import { defaultSearchCommands } from "./commands";
 import { highlight } from "./highlight";
 import { GROUP_LABEL, searchList, type SearchGroup } from "./searchList";
 import { MARKET_FILTERS, SEARCH_FILTERS, matchesMarket, matchingCommands, type MarketFilter, searchMode } from "./searchMode";
@@ -41,7 +41,7 @@ function SearchDialogBody({ purpose }: { purpose: SearchPurpose }) {
   const watch = useSymbolInfos(watchlist.symbols);
   const recent = useSymbolInfos(useUiStore((s) => s.prefs.recentSymbols));
   const registered = useSyncExternalStore(subscribeSearchCommands, searchCommandsSnapshot);
-  const commands = [...DEFAULT_SEARCH_COMMANDS.filter((c) => !registered.some((r) => r.id === c.id)), ...registered];
+  const commands = [...defaultSearchCommands(useActionKeys()).filter((c) => !registered.some((r) => r.id === c.id)), ...registered];
   const queryClient = useQueryClient();
   const [input, setInput] = useState("");
   const [market, setMarket] = useState<MarketFilter>("all");

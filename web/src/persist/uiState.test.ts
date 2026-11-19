@@ -32,9 +32,10 @@ test("옛 라이트 설정은 다크로 옮기고 다른 설정과 모르는 키
     layoutMode: "dock",
     venue: "krx",
     orderSettings: DEFAULT_UI_PREFS.orderSettings,
+    hotkeys: {},
   });
   expect(extra).toEqual({ phone: { symbol: "000660" } });
-  expect(toUiState(prefs, extra)).toEqual({ ...raw, theme: "dark", orderSettings: DEFAULT_UI_PREFS.orderSettings });
+  expect(toUiState(prefs, extra)).toEqual({ ...raw, theme: "dark", orderSettings: DEFAULT_UI_PREFS.orderSettings, hotkeys: {} });
 });
 
 test("마이그레이션이 넣은 처음 값(접힘·최근 종목 없음)은 경고 없이 기본값을 채운다", () => {
@@ -145,4 +146,37 @@ test("거래소는 통합·KRX·NXT만 받고 없거나 틀리면 통합이다",
   expect(parseUiState({ venue: "nxt" }).prefs.venue).toBe("nxt");
   expect(parseUiState({ lastLayoutId: null, theme: "dark" }).prefs.venue).toBe("combined");
   expect(parseUiState({ venue: "KRX" }).prefs.venue).toBe("combined");
+});
+
+test("바꾼 단축키는 없거나 객체가 아니면 빈 값이고, 없을 때만 경고 없이 연다", () => {
+  const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+  expect(parseUiState({ lastLayoutId: null, theme: "dark" }).prefs.hotkeys).toEqual({});
+  expect(warn).not.toHaveBeenCalled();
+  for (const hotkeys of [null, [], "KeyQ", 3]) expect(parseUiState({ lastLayoutId: null, theme: "dark", hotkeys }).prefs.hotkeys).toEqual({});
+  expect(warn).toHaveBeenCalledTimes(4);
+});
+
+test("바꾼 단축키는 모르는 동작·틀린 키·바꿀 수 없는 키를 버리고 경고한다", () => {
+  const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+  const { prefs } = parseUiState({
+    theme: "dark",
+    hotkeys: { "period:D": ["KeyQ", "Ctrl+KeyW", "Escape", "Shift+Ctrl+KeyA", "KeyZZ", 7], nothing: ["KeyA"], "tool:trendline": "KeyA", "tool:rect": [] },
+  });
+  expect(prefs.hotkeys).toEqual({ "period:D": ["KeyQ"], "tool:rect": [] });
+  expect(warn).toHaveBeenCalledOnce();
+});
+
+test("두 동작이 같은 키를 가지면 동작 목록 앞쪽만 남기고 경고한다", () => {
+  const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+  const { prefs } = parseUiState({ lastLayoutId: null, theme: "dark", hotkeys: { "period:D": ["KeyQ"], "period:W": ["KeyQ", "KeyE"], "tool:text": ["KeyQ"] } });
+  expect(prefs.hotkeys).toEqual({ "period:D": ["KeyQ"], "period:W": ["KeyE"], "tool:text": [] });
+  expect(warn).toHaveBeenCalledOnce();
+});
+
+test("바꾼 단축키는 그대로 왕복하고 기본값과 같은 동작은 저장하지 않는다", () => {
+  const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+  const hotkeys = { "period:D": ["KeyQ"], "tool:trendline": [], "tool:fib": ["Alt+KeyP"] };
+  const { prefs, extra } = parseUiState({ lastLayoutId: null, theme: "dark", hotkeys: { ...hotkeys, "period:W": ["KeyW"] } });
+  expect(toUiState(prefs, extra).hotkeys).toEqual(hotkeys);
+  expect(warn).not.toHaveBeenCalled();
 });
