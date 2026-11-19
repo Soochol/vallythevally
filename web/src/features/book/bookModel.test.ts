@@ -51,6 +51,41 @@ test("빈 단(null)은 건너뛴다", () => {
   expect(state.view.bids).toHaveLength(1);
 });
 
+const fullFrame = (): FeedBook => ({
+  t: 1,
+  asks: Array.from({ length: 10 }, (_, i) => ({ price: 71_100 + 100 * i, qty: 100 * (i + 1) })),
+  bids: Array.from({ length: 10 }, (_, i) => ({ price: 71_000 - 100 * i, qty: 10 * (i + 1) })),
+  totalAskQty: 5_500,
+  totalBidQty: 550,
+  expected: null,
+});
+
+const withHole = (book: FeedBook, side: "asks" | "bids", depth: number): FeedBook => ({ ...book, [side]: book[side].map((level, i) => (i === depth ? null : level)) });
+
+test("가격이 빈 단이 중간에 낀 프레임이 와도 직전 실시간 호가의 그 단을 지우지 않는다", () => {
+  const first = acceptLive(EMPTY_BOOK, fullFrame());
+  const holed = acceptLive(first, withHole(withHole(fullFrame(), "asks", 3), "bids", 5));
+  if (holed.phase !== "live" || first.phase !== "live") throw new Error("live");
+  expect(holed.view.asks.map((l) => l.price)).toEqual(first.view.asks.map((l) => l.price));
+  expect(holed.view.bids.map((l) => l.quantity)).toEqual(first.view.bids.map((l) => l.quantity));
+  expect(holed.view.asks.every((l) => l.change === 0)).toBe(true);
+});
+
+test("뒤쪽 단이 비어 오면 얇아진 호가로 받아들인다", () => {
+  const first = acceptLive(EMPTY_BOOK, fullFrame());
+  const thin = { ...fullFrame(), asks: [...fullFrame().asks.slice(0, 3), ...Array<null>(7).fill(null)], bids: Array<null>(10).fill(null) };
+  const next = acceptLive(first, thin);
+  if (next.phase !== "live") throw new Error("live");
+  expect(next.view.asks).toHaveLength(3);
+  expect(next.view.bids).toHaveLength(0);
+});
+
+test("직전 실시간 호가가 없으면 구멍 난 프레임은 있는 단만 보인다", () => {
+  const state = acceptLive(EMPTY_BOOK, withHole(fullFrame(), "asks", 3));
+  if (state.phase !== "live") throw new Error("live");
+  expect(state.view.asks).toHaveLength(9);
+});
+
 const withAfterHours = (ask: number | null, bid: number | null): OrderBook => ({ ...snapshot, afterHoursAskQuantity: ask, afterHoursBidQuantity: bid });
 
 test("시간외 잔량은 조회 값 뒤 실시간 값이 오면 실시간 값이다", () => {

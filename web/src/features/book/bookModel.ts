@@ -40,15 +40,22 @@ export function acceptSnapshot(state: BookState, book: OrderBook): BookState {
   };
 }
 
+function keepingBlankedDepths(previous: readonly RawLevel[] | null, frame: FeedBook["asks"]): RawLevel[] {
+  const deepest = frame.findLastIndex((level) => level !== null);
+  return frame.slice(0, deepest + 1).flatMap((level, depth) => {
+    const kept = level === null ? previous?.[depth] : { price: level.price, quantity: level.qty };
+    return kept ? [kept] : [];
+  });
+}
+
 export function acceptLive(state: BookState, book: FeedBook): BookState {
   const previous = state.phase === "live" ? state.view : null;
-  const present = (levels: FeedBook["asks"]): RawLevel[] => levels.flatMap((level) => (level === null ? [] : [{ price: level.price, quantity: level.qty }]));
   return {
     phase: "live",
     view: {
       t: book.t,
-      asks: withChange(previous?.asks ?? null, present(book.asks)),
-      bids: withChange(previous?.bids ?? null, present(book.bids)),
+      asks: withChange(previous?.asks ?? null, keepingBlankedDepths(previous?.asks ?? null, book.asks)),
+      bids: withChange(previous?.bids ?? null, keepingBlankedDepths(previous?.bids ?? null, book.bids)),
       totalAsk: book.totalAskQty,
       totalBid: book.totalBidQty,
       expected: book.expected,

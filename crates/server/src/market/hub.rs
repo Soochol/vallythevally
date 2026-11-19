@@ -248,6 +248,13 @@ struct Counters {
     unknown_exchange: u64,
     while_seeding: u64,
     late: u64,
+    book_frames: u64,
+    book_frames_with_blank_level: u64,
+    book_frames_with_hole: u64,
+}
+
+fn has_hole(levels: &[Option<BookLevel>]) -> bool {
+    levels.iter().skip_while(|level| level.is_some()).any(Option::is_some)
 }
 
 pub struct MarketHub {
@@ -875,6 +882,14 @@ impl MarketHub {
     }
 
     fn on_book(&mut self, book: &BookSnapshot, received_at: KstTime) {
+        self.counters.book_frames += 1;
+        let sides = [&book.asks[..], &book.bids[..]];
+        if sides.iter().any(|levels| levels.iter().any(Option::is_none)) {
+            self.counters.book_frames_with_blank_level += 1;
+        }
+        if sides.iter().any(|levels| has_hole(levels)) {
+            self.counters.book_frames_with_hole += 1;
+        }
         if let Some(expected) = book.expected
             && self.first_expected.first(book.symbol, received_at.kst_date())
         {
@@ -1033,6 +1048,9 @@ impl MarketHub {
         }
         if c.unknown_exchange + c.while_seeding + c.late > 0 {
             tracing::info!(unknown_exchange = c.unknown_exchange, while_seeding = c.while_seeding, late = c.late, "지난 1분 동안의 실시간 체결 카운터");
+        }
+        if c.book_frames_with_blank_level > 0 {
+            tracing::info!(book_frames = c.book_frames, with_blank_level = c.book_frames_with_blank_level, with_hole = c.book_frames_with_hole, "지난 1분 동안 가격이 빈 호가 단이 있는 0D 프레임 카운터");
         }
     }
 
@@ -3038,6 +3056,78 @@ mod tests {
         h.events.send(feed_trade_of(&h, 100, 1, Some(TradeSide::Buy), Some(Exchange::Krx))).await.unwrap();
         assert_eq!(feed_trades(&take(&out).await, "t"), [(2, vec![(1, krx)])]);
         assert!(take(&out).await.is_empty(), "체결이 없으면 빈 묶음을 보내지 않는다");
+    }
+
+    #[derive(Clone, Default)]
+    struct Logs(Arc<Mutex<Vec<u8>>>);
+
+    impl std::io::Write for Logs {
+        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+            self.0.lock().unwrap().extend_from_slice(bytes);
+            Ok(bytes.len())
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    impl Logs {
+        fn text(&self) -> String {
+            String::from_utf8_lossy(&self.0.lock().unwrap()).into_owned()
+        }
+    }
+
+    fn capture_logs() -> (Logs, tracing::subscriber::DefaultGuard) {
+        let logs = Logs::default();
+        let writer = logs.clone();
+        let subscriber = tracing_subscriber::fmt().with_writer(move || writer.clone()).with_ansi(false).finish();
+        (logs, tracing::subscriber::set_default(subscriber))
+    }
+
+    fn book_with(h: &Harness, asks: [Option<BookLevel>; crate::kiwoom::stream::BOOK_DEPTH]) -> StreamEvent {
+        let StreamEvent::Book { mut book, received_at } = book_event(h, 101, 10) else { unreachable!() };
+        book.asks = asks;
+        book.bids = [Some(BookLevel { price: won(100), qty: Volume(5) }); crate::kiwoom::stream::BOOK_DEPTH];
+        StreamEvent::Book { book, received_at }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn one_line_per_minute_counts_book_frames_with_a_blank_price_level() {
+        let (logs, _guard) = capture_logs();
+        let h = std_harness();
+        live(&h).await;
+        let level = |ask: u64| Some(BookLevel { price: won(ask), qty: Volume(5) });
+        let mut hole = [None; crate::kiwoom::stream::BOOK_DEPTH];
+        hole[0] = level(101);
+        hole[2] = level(103);
+        h.events.send(book_with(&h, hole)).await.unwrap();
+        h.events.send(book_with(&h, [level(101), level(102), level(103), None, None, None, None, None, None, None])).await.unwrap();
+        h.events.send(book_with(&h, [level(101); crate::kiwoom::stream::BOOK_DEPTH])).await.unwrap();
+        settle().await;
+        assert!(!logs.text().contains("0D 프레임 카운터"), "1분이 지나기 전에는 줄이 없다");
+        tokio::time::sleep(Duration::from_secs(60)).await;
+        settle().await;
+        let text = logs.text();
+        let lines: Vec<&str> = text.lines().filter(|line| line.contains("0D 프레임 카운터")).collect();
+        assert_eq!(lines.len(), 1, "{text}");
+        assert!(lines[0].contains("book_frames=3") && lines[0].contains("with_blank_level=2") && lines[0].contains("with_hole=1"), "{}", lines[0]);
+        tokio::time::sleep(Duration::from_secs(60)).await;
+        settle().await;
+        assert_eq!(logs.text().matches("0D 프레임 카운터").count(), 1, "다음 1분에는 0D가 없어 줄이 늘지 않는다");
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn no_counter_line_when_every_book_frame_is_complete() {
+        let (logs, _guard) = capture_logs();
+        let h = std_harness();
+        live(&h).await;
+        let full = Some(BookLevel { price: won(101), qty: Volume(5) });
+        h.events.send(book_with(&h, [full; crate::kiwoom::stream::BOOK_DEPTH])).await.unwrap();
+        settle().await;
+        tokio::time::sleep(Duration::from_secs(60)).await;
+        settle().await;
+        assert!(!logs.text().contains("0D 프레임 카운터"), "{}", logs.text());
     }
 
     #[tokio::test(start_paused = true)]
