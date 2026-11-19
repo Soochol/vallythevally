@@ -34,8 +34,8 @@ describe("매입수량 툴팁", () => {
 });
 
 describe("매입수량 누르기", () => {
-  it("매도 가능 수량을 주 단위로 채운다", () => {
-    expect(sellableFill(HOLDING)).toEqual({ mode: "shares", input: "100" });
+  it("매도 가능 수량을 채운다", () => {
+    expect(sellableFill(HOLDING)).toBe("100");
   });
 
   it("매도 가능 수량이 없으면 채우지 않는다", () => {

@@ -15,7 +15,7 @@ export const buyableName = (policy: MarginPolicy | null): string =>
   policy === null ? "매수 가능" : policy === "cash_only" ? "매수 가능 · 현금" : "매수 가능 · 미수 포함";
 
 const amountAndQuantity = (amount: number | null, quantity: number | null): string =>
-  amount === null || quantity === null ? "-" : `${formatWon(amount)} · ${formatQuantity(quantity)}주`;
+  amount === null || quantity === null ? "-" : `${formatWon(amount)} · ${formatQuantity(quantity)}`;
 
 const rateText = (rate: number | null): string => (rate === null ? "-" : `${rate}%`);
 

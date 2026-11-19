@@ -36,7 +36,8 @@ import { OrderTotals } from "./OrderTotals";
 import { OrderStatusBar } from "./OrderStatusBar";
 import { REJECT_TEXT } from "./statusText";
 import { OrderEstimate, QuantityRow } from "./QuantityRow";
-import { buyBlock, buyPreview, capacityProblem, type DragOutcome, estimateNote, marginOf, modifyBuyProblem, type DragSource, needsHighValueConfirm, orderAmount, quantityOf, type QuantityMode, SIDE_LABEL } from "./orderRules";
+import { buyBlock, buyPreview, capacityProblem, type DragOutcome, estimateNote, marginOf, modifyBuyProblem, type DragSource, needsHighValueConfirm, orderAmount, SIDE_LABEL, typedQuantity } from "./orderRules";
+import type { PresetKind } from "./orderSettings";
 import { useOrderAccess, useOrderData } from "./useOrderData";
 import { useOrderDrag } from "./useOrderDrag";
 import { useOrderWrites } from "./useOrderWrites";
@@ -58,7 +59,7 @@ function OrderBody({ code }: { code: SymbolCode }) {
   const quoteVenue = useShownVenue(code);
   const feed = useBookFeed(code, quoteVenue);
   const access = useOrderAccess();
-  const [mode, setMode] = useState<QuantityMode>("shares");
+  const [presetKind, setPresetKind] = useState<PresetKind>("sharePresets");
   const [input, setInput] = useState("10");
   const [hover, setHover] = useState<HoverCell | null>(null);
   const [confirm, setConfirm] = useState<HighValueRequest | null>(null);
@@ -105,10 +106,9 @@ function OrderBody({ code }: { code: SymbolCode }) {
   const averagePrice = settings.averageDot ? averageRowPrice(rows.map((row) => row.price), holding?.averagePrice ?? null) : null;
   const writable = access.open && !data.blocked && writes.status?.unknown !== true;
 
-  const typed = Number(input);
+  const quantity = typedQuantity(input);
   const unitPrice = hover?.price ?? referencePrice ?? 0;
-  const quantityAt = (price: number) => quantityOf(mode, typed, price);
-  const estimate = unitPrice > 0 && quantityAt(unitPrice) > 0 ? unitPrice * quantityAt(unitPrice) : null;
+  const estimate = unitPrice > 0 && quantity > 0 ? unitPrice * quantity : null;
 
   const latestPlace = useRef<(side: OrderSide, price: number, cappedQuantity?: number) => void>(() => undefined);
 
@@ -121,18 +121,18 @@ function OrderBody({ code }: { code: SymbolCode }) {
       writes.say({ tone: "error", text: ETF_ETN_AFTER_HOURS_TEXT });
       return;
     }
-    const quantity = cappedQuantity ?? quantityAt(price);
-    const problem = capacityProblem(side, quantity, data.capacity);
+    const orderQuantity = cappedQuantity ?? quantity;
+    const problem = capacityProblem(side, orderQuantity, data.capacity);
     if (problem) {
       writes.say({ tone: "error", text: problem });
       return;
     }
-    const block = side === "buy" ? buyBlock(price, quantity, data.capacity.buying) : null;
+    const block = side === "buy" ? buyBlock(price, orderQuantity, data.capacity.buying) : null;
     if (block) {
-      writes.say({ tone: "error", text: block.text, action: block.maxQuantity > 0 ? { label: `${block.maxQuantity.toLocaleString("ko-KR")}주로 보내기`, run: () => latestPlace.current(side, price, block.maxQuantity) } : undefined });
+      writes.say({ tone: "error", text: block.text, action: block.maxQuantity > 0 ? { label: `${block.maxQuantity.toLocaleString("ko-KR")}로 보내기`, run: () => latestPlace.current(side, price, block.maxQuantity) } : undefined });
       return;
     }
-    submit(side, price, quantity);
+    submit(side, price, orderQuantity);
   };
 
   latestPlace.current = place;
@@ -175,11 +175,11 @@ function OrderBody({ code }: { code: SymbolCode }) {
         </div>
       )}
       <AccountBand accountTail={accountTail} maskAccount={settings.maskAccount} openOrders={data.openOrders} balance={data.balance} executions={data.executions} writable={writable} mock={mock} policy={data.orderable?.policy ?? null} onCancel={writes.cancelOne} />
-      <HoldingSummary holding={holding} orderable={data.orderable} buyableProblem={data.buyableProblem} unit={profitUnit} onUnit={() => setProfitUnit(toggledUnit)} onFill={(fill) => { setMode(fill.mode); setInput(fill.input); }} />
+      <HoldingSummary holding={holding} orderable={data.orderable} buyableProblem={data.buyableProblem} unit={profitUnit} onUnit={() => setProfitUnit(toggledUnit)} onFill={setInput} />
       <div className="od-entry">
-        <QuantityRow mode={mode} input={input} sharePresets={settings.sharePresets} amountPresets={settings.amountPresets} onMode={setMode} onInput={setInput} />
+        <QuantityRow presetKind={presetKind} input={input} sharePresets={settings.sharePresets} amountPresets={settings.amountPresets} referencePrice={referencePrice} onPresetKind={setPresetKind} onInput={setInput} />
         <div className="od-toolbar">
-          <OrderEstimate estimate={estimate} shares={mode === "amount" && estimate !== null ? quantityAt(unitPrice) : null} note={estimate !== null && hover?.side !== "sell" ? estimateNote(estimate, data.capacity.buying) : null} />
+          <OrderEstimate estimate={estimate} note={estimate !== null && hover?.side !== "sell" ? estimateNote(estimate, data.capacity.buying) : null} />
           <button type="button" className="od-tool" data-testid="order-explorer" aria-pressed={explorerOn} disabled={referencePrice === null || fullPrices === null} title={fullPrices === null ? EXPLORER_UNAVAILABLE : undefined} onClick={() => { if (!explorerOn) setCenterToken((token) => token + 1); setExploring(!explorerOn); }}>전체 호가</button>
           <button type="button" className="od-tool" data-testid="order-current" disabled={!explorerOn} onClick={() => setCenterToken((token) => token + 1)}>현재가</button>
           <OrderSettingsPopover settings={settings} venue={orderVenue} mock={mock} nxtNotTraded={nxtNotTraded} holding={holding !== null} onChange={setSettings} />
@@ -187,7 +187,7 @@ function OrderBody({ code }: { code: SymbolCode }) {
       </div>
       <div className="bk-ladder od-ladder-wrap" data-stale={feed.connected ? undefined : ""} data-exploring={explorerOn ? "" : undefined}>
         {view
-            ? <OrderLadder rows={rows} previousClose={feed.previousClose} groups={data.groups} writable={writable} previewQuantity={quantityAt(unitPrice)} buyPreview={(price) => buyPreview(price, quantityAt(price), data.capacity.buying)} hover={hover} onHover={setHover} averagePrice={averagePrice} divider={settings.divider} explorer={explorerOn ? { centerPrice: referencePrice, centerToken } : undefined} ladder={ladder} drag={drag} expectedPrice={expected?.price ?? null} rowSlots={{ topRight: infoSlot(infoSlots), bottomLeft: tradeSlot(trades, feed.previousClose) }}
+            ? <OrderLadder rows={rows} previousClose={feed.previousClose} groups={data.groups} writable={writable} previewQuantity={quantity} buyPreview={(price) => buyPreview(price, quantity, data.capacity.buying)} hover={hover} onHover={setHover} averagePrice={averagePrice} divider={settings.divider} explorer={explorerOn ? { centerPrice: referencePrice, centerToken } : undefined} ladder={ladder} drag={drag} expectedPrice={expected?.price ?? null} rowSlots={{ topRight: infoSlot(infoSlots), bottomLeft: tradeSlot(trades, feed.previousClose) }}
                 actions={{ place, cancelOne: writes.cancelOne, cancelAtPrice: writes.cancelAtPrice, cancelGroups: (targets) => targets.forEach((g) => writes.cancelAtPrice(g.side, g.price)) }} />
             : <EmptyState title={feed.snapshotFailed ? "호가를 불러오지 못했습니다" : "호가를 기다리는 중입니다"} />}
         <OrderStatusBar status={writes.status} queued={writes.queued} blocked={data.blocked} onUndo={writes.cancelOne} onReconcile={writes.reconcile} onDismiss={writes.dismiss} />

@@ -10,8 +10,8 @@ const orderable: TradingOrderable = {
 test("자금 표는 예수금·현금·미수 포함·증거금률·미수금 순으로 값을 만든다", () => {
   expect(fundsRows(orderable).map((row) => [row.key, row.label, row.value, row.danger])).toEqual([
     ["deposit", "예수금", "1,200,000원", false],
-    ["cash", "현금 주문가능 (미수불가)", "1,000,000원 · 14주", false],
-    ["margin", "미수 포함 주문가능", "3,000,000원 · 42주", false],
+    ["cash", "현금 주문가능 (미수불가)", "1,000,000원 · 14", false],
+    ["margin", "미수 포함 주문가능", "3,000,000원 · 42", false],
     ["rates", "증거금률", "종목 30% · 계좌 40% · 적용 30%", false],
     ["unpaid", "미수금", "0원", false],
   ]);

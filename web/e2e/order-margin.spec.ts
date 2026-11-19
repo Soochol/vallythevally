@@ -57,8 +57,8 @@ test("매수 가능 칸을 누르면 예수금·현금·미수 포함·증거금
   await openFunds(page);
   await expect(page.getByTestId("funds-title")).toHaveText("자금 · 기준 70,000원");
   await expect(page.getByTestId("funds-deposit")).toHaveText("예수금520,000,000원");
-  await expect(page.getByTestId("funds-cash")).toHaveText("현금 주문가능 (미수불가)500,000,000원 · 100,000주");
-  await expect(page.getByTestId("funds-margin")).toHaveText("미수 포함 주문가능1,500,000,000원 · 300,000주");
+  await expect(page.getByTestId("funds-cash")).toHaveText("현금 주문가능 (미수불가)500,000,000원 · 100,000");
+  await expect(page.getByTestId("funds-margin")).toHaveText("미수 포함 주문가능1,500,000,000원 · 300,000");
   await expect(page.getByTestId("funds-rates")).toHaveText("증거금률종목 100% · 계좌 40% · 적용 100%");
   await expect(page.getByTestId("funds-unpaid")).toHaveText("미수금0원");
   await expect(page.getByTestId("funds-unpaid")).not.toHaveAttribute("data-danger", /.*/);
@@ -122,7 +122,7 @@ test("미수 막기에서 현금을 넘는 매수는 보내지 않고 최대 수
   await expect(buyable(page).locator("b")).toHaveText("700,000원");
   await quantity(page).fill("11");
   await cellAt(page, "buy", BASE).dblclick();
-  await expect(status(page)).toContainText("현금 주문가능 700,000원을 넘습니다 (미수 막음) · 최대 10주");
+  await expect(status(page)).toContainText("현금 주문가능 700,000원을 넘습니다 (미수 막음) · 최대 10");
   expect(api.writes).toHaveLength(0);
   await page.getByTestId("order-status-action").click();
   await pollSaved(() => writesTo(api, "place")).toHaveLength(1);
@@ -159,7 +159,7 @@ test("미수 포함 한도를 넘으면 허용에서도 막는다", async ({ pag
   await expect(buyable(page).locator("b")).toHaveText("3,000,000원");
   await quantity(page).fill("43");
   await cellAt(page, "buy", BASE).dblclick();
-  await expect(status(page)).toContainText("미수 포함 주문가능 3,000,000원을 넘습니다 · 최대 42주");
+  await expect(status(page)).toContainText("미수 포함 주문가능 3,000,000원을 넘습니다 · 최대 42");
   expect(api.writes).toHaveLength(0);
   await page.getByTestId("order-status-action").click();
   await pollSaved(() => writesTo(api, "place")).toHaveLength(1);
@@ -195,12 +195,12 @@ test("막힌 뒤 정책이 막기로 바뀌면 낡은 최대 수량 단추도 �
   await expect(buyable(page).locator("b")).toHaveText("3,000,000원");
   await quantity(page).fill("43");
   await cellAt(page, "buy", BASE).dblclick();
-  await expect(page.getByTestId("order-status-action")).toHaveText("42주로 보내기");
+  await expect(page.getByTestId("order-status-action")).toHaveText("42로 보내기");
   await openFunds(page);
   await page.getByRole("button", { name: "미수 막기" }).click();
   await expect(buyable(page)).toHaveAttribute("data-policy", "cash_only");
   await page.keyboard.press("Escape");
   await page.getByTestId("order-status-action").click();
-  await expect(status(page)).toContainText("현금 주문가능 700,000원을 넘습니다 (미수 막음) · 최대 10주");
+  await expect(status(page)).toContainText("현금 주문가능 700,000원을 넘습니다 (미수 막음) · 최대 10");
   expect(api.writes).toHaveLength(0);
 });
