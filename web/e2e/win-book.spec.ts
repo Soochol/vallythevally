@@ -150,6 +150,35 @@ test("동시호가 6호가 뒤에 10단 호가가 오면 현재가 가운데 격
   await expect(page.locator(".mw-lr[data-current]")).toContainText("810,000");
 });
 
+test("가격이 빈 단이 낀 0D 프레임이 와도 사다리 잔량 칸이 비지 않고 6호가로 바뀌지 않는다", async ({ page, scenario }) => {
+  await open(page, scenario, 70_000);
+  const bookSub = await subOf(scenario, "book");
+  const asks = Array.from({ length: 10 }, (_, i): [number, number] => [70_100 + 100 * i, 10 + i]);
+  const bids = Array.from({ length: 10 }, (_, i): [number, number] => [70_000 - 100 * i, 20 + i]);
+  scenario.live.emit({ type: "feed_book", sub: bookSub, book: liveOf(asks, bids, [1_000, 3_000]) });
+  await expect(ladderRows(page).locator(".mw-qty-value")).toHaveCount(20);
+  const shown = await ladderRows(page).locator(".mw-qty-value").allTextContents();
+  const holed: FeedBook = { ...liveOf(asks, bids, [1_000, 3_000]), t: 2 };
+  holed.asks[3] = null;
+  holed.asks[4] = null;
+  holed.bids[5] = null;
+  scenario.live.emit({ type: "feed_book", sub: bookSub, book: holed });
+  await expect(ladderRows(page).locator(".mw-px-num")).toHaveCount(20);
+  await expect(ladderRows(page).locator(".mw-qty-value")).toHaveText(shown);
+});
+
+test("상한가에 매도 호가가 정말 없으면 매도 쪽이 비고 매수는 그대로 보인다", async ({ page, scenario }) => {
+  await open(page, scenario, 70_000);
+  const bookSub = await subOf(scenario, "book");
+  const asks = Array.from({ length: 10 }, (_, i): [number, number] => [70_100 + 100 * i, 10 + i]);
+  const bids = Array.from({ length: 10 }, (_, i): [number, number] => [70_000 - 100 * i, 20 + i]);
+  scenario.live.emit({ type: "feed_book", sub: bookSub, book: liveOf(asks, bids, [1_000, 3_000]) });
+  await expect(ladderRows(page).locator(".mw-qty-value")).toHaveCount(20);
+  scenario.live.emit({ type: "feed_book", sub: bookSub, book: { ...liveOf([], bids, [0, 3_000]), asks: Array(10).fill(null), t: 2 } });
+  await expect(ladderRows(page).locator(".mw-qty[data-side=ask] .mw-qty-value")).toHaveCount(0);
+  await expect(ladderRows(page).locator(".mw-qty[data-side=bid] .mw-qty-value")).toHaveCount(10);
+});
+
 test("사다리 스무 행의 높이가 같고 가격 칸의 왼쪽 x가 현재가 행을 포함해 모두 같다", async ({ page, scenario }) => {
   await open(page, scenario, 70000);
   await expect(page.locator(".mw-lr[data-current]")).toHaveCount(1);

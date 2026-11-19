@@ -65,6 +65,33 @@ test("잔량이 바뀌면 증감 글자가 잔량 칸 바깥 끝에 서고 주�
   expect(overlaps(bidChange, (await cellAt(page, "buy", 70_000).boundingBox())!)).toBe(false);
 });
 
+test("가격이 빈 단이 낀 0D 프레임이 와도 호가주문 사다리의 잔량 칸이 비지 않는다", async ({ page, scenario }) => {
+  ordersOn(scenario);
+  tradingApi(scenario);
+  await openOrderWindow(page, scenario);
+  let sub = "";
+  await pollSaved(() => {
+    const message = scenario.live.messages.find((m) => m.type === "subscribe_feed" && m.kind === "book" && m.symbol === CODE);
+    sub = message?.type === "subscribe_feed" ? message.sub : "";
+    return sub;
+  }).not.toBe("");
+  const full: FeedBook = {
+    t: 1,
+    asks: Array.from({ length: 10 }, (_, i) => ({ price: 70_100 + 100 * i, qty: 10 + i })),
+    bids: Array.from({ length: 10 }, (_, i) => ({ price: 70_000 - 100 * i, qty: 20 + i })),
+    totalAskQty: 1_000,
+    totalBidQty: 3_000,
+    expected: null,
+  };
+  const quantities = page.getByTestId("price-ladder").locator(".mw-qty-value");
+  scenario.live.emit({ type: "feed_book", sub, book: full });
+  await expect(quantities).toHaveCount(20);
+  const shown = await quantities.allTextContents();
+  scenario.live.emit({ type: "feed_book", sub, book: { ...full, t: 2, asks: full.asks.map((level, i) => (i === 2 ? null : level)), bids: full.bids.map((level, i) => (i === 4 || i === 5 ? null : level)) } });
+  await expect(page.getByTestId("price-ladder").locator(".mw-lr")).toHaveCount(20);
+  await expect(quantities).toHaveText(shown);
+});
+
 test("같은 동작을 중복해서 더블클릭해도 명령은 하나다", async ({ page, scenario }) => {
   ordersOn(scenario);
   const api = tradingApi(scenario);
