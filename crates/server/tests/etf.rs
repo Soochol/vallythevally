@@ -143,7 +143,7 @@ async fn unknown_codes_are_not_found_and_malformed_codes_are_bad_requests() {
     }
 }
 
-fn fund(code: &str, holdings: &[(&str, u32)]) -> Value {
+fn fund(code: &str, holdings: &[(&str, i64)]) -> Value {
     json!({"code": code, "name": format!("합성 {code}"), "issuer": "합성운용", "style": "active", "benchmark": "합성지수", "holdings": holdings.iter().map(|(c, w)| json!({"code": c, "weightBps": w})).collect::<Vec<_>>()})
 }
 
@@ -189,6 +189,10 @@ fn funds_that_fail_validation_are_not_loaded_and_the_reason_is_logged() {
             fund("111111", &[("005930", 3000)]),
             {"code": "888888", "name": "합성", "issuer": "합성운용", "style": "etn", "benchmark": "x", "holdings": [{"code": "005930", "weightBps": 3000}]},
             fund("999999", &[("005930", 10_001)]),
+            fund("101010", &[("005930", 3000), ("000660", -5)]),
+            json!({"code": "121212", "name": "합성", "issuer": "합성운용", "style": "active", "holdings": [{"code": "005930", "weightBps": 3000}]}),
+            json!({"code": "131313", "name": "합성", "issuer": "합성운용", "style": "active", "benchmark": "x", "holdings": [{"code": "005930", "weightBps": 12.5}]}),
+            fund("333334", &[("000660", 4000)]),
         ],
         "stocks": {"005930": "삼성전자", "000660": "SK하이닉스"},
     });
@@ -196,11 +200,11 @@ fn funds_that_fail_validation_are_not_loaded_and_the_reason_is_logged() {
     let loaded = Catalog::load(&snapshot.to_string());
 
     let kept: Vec<_> = loaded.catalog.funds().iter().map(|f| f.code.as_str().to_owned()).collect();
-    assert_eq!(kept, ["111111"]);
+    assert_eq!(kept, ["111111", "333334"]);
     let rejected: Vec<_> = loaded.rejected.iter().map(|r| r.subject.as_str()).collect();
-    assert_eq!(rejected, ["222222", "333333", "44444", "555555", "666666", "777777", "111111", "888888", "999999"]);
+    assert_eq!(rejected, ["222222", "333333", "44444", "555555", "666666", "777777", "111111", "888888", "999999", "101010", "121212", "131313"]);
     let text = String::from_utf8(logs.0.lock().unwrap().clone()).unwrap();
-    for needle in ["비중 합이 허용 범위", "종목이 중복입니다: 005930", "ETF 코드 형식이 아닙니다: 44444", "종목 코드 형식이 아닙니다: 5930", "종목 이름이 없습니다: 000999", "구성 종목이 없습니다", "ETF 코드가 중복입니다", "운용 방식을 알 수 없습니다: etn", "종목 비중이"] {
+    for needle in ["비중 합이 허용 범위", "종목이 중복입니다: 005930", "ETF 코드 형식이 아닙니다: 44444", "종목 코드 형식이 아닙니다: 5930", "종목 이름이 없습니다: 000999", "구성 종목이 없습니다", "ETF 코드가 중복입니다", "운용 방식을 알 수 없습니다: etn", "종목 비중이 0~10000bps를 벗어납니다: 000660 -5bps", "항목을 읽을 수 없습니다"] {
         assert!(text.contains(needle), "로그에 `{needle}`가 없다:\n{text}");
     }
     for rejection in &loaded.rejected {

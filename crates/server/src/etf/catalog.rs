@@ -17,7 +17,7 @@ const TOP_HOLDINGS: usize = 5;
 struct RawSnapshot {
     schema_version: u32,
     holdings_as_of: String,
-    funds: Vec<RawFund>,
+    funds: Vec<serde_json::Value>,
     stocks: HashMap<String, String>,
 }
 
@@ -36,7 +36,7 @@ struct RawFund {
 #[serde(rename_all = "camelCase")]
 struct RawHolding {
     code: String,
-    weight_bps: u32,
+    weight_bps: i64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -119,8 +119,9 @@ impl Catalog {
         }
         let status = EtfDataStatus { source: EtfDataSource::Snapshot, holdings_as_of: holdings_as_of.expect("위에서 확인했다"), last_attempt_at: None, refresh_failed: false };
         for fund in raw.funds {
-            let subject = fund.code.clone();
-            match validated(fund, &raw.stocks, &status, &catalog.by_code) {
+            let subject = fund.get("code").map_or_else(|| "(코드 없음)".to_owned(), |code| code.as_str().map_or_else(|| code.to_string(), str::to_owned));
+            let checked = serde_json::from_value::<RawFund>(fund).map_err(|e| format!("항목을 읽을 수 없습니다: {e}")).and_then(|fund| validated(fund, &raw.stocks, &status, &catalog.by_code));
+            match checked {
                 Ok(fund) => catalog.insert(fund, &raw.stocks),
                 Err(reason) => rejected.push(Rejection { subject, reason }),
             }
@@ -183,14 +184,12 @@ fn validated(raw: RawFund, names: &HashMap<String, String>, status: &EtfDataStat
         if !names.contains_key(stock.as_str()) {
             return Err(format!("종목 이름이 없습니다: {}", holding.code));
         }
-        if holding.weight_bps > MAX_WEIGHT_BPS {
-            return Err(format!("종목 비중이 {MAX_WEIGHT_BPS}bp를 넘습니다: {} {}bp", holding.code, holding.weight_bps));
-        }
-        holdings.push(Holding { code: stock, weight_bps: holding.weight_bps });
+        let weight_bps = u32::try_from(holding.weight_bps).ok().filter(|w| *w <= MAX_WEIGHT_BPS).ok_or_else(|| format!("종목 비중이 0~{MAX_WEIGHT_BPS}bps를 벗어납니다: {} {}bps", holding.code, holding.weight_bps))?;
+        holdings.push(Holding { code: stock, weight_bps });
     }
     let sum: u64 = holdings.iter().map(|h| u64::from(h.weight_bps)).sum();
     if sum == 0 || sum > u64::from(MAX_WEIGHT_SUM_BPS) {
-        return Err(format!("비중 합이 허용 범위(1~{MAX_WEIGHT_SUM_BPS}bp)를 벗어납니다: {sum}bp"));
+        return Err(format!("비중 합이 허용 범위(1~{MAX_WEIGHT_SUM_BPS}bp)를 벗어납니다: {sum}bps"));
     }
     holdings.sort_by(|a, b| b.weight_bps.cmp(&a.weight_bps).then(a.code.cmp(&b.code)));
     let top_weight_bpss = holdings.iter().take(TOP_HOLDINGS).map(|h| h.weight_bps).sum();
