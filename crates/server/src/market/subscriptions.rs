@@ -79,7 +79,7 @@ impl SubscriptionManager {
         if was_held && let Some(kind) = h.feed_kind() && !self.kind_is_held(symbol, kind) && self.has_kind_seat(symbol, kind) {
             self.kind_released_at.insert((symbol, kind), now);
         }
-        if left_empty {
+        if left_empty || !self.is_served(symbol) {
             self.released_at.insert(symbol, now);
         }
     }
@@ -190,7 +190,7 @@ impl SubscriptionManager {
         }
         self.kind_released_at.retain(|_, at| at.plus_secs(RELEASE_GRACE_SECS) > now);
         self.admitted_venue = self.admitted_venue.iter().copied().filter(|&(s, kind)| self.admitted.contains(&s) && self.venue_kind_wanted(s, kind)).collect();
-        let unserved: Vec<Symbol> = self.admitted.iter().copied().filter(|&s| self.holders.contains_key(&s) && !self.is_served(s)).collect();
+        let unserved: Vec<Symbol> = self.admitted.iter().copied().filter(|&s| self.holders.contains_key(&s) && !self.released_at.contains_key(&s) && !self.is_served(s)).collect();
         for s in unserved {
             self.admitted.remove(&s);
         }
@@ -206,7 +206,7 @@ impl SubscriptionManager {
             self.admitted_venue.extend(venue_kinds.into_iter().map(|kind| (s, kind)));
         }
         let mut wanting: Vec<(Rank, Symbol, RealType)> = Vec::new();
-        for &s in &self.admitted {
+        for &s in self.admitted.iter().filter(|s| !self.released_at.contains_key(s)) {
             let seatless = self.held_venue_kinds(s).into_iter().filter(|kind| !self.admitted_venue.contains(&(s, *kind)));
             wanting.extend(seatless.map(|kind| (self.rank(s), s, kind)));
         }
@@ -267,7 +267,7 @@ impl SubscriptionManager {
         let mut watch_only: Vec<(Rank, Symbol)> = self
             .admitted
             .iter()
-            .filter(|s| self.holders.contains_key(s))
+            .filter(|s| self.holders.contains_key(s) && !self.released_at.contains_key(s))
             .map(|s| (self.rank(*s), *s))
             .filter(|(r, _)| r.is_watch_only() && *r > rank)
             .collect();

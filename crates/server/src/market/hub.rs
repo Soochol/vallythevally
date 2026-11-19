@@ -70,7 +70,7 @@ impl HubHandle {
     }
 
     pub fn subscribe_feed(&self, conn: ConnId, sub: SubId, symbol: Symbol, kind: FeedKind, venue: Venue) {
-        self.send(HubInput::SubscribeFeed { conn, sub, feed: FeedSub { symbol, kind, venue } });
+        self.send(HubInput::SubscribeFeed { conn, sub, feed: FeedSub { symbol, kind, venue, requested_venue: venue } });
     }
 
     pub fn unsubscribe(&self, conn: ConnId, sub: SubId) {
@@ -214,6 +214,7 @@ struct FeedSub {
     symbol: Symbol,
     kind: FeedKind,
     venue: Venue,
+    requested_venue: Venue,
 }
 
 impl FeedSub {
@@ -407,7 +408,7 @@ impl MarketHub {
             return;
         }
         let feed = match feed.kind {
-            FeedKind::Book => FeedSub { venue: quotes::effective_book_venue(feed.venue, self.directory.borrow().as_ref().and_then(|dir| dir.get(feed.symbol)).map(|info| info.nxt_enabled)), ..feed },
+            FeedKind::Book => FeedSub { venue: self.effective_book_venue(feed), ..feed },
             _ => feed,
         };
         let old_cell = self.conns.get_mut(&conn).and_then(|c| c.subs.remove(&sub));
@@ -423,6 +424,29 @@ impl MarketHub {
         self.replan(now);
         if !self.rejected.contains(&holder) {
             self.attach_feed(conn, &sub, feed);
+        }
+    }
+
+    fn effective_book_venue(&self, feed: FeedSub) -> Venue {
+        quotes::effective_book_venue(feed.requested_venue, self.directory.borrow().as_ref().and_then(|dir| dir.get(feed.symbol)).map(|info| info.nxt_enabled))
+    }
+
+    fn resettle_book_venues(&mut self, now: KstTime) {
+        let moved: Vec<(ConnId, SubId, FeedSub, Venue)> = self
+            .conns
+            .iter()
+            .flat_map(|(&conn, c)| c.feeds.iter().map(move |(sub, &feed)| (conn, sub, feed)))
+            .filter(|(_, _, feed)| feed.kind == FeedKind::Book)
+            .map(|(conn, sub, feed)| (conn, sub.clone(), feed, self.effective_book_venue(feed)))
+            .filter(|(_, _, feed, venue)| feed.venue != *venue)
+            .collect();
+        for (conn, sub, old, venue) in moved {
+            let feed = FeedSub { venue, ..old };
+            if let Some(c) = self.conns.get_mut(&conn) {
+                c.feeds.insert(sub.clone(), feed);
+            }
+            self.release_feed(conn, &sub, old, now);
+            self.manager.hold(feed.symbol, feed.holder(conn, &sub));
         }
     }
 
@@ -1025,6 +1049,7 @@ impl MarketHub {
         }
         if self.directory.has_changed().unwrap_or(false) {
             self.directory.borrow_and_update();
+            self.resettle_book_venues(now);
             let conns: Vec<ConnId> = self.conns.keys().copied().collect();
             for conn in conns {
                 self.hold_listed_watch_rows(conn, now);
