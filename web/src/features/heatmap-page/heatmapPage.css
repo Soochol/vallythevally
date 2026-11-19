@@ -15,5 +15,22 @@
 .hm-tile:hover, .hm-tile:focus-visible { z-index: 1; box-shadow: inset 0 0 0 2px var(--accent); }
 .hm-tile-text { display: flex; flex-direction: column; gap: 1px; padding: var(--size-4) var(--size-6); font-size: var(--fs-s); line-height: 1.2; }
 .hm-tile-text b { overflow: hidden; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
-.hm-preparing { display: grid; flex: 1; place-content: center; min-height: 240px; color: var(--text-2); border-radius: var(--r-l); background: var(--surface); box-shadow: 0 0 0 1px var(--line); }
 .hm-empty-hint { max-width: 420px; margin: 0; color: var(--text-2); }
+.hm-group-dot { flex: none; width: var(--size-8); height: var(--size-8); align-self: center; border-radius: 50%; }
+.hm-flow { display: flex; flex-direction: column; gap: var(--size-8); padding: var(--size-12); border-radius: var(--r-l); background: var(--surface); box-shadow: 0 0 0 1px var(--line); }
+.hm-flow-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--size-8); }
+.hm-flow-head h2 { margin: 0; font-size: var(--fs-m); font-weight: 650; }
+.hm-flow-head span { color: var(--text-2); font-size: var(--fs-s); }
+.hm-flow-legend { display: flex; flex-wrap: wrap; gap: var(--size-8); }
+.hm-flow-toggle { display: inline-flex; align-items: center; gap: var(--size-8); padding: var(--size-4) var(--size-10); border-radius: var(--r-m); background: var(--bg); box-shadow: 0 0 0 1px var(--line); color: var(--text); font-size: var(--fs-s); }
+.hm-flow-toggle i { width: var(--size-8); height: var(--size-8); border-radius: 50%; }
+.hm-flow-toggle[aria-pressed="false"] { color: var(--text-2); opacity: 0.55; }
+.hm-flow-chart { width: 100%; height: auto; }
+.hm-flow-grid line { stroke: var(--line); }
+.hm-flow-grid[data-zero="true"] line { stroke: var(--text-2); }
+.hm-flow-grid text, .hm-flow-hour { fill: var(--text-2); font-size: 10px; }
+.hm-flow-series { fill: currentColor; font-size: 11px; }
+.hm-flow-line { fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linejoin: round; }
+.hm-flow-empty { margin: 0; padding: var(--size-24) 0; color: var(--text-2); text-align: center; }
+.hm-flow-notes { display: flex; flex-direction: column; gap: var(--size-2); color: var(--text-2); font-size: var(--fs-s); }
+.hm-flow-notes p { margin: 0; }

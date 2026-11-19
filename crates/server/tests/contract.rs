@@ -13,6 +13,7 @@ use server::collector::{CollectorAccess, CollectorAccessState, CollectorStatusPa
 use server::drawing_api::*;
 use server::market_overview::*;
 use server::etf::*;
+use server::heatmap_flow::{HeatmapFlowPoint, HeatmapFlowSeries};
 use ts_rs::TS;
 
 const DIR: &str = "web/src/api/generated";
@@ -149,6 +150,8 @@ fn generated_typescript_matches_the_committed_files() {
         generated::<ProgramTradeTimeline>(),
         generated::<TradePrint>(),
         generated::<TradeTape>(),
+        generated::<HeatmapFlowPoint>(),
+        generated::<HeatmapFlowSeries>(),
         generated::<IchimokuTest>(),
         generated::<IndicatorSpec>(),
         generated::<KeySource>(),

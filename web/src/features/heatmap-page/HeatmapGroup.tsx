@@ -73,6 +73,7 @@ export function HeatmapGroup({ section, settings, names, quotes, loading }: Grou
   return (
     <section className="hm-group" aria-label={`${section.title} 지도`} data-group={section.key} aria-busy={loading}>
       <header className="hm-group-head">
+        <i className="hm-group-dot" style={{ background: section.color }} />
         <h2>{section.title}</h2>
         <span>{rows.length}종목</span>
       </header>
