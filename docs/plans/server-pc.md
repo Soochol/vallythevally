@@ -59,7 +59,7 @@
 
 | ID | 내용 | 방식 | 이유 | 순서 |
 |---|---|---|---|---|
-| `tailnet-host` | `VALLY_TAILNET_HOSTS` 설정, Host·Origin 검사가 설정한 이름을 받음, ADR 0036 | `poteto` | 보안(쓰기 보호와 DNS rebinding 방어의 규칙을 바꾼다) | 먼저 |
+| `tailnet-host` | `VALLY_TAILNET_HOSTS` 설정, Host·Origin 검사가 설정한 이름을 받음, ADR 0036 | `poteto` | 보안(쓰기 보호와 DNS rebinding 방어의 규칙을 바꾼다) | 먼저. tr-optimize 플랜의 `tr-usage-panel`과는 병렬이다. 그 작업은 `system_routes.rs`에 경로 하나와 `tests/system_api.rs`에 시험을 더하고, 이 작업도 두 파일에 필드·함수·시험만 더하므로 두 파일을 `shared`로 두고 최소 변경으로 한다 |
 | `server-ops-doc` | `docs/server-operations.md`: 서버 PC 준비, 이전, 원격 배포 스크립트, 확인, 되돌리기 | `basic` | 문서만 | `tailnet-host` 뒤. 문서가 그 작업이 정한 설정 이름과 규칙을 적는다 |
 
 두 작업이 병합된 뒤 아래 운영 단계를 오케스트레이터가 사용자와 함께 진행한다. 운영 단계는 `tasks.json`의 작업이 아니다.
