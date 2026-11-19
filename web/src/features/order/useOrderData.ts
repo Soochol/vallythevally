@@ -9,6 +9,7 @@ import { useKiwoomLinkStore } from "../../stores/kiwoomLink";
 import type { Capacity } from "./orderRules";
 import { groupOpenOrders, type PriceGroup } from "./orderRules";
 import { fetchBalance, fetchCommands, fetchExecutions, fetchOpenOrders, fetchOrderable } from "./orderApi";
+import { holdingOf } from "./holdingSummary";
 import { ORDER_QUERY_KEY } from "./useOrderWrites";
 
 const POLL_MS = 5000;
@@ -31,9 +32,15 @@ export interface OrderBoardData {
   readonly groups: ReadonlyMap<string, PriceGroup>;
   readonly blocked: boolean;
   readonly capacity: Capacity;
+  readonly buyableProblem: string | null;
   readonly openOrders: readonly TradingOpenOrder[];
   readonly balance: TradingBalance | null;
   readonly executions: readonly TradingExecution[];
+}
+
+function sellableQuantityOf(balance: TradingBalance | null, code: string): number | null {
+  if (balance === null) return null;
+  return holdingOf(balance.holdings, code)?.sellableQuantity ?? 0;
 }
 
 const NONE: readonly never[] = [];
@@ -53,7 +60,6 @@ export function useOrderData(code: string, open: boolean, referencePrice: number
   const executions = useQuery({ queryKey: [...ORDER_QUERY_KEY, "executions"], queryFn: ({ signal }) => fetchExecutions(signal), enabled: open, refetchInterval: POLL_MS * 3, staleTime: POLL_MS, retry: false });
   useRefreshOnAccountChange(open);
   const orderableEnabled = open && referencePrice !== null;
-  const sellable = useQuery({ queryKey: [...ORDER_QUERY_KEY, "orderable", code, "sell"], queryFn: ({ signal }) => fetchOrderable(code, "sell", referencePrice!, signal), enabled: orderableEnabled, refetchInterval: POLL_MS * 3, staleTime: POLL_MS, retry: false });
   const buyable = useQuery({ queryKey: [...ORDER_QUERY_KEY, "orderable", code, "buy"], queryFn: ({ signal }) => fetchOrderable(code, "buy", referencePrice!, signal), enabled: orderableEnabled, refetchInterval: POLL_MS * 3, staleTime: POLL_MS, retry: false });
   const orders = openOrders.data?.orders;
   const groups = useMemo(() => groupOpenOrders(orders ?? [], code), [orders, code]);
@@ -63,6 +69,7 @@ export function useOrderData(code: string, open: boolean, referencePrice: number
     openOrders: orders ?? NONE,
     balance: balance.data ?? null,
     executions: executions.data?.executions ?? NONE,
-    capacity: { sellableQuantity: sellable.data?.quantity ?? null, buyableAmount: buyable.data?.amount ?? null },
+    capacity: { sellableQuantity: sellableQuantityOf(balance.data ?? null, code), buyableAmount: buyable.data?.amount ?? null },
+    buyableProblem: buyable.error?.message ?? null,
   };
 }

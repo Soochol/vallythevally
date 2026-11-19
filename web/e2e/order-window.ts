@@ -22,8 +22,12 @@ export interface Api {
   placeReply: Partial<OrderCommand>;
   batchFailures: number;
   holdings: TradingHolding[];
+  orderableQueries: string[];
+  buyableFailure: { status: number; body: unknown } | null;
   executions: TradingExecution[];
 }
+
+export const HELD: TradingHolding = { code: CODE, name: "삼성전자", quantity: 100_000, sellableQuantity: 100_000, averagePrice: 70_040, currentPrice: BASE, evaluationProfit: 0, profitRateCenti: 0 };
 
 export const win = (page: Page) => page.getByTestId("order-window");
 export const status = (page: Page) => page.getByTestId("order-status");
@@ -55,13 +59,18 @@ export function ordersOn(scenario: Scenario): void {
 }
 
 export function tradingApi(scenario: Scenario, open: TradingOpenOrder[] = []): Api {
-  const api: Api = { open, blocked: false, writes: [], placeReply: {}, batchFailures: 0, holdings: [], executions: [] };
+  const api: Api = { open, blocked: false, writes: [], placeReply: {}, batchFailures: 0, holdings: [HELD], orderableQueries: [], buyableFailure: null, executions: [] };
   const apiError = (message: string) => ({ status: 503, body: { error: { code: "internal", message, reason: null, retryAt: null, manualActionRequired: false } } });
   scenario.on((url) => url.pathname === "/api/trading/open-orders", () => ({ body: { accountRef: ACCOUNT, orders: api.open } }));
   scenario.on((url) => url.pathname === "/api/trading/balance", () => ({ body: { accountRef: ACCOUNT, holdings: api.holdings, totalPurchase: 0, totalEvaluation: 0, totalProfit: 0 } }));
   scenario.on((url) => url.pathname === "/api/trading/executions", () => ({ body: { accountRef: ACCOUNT, day: "2026-11-18", executions: api.executions } }));
   scenario.on((url) => url.pathname === "/api/trading/commands", () => ({ body: { accountRef: ACCOUNT, blocked: api.blocked, commands: [] } }));
-  scenario.on((url) => url.pathname === "/api/trading/orderable", (request) => ({ body: { accountRef: ACCOUNT, code: CODE, side: new URL(request.url()).searchParams.get("side"), price: BASE, amount: 500_000_000, quantity: 100_000 } }));
+  scenario.on((url) => url.pathname === "/api/trading/orderable", (request) => {
+    const side = new URL(request.url()).searchParams.get("side") ?? "";
+    api.orderableQueries.push(side);
+    if (side === "buy" && api.buyableFailure) return api.buyableFailure;
+    return { body: { accountRef: ACCOUNT, code: CODE, side, price: BASE, amount: 500_000_000, quantity: 100_000 } };
+  });
   scenario.on((url, request) => url.pathname.startsWith("/api/trading/commands/") && request.method() === "POST", (request) => {
     const path = new URL(request.url()).pathname;
     const body = request.postDataJSON() as Record<string, unknown>;
