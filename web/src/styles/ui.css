@@ -246,9 +246,16 @@ html.dock-resizing-junction, html.dock-resizing-junction * { cursor:move !import
 .dock-add:hover, .dock-add:focus-visible { background:var(--hover); color:var(--accent); }
 .dock-input-shield { position:fixed; inset:0; z-index:100; cursor:grabbing; }
 .dock-drop-preview { position:absolute; z-index:101; display:grid; place-items:center; padding:12px; border:2px solid var(--accent); border-radius:var(--r-l); background:color-mix(in srgb,var(--accent) 18%,transparent); pointer-events:none; }
-.dock-drop-preview span { max-width:100%; padding:8px 12px; border-radius:var(--r-m); background:var(--surface); color:var(--accent); font-size:var(--fs-s); box-shadow:0 2px 12px #0002; text-align:center; }
+.dock-drop-level { position:absolute; z-index:100; border:2px dashed var(--line-strong); border-radius:var(--r-l); pointer-events:none; }
+.dock-drop-level[data-dock-level-frame=change] { border-color:var(--accent); }
+.dock-drop-level[data-dock-level-frame=blocked] { border-color:var(--warning); }
+.dock-drop-caption { display:grid; justify-items:center; gap:4px; max-width:100%; padding:8px 12px; border-radius:var(--r-m); background:var(--surface); color:var(--accent); font-size:var(--fs-s); box-shadow:0 2px 12px #0002; text-align:center; }
+.dock-drop-steps { display:flex; flex-wrap:wrap; justify-content:center; margin:0; padding:0; list-style:none; color:var(--text-2); }
+.dock-drop-steps li + li::before { content:" · "; white-space:pre; }
+.dock-drop-steps li[aria-current=step] { color:var(--accent); font-weight:600; }
 .dock-drop-preview[data-dock-preview=blocked] { border-color:var(--warning); background:color-mix(in srgb,var(--warning) 12%,transparent); }
-.dock-drop-preview[data-dock-preview=blocked] span { color:var(--warning); }
+.dock-drop-preview[data-dock-preview=blocked] .dock-drop-caption { color:var(--warning); }
+.dock-drop-preview[data-dock-preview=blocked] .dock-drop-steps li[aria-current=step] { color:var(--warning); }
 .workspace[data-dock-dragging] .dock-panel { pointer-events:none; }
 html.dock-dragging, html.dock-dragging * { cursor:grabbing !important; user-select:none !important; }
 
