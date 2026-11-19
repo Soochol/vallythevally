@@ -24,7 +24,7 @@ fn refuse(what: &str) -> ApiFailure {
 pub(crate) fn check_host<'a>(st: &AppState, headers: &'a HeaderMap, uri: &'a Uri) -> Result<&'a str, ApiFailure> {
     let host = headers.get(header::HOST).and_then(|h| h.to_str().ok()).or_else(|| uri.authority().map(|a| a.as_str())).ok_or_else(|| refuse("Host가 없습니다"))?;
     let bound = st.system.bound_addr().ok_or_else(|| refuse("서버가 아직 준비되지 않았습니다"))?;
-    if !is_own_host(host, bound) {
+    if !is_own_host(host, bound) && !st.system.tailnet_hosts().contains(host) {
         return Err(refuse("Host가 이 서버의 주소가 아닙니다"));
     }
     Ok(host)
@@ -33,7 +33,7 @@ pub(crate) fn check_host<'a>(st: &AppState, headers: &'a HeaderMap, uri: &'a Uri
 fn check_write(st: &AppState, req: &Request) -> Result<(), ApiFailure> {
     let headers = req.headers();
     let host = check_host(st, headers, req.uri())?;
-    check_origin(headers, host)?;
+    check_origin(st, headers, host)?;
     let json = headers.get(header::CONTENT_TYPE).and_then(|v| v.to_str().ok()).is_some_and(|v| v.split(';').next().is_some_and(|essence| essence.trim().eq_ignore_ascii_case("application/json")));
     if !json {
         return Err(refuse("Content-Type은 application/json이어야 합니다"));
@@ -46,9 +46,10 @@ fn is_own_host(host: &str, bound: std::net::SocketAddr) -> bool {
     [format!("127.0.0.1:{port}"), format!("localhost:{port}"), format!("[::1]:{port}"), bound.to_string()].contains(&host)
 }
 
-fn check_origin(headers: &HeaderMap, host: &str) -> Result<(), ApiFailure> {
+fn check_origin(st: &AppState, headers: &HeaderMap, host: &str) -> Result<(), ApiFailure> {
     let mut origins = headers.get_all(header::ORIGIN).iter();
     let Some(origin) = origins.next() else { return Ok(()) };
-    let same = origins.next().is_none() && origin.to_str().is_ok_and(|o| o.eq_ignore_ascii_case(&format!("http://{host}")));
+    let scheme = if st.system.tailnet_hosts().contains(host) { "https" } else { "http" };
+    let same = origins.next().is_none() && origin.to_str().is_ok_and(|o| o.eq_ignore_ascii_case(&format!("{scheme}://{host}")));
     if same { Ok(()) } else { Err(ApiFailure::bad_request("이 요청은 받지 않습니다: Origin이 이 서버가 아닙니다")) }
 }

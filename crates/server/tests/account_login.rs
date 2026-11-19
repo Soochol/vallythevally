@@ -95,6 +95,10 @@ impl Machine {
     }
 
     async fn run(&self, account_url: Option<&str>) -> Connector {
+        self.run_with(account_url, &[]).await
+    }
+
+    async fn run_with(&self, account_url: Option<&str>, extra: &[(&str, &str)]) -> Connector {
         let mut pairs = vec![
             ("VALLY_KIWOOM_CONNECT", "off".to_owned()),
             ("VALLY_KIWOOM_APP_KEY", String::new()),
@@ -105,6 +109,7 @@ impl Machine {
         if let Some(url) = account_url {
             pairs.push(("VALLY_ACCOUNT_SERVER_URL", url.to_owned()));
         }
+        pairs.extend(extra.iter().map(|(key, value)| (*key, (*value).to_owned())));
         let overrides: Vec<(&str, &std::ffi::OsStr)> = pairs.iter().map(|(key, value)| (*key, std::ffi::OsStr::new(value.as_str()))).collect();
         let server = Server::spawn_with(&ScriptedTransport::new(), &self.lock, &self.dist, &overrides);
         let addr = server.addr().await;
@@ -601,5 +606,33 @@ async fn when_the_state_file_cannot_be_removed_after_deletion_memory_and_file_st
     })
     .await
     .expect("시작 때의 동기화가 계정 서버가 모르는 토큰을 로그아웃으로 정리한다");
+    assert!(machine.state_file().is_none());
+}
+
+#[tokio::test]
+async fn the_login_completion_answers_to_a_configured_tailnet_host_only() {
+    const TAILNET_NAME: &str = "server.example-tailnet.ts.net";
+    let (accounts, machine) = (Accounts::start().await, Machine::new());
+    let connector = machine.run_with(Some(&accounts.base), &[("VALLY_TAILNET_HOSTS", TAILNET_NAME)]).await;
+    let start = connector.start_login("google").await;
+    let query = follow_to_connector(&accounts, &start).await.query().unwrap().to_owned();
+    for host in ["other.example-tailnet.ts.net", "192.168.0.10:8080", "100.64.0.1:8080", "203.0.113.5"] {
+        let refused = connector.http.get(format!("{}/auth/complete?{query}", connector.base)).header("host", host).send().await.unwrap();
+        assert_eq!(refused.status(), 400, "{host}");
+    }
+    assert!(machine.state_file().is_none(), "거절된 Host의 요청이 state를 쓰지 않았다");
+    let accepted = connector.http.get(format!("{}/auth/complete?{query}", connector.base)).header("host", TAILNET_NAME).send().await.unwrap();
+    assert_eq!(accepted.headers()["location"], "/");
+    assert_eq!(connector.status().await["state"], "signed_in");
+}
+
+#[tokio::test]
+async fn without_a_tailnet_name_the_login_completion_refuses_the_tailnet_host() {
+    let (accounts, machine) = (Accounts::start().await, Machine::new());
+    let connector = machine.run(Some(&accounts.base)).await;
+    let start = connector.start_login("google").await;
+    let query = follow_to_connector(&accounts, &start).await.query().unwrap().to_owned();
+    let refused = connector.http.get(format!("{}/auth/complete?{query}", connector.base)).header("host", "server.example-tailnet.ts.net").send().await.unwrap();
+    assert_eq!(refused.status(), 400);
     assert!(machine.state_file().is_none());
 }

@@ -733,3 +733,77 @@ async fn ip_routes_go_through_the_same_write_checks() {
     assert!(client.get("/api/system/kiwoom").await.1["registeredIp"].is_null(), "거절된 요청은 아무것도 쓰지 않는다");
     assert!(!env.key_path.with_file_name("kiwoom-ip.json").exists());
 }
+
+const TAILNET_NAME: &str = "server.example-tailnet.ts.net";
+
+fn refused_by_the_guard(status: u16, body: &Value) -> bool {
+    status == 400 && body["error"]["message"].as_str().is_some_and(|message| message.starts_with("이 요청은 받지 않습니다"))
+}
+
+#[tokio::test]
+async fn without_a_tailnet_name_the_tailnet_host_is_refused_like_any_foreign_host() {
+    let (env, fake) = (Env::new(), ScriptedTransport::new());
+    let server = env.spawn(&fake, &[]);
+    let client = Client::of(&server).await;
+    for host in [TAILNET_NAME, "other.example-tailnet.ts.net"] {
+        let (status, body) = answer(client.put_request(APP_KEY, APP_SECRET).header("host", host).header("origin", format!("https://{host}")).send().await.unwrap()).await;
+        assert!(refused_by_the_guard(status, &body), "{host}: {status} {body}");
+        let (status, body) = answer(client.http.get(format!("{}/api/trading/account-number", client.base)).header("host", host).send().await.unwrap()).await;
+        assert!(refused_by_the_guard(status, &body), "{host}: {status} {body}");
+    }
+    assert!(!env.key_path.exists(), "거절된 쓰기는 키 파일을 만들지 않는다");
+}
+
+#[tokio::test]
+async fn a_configured_tailnet_name_is_accepted_as_host_with_a_matching_https_origin_and_nothing_else_is() {
+    let (env, fake) = (Env::new(), ScriptedTransport::new());
+    let server = env.spawn(&fake, &[("VALLY_TAILNET_HOSTS", " Server.Example-Tailnet.ts.net ,phone.example-tailnet.ts.net")]);
+    let client = Client::of(&server).await;
+
+    let wrong_origins = [format!("http://{TAILNET_NAME}"), format!("https://{TAILNET_NAME}:443"), "https://other.example-tailnet.ts.net".to_owned(), "https://phone.example-tailnet.ts.net".to_owned(), format!("http://127.0.0.1:{}", client.port)];
+    for origin in &wrong_origins {
+        let (status, body) = answer(client.put_request(OTHER_APP_KEY, OTHER_APP_SECRET).header("host", TAILNET_NAME).header("origin", origin).send().await.unwrap()).await;
+        assert!(refused_by_the_guard(status, &body), "{origin}: {status} {body}");
+    }
+    let two_origins = client.put_request(OTHER_APP_KEY, OTHER_APP_SECRET).header("host", TAILNET_NAME).header("origin", format!("https://{TAILNET_NAME}")).header("origin", format!("https://{TAILNET_NAME}"));
+    let (status, body) = answer(two_origins.send().await.unwrap()).await;
+    assert!(refused_by_the_guard(status, &body), "Origin이 둘이면 거절한다: {status} {body}");
+    for host in ["other.example-tailnet.ts.net", "evil.ts.net", "192.168.0.10:8080", "100.64.0.1:8080", "203.0.113.5", &format!("{TAILNET_NAME}:443"), &format!("{TAILNET_NAME}.")] {
+        let write = answer(client.put_request(OTHER_APP_KEY, OTHER_APP_SECRET).header("host", host).send().await.unwrap()).await;
+        assert!(refused_by_the_guard(write.0, &write.1), "{host}: {} {}", write.0, write.1);
+        let read = answer(client.http.get(format!("{}/api/trading/account-number", client.base)).header("host", host).send().await.unwrap()).await;
+        assert!(refused_by_the_guard(read.0, &read.1), "{host}: {} {}", read.0, read.1);
+    }
+    assert!(!env.key_path.exists(), "거절된 쓰기는 키 파일을 만들지 않는다");
+
+    for origin in [None, Some(format!("https://{TAILNET_NAME}")), Some(format!("HTTPS://{}", TAILNET_NAME.to_uppercase()))] {
+        let mut request = client.put_request(APP_KEY, APP_SECRET).header("host", TAILNET_NAME);
+        if let Some(origin) = &origin {
+            request = request.header("origin", origin);
+        }
+        let (status, body) = answer(request.send().await.unwrap()).await;
+        assert_eq!(status, 200, "{origin:?}: {body}");
+    }
+    let upper_host = client.put_request(APP_KEY, APP_SECRET).header("host", TAILNET_NAME.to_uppercase()).header("origin", format!("https://{TAILNET_NAME}"));
+    assert_eq!(upper_host.send().await.unwrap().status().as_u16(), 200, "Host는 대소문자를 가리지 않는다");
+    let (status, body) = answer(client.http.get(format!("{}/api/trading/account-number", client.base)).header("host", TAILNET_NAME).send().await.unwrap()).await;
+    assert!(!refused_by_the_guard(status, &body), "계좌번호 조회가 Host로 거절됐다: {status} {body}");
+    let phone = answer(client.put_request(APP_KEY, APP_SECRET).header("host", "phone.example-tailnet.ts.net").header("origin", "https://phone.example-tailnet.ts.net").send().await.unwrap()).await;
+    assert_eq!(phone.0, 200, "여러 이름을 설정하면 각자 받는다: {}", phone.1);
+}
+
+#[tokio::test]
+async fn loopback_host_and_origin_keep_working_when_a_tailnet_name_is_configured() {
+    let (env, fake) = (Env::new(), ScriptedTransport::new());
+    let server = env.spawn(&fake, &[("VALLY_TAILNET_HOSTS", TAILNET_NAME)]);
+    let client = Client::of(&server).await;
+    let same_origin = client.put_request(APP_KEY, APP_SECRET).header("origin", format!("http://127.0.0.1:{}", client.port));
+    assert_eq!(same_origin.send().await.unwrap().status().as_u16(), 200);
+    let localhost = client.put_request(APP_KEY, APP_SECRET).header("host", format!("localhost:{}", client.port)).header("origin", format!("http://localhost:{}", client.port));
+    assert_eq!(localhost.send().await.unwrap().status().as_u16(), 200);
+    let https_origin_on_loopback = client.put_request(APP_KEY, APP_SECRET).header("origin", format!("https://{TAILNET_NAME}"));
+    let (status, body) = answer(https_origin_on_loopback.send().await.unwrap()).await;
+    assert!(refused_by_the_guard(status, &body), "루프백 Host에는 tailnet Origin을 받지 않는다: {status} {body}");
+    let (status, body) = answer(client.http.get(format!("{}/api/trading/account-number", client.base)).send().await.unwrap()).await;
+    assert!(!refused_by_the_guard(status, &body), "{status} {body}");
+}
