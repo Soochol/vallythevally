@@ -1,8 +1,10 @@
 import type { Locator, Page } from "@playwright/test";
+import type { LayoutWindow } from "../src/api/generated/LayoutWindow";
+import type { LinkColor } from "../src/api/generated/LinkColor";
 import type { TradingExecution } from "../src/api/generated/TradingExecution";
 import type { TradingHolding } from "../src/api/generated/TradingHolding";
-import { type Scenario, cell, DEFAULT_LAYOUT_ID, expect, pollSaved, test } from "./harness";
-import { ACCOUNT, askAtLastSnapshot, BASE, CODE, cellAt, center, chipAt, dragChip, openOrder, openOrderWindow, ordersOn, status, tradingApi, win, writesTo } from "./order-window";
+import { type Scenario, cell, DEFAULT_LAYOUT_ID, expect, pollSaved, test, windowTabs } from "./harness";
+import { ACCOUNT, askAtLastSnapshot, SETTINGS, BASE, CODE, cellAt, center, chipAt, dragChip, openOrder, openOrderWindow, ordersOn, status, tradingApi, win, writesTo } from "./order-window";
 
 const HOLDING: TradingHolding = { code: CODE, name: "삼성전자", quantity: 120, sellableQuantity: 100, averagePrice: 70_040, currentPrice: BASE, evaluationProfit: -4_800, profitRateCenti: -57 };
 const FILL: TradingExecution = { orderNo: "0000010", code: CODE, name: "삼성전자", side: "buy", quantity: 5, price: 70_000, time: "093015", venue: "krx" };
@@ -990,4 +992,110 @@ test.describe("수요일 08:35 시간외 종가 잔량", () => {
     await expect(page.getByTestId("order-total-ask")).toContainText("13,770");
     await expect(page.getByTestId("order-total-bid")).toContainText("0");
   });
+});
+
+const OTHER = "000660";
+const OTHER_HOLDING: TradingHolding = { ...HOLDING, code: OTHER, name: "SK하이닉스" };
+const OTHER_FILL: TradingExecution = { ...FILL, orderNo: "0000011", code: OTHER, name: "SK하이닉스", time: "101500" };
+
+const chartWindow = (id: string, link: LinkColor | null, symbol: string): LayoutWindow => ({ id, link, kind: "chart", symbol, venue: "combined", period: "D", chartSettings: SETTINGS });
+const savedSymbols = (scenario: Scenario) => scenario.documents.layout(DEFAULT_LAYOUT_ID).windows.flatMap((w) => (w.kind === "chart" ? [[w.id, w.symbol]] : []));
+
+function linkedArrangement(orderLink: LinkColor | null, orderSymbol?: string): (windows: LayoutWindow[]) => LayoutWindow[] {
+  return (windows) => [
+    chartWindow("cell-0", "a", CODE),
+    chartWindow("cell-1", "a", CODE),
+    chartWindow("cell-2", "b", "035420"),
+    ...windows.filter((w) => w.kind !== "chart" && w.kind !== "order"),
+    { id: "book", link: orderLink, kind: "book" },
+    { id: "order", link: orderLink, kind: "order", venue: "krx", ...(orderSymbol ? { symbol: orderSymbol } : {}) },
+  ];
+}
+
+test("내 체결 목록은 최근 체결이 맨 위다", async ({ page, scenario }) => {
+  ordersOn(scenario);
+  const api = tradingApi(scenario);
+  api.executions = [{ ...FILL, orderNo: "0000001", time: "090000" }, { ...FILL, orderNo: "0000003", time: "150000" }, { ...FILL, orderNo: "0000002", time: "101500" }, { ...FILL, orderNo: "0000004", time: "150000" }];
+  await openOrderWindow(page, scenario);
+  await page.getByTestId("account-tab-fills").click();
+  await expect(page.getByTestId("account-fill").locator(".od-time")).toHaveText(["15:00:00", "15:00:00", "10:15:00", "09:00:00"]);
+});
+
+test("보유종목 이름을 누르면 같은 연동 색의 차트와 따르는 창이 모두 그 종목으로 바뀐다", async ({ page, scenario }) => {
+  ordersOn(scenario);
+  const api = tradingApi(scenario);
+  api.holdings = [HOLDING, OTHER_HOLDING];
+  await openOrderWindow(page, scenario, false, "krx", undefined, false, undefined, linkedArrangement("a"));
+  await page.getByTestId("account-tab-holdings").click();
+  await page.getByRole("button", { name: "SK하이닉스로 이동" }).click();
+  await expect(page.getByTestId("account-panel")).toHaveCount(0);
+  await expect(win(page)).toHaveAttribute("data-symbol", OTHER);
+  await pollSaved(() => savedSymbols(scenario)).toEqual([["cell-0", OTHER], ["cell-1", OTHER], ["cell-2", "035420"]]);
+  await windowTabs(page).getByRole("tab", { name: /^10호가/ }).click();
+  await expect(page.getByTestId("book-window")).toHaveAttribute("data-symbol", OTHER);
+  await expect(page.getByRole("status").filter({ hasText: "SK하이닉스" })).toHaveCount(0);
+});
+
+test("내 체결과 미체결의 종목명도 같은 방식으로 이동한다", async ({ page, scenario }) => {
+  ordersOn(scenario);
+  const api = tradingApi(scenario, [{ ...openOrder("0000002", "sell", 71_000, 7), code: OTHER, name: "SK하이닉스" }]);
+  api.executions = [OTHER_FILL];
+  await openOrderWindow(page, scenario, false, "krx", undefined, false, undefined, linkedArrangement("a"));
+  await page.getByTestId("account-tab-fills").click();
+  await page.getByRole("button", { name: "SK하이닉스로 이동" }).click();
+  await expect(win(page)).toHaveAttribute("data-symbol", OTHER);
+  await pollSaved(() => savedSymbols(scenario)).toEqual([["cell-0", OTHER], ["cell-1", OTHER], ["cell-2", "035420"]]);
+
+  await page.getByTestId("account-tab-open").click();
+  await page.getByRole("button", { name: "취소" }).waitFor();
+  await page.getByRole("button", { name: "SK하이닉스로 이동" }).click();
+  await expect(page.getByTestId("account-panel")).toHaveCount(0);
+  await expect(win(page)).toHaveAttribute("data-symbol", OTHER);
+  await expect(page.getByTestId("account-tab-open")).toBeVisible();
+  expect(writesTo(api, "cancel")).toHaveLength(0);
+});
+
+test("연동 끔인 호가주문창에서 누르면 활성 칸 차트와 이 창이 그 종목으로 바뀐다", async ({ page, scenario }) => {
+  ordersOn(scenario);
+  const api = tradingApi(scenario);
+  api.holdings = [HOLDING, OTHER_HOLDING];
+  await openOrderWindow(page, scenario, false, "krx", undefined, false, undefined, (windows) => [
+    chartWindow("cell-0", null, CODE),
+    chartWindow("cell-1", null, "035420"),
+    ...windows.filter((w) => w.kind !== "chart"),
+  ]);
+  await page.getByTestId("account-tab-holdings").click();
+  await page.getByRole("button", { name: "SK하이닉스로 이동" }).click();
+  await expect(win(page)).toHaveAttribute("data-symbol", OTHER);
+  await pollSaved(() => savedSymbols(scenario)).toEqual([["cell-0", OTHER], ["cell-1", "035420"]]);
+});
+
+test("고정 종목이 있는 호가주문창에서 누르면 고정이 풀리고 그 종목으로 바뀐다", async ({ page, scenario }) => {
+  ordersOn(scenario);
+  const api = tradingApi(scenario);
+  api.holdings = [HOLDING, OTHER_HOLDING];
+  await openOrderWindow(page, scenario, false, "krx", undefined, false, undefined, linkedArrangement(null, CODE));
+  await expect(win(page)).toHaveAttribute("data-symbol", CODE);
+  await page.getByTestId("account-tab-holdings").click();
+  await page.getByRole("button", { name: "SK하이닉스로 이동" }).click();
+  await expect(win(page)).toHaveAttribute("data-symbol", OTHER);
+  await pollSaved(() => scenario.documents.layout(DEFAULT_LAYOUT_ID).windows.find((w) => w.id === "order")).not.toHaveProperty("symbol");
+});
+
+test("종목명은 키보드로 누를 수 있고 이름이 \"…로 이동\"이다", async ({ page, scenario }) => {
+  ordersOn(scenario);
+  const api = tradingApi(scenario);
+  api.holdings = [HOLDING, OTHER_HOLDING];
+  await openOrderWindow(page, scenario, false, "krx", undefined, false, undefined, linkedArrangement("a"));
+  await page.getByTestId("account-tab-holdings").click();
+  const name = page.getByRole("button", { name: "SK하이닉스로 이동" });
+  await expect(page.getByRole("button", { name: "삼성전자로 이동" })).toBeVisible();
+  await name.focus();
+  await expect(name).toBeFocused();
+  await page.keyboard.press("Enter");
+  await expect(win(page)).toHaveAttribute("data-symbol", OTHER);
+  await page.getByTestId("account-tab-holdings").click();
+  await page.getByRole("button", { name: "삼성전자로 이동" }).focus();
+  await page.keyboard.press("Space");
+  await expect(win(page)).toHaveAttribute("data-symbol", CODE);
 });

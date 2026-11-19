@@ -72,6 +72,8 @@
 .od-rows li button { margin-left:auto; }
 .od-rows li[data-side=sell] .od-side { color:var(--down); } .od-rows li[data-side=buy] .od-side { color:var(--up); }
 .od-rows .od-name { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.od-rows .od-symbol { flex:0 1 auto; margin:0 auto 0 0; padding:0; text-align:left; color:inherit; font:inherit; }
+.od-rows .od-symbol:hover { text-decoration:underline; color:var(--accent); }
 .od-rows .od-time { color:var(--text-3); }
 .od-rows b[data-tone=up] { color:var(--up); } .od-rows b[data-tone=down] { color:var(--down); }
 
