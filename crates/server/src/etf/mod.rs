@@ -1,10 +1,13 @@
 mod catalog;
 mod collect;
+mod history;
 mod ma;
 
 use std::sync::Arc;
 
-use axum::extract::{Path, State};
+use std::collections::HashMap;
+
+use axum::extract::{Path, Query, State};
 use axum::response::Json;
 use axum::routing::get;
 use axum::{Extension, Router};
@@ -122,10 +125,68 @@ pub struct EtfStockHolders {
     pub holders: Vec<EtfStockHolder>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum EtfChangeKind {
+    Added,
+    Removed,
+    Increased,
+    Decreased,
+    Unchanged,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct EtfChangePair {
+    pub before: KstDate,
+    pub after: KstDate,
+    pub common_scale: Option<f64>,
+    pub added: u32,
+    pub removed: u32,
+    pub increased: u32,
+    pub decreased: u32,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct EtfHistory {
+    pub code: String,
+    pub first_collected_on: Option<KstDate>,
+    pub pairs: Vec<EtfChangePair>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct EtfChangeRow {
+    pub code: String,
+    pub name: String,
+    pub before_quantity: Option<f64>,
+    pub after_quantity: Option<f64>,
+    pub real_change: Option<f64>,
+    pub kind: EtfChangeKind,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct EtfChanges {
+    pub code: String,
+    pub before: KstDate,
+    pub after: KstDate,
+    pub common_scale: Option<f64>,
+    pub rows: Vec<EtfChangeRow>,
+}
+
 pub fn routes() -> Router<Arc<AppState>> {
     Router::new()
         .route("/api/etf/funds", get(funds))
         .route("/api/etf/funds/{code}", get(fund))
+        .route("/api/etf/funds/{code}/history", get(history))
+        .route("/api/etf/funds/{code}/changes", get(changes))
         .route("/api/etf/stocks/{code}", get(stock))
         .layer(Extension(Arc::new(MaCache::default())))
 }
@@ -176,4 +237,38 @@ async fn stock(State(st): State<Arc<AppState>>, Extension(cache): Extension<Arc<
     let ma = cache.snapshot(&st.screener, || catalog.stock_codes()).await;
     let holders = catalog.holders(stock).into_iter().map(|(fund, weight_bps)| EtfStockHolder { fund: summary(fund), weight_bps }).collect();
     Ok(Json(EtfStockHolders { code: stock.as_str().into(), name: stock_name(&st, &catalog, stock), ma: ma.states(stock), ma_as_of: ma.as_of.map(KstDate), holders }))
+}
+
+fn listed_fund(st: &AppState, code: &str) -> Result<StockCode, ApiFailure> {
+    let code = code_in(code)?;
+    st.etf.catalog().fund(code).ok_or_else(|| ApiFailure::new(api::ApiErrorCode::NotFound, format!("없는 ETF입니다: {}", code.as_str())))?;
+    Ok(code)
+}
+
+async fn collection_of(st: &AppState, code: StockCode) -> history::Collection {
+    match st.etf.pdf_dir() {
+        Some(dir) => history::read_collection(dir, code).await,
+        None => history::Collection::new(),
+    }
+}
+
+fn day_in(query: &HashMap<String, String>, name: &str) -> Result<domain::KstDate, ApiFailure> {
+    let text = query.get(name).ok_or_else(|| ApiFailure::bad_request(format!("{name} 날짜가 필요합니다")))?;
+    text.parse::<KstDate>().map(|date| date.0).map_err(ApiFailure::bad_request)
+}
+
+async fn history(State(st): State<Arc<AppState>>, Path(code): Path<String>) -> Result<Json<EtfHistory>, ApiFailure> {
+    let code = listed_fund(&st, &code)?;
+    let collection = collection_of(&st, code).await;
+    Ok(Json(EtfHistory { code: code.as_str().into(), first_collected_on: collection.keys().next().map(|day| KstDate(*day)), pairs: history::pairs(&collection) }))
+}
+
+async fn changes(State(st): State<Arc<AppState>>, Path(code): Path<String>, Query(query): Query<HashMap<String, String>>) -> Result<Json<EtfChanges>, ApiFailure> {
+    let code = listed_fund(&st, &code)?;
+    let (before, after) = (day_in(&query, "before")?, day_in(&query, "after")?);
+    if before >= after {
+        return Err(ApiFailure::bad_request("before는 after보다 앞선 날짜여야 합니다"));
+    }
+    let collection = collection_of(&st, code).await;
+    history::changes(code, &collection, before, after).map(Json).ok_or_else(|| ApiFailure::new(api::ApiErrorCode::NotFound, format!("{}의 {before}·{after} 수집본이 없습니다", code.as_str())))
 }

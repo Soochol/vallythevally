@@ -10,6 +10,8 @@ ETF 페이지가 읽는 서버 경로다. 지금은 서버 실행 파일에 포�
 |---|---|---|
 | `GET /api/etf/funds` | `EtfFundList` | 싣는 ETF 전부. 자료 순서 그대로다 |
 | `GET /api/etf/funds/{code}` | `EtfFundDetail` | ETF 하나와 구성 종목(비중 큰 순, 같으면 코드 순) |
+| `GET /api/etf/funds/{code}/history` | `EtfHistory` | 수집한 날짜의 이웃한 쌍마다 편입·편출·늘림·줄임 개수(최근 쌍이 먼저) |
+| `GET /api/etf/funds/{code}/changes?before=YYYY-MM-DD&after=YYYY-MM-DD` | `EtfChanges` | 수집한 두 날짜의 종목별 증감 |
 | `GET /api/etf/stocks/{code}` | `EtfStockHolders` | 그 종목을 담은 ETF와 비중(비중 큰 순, 같으면 ETF 코드 순) |
 
 오류는 공통 `ApiError`다.
@@ -18,6 +20,8 @@ ETF 페이지가 읽는 서버 경로다. 지금은 서버 실행 파일에 포�
 |---|---|---|
 | 형식이 틀린 코드(6자리 영문 대문자·숫자가 아님, 소문자 포함) | 400 | `bad_request` |
 | 형식은 맞지만 싣지 않은 ETF 코드 | 404 | `not_found` |
+| `changes`의 `before`·`after`가 없거나 `YYYY-MM-DD`가 아니거나 `before`가 `after`보다 앞서지 않음 | 400 | `bad_request` |
+| `changes`의 두 날짜 중 하나라도 그 ETF의 수집본이 없음 | 404 | `not_found` |
 
 `/api/etf/stocks/{code}`는 그 종목을 담은 ETF가 없으면 `holders`가 빈 200이다. 스냅샷은 조사한 ETF 후보 집합이라 담긴 종목이 896개뿐이고, 나머지 종목은 모두 빈 목록이다.
 
@@ -75,6 +79,37 @@ etf-pdf/
   - 비중 합이 1~11,000bps다(내장 자료와 같은 범위).
 - **실패**: 실패한 ETF는 `WARN`을 남기고 `refreshFailed`를 true로, `lastAttemptAt`을 시도 시각으로 싣는다. 나머지 ETF는 계속 받는다. 수집이 전부 실패해도 서버의 다른 기능은 그대로다.
 - **제공**: 수집한 날짜가 있는 ETF는 그 ETF의 최신 수집일 구성을 쓰고 `source`는 `collected`, `holdingsAsOf`는 그 기준일이다. 응답 모양은 같다. 종목 이름은 서버 종목 목록, 스냅샷, 수집 응답의 이름 순서로 쓴다. 수집한 날짜가 없는 ETF는 스냅샷 그대로다. 스냅샷에 없는 ETF는 수집해 저장하지만 이 경로가 싣지 않는다.
+
+## 편입 변경 계산
+
+[일별 구성내역 수집](#일별-구성내역-수집)이 저장한 날짜별 구성(`etf-pdf/pdf/YYYYMMDD/<ETF 코드>.json`)의 CU당 수량(`cuQuantity`)을 이웃한 두 수집일끼리 비교한다. 요청마다 그 ETF의 저장 파일을 읽는다. 날짜의 출처(네이버 수집, 나중의 운용사 API 채우기)는 상관없고 저장돼 있으면 쓴다. 설계는 [페이지 플랜](plans/pages-etf.md)의 결정 13이다.
+
+액티브 ETF는 CU 크기가 바뀌면 종목을 하나도 안 바꿔도 모든 수량이 같은 비율로 변한다. 그래서 수량을 그대로 비교하지 않고 공통 배율을 나눈다.
+
+1. 두 날짜에 모두 있는 종목마다 수량비 = 뒤 수량 ÷ 앞 수량을 구한다.
+2. 수량비의 중앙값이 공통 배율이다(개수가 짝수면 가운데 둘의 평균).
+3. 실질 증감 = 수량비 ÷ 공통 배율 − 1이다. 0.05는 +5%다.
+4. 실질 증감의 절댓값이 0.01 이하면 `unchanged`(유지), 그보다 크면 양수는 `increased`(늘림), 음수는 `decreased`(줄임)다. 정확히 ±1%는 유지다. 부동소수점 오차를 1e-9까지 받는다.
+5. 앞에 없고 뒤에만 있으면 `added`(편입), 앞에만 있으면 `removed`(편출)다. 이 종목은 `realChange`가 null이다. 수량이 0 이하이거나 유한하지 않은 행은 담지 않은 것으로 본다.
+6. 두 날짜에 모두 있는 종목이 없으면 `commonScale`은 null이다.
+
+예: SOL 조선TOP3플러스(466920)의 2026-10-30 → 2026-11-18은 13종목 수량이 모두 바뀌었지만 공통 배율이 0.9403이라, 실질 증감은 HD현대중공업 +25.7%·한화오션 +23.8%(늘림), 삼성중공업 −12.3%·태광 −1.6%(줄임)뿐이고 나머지 9종목은 유지다.
+
+`EtfHistory`:
+
+| 필드 | 뜻 |
+|---|---|
+| `code` | ETF 코드 |
+| `firstCollectedOn` | 저장된 가장 이른 수집일. 저장된 날짜가 없으면 null |
+| `pairs` | `EtfChangePair` 목록. 이웃한 수집일 쌍마다 하나이고 뒤 날짜가 가장 최근인 쌍이 먼저다. 수집일이 둘 미만이면 빈 목록 |
+
+`EtfChangePair`: `before`, `after`(수집일), `commonScale`, `added`, `removed`, `increased`, `decreased`(종목 수. 유지는 싣지 않는다).
+
+`EtfChanges`: `code`, `before`, `after`, `commonScale`, `rows`(`EtfChangeRow`). `rows`는 편입, 늘림, 줄임, 편출, 유지 순이고 같은 구분 안에서는 실질 증감의 절댓값이 큰 순, 같으면 종목 코드 순이다.
+
+`EtfChangeRow`: `code`, `name`, `beforeQuantity`, `afterQuantity`(없는 쪽은 null), `realChange`, `kind`(`added`·`removed`·`increased`·`decreased`·`unchanged`). 종목 이름은 뒤 날짜의 저장본이고 편출 종목만 앞 날짜의 것이다.
+
+저장 파일의 자료 버전·ETF 코드·기준일이 파일 위치와 다르면 `WARN`을 남기고 그 날짜를 건너뛴다. 이력 경로는 스냅샷 ETF만 받는다. 저장 폴더가 없거나 비어 있으면 빈 이력이다.
 
 ## 이평선 계산
 

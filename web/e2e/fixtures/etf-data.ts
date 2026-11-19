@@ -1,7 +1,11 @@
 import type { ApiError } from "../../src/api/generated/ApiError";
+import type { EtfChangePair } from "../../src/api/generated/EtfChangePair";
+import type { EtfChangeRow } from "../../src/api/generated/EtfChangeRow";
+import type { EtfChanges } from "../../src/api/generated/EtfChanges";
 import type { EtfFundDetail } from "../../src/api/generated/EtfFundDetail";
 import type { EtfFundList } from "../../src/api/generated/EtfFundList";
 import type { EtfFundSummary } from "../../src/api/generated/EtfFundSummary";
+import type { EtfHistory } from "../../src/api/generated/EtfHistory";
 import type { EtfHolding } from "../../src/api/generated/EtfHolding";
 import type { EtfStockHolders } from "../../src/api/generated/EtfStockHolders";
 import type { EtfMaStates } from "../../src/api/generated/EtfMaStates";
@@ -85,8 +89,54 @@ export const etfHoldersOf = (code: string): EtfStockHolders => {
   return { code, name, ma: NO_MA, maAsOf: null, holders };
 };
 
-export function etfBaseline(path: string, method: string): FixtureReply | null {
+const changeRow = (code: string, name: string, beforeQuantity: number | null, afterQuantity: number | null, realChange: number | null, kind: EtfChangeRow["kind"]): EtfChangeRow => ({ code, name, beforeQuantity, afterQuantity, realChange, kind });
+
+export const LATEST_CHANGES: EtfChanges = {
+  code: "444200",
+  before: "2026-11-14",
+  after: "2026-11-18",
+  commonScale: 0.94,
+  rows: [
+    changeRow("402340", "SK스퀘어", null, 50, null, "added"),
+    changeRow("000660", "SK하이닉스", 1000, 1200, 0.2766, "increased"),
+    changeRow("005930", "삼성전자", 2000, 1500, -0.2021, "decreased"),
+    changeRow("086520", "에코프로", 300, null, null, "removed"),
+    changeRow("035420", "NAVER", 800, 752, 0, "unchanged"),
+  ],
+};
+
+export const EARLIER_CHANGES: EtfChanges = {
+  code: "444200",
+  before: "2026-11-10",
+  after: "2026-11-14",
+  commonScale: 1,
+  rows: [changeRow("051910", "LG화학", 400, 440, 0.1, "increased"), changeRow("000270", "기아", 700, 700, 0, "unchanged")],
+};
+
+const pairOf = (changes: EtfChanges, counts: Pick<EtfChangePair, "added" | "removed" | "increased" | "decreased">): EtfChangePair => ({ before: changes.before, after: changes.after, commonScale: changes.commonScale, ...counts });
+
+export const MEGA_HISTORY: EtfHistory = {
+  code: "444200",
+  firstCollectedOn: "2026-11-10",
+  pairs: [pairOf(LATEST_CHANGES, { added: 1, removed: 1, increased: 1, decreased: 1 }), pairOf(EARLIER_CHANGES, { added: 0, removed: 0, increased: 1, decreased: 0 })],
+};
+
+export const SINGLE_DAY_HISTORY: EtfHistory = { code: "091160", firstCollectedOn: "2026-11-18", pairs: [] };
+
+const NO_HISTORY = (code: string): EtfHistory => ({ code, firstCollectedOn: null, pairs: [] });
+
+export function etfBaseline(path: string, method: string, query: URLSearchParams = new URLSearchParams()): FixtureReply | null {
   if (method !== "GET") return null;
+  const history = /^\/api\/etf\/funds\/([^/]+)\/history$/.exec(path);
+  if (history) {
+    const code = decodeURIComponent(history[1]!);
+    if (!ETF_DETAILS.some((entry) => entry.fund.code === code)) return notFound(code);
+    return { body: code === MEGA_HISTORY.code ? MEGA_HISTORY : code === SINGLE_DAY_HISTORY.code ? SINGLE_DAY_HISTORY : NO_HISTORY(code) };
+  }
+  if (/^\/api\/etf\/funds\/[^/]+\/changes$/.test(path)) {
+    const found = [LATEST_CHANGES, EARLIER_CHANGES].find((changes) => changes.before === query.get("before") && changes.after === query.get("after"));
+    return found ? { body: found } : notFound(path);
+  }
   if (path === "/api/etf/funds") return { body: ETF_FUNDS };
   const stock = /^\/api\/etf\/stocks\/([^/]+)$/.exec(path);
   if (stock) return { body: etfHoldersOf(decodeURIComponent(stock[1]!)) };
