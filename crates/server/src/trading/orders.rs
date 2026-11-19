@@ -1,9 +1,11 @@
+use std::collections::HashMap;
 use std::num::NonZeroU64;
 use std::sync::Arc;
 
 use domain::{StockCode, Symbol, SymbolInfo, Venue};
 
 use super::journal::{BatchBegun, Begun, JournalError, Prepared, PreparedBatch};
+use super::memory::PriceBand;
 use super::request::{BuyOrder, CancelOrder, LimitOrder, ModifyOrder, OrderAck, OrderNumber, OrderRoute, SellOrder, TradingRequest};
 use super::service::{OpenEntry, Trading, TradingError};
 use super::switch::SwitchRecord;
@@ -33,7 +35,7 @@ impl OrderLimits {
 enum Work {
     Place { code: StockCode, side: OrderSide, quantity: NonZeroU64, price: NonZeroU64, venue: Venue, confirmed: bool },
     Modify { order_no: OrderNumber, price: NonZeroU64, confirmed: bool },
-    Cancel { order_no: OrderNumber },
+    Cancel { order_no: OrderNumber, listed: Option<OpenEntry> },
 }
 
 enum Outbound {
@@ -184,7 +186,7 @@ impl Trading {
         let order_no = OrderNumber::parse(&input.order_no).ok_or(TradingError::BadRequest("주문번호는 7자리 숫자여야 합니다"))?;
         let account_ref = Self::account_ref_of_record(self.enabled_record()?)?;
         let prepared = Prepared { command_id: input.command_id, account_ref, kind: OrderCommandKind::Cancel, code: None, venue: None, quantity: None, price: None, target_order_no: Some(order_no.as_str().to_owned()) };
-        self.run_one(prepared, Work::Cancel { order_no }).await
+        self.run_one(prepared, Work::Cancel { order_no, listed: None }).await
     }
 
     pub async fn cancel_batch(self: &Arc<Self>, input: api::OrderCancelBatchInput) -> Result<api::OrderCommands, TradingError> {
@@ -204,22 +206,22 @@ impl Trading {
         if let Some(recorded) = self.journal.existing_batch(&batch).await? {
             return self.batch_reply(account_ref, recorded).await;
         }
+        let turn = self.turn_of(&account_ref);
+        let _turn = turn.lock().await;
         let (_, entries) = self.open_entries(Priority::Order).await?;
-        let mut targets: Vec<String> = entries.into_iter().filter(|e| e.order.code == code.as_str() && e.order.side == input.side && e.order.price == input.price && e.order.open_quantity > 0).map(|e| e.order.order_no).collect();
+        let listed: HashMap<String, OpenEntry> = entries.into_iter().filter(|e| e.order.code == code.as_str() && e.order.side == input.side && e.order.price == input.price && e.order.open_quantity > 0).map(|e| (e.order.order_no.clone(), e)).collect();
+        let mut targets: Vec<String> = listed.keys().cloned().collect();
         targets.sort();
         let cancels: Vec<Prepared> = targets.iter().map(|order_no| Prepared { command_id: format!("{}_{order_no}", input.batch_id), account_ref: account_ref.clone(), kind: OrderCommandKind::Cancel, code: None, venue: None, quantity: None, price: None, target_order_no: Some(order_no.clone()) }).collect();
         let begun = self.journal.begin_batch(&batch, &cancels, self.clock.now().unix()).await?;
         let BatchBegun::Created(commands) = &begun else {
             return self.batch_reply(account_ref, begun).await;
         };
-        let turn = self.turn_of(&account_ref);
-        {
-            let _turn = turn.lock().await;
-            for command in commands.iter().filter(|c| c.state == OrderCommandState::Prepared) {
-                let target = OrderNumber::parse(command.target_order_no.as_deref().expect("일괄 취소 명령은 대상 주문번호를 가진다")).expect("목록에서 읽은 주문번호는 형식을 이미 확인했다");
-                if let Err(e) = self.execute(&command.command_id, &account_ref, Work::Cancel { order_no: target }).await {
-                    tracing::error!(error = %e, "일괄 취소의 한 명령이 저널 오류로 끝났습니다");
-                }
+        for command in commands.iter().filter(|c| c.state == OrderCommandState::Prepared) {
+            let target = OrderNumber::parse(command.target_order_no.as_deref().expect("일괄 취소 명령은 대상 주문번호를 가진다")).expect("목록에서 읽은 주문번호는 형식을 이미 확인했다");
+            let listed = listed.get(target.as_str()).cloned();
+            if let Err(e) = self.execute(&command.command_id, &account_ref, Work::Cancel { order_no: target, listed }).await {
+                tracing::error!(error = %e, "일괄 취소의 한 명령이 저널 오류로 끝났습니다");
             }
         }
         self.notify(account_ref.clone());
@@ -298,6 +300,9 @@ impl Trading {
         self.journal.mark_sending(command_id, now()).await?;
         let (result, transmitted) = self.send_once(outbound).await;
         let settled = settle(result, transmitted.happened(), self.open.load(std::sync::atomic::Ordering::SeqCst));
+        if matches!(settled.state, OrderCommandState::Accepted | OrderCommandState::Unknown) {
+            self.recent_open.forget();
+        }
         if let Err(e) = self.journal.finish_sending(command_id, settled.state, settled.reason, settled.order_no.as_deref(), now()).await {
             tracing::error!(error = %e, "보낸 뒤 결과를 저널에 쓰지 못했습니다. 결과 불명으로 남깁니다");
             let _ = self.journal.finish_sending(command_id, OrderCommandState::Unknown, None, None, now()).await;
@@ -383,7 +388,7 @@ impl Trading {
                 })
             }
             Work::Modify { order_no, price, confirmed } => {
-                let (code, venue, remaining) = self.resolve_target(command_id, order_no, true).await?;
+                let (code, venue, remaining) = self.resolve_target(command_id, order_no, true, None).await?;
                 let info = self.info_of(code)?;
                 if venue == Venue::Nxt && !info.nxt_enabled {
                     return Err(OrderRejectReason::NxtUnavailable.into());
@@ -393,16 +398,30 @@ impl Trading {
                 self.check_price_band(code, price.get()).await?;
                 Ok(Outbound::Modify(ModifyOrder::new(OrderRoute::from(venue), order_no, code, remaining, *price)))
             }
-            Work::Cancel { order_no } => {
-                let (code, venue, remaining) = self.resolve_target(command_id, order_no, false).await?;
+            Work::Cancel { order_no, listed } => {
+                let (code, venue, remaining) = self.resolve_target(command_id, order_no, false, listed.clone()).await?;
                 Ok(Outbound::Cancel(CancelOrder::new(OrderRoute::from(venue), order_no, code, remaining)))
             }
         }
     }
 
-    async fn resolve_target(&self, command_id: &str, order_no: &OrderNumber, needs_limit_order: bool) -> Result<(StockCode, Venue, NonZeroU64), Stop> {
+    async fn find_open_entry(&self, order_no: &OrderNumber) -> Result<Option<OpenEntry>, Stop> {
+        let account = self.verified(Priority::Order).await?;
+        if let Some(entry) = self.recent_open.find(&account.account_ref, self.clock.now().unix(), order_no.as_str()) {
+            return Ok(Some(entry));
+        }
         let (_, entries) = self.open_entries(Priority::Order).await?;
-        let found: Option<OpenEntry> = entries.into_iter().find(|e| e.order.order_no == order_no.as_str());
+        Ok(entries.into_iter().find(|e| e.order.order_no == order_no.as_str()))
+    }
+
+    async fn resolve_target(&self, command_id: &str, order_no: &OrderNumber, needs_limit_order: bool, listed: Option<OpenEntry>) -> Result<(StockCode, Venue, NonZeroU64), Stop> {
+        let found = match listed {
+            Some(entry) => {
+                self.verified(Priority::Order).await?;
+                Some(entry)
+            }
+            None => self.find_open_entry(order_no).await?,
+        };
         let entry = found.filter(|e| e.order.open_quantity > 0).ok_or(OrderRejectReason::OrderNotFound)?;
         if needs_limit_order && !entry.ordinary_limit {
             return Err(OrderRejectReason::InvalidOrder.into());
@@ -414,18 +433,24 @@ impl Trading {
         Ok((code, venue, remaining))
     }
 
-    async fn check_price_band(&self, code: StockCode, price: u64) -> Result<(), Stop> {
+    async fn fetch_price_band(&self, code: StockCode) -> Result<PriceBand, Stop> {
         let reply = self.rest.call(&StockBasicInfo::new(code), None, Priority::Order, MergeScope::default()).await?;
         let StockBasicInfoResponse::Found { fundamentals, .. } = reply.body else {
             return Err(OrderRejectReason::UnknownSymbol.into());
         };
-        let (Some(upper), Some(lower)) = (fundamentals.upper_limit_won.filter(|v| *v > 0), fundamentals.lower_limit_won.filter(|v| *v > 0)) else {
-            return Err(OrderRejectReason::LimitsUnavailable.into());
-        };
-        if price > upper || price < lower {
-            return Err(OrderRejectReason::OutOfLimit.into());
+        let band = PriceBand::from_limits(fundamentals.upper_limit_won, fundamentals.lower_limit_won).ok_or(OrderRejectReason::LimitsUnavailable)?;
+        self.bands.remember(code, self.clock.now().kst_date(), band);
+        Ok(band)
+    }
+
+    async fn check_price_band(&self, code: StockCode, price: u64) -> Result<(), Stop> {
+        if self.bands.of_day(code, self.clock.now().kst_date()).is_some_and(|band| band.contains(price)) {
+            return Ok(());
         }
-        Ok(())
+        if self.fetch_price_band(code).await?.contains(price) {
+            return Ok(());
+        }
+        Err(OrderRejectReason::OutOfLimit.into())
     }
 }
 

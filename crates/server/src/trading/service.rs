@@ -14,6 +14,7 @@ use crate::clock::Clock;
 use crate::config::Secret;
 use crate::kiwoom::rest::{Admission, ContKey, Dispatch, KiwoomError, KiwoomRest, MergeScope, Page, Priority};
 use super::journal::Journal;
+use super::memory::{PriceBand, PriceBands, RecentOpenOrders};
 use crate::symbols::SymbolDirectory;
 use crate::kiwoom::stream::{AccountEvent, AccountFeed};
 
@@ -97,6 +98,8 @@ pub struct Trading {
     pub(super) symbols: Arc<SymbolDirectory>,
     pub(super) recovered: tokio::sync::OnceCell<Result<(), String>>,
     pub(super) turns: Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>,
+    pub(super) bands: PriceBands,
+    pub(super) recent_open: RecentOpenOrders,
 }
 
 fn hex(bytes: &[u8]) -> String {
@@ -137,6 +140,8 @@ impl Trading {
             symbols,
             recovered: tokio::sync::OnceCell::new(),
             turns: Mutex::new(HashMap::new()),
+            bands: PriceBands::default(),
+            recent_open: RecentOpenOrders::default(),
         });
         if let Err(e) = trading.store.load() {
             tracing::error!(error = %e, "주문 사용 스위치 파일을 읽지 못했습니다. 꺼진 것으로 봅니다");
@@ -145,6 +150,12 @@ impl Trading {
         tokio::spawn(forward_events(Arc::downgrade(&trading), trading.feed.subscribe()));
         trading.start_recovery();
         trading
+    }
+
+    pub fn remember_price_band(&self, code: StockCode, upper: Option<u64>, lower: Option<u64>) {
+        if let Some(band) = PriceBand::from_limits(upper, lower) {
+            self.bands.remember(code, self.clock.now().kst_date(), band);
+        }
     }
 
     pub fn subscribe_changes(&self) -> broadcast::Receiver<AccountChanged> {
@@ -241,6 +252,7 @@ impl Trading {
 
     pub async fn set_enabled(&self, input: api::OrdersSwitchInput) -> Result<api::OrdersStatus, TradingError> {
         let _write = self.write.lock().await;
+        self.recent_open.forget();
         if !input.enabled {
             *self.lock() = State::default();
             let switch = self.switch_lock.lock().expect("스위치 잠금");
@@ -345,6 +357,7 @@ impl Trading {
 
     pub(super) async fn open_entries(&self, priority: Priority) -> Result<(String, Vec<OpenEntry>), TradingError> {
         let account = self.verified(priority).await?;
+        let ticket = self.recent_open.ticket();
         let mut entries = Vec::new();
         for row in self.pages(&OpenOrders::all(), priority).await?.into_iter().flat_map(Rows::into_rows) {
             Self::own_row(&account, row.acnt_no.as_ref())?;
@@ -368,6 +381,7 @@ impl Trading {
             };
             entries.push(OpenEntry { order, ordinary_limit: matches!(row.trde_tp.trim(), "보통" | "0") });
         }
+        self.recent_open.keep(ticket, &account.account_ref, self.clock.now().unix(), &entries);
         Ok((account.account_ref, entries))
     }
 
@@ -418,6 +432,7 @@ impl Trading {
         if account_ref_of(&record.salt, event.account.expose()) != account_ref {
             return;
         }
+        self.recent_open.forget();
         self.notify(account_ref);
     }
 
@@ -426,6 +441,7 @@ impl Trading {
     }
 
     fn on_events_missed(&self) {
+        self.recent_open.forget();
         if let Ok(Some(account_ref)) = self.enabled_record().map(|r| r.account_ref) {
             self.notify(account_ref);
         }
@@ -444,6 +460,7 @@ async fn forward_events(trading: std::sync::Weak<Trading>, mut events: broadcast
     }
 }
 
+#[derive(Clone)]
 pub(super) struct OpenEntry {
     pub(super) order: api::TradingOpenOrder,
     pub(super) ordinary_limit: bool,

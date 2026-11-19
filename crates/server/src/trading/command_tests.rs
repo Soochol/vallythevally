@@ -8,12 +8,13 @@ use serde_json::{Value, json};
 use tower::ServiceExt;
 
 use super::journal::{BatchBegun, Begun, Prepared, PreparedBatch};
-use super::tests::{ETN_CODE, Fixture, HOST, WriteMode, enable, fixture, fixture_in, fixture_with, get, trading_sends};
+use super::tests::{ACCOUNT, DEFAULT_BAND, ETN_CODE, Fixture, HOST, WriteMode, enable, fixture, fixture_in, fixture_with, get, trading_sends};
 use super::{SwitchStore, Trading};
 use crate::api::{KiwoomEnvironment, OrderCommandKind, OrderCommandState};
-use crate::kiwoom::api::{Endpoint, StockList};
+use crate::kiwoom::api::{Endpoint, MarketRequest, StockBasicInfo, StockList};
 use crate::kiwoom::rest::{ContKey, MergeScope, Priority};
-use crate::kiwoom::stream::KiwoomStream;
+use crate::config::Secret;
+use crate::kiwoom::stream::{AccountEvent, AccountKind, KiwoomStream};
 use crate::trading::TradingApiId;
 
 const PLACE: &str = "/api/trading/commands/place";
@@ -518,4 +519,285 @@ async fn a_dropped_http_request_does_not_strand_the_command() {
     }
     let accepted = writes(&f).len();
     assert!(accepted <= 5, "같은 id는 한 번만 나간다: {accepted}");
+}
+
+const BASIC_INFO: &str = Endpoint::Market(StockBasicInfo::API_ID).as_str();
+const FUNDAMENTALS: &str = "/api/symbols/005930/fundamentals";
+const OPEN_ORDERS: &str = "/api/trading/open-orders";
+
+fn sent_ids(f: &Fixture) -> Vec<&'static str> {
+    f.fake.sent().iter().filter(|s| s.api_id != Endpoint::ISSUE).map(|s| s.api_id.as_str()).collect()
+}
+
+fn sent_since(f: &Fixture, before: usize) -> Vec<&'static str> {
+    sent_ids(f).split_off(before)
+}
+
+async fn remember_band(f: &Fixture) {
+    assert_eq!(get(&f.app, FUNDAMENTALS).await.0, StatusCode::OK);
+}
+
+fn set_band(f: &Fixture, upper: &str, lower: &str) {
+    *f.band_limits.lock().unwrap() = (upper.to_owned(), lower.to_owned());
+}
+
+fn sell(id: &str, qty: u64, price: u64) -> Value {
+    json!({"commandId": id, "code": "005930", "side": "sell", "quantity": qty, "price": price})
+}
+
+#[tokio::test]
+async fn place_with_remembered_band_skips_basic_info() {
+    let f = on().await;
+    let before = sent_ids(&f).len();
+    remember_band(&f).await;
+    assert_eq!(sent_since(&f, before), [BASIC_INFO]);
+    let before = sent_ids(&f).len();
+    let (_, bought) = order(&f.app, PLACE, buy("cmd-band-buy01", 3, 71_000)).await;
+    assert_eq!(bought["state"], "accepted", "{bought}");
+    assert_eq!(sent_since(&f, before), ["kt00010", "kt10000"]);
+    let before = sent_ids(&f).len();
+    let (_, sold) = order(&f.app, PLACE, sell("cmd-band-sell1", 2, 71_000)).await;
+    assert_eq!(sold["state"], "accepted", "{sold}");
+    assert_eq!(sent_since(&f, before), ["kt00018", "kt10001"]);
+}
+
+#[tokio::test]
+async fn an_order_alone_remembers_the_band_for_the_next_one() {
+    let f = on().await;
+    let before = sent_ids(&f).len();
+    order(&f.app, PLACE, buy("cmd-band-solo1", 1, 71_000)).await;
+    order(&f.app, PLACE, buy("cmd-band-solo2", 1, 71_000)).await;
+    assert_eq!(sent_since(&f, before), [BASIC_INFO, "kt00010", "kt10000", "kt00010", "kt10000"]);
+}
+
+#[tokio::test]
+async fn price_band_is_fetched_again_on_a_new_kst_day() {
+    let f = on().await;
+    remember_band(&f).await;
+    order(&f.app, PLACE, buy("cmd-day-00001", 1, 71_000)).await;
+    f.state.clock.jump(24 * 60 * 60);
+    let before = sent_ids(&f).len();
+    let (_, next_day) = order(&f.app, PLACE, buy("cmd-day-00002", 1, 71_000)).await;
+    assert_eq!(next_day["state"], "accepted", "{next_day}");
+    assert_eq!(sent_since(&f, before).iter().filter(|id| **id == BASIC_INFO).count(), 1);
+    let before = sent_ids(&f).len();
+    order(&f.app, PLACE, buy("cmd-day-00003", 1, 71_000)).await;
+    assert_eq!(sent_since(&f, before), ["kt00010", "kt10000"], "새 날짜의 값은 다시 기억한다");
+}
+
+#[tokio::test]
+async fn missing_limits_still_refuse_with_limits_unavailable() {
+    let f = on().await;
+    for (round, (upper, lower)) in [("+100000", "0"), ("", "-50000"), ("0", "0"), ("", "")].into_iter().enumerate() {
+        set_band(&f, upper, lower);
+        remember_band(&f).await;
+        let before = sent_ids(&f).len();
+        refused(&f, buy(&format!("cmd-miss-000{round}"), 1, 71_000), "limits_unavailable").await;
+        assert_eq!(sent_since(&f, before), [BASIC_INFO], "상한·하한이 없으면 기억하지 않아 주문에서 다시 묻고, 확인이 막으니 다른 조회도 쓰기도 없다: {upper:?} {lower:?}");
+    }
+    set_band(&f, DEFAULT_BAND[0], DEFAULT_BAND[1]);
+    let (_, accepted) = order(&f.app, PLACE, buy("cmd-miss-0009", 1, 71_000)).await;
+    assert_eq!(accepted["state"], "accepted", "{accepted}");
+}
+
+#[tokio::test]
+async fn out_of_remembered_band_fetches_once_before_refusing() {
+    let f = on().await;
+    remember_band(&f).await;
+    set_band(&f, "+130000", "-60000");
+    let before = sent_ids(&f).len();
+    let (_, inside_new) = order(&f.app, PLACE, buy("cmd-out-00001", 1, 110_000)).await;
+    assert_eq!(inside_new["state"], "accepted", "{inside_new}");
+    assert_eq!(sent_since(&f, before), [BASIC_INFO, "kt00010", "kt10000"]);
+    let before = sent_ids(&f).len();
+    refused(&f, buy("cmd-out-00002", 1, 140_000), "out_of_limit").await;
+    assert_eq!(sent_since(&f, before), [BASIC_INFO], "새 값으로도 밖이면 한 번 조회하고 거절한다");
+    let before = sent_ids(&f).len();
+    let (_, inside_old) = order(&f.app, PLACE, buy("cmd-out-00003", 1, 71_000)).await;
+    assert_eq!(inside_old["state"], "accepted", "{inside_old}");
+    assert_eq!(sent_since(&f, before), ["kt00010", "kt10000"], "새로 받은 값이 기억을 바꿨다");
+}
+
+#[tokio::test]
+async fn cancel_with_recent_open_orders_sends_only_kt10003() {
+    let f = on().await;
+    remember_band(&f).await;
+    get(&f.app, OPEN_ORDERS).await;
+    let before = sent_ids(&f).len();
+    let (_, modified) = order(&f.app, MODIFY, json!({"commandId": "cmd-fast-mod01", "orderNo": "0012345", "price": 71_100})).await;
+    assert_eq!((modified["state"].clone(), modified["quantity"].clone()), (json!("accepted"), json!(7)), "{modified}");
+    assert_eq!(sent_since(&f, before), ["kt10002"]);
+    get(&f.app, OPEN_ORDERS).await;
+    let before = sent_ids(&f).len();
+    let (_, cancelled) = order(&f.app, CANCEL, json!({"commandId": "cmd-fast-can01", "orderNo": "0012346"})).await;
+    assert_eq!((cancelled["state"].clone(), cancelled["venue"].clone(), cancelled["quantity"].clone()), (json!("accepted"), json!("combined"), json!(3)), "{cancelled}");
+    assert_eq!(sent_since(&f, before), ["kt10003"]);
+}
+
+#[tokio::test]
+async fn cancel_of_an_order_missing_from_recent_open_orders_queries_again() {
+    let f = on().await;
+    let cancel = |id: &str, order_no: &str| json!({"commandId": id, "orderNo": order_no});
+
+    get(&f.app, OPEN_ORDERS).await;
+    let before = sent_ids(&f).len();
+    let (_, missing) = order(&f.app, CANCEL, cancel("cmd-miss-can01", "0000001")).await;
+    assert_eq!((missing["state"].clone(), missing["reason"].clone()), (json!("rejected"), json!("order_not_found")));
+    assert_eq!(sent_since(&f, before), ["ka10075"], "기억에 없는 주문번호는 다시 조회한다");
+
+    get(&f.app, OPEN_ORDERS).await;
+    f.state.clock.jump(11);
+    let before = sent_ids(&f).len();
+    order(&f.app, CANCEL, cancel("cmd-miss-can02", "0012345")).await;
+    assert_eq!(sent_since(&f, before), ["ka10075", "kt10003"], "10초가 지난 기억은 쓰지 않는다");
+
+    get(&f.app, OPEN_ORDERS).await;
+    remember_band(&f).await;
+    order(&f.app, PLACE, buy("cmd-miss-buy01", 1, 71_000)).await;
+    let before = sent_ids(&f).len();
+    order(&f.app, CANCEL, cancel("cmd-miss-can03", "0012345")).await;
+    assert_eq!(sent_since(&f, before), ["ka10075", "kt10003"], "이 서버의 쓰기가 접수된 뒤에는 기억을 버린다");
+
+    get(&f.app, OPEN_ORDERS).await;
+    f.feed.emit(AccountEvent { kind: AccountKind::OrderFill, account: Secret::new(ACCOUNT.into()) });
+    for _ in 0..10 {
+        tokio::task::yield_now().await;
+    }
+    let before = sent_ids(&f).len();
+    order(&f.app, CANCEL, cancel("cmd-miss-can04", "0012345")).await;
+    assert_eq!(sent_since(&f, before), ["ka10075", "kt10003"], "계좌 이벤트가 오면 기억을 버린다");
+}
+
+#[tokio::test]
+async fn an_open_orders_read_that_overlaps_a_write_is_not_remembered() {
+    let f = fixture_with(Duration::from_millis(50), Duration::ZERO).await;
+    assert_eq!(enable(&f.app, "01").await.0, StatusCode::OK);
+    remember_band(&f).await;
+    let slow_read = {
+        let trading = f.state.trading.clone();
+        tokio::spawn(async move { trading.open_orders().await.map(drop) })
+    };
+    tokio::time::sleep(Duration::from_millis(10)).await;
+    let (_, placed) = order(&f.app, PLACE, buy("cmd-race-buy01", 1, 71_000)).await;
+    assert_eq!(placed["state"], "accepted", "{placed}");
+    slow_read.await.unwrap().unwrap();
+    let before = sent_ids(&f).len();
+    order(&f.app, CANCEL, json!({"commandId": "cmd-race-can01", "orderNo": "0012345"})).await;
+    assert_eq!(sent_since(&f, before), ["ka10075", "kt10003"], "쓰기 전에 시작한 조회의 결과는 기억하지 않는다");
+}
+
+fn same_price_rows(order_nos: &[&str]) -> Value {
+    Value::Array(order_nos.iter().map(|no| json!({"acnt_no": null, "ord_no": no, "stk_cd": "005930", "stk_nm": "삼성전자", "ord_stt": "접수", "ord_qty": "5", "ord_pric": "71000", "oso_qty": "5", "orig_ord_no": "0000000", "io_tp_nm": "-매수", "trde_tp": "보통", "tm": "093001", "stex_tp": "1", "stex_tp_txt": "KRX", "sor_yn": "N"})).collect())
+}
+
+#[tokio::test]
+async fn batch_cancel_lists_once_then_sends_each() {
+    let f = on().await;
+    *f.open_rows.lock().unwrap() = Some(same_price_rows(&["0020001", "0020002", "0020003"]));
+    get(&f.app, OPEN_ORDERS).await;
+    f.state.trading.remember_price_band(domain::StockCode::parse("005930").unwrap(), Some(100_000), Some(50_000));
+    let before = sent_ids(&f).len();
+    let batch = json!({"batchId": "batch-fast-0001", "code": "005930", "side": "buy", "price": 71_000});
+    let (code, result) = order(&f.app, CANCEL_BATCH, batch.clone()).await;
+    assert_eq!(code, StatusCode::OK, "{result}");
+    assert_eq!(sent_since(&f, before), ["ka10075", "kt10003", "kt10003", "kt10003"], "대상은 새로 조회하고 건마다 취소만 보낸다");
+    let commands = result["commands"].as_array().unwrap();
+    assert_eq!(commands.iter().map(|c| (c["state"].clone(), c["code"].clone(), c["quantity"].clone())).collect::<Vec<_>>(), vec![(json!("accepted"), json!("005930"), json!(5)); 3], "저널에는 건마다 대상 확인이 남는다");
+    assert_eq!(writes(&f).iter().map(|(_, body)| body["orig_ord_no"].clone()).collect::<Vec<_>>(), [json!("0020001"), json!("0020002"), json!("0020003")]);
+    let before = sent_ids(&f).len();
+    let (_, again) = order(&f.app, CANCEL_BATCH, batch).await;
+    assert_eq!(again["commands"], result["commands"]);
+    assert_eq!(sent_since(&f, before), Vec::<&str>::new(), "같은 batch_id 재요청은 새로 보내지 않는다");
+}
+
+#[tokio::test]
+async fn a_batch_lists_afresh_even_when_open_orders_were_just_read() {
+    let f = on().await;
+    get(&f.app, OPEN_ORDERS).await;
+    *f.open_rows.lock().unwrap() = Some(same_price_rows(&["0020001", "0020002"]));
+    let before = sent_ids(&f).len();
+    let (_, result) = order(&f.app, CANCEL_BATCH, json!({"batchId": "batch-fast-0002", "code": "005930", "side": "buy", "price": 71_000})).await;
+    assert_eq!(result["commands"].as_array().unwrap().len(), 2, "막 들어온 주문도 빠뜨리지 않는다: {result}");
+    assert_eq!(sent_since(&f, before), ["ka10075", "kt10003", "kt10003"]);
+}
+
+#[tokio::test]
+async fn order_latency_probe() {
+    let mut table = vec!["조건(지연, 간격) | 동작 | 키움 전송 순서 | HTTP 총 시간".to_owned()];
+    let mut mismatches = Vec::new();
+    for (latency_ms, spacing_ms) in [(0u64, 260u64), (100, 260)] {
+        let spacing = Duration::from_millis(spacing_ms);
+        let f = fixture_with(Duration::from_millis(latency_ms), spacing).await;
+        assert_eq!(enable(&f.app, "01").await.0, StatusCode::OK);
+        let tag = format!("{latency_ms}-{spacing_ms}");
+        let actions: Vec<(&str, Vec<&str>)> = vec![
+            ("매수", vec!["kt00010", "kt10000"]),
+            ("매도", vec!["kt00018", "kt10001"]),
+            ("단건 취소", vec!["kt10003"]),
+            ("같은 가격 3건 일괄 취소", vec!["ka10075", "kt10003", "kt10003", "kt10003"]),
+            ("정정 1건", vec!["kt10002"]),
+        ];
+        for (index, (name, expected)) in actions.into_iter().enumerate() {
+            *f.open_rows.lock().unwrap() = (name == "같은 가격 3건 일괄 취소").then(|| same_price_rows(&["0020001", "0020002", "0020003"]));
+            get(&f.app, FUNDAMENTALS).await;
+            get(&f.app, OPEN_ORDERS).await;
+            tokio::time::sleep(spacing + Duration::from_millis(60)).await;
+            let before = sent_ids(&f).len();
+            let started = tokio::time::Instant::now();
+            let (_, reply) = match name {
+                "매수" => order(&f.app, PLACE, buy(&format!("cmd-probe-{tag}-{index}"), 3, 71_000)).await,
+                "매도" => order(&f.app, PLACE, sell(&format!("cmd-probe-{tag}-{index}"), 2, 71_000)).await,
+                "단건 취소" => order(&f.app, CANCEL, json!({"commandId": format!("cmd-probe-{tag}-{index}"), "orderNo": "0012346"})).await,
+                "같은 가격 3건 일괄 취소" => order(&f.app, CANCEL_BATCH, json!({"batchId": format!("batch-probe-{tag}"), "code": "005930", "side": "buy", "price": 71_000})).await,
+                _ => order(&f.app, MODIFY, json!({"commandId": format!("cmd-probe-{tag}-{index}"), "orderNo": "0012345", "price": 71_100})).await,
+            };
+            let elapsed = started.elapsed();
+            assert!(reply.to_string().contains("accepted"), "{name}: {reply}");
+            let sent = sent_since(&f, before);
+            table.push(format!("{latency_ms}ms, {spacing_ms}ms | {name} | {} | {}ms", sent.join(" → "), elapsed.as_millis()));
+            if sent != expected {
+                mismatches.push(format!("{latency_ms}ms {name}: {sent:?} != {expected:?}"));
+            }
+        }
+    }
+    println!("{}", table.join("\n"));
+    assert!(mismatches.is_empty(), "{mismatches:#?}");
+}
+
+#[tokio::test]
+async fn turning_orders_off_and_on_drops_the_recent_open_orders() {
+    let f = on().await;
+    get(&f.app, OPEN_ORDERS).await;
+    let (code, _) = super::tests::call(&f.app, "PUT", "/api/system/orders", Some(json!({"enabled": false}))).await;
+    assert_eq!(code, StatusCode::OK);
+    *f.open_rows.lock().unwrap() = Some(json!([]));
+    assert_eq!(enable(&f.app, "01").await.0, StatusCode::OK);
+    let before = sent_ids(&f).len();
+    let (_, cancelled) = order(&f.app, CANCEL, json!({"commandId": "cmd-offon-0001", "orderNo": "0012345"})).await;
+    assert_eq!((cancelled["state"].clone(), cancelled["reason"].clone()), (json!("rejected"), json!("order_not_found")), "{cancelled}");
+    assert_eq!(sent_since(&f, before), ["ka10075"]);
+}
+
+#[tokio::test]
+async fn a_batch_waiting_for_the_turn_lists_after_the_write_ahead_of_it() {
+    let f = fixture_with(Duration::from_millis(300), Duration::ZERO).await;
+    assert_eq!(enable(&f.app, "01").await.0, StatusCode::OK);
+    *f.open_rows.lock().unwrap() = Some(same_price_rows(&["0020001", "0020002"]));
+    get(&f.app, OPEN_ORDERS).await;
+    let single = tokio::spawn({
+        let app = f.app.clone();
+        async move { order(&app, CANCEL, json!({"commandId": "cmd-turn-single", "orderNo": "0020001"})).await }
+    });
+    tokio::time::sleep(Duration::from_millis(30)).await;
+    let batch = tokio::spawn({
+        let app = f.app.clone();
+        async move { order(&app, CANCEL_BATCH, json!({"batchId": "batch-turn-0001", "code": "005930", "side": "buy", "price": 71_000})).await }
+    });
+    tokio::time::sleep(Duration::from_millis(120)).await;
+    *f.open_rows.lock().unwrap() = Some(same_price_rows(&["0020002"]));
+    assert_eq!(single.await.unwrap().1["state"], "accepted");
+    let (_, batch) = batch.await.unwrap();
+    assert_eq!(batch["commands"].as_array().unwrap().len(), 1, "{batch}");
+    let cancelled: Vec<Value> = writes(&f).into_iter().map(|(_, body)| body["orig_ord_no"].clone()).collect();
+    assert_eq!(cancelled, [json!("0020001"), json!("0020002")], "이미 취소 접수된 주문에 다시 보내지 않는다");
 }
