@@ -5,7 +5,7 @@ import { formatPrice } from "../../lib/format";
 import { formatQuantity, formatWon } from "../market-window/format";
 import { FundsPopover } from "./FundsPopover";
 import { buyableName } from "./funds";
-import { costTitle, type ProfitUnit, profitText, sellableFill, type QuantityFill } from "./holdingSummary";
+import { costTitle, type ProfitUnit, profitText, sellableFill } from "./holdingSummary";
 
 interface Props {
   readonly holding: TradingHolding | null;
@@ -13,7 +13,7 @@ interface Props {
   readonly buyableProblem: string | null;
   readonly unit: ProfitUnit;
   readonly onUnit: () => void;
-  readonly onFill: (fill: QuantityFill) => void;
+  readonly onFill: (input: string) => void;
 }
 
 export function HoldingSummary({ holding, orderable, buyableProblem, unit, onUnit, onFill }: Props) {

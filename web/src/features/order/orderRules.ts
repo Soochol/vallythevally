@@ -138,13 +138,12 @@ export function dragGhostText(target: DragTarget, source: DragSource): string {
 
 export const previewText = (side: OrderSide, quantity: number): string => `${SIDE_LABEL[side]} ${quantity}`;
 
-export type QuantityMode = "shares" | "amount";
-
-export function quantityOf(mode: QuantityMode, input: number, price: number): number {
-  if (!Number.isFinite(input) || input <= 0) return 0;
-  if (mode === "shares") return Math.floor(input);
-  return price > 0 ? Math.floor(input / price) : 0;
+export function typedQuantity(input: string): number {
+  const typed = Number(input);
+  return Number.isFinite(typed) && typed > 0 ? Math.floor(typed) : 0;
 }
+
+export const quantityForAmount = (amount: number, price: number | null): number | null => (price !== null && price > 0 ? Math.floor(amount / price) : null);
 
 export interface BuyingPower {
   readonly policy: MarginPolicy;
@@ -187,7 +186,7 @@ const overText = (buying: BuyingPower): string =>
 export function buyBlock(price: number, quantity: number, buying: BuyingPower | null): BuyBlock | null {
   if (buyPreview(price, quantity, buying) !== "over") return null;
   const maxQuantity = maxBuyQuantity(price, buying!.amount);
-  return { text: `${overText(buying!)} · ${maxQuantity > 0 ? `최대 ${maxQuantity.toLocaleString("ko-KR")}주` : "살 수 있는 수량이 없습니다"}`, maxQuantity };
+  return { text: `${overText(buying!)} · ${maxQuantity > 0 ? `최대 ${maxQuantity.toLocaleString("ko-KR")}` : "살 수 있는 수량이 없습니다"}`, maxQuantity };
 }
 
 export function modifyBuyProblem(fromPrice: number, toPrice: number, openQuantity: number, buying: BuyingPower | null): string | null {

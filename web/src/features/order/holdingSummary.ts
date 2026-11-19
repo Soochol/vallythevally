@@ -6,7 +6,6 @@ import { formatPercent } from "../../lib/format";
 import { isEtfOrEtn } from "../../lib/symbol";
 import { formatWon } from "../market-window/format";
 import { secondOfDay } from "../trades/tape";
-import type { QuantityMode } from "./orderRules";
 
 export type ProfitUnit = "won" | "percent";
 
@@ -21,14 +20,9 @@ export function profitText(holding: TradingHolding | null, unit: ProfitUnit): st
 
 export const toggledUnit = (unit: ProfitUnit): ProfitUnit => (unit === "won" ? "percent" : "won");
 
-export interface QuantityFill {
-  readonly mode: QuantityMode;
-  readonly input: string;
-}
-
-export function sellableFill(holding: TradingHolding | null): QuantityFill | null {
+export function sellableFill(holding: TradingHolding | null): string | null {
   if (holding === null || !(holding.sellableQuantity > 0)) return null;
-  return { mode: "shares", input: String(holding.sellableQuantity) };
+  return String(holding.sellableQuantity);
 }
 
 export const costTitle = (holding: TradingHolding | null): string | undefined => (holding === null ? undefined : `매입총금액 ${formatWon(Math.round(holding.averagePrice * holding.quantity))}`);
