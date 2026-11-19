@@ -344,6 +344,52 @@ test("창을 열면 지난 체결을 pages=1로 한 번 받아 실시간 없이 
   expect(asked.map((url) => url.searchParams.get("pages"))).toEqual(["1"]);
 });
 
+const bookGroup = (page: Page) => page.locator("[data-dock-group]").filter({ has: book(page) });
+
+async function squeezeBookWindow(page: Page): Promise<void> {
+  const handle = (await page.getByRole("separator", { name: "좌우 창 경계" }).first().boundingBox())!;
+  const at = { x: handle.x + handle.width / 2, y: handle.y + handle.height / 2 };
+  await page.keyboard.down("Alt");
+  await page.mouse.move(at.x, at.y);
+  await page.mouse.down();
+  await page.mouse.move(1440, at.y, { steps: 10 });
+  await page.mouse.up();
+  await page.keyboard.up("Alt");
+}
+
+test("10호가창은 경계를 끌어도 최소 폭 424px 아래로 줄지 않고 그 폭에서 백만 단위 가격·수량이 겹치거나 잘리지 않으며 행끼리 열이 정렬된다", async ({ page, scenario }) => {
+  await open(page, scenario, 70000);
+  await squeezeBookWindow(page);
+  await expect.poll(async () => (await bookGroup(page).boundingBox())!.width).toBe(424);
+  await squeezeBookWindow(page);
+  expect((await bookGroup(page).boundingBox())!.width).toBe(424);
+  const trades: [number, number][] = [[70_000, 600], [1_234_000, 9_999_999], [9_999_000, 999_999], [70_100, 9_999], [70_200, 12_345], [70_300, 7]];
+  for (const [index, [price, qty]] of trades.entries()) await emitTrade(scenario, index + 1, price, qty);
+  await expect(page.getByTestId("ladder-trade")).toHaveCount(trades.length);
+  const parts = await page.getByTestId("ladder-trade").evaluateAll((rows) => rows.map((row) => {
+    const [price, qty] = [row.children[0]!, row.children[1]!];
+    const textRect = (node: Element) => {
+      const range = document.createRange();
+      range.selectNodeContents(node.firstChild!);
+      return range.getBoundingClientRect();
+    };
+    const box = row.parentElement!.getBoundingClientRect();
+    const [priceText, qtyText] = [textRect(price), textRect(qty)];
+    return { price: price.textContent, shown: qty.textContent, fontSize: getComputedStyle(qty).fontSize, priceLeft: priceText.left, priceRight: priceText.right, qtyLeft: qtyText.left, qtyRight: qtyText.right, boxLeft: box.left, boxRight: box.right, lefts: [price.getBoundingClientRect().left, qty.getBoundingClientRect().left], qtyBoxRight: qty.getBoundingClientRect().right };
+  }));
+  expect(parts.map((part) => part.shown)).toEqual(["7", "12,345", "9,999", "999,999", "9,999,999", "600"]);
+  for (const part of parts) {
+    const note = JSON.stringify(part);
+    expect(part.fontSize).toBe("11px");
+    expect(part.priceLeft, note).toBeGreaterThanOrEqual(part.boxLeft);
+    expect(part.qtyRight, note).toBeLessThanOrEqual(part.boxRight);
+    expect(part.priceRight, note).toBeLessThan(part.qtyLeft);
+  }
+  expect(new Set(parts.map((part) => part.lefts.join())).size).toBe(1);
+  expect(new Set(parts.map((part) => Math.round(part.qtyBoxRight * 10))).size).toBe(1);
+  await page.screenshot({ path: "../target/ux-screens/book-min-width.png" });
+});
+
 test("교차 가격 행 하나에 매도·매수 잔량이 함께 있고 현재가 행은 하나다", async ({ page, scenario }) => {
   await open(page, scenario, 70000);
   const bookSub = await subOf(scenario, "book");

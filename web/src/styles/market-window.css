@@ -42,7 +42,7 @@
 .mw-info b, .mw-strength b { color:var(--text); font-weight:600; text-align:right; }
 .mw-info b[data-tone=up] { color:var(--up); } .mw-info b[data-tone=down] { color:var(--down); }
 .mw-box-layer { position:absolute; z-index:2; left:0; right:0; display:grid; box-sizing:border-box; padding:0 var(--s4); pointer-events:none; }
-.mw-box { grid-column:1; justify-self:end; width:max(100%, 130px); max-width:calc(100% + var(--s4)); min-height:0; pointer-events:auto; }
+.mw-box { grid-column:1; min-width:0; min-height:0; pointer-events:auto; }
 .mw-tbox { display:flex; flex-direction:column; height:100%; }
 .mw-tbox > .mw-slot { flex:none; height:var(--size-24); }
 .mw-tscroll { flex:1; min-height:0; display:grid; grid-template-columns:max-content minmax(0, 1fr); grid-auto-rows:var(--size-24); align-content:start; overflow-y:auto; overflow-x:hidden; }

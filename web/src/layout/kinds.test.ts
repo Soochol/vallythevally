@@ -28,7 +28,7 @@ test("차트와 시세 창은 연동 색을 따르고 관심종목·스크리너
 test("시세 창의 이름과 최소 크기는 제안을 따른다", () => {
   expect(["trades", "book", "program", "brokers"].map((kind) => [WINDOW_KINDS[kind as "trades"].name, WINDOW_KINDS[kind as "trades"].minSize])).toEqual([
     ["체결", { w: 220, h: 200 }],
-    ["10호가", { w: 280, h: 300 }],
+    ["10호가", { w: 424, h: 300 }],
     ["프로그램 체결", { w: 260, h: 240 }],
     ["거래원 입체분석", { w: 360, h: 300 }],
   ]);

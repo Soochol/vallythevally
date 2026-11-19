@@ -89,7 +89,7 @@ export function PriceLadder({ rows, previousClose, slots, rowSlots, mark, expect
       ))}
       {boxRows > 0 && rowSlots?.bottomLeft && (
         <div className="mw-box-layer" data-testid="ladder-box-layer" style={{ gridTemplateColumns: columns, top: `calc(var(--s1) + ${boxStart} * var(--size-24))`, height: `calc(${boxRows} * var(--size-24))` }}>
-          <div className="mw-box" style={slots?.left ? { gridColumn: "1 / 3" } : undefined}>{rowSlots.bottomLeft(boxRows)}</div>
+          <div className="mw-box" style={slots?.left ? { gridColumn: 2 } : undefined}>{rowSlots.bottomLeft(boxRows)}</div>
         </div>
       )}
     </div>

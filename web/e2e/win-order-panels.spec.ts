@@ -482,14 +482,32 @@ test("체결강도는 13행, 체결은 14행부터 같은 top에 있고 새 체�
   await expect(page.locator(".mw-trade i")).toHaveCount(0);
 });
 
-test("421px 호가주문창에서 백만 단위 가격·수량까지 11px 쉼표 숫자가 한 줄에 겹치거나 잘리지 않고 행끼리 열이 정렬된다", async ({ page, scenario }) => {
+const orderGroup = (page: Page) => page.locator("[data-dock-group]").filter({ has: win(page) });
+const widthOfGroup = async (locator: Locator) => (await locator.boundingBox())!.width;
+
+async function squeezeOrderWindow(page: Page, toward: number): Promise<void> {
+  const handle = (await page.getByRole("separator", { name: "좌우 창 경계" }).first().boundingBox())!;
+  const at = { x: handle.x + handle.width / 2, y: handle.y + handle.height / 2 };
+  await page.keyboard.down("Alt");
+  await page.mouse.move(at.x, at.y);
+  await page.mouse.down();
+  await page.mouse.move(toward, at.y, { steps: 10 });
+  await page.mouse.up();
+  await page.keyboard.up("Alt");
+}
+
+const MILLION_TRADES: [number, number][] = [[70_000, 600], [1_234_000, 9_999_999], [9_999_000, 999_999], [70_100, 9_999], [70_200, 12_345], [70_300, 7]];
+
+test("호가주문창은 경계를 끌어도 최소 폭 552px 아래로 줄지 않고 그 폭에서 백만 단위 가격·수량이 겹치거나 잘리지 않으며 행끼리 열이 정렬된다", async ({ page, scenario }) => {
   ordersOn(scenario);
-  tradingApi(scenario);
+  const api = tradingApi(scenario);
   await openOrderWindow(page, scenario);
-  await win(page).evaluate((element) => { element.style.flex = "none"; element.style.width = "421px"; });
-  const trades: [number, number][] = [[70_000, 600], [1_234_000, 9_999_999], [9_999_000, 999_999], [70_100, 9_999], [70_200, 12_345], [70_300, 7]];
-  trades.forEach(([price, qty], index) => lastTrade(scenario, price, index + 1, qty));
-  await expect(page.getByTestId("ladder-trade")).toHaveCount(trades.length);
+  await squeezeOrderWindow(page, 0);
+  await expect.poll(() => widthOfGroup(orderGroup(page))).toBe(552);
+  await squeezeOrderWindow(page, 0);
+  expect(await widthOfGroup(orderGroup(page))).toBe(552);
+  MILLION_TRADES.forEach(([price, qty], index) => lastTrade(scenario, price, index + 1, qty));
+  await expect(page.getByTestId("ladder-trade")).toHaveCount(MILLION_TRADES.length);
   const parts = await page.getByTestId("ladder-trade").evaluateAll((rows) => rows.map((row) => {
     const [price, qty] = [row.children[0]!, row.children[1]!];
     const textRect = (node: Element) => {
@@ -499,7 +517,7 @@ test("421px 호가주문창에서 백만 단위 가격·수량까지 11px 쉼표
     };
     const box = row.parentElement!.getBoundingClientRect();
     const [priceText, qtyText] = [textRect(price), textRect(qty)];
-    return { price: price.textContent, shown: qty.textContent, fontSize: getComputedStyle(qty).fontSize, priceLeft: priceText.left, priceRight: priceText.right, qtyLeft: qtyText.left, qtyRight: qtyText.right, boxLeft: box.left, boxRight: box.right, lefts: [price.getBoundingClientRect().left, qty.getBoundingClientRect().left], qtyBoxRight: qty.getBoundingClientRect().right };
+    return { price: price.textContent, shown: qty.textContent, fontSize: getComputedStyle(qty).fontSize, priceLeft: priceText.left, priceRight: priceText.right, qtyLeft: qtyText.left, qtyRight: qtyText.right, boxLeft: box.left, boxRight: box.right, boxWidth: box.width, lefts: [price.getBoundingClientRect().left, qty.getBoundingClientRect().left], qtyBoxRight: qty.getBoundingClientRect().right };
   }));
   expect(parts.map((part) => part.shown)).toEqual(["7", "12,345", "9,999", "999,999", "9,999,999", "600"]);
   expect(parts.map((part) => part.price)).toEqual(["70,300", "70,200", "70,100", "9,999,000", "1,234,000", "70,000"]);
@@ -512,26 +530,12 @@ test("421px 호가주문창에서 백만 단위 가격·수량까지 11px 쉼표
   }
   expect(new Set(parts.map((part) => part.lefts.join())).size).toBe(1);
   expect(new Set(parts.map((part) => Math.round(part.qtyBoxRight * 10))).size).toBe(1);
-});
-
-test("체결 상자가 덮은 매도 주문 칸은 더블클릭해도 주문을 보내지 않고 상자가 받는다", async ({ page, scenario }) => {
-  ordersOn(scenario);
-  const api = tradingApi(scenario);
-  await openOrderWindow(page, scenario);
-  await win(page).evaluate((element) => { element.style.flex = "none"; element.style.width = "421px"; });
-  lastTrade(scenario, 70_000, 1, 3);
-  await expect(page.getByTestId("ladder-trade")).toHaveCount(1);
-  const covered = await cellAt(page, "sell", 69_300).boundingBox();
-  const point = { x: covered!.x + covered!.width / 2, y: covered!.y + covered!.height / 2 };
-  const topmost = await page.evaluate(({ x, y }) => document.elementFromPoint(x, y)?.closest(".mw-box") !== null, point);
-  expect(topmost).toBe(true);
-  await page.mouse.dblclick(point.x, point.y);
-  await cellAt(page, "buy", 70_000).dblclick();
+  await page.screenshot({ path: "../target/ux-screens/order-min-width.png" });
+  const lowest = ladderRows(page).nth(19).locator('[data-order-cell][data-side="sell"]');
+  const lowestPrice = Number(await lowest.getAttribute("data-price"));
+  await lowest.dblclick();
   await pollSaved(() => writesTo(api, "place")).toHaveLength(1);
-  expect(writesTo(api, "place")[0]!.body).toMatchObject({ code: CODE, side: "buy", price: 70_000 });
-  const outside = await cellAt(page, "sell", 70_100).boundingBox();
-  const outsideTop = await page.evaluate(({ x, y }) => document.elementFromPoint(x, y)?.closest(".mw-box") ?? null, { x: outside!.x + outside!.width / 2, y: outside!.y + outside!.height / 2 });
-  expect(outsideTop).toBeNull();
+  expect(writesTo(api, "place")[0]!.body).toMatchObject({ code: CODE, side: "sell", price: lowestPrice });
 });
 
 test("호가주문창이 넓으면 체결 수량을 쉼표 숫자 전체로 보이고 행끼리 열이 정렬된다", async ({ page, scenario }) => {
