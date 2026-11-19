@@ -51,10 +51,10 @@ import { useBeforeConnect } from "../status/beforeConnect";
 
 const DIR_CLASS = { up: "text-up", down: "text-down", flat: "text-text-2" } as const;
 const ROW_GRID = "grid gap-1";
-const GROUP_HEAD = "flex h-[34px] items-center gap-1.5 border-y border-line pl-2 pr-1.5 text-[13px] font-[700] max-md:h-11 max-md:pl-3";
+const GROUP_HEAD = "flex h-[34px] items-center gap-1.5 border-t border-line pl-2 pr-1.5 text-xs font-[600] tracking-[0.04em] text-text-2 max-md:h-11 max-md:pl-3";
 type HeadDropState = "idle" | "accept" | "refuse";
 const HEAD_FILL: Record<HeadDropState, string> = {
-  idle: "bg-white/[0.045]",
+  idle: "bg-transparent",
   accept: "bg-accent-soft shadow-[inset_0_0_0_1px_var(--accent)]",
   refuse: "bg-[color-mix(in_srgb,var(--danger)_15%,transparent)] shadow-[inset_0_0_0_1px_var(--danger)]",
 };
@@ -514,7 +514,7 @@ function DropNote({ drop }: { drop: HeadDrop }) {
 
 function UngroupedHead({ count, drop }: { count: number; drop: HeadDrop }) {
   return (
-    <div className={`${GROUP_HEAD} ${HEAD_FILL[drop.state]} pl-[26px] text-text-2`} onDragOver={drop.over} onDragLeave={drop.leave} onDrop={drop.drop}>
+    <div className={`${GROUP_HEAD} ${HEAD_FILL[drop.state]} pl-[26px]`} onDragOver={drop.over} onDragLeave={drop.leave} onDrop={drop.drop}>
       <span aria-hidden="true" className={`${GROUP_BAR} bg-text-3`} />
       <span>그룹 없음</span>
       <span className={COUNT_BADGE}>{count}<span className="sr-only">종목</span></span>
@@ -525,9 +525,9 @@ function UngroupedHead({ count, drop }: { count: number; drop: HeadDrop }) {
 }
 
 function GroupHead({ list, group, collapsed, naming, onNaming, drop, panelId }: { list: Watchlist; group: WatchGroup; collapsed: boolean; naming: boolean; onNaming: GroupNaming["onNaming"]; drop: HeadDrop; panelId: string }) {
-  if (naming) return <div className={`${GROUP_HEAD} ${HEAD_FILL.idle} text-text`}><GroupNameInput list={list} group={group} onDone={() => onNaming(null)} /></div>;
+  if (naming) return <div className={`${GROUP_HEAD} ${HEAD_FILL.idle}`}><GroupNameInput list={list} group={group} onDone={() => onNaming(null)} /></div>;
   return (
-    <div className={`group/head ${GROUP_HEAD} ${HEAD_FILL[drop.state]} text-text`} onDragOver={drop.over} onDragLeave={drop.leave} onDrop={drop.drop}>
+    <div className={`group/head ${GROUP_HEAD} ${HEAD_FILL[drop.state]}`} onDragOver={drop.over} onDragLeave={drop.leave} onDrop={drop.drop}>
       <button
         type="button"
         className="flex h-full min-w-0 flex-1 items-center gap-1.5 text-left"

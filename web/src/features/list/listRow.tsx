@@ -16,7 +16,7 @@ const RATE_BADGE: Record<ChangeDirection, string> = { up: "bg-up/10 text-up", do
 export const listRowFill = (active: boolean) => (active ? "bg-accent-soft" : "hover:bg-[var(--hover)]");
 
 export function SymbolName({ name, code }: { name: string; code: SymbolCode }) {
-  return <b title={name === code ? code : `${name} ${code}`} className="block min-w-0 truncate text-m font-[600]">{name}</b>;
+  return <b title={name === code ? code : `${name} ${code}`} className="block min-w-0 truncate text-m font-[600] text-text-name">{name}</b>;
 }
 
 export function PriceText({ children }: { children: ReactNode }) {
