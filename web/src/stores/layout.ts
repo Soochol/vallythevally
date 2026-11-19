@@ -21,7 +21,6 @@ import { findGroup, groupOfWindow, putTab, selectTab } from "../layout/dock/tree
 import { defaultRanking } from "../layout/ranking";
 import { MAX_WINDOWS, windowId, WINDOW_KINDS, type WindowId, type WindowKind, type WindowRef } from "../layout/kinds";
 import type { CanvasPlacement, DockPlacement, Placement } from "../layout/placement";
-import { toward } from "../lib/josa";
 import { isIndexCode } from "../lib/symbol";
 import { readDockOrigins, writeDockOrigins } from "../persist/dockOrigins";
 import { useUiStore } from "./ui";
@@ -85,8 +84,6 @@ const PINNABLE: ReadonlySet<WindowKind> = new Set<WindowKind>(["trades", "book",
 
 export type SymbolTarget = Pick<SymbolInfo, "code"> & { name?: string };
 export type SymbolChange = { changed: WindowId[]; notice: string | null };
-
-const unfollowedNotice = (link: LinkColor) => `연동 ${linkLabel(link)}를 따르는 차트가 없습니다. 차트의 연동 색을 ${linkLabel(link)}로 맞추세요`;
 
 function linkedCharts(layout: EditableLayout, cellId: WindowId): ChartWindowState[] {
   const chart = chartWindows(layout).find((w) => w.id === cellId);
@@ -269,9 +266,7 @@ export const useLayoutStore = create<LayoutState>()((set, get) => {
       if (!isChartWindow(w) || !ids.has(w.id)) return w;
       return w.symbol === target.code ? w : { ...w, symbol: target.code };
     });
-    const link = charts[0]?.link ?? null;
-    const notice = link !== null && changed.length > 1 ? `연동 ${linkLabel(link)}: 차트 ${changed.length}개가 ${toward(target.name ?? target.code)} 바뀌었습니다` : null;
-    return { changed, notice };
+    return { changed, notice: null };
   };
   const patchSetting = <K extends "style" | "scale" | "visibleBars" | "showExtremes" | "showLegend" | "showOhlcChange" | "extremeBasis" | "showDaySeparators">(cellId: WindowId, key: K, value: ChartSettings[K]) =>
     patchCell(cellId, (c) => (c.chartSettings[key] === value ? c : { ...c, chartSettings: { ...c.chartSettings, [key]: value } }));
@@ -448,7 +443,7 @@ export const useLayoutStore = create<LayoutState>()((set, get) => {
       const link = senderLink(layout, sender);
       if (link === null) return openIn(linkedCharts(layout, cellId), target);
       const charts = chartWindows(layout).filter((w) => w.link === link);
-      return charts.length ? openIn(charts, target) : { changed: [], notice: unfollowedNotice(link) };
+      return charts.length ? openIn(charts, target) : { changed: [], notice: null };
     },
     setLink: (id, link) => {
       const leader = link === null ? undefined : chartWindows(get().layout).find((c) => c.id !== id && c.link === link);

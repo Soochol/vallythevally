@@ -97,7 +97,7 @@ test("분류와 순위를 고르면 그 순위의 조건만 보이고 고른 순
   expect(savedRanking(scenario)).toEqual(expected);
 });
 
-test("줄을 누르면 같은 연동 색의 차트가 그 종목으로 바뀌고 ↑↓·Enter로도 되며 연동 차트가 없으면 알린다", async ({ page, scenario }) => {
+test("줄을 누르면 같은 연동 색의 차트가 그 종목으로 바뀌고 ↑↓·Enter로도 되며 연동 차트가 없으면 바꾸지 않는다", async ({ page, scenario }) => {
   serveRankings(scenario);
   openLayout(scenario, "a");
   await open(page);
@@ -122,8 +122,8 @@ test("줄을 누르면 같은 연동 색의 차트가 그 종목으로 바뀌고
   await windowTabs(page).locator('[role=tab][data-window-id="ranking"] + .link-dot').click();
   await page.getByRole("menuitemradio", { name: /^B/ }).click();
   await rowOf(page, "000270").click();
-  await expect(toast(page, "연동 B를 따르는 차트가 없습니다. 차트의 연동 색을 B로 맞추세요")).toBeVisible();
   await expect(cell(page, 1)).toHaveAttribute("aria-label", /^칸 1: SK하이닉스 /);
+  await expect(toast(page, "연동")).toHaveCount(0);
 });
 
 test("목록에 없는 종목 줄은 흐리게 보이고 누르거나 Enter를 눌러도 차트를 바꾸지 않고 알린다", async ({ page, scenario }) => {

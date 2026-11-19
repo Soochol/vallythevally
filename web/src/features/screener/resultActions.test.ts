@@ -63,14 +63,14 @@ test.each(["chart", "tab", "unmount"])("정보 대기 중 다른 선택은 늦�
   expect(useSelectionStore.getState().phoneTab).toBe(change === "tab" ? "watch" : "screener");
 });
 
-test("연동 색이 켜진 스크리너 창은 그 색의 차트로 결과를 열고, 그 색의 차트가 없으면 아무것도 바꾸지 않고 알린다", async () => {
+test("연동 색이 켜진 스크리너 창은 그 색의 차트로 결과를 열고, 그 색의 차트가 없으면 아무것도 바꾸지 않고 알리지 않는다", async () => {
   const query = client();
   query.setQueryData(["symbol", "000660"], symbol("000660"));
   const screener = useLayoutStore.getState().layout.windows.find((w) => w.kind === "screener")!.id;
   useLayoutStore.getState().setLink(screener, "a");
   await openResult(query, "000660", screener);
   expect(cell().symbol).toBe("005930");
-  expect(useSelectionStore.getState().toast?.text).toBe("연동 A를 따르는 차트가 없습니다. 차트의 연동 색을 A로 맞추세요");
+  expect(useSelectionStore.getState().toast).toBeNull();
   useLayoutStore.getState().setLink(CELL, "a");
   await openResult(query, "000660", screener);
   expect(cell()).toMatchObject({ symbol: "000660", period: "W" });
