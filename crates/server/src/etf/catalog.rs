@@ -243,6 +243,7 @@ pub struct CollectedFund {
 #[derive(Debug, Clone, Copy)]
 pub struct Attempt {
     pub at: crate::api::UnixSeconds,
+    pub day: domain::KstDate,
     pub failed: bool,
 }
 

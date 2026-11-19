@@ -61,7 +61,7 @@ impl EtfBook {
     }
 
     fn attempted_on(&self, code: StockCode, day: KstDate) -> bool {
-        self.state.lock().expect("ETF 수집 잠금").attempts.get(&code).is_some_and(|attempt| KstTime::from_unix(attempt.at.0).kst_date() == day)
+        self.state.lock().expect("ETF 수집 잠금").attempts.get(&code).is_some_and(|attempt| attempt.day == day)
     }
 
     fn record(&self, code: StockCode, attempt: Attempt, fund: Option<CollectedFund>) -> HashMap<StockCode, Attempt> {
@@ -222,11 +222,12 @@ async fn save_pdf(dir: &Path, code: StockCode, raw: &[u8], parsed: &Parsed) -> s
 #[derive(Serialize, Deserialize)]
 struct StoredAttempt {
     at: i64,
+    day: String,
     failed: bool,
 }
 
 async fn save_attempts(dir: &Path, attempts: &HashMap<StockCode, Attempt>) -> std::io::Result<()> {
-    let stored: std::collections::BTreeMap<&str, StoredAttempt> = attempts.iter().map(|(code, attempt)| (code.as_str(), StoredAttempt { at: attempt.at.0, failed: attempt.failed })).collect();
+    let stored: std::collections::BTreeMap<&str, StoredAttempt> = attempts.iter().map(|(code, attempt)| (code.as_str(), StoredAttempt { at: attempt.at.0, day: attempt.day.yyyymmdd(), failed: attempt.failed })).collect();
     tokio::fs::create_dir_all(dir).await?;
     write_atomically(&dir.join(ATTEMPTS_FILE), &serde_json::to_vec(&stored)?).await
 }
@@ -237,8 +238,8 @@ async fn load(dir: &Path) -> Collected {
         match serde_json::from_slice::<HashMap<String, StoredAttempt>>(&bytes) {
             Ok(stored) => {
                 for (code, attempt) in stored {
-                    if let Ok(code) = StockCode::parse(&code) {
-                        loaded.attempts.insert(code, Attempt { at: UnixSeconds(attempt.at), failed: attempt.failed });
+                    if let (Ok(code), Some(day)) = (StockCode::parse(&code), KstDate::parse_yyyymmdd(&attempt.day)) {
+                        loaded.attempts.insert(code, Attempt { at: UnixSeconds(attempt.at), day, failed: attempt.failed });
                     }
                 }
             }
@@ -338,7 +339,7 @@ async fn collect_day(st: &AppState, dir: &Path, naver: &Naver, listed: &Director
             failed += 1;
             tracing::warn!(etf = code.as_str(), %reason, "ETF 구성내역을 갱신하지 못했습니다. 이전 자료를 그대로 둡니다");
         }
-        let attempt = Attempt { at: UnixSeconds(st.clock.now().unix()), failed: failure.is_some() };
+        let attempt = Attempt { at: UnixSeconds(st.clock.now().unix()), day: today, failed: failure.is_some() };
         let attempts = st.etf.record(code, attempt, outcome.ok());
         if let Err(e) = save_attempts(dir, &attempts).await {
             tracing::warn!(error = %e, "ETF 수집 시도 기록을 저장하지 못했습니다");

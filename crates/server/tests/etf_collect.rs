@@ -344,3 +344,24 @@ async fn a_failed_etf_keeps_its_previous_data_and_reports_a_failed_refresh() {
     assert_eq!(rig.status(NOT_LISTED).await["refreshFailed"], false, "서버 종목 목록에 없는 ETF는 건드리지 않는다");
     assert_eq!(rig.get("/api/etf/funds").await["funds"].as_array().unwrap().len(), embedded.funds().len(), "일부가 실패해도 목록은 그대로 나온다");
 }
+
+#[tokio::test]
+async fn a_run_that_crosses_midnight_still_leaves_the_next_day_its_own_fetch() {
+    let etfs = [AUTOMOBILE, BANK, SEMICONDUCTOR];
+    let mut rig = Rig::new(&etfs).await;
+    for code in etfs {
+        rig.naver.ok(code, DAY_ONE, Day::One);
+    }
+    rig.start("20261119235958").await;
+    rig.jump(1);
+    rig.until_collected_as_of(&etfs, DAY_ONE).await;
+    assert_eq!(rig.naver.count(), 3);
+    assert!(rig.status(BANK).await["lastAttemptAt"].as_i64().unwrap() >= 1_795_100_400 - 1, "한 ETF 이상은 자정 뒤에 시도했다");
+
+    for code in etfs {
+        rig.naver.ok(code, DAY_TWO, Day::Two);
+    }
+    rig.jump(12 * 60 * 60 + 11 * 60);
+    rig.until_collected_as_of(&etfs, DAY_TWO).await;
+    assert_eq!(rig.naver.count(), 6, "둘째 날에도 ETF마다 한 번 부른다");
+}
