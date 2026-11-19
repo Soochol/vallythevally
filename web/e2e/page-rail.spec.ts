@@ -78,6 +78,26 @@ test("페이지에 갔다 와도 작업 영역 차트는 다시 불러오지 않
   expect(scenario.live.subscriptions()).toHaveLength(subscriptions);
 });
 
+test("다른 페이지에서 누른 키는 숨은 작업 영역에 닿지 않는다", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto("/");
+  await expect(cell(page)).toHaveAttribute("aria-busy", "false");
+  const groups = page.locator("[data-dock-group]");
+  await expect(groups).toHaveCount(2);
+  const last = groups.last();
+  const row = (await last.locator(".dock-tabs").boundingBox())!;
+  const lastTab = (await last.locator(".dock-tab-group").last().boundingBox())!;
+  const add = (await last.locator(".dock-add").boundingBox())!;
+  await last.locator(".dock-tabs").dblclick({ position: { x: (lastTab.x + lastTab.width + add.x) / 2 - row.x, y: row.height / 2 } });
+  await expect(groups).toHaveCount(1);
+  await railLink(page, "시장 종합").click();
+  await expect(page.getByRole("main", { name: "시장 종합", exact: true })).toBeVisible();
+  await page.keyboard.press("Escape");
+  await railLink(page, "작업 영역").click();
+  await expect(workspace(page)).toBeVisible();
+  await expect(groups).toHaveCount(1);
+});
+
 test("vally 로고를 누르면 랜딩으로 가고, 로그인 상태 랜딩에 작업 영역 열기와 바로가기 3개가 있다", async ({ page, scenario }) => {
   scenario.live.account = SIGNED_IN;
   await page.goto("/");

@@ -7,6 +7,7 @@ import { useLocation } from "react-router";
 import { PageRail } from "./features/page-rail/PageRail";
 import { PageStage } from "./features/page-rail/PageStage";
 import { PageTopbar } from "./features/page-rail/PageTopbar";
+import { useHiddenWorkspaceKeys } from "./features/page-rail/useHiddenWorkspaceKeys";
 import { isContentPage, pageOfPath, type PageId } from "./features/page-rail/pages";
 import { loadKiwoomLink } from "./api/system";
 import { SystemSettingsDialog } from "./features/system-settings/SystemSettingsDialog";
@@ -71,6 +72,7 @@ function ChartScreen({ page }: { page: PageId }) {
   const [phoneStatus, setPhoneStatus] = useState<{ cellId: WindowId; status: CellStatus } | null>(null);
   const status: CellStatus = phoneStatus?.cellId === cellId ? phoneStatus.status : { kind: "loading" };
 
+  useHiddenWorkspaceKeys(!onWorkspace);
   useHotkeys(onWorkspace);
   useArrangementKeys(onWorkspace);
   useEffect(() => {
