@@ -79,6 +79,20 @@ flock "$(git rev-parse --path-format=absolute --git-common-dir)/compile.lock" en
 
 DuckDB는 release 바이너리에 포함되므로 개발 캐시나 별도 `libduckdb.so`를 배포할 필요가 없다. 실제 배포 직전에 release 빌드를 검증한다. 키움 프로토콜·서비스 동작은 합성 transport와 loopback 어댑터 시험으로 확인하며 실제 키움 인증을 배포 시험에 사용하지 않는다.
 
+### 상시 운영
+
+실계좌 앱 서버는 systemd 사용자 서비스 [`vally-server.service`](../deploy/systemd/vally-server.service)로 돈다. 개발 폴더가 아니라 배포 전용 clone `~/apps/vallythevally`의 release 빌드와 `web/dist`를 쓴다. 배포 전용 clone은 배포만 바꾼다.
+
+| 자리 | 경로 |
+|---|---|
+| 설정과 비밀값 | `~/.config/vally/server.env`(권한 600). 유닛의 `VALLY_ENV_FILE`이 가리킨다 |
+| 사용자 DB, 스크리너 저장소, 재무 DB | `~/vally-data/server/`. 유닛의 `Environment=`가 절대 경로로 정한다 |
+| 백업 | `~/vally-data/backups/`. 배포마다 `vally.db`를 SQLite backup API로 떠서 최근 30개를 남긴다. 재무 DB와 스크리너 저장소는 다시 만들 수 있어 백업하지 않는다 |
+
+설치는 유닛을 `~/.config/systemd/user/`에 복사하고 `systemctl --user daemon-reload` 뒤 `systemctl --user enable --now vally-server.service`다. 로그는 `journalctl --user -u vally-server.service`로 본다.
+
+새 버전은 orch의 `deploy run --repo vallythevally`로 올린다. chute가 머지한 커밋을 받아 release 빌드, 화면 빌드, 백업, 재시작, `http://127.0.0.1:8080/api/screener/status` 확인을 차례로 한다. 단계 명령은 orch 스킬의 `deploy.json`에 있다. 개발 폴더에서 실계좌 `.env`로 서버를 따로 띄우거나 `vally-server` 프로세스를 이름으로 끄지 않는다. 상대 경로 기본값 때문에 개발 폴더의 `data/`에 빈 DB가 생기고, 서비스의 서버도 함께 꺼진다. 개발 중 확인은 목업 서버(`127.0.0.1:8081`, `data/mock`)로 한다.
+
 ## 공유 범위와 무효화
 
 캐시는 `git worktree list`의 첫 번째 주 worktree 안에 있는 `target/dev-cache`를 사용한다. 같은 Git 저장소의 worktree들은 이 위치를 찾는다. 주 worktree를 지울 때 캐시도 지워질 수 있으므로 독립된 작업 폴더의 절대 경로를 `VALLY_DEV_CACHE_DIR`로 지정할 수 있다. worktree별 Cargo `target`은 계속 분리한다.

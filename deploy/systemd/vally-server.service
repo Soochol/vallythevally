@@ -1,0 +1,22 @@
+[Unit]
+Description=Vally 앱 서버 (배포 checkout의 release 빌드)
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=10min
+StartLimitBurst=5
+
+[Service]
+Type=simple
+WorkingDirectory=%h/apps/vallythevally
+Environment=VALLY_ENV_FILE=%h/.config/vally/server.env
+Environment=VALLY_DB_PATH=%h/vally-data/server/vally.db
+Environment=VALLY_SCREENER_DB_PATH=%h/vally-data/server/screener.duckdb
+Environment=VALLY_FINANCIAL_DB_PATH=%h/vally-data/server/financials.db
+Environment=VALLY_STATIC_DIR=%h/apps/vallythevally/web/dist
+ExecStart=%h/apps/vallythevally/target/release/vally-server
+Restart=on-failure
+RestartSec=10
+TimeoutStopSec=60
+
+[Install]
+WantedBy=default.target
