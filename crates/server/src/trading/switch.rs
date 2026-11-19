@@ -14,8 +14,10 @@ pub struct SwitchRecord {
     pub salt: String,
     #[serde(default)]
     pub account_ref: Option<String>,
-    #[serde(default)]
+    #[serde(default, rename = "accountNumberTail")]
     pub account_tail: Option<String>,
+    #[serde(default, rename = "accountTail", skip_serializing)]
+    pub legacy_product_tail: Option<String>,
     #[serde(default)]
     pub confirm_won: Option<u64>,
     #[serde(default)]
@@ -47,7 +49,7 @@ impl SwitchStore {
                 if stored != *environment {
                     return Ok(None);
                 }
-                if record.salt.is_empty() || (record.enabled && (record.account_ref.is_none() || record.account_tail.is_none())) {
+                if record.salt.is_empty() || (record.enabled && (record.account_ref.is_none() || (record.account_tail.is_none() && record.legacy_product_tail.is_none()))) {
                     return Err(file.error("켜져 있는데 확인한 계좌가 없어 쓰지 않습니다"));
                 }
                 Ok(Some(record))
@@ -81,7 +83,7 @@ mod tests {
     use super::*;
 
     fn record(enabled: bool) -> SwitchRecord {
-        SwitchRecord { enabled, salt: "00ff".into(), account_ref: Some("ref".into()), account_tail: Some("01".into()), confirm_won: None, cap_won: None, margin_policy: MarginPolicy::CashOnly }
+        SwitchRecord { enabled, salt: "00ff".into(), account_ref: Some("ref".into()), account_tail: Some("01".into()), legacy_product_tail: None, confirm_won: None, cap_won: None, margin_policy: MarginPolicy::CashOnly }
     }
 
     fn open_up(path: &std::path::Path, mode: u32) {
@@ -128,7 +130,7 @@ mod tests {
     fn an_enabled_switch_without_a_confirmed_account_is_refused() {
         let dir = tempfile::tempdir().unwrap();
         let store = SwitchStore::file(PrivateFile::new(dir.path().join("s").join(ORDER_SWITCH_FILE_NAME)), KiwoomEnvironment::Real);
-        store.save(&SwitchRecord { enabled: true, salt: "00".into(), account_ref: None, account_tail: None, confirm_won: None, cap_won: None, margin_policy: MarginPolicy::CashOnly }).unwrap();
+        store.save(&SwitchRecord { enabled: true, salt: "00".into(), account_ref: None, account_tail: None, legacy_product_tail: None, confirm_won: None, cap_won: None, margin_policy: MarginPolicy::CashOnly }).unwrap();
         assert!(store.load().is_err());
     }
 

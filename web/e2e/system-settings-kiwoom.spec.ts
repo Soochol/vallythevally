@@ -441,7 +441,7 @@ test.describe("1440×900", () => {
     expect(callsTo(scenario, "POST", "/api/system/orders/check-account")).toHaveLength(0);
 
     await orders.getByRole("button", { name: "주문 사용 켜기" }).click();
-    await expect(orders).toContainText("계좌 끝 2자리: 01");
+    await expect(orders).toContainText("계좌번호(8자리) 끝 2자리: 01");
     const confirm = orders.getByRole("button", { name: "켜기 확인" });
     await expect(confirm).toBeDisabled();
     expect(callsTo(scenario, "PUT", "/api/system/orders")).toHaveLength(0);
