@@ -510,6 +510,30 @@ test("거래소를 바꾼 뒤 앞 거래소 구독으로 온 호가는 사다리
   await expect(book(page)).not.toContainText("99,900");
 });
 
+async function emitCombinedTrade(scenario: Scenario, price: number, strength: number) {
+  await pollSaved(() => feedSubscriptions(scenario, "trades", "combined").length).toBe(2);
+  for (const message of feedSubscriptions(scenario, "trades", "combined")) if (message.type === "subscribe_feed") scenario.live.emit({ type: "feed_trades", sub: message.sub, seq: 1, trades: [{ t: scenario.now / 1000, price, qty: 3, venue: "nxt", strength }] });
+}
+
+test("거래소를 바꾸면 앞 거래소의 체결강도가 사다리에 남지 않는다", async ({ page, scenario }) => {
+  await open(page, scenario, 70000);
+  await emitCombinedTrade(scenario, 70000, 150);
+  await expect(page.getByTestId("ladder-strength")).toContainText("150.00%");
+  await pickDesktopVenue(page, "KRX");
+  await pollSaved(() => feedSubscriptions(scenario, "trades", "krx").length).toBe(2);
+  await expect(page.getByTestId("ladder-strength")).not.toContainText("150.00%");
+});
+
+test("새 거래소의 지난 체결 조회가 실패해도 앞 거래소의 체결이 사다리에 남지 않는다", async ({ page, scenario }) => {
+  await open(page, scenario, 70000);
+  await emitCombinedTrade(scenario, 70300, 150);
+  await expect(page.getByTestId("ladder-trade")).toHaveCount(1);
+  scenario.on((url) => url.pathname === "/api/symbols/005930/trades" && url.searchParams.get("venue") === "krx", () => ({ status: 503, body: { error: { code: "internal", message: "지난 체결 조회 실패", reason: null, retryAt: null, manualActionRequired: false } } }));
+  await pickDesktopVenue(page, "KRX");
+  await pollSaved(() => requestedVenues(scenario, "/api/symbols/005930/trades").filter((venue) => venue === "krx").length).toBe(1);
+  await expect(page.getByTestId("ladder-trade")).toHaveCount(0);
+});
+
 test("NXT에서 거래되지 않는 종목을 NXT로 보면 통합으로 구독하고 도킹 탭에 통합 표시가 있고 본문에는 없다", async ({ page, scenario }) => {
   nxtTraded(scenario, false);
   await open(page, scenario, 70000);

@@ -89,3 +89,12 @@ test("수량의 부호가 방향이고 누적은 줄 수 상한과 무관하다"
   const many = run(...Array.from({ length: MAX_TAPE_ROWS + 10 }, (_, i): TapeAction => ({ type: "live", trades: [live("10:00:00", 100, 1 + (i % 2))], receivedAt: 0 })));
   expect(cumulativeQuantity(many, "combined")).toBe(Math.ceil((MAX_TAPE_ROWS + 10) / 2) * 1 + Math.floor((MAX_TAPE_ROWS + 10) / 2) * 2);
 });
+
+test("초기화하면 앞 거래소의 조회·실시간 체결과 체결강도가 사라진다", () => {
+  const filled = run({ type: "history", tape: tapeOf([print("10:00:01", 101, 1)]) }, { type: "live", trades: [live("10:00:02", 202, 5, "nxt", 150)], receivedAt: 0 });
+  expect(filled.strength).toBe(150);
+  const reset = tapeReducer(filled, { type: "reset" });
+  expect(reset.strength).toBeNull();
+  expect(reset.historyVenue).toBeNull();
+  expect(times(reset, "krx")).toEqual([]);
+});

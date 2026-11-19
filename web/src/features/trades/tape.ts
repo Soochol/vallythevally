@@ -83,7 +83,8 @@ export type TapeAction =
   | { type: "resync"; at: number }
   | { type: "hold" }
   | { type: "release" }
-  | { type: "flush" };
+  | { type: "flush" }
+  | { type: "reset" };
 
 const KST_OFFSET_SECONDS = 9 * 3600;
 const DAY_SECONDS = 86_400;
@@ -194,6 +195,8 @@ function closeGap(state: TapeState, at: number): TapeState {
 
 export function tapeReducer(state: TapeState, action: TapeAction): TapeState {
   switch (action.type) {
+    case "reset":
+      return { ...emptyTape, nextKey: state.nextKey };
     case "history": {
       const history = newestFirstCap(historyRows(action.tape, state.nextKey));
       return settleHistory({ ...state, history, historyVenue: action.tape.venue, historyTotals: totalsOf(history), nextKey: state.nextKey + action.tape.trades.length });
