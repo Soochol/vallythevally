@@ -1,0 +1,17 @@
+#!/bin/sh
+set -eu
+service="${VALLY_SERVICE:-vally-server.service}"
+health_url="${VALLY_HEALTH_URL:-http://127.0.0.1:8080/api/screener/status}"
+limit="${VALLY_RESTART_WAIT:-120}"
+systemctl --user restart "$service"
+waited=0
+while [ "$waited" -lt "$limit" ]; do
+    if systemctl --user is-active --quiet "$service" && curl -fsS -o /dev/null --max-time 2 "$health_url"; then
+        echo "$service가 ${waited}초 만에 응답합니다"
+        exit 0
+    fi
+    waited=$((waited + 1))
+    sleep 1
+done
+echo "$service가 ${limit}초 안에 응답하지 않았습니다. journalctl --user -u $service 를 확인하세요" >&2
+exit 1

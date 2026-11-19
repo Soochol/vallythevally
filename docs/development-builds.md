@@ -91,7 +91,7 @@ DuckDB는 release 바이너리에 포함되므로 개발 캐시나 별도 `libdu
 
 설치는 유닛을 `~/.config/systemd/user/`에 복사하고 `systemctl --user daemon-reload` 뒤 `systemctl --user enable --now vally-server.service`다. 로그는 `journalctl --user -u vally-server.service`로 본다.
 
-새 버전은 orch의 `deploy run --repo vallythevally`로 올린다. chute가 머지한 커밋을 받아 release 빌드, 화면 빌드, 백업, 재시작, `http://127.0.0.1:8080/api/screener/status` 확인을 차례로 한다. 단계 명령은 orch 스킬의 `deploy.json`에 있다. 개발 폴더에서 실계좌 `.env`로 서버를 따로 띄우거나 `vally-server` 프로세스를 이름으로 끄지 않는다. 상대 경로 기본값 때문에 개발 폴더의 `data/`에 빈 DB가 생기고, 서비스의 서버도 함께 꺼진다. 개발 중 확인은 목업 서버(`127.0.0.1:8081`, `data/mock`)로 한다.
+새 버전은 orch의 `deploy run --repo vallythevally`로 올린다. chute가 머지한 커밋을 받아 release 빌드, 화면 빌드, 백업, 재시작, `http://127.0.0.1:8080/api/screener/status` 확인을 차례로 한다. 단계 스크립트는 저장소의 `deploy/`(`server-build`, `web-build`, `backup`, `restart`)에 있고, 어느 단계를 어떤 명령으로 부를지는 orch PC의 `~/.claude/orch/deploy.json`이 정한다. 환경 변수와 설정 예는 [서버 PC 실서버 운영](server-operations.md)의 "배포(orch deploy)"에 있다. 이 PC에서는 전환 전까지 `~/.local/bin/vally-deploy-*` 래퍼가 쓰인다. 개발 폴더에서 실계좌 `.env`로 서버를 따로 띄우거나 `vally-server` 프로세스를 이름으로 끄지 않는다. 상대 경로 기본값 때문에 개발 폴더의 `data/`에 빈 DB가 생기고, 서비스의 서버도 함께 꺼진다. 개발 중 확인은 목업 서버(`127.0.0.1:8081`, `data/mock`)로 한다.
 
 실서버를 Tailscale 망의 서버 PC에서 돌리는 구성의 준비·이전·배포·되돌리기는 [서버 PC 실서버 운영](server-operations.md)에 있다.
 
