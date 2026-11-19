@@ -47,7 +47,7 @@ function keepingBlankedDepths(previous: readonly RawLevel[] | null, frame: FeedB
     const before = kept.at(-1)?.price;
     const after = frame.slice(depth + 1).find((next) => next !== null)?.price;
     const candidate = level === null ? previous?.[depth] : { price: level.price, quantity: level.qty };
-    const fitsBetween = (price: number) => (before === undefined || (price - before) * direction > 0) && (after === undefined || (after - price) * direction > 0);
+    const fitsBetween = (price: number) => before !== undefined && (price - before) * direction > 0 && (after === undefined || (after - price) * direction > 0);
     if (candidate && (level !== null || fitsBetween(candidate.price))) kept.push(candidate);
   });
   return kept;

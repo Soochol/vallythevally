@@ -89,6 +89,18 @@ test("호가가 한 틱 움직인 프레임의 빈 단은 직전 단으로 채�
   expect(bids).toEqual([...bids].sort((a, b) => b - a));
 });
 
+test("1단이 비고 호가가 한 틱 움직인 프레임은 직전 1단으로 채워 반대쪽과 교차하지 않는다", () => {
+  const first = acceptLive(EMPTY_BOOK, fullFrame());
+  const moved: FeedBook = {
+    ...fullFrame(),
+    asks: fullFrame().asks.map((level, i) => (i === 0 ? null : { price: 71_200 + 100 * i, qty: level!.qty })),
+    bids: fullFrame().bids.map((level, i) => ({ price: 71_100 - 100 * i, qty: level!.qty })),
+  };
+  const next = acceptLive(first, moved);
+  if (next.phase !== "live") throw new Error("live");
+  expect(next.view.asks[0]!.price).toBeGreaterThan(next.view.bids[0]!.price);
+});
+
 test("뒤쪽 단이 비어 오면 얇아진 호가로 받아들인다", () => {
   const first = acceptLive(EMPTY_BOOK, fullFrame());
   const thin = { ...fullFrame(), asks: [...fullFrame().asks.slice(0, 3), ...Array<null>(7).fill(null)], bids: Array<null>(10).fill(null) };
