@@ -75,7 +75,6 @@ async fn index_quote(bars: &BarService, code: IndexCode) -> Result<Option<(Symbo
     Ok(Some((symbol, quote(symbol, None, last.close().centi(), prev.close().centi(), last.volume().0, bucket.start().unix(), api::QuoteSource::Polled))))
 }
 
-/// 지수는 받지 않는다. 요청 거래소가 NXT인데 그 종목이 NXT에서 거래되지 않으면 통합으로 묻는다.
 pub async fn day_summary(rest: &KiwoomRest, code: StockCode, requested: Venue, nxt_enabled: bool) -> Result<api::SymbolDaySummary, crate::kiwoom::rest::KiwoomError> {
     let venue = effective_venue(requested, nxt_enabled);
     let req = StockQuotes::of_venues(&[(code, venue)]).expect("종목 하나다");

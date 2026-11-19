@@ -468,7 +468,6 @@ fn quote_row_code(stk_cd: &str) -> Result<(StockCode, Venue), WireError> {
     Ok((code, venue))
 }
 
-/// 당일 요약의 한 행. 키움이 0이나 빈 값을 준 항목은 `None`이다. 가격은 원, 거래대금은 원으로 바꾼 값이다.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct DaySummaryRow {
     pub price_won: Option<u64>,
