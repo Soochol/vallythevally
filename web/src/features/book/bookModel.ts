@@ -40,12 +40,17 @@ export function acceptSnapshot(state: BookState, book: OrderBook): BookState {
   };
 }
 
-function keepingBlankedDepths(previous: readonly RawLevel[] | null, frame: FeedBook["asks"]): RawLevel[] {
+function keepingBlankedDepths(previous: readonly RawLevel[] | null, frame: FeedBook["asks"], direction: 1 | -1): RawLevel[] {
   const deepest = frame.findLastIndex((level) => level !== null);
-  return frame.slice(0, deepest + 1).flatMap((level, depth) => {
-    const kept = level === null ? previous?.[depth] : { price: level.price, quantity: level.qty };
-    return kept ? [kept] : [];
+  const kept: RawLevel[] = [];
+  frame.slice(0, deepest + 1).forEach((level, depth) => {
+    const before = kept.at(-1)?.price;
+    const after = frame.slice(depth + 1).find((next) => next !== null)?.price;
+    const candidate = level === null ? previous?.[depth] : { price: level.price, quantity: level.qty };
+    const fitsBetween = (price: number) => (before === undefined || (price - before) * direction > 0) && (after === undefined || (after - price) * direction > 0);
+    if (candidate && (level !== null || fitsBetween(candidate.price))) kept.push(candidate);
   });
+  return kept;
 }
 
 export function acceptLive(state: BookState, book: FeedBook): BookState {
@@ -54,8 +59,8 @@ export function acceptLive(state: BookState, book: FeedBook): BookState {
     phase: "live",
     view: {
       t: book.t,
-      asks: withChange(previous?.asks ?? null, keepingBlankedDepths(previous?.asks ?? null, book.asks)),
-      bids: withChange(previous?.bids ?? null, keepingBlankedDepths(previous?.bids ?? null, book.bids)),
+      asks: withChange(previous?.asks ?? null, keepingBlankedDepths(previous?.asks ?? null, book.asks, 1)),
+      bids: withChange(previous?.bids ?? null, keepingBlankedDepths(previous?.bids ?? null, book.bids, -1)),
       totalAsk: book.totalAskQty,
       totalBid: book.totalBidQty,
       expected: book.expected,

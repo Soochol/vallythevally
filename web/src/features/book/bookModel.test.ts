@@ -71,6 +71,24 @@ test("가격이 빈 단이 중간에 낀 프레임이 와도 직전 실시간 �
   expect(holed.view.asks.every((l) => l.change === 0)).toBe(true);
 });
 
+test("호가가 한 틱 움직인 프레임의 빈 단은 직전 단으로 채우지 않아 가격이 겹치지 않는다", () => {
+  const first = acceptLive(EMPTY_BOOK, fullFrame());
+  const moved = fullFrame();
+  const shifted: FeedBook = {
+    ...moved,
+    asks: moved.asks.map((level, i) => (i === 3 ? null : { price: 71_200 + 100 * i, qty: level!.qty })),
+    bids: moved.bids.map((level, i) => (i === 3 ? null : { price: 71_100 - 100 * i, qty: level!.qty })),
+  };
+  const next = acceptLive(first, shifted);
+  if (next.phase !== "live") throw new Error("live");
+  const asks = next.view.asks.map((l) => l.price);
+  const bids = next.view.bids.map((l) => l.price);
+  expect(new Set(asks).size).toBe(asks.length);
+  expect(new Set(bids).size).toBe(bids.length);
+  expect(asks).toEqual([...asks].sort((a, b) => a - b));
+  expect(bids).toEqual([...bids].sort((a, b) => b - a));
+});
+
 test("뒤쪽 단이 비어 오면 얇아진 호가로 받아들인다", () => {
   const first = acceptLive(EMPTY_BOOK, fullFrame());
   const thin = { ...fullFrame(), asks: [...fullFrame().asks.slice(0, 3), ...Array<null>(7).fill(null)], bids: Array<null>(10).fill(null) };
