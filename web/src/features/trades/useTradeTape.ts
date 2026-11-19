@@ -8,7 +8,10 @@ import { emptyTape, MAX_TAPE_ROWS, tapeReducer } from "./tape";
 
 export type HistoryStatus = "loading" | "ready" | "failed";
 
-export function useTradeTape(socket: Pick<MarketSocketLike, "subscribeFeed">, code: SymbolCode, venue: Venue) {
+export const tradeHistoryPath = (code: SymbolCode, venue: Venue, pages?: number): string =>
+  `/api/symbols/${encodeURIComponent(code)}/trades?venue=${venue}&limit=${MAX_TAPE_ROWS}${pages === undefined ? "" : `&pages=${pages}`}`;
+
+export function useTradeTape(socket: Pick<MarketSocketLike, "subscribeFeed">, code: SymbolCode, venue: Venue, historyPages?: number) {
   const [state, dispatch] = useReducer(tapeReducer, emptyTape);
   const [history, setHistory] = useState<HistoryStatus>("loading");
   const [feedError, setFeedError] = useState<string | null>(null);
@@ -23,7 +26,7 @@ export function useTradeTape(socket: Pick<MarketSocketLike, "subscribeFeed">, co
       else if (event.type === "feed_subscribed") setFeedError(null);
       else if (event.type === "sub_error") setFeedError(event.code);
     });
-    getJson<TradeTape>(`/api/symbols/${encodeURIComponent(code)}/trades?venue=${venue}&limit=${MAX_TAPE_ROWS}`, controller.signal).then(
+    getJson<TradeTape>(tradeHistoryPath(code, venue, historyPages), controller.signal).then(
       (tape) => {
         dispatch({ type: "history", tape });
         setHistory("ready");
@@ -36,7 +39,7 @@ export function useTradeTape(socket: Pick<MarketSocketLike, "subscribeFeed">, co
       controller.abort();
       unsubscribe();
     };
-  }, [socket, code, venue]);
+  }, [socket, code, venue, historyPages]);
 
   return { state, dispatch, history, feedError };
 }

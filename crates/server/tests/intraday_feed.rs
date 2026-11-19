@@ -105,6 +105,16 @@ async fn todays_trades_follow_the_continuation_key_and_stop_at_the_limit() {
 }
 
 #[tokio::test]
+async fn one_page_of_trades_ignores_the_continuation_key() {
+    let f = Fixture::start(true).await;
+    f.script_pages("ka10003", "ka10003_005930_AL_p1", "TRADES2", "ka10003_005930_AL_p2");
+    let (status, body) = f.get("/api/symbols/005930/trades?limit=500&pages=1").await;
+    assert_eq!(status, 200, "{body}");
+    assert!(!body["trades"].as_array().unwrap().is_empty());
+    assert_eq!(f.calls("ka10003").iter().map(|c| c.next_key.clone()).collect::<Vec<_>>(), [None], "첫 쪽에 연속조회 키가 있어도 다음 쪽은 묻지 않는다");
+}
+
+#[tokio::test]
 async fn trades_ask_for_the_requested_venue_and_report_the_combined_fallback() {
     let f = Fixture::start(true).await;
     f.fake.respond_with("ka10003", 200, fixture("ka10003_005930_AL_p2"));
@@ -114,7 +124,7 @@ async fn trades_ask_for_the_requested_venue_and_report_the_combined_fallback() {
     assert_eq!((&nxt["venue"], &krx["venue"], &fallback["venue"]), (&json!("nxt"), &json!("krx"), &json!("combined")));
     let asked: Vec<_> = f.calls("ka10003").into_iter().map(|c| c.body["stk_cd"].as_str().unwrap().to_owned()).collect();
     assert_eq!(asked, ["005930_NX", "005930", "005935_AL"]);
-    for bad in ["venue=tokyo", "limit=0", "limit=501", "limit=x"] {
+    for bad in ["venue=tokyo", "limit=0", "limit=501", "limit=x", "pages=0", "pages=31", "pages=x"] {
         let (status, body) = f.get(&format!("/api/symbols/005930/trades?{bad}")).await;
         assert_eq!((status, &body["error"]["code"]), (400, &json!("bad_request")), "{bad}: {body}");
     }

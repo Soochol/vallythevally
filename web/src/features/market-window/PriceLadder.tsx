@@ -13,7 +13,7 @@ export interface LadderSlots {
 
 export interface LadderRowSlots {
   readonly topRight?: (slot: number) => ReactNode;
-  readonly bottomLeft?: (slot: number) => ReactNode;
+  readonly bottomLeft?: (rowCount: number) => ReactNode;
 }
 
 export interface LadderMark {
@@ -47,9 +47,20 @@ function Quantity({ side, level, ratio }: { side: "ask" | "bid"; level: BookLeve
   );
 }
 
+export const priceTone = (price: number, previousClose: number | null): "up" | "down" | "flat" =>
+  previousClose === null || !(previousClose > 0) ? "flat" : direction(price - previousClose);
+
+export function tradeBoxStart(rows: readonly LadderRow[]): number {
+  let start = LADDER_ROWS - BOTTOM_LEFT_ROWS;
+  rows.forEach((row, index) => {
+    if (index >= start && row.ask) start = index + 1;
+  });
+  return start;
+}
+
 function Price({ row, previousClose, mark }: { row: LadderRow; previousClose: number | null; mark: LadderMark | undefined }) {
   if (row.price === null) return <div className="mw-px" />;
-  const tone = previousClose === null || !(previousClose > 0) ? "flat" : direction(row.price - previousClose);
+  const tone = priceTone(row.price, previousClose);
   return (
     <div className={`mw-px ${TONE[tone]}`}>
       <span className="mw-px-num">
@@ -63,18 +74,24 @@ function Price({ row, previousClose, mark }: { row: LadderRow; previousClose: nu
 
 export function PriceLadder({ rows, previousClose, slots, rowSlots, mark, expectedPrice = null, firstBidIndex = ROWS_ABOVE_BASE }: Props) {
   const columns = `${slots?.left ? "var(--size-64) " : ""}minmax(0, 1fr) var(--size-133) minmax(0, 1fr)${slots?.right ? " var(--size-64)" : ""}`;
-  const firstBottomLeft = LADDER_ROWS - BOTTOM_LEFT_ROWS;
+  const boxStart = tradeBoxStart(rows);
+  const boxRows = rows.length - boxStart;
   return (
     <div className="mw-ladder" data-testid="price-ladder">
       {rows.map((row, index) => (
         <div key={row.key} className="mw-lr" data-side={index < firstBidIndex ? "ask" : "bid"} data-current={row.current ? "" : undefined} data-expected={expectedPrice !== null && row.price === expectedPrice && !row.repeat ? "" : undefined} data-empty={row.price === null ? "" : undefined} style={{ gridTemplateColumns: columns }}>
           {slots?.left?.(row)}
-          {row.ask ? <Quantity side="ask" level={row.ask} ratio={row.askRatio} /> : <div className="mw-qty" data-side="ask">{index >= firstBottomLeft && rowSlots?.bottomLeft?.(index - firstBottomLeft)}</div>}
+          {row.ask ? <Quantity side="ask" level={row.ask} ratio={row.askRatio} /> : <div className="mw-qty" data-side="ask" />}
           <Price row={row} previousClose={previousClose} mark={mark} />
           {row.bid ? <Quantity side="bid" level={row.bid} ratio={row.bidRatio} /> : <div className="mw-qty" data-side="bid">{index < TOP_RIGHT_ROWS && rowSlots?.topRight?.(index)}</div>}
           {slots?.right?.(row)}
         </div>
       ))}
+      {boxRows > 0 && rowSlots?.bottomLeft && (
+        <div className="mw-box-layer" data-testid="ladder-box-layer" style={{ gridTemplateColumns: columns, top: `calc(var(--s1) + ${boxStart} * var(--size-24))`, height: `calc(${boxRows} * var(--size-24))` }}>
+          <div className="mw-box" style={slots?.left ? { gridColumn: 2 } : undefined}>{rowSlots.bottomLeft(boxRows)}</div>
+        </div>
+      )}
     </div>
   );
 }

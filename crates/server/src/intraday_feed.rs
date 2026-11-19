@@ -61,10 +61,14 @@ async fn trades(State(st): State<Arc<AppState>>, Path(code): Path<String>, Query
         None => DEFAULT_TRADE_LIMIT,
         Some(s) => s.parse::<usize>().ok().filter(|n| (1..=MAX_TRADE_LIMIT).contains(n)).ok_or_else(|| ApiFailure::bad_request(format!("limit은 1~{MAX_TRADE_LIMIT}입니다: {s}")))?,
     };
+    let max_pages = match q.get("pages") {
+        None => MAX_PAGES,
+        Some(s) => s.parse::<usize>().ok().filter(|n| (1..=MAX_PAGES).contains(n)).ok_or_else(|| ApiFailure::bad_request(format!("pages는 1~{MAX_PAGES}입니다: {s}")))?,
+    };
     let stock = listed_stock(&st, &code).await?;
     let nxt_enabled = symbol_list(&st).await?.get(Symbol::Stock(stock)).is_some_and(|info| info.nxt_enabled);
     let venue = effective_venue(requested, nxt_enabled);
-    let (trades, skipped_rows) = walk_trades(&st.rest, &StockTrades::new(stock, venue), stock, limit).await.map_err(|e| Lookup::Trades.failure(e, st.clock.now()))?;
+    let (trades, skipped_rows) = walk_trades(&st.rest, &StockTrades::new(stock, venue), stock, limit, max_pages).await.map_err(|e| Lookup::Trades.failure(e, st.clock.now()))?;
     Ok(Json(api::TradeTape { symbol: symbol_code(stock), venue: venue.into(), trades, skipped_rows }))
 }
 
@@ -91,11 +95,11 @@ async fn program_trades(State(st): State<Arc<AppState>>, Path(code): Path<String
     Ok(Json(api::ProgramTradeTimeline { symbol: symbol_code(stock), points, skipped_rows }))
 }
 
-async fn walk_trades(rest: &KiwoomRest, req: &StockTrades, code: StockCode, limit: usize) -> Result<(Vec<api::TradePrint>, u32), BarError> {
+async fn walk_trades(rest: &KiwoomRest, req: &StockTrades, code: StockCode, limit: usize, max_pages: usize) -> Result<(Vec<api::TradePrint>, u32), BarError> {
     let (mut trades, mut skipped) = (Vec::new(), 0);
     let mut seen_keys = HashSet::new();
     let mut cont: Option<ContKey> = None;
-    for _ in 0..MAX_PAGES {
+    for _ in 0..max_pages {
         let page = rest.call(req, cont.as_ref(), Priority::Screen, MergeScope::default()).await?;
         let parsed = page.body.trades();
         trades.extend(parsed.rows);
