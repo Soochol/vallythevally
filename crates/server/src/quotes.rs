@@ -10,7 +10,7 @@ use crate::api;
 use crate::bars::{BarError, BarService};
 use crate::kiwoom::api::StockQuotes;
 use crate::kiwoom::rest::{KiwoomRest, MergeScope, Priority};
-use crate::kiwoom::wire::parse_quotes;
+use crate::kiwoom::wire::{parse_day_summary, parse_quotes};
 use crate::market::venue_volume::DayVolumes;
 use crate::symbols::Directory;
 
@@ -73,6 +73,26 @@ async fn index_quote(bars: &BarService, code: IndexCode) -> Result<Option<(Symbo
     };
     let symbol = Symbol::Index(code);
     Ok(Some((symbol, quote(symbol, None, last.close().centi(), prev.close().centi(), last.volume().0, bucket.start().unix(), api::QuoteSource::Polled))))
+}
+
+/// 지수는 받지 않는다. 요청 거래소가 NXT인데 그 종목이 NXT에서 거래되지 않으면 통합으로 묻는다.
+pub async fn day_summary(rest: &KiwoomRest, code: StockCode, requested: Venue, nxt_enabled: bool) -> Result<api::SymbolDaySummary, crate::kiwoom::rest::KiwoomError> {
+    let venue = effective_venue(requested, nxt_enabled);
+    let req = StockQuotes::of_venues(&[(code, venue)]).expect("종목 하나다");
+    let page = rest.call(&req, None, Priority::Screen, MergeScope::default()).await?;
+    let row = parse_day_summary(page.body, code, venue);
+    let won = |won: Option<u64>| won.map(|w| w as f64);
+    Ok(api::SymbolDaySummary {
+        symbol: api::SymbolCode(Symbol::Stock(code).as_wire()),
+        venue: venue.into(),
+        price: won(row.price_won),
+        open: won(row.open_won),
+        high: won(row.high_won),
+        low: won(row.low_won),
+        volume: row.volume,
+        trade_value_won: row.trade_value_won,
+        t: row.at.map(|at| api::UnixSeconds(at.unix())),
+    })
 }
 
 pub fn base_centi(price: Price, change_centi: i64) -> Option<u64> {

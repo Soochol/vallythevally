@@ -43,6 +43,7 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/api/symbols", get(search))
         .route("/api/symbols/{code}", get(symbol))
         .route("/api/symbols/{code}/fundamentals", get(fundamentals))
+        .route("/api/symbols/{code}/day-summary", get(day_summary))
         .route("/api/bars", get(bars))
         .route("/api/bars/jump", get(jump_bars))
         .route("/api/quotes", get(quotes))
@@ -287,6 +288,19 @@ async fn fundamentals(State(st): State<Arc<AppState>>, Path(code): Path<String>)
     let fundamentals = crate::fundamentals::fundamentals(&st.rest, stock).await.map_err(|e| Lookup::Fundamentals.failure(e, st.clock.now()))?;
     st.trading.remember_price_band(stock, fundamentals.upper_limit, fundamentals.lower_limit);
     Ok(Json(fundamentals))
+}
+
+async fn day_summary(State(st): State<Arc<AppState>>, Path(code): Path<String>, Query(q): Query<HashMap<String, String>>) -> Result<Json<api::SymbolDaySummary>, ApiFailure> {
+    let Symbol::Stock(stock) = Symbol::parse(&code).map_err(|e| ApiFailure::bad_request(e.to_string()))? else {
+        return Err(ApiFailure::bad_request("지수에는 종목 당일 요약이 없습니다"));
+    };
+    let venue = venue_param(&q)?.unwrap_or(Venue::Combined);
+    let failure = |e: BarError| Lookup::Quotes.failure(e, st.clock.now());
+    let nxt_enabled = match venue {
+        Venue::Nxt => st.symbols.ready(&st.rest).await.map_err(|e| failure(e.into()))?.get(Symbol::Stock(stock)).is_some_and(|info| info.nxt_enabled),
+        _ => false,
+    };
+    Ok(Json(crate::quotes::day_summary(&st.rest, stock, venue, nxt_enabled).await.map_err(|e| failure(e.into()))?))
 }
 
 struct BarsQuery {
@@ -534,12 +548,13 @@ mod tests {
             if s.api_id == ApiId::Ka10095 && (s.body.contains("_NX") || !s.body.contains("_AL")) {
                 let body: Value = serde_json::from_str(&s.body).unwrap();
                 let rows: Vec<Value> = body["stk_cd"].as_str().unwrap().split('|').map(|stk_cd| {
-                    let (price, volume) = match stk_cd.split_once('_') {
-                        Some((_, "NX")) => ("49900", "234567"),
-                        Some(_) => ("50000", "1234567"),
-                        None => ("50100", "1000000"),
+                    let (price, volume, traded) = match stk_cd.split_once('_') {
+                        Some((_, "NX")) => ("49900", "234567", "11705"),
+                        Some(_) => ("50000", "1234567", "61728"),
+                        None => ("50100", "1000000", "50100"),
                     };
                     json!({"stk_cd": stk_cd, "cur_prc": price, "base_pric": "51000", "pred_pre_sig": "5", "trde_qty": volume,
+                           "trde_prica": traded, "open_pric": "+51200", "high_pric": "+51500", "low_pric": "-49800",
                            "cntr_tm": "195959", "dt": "20261106"})
                 }).collect();
                 return ok(json!({"atn_stk_infr": rows, "return_code": 0}), None);
@@ -687,6 +702,41 @@ mod tests {
         }
         let f = fixture(true, true).await;
         let (s, v) = json(&f.app, "/api/quotes?symbols=005930").await;
+        assert_eq!((s, code(&v)), (StatusCode::SERVICE_UNAVAILABLE, "kiwoom_unavailable"));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn day_summary_reads_one_ka10095_row_for_the_shown_venue_and_rejects_indexes() {
+        let f = fixture(false, true).await;
+        let asked = |f: &Fixture| f.fake.market_sent().into_iter().filter(|s| s.api_id == ApiId::Ka10095).map(|s| s.body).next_back().unwrap();
+        let (s, v) = json(&f.app, "/api/symbols/005930/day-summary").await;
+        assert_eq!(s, StatusCode::OK, "{v}");
+        assert_eq!(asked(&f), r#"{"stk_cd":"005930_AL"}"#);
+        assert_eq!(
+            v,
+            json!({"symbol": "005930", "venue": "combined", "price": 50_000.0, "open": 51_200.0, "high": 51_500.0, "low": 49_800.0, "volume": 1_234_567,
+                   "tradeValueWon": 61_728_000_000u64, "t": 1_793_890_800 + 71_999})
+        );
+        let (_, v) = json(&f.app, "/api/symbols/005930/day-summary?venue=krx").await;
+        assert_eq!((asked(&f), v["venue"].as_str(), v["price"].as_f64(), v["tradeValueWon"].as_u64()), (r#"{"stk_cd":"005930"}"#.to_owned(), Some("krx"), Some(50_100.0), Some(50_100_000_000)));
+        let (_, v) = json(&f.app, "/api/symbols/005930/day-summary?venue=nxt").await;
+        assert_eq!((asked(&f), v["venue"].as_str(), v["price"].as_f64(), v["volume"].as_u64()), (r#"{"stk_cd":"005930_NX"}"#.to_owned(), Some("nxt"), Some(49_900.0), Some(234_567)));
+        let (_, v) = json(&f.app, "/api/symbols/005935/day-summary?venue=nxt").await;
+        assert_eq!((asked(&f), v["venue"].as_str()), (r#"{"stk_cd":"005935_AL"}"#.to_owned(), Some("combined")), "NXT에서 거래되지 않는 종목은 통합으로 묻는다");
+        let (s, v) = json(&f.app, "/api/symbols/005935/day-summary").await;
+        assert_eq!(
+            (s, v),
+            (StatusCode::OK, json!({"symbol": "005935", "venue": "combined", "price": null, "open": null, "high": null, "low": null, "volume": null, "tradeValueWon": null, "t": null})),
+            "행이 없으면 모든 항목이 null이다"
+        );
+        let before = f.fake.market_sent().len();
+        for uri in ["/api/symbols/IDX:001/day-summary", "/api/symbols/bad/day-summary", "/api/symbols/005930/day-summary?venue=tokyo"] {
+            let (s, v) = json(&f.app, uri).await;
+            assert_eq!((s, code(&v)), (StatusCode::BAD_REQUEST, "bad_request"), "{uri}: {v}");
+        }
+        assert_eq!(f.fake.market_sent().len(), before, "거절한 요청은 키움에 묻지 않는다");
+        let f = fixture(true, true).await;
+        let (s, v) = json(&f.app, "/api/symbols/005930/day-summary").await;
         assert_eq!((s, code(&v)), (StatusCode::SERVICE_UNAVAILABLE, "kiwoom_unavailable"));
     }
 

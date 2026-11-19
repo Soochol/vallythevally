@@ -779,6 +779,28 @@ pub struct Quote {
     pub venue: Option<Venue>,
 }
 
+/// `GET /api/symbols/:code/day-summary?venue=krx` → 주식 한 종목의 당일 요약(ka10095 한 행). 지수는 400 `bad_request`.
+/// `venue`는 `combined`(기본), `krx`, `nxt`다. 요청이 NXT인데 그 종목이 NXT에서 거래되지 않으면 통합으로 묻고 `venue`에 통합이 온다.
+/// 장 전처럼 키움이 0이나 빈 값을 준 항목과 행이 없는 종목의 모든 항목은 null이다.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct SymbolDaySummary {
+    pub symbol: SymbolCode,
+    pub venue: Venue,
+    pub price: Option<f64>,
+    pub open: Option<f64>,
+    pub high: Option<f64>,
+    pub low: Option<f64>,
+    /// 당일 누적.
+    #[ts(type = "number | null")]
+    pub volume: Option<u64>,
+    /// 당일 누적 거래대금, 원.
+    #[ts(type = "number | null")]
+    pub trade_value_won: Option<u64>,
+    pub t: Option<UnixSeconds>,
+}
+
 /// `GET /api/symbols/:code/fundamentals` → 주식의 기본 정보(ka10001, 통합 시세). 지수는 400 `bad_request`.
 /// 키움이 값을 주지 않은 항목은 null이다. ETF·우선주는 PER·PBR·ROE·EPS·BPS가, 적자 종목은 PER가 null이다.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
