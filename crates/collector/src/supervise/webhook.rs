@@ -14,7 +14,25 @@ const LEDGER_FILE: &str = "webhook-ledger.json";
 struct SentToday {
     date: u32,
     announced: BTreeSet<AlertKind>,
-    notes_sent: bool,
+    notes: BTreeSet<String>,
+}
+
+impl SentToday {
+    fn record(&mut self, outgoing: &Outgoing) {
+        if self.date != outgoing.date {
+            *self = SentToday { date: outgoing.date, ..SentToday::default() };
+        }
+        self.announced.extend(outgoing.kind);
+        self.notes.extend(outgoing.notes.iter().cloned());
+    }
+}
+
+#[derive(Debug, PartialEq, Eq)]
+struct Outgoing {
+    date: u32,
+    text: String,
+    kind: Option<AlertKind>,
+    notes: Vec<String>,
 }
 
 #[derive(Default)]
@@ -23,8 +41,7 @@ struct Ledger {
     announced: BTreeSet<AlertKind>,
     suppressed: BTreeMap<AlertKind, usize>,
     notes: Vec<String>,
-    notes_sent: bool,
-    notes_sent_before_start: bool,
+    delivered_notes: BTreeSet<String>,
 }
 
 struct LedgerFile {
@@ -73,11 +90,7 @@ fn alert_line(alert: &Alert) -> String {
 
 impl Ledger {
     fn restored(sent: SentToday) -> Ledger {
-        Ledger { date: sent.date, announced: sent.announced, notes_sent: sent.notes_sent, notes_sent_before_start: sent.notes_sent, ..Ledger::default() }
-    }
-
-    fn sent_today(&self) -> SentToday {
-        SentToday { date: self.date, announced: self.announced.clone(), notes_sent: self.notes_sent }
+        Ledger { date: sent.date, announced: sent.announced, delivered_notes: sent.notes, ..Ledger::default() }
     }
 
     fn roll_to(&mut self, date: u32) {
@@ -94,10 +107,8 @@ impl Ledger {
         })
     }
 
-    fn notes_text(&mut self) -> Option<String> {
-        let notes = std::mem::take(&mut self.notes);
+    fn notes_text(notes: &[String]) -> Option<String> {
         (!notes.is_empty()).then(|| {
-            self.notes_sent = true;
             let lines: Vec<String> = notes.iter().map(|note| format!("- {note}")).collect();
             format!("[수집 계획] 알릴 내용 {}건\n{}", notes.len(), lines.join("\n"))
         })
@@ -110,10 +121,10 @@ impl Ledger {
         }
     }
 
-    fn offer(&mut self, date: u32, alert: &Alert) -> Option<String> {
+    fn offer(&mut self, date: u32, alert: &Alert) -> Option<Outgoing> {
         self.roll_to(date);
         if alert.kind.is_note() {
-            if !self.notes_sent_before_start {
+            if !self.delivered_notes.contains(&alert.message) {
                 self.notes.push(alert.message.clone());
             }
             return None;
@@ -122,73 +133,75 @@ impl Ledger {
             *self.suppressed.entry(alert.kind).or_default() += 1;
             return None;
         }
-        Some(self.with_suppressed(alert_line(alert)))
+        let text = self.with_suppressed(alert_line(alert));
+        Some(Outgoing { date, text, kind: Some(alert.kind), notes: Vec::new() })
     }
 
-    fn flush_notes(&mut self, date: u32) -> Option<String> {
+    fn flush_notes(&mut self, date: u32) -> Option<Outgoing> {
         self.roll_to(date);
-        let text = self.notes_text()?;
-        Some(self.with_suppressed(text))
+        let notes = std::mem::take(&mut self.notes);
+        let text = Ledger::notes_text(&notes)?;
+        let text = self.with_suppressed(text);
+        Some(Outgoing { date, text, kind: None, notes })
     }
 
-    fn close_day(&mut self, date: u32) -> Option<String> {
+    fn close_day(&mut self, date: u32) -> Option<Outgoing> {
         self.roll_to(date);
-        let parts: Vec<String> = [self.notes_text(), self.suppressed_line()].into_iter().flatten().collect();
-        (!parts.is_empty()).then(|| format!("[수집 경보] {date}일 마감\n{}", parts.join("\n")))
+        let notes = std::mem::take(&mut self.notes);
+        let parts: Vec<String> = [Ledger::notes_text(&notes), self.suppressed_line()].into_iter().flatten().collect();
+        (!parts.is_empty()).then(|| Outgoing { date, text: format!("[수집 경보] {date}일 마감\n{}", parts.join("\n")), kind: None, notes })
     }
 }
 
 #[derive(Clone)]
 pub struct AlertWebhook {
     ledger: Arc<Mutex<Ledger>>,
-    file: Arc<LedgerFile>,
-    outbox: mpsc::UnboundedSender<String>,
+    outbox: mpsc::UnboundedSender<Outgoing>,
 }
 
 impl AlertWebhook {
     pub fn spawn(webhook: Webhook, state_folder: &Path) -> AlertWebhook {
-        let (outbox, mut inbox) = mpsc::unbounded_channel::<String>();
+        let (outbox, mut inbox) = mpsc::unbounded_channel::<Outgoing>();
+        let file = LedgerFile::in_folder(state_folder);
+        let mut delivered = file.load();
+        let ledger = Arc::new(Mutex::new(Ledger::restored(delivered.clone())));
         tokio::spawn(async move {
-            while let Some(text) = inbox.recv().await {
-                if let Err(failure) = webhook.send(&text).await {
-                    tracing::warn!(%failure, "수집 경보를 웹훅으로 보내지 못했습니다");
+            while let Some(outgoing) = inbox.recv().await {
+                match webhook.send(&outgoing.text).await {
+                    Ok(()) => {
+                        delivered.record(&outgoing);
+                        file.save(&delivered);
+                    }
+                    Err(failure) => tracing::warn!(%failure, "수집 경보를 웹훅으로 보내지 못했습니다"),
                 }
             }
         });
-        let file = LedgerFile::in_folder(state_folder);
-        AlertWebhook { ledger: Arc::new(Mutex::new(Ledger::restored(file.load()))), file: Arc::new(file), outbox }
+        AlertWebhook { ledger, outbox }
     }
 
-    fn with_ledger(&self, change: impl FnOnce(&mut Ledger) -> Option<String>) -> Option<String> {
-        let mut ledger = self.ledger.lock().expect("웹훅 장부 잠금");
-        let before = ledger.sent_today();
-        let text = change(&mut ledger);
-        let after = ledger.sent_today();
-        if after != before {
-            self.file.save(&after);
-        }
-        text
+    fn ledger(&self) -> std::sync::MutexGuard<'_, Ledger> {
+        self.ledger.lock().expect("웹훅 장부 잠금")
     }
 
-    fn deliver(&self, text: Option<String>) {
-        if let Some(text) = text {
-            let _ = self.outbox.send(text);
+    fn deliver(&self, outgoing: Option<Outgoing>) {
+        if let Some(outgoing) = outgoing {
+            let _ = self.outbox.send(outgoing);
         }
     }
 
     pub(super) fn alert(&self, date: u32, alert: &Alert) {
-        let text = self.with_ledger(|ledger| ledger.offer(date, alert));
-        self.deliver(text);
+        let outgoing = self.ledger().offer(date, alert);
+        self.deliver(outgoing);
     }
 
     pub(super) fn flush_notes(&self, date: u32) {
-        let text = self.with_ledger(|ledger| ledger.flush_notes(date));
-        self.deliver(text);
+        let outgoing = self.ledger().flush_notes(date);
+        self.deliver(outgoing);
     }
 
     pub(super) fn close_day(&self, date: u32) {
-        let text = self.with_ledger(|ledger| ledger.close_day(date));
-        self.deliver(text);
+        let outgoing = self.ledger().close_day(date);
+        self.deliver(outgoing);
     }
 }
 
@@ -206,10 +219,10 @@ mod tests {
     fn a_kind_is_announced_once_a_day_and_the_extras_are_counted_into_the_next_message() {
         let mut ledger = Ledger::default();
         let first = ledger.offer(DATE, &alert(AlertKind::KeyStopped, "collect-01를 멈췄습니다")).unwrap();
-        assert_eq!(first, "[수집 경보] 09:00:05 KST · 키 멈춤 · collect-01를 멈췄습니다");
+        assert_eq!(first.text, "[수집 경보] 09:00:05 KST · 키 멈춤 · collect-01를 멈췄습니다");
         assert_eq!(ledger.offer(DATE, &alert(AlertKind::KeyStopped, "collect-02를 멈췄습니다")), None);
         assert_eq!(ledger.offer(DATE, &alert(AlertKind::KeyStopped, "collect-03를 멈췄습니다")), None);
-        let next = ledger.offer(DATE, &alert(AlertKind::StageFailed, "정리 실패")).unwrap();
+        let next = ledger.offer(DATE, &alert(AlertKind::StageFailed, "정리 실패")).unwrap().text;
         assert!(next.ends_with("\n같은 종류 경보가 더 있었습니다: 키 멈춤 2건"), "{next}");
         assert_eq!(ledger.close_day(DATE), None);
     }
@@ -219,26 +232,46 @@ mod tests {
         let mut ledger = Ledger::default();
         ledger.offer(DATE, &alert(AlertKind::StageFailed, "하나"));
         ledger.offer(DATE, &alert(AlertKind::StageFailed, "둘"));
-        let closing = ledger.close_day(DATE).unwrap();
+        let closing = ledger.close_day(DATE).unwrap().text;
         assert!(closing.contains("단계 실패 1건"), "{closing}");
         assert_eq!(ledger.close_day(DATE), None);
     }
 
+    fn deliver(file: &LedgerFile, sent: &mut SentToday, outgoing: &Outgoing) {
+        sent.record(outgoing);
+        file.save(sent);
+    }
+
     #[test]
-    fn a_restarted_day_does_not_announce_the_kinds_and_notes_it_already_sent() {
+    fn a_restarted_day_does_not_announce_the_kinds_and_notes_that_were_delivered() {
         let folder = tempfile::tempdir().unwrap();
         let file = LedgerFile::in_folder(folder.path());
-        let mut first = Ledger::restored(file.load());
-        assert!(first.offer(DATE, &alert(AlertKind::StageFailed, "하나")).is_some());
+        let mut sent = file.load();
+        let mut first = Ledger::restored(sent.clone());
+        deliver(&file, &mut sent, &first.offer(DATE, &alert(AlertKind::StageFailed, "하나")).unwrap());
         first.offer(DATE, &alert(AlertKind::PlanNote, "메모"));
-        assert!(first.flush_notes(DATE).is_some());
-        file.save(&first.sent_today());
+        deliver(&file, &mut sent, &first.flush_notes(DATE).unwrap());
         let mut second = Ledger::restored(file.load());
         assert_eq!(second.offer(DATE, &alert(AlertKind::StageFailed, "둘")), None);
         assert!(second.offer(DATE, &alert(AlertKind::KeyStopped, "새 종류")).is_some());
         second.offer(DATE, &alert(AlertKind::PlanNote, "메모"));
         assert_eq!(second.flush_notes(DATE), None);
+        second.offer(DATE, &alert(AlertKind::PlanNote, "다시 시작한 뒤 새로 생긴 메모"));
+        assert!(second.close_day(DATE).unwrap().text.contains("다시 시작한 뒤 새로 생긴 메모"));
         assert!(second.offer(DATE + 1, &alert(AlertKind::StageFailed, "다음 날")).is_some());
+    }
+
+    #[test]
+    fn what_was_never_delivered_is_not_recorded_so_a_restart_sends_it_again() {
+        let folder = tempfile::tempdir().unwrap();
+        let file = LedgerFile::in_folder(folder.path());
+        let mut sent = file.load();
+        let mut first = Ledger::restored(sent.clone());
+        deliver(&file, &mut sent, &first.offer(DATE, &alert(AlertKind::KeyStopped, "전달됨")).unwrap());
+        first.offer(DATE, &alert(AlertKind::StageFailed, "큐에서 멈춤")).unwrap();
+        let mut second = Ledger::restored(file.load());
+        assert!(second.offer(DATE, &alert(AlertKind::StageFailed, "다시")).is_some());
+        assert_eq!(second.offer(DATE, &alert(AlertKind::KeyStopped, "또")), None);
     }
 
     #[test]
@@ -246,10 +279,11 @@ mod tests {
         let folder = tempfile::tempdir().unwrap();
         std::fs::write(folder.path().join(LEDGER_FILE), "{깨짐").unwrap();
         let mut ledger = Ledger::restored(LedgerFile::in_folder(folder.path()).load());
-        assert!(ledger.offer(DATE, &alert(AlertKind::StageFailed, "하나")).is_some());
+        let outgoing = ledger.offer(DATE, &alert(AlertKind::StageFailed, "하나")).unwrap();
         let blocked = folder.path().join("파일");
         std::fs::write(&blocked, "").unwrap();
-        LedgerFile::in_folder(&blocked).save(&ledger.sent_today());
+        let mut sent = SentToday::default();
+        deliver(&LedgerFile::in_folder(&blocked), &mut sent, &outgoing);
     }
 
     #[test]
@@ -265,7 +299,7 @@ mod tests {
         let mut ledger = Ledger::default();
         assert_eq!(ledger.offer(DATE, &alert(AlertKind::Excluded, "3종목 제외")), None);
         assert_eq!(ledger.offer(DATE, &alert(AlertKind::PlanNote, "예비 키 없음")), None);
-        let batch = ledger.flush_notes(DATE).unwrap();
+        let batch = ledger.flush_notes(DATE).unwrap().text;
         assert_eq!(batch, "[수집 계획] 알릴 내용 2건\n- 3종목 제외\n- 예비 키 없음");
         assert_eq!(ledger.flush_notes(DATE), None);
     }

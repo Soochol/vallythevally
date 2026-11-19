@@ -1355,7 +1355,7 @@ impl FakeWebhook {
     fn url_file(folder: &Path, port: u16) -> PathBuf {
         use std::os::unix::fs::OpenOptionsExt;
         let path = folder.join("discord-webhook");
-        let mut file = std::fs::OpenOptions::new().write(true).create_new(true).mode(0o600).open(&path).unwrap();
+        let mut file = std::fs::OpenOptions::new().write(true).create(true).truncate(true).mode(0o600).open(&path).unwrap();
         io::Write::write_all(&mut file, format!("http://127.0.0.1:{port}/api/webhooks/123/{WEBHOOK_SECRET}\n").as_bytes()).unwrap();
         path
     }
@@ -1553,4 +1553,17 @@ async fn a_broken_ledger_file_does_not_stop_the_daemon_and_the_alerts_are_sent()
     let log = logs.text();
     assert!(log.contains("웹훅 전송 기록이 깨져 있어"), "{log}");
     assert!(!log.contains(WEBHOOK_SECRET), "{log}");
+}
+
+#[tokio::test(start_paused = true)]
+async fn an_alert_that_never_reached_the_webhook_is_sent_again_after_a_restart() {
+    let refusing = FakeWebhook::start(Vec::new(), Answer::Fail).await;
+    let folder = tempfile::tempdir().unwrap();
+    run_the_failing_day_with_notes(refusing.webhook(folder.path())).await;
+    assert!(refusing.texts().is_empty());
+    let accepting = FakeWebhook::start(Vec::new(), Answer::Accept).await;
+    run_the_failing_day_with_notes(accepting.webhook(folder.path())).await;
+    let texts = accepting.texts();
+    assert_eq!(count_containing(&texts, "· 단계 실패 ·"), 1, "{texts:?}");
+    assert_eq!(count_containing(&texts, "[수집 계획]"), 1, "{texts:?}");
 }
