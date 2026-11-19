@@ -7,7 +7,7 @@ export type SplitResult = { ok: true; dock: DockPlacement } | { ok: false; reaso
 
 export const SPLIT_SHARE = 0.5;
 
-function splitBeside(target: DockNode, rect: Rect, window: WindowId, edge: Edge, id: string, space: DockSpace): SplitNode | null {
+export function splitBeside(target: DockNode, rect: Rect, window: WindowId, edge: Edge, id: string, space: DockSpace): SplitNode | null {
   const row = edge === "left" || edge === "right";
   const leads = edge === "left" || edge === "top";
   const need = tabsMinSize(space.windows, [window]);
