@@ -22,6 +22,7 @@ export function LayoutMenu() {
   const mode = useUiStore((s) => s.prefs.layoutMode);
   const layout = useLayoutStore((s) => s.layout);
   const canUndo = useLayoutStore((s) => s.steps.length > 0);
+  const canRedo = useLayoutStore((s) => s.redos.length > 0);
   const offline = usePersistStore((s) => s.phase.kind !== "ready");
   const { phase, layouts } = useLayoutsStore();
   const busy = phase === "busy";
@@ -47,6 +48,7 @@ export function LayoutMenu() {
     { kind: "action", label: "기본 배치로", onSelect: layoutCommands.resetPlacement },
     { kind: "action", label: "크기 모두 고르게", disabled: mode !== "dock" || !layout.placement.dock, onSelect: equalizeDockSizes },
     { kind: "action", label: "배치 되돌리기", disabled: !canUndo, onSelect: () => useLayoutStore.getState().undoArrangement() },
+    { kind: "action", label: "배치 다시 하기", disabled: !canRedo, onSelect: () => useLayoutStore.getState().redoArrangement() },
   ];
   return (
     <div ref={root} className="contents">

@@ -25,6 +25,7 @@ import { StatusBar } from "./features/status/StatusBar";
 import { Toast } from "./features/toast/Toast";
 import { Topbar } from "./features/topbar/Topbar";
 import { useHotkeys } from "./features/useHotkeys";
+import { useArrangementKeys } from "./features/workspace/useArrangementKeys";
 import { useOpenFromAddress } from "./features/useOpenFromAddress";
 import { useCell } from "./stores/layout";
 import { PhoneSaveBand } from "./features/status/SaveStatus";
@@ -63,6 +64,7 @@ function ChartScreen() {
   const status: CellStatus = phoneStatus?.cellId === cellId ? phoneStatus.status : { kind: "loading" };
 
   useHotkeys();
+  useArrangementKeys();
   useEffect(() => {
     const { loginFailure, showLoginFailure } = useAccountStore.getState();
     if (loginFailure === null) return;
