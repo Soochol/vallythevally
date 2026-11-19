@@ -20,6 +20,7 @@ import { expectedInfoItems, placeInfoItems } from "../market-window/quoteInfo";
 import { stripTotals } from "../book/bookModel";
 import { visibleAfterHours, visibleExpected } from "../book/sessionWindows";
 import { useLadderTrades, useQuoteInfo } from "../market-window/useLadderSlots";
+import { useShownVenue } from "../market-window/useShownVenue";
 import { EmptyState } from "../overlay/State";
 import { openSystemSettings } from "../system-settings/open";
 import { AccountBand } from "./AccountBand";
@@ -54,7 +55,8 @@ const sameLadderPrices = (a: LadderPrices | null, b: LadderPrices | null): boole
 
 function OrderBody({ code }: { code: SymbolCode }) {
   const mock = useMockEnvironment();
-  const feed = useBookFeed(code);
+  const quoteVenue = useShownVenue(code);
+  const feed = useBookFeed(code, quoteVenue);
   const access = useOrderAccess();
   const [mode, setMode] = useState<QuantityMode>("shares");
   const [input, setInput] = useState("10");
@@ -68,11 +70,11 @@ function OrderBody({ code }: { code: SymbolCode }) {
   const [profitUnit, setProfitUnit] = useState<ProfitUnit>("won");
   const [now, setNow] = useState(() => Date.now());
   const settings = useOrderSettings();
-  const venue: Venue = mock ? "krx" : settings.venue;
+  const orderVenue: Venue = mock ? "krx" : settings.venue;
   const setSettings = useUiStore((s) => s.setOrderSettings);
   const limits = useFundamentals(code).data;
   const symbolInfo = useSymbolInfo(code).data;
-  const nxtNotTraded = venue === "nxt" && symbolInfo?.nxtEnabled === false;
+  const nxtNotTraded = orderVenue === "nxt" && symbolInfo?.nxtEnabled === false;
   const accountTail = useOrdersStatus().data?.accountTail ?? null;
 
   useEffect(() => {
@@ -92,13 +94,13 @@ function OrderBody({ code }: { code: SymbolCode }) {
   const explorerOn = exploring && fullPrices !== null;
   const shownRows: LadderRow[] = quotes && heldLadder ? (explorerOn ? buildLadderRows(fullPrices, quotes) : buildLadderRows(heldLadder.prices, quotes, heldLadder.sidesSplit)) : [];
   const rows = settings.rate ? shownRows : shownRows.map((row) => ({ ...row, rate: null }));
-  const info = useQuoteInfo({ code, venue, lastPrice: feed.lastPrice, previousClose: feed.previousClose, upperLimit: bounds.upper, lowerLimit: bounds.lower });
-  const trades = useLadderTrades(code, venue);
+  const info = useQuoteInfo({ code, venue: quoteVenue, lastPrice: feed.lastPrice, previousClose: feed.previousClose, upperLimit: bounds.upper, lowerLimit: bounds.lower });
+  const trades = useLadderTrades(code, quoteVenue);
   const expected = view ? visibleExpected(view.t, Math.floor(now / 1000), view.expected) : null;
   const infoSlots = placeInfoItems(rows, info, expected === null ? [] : expectedInfoItems(expected, feed.previousClose));
   const totals = stripTotals(view && { ask: view.totalAsk, bid: view.totalBid }, visibleAfterHours(feed.afterHours?.totals ?? null, Math.floor(now / 1000)));
   const data = useOrderData(code, access.open, referencePrice);
-  const writes = useOrderWrites(code, venue);
+  const writes = useOrderWrites(code, orderVenue);
   const holding = holdingOf(data.balance?.holdings ?? [], code);
   const averagePrice = settings.averageDot ? averageRowPrice(rows.map((row) => row.price), holding?.averagePrice ?? null) : null;
   const writable = access.open && !data.blocked && writes.status?.unknown !== true;
@@ -146,7 +148,7 @@ function OrderBody({ code }: { code: SymbolCode }) {
   };
 
   return (
-    <div className="od" data-testid="order-window" data-symbol={code} data-venue={venue} data-writable={writable ? "" : undefined}>
+    <div className="od" data-testid="order-window" data-symbol={code} data-venue={orderVenue} data-quote-venue={quoteVenue} data-writable={writable ? "" : undefined}>
       {access.reason && (
         <div className="od-gate" role="status" data-testid="order-gate">
           <span>{access.reason}</span>
@@ -161,7 +163,7 @@ function OrderBody({ code }: { code: SymbolCode }) {
           <OrderEstimate estimate={estimate} shares={mode === "amount" && estimate !== null ? quantityAt(unitPrice) : null} />
           <button type="button" className="od-tool" data-testid="order-explorer" aria-pressed={explorerOn} disabled={referencePrice === null || fullPrices === null} title={fullPrices === null ? EXPLORER_UNAVAILABLE : undefined} onClick={() => { if (!explorerOn) setCenterToken((token) => token + 1); setExploring(!explorerOn); }}>전체 호가</button>
           <button type="button" className="od-tool" data-testid="order-current" disabled={!explorerOn} onClick={() => setCenterToken((token) => token + 1)}>현재가</button>
-          <OrderSettingsPopover settings={settings} venue={venue} mock={mock} nxtNotTraded={nxtNotTraded} holding={holding !== null} onChange={setSettings} />
+          <OrderSettingsPopover settings={settings} venue={orderVenue} mock={mock} nxtNotTraded={nxtNotTraded} holding={holding !== null} onChange={setSettings} />
         </div>
       </div>
       <div className="bk-ladder od-ladder-wrap" data-stale={feed.connected ? undefined : ""} data-exploring={explorerOn ? "" : undefined}>

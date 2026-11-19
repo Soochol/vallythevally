@@ -1,8 +1,12 @@
 import type { ReactNode } from "react";
+import type { SymbolCode } from "../../api/generated/SymbolCode";
+import { NXT_UNAVAILABLE } from "../../lib/venue";
 import { useVenue } from "../../stores/ui";
 import { formatQuantity } from "./format";
 import { ratioSplit } from "./ladder";
-import type { WindowKind } from "../../layout/kinds";
+import type { WindowId, WindowKind } from "../../layout/kinds";
+import { useLinkedSymbol } from "./MarketWindowGate";
+import { useShownVenue } from "./useShownVenue";
 
 export function Strip({ children, divided }: { children: ReactNode; divided?: boolean }) {
   return <div className="mw-strip" data-divided={divided ? "" : undefined}>{children}</div>;
@@ -37,12 +41,27 @@ export function Segmented<T extends string>({ label, options, value, disabled, o
   );
 }
 
-const INTEGRATED_KINDS: readonly WindowKind[] = ["book", "program", "brokers", "order"];
+const COMBINED_ONLY_KINDS: readonly WindowKind[] = ["program", "brokers"];
+const FOLLOWING_KINDS: readonly WindowKind[] = ["book", "order"];
 
-export const showsIntegratedBadge = (kind: WindowKind): boolean => INTEGRATED_KINDS.includes(kind);
+function CombinedOnlyBadge() {
+  if (useVenue() === "combined") return null;
+  return <span className="mw-integrated" title="키움 프로그램·거래원은 KRX와 NXT를 합친 값입니다">통합</span>;
+}
 
-export function IntegratedBadge() {
-  const venue = useVenue();
-  if (venue === "combined") return null;
-  return <span className="mw-integrated" title="키움 호가·프로그램·거래원은 KRX와 NXT를 합친 값입니다">통합</span>;
+function SubstitutedBadge({ code }: { code: SymbolCode }) {
+  const appVenue = useVenue();
+  const shown = useShownVenue(code);
+  if (shown === appVenue) return null;
+  return <span className="mw-integrated" title={`${NXT_UNAVAILABLE}이라 통합 시세를 보입니다`}>통합</span>;
+}
+
+function FollowingBadge({ id }: { id: WindowId }) {
+  const code = useLinkedSymbol(id);
+  return code === null ? null : <SubstitutedBadge code={code} />;
+}
+
+export function IntegratedBadge({ id, kind }: { id: WindowId; kind: WindowKind }) {
+  if (COMBINED_ONLY_KINDS.includes(kind)) return <CombinedOnlyBadge />;
+  return FOLLOWING_KINDS.includes(kind) ? <FollowingBadge id={id} /> : null;
 }

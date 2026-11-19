@@ -7,7 +7,7 @@ import { PERIOD_LABEL } from "../../lib/symbol";
 import { chartNumber, chartWindows, useCell, useLayoutStore, useWindowName, type WindowState } from "../../stores/layout";
 import { useSelectionStore } from "../../stores/selection";
 import { CloseIcon } from "../icons";
-import { IntegratedBadge, showsIntegratedBadge } from "../market-window/parts";
+import { IntegratedBadge } from "../market-window/parts";
 import { ScreenerBadge } from "../screener/ScreenerPanel";
 import { AddWindowMenu } from "./AddWindowMenu";
 import type { DockInteraction } from "./dockInteraction";
@@ -39,7 +39,7 @@ function ChartTabLabel({ id }: { id: WindowId }) {
 
 function OtherTabLabel({ window }: { window: WindowState }) {
   const name = useWindowName(window);
-  return <><span className="dock-tab-name">{name}</span>{window.kind === "screener" && <ScreenerBadge id={window.id} />}{showsIntegratedBadge(window.kind) && <IntegratedBadge />}</>;
+  return <><span className="dock-tab-name">{name}</span>{window.kind === "screener" && <ScreenerBadge id={window.id} />}<IntegratedBadge id={window.id} kind={window.kind} /></>;
 }
 
 function TabLabel({ window }: { window: WindowState }) {

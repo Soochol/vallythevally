@@ -5,7 +5,7 @@ import type { LayoutWindow } from "../src/api/generated/LayoutWindow";
 import type { OrderBook } from "../src/api/generated/OrderBook";
 import type { TradePrint } from "../src/api/generated/TradePrint";
 import { type Scenario, cell, DEFAULT_LAYOUT_ID, expect, pickDesktopVenue, test, windowTabs, pollSaved } from "./harness";
-import { pinQuote } from "./order-window";
+import { feedSubscriptions, nxtTraded, pinQuote, requestedVenues, venueScene } from "./order-window";
 
 const SETTINGS = { v: 1, style: "candle", scale: "normal", indicators: [], compare: [], panels: [] };
 const CODE = "005930";
@@ -479,13 +479,48 @@ test("끊기면 사다리를 흐리게 하고 끊김을 보인다", async ({ pag
   await page.screenshot({ path: "../target/ux-screens/win-book-disconnected.png" });
 });
 
-test("앱 거래소가 KRX이면 도킹 탭에 통합 표시가 있고 본문에는 없다", async ({ page, scenario }) => {
+test("위 막대 거래소를 KRX로 바꾸면 호가·체결을 krx로 다시 구독하고 order-book?venue=krx의 KRX 사다리를 보인다", async ({ page, scenario }) => {
+  await open(page, scenario, 70000);
+  venueScene(scenario, { krx: 60000 }, 1000);
+  await expect(ladderRows(page).locator(".mw-px-num").first()).toHaveText("71,000");
+  await pollSaved(() => feedSubscriptions(scenario, "book", "combined").length).toBe(1);
+  await pickDesktopVenue(page, "KRX");
+  await pollSaved(() => feedSubscriptions(scenario, "book", "krx").length).toBe(1);
+  await pollSaved(() => feedSubscriptions(scenario, "trades", "krx").length).toBe(2);
+  await expect(ladderRows(page).locator(".mw-px-num").first()).toHaveText("61,000");
+  await expect(page.locator(".mw-lr[data-current]")).toContainText("60,000");
+  expect(requestedVenues(scenario, "/api/symbols/005930/order-book")).toEqual(["combined", "krx"]);
+  expect(requestedVenues(scenario, "/api/symbols/005930/trades")).toContain("krx");
+  const subOfMessage = (m: (typeof scenario.live.messages)[number]) => ("sub" in m ? m.sub : "");
+  const unsubscribed = scenario.live.messages.filter((m) => m.type === "unsubscribe").map(subOfMessage);
+  expect(unsubscribed).toEqual(expect.arrayContaining([...feedSubscriptions(scenario, "book", "combined"), ...feedSubscriptions(scenario, "trades", "combined")].map(subOfMessage)));
+});
+
+test("거래소를 바꾼 뒤 앞 거래소 구독으로 온 호가는 사다리에 반영되지 않는다", async ({ page, scenario }) => {
+  await open(page, scenario, 70000);
+  venueScene(scenario, { krx: 60000 }, 1000);
+  const combinedSub = await subOf(scenario, "book");
+  await pickDesktopVenue(page, "KRX");
+  await expect(ladderRows(page).locator(".mw-px-num").first()).toHaveText("61,000");
+  scenario.live.emit({ type: "feed_book", sub: combinedSub, book: liveOf([[99_900, 5]], [[99_800, 5]], [5, 5]) });
+  const krxSub = feedSubscriptions(scenario, "book", "krx")[0];
+  if (krxSub?.type !== "subscribe_feed") throw new Error("KRX 호가 구독이 없습니다");
+  scenario.live.emit({ type: "feed_book", sub: krxSub.sub, book: liveOf([[60_100, 11]], [[60_000, 22]], [11, 22]) });
+  await expect(ladderRows(page).locator(".mw-qty-value")).toHaveText(["11", "22"]);
+  await expect(book(page)).not.toContainText("99,900");
+});
+
+test("NXT에서 거래되지 않는 종목을 NXT로 보면 통합으로 구독하고 도킹 탭에 통합 표시가 있고 본문에는 없다", async ({ page, scenario }) => {
+  nxtTraded(scenario, false);
   await open(page, scenario, 70000);
   const bookTab = windowTabs(page).getByRole("tab", { name: /^10호가/ });
   await expect(bookTab.locator(".mw-integrated")).toHaveCount(0);
-  await pickDesktopVenue(page, "KRX");
+  await pickDesktopVenue(page, "NXT");
   await expect(bookTab.locator(".mw-integrated")).toHaveText("통합");
   await expect(book(page).locator(".mw-integrated")).toHaveCount(0);
+  expect(feedSubscriptions(scenario, "book", "nxt")).toHaveLength(0);
+  expect(feedSubscriptions(scenario, "book", "combined")).toHaveLength(1);
+  expect(requestedVenues(scenario, "/api/symbols/005930/order-book")).toEqual(["combined"]);
   const tabBox = (await bookTab.boundingBox())!;
   const badgeBox = (await bookTab.locator(".mw-integrated").boundingBox())!;
   expect(badgeBox.x + badgeBox.width).toBeLessThanOrEqual(tabBox.x + tabBox.width);
@@ -496,14 +531,25 @@ test("앱 거래소가 KRX이면 도킹 탭에 통합 표시가 있고 본문에
   await expect(bookTab.locator(".mw-integrated")).toHaveText("통합");
 });
 
-test("캔버스 배치에서 KRX이면 10호가 창에 통합 표시가 머리에 하나만 있다", async ({ page, scenario }) => {
+test("NXT에서 거래되는 종목을 KRX로 보면 10호가 도킹 탭에 통합 표시가 없다", async ({ page, scenario }) => {
+  nxtTraded(scenario, true);
+  await open(page, scenario, 70000);
+  const bookTab = windowTabs(page).getByRole("tab", { name: /^10호가/ });
+  await pickDesktopVenue(page, "KRX");
+  await pollSaved(() => feedSubscriptions(scenario, "book", "krx").length).toBe(1);
+  await expect(bookTab.locator(".mw-integrated")).toHaveCount(0);
+  await expect(book(page).locator(".mw-integrated")).toHaveCount(0);
+});
+
+test("캔버스 배치에서 NXT 불가 종목을 NXT로 보면 10호가 창에 통합 표시가 머리에 하나만 있다", async ({ page, scenario }) => {
+  nxtTraded(scenario, false);
   bookWindow(scenario, CODE);
   replyBook(scenario, 70000);
   scenario.documents.saveLayout({ ...scenario.documents.layout(DEFAULT_LAYOUT_ID), placement: { v: 1, dock: null, canvas: null }, revision: scenario.documents.layout(DEFAULT_LAYOUT_ID).revision + 1 });
   scenario.documents.saveUiState({ ...scenario.documents.uiState(), layoutMode: "canvas" });
   await page.goto("/");
   await expect(cell(page)).toHaveAttribute("aria-busy", "false");
-  await pickDesktopVenue(page, "KRX");
+  await pickDesktopVenue(page, "NXT");
   const frame = page.locator('[data-canvas-window="book"]');
   await expect(frame.locator(".mw-integrated")).toHaveCount(1);
   await expect(frame.locator(".window-head .mw-integrated")).toHaveText("통합");
