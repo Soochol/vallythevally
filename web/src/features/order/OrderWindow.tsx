@@ -144,7 +144,7 @@ function OrderBody({ code }: { code: SymbolCode }) {
       <div className="od-entry">
         <QuantityRow mode={mode} input={input} sharePresets={settings.sharePresets} amountPresets={settings.amountPresets} onMode={setMode} onInput={setInput} />
         <div className="od-toolbar">
-          <OrderEstimate estimate={estimate} />
+          <OrderEstimate estimate={estimate} shares={mode === "amount" && estimate !== null ? quantityAt(unitPrice) : null} />
           <button type="button" className="od-tool" data-testid="order-explorer" aria-pressed={explorerOn} disabled={referencePrice === null || fullPrices === null} title={fullPrices === null ? EXPLORER_UNAVAILABLE : undefined} onClick={() => { if (!explorerOn) setCenterToken((token) => token + 1); setExploring(!explorerOn); }}>전체 호가</button>
           <button type="button" className="od-tool" data-testid="order-current" disabled={!explorerOn} onClick={() => setCenterToken((token) => token + 1)}>현재가</button>
           <OrderSettingsPopover settings={settings} venue={venue} mock={mock} nxtNotTraded={nxtNotTraded} holding={holding !== null} onChange={setSettings} />

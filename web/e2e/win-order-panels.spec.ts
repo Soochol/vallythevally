@@ -479,7 +479,7 @@ test("금액 프리셋을 바꾸면 금액 모드의 프리셋 단추가 그 값
   const buttons = page.getByRole("group", { name: "수량 프리셋" }).getByRole("button");
   await expect(buttons).toHaveText(["200만", "500만", "1000만", "5000만"]);
   await buttons.first().click();
-  await expect(page.getByRole("textbox", { name: "수량" })).toHaveValue("2000000");
+  await expect(page.getByRole("textbox", { name: "금액" })).toHaveValue("2,000,000");
 });
 
 test("설정 창은 Esc와 바깥 클릭으로 닫히고 머리에 적용 범위를 적는다", async ({ page, scenario }) => {
@@ -531,8 +531,94 @@ test("금액 방식이면 같은 줄의 프리셋이 100만·500만·1000만·50
   await page.getByRole("group", { name: "수량 방식" }).getByRole("button", { name: "금액" }).click();
   const presets = page.getByRole("group", { name: "수량 프리셋" }).getByRole("button");
   await expect(presets).toHaveText(["100만", "500만", "1000만", "5000만"]);
-  const input = Math.round(await topOf(page.getByRole("textbox", { name: "수량" })));
+  const input = Math.round(await topOf(page.getByRole("textbox", { name: "금액" })));
   expect((await tops(presets)).map(Math.round)).toEqual([input, input, input, input]);
+});
+
+for (const width of [421, 900]) {
+  test(`금액 방식에서 프리셋을 누르면 ${width}px 창에서도 금액 전체와 실제 수량이 보이고 그 수량으로 주문이 나간다`, async ({ page, scenario }) => {
+    ordersOn(scenario);
+    const api = tradingApi(scenario);
+    await openOrderWindow(page, scenario);
+    lastTrade(scenario, BASE);
+    await win(page).evaluate((element, px) => { element.style.flex = "none"; element.style.width = `${px}px`; }, width);
+    await page.getByRole("group", { name: "수량 방식" }).getByRole("button", { name: "금액" }).click();
+    const input = page.getByRole("textbox", { name: "금액" });
+    const presets = page.getByRole("group", { name: "수량 프리셋" }).getByRole("button");
+    for (const [index, shown] of ["1,000,000", "5,000,000", "10,000,000", "50,000,000"].entries()) {
+      await presets.nth(index).click();
+      await expect(input).toHaveValue(shown);
+      expect(await input.evaluate((element: HTMLInputElement) => element.scrollWidth <= element.clientWidth)).toBe(true);
+    }
+    await expect(page.getByTestId("order-estimate-quantity")).toHaveText("714");
+    const clipped = (locator: Locator) => locator.evaluate((element) => element.scrollWidth > element.clientWidth);
+    expect(await clipped(page.getByTestId("order-estimate").locator(".."))).toBe(false);
+    expect(await clipped(page.locator(".od-estimate-amount"))).toBe(false);
+    await presets.first().click();
+    await expect(page.getByTestId("order-estimate-quantity")).toHaveText("14");
+    await expect(page.getByTestId("order-estimate")).toHaveText("980,000원");
+    await cellAt(page, "buy", BASE).dblclick();
+    await pollSaved(() => writesTo(api, "place")).toHaveLength(1);
+    expect(writesTo(api, "place")[0]!.body).toMatchObject({ side: "buy", price: BASE, quantity: 14 });
+  });
+}
+
+test("금액 칸은 쉼표를 건너뛰어 지우고 가운데에 넣어도 커서가 제자리에 있다", async ({ page, scenario }) => {
+  ordersOn(scenario);
+  tradingApi(scenario);
+  await openOrderWindow(page, scenario);
+  await page.getByRole("group", { name: "수량 방식" }).getByRole("button", { name: "금액" }).click();
+  const input = page.getByRole("textbox", { name: "금액" });
+  await input.fill("1000000");
+  await input.evaluate((element: HTMLInputElement) => element.setSelectionRange(6, 6));
+  await page.keyboard.press("Backspace");
+  await page.keyboard.press("Backspace");
+  await expect(input).toHaveValue("100,000");
+  await input.fill("100000");
+  await input.evaluate((element: HTMLInputElement) => element.setSelectionRange(1, 1));
+  await page.keyboard.type("55");
+  await expect(input).toHaveValue("15,500,000");
+  await input.fill("1234567");
+  await input.evaluate((element: HTMLInputElement) => element.setSelectionRange(3, 3));
+  await page.keyboard.type("a");
+  await expect(input).toHaveValue("1,234,567");
+  expect(await input.evaluate((element: HTMLInputElement) => element.selectionStart)).toBe(3);
+  await input.fill("1234");
+  await input.evaluate((element: HTMLInputElement) => element.setSelectionRange(0, 0));
+  await page.keyboard.type("0");
+  await page.keyboard.type("9");
+  await expect(input).toHaveValue("91,234");
+  await input.fill("12345678901234567890");
+  await expect(input).toHaveValue("12,345,678,901,234,567,890");
+});
+
+test("421px에서 큰 금액을 넣어도 호가를 가리키는 동안 툴바 높이와 사다리 위치가 변하지 않는다", async ({ page, scenario }) => {
+  ordersOn(scenario);
+  tradingApi(scenario);
+  await openOrderWindow(page, scenario);
+  lastTrade(scenario, BASE);
+  await win(page).evaluate((element) => { element.style.flex = "none"; element.style.width = "421px"; });
+  await page.getByRole("group", { name: "수량 방식" }).getByRole("button", { name: "금액" }).click();
+  await page.getByRole("textbox", { name: "금액" }).fill("70000000");
+  const toolbar = page.locator(".od-toolbar");
+  const heights = new Set<number>();
+  const rowTops = new Set<number>();
+  for (const price of [BASE + 1_000, BASE - 900, BASE + 1_000]) {
+    await cellAt(page, "buy", price).hover();
+    heights.add(Math.round((await toolbar.boundingBox())!.height));
+    rowTops.add(Math.round(await topOf(ladderRows(page).first())));
+  }
+  expect(heights.size).toBe(1);
+  expect(rowTops.size).toBe(1);
+});
+
+test("수량 방식은 칸 이름이 수량이고 예상 주문금액 줄에 수량을 따로 보이지 않는다", async ({ page, scenario }) => {
+  ordersOn(scenario);
+  tradingApi(scenario);
+  await openOrderWindow(page, scenario);
+  await expect(page.getByRole("textbox", { name: "수량" })).toBeVisible();
+  await expect(page.getByRole("group", { name: "수량 프리셋" }).getByRole("button")).toHaveText(["10", "50", "100", "500"]);
+  await expect(page.getByTestId("order-estimate-quantity")).toHaveCount(0);
 });
 
 test("정보 7항목이 사다리 1~7행과 같은 top에 있고 값이 맞다", async ({ page, scenario }) => {
