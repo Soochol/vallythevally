@@ -152,7 +152,12 @@ for (const slice of SLICES) {
 
     const first = slice.placed[0]!.tool;
     const frame = (await chart.boundingBox())!;
-    const anchors = new Map((await settledMirror(page)).filter((d) => d.points.length > 1).map((d) => [d.tool, d.points[0]!]));
+    const INSIDE_PX = 3;
+    const anchors = new Map((await settledMirror(page)).filter((d) => d.points.length > 1).map((d) => {
+      const [from, to] = [d.points[0]!, d.points[1]!];
+      const length = Math.hypot(to.x - from.x, to.y - from.y);
+      return [d.tool, length === 0 ? from : { x: from.x + (to.x - from.x) * INSIDE_PX / length, y: from.y + (to.y - from.y) * INSIDE_PX / length }];
+    }));
     const target = slice.placed.map(({ tool }) => tool.tool).find((tool) => anchors.has(tool))!;
     await expect(async () => {
       await page.mouse.move(frame.x + anchors.get(target)!.x, frame.y + anchors.get(target)!.y);

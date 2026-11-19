@@ -16,10 +16,10 @@ import { RatioBar, Strip, TotalFigure } from "../market-window/parts";
 import { useLinkedSymbol } from "../market-window/MarketWindowGate";
 import { formatQuantity } from "../market-window/format";
 import { infoSlot, tradeSlot } from "../market-window/LadderSlots";
-import { expectedInfoItems, placeInfoItems } from "../market-window/quoteInfo";
+import { expectedItemsOnPage, placeInfoItems } from "../market-window/quoteInfo";
 import { stripTotals } from "../book/bookModel";
 import { visibleAfterHours, visibleExpected } from "../book/sessionWindows";
-import { useLadderTrades, useQuoteInfo } from "../market-window/useLadderSlots";
+import { type InfoPager, useInfoPager, useLadderTrades, useQuoteInfo } from "../market-window/useLadderSlots";
 import { useShownVenue } from "../market-window/useShownVenue";
 import { EmptyState } from "../overlay/State";
 import { openSystemSettings } from "../system-settings/open";
@@ -54,7 +54,7 @@ function useHeldWhile<T>(value: T, hold: boolean, same: (a: T, b: T) => boolean 
 const sameLadderPrices = (a: LadderPrices | null, b: LadderPrices | null): boolean =>
   a === b || (a !== null && b !== null && a.sidesSplit === b.sidesSplit && a.prices.length === b.prices.length && a.prices.every((price, row) => price === b.prices[row]));
 
-function OrderBody({ code }: { code: SymbolCode }) {
+function OrderBody({ id, code, infoPager }: { id: WindowId; code: SymbolCode; infoPager: InfoPager }) {
   const mock = useMockEnvironment();
   const quoteVenue = useShownVenue(code);
   const feed = useBookFeed(code, quoteVenue);
@@ -95,10 +95,10 @@ function OrderBody({ code }: { code: SymbolCode }) {
   const explorerOn = exploring && fullPrices !== null;
   const shownRows: LadderRow[] = quotes && heldLadder ? (explorerOn ? buildLadderRows(fullPrices, quotes) : buildLadderRows(heldLadder.prices, quotes, heldLadder.sidesSplit)) : [];
   const rows = settings.rate ? shownRows : shownRows.map((row) => ({ ...row, rate: null }));
-  const info = useQuoteInfo({ code, venue: quoteVenue, lastPrice: feed.lastPrice, previousClose: feed.previousClose, upperLimit: bounds.upper, lowerLimit: bounds.lower });
+  const info = useQuoteInfo({ code, venue: quoteVenue, lastPrice: feed.lastPrice, previousClose: feed.previousClose, fundamentals: limits, page: infoPager.page });
   const trades = useLadderTrades(code, quoteVenue);
   const expected = view ? visibleExpected(view.t, Math.floor(now / 1000), view.expected) : null;
-  const infoSlots = placeInfoItems(rows, info, expected === null ? [] : expectedInfoItems(expected, feed.previousClose));
+  const infoSlots = placeInfoItems(rows, info, expectedItemsOnPage(infoPager.page, expected, feed.previousClose));
   const totals = stripTotals(view && { ask: view.totalAsk, bid: view.totalBid }, visibleAfterHours(feed.afterHours?.totals ?? null, Math.floor(now / 1000)));
   const data = useOrderData(code, access.open, referencePrice);
   const writes = useOrderWrites(code, orderVenue);
@@ -174,7 +174,7 @@ function OrderBody({ code }: { code: SymbolCode }) {
           <button type="button" className="od-link" onClick={() => openSystemSettings("kiwoom")}>시스템 설정 열기</button>
         </div>
       )}
-      <AccountBand accountTail={accountTail} maskAccount={settings.maskAccount} openOrders={data.openOrders} balance={data.balance} executions={data.executions} writable={writable} mock={mock} policy={data.orderable?.policy ?? null} onCancel={writes.cancelOne} />
+      <AccountBand windowId={id} accountTail={accountTail} maskAccount={settings.maskAccount} openOrders={data.openOrders} balance={data.balance} executions={data.executions} writable={writable} mock={mock} policy={data.orderable?.policy ?? null} onCancel={writes.cancelOne} />
       <HoldingSummary holding={holding} orderable={data.orderable} buyableProblem={data.buyableProblem} unit={profitUnit} onUnit={() => setProfitUnit(toggledUnit)} onFill={setInput} />
       <div className="od-entry">
         <QuantityRow presetKind={presetKind} input={input} sharePresets={settings.sharePresets} amountPresets={settings.amountPresets} referencePrice={referencePrice} onPresetKind={setPresetKind} onInput={setInput} />
@@ -187,7 +187,7 @@ function OrderBody({ code }: { code: SymbolCode }) {
       </div>
       <div className="bk-ladder od-ladder-wrap" data-stale={feed.connected ? undefined : ""} data-exploring={explorerOn ? "" : undefined}>
         {view
-            ? <OrderLadder rows={rows} previousClose={feed.previousClose} groups={data.groups} writable={writable} previewQuantity={quantity} buyPreview={(price) => buyPreview(price, quantity, data.capacity.buying)} hover={hover} onHover={setHover} averagePrice={averagePrice} divider={settings.divider} explorer={explorerOn ? { centerPrice: referencePrice, centerToken } : undefined} ladder={ladder} drag={drag} expectedPrice={expected?.price ?? null} rowSlots={{ topRight: infoSlot(infoSlots), bottomLeft: tradeSlot(trades, feed.previousClose) }}
+            ? <OrderLadder rows={rows} previousClose={feed.previousClose} groups={data.groups} writable={writable} previewQuantity={quantity} buyPreview={(price) => buyPreview(price, quantity, data.capacity.buying)} hover={hover} onHover={setHover} averagePrice={averagePrice} divider={settings.divider} explorer={explorerOn ? { centerPrice: referencePrice, centerToken } : undefined} ladder={ladder} drag={drag} expectedPrice={expected?.price ?? null} rowSlots={{ topRight: infoSlot(infoSlots, infoPager, rows), bottomLeft: tradeSlot(trades, feed.previousClose) }}
                 actions={{ place, cancelOne: writes.cancelOne, cancelAtPrice: writes.cancelAtPrice, cancelGroups: (targets) => targets.forEach((g) => writes.cancelAtPrice(g.side, g.price)) }} />
             : <EmptyState title={feed.snapshotFailed ? "호가를 불러오지 못했습니다" : "호가를 기다리는 중입니다"} />}
         <OrderStatusBar status={writes.status} queued={writes.queued} blocked={data.blocked} onUndo={writes.cancelOne} onReconcile={writes.reconcile} onDismiss={writes.dismiss} />
@@ -206,7 +206,8 @@ function OrderBody({ code }: { code: SymbolCode }) {
 
 export function OrderWindow({ id }: { id: WindowId }) {
   const code = useLinkedSymbol(id);
+  const infoPager = useInfoPager();
   if (code === null) return <EmptyState title="연동된 종목이 없습니다" />;
   if (isIndexCode(code)) return <EmptyState title="이 창은 주식만 보입니다" />;
-  return <OrderBody key={code} code={code} />;
+  return <OrderBody key={code} id={id} code={code} infoPager={infoPager} />;
 }

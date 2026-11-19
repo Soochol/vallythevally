@@ -10,7 +10,7 @@ use crate::api;
 use crate::bars::{BarError, BarService};
 use crate::kiwoom::api::StockQuotes;
 use crate::kiwoom::rest::{KiwoomRest, MergeScope, Priority};
-use crate::kiwoom::wire::parse_quotes;
+use crate::kiwoom::wire::{parse_day_summary, parse_quotes};
 use crate::market::venue_volume::DayVolumes;
 use crate::symbols::Directory;
 
@@ -49,7 +49,7 @@ pub async fn quotes(rest: &KiwoomRest, bars: &BarService, directory: Option<&Dir
             let asked: HashMap<StockCode, Venue> = chunk.iter().copied().collect();
             out.extend(parse_quotes(page.body).into_iter().filter(|q| asked.get(&q.code) == Some(&q.venue)).map(|q| {
                 let symbol = Symbol::Stock(q.code);
-                (symbol, quote(symbol, Some(q.venue), q.price_centi, q.base_centi, q.volume.0, q.at.unix(), api::QuoteSource::Polled))
+                (symbol, api::Quote { traded_million_won: q.traded.map(|t| t.0), ..quote(symbol, Some(q.venue), q.price_centi, q.base_centi, q.volume.0, q.at.unix(), api::QuoteSource::Polled) })
             }));
         }
         Ok::<_, BarError>(out)
@@ -73,6 +73,26 @@ async fn index_quote(bars: &BarService, code: IndexCode) -> Result<Option<(Symbo
     };
     let symbol = Symbol::Index(code);
     Ok(Some((symbol, quote(symbol, None, last.close().centi(), prev.close().centi(), last.volume().0, bucket.start().unix(), api::QuoteSource::Polled))))
+}
+
+pub async fn day_summary(rest: &KiwoomRest, code: StockCode, requested: Venue, nxt_enabled: bool) -> Result<api::SymbolDaySummary, crate::kiwoom::rest::KiwoomError> {
+    let venue = effective_venue(requested, nxt_enabled);
+    let req = StockQuotes::of_venues(&[(code, venue)]).expect("종목 하나다");
+    let page = rest.call(&req, None, Priority::Screen, MergeScope::default()).await?;
+    let row = parse_day_summary(page.body, code, venue);
+    let won = |won: Option<u64>| won.map(|w| w as f64);
+    Ok(api::SymbolDaySummary {
+        symbol: api::SymbolCode(Symbol::Stock(code).as_wire()),
+        venue: venue.into(),
+        price: won(row.price_won),
+        previous_close: won(row.base_won),
+        open: won(row.open_won),
+        high: won(row.high_won),
+        low: won(row.low_won),
+        volume: row.volume,
+        trade_value_won: row.trade_value_won,
+        t: row.at.map(|at| api::UnixSeconds(at.unix())),
+    })
 }
 
 pub fn base_centi(price: Price, change_centi: i64) -> Option<u64> {
@@ -125,6 +145,7 @@ fn quote(symbol: Symbol, venue: Option<Venue>, price_centi: u64, base_centi: u64
         t: api::UnixSeconds(t),
         source,
         venue: venue.map(Into::into),
+        traded_million_won: None,
     }
 }
 

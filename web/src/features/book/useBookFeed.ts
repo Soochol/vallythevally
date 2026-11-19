@@ -5,7 +5,7 @@ import type { OrderBook } from "../../api/generated/OrderBook";
 import type { SubErrorCode } from "../../api/generated/SubErrorCode";
 import type { SymbolCode } from "../../api/generated/SymbolCode";
 import type { Venue } from "../../api/generated/Venue";
-import { fetchQuotes } from "../../api/userData";
+import { daySummaryQuery } from "../../api/userData";
 import { marketSocket } from "../../stores/realtime";
 import { acceptAfterHoursLive, acceptAfterHoursSnapshot, acceptLive, acceptSnapshot, EMPTY_BOOK, type AfterHoursState, type BookState } from "./bookModel";
 
@@ -18,8 +18,6 @@ export interface BookFeed {
   readonly rejected: SubErrorCode | null;
   readonly snapshotFailed: boolean;
 }
-
-const QUOTE_REFRESH_MS = 5000;
 
 interface LastTrade {
   readonly price: number;
@@ -73,23 +71,16 @@ export function useBookFeed(code: SymbolCode, venue: Venue): BookFeed {
     gcTime: 0,
     retry: false,
   });
-  const quote = useQuery({
-    queryKey: ["book-quote", code, venue],
-    queryFn: async ({ signal }) => (await fetchQuotes([code], venue, signal))[0] ?? null,
-    refetchInterval: QUOTE_REFRESH_MS,
-    staleTime: 0,
-    gcTime: 0,
-    retry: false,
-  });
+  const summary = useQuery(daySummaryQuery(code, venue));
 
   const book = snapshot.data ? acceptSnapshot(current.book, snapshot.data) : current.book;
   const afterHours = snapshot.data ? acceptAfterHoursSnapshot(current.afterHours, snapshot.data, Math.floor(snapshot.dataUpdatedAt / 1000)) : current.afterHours;
-  const quoted = quote.data ?? null;
+  const quoted = summary.data?.price != null && summary.data.t != null ? { price: summary.data.price, t: summary.data.t } : null;
   return {
     book,
     afterHours,
     lastPrice: laterPrice(current.lastTrade, quoted),
-    previousClose: quoted ? quoted.price - quoted.change : null,
+    previousClose: summary.data?.previousClose ?? null,
     connected: current.socketOpen && current.linkLive,
     rejected: current.rejected,
     snapshotFailed: snapshot.isError && current.book.phase === "empty",

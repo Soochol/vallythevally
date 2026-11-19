@@ -194,6 +194,7 @@ interface LayoutState {
   closeWindow(id: WindowId, replacement?: WindowId): boolean;
   setSymbol(cellId: WindowId, target: SymbolTarget): SymbolChange;
   sendSymbol(sender: WindowId | null, cellId: WindowId, target: SymbolTarget): SymbolChange;
+  sendSymbolToLink(link: LinkColor | null, activeCell: WindowId, target: SymbolTarget): SymbolChange;
   setLink(window: WindowId, link: LinkColor | null): void;
   setWindowList(window: WindowId, list: string | null): void;
   setWindowScreen(window: WindowId, screen: string | null): void;
@@ -444,6 +445,11 @@ export const useLayoutStore = create<LayoutState>()((set, get) => {
       if (link === null) return openIn(linkedCharts(layout, cellId), target);
       const charts = chartWindows(layout).filter((w) => w.link === link);
       return charts.length ? openIn(charts, target) : { changed: [], notice: null };
+    },
+    sendSymbolToLink: (link, activeCell, target) => {
+      const { layout } = get();
+      const charts = link === null ? [] : chartWindows(layout).filter((w) => w.link === link);
+      return openIn(charts.length ? charts : linkedCharts(layout, activeCell), target);
     },
     setLink: (id, link) => {
       const leader = link === null ? undefined : chartWindows(get().layout).find((c) => c.id !== id && c.link === link);

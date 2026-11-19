@@ -14,7 +14,7 @@ import { useUiStore } from "../stores/ui";
  * 아래 알림을 띄운다(frontend.md §3.7a). 읽은 뒤에는 주소에서 지운다.
  * venue는 앱 전체 거래소를 바꾼다. 없거나 모르는 값이면 건드리지 않는다. venue는 symbol과 함께일 때만 읽는다.
  */
-export function useOpenFromAddress() {
+export function useOpenFromAddress(enabled: boolean) {
   const [params, setParams] = useSearchParams();
   const queryClient = useQueryClient();
   const symbol = params.get("symbol");
@@ -22,7 +22,7 @@ export function useOpenFromAddress() {
   const period = params.get("period");
 
   useEffect(() => {
-    if (symbol === null && venueParam === null && period === null) return;
+    if (!enabled || (symbol === null && venueParam === null && period === null)) return;
     const cellId = useSelectionStore.getState().activeCell;
     const session = useLayoutStore.getState().session;
     const { setSymbol, setPeriod } = useLayoutStore.getState();
@@ -49,5 +49,5 @@ export function useOpenFromAddress() {
           }
         },
       );
-  }, [symbol, venueParam, period, setParams, queryClient]);
+  }, [enabled, symbol, venueParam, period, setParams, queryClient]);
 }

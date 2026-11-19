@@ -1,8 +1,10 @@
 import type { Locator, Page } from "@playwright/test";
+import type { LayoutWindow } from "../src/api/generated/LayoutWindow";
+import type { LinkColor } from "../src/api/generated/LinkColor";
 import type { TradingExecution } from "../src/api/generated/TradingExecution";
 import type { TradingHolding } from "../src/api/generated/TradingHolding";
-import { type Scenario, cell, DEFAULT_LAYOUT_ID, expect, pollSaved, test } from "./harness";
-import { ACCOUNT, askAtLastSnapshot, BASE, CODE, cellAt, center, chipAt, dragChip, openOrder, openOrderWindow, ordersOn, status, tradingApi, win, writesTo } from "./order-window";
+import { type Scenario, cell, DEFAULT_LAYOUT_ID, expect, pollSaved, test, windowTabs } from "./harness";
+import { ACCOUNT, askAtLastSnapshot, SETTINGS, BASE, CODE, cellAt, center, chipAt, dragChip, INFO_PAGE_1, INFO_PAGE_2, INFO_PAGE_2_VALUES, infoLabels, infoPager, infoValues, openOrder, openOrderWindow, ordersOn, status, tradingApi, win, writesTo } from "./order-window";
 
 const HOLDING: TradingHolding = { code: CODE, name: "삼성전자", quantity: 120, sellableQuantity: 100, averagePrice: 70_040, currentPrice: BASE, evaluationProfit: -4_800, profitRateCenti: -57 };
 const FILL: TradingExecution = { orderNo: "0000010", code: CODE, name: "삼성전자", side: "buy", quantity: 5, price: 70_000, time: "093015", venue: "krx" };
@@ -25,7 +27,7 @@ test("미체결 패널이 모든 종목의 목록을 보이고 개별 취소 요
   ordersOn(scenario);
   const api = tradingApi(scenario, [openOrder("0000001", "buy", 70_000, 5), { ...openOrder("0000002", "sell", 71_000, 7), code: "000660", name: "SK하이닉스" }]);
   await openOrderWindow(page, scenario);
-  await expect(page.getByTestId("account-label")).toHaveText("키움 ****-****-01");
+  await expect(page.getByTestId("account-label")).toHaveText("키움 ****-**01");
   await expect(page.getByTestId("account-tab-open")).toContainText("2");
   await page.getByTestId("account-tab-open").click();
   await expect(page.getByTestId("account-panel")).toBeVisible();
@@ -101,26 +103,41 @@ test("목록 popover가 단추에 붙어 사다리를 밀지 않고 Esc·바깥 
   await expect(panel).toHaveCount(0);
 });
 
-test("계좌번호 가리기는 기본 켜짐이고 켠 동안 조회하지 않으며 끄면 4-4-2로 보이고 다시 켜면 가린다", async ({ page, scenario }) => {
+test("계좌번호 가리기는 기본 켜짐이고 켠 동안 조회하지 않으며 끄면 앞 8자리가 4-4로 보이고 다시 켜면 가린다", async ({ page, scenario }) => {
   ordersOn(scenario);
   tradingApi(scenario);
   let lookups = 0;
-  scenario.on((url) => url.pathname === "/api/trading/account-number", () => { lookups += 1; return { body: { accountNumber: "1234567801" } }; });
+  scenario.on((url) => url.pathname === "/api/trading/account-number", () => { lookups += 1; return { body: { accountNumber: "1234567810" } }; });
   await openOrderWindow(page, scenario);
   const label = page.getByTestId("account-label");
-  await expect(label).toHaveText("키움 ****-****-01");
+  await expect(label).toHaveText("키움 ****-**01");
   await page.getByTestId("order-settings-button").click();
   const mask = page.getByRole("checkbox", { name: "계좌번호 가리기" });
   await expect(mask).toBeChecked();
   expect(lookups).toBe(0);
 
   await mask.uncheck();
-  await expect(label).toHaveText("키움 1234-5678-01");
+  await expect(label).toHaveText("키움 1234-5678");
   expect(lookups).toBe(1);
 
   await mask.check();
-  await expect(label).toHaveText("키움 ****-****-01");
+  await expect(label).toHaveText("키움 ****-**01");
   expect(lookups).toBe(1);
+});
+
+test("끝 2자리를 모르는 옛 켜짐 기록이면 계좌 줄이 키움 —를 보이고 가리기를 꺼도 조회하지 않는다", async ({ page, scenario }) => {
+  ordersOn(scenario);
+  scenario.live.orders = { ...scenario.live.orders, accountTail: null };
+  tradingApi(scenario);
+  let lookups = 0;
+  scenario.on((url) => url.pathname === "/api/trading/account-number", () => { lookups += 1; return { body: { accountNumber: "1234567810" } }; });
+  await openOrderWindow(page, scenario);
+  const label = page.getByTestId("account-label");
+  await expect(label).toHaveText("키움 —");
+  await page.getByTestId("order-settings-button").click();
+  await page.getByRole("checkbox", { name: "계좌번호 가리기" }).uncheck();
+  await expect(label).toHaveText("키움 —");
+  expect(lookups).toBe(0);
 });
 
 test("계좌번호 조회가 실패하면 가린 모양과 실패 title을 보인다", async ({ page, scenario }) => {
@@ -132,7 +149,7 @@ test("계좌번호 조회가 실패하면 가린 모양과 실패 title을 보�
   await page.getByRole("checkbox", { name: "계좌번호 가리기" }).uncheck();
   const label = page.getByTestId("account-label");
   await expect(label).toHaveAttribute("title", "계좌번호를 읽지 못했습니다");
-  await expect(label).toHaveText("키움 ****-****-01");
+  await expect(label).toHaveText("키움 ****-**01");
 });
 
 test("보유 요약이 값을 보이고 평가손익을 원과 퍼센트로 바꾸며 매입수량이 매도 가능 수량을 채운다", async ({ page, scenario }) => {
@@ -643,7 +660,7 @@ test("금액 프리셋을 누른 뒤 현재가가 바뀌어도 수량 칸은 그
   await amountPresetButtons(page).first().click();
   await expect(quantityField(page)).toHaveValue("14");
   lastTrade(scenario, BASE + 1_000, 2);
-  await expect(page.getByTestId("ladder-info").filter({ hasText: "현재가" })).toContainText("71,000");
+  await expect(page.getByTestId("ladder-info").filter({ hasText: "전일대비" })).toContainText("+1,000 +1.43%");
   await expect(quantityField(page)).toHaveValue("14");
   await cellAt(page, "buy", BASE + 1_000).dblclick();
   await pollSaved(() => writesTo(api, "place")).toHaveLength(1);
@@ -735,10 +752,60 @@ test("정보 7항목이 사다리 1~7행과 같은 top에 있고 값이 맞다",
   await openOrderWindow(page, scenario);
   const info = page.getByTestId("ladder-info");
   await expect(info).toHaveCount(7);
-  await expect(info.filter({ hasText: "현재가" })).toContainText("70,000");
-  await expect(info.filter({ hasText: "상한가" })).toContainText("91,000");
-  await expect(info.filter({ hasText: "하한가" })).toContainText("49,000");
+  await expect(infoLabels(page)).toHaveText(INFO_PAGE_1);
+  await expect(infoValues(page)).toHaveText(["69,900", "70,400", "69,400", "70,000", "0 0.00%", "123만", "864억"]);
   expect(await tops(info)).toEqual((await tops(ladderRows(page))).slice(0, 7));
+});
+
+test("정보란을 누르면 2쪽으로 바뀌고 다시 누르면 1쪽이다", async ({ page, scenario }) => {
+  ordersOn(scenario);
+  tradingApi(scenario);
+  await openOrderWindow(page, scenario);
+  await expect(infoPager(page)).toHaveAccessibleName("정보 1/2쪽, 눌러서 다음 쪽");
+  await expect(infoLabels(page)).toHaveText(INFO_PAGE_1);
+
+  await page.getByTestId("ladder-info").nth(4).click();
+  await expect(infoPager(page)).toHaveAccessibleName("정보 2/2쪽, 눌러서 다음 쪽");
+  await expect(infoLabels(page)).toHaveText(INFO_PAGE_2);
+  await expect(infoValues(page)).toHaveText(INFO_PAGE_2_VALUES);
+  expect(await tops(page.getByTestId("ladder-info"))).toEqual((await tops(ladderRows(page))).slice(0, 8));
+
+  await infoPager(page).click();
+  await expect(infoLabels(page)).toHaveText(INFO_PAGE_1);
+
+  await infoPager(page).focus();
+  await page.keyboard.press("Enter");
+  await expect(infoLabels(page)).toHaveText(INFO_PAGE_2);
+  await page.keyboard.press("Space");
+  await expect(infoLabels(page)).toHaveText(INFO_PAGE_1);
+});
+
+test("정보란에서 고른 쪽은 종목이 바뀌어도 유지된다", async ({ page, scenario }) => {
+  ordersOn(scenario);
+  tradingApi(scenario);
+  await openOrderWindow(page, scenario, true);
+  await infoPager(page).click();
+  await expect(infoLabels(page)).toHaveText(INFO_PAGE_2);
+  await cell(page, 2).click();
+  await expect(win(page)).toHaveAttribute("data-symbol", "000660");
+  await expect(infoPager(page)).toHaveAccessibleName("정보 2/2쪽, 눌러서 다음 쪽");
+  await expect(infoLabels(page)).toHaveText(INFO_PAGE_2);
+  await cell(page, 1).click();
+  await expect(win(page)).toHaveAttribute("data-symbol", CODE);
+  await expect(infoLabels(page)).toHaveText(INFO_PAGE_2);
+});
+
+test("호가주문창에서 정보란을 더블클릭해도 주문 요청이 없다", async ({ page, scenario }) => {
+  ordersOn(scenario);
+  const api = tradingApi(scenario);
+  await openOrderWindow(page, scenario);
+  const info = page.getByTestId("ladder-info");
+  await info.first().dblclick();
+  await info.last().dblclick();
+  await expect(infoLabels(page)).toHaveText(INFO_PAGE_1);
+  await expect(page.getByTestId("order-ladder")).not.toHaveAttribute("data-dragging", "");
+  expect(scenario.requests.filter((request) => request.method() !== "GET" && new URL(request.url()).pathname.startsWith("/api/trading/"))).toEqual([]);
+  expect(writesTo(api, "place")).toHaveLength(0);
 });
 
 test("체결강도는 11행, 체결은 12행부터 같은 top에 있고 새 체결이 맨 위이며 왼쪽 테두리와 대량 글자·막대가 없다", async ({ page, scenario }) => {
@@ -936,8 +1003,8 @@ test("교차 호가로 위 오른쪽 칸에 매수 잔량이 있으면 그 행�
   await expect(crossed.getByTestId("ladder-info")).toHaveCount(0);
   const info = page.getByTestId("ladder-info");
   await expect(info).toHaveCount(6);
-  await expect(info.filter({ hasText: "하한가" })).toContainText("49,000");
-
+  await expect(info.filter({ hasText: "기준가" })).toHaveCount(0);
+  await expect(info.filter({ hasText: "거래대금" })).toContainText("864억");
 });
 
 test.describe("수요일 08:55 동시호가", () => {
@@ -990,4 +1057,110 @@ test.describe("수요일 08:35 시간외 종가 잔량", () => {
     await expect(page.getByTestId("order-total-ask")).toContainText("13,770");
     await expect(page.getByTestId("order-total-bid")).toContainText("0");
   });
+});
+
+const OTHER = "000660";
+const OTHER_HOLDING: TradingHolding = { ...HOLDING, code: OTHER, name: "SK하이닉스" };
+const OTHER_FILL: TradingExecution = { ...FILL, orderNo: "0000011", code: OTHER, name: "SK하이닉스", time: "101500" };
+
+const chartWindow = (id: string, link: LinkColor | null, symbol: string): LayoutWindow => ({ id, link, kind: "chart", symbol, venue: "combined", period: "D", chartSettings: SETTINGS });
+const savedSymbols = (scenario: Scenario) => scenario.documents.layout(DEFAULT_LAYOUT_ID).windows.flatMap((w) => (w.kind === "chart" ? [[w.id, w.symbol]] : []));
+
+function linkedArrangement(orderLink: LinkColor | null, orderSymbol?: string): (windows: LayoutWindow[]) => LayoutWindow[] {
+  return (windows) => [
+    chartWindow("cell-0", "a", CODE),
+    chartWindow("cell-1", "a", CODE),
+    chartWindow("cell-2", "b", "035420"),
+    ...windows.filter((w) => w.kind !== "chart" && w.kind !== "order"),
+    { id: "book", link: orderLink, kind: "book" },
+    { id: "order", link: orderLink, kind: "order", venue: "krx", ...(orderSymbol ? { symbol: orderSymbol } : {}) },
+  ];
+}
+
+test("내 체결 목록은 최근 체결이 맨 위다", async ({ page, scenario }) => {
+  ordersOn(scenario);
+  const api = tradingApi(scenario);
+  api.executions = [{ ...FILL, orderNo: "0000001", time: "090000" }, { ...FILL, orderNo: "0000003", time: "150000" }, { ...FILL, orderNo: "0000002", time: "101500" }, { ...FILL, orderNo: "0000004", time: "150000" }];
+  await openOrderWindow(page, scenario);
+  await page.getByTestId("account-tab-fills").click();
+  await expect(page.getByTestId("account-fill").locator(".od-time")).toHaveText(["15:00:00", "15:00:00", "10:15:00", "09:00:00"]);
+});
+
+test("보유종목 이름을 누르면 같은 연동 색의 차트와 따르는 창이 모두 그 종목으로 바뀐다", async ({ page, scenario }) => {
+  ordersOn(scenario);
+  const api = tradingApi(scenario);
+  api.holdings = [HOLDING, OTHER_HOLDING];
+  await openOrderWindow(page, scenario, false, "krx", undefined, false, undefined, linkedArrangement("a"));
+  await page.getByTestId("account-tab-holdings").click();
+  await page.getByRole("button", { name: "SK하이닉스로 이동" }).click();
+  await expect(page.getByTestId("account-panel")).toHaveCount(0);
+  await expect(win(page)).toHaveAttribute("data-symbol", OTHER);
+  await pollSaved(() => savedSymbols(scenario)).toEqual([["cell-0", OTHER], ["cell-1", OTHER], ["cell-2", "035420"]]);
+  await windowTabs(page).getByRole("tab", { name: /^10호가/ }).click();
+  await expect(page.getByTestId("book-window")).toHaveAttribute("data-symbol", OTHER);
+  await expect(page.getByRole("status").filter({ hasText: "SK하이닉스" })).toHaveCount(0);
+});
+
+test("내 체결과 미체결의 종목명도 같은 방식으로 이동한다", async ({ page, scenario }) => {
+  ordersOn(scenario);
+  const api = tradingApi(scenario, [{ ...openOrder("0000002", "sell", 71_000, 7), code: OTHER, name: "SK하이닉스" }]);
+  api.executions = [OTHER_FILL];
+  await openOrderWindow(page, scenario, false, "krx", undefined, false, undefined, linkedArrangement("a"));
+  await page.getByTestId("account-tab-fills").click();
+  await page.getByRole("button", { name: "SK하이닉스로 이동" }).click();
+  await expect(win(page)).toHaveAttribute("data-symbol", OTHER);
+  await pollSaved(() => savedSymbols(scenario)).toEqual([["cell-0", OTHER], ["cell-1", OTHER], ["cell-2", "035420"]]);
+
+  await page.getByTestId("account-tab-open").click();
+  await page.getByRole("button", { name: "취소" }).waitFor();
+  await page.getByRole("button", { name: "SK하이닉스로 이동" }).click();
+  await expect(page.getByTestId("account-panel")).toHaveCount(0);
+  await expect(win(page)).toHaveAttribute("data-symbol", OTHER);
+  await expect(page.getByTestId("account-tab-open")).toBeVisible();
+  expect(writesTo(api, "cancel")).toHaveLength(0);
+});
+
+test("연동 끔인 호가주문창에서 누르면 활성 칸 차트와 이 창이 그 종목으로 바뀐다", async ({ page, scenario }) => {
+  ordersOn(scenario);
+  const api = tradingApi(scenario);
+  api.holdings = [HOLDING, OTHER_HOLDING];
+  await openOrderWindow(page, scenario, false, "krx", undefined, false, undefined, (windows) => [
+    chartWindow("cell-0", null, CODE),
+    chartWindow("cell-1", null, "035420"),
+    ...windows.filter((w) => w.kind !== "chart"),
+  ]);
+  await page.getByTestId("account-tab-holdings").click();
+  await page.getByRole("button", { name: "SK하이닉스로 이동" }).click();
+  await expect(win(page)).toHaveAttribute("data-symbol", OTHER);
+  await pollSaved(() => savedSymbols(scenario)).toEqual([["cell-0", OTHER], ["cell-1", "035420"]]);
+});
+
+test("고정 종목이 있는 호가주문창에서 누르면 고정이 풀리고 그 종목으로 바뀐다", async ({ page, scenario }) => {
+  ordersOn(scenario);
+  const api = tradingApi(scenario);
+  api.holdings = [HOLDING, OTHER_HOLDING];
+  await openOrderWindow(page, scenario, false, "krx", undefined, false, undefined, linkedArrangement(null, CODE));
+  await expect(win(page)).toHaveAttribute("data-symbol", CODE);
+  await page.getByTestId("account-tab-holdings").click();
+  await page.getByRole("button", { name: "SK하이닉스로 이동" }).click();
+  await expect(win(page)).toHaveAttribute("data-symbol", OTHER);
+  await pollSaved(() => scenario.documents.layout(DEFAULT_LAYOUT_ID).windows.find((w) => w.id === "order")).not.toHaveProperty("symbol");
+});
+
+test("종목명은 키보드로 누를 수 있고 이름이 \"…로 이동\"이다", async ({ page, scenario }) => {
+  ordersOn(scenario);
+  const api = tradingApi(scenario);
+  api.holdings = [HOLDING, OTHER_HOLDING];
+  await openOrderWindow(page, scenario, false, "krx", undefined, false, undefined, linkedArrangement("a"));
+  await page.getByTestId("account-tab-holdings").click();
+  const name = page.getByRole("button", { name: "SK하이닉스로 이동" });
+  await expect(page.getByRole("button", { name: "삼성전자로 이동" })).toBeVisible();
+  await name.focus();
+  await expect(name).toBeFocused();
+  await page.keyboard.press("Enter");
+  await expect(win(page)).toHaveAttribute("data-symbol", OTHER);
+  await page.getByTestId("account-tab-holdings").click();
+  await page.getByRole("button", { name: "삼성전자로 이동" }).focus();
+  await page.keyboard.press("Space");
+  await expect(win(page)).toHaveAttribute("data-symbol", CODE);
 });

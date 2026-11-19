@@ -27,11 +27,15 @@ import type { Period } from "../../src/api/generated/Period";
 import type { RankingPage } from "../../src/api/generated/RankingPage";
 import type { Screens } from "../../src/api/generated/Screens";
 import type { ServerMessage } from "../../src/api/generated/ServerMessage";
+import type { Quote } from "../../src/api/generated/Quote";
+import type { SymbolDaySummary } from "../../src/api/generated/SymbolDaySummary";
 import type { SymbolInfo } from "../../src/api/generated/SymbolInfo";
 import type { UiState } from "../../src/api/generated/UiState";
 import type { Venue } from "../../src/api/generated/Venue";
 import type { Watchlist } from "../../src/api/generated/Watchlist";
 import type { Watchlists } from "../../src/api/generated/Watchlists";
+import { etfBaseline } from "./etf-data";
+import { marketOverviewBaseline } from "./market-data";
 import { barsPage, findSymbol, publicInfo, quoteOf, resolveVenue, search, SYMBOLS } from "../../dev/fakeMarket";
 
 export const DEFAULT_LAYOUT_ID = "01900000-0000-7000-8000-000000000001";
@@ -136,6 +140,13 @@ export class MarketFixtures {
     return [...search(query), ...extra].filter(value => (!options.market || value.market === options.market) && (!options.kind || value.kind === options.kind));
   }
 }
+
+export const DAY_SUMMARY_VOLUME = 1_234_567;
+
+export const daySummaryOf = (quote: Quote): SymbolDaySummary => ({
+  symbol: quote.symbol, venue: quote.venue ?? "combined", price: quote.price, previousClose: quote.price - quote.change, open: quote.price - 100, high: quote.price + 400, low: quote.price - 600,
+  volume: DAY_SUMMARY_VOLUME, tradeValueWon: Math.round(quote.price * DAY_SUMMARY_VOLUME), t: quote.t,
+});
 
 export const CONNECTED_KIWOOM: KiwoomLinkStatus = {
   environment: "real", keySource: "file", appKeyTail: "1234", registeredIp: null, credentialId: null, state: "connected", problem: null, message: "키움에 연결되어 있습니다",
@@ -317,6 +328,15 @@ export class Scenario {
       if (venue !== "combined" && venue !== "krx" && venue !== "nxt") return error(400, "bad_request", "Invalid venue");
       return { body: (url.searchParams.get("symbols") ?? "").split(",").flatMap(symbol => { const quote = this.market.quote(symbol, venue); return quote ? [quote] : []; }) };
     }
+    const daySummary = /^\/api\/symbols\/([^/]+)\/day-summary$/.exec(path);
+    if (daySummary && method === "GET") {
+      const symbol = decodeURIComponent(daySummary[1]!);
+      const venue = url.searchParams.get("venue") ?? "combined";
+      if (venue !== "combined" && venue !== "krx" && venue !== "nxt") return error(400, "bad_request", "Invalid venue");
+      if (symbol.startsWith("IDX:")) return error(400, "bad_request", "지수에는 종목 당일 요약이 없습니다");
+      const quote = this.market.quote(symbol, venue);
+      return { body: quote ? daySummaryOf(quote) : { symbol, venue, price: null, previousClose: null, open: null, high: null, low: null, volume: null, tradeValueWon: null, t: null } satisfies SymbolDaySummary };
+    }
     if (path === "/api/bars" && method === "GET") {
       const symbol = url.searchParams.get("symbol") ?? "";
       const period = url.searchParams.get("period") ?? "D";
@@ -338,6 +358,10 @@ export class Scenario {
       return { body: this.market.jumpPage({ symbol, period, venue, date, limit: Number(url.searchParams.get("limit") ?? 500), before: url.searchParams.has("before") ? Number(url.searchParams.get("before")) : null }) };
     }
     if (/^\/api\/symbols\/[^/]+$/.test(path) && method === "GET") { const value = this.market.symbols.find(value => value.code === decodeURIComponent(path.slice("/api/symbols/".length))); return value ? { body: value } : error(404, "unknown_symbol", "종목이 없습니다"); }
+    const etf = etfBaseline(path, method);
+    if (etf) return etf;
+    const marketOverview = marketOverviewBaseline(url, method);
+    if (marketOverview) return marketOverview;
     if (path === "/api/rankings" && method === "POST") return { body: { rows: [], pages: 1, end: true, limited: false, hidden: 0, fetchedAt: Math.floor(this.now / 1000) } satisfies RankingPage };
     if (path === "/api/screener/status" && method === "GET") return { body: { lastDay: null, needDay: "2026-11-06", todayAvailable: false, fullHistory: { done: 0, total: 0 }, unconfirmed: 0, update: null } satisfies ScreenerStatus };
     if (path === "/api/financial-update" && method === "GET") return { body: { id: 0, status: "not_configured", phase: "planning", stopReason: null, nextCheckAt: null, canResume: false, automatic: false, latestCheckPending: false, historyCompletedCompanies: 0, historyFailedCompanies: 0, recentFailedCompanies: 0, historyComplete: false, fromYear: 2015, throughYear: 2026, totalSymbols: 0, processedSymbols: 0, unsupportedSymbols: 0, unverifiedSymbols: 0, unverifiedDividends: 0, totalCompanies: 0, completedCompanies: 0, failedCompanies: 0, startedAt: null, lastCheckedAt: null, failure: null, failures: [] } satisfies FinancialUpdatePage };

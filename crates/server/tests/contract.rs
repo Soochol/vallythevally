@@ -11,6 +11,9 @@ use server::api::*;
 use server::collector::wire::{CollectorAlert, CollectorCoverage, CollectorCoverageDay, CollectorDayBytes, CollectorDayState, CollectorDisk, CollectorDiskUsage, CollectorFilesystem, CollectorKey, CollectorKeyRole, CollectorKeyState, CollectorObservationDay, CollectorPhase, CollectorRenamedStock, CollectorRest, CollectorStatus, CollectorStock, CollectorToday, CollectorUniverseChanges, CollectorVerdict};
 use server::collector::{CollectorAccess, CollectorAccessState, CollectorStatusPage, DaemonJudgment};
 use server::drawing_api::*;
+use server::market_overview::*;
+use server::etf::*;
+use server::heatmap_flow::{HeatmapFlowPoint, HeatmapFlowSeries};
 use ts_rs::TS;
 
 const DIR: &str = "web/src/api/generated";
@@ -106,6 +109,17 @@ fn generated_typescript_matches_the_committed_files() {
         generated::<DrawingTool>(),
         generated::<ClientMessage>(),
         generated::<ConnectionStatus>(),
+        generated::<EtfDataSource>(),
+        generated::<EtfDataStatus>(),
+        generated::<EtfFundDetail>(),
+        generated::<EtfFundList>(),
+        generated::<EtfFundSummary>(),
+        generated::<EtfHolding>(),
+        generated::<EtfMaState>(),
+        generated::<EtfMaStates>(),
+        generated::<EtfStockHolder>(),
+        generated::<EtfStockHolders>(),
+        generated::<EtfStyle>(),
         generated::<ExcludeKind>(),
         generated::<Extreme>(),
         generated::<FinancialBasis>(),
@@ -129,12 +143,15 @@ fn generated_typescript_matches_the_committed_files() {
         generated::<ForeignHoldingDay>(),
         generated::<FullHistory>(),
         generated::<Fundamentals>(),
+        generated::<SymbolDaySummary>(),
         generated::<OrderBook>(),
         generated::<OrderBookLevel>(),
         generated::<ProgramTradePoint>(),
         generated::<ProgramTradeTimeline>(),
         generated::<TradePrint>(),
         generated::<TradeTape>(),
+        generated::<HeatmapFlowPoint>(),
+        generated::<HeatmapFlowSeries>(),
         generated::<IchimokuTest>(),
         generated::<IndicatorSpec>(),
         generated::<KeySource>(),
@@ -244,6 +261,27 @@ fn generated_typescript_matches_the_committed_files() {
         generated::<TradingSession>(),
         generated::<ViewSpan>(),
         generated::<Won>(),
+        generated::<MarketOverviewBreadth>(),
+        generated::<MarketOverviewContext>(),
+        generated::<MarketOverviewFlowCard>(),
+        generated::<MarketOverviewIndex>(),
+        generated::<MarketOverviewIndexCard>(),
+        generated::<MarketOverviewIntradayFlow>(),
+        generated::<MarketOverviewIntradayPoint>(),
+        generated::<MarketOverviewInvestorDay>(),
+        generated::<MarketOverviewPart<MarketOverviewIndex>>(),
+        generated::<MarketOverviewPeriod>(),
+        generated::<MarketOverviewPhase>(),
+        generated::<MarketOverviewProgramDay>(),
+        generated::<MarketOverviewSector>(),
+        generated::<MarketOverviewSectorFlow>(),
+        generated::<MarketOverviewSectorsCard>(),
+        generated::<MarketOverviewStreak>(),
+        generated::<MarketOverviewStreakBoard>(),
+        generated::<MarketOverviewStreaksCard>(),
+        generated::<MarketOverviewTurnoverCard>(),
+        generated::<MarketOverviewTurnoverDay>(),
+        generated::<MarketOverviewVolatility>(),
     ];
     let mut committed: Vec<String> = git(&["ls-tree", "--name-only", "HEAD", &format!("{DIR}/")])
         .lines()
