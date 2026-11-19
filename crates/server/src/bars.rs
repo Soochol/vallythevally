@@ -213,16 +213,15 @@ impl BarService {
         let mut s = slot.series.lock().await;
         match before {
             None => {
-                // 잠금을 기다리는 동안 다른 요청이 최신 페이지를 받았으면 그 결과를 같이 쓴다.
-                if slot.latest_fetches.load(Ordering::SeqCst) == seen_latest {
-                    self.refresh_latest(key, &mut s, prio).await?;
-                    slot.latest_fetches.fetch_add(1, Ordering::SeqCst);
-                }
+                self.refresh_latest_unless_shared(&slot, seen_latest, key, &mut s, prio).await?;
                 while s.bars.len() < limit && !s.reached_origin {
                     self.extend_older(key, &mut s, prio).await?;
                 }
             }
             Some(before) => {
+                if s.current.is_some_and(|c| c.bucket.is_confirmed_at(self.clock.now())) {
+                    self.refresh_latest_unless_shared(&slot, seen_latest, key, &mut s, prio).await?;
+                }
                 while s.bars.partition_point(|b| b.bucket.start() < before) < limit && !s.reached_origin {
                     self.extend_older(key, &mut s, prio).await?;
                 }
@@ -233,6 +232,14 @@ impl BarService {
         }
         slot.last_access.store(self.clock.now().unix(), Ordering::SeqCst);
         Ok(build_page(&s, before, limit))
+    }
+
+    async fn refresh_latest_unless_shared(&self, slot: &Slot, seen_latest: u64, key: SeriesKey, s: &mut Series, prio: Priority) -> Result<(), BarError> {
+        if slot.latest_fetches.load(Ordering::SeqCst) == seen_latest {
+            self.refresh_latest(key, s, prio).await?;
+            slot.latest_fetches.fetch_add(1, Ordering::SeqCst);
+        }
+        Ok(())
     }
 
     pub async fn jump_page(&self, key: SeriesKey, date: KstDate, before: Option<KstTime>, limit: usize) -> Result<JumpPage, BarError> {
@@ -824,6 +831,28 @@ mod tests {
         assert_eq!(older.bars.len(), 100);
         let conts: Vec<_> = h.chart_calls().iter().map(|s| s.cont.clone()).collect();
         assert_eq!(conts, [None, None, Some("P600".to_string())]);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn an_older_page_refetches_the_latest_only_when_the_held_current_bar_has_been_confirmed() {
+        let friday_afternoon = kst(date(2026, 11, 6), 15, 0, 0);
+        let h = harness(friday_afternoon, Duration::ZERO, Charts::default());
+        let k = key(SAMSUNG, Period::Day);
+        let latest = h.bars.page(k, None, 10).await.unwrap();
+        assert_eq!(latest.current.unwrap().bucket.start(), midnight(date(2026, 11, 6)), "장 중에는 11-06 일봉이 진행 중 봉");
+        let before = midnight(date(2026, 11, 7));
+
+        let during_session = h.bars.page(k, Some(before), 3).await.unwrap();
+        assert_eq!(during_session.bars.last().unwrap().bucket.start(), midnight(date(2026, 11, 5)));
+        assert_eq!(h.chart_calls().len(), 1, "확정되기 전에는 과거 페이지가 키움을 부르지 않는다");
+
+        h.clock.jump(11 * 3600);
+        let after_confirm = h.bars.page(k, Some(before), 3).await.unwrap();
+        assert_eq!(after_confirm.bars.last().unwrap().bucket.start(), midnight(date(2026, 11, 6)), "확정된 봉이 결과에 든다");
+        assert_eq!(h.chart_calls().len(), 2, "최신 페이지를 한 번 다시 받는다");
+
+        h.bars.page(k, Some(before), 3).await.unwrap();
+        assert_eq!(h.chart_calls().len(), 2, "진행 중 봉이 없어졌으니 더 받지 않는다");
     }
 
     #[tokio::test(start_paused = true)]

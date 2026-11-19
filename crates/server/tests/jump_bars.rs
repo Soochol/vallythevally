@@ -95,7 +95,11 @@ struct Harness {
 }
 
 fn harness(chart: &Chart) -> Harness {
-    let clock = Clock::fake(kst(day(2026, 11, 9), 2, 39, 0));
+    harness_at(chart, kst(day(2026, 11, 9), 2, 39, 0))
+}
+
+fn harness_at(chart: &Chart, now: KstTime) -> Harness {
+    let clock = Clock::fake(now);
     let rest = KiwoomRest::new(Arc::new(chart.clone()), KiwoomAuth::new(Secret::new("k".into()), Secret::new("s".into()), None), clock.clone());
     let symbols = Arc::new(SymbolDirectory::default());
     let symbol = Symbol::parse(SYMBOL).unwrap();
@@ -225,6 +229,57 @@ async fn a_day_without_a_ratio_keeps_the_received_prices_and_is_listed() {
     let page = harness(&missing_today).bars.jump_page(minute_key(), day(2026, 7, 14), None, 500).await.unwrap();
     assert_eq!(page.unadjusted_days, vec![day(2026, 7, 14)], "오늘 기준 일봉에 없는 날도 같다");
     assert_eq!(won(&page.bars[1]), (1_000, 1_050, 950, 1_000));
+}
+
+fn friday_chart(daily_close: u64) -> Chart {
+    Chart::default()
+        .reply(MINUTE_API, "20261106", None, minute_body(&[("20261106100000", 1_000, 1_050, 950, 1_000, 10)]), None)
+        .reply(DAILY_API, "20261106", None, daily_body(&[("20261106", daily_close), ("20261105", 900)]), None)
+}
+
+fn daily_key() -> SeriesKey {
+    SeriesKey { period: Period::Day, ..minute_key() }
+}
+
+fn daily_fetches_on(chart: &Chart, base: &str) -> usize {
+    chart.sent(DAILY_API).iter().filter(|(b, _)| b == base).count()
+}
+
+#[tokio::test(start_paused = true)]
+async fn yesterdays_daily_bar_cached_during_the_session_takes_its_final_close_after_midnight() {
+    let chart = friday_chart(1_000);
+    let h = harness_at(&chart, kst(day(2026, 11, 6), 15, 0, 0));
+    let cached = h.bars.page(daily_key(), None, 5).await.unwrap();
+    assert_eq!(cached.current.unwrap().ohlcv.close().centi() / 100, 1_000, "15:00에 받은 11-06 일봉은 진행 중 봉");
+    chart.clone().reply(DAILY_API, "20261106", None, daily_body(&[("20261106", 1_200), ("20261105", 900)]), None);
+    h.clock.jump(11 * 3600);
+    assert_eq!(h.clock.now(), kst(day(2026, 11, 7), 2, 0, 0));
+
+    let page = h.bars.jump_page(minute_key(), day(2026, 11, 6), None, 100).await.unwrap();
+
+    assert!(page.unadjusted_days.is_empty(), "{:?}", page.unadjusted_days);
+    assert_eq!(won(&page.bars[0]), (1_000, 1_050, 950, 1_000), "최종 종가 1,200 대 1,200이라 받은 가격 그대로. 15:00 값 1,000을 썼다면 바뀐다");
+    assert_eq!(daily_fetches_on(&chart, "20261106"), 3, "일봉 최신 조회가 바로가기에서 한 번 더 나간다(처음 받기, 기준일, 최신 다시 받기)");
+}
+
+#[tokio::test(start_paused = true)]
+async fn the_daily_latest_is_not_asked_again_when_the_day_was_already_confirmed_or_the_session_is_open() {
+    let chart = friday_chart(1_000);
+    let h = harness_at(&chart, kst(day(2026, 11, 6), 20, 30, 0));
+    h.bars.page(daily_key(), None, 5).await.unwrap();
+    h.clock.jump(5 * 3600 + 30 * 60);
+    let page = h.bars.jump_page(minute_key(), day(2026, 11, 6), None, 100).await.unwrap();
+    assert!(page.unadjusted_days.is_empty(), "{:?}", page.unadjusted_days);
+    assert_eq!(daily_fetches_on(&chart, "20261106"), 2, "20시 유예 뒤에 만든 시리즈는 처음 받기와 기준일 조회뿐");
+
+    let chart = friday_chart(1_000).reply(DAILY_API, "20261109", None, daily_body(&[("20261109", 1_100), ("20261106", 1_000)]), None);
+    let h = harness_at(&chart, kst(day(2026, 11, 9), 10, 0, 0));
+    h.bars.page(daily_key(), None, 5).await.unwrap();
+    h.clock.jump(30 * 60);
+    let page = h.bars.jump_page(minute_key(), day(2026, 11, 6), None, 100).await.unwrap();
+    assert!(page.unadjusted_days.is_empty(), "{:?}", page.unadjusted_days);
+    assert_eq!(daily_fetches_on(&chart, "20261109"), 1, "장 중에는 최신 조회를 더하지 않는다");
+    assert_eq!(daily_fetches_on(&chart, "20261106"), 1, "기준일 조회뿐");
 }
 
 #[tokio::test(start_paused = true)]
