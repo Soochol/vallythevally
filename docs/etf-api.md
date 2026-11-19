@@ -2,7 +2,7 @@
 
 ETF 페이지가 읽는 서버 경로다. 지금은 서버 실행 파일에 포함한 hoga-ops 동결 스냅샷(ETF 119개, 종목 896개, 편입 4,937건, 구성 기준일 2026-10-30)을 검증해 싣는다. 키움을 부르지 않는다. 설계는 [페이지 플랜](plans/pages-etf.md)의 결정 9와 스스로 정한 결정 5·7이다.
 
-응답 모양은 뒤 작업이 웹을 고치지 않도록 처음부터 넓게 정했다. 종목의 이평선 칸과 자료 출처 칸은 지금 비어 있거나 스냅샷 값이고, `etf-ma`와 `etf-pdf-collect`가 서버에서 채운다. 타입은 `crates/server/src/etf/mod.rs`의 `Etf*`이고 `web/src/api/generated/Etf*.ts`로 생성된다. 필드는 camelCase, 열거 값은 snake_case다.
+응답 모양은 뒤 작업이 웹을 고치지 않도록 처음부터 넓게 정했다. 종목의 이평선 칸은 서버가 일봉 저장소로 채우고, 자료 출처 칸은 지금 스냅샷 값이며 `etf-pdf-collect`가 서버에서 채운다. 타입은 `crates/server/src/etf/mod.rs`의 `Etf*`이고 `web/src/api/generated/Etf*.ts`로 생성된다. 필드는 camelCase, 열거 값은 snake_case다.
 
 ## 경로
 
@@ -45,7 +45,17 @@ ETF 페이지가 읽는 서버 경로다. 지금은 서버 실행 파일에 포�
 
 `EtfHolding`(상세의 `holdings[]`): `code`, `name`, `weightBps`, `ma`. 이름은 서버 종목 목록(키움)을 먼저 쓰고, 목록이 아직 없거나 종목이 없으면 스냅샷 이름이다.
 
-`EtfMaStates`(`ma`): `ma20`, `ma60`, `ma120`. 값은 `above`(종가가 이평선 위), `equal`, `below`, 또는 null(계산하지 않았거나 일봉이 모자람)이다. 지금은 모두 null이다. 역색인 응답은 종목 하나이므로 `ma`가 `EtfStockHolders` 바로 아래에 있다.
+`EtfMaStates`(`ma`): `ma20`, `ma60`, `ma120`. 값은 `above`(종가가 이평선 위), `equal`, `below`, 또는 null(일봉이 모자라거나 저장소에 없음)이다. 역색인 응답은 종목 하나이므로 `ma`가 `EtfStockHolders` 바로 아래에 있다.
+
+## 이평선 계산
+
+서버가 스크리너 일봉 저장소([ADR 0010](adr/0010-screener-reads-a-disk-daily-store.md))를 읽기만 해서 계산한다. 키움을 부르지 않는다.
+
+- 기준일은 저장소 최신 봉의 날짜이고 `EtfFundDetail.maAsOf`와 `EtfStockHolders.maAsOf`에 싣는다. 저장소에 봉이 없으면 null이다([ADR 0015](adr/0015-screener-recent-period-from-latest-bar.md)와 같은 규칙).
+- 종목마다 기준일 봉의 종가를 최근 20·60·120개 봉 종가의 단순 평균과 정수로 비교한다. 개수가 모자란 창은 null이다.
+- 기준일 봉이 없는 종목(저장소에 없거나 마지막 봉이 더 옛날)은 세 칸이 모두 null이다.
+- 계산 결과는 저장소 쓰기 세대가 같은 동안 다시 계산하지 않고 재사용한다.
+- 저장소를 읽지 못하면 `WARN`을 남기고 모든 칸과 `maAsOf`를 null로 응답한다.
 
 비중은 정수 bps(1bps = 0.01%)다. 비중 합을 100%로 다시 맞추지 않는다. 파생·기타 자산은 싣지 않으므로 합이 100% 미만일 수 있다.
 
