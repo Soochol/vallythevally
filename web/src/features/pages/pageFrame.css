@@ -1,0 +1,18 @@
+.page-frame { display: flex; flex-direction: column; gap: var(--size-12); min-height: 100%; padding: 0 var(--size-4) var(--size-24); }
+.page-frame-bar {
+  position: sticky; top: 0; z-index: 5; display: flex; flex-wrap: wrap; align-items: center; gap: var(--size-10);
+  padding: var(--size-10) var(--size-12); border-radius: var(--r-l); background: var(--glass-solid); box-shadow: 0 0 0 1px var(--line);
+}
+.page-frame-title { margin: 0 var(--size-5) 0 0; font-size: var(--fs-l); font-weight: 700; letter-spacing: -0.02em; }
+.page-frame-freshness { display: flex; align-items: center; gap: var(--size-5); color: var(--text-2); font-size: var(--fs-s); }
+.page-frame-spacer { flex: 1; }
+.page-frame-back { display: inline-grid; place-items: center; width: var(--size-30); height: var(--size-30); border-radius: var(--r-m); color: var(--text-2); font-size: var(--fs-l); }
+.page-frame-body { display: flex; flex: 1; flex-direction: column; min-width: 0; }
+.page-link-button { display: inline-flex; align-items: center; gap: var(--size-8); height: var(--size-30); padding: 0 var(--size-8); border-radius: var(--r-m); color: var(--text-2); font-size: var(--fs-s); }
+.page-link-button:hover, .page-link-button[aria-expanded="true"] { background: var(--hover); color: var(--text); }
+.page-link-chip { --swatch: var(--size-20); }
+.page-preparing { display: grid; flex: 1; place-content: center; gap: var(--size-4); min-height: 240px; text-align: center; color: var(--text-2); border-radius: var(--r-l); background: var(--surface); box-shadow: 0 0 0 1px var(--line); }
+.page-preparing strong { color: var(--text); font-size: var(--fs-l); }
+.page-preparing-recent { display: flex; flex-wrap: wrap; justify-content: center; gap: var(--size-8); margin-top: var(--size-12); }
+.page-preparing-symbol { padding: var(--size-5) var(--size-12); border-radius: var(--r-m); background: var(--raised); color: var(--text); font-size: var(--fs-s); }
+.page-preparing-symbol:hover { box-shadow: 0 0 0 1px var(--accent); }

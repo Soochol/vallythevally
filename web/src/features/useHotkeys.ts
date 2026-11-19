@@ -16,8 +16,9 @@ import { useAccountStore } from "../stores/account";
 import { currentActionKeys } from "../stores/ui";
 
 /** 화면 전체의 단축키. 대화상자가 열려 있거나 입력칸에 초점이 있으면 쓰지 않는다. */
-export function useHotkeys() {
+export function useHotkeys(enabled: boolean) {
   useEffect(() => {
+    if (!enabled) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.defaultPrevented || e.isComposing || ownsChartKeyboard(e)) return;
       if (wizardVisible(useAccountStore.getState().status, useWizardStore.getState().open)) return;
@@ -65,5 +66,5 @@ export function useHotkeys() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, []);
+  }, [enabled]);
 }

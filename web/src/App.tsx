@@ -3,6 +3,12 @@ import { FinancialUpdateDialog } from "./features/financial-update/FinancialUpda
 import { ConfirmHost } from "./features/overlay/Confirm";
 import { TooltipHost } from "./features/overlay/Tooltip";
 import { useEffect, useState } from "react";
+import { useLocation } from "react-router";
+import { PageRail } from "./features/page-rail/PageRail";
+import { PageStage } from "./features/page-rail/PageStage";
+import { PageTopbar } from "./features/page-rail/PageTopbar";
+import { useHiddenWorkspaceKeys } from "./features/page-rail/useHiddenWorkspaceKeys";
+import { isContentPage, pageOfPath, type PageId } from "./features/page-rail/pages";
 import { loadKiwoomLink } from "./api/system";
 import { SystemSettingsDialog } from "./features/system-settings/SystemSettingsDialog";
 import { useSymbolInfo } from "./api/queries";
@@ -39,6 +45,7 @@ import { DESKTOP_QUERY, useMediaQuery } from "./lib/media";
 import type { WindowId } from "./layout/kinds";
 
 export function ChartRoute() {
+  const page = pageOfPath(useLocation().pathname) ?? "workspace";
   const restoring = usePersistStore((s) => s.phase.kind === "restoring");
   const account = useAccountStore((s) => s.status);
   const wizardOpen = useWizardStore((s) => s.open);
@@ -48,13 +55,15 @@ export function ChartRoute() {
   if (account?.state === "owner_mismatch") return <ReplaceLocalScreen status={account} />;
   return (
     <>
-      {restoring || needsChoice(account) ? <div className="h-dvh bg-bg" aria-busy="true" aria-label="마지막 화면을 불러오는 중" /> : <ChartScreen />}
+      {restoring || needsChoice(account) ? <div className="h-dvh bg-bg" aria-busy="true" aria-label="마지막 화면을 불러오는 중" /> : <ChartScreen page={page} />}
+      {page === "home" && <div className="fixed inset-0 z-50 bg-bg"><Landing /></div>}
       {wizardVisible(account, wizardOpen) && <SetupWizard />}
     </>
   );
 }
 
-function ChartScreen() {
+function ChartScreen({ page }: { page: PageId }) {
+  const onWorkspace = page === "workspace";
   const cellId = useSelectionStore((s) => s.activeCell);
   const cell = useCell(cellId);
   const info = useSymbolInfo(cell.symbol).data;
@@ -63,8 +72,9 @@ function ChartScreen() {
   const [phoneStatus, setPhoneStatus] = useState<{ cellId: WindowId; status: CellStatus } | null>(null);
   const status: CellStatus = phoneStatus?.cellId === cellId ? phoneStatus.status : { kind: "loading" };
 
-  useHotkeys();
-  useArrangementKeys();
+  useHiddenWorkspaceKeys(!onWorkspace);
+  useHotkeys(onWorkspace);
+  useArrangementKeys(onWorkspace);
   useEffect(() => {
     const { loginFailure, showLoginFailure } = useAccountStore.getState();
     if (loginFailure === null) return;
@@ -76,33 +86,49 @@ function ChartScreen() {
     void loadKiwoomLink(load.signal);
     return () => load.abort();
   }, []);
-  useOpenFromAddress();
+  useOpenFromAddress(onWorkspace);
   useEffect(() => {
     if (info) pushRecent(info.code);
   }, [info, pushRecent]);
 
+  const phoneGrid = onWorkspace
+    ? "max-md:grid-rows-[auto_auto_minmax(0,1fr)_56px] max-md:[grid-template-areas:'mhead'_'mper'_'grid'_'mtabs']"
+    : "max-md:grid-rows-[minmax(0,1fr)] max-md:[grid-template-areas:'grid']";
+  const shownPage = isContentPage(page) ? page : null;
+
   return (
     <div
+      inert={page === "home"}
       className={
-        "app-shell relative flex h-dvh min-h-0 min-w-0 flex-col overflow-hidden bg-bg " +
-        "max-md:grid max-md:grid-cols-[minmax(0,1fr)] max-md:grid-rows-[auto_auto_minmax(0,1fr)_56px] max-md:[grid-template-areas:'mhead'_'mper'_'grid'_'mtabs']"
+        "app-shell relative flex h-dvh min-h-0 min-w-0 flex-col overflow-hidden bg-bg max-md:grid max-md:grid-cols-[minmax(0,1fr)] " +
+        phoneGrid +
+        (page === "home" ? " invisible" : "")
       }
     >
-      <Topbar />
-      <PhoneHeader cell={cell} info={info} status={status} />
-      <PeriodChips cell={cell} />
+      {onWorkspace ? <Topbar /> : <PageTopbar page={page} />}
+      {onWorkspace && <PhoneHeader cell={cell} info={info} status={status} />}
+      {onWorkspace && <PeriodChips cell={cell} />}
       {desktop ? (
         <div className="flex min-h-0 min-w-0 flex-1">
-          <DrawingToolbar />
-          <Workspace />
+          <div className="relative flex min-h-0 min-w-0 flex-1">
+            <div inert={!onWorkspace} className={"absolute inset-0 flex" + (onWorkspace ? "" : " invisible")}>
+              <DrawingToolbar />
+              <Workspace />
+            </div>
+            {shownPage && <PageStage page={shownPage} />}
+          </div>
+          <PageRail page={page} />
         </div>
       ) : (
-        <main aria-label="칸" className="grid min-h-0 min-w-0 grid-cols-1 grid-rows-1 [grid-area:grid]">
-          <ChartCell key={cellId} cellId={cellId} status={status} onStatus={(next) => setPhoneStatus({ cellId, status: next })} />
-        </main>
+        <>
+          <main aria-label="칸" inert={!onWorkspace} className={"grid min-h-0 min-w-0 grid-cols-1 grid-rows-1 [grid-area:grid]" + (onWorkspace ? "" : " invisible")}>
+            <ChartCell key={cellId} cellId={cellId} status={status} onStatus={(next) => setPhoneStatus({ cellId, status: next })} />
+          </main>
+          {shownPage && <PageStage page={shownPage} />}
+        </>
       )}
       <StatusBar />
-      <PhoneTabs />
+      {onWorkspace && <PhoneTabs />}
       <PhoneWatch />
       <PhoneScreener />
       <PhoneSaveBand />

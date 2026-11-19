@@ -7,6 +7,7 @@ import { retryDelay, shouldRetry } from "./api/retry";
 import { ChartRoute } from "./App";
 import { CollectorPage } from "./features/collector-board/CollectorPage";
 import { takeLoginFailure } from "./features/account/loginFailure";
+import { ALL_PAGES } from "./features/page-rail/pages";
 import { start } from "./persist/start";
 import { useAccountStore } from "./stores/account";
 import { marketSocket } from "./stores/realtime";
@@ -34,7 +35,7 @@ void start();
 marketSocket.start();
 
 const router = createBrowserRouter([
-  { path: "/", element: <ChartRoute /> },
+  { element: <ChartRoute />, children: ALL_PAGES.map(({ path }) => ({ path })) },
   { path: "/collector", element: <CollectorPage /> },
   { path: "*", element: <Navigate to="/" replace /> },
 ]);

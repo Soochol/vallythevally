@@ -33,9 +33,10 @@ test("옛 라이트 설정은 다크로 옮기고 다른 설정과 모르는 키
     venue: "krx",
     orderSettings: DEFAULT_UI_PREFS.orderSettings,
     hotkeys: {},
+    pageLink: "a",
   });
   expect(extra).toEqual({ phone: { symbol: "000660" } });
-  expect(toUiState(prefs, extra)).toEqual({ ...raw, theme: "dark", orderSettings: DEFAULT_UI_PREFS.orderSettings, hotkeys: {} });
+  expect(toUiState(prefs, extra)).toEqual({ ...raw, theme: "dark", orderSettings: DEFAULT_UI_PREFS.orderSettings, hotkeys: {}, pageLink: "a" });
 });
 
 test("마이그레이션이 넣은 처음 값(접힘·최근 종목 없음)은 경고 없이 기본값을 채운다", () => {
@@ -179,4 +180,16 @@ test("바꾼 단축키는 그대로 왕복하고 기본값과 같은 동작은 �
   const { prefs, extra } = parseUiState({ lastLayoutId: null, theme: "dark", hotkeys: { ...hotkeys, "period:W": ["KeyW"] } });
   expect(toUiState(prefs, extra).hotkeys).toEqual(hotkeys);
   expect(warn).not.toHaveBeenCalled();
+});
+
+test("페이지에서 보낼 연동 색은 없으면 경고 없이 A, 색 이름이나 끔(null)이면 그대로 왕복하고 틀리면 A로 연다", () => {
+  const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+  const warned = () => warn.mock.calls.filter(([text]) => String(text).includes("pageLink")).length;
+  expect(parseUiState({}).prefs.pageLink).toBe("a");
+  expect(warned()).toBe(0);
+  expect(parseUiState({ pageLink: "d" }).prefs.pageLink).toBe("d");
+  expect(parseUiState({ pageLink: null }).prefs.pageLink).toBeNull();
+  expect(toUiState(parseUiState({ pageLink: null }).prefs, {})).toMatchObject({ pageLink: null });
+  expect(parseUiState({ pageLink: "z" }).prefs.pageLink).toBe("a");
+  expect(warned()).toBe(1);
 });
