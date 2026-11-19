@@ -89,7 +89,7 @@ test("호가가 한 틱 움직인 프레임의 빈 단은 직전 단으로 채�
   expect(bids).toEqual([...bids].sort((a, b) => b - a));
 });
 
-test("1단이 비고 호가가 한 틱 움직인 프레임은 직전 1단으로 채워 반대쪽과 교차하지 않는다", () => {
+test("1단이 비고 호가가 한 틱 움직인 프레임은 직전 1단으로 채우지 않아 반대쪽과 교차하지 않는다", () => {
   const first = acceptLive(EMPTY_BOOK, fullFrame());
   const moved: FeedBook = {
     ...fullFrame(),
