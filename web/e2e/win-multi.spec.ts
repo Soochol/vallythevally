@@ -239,45 +239,51 @@ test("한 묶음에 탭 20개가 있을 때 마지막 탭을 단축키나 복제
 });
 
 const headOf = (page: Page, id: string) => page.locator(`[data-window-header="${id}"]`);
-const symbolName = (page: Page, id: string) => headOf(page, id).locator(".window-symbol-name");
 const unpin = (page: Page, id: string) => headOf(page, id).getByRole("button", { name: "종목 고정 풀기" });
 const pinned = (scenario: Scenario, kind: string) => savedWindows(scenario, kind).map((w) => [w.id, (w as { symbol?: string }).symbol ?? null]);
-const pickDialog = (page: Page) => page.getByRole("dialog", { name: "창에 보일 종목 고르기" });
-
-async function pickSymbol(page: Page, id: string, query: string, code: string) {
-  await symbolName(page, id).dispatchEvent("click");
-  await pickDialog(page).getByRole("combobox", { name: "종목 검색" }).fill(query);
-  const option = pickDialog(page).locator(`[role=option][data-symbol="${code}"]`);
-  await expect(option).toHaveAttribute("aria-disabled", "false");
-  await option.click();
-  await expect(pickDialog(page)).toHaveCount(0);
-}
 
 const floatingBooks = (scenario: Scenario, links: [LinkColor | null, LinkColor | null] = [null, null]) =>
   saveWindows(scenario, [{ id: "book", link: links[0], kind: "book" }, { id: "book-2", link: links[1], kind: "book" }], "canvas");
 
-test("연동 끔인 10호가 창 둘 가운데 하나에서 종목 이름을 눌러 종목을 고르면 그 창만 그 종목에 고정되어 구독하고 저장된다", async ({ page, scenario }) => {
+test("고정 안 된 10호가 창은 도킹 탭에 종목 이름과 고정 표시를 그리지 않는다", async ({ page, scenario }) => {
+  saveWindows(scenario, [{ id: "book", link: null, kind: "book" }]);
+  await open(page);
+  const group = page.locator(".dock-tab-group").filter({ has: tabOf(page, "book") });
+  await expect(tabOf(page, "book")).toBeVisible();
+  await expect(group.locator(".window-symbol")).toHaveCount(0);
+  await expect(group.getByText("삼성전자")).toHaveCount(0);
+});
+
+test("고정 안 된 10호가 창은 캔버스 창 머리에 종목 이름과 고정 표시를 그리지 않는다", async ({ page, scenario }) => {
   floatingBooks(scenario);
   await open(page);
-  const books = page.getByTestId("book-window");
-  await expect(books.nth(0)).toHaveAttribute("data-symbol", "005930");
-  await expect(books.nth(1)).toHaveAttribute("data-symbol", "005930");
-  await expect(unpin(page, "book-2")).toHaveCount(0);
+  await expect(headOf(page, "book")).toBeVisible();
+  await expect(headOf(page, "book").locator(".window-symbol")).toHaveCount(0);
+  await expect(headOf(page, "book").getByText("삼성전자")).toHaveCount(0);
+});
 
-  await pickSymbol(page, "book-2", "035420", "035420");
-  await expect(books.nth(1)).toHaveAttribute("data-symbol", "035420");
-  await expect(books.nth(0)).toHaveAttribute("data-symbol", "005930");
-  await expect(symbolName(page, "book-2")).toHaveText("NAVER");
-  await expect(unpin(page, "book-2")).toBeVisible();
-  await pollSaved(() => bookSubs(scenario).map((s) => s.symbol).sort()).toEqual(["005930", "005930", "035420"]);
-  await pollSaved(() => pinned(scenario, "book")).toEqual([["book", null], ["book-2", "035420"]]);
+test("저장된 고정이 있는 창은 도킹 탭에 고정 점과 풀기 단추만 보이고 종목 이름 글자는 없다", async ({ page, scenario }) => {
+  saveWindows(scenario, [{ id: "book", link: null, kind: "book", symbol: "035420" }]);
+  await open(page);
+  const group = page.locator(".dock-tab-group").filter({ has: tabOf(page, "book") });
+  await expect(tabOf(page, "book")).toHaveAccessibleName(/^10호가/);
+  await expect(group.locator('.window-symbol-pin[title="종목 고정: NAVER"]')).toHaveCount(1);
+  await expect(group.getByRole("button", { name: "종목 고정 풀기" })).toBeVisible();
+  await expect(group.getByText("NAVER")).toHaveCount(0);
+});
+
+test("저장된 고정이 있는 창은 캔버스 창 머리에 고정 점과 풀기 단추만 보이고 종목 이름 글자는 없다", async ({ page, scenario }) => {
+  saveWindows(scenario, [{ id: "book", link: null, kind: "book", symbol: "035420" }], "canvas");
+  await open(page);
+  await expect(headOf(page, "book").locator('.window-symbol-pin[title="종목 고정: NAVER"]')).toHaveCount(1);
+  await expect(unpin(page, "book")).toBeVisible();
+  await expect(headOf(page, "book").getByText("NAVER")).toHaveCount(0);
 });
 
 test("활성 칸을 다른 차트로 바꿔도 고정된 창은 그대로이고 고정 안 된 창은 따라가며, 고정 풀기를 누르면 활성 칸 종목으로 돌아간다", async ({ page, scenario }) => {
-  floatingBooks(scenario);
+  saveWindows(scenario, [{ id: "book", link: null, kind: "book" }, { id: "book-2", link: null, kind: "book", symbol: "035420" }], "canvas");
   await open(page);
   const books = page.getByTestId("book-window");
-  await pickSymbol(page, "book-2", "035420", "035420");
   await expect(books.nth(1)).toHaveAttribute("data-symbol", "035420");
 
   await page.locator('[data-canvas-window="cell-1"] .window-panel').dispatchEvent("pointerdown");
@@ -290,30 +296,6 @@ test("활성 칸을 다른 차트로 바꿔도 고정된 창은 그대로이고 
   await pollSaved(() => pinned(scenario, "book")).toEqual([["book", null], ["book-2", null]]);
 });
 
-test("연동 B 창에서 종목을 고르면 연동 B 차트의 종목이 바뀌고 창 종목은 고정되지 않는다", async ({ page, scenario }) => {
-  floatingBooks(scenario, ["b", null]);
-  await open(page);
-  const books = page.getByTestId("book-window");
-  await expect(books.nth(0)).toHaveAttribute("data-symbol", "000660");
-  await expect(unpin(page, "book")).toHaveCount(0);
-
-  await pickSymbol(page, "book", "035420", "035420");
-  await expect(cell(page, 2)).toHaveAttribute("aria-label", /^칸 2: NAVER/);
-  await expect(books.nth(0)).toHaveAttribute("data-symbol", "035420");
-  await expect(books.nth(1)).toHaveAttribute("data-symbol", "005930");
-  await expect(unpin(page, "book")).toHaveCount(0);
-  await pollSaved(() => pinned(scenario, "book")).toEqual([["book", null], ["book-2", null]]);
-});
-
-test("연동 색 창이 따르는 차트가 없으면 종목을 골라도 알림만 뜨고 아무것도 바뀌지 않는다", async ({ page, scenario }) => {
-  saveWindows(scenario, [{ id: "book", link: "c", kind: "book", symbol: "005930" }], "canvas");
-  await open(page);
-  await pickSymbol(page, "book", "035420", "035420");
-  await expect(page.getByRole("status").filter({ hasText: "연동 C를 따르는 차트가 없습니다" })).toBeVisible();
-  await expect(page.getByTestId("book-window")).toHaveAttribute("data-symbol", "005930");
-  await expect(cell(page, 2)).toHaveAttribute("aria-label", /^칸 2: SK하이닉스/);
-});
-
 test("고정된 창에서 연동 색을 고르면 고정이 풀리고 그 색의 차트 종목을 따른다", async ({ page, scenario }) => {
   saveWindows(scenario, [{ id: "book", link: null, kind: "book", symbol: "035420" }], "dock");
   await open(page);
@@ -324,33 +306,23 @@ test("고정된 창에서 연동 색을 고르면 고정이 풀리고 그 색의
   await pollSaved(() => savedWindows(scenario, "book").map((w) => w.link)).toEqual(["a"]);
 });
 
-test("종목 고르기에는 지수가 나오지 않고 주식만 나온다", async ({ page, scenario }) => {
-  floatingBooks(scenario);
-  await open(page);
-  await symbolName(page, "book").click();
-  await pickDialog(page).getByRole("combobox", { name: "종목 검색" }).fill("00");
-  await expect(pickDialog(page).locator('[role=option][data-symbol="005930"]')).toBeVisible();
-  await expect(pickDialog(page).locator('[role=option][data-symbol^="IDX:"]')).toHaveCount(0);
-  await page.keyboard.press("Escape");
-  await expect(pickDialog(page)).toHaveCount(0);
-});
-
-test("고정은 새로 고침해도 그대로이고 도킹 탭 옆에도 종목 이름이 보이며 탭 이름은 그대로다", async ({ page, scenario }) => {
+test("고정은 새로 고침해도 그대로이고 도킹 탭 옆에 고정 점과 풀기 단추가 남으며 탭 이름은 그대로다", async ({ page, scenario }) => {
   saveWindows(scenario, [{ id: "book", link: null, kind: "book", symbol: "035420" }, { id: "trades", link: "a", kind: "trades" }]);
   await open(page);
   const group = page.locator(".dock-tab-group").filter({ has: tabOf(page, "book") });
   await expect(tabOf(page, "book")).toHaveAccessibleName(/^10호가/);
-  await expect(group.locator(".window-symbol-name")).toHaveText("NAVER");
+  await expect(group.locator(".window-symbol-pin")).toHaveCount(1);
   await expect(group.getByRole("button", { name: "종목 고정 풀기" })).toBeVisible();
   await tabOf(page, "book").click();
   await expect(page.getByTestId("book-window")).toHaveAttribute("data-symbol", "035420");
-  await expect(page.locator(".dock-tab-group").filter({ has: tabOf(page, "trades") }).locator(".window-symbol-name")).toHaveText("삼성전자");
+  await expect(page.locator(".dock-tab-group").filter({ has: tabOf(page, "trades") }).locator(".window-symbol")).toHaveCount(0);
 
   await page.reload();
   await expect(cell(page)).toHaveAttribute("aria-busy", "false");
   await tabOf(page, "book").click();
   await expect(page.getByTestId("book-window")).toHaveAttribute("data-symbol", "035420");
-  await expect(group.locator(".window-symbol-name")).toHaveText("NAVER");
+  await expect(group.locator(".window-symbol-pin")).toHaveCount(1);
+  await expect(group.getByRole("button", { name: "종목 고정 풀기" })).toBeVisible();
   await pollSaved(() => pinned(scenario, "book")).toEqual([["book", "035420"]]);
 });
 

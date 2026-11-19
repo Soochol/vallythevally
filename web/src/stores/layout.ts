@@ -200,7 +200,6 @@ interface LayoutState {
   setWindowScreen(window: WindowId, screen: string | null): void;
   setWindowRanking(window: WindowId, ranking: Ranking): void;
   pinSymbol(window: WindowId, code: SymbolCode | null): void;
-  pickWindowSymbol(window: WindowId, activeCell: WindowId, target: SymbolTarget): SymbolChange;
   setPeriod(cellId: WindowId, p: Period): void;
   setStyle(cellId: WindowId, s: ChartStyle): void;
   setScale(cellId: WindowId, s: PriceScale): void;
@@ -447,15 +446,6 @@ export const useLayoutStore = create<LayoutState>()((set, get) => {
     setWindowRanking: (id, ranking) => patchWindows((w) => (w.id === id && w.kind === "ranking" ? { ...w, ranking } : w)),
     pinSymbol: (id, code) =>
       patchWindows((w) => (w.id === id && PINNABLE.has(w.kind) && (code === null || !isIndexCode(code)) ? withOptional(w as PinnableWindowState | OrderWindowState, "symbol", code) : w)),
-    pickWindowSymbol: (id, activeCell, target) => {
-      const picked = get().layout.windows.find((w) => w.id === id);
-      if (!picked || !isPinnableWindow(picked)) return { changed: [], notice: null };
-      if (picked.link === null) {
-        get().pinSymbol(id, target.code);
-        return { changed: [id], notice: null };
-      }
-      return get().sendSymbol(id, activeCell, target);
-    },
     setPeriod: (cellId, period) => patchCell(cellId, (c) => (c.period === period ? c : { ...c, period })),
     setStyle: (cellId, style) => patchSetting(cellId, "style", style),
     setScale: (cellId, scale) => patchSetting(cellId, "scale", scale),

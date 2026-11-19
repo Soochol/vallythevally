@@ -96,9 +96,6 @@
 .dock-tab-sub { color:var(--text-3); font-weight:500; }
 .dock-tab:has(+ .link-dot) { position:relative; padding-right:var(--size-32); }
 .window-symbol { display:flex; flex:0 1 auto; align-items:center; gap:var(--size-2); min-width:0; align-self:center; font-size:var(--fs-s); }
-.window-symbol-name { min-width:0; max-width:var(--size-120); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; padding:0 var(--size-4); border-radius:var(--r-s); }
-.window-symbol-name:hover { background:var(--hover); color:var(--text); }
-.window-symbol[data-pinned] .window-symbol-name { color:var(--accent); }
 .window-symbol-pin { color:var(--accent); font-size:var(--size-8); }
 .window-symbol-unpin { display:grid; place-items:center; width:var(--size-16); height:var(--size-16); border-radius:var(--r-s); color:var(--text-3); }
 .window-symbol-unpin:hover { background:var(--hover); color:var(--text); }
