@@ -60,6 +60,44 @@ impl Fixture {
         (status, serde_json::from_slice(&resp.into_body().collect().await.unwrap().to_bytes()).unwrap())
     }
 
+    fn get_in_background(&self, path: &str) -> tokio::task::JoinHandle<(u16, Value)> {
+        let (app, path) = (self.app.clone(), path.to_owned());
+        tokio::spawn(async move {
+            let resp = app.oneshot(Request::get(path).body(Body::empty()).unwrap()).await.unwrap();
+            let status = resp.status().as_u16();
+            (status, serde_json::from_slice(&resp.into_body().collect().await.unwrap().to_bytes()).unwrap())
+        })
+    }
+
+    async fn until_calls(&self, api_id: &str, count: usize) {
+        for _ in 0..100_000 {
+            if self.calls(api_id).len() >= count {
+                return;
+            }
+            tokio::task::yield_now().await;
+        }
+        panic!("{api_id} 호출이 {count}건에 이르지 않았다: {:?}", self.calls(api_id));
+    }
+
+    async fn settle(&self) {
+        for _ in 0..1_000 {
+            tokio::task::yield_now().await;
+        }
+    }
+
+    fn script_five_pages(&self, api_id: &str, first: &str, last: &str) {
+        let page_with_next = |next: &str| {
+            let mut page = fixture(first);
+            page["_headers"]["next-key"] = json!(next);
+            page
+        };
+        self.fake.respond_with(api_id, 200, page_with_next("PAGE2"));
+        for (key, next) in [("PAGE2", "PAGE3"), ("PAGE3", "PAGE4"), ("PAGE4", "PAGE5")] {
+            self.fake.respond_with_for_key(api_id, key, 200, page_with_next(next));
+        }
+        self.fake.respond_with_for_key(api_id, "PAGE5", 200, fixture(last));
+    }
+
     fn calls(&self, api_id: &str) -> Vec<support::Call> {
         self.fake.calls().into_iter().filter(|c| c.api_id == api_id).collect()
     }
@@ -222,4 +260,54 @@ async fn a_success_without_the_rows_is_a_protocol_failure() {
         let (status, body) = f.get(&format!("/api/symbols/005930/{route}")).await;
         assert_eq!((status, &body["error"]["reason"]), (500, &json!("protocol")), "{route}: {body}");
     }
+}
+
+fn asked(calls: &[support::Call]) -> Vec<(String, Option<String>)> {
+    calls.iter().map(|c| (c.body["stk_cd"].as_str().unwrap().to_owned(), c.next_key.clone())).collect()
+}
+
+fn page(code: &str, key: Option<&str>) -> (String, Option<String>) {
+    (code.to_owned(), key.map(str::to_owned))
+}
+
+#[tokio::test]
+async fn the_later_pages_of_trades_leave_two_slots_so_the_next_symbol_is_not_held() {
+    let f = Fixture::start(true).await;
+    f.script_five_pages("ka10003", "ka10003_005930_AL_p1", "ka10003_005930_AL_p2");
+    let long_walk = f.get_in_background("/api/symbols/005930/trades?limit=500");
+    f.until_calls("ka10003", 3).await;
+    let next_symbol = f.get_in_background("/api/symbols/005935/trades?pages=1");
+    f.until_calls("ka10003", 4).await;
+    f.settle().await;
+    let before_the_window_frees = asked(&f.calls("ka10003"));
+    assert_eq!(before_the_window_frees, [page("005930_AL", None), page("005930_AL", Some("PAGE2")), page("005930_AL", Some("PAGE3")), page("005935_AL", None)], "B의 첫 쪽은 A의 넷째 쪽보다 먼저 나간다");
+    tokio::time::advance(Duration::from_millis(1049)).await;
+    f.settle().await;
+    assert_eq!(f.calls("ka10003").len(), 4, "A의 넷째 쪽은 창이 빌 때까지 나가지 않는다");
+    tokio::time::advance(Duration::from_millis(2)).await;
+    f.until_calls("ka10003", 5).await;
+    assert_eq!(asked(&f.calls("ka10003"))[4], page("005930_AL", Some("PAGE4")));
+    assert_eq!(next_symbol.await.unwrap().0, 200);
+    tokio::time::advance(Duration::from_secs(10)).await;
+    assert_eq!(long_walk.await.unwrap().0, 200);
+    assert_eq!(f.calls("ka10003").len(), 6);
+}
+
+#[tokio::test]
+async fn the_later_pages_of_program_trades_leave_two_slots_in_the_window() {
+    let f = Fixture::start(true).await;
+    f.script_five_pages("ka90008", "ka90008_005930_AL_p1", "ka90008_005930_AL_p2");
+    let walk = f.get_in_background("/api/symbols/005930/program-trades");
+    f.until_calls("ka90008", 3).await;
+    f.settle().await;
+    assert_eq!(f.calls("ka90008").len(), 3, "넷째 쪽은 창이 빌 때까지 나가지 않는다");
+    tokio::time::advance(Duration::from_millis(1049)).await;
+    f.settle().await;
+    assert_eq!(f.calls("ka90008").len(), 3);
+    tokio::time::advance(Duration::from_millis(2)).await;
+    f.until_calls("ka90008", 4).await;
+    assert_eq!(f.calls("ka90008")[3].next_key.as_deref(), Some("PAGE4"));
+    tokio::time::advance(Duration::from_secs(10)).await;
+    assert_eq!(walk.await.unwrap().0, 200);
+    assert_eq!(f.calls("ka90008").len(), 5);
 }
