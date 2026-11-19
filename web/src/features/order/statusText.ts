@@ -1,8 +1,10 @@
 import type { OrderCommand } from "../../api/generated/OrderCommand";
+import type { OrderSide } from "../../api/generated/OrderSide";
 import type { OrderRejectReason } from "../../api/generated/OrderRejectReason";
 import { ApiRequestError } from "../../api/http";
 import { formatPrice } from "../../lib/format";
 import { SIDE_LABEL } from "./orderRules";
+import type { PendingState } from "./pendingWrites";
 
 export const MOCK_KRX_ONLY_TEXT = "모의투자는 KRX 주문만 됩니다";
 
@@ -58,6 +60,19 @@ export function statusOfCommand(command: OrderCommand): OrderStatus {
       return { tone: "info", text: `줄 서는 중 · ${describe(command)}` };
   }
 }
+
+export const PENDING_TEXT: Readonly<Record<PendingState, string>> = { sending: "보내는 중", canceling: "취소 중", modifying: "정정 중" };
+
+const won = (price: number): string => `${formatPrice(price, false)}원`;
+
+export const statusOfSending = (side: OrderSide, quantity: number, price: number): OrderStatus =>
+  ({ tone: "info", text: `${PENDING_TEXT.sending} · ${SIDE_LABEL[side]} ${quantity.toLocaleString("ko-KR")} · ${won(price)}` });
+
+export const statusOfCanceling = (target?: { readonly side: OrderSide; readonly price: number }): OrderStatus =>
+  ({ tone: "info", text: target ? `${PENDING_TEXT.canceling} · ${SIDE_LABEL[target.side]} ${won(target.price)}` : PENDING_TEXT.canceling });
+
+export const statusOfModifying = (from: number, to: number): OrderStatus =>
+  ({ tone: "info", text: `${PENDING_TEXT.modifying} · ${won(from)} → ${won(to)}` });
 
 export const isUnanswered = (error: unknown): boolean => !(error instanceof ApiRequestError) || error.code === "network" || error.code === "internal";
 

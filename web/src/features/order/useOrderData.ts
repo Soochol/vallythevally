@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useSyncExternalStore } from "react";
 import { useOrdersStatus } from "../../api/system";
 import type { TradingBalance } from "../../api/generated/TradingBalance";
 import type { TradingExecution } from "../../api/generated/TradingExecution";
@@ -7,7 +7,8 @@ import type { TradingOpenOrder } from "../../api/generated/TradingOpenOrder";
 import { marketSocket } from "../../stores/realtime";
 import { useKiwoomLinkStore } from "../../stores/kiwoomLink";
 import type { Capacity } from "./orderRules";
-import { groupOpenOrders, type PriceGroup } from "./orderRules";
+import { groupWithPending, type PriceGroup } from "./orderRules";
+import { pendingWrites } from "./pendingWrites";
 import { fetchBalance, fetchCommands, fetchExecutions, fetchOpenOrders, fetchOrderable } from "./orderApi";
 import { holdingOf } from "./holdingSummary";
 import { ORDER_QUERY_KEY } from "./useOrderWrites";
@@ -62,7 +63,10 @@ export function useOrderData(code: string, open: boolean, referencePrice: number
   const orderableEnabled = open && referencePrice !== null;
   const buyable = useQuery({ queryKey: [...ORDER_QUERY_KEY, "orderable", code, "buy"], queryFn: ({ signal }) => fetchOrderable(code, "buy", referencePrice!, signal), enabled: orderableEnabled, refetchInterval: POLL_MS * 3, staleTime: POLL_MS, retry: false });
   const orders = openOrders.data?.orders;
-  const groups = useMemo(() => groupOpenOrders(orders ?? [], code), [orders, code]);
+  const writes = useSyncExternalStore(pendingWrites.subscribe, pendingWrites.snapshot);
+  const fetchedAt = openOrders.dataUpdatedAt;
+  useEffect(() => { if (orders) pendingWrites.observe(code, { orders, at: fetchedAt }); }, [orders, fetchedAt, code]);
+  const groups = useMemo(() => groupWithPending(orders ?? NONE, writes, code), [orders, writes, code]);
   return {
     groups,
     blocked: commands.data?.blocked ?? false,

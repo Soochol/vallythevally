@@ -1,7 +1,7 @@
 import { expect, test } from "vitest";
 import { ApiRequestError } from "../../api/http";
 import type { OrderCommand } from "../../api/generated/OrderCommand";
-import { isUnanswered, statusOfCommand, statusOfFailure } from "./statusText";
+import { isUnanswered, statusOfCanceling, statusOfCommand, statusOfFailure, statusOfModifying, statusOfSending } from "./statusText";
 
 test("서버의 답을 읽지 못한 실패는 답을 못 받은 것으로 본다", () => {
   expect(isUnanswered(new ApiRequestError("network", "서버에 연결하지 못했습니다"))).toBe(true);
@@ -20,4 +20,11 @@ test("접수 문구는 수량과 가격을 단위 없이 가운뎃점으로 잇�
   expect(statusOfCommand(command).text).toBe("접수 · 매수 10 · 70,000원");
   expect(statusOfCommand({ ...command, price: null }).text).toBe("접수 · 매수 10");
   expect(statusOfCommand({ ...command, kind: "cancel", quantity: null, price: null }).text).toBe("접수 · 취소");
+});
+
+test("보내는 중·취소 중·정정 중 문구", () => {
+  expect(statusOfSending("buy", 10, 70_000).text).toBe("보내는 중 · 매수 10 · 70,000원");
+  expect(statusOfCanceling().text).toBe("취소 중");
+  expect(statusOfCanceling({ side: "sell", price: 70_100 }).text).toBe("취소 중 · 매도 70,100원");
+  expect(statusOfModifying(70_000, 70_100).text).toBe("정정 중 · 70,000원 → 70,100원");
 });
