@@ -1,5 +1,6 @@
 import type { Page } from "@playwright/test";
 import type { AccountStatus } from "../src/api/generated/AccountStatus";
+import { serveMarketRankings } from "./fixtures/market-data";
 import { cell, expect, test, withFirstChart, type Scenario } from "./harness";
 
 const SIGNED_OUT: AccountStatus = { state: "signed_out" };
@@ -159,6 +160,7 @@ test.describe("종목 보내기", () => {
   test("고른 연동 색의 차트에 종목이 열리고 주소가 작업 영역이 된다", async ({ page, scenario }) => {
     const ui = scenario.documents.uiState();
     scenario.documents.saveUiState({ ...ui, pageLink: "b", recentSymbols: ["028260"], revision: ui.revision + 1 });
+    serveMarketRankings(scenario);
     await page.goto("/market");
     await expect(page.getByRole("button", { name: "보낼 연동 색: B" })).toBeVisible();
     await page.getByRole("button", { name: "삼성물산", exact: true }).click();
@@ -172,6 +174,7 @@ test.describe("종목 보내기", () => {
   test("연동 색 고르기는 화면 설정에 남고, 고른 색의 차트가 없으면 활성 차트에 열린다", async ({ page, scenario }) => {
     const ui = scenario.documents.uiState();
     scenario.documents.saveUiState({ ...ui, recentSymbols: ["028260"], revision: ui.revision + 1 });
+    serveMarketRankings(scenario);
     await page.goto("/market");
     await page.getByRole("button", { name: /^보낼 연동 색/ }).click();
     await page.getByRole("menuitemradio", { name: /^C · 창 0개/ }).click();
