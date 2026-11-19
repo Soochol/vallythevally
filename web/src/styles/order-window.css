@@ -36,6 +36,8 @@
 .od-qty { display:flex; flex:none; align-items:center; gap:var(--s3); flex-wrap:wrap; padding:var(--s3) var(--s4); border-top:var(--size-1) solid var(--line); }
 .od-qty-label { color:var(--text-3); font-size:var(--fs-xs); line-height:var(--size-28); }
 .od-qty-input { width:var(--size-48); min-width:0; height:var(--size-28); padding:0 var(--s3); border:var(--size-1) solid var(--line-strong); border-radius:var(--r-m); background:transparent; color:var(--text); font-size:var(--fs-s); text-align:right; font-variant-numeric:tabular-nums; }
+.od-qty[data-mode=amount] { column-gap:var(--s2); }
+.od-qty[data-mode=amount] .od-qty-input { width:var(--size-84); padding:0 var(--s2); }
 .od-qty-input:focus { border-color:var(--accent); outline:0; }
 .od-presets { display:flex; gap:var(--s2); }
 .od-preset { height:var(--size-28); padding:0 var(--s2); border-radius:var(--r-s); background:var(--raised); color:var(--text-2); font-size:var(--fs-xs); }
