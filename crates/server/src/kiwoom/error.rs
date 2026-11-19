@@ -258,7 +258,6 @@ impl fmt::Display for Note {
     }
 }
 
-/// `[NNNN](RRRRRR:…)`의 괄호 안 여섯 자리. 숫자만 담고 뒤따르는 키움 문장은 버린다.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct VendorReason(u32);
 
@@ -465,7 +464,6 @@ pub fn rest_details(msg: &str) -> Vec<u16> {
     found
 }
 
-/// `[NNNN]` 바로 뒤에 `(` + 정확히 여섯 자리 ASCII 숫자 + `:` 또는 `)`가 올 때만 그 숫자를 읽는다.
 pub fn vendor_reason(msg: &str, detail: u16) -> Option<VendorReason> {
     let bytes = msg.as_bytes();
     let head = format!("[{detail:04}](");
