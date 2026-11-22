@@ -1,9 +1,9 @@
 //! 키움 WebSocket 세션(backend.md §5.1, §5.2). 토큰 하나에 세션 하나라서 서버 안에서도 세션은 언제나 하나다.
 
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::collections::{BTreeSet, HashMap};
 use std::time::Duration;
 
-use domain::{IndexCode, KstTime, Price, Symbol, TimeOfDay, Venue, Volume};
+use domain::{IndexCode, KstTime, Symbol, Volume};
 use futures::{Sink, SinkExt, Stream, StreamExt, future::BoxFuture};
 use tokio::sync::{broadcast, mpsc, watch};
 use tokio::time::{Instant, sleep_until, timeout};
@@ -13,128 +13,31 @@ use tokio_tungstenite::connect_async;
 use super::error::{Category, CodeKey, WsRejection, classify};
 use super::rest::{Access, KiwoomRest};
 pub use super::wire::{AccountEvent, AccountKind};
-use super::wire::{self, AfterHoursTotals, RealItem, RealType, Registrations, WsControl, WsFrame};
+use super::wire::{self, RealItem, RealType, Registrations, WsControl, WsFrame};
 use crate::clock::Clock;
+pub use crate::market_source::stream::StreamEvent;
+use crate::market_source::stream::{DayTotals, DesiredFeeds, MarketStream, RealTick, SeatRules, StreamKind};
 
-/// 0B `9081`. `_AL` 한 흐름이 KRX와 NXT 체결을 함께 준다(kiwoom.md 11.1, 11.2).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum Exchange {
-    Krx,
-    Nxt,
-}
+pub const KIWOOM_REALTIME_LIMIT: usize = 200;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum TradeSide {
-    Buy,
-    Sell,
-}
+pub struct KiwoomSeats;
 
-/// 실시간 체결 하나. 날짜는 아직 없다(`domain::resolve_trade_time`이 붙인다).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct RealTick {
-    pub symbol: Symbol,
-    pub hhmmss: TimeOfDay,
-    pub price: Price,
-    pub qty: Volume,
-    /// 지수(0J)와 `9081`이 없거나 모르는 값이면 None.
-    pub exchange: Option<Exchange>,
-    /// 프레임에 11·13이 없거나 읽지 못하면 None.
-    pub day: Option<DayTotals>,
-    pub strength_centi: Option<u64>,
-    pub side: Option<TradeSide>,
-}
+impl SeatRules for KiwoomSeats {
+    fn limit(&self) -> usize {
+        KIWOOM_REALTIME_LIMIT
+    }
 
-/// 체결 프레임에 같이 오는 그날 값(kiwoom.md §11.3, §11.5).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct DayTotals {
-    /// 11 전일대비. 부호가 곧 값이다.
-    pub change_centi: i64,
-    pub cumulative: Volume,
-}
+    fn takes_own_seat(&self, kind: StreamKind) -> bool {
+        RealType::from(kind).has_own_code()
+    }
 
-pub const BOOK_DEPTH: usize = 10;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct BookLevel {
-    pub price: Price,
-    pub qty: Volume,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct ExpectedTrade {
-    pub price: Price,
-    pub qty: Volume,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct BookSnapshot {
-    pub symbol: Symbol,
-    pub venue: Venue,
-    pub hhmmss: TimeOfDay,
-    pub asks: [Option<BookLevel>; BOOK_DEPTH],
-    pub bids: [Option<BookLevel>; BOOK_DEPTH],
-    pub total_ask_qty: Volume,
-    pub total_bid_qty: Volume,
-    pub expected: Option<ExpectedTrade>,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct RealProgramTrade {
-    pub symbol: Symbol,
-    pub hhmmss: TimeOfDay,
-    pub price: Option<Price>,
-    pub sell_qty: Volume,
-    pub sell_amount_million_won: u64,
-    pub buy_qty: Volume,
-    pub buy_amount_million_won: u64,
-    pub net_buy_qty: i64,
-    pub net_buy_qty_change: i64,
-    pub net_buy_amount_million_won: i64,
-    pub net_buy_amount_change_million_won: i64,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct BrokerEntry {
-    pub member_code: String,
-    pub member_name: String,
-    pub cumulative_qty: Volume,
-    pub change_qty: i64,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct BrokerSnapshot {
-    pub symbol: Symbol,
-    pub sells: Vec<BrokerEntry>,
-    pub buys: Vec<BrokerEntry>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum StreamEvent {
-    Tick { tick: RealTick, received_at: KstTime },
-    Book { book: Box<BookSnapshot>, received_at: KstTime },
-    Program { row: RealProgramTrade, received_at: KstTime },
-    Broker { snapshot: BrokerSnapshot, received_at: KstTime },
-    AfterHours { totals: AfterHoursTotals, received_at: KstTime },
-    /// 세션이 LOGIN을 마치고 원하는 집합을 모두 REG 했다.
-    Live { since: KstTime },
-    /// 세션이 끊겼다. 다음 Live까지는 체결이 빠졌을 수 있다.
-    Down { at: KstTime },
-    Idle,
-    Halted,
-}
-
-pub type DesiredFeeds = BTreeMap<Symbol, BTreeSet<RealType>>;
-
-pub fn trades_only(symbols: BTreeSet<Symbol>) -> DesiredFeeds {
-    symbols.into_iter().map(|symbol| (symbol, BTreeSet::from([RealType::of(symbol)]))).collect()
-}
-
-pub fn seats(desired: &DesiredFeeds) -> usize {
-    desired.values().map(|kinds| 1 + kinds.iter().filter(|kind| kind.has_own_code()).count()).sum()
+    fn companion(&self, kind: StreamKind) -> Option<StreamKind> {
+        RealType::from(kind).companion().map(StreamKind::from)
+    }
 }
 
 fn registrations(desired: &DesiredFeeds) -> Registrations {
-    desired.iter().flat_map(|(&symbol, kinds)| kinds.iter().map(move |&kind| (kind, symbol))).collect()
+    desired.iter().flat_map(|(&symbol, kinds)| kinds.iter().map(move |&kind| (RealType::from(kind), symbol))).collect()
 }
 
 #[derive(Clone)]
@@ -202,16 +105,22 @@ impl KiwoomStream {
     pub fn account_feed(&self) -> AccountFeed {
         self.account.clone()
     }
+}
 
-    pub fn watch_desired(&self) -> watch::Receiver<DesiredFeeds> {
+impl MarketStream for KiwoomStream {
+    fn seat_rules(&self) -> std::sync::Arc<dyn SeatRules> {
+        std::sync::Arc::new(KiwoomSeats)
+    }
+
+    fn watch_desired(&self) -> watch::Receiver<DesiredFeeds> {
         self.desired.subscribe()
     }
 
-    pub fn set_desired(&self, desired: DesiredFeeds) {
+    fn set_desired(&self, desired: DesiredFeeds) {
         let desired: DesiredFeeds = desired
             .into_iter()
             .filter_map(|(symbol, kinds)| {
-                let kinds: BTreeSet<RealType> = kinds.into_iter().filter(|kind| kind.serves(symbol)).collect();
+                let kinds: BTreeSet<StreamKind> = kinds.into_iter().filter(|kind| kind.serves(symbol)).collect();
                 (!kinds.is_empty()).then_some((symbol, kinds))
             })
             .collect();
@@ -849,7 +758,7 @@ pub(crate) mod tests {
     use std::sync::{Arc, Mutex, atomic::{AtomicUsize, Ordering}};
     use std::task::{Context, Poll};
 
-    use domain::{KstDate, StockCode};
+    use domain::{KstDate, StockCode, TimeOfDay, Venue};
     use futures::channel::mpsc::{UnboundedReceiver, UnboundedSender, unbounded};
     use serde_json::{Value, json};
 
@@ -858,6 +767,7 @@ pub(crate) mod tests {
     use crate::kiwoom::auth::KiwoomAuth;
     use crate::kiwoom::rest::testing::{FakeTransport, token};
     use crate::kiwoom::wire::TokenResponse;
+    use crate::market_source::stream::{Exchange, trades_only};
 
     const WAIT: Duration = Duration::from_secs(120);
     type Frames = UnboundedSender<Result<Message, WsError>>;
@@ -946,7 +856,7 @@ pub(crate) mod tests {
     }
 
     fn feeds(spec: &[(Symbol, &[RealType])]) -> DesiredFeeds {
-        spec.iter().map(|&(symbol, kinds)| (symbol, kinds.iter().copied().collect())).collect()
+        spec.iter().map(|&(symbol, kinds)| (symbol, kinds.iter().map(|&kind| StreamKind::from(kind)).collect())).collect()
     }
 
     fn book_frame(item: &str) -> Value {
@@ -1395,7 +1305,7 @@ pub(crate) mod tests {
     async fn full_limit_removes_before_registering() {
         let peer = Peer::ok();
         let stock = |n: u32| Symbol::Stock(StockCode::parse(&format!("{n:06}")).unwrap());
-        let both = |range: std::ops::RangeInclusive<u32>| -> DesiredFeeds { range.map(|n| (stock(n), [RealType::Trade, RealType::Book].into())).collect() };
+        let both = |range: std::ops::RangeInclusive<u32>| -> DesiredFeeds { range.map(|n| (stock(n), [StreamKind::Trades, StreamKind::Book(Venue::Combined)].into())).collect() };
         let (stream, mut events) = peer.start_feeds(both(1..=200));
         assert!(matches!(next(&mut events).await, StreamEvent::Live { .. }));
         stream.set_desired(both(2..=201));

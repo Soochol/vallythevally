@@ -37,7 +37,7 @@ pub struct Server {
     shutdown: Option<tokio::sync::oneshot::Sender<()>>,
     address: watch::Receiver<Option<SocketAddr>>,
     output: Captured,
-    pub events: tokio::sync::mpsc::Sender<server::kiwoom::stream::StreamEvent>,
+    pub events: tokio::sync::mpsc::Sender<server::market_source::stream::StreamEvent>,
 }
 
 impl Server {

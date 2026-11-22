@@ -23,8 +23,9 @@ use crate::bars::{BarError, BarService, Seed};
 use crate::clock::Clock;
 use crate::kiwoom::rest::Priority;
 use crate::market_source::SourceError;
-use crate::kiwoom::stream::{BookLevel, BookSnapshot, BrokerEntry, BrokerSnapshot, Exchange, KiwoomStream, RealProgramTrade, RealTick, StreamEvent, TradeSide};
-use crate::kiwoom::wire::{AfterHoursTotals, RealType};
+use crate::market_source::stream::{
+    AfterHoursTotals, BookLevel, BookSnapshot, BrokerEntry, BrokerSnapshot, Exchange, MarketStream, RealProgramTrade, RealTick, StreamEvent, StreamKind, TradeSide,
+};
 use crate::quotes;
 use crate::symbols::Directory;
 
@@ -219,16 +220,16 @@ struct FeedSub {
 
 impl FeedSub {
     fn holder(&self, conn: ConnId, sub: &SubId) -> Holder {
-        Holder::Feed { conn, sub: sub.clone(), kind: real_type(self.kind, self.venue) }
+        Holder::Feed { conn, sub: sub.clone(), kind: stream_kind(self.kind, self.venue) }
     }
 }
 
-fn real_type(kind: FeedKind, venue: Venue) -> RealType {
+fn stream_kind(kind: FeedKind, venue: Venue) -> StreamKind {
     match kind {
-        FeedKind::Trades => RealType::Trade,
-        FeedKind::Book => RealType::book(venue),
-        FeedKind::Program => RealType::Program,
-        FeedKind::Brokers => RealType::Broker,
+        FeedKind::Trades => StreamKind::Trades,
+        FeedKind::Book => StreamKind::Book(venue),
+        FeedKind::Program => StreamKind::Program,
+        FeedKind::Brokers => StreamKind::Brokers,
     }
 }
 
@@ -260,7 +261,7 @@ fn has_hole(levels: &[Option<BookLevel>]) -> bool {
 
 pub struct MarketHub {
     bars: Arc<BarService>,
-    stream: KiwoomStream,
+    stream: Arc<dyn MarketStream>,
     clock: Clock,
     tx: mpsc::UnboundedSender<HubInput>,
     manager: SubscriptionManager,
@@ -285,16 +286,17 @@ pub struct MarketHub {
 
 impl MarketHub {
     /// 허브 태스크를 띄운다. 키움 세션이 Live가 되기 전까지는 끊긴 상태로 본다.
-    pub fn spawn(bars: Arc<BarService>, stream: KiwoomStream, events: mpsc::Receiver<StreamEvent>, clock: Clock) -> HubHandle {
+    pub fn spawn(bars: Arc<BarService>, stream: Arc<dyn MarketStream>, events: mpsc::Receiver<StreamEvent>, clock: Clock) -> HubHandle {
         let (tx, rx) = mpsc::unbounded_channel();
         let now = clock.now();
+        let manager = SubscriptionManager::new(stream.seat_rules());
         let hub = MarketHub {
             directory: bars.directory_updates(),
             bars,
             stream,
             clock,
             tx: tx.clone(),
-            manager: SubscriptionManager::default(),
+            manager,
             rejected: BTreeSet::new(),
             broker_history: BTreeMap::new(),
             first_after_hours: FirstOfDay::default(),
@@ -605,7 +607,7 @@ impl MarketHub {
 
     fn replan(&mut self, now: KstTime) {
         let plan = self.manager.plan(now);
-        self.broker_history.retain(|symbol, _| plan.feeds.get(symbol).is_some_and(|kinds| kinds.contains(&RealType::Broker)));
+        self.broker_history.retain(|symbol, _| plan.feeds.get(symbol).is_some_and(|kinds| kinds.contains(&StreamKind::Brokers)));
         self.stream.set_desired(plan.feeds);
         let newly: Vec<Holder> = plan.rejected.difference(&self.rejected).cloned().collect();
         let recovered: Vec<Holder> = self.rejected.difference(&plan.rejected).cloned().collect();
@@ -1124,7 +1126,7 @@ fn start_aggregator(key: SeriesKey, seed: &Seed, now: KstTime) -> Aggregator {
     }
 }
 
-/// `_AL` 한 흐름을 거래소별 키로 나눈다(ADR 0007). `9081`이 없거나 모르는 값이면 통합에만 넣는다.
+/// 통합 한 흐름을 거래소별 키로 나눈다(ADR 0007). 체결 거래소를 모르면 통합에만 넣는다.
 fn accepts(feed: Feed, exchange: Option<Exchange>) -> bool {
     match feed {
         Feed::Index(_) | Feed::Stock(_, Venue::Combined) => true,
@@ -1293,11 +1295,12 @@ mod tests {
 
     use super::*;
     use crate::api::Bar;
-    use crate::market::subscriptions::REALTIME_LIMIT;
     use crate::clock::kst;
     use crate::config::Secret;
     use crate::kiwoom::api::ApiId;
-    use crate::kiwoom::stream::{DayTotals, trades_only};
+    use crate::kiwoom::api::kiwoom_stock_code;
+    use crate::kiwoom::stream::{KIWOOM_REALTIME_LIMIT as REALTIME_LIMIT, KiwoomSeats, KiwoomStream};
+    use crate::market_source::stream::{DayTotals, DesiredFeeds, SeatRules, trades_only};
     use crate::kiwoom::auth::KiwoomAuth;
     use crate::kiwoom::rest::KiwoomRest;
     use crate::kiwoom::rest::testing::{FakeTransport, ok, status, token};
@@ -1305,7 +1308,7 @@ mod tests {
     use crate::symbols::SymbolDirectory;
 
     const SAMSUNG: &str = "005930";
-    const NOT_ON_NXT: &str = "005935";
+    const NEXTRADE_EXCLUDED: &str = "005935";
     const UNLISTED: &str = "000020";
 
     fn at(h: u32, m: u32, s: u32) -> KstTime {
@@ -1333,7 +1336,7 @@ mod tests {
         day_volumes: Arc<Mutex<HashMap<String, u64>>>,
         hub: HubHandle,
         events: mpsc::Sender<StreamEvent>,
-        desired: watch::Receiver<crate::kiwoom::stream::DesiredFeeds>,
+        desired: watch::Receiver<DesiredFeeds>,
         bars: Arc<BarService>,
         symbols: Arc<SymbolDirectory>,
         chart: Arc<Mutex<Chart>>,
@@ -1361,7 +1364,7 @@ mod tests {
 
     fn listed_directory() -> Directory {
         let stock = |code: &str, nxt_enabled| SymbolInfo { symbol: Symbol::parse(code).unwrap(), name: code.into(), kind: SymbolKind::Common, market: Market::Kospi, nxt_enabled };
-        let mut listed = vec![stock(SAMSUNG, true), stock(NOT_ON_NXT, false)];
+        let mut listed = vec![stock(SAMSUNG, true), stock(NEXTRADE_EXCLUDED, false)];
         listed.extend((0..REALTIME_LIMIT).map(|i| stock(&listed_filler(i), false)));
         Directory::build(listed)
     }
@@ -1369,11 +1372,7 @@ mod tests {
     fn period_harness_without_directory(start: KstTime, chart: Chart, latency: Duration, period: Period) -> Harness {
         let chart = Arc::new(Mutex::new(chart));
         let script = chart.clone();
-        let day_volumes = Arc::new(Mutex::new(HashMap::from([
-            ("005930_AL".to_owned(), 1_000),
-            ("005930".to_owned(), 700),
-            ("005930_NX".to_owned(), 300),
-        ])));
+        let day_volumes = Arc::new(Mutex::new(volumes(1_000, 700, Some(300))));
         let volumes = day_volumes.clone();
         let fake = Arc::new(FakeTransport::new(latency, move |s| {
             if s.api_id == ApiId::Au10001 {
@@ -1433,7 +1432,7 @@ mod tests {
         let bars = Arc::new(BarService::new(rest, symbols.clone(), clock.clone()));
         let (stream, desired) = KiwoomStream::detached();
         let (events, rx) = mpsc::channel(64);
-        let hub = MarketHub::spawn(bars.clone(), stream, rx, clock.clone());
+        let hub = MarketHub::spawn(bars.clone(), Arc::new(stream), rx, clock.clone());
         Harness { day_volumes, hub, events, desired, bars, symbols, chart, fake, clock }
     }
 
@@ -1840,7 +1839,7 @@ mod tests {
         live(&h).await;
         let (conn, out) = connect(&h).await;
         h.hub.subscribe(conn, sub("x"), key(UNLISTED, Venue::Combined));
-        h.hub.subscribe(conn, sub("y"), key(NOT_ON_NXT, Venue::Nxt));
+        h.hub.subscribe(conn, sub("y"), key(NEXTRADE_EXCLUDED, Venue::Nxt));
         assert_eq!(
             take(&out).await,
             vec![subscribed("x", 0, None), subscribed("y", 0, None), sub_error("x", SubErrorCode::UnknownSymbol), sub_error("y", SubErrorCode::BadRequest)]
@@ -2759,6 +2758,20 @@ mod tests {
         msgs.into_iter().filter(|m| matches!(m, ServerMessage::Quotes { .. })).collect()
     }
 
+    fn samsung_code(venue: Venue) -> String {
+        kiwoom_stock_code(StockCode::parse(SAMSUNG).unwrap(), venue)
+    }
+
+    fn volumes(combined: u64, krx: u64, nxt: Option<u64>) -> HashMap<String, u64> {
+        let mut by_code = HashMap::from([(samsung_code(Venue::Combined), combined), (samsung_code(Venue::Krx), krx)]);
+        by_code.extend(nxt.map(|nxt| (samsung_code(Venue::Nxt), nxt)));
+        by_code
+    }
+
+    fn samsung_volume_request() -> String {
+        format!(r#"{{"stk_cd":"{}|{}|{}"}}"#, samsung_code(Venue::Combined), samsung_code(Venue::Krx), samsung_code(Venue::Nxt))
+    }
+
     fn day_volume_requests(h: &Harness) -> Vec<String> {
         h.fake.market_sent().into_iter().filter(|s| s.api_id == ApiId::Ka10095).map(|s| s.body).collect()
     }
@@ -2781,7 +2794,7 @@ mod tests {
         h.hub.watch(conn, vec![samsung().feed.symbol()], Venue::Krx);
         day_volume_asked(&h, 1).await;
         settle().await;
-        assert_eq!(day_volume_requests(&h), [r#"{"stk_cd":"005930_AL|005930|005930_NX"}"#], "통합·KRX·NXT 누적을 한 요청으로 묻는다");
+        assert_eq!(day_volume_requests(&h), [samsung_volume_request()], "통합·KRX·NXT 누적을 한 요청으로 묻는다");
         h.events.send(fill(&h, SAMSUNG, (9, 0, 51), 112, Some(Exchange::Krx), 5, (12, 1_005))).await.unwrap();
         assert_eq!(quote_messages(take(&out).await), vec![quotes_msg(api::Venue::Krx, vec![venue_quote(SAMSUNG, api::Venue::Krx, 112.0, 12.0, 705, at(9, 0, 51))])], "거래량은 통합 1_005가 아니라 KRX 누적이다");
         h.events.send(fill(&h, SAMSUNG, (9, 0, 52), 90, Some(Exchange::Nxt), 4, (-10, 1_009))).await.unwrap();
@@ -2810,10 +2823,10 @@ mod tests {
         let h = std_harness();
         let (conn, out) = connect(&h).await;
         live(&h).await;
-        h.hub.watch(conn, vec![Symbol::parse(NOT_ON_NXT).unwrap()], Venue::Nxt);
+        h.hub.watch(conn, vec![Symbol::parse(NEXTRADE_EXCLUDED).unwrap()], Venue::Nxt);
         settle().await;
-        h.events.send(fill(&h, NOT_ON_NXT, (9, 0, 51), 112, Some(Exchange::Krx), 5, (12, 2_005))).await.unwrap();
-        assert_eq!(quote_messages(take(&out).await), vec![quotes_msg(api::Venue::Nxt, vec![venue_quote(NOT_ON_NXT, api::Venue::Combined, 112.0, 12.0, 2_005, at(9, 0, 51))])], "요청은 NXT, 값은 통합이다");
+        h.events.send(fill(&h, NEXTRADE_EXCLUDED, (9, 0, 51), 112, Some(Exchange::Krx), 5, (12, 2_005))).await.unwrap();
+        assert_eq!(quote_messages(take(&out).await), vec![quotes_msg(api::Venue::Nxt, vec![venue_quote(NEXTRADE_EXCLUDED, api::Venue::Combined, 112.0, 12.0, 2_005, at(9, 0, 51))])], "요청은 NXT, 값은 통합이다");
         assert_eq!(day_volume_requests(&h), Vec::<String>::new(), "통합 누적을 그대로 쓰므로 거래소별 거래량을 묻지 않는다");
     }
 
@@ -2822,11 +2835,11 @@ mod tests {
         let h = std_harness();
         let (conn, out) = connect(&h).await;
         live(&h).await;
-        h.hub.watch(conn, vec![Symbol::parse(NOT_ON_NXT).unwrap()], Venue::Krx);
+        h.hub.watch(conn, vec![Symbol::parse(NEXTRADE_EXCLUDED).unwrap()], Venue::Krx);
         settle().await;
-        h.events.send(fill(&h, NOT_ON_NXT, (9, 0, 51), 112, Some(Exchange::Krx), 5, (12, 2_005))).await.unwrap();
-        h.events.send(fill(&h, NOT_ON_NXT, (9, 0, 52), 113, None, 5, (13, 2_010))).await.unwrap();
-        assert_eq!(quote_messages(take(&out).await), vec![quotes_msg(api::Venue::Krx, vec![venue_quote(NOT_ON_NXT, api::Venue::Krx, 112.0, 12.0, 2_005, at(9, 0, 51))])], "거래소를 모르는 체결은 움직이지 않는다");
+        h.events.send(fill(&h, NEXTRADE_EXCLUDED, (9, 0, 51), 112, Some(Exchange::Krx), 5, (12, 2_005))).await.unwrap();
+        h.events.send(fill(&h, NEXTRADE_EXCLUDED, (9, 0, 52), 113, None, 5, (13, 2_010))).await.unwrap();
+        assert_eq!(quote_messages(take(&out).await), vec![quotes_msg(api::Venue::Krx, vec![venue_quote(NEXTRADE_EXCLUDED, api::Venue::Krx, 112.0, 12.0, 2_005, at(9, 0, 51))])], "거래소를 모르는 체결은 움직이지 않는다");
     }
 
     #[tokio::test(start_paused = true)]
@@ -2844,7 +2857,7 @@ mod tests {
         tokio::time::sleep(Duration::from_secs(2)).await;
         let registered = h.desired.borrow().clone();
         assert!(!registered.is_empty());
-        *h.day_volumes.lock().unwrap() = HashMap::from([("005930_AL".to_owned(), 1_006), ("005930".to_owned(), 706), ("005930_NX".to_owned(), 300)]);
+        *h.day_volumes.lock().unwrap() = volumes(1_006, 706, Some(300));
         h.hub.watch(conn, list, Venue::Krx);
         settle().await;
         assert_eq!(quote_messages(out.take(true).messages), vec![], "바꾸기 전 거래소로 만든 대기 중 시세는 나가지 않는다");
@@ -2920,12 +2933,12 @@ mod tests {
         let h = std_harness();
         let (conn, out) = connect(&h).await;
         live(&h).await;
-        *h.day_volumes.lock().unwrap() = HashMap::from([("005930_AL".to_owned(), 1_000), ("005930".to_owned(), 700), ("005930_NX".to_owned(), 200)]);
+        *h.day_volumes.lock().unwrap() = volumes(1_000, 700, Some(200));
         h.hub.watch(conn, vec![samsung().feed.symbol()], Venue::Krx);
         settle().await;
         h.events.send(fill(&h, SAMSUNG, (9, 0, 51), 112, Some(Exchange::Krx), 5, (12, 1_005))).await.unwrap();
         assert_eq!(quote_messages(take(&out).await), vec![]);
-        *h.day_volumes.lock().unwrap() = HashMap::from([("005930_AL".to_owned(), 1_005), ("005930".to_owned(), 705), ("005930_NX".to_owned(), 300)]);
+        *h.day_volumes.lock().unwrap() = volumes(1_005, 705, Some(300));
         tokio::time::sleep(Duration::from_secs(6)).await;
         h.events.send(fill(&h, SAMSUNG, (9, 0, 58), 113, Some(Exchange::Krx), 1, (13, 1_006))).await.unwrap();
         assert_eq!(quote_messages(take(&out).await), vec![quotes_msg(api::Venue::Krx, vec![venue_quote(SAMSUNG, api::Venue::Krx, 113.0, 13.0, 706, at(9, 0, 58))])], "다시 받은 값이 맞으면 그때부터 낸다");
@@ -2936,7 +2949,7 @@ mod tests {
         let h = std_harness();
         let (conn, out) = connect(&h).await;
         live(&h).await;
-        *h.day_volumes.lock().unwrap() = HashMap::from([("005930_AL".to_owned(), 1_000), ("005930".to_owned(), 1_000)]);
+        *h.day_volumes.lock().unwrap() = volumes(1_000, 1_000, None);
         h.hub.watch(conn, vec![samsung().feed.symbol()], Venue::Krx);
         day_volume_asked(&h, 1).await;
         settle().await;
@@ -2949,7 +2962,7 @@ mod tests {
         let h = std_harness();
         let (conn, out) = connect(&h).await;
         live(&h).await;
-        *h.day_volumes.lock().unwrap() = HashMap::from([("005930_AL".to_owned(), 1_000), ("005930".to_owned(), 900)]);
+        *h.day_volumes.lock().unwrap() = volumes(1_000, 900, None);
         h.hub.watch(conn, vec![samsung().feed.symbol()], Venue::Krx);
         day_volume_asked(&h, 1).await;
         settle().await;
@@ -2969,7 +2982,7 @@ mod tests {
         assert_eq!(quote_messages(take(&out).await).len(), 1);
         h.events.send(fill(&h, SAMSUNG, (9, 0, 52), 113, Some(Exchange::Krx), 5, (13, 1_030))).await.unwrap();
         assert_eq!(quote_messages(take(&out).await), vec![], "1_005 다음이 1_030이면 사이 체결이 빠졌다");
-        *h.day_volumes.lock().unwrap() = HashMap::from([("005930_AL".to_owned(), 1_031), ("005930".to_owned(), 720), ("005930_NX".to_owned(), 311)]);
+        *h.day_volumes.lock().unwrap() = volumes(1_031, 720, Some(311));
         tokio::time::sleep(Duration::from_secs(6)).await;
         assert_eq!(day_volume_requests(&h).len(), 2, "다시 묻는다");
         h.events.send(fill(&h, SAMSUNG, (9, 0, 58), 114, Some(Exchange::Krx), 9, (14, 1_040))).await.unwrap();
@@ -2998,7 +3011,7 @@ mod tests {
         let h = std_harness();
         let (conn, out) = connect(&h).await;
         live(&h).await;
-        h.hub.subscribe(conn, sub("a"), key(NOT_ON_NXT, Venue::Combined));
+        h.hub.subscribe(conn, sub("a"), key(NEXTRADE_EXCLUDED, Venue::Combined));
         let mut rows = fillers(REALTIME_LIMIT - 1);
         rows.push(samsung().feed.symbol());
         h.hub.watch(conn, rows, Venue::Krx);
@@ -3007,7 +3020,7 @@ mod tests {
         assert_eq!(day_volume_requests(&h), Vec::<String>::new(), "실시간 자리를 받지 못한 줄은 거래소별 거래량을 묻지 않는다");
         h.hub.unsubscribe(conn, sub("a"));
         tokio::time::sleep(Duration::from_secs(3)).await;
-        assert_eq!(day_volume_requests(&h), [r#"{"stk_cd":"005930_AL|005930|005930_NX"}"#], "자리가 나면 그때 묻는다");
+        assert_eq!(day_volume_requests(&h), [samsung_volume_request()], "자리가 나면 그때 묻는다");
     }
 
     fn samsung_symbol() -> Symbol {
@@ -3024,14 +3037,14 @@ mod tests {
     }
 
     fn book_event(h: &Harness, ask: u64, qty: u64) -> StreamEvent {
-        let mut asks = [None; crate::kiwoom::stream::BOOK_DEPTH];
+        let mut asks = [None; crate::market_source::stream::BOOK_DEPTH];
         asks[0] = Some(BookLevel { price: won(ask), qty: Volume(qty) });
         let book = BookSnapshot {
             symbol: samsung_symbol(),
             venue: Venue::Combined,
             hhmmss: TimeOfDay::hms(9, 0, 50).unwrap(),
             asks,
-            bids: [None; crate::kiwoom::stream::BOOK_DEPTH],
+            bids: [None; crate::market_source::stream::BOOK_DEPTH],
             total_ask_qty: Volume(qty),
             total_bid_qty: Volume(0),
             expected: None,
@@ -3132,10 +3145,10 @@ mod tests {
         (logs, tracing::subscriber::set_default(subscriber))
     }
 
-    fn book_with(h: &Harness, asks: [Option<BookLevel>; crate::kiwoom::stream::BOOK_DEPTH]) -> StreamEvent {
+    fn book_with(h: &Harness, asks: [Option<BookLevel>; crate::market_source::stream::BOOK_DEPTH]) -> StreamEvent {
         let StreamEvent::Book { mut book, received_at } = book_event(h, 101, 10) else { unreachable!() };
         book.asks = asks;
-        book.bids = [Some(BookLevel { price: won(100), qty: Volume(5) }); crate::kiwoom::stream::BOOK_DEPTH];
+        book.bids = [Some(BookLevel { price: won(100), qty: Volume(5) }); crate::market_source::stream::BOOK_DEPTH];
         StreamEvent::Book { book, received_at }
     }
 
@@ -3145,12 +3158,12 @@ mod tests {
         let h = std_harness();
         live(&h).await;
         let level = |ask: u64| Some(BookLevel { price: won(ask), qty: Volume(5) });
-        let mut hole = [None; crate::kiwoom::stream::BOOK_DEPTH];
+        let mut hole = [None; crate::market_source::stream::BOOK_DEPTH];
         hole[0] = level(101);
         hole[2] = level(103);
         h.events.send(book_with(&h, hole)).await.unwrap();
         h.events.send(book_with(&h, [level(101), level(102), level(103), None, None, None, None, None, None, None])).await.unwrap();
-        h.events.send(book_with(&h, [level(101); crate::kiwoom::stream::BOOK_DEPTH])).await.unwrap();
+        h.events.send(book_with(&h, [level(101); crate::market_source::stream::BOOK_DEPTH])).await.unwrap();
         settle().await;
         assert!(!logs.text().contains("0D 프레임 카운터"), "1분이 지나기 전에는 줄이 없다");
         tokio::time::sleep(Duration::from_secs(60)).await;
@@ -3170,7 +3183,7 @@ mod tests {
         let h = std_harness();
         live(&h).await;
         let full = Some(BookLevel { price: won(101), qty: Volume(5) });
-        h.events.send(book_with(&h, [full; crate::kiwoom::stream::BOOK_DEPTH])).await.unwrap();
+        h.events.send(book_with(&h, [full; crate::market_source::stream::BOOK_DEPTH])).await.unwrap();
         settle().await;
         tokio::time::sleep(Duration::from_secs(60)).await;
         settle().await;
@@ -3185,7 +3198,7 @@ mod tests {
         StreamEvent::Book { book, received_at }
     }
 
-    fn desired_kinds(h: &Harness, symbol: Symbol) -> BTreeSet<RealType> {
+    fn desired_kinds(h: &Harness, symbol: Symbol) -> BTreeSet<StreamKind> {
         h.desired.borrow().get(&symbol).cloned().unwrap_or_default()
     }
 
@@ -3196,8 +3209,8 @@ mod tests {
         let (conn, _out) = connect(&h).await;
         subscribe_feed(&h, conn, "k", FeedKind::Book, Venue::Krx);
         settle().await;
-        assert_eq!(desired_kinds(&h, samsung_symbol()), BTreeSet::from([RealType::Trade, RealType::BookKrx, RealType::AfterHours]));
-        assert_eq!(crate::kiwoom::stream::seats(&h.desired.borrow()), 2);
+        assert_eq!(desired_kinds(&h, samsung_symbol()), BTreeSet::from([StreamKind::Trades, StreamKind::Book(Venue::Krx), StreamKind::AfterHours]));
+        assert_eq!(KiwoomSeats.seats(&h.desired.borrow()), 2);
     }
 
     #[tokio::test(start_paused = true)]
@@ -3205,12 +3218,12 @@ mod tests {
         let h = std_harness();
         live(&h).await;
         let (conn, _out) = connect(&h).await;
-        let off_nxt = Symbol::parse(NOT_ON_NXT).unwrap();
+        let off_nxt = Symbol::parse(NEXTRADE_EXCLUDED).unwrap();
         h.hub.subscribe_feed(conn, sub("k"), off_nxt, FeedKind::Book, Venue::Krx);
         h.hub.subscribe_feed(conn, sub("n"), off_nxt, FeedKind::Book, Venue::Nxt);
         settle().await;
-        assert_eq!(desired_kinds(&h, off_nxt), BTreeSet::from([RealType::Trade, RealType::Book, RealType::AfterHours]));
-        assert_eq!(crate::kiwoom::stream::seats(&h.desired.borrow()), 1);
+        assert_eq!(desired_kinds(&h, off_nxt), BTreeSet::from([StreamKind::Trades, StreamKind::Book(Venue::Combined), StreamKind::AfterHours]));
+        assert_eq!(KiwoomSeats.seats(&h.desired.borrow()), 1);
     }
 
     #[tokio::test(start_paused = true)]
@@ -3222,7 +3235,7 @@ mod tests {
         subscribe_feed(&h, conn, "krx", FeedKind::Book, Venue::Krx);
         subscribe_feed(&h, conn, "nxt", FeedKind::Book, Venue::Nxt);
         take(&out).await;
-        assert_eq!(desired_kinds(&h, samsung_symbol()), BTreeSet::from([RealType::Trade, RealType::Book, RealType::BookKrx, RealType::BookNxt, RealType::AfterHours]));
+        assert_eq!(desired_kinds(&h, samsung_symbol()), BTreeSet::from([StreamKind::Trades, StreamKind::Book(Venue::Combined), StreamKind::Book(Venue::Krx), StreamKind::Book(Venue::Nxt), StreamKind::AfterHours]));
         let fed = |msgs: Vec<ServerMessage>| -> Vec<String> { msgs.into_iter().filter_map(|m| if let ServerMessage::FeedBook { sub, .. } = m { Some(sub) } else { None }).collect() };
         h.events.send(book_event_on(&h, Venue::Nxt, 101, 10)).await.unwrap();
         assert_eq!(fed(take(&out).await), ["nxt"]);
@@ -3242,9 +3255,9 @@ mod tests {
         settle().await;
         h.hub.unsubscribe(conn, sub("nxt"));
         tokio::time::sleep(Duration::from_secs(29)).await;
-        assert!(desired_kinds(&h, samsung_symbol()).contains(&RealType::BookNxt), "유예 안에는 거래소 코드 0D를 유지한다");
+        assert!(desired_kinds(&h, samsung_symbol()).contains(&StreamKind::Book(Venue::Nxt)), "유예 안에는 거래소 코드 0D를 유지한다");
         tokio::time::sleep(Duration::from_secs(2)).await;
-        assert_eq!(desired_kinds(&h, samsung_symbol()), BTreeSet::from([RealType::Trade, RealType::Book, RealType::AfterHours]));
+        assert_eq!(desired_kinds(&h, samsung_symbol()), BTreeSet::from([StreamKind::Trades, StreamKind::Book(Venue::Combined), StreamKind::AfterHours]));
     }
 
     #[tokio::test(start_paused = true)]
@@ -3258,7 +3271,7 @@ mod tests {
         tokio::time::sleep(Duration::from_secs(10)).await;
         subscribe_feed(&h, conn, "nxt2", FeedKind::Book, Venue::Nxt);
         tokio::time::sleep(Duration::from_secs(60)).await;
-        assert!(desired_kinds(&h, samsung_symbol()).contains(&RealType::BookNxt));
+        assert!(desired_kinds(&h, samsung_symbol()).contains(&StreamKind::Book(Venue::Nxt)));
     }
 
     fn std_harness_before_the_directory() -> Harness {
@@ -3272,12 +3285,12 @@ mod tests {
         let (conn, out) = connect(&h).await;
         subscribe_feed(&h, conn, "n", FeedKind::Book, Venue::Nxt);
         settle().await;
-        assert_eq!(desired_kinds(&h, samsung_symbol()), BTreeSet::from([RealType::Trade, RealType::Book, RealType::AfterHours]), "종목 정보가 없는 동안 NXT는 통합으로 받는다");
+        assert_eq!(desired_kinds(&h, samsung_symbol()), BTreeSet::from([StreamKind::Trades, StreamKind::Book(Venue::Combined), StreamKind::AfterHours]), "종목 정보가 없는 동안 NXT는 통합으로 받는다");
         h.symbols.replace(listed_directory());
         tokio::time::sleep(Duration::from_secs(2)).await;
-        assert!(desired_kinds(&h, samsung_symbol()).contains(&RealType::BookNxt));
+        assert!(desired_kinds(&h, samsung_symbol()).contains(&StreamKind::Book(Venue::Nxt)));
         tokio::time::sleep(Duration::from_secs(31)).await;
-        assert_eq!(desired_kinds(&h, samsung_symbol()), BTreeSet::from([RealType::Trade, RealType::BookNxt, RealType::AfterHours]), "통합 0D는 유예 뒤에 놓는다");
+        assert_eq!(desired_kinds(&h, samsung_symbol()), BTreeSet::from([StreamKind::Trades, StreamKind::Book(Venue::Nxt), StreamKind::AfterHours]), "통합 0D는 유예 뒤에 놓는다");
         out.take(true);
         h.events.send(book_event_on(&h, Venue::Nxt, 101, 10)).await.unwrap();
         let fed: Vec<String> = take(&out).await.into_iter().filter_map(|m| if let ServerMessage::FeedBook { sub, .. } = m { Some(sub) } else { None }).collect();
@@ -3289,14 +3302,14 @@ mod tests {
         let h = std_harness_before_the_directory();
         live(&h).await;
         let (conn, _out) = connect(&h).await;
-        let off_nxt = Symbol::parse(NOT_ON_NXT).unwrap();
+        let off_nxt = Symbol::parse(NEXTRADE_EXCLUDED).unwrap();
         h.hub.subscribe_feed(conn, sub("k"), off_nxt, FeedKind::Book, Venue::Krx);
         settle().await;
-        assert_eq!(desired_kinds(&h, off_nxt), BTreeSet::from([RealType::Trade, RealType::BookKrx, RealType::AfterHours]));
+        assert_eq!(desired_kinds(&h, off_nxt), BTreeSet::from([StreamKind::Trades, StreamKind::Book(Venue::Krx), StreamKind::AfterHours]));
         h.symbols.replace(listed_directory());
         tokio::time::sleep(Duration::from_secs(33)).await;
-        assert_eq!(desired_kinds(&h, off_nxt), BTreeSet::from([RealType::Trade, RealType::Book, RealType::AfterHours]));
-        assert_eq!(crate::kiwoom::stream::seats(&h.desired.borrow()), 1);
+        assert_eq!(desired_kinds(&h, off_nxt), BTreeSet::from([StreamKind::Trades, StreamKind::Book(Venue::Combined), StreamKind::AfterHours]));
+        assert_eq!(KiwoomSeats.seats(&h.desired.borrow()), 1);
     }
 
     #[tokio::test(start_paused = true)]
@@ -3307,7 +3320,7 @@ mod tests {
         for i in 0..REALTIME_LIMIT - 1 {
             h.hub.subscribe_feed(conn, sub(&format!("f{i}")), Symbol::parse(&listed_filler(i)).unwrap(), FeedKind::Trades, Venue::Krx);
         }
-        let off_nxt = Symbol::parse(NOT_ON_NXT).unwrap();
+        let off_nxt = Symbol::parse(NEXTRADE_EXCLUDED).unwrap();
         h.hub.subscribe_feed(conn, sub("k"), off_nxt, FeedKind::Book, Venue::Krx);
         settle().await;
         assert!(out.take(true).messages.contains(&sub_error("k", SubErrorCode::RealtimeLimit)));
@@ -3328,13 +3341,13 @@ mod tests {
         }
         subscribe_feed(&h, conn, "n", FeedKind::Book, Venue::Nxt);
         settle().await;
-        assert_eq!(crate::kiwoom::stream::seats(&h.desired.borrow()), REALTIME_LIMIT);
-        assert!(desired_kinds(&h, samsung_symbol()).contains(&RealType::Book));
+        assert_eq!(KiwoomSeats.seats(&h.desired.borrow()), REALTIME_LIMIT);
+        assert!(desired_kinds(&h, samsung_symbol()).contains(&StreamKind::Book(Venue::Combined)));
         out.take(true);
         h.symbols.replace(listed_directory());
         tokio::time::sleep(Duration::from_secs(2)).await;
         let msgs = out.take(true).messages;
-        assert!(desired_kinds(&h, samsung_symbol()).contains(&RealType::Book), "옛 통합 0D는 30초 유예 뒤 REMOVE: desired={:?} msgs={msgs:?}", desired_kinds(&h, samsung_symbol()));
+        assert!(desired_kinds(&h, samsung_symbol()).contains(&StreamKind::Book(Venue::Combined)), "옛 통합 0D는 30초 유예 뒤 REMOVE: desired={:?} msgs={msgs:?}", desired_kinds(&h, samsung_symbol()));
     }
 
     #[tokio::test(start_paused = true)]
@@ -3353,13 +3366,13 @@ mod tests {
         let msgs = out.take(true).messages;
         assert!(msgs.contains(&sub_error("nxt", SubErrorCode::RealtimeLimit)), "{msgs:?}");
         assert!(!msgs.contains(&feed_subscribed("nxt", FeedKind::Book)));
-        assert_eq!(crate::kiwoom::stream::seats(&h.desired.borrow()), REALTIME_LIMIT);
+        assert_eq!(KiwoomSeats.seats(&h.desired.borrow()), REALTIME_LIMIT);
         h.hub.unsubscribe(conn, sub("f0"));
         tokio::time::sleep(Duration::from_secs(2)).await;
         let msgs = out.take(true).messages;
         assert!(msgs.contains(&feed_subscribed("nxt", FeedKind::Book)), "유예 중인 종목의 자리를 받아 같은 sub로 다시 알린다: {msgs:?}");
-        assert!(desired_kinds(&h, samsung_symbol()).contains(&RealType::BookNxt));
-        assert_eq!(crate::kiwoom::stream::seats(&h.desired.borrow()), REALTIME_LIMIT);
+        assert!(desired_kinds(&h, samsung_symbol()).contains(&StreamKind::Book(Venue::Nxt)));
+        assert_eq!(KiwoomSeats.seats(&h.desired.borrow()), REALTIME_LIMIT);
     }
 
     #[tokio::test(start_paused = true)]
@@ -3542,11 +3555,11 @@ mod tests {
         let (conn, _out) = connect(&h).await;
         subscribe_feed(&h, conn, "b", FeedKind::Book, Venue::Combined);
         settle().await;
-        let want = |kinds: &[RealType]| h.desired.borrow().get(&samsung_symbol()).cloned().unwrap_or_default() == kinds.iter().copied().collect::<BTreeSet<_>>();
-        assert!(want(&[RealType::Trade, RealType::Book, RealType::AfterHours]));
+        let want = |kinds: &[StreamKind]| h.desired.borrow().get(&samsung_symbol()).cloned().unwrap_or_default() == kinds.iter().copied().collect::<BTreeSet<_>>();
+        assert!(want(&[StreamKind::Trades, StreamKind::Book(Venue::Combined), StreamKind::AfterHours]));
         h.hub.unsubscribe(conn, sub("b"));
         tokio::time::sleep(Duration::from_secs(29)).await;
-        assert!(want(&[RealType::Trade, RealType::Book, RealType::AfterHours]), "마지막 호가 창을 닫아도 30초 동안 0D와 0E를 유지한다");
+        assert!(want(&[StreamKind::Trades, StreamKind::Book(Venue::Combined), StreamKind::AfterHours]), "마지막 호가 창을 닫아도 30초 동안 0D와 0E를 유지한다");
         tokio::time::sleep(Duration::from_secs(2)).await;
         assert!(want(&[]), "유예가 지나면 종목째 빠진다");
     }
@@ -3559,10 +3572,10 @@ mod tests {
         subscribe_feed(&h, conn, "first", FeedKind::Book, Venue::Combined);
         subscribe_feed(&h, conn, "second", FeedKind::Book, Venue::Combined);
         take(&out).await;
-        let want = |kinds: &[RealType]| h.desired.borrow().get(&samsung_symbol()).cloned().unwrap_or_default() == kinds.iter().copied().collect::<BTreeSet<_>>();
+        let want = |kinds: &[StreamKind]| h.desired.borrow().get(&samsung_symbol()).cloned().unwrap_or_default() == kinds.iter().copied().collect::<BTreeSet<_>>();
         h.hub.unsubscribe(conn, sub("first"));
         tokio::time::sleep(Duration::from_secs(60)).await;
-        assert!(want(&[RealType::Trade, RealType::Book, RealType::AfterHours]), "남은 창이 있으면 유예가 지나도 호가 종류가 등록 목록에 남는다");
+        assert!(want(&[StreamKind::Trades, StreamKind::Book(Venue::Combined), StreamKind::AfterHours]), "남은 창이 있으면 유예가 지나도 호가 종류가 등록 목록에 남는다");
         h.events.send(book_event(&h, 101, 10)).await.unwrap();
         let msgs = take(&out).await;
         let [ServerMessage::FeedBook { sub: fed, .. }] = msgs.as_slice() else { panic!("{msgs:?}") };

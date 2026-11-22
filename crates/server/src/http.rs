@@ -37,7 +37,8 @@ pub struct AppState {
     pub link: Link,
     pub keys: Arc<crate::kiwoom::keys::KeyRing>,
     pub system: crate::system_routes::SystemState,
-    pub registered: tokio::sync::watch::Receiver<crate::kiwoom::stream::DesiredFeeds>,
+    pub registered: tokio::sync::watch::Receiver<crate::market_source::stream::DesiredFeeds>,
+    pub seat_rules: Arc<dyn crate::market_source::stream::SeatRules>,
     pub accounts: Arc<crate::trading::Accounts>,
     pub rankings: crate::rankings::RankingCache,
     pub market_overview: crate::market_overview::MarketOverview,
@@ -522,7 +523,8 @@ mod tests {
     use crate::kiwoom::auth::KiwoomAuth;
     use crate::kiwoom::rest::KiwoomRest;
     use crate::kiwoom::rest::testing::{FakeTransport, ok, status, token};
-    use crate::kiwoom::stream::{KiwoomStream, StreamEvent};
+    use crate::kiwoom::stream::KiwoomStream;
+    use crate::market_source::stream::StreamEvent;
     use crate::symbols::Directory;
     use domain::{KstDate, Market, SymbolInfo, SymbolKind};
 

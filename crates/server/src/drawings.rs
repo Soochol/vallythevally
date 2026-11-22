@@ -209,7 +209,8 @@ mod tests {
     use crate::kiwoom::auth::KiwoomAuth;
     use crate::kiwoom::rest::KiwoomRest;
     use crate::kiwoom::rest::testing::FakeTransport;
-    use crate::kiwoom::stream::{KiwoomStream, StreamEvent};
+    use crate::kiwoom::stream::KiwoomStream;
+    use crate::market_source::stream::StreamEvent;
     use crate::symbols::SymbolDirectory;
     use crate::userdata;
 

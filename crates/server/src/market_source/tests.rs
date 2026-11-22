@@ -106,7 +106,7 @@ impl MarketSource for StubSource {
 struct Fixture {
     app: Router,
     kiwoom: Arc<FakeTransport>,
-    _events: tokio::sync::mpsc::Sender<crate::kiwoom::stream::StreamEvent>,
+    _events: tokio::sync::mpsc::Sender<crate::market_source::stream::StreamEvent>,
     _dir: tempfile::TempDir,
 }
 

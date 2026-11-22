@@ -2,7 +2,7 @@ use std::collections::{BTreeSet, HashMap};
 
 use domain::{KstTime, StockCode};
 
-use crate::kiwoom::stream::Exchange;
+use crate::market_source::stream::Exchange;
 
 pub const RETRY_SECS: i64 = 5;
 const MAX_RETRY_SECS: i64 = 60;
