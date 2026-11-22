@@ -9,6 +9,7 @@ tab="$(printf '\t')"
 install_verdict="$unit_dir/.vally-collector-install-verdict"
 lock_file="$unit_dir/.vally-collector-deploy.lock"
 lock_wait_seconds="${VALLY_COLLECTOR_LOCK_SECONDS:-120}"
+VALLY_COLLECTOR_BIN="$bin_dir/collector" "$here/collector-restart" --validate || exit 2
 if [ ! -x "$built" ]; then
     echo "vally-deploy collector-install: $built가 없습니다. deploy/collector-build를 먼저 돌리세요" >&2
     exit 1
