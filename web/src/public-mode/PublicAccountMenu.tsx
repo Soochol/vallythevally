@@ -14,6 +14,7 @@ export function PublicAccountMenu() {
   const command = useCommand();
   const [deleting, setDeleting] = useState(false);
   const [phrase, setPhrase] = useState("");
+  const [clearBrowserKeys, setClearBrowserKeys] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const deleteButton = useReturnFocus<HTMLButtonElement>(deleting);
 
@@ -23,7 +24,7 @@ export function PublicAccountMenu() {
     setDeleteError(null);
     await command.run(async () => {
       try {
-        await deletePublicAccount();
+        await deletePublicAccount({ clearBrowserKeys });
       } catch (e) {
         setDeleteError(deleteFailureText(e instanceof ApiRequestError ? e : null));
         throw e;
@@ -50,11 +51,15 @@ export function PublicAccountMenu() {
             <span className="text-text-2">확인하려면 “{DELETE_PHRASE}”을 입력하세요</span>
             <input autoFocus className="ui-field" value={phrase} autoComplete="off" spellCheck={false} onChange={(e) => setPhrase(e.target.value)} />
           </label>
+          <label className="flex items-center gap-2 text-m">
+            <input type="checkbox" checked={clearBrowserKeys} onChange={(e) => setClearBrowserKeys(e.target.checked)} />
+            <span>이 브라우저의 키도 지우기</span>
+          </label>
           <div className="flex flex-wrap gap-2">
             <button type="button" className="tb-btn h-9 bg-[color-mix(in_srgb,var(--danger)_16%,transparent)] px-3 font-semibold text-danger disabled:opacity-50" disabled={phrase.trim() !== DELETE_PHRASE || command.busy} onClick={() => void remove()}>
               계정 삭제 실행
             </button>
-            <button type="button" className="tb-btn h-9 px-3" disabled={command.busy} onClick={() => { setDeleting(false); setPhrase(""); setDeleteError(null); }}>취소</button>
+            <button type="button" className="tb-btn h-9 px-3" disabled={command.busy} onClick={() => { setDeleting(false); setPhrase(""); setClearBrowserKeys(false); setDeleteError(null); }}>취소</button>
           </div>
           {deleteError && <p role="alert" className="text-m text-danger">{deleteError}</p>}
         </section>

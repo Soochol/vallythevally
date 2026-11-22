@@ -7,7 +7,7 @@ import { HotkeysMenuContent } from "../features/system-settings/HotkeysMenuConte
 import { cancelHotkeyRecording } from "../features/system-settings/hotkeyRecording";
 import type { SystemMenuId } from "../features/system-settings/menus";
 import { useSelectionStore } from "../stores/selection";
-import { BrowserKeySlot } from "./BrowserKeySlot";
+import { BrowserKeys } from "./keys/BrowserKeys";
 import { PublicAccountMenu } from "./PublicAccountMenu";
 
 type PublicMenuId = Extract<SystemMenuId, "kiwoom" | "hotkeys" | "collector" | "account">;
@@ -47,7 +47,7 @@ export function PublicSystemSettings({ menu }: { menu: SystemMenuId | null }) {
             <button type="button" className="icon-btn flex-none" aria-label="닫기" onClick={close}><CloseIcon /></button>
           </header>
           <div className="min-h-0 flex-1 overflow-y-auto px-5 pb-5 max-md:px-4">
-            {current.id === "kiwoom" ? <BrowserKeySlot /> : current.id === "collector" ? <CollectorBoard /> : current.id === "account" ? <PublicAccountMenu /> : <HotkeysMenuContent />}
+            {current.id === "kiwoom" ? <BrowserKeys /> : current.id === "collector" ? <CollectorBoard /> : current.id === "account" ? <PublicAccountMenu /> : <HotkeysMenuContent />}
           </div>
         </section>
       </div>
