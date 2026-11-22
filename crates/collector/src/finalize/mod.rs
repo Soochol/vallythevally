@@ -3,12 +3,11 @@ use std::io;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
-use futures::future::BoxFuture;
 use server::config::Secret;
 
 use crate::args::{ArgSpec, Arguments};
 use crate::build::day::parse_date;
-use crate::calendar::{Calendar, Day, HolidayRequest, HolidayTransport, TransportError};
+use crate::calendar::{CachedHolidaysOnly, Calendar, Day};
 use crate::raw_read::read_day;
 
 mod check;
@@ -108,14 +107,6 @@ pub fn run(raw_arguments: &[String]) -> ExitCode {
             eprintln!("finalize: {}를 정리할 수 없다: {error}", options.date);
             ExitCode::FAILURE
         }
-    }
-}
-
-struct CachedHolidaysOnly;
-
-impl HolidayTransport for CachedHolidaysOnly {
-    fn fetch<'a>(&'a self, _request: HolidayRequest<'a>) -> BoxFuture<'a, Result<String, TransportError>> {
-        Box::pin(async { Err(TransportError::Unreachable) })
     }
 }
 

@@ -694,6 +694,8 @@ SIGTERM·SIGINT나 종료 시각(`end_at`, 기본 20:05 KST, 계획 파일의 �
 
 - `tests/supervise.rs`: 가짜 자식(`Launcher`·`ChildProcess`를 구현한 in-process 가짜), 합성 `Transport`, 멈춘 tokio 시간과 `Clock::fake`로 토큰 간격, 재시작, 인계, 8050, `token_invalid`, 종료, 시작 확인, 사건 기록과 로그의 토큰 비노출을 확인한다. `python3 scripts/dev.py cargo test -p collector --test supervise`.
 - `tests/supervise_status.rs`: 상태 소켓 권한(600), 남은 소켓 파일, 응답이 `tests/fixtures/status/` 예시와 같은 모양인지, 감시 연결의 5초 하트비트와 단계 변경 즉시 전송, 읽지 않는 연결 끊기, 요청 없이 붙은 연결 정리, 파일 요청이 밀려도 `status` 답하기, 두 데몬이 동시에 낡은 소켓을 열 때 하나만 얻는 것, 명령 거절, 비밀값 비노출, `collector status` 표와 "데몬 꺼짐"을 확인한다. 소켓 경로 길이 한도(SUN_LEN) 때문에 소켓만 `/tmp` 아래 짧은 임시 폴더에 둔다. `python3 scripts/dev.py cargo test -p collector --test supervise_status`.
+- `tests/restart_window_cli.rs`: `collector restart-window`의 출력(`now`, `wait <시각> Asia/Seoul`), 특일정보 캐시의 공휴일, 캐시가 없을 때의 예약, 데몬과 같은 시각 인수, 틀린 값의 종료 코드 2를 확인한다. 판정 규칙 자체는 `src/supervise/restart_window.rs`의 단위 시험이 가짜 달력과 임시 폴더로 확인한다. `python3 scripts/dev.py cargo test -p collector --test restart_window_cli`.
+- `tests/restart_script.rs`: `deploy/collector-restart`를 가짜 `systemctl`·`systemd-run`과 `--now`를 붙이는 `collector` 껍데기로 돌려, 실제 판정이 바로 재시작과 예약으로 이어지는지 확인한다. 나머지 배포 스크립트(`collector-build`, `collector-install`, `collector-restart`)의 경우별 시험은 `python3 scripts/test-deploy-scripts.py`에 있다.
 - `tests/supervise_process.rs`: 실제 `collector supervise`가 실제 `collect --child` 자식 둘을 루프백 WebSocket 시험 서버에 붙여 LOGIN과 REG까지 가고, 데몬을 끝내면(SIGTERM) 자식도 끝나고, 데몬을 SIGKILL로 죽여도 자식이 끝남을 확인한다. 토큰은 토큰 파일에 미리 넣어 두고 `VALLY_COLLECTOR_REST_URL`(`http://127.0.0.1…`만 받는다)을 닫힌 포트로 돌려 키움에는 아무것도 보내지 않는다. `python3 scripts/dev.py cargo test -p collector --test supervise_process`.
 
 ## 감독 데몬
@@ -801,9 +803,11 @@ REST용 키는 키 목록의 예비 키이고, 예비 키가 없으면 첫 활�
    mkdir -p ~/.config/systemd/user
    cp deploy/systemd/vally-collector.service deploy/systemd/vally-collector-alert.service ~/.config/systemd/user/
    install -D -m 755 deploy/systemd/vally-collector-alert-telegram ~/.local/bin/vally-collector-alert-telegram
-   systemctl --user edit --full vally-collector.service
+   systemctl --user edit vally-collector.service
    systemd-analyze --user verify ~/.config/systemd/user/vally-collector.service
    ```
+
+   이 첫 설치 뒤에는 `orch deploy`의 `collector-build`·`collector-install`·`collector-restart`가 실행 파일, 경보 스크립트, 위 두 유닛을 저장소 판으로 바꾸고 데몬을 다시 띄운다([서버 운영 문서](server-operations.md)의 "배포(orch deploy)"). 그래서 `Environment=` 값은 유닛 파일을 직접 고치지 말고 `systemctl --user edit`가 만드는 드롭인(`vally-collector.service.d/override.conf`)에 둔다. 유닛 파일 자체를 고치면 다음 배포가 저장소 판으로 덮는다. 같은 이유로 `--full`은 쓰지 않는다.
 
 4. **켠다.** 사용자가 로그아웃해도 서비스가 돌도록 linger를 켠다. 켜기 전에 아래 "키 목록 설정과 비밀값 파일"의 점검 명령으로 설정이 읽히는지 본다.
 
@@ -881,8 +885,16 @@ read -rs HOLIDAY_KEY && printf '%s' "$HOLIDAY_KEY" > ~/.config/vally/holiday-ser
    collector status --state ~/.local/state/vallythevally/collector
    ```
 
-4. 새 버전을 올릴 때는 재시작 전에 실행 파일을 바꾼다(`install`로 덮어쓴다. 돌고 있는 파일을 덮어쓰는 것이므로 `cp`가 아니라 `install`을 쓴다).
+4. 새 버전을 올릴 때는 재시작 전에 실행 파일을 바꾼다. 손으로 할 때는 `install`로 덮어쓴다(돌고 있는 파일을 덮어쓰는 것이므로 `cp`가 아니라 `install`을 쓴다). `orch deploy`의 `collector-install`은 같은 폴더에 새 파일을 쓰고 rename한다.
 5. 유닛 파일을 바꿨으면 `systemctl --user daemon-reload` 뒤에 재시작한다.
+
+`orch deploy`는 이 규칙을 `collector-restart`로 지킨다. `collector restart-window`가 지금이 수집 시간인지(판단 시각부터 마감 시각 + 정리 여유까지, 쉬는 날 제외) 판정해 밖이면 바로 재시작하고, 안이면 마감 정리 여유가 끝나는 시각에 일회 타이머 하나를 걸어 둔다. 판정과 예약의 세부는 [서버 운영 문서](server-operations.md)의 "수집 데몬 재시작"에 있다. 이 명령은 손으로도 돌린다.
+
+```sh
+collector restart-window --data ~/vally-data/hoga
+```
+
+출력은 `now`나 `wait <시각> Asia/Seoul`로 시작하는 한 줄이고(탭으로 나눔), 데몬 설정에서 시각 인수를 바꿨으면 같은 `--judge-at`·`--plan-at`·`--launch-at`·`--close-at`을 준다. 정리 여유 기본은 120분(`--finalize-allowance-minutes`)이다.
 
 장중에 데몬이 뜻하지 않게 죽었을 때는 이 규칙의 예외다. systemd가 30초 뒤 다시 띄우고, 데몬은 오늘 계획 파일이 있으면 그것을 써서 자식을 다시 띄운다. 죽은 동안의 끊긴 구간은 사건 기록과 커버리지에 남는다.
 

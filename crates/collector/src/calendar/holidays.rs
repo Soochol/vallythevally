@@ -33,6 +33,14 @@ pub trait HolidayTransport: Send + Sync {
     ) -> BoxFuture<'a, Result<String, TransportError>>;
 }
 
+pub struct CachedHolidaysOnly;
+
+impl HolidayTransport for CachedHolidaysOnly {
+    fn fetch<'a>(&'a self, _request: HolidayRequest<'a>) -> BoxFuture<'a, Result<String, TransportError>> {
+        Box::pin(async { Err(TransportError::Unreachable) })
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum BadResponse {
     NotJson,

@@ -1,0 +1,53 @@
+#!/bin/sh
+set -eu
+root="$(cd "$(dirname "$0")/.." && pwd)"
+bin_dir="${VALLY_COLLECTOR_BIN_DIR:-$HOME/.local/bin}"
+unit_dir="${VALLY_SYSTEMD_USER_DIR:-${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user}"
+built="$root/target/release/collector"
+if [ ! -x "$built" ]; then
+    echo "vally-deploy collector-install: $built가 없습니다. deploy/collector-build를 먼저 돌리세요" >&2
+    exit 1
+fi
+
+put() {
+    source="$1"
+    target="$2"
+    mode="$3"
+    if [ -e "$target" ] && cmp -s "$source" "$target"; then
+        echo "그대로: $target"
+        changed=no
+        return 0
+    fi
+    mkdir -p "$(dirname "$target")"
+    partial="$(mktemp "$target.part.XXXXXX")"
+    if ! { cp "$source" "$partial" && chmod "$mode" "$partial" && mv -f "$partial" "$target"; }; then
+        rm -f "$partial"
+        echo "vally-deploy collector-install: $target을 쓰지 못했습니다" >&2
+        exit 1
+    fi
+    echo "바꿈: $target"
+    changed=yes
+}
+
+put_if_installed() {
+    if [ -e "$2" ]; then
+        put "$@"
+    else
+        echo "설치 안 됨, 건너뜀: $2 (처음 설치는 docs/hoga-collector.md의 설치 절)"
+        changed=no
+    fi
+}
+
+put "$built" "$bin_dir/collector" 755
+put_if_installed "$root/deploy/systemd/vally-collector-alert-telegram" "$bin_dir/vally-collector-alert-telegram" 755
+
+units_changed=no
+for unit in vally-collector.service vally-collector-alert.service; do
+    put_if_installed "$root/deploy/systemd/$unit" "$unit_dir/$unit" 644
+    [ "$changed" = yes ] && units_changed=yes
+done
+if [ "$units_changed" = yes ]; then
+    systemctl --user daemon-reload
+    echo "유닛이 바뀌어 daemon-reload를 했습니다"
+fi
+exit 0

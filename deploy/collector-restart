@@ -1,0 +1,68 @@
+#!/bin/sh
+set -eu
+self="$(cd "$(dirname "$0")" && pwd)/collector-restart"
+service="${VALLY_COLLECTOR_SERVICE:-vally-collector.service}"
+collector="${VALLY_COLLECTOR_BIN:-$HOME/.local/bin/collector}"
+data_dir="${VALLY_DATA:-$HOME/vally-data/hoga}"
+schedule_args="${VALLY_COLLECTOR_SCHEDULE_ARGS:-}"
+allowance="${VALLY_COLLECTOR_FINALIZE_MINUTES:-120}"
+stable="${VALLY_COLLECTOR_STABLE_SECONDS:-10}"
+reservation="vally-collector-restart"
+tab="$(printf '\t')"
+
+case "$stable" in
+    ''|*[!0-9]*) echo "vally-deploy collector-restart: VALLY_COLLECTOR_STABLE_SECONDS는 1 이상의 정수여야 합니다($stable)" >&2; exit 2 ;;
+esac
+if [ "$stable" -lt 1 ]; then
+    echo "vally-deploy collector-restart: VALLY_COLLECTOR_STABLE_SECONDS는 1 이상의 정수여야 합니다($stable)" >&2
+    exit 2
+fi
+
+cancel_reservation() {
+    systemctl --user stop "$reservation.timer" 2>/dev/null || true
+}
+
+restart_and_watch() {
+    systemctl --user restart "$service"
+    elapsed=0
+    while [ "$elapsed" -lt "$stable" ]; do
+        sleep 1
+        if ! systemctl --user is-active --quiet "$service"; then
+            echo "vally-deploy collector-restart: $service가 재시작 ${elapsed}초 만에 active가 아닙니다. journalctl --user -u $service 를 확인하세요" >&2
+            exit 1
+        fi
+        elapsed=$((elapsed + 1))
+    done
+    echo "$service를 재시작했고 ${stable}초 동안 active입니다"
+}
+
+if [ "${1:-}" = "--scheduled" ]; then
+    echo "예약된 재시작: 마감 정리 여유가 끝난 시각이라 바로 재시작합니다"
+    restart_and_watch
+    exit 0
+fi
+
+if ! verdict="$("$collector" restart-window --data "$data_dir" --finalize-allowance-minutes "$allowance" $schedule_args)"; then
+    echo "vally-deploy collector-restart: 재시작해도 되는지 판정하지 못했습니다($collector restart-window 실패). 재시작하지 않았습니다" >&2
+    exit 1
+fi
+decision="${verdict%%"$tab"*}"
+rest="${verdict#*"$tab"}"
+case "$decision" in
+    now)
+        echo "재시작: $rest"
+        cancel_reservation
+        restart_and_watch
+        ;;
+    wait)
+        until="${rest%%"$tab"*}"
+        reason="${rest#*"$tab"}"
+        cancel_reservation
+        systemd-run --user --unit="$reservation" --on-calendar="$until" --setenv=VALLY_COLLECTOR_SERVICE="$service" --setenv=VALLY_COLLECTOR_STABLE_SECONDS="$stable" --collect "$self" --scheduled >/dev/null
+        echo "재시작하지 않고 예약: $until에 한 번 재시작합니다. 이유: $reason"
+        ;;
+    *)
+        echo "vally-deploy collector-restart: restart-window의 출력을 읽을 수 없습니다: $verdict" >&2
+        exit 1
+        ;;
+esac

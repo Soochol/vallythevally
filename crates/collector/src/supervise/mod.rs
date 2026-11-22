@@ -21,6 +21,7 @@ mod files;
 mod handoff;
 mod journal;
 mod process;
+mod restart_window;
 mod schedule;
 mod settings;
 mod status_command;
@@ -35,6 +36,7 @@ pub use journal::{JOURNAL_VERSION, JournalEvent, journal_path, kst_stamp, read_l
 pub use process::{ChildMessage, ChildProcess, FORWARDED_VARIABLES, Launcher, Spawned, TokioLauncher};
 pub use schedule::{Daemon, DaemonInjected, DaemonInputs, DaemonStartError, DayTimes, FinalizeRunner, ProcessFinalizeRunner, ScheduleSettings, finalize_arguments, parse_clock_time};
 pub use settings::{MarketOpenCheck, Settings, SocketSetting};
+pub use restart_window::{RestartInputs, RestartVerdict, decide as decide_restart, run as run_restart_window};
 pub use status_command::run as run_status;
 pub use status::{Alert, AlertKind, DaemonStatus, DayPhase, KeyState, KeyStatus, ObservationDay, ObservationVerdict, RestProgress, Today};
 pub use api::{MAX_CONNECTIONS, OUTBOX_LINES, SOCKET_FILE_NAME, StatusSocket};

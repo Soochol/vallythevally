@@ -7,7 +7,7 @@ mod overrides;
 
 pub use day::{Day, Weekday};
 pub use holidays::{
-    BadResponse, CachedHolidays, FetchFailure, Holiday, HolidayRequest, HolidayTransport,
+    BadResponse, CachedHolidays, CachedHolidaysOnly, FetchFailure, Holiday, HolidayRequest, HolidayTransport,
     HolidayYear, Provenance, ServiceKeyError, TransportError, cache_path, read_service_key,
 };
 pub use http::{HOLIDAY_BASE_URL, ReqwestHolidayTransport};
