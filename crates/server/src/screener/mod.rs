@@ -363,7 +363,7 @@ impl Screener {
         let edition = self.memory.edition_for(&self.store, generation).await?;
         self.check_ready(&edition, need_day, now)?;
         let observation = calendar.observation(now);
-        let Some(snapshot) = shared.snapshot(observation, now.kst_date()) else {
+        let Some(snapshot) = shared.snapshot(observation, now.kst_date(), need_day) else {
             return Err(ApiFailure::new(api::ApiErrorCode::KiwoomUnavailable, "공용 시세 스냅샷을 아직 받지 못했습니다. 수집 데몬이 오늘 첫 스냅샷을 쓴 뒤 다시 실행하세요"));
         };
         let basis = CollectionBasis { generation, update_epoch };

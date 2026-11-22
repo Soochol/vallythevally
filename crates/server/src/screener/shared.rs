@@ -89,13 +89,13 @@ impl SharedQuotes {
         counter.fetch_add(1, Ordering::Relaxed);
     }
 
-    pub(super) fn snapshot(&self, observation: Observation, today: KstDate) -> Option<Snapshot> {
+    pub(super) fn snapshot(&self, observation: Observation, today: KstDate, previous_day: Option<KstDate>) -> Option<Snapshot> {
         let loaded = self.data.snapshot(Venue::Krx).current()?;
         let observation_day = KstDate::parse_yyyymmdd(&loaded.header.observation_date)?;
         let current = match observation {
             Observation::Current => observation_day == today,
             Observation::PreviousOnly(previous) => observation_day == previous,
-            Observation::Unresolved => true,
+            Observation::Unresolved => previous_day.is_none_or(|previous| observation_day >= previous),
         };
         current.then(|| Snapshot { id: SnapshotId { observation_day, as_of: loaded.header.as_of, written_at: loaded.header.written_at }, loaded })
     }

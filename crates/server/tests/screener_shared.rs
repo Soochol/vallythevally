@@ -376,3 +376,29 @@ async fn the_same_screen_on_the_same_snapshot_is_reused_until_the_snapshot_chang
     assert_eq!(counts(), (hits + 7, 4 + 1), "같은 조건 8개가 동시에 와도 판정은 한 번이다");
     server.stop().await;
 }
+
+#[tokio::test]
+async fn while_today_is_not_yet_known_a_snapshot_older_than_the_previous_observation_day_is_refused() {
+    let today = day(2026, 11, 9);
+    let stored = last_open_days(20, today.add_days(-1));
+    let previous = *stored.last().unwrap();
+    let session = Session::prepare(today, "1200", 2, stored.clone(), stored).await;
+    let quote_calls = session.quote_calls();
+    let rows = |on: KstDate| (0..2).map(|i| quote(&code_of(i), on, 100, 100, 1_000, 1)).collect::<Vec<_>>();
+    let long_ago = previous.add_days(-17);
+    publish(&session.shared, long_ago, kst(long_ago, 20, 0, 30).unix(), &rows(long_ago));
+    let server = session.boot(true);
+    let api = Api::of(&server).await;
+    api.warm_calendar().await;
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    let (status, body) = api.run(&every(vec![])).await;
+    assert_ne!(status, 200, "{body}");
+    assert!(body.to_string().contains("스냅샷"), "{body}");
+
+    let as_of = kst(previous, 20, 0, 30).unix();
+    publish(&session.shared, previous, as_of, &rows(previous));
+    let result = api.result_of_snapshot(&every(vec![]), as_of).await;
+    assert_eq!((result["asOf"].clone(), result["missingSummary"].clone()), (json!(previous.to_string()), json!(2)), "평일 낮 달력에 오늘이 없으면 휴장으로 추정하지 않고 이전 날짜 행을 누락으로 센다: {result}");
+    assert_eq!(session.quote_calls(), quote_calls);
+    server.stop().await;
+}
