@@ -4,7 +4,7 @@ import type { Page } from "@playwright/test";
 import type { LayoutWindow } from "../src/api/generated/LayoutWindow";
 import type { Ranking } from "../src/api/generated/Ranking";
 import type { RankingPage } from "../src/api/generated/RankingPage";
-import { HEATMAP_FLOWS, HEATMAP_TABLE, seedHeatmapFlow, seedHeatmapThemes } from "./fixtures/heatmap-data";
+import { flowSeries, HEATMAP_FLOWS, HEATMAP_TABLE, seedHeatmapFlow, seedHeatmapThemes } from "./fixtures/heatmap-data";
 import type { PublicSession } from "./fixtures/public-mode-data";
 import { isRankingRequest, rankingCalls, rankingRows, serveRankings } from "./fixtures/ranking-data";
 import { DEFAULT_LAYOUT_ID, expect, test, windowTab, type Scenario } from "./harness";
@@ -244,6 +244,13 @@ test.describe("로그인 뒤", () => {
     expect(asked).toHaveLength(loaded);
     await page.clock.runFor(8_200);
     await expect.poll(() => asked.length).toBe(loaded * 2);
+  });
+
+  test("흐름 응답의 테마 밖 종목은 빠진 종목으로 보인다", async ({ page, scenario }) => {
+    seedHeatmapThemes(scenario, structuredClone(HEATMAP_TABLE));
+    seedHeatmapFlow(scenario, { ...HEATMAP_FLOWS, "005930,000660": flowSeries([0.5, 1.2], ["005930"], { notInThemes: ["000660"] }) });
+    await page.goto("/heatmap?view=flow");
+    await expect(main(page).getByText("반도체: 분봉을 받지 못해 평균에서 뺀 종목 SK하이닉스")).toBeVisible();
   });
 
   test("429의 retryAt이 지나기 전에는 같은 요청을 다시 보내지 않는다", async ({ page, scenario }) => {
