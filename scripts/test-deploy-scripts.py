@@ -973,6 +973,32 @@ class CollectorRestartTest(FakeCollectorHost):
         restarts = [call for call in self.recorded() if call == "systemctl --user restart vally-collector.service"]
         self.assertEqual(len(restarts), 2, self.recorded())
 
+    def seed_marker_of_a_restart_finishing_in_the_future(self):
+        units = self.home_units()
+        marker = units / ".vally-collector-last-restart"
+        fingerprint = "\n".join([subprocess.run(["cksum"], input=(self.stubs / "collector").read_bytes(), capture_output=True).stdout.decode().strip(), "missing"])
+        marker.write_text(f"{time.time_ns() + 60_000_000_000}\n{fingerprint}\n")
+        return marker
+
+    def test_a_restart_does_not_skip_when_the_daemon_is_no_longer_active(self):
+        self.seed_marker_of_a_restart_finishing_in_the_future()
+        write_stub(self.stubs, "systemctl", f'echo "systemctl $*" >> "{self.calls}"\ncase "$*" in *is-active*) exit 3 ;; esac\nexit 0\n')
+        result = self.restart("--scheduled", VALLY_COLLECTOR_STABLE_SECONDS="1")
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("systemctl --user restart vally-collector.service", self.recorded())
+
+    def test_a_restart_that_fails_its_check_forgets_the_earlier_restart_so_nothing_skips_on_it(self):
+        marker = self.seed_marker_of_a_restart_finishing_in_the_future()
+        write_stub(self.stubs, "systemctl", f'echo "systemctl $*" >> "{self.calls}"\ncase "$*" in *is-active*) exit 3 ;; esac\nexit 0\n')
+        self.restart("--scheduled", VALLY_COLLECTOR_STABLE_SECONDS="1")
+        self.assertFalse(marker.exists())
+
+    def test_lock_seconds_with_leading_zeros_or_decimals_still_restart_without_complaint(self):
+        for value in ["08", "1.5", "010"]:
+            result = self.restart("--scheduled", VALLY_COLLECTOR_STABLE_SECONDS="1", VALLY_COLLECTOR_LOCK_SECONDS=value)
+            self.assertEqual(result.returncode, 0, f"{value}: {result.stderr}")
+            self.assertEqual(result.stderr, "")
+
     def test_the_wait_for_another_restart_is_longer_than_that_restarts_check_even_when_the_check_outlasts_the_lock_seconds(self):
         results = self.overlapped_restarts(VALLY_COLLECTOR_STABLE_SECONDS="3", VALLY_COLLECTOR_LOCK_SECONDS="2")
         for result in results:
