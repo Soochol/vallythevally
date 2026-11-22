@@ -1,5 +1,7 @@
 # 원격 접속은 `tailscale serve`가 받고, 서버는 설정한 tailnet 이름만 자기 이름으로 받는다
 
+공개 리스너는 [ADR 0040](0040-the-public-listener-serves-browser-logins-and-shared-data-apart-from-the-operator-listener.md)이 정한다. 이 ADR의 규칙(루프백 바인드, `tailscale serve`, `VALLY_TAILNET_HOSTS`, Host·Origin 검사)은 운영자 리스너에 그대로 적용된다.
+
 실서버를 Tailscale 망의 서버 PC로 옮기고 같은 망의 기기(개발 PC, 폰) 브라우저로 쓰려 한다. 계획은 [서버 PC 이전](../plans/server-pc.md)이다. 서버는 루프백만 받고, `write_guard.rs`의 Host·Origin 검사는 루프백 형태가 아닌 Host를 거절한다. 이 검사는 DNS rebinding으로 남의 웹 페이지가 로컬 서버에 쓰는 것을 막는 장치이고, 쓰기 가드와 계좌번호 조회(`GET /api/trading/account-number`), 로그인 완료(`GET /auth/complete`)에 걸려 있다. 그래서 `tailscale serve`를 거친 요청은 지금 모두 거절된다.
 
 ## 정한 것
