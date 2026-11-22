@@ -733,9 +733,8 @@ impl MarketHub {
         for key in keys {
             let ks = self.keys.get_mut(&key).expect("방금 본 키");
             let gap_fill = matches!(purpose, SeedPurpose::Reload { reason: ReloadReason::GapFilled, .. });
-            if gap_fill && matches!(ks.feed, KeyFeed::Seeding { purpose: SeedPurpose::Reload { reason: ReloadReason::DailyReset, .. }, .. }) {
-                continue;
-            }
+            let reset_pending = matches!(ks.feed, KeyFeed::Seeding { purpose: SeedPurpose::Reload { reason: ReloadReason::DailyReset, .. }, .. });
+            let purpose = if gap_fill && reset_pending { SeedPurpose::Reload { reason: ReloadReason::DailyReset, from: None } } else { purpose };
             let generation = self.new_generation();
             let ks = self.keys.get_mut(&key).expect("방금 본 키");
             if matches!(purpose, SeedPurpose::Reload { reason: ReloadReason::DailyReset, .. }) {
@@ -2169,12 +2168,16 @@ mod tests {
     async fn a_gap_that_opens_after_the_source_switch_does_not_replace_the_pending_daily_reset() {
         let h = harness(at(9, 0, 5), Chart::default(), Duration::from_secs(3));
         let out = subscribe_with_dropped_tick(&h, (9, 0, 7)).await;
+        h.bars.clear_all();
         h.hub.source_switched();
         h.events.send(StreamEvent::Down { at: h.clock.now() }).await.unwrap();
+        h.chart.lock().unwrap().set(at(9, 0, 0), [100, 100, 100, 100, 7]);
         live(&h).await;
-        tokio::time::sleep(Duration::from_secs(60)).await;
+        tokio::time::sleep(Duration::from_secs(10)).await;
         let reloads: Vec<ReloadReason> = out.take(true).messages.iter().filter_map(|m| match m { ServerMessage::Reload { reason, .. } => Some(*reason), _ => None }).collect();
         assert_eq!(reloads, [ReloadReason::DailyReset], "바꾼 뒤 열린 끊김 구간이 비우기 알림을 밀어내지 않는다: {reloads:?}");
+        let current = h.hub.snapshot(samsung()).await.unwrap().current;
+        assert_eq!(current.map(|bar| bar.ohlcv().volume().0), Some(7), "끊긴 동안의 체결은 Live 뒤 시드로 받는다: {current:?}");
     }
 
     #[tokio::test(start_paused = true)]
