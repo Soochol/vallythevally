@@ -479,3 +479,53 @@ async fn a_token_received_while_the_market_key_changes_is_not_saved_in_the_other
     assert!(!first_file.contains(&token_for(SECOND_KEY)), "k1의 토큰 파일에 k2의 토큰이 들어갔다");
     server.stop().await;
 }
+
+const THIRD_KEY: &str = "FAKE-APPKEY-keys-third-9C5M";
+const THIRD_SECRET: &str = "FAKE-SECRET-keys-third-2J8T";
+
+#[tokio::test]
+async fn replacing_the_credentials_of_a_blocked_key_keeps_it_blocked_after_a_restart() {
+    let fake = ScriptedTransport::new();
+    let env = Env::new();
+    let server = env.spawn(&fake, &[OFF]);
+    let client = Client::of(&server).await;
+    assert_eq!(client.put_market_credentials(FIRST_KEY, FIRST_SECRET).await.0, 200);
+    client.until_key_state("k1", "connected").await;
+    fake.script("au10001", vec![ScriptedReply { status: 200, body: json!({"return_code": 3, "return_msg": EIGHT_FIFTY}), delay: Duration::ZERO }]);
+    assert_eq!(client.add("막힌 키", SECOND_KEY, SECOND_SECRET).await.0, 200);
+    client.until_key_state("k2", "failed").await;
+    let replaced = client.send(reqwest::Method::PUT, "/api/system/kiwoom/keys/k2/key", Some(json!({"appKey": THIRD_KEY, "appSecret": THIRD_SECRET}))).await;
+    assert_eq!(replaced.0, 200, "{}", replaced.1);
+    assert_eq!(client.key("k2").await["link"]["problem"], "authBlocked8050", "키를 바꿔도 8050은 남는다");
+    server.stop().await;
+
+    let restarted_fake = ScriptedTransport::new();
+    let restarted = env.spawn(&restarted_fake, &[START]);
+    let client = Client::of(&restarted).await;
+    client.until_key_state("k1", "connected").await;
+    let blocked = client.until_key_state("k2", "failed").await;
+    assert_eq!(blocked["link"]["problem"], "authBlocked8050", "{blocked}");
+    assert_eq!(issued_for(&restarted_fake, THIRD_KEY), 0);
+    restarted.stop().await;
+}
+
+#[tokio::test]
+async fn replacing_the_market_key_while_blocked_keeps_the_block_after_a_restart() {
+    let fake = ScriptedTransport::new();
+    let env = Env::new();
+    fake.script("au10001", vec![ScriptedReply { status: 200, body: json!({"return_code": 3, "return_msg": EIGHT_FIFTY}), delay: Duration::ZERO }]);
+    let server = env.spawn(&fake, &[OFF]);
+    let client = Client::of(&server).await;
+    assert_eq!(client.put_market_credentials(FIRST_KEY, FIRST_SECRET).await.0, 200);
+    client.until_key_state("k1", "failed").await;
+    assert_eq!(client.put_market_credentials(THIRD_KEY, THIRD_SECRET).await.0, 200);
+    assert_eq!(client.key("k1").await["link"]["problem"], "authBlocked8050");
+    server.stop().await;
+
+    let restarted_fake = ScriptedTransport::new();
+    let restarted = env.spawn(&restarted_fake, &[START]);
+    let blocked = Client::of(&restarted).await.until_key_state("k1", "failed").await;
+    assert_eq!(blocked["link"]["problem"], "authBlocked8050", "{blocked}");
+    assert_eq!(issued_for(&restarted_fake, THIRD_KEY), 0);
+    restarted.stop().await;
+}

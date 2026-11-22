@@ -245,11 +245,16 @@ pub fn paths_for_key(bases: &FileBases, environment: KiwoomEnvironment, credenti
         Some(owner) => owner == credential,
         None => first_claimant,
     };
-    if owns_base {
-        KeyPaths { token: bases.token.clone(), registered_ip: bases.registered_ip.clone() }
-    } else {
-        KeyPaths { token: derived(&bases.token, &credential), registered_ip: derived(&bases.registered_ip, &credential) }
-    }
+    if owns_base { base_paths(bases) } else { derived_paths(bases, credentials) }
+}
+
+pub fn base_paths(bases: &FileBases) -> KeyPaths {
+    KeyPaths { token: bases.token.clone(), registered_ip: bases.registered_ip.clone() }
+}
+
+pub fn derived_paths(bases: &FileBases, credentials: &KiwoomCredentials) -> KeyPaths {
+    let credential = credential_id(credentials.app_key.expose());
+    KeyPaths { token: derived(&bases.token, &credential), registered_ip: derived(&bases.registered_ip, &credential) }
 }
 
 #[derive(Debug, Clone)]

@@ -203,6 +203,13 @@ impl KiwoomAuth {
         file.save(&saved)
     }
 
+    pub fn persist(&self) {
+        let st = self.lock();
+        if let Err(e) = self.save(&st) {
+            tracing::warn!(error = %e, "토큰 파일에 현재 앱키를 적지 못했습니다");
+        }
+    }
+
     pub fn kept_disconnected(&self) -> bool {
         let st = self.lock();
         st.disconnected.is_some() && st.disconnected.as_deref() == st.credentials.as_ref().map(|c| c.id.as_str())

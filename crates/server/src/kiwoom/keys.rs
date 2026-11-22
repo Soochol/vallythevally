@@ -6,7 +6,7 @@ use std::time::Duration;
 use tokio::task::JoinHandle;
 
 use super::auth::KiwoomAuth;
-use super::key_file::{FileBases, KEY_LIMIT, KeyFile, KeyId, KeyList, KeyOrigin, KeyPaths, StartupKey, StoredKey, checked_alias, paths_for_key, registered_ip_file};
+use super::key_file::{FileBases, KEY_LIMIT, derived_paths, KeyFile, KeyId, KeyList, KeyOrigin, KeyPaths, StartupKey, StoredKey, checked_alias, paths_for_key, registered_ip_file};
 use super::link::Link;
 use super::private_file::FileError;
 use super::rest::KiwoomRest;
@@ -342,9 +342,19 @@ impl KeyRing {
             key.credentials = credentials.clone();
         }
         self.persist(&proposed)?;
+        let factory = self.factory.as_ref().ok_or(KeyError::NoStore)?;
         let entry = &mut inner.entries[at];
-        entry.credentials = credentials.clone();
-        entry.lane.link.replace_key(credentials.app_key, credentials.app_secret);
+        entry.credentials = credentials;
+        let owns_base = entry.paths.token == factory.bases.token;
+        let new_paths = if owns_base { entry.paths.clone() } else { derived_paths(&factory.bases, &entry.credentials) };
+        for (from, to) in [(&entry.paths.token, &new_paths.token), (&entry.paths.registered_ip, &new_paths.registered_ip)] {
+            if from != to && from.exists() && !to.exists() && let Err(e) = std::fs::rename(from, to) {
+                tracing::warn!(error = %e, "키를 바꾸면서 키별 파일을 새 이름으로 옮기지 못했습니다");
+            }
+        }
+        entry.paths = new_paths;
+        entry.lane.link.rebind(identity(factory, entry));
+        entry.lane.link.record_key_in_token_file();
         entry.lane.link.connect_in_background();
         Ok(())
     }

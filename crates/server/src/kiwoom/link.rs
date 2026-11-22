@@ -505,6 +505,10 @@ impl Link {
         self.state()
     }
 
+    pub fn record_key_in_token_file(&self) {
+        self.0.rest.auth().persist();
+    }
+
     pub fn clear_key(&self) -> LinkState {
         self.abandon_connect(|| {
             self.0.rest.set_access(Access::Closed);
