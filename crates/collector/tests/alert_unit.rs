@@ -1,6 +1,8 @@
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::TcpListener;
+use std::os::fd::AsRawFd;
 use std::os::unix::fs::PermissionsExt;
+use std::os::unix::net::UnixListener;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 use std::sync::{Arc, Mutex};
@@ -227,6 +229,8 @@ enum Layout {
     NoAccess,
     SymlinkLoop,
     UnderAFile,
+    Directory,
+    Socket,
     Missing,
     DanglingSymlink,
     Relative(&'static str),
@@ -255,6 +259,13 @@ fn sends(chat_id: &str) -> Outcome {
     Outcome::Sends(chat_id.to_owned())
 }
 
+fn permission_000_still_reads() -> bool {
+    let folder = tempfile::tempdir().unwrap();
+    let file = folder.path().join("closed");
+    write_private(&file, "", 0o000);
+    std::fs::File::open(&file).is_ok()
+}
+
 fn parity_cases() -> Vec<Case> {
     let token = format!("bot_token=123456:{SECRET}\n");
     let two_lines = format!("{token}chat_id=-100777\n");
@@ -274,9 +285,11 @@ fn parity_cases() -> Vec<Case> {
         case("빈 첫 토큰 뒤의 중복 키", &format!("bot_token=\n{token}chat_id=-100777\n"), Layout::File, Outcome::Fails),
         case("파일이 없다", &two_lines, Layout::Missing, Outcome::TurnsOff),
         case("가리키는 곳이 없는 심볼릭 링크", &two_lines, Layout::DanglingSymlink, Outcome::TurnsOff),
-        case("권한 000 파일", &two_lines, Layout::NoAccess, Outcome::Fails),
+        case("권한 000 파일", &two_lines, Layout::NoAccess, if permission_000_still_reads() { sends("-100777") } else { Outcome::Fails }),
         case("심볼릭 링크 고리", &two_lines, Layout::SymlinkLoop, Outcome::Fails),
         case("경로 중간이 파일", &two_lines, Layout::UnderAFile, Outcome::Fails),
+        case("디렉터리", &two_lines, Layout::Directory, Outcome::Fails),
+        case("소켓 파일", &two_lines, Layout::Socket, Outcome::Fails),
         case("-로 시작하는 상대 경로", &two_lines, Layout::Relative("-telegram"), sends("-100777")),
         case("이름이 -뿐인 상대 경로", &two_lines, Layout::Relative("-"), sends("-100777")),
         case("-로 시작하는 없는 상대 경로", &two_lines, Layout::MissingRelative("-nothing-here"), Outcome::TurnsOff),
@@ -314,6 +327,19 @@ fn place(folder: &Path, case: &Case) -> PathBuf {
             first
         }
         Layout::UnderAFile => target.join("telegram"),
+        Layout::Directory => {
+            let directory = folder.join("directory");
+            std::fs::create_dir(&directory).unwrap();
+            std::fs::set_permissions(&directory, std::fs::Permissions::from_mode(0o700)).unwrap();
+            directory
+        }
+        Layout::Socket => {
+            let socket = folder.join("socket");
+            let folder_handle = std::fs::File::open(folder).unwrap();
+            drop(UnixListener::bind(format!("/proc/self/fd/{}/socket", folder_handle.as_raw_fd())).unwrap());
+            std::fs::set_permissions(&socket, std::fs::Permissions::from_mode(0o600)).unwrap();
+            socket
+        }
         Layout::Missing => folder.join("nothing-here"),
         Layout::DanglingSymlink => {
             let link = folder.join("dangling");
@@ -344,24 +370,49 @@ fn fake_for(case: &Case) -> FakeTelegram {
     serve(if matches!(case.outcome, Outcome::Sends(_)) { vec![ACCEPTED] } else { vec![] })
 }
 
+fn phrase_for_a_file_that_cannot_be_opened(layout: &Layout) -> Option<&'static str> {
+    match layout {
+        Layout::SymlinkLoop | Layout::UnderAFile | Layout::Directory => Some("을 열 수 없습니다"),
+        Layout::NoAccess | Layout::Socket => Some("을 읽을 수 없습니다"),
+        _ => None,
+    }
+}
+
+fn utf8_locale() -> String {
+    let listed = Command::new("locale").arg("-a").output().unwrap();
+    let names = String::from_utf8_lossy(&listed.stdout).into_owned();
+    ["C.utf8", "C.UTF-8", "en_US.utf8", "ko_KR.utf8"].into_iter().find(|wanted| names.lines().any(|name| name == *wanted)).expect("UTF-8 로캘이 하나는 설치돼 있어야 시험이 의미가 있다").to_owned()
+}
+
 fn script_outcome(case: &Case) -> Outcome {
+    script_outcome_in_locale(case, None)
+}
+
+fn script_outcome_in_locale(case: &Case, locale: Option<&str>) -> Outcome {
     let folder = tempfile::tempdir().unwrap();
     let file = place(folder.path(), case);
     let hook = fake_for(case);
-    let output = Command::new(SCRIPT)
+    let mut command = Command::new(SCRIPT);
+    command
         .arg("메시지")
         .current_dir(folder.path())
         .env_clear()
         .env("PATH", "/usr/bin:/bin")
         .env("HOME", folder.path())
         .env("VALLY_TELEGRAM", &file)
-        .env("VALLY_TELEGRAM_API", format!("http://127.0.0.1:{}", hook.port))
-        .output()
-        .unwrap();
+        .env("VALLY_TELEGRAM_API", format!("http://127.0.0.1:{}", hook.port));
+    if let Some(locale) = locale {
+        command.env("LANG", locale).env("LC_ALL", locale);
+    }
+    let output = command.output().unwrap();
     let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
     let loaded = if output.status.success() { Ok(!hook.requests.lock().unwrap().is_empty()) } else { Err(stderr.clone()) };
     if let Err(message) = &loaded {
         assert!(message.contains(&file.display().to_string()), "{}: 오류 문구에 경로가 없다: {message}", case.name);
+        if let Some(phrase) = phrase_for_a_file_that_cannot_be_opened(&case.layout) {
+            assert!(message.contains(phrase), "{}: 오류 문구가 \"{phrase}\"이 아니다: {message}", case.name);
+            assert!(message.lines().count() == 1 && !message.contains("bot_token"), "{}: 다른 명령의 오류가 섞인다: {message}", case.name);
+        }
     }
     assert!(output.stdout.is_empty(), "{}: 표준 출력이 있다", case.name);
     observed(case, &hook.requests, loaded)
@@ -403,5 +454,13 @@ fn the_script_and_the_daemon_read_the_same_settings_file_the_same_way() {
     for case in parity_cases() {
         assert_eq!(rust_outcome(&case), case.outcome, "{}: Rust", case.name);
         assert_eq!(script_outcome(&case), case.outcome, "{}: 스크립트", case.name);
+    }
+}
+
+#[test]
+fn the_script_reads_the_settings_file_the_same_way_under_a_utf8_locale() {
+    let locale = utf8_locale();
+    for case in parity_cases() {
+        assert_eq!(script_outcome_in_locale(&case, Some(&locale)), case.outcome, "{}: 스크립트({locale})", case.name);
     }
 }
