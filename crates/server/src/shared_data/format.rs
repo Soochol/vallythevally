@@ -15,6 +15,7 @@ pub enum DataKind {
     SnapshotKrx,
     SnapshotCombined,
     SnapshotNxt,
+    Minute,
 }
 
 impl DataKind {
@@ -24,6 +25,7 @@ impl DataKind {
             DataKind::SnapshotKrx => "snapshot-krx",
             DataKind::SnapshotCombined => "snapshot-combined",
             DataKind::SnapshotNxt => "snapshot-nxt",
+            DataKind::Minute => "minute",
         }
     }
 }

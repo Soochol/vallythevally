@@ -1,6 +1,7 @@
 mod board;
 mod feed;
 mod format;
+mod minute;
 mod snapshot;
 mod write;
 
@@ -11,6 +12,7 @@ use std::time::Duration;
 pub use board::Board;
 pub use feed::Feed;
 pub use format::{Broker, DataKind, FORMAT_VERSION, Header, Loaded, Probe, ProbeBody, ProbeItem, SourceKey};
+pub use minute::{MinuteBar, MinuteBarKey, MinuteInstrument, MinuteTrade, MinuteVenue, minute_path};
 pub use snapshot::{IndexRow, SnapshotBody, SnapshotRow, snapshot_kind};
 pub use write::{FeedWriter, write_snapshot};
 
@@ -86,6 +88,7 @@ impl SharedData {
             DataKind::SnapshotKrx => self.snapshot_krx.errors(),
             DataKind::SnapshotCombined => self.snapshot_combined.errors(),
             DataKind::SnapshotNxt => self.snapshot_nxt.errors(),
+            DataKind::Minute => 0,
         }
     }
 
@@ -95,6 +98,7 @@ impl SharedData {
             DataKind::SnapshotKrx => self.snapshot_krx.age_secs(now),
             DataKind::SnapshotCombined => self.snapshot_combined.age_secs(now),
             DataKind::SnapshotNxt => self.snapshot_nxt.age_secs(now),
+            DataKind::Minute => None,
         }
     }
 }

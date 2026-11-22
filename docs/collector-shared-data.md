@@ -94,3 +94,25 @@ TR 줄:
 | `snapshotKrx` | `snapshot-krx/` | `snapshot-krx/<YYYYMMDD>.json` | | `SnapshotBody` |
 | `snapshotCombined` | `snapshot-combined/` | `snapshot-combined/<YYYYMMDD>.json` | | `SnapshotBody` |
 | `snapshotNxt` | `snapshot-nxt/` | `snapshot-nxt/<YYYYMMDD>.json` | | `SnapshotBody` |
+| `minute` (1분봉) | `minute/<YYYYMMDD>/` | | `minute/<YYYYMMDD>/<키 이름>.jsonl` | `MinuteBar` |
+
+## 1분봉
+
+`collect` 자식이 받은 실시간 `0B`(종목 체결)와 `0J`(업종 지수)로 1분봉을 만들어 5초마다 `<공용 자료 폴더>/minute/<YYYYMMDD>/<키 이름>.jsonl`에 덧붙인다(플랜 결정 C6). 데몬은 자식을 `collect --child --key <이름> --data <폴더> --shared <공용 자료 폴더>`로 띄운다. `--shared`가 없으면 집계하지 않는다. 형식과 합치기 함수는 `crates/server/src/shared_data/minute.rs`, 집계는 `crates/collector/src/shared/minute/`에 있다.
+
+줄(camelCase, 첫 줄은 `kind: "minute"` 머리):
+
+```json
+{"symbol":"005930","instrument":"stock","venue":"krx","minute":540,"open":70000.0,"high":71000.0,"low":69900.0,"close":69900.0,"volume":14,"value":980850,"trades":4,"firstSec":32401,"lastSec":32459}
+```
+
+- `instrument`는 `stock`·`index`다. 종목 `symbol`은 등록 글자에서 `_AL`을 뗀 코드, 지수는 업종 코드(`001` 등)다. `venue`는 종목만 갖고 `krx`·`nxt`·`combined`(통합)다. 지수 줄에는 `venue`가 없다.
+- `minute`는 KST 자정부터의 분(09:00 → 540)이고 체결 시각 `f20`(HHMMSS)으로 정한다. 날짜는 받은 시각의 KST 날짜다.
+- 종목 체결은 `f10`(현재가, 부호 뗌), `f15`(체결량, 부호 뗌)로 센다. `volume`은 체결량의 합, `value`는 체결가 × 체결량의 합, `trades`는 체결 수다. `f15`가 0인 항목은 체결이 아니라 건너뛴다. 거래소는 `f9081`(`KRX`·`NXT`)로 가르고 통합 봉은 둘과 거래소를 알 수 없는 체결을 모두 합친다.
+- 지수는 `f10`을 가격으로, `f15`를 거래량으로 센다. `value`는 `f14`(누적거래대금)가 직전 체결보다 늘어난 만큼의 합이다. 자식을 다시 띄운 뒤 첫 체결의 증가분과 `f14`가 없는 체결은 0으로 센다.
+- `open`은 `firstSec`가 가장 이른 체결, `close`는 `lastSec`가 가장 늦은 체결의 값이다. 같은 초에는 `open`은 먼저, `close`는 나중에 온 체결이다. `firstSec`·`lastSec`는 KST 자정부터의 초다.
+- 같은 (종목, 거래소, 분)의 뒤 줄이 앞 줄을 대신한다. 5초마다 그 사이 바뀐 봉(진행 중인 봉 포함)만 덧붙고, 바뀐 것이 없으면 아무것도 쓰지 않는다. 줄은 분, 종목, 거래소 순으로 쓴다.
+- 자식이 다시 뜨면 그날 파일을 읽어 가장 늦은 분에서 5분 안의 봉부터 이어 센다. 그보다 5분 넘게 늦게 온 체결은 세지 않고 `too_late`로 센다.
+- 인계로 종목이 다른 키로 옮겨 가면 새 키의 파일에 그때부터 쌓인다. 두 파일에 나뉜 같은 분은 `MinuteBar::merged_with`로 합친다. 받는 쪽을 이른 쪽으로 보고, 시가는 `firstSec`가 더 이른 쪽, 종가는 `lastSec`가 더 늦은(같으면 인수로 받은 뒤쪽) 쪽, 고가·저가는 극값, 양·대금·체결 수는 합이다. 키가 다른 봉은 합치지 않는다(`None`).
+- 집계는 원문 쓰기와 다른 작업에서 돈다. 세션은 `0B`·`0J`를 담은 프레임을 가득 차지 않은 큐(16,384개)에 `try_send`로만 넘기고, 큐가 차면 그 프레임을 집계 쪽이 버리고 `dropped`로 센다. 원문 쓰기는 늦어지지 않는다. 누계(`ticks`, `lines`, `dropped`, `skipped`, `unreadable`, `too_late`, `store_errors`)는 1분마다 로그 `분봉 집계 누계`로 남는다. 파일에 쓰지 못하면 바뀐 봉을 그대로 두고 다음 5초에 다시 쓴다. 집계의 오류는 세션을 멈추지 않는다.
+- 하루 파일 크기는 진행 중인 봉이 5초마다 한 줄씩 다시 쓰이므로 체결이 잦은 종목일수록 크다. 읽는 쪽은 지난번 위치부터 읽고 같은 키의 뒤 줄을 앞 줄 대신 쓴다.

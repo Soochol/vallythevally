@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 mod assignment;
 pub mod child;
 mod job;
+pub mod minute;
 mod probe;
 mod runner;
 pub mod snapshot;
