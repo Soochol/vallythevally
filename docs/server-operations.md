@@ -144,15 +144,26 @@ tailscale serve status
 | `~/.local/state/vallythevally/kiwoom-keys.json` | 실전 키 목록(최대 5개). 옛 `kiwoom-key.json`은 처음 켤 때 이 파일로 옮겨지고 지워진다 | 권한 600 |
 | `~/.local/state/vallythevally/kiwoom-orders.json` | 주문 사용 스위치 | |
 | `~/.local/state/vallythevally/token.json`, `token.<키 ID>.json` | 접근 토큰(키마다 하나) | |
+| `~/.local/state/vallythevally/kis-token.json` | 한투 접근 토큰. 앱키 해시와 마지막 발급 요청 시각이 함께 있다 | 한투 키를 쓸 때만 있다. 권한 600 |
 | `~/.local/state/vallythevally/kiwoom-ip.json`, `kiwoom-ip.<키 ID>.json` | 등록 IP 확인 상태(키마다 하나) | 있으면 |
 
 옮기지 않는 것: 모의 서버의 `mock/`과 `collector/`(개발 PC에 남는다).
 
-비밀값 파일(`server.env`, `kiwoom-*.json`, `token.json`)의 규칙:
+비밀값 파일(`server.env`, `kiwoom-*.json`, `token.json`, `kis-token.json`)의 규칙:
 
 - `scp -p`나 `rsync -a`로 파일째 보낸다. `cat`, `diff`, `grep`, 로그 출력으로 내용을 보지 않는다.
 - 받은 쪽은 권한이 600인지 `stat`로만 확인한다.
 - 커밋하거나 이슈·PR·메신저에 적지 않는다.
+
+### 한투 환경 변수
+
+`server.env`에 적는다. 값은 이 문서에 적지 않는다([ADR 0038](adr/0038-kis-key-and-token-are-vally-only.md)).
+
+| 변수 | 뜻 | 비고 |
+|---|---|---|
+| `VALLY_KIS_APP_KEY`, `VALLY_KIS_APP_SECRET` | 한투 앱키와 시크릿 | 둘 다 적거나 둘 다 비운다. hoga-ops와 공유하지 않는다. 모의 서버(`VALLY_KIWOOM_ENV=mock`)에는 적지 않는다 |
+| `VALLY_KIS_BASE_URL`, `VALLY_KIS_WS_URL` | 한투 REST·실시간 주소 | 시험용이다. 공식 실전 주소나 루프백만 되고 둘 다 적거나 둘 다 비운다. 비우면 공식 주소다 |
+| `VALLY_KIS_TOKEN_PATH` | 한투 토큰 파일 | 기본은 `VALLY_TOKEN_PATH`와 같은 폴더의 `kis-token.json`이다 |
 
 받는 쪽 폴더를 먼저 만든다.
 
