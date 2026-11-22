@@ -1,6 +1,6 @@
 import { Segment } from "../dialog/DialogParts";
 import { COLOR_RANGES, legendStops } from "./colors";
-import { HEATMAP_VIEWS, ORDER_LABEL, SIZE_LABEL, SIZE_MODES, SORT_LABEL, SORT_MODES, THEME_ORDERS, VIEW_LABEL, type HeatmapSettings } from "./settings";
+import { HEATMAP_SOURCES, HEATMAP_VIEWS, ORDER_LABEL, SIZE_LABEL, SOURCE_LABEL, SIZE_MODES, SORT_LABEL, SORT_MODES, THEME_ORDERS, VIEW_LABEL, type HeatmapSettings } from "./settings";
 
 interface Props {
   settings: HeatmapSettings;
@@ -34,8 +34,24 @@ function Labelled<T extends string | number>(props: { label: string; options: re
   );
 }
 
+export function SourceTabs({ settings, onSelect }: { settings: HeatmapSettings; onSelect(source: HeatmapSettings["source"]): void }) {
+  return (
+    <div role="tablist" aria-label="테마 출처" className="hm-sources">
+      {HEATMAP_SOURCES.map((source) => (
+        <button key={source} type="button" role="tab" className="hm-source" aria-selected={settings.source === source} onClick={() => onSelect(source)}>
+          {SOURCE_LABEL[source]}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 export function HeatmapToolbar({ settings, onChange, tradedKnown, onEdit }: Props) {
   const set = <K extends keyof HeatmapSettings>(key: K, value: HeatmapSettings[K]) => onChange({ ...settings, [key]: value });
+  const kiwoom = settings.source === "kiwoom";
+  const themeMap = kiwoom && settings.view === "board" && settings.theme === null;
+  const showsThemeOrder = !kiwoom;
+  const showsStockControls = settings.view === "board" && !themeMap;
   return (
     <div className="hm-toolbar">
       <div role="tablist" aria-label="보기" className="hm-views">
@@ -45,10 +61,10 @@ export function HeatmapToolbar({ settings, onChange, tradedKnown, onEdit }: Prop
           </button>
         ))}
       </div>
-      <Labelled label="테마 순서" options={THEME_ORDERS.map((order) => [order, ORDER_LABEL[order]] as const)} value={settings.order} onChange={(order) => set("order", order)} />
-      {settings.view === "board" && (
+      {showsThemeOrder && <Labelled label="테마 순서" options={THEME_ORDERS.map((order) => [order, ORDER_LABEL[order]] as const)} value={settings.order} onChange={(order) => set("order", order)} />}
+      {settings.view === "board" && <Labelled label="색 범위" options={COLOR_RANGES.map((range) => [range, `±${range}%`] as const)} value={settings.range} onChange={(range) => set("range", range)} />}
+      {showsStockControls && (
         <>
-          <Labelled label="색 범위" options={COLOR_RANGES.map((range) => [range, `±${range}%`] as const)} value={settings.range} onChange={(range) => set("range", range)} />
           <Labelled label="칸 크기" options={SIZE_MODES.map((mode) => [mode, SIZE_LABEL[mode]] as const)} value={settings.size} onChange={(size) => set("size", size)} />
           <Labelled label="칸 정렬" options={SORT_MODES.map((mode) => [mode, SORT_LABEL[mode]] as const)} value={settings.sort} onChange={(sort) => set("sort", sort)} />
           <span className="hm-sort-note" role="status">
@@ -59,7 +75,7 @@ export function HeatmapToolbar({ settings, onChange, tradedKnown, onEdit }: Prop
       )}
       <div className="hm-toolbar-end">
         {settings.view === "board" && <Legend range={settings.range} />}
-        <button type="button" className="tb-btn hm-edit-open" aria-haspopup="dialog" onClick={onEdit}>테마 편집</button>
+        {!kiwoom && <button type="button" className="tb-btn hm-edit-open" aria-haspopup="dialog" onClick={onEdit}>테마 편집</button>}
       </div>
     </div>
   );

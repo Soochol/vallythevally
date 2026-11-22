@@ -51,6 +51,7 @@ pub struct KisCredentials {
 
 pub const KIS_BASE_URL: &str = "https://openapi.koreainvestment.com:9443";
 pub const KIS_WS_URL: &str = "ws://ops.koreainvestment.com:21000";
+pub const KIS_MASTER_BASE_URL: &str = "https://new.real.download.dws.co.kr";
 const KIS_BASE_HOST: &str = "openapi.koreainvestment.com";
 const KIS_BASE_PORT: u16 = 9443;
 const KIS_WS_HOST: &str = "ops.koreainvestment.com";
@@ -165,10 +166,12 @@ const KNOWN_KEYS: &[&str] = &[
     "VALLY_DART_BASE_URL",
     "VALLY_KIND_BASE_URL",
     "VALLY_NAVER_BASE_URL",
+    "VALLY_KIS_MASTER_BASE_URL",
     "VALLY_ETF_PDF_DIR",
     "VALLY_PUBLIC_IP_URL",
     "VALLY_FINANCIAL_DB_PATH",
     "VALLY_MARKET_SAMPLES_DIR",
+    "VALLY_KIWOOM_THEMES_DIR",
     "VALLY_FINANCIAL_AUTOMATIC",
     "VALLY_ACCOUNT_SERVER_URL",
     "VALLY_ACCOUNT_STATE_PATH",
@@ -204,10 +207,12 @@ pub struct Config {
     pub dart_base_url: String,
     pub kind_base_url: String,
     pub naver_base_url: String,
+    pub kis_master_base_url: String,
     pub etf_pdf_dir: PathBuf,
     pub public_ip_url: String,
     pub financial_db_path: PathBuf,
     pub market_samples_dir: PathBuf,
+    pub kiwoom_themes_dir: PathBuf,
     pub financial_automatic: bool,
     pub account_server_url: Option<AccountServerUrl>,
     pub account_state_path: Option<PathBuf>,
@@ -315,6 +320,7 @@ impl Config {
         let dart_base_url = public_or_loopback("VALLY_DART_BASE_URL", url("VALLY_DART_BASE_URL"), "https://opendart.fss.or.kr")?;
         let kind_base_url = public_or_loopback("VALLY_KIND_BASE_URL", url("VALLY_KIND_BASE_URL"), "https://kind.krx.co.kr")?;
         let naver_base_url = public_or_loopback("VALLY_NAVER_BASE_URL", url("VALLY_NAVER_BASE_URL"), "https://stock.naver.com")?;
+        let kis_master_base_url = public_or_loopback("VALLY_KIS_MASTER_BASE_URL", url("VALLY_KIS_MASTER_BASE_URL"), KIS_MASTER_BASE_URL)?;
         let public_ip_url = public_or_loopback("VALLY_PUBLIC_IP_URL", url("VALLY_PUBLIC_IP_URL"), "https://api.ipify.org")?;
         let account_server_url = url("VALLY_ACCOUNT_SERVER_URL").map(|value| AccountServerUrl::parse(&value).map_err(|e| ConfigError(format!("VALLY_ACCOUNT_SERVER_URL: {e}")))).transpose()?;
         if mock && account_server_url.is_some() {
@@ -380,10 +386,12 @@ impl Config {
             dart_base_url,
             kind_base_url,
             naver_base_url,
+            kis_master_base_url,
             etf_pdf_dir: vars.get("VALLY_ETF_PDF_DIR").map(PathBuf::from).unwrap_or_else(|| db_path.with_file_name("etf-pdf")),
             public_ip_url,
             financial_db_path: vars.get("VALLY_FINANCIAL_DB_PATH").map(PathBuf::from).unwrap_or_else(|| db_path.with_file_name("financials.db")),
             market_samples_dir: vars.get("VALLY_MARKET_SAMPLES_DIR").map(PathBuf::from).unwrap_or_else(|| db_path.with_file_name("market-samples")),
+            kiwoom_themes_dir: vars.get("VALLY_KIWOOM_THEMES_DIR").map(PathBuf::from).unwrap_or_else(|| db_path.with_file_name("kiwoom-themes")),
             db_path,
             log_filter: vars.get("VALLY_LOG").cloned().unwrap_or_else(|| "info".to_owned()),
         };
@@ -619,6 +627,22 @@ mod tests {
     }
 
     #[test]
+    fn the_kis_master_source_defaults_to_the_public_download_host_and_accepts_only_loopback_overrides() {
+        let file = vars(&[("VALLY_DB_PATH", "isolated/user.db")]);
+        let (config, _) = Config::from_vars(file.clone(), vars(&REAL), lock, token, key, account).unwrap();
+        assert_eq!(config.kis_master_base_url, KIS_MASTER_BASE_URL);
+        let mut process = vars(&REAL);
+        process.insert("VALLY_KIS_MASTER_BASE_URL".into(), "http://127.0.0.1:23/".into());
+        let (config, _) = Config::from_vars(file.clone(), process, lock, token, key, account).unwrap();
+        assert_eq!(config.kis_master_base_url, "http://127.0.0.1:23");
+        for endpoint in ["https://example.com", "http://new.real.download.dws.co.kr", "https://new.real.download.dws.co.kr.evil.test"] {
+            let mut process = vars(&REAL);
+            process.insert("VALLY_KIS_MASTER_BASE_URL".into(), endpoint.into());
+            assert!(Config::from_vars(file.clone(), process, lock, token, key, account).is_err(), "{endpoint}");
+        }
+    }
+
+    #[test]
     fn dart_is_optional_redacted_and_uses_separate_rebuildable_storage() {
         let file = vars(&[("VALLY_KIWOOM_APP_KEY", KEY), ("VALLY_KIWOOM_APP_SECRET", SECRET), ("VALLY_DB_PATH", "isolated/user.db"), ("OPENDART_API_KEY", "file-dart-secret")]);
         let mut process = vars(&REAL);
@@ -628,6 +652,7 @@ mod tests {
         assert_eq!(config.opendart_api_key.as_ref().unwrap().expose(), "process-dart-secret");
         assert_eq!(config.financial_db_path, PathBuf::from("isolated/financials.db"));
         assert_eq!(config.market_samples_dir, PathBuf::from("isolated/market-samples"));
+        assert_eq!(config.kiwoom_themes_dir, PathBuf::from("isolated/kiwoom-themes"));
         assert!(!format!("{config:?}").contains("dart-secret"));
         for endpoint in ["https://example.com", "https://opendart.fss.or.kr.evil.test", "http://user:pass@localhost:19", "http://localhost:19/?key=value"] {
             let mut process = vars(&REAL);

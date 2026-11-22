@@ -154,3 +154,61 @@ fn detector_catches_order_ids() {
     assert!(has_kt_api_id(&["KT", "10001"].concat()));
     assert!(!has_kt_api_id("ka10081 kt_x"));
 }
+
+fn kis_tr_ids(text: &str) -> Vec<String> {
+    let b = text.as_bytes();
+    let word = |i: usize| b.get(i).is_some_and(|c| c.is_ascii_alphanumeric() || *c == b'_');
+    (0..b.len().saturating_sub(12))
+        .filter(|&i| {
+            (i == 0 || !word(i - 1))
+                && (b[i..i + 2] == *b"FH" || b[i..i + 2] == *b"HH")
+                && b[i + 2..i + 5].iter().all(u8::is_ascii_uppercase)
+                && b[i + 5..i + 13].iter().all(u8::is_ascii_digit)
+                && !word(i + 13)
+        })
+        .map(|i| text[i..i + 13].to_owned())
+        .collect()
+}
+
+const KIS_MARKET_TR_IDS: [&str; 18] = [
+    "FHKST01010100",
+    "FHKST11300006",
+    "FHKST03010100",
+    "FHKST03010200",
+    "FHKST03010230",
+    "FHKUP03500100",
+    "FHKUP03500200",
+    "FHKST01010200",
+    "FHPST01060000",
+    "FHPPG04650101",
+    "FHPUP02100000",
+    "FHPUP02140000",
+    "FHPTJ04030000",
+    "FHPTJ04040000",
+    "FHPPG04600101",
+    "FHPPG04600001",
+    "FHPTJ04160001",
+    "HHPTJ04160200",
+];
+
+#[test]
+fn kis_market_tr_ids_live_only_in_the_kis_module_and_are_exactly_the_listed_ones() {
+    let sources = server_sources();
+    for source in sources.iter().filter(|s| !s.relative.starts_with("kis/")) {
+        assert_eq!(kis_tr_ids(&source.text), Vec::<String>::new(), "{}에 한투 시세 tr_id가 있습니다", source.relative);
+    }
+    let seen: BTreeSet<String> = sources.iter().filter(|s| s.relative.starts_with("kis/")).flat_map(|s| kis_tr_ids(&s.text)).collect();
+    let want: BTreeSet<String> = KIS_MARKET_TR_IDS.iter().map(|id| (*id).to_owned()).collect();
+    assert_eq!(seen, want, "src/kis 안의 한투 시세 tr_id가 목록과 다릅니다");
+}
+
+#[test]
+fn kis_tr_id_scanner_finds_words_only_and_the_list_check_notices_an_extra_id() {
+    assert_eq!(kis_tr_ids("\"FHKST01010100\", FHPST01060000 HHPTJ04160200 x"), ["FHKST01010100", "FHPST01060000", "HHPTJ04160200"]);
+    assert!(kis_tr_ids("XFHKST01010100 FHKST010101000 FHkst01010100 FHKST0101010").is_empty());
+    let listed = |text: &str| kis_tr_ids(text).into_iter().collect::<BTreeSet<String>>();
+    let want: BTreeSet<String> = KIS_MARKET_TR_IDS.iter().map(|id| (*id).to_owned()).collect();
+    assert_eq!(listed(&KIS_MARKET_TR_IDS.join(" ")), want);
+    assert_ne!(listed(&format!("{} FHKST99999999", KIS_MARKET_TR_IDS.join(" "))), want, "더해진 id를 알아채야 한다");
+    assert_ne!(listed(&KIS_MARKET_TR_IDS[1..].join(" ")), want, "빠진 id를 알아채야 한다");
+}

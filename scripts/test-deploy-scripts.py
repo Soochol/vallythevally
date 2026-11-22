@@ -1090,6 +1090,48 @@ class CollectorRestartTest(FakeCollectorHost):
             self.assertIn("VALLY_COLLECTOR_LOCK_SECONDS", result.stderr)
         self.assertEqual(self.recorded(), [])
 
+    def test_a_value_with_control_characters_gets_a_one_line_message_naming_the_variable(self):
+        for name in ["VALLY_COLLECTOR_LOCK_SECONDS", "VALLY_COLLECTOR_STABLE_SECONDS"]:
+            for value, shown in [("5\n6", "5\\n6"), ("5\t6", "5\\t6"), ("5\r\n", "5\\r\\n"), ("5\x1b6", "5\\x1b6")]:
+                result = self.restart("--scheduled", **{name: value})
+                self.assertEqual(result.returncode, 2, (name, value))
+                self.assertEqual(len(result.stderr.splitlines()), 1, (name, value, result.stderr))
+                self.assertIn(name, result.stderr)
+                self.assertIn(f"({shown})", result.stderr)
+        self.assertEqual(self.recorded(), [])
+
+    def test_a_value_with_other_control_or_line_separator_characters_is_shown_escaped_on_one_line(self):
+        cases = [
+            ("5\\6", "5\\\\6"),
+            ("5\\n6", "5\\\\n6"),
+            ("5\\\n6", "5\\\\\\n6"),
+            ("5\\x1b6", "5\\\\x1b6"),
+            ("5\x016", "5\\x016"),
+            ("5\x0b6", "5\\x0b6"),
+            ("5\x7f6", "5\\x7f6"),
+            ("5\u00856", "5\\u00856"),
+            ("5\u20286", "5\\u20286"),
+            ("5\u20296", "5\\u20296"),
+            ("5\u00806", "5\\u00806"),
+            ("5\u009f6", "5\\u009f6"),
+            ("5\u00a06", "5\u00a06"),
+            ("5\udcff6", "5\\xff6"),
+            ("5\udc806", "5\\x806"),
+            ("5\udcc26", "5\\xc26"),
+            ("5\udce2\udc80", "5\\xe2\\x80"),
+            ("5\udced\udca0\udc80", "5\\xed\\xa0\\x80"),
+            ("5\u00e96", "5\u00e96"),
+            ("5\ud55c\uae00", "5\ud55c\uae00"),
+        ]
+        for name in ["VALLY_COLLECTOR_LOCK_SECONDS", "VALLY_COLLECTOR_STABLE_SECONDS"]:
+            for value, shown in cases:
+                for locale in ["C", "C.UTF-8"]:
+                    result = self.restart("--scheduled", LC_ALL=locale, **{name: value})
+                    self.assertEqual(result.returncode, 2, (name, value))
+                    self.assertEqual(len(result.stderr.splitlines()), 1, (name, value, result.stderr))
+                    self.assertIn(f"({shown})", result.stderr)
+        self.assertEqual(self.recorded(), [])
+
     def test_a_decimal_lock_seconds_does_not_shorten_the_wait_for_another_restart(self):
         units = self.home_units()
         with open(units / ".vally-collector-restart.lock", "w") as lock:

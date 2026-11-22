@@ -303,6 +303,53 @@ async fn an_issue_limit_answer_is_an_interval_wait_and_a_refusal_halts_the_key()
 }
 
 #[tokio::test(start_paused = true)]
+async fn a_transient_server_error_on_issue_does_not_stop_the_key_and_the_next_attempt_after_the_interval_recovers() {
+    for answer in [Ok(HttpResponse { status: 502, tr_cont: None, body: "<html>FAKE-KIS-BODY-must-not-appear</html>".into() }), Ok(HttpResponse { status: 500, tr_cont: None, body: String::new() }), Err(TransportError { stage: server::kis::transport::Stage::AwaitResponse, timed_out: true })] {
+        let home = Home::new();
+        let down = Arc::new(Mutex::new(Some(answer)));
+        let behind = down.clone();
+        let transport = FakeTransport::new(move |sent, _| match (sent.path, behind.lock().unwrap().take()) {
+            (TOKEN_PATH, Some(failure)) => failure,
+            (TOKEN_PATH, None) => response(200, "token.json"),
+            _ => response(200, "price.json"),
+        });
+        let clock = Clock::fake(now());
+        let transport_dyn: Arc<dyn Transport> = transport.clone();
+        let auth = KisAuth::new(credentials(), home.path.clone(), transport_dyn.clone(), clock.clone());
+        let rest = KisRest::new(transport_dyn, auth.clone());
+
+        let first = rest.call(price_request("005930", Priority::Screen)).await.expect_err("일시 장애다");
+        assert!(matches!(first, KisError::Failed(_) | KisError::Transport(_)), "{first:?}");
+        assert!(auth.halted().is_none(), "일시 장애는 멈춤이 아니다");
+        assert!(rest.stopped(KisApiId::CurrentPrice).is_none());
+
+        let retry_at = now().plus_secs(600);
+        assert_eq!(rest.call(price_request("005930", Priority::Screen)).await.expect_err("발급 간격 안이다"), KisError::Gated { until: retry_at });
+        assert_eq!(transport.sent_to(TOKEN_PATH).len(), 1, "간격 안에는 다시 보내지 않는다");
+
+        clock.jump(600);
+        let page = rest.call(price_request("005930", Priority::Screen)).await.expect("다음 시도에서 회복한다");
+        assert!(page.body.contains("stck_prpr"));
+        assert_eq!(transport.sent_to(TOKEN_PATH).len(), 2);
+    }
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_rejected_key_on_issue_stays_stopped_even_after_the_interval() {
+    let home = Home::new();
+    let refused = FakeTransport::new(|_, _| response(403, "issue_refused.json"));
+    let clock = Clock::fake(now());
+    let transport_dyn: Arc<dyn Transport> = refused.clone();
+    let auth = KisAuth::new(credentials(), home.path.clone(), transport_dyn.clone(), clock.clone());
+    let rest = KisRest::new(transport_dyn, auth.clone());
+    assert!(matches!(rest.call(price_request("005930", Priority::Screen)).await, Err(KisError::Stopped(f)) if f.category() == Category::AuthBlocked));
+    clock.jump(3600);
+    assert!(matches!(rest.call(price_request("005930", Priority::Screen)).await, Err(KisError::Stopped(_))));
+    assert_eq!(refused.sent().len(), 1, "거절된 키로는 다시 발급하지 않는다");
+    assert!(auth.halted().is_some());
+}
+
+#[tokio::test(start_paused = true)]
 async fn a_rate_limit_answer_resends_when_the_window_empties_and_the_third_one_fails() {
     let home = Home::new();
     home.holding_file_token(3600);

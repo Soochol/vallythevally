@@ -9,6 +9,8 @@ pub struct Settings {
     pub database_path: PathBuf,
     pub config: AccountConfig,
     pub pending_login_limit: u32,
+    pub max_accounts: u32,
+    pub blocked: BlockedIdentities,
 }
 
 pub fn parse_env_file(text: &str) -> HashMap<String, String> {
@@ -29,6 +31,10 @@ pub fn parse_env_file(text: &str) -> HashMap<String, String> {
 }
 
 impl Settings {
+    pub fn account_options(&self) -> AccountOptions {
+        AccountOptions { pending_login_limit: self.pending_login_limit, max_accounts: self.max_accounts, blocked: self.blocked.clone() }
+    }
+
     pub fn from_values(values: &HashMap<String, String>) -> Result<Self, ConfigError> {
         let get = |name: &str| values.get(name).filter(|value| !value.is_empty());
         let required = |name: &str| {
@@ -57,6 +63,10 @@ impl Settings {
         let pending_login_limit = get("VALLY_ACCOUNT_PENDING_LOGIN_LIMIT").map_or(Ok(DEFAULT_PENDING_LOGIN_LIMIT), |value| {
             value.parse().map_err(|_| ConfigError("VALLY_ACCOUNT_PENDING_LOGIN_LIMIT를 읽을 수 없습니다".into()))
         })?;
-        Ok(Self { bind, database_path, config: AccountConfig { public_url, google, naver }, pending_login_limit })
+        let max_accounts = get("VALLY_ACCOUNT_MAX_ACCOUNTS").map_or(Ok(DEFAULT_MAX_ACCOUNTS), |value| {
+            value.parse().map_err(|_| ConfigError("VALLY_ACCOUNT_MAX_ACCOUNTS를 읽을 수 없습니다".into()))
+        })?;
+        let blocked = get("VALLY_ACCOUNT_BLOCKED_IDENTITIES").map_or(Ok(BlockedIdentities::default()), |value| BlockedIdentities::parse_list(value))?;
+        Ok(Self { bind, database_path, config: AccountConfig { public_url, google, naver }, pending_login_limit, max_accounts, blocked })
     }
 }

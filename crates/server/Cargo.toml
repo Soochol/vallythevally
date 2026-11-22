@@ -25,6 +25,7 @@ indicators = { path = "../indicators" }
 setup = { path = "../setup" }
 axum = { version = "0.8", features = ["ws"] }
 base64 = "0.22"
+encoding_rs = "0.8"
 getrandom = "0.3"
 futures = "0.3"
 reqwest = { version = "0.13", default-features = false, features = ["rustls", "native-tls", "query"] }

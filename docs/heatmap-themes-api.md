@@ -43,12 +43,16 @@
 |---|---|
 | `venue` | `combined`(기본), `krx`, `nxt`. `/api/quotes`와 같다 |
 | `order` | 테마 순서. `rate`(가중 평균 등락률 높은 순, 기본), `custom`(저장 순서), `traded`(거래대금 합 큰 순). 값이 같으면 저장 순서를 따르고, 값이 없는 테마는 맨 뒤다. 다른 값은 400이다 |
+| `source` | `mine`(내 테마, 기본) 또는 `kiwoom`(서버가 저장한 **키움 테마** 구성종목, [ADR 0042](adr/0042-heatmap-adds-kiwoom-themes-as-a-second-source.md)). 다른 값은 400이다 |
 
 | 칸 | 뜻 |
 |---|---|
-| `revision` | 계산에 쓴 테마 문서의 revision |
+| `revision` | 계산에 쓴 테마 문서의 revision. 키움 테마는 0 |
+| `source` | 적용한 출처 |
+| `catalog` | `source=kiwoom`일 때 저장된 구성종목의 날(`date`), 받은 시각(`collectedAt`), 테마 수(`themes`), 상태(`state`: `ready` 파일이 있다, `collecting` 없고 받는 중, `empty` 없고 받고 있지 않다). 내 테마면 `null` |
 | `order` | 적용한 순서 |
 | `asOf` | 받은 시세 가운데 가장 늦은 시각(Unix 초). 시세가 하나도 없으면 `null` |
+| `themes[].id` | 내 테마는 저장한 id, 키움 테마는 `kiwoom-<테마코드>` |
 | `themes[].members` | 시세를 받은 종목, 테마 안 저장 순서. `symbol`, `name`(종목 목록의 이름, 없으면 코드), `changeRate`(%), `tradedMillionWon`(당일 누적 거래대금, 백만원. 없으면 빠진다) |
 | `themes[].missing` | 시세를 받지 못한 종목. 요약에서 빠진다 |
 | `themes[].summary` | 테마 요약. 시세를 받은 종목이 없으면 `null` |

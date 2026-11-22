@@ -1,0 +1,12 @@
+{
+ "_source": "합성 값. 필드 이름과 모양만 키움 가이드 ka90001과 2026-11-22 실측(칸 이름)을 따른다. 테마와 숫자는 지어낸 것이다",
+ "_headers": {
+  "cont-yn": "N",
+  "next-key": ""
+ },
+ "return_code": 0,
+ "return_msg": "정상적으로 처리되었습니다",
+ "thema_grp": [
+  {"thema_grp_cd": "901", "thema_nm": "가상테마A", "stk_num": "2", "flu_sig": "2", "flu_rt": "+1.20", "rising_stk_num": "1", "fall_stk_num": "1", "dt_prft_rt": "+0.80", "main_stk": "가상종목A,가상종목B"}
+ ]
+}
