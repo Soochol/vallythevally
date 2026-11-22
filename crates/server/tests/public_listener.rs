@@ -1709,3 +1709,57 @@ async fn usage_counts_limits_cache_hits_top_accounts_and_operator_latency() {
     let samples = latency["current"]["samples"].as_u64().unwrap() + latency["lastMinute"]["samples"].as_u64().unwrap_or(0);
     assert_eq!(samples, 1, "운영자 리스너의 키움 경로 응답 시간만 센다: {latency}");
 }
+
+#[tokio::test]
+async fn a_failed_market_overview_card_carries_fixed_words_and_is_not_kept_for_other_accounts() {
+    let work = Work::new();
+    let idp = start_idp().await;
+    let fake = ScriptedTransport::new();
+    script_market_overview(&fake);
+    fake.respond_with("ka20003", 200, json!({"return_code": 1501, "return_msg": "운영자만 아는 사정"}));
+    let site = Spec::new(&work, &idp).with_fake(fake.clone()).start().await;
+    let alice = site.login("alice").await;
+    let bob = site.login("bob").await;
+    let path = "/api/market-overview/index?market=kospi";
+    let failed = site.get(&alice, path).await;
+    assert_eq!(failed.status, 200, "{}", head(&failed.text()));
+    let text = failed.text();
+    assert!(text.contains("\"failed\""), "{}", head(&text));
+    assert!(!text.contains("1501") && !text.contains("ka20003") && !text.contains("운영자"), "{}", head(&text));
+    assert!(text.contains("\"manualActionRequired\":false"), "{}", head(&text));
+    fake.reset();
+    script_market_overview(&fake);
+    site.jump(1);
+    let recovered = site.get(&bob, path).await;
+    assert!(!recovered.text().contains("\"failed\""), "{}", head(&recovered.text()));
+    assert_eq!(site.usage().await["cacheHits"]["marketOverview"], 0);
+}
+
+#[tokio::test]
+async fn the_same_market_overview_query_in_another_parameter_order_hits_the_cache() {
+    let work = Work::new();
+    let idp = start_idp().await;
+    let fake = ScriptedTransport::new();
+    script_market_overview(&fake);
+    let site = Spec::new(&work, &idp).with_fake(fake.clone()).start().await;
+    let who = site.login("alice").await;
+    assert_eq!(site.get(&who, "/api/market-overview/flow?market=kospi&period=20").await.status, 200);
+    let before = fake.requests();
+    assert_eq!(site.get(&who, "/api/market-overview/flow?period=20&market=kospi").await.status, 200);
+    assert_eq!(fake.requests(), before);
+}
+
+#[tokio::test]
+async fn screen_files_are_never_compressed_again_on_the_fly() {
+    let work = Work::new();
+    std::fs::write(work.dist().join("assets/photo-1a2b.webp"), vec![7u8; 4096]).unwrap();
+    std::fs::write(work.dist().join("robots.txt"), "User-agent: *\n").unwrap();
+    let idp = start_idp().await;
+    let site = Spec::new(&work, &idp).start().await;
+    for (path, content_type) in [("/assets/photo-1a2b.webp", "image/webp"), ("/robots.txt", "text/plain; charset=utf-8")] {
+        let reply = fetch(&site.http, format!("{}{path}", site.public), &[("accept-encoding", "gzip")]).await;
+        assert_eq!(reply.status, 200, "{path}");
+        assert_eq!(reply.header("content-type"), Some(content_type), "{path}");
+        assert_eq!(reply.header("content-encoding"), None, "{path}");
+    }
+}

@@ -148,13 +148,47 @@ fn total_trs_sent(runtime: &Runtime) -> u64 {
     runtime.sends.load(std::sync::atomic::Ordering::Relaxed)
 }
 
-async fn cache_if_ok(response: Response) -> (Response, Option<Cached>) {
-    let (parts, body) = response.into_parts();
+fn cache_key(uri: &axum::http::Uri) -> String {
+    let mut pairs: Vec<&str> = uri.query().map(|q| q.split('&').collect()).unwrap_or_default();
+    pairs.sort_unstable();
+    format!("{}?{}", uri.path(), pairs.join("&"))
+}
+
+fn scrub_failed_cards(value: &mut serde_json::Value, retry_at: i64) -> bool {
+    match value {
+        serde_json::Value::Object(object) => {
+            let mut scrubbed = false;
+            if object.get("status").and_then(|s| s.as_str()) == Some("failed")
+                && let Some(serde_json::Value::Object(error)) = object.get_mut("error")
+            {
+                error.insert("message".into(), errors::KIWOOM_FIXED.into());
+                error.insert("manualActionRequired".into(), false.into());
+                error.insert("reason".into(), serde_json::Value::Null);
+                error.insert("retryAt".into(), retry_at.into());
+                scrubbed = true;
+            }
+            object.values_mut().fold(scrubbed, |any, child| scrub_failed_cards(child, retry_at) || any)
+        }
+        serde_json::Value::Array(items) => items.iter_mut().fold(false, |any, child| scrub_failed_cards(child, retry_at) || any),
+        _ => false,
+    }
+}
+
+async fn cache_if_ok(response: Response, scrub_at: Option<i64>) -> (Response, Option<Cached>) {
+    let (mut parts, body) = response.into_parts();
     if parts.status != StatusCode::OK {
         return (Response::from_parts(parts, body), None);
     }
     match axum::body::to_bytes(body, CACHED_BODY_LIMIT).await {
         Ok(bytes) => {
+            if let Some(now) = scrub_at
+                && let Ok(mut value) = serde_json::from_slice::<serde_json::Value>(&bytes)
+                && scrub_failed_cards(&mut value, now + errors::KIWOOM_RETRY_SECS)
+                && let Ok(scrubbed) = serde_json::to_vec(&value)
+            {
+                parts.headers.remove(header::CONTENT_LENGTH);
+                return (Response::from_parts(parts, Body::from(scrubbed)), None);
+            }
             let cached = Cached { at: 0, content_type: parts.headers.get(header::CONTENT_TYPE).cloned(), body: bytes.clone() };
             (Response::from_parts(parts, Body::from(bytes)), Some(cached))
         }
@@ -198,7 +232,7 @@ pub(super) async fn market_overview(State(runtime): State<Arc<Runtime>>, request
         return next.run(request).await;
     }
     let now = runtime.clock.now().unix();
-    let key = request.uri().path_and_query().map_or_else(|| request.uri().path().to_owned(), |pq| pq.as_str().to_owned());
+    let key = cache_key(request.uri());
     if let Some(hit) = runtime.kiwoom.fresh_market(&key, now) {
         runtime.usage.market_cache_hit();
         return hit;
@@ -212,7 +246,7 @@ pub(super) async fn market_overview(State(runtime): State<Arc<Runtime>>, request
     let response = next.run(request).await;
     runtime.usage.tr_calls(Bundle::MarketOverview, total_trs_sent(&runtime).saturating_sub(before));
     drop(held);
-    let (response, cached) = cache_if_ok(response).await;
+    let (response, cached) = cache_if_ok(response, Some(now)).await;
     if let Some(cached) = cached {
         runtime.kiwoom.keep_market(key, Cached { at: runtime.clock.now().unix(), ..cached }, now);
     }
@@ -246,7 +280,7 @@ pub(super) async fn screener_status(State(runtime): State<Arc<Runtime>>, request
         return hit;
     }
     let response = next.run(request).await;
-    let (response, cached) = cache_if_ok(response).await;
+    let (response, cached) = cache_if_ok(response, None).await;
     if let Some(cached) = cached {
         *locked(&runtime.kiwoom.status_cache) = Some(Cached { at: now, ..cached });
     }

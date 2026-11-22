@@ -180,7 +180,11 @@ impl PublicListener {
             .merge(api)
             .fallback(move |method: Method, uri: Uri, headers: axum::http::HeaderMap| {
                 let site = site.clone();
-                async move { site.respond(&method, uri.path(), &headers) }
+                async move {
+                    let mut response = site.respond(&method, uri.path(), &headers);
+                    response.extensions_mut().insert(PreEncoded);
+                    response
+                }
             })
             .layer(from_fn_with_state(runtime.clone(), origin::check))
             .layer(RequestBodyLimitLayer::new(BODY_LIMIT_BYTES))
@@ -199,10 +203,25 @@ impl PublicListener {
     }
 }
 
+#[derive(Clone, Copy)]
+struct PreEncoded;
+
+#[derive(Clone, Copy)]
+struct NotPreEncoded;
+
+impl Predicate for NotPreEncoded {
+    fn should_compress<B>(&self, response: &axum::http::Response<B>) -> bool
+    where
+        B: axum::body::HttpBody,
+    {
+        response.extensions().get::<PreEncoded>().is_none()
+    }
+}
+
 pub fn compression() -> CompressionLayer<impl Predicate> {
     CompressionLayer::new()
         .quality(CompressionLevel::Precise(COMPRESSION_QUALITY))
-        .compress_when(DefaultPredicate::new().and(NotForContentType::const_new("font/woff2")).and(NotForContentType::const_new("font/woff")).and(NotForContentType::const_new("application/zip")))
+        .compress_when(DefaultPredicate::new().and(NotForContentType::const_new("font/woff2")).and(NotForContentType::const_new("font/woff")).and(NotForContentType::const_new("application/zip")).and(NotPreEncoded))
 }
 
 async fn v1_proxy(State(login): State<Router>, mut request: Request) -> Response {
