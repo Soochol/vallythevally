@@ -66,12 +66,14 @@ struct FakeKiwoom {
     origin: Instant,
     calls: Mutex<Vec<Call>>,
     failing: AtomicBool,
+    blank_traded: AtomicBool,
+    no_whole_index: AtomicBool,
     omitted: Mutex<HashSet<String>>,
 }
 
 impl FakeKiwoom {
     fn new() -> Arc<FakeKiwoom> {
-        Arc::new(FakeKiwoom { origin: Instant::now(), calls: Mutex::default(), failing: AtomicBool::new(false), omitted: Mutex::default() })
+        Arc::new(FakeKiwoom { origin: Instant::now(), calls: Mutex::default(), failing: AtomicBool::new(false), blank_traded: AtomicBool::new(false), no_whole_index: AtomicBool::new(false), omitted: Mutex::default() })
     }
 
     fn calls_of(&self, api: &str) -> Vec<(Duration, Option<String>)> {
@@ -124,13 +126,19 @@ impl Transport for FakeKiwoom {
             match api.as_str() {
                 "ka10095" => {
                     let omitted = self.omitted.lock().unwrap();
-                    let rows: Vec<Value> = stk_cd.unwrap().split('|').filter(|code| !omitted.contains(code.split('_').next().unwrap())).map(|code| quote_row(code, "20261118")).collect();
+                    let rows: Vec<Value> = stk_cd.unwrap().split('|').filter(|code| !omitted.contains(code.split('_').next().unwrap())).map(|code| quote_row(code, "20261118")).map(|mut row| {
+                        if self.blank_traded.load(Ordering::SeqCst) {
+                            row["trde_prica"] = json!("");
+                        }
+                        row
+                    }).collect();
                     reply(json!({"atn_stk_infr": rows, "return_code": 0, "return_msg": "정상"}))
                 }
                 "ka20003" => {
                     let whole = body["inds_cd"].as_str().unwrap();
+                    let hidden = self.no_whole_index.load(Ordering::SeqCst);
                     reply(json!({"all_inds_idex": [
-                        {"stk_cd": whole, "stk_nm": format!("종합{whole}"), "cur_prc": "-2650.12", "flu_rt": "-0.67", "rising": "410", "stdns": "52", "fall": "+498", "upl": "3", "lst": "0", "trde_prica": "13,485,976"},
+                        {"stk_cd": if hidden { "999" } else { whole }, "stk_nm": format!("종합{whole}"), "cur_prc": "-2650.12", "flu_rt": "-0.67", "rising": "410", "stdns": "52", "fall": "+498", "upl": "3", "lst": "0", "trde_prica": "13,485,976"},
                         {"stk_cd": "013", "stk_nm": "전기전자", "cur_prc": "+3100.50", "flu_rt": "+1.25", "trde_prica": "4000000"}
                     ], "return_code": 0, "return_msg": "정상"}))
                 }
@@ -370,4 +378,58 @@ async fn the_venue_option_picks_the_files_and_the_calls_and_a_missing_listing_is
     assert_eq!(lonely_fake.total(), 0, "종목 목록이 없으면 부르지 않는다");
     assert!(lonely_stats.last_error().is_some_and(|error| error.contains("전체 종목 행 파일이 없습니다")), "{:?}", lonely_stats.last_error());
     assert_eq!(lonely.failures(), 1);
+}
+
+fn files_of(folder: &Folder) -> Vec<Vec<u8>> {
+    [DataKind::SnapshotKrx, DataKind::SnapshotCombined, DataKind::SnapshotNxt].iter().map(|kind| std::fs::read(folder.file(*kind, 20261118)).unwrap()).collect()
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_response_with_no_readable_row_or_no_whole_index_row_fails_the_tick_and_keeps_the_previous_file() {
+    let folder = Folder::with_listing(&[20261118]);
+    let clock = Clock::fake(at(20261118, 10, 0, 0));
+    let fake = FakeKiwoom::new();
+    let (job, stats) = (Arc::new(SnapshotJob::default()), LoopStats::default());
+    let rest = rest_of(&fake, &clock);
+    let looping = job_loop(&job, 20261118, Slice::WHOLE, Value::Null);
+    run_for(&looping, &rest, "rest-01", &folder.shared(), &clock, &stats, 5).await;
+    let previous = files_of(&folder);
+    let as_of = board_of(&folder.shared(), Venue::Krx).header.as_of;
+    assert_eq!(job.failures(), 0);
+
+    fake.blank_traded.store(true, Ordering::SeqCst);
+    run_for(&looping, &rest, "rest-01", &folder.shared(), &clock, &stats, 30).await;
+    assert_eq!(job.failures(), 1, "읽히는 행이 하나도 없는 응답은 실패로 센다");
+    assert!(stats.last_error().is_some_and(|error| error.contains("읽히는 행이 하나도 없습니다")), "{:?}", stats.last_error());
+    assert_eq!(files_of(&folder), previous, "빈 판이 이전 판을 덮지 않는다");
+    assert_eq!(board_of(&folder.shared(), Venue::Krx).header.as_of, as_of, "받은 시각이 그대로라 서버가 낡음을 안다");
+
+    fake.blank_traded.store(false, Ordering::SeqCst);
+    fake.no_whole_index.store(true, Ordering::SeqCst);
+    run_for(&looping, &rest, "rest-01", &folder.shared(), &clock, &stats, 30).await;
+    assert_eq!(job.failures(), 2, "종합지수 행이 없는 응답도 실패로 센다");
+    assert!(stats.last_error().is_some_and(|error| error.contains("종합지수")), "{:?}", stats.last_error());
+    assert_eq!(files_of(&folder), previous);
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_listing_of_the_day_that_appears_after_a_fallback_replaces_the_earlier_days_list_from_the_next_tick() {
+    let folder = Folder::with_listing(&[20261117]);
+    let clock = Clock::fake(at(20261118, 10, 0, 0));
+    let fake = FakeKiwoom::new();
+    let (job, stats) = (Arc::new(SnapshotJob::default()), LoopStats::default());
+    let rest = rest_of(&fake, &clock);
+    let looping = job_loop(&job, 20261118, Slice::WHOLE, Value::Null);
+    run_for(&looping, &rest, "rest-01", &folder.shared(), &clock, &stats, 5).await;
+    assert_eq!(board_of(&folder.shared(), Venue::Krx).body.requested, STOCKS as u32, "그날 목록이 없으면 이전 날 것으로 돈다");
+
+    let today: Vec<ListedStock> = (0..STOCKS + 10).map(|index| ListedStock { code: code_of(index), nxt_enabled: index % 2 == 0 }).collect();
+    write_listing(folder.root.path(), &ListingFile { format_version: LISTING_FORMAT_VERSION, date: 20261118, fetched_at: "2026-11-18T10:00:10+09:00".into(), stocks: today }).unwrap();
+    run_for(&looping, &rest, "rest-01", &folder.shared(), &clock, &stats, 60).await;
+    let krx = board_of(&folder.shared(), Venue::Krx);
+    assert_eq!((krx.body.requested, krx.body.stocks.len()), (STOCKS as u32 + 10, STOCKS + 10), "그날 목록이 생기면 신규 종목도 받는다");
+
+    let calls_before = fake.total();
+    run_for(&looping, &rest, "rest-01", &folder.shared(), &clock, &stats, 30).await;
+    assert!(fake.total() > calls_before && job.failures() == 0, "그날 목록은 캐시되어 계속 돈다");
 }

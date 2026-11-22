@@ -9,7 +9,7 @@ use server::kiwoom::rest::KiwoomRest;
 use server::shared_data::{Broker, DataKind, snapshot_kind};
 
 use super::job::{JobCall, JobError, JobFuture, JobWindow, Market, SharedJob};
-use crate::universe::{ListedStock, read_listing_upto};
+use crate::universe::{ListedStock, listing_path, read_listing_upto};
 
 mod fetch;
 mod parts;
@@ -96,9 +96,15 @@ fn tick_after(now: KstTime, observation_date: KstDate) -> Tick {
     }
 }
 
+struct CachedListing {
+    observation_date: KstDate,
+    source_date: u32,
+    stocks: Arc<Vec<ListedStock>>,
+}
+
 #[derive(Default)]
 pub struct SnapshotJob {
-    listing: Mutex<Option<(KstDate, Arc<Vec<ListedStock>>)>>,
+    listing: Mutex<Option<CachedListing>>,
     failures: AtomicU64,
 }
 
@@ -108,17 +114,17 @@ impl SnapshotJob {
     }
 
     fn listed_on(&self, shared_dir: &Path, observation_date: KstDate) -> Result<Arc<Vec<ListedStock>>, JobError> {
-        let mut cached = self.listing.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-        if let Some((_, stocks)) = cached.as_ref().filter(|(day, _)| *day == observation_date) {
-            return Ok(stocks.clone());
-        }
         let data_dir = shared_dir.parent().ok_or_else(|| JobError(format!("공용 자료 폴더 {}의 위 폴더(데이터 폴더)를 알 수 없습니다", shared_dir.display())))?;
         let date: u32 = observation_date.yyyymmdd().parse().expect("날짜는 숫자 여덟 자리다");
+        let mut cached = self.listing.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        if let Some(kept) = cached.as_ref().filter(|kept| kept.observation_date == observation_date && (kept.source_date == date || !listing_path(data_dir, date).exists())) {
+            return Ok(kept.stocks.clone());
+        }
         let file = read_listing_upto(data_dir, date)
             .map_err(|error| JobError(error.to_string()))?
             .ok_or_else(|| JobError(format!("{} 아래에 {date} 이전의 전체 종목 행 파일이 없습니다", data_dir.join("listing").display())))?;
         let stocks = Arc::new(file.stocks);
-        *cached = Some((observation_date, stocks.clone()));
+        *cached = Some(CachedListing { observation_date, source_date: file.date, stocks: stocks.clone() });
         Ok(stocks)
     }
 

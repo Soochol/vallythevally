@@ -71,6 +71,9 @@ pub(super) async fn fetch_slice(rest: &KiwoomRest, units: &[Unit], venues: &[Ven
             Err(error) => failures.push(error),
         }
     }
+    for part in by_venue.values().filter(|part| part.requested > 0 && part.rows.is_empty()) {
+        failures.push(format!("{:?} 응답에서 읽히는 행이 하나도 없습니다({}종목 요청)", part.venue, part.requested));
+    }
     if let Some(first) = failures.first() {
         return Err(format!("묶음 {}개가 실패해 이 판을 쓰지 않습니다(첫 실패: {first})", failures.len()));
     }
@@ -96,8 +99,8 @@ async fn fetch_unit(rest: &KiwoomRest, unit: &Unit) -> Result<Fetched, String> {
         Unit::Index(market) => {
             let page = rest.call(&AllIndices::new(*market), None, Priority::Background, MergeScope::default()).await.map_err(|error| error.to_string())?;
             let whole = market.index_code();
-            let rows = page.body.rows().rows.into_iter().filter(|row| row.code == whole.as_str()).map(|row| IndexRow { code: row.code, name: row.name, level: row.level, change_rate: row.change_rate, trade_million_won: row.trade_million_won }).collect();
-            Ok(Fetched::Index(rows))
+            let row = page.body.rows().rows.into_iter().find(|row| row.code == whole.as_str()).ok_or_else(|| format!("ka20003 응답에 종합지수 {} 행이 없습니다", whole.as_str()))?;
+            Ok(Fetched::Index(vec![IndexRow { code: row.code, name: row.name, level: row.level, change_rate: row.change_rate, trade_million_won: row.trade_million_won }]))
         }
     }
 }
