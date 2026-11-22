@@ -134,11 +134,14 @@ impl KiwoomAuth {
     }
 
     pub fn rebind(&self, identity: Option<(Secret<String>, Secret<String>, Option<TokenFile>)>) {
-        let (state, halt) = match identity {
+        let (mut state, halt) = match identity {
             Some((app_key, app_secret, file)) => loaded_state(Some(Credentials::new(app_key, app_secret)), file),
             None => loaded_state(None, None),
         };
-        *self.lock() = state;
+        let mut current = self.lock();
+        state.issuing_for = current.issuing_for.take();
+        *current = state;
+        drop(current);
         self.halted.send_replace(halt);
     }
 

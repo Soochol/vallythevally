@@ -6,8 +6,7 @@ use std::time::Duration;
 use tokio::task::JoinHandle;
 
 use super::auth::KiwoomAuth;
-use super::ip_file::RegisteredIpFile;
-use super::key_file::{KEY_LIMIT, KeyFile, KeyId, KeyList, KeyOrigin, StartupKey, StoredKey, checked_alias, path_for_key, registered_ip_file};
+use super::key_file::{FileBases, KEY_LIMIT, KeyFile, KeyId, KeyList, KeyOrigin, KeyPaths, StartupKey, StoredKey, checked_alias, paths_for_key, registered_ip_file};
 use super::link::Link;
 use super::private_file::FileError;
 use super::rest::KiwoomRest;
@@ -17,7 +16,6 @@ use super::transport::Transport;
 use crate::api::{Broker, KiwoomEnvironment, RegisteredIp};
 use crate::clock::Clock;
 use crate::config::{KiwoomCredentials, Secret};
-use crate::instance::Held;
 
 struct LaneTasks {
     _stream: KiwoomStream,
@@ -51,23 +49,20 @@ pub struct LaneFactory {
     pub environment: KiwoomEnvironment,
     pub spacing: Option<Duration>,
     pub ws_url: Option<String>,
-    pub held: Held,
-    pub token_base: PathBuf,
-    pub registered_ip_base: PathBuf,
-    pub env_key_present: bool,
+    pub bases: FileBases,
 }
 
 impl LaneFactory {
-    pub fn token_file(&self, id: &KeyId) -> TokenFile {
-        TokenFile::held(path_for_key(&self.token_base, id, self.env_key_present), self.held).with_environment(self.environment)
+    pub fn token_file(&self, paths: &KeyPaths) -> TokenFile {
+        TokenFile::held(paths.token.clone(), self.bases.held).with_environment(self.environment)
     }
 
-    fn registered_ip_file(&self, id: &KeyId) -> RegisteredIpFile {
-        registered_ip_file(path_for_key(&self.registered_ip_base, id, self.env_key_present))
+    fn paths_for(&self, credentials: &KiwoomCredentials, first_claimant: bool) -> KeyPaths {
+        paths_for_key(&self.bases, self.environment, credentials, first_claimant)
     }
 
-    fn account_lane(&self, id: &KeyId, credentials: &KiwoomCredentials) -> Lane {
-        let auth = KiwoomAuth::new(credentials.app_key.clone(), credentials.app_secret.clone(), Some(self.token_file(id)));
+    fn account_lane(&self, paths: &KeyPaths, credentials: &KiwoomCredentials) -> Lane {
+        let auth = KiwoomAuth::new(credentials.app_key.clone(), credentials.app_secret.clone(), Some(self.token_file(paths)));
         let rest = match self.spacing {
             None => KiwoomRest::for_environment(self.transport.clone(), auth, self.clock.clone(), self.environment),
             Some(spacing) => KiwoomRest::build(self.transport.clone(), auth, self.clock.clone(), spacing, self.environment),
@@ -126,6 +121,7 @@ struct Entry {
     origin: KeyOrigin,
     broker: Broker,
     credentials: KiwoomCredentials,
+    paths: KeyPaths,
     lane: Lane,
     registered_ip: Option<RegisteredIp>,
 }
@@ -185,7 +181,7 @@ fn app_key_tail(app_key: &str) -> Option<String> {
 }
 
 fn identity(factory: &LaneFactory, entry: &Entry) -> Option<(Secret<String>, Secret<String>, Option<TokenFile>)> {
-    Some((entry.credentials.app_key.clone(), entry.credentials.app_secret.clone(), Some(factory.token_file(&entry.id))))
+    Some((entry.credentials.app_key.clone(), entry.credentials.app_secret.clone(), Some(factory.token_file(&entry.paths))))
 }
 
 impl KeyRing {
@@ -195,8 +191,8 @@ impl KeyRing {
 
     pub fn new(setup: KeySetup, market_lane: Lane) -> KeyRing {
         let KeySetup { store, keys, market, factory } = setup;
-        let load_ip = |id: &KeyId| {
-            factory.registered_ip_file(id).load().unwrap_or_else(|e| {
+        let load_ip = |path: &PathBuf| {
+            registered_ip_file(path.clone()).load().unwrap_or_else(|e| {
                 tracing::warn!(error = %e, "등록한 IP 기록을 읽지 못했습니다. 없는 것으로 봅니다");
                 None
             })
@@ -204,12 +200,12 @@ impl KeyRing {
         let entries: Vec<Entry> = keys
             .into_iter()
             .map(|key| {
-                let lane = if Some(&key.id) == market.as_ref() { market_lane.clone() } else { factory.account_lane(&key.id, &key.credentials) };
-                let registered_ip = load_ip(&key.id);
-                Entry { id: key.id, alias: key.alias, origin: key.origin, broker: key.broker, credentials: key.credentials, lane, registered_ip }
+                let lane = if Some(&key.id) == market.as_ref() { market_lane.clone() } else { factory.account_lane(&key.paths, &key.credentials) };
+                let registered_ip = load_ip(&key.paths.registered_ip);
+                Entry { id: key.id, alias: key.alias, origin: key.origin, broker: key.broker, credentials: key.credentials, paths: key.paths, lane, registered_ip }
             })
             .collect();
-        let idle_registered_ip = if entries.is_empty() { load_ip(&KeyId::numbered(1)) } else { None };
+        let idle_registered_ip = if entries.is_empty() { load_ip(&factory.bases.registered_ip) } else { None };
         KeyRing { inner: Mutex::new(Inner { entries, market, idle_registered_ip }), store: Some(store), factory: Some(factory), market_lane }
     }
 
@@ -261,8 +257,8 @@ impl KeyRing {
     pub fn record_registered_ip(&self, registered: RegisteredIp) -> Result<(), KeyError> {
         let factory = self.factory.as_ref().ok_or(KeyError::NoStore)?;
         let mut inner = self.lock();
-        let id = inner.market.clone().unwrap_or_else(|| KeyId::numbered(1));
-        factory.registered_ip_file(&id).save(&registered).map_err(KeyError::File)?;
+        let path = inner.market.as_ref().and_then(|market| inner.entries.iter().find(|entry| entry.id == *market)).map_or_else(|| factory.bases.registered_ip.clone(), |entry| entry.paths.registered_ip.clone());
+        registered_ip_file(path).save(&registered).map_err(KeyError::File)?;
         match inner.market.clone() {
             Some(market) => {
                 if let Some(entry) = inner.entries.iter_mut().find(|entry| entry.id == market) {
@@ -308,9 +304,10 @@ impl KeyRing {
             proposed.market = Some(id.clone());
         }
         self.persist(&proposed)?;
-        let lane = if first { self.market_lane.clone() } else { factory.account_lane(&id, &credentials) };
-        let registered_ip = factory.registered_ip_file(&id).load().ok().flatten();
-        let entry = Entry { id: id.clone(), alias, origin: KeyOrigin::File, broker: Broker::Kiwoom, credentials, lane, registered_ip };
+        let paths = factory.paths_for(&credentials, first);
+        let lane = if first { self.market_lane.clone() } else { factory.account_lane(&paths, &credentials) };
+        let registered_ip = registered_ip_file(paths.registered_ip.clone()).load().ok().flatten();
+        let entry = Entry { id: id.clone(), alias, origin: KeyOrigin::File, broker: Broker::Kiwoom, credentials, paths, lane, registered_ip };
         if first {
             inner.market = Some(id.clone());
             inner.idle_registered_ip = None;
@@ -367,11 +364,14 @@ impl KeyRing {
             self.swap_market(&mut inner, at, successor);
         }
         let removed = inner.entries.remove(at);
-        removed.lane.link.clear_key();
         if was_market && successor.is_none() {
+            removed.lane.link.clear_key();
             inner.market = None;
-        } else if successor.is_some() {
-            self.market_lane.link.connect_at_start();
+        } else {
+            removed.lane.link.disconnect();
+            if successor.is_some() {
+                self.market_lane.link.connect_at_start();
+            }
         }
         Ok(())
     }

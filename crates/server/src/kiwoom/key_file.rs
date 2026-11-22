@@ -6,7 +6,8 @@ use super::ip_file::RegisteredIpFile;
 use super::private_file::{FileError, PrivateFile};
 use crate::api::{Broker, KiwoomEnvironment};
 use crate::config::{KiwoomCredentials, Secret};
-use crate::instance::InstanceLock;
+use super::token_file::{TokenFile, credential_id};
+use crate::instance::{Held, InstanceLock};
 
 pub const KEY_LIMIT: usize = 5;
 pub const KEY_LIST_FILE_NAME: &str = "kiwoom-keys.json";
@@ -70,7 +71,11 @@ pub struct KeyList {
 
 impl KeyList {
     pub fn next_id(&self) -> KeyId {
-        KeyId::numbered(self.keys.iter().filter_map(|key| key.id.number()).max().unwrap_or(0) + 1)
+        let after_largest = KeyId::numbered(self.keys.iter().filter_map(|key| key.id.number()).max().unwrap_or(0).saturating_add(1));
+        if self.keys.iter().all(|key| key.id != after_largest) {
+            return after_largest;
+        }
+        (1..).map(KeyId::numbered).find(|id| self.keys.iter().all(|key| key.id != *id)).expect("키는 5개까지라 빈 번호가 있다")
     }
 }
 
@@ -211,17 +216,40 @@ pub fn registered_ip_file(path: PathBuf) -> RegisteredIpFile {
     RegisteredIpFile::new(PrivateFile::new(path))
 }
 
-pub fn path_for_key(base: &Path, id: &KeyId, env_key_present: bool) -> PathBuf {
-    let owns_base = *id == KeyId::env() || (!env_key_present && *id == KeyId::numbered(1));
-    if owns_base {
-        return base.to_owned();
-    }
+pub struct FileBases {
+    pub token: PathBuf,
+    pub registered_ip: PathBuf,
+    pub held: Held,
+}
+
+#[derive(Debug, Clone)]
+pub struct KeyPaths {
+    pub token: PathBuf,
+    pub registered_ip: PathBuf,
+}
+
+fn derived(base: &Path, credential: &str) -> PathBuf {
+    let tag: String = credential.trim_start_matches("sha256:").chars().take(8).collect();
     let stem = base.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
     let name = match base.extension() {
-        Some(ext) => format!("{stem}.{id}.{}", ext.to_string_lossy()),
-        None => format!("{stem}.{id}"),
+        Some(ext) => format!("{stem}.{tag}.{}", ext.to_string_lossy()),
+        None => format!("{stem}.{tag}"),
     };
     base.with_file_name(name)
+}
+
+pub fn paths_for_key(bases: &FileBases, environment: KiwoomEnvironment, credentials: &KiwoomCredentials, first_claimant: bool) -> KeyPaths {
+    let credential = credential_id(credentials.app_key.expose());
+    let owner = TokenFile::held(bases.token.clone(), bases.held).with_environment(environment).load().ok().flatten().and_then(|saved| saved.credential);
+    let owns_base = match owner {
+        Some(owner) => owner == credential,
+        None => first_claimant,
+    };
+    if owns_base {
+        KeyPaths { token: bases.token.clone(), registered_ip: bases.registered_ip.clone() }
+    } else {
+        KeyPaths { token: derived(&bases.token, &credential), registered_ip: derived(&bases.registered_ip, &credential) }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -231,6 +259,7 @@ pub struct StartupKey {
     pub origin: KeyOrigin,
     pub broker: Broker,
     pub credentials: KiwoomCredentials,
+    pub paths: KeyPaths,
 }
 
 pub struct StartupKeys {
@@ -239,8 +268,12 @@ pub struct StartupKeys {
     pub file_problem: Option<FileError>,
 }
 
-pub fn startup_keys(env: Option<KiwoomCredentials>, file: &KeyFile, environment: KiwoomEnvironment) -> StartupKeys {
-    let mut keys: Vec<StartupKey> = env.into_iter().map(|credentials| StartupKey { id: KeyId::env(), alias: ENV_KEY_ALIAS.to_owned(), origin: KeyOrigin::Env, broker: Broker::Kiwoom, credentials }).collect();
+pub fn startup_keys(env: Option<KiwoomCredentials>, file: &KeyFile, environment: KiwoomEnvironment, bases: &FileBases) -> StartupKeys {
+    let mut keys: Vec<StartupKey> = Vec::new();
+    if let Some(credentials) = env {
+        let paths = paths_for_key(bases, environment, &credentials, true);
+        keys.push(StartupKey { id: KeyId::env(), alias: ENV_KEY_ALIAS.to_owned(), origin: KeyOrigin::Env, broker: Broker::Kiwoom, credentials, paths });
+    }
     if environment == KiwoomEnvironment::Mock {
         let market = keys.first().map(|key| key.id.clone());
         return StartupKeys { keys, market, file_problem: None };
@@ -257,7 +290,8 @@ pub fn startup_keys(env: Option<KiwoomCredentials>, file: &KeyFile, environment:
             tracing::warn!("키 목록의 키가 환경 설정 키와 같아 한 번만 씁니다");
             continue;
         }
-        keys.push(StartupKey { id: stored.id, alias: stored.alias, origin: KeyOrigin::File, broker: stored.broker, credentials: stored.credentials });
+        let paths = paths_for_key(bases, environment, &stored.credentials, keys.is_empty());
+        keys.push(StartupKey { id: stored.id, alias: stored.alias, origin: KeyOrigin::File, broker: stored.broker, credentials: stored.credentials, paths });
     }
     let market = list.market.filter(|id| keys.iter().any(|key| key.id == *id)).or_else(|| keys.first().map(|key| key.id.clone()));
     StartupKeys { keys, market, file_problem }
@@ -267,6 +301,7 @@ pub fn startup_keys(env: Option<KiwoomCredentials>, file: &KeyFile, environment:
 mod tests {
     use std::os::unix::fs::PermissionsExt;
 
+    use super::super::token_file::Saved;
     use super::*;
 
     fn temp_key_file() -> (tempfile::TempDir, InstanceLock, KeyFile) {
@@ -274,6 +309,11 @@ mod tests {
         let lock = InstanceLock::acquire(&dir.path().join("server.lock")).unwrap();
         let file = KeyFile::new(dir.path().join("state/vallythevally/kiwoom-key.json"), &lock);
         (dir, lock, file)
+    }
+
+    fn bases(dir: &tempfile::TempDir) -> FileBases {
+        let lock = InstanceLock::acquire(&dir.path().join("bases.lock")).unwrap();
+        FileBases { token: dir.path().join("state/vallythevally/token.json"), registered_ip: dir.path().join("state/vallythevally/kiwoom-ip.json"), held: lock.held() }
     }
 
     fn credentials(key: &str, secret: &str) -> KiwoomCredentials {
@@ -369,38 +409,56 @@ mod tests {
 
     #[test]
     fn the_environment_key_leads_the_list_and_the_file_keys_follow() {
-        let (_dir, _lock, file) = temp_key_file();
+        let (dir, _lock, file) = temp_key_file();
         file.save(&KeyList { keys: vec![stored(1, "파일", "FAKE-APPKEY-file")], market: None }).unwrap();
-        let startup = startup_keys(Some(credentials("FAKE-APPKEY-env", "FAKE-SECRET-env")), &file, KiwoomEnvironment::Real);
+        let startup = startup_keys(Some(credentials("FAKE-APPKEY-env", "FAKE-SECRET-env")), &file, KiwoomEnvironment::Real, &bases(&dir));
         assert_eq!(startup.keys.iter().map(|k| (k.id.as_str(), k.origin)).collect::<Vec<_>>(), [("env", KeyOrigin::Env), ("k1", KeyOrigin::File)]);
         assert_eq!(startup.market, Some(KeyId::env()));
         file.save(&KeyList { keys: vec![stored(1, "파일", "FAKE-APPKEY-file")], market: Some(KeyId::numbered(1)) }).unwrap();
-        assert_eq!(startup_keys(Some(credentials("FAKE-APPKEY-env", "s")), &file, KiwoomEnvironment::Real).market, Some(KeyId::numbered(1)));
-        let duplicate = startup_keys(Some(credentials("FAKE-APPKEY-file", "s")), &file, KiwoomEnvironment::Real);
+        assert_eq!(startup_keys(Some(credentials("FAKE-APPKEY-env", "s")), &file, KiwoomEnvironment::Real, &bases(&dir)).market, Some(KeyId::numbered(1)));
+        let duplicate = startup_keys(Some(credentials("FAKE-APPKEY-file", "s")), &file, KiwoomEnvironment::Real, &bases(&dir));
         assert_eq!(duplicate.keys.len(), 1, "같은 앱키는 한 번만 쓴다");
     }
 
     #[test]
     fn a_bad_file_leaves_only_the_environment_key_and_reports_the_problem() {
-        let (_dir, _lock, file) = temp_key_file();
+        let (dir, _lock, file) = temp_key_file();
         file.save(&KeyList { keys: vec![stored(1, "파일", "FAKE-APPKEY-file")], market: None }).unwrap();
         std::fs::set_permissions(file.path(), std::fs::Permissions::from_mode(0o644)).unwrap();
-        let startup = startup_keys(Some(credentials("FAKE-APPKEY-env", "s")), &file, KiwoomEnvironment::Real);
+        let startup = startup_keys(Some(credentials("FAKE-APPKEY-env", "s")), &file, KiwoomEnvironment::Real, &bases(&dir));
         assert_eq!(startup.keys.len(), 1);
         assert!(startup.file_problem.is_some());
-        let keyless = startup_keys(None, &file, KiwoomEnvironment::Real);
+        let keyless = startup_keys(None, &file, KiwoomEnvironment::Real, &bases(&dir));
         assert!(keyless.keys.is_empty() && keyless.market.is_none() && keyless.file_problem.is_some());
-        let mock = startup_keys(None, &file, KiwoomEnvironment::Mock);
+        let mock = startup_keys(None, &file, KiwoomEnvironment::Mock, &bases(&dir));
         assert!(mock.keys.is_empty() && mock.file_problem.is_none(), "모의 서버는 키 파일을 읽지 않으므로 문제도 모른다");
         std::fs::set_permissions(file.path(), std::fs::Permissions::from_mode(0o600)).unwrap();
-        assert!(startup_keys(None, &file, KiwoomEnvironment::Mock).keys.is_empty(), "읽을 수 있는 키 파일이 있어도 모의 서버는 쓰지 않는다");
+        assert!(startup_keys(None, &file, KiwoomEnvironment::Mock, &bases(&dir)).keys.is_empty(), "읽을 수 있는 키 파일이 있어도 모의 서버는 쓰지 않는다");
     }
 
     #[test]
-    fn key_files_do_not_share_paths() {
-        let base = Path::new("/s/token.json");
-        let paths = [path_for_key(base, &KeyId::numbered(1), false), path_for_key(base, &KeyId::numbered(2), false), path_for_key(base, &KeyId::numbered(1), true), path_for_key(base, &KeyId::env(), true)];
-        assert_eq!(paths.map(|p| p.display().to_string()), ["/s/token.json", "/s/token.k2.json", "/s/token.k1.json", "/s/token.json"]);
+    fn base_files_follow_the_app_key_not_the_key_id_or_the_presence_of_an_environment_key() {
+        let (dir, _lock, _file) = temp_key_file();
+        let bases = bases(&dir);
+        let (first, second) = (credentials("FAKE-APPKEY-paths-1", "s"), credentials("FAKE-APPKEY-paths-2", "s"));
+        let environment = KiwoomEnvironment::Real;
+        assert_eq!(paths_for_key(&bases, environment, &first, true).token, bases.token, "아무도 쓰지 않은 기본 파일은 첫 키가 쓴다");
+        assert_ne!(paths_for_key(&bases, environment, &second, false).token, bases.token);
+        let claimed = Saved { credential: Some(credential_id("FAKE-APPKEY-paths-1")), ..Saved::default() };
+        TokenFile::held(bases.token.clone(), bases.held).save(&claimed).unwrap();
+        assert_eq!(paths_for_key(&bases, environment, &first, false).token, bases.token, "목록의 순서가 바뀌어도 앱키가 같으면 같은 파일이다");
+        assert_ne!(paths_for_key(&bases, environment, &second, true).token, bases.token, "다른 앱키가 쓰던 기본 파일을 첫 키라고 가져가지 않는다");
+        let derived = paths_for_key(&bases, environment, &second, true);
+        assert_eq!(derived.token, paths_for_key(&bases, environment, &second, false).token);
+        let name = derived.registered_ip.file_name().unwrap().to_string_lossy().into_owned();
+        assert!(name.starts_with("kiwoom-ip.") && name.ends_with(".json") && name != "kiwoom-ip.json", "{name}");
+        assert_ne!(derived.token, derived.registered_ip);
+    }
+
+    #[test]
+    fn a_huge_key_number_does_not_overflow_the_next_id() {
+        let list = KeyList { keys: vec![stored(u32::MAX, "a", "a")], market: None };
+        assert_eq!(list.next_id(), KeyId::numbered(1));
     }
 
     #[test]

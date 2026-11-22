@@ -33,7 +33,7 @@ use crate::screener::Screener;
 use crate::screener::store::Store;
 use crate::symbols::SymbolDirectory;
 use crate::system_routes::SystemState;
-use crate::kiwoom::key_file::{KeyFile, path_for_key, startup_keys};
+use crate::kiwoom::key_file::{FileBases, KeyFile, KeyPaths, startup_keys};
 use crate::kiwoom::keys::{KeyRing, KeySetup, Lane, LaneFactory};
 
 const DAILY_RESET_AT: TimeOfDay = match TimeOfDay::hms(7, 45, 0) {
@@ -232,12 +232,12 @@ pub async fn start(config: &Config, lock: &InstanceLock, adapters: Adapters) -> 
             Clock::fake(start)
         }
     };
-    let env_key = config.kiwoom_credentials.is_some();
-    let startup = startup_keys(config.kiwoom_credentials.clone(), &key_file, config.kiwoom_environment);
-    let token_file_for = |id: &crate::kiwoom::key_file::KeyId| TokenFile::held(path_for_key(&config.token_path, id, env_key), lock.held()).with_environment(config.kiwoom_environment);
+    let bases = FileBases { token: config.token_path.clone(), registered_ip: config.kiwoom_key_path.with_file_name(crate::config::REGISTERED_IP_FILE_NAME), held: lock.held() };
+    let startup = startup_keys(config.kiwoom_credentials.clone(), &key_file, config.kiwoom_environment, &bases);
+    let token_file_for = |paths: &KeyPaths| TokenFile::held(paths.token.clone(), lock.held()).with_environment(config.kiwoom_environment);
     let market_key = startup.market.as_ref().and_then(|market| startup.keys.iter().find(|key| key.id == *market));
     let auth = match market_key {
-        Some(key) => KiwoomAuth::new(key.credentials.app_key.clone(), key.credentials.app_secret.clone(), Some(token_file_for(&key.id))),
+        Some(key) => KiwoomAuth::new(key.credentials.app_key.clone(), key.credentials.app_secret.clone(), Some(token_file_for(&key.paths))),
         None => KiwoomAuth::keyless(Some(TokenFile::new(config.token_path.clone(), lock).with_environment(config.kiwoom_environment))),
     };
     let lane_transport = kiwoom.clone();
@@ -280,7 +280,7 @@ pub async fn start(config: &Config, lock: &InstanceLock, adapters: Adapters) -> 
         };
         collector = Some(board.with_webhook(webhook));
     }
-    let factory = LaneFactory { transport: lane_transport, clock: clock.clone(), environment: config.kiwoom_environment, spacing: kiwoom_spacing, ws_url: lane_ws_url, held: lock.held(), token_base: config.token_path.clone(), registered_ip_base: config.kiwoom_key_path.with_file_name(crate::config::REGISTERED_IP_FILE_NAME), env_key_present: env_key };
+    let factory = LaneFactory { transport: lane_transport, clock: clock.clone(), environment: config.kiwoom_environment, spacing: kiwoom_spacing, ws_url: lane_ws_url, bases };
     let key_setup = KeySetup { store: key_file, keys: startup.keys, market: startup.market, factory };
     let system = SystemState::new(key_setup, startup.file_problem, crate::api::SystemSettings::from_config(config)).with_public_ip(Arc::new(public_ip)).with_account(account).with_collector(collector).with_tailnet_hosts(config.tailnet_hosts.clone());
     let state = application_with_system(ApplicationInputs { rest: rest.clone(), clock: clock.clone(), symbols: symbols.clone(), db, screener_store, stream, static_dir: config.static_dir.clone(), screener_update_on_connect: config.screener_update_on_start }, system);

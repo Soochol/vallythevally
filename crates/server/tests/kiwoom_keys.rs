@@ -398,3 +398,84 @@ async fn renaming_and_deleting_keys_and_handing_the_market_to_the_next_key() {
     assert!(!env.list_path().exists(), "키가 하나도 없으면 목록 파일을 지운다");
     server.stop().await;
 }
+
+fn issued_for(fake: &ScriptedTransport, app_key: &str) -> usize {
+    fake.calls().into_iter().filter(|call| call.api_id == "au10001" && call.body["appkey"] == app_key).count()
+}
+
+#[tokio::test]
+async fn adding_an_environment_key_later_keeps_the_blocked_file_key_blocked() {
+    let fake = ScriptedTransport::new();
+    let env = Env::new();
+    fake.script("au10001", vec![ScriptedReply { status: 200, body: json!({"return_code": 3, "return_msg": EIGHT_FIFTY}), delay: Duration::ZERO }]);
+    let server = env.spawn(&fake, &[OFF]);
+    let client = Client::of(&server).await;
+    assert_eq!(client.put_market_credentials(FIRST_KEY, FIRST_SECRET).await.0, 200);
+    client.until_key_state("k1", "failed").await;
+    server.stop().await;
+
+    let restarted_fake = ScriptedTransport::new();
+    let restarted = env.spawn(&restarted_fake, &[START, ("VALLY_KIWOOM_APP_KEY", ENV_KEY), ("VALLY_KIWOOM_APP_SECRET", "FAKE-SECRET-keys-env")]);
+    let client = Client::of(&restarted).await;
+    let blocked = client.until_key_state("k1", "failed").await;
+    assert_eq!(blocked["link"]["problem"], "authBlocked8050", "{blocked}");
+    client.until_key_state("env", "connected").await;
+    assert_eq!(issued_for(&restarted_fake, FIRST_KEY), 0, "환경 키가 생겨도 막힌 키는 발급을 보내지 않는다");
+    restarted.stop().await;
+}
+
+#[tokio::test]
+async fn removing_a_blocked_key_and_adding_the_same_app_key_back_keeps_it_blocked() {
+    let fake = ScriptedTransport::new();
+    let env = Env::new();
+    let server = env.spawn(&fake, &[OFF]);
+    let client = Client::of(&server).await;
+    assert_eq!(client.put_market_credentials(FIRST_KEY, FIRST_SECRET).await.0, 200);
+    client.until_key_state("k1", "connected").await;
+    fake.script("au10001", vec![ScriptedReply { status: 200, body: json!({"return_code": 3, "return_msg": EIGHT_FIFTY}), delay: Duration::ZERO }]);
+    assert_eq!(client.add("막힌 키", SECOND_KEY, SECOND_SECRET).await.0, 200);
+    client.until_key_state("k2", "failed").await;
+    assert_eq!(client.send(reqwest::Method::DELETE, "/api/system/kiwoom/keys/k2", None).await.0, 200);
+    assert_eq!(client.add("다시 넣은 키", SECOND_KEY, SECOND_SECRET).await.0, 200);
+    let readded = client.until_key_state("k2", "failed").await;
+    assert_eq!(readded["link"]["problem"], "authBlocked8050", "{readded}");
+    assert_eq!(issued_for(&fake, SECOND_KEY), 1, "지웠다 다시 넣어도 같은 앱키는 막힌 채다");
+    server.stop().await;
+}
+
+#[tokio::test]
+async fn a_token_request_in_flight_when_the_market_key_changes_is_not_credited_to_the_other_key() {
+    let fake = ScriptedTransport::new();
+    let env = Env::new();
+    let server = env.spawn(&fake, &[OFF]);
+    let client = Client::of(&server).await;
+    assert_eq!(client.put_market_credentials(FIRST_KEY, FIRST_SECRET).await.0, 200);
+    client.until_key_state("k1", "connected").await;
+    fake.script("au10001", vec![ScriptedReply { status: 200, body: json!({"return_code": 3, "return_msg": EIGHT_FIFTY}), delay: Duration::from_millis(800) }]);
+    assert_eq!(client.add("둘째", SECOND_KEY, SECOND_SECRET).await.0, 200);
+    until("둘째 키의 발급 요청", || async { (issued_for(&fake, SECOND_KEY) == 1).then_some(()) }).await;
+    assert_eq!(client.designate("k2").await.0, 200);
+    tokio::time::sleep(Duration::from_millis(1500)).await;
+    let first = client.key("k1").await;
+    assert_ne!(first["link"]["problem"], "authBlocked8050", "k1은 그 요청을 보내지 않았다: {first}");
+    assert_eq!(issued_for(&fake, FIRST_KEY), 1, "k1은 토큰을 다시 받지 않는다");
+    server.stop().await;
+}
+
+#[tokio::test]
+async fn a_token_received_while_the_market_key_changes_is_not_saved_in_the_other_keys_file() {
+    let fake = ScriptedTransport::new();
+    let env = Env::new();
+    let server = env.spawn(&fake, &[OFF]);
+    let client = Client::of(&server).await;
+    assert_eq!(client.put_market_credentials(FIRST_KEY, FIRST_SECRET).await.0, 200);
+    client.until_key_state("k1", "connected").await;
+    fake.delay("au10001", Duration::from_millis(800));
+    assert_eq!(client.add("둘째", SECOND_KEY, SECOND_SECRET).await.0, 200);
+    until("둘째 키의 발급 요청", || async { (issued_for(&fake, SECOND_KEY) == 1).then_some(()) }).await;
+    assert_eq!(client.designate("k2").await.0, 200);
+    tokio::time::sleep(Duration::from_millis(1500)).await;
+    let first_file = std::fs::read_to_string(env.lock.parent().unwrap().join("token.json")).unwrap();
+    assert!(!first_file.contains(&token_for(SECOND_KEY)), "k1의 토큰 파일에 k2의 토큰이 들어갔다");
+    server.stop().await;
+}

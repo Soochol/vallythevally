@@ -206,7 +206,7 @@ async fn a_key_file_others_can_read_is_not_read_and_the_status_names_the_cause()
     client.until_state("connected").await;
     server.stop().await;
     let sent = fake.requests();
-    std::fs::set_permissions(&env.list_path(), std::fs::Permissions::from_mode(0o644)).unwrap();
+    std::fs::set_permissions(env.list_path(), std::fs::Permissions::from_mode(0o644)).unwrap();
 
     let restarted = env.spawn(&fake, &[]);
     let client = Client::of(&restarted).await;
@@ -281,7 +281,7 @@ async fn mock_server_connects_with_the_mock_key_only() {
     assert_eq!(client.put_key(APP_KEY, APP_SECRET).await.0, 200);
     assert_eq!(client.until_state("connected").await["keySource"], "file");
     real.stop().await;
-    let key_file_before = std::fs::read(&env.list_path()).unwrap();
+    let key_file_before = std::fs::read(env.list_path()).unwrap();
     let issued_before = fake.seen.token_bodies.lock().unwrap().len();
 
     let mock_env = Env { key_path: env.key_path.clone(), ..Env::new() };
@@ -292,7 +292,7 @@ async fn mock_server_connects_with_the_mock_key_only() {
     let bodies = fake.seen.token_bodies.lock().unwrap().clone();
     assert_eq!(bodies.len(), issued_before + 1, "{bodies:?}");
     assert_eq!((bodies[issued_before]["appkey"].as_str(), bodies[issued_before]["secretkey"].as_str()), (Some(MOCK_APP_KEY), Some(MOCK_APP_SECRET)), "발급 요청은 모의 키만 담는다");
-    assert_eq!(std::fs::read(&env.list_path()).unwrap(), key_file_before, "모의 서버는 실전 키 파일을 읽지도 쓰지도 않는다");
+    assert_eq!(std::fs::read(env.list_path()).unwrap(), key_file_before, "모의 서버는 실전 키 파일을 읽지도 쓰지도 않는다");
     assert_no_secret("연결 응답", &connected.to_string());
     let logs = server.stop().await;
     assert!(!logs.contains(MOCK_APP_KEY) && !logs.contains(MOCK_APP_SECRET), "{logs}");
@@ -491,7 +491,7 @@ async fn a_write_from_another_site_host_or_content_type_is_refused_and_leaves_th
     assert_eq!(client.put_key(APP_KEY, APP_SECRET).await.0, 200);
     client.until_state("connected").await;
     let sent = fake.requests();
-    let saved = std::fs::read(&env.list_path()).unwrap();
+    let saved = std::fs::read(env.list_path()).unwrap();
 
     let evil_host = client.put_request(OTHER_APP_KEY, OTHER_APP_SECRET).header("host", format!("evil.example:{}", client.port));
     let evil_origin = client.put_request(OTHER_APP_KEY, OTHER_APP_SECRET).header("origin", "https://evil.example");
@@ -506,7 +506,7 @@ async fn a_write_from_another_site_host_or_content_type_is_refused_and_leaves_th
         assert_eq!(status, 400, "{name}: {body}");
         assert_eq!(body["error"]["code"], "bad_request", "{name}: {body}");
         assert_no_secret(name, &body.to_string());
-        assert_eq!(std::fs::read(&env.list_path()).unwrap(), saved, "{name}");
+        assert_eq!(std::fs::read(env.list_path()).unwrap(), saved, "{name}");
     }
     let (_, status) = client.get("/api/system/kiwoom").await;
     assert_eq!((status["state"].as_str(), status["appKeyTail"].as_str()), (Some("connected"), Some("7Q2D")));
