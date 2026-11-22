@@ -1386,6 +1386,9 @@ pub struct DayHistory<T> {
     pub days: Vec<T>,
     pub skipped_days: Vec<SkippedDay>,
     pub undated_rows: Vec<UndatedRow>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub estimated_days: Option<Vec<KstDate>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]

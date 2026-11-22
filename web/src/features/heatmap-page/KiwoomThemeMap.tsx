@@ -64,6 +64,7 @@ function ThemeTile({ theme, rect, range, href }: TileProps) {
 
 export function KiwoomThemeMap({ themes, range, hrefOf }: MapProps) {
   const rects = useMemo(() => arrangeThemes(themes, MAP_WIDTH, MAP_HEIGHT), [themes]);
+  const byId = useMemo(() => new Map(themes.map((theme) => [theme.id, theme] as const)), [themes]);
   return (
     <section className="hm-group hm-theme-map" aria-label="키움 테마 지도">
       <header className="hm-group-head">
@@ -71,12 +72,12 @@ export function KiwoomThemeMap({ themes, range, hrefOf }: MapProps) {
           <h2>키움 테마</h2>
           <span>{themes.length}개</span>
         </div>
-        <p className="hm-summary">칸 크기 = 테마 거래대금 합 · 칸 색 = 거래대금 가중 평균 등락률 · 칸을 누르면 그 테마의 종목 지도를 봅니다</p>
+        <p className="hm-summary">칸 크기 = 테마 거래대금 합(제곱근으로 줄임) · 큰 테마부터 · 칸 색 = 거래대금 가중 평균 등락률 · 칸을 누르면 그 테마의 종목 지도를 봅니다</p>
       </header>
       <div className="hm-map" role="group" aria-label="키움 테마 칸">
-        {themes.map((theme) => {
-          const rect = rects.get(theme.id);
-          return rect ? <ThemeTile key={theme.id} theme={theme} rect={rect} range={range} href={hrefOf(theme.id)} /> : null;
+        {[...rects].map(([id, rect]) => {
+          const theme = byId.get(id);
+          return theme ? <ThemeTile key={id} theme={theme} rect={rect} range={range} href={hrefOf(id)} /> : null;
         })}
       </div>
     </section>

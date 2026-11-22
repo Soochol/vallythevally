@@ -13,18 +13,28 @@ const theme = (id: string, traded: number | null): HeatmapBoardTheme => ({
 
 const catalog = (state: KiwoomCatalogInfo["state"], date: string | null = null): KiwoomCatalogInfo => ({ date, collectedAt: null, themes: 0, state });
 
-test("칸 무게는 테마 거래대금 합이고 시세가 없는 테마는 가장 작은 값을 받는다", () => {
-  expect(themeTileWeights([theme("a", 3_000_000), theme("b", 1_000_000), theme("c", null)])).toEqual([3_000_000, 1_000_000, 1_000_000]);
+test("칸 무게는 테마 거래대금 합의 제곱근이고 시세가 없는 테마는 가장 작은 값을 받는다", () => {
+  expect(themeTileWeights([theme("a", 9_000_000), theme("b", 1_000_000), theme("c", null)])).toEqual([3_000, 1_000, 1_000]);
 });
 
 test("거래대금이 하나도 없으면 모든 테마가 같은 무게다", () => {
   expect(themeTileWeights([theme("a", null), theme("b", 0)])).toEqual([1, 1]);
 });
 
-test("아주 작은 테마도 전체의 0.1% 넓이는 받아 지도에서 사라지지 않는다", () => {
-  const themes = [theme("big", 1_000_000_000), theme("tiny", 1)];
-  const [, tiny] = themeTileWeights(themes);
-  expect(tiny).toBeCloseTo(1_000_000, 0);
+test("아주 작은 테마도 전체 무게의 0.1%는 받아 지도에서 사라지지 않는다", () => {
+  const themes = [theme("big", 1_000_000_000_000), theme("tiny", 1)];
+  const [big, tiny] = themeTileWeights(themes);
+  expect(big).toBe(1_000_000);
+  expect(tiny).toBeCloseTo((1_000_000 + 1) * 0.001, 6);
+});
+
+test("큰 테마부터 놓아 첫 칸이 가장 크고 등락률 순서와는 상관없다", () => {
+  const rects = arrangeThemes([theme("small", 1_000), theme("big", 900_000), theme("mid", 40_000)], 160, 90);
+  const area = (id: string) => rects.get(id)!.w * rects.get(id)!.h;
+  expect(rects.get("big")).toMatchObject({ x: 0, y: 0 });
+  expect(area("big")).toBeGreaterThan(area("mid"));
+  expect(area("mid")).toBeGreaterThan(area("small"));
+  expect(area("big") / area("small")).toBeCloseTo(30, 4);
 });
 
 test("모든 테마가 지도 위에 자리를 받고 넓이는 무게 비율을 따른다", () => {

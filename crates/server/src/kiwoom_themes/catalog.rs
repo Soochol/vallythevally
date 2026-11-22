@@ -10,7 +10,7 @@ use crate::clock::next_daily;
 use crate::heatmap_board::{KiwoomCatalogInfo, KiwoomCatalogState};
 use crate::http::AppState;
 use crate::kiwoom::api::{ThemeGroups, ThemeMembers};
-use crate::kiwoom::rest::{Access, KiwoomRest, Priority};
+use crate::kiwoom::rest::{KiwoomRest, Priority};
 
 pub const CATALOG_AT: TimeOfDay = match TimeOfDay::hms(8, 30, 0) {
     Some(at) => at,
@@ -171,27 +171,18 @@ pub fn start_collection(st: Arc<AppState>, dir: PathBuf) -> tokio::task::JoinHan
         loop {
             let now = st.clock.now();
             if due(now, &st.kiwoom_catalog) {
-                let open = st.kiwoom.rest().ok().filter(|rest| rest.access() == Access::Open).cloned();
-                match open {
-                    Some(rest) => {
-                        st.kiwoom_catalog.collecting(true);
-                        let previous = st.kiwoom_catalog.latest();
-                        let outcome = collect(&rest, now, previous.as_deref()).await;
-                        st.kiwoom_catalog.collecting(false);
-                        match outcome {
-                            Ok(catalog) => {
-                                if let Err(e) = st.kiwoom_catalog.keep(catalog) {
-                                    tracing::warn!(error = %e, "키움 테마 구성종목을 파일에 쓰지 못했습니다. 메모리의 것만 씁니다");
-                                }
-                            }
-                            Err(reason) => {
-                                tracing::warn!(?reason, "키움 테마 목록을 받지 못했습니다. 지난 구성종목을 그대로 씁니다");
-                                st.clock.sleep_until(KstTime::from_unix(st.clock.now().unix() + RETRY_SECS)).await;
-                                continue;
-                            }
+                st.kiwoom_catalog.collecting(true);
+                let previous = st.kiwoom_catalog.latest();
+                let outcome = collect(&st.rest, now, previous.as_deref()).await;
+                st.kiwoom_catalog.collecting(false);
+                match outcome {
+                    Ok(catalog) => {
+                        if let Err(e) = st.kiwoom_catalog.keep(catalog) {
+                            tracing::warn!(error = %e, "키움 테마 구성종목을 파일에 쓰지 못했습니다. 메모리의 것만 씁니다");
                         }
                     }
-                    None => {
+                    Err(reason) => {
+                        tracing::warn!(?reason, "키움 테마 목록을 받지 못했습니다. 지난 구성종목을 그대로 쓰고 5분 뒤 다시 받습니다");
                         st.clock.sleep_until(KstTime::from_unix(st.clock.now().unix() + RETRY_SECS)).await;
                         continue;
                     }

@@ -32,7 +32,6 @@ export const DEFAULT_SETTINGS: HeatmapSettings = { range: DEFAULT_COLOR_RANGE, s
 export const SIZE_LABEL: Record<SizeMode, string> = { traded: "거래대금", equal: "같게" };
 export const SORT_LABEL: Record<SortMode, string> = { rate: "등락률", traded: "거래대금", name: "이름" };
 export const ORDER_LABEL: Record<HeatmapThemeOrder, string> = { rate: "가중 평균 등락률", custom: "내 순서", traded: "거래대금" };
-export const KIWOOM_ORDER_LABEL: Record<HeatmapThemeOrder, string> = { ...ORDER_LABEL, custom: "키움 순서" };
 export const SOURCE_LABEL: Record<HeatmapSource, string> = { mine: "내 테마", kiwoom: "키움 테마" };
 export const VIEW_LABEL: Record<HeatmapView, string> = { board: "보드", flow: "흐름 비교" };
 

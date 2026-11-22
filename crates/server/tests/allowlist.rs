@@ -161,7 +161,7 @@ fn kis_tr_ids(text: &str) -> Vec<String> {
     (0..b.len().saturating_sub(12))
         .filter(|&i| {
             (i == 0 || !word(i - 1))
-                && b[i..i + 2] == *b"FH"
+                && (b[i..i + 2] == *b"FH" || b[i..i + 2] == *b"HH")
                 && b[i + 2..i + 5].iter().all(u8::is_ascii_uppercase)
                 && b[i + 5..i + 13].iter().all(u8::is_ascii_digit)
                 && !word(i + 13)
@@ -170,7 +170,26 @@ fn kis_tr_ids(text: &str) -> Vec<String> {
         .collect()
 }
 
-const KIS_MARKET_TR_IDS: [&str; 10] = ["FHKST01010100", "FHKST11300006", "FHKST03010100", "FHKST03010200", "FHKST03010230", "FHKUP03500100", "FHKUP03500200", "FHKST01010200", "FHPST01060000", "FHPPG04650101"];
+const KIS_MARKET_TR_IDS: [&str; 18] = [
+    "FHKST01010100",
+    "FHKST11300006",
+    "FHKST03010100",
+    "FHKST03010200",
+    "FHKST03010230",
+    "FHKUP03500100",
+    "FHKUP03500200",
+    "FHKST01010200",
+    "FHPST01060000",
+    "FHPPG04650101",
+    "FHPUP02100000",
+    "FHPUP02140000",
+    "FHPTJ04030000",
+    "FHPTJ04040000",
+    "FHPPG04600101",
+    "FHPPG04600001",
+    "FHPTJ04160001",
+    "HHPTJ04160200",
+];
 
 #[test]
 fn kis_market_tr_ids_live_only_in_the_kis_module_and_are_exactly_the_listed_ones() {
@@ -185,7 +204,7 @@ fn kis_market_tr_ids_live_only_in_the_kis_module_and_are_exactly_the_listed_ones
 
 #[test]
 fn kis_tr_id_scanner_finds_words_only_and_the_list_check_notices_an_extra_id() {
-    assert_eq!(kis_tr_ids("\"FHKST01010100\", FHPST01060000 x"), ["FHKST01010100", "FHPST01060000"]);
+    assert_eq!(kis_tr_ids("\"FHKST01010100\", FHPST01060000 HHPTJ04160200 x"), ["FHKST01010100", "FHPST01060000", "HHPTJ04160200"]);
     assert!(kis_tr_ids("XFHKST01010100 FHKST010101000 FHkst01010100 FHKST0101010").is_empty());
     let listed = |text: &str| kis_tr_ids(text).into_iter().collect::<BTreeSet<String>>();
     let want: BTreeSet<String> = KIS_MARKET_TR_IDS.iter().map(|id| (*id).to_owned()).collect();

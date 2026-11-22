@@ -3,16 +3,15 @@ use std::sync::Arc;
 
 use domain::KstTime;
 
-use super::cards::listed;
+use super::overview_source;
 use super::samples::{Sample, SampleValue};
 use super::session::{SAMPLE_INTERVAL_SECS, is_sampling_minute, minute_floor};
 use crate::api::Market;
 use crate::http::AppState;
-use crate::kiwoom::api::{ProgramTrendByMinute, SectorInvestorNet};
-use crate::kiwoom::rest::Access;
-use crate::market_source::{MergeScope, Priority};
+use crate::market_source::{IntradayProgram, InvestorNetEok, Priority};
 
 const MARKETS: [Market; 2] = [Market::Kospi, Market::Kosdaq];
+const MILLION_WON_PER_EOK: f64 = 100.0;
 
 pub fn start(state: Arc<AppState>, dir: PathBuf) -> tokio::task::JoinHandle<()> {
     tokio::spawn(run(state, dir))
@@ -25,7 +24,7 @@ async fn run(st: Arc<AppState>, dir: PathBuf) {
         let now = st.clock.now();
         st.market_overview.samples.roll_over(now).await;
         let mark = minute_floor(now);
-        if is_sampling_minute(mark) && st.kiwoom.rest().is_ok_and(|rest| rest.access() == Access::Open) {
+        if is_sampling_minute(mark) && overview_source(&st).is_open() {
             tokio::join!(
                 take(&st, Market::Kospi, mark, now, Kind::Investors),
                 take(&st, Market::Kospi, mark, now, Kind::Program),
@@ -54,36 +53,29 @@ async fn take(st: &AppState, market: Market, mark: KstTime, now: KstTime, kind: 
 }
 
 async fn investors(st: &AppState, market: Market, now: KstTime) -> Option<SampleValue> {
-    let request = SectorInvestorNet::new(listed(market), now.kst_date());
-    let Ok(rest) = st.kiwoom.rest() else { return None };
-    let body = match rest.call(&request, None, Priority::Background, MergeScope::default()).await {
-        Ok(page) => page.body,
+    match overview_source(st).intraday_investors(market, now, Priority::Background).await {
+        Ok(net) => net.map(|InvestorNetEok { individual, foreign, institution }| SampleValue::Investors { individual_eok: individual, foreign_eok: foreign, institution_eok: institution }),
         Err(e) => {
             tracing::warn!(?market, reason = %e, "장중 업종별 투자자 표본을 받지 못했습니다. 이 분의 표본은 비웁니다");
-            return None;
+            None
         }
-    };
-    let rows = body.rows().rows;
-    let whole = rows.into_iter().find(|r| r.code == super::cards::index_code(market));
-    if whole.is_none() {
-        tracing::info!(?market, "키움이 종합 행을 주지 않아 이 분의 투자자 표본을 비웁니다(휴장일이거나 장이 시작되지 않았을 수 있습니다)");
     }
-    whole.map(|r| SampleValue::Investors { individual_eok: r.individual_eok, foreign_eok: r.foreign_eok, institution_eok: r.institution_eok })
+}
+
+fn million_won(eok: f64) -> i64 {
+    (eok * MILLION_WON_PER_EOK).round() as i64
 }
 
 async fn program(st: &AppState, market: Market, now: KstTime) -> Option<SampleValue> {
-    let request = ProgramTrendByMinute::new(listed(market), now.kst_date());
-    let Ok(rest) = st.kiwoom.rest() else { return None };
-    let body = match rest.call(&request, None, Priority::Background, MergeScope::default()).await {
-        Ok(page) => page.body,
+    match overview_source(st).intraday_program(market, now, Priority::Background).await {
+        Ok(latest) => latest.map(|IntradayProgram { total_eok, split }| SampleValue::Program {
+            arbitrage_million_won: split.map(|s| million_won(s.arbitrage_eok)),
+            non_arbitrage_million_won: split.map(|s| million_won(s.non_arbitrage_eok)),
+            total_million_won: million_won(total_eok),
+        }),
         Err(e) => {
             tracing::warn!(?market, reason = %e, "장중 프로그램 매매 표본을 받지 못했습니다. 이 분의 표본은 비웁니다");
-            return None;
+            None
         }
-    };
-    let latest = body.rows().rows.into_iter().max_by_key(|r| r.time.secs());
-    if latest.is_none() {
-        tracing::info!(?market, "키움이 프로그램 매매 행을 주지 않아 이 분의 표본을 비웁니다");
     }
-    latest.map(|r| SampleValue::Program { arbitrage_million_won: r.net.arbitrage, non_arbitrage_million_won: r.net.non_arbitrage, total_million_won: r.net.total })
 }
