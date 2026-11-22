@@ -23,6 +23,7 @@ use crate::db::AppDb;
 use crate::http::{AppState, router};
 use crate::instance::InstanceLock;
 use crate::market::hub::{HubHandle, MarketHub};
+use crate::market_source::{KiwoomHandle, MarketSource};
 use crate::kiwoom::auth::{DAILY_REISSUE_AT, KiwoomAuth};
 use crate::kiwoom::link::{Link, LinkState};
 use crate::kiwoom::rest::{KiwoomRest, Priority};
@@ -112,10 +113,16 @@ pub fn application(inputs: ApplicationInputs) -> Arc<AppState> {
     application_with_system(inputs, SystemState::unconfigured())
 }
 
-pub fn application_with_system(inputs: ApplicationInputs, mut system: SystemState) -> Arc<AppState> {
+pub fn application_with_system(inputs: ApplicationInputs, system: SystemState) -> Arc<AppState> {
+    let source: Arc<dyn MarketSource> = inputs.rest.clone().into();
+    application_with_source(inputs, system, source)
+}
+
+pub fn application_with_source(inputs: ApplicationInputs, mut system: SystemState, source: Arc<dyn MarketSource>) -> Arc<AppState> {
     let ApplicationInputs { rest, clock, symbols, db, screener_store, stream: (stream, events), static_dir, screener_update_on_connect } = inputs;
-    let bars = Arc::new(BarService::new(rest.clone(), symbols.clone(), clock.clone()));
-    let screener = Arc::new(Screener::new(screener_store, rest.clone(), bars.clone(), symbols.clone(), clock.clone()));
+    let kiwoom = KiwoomHandle::connected(rest.clone());
+    let bars = Arc::new(BarService::new(source.clone(), symbols.clone(), clock.clone()));
+    let screener = Arc::new(Screener::new(screener_store, kiwoom.clone(), bars.clone(), symbols.clone(), clock.clone()));
     let registered = stream.watch_desired();
     let account_feed = stream.account_feed();
     let hub = MarketHub::spawn(bars.clone(), stream, events, clock.clone());
@@ -126,12 +133,12 @@ pub fn application_with_system(inputs: ApplicationInputs, mut system: SystemStat
         None => KeyRing::unconfigured(market_lane),
     });
     let accounts = crate::trading::Accounts::new(keys.clone(), rest.clone(), account_feed, clock.clone(), system.take_order_switch_store(), db.clone(), symbols.clone());
-    Arc::new(AppState { symbols, bars, rest, db, clock, static_dir, hub, screener, link, keys, system, registered, accounts, rankings: Default::default(), market_overview: Default::default(), etf: Default::default() })
+    Arc::new(AppState { symbols, bars, rest, source, kiwoom, db, clock, static_dir, hub, screener, link, keys, system, registered, accounts, rankings: Default::default(), market_overview: Default::default(), etf: Default::default() })
 }
 
 pub async fn daily_maintenance(state: Arc<AppState>) {
     tokio::join!(
-        daily_reset(state.clock.clone(), state.rest.clone(), state.symbols.clone(), state.bars.clone(), state.hub.clone(), state.link.clone()),
+        daily_reset(state.clock.clone(), state.source.clone(), state.symbols.clone(), state.bars.clone(), state.hub.clone(), state.link.clone()),
         daily_token(state.clock.clone(), state.rest.clone(), state.link.clone()),
     );
 }
@@ -325,7 +332,7 @@ pub(crate) fn next_try(clock: &Clock, retry_at: KstTime, at_least: Duration) -> 
     retry_at.max(clock.now().plus_secs(at_least.as_secs() as i64))
 }
 
-async fn daily_reset(clock: Clock, rest: KiwoomRest, symbols: Arc<SymbolDirectory>, bars: Arc<BarService>, hub: HubHandle, link: Link) {
+async fn daily_reset(clock: Clock, source: Arc<dyn MarketSource>, symbols: Arc<SymbolDirectory>, bars: Arc<BarService>, hub: HubHandle, link: Link) {
     loop {
         clock.sleep_until(next_daily(clock.now(), DAILY_RESET_AT)).await;
         bars.clear_all();
@@ -334,7 +341,7 @@ async fn daily_reset(clock: Clock, rest: KiwoomRest, symbols: Arc<SymbolDirector
             continue;
         }
         let deadline = next_daily(clock.now(), DAILY_RESET_AT);
-        while let Err(e) = symbols.refresh(&rest, Priority::Background).await {
+        while let Err(e) = symbols.refresh(source.as_ref(), Priority::Background).await {
             let Some(retry_at) = e.retry_at() else {
                 tracing::error!(error = %e, "07:45 종목 목록 갱신에 실패했습니다. 이전 목록을 쓰고 다시 받지 않습니다");
                 break;

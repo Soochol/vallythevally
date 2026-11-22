@@ -6,7 +6,7 @@ use std::sync::{Arc, Mutex};
 use domain::{ConfirmedBar, Feed, KstDate, KstTime, Ohlcv, Period, Price, SeriesKey, TimeOfDay};
 
 use crate::bars::{BarError, BarService, CONT_FRESH_SECS, Cont, IDLE_EVICT_SECS, MAX_LIMIT, merge, window};
-use crate::kiwoom::rest::Priority;
+use crate::market_source::Priority;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct JumpPage {

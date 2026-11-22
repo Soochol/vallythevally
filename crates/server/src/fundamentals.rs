@@ -2,15 +2,11 @@ use domain::{StockCode, Symbol};
 
 use crate::api;
 use crate::bars::BarError;
-use crate::kiwoom::api::StockBasicInfo;
-use crate::kiwoom::rest::{KiwoomRest, MergeScope, Priority};
-use crate::kiwoom::wire::StockBasicInfoResponse;
+use crate::market_source::{MarketFeature, MarketSource, Priority};
 
-pub async fn fundamentals(rest: &KiwoomRest, code: StockCode) -> Result<api::Fundamentals, BarError> {
-    let f = match rest.call(&StockBasicInfo::new(code), None, Priority::Screen, MergeScope::default()).await?.body {
-        StockBasicInfoResponse::UnknownSymbol => return Err(BarError::UnknownSymbol),
-        StockBasicInfoResponse::Found { fundamentals, .. } => fundamentals,
-    };
+pub async fn fundamentals(source: &dyn MarketSource, code: StockCode) -> Result<api::Fundamentals, BarError> {
+    source.requires(MarketFeature::Fundamentals)?;
+    let f = source.fundamentals(code, Priority::Screen).await?.ok_or(BarError::UnknownSymbol)?;
     Ok(api::Fundamentals {
         symbol: api::SymbolCode(Symbol::Stock(code).as_wire()),
         market_cap: f.market_cap_won,

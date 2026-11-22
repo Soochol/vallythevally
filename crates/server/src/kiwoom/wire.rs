@@ -4,7 +4,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::num::NonZeroU64;
 
-use domain::{AuditStatus, Bucket, IndexCode, KstDate, KstTime, ListingRow, Market, Ohlcv, Period, Price, StockCode, Symbol, SymbolInfo, SymbolKind, TimeOfDay, Venue, Volume};
+use domain::{AuditStatus, IndexCode, KstDate, KstTime, ListingRow, Market, Ohlcv, Period, Price, StockCode, Symbol, SymbolInfo, SymbolKind, TimeOfDay, Venue, Volume};
 use serde::Deserialize;
 use serde_json::{Value, json};
 
@@ -91,12 +91,7 @@ chart_body!(IndexWeeklyChartResponse, inds_stk_pole_qry, IndexCenti, Date);
 chart_body!(IndexMonthlyChartResponse, inds_mth_pole_qry, IndexCenti, Date);
 chart_body!(IndexYearlyChartResponse, inds_yr_pole_qry, IndexCenti, Date);
 
-/// 키움에서 받은 봉. 가장 늦은 봉은 진행 중인 구간일 수 있다.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct KiwoomBar {
-    pub bucket: Bucket,
-    pub ohlcv: Ohlcv,
-}
+pub use crate::market_source::PeriodBar as KiwoomBar;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ChartRows {
@@ -251,15 +246,7 @@ fn list_rows<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<Vec<Li
     Ok(Vec::<WireListRow>::deserialize(deserializer)?.into_iter().map(ListingRow::from).collect())
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ScreenerListing {
-    pub code: StockCode,
-    pub name: String,
-    pub listed_on: Option<KstDate>,
-    pub excludable_as: Vec<ExcludeKind>,
-    pub market: api::Market,
-    pub listed_shares: Option<NonZeroU64>,
-}
+pub use crate::market_source::ScreenerListing;
 
 pub fn screener_listing(row: &ListingRow, info: &SymbolInfo) -> Option<ScreenerListing> {
     let Symbol::Stock(code) = info.symbol else {
@@ -470,17 +457,7 @@ fn quote_row_code(stk_cd: &str) -> Result<(StockCode, Venue), WireError> {
     Ok((code, venue))
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub struct DaySummaryRow {
-    pub price_won: Option<u64>,
-    pub base_won: Option<u64>,
-    pub open_won: Option<u64>,
-    pub high_won: Option<u64>,
-    pub low_won: Option<u64>,
-    pub volume: Option<u64>,
-    pub trade_value_won: Option<u64>,
-    pub at: Option<KstTime>,
-}
+pub use crate::market_source::DaySummary as DaySummaryRow;
 
 pub fn parse_day_summary(body: StockQuotesResponse, code: StockCode, venue: Venue) -> DaySummaryRow {
     let present = |s: &str| unsigned(s).ok().filter(|n| *n > 0);
@@ -539,21 +516,7 @@ pub struct BasicInfoRow {
     lst_pric: String,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Default)]
-pub struct StockFundamentals {
-    pub market_cap_won: Option<u64>,
-    pub listed_shares: Option<u64>,
-    pub per: Option<f64>,
-    pub pbr: Option<f64>,
-    pub roe_pct: Option<f64>,
-    pub eps_won: Option<i64>,
-    pub bps_won: Option<i64>,
-    pub foreign_exhaustion_pct: Option<f64>,
-    pub high_250_won: Option<u64>,
-    pub low_250_won: Option<u64>,
-    pub upper_limit_won: Option<u64>,
-    pub lower_limit_won: Option<u64>,
-}
+pub use crate::market_source::StockFundamentals;
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(try_from = "BasicInfoRow")]

@@ -10,8 +10,7 @@ use domain::{StockCode, Symbol, Venue};
 use crate::api;
 use crate::bars::BarError;
 use crate::http::{ApiFailure, AppState, Lookup, symbol_list, venue_param};
-use crate::kiwoom::api::{MarketRequest, StockOrderBook, StockProgramTrades, StockTrades};
-use crate::kiwoom::rest::{ContKey, KiwoomRest, MergeScope, Priority};
+use crate::market_source::{Cursor, MarketFeature, MarketSource, Priority};
 use crate::quotes::{effective_book_venue, effective_venue};
 
 pub const DEFAULT_TRADE_LIMIT: usize = 200;
@@ -39,13 +38,17 @@ fn symbol_code(stock: StockCode) -> api::SymbolCode {
     api::SymbolCode(Symbol::Stock(stock).as_wire())
 }
 
+fn require(st: &AppState, lookup: Lookup, feature: MarketFeature) -> Result<(), ApiFailure> {
+    st.source.requires(feature).map_err(|e| lookup.failure(e, st.clock.now()))
+}
+
 async fn order_book(State(st): State<Arc<AppState>>, Path(code): Path<String>, Query(q): Query<HashMap<String, String>>) -> Result<Json<api::OrderBook>, ApiFailure> {
     let requested = venue_param(&q)?.unwrap_or(Venue::Combined);
     let stock = listed_stock(&st, &code).await?;
     let nxt_enabled = symbol_list(&st).await?.get(Symbol::Stock(stock)).map(|info| info.nxt_enabled);
     let venue = effective_book_venue(requested, nxt_enabled);
-    let page = st.rest.call(&StockOrderBook::new(stock, venue), None, Priority::Screen, MergeScope::default()).await.map_err(|e| Lookup::OrderBook.failure(e.into(), st.clock.now()))?;
-    let book = page.body;
+    require(&st, Lookup::OrderBook, MarketFeature::OrderBook)?;
+    let book = st.source.order_book(stock, venue, Priority::Screen).await.map_err(|e| Lookup::OrderBook.failure(e.into(), st.clock.now()))?;
     Ok(Json(api::OrderBook {
         symbol: symbol_code(stock),
         asks: book.asks,
@@ -71,26 +74,27 @@ async fn trades(State(st): State<Arc<AppState>>, Path(code): Path<String>, Query
     let stock = listed_stock(&st, &code).await?;
     let nxt_enabled = symbol_list(&st).await?.get(Symbol::Stock(stock)).is_some_and(|info| info.nxt_enabled);
     let venue = effective_venue(requested, nxt_enabled);
-    let (trades, skipped_rows) = walk_trades(&st.rest, &StockTrades::new(stock, venue), stock, limit, max_pages).await.map_err(|e| Lookup::Trades.failure(e, st.clock.now()))?;
+    require(&st, Lookup::Trades, MarketFeature::Trades)?;
+    let (trades, skipped_rows) = walk_trades(st.source.as_ref(), stock, venue, limit, max_pages).await.map_err(|e| Lookup::Trades.failure(e, st.clock.now()))?;
     Ok(Json(api::TradeTape { symbol: symbol_code(stock), venue: venue.into(), trades, skipped_rows }))
 }
 
 async fn program_trades(State(st): State<Arc<AppState>>, Path(code): Path<String>) -> Result<Json<api::ProgramTradeTimeline>, ApiFailure> {
     let stock = listed_stock(&st, &code).await?;
-    let req = StockProgramTrades::new(stock, st.clock.now().kst_date());
+    require(&st, Lookup::ProgramTrades, MarketFeature::ProgramTrades)?;
+    let today = st.clock.now().kst_date();
     let (mut points, mut skipped_rows) = (Vec::new(), 0);
     let mut seen_keys = HashSet::new();
-    let mut cont: Option<ContKey> = None;
+    let mut cont: Option<Cursor> = None;
     for _ in 0..MAX_PAGES {
         let priority = if cont.is_none() { Priority::Screen } else { Priority::ScreenBulk };
-        let page = st.rest.call(&req, cont.as_ref(), priority, MergeScope::default()).await.map_err(|e| Lookup::ProgramTrades.failure(e.into(), st.clock.now()))?;
-        let parsed = page.body.points();
-        points.extend(parsed.rows);
-        skipped_rows += parsed.skipped;
+        let page = st.source.program_trades_page(stock, today, cont.clone(), priority).await.map_err(|e| Lookup::ProgramTrades.failure(e.into(), st.clock.now()))?;
+        points.extend(page.rows);
+        skipped_rows += page.skipped;
         match page.next {
             Some(next) if seen_keys.insert(next.clone()) => cont = Some(next),
             Some(_) => {
-                tracing::warn!(api_id = StockProgramTrades::API_ID.as_str(), code = stock.as_str(), "키움 연속조회 키가 되풀이돼 여기서 멈춥니다");
+                tracing::warn!(feature = MarketFeature::ProgramTrades.label(), code = stock.as_str(), "연속조회 키가 되풀이돼 여기서 멈춥니다");
                 break;
             }
             None => break,
@@ -99,23 +103,22 @@ async fn program_trades(State(st): State<Arc<AppState>>, Path(code): Path<String
     Ok(Json(api::ProgramTradeTimeline { symbol: symbol_code(stock), points, skipped_rows }))
 }
 
-async fn walk_trades(rest: &KiwoomRest, req: &StockTrades, code: StockCode, limit: usize, max_pages: usize) -> Result<(Vec<api::TradePrint>, u32), BarError> {
+async fn walk_trades(source: &dyn MarketSource, code: StockCode, venue: Venue, limit: usize, max_pages: usize) -> Result<(Vec<api::TradePrint>, u32), BarError> {
     let (mut trades, mut skipped) = (Vec::new(), 0);
     let mut seen_keys = HashSet::new();
-    let mut cont: Option<ContKey> = None;
+    let mut cont: Option<Cursor> = None;
     for _ in 0..max_pages {
         let priority = if cont.is_none() { Priority::Screen } else { Priority::ScreenBulk };
-        let page = rest.call(req, cont.as_ref(), priority, MergeScope::default()).await?;
-        let parsed = page.body.trades();
-        trades.extend(parsed.rows);
-        skipped += parsed.skipped;
+        let page = source.trades_page(code, venue, cont.clone(), priority).await?;
+        trades.extend(page.rows);
+        skipped += page.skipped;
         if trades.len() >= limit {
             break;
         }
         match page.next {
             Some(next) if seen_keys.insert(next.clone()) => cont = Some(next),
             Some(_) => {
-                tracing::warn!(api_id = StockTrades::API_ID.as_str(), code = code.as_str(), "키움 연속조회 키가 되풀이돼 여기서 멈춥니다");
+                tracing::warn!(feature = MarketFeature::Trades.label(), code = code.as_str(), "연속조회 키가 되풀이돼 여기서 멈춥니다");
                 break;
             }
             None => break,

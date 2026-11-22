@@ -24,6 +24,7 @@ pub mod jump_bars;
 pub mod kis;
 pub mod kiwoom;
 pub mod market;
+pub mod market_source;
 pub mod market_overview;
 pub mod public_ip;
 pub mod quotes;

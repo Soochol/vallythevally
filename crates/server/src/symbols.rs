@@ -4,12 +4,12 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
-use domain::{IndexCode, Listing, ListingRow, Market, Symbol, SymbolInfo, SymbolKind, classify};
+use domain::{IndexCode, Market, Symbol, SymbolInfo, SymbolKind};
 use tokio::sync::watch;
 
-use crate::kiwoom::api::{ApiId, StockList};
-use crate::kiwoom::rest::{KiwoomError, KiwoomRest, MergeScope, Priority};
-use crate::kiwoom::wire::{self, ScreenerListing};
+use crate::market_source::{MarketSource, Priority, ScreenerListing, SourceError};
+
+pub use crate::kiwoom::market_source::{ListingPages, fetch_listing_rows};
 
 pub const READY_WAIT: Duration = Duration::from_secs(10);
 const MAX_RESULTS: usize = 20;
@@ -37,6 +37,10 @@ pub struct Directory {
 }
 
 impl Directory {
+    pub fn with_screener_listing(self, screener_listing: Vec<ScreenerListing>) -> Directory {
+        Directory { screener_listing, ..self }
+    }
+
     /// 코스피·코스닥 지수 두 개는 언제나 넣는다.
     pub fn build(stocks: Vec<SymbolInfo>) -> Directory {
         let fixed = [
@@ -151,7 +155,7 @@ pub struct SymbolDirectory {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum NotReady {
     Timeout,
-    Kiwoom(KiwoomError),
+    Source(SourceError),
 }
 
 impl Default for SymbolDirectory {
@@ -171,20 +175,20 @@ impl SymbolDirectory {
     }
 
     /// 새 목록을 받아 통째로 바꾼다. 실패하면 이전 목록을 그대로 둔다.
-    pub async fn refresh(&self, rest: &KiwoomRest, priority: Priority) -> Result<(), KiwoomError> {
-        let dir = fetch_directory(rest, priority).await?;
+    pub async fn refresh(&self, source: &dyn MarketSource, priority: Priority) -> Result<(), SourceError> {
+        let dir = source.directory(priority).await?;
         self.replace(dir);
         Ok(())
     }
 
     /// 목록이 아직 없으면 최대 10초 기다린다.
-    pub async fn ready(&self, rest: &KiwoomRest) -> Result<Arc<Directory>, NotReady> {
-        if let Some(e) = rest.blocked() {
-            return Err(NotReady::Kiwoom(e));
+    pub async fn ready(&self, source: &dyn MarketSource) -> Result<Arc<Directory>, NotReady> {
+        if let Some(e) = source.outage() {
+            return Err(NotReady::Source(e));
         }
         let mut rx = self.current.subscribe();
-        if let Some(e) = rest.stopped(ApiId::Ka10099).filter(|_| rx.borrow().is_none()) {
-            return Err(NotReady::Kiwoom(e));
+        if let Some(e) = source.list_outage().filter(|_| rx.borrow().is_none()) {
+            return Err(NotReady::Source(e));
         }
         tokio::select! {
             biased;
@@ -192,60 +196,16 @@ impl SymbolDirectory {
                 Ok(Ok(dir)) => Ok(dir.clone().expect("wait_for가 Some을 기다렸다")),
                 _ => Err(NotReady::Timeout),
             },
-            e = rest.until_halted() => Err(NotReady::Kiwoom(e)),
-            e = rest.until_stopped(ApiId::Ka10099) => Err(NotReady::Kiwoom(e)),
+            e = source.until_outage() => Err(NotReady::Source(e)),
+            e = source.until_list_outage() => Err(NotReady::Source(e)),
         }
     }
-}
-
-pub struct ListingPages {
-    pub rows: Vec<ListingRow>,
-    pub stopped_at_page_limit_with_pages_left: bool,
-}
-
-pub async fn fetch_listing_rows(rest: &KiwoomRest, priority: Priority) -> Result<ListingPages, KiwoomError> {
-    let mut rows = Vec::new();
-    let mut stopped_at_page_limit_with_pages_left = false;
-    for req in [StockList::EXCHANGE, StockList::KOSDAQ] {
-        let mut cont = None;
-        for _ in 0..MAX_LIST_PAGES {
-            let page = rest.call(&req, cont.as_ref(), priority, MergeScope::default()).await?;
-            rows.extend(page.body.list);
-            cont = page.next;
-            if cont.is_none() {
-                break;
-            }
-        }
-        stopped_at_page_limit_with_pages_left |= cont.is_some();
-    }
-    Ok(ListingPages { rows, stopped_at_page_limit_with_pages_left })
-}
-
-/// ka10099를 `mrkt_tp=0`, `10`으로 불러 목록을 만든다.
-pub async fn fetch_directory(rest: &KiwoomRest, priority: Priority) -> Result<Directory, KiwoomError> {
-    let mut stocks = Vec::new();
-    let mut screener_listing = Vec::new();
-    let mut unknown = Vec::new();
-    for row in &fetch_listing_rows(rest, priority).await?.rows {
-        match classify(row) {
-            Listing::Include(info) => {
-                screener_listing.extend(wire::screener_listing(row, &info));
-                stocks.push(info);
-            }
-            Listing::Unknown(why) => unknown.push(why),
-        }
-    }
-    if !unknown.is_empty() {
-        tracing::warn!(count = unknown.len(), first = %unknown[0], "종목 목록에 표에 없는 행이 있어 넣지 않았습니다");
-    }
-    let dir = Directory { screener_listing, ..Directory::build(stocks) };
-    tracing::info!(count = dir.len(), "종목 목록을 받았습니다");
-    Ok(dir)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::kiwoom::rest::KiwoomRest;
     use domain::StockCode;
 
     fn stock(code: &str, name: &str, kind: SymbolKind) -> SymbolInfo {
@@ -367,7 +327,7 @@ mod tests {
     #[tokio::test(start_paused = true)]
     async fn refresh_loads_both_lists_and_keeps_the_old_one_on_failure() {
         use crate::kiwoom::rest::testing::{FakeTransport, ok, token};
-        use crate::kiwoom::api::ApiId;
+        use crate::kiwoom::rest::testing::ApiId;
         use std::sync::atomic::{AtomicBool, Ordering};
         let fixture = |name: &str| -> serde_json::Value {
             let path = format!("{}/tests/fixtures/kiwoom/{name}.json", env!("CARGO_MANIFEST_DIR"));

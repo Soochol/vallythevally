@@ -8,7 +8,8 @@ use tokio::sync::watch;
 
 use crate::clock::Clock;
 use crate::kiwoom::api::StockQuotes;
-use crate::kiwoom::rest::{KiwoomError, KiwoomRest, MergeScope, Priority};
+use crate::kiwoom::rest::KiwoomError;
+use crate::market_source::{KiwoomHandle, MergeScope, Priority};
 use crate::kiwoom::wire::{KrxSummary, StockQuotesResponse, WireError, parse_krx_summary};
 
 static NEXT_COLLECTION: AtomicU64 = AtomicU64::new(1);
@@ -96,14 +97,14 @@ struct State {
 }
 
 pub struct SummaryCollector {
-    rest: KiwoomRest,
+    kiwoom: KiwoomHandle,
     clock: Clock,
     state: Mutex<State>,
 }
 
 impl SummaryCollector {
-    pub fn new(rest: KiwoomRest, clock: Clock) -> Arc<Self> {
-        Arc::new(Self { rest, clock, state: Mutex::new(State::default()) })
+    pub fn new(kiwoom: impl Into<KiwoomHandle>, clock: Clock) -> Arc<Self> {
+        Arc::new(Self { kiwoom: kiwoom.into(), clock, state: Mutex::new(State::default()) })
     }
 
     pub fn completed(&self) -> Option<Arc<SummaryBatch>> {
@@ -161,7 +162,7 @@ impl SummaryCollector {
         for chunk in codes.chunks(StockQuotes::MAX) {
             self.check_date(target)?;
             let request = StockQuotes::new(chunk, Venue::Krx).expect("1~MAX 종목 묶음");
-            let page = self.rest.call(&request, None, Priority::Screen, MergeScope::Summary(id.0)).await.map_err(CollectionError::Kiwoom)?;
+            let page = self.kiwoom.rest().map_err(CollectionError::Kiwoom)?.call(&request, None, Priority::Screen, MergeScope::Summary(id.0)).await.map_err(CollectionError::Kiwoom)?;
             let received_at = self.clock.now();
             self.check_date(target)?;
             if page.next.is_some() {

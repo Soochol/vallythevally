@@ -394,7 +394,7 @@ impl Link {
     async fn load_symbols(&self, epoch: u64) -> Result<(), KiwoomError> {
         loop {
             let Some(market) = &self.0.market else { return Ok(()) };
-            let error = match market.symbols.refresh(&self.0.rest, Priority::Screen).await {
+            let error = match crate::kiwoom::market_source::refresh_symbols(&market.symbols, &self.0.rest, Priority::Screen).await {
                 Ok(()) => return Ok(()),
                 Err(error) => error,
             };

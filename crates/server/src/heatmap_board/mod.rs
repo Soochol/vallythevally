@@ -87,7 +87,7 @@ async fn board(State(st): State<Arc<AppState>>, Extension(cache): Extension<Arc<
     let now = st.clock.now();
     let (mut quotes, stale) = cache.fresh(&wanted, venue, now);
     if !stale.is_empty() {
-        let fetched = crate::quotes::quotes(&st.rest, &st.bars, directory.as_deref(), &stale, venue).await.map_err(|e| Lookup::Quotes.failure(e, now))?;
+        let fetched = crate::quotes::quotes(st.source.as_ref(), &st.bars, directory.as_deref(), &stale, venue).await.map_err(|e| Lookup::Quotes.failure(e, now))?;
         cache.keep(venue, now, &fetched);
         quotes.extend(fetched.into_iter().filter_map(|quote| Symbol::parse(&quote.symbol.0).ok().map(|symbol| (symbol, quote))));
     }

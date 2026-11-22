@@ -13,12 +13,9 @@ use domain::{BarSource, Bucket, ConfirmedBar, Feed, KstDate, KstTime, Ohlcv, Per
 
 use crate::clock::Clock;
 use crate::jump_bars::{JumpPage, JumpTable};
-use crate::kiwoom::api::{
-    DailyChart, IndexDailyChart, IndexMinuteChart, IndexMonthlyChart, IndexWeeklyChart, IndexYearlyChart, MarketRequest, MinuteChart, MonthlyChart, WeeklyChart, YearlyChart,
-};
-use crate::kiwoom::error::{Failure, Surface};
-use crate::kiwoom::rest::{ContKey, KiwoomError, KiwoomRest, MergeScope, Priority};
-use crate::kiwoom::wire::{ChartBody, ChartRows, KiwoomBar, parse_chart};
+use crate::api::ApiErrorCode;
+use crate::kiwoom::rest::KiwoomError;
+use crate::market_source::{Cursor, MarketFeature, MarketSource, MergeScope, PeriodBar, Priority, SourceError, SourceFailure};
 use crate::symbols::{Directory, NotReady, SymbolDirectory};
 
 pub const DEFAULT_LIMIT: usize = 500;
@@ -38,7 +35,8 @@ pub enum BarError {
     UnknownSymbol,
     ListNotReady,
     IncompleteHistory,
-    Kiwoom(KiwoomError),
+    Unsupported(MarketFeature),
+    Source(SourceFailure),
     Internal(String),
 }
 
@@ -49,24 +47,33 @@ impl fmt::Display for BarError {
             BarError::UnknownSymbol => f.write_str("없는 종목입니다"),
             BarError::ListNotReady => f.write_str("종목 목록을 아직 받지 못했습니다"),
             BarError::IncompleteHistory => f.write_str("키움 월봉 연속조회가 과거로 진행하지 않습니다. 다시 시도하세요"),
-            BarError::Kiwoom(e) => e.fmt(f),
+            BarError::Unsupported(feature) => write!(f, "지금 쓰는 시세 공급원은 {}을(를) 받을 수 없습니다", feature.label()),
+            BarError::Source(failure) => f.write_str(&failure.message),
+        }
+    }
+}
+
+impl From<SourceError> for BarError {
+    fn from(e: SourceError) -> Self {
+        match e {
+            SourceError::UnknownSymbol => BarError::UnknownSymbol,
+            SourceError::Malformed(message) => BarError::Internal(message),
+            SourceError::Failed(failure) if failure.code == ApiErrorCode::UnknownSymbol => BarError::UnknownSymbol,
+            SourceError::Failed(failure) => BarError::Source(failure),
         }
     }
 }
 
 impl From<KiwoomError> for BarError {
     fn from(e: KiwoomError) -> Self {
-        match e.failure().map(Failure::surface) {
-            Some(Surface::UnknownSymbol) => BarError::UnknownSymbol,
-            _ => BarError::Kiwoom(e),
-        }
+        SourceError::from(e).into()
     }
 }
 
 impl From<NotReady> for BarError {
     fn from(e: NotReady) -> Self {
         match e {
-            NotReady::Kiwoom(e) => e.into(),
+            NotReady::Source(e) => e.into(),
             NotReady::Timeout => BarError::ListNotReady,
         }
     }
@@ -77,7 +84,7 @@ pub struct BarPage {
     /// 오름차순. `before`가 있으면 그보다 이른 것만.
     pub bars: Vec<ConfirmedBar>,
     /// 최신 페이지일 때만. 키움 최신 페이지의 진행 중 구간 봉(D3, D12).
-    pub current: Option<KiwoomBar>,
+    pub current: Option<PeriodBar>,
     /// None이면 더 과거가 없다.
     pub next_before: Option<KstTime>,
 }
@@ -85,7 +92,7 @@ pub struct BarPage {
 /// 실시간 집계기를 시작할 재료. `tail`은 캐시의 가장 늦은 확정 봉 몇 개다(오름차순).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Seed {
-    pub current: Option<KiwoomBar>,
+    pub current: Option<PeriodBar>,
     pub tail: Vec<ConfirmedBar>,
 }
 
@@ -109,16 +116,16 @@ struct Series {
     /// 지금 가진 가장 이른 봉 바로 앞을 가리키는 연속조회.
     cont: Option<Cont>,
     /// 마지막 최신 페이지 조회가 준 진행 중 구간 봉. 캐시 구간에는 넣지 않는다.
-    current: Option<KiwoomBar>,
+    current: Option<PeriodBar>,
 }
 
 #[derive(Clone)]
 pub(crate) struct Cont {
-    pub(crate) key: ContKey,
+    pub(crate) key: Cursor,
     /// 이 키를 낸 조회의 `base_dt`. 이어 받을 때도 같은 본문을 보낸다.
     pub(crate) base: KstDate,
     pub(crate) received_at: KstTime,
-    pending_months: Vec<KiwoomBar>,
+    pending_months: Vec<PeriodBar>,
     months_before: Option<KstTime>,
 }
 
@@ -127,7 +134,7 @@ const MAX_REPEATED_MONTHLY_CURSOR: usize = 3;
 
 struct MonthlyProgress {
     oldest: Option<KstTime>,
-    cursor: Option<ContKey>,
+    cursor: Option<Cursor>,
     stagnant: usize,
     repeated: usize,
 }
@@ -142,7 +149,7 @@ impl MonthlyProgress {
         }
     }
 
-    fn advance(&mut self, oldest: Option<KstTime>, cursor: &ContKey) -> Result<(), BarError> {
+    fn advance(&mut self, oldest: Option<KstTime>, cursor: &Cursor) -> Result<(), BarError> {
         if oldest.is_some_and(|t| self.oldest.is_none_or(|old| t < old)) {
             self.oldest = oldest;
             self.stagnant = 0;
@@ -169,7 +176,7 @@ struct Slot {
 }
 
 pub struct BarService {
-    rest: KiwoomRest,
+    source: Arc<dyn MarketSource>,
     symbols: Arc<SymbolDirectory>,
     clock: Clock,
     slots: Mutex<HashMap<SeriesKey, Arc<Slot>>>,
@@ -180,17 +187,17 @@ pub struct BarService {
 }
 
 pub(crate) struct Fetched {
-    pub(crate) rows: Vec<KiwoomBar>,
+    pub(crate) rows: Vec<PeriodBar>,
     pub(crate) next: Option<Cont>,
 }
 
 impl BarService {
-    pub fn new(rest: KiwoomRest, symbols: Arc<SymbolDirectory>, clock: Clock) -> Self {
-        BarService { rest, symbols, clock, slots: Mutex::new(HashMap::new()), next_id: AtomicU64::new(1), resets: AtomicU64::new(0), jumps: JumpTable::default() }
+    pub fn new(source: impl Into<Arc<dyn MarketSource>>, symbols: Arc<SymbolDirectory>, clock: Clock) -> Self {
+        BarService { source: source.into(), symbols, clock, slots: Mutex::new(HashMap::new()), next_id: AtomicU64::new(1), resets: AtomicU64::new(0), jumps: JumpTable::default() }
     }
 
-    pub fn rest(&self) -> &KiwoomRest {
-        &self.rest
+    pub fn source(&self) -> &Arc<dyn MarketSource> {
+        &self.source
     }
 
     pub(crate) fn now(&self) -> KstTime {
@@ -284,7 +291,10 @@ impl BarService {
     }
 
     pub(crate) async fn check(&self, key: SeriesKey) -> Result<(), BarError> {
-        let dir = self.symbols.ready(&self.rest).await?;
+        if let Some(missing) = self.source.features().first_missing_for(key) {
+            return Err(BarError::Unsupported(missing));
+        }
+        let dir = self.symbols.ready(self.source.as_ref()).await?;
         let Some(info) = dir.get(key.feed.symbol()) else {
             return Err(BarError::UnknownSymbol);
         };
@@ -464,61 +474,29 @@ impl BarService {
         }
     }
 
-    pub(crate) async fn fetch_direct(&self, key: SeriesKey, base: KstDate, cont: Option<&ContKey>, prio: Priority) -> Result<Fetched, BarError> {
-        const MINUTE: &str = "달력 봉이 아니면 분봉이다";
-        let p = key.period;
-        match key.feed {
-            Feed::Stock(c, v) => match p {
-                Period::Day => self.fetch_tr(&DailyChart::new(c, v, base), cont, p, base, prio).await,
-                Period::Week => self.fetch_tr(&WeeklyChart::new(c, v, base), cont, p, base, prio).await,
-                Period::Month => self.fetch_tr(&MonthlyChart::new(c, v, base), cont, p, base, prio).await,
-                Period::Year => self.fetch_tr(&YearlyChart::new(c, v, base), cont, p, base, prio).await,
-                _ => self.fetch_tr(&MinuteChart::new(c, v, p, base).expect(MINUTE), cont, p, base, prio).await,
-            },
-            Feed::Index(c) => match p {
-                Period::Day => self.fetch_tr(&IndexDailyChart::new(c, base), cont, p, base, prio).await,
-                Period::Week => self.fetch_tr(&IndexWeeklyChart::new(c, base), cont, p, base, prio).await,
-                Period::Month => self.fetch_tr(&IndexMonthlyChart::new(c, base), cont, p, base, prio).await,
-                Period::Year => self.fetch_tr(&IndexYearlyChart::new(c, base), cont, p, base, prio).await,
-                _ => self.fetch_tr(&IndexMinuteChart::new(c, p, base).expect(MINUTE), cont, p, base, prio).await,
-            },
-        }
-    }
-
-    async fn fetch_tr<R>(&self, req: &R, cont: Option<&ContKey>, period: Period, base: KstDate, prio: Priority) -> Result<Fetched, BarError>
-    where
-        R: MarketRequest,
-        R::Response: ChartBody,
-    {
+    pub(crate) async fn fetch_direct(&self, key: SeriesKey, base: KstDate, cont: Option<&Cursor>, prio: Priority) -> Result<Fetched, BarError> {
         let scope = MergeScope::Bars(self.resets.load(Ordering::SeqCst));
-        let page = self.rest.call(req, cont, prio, scope).await?;
-        match parse_chart(page.body, period) {
-            Ok(ChartRows::Rows(rows)) => Ok(Fetched { rows, next: page.next.map(|key| Cont { key, base, received_at: self.clock.now(), pending_months: Vec::new(), months_before: None }) }),
-            Ok(ChartRows::UnknownSymbol) => Err(BarError::UnknownSymbol),
-            Err(e) => {
-                tracing::error!(api_id = R::API_ID.as_str(), error = %e, "키움 봉 응답을 읽지 못했습니다");
-                Err(BarError::Internal(format!("키움 응답을 읽지 못했습니다: {e}")))
-            }
-        }
+        let page = self.source.chart_page(key, base, cont.cloned(), prio, scope).await?;
+        Ok(Fetched { rows: page.bars, next: page.next.map(|key| Cont { key, base, received_at: self.clock.now(), pending_months: Vec::new(), months_before: None }) })
     }
 }
 
-fn quarterly_rows(months: &[KiwoomBar]) -> Vec<KiwoomBar> {
-    let mut quarters: Vec<KiwoomBar> = Vec::new();
+fn quarterly_rows(months: &[PeriodBar]) -> Vec<PeriodBar> {
+    let mut quarters: Vec<PeriodBar> = Vec::new();
     for month in months {
         let bucket = Period::Quarter.bucket(month.bucket.start());
         if let Some(q) = quarters.last_mut().filter(|q| q.bucket == bucket) {
             let (a, b) = (q.ohlcv, month.ohlcv);
             q.ohlcv = Ohlcv::try_new(a.open(), a.high().max(b.high()), a.low().min(b.low()), b.close(), Volume(a.volume().0.saturating_add(b.volume().0))).expect("월봉의 OHLCV 집계");
         } else {
-            quarters.push(KiwoomBar { bucket, ohlcv: month.ohlcv });
+            quarters.push(PeriodBar { bucket, ohlcv: month.ohlcv });
         }
     }
     quarters
 }
 
 /// 아직 확정되지 않은 구간(가장 늦은 행)은 현재 봉으로 떼어 낸다. 캐시에는 확정 봉만 들어간다.
-fn split_current(rows: &[KiwoomBar], now: KstTime) -> (Vec<ConfirmedBar>, Option<KiwoomBar>) {
+fn split_current(rows: &[PeriodBar], now: KstTime) -> (Vec<ConfirmedBar>, Option<PeriodBar>) {
     let mut current = None;
     let mut confirmed = Vec::with_capacity(rows.len());
     for r in rows {
@@ -565,7 +543,8 @@ mod tests {
     use super::*;
     use crate::clock::kst;
     use crate::config::Secret;
-    use crate::kiwoom::api::ApiId;
+    use crate::kiwoom::rest::KiwoomRest;
+    use crate::kiwoom::rest::testing::ApiId;
     use crate::kiwoom::auth::KiwoomAuth;
     use crate::kiwoom::rest::testing::{FakeTransport, Sent, ok, token};
     use crate::symbols::Directory;
@@ -1168,7 +1147,7 @@ mod tests {
         ]
     }
 
-    fn prices(row: &KiwoomBar) -> [u64; 5] {
+    fn prices(row: &PeriodBar) -> [u64; 5] {
         let b = row.ohlcv;
         [b.open().centi(), b.high().centi(), b.low().centi(), b.close().centi(), b.volume().0]
     }
@@ -1182,7 +1161,7 @@ mod tests {
             let scale = if symbol == SAMSUNG { 100 } else { 1 };
             assert_eq!(prices(&first.current.unwrap()), [190 * scale, 240 * scale, 180 * scale, 230 * scale, 90]);
             assert_eq!(first.bars[0].bucket.start(), midnight(date(2026, 1, 1)));
-            assert_eq!(prices(&KiwoomBar { bucket: first.bars[0].bucket, ohlcv: first.bars[0].ohlcv }), [100 * scale, 200 * scale, 80 * scale, 190 * scale, 60]);
+            assert_eq!(prices(&PeriodBar { bucket: first.bars[0].bucket, ohlcv: first.bars[0].ohlcv }), [100 * scale, 200 * scale, 80 * scale, 190 * scale, 60]);
             if symbol == SAMSUNG {
                 h.clock.jump(CONT_FRESH_SECS + 1);
             }
@@ -1213,7 +1192,7 @@ mod tests {
             } else {
                 h.bars.page(k, None, 1).await.map(|_| ())
             };
-            assert!(matches!(result, Err(BarError::Kiwoom(_))), "page {failed_page}: {result:?}");
+            assert!(matches!(result, Err(BarError::Source(_))), "page {failed_page}: {result:?}");
             let slot = h.bars.slot(k);
             let s = slot.series.lock().await;
             assert!(s.bars.is_empty());
@@ -1397,5 +1376,4 @@ mod tests {
         assert_eq!(s.current, previous.current);
         assert!(s.reached_origin);
     }
-
 }

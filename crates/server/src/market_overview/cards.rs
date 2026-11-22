@@ -12,7 +12,8 @@ use crate::api::{self, ApiErrorBody, Market};
 use crate::bars::BarError;
 use crate::http::{ApiFailure, AppState, Lookup, symbol_list};
 use crate::kiwoom::api::{AllIndices, IndexDailyChart, InstitutionForeignStreak, ListedMarket, MarketRequest, ProgramTrendByDay, SectorInvestorNet, StreakSide};
-use crate::kiwoom::rest::{KiwoomError, MergeScope, Priority};
+use crate::kiwoom::rest::KiwoomError;
+use crate::market_source::{MergeScope, Priority, SourceFailure};
 use crate::kiwoom::wire::{ProgramNetMillionWon, SectorInvestorRow, index_trade_days};
 
 const MILLION_WON_PER_EOK: f64 = 100.0;
@@ -75,7 +76,8 @@ impl Answers {
     }
 
     async fn ask<R: MarketRequest>(&mut self, st: &AppState, request: &R) -> Result<R::Response, ApiErrorBody> {
-        match st.rest.call(request, None, Priority::Screen, MergeScope::default()).await {
+        let rest = st.kiwoom.rest().map_err(|e| failed(st, e))?;
+        match rest.call(request, None, Priority::Screen, MergeScope::default()).await {
             Ok(page) => {
                 self.latest = Some(st.clock.now());
                 Ok(page.body)
@@ -90,7 +92,7 @@ impl Answers {
 }
 
 fn failed(st: &AppState, error: KiwoomError) -> ApiErrorBody {
-    Lookup::MarketOverview.failure(BarError::Kiwoom(error), st.clock.now()).into_body()
+    Lookup::MarketOverview.failure(BarError::Source(SourceFailure::from(&error)), st.clock.now()).into_body()
 }
 
 fn protocol_failure(message: impl Into<String>) -> ApiErrorBody {

@@ -1780,6 +1780,7 @@ pub enum ApiErrorReason {
     NotConnected,
     OrdersOff,
     AccountChanged,
+    UnsupportedBySource,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]

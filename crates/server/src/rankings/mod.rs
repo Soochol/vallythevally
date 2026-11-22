@@ -34,7 +34,8 @@ async fn rankings(State(st): State<Arc<AppState>>, body: Body) -> Result<Json<ap
         api::RankingTrigger::Refresh => Priority::Background,
     };
     let (query, excludes) = query::plan(request.ranking);
-    let served = st.rankings.serve(query, usize::from(u8::from(request.pages)), priority, &st.rest, &st.clock).await.map_err(|e| failure(e, &st))?;
+    let rest = st.kiwoom.rest().map_err(|e| failure(WalkError::Kiwoom(e), &st))?;
+    let served = st.rankings.serve(query, usize::from(u8::from(request.pages)), priority, rest, &st.clock).await.map_err(|e| failure(e, &st))?;
     let directory = symbol_list(&st).await?;
     present(served, excludes, &directory).map(Json).map_err(|e| Lookup::Rankings.failure(e, st.clock.now()))
 }
