@@ -73,7 +73,7 @@ test("일괄 취소는 요청마다 새 batchId를 만들고 답을 못 받은 �
   expect(later.id).not.toBe(first.id);
 });
 
-it("같은 가격 일괄 취소도 계좌가 다르면 서로 합쳐지지 않는다", () => {
+test("같은 가격 일괄 취소도 계좌가 다르면 서로 합쳐지지 않는다", () => {
   const ledger = createLedger(newIdFor);
   const action = cancelBatchAction("005930", "buy", 71_000);
   const first = ledger.issue(actionInAccount(action, "account-a"));

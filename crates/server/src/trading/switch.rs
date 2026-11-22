@@ -150,7 +150,7 @@ impl SwitchStore {
             return Ok(());
         }
         self.update(|records| {
-            for (key, record) in records.iter_mut().filter(|(key, _)| !is_present(key)) {
+            for (_, record) in records.iter_mut().filter(|(key, _)| !is_present(key)) {
                 *record = SwitchRecord { enabled: false, salt: record.salt.clone(), account_ref: None, account_tail: None, legacy_product_tail: None, confirm_won: None, cap_won: None, margin_policy: MarginPolicy::default() };
             }
         })
