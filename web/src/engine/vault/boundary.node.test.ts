@@ -11,7 +11,7 @@ describe("화면과 엔진의 경계", () => {
       if (statSync(full).isDirectory()) return sources(full);
       return /\.tsx?$/.test(name) && !/\.test\.tsx?$/.test(name) ? [full] : [];
     });
-  const importsOf = (file: string) => [...readFileSync(file, "utf8").matchAll(/from\s+["']([^"']+)["']/g)].map((m) => path.resolve(path.dirname(file), m[1]!));
+  const importsOf = (file: string) => [...readFileSync(file, "utf8").matchAll(/(?:from\s+|import\s*\(\s*)["']([^"']+)["']/g)].map((m) => path.resolve(path.dirname(file), m[1]!));
   const SECRET_MODULES = [path.join(VAULT, "engine"), path.join(VAULT, "internals")];
 
   it("엔진용 모듈은 엔진 코드만 가져다 쓴다", () => {

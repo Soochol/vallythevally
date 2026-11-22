@@ -115,7 +115,7 @@ test("키 둘 더하기, 시세 키 바꾸기, 새로 고침 뒤 입력 없이 �
   await leaks.expectNone();
 });
 
-test("같은 앱키와 여섯째 키는 오류 문구로 거절한다", async ({ page }) => {
+test("같은 앱키는 오류 문구로 거절한다", async ({ page }) => {
   await openKeys(page);
   await addKey(page, FIRST);
   await keys(page).getByRole("button", { name: "＋ 키 더하기" }).click();
@@ -124,6 +124,33 @@ test("같은 앱키와 여섯째 키는 오류 문구로 거절한다", async ({
   await addForm(page).getByRole("button", { name: "저장", exact: true }).click();
   await expect(addForm(page).getByRole("alert")).toHaveText("이미 저장한 앱키입니다");
   await expect(rows(page)).toHaveCount(1);
+});
+
+test("키 다섯을 채우면 더하기 대신 한도 문구가 보인다", async ({ page }) => {
+  await openKeys(page);
+  for (const n of [1, 2, 3, 4, 5]) await addKey(page, { alias: `키 ${n}`, appKey: `AKLIMIT-${n}-0000-aaaa-bbbb`, appSecret: `SKLIMIT-secret-${n}` });
+  await expect(rows(page)).toHaveCount(5);
+  await expect(keys(page)).toContainText("키는 5개까지입니다");
+  await expect(keys(page).getByRole("button", { name: "＋ 키 더하기" })).toHaveCount(0);
+});
+
+test("두 탭이 동시에 키를 더하면 둘 다 남는다", async ({ page, context }) => {
+  await openKeys(page);
+  await addKey(page, FIRST);
+  const other = await context.newPage();
+  await openKeys(other);
+  for (const [tab, entry] of [[page, SECOND], [other, { alias: "셋째 키", appKey: "AKTHIRD-3333-gggg-hhhh-iiii", appSecret: "SKTHIRD-secret-value-0003" }]] as const) {
+    await keys(tab).getByRole("button", { name: "＋ 키 더하기" }).click();
+    await addForm(tab).getByLabel("별칭").fill(entry.alias);
+    await addForm(tab).getByLabel("앱키").fill(entry.appKey);
+    await addForm(tab).getByLabel("시크릿").fill(entry.appSecret);
+  }
+  await Promise.all([page, other].map((tab) => addForm(tab).getByRole("button", { name: "저장", exact: true }).click()));
+  await expect(rows(page).filter({ hasText: SECOND.alias })).toHaveCount(1);
+  await expect(rows(other).filter({ hasText: "셋째 키" })).toHaveCount(1);
+  await reopenKeys(page);
+  await expect(rows(page)).toHaveCount(3);
+  expect(await rows(page).evaluateAll((items) => items.map((item) => item.getAttribute("data-key-id")))).toEqual(["k1", "k2", "k3"]);
 });
 
 test("비밀번호 켜기, 새로 고침, 잠김, 풀기, 끄기, 새로 고침 뒤 입력 없이 목록이 같다", async ({ page }) => {

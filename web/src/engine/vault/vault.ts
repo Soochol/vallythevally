@@ -73,6 +73,12 @@ interface Snapshot {
   values: Map<string, Sealed>;
 }
 
+export type Exclusive = <T>(task: () => Promise<T>) => Promise<T>;
+
+const LOCK_NAME = "vally-key-vault";
+
+export const acrossTabs: Exclusive = (task) => (globalThis.navigator?.locks ? globalThis.navigator.locks.request(LOCK_NAME, task) : task());
+
 const META = "meta";
 const AUTO_KEY = "auto-key";
 const KEY_PREFIX = "key:";
@@ -105,7 +111,7 @@ export class Vault {
   private unlocked: { lockId: string; key: CryptoKey } | null = null;
   private queue: Promise<unknown> = Promise.resolve();
 
-  constructor(private readonly store: VaultStore) {}
+  constructor(private readonly store: VaultStore, private readonly exclusive: Exclusive = acrossTabs) {}
 
   view(): Promise<VaultView> {
     return this.run(async () => this.viewOf(await this.snapshot()));
@@ -267,7 +273,7 @@ export class Vault {
   }
 
   private run<T>(task: () => Promise<T>): Promise<T> {
-    const result = this.queue.then(task);
+    const result = this.queue.then(() => this.exclusive(task));
     this.queue = result.catch(() => undefined);
     return result;
   }

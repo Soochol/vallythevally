@@ -32,6 +32,38 @@ function dump(store: MemoryStore): string {
   return parts.join("\n");
 }
 
+function sharedLock() {
+  let tail: Promise<unknown> = Promise.resolve();
+  return <T>(task: () => Promise<T>): Promise<T> => {
+    const result = tail.then(task);
+    tail = result.catch(() => undefined);
+    return result;
+  };
+}
+
+describe("여러 탭", () => {
+  it("두 탭이 동시에 키를 더해도 둘 다 남고 ID가 겹치지 않는다", async () => {
+    const store = memoryStore();
+    const lock = sharedLock();
+    const [a, b] = [new Vault(store, lock), new Vault(store, lock)];
+    await a.addKey(key(1));
+    await Promise.all([a.addKey(key(2)), b.addKey(key(3))]);
+    expect((await new Vault(store, lock).view()).keys.map((k) => k.keyId)).toEqual(["k1", "k2", "k3"]);
+  });
+
+  it("다른 탭이 비밀번호를 켜는 사이 더한 키도 읽힌다", async () => {
+    const store = memoryStore();
+    const lock = sharedLock();
+    const [a, b] = [new Vault(store, lock), new Vault(store, lock)];
+    await a.addKey(key(1));
+    const results = await Promise.allSettled([a.enablePassword(PASSWORD), b.addKey(key(2))]);
+    expect(results[0]!.status).toBe("fulfilled");
+    await a.unlock(PASSWORD);
+    const readable = await readAllKeySecrets(a);
+    expect(readable.map((k) => k.keyId)).toEqual((await a.view()).keys.map((k) => k.keyId));
+  });
+});
+
 describe("자동 잠금", () => {
   it("다시 열면 입력 없이 같은 키가 나온다", async () => {
     const { store, vault } = fresh();
