@@ -258,7 +258,7 @@ test.describe("로그인 뒤", () => {
     let answered = 0;
     scenario.on(isRankingRequest, () => {
       answered++;
-      const page: RankingPage = { rows: rankingRows(5), pages: 1, end: true, limited: false, hidden: 0, fetchedAt: Math.floor(scenario.now / 1000) };
+      const page: RankingPage = { source: "kiwoom", rows: rankingRows(5), pages: 1, end: true, limited: false, hidden: 0, fetchedAt: Math.floor(scenario.now / 1000) };
       return answered === 1
         ? { status: 429, body: { error: { code: "kiwoom_unavailable", message: "요청이 너무 많습니다. 잠시 뒤 다시 시도하세요", reason: "rate_limited", retryAt, manualActionRequired: false } } }
         : { body: page };

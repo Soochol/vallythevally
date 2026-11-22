@@ -3,7 +3,7 @@ import type { RankingPage } from "../api/generated/RankingPage";
 import { capRankingPage, PUBLIC_RANKING_MAX_PAGES } from "./rankingPages";
 import { useServerModeStore } from "./serverMode";
 
-const page = (pages: number, patch: Partial<RankingPage> = {}): RankingPage => ({ rows: [], pages, end: false, limited: false, hidden: 0, fetchedAt: 0, ...patch });
+const page = (pages: number, patch: Partial<RankingPage> = {}): RankingPage => ({ source: "kiwoom", rows: [], pages, end: false, limited: false, hidden: 0, fetchedAt: 0, ...patch });
 
 beforeEach(() => useServerModeStore.setState({ kind: "public" }));
 
