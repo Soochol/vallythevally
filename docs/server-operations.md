@@ -54,6 +54,22 @@ cd ~/apps/vallythevally
 git checkout main
 ```
 
+### 수집 데몬 재시작
+
+수집 데몬은 장 전 준비부터 마감 정리가 끝날 때까지 돌고, 꺼지면 모든 키의 수집과 정리가 끊긴다([ADR 0026](adr/0026-collector-supervisor-collects-common-and-preferred-stocks.md)). 그래서 배포가 앱 서버와 달리 데몬을 바로 재시작하지 않는다. 설치(`collector-install`)는 장중에도 하고, 재시작(`collector-restart`)만 판정을 거친다.
+
+`collector restart-window`는 데몬이 쓰는 `ScheduleSettings`와 `Calendar`로 판정하고 한 줄을 출력한다(탭으로 나눈다). 달력은 네트워크 없이 데이터 폴더의 특일정보 캐시와 `calendar/overrides.json`만 읽는다.
+
+| 지금 | 출력 | 배포 |
+|---|---|---|
+| 수집 시간(판단 시각 07:20부터 마감 시각 20:05 + 정리 여유 120분 = 22:05 전까지) 밖 | `now` | 바로 재시작 |
+| 수집 시간 안인데 쉬는 날(주말, 공휴일, KRX 휴장일, 수정 파일의 임시 휴장) | `now` | 바로 재시작 |
+| 수집 시간 안, 관측일, 마감 전이거나 `store/<오늘>/complete.json`이 없거나 `store/<오늘>.tmp/`가 남음 | `wait` + 오늘 마감 정리 여유가 끝나는 시각 | 예약 |
+| 수집 시간 안인데 오늘이 쉬는 날인지 알 수 없음(특일정보 캐시가 없고 못 받는 해 등) | `wait` + 같은 시각 | 예약 |
+| 마감 뒤이고 `complete.json`이 있고 `.tmp`가 없음 | `now` | 바로 재시작 |
+
+수집 시간 밖은 달력을 보지 않는다. 그 시각에는 쉬는 날이든 아니든 데몬이 수집하지 않기 때문이다. 정리가 실패해 `complete.json`이 끝내 없어도 정리 여유가 지나면 재시작한다. 데몬은 다음 날 시작이나 데몬 시작 때 정리를 다시 한다([수집기 문서](hoga-collector.md)의 "데몬 재시작 규칙"). 예약이 걸린 시각에는 판정 없이 재시작하며, 그 시각은 정리 여유가 끝난 뒤라 수집 시간 밖이다. 예약된 재시작이 실패하면 배포 출력에는 나오지 않으므로 `journalctl --user -u vally-collector-restart.service`와 데몬 경보로 본다. 서버 PC가 꺼졌다 켜지면 예약은 사라지지만 데몬도 새로 떠서 새 실행 파일을 쓴다.
+
 Node와 pnpm은 fnm으로 깔려 있어 비대화형 ssh의 PATH에 없다(`bash -lc`에서만 보인다). cargo는 `~/.cargo/bin`에 있다. 배포 스크립트(`deploy/web-build`)는 fnm 설치 경로 `~/.local/share/fnm/node-versions/v<버전>/installation/bin`을 `VALLY_NODE_BIN`으로 받아 PATH에 넣는다. 버전은 `ls ~/.local/share/fnm/node-versions`로 확인한다.
 
 최초 빌드는 개발 문서의 명령과 같다.
@@ -298,6 +314,9 @@ curl -sS --max-time 5 http://<서버 PC의 Tailscale IP>:8080/api/screener/statu
 |---|---|---|
 | `deploy/server-build` | `ORCH_DEPLOY_SHA`가 있고 checkout HEAD와 다르면 `cargo`를 부르지 않고 실패한다. 같으면 공용 `compile.lock`(`git rev-parse --git-common-dir` 아래)을 `flock`으로 잡고 `cargo build --locked --release -p server`를 한다 | `VALLY_CARGO_BIN`(`$HOME/.cargo/bin`): PATH 앞에 더할 cargo 폴더. `VALLY_BUILD_JOBS`(`4`): `CARGO_BUILD_JOBS` |
 | `deploy/web-build` | `web/`에서 `pnpm install --frozen-lockfile` 뒤 `pnpm build` | `VALLY_NODE_BIN`(필수): node와 pnpm이 있는 폴더로, `~` 없는 절대 경로다. 없거나 그 폴더에 `pnpm`이 없으면 0이 아닌 코드로 멈추고 찾는 법을 알린다. `VALLY_CARGO_BIN`, `VALLY_BUILD_JOBS`는 위와 같다 |
+| `deploy/collector-build` | `server-build`와 같은 방식으로 `ORCH_DEPLOY_SHA`와 checkout HEAD를 대조하고 공용 `compile.lock`을 잡은 뒤 `cargo build --locked --release -p collector`를 한다 | `VALLY_CARGO_BIN`, `VALLY_BUILD_JOBS`: `server-build`와 같다 |
+| `deploy/collector-install` | `target/release/collector`를 `~/.local/bin/collector`로, 이미 설치된 경보 스크립트(`vally-collector-alert-telegram`)와 유닛(`vally-collector.service`, `vally-collector-alert.service`)을 저장소 판으로 바꾼다. 같은 폴더에 새 파일을 쓰고 rename하므로 돌고 있는 데몬의 실행 파일이 깨지지 않는다. 내용이 같으면 건드리지 않고, 유닛이 하나라도 바뀌었을 때만 `systemctl --user daemon-reload`를 부른다. 설치되지 않은 스크립트와 유닛은 만들지 않고 건너뛴다(처음 설치는 [수집기 문서](hoga-collector.md)의 설치 절). `vally-server.service`는 서버 PC 판이 다르므로 건드리지 않는다. 서버 PC에서 유닛을 고칠 때는 `systemctl --user edit`의 드롭인(`<유닛>.d/`)으로 한다. 유닛 파일 자체를 고치면 이 단계가 저장소 판으로 덮는다 | `VALLY_COLLECTOR_BIN_DIR`(`$HOME/.local/bin`), `VALLY_SYSTEMD_USER_DIR`(`${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user`) |
+| `deploy/collector-restart` | 데몬을 재시작해도 되는지 `collector restart-window`(데몬과 같은 달력·시각 설정, 아래 "수집 데몬 재시작")로 판정한다. 수집 시간 밖이거나 쉬는 날이면 바로 재시작하고 `VALLY_COLLECTOR_STABLE_SECONDS`초 동안 active인지 본다. 중간에 active가 아니면 `journalctl` 안내와 함께 실패한다. 수집 시간 안이거나 판정이 불확실하면 재시작하지 않고 `systemd-run --user`의 일회 타이머(`vally-collector-restart`) 하나를 마감 정리 여유가 끝나는 시각에 걸고, 이미 있던 예약은 새 시각으로 바꾼다. 어느 쪽인지 출력에 한 줄로 남는다. 타이머는 `collector-restart --scheduled`를 불러 판정 없이 재시작한다 | `VALLY_COLLECTOR_SERVICE`(`vally-collector.service`), `VALLY_COLLECTOR_BIN`(`$HOME/.local/bin/collector`), `VALLY_DATA`(`$HOME/vally-data/hoga`): 유닛의 `VALLY_DATA`와 같아야 한다. `VALLY_COLLECTOR_SCHEDULE_ARGS`(비어 있음): 유닛 `ExecStart=`에 `--judge-at`·`--plan-at`·`--launch-at`·`--close-at`을 적었다면 같은 인수. `VALLY_COLLECTOR_FINALIZE_MINUTES`(`120`): 마감 시각 뒤 정리를 기다리는 분. `VALLY_COLLECTOR_STABLE_SECONDS`(`10`, 1 이상의 정수) |
 | `deploy/backup` | `vally.db`를 SQLite backup API로 떠서 `integrity_check`가 `ok`일 때만 fsync 뒤 원자 교체로 남기고, 보관 개수를 넘는 오래된 백업을 지운다. 원본이 없으면 경로를 알리고 실패한다 | `VALLY_DATA_DIR`(`$HOME/vally-data`): 원본 `server/vally.db`, 보관 폴더 `backups/`. `VALLY_BACKUP_KEEP`(`30`): 1 이상 |
 | `deploy/restart` | 서비스를 재시작하고, 서비스가 active이고 확인 주소가 응답할 때까지 1초마다 본다. 기다림 안에 안 되면 `journalctl` 안내와 함께 실패한다 | `VALLY_SERVICE`(`vally-server.service`), `VALLY_HEALTH_URL`(`http://127.0.0.1:8080/api/screener/status`), `VALLY_RESTART_WAIT`(`120`초, 1 이상의 정수. 아니면 재시작 전에 멈춘다) |
 
@@ -318,10 +337,13 @@ orch를 돌리는 PC의 `~/.claude/orch/deploy.json`이다. 아래는 서버 PC�
   "steps": [
     {"name": "server-build", "run": ["deploy/server-build"], "timeout": 5400},
     {"name": "web-build", "run": ["deploy/web-build"]},
-    {"name": "backup", "run": ["deploy/backup"]}
+    {"name": "backup", "run": ["deploy/backup"]},
+    {"name": "collector-build", "run": ["deploy/collector-build"], "timeout": 5400},
+    {"name": "collector-install", "run": ["deploy/collector-install"], "timeout": 120}
   ],
   "restart": ["deploy/restart"],
   "after": [
+    {"name": "collector-restart", "run": ["deploy/collector-restart"], "timeout": 120},
     {"name": "status", "run": ["systemctl", "--user", "is-active", "vally-server.service"]},
     {"name": "logs", "run": ["journalctl", "--user", "-u", "vally-server.service", "-n", "200", "--no-pager"]}
   ],
@@ -330,6 +352,8 @@ orch를 돌리는 PC의 `~/.claude/orch/deploy.json`이다. 아래는 서버 PC�
 }}}
 ```
 
+- 수집 데몬 단계는 앱 서버 단계와 같은 `steps`·`after`에 든다. `collector-build`·`collector-install`은 앱 서버 재시작 전에, `collector-restart`는 앱 서버 재시작 뒤 `after`에서 돈다. `after`의 단계가 실패하면 배포가 실패로 끝난다. 데몬이 재시작 뒤 바로 죽었을 때가 그렇다. 수집 시간 안이라 재시작을 예약한 경우는 성공이다.
+- `collector-build`는 `server-build`와 같은 `target/`을 쓰지만 `collector`가 `server`를 기능을 줄여(`default-features = false`) 쓰므로 `server`의 일부를 다시 컴파일한다. 첫 배포는 오래 걸리니 `timeout`을 넉넉히 둔다.
 - `host`가 없으면 같은 PC의 checkout에서 돈다. 이때 `cwd`는 그 PC의 경로이고 `VALLY_DATA_DIR`처럼 다른 PC와 다른 값은 모두 `env`에 둔다.
 - `run`의 `deploy/...`는 `cwd` 기준이라 대상 SHA의 스크립트가 돈다.
 - 서버 PC가 아닌 PC에서도 `env`와 `host`·`cwd`만 바꾸면 같은 스크립트를 쓴다. 서비스 이름과 확인 주소가 다르면 `VALLY_SERVICE`와 `VALLY_HEALTH_URL`을 `env`에 더한다.

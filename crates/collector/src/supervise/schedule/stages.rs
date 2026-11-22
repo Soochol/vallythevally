@@ -1,7 +1,6 @@
 use std::collections::BTreeMap;
 
 use domain::{IndexCode, KstTime, TimeOfDay};
-use futures::future::BoxFuture;
 use serde::Deserialize;
 use server::config::Secret;
 use server::kiwoom::api::IndexDailyChart;
@@ -12,7 +11,7 @@ use tokio::sync::watch;
 use super::rest::RestSession;
 use super::{Daemon, DayEnd, DayRun, Halt, StageResult, date_number, stoppable};
 use crate::calendar::{
-    Calendar, CrossCheck, DEFAULT_OPEN_MINUTE, Day, HolidayRequest, HolidayTransport, Judgment, Mismatch, TransportError, Verdict, cross_check, read_service_key,
+    CachedHolidaysOnly, Calendar, CrossCheck, DEFAULT_OPEN_MINUTE, Day, Judgment, Mismatch, Verdict, cross_check, read_service_key,
 };
 use crate::finalize::{COMPLETE_FILE_NAME, IndexCheckResult, JudgedVerdict, TreatedAs, raw_days_without_complete, store_dir};
 use crate::plan::{PlanFile, PlanInput, build_plan, plan_path, write_plan};
@@ -24,14 +23,6 @@ use crate::supervise::status::{AlertKind, DayPhase, ObservationDay, ObservationV
 use crate::universe::{Morning, UniverseFile, after_close_path, collect_after_close, collect_morning, read_universe_if_present};
 
 const FINALIZE_RETRY_NOTE: &str = "같은 날 안에는 다시 하지 않고, 다음 정리 기회(다음 날 시작이나 다음 데몬 시작)에 정리가 안 끝난 날로 다시 시도합니다";
-
-struct CachedHolidaysOnly;
-
-impl HolidayTransport for CachedHolidaysOnly {
-    fn fetch<'a>(&'a self, _request: HolidayRequest<'a>) -> BoxFuture<'a, Result<String, TransportError>> {
-        Box::pin(async { Err(TransportError::Unreachable) })
-    }
-}
 
 #[derive(Deserialize)]
 struct PreviousComplete {
