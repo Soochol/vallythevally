@@ -51,6 +51,7 @@ pub struct KisCredentials {
 
 pub const KIS_BASE_URL: &str = "https://openapi.koreainvestment.com:9443";
 pub const KIS_WS_URL: &str = "ws://ops.koreainvestment.com:21000";
+pub const KIS_MASTER_BASE_URL: &str = "https://new.real.download.dws.co.kr";
 const KIS_BASE_HOST: &str = "openapi.koreainvestment.com";
 const KIS_BASE_PORT: u16 = 9443;
 const KIS_WS_HOST: &str = "ops.koreainvestment.com";
@@ -165,6 +166,7 @@ const KNOWN_KEYS: &[&str] = &[
     "VALLY_DART_BASE_URL",
     "VALLY_KIND_BASE_URL",
     "VALLY_NAVER_BASE_URL",
+    "VALLY_KIS_MASTER_BASE_URL",
     "VALLY_ETF_PDF_DIR",
     "VALLY_PUBLIC_IP_URL",
     "VALLY_FINANCIAL_DB_PATH",
@@ -204,6 +206,7 @@ pub struct Config {
     pub dart_base_url: String,
     pub kind_base_url: String,
     pub naver_base_url: String,
+    pub kis_master_base_url: String,
     pub etf_pdf_dir: PathBuf,
     pub public_ip_url: String,
     pub financial_db_path: PathBuf,
@@ -315,6 +318,7 @@ impl Config {
         let dart_base_url = public_or_loopback("VALLY_DART_BASE_URL", url("VALLY_DART_BASE_URL"), "https://opendart.fss.or.kr")?;
         let kind_base_url = public_or_loopback("VALLY_KIND_BASE_URL", url("VALLY_KIND_BASE_URL"), "https://kind.krx.co.kr")?;
         let naver_base_url = public_or_loopback("VALLY_NAVER_BASE_URL", url("VALLY_NAVER_BASE_URL"), "https://stock.naver.com")?;
+        let kis_master_base_url = public_or_loopback("VALLY_KIS_MASTER_BASE_URL", url("VALLY_KIS_MASTER_BASE_URL"), KIS_MASTER_BASE_URL)?;
         let public_ip_url = public_or_loopback("VALLY_PUBLIC_IP_URL", url("VALLY_PUBLIC_IP_URL"), "https://api.ipify.org")?;
         let account_server_url = url("VALLY_ACCOUNT_SERVER_URL").map(|value| AccountServerUrl::parse(&value).map_err(|e| ConfigError(format!("VALLY_ACCOUNT_SERVER_URL: {e}")))).transpose()?;
         if mock && account_server_url.is_some() {
@@ -380,6 +384,7 @@ impl Config {
             dart_base_url,
             kind_base_url,
             naver_base_url,
+            kis_master_base_url,
             etf_pdf_dir: vars.get("VALLY_ETF_PDF_DIR").map(PathBuf::from).unwrap_or_else(|| db_path.with_file_name("etf-pdf")),
             public_ip_url,
             financial_db_path: vars.get("VALLY_FINANCIAL_DB_PATH").map(PathBuf::from).unwrap_or_else(|| db_path.with_file_name("financials.db")),
@@ -614,6 +619,22 @@ mod tests {
         for endpoint in ["https://example.com", "https://stock.naver.com.evil.test", "http://stock.naver.com"] {
             let mut process = vars(&REAL);
             process.insert("VALLY_NAVER_BASE_URL".into(), endpoint.into());
+            assert!(Config::from_vars(file.clone(), process, lock, token, key, account).is_err(), "{endpoint}");
+        }
+    }
+
+    #[test]
+    fn the_kis_master_source_defaults_to_the_public_download_host_and_accepts_only_loopback_overrides() {
+        let file = vars(&[("VALLY_DB_PATH", "isolated/user.db")]);
+        let (config, _) = Config::from_vars(file.clone(), vars(&REAL), lock, token, key, account).unwrap();
+        assert_eq!(config.kis_master_base_url, KIS_MASTER_BASE_URL);
+        let mut process = vars(&REAL);
+        process.insert("VALLY_KIS_MASTER_BASE_URL".into(), "http://127.0.0.1:23/".into());
+        let (config, _) = Config::from_vars(file.clone(), process, lock, token, key, account).unwrap();
+        assert_eq!(config.kis_master_base_url, "http://127.0.0.1:23");
+        for endpoint in ["https://example.com", "http://new.real.download.dws.co.kr", "https://new.real.download.dws.co.kr.evil.test"] {
+            let mut process = vars(&REAL);
+            process.insert("VALLY_KIS_MASTER_BASE_URL".into(), endpoint.into());
             assert!(Config::from_vars(file.clone(), process, lock, token, key, account).is_err(), "{endpoint}");
         }
     }

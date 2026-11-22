@@ -5,7 +5,7 @@ use std::sync::{Arc, Mutex};
 use domain::{KstDate, KstTime, TimeOfDay};
 use serde::{Deserialize, Serialize};
 
-use super::error::{Failure, Policy, judge_issue};
+use super::error::{Category, Failure, judge_issue};
 use super::token_file::{FileError, Saved, SavedToken, TokenFile, credential_id};
 use super::transport::{HttpRequest, Method, Transport, TransportError};
 use crate::clock::Clock;
@@ -229,9 +229,9 @@ impl KisAuth {
     }
 
     fn refused(&self, failure: Failure, now: KstTime) -> AuthError {
-        match failure.policy() {
-            Policy::WaitIssueInterval => AuthError::IssueInterval { retry_at: now.plus_secs(MIN_ISSUE_INTERVAL_SECS) },
-            Policy::HaltAll | Policy::HaltPath => {
+        match failure.category() {
+            Category::IssueLimited => AuthError::IssueInterval { retry_at: now.plus_secs(MIN_ISSUE_INTERVAL_SECS) },
+            Category::AuthBlocked => {
                 self.halt(failure.clone());
                 AuthError::Halted(Halt::Rejected(failure))
             }
