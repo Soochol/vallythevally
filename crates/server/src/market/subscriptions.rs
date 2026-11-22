@@ -1,6 +1,4 @@
 //! 구독 관리자(backend.md §5.3). 순수하다. 같은 상태와 같은 `now`면 언제나 같은 계획을 낸다.
-//!
-//! 구독 단위는 종목이다. 종목마다 기본 자리 하나를 쓰고, 공급원 자리 규칙(`SeatRules`)이 자기 자리를 따로 먹는다고 한 종류는 자리를 더 쓴다. 키움은 거래소 호가 코드가 그렇다(ADR 0032).
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
@@ -36,7 +34,6 @@ impl Rank {
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct Plan {
-    /// 공급원에 등록할 종목 집합. 자리 수(`SeatRules::seats(&feeds)`) ≤ `SeatRules::limit()`.
     pub realtime: BTreeSet<Symbol>,
     pub feeds: DesiredFeeds,
     pub rejected: BTreeSet<Holder>,

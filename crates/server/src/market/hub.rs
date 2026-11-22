@@ -1126,7 +1126,6 @@ fn start_aggregator(key: SeriesKey, seed: &Seed, now: KstTime) -> Aggregator {
     }
 }
 
-/// 통합 한 흐름을 거래소별 키로 나눈다(ADR 0007). 체결 거래소를 모르면 통합에만 넣는다.
 fn accepts(feed: Feed, exchange: Option<Exchange>) -> bool {
     match feed {
         Feed::Index(_) | Feed::Stock(_, Venue::Combined) => true,
