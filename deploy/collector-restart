@@ -170,15 +170,30 @@ visible_text() {
         function value(hex) { return (index("0123456789abcdef", substr(hex, 1, 1)) - 1) * 16 + index("0123456789abcdef", substr(hex, 2, 1)) - 1 }
         BEGIN { ORS = ""; names[10] = "\\n"; names[9] = "\\t"; names[13] = "\\r" }
         { for (field = 1; field <= NF; field++) byte[++count] = value($field) }
+        function continuation(position, low, high) { return position <= count && byte[position] >= low && byte[position] <= high }
+        function sequence_length(i,    lead) {
+            lead = byte[i]
+            if (lead < 128) return 1
+            if (lead >= 194 && lead <= 223) return continuation(i + 1, 128, 191) ? 2 : 0
+            if (lead == 224) return continuation(i + 1, 160, 191) && continuation(i + 2, 128, 191) ? 3 : 0
+            if (lead == 237) return continuation(i + 1, 128, 159) && continuation(i + 2, 128, 191) ? 3 : 0
+            if (lead >= 225 && lead <= 239) return continuation(i + 1, 128, 191) && continuation(i + 2, 128, 191) ? 3 : 0
+            if (lead == 240) return continuation(i + 1, 144, 191) && continuation(i + 2, 128, 191) && continuation(i + 3, 128, 191) ? 4 : 0
+            if (lead == 244) return continuation(i + 1, 128, 143) && continuation(i + 2, 128, 191) && continuation(i + 3, 128, 191) ? 4 : 0
+            if (lead >= 241 && lead <= 243) return continuation(i + 1, 128, 191) && continuation(i + 2, 128, 191) && continuation(i + 3, 128, 191) ? 4 : 0
+            return 0
+        }
         END {
             for (i = 1; i <= count; i++) {
                 code = byte[i]
                 if (code in names) print names[code]
                 else if (code < 32 || code == 127) printf "\\x%02x", code
-                else if (code == 194 && byte[i + 1] == 133) { print "\\u0085"; i += 1 }
+                else if (code < 128) printf "%c", code
+                else if (!(length_here = sequence_length(i))) printf "\\x%02x", code
+                else if (code == 194 && byte[i + 1] < 160) { printf "\\u00%02x", byte[i + 1]; i += 1 }
                 else if (code == 226 && byte[i + 1] == 128 && byte[i + 2] == 168) { print "\\u2028"; i += 2 }
                 else if (code == 226 && byte[i + 1] == 128 && byte[i + 2] == 169) { print "\\u2029"; i += 2 }
-                else printf "%c", code
+                else { for (k = 0; k < length_here; k++) printf "%c", byte[i + k]; i += length_here - 1 }
             }
         }'
 }
