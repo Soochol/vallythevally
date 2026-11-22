@@ -1,5 +1,6 @@
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::TcpListener;
+use std::os::fd::AsRawFd;
 use std::os::unix::fs::PermissionsExt;
 use std::os::unix::net::UnixListener;
 use std::path::{Path, PathBuf};
@@ -334,7 +335,8 @@ fn place(folder: &Path, case: &Case) -> PathBuf {
         }
         Layout::Socket => {
             let socket = folder.join("socket");
-            drop(UnixListener::bind(&socket).unwrap());
+            let folder_handle = std::fs::File::open(folder).unwrap();
+            drop(UnixListener::bind(format!("/proc/self/fd/{}/socket", folder_handle.as_raw_fd())).unwrap());
             std::fs::set_permissions(&socket, std::fs::Permissions::from_mode(0o600)).unwrap();
             socket
         }
