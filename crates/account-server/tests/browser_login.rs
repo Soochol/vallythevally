@@ -454,6 +454,29 @@ async fn a_blocked_identity_loses_its_connector_token_too() {
 }
 
 #[tokio::test]
+async fn a_code_issued_before_a_block_cannot_be_exchanged_after_it() {
+    let harness = Harness::start().await;
+    harness.idp.set_subject("bad");
+    let bad = harness.login("google", "a").await;
+    harness.idp.set_subject("good");
+    let good = harness.login("google", "b").await;
+    let blocked = BlockedIdentities::new([(Provider::Google, "bad".to_owned())]);
+    let restarted = serve_again(&harness, AccountOptions { blocked, ..AccountOptions::default() }).await;
+    for _ in 0..2 {
+        let refused = restarted.exchange(&bad.code, &bad.verifier).await;
+        assert_eq!(refused.status(), 400);
+        let body: serde_json::Value = refused.json().await.unwrap();
+        assert_eq!(body["code"], "invalid_grant");
+        assert_eq!(harness.count("connector_tokens").await, 0);
+    }
+    let accepted = restarted.exchange(&good.code, &good.verifier).await;
+    assert_eq!(accepted.status(), 200);
+    let body: serde_json::Value = accepted.json().await.unwrap();
+    assert_eq!(restarted.me(body["token"].as_str().unwrap()).await.status(), 200);
+    assert_eq!(harness.count("connector_tokens").await, 1);
+}
+
+#[tokio::test]
 async fn blocked_lists_tolerate_spaces_and_reject_unreadable_entries() {
     let blocked = BlockedIdentities::parse_list("google: bad , naver :  worse ").unwrap();
     let harness = Harness::start_with_options(AccountOptions { blocked, ..AccountOptions::default() }).await;
