@@ -10,10 +10,18 @@ pub enum KisApiId {
     OrderBook,
     TodayTrades,
     ProgramTrades,
+    IndexPrice,
+    IndexCategoryPrice,
+    InvestorTimeByMarket,
+    InvestorDailyByMarket,
+    ProgramToday,
+    ProgramDaily,
+    StockInvestorDaily,
+    InvestorEstimate,
 }
 
 impl KisApiId {
-    pub const ALL: [KisApiId; 10] = [
+    pub const ALL: [KisApiId; 18] = [
         KisApiId::CurrentPrice,
         KisApiId::MultiPrice,
         KisApiId::DailyChart,
@@ -24,6 +32,14 @@ impl KisApiId {
         KisApiId::OrderBook,
         KisApiId::TodayTrades,
         KisApiId::ProgramTrades,
+        KisApiId::IndexPrice,
+        KisApiId::IndexCategoryPrice,
+        KisApiId::InvestorTimeByMarket,
+        KisApiId::InvestorDailyByMarket,
+        KisApiId::ProgramToday,
+        KisApiId::ProgramDaily,
+        KisApiId::StockInvestorDaily,
+        KisApiId::InvestorEstimate,
     ];
 
     pub fn tr_id(self) -> &'static str {
@@ -38,6 +54,14 @@ impl KisApiId {
             KisApiId::OrderBook => "FHKST01010200",
             KisApiId::TodayTrades => "FHPST01060000",
             KisApiId::ProgramTrades => "FHPPG04650101",
+            KisApiId::IndexPrice => "FHPUP02100000",
+            KisApiId::IndexCategoryPrice => "FHPUP02140000",
+            KisApiId::InvestorTimeByMarket => "FHPTJ04030000",
+            KisApiId::InvestorDailyByMarket => "FHPTJ04040000",
+            KisApiId::ProgramToday => "FHPPG04600101",
+            KisApiId::ProgramDaily => "FHPPG04600001",
+            KisApiId::StockInvestorDaily => "FHPTJ04160001",
+            KisApiId::InvestorEstimate => "HHPTJ04160200",
         }
     }
 
@@ -53,6 +77,14 @@ impl KisApiId {
             KisApiId::OrderBook => "/uapi/domestic-stock/v1/quotations/inquire-asking-price-exp-ccn",
             KisApiId::TodayTrades => "/uapi/domestic-stock/v1/quotations/inquire-time-itemconclusion",
             KisApiId::ProgramTrades => "/uapi/domestic-stock/v1/quotations/program-trade-by-stock",
+            KisApiId::IndexPrice => "/uapi/domestic-stock/v1/quotations/inquire-index-price",
+            KisApiId::IndexCategoryPrice => "/uapi/domestic-stock/v1/quotations/inquire-index-category-price",
+            KisApiId::InvestorTimeByMarket => "/uapi/domestic-stock/v1/quotations/inquire-investor-time-by-market",
+            KisApiId::InvestorDailyByMarket => "/uapi/domestic-stock/v1/quotations/inquire-investor-daily-by-market",
+            KisApiId::ProgramToday => "/uapi/domestic-stock/v1/quotations/comp-program-trade-today",
+            KisApiId::ProgramDaily => "/uapi/domestic-stock/v1/quotations/comp-program-trade-daily",
+            KisApiId::StockInvestorDaily => "/uapi/domestic-stock/v1/quotations/investor-trade-by-stock-daily",
+            KisApiId::InvestorEstimate => "/uapi/domestic-stock/v1/quotations/investor-trend-estimate",
         }
     }
 }

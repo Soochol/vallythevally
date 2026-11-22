@@ -93,3 +93,18 @@
 - `ka90005`·`ka90010`의 `kospi200`·`basis` 열은 TR과 시장에 따라 믿을 수 없어 읽지 않는다.
 - `ka10131`은 `dt=1`로 부른다. 연속 일수는 기간 인자와 무관하다.
 - `ka20006` 한 쪽은 600거래일이다. 기간 최대 60일에는 한 쪽이면 된다.
+
+## 시세 공급원 경계와 한투 구현
+
+이 경로의 응답은 시세 경계(`crates/server/src/market_source/overview.rs`)의 중립 타입에서 만든다. 키움 호출과 해석은 `market_overview/kiwoom_overview.rs`, 한투 호출과 해석은 `kis/overview.rs`가 맡는다. 어느 쪽이 받는지는 `MarketOverview::choose`로 정하고, 정하지 않으면 키움이다. 금액은 경계에서 억원으로 맞춘다.
+
+| 칸 | 키움 | 한투 |
+|---|---|---|
+| `index` | `ka20003` | `FHPUP02100000`(변동성 지수 없음) |
+| `sectors` | `ka20003`·`ka10051` | `FHPUP02140000`과 업종마다 `FHPTJ04030000`(배경 우선순위) |
+| `flow` | `ka20006`·`ka10051`·`ka90010` | `FHKUP03500100`·`FHPTJ04040000`·`FHPPG04600001` |
+| `flow/intraday` 표본 | `ka10051`·`ka90005` | `FHPTJ04030000`·`FHPPG04600101` |
+| `turnover` | `ka20006` | `FHKUP03500100` |
+| `streaks` | `ka10131` | 없음. 요청을 보내지 않고 `unsupported_by_source`로 답한다 |
+
+한투의 시간별 프로그램매매는 차익·비차익 열이 없다. 그래서 한투가 쌓은 표본의 프로그램 줄에는 `arbitrage_million_won`·`non_arbitrage_million_won`이 없고 `total_million_won`만 있다. 키움 줄은 세 열이 그대로 있다.
