@@ -43,6 +43,7 @@ pub struct AppState {
     pub rankings: crate::rankings::RankingCache,
     pub market_overview: crate::market_overview::MarketOverview,
     pub etf: crate::etf::EtfBook,
+    pub kiwoom_catalog: crate::kiwoom_themes::CatalogStore,
 }
 
 pub fn router(state: Arc<AppState>) -> Router {

@@ -13,7 +13,7 @@ use server::collector::{CollectorAccess, CollectorAccessState, CollectorStatusPa
 use server::drawing_api::*;
 use server::market_overview::*;
 use server::etf::*;
-use server::heatmap_board::{HeatmapBoard, HeatmapBoardMember, HeatmapBoardTheme, HeatmapThemeOrder, HeatmapThemeSummary};
+use server::heatmap_board::{HeatmapBoard, HeatmapBoardMember, HeatmapBoardTheme, HeatmapSource, HeatmapThemeOrder, HeatmapThemeSummary, KiwoomCatalogInfo, KiwoomCatalogState};
 use server::heatmap_flow::{HeatmapFlowPoint, HeatmapFlowSeries};
 use server::kiwoom_themes::{KiwoomLimitMove, KiwoomTheme, KiwoomThemeList, KiwoomThemeMember, KiwoomThemeMembers};
 use ts_rs::TS;
@@ -260,6 +260,9 @@ fn generated_typescript_matches_the_committed_files() {
         generated::<HeatmapTheme>(),
         generated::<HeatmapThemes>(),
         generated::<HeatmapBoard>(),
+        generated::<HeatmapSource>(),
+        generated::<KiwoomCatalogInfo>(),
+        generated::<KiwoomCatalogState>(),
         generated::<KiwoomTheme>(),
         generated::<KiwoomThemeList>(),
         generated::<KiwoomLimitMove>(),

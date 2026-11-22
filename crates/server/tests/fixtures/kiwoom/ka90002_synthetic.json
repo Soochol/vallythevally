@@ -1,0 +1,15 @@
+{
+ "_source": "합성 값. 필드 이름과 모양만 키움 가이드 ka90002와 2026-11-22 실측(칸 이름)을 따른다. 종목과 숫자는 지어낸 것이다",
+ "_headers": {
+  "cont-yn": "N",
+  "next-key": ""
+ },
+ "return_code": 0,
+ "return_msg": "정상적으로 처리되었습니다",
+ "flu_rt": "+1.20",
+ "dt_prft_rt": "+0.80",
+ "thema_comp_stk": [
+  {"stk_cd": "005930_AL", "stk_nm": "가상종목A", "cur_prc": "-50000", "flu_sig": "5", "pred_pre": "-1000", "flu_rt": "-1.96", "acc_trde_qty": "1234567", "sel_bid": "50100", "sel_req": "10", "buy_bid": "50000", "buy_req": "12", "dt_prft_rt_n": "-0.50"},
+  {"stk_cd": "000660_AL", "stk_nm": "가상종목B", "cur_prc": "+120500", "flu_sig": "2", "pred_pre": "+500", "flu_rt": "+0.42", "acc_trde_qty": "765432", "sel_bid": "120600", "sel_req": "3", "buy_bid": "120500", "buy_req": "4", "dt_prft_rt_n": "+1.10"}
+ ]
+}

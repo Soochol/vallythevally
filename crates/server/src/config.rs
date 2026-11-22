@@ -171,6 +171,7 @@ const KNOWN_KEYS: &[&str] = &[
     "VALLY_PUBLIC_IP_URL",
     "VALLY_FINANCIAL_DB_PATH",
     "VALLY_MARKET_SAMPLES_DIR",
+    "VALLY_KIWOOM_THEMES_DIR",
     "VALLY_FINANCIAL_AUTOMATIC",
     "VALLY_ACCOUNT_SERVER_URL",
     "VALLY_ACCOUNT_STATE_PATH",
@@ -211,6 +212,7 @@ pub struct Config {
     pub public_ip_url: String,
     pub financial_db_path: PathBuf,
     pub market_samples_dir: PathBuf,
+    pub kiwoom_themes_dir: PathBuf,
     pub financial_automatic: bool,
     pub account_server_url: Option<AccountServerUrl>,
     pub account_state_path: Option<PathBuf>,
@@ -389,6 +391,7 @@ impl Config {
             public_ip_url,
             financial_db_path: vars.get("VALLY_FINANCIAL_DB_PATH").map(PathBuf::from).unwrap_or_else(|| db_path.with_file_name("financials.db")),
             market_samples_dir: vars.get("VALLY_MARKET_SAMPLES_DIR").map(PathBuf::from).unwrap_or_else(|| db_path.with_file_name("market-samples")),
+            kiwoom_themes_dir: vars.get("VALLY_KIWOOM_THEMES_DIR").map(PathBuf::from).unwrap_or_else(|| db_path.with_file_name("kiwoom-themes")),
             db_path,
             log_filter: vars.get("VALLY_LOG").cloned().unwrap_or_else(|| "info".to_owned()),
         };
@@ -649,6 +652,7 @@ mod tests {
         assert_eq!(config.opendart_api_key.as_ref().unwrap().expose(), "process-dart-secret");
         assert_eq!(config.financial_db_path, PathBuf::from("isolated/financials.db"));
         assert_eq!(config.market_samples_dir, PathBuf::from("isolated/market-samples"));
+        assert_eq!(config.kiwoom_themes_dir, PathBuf::from("isolated/kiwoom-themes"));
         assert!(!format!("{config:?}").contains("dart-secret"));
         for endpoint in ["https://example.com", "https://opendart.fss.or.kr.evil.test", "http://user:pass@localhost:19", "http://localhost:19/?key=value"] {
             let mut process = vars(&REAL);

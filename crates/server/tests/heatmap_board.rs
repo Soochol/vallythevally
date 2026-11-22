@@ -91,6 +91,10 @@ fn day() -> KstDate {
 
 impl Harness {
     async fn start(market: Market10095, listed: &[(&str, &str)]) -> Harness {
+        Harness::start_with(market, listed, None).await
+    }
+
+    async fn start_with(market: Market10095, listed: &[(&str, &str)], catalog: Option<Value>) -> Harness {
         let clock = Clock::fake(kst(day(), 10, 1, 0));
         let auth = KiwoomAuth::new(Secret::new("FAKE_KEY".into()), Secret::new("FAKE_SECRET".into()), None);
         let rest = KiwoomRest::new(Arc::new(market.clone()), auth, clock.clone());
@@ -104,6 +108,12 @@ impl Harness {
         let store = server::screener::store::Store::open(&tmp.path().join("screener.duckdb")).unwrap();
         let state = application(ApplicationInputs { rest: rest.clone(), clock: clock.clone(), symbols, db, screener_store: store, stream: (stream, events), static_dir: tmp.path().to_owned(), screener_update_on_connect: false });
         rest.set_access(Access::Open);
+        let catalog_dir = tmp.path().join("kiwoom-themes");
+        if let Some(catalog) = catalog {
+            std::fs::create_dir_all(&catalog_dir).unwrap();
+            std::fs::write(catalog_dir.join(format!("{}.json", catalog["date"].as_str().unwrap())), catalog.to_string()).unwrap();
+        }
+        state.kiwoom_catalog.open(catalog_dir);
         Harness { app: router(state), clock, market, _tmp: tmp }
     }
 
@@ -214,4 +224,31 @@ async fn no_themes_means_no_kiwoom_call() {
     let board = h.board("").await;
     assert_eq!((board["themes"].clone(), board["asOf"].clone()), (json!([]), Value::Null));
     assert!(h.market.asked().is_empty());
+}
+
+#[tokio::test]
+async fn the_kiwoom_source_builds_themes_from_the_stored_members_with_the_same_summary() {
+    let catalog = json!({"date": "20261119", "collected_at": 1_794_000_000, "themes": [
+        {"code": "319", "name": "반도체", "members": ["005930", "000660"]},
+        {"code": "7", "name": "금융", "members": ["105560"]},
+    ]});
+    let h = Harness::start_with(market(), &LISTED, Some(catalog)).await;
+    h.themes(json!([{"id": "MINE", "name": "내 것", "symbols": ["042700"]}]), 3).await;
+    let board = h.board("?source=kiwoom&order=custom").await;
+    assert_eq!((board["source"].clone(), board["revision"].clone()), (json!("kiwoom"), json!(0)));
+    assert_eq!(board["catalog"], json!({"date": "2026-11-19", "collectedAt": 1_794_000_000, "themes": 2, "state": "ready"}));
+    assert_eq!(ids(&board), ["kiwoom-319", "kiwoom-7"]);
+    assert_eq!(board["themes"][0]["name"], "반도체");
+    assert_eq!(board["themes"][0]["summary"]["weightedRate"], rounded((2.0 * 5_000.0 + 9.0 * 50.0) / 5_050.0));
+    let mine = h.board("").await;
+    assert_eq!((mine["source"].clone(), mine["catalog"].clone(), ids(&mine)), (json!("mine"), Value::Null, vec!["MINE"]));
+}
+
+#[tokio::test]
+async fn the_kiwoom_source_without_stored_members_is_empty_and_a_bad_source_is_refused() {
+    let h = Harness::start(market(), &LISTED).await;
+    let board = h.board("?source=kiwoom").await;
+    assert_eq!((board["themes"].clone(), board["catalog"]["state"].clone(), board["catalog"]["date"].clone()), (json!([]), json!("empty"), Value::Null));
+    let (status, body) = h.send("GET", "/api/heatmap/board?source=naver", None).await;
+    assert_eq!((status, &body["error"]["code"]), (400, &json!("bad_request")), "{body}");
 }
