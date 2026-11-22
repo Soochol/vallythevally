@@ -108,7 +108,7 @@ pub async fn run_shared(parts: SharedParts) {
                     for job in jobs {
                         let stats = Arc::new(LoopStats::default());
                         running.stats.push((job.job, stats.clone()));
-                        running.tasks.push(tokio::spawn(job_task(job, day, broker, rest.clone(), key.clone(), shared_dir.clone(), clock.clone(), stats)));
+                        running.tasks.push(tokio::spawn(JobTask { assigned: job, day, broker, rest: rest.clone(), key: key.clone(), shared_dir: shared_dir.clone(), clock: clock.clone(), stats }.run()));
                     }
                 }
                 Some(Ok(Command::Register(_) | Command::Unregister(_))) => tracing::warn!(%key, "공용 자료 자식은 등록 명령을 받지 않습니다"),
@@ -138,21 +138,32 @@ pub async fn run_shared(parts: SharedParts) {
     running.stop();
 }
 
-#[allow(clippy::too_many_arguments)]
-async fn job_task(assigned: AssignedJob, day: KstDate, broker: Broker, rest: KiwoomRest, key: KeyName, shared_dir: PathBuf, clock: Clock, stats: Arc<LoopStats>) {
-    let job = assigned.job.job();
-    let job_loop = JobLoop {
-        job,
-        observation_date: day,
-        period: Duration::from_secs(assigned.period_secs),
-        slice: Slice { index: assigned.slice_index, count: assigned.slice_count },
-        options: assigned.options,
-    };
-    let market = match broker {
-        Broker::Kiwoom => Market::Kiwoom(&rest),
-        Broker::Kis => Market::Kis,
-    };
-    job_loop.run(market, &key, &shared_dir, &clock, &stats).await;
+struct JobTask {
+    assigned: AssignedJob,
+    day: KstDate,
+    broker: Broker,
+    rest: KiwoomRest,
+    key: KeyName,
+    shared_dir: PathBuf,
+    clock: Clock,
+    stats: Arc<LoopStats>,
+}
+
+impl JobTask {
+    async fn run(self) {
+        let job_loop = JobLoop {
+            job: self.assigned.job.job(),
+            observation_date: self.day,
+            period: Duration::from_secs(self.assigned.period_secs),
+            slice: Slice { index: self.assigned.slice_index, count: self.assigned.slice_count },
+            options: self.assigned.options.clone(),
+        };
+        let market = match self.broker {
+            Broker::Kiwoom => Market::Kiwoom(&self.rest),
+            Broker::Kis => Market::Kis,
+        };
+        job_loop.run(market, &self.key, &self.shared_dir, &self.clock, &self.stats).await;
+    }
 }
 
 const SPEC: ArgSpec = ArgSpec { value_options: &["key", "shared", "broker", "total-per-second"], flag_options: &["child"] };
