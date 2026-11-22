@@ -22,6 +22,7 @@ const QUOTE_REPLY_DELAY: Duration = Duration::from_millis(12);
 const LIVE_PER_SECOND_LIMIT: usize = 5;
 const LIVE_WINDOW_WITH_MARGIN: Duration = Duration::from_millis(1_050);
 const CONCURRENT_JUDGMENTS: [usize; 4] = [1, 2, 4, 8];
+const JOIN_SETTLE: Duration = Duration::from_secs(1);
 const QUOTE_API: &str = "ka10095";
 
 fn day(y: i32, m: u8, d: u8) -> KstDate {
@@ -194,17 +195,26 @@ async fn one_screener_run_splits_into_quote_receiving_and_judging_time() {
     for (round, &concurrent) in CONCURRENT_JUDGMENTS.iter().enumerate() {
         let calls_before = quote_calls(&fake);
         let (collecting, _) = api.run_ok(&no_condition_screen()).await;
-        let started = Instant::now();
+        let held = fake.hold("수집 합류 대기", |call| call.api_id == QUOTE_API);
+        let joining = async {
+            held.arrived().await;
+            tokio::time::sleep(JOIN_SETTLE).await;
+            held.release();
+            Instant::now()
+        };
         let runs = futures::future::join_all((0..concurrent).map(|i| {
             let screen = distinct_screen(10 * (round + 1) + i);
             let api = &api;
-            async move { api.run_ok(&screen).await.0 }
-        }))
-        .await;
-        let wall = started.elapsed();
+            async move {
+                api.run_ok(&screen).await;
+                Instant::now()
+            }
+        }));
+        let (released, finished) = tokio::join!(joining, runs);
+        let wall = finished.iter().max().unwrap().duration_since(released);
         let joined_calls = quote_calls(&fake) - calls_before - QUOTE_CALLS_PER_RUN;
         assert_eq!(joined_calls, QUOTE_CALLS_PER_RUN, "동시 {concurrent}개 실행은 수집 작업 하나를 같이 쓴다. StockQuotes는 한 번분만 간다");
-        let each: Vec<f64> = runs.iter().map(|took| millis(took.saturating_sub(collecting))).collect();
+        let each: Vec<f64> = finished.iter().map(|end| millis(end.duration_since(released).saturating_sub(collecting))).collect();
         let mean = each.iter().sum::<f64>() / each.len() as f64;
         let judging_wall = millis(wall.saturating_sub(collecting));
         eprintln!(
