@@ -11,8 +11,12 @@ reservation="vally-collector-restart"
 tab="$(printf '\t')"
 
 case "$stable" in
-    ''|*[!0-9]*|0) echo "vally-deploy collector-restart: VALLY_COLLECTOR_STABLE_SECONDS는 1 이상의 정수여야 합니다($stable)" >&2; exit 2 ;;
+    ''|*[!0-9]*) echo "vally-deploy collector-restart: VALLY_COLLECTOR_STABLE_SECONDS는 1 이상의 정수여야 합니다($stable)" >&2; exit 2 ;;
 esac
+if [ "$stable" -lt 1 ]; then
+    echo "vally-deploy collector-restart: VALLY_COLLECTOR_STABLE_SECONDS는 1 이상의 정수여야 합니다($stable)" >&2
+    exit 2
+fi
 
 cancel_reservation() {
     systemctl --user stop "$reservation.timer" 2>/dev/null || true
@@ -54,7 +58,7 @@ case "$decision" in
         until="${rest%%"$tab"*}"
         reason="${rest#*"$tab"}"
         cancel_reservation
-        systemd-run --user --unit="$reservation" --on-calendar="$until" --collect "$self" --scheduled >/dev/null
+        systemd-run --user --unit="$reservation" --on-calendar="$until" --setenv=VALLY_COLLECTOR_SERVICE="$service" --setenv=VALLY_COLLECTOR_STABLE_SECONDS="$stable" --collect "$self" --scheduled >/dev/null
         echo "재시작하지 않고 예약: $until에 한 번 재시작합니다. 이유: $reason"
         ;;
     *)

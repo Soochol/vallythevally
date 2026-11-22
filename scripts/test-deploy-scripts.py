@@ -259,6 +259,14 @@ echo "$*" > "{self.state}/$unit.timer"
         self.assertIn("--on-calendar=2026-11-24 22:05:00 Asia/Seoul", reservation)
         self.assertIn(f"{self.root.resolve()}/deploy/collector-restart --scheduled", reservation)
 
+    def test_the_reservation_carries_the_service_and_watch_seconds_to_the_scheduled_run(self):
+        self.say("wait\t2026-11-24 22:05:00 Asia/Seoul\t수집 시간 안이다")
+        result = self.restart(VALLY_COLLECTOR_SERVICE="demo.service", VALLY_COLLECTOR_STABLE_SECONDS="7")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        reservation = (self.state / "vally-collector-restart.timer").read_text()
+        self.assertIn("--setenv=VALLY_COLLECTOR_SERVICE=demo.service", reservation)
+        self.assertIn("--setenv=VALLY_COLLECTOR_STABLE_SECONDS=7", reservation)
+
     def test_a_later_wait_replaces_the_earlier_reservation_time(self):
         self.say("wait\t2026-11-24 22:05:00 Asia/Seoul\ta")
         self.restart()
@@ -323,7 +331,7 @@ echo "$*" > "{self.state}/$unit.timer"
         self.assertFalse(any(" restart " in call for call in self.recorded()))
 
     def test_invalid_stable_seconds_fail_before_anything_runs(self):
-        for value in ["0", "abc", "1.5"]:
+        for value in ["0", "00", "abc", "1.5"]:
             result = self.restart(VALLY_COLLECTOR_STABLE_SECONDS=value)
             self.assertEqual(result.returncode, 2, value)
             self.assertIn("VALLY_COLLECTOR_STABLE_SECONDS", result.stderr)

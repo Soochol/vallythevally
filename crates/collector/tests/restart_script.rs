@@ -65,7 +65,7 @@ fn the_real_check_decides_between_restart_and_reservation_for_the_script() {
     assert_eq!(calls[0], "systemctl --user stop vally-collector-restart.timer");
     assert_eq!(
         calls[1],
-        format!("systemd-run --user --unit=vally-collector-restart --on-calendar=2026-11-24 22:05:00 Asia/Seoul --collect {} --scheduled", script_path().display())
+        format!("systemd-run --user --unit=vally-collector-restart --on-calendar=2026-11-24 22:05:00 Asia/Seoul --setenv=VALLY_COLLECTOR_SERVICE=vally-collector.service --setenv=VALLY_COLLECTOR_STABLE_SECONDS=1 --collect {} --scheduled", script_path().display())
     );
 
     let outside = Sandbox::new();
