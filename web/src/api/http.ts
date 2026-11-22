@@ -19,6 +19,7 @@ const API_ERROR_CODES = [
   "account_server_unavailable",
   "forbidden",
   "collector_unavailable",
+  "signed_out",
   "internal",
 ] as const satisfies readonly ApiErrorCode[];
 

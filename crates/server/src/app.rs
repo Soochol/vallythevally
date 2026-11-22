@@ -135,7 +135,7 @@ pub fn application_with_source(inputs: ApplicationInputs, mut system: SystemStat
         None => KeyRing::unconfigured(market_lane),
     });
     let accounts = crate::trading::Accounts::new(keys.clone(), rest.clone(), account_feed, clock.clone(), system.take_order_switch_store(), db.clone(), symbols.clone());
-    Arc::new(AppState { symbols, bars, rest, source, kiwoom, db, clock, static_dir, hub, screener, link, keys, system, registered, seat_rules, accounts, rankings: Default::default(), market_overview: Default::default(), etf: Default::default(), kiwoom_catalog: Default::default() })
+    Arc::new(AppState { symbols, bars, rest, source, kiwoom, db, clock, static_dir, hub, screener, link, keys, system, registered, seat_rules, accounts, rankings: Default::default(), market_overview: Default::default(), etf: Default::default(), kiwoom_catalog: Default::default(), public_usage: Default::default() })
 }
 
 pub async fn daily_maintenance(state: Arc<AppState>) {
@@ -177,6 +177,7 @@ pub struct Started {
     pub router: axum::Router,
     pub listener: TcpListener,
     pub automatic: Option<tokio::task::JoinHandle<()>>,
+    pub public: Option<crate::public::PublicListener>,
 }
 
 async fn serve(config: Config, lock: &InstanceLock) -> ExitCode {
@@ -184,7 +185,26 @@ async fn serve(config: Config, lock: &InstanceLock) -> ExitCode {
     let Ok(started) = start(&config, lock, adapters).await else { return ExitCode::from(1) };
     started.state.keys.connect_at_start();
     tracing::info!(static_dir = %config.static_dir.display(), "요청을 받기 시작합니다");
-    if let Err(e) = axum::serve(started.listener, started.router).with_graceful_shutdown(shutdown_signal()).await {
+    let (stop, stopped) = tokio::sync::watch::channel(false);
+    tokio::spawn(async move {
+        shutdown_signal().await;
+        stop.send_replace(true);
+    });
+    let wait_for_stop = |mut stopped: tokio::sync::watch::Receiver<bool>| async move {
+        let _ = stopped.wait_for(|stop| *stop).await;
+    };
+    let operator = axum::serve(started.listener, started.router).with_graceful_shutdown(wait_for_stop(stopped.clone()));
+    let public = async {
+        match started.public {
+            Some(public) => {
+                let router = public.router();
+                axum::serve(public.listener, router).with_graceful_shutdown(wait_for_stop(stopped.clone())).await
+            }
+            None => Ok(()),
+        }
+    };
+    let (operator, public) = tokio::join!(operator, public);
+    if let Err(e) = operator.and(public) {
         tracing::error!(error = %e, "서버가 멈췄습니다");
         return ExitCode::from(1);
     }
@@ -278,7 +298,7 @@ pub async fn start(config: &Config, lock: &InstanceLock, adapters: Adapters) -> 
         },
         _ => AccountState::local_only(),
     };
-    let mut collector = crate::collector::CollectorBoard::configured(config.collector_admins.clone(), config.collector_socket.clone(), account.is_linked());
+    let mut collector = crate::collector::CollectorBoard::configured(config.collector_admins.clone(), config.collector_socket.clone(), account.is_linked() || config.public.is_some());
     if let Some(board) = collector.take() {
         let telegram_path = config.collector_telegram.clone().or_else(|| std::env::var_os("HOME").filter(|home| !home.is_empty()).map(|home| crate::collector::telegram::default_path(std::path::Path::new(&home))));
         let telegram = match telegram_path.map(|path| crate::collector::telegram::Telegram::load(&path)).transpose() {
@@ -311,8 +331,12 @@ pub async fn start(config: &Config, lock: &InstanceLock, adapters: Adapters) -> 
     let financials = crate::financials::Financials::with_store(dart, financial_store, clock.clone());
     let automatic = config.financial_automatic.then(|| financials.start_automatic(symbols.clone()));
     let financial_routes = crate::financials::routes(financials, symbols.clone());
-    let router = router(state.clone()).merge(financial_routes);
-    Ok(Started { state, router, listener, automatic })
+    let public = crate::public::start(config, state.clone(), financial_routes.clone()).await?;
+    let router = router(state.clone())
+        .merge(financial_routes)
+        .layer(axum::middleware::from_fn_with_state(state.clone(), crate::public::measure_operator_kiwoom))
+        .layer(axum::middleware::from_fn_with_state(state.clone(), crate::write_guard::guard_origin));
+    Ok(Started { state, router, listener, automatic, public })
 }
 
 async fn shutdown_signal() {

@@ -1,0 +1,224 @@
+//! 공개 리스너(ADR 0040). 같은 프로세스에 두 번째 리스너를 열고, 허용 목록 라우터와 로그인·검사·제한을 건다.
+//! 운영자 리스너의 라우트는 바꾸지 않는다.
+
+mod errors;
+mod gate;
+mod kiwoom_guard;
+mod limits;
+mod origin;
+mod server_mode;
+pub mod settings;
+pub mod static_files;
+pub mod usage;
+
+use std::sync::Arc;
+use std::time::{Duration, Instant};
+
+use axum::Router;
+use axum::extract::{Request, State};
+use axum::http::{Method, Uri};
+use axum::middleware::{Next, from_fn_with_state, map_response};
+use axum::response::{Json, Response};
+use axum::routing::{any, any_service, get};
+use tokio::net::TcpListener;
+use tower_http::catch_panic::CatchPanicLayer;
+use tower_http::compression::predicate::{DefaultPredicate, NotForContentType, Predicate};
+use tower_http::compression::{CompressionLayer, CompressionLevel};
+use tower_http::limit::RequestBodyLimitLayer;
+use tower_http::timeout::TimeoutLayer;
+
+pub use self::server_mode::{ServerMode, ServerModeKind, local as server_mode_local};
+use self::settings::{Limits, PublicOrigin, PublicSettings};
+use self::static_files::StaticSite;
+use self::usage::{Bundle, Usage, UsageSnapshot};
+use crate::app::StartFailure;
+use crate::clock::Clock;
+use crate::config::Config;
+use crate::http::AppState;
+
+pub const CSP: &str = include_str!("csp.txt");
+pub const BODY_LIMIT_BYTES: usize = 8 * 1024 * 1024;
+const COMPRESSION_QUALITY: i32 = 4;
+const USAGE_LOG_EVERY: Duration = Duration::from_secs(60);
+
+#[derive(Debug, Clone)]
+pub struct Principal {
+    pub account_id: String,
+    pub key: String,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct AccountMark(pub String);
+
+pub(crate) struct Runtime {
+    pub(super) state: Arc<AppState>,
+    pub(super) origin: PublicOrigin,
+    pub(super) limits: Limits,
+    pub(super) accounts: account_server::Accounts,
+    pub(super) clock: Clock,
+    pub(super) usage: Arc<Usage>,
+    pub(super) meters: gate::Meters,
+    pub(super) flight: gate::Flight,
+    pub(super) kiwoom: kiwoom_guard::KiwoomGuard,
+}
+
+pub struct PublicListener {
+    pub listener: TcpListener,
+    runtime: Arc<Runtime>,
+    browser_login: Router,
+    financial_reads: Router,
+    site: Arc<StaticSite>,
+}
+
+pub async fn start(config: &Config, state: Arc<AppState>, financial_routes: Router) -> Result<Option<PublicListener>, StartFailure> {
+    let Some(settings) = config.public.clone() else { return Ok(None) };
+    let PublicSettings { bind, origin, account, limits } = settings;
+    let listener = TcpListener::bind(bind.socket_addr()).await.map_err(|e| {
+        tracing::error!(addr = %bind.socket_addr(), error = %e, "공개 포트를 열 수 없습니다");
+        StartFailure
+    })?;
+    let account_settings = account.0;
+    if let Some(parent) = account_settings.database_path.parent().filter(|p| !p.as_os_str().is_empty()) {
+        std::fs::create_dir_all(parent).map_err(|e| {
+            tracing::error!(path = %parent.display(), error = %e, "공개 계정 DB 폴더를 만들 수 없습니다");
+            StartFailure
+        })?;
+    }
+    let pool = account_server::open_database(&account_settings.database_path).await.map_err(|e| {
+        tracing::error!(path = %account_settings.database_path.display(), error = %e, "공개 계정 DB를 열 수 없습니다");
+        StartFailure
+    })?;
+    let accounts = account_server::Accounts::new(account_settings.config.clone(), account_settings.account_options(), pool, Arc::new(account_server::SystemClock));
+    let loading = std::time::Instant::now();
+    let site = StaticSite::load(config.static_dir.clone()).await.map_err(|e| {
+        tracing::error!(path = %config.static_dir.display(), error = %e, "공개 화면 파일을 읽을 수 없습니다");
+        StartFailure
+    })?;
+    tracing::info!(path = %config.static_dir.display(), elapsed_ms = loading.elapsed().as_millis() as u64, "공개 화면 파일을 메모리에 올렸습니다");
+    let now = state.clock.now().unix();
+    state.public_usage.started(now);
+    let runtime = Arc::new(Runtime {
+        origin,
+        accounts: accounts.clone(),
+        clock: state.clock.clone(),
+        usage: state.public_usage.clone(),
+        meters: gate::Meters::new(&limits, now),
+        flight: gate::Flight::new(&limits),
+        kiwoom: kiwoom_guard::KiwoomGuard::new(&limits),
+        limits,
+        state,
+    });
+    tokio::spawn(log_usage_every_minute(runtime.usage.clone(), runtime.clock.clone()));
+    let financial_reads = financial_routes.route_layer(axum::middleware::from_fn(kiwoom_guard::financial_reads));
+    tracing::info!(addr = %bind.socket_addr(), origin = %runtime.origin.origin, "공개 리스너를 엽니다");
+    Ok(Some(PublicListener { listener, runtime, browser_login: accounts.browser_router(), financial_reads, site: Arc::new(site) }))
+}
+
+async fn log_usage_every_minute(usage: Arc<Usage>, clock: Clock) {
+    let mut ticks = tokio::time::interval(USAGE_LOG_EVERY);
+    ticks.tick().await;
+    loop {
+        ticks.tick().await;
+        if let Some(line) = usage.take_minute_line(clock.now().unix()) {
+            tracing::info!("{line}");
+        }
+    }
+}
+
+impl PublicListener {
+    pub fn router(&self) -> Router {
+        self.router_with(Router::new())
+    }
+
+    /// `extra`는 운영 빌드에서 비어 있다. 시험이 panic 라우트 같은 것을 `/api` 아래에 붙인다.
+    pub fn router_with(&self, extra: Router<Arc<AppState>>) -> Router {
+        let runtime = self.runtime.clone();
+        let rankings = crate::rankings::routes().route_layer(from_fn_with_state(runtime.clone(), kiwoom_guard::rankings));
+        let market = crate::market_overview::routes().route_layer(from_fn_with_state(runtime.clone(), kiwoom_guard::market_overview));
+        let screener = crate::screener::routes().route_layer(from_fn_with_state(runtime.clone(), kiwoom_guard::screener));
+        let shared = Router::new()
+            .route("/api/server-mode", get(server_mode::public))
+            .route("/api/symbols", get(crate::http::search))
+            .route("/api/symbols/{code}", get(crate::http::symbol))
+            .merge(rankings)
+            .merge(market)
+            .merge(crate::etf::routes())
+            .merge(screener)
+            .merge(crate::collector::routes())
+            .merge(extra)
+            .with_state(runtime.state.clone());
+        let site = self.site.clone();
+        let api = shared
+            .merge(self.financial_reads.clone())
+            .route("/api", any(not_found))
+            .route("/api/{*rest}", any(not_found))
+            .route("/v1", any(not_found))
+            .route("/v1/{*rest}", any_service(self.browser_login.clone()))
+            .layer(from_fn_with_state(runtime.clone(), gate::gate));
+        let finish_state = runtime.clone();
+        Router::new()
+            .merge(api)
+            .fallback(move |method: Method, uri: Uri, headers: axum::http::HeaderMap| {
+                let site = site.clone();
+                async move { site.respond(&method, uri.path(), &headers) }
+            })
+            .layer(from_fn_with_state(runtime.clone(), origin::check))
+            .layer(RequestBodyLimitLayer::new(BODY_LIMIT_BYTES))
+            .layer(TimeoutLayer::with_status_code(axum::http::StatusCode::SERVICE_UNAVAILABLE, runtime.limits.request_timeout))
+            .layer(CatchPanicLayer::custom(|_| errors::internal()))
+            .layer(from_fn_with_state(finish_state, finish))
+            .layer(compression())
+            .layer(map_response(|mut response: Response| async move {
+                errors::security_headers(&mut response, CSP.trim());
+                response
+            }))
+    }
+
+    pub fn local_addr(&self) -> std::io::Result<std::net::SocketAddr> {
+        self.listener.local_addr()
+    }
+}
+
+pub fn compression() -> CompressionLayer<impl Predicate + Clone> {
+    CompressionLayer::new()
+        .quality(CompressionLevel::Precise(COMPRESSION_QUALITY))
+        .compress_when(DefaultPredicate::new().and(NotForContentType::const_new("font/woff2")).and(NotForContentType::const_new("font/woff")).and(NotForContentType::const_new("application/zip")))
+}
+
+async fn not_found() -> Response {
+    errors::not_found()
+}
+
+async fn finish(State(runtime): State<Arc<Runtime>>, request: Request, next: Next) -> Response {
+    let path = request.uri().path().to_owned();
+    let counted = path == "/api" || path.starts_with("/api/") || path == "/v1" || path.starts_with("/v1/");
+    let response = next.run(request).await;
+    let account = response.extensions().get::<AccountMark>().map(|mark| mark.0.clone());
+    let response = errors::shape(response, runtime.clock.now().unix()).await;
+    if counted {
+        runtime.usage.response(Bundle::of_path(&path), response.status().as_u16(), account.as_deref());
+    }
+    response
+}
+
+/// 운영자 리스너 전용 `GET /api/public-usage`.
+pub async fn usage_page(State(state): State<Arc<AppState>>) -> Json<UsageSnapshot> {
+    Json(state.public_usage.snapshot(state.clock.now().unix()))
+}
+
+fn is_kiwoom_path(path: &str) -> bool {
+    const PREFIXES: &[&str] = &["/api/rankings", "/api/market-overview/", "/api/screener/run", "/api/heatmap/", "/api/bars", "/api/quotes"];
+    const SYMBOL_SUFFIXES: &[&str] = &["/order-book", "/trades", "/program-trades", "/foreign-holdings", "/investor-net-shares", "/fundamentals", "/day-summary"];
+    PREFIXES.iter().any(|prefix| path.starts_with(prefix)) || (path.starts_with("/api/symbols/") && SYMBOL_SUFFIXES.iter().any(|suffix| path.ends_with(suffix)))
+}
+
+/// 운영자 리스너가 키움 경로 응답 시간을 분마다 p50과 최대로 센다(D7b(3)).
+pub async fn measure_operator_kiwoom(State(state): State<Arc<AppState>>, request: Request, next: Next) -> Response {
+    if !is_kiwoom_path(request.uri().path()) {
+        return next.run(request).await;
+    }
+    let started = Instant::now();
+    let response = next.run(request).await;
+    state.public_usage.operator_kiwoom_response(state.clock.now().unix(), started.elapsed());
+    response
+}

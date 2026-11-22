@@ -1751,6 +1751,8 @@ pub enum ApiErrorCode {
     AccountServerUnavailable,
     Forbidden,
     CollectorUnavailable,
+    /// 공개 리스너에서 세션이 없거나 만료됐다.
+    SignedOut,
     Internal,
 }
 
