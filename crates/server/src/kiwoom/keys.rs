@@ -57,8 +57,8 @@ impl LaneFactory {
         TokenFile::held(paths.token.clone(), self.bases.held).with_environment(self.environment)
     }
 
-    fn paths_for(&self, credentials: &KiwoomCredentials, first_claimant: bool) -> KeyPaths {
-        paths_for_key(&self.bases, self.environment, credentials, first_claimant)
+    fn paths_for(&self, credentials: &KiwoomCredentials, first_claimant: bool, listed: &[KiwoomCredentials]) -> KeyPaths {
+        paths_for_key(&self.bases, self.environment, credentials, first_claimant, listed)
     }
 
     fn account_lane(&self, paths: &KeyPaths, credentials: &KiwoomCredentials) -> Lane {
@@ -304,7 +304,8 @@ impl KeyRing {
             proposed.market = Some(id.clone());
         }
         self.persist(&proposed)?;
-        let paths = factory.paths_for(&credentials, first);
+        let listed: Vec<KiwoomCredentials> = inner.entries.iter().map(|entry| entry.credentials.clone()).chain([credentials.clone()]).collect();
+        let paths = factory.paths_for(&credentials, first, &listed);
         let lane = if first { self.market_lane.clone() } else { factory.account_lane(&paths, &credentials) };
         let registered_ip = registered_ip_file(paths.registered_ip.clone()).load().ok().flatten();
         let entry = Entry { id: id.clone(), alias, origin: KeyOrigin::File, broker: Broker::Kiwoom, credentials, paths, lane, registered_ip };

@@ -529,3 +529,23 @@ async fn replacing_the_market_key_while_blocked_keeps_the_block_after_a_restart(
     assert_eq!(issued_for(&restarted_fake, THIRD_KEY), 0);
     restarted.stop().await;
 }
+
+#[tokio::test]
+async fn a_blocked_key_added_back_under_a_new_id_is_still_blocked() {
+    let fake = ScriptedTransport::new();
+    let env = Env::new();
+    let server = env.spawn(&fake, &[OFF]);
+    let client = Client::of(&server).await;
+    assert_eq!(client.put_market_credentials(FIRST_KEY, FIRST_SECRET).await.0, 200);
+    client.until_key_state("k1", "connected").await;
+    fake.script("au10001", vec![ScriptedReply { status: 200, body: json!({"return_code": 3, "return_msg": EIGHT_FIFTY}), delay: Duration::ZERO }]);
+    assert_eq!(client.add("막힌 키", SECOND_KEY, SECOND_SECRET).await.0, 200);
+    client.until_key_state("k2", "failed").await;
+    assert_eq!(client.add("셋째", THIRD_KEY, THIRD_SECRET).await.0, 200);
+    assert_eq!(client.send(reqwest::Method::DELETE, "/api/system/kiwoom/keys/k2", None).await.0, 200);
+    assert_eq!(client.add("다시 넣은 키", SECOND_KEY, SECOND_SECRET).await.0, 200);
+    let readded = client.until_key_state("k4", "failed").await;
+    assert_eq!(readded["link"]["problem"], "authBlocked8050", "{readded}");
+    assert_eq!(issued_for(&fake, SECOND_KEY), 1);
+    server.stop().await;
+}

@@ -238,14 +238,16 @@ fn derived(base: &Path, credential: &str) -> PathBuf {
     base.with_file_name(name)
 }
 
-pub fn paths_for_key(bases: &FileBases, environment: KiwoomEnvironment, credentials: &KiwoomCredentials, first_claimant: bool) -> KeyPaths {
+pub fn paths_for_key(bases: &FileBases, environment: KiwoomEnvironment, credentials: &KiwoomCredentials, first_claimant: bool, present: &[KiwoomCredentials]) -> KeyPaths {
     let credential = credential_id(credentials.app_key.expose());
     let owner = TokenFile::held(bases.token.clone(), bases.held).with_environment(environment).load().ok().flatten().and_then(|saved| saved.credential);
+    let owner_is_listed = owner.as_ref().is_some_and(|owner| present.iter().any(|listed| credential_id(listed.app_key.expose()) == *owner));
+    let derived = derived_paths(bases, credentials);
     let owns_base = match owner {
-        Some(owner) => owner == credential,
-        None => first_claimant,
+        Some(owner) if owner_is_listed => owner == credential,
+        _ => first_claimant && !derived.token.exists(),
     };
-    if owns_base { base_paths(bases) } else { derived_paths(bases, credentials) }
+    if owns_base { base_paths(bases) } else { derived }
 }
 
 pub fn base_paths(bases: &FileBases) -> KeyPaths {
@@ -275,15 +277,17 @@ pub struct StartupKeys {
 
 pub fn startup_keys(env: Option<KiwoomCredentials>, file: &KeyFile, environment: KiwoomEnvironment, bases: &FileBases) -> StartupKeys {
     let mut keys: Vec<StartupKey> = Vec::new();
-    if let Some(credentials) = env {
-        let paths = paths_for_key(bases, environment, &credentials, true);
+    let file_list = if environment == KiwoomEnvironment::Mock { Ok(KeyList::default()) } else { file.load() };
+    let listed: Vec<KiwoomCredentials> = env.iter().cloned().chain(file_list.iter().flat_map(|list| list.keys.iter().map(|key| key.credentials.clone()))).collect();
+    if let Some(credentials) = env.clone() {
+        let paths = paths_for_key(bases, environment, &credentials, true, &listed);
         keys.push(StartupKey { id: KeyId::env(), alias: ENV_KEY_ALIAS.to_owned(), origin: KeyOrigin::Env, broker: Broker::Kiwoom, credentials, paths });
     }
     if environment == KiwoomEnvironment::Mock {
         let market = keys.first().map(|key| key.id.clone());
         return StartupKeys { keys, market, file_problem: None };
     }
-    let (list, file_problem) = match file.load() {
+    let (list, file_problem) = match file_list {
         Ok(list) => (list, None),
         Err(e) => {
             tracing::error!(error = %e, "키 파일을 읽지 못했습니다. 파일의 키 없이 켭니다");
@@ -295,7 +299,7 @@ pub fn startup_keys(env: Option<KiwoomCredentials>, file: &KeyFile, environment:
             tracing::warn!("키 목록의 키가 환경 설정 키와 같아 한 번만 씁니다");
             continue;
         }
-        let paths = paths_for_key(bases, environment, &stored.credentials, keys.is_empty());
+        let paths = paths_for_key(bases, environment, &stored.credentials, keys.is_empty(), &listed);
         keys.push(StartupKey { id: stored.id, alias: stored.alias, origin: KeyOrigin::File, broker: stored.broker, credentials: stored.credentials, paths });
     }
     let market = list.market.filter(|id| keys.iter().any(|key| key.id == *id)).or_else(|| keys.first().map(|key| key.id.clone()));
@@ -446,18 +450,20 @@ mod tests {
         let (dir, _lock, _file) = temp_key_file();
         let bases = bases(&dir);
         let (first, second) = (credentials("FAKE-APPKEY-paths-1", "s"), credentials("FAKE-APPKEY-paths-2", "s"));
+        let both = [first.clone(), second.clone()];
         let environment = KiwoomEnvironment::Real;
-        assert_eq!(paths_for_key(&bases, environment, &first, true).token, bases.token, "아무도 쓰지 않은 기본 파일은 첫 키가 쓴다");
-        assert_ne!(paths_for_key(&bases, environment, &second, false).token, bases.token);
+        assert_eq!(paths_for_key(&bases, environment, &first, true, &both).token, bases.token, "아무도 쓰지 않은 기본 파일은 첫 키가 쓴다");
+        assert_ne!(paths_for_key(&bases, environment, &second, false, &both).token, bases.token);
         let claimed = Saved { credential: Some(credential_id("FAKE-APPKEY-paths-1")), ..Saved::default() };
         TokenFile::held(bases.token.clone(), bases.held).save(&claimed).unwrap();
-        assert_eq!(paths_for_key(&bases, environment, &first, false).token, bases.token, "목록의 순서가 바뀌어도 앱키가 같으면 같은 파일이다");
-        assert_ne!(paths_for_key(&bases, environment, &second, true).token, bases.token, "다른 앱키가 쓰던 기본 파일을 첫 키라고 가져가지 않는다");
-        let derived = paths_for_key(&bases, environment, &second, true);
-        assert_eq!(derived.token, paths_for_key(&bases, environment, &second, false).token);
+        assert_eq!(paths_for_key(&bases, environment, &first, false, &both).token, bases.token, "목록의 순서가 바뀌어도 앱키가 같으면 같은 파일이다");
+        let derived = paths_for_key(&bases, environment, &second, true, &both);
+        assert_ne!(derived.token, bases.token, "목록에 있는 다른 앱키가 쓰던 기본 파일을 첫 키라고 가져가지 않는다");
+        assert_eq!(derived.token, paths_for_key(&bases, environment, &second, false, &both).token);
         let name = derived.registered_ip.file_name().unwrap().to_string_lossy().into_owned();
         assert!(name.starts_with("kiwoom-ip.") && name.ends_with(".json") && name != "kiwoom-ip.json", "{name}");
         assert_ne!(derived.token, derived.registered_ip);
+        assert_eq!(paths_for_key(&bases, environment, &second, true, std::slice::from_ref(&second)).token, bases.token, "기본 파일을 쓰던 앱키가 목록에 없으면 첫 키가 이어받는다");
     }
 
     #[test]
