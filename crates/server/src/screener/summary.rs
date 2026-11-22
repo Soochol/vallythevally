@@ -17,6 +17,12 @@ static NEXT_COLLECTION: AtomicU64 = AtomicU64::new(1);
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CollectionId(u64);
 
+impl CollectionId {
+    pub(super) fn next() -> CollectionId {
+        CollectionId(NEXT_COLLECTION.fetch_add(1, Ordering::SeqCst))
+    }
+}
+
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct CollectionBasis {
     pub generation: u64,

@@ -5,12 +5,13 @@ mod line;
 mod market_cap;
 pub mod memory;
 mod rules;
+mod shared;
 pub mod store;
 pub mod summary;
 mod update;
 
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex, MutexGuard};
+use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
 
 use axum::Router;
 use axum::body::Body;
@@ -30,7 +31,9 @@ use crate::user_routes::read_json;
 use setup::JSON_LIMIT;
 use memory::{Edition, Memory};
 pub(crate) use rules::{Invalid, RunnableScreen, parse_screen};
-use summary::{CollectionBasis, CollectionError, SummaryCollector};
+pub use shared::ReuseCounts;
+use shared::{ResultKey, SharedQuotes, screen_key};
+use summary::{CollectionBasis, CollectionError, SummaryBatch, SummaryCollector};
 use store::{Listed, Store, StoreError};
 
 const CALENDAR_DAYS: usize = 10;
@@ -56,7 +59,7 @@ enum CalendarUse {
     Update,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 enum Observation {
     Current,
     PreviousOnly(KstDate),
@@ -98,10 +101,30 @@ impl Calendar {
     }
 }
 
+struct SnapshotRun {
+    screen: RunnableScreen,
+    screen_key: String,
+    calendar: Arc<Calendar>,
+    need_day: Option<KstDate>,
+    now: KstTime,
+    update_epoch: u64,
+}
+
+struct Judging {
+    screen: RunnableScreen,
+    edition: Arc<Edition>,
+    batch: Arc<SummaryBatch>,
+    calendar: Arc<Calendar>,
+    need_day: Option<KstDate>,
+    now: KstTime,
+    basis: CollectionBasis,
+}
+
 pub struct Screener {
     store: Arc<Store>,
     memory: Memory,
     summaries: Arc<SummaryCollector>,
+    shared: OnceLock<SharedQuotes>,
     kiwoom: KiwoomHandle,
     bars: Arc<BarService>,
     symbols: Arc<SymbolDirectory>,
@@ -119,6 +142,7 @@ impl Screener {
             store: Arc::new(store),
             memory: Memory::default(),
             summaries: SummaryCollector::new(kiwoom.clone(), clock.clone()),
+            shared: OnceLock::new(),
             kiwoom,
             bars,
             symbols,
@@ -137,6 +161,16 @@ impl Screener {
     async fn with_store<T: Send + 'static>(&self, f: impl FnOnce(&Store) -> Result<T, StoreError> + Send + 'static) -> Result<T, StoreError> {
         let store = self.store.clone();
         tokio::task::spawn_blocking(move || f(&store)).await.map_err(|e| StoreError(format!("저장소 작업이 끝나지 못했습니다: {e}")))?
+    }
+
+    pub fn read_shared_snapshots(&self, data: Arc<crate::shared_data::SharedData>) {
+        if self.shared.set(SharedQuotes::new(data)).is_err() {
+            tracing::warn!("스크리너가 이미 공용 스냅샷을 읽고 있어 다시 켜지 않습니다");
+        }
+    }
+
+    pub fn result_reuse(&self) -> Option<ReuseCounts> {
+        self.shared.get().map(SharedQuotes::counts)
     }
 
     pub fn store_generation(&self) -> u64 {
@@ -302,24 +336,56 @@ impl Screener {
         Ok(self.with_store(move |s| s.fill_lost_listing(directory.screener_listing())).await?)
     }
 
-    async fn run_screen(self: &Arc<Self>, screen: RunnableScreen) -> Result<ScreenerResult, ApiFailure> {
+    async fn run_screen(self: &Arc<Self>, screen: RunnableScreen, screen_key: String) -> Result<ScreenerResult, ApiFailure> {
         let now = self.clock.now();
         let calendar = self.calendar(CalendarUse::Status).await.map_err(|e| Lookup::ScreenerRun.failure(e, now))?;
         let need_day = calendar.need_day(now);
         self.refill_listing().await.map_err(|e| Lookup::ScreenerRun.failure(e, now))?;
         self.recents_started_outside_recent()?;
         let update_epoch = self.next_run.load(Ordering::SeqCst);
+        if let Some(shared) = self.shared.get() {
+            return self.run_from_snapshot(shared, SnapshotRun { screen, screen_key, calendar, need_day, now, update_epoch }).await;
+        }
         let (generation, codes) = self.with_store(Store::collection_targets).await?;
         let edition = self.memory.edition_for(&self.store, generation).await?;
-        let edition_generation = edition.generation();
         self.check_ready(&edition, need_day, now)?;
         let basis = CollectionBasis { generation, update_epoch };
         let batch = self.summaries.collect(codes, basis).await.map_err(|error| match error {
             CollectionError::Kiwoom(error) => Lookup::ScreenerRun.failure(error.into(), self.clock.now()),
             error => data_changed(error.to_string()),
         })?;
+        self.judge(Judging { screen, edition, batch, calendar, need_day, now, basis }).await
+    }
+
+    async fn run_from_snapshot(self: &Arc<Self>, shared: &SharedQuotes, run: SnapshotRun) -> Result<ScreenerResult, ApiFailure> {
+        let SnapshotRun { screen, screen_key, calendar, need_day, now, update_epoch } = run;
+        let generation = self.with_store(|store| Ok(store.generation())).await?;
+        let edition = self.memory.edition_for(&self.store, generation).await?;
+        self.check_ready(&edition, need_day, now)?;
+        let observation = calendar.observation(now);
+        let Some(snapshot) = shared.snapshot(observation, now.kst_date()) else {
+            return Err(ApiFailure::new(api::ApiErrorCode::KiwoomUnavailable, "공용 시세 스냅샷을 아직 받지 못했습니다. 수집 데몬이 오늘 첫 스냅샷을 쓴 뒤 다시 실행하세요"));
+        };
+        let basis = CollectionBasis { generation, update_epoch };
+        let slot = shared.slot(ResultKey::new(screen_key, &snapshot, basis, now.kst_date(), observation));
+        let mut judged_here = false;
+        let result = slot
+            .get_or_try_init(|| async {
+                judged_here = true;
+                let batch = shared.batch(&snapshot, edition.stocks.iter().map(|stock| stock.code), basis, now.kst_date());
+                self.judge(Judging { screen, edition: edition.clone(), batch, calendar, need_day, now, basis }).await.map(Arc::new)
+            })
+            .await?;
+        shared.count(judged_here);
+        Ok(ScreenerResult::clone(result))
+    }
+
+    async fn judge(self: &Arc<Self>, judging: Judging) -> Result<ScreenerResult, ApiFailure> {
+        let Judging { screen, edition, batch, calendar, need_day, now, basis } = judging;
+        let (generation, update_epoch) = (basis.generation, basis.update_epoch);
+        let edition_generation = edition.generation();
         let me = self.clone();
-        let judging = std::time::Instant::now();
+        let started = std::time::Instant::now();
         let judged = tokio::task::spawn_blocking(move || {
             if me.clock.now().kst_date() != batch.target || batch.target != now.kst_date() {
                 return Err(data_changed("실행 중 날짜가 바뀌었습니다. 다시 실행하세요"));
@@ -341,7 +407,7 @@ impl Screener {
             }
             Ok(result)
         }).await.map_err(|e| StoreError(format!("실행 작업이 끝나지 못했습니다: {e}")))?;
-        tracing::info!(judging_us = judging.elapsed().as_micros() as u64, edition = edition_generation, ok = judged.is_ok(), "스크리너 판정을 마쳤습니다");
+        tracing::info!(judging_us = started.elapsed().as_micros() as u64, edition = edition_generation, ok = judged.is_ok(), "스크리너 판정을 마쳤습니다");
         judged
     }
 
@@ -422,8 +488,8 @@ async fn status(State(st): State<Arc<AppState>>) -> Result<Json<ScreenerStatus>,
 
 async fn run_screen(State(st): State<Arc<AppState>>, body: Body) -> Result<Json<ScreenerResult>, ApiFailure> {
     let screen: Screen = read_json(body, JSON_LIMIT, "조건식 본문").await?;
-    let screen = parse_stored_screen(&screen)?;
-    Ok(Json(st.screener.run_screen(screen).await?))
+    let runnable = parse_stored_screen(&screen)?;
+    Ok(Json(st.screener.run_screen(runnable, screen_key(&screen)).await?))
 }
 
 impl From<Invalid> for ApiFailure {

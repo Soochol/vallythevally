@@ -320,6 +320,9 @@ pub async fn start(config: &Config, lock: &InstanceLock, adapters: Adapters) -> 
     tokio::spawn(crate::account::sync::run(state.clone()));
     tokio::spawn(crate::collector::run(state.clone()));
     state.shared_data.start(config.shared_data.as_ref());
+    if config.shared_data.is_some() {
+        state.screener.read_shared_snapshots(state.shared_data.clone());
+    }
     crate::market_overview::start(state.clone(), config.market_samples_dir.clone());
     crate::etf::start_collection(state.clone(), config.etf_pdf_dir.clone(), config.naver_base_url.clone());
     crate::kiwoom_themes::start_collection(state.clone(), config.kiwoom_themes_dir.clone());
