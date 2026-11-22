@@ -17,6 +17,8 @@ pub const MAX_ATTEMPTS: u32 = 4;
 pub const LONGEST_WAIT: Duration = Duration::from_secs(60);
 const FALLBACK_WAIT: Duration = Duration::from_secs(1);
 const TEXT_LIMIT: usize = 4096;
+pub const LONGEST_BOT_TOKEN: usize = 256;
+pub const LONGEST_CHAT_ID: usize = 128;
 
 pub fn default_path(home: &Path) -> PathBuf {
     home.join(DEFAULT_FILE)
@@ -110,10 +112,13 @@ fn payload(chat_id: &str, text: &str) -> String {
 }
 
 fn is_bot_token(value: &str) -> bool {
-    !value.is_empty() && value.bytes().all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b':' | b'_' | b'-'))
+    !value.is_empty() && value.len() <= LONGEST_BOT_TOKEN && value.bytes().all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b':' | b'_' | b'-'))
 }
 
 fn is_chat_id(value: &str) -> bool {
+    if value.len() > LONGEST_CHAT_ID {
+        return false;
+    }
     let digits = value.strip_prefix('-').unwrap_or(value);
     let channel_name = value.strip_prefix('@');
     (!digits.is_empty() && digits.bytes().all(|byte| byte.is_ascii_digit())) || channel_name.is_some_and(|name| !name.is_empty() && name.bytes().all(|byte| byte.is_ascii_alphanumeric() || byte == b'_'))
@@ -140,10 +145,10 @@ fn parse_settings(text: &str) -> Result<Settings, &'static str> {
     let bot_token = bot_token.ok_or("bot_token이 없습니다")?;
     let chat_id = chat_id.ok_or("chat_id가 없습니다")?;
     if !is_bot_token(&bot_token) {
-        return Err("bot_token에 쓸 수 없는 글자가 있거나 비어 있습니다");
+        return Err("bot_token이 비어 있거나 쓸 수 없는 글자가 있거나 256자를 넘습니다");
     }
     if !is_chat_id(&chat_id) {
-        return Err("chat_id는 숫자(음수 가능)나 @이름이어야 합니다");
+        return Err("chat_id는 128자 이하의 숫자(음수 가능)나 @이름이어야 합니다");
     }
     Ok(Settings { bot_token, chat_id })
 }
@@ -158,15 +163,15 @@ impl Telegram {
         let mut file = match std::fs::File::open(path) {
             Ok(file) => file,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
-            Err(error) => return Err(problem(FileProblem::Unreadable(error.kind().to_string()))),
+            Err(error) => return Err(problem(FileProblem::Unreadable(error.to_string()))),
         };
-        let metadata = file.metadata().map_err(|error| problem(FileProblem::Unreadable(error.kind().to_string())))?;
+        let metadata = file.metadata().map_err(|error| problem(FileProblem::Unreadable(error.to_string())))?;
         let mode = metadata.permissions().mode() & 0o777;
         if mode & 0o077 != 0 {
             return Err(problem(FileProblem::Mode(mode)));
         }
         let mut text = String::new();
-        file.read_to_string(&mut text).map_err(|error| problem(FileProblem::Unreadable(error.kind().to_string())))?;
+        file.read_to_string(&mut text).map_err(|error| problem(FileProblem::Unreadable(error.to_string())))?;
         let settings = parse_settings(&text).map_err(|reason| problem(FileProblem::Malformed(reason)))?;
         if !reqwest::Url::parse(api).is_ok_and(|parsed| matches!(parsed.scheme(), "http" | "https")) {
             return Err(problem(FileProblem::Malformed("API 기준 주소가 http나 https 주소가 아닙니다")));
@@ -248,6 +253,36 @@ mod tests {
     fn a_missing_file_turns_telegram_off_without_an_error() {
         let folder = tempfile::tempdir().unwrap();
         assert!(Telegram::load(&folder.path().join("telegram")).unwrap().is_none());
+    }
+
+    #[test]
+    fn a_path_that_cannot_be_opened_is_an_error_but_only_a_missing_file_turns_telegram_off() {
+        let folder = tempfile::tempdir().unwrap();
+        let (_file_folder, file) = file_with(0o600, SETTINGS);
+        let under_a_file = file.join("telegram");
+        let loop_a = folder.path().join("loop-a");
+        let loop_b = folder.path().join("loop-b");
+        std::os::unix::fs::symlink(&loop_b, &loop_a).unwrap();
+        std::os::unix::fs::symlink(&loop_a, &loop_b).unwrap();
+        let (_closed_folder, closed) = file_with(0o000, SETTINGS);
+        let dangling = folder.path().join("dangling");
+        std::os::unix::fs::symlink(folder.path().join("nowhere"), &dangling).unwrap();
+        for path in [&under_a_file, &loop_a, &closed] {
+            let message = Telegram::load(path).unwrap_err().to_string();
+            assert!(message.contains(&path.display().to_string()) && !message.contains("SECRET-TOKEN"), "{message}");
+        }
+        assert!(Telegram::load(&dangling).unwrap().is_none());
+    }
+
+    #[test]
+    fn the_token_and_the_chat_have_a_longest_length() {
+        let settings = |token: usize, chat: &str| format!("bot_token={}\nchat_id={chat}\n", "a".repeat(token));
+        assert!(parse_settings(&settings(LONGEST_BOT_TOKEN, "1")).is_ok());
+        assert!(parse_settings(&settings(LONGEST_BOT_TOKEN + 1, "1")).is_err());
+        for chat in ["1".repeat(LONGEST_CHAT_ID), format!("-{}", "1".repeat(LONGEST_CHAT_ID - 1)), format!("@{}", "a".repeat(LONGEST_CHAT_ID - 1))] {
+            assert!(parse_settings(&settings(1, &chat)).is_ok(), "{chat}");
+            assert!(parse_settings(&settings(1, &format!("{chat}1"))).is_err(), "{chat}");
+        }
     }
 
     #[test]

@@ -224,33 +224,67 @@ fn blank_lines_spaces_and_a_username_chat_are_fine() {
 enum Layout {
     File,
     SymlinkToFile,
+    NoAccess,
+    SymlinkLoop,
+    UnderAFile,
+    Missing,
+    DanglingSymlink,
+    DashRelative,
+}
+
+#[derive(Debug, PartialEq)]
+enum Outcome {
+    Sends(String),
+    TurnsOff,
+    Fails,
 }
 
 struct Case {
     name: &'static str,
     text: String,
     layout: Layout,
-    sends_to: Option<&'static str>,
+    outcome: Outcome,
 }
 
-fn case(name: &'static str, text: &str, layout: Layout, sends_to: Option<&'static str>) -> Case {
-    Case { name, text: text.to_owned(), layout, sends_to }
+fn case(name: &'static str, text: &str, layout: Layout, outcome: Outcome) -> Case {
+    Case { name, text: text.to_owned(), layout, outcome }
+}
+
+fn sends(chat_id: &str) -> Outcome {
+    Outcome::Sends(chat_id.to_owned())
 }
 
 fn parity_cases() -> Vec<Case> {
     let token = format!("bot_token=123456:{SECRET}\n");
+    let two_lines = format!("{token}chat_id=-100777\n");
+    let with_token_of = |length: usize| format!("bot_token={}\nchat_id=-100777\n", "a".repeat(length));
+    let with_chat_of = |chat_id: String| format!("{token}chat_id={chat_id}\n");
     vec![
-        case("정상 두 줄", &format!("{token}chat_id=-100777\n"), Layout::File, Some("-100777")),
-        case("600 파일을 가리키는 심볼릭 링크", &format!("{token}chat_id=-100777\n"), Layout::SymlinkToFile, Some("-100777")),
-        case("값 끝의 NBSP", &format!("{token}chat_id=-100777\u{a0}\n"), Layout::File, None),
-        case("값 끝의 전각 공백", &format!("{token}chat_id=-100777\u{3000}\n"), Layout::File, None),
-        case("값 끝의 탭과 수직 탭", &format!("{token}chat_id=-100777\t\x0b\n"), Layout::File, Some("-100777")),
-        case("줄 안의 CR", &format!("{token}chat_id=-100\r777\n"), Layout::File, None),
-        case("CRLF 줄 끝", &format!("bot_token=123456:{SECRET}\r\nchat_id=-100777\r\n"), Layout::File, Some("-100777")),
-        case("줄 안의 NUL", &format!("{token}chat_id=-100\u{0}777\n"), Layout::File, None),
-        case("값 끝의 NUL", &format!("{token}chat_id=-100777\0\n"), Layout::File, None),
-        case("빈 첫 값 뒤의 중복 키", &format!("{token}chat_id=\nchat_id=-100777\n"), Layout::File, None),
-        case("빈 첫 토큰 뒤의 중복 키", &format!("bot_token=\n{token}chat_id=-100777\n"), Layout::File, None),
+        case("정상 두 줄", &two_lines, Layout::File, sends("-100777")),
+        case("600 파일을 가리키는 심볼릭 링크", &two_lines, Layout::SymlinkToFile, sends("-100777")),
+        case("값 끝의 NBSP", &format!("{token}chat_id=-100777\u{a0}\n"), Layout::File, Outcome::Fails),
+        case("값 끝의 전각 공백", &format!("{token}chat_id=-100777\u{3000}\n"), Layout::File, Outcome::Fails),
+        case("값 끝의 탭과 수직 탭", &format!("{token}chat_id=-100777\t\x0b\n"), Layout::File, sends("-100777")),
+        case("줄 안의 CR", &format!("{token}chat_id=-100\r777\n"), Layout::File, Outcome::Fails),
+        case("CRLF 줄 끝", &format!("bot_token=123456:{SECRET}\r\nchat_id=-100777\r\n"), Layout::File, sends("-100777")),
+        case("줄 안의 NUL", &format!("{token}chat_id=-100\u{0}777\n"), Layout::File, Outcome::Fails),
+        case("값 끝의 NUL", &format!("{token}chat_id=-100777\0\n"), Layout::File, Outcome::Fails),
+        case("빈 첫 값 뒤의 중복 키", &format!("{token}chat_id=\nchat_id=-100777\n"), Layout::File, Outcome::Fails),
+        case("빈 첫 토큰 뒤의 중복 키", &format!("bot_token=\n{token}chat_id=-100777\n"), Layout::File, Outcome::Fails),
+        case("파일이 없다", &two_lines, Layout::Missing, Outcome::TurnsOff),
+        case("가리키는 곳이 없는 심볼릭 링크", &two_lines, Layout::DanglingSymlink, Outcome::TurnsOff),
+        case("권한 000 파일", &two_lines, Layout::NoAccess, Outcome::Fails),
+        case("심볼릭 링크 고리", &two_lines, Layout::SymlinkLoop, Outcome::Fails),
+        case("경로 중간이 파일", &two_lines, Layout::UnderAFile, Outcome::Fails),
+        case("-로 시작하는 상대 경로", &two_lines, Layout::DashRelative, sends("-100777")),
+        case("상한 길이의 토큰", &with_token_of(256), Layout::File, sends("-100777")),
+        case("상한을 넘는 토큰", &with_token_of(257), Layout::File, Outcome::Fails),
+        case("수만 자 토큰", &with_token_of(40_000), Layout::File, Outcome::Fails),
+        case("상한 길이의 숫자 chat_id", &with_chat_of("1".repeat(128)), Layout::File, sends(&"1".repeat(128))),
+        case("상한 길이의 음수 chat_id", &with_chat_of(format!("-{}", "1".repeat(127))), Layout::File, sends(&format!("-{}", "1".repeat(127)))),
+        case("상한 길이의 @이름 chat_id", &with_chat_of(format!("@{}", "a".repeat(127))), Layout::File, sends(&format!("@{}", "a".repeat(127)))),
+        case("상한을 넘는 chat_id", &with_chat_of("1".repeat(129)), Layout::File, Outcome::Fails),
+        case("수십만 자 chat_id", &with_chat_of("1".repeat(300_000)), Layout::File, Outcome::Fails),
     ]
 }
 
@@ -265,15 +299,54 @@ fn place(folder: &Path, case: &Case) -> PathBuf {
             std::os::unix::fs::symlink(&target, &link).unwrap();
             link
         }
+        Layout::NoAccess => {
+            std::fs::set_permissions(&target, std::fs::Permissions::from_mode(0o000)).unwrap();
+            target
+        }
+        Layout::SymlinkLoop => {
+            let (first, second) = (folder.join("loop-a"), folder.join("loop-b"));
+            std::os::unix::fs::symlink(&second, &first).unwrap();
+            std::os::unix::fs::symlink(&first, &second).unwrap();
+            first
+        }
+        Layout::UnderAFile => target.join("telegram"),
+        Layout::Missing => folder.join("nothing-here"),
+        Layout::DanglingSymlink => {
+            let link = folder.join("dangling");
+            std::os::unix::fs::symlink(folder.join("nothing-here"), &link).unwrap();
+            link
+        }
+        Layout::DashRelative => {
+            let dashed = PathBuf::from("-telegram");
+            std::fs::rename(&target, folder.join(&dashed)).unwrap();
+            dashed
+        }
     }
 }
 
-fn script_sent_chat(case: &Case) -> Option<String> {
+fn observed(case: &Case, requests: &Mutex<Vec<(String, Value)>>, loaded: Result<bool, String>) -> Outcome {
+    match (loaded, requests.lock().unwrap().first()) {
+        (Ok(_), Some((_, body))) => Outcome::Sends(body["chat_id"].as_str().unwrap().to_owned()),
+        (Ok(false), None) => Outcome::TurnsOff,
+        (Ok(true), None) => panic!("{}: 켜졌는데 보내지 않았다", case.name),
+        (Err(message), _) => {
+            assert!(!message.contains(SECRET), "{}: 오류 문구에 토큰이 나온다: {message}", case.name);
+            Outcome::Fails
+        }
+    }
+}
+
+fn fake_for(case: &Case) -> FakeTelegram {
+    serve(if matches!(case.outcome, Outcome::Sends(_)) { vec![ACCEPTED] } else { vec![] })
+}
+
+fn script_outcome(case: &Case) -> Outcome {
     let folder = tempfile::tempdir().unwrap();
     let file = place(folder.path(), case);
-    let hook = serve(if case.sends_to.is_some() { vec![ACCEPTED] } else { vec![] });
+    let hook = fake_for(case);
     let output = Command::new(SCRIPT)
         .arg("메시지")
+        .current_dir(folder.path())
         .env_clear()
         .env("PATH", "/usr/bin:/bin")
         .env("HOME", folder.path())
@@ -281,28 +354,50 @@ fn script_sent_chat(case: &Case) -> Option<String> {
         .env("VALLY_TELEGRAM_API", format!("http://127.0.0.1:{}", hook.port))
         .output()
         .unwrap();
-    let sent = hook.requests.lock().unwrap().first().map(|(_, body)| body["chat_id"].as_str().unwrap().to_owned());
-    assert_eq!(output.status.success(), sent.is_some(), "{}: 스크립트는 보냈을 때만 성공한다", case.name);
-    sent
+    let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
+    let loaded = if output.status.success() { Ok(!hook.requests.lock().unwrap().is_empty()) } else { Err(stderr.clone()) };
+    if let Err(message) = &loaded {
+        assert!(message.contains(&file.display().to_string()), "{}: 오류 문구에 경로가 없다: {message}", case.name);
+    }
+    assert!(output.stdout.is_empty(), "{}: 표준 출력이 있다", case.name);
+    observed(case, &hook.requests, loaded)
 }
 
-fn rust_sent_chat(case: &Case) -> Option<String> {
+static WORKING_FOLDER: Mutex<()> = Mutex::new(());
+
+fn load_in(folder: &Path, file: &Path, api: &str) -> Result<Option<server::collector::telegram::Telegram>, server::collector::telegram::TelegramFileError> {
+    let _held = WORKING_FOLDER.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    let before = std::env::current_dir().unwrap();
+    std::env::set_current_dir(folder).unwrap();
+    let loaded = server::collector::telegram::Telegram::load_at(file, api);
+    std::env::set_current_dir(before).unwrap();
+    loaded
+}
+
+fn rust_outcome(case: &Case) -> Outcome {
     let folder = tempfile::tempdir().unwrap();
     let file = place(folder.path(), case);
-    let hook = serve(if case.sends_to.is_some() { vec![ACCEPTED] } else { vec![] });
-    let loaded = server::collector::telegram::Telegram::load_at(&file, &format!("http://127.0.0.1:{}", hook.port));
-    if let Ok(Some(telegram)) = loaded {
-        let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
-        runtime.block_on(telegram.send("메시지")).unwrap();
-    }
-    hook.requests.lock().unwrap().first().map(|(_, body)| body["chat_id"].as_str().unwrap().to_owned())
+    let hook = fake_for(case);
+    let loaded = match load_in(folder.path(), &file, &format!("http://127.0.0.1:{}", hook.port)) {
+        Ok(Some(telegram)) => {
+            let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+            runtime.block_on(telegram.send("메시지")).unwrap();
+            Ok(true)
+        }
+        Ok(None) => Ok(false),
+        Err(error) => {
+            let message = format!("{error} {error:?}");
+            assert!(message.contains(&file.display().to_string()), "{}: 오류 문구에 경로가 없다: {message}", case.name);
+            Err(message)
+        }
+    };
+    observed(case, &hook.requests, loaded)
 }
 
 #[test]
 fn the_script_and_the_daemon_read_the_same_settings_file_the_same_way() {
     for case in parity_cases() {
-        let expected = case.sends_to.map(str::to_owned);
-        assert_eq!(rust_sent_chat(&case), expected, "{}: Rust", case.name);
-        assert_eq!(script_sent_chat(&case), expected, "{}: 스크립트", case.name);
+        assert_eq!(rust_outcome(&case), case.outcome, "{}: Rust", case.name);
+        assert_eq!(script_outcome(&case), case.outcome, "{}: 스크립트", case.name);
     }
 }
