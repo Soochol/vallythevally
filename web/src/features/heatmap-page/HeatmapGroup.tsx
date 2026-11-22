@@ -1,5 +1,5 @@
 import { useQueryClient } from "@tanstack/react-query";
-import { useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { type ReactNode, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import type { HeatmapThemeSummary } from "../../api/generated/HeatmapThemeSummary";
 import type { SymbolCode } from "../../api/generated/SymbolCode";
 import { formatPercent, formatWonAmount } from "../../lib/format";
@@ -28,7 +28,7 @@ interface TileProps {
   range: HeatmapSettings["range"];
   themeName: string;
   themeTraded: number;
-  onMenu(code: SymbolCode, x: number, y: number): void;
+  onMenu: ((code: SymbolCode, x: number, y: number) => void) | null;
 }
 
 function tileDetail(row: SnapshotRow, text: string, themeName: string, themeTraded: number): string {
@@ -56,8 +56,8 @@ function Tile({ row, rect, range, themeName, themeTraded, onMenu }: TileProps) {
       data-side={rate === null ? "none" : rateSide(rate)}
       data-strong={rate !== null && needsStrongInk(rate, range)}
       aria-label={`${row.name} ${text}`}
-      aria-haspopup="menu"
-      aria-keyshortcuts="Shift+F10"
+      aria-haspopup={onMenu ? "menu" : undefined}
+      aria-keyshortcuts={onMenu ? "Shift+F10" : undefined}
       title={tileDetail(row, text, themeName, themeTraded)}
       style={{
         left: `${(rect.x / MAP_WIDTH) * 100}%`,
@@ -68,11 +68,12 @@ function Tile({ row, rect, range, themeName, themeTraded, onMenu }: TileProps) {
       }}
       onClick={() => send({ code: row.code, name: row.name })}
       onContextMenu={(event) => {
+        if (!onMenu) return;
         event.preventDefault();
         onMenu(row.code, event.clientX, event.clientY);
       }}
       onKeyDown={(event) => {
-        if (event.key !== "ContextMenu" && !(event.shiftKey && event.key === "F10")) return;
+        if (!onMenu || (event.key !== "ContextMenu" && !(event.shiftKey && event.key === "F10"))) return;
         event.preventDefault();
         const box = event.currentTarget.getBoundingClientRect();
         onMenu(row.code, box.x, box.bottom);
@@ -93,6 +94,8 @@ interface GroupProps {
   settings: HeatmapSettings;
   names: ReadonlyMap<SymbolCode, string>;
   themes: readonly ThemeChoice[];
+  editable: boolean;
+  headAction?: ReactNode;
 }
 
 function Breadth({ summary }: { summary: HeatmapThemeSummary }) {
@@ -122,7 +125,7 @@ function SummaryLine({ summary, names }: { summary: HeatmapThemeSummary; names: 
   );
 }
 
-export function HeatmapGroup({ section, settings, names, themes }: GroupProps) {
+export function HeatmapGroup({ section, settings, names, themes, editable, headAction }: GroupProps) {
   const { theme } = section;
   const client = useQueryClient();
   const map = useRef<HTMLDivElement>(null);
@@ -149,6 +152,7 @@ export function HeatmapGroup({ section, settings, names, themes }: GroupProps) {
           <small>거래대금 가중 평균</small>
         </div>
         {theme.summary && <SummaryLine summary={theme.summary} names={names} />}
+        {headAction && <div className="hm-group-actions">{headAction}</div>}
       </header>
       {rows.length === 0 ? (
         <p className="hm-group-empty">이 테마에 종목이 없습니다</p>
@@ -156,7 +160,7 @@ export function HeatmapGroup({ section, settings, names, themes }: GroupProps) {
         <div ref={map} className="hm-map" role="group" aria-label={`${section.title} 칸`}>
           {arrangement.rows.map((row) => {
             const rect = arrangement.rects.get(row.code);
-            return rect ? <Tile key={row.code} row={row} rect={rect} range={settings.range} themeName={section.title} themeTraded={theme.summary?.tradedMillionWon ?? 0} onMenu={openMenu} /> : null;
+            return rect ? <Tile key={row.code} row={row} rect={rect} range={settings.range} themeName={section.title} themeTraded={theme.summary?.tradedMillionWon ?? 0} onMenu={editable ? openMenu : null} /> : null;
           })}
         </div>
       )}

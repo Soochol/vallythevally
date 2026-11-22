@@ -1,7 +1,7 @@
 import type { HeatmapFlowSeries } from "../../src/api/generated/HeatmapFlowSeries";
 import type { HeatmapThemes } from "../../src/api/generated/HeatmapThemes";
 import type { Quote } from "../../src/api/generated/Quote";
-import { boardOf, parseOrder } from "../../dev/fakeHeatmapBoard";
+import { boardOf, kiwoomBoardOf, parseOrder, parseSource, type KiwoomCatalog } from "../../dev/fakeHeatmapBoard";
 import type { Scenario } from "./scenario";
 
 export interface HeatmapRow {
@@ -18,7 +18,7 @@ export const HEATMAP_TABLE: HeatmapTable = {
   "086520": { rate: -4, traded: 10_000 },
 };
 
-export const HEATMAP_NAMES: Record<string, string> = { "005930": "삼성전자", "000660": "SK하이닉스", "028260": "삼성물산", "086520": "에코프로" };
+export const HEATMAP_NAMES: Record<string, string> = { "005930": "삼성전자", "000660": "SK하이닉스", "028260": "삼성물산", "086520": "에코프로", "010140": "삼성중공업", "009540": "HD한국조선해양", "042660": "한화오션" };
 
 export const BASE_PRICE = 100_000;
 export const QUOTED_AT = 1_794_186_000;
@@ -44,13 +44,15 @@ export function seedHeatmapThemes(scenario: Scenario, table: HeatmapTable, theme
     return { body: symbols.flatMap((symbol) => (table[symbol] ? [heatmapQuote(symbol, table[symbol])] : [])) };
   });
   scenario.on("/api/heatmap/board", (request) => {
-    const order = parseOrder(new URL(request.url()).searchParams.get("order")) ?? "rate";
-    asked.push(order);
+    const params = new URL(request.url()).searchParams;
+    const order = parseOrder(params.get("order")) ?? "rate";
+    const source = parseSource(params.get("source")) ?? "mine";
+    asked.push(source === "kiwoom" ? `kiwoom:${order}` : order);
     const memberOf = (code: string) => {
       const row = table[code];
       return row ? { symbol: code, name: HEATMAP_NAMES[code] ?? code, changeRate: row.rate, tradedMillionWon: row.traded } : null;
     };
-    return { body: boardOf(scenario.documents.heatmapThemes(), memberOf, order, QUOTED_AT) };
+    return { body: source === "kiwoom" ? kiwoomBoardOf(scenario.kiwoomCatalog, memberOf, order, QUOTED_AT) : boardOf(scenario.documents.heatmapThemes(), memberOf, order, QUOTED_AT) };
   });
   return asked;
 }
@@ -86,3 +88,19 @@ export function seedHeatmapFlow(scenario: Scenario, flows: Record<string, Heatma
   });
   return asked;
 }
+
+export const KIWOOM_TABLE: HeatmapTable = {
+  ...HEATMAP_TABLE,
+  "010140": { rate: 3, traded: 120_000 },
+  "009540": { rate: 1, traded: 80_000 },
+  "042660": { rate: -2, traded: 40_000 },
+};
+
+export const KIWOOM_CATALOG: KiwoomCatalog = {
+  info: { date: "2026-11-09", collectedAt: 1_794_186_000, themes: 3, state: "ready" },
+  themes: [
+    { id: "kiwoom-319", name: "조선", symbols: ["010140", "009540", "042660"] },
+    { id: "kiwoom-101", name: "반도체 대표", symbols: ["005930", "000660"] },
+    { id: "kiwoom-777", name: "에코프로 단독", symbols: ["086520"] },
+  ],
+};
