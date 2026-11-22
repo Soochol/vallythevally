@@ -9,6 +9,7 @@ import { CollectorPage } from "./features/collector-board/CollectorPage";
 import { takeLoginFailure } from "./features/account/loginFailure";
 import { ALL_PAGES } from "./features/page-rail/pages";
 import { start } from "./persist/start";
+import { loadServerMode } from "./public-mode/serverModeLoad";
 import { useAccountStore } from "./stores/account";
 import { marketSocket } from "./stores/realtime";
 import "./styles/index.css";
@@ -30,9 +31,11 @@ if (loginFailure) {
   useAccountStore.getState().showLoginFailure(loginFailure.text);
 }
 
+const serverMode = await loadServerMode();
+
 // React 밖에서 한 번만 되살린다. StrictMode가 효과를 두 번 부르더라도 복원은 한 번이다.
 void start();
-marketSocket.start();
+if (serverMode === "local") marketSocket.start();
 
 const router = createBrowserRouter([
   { element: <ChartRoute />, children: ALL_PAGES.map(({ path }) => ({ path })) },

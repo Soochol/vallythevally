@@ -1,3 +1,5 @@
+import { readSession } from "../public-mode/session";
+import { isPublicMode } from "../public-mode/serverMode";
 import { useAccountStore } from "../stores/account";
 import type { AccountConfirm } from "./generated/AccountConfirm";
 import type { AccountLoginRequest } from "./generated/AccountLoginRequest";
@@ -12,7 +14,8 @@ const ACCOUNT = "/api/account";
 
 export async function loadAccount(signal?: AbortSignal): Promise<void> {
   const pushesAtRequest = useAccountStore.getState().pushes;
-  useAccountStore.getState().receiveSnapshot(await getJson<AccountStatus>(ACCOUNT, signal), pushesAtRequest);
+  const status = isPublicMode() ? await readSession() : await getJson<AccountStatus>(ACCOUNT, signal);
+  useAccountStore.getState().receiveSnapshot(status, pushesAtRequest);
 }
 
 async function applyStatus(run: () => Promise<AccountStatus>): Promise<void> {

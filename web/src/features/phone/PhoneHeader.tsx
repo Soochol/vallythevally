@@ -10,6 +10,7 @@ import { saveSnapshot } from "../snapshot/saveSnapshot";
 import { PhoneSystemButton } from "../system-settings/SystemButton";
 import { VenuePicker } from "../venue/VenuePicker";
 import { Attribution } from "../status/attribution";
+import { usePublicMode } from "../../public-mode/serverMode";
 import { ConnectionIndicator, useConnectionView } from "../status/ConnectionIndicator";
 
 const DIR_CLASS = { up: "text-up", down: "text-down", flat: "text-text-2" } as const;
@@ -22,6 +23,7 @@ export function PhoneHeader({ cell, info, status }: { cell: ChartWindowState; in
   const openSearch = useSelectionStore((s) => s.openSearch);
   const isIndex = isIndexCode(cell.symbol);
   const connection = useConnectionView();
+  const publicMode = usePublicMode();
   const ready = status.kind === "ready" ? status : null;
   const chg = ready?.prev ? ready.latest.c - ready.prev.c : 0;
   const dir = DIR_CLASS[direction(chg)];
@@ -56,7 +58,7 @@ export function PhoneHeader({ cell, info, status }: { cell: ChartWindowState; in
           <VenuePicker variant="phone" />
         </div>
         <div className="mt-0.5 flex items-center justify-between gap-2 text-xs text-text-2">
-          <ConnectionIndicator view={connection} />
+          {!publicMode && <ConnectionIndicator view={connection} />}
           <Attribution text="Lightweight Charts™" className="text-text-3 underline underline-offset-2" />
         </div>
       </div>
