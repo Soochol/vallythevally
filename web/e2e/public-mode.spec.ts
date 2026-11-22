@@ -167,10 +167,10 @@ test.describe("로그인 뒤", () => {
     listenerOnlyForbidden(scenario);
   });
 
-  test("시스템 설정의 키움 영역은 비어 있고 키움 경로를 부르지 않는다", async ({ page, scenario }) => {
+  test("시스템 설정의 키움 영역은 브라우저 보관소 화면이고 키움 경로를 부르지 않는다", async ({ page, scenario }) => {
     await page.goto("/");
     await page.getByRole("button", { name: "시스템 설정", exact: true }).click();
-    await expect(settings(page).getByTestId("browser-key-slot")).toBeVisible();
+    await expect(settings(page).getByTestId("browser-keys")).toBeVisible();
     await expect(settings(page).getByRole("tab", { name: "일반" })).toHaveCount(0);
     await expect(page.getByRole("alert")).toHaveCount(0);
     listenerOnlyForbidden(scenario);
