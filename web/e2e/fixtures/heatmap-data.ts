@@ -1,7 +1,7 @@
 import type { HeatmapFlowSeries } from "../../src/api/generated/HeatmapFlowSeries";
 import type { HeatmapThemes } from "../../src/api/generated/HeatmapThemes";
 import type { Quote } from "../../src/api/generated/Quote";
-import { boardOf, parseOrder } from "./heatmap-board";
+import { boardOf, parseOrder } from "../../dev/fakeHeatmapBoard";
 import type { Scenario } from "./scenario";
 
 export interface HeatmapRow {

@@ -6,7 +6,7 @@ import { formatPercent, formatWonAmount } from "../../lib/format";
 import { quoteBook } from "../../stores/realtime";
 import { useSendSymbol } from "../pages/sendSymbol";
 import { arrange, boardRows, type SnapshotRow } from "./arrange";
-import { rateFill, rateSide } from "./colors";
+import { needsStrongInk, rateFill, rateSide } from "./colors";
 import type { HeatmapSection } from "./HeatmapPage";
 import type { HeatmapSettings } from "./settings";
 import { TileMenu, type TileMenuState } from "./TileMenu";
@@ -54,6 +54,7 @@ function Tile({ row, rect, range, themeName, themeTraded, onMenu }: TileProps) {
       className="hm-tile"
       data-code={row.code}
       data-side={rate === null ? "none" : rateSide(rate)}
+      data-strong={rate !== null && needsStrongInk(rate, range)}
       aria-label={`${row.name} ${text}`}
       aria-haspopup="menu"
       aria-keyshortcuts="Shift+F10"

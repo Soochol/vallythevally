@@ -2,6 +2,8 @@ import type { ApiErrorCode } from "../src/api/generated/ApiErrorCode.ts";
 import type { BarField } from "../src/api/generated/BarField.ts";
 import type { Condition } from "../src/api/generated/Condition.ts";
 import type { ExcludeKind } from "../src/api/generated/ExcludeKind.ts";
+import type { HeatmapTheme } from "../src/api/generated/HeatmapTheme.ts";
+import type { HeatmapThemes } from "../src/api/generated/HeatmapThemes.ts";
 import type { Layout } from "../src/api/generated/Layout.ts";
 import type { LayoutInput } from "../src/api/generated/LayoutInput.ts";
 import type { LayoutSummary } from "../src/api/generated/LayoutSummary.ts";
@@ -80,6 +82,12 @@ const isCondition = (x: unknown): x is Condition =>
   CONDITION_KINDS.includes(x.kind) &&
   (x.kind === "market_cap" || (typeof x.period === "string" && SCREEN_PERIODS.includes(x.period) && typeof x.recentBars === "number" && Number.isInteger(x.recentBars) && x.recentBars >= 1 && x.recentBars <= 4_294_967_296 && !("barRange" in x) && !("m" in x))) &&
   (!isRecordKind(x.kind) || (typeof x.field === "string" && BAR_FIELDS.includes(x.field) && isU32(x.n)));
+const MAX_HEATMAP_THEME_NAME = 40;
+const MAX_HEATMAP_THEME_SYMBOLS = 60;
+
+const isHeatmapTheme = (x: unknown): x is HeatmapTheme =>
+  isObject(x) && typeof x.id === "string" && x.id !== "" && typeof x.name === "string" && Array.isArray(x.symbols) && x.symbols.every((c) => typeof c === "string");
+
 export const isScreen = (x: unknown): x is Screen =>
   isObject(x) &&
   typeof x.id === "string" &&
@@ -147,6 +155,14 @@ export function createUserData(seedWatchlist: string[], seedScreens: Screen[], n
     ],
   ]);
   let uiState: Record<string, unknown> = { lastLayoutId: DEFAULT_LAYOUT_ID, theme: "dark", revision: 0 };
+  let heatmapThemes: HeatmapThemes = {
+    themes: [
+      { id: "dev-chips", name: "반도체", symbols: seedWatchlist.filter((code) => code === "005930" || code === "000660") },
+      { id: "dev-battery", name: "2차전지", symbols: seedWatchlist.filter((code) => code === "373220") },
+      { id: "dev-internet", name: "인터넷", symbols: seedWatchlist.filter((code) => code === "035420") },
+    ],
+    revision: 0,
+  };
   let watchlists: Watchlists = { lists: [{ id: FIRST_WATCHLIST_ID, name: "기본", symbols: [...seedWatchlist], groups: [] }], revision: 0 };
   let screens: Screens = { screens: seedScreens, revision: 0 };
 
@@ -192,6 +208,19 @@ export function createUserData(seedWatchlist: string[], seedScreens: Screen[], n
       return ok(uiState);
     },
     getWatchlists: (): Reply => ok(watchlists),
+    getHeatmapThemes: (): HeatmapThemes => heatmapThemes,
+    putHeatmapThemes: (body: unknown): Reply => {
+      if (!isObject(body) || !Array.isArray(body.themes) || !body.themes.every(isHeatmapTheme)) return fail(400, "bad_request", "테마 본문이 아닙니다");
+      const themes = body.themes as HeatmapTheme[];
+      if (new Set(themes.map((t) => t.id)).size !== themes.length) return fail(400, "bad_request", "테마 id가 겹칩니다");
+      if (new Set(themes.map((t) => t.name)).size !== themes.length) return fail(400, "bad_request", "같은 이름의 테마가 두 개 있습니다");
+      if (themes.some((t) => t.name.trim() !== t.name || t.name === "" || [...t.name].length > MAX_HEATMAP_THEME_NAME)) return fail(400, "bad_request", "테마 이름이 틀렸습니다");
+      if (themes.some((t) => t.symbols.length > MAX_HEATMAP_THEME_SYMBOLS || new Set(t.symbols).size !== t.symbols.length || t.symbols.some((c) => c.startsWith("IDX:")))) return fail(400, "bad_request", "테마 종목이 틀렸습니다");
+      if (!isRevision(body.revision)) return fail(400, "bad_request", "revision이 없습니다");
+      if (body.revision <= heatmapThemes.revision) return stale(heatmapThemes.revision);
+      heatmapThemes = { themes, revision: body.revision };
+      return ok(heatmapThemes);
+    },
     getScreens: (): Reply => ok(screens),
     putScreens: (body: unknown): Reply => {
       if (bytes(body) > SCREENS_LIMIT_BYTES) return fail(413, "payload_too_large", "조건식 본문이 128KB를 넘습니다");

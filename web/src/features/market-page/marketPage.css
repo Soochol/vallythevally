@@ -28,7 +28,7 @@
 .mk-breadth-bar i[data-side="flat"] { background: var(--text-3); }
 .mk-breadth-count { display: flex; justify-content: space-between; gap: var(--size-5); margin-top: var(--size-4); font-size: var(--fs-xs); }
 .mk-flow { display: grid; gap: var(--size-12); }
-.mk-bars { display: flex; flex-direction: column; gap: var(--size-6); margin: 0; padding: 0; list-style: none; }
+.mk-bars { display: flex; flex-direction: column; gap: var(--size-8); margin: 0; padding: 0; list-style: none; }
 .mk-bar-row { display: grid; grid-template-columns: 64px minmax(0, 1fr) 84px; align-items: center; gap: var(--size-8); font-size: var(--fs-s); }
 .mk-bar-track { position: relative; height: 14px; border-radius: 3px; background: var(--raised); }
 .mk-bar-track::before { content: ""; position: absolute; top: 0; bottom: 0; left: 50%; width: 1px; background: var(--line-strong); }

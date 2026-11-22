@@ -25,6 +25,15 @@ export function Legend({ range }: { range: HeatmapSettings["range"] }) {
   );
 }
 
+function Labelled<T extends string | number>(props: { label: string; options: readonly (readonly [T, string])[]; value: T; onChange(value: T): void }) {
+  return (
+    <div className="hm-control">
+      <span className="hm-control-label" aria-hidden="true">{props.label}</span>
+      <Segment {...props} />
+    </div>
+  );
+}
+
 export function HeatmapToolbar({ settings, onChange, tradedKnown, onEdit }: Props) {
   const set = <K extends keyof HeatmapSettings>(key: K, value: HeatmapSettings[K]) => onChange({ ...settings, [key]: value });
   return (
@@ -36,12 +45,12 @@ export function HeatmapToolbar({ settings, onChange, tradedKnown, onEdit }: Prop
           </button>
         ))}
       </div>
-      <Segment label="테마 순서" options={THEME_ORDERS.map((order) => [order, ORDER_LABEL[order]] as const)} value={settings.order} onChange={(order) => set("order", order)} />
+      <Labelled label="테마 순서" options={THEME_ORDERS.map((order) => [order, ORDER_LABEL[order]] as const)} value={settings.order} onChange={(order) => set("order", order)} />
       {settings.view === "board" && (
         <>
-          <Segment label="색 범위" options={COLOR_RANGES.map((range) => [range, `±${range}%`] as const)} value={settings.range} onChange={(range) => set("range", range)} />
-          <Segment label="칸 크기" options={SIZE_MODES.map((mode) => [mode, SIZE_LABEL[mode]] as const)} value={settings.size} onChange={(size) => set("size", size)} />
-          <Segment label="칸 정렬" options={SORT_MODES.map((mode) => [mode, SORT_LABEL[mode]] as const)} value={settings.sort} onChange={(sort) => set("sort", sort)} />
+          <Labelled label="색 범위" options={COLOR_RANGES.map((range) => [range, `±${range}%`] as const)} value={settings.range} onChange={(range) => set("range", range)} />
+          <Labelled label="칸 크기" options={SIZE_MODES.map((mode) => [mode, SIZE_LABEL[mode]] as const)} value={settings.size} onChange={(size) => set("size", size)} />
+          <Labelled label="칸 정렬" options={SORT_MODES.map((mode) => [mode, SORT_LABEL[mode]] as const)} value={settings.sort} onChange={(sort) => set("sort", sort)} />
           <span className="hm-sort-note" role="status">
             칸 정렬: {SORT_LABEL[settings.sort]}{settings.sort === "name" ? " 가나다순" : " 높은 순"} · 크기: {SIZE_LABEL[settings.size]}
             {!tradedKnown && settings.size === "traded" ? " (거래대금을 받지 못해 같은 크기로 보입니다)" : ""}

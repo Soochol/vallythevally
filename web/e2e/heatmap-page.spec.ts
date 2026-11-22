@@ -28,6 +28,7 @@ test("테마마다 타일 지도가 보이고 칸 색이 등락률 부호를 따
   await expect(main(page).getByRole("status", { name: "자료 신선도" })).toContainText("시세");
   await expect(legend(page)).toContainText("칸 색 = 등락률");
   await expect(legend(page)).toContainText("시세 없음");
+  for (const label of ["테마 순서", "색 범위", "칸 크기", "칸 정렬"]) await expect(main(page).locator(".hm-control-label", { hasText: label })).toBeVisible();
   const big = (await tile(page, "005930").boundingBox())!;
   const small = (await tile(page, "000660").boundingBox())!;
   expect(big.width * big.height).toBeGreaterThan(small.width * small.height);
@@ -42,6 +43,8 @@ test("색 범위를 ±3으로 바꾸면 범례와 칸 색이 바뀌고 주소에
   await expect(legend(page)).toHaveAccessibleName("색 범위 −3%에서 +3%");
   await expect.poll(() => fill(tile(page, "005930"))).not.toBe(before);
   await expect(page).toHaveURL(/[?&]range=3(&|$)/);
+  await expect(tile(page, "028260")).toHaveAttribute("data-strong", "true");
+  await expect(tile(page, "000660")).toHaveAttribute("data-strong", "false");
   await page.reload();
   await expect(legend(page)).toHaveAccessibleName("색 범위 −3%에서 +3%");
   await expect(main(page).getByRole("group", { name: "색 범위" }).getByRole("button", { name: "±3%" })).toHaveAttribute("aria-pressed", "true");
