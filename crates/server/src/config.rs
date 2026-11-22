@@ -56,7 +56,7 @@ const KIS_BASE_HOST: &str = "openapi.koreainvestment.com";
 const KIS_BASE_PORT: u16 = 9443;
 const KIS_WS_HOST: &str = "ops.koreainvestment.com";
 const KIS_WS_PORT: u16 = 21000;
-const KIS_TOKEN_FILE_NAME: &str = "kis-token.json";
+pub const KIS_TOKEN_FILE_NAME: &str = "kis-token.json";
 
 pub const KIWOOM_BASE_URL: &str = "https://api.kiwoom.com";
 pub const KIWOOM_WS_URL: &str = "wss://api.kiwoom.com:10000/api/dostk/websocket";

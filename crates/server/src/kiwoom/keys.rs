@@ -7,7 +7,11 @@ use tokio::sync::watch;
 use tokio::task::JoinHandle;
 
 use super::auth::KiwoomAuth;
-use super::key_file::{FileBases, KEY_LIMIT, derived_paths, KeyFile, KeyId, KeyList, KeyOrigin, KeyPaths, StartupKey, StoredKey, checked_alias, paths_for_key, registered_ip_file};
+use super::key_file::{FileBases, KEY_LIMIT, derived_paths, KeyFile, KeyId, KeyList, KeyOrigin, KeyPaths, StartupKey, StoredKey, checked_alias, kis_token_path, market_lane_key, paths_for_key, registered_ip_file};
+use crate::kis::auth::KisAuth;
+use crate::kis::link::{KisLane, KisLink};
+use crate::kis::rest::KisRest;
+use crate::kis::transport::Transport as KisTransport;
 use super::link::Link;
 use super::private_file::FileError;
 use super::rest::KiwoomRest;
@@ -16,7 +20,7 @@ use super::token_file::{Saved, TokenFile};
 use super::transport::Transport;
 use crate::api::{Broker, KiwoomEnvironment, RegisteredIp};
 use crate::clock::Clock;
-use crate::config::{KiwoomCredentials, Secret};
+use crate::config::{KisCredentials, KiwoomCredentials, Secret};
 
 static NEXT_SERIAL: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
 
@@ -91,6 +95,21 @@ impl LaneFactory {
     }
 }
 
+#[derive(Clone)]
+pub struct KisFactory {
+    pub transport: Arc<dyn KisTransport>,
+    pub clock: Clock,
+    pub token_base: PathBuf,
+}
+
+impl KisFactory {
+    fn lane(&self, token_path: PathBuf, credentials: &KiwoomCredentials) -> KisLane {
+        let kis_credentials = KisCredentials { app_key: credentials.app_key.clone(), app_secret: credentials.app_secret.clone() };
+        let auth = KisAuth::new(kis_credentials, token_path, self.transport.clone(), self.clock.clone());
+        KisLink::lane(KisRest::new(self.transport.clone(), auth), self.clock.clone())
+    }
+}
+
 pub struct KeySetup {
     pub store: KeyFile,
     pub keys: Vec<StartupKey>,
@@ -123,6 +142,28 @@ impl fmt::Display for KeyError {
     }
 }
 
+#[derive(Clone)]
+enum EntryLane {
+    Kiwoom(Lane),
+    Kis(KisLane),
+}
+
+impl EntryLane {
+    fn disconnect(&self) {
+        match self {
+            EntryLane::Kiwoom(lane) => lane.link.disconnect(),
+            EntryLane::Kis(lane) => lane.link.disconnect(),
+        }
+    }
+
+    fn connect_at_start(&self) {
+        match self {
+            EntryLane::Kiwoom(lane) => lane.link.connect_at_start(),
+            EntryLane::Kis(lane) => lane.link.connect_at_start(),
+        }
+    }
+}
+
 struct Entry {
     serial: u64,
     id: KeyId,
@@ -131,7 +172,7 @@ struct Entry {
     broker: Broker,
     credentials: KiwoomCredentials,
     paths: KeyPaths,
-    lane: Lane,
+    lane: EntryLane,
     registered_ip: Option<RegisteredIp>,
 }
 
@@ -139,11 +180,19 @@ impl Entry {
     fn stored(&self) -> StoredKey {
         StoredKey { id: self.id.clone(), alias: self.alias.clone(), broker: self.broker, credentials: self.credentials.clone() }
     }
+
+    fn kiwoom_lane(&self) -> Option<&Lane> {
+        match &self.lane {
+            EntryLane::Kiwoom(lane) => Some(lane),
+            EntryLane::Kis(_) => None,
+        }
+    }
 }
 
 struct Inner {
     entries: Vec<Entry>,
     market: Option<KeyId>,
+    market_lane_holder: Option<KeyId>,
     idle_registered_ip: Option<RegisteredIp>,
 }
 
@@ -161,8 +210,29 @@ impl Inner {
         if self.entries[at].origin == KeyOrigin::Env { Err(KeyError::EnvReadOnly) } else { Ok(at) }
     }
 
-    fn has_app_key(&self, app_key: &str, except: Option<&KeyId>) -> bool {
-        self.entries.iter().any(|entry| Some(&entry.id) != except && entry.credentials.app_key.expose() == app_key)
+    fn has_app_key(&self, broker: Broker, app_key: &str, except: Option<&KeyId>) -> bool {
+        self.entries.iter().any(|entry| entry.broker == broker && Some(&entry.id) != except && entry.credentials.app_key.expose() == app_key)
+    }
+
+    fn count(&self, broker: Broker) -> usize {
+        self.entries.iter().filter(|entry| entry.broker == broker).count()
+    }
+
+    fn first_kiwoom(&self, except: Option<&KeyId>) -> Option<usize> {
+        self.entries.iter().position(|entry| entry.broker == Broker::Kiwoom && Some(&entry.id) != except)
+    }
+
+    fn source_is_kiwoom(&self) -> bool {
+        self.market.as_ref().and_then(|market| self.entries.iter().find(|entry| entry.id == *market)).is_none_or(|entry| entry.broker == Broker::Kiwoom)
+    }
+
+    fn desired_lane_holder(&self, removing: Option<&KeyId>) -> Option<usize> {
+        let source = self.market.as_ref().and_then(|market| self.entries.iter().position(|entry| entry.id == *market));
+        if let Some(at) = source.filter(|&at| self.entries[at].broker == Broker::Kiwoom && Some(&self.entries[at].id) != removing) {
+            return Some(at);
+        }
+        let current = self.market_lane_holder.as_ref().and_then(|holder| self.entries.iter().position(|entry| entry.id == *holder));
+        current.filter(|&at| Some(&self.entries[at].id) != removing).or_else(|| self.first_kiwoom(removing))
     }
 }
 
@@ -179,11 +249,30 @@ pub struct KeyView {
     pub registered_ip: Option<RegisteredIp>,
 }
 
+#[derive(Clone)]
+pub enum Connection {
+    Kiwoom { lane: Lane, registered_ip: Option<RegisteredIp> },
+    Kis(KisLane),
+}
+
+#[derive(Clone)]
+pub struct ListedKey {
+    pub serial: u64,
+    pub id: KeyId,
+    pub alias: String,
+    pub origin: KeyOrigin,
+    pub broker: Broker,
+    pub market: bool,
+    pub app_key_tail: Option<String>,
+    pub connection: Connection,
+}
+
 pub struct KeyRing {
     inner: Mutex<Inner>,
     changes: watch::Sender<u64>,
     store: Option<KeyFile>,
     factory: Option<LaneFactory>,
+    kis: Option<KisFactory>,
     market_lane: Lane,
 }
 
@@ -197,10 +286,14 @@ fn identity(factory: &LaneFactory, entry: &Entry) -> Option<(Secret<String>, Sec
 
 impl KeyRing {
     pub fn unconfigured(market_lane: Lane) -> KeyRing {
-        KeyRing { inner: Mutex::new(Inner { entries: Vec::new(), market: None, idle_registered_ip: None }), changes: watch::channel(0).0, store: None, factory: None, market_lane }
+        KeyRing { inner: Mutex::new(Inner { entries: Vec::new(), market: None, market_lane_holder: None, idle_registered_ip: None }), changes: watch::channel(0).0, store: None, factory: None, kis: None, market_lane }
     }
 
     pub fn new(setup: KeySetup, market_lane: Lane) -> KeyRing {
+        KeyRing::with_kis(setup, None, market_lane)
+    }
+
+    pub fn with_kis(setup: KeySetup, kis: Option<KisFactory>, market_lane: Lane) -> KeyRing {
         let KeySetup { store, keys, market, factory } = setup;
         let load_ip = |path: &PathBuf| {
             registered_ip_file(path.clone()).load().unwrap_or_else(|e| {
@@ -208,16 +301,31 @@ impl KeyRing {
                 None
             })
         };
+        let kiwoom_holder = market_lane_key(&keys, market.as_ref()).map(|key| key.id.clone());
         let entries: Vec<Entry> = keys
             .into_iter()
-            .map(|key| {
-                let lane = if Some(&key.id) == market.as_ref() { market_lane.clone() } else { factory.account_lane(&key.paths, &key.credentials) };
-                let registered_ip = load_ip(&key.paths.registered_ip);
-                Entry { serial: next_serial(), id: key.id, alias: key.alias, origin: key.origin, broker: key.broker, credentials: key.credentials, paths: key.paths, lane, registered_ip }
+            .filter_map(|key| {
+                let (lane, registered_ip) = match key.broker {
+                    Broker::Kiwoom => {
+                        let lane = if Some(&key.id) == kiwoom_holder.as_ref() { market_lane.clone() } else { factory.account_lane(&key.paths, &key.credentials) };
+                        (EntryLane::Kiwoom(lane), load_ip(&key.paths.registered_ip))
+                    }
+                    Broker::Kis => {
+                        let Some(kis) = kis.as_ref() else {
+                            tracing::warn!("한투 키가 있지만 한투 연결 설정이 없어 쓰지 않습니다");
+                            return None;
+                        };
+                        (EntryLane::Kis(kis.lane(key.paths.token.clone(), &key.credentials)), None)
+                    }
+                };
+                Some(Entry { serial: next_serial(), id: key.id, alias: key.alias, origin: key.origin, broker: key.broker, credentials: key.credentials, paths: key.paths, lane, registered_ip })
             })
             .collect();
-        let idle_registered_ip = if entries.is_empty() { load_ip(&factory.bases.registered_ip) } else { None };
-        KeyRing { inner: Mutex::new(Inner { entries, market, idle_registered_ip }), changes: watch::channel(0).0, store: Some(store), factory: Some(factory), market_lane }
+        let market = market.filter(|id| entries.iter().any(|entry| entry.id == *id));
+        let idle_registered_ip = if kiwoom_holder.is_none() { load_ip(&factory.bases.registered_ip) } else { None };
+        let ring = KeyRing { inner: Mutex::new(Inner { entries, market, market_lane_holder: kiwoom_holder, idle_registered_ip }), changes: watch::channel(0).0, store: Some(store), factory: Some(factory), kis, market_lane };
+        ring.apply_market_duty(&ring.lock());
+        ring
     }
 
     pub fn subscribe_changes(&self) -> watch::Receiver<u64> {
@@ -232,8 +340,30 @@ impl KeyRing {
         self.inner.lock().expect("키 목록 잠금")
     }
 
-    fn view(inner: &Inner, entry: &Entry) -> KeyView {
-        KeyView {
+    fn apply_market_duty(&self, inner: &Inner) {
+        self.market_lane.link.set_market_duty(inner.source_is_kiwoom());
+    }
+
+    fn kiwoom_view(inner: &Inner, entry: &Entry) -> Option<KeyView> {
+        Some(KeyView {
+            serial: entry.serial,
+            id: entry.id.clone(),
+            alias: entry.alias.clone(),
+            origin: entry.origin,
+            broker: entry.broker,
+            market: inner.market_lane_holder.as_ref() == Some(&entry.id),
+            app_key_tail: app_key_tail(entry.credentials.app_key.expose()),
+            lane: entry.kiwoom_lane()?.clone(),
+            registered_ip: entry.registered_ip.clone(),
+        })
+    }
+
+    fn listed(inner: &Inner, entry: &Entry) -> ListedKey {
+        let connection = match &entry.lane {
+            EntryLane::Kiwoom(lane) => Connection::Kiwoom { lane: lane.clone(), registered_ip: entry.registered_ip.clone() },
+            EntryLane::Kis(lane) => Connection::Kis(lane.clone()),
+        };
+        ListedKey {
             serial: entry.serial,
             id: entry.id.clone(),
             alias: entry.alias.clone(),
@@ -241,35 +371,50 @@ impl KeyRing {
             broker: entry.broker,
             market: inner.market.as_ref() == Some(&entry.id),
             app_key_tail: app_key_tail(entry.credentials.app_key.expose()),
-            lane: entry.lane.clone(),
-            registered_ip: entry.registered_ip.clone(),
+            connection,
         }
     }
 
     pub fn views(&self) -> Vec<KeyView> {
         let inner = self.lock();
-        inner.entries.iter().map(|entry| Self::view(&inner, entry)).collect()
+        inner.entries.iter().filter_map(|entry| Self::kiwoom_view(&inner, entry)).collect()
     }
 
     pub fn view_of(&self, id: &KeyId) -> Option<KeyView> {
         let inner = self.lock();
-        inner.entries.iter().find(|entry| entry.id == *id).map(|entry| Self::view(&inner, entry))
+        inner.entries.iter().find(|entry| entry.id == *id).and_then(|entry| Self::kiwoom_view(&inner, entry))
     }
 
     pub fn market(&self) -> Option<KeyView> {
         let inner = self.lock();
-        let market = inner.market.as_ref()?;
-        inner.entries.iter().find(|entry| entry.id == *market).map(|entry| Self::view(&inner, entry))
+        let holder = inner.market_lane_holder.as_ref()?;
+        inner.entries.iter().find(|entry| entry.id == *holder).and_then(|entry| Self::kiwoom_view(&inner, entry))
     }
 
     pub fn market_origin(&self) -> Option<KeyOrigin> {
         self.market().map(|view| view.origin)
     }
 
+    pub fn listing(&self) -> Vec<ListedKey> {
+        let inner = self.lock();
+        inner.entries.iter().map(|entry| Self::listed(&inner, entry)).collect()
+    }
+
+    pub fn listed_key(&self, id: &KeyId) -> Option<ListedKey> {
+        let inner = self.lock();
+        inner.entries.iter().find(|entry| entry.id == *id).map(|entry| Self::listed(&inner, entry))
+    }
+
+    pub fn source_key(&self) -> Option<ListedKey> {
+        let inner = self.lock();
+        let source = inner.market.as_ref()?;
+        inner.entries.iter().find(|entry| entry.id == *source).map(|entry| Self::listed(&inner, entry))
+    }
+
     pub fn registered_ip(&self) -> Option<RegisteredIp> {
         let inner = self.lock();
-        match inner.market.as_ref() {
-            Some(market) => inner.entries.iter().find(|entry| entry.id == *market).and_then(|entry| entry.registered_ip.clone()),
+        match inner.market_lane_holder.as_ref() {
+            Some(holder) => inner.entries.iter().find(|entry| entry.id == *holder).and_then(|entry| entry.registered_ip.clone()),
             None => inner.idle_registered_ip.clone(),
         }
     }
@@ -277,11 +422,11 @@ impl KeyRing {
     pub fn record_registered_ip(&self, registered: RegisteredIp) -> Result<(), KeyError> {
         let factory = self.factory.as_ref().ok_or(KeyError::NoStore)?;
         let mut inner = self.lock();
-        let path = inner.market.as_ref().and_then(|market| inner.entries.iter().find(|entry| entry.id == *market)).map_or_else(|| factory.bases.registered_ip.clone(), |entry| entry.paths.registered_ip.clone());
+        let path = inner.market_lane_holder.as_ref().and_then(|holder| inner.entries.iter().find(|entry| entry.id == *holder)).map_or_else(|| factory.bases.registered_ip.clone(), |entry| entry.paths.registered_ip.clone());
         registered_ip_file(path).save(&registered).map_err(KeyError::File)?;
-        match inner.market.clone() {
-            Some(market) => {
-                if let Some(entry) = inner.entries.iter_mut().find(|entry| entry.id == market) {
+        match inner.market_lane_holder.clone() {
+            Some(holder) => {
+                if let Some(entry) = inner.entries.iter_mut().find(|entry| entry.id == holder) {
                     entry.registered_ip = Some(registered);
                 }
             }
@@ -291,12 +436,15 @@ impl KeyRing {
     }
 
     pub fn connect_at_start(&self) {
-        let lanes: Vec<Lane> = self.lock().entries.iter().map(|entry| entry.lane.clone()).collect();
-        if lanes.is_empty() {
+        let (lanes, holder_free): (Vec<EntryLane>, bool) = {
+            let inner = self.lock();
+            (inner.entries.iter().map(|entry| entry.lane.clone()).collect(), inner.market_lane_holder.is_none())
+        };
+        if holder_free {
             self.market_lane.link.connect_at_start();
         }
         for lane in lanes {
-            lane.link.connect_at_start();
+            lane.connect_at_start();
         }
     }
 
@@ -307,35 +455,61 @@ impl KeyRing {
     }
 
     pub fn add(&self, alias: &str, credentials: KiwoomCredentials) -> Result<KeyId, KeyError> {
+        self.add_for(Broker::Kiwoom, alias, credentials)
+    }
+
+    pub fn add_for(&self, broker: Broker, alias: &str, credentials: KiwoomCredentials) -> Result<KeyId, KeyError> {
         let alias = checked_alias(alias).map_err(KeyError::Alias)?;
         let factory = self.factory.as_ref().ok_or(KeyError::NoStore)?;
         let mut inner = self.lock();
-        if inner.has_app_key(credentials.app_key.expose(), None) {
+        if inner.has_app_key(broker, credentials.app_key.expose(), None) {
             return Err(KeyError::DuplicateAppKey);
         }
-        if inner.entries.len() >= KEY_LIMIT {
+        if inner.count(broker) >= KEY_LIMIT {
             return Err(KeyError::Limit);
         }
+        let kis = match broker {
+            Broker::Kiwoom => None,
+            Broker::Kis => Some(self.kis.as_ref().ok_or(KeyError::NoStore)?),
+        };
         let mut proposed = inner.file_list();
         let id = proposed.next_id();
-        let first = inner.entries.is_empty();
-        proposed.keys.push(StoredKey { id: id.clone(), alias: alias.clone(), broker: Broker::Kiwoom, credentials: credentials.clone() });
-        if first {
+        let becomes_source = inner.market.is_none();
+        proposed.keys.push(StoredKey { id: id.clone(), alias: alias.clone(), broker, credentials: credentials.clone() });
+        if becomes_source {
             proposed.market = Some(id.clone());
         }
         self.persist(&proposed)?;
-        let listed: Vec<KiwoomCredentials> = inner.entries.iter().map(|entry| entry.credentials.clone()).chain([credentials.clone()]).collect();
-        let base_taken = inner.entries.iter().any(|entry| entry.paths.token == factory.bases.token);
-        let paths = factory.paths_for(&credentials, base_taken, &listed);
-        let lane = if first { self.market_lane.clone() } else { factory.account_lane(&paths, &credentials) };
-        let registered_ip = registered_ip_file(paths.registered_ip.clone()).load().ok().flatten();
-        let entry = Entry { serial: next_serial(), id: id.clone(), alias, origin: KeyOrigin::File, broker: Broker::Kiwoom, credentials, paths, lane, registered_ip };
-        if first {
+        let entry = match kis {
+            Some(kis) => {
+                let paths = KeyPaths { token: kis_token_path(&kis.token_base, &credentials), registered_ip: derived_paths(&factory.bases, &credentials).registered_ip };
+                let lane = kis.lane(paths.token.clone(), &credentials);
+                Entry { serial: next_serial(), id: id.clone(), alias, origin: KeyOrigin::File, broker, credentials, paths, lane: EntryLane::Kis(lane), registered_ip: None }
+            }
+            None => {
+                let listed: Vec<KiwoomCredentials> = inner.entries.iter().filter(|entry| entry.broker == Broker::Kiwoom).map(|entry| entry.credentials.clone()).chain([credentials.clone()]).collect();
+                let base_taken = inner.entries.iter().any(|entry| entry.broker == Broker::Kiwoom && entry.paths.token == factory.bases.token);
+                let paths = factory.paths_for(&credentials, base_taken, &listed);
+                let takes_market_lane = inner.market_lane_holder.is_none();
+                let lane = if takes_market_lane { self.market_lane.clone() } else { factory.account_lane(&paths, &credentials) };
+                let registered_ip = registered_ip_file(paths.registered_ip.clone()).load().ok().flatten();
+                let entry = Entry { serial: next_serial(), id: id.clone(), alias, origin: KeyOrigin::File, broker, credentials, paths, lane: EntryLane::Kiwoom(lane.clone()), registered_ip };
+                if takes_market_lane {
+                    inner.market_lane_holder = Some(id.clone());
+                    inner.idle_registered_ip = None;
+                    lane.link.rebind(identity(factory, &entry));
+                }
+                entry
+            }
+        };
+        if becomes_source {
             inner.market = Some(id.clone());
-            inner.idle_registered_ip = None;
-            entry.lane.link.rebind(identity(factory, &entry));
         }
-        entry.lane.link.connect_in_background();
+        self.apply_market_duty(&inner);
+        match &entry.lane {
+            EntryLane::Kiwoom(lane) => lane.link.connect_in_background(),
+            EntryLane::Kis(lane) => lane.link.connect_in_background(),
+        }
         inner.entries.push(entry);
         self.announce_change();
         Ok(id)
@@ -357,7 +531,8 @@ impl KeyRing {
     pub fn replace_credentials(&self, id: &KeyId, credentials: KiwoomCredentials) -> Result<(), KeyError> {
         let mut inner = self.lock();
         let at = inner.file_position(id)?;
-        if inner.has_app_key(credentials.app_key.expose(), Some(id)) {
+        let broker = inner.entries[at].broker;
+        if inner.has_app_key(broker, credentials.app_key.expose(), Some(id)) {
             return Err(KeyError::DuplicateAppKey);
         }
         let mut proposed = inner.file_list();
@@ -366,6 +541,22 @@ impl KeyRing {
         }
         self.persist(&proposed)?;
         let factory = self.factory.as_ref().ok_or(KeyError::NoStore)?;
+        if broker == Broker::Kis {
+            let kis = self.kis.as_ref().ok_or(KeyError::NoStore)?;
+            let entry = &mut inner.entries[at];
+            let old_token = entry.paths.token.clone();
+            entry.lane.disconnect();
+            entry.paths.token = kis_token_path(&kis.token_base, &credentials);
+            entry.credentials = credentials;
+            let lane = kis.lane(entry.paths.token.clone(), &entry.credentials);
+            lane.link.connect_in_background();
+            entry.lane = EntryLane::Kis(lane);
+            if old_token != entry.paths.token {
+                drop(std::fs::remove_file(old_token));
+            }
+            self.announce_change();
+            return Ok(());
+        }
         let entry = &mut inner.entries[at];
         entry.credentials = credentials;
         let owns_base = entry.paths.token == factory.bases.token;
@@ -377,9 +568,11 @@ impl KeyRing {
             tracing::warn!(error = %e, "키를 바꾸면서 등록 IP 기록을 새 이름으로 옮기지 못했습니다");
         }
         entry.paths = new_paths;
-        entry.lane.link.rebind(identity(factory, entry));
-        entry.lane.link.record_key_in_token_file();
-        entry.lane.link.connect_in_background();
+        if let EntryLane::Kiwoom(lane) = &entry.lane {
+            lane.link.rebind(identity(factory, entry));
+            lane.link.record_key_in_token_file();
+            lane.link.connect_in_background();
+        }
         self.announce_change();
         Ok(())
     }
@@ -411,25 +604,22 @@ impl KeyRing {
         let mut inner = self.lock();
         let at = inner.file_position(id)?;
         let was_market = inner.market.as_ref() == Some(id);
-        let successor = if was_market { inner.entries.iter().position(|entry| entry.id != *id) } else { None };
+        let was_lane_holder = inner.market_lane_holder.as_ref() == Some(id);
+        let next_market = if was_market { inner.entries.iter().find(|entry| entry.id != *id).map(|entry| entry.id.clone()) } else { inner.market.clone() };
         let mut proposed = inner.file_list();
         proposed.keys.retain(|key| key.id != *id);
-        if was_market {
-            proposed.market = successor.map(|at| inner.entries[at].id.clone());
-        }
+        proposed.market.clone_from(&next_market);
         self.persist(&proposed)?;
-        if let Some(successor) = successor {
-            self.swap_market(&mut inner, at, successor);
-        }
+        inner.market = next_market;
+        let next_holder = inner.desired_lane_holder(Some(id));
+        let moved = self.hand_over_market_lane(&mut inner, next_holder);
         let removed = inner.entries.remove(at);
-        if was_market && successor.is_none() {
-            removed.lane.link.clear_key();
-            inner.market = None;
-        } else {
-            removed.lane.link.disconnect();
-            if successor.is_some() {
-                self.market_lane.link.connect_at_start();
-            }
+        if !(was_lane_holder && next_holder.is_none()) {
+            removed.lane.disconnect();
+        }
+        self.apply_market_duty(&inner);
+        if moved {
+            self.market_lane.link.connect_at_start();
         }
         self.announce_change();
         Ok(())
@@ -442,31 +632,52 @@ impl KeyRing {
     pub fn designate_market(&self, id: &KeyId) -> Result<(), KeyError> {
         let mut inner = self.lock();
         let to = inner.position(id)?;
-        let Some(from) = inner.market.as_ref().and_then(|market| inner.entries.iter().position(|entry| entry.id == *market)) else { return Err(KeyError::Unknown) };
-        if from == to {
+        if inner.market.as_ref() == Some(id) {
             return Ok(());
         }
         let mut proposed = inner.file_list();
         proposed.market = Some(id.clone());
         self.persist(&proposed)?;
-        self.swap_market(&mut inner, from, to);
-        let lanes = [inner.entries[from].lane.clone(), inner.entries[to].lane.clone()];
+        inner.market = Some(id.clone());
+        let next_holder = inner.desired_lane_holder(None);
+        let moved = self.hand_over_market_lane(&mut inner, next_holder);
+        self.apply_market_duty(&inner);
+        let lanes: Vec<EntryLane> = inner.entries.iter().enumerate().filter(|(at, entry)| *at == to || (moved && Some(&entry.id) == inner.market_lane_holder.as_ref())).map(|(_, entry)| entry.lane.clone()).collect();
         for lane in lanes {
-            lane.link.connect_at_start();
+            lane.connect_at_start();
         }
         self.announce_change();
         Ok(())
     }
 
-    fn swap_market(&self, inner: &mut Inner, from: usize, to: usize) {
-        let Some(factory) = self.factory.as_ref() else { return };
-        let (from_lane, to_lane) = (inner.entries[from].lane.clone(), inner.entries[to].lane.clone());
-        from_lane.link.disconnect();
-        to_lane.link.disconnect();
-        from_lane.link.rebind(identity(factory, &inner.entries[to]));
-        to_lane.link.rebind(identity(factory, &inner.entries[from]));
-        inner.entries[from].lane = to_lane;
-        inner.entries[to].lane = from_lane;
-        inner.market = Some(inner.entries[to].id.clone());
+    fn hand_over_market_lane(&self, inner: &mut Inner, to: Option<usize>) -> bool {
+        let Some(factory) = self.factory.as_ref() else { return false };
+        let from = inner.market_lane_holder.as_ref().and_then(|holder| inner.entries.iter().position(|entry| entry.id == *holder));
+        match (from, to) {
+            (Some(from), Some(to)) if from != to => {
+                let (EntryLane::Kiwoom(from_lane), EntryLane::Kiwoom(to_lane)) = (inner.entries[from].lane.clone(), inner.entries[to].lane.clone()) else { return false };
+                from_lane.link.disconnect();
+                to_lane.link.disconnect();
+                from_lane.link.rebind(identity(factory, &inner.entries[to]));
+                to_lane.link.rebind(identity(factory, &inner.entries[from]));
+                inner.entries[from].lane = EntryLane::Kiwoom(to_lane);
+                inner.entries[to].lane = EntryLane::Kiwoom(from_lane);
+                inner.market_lane_holder = Some(inner.entries[to].id.clone());
+                true
+            }
+            (None, Some(to)) => {
+                self.market_lane.link.rebind(identity(factory, &inner.entries[to]));
+                inner.entries[to].lane = EntryLane::Kiwoom(self.market_lane.clone());
+                inner.market_lane_holder = Some(inner.entries[to].id.clone());
+                inner.idle_registered_ip = None;
+                true
+            }
+            (Some(_), None) => {
+                self.market_lane.link.clear_key();
+                inner.market_lane_holder = None;
+                false
+            }
+            _ => false,
+        }
     }
 }

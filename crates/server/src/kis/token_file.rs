@@ -13,6 +13,8 @@ pub struct Saved {
     #[serde(default)]
     pub token: Option<SavedToken>,
     pub last_request_at: i64,
+    #[serde(default)]
+    pub disconnected: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Clone, PartialEq, Eq)]
@@ -70,6 +72,7 @@ mod tests {
             credential: Some(credential_id("FAKE-KIS-APPKEY-file-1")),
             token: Some(SavedToken { value: "FAKE-KIS-TOKEN-file-1".into(), expires_at: 2_000_000_000, issued_at: 1_999_913_600 }),
             last_request_at: 1_999_913_599,
+            disconnected: Some(credential_id("FAKE-KIS-APPKEY-file-1")),
         }
     }
 

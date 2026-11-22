@@ -136,7 +136,7 @@ impl Harness {
         let dir = tempfile::tempdir().unwrap();
         let token_path: PathBuf = dir.path().join("state/vallythevally/kis-token.json");
         TokenFile::new(token_path.clone())
-            .save(&Saved { credential: Some(credential_id(APP_KEY)), token: Some(SavedToken { value: TOKEN.into(), expires_at: now.unix() + 86_400, issued_at: now.unix() - 3600 }), last_request_at: now.unix() - 3600 })
+            .save(&Saved { credential: Some(credential_id(APP_KEY)), token: Some(SavedToken { value: TOKEN.into(), expires_at: now.unix() + 86_400, issued_at: now.unix() - 3600 }), last_request_at: now.unix() - 3600, disconnected: None })
             .unwrap();
         let kis = Arc::new(FakeKis { sent: Mutex::default(), handler: Box::new(handler) });
         let clock = Clock::fake(now);

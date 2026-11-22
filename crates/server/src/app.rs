@@ -35,8 +35,8 @@ use crate::screener::Screener;
 use crate::screener::store::Store;
 use crate::symbols::SymbolDirectory;
 use crate::system_routes::SystemState;
-use crate::kiwoom::key_file::{FileBases, KeyFile, KeyPaths, startup_keys};
-use crate::kiwoom::keys::{KeyRing, KeySetup, Lane, LaneFactory};
+use crate::kiwoom::key_file::{FileBases, KeyFile, KeyPaths, KisStartup, market_lane_key, startup_keys_with_kis};
+use crate::kiwoom::keys::{KeyRing, KeySetup, KisFactory, Lane, LaneFactory};
 
 const DAILY_RESET_AT: TimeOfDay = match TimeOfDay::hms(7, 45, 0) {
     Some(t) => t,
@@ -131,7 +131,7 @@ pub fn application_with_source(inputs: ApplicationInputs, mut system: SystemStat
     let link = Link::new(rest.clone(), symbols.clone(), screener.clone(), clock.clone(), screener_update_on_connect);
     let market_lane = Lane::market(rest.clone(), link.clone(), account_feed.clone());
     let keys = Arc::new(match system.take_key_setup() {
-        Some(setup) => KeyRing::new(setup, market_lane),
+        Some(setup) => KeyRing::with_kis(setup, system.take_kis_factory(), market_lane),
         None => KeyRing::unconfigured(market_lane),
     });
     let accounts = crate::trading::Accounts::new(keys.clone(), rest.clone(), account_feed, clock.clone(), system.take_order_switch_store(), db.clone(), symbols.clone());
@@ -152,6 +152,7 @@ pub enum StreamSource {
 
 pub struct Adapters {
     pub kiwoom: Arc<dyn Transport>,
+    pub kis: Option<Arc<dyn crate::kis::transport::Transport>>,
     pub stream: StreamSource,
     pub kiwoom_spacing: Option<Duration>,
     pub dart_spacing: Option<Duration>,
@@ -159,8 +160,15 @@ pub struct Adapters {
 
 impl Adapters {
     pub fn production(config: &Config) -> Result<Adapters, StartFailure> {
+        let kis: Option<Arc<dyn crate::kis::transport::Transport>> = match crate::kis::transport::ReqwestTransport::new(config.kis_base_url.clone()) {
+            Ok(transport) => Some(Arc::new(transport)),
+            Err(e) => {
+                tracing::error!(error = %e, "한투용 HTTP 클라이언트를 만들 수 없습니다");
+                return Err(StartFailure);
+            }
+        };
         match ReqwestTransport::new(config.kiwoom_base_url.clone()) {
-            Ok(transport) => Ok(Adapters { kiwoom: Arc::new(transport), stream: StreamSource::Connect, kiwoom_spacing: None, dart_spacing: None }),
+            Ok(transport) => Ok(Adapters { kiwoom: Arc::new(transport), kis, stream: StreamSource::Connect, kiwoom_spacing: None, dart_spacing: None }),
             Err(e) => {
                 tracing::error!(error = %e, "HTTP 클라이언트를 만들 수 없습니다");
                 Err(StartFailure)
@@ -192,7 +200,7 @@ async fn serve(config: Config, lock: &InstanceLock) -> ExitCode {
 }
 
 pub async fn start(config: &Config, lock: &InstanceLock, adapters: Adapters) -> Result<Started, StartFailure> {
-    let Adapters { kiwoom, stream: stream_source, kiwoom_spacing, dart_spacing } = adapters;
+    let Adapters { kiwoom, kis, stream: stream_source, kiwoom_spacing, dart_spacing } = adapters;
     let key_file = KeyFile::new(config.kiwoom_key_path.clone(), lock).with_environment(config.kiwoom_environment);
     let account_file = config.account_state_path.clone().map(|path| AccountStateFile::new(path, lock));
     tracing::info!(environment = config.kiwoom_environment.as_str(), host = %crate::system_routes::kiwoom_target(&config.kiwoom_base_url).host.as_deref().unwrap_or("loopback"), "키움 투자구분으로 켭니다");
@@ -243,9 +251,11 @@ pub async fn start(config: &Config, lock: &InstanceLock, adapters: Adapters) -> 
         }
     };
     let bases = FileBases { token: config.token_path.clone(), registered_ip: config.kiwoom_key_path.with_file_name(crate::config::REGISTERED_IP_FILE_NAME), held: lock.held() };
-    let startup = startup_keys(config.kiwoom_credentials.clone(), &key_file, config.kiwoom_environment, &bases);
+    let kis_token_base = config.kis_token_path.clone().unwrap_or_else(|| bases.token.with_file_name(crate::config::KIS_TOKEN_FILE_NAME));
+    let kis_startup = KisStartup { env: config.kis_credentials.clone(), token_base: kis_token_base.clone() };
+    let startup = startup_keys_with_kis(config.kiwoom_credentials.clone(), kis_startup, &key_file, config.kiwoom_environment, &bases);
     let token_file_for = |paths: &KeyPaths| TokenFile::held(paths.token.clone(), lock.held()).with_environment(config.kiwoom_environment);
-    let market_key = startup.market.as_ref().and_then(|market| startup.keys.iter().find(|key| key.id == *market));
+    let market_key = market_lane_key(&startup.keys, startup.market.as_ref());
     let auth = match market_key {
         Some(key) => KiwoomAuth::new(key.credentials.app_key.clone(), key.credentials.app_secret.clone(), Some(token_file_for(&key.paths))),
         None => KiwoomAuth::keyless(Some(TokenFile::new(config.token_path.clone(), lock).with_environment(config.kiwoom_environment))),
@@ -292,7 +302,11 @@ pub async fn start(config: &Config, lock: &InstanceLock, adapters: Adapters) -> 
     }
     let factory = LaneFactory { transport: lane_transport, clock: clock.clone(), environment: config.kiwoom_environment, spacing: kiwoom_spacing, ws_url: lane_ws_url, bases };
     let key_setup = KeySetup { store: key_file, keys: startup.keys, market: startup.market, factory };
-    let system = SystemState::new(key_setup, startup.file_problem, crate::api::SystemSettings::from_config(config)).with_public_ip(Arc::new(public_ip)).with_account(account).with_collector(collector).with_tailnet_hosts(config.tailnet_hosts.clone());
+    let kis_factory = kis.map(|transport| KisFactory { transport, clock: clock.clone(), token_base: kis_token_base });
+    let mut system = SystemState::new(key_setup, startup.file_problem, crate::api::SystemSettings::from_config(config)).with_public_ip(Arc::new(public_ip)).with_account(account).with_collector(collector).with_tailnet_hosts(config.tailnet_hosts.clone());
+    if let Some(factory) = kis_factory {
+        system = system.with_kis(factory);
+    }
     let state = application_with_system(ApplicationInputs { rest: rest.clone(), clock: clock.clone(), symbols: symbols.clone(), db, screener_store, stream, static_dir: config.static_dir.clone(), screener_update_on_connect: config.screener_update_on_start }, system);
     state.system.bound(bound_addr);
     tokio::spawn(daily_maintenance(state.clone()));

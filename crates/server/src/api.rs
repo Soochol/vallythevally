@@ -585,6 +585,7 @@ impl std::fmt::Debug for KiwoomKeyInput {
 #[ts(export)]
 pub enum Broker {
     Kiwoom,
+    Kis,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -616,6 +617,9 @@ pub struct KiwoomKeyAdd {
     pub alias: String,
     pub app_key: String,
     pub app_secret: String,
+    #[serde(default)]
+    #[ts(optional)]
+    pub broker: Option<Broker>,
 }
 
 impl std::fmt::Debug for KiwoomKeyAdd {
