@@ -79,7 +79,7 @@ impl Server {
             let mut background = tokio::task::JoinSet::new();
             publish.set(Control { link: state.link.clone(), runtime: tokio::runtime::Handle::current(), clock: state.clock.clone() }).ok();
             if value("VALLY_KIWOOM_CONNECT") == Some("start") {
-                state.link.connect_at_start();
+                state.keys.connect_at_start();
             } else if value("VALLY_KIWOOM_CONNECT") != Some("off") {
                 let link = state.link.clone();
                 background.spawn(async move { link.connect(false).await; });

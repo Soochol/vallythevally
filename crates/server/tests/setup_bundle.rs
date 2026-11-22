@@ -336,7 +336,7 @@ async fn the_bundle_never_carries_kiwoom_keys_tokens_the_registered_ip_or_the_op
     fill(&machine).await;
     assert_eq!(machine.put("/api/system/kiwoom/key", &json!({"appKey": APP_KEY, "appSecret": APP_SECRET})).await.0, 200);
     assert_eq!(machine.put("/api/system/kiwoom/registered-ip", &json!({"ip": REGISTERED_IP})).await.0, 200);
-    let key_file = std::fs::read_to_string(&machine.key_path).unwrap();
+    let key_file = std::fs::read_to_string(machine.key_path.with_file_name("kiwoom-keys.json")).unwrap();
     assert!(key_file.contains(APP_KEY), "키 파일에 가짜 키가 들어 있다");
     let token = common::support::token_for(APP_KEY);
 

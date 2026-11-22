@@ -12,6 +12,9 @@ pub struct InstanceLock {
     _file: File,
 }
 
+#[derive(Debug, Clone, Copy)]
+pub struct Held(());
+
 #[derive(Debug)]
 pub enum LockError {
     /// 다른 프로세스가 잡고 있다. 파일에 적힌 pid를 함께 돌려준다(읽을 수 있으면).
@@ -37,6 +40,10 @@ impl fmt::Display for LockError {
 impl std::error::Error for LockError {}
 
 impl InstanceLock {
+    pub fn held(&self) -> Held {
+        Held(())
+    }
+
     /// 이미 잡혀 있으면 기다리지 않고 바로 실패한다.
     pub fn acquire(path: &Path) -> Result<InstanceLock, LockError> {
         let io = |error| LockError::Io { path: path.to_owned(), error };

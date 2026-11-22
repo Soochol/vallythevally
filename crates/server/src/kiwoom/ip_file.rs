@@ -39,14 +39,12 @@ mod tests {
     use std::os::unix::fs::PermissionsExt;
 
     use super::*;
-    use crate::instance::InstanceLock;
-    use crate::kiwoom::key_file::KeyFile;
+    use crate::kiwoom::key_file::registered_ip_file;
 
     #[test]
     fn round_trip_next_to_the_key_file_with_private_permissions() {
         let dir = tempfile::tempdir().unwrap();
-        let lock = InstanceLock::acquire(&dir.path().join("server.lock")).unwrap();
-        let file = KeyFile::new(dir.path().join("state/vallythevally/kiwoom-key.json"), &lock).registered_ip_file();
+        let file = registered_ip_file(dir.path().join("state/vallythevally/kiwoom-ip.json"));
         assert_eq!(file.load().unwrap(), None);
         let registered = RegisteredIp { ip: "203.0.113.7".into(), at: UnixSeconds(1_700_000_000) };
         file.save(&registered).unwrap();

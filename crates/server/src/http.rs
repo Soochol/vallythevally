@@ -32,6 +32,7 @@ pub struct AppState {
     pub hub: HubHandle,
     pub screener: Arc<Screener>,
     pub link: Link,
+    pub keys: crate::kiwoom::keys::KeyRing,
     pub system: crate::system_routes::SystemState,
     pub registered: tokio::sync::watch::Receiver<crate::kiwoom::stream::DesiredFeeds>,
     pub trading: Arc<crate::trading::Trading>,

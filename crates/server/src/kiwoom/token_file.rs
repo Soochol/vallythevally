@@ -56,6 +56,10 @@ impl TokenFile {
         TokenFile { file: PrivateFile::new(path), environment: KiwoomEnvironment::Real }
     }
 
+    pub fn held(path: PathBuf, _held: crate::instance::Held) -> Self {
+        TokenFile { file: PrivateFile::new(path), environment: KiwoomEnvironment::Real }
+    }
+
     pub fn with_environment(mut self, environment: KiwoomEnvironment) -> Self {
         self.environment = environment;
         self
