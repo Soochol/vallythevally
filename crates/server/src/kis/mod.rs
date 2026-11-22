@@ -2,6 +2,7 @@ pub mod api;
 pub mod auth;
 pub mod error;
 pub mod market_rest;
+pub mod market_stream;
 pub mod master;
 pub mod minute_bars;
 pub mod overview;
