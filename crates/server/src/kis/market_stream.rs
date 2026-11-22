@@ -161,7 +161,7 @@ fn kis_index_code(code: IndexCode) -> String {
 }
 
 fn index_code_of(kis: &str) -> Option<IndexCode> {
-    let tail = kis.get(2..).filter(|_| kis.len() == 4)?;
+    let tail = kis.get(2..).filter(|_| kis.len() == 4 && kis.is_ascii())?;
     IndexCode::parse(&format!("{}{}", &kis[..1], tail)).ok()
 }
 
@@ -227,6 +227,9 @@ fn parse_centi(text: &str) -> Option<i64> {
         None => (false, text.strip_prefix('+').unwrap_or(text)),
     };
     let (whole, fraction) = unsigned.split_once('.').unwrap_or((unsigned, ""));
+    if whole.is_empty() && fraction.is_empty() || !whole.bytes().all(|b| b.is_ascii_digit()) {
+        return None;
+    }
     let whole: i64 = if whole.is_empty() { 0 } else { whole.parse().ok()? };
     let mut cents = fraction.chars().take(2).map(|c| c.to_digit(10)).collect::<Option<Vec<_>>>()?;
     cents.resize(2, 0);
@@ -326,7 +329,7 @@ impl Bridge {
                 tracing::warn!(?end, "한투 실시간 세션이 끊겼습니다");
                 self.open = false;
                 self.index_cumulative.clear();
-                self.send(StreamEvent::Down { at: self.clock.now() }).await
+                self.send(StreamEvent::Down { at: self.clock.now() }).await && self.on_status().await
             }
             SessionEvent::InUseElsewhere => {
                 tracing::warn!("다른 곳에서 이 한투 키로 실시간을 쓰고 있어 다시 잇지 않습니다");
@@ -388,9 +391,9 @@ impl Bridge {
             buy_qty: Volume(record.quantity(4).unwrap_or(0)),
             buy_amount_million_won: u64::try_from(million_won(5)).unwrap_or(0),
             net_buy_qty: net_qty,
-            net_buy_qty_change: net_qty - last.net_qty,
+            net_buy_qty_change: net_qty.saturating_sub(last.net_qty),
             net_buy_amount_million_won: net_amount,
-            net_buy_amount_change_million_won: net_amount - last.net_amount_million_won,
+            net_buy_amount_change_million_won: net_amount.saturating_sub(last.net_amount_million_won),
         };
         Some(StreamEvent::Program { row, received_at })
     }
@@ -503,6 +506,9 @@ mod tests {
         assert_eq!(parse_centi("-3.5"), Some(-350));
         assert_eq!(parse_centi("+.07"), Some(7));
         assert_eq!(parse_centi("x"), None);
+        for malformed in ["--5", "+-3.5", "-", ".", "", "1.x"] {
+            assert_eq!(parse_centi(malformed), None, "{malformed}");
+        }
     }
 
     #[test]
@@ -513,6 +519,7 @@ mod tests {
             assert_eq!(index_code_of(kis), Some(code));
         }
         assert_eq!(index_code_of("001"), None);
+        assert_eq!(index_code_of("é01"), None);
     }
 
     #[test]

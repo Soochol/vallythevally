@@ -120,9 +120,18 @@ impl SubscriptionManager {
     }
 
     fn seat_wanted(&self, symbol: Symbol, seat: StreamKind) -> bool {
+        self.seat_wanted_without(symbol, seat, &[])
+    }
+
+    fn seat_wanted_without(&self, symbol: Symbol, seat: StreamKind, evicted: &[Eviction]) -> bool {
+        let gone = |kind: StreamKind| evicted.iter().any(|e| matches!(*e, Eviction::Venue(s, k) if s == symbol && k == kind));
         let held = self.holders.get(&symbol).into_iter().flatten().filter_map(Holder::feed_kind);
-        let in_grace = self.kind_released_at.keys().filter(|(s, _)| *s == symbol).map(|(_, kind)| *kind);
+        let in_grace = self.kind_released_at.keys().filter(|(s, kind)| *s == symbol && !gone(*kind)).map(|(_, kind)| *kind);
         held.chain(in_grace).any(|kind| self.rules.own_seats(symbol, kind).contains(&seat))
+    }
+
+    fn unwanted_seats(&self, symbol: Symbol, evicted: &[Eviction]) -> usize {
+        self.admitted_venue.iter().filter(|(s, seat)| *s == symbol && !self.seat_wanted_without(symbol, *seat, evicted)).count()
     }
 
     fn seats_used(&self) -> usize {
@@ -220,13 +229,14 @@ impl SubscriptionManager {
         }
         let mut wanting: Vec<(Rank, Symbol, StreamKind)> = Vec::new();
         for &s in &self.admitted {
-            let seatless = self.held_venue_kinds(s).into_iter().filter(|kind| !self.admitted_venue.contains(&(s, *kind)));
-            wanting.extend(seatless.map(|kind| (self.rank(s), s, kind)));
+            let held = self.holders.get(&s).into_iter().flatten().filter_map(Holder::feed_kind).collect::<BTreeSet<_>>();
+            wanting.extend(held.into_iter().map(|kind| (self.rank(s), s, kind)));
         }
         wanting.sort();
         for (rank, s, kind) in wanting {
-            if self.admitted.contains(&s) && self.seats_fit(1, rank, Some(s)) {
-                self.admitted_venue.insert((s, kind));
+            let missing: Vec<StreamKind> = self.rules.own_seats(s, kind).into_iter().filter(|seat| !self.admitted_venue.contains(&(s, *seat))).collect();
+            if !missing.is_empty() && self.admitted.contains(&s) && self.seats_fit(missing.len(), rank, Some(s)) {
+                self.admitted_venue.extend(missing.into_iter().map(|seat| (s, seat)));
                 self.released_at.remove(&s);
             }
         }
@@ -295,16 +305,17 @@ impl SubscriptionManager {
     }
 
     fn seats_freed_by(&self, victim: Eviction, chosen: &[Eviction]) -> usize {
-        let held_seats = |s: Symbol| -> BTreeSet<StreamKind> { self.admitted_venue.iter().filter(|(x, _)| *x == s).map(|(_, seat)| *seat).collect() };
-        let already_out = |s: Symbol| -> BTreeSet<StreamKind> {
-            chosen.iter().filter_map(|c| match *c { Eviction::Venue(x, kind) if x == s => Some(self.rules.own_seats(s, kind)), _ => None }).flatten().collect()
-        };
+        let symbol = victim.symbol();
+        let whole_symbol_out = |list: &[Eviction]| list.iter().any(|e| matches!(*e, Eviction::Symbol(x) if x == symbol));
+        if whole_symbol_out(chosen) {
+            return 0;
+        }
+        let already_out = self.unwanted_seats(symbol, chosen);
         match victim {
-            Eviction::Symbol(s) => 1 + held_seats(s).difference(&already_out(s)).count(),
-            Eviction::Venue(s, _) if chosen.iter().any(|c| matches!(*c, Eviction::Symbol(x) if x == s)) => 0,
-            Eviction::Venue(s, kind) => {
-                let out = already_out(s);
-                self.rules.own_seats(s, kind).iter().filter(|seat| held_seats(s).contains(seat) && !out.contains(seat)).count()
+            Eviction::Symbol(_) => 1 + self.admitted_venue.iter().filter(|(x, _)| *x == symbol).count() - already_out,
+            Eviction::Venue(..) => {
+                let with_victim: Vec<Eviction> = chosen.iter().copied().chain([victim]).collect();
+                self.unwanted_seats(symbol, &with_victim) - already_out
             }
         }
     }
@@ -319,7 +330,9 @@ impl SubscriptionManager {
             Eviction::Venue(s, kind) => {
                 self.kind_released_at.remove(&(s, kind));
                 for seat in self.rules.own_seats(s, kind) {
-                    self.admitted_venue.remove(&(s, seat));
+                    if !self.seat_wanted(s, seat) {
+                        self.admitted_venue.remove(&(s, seat));
+                    }
                 }
             }
         }
@@ -1021,5 +1034,43 @@ mod tests {
         assert_eq!(plan.feeds[&stock(0)], BTreeSet::from([StreamKind::Trades]), "호가를 놓으면 동반 종류의 자리도 돌아온다");
         assert!(plan.feeds.contains_key(&stock(1)));
         assert_eq!(rules.seats(&plan.feeds), 2);
+    }
+
+    fn book_companion_rules(limit: usize) -> Arc<SeatRulesFor> {
+        Arc::new(SeatRulesFor {
+            limit,
+            own_seat: |kind| matches!(kind, StreamKind::Book(_) | StreamKind::AfterHours),
+            companion: |kind| matches!(kind, StreamKind::Book(_)).then_some(StreamKind::AfterHours),
+        })
+    }
+
+    #[test]
+    fn a_kind_whose_companion_seat_does_not_fit_gets_neither_seat() {
+        let rules = book_companion_rules(2);
+        let mut m = SubscriptionManager::new(rules.clone());
+        m.hold(stock(0), cell(1, "a"));
+        m.hold(stock(0), feed(1, "book", StreamKind::Book(Venue::Combined)));
+        let plan = m.plan(t(0));
+        assert_eq!(plan.feeds[&stock(0)], BTreeSet::from([StreamKind::Trades]));
+        assert_eq!(plan.rejected, BTreeSet::from([feed(1, "book", StreamKind::Book(Venue::Combined))]));
+        assert_eq!(rules.seats(&plan.feeds), 1);
+    }
+
+    #[test]
+    fn evicting_one_book_in_grace_keeps_the_companion_seat_the_other_held_book_needs() {
+        let rules = book_companion_rules(4);
+        let mut m = SubscriptionManager::new(rules.clone());
+        let krx = feed(1, "krx", StreamKind::Book(Venue::Krx));
+        m.hold(stock(0), cell(1, "a"));
+        m.hold(stock(0), krx.clone());
+        m.hold(stock(0), feed(1, "nxt", StreamKind::Book(Venue::Nxt)));
+        let plan = m.plan(t(0));
+        assert_eq!(rules.seats(&plan.feeds), 4);
+        m.release(stock(0), &krx, t(1));
+        m.hold(stock(1), cell(1, "b"));
+        m.hold(stock(2), cell(1, "c"));
+        let plan = m.plan(t(2));
+        assert_eq!(rules.seats(&plan.feeds), plan.feeds.len() + plan.feeds.values().map(|kinds| kinds.iter().filter(|k| rules.takes_own_seat(**k)).count()).sum::<usize>());
+        assert!(plan.feeds[&stock(0)].contains(&StreamKind::Book(Venue::Nxt)) && plan.feeds[&stock(0)].contains(&StreamKind::AfterHours), "{plan:?}");
     }
 }

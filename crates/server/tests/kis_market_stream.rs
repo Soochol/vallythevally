@@ -536,3 +536,48 @@ async fn an_in_use_elsewhere_answer_halts_the_stream_and_ten_minutes_later_there
     assert_eq!(rig.connector.attempts(), 1, "다시 접속하지 않는다");
     assert_eq!(rig.stream.status(), StreamStatus::InUseElsewhere);
 }
+
+#[tokio::test(start_paused = true)]
+async fn a_reconnect_while_the_bridge_is_backed_up_still_reports_down_and_then_live() {
+    let mut rig = rig();
+    let mut first = rig.connector.queue_connection();
+    let _second = rig.connector.queue_connection();
+    rig.stream.set_desired(feeds(&[(stock("005930"), &[StreamKind::Trades])]));
+    first.heard().await;
+    let record = frame("H0STCNT0", 46, &trade_fields());
+    let fields = record.splitn(4, '|').nth(3).unwrap();
+    let burst = format!("0|H0STCNT0|999|{}", vec![fields; 999].join("^"));
+    for _ in 0..5 {
+        first.say(&burst);
+    }
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    first.hang_up();
+    tokio::time::sleep(Duration::from_secs(5)).await;
+    assert_eq!(rig.connector.attempts(), 2);
+    let mut lifecycle = Vec::new();
+    while let Ok(Some(event)) = tokio::time::timeout(Duration::from_secs(5), rig.events.recv()).await {
+        match event {
+            StreamEvent::Live { .. } => lifecycle.push("Live"),
+            StreamEvent::Down { .. } => lifecycle.push("Down"),
+            _ => {}
+        }
+    }
+    assert_eq!(lifecycle, ["Live", "Down", "Live"]);
+}
+
+#[tokio::test(start_paused = true)]
+async fn frames_with_unreadable_keys_or_extreme_numbers_are_dropped_and_the_session_goes_on() {
+    let mut rig = rig();
+    let peer = rig.connector.queue_connection();
+    peer.say(&frame("H0UPCNT0", 30, &[(0, "é01"), (1, "093001"), (2, "2650.12")]));
+    let program = |net: &'static str| frame("H0UNPGM0", 11, &[(0, "005930"), (1, "093001"), (6, net)]);
+    for net in ["9223372036854775807", "-9223372036854775807", "5"] {
+        peer.say(&program(net));
+    }
+    for _ in 0..3 {
+        assert!(matches!(next_data_event(&mut rig.events).await, StreamEvent::Program { .. }));
+    }
+    peer.say(&frame("H0UPCNT0", 30, &[(0, "0001"), (1, "093001"), (2, "2650.12")]));
+    assert!(matches!(next_data_event(&mut rig.events).await, StreamEvent::Tick { .. }));
+    assert_eq!(rig.stream.status(), StreamStatus::Open);
+}
