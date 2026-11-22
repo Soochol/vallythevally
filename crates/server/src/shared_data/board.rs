@@ -14,11 +14,12 @@ struct Signature {
     path: PathBuf,
     modified: Option<SystemTime>,
     len: u64,
+    identity: u64,
 }
 
 impl Signature {
     fn of(path: PathBuf, meta: &Metadata) -> Self {
-        Signature { path, modified: meta.modified().ok(), len: meta.len() }
+        Signature { path, modified: meta.modified().ok(), len: meta.len(), identity: super::format::file_identity(meta) }
     }
 }
 

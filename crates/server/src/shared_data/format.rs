@@ -99,3 +99,13 @@ pub fn newest_file(dir: &Path, kind: DataKind, extension: &str) -> Option<PathBu
         .max_by(|a, b| a.0.cmp(&b.0))
         .map(|(_, path)| path)
 }
+
+#[cfg(unix)]
+pub fn file_identity(meta: &std::fs::Metadata) -> u64 {
+    std::os::unix::fs::MetadataExt::ino(meta)
+}
+
+#[cfg(not(unix))]
+pub fn file_identity(_: &std::fs::Metadata) -> u64 {
+    0
+}

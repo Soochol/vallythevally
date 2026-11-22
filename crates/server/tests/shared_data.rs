@@ -177,3 +177,55 @@ async fn age_counts_from_as_of_with_the_fake_clock() {
     clock.jump(45);
     assert_eq!(data.age_secs(DataKind::Probe, clock.now()), Some(65));
 }
+
+fn seqs(data: &SharedData) -> Vec<u64> {
+    data.probe_feed.read(|items| items.iter().map(|i| i.seq).collect())
+}
+
+#[tokio::test]
+async fn appended_file_with_unknown_version_is_never_read_and_counts_one_error() {
+    let tmp = tempfile::tempdir().unwrap();
+    let data = SharedData::new();
+    let mut future = header(noon());
+    future.format_version = FORMAT_VERSION + 1;
+    std::fs::create_dir_all(tmp.path().join("probe")).unwrap();
+    std::fs::write(feed_path(tmp.path()), format!("{}\n{{\"seq\":", serde_json::to_string(&future).unwrap())).unwrap();
+    data.poll_once(tmp.path()).await;
+    OpenOptions::new().append(true).open(feed_path(tmp.path())).unwrap().write_all(b"7}\n{\"seq\":1}\n").unwrap();
+    data.poll_once(tmp.path()).await;
+    assert_eq!(seqs(&data), Vec::<u64>::new());
+    assert_eq!(data.error_count(DataKind::Probe), 1);
+}
+
+#[tokio::test]
+async fn new_day_file_with_bad_header_keeps_previous_items() {
+    let tmp = tempfile::tempdir().unwrap();
+    let data = SharedData::new();
+    let mut writer = FeedWriter::open(tmp.path(), header(noon())).unwrap();
+    writer.append(&ProbeItem { seq: 1 }).unwrap();
+    data.poll_once(tmp.path()).await;
+    std::fs::write(tmp.path().join("probe").join("20261124.jsonl"), b"garbage\n{\"seq\":9}\n").unwrap();
+    data.poll_once(tmp.path()).await;
+    data.poll_once(tmp.path()).await;
+    assert_eq!(seqs(&data), vec![1]);
+    assert_eq!(data.error_count(DataKind::Probe), 1);
+}
+
+#[tokio::test]
+async fn recreated_file_at_the_same_path_is_read_from_the_start() {
+    let tmp = tempfile::tempdir().unwrap();
+    let data = SharedData::new();
+    let mut writer = FeedWriter::open(tmp.path(), header(noon())).unwrap();
+    for seq in 0..3 {
+        writer.append(&ProbeItem { seq }).unwrap();
+    }
+    data.poll_once(tmp.path()).await;
+    std::fs::remove_file(feed_path(tmp.path())).unwrap();
+    let mut again = FeedWriter::open(tmp.path(), header(noon())).unwrap();
+    for seq in 100..110 {
+        again.append(&ProbeItem { seq }).unwrap();
+    }
+    data.poll_once(tmp.path()).await;
+    assert_eq!(seqs(&data), (100..110).collect::<Vec<_>>());
+    assert_eq!(data.error_count(DataKind::Probe), 0);
+}
