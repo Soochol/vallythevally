@@ -66,6 +66,14 @@ impl SubscriptionManager {
         }
     }
 
+    pub fn reseat(&mut self, rules: Arc<dyn SeatRules>) {
+        self.rules = rules;
+        self.admitted.clear();
+        self.admitted_venue.clear();
+        self.released_at.clear();
+        self.kind_released_at.clear();
+    }
+
     /// 유예 중인 종목이면 유예를 취소한다.
     pub fn hold(&mut self, symbol: Symbol, h: Holder) {
         if self.has_seat(symbol, &h) || !self.admitted.contains(&symbol) {

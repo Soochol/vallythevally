@@ -141,6 +141,7 @@ pub async fn flow(State(st): State<Arc<AppState>>, Query(query): Query<HashMap<S
 }
 
 async fn investor_days(st: &AppState, params: &Params, answers: &mut Answers) -> Result<Vec<MarketOverviewInvestorDay>, ApiErrorBody> {
+    let started = st.market_overview.ticket();
     let source = overview_source(st);
     let days = trading_days(st, params, answers).await?;
     let mut rows = Vec::with_capacity(days.len());
@@ -153,7 +154,7 @@ async fn investor_days(st: &AppState, params: &Params, answers: &mut Answers) ->
         let net = answers.ask(st, source.investor_day(params.market, day, Priority::Screen)).await?;
         let row = MarketOverviewInvestorDay { date: api::KstDate(day), individual_eok: net.individual, foreign_eok: net.foreign, institution_eok: net.institution };
         if day < observation_day(now) {
-            st.market_overview.cache_investor_day(now, params.market, row.clone());
+            st.market_overview.cache_investor_day(now, params.market, row.clone(), started);
         }
         rows.push(row);
     }

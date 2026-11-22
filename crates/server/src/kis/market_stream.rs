@@ -74,12 +74,12 @@ impl KisMarketStream {
         (KisMarketStream { desired, venue, status, seats: Arc::new(KisSeats::new(reserved_seats)) }, out_rx)
     }
 
-    pub fn set_venue(&self, venue: Venue) {
-        self.venue.send_if_modified(|current| std::mem::replace(current, venue) != venue);
-    }
-
     pub fn status(&self) -> StreamStatus {
         self.status.borrow().clone()
+    }
+
+    pub fn watch_status(&self) -> watch::Receiver<StreamStatus> {
+        self.status.clone()
     }
 }
 
@@ -101,6 +101,10 @@ impl MarketStream for KisMarketStream {
 
     fn watch_desired(&self) -> watch::Receiver<DesiredFeeds> {
         self.desired.subscribe()
+    }
+
+    fn set_venue(&self, venue: Venue) {
+        self.venue.send_if_modified(|current| std::mem::replace(current, venue) != venue);
     }
 }
 

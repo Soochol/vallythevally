@@ -100,6 +100,7 @@ pub struct KisFactory {
     pub transport: Arc<dyn KisTransport>,
     pub clock: Clock,
     pub token_base: PathBuf,
+    pub feed: Option<crate::kis::feed::KisFeedParts>,
 }
 
 impl KisFactory {

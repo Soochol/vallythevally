@@ -581,3 +581,21 @@ async fn frames_with_unreadable_keys_or_extreme_numbers_are_dropped_and_the_sess
     assert!(matches!(next_data_event(&mut rig.events).await, StreamEvent::Tick { .. }));
     assert_eq!(rig.stream.status(), StreamStatus::Open);
 }
+
+#[tokio::test(start_paused = true)]
+async fn reseating_the_manager_for_the_kis_limit_keeps_the_first_forty_holders_and_rejects_the_rest() {
+    let kiwoom: Arc<dyn SeatRules> = Arc::new(server::kiwoom::stream::KiwoomSeats);
+    let mut manager = SubscriptionManager::new(kiwoom);
+    let symbols = listed(50);
+    let cell = |i: usize| Holder::Cell { conn: ConnId(1), sub: SubId(format!("cell{i}")) };
+    for (i, symbol) in symbols.iter().enumerate() {
+        manager.hold(*symbol, cell(i));
+    }
+    let plan = manager.plan(now());
+    assert!(plan.rejected.is_empty(), "키움 자리에는 쉰 종목이 다 들어간다");
+    manager.reseat(Arc::new(KisSeats::new(0)));
+    let plan = manager.plan(now());
+    assert_eq!(plan.realtime.len(), LIMIT);
+    assert_eq!(plan.rejected.len(), 10);
+    assert!(symbols.iter().take(LIMIT).all(|symbol| plan.realtime.contains(symbol)), "먼저 잡은 종목이 남는다");
+}

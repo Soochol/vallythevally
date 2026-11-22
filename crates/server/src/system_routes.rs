@@ -284,6 +284,7 @@ async fn delete_key(State(st): State<Arc<AppState>>) -> Result<Json<KiwoomLinkSt
         None => st.keys.reset_file().map_err(key_failure)?,
         Some(market) => st.keys.remove(&market.id).map_err(key_failure)?,
     }
+    st.source_switch.sync().await;
     st.system.set_key_file_problem(None);
     tracing::info!("키움 키를 지웠습니다");
     Ok(Json(kiwoom_status(&st)))
@@ -300,6 +301,7 @@ async fn add_key(State(st): State<Arc<AppState>>, body: Body) -> Result<Json<api
     let credentials = checked_credentials(&input.app_key, &input.app_secret)?;
     let broker = input.broker.unwrap_or(Broker::Kiwoom);
     st.keys.add_for(broker, &input.alias, credentials).map_err(key_failure)?;
+    st.source_switch.sync().await;
     st.system.set_key_file_problem(None);
     tracing::info!(broker = ?broker, "키를 더했습니다");
     Ok(Json(key_list(&st)))
@@ -321,6 +323,7 @@ async fn replace_key(State(st): State<Arc<AppState>>, Path(id): Path<String>, bo
     refuse_mock(&st)?;
     let credentials = checked_credentials(&input.app_key, &input.app_secret)?;
     st.keys.replace_credentials(&id, credentials).map_err(key_failure)?;
+    st.source_switch.sync().await;
     st.system.set_key_file_problem(None);
     tracing::info!("키움 키를 바꿨습니다");
     Ok(Json(key_list(&st)))
@@ -331,6 +334,7 @@ async fn delete_key_by_id(State(st): State<Arc<AppState>>, Path(id): Path<String
     let _write = st.system.write.lock().await;
     refuse_mock(&st)?;
     st.keys.remove(&id).map_err(key_failure)?;
+    st.source_switch.sync().await;
     tracing::info!("키움 키를 지웠습니다");
     Ok(Json(key_list(&st)))
 }
@@ -341,6 +345,7 @@ async fn put_market_key(State(st): State<Arc<AppState>>, body: Body) -> Result<J
     let _write = st.system.write.lock().await;
     refuse_mock(&st)?;
     st.keys.designate_market(&id).map_err(key_failure)?;
+    st.source_switch.sync().await;
     tracing::info!("시세 키를 바꿨습니다");
     Ok(Json(key_list(&st)))
 }

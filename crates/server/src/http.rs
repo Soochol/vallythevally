@@ -44,6 +44,8 @@ pub struct AppState {
     pub market_overview: crate::market_overview::MarketOverview,
     pub etf: crate::etf::EtfBook,
     pub kiwoom_catalog: crate::kiwoom_themes::CatalogStore,
+    pub generation: crate::market_source::SourceGeneration,
+    pub source_switch: Arc<crate::market_source::switch::SourceSwitch>,
 }
 
 pub fn router(state: Arc<AppState>) -> Router {

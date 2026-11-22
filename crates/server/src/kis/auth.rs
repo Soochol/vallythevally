@@ -197,6 +197,16 @@ impl KisAuth {
         }
     }
 
+    pub fn due_daily_reissue(&self, now: KstTime, at: TimeOfDay) -> bool {
+        let cutoff = KstTime::from_kst_civil(now.kst_date(), at);
+        now >= cutoff && self.lock().issued.as_ref().is_some_and(|issued| issued.issued_at < cutoff)
+    }
+
+    pub async fn reissue(&self) -> Result<TokenLease, AuthError> {
+        let _issuing = self.0.issuing.lock().await;
+        self.issue().await
+    }
+
     pub fn token_expires_at(&self) -> Option<KstTime> {
         self.lock().issued.as_ref().map(|issued| issued.expires_at)
     }

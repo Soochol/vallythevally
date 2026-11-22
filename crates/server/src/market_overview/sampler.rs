@@ -43,12 +43,13 @@ enum Kind {
 
 async fn take(st: &AppState, market: Market, mark: KstTime, now: KstTime, kind: Kind) {
     debug_assert!(MARKETS.contains(&market));
+    let started = st.market_overview.samples.ticket();
     let value = match kind {
         Kind::Investors => investors(st, market, now).await,
         Kind::Program => program(st, market, now).await,
     };
     if let Some(value) = value {
-        st.market_overview.samples.record(now, Sample { at: mark.unix(), received_at: st.clock.now().unix(), market, value }).await;
+        st.market_overview.samples.record(now, Sample { at: mark.unix(), received_at: st.clock.now().unix(), market, value }, started).await;
     }
 }
 

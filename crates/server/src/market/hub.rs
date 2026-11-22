@@ -98,6 +98,10 @@ impl HubHandle {
         self.send(HubInput::DailyReset);
     }
 
+    pub fn source_switched(&self) {
+        self.send(HubInput::SourceSwitched);
+    }
+
     fn send(&self, input: HubInput) {
         if self.tx.send(input).is_err() {
             tracing::error!("MarketHub가 멈췄습니다");
@@ -115,6 +119,7 @@ enum HubInput {
     Watch { conn: ConnId, symbols: Vec<Symbol>, venue: Venue },
     Snapshot { key: SeriesKey, reply: oneshot::Sender<Option<HubSnapshot>> },
     DailyReset,
+    SourceSwitched,
     Seeded { key: SeriesKey, generation: u64, result: Result<Seed, BarError> },
     Verified { key: SeriesKey, generation: u64, bucket: Bucket, attempt: u32, result: Result<Option<ConfirmedBar>, BarError> },
     DayVolumes { requests: Vec<(StockCode, u64)>, result: Result<HashMap<StockCode, DayVolumes>, SourceError> },
@@ -375,6 +380,13 @@ impl MarketHub {
                 tracing::info!(keys = self.keys.len(), "07:45 실시간 키를 모두 다시 시드합니다");
                 self.reseed_all(SeedPurpose::Reload { reason: ReloadReason::DailyReset, from: None });
             }
+            HubInput::SourceSwitched => {
+                self.manager.reseat(self.stream.seat_rules());
+                self.replan(now);
+                self.broker_history.clear();
+                tracing::info!(keys = self.keys.len(), "시세 공급원이 바뀌어 실시간 키를 모두 다시 시드합니다");
+                self.reseed_all(SeedPurpose::Reload { reason: ReloadReason::DailyReset, from: None });
+            }
             HubInput::Seeded { key, generation, result } => self.on_seeded(key, generation, result, now),
             HubInput::Verified { key, generation, bucket, attempt, result } => self.on_verified(key, generation, bucket, attempt, result, now),
             HubInput::DayVolumes { requests, result } => self.on_day_volumes(requests, result, now),
@@ -513,6 +525,7 @@ impl MarketHub {
         };
         c.requested_watch = symbols;
         c.watch_venue = venue;
+        self.stream.set_venue(venue);
         c.outbox.set_quote_venue(venue.into());
         self.hold_listed_watch_rows(conn, now);
         self.sync_day_volumes(now);

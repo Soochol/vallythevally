@@ -1,6 +1,7 @@
 pub mod api;
 pub mod auth;
 pub mod error;
+pub mod feed;
 pub mod link;
 pub mod market_rest;
 pub mod market_stream;
