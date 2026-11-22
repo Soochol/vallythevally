@@ -1026,6 +1026,14 @@ class CollectorRestartTest(FakeCollectorHost):
         restarts = [call for call in self.recorded() if call == "systemctl --user restart vally-collector.service"]
         self.assertEqual(len(restarts), 4, self.recorded())
 
+    def test_a_marker_the_script_cannot_read_still_lets_the_restart_happen(self):
+        marker = self.home_units() / ".vally-collector-last-restart"
+        marker.write_text("5\nfingerprint\n")
+        marker.chmod(0)
+        result = self.restart("--scheduled", VALLY_COLLECTOR_STABLE_SECONDS="1")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("systemctl --user restart vally-collector.service", self.recorded())
+
     def test_a_marker_stamped_with_a_future_time_does_not_make_the_run_skip_a_restart_that_never_happened(self):
         marker = self.seed_marker_of_a_restart_finishing_in_the_future()
         result = self.restart("--scheduled", VALLY_COLLECTOR_STABLE_SECONDS="1")

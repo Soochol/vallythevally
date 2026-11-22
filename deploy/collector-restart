@@ -195,7 +195,7 @@ restart_generation() {
     esac
     generation="${generation#"${generation%%[!0]*}"}"
     case "$generation" in
-        ?????????????????????*) return 0 ;;
+        ????????????????*) return 0 ;;
     esac
     printf '%s\n' "${generation:-0}"
 }
@@ -230,6 +230,7 @@ restart_and_watch() {
         return 0
     fi
     generation_before="$(restart_generation)"
+    rm -f "$last_restart_file"
     printf '%s\n' "${generation_before:-0}" > "$last_restart_file"
     systemctl --user restart "$service"
     elapsed=0
