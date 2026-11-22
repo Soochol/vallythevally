@@ -1090,6 +1090,16 @@ class CollectorRestartTest(FakeCollectorHost):
             self.assertIn("VALLY_COLLECTOR_LOCK_SECONDS", result.stderr)
         self.assertEqual(self.recorded(), [])
 
+    def test_a_value_with_control_characters_gets_a_one_line_message_naming_the_variable(self):
+        for name in ["VALLY_COLLECTOR_LOCK_SECONDS", "VALLY_COLLECTOR_STABLE_SECONDS"]:
+            for value, shown in [("5\n6", "5\\n6"), ("5\t6", "5\\t6"), ("5\r\n", "5\\r\\n"), ("5\x1b6", "5\\x1b6")]:
+                result = self.restart("--scheduled", **{name: value})
+                self.assertEqual(result.returncode, 2, (name, value))
+                self.assertEqual(len(result.stderr.splitlines()), 1, (name, value, result.stderr))
+                self.assertIn(name, result.stderr)
+                self.assertIn(f"({shown})", result.stderr)
+        self.assertEqual(self.recorded(), [])
+
     def test_a_decimal_lock_seconds_does_not_shorten_the_wait_for_another_restart(self):
         units = self.home_units()
         with open(units / ".vally-collector-restart.lock", "w") as lock:
