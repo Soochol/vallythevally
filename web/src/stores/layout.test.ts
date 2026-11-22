@@ -3,6 +3,8 @@ import { DEFAULT_CHART_SETTINGS } from "../chart/settings";
 import { detachWindow, moveFloat } from "../layout/dock/floats";
 import { useSelectionStore } from "./selection";
 import { useUiStore } from "./ui";
+import { orderEntryKey, type OrderEntry } from "../features/order/orderEntries";
+import { DEFAULT_UI_PREFS } from "../persist/uiState";
 import { layoutDock } from "../layout/dock/geometry";
 import { groupOfWindow, listGroups } from "../layout/dock/tree";
 import { MAX_WINDOWS, windowId, type WindowId, type WindowKind } from "../layout/kinds";
@@ -771,4 +773,45 @@ test(`다시 하기 기록도 최근 ${ARRANGEMENT_STEPS}단계만 남긴다`, (
   }
   for (let n = 0; n < ARRANGEMENT_STEPS + 3; n += 1) state().undoArrangement();
   expect(state().redos).toHaveLength(ARRANGEMENT_STEPS);
+});
+
+const rememberedEntry: OrderEntry = { presetKind: "amountPresets", quantity: 37, usedAt: 1 };
+const rememberedKeys = () => Object.keys(useUiStore.getState().prefs.orderEntries).sort();
+const rememberOrders = (layoutId: string, windowIds: readonly string[]) => {
+  for (const id of windowIds) for (const code of ["005930", "000660"]) useUiStore.getState().rememberOrderEntry(orderEntryKey(layoutId, id, code), rememberedEntry);
+};
+const otherLayoutId = "other-layout";
+
+const reuseOrderTwo = (reuse: () => WindowId | null) => {
+  useUiStore.getState().load(DEFAULT_UI_PREFS, {});
+  const layoutId = state().layout.id;
+  state().openWindow("order");
+  expect(state().duplicateWindow(windowId("order"))).toBe("order-2");
+  expect(state().closeWindow(windowId("order-2"))).toBe(true);
+  rememberOrders(layoutId, ["order", "order-2"]);
+  rememberOrders(otherLayoutId, ["order-2"]);
+  expect(rememberedKeys()).toHaveLength(6);
+  expect(reuse()).toBe("order-2");
+  expect(rememberedKeys()).toEqual([orderEntryKey(layoutId, "order", "000660"), orderEntryKey(layoutId, "order", "005930"), orderEntryKey(otherLayoutId, "order-2", "000660"), orderEntryKey(otherLayoutId, "order-2", "005930")].sort());
+};
+
+test("닫은 호가주문창의 id를 복제가 다시 받으면 그 창의 기억만 지운다", () => reuseOrderTwo(() => state().duplicateWindow(windowId("order"))));
+
+test("닫은 호가주문창의 id를 새 창이 다시 받으면 그 창의 기억만 지운다", () => reuseOrderTwo(() => state().openWindow("order")));
+
+test("호가주문창을 닫기만 하면 그 창의 기억은 남는다", () => {
+  useUiStore.getState().load(DEFAULT_UI_PREFS, {});
+  state().openWindow("order");
+  state().duplicateWindow(windowId("order"));
+  rememberOrders(state().layout.id, ["order-2"]);
+  expect(state().closeWindow(windowId("order-2"))).toBe(true);
+  expect(rememberedKeys()).toHaveLength(2);
+});
+
+test("지울 기억이 없으면 창을 열어도 ui 상태를 바꾸지 않는다", () => {
+  useUiStore.getState().load(DEFAULT_UI_PREFS, {});
+  const before = useUiStore.getState();
+  state().openWindow("order");
+  state().duplicateWindow(windowId("order"));
+  expect(useUiStore.getState()).toBe(before);
 });
