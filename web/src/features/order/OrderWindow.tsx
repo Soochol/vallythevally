@@ -185,7 +185,7 @@ function OrderBody({ id, code, infoPager }: { id: WindowId; code: SymbolCode; in
         </div>
       )}
       <AccountBand windowId={id} accountTail={accountTail} maskAccount={settings.maskAccount} openOrders={data.openOrders} balance={data.balance} executions={data.executions} writable={writable} mock={mock} policy={data.orderable?.policy ?? null} onCancel={writes.cancelOne} />
-      <HoldingSummary holding={holding} orderable={data.orderable} buyableProblem={data.buyableProblem} sellOrdered={sellOrderQuantity(data.groups, pending, code)} unit={profitUnit} onUnit={() => setProfitUnit(toggledUnit)} onFill={setInput} />
+      <HoldingSummary holding={holding} orderable={data.orderable} buyableProblem={data.buyableProblem} sellOrdered={sellOrderQuantity(data.groups, pending, code, data.openOrdersListedAt)} unit={profitUnit} onUnit={() => setProfitUnit(toggledUnit)} onFill={setInput} />
       <div className="od-entry">
         <QuantityRow presetKind={presetKind} input={input} sharePresets={settings.sharePresets} amountPresets={settings.amountPresets} referencePrice={referencePrice} keepLastEntry={settings.keepLastEntry} onPresetKind={setPresetKind} onInput={setInput} />
         <div className="od-toolbar">

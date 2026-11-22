@@ -1436,3 +1436,20 @@ test("접수된 매도와 같은 가격에 보내는 중인 매도도 남은 수
   await expect(quantityField(page)).toHaveValue("40");
   held.reply({ body: commandOf("sell", { price: 70_800, quantity: 30 }) });
 });
+
+test("응답 전에 미체결 목록에 오른 보내는 중 매도는 남은 수량에서 두 번 빼지 않는다", async ({ page, scenario }) => {
+  ordersOn(scenario);
+  const api = tradingApi(scenario, [openOrder("0000001", "sell", 70_800, 50)]);
+  api.holdings = [SELL_HOLDING];
+  await openOrderWindow(page, scenario);
+  const held = scenario.hold((url, request) => url.pathname === "/api/trading/commands/place" && request.method() === "POST");
+  await quantityField(page).fill("30");
+  await cellAt(page, "sell", 70_800).dblclick();
+  await held.received;
+  await expect(page.getByTestId("summary-remaining")).toHaveText("남은 40");
+  api.open = [openOrder("0000001", "sell", 70_800, 50), openOrder("0000002", "sell", 70_800, 30)];
+  scenario.live.emit({ type: "trading_account_changed", accountRef: ACCOUNT });
+  await expect(chipAt(page, "sell", 70_800)).toHaveText("80");
+  await expect(page.getByTestId("summary-remaining")).toHaveText("남은 40");
+  held.reply({ body: commandOf("sell", { price: 70_800, quantity: 30 }) });
+});
