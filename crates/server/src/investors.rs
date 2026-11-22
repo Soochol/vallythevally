@@ -38,13 +38,15 @@ pub fn routes() -> Router<Arc<AppState>> {
 
 async fn foreign_holdings(State(st): State<Arc<AppState>>, Path(code): Path<String>, Query(q): Query<HashMap<String, String>>) -> Result<Json<api::DayHistory<api::ForeignHoldingDay>>, ApiFailure> {
     let (stock, range) = history_query(&st, &code, &q).await?;
-    let history = walk(&st.rest, &StockForeignHoldings::new(stock), stock, range).await;
+    let rest = st.kiwoom.rest().map_err(|e| Lookup::ForeignHoldings.failure(e.into(), st.clock.now()))?;
+    let history = walk(rest, &StockForeignHoldings::new(stock), stock, range).await;
     Ok(Json(history.map_err(|e| Lookup::ForeignHoldings.failure(e, st.clock.now()))?))
 }
 
 async fn investor_net_shares(State(st): State<Arc<AppState>>, Path(code): Path<String>, Query(q): Query<HashMap<String, String>>) -> Result<Json<api::DayHistory<api::InvestorNetSharesDay>>, ApiFailure> {
     let (stock, range) = history_query(&st, &code, &q).await?;
-    let history = walk(&st.rest, &StockInvestorNetShares::new(stock, st.clock.now().kst_date()), stock, range).await;
+    let rest = st.kiwoom.rest().map_err(|e| Lookup::InvestorNetShares.failure(e.into(), st.clock.now()))?;
+    let history = walk(rest, &StockInvestorNetShares::new(stock, st.clock.now().kst_date()), stock, range).await;
     Ok(Json(history.map_err(|e| Lookup::InvestorNetShares.failure(e, st.clock.now()))?))
 }
 

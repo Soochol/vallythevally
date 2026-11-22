@@ -22,7 +22,7 @@ use crate::api::{self, ApiErrorBody, ApiErrorReason, FullHistory, Screen, Screen
 use crate::bars::{BarError, BarService};
 use crate::clock::Clock;
 use crate::http::{ApiFailure, AppState, Lookup};
-use crate::kiwoom::rest::{KiwoomRest, Priority};
+use crate::market_source::{KiwoomHandle, Priority};
 use crate::symbols::SymbolDirectory;
 use crate::setup_documents::parse_stored_screen;
 use crate::user_routes::read_json;
@@ -100,7 +100,7 @@ impl Calendar {
 pub struct Screener {
     store: Arc<Store>,
     summaries: Arc<SummaryCollector>,
-    rest: KiwoomRest,
+    kiwoom: KiwoomHandle,
     bars: Arc<BarService>,
     symbols: Arc<SymbolDirectory>,
     clock: Clock,
@@ -111,11 +111,12 @@ pub struct Screener {
 }
 
 impl Screener {
-    pub fn new(store: Store, rest: KiwoomRest, bars: Arc<BarService>, symbols: Arc<SymbolDirectory>, clock: Clock) -> Self {
+    pub fn new(store: Store, kiwoom: impl Into<KiwoomHandle>, bars: Arc<BarService>, symbols: Arc<SymbolDirectory>, clock: Clock) -> Self {
+        let kiwoom = kiwoom.into();
         Screener {
             store: Arc::new(store),
-            summaries: SummaryCollector::new(rest.clone(), clock.clone()),
-            rest,
+            summaries: SummaryCollector::new(kiwoom.clone(), clock.clone()),
+            kiwoom,
             bars,
             symbols,
             clock,
@@ -277,7 +278,7 @@ impl Screener {
         if !self.with_store(Store::listing_lost).await? {
             return Ok(Listed::Present);
         }
-        let directory = self.symbols.ready(&self.rest).await?;
+        let directory = self.symbols.ready(self.kiwoom.rest()?).await?;
         Ok(self.with_store(move |s| s.fill_lost_listing(directory.screener_listing())).await?)
     }
 

@@ -49,17 +49,7 @@ const GATE_LONG_WAIT: Duration = Duration::from_secs(5 * 60);
 const GATE_MISSES_BEFORE_LONG_WAIT: u8 = 3;
 const AUTH_GATE_WAIT: Duration = Duration::from_secs(MIN_ISSUE_INTERVAL_SECS as u64);
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub enum Priority {
-    Order,
-    /// 브라우저가 기다리는 요청: 봉 페이지, 서버를 켤 때의 종목 목록.
-    Screen,
-    ScreenBulk,
-    /// 끊긴 구간 복구 같은 것(#4). #2에는 부르는 곳이 없다.
-    Recovery,
-    /// 07:45 종목 목록 갱신 같은 것. 앞의 둘이 비었을 때만 나간다.
-    Background,
-}
+pub use crate::market_source::Priority;
 
 impl Priority {
     fn lane(self) -> usize {
@@ -93,15 +83,7 @@ impl ContKey {
     }
 }
 
-/// 같은 요청 합치기의 범위. 범위가 다르면 내용이 같아도 합치지 않고 따로 보낸다.
-/// `BarService`는 07:45 비우기마다 범위를 바꿔, 비우기 전 조회의 응답이 새 캐시에 들어가지 않게 한다.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
-pub enum MergeScope {
-    #[default]
-    Shared,
-    Bars(u64),
-    Summary(u64),
-}
+pub use crate::market_source::MergeScope;
 
 #[derive(Debug)]
 pub struct Page<T> {
@@ -1361,7 +1343,8 @@ pub mod testing {
     use futures::future::BoxFuture;
     use tokio::time::Instant;
 
-    use super::super::api::{ApiId, Endpoint};
+    pub use super::super::api::ApiId;
+    use super::super::api::Endpoint;
     use super::super::transport::{HttpRequest, HttpResponse, Transport, TransportError};
 
     #[derive(Debug, Clone)]

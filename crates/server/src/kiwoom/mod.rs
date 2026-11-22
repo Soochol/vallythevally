@@ -7,6 +7,7 @@ pub mod ip_file;
 pub mod key_file;
 pub mod keys;
 pub mod link;
+pub mod market_source;
 pub mod private_file;
 pub mod rest;
 pub mod stream;

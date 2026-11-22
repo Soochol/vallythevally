@@ -22,7 +22,7 @@ use crate::api::{self, ConnectionStatus, FeedKind, RealtimeState, ReloadReason, 
 use crate::bars::{BarError, BarService, Seed};
 use crate::clock::Clock;
 use crate::kiwoom::rest::Priority;
-use crate::kiwoom::rest::KiwoomError;
+use crate::market_source::SourceError;
 use crate::kiwoom::stream::{BookLevel, BookSnapshot, BrokerEntry, BrokerSnapshot, Exchange, KiwoomStream, RealProgramTrade, RealTick, StreamEvent, TradeSide};
 use crate::kiwoom::wire::{AfterHoursTotals, RealType};
 use crate::quotes;
@@ -116,7 +116,7 @@ enum HubInput {
     DailyReset,
     Seeded { key: SeriesKey, generation: u64, result: Result<Seed, BarError> },
     Verified { key: SeriesKey, generation: u64, bucket: Bucket, attempt: u32, result: Result<Option<ConfirmedBar>, BarError> },
-    DayVolumes { requests: Vec<(StockCode, u64)>, result: Result<HashMap<StockCode, DayVolumes>, KiwoomError> },
+    DayVolumes { requests: Vec<(StockCode, u64)>, result: Result<HashMap<StockCode, DayVolumes>, SourceError> },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -537,13 +537,13 @@ impl MarketHub {
             let requests: Vec<(StockCode, u64)> = chunk.iter().map(|code| (*code, self.tallies.request(*code))).collect();
             tokio::spawn(async move {
                 let codes: Vec<StockCode> = requests.iter().map(|(code, _)| *code).collect();
-                let result = quotes::day_volumes(bars.rest(), &codes).await;
+                let result = quotes::day_volumes(bars.source().as_ref(), &codes).await;
                 let _ = tx.send(HubInput::DayVolumes { requests, result });
             });
         }
     }
 
-    fn on_day_volumes(&mut self, requests: Vec<(StockCode, u64)>, result: Result<HashMap<StockCode, DayVolumes>, KiwoomError>, now: KstTime) {
+    fn on_day_volumes(&mut self, requests: Vec<(StockCode, u64)>, result: Result<HashMap<StockCode, DayVolumes>, SourceError>, now: KstTime) {
         let mut volumes = match result {
             Ok(volumes) => volumes,
             Err(e) => {

@@ -19,6 +19,7 @@ use crate::db::AppDb;
 use crate::kiwoom::link::Link;
 use crate::kiwoom::rest::{KiwoomError, KiwoomRest};
 use crate::market::hub::{HubHandle, HubSnapshot};
+use crate::market_source::{KiwoomHandle, MarketSource, SourceFailure};
 use crate::screener::Screener;
 use crate::symbols::{NotReady, SearchFilter, SymbolDirectory};
 
@@ -26,6 +27,8 @@ pub struct AppState {
     pub symbols: Arc<SymbolDirectory>,
     pub bars: Arc<BarService>,
     pub rest: KiwoomRest,
+    pub source: Arc<dyn MarketSource>,
+    pub kiwoom: KiwoomHandle,
     pub db: AppDb,
     pub clock: Clock,
     pub static_dir: PathBuf,
@@ -92,6 +95,10 @@ impl ApiFailure {
     fn kiwoom(e: &KiwoomError) -> Self {
         let shown = e.shown();
         ApiFailure { code: shown.code, message: e.to_string(), reason: Some(shown.reason), retry_at: shown.retry_at, manual_action_required: shown.manual_action_required }
+    }
+
+    fn source(failure: &SourceFailure) -> Self {
+        ApiFailure { code: failure.code, message: failure.message.clone(), reason: Some(failure.reason), retry_at: failure.retry_at, manual_action_required: failure.manual_action_required }
     }
 
     pub(crate) fn trading(e: crate::trading::TradingError) -> Self {
@@ -227,12 +234,13 @@ impl Lookup {
             BarError::UnknownSymbol => ApiFailure::new(UnknownSymbol, "없는 종목입니다"),
             BarError::ListNotReady => ApiFailure::list_not_ready(now),
             BarError::IncompleteHistory => ApiFailure::new(KiwoomUnavailable, BarError::IncompleteHistory.to_string()),
-            BarError::Kiwoom(e) => {
-                let failure = ApiFailure::kiwoom(&e);
+            BarError::Unsupported(feature) => ApiFailure { reason: Some(api::ApiErrorReason::UnsupportedBySource), ..ApiFailure::new(BadRequest, BarError::Unsupported(feature).to_string()) },
+            BarError::Source(e) => {
+                let failure = ApiFailure::source(&e);
                 if failure.code == Internal {
-                    tracing::error!(reason = %e, "{what} 요청에 답하지 못했습니다");
+                    tracing::error!(reason = %e.message, "{what} 요청에 답하지 못했습니다");
                 } else {
-                    tracing::warn!(reason = %e, "{what} 요청에 답하지 못했습니다");
+                    tracing::warn!(reason = %e.message, "{what} 요청에 답하지 못했습니다");
                 }
                 failure
             }
@@ -245,8 +253,8 @@ impl Lookup {
 }
 
 pub(crate) async fn symbol_list(st: &AppState) -> Result<Arc<crate::symbols::Directory>, ApiFailure> {
-    st.symbols.ready(&st.rest).await.map_err(|e| match e {
-        NotReady::Kiwoom(e) => Lookup::Symbols.failure(e.into(), st.clock.now()),
+    st.symbols.ready(st.source.as_ref()).await.map_err(|e| match e {
+        NotReady::Source(e) => Lookup::Symbols.failure(e.into(), st.clock.now()),
         NotReady::Timeout => ApiFailure::list_not_ready(st.clock.now()),
     })
 }
@@ -295,7 +303,7 @@ async fn fundamentals(State(st): State<Arc<AppState>>, Path(code): Path<String>)
     if symbol_list(&st).await?.get(Symbol::Stock(stock)).is_none() {
         return Err(ApiFailure::new(api::ApiErrorCode::UnknownSymbol, format!("없는 종목입니다: {code}")));
     }
-    let fundamentals = crate::fundamentals::fundamentals(&st.rest, stock).await.map_err(|e| Lookup::Fundamentals.failure(e, st.clock.now()))?;
+    let fundamentals = crate::fundamentals::fundamentals(st.source.as_ref(), stock).await.map_err(|e| Lookup::Fundamentals.failure(e, st.clock.now()))?;
     st.accounts.remember_price_band(stock, fundamentals.upper_limit, fundamentals.lower_limit);
     Ok(Json(fundamentals))
 }
@@ -307,10 +315,10 @@ async fn day_summary(State(st): State<Arc<AppState>>, Path(code): Path<String>, 
     let venue = venue_param(&q)?.unwrap_or(Venue::Combined);
     let failure = |e: BarError| Lookup::Quotes.failure(e, st.clock.now());
     let nxt_enabled = match venue {
-        Venue::Nxt => st.symbols.ready(&st.rest).await.map_err(|e| failure(e.into()))?.get(Symbol::Stock(stock)).is_some_and(|info| info.nxt_enabled),
+        Venue::Nxt => st.symbols.ready(st.source.as_ref()).await.map_err(|e| failure(e.into()))?.get(Symbol::Stock(stock)).is_some_and(|info| info.nxt_enabled),
         _ => false,
     };
-    Ok(Json(crate::quotes::day_summary(&st.rest, stock, venue, nxt_enabled).await.map_err(|e| failure(e.into()))?))
+    Ok(Json(crate::quotes::day_summary(st.source.as_ref(), stock, venue, nxt_enabled).await.map_err(failure)?))
 }
 
 struct BarsQuery {
@@ -378,7 +386,7 @@ async fn jump_bars(State(st): State<Arc<AppState>>, Query(q): Query<HashMap<Stri
 
 fn with_snapshot(
     mut bars: Vec<domain::ConfirmedBar>,
-    kiwoom_current: Option<crate::kiwoom::wire::KiwoomBar>,
+    kiwoom_current: Option<crate::market_source::PeriodBar>,
     snapshot: Option<HubSnapshot>,
 ) -> (Vec<domain::ConfirmedBar>, Option<api::Bar>, Option<u64>) {
     let Some(snap) = snapshot else {
@@ -422,10 +430,10 @@ async fn quotes(State(st): State<Arc<AppState>>, Query(q): Query<HashMap<String,
     }
     let failure = |e: BarError| Lookup::Quotes.failure(e, st.clock.now());
     let directory = match venue {
-        Venue::Nxt if symbols.iter().any(|s| matches!(s, Symbol::Stock(_))) => Some(st.symbols.ready(&st.rest).await.map_err(|e| failure(e.into()))?),
+        Venue::Nxt if symbols.iter().any(|s| matches!(s, Symbol::Stock(_))) => Some(st.symbols.ready(st.source.as_ref()).await.map_err(|e| failure(e.into()))?),
         _ => None,
     };
-    Ok(Json(crate::quotes::quotes(&st.rest, &st.bars, directory.as_deref(), &symbols, venue).await.map_err(failure)?))
+    Ok(Json(crate::quotes::quotes(st.source.as_ref(), &st.bars, directory.as_deref(), &symbols, venue).await.map_err(failure)?))
 }
 
 async fn method_not_allowed(method: Method, uri: Uri) -> ApiFailure {
@@ -1413,7 +1421,7 @@ mod tests {
             json(&app, "/api/symbols/005930"),
             json(&app, "/api/bars?symbol=005930&period=D&before=1794182400"),
             put(&app, "/api/layouts/L2", &nxt_layout),
-            symbols.refresh(&rest, crate::kiwoom::rest::Priority::Screen),
+            crate::kiwoom::market_source::refresh_symbols(&symbols, &rest, crate::kiwoom::rest::Priority::Screen),
         );
         let list = list.unwrap_err();
         let failure = list.failure().expect("키움 판정");

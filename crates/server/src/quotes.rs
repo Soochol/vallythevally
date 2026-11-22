@@ -8,10 +8,8 @@ use domain::{Feed, IndexCode, KstTime, Period, Price, SeriesKey, StockCode, Symb
 
 use crate::api;
 use crate::bars::{BarError, BarService};
-use crate::kiwoom::api::StockQuotes;
-use crate::kiwoom::rest::{KiwoomRest, MergeScope, Priority};
-use crate::kiwoom::wire::{parse_day_summary, parse_quotes};
 use crate::market::venue_volume::DayVolumes;
+use crate::market_source::{MarketFeature, MarketSource, Priority, SourceError};
 use crate::symbols::Directory;
 
 const INDEX_BARS: usize = 2;
@@ -31,7 +29,7 @@ pub fn effective_book_venue(requested: Venue, nxt_enabled: Option<bool>) -> Venu
 }
 
 /// `symbols`는 중복이 없어야 한다. 값을 얻은 종목만 요청 순서대로 돌려준다.
-pub async fn quotes(rest: &KiwoomRest, bars: &BarService, directory: Option<&Directory>, symbols: &[Symbol], requested: Venue) -> Result<Vec<api::Quote>, BarError> {
+pub async fn quotes(source: &dyn MarketSource, bars: &BarService, directory: Option<&Directory>, symbols: &[Symbol], requested: Venue) -> Result<Vec<api::Quote>, BarError> {
     let stocks: Vec<(StockCode, Venue)> = symbols
         .iter()
         .filter_map(|s| if let Symbol::Stock(c) = s { Some(*c) } else { None })
@@ -42,17 +40,21 @@ pub async fn quotes(rest: &KiwoomRest, bars: &BarService, directory: Option<&Dir
         .collect();
     let indexes = symbols.iter().filter_map(|s| if let Symbol::Index(c) = s { Some(*c) } else { None });
     let stock_quotes = async {
-        let mut out = Vec::new();
-        for chunk in stocks.chunks(StockQuotes::MAX) {
-            let req = StockQuotes::of_venues(chunk).expect("chunks는 1~MAX개다");
-            let page = rest.call(&req, None, Priority::Screen, MergeScope::default()).await?;
-            let asked: HashMap<StockCode, Venue> = chunk.iter().copied().collect();
-            out.extend(parse_quotes(page.body).into_iter().filter(|q| asked.get(&q.code) == Some(&q.venue)).map(|q| {
-                let symbol = Symbol::Stock(q.code);
-                (symbol, api::Quote { traded_million_won: q.traded.map(|t| t.0), ..quote(symbol, Some(q.venue), q.price_centi, q.base_centi, q.volume.0, q.at.unix(), api::QuoteSource::Polled) })
-            }));
+        if stocks.is_empty() {
+            return Ok(Vec::new());
         }
-        Ok::<_, BarError>(out)
+        source.requires(MarketFeature::Quotes)?;
+        let asked: HashMap<StockCode, Venue> = stocks.iter().copied().collect();
+        let rows = source.quotes(stocks.clone(), Priority::Screen).await?;
+        Ok::<_, BarError>(
+            rows.into_iter()
+                .filter(|q| asked.get(&q.code) == Some(&q.venue))
+                .map(|q| {
+                    let symbol = Symbol::Stock(q.code);
+                    (symbol, api::Quote { traded_million_won: q.traded_million_won, ..quote(symbol, Some(q.venue), q.price_centi, q.base_centi, q.volume.0, q.at.unix(), api::QuoteSource::Polled) })
+                })
+                .collect::<Vec<_>>(),
+        )
     };
     let index_quotes = futures::future::try_join_all(indexes.map(|c| index_quote(bars, c)));
     let (stock_quotes, index_quotes) = futures::try_join!(stock_quotes, index_quotes)?;
@@ -75,11 +77,10 @@ async fn index_quote(bars: &BarService, code: IndexCode) -> Result<Option<(Symbo
     Ok(Some((symbol, quote(symbol, None, last.close().centi(), prev.close().centi(), last.volume().0, bucket.start().unix(), api::QuoteSource::Polled))))
 }
 
-pub async fn day_summary(rest: &KiwoomRest, code: StockCode, requested: Venue, nxt_enabled: bool) -> Result<api::SymbolDaySummary, crate::kiwoom::rest::KiwoomError> {
+pub async fn day_summary(source: &dyn MarketSource, code: StockCode, requested: Venue, nxt_enabled: bool) -> Result<api::SymbolDaySummary, BarError> {
+    source.requires(MarketFeature::Quotes)?;
     let venue = effective_venue(requested, nxt_enabled);
-    let req = StockQuotes::of_venues(&[(code, venue)]).expect("종목 하나다");
-    let page = rest.call(&req, None, Priority::Screen, MergeScope::default()).await?;
-    let row = parse_day_summary(page.body, code, venue);
+    let row = source.day_summary(code, venue, Priority::Screen).await?;
     let won = |won: Option<u64>| won.map(|w| w as f64);
     Ok(api::SymbolDaySummary {
         symbol: api::SymbolCode(Symbol::Stock(code).as_wire()),
@@ -104,12 +105,10 @@ pub fn realtime(symbol: Symbol, venue: Venue, price: Price, base_centi: u64, vol
     quote(symbol, venue, price.centi(), base_centi, volume, at.unix(), api::QuoteSource::Realtime)
 }
 
-pub async fn day_volumes(rest: &KiwoomRest, codes: &[StockCode]) -> Result<HashMap<StockCode, DayVolumes>, crate::kiwoom::rest::KiwoomError> {
+pub async fn day_volumes(source: &dyn MarketSource, codes: &[StockCode]) -> Result<HashMap<StockCode, DayVolumes>, SourceError> {
     let rows: Vec<(StockCode, Venue)> = codes.iter().flat_map(|c| [Venue::Combined, Venue::Krx, Venue::Nxt].map(|v| (*c, v))).collect();
-    let req = StockQuotes::of_venues(&rows).expect("종목 수가 DAY_VOLUME_CHUNK 이하다");
-    let page = rest.call(&req, None, Priority::Screen, MergeScope::default()).await?;
     let mut seen: HashMap<StockCode, [Option<u64>; 3]> = HashMap::new();
-    for q in parse_quotes(page.body) {
+    for q in source.quotes(rows, Priority::Screen).await? {
         let slot = match q.venue {
             Venue::Combined => 0,
             Venue::Krx => 1,
@@ -132,7 +131,7 @@ pub async fn day_volumes(rest: &KiwoomRest, codes: &[StockCode]) -> Result<HashM
         .collect())
 }
 
-pub const DAY_VOLUME_CHUNK: usize = StockQuotes::MAX / 3;
+pub const DAY_VOLUME_CHUNK: usize = 33;
 
 fn quote(symbol: Symbol, venue: Option<Venue>, price_centi: u64, base_centi: u64, volume: u64, t: i64, source: api::QuoteSource) -> api::Quote {
     let change_centi = price_centi as i64 - base_centi as i64;

@@ -68,7 +68,7 @@ impl Screener {
     pub(super) async fn update(&self, id: u64, full: bool) -> Result<(), BarError> {
         tracing::info!(full, "스크리너 업데이트를 시작합니다");
         self.report(id, UpdatePhase::Symbols, 0, 1);
-        let directory = self.symbols.ready(&self.rest).await?;
+        let directory = self.symbols.ready(self.kiwoom.rest()?).await?;
         if directory.screener_listing().is_empty() {
             tracing::warn!("서버가 받아 둔 종목 목록이 비어 있어, 스크리너 종목 목록을 바꾸지 않고 업데이트를 멈춥니다");
             return Err(BarError::ListNotReady);
@@ -103,7 +103,7 @@ impl Screener {
         let mut pages = Vec::new();
         let mut cont = None;
         for _ in 0..MAX_HISTORY_PAGES {
-            let page = self.rest.call(&req, cont.as_ref(), Priority::Background, MergeScope::default()).await?;
+            let page = self.kiwoom.rest()?.call(&req, cont.as_ref(), Priority::Background, MergeScope::default()).await?;
             let days = index_days(page.body).map_err(|e| BarError::Internal(format!("코스피 일봉 응답을 읽지 못했습니다: {e}")))?;
             let reaches_stored = stored_through.is_some_and(|last| days.first().is_some_and(|oldest| *oldest <= last));
             pages.push(days);
@@ -128,7 +128,7 @@ impl Screener {
         for chunk in unfilled.chunks(StockQuotes::MAX) {
             let codes: Vec<StockCode> = chunk.iter().map(|t| t.code).collect();
             let req = StockQuotes::new(&codes, Venue::Krx).expect("chunks는 1~MAX개다");
-            let page = self.rest.call(&req, None, Priority::Background, MergeScope::default()).await?;
+            let page = self.kiwoom.rest()?.call(&req, None, Priority::Background, MergeScope::default()).await?;
             let quotes: HashMap<StockCode, KrxDayQuote> = parse_krx_quotes(page.body).into_iter().map(|q| (q.code, q)).collect();
             let waiting = catchups.len();
             let mut writes = Vec::new();
@@ -257,7 +257,7 @@ impl Screener {
     }
 
     async fn daily_page(&self, code: StockCode, req: &DailyChart, cont: Option<&ContKey>, target: KstDate) -> Result<Option<DailyPage>, BarError> {
-        let page = match self.rest.call(req, cont, Priority::Background, MergeScope::default()).await {
+        let page = match self.kiwoom.rest()?.call(req, cont, Priority::Background, MergeScope::default()).await {
             Ok(page) => page,
             Err(e) if unknown_symbol(&e) => return Ok(None),
             Err(e) => return Err(e.into()),
