@@ -336,7 +336,7 @@ fn run_single_day(arguments: &Arguments, keys_path: &std::path::Path, date: &str
             transport: Arc::new(transport),
             clock: Clock::system(),
         };
-        let supervisor = match Supervisor::start(Inputs { plan, keys: keys.active, data_dir, settings: Settings { status_socket: Some(SocketSetting { path: socket, required: socket_given }), ..Settings::default() } }, injected) {
+        let supervisor = match Supervisor::start(Inputs { plan, keys: keys.split_rest().0, data_dir, settings: Settings { status_socket: Some(SocketSetting { path: socket, required: socket_given }), ..Settings::default() } }, injected) {
             Ok(supervisor) => supervisor,
             Err(error) => {
                 eprintln!("supervise: 시작하지 못했습니다: {error}");

@@ -608,10 +608,16 @@ impl Launcher for FakeLauncher {
         }
         let (event_sink, event_source) = std::sync::mpsc::channel();
         let forward = messages_tx.clone();
-        std::thread::spawn(move || {
-            for event in event_source {
-                if forward.send(ChildMessage::Event(event)).is_err() {
-                    return;
+        tokio::spawn(async move {
+            loop {
+                match event_source.try_recv() {
+                    Ok(event) => {
+                        if forward.send(ChildMessage::Event(event)).is_err() {
+                            return;
+                        }
+                    }
+                    Err(std::sync::mpsc::TryRecvError::Empty) => sleep(Duration::from_millis(1)).await,
+                    Err(std::sync::mpsc::TryRecvError::Disconnected) => return,
                 }
             }
         });
@@ -1012,4 +1018,51 @@ async fn without_an_assignment_file_no_shared_child_starts_and_nothing_is_alerte
     off.until(at(7, 58, 0)).await;
     assert!(off.launcher.shared_keys().is_empty(), "배정표 설정을 켜지 않으면 파일이 있어도 돌리지 않는다");
     off.finish().await;
+}
+
+#[test]
+fn the_single_day_entry_ignores_rest_keys_when_checking_the_plan() {
+    let files = KeyFiles::new();
+    let entries = vec![
+        files.v2("collect-01", "FAKE-APPKEY-A", "collect", "kiwoom"),
+        files.v2("spare-01", "FAKE-APPKEY-B", "spare", "kiwoom"),
+        files.v2("rest-01", "FAKE-APPKEY-C", "rest", "kiwoom"),
+    ];
+    let keys_file = files.folder.path().join("keys.json");
+    std::fs::write(&keys_file, json!({"version": 2, "keys": entries}).to_string()).unwrap();
+    let share = |name: &str, role: KeyRole, app_key: &str, collecting: bool| collector::plan::KeyShare {
+        name: name_of(name),
+        role,
+        app_key_hash: credential_id(app_key),
+        stocks: if collecting { vec!["000001".to_owned()] } else { Vec::new() },
+        market_types: if collecting { collector::plan::MARKET_TYPES.to_vec() } else { Vec::new() },
+        rest_jobs: Vec::new(),
+        load: 0,
+    };
+    let plan = collector::plan::PlanFile {
+        format_version: 1,
+        date: 20260105,
+        created_at: "2026-01-05T07:35:00+09:00".to_owned(),
+        input: collector::plan::InputSummary { active_keys: 2, universe_replaced: None },
+        keys: vec![share("collect-01", KeyRole::Collecting, "FAKE-APPKEY-A", true), share("spare-01", KeyRole::Spare, "FAKE-APPKEY-B", false)],
+        excluded: Vec::new(),
+        unregistered: Vec::new(),
+        alerts: Vec::new(),
+    };
+    let data = files.folder.path().join("data");
+    collector::plan::write_plan(&data, &plan).unwrap();
+    let sockets = tempfile::Builder::new().prefix("sj").tempdir_in("/tmp").unwrap();
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_collector"))
+        .args(["supervise", "--date", "20260105", "--keys"])
+        .arg(&keys_file)
+        .arg("--data")
+        .arg(&data)
+        .arg("--state")
+        .arg(files.folder.path().join("state"))
+        .arg("--socket")
+        .arg(sockets.path().join("s.sock"))
+        .env_clear()
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "rest 키가 있어도 시작한다: {}", String::from_utf8_lossy(&output.stderr));
 }
