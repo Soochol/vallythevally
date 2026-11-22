@@ -44,6 +44,7 @@ impl Sandbox {
             .env("PATH", path)
             .env("HOME", self.folder.path())
             .env("VALLY_COLLECTOR_BIN", &wrapper)
+            .env("VALLY_SYSTEMD_USER_DIR", self.folder.path().join("units"))
             .env("VALLY_DATA", self.folder.path().join("data"))
             .env("VALLY_COLLECTOR_STABLE_SECONDS", "1")
             .output()
@@ -59,13 +60,15 @@ fn script_path() -> PathBuf {
 fn the_real_check_decides_between_restart_and_reservation_for_the_script() {
     let inside = Sandbox::new();
     let output = inside.run_at("20261124", 12, 0);
+    let wrapper = inside.folder.path().join("stubs/collector");
+    let units = inside.folder.path().join("units");
     assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
     let calls = inside.calls();
     assert_eq!(calls.len(), 2, "{calls:?}");
     assert_eq!(calls[0], "systemctl --user stop vally-collector-restart.timer");
     assert_eq!(
         calls[1],
-        format!("systemd-run --user --unit=vally-collector-restart --on-calendar=2026-11-24 22:05:00 Asia/Seoul --setenv=VALLY_COLLECTOR_SERVICE=vally-collector.service --setenv=VALLY_COLLECTOR_STABLE_SECONDS=1 --collect {} --scheduled", script_path().display())
+        format!("systemd-run --user --unit=vally-collector-restart --on-calendar=2026-11-24 22:05:00 Asia/Seoul --setenv=VALLY_COLLECTOR_SERVICE=vally-collector.service --setenv=VALLY_COLLECTOR_STABLE_SECONDS=1 --setenv=VALLY_COLLECTOR_BIN={} --setenv=VALLY_SYSTEMD_USER_DIR={} --collect {} --scheduled", wrapper.display(), units.display(), script_path().display())
     );
 
     let outside = Sandbox::new();
