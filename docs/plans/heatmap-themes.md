@@ -90,7 +90,7 @@
       "name": "반도체 소부장",
       "summary": {
         "weightedRate": 2.41,
-        "tradedEok": 5120,
+        "tradedMillionWon": 512000,
         "rising": 9, "flat": 1, "falling": 2,
         "leader": "042700"
       },
@@ -105,11 +105,11 @@
 
 - 요약 값:
   - `weightedRate`: 받은 종목 등락률의 거래대금 가중 평균이다(결정 5). 거래대금 합이 0이면 `null`이다.
-  - `tradedEok`: 거래대금 합이고 단위는 억원이다.
+  - `tradedMillionWon`: 거래대금 합이고 단위는 `Quote`와 같은 백만원이다. 억원으로 바꾸는 일은 화면이 한다.
   - `rising`, `flat`, `falling`: 상승·보합·하락 종목 수다.
   - `leader`: 테마 안에서 등락률이 가장 높은 종목이다.
 - 시세는 기존 `QuoteService`(`ka10095`, 100종목씩)에서 받는다. 테마 전체의 종목을 중복 없이 모아 한 번에 묻는다. 테마 30개 × 20종목이 겹침 없이 600종목이면 1분에 6건이다.
-- 보드 응답은 서버 메모리에 45초 둔다(흐름 비교의 `FRESH_SECS`와 같다). 웹은 지금처럼 60초마다 다시 부른다. 테마 문서가 바뀌면 캐시를 버린다.
+- 보드 응답이 아니라 종목별 시세를 서버 메모리에 45초 둔다(흐름 비교의 `FRESH_SECS`와 같다). 테마를 고친 뒤에는 새로 든 종목만 키움에 묻는다. 웹은 지금처럼 60초마다 다시 부른다. 구현된 계약은 [히트맵 테마 API](../heatmap-themes-api.md)다.
 - 시세를 못 받은 종목은 `missing`에 적고 요약에서 뺀다. 모든 종목을 못 받은 테마는 요약이 `null`이다.
 
 ## 웹
@@ -156,7 +156,7 @@ python3 scripts/themes.py add "AI 반도체" 삼성 --dry-run
 | `flow-weighted` | 흐름 비교를 거래대금 가중 평균으로 바꾸기, API 문서와 화면 문구 | `heatmap_flow` 서버 시험의 손 계산 값을 가중 평균으로 고침, 가중치 0 칸, e2e `heatmap-flow.spec.ts` |
 | `themes-store` | ADR, GLOSSARY, 마이그레이션, `GET/PUT /api/heatmap/themes`, ts-rs 타입 | 서버 시험: 왕복, 검사별 거절, revision 충돌, 거절 뒤 불변 |
 | `themes-cli` | `scripts/themes.py`(아래 "AI용 CLI"), 사용법 문서, `AGENTS.md` 개발 문서 목록에 한 줄 | `scripts/test-themes.py`가 루프백 합성 서버에 붙어 명령별 결과, 409 뒤 다시 적용, 애매한 이름 거절, `--dry-run`이 PUT을 보내지 않음을 확인 |
-| `themes-board` | `/api/heatmap/board`, 요약 계산, 45초 캐시, 문서 변경 시 캐시 버림 | 합성 transport로 손 계산한 요약, `order` 세 가지, `missing`, 호출 건수 |
+| `themes-board` | `/api/heatmap/board`, 요약 계산, 종목별 시세 45초 캐시 | 합성 transport로 손 계산한 요약, `order` 세 가지, `missing`, 호출 건수 |
 | `themes-web` | 페이지가 board를 쓰게 바꾸기, 요약 줄, `order` 설정 | e2e `heatmap-page.spec.ts`, `heatmap-flow.spec.ts` 고침 |
 | `themes-edit` | 편집 패널, 관심종목 그룹에서 가져오기, 타일 우클릭 메뉴 | e2e 새 spec: 만들기·가져오기·편집이 새로 고침 뒤에도 남는다 |
 
