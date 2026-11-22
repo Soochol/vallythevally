@@ -32,9 +32,11 @@ struct Sent {
     body: Value,
 }
 
+type PageKey = (String, Option<String>);
+
 #[derive(Clone, Default)]
 struct Kiwoom {
-    replies: Arc<Mutex<HashMap<(String, Option<String>), Reply>>>,
+    replies: Arc<Mutex<HashMap<PageKey, Reply>>>,
     sent: Arc<Mutex<Vec<Sent>>>,
 }
 
