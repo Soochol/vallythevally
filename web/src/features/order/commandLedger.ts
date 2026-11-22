@@ -10,11 +10,19 @@ type Entry = { readonly id: string; readonly phase: "inflight" | "retry" };
 export interface CommandLedger {
   issue(action: string): Issued;
   settle(action: string, settlement: Settlement): void;
+  issueEach(action: string): string;
+  settleEach(action: string, id: string, settlement: Settlement): void;
 }
 
 export function createLedger(newId: (action: string) => string): CommandLedger {
   const entries = new Map<string, Entry>();
+  const resendIds = new Map<string, string>();
   return {
+    issueEach: (action) => resendIds.get(action) ?? newId(action),
+    settleEach(action, id, settlement) {
+      if (settlement === "unanswered") resendIds.set(action, id);
+      else if (resendIds.get(action) === id) resendIds.delete(action);
+    },
     issue(action) {
       const entry = entries.get(action);
       if (entry?.phase === "inflight") return { id: entry.id, send: false };

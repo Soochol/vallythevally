@@ -508,6 +508,22 @@ test("답을 못 받은 신규는 다른 종목을 보고 돌아와 다시 해�
   expect(second).toBe(first);
 });
 
+test("답을 못 받은 첫 신규 뒤에 줄 서 있던 두 번째 신규는 새 commandId로 나간다", async ({ page, scenario }) => {
+  ordersOn(scenario);
+  tradingApi(scenario);
+  await openOrderWindow(page, scenario);
+  const held = scenario.hold((url, request) => url.pathname === "/api/trading/commands/place" && request.method() === "POST");
+  const target = cellAt(page, "buy", 70_000);
+  await target.dblclick();
+  await held.received;
+  await target.dblclick();
+  await expect(page.getByTestId("order-queue")).toHaveText("줄 서는 중 · 2건");
+  held.reply({ status: 503, body: { error: { code: "internal", message: "서버가 응답하지 못했습니다", reason: null, retryAt: null, manualActionRequired: false } } });
+  await pollSaved(() => placeIds(scenario).length).toBe(2);
+  const [first, second] = placeIds(scenario);
+  expect(second).not.toBe(first);
+});
+
 const daySummaryRequests = (scenario: Scenario, symbol: string) => scenario.requests.filter((r) => new URL(r.url()).pathname === `/api/symbols/${symbol}/day-summary`).length;
 const quotesRequests = (scenario: Scenario) => scenario.requests.filter((r) => new URL(r.url()).pathname === "/api/quotes").length;
 

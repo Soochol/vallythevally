@@ -78,16 +78,16 @@ export function useOrderWrites(code: string, venue: Venue): OrderWrites {
   useEffect(() => () => pendingWrites.clear(code), [code, writeScope]);
 
   const enqueue = useCallback(<T,>(plan: Plan<T>) => {
-    const early = plan.coalesce ? ledger.issue(plan.action) : null;
-    if (early && !early.send) return;
+    const coalesced = plan.coalesce ? ledger.issue(plan.action) : null;
+    if (coalesced && !coalesced.send) return;
+    const commandId = coalesced?.id ?? ledger.issueEach(plan.action);
     pendingWrites.begin(plan.mark);
     setQueued((n) => n + 1);
     tail.current = tail.current.then(async () => {
-      const issued = early ?? ledger.issue(plan.action);
       let settlement: Settlement = "answered";
       setStatus(plan.starting);
       try {
-        const result = await plan.call(issued.id);
+        const result = await plan.call(commandId);
         pendingWrites.resolve(plan.mark.key, plan.settled(result));
         setStatus(plan.describe(result));
       } catch (error) {
@@ -95,7 +95,8 @@ export function useOrderWrites(code: string, venue: Venue): OrderWrites {
         setStatus(statusOfFailure(error));
       } finally {
         pendingWrites.resolve(plan.mark.key, []);
-        ledger.settle(plan.action, settlement);
+        if (coalesced) ledger.settle(plan.action, settlement);
+        else ledger.settleEach(plan.action, commandId, settlement);
         setQueued((n) => n - 1);
         void queryClient.invalidateQueries({ queryKey: ORDER_QUERY_KEY });
       }
