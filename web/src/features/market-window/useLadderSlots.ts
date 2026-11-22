@@ -7,7 +7,7 @@ import { daySummaryQuery } from "../../api/userData";
 import { marketSocket } from "../../stores/realtime";
 import type { TradeRow } from "../trades/tape";
 import { useTradeTape } from "../trades/useTradeTape";
-import { type InfoPage, nextInfoPage, quoteInfoItems, type QuoteInfo } from "./quoteInfo";
+import { type InfoLine, type InfoPage, quoteInfoItems } from "./quoteInfo";
 import { tradeRows } from "./recentTrades";
 
 const HISTORY_PAGES = 1;
@@ -21,19 +21,19 @@ export interface QuoteInfoSource {
   readonly page: InfoPage;
 }
 
-export function useQuoteInfo({ code, venue, lastPrice, previousClose, fundamentals, page }: QuoteInfoSource): QuoteInfo[] {
+export function useQuoteInfo({ code, venue, lastPrice, previousClose, fundamentals, page }: QuoteInfoSource): InfoLine[] {
   const summary = useQuery(daySummaryQuery(code, venue)).data ?? null;
   return quoteInfoItems(page, { price: lastPrice ?? summary?.price ?? null, previousClose, summary, fundamentals: fundamentals ?? null });
 }
 
 export interface InfoPager {
   readonly page: InfoPage;
-  readonly next: () => void;
+  readonly select: (page: InfoPage) => void;
 }
 
 export function useInfoPager(): InfoPager {
   const [page, setPage] = useState<InfoPage>(0);
-  return { page, next: () => setPage(nextInfoPage) };
+  return { page, select: setPage };
 }
 
 export interface LadderTrades {
