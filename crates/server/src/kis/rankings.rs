@@ -57,6 +57,7 @@ const CREDIT_LOAN_RATIO_FIRST: &str = "0";
 const LIMIT_UP_SIGN: &str = "1";
 const LIMIT_DOWN_SIGN: &str = "4";
 const FALLING_SIGNS: [&str; 2] = [LIMIT_DOWN_SIGN, "5"];
+const RISING_SIGNS: [&str; 3] = [LIMIT_UP_SIGN, "2", "3"];
 const WON_PER_MILLION: i64 = 1_000_000;
 
 const SUPPORTED_KINDS: [RankingKind; 11] = [
@@ -466,8 +467,12 @@ fn percent(text: &str) -> Option<Percent> {
 }
 
 fn signed_change(sign: &str, magnitude: &str) -> Option<Won> {
+    let sign = sign.trim();
+    if !RISING_SIGNS.contains(&sign) && !FALLING_SIGNS.contains(&sign) {
+        return None;
+    }
     let amount = signed_whole(magnitude)?.abs();
-    Some(Won(if FALLING_SIGNS.contains(&sign.trim()) { -amount } else { amount }))
+    Some(Won(if FALLING_SIGNS.contains(&sign) { -amount } else { amount }))
 }
 
 fn won_from_million(text: &str) -> Option<Won> {

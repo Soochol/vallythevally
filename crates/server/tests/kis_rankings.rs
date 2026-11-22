@@ -466,3 +466,15 @@ async fn a_null_column_or_a_non_object_row_costs_only_that_row() {
     let volume = rows(&rig.source, Ranking::TradeVolume { market: RankingMarket::All, venue: Venue::Combined, session: TradingSession::All, excludes: KEEP_ALL, exclude_managed: false }).await.unwrap();
     assert!(matches!(volume[0].figures, RankingFigures::TradeVolume { previous_day_volume_rate: None, .. }), "null인 칸은 비운다");
 }
+
+#[tokio::test(start_paused = true)]
+async fn a_mover_row_without_a_readable_change_sign_is_dropped_not_read_as_rising() {
+    let body = r#"{"rt_cd":"0","msg_cd":"MCA00000","msg1":"ok","output":[{"stck_shrn_iscd":"086520","hts_kor_isnm":"에코프로","stck_prpr":"70000","prdy_vrss":"30000","prdy_vrss_sign":null,"prdy_ctrt":"-30.00","acml_vol":"1200000"},{"stck_shrn_iscd":"247540","hts_kor_isnm":"에코프로비엠","stck_prpr":"230000","prdy_vrss":"20000","prdy_vrss_sign":"5","prdy_ctrt":"-8.00","acml_vol":"800000"}]}"#;
+    let rig = rig(move |_| ok(body));
+    let losers = |include_limit| Ranking::Losers { market: RankingMarket::All, venue: Venue::Krx, include_limit, min_trade_amount: MinTradeAmount::Any, excludes: KEEP_ALL, exclude_managed: false };
+    for include_limit in [false, true] {
+        let found = rows(&rig.source, losers(include_limit)).await.unwrap();
+        assert_eq!(found.iter().map(|row| row.code.as_str()).collect::<Vec<_>>(), ["247540"], "include_limit={include_limit}");
+        assert_eq!(found[0].figures, RankingFigures::Movers { price_change: api::Won(-20_000), volume: api::Shares(800_000) });
+    }
+}
