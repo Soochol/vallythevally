@@ -378,10 +378,20 @@ fn phrase_for_a_file_that_cannot_be_opened(layout: &Layout) -> Option<&'static s
     }
 }
 
-fn utf8_locale() -> Option<String> {
-    let listed = Command::new("locale").arg("-a").output().ok()?;
+fn utf8_locale() -> Result<String, String> {
+    let listed = Command::new("locale").arg("-a").output().map_err(|error| format!("locale 명령을 실행할 수 없어({error})"))?;
     let names = String::from_utf8_lossy(&listed.stdout).into_owned();
-    ["C.utf8", "C.UTF-8", "en_US.utf8", "ko_KR.utf8"].into_iter().find(|wanted| names.lines().any(|name| name == *wanted)).map(str::to_owned)
+    let preferred = ["C.utf8", "C.UTF-8", "en_US.utf8", "ko_KR.utf8"].into_iter().find(|wanted| names.lines().any(|name| name == *wanted));
+    let any_utf8 = names.lines().find(|name| name.ends_with(".utf8") || name.ends_with(".UTF-8"));
+    if let Some(name) = preferred.or(any_utf8) {
+        return Ok(name.to_owned());
+    }
+    let exit = match listed.status.code() {
+        Some(0) => String::new(),
+        Some(code) => format!("locale -a 종료 코드 {code}, "),
+        None => "locale -a가 신호로 끝났고 ".to_owned(),
+    };
+    Err(format!("{exit}UTF-8 로캘이 목록에 없어"))
 }
 
 fn script_outcome(case: &Case) -> Outcome {
@@ -459,9 +469,12 @@ fn the_script_and_the_daemon_read_the_same_settings_file_the_same_way() {
 
 #[test]
 fn the_script_reads_the_settings_file_the_same_way_under_a_utf8_locale() {
-    let Some(locale) = utf8_locale() else {
-        writeln!(std::io::stderr(), "locale 명령이 없거나 UTF-8 로캘이 없어 UTF-8 로캘 경우를 건너뛴다").unwrap();
-        return;
+    let locale = match utf8_locale() {
+        Ok(locale) => locale,
+        Err(reason) => {
+            writeln!(std::io::stderr(), "{reason} UTF-8 로캘 경우를 건너뛴다").unwrap();
+            return;
+        }
     };
     for case in parity_cases() {
         assert_eq!(script_outcome_in_locale(&case, Some(&locale)), case.outcome, "{}: 스크립트({locale})", case.name);
