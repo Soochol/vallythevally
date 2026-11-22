@@ -734,7 +734,7 @@ impl MarketHub {
             let ks = self.keys.get_mut(&key).expect("방금 본 키");
             let gap_fill = matches!(purpose, SeedPurpose::Reload { reason: ReloadReason::GapFilled, .. });
             let reset_pending = matches!(ks.feed, KeyFeed::Seeding { purpose: SeedPurpose::Reload { reason: ReloadReason::DailyReset, .. }, .. });
-            let purpose = if gap_fill && reset_pending { SeedPurpose::Reload { reason: ReloadReason::DailyReset, from: None } } else { purpose };
+            let key_purpose = if gap_fill && reset_pending { SeedPurpose::Reload { reason: ReloadReason::DailyReset, from: None } } else { purpose };
             let generation = self.new_generation();
             let ks = self.keys.get_mut(&key).expect("방금 본 키");
             if matches!(purpose, SeedPurpose::Reload { reason: ReloadReason::DailyReset, .. }) {
@@ -747,7 +747,7 @@ impl MarketHub {
                 }
             }
             ks.generation = generation;
-            ks.feed = KeyFeed::Seeding { purpose, attempt: 0, reported: false, last_dropped: None };
+            ks.feed = KeyFeed::Seeding { purpose: key_purpose, attempt: 0, reported: false, last_dropped: None };
             ks.contiguous = false;
             self.start_seed(key, Duration::ZERO);
         }
@@ -2178,6 +2178,27 @@ mod tests {
         assert_eq!(reloads, [ReloadReason::DailyReset], "바꾼 뒤 열린 끊김 구간이 비우기 알림을 밀어내지 않는다: {reloads:?}");
         let current = h.hub.snapshot(samsung()).await.unwrap().current;
         assert_eq!(current.map(|bar| bar.ohlcv().volume().0), Some(7), "끊긴 동안의 체결은 Live 뒤 시드로 받는다: {current:?}");
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_gap_after_the_source_switch_keeps_the_verification_of_a_trade_dropped_during_the_reset_seed() {
+        let h = harness(at(9, 0, 5), Chart::default(), Duration::from_secs(3));
+        live(&h).await;
+        let (conn, out) = connect(&h).await;
+        h.hub.subscribe(conn, sub("a"), samsung());
+        tokio::time::sleep(Duration::from_secs(4)).await;
+        h.bars.clear_all();
+        h.hub.source_switched();
+        settle().await;
+        h.events.send(trade(&h, (9, 0, 10), 100, 7, Some(Exchange::Krx))).await.unwrap();
+        settle().await;
+        h.events.send(StreamEvent::Down { at: h.clock.now() }).await.unwrap();
+        live(&h).await;
+        tokio::time::sleep(Duration::from_secs(4)).await;
+        h.chart.lock().unwrap().set(at(9, 0, 0), [100, 100, 100, 100, 7]);
+        h.clock.sleep_until(at(9, 1, 50)).await;
+        let reasons: Vec<ReloadReason> = take(&out).await.iter().filter_map(|m| match m { ServerMessage::Reload { reason, .. } => Some(*reason), _ => None }).collect();
+        assert!(reasons.contains(&ReloadReason::Replaced), "시드 중 버려진 체결의 대조가 살아 봉을 고친다: {reasons:?}");
     }
 
     #[tokio::test(start_paused = true)]
