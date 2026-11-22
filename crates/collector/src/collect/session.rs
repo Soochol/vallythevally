@@ -18,7 +18,7 @@ use server::kiwoom::rest::{KiwoomError, KiwoomRest};
 use server::kiwoom::wire::{self, WsControl, WsFrame};
 use tokio::sync::watch;
 use tokio::time::{Instant, sleep_until, timeout};
-use tokio_tungstenite::tungstenite::Message;
+use tokio_tungstenite::tungstenite::{Message, Utf8Bytes};
 
 use super::link::{ChildLink, Commands, Events};
 use super::output::Output;
@@ -26,6 +26,7 @@ use super::registry::{Chunk, Registry};
 use super::ws::{Connector, Socket};
 use crate::protocol::{Command, ProtocolError, Rejection, SessionState};
 use crate::raw_write::RawLine;
+use crate::shared::minute::MinuteFeed;
 
 pub trait WallClock: Send + Sync {
     fn now_ms(&self) -> i64;
@@ -408,6 +409,7 @@ pub struct SessionParts {
     pub timings: Timings,
     pub shutdown: watch::Receiver<bool>,
     pub child: Option<ChildLink>,
+    pub minutes: Option<MinuteFeed>,
 }
 
 pub struct Session {
@@ -422,6 +424,7 @@ pub struct Session {
     commands: Option<Commands>,
     events: Events,
     state: watch::Sender<SessionState>,
+    minutes: Option<MinuteFeed>,
     halt_on_rejected_register: bool,
     gap: Gap,
     attempt: u32,
@@ -452,6 +455,7 @@ impl Session {
             commands,
             events,
             state,
+            minutes: parts.minutes,
             halt_on_rejected_register,
             gap: Gap::Unknown,
             attempt: 0,
@@ -604,11 +608,12 @@ impl Session {
 
     fn take_command(&mut self, command: Command) -> Result<(), Exit> {
         match command {
-            Command::Token { token, generation } => {
+            Command::Token { token, generation, .. } => {
                 if let Tokens::Supplied(slot) = &mut self.tokens {
                     *slot = Some(Credential { token, generation });
                 }
             }
+            Command::Assign { .. } => {}
             Command::Register(registration) => {
                 let chunks = self.registry.add(Chunk::split(&registration));
                 self.queue_ops(OpKind::Register, chunks);
@@ -802,18 +807,22 @@ impl Session {
                 None => return Err(End::Closed(None).into()),
             };
             conn.touch();
-            if let Some(wake) = self.handle_text(conn, text.as_str(), recv_ms).await? {
+            if let Some(wake) = self.handle_text(conn, &text, recv_ms).await? {
                 return Ok(wake);
             }
         }
     }
 
-    async fn handle_text(&mut self, conn: &mut Conn, text: &str, recv_ms: i64) -> Result<Option<Wake>, Interrupt> {
+    async fn handle_text(&mut self, conn: &mut Conn, bytes: &Utf8Bytes, recv_ms: i64) -> Result<Option<Wake>, Interrupt> {
+        let text = bytes.as_str();
         match classify_frame(text) {
             FrameKind::Ping => conn.send(text.to_owned()).await?,
             FrameKind::NotJson => self.out.write_text(recv_ms, text)?,
             FrameKind::Real => {
                 self.out.write_frame(recv_ms, text)?;
+                if let Some(minutes) = &self.minutes {
+                    minutes.offer(recv_ms, bytes);
+                }
                 self.report_market_hours(text, recv_ms);
             }
             FrameKind::Control => {

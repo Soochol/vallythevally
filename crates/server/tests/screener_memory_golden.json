@@ -1,0 +1,2144 @@
+{
+  "D 값 범위": {
+    "asOf": "2026-11-09",
+    "excluded": {
+      "historyShort": 0,
+      "listedTooShort": 0,
+      "unconfirmed": 1
+    },
+    "missingSummary": 2,
+    "rows": [
+      {
+        "changeRate": -10.0,
+        "close": 32152.0,
+        "latestBarDate": "2026-11-09",
+        "matchedDate": "2026-11-09",
+        "name": "가상300002",
+        "provisional": true,
+        "symbol": "300002"
+      },
+      {
+        "changeRate": 1.0,
+        "close": 20219.0,
+        "latestBarDate": "2026-11-09",
+        "matchedDate": "2026-11-09",
+        "name": "가상300004",
+        "provisional": true,
+        "symbol": "300004"
+      },
+      {
+        "changeRate": 1.0,
+        "close": 35835.0,
+        "latestBarDate": "2026-11-09",
+        "matchedDate": "2026-11-09",
+        "name": "가상300005",
+        "provisional": true,
+        "symbol": "300005"
+      },
+      {
+        "changeRate": 1.0,
+        "close": 34518.0,
+        "latestBarDate": "2026-11-09",
+        "matchedDate": "2026-11-09",
+        "name": "가상300006",
+        "provisional": true,
+        "symbol": "300006"
+      },
+      {
+        "changeRate": 1.0,
+        "close": 24323.0,
+        "latestBarDate": "2026-11-09",
+        "matchedDate": "2026-11-09",
+        "name": "가상300007",
+        "provisional": true,
+        "symbol": "300007"
+      },
+      {
+        "changeRate": 0.99,
+        "close": 16461.0,
+        "latestBarDate": "2026-11-09",
+        "matchedDate": "2026-11-09",
+        "name": "가상300008",
+        "provisional": true,
+        "symbol": "300008"
+      },
+      {
+        "changeRate": 1.0,
+        "close": 17326.0,
+        "latestBarDate": "2026-11-09",
+        "matchedDate": "2026-11-09",
+        "name": "가상300011",
+        "provisional": true,
+        "symbol": "300011"
+      }
+    ],
+    "universe": 12
+  },
+  "D 근접": {
+    "asOf": "2026-11-09",
+    "excluded": {
+      "historyShort": 0,
+      "listedTooShort": 0,
+      "unconfirmed": 1
+    },
+    "missingSummary": 2,
+    "rows": [
+      {
+        "changeRate": 10.0,
+        "close": 68780.0,
+        "latestBarDate": "2026-11-09",
+        "matchedDate": "2026-11-09",
+        "name": "가상300001",
+        "provisional": true,
+        "symbol": "300001"
+      },
+      {
+        "changeRate": 1.0,
+        "close": 34518.0,
+        "latestBarDate": "2026-11-09",
+        "matchedDate": "2026-11-09",
+        "name": "가상300006",
+        "provisional": true,
+        "symbol": "300006"
+      },
+      {
+        "changeRate": 1.0,
+        "close": 24323.0,
+        "latestBarDate": "2026-11-09",
+        "matchedDate": "2026-11-09",
+        "name": "가상300007",
+        "provisional": true,
+        "symbol": "300007"
+      }
+    ],
+    "universe": 12
+  },
+  "D 급증": {
+    "asOf": "2026-11-09",
+    "excluded": {
+      "historyShort": 0,
+      "listedTooShort": 0,
+      "unconfirmed": 1
+    },
+    "missingSummary": 2,
+    "rows": [
+      {
+        "changeRate": 10.0,
+        "close": 68780.0,
+        "latestBarDate": "2026-11-09",
+        "matchedDate": "2026-11-09",
+        "name": "가상300001",
+        "provisional": true,
+        "symbol": "300001"
+      },
+      {
+        "changeRate": -3.11,
+        "close": 52955.0,
+        "latestBarDate": "2026-11-09",
+        "matchedDate": "2026-11-09",
+        "name": "가상300003",
+        "provisional": true,
+        "symbol": "300003"
+      },
+      {
+        "changeRate": 1.0,
+        "close": 20219.0,
+        "latestBarDate": "2026-11-09",
+        "matchedDate": "2026-11-09",
+        "name": "가상300004",
+        "provisional": true,
+        "symbol": "300004"
+      },
+      {
+        "changeRate": 1.0,
+        "close": 35835.0,
+        "latestBarDate": "2026-11-09",
+        "matchedDate": "2026-11-09",
+        "name": "가상300005",
+        "provisional": true,
+        "symbol": "300005"
+      },
+      {
+        "changeRate": 1.0,
+        "close": 34518.0,
+        "latestBarDate": "2026-11-09",
+        "matchedDate": "2026-11-09",
+        "name": "가상300006",
+        "provisional": true,
+        "symbol": "300006"
+      },
+      {
+        "changeRate": 1.0,
+        "close": 24323.0,
+        "latestBarDate": "2026-11-09",
+        "matchedDate": "2026-11-09",
+        "name": "가상300007",
+        "provisional": true,
+        "symbol": "300007"
+      },
+      {
+        "changeRate": 0.99,
+        "close": 16461.0,
+        "latestBarDate": "2026-11-09",
+        "matchedDate": "2026-11-09",
+        "name": "가상300008",
+        "provisional": true,
+        "symbol": "300008"
+      },
+      {
+        "changeRate": 1.0,
+        "close": 17326.0,
+        "latestBarDate": "2026-11-09",
+        "matchedDate": "2026-11-09",
+        "name": "가상300011",
+        "provisional": true,
+        "symbol": "300011"
+      },
+      {
+        "changeRate": -10.0,
+        "close": 32152.0,
+        "latestBarDate": "2026-11-09",
+        "matchedDate": "2026-11-06",
+        "name": "가상300002",
+        "provisional": true,
+        "symbol": "300002"
+      }
+    ],
+    "universe": 12
+  },
+  "D 변화율": {
+    "asOf": "2026-11-09",
+    "excluded": {
+      "historyShort": 0,
+      "listedTooShort": 0,
+      "unconfirmed": 1
+    },
+    "missingSummary": 2,
+    "rows": [
+      {
+        "changeRate": 10.0,
+        "close": 68780.0,
+        "latestBarDate": "2026-11-09",
+        "matchedDate": "2026-11-09",
+        "name": "가상300001",
+        "provisional": true,
+        "symbol": "300001"
+      },
+      {
+        "changeRate": 0.99,
+        "close": 16461.0,
+        "latestBarDate": "2026-11-09",
+        "matchedDate": "2026-11-09",
+        "name": "가상300008",
+        "provisional": true,
+        "symbol": "300008"
+      },
+      {
+        "changeRate": -3.11,
+        "close": 52955.0,
+        "latestBarDate": "2026-11-09",
+        "matchedDate": "2026-11-03",
+        "name": "가상300003",
+        "provisional": true,
+        "symbol": "300003"
+      }
+    ],
+    "universe": 12
+  },
+  "D 신고 close 3 1": {
+    "asOf": "2026-11-09",
+    "excluded": {
+      "historyShort": 0,
+      "listedTooShort": 0,
+      "unconfirmed": 1
+    },
+    "missingSummary": 2,
+    "rows": [
+      {
+        "changeRate": 10.0,
+        "close": 68780.0,
+        "latestBarDate": "2026-11-09",
+        "matchedDate": "2026-11-09",
+        "name": "가상300001",
+        "provisional": true,
+        "symbol": "300001"
+      },
+      {
+        "changeRate": 1.0,
+        "close": 34518.0,
+        "latestBarDate": "2026-11-09",
+        "matchedDate": "2026-11-09",
+        "name": "가상300006",
+        "provisional": true,
+        "symbol": "300006"
+      },
+      {
+        "changeRate": 0.99,
+        "close": 16461.0,
+        "latestBarDate": "2026-11-09",
+        "matchedDate": "2026-11-09",
+        "name": "가상300008",
+        "provisional": true,
+        "symbol": "300008"
+      }
+    ],
+    "universe": 12
+  },
+  "D 신고 high 20 3": {
+    "asOf": "2026-11-09",
+    "excluded": {
+      "historyShort": 0,
+      "listedTooShort": 1,
+      "unconfirmed": 1
+    },
+    "missingSummary": 2,
+    "rows": [
+      {
+        "changeRate": 10.0,
+        "close": 68780.0,
+        "latestBarDate": "2026-11-09",
+        "matchedDate": "2026-11-09",
+        "name": "가상300001",
+        "provisional": true,
+        "symbol": "300001"
+      }
+    ],
+    "universe": 12
+  },
+  "D 신고 high 5 1": {
+    "asOf": "2026-11-09",
+    "excluded": {
+      "historyShort": 0,
+      "listedTooShort": 0,
+      "unconfirmed": 1
+    },
+    "missingSummary": 2,
+    "rows": [
+      {
+        "changeRate": 10.0,
+        "close": 68780.0,
+        "latestBarDate": "2026-11-09",
+        "matchedDate": "2026-11-09",
+        "name": "가상300001",
+        "provisional": true,
+        "symbol": "300001"
+      }
+    ],
+    "universe": 12
+  },
+  "D 신고 traded_value 4 1": {
+    "asOf": "2026-11-09",
+    "excluded": {
+      "historyShort": 0,
+      "listedTooShort": 0,
+      "unconfirmed": 1
+    },
+    "missingSummary": 2,
+    "rows": [
+      {
+        "changeRate": 10.0,
+        "close": 68780.0,
+        "latestBarDate": "2026-11-09",
+        "matchedDate": "2026-11-09",
+        "name": "가상300001",
+        "provisional": true,
+        "symbol": "300001"
+      },
+      {
+        "changeRate": -3.11,
+        "close": 52955.0,
+        "latestBarDate": "2026-11-09",
+        "matchedDate": "2026-11-09",
+        "name": "가상300003",
+        "provisional": true,
+        "symbol": "300003"
+      },
+      {
+        "changeRate": 1.0,
+        "close": 20219.0,
+        "latestBarDate": "2026-11-09",
+        "matchedDate": "2026-11-09",
+        "name": "가상300004",
+        "provisional": true,
+        "symbol": "300004"
+      },
+      {
+        "changeRate": 1.0,
+        "close": 35835.0,
+        "latestBarDate": "2026-11-09",
+        "matchedDate": "2026-11-09",
+        "name": "가상300005",
+        "provisional": true,
+        "symbol": "300005"
+      },
+      {
+        "changeRate": 1.0,
+        "close": 34518.0,
+        "latestBarDate": "2026-11-09",
+        "matchedDate": "2026-11-09",
+        "name": "가상300006",
+        "provisional": true,
+        "symbol": "300006"
+      },
+      {
+        "changeRate": 1.0,
+        "close": 24323.0,
+        "latestBarDate": "2026-11-09",
+        "matchedDate": "2026-11-09",
+        "name": "가상300007",
+        "provisional": true,
+        "symbol": "300007"
+      },
+      {
+        "changeRate": 0.99,
+        "close": 16461.0,
+        "latestBarDate": "2026-11-09",
+        "matchedDate": "2026-11-09",
+        "name": "가상300008",
+        "provisional": true,
+        "symbol": "300008"
+      },
+      {
+        "changeRate": 1.0,
+        "close": 17326.0,
+        "latestBarDate": "2026-11-09",
+        "matchedDate": "2026-11-09",
+        "name": "가상300011",
+        "provisional": true,
+        "symbol": "300011"
+      }
+    ],
+    "universe": 12
+  },
+  "D 신고 volume 10 2": {
+    "asOf": "2026-11-09",
+    "excluded": {
+      "historyShort": 0,
+      "listedTooShort": 0,
+      "unconfirmed": 1
+    },
+    "missingSummary": 2,
+    "rows": [
+      {
+        "changeRate": 10.0,
+        "close": 68780.0,
+        "latestBarDate": "2026-11-09",
+        "matchedDate": "2026-11-09",
+        "name": "가상300001",
+        "provisional": true,
+        "symbol": "300001"
+      },
+      {
+        "changeRate": -3.11,
+        "close": 52955.0,
+        "latestBarDate": "2026-11-09",
+        "matchedDate": "2026-11-09",
+        "name": "가상300003",
+        "provisional": true,
+        "symbol": "300003"
+      },
+      {
+        "changeRate": 1.0,
+        "close": 20219.0,
+        "latestBarDate": "2026-11-09",
+        "matchedDate": "2026-11-09",
+        "name": "가상300004",
+        "provisional": true,
+        "symbol": "300004"
+      },
+      {
+        "changeRate": 1.0,
+        "close": 35835.0,
+        "latestBarDate": "2026-11-09",
+        "matchedDate": "2026-11-09",
+        "name": "가상300005",
+        "provisional": true,
+        "symbol": "300005"
+      },
+      {
+        "changeRate": 1.0,
+        "close": 34518.0,
+        "latestBarDate": "2026-11-09",
+        "matchedDate": "2026-11-09",
+        "name": "가상300006",
+        "provisional": true,
+        "symbol": "300006"
+      },
+      {
+        "changeRate": 1.0,
+        "close": 24323.0,
+        "latestBarDate": "2026-11-09",
+        "matchedDate": "2026-11-09",
+        "name": "가상300007",
+        "provisional": true,
+        "symbol": "300007"
+      },
+      {
+        "changeRate": 0.99,
+        "close": 16461.0,
+        "latestBarDate": "2026-11-09",
+        "matchedDate": "2026-11-09",
+        "name": "가상300008",
+        "provisional": true,
+        "symbol": "300008"
+      },
+      {
+        "changeRate": 1.0,
+        "close": 17326.0,
+        "latestBarDate": "2026-11-09",
+        "matchedDate": "2026-11-09",
+        "name": "가상300011",
+        "provisional": true,
+        "symbol": "300011"
+      }
+    ],
+    "universe": 12
+  },
+  "D 신저": {
+    "asOf": "2026-11-09",
+    "excluded": {
+      "historyShort": 0,
+      "listedTooShort": 0,
+      "unconfirmed": 1
+    },
+    "missingSummary": 2,
+    "rows": [
+      {
+        "changeRate": -10.0,
+        "close": 32152.0,
+        "latestBarDate": "2026-11-09",
+        "matchedDate": "2026-11-09",
+        "name": "가상300002",
+        "provisional": true,
+        "symbol": "300002"
+      },
+      {
+        "changeRate": 1.0,
+        "close": 20219.0,
+        "latestBarDate": "2026-11-09",
+        "matchedDate": "2026-11-09",
+        "name": "가상300004",
+        "provisional": true,
+        "symbol": "300004"
+      },
+      {
+        "changeRate": 1.0,
+        "close": 35835.0,
+        "latestBarDate": "2026-11-09",
+        "matchedDate": "2026-11-06",
+        "name": "가상300005",
+        "provisional": true,
+        "symbol": "300005"
+      },
+      {
+        "changeRate": 0.99,
+        "close": 16461.0,
+        "latestBarDate": "2026-11-09",
+        "matchedDate": "2026-11-06",
+        "name": "가상300008",
+        "provisional": true,
+        "symbol": "300008"
+      },
+      {
+        "changeRate": 1.0,
+        "close": 17326.0,
+        "latestBarDate": "2026-11-09",
+        "matchedDate": "2026-11-06",
+        "name": "가상300011",
+        "provisional": true,
+        "symbol": "300011"
+      }
+    ],
+    "universe": 12
+  },
+  "ETF와 관리 제외": {
+    "asOf": "2026-11-09",
+    "excluded": {
+      "historyShort": 0,
+      "listedTooShort": 0,
+      "unconfirmed": 1
+    },
+    "missingSummary": 2,
+    "rows": [
+      {
+        "changeRate": 10.0,
+        "close": 68780.0,
+        "latestBarDate": "2026-11-09",
+        "matchedDate": "2026-11-09",
+        "name": "가상300001",
+        "provisional": true,
+        "symbol": "300001"
+      },
+      {
+        "changeRate": 1.0,
+        "close": 35835.0,
+        "latestBarDate": "2026-11-09",
+        "matchedDate": "2026-11-06",
+        "name": "가상300005",
+        "provisional": true,
+        "symbol": "300005"
+      },
+      {
+        "changeRate": -3.11,
+        "close": 52955.0,
+        "latestBarDate": "2026-11-09",
+        "matchedDate": "2026-11-03",
+        "name": "가상300003",
+        "provisional": true,
+        "symbol": "300003"
+      }
+    ],
+    "universe": 10
+  },
+  "M 값 범위": {
+    "asOf": "2026-11-09",
+    "excluded": {
+      "historyShort": 0,
+      "listedTooShort": 0,
+      "unconfirmed": 1
+    },
+    "missingSummary": 2,
+    "rows": [
+      {
+        "changeRate": -10.0,
+        "close": 32152.0,
+        "latestBarDate": "2026-11-09",
+        "matchedDate": "2026-11-01",
+        "name": "가상300002",
+        "provisional": true,
+        "symbol": "300002"
+      },
+      {
+        "changeRate": 1.0,
+        "close": 20219.0,
+        "latestBarDate": "2026-11-09",
+        "matchedDate": "2026-11-01",
+        "name": "가상300004",
+        "provisional": true,
+        "symbol": "300004"
+      },
+      {
+        "changeRate": 1.0,
+        "close": 35835.0,
+        "latestBarDate": "2026-11-09",
+        "matchedDate": "2026-11-01",
+        "name": "가상300005",
+        "provisional": true,
+        "symbol": "300005"
+      },
+      {
+        "changeRate": 1.0,
+        "close": 34518.0,
+        "latestBarDate": "2026-11-09",
+        "matchedDate": "2026-11-01",
+        "name": "가상300006",
+        "provisional": true,
+        "symbol": "300006"
+      },
+      {
+        "changeRate": 1.0,
+        "close": 24323.0,
+        "latestBarDate": "2026-11-09",
+        "matchedDate": "2026-11-01",
+        "name": "가상300007",
+        "provisional": true,
+        "symbol": "300007"
+      },
+      {
+        "changeRate": 0.99,
+        "close": 16461.0,
+        "latestBarDate": "2026-11-09",
+        "matchedDate": "2026-11-01",
+        "name": "가상300008",
+        "provisional": true,
+        "symbol": "300008"
+      },
+      {
+        "changeRate": 1.0,
+        "close": 17326.0,
+        "latestBarDate": "2026-11-09",
+        "matchedDate": "2026-11-01",
+        "name": "가상300011",
+        "provisional": true,
+        "symbol": "300011"
+      }
+    ],
+    "universe": 12
+  },
+  "M 근접": {
+    "asOf": "2026-11-09",
+    "excluded": {
+      "historyShort": 0,
+      "listedTooShort": 1,
+      "unconfirmed": 1
+    },
+    "missingSummary": 2,
+    "rows": [
+      {
+        "changeRate": 10.0,
+        "close": 68780.0,
+        "latestBarDate": "2026-11-09",
+        "matchedDate": "2026-11-01",
+        "name": "가상300001",
+        "provisional": true,
+        "symbol": "300001"
+      }
+    ],
+    "universe": 12
+  },
+  "M 급증": {
+    "asOf": "2026-11-09",
+    "excluded": {
+      "historyShort": 0,
+      "listedTooShort": 1,
+      "unconfirmed": 1
+    },
+    "missingSummary": 2,
+    "rows": [
+      {
+        "changeRate": 10.0,
+        "close": 68780.0,
+        "latestBarDate": "2026-11-09",
+        "matchedDate": "2026-11-01",
+        "name": "가상300001",
+        "provisional": true,
+        "symbol": "300001"
+      },
+      {
+        "changeRate": -3.11,
+        "close": 52955.0,
+        "latestBarDate": "2026-11-09",
+        "matchedDate": "2026-10-01",
+        "name": "가상300003",
+        "provisional": true,
+        "symbol": "300003"
+      }
+    ],
+    "universe": 12
+  },
+  "M 변화율": {
+    "asOf": "2026-11-09",
+    "excluded": {
+      "historyShort": 0,
+      "listedTooShort": 1,
+      "unconfirmed": 1
+    },
+    "missingSummary": 2,
+    "rows": [
+      {
+        "changeRate": 10.0,
+        "close": 68780.0,
+        "latestBarDate": "2026-11-09",
+        "matchedDate": "2026-11-01",
+        "name": "가상300001",
+        "provisional": true,
+        "symbol": "300001"
+      },
+      {
+        "changeRate": -3.11,
+        "close": 52955.0,
+        "latestBarDate": "2026-11-09",
+        "matchedDate": "2026-11-01",
+        "name": "가상300003",
+        "provisional": true,
+        "symbol": "300003"
+      },
+      {
+        "changeRate": 1.0,
+        "close": 20219.0,
+        "latestBarDate": "2026-11-09",
+        "matchedDate": "2026-11-01",
+        "name": "가상300004",
+        "provisional": true,
+        "symbol": "300004"
+      },
+      {
+        "changeRate": 1.0,
+        "close": 34518.0,
+        "latestBarDate": "2026-11-09",
+        "matchedDate": "2026-11-01",
+        "name": "가상300006",
+        "provisional": true,
+        "symbol": "300006"
+      },
+      {
+        "changeRate": 1.0,
+        "close": 24323.0,
+        "latestBarDate": "2026-11-09",
+        "matchedDate": "2026-11-01",
+        "name": "가상300007",
+        "provisional": true,
+        "symbol": "300007"
+      },
+      {
+        "changeRate": 1.0,
+        "close": 17326.0,
+        "latestBarDate": "2026-11-09",
+        "matchedDate": "2026-11-01",
+        "name": "가상300011",
+        "provisional": true,
+        "symbol": "300011"
+      },
+      {
+        "changeRate": 0.99,
+        "close": 16461.0,
+        "latestBarDate": "2026-11-09",
+        "matchedDate": "2026-10-01",
+        "name": "가상300008",
+        "provisional": true,
+        "symbol": "300008"
+      }
+    ],
+    "universe": 12
+  },
+  "M 신고 close 3 1": {
+    "asOf": "2026-11-09",
+    "excluded": {
+      "historyShort": 0,
+      "listedTooShort": 1,
+      "unconfirmed": 1
+    },
+    "missingSummary": 2,
+    "rows": [
+      {
+        "changeRate": 10.0,
+        "close": 68780.0,
+        "latestBarDate": "2026-11-09",
+        "matchedDate": "2026-11-01",
+        "name": "가상300001",
+        "provisional": true,
+        "symbol": "300001"
+      },
+      {
+        "changeRate": -3.11,
+        "close": 52955.0,
+        "latestBarDate": "2026-11-09",
+        "matchedDate": "2026-11-01",
+        "name": "가상300003",
+        "provisional": true,
+        "symbol": "300003"
+      },
+      {
+        "changeRate": 1.0,
+        "close": 24323.0,
+        "latestBarDate": "2026-11-09",
+        "matchedDate": "2026-11-01",
+        "name": "가상300007",
+        "provisional": true,
+        "symbol": "300007"
+      }
+    ],
+    "universe": 12
+  },
+  "M 신고 high 20 3": {
+    "asOf": "2026-11-09",
+    "excluded": {
+      "historyShort": 0,
+      "listedTooShort": 9,
+      "unconfirmed": 1
+    },
+    "missingSummary": 2,
+    "rows": [],
+    "universe": 12
+  },
+  "M 신고 high 5 1": {
+    "asOf": "2026-11-09",
+    "excluded": {
+      "historyShort": 0,
+      "listedTooShort": 1,
+      "unconfirmed": 1
+    },
+    "missingSummary": 2,
+    "rows": [
+      {
+        "changeRate": 10.0,
+        "close": 68780.0,
+        "latestBarDate": "2026-11-09",
+        "matchedDate": "2026-11-01",
+        "name": "가상300001",
+        "provisional": true,
+        "symbol": "300001"
+      }
+    ],
+    "universe": 12
+  },
+  "M 신고 traded_value 4 1": {
+    "asOf": "2026-11-09",
+    "excluded": {
+      "historyShort": 0,
+      "listedTooShort": 1,
+      "unconfirmed": 1
+    },
+    "missingSummary": 2,
+    "rows": [
+      {
+        "changeRate": 10.0,
+        "close": 68780.0,
+        "latestBarDate": "2026-11-09",
+        "matchedDate": "2026-11-01",
+        "name": "가상300001",
+        "provisional": true,
+        "symbol": "300001"
+      }
+    ],
+    "universe": 12
+  },
+  "M 신고 volume 10 2": {
+    "asOf": "2026-11-09",
+    "excluded": {
+      "historyShort": 0,
+      "listedTooShort": 9,
+      "unconfirmed": 1
+    },
+    "missingSummary": 2,
+    "rows": [],
+    "universe": 12
+  },
+  "M 신저": {
+    "asOf": "2026-11-09",
+    "excluded": {
+      "historyShort": 0,
+      "listedTooShort": 1,
+      "unconfirmed": 1
+    },
+    "missingSummary": 2,
+    "rows": [
+      {
+        "changeRate": -10.0,
+        "close": 32152.0,
+        "latestBarDate": "2026-11-09",
+        "matchedDate": "2026-11-01",
+        "name": "가상300002",
+        "provisional": true,
+        "symbol": "300002"
+      },
+      {
+        "changeRate": 1.0,
+        "close": 20219.0,
+        "latestBarDate": "2026-11-09",
+        "matchedDate": "2026-10-01",
+        "name": "가상300004",
+        "provisional": true,
+        "symbol": "300004"
+      },
+      {
+        "changeRate": 1.0,
+        "close": 17326.0,
+        "latestBarDate": "2026-11-09",
+        "matchedDate": "2026-10-01",
+        "name": "가상300011",
+        "provisional": true,
+        "symbol": "300011"
+      }
+    ],
+    "universe": 12
+  },
+  "W 값 범위": {
+    "asOf": "2026-11-09",
+    "excluded": {
+      "historyShort": 0,
+      "listedTooShort": 0,
+      "unconfirmed": 1
+    },
+    "missingSummary": 2,
+    "rows": [
+      {
+        "changeRate": -10.0,
+        "close": 32152.0,
+        "latestBarDate": "2026-11-09",
+        "matchedDate": "2026-11-09",
+        "name": "가상300002",
+        "provisional": true,
+        "symbol": "300002"
+      },
+      {
+        "changeRate": 1.0,
+        "close": 20219.0,
+        "latestBarDate": "2026-11-09",
+        "matchedDate": "2026-11-09",
+        "name": "가상300004",
+        "provisional": true,
+        "symbol": "300004"
+      },
+      {
+        "changeRate": 1.0,
+        "close": 35835.0,
+        "latestBarDate": "2026-11-09",
+        "matchedDate": "2026-11-09",
+        "name": "가상300005",
+        "provisional": true,
+        "symbol": "300005"
+      },
+      {
+        "changeRate": 1.0,
+        "close": 34518.0,
+        "latestBarDate": "2026-11-09",
+        "matchedDate": "2026-11-09",
+        "name": "가상300006",
+        "provisional": true,
+        "symbol": "300006"
+      },
+      {
+        "changeRate": 1.0,
+        "close": 24323.0,
+        "latestBarDate": "2026-11-09",
+        "matchedDate": "2026-11-09",
+        "name": "가상300007",
+        "provisional": true,
+        "symbol": "300007"
+      },
+      {
+        "changeRate": 0.99,
+        "close": 16461.0,
+        "latestBarDate": "2026-11-09",
+        "matchedDate": "2026-11-09",
+        "name": "가상300008",
+        "provisional": true,
+        "symbol": "300008"
+      },
+      {
+        "changeRate": 1.0,
+        "close": 17326.0,
+        "latestBarDate": "2026-11-09",
+        "matchedDate": "2026-11-09",
+        "name": "가상300011",
+        "provisional": true,
+        "symbol": "300011"
+      }
+    ],
+    "universe": 12
+  },
+  "W 근접": {
+    "asOf": "2026-11-09",
+    "excluded": {
+      "historyShort": 0,
+      "listedTooShort": 1,
+      "unconfirmed": 1
+    },
+    "missingSummary": 2,
+    "rows": [
+      {
+        "changeRate": 10.0,
+        "close": 68780.0,
+        "latestBarDate": "2026-11-09",
+        "matchedDate": "2026-11-09",
+        "name": "가상300001",
+        "provisional": true,
+        "symbol": "300001"
+      },
+      {
+        "changeRate": 1.0,
+        "close": 34518.0,
+        "latestBarDate": "2026-11-09",
+        "matchedDate": "2026-11-09",
+        "name": "가상300006",
+        "provisional": true,
+        "symbol": "300006"
+      }
+    ],
+    "universe": 12
+  },
+  "W 급증": {
+    "asOf": "2026-11-09",
+    "excluded": {
+      "historyShort": 0,
+      "listedTooShort": 0,
+      "unconfirmed": 1
+    },
+    "missingSummary": 2,
+    "rows": [
+      {
+        "changeRate": 10.0,
+        "close": 68780.0,
+        "latestBarDate": "2026-11-09",
+        "matchedDate": "2026-11-09",
+        "name": "가상300001",
+        "provisional": true,
+        "symbol": "300001"
+      },
+      {
+        "changeRate": -3.11,
+        "close": 52955.0,
+        "latestBarDate": "2026-11-09",
+        "matchedDate": "2026-11-09",
+        "name": "가상300003",
+        "provisional": true,
+        "symbol": "300003"
+      },
+      {
+        "changeRate": 1.0,
+        "close": 20219.0,
+        "latestBarDate": "2026-11-09",
+        "matchedDate": "2026-11-09",
+        "name": "가상300004",
+        "provisional": true,
+        "symbol": "300004"
+      },
+      {
+        "changeRate": 1.0,
+        "close": 35835.0,
+        "latestBarDate": "2026-11-09",
+        "matchedDate": "2026-11-09",
+        "name": "가상300005",
+        "provisional": true,
+        "symbol": "300005"
+      },
+      {
+        "changeRate": 1.0,
+        "close": 34518.0,
+        "latestBarDate": "2026-11-09",
+        "matchedDate": "2026-11-09",
+        "name": "가상300006",
+        "provisional": true,
+        "symbol": "300006"
+      },
+      {
+        "changeRate": 1.0,
+        "close": 24323.0,
+        "latestBarDate": "2026-11-09",
+        "matchedDate": "2026-11-09",
+        "name": "가상300007",
+        "provisional": true,
+        "symbol": "300007"
+      },
+      {
+        "changeRate": 0.99,
+        "close": 16461.0,
+        "latestBarDate": "2026-11-09",
+        "matchedDate": "2026-11-09",
+        "name": "가상300008",
+        "provisional": true,
+        "symbol": "300008"
+      },
+      {
+        "changeRate": 1.0,
+        "close": 17326.0,
+        "latestBarDate": "2026-11-09",
+        "matchedDate": "2026-11-09",
+        "name": "가상300011",
+        "provisional": true,
+        "symbol": "300011"
+      },
+      {
+        "changeRate": -10.0,
+        "close": 32152.0,
+        "latestBarDate": "2026-11-09",
+        "matchedDate": "2026-11-02",
+        "name": "가상300002",
+        "provisional": true,
+        "symbol": "300002"
+      }
+    ],
+    "universe": 12
+  },
+  "W 변화율": {
+    "asOf": "2026-11-09",
+    "excluded": {
+      "historyShort": 0,
+      "listedTooShort": 0,
+      "unconfirmed": 1
+    },
+    "missingSummary": 2,
+    "rows": [
+      {
+        "changeRate": 10.0,
+        "close": 68780.0,
+        "latestBarDate": "2026-11-09",
+        "matchedDate": "2026-11-09",
+        "name": "가상300001",
+        "provisional": true,
+        "symbol": "300001"
+      },
+      {
+        "changeRate": -3.11,
+        "close": 52955.0,
+        "latestBarDate": "2026-11-09",
+        "matchedDate": "2026-11-09",
+        "name": "가상300003",
+        "provisional": true,
+        "symbol": "300003"
+      },
+      {
+        "changeRate": 1.0,
+        "close": 24323.0,
+        "latestBarDate": "2026-11-09",
+        "matchedDate": "2026-11-09",
+        "name": "가상300007",
+        "provisional": true,
+        "symbol": "300007"
+      },
+      {
+        "changeRate": 1.0,
+        "close": 35835.0,
+        "latestBarDate": "2026-11-09",
+        "matchedDate": "2026-11-02",
+        "name": "가상300005",
+        "provisional": true,
+        "symbol": "300005"
+      }
+    ],
+    "universe": 12
+  },
+  "W 신고 close 3 1": {
+    "asOf": "2026-11-09",
+    "excluded": {
+      "historyShort": 0,
+      "listedTooShort": 0,
+      "unconfirmed": 1
+    },
+    "missingSummary": 2,
+    "rows": [
+      {
+        "changeRate": 10.0,
+        "close": 68780.0,
+        "latestBarDate": "2026-11-09",
+        "matchedDate": "2026-11-09",
+        "name": "가상300001",
+        "provisional": true,
+        "symbol": "300001"
+      },
+      {
+        "changeRate": 1.0,
+        "close": 24323.0,
+        "latestBarDate": "2026-11-09",
+        "matchedDate": "2026-11-09",
+        "name": "가상300007",
+        "provisional": true,
+        "symbol": "300007"
+      }
+    ],
+    "universe": 12
+  },
+  "W 신고 high 20 3": {
+    "asOf": "2026-11-09",
+    "excluded": {
+      "historyShort": 0,
+      "listedTooShort": 1,
+      "unconfirmed": 1
+    },
+    "missingSummary": 2,
+    "rows": [
+      {
+        "changeRate": 10.0,
+        "close": 68780.0,
+        "latestBarDate": "2026-11-09",
+        "matchedDate": "2026-11-09",
+        "name": "가상300001",
+        "provisional": true,
+        "symbol": "300001"
+      }
+    ],
+    "universe": 12
+  },
+  "W 신고 high 5 1": {
+    "asOf": "2026-11-09",
+    "excluded": {
+      "historyShort": 0,
+      "listedTooShort": 1,
+      "unconfirmed": 1
+    },
+    "missingSummary": 2,
+    "rows": [
+      {
+        "changeRate": 10.0,
+        "close": 68780.0,
+        "latestBarDate": "2026-11-09",
+        "matchedDate": "2026-11-09",
+        "name": "가상300001",
+        "provisional": true,
+        "symbol": "300001"
+      }
+    ],
+    "universe": 12
+  },
+  "W 신고 traded_value 4 1": {
+    "asOf": "2026-11-09",
+    "excluded": {
+      "historyShort": 0,
+      "listedTooShort": 0,
+      "unconfirmed": 1
+    },
+    "missingSummary": 2,
+    "rows": [
+      {
+        "changeRate": 10.0,
+        "close": 68780.0,
+        "latestBarDate": "2026-11-09",
+        "matchedDate": "2026-11-09",
+        "name": "가상300001",
+        "provisional": true,
+        "symbol": "300001"
+      },
+      {
+        "changeRate": -3.11,
+        "close": 52955.0,
+        "latestBarDate": "2026-11-09",
+        "matchedDate": "2026-11-09",
+        "name": "가상300003",
+        "provisional": true,
+        "symbol": "300003"
+      },
+      {
+        "changeRate": 1.0,
+        "close": 20219.0,
+        "latestBarDate": "2026-11-09",
+        "matchedDate": "2026-11-09",
+        "name": "가상300004",
+        "provisional": true,
+        "symbol": "300004"
+      },
+      {
+        "changeRate": 1.0,
+        "close": 35835.0,
+        "latestBarDate": "2026-11-09",
+        "matchedDate": "2026-11-09",
+        "name": "가상300005",
+        "provisional": true,
+        "symbol": "300005"
+      },
+      {
+        "changeRate": 1.0,
+        "close": 34518.0,
+        "latestBarDate": "2026-11-09",
+        "matchedDate": "2026-11-09",
+        "name": "가상300006",
+        "provisional": true,
+        "symbol": "300006"
+      },
+      {
+        "changeRate": 1.0,
+        "close": 24323.0,
+        "latestBarDate": "2026-11-09",
+        "matchedDate": "2026-11-09",
+        "name": "가상300007",
+        "provisional": true,
+        "symbol": "300007"
+      },
+      {
+        "changeRate": 0.99,
+        "close": 16461.0,
+        "latestBarDate": "2026-11-09",
+        "matchedDate": "2026-11-09",
+        "name": "가상300008",
+        "provisional": true,
+        "symbol": "300008"
+      },
+      {
+        "changeRate": 1.0,
+        "close": 17326.0,
+        "latestBarDate": "2026-11-09",
+        "matchedDate": "2026-11-09",
+        "name": "가상300011",
+        "provisional": true,
+        "symbol": "300011"
+      }
+    ],
+    "universe": 12
+  },
+  "W 신고 volume 10 2": {
+    "asOf": "2026-11-09",
+    "excluded": {
+      "historyShort": 0,
+      "listedTooShort": 1,
+      "unconfirmed": 1
+    },
+    "missingSummary": 2,
+    "rows": [
+      {
+        "changeRate": 10.0,
+        "close": 68780.0,
+        "latestBarDate": "2026-11-09",
+        "matchedDate": "2026-11-09",
+        "name": "가상300001",
+        "provisional": true,
+        "symbol": "300001"
+      },
+      {
+        "changeRate": -3.11,
+        "close": 52955.0,
+        "latestBarDate": "2026-11-09",
+        "matchedDate": "2026-11-09",
+        "name": "가상300003",
+        "provisional": true,
+        "symbol": "300003"
+      },
+      {
+        "changeRate": 1.0,
+        "close": 20219.0,
+        "latestBarDate": "2026-11-09",
+        "matchedDate": "2026-11-09",
+        "name": "가상300004",
+        "provisional": true,
+        "symbol": "300004"
+      },
+      {
+        "changeRate": 1.0,
+        "close": 34518.0,
+        "latestBarDate": "2026-11-09",
+        "matchedDate": "2026-11-09",
+        "name": "가상300006",
+        "provisional": true,
+        "symbol": "300006"
+      },
+      {
+        "changeRate": 1.0,
+        "close": 24323.0,
+        "latestBarDate": "2026-11-09",
+        "matchedDate": "2026-11-09",
+        "name": "가상300007",
+        "provisional": true,
+        "symbol": "300007"
+      },
+      {
+        "changeRate": 0.99,
+        "close": 16461.0,
+        "latestBarDate": "2026-11-09",
+        "matchedDate": "2026-11-09",
+        "name": "가상300008",
+        "provisional": true,
+        "symbol": "300008"
+      },
+      {
+        "changeRate": 1.0,
+        "close": 17326.0,
+        "latestBarDate": "2026-11-09",
+        "matchedDate": "2026-11-09",
+        "name": "가상300011",
+        "provisional": true,
+        "symbol": "300011"
+      }
+    ],
+    "universe": 12
+  },
+  "W 신저": {
+    "asOf": "2026-11-09",
+    "excluded": {
+      "historyShort": 0,
+      "listedTooShort": 0,
+      "unconfirmed": 1
+    },
+    "missingSummary": 2,
+    "rows": [
+      {
+        "changeRate": -10.0,
+        "close": 32152.0,
+        "latestBarDate": "2026-11-09",
+        "matchedDate": "2026-11-09",
+        "name": "가상300002",
+        "provisional": true,
+        "symbol": "300002"
+      },
+      {
+        "changeRate": 1.0,
+        "close": 20219.0,
+        "latestBarDate": "2026-11-09",
+        "matchedDate": "2026-11-02",
+        "name": "가상300004",
+        "provisional": true,
+        "symbol": "300004"
+      },
+      {
+        "changeRate": 0.99,
+        "close": 16461.0,
+        "latestBarDate": "2026-11-09",
+        "matchedDate": "2026-11-02",
+        "name": "가상300008",
+        "provisional": true,
+        "symbol": "300008"
+      }
+    ],
+    "universe": 12
+  },
+  "거래정지 구간": {
+    "asOf": "2026-11-09",
+    "excluded": {
+      "historyShort": 0,
+      "listedTooShort": 0,
+      "unconfirmed": 1
+    },
+    "missingSummary": 2,
+    "rows": [
+      {
+        "changeRate": 10.0,
+        "close": 68780.0,
+        "latestBarDate": "2026-11-09",
+        "matchedDate": "2026-11-09",
+        "name": "가상300001",
+        "provisional": true,
+        "symbol": "300001"
+      },
+      {
+        "changeRate": 1.0,
+        "close": 35835.0,
+        "latestBarDate": "2026-11-09",
+        "matchedDate": "2026-11-06",
+        "name": "가상300005",
+        "provisional": true,
+        "symbol": "300005"
+      },
+      {
+        "changeRate": 1.0,
+        "close": 24323.0,
+        "latestBarDate": "2026-11-09",
+        "matchedDate": "2026-11-06",
+        "name": "가상300007",
+        "provisional": true,
+        "symbol": "300007"
+      },
+      {
+        "changeRate": -10.0,
+        "close": 32152.0,
+        "latestBarDate": "2026-11-09",
+        "matchedDate": "2026-11-04",
+        "name": "가상300002",
+        "provisional": true,
+        "symbol": "300002"
+      },
+      {
+        "changeRate": 1.0,
+        "close": 20219.0,
+        "latestBarDate": "2026-11-09",
+        "matchedDate": "2026-11-04",
+        "name": "가상300004",
+        "provisional": true,
+        "symbol": "300004"
+      },
+      {
+        "changeRate": -3.11,
+        "close": 52955.0,
+        "latestBarDate": "2026-11-09",
+        "matchedDate": "2026-11-03",
+        "name": "가상300003",
+        "provisional": true,
+        "symbol": "300003"
+      },
+      {
+        "changeRate": 1.0,
+        "close": 17326.0,
+        "latestBarDate": "2026-11-09",
+        "matchedDate": "2026-11-03",
+        "name": "가상300011",
+        "provisional": true,
+        "symbol": "300011"
+      },
+      {
+        "changeRate": 1.0,
+        "close": 34518.0,
+        "latestBarDate": "2026-11-09",
+        "matchedDate": "2026-10-30",
+        "name": "가상300006",
+        "provisional": true,
+        "symbol": "300006"
+      },
+      {
+        "changeRate": 0.99,
+        "close": 16461.0,
+        "latestBarDate": "2026-11-09",
+        "matchedDate": "2026-10-23",
+        "name": "가상300008",
+        "provisional": true,
+        "symbol": "300008"
+      }
+    ],
+    "universe": 12
+  },
+  "긴 창 상장 짧음": {
+    "asOf": "2026-11-09",
+    "excluded": {
+      "historyShort": 0,
+      "listedTooShort": 1,
+      "unconfirmed": 1
+    },
+    "missingSummary": 2,
+    "rows": [
+      {
+        "changeRate": 10.0,
+        "close": 68780.0,
+        "latestBarDate": "2026-11-09",
+        "matchedDate": "2026-11-09",
+        "name": "가상300001",
+        "provisional": true,
+        "symbol": "300001"
+      }
+    ],
+    "universe": 12
+  },
+  "시가총액": {
+    "asOf": "2026-11-09",
+    "excluded": {
+      "historyShort": 0,
+      "listedTooShort": 0,
+      "unconfirmed": 1
+    },
+    "missingSummary": 2,
+    "rows": [
+      {
+        "changeRate": 1.0,
+        "close": 24323.0,
+        "latestBarDate": "2026-11-09",
+        "matchedDate": "2026-11-06",
+        "name": "가상300007",
+        "provisional": true,
+        "symbol": "300007"
+      }
+    ],
+    "universe": 12
+  },
+  "여러 줄 서로 다른 봉": {
+    "asOf": "2026-11-09",
+    "excluded": {
+      "historyShort": 0,
+      "listedTooShort": 0,
+      "unconfirmed": 1
+    },
+    "missingSummary": 2,
+    "rows": [
+      {
+        "changeRate": 10.0,
+        "close": 68780.0,
+        "latestBarDate": "2026-11-09",
+        "matchedDate": "2026-11-09",
+        "name": "가상300001",
+        "provisional": true,
+        "symbol": "300001"
+      },
+      {
+        "changeRate": -10.0,
+        "close": 32152.0,
+        "latestBarDate": "2026-11-09",
+        "matchedDate": "2026-11-09",
+        "name": "가상300002",
+        "provisional": true,
+        "symbol": "300002"
+      },
+      {
+        "changeRate": -3.11,
+        "close": 52955.0,
+        "latestBarDate": "2026-11-09",
+        "matchedDate": "2026-11-09",
+        "name": "가상300003",
+        "provisional": true,
+        "symbol": "300003"
+      },
+      {
+        "changeRate": 1.0,
+        "close": 20219.0,
+        "latestBarDate": "2026-11-09",
+        "matchedDate": "2026-11-09",
+        "name": "가상300004",
+        "provisional": true,
+        "symbol": "300004"
+      },
+      {
+        "changeRate": 1.0,
+        "close": 35835.0,
+        "latestBarDate": "2026-11-09",
+        "matchedDate": "2026-11-09",
+        "name": "가상300005",
+        "provisional": true,
+        "symbol": "300005"
+      },
+      {
+        "changeRate": 1.0,
+        "close": 34518.0,
+        "latestBarDate": "2026-11-09",
+        "matchedDate": "2026-11-09",
+        "name": "가상300006",
+        "provisional": true,
+        "symbol": "300006"
+      },
+      {
+        "changeRate": 1.0,
+        "close": 24323.0,
+        "latestBarDate": "2026-11-09",
+        "matchedDate": "2026-11-09",
+        "name": "가상300007",
+        "provisional": true,
+        "symbol": "300007"
+      },
+      {
+        "changeRate": 0.99,
+        "close": 16461.0,
+        "latestBarDate": "2026-11-09",
+        "matchedDate": "2026-11-09",
+        "name": "가상300008",
+        "provisional": true,
+        "symbol": "300008"
+      },
+      {
+        "changeRate": 1.0,
+        "close": 17326.0,
+        "latestBarDate": "2026-11-09",
+        "matchedDate": "2026-11-09",
+        "name": "가상300011",
+        "provisional": true,
+        "symbol": "300011"
+      }
+    ],
+    "universe": 12
+  },
+  "월 긴 창": {
+    "asOf": "2026-11-09",
+    "excluded": {
+      "historyShort": 0,
+      "listedTooShort": 1,
+      "unconfirmed": 1
+    },
+    "missingSummary": 2,
+    "rows": [
+      {
+        "changeRate": 10.0,
+        "close": 68780.0,
+        "latestBarDate": "2026-11-09",
+        "matchedDate": "2026-11-01",
+        "name": "가상300001",
+        "provisional": true,
+        "symbol": "300001"
+      }
+    ],
+    "universe": 12
+  },
+  "조건 없음": {
+    "asOf": "2026-11-09",
+    "excluded": {
+      "historyShort": 0,
+      "listedTooShort": 0,
+      "unconfirmed": 1
+    },
+    "missingSummary": 2,
+    "rows": [
+      {
+        "changeRate": 10.0,
+        "close": 68780.0,
+        "latestBarDate": "2026-11-09",
+        "matchedDate": "2026-11-09",
+        "name": "가상300001",
+        "provisional": true,
+        "symbol": "300001"
+      },
+      {
+        "changeRate": -10.0,
+        "close": 32152.0,
+        "latestBarDate": "2026-11-09",
+        "matchedDate": "2026-11-09",
+        "name": "가상300002",
+        "provisional": true,
+        "symbol": "300002"
+      },
+      {
+        "changeRate": -3.11,
+        "close": 52955.0,
+        "latestBarDate": "2026-11-09",
+        "matchedDate": "2026-11-09",
+        "name": "가상300003",
+        "provisional": true,
+        "symbol": "300003"
+      },
+      {
+        "changeRate": 1.0,
+        "close": 20219.0,
+        "latestBarDate": "2026-11-09",
+        "matchedDate": "2026-11-09",
+        "name": "가상300004",
+        "provisional": true,
+        "symbol": "300004"
+      },
+      {
+        "changeRate": 1.0,
+        "close": 35835.0,
+        "latestBarDate": "2026-11-09",
+        "matchedDate": "2026-11-09",
+        "name": "가상300005",
+        "provisional": true,
+        "symbol": "300005"
+      },
+      {
+        "changeRate": 1.0,
+        "close": 34518.0,
+        "latestBarDate": "2026-11-09",
+        "matchedDate": "2026-11-09",
+        "name": "가상300006",
+        "provisional": true,
+        "symbol": "300006"
+      },
+      {
+        "changeRate": 1.0,
+        "close": 24323.0,
+        "latestBarDate": "2026-11-09",
+        "matchedDate": "2026-11-09",
+        "name": "가상300007",
+        "provisional": true,
+        "symbol": "300007"
+      },
+      {
+        "changeRate": 0.99,
+        "close": 16461.0,
+        "latestBarDate": "2026-11-09",
+        "matchedDate": "2026-11-09",
+        "name": "가상300008",
+        "provisional": true,
+        "symbol": "300008"
+      },
+      {
+        "changeRate": 1.0,
+        "close": 17326.0,
+        "latestBarDate": "2026-11-09",
+        "matchedDate": "2026-11-09",
+        "name": "가상300011",
+        "provisional": true,
+        "symbol": "300011"
+      }
+    ],
+    "universe": 12
+  },
+  "주 월 일 섞음": {
+    "asOf": "2026-11-09",
+    "excluded": {
+      "historyShort": 0,
+      "listedTooShort": 0,
+      "unconfirmed": 1
+    },
+    "missingSummary": 2,
+    "rows": [
+      {
+        "changeRate": 10.0,
+        "close": 68780.0,
+        "latestBarDate": "2026-11-09",
+        "matchedDate": "2026-11-09",
+        "name": "가상300001",
+        "provisional": true,
+        "symbol": "300001"
+      }
+    ],
+    "universe": 12
+  },
+  "지표 MACD 주봉": {
+    "asOf": "2026-11-09",
+    "excluded": {
+      "historyShort": 0,
+      "listedTooShort": 1,
+      "unconfirmed": 1
+    },
+    "missingSummary": 2,
+    "rows": [
+      {
+        "changeRate": 10.0,
+        "close": 68780.0,
+        "latestBarDate": "2026-11-09",
+        "matchedDate": "2026-11-09",
+        "name": "가상300001",
+        "provisional": true,
+        "symbol": "300001"
+      },
+      {
+        "changeRate": 1.0,
+        "close": 24323.0,
+        "latestBarDate": "2026-11-09",
+        "matchedDate": "2026-11-09",
+        "name": "가상300007",
+        "provisional": true,
+        "symbol": "300007"
+      },
+      {
+        "changeRate": 1.0,
+        "close": 17326.0,
+        "latestBarDate": "2026-11-09",
+        "matchedDate": "2026-10-26",
+        "name": "가상300011",
+        "provisional": true,
+        "symbol": "300011"
+      }
+    ],
+    "universe": 12
+  },
+  "지표 RSI": {
+    "asOf": "2026-11-09",
+    "excluded": {
+      "historyShort": 0,
+      "listedTooShort": 0,
+      "unconfirmed": 1
+    },
+    "missingSummary": 2,
+    "rows": [
+      {
+        "changeRate": -10.0,
+        "close": 32152.0,
+        "latestBarDate": "2026-11-09",
+        "matchedDate": "2026-11-09",
+        "name": "가상300002",
+        "provisional": true,
+        "symbol": "300002"
+      },
+      {
+        "changeRate": 1.0,
+        "close": 20219.0,
+        "latestBarDate": "2026-11-09",
+        "matchedDate": "2026-11-09",
+        "name": "가상300004",
+        "provisional": true,
+        "symbol": "300004"
+      },
+      {
+        "changeRate": 0.99,
+        "close": 16461.0,
+        "latestBarDate": "2026-11-09",
+        "matchedDate": "2026-11-09",
+        "name": "가상300008",
+        "provisional": true,
+        "symbol": "300008"
+      },
+      {
+        "changeRate": -3.11,
+        "close": 52955.0,
+        "latestBarDate": "2026-11-09",
+        "matchedDate": "2026-10-29",
+        "name": "가상300003",
+        "provisional": true,
+        "symbol": "300003"
+      }
+    ],
+    "universe": 12
+  },
+  "지표 골든크로스": {
+    "asOf": "2026-11-09",
+    "excluded": {
+      "historyShort": 0,
+      "listedTooShort": 1,
+      "unconfirmed": 1
+    },
+    "missingSummary": 2,
+    "rows": [
+      {
+        "changeRate": 10.0,
+        "close": 68780.0,
+        "latestBarDate": "2026-11-09",
+        "matchedDate": "2026-11-04",
+        "name": "가상300001",
+        "provisional": true,
+        "symbol": "300001"
+      },
+      {
+        "changeRate": 1.0,
+        "close": 24323.0,
+        "latestBarDate": "2026-11-09",
+        "matchedDate": "2026-11-04",
+        "name": "가상300007",
+        "provisional": true,
+        "symbol": "300007"
+      },
+      {
+        "changeRate": -3.11,
+        "close": 52955.0,
+        "latestBarDate": "2026-11-09",
+        "matchedDate": "2026-11-02",
+        "name": "가상300003",
+        "provisional": true,
+        "symbol": "300003"
+      }
+    ],
+    "universe": 12
+  },
+  "지표 볼린저 월봉": {
+    "asOf": "2026-11-09",
+    "excluded": {
+      "historyShort": 0,
+      "listedTooShort": 1,
+      "unconfirmed": 1
+    },
+    "missingSummary": 2,
+    "rows": [
+      {
+        "changeRate": 10.0,
+        "close": 68780.0,
+        "latestBarDate": "2026-11-09",
+        "matchedDate": "2026-11-01",
+        "name": "가상300001",
+        "provisional": true,
+        "symbol": "300001"
+      },
+      {
+        "changeRate": -3.11,
+        "close": 52955.0,
+        "latestBarDate": "2026-11-09",
+        "matchedDate": "2026-11-01",
+        "name": "가상300003",
+        "provisional": true,
+        "symbol": "300003"
+      },
+      {
+        "changeRate": 1.0,
+        "close": 24323.0,
+        "latestBarDate": "2026-11-09",
+        "matchedDate": "2026-11-01",
+        "name": "가상300007",
+        "provisional": true,
+        "symbol": "300007"
+      }
+    ],
+    "universe": 12
+  },
+  "지표 이평 위치": {
+    "asOf": "2026-11-09",
+    "excluded": {
+      "historyShort": 0,
+      "listedTooShort": 1,
+      "unconfirmed": 1
+    },
+    "missingSummary": 2,
+    "rows": [
+      {
+        "changeRate": 10.0,
+        "close": 68780.0,
+        "latestBarDate": "2026-11-09",
+        "matchedDate": "2026-11-09",
+        "name": "가상300001",
+        "provisional": true,
+        "symbol": "300001"
+      },
+      {
+        "changeRate": -3.11,
+        "close": 52955.0,
+        "latestBarDate": "2026-11-09",
+        "matchedDate": "2026-11-09",
+        "name": "가상300003",
+        "provisional": true,
+        "symbol": "300003"
+      },
+      {
+        "changeRate": 1.0,
+        "close": 34518.0,
+        "latestBarDate": "2026-11-09",
+        "matchedDate": "2026-11-09",
+        "name": "가상300006",
+        "provisional": true,
+        "symbol": "300006"
+      },
+      {
+        "changeRate": 1.0,
+        "close": 24323.0,
+        "latestBarDate": "2026-11-09",
+        "matchedDate": "2026-11-09",
+        "name": "가상300007",
+        "provisional": true,
+        "symbol": "300007"
+      },
+      {
+        "changeRate": 1.0,
+        "close": 17326.0,
+        "latestBarDate": "2026-11-09",
+        "matchedDate": "2026-11-05",
+        "name": "가상300011",
+        "provisional": true,
+        "symbol": "300011"
+      }
+    ],
+    "universe": 12
+  },
+  "지표 이평 정렬": {
+    "asOf": "2026-11-09",
+    "excluded": {
+      "historyShort": 0,
+      "listedTooShort": 1,
+      "unconfirmed": 1
+    },
+    "missingSummary": 2,
+    "rows": [
+      {
+        "changeRate": 10.0,
+        "close": 68780.0,
+        "latestBarDate": "2026-11-09",
+        "matchedDate": "2026-11-09",
+        "name": "가상300001",
+        "provisional": true,
+        "symbol": "300001"
+      },
+      {
+        "changeRate": -3.11,
+        "close": 52955.0,
+        "latestBarDate": "2026-11-09",
+        "matchedDate": "2026-11-09",
+        "name": "가상300003",
+        "provisional": true,
+        "symbol": "300003"
+      },
+      {
+        "changeRate": 1.0,
+        "close": 34518.0,
+        "latestBarDate": "2026-11-09",
+        "matchedDate": "2026-11-09",
+        "name": "가상300006",
+        "provisional": true,
+        "symbol": "300006"
+      },
+      {
+        "changeRate": 1.0,
+        "close": 24323.0,
+        "latestBarDate": "2026-11-09",
+        "matchedDate": "2026-11-09",
+        "name": "가상300007",
+        "provisional": true,
+        "symbol": "300007"
+      }
+    ],
+    "universe": 12
+  },
+  "코스닥만": {
+    "asOf": "2026-11-09",
+    "excluded": {
+      "historyShort": 0,
+      "listedTooShort": 0,
+      "unconfirmed": 0
+    },
+    "missingSummary": 0,
+    "rows": [],
+    "universe": 1
+  },
+  "코스피만": {
+    "asOf": "2026-11-09",
+    "excluded": {
+      "historyShort": 0,
+      "listedTooShort": 0,
+      "unconfirmed": 1
+    },
+    "missingSummary": 2,
+    "rows": [
+      {
+        "changeRate": 10.0,
+        "close": 68780.0,
+        "latestBarDate": "2026-11-09",
+        "matchedDate": "2026-11-09",
+        "name": "가상300001",
+        "provisional": true,
+        "symbol": "300001"
+      },
+      {
+        "changeRate": 1.0,
+        "close": 35835.0,
+        "latestBarDate": "2026-11-09",
+        "matchedDate": "2026-11-06",
+        "name": "가상300005",
+        "provisional": true,
+        "symbol": "300005"
+      },
+      {
+        "changeRate": 1.0,
+        "close": 24323.0,
+        "latestBarDate": "2026-11-09",
+        "matchedDate": "2026-11-06",
+        "name": "가상300007",
+        "provisional": true,
+        "symbol": "300007"
+      },
+      {
+        "changeRate": -3.11,
+        "close": 52955.0,
+        "latestBarDate": "2026-11-09",
+        "matchedDate": "2026-11-03",
+        "name": "가상300003",
+        "provisional": true,
+        "symbol": "300003"
+      }
+    ],
+    "universe": 11
+  }
+}

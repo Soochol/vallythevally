@@ -107,7 +107,7 @@ impl FakeChild {
     fn tokens(&self) -> Vec<(String, u64)> {
         self.commands()
             .into_iter()
-            .filter_map(|command| if let Command::Token { token, generation } = command { Some((token.expose().clone(), generation)) } else { None })
+            .filter_map(|command| if let Command::Token { token, generation, .. } = command { Some((token.expose().clone(), generation)) } else { None })
             .collect()
     }
 
@@ -213,6 +213,7 @@ fn identity(name: &str, role: KeyRole) -> KeyIdentity {
 
 fn active_key(folder: &Path, name: &str, role: KeyRole) -> ActiveKey {
     ActiveKey {
+        broker: server::shared_data::Broker::Kiwoom,
         identity: identity(name, role),
         app_key: Secret::new(app_key_of(name)),
         app_secret: Secret::new(format!("FAKE-SECRET-{name}")),

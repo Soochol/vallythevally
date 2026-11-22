@@ -15,6 +15,7 @@ use super::registry::Registry;
 use super::session::{Finish, Halt, Session, SessionParts, SystemWallClock, Timings, Tokens, WallClock};
 use super::start::{KIWOOM_WS_URL, exit_status, forward_termination_signals, init_logging};
 use super::ws::{Connector, WebSocketConnector};
+use crate::shared::minute::{self, FileMinuteStore, MinuteStore};
 use crate::protocol::{Command, Event, HEARTBEAT_EVERY, KeyName, ProtocolError, SessionState, encode_line, parse_command};
 
 pub const WS_URL_VARIABLE: &str = "VALLY_COLLECTOR_WS_URL";
@@ -29,10 +30,11 @@ pub struct ChildParts {
     pub commands: Commands,
     pub events: Events,
     pub shutdown: watch::Receiver<bool>,
+    pub minutes: Option<Box<dyn MinuteStore>>,
 }
 
 pub async fn run_session(parts: ChildParts) -> Finish {
-    let ChildParts { key, data_dir, connector, wall_clock, timings, commands, events, shutdown } = parts;
+    let ChildParts { key, data_dir, connector, wall_clock, timings, commands, events, shutdown, minutes } = parts;
     if let Err(error) = std::fs::create_dir_all(data_dir.join("raw")) {
         let halt = Halt::Output(error);
         events.halted(&halt.reason(), halt.action());
@@ -41,6 +43,13 @@ pub async fn run_session(parts: ChildParts) -> Finish {
     let output = Output::for_key(data_dir, key);
     let (state, observed_state) = watch::channel(SessionState::WaitingForToken);
     let heartbeat = tokio::spawn(heartbeat(events.clone(), output.throughput(), observed_state));
+    let (feed, worker) = match minutes {
+        Some(store) => {
+            let (feed, worker) = minute::spawn(store, wall_clock.now_ms());
+            (Some(feed), Some(worker))
+        }
+        None => (None, None),
+    };
     let session = Session::new(SessionParts {
         tokens: Tokens::supplied(),
         registry: Registry::default(),
@@ -50,8 +59,12 @@ pub async fn run_session(parts: ChildParts) -> Finish {
         timings,
         shutdown,
         child: Some(ChildLink { commands, events, state }),
+        minutes: feed,
     });
     let finish = session.run().await;
+    if let Some(worker) = worker {
+        worker.finish().await;
+    }
     heartbeat.abort();
     let _ = heartbeat.await;
     finish
@@ -138,7 +151,7 @@ pub fn is_loopback_ws(url: &str) -> bool {
     port_ok && LOOPBACK_HOSTS.contains(&host.as_str())
 }
 
-pub fn run(key: KeyName, data_dir: PathBuf) -> ExitCode {
+pub fn run(key: KeyName, data_dir: PathBuf, shared_dir: Option<PathBuf>) -> ExitCode {
     init_logging();
     match die_with_parent() {
         Ok(ParentWatch::Armed) => {}
@@ -174,6 +187,7 @@ pub fn run(key: KeyName, data_dir: PathBuf) -> ExitCode {
     let (stop, shutdown) = watch::channel(false);
     let finish = runtime.block_on(async {
         tokio::spawn(forward_termination_signals(stop));
+        let minutes = shared_dir.map(|dir| Box::new(FileMinuteStore::new(dir, key.clone())) as Box<dyn MinuteStore>);
         run_session(ChildParts {
             key,
             data_dir,
@@ -183,6 +197,7 @@ pub fn run(key: KeyName, data_dir: PathBuf) -> ExitCode {
             commands,
             events: events.clone(),
             shutdown,
+            minutes,
         })
         .await
     });

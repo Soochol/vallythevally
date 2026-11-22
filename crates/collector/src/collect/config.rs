@@ -11,6 +11,7 @@ pub const LOCK_PATH_VARIABLE: &str = "VALLY_COLLECTOR_LOCK_PATH";
 pub const ENV_FILE_VARIABLE: &str = "VALLY_COLLECTOR_ENV_FILE";
 const APP_SERVER_ENV_FILE_VARIABLE: &str = "VALLY_ENV_FILE";
 const APP_SERVER_KEY_VARIABLE: &str = "VALLY_KIWOOM_APP_KEY";
+const APP_SERVER_KIS_KEY_VARIABLE: &str = "VALLY_KIS_APP_KEY";
 
 const STATE_FOLDER: &str = "vallythevally/collector";
 pub(crate) const TOKEN_FILE_NAME: &str = "token.json";
@@ -91,14 +92,22 @@ pub(crate) fn default_state_folder(variables: &Variables) -> Result<PathBuf, Con
 }
 
 pub(crate) fn reject_app_server_key(process: &Variables, collector_key: &str) -> Result<(), ConfigError> {
+    reject_same_as(process, collector_key, APP_SERVER_KEY_VARIABLE, "수집기 전용 키를 쓰세요")
+}
+
+pub(crate) fn reject_server_kis_key(process: &Variables, collector_key: &str) -> Result<(), ConfigError> {
+    reject_same_as(process, collector_key, APP_SERVER_KIS_KEY_VARIABLE, "수집기 전용 한투 키를 쓰세요(ADR 0039)")
+}
+
+fn reject_same_as(process: &Variables, collector_key: &str, server_variable: &str, advice: &str) -> Result<(), ConfigError> {
     let mut app_server = match process.get(APP_SERVER_ENV_FILE_VARIABLE).filter(|path| !path.is_empty()) {
         Some(path) => read_env_file(APP_SERVER_ENV_FILE_VARIABLE, Path::new(path))?,
         None => Variables::new(),
     };
     app_server.extend(process.iter().map(|(name, value)| (name.clone(), value.clone())));
-    if app_server.get(APP_SERVER_KEY_VARIABLE).is_some_and(|key| key == collector_key) {
+    if app_server.get(server_variable).is_some_and(|key| key == collector_key) {
         return Err(ConfigError(format!(
-            "{APP_KEY_VARIABLE}가 앱 서버의 {APP_SERVER_KEY_VARIABLE}와 같습니다. 같은 키를 두 곳에서 쓰면 서로 연결을 끊습니다. 수집기 전용 키를 쓰세요"
+            "{APP_KEY_VARIABLE}가 앱 서버의 {server_variable}와 같습니다. 같은 키를 두 곳에서 쓰면 서로 연결을 끊습니다. {advice}"
         )));
     }
     Ok(())

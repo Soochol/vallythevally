@@ -30,6 +30,7 @@ struct Control {
     runtime: tokio::runtime::Handle,
     clock: server::clock::Clock,
     keys: Arc<server::kiwoom::keys::KeyRing>,
+    screener: Arc<server::screener::Screener>,
 }
 
 pub struct Server {
@@ -86,7 +87,7 @@ impl Server {
             let started = server::app::start(&config, &instance, adapters).await.unwrap();
             let state = started.state.clone();
             let mut background = tokio::task::JoinSet::new();
-            publish.set(Control { link: state.link.clone(), runtime: tokio::runtime::Handle::current(), clock: state.clock.clone(), keys: state.keys.clone() }).ok();
+            publish.set(Control { link: state.link.clone(), runtime: tokio::runtime::Handle::current(), clock: state.clock.clone(), keys: state.keys.clone(), screener: state.screener.clone() }).ok();
             if value("VALLY_KIWOOM_CONNECT") == Some("start") {
                 state.keys.connect_at_start();
             } else if value("VALLY_KIWOOM_CONNECT") != Some("off") {
@@ -132,6 +133,8 @@ impl Server {
     pub fn keys(&self) -> Arc<server::kiwoom::keys::KeyRing> { self.control.get().expect("서버가 아직 준비되지 않았습니다").keys.clone() }
 
     pub fn clock(&self) -> server::clock::Clock { self.control.get().expect("서버가 아직 준비되지 않았습니다").clock.clone() }
+
+    pub fn screener(&self) -> Arc<server::screener::Screener> { self.control.get().expect("서버가 아직 준비되지 않았습니다").screener.clone() }
 
     pub fn link(&self) -> server::kiwoom::link::Link { self.control.get().expect("서버가 아직 준비되지 않았습니다").link.clone() }
 

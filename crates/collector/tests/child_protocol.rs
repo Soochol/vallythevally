@@ -20,6 +20,7 @@ const TOKEN: &str = "FAKE-INTEGRATION-TOKEN-0001";
 const BAD_TOKEN: &str = "FAKE-INTEGRATION-TOKEN-REJECTED";
 const NEW_TOKEN: &str = "FAKE-INTEGRATION-TOKEN-0002";
 const REAL_FRAME: &str = r#"{"trnm":"REAL","data":[{"type":"0B","item":"000001_AL","name":"주식체결","values":{"20":"090001","10":"-71000"}}]}"#;
+const TRADE_FRAME: &str = r#"{"trnm":"REAL","data":[{"type":"0B","item":"000001_AL","name":"주식체결","values":{"20":"090001","10":"-71000","15":"+5","9081":"KRX"}}]}"#;
 const MARKET_FRAME: &str = r#"{"trnm":"REAL","data":[{"type":"0s","item":"","name":"장시작시간","values":{"215":"3","20":"090000","214":"000000"}}]}"#;
 const WAIT: Duration = Duration::from_secs(30);
 
@@ -171,7 +172,7 @@ impl Collector {
 }
 
 fn token_command(token: &str, generation: u64) -> DaemonCommand {
-    DaemonCommand::Token { token: Secret::new(token.to_owned()), generation }
+    DaemonCommand::Token { token: Secret::new(token.to_owned()), generation, expires_at: None }
 }
 
 fn stock_registration(id: &str, count: usize) -> DaemonCommand {
@@ -324,10 +325,11 @@ async fn broken_unknown_and_foreign_version_lines_halt_with_a_nonzero_exit() {
     let kiwoom = Kiwoom::start().await;
     let lines = [
         "깨진 줄\n",
-        "{\"v\":1,\"cmd\":\"dance\"}\n",
-        "{\"v\":2,\"cmd\":\"shutdown\"}\n",
+        "{\"v\":2,\"cmd\":\"dance\"}\n",
+        "{\"v\":1,\"cmd\":\"shutdown\"}\n",
+        "{\"v\":3,\"cmd\":\"shutdown\"}\n",
         "{\"cmd\":\"shutdown\"}\n",
-        "{\"v\":1,\"cmd\":\"register\",\"id\":\"r\",\"items\":[\"5930\"],\"types\":[\"0B\"]}\n",
+        "{\"v\":2,\"cmd\":\"register\",\"id\":\"r\",\"items\":[\"5930\"],\"types\":[\"0B\"]}\n",
         "\n",
     ];
     for line in lines {
@@ -423,4 +425,58 @@ async fn a_remote_websocket_address_is_refused() {
         .unwrap();
     assert_eq!(output.status.code(), Some(2));
     assert!(output.stdout.is_empty());
+}
+
+fn only_child_of(folder: &Path) -> PathBuf {
+    let entries: Vec<PathBuf> = std::fs::read_dir(folder).unwrap().map(|entry| entry.unwrap().path()).collect();
+    assert_eq!(entries.len(), 1, "{entries:?}");
+    entries[0].clone()
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_child_given_a_shared_folder_writes_its_one_minute_bars_before_it_exits() {
+    let kiwoom = Kiwoom::start().await;
+    let shared = tempfile::tempdir().unwrap();
+    let mut child = spawn_child(&kiwoom, &["--shared", shared.path().to_str().unwrap()]);
+    child.send(&token_command(TOKEN, 1)).await;
+    child.send(&stock_registration("r1", 1)).await;
+    child.until("live", |event| matches!(event, Event::Live)).await;
+    kiwoom.push(TRADE_FRAME);
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    child.send(&DaemonCommand::Shutdown).await;
+    let (status, stderr, ..) = child.finish().await;
+    assert_eq!(status.code(), Some(0), "{stderr}");
+
+    let file = only_child_of(&only_child_of(&shared.path().join("minute"))).to_owned();
+    assert_eq!(file.file_name().unwrap(), "k1.jsonl");
+    let text = std::fs::read_to_string(&file).unwrap();
+    let mut lines = text.lines();
+    let header: Value = serde_json::from_str(lines.next().unwrap()).unwrap();
+    assert_eq!((header["kind"].as_str(), header["sources"][0]["keyName"].as_str()), (Some("minute"), Some("k1")));
+    let bars: Vec<Value> = lines.map(|line| serde_json::from_str(line).unwrap()).collect();
+    let summary: Vec<(&str, i64, f64, i64, i64)> = bars.iter().map(|bar| (bar["venue"].as_str().unwrap(), bar["minute"].as_i64().unwrap(), bar["close"].as_f64().unwrap(), bar["volume"].as_i64().unwrap(), bar["value"].as_i64().unwrap())).collect();
+    assert_eq!(summary, [("krx", 540, 71000.0, 5, 355_000), ("combined", 540, 71000.0, 5, 355_000)]);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_child_without_a_shared_folder_writes_no_minute_bars() {
+    let kiwoom = Kiwoom::start().await;
+    let mut child = spawn_child(&kiwoom, &[]);
+    child.send(&token_command(TOKEN, 1)).await;
+    child.send(&stock_registration("r1", 1)).await;
+    child.until("live", |event| matches!(event, Event::Live)).await;
+    kiwoom.push(TRADE_FRAME);
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    child.send(&DaemonCommand::Shutdown).await;
+    let (status, _, data, _) = child.finish().await;
+    assert_eq!(status.code(), Some(0));
+    let names: Vec<_> = std::fs::read_dir(data.path()).unwrap().map(|entry| entry.unwrap().file_name().into_string().unwrap()).collect();
+    assert_eq!(names, ["raw"]);
+}
+
+#[tokio::test]
+async fn the_shared_option_belongs_to_the_child_only() {
+    let output = Command::new(env!("CARGO_BIN_EXE_collector")).args(["collect", "--shared", "/nowhere"]).env_clear().output().await.unwrap();
+    assert_eq!(output.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&output.stderr).contains("--child"));
 }

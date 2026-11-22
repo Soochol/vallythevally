@@ -7,6 +7,7 @@ use std::sync::Arc;
 use domain::{KstDate, KstTime, TimeOfDay};
 use server::clock::Clock;
 use server::kiwoom::transport::Transport;
+use server::kis::transport::Transport as KisTransport;
 use tokio::sync::watch;
 
 use super::api::{StatusApi, StatusSocket, serve};
@@ -18,7 +19,8 @@ use super::tokens::IssueLane;
 use super::telegram::AlertTelegram;
 use crate::calendar::{Calendar, HolidayTransport, Judgment};
 use crate::finalize::{COMPLETE_FILE_NAME, store_dir};
-use crate::keys::ActiveKey;
+use crate::keys::{ActiveKey, KeyRole};
+use crate::shared::AssignmentStore;
 use report::Reporter;
 
 mod finalizer;
@@ -65,8 +67,20 @@ impl fmt::Display for DaemonStartError {
 
 impl std::error::Error for DaemonStartError {}
 
+pub struct SharedJobs {
+    pub assignment_path: PathBuf,
+    pub kis_transport: Option<Arc<dyn KisTransport>>,
+}
+
+struct SharedSetup {
+    store: AssignmentStore,
+    kis_transport: Option<Arc<dyn KisTransport>>,
+}
+
 pub struct Daemon {
     keys: Vec<ActiveKey>,
+    rest_keys: Vec<ActiveKey>,
+    shared: Option<SharedSetup>,
     data_dir: PathBuf,
     supervisor: Settings,
     schedule: ScheduleSettings,
@@ -118,6 +132,7 @@ fn date_number(day: KstDate) -> u32 {
 impl Daemon {
     pub fn start(inputs: DaemonInputs, injected: DaemonInjected) -> Result<Daemon, DaemonStartError> {
         let DaemonInputs { keys, data_dir, mut supervisor, schedule, holiday_key_path } = inputs;
+        let (rest_keys, keys): (Vec<ActiveKey>, Vec<ActiveKey>) = keys.into_iter().partition(|key| key.identity.role == KeyRole::Rest);
         if keys.is_empty() {
             return Err(DaemonStartError::NoKeys);
         }
@@ -136,6 +151,8 @@ impl Daemon {
         let today = date_number(injected.clock.now().kst_date());
         Ok(Daemon {
             keys,
+            rest_keys,
+            shared: None,
             data_dir,
             supervisor,
             schedule,
@@ -149,6 +166,11 @@ impl Daemon {
             clock: injected.clock,
             socket,
         })
+    }
+
+    pub fn with_shared_jobs(mut self, jobs: SharedJobs) -> Daemon {
+        self.shared = Some(SharedSetup { store: AssignmentStore::new(jobs.assignment_path, &self.data_dir), kis_transport: jobs.kis_transport });
+        self
     }
 
     pub fn with_telegram(mut self, telegram: Option<AlertTelegram>) -> Daemon {
@@ -216,6 +238,7 @@ impl Daemon {
         self.reporter.phase(DayPhase::MorningPrep);
         let universe = self.morning_universe(day, shutdown).await?;
         self.wait(shutdown, day.times.plan).await?;
+        self.reload_shared_assignment();
         let plan = self.plan(day, universe)?;
         self.wait(shutdown, day.times.launch).await?;
         if self.clock.now().unix() >= day.times.close.unix() {

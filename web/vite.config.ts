@@ -5,6 +5,8 @@ import { defineConfig, loadEnv } from "vite";
 import { fakeApi } from "./dev/fakeApi.ts";
 
 // VITE_FAKE_API=0 이면 /api를 실제 서버로 보낸다. 그 밖에는 dev 서버가 가짜 API로 답한다.
+const BACKEND = "http://127.0.0.1:8080";
+
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), "VITE_");
   const useFakeApi = env.VITE_FAKE_API !== "0";
@@ -12,7 +14,22 @@ export default defineConfig(({ mode }) => {
     plugins: [react(), tailwindcss(), useFakeApi ? fakeApi(env.VITE_FAKE_SCREENER) : null],
     server: {
       host: "127.0.0.1",
-      proxy: useFakeApi ? undefined : { "/api": { target: "http://127.0.0.1:8080", ws: true } },
+      proxy: useFakeApi
+        ? undefined
+        : {
+            "/api": {
+              target: BACKEND,
+              ws: true,
+              changeOrigin: true,
+              configure: (proxy) => {
+                const asBackendOrigin = (proxyReq: { getHeader(name: string): unknown; setHeader(name: string, value: string): void }) => {
+                  if (proxyReq.getHeader("origin") !== undefined) proxyReq.setHeader("origin", BACKEND);
+                };
+                proxy.on("proxyReq", asBackendOrigin);
+                proxy.on("proxyReqWs", asBackendOrigin);
+              },
+            },
+          },
     },
     test: { environment: "node", include: ["src/**/*.test.ts", "dev/**/*.test.ts"] },
   };

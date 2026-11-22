@@ -14,10 +14,12 @@ use crate::calendar::{
     CachedHolidaysOnly, Calendar, CrossCheck, DEFAULT_OPEN_MINUTE, Day, Judgment, Mismatch, Verdict, cross_check, read_service_key,
 };
 use crate::finalize::{COMPLETE_FILE_NAME, IndexCheckResult, JudgedVerdict, TreatedAs, raw_days_without_complete, store_dir};
+use crate::shared::Reload;
 use crate::plan::{PlanFile, PlanInput, build_plan, plan_path, write_plan};
 use crate::raw_write::raw_day_dir;
 use crate::supervise::daemon::{Injected, Inputs, Supervisor, load_plan};
 use crate::supervise::journal::{JournalEvent, has_event, journal_path};
+use crate::supervise::shared::{SharedInjected, SharedInputs, SharedSupervisor};
 use crate::supervise::settings::{MarketOpenCheck, Settings};
 use crate::supervise::status::{AlertKind, DayPhase, ObservationDay, ObservationVerdict};
 use crate::universe::{Morning, UniverseFile, after_close_path, collect_after_close, collect_morning, read_universe_if_present};
@@ -153,6 +155,30 @@ impl Daemon {
         Ok(morning)
     }
 
+    pub(super) fn reload_shared_assignment(&mut self) {
+        let Some(shared) = &mut self.shared else { return };
+        let outcome = shared.store.reload(&self.rest_keys);
+        match outcome {
+            Reload::NoFile | Reload::Loaded => {}
+            Reload::KeptPrevious(error) => self.reporter.alert(AlertKind::StageFailed, format!("키 배정표를 읽지 못해 전날 배정을 씁니다: {error}")),
+            Reload::Unusable(error) => self.reporter.alert(AlertKind::StageFailed, format!("키 배정표를 읽지 못해 공용 자료 일을 돌리지 않습니다: {error}")),
+        }
+    }
+
+    fn start_shared(&mut self, day: &DayRun, settings: &Settings) -> Option<SharedSupervisor> {
+        let shared = self.shared.as_ref()?;
+        let assignment = shared.store.current().filter(|assignment| !assignment.is_empty())?.clone();
+        let inputs = SharedInputs { keys: self.rest_keys.clone(), assignment, date: day.date, data_dir: self.data_dir.clone(), settings: settings.clone() };
+        let injected = SharedInjected { launcher: self.launcher.clone(), transport: self.transport.clone(), kis_transport: shared.kis_transport.clone(), clock: self.clock.clone() };
+        match SharedSupervisor::start(inputs, injected) {
+            Ok(supervisor) => Some(supervisor),
+            Err(error) => {
+                self.reporter.alert(AlertKind::StageFailed, format!("공용 자료 자식 띄우기: {error}"));
+                None
+            }
+        }
+    }
+
     pub(super) fn plan(&mut self, day: &DayRun, universe: Option<UniverseFile>) -> Result<PlanFile, DayEnd> {
         let built = self.plan_file(day, universe.as_ref());
         self.soft("계획", built)?.ok_or(DayEnd::Done)
@@ -203,6 +229,7 @@ impl Daemon {
             market_open_check: Some(MarketOpenCheck { opens_at, deadline }),
             ..self.supervisor.clone()
         };
+        let shared_supervisor = self.start_shared(day, &settings);
         let inputs = Inputs { plan, keys: self.keys.clone(), data_dir: self.data_dir.clone(), settings };
         let injected = Injected { launcher: self.launcher.clone(), transport: self.transport.clone(), clock: self.clock.clone() };
         let supervisor = match Supervisor::start(inputs, injected) {
@@ -214,8 +241,16 @@ impl Daemon {
         };
         let mut status = supervisor.status();
         let mut task = tokio::spawn(supervisor.run(shutdown.clone()));
+        let mut shared_report = shared_supervisor.as_ref().map(SharedSupervisor::report);
+        let mut shared_task = shared_supervisor.map(|shared| tokio::spawn(shared.run(shutdown.clone())));
         loop {
             tokio::select! {
+                Some(Ok(())) = async { match shared_report.as_mut() { Some(report) => Some(report.changed().await), None => std::future::pending().await } } => {
+                    if let Some(report) = shared_report.as_mut() {
+                        let snapshot = report.borrow_and_update().clone();
+                        self.reporter.shared(snapshot);
+                    }
+                }
                 finished = &mut task => {
                     if let Err(error) = finished {
                         self.reporter.alert(AlertKind::StageFailed, format!("장중 수집이 비정상으로 끝났습니다: {error}"));
@@ -233,6 +268,15 @@ impl Daemon {
                     }
                 },
             }
+        }
+        if let Some(task) = shared_task.take()
+            && let Err(error) = task.await
+        {
+            self.reporter.alert(AlertKind::StageFailed, format!("공용 자료 감독이 비정상으로 끝났습니다: {error}"));
+        }
+        if let Some(report) = shared_report.as_mut() {
+            let last = report.borrow().clone();
+            self.reporter.shared(last);
         }
         let last = status.borrow().clone();
         self.reporter.supervised(last);

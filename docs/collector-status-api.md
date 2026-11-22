@@ -82,19 +82,20 @@
 |---|---|
 | `name` | 키 이름 |
 | `app_key_hash_prefix` | 앱키 해시(`sha256:` 뒤)의 앞 8자. 키를 가리는 용도이고 비밀값은 아니다 |
-| `role` | `collecting`(수집) 또는 `spare`(예비) |
+| `role` | `collecting`(수집), `spare`(예비), `rest`(공용 자료를 받는 REST 키) |
 | `state` | `waiting`(대기), `connecting`(연결 중), `receiving`(받는 중), `disconnected`(끊김), `stopped`(멈춤), `handed_off`(인계됨) |
 | `stocks` | 지금 맡은 종목 수. 인계된 키는 0이다 |
 | `messages_per_second` | 직전 자식 하트비트 구간의 초당 프레임 수. 아직 모르면 `null` |
 | `register_failures` | 지금 자식의 등록 실패 묶음 수 |
 | `restarts` | 그날 자식 재시작 수 |
-| `rest` | REST 진행: `planned_jobs`, `finished_jobs`(작업 수). 지금은 둘 다 0이다 |
+| `rest` | REST 진행: `planned_jobs`, `finished_jobs`(작업 수). 수집·예비 키는 둘 다 0이다. `rest` 역할 키는 `planned_jobs`가 지금 맡은 일 수, `finished_jobs`가 끝낸 실행 횟수 합이다 |
+| `usage` | `rest` 역할 키의 지난 1분 TR 사용량. 없으면 이 칸이 없다. `minute_start`(그 1분의 시작, Unix 초), `key_max_per_second`(키 전체에서 최근 1초 전송 합계의 최댓값), `trs[]`(TR마다 `tr`, `sent`, `rate_limited`, `resent`, `max_wait_ms`, `max_per_second`)다. 같은 값이 `<--data>/usage/<YYYYMMDD>.jsonl`에도 한 줄씩 남는다([공용 자료](collector-shared-data.md#키별-tr-사용량)). 예시는 `reply-status-rest-usage.json` |
 
 `universe_changes`는 `{added, removed, renamed, halt_started, halt_lifted}`다. 앞의 둘과 뒤의 둘은 `{code, name}` 배열이고 `renamed`는 `{code, from, to}` 배열이다.
 
 `observation_day`는 `{verdict, reasons}`다. `verdict`는 `observed`, `not_observed`, `unknown`이고 `reasons`는 사람이 읽는 근거 문장 배열이다.
 
-`alerts[]`는 `{at, kind, message}`다. `at`은 KST 시각이다. `kind`는 `excluded`(제외 발생), `plan_note`(계획의 알림), `handoff`(인계), `handoff_skipped`(인계하지 못함), `key_stopped`(키 멈춤), `register_failed`(등록 실패), `market_open_missing`(관측일인데 `0s`가 정한 시각까지 오지 않음), `observation_unknown`(관측일인지 알 수 없어 관측일로 보고 돌림), `index_mismatch`(코스피 지수 일봉과 관측일 판단이 어긋남), `stage_failed`(하루 단계 하나가 실패함: 종목 목록, 계획, 마감 뒤 처리, 정리 등)이다. 읽는 쪽은 모르는 `phase`와 `kind`를 그대로 보여 준다. 새 값은 형식 버전을 올리지 않는다.
+`alerts[]`는 `{at, kind, message}`다. `at`은 KST 시각이다. `kind`는 `excluded`(제외 발생), `plan_note`(계획의 알림), `handoff`(인계), `handoff_skipped`(인계하지 못함), `key_stopped`(키 멈춤), `register_failed`(등록 실패), `market_open_missing`(관측일인데 `0s`가 정한 시각까지 오지 않음), `observation_unknown`(관측일인지 알 수 없어 관측일로 보고 돌림), `index_mismatch`(코스피 지수 일봉과 관측일 판단이 어긋남), `stage_failed`(하루 단계 하나가 실패함: 종목 목록, 계획, 마감 뒤 처리, 정리, 키 배정표 읽기 등), `shared_job_moved`(공용 자료 일을 멈춘 키에서 다른 키로 옮김)이다. 읽는 쪽은 모르는 `phase`와 `kind`를 그대로 보여 준다. 새 값은 형식 버전을 올리지 않는다.
 
 ### `heartbeat` (`reply-heartbeat.json`)
 

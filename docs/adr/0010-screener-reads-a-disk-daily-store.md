@@ -1,5 +1,7 @@
 # 스크리너는 전 종목 일봉을 디스크에 모아 두고, 그것만 읽어 조건을 따진다
 
+- (2026-11-23 개정) 실행 때 당일 요약의 기준가를 견주는 수정주가 대조는 수집 데몬의 KRX 스냅샷 행(`baseWon`)으로도 같은 규칙으로 성립한다. [ADR 0044](0044-screener-reads-the-shared-quote-snapshot.md).
+
 [ADR 0014](0014-screener-includes-current-krx-day.md)은 당일 기준 검색에 조회한 오늘 KRX 시세를 반영하는 예외를 추가한다.
 
 (2026-11-23 개정) 시세 공급원이 한투여도 저장소는 키움 KRX 일봉의 사본이고, 갱신은 연결된 키움 키가 있어야 한다. 연결된 키움 키가 없으면 갱신 요청을 닫힌 사유로 거절하고, 스크리너 실행과 검색은 그대로 된다. [ADR 0043](0043-market-source-is-one-key-of-either-broker-and-switching-drops-the-cache.md).

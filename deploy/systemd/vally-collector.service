@@ -12,10 +12,11 @@ Environment=VALLY_KEYS=%h/.config/vally/collector-keys.json
 Environment=VALLY_DATA=%h/vally-data/hoga
 Environment=VALLY_STATE=%h/.local/state/vallythevally/collector
 Environment=VALLY_HOLIDAY_KEY=%h/.config/vally/holiday-service-key
+Environment=VALLY_SHARED_CONFIG=%h/.config/vally/collector-shared.json
 Environment=RUST_LOG=info
 WorkingDirectory=%h
 ExecStartPre=-%h/.local/bin/vally-collector-restart --before-start
-ExecStart=%h/.local/bin/collector supervise --keys ${VALLY_KEYS} --data ${VALLY_DATA} --state ${VALLY_STATE} --holiday-key ${VALLY_HOLIDAY_KEY}
+ExecStart=%h/.local/bin/collector supervise --keys ${VALLY_KEYS} --data ${VALLY_DATA} --state ${VALLY_STATE} --holiday-key ${VALLY_HOLIDAY_KEY} --shared-config ${VALLY_SHARED_CONFIG}
 ExecStopPost=/bin/sh -c 'test "$SERVICE_RESULT" = success || exec systemctl --user start --no-block vally-collector-alert.service'
 Restart=on-failure
 RestartSec=30

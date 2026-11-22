@@ -4,8 +4,11 @@ use crate::error::ApiError;
 use crate::idp::{AuthorizeParams, CodeGrant, IdpClient};
 use crate::model::{ConnectorPort, LoginFlow, Provider, StartRequest};
 use crate::secrets::{random_string, s256_challenge};
+use crate::setup_access::SetupPut;
 use crate::setup_api::{ChangesResponse, PushResponse, SummaryResponse};
-use crate::store::{AccountSlot, PendingLoginSlot, Store};
+use crate::setup_store::{LayoutHead, Removal, SetupDocument};
+use setup::DocumentKind;
+use crate::store::{AccountSlot, AccountView, PendingLoginSlot, Store};
 use axum::body::Bytes;
 use axum::extract::{DefaultBodyLimit, Path, RawQuery, State};
 use axum::http::header::{CACHE_CONTROL, CONTENT_TYPE, COOKIE, LOCATION, RETRY_AFTER, SET_COOKIE};
@@ -111,6 +114,30 @@ impl Accounts {
 
     pub async fn setup_summary(&self, account_id: &str) -> Result<SummaryResponse, ApiError> {
         crate::setup_api::summary(&self.0.store, account_id).await
+    }
+
+    pub async fn setup_document(&self, account_id: &str, kind: DocumentKind, id: &str) -> Result<Option<SetupDocument>, sqlx::Error> {
+        self.0.store.setup_document(account_id, kind, id).await
+    }
+
+    pub async fn setup_put(&self, account_id: &str, document: &SetupDocument) -> Result<SetupPut, sqlx::Error> {
+        crate::setup_access::put(&self.0.store, self.0.clock.now().0.saturating_mul(1000), account_id, document).await
+    }
+
+    pub async fn setup_remove(&self, account_id: &str, kind: DocumentKind, id: &str, floor_revision: i64) -> Result<Removal, sqlx::Error> {
+        self.0.store.remove_document(account_id, kind, id, floor_revision).await
+    }
+
+    pub async fn setup_layout_heads(&self, account_id: &str) -> Result<Vec<LayoutHead>, sqlx::Error> {
+        self.0.store.layout_heads(account_id).await
+    }
+
+    pub async fn setup_layout_name_taken(&self, account_id: &str, name: &str, except_id: &str) -> Result<bool, sqlx::Error> {
+        self.0.store.layout_name_taken(account_id, name, except_id).await
+    }
+
+    pub async fn setup_drawings_of(&self, account_id: &str, symbol: &str) -> Result<Vec<SetupDocument>, sqlx::Error> {
+        self.0.store.drawings_of(account_id, symbol).await
     }
 }
 
@@ -368,6 +395,9 @@ async fn exchange_token(State(state): Shared, body: Bytes) -> Result<Json<TokenR
         return Err(ApiError::invalid_grant());
     }
     let account = state.store.account(&account_id).await?.ok_or_else(ApiError::invalid_grant)?;
+    if is_blocked(state.as_ref(), &account) {
+        return Err(ApiError::invalid_grant());
+    }
     let token = random_string(32);
     state.store.insert_token(&token, &account_id, now).await.map_err(|error| {
         if ApiError::is_foreign_key_violation(&error) { ApiError::invalid_grant() } else { error.into() }
@@ -386,12 +416,15 @@ pub(crate) async fn authenticate(state: &AppState, headers: &HeaderMap) -> Resul
     let account_id = state.store.touch_token(token, state.clock.now()).await?.ok_or_else(ApiError::unauthorized)?;
     if !state.options.blocked.is_empty() {
         let account = state.store.account(&account_id).await?.ok_or_else(ApiError::unauthorized)?;
-        let blocked = Provider::parse(&account.provider).is_ok_and(|provider| state.options.blocked.contains(provider, &account.subject));
-        if blocked {
+        if is_blocked(state, &account) {
             return Err(ApiError::unauthorized());
         }
     }
     Ok((token.to_owned(), account_id))
+}
+
+fn is_blocked(state: &AppState, account: &AccountView) -> bool {
+    Provider::parse(&account.provider).is_ok_and(|provider| state.options.blocked.contains(provider, &account.subject))
 }
 
 #[derive(Serialize)]

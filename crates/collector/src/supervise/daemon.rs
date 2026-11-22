@@ -218,6 +218,7 @@ impl KeyRuntime {
             register_failures: self.failed_batches(),
             restarts: self.restarts,
             rest: RestProgress { planned_jobs: self.rest_jobs, finished_jobs: 0 },
+            usage: None,
         }
     }
 }
@@ -694,7 +695,7 @@ impl Supervisor {
         }
         let Some((token, generation)) = key.tokens.current() else { return };
         if key.sent_generation != Some(generation) {
-            running.process.send(&Command::Token { token, generation });
+            running.process.send(&Command::Token { token, generation, expires_at: None });
             key.sent_generation = Some(generation);
         }
     }
@@ -855,6 +856,7 @@ impl Supervisor {
                 self.keys[index].sent_generation = None;
                 self.acquire_token(index);
             }
+            Event::Usage { .. } | Event::JobStats { .. } => {}
             Event::Halted { reason, action } => {
                 tracing::error!(%key, %reason, %action, "자식이 멈췄다고 알렸습니다");
             }

@@ -188,6 +188,10 @@ pub fn application_with_source(inputs: ApplicationInputs, mut system: SystemStat
         generation,
         source_switch,
         market_source_board,
+        public_usage: Default::default(),
+        shared_data: crate::shared_data::SharedData::new(),
+        heatmap_quotes: Default::default(),
+        heatmap_flow: Default::default(),
     })
 }
 
@@ -249,6 +253,7 @@ pub struct Started {
     pub router: axum::Router,
     pub listener: TcpListener,
     pub automatic: Option<tokio::task::JoinHandle<()>>,
+    pub public: Option<crate::public::PublicListener>,
 }
 
 async fn serve(config: Config, lock: &InstanceLock) -> ExitCode {
@@ -256,7 +261,26 @@ async fn serve(config: Config, lock: &InstanceLock) -> ExitCode {
     let Ok(started) = start(&config, lock, adapters).await else { return ExitCode::from(1) };
     started.state.keys.connect_at_start();
     tracing::info!(static_dir = %config.static_dir.display(), "요청을 받기 시작합니다");
-    if let Err(e) = axum::serve(started.listener, started.router).with_graceful_shutdown(shutdown_signal()).await {
+    let (stop, stopped) = tokio::sync::watch::channel(false);
+    tokio::spawn(async move {
+        shutdown_signal().await;
+        stop.send_replace(true);
+    });
+    let wait_for_stop = |mut stopped: tokio::sync::watch::Receiver<bool>| async move {
+        let _ = stopped.wait_for(|stop| *stop).await;
+    };
+    let operator = axum::serve(started.listener, started.router).with_graceful_shutdown(wait_for_stop(stopped.clone()));
+    let public = async {
+        match started.public {
+            Some(public) => {
+                let router = public.router();
+                axum::serve(public.listener, router).with_graceful_shutdown(wait_for_stop(stopped.clone())).await
+            }
+            None => Ok(()),
+        }
+    };
+    let (operator, public) = tokio::join!(operator, public);
+    if let Err(e) = operator.and(public) {
         tracing::error!(error = %e, "서버가 멈췄습니다");
         return ExitCode::from(1);
     }
@@ -324,6 +348,7 @@ pub async fn start(config: &Config, lock: &InstanceLock, adapters: Adapters) -> 
         Some(key) => KiwoomAuth::new(key.credentials.app_key.clone(), key.credentials.app_secret.clone(), Some(token_file_for(&key.paths))),
         None => KiwoomAuth::keyless(Some(TokenFile::new(config.token_path.clone(), lock).with_environment(config.kiwoom_environment))),
     };
+    let (kiwoom, sends) = if config.public.is_some() { crate::public::counted(kiwoom) } else { (kiwoom, Arc::new(std::sync::atomic::AtomicU64::new(0))) };
     let lane_transport = kiwoom.clone();
     let rest = match kiwoom_spacing {
         None => KiwoomRest::for_environment(kiwoom, auth, clock.clone(), config.kiwoom_environment),
@@ -352,7 +377,7 @@ pub async fn start(config: &Config, lock: &InstanceLock, adapters: Adapters) -> 
         },
         _ => AccountState::local_only(),
     };
-    let mut collector = crate::collector::CollectorBoard::configured(config.collector_admins.clone(), config.collector_socket.clone(), account.is_linked());
+    let mut collector = crate::collector::CollectorBoard::configured(config.collector_admins.clone(), config.collector_socket.clone(), account.is_linked() || config.public.is_some());
     if let Some(board) = collector.take() {
         let telegram_path = config.collector_telegram.clone().or_else(|| std::env::var_os("HOME").filter(|home| !home.is_empty()).map(|home| crate::collector::telegram::default_path(std::path::Path::new(&home))));
         let telegram = match telegram_path.map(|path| crate::collector::telegram::Telegram::load(&path)).transpose() {
@@ -378,6 +403,10 @@ pub async fn start(config: &Config, lock: &InstanceLock, adapters: Adapters) -> 
     tokio::spawn(daily_maintenance(state.clone()));
     tokio::spawn(crate::account::sync::run(state.clone()));
     tokio::spawn(crate::collector::run(state.clone()));
+    state.shared_data.start(config.shared_data.as_ref());
+    if config.shared_data.is_some() {
+        state.screener.read_shared_snapshots(state.shared_data.clone());
+    }
     crate::market_overview::start(state.clone(), config.market_samples_dir.clone());
     crate::etf::start_collection(state.clone(), config.etf_pdf_dir.clone(), config.naver_base_url.clone());
     crate::kiwoom_themes::start_collection(state.clone(), config.kiwoom_themes_dir.clone());
@@ -391,8 +420,12 @@ pub async fn start(config: &Config, lock: &InstanceLock, adapters: Adapters) -> 
     let financials = crate::financials::Financials::with_store(dart, financial_store, clock.clone());
     let automatic = config.financial_automatic.then(|| financials.start_automatic(symbols.clone()));
     let financial_routes = crate::financials::routes(financials, symbols.clone());
-    let router = router(state.clone()).merge(financial_routes);
-    Ok(Started { state, router, listener, automatic })
+    let public = crate::public::start(config, state.clone(), financial_routes.clone(), sends).await?;
+    let router = router(state.clone())
+        .merge(financial_routes)
+        .layer(axum::middleware::from_fn_with_state(state.clone(), crate::public::measure_operator_kiwoom))
+        .layer(axum::middleware::from_fn_with_state(state.clone(), crate::write_guard::guard_origin));
+    Ok(Started { state, router, listener, automatic, public })
 }
 
 async fn shutdown_signal() {

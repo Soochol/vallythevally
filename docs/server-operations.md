@@ -141,6 +141,15 @@ loginctl show-user <서버 PC 사용자> --property=Linger
 
 두 번째 명령이 `Linger=yes`를 보여야 한다.
 
+### 공용 자료 키 배정표
+
+수집 데몬이 공용 자료를 만들 `rest` 키와 일의 배정은 서버 PC의 `~/.config/vally/collector-shared.json`에 둔다([형식과 예시](collector-shared-data.md#키-배정표)). 유닛의 `VALLY_SHARED_CONFIG`가 이 경로이고 `--shared-config`로 넘어간다. 권한은 600으로 두고 비밀값은 적지 않는다(키 이름과 한도만 있다). 파일이 없으면 공용 자료 일은 돌지 않는다.
+
+- 데몬은 매일 07:35에 이 파일을 다시 읽으므로 배정을 바꾸는 데 재시작이 필요 없고 바뀐 배정은 그날 07:55에 뜨는 자식부터 쓴다. 읽지 못하면 직전 배정으로 돌고 상태 API에 경보가 난다.
+- `rest` 키는 `collector-keys.json`(형식 버전 2, `role: rest`)에 적는다. 한투 키는 서버의 한투 키(`VALLY_KIS_APP_KEY`)와 다른 키여야 한다.
+- 한도 확인(ADR 0035의 미확인 사항) 전에는 `rest` 키마다 `total_per_second: 5`를 켠 배정으로 돈다. 확인 방법은 [키별 TR 사용량](collector-shared-data.md#키별-tr-사용량)의 B5 규칙이고 줄은 `~/vally-data/hoga/usage/<날짜>.jsonl`에 남는다.
+- 이 변경으로 데몬과 자식의 줄 JSON 형식이 버전 2가 된다. 데몬 재시작은 마감 뒤에만 되므로(위 "수집 데몬 재시작") 배포한 날 새 판은 마감 뒤에 켜지고 다음 관측일부터 자료를 만든다.
+
 ### tailscale serve
 
 serve 설정은 전환 순서의 마지막에 한다. 명령과 확인은 다음과 같다.

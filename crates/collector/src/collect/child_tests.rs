@@ -44,13 +44,14 @@ fn launch_child(peer: &Peer) -> Child {
         commands: command_source,
         events: Events::to(event_sink),
         shutdown,
+        minutes: None,
     };
     let task = tokio::spawn(run_session(parts));
     Child { paths, wall, commands, events, stop, task }
 }
 
 fn token(value: &str, generation: u64) -> Command {
-    Command::Token { token: Secret::new(value.to_owned()), generation }
+    Command::Token { token: Secret::new(value.to_owned()), generation, expires_at: None }
 }
 
 fn stocks(id: &str, count: usize, types: &[RealType]) -> Registration {
@@ -496,7 +497,7 @@ fn events_are_written_one_json_line_each_with_the_version() {
     let lines: Vec<&str> = std::str::from_utf8(&out).unwrap().lines().collect();
     assert_eq!(lines.len(), 2);
     assert_eq!(parse_event(lines[0]).unwrap(), Event::Live);
-    assert_eq!(serde_json::from_str::<Value>(lines[1]).unwrap(), json!({"v": 1, "event": "down", "reason": "끊김"}));
+    assert_eq!(serde_json::from_str::<Value>(lines[1]).unwrap(), json!({"v": crate::protocol::PROTOCOL_VERSION, "event": "down", "reason": "끊김"}));
 }
 
 #[test]

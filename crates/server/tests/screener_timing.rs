@@ -12,6 +12,7 @@ use domain::{KstDate, Ohlcv, Price, StockCode, Volume, Weekday};
 use serde_json::{Value, json};
 use server::api::Market;
 use server::kiwoom::wire::{MillionWon, ScreenerListing};
+use server::screener::memory::Edition;
 use server::screener::store::{DayBar, Store, Write};
 
 const STOCKS: usize = 3_960;
@@ -143,6 +144,18 @@ fn quote_calls(fake: &ScriptedTransport) -> usize {
     fake.calls().iter().filter(|call| call.api_id == QUOTE_API).count()
 }
 
+fn judging_millis(server: &Server, seen: &mut usize) -> Vec<f64> {
+    let all: Vec<f64> = server
+        .logs()
+        .lines()
+        .filter_map(|line| line.split("judging_us=").nth(1)?.split_whitespace().next()?.parse::<f64>().ok())
+        .map(|micros| micros / 1_000.0)
+        .collect();
+    let fresh = all[*seen..].to_vec();
+    *seen = all.len();
+    fresh
+}
+
 fn live_quote_time(calls: usize) -> Duration {
     LIVE_WINDOW_WITH_MARGIN * (calls.div_ceil(LIVE_PER_SECOND_LIMIT) as u32 - 1)
 }
@@ -162,6 +175,23 @@ async fn one_screener_run_splits_into_quote_receiving_and_judging_time() {
     let filling = Instant::now();
     tokio::task::spawn_blocking(move || fill_store(&path, &stored)).await.unwrap();
     eprintln!("[계측] 저장소 {STOCKS}종목 × {HISTORY_BARS}일봉을 {:?}에 채웠다", filling.elapsed());
+    let loading_path = dir.path().join("run/screener.duckdb");
+    let (loading, edition) = tokio::task::spawn_blocking(move || {
+        let store = Store::open(&loading_path).unwrap();
+        let started = Instant::now();
+        (started, Edition::load(&store).unwrap())
+    })
+    .await
+    .map(|(started, edition)| (started.elapsed(), edition))
+    .unwrap();
+    eprintln!(
+        "[계측] 메모리 판 올리기 {:?}: 종목 {STOCKS} × 일봉 {HISTORY_BARS} = 거래 봉 {}개, 일·주·월봉 열과 종목 표가 쓰는 메모리 {} 바이트({:.1} MiB)",
+        loading,
+        edition.bar_count(),
+        edition.bytes(),
+        edition.bytes() as f64 / (1024.0 * 1024.0),
+    );
+    drop(edition);
 
     let fake = ScriptedTransport::new();
     fake.set_quote_rows((0..STOCKS).map(|i| quote_row(&code_of(i), today, 100)).collect());
@@ -169,6 +199,10 @@ async fn one_screener_run_splits_into_quote_receiving_and_judging_time() {
     fake.delay(QUOTE_API, QUOTE_REPLY_DELAY);
     let server = boot(&fake, dir.path(), &at(today, "100000"));
     let api = Api::of(&server).await;
+
+    let mut seen = 0;
+    let (first, _) = api.run_ok(&no_condition_screen()).await;
+    eprintln!("[계측] 서버를 켠 뒤 첫 실행(메모리 판을 올리는 시간이 들 수 있다): {:.0}ms, 서버가 잰 판정 {:?}ms", millis(first), judging_millis(&server, &mut seen));
 
     let before = quote_calls(&fake);
     let (collecting_probe, probe) = api.run_ok(&no_condition_screen()).await;
@@ -178,50 +212,45 @@ async fn one_screener_run_splits_into_quote_receiving_and_judging_time() {
     assert_eq!(probe["missingSummary"], 0);
     let injected = QUOTE_REPLY_DELAY * calls_per_run as u32;
     assert!(collecting_probe >= injected, "주입한 지연 {injected:?}보다 빠를 수 없다: {collecting_probe:?}");
+    judging_millis(&server, &mut seen);
 
     let before = quote_calls(&fake);
     let (judged_run, result) = api.run_ok(&distinct_screen(0)).await;
     assert_eq!(quote_calls(&fake) - before, QUOTE_CALLS_PER_RUN, "연달아 실행하면 다시 받는다. 호출 수가 두 배다");
-    assert_eq!(quote_calls(&fake), 2 * QUOTE_CALLS_PER_RUN);
+    assert_eq!(quote_calls(&fake), 3 * QUOTE_CALLS_PER_RUN);
     assert!(result["rows"].as_array().is_some_and(|rows| !rows.is_empty()), "판정이 실제로 돌았다면 맞는 종목이 있다");
-    let judging = judged_run.saturating_sub(collecting_probe);
     eprintln!(
         "[계측] 종목 {STOCKS}, 실행당 StockQuotes {calls_per_run}회, 응답당 주입 지연 {QUOTE_REPLY_DELAY:?} → 주입 합 {injected:?}, 시세 받기 실측(조건 없는 실행) {:.0}ms, 실전 대기열(TR당 초당 {LIVE_PER_SECOND_LIMIT}, ADR 0035) 기대 시세 받기 {:?}",
         millis(collecting_probe),
         live_quote_time(calls_per_run) + QUOTE_REPLY_DELAY,
     );
-    eprintln!("[계측] 시세 받기 뒤 판정(조건 2줄, 전체 실행 {:.0}ms − 시세 받기 {:.0}ms) ≈ {:.0}ms", millis(judged_run), millis(collecting_probe), millis(judging));
+    eprintln!("[계측] 판정(조건 2줄, 서버가 잰 시간) = {:?}ms (전체 실행 {:.0}ms)", judging_millis(&server, &mut seen), millis(judged_run));
 
     for (round, &concurrent) in CONCURRENT_JUDGMENTS.iter().enumerate() {
         let calls_before = quote_calls(&fake);
-        let (collecting, _) = api.run_ok(&no_condition_screen()).await;
+        api.run_ok(&no_condition_screen()).await;
+        judging_millis(&server, &mut seen);
         let held = fake.hold("수집 합류 대기", |call| call.api_id == QUOTE_API);
         let joining = async {
             held.arrived().await;
             tokio::time::sleep(JOIN_SETTLE).await;
             held.release();
-            Instant::now()
         };
         let runs = futures::future::join_all((0..concurrent).map(|i| {
             let screen = distinct_screen(10 * (round + 1) + i);
             let api = &api;
-            async move {
-                api.run_ok(&screen).await;
-                Instant::now()
-            }
+            async move { api.run_ok(&screen).await }
         }));
-        let (released, finished) = tokio::join!(joining, runs);
-        let wall = finished.iter().max().unwrap().duration_since(released);
+        tokio::join!(joining, runs);
         let joined_calls = quote_calls(&fake) - calls_before - QUOTE_CALLS_PER_RUN;
         assert_eq!(joined_calls, QUOTE_CALLS_PER_RUN, "동시 {concurrent}개 실행은 수집 작업 하나를 같이 쓴다. StockQuotes는 한 번분만 간다");
-        let each: Vec<f64> = finished.iter().map(|end| millis(end.duration_since(released).saturating_sub(collecting))).collect();
-        let mean = each.iter().sum::<f64>() / each.len() as f64;
-        let judging_wall = millis(wall.saturating_sub(collecting));
+        let each = judging_millis(&server, &mut seen);
+        assert_eq!(each.len(), concurrent);
+        let slowest = each.iter().cloned().fold(0.0, f64::max);
         eprintln!(
-            "[계측] 동시 판정 {concurrent}개: 판정 하나 평균 {mean:.0}ms(가장 느린 {:.0}ms), 전체 {judging_wall:.0}ms, 처리량 {:.2}개/초 (시세 받기 {:.0}ms는 뺐다)",
-            each.iter().cloned().fold(0.0, f64::max),
-            concurrent as f64 / (judging_wall / 1_000.0),
-            millis(collecting),
+            "[계측] 동시 판정 {concurrent}개(같은 수집 결과를 받아 함께 판정을 시작한다): 판정 하나 평균 {:.0}ms(가장 느린 {slowest:.0}ms), 처리량 {:.2}개/초 (= {concurrent} / 가장 느린 판정)",
+            each.iter().sum::<f64>() / each.len() as f64,
+            concurrent as f64 / (slowest / 1_000.0),
         );
     }
     server.stop().await;
