@@ -15,12 +15,13 @@ unit_dir="${VALLY_SYSTEMD_USER_DIR:-${XDG_CONFIG_HOME:-$HOME/.config}/systemd/us
 reload_pending="$unit_dir/.vally-collector-reload-pending"
 install_verdict="$unit_dir/.vally-collector-install-verdict"
 lock_file="$unit_dir/.vally-collector-deploy.lock"
+restart_lock_file="$unit_dir/.vally-collector-restart.lock"
 alert_script="$bin_dir/vally-collector-alert-telegram"
 stable_max=600
 lock_wait_seconds="${VALLY_COLLECTOR_LOCK_SECONDS:-120}"
 install_verdict_minutes=30
 alert_on_failure=no
-units_promoted=no
+daemon_unit_promoted=no
 
 check_window() {
     judge="$collector"
@@ -84,7 +85,7 @@ fail_promotion() {
 }
 
 promote_pending() {
-    units_promoted=no
+    daemon_unit_promoted=no
     acquire_lock || return 1
     set --
     for target in "$collector" "$bin_dir/vally-collector-alert-telegram" "$bin_dir/vally-collector-restart" "$unit_dir/vally-collector.service" "$unit_dir/vally-collector-alert.service"; do
@@ -94,7 +95,10 @@ promote_pending() {
         fi
         [ -e "$real.next" ] || continue
         case "$target" in
-            "$unit_dir"/*) : > "$reload_pending"; units_promoted=yes ;;
+            "$unit_dir"/*) : > "$reload_pending" ;;
+        esac
+        case "$target" in
+            "$unit_dir/vally-collector.service") daemon_unit_promoted=yes ;;
         esac
         if { [ ! -e "$real" ] || ln -f "$real" "$real.prev"; } && mv -f "$real.next" "$real"; then
             set -- "$@" "$real"
@@ -138,9 +142,12 @@ retry_reload() {
 before_start() {
     alert_on_failure=yes
     promote_pending || return 0
-    if [ "$units_promoted" = yes ]; then
-        systemd-run --user --unit="$reservation-after-start" --on-active=10 --collect systemctl --user restart "$service" >/dev/null || true
-        echo "유닛이 바뀌었으니 시작 뒤 10초에 한 번 다시 시작해 새 유닛 정의를 씁니다"
+    if [ "$daemon_unit_promoted" = yes ]; then
+        if systemd-run --user --unit="$reservation-after-start" --on-active=10 --collect systemctl --user restart "$service" >/dev/null; then
+            echo "데몬 유닛이 바뀌었으니 시작 뒤 10초에 한 번 다시 시작해 새 유닛 정의를 씁니다"
+        else
+            echo "vally-deploy collector-restart: 시작 뒤 재시작을 걸지 못했습니다. 새 유닛 정의는 다음 재시작부터 쓰입니다" >&2
+        fi
     fi
 }
 
@@ -169,6 +176,12 @@ cancel_reservation() {
 }
 
 restart_and_watch() {
+    mkdir -p "$unit_dir"
+    exec 8>"$restart_lock_file"
+    if command -v flock >/dev/null 2>&1 && ! flock -w "$lock_wait_seconds" 8; then
+        echo "vally-deploy collector-restart: 다른 재시작이 ${lock_wait_seconds}초 넘게 끝나지 않습니다($restart_lock_file)" >&2
+        exit 1
+    fi
     promote_pending
     systemctl --user restart "$service"
     elapsed=0

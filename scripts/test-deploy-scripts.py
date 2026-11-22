@@ -898,6 +898,25 @@ class CollectorRestartTest(FakeCollectorHost):
         self.assertEqual((self.stubs / "collector").read_text(), "#!/bin/sh\n# next\n")
         self.assertEqual(self.recorded(), [])
 
+    def test_the_cleanup_before_the_daemon_starts_leaves_the_daemon_alone_when_only_the_alert_unit_changed(self):
+        units = self.home_units()
+        (units / "vally-collector-alert.service").write_text("old")
+        (units / "vally-collector-alert.service.next").write_text("new")
+        result = self.restart("--before-start")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual((units / "vally-collector-alert.service").read_text(), "new")
+        self.assertEqual(self.recorded(), ["systemctl --user daemon-reload"])
+
+    def test_a_restart_waits_for_another_restart_to_finish_and_fails_when_it_takes_too_long(self):
+        units = self.home_units()
+        with open(units / ".vally-collector-restart.lock", "w") as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX)
+            result = self.restart("--scheduled", VALLY_COLLECTOR_LOCK_SECONDS="1")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("다른 재시작", result.stderr)
+        self.assertEqual(self.recorded(), [])
+        self.assertEqual(self.restart("--scheduled").returncode, 0)
+
     def test_the_cleanup_before_the_daemon_starts_does_nothing_without_pending_files(self):
         result = self.restart("--before-start")
         self.assertEqual(result.returncode, 0, result.stderr)
