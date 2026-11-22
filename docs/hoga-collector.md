@@ -766,10 +766,10 @@ REST용 키는 키 목록의 예비 키이고, 예비 키가 없으면 첫 활�
 | 파일 | 하는 일 |
 |---|---|
 | [`vally-collector.service`](../deploy/systemd/vally-collector.service) | `collector supervise`를 띄운다. `Restart=on-failure`, 30초 뒤 다시 뜬다. 인수 오류(종료 코드 2)는 다시 띄우지 않는다. 1시간에 5번 넘게 죽으면 멈춘다 |
-| [`vally-collector-alert.service`](../deploy/systemd/vally-collector-alert.service) | 데몬이 뜻하지 않게 끝나면 `OnFailure=`와 `ExecStopPost=`가 부른다. journal에 `crit` 줄 하나를 남기고, 디스코드 웹훅 주소 파일이 있으면 웹훅으로도 보낸다 |
-| [`vally-collector-alert-webhook`](../deploy/systemd/vally-collector-alert-webhook) | 경보 유닛이 부르는 `curl` 스크립트. 웹훅 주소를 파일에서 읽어 명령줄과 로그에 남기지 않는다 |
+| [`vally-collector-alert.service`](../deploy/systemd/vally-collector-alert.service) | 데몬이 뜻하지 않게 끝나면 `OnFailure=`와 `ExecStopPost=`가 부른다. journal에 `crit` 줄 하나를 남기고, 텔레그램 설정 파일이 있으면 텔레그램으로도 보낸다 |
+| [`vally-collector-alert-telegram`](../deploy/systemd/vally-collector-alert-telegram) | 경보 유닛이 부르는 `curl` 스크립트. 봇 토큰을 파일에서 읽어 명령줄과 로그에 남기지 않는다 |
 
-- 경보처는 journal의 `vally-collector-alert` 줄과 디스코드 웹훅이다(아래 "디스코드 경보"). 메일 같은 다른 경보처는 아직 정하지 않았다([ADR 0026](adr/0026-collector-supervisor-collects-common-and-preferred-stocks.md) "아직 정하지 않은 것").
+- 경보처는 journal의 `vally-collector-alert` 줄과 텔레그램이다(아래 "텔레그램 경보"). 메일 같은 다른 경보처는 아직 정하지 않았다([ADR 0026](adr/0026-collector-supervisor-collects-common-and-preferred-stocks.md) "아직 정하지 않은 것").
 - `OnFailure=`만으로는 한 번 죽고 다시 뜬 경우를 알릴 수 없다. systemd는 `Restart=`로 다시 뜨는 동안 유닛을 failed로 보지 않고 재시작 한도를 넘긴 뒤에야 `OnFailure=`를 부른다. 그래서 `ExecStopPost=`가 비정상 종료마다 같은 경보 유닛을 부른다. 한도를 넘기면 두 경로가 모두 불러 경보 줄이 두 번 나올 수 있다.
 - 유닛은 자식에 `nice`·`ionice`를 거는 데몬의 동작을 막지 않는다. `finalize` 자식은 `nice -n 10 ionice -c 3`로 뜨므로 `nice`와 `ionice`(util-linux)가 `PATH`에 있어야 한다. 없으면 데몬이 경보를 남기고 그대로 띄운다.
 - `OOMPolicy=continue`는 정리 자식이 메모리 부족으로 죽어도 데몬과 다른 자식을 함께 내리지 않게 한다.
@@ -800,7 +800,7 @@ REST용 키는 키 목록의 예비 키이고, 예비 키가 없으면 첫 활�
    ```sh
    mkdir -p ~/.config/systemd/user
    cp deploy/systemd/vally-collector.service deploy/systemd/vally-collector-alert.service ~/.config/systemd/user/
-   install -D -m 755 deploy/systemd/vally-collector-alert-webhook ~/.local/bin/vally-collector-alert-webhook
+   install -D -m 755 deploy/systemd/vally-collector-alert-telegram ~/.local/bin/vally-collector-alert-telegram
    systemctl --user edit --full vally-collector.service
    systemd-analyze --user verify ~/.config/systemd/user/vally-collector.service
    ```
@@ -886,25 +886,32 @@ read -rs HOLIDAY_KEY && printf '%s' "$HOLIDAY_KEY" > ~/.config/vally/holiday-ser
 
 장중에 데몬이 뜻하지 않게 죽었을 때는 이 규칙의 예외다. systemd가 30초 뒤 다시 띄우고, 데몬은 오늘 계획 파일이 있으면 그것을 써서 자식을 다시 띄운다. 죽은 동안의 끊긴 구간은 사건 기록과 커버리지에 남는다.
 
-### 디스코드 경보
+### 텔레그램 경보
 
-디스코드 웹훅 주소를 두면 경보가 PC 앞에 없거나 앱 탭이 닫혀 있어도 디스코드로 온다. 실제 디스코드로 보내는 시험은 없다. 모든 시험은 루프백 가짜 웹훅 서버로 돈다.
+텔레그램 봇 설정을 두면 경보가 PC 앞에 없거나 앱 탭이 닫혀 있어도 텔레그램으로 온다. 실제 텔레그램으로 보내는 시험은 없다. 모든 시험은 루프백 가짜 텔레그램 서버로 돈다. 전송은 Bot API `sendMessage`(`POST <API 기준 주소>/bot<토큰>/sendMessage`, JSON 본문 `chat_id`와 `text`, 링크 미리보기 끔, `parse_mode` 없음)이고 글은 4096자로 자른다.
 
-- **주소 파일.** `~/.config/vally/discord-webhook`에 웹훅 주소 한 줄을 적고 `chmod 600`으로 둔다. 데몬은 `--discord-webhook <경로>`, 앱 서버(커넥터)는 `VALLY_COLLECTOR_WEBHOOK`, 경보 유닛은 `Environment=VALLY_DISCORD_WEBHOOK=`로 경로를 바꾼다. 파일이 없으면 웹훅 보내기만 꺼지고 나머지는 그대로 돈다. 권한이 600보다 넓거나(그룹·다른 사용자 비트가 있으면), 비었거나, http·https 주소가 아니면 데몬과 앱 서버는 시작하지 않고(데몬은 종료 코드 2) 경보 스크립트는 보내지 않고 실패한다. 경보 스크립트는 내용이 있는 줄이 둘 이상이어도 보내지 않고 실패한다(뒤따르는 빈 줄은 무시한다). 오류 문구에는 파일 경로만 나오고 주소는 나오지 않는다.
-- **주소는 어디에도 남기지 않는다.** 로그, 오류 문구, 상태 API, 커밋에 나오지 않는다. `reqwest` 오류는 주소를 떼고 남기고, 경보 스크립트는 주소를 `curl`의 명령줄이 아니라 표준입력의 `--config -`로 넘긴다.
+- **설정 파일.** `~/.config/vally/telegram`에 아래 두 줄을 적고 `chmod 600`으로 둔다. `bot_token`은 BotFather가 준 토큰, `chat_id`는 받을 대화의 번호(음수 가능)나 `@채널이름`이다.
+
+  ```
+  bot_token=123456:ABC-DEF
+  chat_id=-1001234567890
+  ```
+
+  키 둘은 한 번씩만 나와야 하고 다른 키나 `키=값`이 아닌 줄은 오류다(빈 줄과 `=` 둘레의 공백은 무시한다). 토큰은 영문·숫자·`:`·`_`·`-`만 받는다. 데몬은 `--telegram <경로>`, 앱 서버(커넥터)는 `VALLY_COLLECTOR_TELEGRAM`, 경보 유닛은 `Environment=VALLY_TELEGRAM=`로 경로를 바꾼다. 경보 스크립트만 `VALLY_TELEGRAM_API`로 API 기준 주소(기본 `https://api.telegram.org`)를 바꿀 수 있고 시험이 가짜 서버를 가리킬 때 쓴다. 파일이 없으면 텔레그램 보내기만 꺼지고 나머지는 그대로 돈다. 권한이 600보다 넓거나(그룹·다른 사용자 비트가 있으면) 형식이 틀리면 데몬과 앱 서버는 시작하지 않고(데몬은 종료 코드 2) 경보 스크립트는 보내지 않고 실패한다. 오류 문구에는 파일 경로와 이유만 나오고 토큰은 나오지 않는다.
+- **토큰은 어디에도 남기지 않는다.** 토큰이 들어간 요청 주소 전체가 비밀값이다. 로그, 오류 문구, 상태 API, 커밋에 나오지 않는다. `reqwest` 오류는 주소를 떼고 남기고, 경보 스크립트는 주소를 `curl`의 명령줄이 아니라 표준입력의 `--config -`로 넘긴다.
 - **세 경로.**
 
   | 경로 | 보내는 곳 | 보내는 때 |
   |---|---|---|
-  | 데몬 프로세스가 죽음 | 경보 유닛의 `vally-collector-alert-webhook` | 유닛이 불릴 때마다. 앱 서버가 함께 멈춰 있어도 간다 |
+  | 데몬 프로세스가 죽음 | 경보 유닛의 `vally-collector-alert-telegram` | 유닛이 불릴 때마다. 앱 서버가 함께 멈춰 있어도 간다 |
   | 데몬은 살아 있는데 응답 없음 | 앱 서버의 커넥터 | 판단이 `down`이나 `unresponsive`로 바뀔 때. 브라우저 알림과 같은 시점이고 정상 복귀는 보내지 않는다 |
   | 데몬의 일반 경보 | 감독 데몬 | 상태의 `alerts`에 새 경보가 생길 때 |
 
-- **데몬 경보를 시끄럽지 않게 하는 규칙.** KST 하루에 같은 종류(`AlertKind`)는 한 번만 보낸다. 그날 같은 종류가 더 나면 개수만 세어 다음에 보내는 메시지 끝에 "같은 종류 경보가 더 있었습니다: 키 멈춤 2건"으로 붙이고, 남은 것은 그날 일정이 끝난 뒤(정리 다음) 한 번에 보낸다. 상태의 `alerts`와 현황판에는 모두 그대로 남는다. 정보성인 `excluded`와 `plan_note`는 바로 보내지 않고 모아 두었다가 장중 수집이 시작될 때(계획이 선 뒤) 한 메시지로 보낸다. 날짜별로 웹훅이 받아 준 종류와 계획 메모 문구는 `--state` 폴더(기본 `default_state_folder`)의 `webhook-ledger.json`에 남기고, 데몬이 같은 날 다시 시작하면 읽어서 같은 종류와 같은 계획 메모를 또 보내지 않는다. 기록은 보내기에 성공한 뒤에 하므로, 종료 때 큐에 남았거나 보내지 못한 경보는 재시작하면 다시 나간다. 재시작 뒤에 새로 생긴 계획 메모는 보낸 적 없는 문구라 마감 메시지로 나간다. 파일에는 그날 한 날짜만 담아 날짜가 바뀌면 덮어쓴다. 읽거나 쓰지 못하거나 깨져 있으면 경고만 남기고 처음부터 보낸다(알림을 잃는 것보다 중복이 낫다). 같은 종류의 더 난 개수는 파일에 남기지 않아 재시작하면 그 개수는 잃는다.
-- **보내기 실패.** 웹훅 서버가 없거나 오류를 내도 수집과 정리는 막히지 않는다. 경고 로그 한 줄만 남기고 그 메시지는 버린다. 디스코드의 429는 `retry_after`(없으면 `Retry-After` 헤더)만큼 기다린 뒤 다시 보내고, 한 메시지에 네 번까지 시도한다. 기다릴 시간이 60초를 넘거나 `Duration` 범위를 넘으면 포기한다. 경보 스크립트도 응답 코드로 판정해 끝내 보내지 못하면(예: `Retry-After: 9999`인 429) 0이 아닌 종료 코드로 끝나고, 메시지의 개행·탭·제어 문자는 JSON에서 이스케이프한다. 앱 서버의 알림 큐가 밀려 알림을 건너뛰면 건너뛴 개수를 경고 로그로 남긴다. 보내기는 따로 도는 작업이 차례로 하므로 기다리는 동안에도 데몬은 일을 계속한다.
-- **메시지 모양.** `[수집 경보] 09:00:05 KST · 키 멈춤 · collect-01를 멈췄습니다: ...` 한 줄이다. 앱키나 해시, 비밀값은 넣지 않는다. 멘션은 꺼서 보낸다.
-- **범위.** `collector supervise --date`로 하루만 돌리는 시험용 실행은 웹훅으로 보내지 않는다.
-- **시험.** `tests/supervise_day.rs`(데몬 경보, 하루 한 번, 429, 서버 없음·오류, 로그에 주소 없음, 계획 메모 묶음, 같은 날 재시작·깨진 기록), `tests/alert_unit.rs`(경보 유닛 스크립트를 가짜 서버로 확인), 서버의 `tests/collector_board.rs`(커넥터).
+- **데몬 경보를 시끄럽지 않게 하는 규칙.** KST 하루에 같은 종류(`AlertKind`)는 한 번만 보낸다. 그날 같은 종류가 더 나면 개수만 세어 다음에 보내는 메시지 끝에 "같은 종류 경보가 더 있었습니다: 키 멈춤 2건"으로 붙이고, 남은 것은 그날 일정이 끝난 뒤(정리 다음) 한 번에 보낸다. 상태의 `alerts`와 현황판에는 모두 그대로 남는다. 정보성인 `excluded`와 `plan_note`는 바로 보내지 않고 모아 두었다가 장중 수집이 시작될 때(계획이 선 뒤) 한 메시지로 보낸다. 날짜별로 텔레그램이 받아 준 종류와 계획 메모 문구는 `--state` 폴더(기본 `default_state_folder`)의 `telegram-ledger.json`에 남기고, 데몬이 같은 날 다시 시작하면 읽어서 같은 종류와 같은 계획 메모를 또 보내지 않는다. 기록은 보내기에 성공한 뒤에 하므로, 종료 때 큐에 남았거나 보내지 못한 경보는 재시작하면 다시 나간다. 재시작 뒤에 새로 생긴 계획 메모는 보낸 적 없는 문구라 마감 메시지로 나간다. 파일에는 그날 한 날짜만 담아 날짜가 바뀌면 덮어쓴다. 읽거나 쓰지 못하거나 깨져 있으면 경고만 남기고 처음부터 보낸다(알림을 잃는 것보다 중복이 낫다). 같은 종류의 더 난 개수는 파일에 남기지 않아 재시작하면 그 개수는 잃는다.
+- **보내기 실패.** 텔레그램 서버가 없거나 오류를 내도 수집과 정리는 막히지 않는다. 경고 로그 한 줄만 남기고 그 메시지는 버린다. 텔레그램의 429는 응답의 `parameters.retry_after`(없으면 `Retry-After` 헤더)만큼 기다린 뒤 다시 보내고, 한 메시지에 네 번까지 시도한다. 기다릴 시간이 60초를 넘거나 `Duration` 범위를 넘으면 포기한다. 경보 스크립트도 응답 코드로 판정해 끝내 보내지 못하면(예: `Retry-After: 9999`인 429) 0이 아닌 종료 코드로 끝나고, 메시지의 개행·탭·제어 문자는 JSON에서 이스케이프한다. 앱 서버의 알림 큐가 밀려 알림을 건너뛰면 건너뛴 개수를 경고 로그로 남긴다. 보내기는 따로 도는 작업이 차례로 하므로 기다리는 동안에도 데몬은 일을 계속한다.
+- **메시지 모양.** `[수집 경보] 09:00:05 KST · 키 멈춤 · collect-01를 멈췄습니다: ...` 한 줄이다. 앱키나 해시, 비밀값은 넣지 않는다. 링크 미리보기는 끄고 서식(`parse_mode`)은 쓰지 않는다.
+- **범위.** `collector supervise --date`로 하루만 돌리는 시험용 실행은 텔레그램으로 보내지 않는다.
+- **시험.** `tests/supervise_day.rs`(데몬 경보, 하루 한 번, 429, 서버 없음·오류, 로그에 토큰 없음, 계획 메모 묶음, 같은 날 재시작·깨진 기록), `tests/alert_unit.rs`(경보 유닛 스크립트를 가짜 서버로 확인), 서버의 `tests/collector_board.rs`(커넥터).
 
 ### 상태 보기
 

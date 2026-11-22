@@ -155,7 +155,7 @@ const KNOWN_KEYS: &[&str] = &[
     "VALLY_ACCOUNT_STATE_PATH",
     "VALLY_COLLECTOR_SOCKET",
     "VALLY_COLLECTOR_ADMINS",
-    "VALLY_COLLECTOR_WEBHOOK",
+    "VALLY_COLLECTOR_TELEGRAM",
 ];
 
 #[derive(Debug, Clone)]
@@ -190,7 +190,7 @@ pub struct Config {
     pub account_state_path: Option<PathBuf>,
     pub collector_socket: Option<PathBuf>,
     pub collector_admins: Vec<ProviderSubject>,
-    pub collector_webhook: Option<PathBuf>,
+    pub collector_telegram: Option<PathBuf>,
 }
 
 /// 설정을 읽으며 모은 경고. 로그를 켜기 전에 읽으므로 호출자가 나중에 남긴다.
@@ -319,7 +319,7 @@ impl Config {
             account_state_path,
             collector_socket,
             collector_admins,
-            collector_webhook: present("VALLY_COLLECTOR_WEBHOOK").map(PathBuf::from),
+            collector_telegram: present("VALLY_COLLECTOR_TELEGRAM").map(PathBuf::from),
             financial_automatic: match vars.get("VALLY_FINANCIAL_AUTOMATIC").map(String::as_str) {
                 None | Some("on") => true,
                 Some("off") => false,

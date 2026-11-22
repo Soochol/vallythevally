@@ -3,7 +3,7 @@ use std::process::ExitCode;
 use std::sync::Arc;
 
 use server::clock::Clock;
-use server::collector::webhook::{Webhook, default_path as default_webhook_path};
+use server::collector::telegram::{Telegram, default_path as default_telegram_path};
 use server::kiwoom::transport::ReqwestTransport;
 use tokio::sync::watch;
 
@@ -26,7 +26,7 @@ mod settings;
 mod status_command;
 mod status;
 mod tokens;
-mod webhook;
+mod telegram;
 mod wire;
 
 pub use daemon::{Control, Injected, Inputs, StartError, Supervisor, load_plan};
@@ -38,7 +38,7 @@ pub use settings::{MarketOpenCheck, Settings, SocketSetting};
 pub use status_command::run as run_status;
 pub use status::{Alert, AlertKind, DaemonStatus, DayPhase, KeyState, KeyStatus, ObservationDay, ObservationVerdict, RestProgress, Today};
 pub use api::{MAX_CONNECTIONS, OUTBOX_LINES, SOCKET_FILE_NAME, StatusSocket};
-pub use webhook::AlertWebhook;
+pub use telegram::AlertTelegram;
 pub use files::{read_coverage, read_disk};
 pub use wire::{API_VERSION, CoverageDay, CoverageState, DayBytes, DiskUsage, ErrorCode, Filesystem, Reply, ReplyBody, Request, RequestKind};
 
@@ -61,7 +61,7 @@ const SPEC: ArgSpec = ArgSpec {
         "keep-early",
         "keep",
         "early-period",
-        "discord-webhook",
+        "telegram",
     ],
     flag_options: &[],
 };
@@ -78,7 +78,7 @@ const DAEMON_ONLY_OPTIONS: [&str; 12] = [
     "keep-early",
     "keep",
     "early-period",
-    "discord-webhook",
+    "telegram",
 ];
 
 const HOLIDAY_KEY_FILE: &str = ".config/vally/holiday-service-key";
@@ -159,10 +159,10 @@ pub fn schedule_from_arguments(raw_arguments: &[String]) -> Result<ScheduleSetti
     parse_schedule(&arguments)
 }
 
-fn load_webhook(arguments: &Arguments, process: &Variables) -> Result<Option<Webhook>, String> {
-    let default = || process.get("HOME").filter(|home| !home.is_empty()).map(|home| default_webhook_path(std::path::Path::new(home)));
-    let Some(path) = arguments.value("discord-webhook").map(PathBuf::from).or_else(default) else { return Ok(None) };
-    Webhook::load(&path).map_err(|error| error.to_string())
+fn load_telegram(arguments: &Arguments, process: &Variables) -> Result<Option<Telegram>, String> {
+    let default = || process.get("HOME").filter(|home| !home.is_empty()).map(|home| default_telegram_path(std::path::Path::new(home)));
+    let Some(path) = arguments.value("telegram").map(PathBuf::from).or_else(default) else { return Ok(None) };
+    Telegram::load(&path).map_err(|error| error.to_string())
 }
 
 fn run_daemon(arguments: &Arguments, keys_path: &std::path::Path) -> ExitCode {
@@ -199,8 +199,8 @@ fn run_daemon(arguments: &Arguments, keys_path: &std::path::Path) -> ExitCode {
             Err(message) => return usage_error(message),
         },
     };
-    let webhook = match load_webhook(arguments, &process) {
-        Ok(webhook) => webhook,
+    let telegram = match load_telegram(arguments, &process) {
+        Ok(telegram) => telegram,
         Err(message) => return usage_error(message),
     };
     let executable = match std::env::current_exe() {
@@ -236,7 +236,7 @@ fn run_daemon(arguments: &Arguments, keys_path: &std::path::Path) -> ExitCode {
             holiday_key_path,
         };
         let daemon = match Daemon::start(inputs, injected) {
-            Ok(daemon) => daemon.with_webhook(webhook.map(|webhook| AlertWebhook::spawn(webhook, &state_folder))),
+            Ok(daemon) => daemon.with_telegram(telegram.map(|telegram| AlertTelegram::spawn(telegram, &state_folder))),
             Err(error) => {
                 eprintln!("supervise: 시작하지 못했습니다: {error}");
                 return ExitCode::FAILURE;
@@ -324,34 +324,34 @@ mod tests {
     use super::*;
     use std::time::{Duration, Instant};
 
-    fn webhook_arguments(path: &std::path::Path) -> Arguments {
-        let raw: Vec<String> = ["--keys", "keys.json", "--discord-webhook", &path.display().to_string()].map(str::to_owned).to_vec();
+    fn telegram_arguments(path: &std::path::Path) -> Arguments {
+        let raw: Vec<String> = ["--keys", "keys.json", "--telegram", &path.display().to_string()].map(str::to_owned).to_vec();
         Arguments::parse(&raw, &SPEC).unwrap()
     }
 
     #[test]
-    fn the_webhook_file_comes_from_the_option_or_home_and_a_wide_one_stops_the_start() {
+    fn the_telegram_file_comes_from_the_option_or_home_and_a_wide_one_stops_the_start() {
         use std::os::unix::fs::PermissionsExt;
         let folder = tempfile::tempdir().unwrap();
         let file = folder.path().join("hook");
-        std::fs::write(&file, "http://127.0.0.1:1/api/webhooks/1/SECRET-TOKEN\n").unwrap();
+        std::fs::write(&file, "bot_token=1:SECRET-TOKEN\nchat_id=1\n").unwrap();
         std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o644)).unwrap();
-        let message = load_webhook(&webhook_arguments(&file), &Variables::default()).unwrap_err();
+        let message = load_telegram(&telegram_arguments(&file), &Variables::default()).unwrap_err();
         assert!(message.contains("chmod 600") && !message.contains("SECRET-TOKEN"), "{message}");
         std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o600)).unwrap();
-        assert!(load_webhook(&webhook_arguments(&file), &Variables::default()).unwrap().is_some());
+        assert!(load_telegram(&telegram_arguments(&file), &Variables::default()).unwrap().is_some());
 
         let none = Arguments::parse(&["--keys".to_owned(), "keys.json".to_owned()], &SPEC).unwrap();
-        assert!(load_webhook(&none, &Variables::default()).unwrap().is_none(), "HOME이 없으면 꺼진다");
+        assert!(load_telegram(&none, &Variables::default()).unwrap().is_none(), "HOME이 없으면 꺼진다");
         let mut process = Variables::default();
         process.insert("HOME".to_owned(), folder.path().display().to_string());
-        assert!(load_webhook(&none, &process).unwrap().is_none(), "기본 파일이 없으면 꺼진다");
-        let default_file = server::collector::webhook::default_path(folder.path());
+        assert!(load_telegram(&none, &process).unwrap().is_none(), "기본 파일이 없으면 꺼진다");
+        let default_file = server::collector::telegram::default_path(folder.path());
         std::fs::create_dir_all(default_file.parent().unwrap()).unwrap();
         std::fs::copy(&file, &default_file).unwrap();
-        assert!(load_webhook(&none, &process).unwrap().is_some(), "HOME 아래 기본 경로를 읽는다");
+        assert!(load_telegram(&none, &process).unwrap().is_some(), "HOME 아래 기본 경로를 읽는다");
         std::fs::set_permissions(&default_file, std::fs::Permissions::from_mode(0o660)).unwrap();
-        assert!(load_webhook(&none, &process).is_err());
+        assert!(load_telegram(&none, &process).is_err());
     }
 
     #[test]

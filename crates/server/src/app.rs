@@ -262,15 +262,15 @@ pub async fn start(config: &Config, lock: &InstanceLock, adapters: Adapters) -> 
     };
     let mut collector = crate::collector::CollectorBoard::configured(config.collector_admins.clone(), config.collector_socket.clone(), account.is_linked());
     if let Some(board) = collector.take() {
-        let webhook_path = config.collector_webhook.clone().or_else(|| std::env::var_os("HOME").filter(|home| !home.is_empty()).map(|home| crate::collector::webhook::default_path(std::path::Path::new(&home))));
-        let webhook = match webhook_path.map(|path| crate::collector::webhook::Webhook::load(&path)).transpose() {
-            Ok(webhook) => webhook.flatten(),
+        let telegram_path = config.collector_telegram.clone().or_else(|| std::env::var_os("HOME").filter(|home| !home.is_empty()).map(|home| crate::collector::telegram::default_path(std::path::Path::new(&home))));
+        let telegram = match telegram_path.map(|path| crate::collector::telegram::Telegram::load(&path)).transpose() {
+            Ok(telegram) => telegram.flatten(),
             Err(e) => {
-                tracing::error!(error = %e, "수집 경보 웹훅 주소 파일을 쓸 수 없습니다");
+                tracing::error!(error = %e, "수집 경보 텔레그램 설정 파일을 쓸 수 없습니다");
                 return Err(StartFailure);
             }
         };
-        collector = Some(board.with_webhook(webhook));
+        collector = Some(board.with_telegram(telegram));
     }
     let system = SystemState::new(key_file, env_key, startup.file_problem, crate::api::SystemSettings::from_config(config)).with_public_ip(Arc::new(public_ip)).with_account(account).with_collector(collector).with_tailnet_hosts(config.tailnet_hosts.clone());
     let state = application_with_system(ApplicationInputs { rest: rest.clone(), clock: clock.clone(), symbols: symbols.clone(), db, screener_store, stream, static_dir: config.static_dir.clone(), screener_update_on_connect: config.screener_update_on_start }, system);

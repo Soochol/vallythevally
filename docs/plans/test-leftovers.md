@@ -29,7 +29,7 @@
 | `crates/server/tests/account_login.rs` 570행 | 상태 디렉터리 0o500 | 막는다. 이 플랜에서 고친다 |
 | `crates/server/tests/token.rs`의 `with_modes` | 파일 0o644, 디렉터리 0o755·0o700 | 막지 않는다. 디렉터리에 소유자 쓰기가 남는다 |
 | `crates/server/src/kiwoom/token_file.rs`, `key_file.rs`, `trading/switch.rs`의 단위 시험 | 파일 0o644·0o600, 디렉터리 0o755 | 막지 않는다 |
-| `crates/server/src/collector/webhook.rs`, `crates/collector/src/supervise/mod.rs`의 단위 시험 | 파일 권한 | 막지 않는다 |
+| `crates/server/src/collector/telegram.rs`, `crates/collector/src/supervise/mod.rs`의 단위 시험 | 파일 권한 | 막지 않는다 |
 | `crates/collector/tests/plan.rs`, `alert_unit.rs`, `supervise_process.rs` | 파일 0o600·0o644·0o755 | 막지 않는다 |
 | `crates/server/tests/kiwoom_link.rs`, `financials*.rs`, `collector_board.rs` | 디렉터리 0o700, 파일 0o600·0o644 | 막지 않는다 |
 | `scripts/test-dev.py`, `scripts/test-live.py`, `scripts/test-offline.sh`, `.claude/skills/verify-vally/scripts/vv.py` | 실행 권한 추가, 디렉터리 0o700 | 막지 않는다 |
