@@ -1,4 +1,3 @@
-//! 공개 오류 응답. 키움 원문을 싣지 않고, 429·503에는 `retryAt`과 `Retry-After`를 맞춰 싣는다.
 
 use axum::body::Body;
 use axum::http::{HeaderValue, StatusCode, header};
@@ -60,7 +59,6 @@ fn is_kiwoom_code(code: ApiErrorCode) -> bool {
     matches!(code, ApiErrorCode::KiwoomUnavailable | ApiErrorCode::KiwoomAuthFailed | ApiErrorCode::AccountServerUnavailable)
 }
 
-/// 안쪽이 낸 오류 응답을 공개 모양으로 고친다. 오류가 아닌 응답은 건드리지 않는다.
 pub(super) async fn shape(response: Response, now: i64) -> Response {
     let status = response.status();
     if !(status.is_client_error() || status.is_server_error()) {

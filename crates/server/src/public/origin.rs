@@ -1,4 +1,3 @@
-//! 공개 리스너의 Host·Origin·Content-Type 검사(D5).
 
 use std::sync::Arc;
 

@@ -1,5 +1,3 @@
-//! 임시 장치: 공개 요청이 운영자 키움 키의 대기열을 밀어내는 크기를 묶는다(ADR D10·D11).
-//! `collector-shared-data`가 공용 자료를 수집 데몬으로 옮기면 이 모듈과 `public/mod.rs`에서 부르는 줄을 지운다.
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -95,7 +93,6 @@ impl KiwoomGuard {
         }
     }
 
-    /// 묶음 자리와 계정당 키움 경로 자리를 함께 잡는다. 자리가 없으면 기다리지 않는다. `public-user-data`의 보드·흐름도 이 함수를 쓴다.
     pub fn hold(&self, bundle: Bundle, account: &str) -> Result<Held, Refusal> {
         let pool = match bundle {
             Bundle::Rankings => Some(&self.rankings),

@@ -1,4 +1,3 @@
-//! 공개 리스너 설정의 해석. `config.rs`는 `PublicSettings::from_vars`만 부른다.
 
 use std::collections::{BTreeMap, HashMap};
 use std::net::{IpAddr, SocketAddr};

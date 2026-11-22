@@ -1,5 +1,3 @@
-//! 공개 리스너(ADR 0040). 같은 프로세스에 두 번째 리스너를 열고, 허용 목록 라우터와 로그인·검사·제한을 건다.
-//! 운영자 리스너의 라우트는 바꾸지 않는다.
 
 mod errors;
 mod gate;
@@ -86,7 +84,6 @@ impl Transport for CountingTransport {
     }
 }
 
-/// 키움으로 나가는 요청 수를 센다. 공개 요청 앞뒤의 차이가 그 요청의 TR 수 추정이다(운영자 호출이 같은 때 섞일 수 있다).
 pub fn counted(inner: Arc<dyn Transport>) -> (Arc<dyn Transport>, Arc<AtomicU64>) {
     let sent = Arc::new(AtomicU64::new(0));
     (Arc::new(CountingTransport { inner, sent: sent.clone() }), sent)
@@ -153,7 +150,6 @@ impl PublicListener {
         self.router_with(Router::new())
     }
 
-    /// `extra`는 운영 빌드에서 비어 있다. 시험이 panic 라우트 같은 것을 `/api` 아래에 붙인다.
     pub fn router_with(&self, extra: Router<Arc<AppState>>) -> Router {
         let runtime = self.runtime.clone();
         let rankings = crate::rankings::routes().route_layer(from_fn_with_state(runtime.clone(), kiwoom_guard::rankings));
@@ -233,7 +229,6 @@ async fn finish(State(runtime): State<Arc<Runtime>>, request: Request, next: Nex
     response
 }
 
-/// 운영자 리스너 전용 `GET /api/public-usage`.
 pub async fn usage_page(State(state): State<Arc<AppState>>) -> Json<UsageSnapshot> {
     Json(state.public_usage.snapshot(state.clock.now().unix()))
 }
@@ -244,7 +239,6 @@ fn is_kiwoom_path(path: &str) -> bool {
     PREFIXES.iter().any(|prefix| path.starts_with(prefix)) || (path.starts_with("/api/symbols/") && SYMBOL_SUFFIXES.iter().any(|suffix| path.ends_with(suffix)))
 }
 
-/// 운영자 리스너가 키움 경로 응답 시간을 분마다 p50과 최대로 센다(D7b(3)).
 pub async fn measure_operator_kiwoom(State(state): State<Arc<AppState>>, request: Request, next: Next) -> Response {
     if !is_kiwoom_path(request.uri().path()) {
         return next.run(request).await;

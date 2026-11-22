@@ -1,4 +1,3 @@
-//! 조정 근거(D7b): 묶음별 응답·429·503·대기·TR·캐시 적중, 상위 계정, 운영자 쪽 키움 경로 응답 시간.
 
 use std::collections::{BTreeMap, HashMap};
 use std::sync::Mutex;

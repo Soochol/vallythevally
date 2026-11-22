@@ -30,7 +30,6 @@ pub(crate) fn check_host<'a>(st: &AppState, headers: &'a HeaderMap, uri: &'a Uri
     Ok(host)
 }
 
-/// 운영자 리스너의 모든 요청: Host와 Origin을 보고, `/api/*`는 `Sec-Fetch-Site`가 다른 사이트면 거절한다(ADR D27).
 pub(crate) async fn guard_origin(State(st): State<Arc<AppState>>, req: Request, next: Next) -> Response {
     if let Err(rejected) = check_request_origin(&st, &req) {
         tracing::warn!(method = %req.method(), path = req.uri().path(), "출처가 맞지 않는 요청을 거절했습니다");

@@ -1,4 +1,3 @@
-//! 요청 제한의 부품: 토큰 버킷, 분당 창, 동시 처리 자리. 시계는 `Clock`을 주입한다.
 
 use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
