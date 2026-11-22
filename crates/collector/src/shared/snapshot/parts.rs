@@ -84,6 +84,10 @@ fn write_boards(shared_dir: &Path, observation_date: KstDate, parts: Vec<Part>, 
         }
     }
     indices.sort_by(|a, b| a.code.cmp(&b.code));
+    let (requested_all, read_all): (u32, usize) = by_venue.values().fold((0, 0), |(requested, read), (venue_requested, rows)| (requested + venue_requested, read + rows.len()));
+    if requested_all > 0 && read_all == 0 {
+        return Err(io::Error::other(format!("모든 키의 응답에서 읽히는 행이 하나도 없습니다({requested_all}종목 요청). 이전 판을 둡니다")));
+    }
     for (venue, (requested, mut stocks)) in by_venue {
         stocks.sort_by(|a, b| a.code.cmp(&b.code));
         let missing = requested.saturating_sub(stocks.len() as u32);

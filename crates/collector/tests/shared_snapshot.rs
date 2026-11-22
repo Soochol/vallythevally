@@ -433,3 +433,55 @@ async fn a_listing_of_the_day_that_appears_after_a_fallback_replaces_the_earlier
     run_for(&looping, &rest, "rest-01", &folder.shared(), &clock, &stats, 30).await;
     assert!(fake.total() > calls_before && job.failures() == 0, "그날 목록은 캐시되어 계속 돈다");
 }
+
+#[tokio::test(start_paused = true)]
+async fn one_omitted_stock_of_a_tiny_venue_is_missing_not_a_failed_tick_and_a_broken_listing_keeps_the_cached_one() {
+    let folder = Folder::with_listing(&[20261117]);
+    let stocks: Vec<ListedStock> = (0..STOCKS).map(|index| ListedStock { code: code_of(index), nxt_enabled: index == 0 }).collect();
+    write_listing(folder.root.path(), &ListingFile { format_version: LISTING_FORMAT_VERSION, date: 20261117, fetched_at: "x".into(), stocks }).unwrap();
+    let clock = Clock::fake(at(20261118, 10, 0, 0));
+    let fake = FakeKiwoom::new();
+    fake.omitted.lock().unwrap().insert(code_of(0));
+    let (job, stats) = (Arc::new(SnapshotJob::default()), LoopStats::default());
+    let rest = rest_of(&fake, &clock);
+    let looping = job_loop(&job, 20261118, Slice::WHOLE, Value::Null);
+    run_for(&looping, &rest, "rest-01", &folder.shared(), &clock, &stats, 5).await;
+    assert_eq!(job.failures(), 0, "NXT에 한 종목뿐이고 그 행이 빠져도 판은 써진다");
+    let nxt = board_of(&folder.shared(), Venue::Nxt);
+    assert_eq!((nxt.body.requested, nxt.body.missing, nxt.body.stocks.len()), (1, 1, 0));
+    assert_eq!(board_of(&folder.shared(), Venue::Krx).body.stocks.len(), STOCKS - 1);
+
+    std::fs::write(folder.root.path().join("listing").join("20261118.json"), "{broken").unwrap();
+    run_for(&looping, &rest, "rest-01", &folder.shared(), &clock, &stats, 60).await;
+    assert_eq!(job.failures(), 0, "그날 목록 파일이 깨져도 이미 읽은 목록으로 계속 돈다: {:?}", stats.last_error());
+}
+
+#[tokio::test(start_paused = true)]
+async fn with_two_keys_a_key_whose_share_is_one_omitted_stock_does_not_fail_the_tick() {
+    let folder = Folder::with_listing(&[]);
+    let stocks: Vec<ListedStock> = (0..101).map(|index| ListedStock { code: code_of(index), nxt_enabled: false }).collect();
+    write_listing(folder.root.path(), &ListingFile { format_version: LISTING_FORMAT_VERSION, date: 20261118, fetched_at: "x".into(), stocks }).unwrap();
+    let clock = Clock::fake(at(20261118, 10, 0, 0));
+    let (first, second) = (FakeKiwoom::new(), FakeKiwoom::new());
+    for fake in [&first, &second] {
+        fake.omitted.lock().unwrap().insert(code_of(100));
+    }
+    let (job_first, job_second) = (Arc::new(SnapshotJob::default()), Arc::new(SnapshotJob::default()));
+    let (stats_first, stats_second) = (LoopStats::default(), LoopStats::default());
+    let (rest_first, rest_second) = (rest_of(&first, &clock), rest_of(&second, &clock));
+    let (loop_first, loop_second) = (job_loop(&job_first, 20261118, Slice { index: 0, count: 2 }, Value::Null), job_loop(&job_second, 20261118, Slice { index: 1, count: 2 }, Value::Null));
+    let shared = folder.shared();
+    let (key_first, key_second) = (KeyName::parse("rest-01").unwrap(), KeyName::parse("rest-02").unwrap());
+    tokio::select! {
+        _ = async {
+            tokio::join!(
+                loop_first.run(Market::Kiwoom(&rest_first), &key_first, &shared, &clock, &stats_first),
+                loop_second.run(Market::Kiwoom(&rest_second), &key_second, &shared, &clock, &stats_second),
+            );
+        } => {}
+        _ = sleep(Duration::from_secs(5)) => {}
+    }
+    assert_eq!((job_first.failures(), job_second.failures()), (0, 0), "{:?} {:?}", stats_first.last_error(), stats_second.last_error());
+    let krx = board_of(&shared, Venue::Krx);
+    assert_eq!((krx.body.requested, krx.body.missing, krx.body.stocks.len()), (101, 1, 100));
+}

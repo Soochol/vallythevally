@@ -120,9 +120,17 @@ impl SnapshotJob {
         if let Some(kept) = cached.as_ref().filter(|kept| kept.observation_date == observation_date && (kept.source_date == date || !listing_path(data_dir, date).exists())) {
             return Ok(kept.stocks.clone());
         }
-        let file = read_listing_upto(data_dir, date)
-            .map_err(|error| JobError(error.to_string()))?
-            .ok_or_else(|| JobError(format!("{} 아래에 {date} 이전의 전체 종목 행 파일이 없습니다", data_dir.join("listing").display())))?;
+        let file = match read_listing_upto(data_dir, date) {
+            Ok(Some(file)) => file,
+            Ok(None) => return Err(JobError(format!("{} 아래에 {date} 이전의 전체 종목 행 파일이 없습니다", data_dir.join("listing").display()))),
+            Err(error) => match cached.as_ref().filter(|kept| kept.observation_date == observation_date) {
+                Some(kept) => {
+                    tracing::warn!(%error, "그날 종목 행 파일을 읽지 못해 이미 읽은 목록을 계속 씁니다");
+                    return Ok(kept.stocks.clone());
+                }
+                None => return Err(JobError(error.to_string())),
+            },
+        };
         let stocks = Arc::new(file.stocks);
         *cached = Some(CachedListing { observation_date, source_date: file.date, stocks: stocks.clone() });
         Ok(stocks)

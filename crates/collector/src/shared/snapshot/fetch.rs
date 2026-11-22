@@ -71,9 +71,6 @@ pub(super) async fn fetch_slice(rest: &KiwoomRest, units: &[Unit], venues: &[Ven
             Err(error) => failures.push(error),
         }
     }
-    for part in by_venue.values().filter(|part| part.requested > 0 && part.rows.is_empty()) {
-        failures.push(format!("{:?} 응답에서 읽히는 행이 하나도 없습니다({}종목 요청)", part.venue, part.requested));
-    }
     if let Some(first) = failures.first() {
         return Err(format!("묶음 {}개가 실패해 이 판을 쓰지 않습니다(첫 실패: {first})", failures.len()));
     }
