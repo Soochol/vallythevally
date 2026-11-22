@@ -41,7 +41,7 @@ export function boardOf(document: HeatmapThemes, memberOf: MemberOf, order: Heat
     if (right === null) return -1;
     return right - left || a.i - b.i;
   }).map(({ theme }) => theme);
-  return { revision: document.revision, order, asOf, themes: ordered };
+  return { revision: document.revision, order, asOf, source: "mine", catalog: null, themes: ordered };
 }
 
 export const parseOrder = (raw: string | null): HeatmapThemeOrder | null => (raw === null ? "rate" : raw === "rate" || raw === "custom" || raw === "traded" ? raw : null);

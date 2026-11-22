@@ -11,7 +11,7 @@ use domain::{KstTime, Symbol, Venue};
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
-use crate::api::{Quote, Revision, SymbolCode, UnixSeconds};
+use crate::api::{KstDate, Quote, Revision, SymbolCode, UnixSeconds};
 use crate::http::{ApiFailure, AppState, Lookup, symbol_list, venue_param};
 use crate::userdata;
 pub use board::{HeatmapBoardMember, HeatmapBoardTheme, HeatmapThemeOrder, HeatmapThemeSummary, board_theme, in_order};
@@ -25,7 +25,37 @@ pub struct HeatmapBoard {
     pub revision: Revision,
     pub order: HeatmapThemeOrder,
     pub as_of: Option<UnixSeconds>,
+    pub source: HeatmapSource,
+    pub catalog: Option<KiwoomCatalogInfo>,
     pub themes: Vec<HeatmapBoardTheme>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub enum HeatmapSource {
+    #[default]
+    Mine,
+    Kiwoom,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub enum KiwoomCatalogState {
+    Ready,
+    Collecting,
+    Empty,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct KiwoomCatalogInfo {
+    pub date: Option<KstDate>,
+    pub collected_at: Option<UnixSeconds>,
+    pub themes: u32,
+    pub state: KiwoomCatalogState,
 }
 
 struct Entry {
@@ -97,7 +127,7 @@ async fn board(State(st): State<Arc<AppState>>, Extension(cache): Extension<Arc<
         Symbol::parse(&code.0).ok().and_then(|symbol| directory.as_deref().and_then(|d| d.get(symbol))).map_or_else(|| code.0.clone(), |info| info.name.clone())
     };
     let themes = document.themes.iter().map(|theme| board_theme(theme, &by_code, name_of)).collect();
-    Ok(Json(HeatmapBoard { revision: document.revision, order, as_of, themes: in_order(themes, order) }))
+    Ok(Json(HeatmapBoard { revision: document.revision, order, as_of, source: HeatmapSource::Mine, catalog: None, themes: in_order(themes, order) }))
 }
 
 #[cfg(test)]
