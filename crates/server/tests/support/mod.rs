@@ -172,6 +172,8 @@ impl ScriptedTransport {
             "ka20007" => "ka20007_001",
             "ka20008" => "ka20008_001",
             "ka20019" => "ka20019_synthetic",
+            "ka90001" => "ka90001_synthetic",
+            "ka90002" => "ka90002_synthetic",
             _ => panic!("unscripted transport request: {id}: {body}"),
         };
         let mut value = fixture(name);

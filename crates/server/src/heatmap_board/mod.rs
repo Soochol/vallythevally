@@ -11,7 +11,7 @@ use domain::{KstTime, Symbol, Venue};
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
-use crate::api::{KstDate, Quote, Revision, SymbolCode, UnixSeconds};
+use crate::api::{HeatmapTheme, HeatmapThemes, KstDate, Quote, Revision, SymbolCode, UnixSeconds};
 use crate::http::{ApiFailure, AppState, Lookup, symbol_list, venue_param};
 use crate::userdata;
 pub use board::{HeatmapBoardMember, HeatmapBoardTheme, HeatmapThemeOrder, HeatmapThemeSummary, board_theme, in_order};
@@ -105,7 +105,15 @@ async fn board(State(st): State<Arc<AppState>>, Extension(cache): Extension<Arc<
         None => HeatmapThemeOrder::default(),
         Some(raw) => HeatmapThemeOrder::parse(raw).ok_or_else(|| ApiFailure::bad_request("order는 rate, custom 또는 traded여야 합니다"))?,
     };
-    let document = userdata::get_heatmap_themes(&st.db).await?;
+    let source = match q.get("source").map(String::as_str) {
+        None | Some("mine") => HeatmapSource::Mine,
+        Some("kiwoom") => HeatmapSource::Kiwoom,
+        Some(_) => return Err(ApiFailure::bad_request("source는 mine 또는 kiwoom이어야 합니다")),
+    };
+    let (document, catalog) = match source {
+        HeatmapSource::Mine => (userdata::get_heatmap_themes(&st.db).await?, None),
+        HeatmapSource::Kiwoom => (kiwoom_document(&st.kiwoom_catalog), Some(st.kiwoom_catalog.info())),
+    };
     let mut wanted: Vec<Symbol> = Vec::new();
     for code in document.themes.iter().flat_map(|t| &t.symbols) {
         let symbol = Symbol::parse(&code.0).map_err(|e| ApiFailure::bad_request(format!("저장된 테마의 종목 코드가 틀렸습니다: {e}")))?;
@@ -127,7 +135,24 @@ async fn board(State(st): State<Arc<AppState>>, Extension(cache): Extension<Arc<
         Symbol::parse(&code.0).ok().and_then(|symbol| directory.as_deref().and_then(|d| d.get(symbol))).map_or_else(|| code.0.clone(), |info| info.name.clone())
     };
     let themes = document.themes.iter().map(|theme| board_theme(theme, &by_code, name_of)).collect();
-    Ok(Json(HeatmapBoard { revision: document.revision, order, as_of, source: HeatmapSource::Mine, catalog: None, themes: in_order(themes, order) }))
+    Ok(Json(HeatmapBoard { revision: document.revision, order, as_of, source, catalog, themes: in_order(themes, order) }))
+}
+
+pub const KIWOOM_THEME_ID_PREFIX: &str = "kiwoom-";
+
+fn kiwoom_document(store: &crate::kiwoom_themes::CatalogStore) -> HeatmapThemes {
+    let themes = store.latest().map_or_else(Vec::new, |catalog| {
+        catalog
+            .themes
+            .iter()
+            .map(|theme| HeatmapTheme {
+                id: format!("{KIWOOM_THEME_ID_PREFIX}{}", theme.code),
+                name: theme.name.clone(),
+                symbols: crate::kiwoom_themes::members_of(theme).into_iter().map(|code| SymbolCode(Symbol::Stock(code).as_wire())).collect(),
+            })
+            .collect()
+    });
+    HeatmapThemes { themes, revision: Revision(0) }
 }
 
 #[cfg(test)]

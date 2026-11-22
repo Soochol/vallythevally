@@ -1,3 +1,5 @@
+mod catalog;
+
 use std::collections::{BTreeSet, HashMap};
 use std::sync::{Arc, Mutex};
 
@@ -15,6 +17,8 @@ use crate::http::{ApiFailure, AppState, Lookup, venue_param};
 use crate::kiwoom::api::{MarketRequest, THEME_PERIOD_DAYS, ThemeGroups, ThemeMembers};
 use crate::kiwoom::rest::{ContKey, KiwoomRest, MergeScope, Priority};
 use crate::kiwoom::wire::{LimitMove, ThemeGroupsResponse, ThemeMembersResponse};
+
+pub use catalog::{CATALOG_AT, CatalogStore, StoredCatalog, StoredTheme, collect, members_of, start_collection};
 
 pub const FRESH_SECS: i64 = 45;
 pub const MAX_PAGES: usize = 20;
@@ -87,24 +91,24 @@ pub struct KiwoomThemeMembers {
     pub skipped: u32,
 }
 
-struct Walked<T> {
+pub(crate) struct Walked<T> {
     bodies: Vec<T>,
     complete: bool,
 }
 
 #[derive(Debug)]
-enum WalkFailure {
+pub enum WalkFailure {
     Kiwoom(crate::kiwoom::rest::KiwoomError),
     KeyRepeated,
     KeyMissing,
 }
 
-async fn walk<R: MarketRequest>(rest: &KiwoomRest, request: &R) -> Result<Walked<R::Response>, WalkFailure> {
+async fn walk<R: MarketRequest>(rest: &KiwoomRest, request: &R, priority: Priority) -> Result<Walked<R::Response>, WalkFailure> {
     let mut bodies = Vec::new();
     let mut used: Vec<ContKey> = Vec::new();
     let mut cont: Option<ContKey> = None;
     while bodies.len() < MAX_PAGES {
-        let page = rest.call(request, cont.as_ref(), Priority::Screen, MergeScope::default()).await.map_err(WalkFailure::Kiwoom)?;
+        let page = rest.call(request, cont.as_ref(), priority, MergeScope::default()).await.map_err(WalkFailure::Kiwoom)?;
         bodies.push(page.body);
         match page.next {
             Some(next) if used.contains(&next) => return Err(WalkFailure::KeyRepeated),
@@ -184,7 +188,7 @@ async fn list(State(st): State<Arc<AppState>>, Extension(cache): Extension<Arc<T
         return Ok(Json((*hit).clone()));
     }
     let request = ThemeGroups::by_change_rate(days, venue).expect("days는 범위 안이다");
-    let walked = walk(&st.rest, &request).await.map_err(|e| walk_failure(e, &st))?;
+    let walked = walk(&st.rest, &request, Priority::Screen).await.map_err(|e| walk_failure(e, &st))?;
     let unknown = walked.bodies.iter().flat_map(ThemeGroupsResponse::unknown_fields).collect();
     let mut seen = BTreeSet::new();
     let (mut themes, mut skipped) = (Vec::new(), 0);
@@ -213,7 +217,7 @@ async fn members(State(st): State<Arc<AppState>>, Extension(cache): Extension<Ar
     if let Some(hit) = fresh(&cache.members, &key, now) {
         return Ok(Json((*hit).clone()));
     }
-    let walked = walk(&st.rest, &request).await.map_err(|e| walk_failure(e, &st))?;
+    let walked = walk(&st.rest, &request, Priority::Screen).await.map_err(|e| walk_failure(e, &st))?;
     let unknown = walked.bodies.iter().flat_map(ThemeMembersResponse::unknown_fields).collect();
     let mut seen = BTreeSet::new();
     let (mut list, mut skipped) = (Vec::new(), 0);

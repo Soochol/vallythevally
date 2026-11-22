@@ -169,3 +169,64 @@ async fn bad_periods_and_theme_codes_are_refused_before_kiwoom_is_called() {
     }
     assert!(h.kiwoom.sent.lock().unwrap().is_empty());
 }
+
+fn members_body(codes: &[&str]) -> Value {
+    json!({"return_code": 0, "flu_rt": "+1.00", "dt_prft_rt": "+1.00", "thema_comp_stk": codes.iter().map(|c| json!({"stk_cd": format!("{c}_AL"), "stk_nm": c, "cur_prc": "1000", "flu_sig": "2", "flu_rt": "+1.00", "acc_trde_qty": "10", "dt_prft_rt_n": "+1.00"})).collect::<Vec<_>>()})
+}
+
+async fn collected(kiwoom: Kiwoom, previous: Option<&server::kiwoom_themes::StoredCatalog>) -> Result<server::kiwoom_themes::StoredCatalog, server::kiwoom_themes::WalkFailure> {
+    let clock = Clock::fake(kst(KstDate::new(2026, 11, 23).unwrap(), 8, 30, 0));
+    let rest = KiwoomRest::new(Arc::new(kiwoom), KiwoomAuth::new(Secret::new("FAKE_KEY".into()), Secret::new("FAKE_SECRET".into()), None), clock.clone());
+    rest.set_access(Access::Open);
+    server::kiwoom_themes::collect(&rest, clock.now(), previous).await
+}
+
+#[tokio::test]
+async fn collection_stores_each_themes_member_codes_for_the_day() {
+    let kiwoom = two_pages()
+        .page("ka90002", None, None, members_body(&["042660", "010140"]));
+    let catalog = collected(kiwoom.clone(), None).await.unwrap();
+    assert_eq!((catalog.date.as_str(), catalog.themes.len()), ("20261123", 3));
+    assert_eq!((catalog.themes[0].code.as_str(), catalog.themes[0].name.as_str()), ("319", "조선"));
+    assert_eq!(catalog.themes[0].members, ["042660", "010140"]);
+    let asked: Vec<String> = kiwoom.sent("ka90002").iter().map(|s| s.body["thema_grp_cd"].as_str().unwrap().to_owned()).collect();
+    assert_eq!(asked, ["319", "100", "7"]);
+    assert_eq!(kiwoom.sent("ka90001")[0].body["date_tp"], "1");
+}
+
+#[derive(Clone, Default)]
+struct OneFails(Kiwoom);
+
+impl Transport for OneFails {
+    fn send(&self, req: HttpRequest) -> BoxFuture<'static, Result<HttpResponse, TransportError>> {
+        let fails = req.api_id.as_str() == "ka90002" && serde_json::from_str::<Value>(req.body.expose()).unwrap()["thema_grp_cd"] == "100";
+        if fails {
+            let response = HttpResponse { status: 200, next_key: None, body: json!({"return_code": 1, "return_msg": "조회 실패"}).to_string() };
+            return Box::pin(async move { Ok(response) });
+        }
+        self.0.send(req)
+    }
+}
+
+#[tokio::test]
+async fn a_theme_whose_members_fail_keeps_yesterdays_members_or_is_left_out() {
+    let theme = |code: &str, member: &str| server::kiwoom_themes::StoredTheme { code: code.into(), name: code.into(), members: vec![member.into()] };
+    let previous = server::kiwoom_themes::StoredCatalog { date: "20261122".into(), collected_at: 1, themes: vec![theme("100", "034020"), theme("7", "012450")] };
+    let failing = OneFails(two_pages().page("ka90002", None, None, members_body(&["005930"])));
+    let clock = Clock::fake(kst(KstDate::new(2026, 11, 23).unwrap(), 8, 30, 0));
+    let rest = KiwoomRest::new(Arc::new(failing.clone()), KiwoomAuth::new(Secret::new("FAKE_KEY".into()), Secret::new("FAKE_SECRET".into()), None), clock.clone());
+    rest.set_access(Access::Open);
+    let kept = server::kiwoom_themes::collect(&rest, clock.now(), Some(&previous)).await.unwrap();
+    let codes = |c: &server::kiwoom_themes::StoredCatalog| c.themes.iter().map(|t| (t.code.clone(), t.members.clone())).collect::<Vec<_>>();
+    assert_eq!(codes(&kept), [("319".into(), vec!["005930".to_owned()]), ("100".into(), vec!["034020".to_owned()]), ("7".into(), vec!["012450".to_owned()])], "모르는 오류는 그 TR 경로를 막으므로(ADR 0009) 뒤 테마도 지난 구성종목을 쓴다");
+    let rest = KiwoomRest::new(Arc::new(failing), KiwoomAuth::new(Secret::new("FAKE_KEY".into()), Secret::new("FAKE_SECRET".into()), None), clock.clone());
+    rest.set_access(Access::Open);
+    let without = server::kiwoom_themes::collect(&rest, clock.now(), None).await.unwrap();
+    assert_eq!(without.themes.iter().map(|t| t.code.as_str()).collect::<Vec<_>>(), ["319"]);
+}
+
+#[tokio::test]
+async fn a_theme_list_that_fails_fails_the_collection() {
+    let kiwoom = Kiwoom::default().page("ka90001", None, None, json!({"return_code": 1, "return_msg": "조회 실패"}));
+    assert!(collected(kiwoom, None).await.is_err());
+}
