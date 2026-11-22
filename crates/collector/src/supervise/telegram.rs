@@ -3,12 +3,12 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use serde::{Deserialize, Serialize};
-use server::collector::webhook::Webhook;
+use server::collector::telegram::Telegram;
 use tokio::sync::mpsc;
 
 use super::status::{Alert, AlertKind};
 
-const LEDGER_FILE: &str = "webhook-ledger.json";
+const LEDGER_FILE: &str = "telegram-ledger.json";
 
 #[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize)]
 struct SentToday {
@@ -58,12 +58,12 @@ impl LedgerFile {
             Ok(text) => text,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => return SentToday::default(),
             Err(error) => {
-                tracing::warn!(path = %self.path.display(), %error, "웹훅 전송 기록을 읽지 못해 처음부터 시작합니다");
+                tracing::warn!(path = %self.path.display(), %error, "텔레그램 전송 기록을 읽지 못해 처음부터 시작합니다");
                 return SentToday::default();
             }
         };
         serde_json::from_str(&text).unwrap_or_else(|error| {
-            tracing::warn!(path = %self.path.display(), %error, "웹훅 전송 기록이 깨져 있어 처음부터 시작합니다");
+            tracing::warn!(path = %self.path.display(), %error, "텔레그램 전송 기록이 깨져 있어 처음부터 시작합니다");
             SentToday::default()
         })
     }
@@ -78,7 +78,7 @@ impl LedgerFile {
             std::fs::rename(&temporary, &self.path)
         });
         if let Err(error) = written {
-            tracing::warn!(path = %self.path.display(), %error, "웹훅 전송 기록을 남기지 못했습니다");
+            tracing::warn!(path = %self.path.display(), %error, "텔레그램 전송 기록을 남기지 못했습니다");
         }
     }
 }
@@ -154,33 +154,33 @@ impl Ledger {
 }
 
 #[derive(Clone)]
-pub struct AlertWebhook {
+pub struct AlertTelegram {
     ledger: Arc<Mutex<Ledger>>,
     outbox: mpsc::UnboundedSender<Outgoing>,
 }
 
-impl AlertWebhook {
-    pub fn spawn(webhook: Webhook, state_folder: &Path) -> AlertWebhook {
+impl AlertTelegram {
+    pub fn spawn(telegram: Telegram, state_folder: &Path) -> AlertTelegram {
         let (outbox, mut inbox) = mpsc::unbounded_channel::<Outgoing>();
         let file = LedgerFile::in_folder(state_folder);
         let mut delivered = file.load();
         let ledger = Arc::new(Mutex::new(Ledger::restored(delivered.clone())));
         tokio::spawn(async move {
             while let Some(outgoing) = inbox.recv().await {
-                match webhook.send(&outgoing.text).await {
+                match telegram.send(&outgoing.text).await {
                     Ok(()) => {
                         delivered.record(&outgoing);
                         file.save(&delivered);
                     }
-                    Err(failure) => tracing::warn!(%failure, "수집 경보를 웹훅으로 보내지 못했습니다"),
+                    Err(failure) => tracing::warn!(%failure, "수집 경보를 텔레그램으로 보내지 못했습니다"),
                 }
             }
         });
-        AlertWebhook { ledger, outbox }
+        AlertTelegram { ledger, outbox }
     }
 
     fn ledger(&self) -> std::sync::MutexGuard<'_, Ledger> {
-        self.ledger.lock().expect("웹훅 장부 잠금")
+        self.ledger.lock().expect("텔레그램 장부 잠금")
     }
 
     fn deliver(&self, outgoing: Option<Outgoing>) {

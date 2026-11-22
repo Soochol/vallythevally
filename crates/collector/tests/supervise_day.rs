@@ -11,14 +11,14 @@ use collector::keys::{ActiveKey, KeyIdentity, KeyRole};
 use collector::plan::{InputSummary, KeyShare, MARKET_TYPES, PlanFile, read_plan, write_plan};
 use collector::protocol::{Command, Event, KeyName, SessionState};
 use collector::supervise::{
-    AlertWebhook, ChildMessage, ChildProcess, Daemon, DaemonInjected, DaemonInputs, DaemonStartError, DaemonStatus, DayPhase, FinalizeRunner, Injected, Inputs, Launcher, ScheduleSettings,
+    AlertTelegram, ChildMessage, ChildProcess, Daemon, DaemonInjected, DaemonInputs, DaemonStartError, DaemonStatus, DayPhase, FinalizeRunner, Injected, Inputs, Launcher, ScheduleSettings,
     Settings, SocketSetting, Spawned, Supervisor, journal_path, schedule_from_arguments,
 };
 use domain::{KstDate, KstTime};
 use futures::future::BoxFuture;
 use serde_json::{Value, json};
 use server::clock::{Clock, kst};
-use server::collector::webhook::Webhook;
+use server::collector::telegram::Telegram;
 use server::kiwoom::token_file::credential_id;
 use server::kiwoom::transport::{HttpRequest, HttpResponse, Transport, TransportError};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
@@ -330,7 +330,7 @@ struct Config {
     seed_history: bool,
     seed_today_raw: bool,
     schedule: ScheduleSettings,
-    webhook: Option<AlertWebhook>,
+    telegram: Option<AlertTelegram>,
 }
 
 impl Default for Config {
@@ -347,7 +347,7 @@ impl Default for Config {
             seed_history: true,
             seed_today_raw: true,
             schedule: ScheduleSettings::default(),
-            webhook: None,
+            telegram: None,
         }
     }
 }
@@ -452,7 +452,7 @@ impl Harness {
             DaemonInjected { launcher: launcher.clone(), transport: kiwoom.clone(), holidays: holidays.clone(), finalizer: finalizer.clone(), clock: clock.clone() },
         )
         .unwrap_or_else(|error| panic!("시작하지 못했다: {error}"))
-        .with_webhook(config.webhook);
+        .with_telegram(config.telegram);
         let status = daemon.status();
         let (stop, shutdown) = watch::channel(false);
         let done = tokio::spawn(daemon.run(shutdown));
@@ -1282,28 +1282,30 @@ async fn a_second_daemon_on_a_live_status_socket_does_not_start_even_without_an_
     assert!(Client::connect(&harness.socket()).await.status().await["type"] == "status");
 }
 
-const WEBHOOK_SECRET: &str = "WEBHOOK-TOKEN-do-not-print";
+const TELEGRAM_SECRET: &str = "TELEGRAM-TOKEN-do-not-print";
+const TELEGRAM_CHAT_ID: &str = "-100777";
 
 #[derive(Clone, Copy)]
 enum Answer {
     Accept,
-    RateLimit(f64),
+    RateLimit(u64),
     Fail,
 }
 
-struct WebhookRequest {
+struct TelegramRequest {
     at: tokio::time::Instant,
     path: String,
-    content: String,
+    chat_id: String,
+    text: String,
     accepted: bool,
 }
 
-struct FakeWebhook {
+struct FakeTelegram {
     port: u16,
-    requests: Arc<Mutex<Vec<WebhookRequest>>>,
+    requests: Arc<Mutex<Vec<TelegramRequest>>>,
 }
 
-async fn read_webhook_request(stream: &mut tokio::net::TcpStream) -> (String, Value) {
+async fn read_telegram_request(stream: &mut tokio::net::TcpStream) -> (String, Value) {
     let mut reader = BufReader::new(stream);
     let mut request_line = String::new();
     reader.read_line(&mut request_line).await.unwrap();
@@ -1324,23 +1326,23 @@ async fn read_webhook_request(stream: &mut tokio::net::TcpStream) -> (String, Va
     (path, serde_json::from_slice(&body).unwrap())
 }
 
-impl FakeWebhook {
-    async fn start(script: Vec<Answer>, rest: Answer) -> FakeWebhook {
+impl FakeTelegram {
+    async fn start(script: Vec<Answer>, rest: Answer) -> FakeTelegram {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let port = listener.local_addr().unwrap().port();
-        let requests: Arc<Mutex<Vec<WebhookRequest>>> = Arc::default();
+        let requests: Arc<Mutex<Vec<TelegramRequest>>> = Arc::default();
         let log = requests.clone();
         tokio::spawn(async move {
             let mut script = script.into_iter();
             loop {
                 let Ok((mut stream, _)) = listener.accept().await else { return };
-                let (path, body) = read_webhook_request(&mut stream).await;
+                let (path, body) = read_telegram_request(&mut stream).await;
                 let answer = script.next().unwrap_or(rest);
-                log.lock().unwrap().push(WebhookRequest { at: tokio::time::Instant::now(), path, content: body["content"].as_str().unwrap().to_owned(), accepted: matches!(answer, Answer::Accept) });
+                log.lock().unwrap().push(TelegramRequest { at: tokio::time::Instant::now(), path, chat_id: body["chat_id"].as_str().unwrap().to_owned(), text: body["text"].as_str().unwrap().to_owned(), accepted: matches!(answer, Answer::Accept) });
                 let response = match answer {
-                    Answer::Accept => "HTTP/1.1 204 No Content\r\ncontent-length: 0\r\nconnection: close\r\n\r\n".to_owned(),
+                    Answer::Accept => "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: 11\r\nconnection: close\r\n\r\n{\"ok\":true}".to_owned(),
                     Answer::RateLimit(seconds) => {
-                        let body = json!({"message": "You are being rate limited.", "retry_after": seconds, "global": false}).to_string();
+                        let body = json!({"ok": false, "error_code": 429, "description": format!("Too Many Requests: retry after {seconds}"), "parameters": {"retry_after": seconds}}).to_string();
                         format!("HTTP/1.1 429 Too Many Requests\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}", body.len())
                     }
                     Answer::Fail => "HTTP/1.1 500 Internal Server Error\r\ncontent-length: 0\r\nconnection: close\r\n\r\n".to_owned(),
@@ -1349,27 +1351,27 @@ impl FakeWebhook {
                 let _ = stream.shutdown().await;
             }
         });
-        FakeWebhook { port, requests }
+        FakeTelegram { port, requests }
     }
 
-    fn url_file(folder: &Path, port: u16) -> PathBuf {
+    fn settings_file(folder: &Path) -> PathBuf {
         use std::os::unix::fs::OpenOptionsExt;
-        let path = folder.join("discord-webhook");
+        let path = folder.join("telegram");
         let mut file = std::fs::OpenOptions::new().write(true).create(true).truncate(true).mode(0o600).open(&path).unwrap();
-        io::Write::write_all(&mut file, format!("http://127.0.0.1:{port}/api/webhooks/123/{WEBHOOK_SECRET}\n").as_bytes()).unwrap();
+        io::Write::write_all(&mut file, format!("bot_token=123456:{TELEGRAM_SECRET}\nchat_id={TELEGRAM_CHAT_ID}\n").as_bytes()).unwrap();
         path
     }
 
-    fn webhook(&self, folder: &Path) -> AlertWebhook {
-        AlertWebhook::spawn(Webhook::load(&FakeWebhook::url_file(folder, self.port)).unwrap().unwrap(), folder)
+    fn telegram_at(folder: &Path, port: u16) -> AlertTelegram {
+        AlertTelegram::spawn(Telegram::load_at(&FakeTelegram::settings_file(folder), &format!("http://127.0.0.1:{port}")).unwrap().unwrap(), folder)
     }
 
-    fn webhook_again(folder: &Path) -> AlertWebhook {
-        AlertWebhook::spawn(Webhook::load(&folder.join("discord-webhook")).unwrap().unwrap(), folder)
+    fn telegram(&self, folder: &Path) -> AlertTelegram {
+        FakeTelegram::telegram_at(folder, self.port)
     }
 
     fn texts(&self) -> Vec<String> {
-        self.requests.lock().unwrap().iter().filter(|request| request.accepted).map(|request| request.content.clone()).collect()
+        self.requests.lock().unwrap().iter().filter(|request| request.accepted).map(|request| request.text.clone()).collect()
     }
 
     async fn wait_for_requests(&self, count: usize) {
@@ -1379,7 +1381,7 @@ impl FakeWebhook {
             }
             sleep(Duration::from_millis(10)).await;
         }
-        panic!("웹훅 요청이 {count}개가 되지 않았다: {}", self.requests.lock().unwrap().len());
+        panic!("텔레그램 요청이 {count}개가 되지 않았다: {}", self.requests.lock().unwrap().len());
     }
 }
 
@@ -1418,10 +1420,10 @@ impl LogCapture {
 }
 
 #[tokio::test(start_paused = true)]
-async fn a_daemon_alert_goes_to_the_webhook_and_a_second_of_the_same_kind_waits_for_the_closing_message() {
-    let hook = FakeWebhook::start(Vec::new(), Answer::Accept).await;
+async fn a_daemon_alert_goes_to_telegram_and_a_second_of_the_same_kind_waits_for_the_closing_message() {
+    let hook = FakeTelegram::start(Vec::new(), Answer::Accept).await;
     let folder = tempfile::tempdir().unwrap();
-    let harness = Harness::start(Config { holidays: Holidays::Down, candles: Candles::Failing, forced_exit: Some(1), webhook: Some(hook.webhook(folder.path())), ..Config::default() });
+    let harness = Harness::start(Config { holidays: Holidays::Down, candles: Candles::Failing, forced_exit: Some(1), telegram: Some(hook.telegram(folder.path())), ..Config::default() });
     harness.until_finalize_finished(1).await;
     hook.wait_for_requests(3).await;
     harness.until(at(23, 0, 0)).await;
@@ -1434,67 +1436,67 @@ async fn a_daemon_alert_goes_to_the_webhook_and_a_second_of_the_same_kind_waits_
     let alerts = harness.status_now().alerts.iter().filter(|alert| serde_json::to_value(alert.kind).unwrap() == "stage_failed").count();
     assert_eq!(alerts, 2, "현황에는 두 번 다 남는다");
     for text in &texts {
-        assert!(!text.contains(WEBHOOK_SECRET) && SECRET_MARKERS.iter().all(|marker| !text.contains(marker)), "{text}");
+        assert!(!text.contains(TELEGRAM_SECRET) && SECRET_MARKERS.iter().all(|marker| !text.contains(marker)), "{text}");
     }
-    assert!(hook.requests.lock().unwrap().iter().all(|request| request.path == format!("/api/webhooks/123/{WEBHOOK_SECRET}")));
+    assert!(hook.requests.lock().unwrap().iter().all(|request| request.path == format!("/bot123456:{TELEGRAM_SECRET}/sendMessage") && request.chat_id == TELEGRAM_CHAT_ID));
     harness.finish().await;
 }
 
 #[tokio::test(start_paused = true)]
 async fn a_rate_limited_alert_waits_for_retry_after_and_is_sent_again() {
-    let hook = FakeWebhook::start(vec![Answer::RateLimit(0.2)], Answer::Accept).await;
+    let hook = FakeTelegram::start(vec![Answer::RateLimit(1)], Answer::Accept).await;
     let folder = tempfile::tempdir().unwrap();
-    let harness = Harness::start(Config { candles: Candles::Failing, webhook: Some(hook.webhook(folder.path())), ..Config::default() });
+    let harness = Harness::start(Config { candles: Candles::Failing, telegram: Some(hook.telegram(folder.path())), ..Config::default() });
     harness.until_finalize_finished(1).await;
     hook.wait_for_requests(2).await;
     {
         let requests = hook.requests.lock().unwrap();
         assert_eq!(requests.len(), 2);
-        assert_eq!(requests[0].content, requests[1].content);
+        assert_eq!(requests[0].text, requests[1].text);
         assert!(!requests[0].accepted && requests[1].accepted);
-        assert!(requests[1].at - requests[0].at >= Duration::from_millis(200), "{:?}", requests[1].at - requests[0].at);
+        assert!(requests[1].at - requests[0].at >= Duration::from_secs(1), "{:?}", requests[1].at - requests[0].at);
     }
     harness.finish().await;
 }
 
-async fn the_day_runs_to_the_complete_file_while_the_webhook_fails(webhook: AlertWebhook, harness_webhook_secret: &str) {
+async fn the_day_runs_to_the_complete_file_while_telegram_fails(telegram: AlertTelegram, harness_telegram_secret: &str) {
     let (logs, _guard) = LogCapture::capture();
-    let harness = Harness::start(Config { candles: Candles::Failing, webhook: Some(webhook), ..Config::default() });
+    let harness = Harness::start(Config { candles: Candles::Failing, telegram: Some(telegram), ..Config::default() });
     harness.until_finalize_finished(1).await;
     harness.until(at(23, 0, 0)).await;
-    assert!(harness.complete_exists(), "웹훅이 실패해도 정리까지 간다");
+    assert!(harness.complete_exists(), "텔레그램이 실패해도 정리까지 간다");
     assert_eq!(harness.launcher.launched(), 3);
     let text = logs.text();
-    assert!(text.contains("수집 경보를 웹훅으로 보내지 못했습니다"), "{text}");
-    for hidden in [harness_webhook_secret, "/api/webhooks"] {
+    assert!(text.contains("수집 경보를 텔레그램으로 보내지 못했습니다"), "{text}");
+    for hidden in [harness_telegram_secret, "/bot123456"] {
         assert!(!text.contains(hidden), "{hidden}가 로그에 나온다: {text}");
     }
-    let webhook_lines: Vec<&str> = text.lines().filter(|line| line.contains("웹훅")).collect();
-    assert!(!webhook_lines.is_empty() && webhook_lines.iter().all(|line| !line.contains("127.0.0.1")), "{webhook_lines:?}");
+    let telegram_lines: Vec<&str> = text.lines().filter(|line| line.contains("텔레그램")).collect();
+    assert!(!telegram_lines.is_empty() && telegram_lines.iter().all(|line| !line.contains("127.0.0.1")), "{telegram_lines:?}");
     harness.finish().await;
 }
 
 #[tokio::test(start_paused = true)]
-async fn a_webhook_that_answers_with_an_error_does_not_stop_the_day_and_its_address_stays_out_of_the_log() {
-    let hook = FakeWebhook::start(Vec::new(), Answer::Fail).await;
+async fn a_telegram_that_answers_with_an_error_does_not_stop_the_day_and_its_token_stays_out_of_the_log() {
+    let hook = FakeTelegram::start(Vec::new(), Answer::Fail).await;
     let folder = tempfile::tempdir().unwrap();
-    the_day_runs_to_the_complete_file_while_the_webhook_fails(hook.webhook(folder.path()), WEBHOOK_SECRET).await;
+    the_day_runs_to_the_complete_file_while_telegram_fails(hook.telegram(folder.path()), TELEGRAM_SECRET).await;
     assert!(!hook.requests.lock().unwrap().is_empty());
 }
 
 #[tokio::test(start_paused = true)]
-async fn a_webhook_nobody_listens_on_does_not_stop_the_day_and_its_address_stays_out_of_the_log() {
+async fn a_telegram_nobody_listens_on_does_not_stop_the_day_and_its_token_stays_out_of_the_log() {
     let closed_port = TcpListener::bind("127.0.0.1:0").await.unwrap().local_addr().unwrap().port();
     let folder = tempfile::tempdir().unwrap();
-    let webhook = AlertWebhook::spawn(Webhook::load(&FakeWebhook::url_file(folder.path(), closed_port)).unwrap().unwrap(), folder.path());
-    the_day_runs_to_the_complete_file_while_the_webhook_fails(webhook, WEBHOOK_SECRET).await;
+    let telegram = FakeTelegram::telegram_at(folder.path(), closed_port);
+    the_day_runs_to_the_complete_file_while_telegram_fails(telegram, TELEGRAM_SECRET).await;
 }
 
 #[tokio::test(start_paused = true)]
 async fn plan_notes_go_out_once_as_one_batch_when_collection_starts() {
-    let hook = FakeWebhook::start(Vec::new(), Answer::Accept).await;
+    let hook = FakeTelegram::start(Vec::new(), Answer::Accept).await;
     let folder = tempfile::tempdir().unwrap();
-    let harness = Harness::start_with(Config { start: at(11, 0, 0), webhook: Some(hook.webhook(folder.path())), ..Config::default() }, |data| {
+    let harness = Harness::start_with(Config { start: at(11, 0, 0), telegram: Some(hook.telegram(folder.path())), ..Config::default() }, |data| {
         let mut plan = day_plan();
         plan.alerts = vec!["예비 키 용량이 빠듯합니다".to_owned(), "인계할 몫이 큽니다".to_owned()];
         write_plan(data, &plan).unwrap();
@@ -1514,8 +1516,8 @@ fn with_plan_notes(data: &Path) {
     write_plan(data, &plan).unwrap();
 }
 
-async fn run_the_failing_day_with_notes(webhook: AlertWebhook) {
-    let harness = Harness::start_with(Config { start: at(11, 0, 0), candles: Candles::Failing, webhook: Some(webhook), ..Config::default() }, with_plan_notes);
+async fn run_the_failing_day_with_notes(telegram: AlertTelegram) {
+    let harness = Harness::start_with(Config { start: at(11, 0, 0), candles: Candles::Failing, telegram: Some(telegram), ..Config::default() }, with_plan_notes);
     harness.until_finalize_finished(1).await;
     harness.until(at(23, 0, 0)).await;
     harness.finish().await;
@@ -1527,42 +1529,42 @@ fn count_containing(texts: &[String], needle: &str) -> usize {
 
 #[tokio::test(start_paused = true)]
 async fn a_daemon_restarted_the_same_day_does_not_send_the_same_alert_kind_or_plan_notes_again() {
-    let hook = FakeWebhook::start(Vec::new(), Answer::Accept).await;
+    let hook = FakeTelegram::start(Vec::new(), Answer::Accept).await;
     let folder = tempfile::tempdir().unwrap();
-    run_the_failing_day_with_notes(hook.webhook(folder.path())).await;
+    run_the_failing_day_with_notes(hook.telegram(folder.path())).await;
     let first = hook.texts();
     assert_eq!(count_containing(&first, "· 단계 실패 ·"), 1, "{first:?}");
     assert_eq!(count_containing(&first, "[수집 계획]"), 1, "{first:?}");
-    run_the_failing_day_with_notes(FakeWebhook::webhook_again(folder.path())).await;
+    run_the_failing_day_with_notes(hook.telegram(folder.path())).await;
     let all = hook.texts();
     assert_eq!(count_containing(&all, "· 단계 실패 ·"), 1, "{all:?}");
     assert_eq!(count_containing(&all, "[수집 계획]"), 1, "{all:?}");
-    assert!(folder.path().join("webhook-ledger.json").exists());
+    assert!(folder.path().join("telegram-ledger.json").exists());
 }
 
 #[tokio::test(start_paused = true)]
 async fn a_broken_ledger_file_does_not_stop_the_daemon_and_the_alerts_are_sent() {
-    let hook = FakeWebhook::start(Vec::new(), Answer::Accept).await;
+    let hook = FakeTelegram::start(Vec::new(), Answer::Accept).await;
     let folder = tempfile::tempdir().unwrap();
-    std::fs::write(folder.path().join("webhook-ledger.json"), "{깨진 기록").unwrap();
+    std::fs::write(folder.path().join("telegram-ledger.json"), "{깨진 기록").unwrap();
     let (logs, _guard) = LogCapture::capture();
-    run_the_failing_day_with_notes(hook.webhook(folder.path())).await;
+    run_the_failing_day_with_notes(hook.telegram(folder.path())).await;
     let texts = hook.texts();
     assert_eq!(count_containing(&texts, "· 단계 실패 ·"), 1, "{texts:?}");
     assert_eq!(count_containing(&texts, "[수집 계획]"), 1, "{texts:?}");
     let log = logs.text();
-    assert!(log.contains("웹훅 전송 기록이 깨져 있어"), "{log}");
-    assert!(!log.contains(WEBHOOK_SECRET), "{log}");
+    assert!(log.contains("텔레그램 전송 기록이 깨져 있어"), "{log}");
+    assert!(!log.contains(TELEGRAM_SECRET), "{log}");
 }
 
 #[tokio::test(start_paused = true)]
-async fn an_alert_that_never_reached_the_webhook_is_sent_again_after_a_restart() {
-    let refusing = FakeWebhook::start(Vec::new(), Answer::Fail).await;
+async fn an_alert_that_never_reached_telegram_is_sent_again_after_a_restart() {
+    let refusing = FakeTelegram::start(Vec::new(), Answer::Fail).await;
     let folder = tempfile::tempdir().unwrap();
-    run_the_failing_day_with_notes(refusing.webhook(folder.path())).await;
+    run_the_failing_day_with_notes(refusing.telegram(folder.path())).await;
     assert!(refusing.texts().is_empty());
-    let accepting = FakeWebhook::start(Vec::new(), Answer::Accept).await;
-    run_the_failing_day_with_notes(accepting.webhook(folder.path())).await;
+    let accepting = FakeTelegram::start(Vec::new(), Answer::Accept).await;
+    run_the_failing_day_with_notes(accepting.telegram(folder.path())).await;
     let texts = accepting.texts();
     assert_eq!(count_containing(&texts, "· 단계 실패 ·"), 1, "{texts:?}");
     assert_eq!(count_containing(&texts, "[수집 계획]"), 1, "{texts:?}");

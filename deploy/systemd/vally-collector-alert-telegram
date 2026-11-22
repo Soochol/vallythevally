@@ -1,0 +1,73 @@
+#!/bin/sh
+set -u
+name=vally-collector-alert-telegram
+file=${VALLY_TELEGRAM:-${HOME:-}/.config/vally/telegram}
+api=${VALLY_TELEGRAM_API:-https://api.telegram.org}
+message=${1:-}
+if [ -z "$message" ]; then
+    echo "$name: 보낼 메시지가 없습니다" >&2
+    exit 2
+fi
+[ -e "$file" ] || exit 0
+mode=$(stat -c %a "$file") || exit 1
+if [ $((0$mode & 077)) -ne 0 ]; then
+    echo "$name: $file 의 권한이 $mode 라 쓰지 않습니다. chmod 600 $file" >&2
+    exit 1
+fi
+bot_token=
+chat_id=
+while IFS= read -r line || [ -n "$line" ]; do
+    line=$(printf %s "$line" | tr -d '\r' | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
+    [ -n "$line" ] || continue
+    case $line in
+        *=*) ;;
+        *)
+            echo "$name: $file 에 key=value 꼴이 아닌 줄이 있어 쓰지 않습니다" >&2
+            exit 1
+            ;;
+    esac
+    key=$(printf %s "${line%%=*}" | sed -e 's/[[:space:]]*$//')
+    value=$(printf %s "${line#*=}" | sed -e 's/^[[:space:]]*//')
+    case $key in
+        bot_token)
+            [ -z "$bot_token" ] || { echo "$name: $file 에 bot_token이 두 번 나와 쓰지 않습니다" >&2; exit 1; }
+            bot_token=$value
+            ;;
+        chat_id)
+            [ -z "$chat_id" ] || { echo "$name: $file 에 chat_id가 두 번 나와 쓰지 않습니다" >&2; exit 1; }
+            chat_id=$value
+            ;;
+        *)
+            echo "$name: $file 에 알 수 없는 키가 있어 쓰지 않습니다" >&2
+            exit 1
+            ;;
+    esac
+done < "$file"
+case $bot_token in
+    '' | *[!0-9A-Za-z:_-]*)
+        echo "$name: $file 의 bot_token이 없거나 쓸 수 없는 글자가 있어 쓰지 않습니다" >&2
+        exit 1
+        ;;
+esac
+case $chat_id in
+    '' | - | @ | -*[!0-9]* | [0-9]*[!0-9]* | @*[!0-9A-Za-z_]*) valid_chat=no ;;
+    -[0-9]* | [0-9]* | @*) valid_chat=yes ;;
+    *) valid_chat=no ;;
+esac
+if [ "$valid_chat" != yes ]; then
+    echo "$name: $file 의 chat_id가 없거나 숫자(음수 가능)나 @이름이 아니라 쓰지 않습니다" >&2
+    exit 1
+fi
+control_escapes=
+for code in 1 2 3 4 5 6 7 8 9 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31; do
+    character=$(printf "\\$(printf %03o "$code")")
+    control_escapes="${control_escapes}s/$character/\\\\u$(printf %04x "$code")/g;"
+done
+text=$(printf %s "$message" | sed -e ':a' -e '$!{' -e 'N' -e 'ba' -e '}' -e 's/\\/\\\\/g' -e 's/"/\\"/g' -e 's/\n/\\n/g' -e "$control_escapes")
+body=$(printf '{"chat_id":"%s","text":"%s","link_preview_options":{"is_disabled":true}}' "$chat_id" "$text")
+status=$(printf 'url = "%s/bot%s/sendMessage"\n' "${api%/}" "$bot_token" | curl --config - --silent --show-error --fail --max-time 10 --retry 3 --retry-max-time 60 --header 'Content-Type: application/json' --data "$body" --output /dev/null --write-out '%{http_code}')
+case $status in
+    2??) exit 0 ;;
+esac
+echo "$name: 알림을 보내지 못했습니다 (HTTP ${status:-없음})" >&2
+exit 1

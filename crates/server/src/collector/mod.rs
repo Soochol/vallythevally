@@ -1,5 +1,5 @@
 mod watch;
-pub mod webhook;
+pub mod telegram;
 pub mod wire;
 
 use std::path::PathBuf;
@@ -16,7 +16,7 @@ use ts_rs::TS;
 
 pub use self::watch::{ASK_TIMEOUT, CONNECT_TIMEOUT, DaemonJudgment, DaemonNotice, HEARTBEAT_EVERY, MAX_LINE_BYTES, MISSED_HEARTBEATS, RECONNECT_BACKOFF};
 use self::watch::{Answer, AskFailure, Question, Watcher};
-use self::webhook::Webhook;
+use self::telegram::Telegram;
 use self::wire::{CollectorCoverage, CollectorDisk, CollectorStatus};
 use crate::account::ProviderSubject;
 use crate::api::{ApiErrorCode, UnixSeconds};
@@ -28,7 +28,7 @@ pub struct CollectorBoard {
     admins: Vec<ProviderSubject>,
     socket: PathBuf,
     watcher: Watcher,
-    webhook: Option<Arc<Webhook>>,
+    telegram: Option<Arc<Telegram>>,
 }
 
 impl CollectorBoard {
@@ -36,11 +36,11 @@ impl CollectorBoard {
         if admins.is_empty() || !account_linked {
             return None;
         }
-        Some(CollectorBoard { admins, socket: socket?, watcher: Watcher::new(), webhook: None })
+        Some(CollectorBoard { admins, socket: socket?, watcher: Watcher::new(), telegram: None })
     }
 
-    pub fn with_webhook(mut self, webhook: Option<Webhook>) -> CollectorBoard {
-        self.webhook = webhook.map(Arc::new);
+    pub fn with_telegram(mut self, telegram: Option<Telegram>) -> CollectorBoard {
+        self.telegram = telegram.map(Arc::new);
         self
     }
 
@@ -152,11 +152,11 @@ async fn disk(State(st): State<Arc<AppState>>) -> Result<Json<CollectorDisk>, Ap
 
 pub async fn run(st: Arc<AppState>) {
     let Some(board) = st.system.collector() else { return };
-    let announced = board.webhook.clone().map(|webhook| (webhook, board.subscribe_notices()));
-    tokio::join!(watch::watch_forever(&board.socket, &board.watcher, &st.clock), fill_missing_subject(st.system.account()), announce_to_webhook(announced));
+    let announced = board.telegram.clone().map(|telegram| (telegram, board.subscribe_notices()));
+    tokio::join!(watch::watch_forever(&board.socket, &board.watcher, &st.clock), fill_missing_subject(st.system.account()), announce_to_telegram(announced));
 }
 
-fn webhook_text(notice: &DaemonNotice) -> String {
+fn telegram_text(notice: &DaemonNotice) -> String {
     let what = match notice.judgment {
         DaemonJudgment::Down => "감독 데몬이 꺼져 있습니다",
         _ => "감독 데몬이 응답하지 않습니다",
@@ -164,13 +164,13 @@ fn webhook_text(notice: &DaemonNotice) -> String {
     format!("[수집 경보] {} · {what}", domain::KstTime::from_unix(notice.at.0))
 }
 
-async fn announce_to_webhook(announced: Option<(Arc<Webhook>, tokio::sync::broadcast::Receiver<DaemonNotice>)>) {
-    let Some((webhook, mut notices)) = announced else { return };
+async fn announce_to_telegram(announced: Option<(Arc<Telegram>, tokio::sync::broadcast::Receiver<DaemonNotice>)>) {
+    let Some((telegram, mut notices)) = announced else { return };
     loop {
         match notices.recv().await {
             Ok(notice) => {
-                if let Err(failure) = webhook.send(&webhook_text(&notice)).await {
-                    tracing::warn!(%failure, "수집 경보를 웹훅으로 보내지 못했습니다");
+                if let Err(failure) = telegram.send(&telegram_text(&notice)).await {
+                    tracing::warn!(%failure, "수집 경보를 텔레그램으로 보내지 못했습니다");
                 }
             }
             Err(tokio::sync::broadcast::error::RecvError::Lagged(skipped)) => tracing::warn!(skipped, "수집 경보 알림을 건너뛰었습니다"),
@@ -225,16 +225,16 @@ mod tests {
         let subscriber = tracing_subscriber::fmt().with_writer(move || writer.clone()).with_ansi(false).finish();
         let _guard = tracing::subscriber::set_default(subscriber);
         let folder = tempfile::tempdir().unwrap();
-        let path = folder.path().join("discord-webhook");
-        std::fs::write(&path, "http://127.0.0.1:9/api/webhooks/1/token\n").unwrap();
+        let path = folder.path().join("telegram");
+        std::fs::write(&path, "bot_token=1:token\nchat_id=1\n").unwrap();
         std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).unwrap();
-        let webhook = Arc::new(Webhook::load(&path).unwrap().unwrap());
+        let telegram = Arc::new(Telegram::load(&path).unwrap().unwrap());
         let (sender, receiver) = tokio::sync::broadcast::channel(2);
         for second in 0..5 {
             sender.send(DaemonNotice { judgment: DaemonJudgment::Down, at: UnixSeconds(second) }).unwrap();
         }
         drop(sender);
-        announce_to_webhook(Some((webhook, receiver))).await;
+        announce_to_telegram(Some((telegram, receiver))).await;
         let logs = String::from_utf8_lossy(&capture.0.lock().unwrap()).into_owned();
         assert!(logs.contains("수집 경보 알림을 건너뛰었습니다") && logs.contains("skipped=3"), "{logs}");
     }
