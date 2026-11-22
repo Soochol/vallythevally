@@ -29,7 +29,48 @@
 ## 쓰는 규칙
 
 - 한 파일 자료(`write_snapshot`): 같은 폴더의 임시 파일(`.<이름>.tmp-<pid>`)에 쓰고 `fsync` 뒤 rename한다. 읽는 쪽은 `<YYYYMMDD>.json`만 본다.
+- 수집기가 쓰는 JSONL(덧붙이는 자료, `usage/`, 사건 기록)에는 빈 줄을 쓰지 않는다. 줄마다 줄바꿈 하나로 끝난다.
 - 덧붙이는 자료(`FeedWriter`): 한 줄을 한 번의 쓰기로 보낸다. 다시 열 때 줄바꿈 없이 끝난 꼬리는 잘라 낸다. 읽는 쪽은 지난번 위치부터 읽고 줄바꿈이 없는 마지막 줄은 다음에 읽는다. 관측일 파일이 바뀌면 처음부터 읽는다. 파일이 줄었어도 처음부터 읽는다.
+
+## 키 배정표
+
+데몬이 어느 `rest` 키가 어느 일을 받을지 정하는 설정 파일이다(`collector supervise --shared-config <경로>`, 기본 `~/.config/vally/collector-shared.json`). 데몬은 매일 07:35 계획 때 다시 읽는다. 읽지 못하거나 검사에 걸리면 직전에 읽은 배정(직전 사본은 `<--data>/plan/shared-assignment.last.json`)을 쓰고 상태 API에 `stage_failed` 경보를 낸다. 직전 배정도 없으면 공용 자료 일을 돌리지 않고 경보한다. 파일이 없으면 경보 없이 공용 자료 일을 돌리지 않는다(이 기능을 쓰지 않는 지금 동작). 바뀐 배정은 다음 관측일 자식부터 쓴다. 장중에는 읽지 않는다.
+
+```json
+{"version": 1,
+ "keys": {"rest-01": {"total_per_second": 5}},
+ "jobs": {"probe": {"keys": ["rest-01", "rest-02"], "period_secs": 30, "options": {"calls_per_tr": 4}}}}
+```
+
+- `jobs`의 이름은 닫힌 열거형이다(`crates/collector/src/shared/mod.rs`의 `JobName`). 지금은 시험용 `probe` 하나다. 뒤 작업이 자기 일을 한 줄씩 더한다.
+- 일마다 `keys`(순서가 우선순위), `period_secs`(1 이상), `options`(일이 정하는 선택값, 없으면 일의 기본값)를 둔다. `keys`의 키는 모두 활성 `rest` 키여야 하고 그 일이 받는 증권사여야 한다. 같은 키를 두 번 적을 수 없다.
+- 같은 일에 키가 여럿이면 일이 나눌 단위를 키 수로 나눠 그 키들이 동시에 부른다. 키 `i`가 단위 `u`를 `u % 키 수 == i`일 때 맡는다. 키 하나가 멈추면(재시작 한도, 8050 등) 남은 키들이 몫을 다시 나눠 갖는다. 마지막 키까지 멈추면 그 일은 서고 상태 API에 경보가 난다.
+- `keys.<이름>.total_per_second`(선택)를 적으면 그 키의 `KiwoomRest` 합계 창을 그 값으로 켜서 모든 TR의 1초 전송 합계가 그 값을 넘지 않게 한다. 적지 않으면 TR별 창(5)만 지킨다.
+- 모르는 칸, 모르는 일 이름, `rest`가 아닌 키, 키 목록에 없는 키, 0인 주기·한도, 일이 받지 않는 선택값은 읽기 오류다.
+- 데몬은 배정표에 든 `rest` 키마다 공용 자료 자식(`collector shared --child`) 하나를 띄운다. 어느 일에도 든 적 없는 `rest` 키는 띄우지 않는다.
+
+## 키별 TR 사용량
+
+공용 자료 자식과 데몬의 REST(예비 키가 아침 목록·마감 뒤 대조에 쓰는 세션)가 1분마다 키·TR별 사용량을 `<--data>/usage/<YYYYMMDD>.jsonl`에 한 줄씩 덧붙인다. 날짜는 그 1분이 시작한 KST 날짜다. 한 줄은 한 번의 쓰기로 가고 빈 줄은 쓰지 않는다. 자식은 1분이 끝나면(키움 REST의 1분 카운터가 닫힐 때) 사건 `usage`로 데몬에 알리고, 파일은 데몬이 쓴다. 보낸 것이 없는 분은 쓰지 않는다. 일을 바꾸는 중이라 끝나지 못한 1분은 남지 않는다.
+
+TR 줄:
+
+```json
+{"v":1,"at":"2026-11-18T09:01:00+09:00","key":"rest-01","broker":"kiwoom","scope":"tr","tr":"ka10095","sent":12,"rate_limited":1,"resent":1,"max_wait_ms":1050,"max_per_second":5}
+```
+
+키 줄(그 분에 TR 줄이 하나라도 있으면 한 줄):
+
+```json
+{"v":1,"at":"2026-11-18T09:01:00+09:00","key":"rest-01","broker":"kiwoom","scope":"key","max_per_second":7}
+```
+
+- `sent`는 보낸 요청 수(다시 보낸 것 포함), `rate_limited`는 제한 응답(429 등)을 받은 수, `resent`는 제한 응답 뒤 다시 보낸 수, `max_wait_ms`는 TR 창이 비기를 기다린 가장 긴 시간, `max_per_second`는 최근 1초(창 길이 1.05초) 전송 수의 최댓값이다.
+- 키 줄의 `max_per_second`는 모든 TR(토큰 발급 제외)의 최근 1초 전송 합계의 최댓값이다. 합계 창이 꺼져 있어도 센다.
+- **한도 확인(플랜 결정 B5)**: ADR 0035의 미확인 사항("초당 5회"가 키 하나의 TR 합계인지)은 `total_per_second` 없이 한 키에 TR이 다른 일 둘을 함께 배정한 관측일 하루의 줄로 가린다.
+  - 키 줄 `max_per_second`가 5를 넘은 분에 TR마다 `max_per_second`가 5 이하인데 `rate_limited`가 나면 합계 한도다. 그때는 `rest` 키마다 `total_per_second: 5`를 켜고 일을 키마다 하나씩 둔다.
+  - 키 줄이 5를 넘었는데 `rate_limited`가 0이면 TR이 독립이다. 한 키에 TR이 다른 일 여럿을 둘 수 있다.
+  - `crates/collector/src/shared/usage.rs`의 `judge_limit`이 이 규칙이다. 확인하기 전에는 `total_per_second: 5`를 켠 배정으로 돈다.
 
 ## 폴더 배치
 

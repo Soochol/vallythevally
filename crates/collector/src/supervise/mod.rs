@@ -5,6 +5,7 @@ use std::sync::Arc;
 use server::clock::Clock;
 use server::collector::telegram::{Telegram, default_path as default_telegram_path};
 use server::kiwoom::transport::ReqwestTransport;
+use server::shared_data::Broker;
 use tokio::sync::watch;
 
 use crate::args::{ArgSpec, Arguments};
@@ -24,6 +25,7 @@ mod process;
 mod restart_window;
 mod schedule;
 mod settings;
+mod shared;
 mod status_command;
 mod status;
 mod tokens;
@@ -33,12 +35,13 @@ mod wire;
 pub use daemon::{Control, Injected, Inputs, StartError, Supervisor, load_plan};
 pub use handoff::{STOCK_TYPES, effective_plan, registrations_of};
 pub use journal::{JOURNAL_VERSION, JournalEvent, journal_path, kst_stamp, read_lossy};
-pub use process::{ChildMessage, ChildProcess, FORWARDED_VARIABLES, Launcher, Spawned, TokioLauncher};
-pub use schedule::{Daemon, DaemonInjected, DaemonInputs, DaemonStartError, DayTimes, FinalizeRunner, ProcessFinalizeRunner, ScheduleSettings, finalize_arguments, parse_clock_time};
+pub use process::{ChildMessage, ChildProcess, FORWARDED_VARIABLES, Launcher, SharedLaunch, Spawned, TokioLauncher};
+pub use shared::{SharedInjected, SharedInputs, SharedReport, SharedStartError, SharedSupervisor};
+pub use schedule::{Daemon, SharedJobs, DaemonInjected, DaemonInputs, DaemonStartError, DayTimes, FinalizeRunner, ProcessFinalizeRunner, ScheduleSettings, finalize_arguments, parse_clock_time};
 pub use settings::{MarketOpenCheck, Settings, SocketSetting};
 pub use restart_window::{RestartInputs, RestartVerdict, decide as decide_restart, run as run_restart_window};
 pub use status_command::run as run_status;
-pub use status::{Alert, AlertKind, DaemonStatus, DayPhase, KeyState, KeyStatus, ObservationDay, ObservationVerdict, RestProgress, Today};
+pub use status::{Alert, AlertKind, DaemonStatus, DayPhase, KeyState, KeyStatus, KeyUsage, ObservationDay, ObservationVerdict, RestProgress, Today};
 pub use api::{MAX_CONNECTIONS, OUTBOX_LINES, SOCKET_FILE_NAME, StatusSocket};
 pub use telegram::AlertTelegram;
 pub use files::{read_coverage, read_disk};
@@ -64,11 +67,13 @@ const SPEC: ArgSpec = ArgSpec {
         "keep",
         "early-period",
         "telegram",
+        "shared-config",
+        "shared",
     ],
     flag_options: &[],
 };
 
-const DAEMON_ONLY_OPTIONS: [&str; 12] = [
+const DAEMON_ONLY_OPTIONS: [&str; 14] = [
     "judge-at",
     "plan-at",
     "launch-at",
@@ -81,8 +86,11 @@ const DAEMON_ONLY_OPTIONS: [&str; 12] = [
     "keep",
     "early-period",
     "telegram",
+    "shared-config",
+    "shared",
 ];
 
+const SHARED_CONFIG_FILE: &str = ".config/vally/collector-shared.json";
 const HOLIDAY_KEY_FILE: &str = ".config/vally/holiday-service-key";
 const RUNTIME_STOP_LIMIT: std::time::Duration = std::time::Duration::from_secs(5);
 
@@ -161,6 +169,13 @@ pub fn schedule_from_arguments(raw_arguments: &[String]) -> Result<ScheduleSetti
     parse_schedule(&arguments)
 }
 
+fn default_shared_config_path(variables: &Variables) -> Result<PathBuf, String> {
+    match variables.get("HOME").filter(|home| !home.is_empty()) {
+        Some(home) => Ok(PathBuf::from(home).join(SHARED_CONFIG_FILE)),
+        None => Err("HOME이 없어 키 배정표 경로를 정할 수 없습니다. --shared-config를 주세요".to_string()),
+    }
+}
+
 fn load_telegram(arguments: &Arguments, process: &Variables) -> Result<Option<Telegram>, String> {
     let default = || process.get("HOME").filter(|home| !home.is_empty()).map(|home| default_telegram_path(std::path::Path::new(home)));
     let Some(path) = arguments.value("telegram").map(PathBuf::from).or_else(default) else { return Ok(None) };
@@ -194,6 +209,14 @@ fn run_daemon(arguments: &Arguments, keys_path: &std::path::Path) -> ExitCode {
         Ok(keys) => keys,
         Err(error) => return usage_error(error),
     };
+    let shared_config = match arguments.value("shared-config") {
+        Some(path) => PathBuf::from(path),
+        None => match default_shared_config_path(&process) {
+            Ok(path) => path,
+            Err(message) => return usage_error(message),
+        },
+    };
+    let shared_dir = arguments.value("shared").map_or_else(|| data_dir.join("shared"), PathBuf::from);
     let holiday_key_path = match arguments.value("holiday-key") {
         Some(path) => PathBuf::from(path),
         None => match default_holiday_key_path(&process) {
@@ -208,6 +231,14 @@ fn run_daemon(arguments: &Arguments, keys_path: &std::path::Path) -> ExitCode {
     let executable = match std::env::current_exe() {
         Ok(path) => path,
         Err(error) => return usage_error(format_args!("실행 파일 경로를 알 수 없습니다: {error}")),
+    };
+    let kis_transport: Option<Arc<dyn server::kis::transport::Transport>> = if keys.active.iter().any(|key| key.broker == Broker::Kis) {
+        match server::kis::transport::ReqwestTransport::new(server::config::KIS_BASE_URL.to_owned()) {
+            Ok(transport) => Some(Arc::new(transport)),
+            Err(error) => return usage_error(format_args!("한투 HTTP 클라이언트를 만들지 못했습니다: {error}")),
+        }
+    } else {
+        None
     };
     init_logging();
     let runtime = match tokio::runtime::Builder::new_multi_thread().enable_all().build() {
@@ -224,7 +255,7 @@ fn run_daemon(arguments: &Arguments, keys_path: &std::path::Path) -> ExitCode {
             Err(error) => return usage_error(format_args!("특일정보 HTTP 클라이언트를 만들지 못했습니다: {error}")),
         };
         let injected = DaemonInjected {
-            launcher: Arc::new(TokioLauncher::new(executable.clone(), data_dir.clone(), &process)),
+            launcher: Arc::new(TokioLauncher::new(executable.clone(), data_dir.clone(), &process).with_shared_dir(shared_dir)),
             transport: Arc::new(transport),
             holidays: Arc::new(holidays),
             finalizer: Arc::new(ProcessFinalizeRunner::new(executable)),
@@ -238,7 +269,7 @@ fn run_daemon(arguments: &Arguments, keys_path: &std::path::Path) -> ExitCode {
             holiday_key_path,
         };
         let daemon = match Daemon::start(inputs, injected) {
-            Ok(daemon) => daemon.with_telegram(telegram.map(|telegram| AlertTelegram::spawn(telegram, &state_folder))),
+            Ok(daemon) => daemon.with_shared_jobs(SharedJobs { assignment_path: shared_config, kis_transport }).with_telegram(telegram.map(|telegram| AlertTelegram::spawn(telegram, &state_folder))),
             Err(error) => {
                 eprintln!("supervise: 시작하지 못했습니다: {error}");
                 return ExitCode::FAILURE;
@@ -305,7 +336,7 @@ fn run_single_day(arguments: &Arguments, keys_path: &std::path::Path, date: &str
             transport: Arc::new(transport),
             clock: Clock::system(),
         };
-        let supervisor = match Supervisor::start(Inputs { plan, keys: keys.active, data_dir, settings: Settings { status_socket: Some(SocketSetting { path: socket, required: socket_given }), ..Settings::default() } }, injected) {
+        let supervisor = match Supervisor::start(Inputs { plan, keys: keys.split_rest().0, data_dir, settings: Settings { status_socket: Some(SocketSetting { path: socket, required: socket_given }), ..Settings::default() } }, injected) {
             Ok(supervisor) => supervisor,
             Err(error) => {
                 eprintln!("supervise: 시작하지 못했습니다: {error}");

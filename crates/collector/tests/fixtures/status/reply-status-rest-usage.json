@@ -1,0 +1,98 @@
+{
+  "v": 1,
+  "type": "status",
+  "sent_at": "2026-11-18T09:00:05+09:00",
+  "status": {
+    "date": 20261118,
+    "phase": "collecting",
+    "today": {
+      "planned_stocks": 0,
+      "receiving_stocks": 0,
+      "register_failed_batches": 0,
+      "disconnected_stocks": 0,
+      "handed_off_stocks": 0,
+      "excluded_stocks": 0
+    },
+    "keys": [
+      {
+        "name": "rest-01",
+        "app_key_hash_prefix": "1a2b3c4d",
+        "role": "rest",
+        "state": "receiving",
+        "stocks": 0,
+        "messages_per_second": null,
+        "register_failures": 0,
+        "restarts": 0,
+        "rest": {
+          "planned_jobs": 1,
+          "finished_jobs": 2
+        },
+        "usage": {
+          "minute_start": 1795046400,
+          "key_max_per_second": 10,
+          "trs": [
+            {
+              "tr": "ka10001",
+              "sent": 12,
+              "rate_limited": 2,
+              "resent": 2,
+              "max_wait_ms": 1050,
+              "max_per_second": 5
+            },
+            {
+              "tr": "ka10008",
+              "sent": 10,
+              "rate_limited": 0,
+              "resent": 0,
+              "max_wait_ms": 0,
+              "max_per_second": 5
+            }
+          ]
+        }
+      }
+    ],
+    "universe_changes": {
+      "added": [
+        {
+          "code": "123456",
+          "name": "신규상장"
+        }
+      ],
+      "removed": [
+        {
+          "code": "654321",
+          "name": "폐지종목"
+        }
+      ],
+      "renamed": [
+        {
+          "code": "005930",
+          "from": "삼성전자",
+          "to": "삼성전자우"
+        }
+      ],
+      "halt_started": [],
+      "halt_lifted": [
+        {
+          "code": "111111",
+          "name": "재개종목"
+        }
+      ]
+    },
+    "observation_day": {
+      "verdict": "observed",
+      "reasons": [
+        "평일",
+        "공휴일 아님",
+        "수정 파일에 없음"
+      ]
+    },
+    "alerts": [
+      {
+        "at": "2026-11-18T08:03:00+09:00",
+        "kind": "shared_job_moved",
+        "message": "rest-02의 일 Probe을 rest-01로 옮깁니다"
+      }
+    ]
+  }
+}

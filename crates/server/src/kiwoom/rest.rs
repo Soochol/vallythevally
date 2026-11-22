@@ -2,7 +2,7 @@
 //!
 //! - TR(api-id)마다 최근 1초 전송 수를 센다. 한도(실전 5, 모의 1) 미만이면 곧바로 보내고, 찼으면 창 안 가장 오래된 전송 + 1초 + 여유(`WINDOW_MARGIN`)에 보낸다. TR 사이에는 간격이 없다.
 //!   주문 쓰기 네 TR은 한 창으로 센다. 토큰 발급, 다시 보내기, 연속조회 페이지도 같은 창에 센다.
-//! - `TOTAL_PER_SECOND_LIMIT`을 켜면 TR별 창과 별개로 모든 TR의 합계 창도 지킨다. 기본은 꺼져 있다.
+//! - `with_total_per_second`로 켜면 TR별 창과 별개로 모든 TR의 합계 창도 지킨다. 기본은 꺼져 있다. 꺼져 있어도 키 전체의 초당 전송 최댓값은 센다.
 //! - 제한 응답은 그 TR(주문 쓰기면 묶음)만 창이 비는 시각까지 붙잡고 같은 요청을 그때 다시 보낸다. 응답의 `유량=N`이 그 TR의 한도가 된다. 대기열 전체는 멈추지 않는다.
 //! - 주문 쓰기도 제한 응답(HTTP 429)이면 최대 `ORDER_RATE_LIMIT_RESENDS`번 다시 보낸다. 그 밖의 실패는 다시 보내지 않는다.
 //! - 1분마다 TR별 전송·제한 응답·다시 보낸 수와 창 때문에 기다린 가장 긴 시간을 로그 한 줄씩 남긴다.
@@ -34,7 +34,6 @@ const WINDOW_MARGIN: Duration = Duration::from_millis(50);
 const REAL_SENDS_PER_WINDOW: u32 = 5;
 const MOCK_SENDS_PER_WINDOW: u32 = 1;
 const MOCK_SAME_TR_SPACING: Duration = Duration::from_secs(1);
-const TOTAL_PER_SECOND_LIMIT: Option<u32> = None;
 const SCREEN_RESERVED_SLOTS: u32 = 2;
 const SCREEN_ACTIVITY_SPAN: Duration = Duration::from_secs(10);
 const MAX_RATE_LIMITED: u8 = 3;
@@ -392,6 +391,7 @@ struct TrTotals {
 struct FinishedMinute {
     started_at: KstTime,
     counters: HashMap<Endpoint, TrCounter>,
+    key_max_per_second: u32,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -415,6 +415,7 @@ pub struct TrUsage {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Usage {
     pub last_minute_started_at: Option<KstTime>,
+    pub last_minute_key_max_per_second: u32,
     pub total_rate_limited: u64,
     pub trs: Vec<TrUsage>,
 }
@@ -464,6 +465,8 @@ struct Queue {
     windows: HashMap<WindowKey, SendWindow>,
     total: Option<SendWindow>,
     counters: HashMap<Endpoint, TrCounter>,
+    key_sends: VecDeque<Instant>,
+    key_max_per_second: u32,
     last_minute: Option<FinishedMinute>,
     totals: HashMap<Endpoint, TrTotals>,
     next_id: u64,
@@ -589,7 +592,11 @@ impl KiwoomRest {
     }
 
     pub fn for_environment(transport: Arc<dyn Transport>, auth: KiwoomAuth, clock: Clock, environment: KiwoomEnvironment) -> Self {
-        Self::start(transport, auth, clock, Pacing::PerTr, environment, ORDER_RATE_LIMIT_RESENDS, TOTAL_PER_SECOND_LIMIT)
+        Self::start(transport, auth, clock, Pacing::PerTr, environment, ORDER_RATE_LIMIT_RESENDS, None)
+    }
+
+    pub fn with_total_per_second(transport: Arc<dyn Transport>, auth: KiwoomAuth, clock: Clock, environment: KiwoomEnvironment, total_per_second: Option<u32>) -> Self {
+        Self::start(transport, auth, clock, Pacing::PerTr, environment, ORDER_RATE_LIMIT_RESENDS, total_per_second)
     }
 
     pub fn with_send_spacing(transport: Arc<dyn Transport>, auth: KiwoomAuth, clock: Clock, send_spacing: Duration) -> Self {
@@ -597,7 +604,7 @@ impl KiwoomRest {
     }
 
     pub(crate) fn build(transport: Arc<dyn Transport>, auth: KiwoomAuth, clock: Clock, send_spacing: Duration, environment: KiwoomEnvironment) -> Self {
-        Self::start(transport, auth, clock, Pacing::SharedSpacing(send_spacing), environment, ORDER_RATE_LIMIT_RESENDS, TOTAL_PER_SECOND_LIMIT)
+        Self::start(transport, auth, clock, Pacing::SharedSpacing(send_spacing), environment, ORDER_RATE_LIMIT_RESENDS, None)
     }
 
     fn start(transport: Arc<dyn Transport>, auth: KiwoomAuth, clock: Clock, pacing: Pacing, environment: KiwoomEnvironment, order_resends: u8, total_limit: Option<u32>) -> Self {
@@ -737,7 +744,8 @@ async fn report_counters(inner: Arc<Inner>) {
             let mut q = inner.lock();
             let counters = std::mem::take(&mut q.counters);
             let lines = counters.iter().filter(|(_, c)| c.has_activity()).map(|(endpoint, c)| (endpoint.as_str(), *c)).collect();
-            q.last_minute = Some(FinishedMinute { started_at, counters });
+            let key_max_per_second = std::mem::take(&mut q.key_max_per_second);
+            q.last_minute = Some(FinishedMinute { started_at, counters, key_max_per_second });
             lines
         };
         started_at = inner.clock.now();
@@ -989,7 +997,7 @@ impl Inner {
                 }
             })
             .collect();
-        Usage { last_minute_started_at: last_minute.map(|m| m.started_at), total_rate_limited: q.totals.values().map(|t| t.rate_limited).sum(), trs }
+        Usage { last_minute_started_at: last_minute.map(|m| m.started_at), last_minute_key_max_per_second: last_minute.map_or(0, |m| m.key_max_per_second), total_rate_limited: q.totals.values().map(|t| t.rate_limited).sum(), trs }
     }
 
     fn default_limit(&self) -> u32 {
@@ -1036,6 +1044,13 @@ impl Inner {
             && let Some(total) = q.total.as_mut()
         {
             total.record(now, serves_screen);
+        }
+        if endpoint != Endpoint::ISSUE {
+            while q.key_sends.front().is_some_and(|&t| t + SendWindow::span() <= now) {
+                q.key_sends.pop_front();
+            }
+            q.key_sends.push_back(now);
+            q.key_max_per_second = q.key_max_per_second.max(u32::try_from(q.key_sends.len()).unwrap_or(u32::MAX));
         }
         let counter = q.counters.entry(endpoint).or_default();
         counter.sent += 1;
@@ -2569,6 +2584,48 @@ mod tests {
         let (at, lines) = seven_trs_with_total_limit(None).await;
         assert_eq!(at, [0; 7]);
         assert!(lines.iter().all(|l| !l.contains("max_total_wait_ms")), "{lines:?}");
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn with_the_total_window_off_one_tr_stays_at_five_per_window_and_two_trs_do_not_wait() {
+        let fake = fake_with(Duration::ZERO, |_| list_ok());
+        let rest = real_rest(&fake).await;
+        let origin = Instant::now();
+        all_ok((0..6).map(|i| tr_call(&rest, ApiId::Ka10081, &format!("a{i}"), Priority::Screen)).collect()).await;
+        assert_eq!(at_ms(&fake.market_sent(), origin), [0, 0, 0, 0, 0, 1050]);
+        tokio::time::sleep(Duration::from_secs(5)).await;
+        let second = Instant::now();
+        let both = [ApiId::Ka10001, ApiId::Ka10004].into_iter().flat_map(|api| (0..5).map(move |i| (api, format!("{}{i}", api.as_str()))));
+        all_ok(both.map(|(api, body)| tr_call(&rest, api, &body, Priority::Screen)).collect()).await;
+        let later: Vec<_> = fake.market_sent().into_iter().filter(|s| s.at >= second).collect();
+        assert_eq!(at_ms(&later, second), [0; 10]);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn the_public_total_constructor_keeps_any_one_second_within_the_total() {
+        let fake = fake_with(Duration::ZERO, |_| list_ok());
+        let auth = KiwoomAuth::new(Secret::new("k".into()), Secret::new("s".into()), None);
+        let clock = Clock::fake(kst(KstDate::new(2026, 11, 9).unwrap(), 9, 0, 0));
+        let rest = KiwoomRest::with_total_per_second(Arc::new(fake.clone()), auth, clock, KiwoomEnvironment::Real, Some(5));
+        rest.issue_token().await.unwrap();
+        let origin = Instant::now();
+        let both = [ApiId::Ka10001, ApiId::Ka10004].into_iter().flat_map(|api| (0..5).map(move |i| (api, format!("{}{i}", api.as_str()))));
+        all_ok(both.map(|(api, body)| tr_call(&rest, api, &body, Priority::Screen)).collect()).await;
+        let at = at_ms(&fake.market_sent(), origin);
+        assert_eq!(at.len(), 10);
+        assert!(at.iter().all(|&a| at.iter().filter(|&&b| b >= a && b < a + 1000).count() <= 5), "{at:?}");
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn the_key_peak_counts_every_tr_even_with_the_total_window_off() {
+        let fake = fake_with(Duration::ZERO, |_| list_ok());
+        let rest = real_rest(&fake).await;
+        let both = [ApiId::Ka10001, ApiId::Ka10004].into_iter().flat_map(|api| (0..3).map(move |i| (api, format!("{}{i}", api.as_str()))));
+        all_ok(both.map(|(api, body)| tr_call(&rest, api, &body, Priority::Screen)).collect()).await;
+        let usage = pass_the_first_minute(&rest).await;
+        assert_eq!(row(&usage, ApiId::Ka10001.as_str()).last_minute.max_per_second, 3);
+        assert_eq!(row(&usage, ApiId::Ka10004.as_str()).last_minute.max_per_second, 3);
+        assert_eq!(usage.last_minute_key_max_per_second, 6);
     }
 
     #[tokio::test(start_paused = true)]

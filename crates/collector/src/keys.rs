@@ -7,13 +7,15 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 use server::config::Secret;
 use server::kiwoom::token_file::credential_id;
+use server::shared_data::Broker;
 
 use crate::collect::config::{
-    APP_KEY_VARIABLE, APP_SECRET_VARIABLE, LOCK_FILE_NAME, TOKEN_FILE_NAME, Variables, read_env_file, reject_app_server_key,
+    APP_KEY_VARIABLE, APP_SECRET_VARIABLE, LOCK_FILE_NAME, TOKEN_FILE_NAME, Variables, read_env_file, reject_app_server_key, reject_server_kis_key,
 };
 use crate::protocol::KeyName;
 
-const SUPPORTED_VERSION: u32 = 1;
+const FIRST_VERSION: u32 = 1;
+const ROLE_VERSION: u32 = 2;
 const HASH_PREFIX: &str = "sha256:";
 const HASH_HEX_LEN: usize = 64;
 
@@ -22,6 +24,25 @@ const HASH_HEX_LEN: usize = 64;
 pub enum KeyRole {
     Collecting,
     Spare,
+    Rest,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum EntryRole {
+    Collect,
+    Spare,
+    Rest,
+}
+
+impl EntryRole {
+    fn key_role(self) -> KeyRole {
+        match self {
+            EntryRole::Collect => KeyRole::Collecting,
+            EntryRole::Spare => KeyRole::Spare,
+            EntryRole::Rest => KeyRole::Rest,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -34,6 +55,7 @@ pub struct KeyIdentity {
 #[derive(Debug, Clone)]
 pub struct ActiveKey {
     pub identity: KeyIdentity,
+    pub broker: Broker,
     pub app_key: Secret<String>,
     pub app_secret: Secret<String>,
     pub token_path: PathBuf,
@@ -50,10 +72,14 @@ impl KeyList {
         self.active.iter().map(|key| key.identity.clone()).collect()
     }
 
+    pub fn split_rest(self) -> (Vec<ActiveKey>, Vec<ActiveKey>) {
+        self.active.into_iter().partition(|key| key.identity.role != KeyRole::Rest)
+    }
+
     pub fn load(path: &Path, state_folder: &Path, process: &Variables) -> Result<KeyList, KeysError> {
         let entries = read_entries(path)?;
         let named = name_entries(entries)?;
-        let spares = named.iter().filter(|entry| entry.spare).count();
+        let spares = named.iter().filter(|entry| entry.role == KeyRole::Spare).count();
         if spares != 1 {
             return Err(KeysError::SpareCount(spares));
         }
@@ -78,7 +104,12 @@ struct KeyListFile {
 struct KeyEntry {
     name: String,
     active: bool,
-    spare: bool,
+    #[serde(default)]
+    spare: Option<bool>,
+    #[serde(default)]
+    role: Option<EntryRole>,
+    #[serde(default)]
+    broker: Option<Broker>,
     app_key_hash: String,
     secret_file: PathBuf,
     #[serde(default)]
@@ -90,7 +121,8 @@ struct KeyEntry {
 struct NamedEntry {
     name: KeyName,
     active: bool,
-    spare: bool,
+    role: KeyRole,
+    broker: Broker,
     app_key_hash: String,
     secret_file: PathBuf,
     token_path: Option<PathBuf>,
@@ -109,6 +141,8 @@ pub enum KeysError {
     Unreadable { path: PathBuf, kind: io::ErrorKind },
     Malformed { path: PathBuf, detail: String },
     UnsupportedVersion(u32),
+    EntryFields { key: String, detail: &'static str },
+    KisNeedsRestRole(KeyName),
     BadName { name: String, detail: String },
     DuplicateName(KeyName),
     SpareCount(usize),
@@ -126,6 +160,8 @@ impl fmt::Display for KeysError {
             KeysError::Unreadable { path, kind } => write!(formatter, "키 목록 설정을 읽을 수 없습니다({}): {kind}", path.display()),
             KeysError::Malformed { path, detail } => write!(formatter, "키 목록 설정 형식이 틀렸습니다({}): {detail}", path.display()),
             KeysError::UnsupportedVersion(version) => write!(formatter, "키 목록 설정의 형식 버전 {version}은 지원하지 않습니다"),
+            KeysError::EntryFields { key, detail } => write!(formatter, "키 {key:?}의 칸이 형식 버전과 맞지 않습니다: {detail}"),
+            KeysError::KisNeedsRestRole(key) => write!(formatter, "키 {key}는 한투 키라 역할이 rest여야 합니다. 한투는 실시간 수집과 예비를 맡지 않습니다"),
             KeysError::BadName { name, detail } => write!(formatter, "키 이름 {name:?}을 쓸 수 없습니다: {detail}"),
             KeysError::DuplicateName(name) => write!(formatter, "키 이름 {name}이 겹칩니다"),
             KeysError::SpareCount(count) => write!(formatter, "예비 키는 정확히 하나여야 합니다({count}개)"),
@@ -158,10 +194,31 @@ fn read_entries(path: &Path) -> Result<Vec<KeyEntry>, KeysError> {
         path: path.to_owned(),
         detail: format!("JSON {:?} 오류, {}번째 줄", error.classify(), error.line()),
     })?;
-    if file.version != SUPPORTED_VERSION {
+    if file.version != FIRST_VERSION && file.version != ROLE_VERSION {
         return Err(KeysError::UnsupportedVersion(file.version));
     }
+    for entry in &file.keys {
+        check_entry_fields(file.version, entry)?;
+    }
     Ok(file.keys)
+}
+
+fn check_entry_fields(version: u32, entry: &KeyEntry) -> Result<(), KeysError> {
+    let wrong = |detail: &'static str| Err(KeysError::EntryFields { key: entry.name.clone(), detail });
+    match version {
+        FIRST_VERSION if entry.spare.is_none() => wrong("버전 1은 spare가 필요합니다"),
+        FIRST_VERSION if entry.role.is_some() || entry.broker.is_some() => wrong("role과 broker는 버전 2부터 씁니다"),
+        ROLE_VERSION if entry.role.is_none() || entry.broker.is_none() => wrong("버전 2는 role과 broker가 필요합니다"),
+        ROLE_VERSION if entry.spare.is_some() => wrong("spare는 버전 1의 칸입니다. 버전 2는 role을 씁니다"),
+        _ => Ok(()),
+    }
+}
+
+fn entry_role_and_broker(entry: &KeyEntry) -> (KeyRole, Broker) {
+    match (entry.role, entry.broker) {
+        (Some(role), Some(broker)) => (role.key_role(), broker),
+        _ => (if entry.spare == Some(true) { KeyRole::Spare } else { KeyRole::Collecting }, Broker::Kiwoom),
+    }
 }
 
 fn parse_name(text: &str) -> Result<KeyName, KeysError> {
@@ -181,10 +238,15 @@ fn name_entries(entries: Vec<KeyEntry>) -> Result<Vec<NamedEntry>, KeysError> {
         if !seen.insert(name.clone()) {
             return Err(KeysError::DuplicateName(name));
         }
+        let (role, broker) = entry_role_and_broker(&entry);
+        if broker == Broker::Kis && role != KeyRole::Rest {
+            return Err(KeysError::KisNeedsRestRole(name));
+        }
         named.push(NamedEntry {
             name,
             active: entry.active,
-            spare: entry.spare,
+            role,
+            broker,
             app_key_hash: entry.app_key_hash,
             secret_file: entry.secret_file,
             token_path: entry.token_path,
@@ -220,7 +282,7 @@ fn require_absolute(key: &KeyName, path: &Path) -> Result<(), KeysError> {
 }
 
 fn open_key(entry: NamedEntry, state_folder: &Path, process: &Variables) -> Result<ActiveKey, KeysError> {
-    let NamedEntry { name, spare, app_key_hash, secret_file, token_path, lock_path, .. } = entry;
+    let NamedEntry { name, role, broker, app_key_hash, secret_file, token_path, lock_path, .. } = entry;
     require_absolute(&name, &secret_file)?;
     let default_folder = state_folder.join(name.as_str());
     let token_path = token_path.unwrap_or_else(|| default_folder.join(TOKEN_FILE_NAME));
@@ -231,9 +293,12 @@ fn open_key(entry: NamedEntry, state_folder: &Path, process: &Variables) -> Resu
     if credential_id(app_key.expose()) != app_key_hash {
         return Err(KeysError::HashMismatch(name));
     }
-    reject_app_server_key(process, app_key.expose()).map_err(|error| KeysError::AppServerKey { key: name.clone(), detail: error.to_string() })?;
-    let role = if spare { KeyRole::Spare } else { KeyRole::Collecting };
-    Ok(ActiveKey { identity: KeyIdentity { name, role, app_key_hash }, app_key, app_secret, token_path, lock_path })
+    let server_key_check = match broker {
+        Broker::Kiwoom => reject_app_server_key(process, app_key.expose()),
+        Broker::Kis => reject_server_kis_key(process, app_key.expose()),
+    };
+    server_key_check.map_err(|error| KeysError::AppServerKey { key: name.clone(), detail: error.to_string() })?;
+    Ok(ActiveKey { identity: KeyIdentity { name, role, app_key_hash }, broker, app_key, app_secret, token_path, lock_path })
 }
 
 fn read_secrets(key: &KeyName, path: &Path) -> Result<(Secret<String>, Secret<String>), KeysError> {

@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::keys::KeyRole;
 use crate::protocol::KeyName;
+use crate::shared::TrMinute;
 use crate::universe::Diff;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -68,6 +69,15 @@ pub struct KeyStatus {
     pub register_failures: usize,
     pub restarts: u32,
     pub rest: RestProgress,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub usage: Option<KeyUsage>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct KeyUsage {
+    pub minute_start: i64,
+    pub key_max_per_second: u32,
+    pub trs: Vec<TrMinute>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -93,6 +103,7 @@ pub enum AlertKind {
     ObservationUnknown,
     IndexMismatch,
     StageFailed,
+    SharedJobMoved,
 }
 
 impl AlertKind {
@@ -108,6 +119,7 @@ impl AlertKind {
             AlertKind::ObservationUnknown => "관측일 판단 모름",
             AlertKind::IndexMismatch => "지수 대조 불일치",
             AlertKind::StageFailed => "단계 실패",
+            AlertKind::SharedJobMoved => "공용 자료 일 이동",
         }
     }
 

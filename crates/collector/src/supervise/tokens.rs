@@ -51,6 +51,10 @@ impl KeyTokens {
         self.rest.auth().current(self.clock.now()).map(|(token, TokenGen(generation))| (token, generation))
     }
 
+    pub fn expires_at(&self) -> Option<i64> {
+        self.rest.auth().token_expires_at().map(|at| at.unix())
+    }
+
     pub fn needs_issue(&self) -> bool {
         self.rest.auth().needs_issue(self.clock.now())
     }

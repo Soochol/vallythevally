@@ -192,15 +192,16 @@ data/hoga/
 3. stdout에 `hello`를 쓰고 stdin을 읽기 시작한다. stdin이 닫히면(데몬이 죽었거나 닫았으면) `shutdown` 명령과 같다.
 4. `token` 명령이 올 때까지 연결하지 않는다.
 
-#### 프로토콜(버전 1)
+#### 프로토콜(버전 2)
 
-stdin은 명령을, stdout은 사건을 준다. 줄마다 JSON 객체 하나이고 `"v":1`이 있다. 사람이 읽는 로그는 stderr로만 쓴다.
+stdin은 명령을, stdout은 사건을 준다. 줄마다 JSON 객체 하나이고 `"v":2`가 있다. 버전 2는 공용 자료 자식([공용 자료 자식](#공용-자료-자식과-일-실행기))의 명령 `assign`, 사건 `usage`·`job_stats`와 `token`의 `expires_at`을 더하며 `collect` 자식과 같은 형식을 쓴다. 버전 1 줄은 읽지 않는다. 데몬과 자식이 같은 실행 파일이므로 함께 바뀐다. 사람이 읽는 로그는 stderr로만 쓴다.
 
-명령(데몬 → 자식). 모양은 `{"v":1,"cmd":"<이름>",…}`다.
+명령(데몬 → 자식). 모양은 `{"v":2,"cmd":"<이름>",…}`다.
 
 | `cmd` | 필드 | 뜻 |
 |---|---|---|
-| `token` | `token`(글자), `generation`(정수) | LOGIN에 쓸 토큰과 데몬이 매긴 세대. 새 `token`은 앞의 것을 대체한다. 이미 붙은 세션은 끊지 않고 다음 LOGIN부터 쓴다 |
+| `token` | `token`(글자), `generation`(정수), `expires_at`(Unix 초, 선택) | LOGIN에 쓸 토큰과 데몬이 매긴 세대. 새 `token`은 앞의 것을 대체한다. 이미 붙은 세션은 끊지 않고 다음 LOGIN부터 쓴다. `expires_at`은 공용 자료 자식만 쓴다 |
+| `assign` | `date`(정수 `YYYYMMDD`), `jobs`(배열) | 공용 자료 자식만 받는다. 그날 그 키가 맡을 일의 전체 목록이다. 앞의 목록을 대체한다. `collect` 자식은 무시한다 |
 | `register` | `id`(글자), `items`(글자 배열), `types`(글자 배열) | 등록. `items`를 50개씩 나눠 REG로 보낸다. 붙어 있지 않으면 받아 두었다가 LOGIN 뒤 보낸다 |
 | `unregister` | `register`와 같다 | 해제. 50개씩 나눠 REMOVE로 보내고 다시 붙을 때 보낼 목록에서 뺀다 |
 | `shutdown` | 없음 | 종료 |
@@ -209,7 +210,7 @@ stdin은 명령을, stdout은 사건을 준다. 줄마다 JSON 객체 하나이�
 - 종목 단위 타입의 `items`는 종목코드(6자리 영숫자 대문자)이고 자식이 `_AL`을 붙인다. 시장 단위 타입의 `items`는 글자 그대로 REG의 `item`에 간다(업종 코드, 빈 글자 `""` 등). 이 세 타입의 항목 형식은 키움 공식 명세(`kiwoom_api_spec.json`, [ADR 0012](adr/0012-quarterly-bars-from-kiwoom-monthly-bars.md)가 링크한 고정본)에도, `docs/research/2026-11-15-kiwoom-al-realtime-types.md`에도 적혀 있지 않다. 명세는 `item`을 "거래소별 종목코드, 업종코드"라고만 적는다. 그래서 자식은 항목을 검사하지 않고 데몬이 정한 대로 보낸다. 어떤 항목이 실제로 받아들여지는지는 실제 접속으로 확인해야 하고, 거절은 `registered`의 `ok:false`로 보인다.
 - `items`는 비면 안 되고 같은 항목이 두 번 있으면 안 된다. 같은 (항목, 타입)을 다시 등록하면 한 벌만 남는다.
 
-사건(자식 → 데몬). 모양은 `{"v":1,"event":"<이름>",…}`다.
+사건(자식 → 데몬). 모양은 `{"v":2,"event":"<이름>",…}`다.
 
 | `event` | 필드 | 언제 |
 |---|---|---|
@@ -222,9 +223,11 @@ stdin은 명령을, stdout은 사건을 준다. 줄마다 JSON 객체 하나이�
 | `token_invalid` | `generation` | LOGIN이 토큰 무효로 거절됨. 거절된 `token`의 세대를 싣는다. 새 `token`이 올 때까지 다시 LOGIN하지 않는다 |
 | `market_open` | `recv_ms`, `values` | `0s` 프레임을 받을 때마다. `values`는 그 항목의 값 객체(`"215"` 장운영구분, `"20"` 시각, `"214"` 장시작예상잔여시간) 그대로고 `recv_ms`는 받은 때의 유닉스 ms다. 어느 값이 장 시작인지는 데몬이 판단한다 |
 | `halted` | `reason`, `action` | 멈출 때. 까닭과 할 일 |
+| `usage` | `minute_start`, `key_max_per_second`, `trs[]` | 공용 자료 자식만 낸다. 키움 REST의 1분 카운터가 닫힐 때마다 한 번. 보낸 것이 없는 분은 내지 않는다 |
+| `job_stats` | `jobs[]`(`job`, `runs`, `overruns`, `last_error`) | 공용 자료 자식만 낸다. 맡은 일이 있으면 1분마다 |
 
 - `rejection`은 `{"reason":"<키움 오류 분류>","return_code":…,"detail":…}`다. 값이 없으면 `null`이다.
-- 모르는 명령, 버전이 다른 줄(`v`가 없거나 1이 아님), 깨진 줄(JSON 객체가 아님, 빈 줄, UTF-8이 아님, 필드가 맞지 않음)은 `down`과 `halted`를 내고 종료 코드 1로 끝난다. 조용히 넘기지 않는다.
+- 모르는 명령, 버전이 다른 줄(`v`가 없거나 2가 아님), 깨진 줄(JSON 객체가 아님, 빈 줄, UTF-8이 아님, 필드가 맞지 않음)은 `down`과 `halted`를 내고 종료 코드 1로 끝난다. 조용히 넘기지 않는다.
 - 토큰 값은 stdin으로만 받는다. 로그, 사건, 원문, 오류 문구(깨진 `token` 줄을 읽다 난 오류 포함)에 나오지 않는다.
 
 #### 끝나는 경우
@@ -570,25 +573,30 @@ data/hoga/calendar/
 
 ## 키 목록 설정
 
-`collector::keys::KeyList::load`가 저장소 밖 JSON 파일 하나에서 수집 키 목록을 읽는다. 비밀값은 이 파일에 없고 키마다 비밀값 파일을 가리킨다. 아래 값은 모두 가짜다.
+`collector::keys::KeyList::load`가 저장소 밖 JSON 파일 하나에서 키 목록을 읽는다. 비밀값은 이 파일에 없고 키마다 비밀값 파일을 가리킨다. 아래 값은 모두 가짜다.
 
 ```json
-{"version": 1, "keys": [
-  {"name": "collect-01", "active": true, "spare": false,
+{"version": 2, "keys": [
+  {"name": "collect-01", "active": true, "role": "collect", "broker": "kiwoom",
    "app_key_hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
    "secret_file": "/etc/vally/collect-01.env"},
-  {"name": "spare-01", "active": true, "spare": true,
+  {"name": "spare-01", "active": true, "role": "spare", "broker": "kiwoom",
    "app_key_hash": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
    "secret_file": "/etc/vally/spare-01.env",
    "token_path": "/var/lib/vally/spare-01/token.json",
-   "lock_path": "/var/lib/vally/spare-01/collector.lock"}
+   "lock_path": "/var/lib/vally/spare-01/collector.lock"},
+  {"name": "rest-01", "active": true, "role": "rest", "broker": "kiwoom",
+   "app_key_hash": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+   "secret_file": "/etc/vally/rest-01.env"}
 ]}
 ```
 
+- 형식 버전 2는 키마다 `role`(`collect`·`spare`·`rest`)과 `broker`(`kiwoom`·`kis`)가 있어야 하고 `spare` 칸은 받지 않는다. 버전 1(`spare: true|false`, `role`·`broker` 없음)은 그대로 읽는다. `spare: true`는 `spare`, 나머지는 `collect`, 증권사는 `kiwoom`이다. 두 버전의 칸을 섞으면 오류다.
+- 역할 `rest`는 실시간 세션 없이 공용 자료를 받는 키다([공용 자료](collector-shared-data.md)). 수집 계획과 `collect --child`에는 들지 않는다. 한투(`kis`) 키는 `rest`만 될 수 있다.
 - `name`은 `a-z0-9-`다. `app_key_hash`는 토큰 파일이 쓰는 `sha256:<소문자 16진수 64자>`다. 모든 경로는 절대 경로다.
-- 비밀값 파일은 `collect`의 env 파일과 같은 형식이다(`VALLY_COLLECTOR_APP_KEY`, `VALLY_COLLECTOR_APP_SECRET`). 읽는 것은 활성 키뿐이라 아직 없는 키는 `active: false`로 적어 둘 수 있다.
+- 비밀값 파일은 `collect`의 env 파일과 같은 형식이다(`VALLY_COLLECTOR_APP_KEY`, `VALLY_COLLECTOR_APP_SECRET`). 한투 키도 같은 변수 이름과 같은 검사(권한 600, 앱키 해시 일치)를 쓴다. 읽는 것은 활성 키뿐이라 아직 없는 키는 `active: false`로 적어 둘 수 있다.
 - `token_path`와 `lock_path`를 적지 않으면 상태 폴더 아래 키 이름 폴더(`<상태 폴더>/<키 이름>/token.json`, `collector.lock`)다.
-- 읽을 때 다음이 하나라도 틀리면 오류다. 이름이 겹침, `spare: true`가 정확히 하나가 아님, 비밀값 파일 권한에 그룹·다른 사용자 비트가 있음(600이어야 한다), 비밀값 파일의 앱키 해시가 설정과 다름, 두 키의 앱키 해시가 같음, 앱 서버 키(`VALLY_KIWOOM_APP_KEY`)와 같음.
+- 읽을 때 다음이 하나라도 틀리면 오류다. 이름이 겹침, 예비 키(`spare`)가 정확히 하나가 아님, 비밀값 파일 권한에 그룹·다른 사용자 비트가 있음(600이어야 한다), 비밀값 파일의 앱키 해시가 설정과 다름, 두 키의 앱키 해시가 같음, 칸이 형식 버전과 맞지 않음, 한투 키가 `rest`가 아님, 키움 키가 앱 서버 키(`VALLY_KIWOOM_APP_KEY`)와 같음, 한투 키가 앱 서버의 한투 키(`VALLY_KIS_APP_KEY`)와 같음([ADR 0039](adr/0039-kis-key-and-token-are-vally-only.md)). 앱 서버 키는 프로세스 환경과 `VALLY_ENV_FILE`이 가리키는 파일에서 찾는다.
 - 오류 문구에는 키 이름과 경로만 나온다. 비밀값은 `Secret`에 담긴다.
 
 ## 수집 계획
@@ -643,7 +651,7 @@ data/hoga/calendar/
 
 ### 자식과 재시작
 
-- 자식은 같은 실행 파일을 `collect --child --key <이름> --data <폴더>`로 띄운다. 환경변수는 비우고 `VALLY_COLLECTOR_WS_URL`, `RUST_LOG`만 넘긴다. stdin·stdout은 프로토콜 줄이고 stderr는 데몬 로그(`자식: …`)로 잇는다. 띄우는 부분은 `Launcher` trait이고 실제 구현은 `tokio::process`(`TokioLauncher`)다.
+- 자식은 같은 실행 파일을 `collect --child --key <이름> --data <폴더>`로 띄운다. 환경변수는 비우고 `VALLY_COLLECTOR_WS_URL`, `VALLY_COLLECTOR_REST_URL`(공용 자료 자식만 쓴다), `RUST_LOG`만 넘긴다. stdin·stdout은 프로토콜 줄이고 stderr는 데몬 로그(`자식: …`)로 잇는다. 띄우는 부분은 `Launcher` trait이고 실제 구현은 `tokio::process`(`TokioLauncher`)다.
 - `PR_SET_PDEATHSIG`는 자식이 건다. 리눅스는 이 신호를 부모를 만든 스레드가 끝날 때 보내므로, 데몬은 자식을 tokio 런타임의 작업 스레드(`spawn_blocking`이 아님)에서 띄운다.
 - `hello`가 오면 토큰과 계획의 몫을 `register`로 보낸다. 자식이 다시 뜨면 토큰과 등록을 처음부터 다시 보낸다.
 - 하트비트가 `heartbeat_timeout`(15초) 동안 오지 않거나 자식이 끝나면 그 자식을 SIGTERM으로 끝내고, `shutdown_grace`(10초) 안에 끝나지 않으면 SIGKILL로 끝낸 뒤 같은 키로 다시 띄운다.
@@ -681,6 +689,7 @@ data/hoga/calendar/
 | `market_open_missing` | `deadline` | 마감 시각까지 `market_open`이 없었다 |
 | `market_open_not_checked` | `reason` | 개장 뒤에 시작해 대조하지 않았다 |
 | `index_checked` | `result`(`agrees`·`disagrees`·`undetermined`·`failed`), `mismatch`, `detail` | 마감 뒤 코스피 지수 일봉 대조 |
+| `shared_job_moved` | `job`, `from`, `to` | 공용 자료 키 `from`이 멈춰 그 일을 같은 일의 다른 키로 옮겼다. 맡을 키가 남지 않았으면 `to`가 `null`이다. 같은 시각에 `key_stopped`가 먼저 적힌다 |
 
 ### 상태 모양과 로그
 
@@ -697,6 +706,29 @@ SIGTERM·SIGINT나 종료 시각(`end_at`, 기본 20:05 KST, 계획 파일의 �
 - `tests/restart_window_cli.rs`: `collector restart-window`의 출력(`now`, `wait <시각> Asia/Seoul`), 특일정보 캐시의 공휴일, 캐시가 없을 때의 예약, 데몬과 같은 시각 인수, 틀린 값의 종료 코드 2를 확인한다. 판정 규칙 자체는 `src/supervise/restart_window.rs`의 단위 시험이 가짜 달력과 임시 폴더로 확인한다. `python3 scripts/dev.py cargo test -p collector --test restart_window_cli`.
 - `tests/restart_script.rs`: `deploy/collector-restart`를 가짜 `systemctl`·`systemd-run`과 `--now`를 붙이는 `collector` 껍데기로 돌려, 실제 판정이 바로 재시작과 예약으로 이어지는지 확인한다. 나머지 배포 스크립트(`collector-build`, `collector-install`, `collector-restart`)의 경우별 시험은 옆 자리·예약·설치와 재시작의 같은 판정·reload 실패 되돌림과 경보·시작 전 정리·잠금·reload 재시도·링크·모드를 포함해 `python3 scripts/test-deploy-scripts.py`에 있다.
 - `tests/supervise_process.rs`: 실제 `collector supervise`가 실제 `collect --child` 자식 둘을 루프백 WebSocket 시험 서버에 붙여 LOGIN과 REG까지 가고, 데몬을 끝내면(SIGTERM) 자식도 끝나고, 데몬을 SIGKILL로 죽여도 자식이 끝남을 확인한다. 토큰은 토큰 파일에 미리 넣어 두고 `VALLY_COLLECTOR_REST_URL`(`http://127.0.0.1…`만 받는다)을 닫힌 포트로 돌려 키움에는 아무것도 보내지 않는다. `python3 scripts/dev.py cargo test -p collector --test supervise_process`.
+
+## 공용 자료 자식과 일 실행기
+
+공용 자료([플랜](plans/collector-shared-data.md))를 수집 데몬이 정해진 주기에 `rest` 역할 키로 만든다. 서버와 만나는 길은 파일이다([공용 자료 파일](collector-shared-data.md)). 결정은 [ADR 0043](adr/0043-collector-makes-shared-data-and-the-server-only-reads-it.md)에 있다. 코드는 `crates/collector/src/shared/`(일, 배정표, 일 실행기, 사용량, 자식)와 `src/supervise/shared.rs`(데몬 쪽 감독)다.
+
+### 데몬이 하는 일
+
+- 07:35 계획 때 키 배정표를 다시 읽는다([형식](collector-shared-data.md#키-배정표)). `--shared-config` 파일이 없으면 이 절의 모든 일이 꺼져 있다.
+- 07:55 자식 띄우기 때 배정표에 든 `rest` 키마다 `collector shared --child --key <이름> --broker <kiwoom|kis> --data <폴더> --shared <폴더> [--total-per-second N]` 하나를 띄운다. 환경변수는 `collect` 자식과 같게 비우고 일부만 넘긴다. 수집 계획과 `collect` 자식에는 `rest` 키가 들지 않는다. 같은 `Settings`(`heartbeat_timeout`, `restart_delays`, `restart_limit`, `shutdown_grace`, 종료 시각)를 쓴다. 자식에는 `PR_SET_PDEATHSIG`를 건다.
+- 토큰은 데몬이 발급한다. 키움 키는 `KeyTokens`(키 잠금과 토큰 파일), 한투 키는 `server::kis::KisAuth`와 키별 토큰 파일(`Daemon::with_shared_jobs`로 한투 transport를 준다)이다. `hello`가 오면 `token`을 stdin으로 보내고 그 뒤에 `assign`을 보낸다. 자식은 키·시크릿을 알지 못하고 발급하지도 않는다. 토큰이 무효가 되면(`token_invalid`, 만료 가까움) 데몬이 다시 발급해 새 `token`을 보낸다.
+- 자식이 하트비트를 잃거나 끝나면 `collect` 자식과 같은 간격과 한도로 다시 띄운다. 한도를 넘거나 키가 막히면(8050 등) 그 키를 멈춤으로 하고 그 키가 맡던 일을 배정표에서 같은 일의 남은 키들에 다시 나눠 `assign`을 새로 보낸다. 사건 기록에 `key_stopped`와 `shared_job_moved`를 남기고 상태 API에 `shared_job_moved` 경보를 낸다.
+- 상태 API의 키 항목에 `rest` 역할 키가 나오고 지난 1분 사용량이 실린다([상태 API](collector-status-api.md)).
+- 데몬 쪽 REST(예비 키)도 1분 카운터를 5초마다 보고 닫힌 분을 `<--data>/usage/`에 쓴다.
+
+### 일
+
+일은 `JobName`(닫힌 열거형)마다 `SharedJob` 구현 하나다. 일은 관측일 안의 시간대(`window`)와 받는 증권사(`brokers`), 선택값 검사(`check_options`), 한 번 하는 일(`run`)을 갖는다. 주기는 배정표의 `period_secs`다. 일 목록은 `src/shared/mod.rs`의 `JobName`과 `JobName::job` 한 곳이고 뒤 작업이 한 줄씩 더한다. 지금은 시험용 `probe`(두 TR을 종목 단위로 부르고 결과를 `shared_data::write_snapshot`으로 `probe/`에 쓴다)뿐이다.
+
+일 실행기(`JobLoop`)는 시간대가 열릴 때까지 기다렸다가 주기 격자에 맞춰 일을 돌린다. 한 번이 주기보다 길면 겹쳐 띄우지 않고 끝나자마자 다음을 시작하며 넘친 횟수(`overruns`)를 센다. 시간대가 닫힌 뒤에는 새로 시작하지 않는다. 같은 일에 키가 여럿이면 일이 나눌 단위(`Slice`)를 키 수로 나눠 키마다 자기 몫만 부른다. 모든 호출은 `Priority::Background`다. 결과는 `shared_data`의 쓰기 함수로 공용 자료 폴더에 쓴다.
+
+### 시험
+
+`tests/shared_jobs.rs`: 키 목록 버전 1·2와 역할·증권사 검사, 한투 키 충돌, 배정표 검사와 다시 읽기, 읽기 실패 때 직전 배정과 경보, 데몬의 07:35 다시 읽기, 자식이 토큰을 stdin으로 받는 것, 재시작 한도 뒤 일 옮기기와 사건, 주기를 넘은 한 번, 사용량 줄(TR별과 키 전체 최댓값을 따로 기록하고 합계 한도와 TR별 한도의 줄이 구별되는 것), `total_per_second: 5`가 어느 1초에도 5건을 넘기지 않는 것을 합성 transport·가짜 시계로 확인한다. `python3 scripts/dev.py cargo test -p collector --test shared_jobs`.
 
 ## 감독 데몬
 
@@ -751,6 +783,8 @@ REST용 키는 키 목록의 예비 키이고, 예비 키가 없으면 첫 활�
 | `reissue_spacing` | 30초 | `--reissue-spacing-secs N` |
 | `finalize_threads` | 2 | `--finalize-threads N` |
 | 서비스 키 파일 | `~/.config/vally/holiday-service-key` | `--holiday-key <경로>` |
+| 키 배정표 | `~/.config/vally/collector-shared.json` | `--shared-config <경로>` |
+| 공용 자료 폴더 | `<--data>/shared` | `--shared <폴더>` |
 | 원문 보관, 처음 기간 | 7관측일 | `--keep-early N`(1 이상) |
 | 원문 보관, 그 뒤 | 1관측일 | `--keep N`(1 이상) |
 | 처음 기간의 길이 | 10관측일 | `--early-period N`(0 이상) |

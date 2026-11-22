@@ -59,6 +59,7 @@ fn active_keys(folder: &Path) -> Vec<ActiveKey> {
     [("collect-01", KeyRole::Collecting), ("collect-02", KeyRole::Collecting), ("spare-01", KeyRole::Spare)]
         .into_iter()
         .map(|(name, role)| ActiveKey {
+            broker: server::shared_data::Broker::Kiwoom,
             identity: identity(name, role),
             app_key: server::config::Secret::new(app_key_of(name)),
             app_secret: server::config::Secret::new(format!("FAKE-SECRET-{name}")),

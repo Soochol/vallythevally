@@ -7,10 +7,12 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::Command as OsCommand;
 use tokio::sync::mpsc;
 
+use server::shared_data::Broker;
+
 use crate::collect::config::Variables;
 use crate::protocol::{Command, Event, KeyName, ProtocolError, encode_line, parse_event};
 
-pub const FORWARDED_VARIABLES: [&str; 2] = ["VALLY_COLLECTOR_WS_URL", "RUST_LOG"];
+pub const FORWARDED_VARIABLES: [&str; 3] = ["VALLY_COLLECTOR_WS_URL", "VALLY_COLLECTOR_REST_URL", "RUST_LOG"];
 
 #[derive(Debug)]
 pub enum ChildMessage {
@@ -31,20 +33,37 @@ pub struct Spawned {
     pub messages: mpsc::UnboundedReceiver<ChildMessage>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SharedLaunch {
+    pub broker: Broker,
+    pub total_per_second: Option<u32>,
+}
+
 pub trait Launcher: Send + Sync + 'static {
     fn launch(&self, key: &KeyName) -> io::Result<Spawned>;
+
+    fn launch_shared(&self, _key: &KeyName, _launch: &SharedLaunch) -> io::Result<Spawned> {
+        Err(io::Error::new(io::ErrorKind::Unsupported, "이 띄우개는 공용 자료 자식을 띄우지 않습니다"))
+    }
 }
 
 pub struct TokioLauncher {
     executable: PathBuf,
     data_dir: PathBuf,
+    shared_dir: PathBuf,
     forwarded: Vec<(String, String)>,
 }
 
 impl TokioLauncher {
     pub fn new(executable: PathBuf, data_dir: PathBuf, process: &Variables) -> TokioLauncher {
         let forwarded = FORWARDED_VARIABLES.iter().filter_map(|name| process.get(*name).map(|value| ((*name).to_owned(), value.clone()))).collect();
-        TokioLauncher { executable, data_dir, forwarded }
+        let shared_dir = data_dir.join("shared");
+        TokioLauncher { executable, data_dir, shared_dir, forwarded }
+    }
+
+    pub fn with_shared_dir(mut self, shared_dir: PathBuf) -> TokioLauncher {
+        self.shared_dir = shared_dir;
+        self
     }
 }
 
@@ -75,9 +94,24 @@ impl ChildProcess for TokioChild {
 
 impl Launcher for TokioLauncher {
     fn launch(&self, key: &KeyName) -> io::Result<Spawned> {
-        let mut child = OsCommand::new(&self.executable)
-            .args(["collect", "--child", "--key", key.as_str(), "--data"])
-            .arg(&self.data_dir)
+        let mut command = OsCommand::new(&self.executable);
+        command.args(["collect", "--child", "--key", key.as_str(), "--data"]).arg(&self.data_dir);
+        self.spawn(key, command)
+    }
+
+    fn launch_shared(&self, key: &KeyName, launch: &SharedLaunch) -> io::Result<Spawned> {
+        let mut command = OsCommand::new(&self.executable);
+        command.args(["shared", "--child", "--key", key.as_str(), "--broker", if launch.broker == Broker::Kis { "kis" } else { "kiwoom" }, "--data"]).arg(&self.data_dir).arg("--shared").arg(&self.shared_dir);
+        if let Some(total) = launch.total_per_second {
+            command.arg("--total-per-second").arg(total.to_string());
+        }
+        self.spawn(key, command)
+    }
+}
+
+impl TokioLauncher {
+    fn spawn(&self, key: &KeyName, mut command: OsCommand) -> io::Result<Spawned> {
+        let mut child = command
             .env_clear()
             .envs(self.forwarded.iter().map(|(name, value)| (name, value)))
             .stdin(Stdio::piped())

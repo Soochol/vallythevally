@@ -140,6 +140,7 @@ fn active_keys_for(folder: &Path, plan: &PlanFile) -> Vec<ActiveKey> {
     plan.keys
         .iter()
         .map(|share| ActiveKey {
+            broker: server::shared_data::Broker::Kiwoom,
             identity: KeyIdentity { name: share.name.clone(), role: share.role, app_key_hash: share.app_key_hash.clone() },
             app_key: Secret::new(app_key_of(share.name.as_str())),
             app_secret: Secret::new(format!("FAKE-SECRET-{}", share.name)),

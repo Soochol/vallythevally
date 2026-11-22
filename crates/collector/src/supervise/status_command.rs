@@ -186,6 +186,7 @@ mod tests {
                 register_failures: 0,
                 restarts: 1,
                 rest: RestProgress::default(),
+                usage: None,
             }],
             alerts: vec![Alert { at: "2026-11-18T09:00:00+09:00".to_owned(), kind: AlertKind::Handoff, message: "인계했습니다".to_owned() }],
             ..DaemonStatus::default()
