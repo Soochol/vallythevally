@@ -582,6 +582,15 @@ class CollectorRestartTest(FakeCollectorHost):
         self.assertFalse((self.stubs / "collector.next").exists())
         self.assertEqual((self.stubs / "collector").read_text(), "#!/bin/sh\n# next\n")
 
+    def test_the_window_is_judged_by_the_pending_new_build_when_the_installed_one_cannot(self):
+        write_stub(self.stubs, "collector", "echo '사용법: collector <collect|supervise>' >&2\nexit 2\n")
+        write_stub(self.stubs, "collector.next", f'echo "next $*" >> "{self.calls}"\ncat "{self.verdict}"\n')
+        self.say("wait\t2026-11-24 22:05:00 Asia/Seoul\t수집 시간 안이다")
+        result = self.restart()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.reservations(), ["vally-collector-restart.timer"])
+        self.assertTrue(self.recorded()[0].startswith("next restart-window"))
+
     def test_waiting_leaves_pending_files_where_they_are(self):
         self.say("wait\t2026-11-24 22:05:00 Asia/Seoul\t수집 시간 안이다")
         (self.stubs / "collector.next").write_text("#!/bin/sh\n# next\n")

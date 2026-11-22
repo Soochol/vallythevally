@@ -16,7 +16,10 @@ reload_pending="$unit_dir/.vally-collector-reload-pending"
 stable_max=600
 
 check_window() {
-    "$collector" restart-window --data "$data_dir" --finalize-allowance-minutes "$allowance" $schedule_args
+    judge="$collector"
+    pending_judge="$(readlink -f "$collector" || echo "$collector").next"
+    [ -x "$pending_judge" ] && judge="$pending_judge"
+    "$judge" restart-window --data "$data_dir" --finalize-allowance-minutes "$allowance" $schedule_args
 }
 
 promote_pending() {
