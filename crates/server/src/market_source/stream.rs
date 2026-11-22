@@ -148,8 +148,13 @@ pub trait SeatRules: Send + Sync + 'static {
     fn takes_own_seat(&self, kind: StreamKind) -> bool;
     fn companion(&self, kind: StreamKind) -> Option<StreamKind>;
 
+    fn own_seats(&self, symbol: Symbol, kind: StreamKind) -> BTreeSet<StreamKind> {
+        let base = StreamKind::base(symbol);
+        std::iter::once(kind).chain(self.companion(kind)).filter(|seat| *seat != base && self.takes_own_seat(*seat)).collect()
+    }
+
     fn seats(&self, desired: &DesiredFeeds) -> usize {
-        desired.values().map(|kinds| 1 + kinds.iter().filter(|kind| self.takes_own_seat(**kind)).count()).sum()
+        desired.iter().map(|(symbol, kinds)| 1 + kinds.iter().flat_map(|kind| self.own_seats(*symbol, *kind)).collect::<BTreeSet<_>>().len()).sum()
     }
 }
 

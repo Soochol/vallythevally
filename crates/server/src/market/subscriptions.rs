@@ -100,7 +100,7 @@ impl SubscriptionManager {
     }
 
     fn has_kind_seat(&self, symbol: Symbol, kind: StreamKind) -> bool {
-        !self.rules.takes_own_seat(kind) || self.admitted_venue.contains(&(symbol, kind))
+        self.rules.own_seats(symbol, kind).iter().all(|seat| self.admitted_venue.contains(&(symbol, *seat)))
     }
 
     fn has_seat(&self, symbol: Symbol, holder: &Holder) -> bool {
@@ -108,7 +108,7 @@ impl SubscriptionManager {
     }
 
     fn needs_only_venue_codes(&self, symbol: Symbol) -> bool {
-        self.holders.get(&symbol).into_iter().flatten().all(|h| h.feed_kind().is_some_and(|kind| self.rules.takes_own_seat(kind)))
+        self.holders.get(&symbol).into_iter().flatten().all(|h| h.feed_kind().is_some_and(|kind| !self.rules.own_seats(symbol, kind).is_empty()))
     }
 
     fn is_served(&self, symbol: Symbol) -> bool {
@@ -116,11 +116,13 @@ impl SubscriptionManager {
     }
 
     fn held_venue_kinds(&self, symbol: Symbol) -> BTreeSet<StreamKind> {
-        self.holders.get(&symbol).into_iter().flatten().filter_map(Holder::feed_kind).filter(|kind| self.rules.takes_own_seat(*kind)).collect()
+        self.holders.get(&symbol).into_iter().flatten().filter_map(Holder::feed_kind).flat_map(|kind| self.rules.own_seats(symbol, kind)).collect()
     }
 
-    fn venue_kind_wanted(&self, symbol: Symbol, kind: StreamKind) -> bool {
-        self.kind_is_held(symbol, kind) || self.kind_released_at.contains_key(&(symbol, kind))
+    fn seat_wanted(&self, symbol: Symbol, seat: StreamKind) -> bool {
+        let held = self.holders.get(&symbol).into_iter().flatten().filter_map(Holder::feed_kind);
+        let in_grace = self.kind_released_at.keys().filter(|(s, _)| *s == symbol).map(|(_, kind)| *kind);
+        held.chain(in_grace).any(|kind| self.rules.own_seats(symbol, kind).contains(&seat))
     }
 
     fn seats_used(&self) -> usize {
@@ -200,7 +202,7 @@ impl SubscriptionManager {
             self.admitted.remove(&s);
         }
         self.kind_released_at.retain(|_, at| at.plus_secs(RELEASE_GRACE_SECS) > now);
-        self.admitted_venue = self.admitted_venue.iter().copied().filter(|&(s, kind)| self.admitted.contains(&s) && self.venue_kind_wanted(s, kind)).collect();
+        self.admitted_venue = self.admitted_venue.iter().copied().filter(|&(s, kind)| self.admitted.contains(&s) && self.seat_wanted(s, kind)).collect();
         let unserved: Vec<Symbol> = self.admitted.iter().copied().filter(|&s| self.holders.contains_key(&s) && !self.released_at.contains_key(&s) && !self.is_served(s)).collect();
         for s in unserved {
             self.admitted.remove(&s);
@@ -232,7 +234,8 @@ impl SubscriptionManager {
         let mut kind_released_at = std::mem::take(&mut self.kind_released_at);
         kind_released_at.retain(|&(s, kind), _| self.admitted.contains(&s) && self.has_kind_seat(s, kind));
         self.kind_released_at = kind_released_at;
-        let feeds = self.admitted.iter().map(|&s| (s, self.kinds_to_receive(s))).collect();
+        let feeds: DesiredFeeds = self.admitted.iter().map(|&s| (s, self.kinds_to_receive(s))).collect();
+        debug_assert_eq!(self.rules.seats(&feeds), self.seats_used(), "관리자와 규칙이 자리를 다르게 센다");
         Plan { realtime: self.admitted.clone(), feeds, rejected }
     }
 
@@ -272,7 +275,7 @@ impl SubscriptionManager {
         graces.extend(
             self.kind_released_at
                 .iter()
-                .filter(|((s, kind), _)| self.rules.takes_own_seat(*kind) && !self.released_at.contains_key(s) && self.admitted_venue.contains(&(*s, *kind)))
+                .filter(|((s, kind), _)| !self.released_at.contains_key(s) && self.rules.own_seats(*s, *kind).iter().any(|seat| self.admitted_venue.contains(&(*s, *seat))))
                 .map(|((s, kind), at)| (*at, *s, Some(*kind))),
         );
         graces.sort();
@@ -292,11 +295,17 @@ impl SubscriptionManager {
     }
 
     fn seats_freed_by(&self, victim: Eviction, chosen: &[Eviction]) -> usize {
-        let already_out = |kind: StreamKind, s: Symbol| chosen.iter().any(|c| matches!(*c, Eviction::Venue(x, k) if x == s && k == kind));
+        let held_seats = |s: Symbol| -> BTreeSet<StreamKind> { self.admitted_venue.iter().filter(|(x, _)| *x == s).map(|(_, seat)| *seat).collect() };
+        let already_out = |s: Symbol| -> BTreeSet<StreamKind> {
+            chosen.iter().filter_map(|c| match *c { Eviction::Venue(x, kind) if x == s => Some(self.rules.own_seats(s, kind)), _ => None }).flatten().collect()
+        };
         match victim {
-            Eviction::Symbol(s) => 1 + self.admitted_venue.iter().filter(|&&(x, kind)| x == s && !already_out(kind, s)).count(),
+            Eviction::Symbol(s) => 1 + held_seats(s).difference(&already_out(s)).count(),
             Eviction::Venue(s, _) if chosen.iter().any(|c| matches!(*c, Eviction::Symbol(x) if x == s)) => 0,
-            Eviction::Venue(..) => 1,
+            Eviction::Venue(s, kind) => {
+                let out = already_out(s);
+                self.rules.own_seats(s, kind).iter().filter(|seat| held_seats(s).contains(seat) && !out.contains(seat)).count()
+            }
         }
     }
 
@@ -309,7 +318,9 @@ impl SubscriptionManager {
             }
             Eviction::Venue(s, kind) => {
                 self.kind_released_at.remove(&(s, kind));
-                self.admitted_venue.remove(&(s, kind));
+                for seat in self.rules.own_seats(s, kind) {
+                    self.admitted_venue.remove(&(s, seat));
+                }
             }
         }
     }
@@ -951,5 +962,64 @@ mod tests {
         let a = m.plan(t(2));
         let b = m.plan(t(2));
         assert_eq!(a, b);
+    }
+
+    struct SeatRulesFor {
+        limit: usize,
+        own_seat: fn(StreamKind) -> bool,
+        companion: fn(StreamKind) -> Option<StreamKind>,
+    }
+
+    impl SeatRules for SeatRulesFor {
+        fn limit(&self) -> usize {
+            self.limit
+        }
+
+        fn takes_own_seat(&self, kind: StreamKind) -> bool {
+            (self.own_seat)(kind)
+        }
+
+        fn companion(&self, kind: StreamKind) -> Option<StreamKind> {
+            (self.companion)(kind)
+        }
+    }
+
+    #[test]
+    fn a_rule_that_gives_the_base_kind_a_seat_still_counts_one_seat_per_symbol_in_the_manager_and_in_seats() {
+        let rules = Arc::new(SeatRulesFor { limit: 3, own_seat: |_| true, companion: |_| None });
+        let mut m = SubscriptionManager::new(rules.clone());
+        fill(&mut m, 4);
+        let plan = m.plan(t(0));
+        assert_eq!(plan.realtime.len(), 3);
+        assert_eq!(rules.seats(&plan.feeds), 3);
+        assert_eq!(plan.rejected, BTreeSet::from([cell(1, "s3")]));
+    }
+
+    #[test]
+    fn a_companion_kind_that_takes_a_seat_counts_against_the_limit_and_the_earlier_registration_stays() {
+        let rules = Arc::new(SeatRulesFor {
+            limit: 3,
+            own_seat: |kind| matches!(kind, StreamKind::Book(_) | StreamKind::AfterHours),
+            companion: |kind| matches!(kind, StreamKind::Book(_)).then_some(StreamKind::AfterHours),
+        });
+        let mut m = SubscriptionManager::new(rules.clone());
+        let book = feed(1, "book", StreamKind::Book(Venue::Combined));
+        m.hold(stock(0), cell(1, "a"));
+        m.hold(stock(0), book.clone());
+        let plan = m.plan(t(0));
+        assert_eq!(plan.feeds[&stock(0)], BTreeSet::from([StreamKind::Trades, StreamKind::Book(Venue::Combined), StreamKind::AfterHours]));
+        assert_eq!(rules.seats(&plan.feeds), 3, "체결, 호가, 호가의 동반 종류가 세 자리다");
+
+        m.hold(stock(1), cell(1, "b"));
+        let plan = m.plan(t(1));
+        assert_eq!(plan.rejected, BTreeSet::from([cell(1, "b")]), "동반 종류의 자리도 한도에 든다");
+        assert!(plan.feeds.contains_key(&stock(0)) && !plan.feeds.contains_key(&stock(1)));
+        assert_eq!(rules.seats(&plan.feeds), 3);
+
+        m.release(stock(0), &book, t(2));
+        let plan = m.plan(t(40));
+        assert_eq!(plan.feeds[&stock(0)], BTreeSet::from([StreamKind::Trades]), "호가를 놓으면 동반 종류의 자리도 돌아온다");
+        assert!(plan.feeds.contains_key(&stock(1)));
+        assert_eq!(rules.seats(&plan.feeds), 2);
     }
 }
