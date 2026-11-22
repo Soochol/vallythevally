@@ -134,8 +134,8 @@ async fn same_command_id_does_not_create_a_second_order() {
 #[tokio::test]
 async fn sending_command_after_restart_stays_unknown() {
     let f = on().await;
-    let journal = f.state.trading.journal.clone();
-    let account_ref = f.state.trading.enabled_record().unwrap().account_ref.unwrap();
+    let journal = f.state.accounts.market().journal.clone();
+    let account_ref = f.state.accounts.market().enabled_record().unwrap().account_ref.unwrap();
     let prepared = Prepared { command_id: "cmd-restart-01".into(), account_ref, kind: OrderCommandKind::Buy, code: Some("005930".into()), venue: Some(domain::Venue::Krx), quantity: Some(1), price: Some(71_000), target_order_no: None };
     assert!(matches!(journal.begin(&prepared, 1).await.unwrap(), Begun::Created(_)));
     journal.mark_sending("cmd-restart-01", 2).await.unwrap();
@@ -385,7 +385,7 @@ async fn turning_orders_off_while_a_command_waits_rejects_it_without_sending() {
         async move { order(&app, PLACE, buy("cmd-late-0001", 1, 71_000)).await }
     });
     tokio::time::sleep(Duration::from_millis(60)).await;
-    f.state.trading.set_enabled(crate::api::OrdersSwitchInput { enabled: false, confirm_account_tail: None }).await.unwrap();
+    f.state.accounts.market().set_enabled(crate::api::OrdersSwitchInput { enabled: false, confirm_account_tail: None, key_id: None }).await.unwrap();
     let (_, command) = placing.await.unwrap();
     assert_eq!((command["state"].clone(), command["reason"].clone()), (json!("rejected"), json!("orders_off")), "{command}");
     assert_eq!(writes(&f).len(), 0);
@@ -476,7 +476,7 @@ async fn a_batch_adopts_a_cancel_already_journaled_under_its_command_id() {
 #[tokio::test]
 async fn a_repeated_batch_lists_adopted_and_new_commands_in_the_first_order() {
     let f = on().await;
-    let journal = &f.state.trading.journal;
+    let journal = &f.state.accounts.market().journal;
     let cancel = |order_no: &str| Prepared { command_id: format!("batch-order-01_{order_no}"), account_ref: "x".into(), kind: OrderCommandKind::Cancel, code: None, venue: None, quantity: None, price: None, target_order_no: Some(order_no.into()) };
     let batch = PreparedBatch { batch_id: "batch-order-01".into(), account_ref: "x".into(), code: "005930".into(), side: crate::api::OrderSide::Buy, price: 71_000 };
     journal.begin(&cancel("0000002"), 1).await.unwrap();
@@ -497,7 +497,7 @@ async fn writes_for_one_account_run_one_at_a_time() {
     let (first, second) = (place("cmd-line-0001"), place("cmd-line-0002"));
     let mut seen_waiting = false;
     for _ in 0..40 {
-        let states: Vec<Value> = ["cmd-line-0001", "cmd-line-0002"].iter().map(|id| serde_json::to_value(futures::executor::block_on(f.state.trading.command(id)).ok().map(|c| c.state)).unwrap()).collect();
+        let states: Vec<Value> = ["cmd-line-0001", "cmd-line-0002"].iter().map(|id| serde_json::to_value(futures::executor::block_on(f.state.accounts.market().command(id)).ok().map(|c| c.state)).unwrap()).collect();
         seen_waiting |= states.contains(&json!("prepared")) && states.iter().any(|s| *s == json!("prepared") || *s == json!("sending"));
         tokio::time::sleep(Duration::from_millis(20)).await;
     }
@@ -750,7 +750,7 @@ async fn an_open_orders_read_that_overlaps_a_write_is_not_remembered() {
     assert_eq!(enable(&f.app, "01").await.0, StatusCode::OK);
     remember_band(&f).await;
     let slow_read = {
-        let trading = f.state.trading.clone();
+        let trading = f.state.accounts.market().clone();
         tokio::spawn(async move { trading.open_orders().await.map(drop) })
     };
     tokio::time::sleep(Duration::from_millis(10)).await;
@@ -771,7 +771,7 @@ async fn batch_cancel_lists_once_then_sends_each() {
     let f = on().await;
     *f.open_rows.lock().unwrap() = Some(same_price_rows(&["0020001", "0020002", "0020003"]));
     get(&f.app, OPEN_ORDERS).await;
-    f.state.trading.remember_price_band(domain::StockCode::parse("005930").unwrap(), Some(100_000), Some(50_000));
+    f.state.accounts.remember_price_band(domain::StockCode::parse("005930").unwrap(), Some(100_000), Some(50_000));
     let before = sent_ids(&f).len();
     let batch = json!({"batchId": "batch-fast-0001", "code": "005930", "side": "buy", "price": 71_000});
     let (code, result) = order(&f.app, CANCEL_BATCH, batch.clone()).await;

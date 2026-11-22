@@ -142,3 +142,14 @@ button.od-cellbtn:hover:not(:disabled) { background:var(--hover); }
 .od-funds-confirm p { margin:0 0 var(--s3); }
 .od-funds-confirm-actions { display:flex; justify-content:flex-end; gap:var(--s4); }
 .od-funds-confirm .od-link[data-danger] { color:var(--warning); }
+.od-account-pick { display:inline-flex; align-items:center; gap:var(--s2); min-width:0; padding:var(--size-1) var(--s3); border:var(--size-1) solid var(--line-strong, var(--line)); border-radius:var(--r-m); color:var(--text); }
+.od-account-pick:hover, .od-account-pick[aria-expanded=true] { border-color:var(--accent); }
+.od-account-text { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.od-account-menu-head { margin:0 0 var(--s2); color:var(--text-3); }
+.od-account-option { display:flex; align-items:center; gap:var(--s3); width:100%; padding:var(--s3) 0; text-align:left; color:var(--text); }
+.od-account-option[data-off] { color:var(--text-3); cursor:not-allowed; }
+.od-account-option small { margin-left:auto; color:var(--text-3); }
+.od-account-option-text { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.od-account-radio { flex:none; width:var(--size-12, 12px); height:var(--size-12, 12px); border:var(--size-1) solid var(--text-3); border-radius:50%; }
+.od-account-radio[data-checked] { border-color:var(--accent); background:radial-gradient(circle, var(--accent) 40%, transparent 45%); }
+.od-account-manage { display:block; width:100%; margin-top:var(--s2); padding-top:var(--s3); border-top:var(--size-1) solid var(--line); text-align:left; }

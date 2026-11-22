@@ -5,7 +5,6 @@ import type { Venue } from "../../api/generated/Venue";
 import type { SymbolCode } from "../../api/generated/SymbolCode";
 import type { WindowId } from "../../layout/kinds";
 import { useFundamentals, useSymbolInfo } from "../../api/queries";
-import { useOrdersStatus } from "../../api/system";
 import { formatPrice } from "../../lib/format";
 import { isIndexCode } from "../../lib/symbol";
 import { useMockEnvironment } from "../../stores/kiwoomLink";
@@ -41,7 +40,9 @@ import { OrderEstimate, QuantityRow } from "./QuantityRow";
 import { buyBlock, buyPreview, capacityProblem, type DragOutcome, estimateNote, marginOf, modifyBuyProblem, type DragSource, needsHighValueConfirm, orderAmount, SIDE_LABEL, typedQuantity } from "./orderRules";
 import type { PresetKind } from "./orderSettings";
 import { pendingWrites } from "./pendingWrites";
+import { FALLBACK_NOTICE } from "./orderAccount";
 import { useOrderAccess, useOrderData } from "./useOrderData";
+import { useOrderAccount } from "./useOrderAccount";
 import { useOrderDrag } from "./useOrderDrag";
 import { useOrderWrites } from "./useOrderWrites";
 
@@ -61,7 +62,9 @@ function OrderBody({ id, code, infoPager }: { id: WindowId; code: SymbolCode; in
   const mock = useMockEnvironment();
   const quoteVenue = useShownVenue(code);
   const feed = useBookFeed(code, quoteVenue);
-  const access = useOrderAccess();
+  const choice = useOrderAccount();
+  const access = useOrderAccess(choice);
+  const accountRef = choice.current?.ref ?? null;
   const entryKey = useLayoutStore((s) => orderEntryKey(s.layout.id, id, code));
   const [kept] = useState(() => { const { prefs } = useUiStore.getState(); return prefs.orderSettings.keepLastEntry ? prefs.orderEntries[entryKey] ?? null : null; });
   const [presetKind, setPresetKind] = useState<PresetKind>(kept?.presetKind ?? "sharePresets");
@@ -82,7 +85,6 @@ function OrderBody({ id, code, infoPager }: { id: WindowId; code: SymbolCode; in
   const limits = useFundamentals(code).data;
   const symbolInfo = useSymbolInfo(code).data;
   const nxtNotTraded = orderVenue === "nxt" && symbolInfo?.nxtEnabled === false;
-  const accountTail = useOrdersStatus().data?.accountTail ?? null;
 
   useEffect(() => {
     const timer = setInterval(() => setNow(Date.now()), CLOCK_MS);
@@ -106,8 +108,15 @@ function OrderBody({ id, code, infoPager }: { id: WindowId; code: SymbolCode; in
   const expected = view ? visibleExpected(view.t, Math.floor(now / 1000), view.expected) : null;
   const infoSlots = placeInfoItems(rows, info, expectedItemsOnPage(infoPager.page, expected));
   const totals = stripTotals(view && { ask: view.totalAsk, bid: view.totalBid }, visibleAfterHours(feed.afterHours?.totals ?? null, Math.floor(now / 1000)));
-  const data = useOrderData(code, access.open, referencePrice);
-  const writes = useOrderWrites(code, orderVenue);
+  const data = useOrderData(accountRef, code, access.open, referencePrice);
+  const writes = useOrderWrites(choice.current, code, orderVenue);
+  const fellBack = choice.fellBack;
+  useEffect(() => {
+    if (!fellBack) return;
+    writes.say({ tone: "info", text: FALLBACK_NOTICE, fades: true });
+    const { prefs } = useUiStore.getState();
+    setSettings({ ...prefs.orderSettings, account: null });
+  }, [fellBack]);
   const pending = useSyncExternalStore(pendingWrites.subscribe, pendingWrites.snapshot);
   const holding = holdingOf(data.balance?.holdings ?? [], code);
   const averagePrice = settings.averageDot ? averageRowPrice(rows.map((row) => row.price), holding?.averagePrice ?? null) : null;
@@ -184,8 +193,8 @@ function OrderBody({ id, code, infoPager }: { id: WindowId; code: SymbolCode; in
           <button type="button" className="od-link" onClick={() => openSystemSettings("kiwoom")}>시스템 설정 열기</button>
         </div>
       )}
-      <AccountBand windowId={id} accountTail={accountTail} maskAccount={settings.maskAccount} openOrders={data.openOrders} balance={data.balance} executions={data.executions} writable={writable} mock={mock} policy={data.orderable?.policy ?? null} onCancel={writes.cancelOne} />
-      <HoldingSummary holding={holding} orderable={data.orderable} buyableProblem={data.buyableProblem} sellOrdered={sellOrderQuantity(data.groups, pending, code, data.openOrdersListedAt)} unit={profitUnit} onUnit={() => setProfitUnit(toggledUnit)} onFill={setInput} />
+      <AccountBand windowId={id} choice={choice} onPick={(account) => setSettings({ ...settings, account })} maskAccount={settings.maskAccount} openOrders={data.openOrders} balance={data.balance} executions={data.executions} writable={writable} mock={mock} policy={data.orderable?.policy ?? null} onCancel={writes.cancelOne} />
+      <HoldingSummary account={accountRef} holding={holding} orderable={data.orderable} buyableProblem={data.buyableProblem} sellOrdered={sellOrderQuantity(data.groups, pending, code, data.openOrdersListedAt)} unit={profitUnit} onUnit={() => setProfitUnit(toggledUnit)} onFill={setInput} />
       <div className="od-entry">
         <QuantityRow presetKind={presetKind} input={input} sharePresets={settings.sharePresets} amountPresets={settings.amountPresets} referencePrice={referencePrice} keepLastEntry={settings.keepLastEntry} onPresetKind={setPresetKind} onInput={setInput} />
         <div className="od-toolbar">

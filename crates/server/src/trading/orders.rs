@@ -83,7 +83,7 @@ impl From<TradingError> for Stop {
             TradingError::AccountChanged => Stop::Refuse(OrderRejectReason::AccountChanged),
             TradingError::Kiwoom(e) => e.into(),
             TradingError::Journal(why) => Stop::Broken(why),
-            TradingError::TailMismatch | TradingError::Unreadable(_) | TradingError::BadRequest(_) | TradingError::CommandNotFound => Stop::Refuse(OrderRejectReason::KiwoomUnavailable),
+            TradingError::TailMismatch | TradingError::Unreadable(_) | TradingError::BadRequest(_) | TradingError::CommandNotFound | TradingError::UnknownAccount | TradingError::UnknownKey | TradingError::SameAccount(_) => Stop::Refuse(OrderRejectReason::KiwoomUnavailable),
         }
     }
 }
@@ -341,7 +341,10 @@ impl Trading {
             admit: Some(Arc::new(move || open.load(std::sync::atomic::Ordering::SeqCst))),
             once: Some(SendOnce { transmitted: transmitted.clone() }),
         };
-        (self.rest.call_endpoint(call, |_| true).await, transmitted)
+        match self.rest() {
+            Ok(rest) => (rest.call_endpoint(call, |_| true).await, transmitted),
+            Err(_) => (Err(KiwoomError::NotConnected), transmitted),
+        }
     }
 
     fn info_of(&self, code: StockCode) -> Result<SymbolInfo, Stop> {
@@ -355,7 +358,8 @@ impl Trading {
             return Err(OrderRejectReason::AccountChanged.into());
         }
         let limits = OrderLimits::of(&record);
-        if let Some(blocked) = self.rest.blocked() {
+        let rest = self.rest()?;
+        if let Some(blocked) = rest.blocked() {
             return Err(blocked.into());
         }
         if self.journal.blocking_unknown(account_ref).await? > 0 {
@@ -363,7 +367,7 @@ impl Trading {
         }
         match work {
             Work::Place { code, side, quantity, price, venue, confirmed } => {
-                if self.rest.environment() == KiwoomEnvironment::Mock && *venue != Venue::Krx {
+                if rest.environment() == KiwoomEnvironment::Mock && *venue != Venue::Krx {
                     return Err(OrderRejectReason::MockKrxOnly.into());
                 }
                 let info = self.info_of(*code)?;
@@ -448,7 +452,7 @@ impl Trading {
     }
 
     async fn fetch_price_band(&self, code: StockCode) -> Result<PriceBand, Stop> {
-        let reply = self.rest.call(&StockBasicInfo::new(code), None, Priority::Order, MergeScope::default()).await?;
+        let reply = self.quote_rest.call(&StockBasicInfo::new(code), None, Priority::Order, MergeScope::default()).await?;
         let StockBasicInfoResponse::Found { fundamentals, .. } = reply.body else {
             return Err(OrderRejectReason::UnknownSymbol.into());
         };

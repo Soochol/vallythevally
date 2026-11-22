@@ -24,6 +24,7 @@ import type { DrawingInput } from "../../src/api/generated/DrawingInput";
 import type { Layout } from "../../src/api/generated/Layout";
 import type { LayoutInput } from "../../src/api/generated/LayoutInput";
 import type { LayoutWindow } from "../../src/api/generated/LayoutWindow";
+import type { OrdersAccount } from "../../src/api/generated/OrdersAccount";
 import type { OrdersAccountCheck } from "../../src/api/generated/OrdersAccountCheck";
 import type { OrdersStatus } from "../../src/api/generated/OrdersStatus";
 import type { OrdersSwitchInput } from "../../src/api/generated/OrdersSwitchInput";
@@ -161,6 +162,7 @@ export const CONNECTED_KIWOOM: KiwoomLinkStatus = {
   retryAt: null, needsAcknowledgement: false, step: null, tokenExpiresAt: null, realtimeRegistered: 0, symbolCount: 2800, atStart: "connects",
 };
 
+export const ORDERS_OFF_MESSAGE = "주문 사용이 꺼져 있습니다";
 export const KEY_LIMIT = 5;
 
 export const keyEntry = (keyId: string, alias: string, link: KiwoomLinkStatus, patch: Partial<KiwoomKey> = {}): KiwoomKey =>
@@ -191,8 +193,10 @@ export class LiveFrames {
   kiwoomLink: KiwoomLinkStatus = CONNECTED_KIWOOM;
   kiwoomKeys: KiwoomKeyList | null = null;
   account: AccountStatus = { state: "local_only" };
-  orders: OrdersStatus = { state: "off", accountRef: null, accountTail: null, message: "주문 사용이 꺼져 있습니다" };
+  orders: OrdersStatus = { state: "off", accountRef: null, accountTail: null, message: ORDERS_OFF_MESSAGE, accounts: [{ keyId: "k1", alias: "키 1", market: true, state: "off", accountRef: null, accountTail: null }] };
   ordersAccountTail = "01";
+  ordersAccountTails: Record<string, string> = {};
+  ordersAccountRefs: Record<string, string> = {};
   kiwoomUsage: KiwoomUsage = { lastMinuteStartedAt: null, totalRateLimited: 0, trs: [] };
   constructor(private readonly now: number, private readonly market: MarketFixtures) { this.state = { realtime: "live", since: Math.floor(now / 1000), backfilling: false }; }
   connect(socket: WebSocketRoute) {
@@ -350,14 +354,9 @@ export class Scenario {
     if (path === "/api/system/kiwoom" && method === "GET") return { body: this.live.kiwoomLink };
     if (path === "/api/system/kiwoom/keys" && method === "GET") return { body: this.live.kiwoomKeys ?? keyListFromLink(this.live.kiwoomLink) };
     if (path === "/api/system/kiwoom/usage" && method === "GET") return { body: this.live.kiwoomUsage };
-    if (path === "/api/system/orders" && method === "GET") return { body: this.live.orders };
-    if (path === "/api/system/orders/check-account" && method === "POST") return { body: { accountTail: this.live.ordersAccountTail } satisfies OrdersAccountCheck };
-    if (path === "/api/system/orders" && method === "PUT") {
-      const input: OrdersSwitchInput = request.postDataJSON();
-      if (!input.enabled) return { body: this.live.orders = { state: "off", accountRef: null, accountTail: null, message: "주문 사용이 꺼져 있습니다" } satisfies OrdersStatus };
-      if (input.confirmAccountTail !== this.live.ordersAccountTail) return error(400, "bad_request", "확인한 계좌 끝 2자리가 계좌와 다릅니다");
-      return { body: this.live.orders = { state: "on", accountRef: "synthetic-account", accountTail: this.live.ordersAccountTail, message: "주문 사용이 켜져 있습니다" } satisfies OrdersStatus };
-    }
+    if (path === "/api/system/orders" && method === "GET") return this.ordersFor(url.searchParams.get("account"));
+    if (path === "/api/system/orders/check-account" && method === "POST") return { body: { accountTail: this.live.ordersAccountTails[url.searchParams.get("keyId") ?? ""] ?? this.live.ordersAccountTail } satisfies OrdersAccountCheck };
+    if (path === "/api/system/orders" && method === "PUT") return this.switchOrders(request.postDataJSON());
     if (path === "/api/system/settings" && method === "GET") return { body: DEFAULT_SYSTEM_SETTINGS };
     if (path === "/api/symbols" && method === "GET") return { body: this.market.search(url.searchParams.get("q") ?? "", { market: url.searchParams.get("market"), kind: url.searchParams.get("kind") }) };
     if (path === "/api/quotes" && method === "GET") {
@@ -406,6 +405,32 @@ export class Scenario {
     const description = `Unconfigured API fixture: ${method} ${url.pathname}${url.search}`;
     this.failures.push(description);
     return error(599, "internal", description);
+  }
+  private ordersTopOf(row: OrdersAccount): OrdersStatus {
+    const message = row.state === "on" ? "주문 사용이 켜져 있습니다" : ORDERS_OFF_MESSAGE;
+    return { state: row.state, accountRef: row.accountRef, accountTail: row.accountTail, message, accounts: this.live.orders.accounts };
+  }
+  private ordersFor(account: string | null): FixtureReply {
+    if (account === null) return { body: this.live.orders };
+    const row = this.live.orders.accounts.find((candidate) => candidate.accountRef === account);
+    return row ? { body: this.ordersTopOf(row) } : error(404, "not_found", "알 수 없는 계좌입니다");
+  }
+  private switchOrders(input: OrdersSwitchInput): FixtureReply {
+    const accounts = this.live.orders.accounts;
+    const row = accounts.find((candidate) => (input.keyId === undefined ? candidate.market : candidate.keyId === input.keyId));
+    if (!row) return error(404, "not_found", "알 수 없는 키입니다");
+    if (!input.enabled) row.state = "off";
+    else {
+      const tail = this.live.ordersAccountTails[row.keyId] ?? this.live.ordersAccountTail;
+      if (input.confirmAccountTail !== tail) return error(400, "bad_request", "확인한 계좌 끝 2자리가 계좌와 다릅니다");
+      const ref = this.live.ordersAccountRefs[row.keyId] ?? (row.market ? "synthetic-account" : `ref-${row.keyId}`);
+      const twin = accounts.find((candidate) => candidate.keyId !== row.keyId && candidate.state === "on" && candidate.accountRef === ref);
+      if (twin) return error(409, "conflict", `‘${twin.alias}’와 같은 계좌입니다. 주문은 한 줄에서만 씁니다`);
+      Object.assign(row, { state: "on", accountRef: ref, accountTail: tail });
+    }
+    const top = this.ordersTopOf(row);
+    if (row.market) this.live.orders = top;
+    return { body: top };
   }
   async close(): Promise<void> { for (const release of this.holds) release(); this.holds.clear(); this.live.close(); if (this.failures.length) throw new Error(this.failures.join("\n")); }
 }

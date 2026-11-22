@@ -6,6 +6,7 @@ import type { ConnectionTone } from "../status/connectionView";
 import { BROKERS, brokerOrder } from "./brokers";
 import { formatRemaining } from "./kiwoomPanel";
 import { linkDotTone } from "./linkDot";
+import { REMOVE_ORDERS_NOTE } from "./orderUse";
 
 export const KEY_LIST_REFRESH_MS = 5000;
 
@@ -59,7 +60,12 @@ export function nextMarketKey(keys: readonly KiwoomKey[], removing: KiwoomKey): 
 
 export const marketChangeText = (alias: string) => `시세를 ‘${alias}’에서 받습니다. 열린 차트·호가·체결을 새로 받습니다. 주문 계좌는 바뀌지 않습니다`;
 
-export function removeText(keys: readonly KiwoomKey[], removing: KiwoomKey): string {
+export function removeText(keys: readonly KiwoomKey[], removing: KiwoomKey, ordersInUse = false): string {
+  const base = removeBaseText(keys, removing);
+  return ordersInUse ? `${base}. ${REMOVE_ORDERS_NOTE}` : base;
+}
+
+function removeBaseText(keys: readonly KiwoomKey[], removing: KiwoomKey): string {
   if (!removing.market) return `‘${removing.alias}’ 키를 지웁니다`;
   const next = nextMarketKey(keys, removing);
   return next

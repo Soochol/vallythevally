@@ -8,6 +8,7 @@ import { buyableName } from "./funds";
 import { ALL_SELLING_TEXT, costTitle, type ProfitUnit, profitText, remainingToSell, sellableFill } from "./holdingSummary";
 
 interface Props {
+  readonly account: string | null;
   readonly holding: TradingHolding | null;
   readonly orderable: TradingOrderable | null;
   readonly buyableProblem: string | null;
@@ -17,7 +18,7 @@ interface Props {
   readonly onFill: (input: string) => void;
 }
 
-export function HoldingSummary({ holding, orderable, buyableProblem, sellOrdered, unit, onUnit, onFill }: Props) {
+export function HoldingSummary({ account, holding, orderable, buyableProblem, sellOrdered, unit, onUnit, onFill }: Props) {
   const fill = sellableFill(holding, sellOrdered);
   const allSelling = holding !== null && sellOrdered > 0 && fill === null;
   const [funds, setFunds] = useState(false);
@@ -37,7 +38,7 @@ export function HoldingSummary({ holding, orderable, buyableProblem, sellOrdered
         <small>{buyableName(policy)}{orderable !== null && orderable.unpaid > 0 && <i className="od-unpaid-dot" aria-label="미수금 있음" />}</small>
         <b>{orderable === null ? "-" : formatWon(orderable.amount)}</b>
       </button>
-      {funds && orderable !== null && <FundsPopover orderable={orderable} opener={opener} onClose={() => setFunds(false)} />}
+      {funds && orderable !== null && <FundsPopover account={account} orderable={orderable} opener={opener} onClose={() => setFunds(false)} />}
     </div>
   );
 }

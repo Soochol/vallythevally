@@ -9,6 +9,7 @@ import type { KiwoomMarketKeyInput } from "../src/api/generated/KiwoomMarketKeyI
 import type { KiwoomLinkStatus } from "../src/api/generated/KiwoomLinkStatus";
 import type { KiwoomUsage } from "../src/api/generated/KiwoomUsage";
 import type { KiwoomUsageTr } from "../src/api/generated/KiwoomUsageTr";
+import type { OrdersStatus } from "../src/api/generated/OrdersStatus";
 import type { OrdersSwitchInput } from "../src/api/generated/OrdersSwitchInput";
 import type { PublicIpCheck } from "../src/api/generated/PublicIpCheck";
 import type { RegisteredIpInput } from "../src/api/generated/RegisteredIpInput";
@@ -42,6 +43,14 @@ const marketCard = (page: Page) => panel(page).getByRole("region", { name: "시�
 const keyRows = (page: Page) => accounts(page).getByRole("listitem");
 const expandKey = (page: Page, alias: string) => accounts(page).getByRole("button", { name: alias, exact: false }).first().click();
 const singleKey = (link: KiwoomLinkStatus) => keyListOf(keyEntry("k1", "키 1", link, { market: true }));
+const twoKeys = () => keyListOf(keyEntry("k1", "주계좌", CONNECTED_KIWOOM, { market: true }), keyEntry("k2", "보조", { ...CONNECTED_KIWOOM, appKeyTail: "5678" }));
+const twoOrders = ({ second = "off" }: { second?: "on" | "off" } = {}): OrdersStatus => ({
+  state: "on", accountRef: "ref-k1", accountTail: "12", message: "주문 사용이 켜져 있습니다",
+  accounts: [
+    { keyId: "k1", alias: "주계좌", market: true, state: "on", accountRef: "ref-k1", accountTail: "12" },
+    { keyId: "k2", alias: "보조", market: false, state: second, accountRef: second === "on" ? "ref-k2" : null, accountTail: second === "on" ? "47" : null },
+  ],
+});
 const refusal = (message: string) => ({ status: 400, body: { error: { code: "bad_request", message, reason: null, retryAt: null, manualActionRequired: false } } });
 
 const USAGE_PATH = "/api/system/kiwoom/usage";
@@ -465,44 +474,99 @@ test.describe("1440×900", () => {
     await expect(portal).toHaveAttribute("rel", "noopener noreferrer");
   });
 
-  test("주문 사용: 꺼짐 → 켜기 → 끝 2자리 확인 → 체크해야 켜기 확인 → 켜짐 → 끄기 → 꺼짐", async ({ page, scenario }) => {
+  test("시스템 설정에 주문 카드가 없고, 계좌 줄을 펼치면 그 계좌의 주문 사용 켜기가 끝 2자리 확인을 거쳐 그 키 ID로 나간다", async ({ page, scenario }) => {
+    scenario.live.kiwoomKeys = twoKeys();
+    scenario.live.orders = twoOrders();
+    scenario.live.ordersAccountTails = { k2: "47" };
     await openKiwoom(page);
-    const orders = panel(page).getByRole("region", { name: "주문 사용" });
-    await expect(orders).toContainText("주문 사용 꺼짐");
+    await expect(panel(page).getByRole("region", { name: "주문 사용" })).toHaveCount(0);
+    const [first, second] = [keyRows(page).nth(0), keyRows(page).nth(1)];
+    await expect(first.getByTestId("key-account")).toHaveText("****-**12");
+    await expect(first.getByTestId("key-order-mark")).toHaveText("주문 켜짐");
+    await expect(second.getByTestId("key-account")).toHaveText("켤 때 확인");
+    await expect(second.getByTestId("key-order-mark")).toHaveText("주문 꺼짐");
+
+    await expandKey(page, "보조");
+    const orders = second.getByRole("region", { name: "주문 사용" });
     await expect(orders.getByRole("button", { name: "주문 사용 끄기" })).toHaveCount(0);
     expect(callsTo(scenario, "POST", "/api/system/orders/check-account")).toHaveLength(0);
-
     await orders.getByRole("button", { name: "주문 사용 켜기" }).click();
-    await expect(orders).toContainText("계좌번호(8자리) 끝 2자리: 01");
+    await expect(orders).toContainText("계좌번호(8자리) 끝 2자리: 47");
+    expect(new URL(callsTo(scenario, "POST", "/api/system/orders/check-account")[0]!.url()).searchParams.get("keyId")).toBe("k2");
     const confirm = orders.getByRole("button", { name: "켜기 확인" });
     await expect(confirm).toBeDisabled();
     expect(callsTo(scenario, "PUT", "/api/system/orders")).toHaveLength(0);
     await orders.getByRole("checkbox", { name: "이 계좌가 맞습니다" }).check();
-    await expect(confirm).toBeEnabled();
     await confirm.click();
 
-    await expect(orders).toContainText("주문 사용 켜짐 · 계좌 끝 01");
-    const [put] = callsTo(scenario, "PUT", "/api/system/orders");
-    expect(put!.postDataJSON()).toEqual({ enabled: true, confirmAccountTail: "01" } satisfies OrdersSwitchInput);
+    await expect(second.getByTestId("key-order-mark")).toHaveText("주문 켜짐");
+    await expect(second.getByTestId("key-account")).toHaveText("****-**47");
+    await expect(first.getByTestId("key-order-mark")).toHaveText("주문 켜짐");
+    expect(callsTo(scenario, "PUT", "/api/system/orders")[0]!.postDataJSON()).toEqual({ enabled: true, confirmAccountTail: "47", keyId: "k2" } satisfies OrdersSwitchInput);
 
     await orders.getByRole("button", { name: "주문 사용 끄기" }).click();
-    await expect(orders).toContainText("주문 사용 꺼짐");
-    expect(callsTo(scenario, "PUT", "/api/system/orders")[1]!.postDataJSON()).toEqual({ enabled: false, confirmAccountTail: null } satisfies OrdersSwitchInput);
+    await expect(second.getByTestId("key-order-mark")).toHaveText("주문 꺼짐");
+    await expect(second.getByTestId("key-account")).toHaveText("****-**47");
+    expect(callsTo(scenario, "PUT", "/api/system/orders")[1]!.postDataJSON()).toEqual({ enabled: false, confirmAccountTail: null, keyId: "k2" } satisfies OrdersSwitchInput);
   });
 
-  test("주문 사용: 서버가 끝 2자리를 거절하면 오류가 보이고 꺼짐으로 남는다", async ({ page, scenario }) => {
-    scenario.on(route("PUT", "/api/system/orders"), () => ({
-      status: 400,
-      body: { error: { code: "bad_request", message: "확인한 계좌 끝 2자리가 계좌와 다릅니다", reason: null, retryAt: null, manualActionRequired: false } },
-    }));
+  test("주문 사용: 서버가 끝 2자리를 거절하면 오류가 그 줄에 보이고 꺼짐으로 남는다", async ({ page, scenario }) => {
+    scenario.live.kiwoomKeys = twoKeys();
+    scenario.live.orders = twoOrders();
+    scenario.on(route("PUT", "/api/system/orders"), () => refusal("확인한 계좌 끝 2자리가 계좌와 다릅니다"));
     await openKiwoom(page);
-    const orders = panel(page).getByRole("region", { name: "주문 사용" });
+    await expandKey(page, "보조");
+    const orders = keyRows(page).nth(1).getByRole("region", { name: "주문 사용" });
     await orders.getByRole("button", { name: "주문 사용 켜기" }).click();
     await orders.getByRole("checkbox", { name: "이 계좌가 맞습니다" }).check();
     await orders.getByRole("button", { name: "켜기 확인" }).click();
     await expect(orders.getByRole("alert")).toContainText("확인한 계좌 끝 2자리가 계좌와 다릅니다");
     await orders.getByRole("button", { name: "취소" }).click();
-    await expect(orders).toContainText("주문 사용 꺼짐");
+    await expect(keyRows(page).nth(1).getByTestId("key-order-mark")).toHaveText("주문 꺼짐");
+  });
+
+  test("같은 계좌 거절이면 그 줄에 문구가 보이고 줄의 주문 표시는 꺼짐이다", async ({ page, scenario }) => {
+    scenario.live.kiwoomKeys = twoKeys();
+    scenario.live.orders = twoOrders();
+    scenario.live.ordersAccountTails = { k2: "12" };
+    scenario.live.ordersAccountRefs = { k2: "ref-k1" };
+    await openKiwoom(page);
+    await expandKey(page, "보조");
+    const second = keyRows(page).nth(1);
+    const orders = second.getByRole("region", { name: "주문 사용" });
+    await orders.getByRole("button", { name: "주문 사용 켜기" }).click();
+    await orders.getByRole("checkbox", { name: "이 계좌가 맞습니다" }).check();
+    await orders.getByRole("button", { name: "켜기 확인" }).click();
+    await expect(orders.getByRole("alert")).toHaveText("‘주계좌’와 같은 계좌입니다. 주문은 한 줄에서만 씁니다");
+    await expect(orders.getByRole("button", { name: "켜기 확인" })).toHaveCount(0);
+    await expect(orders.getByRole("checkbox", { name: "이 계좌가 맞습니다" })).toHaveCount(0);
+    await expect(second.getByTestId("key-order-mark")).toHaveText("주문 꺼짐");
+    await expect(orders.getByRole("button", { name: "주문 사용 켜기" })).toBeVisible();
+  });
+
+  test("호가주문 설정에서 계좌번호 가리기를 꺼도 시스템 설정 계좌 줄은 끝 2자리만 보인다", async ({ page, scenario }) => {
+    scenario.live.kiwoomKeys = twoKeys();
+    scenario.live.orders = twoOrders();
+    const state = scenario.documents.uiState();
+    scenario.documents.saveUiState({ ...state, orderSettings: { ...scenario.documents.uiPrefs().orderSettings, maskAccount: false }, revision: state.revision + 1 } as typeof state);
+    expect(scenario.documents.uiPrefs().orderSettings.maskAccount).toBe(false);
+    let lookups = 0;
+    scenario.on((url) => url.pathname === "/api/trading/account-number", () => { lookups += 1; return { body: { accountNumber: "1234567810" } }; });
+    await openKiwoom(page);
+    await expect(keyRows(page).first().getByTestId("key-account")).toHaveText("****-**12");
+    await expandKey(page, "주계좌");
+    await expect(keyRows(page).first()).not.toContainText("12345678");
+    await expect(dialog(page)).not.toContainText("1234-5678");
+    expect(lookups).toBe(0);
+  });
+
+  test("주문 사용 중인 키를 지우면 확인 문구에 호가주문창이 시세 공급원 계좌로 돌아간다고 더한다", async ({ page, scenario }) => {
+    scenario.live.kiwoomKeys = twoKeys();
+    scenario.live.orders = twoOrders({ second: "on" });
+    await openKiwoom(page);
+    await expandKey(page, "보조");
+    await keyRows(page).nth(1).getByRole("button", { name: "지우기" }).click();
+    await expect(page.getByRole("dialog", { name: /‘보조’ 키를 지웁니다/ })).toContainText("주문 사용이 꺼지고, 이 계좌를 고른 호가주문창은 시세 공급원 계좌로 돌아갑니다");
   });
 
   test("호출 한도 카드: 줄을 표로 보이고 한도에 닿은 줄과 제한 응답이 있는 줄을 글자로도 표시한다", async ({ page, scenario }) => {
@@ -580,7 +644,7 @@ test.describe("1440×900", () => {
     await openKiwoom(page);
     await expect(dialog(page).getByRole("tab", { name: /^증권사 · 계좌/ })).toHaveAttribute("aria-selected", "true");
     await expect(dialog(page).getByRole("tab", { name: /^키움 연결/ })).toHaveCount(0);
-    expect(await panel(page).getByRole("region").evaluateAll((sections) => sections.map((section) => section.getAttribute("aria-label")))).toEqual(["시세 공급원", "계좌 목록", "주문 사용", "호출 한도", "IP 도움"]);
+    expect(await panel(page).getByRole("region").evaluateAll((sections) => sections.map((section) => section.getAttribute("aria-label")))).toEqual(["시세 공급원", "계좌 목록", "호출 한도", "IP 도움"]);
   });
 
   test("키 둘을 더하면 키움증권 묶음에 두 줄과 2 / 5가 보이고 첫 키에 시세 표시가 있으며 응답과 화면 어디에도 시크릿이 없다", async ({ page, scenario }) => {

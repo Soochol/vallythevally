@@ -104,7 +104,7 @@ export class MarketSocket implements MarketSocketLike {
   private watchSymbols: SymbolCode[] = [];
   private watchVenue: Venue = "combined";
   private readonly quoteHandlers = new Set<(e: QuoteEvent) => void>();
-  private readonly tradingAccountHandlers = new Set<() => void>();
+  private readonly tradingAccountHandlers = new Set<(accountRef: string) => void>();
 
   constructor(private readonly opts: { url: () => string; connect?: Connect; onKiwoomLink?: (status: KiwoomLinkStatus) => void; onAccount?: (status: AccountStatus) => void; onSetupChanged?: (kinds: readonly DocumentKind[]) => void; onCollectorDaemon?: (judgment: DaemonJudgment, at: UnixSeconds) => void }) {}
 
@@ -159,7 +159,7 @@ export class MarketSocket implements MarketSocketLike {
     return () => this.quoteHandlers.delete(handler);
   }
 
-  watchTradingAccount(handler: () => void): () => void {
+  watchTradingAccount(handler: (accountRef: string) => void): () => void {
     this.tradingAccountHandlers.add(handler);
     return () => this.tradingAccountHandlers.delete(handler);
   }
@@ -228,7 +228,7 @@ export class MarketSocket implements MarketSocketLike {
       case "collector_daemon":
         return this.opts.onCollectorDaemon?.(m.judgment, m.at);
       case "trading_account_changed":
-        for (const handler of this.tradingAccountHandlers) handler();
+        for (const handler of this.tradingAccountHandlers) handler(m.accountRef);
         return;
       default:
         return;

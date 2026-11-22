@@ -1,6 +1,6 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
-import { KIWOOM_KEYS_QUERY_KEY, useKiwoomKeys, useSystemSettings } from "../../api/system";
+import { KIWOOM_KEYS_QUERY_KEY, useKiwoomKeys, useOrdersStatus, useSystemSettings } from "../../api/system";
 import { useKiwoomLinkStore } from "../../stores/kiwoomLink";
 import { useServerTime } from "../status/useServerTime";
 import { AddKeyPanel } from "./AddKeyPanel";
@@ -16,6 +16,7 @@ export function KiwoomAccountList({ onOpenIpHelp }: { onOpenIpHelp(): void }) {
   const now = useServerTime();
   const [expanded, setExpanded] = useState<string | null>(null);
   const target = useSystemSettings().data?.kiwoomTarget;
+  const orders = useOrdersStatus().data?.accounts;
   const list = query.data;
   const mock = status?.environment === "mock";
 
@@ -39,7 +40,7 @@ export function KiwoomAccountList({ onOpenIpHelp }: { onOpenIpHelp(): void }) {
             </div>
             <ul className="flex flex-col">
               {keys.map((key) => (
-                <KiwoomKeyRow key={key.keyId} entry={key} keys={list.keys} mock={mock} expanded={expanded === key.keyId} now={now} onToggle={() => setExpanded(expanded === key.keyId ? null : key.keyId)} onOpenIpHelp={onOpenIpHelp} />
+                <KiwoomKeyRow key={key.keyId} entry={key} order={orders?.find((account) => account.keyId === key.keyId)} keys={list.keys} mock={mock} expanded={expanded === key.keyId} now={now} onToggle={() => setExpanded(expanded === key.keyId ? null : key.keyId)} onOpenIpHelp={onOpenIpHelp} />
               ))}
             </ul>
           </div>

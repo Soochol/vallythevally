@@ -1827,6 +1827,19 @@ pub struct OrdersStatus {
     pub account_ref: Option<String>,
     pub account_tail: Option<String>,
     pub message: String,
+    pub accounts: Vec<OrdersAccount>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct OrdersAccount {
+    pub key_id: String,
+    pub alias: String,
+    pub market: bool,
+    pub state: OrdersState,
+    pub account_ref: Option<String>,
+    pub account_tail: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -1843,6 +1856,16 @@ pub enum MarginPolicy {
 #[ts(export)]
 pub struct OrdersMargin {
     pub policy: MarginPolicy,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct OrdersMarginInput {
+    pub policy: MarginPolicy,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub account: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -1865,6 +1888,9 @@ pub struct TradingAccountNumber {
 pub struct OrdersSwitchInput {
     pub enabled: bool,
     pub confirm_account_tail: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub key_id: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -2058,6 +2084,9 @@ pub struct OrderCommand {
 #[serde(rename_all = "camelCase")]
 #[ts(export)]
 pub struct OrderPlaceInput {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub account: Option<String>,
     pub command_id: String,
     pub code: String,
     pub side: OrderSide,
@@ -2074,6 +2103,9 @@ pub struct OrderPlaceInput {
 #[serde(rename_all = "camelCase")]
 #[ts(export)]
 pub struct OrderModifyInput {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub account: Option<String>,
     pub command_id: String,
     pub order_no: String,
     #[ts(type = "number")]
@@ -2086,6 +2118,9 @@ pub struct OrderModifyInput {
 #[serde(rename_all = "camelCase")]
 #[ts(export)]
 pub struct OrderCancelInput {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub account: Option<String>,
     pub command_id: String,
     pub order_no: String,
 }
@@ -2094,6 +2129,9 @@ pub struct OrderCancelInput {
 #[serde(rename_all = "camelCase")]
 #[ts(export)]
 pub struct OrderCancelBatchInput {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub account: Option<String>,
     pub batch_id: String,
     pub code: String,
     pub side: OrderSide,

@@ -9,12 +9,13 @@ import { putMarginPolicy } from "./orderApi";
 import { ORDERABLE_QUERY_KEY } from "./useOrderData";
 
 interface Props {
+  readonly account: string | null;
   readonly orderable: TradingOrderable;
   readonly opener: RefObject<HTMLElement | null>;
   readonly onClose: () => void;
 }
 
-export function FundsPopover({ orderable, opener, onClose }: Props) {
+export function FundsPopover({ account, orderable, opener, onClose }: Props) {
   const client = useQueryClient();
   const [confirming, setConfirming] = useState(false);
   const [requested, setRequested] = useState<MarginPolicy | null>(null);
@@ -29,7 +30,7 @@ export function FundsPopover({ orderable, opener, onClose }: Props) {
     setFailure(null);
     setRequested(next);
     try {
-      await putMarginPolicy(next);
+      await putMarginPolicy(next, account);
       await client.invalidateQueries({ queryKey: ORDERABLE_QUERY_KEY });
     } catch (error) {
       setFailure(error instanceof Error ? error.message : "미수 정책을 바꾸지 못했습니다");

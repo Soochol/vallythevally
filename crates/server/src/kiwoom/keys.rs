@@ -3,6 +3,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Duration;
 
+use tokio::sync::watch;
 use tokio::task::JoinHandle;
 
 use super::auth::KiwoomAuth;
@@ -10,12 +11,18 @@ use super::key_file::{FileBases, KEY_LIMIT, derived_paths, KeyFile, KeyId, KeyLi
 use super::link::Link;
 use super::private_file::FileError;
 use super::rest::KiwoomRest;
-use super::stream::KiwoomStream;
+use super::stream::{AccountFeed, KiwoomStream};
 use super::token_file::{Saved, TokenFile};
 use super::transport::Transport;
 use crate::api::{Broker, KiwoomEnvironment, RegisteredIp};
 use crate::clock::Clock;
 use crate::config::{KiwoomCredentials, Secret};
+
+static NEXT_SERIAL: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+
+fn next_serial() -> u64 {
+    NEXT_SERIAL.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+}
 
 struct LaneTasks {
     _stream: KiwoomStream,
@@ -34,12 +41,13 @@ impl Drop for LaneTasks {
 pub struct Lane {
     pub rest: KiwoomRest,
     pub link: Link,
+    pub account: AccountFeed,
     _owned: Option<Arc<LaneTasks>>,
 }
 
 impl Lane {
-    pub fn market(rest: KiwoomRest, link: Link) -> Lane {
-        Lane { rest, link, _owned: None }
+    pub fn market(rest: KiwoomRest, link: Link, account: AccountFeed) -> Lane {
+        Lane { rest, link, account, _owned: None }
     }
 }
 
@@ -79,7 +87,7 @@ impl LaneFactory {
             None => KiwoomStream::detached().0,
         };
         tasks.push(tokio::spawn(crate::app::daily_token(self.clock.clone(), rest.clone(), link.clone())));
-        Lane { rest, link, _owned: Some(Arc::new(LaneTasks { _stream: stream, tasks })) }
+        Lane { rest, link, account: stream.account_feed(), _owned: Some(Arc::new(LaneTasks { _stream: stream, tasks })) }
     }
 }
 
@@ -116,6 +124,7 @@ impl fmt::Display for KeyError {
 }
 
 struct Entry {
+    serial: u64,
     id: KeyId,
     alias: String,
     origin: KeyOrigin,
@@ -159,6 +168,7 @@ impl Inner {
 
 #[derive(Clone)]
 pub struct KeyView {
+    pub serial: u64,
     pub id: KeyId,
     pub alias: String,
     pub origin: KeyOrigin,
@@ -171,6 +181,7 @@ pub struct KeyView {
 
 pub struct KeyRing {
     inner: Mutex<Inner>,
+    changes: watch::Sender<u64>,
     store: Option<KeyFile>,
     factory: Option<LaneFactory>,
     market_lane: Lane,
@@ -186,7 +197,7 @@ fn identity(factory: &LaneFactory, entry: &Entry) -> Option<(Secret<String>, Sec
 
 impl KeyRing {
     pub fn unconfigured(market_lane: Lane) -> KeyRing {
-        KeyRing { inner: Mutex::new(Inner { entries: Vec::new(), market: None, idle_registered_ip: None }), store: None, factory: None, market_lane }
+        KeyRing { inner: Mutex::new(Inner { entries: Vec::new(), market: None, idle_registered_ip: None }), changes: watch::channel(0).0, store: None, factory: None, market_lane }
     }
 
     pub fn new(setup: KeySetup, market_lane: Lane) -> KeyRing {
@@ -202,11 +213,19 @@ impl KeyRing {
             .map(|key| {
                 let lane = if Some(&key.id) == market.as_ref() { market_lane.clone() } else { factory.account_lane(&key.paths, &key.credentials) };
                 let registered_ip = load_ip(&key.paths.registered_ip);
-                Entry { id: key.id, alias: key.alias, origin: key.origin, broker: key.broker, credentials: key.credentials, paths: key.paths, lane, registered_ip }
+                Entry { serial: next_serial(), id: key.id, alias: key.alias, origin: key.origin, broker: key.broker, credentials: key.credentials, paths: key.paths, lane, registered_ip }
             })
             .collect();
         let idle_registered_ip = if entries.is_empty() { load_ip(&factory.bases.registered_ip) } else { None };
-        KeyRing { inner: Mutex::new(Inner { entries, market, idle_registered_ip }), store: Some(store), factory: Some(factory), market_lane }
+        KeyRing { inner: Mutex::new(Inner { entries, market, idle_registered_ip }), changes: watch::channel(0).0, store: Some(store), factory: Some(factory), market_lane }
+    }
+
+    pub fn subscribe_changes(&self) -> watch::Receiver<u64> {
+        self.changes.subscribe()
+    }
+
+    fn announce_change(&self) {
+        self.changes.send_modify(|count| *count += 1);
     }
 
     fn lock(&self) -> MutexGuard<'_, Inner> {
@@ -215,6 +234,7 @@ impl KeyRing {
 
     fn view(inner: &Inner, entry: &Entry) -> KeyView {
         KeyView {
+            serial: entry.serial,
             id: entry.id.clone(),
             alias: entry.alias.clone(),
             origin: entry.origin,
@@ -309,7 +329,7 @@ impl KeyRing {
         let paths = factory.paths_for(&credentials, base_taken, &listed);
         let lane = if first { self.market_lane.clone() } else { factory.account_lane(&paths, &credentials) };
         let registered_ip = registered_ip_file(paths.registered_ip.clone()).load().ok().flatten();
-        let entry = Entry { id: id.clone(), alias, origin: KeyOrigin::File, broker: Broker::Kiwoom, credentials, paths, lane, registered_ip };
+        let entry = Entry { serial: next_serial(), id: id.clone(), alias, origin: KeyOrigin::File, broker: Broker::Kiwoom, credentials, paths, lane, registered_ip };
         if first {
             inner.market = Some(id.clone());
             inner.idle_registered_ip = None;
@@ -317,6 +337,7 @@ impl KeyRing {
         }
         entry.lane.link.connect_in_background();
         inner.entries.push(entry);
+        self.announce_change();
         Ok(id)
     }
 
@@ -359,6 +380,7 @@ impl KeyRing {
         entry.lane.link.rebind(identity(factory, entry));
         entry.lane.link.record_key_in_token_file();
         entry.lane.link.connect_in_background();
+        self.announce_change();
         Ok(())
     }
 
@@ -409,6 +431,7 @@ impl KeyRing {
                 self.market_lane.link.connect_at_start();
             }
         }
+        self.announce_change();
         Ok(())
     }
 
@@ -431,6 +454,7 @@ impl KeyRing {
         for lane in lanes {
             lane.link.connect_at_start();
         }
+        self.announce_change();
         Ok(())
     }
 

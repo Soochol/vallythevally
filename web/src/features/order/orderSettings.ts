@@ -17,15 +17,16 @@ export interface OrderSettings {
   readonly maskAccount: boolean;
   readonly keepLastEntry: boolean;
   readonly venue: Venue;
+  readonly account: string | null;
 }
 
-export const DEFAULT_ORDER_SETTINGS: OrderSettings = { sharePresets: [10, 50, 100, 500], amountPresets: [100, 500, 1_000, 5_000], averageDot: true, divider: true, rate: true, skipSpreadGap: false, maskAccount: true, keepLastEntry: true, venue: "combined" };
+export const DEFAULT_ORDER_SETTINGS: OrderSettings = { sharePresets: [10, 50, 100, 500], amountPresets: [100, 500, 1_000, 5_000], averageDot: true, divider: true, rate: true, skipSpreadGap: false, maskAccount: true, keepLastEntry: true, venue: "combined", account: null };
 
 const isPreset = (x: unknown): x is number => typeof x === "number" && Number.isInteger(x) && x > 0 && x <= MAX_PRESET_SHARES;
 
 export function parseOrderSettings(raw: unknown): OrderSettings {
   if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return DEFAULT_ORDER_SETTINGS;
-  const { sharePresets, amountPresets, averageDot, divider, rate, skipSpreadGap, maskAccount, keepLastEntry, venue } = raw as Record<string, unknown>;
+  const { sharePresets, amountPresets, averageDot, divider, rate, skipSpreadGap, maskAccount, keepLastEntry, venue, account } = raw as Record<string, unknown>;
   const flag = (value: unknown, fallback: boolean) => (typeof value === "boolean" ? value : fallback);
   return {
     sharePresets: Array.isArray(sharePresets) && sharePresets.length === SHARE_PRESET_COUNT && sharePresets.every(isPreset) ? sharePresets : DEFAULT_ORDER_SETTINGS.sharePresets,
@@ -37,6 +38,7 @@ export function parseOrderSettings(raw: unknown): OrderSettings {
     maskAccount: flag(maskAccount, DEFAULT_ORDER_SETTINGS.maskAccount),
     keepLastEntry: flag(keepLastEntry, DEFAULT_ORDER_SETTINGS.keepLastEntry),
     venue: typeof venue === "string" && isVenue(venue) ? venue : DEFAULT_ORDER_SETTINGS.venue,
+    account: typeof account === "string" && account !== "" ? account : null,
   };
 }
 

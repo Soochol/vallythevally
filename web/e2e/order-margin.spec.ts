@@ -1,7 +1,7 @@
 import type { Page } from "@playwright/test";
 import type { TradingOrderable } from "../src/api/generated/TradingOrderable";
 import { type Scenario, expect, pollSaved, test } from "./harness";
-import { BASE, cellAt, center, chipAt, dragChip, openOrder, openOrderWindow, ordersOn, status, tradingApi, writesTo } from "./order-window";
+import { ACCOUNT, BASE, cellAt, center, chipAt, dragChip, openOrder, openOrderWindow, ordersOn, status, tradingApi, writesTo } from "./order-window";
 
 const buyable = (page: Page) => page.getByTestId("summary-buyable");
 const quantity = (page: Page) => page.getByLabel("수량", { exact: true });
@@ -78,13 +78,13 @@ test("미수 허용은 확인을 거쳐야 바뀌고 막기로는 바로 돌아�
 
   await page.getByRole("button", { name: "미수 허용", exact: true }).click();
   await page.getByRole("button", { name: "허용으로 바꾸기" }).click();
-  await pollSaved(() => api.policyWrites).toEqual([{ policy: "allow_margin" }]);
+  await pollSaved(() => api.policyWrites).toEqual([{ policy: "allow_margin", account: ACCOUNT }]);
   await expect(page.getByTestId("margin-toggle")).toHaveAttribute("data-policy", "allow_margin");
   await expect(buyable(page)).toHaveAttribute("data-policy", "allow_margin");
 
   await page.getByRole("button", { name: "미수 막기" }).click();
   await expect(page.getByTestId("margin-confirm")).toHaveCount(0);
-  await pollSaved(() => api.policyWrites).toEqual([{ policy: "allow_margin" }, { policy: "cash_only" }]);
+  await pollSaved(() => api.policyWrites).toEqual([{ policy: "allow_margin", account: ACCOUNT }, { policy: "cash_only", account: ACCOUNT }]);
   await expect(buyable(page)).toHaveAttribute("data-policy", "cash_only");
 });
 
@@ -96,7 +96,7 @@ test("정책 저장이 실패하면 토글이 되돌아가고 이유가 보인�
   await expect(page.getByTestId("margin-failure")).toHaveText("주문 사용이 꺼져 있어 미수 정책을 바꿀 수 없습니다");
   await expect(page.getByTestId("margin-toggle")).toHaveAttribute("data-policy", "cash_only");
   await expect(buyable(page)).toHaveAttribute("data-policy", "cash_only");
-  expect(api.policyWrites).toEqual([{ policy: "allow_margin" }]);
+  expect(api.policyWrites).toEqual([{ policy: "allow_margin", account: ACCOUNT }]);
 });
 
 test("계좌 증거금률이 100%면 미수 허용을 고를 수 없다", async ({ page, scenario }) => {
