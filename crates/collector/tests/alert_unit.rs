@@ -220,3 +220,89 @@ fn blank_lines_spaces_and_a_username_chat_are_fine() {
     assert!(run.output.status.success(), "{}", String::from_utf8_lossy(&run.output.stderr));
     assert_eq!(hook.requests.lock().unwrap()[0].1["chat_id"], "@alerts_room");
 }
+
+enum Layout {
+    File,
+    SymlinkToFile,
+}
+
+struct Case {
+    name: &'static str,
+    text: String,
+    layout: Layout,
+    sends_to: Option<&'static str>,
+}
+
+fn case(name: &'static str, text: &str, layout: Layout, sends_to: Option<&'static str>) -> Case {
+    Case { name, text: text.to_owned(), layout, sends_to }
+}
+
+fn parity_cases() -> Vec<Case> {
+    let token = format!("bot_token=123456:{SECRET}\n");
+    vec![
+        case("정상 두 줄", &format!("{token}chat_id=-100777\n"), Layout::File, Some("-100777")),
+        case("600 파일을 가리키는 심볼릭 링크", &format!("{token}chat_id=-100777\n"), Layout::SymlinkToFile, Some("-100777")),
+        case("값 끝의 NBSP", &format!("{token}chat_id=-100777\u{a0}\n"), Layout::File, None),
+        case("값 끝의 전각 공백", &format!("{token}chat_id=-100777\u{3000}\n"), Layout::File, None),
+        case("값 끝의 탭과 수직 탭", &format!("{token}chat_id=-100777\t\x0b\n"), Layout::File, Some("-100777")),
+        case("줄 안의 CR", &format!("{token}chat_id=-100\r777\n"), Layout::File, None),
+        case("CRLF 줄 끝", &format!("bot_token=123456:{SECRET}\r\nchat_id=-100777\r\n"), Layout::File, Some("-100777")),
+        case("줄 안의 NUL", &format!("{token}chat_id=-100\u{0}777\n"), Layout::File, None),
+        case("값 끝의 NUL", &format!("{token}chat_id=-100777\0\n"), Layout::File, None),
+        case("빈 첫 값 뒤의 중복 키", &format!("{token}chat_id=\nchat_id=-100777\n"), Layout::File, None),
+        case("빈 첫 토큰 뒤의 중복 키", &format!("bot_token=\n{token}chat_id=-100777\n"), Layout::File, None),
+    ]
+}
+
+fn place(folder: &Path, case: &Case) -> PathBuf {
+    let target = folder.join("target");
+    std::fs::write(&target, case.text.as_bytes()).unwrap();
+    std::fs::set_permissions(&target, std::fs::Permissions::from_mode(0o600)).unwrap();
+    match case.layout {
+        Layout::File => target,
+        Layout::SymlinkToFile => {
+            let link = folder.join("link");
+            std::os::unix::fs::symlink(&target, &link).unwrap();
+            link
+        }
+    }
+}
+
+fn script_sent_chat(case: &Case) -> Option<String> {
+    let folder = tempfile::tempdir().unwrap();
+    let file = place(folder.path(), case);
+    let hook = serve(if case.sends_to.is_some() { vec![ACCEPTED] } else { vec![] });
+    let output = Command::new(SCRIPT)
+        .arg("메시지")
+        .env_clear()
+        .env("PATH", "/usr/bin:/bin")
+        .env("HOME", folder.path())
+        .env("VALLY_TELEGRAM", &file)
+        .env("VALLY_TELEGRAM_API", format!("http://127.0.0.1:{}", hook.port))
+        .output()
+        .unwrap();
+    let sent = hook.requests.lock().unwrap().first().map(|(_, body)| body["chat_id"].as_str().unwrap().to_owned());
+    assert_eq!(output.status.success(), sent.is_some(), "{}: 스크립트는 보냈을 때만 성공한다", case.name);
+    sent
+}
+
+fn rust_sent_chat(case: &Case) -> Option<String> {
+    let folder = tempfile::tempdir().unwrap();
+    let file = place(folder.path(), case);
+    let hook = serve(if case.sends_to.is_some() { vec![ACCEPTED] } else { vec![] });
+    let loaded = server::collector::telegram::Telegram::load_at(&file, &format!("http://127.0.0.1:{}", hook.port));
+    if let Ok(Some(telegram)) = loaded {
+        let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+        runtime.block_on(telegram.send("메시지")).unwrap();
+    }
+    hook.requests.lock().unwrap().first().map(|(_, body)| body["chat_id"].as_str().unwrap().to_owned())
+}
+
+#[test]
+fn the_script_and_the_daemon_read_the_same_settings_file_the_same_way() {
+    for case in parity_cases() {
+        let expected = case.sends_to.map(str::to_owned);
+        assert_eq!(rust_sent_chat(&case), expected, "{}: Rust", case.name);
+        assert_eq!(script_sent_chat(&case), expected, "{}: 스크립트", case.name);
+    }
+}

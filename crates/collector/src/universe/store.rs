@@ -88,6 +88,7 @@ pub fn latest_readable_before(data_dir: &Path, date: u32) -> Result<Previous, St
                 previous.file = Some(file);
                 break;
             }
+            Err(error @ StoreError::Read { .. }) => return Err(error),
             Err(error) => previous.skipped.push(SkippedFile { date: candidate, cause: error.to_string() }),
         }
     }
@@ -95,9 +96,9 @@ pub fn latest_readable_before(data_dir: &Path, date: u32) -> Result<Previous, St
 }
 
 pub fn read_universe_if_present(data_dir: &Path, date: u32) -> Result<Option<UniverseFile>, StoreError> {
-    match universe_path(data_dir, date).try_exists() {
-        Ok(true) => read_universe(data_dir, date).map(Some),
-        Ok(false) => Ok(None),
+    match fs::symlink_metadata(universe_path(data_dir, date)) {
+        Ok(_) => read_universe(data_dir, date).map(Some),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(None),
         Err(error) => Err(StoreError::Read { path: universe_path(data_dir, date), cause: error.to_string() }),
     }
 }
