@@ -1,53 +1,70 @@
 #!/bin/sh
 set -eu
-root="$(cd "$(dirname "$0")/.." && pwd)"
+here="$(cd "$(dirname "$0")" && pwd)"
+root="$(cd "$here/.." && pwd)"
 bin_dir="${VALLY_COLLECTOR_BIN_DIR:-$HOME/.local/bin}"
 unit_dir="${VALLY_SYSTEMD_USER_DIR:-${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user}"
 built="$root/target/release/collector"
+tab="$(printf '\t')"
 if [ ! -x "$built" ]; then
     echo "vally-deploy collector-install: $built가 없습니다. deploy/collector-build를 먼저 돌리세요" >&2
     exit 1
 fi
 
-put() {
+stage() {
     source="$1"
     target="$2"
     mode="$3"
-    if [ -e "$target" ] && cmp -s "$source" "$target"; then
+    real="$(readlink -f "$target" || echo "$target")"
+    pending="$real.next"
+    if [ -e "$real" ] && cmp -s "$source" "$real"; then
+        rm -f "$pending"
         echo "그대로: $target"
-        changed=no
         return 0
     fi
-    mkdir -p "$(dirname "$target")"
-    partial="$(mktemp "$target.part.XXXXXX")"
-    if ! { cp "$source" "$partial" && chmod "$mode" "$partial" && mv -f "$partial" "$target"; }; then
+    if [ -e "$pending" ] && cmp -s "$source" "$pending"; then
+        echo "이미 옆 자리에 있음: $pending"
+        return 0
+    fi
+    mkdir -p "$(dirname "$real")"
+    partial="$(mktemp "$pending.part.XXXXXX")"
+    if ! { cp "$source" "$partial" && chmod "$mode" "$partial" && mv -f "$partial" "$pending"; }; then
         rm -f "$partial"
-        echo "vally-deploy collector-install: $target을 쓰지 못했습니다" >&2
+        echo "vally-deploy collector-install: $pending을 쓰지 못했습니다" >&2
         exit 1
     fi
-    echo "바꿈: $target"
-    changed=yes
+    echo "옆 자리에 둠: $pending"
 }
 
-put_if_installed() {
+stage_if_installed() {
     if [ -e "$2" ]; then
-        put "$@"
+        stage "$@"
     else
         echo "설치 안 됨, 건너뜀: $2 (처음 설치는 docs/hoga-collector.md의 설치 절)"
-        changed=no
     fi
 }
 
-put "$built" "$bin_dir/collector" 755
-put_if_installed "$root/deploy/systemd/vally-collector-alert-telegram" "$bin_dir/vally-collector-alert-telegram" 755
+daemon_installed=no
+[ -e "$bin_dir/collector" ] && daemon_installed=yes
 
-units_changed=no
+stage "$built" "$bin_dir/collector" 755
+stage_if_installed "$here/systemd/vally-collector-alert-telegram" "$bin_dir/vally-collector-alert-telegram" 755
 for unit in vally-collector.service vally-collector-alert.service; do
-    put_if_installed "$root/deploy/systemd/$unit" "$unit_dir/$unit" 644
-    [ "$changed" = yes ] && units_changed=yes
+    stage_if_installed "$here/systemd/$unit" "$unit_dir/$unit" 644
 done
-if [ "$units_changed" = yes ]; then
-    systemctl --user daemon-reload
-    echo "유닛이 바뀌어 daemon-reload를 했습니다"
+
+decision=wait
+if [ "$daemon_installed" = no ]; then
+    decision=now
+elif verdict="$(VALLY_COLLECTOR_BIN="$built" "$here/collector-restart" --check)"; then
+    decision="${verdict%%"$tab"*}"
+else
+    echo "수집 시간인지 판정하지 못해 제자리 파일은 바꾸지 않습니다" >&2
+fi
+
+if [ "$decision" = now ]; then
+    VALLY_COLLECTOR_BIN="$bin_dir/collector" VALLY_SYSTEMD_USER_DIR="$unit_dir" "$here/collector-restart" --promote
+else
+    echo "수집 시간 안이라 새 판을 옆 자리(.next)에만 두었습니다. 마감 뒤 collector-restart가 제자리로 옮기고 재시작합니다"
 fi
 exit 0
