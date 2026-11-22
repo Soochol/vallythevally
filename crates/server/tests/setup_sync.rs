@@ -268,6 +268,7 @@ impl Connector {
             "layoutList": list,
             "layouts": layouts,
             "drawings": drawings,
+            "heatmapThemes": self.get("/api/heatmap/themes").await.1,
         })
     }
 
@@ -332,6 +333,7 @@ async fn fill(connector: &Connector) {
     connector.saved("/api/drawings/D1", &drawing("D1", "005930", json!({"kind": "symbol"}), 1_794_152_040_006)).await;
     connector.saved("/api/drawings/D2", &drawing("D2", "000660", json!({"kind": "layout", "layoutId": LAYOUT_ONE}), 1_794_152_040_007)).await;
     connector.saved("/api/drawings/D3", &drawing("D3", "005930", json!({"kind": "cell", "layoutId": LAYOUT_TWO, "windowId": "cell-1"}), 1_794_152_040_008)).await;
+    connector.saved("/api/heatmap/themes", &json!({"themes": [{"id": "T1", "name": "반도체 소부장", "symbols": ["042700", "000660"]}], "revision": 1_794_152_040_009_i64})).await;
 }
 
 struct Pair {
@@ -363,14 +365,14 @@ async fn what_one_pc_saves_the_other_pc_gets_with_the_same_revisions_and_a_setup
     let (a, b) = (&pair.a, &pair.b);
     let mut ws = b.websocket().await;
     fill(a).await;
-    assert_eq!(a.sync_status().await["pendingDocuments"], 8);
+    assert_eq!(a.sync_status().await["pendingDocuments"], 9);
     a.synced().await;
     assert_eq!(a.sync_status().await["pendingDocuments"], 0);
 
     b.synced().await;
     let changed = next_of_type(&mut ws, "setup_changed").await;
     let kinds: BTreeSet<String> = changed["kinds"].as_array().unwrap().iter().map(|kind| kind.as_str().unwrap().to_owned()).collect();
-    assert_eq!(kinds, ["drawing", "layout", "screens", "ui_state", "watchlists"].map(String::from).into());
+    assert_eq!(kinds, ["drawing", "heatmap_themes", "layout", "screens", "ui_state", "watchlists"].map(String::from).into());
     assert_eq!(b.snapshot().await, a.snapshot().await);
     assert_eq!(b.export().await, a.export().await);
     assert_eq!(b.sync_status().await["pendingDocuments"], 0);
@@ -485,7 +487,7 @@ async fn the_first_login_uploads_a_local_setup_when_the_account_is_empty_and_tak
     assert_eq!(first.sync_status().await, Value::Null, "로그인 전에는 동기화 상태가 없다");
     first.login(&accounts).await;
     first.synced().await;
-    assert_eq!(accounts.summary(&first.token()).await["documents"], 9);
+    assert_eq!(accounts.summary(&first.token()).await["documents"], 10);
     assert_eq!(first.sync_status().await["state"], "running");
 
     let second = second_machine.run(&accounts.base).await;
@@ -510,7 +512,7 @@ async fn when_both_sides_have_a_setup_the_first_login_waits_for_a_choice_and_eac
     upload.saved("/api/layouts/EXTRA", &layout("EXTRA", "여분", 1_794_152_080_002, json!([chart_window("cell-0"), {"id": "watchlist", "link": null, "kind": "watchlist"}]))).await;
     upload.login(&accounts).await;
     let waiting = upload.synced().await;
-    assert_eq!((waiting["sync"]["state"].clone(), waiting["sync"]["localDocuments"].clone(), waiting["sync"]["accountDocuments"].clone()), (json!("needs_choice"), json!(5), json!(seeded)));
+    assert_eq!((waiting["sync"]["state"].clone(), waiting["sync"]["localDocuments"].clone(), waiting["sync"]["accountDocuments"].clone()), (json!("needs_choice"), json!(6), json!(seeded)));
     assert_eq!(accounts.summary(&upload.token()).await["documents"], seeded, "고르기 전에는 아무것도 올리지 않는다");
     assert_eq!(upload.get("/api/watchlists").await.1["lists"][0]["name"], "올릴 것");
     let (status, _) = upload.post("/api/account/initial-sync", &json!({"choice": "keep"})).await;
@@ -587,7 +589,7 @@ async fn a_rejected_token_signs_the_connector_out_and_stops_the_loop() {
 }
 
 #[tokio::test]
-async fn the_requests_to_the_account_server_carry_only_the_five_document_kinds_and_none_of_the_secrets() {
+async fn the_requests_to_the_account_server_carry_only_the_setup_document_kinds_and_none_of_the_secrets() {
     let accounts = Accounts::start().await;
     let machine = Machine::new();
     let connector = machine.run(&accounts.base).await;
@@ -611,7 +613,7 @@ async fn the_requests_to_the_account_server_carry_only_the_five_document_kinds_a
         if request.method == "POST" {
             let body: Value = serde_json::from_str(&request.body).unwrap();
             assert_eq!(body.as_object().unwrap().keys().collect::<Vec<_>>(), ["documents"]);
-            assert!(kinds_of(&body["documents"]).is_subset(&["drawing", "layout", "screens", "ui_state", "watchlists"].map(String::from).into()));
+            assert!(kinds_of(&body["documents"]).is_subset(&["drawing", "heatmap_themes", "layout", "screens", "ui_state", "watchlists"].map(String::from).into()));
         }
     }
     let logs = connector.server.stop().await;

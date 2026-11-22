@@ -3,7 +3,7 @@ use sqlx::Row;
 use sqlx::SqliteConnection;
 use sqlx::sqlite::SqliteRow;
 
-use crate::api::{Layout, LayoutInput, LayoutSummary, LayoutWindow, Revision, Screens, SymbolCode, UiState, UnixSeconds, WatchGroup, Watchlist, Watchlists, WindowContent, WindowId, parse_layout_feed};
+use crate::api::{HeatmapTheme, HeatmapThemes, Layout, LayoutInput, LayoutSummary, LayoutWindow, Revision, Screens, SymbolCode, UiState, UnixSeconds, WatchGroup, Watchlist, Watchlists, WindowContent, WindowId, parse_layout_feed};
 use crate::db::{AppDb, DbError};
 use crate::sync_log;
 use setup::{DocumentKind, SINGLETON_ID};
@@ -127,6 +127,59 @@ pub(crate) async fn store_watchlists(tx: &mut SqliteConnection, all: &Watchlists
                     .execute(&mut *tx)
                     .await?;
             }
+        }
+    }
+    Ok(())
+}
+
+pub async fn get_heatmap_themes(db: &AppDb) -> Result<HeatmapThemes, StoreError> {
+    get_heatmap_themes_in(&mut *db.read().acquire().await?).await
+}
+
+pub(crate) async fn get_heatmap_themes_in(conn: &mut SqliteConnection) -> Result<HeatmapThemes, StoreError> {
+    let mut themes: Vec<HeatmapTheme> = sqlx::query("SELECT id, name FROM heatmap_themes ORDER BY position")
+        .fetch_all(&mut *conn)
+        .await?
+        .into_iter()
+        .map(|r| HeatmapTheme { id: r.get("id"), name: r.get("name"), symbols: Vec::new() })
+        .collect();
+    let items = sqlx::query("SELECT theme_id, symbol FROM heatmap_theme_items ORDER BY theme_id, position").fetch_all(&mut *conn).await?;
+    for item in items {
+        let theme_id: String = item.get("theme_id");
+        let theme = themes.iter_mut().find(|t| t.id == theme_id).ok_or_else(|| corrupt("heatmap_theme_items", &theme_id))?;
+        theme.symbols.push(SymbolCode(item.get("symbol")));
+    }
+    let revision: i64 = sqlx::query_scalar("SELECT revision FROM heatmap_theme_revision WHERE singleton = 1").fetch_one(&mut *conn).await?;
+    Ok(HeatmapThemes { themes, revision: Revision(revision) })
+}
+
+pub async fn put_heatmap_themes(db: &AppDb, all: &HeatmapThemes) -> Result<(), StoreError> {
+    let mut tx = db.begin_write().await?;
+    let stored: Option<i64> = sqlx::query_scalar("SELECT revision FROM heatmap_theme_revision WHERE singleton = 1").fetch_optional(&mut *tx).await?;
+    check_newer(stored, all.revision)?;
+    store_heatmap_themes(&mut tx, all).await?;
+    tx.commit().await?;
+    Ok(())
+}
+
+pub(crate) async fn store_heatmap_themes(tx: &mut SqliteConnection, all: &HeatmapThemes) -> Result<(), StoreError> {
+    sqlx::query("UPDATE heatmap_theme_revision SET revision = ? WHERE singleton = 1").bind(all.revision.0).execute(&mut *tx).await?;
+    sync_log::saved(tx, DocumentKind::HeatmapThemes, SINGLETON_ID, all.revision.0).await?;
+    sqlx::query("DELETE FROM heatmap_themes").execute(&mut *tx).await?;
+    for (theme_position, theme) in all.themes.iter().enumerate() {
+        sqlx::query("INSERT INTO heatmap_themes (id, name, position) VALUES (?, ?, ?)")
+            .bind(&theme.id)
+            .bind(&theme.name)
+            .bind(theme_position as i64)
+            .execute(&mut *tx)
+            .await?;
+        for (position, symbol) in theme.symbols.iter().enumerate() {
+            sqlx::query("INSERT INTO heatmap_theme_items (theme_id, symbol, position) VALUES (?, ?, ?)")
+                .bind(&theme.id)
+                .bind(&symbol.0)
+                .bind(position as i64)
+                .execute(&mut *tx)
+                .await?;
         }
     }
     Ok(())
@@ -538,6 +591,33 @@ mod tests {
         assert!(matches!(put_watchlists(&db, &overlap).await, Err(StoreError::Stale(Revision(42)))));
         drop(db);
         assert_eq!(get_watchlists(&AppDb::open(&path).await.unwrap()).await.unwrap(), overlap);
+    }
+
+    #[tokio::test]
+    async fn the_heatmap_theme_migration_keeps_every_sync_record_and_adds_an_empty_theme_document() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("vally.db");
+        {
+            let pool = SqlitePoolOptions::new().connect_with(SqliteConnectOptions::new().filename(&path).create_if_missing(true)).await.unwrap();
+            sqlx::migrate!("./migrations").run_to(23, &pool).await.unwrap();
+            sqlx::query("UPDATE sync_documents SET revision = 41, acked_revision = 40 WHERE kind = 'watchlists'").execute(&pool).await.unwrap();
+            sqlx::query("INSERT INTO sync_documents (kind, id, revision, acked_revision, deleted) VALUES ('drawing', 'GONE', 7, 7, 1)").execute(&pool).await.unwrap();
+            pool.close().await;
+        }
+        let before = |db: &AppDb| {
+            let pool = db.read().clone();
+            async move { sqlx::query_as::<_, (String, String, i64, Option<i64>, i64)>("SELECT kind, id, revision, acked_revision, deleted FROM sync_documents ORDER BY kind, id").fetch_all(&pool).await.unwrap() }
+        };
+        let db = AppDb::open(&path).await.unwrap();
+        let records = before(&db).await;
+        assert!(records.contains(&("watchlists".into(), SINGLETON_ID.into(), 41, Some(40), 0)), "{records:?}");
+        assert!(records.contains(&("drawing".into(), "GONE".into(), 7, Some(7), 1)), "{records:?}");
+        assert!(records.contains(&("heatmap_themes".into(), SINGLETON_ID.into(), 0, None, 0)), "{records:?}");
+        assert_eq!(get_heatmap_themes(&db).await.unwrap(), HeatmapThemes { themes: Vec::new(), revision: Revision(0) });
+        let saved = HeatmapThemes { themes: vec![HeatmapTheme { id: "T1".into(), name: "반도체".into(), symbols: vec![SymbolCode("042700".into()), SymbolCode("005930".into())] }], revision: Revision(1) };
+        put_heatmap_themes(&db, &saved).await.unwrap();
+        assert_eq!(get_heatmap_themes(&db).await.unwrap(), saved);
+        assert!(matches!(put_heatmap_themes(&db, &saved).await, Err(StoreError::Stale(Revision(1)))));
     }
 
     #[tokio::test]

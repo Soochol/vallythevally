@@ -855,6 +855,49 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn heatmap_themes_round_trip_and_rejections() {
+        let f = live_fixture(true).await;
+        assert_eq!(json(&f.app, "/api/heatmap/themes").await, (StatusCode::OK, json!({"themes": [], "revision": 0})));
+        let all = json!({"themes": [
+            {"id": "T1", "name": "반도체 소부장", "symbols": ["042700", "403870", "0158S0", "999990"]},
+            {"id": "T2", "name": "AI 반도체", "symbols": ["005930", "042700"]},
+            {"id": "T3", "name": "빈 테마", "symbols": []},
+        ], "revision": 1});
+        assert_eq!(put(&f.app, "/api/heatmap/themes", &all).await, (StatusCode::OK, all.clone()), "목록에 없는 코드, 테마 사이 같은 종목, 빈 테마도 받는다");
+        assert_eq!(json(&f.app, "/api/heatmap/themes").await, (StatusCode::OK, all), "테마 순서와 테마 안 순서를 그대로 돌려준다");
+        let one = |id: &str, name: &str, symbols: Value| json!({"id": id, "name": name, "symbols": symbols});
+        let body = |themes: Value, revision: i64| json!({"themes": themes, "revision": revision}).to_string();
+        let many: Vec<Value> = (0..=setup::MAX_HEATMAP_THEMES).map(|i| one(&format!("T{i}"), &format!("테마 {i}"), json!([]))).collect();
+        let crowded: Vec<String> = (0..=setup::MAX_HEATMAP_THEME_SYMBOLS).map(|i| format!("{:06}", 100_000 + i)).collect();
+        for (body, status, want) in [
+            (body(json!([one("A", "가", json!(["005930", "005930"]))]), 2), StatusCode::BAD_REQUEST, "bad_request"),
+            (body(json!([one("A", "가", json!(["IDX:001"]))]), 2), StatusCode::BAD_REQUEST, "bad_request"),
+            (body(json!([one("A", "가", json!(["abc"]))]), 2), StatusCode::BAD_REQUEST, "bad_request"),
+            (body(json!([one("A", "가", json!(crowded))]), 2), StatusCode::BAD_REQUEST, "bad_request"),
+            (body(json!(many), 2), StatusCode::BAD_REQUEST, "bad_request"),
+            (body(json!([one("A", "가", json!([])), one("B", "가", json!([]))]), 2), StatusCode::BAD_REQUEST, "bad_request"),
+            (body(json!([one("A", "가", json!([])), one("A", "나", json!([]))]), 2), StatusCode::BAD_REQUEST, "bad_request"),
+            (body(json!([one("", "가", json!([]))]), 2), StatusCode::BAD_REQUEST, "bad_request"),
+            (body(json!([one("A", " 가", json!([]))]), 2), StatusCode::BAD_REQUEST, "bad_request"),
+            (body(json!([one("A", "", json!([]))]), 2), StatusCode::BAD_REQUEST, "bad_request"),
+            (body(json!([one("A", &"가".repeat(setup::MAX_HEATMAP_THEME_NAME_CHARS + 1), json!([]))]), 2), StatusCode::BAD_REQUEST, "bad_request"),
+            (json!({"themes": []}).to_string(), StatusCode::BAD_REQUEST, "bad_request"),
+            (json!({"themes": [], "revision": 2, "pad": "x".repeat(setup::HEATMAP_THEMES_LIMIT)}).to_string(), StatusCode::PAYLOAD_TOO_LARGE, "payload_too_large"),
+            (body(json!([]), 1), StatusCode::CONFLICT, "stale_revision"),
+        ] {
+            let (s, v) = send(&f.app, "PUT", "/api/heatmap/themes", body).await;
+            assert_eq!((s, code(&v)), (status, want), "{v}");
+            assert!(!v["error"]["message"].as_str().unwrap().is_empty());
+        }
+        assert_eq!(json(&f.app, "/api/heatmap/themes").await.1["themes"].as_array().unwrap().len(), 3, "거절한 PUT은 테마를 바꾸지 않는다");
+        let most: Vec<Value> = many[..setup::MAX_HEATMAP_THEMES].to_vec();
+        assert_eq!(put(&f.app, "/api/heatmap/themes", &json!({"themes": most, "revision": 3})).await.0, StatusCode::OK, "상한까지 받는다");
+        let full: Vec<String> = crowded[..setup::MAX_HEATMAP_THEME_SYMBOLS].to_vec();
+        assert_eq!(put(&f.app, "/api/heatmap/themes", &json!({"themes": [one("A", "가", json!(full))], "revision": 4})).await.0, StatusCode::OK, "테마당 종목 상한까지 받는다");
+        assert_eq!(setup::MAX_HEATMAP_THEME_SYMBOLS, crate::heatmap_flow::MAX_SYMBOLS, "테마 하나는 흐름 비교 한 번에 모두 든다");
+    }
+
+    #[tokio::test]
     async fn watch_groups_round_trip_and_invariant_rejections() {
         let f = live_fixture(true).await;
         let group = |id: &str, name: &str, symbols: Value| json!({"id": id, "name": name, "symbols": symbols});

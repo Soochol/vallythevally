@@ -26,6 +26,14 @@ pub const WATCHLISTS_LIMIT: usize = (MAX_WATCH_GROUPS + 1) * JSON_LIMIT + MAX_WA
 
 pub const SCREENS_LIMIT: usize = 2 * JSON_LIMIT;
 
+pub const MAX_HEATMAP_THEMES: usize = 100;
+pub const MAX_HEATMAP_THEME_SYMBOLS: usize = 60;
+pub const MAX_HEATMAP_THEME_NAME_CHARS: usize = 40;
+pub const MAX_HEATMAP_THEME_ID_BYTES: usize = 64;
+const THEME_STOCK_CODE_BYTES: usize = r#""000000","#.len();
+const LONGEST_THEME_BYTES: usize = r#"{"id":"","name":"","symbols":[]},"#.len() + MAX_HEATMAP_THEME_ID_BYTES + 4 * MAX_HEATMAP_THEME_NAME_CHARS + MAX_HEATMAP_THEME_SYMBOLS * THEME_STOCK_CODE_BYTES;
+pub const HEATMAP_THEMES_LIMIT: usize = JSON_LIMIT + MAX_HEATMAP_THEMES * LONGEST_THEME_BYTES;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, TS)]
 #[serde(rename_all = "snake_case")]
 #[ts(export)]
@@ -35,10 +43,11 @@ pub enum DocumentKind {
     UiState,
     Layout,
     Drawing,
+    HeatmapThemes,
 }
 
 impl DocumentKind {
-    pub const ALL: [DocumentKind; 5] = [DocumentKind::Watchlists, DocumentKind::Screens, DocumentKind::UiState, DocumentKind::Layout, DocumentKind::Drawing];
+    pub const ALL: [DocumentKind; 6] = [DocumentKind::Watchlists, DocumentKind::Screens, DocumentKind::UiState, DocumentKind::Layout, DocumentKind::Drawing, DocumentKind::HeatmapThemes];
 
     pub const fn wire_name(self) -> &'static str {
         match self {
@@ -47,11 +56,12 @@ impl DocumentKind {
             DocumentKind::UiState => "ui_state",
             DocumentKind::Layout => "layout",
             DocumentKind::Drawing => "drawing",
+            DocumentKind::HeatmapThemes => "heatmap_themes",
         }
     }
 
     pub const fn is_singleton(self) -> bool {
-        matches!(self, DocumentKind::Watchlists | DocumentKind::Screens | DocumentKind::UiState)
+        matches!(self, DocumentKind::Watchlists | DocumentKind::Screens | DocumentKind::UiState | DocumentKind::HeatmapThemes)
     }
 
     pub fn accepts_id(self, id: &str) -> bool {
@@ -70,6 +80,7 @@ impl DocumentKind {
             DocumentKind::Watchlists => WATCHLISTS_LIMIT,
             DocumentKind::Screens => SCREENS_LIMIT,
             DocumentKind::Layout => LAYOUT_LIMIT,
+            DocumentKind::HeatmapThemes => HEATMAP_THEMES_LIMIT,
             DocumentKind::UiState | DocumentKind::Drawing => JSON_LIMIT,
         }
     }
@@ -217,16 +228,16 @@ mod tests {
     }
 
     #[test]
-    fn the_kind_names_are_the_five_closed_wire_names() {
+    fn the_kind_names_are_the_six_closed_wire_names() {
         let names: Vec<_> = DocumentKind::ALL.iter().map(|kind| serde_json::to_value(kind).unwrap()).collect();
-        assert_eq!(names, ["watchlists", "screens", "ui_state", "layout", "drawing"].map(|name| json!(name)));
+        assert_eq!(names, ["watchlists", "screens", "ui_state", "layout", "drawing", "heatmap_themes"].map(|name| json!(name)));
         assert!(DocumentKind::ALL.iter().all(|kind| serde_json::to_value(kind).unwrap() == kind.wire_name()));
         assert!(serde_json::from_value::<DocumentKind>(json!("quotes")).is_err());
     }
 
     #[test]
     fn a_singleton_kind_has_the_fixed_id_and_the_others_take_a_plain_id() {
-        for kind in [DocumentKind::Watchlists, DocumentKind::Screens, DocumentKind::UiState] {
+        for kind in [DocumentKind::Watchlists, DocumentKind::Screens, DocumentKind::UiState, DocumentKind::HeatmapThemes] {
             assert_eq!(live(kind, "main", json!({})).check(), Ok(2));
             assert!(matches!(live(kind, "other", json!({})).check(), Err(ShapeError::Id { .. })));
         }
@@ -278,8 +289,9 @@ mod tests {
     fn the_limits_keep_the_values_the_routes_had() {
         let limits = DocumentKind::ALL.map(DocumentKind::body_limit);
         assert_eq!((JSON_LIMIT, MAX_CHART_WINDOWS), (64 * 1024, 8));
-        assert_eq!(limits, [WATCHLISTS_LIMIT, 128 * 1024, 64 * 1024, 9 * 64 * 1024 + 16 * 1024, 64 * 1024]);
+        assert_eq!(limits, [WATCHLISTS_LIMIT, 128 * 1024, 64 * 1024, 9 * 64 * 1024 + 16 * 1024, 64 * 1024, HEATMAP_THEMES_LIMIT]);
         assert_eq!(WATCHLISTS_LIMIT, 6_976_916);
+        assert_eq!(HEATMAP_THEMES_LIMIT, 145_236);
     }
 
     #[test]

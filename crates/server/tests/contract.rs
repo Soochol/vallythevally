@@ -253,6 +253,8 @@ fn generated_typescript_matches_the_committed_files() {
         generated::<WatchGroup>(),
         generated::<Watchlist>(),
         generated::<Watchlists>(),
+        generated::<HeatmapTheme>(),
+        generated::<HeatmapThemes>(),
         generated::<BalanceSort>(),
         generated::<Excludes>(),
         generated::<ExpectedSort>(),
