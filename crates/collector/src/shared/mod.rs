@@ -6,6 +6,7 @@ mod assignment;
 pub mod child;
 mod job;
 mod probe;
+pub mod rankings;
 mod runner;
 mod usage;
 mod wire;
