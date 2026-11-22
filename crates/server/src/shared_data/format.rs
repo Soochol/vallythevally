@@ -12,6 +12,9 @@ pub const FEED_EXTENSION: &str = "jsonl";
 #[serde(rename_all = "camelCase")]
 pub enum DataKind {
     Probe,
+    SnapshotKrx,
+    SnapshotCombined,
+    SnapshotNxt,
     Minute,
 }
 
@@ -19,6 +22,9 @@ impl DataKind {
     pub fn folder(self) -> &'static str {
         match self {
             DataKind::Probe => "probe",
+            DataKind::SnapshotKrx => "snapshot-krx",
+            DataKind::SnapshotCombined => "snapshot-combined",
+            DataKind::SnapshotNxt => "snapshot-nxt",
             DataKind::Minute => "minute",
         }
     }
