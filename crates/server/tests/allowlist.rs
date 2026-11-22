@@ -170,7 +170,7 @@ fn kis_tr_ids(text: &str) -> Vec<String> {
         .collect()
 }
 
-const KIS_MARKET_TR_IDS: [&str; 18] = [
+const KIS_MARKET_TR_IDS: [&str; 25] = [
     "FHKST01010100",
     "FHKST11300006",
     "FHKST03010100",
@@ -189,6 +189,13 @@ const KIS_MARKET_TR_IDS: [&str; 18] = [
     "FHPPG04600001",
     "FHPTJ04160001",
     "HHPTJ04160200",
+    "FHPST01710000",
+    "FHPST01700000",
+    "FHPST01820000",
+    "FHPTJ04400000",
+    "FHPST01720000",
+    "FHKST17010000",
+    "FHPST02350000",
 ];
 
 #[test]

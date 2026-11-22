@@ -5,11 +5,10 @@ use std::sync::{Arc, Mutex};
 use domain::KstTime;
 use tokio::sync::watch;
 
-use super::query::{FetchedPage, Query, QueryKey, RawRow};
-use crate::api::MAX_RANKING_PAGES;
+use crate::api::{MAX_RANKING_PAGES, Ranking};
 use crate::clock::Clock;
-use crate::kiwoom::error::Category;
-use crate::kiwoom::rest::{ContKey, KiwoomError, KiwoomRest, MergeScope, Page, Priority};
+use crate::market_source::rankings::{Demand, QueryKey, RankedRow, RankingError, RankingFetch, RankingSource, Unsupported};
+use crate::market_source::{Cursor, Priority, SourceError};
 
 const FRESH_SECS: i64 = 8;
 const IDLE_SECS: i64 = 60;
@@ -17,30 +16,46 @@ const MAX_PAGES: usize = MAX_RANKING_PAGES as usize;
 
 #[derive(Debug, Clone)]
 pub enum WalkError {
-    Kiwoom(KiwoomError),
+    Source(SourceError),
+    CursorRefused(SourceError),
+    Unsupported(Unsupported),
     KeyRepeated,
     KeyMissing,
     PageUnreadable,
     WalkLost,
 }
 
-impl From<KiwoomError> for WalkError {
-    fn from(e: KiwoomError) -> Self {
-        WalkError::Kiwoom(e)
+impl From<RankingError> for WalkError {
+    fn from(e: RankingError) -> Self {
+        match e {
+            RankingError::Source(e) => WalkError::Source(e),
+            RankingError::CursorRefused(e) => WalkError::CursorRefused(e),
+            RankingError::Unreadable => WalkError::PageUnreadable,
+            RankingError::Unsupported(unsupported) => WalkError::Unsupported(unsupported),
+        }
+    }
+}
+
+impl WalkError {
+    fn settled(self) -> WalkError {
+        match self {
+            WalkError::CursorRefused(e) => WalkError::Source(e),
+            other => other,
+        }
     }
 }
 
 #[derive(Debug, Clone)]
 enum Next {
     Start,
-    Key(ContKey),
+    Key(Cursor),
     End,
 }
 
 #[derive(Debug, Clone)]
 struct Walk {
-    pages: Vec<Arc<Vec<RawRow>>>,
-    used_keys: Vec<ContKey>,
+    pages: Vec<Arc<Vec<RankedRow>>>,
+    used_keys: Vec<Cursor>,
     next: Next,
 }
 
@@ -53,20 +68,20 @@ impl Walk {
         self.pages.len() >= wanted || matches!(self.next, Next::End)
     }
 
-    async fn advance_to(&mut self, wanted: usize, query: &Query, rest: &KiwoomRest, demand: &mut Demand) -> Result<(), WalkError> {
+    async fn advance_to(&mut self, wanted: usize, source: &dyn RankingSource, ranking: &Ranking, demand: &mut Demand) -> Result<(), WalkError> {
         while self.pages.len() < wanted {
             let cont = match &self.next {
                 Next::End => break,
                 Next::Start => None,
                 Next::Key(key) => Some(key.clone()),
             };
-            let FetchedPage { rows, next, continues_without_key } = query.fetch(rest, cont.as_ref(), demand).await?;
+            let RankingFetch { rows, next, continues_without_cursor } = source.page(ranking, cont.as_ref(), demand).await?;
             self.used_keys.extend(cont);
             self.pages.push(Arc::new(rows));
             self.next = match next {
                 Some(key) if self.used_keys.contains(&key) => return Err(WalkError::KeyRepeated),
                 Some(key) => Next::Key(key),
-                None if continues_without_key => return Err(WalkError::KeyMissing),
+                None if continues_without_cursor => return Err(WalkError::KeyMissing),
                 None => Next::End,
             };
         }
@@ -94,7 +109,7 @@ impl Snapshot {
 }
 
 pub struct Served {
-    pub pages: Vec<Arc<Vec<RawRow>>>,
+    pub pages: Vec<Arc<Vec<RankedRow>>>,
     pub end: bool,
     pub limited: bool,
     pub fetched_at: KstTime,
@@ -142,30 +157,6 @@ impl Drop for Want<'_> {
     }
 }
 
-pub struct Demand {
-    best: watch::Receiver<Priority>,
-}
-
-impl Demand {
-    pub async fn call<R: crate::kiwoom::api::MarketRequest>(&mut self, rest: &KiwoomRest, request: &R, cont: Option<&ContKey>) -> Result<Page<R::Response>, KiwoomError> {
-        let mut priority = *self.best.borrow_and_update();
-        let mut call = Box::pin(rest.call(request, cont, priority, MergeScope::default()));
-        loop {
-            tokio::select! {
-                biased;
-                result = &mut call => return result,
-                Ok(()) = self.best.changed() => {
-                    let best = *self.best.borrow_and_update();
-                    if best < priority {
-                        priority = best;
-                        call = Box::pin(rest.call(request, cont, priority, MergeScope::default()));
-                    }
-                }
-            }
-        }
-    }
-}
-
 type Outcome = Result<Snapshot, WalkError>;
 
 #[derive(Default)]
@@ -205,21 +196,17 @@ pub struct RankingCache {
     slots: Mutex<HashMap<QueryKey, Arc<Slot>>>,
 }
 
-fn key_was_refused(error: &KiwoomError) -> bool {
-    matches!(error, KiwoomError::Failed(failure) if matches!(failure.category(), Category::InvalidRequest | Category::Unknown))
-}
-
-async fn walk_snapshot(base: Option<Snapshot>, wanted: usize, query: &Query, rest: &KiwoomRest, clock: &Clock, demand: &mut Demand) -> Outcome {
+async fn walk_snapshot(base: Option<Snapshot>, wanted: usize, source: &dyn RankingSource, ranking: &Ranking, clock: &Clock, demand: &mut Demand) -> Outcome {
     if let Some(base) = base {
         let mut walk = base.walk.clone();
-        match walk.advance_to(wanted, query, rest, demand).await {
+        match walk.advance_to(wanted, source, ranking, demand).await {
             Ok(()) => return Ok(Snapshot { walk, fetched_at: base.fetched_at }),
-            Err(WalkError::Kiwoom(e)) if key_was_refused(&e) => tracing::info!(reason = %e, "키움이 남긴 연속조회 키를 받지 않아 1페이지부터 다시 받습니다"),
+            Err(WalkError::CursorRefused(e)) => tracing::info!(reason = %e, source = source.name(), "공급원이 남긴 연속조회 키를 받지 않아 1페이지부터 다시 받습니다"),
             Err(e) => return Err(e),
         }
     }
     let mut walk = Walk::start();
-    walk.advance_to(wanted, query, rest, demand).await?;
+    walk.advance_to(wanted, source, ranking, demand).await.map_err(WalkError::settled)?;
     Ok(Snapshot { walk, fetched_at: clock.now() })
 }
 
@@ -236,10 +223,10 @@ impl RankingCache {
         slot.clone()
     }
 
-    pub async fn serve(&self, query: Query, wanted: usize, priority: Priority, rest: &KiwoomRest, clock: &Clock) -> Result<Served, WalkError> {
-        let slot = self.slot(query.key(), clock.now());
+    pub async fn serve(&self, source: Arc<dyn RankingSource>, ranking: Ranking, wanted: usize, priority: Priority, clock: &Clock) -> Result<Served, WalkError> {
+        source.check(&ranking).map_err(WalkError::Unsupported)?;
+        let slot = self.slot(source.query_key(&ranking), clock.now());
         let _want = slot.wants.add(priority);
-        let query = Arc::new(query);
         loop {
             let now = clock.now();
             slot.last_read.store(now.unix(), Ordering::SeqCst);
@@ -255,11 +242,11 @@ impl RankingCache {
                         let (outcome, flight) = watch::channel(None);
                         state.flight = Some(flight.clone());
                         let landing = Landing { slot: slot.clone(), outcome, result: None };
-                        let (query, rest, clock) = (query.clone(), rest.clone(), clock.clone());
-                        let mut demand = Demand { best: slot.wants.best.subscribe() };
+                        let (source, clock) = (source.clone(), clock.clone());
+                        let mut demand = Demand::new(slot.wants.best.subscribe());
                         tokio::spawn(async move {
                             let mut landing = landing;
-                            landing.result = Some(walk_snapshot(fresh, wanted, &query, &rest, &clock, &mut demand).await);
+                            landing.result = Some(walk_snapshot(fresh, wanted, source.as_ref(), &ranking, &clock, &mut demand).await);
                         });
                         (flight, true)
                     }
