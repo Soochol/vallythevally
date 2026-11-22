@@ -141,8 +141,16 @@ _Avoid_: 외부 서버, 공개 서버
 _Avoid_: 내부 서버, 관리자 서버
 
 **공용 자료**:
-운영자 쪽이 운영자 키(수집 키 포함)로 만들어 로그인한 모든 **사용자**에게 주는 자료. 종목 목록, 일봉 저장소, 스크리너, 재무, ETF, 순위, 시장 개요, 히트맵이 든다. 만드는 주체는 수집 데몬이 가려는 방향이고, 첫 단계 동안은 서버가 운영자 시세 키로 임시로 받는다([ADR 0038](docs/adr/0038-user-kiwoom-keys-stay-in-the-browser-and-collection-runs-on-one-server.md)).
+운영자 쪽이 운영자 키(수집 키 포함)로 만들어 로그인한 모든 **사용자**에게 주는 자료. 종목 목록, 일봉 저장소, 스크리너, 재무, ETF, 순위, 시장 개요, 히트맵이 든다. **감독 데몬**이 정해진 주기에 `rest` 역할 키로 만들어 공용 자료 폴더에 파일로 쓰고 서버는 그것을 읽어 주기만 한다([ADR 0043](docs/adr/0043-collector-makes-shared-data-and-the-server-only-reads-it.md), 형식은 [`docs/collector-shared-data.md`](docs/collector-shared-data.md)). 서버가 읽는 길이 켜지기 전에는(`VALLY_SHARED_DATA_DIR`이 없으면) 지금처럼 서버가 운영자 시세 키로 받는다([ADR 0038](docs/adr/0038-user-kiwoom-keys-stay-in-the-browser-and-collection-runs-on-one-server.md)).
 _Avoid_: 공유 데이터, 공통 시세
+
+**키 배정표**:
+어느 `rest` 키가 어느 일(공용 자료를 만드는 단위)을 받을지 적은 **감독 데몬**의 설정 파일(`collector-shared.json`). 일마다 키 목록(순서가 우선순위)과 주기, 선택값이 있고 키마다 `total_per_second`를 켤 수 있다. 데몬이 매일 07:35에 다시 읽는다.
+_Avoid_: 키 분담표, 일 목록
+
+**오늘 시세 스냅샷**:
+장중 30초마다 전 종목의 오늘 시세를 한 번 받아 최신 하나만 덮어쓰는 **공용 자료**. 스크리너의 오늘 요약과 히트맵 지도가 이것을 쓴다. 이 자료를 만드는 일은 뒤 작업이 더한다.
+_Avoid_: 전 종목 시세 캐시
 
 **세션**:
 **공개 모드**에서 브라우저가 로그인한 뒤 쿠키(`__Host-vally_session`)로 가리키는 로그인 상태. 값의 SHA-256만 서버에 두고, 30일 안 쓰거나 만든 지 90일이 지나면 만료한다. 로그아웃과 계정 삭제가 폐기한다.
