@@ -1,4 +1,4 @@
-import type { Quote } from "../../api/generated/Quote";
+import type { HeatmapBoardTheme } from "../../api/generated/HeatmapBoardTheme";
 import type { SymbolCode } from "../../api/generated/SymbolCode";
 import { layoutTiles, type TileRect } from "./treemap";
 import type { SizeMode, SortMode } from "./settings";
@@ -10,12 +10,10 @@ export interface SnapshotRow {
   tradedMillionWon: number | null;
 }
 
-export function snapshotRows(codes: readonly SymbolCode[], names: ReadonlyMap<SymbolCode, string>, quotes: readonly Quote[]): SnapshotRow[] {
-  const byCode = new Map(quotes.map((quote) => [quote.symbol, quote]));
-  return codes.map((code) => {
-    const quote = byCode.get(code);
-    return { code, name: names.get(code) ?? code, changeRate: quote?.changeRate ?? null, tradedMillionWon: quote?.tradedMillionWon ?? null };
-  });
+export function boardRows(theme: HeatmapBoardTheme, names: ReadonlyMap<SymbolCode, string>): SnapshotRow[] {
+  const quoted = theme.members.map((member) => ({ code: member.symbol, name: member.name, changeRate: member.changeRate, tradedMillionWon: member.tradedMillionWon ?? null }));
+  const unquoted = theme.missing.map((code) => ({ code, name: names.get(code) ?? code, changeRate: null, tradedMillionWon: null }));
+  return [...quoted, ...unquoted];
 }
 
 const byName = (a: SnapshotRow, b: SnapshotRow) => a.name.localeCompare(b.name, "ko") || a.code.localeCompare(b.code);

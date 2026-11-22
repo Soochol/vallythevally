@@ -37,7 +37,7 @@ pub struct HeatmapBoardMember {
     pub name: String,
     pub change_rate: f64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[ts(optional)]
+    #[ts(type = "number", optional)]
     pub traded_million_won: Option<u64>,
 }
 
@@ -46,6 +46,7 @@ pub struct HeatmapBoardMember {
 #[ts(export)]
 pub struct HeatmapThemeSummary {
     pub weighted_rate: Option<f64>,
+    #[ts(type = "number")]
     pub traded_million_won: u64,
     pub rising: u32,
     pub flat: u32,
