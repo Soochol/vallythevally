@@ -12,7 +12,7 @@ import type { Screen } from "../src/api/generated/Screen.ts";
 import type { ScreenPeriod } from "../src/api/generated/ScreenPeriod.ts";
 import type { Resume } from "../src/api/http.ts";
 import { barsPage, findSymbol, publicInfo, quoteOf, resolveVenue, search } from "./fakeMarket.ts";
-import { boardOf, parseOrder } from "./fakeHeatmapBoard.ts";
+import { boardOf, FAKE_KIWOOM_CATALOG, kiwoomBoardOf, parseOrder, parseSource } from "./fakeHeatmapBoard.ts";
 import { createScreener, parseScenario } from "./fakeScreener.ts";
 import { createUserData, type Reply } from "./fakeUserData.ts";
 
@@ -105,14 +105,16 @@ export function fakeApi(screenerScenario: string | undefined): Plugin {
         if (path === "/heatmap/board" && method === "GET") {
           const venue = url.searchParams.get("venue") ?? "combined";
           const order = parseOrder(url.searchParams.get("order"));
-          if ((venue !== "combined" && venue !== "krx" && venue !== "nxt") || order === null) return fail(res, 400, "bad_request", "venue나 order가 틀렸습니다");
+          const source = parseSource(url.searchParams.get("source"));
+          if ((venue !== "combined" && venue !== "krx" && venue !== "nxt") || order === null || source === null) return fail(res, 400, "bad_request", "venue, order, source가 틀렸습니다");
           const now = Date.now();
           const memberOf = (code: string) => {
             const s = findSymbol(code);
             const q = s && quoteOf(s, now, venue);
             return s && q ? { symbol: code, name: s.name, changeRate: q.changeRate, ...(q.tradedMillionWon === undefined ? {} : { tradedMillionWon: q.tradedMillionWon }) } : null;
           };
-          return send(res, 200, boardOf(user.getHeatmapThemes(), memberOf, order, Math.floor(now / 1000)));
+          const asOf = Math.floor(now / 1000);
+          return send(res, 200, source === "kiwoom" ? kiwoomBoardOf(FAKE_KIWOOM_CATALOG, memberOf, order, asOf) : boardOf(user.getHeatmapThemes(), memberOf, order, asOf));
         }
         if (path === "/heatmap/flow" && method === "GET") {
           const used = (url.searchParams.get("symbols") ?? "").split(",").filter(Boolean);

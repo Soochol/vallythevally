@@ -82,6 +82,21 @@ export const removeSymbolFromTheme = (themes: readonly HeatmapTheme[], id: strin
 export const moveSymbol = (themes: readonly HeatmapTheme[], id: string, from: number, to: number): HeatmapTheme[] =>
   editTheme(themes, id, (theme) => ({ ...theme, symbols: moveItem(theme.symbols, from, to) }));
 
+export type ThemeCopy =
+  | { outcome: "added"; kept: number; total: number }
+  | { outcome: "sameName" | "invalidName" | "overThemeLimit" };
+
+export function appendThemeCopy(themes: readonly HeatmapTheme[], id: string, name: string, symbols: readonly SymbolCode[]): { themes: HeatmapTheme[]; result: ThemeCopy } {
+  const trimmed = name.trim();
+  const unchanged = (outcome: "sameName" | "invalidName" | "overThemeLimit") => ({ themes: [...themes], result: { outcome } as const });
+  if (themes.some((theme) => theme.name === trimmed)) return unchanged("sameName");
+  if (themes.length >= MAX_THEMES) return unchanged("overThemeLimit");
+  if (themeNameProblem(trimmed, themes, null) !== null) return unchanged("invalidName");
+  const stocks = [...new Set(symbols)].filter((code) => !isIndexCode(code));
+  const kept = stocks.slice(0, MAX_THEME_SYMBOLS);
+  return { themes: [...themes, { id, name: trimmed, symbols: kept }], result: { outcome: "added", kept: kept.length, total: stocks.length } };
+}
+
 export interface ImportReport {
   imported: string[];
   sameName: string[];

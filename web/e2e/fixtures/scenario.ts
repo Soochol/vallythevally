@@ -40,7 +40,7 @@ import type { Venue } from "../../src/api/generated/Venue";
 import type { Watchlist } from "../../src/api/generated/Watchlist";
 import type { Watchlists } from "../../src/api/generated/Watchlists";
 import { etfBaseline } from "./etf-data";
-import { boardOf, parseOrder } from "../../dev/fakeHeatmapBoard";
+import { boardOf, EMPTY_KIWOOM_CATALOG, kiwoomBoardOf, parseOrder, parseSource, type KiwoomCatalog } from "../../dev/fakeHeatmapBoard";
 import { marketOverviewBaseline } from "./market-data";
 import { barsPage, findSymbol, publicInfo, quoteOf, resolveVenue, search, SYMBOLS } from "../../dev/fakeMarket";
 
@@ -246,6 +246,7 @@ export class Scenario {
   readonly market: MarketFixtures;
   readonly live: LiveFrames;
   readonly requests: Request[] = [];
+  kiwoomCatalog: KiwoomCatalog = EMPTY_KIWOOM_CATALOG;
   private handlers: Array<{ match: Matcher; handler: Handler }> = [];
   private failures: string[] = [];
   private contexts = new Set<BrowserContext>();
@@ -323,13 +324,14 @@ export class Scenario {
     if (path === "/api/heatmap/board" && method === "GET") {
       const venue = url.searchParams.get("venue") ?? "combined";
       const order = parseOrder(url.searchParams.get("order"));
-      if ((venue !== "combined" && venue !== "krx" && venue !== "nxt") || order === null) return error(400, "bad_request", "Invalid venue or order");
+      const source = parseSource(url.searchParams.get("source"));
+      if ((venue !== "combined" && venue !== "krx" && venue !== "nxt") || order === null || source === null) return error(400, "bad_request", "Invalid venue, order or source");
       const memberOf = (code: string) => {
         const quote = this.market.quote(code, venue);
         const name = this.market.symbols.find((value) => value.code === code)?.name ?? code;
         return quote ? { symbol: code, name, changeRate: quote.changeRate, ...(quote.tradedMillionWon === undefined ? {} : { tradedMillionWon: quote.tradedMillionWon }) } : null;
       };
-      return { body: boardOf(this.documents.heatmapThemes(), memberOf, order, null) };
+      return { body: source === "kiwoom" ? kiwoomBoardOf(this.kiwoomCatalog, memberOf, order, null) : boardOf(this.documents.heatmapThemes(), memberOf, order, null) };
     }
     if (path === "/api/screens") {
       if (method === "GET") return { body: this.documents.screens() };
