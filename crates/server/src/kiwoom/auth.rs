@@ -87,10 +87,10 @@ struct State {
     issued_count: u64,
     disconnected: Option<String>,
     auth_block: Option<SavedAuthBlock>,
+    file: Option<TokenFile>,
 }
 
 pub struct KiwoomAuth {
-    file: Option<TokenFile>,
     state: Mutex<State>,
     halted: watch::Sender<Option<Halt>>,
 }
@@ -101,7 +101,7 @@ impl fmt::Debug for KiwoomAuth {
         f.debug_struct("KiwoomAuth")
             .field("app_key", &st.credentials.as_ref().map(|c| &c.app_key))
             .field("app_secret", &st.credentials.as_ref().map(|c| &c.app_secret))
-            .field("file", &self.file.as_ref().map(TokenFile::path))
+            .field("file", &st.file.as_ref().map(TokenFile::path))
             .field("generation", &st.issued.as_ref().map(|i| i.generation))
             .field("token", &st.issued.as_ref().map(|i| &i.token))
             .field("expires_at", &st.issued.as_ref().map(|i| i.expires_at))
@@ -129,21 +129,17 @@ impl KiwoomAuth {
     }
 
     fn with_credentials(credentials: Option<Credentials>, file: Option<TokenFile>) -> Self {
-        let id = credentials.as_ref().map(|c| c.id.as_str());
-        let (mut state, halt) = match file.as_ref().map(TokenFile::load) {
-            None | Some(Ok(None)) => (State::default(), None),
-            Some(Ok(Some(saved))) => {
-                let state = restore(saved, id);
-                let halt = restored_halt(&state, id);
-                (state, halt)
-            }
-            Some(Err(e)) => {
-                tracing::error!(error = %e, "토큰 파일을 읽지 못했습니다. 마지막 발급 요청 시각을 모르므로 조회와 토큰 발급을 멈춥니다");
-                (State::default(), Some(Halt::TokenFileUnreadable(e)))
-            }
+        let (state, halt) = loaded_state(credentials, file);
+        KiwoomAuth { state: Mutex::new(state), halted: watch::channel(halt).0 }
+    }
+
+    pub fn rebind(&self, identity: Option<(Secret<String>, Secret<String>, Option<TokenFile>)>) {
+        let (state, halt) = match identity {
+            Some((app_key, app_secret, file)) => loaded_state(Some(Credentials::new(app_key, app_secret)), file),
+            None => loaded_state(None, None),
         };
-        state.credentials = credentials;
-        KiwoomAuth { file, state: Mutex::new(state), halted: watch::channel(halt).0 }
+        *self.lock() = state;
+        self.halted.send_replace(halt);
     }
 
     fn lock(&self) -> std::sync::MutexGuard<'_, State> {
@@ -177,7 +173,7 @@ impl KiwoomAuth {
     }
 
     fn save(&self, st: &State) -> Result<(), FileError> {
-        let Some(file) = &self.file else { return Ok(()) };
+        let Some(file) = &st.file else { return Ok(()) };
         let saved = Saved {
             credential: st.credentials.as_ref().map(|c| c.id.clone()),
             token: st.issued.as_ref().map(|i| SavedToken {
@@ -193,7 +189,7 @@ impl KiwoomAuth {
     }
 
     fn save_records(&self, st: &State) -> Result<(), FileError> {
-        let Some(file) = &self.file else { return Ok(()) };
+        let Some(file) = &st.file else { return Ok(()) };
         let mut saved = match file.load()? {
             Some(saved) => saved,
             None if st.disconnected.is_none() && st.auth_block.is_none() => return Ok(()),
@@ -238,7 +234,7 @@ impl KiwoomAuth {
         if !same_key {
             st.issued = None;
             st.stale = false;
-            let from_file = self.file.as_ref().and_then(|f| f.load().ok().flatten()).and_then(|saved| restore(saved, Some(&next.id)).issued);
+            let from_file = st.file.as_ref().and_then(|f| f.load().ok().flatten()).and_then(|saved| restore(saved, Some(&next.id)).issued);
             if let Some(mut issued) = from_file {
                 st.issued_count += 1;
                 issued.generation = TokenGen(st.issued_count);
@@ -303,11 +299,14 @@ impl KiwoomAuth {
     }
 
     pub fn recheck_token_file(&self) -> Result<(), FileError> {
-        let Some(file) = &self.file else { return Ok(()) };
         if !matches!(self.halted(), Some(Halt::TokenFileUnreadable(_))) {
             return Ok(());
         }
-        match file.load() {
+        let loaded = match &self.lock().file {
+            Some(file) => file.load(),
+            None => return Ok(()),
+        };
+        match loaded {
             Ok(saved) => {
                 let mut st = self.lock();
                 let id = st.credentials.as_ref().map(|c| c.id.clone());
@@ -437,6 +436,26 @@ impl KiwoomAuth {
         let cutoff = KstTime::from_kst_civil(now.kst_date(), DAILY_REISSUE_AT);
         now >= cutoff && self.lock().issued.as_ref().is_none_or(|i| i.issued_at < cutoff)
     }
+}
+
+fn loaded_state(credentials: Option<Credentials>, file: Option<TokenFile>) -> (State, Option<Halt>) {
+    let id = credentials.as_ref().map(|c| c.id.clone());
+    let id = id.as_deref();
+    let (mut state, halt) = match file.as_ref().map(TokenFile::load) {
+        None | Some(Ok(None)) => (State::default(), None),
+        Some(Ok(Some(saved))) => {
+            let state = restore(saved, id);
+            let halt = restored_halt(&state, id);
+            (state, halt)
+        }
+        Some(Err(e)) => {
+            tracing::error!(error = %e, "토큰 파일을 읽지 못했습니다. 마지막 발급 요청 시각을 모르므로 조회와 토큰 발급을 멈춥니다");
+            (State::default(), Some(Halt::TokenFileUnreadable(e)))
+        }
+    };
+    state.credentials = credentials;
+    state.file = file;
+    (state, halt)
 }
 
 fn restore(saved: Saved, credential: Option<&str>) -> State {

@@ -2,7 +2,7 @@ use std::sync::{Arc, Mutex, OnceLock};
 
 use axum::Router;
 use axum::body::Body;
-use axum::extract::State;
+use axum::extract::{Path, State};
 use axum::middleware;
 use axum::response::Json;
 use axum::routing::{get, post, put};
@@ -11,8 +11,8 @@ use serde::de::DeserializeOwned;
 use crate::api::{self, ApiErrorCode, KeySource, KiwoomAtStart, KiwoomEnvironment, KiwoomConnectStep, KiwoomLinkProblem, KiwoomLinkState, KiwoomLinkStatus, UnixSeconds};
 use crate::config::{Config, KiwoomCredentials, Secret};
 use crate::http::{ApiFailure, AppState};
-use crate::kiwoom::ip_file::RegisteredIpFile;
-use crate::kiwoom::key_file::KeyFile;
+use crate::kiwoom::key_file::{KEY_LIMIT, KeyId, KeyOrigin, MIGRATED_KEY_ALIAS};
+use crate::kiwoom::keys::{KeyError, KeySetup, KeyView};
 use crate::kiwoom::link::{ConnectStep, LinkState, Problem};
 use crate::kiwoom::private_file::FileError;
 use crate::kiwoom::rest::Usage;
@@ -22,11 +22,9 @@ const BODY_LIMIT: usize = 4096;
 
 pub struct SystemState {
     environment: KiwoomEnvironment,
-    key_file: Option<KeyFile>,
-    ip_file: Option<RegisteredIpFile>,
-    registered_ip: Mutex<Option<api::RegisteredIp>>,
+    key_setup: Option<KeySetup>,
+    order_switch: Option<crate::trading::SwitchStore>,
     public_ip: Option<Arc<dyn PublicIpTransport>>,
-    env_key: bool,
     key_file_problem: Mutex<Option<String>>,
     settings: Option<api::SystemSettings>,
     account: crate::account::AccountState,
@@ -38,13 +36,9 @@ pub struct SystemState {
 }
 
 impl SystemState {
-    pub fn new(key_file: KeyFile, env_key: bool, key_file_problem: Option<FileError>, settings: api::SystemSettings) -> Self {
-        let ip_file = key_file.registered_ip_file();
-        let registered_ip = ip_file.load().unwrap_or_else(|e| {
-            tracing::warn!(error = %e, "등록한 IP 기록을 읽지 못했습니다. 없는 것으로 봅니다");
-            None
-        });
-        SystemState { environment: settings.environment, key_file: Some(key_file), ip_file: Some(ip_file), registered_ip: Mutex::new(registered_ip), public_ip: None, env_key, key_file_problem: Mutex::new(key_file_problem.map(|e| e.to_string())), settings: Some(settings), account: crate::account::AccountState::local_only(), collector: None, bound: OnceLock::new(), tailnet_hosts: Default::default(), bound_signal: tokio::sync::Notify::new(), write: tokio::sync::Mutex::new(()) }
+    pub fn new(key_setup: KeySetup, key_file_problem: Option<FileError>, settings: api::SystemSettings) -> Self {
+        let order_switch = Some(key_setup.store.order_switch_store());
+        SystemState { environment: settings.environment, key_setup: Some(key_setup), order_switch, public_ip: None, key_file_problem: Mutex::new(key_file_problem.map(|e| e.to_string())), settings: Some(settings), account: crate::account::AccountState::local_only(), collector: None, bound: OnceLock::new(), tailnet_hosts: Default::default(), bound_signal: tokio::sync::Notify::new(), write: tokio::sync::Mutex::new(()) }
     }
 
     pub fn environment(&self) -> KiwoomEnvironment {
@@ -83,15 +77,16 @@ impl SystemState {
         &self.account
     }
 
-    pub fn order_switch_store(&self) -> crate::trading::SwitchStore {
-        match &self.key_file {
-            Some(key_file) => key_file.order_switch_store(),
-            None => crate::trading::SwitchStore::memory(),
-        }
+    pub fn take_order_switch_store(&mut self) -> crate::trading::SwitchStore {
+        self.order_switch.take().unwrap_or_else(crate::trading::SwitchStore::memory)
+    }
+
+    pub fn take_key_setup(&mut self) -> Option<KeySetup> {
+        self.key_setup.take()
     }
 
     pub fn unconfigured() -> Self {
-        SystemState { environment: KiwoomEnvironment::Real, key_file: None, ip_file: None, registered_ip: Mutex::new(None), public_ip: None, env_key: false, key_file_problem: Mutex::new(None), settings: None, account: crate::account::AccountState::local_only(), collector: None, bound: OnceLock::new(), tailnet_hosts: Default::default(), bound_signal: tokio::sync::Notify::new(), write: tokio::sync::Mutex::new(()) }
+        SystemState { environment: KiwoomEnvironment::Real, key_setup: None, order_switch: None, public_ip: None, key_file_problem: Mutex::new(None), settings: None, account: crate::account::AccountState::local_only(), collector: None, bound: OnceLock::new(), tailnet_hosts: Default::default(), bound_signal: tokio::sync::Notify::new(), write: tokio::sync::Mutex::new(()) }
     }
 
     pub fn bound(&self, addr: std::net::SocketAddr) {
@@ -119,10 +114,6 @@ impl SystemState {
         self.key_file_problem.lock().expect("키 파일 문제 잠금").clone()
     }
 
-    fn registered_ip(&self) -> Option<api::RegisteredIp> {
-        self.registered_ip.lock().expect("등록 IP 잠금").clone()
-    }
-
     fn set_key_file_problem(&self, problem: Option<String>) {
         *self.key_file_problem.lock().expect("키 파일 문제 잠금") = problem;
     }
@@ -143,7 +134,7 @@ impl api::SystemSettings {
             financial_automatic: config.financial_automatic,
             opendart_key_present: config.opendart_api_key.is_some(),
             token_path: path(&config.token_path),
-            key_path: path(&config.kiwoom_key_path),
+            key_path: path(&config.kiwoom_key_path.with_file_name(crate::kiwoom::key_file::KEY_LIST_FILE_NAME)),
             lock_path: path(&config.lock_path),
             kiwoom_target: kiwoom_target(&config.kiwoom_base_url),
             server_version: env!("CARGO_PKG_VERSION").to_owned(),
@@ -170,6 +161,13 @@ pub fn routes(state: Arc<AppState>) -> Router<Arc<AppState>> {
         .route("/api/system/kiwoom", get(get_kiwoom))
         .route("/api/system/kiwoom/usage", get(get_kiwoom_usage))
         .route("/api/system/kiwoom/key", put(put_key).delete(delete_key))
+        .route("/api/system/kiwoom/keys", get(list_keys).post(add_key))
+        .route("/api/system/kiwoom/keys/{id}", axum::routing::delete(delete_key_by_id))
+        .route("/api/system/kiwoom/keys/{id}/alias", put(rename_key))
+        .route("/api/system/kiwoom/keys/{id}/key", put(replace_key))
+        .route("/api/system/kiwoom/keys/{id}/connect", post(connect_key))
+        .route("/api/system/kiwoom/keys/{id}/disconnect", post(disconnect_key))
+        .route("/api/system/kiwoom/market-key", put(put_market_key))
         .route("/api/system/kiwoom/connect", post(connect))
         .route("/api/system/kiwoom/disconnect", post(disconnect))
         .route("/api/system/kiwoom/ip-check", post(ip_check))
@@ -191,10 +189,6 @@ fn env_key_conflict() -> ApiFailure {
 
 fn mock_key_conflict() -> ApiFailure {
     ApiFailure::new(ApiErrorCode::Conflict, "모의투자 키는 환경 설정(VALLY_KIWOOM_MOCK_APP_KEY, VALLY_KIWOOM_MOCK_APP_SECRET)에서만 받아 화면에서 바꿀 수 없습니다")
-}
-
-fn key_file_of(system: &SystemState) -> Result<&KeyFile, ApiFailure> {
-    system.key_file.as_ref().ok_or_else(|| ApiFailure::new(ApiErrorCode::Internal, "키 파일 위치가 정해지지 않았습니다"))
 }
 
 async fn get_kiwoom(State(st): State<Arc<AppState>>) -> Json<KiwoomLinkStatus> {
@@ -230,46 +224,127 @@ fn kiwoom_usage(usage: &Usage) -> api::KiwoomUsage {
     }
 }
 
-async fn put_key(State(st): State<Arc<AppState>>, body: Body) -> Result<Json<KiwoomLinkStatus>, ApiFailure> {
-    let input: api::KiwoomKeyInput = read_body(body).await?;
-    let _write = st.system.write.lock().await;
-    if st.system.environment == KiwoomEnvironment::Mock {
-        return Err(mock_key_conflict());
+fn key_failure(error: KeyError) -> ApiFailure {
+    match error {
+        KeyError::Limit | KeyError::DuplicateAppKey | KeyError::Alias(_) => ApiFailure::bad_request(error.to_string()),
+        KeyError::Unknown => ApiFailure::new(ApiErrorCode::NotFound, error.to_string()),
+        KeyError::EnvReadOnly => env_key_conflict(),
+        KeyError::NoStore | KeyError::File(_) => ApiFailure::new(ApiErrorCode::Internal, error.to_string()),
     }
-    if st.system.env_key {
-        return Err(env_key_conflict());
-    }
-    let (app_key, app_secret) = (input.app_key.trim(), input.app_secret.trim());
+}
+
+fn key_id(text: &str) -> Result<KeyId, ApiFailure> {
+    KeyId::parse(text).ok_or_else(|| key_failure(KeyError::Unknown))
+}
+
+fn checked_credentials(app_key: &str, app_secret: &str) -> Result<KiwoomCredentials, ApiFailure> {
+    let (app_key, app_secret) = (app_key.trim(), app_secret.trim());
     if app_key.is_empty() {
         return Err(ApiFailure::bad_request("앱키가 비어 있습니다"));
     }
     if app_secret.is_empty() {
         return Err(ApiFailure::bad_request("시크릿이 비어 있습니다"));
     }
-    let credentials = KiwoomCredentials { app_key: Secret::new(app_key.to_owned()), app_secret: Secret::new(app_secret.to_owned()) };
-    st.link.disconnect();
-    key_file_of(&st.system)?.save(&credentials).map_err(|e| ApiFailure::new(ApiErrorCode::Internal, format!("키 파일에 쓰지 못했습니다: {e}")))?;
+    Ok(KiwoomCredentials { app_key: Secret::new(app_key.to_owned()), app_secret: Secret::new(app_secret.to_owned()) })
+}
+
+fn refuse_mock(st: &AppState) -> Result<(), ApiFailure> {
+    if st.system.environment == KiwoomEnvironment::Mock { Err(mock_key_conflict()) } else { Ok(()) }
+}
+
+async fn put_key(State(st): State<Arc<AppState>>, body: Body) -> Result<Json<KiwoomLinkStatus>, ApiFailure> {
+    let input: api::KiwoomKeyInput = read_body(body).await?;
+    let _write = st.system.write.lock().await;
+    refuse_mock(&st)?;
+    let credentials = checked_credentials(&input.app_key, &input.app_secret)?;
+    match st.keys.market() {
+        None => st.keys.add(MIGRATED_KEY_ALIAS, credentials).map(drop),
+        Some(market) => st.keys.replace_credentials(&market.id, credentials),
+    }
+    .map_err(key_failure)?;
     st.system.set_key_file_problem(None);
-    st.link.replace_key(credentials.app_key, credentials.app_secret);
     tracing::info!("키움 키를 저장했습니다");
-    st.link.connect_in_background();
     Ok(Json(kiwoom_status(&st)))
 }
 
 async fn delete_key(State(st): State<Arc<AppState>>) -> Result<Json<KiwoomLinkStatus>, ApiFailure> {
     let _write = st.system.write.lock().await;
-    if st.system.environment == KiwoomEnvironment::Mock {
-        return Err(mock_key_conflict());
+    refuse_mock(&st)?;
+    match st.keys.market() {
+        None => st.keys.reset_file().map_err(key_failure)?,
+        Some(market) => st.keys.remove(&market.id).map_err(key_failure)?,
     }
-    if st.system.env_key {
-        return Err(env_key_conflict());
-    }
-    st.link.disconnect();
-    key_file_of(&st.system)?.remove().map_err(|e| ApiFailure::new(ApiErrorCode::Internal, format!("키 파일을 지우지 못했습니다: {e}")))?;
     st.system.set_key_file_problem(None);
-    st.link.clear_key();
     tracing::info!("키움 키를 지웠습니다");
     Ok(Json(kiwoom_status(&st)))
+}
+
+async fn list_keys(State(st): State<Arc<AppState>>) -> Json<api::KiwoomKeyList> {
+    Json(key_list(&st))
+}
+
+async fn add_key(State(st): State<Arc<AppState>>, body: Body) -> Result<Json<api::KiwoomKeyList>, ApiFailure> {
+    let input: api::KiwoomKeyAdd = read_body(body).await?;
+    let _write = st.system.write.lock().await;
+    refuse_mock(&st)?;
+    let credentials = checked_credentials(&input.app_key, &input.app_secret)?;
+    st.keys.add(&input.alias, credentials).map_err(key_failure)?;
+    st.system.set_key_file_problem(None);
+    tracing::info!("키움 키를 더했습니다");
+    Ok(Json(key_list(&st)))
+}
+
+async fn rename_key(State(st): State<Arc<AppState>>, Path(id): Path<String>, body: Body) -> Result<Json<api::KiwoomKeyList>, ApiFailure> {
+    let input: api::KiwoomKeyAlias = read_body(body).await?;
+    let id = key_id(&id)?;
+    let _write = st.system.write.lock().await;
+    refuse_mock(&st)?;
+    st.keys.rename(&id, &input.alias).map_err(key_failure)?;
+    Ok(Json(key_list(&st)))
+}
+
+async fn replace_key(State(st): State<Arc<AppState>>, Path(id): Path<String>, body: Body) -> Result<Json<api::KiwoomKeyList>, ApiFailure> {
+    let input: api::KiwoomKeyInput = read_body(body).await?;
+    let id = key_id(&id)?;
+    let _write = st.system.write.lock().await;
+    refuse_mock(&st)?;
+    let credentials = checked_credentials(&input.app_key, &input.app_secret)?;
+    st.keys.replace_credentials(&id, credentials).map_err(key_failure)?;
+    st.system.set_key_file_problem(None);
+    tracing::info!("키움 키를 바꿨습니다");
+    Ok(Json(key_list(&st)))
+}
+
+async fn delete_key_by_id(State(st): State<Arc<AppState>>, Path(id): Path<String>) -> Result<Json<api::KiwoomKeyList>, ApiFailure> {
+    let id = key_id(&id)?;
+    let _write = st.system.write.lock().await;
+    refuse_mock(&st)?;
+    st.keys.remove(&id).map_err(key_failure)?;
+    tracing::info!("키움 키를 지웠습니다");
+    Ok(Json(key_list(&st)))
+}
+
+async fn put_market_key(State(st): State<Arc<AppState>>, body: Body) -> Result<Json<api::KiwoomKeyList>, ApiFailure> {
+    let input: api::KiwoomMarketKeyInput = read_body(body).await?;
+    let id = key_id(&input.key_id)?;
+    let _write = st.system.write.lock().await;
+    refuse_mock(&st)?;
+    st.keys.designate_market(&id).map_err(key_failure)?;
+    tracing::info!("시세 키를 바꿨습니다");
+    Ok(Json(key_list(&st)))
+}
+
+async fn connect_key(State(st): State<Arc<AppState>>, Path(id): Path<String>, body: Body) -> Result<Json<api::KiwoomKeyList>, ApiFailure> {
+    let input: api::KiwoomConnectInput = read_body(body).await?;
+    let view = st.keys.view_of(&key_id(&id)?).ok_or_else(|| key_failure(KeyError::Unknown))?;
+    view.lane.link.connect_until_waiting(input.acknowledged).await;
+    Ok(Json(key_list(&st)))
+}
+
+async fn disconnect_key(State(st): State<Arc<AppState>>, Path(id): Path<String>) -> Result<Json<api::KiwoomKeyList>, ApiFailure> {
+    let view = st.keys.view_of(&key_id(&id)?).ok_or_else(|| key_failure(KeyError::Unknown))?;
+    view.lane.link.disconnect_by_user();
+    Ok(Json(key_list(&st)))
 }
 
 async fn connect(State(st): State<Arc<AppState>>, body: Body) -> Result<Json<KiwoomLinkStatus>, ApiFailure> {
@@ -305,10 +380,11 @@ async fn put_registered_ip(State(st): State<Arc<AppState>>, body: Body) -> Resul
     let input: api::RegisteredIpInput = read_body(body).await?;
     let ip: std::net::IpAddr = input.ip.trim().parse().map_err(|_| ApiFailure::bad_request("IP 주소 형식이 올바르지 않습니다"))?;
     let _write = st.system.write.lock().await;
-    let file = st.system.ip_file.as_ref().ok_or_else(|| ApiFailure::new(ApiErrorCode::Internal, "등록 IP 파일 위치가 정해지지 않았습니다"))?;
     let registered = api::RegisteredIp { ip: ip.to_string(), at: UnixSeconds(st.clock.now().unix()) };
-    file.save(&registered).map_err(|e| ApiFailure::new(ApiErrorCode::Internal, format!("등록한 IP를 파일에 쓰지 못했습니다: {e}")))?;
-    *st.system.registered_ip.lock().expect("등록 IP 잠금") = Some(registered);
+    st.keys.record_registered_ip(registered).map_err(|e| match e {
+        KeyError::NoStore => ApiFailure::new(ApiErrorCode::Internal, "등록 IP 파일 위치가 정해지지 않았습니다"),
+        other => ApiFailure::new(ApiErrorCode::Internal, format!("등록한 IP를 파일에 쓰지 못했습니다: {other}")),
+    })?;
     tracing::info!("포털에 등록한 공인 IP를 기록했습니다");
     Ok(Json(kiwoom_status(&st)))
 }
@@ -318,9 +394,42 @@ async fn get_settings(State(st): State<Arc<AppState>>) -> Result<Json<api::Syste
 }
 
 pub fn kiwoom_status(st: &AppState) -> KiwoomLinkStatus {
-    let summary = st.rest.auth().credential_summary();
+    let market = st.keys.market();
+    let source = match market.as_ref().map(|view| view.origin) {
+        Some(origin) => key_source(origin),
+        None if st.rest.auth().has_credentials() => KeySource::File,
+        None => KeySource::None,
+    };
+    link_status(st, &st.rest, &st.link, source, st.keys.registered_ip(), true)
+}
+
+fn key_source(origin: KeyOrigin) -> KeySource {
+    match origin {
+        KeyOrigin::Env => KeySource::Env,
+        KeyOrigin::File => KeySource::File,
+    }
+}
+
+fn key_list(st: &AppState) -> api::KiwoomKeyList {
+    api::KiwoomKeyList { limit: KEY_LIMIT as u32, keys: st.keys.views().iter().map(|view| key_entry(st, view)).collect(), key_file_problem: st.system.key_file_problem() }
+}
+
+fn key_entry(st: &AppState, view: &KeyView) -> api::KiwoomKey {
+    let source = key_source(view.origin);
+    api::KiwoomKey {
+        key_id: view.id.to_string(),
+        alias: view.alias.clone(),
+        broker: view.broker,
+        source,
+        app_key_tail: view.app_key_tail.clone(),
+        market: view.market,
+        link: link_status(st, &view.lane.rest, &view.lane.link, source, view.registered_ip.clone(), view.market),
+    }
+}
+
+fn link_status(st: &AppState, rest: &crate::kiwoom::rest::KiwoomRest, link: &crate::kiwoom::link::Link, key_source: KeySource, registered_ip: Option<api::RegisteredIp>, market: bool) -> KiwoomLinkStatus {
+    let summary = rest.auth().credential_summary();
     let summary_present = summary.is_some();
-    let key_source = if st.system.env_key { KeySource::Env } else if summary.is_some() { KeySource::File } else { KeySource::None };
     let mut status = KiwoomLinkStatus {
         environment: st.system.environment,
         key_source,
@@ -330,16 +439,16 @@ pub fn kiwoom_status(st: &AppState) -> KiwoomLinkStatus {
         problem: None,
         message: String::new(),
         retry_at: None,
-        needs_acknowledgement: st.link.needs_acknowledgement(),
+        needs_acknowledgement: link.needs_acknowledgement(),
         step: None,
         token_expires_at: None,
         realtime_registered: None,
         symbol_count: None,
-        registered_ip: st.system.registered_ip(),
+        registered_ip,
         at_start: None,
     };
-    status.at_start = summary_present.then(|| if st.rest.auth().kept_disconnected() { KiwoomAtStart::KeptDisconnected } else { KiwoomAtStart::Connects });
-    match st.link.state() {
+    status.at_start = summary_present.then(|| if rest.auth().kept_disconnected() { KiwoomAtStart::KeptDisconnected } else { KiwoomAtStart::Connects });
+    match link.state() {
         LinkState::NoKey => match st.system.key_file_problem() {
             Some(problem) => {
                 status.state = KiwoomLinkState::Failed;
@@ -370,9 +479,11 @@ pub fn kiwoom_status(st: &AppState) -> KiwoomLinkStatus {
         LinkState::Connected => {
             status.state = KiwoomLinkState::Connected;
             status.message = "키움에 연결됨".to_owned();
-            status.token_expires_at = st.rest.auth().token_expires_at().map(|t| UnixSeconds(t.unix()));
-            status.realtime_registered = Some(count(crate::kiwoom::stream::seats(&st.registered.borrow())));
-            status.symbol_count = st.symbols.updates().borrow().as_ref().map(|directory| count(directory.len()));
+            status.token_expires_at = rest.auth().token_expires_at().map(|t| UnixSeconds(t.unix()));
+            if market {
+                status.realtime_registered = Some(count(crate::kiwoom::stream::seats(&st.registered.borrow())));
+                status.symbol_count = st.symbols.updates().borrow().as_ref().map(|directory| count(directory.len()));
+            }
         }
         LinkState::Failed(failure) => {
             status.state = KiwoomLinkState::Failed;

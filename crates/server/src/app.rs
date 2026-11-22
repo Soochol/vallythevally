@@ -33,7 +33,8 @@ use crate::screener::Screener;
 use crate::screener::store::Store;
 use crate::symbols::SymbolDirectory;
 use crate::system_routes::SystemState;
-use crate::kiwoom::key_file::{KeyFile, startup_key};
+use crate::kiwoom::key_file::{KeyFile, path_for_key, startup_keys};
+use crate::kiwoom::keys::{KeyRing, KeySetup, Lane, LaneFactory};
 
 const DAILY_RESET_AT: TimeOfDay = match TimeOfDay::hms(7, 45, 0) {
     Some(t) => t,
@@ -111,15 +112,20 @@ pub fn application(inputs: ApplicationInputs) -> Arc<AppState> {
     application_with_system(inputs, SystemState::unconfigured())
 }
 
-pub fn application_with_system(inputs: ApplicationInputs, system: SystemState) -> Arc<AppState> {
+pub fn application_with_system(inputs: ApplicationInputs, mut system: SystemState) -> Arc<AppState> {
     let ApplicationInputs { rest, clock, symbols, db, screener_store, stream: (stream, events), static_dir, screener_update_on_connect } = inputs;
     let bars = Arc::new(BarService::new(rest.clone(), symbols.clone(), clock.clone()));
     let screener = Arc::new(Screener::new(screener_store, rest.clone(), bars.clone(), symbols.clone(), clock.clone()));
     let registered = stream.watch_desired();
-    let trading = crate::trading::Trading::new(rest.clone(), clock.clone(), system.order_switch_store(), stream.account_feed(), db.clone(), symbols.clone());
+    let trading = crate::trading::Trading::new(rest.clone(), clock.clone(), system.take_order_switch_store(), stream.account_feed(), db.clone(), symbols.clone());
     let hub = MarketHub::spawn(bars.clone(), stream, events, clock.clone());
     let link = Link::new(rest.clone(), symbols.clone(), screener.clone(), clock.clone(), screener_update_on_connect);
-    Arc::new(AppState { symbols, bars, rest, db, clock, static_dir, hub, screener, link, system, registered, trading, rankings: Default::default(), market_overview: Default::default(), etf: Default::default() })
+    let market_lane = Lane::market(rest.clone(), link.clone());
+    let keys = match system.take_key_setup() {
+        Some(setup) => KeyRing::new(setup, market_lane),
+        None => KeyRing::unconfigured(market_lane),
+    };
+    Arc::new(AppState { symbols, bars, rest, db, clock, static_dir, hub, screener, link, keys, system, registered, trading, rankings: Default::default(), market_overview: Default::default(), etf: Default::default() })
 }
 
 pub async fn daily_maintenance(state: Arc<AppState>) {
@@ -166,7 +172,7 @@ pub struct Started {
 async fn serve(config: Config, lock: &InstanceLock) -> ExitCode {
     let Ok(adapters) = Adapters::production(&config) else { return ExitCode::from(1) };
     let Ok(started) = start(&config, lock, adapters).await else { return ExitCode::from(1) };
-    started.state.link.connect_at_start();
+    started.state.keys.connect_at_start();
     tracing::info!(static_dir = %config.static_dir.display(), "요청을 받기 시작합니다");
     if let Err(e) = axum::serve(started.listener, started.router).with_graceful_shutdown(shutdown_signal()).await {
         tracing::error!(error = %e, "서버가 멈췄습니다");
@@ -177,7 +183,6 @@ async fn serve(config: Config, lock: &InstanceLock) -> ExitCode {
 
 pub async fn start(config: &Config, lock: &InstanceLock, adapters: Adapters) -> Result<Started, StartFailure> {
     let Adapters { kiwoom, stream: stream_source, kiwoom_spacing, dart_spacing } = adapters;
-    let token_file = TokenFile::new(config.token_path.clone(), lock).with_environment(config.kiwoom_environment);
     let key_file = KeyFile::new(config.kiwoom_key_path.clone(), lock).with_environment(config.kiwoom_environment);
     let account_file = config.account_state_path.clone().map(|path| AccountStateFile::new(path, lock));
     tracing::info!(environment = config.kiwoom_environment.as_str(), host = %crate::system_routes::kiwoom_target(&config.kiwoom_base_url).host.as_deref().unwrap_or("loopback"), "키움 투자구분으로 켭니다");
@@ -228,20 +233,23 @@ pub async fn start(config: &Config, lock: &InstanceLock, adapters: Adapters) -> 
         }
     };
     let env_key = config.kiwoom_credentials.is_some();
-    let startup = startup_key(config.kiwoom_credentials.clone(), &key_file, config.kiwoom_environment);
-    let auth = match &startup.credentials {
-        Some(credentials) => KiwoomAuth::new(credentials.app_key.clone(), credentials.app_secret.clone(), Some(token_file)),
-        None => KiwoomAuth::keyless(Some(token_file)),
+    let startup = startup_keys(config.kiwoom_credentials.clone(), &key_file, config.kiwoom_environment);
+    let token_file_for = |id: &crate::kiwoom::key_file::KeyId| TokenFile::held(path_for_key(&config.token_path, id, env_key), lock.held()).with_environment(config.kiwoom_environment);
+    let market_key = startup.market.as_ref().and_then(|market| startup.keys.iter().find(|key| key.id == *market));
+    let auth = match market_key {
+        Some(key) => KiwoomAuth::new(key.credentials.app_key.clone(), key.credentials.app_secret.clone(), Some(token_file_for(&key.id))),
+        None => KiwoomAuth::keyless(Some(TokenFile::new(config.token_path.clone(), lock).with_environment(config.kiwoom_environment))),
     };
+    let lane_transport = kiwoom.clone();
     let rest = match kiwoom_spacing {
         None => KiwoomRest::for_environment(kiwoom, auth, clock.clone(), config.kiwoom_environment),
         Some(spacing) => KiwoomRest::build(kiwoom, auth, clock.clone(), spacing, config.kiwoom_environment),
     };
     rest.set_access(crate::kiwoom::rest::Access::Closed);
     let symbols = Arc::new(SymbolDirectory::default());
-    let stream = match stream_source {
-        StreamSource::Connect => KiwoomStream::spawn(config.kiwoom_ws_url.clone(), rest.clone(), clock.clone()),
-        StreamSource::Detached(events) => (KiwoomStream::detached().0, events),
+    let (stream, lane_ws_url) = match stream_source {
+        StreamSource::Connect => (KiwoomStream::spawn(config.kiwoom_ws_url.clone(), rest.clone(), clock.clone()), Some(config.kiwoom_ws_url.clone())),
+        StreamSource::Detached(events) => ((KiwoomStream::detached().0, events), None),
     };
     let public_ip = match crate::public_ip::ReqwestPublicIp::new(config.public_ip_url.clone()) {
         Ok(t) => t,
@@ -272,7 +280,9 @@ pub async fn start(config: &Config, lock: &InstanceLock, adapters: Adapters) -> 
         };
         collector = Some(board.with_webhook(webhook));
     }
-    let system = SystemState::new(key_file, env_key, startup.file_problem, crate::api::SystemSettings::from_config(config)).with_public_ip(Arc::new(public_ip)).with_account(account).with_collector(collector).with_tailnet_hosts(config.tailnet_hosts.clone());
+    let factory = LaneFactory { transport: lane_transport, clock: clock.clone(), environment: config.kiwoom_environment, spacing: kiwoom_spacing, ws_url: lane_ws_url, held: lock.held(), token_base: config.token_path.clone(), registered_ip_base: config.kiwoom_key_path.with_file_name(crate::config::REGISTERED_IP_FILE_NAME), env_key_present: env_key };
+    let key_setup = KeySetup { store: key_file, keys: startup.keys, market: startup.market, factory };
+    let system = SystemState::new(key_setup, startup.file_problem, crate::api::SystemSettings::from_config(config)).with_public_ip(Arc::new(public_ip)).with_account(account).with_collector(collector).with_tailnet_hosts(config.tailnet_hosts.clone());
     let state = application_with_system(ApplicationInputs { rest: rest.clone(), clock: clock.clone(), symbols: symbols.clone(), db, screener_store, stream, static_dir: config.static_dir.clone(), screener_update_on_connect: config.screener_update_on_start }, system);
     state.system.bound(bound_addr);
     tokio::spawn(daily_maintenance(state.clone()));
@@ -339,7 +349,7 @@ async fn daily_reset(clock: Clock, rest: KiwoomRest, symbols: Arc<SymbolDirector
 }
 
 /// 매일 20:05: 그날 20:05 전에 받은 토큰이면 다시 받는다. 실패하면 07:45까지 10분마다.
-async fn daily_token(clock: Clock, rest: KiwoomRest, link: Link) {
+pub(crate) async fn daily_token(clock: Clock, rest: KiwoomRest, link: Link) {
     loop {
         clock.sleep_until(next_daily(clock.now(), DAILY_REISSUE_AT)).await;
         if link.settled().await != LinkState::Connected || rest.halted().is_some() || !rest.auth().due_daily_reissue(clock.now()) {

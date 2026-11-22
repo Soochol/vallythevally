@@ -34,6 +34,10 @@ impl Env {
         Env { lock, dist, key_path, _tmp: tmp }
     }
 
+    fn list_path(&self) -> PathBuf {
+        self.key_path.with_file_name("kiwoom-keys.json")
+    }
+
     fn spawn(&self, fake: &ScriptedTransport, extra: &[(&str, &str)]) -> Server {
         let key_path = self.key_path.to_str().unwrap();
         let mut pairs = vec![OFF, NO_KEY, ("VALLY_KIWOOM_KEY_PATH", key_path)];
@@ -180,8 +184,8 @@ async fn the_key_file_is_private_and_the_next_start_reads_it_without_calling_kiw
     let client = Client::of(&server).await;
     assert_eq!(client.put_key(APP_KEY, APP_SECRET).await.0, 200);
     client.until_state("connected").await;
-    assert_eq!(mode(&env.key_path), 0o600);
-    assert_eq!(mode(env.key_path.parent().unwrap()), 0o700);
+    assert_eq!(mode(&env.list_path()), 0o600);
+    assert_eq!(mode(env.list_path().parent().unwrap()), 0o700);
     server.stop().await;
     let sent = fake.requests();
 
@@ -202,7 +206,7 @@ async fn a_key_file_others_can_read_is_not_read_and_the_status_names_the_cause()
     client.until_state("connected").await;
     server.stop().await;
     let sent = fake.requests();
-    std::fs::set_permissions(&env.key_path, std::fs::Permissions::from_mode(0o644)).unwrap();
+    std::fs::set_permissions(&env.list_path(), std::fs::Permissions::from_mode(0o644)).unwrap();
 
     let restarted = env.spawn(&fake, &[]);
     let client = Client::of(&restarted).await;
@@ -213,12 +217,12 @@ async fn a_key_file_others_can_read_is_not_read_and_the_status_names_the_cause()
     assert_eq!(after_connect["problem"].as_str(), Some("keyFileUnusable"));
     assert_eq!(fake.requests(), sent, "{:?}", fake.api_ids());
     assert_no_secret("상태", &status.to_string());
-    assert_eq!(mode(&env.key_path), 0o644, "읽지 않은 파일은 건드리지 않는다");
+    assert_eq!(mode(&env.list_path()), 0o644, "읽지 않은 파일은 건드리지 않는다");
 
     assert_eq!(client.put_key(OTHER_APP_KEY, OTHER_APP_SECRET).await.0, 200, "새 키를 저장하면 파일이 새로 쓰여 문제가 풀린다");
     let (_, fixed) = client.get("/api/system/kiwoom").await;
     assert_eq!((fixed["state"].as_str(), fixed["problem"].as_str()), (Some("connecting"), None), "{fixed}");
-    assert_eq!(mode(&env.key_path), 0o600);
+    assert_eq!(mode(&env.list_path()), 0o600);
 }
 
 #[tokio::test]
@@ -236,7 +240,7 @@ async fn an_environment_key_wins_and_the_screen_cannot_change_it() {
         assert_eq!(body["error"]["code"], "conflict");
         assert_eq!(body["error"]["message"], ".env에서 읽은 키라 화면에서 바꿀 수 없습니다");
     }
-    assert!(!env.key_path.exists(), "환경 키가 있으면 키 파일이 생기지 않는다");
+    assert!(!env.list_path().exists(), "환경 키가 있으면 키 파일이 생기지 않는다");
     assert_eq!(fake.requests(), 0);
 }
 
@@ -257,15 +261,15 @@ async fn mock_server_refuses_key_save_and_delete() {
         assert!(body["error"]["message"].as_str().unwrap().contains("VALLY_KIWOOM_MOCK_APP_KEY"), "{body}");
         assert_no_secret("거절 응답", &body.to_string());
     }
-    assert!(!env.key_path.exists(), "모의 서버는 키 파일을 쓰지 않는다");
-    assert!(!env.key_path.parent().unwrap().exists());
+    assert!(!env.list_path().exists(), "모의 서버는 키 파일을 쓰지 않는다");
+    assert!(!env.list_path().parent().unwrap().exists());
     assert_eq!(fake.requests(), 0);
 
     let keyless = Env::new();
     let server = keyless.spawn(&fake, &[("VALLY_KIWOOM_ENV", "mock"), ("VALLY_KIWOOM_MOCK_APP_KEY", "")]);
     let client = Client::of(&server).await;
     assert_eq!(client.put_key(APP_KEY, APP_SECRET).await.0, 409, "모의 키가 없어도 화면에서는 저장하지 못한다");
-    assert!(!keyless.key_path.exists());
+    assert!(!keyless.list_path().exists());
     assert_eq!(client.get("/api/system/kiwoom").await.1["state"], "noKey");
 }
 
@@ -277,7 +281,7 @@ async fn mock_server_connects_with_the_mock_key_only() {
     assert_eq!(client.put_key(APP_KEY, APP_SECRET).await.0, 200);
     assert_eq!(client.until_state("connected").await["keySource"], "file");
     real.stop().await;
-    let key_file_before = std::fs::read(&env.key_path).unwrap();
+    let key_file_before = std::fs::read(&env.list_path()).unwrap();
     let issued_before = fake.seen.token_bodies.lock().unwrap().len();
 
     let mock_env = Env { key_path: env.key_path.clone(), ..Env::new() };
@@ -288,7 +292,7 @@ async fn mock_server_connects_with_the_mock_key_only() {
     let bodies = fake.seen.token_bodies.lock().unwrap().clone();
     assert_eq!(bodies.len(), issued_before + 1, "{bodies:?}");
     assert_eq!((bodies[issued_before]["appkey"].as_str(), bodies[issued_before]["secretkey"].as_str()), (Some(MOCK_APP_KEY), Some(MOCK_APP_SECRET)), "발급 요청은 모의 키만 담는다");
-    assert_eq!(std::fs::read(&env.key_path).unwrap(), key_file_before, "모의 서버는 실전 키 파일을 읽지도 쓰지도 않는다");
+    assert_eq!(std::fs::read(&env.list_path()).unwrap(), key_file_before, "모의 서버는 실전 키 파일을 읽지도 쓰지도 않는다");
     assert_no_secret("연결 응답", &connected.to_string());
     let logs = server.stop().await;
     assert!(!logs.contains(MOCK_APP_KEY) && !logs.contains(MOCK_APP_SECRET), "{logs}");
@@ -379,7 +383,7 @@ async fn deleting_and_saving_again_waits_out_the_issue_interval_and_then_connect
 
     let (status, deleted) = client.delete_key().await;
     assert_eq!((status, deleted["state"].as_str(), deleted["keySource"].as_str()), (200, Some("noKey"), Some("none")), "{deleted}");
-    assert!(!env.key_path.exists());
+    assert!(!env.list_path().exists());
     assert_eq!(client.delete_key().await.0, 200, "이미 지운 키를 또 지워도 같은 결과다");
 
     assert_eq!(client.put_key(APP_KEY, APP_SECRET).await.0, 200);
@@ -487,7 +491,7 @@ async fn a_write_from_another_site_host_or_content_type_is_refused_and_leaves_th
     assert_eq!(client.put_key(APP_KEY, APP_SECRET).await.0, 200);
     client.until_state("connected").await;
     let sent = fake.requests();
-    let saved = std::fs::read(&env.key_path).unwrap();
+    let saved = std::fs::read(&env.list_path()).unwrap();
 
     let evil_host = client.put_request(OTHER_APP_KEY, OTHER_APP_SECRET).header("host", format!("evil.example:{}", client.port));
     let evil_origin = client.put_request(OTHER_APP_KEY, OTHER_APP_SECRET).header("origin", "https://evil.example");
@@ -502,7 +506,7 @@ async fn a_write_from_another_site_host_or_content_type_is_refused_and_leaves_th
         assert_eq!(status, 400, "{name}: {body}");
         assert_eq!(body["error"]["code"], "bad_request", "{name}: {body}");
         assert_no_secret(name, &body.to_string());
-        assert_eq!(std::fs::read(&env.key_path).unwrap(), saved, "{name}");
+        assert_eq!(std::fs::read(&env.list_path()).unwrap(), saved, "{name}");
     }
     let (_, status) = client.get("/api/system/kiwoom").await;
     assert_eq!((status["state"].as_str(), status["appKeyTail"].as_str()), (Some("connected"), Some("7Q2D")));
@@ -525,7 +529,7 @@ async fn settings_report_the_values_but_never_the_opendart_key() {
     assert_eq!(status, 200);
     assert!(!settings.to_string().contains(DART_KEY), "{settings}");
     assert_eq!(settings["opendartKeyPresent"], true);
-    assert_eq!(settings["keyPath"].as_str(), env.key_path.to_str());
+    assert_eq!(settings["keyPath"].as_str(), env.list_path().to_str());
     assert_eq!(settings["kiwoomTarget"], json!({"kind": "loopback", "host": null}));
     assert_eq!(settings["serverVersion"], env!("CARGO_PKG_VERSION"));
     for field in ["bind", "logFilter", "staticDir", "dbPath", "screenerDbPath", "financialDbPath", "tokenPath", "lockPath"] {
@@ -726,7 +730,7 @@ async fn the_registered_ip_is_private_on_disk_and_survives_a_restart() {
     let (status, saved) = client.put_registered_ip("203.0.113.7").await;
     assert_eq!(status, 200, "{saved}");
     assert_eq!(saved["registeredIp"]["ip"].as_str(), Some("203.0.113.7"));
-    let ip_path = env.key_path.with_file_name("kiwoom-ip.json");
+    let ip_path = env.list_path().with_file_name("kiwoom-ip.json");
     assert_eq!(mode(&ip_path), 0o600);
     assert_eq!(mode(ip_path.parent().unwrap()), 0o700);
     let at = saved["registeredIp"]["at"].as_i64().unwrap();
@@ -759,7 +763,7 @@ async fn ip_routes_go_through_the_same_write_checks() {
         }
     }
     assert!(client.get("/api/system/kiwoom").await.1["registeredIp"].is_null(), "거절된 요청은 아무것도 쓰지 않는다");
-    assert!(!env.key_path.with_file_name("kiwoom-ip.json").exists());
+    assert!(!env.list_path().with_file_name("kiwoom-ip.json").exists());
 }
 
 const TAILNET_NAME: &str = "server.example-tailnet.ts.net";
@@ -779,7 +783,7 @@ async fn without_a_tailnet_name_the_tailnet_host_is_refused_like_any_foreign_hos
         let (status, body) = answer(client.http.get(format!("{}/api/trading/account-number", client.base)).header("host", host).send().await.unwrap()).await;
         assert!(refused_by_the_guard(status, &body), "{host}: {status} {body}");
     }
-    assert!(!env.key_path.exists(), "거절된 쓰기는 키 파일을 만들지 않는다");
+    assert!(!env.list_path().exists(), "거절된 쓰기는 키 파일을 만들지 않는다");
 }
 
 #[tokio::test]
@@ -802,7 +806,7 @@ async fn a_configured_tailnet_name_is_accepted_as_host_with_a_matching_https_ori
         let read = answer(client.http.get(format!("{}/api/trading/account-number", client.base)).header("host", host).send().await.unwrap()).await;
         assert!(refused_by_the_guard(read.0, &read.1), "{host}: {} {}", read.0, read.1);
     }
-    assert!(!env.key_path.exists(), "거절된 쓰기는 키 파일을 만들지 않는다");
+    assert!(!env.list_path().exists(), "거절된 쓰기는 키 파일을 만들지 않는다");
 
     for origin in [None, Some(format!("https://{TAILNET_NAME}")), Some(format!("HTTPS://{}", TAILNET_NAME.to_uppercase()))] {
         let mut request = client.put_request(APP_KEY, APP_SECRET).header("host", TAILNET_NAME);

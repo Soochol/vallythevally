@@ -23,7 +23,7 @@ VALLY_KIWOOM_MOCK_APP_SECRET=<모의 시크릿>
 - 실전 키 변수(`VALLY_KIWOOM_APP_KEY`, `VALLY_KIWOOM_APP_SECRET`)는 넣지 않는다. 설정 파일이든 프로세스 환경이든 있으면 서버가 뜨지 않는다.
 - 키움 주소 변수(`VALLY_KIWOOM_BASE_URL`, `VALLY_KIWOOM_WS_URL`)는 비워 둔다. 비우면 모의 공식 주소(`https://mockapi.kiwoom.com`, `wss://mockapi.kiwoom.com:10000/api/dostk/websocket`)를 쓴다. 적으려면 `mockapi.kiwoom.com`이거나 루프백이어야 한다.
 - 프로세스 환경의 값이 설정 파일 값을 덮는다. 셸에 실전 `VALLY_*` 변수가 남아 있으면 먼저 지운다.
-- 모의 키는 환경에서만 받는다. 화면의 키 저장·삭제는 거절하고, 키 파일(`kiwoom-key.json`)은 읽지 않는다.
+- 모의 키는 환경에서만 받는다. 화면의 키 저장·삭제는 거절하고, 키 목록 파일(`kiwoom-keys.json`)과 옛 `kiwoom-key.json`은 읽지 않는다.
 - `VALLY_ACCOUNT_SERVER_URL`은 모의와 함께 쓸 수 없다.
 
 ## 켜기

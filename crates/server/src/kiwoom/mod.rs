@@ -5,6 +5,7 @@ pub mod auth;
 pub mod error;
 pub mod ip_file;
 pub mod key_file;
+pub mod keys;
 pub mod link;
 pub mod private_file;
 pub mod rest;

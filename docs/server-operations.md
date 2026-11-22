@@ -141,10 +141,10 @@ tailscale serve status
 | `~/vally-data/server/financials.db` | 재무 DB. 수십 GB | 미리 복사한다 |
 | `~/vally-data/server/market-samples/` | 시장 표본 | 있으면 |
 | `~/.config/vally/server.env` | 설정과 비밀값 | 권한 600 |
-| `~/.local/state/vallythevally/kiwoom-key.json` | 실전 키 | 권한 600 |
+| `~/.local/state/vallythevally/kiwoom-keys.json` | 실전 키 목록(최대 5개). 옛 `kiwoom-key.json`은 처음 켤 때 이 파일로 옮겨지고 지워진다 | 권한 600 |
 | `~/.local/state/vallythevally/kiwoom-orders.json` | 주문 사용 스위치 | |
-| `~/.local/state/vallythevally/token.json` | 접근 토큰 | |
-| `~/.local/state/vallythevally/kiwoom-ip.json` | 등록 IP 확인 상태 | 있으면 |
+| `~/.local/state/vallythevally/token.json`, `token.<키 ID>.json` | 접근 토큰(키마다 하나) | |
+| `~/.local/state/vallythevally/kiwoom-ip.json`, `kiwoom-ip.<키 ID>.json` | 등록 IP 확인 상태(키마다 하나) | 있으면 |
 
 옮기지 않는 것: 모의 서버의 `mock/`과 `collector/`(개발 PC에 남는다).
 
@@ -213,7 +213,7 @@ rsync -a --delete --info=progress2 --exclude='/mock/' --exclude='/collector/' ~/
 
 ```sh
 rsync -a ~/.config/vally/server.env <서버 PC>:.config/vally/server.env
-rsync -a --ignore-missing-args ~/.local/state/vallythevally/kiwoom-key.json ~/.local/state/vallythevally/kiwoom-orders.json ~/.local/state/vallythevally/token.json ~/.local/state/vallythevally/kiwoom-ip.json <서버 PC>:.local/state/vallythevally/
+rsync -a --ignore-missing-args ~/.local/state/vallythevally/kiwoom-key.json ~/.local/state/vallythevally/kiwoom-keys.json ~/.local/state/vallythevally/kiwoom-orders.json ~/.local/state/vallythevally/token*.json ~/.local/state/vallythevally/kiwoom-ip*.json <서버 PC>:.local/state/vallythevally/
 ssh -o BatchMode=yes <서버 PC> 'stat -c "%a %n" ~/.config/vally/server.env ~/.local/state/vallythevally/*.json'
 ```
 
@@ -371,8 +371,8 @@ ssh -o BatchMode=yes <서버 PC> true
 
    ```sh
    cd ~/.local/state/vallythevally
-   for name in kiwoom-key.json kiwoom-orders.json token.json kiwoom-ip.json; do [ -e "$name" ] && mv "$name" "$name.before-rollback"; done
-   rsync -a --ignore-missing-args <서버 PC>:.local/state/vallythevally/kiwoom-key.json <서버 PC>:.local/state/vallythevally/kiwoom-orders.json <서버 PC>:.local/state/vallythevally/token.json <서버 PC>:.local/state/vallythevally/kiwoom-ip.json ~/.local/state/vallythevally/
+   for name in kiwoom-key.json kiwoom-keys.json kiwoom-orders.json token*.json kiwoom-ip*.json; do [ -e "$name" ] && mv "$name" "$name.before-rollback"; done
+   rsync -a --ignore-missing-args <서버 PC>:.local/state/vallythevally/kiwoom-key.json <서버 PC>:.local/state/vallythevally/kiwoom-keys.json <서버 PC>:.local/state/vallythevally/kiwoom-orders.json '<서버 PC>:.local/state/vallythevally/token*.json' '<서버 PC>:.local/state/vallythevally/kiwoom-ip*.json' ~/.local/state/vallythevally/
    stat -c "%a %n" ~/.local/state/vallythevally/*.json
    ```
 

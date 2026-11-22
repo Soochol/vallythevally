@@ -85,12 +85,16 @@ enum Decision {
 
 type Flight = Shared<BoxFuture<'static, LinkState>>;
 
-struct Inner {
-    rest: KiwoomRest,
+struct MarketData {
     symbols: Arc<SymbolDirectory>,
     screener: Arc<Screener>,
-    clock: Clock,
     update_on_start: bool,
+}
+
+struct Inner {
+    rest: KiwoomRest,
+    market: Option<MarketData>,
+    clock: Clock,
     state: watch::Sender<LinkState>,
     flight: Mutex<Option<(bool, Flight)>>,
     released_8050: Mutex<Option<(Halt, Option<TokenGen>)>>,
@@ -102,8 +106,16 @@ pub struct Link(Arc<Inner>);
 
 impl Link {
     pub fn new(rest: KiwoomRest, symbols: Arc<SymbolDirectory>, screener: Arc<Screener>, clock: Clock, update_on_start: bool) -> Link {
+        Link::with_market(rest, Some(MarketData { symbols, screener, update_on_start }), clock)
+    }
+
+    pub fn account_only(rest: KiwoomRest, clock: Clock) -> Link {
+        Link::with_market(rest, None, clock)
+    }
+
+    fn with_market(rest: KiwoomRest, market: Option<MarketData>, clock: Clock) -> Link {
         rest.set_access(Access::Closed);
-        let link = Link(Arc::new(Inner { rest, symbols, screener, clock, update_on_start, state: watch::channel(LinkState::Disconnected).0, flight: Mutex::new(None), released_8050: Mutex::new(None), epoch: watch::channel(0).0 }));
+        let link = Link(Arc::new(Inner { rest, market, clock, state: watch::channel(LinkState::Disconnected).0, flight: Mutex::new(None), released_8050: Mutex::new(None), epoch: watch::channel(0).0 }));
         link.0.state.send_replace(link.resting_state());
         link.watch_halts();
         link
@@ -291,9 +303,11 @@ impl Link {
                 return self.fail(&error, epoch);
             }
         }
-        self.step(epoch, LinkState::Connecting(ConnectStep::Symbols))?;
-        if let Err(error) = self.load_symbols(epoch).await {
-            return self.fail(&error, epoch);
+        if self.0.market.is_some() {
+            self.step(epoch, LinkState::Connecting(ConnectStep::Symbols))?;
+            if let Err(error) = self.load_symbols(epoch).await {
+                return self.fail(&error, epoch);
+            }
         }
         self.step(epoch, LinkState::Connecting(ConnectStep::Realtime))?;
         let mut outcome = LinkState::Connected;
@@ -379,7 +393,8 @@ impl Link {
 
     async fn load_symbols(&self, epoch: u64) -> Result<(), KiwoomError> {
         loop {
-            let error = match self.0.symbols.refresh(&self.0.rest, Priority::Screen).await {
+            let Some(market) = &self.0.market else { return Ok(()) };
+            let error = match market.symbols.refresh(&self.0.rest, Priority::Screen).await {
                 Ok(()) => return Ok(()),
                 Err(error) => error,
             };
@@ -404,8 +419,9 @@ impl Link {
     }
 
     fn start_screener_update(&self) {
-        let screener = self.0.screener.clone();
-        let update_on_start = self.0.update_on_start;
+        let Some(market) = &self.0.market else { return };
+        let screener = market.screener.clone();
+        let update_on_start = market.update_on_start;
         tokio::spawn(async move {
             screener.fill_lost_listing().await;
             if update_on_start {
@@ -475,6 +491,15 @@ impl Link {
             self.0.rest.set_access(Access::Closed);
             auth.replace_credentials(app_key, app_secret);
             auth.release_key_rejection();
+            self.set(self.resting_state());
+        });
+        self.state()
+    }
+
+    pub fn rebind(&self, identity: Option<(Secret<String>, Secret<String>, Option<super::token_file::TokenFile>)>) -> LinkState {
+        self.abandon_connect(|| {
+            self.0.rest.set_access(Access::Closed);
+            self.0.rest.auth().rebind(identity);
             self.set(self.resting_state());
         });
         self.state()

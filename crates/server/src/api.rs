@@ -580,6 +580,64 @@ impl std::fmt::Debug for KiwoomKeyInput {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub enum Broker {
+    Kiwoom,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct KiwoomKey {
+    pub key_id: String,
+    pub alias: String,
+    pub broker: Broker,
+    pub source: KeySource,
+    pub app_key_tail: Option<String>,
+    pub market: bool,
+    pub link: KiwoomLinkStatus,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct KiwoomKeyList {
+    pub limit: u32,
+    pub keys: Vec<KiwoomKey>,
+    pub key_file_problem: Option<String>,
+}
+
+#[derive(Clone, PartialEq, Eq, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct KiwoomKeyAdd {
+    pub alias: String,
+    pub app_key: String,
+    pub app_secret: String,
+}
+
+impl std::fmt::Debug for KiwoomKeyAdd {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("KiwoomKeyAdd([가림])")
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct KiwoomKeyAlias {
+    pub alias: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct KiwoomMarketKeyInput {
+    pub key_id: String,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export)]
