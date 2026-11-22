@@ -5,4 +5,4 @@ import type { SkippedDay } from "./SkippedDay";
 import type { SymbolCode } from "./SymbolCode";
 import type { UndatedRow } from "./UndatedRow";
 
-export type DayHistory<T> = { symbol: SymbolCode, from: KstDate, to: KstDate, coverage: RangeCoverage, days: Array<T>, skippedDays: Array<SkippedDay>, undatedRows: Array<UndatedRow>, };
+export type DayHistory<T> = { symbol: SymbolCode, from: KstDate, to: KstDate, coverage: RangeCoverage, days: Array<T>, skippedDays: Array<SkippedDay>, undatedRows: Array<UndatedRow>, estimatedDays?: Array<KstDate>, };

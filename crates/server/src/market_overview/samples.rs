@@ -12,7 +12,13 @@ use crate::api::Market;
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum SampleValue {
     Investors { individual_eok: i64, foreign_eok: i64, institution_eok: i64 },
-    Program { arbitrage_million_won: i64, non_arbitrage_million_won: i64, total_million_won: i64 },
+    Program {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        arbitrage_million_won: Option<i64>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        non_arbitrage_million_won: Option<i64>,
+        total_million_won: i64,
+    },
 }
 
 impl SampleValue {
@@ -160,4 +166,25 @@ async fn append(dir: &Path, day: KstDate, sample: &Sample) -> std::io::Result<()
     let mut file = tokio::fs::OpenOptions::new().create(true).append(true).open(dir.join(file_name(day))).await?;
     file.write_all(line.as_bytes()).await?;
     file.flush().await
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use super::*;
+
+    #[test]
+    fn a_program_line_keeps_the_split_columns_when_the_source_has_them_and_drops_them_when_it_has_not() {
+        let line = |value: SampleValue| serde_json::to_value(Sample { at: 60, received_at: 61, market: Market::Kospi, value }).unwrap();
+        assert_eq!(
+            line(SampleValue::Program { arbitrage_million_won: Some(25_634), non_arbitrage_million_won: Some(-528_475), total_million_won: -502_841 })["value"],
+            json!({"kind": "program", "arbitrage_million_won": 25_634, "non_arbitrage_million_won": -528_475, "total_million_won": -502_841})
+        );
+        assert_eq!(line(SampleValue::Program { arbitrage_million_won: None, non_arbitrage_million_won: None, total_million_won: 7 })["value"], json!({"kind": "program", "total_million_won": 7}));
+        let old: Sample = serde_json::from_str(r#"{"at":60,"received_at":61,"market":"kospi","value":{"kind":"program","arbitrage_million_won":1,"non_arbitrage_million_won":2,"total_million_won":3}}"#).unwrap();
+        assert_eq!(old.value, SampleValue::Program { arbitrage_million_won: Some(1), non_arbitrage_million_won: Some(2), total_million_won: 3 });
+        let split_less: Sample = serde_json::from_str(r#"{"at":60,"received_at":61,"market":"kospi","value":{"kind":"program","total_million_won":3}}"#).unwrap();
+        assert_eq!(split_less.value, SampleValue::Program { arbitrage_million_won: None, non_arbitrage_million_won: None, total_million_won: 3 });
+    }
 }

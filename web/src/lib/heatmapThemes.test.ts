@@ -3,6 +3,7 @@ import type { HeatmapTheme } from "../api/generated/HeatmapTheme";
 import type { Watchlist } from "../api/generated/Watchlist";
 import {
   addSymbolToTheme,
+  appendThemeCopy,
   createTheme,
   deleteTheme,
   importNotices,
@@ -189,5 +190,29 @@ describe("importWatchlistGroups", () => {
     const before = structuredClone(source);
     importWatchlistGroups([], source, ids());
     expect(source).toEqual(before);
+  });
+});
+
+describe("appendThemeCopy", () => {
+  it("같은 이름·종목으로 맨 뒤에 붙이고 지수는 뺀다", () => {
+    const { themes, result } = appendThemeCopy([theme("a", "기존")], "k", "조선", ["009540", "IDX:001", "009540", "010140"]);
+    expect(themes).toEqual([theme("a", "기존"), theme("k", "조선", ["009540", "010140"])]);
+    expect(result).toEqual({ outcome: "added", kept: 2, total: 2 });
+  });
+  it("종목이 60개를 넘으면 앞의 60개만 넣고 전체 수를 알린다", () => {
+    const { themes, result } = appendThemeCopy([], "k", "큰 테마", codes(75));
+    expect(themes[0]?.symbols).toEqual(codes(60));
+    expect(result).toEqual({ outcome: "added", kept: 60, total: 75 });
+  });
+  it("같은 이름이 있으면 바꾸지 않는다", () => {
+    const before = [theme("a", "조선", ["005930"])];
+    const { themes, result } = appendThemeCopy(before, "k", "조선", ["009540"]);
+    expect(themes).toEqual(before);
+    expect(result).toEqual({ outcome: "sameName" });
+  });
+  it("테마가 가득 찼거나 이름을 쓸 수 없으면 바꾸지 않는다", () => {
+    const full = Array.from({ length: MAX_THEMES }, (_, i) => theme(`t${i}`, `테마${i}`));
+    expect(appendThemeCopy(full, "k", "조선", []).result).toEqual({ outcome: "overThemeLimit" });
+    expect(appendThemeCopy([], "k", "가".repeat(MAX_THEME_NAME_CHARS + 1), []).result).toEqual({ outcome: "invalidName" });
   });
 });

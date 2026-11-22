@@ -520,7 +520,7 @@ fn parse_tape_cursor(text: &str) -> Option<(String, usize)> {
     (hour.len() == 6 && hour.bytes().all(|b| b.is_ascii_digit())).then(|| seen.parse().ok().map(|seen| (hour.to_owned(), seen)))?
 }
 
-fn kis_priority(priority: Priority) -> KisPriority {
+pub(super) fn kis_priority(priority: Priority) -> KisPriority {
     match priority {
         Priority::Order => KisPriority::Order,
         Priority::Screen => KisPriority::Screen,
@@ -592,12 +592,12 @@ fn hms_text(secs: u32) -> String {
     format!("{:02}:{:02}:{:02}", secs / 3600, secs % 3600 / 60, secs % 60)
 }
 
-fn clock_of(text: &str) -> Option<TimeOfDay> {
+pub(super) fn clock_of(text: &str) -> Option<TimeOfDay> {
     let text = text.trim();
     (text.len() == 6 && text.bytes().all(|b| b.is_ascii_digit())).then(|| TimeOfDay::hms(text[0..2].parse().ok()?, text[2..4].parse().ok()?, text[4..6].parse().ok()?))?
 }
 
-fn date_of(text: &str) -> Option<KstDate> {
+pub(super) fn date_of(text: &str) -> Option<KstDate> {
     KstDate::parse_yyyymmdd(text.trim())
 }
 
@@ -617,7 +617,7 @@ pub fn whole(text: &str) -> Option<u64> {
     centi(text).map(|c| (c + 50) / 100)
 }
 
-fn signed_whole(text: &str) -> Option<i64> {
+pub(super) fn signed_whole(text: &str) -> Option<i64> {
     let text = text.trim();
     match text.strip_prefix('-') {
         Some(rest) => whole(rest).and_then(|n| i64::try_from(n).ok()).map(|n| -n),
@@ -625,12 +625,12 @@ fn signed_whole(text: &str) -> Option<i64> {
     }
 }
 
-fn float(text: &str) -> Option<f64> {
+pub(super) fn float(text: &str) -> Option<f64> {
     let text = text.trim();
     (!text.is_empty()).then(|| text.parse::<f64>().ok()).flatten().filter(|v| v.is_finite())
 }
 
-fn parse_body<T: for<'de> Deserialize<'de>>(api: KisApiId, page: &KisPage) -> Result<T, SourceError> {
+pub(super) fn parse_body<T: for<'de> Deserialize<'de>>(api: KisApiId, page: &KisPage) -> Result<T, SourceError> {
     serde_json::from_str(&page.body).map_err(|e| {
         tracing::error!(tr_id = api.tr_id(), error = %e, "한투 응답을 읽지 못했습니다");
         SourceError::Malformed(format!("한투 응답을 읽지 못했습니다({})", api.tr_id()))
@@ -925,7 +925,7 @@ fn halt_error(halt: &Halt) -> SourceError {
     }
 }
 
-fn failure_of(error: &KisError) -> SourceError {
+pub(super) fn failure_of(error: &KisError) -> SourceError {
     let unavailable = |reason| SourceFailure { code: ApiErrorCode::KiwoomUnavailable, reason, message: error.to_string(), retry_at: None, manual_action_required: false };
     let failure = match error {
         KisError::Failed(failure) => unavailable(match failure.category() {

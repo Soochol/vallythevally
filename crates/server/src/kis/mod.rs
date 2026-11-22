@@ -4,6 +4,7 @@ pub mod error;
 pub mod market_rest;
 pub mod master;
 pub mod minute_bars;
+pub mod overview;
 pub mod rankings;
 pub mod rest;
 pub mod stream;
