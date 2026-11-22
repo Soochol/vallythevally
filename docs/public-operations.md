@@ -2,7 +2,7 @@
 
 `vally-server`는 운영자 리스너와 따로 **공개 리스너**를 같은 프로세스에 열 수 있다. 공개 리스너는 Tailscale Funnel로 인터넷에 내놓는다. 구조와 결정은 [`docs/plans/browser-keys-funnel.md`](plans/browser-keys-funnel.md)에 있다. 이 문서는 켜고 조정하고 되돌리는 절차를 적는다.
 
-공개 리스너가 주는 것은 로그인한 사용자에게 보이는 공용 자료(종목 목록·검색, 스크리너, 재무 읽기, ETF, 순위, 시장 개요)와 로그인·세션 경로다. 운영자 라우트(`/api/ws`, `/api/system/*`, `/api/trading/*`, `/api/account/*`, 차트 봉, 시세, 스크리너·재무 갱신 `POST` 같은 것)는 공개 리스너에 없고 404다. 수집 현황(`/api/collector/*`)은 로그인한 세션의 계정이 `VALLY_COLLECTOR_ADMINS`에 있을 때만 열린다.
+공개 리스너가 주는 것은 로그인한 사용자에게 보이는 공용 자료(종목 목록·검색, 스크리너, 재무 읽기, ETF, 순위, 시장 개요)와 로그인·세션 경로다. 운영자 라우트(`/api/ws`, `/api/system/*`, `/api/trading/*`, `/api/account/*`, 차트 봉, 시세, 스크리너·재무 갱신 `POST` 같은 것)는 공개 리스너에 없다. 로그인한 요청에는 404이고, 로그인하지 않은 `/api/*` 요청에는 401이다. 수집 현황(`/api/collector/*`)은 로그인한 세션의 계정이 `VALLY_COLLECTOR_ADMINS`에 있을 때만 열린다.
 
 ## 켜기와 끄기
 
@@ -155,7 +155,7 @@ P5 되돌리기: Funnel을 끄고, 공개 설정(`VALLY_PUBLIC_*`)을 지우고,
 
 한도를 바꿀 근거는 두 곳에 있다.
 
-- **운영자 리스너 전용 `GET /api/public-usage`.** 공개 리스너에는 이 경로가 없다(404). 시작 뒤 누적값을 낸다.
+- **운영자 리스너 전용 `GET /api/public-usage`.** 공개 리스너에서는 세션이 없으면 401, 세션이 있으면 404다. 시작 뒤 누적값을 낸다.
   - `bundles`: 묶음별 계수. 묶음은 `rankings`, `market_overview`, `screener_run`, `board`, `flow`, `shared`(그 밖 공용 자료), `user_data`, `login`이다. 값은 `responses`(응답 수), `tooManyRequests`(429 횟수), `unavailable`(503 횟수), `waitTotalMs`·`waitMaxMs`(동시 한도에서 기다린 시간. 바로 거절하는 경로는 0이다), `trCalls`(공개 요청이 낸 TR 수. 순위·시장 개요·스크리너는 요청 앞뒤의 키움 대기열 전송 수 차이로 추정하므로 같은 시간의 운영자 호출이 섞일 수 있다).
   - `cacheHits`: 시장 개요 응답 캐시와 스크리너 상태 캐시의 적중 수.
   - `topAccounts`: 요청 수 상위 계정 10개(`provider:subject`).

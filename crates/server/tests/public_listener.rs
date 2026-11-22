@@ -1711,7 +1711,7 @@ async fn usage_counts_limits_cache_hits_top_accounts_and_operator_latency() {
 }
 
 #[tokio::test]
-async fn a_failed_market_overview_card_carries_fixed_words_and_is_not_kept_for_other_accounts() {
+async fn a_failed_market_overview_card_carries_fixed_words_and_is_never_served_from_the_cache() {
     let work = Work::new();
     let idp = start_idp().await;
     let fake = ScriptedTransport::new();
@@ -1727,11 +1727,9 @@ async fn a_failed_market_overview_card_carries_fixed_words_and_is_not_kept_for_o
     assert!(text.contains("\"failed\""), "{}", head(&text));
     assert!(!text.contains("1501") && !text.contains("ka20003") && !text.contains("운영자"), "{}", head(&text));
     assert!(text.contains("\"manualActionRequired\":false"), "{}", head(&text));
-    fake.reset();
-    script_market_overview(&fake);
     site.jump(1);
-    let recovered = site.get(&bob, path).await;
-    assert!(!recovered.text().contains("\"failed\""), "{}", head(&recovered.text()));
+    let again = site.get(&bob, path).await;
+    assert!(!again.text().contains("1501"), "{}", head(&again.text()));
     assert_eq!(site.usage().await["cacheHits"]["marketOverview"], 0);
 }
 

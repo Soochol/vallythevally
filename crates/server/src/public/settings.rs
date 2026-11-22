@@ -109,7 +109,7 @@ impl PublicOrigin {
             _ => (rest, None),
         };
         if let Some(port) = port
-            && port.parse::<u16>().is_err()
+            && port.parse::<u16>().map_or(true, |port| port == 0)
         {
             return Err(bad("포트를 읽을 수 없습니다"));
         }
@@ -124,7 +124,9 @@ impl PublicOrigin {
             return Err(bad("호스트가 비었습니다"));
         }
         let account_url = account_server::PublicUrl::parse(value).map_err(|e| bad(&e.to_string()))?;
-        Ok(PublicOrigin { origin: account_url.origin().to_owned(), host_port: rest.to_ascii_lowercase() })
+        let origin = account_url.origin().to_owned();
+        let host_port = origin.split_once("://").map_or_else(String::new, |(_, host_port)| host_port.to_ascii_lowercase());
+        Ok(PublicOrigin { origin, host_port })
     }
 
     pub fn matches_host(&self, host: &str) -> bool {
@@ -346,6 +348,7 @@ mod tests {
         }
         assert!(start(&[("VALLY_PUBLIC_ORIGIN", "https://a.ts.net:8443")]).is_ok());
         assert!(start(&[("VALLY_PUBLIC_ORIGIN", "http://127.0.0.1:5000")]).is_ok());
+        assert!(start(&[("VALLY_PUBLIC_ORIGIN", "https://a.ts.net:0")]).is_err(), "포트 0");
         assert!(start(&[("VALLY_PUBLIC_BIND", "0.0.0.0:8443")]).is_err(), "루프백이 아님");
         assert!(start(&[("VALLY_PUBLIC_BIND", "127.0.0.1:8080")]).is_err(), "운영자 주소와 같음");
         for (name, value) in [
@@ -364,6 +367,15 @@ mod tests {
         ] {
             assert!(start(&[(name, value)]).is_err(), "{name}={value}");
         }
+    }
+
+    #[test]
+    fn the_host_to_match_is_the_one_a_browser_sends() {
+        let host = |origin: &str| PublicOrigin::parse(origin).unwrap().host_port;
+        assert_eq!(host("https://A.ts.net:443"), "a.ts.net");
+        assert_eq!(host("https://a.ts.net:08443"), "a.ts.net:8443");
+        assert_eq!(host("https://한글.ts.net"), "xn--bj0bj06e.ts.net");
+        assert_eq!(host("http://127.0.0.1:80"), "127.0.0.1");
     }
 
     #[test]
