@@ -604,11 +604,12 @@ impl Session {
 
     fn take_command(&mut self, command: Command) -> Result<(), Exit> {
         match command {
-            Command::Token { token, generation } => {
+            Command::Token { token, generation, .. } => {
                 if let Tokens::Supplied(slot) = &mut self.tokens {
                     *slot = Some(Credential { token, generation });
                 }
             }
+            Command::Assign { .. } => {}
             Command::Register(registration) => {
                 let chunks = self.registry.add(Chunk::split(&registration));
                 self.queue_ops(OpKind::Register, chunks);

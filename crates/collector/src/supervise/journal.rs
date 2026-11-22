@@ -9,6 +9,7 @@ use crate::calendar::{Evidence, Mismatch};
 use crate::finalize::{IndexCheckResult, JudgedVerdict, TreatedAs};
 use crate::plan::plan_path;
 use crate::protocol::{KeyName, RealType};
+use crate::shared::JobName;
 
 pub const JOURNAL_VERSION: u32 = 1;
 
@@ -34,6 +35,7 @@ pub enum JournalEvent {
     MarketOpenSeen { key: KeyName, deadline: String },
     MarketOpenMissing { deadline: String },
     MarketOpenNotChecked { reason: String },
+    SharedJobMoved { job: JobName, from: KeyName, to: Option<KeyName> },
     IndexChecked { result: IndexCheckResult, mismatch: Option<Mismatch>, detail: Option<String> },
 }
 

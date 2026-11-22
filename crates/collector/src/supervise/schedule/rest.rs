@@ -1,17 +1,44 @@
+use std::path::PathBuf;
 use std::time::Duration;
 
 use server::kiwoom::rest::KiwoomRest;
 use tokio::sync::watch;
+use tokio::task::JoinHandle;
 use tokio::time::sleep;
 
 use super::{Daemon, Halt, StageResult, stoppable};
 use crate::keys::{ActiveKey, KeyRole};
+use crate::shared::{UsageLog, UsagePoller};
 use crate::supervise::tokens::{Issue, KeyTokens};
 
 const TOKEN_ATTEMPTS: u32 = 3;
+const USAGE_POLL: Duration = Duration::from_secs(5);
 
 pub(super) struct RestSession {
     tokens: KeyTokens,
+    usage: JoinHandle<()>,
+}
+
+impl Drop for RestSession {
+    fn drop(&mut self) {
+        self.usage.abort();
+    }
+}
+
+fn record_usage(tokens: &KeyTokens, key: &ActiveKey, data_dir: PathBuf) -> JoinHandle<()> {
+    let (rest, name, broker) = (tokens.rest().clone(), key.identity.name.clone(), key.broker);
+    tokio::spawn(async move {
+        let (log, mut poller) = (UsageLog::new(data_dir), UsagePoller::default());
+        let mut tick = tokio::time::interval(USAGE_POLL);
+        loop {
+            tick.tick().await;
+            if let Some(minute) = poller.take(&rest.usage())
+                && let Err(error) = log.append(&name, broker, &minute)
+            {
+                tracing::error!(key = %name, %error, "사용량 줄을 쓰지 못했습니다");
+            }
+        }
+    })
 }
 
 impl RestSession {
@@ -32,7 +59,8 @@ impl Daemon {
         let (key, _) = self.rest_key();
         let tokens = KeyTokens::open(key, self.transport.clone(), self.clock.clone()).map_err(|error| Halt::Failed(format!("키 {}의 잠금을 잡지 못했습니다: {error}", key.identity.name)))?;
         self.ensure_token(&tokens, shutdown).await?;
-        Ok(RestSession { tokens })
+        let usage = record_usage(&tokens, key, self.data_dir.clone());
+        Ok(RestSession { tokens, usage })
     }
 
     pub(super) async fn ensure_token(&self, tokens: &KeyTokens, shutdown: &mut watch::Receiver<bool>) -> StageResult<()> {

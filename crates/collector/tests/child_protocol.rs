@@ -171,7 +171,7 @@ impl Collector {
 }
 
 fn token_command(token: &str, generation: u64) -> DaemonCommand {
-    DaemonCommand::Token { token: Secret::new(token.to_owned()), generation }
+    DaemonCommand::Token { token: Secret::new(token.to_owned()), generation, expires_at: None }
 }
 
 fn stock_registration(id: &str, count: usize) -> DaemonCommand {
@@ -324,10 +324,11 @@ async fn broken_unknown_and_foreign_version_lines_halt_with_a_nonzero_exit() {
     let kiwoom = Kiwoom::start().await;
     let lines = [
         "깨진 줄\n",
-        "{\"v\":1,\"cmd\":\"dance\"}\n",
-        "{\"v\":2,\"cmd\":\"shutdown\"}\n",
+        "{\"v\":2,\"cmd\":\"dance\"}\n",
+        "{\"v\":1,\"cmd\":\"shutdown\"}\n",
+        "{\"v\":3,\"cmd\":\"shutdown\"}\n",
         "{\"cmd\":\"shutdown\"}\n",
-        "{\"v\":1,\"cmd\":\"register\",\"id\":\"r\",\"items\":[\"5930\"],\"types\":[\"0B\"]}\n",
+        "{\"v\":2,\"cmd\":\"register\",\"id\":\"r\",\"items\":[\"5930\"],\"types\":[\"0B\"]}\n",
         "\n",
     ];
     for line in lines {

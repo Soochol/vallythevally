@@ -7,7 +7,9 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use server::config::Secret;
 
-pub const PROTOCOL_VERSION: u32 = 1;
+use crate::shared::{AssignedJob, JobStat, TrMinute};
+
+pub const PROTOCOL_VERSION: u32 = 2;
 pub const HEARTBEAT_EVERY: Duration = Duration::from_secs(5);
 pub const REGISTER_BATCH_SIZE: usize = 50;
 pub const STOCK_ITEM_SUFFIX: &str = "_AL";
@@ -257,13 +259,19 @@ pub enum Command {
         #[serde(with = "secret_text")]
         token: Secret<String>,
         generation: u64,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        expires_at: Option<i64>,
+    },
+    Assign {
+        date: u32,
+        jobs: Vec<AssignedJob>,
     },
     Register(Registration),
     Unregister(Registration),
     Shutdown,
 }
 
-const COMMAND_NAMES: [&str; 4] = ["token", "register", "unregister", "shutdown"];
+const COMMAND_NAMES: [&str; 5] = ["token", "assign", "register", "unregister", "shutdown"];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -332,6 +340,14 @@ pub enum Event {
     Halted {
         reason: String,
         action: String,
+    },
+    Usage {
+        minute_start: i64,
+        key_max_per_second: u32,
+        trs: Vec<TrMinute>,
+    },
+    JobStats {
+        jobs: Vec<JobStat>,
     },
 }
 
@@ -412,6 +428,7 @@ pub fn parse_command(line: &str) -> Result<Command, ProtocolError> {
             let registration = Registration::try_from(wire).map_err(|error| invalid(error.to_string()))?;
             Ok(if name == "register" { Command::Register(registration) } else { Command::Unregister(registration) })
         }
+        "assign" => serde_json::from_value::<Command>(Value::Object(object)).map_err(|error| invalid(format!("date(정수)와 jobs(배열)가 필요합니다: {error}"))),
         _ => serde_json::from_value::<Command>(Value::Object(object)).map_err(|_| invalid("token(문자열)과 generation(정수)이 필요합니다".to_owned())),
     }
 }
@@ -469,7 +486,7 @@ mod tests {
     #[test]
     fn commands_round_trip_through_a_versioned_line() {
         let commands = [
-            Command::Token { token: Secret::new("FAKE-TOKEN".to_owned()), generation: 7 },
+            Command::Token { token: Secret::new("FAKE-TOKEN".to_owned()), generation: 7, expires_at: None },
             Command::Register(Registration::new("r1", vec!["005930".into(), "000660".into()], vec![RealType::Trade, RealType::OrderBook]).unwrap()),
             Command::Unregister(Registration::new("u1", vec!["001".into(), String::new()], vec![RealType::SectorIndex]).unwrap()),
             Command::Shutdown,
@@ -477,15 +494,15 @@ mod tests {
         for command in commands {
             let line = encode_line(&command);
             assert!(line.ends_with('\n') && !line[..line.len() - 1].contains('\n'));
-            assert_eq!(serde_json::from_str::<Value>(&line).unwrap()["v"], 1);
+            assert_eq!(serde_json::from_str::<Value>(&line).unwrap()["v"], PROTOCOL_VERSION);
             assert_eq!(parse_command(&line).unwrap(), command);
         }
     }
 
     #[test]
     fn the_token_wire_shape_is_plain_and_its_debug_form_is_masked() {
-        let command = Command::Token { token: Secret::new("FAKE-TOKEN".to_owned()), generation: 3 };
-        assert_eq!(serde_json::from_str::<Value>(&encode_line(&command)).unwrap(), json!({"v": 1, "cmd": "token", "token": "FAKE-TOKEN", "generation": 3}));
+        let command = Command::Token { token: Secret::new("FAKE-TOKEN".to_owned()), generation: 3, expires_at: None };
+        assert_eq!(serde_json::from_str::<Value>(&encode_line(&command)).unwrap(), json!({"v": PROTOCOL_VERSION, "cmd": "token", "token": "FAKE-TOKEN", "generation": 3}));
         assert!(!format!("{command:?}").contains("FAKE-TOKEN"));
     }
 
@@ -514,7 +531,7 @@ mod tests {
         }
         assert_eq!(
             serde_json::from_str::<Value>(&encode_line(&Event::Registered { batch: Batch { id: "r1".into(), part: 0, parts: 1, items: 2 }, ok: true, replay: false, rejection: None })).unwrap(),
-            json!({"v": 1, "event": "registered", "id": "r1", "part": 0, "parts": 1, "items": 2, "ok": true, "replay": false})
+            json!({"v": PROTOCOL_VERSION, "event": "registered", "id": "r1", "part": 0, "parts": 1, "items": 2, "ok": true, "replay": false})
         );
     }
 
@@ -545,27 +562,28 @@ mod tests {
         assert_eq!(parse_command(""), Err(ProtocolError::NotJson));
         assert_eq!(parse_command("[1]"), Err(ProtocolError::NotJson));
         assert_eq!(parse_command(r#"{"cmd":"shutdown"}"#), Err(ProtocolError::Version(None)));
-        assert_eq!(parse_command(r#"{"v":2,"cmd":"shutdown"}"#), Err(ProtocolError::Version(Some(2))));
-        assert_eq!(parse_command(r#"{"v":1,"cmd":"dance"}"#), Err(ProtocolError::UnknownCommand("dance".into())));
-        assert_eq!(parse_command(r#"{"v":1}"#), Err(ProtocolError::UnknownCommand("(이름을 읽을 수 없음)".into())));
-        assert!(matches!(parse_command(r#"{"v":1,"cmd":"register","id":"r","items":["5930"],"types":["0B"]}"#), Err(ProtocolError::Invalid { .. })));
-        assert!(matches!(parse_command(r#"{"v":1,"cmd":"shutdown","extra":1}"#), Ok(Command::Shutdown)));
-        assert!(matches!(parse_command(r#"{"v":1,"cmd":"register","id":"r","items":["005930"],"types":["zz"]}"#), Err(ProtocolError::Invalid { .. })));
-        assert_eq!(parse_command(r#"{"v":1,"cmd":"shutdown"}"#), Ok(Command::Shutdown));
+        assert_eq!(parse_command(r#"{"v":3,"cmd":"shutdown"}"#), Err(ProtocolError::Version(Some(3))));
+        assert_eq!(parse_command(r#"{"v":1,"cmd":"shutdown"}"#), Err(ProtocolError::Version(Some(1))));
+        assert_eq!(parse_command(r#"{"v":2,"cmd":"dance"}"#), Err(ProtocolError::UnknownCommand("dance".into())));
+        assert_eq!(parse_command(r#"{"v":2}"#), Err(ProtocolError::UnknownCommand("(이름을 읽을 수 없음)".into())));
+        assert!(matches!(parse_command(r#"{"v":2,"cmd":"register","id":"r","items":["5930"],"types":["0B"]}"#), Err(ProtocolError::Invalid { .. })));
+        assert!(matches!(parse_command(r#"{"v":2,"cmd":"shutdown","extra":1}"#), Ok(Command::Shutdown)));
+        assert!(matches!(parse_command(r#"{"v":2,"cmd":"register","id":"r","items":["005930"],"types":["zz"]}"#), Err(ProtocolError::Invalid { .. })));
+        assert_eq!(parse_command(r#"{"v":2,"cmd":"shutdown"}"#), Ok(Command::Shutdown));
     }
 
     #[test]
     fn a_malformed_token_line_never_repeats_what_it_carried() {
         let secret = "FAKE-TOKEN-must-not-leak";
         for line in [
-            format!(r#"{{"v":1,"cmd":"token","token":"{secret}","generation":"seven"}}"#),
-            format!(r#"{{"v":1,"cmd":"token","token":"{secret}"}}"#),
-            format!(r#"{{"v":1,"cmd":"{secret}"}}"#),
-            format!(r#"{{"v":1,"cmd":"token","token":["{secret}"],"generation":1}}"#),
-            format!(r#"{{"v":1,"cmd":"register","id":"r","items":["{secret}"],"types":["0B"]}}"#),
-            format!(r#"{{"v":1,"cmd":"register","id":"r","items":["005930"],"types":["{secret}"]}}"#),
-            format!(r#"{{"v":1,"cmd":"unregister","id":"{secret}","items":"005930","types":["0B"]}}"#),
-            format!(r#"{{"v":1,"cmd":"register","id":"r","items":["{secret}","{secret}"],"types":["0s"]}}"#),
+            format!(r#"{{"v":2,"cmd":"token","token":"{secret}","generation":"seven"}}"#),
+            format!(r#"{{"v":2,"cmd":"token","token":"{secret}"}}"#),
+            format!(r#"{{"v":2,"cmd":"{secret}"}}"#),
+            format!(r#"{{"v":2,"cmd":"token","token":["{secret}"],"generation":1}}"#),
+            format!(r#"{{"v":2,"cmd":"register","id":"r","items":["{secret}"],"types":["0B"]}}"#),
+            format!(r#"{{"v":2,"cmd":"register","id":"r","items":["005930"],"types":["{secret}"]}}"#),
+            format!(r#"{{"v":2,"cmd":"unregister","id":"{secret}","items":"005930","types":["0B"]}}"#),
+            format!(r#"{{"v":2,"cmd":"register","id":"r","items":["{secret}","{secret}"],"types":["0s"]}}"#),
         ] {
             let error = parse_command(&line).unwrap_err();
             assert!(!format!("{error} {error:?}").contains(secret), "{line}");
