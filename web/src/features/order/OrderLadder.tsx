@@ -4,7 +4,7 @@ import { formatPrice } from "../../lib/format";
 import type { LadderRow } from "../market-window/ladder";
 import { type LadderRowSlots, PriceLadder } from "../market-window/PriceLadder";
 import { formatShares } from "../market-window/format";
-import { type BuyPreview, groupKey, type PriceGroup, previewText, SIDE_LABEL } from "./orderRules";
+import { addQuantityText, type BuyPreview, groupKey, type PriceGroup, previewText, SIDE_LABEL } from "./orderRules";
 import { PENDING_TEXT } from "./statusText";
 import { LADDER_ROW_HEIGHT_PX, type RowRange, scrollTopToCenter, visibleRowRange } from "./priceRange";
 import { OrderList, type OrderListItem } from "./OrderList";
@@ -91,6 +91,8 @@ export function OrderLadder({ rows, previousClose, groups, writable, previewQuan
     if (price === null) return <div className="od-cell" data-empty="" />;
     const group = groups.get(groupKey(side, price));
     const hovered = hover?.side === side && hover.price === price;
+    const showsPreview = hovered && writable && previewQuantity > 0;
+    const previewTone = side === "buy" ? buyPreview(price) : null;
     return (
       <div
         className="od-cell"
@@ -99,18 +101,19 @@ export function OrderLadder({ rows, previousClose, groups, writable, previewQuan
         data-price={price}
         data-disabled={writable ? undefined : ""}
         data-target={view?.target.kind === "cell" && view.target.side === side && view.target.price === price ? "" : undefined}
-        onDoubleClick={() => { if (writable && !group) actions.place(side, price); }}
+        onDoubleClick={() => { if (writable) actions.place(side, price); }}
         onPointerEnter={() => onHover({ side, price })}
         onPointerLeave={() => onHover(null)}
       >
         {group && !row.repeat
           ? <button type="button" className="od-chip" data-testid="order-chip" data-side={side} data-price={price} data-dragging={view?.source.kind === "chip" && view.source.group === group ? "" : undefined} data-pending={group.pending}
+              data-add={showsPreview ? addQuantityText(previewQuantity) : undefined} data-add-over={showsPreview && previewTone === "over" ? "" : undefined} data-add-margin={showsPreview && previewTone === "margin" ? "" : undefined}
               aria-label={`${SIDE_LABEL[side]} ${formatPrice(price, false)}원 ${formatShares(group.quantity)} 주문${group.pending ? ` ${PENDING_TEXT[group.pending]}` : ""}`}
               onPointerDown={(e) => { if (writable && !group.pending) begin({ source: { kind: "chip", group }, origin: null }, e); }}
               onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); if (!group.pending) setMenu({ x: e.clientX, y: e.clientY, group }); }}>
               {group.quantity.toLocaleString("ko-KR")}
             </button>
-          : hovered && writable && previewQuantity > 0 && <span className="od-preview" data-testid="order-preview" data-over={side === "buy" && buyPreview(price) === "over" ? "" : undefined} data-margin={side === "buy" && buyPreview(price) === "margin" ? "" : undefined}>{previewText(side, previewQuantity)}</span>}
+          : showsPreview && <span className="od-preview" data-testid="order-preview" data-over={previewTone === "over" ? "" : undefined} data-margin={previewTone === "margin" ? "" : undefined}>{previewText(side, previewQuantity)}</span>}
       </div>
     );
   };

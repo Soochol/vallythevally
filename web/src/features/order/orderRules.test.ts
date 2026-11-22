@@ -196,6 +196,15 @@ test("보내는 중 표시는 빈 칸에 방향·수량의 칩을 그리고 합�
   expect(sideTotal(groups, "sell")).toEqual({ quantity: 0, count: 0 });
 });
 
+test("같은 빈 칸에 보내는 중 표시가 둘이면 칩 수량은 둘의 합이고 이미 걸린 가격의 칩은 그대로다", () => {
+  const sending = (key: string, price: number, quantity: number): PendingWrite => ({ ...stamped, kind: "sending", key, side: "buy", price, quantity });
+  const writes = [sending("a", 70_000, 10), sending("b", 70_000, 15), sending("c", 69_900, 4)];
+  const groups = groupWithPending([order("0000001", "buy", 69_900, 5)], writes, "005930");
+  expect(groups.get("buy:70000")).toMatchObject({ quantity: 25, pending: "sending" });
+  expect(groups.get("buy:69900")?.quantity).toBe(5);
+  expect(groups.get("buy:69900")?.pending).toBeUndefined();
+});
+
 test("취소 중·정정 중 표시는 대상 주문의 칩에 붙고 가격 단위 표시는 그 가격 칩 전체에 붙는다", () => {
   const orders = [order("0000001", "buy", 70_000, 5), order("0000002", "buy", 69_900, 7), order("0000003", "sell", 70_100, 2)];
   const writes: PendingWrite[] = [

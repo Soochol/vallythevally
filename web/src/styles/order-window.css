@@ -18,7 +18,7 @@
 .od-cell[data-disabled] { cursor:not-allowed; opacity:.45; }
 .od-cell[data-target] { box-shadow:inset 0 0 0 2px var(--accent); }
 .od-preview { color:var(--text-2); font-size:var(--size-10); font-weight:600; pointer-events:none; white-space:nowrap; }
-.od-chip { width:100%; height:100%; border-radius:var(--r-s); font-size:var(--size-11); font-weight:700; cursor:grab; touch-action:none; color:var(--text); }
+.od-chip { position:relative; width:100%; height:100%; border-radius:var(--r-s); font-size:var(--size-11); font-weight:700; cursor:grab; touch-action:none; color:var(--text); }
 .od-chip[data-side=sell] { background:color-mix(in srgb, var(--down) 38%, transparent); }
 .od-chip[data-side=buy] { background:color-mix(in srgb, var(--up) 38%, transparent); }
 .od-chip[data-dragging] { opacity:.4; }
@@ -118,6 +118,9 @@ button.od-cellbtn:hover:not(:disabled) { background:var(--hover); }
 .od-cellbtn[data-policy=allow_margin] b { color:var(--warning); }
 .od-cellbtn small { display:flex; align-items:center; gap:var(--s2); }
 .od-unpaid-dot { flex:none; width:var(--size-5); height:var(--size-5); border-radius:50%; background:var(--danger); }
+.od-chip[data-add]::after { content:attr(data-add); position:absolute; right:4px; top:50%; transform:translateY(-50%); color:var(--text-2); font-size:var(--size-10); font-weight:600; pointer-events:none; white-space:nowrap; }
+.od-chip[data-add-over]::after { color:var(--danger); text-decoration:line-through; }
+.od-chip[data-add-margin]::after { color:var(--warning); }
 .od-preview[data-over] { color:var(--danger); text-decoration:line-through; }
 .od-preview[data-margin] { color:var(--warning); }
 .od-estimate-note { color:var(--warning); }
