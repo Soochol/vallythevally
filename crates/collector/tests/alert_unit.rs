@@ -460,7 +460,7 @@ fn the_script_and_the_daemon_read_the_same_settings_file_the_same_way() {
 #[test]
 fn the_script_reads_the_settings_file_the_same_way_under_a_utf8_locale() {
     let Some(locale) = utf8_locale() else {
-        eprintln!("locale 명령이 없거나 UTF-8 로캘이 없어 UTF-8 로캘 경우를 건너뛴다");
+        writeln!(std::io::stderr(), "locale 명령이 없거나 UTF-8 로캘이 없어 UTF-8 로캘 경우를 건너뛴다").unwrap();
         return;
     };
     for case in parity_cases() {
