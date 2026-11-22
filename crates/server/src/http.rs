@@ -19,7 +19,8 @@ use crate::db::AppDb;
 use crate::kiwoom::link::Link;
 use crate::kiwoom::rest::{KiwoomError, KiwoomRest};
 use crate::market::hub::{HubHandle, HubSnapshot};
-use crate::market_source::{KiwoomHandle, MarketSource, SourceFailure};
+use crate::market_source::route::FeatureRoute;
+use crate::market_source::{MarketSource, SourceFailure};
 use crate::screener::Screener;
 use crate::symbols::{NotReady, SearchFilter, SymbolDirectory};
 
@@ -28,7 +29,7 @@ pub struct AppState {
     pub bars: Arc<BarService>,
     pub rest: KiwoomRest,
     pub source: Arc<dyn MarketSource>,
-    pub kiwoom: KiwoomHandle,
+    pub route: Arc<FeatureRoute>,
     pub db: AppDb,
     pub clock: Clock,
     pub static_dir: PathBuf,
@@ -264,6 +265,14 @@ pub(crate) async fn symbol_list(st: &AppState) -> Result<Arc<crate::symbols::Dir
         NotReady::Source(e) => Lookup::Symbols.failure(e.into(), st.clock.now()),
         NotReady::Timeout => ApiFailure::list_not_ready(st.clock.now()),
     })
+}
+
+pub(crate) async fn feature_symbol_list(st: &AppState) -> Result<Arc<crate::symbols::Directory>, ApiFailure> {
+    let loaded = st.symbols.updates().borrow().clone();
+    match loaded {
+        Some(loaded) => Ok(loaded),
+        None => symbol_list(st).await,
+    }
 }
 
 async fn search(State(st): State<Arc<AppState>>, Query(q): Query<HashMap<String, String>>) -> Result<Json<Vec<api::SymbolInfo>>, ApiFailure> {

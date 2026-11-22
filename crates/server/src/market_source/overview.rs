@@ -200,6 +200,8 @@ pub struct StreakRow {
 }
 
 pub trait OverviewSource: Send + Sync + 'static {
+    fn broker(&self) -> api::Broker;
+
     fn features(&self) -> OverviewFeatures;
 
     fn is_open(&self) -> bool;

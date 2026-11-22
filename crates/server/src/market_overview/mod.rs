@@ -12,8 +12,9 @@ use axum::Router;
 use axum::routing::get;
 use domain::{KstDate, KstTime};
 
-use crate::api::Market;
+use crate::api::{Broker, Market};
 use crate::http::AppState;
+use crate::market_source::route::Picked;
 use crate::market_source::{GenerationTicket, OverviewSource, SourceGeneration};
 
 pub use dto::*;
@@ -36,7 +37,7 @@ pub fn routes() -> Router<Arc<AppState>> {
 struct InvestorDays {
     observation_day: Option<KstDate>,
     filled_in: Option<GenerationTicket>,
-    days: HashMap<(Market, KstDate), MarketOverviewInvestorDay>,
+    days: HashMap<(Broker, Market, KstDate), MarketOverviewInvestorDay>,
 }
 
 #[derive(Default)]
@@ -47,10 +48,10 @@ pub struct MarketOverview {
     generation: SourceGeneration,
 }
 
-pub fn overview_source(st: &AppState) -> Arc<dyn OverviewSource> {
+pub fn overview_source(st: &AppState) -> Picked<dyn OverviewSource> {
     match st.market_overview.chosen.lock().expect("공급원 잠금").clone() {
-        Some(source) => source,
-        None => Arc::new(KiwoomOverview::new(st.kiwoom.clone())),
+        Some(source) => Picked { broker: source.broker(), source },
+        None => st.route.overview(),
     }
 }
 
@@ -69,18 +70,18 @@ impl MarketOverview {
         *chosen = source;
     }
 
-    pub fn cached_investor_day(&self, now: KstTime, market: Market, day: KstDate) -> Option<MarketOverviewInvestorDay> {
+    pub fn cached_investor_day(&self, now: KstTime, broker: Broker, market: Market, day: KstDate) -> Option<MarketOverviewInvestorDay> {
         let mut cache = self.investor_days.lock().expect("투자자 캐시 잠금");
         cache.roll(now, self.generation.ticket());
-        cache.days.get(&(market, day)).cloned()
+        cache.days.get(&(broker, market, day)).cloned()
     }
 
-    pub fn cache_investor_day(&self, now: KstTime, market: Market, row: MarketOverviewInvestorDay, started: GenerationTicket) {
+    pub fn cache_investor_day(&self, now: KstTime, broker: Broker, market: Market, row: MarketOverviewInvestorDay, started: GenerationTicket) {
         let mut cache = self.investor_days.lock().expect("투자자 캐시 잠금");
         let current = self.generation.ticket();
         cache.roll(now, current);
         if started == current {
-            cache.days.insert((market, row.date.0), row);
+            cache.days.insert((broker, market, row.date.0), row);
         }
     }
 }

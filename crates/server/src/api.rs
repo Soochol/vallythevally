@@ -580,7 +580,7 @@ impl std::fmt::Debug for KiwoomKeyInput {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export)]
 pub enum Broker {
@@ -1388,6 +1388,7 @@ pub struct DayHistory<T> {
     pub to: KstDate,
     pub coverage: RangeCoverage,
     pub days: Vec<T>,
+    pub source: Broker,
     pub skipped_days: Vec<SkippedDay>,
     pub undated_rows: Vec<UndatedRow>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -2397,6 +2398,7 @@ pub struct RankingPage {
     pub limited: bool,
     pub hidden: u32,
     pub fetched_at: UnixSeconds,
+    pub source: Broker,
 }
 
 #[cfg(test)]

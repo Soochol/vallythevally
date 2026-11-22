@@ -15,7 +15,7 @@ type Wire<T> = T extends bigint ? number : T extends readonly (infer U)[] ? Wire
 
 const RECEIVED_AT = 1_794_186_000;
 
-const context = (market: Market) => ({ market, phase: "regular", receivedAt: RECEIVED_AT }) as const;
+const context = (market: Market) => ({ market, phase: "regular", receivedAt: RECEIVED_AT, source: "kiwoom" }) as const;
 const part = <T>(value: T) => ({ status: "ok", value }) as const;
 
 const NAMES: Record<Market, string> = { kospi: "코스피", kosdaq: "코스닥" };
@@ -140,7 +140,7 @@ export function serveMarketRankings(scenario: Scenario): void {
       const ranking = asked.ranking;
       const market: Market = "market" in ranking && ranking.market === "kosdaq" ? "kosdaq" : "kospi";
       const rows = ranking.kind === "tradeAmount" || ranking.kind === "gainers" || ranking.kind === "losers" ? RANKING_ROWS[market][ranking.kind] : [];
-      return { body: { rows, pages: 1, end: true, limited: false, hidden: 0, fetchedAt: Math.floor(scenario.now / 1000) } satisfies RankingPage };
+      return { body: { rows, pages: 1, end: true, limited: false, hidden: 0, fetchedAt: Math.floor(scenario.now / 1000), source: "kiwoom" } satisfies RankingPage };
     },
   );
 }

@@ -4,6 +4,7 @@ mod feature;
 mod generation;
 mod kiwoom_handle;
 mod overview;
+pub mod route;
 pub mod switch;
 pub mod rankings;
 pub mod stream;

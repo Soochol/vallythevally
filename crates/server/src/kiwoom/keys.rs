@@ -268,6 +268,11 @@ pub struct ListedKey {
     pub connection: Connection,
 }
 
+pub struct ConnectedLanes {
+    pub kiwoom: Option<KiwoomRest>,
+    pub kis: Option<KisLane>,
+}
+
 pub struct KeyRing {
     inner: Mutex<Inner>,
     changes: watch::Sender<u64>,
@@ -399,6 +404,19 @@ impl KeyRing {
     pub fn listing(&self) -> Vec<ListedKey> {
         let inner = self.lock();
         inner.entries.iter().map(|entry| Self::listed(&inner, entry)).collect()
+    }
+
+    pub fn connected_lanes(&self) -> ConnectedLanes {
+        let inner = self.lock();
+        let mut connected = ConnectedLanes { kiwoom: None, kis: None };
+        for entry in &inner.entries {
+            match &entry.lane {
+                EntryLane::Kiwoom(lane) if connected.kiwoom.is_none() && lane.rest.access() == super::rest::Access::Open => connected.kiwoom = Some(lane.rest.clone()),
+                EntryLane::Kis(lane) if connected.kis.is_none() && lane.link.is_connected() => connected.kis = Some(lane.clone()),
+                _ => {}
+            }
+        }
+        connected
     }
 
     pub fn listed_key(&self, id: &KeyId) -> Option<ListedKey> {

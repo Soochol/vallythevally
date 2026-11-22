@@ -27,6 +27,7 @@ use crate::kis::feed::{KisConnect, KisFeedParts};
 use crate::market_overview::MarketOverview;
 use crate::market_source::active::{ActiveSource, ActiveStream};
 use crate::market_source::switch::{SourceSwitch, SwitchParts};
+use crate::market_source::route::FeatureRoute;
 use crate::market_source::{KiwoomHandle, MarketSource, SourceGeneration};
 use crate::rankings::RankingCache;
 use crate::kiwoom::auth::{DAILY_REISSUE_AT, KiwoomAuth};
@@ -127,11 +128,11 @@ pub fn application_with_system(inputs: ApplicationInputs, system: SystemState) -
 pub fn application_with_source(inputs: ApplicationInputs, mut system: SystemState, source: Arc<dyn MarketSource>) -> Arc<AppState> {
     let ApplicationInputs { rest, clock, symbols, db, screener_store, stream: (stream, events), static_dir, screener_update_on_connect } = inputs;
     let generation = SourceGeneration::default();
-    let kiwoom = KiwoomHandle::connected(rest.clone());
+    let route = Arc::new(FeatureRoute::new(rest.clone(), clock.clone()));
     let active_source = Arc::new(ActiveSource::new(source.clone()));
     let shared_source: Arc<dyn MarketSource> = active_source.clone();
     let bars = Arc::new(BarService::new(shared_source.clone(), symbols.clone(), clock.clone()));
-    let screener = Arc::new(Screener::new(screener_store, kiwoom.clone(), bars.clone(), symbols.clone(), clock.clone()));
+    let screener = Arc::new(Screener::new(screener_store, KiwoomHandle::routed(route.clone()), bars.clone(), symbols.clone(), clock.clone()));
     let account_feed = stream.account_feed();
     let (active_stream, merged_events, kiwoom_stream) = ActiveStream::new(Arc::new(stream), events, clock.clone());
     let active_stream = Arc::new(active_stream);
@@ -146,6 +147,7 @@ pub fn application_with_source(inputs: ApplicationInputs, mut system: SystemStat
         Some(setup) => KeyRing::with_kis(setup, kis_factory, market_lane),
         None => KeyRing::unconfigured(market_lane),
     });
+    route.bind(&keys);
     let source_switch = Arc::new(SourceSwitch::new(SwitchParts {
         keys: keys.clone(),
         kiwoom_source: source,
@@ -166,7 +168,7 @@ pub fn application_with_source(inputs: ApplicationInputs, mut system: SystemStat
         bars,
         rest,
         source: shared_source,
-        kiwoom,
+        route,
         db,
         clock,
         static_dir,

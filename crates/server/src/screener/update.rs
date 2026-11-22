@@ -68,7 +68,7 @@ impl Screener {
     pub(super) async fn update(&self, id: u64, full: bool) -> Result<(), BarError> {
         tracing::info!(full, "스크리너 업데이트를 시작합니다");
         self.report(id, UpdatePhase::Symbols, 0, 1);
-        let directory = self.symbols.ready(self.kiwoom.rest()?).await?;
+        let directory = self.symbols.ready(&self.kiwoom.rest()?).await?;
         if directory.screener_listing().is_empty() {
             tracing::warn!("서버가 받아 둔 종목 목록이 비어 있어, 스크리너 종목 목록을 바꾸지 않고 업데이트를 멈춥니다");
             return Err(BarError::ListNotReady);

@@ -186,7 +186,7 @@ async fn the_index_card_carries_levels_breadth_volatility_and_the_response_time(
     assert_eq!(
         body,
         json!({
-            "context": {"market": "kospi", "phase": "regular", "receivedAt": at(MONDAY, 10, 0, 0).unix()},
+            "context": {"market": "kospi", "phase": "regular", "receivedAt": at(MONDAY, 10, 0, 0).unix(), "source": "kiwoom"},
             "index": {"status": "ok", "value": {
                 "code": "001", "name": "종합(KOSPI)", "level": 6613.59, "changeRate": -0.67,
                 "breadth": {"rising": 410, "flat": 52, "falling": 498, "upperLimit": 3, "lowerLimit": 0},

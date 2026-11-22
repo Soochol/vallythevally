@@ -233,7 +233,7 @@ async fn the_kospi_index_card_asks_the_kis_index_tr_once_and_fills_the_neutral_c
     assert_eq!(
         body,
         json!({
-            "context": {"market": "kospi", "phase": "regular"},
+            "context": {"market": "kospi", "phase": "regular", "source": "kis"},
             "index": {"status": "ok", "value": {
                 "code": "0001", "name": "코스피", "level": 2705.38, "changeRate": -0.67,
                 "breadth": {"rising": 410, "flat": 52, "falling": 498, "upperLimit": 3, "lowerLimit": 0},

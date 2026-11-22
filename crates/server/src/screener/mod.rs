@@ -22,7 +22,7 @@ use crate::api::{self, ApiErrorBody, ApiErrorReason, FullHistory, Screen, Screen
 use crate::bars::{BarError, BarService};
 use crate::clock::Clock;
 use crate::http::{ApiFailure, AppState, Lookup};
-use crate::market_source::{KiwoomHandle, Priority};
+use crate::market_source::{KiwoomHandle, Priority, SourceFailure};
 use crate::symbols::SymbolDirectory;
 use crate::setup_documents::parse_stored_screen;
 use crate::user_routes::read_json;
@@ -278,7 +278,7 @@ impl Screener {
         if !self.with_store(Store::listing_lost).await? {
             return Ok(Listed::Present);
         }
-        let directory = self.symbols.ready(self.kiwoom.rest()?).await?;
+        let directory = self.symbols.ready(&self.kiwoom.rest()?).await?;
         Ok(self.with_store(move |s| s.fill_lost_listing(directory.screener_listing())).await?)
     }
 
@@ -392,8 +392,23 @@ pub fn routes() -> Router<Arc<AppState>> {
 
 async fn start_update(State(st): State<Arc<AppState>>, body: Body) -> Result<Json<ScreenerStatus>, ApiFailure> {
     let request: ScreenerUpdateRequest = read_json(body, JSON_LIMIT, "업데이트 본문").await?;
+    refuse_without_kiwoom_key(&st)?;
     st.screener.start(request.full);
     Ok(Json(st.screener.status().await?))
+}
+
+fn refuse_without_kiwoom_key(st: &AppState) -> Result<(), ApiFailure> {
+    if !st.route.kis_receives() {
+        return Ok(());
+    }
+    let refusal = SourceFailure {
+        code: api::ApiErrorCode::BadRequest,
+        reason: ApiErrorReason::UnsupportedBySource,
+        message: "스크리너 갱신은 연결된 키움 키가 있어야 합니다. 지금은 한투 키만 연결돼 있습니다".to_owned(),
+        retry_at: None,
+        manual_action_required: false,
+    };
+    Err(Lookup::ScreenerUpdate.failure(BarError::Source(refusal), st.clock.now()))
 }
 
 async fn cancel_update(State(st): State<Arc<AppState>>) -> Result<Json<ScreenerStatus>, ApiFailure> {
