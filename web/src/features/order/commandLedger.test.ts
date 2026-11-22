@@ -25,9 +25,13 @@ test("신규처럼 묶지 않는 동작은 요청마다 새 id이고 답을 못 
   expect(second).toBe("id-2");
   ledger.settleEach(action, first, "unanswered");
   ledger.settleEach(action, second, "answered");
-  expect(ledger.issueEach(action)).toBe(first);
-  ledger.settleEach(action, first, "answered");
-  expect(ledger.issueEach(action)).toBe("id-3");
+  const retry = ledger.issueEach(action);
+  const whileRetrying = ledger.issueEach(action);
+  expect(retry).toBe(first);
+  expect(whileRetrying).toBe("id-3");
+  ledger.settleEach(action, retry, "answered");
+  ledger.settleEach(action, whileRetrying, "answered");
+  expect(ledger.issueEach(action)).toBe("id-4");
 });
 
 test("끝난 동작을 다시 하면 새 명령이다", () => {

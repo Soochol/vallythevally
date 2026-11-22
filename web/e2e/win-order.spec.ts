@@ -524,6 +524,29 @@ test("답을 못 받은 첫 신규 뒤에 줄 서 있던 두 번째 신규는 �
   expect(second).not.toBe(first);
 });
 
+test("답을 못 받은 신규를 다시 보내는 동안 또 누른 신규는 새 commandId로 나간다", async ({ page, scenario }) => {
+  ordersOn(scenario);
+  tradingApi(scenario);
+  await openOrderWindow(page, scenario);
+  const noAnswer = { status: 503, body: { error: { code: "internal", message: "서버가 응답하지 못했습니다", reason: null, retryAt: null, manualActionRequired: false } } };
+  const target = cellAt(page, "buy", 70_000);
+  const firstHold = scenario.hold((url, request) => url.pathname === "/api/trading/commands/place" && request.method() === "POST");
+  await target.dblclick();
+  await firstHold.received;
+  firstHold.reply(noAnswer);
+  await expect(status(page)).toContainText("같은 동작을 다시 하면 같은 명령으로 보냅니다");
+  const retryHold = scenario.hold((url, request) => url.pathname === "/api/trading/commands/place" && request.method() === "POST");
+  await target.dblclick();
+  await retryHold.received;
+  await target.dblclick();
+  await expect(page.getByTestId("order-queue")).toHaveText("줄 서는 중 · 2건");
+  retryHold.reply({ body: commandOf("buy", { price: 70_000 }) });
+  await pollSaved(() => placeIds(scenario).length).toBe(3);
+  const [first, retried, fresh] = placeIds(scenario);
+  expect(retried).toBe(first);
+  expect(fresh).not.toBe(first);
+});
+
 const daySummaryRequests = (scenario: Scenario, symbol: string) => scenario.requests.filter((r) => new URL(r.url()).pathname === `/api/symbols/${symbol}/day-summary`).length;
 const quotesRequests = (scenario: Scenario) => scenario.requests.filter((r) => new URL(r.url()).pathname === "/api/quotes").length;
 

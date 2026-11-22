@@ -18,10 +18,13 @@ export function createLedger(newId: (action: string) => string): CommandLedger {
   const entries = new Map<string, Entry>();
   const resendIds = new Map<string, string>();
   return {
-    issueEach: (action) => resendIds.get(action) ?? newId(action),
+    issueEach(action) {
+      const resend = resendIds.get(action);
+      resendIds.delete(action);
+      return resend ?? newId(action);
+    },
     settleEach(action, id, settlement) {
       if (settlement === "unanswered") resendIds.set(action, id);
-      else if (resendIds.get(action) === id) resendIds.delete(action);
     },
     issue(action) {
       const entry = entries.get(action);
