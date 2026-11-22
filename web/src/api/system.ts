@@ -65,6 +65,7 @@ export function useKiwoomKeys(refreshMs: number) {
 export async function storeKiwoomKeys(queryClient: QueryClient, list: KiwoomKeyList): Promise<void> {
   await queryClient.cancelQueries({ queryKey: KIWOOM_KEYS_QUERY_KEY });
   queryClient.setQueryData(KIWOOM_KEYS_QUERY_KEY, list);
+  void queryClient.invalidateQueries({ queryKey: ORDERS_QUERY_KEY });
 }
 export const addKiwoomKey = (input: KiwoomKeyAdd) => sendJson<KiwoomKeyList>("POST", KEYS, JSON.stringify(input));
 export const renameKiwoomKey = (keyId: string, input: KiwoomKeyAlias) => putJson<KiwoomKeyList>(keyPath(keyId, "/alias"), input);
@@ -80,7 +81,7 @@ export const ORDERS_QUERY_KEY = ["system", "orders"] as const;
 export function useOrdersStatus() {
   return useQuery({ queryKey: ORDERS_QUERY_KEY, queryFn: ({ signal }) => getJson<OrdersStatus>(ORDERS, signal), staleTime: Infinity });
 }
-export const checkOrdersAccount = () => sendJson<OrdersAccountCheck>("POST", `${ORDERS}/check-account`, "{}");
+export const checkOrdersAccount = (keyId: string) => sendJson<OrdersAccountCheck>("POST", `${ORDERS}/check-account?keyId=${encodeURIComponent(keyId)}`, "{}");
 export const switchOrders = (input: OrdersSwitchInput) => putJson<OrdersStatus>(ORDERS, input);
 
 export function useKiwoomUsage(refreshMs: number) {

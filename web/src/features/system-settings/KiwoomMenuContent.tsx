@@ -3,7 +3,6 @@ import { useKiwoomKeys } from "../../api/system";
 import { useServerTime } from "../status/useServerTime";
 import { KiwoomAccountList } from "./KiwoomAccountList";
 import { KiwoomIpHelp } from "./KiwoomIpHelp";
-import { KiwoomOrdersCard } from "./KiwoomOrdersCard";
 import { KiwoomStatusCard } from "./KiwoomStatusCard";
 import { KiwoomUsageCard } from "./KiwoomUsageCard";
 import { MarketKeyPicker } from "./MarketKeyPicker";
@@ -31,7 +30,6 @@ export function KiwoomMenuContent() {
       />
       {panel.command.error && <p role="alert" className="text-m text-danger">{panel.command.error}</p>}
       <KiwoomAccountList onOpenIpHelp={() => setIpHelpRequests((n) => n + 1)} />
-      <KiwoomOrdersCard />
       <KiwoomUsageCard />
       <KiwoomIpHelp status={panel.status} openByItself={panel.view.ipHelpOpensByItself} openRequests={ipHelpRequests} checked={panel.checkedIp} onChecked={panel.setCheckedIp} command={panel.ipCommand} />
       {panel.ipCommand.error && <p role="alert" className="text-m text-danger">{panel.ipCommand.error}</p>}

@@ -35,7 +35,7 @@ async fn serve(socket: WebSocket, st: Arc<AppState>, hub: HubHandle) {
     let mut account_changes = st.system.account().subscribe();
     let mut setup_changes = st.system.account().subscribe_setup_changes();
     let mut collector_notices = st.system.collector().map(|board| board.subscribe_notices());
-    let mut trading_changes = st.trading.subscribe_changes();
+    let mut trading_changes = st.accounts.subscribe_changes();
     hub.send_to(conn, ServerMessage::KiwoomLink { status: kiwoom_status(&st) });
     send_account(&st, &hub, conn).await;
     loop {

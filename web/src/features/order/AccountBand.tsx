@@ -1,4 +1,3 @@
-import { useQuery } from "@tanstack/react-query";
 import { useRef, useState } from "react";
 import type { TradingBalance } from "../../api/generated/TradingBalance";
 import type { TradingExecution } from "../../api/generated/TradingExecution";
@@ -12,7 +11,8 @@ import { Popover } from "../overlay/Popover";
 import { formatQuantity } from "../market-window/format";
 import { formatFillTime, profitText } from "./holdingSummary";
 import { newestFirst } from "./accountLists";
-import { fetchAccountNumber } from "./orderApi";
+import { AccountLabel } from "./AccountPicker";
+import type { OrderAccountChoice } from "./orderAccount";
 import { POLICY_LABEL } from "./funds";
 import { listAnchorRect, listWidthIn, listWindowOf } from "./listPopover";
 import { SIDE_LABEL } from "./orderRules";
@@ -27,7 +27,8 @@ const TABS: readonly { readonly kind: PanelKind; readonly label: string }[] = [
 
 interface Props {
   readonly windowId: WindowId;
-  readonly accountTail: string | null;
+  readonly choice: OrderAccountChoice;
+  readonly onPick: (accountRef: string) => void;
   readonly maskAccount: boolean;
   readonly openOrders: readonly TradingOpenOrder[];
   readonly balance: TradingBalance | null;
@@ -96,25 +97,7 @@ function FillsPanel({ executions, goTo }: { executions: readonly TradingExecutio
 }
 
 const isTab = (target: Node) => target instanceof Element && target.closest(".od-tab") !== null;
-const BROKER = "키움";
-const ACCOUNT_NUMBER_KEY = ["trading", "account-number"] as const;
-const groupedAccountNumber = (digits: string) => `${digits.slice(0, 4)}-${digits.slice(4, 8)}`;
-
-function RevealedAccountLabel({ masked }: { masked: string }) {
-  const lookup = useQuery({ queryKey: ACCOUNT_NUMBER_KEY, queryFn: ({ signal }) => fetchAccountNumber(signal), gcTime: 0, staleTime: Infinity, retry: false, refetchOnWindowFocus: false });
-  const failure = lookup.isError ? (lookup.error instanceof Error ? lookup.error.message : "계좌번호를 불러오지 못했습니다") : undefined;
-  const text = lookup.data ? `${BROKER} ${groupedAccountNumber(lookup.data.accountNumber)}` : masked;
-  return <span className="od-account-label" data-testid="account-label" title={failure}>{text}</span>;
-}
-
-function AccountLabel({ accountTail, maskAccount }: { accountTail: string | null; maskAccount: boolean }) {
-  if (accountTail === null) return <span className="od-account-label" data-testid="account-label">{BROKER} —</span>;
-  const masked = `${BROKER} ****-**${accountTail}`;
-  if (maskAccount) return <span className="od-account-label" data-testid="account-label">{masked}</span>;
-  return <RevealedAccountLabel masked={masked} />;
-}
-
-export function AccountBand({ windowId, accountTail, maskAccount, openOrders, balance, executions, writable, mock, policy, onCancel }: Props) {
+export function AccountBand({ windowId, choice, onPick, maskAccount, openOrders, balance, executions, writable, mock, policy, onCancel }: Props) {
   const [panel, setPanel] = useState<PanelKind | null>(null);
   const opener = useRef<HTMLElement | null>(null);
   const counts: Record<PanelKind, number> = { open: openOrders.length, holdings: balance?.holdings.length ?? 0, fills: executions.length };
@@ -129,7 +112,7 @@ export function AccountBand({ windowId, accountTail, maskAccount, openOrders, ba
   return (
     <div className="od-account" data-testid="order-account">
       <div className="od-account-bar">
-        <AccountLabel accountTail={accountTail} maskAccount={maskAccount} />
+        <AccountLabel choice={choice} maskAccount={maskAccount} onPick={onPick} />
         {mock && <span className="od-account-mock" data-testid="account-mock">모의</span>}
         {policy !== null && <span className="od-policy" data-testid="margin-policy" data-policy={policy}>{POLICY_LABEL[policy]}</span>}
         {TABS.map(({ kind, label }) => (

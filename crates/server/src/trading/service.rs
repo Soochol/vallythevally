@@ -12,9 +12,11 @@ use super::switch::{SwitchRecord, SwitchStore};
 use crate::api::{self, OrderSide};
 use crate::clock::Clock;
 use crate::config::Secret;
+use crate::kiwoom::key_file::KeyId;
+use crate::kiwoom::keys::KeyRing;
 use crate::kiwoom::rest::{Admission, ContKey, Dispatch, KiwoomError, KiwoomRest, MergeScope, Page, Priority};
 use super::journal::Journal;
-use super::memory::{PriceBand, PriceBands, RecentOpenOrders};
+use super::memory::{PriceBands, RecentOpenOrders};
 use crate::symbols::SymbolDirectory;
 use crate::kiwoom::stream::{AccountEvent, AccountFeed};
 
@@ -42,12 +44,15 @@ pub enum TradingError {
     BadRequest(&'static str),
     Journal(String),
     CommandNotFound,
+    UnknownAccount,
+    UnknownKey,
+    SameAccount(String),
 }
 
 impl fmt::Display for TradingError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            TradingError::Off => f.write_str("주문 사용이 꺼져 있어 계좌를 조회하지 않습니다. 시스템 설정 키움 탭에서 켜세요"),
+            TradingError::Off => f.write_str("주문 사용이 꺼져 있어 계좌를 조회하지 않습니다. 시스템 설정 증권사 · 계좌에서 켜세요"),
             TradingError::FileUnusable(why) => write!(f, "주문 사용 스위치 파일을 쓸 수 없어 꺼진 것으로 봅니다({why})"),
             TradingError::AccountChanged => f.write_str("확인한 계좌와 지금 키움이 알려 주는 계좌가 다릅니다. 시스템 설정에서 주문 사용을 다시 켜 확인하세요"),
             TradingError::TailMismatch => f.write_str("입력한 끝 2자리가 키움이 알려 준 계좌와 다릅니다"),
@@ -56,6 +61,9 @@ impl fmt::Display for TradingError {
             TradingError::BadRequest(what) => f.write_str(what),
             TradingError::Journal(why) => f.write_str(why),
             TradingError::CommandNotFound => f.write_str("그 command_id의 명령이 없습니다"),
+            TradingError::UnknownAccount => f.write_str("알 수 없는 계좌입니다. 시스템 설정 증권사 · 계좌에서 계좌를 확인하세요"),
+            TradingError::UnknownKey => f.write_str("그 키가 없습니다"),
+            TradingError::SameAccount(alias) => write!(f, "‘{alias}’와 같은 계좌입니다. 주문은 한 줄에서만 씁니다"),
         }
     }
 }
@@ -85,11 +93,53 @@ struct State {
     verified: Option<Verified>,
 }
 
-pub struct Trading {
-    pub(super) rest: KiwoomRest,
+pub(super) enum Lanes {
+    Fixed { rest: KiwoomRest, feed: AccountFeed },
+    Keyed { ring: Arc<KeyRing>, key: KeyId },
+}
+
+impl Lanes {
+    fn rest(&self) -> Result<KiwoomRest, TradingError> {
+        match self {
+            Lanes::Fixed { rest, .. } => Ok(rest.clone()),
+            Lanes::Keyed { ring, key } => ring.view_of(key).map(|view| view.lane.rest).ok_or(TradingError::UnknownKey),
+        }
+    }
+
+    fn feed(&self) -> Option<AccountFeed> {
+        match self {
+            Lanes::Fixed { feed, .. } => Some(feed.clone()),
+            Lanes::Keyed { ring, key } => ring.view_of(key).map(|view| view.lane.account),
+        }
+    }
+}
+
+pub(super) struct Shared {
     pub(super) clock: Clock,
-    store: SwitchStore,
-    feed: AccountFeed,
+    pub(super) journal: Journal,
+    pub(super) symbols: Arc<SymbolDirectory>,
+    pub(super) bands: Arc<PriceBands>,
+    pub(super) recovered: Arc<tokio::sync::OnceCell<Result<(), String>>>,
+    pub(super) changes: broadcast::Sender<AccountChanged>,
+    pub(super) quote_rest: KiwoomRest,
+}
+
+impl Shared {
+    pub(super) fn new(clock: Clock, db: crate::db::AppDb, symbols: Arc<SymbolDirectory>, quote_rest: KiwoomRest) -> Shared {
+        Shared { clock, journal: Journal::new(db), symbols, bands: Arc::default(), recovered: Arc::default(), changes: broadcast::channel(16).0, quote_rest }
+    }
+
+    pub(super) fn clone_parts(&self) -> Shared {
+        Shared { clock: self.clock.clone(), journal: self.journal.clone(), symbols: self.symbols.clone(), bands: self.bands.clone(), recovered: self.recovered.clone(), changes: self.changes.clone(), quote_rest: self.quote_rest.clone() }
+    }
+}
+
+pub struct Trading {
+    lanes: Lanes,
+    pub(super) quote_rest: KiwoomRest,
+    pub(super) clock: Clock,
+    store: Arc<SwitchStore>,
+    pub(super) key: KeyId,
     state: Mutex<State>,
     switch_lock: Mutex<()>,
     pub(super) open: Arc<AtomicBool>,
@@ -97,17 +147,18 @@ pub struct Trading {
     changes: broadcast::Sender<AccountChanged>,
     pub(super) journal: Journal,
     pub(super) symbols: Arc<SymbolDirectory>,
-    pub(super) recovered: tokio::sync::OnceCell<Result<(), String>>,
+    pub(super) recovered: Arc<tokio::sync::OnceCell<Result<(), String>>>,
     pub(super) turns: Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>,
-    pub(super) bands: PriceBands,
+    pub(super) bands: Arc<PriceBands>,
     pub(super) recent_open: RecentOpenOrders,
+    feed_task: Mutex<Option<tokio::task::JoinHandle<()>>>,
 }
 
 fn hex(bytes: &[u8]) -> String {
     bytes.iter().map(|b| format!("{b:02x}")).collect()
 }
 
-fn account_ref_of(salt: &str, number: &str) -> String {
+pub(super) fn account_ref_of(salt: &str, number: &str) -> String {
     let mut hasher = Sha256::new();
     hasher.update(salt.as_bytes());
     hasher.update(b":");
@@ -125,42 +176,76 @@ fn new_salt() -> String {
     hex(&bytes)
 }
 
+pub const FIXED_KEY_ID: &str = "market";
+
 impl Trading {
     pub fn new(rest: KiwoomRest, clock: Clock, store: SwitchStore, feed: AccountFeed, db: crate::db::AppDb, symbols: Arc<SymbolDirectory>) -> Arc<Trading> {
+        let shared = Shared::new(clock, db, symbols, rest.clone());
+        let key = KeyId::parse(FIXED_KEY_ID).expect("고정 키 ID는 올바른 키 ID다");
+        store.claim_legacy(&key);
+        Trading::assemble(Lanes::Fixed { rest, feed }, key, Arc::new(store), shared)
+    }
+
+    pub(super) fn assemble(lanes: Lanes, key: KeyId, store: Arc<SwitchStore>, shared: Shared) -> Arc<Trading> {
+        let Shared { clock, journal, symbols, bands, recovered, changes, quote_rest } = shared;
         let trading = Arc::new(Trading {
-            rest,
+            lanes,
+            quote_rest,
             clock,
             store,
-            feed,
+            key,
             state: Mutex::new(State::default()),
             switch_lock: Mutex::new(()),
             open: Arc::new(AtomicBool::new(false)),
             write: tokio::sync::Mutex::new(()),
-            changes: broadcast::channel(16).0,
-            journal: Journal::new(db),
+            changes,
+            journal,
             symbols,
-            recovered: tokio::sync::OnceCell::new(),
+            recovered,
             turns: Mutex::new(HashMap::new()),
-            bands: PriceBands::default(),
+            bands,
             recent_open: RecentOpenOrders::default(),
+            feed_task: Mutex::new(None),
         });
-        if let Err(e) = trading.store.load() {
+        if let Err(e) = trading.store.load(&trading.key) {
             tracing::error!(error = %e, "주문 사용 스위치 파일을 읽지 못했습니다. 꺼진 것으로 봅니다");
         }
         drop(trading.enabled_record());
-        tokio::spawn(forward_events(Arc::downgrade(&trading), trading.feed.subscribe()));
+        trading.follow_feed();
         trading.start_recovery();
         trading
     }
 
-    pub fn remember_price_band(&self, code: StockCode, upper: Option<u64>, lower: Option<u64>) {
-        if let Some(band) = PriceBand::from_limits(upper, lower) {
-            self.bands.remember(code, self.clock.now().kst_date(), band);
+    pub(super) fn follow_feed(self: &Arc<Self>) {
+        let Some(feed) = self.lanes.feed() else { return };
+        let task = tokio::spawn(forward_events(Arc::downgrade(self), feed.subscribe()));
+        if let Some(old) = self.feed_task.lock().expect("계좌 실시간 작업 잠금").replace(task) {
+            old.abort();
         }
+    }
+
+    pub(super) fn forget_verified(&self) {
+        self.lock().verified = None;
+    }
+
+    pub(super) fn republish(&self) {
+        drop(self.enabled_record());
+    }
+
+    pub(super) fn rest(&self) -> Result<KiwoomRest, TradingError> {
+        self.lanes.rest()
     }
 
     pub fn subscribe_changes(&self) -> broadcast::Receiver<AccountChanged> {
         self.changes.subscribe()
+    }
+
+    pub(super) fn record(&self) -> Result<Option<SwitchRecord>, crate::kiwoom::private_file::FileError> {
+        self.store.load(&self.key)
+    }
+
+    fn save_record(&self, record: &SwitchRecord) -> Result<(), TradingError> {
+        self.store.save(&self.key, record).map_err(|e| TradingError::FileUnusable(e.to_string()))
     }
 
     fn lock(&self) -> std::sync::MutexGuard<'_, State> {
@@ -169,7 +254,7 @@ impl Trading {
 
     pub(super) fn enabled_record(&self) -> Result<SwitchRecord, TradingError> {
         let _switch = self.switch_lock.lock().expect("스위치 잠금");
-        let record = match self.store.load() {
+        let record = match self.record() {
             Err(e) => Err(TradingError::FileUnusable(e.to_string())),
             Ok(Some(record)) if record.enabled => Ok(record),
             Ok(_) => Err(TradingError::Off),
@@ -180,7 +265,9 @@ impl Trading {
 
     fn publish(&self, enabled: bool) {
         self.open.store(enabled, Ordering::SeqCst);
-        self.feed.set_wanted(enabled);
+        if let Some(feed) = self.lanes.feed() {
+            feed.set_wanted(enabled);
+        }
     }
 
     async fn read<R: TradingRequest>(&self, req: &R, cont: Option<&ContKey>, priority: Priority) -> Result<Page<R::Response>, TradingError> {
@@ -190,28 +277,35 @@ impl Trading {
 
     pub fn status(&self) -> api::OrdersStatus {
         drop(self.enabled_record());
-        let record = match self.store.load() {
+        let record = match self.record() {
             Err(e) => {
-                return api::OrdersStatus { state: api::OrdersState::FileUnusable, account_ref: None, account_tail: None, message: TradingError::FileUnusable(e.to_string()).to_string() };
+                return api::OrdersStatus { state: api::OrdersState::FileUnusable, account_ref: None, account_tail: None, message: TradingError::FileUnusable(e.to_string()).to_string(), accounts: Vec::new() };
             }
             Ok(record) => record,
         };
         let Some(record) = record.filter(|r| r.enabled) else {
-            return api::OrdersStatus { state: api::OrdersState::Off, account_ref: None, account_tail: None, message: "주문 사용이 꺼져 있습니다. 키움에는 계좌 요청을 보내지 않습니다".to_owned() };
+            return api::OrdersStatus { state: api::OrdersState::Off, account_ref: None, account_tail: None, message: "주문 사용이 꺼져 있습니다. 키움에는 계좌 요청을 보내지 않습니다".to_owned(), accounts: Vec::new() };
         };
         let (state, message) = if self.lock().mismatch {
             (api::OrdersState::AccountChanged, TradingError::AccountChanged.to_string())
         } else {
             (api::OrdersState::On, "주문 사용이 켜져 있습니다".to_owned())
         };
-        api::OrdersStatus { state, account_ref: record.account_ref, account_tail: record.account_tail, message }
+        api::OrdersStatus { state, account_ref: record.account_ref, account_tail: record.account_tail, message, accounts: Vec::new() }
+    }
+
+    pub(super) fn listing(&self, alias: &str, market: bool) -> api::OrdersAccount {
+        let state = self.status().state;
+        let (account_ref, account_tail) = self.record().ok().flatten().map_or((None, None), |record| (record.account_ref, record.account_tail));
+        api::OrdersAccount { key_id: self.key.as_str().to_owned(), alias: alias.to_owned(), market, state, account_ref, account_tail }
     }
 
     async fn send<R: TradingRequest>(&self, req: &R, cont: Option<&ContKey>, guarded: bool, priority: Priority) -> Result<Page<R::Response>, TradingError> {
         let body = serde_json::to_string(req).expect("요청 타입은 언제나 직렬화된다");
         let open = self.open.clone();
         let admit: Option<Admission> = guarded.then(|| Arc::new(move || open.load(Ordering::SeqCst)) as Admission);
-        match self.rest.call_endpoint(Dispatch { endpoint: R::API_ID.into(), body, cont, priority, scope: MergeScope::default(), admit, once: None }, |_| true).await {
+        let rest = self.rest()?;
+        match rest.call_endpoint(Dispatch { endpoint: R::API_ID.into(), body, cont, priority, scope: MergeScope::default(), admit, once: None }, |_| true).await {
             Ok(page) => Ok(page),
             Err(e) if guarded => Err(self.enabled_record().err().unwrap_or(TradingError::Kiwoom(e))),
             Err(e) => Err(TradingError::Kiwoom(e)),
@@ -252,32 +346,41 @@ impl Trading {
     }
 
     pub async fn set_enabled(&self, input: api::OrdersSwitchInput) -> Result<api::OrdersStatus, TradingError> {
+        self.set_enabled_unless_taken(input, &|_| None).await
+    }
+
+    pub(super) async fn set_enabled_unless_taken(&self, input: api::OrdersSwitchInput, taken_by: &(dyn Fn(&str) -> Option<String> + Sync)) -> Result<api::OrdersStatus, TradingError> {
         let _write = self.write.lock().await;
         self.recent_open.forget();
         if !input.enabled {
             *self.lock() = State::default();
             let switch = self.switch_lock.lock().expect("스위치 잠금");
             self.publish(false);
-            let saved = self.store.load().map_err(|e| TradingError::FileUnusable(e.to_string()))?;
+            let saved = self.record().map_err(|e| TradingError::FileUnusable(e.to_string()))?;
             if let Some(record) = saved.filter(|r| r.enabled) {
-                self.store.save(&SwitchRecord { enabled: false, ..record }).map_err(|e| TradingError::FileUnusable(e.to_string()))?;
+                self.save_record(&SwitchRecord { enabled: false, ..record })?;
             }
             drop(switch);
             tracing::info!("주문 사용을 껐습니다");
             return Ok(self.status());
         }
-        let saved = self.store.load().map_err(|e| TradingError::FileUnusable(e.to_string()))?;
+        let saved = self.record().map_err(|e| TradingError::FileUnusable(e.to_string()))?;
         let tail = input.confirm_account_tail.ok_or(TradingError::BadRequest("켜려면 확인한 계좌 끝 2자리를 보내야 합니다"))?;
         let number = self.account_number(false, Priority::Screen).await?;
         if tail_of(number.expose()) != tail.trim() {
             return Err(TradingError::TailMismatch);
         }
         let (confirm_won, cap_won, margin_policy) = saved.as_ref().map_or((None, None, api::MarginPolicy::default()), |r| (r.confirm_won, r.cap_won, r.margin_policy));
-        let salt = saved.map_or_else(new_salt, |r| r.salt);
+        let shared_salt = self.store.shared_salt().map_err(|e| TradingError::FileUnusable(e.to_string()))?;
+        let salt = saved.map(|r| r.salt).or(shared_salt).unwrap_or_else(new_salt);
         let account_ref = account_ref_of(&salt, number.expose());
+        if let Some(alias) = taken_by(&account_ref) {
+            tracing::info!("같은 계좌가 다른 줄에서 주문 사용 중이라 켜지 않았습니다");
+            return Err(TradingError::SameAccount(alias));
+        }
         let record = SwitchRecord { enabled: true, salt, account_ref: Some(account_ref.clone()), account_tail: Some(tail_of(number.expose())), legacy_product_tail: None, confirm_won, cap_won, margin_policy };
         let switch = self.switch_lock.lock().expect("스위치 잠금");
-        self.store.save(&record).map_err(|e| TradingError::FileUnusable(e.to_string()))?;
+        self.save_record(&record)?;
         *self.lock() = State { mismatch: false, verified: Some(Verified { number, account_ref, at: self.clock.now().unix() }) };
         self.publish(true);
         drop(switch);
@@ -318,9 +421,9 @@ impl Trading {
     fn fill_account_tail(&self, account_ref: &str, tail: String) -> Result<(), TradingError> {
         let _switch = self.switch_lock.lock().expect("스위치 잠금");
         let file_unusable = |e: crate::kiwoom::private_file::FileError| TradingError::FileUnusable(e.to_string());
-        match self.store.load().map_err(file_unusable)? {
+        match self.record().map_err(file_unusable)? {
             Some(record) if record.enabled && record.account_tail.is_none() && record.account_ref.as_deref() == Some(account_ref) => {
-                self.store.save(&SwitchRecord { account_tail: Some(tail), legacy_product_tail: None, ..record }).map_err(file_unusable)
+                self.store.save(&self.key, &SwitchRecord { account_tail: Some(tail), legacy_product_tail: None, ..record }).map_err(file_unusable)
             }
             _ => Ok(()),
         }
@@ -423,7 +526,7 @@ impl Trading {
         let _write = self.write.lock().await;
         let record = self.enabled_record()?;
         let switch = self.switch_lock.lock().expect("스위치 잠금");
-        self.store.save(&SwitchRecord { margin_policy: input.policy, ..record }).map_err(|e| TradingError::FileUnusable(e.to_string()))?;
+        self.save_record(&SwitchRecord { margin_policy: input.policy, ..record })?;
         drop(switch);
         Ok(input)
     }

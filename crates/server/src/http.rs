@@ -32,10 +32,10 @@ pub struct AppState {
     pub hub: HubHandle,
     pub screener: Arc<Screener>,
     pub link: Link,
-    pub keys: crate::kiwoom::keys::KeyRing,
+    pub keys: Arc<crate::kiwoom::keys::KeyRing>,
     pub system: crate::system_routes::SystemState,
     pub registered: tokio::sync::watch::Receiver<crate::kiwoom::stream::DesiredFeeds>,
-    pub trading: Arc<crate::trading::Trading>,
+    pub accounts: Arc<crate::trading::Accounts>,
     pub rankings: crate::rankings::RankingCache,
     pub market_overview: crate::market_overview::MarketOverview,
     pub etf: crate::etf::EtfBook,
@@ -106,7 +106,8 @@ impl ApiFailure {
             T::Off | T::FileUnusable(_) => with_reason(Conflict, api::ApiErrorReason::OrdersOff),
             T::AccountChanged => with_reason(Conflict, api::ApiErrorReason::AccountChanged),
             T::TailMismatch | T::BadRequest(_) => ApiFailure::bad_request(e.to_string()),
-            T::CommandNotFound => ApiFailure::new(NotFound, e.to_string()),
+            T::CommandNotFound | T::UnknownAccount | T::UnknownKey => ApiFailure::new(NotFound, e.to_string()),
+            T::SameAccount(_) => ApiFailure::new(Conflict, e.to_string()),
             T::Journal(_) => {
                 tracing::error!(reason = %e, "주문 명령 저널 오류");
                 ApiFailure::new(Internal, "명령 저널을 쓰거나 읽지 못했습니다. 명령 상태를 조회해 확인하세요")
@@ -294,7 +295,7 @@ async fn fundamentals(State(st): State<Arc<AppState>>, Path(code): Path<String>)
         return Err(ApiFailure::new(api::ApiErrorCode::UnknownSymbol, format!("없는 종목입니다: {code}")));
     }
     let fundamentals = crate::fundamentals::fundamentals(&st.rest, stock).await.map_err(|e| Lookup::Fundamentals.failure(e, st.clock.now()))?;
-    st.trading.remember_price_band(stock, fundamentals.upper_limit, fundamentals.lower_limit);
+    st.accounts.remember_price_band(stock, fundamentals.upper_limit, fundamentals.lower_limit);
     Ok(Json(fundamentals))
 }
 

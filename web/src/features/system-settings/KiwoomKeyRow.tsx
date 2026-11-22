@@ -1,20 +1,24 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { useReducer, useState } from "react";
 import type { KiwoomKey } from "../../api/generated/KiwoomKey";
+import type { OrdersAccount } from "../../api/generated/OrdersAccount";
 import type { KiwoomKeyList } from "../../api/generated/KiwoomKeyList";
 import { connectKiwoomKey, disconnectKiwoomKey, loadKiwoomLink, removeKiwoomKey, renameKiwoomKey, replaceKiwoomKey, storeKiwoomKeys } from "../../api/system";
 import { confirmAction } from "../overlay/Confirm";
 import { KeyFields } from "./KiwoomKeyFields";
 import { ReadOnlyRow, SaveNote } from "./KiwoomKeyForm";
+import { KiwoomRowOrders } from "./KiwoomRowOrders";
 import { Confirm } from "./KiwoomStatusCard";
 import { emptyEntry, editRequest, keyEntryReducer, removeText, shortReason } from "./kiwoomKeys";
 import { keySaveNote, maskedAppKey, NO_CONFIRMATIONS } from "./kiwoomPanel";
 import { linkDotTone } from "./linkDot";
+import { accountNumberOf, orderInUse, orderMarkOf } from "./orderUse";
 import { useCommand } from "./useCommand";
 import { useConfirmations } from "./useConfirmations";
 
 interface Props {
   entry: KiwoomKey;
+  order: OrdersAccount | undefined;
   keys: readonly KiwoomKey[];
   mock: boolean;
   expanded: boolean;
@@ -23,7 +27,9 @@ interface Props {
   onOpenIpHelp(): void;
 }
 
-export function KiwoomKeyRow({ entry, keys, mock, expanded, now, onToggle, onOpenIpHelp }: Props) {
+const orderMarkStyle = (tone: "on" | "off" | "warn") => ({ color: tone === "on" ? "var(--success)" : tone === "warn" ? "var(--warning)" : "var(--text-3)", background: "var(--raised)" });
+
+export function KiwoomKeyRow({ entry, order, keys, mock, expanded, now, onToggle, onOpenIpHelp }: Props) {
   const reason = shortReason(entry.link, now);
   return (
     <li className="flex flex-col border-b border-line last:border-b-0">
@@ -32,16 +38,18 @@ export function KiwoomKeyRow({ entry, keys, mock, expanded, now, onToggle, onOpe
         <span className="min-w-0 truncate text-m font-semibold text-text">{entry.alias}</span>
         {entry.market && <span className="flex-none rounded-s bg-accent-soft px-2 py-0.5 text-xs text-accent">시세</span>}
         {entry.source === "env" && <span className="flex-none rounded-s bg-raised px-2 py-0.5 text-xs text-text-2">{mock ? "모의투자" : ".env"}</span>}
+        {order && <span className="flex-none text-s text-text-2" data-testid="key-account">{accountNumberOf(order.accountTail)}</span>}
+        {order && <span className="flex-none rounded-s px-2 py-0.5 text-xs" data-testid="key-order-mark" data-tone={orderMarkOf(order.state).tone} style={orderMarkStyle(orderMarkOf(order.state).tone)}>{orderMarkOf(order.state).text}</span>}
         <span className="flex-1" />
         {reason && <span className="min-w-0 truncate text-s text-warning">{reason}</span>}
         <span aria-hidden="true" className="flex-none text-text-3">{expanded ? "접기" : "펼치기"}</span>
       </button>
-      {expanded && <KeyDetails entry={entry} keys={keys} now={now} onOpenIpHelp={onOpenIpHelp} />}
+      {expanded && <KeyDetails entry={entry} order={order} keys={keys} now={now} onOpenIpHelp={onOpenIpHelp} />}
     </li>
   );
 }
 
-function KeyDetails({ entry, keys, now, onOpenIpHelp }: { entry: KiwoomKey; keys: readonly KiwoomKey[]; now: number; onOpenIpHelp(): void }) {
+function KeyDetails({ entry, order, keys, now, onOpenIpHelp }: { entry: KiwoomKey; order: OrdersAccount | undefined; keys: readonly KiwoomKey[]; now: number; onOpenIpHelp(): void }) {
   const queryClient = useQueryClient();
   const command = useCommand();
   const [editing, setEditing] = useState(false);
@@ -62,7 +70,7 @@ function KeyDetails({ entry, keys, now, onOpenIpHelp }: { entry: KiwoomKey; keys
     dispatch({ type: "reset", alias: request.alias ?? entry.alias });
   };
   const remove = async () => {
-    if (!(await confirmAction(removeText(keys, entry), { action: "키 지우기", danger: true }))) return;
+    if (!(await confirmAction(removeText(keys, entry, orderInUse(order)), { action: "키 지우기", danger: true }))) return;
     await command.run(async () => {
       await keep(await removeKiwoomKey(entry.keyId));
       if (entry.market) await loadKiwoomLink();
@@ -93,6 +101,7 @@ function KeyDetails({ entry, keys, now, onOpenIpHelp }: { entry: KiwoomKey; keys
           <button type="button" className="tb-btn h-9 px-3 text-danger" disabled={locked} onClick={() => void remove()}>지우기</button>
         </div>
       )}
+      {order && <KiwoomRowOrders keyId={entry.keyId} order={order} />}
       {!entry.market && <RowConnection entry={entry} now={now} keep={keep} />}
       {command.error && <p role="alert" className="text-m text-danger">{command.error}</p>}
     </div>

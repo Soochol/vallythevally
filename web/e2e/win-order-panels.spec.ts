@@ -3,8 +3,9 @@ import type { LayoutWindow } from "../src/api/generated/LayoutWindow";
 import type { LinkColor } from "../src/api/generated/LinkColor";
 import type { TradingExecution } from "../src/api/generated/TradingExecution";
 import type { TradingHolding } from "../src/api/generated/TradingHolding";
+import { CONNECTED_KIWOOM } from "./fixtures/scenario";
 import { type Scenario, cell, DEFAULT_LAYOUT_ID, expect, pollSaved, test, windowTabs } from "./harness";
-import { ACCOUNT, askAtLastSnapshot, SETTINGS, BASE, CODE, cellAt, center, chipAt, commandOf, dragChip, INFO_PAGE_1, INFO_PAGE_2, INFO_PAGE_2_ENDS, INFO_PAGE_2_VALUES, infoCard, infoLabels, infoTab, infoValues, openOrder, openOrderWindow, ordersOn, status, tradingApi, win, writesTo } from "./order-window";
+import { accountData, ACCOUNT, askAtLastSnapshot, SETTINGS, BASE, CODE, cellAt, center, chipAt, commandOf, dragChip, INFO_PAGE_1, INFO_PAGE_2, INFO_PAGE_2_ENDS, INFO_PAGE_2_VALUES, infoCard, infoLabels, infoTab, infoValues, openOrder, openOrderWindow, ordersOn, otherAccount, SECOND_ACCOUNT, status, tradingApi, win, writesTo } from "./order-window";
 
 const HOLDING: TradingHolding = { code: CODE, name: "삼성전자", quantity: 120, sellableQuantity: 100, averagePrice: 70_040, currentPrice: BASE, evaluationProfit: -4_800, profitRateCenti: -57 };
 const FILL: TradingExecution = { orderNo: "0000010", code: CODE, name: "삼성전자", side: "buy", quantity: 5, price: 70_000, time: "093015", venue: "krx" };
@@ -1452,4 +1453,129 @@ test("응답 전에 미체결 목록에 오른 보내는 중 매도는 남은 �
   await expect(chipAt(page, "sell", 70_800)).toHaveText("80");
   await expect(page.getByTestId("summary-remaining")).toHaveText("남은 40");
   held.reply({ body: commandOf("sell", { price: 70_800, quantity: 30 }) });
+});
+
+const accountButton = (page: Page) => page.locator('button[data-testid="account-label"]');
+const accountOptions = (page: Page) => page.getByTestId("account-option");
+const accountMenu = (page: Page) => page.getByTestId("account-menu");
+const bAccount = () => accountData({ open: [openOrder("B-0001", "sell", 71_000, 3)], holdings: [{ ...HOLDING, quantity: 777 }], executions: [{ ...FILL, orderNo: "B-0010", quantity: 9 }], orderable: { cashAmount: 12_000_000 } });
+const savedAccount = (scenario: Scenario) => scenario.documents.uiPrefs().orderSettings.account;
+
+async function pickAccount(page: Page, text: RegExp | string): Promise<void> {
+  await accountButton(page).click();
+  await accountOptions(page).filter({ hasText: text }).click();
+}
+
+test("계좌가 하나면 계좌 글자는 단추가 아니고 지금과 같다", async ({ page, scenario }) => {
+  ordersOn(scenario);
+  tradingApi(scenario);
+  await openOrderWindow(page, scenario);
+  const label = page.getByTestId("account-label");
+  await expect(label).toHaveText("키움 ****-**01");
+  await expect(accountButton(page)).toHaveCount(0);
+  await label.click();
+  await expect(accountMenu(page)).toHaveCount(0);
+  await expect(page.getByRole("button", { name: /키움 \*\*\*\*-\*\*01/ })).toHaveCount(0);
+});
+
+test("계좌 둘이면 계좌 단추로 목록을 열어 B를 고르면 미체결·보유·주문가능 조회와 주문이 B 참조로 나가고 다른 호가주문창도 B를 보인다; 새로 고쳐도 B다", async ({ page, scenario }) => {
+  ordersOn(scenario, [otherAccount()]);
+  const api = tradingApi(scenario, [openOrder("A-0001", "buy", 70_000, 5)]);
+  api.accounts[SECOND_ACCOUNT] = bAccount();
+  await openOrderWindow(page, scenario);
+  await expect(accountButton(page)).toHaveText("키 1 · 키움 ****-**01");
+  await expect(page.getByTestId("account-tab-open")).toContainText("1");
+
+  await accountButton(page).click();
+  await expect(accountOptions(page)).toHaveText(["키 1 · 키움 ****-**01시세", "위탁 2 · 키움 ****-**05"]);
+  await expect(accountOptions(page).first()).toHaveAttribute("aria-checked", "true");
+  await accountOptions(page).nth(1).click();
+  await expect(accountMenu(page)).toHaveCount(0);
+  await expect(accountButton(page)).toHaveText("위탁 2 · 키움 ****-**05");
+  await expect(page.getByTestId("summary-quantity")).toContainText("777");
+  await expect(page.getByTestId("account-tab-open")).toContainText("1");
+  await expect(page.getByTestId("account-tab-fills")).toContainText("1");
+  await expect(cellAt(page, "sell", 71_000)).toBeVisible();
+  const forB = (path: string) => api.seen.filter((request) => request.path === path && request.account === SECOND_ACCOUNT);
+  await pollSaved(() => ["/api/trading/open-orders", "/api/trading/balance", "/api/trading/executions", "/api/trading/orderable"].map((path) => forB(path).length > 0)).toEqual([true, true, true, true]);
+  await pollSaved(() => savedAccount(scenario)).toBe(SECOND_ACCOUNT);
+
+  await cellAt(page, "buy", 70_000).dblclick();
+  await pollSaved(() => writesTo(api, "place")).toHaveLength(1);
+  expect(writesTo(api, "place")[0]!.body.account).toBe(SECOND_ACCOUNT);
+
+  const layout = scenario.documents.layout(DEFAULT_LAYOUT_ID);
+  scenario.documents.saveLayout({ ...layout, windows: [...layout.windows, { id: "order-2", link: null, kind: "order", venue: "krx" }], revision: layout.revision + 1 });
+  await page.reload();
+  await expect(cell(page)).toHaveAttribute("aria-busy", "false");
+  await windowTabs(page).getByRole("tab", { name: /^호가주문 2/ }).click();
+  await expect(accountButton(page)).toHaveText(["위탁 2 · 키움 ****-**05", "위탁 2 · 키움 ****-**05"]);
+  await expect(page.getByTestId("summary-quantity")).toHaveText([/777/, /777/]);
+});
+
+test("주문 꺼진 계좌는 목록에서 고를 수 없고 시스템 설정에서 계좌 관리 이어가기가 증권사 · 계좌 메뉴를 연다", async ({ page, scenario }) => {
+  ordersOn(scenario, [otherAccount(), otherAccount({ keyId: "k3", alias: "연금계좌", state: "off", accountRef: null, accountTail: null })]);
+  const api = tradingApi(scenario);
+  await openOrderWindow(page, scenario);
+  await accountButton(page).click();
+  const off = accountOptions(page).filter({ hasText: "연금계좌" });
+  await expect(off).toHaveText("연금계좌 · 계좌 미확인주문 꺼짐");
+  await expect(off).toHaveAttribute("aria-disabled", "true");
+  await off.click({ force: true });
+  await expect(accountMenu(page)).toBeVisible();
+  await expect(accountButton(page)).toHaveText("키 1 · 키움 ****-**01");
+  expect(savedAccount(scenario)).toBeNull();
+  expect(api.seen.every((request) => request.account === ACCOUNT)).toBe(true);
+
+  await page.getByTestId("account-manage").click();
+  await expect(accountMenu(page)).toHaveCount(0);
+  const dialog = page.getByRole("dialog", { name: "시스템 설정", exact: true });
+  await expect(dialog).toBeVisible();
+  await expect(dialog.getByRole("tab", { name: /^증권사 · 계좌/ })).toHaveAttribute("aria-selected", "true");
+});
+
+test("고른 계좌가 없어지면 시세 키 계좌로 돌아가고 상태줄이 한 번 알린다", async ({ page, scenario }) => {
+  ordersOn(scenario, [otherAccount()]);
+  const api = tradingApi(scenario);
+  api.accounts[SECOND_ACCOUNT] = bAccount();
+  const first = { keyId: "k1", alias: "키 1", broker: "kiwoom" as const, source: "file" as const, appKeyTail: "1234", market: true, link: CONNECTED_KIWOOM };
+  const second = { ...first, keyId: "k2", alias: "위탁 2", market: false };
+  scenario.live.kiwoomKeys = { limit: 5, keys: [first, second], keyFileProblem: null };
+  scenario.on((url, request) => url.pathname === "/api/system/kiwoom/keys/k2" && request.method() === "DELETE", () => {
+    ordersOn(scenario);
+    scenario.live.kiwoomKeys = { limit: 5, keys: [first], keyFileProblem: null };
+    return { body: scenario.live.kiwoomKeys };
+  });
+  await openOrderWindow(page, scenario);
+  await pickAccount(page, "위탁 2");
+  await expect(accountButton(page)).toHaveText("위탁 2 · 키움 ****-**05");
+  await pollSaved(() => savedAccount(scenario)).toBe(SECOND_ACCOUNT);
+
+  await page.getByRole("button", { name: "시스템 설정", exact: true }).click();
+  const dialog = page.getByRole("dialog", { name: "시스템 설정", exact: true });
+  await dialog.getByRole("button", { name: "위탁 2", exact: false }).first().click();
+  await dialog.getByRole("button", { name: "지우기" }).click();
+  await page.getByRole("dialog", { name: /‘위탁 2’ 키를 지웁니다/ }).getByRole("button", { name: "키 지우기" }).click();
+
+  await expect(page.getByTestId("account-label")).toHaveText("키움 ****-**01");
+  await expect(accountButton(page)).toHaveCount(0);
+  await expect(status(page)).toHaveText("고른 계좌가 꺼져 시세 키 계좌로 돌아갑니다");
+  await expect(page.getByTestId("summary-quantity")).not.toContainText("777");
+  await pollSaved(() => savedAccount(scenario)).toBeNull();
+  await expect(status(page)).toHaveCount(0);
+});
+
+test("계좌를 바꾸면 보내는 중 칩이 사라진다", async ({ page, scenario }) => {
+  ordersOn(scenario, [otherAccount()]);
+  const api = tradingApi(scenario);
+  api.accounts[SECOND_ACCOUNT] = bAccount();
+  await openOrderWindow(page, scenario);
+  const place = scenario.hold((url) => url.pathname === "/api/trading/commands/place");
+  await cellAt(page, "buy", BASE).dblclick();
+  await place.received;
+  await expect(chipAt(page, "buy", BASE)).toHaveAttribute("data-pending", "sending");
+  await pickAccount(page, "위탁 2");
+  await expect(accountButton(page)).toHaveText("위탁 2 · 키움 ****-**05");
+  await expect(chipAt(page, "buy", BASE)).toHaveCount(0);
+  place.reply({ body: commandOf("buy") });
 });

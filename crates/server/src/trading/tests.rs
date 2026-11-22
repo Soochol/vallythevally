@@ -29,7 +29,7 @@ use crate::symbols::SymbolDirectory;
 use crate::trading::TradingApiId;
 
 pub(super) const ACCOUNT: &str = "5550120110";
-const OTHER_ACCOUNT: &str = "5559870210";
+pub(super) const OTHER_ACCOUNT: &str = "5559870210";
 pub(super) const HOST: &str = "127.0.0.1:7777";
 
 #[derive(Clone, Default)]
@@ -64,7 +64,7 @@ pub(super) enum WriteMode {
     BusinessReject,
 }
 
-fn write_reply(mode: WriteMode) -> Result<HttpResponse, TransportError> {
+pub(super) fn write_reply(mode: WriteMode) -> Result<HttpResponse, TransportError> {
     match mode {
         WriteMode::Accept => ok(json!({"ord_no": "0099001", "dmst_stex_tp": "KRX", "return_code": 0, "return_msg": "정상"}), None),
         WriteMode::Timeout => Err(TransportError { stage: Stage::AwaitResponse, timed_out: true }),
@@ -77,7 +77,7 @@ fn write_reply(mode: WriteMode) -> Result<HttpResponse, TransportError> {
     }
 }
 
-fn is_write(id: TradingApiId) -> bool {
+pub(super) fn is_write(id: TradingApiId) -> bool {
     matches!(id, TradingApiId::Kt10000 | TradingApiId::Kt10001 | TradingApiId::Kt10002 | TradingApiId::Kt10003)
 }
 
@@ -114,7 +114,7 @@ pub(super) fn cash_600k_margin_1_5m() -> Value {
     }))
 }
 
-fn price_band_reply(requested: &str, limits: &(String, String)) -> Result<HttpResponse, TransportError> {
+pub(super) fn price_band_reply(requested: &str, limits: &(String, String)) -> Result<HttpResponse, TransportError> {
     let mut body: Value = serde_json::from_str(include_str!("../../tests/fixtures/kiwoom/ka10001_005930_AL.json")).unwrap();
     let (upper, lower) = if requested.contains(ETN_CODE) {
         body["stk_cd"] = format!("{ETN_CODE}_AL").into();
@@ -132,7 +132,7 @@ fn price_band_reply(requested: &str, limits: &(String, String)) -> Result<HttpRe
 pub(super) const ETN_CODE: &str = "520100";
 pub(super) const DEFAULT_BAND: [&str; 2] = ["+100000", "-50000"];
 
-fn listed_symbols() -> Arc<SymbolDirectory> {
+pub(super) fn listed_symbols() -> Arc<SymbolDirectory> {
     use domain::{Market, Symbol, SymbolInfo, SymbolKind};
     let info = |code: &str, name: &str, kind, nxt_enabled| SymbolInfo { symbol: Symbol::parse(code).unwrap(), name: name.into(), kind, market: Market::Kospi, nxt_enabled };
     let symbols = Arc::new(SymbolDirectory::default());
@@ -154,7 +154,7 @@ pub(super) struct Fixture {
     pub(super) _dir: tempfile::TempDir,
 }
 
-fn reply(sent: &Sent, account: &str, rows_account: &str) -> Result<crate::kiwoom::transport::HttpResponse, crate::kiwoom::transport::TransportError> {
+pub(super) fn reply(sent: &Sent, account: &str, rows_account: &str) -> Result<crate::kiwoom::transport::HttpResponse, crate::kiwoom::transport::TransportError> {
     let Endpoint::Trading(id) = sent.api_id else { return token(1) };
     match id {
         TradingApiId::Ka00001 => ok(json!({"acctNo": account, "return_code": 0, "return_msg": "정상"}), None),
@@ -328,7 +328,7 @@ async fn account_number_never_leaves_in_responses_or_logs() {
         assert_eq!(code, StatusCode::OK, "{uri}: {body}");
         bodies.push(body);
     }
-    f.state.trading.set_enabled(OrdersSwitchInput { enabled: true, confirm_account_tail: Some("99".into()) }).await.unwrap_err();
+    f.state.accounts.market().set_enabled(OrdersSwitchInput { enabled: true, confirm_account_tail: Some("99".into()), key_id: None }).await.unwrap_err();
     *f.account.lock().unwrap() = OTHER_ACCOUNT.to_owned();
     f.feed.emit(AccountEvent { kind: AccountKind::OrderFill, account: Secret::new(ACCOUNT.into()) });
     tokio::task::yield_now().await;
@@ -375,7 +375,7 @@ async fn account_reads_stop_when_the_key_is_auth_blocked() {
     let (stream, _desired) = KiwoomStream::detached();
     let db = AppDb::open(&dir.path().join("vally.db")).await.unwrap();
     let trading = Trading::new(rest.clone(), clock, SwitchStore::file(PrivateFile::new(dir.path().join("state").join("orders.json")), crate::api::KiwoomEnvironment::Real), stream.account_feed(), db, Arc::new(SymbolDirectory::default()));
-    trading.set_enabled(OrdersSwitchInput { enabled: true, confirm_account_tail: Some("01".into()) }).await.unwrap();
+    trading.set_enabled(OrdersSwitchInput { enabled: true, confirm_account_tail: Some("01".into()), key_id: None }).await.unwrap();
     blocked.store(true, std::sync::atomic::Ordering::SeqCst);
     let auth_blocked = |e: &TradingError| matches!(e, TradingError::Kiwoom(KiwoomError::Stopped(f)) if f.category() == Category::AuthBlocked);
     let first = trading.balance().await.unwrap_err();
@@ -473,7 +473,10 @@ async fn a_business_rejection_fails_only_that_request_and_stops_no_path() {
     assert_eq!(enable(&f.app, "01").await.0, StatusCode::OK);
     f.orderable_replies.lock().unwrap().insert("70000".into(), json!({"return_code": 20, "return_msg": "[2000](571455:합성 매도 사유 FAKE-SECRET-sell)"}));
     let code = domain::StockCode::parse("005930").unwrap();
-    let (sell, buy) = tokio::join!(f.state.trading.orderable(code, OrderSide::Sell, 70_000), f.state.trading.orderable(code, OrderSide::Buy, 71_000));
+    let (sell, buy) = {
+        let market = f.state.accounts.market();
+        tokio::join!(market.orderable(code, OrderSide::Sell, 70_000), market.orderable(code, OrderSide::Buy, 71_000))
+    };
     assert_eq!(buy.unwrap().quantity, 14, "같은 경로의 매수 조회는 성공한다");
     let Err(TradingError::Kiwoom(ref error @ KiwoomError::Failed(ref failure))) = sell else { panic!("{sell:?}") };
     assert_eq!((failure.category(), failure.vendor_reason().map(|r| r.number())), (Category::BusinessRejected, Some(571455)));
@@ -483,7 +486,7 @@ async fn a_business_rejection_fails_only_that_request_and_stops_no_path() {
     assert!(f.state.rest.stopped(Endpoint::Trading(TradingApiId::Kt00011)).is_none() && f.state.rest.halted().is_none());
     let sent = orderable_sends(&f);
     assert_eq!(sent, 2, "매도·매수가 각각 한 번 나갔다");
-    assert!(matches!(f.state.trading.orderable(code, OrderSide::Sell, 70_000).await, Err(TradingError::Kiwoom(KiwoomError::Failed(_)))));
+    assert!(matches!(f.state.accounts.market().orderable(code, OrderSide::Sell, 70_000).await, Err(TradingError::Kiwoom(KiwoomError::Failed(_)))));
     assert_eq!(orderable_sends(&f), sent + 1, "거절된 뒤에도 다시 키움으로 나간다");
 }
 
@@ -610,7 +613,7 @@ async fn orderable_validates_its_query_before_asking_kiwoom() {
 #[tokio::test]
 async fn account_events_for_the_confirmed_account_tell_the_browser_the_account_changed() {
     let f = fixture().await;
-    let mut changes = f.state.trading.subscribe_changes();
+    let mut changes = f.state.accounts.market().subscribe_changes();
     f.feed.emit(AccountEvent { kind: AccountKind::OrderFill, account: Secret::new(ACCOUNT.into()) });
     tokio::task::yield_now().await;
     assert!(changes.try_recv().is_err(), "꺼져 있으면 알리지 않는다");
@@ -647,7 +650,7 @@ async fn trading_of_account(account: &'static str, latency: Duration, spacing: D
 }
 
 fn confirm(tail: &str) -> OrdersSwitchInput {
-    OrdersSwitchInput { enabled: true, confirm_account_tail: Some(tail.into()) }
+    OrdersSwitchInput { enabled: true, confirm_account_tail: Some(tail.into()), key_id: None }
 }
 
 #[tokio::test]
@@ -661,7 +664,7 @@ async fn an_off_switch_stops_a_read_that_is_already_in_flight() {
         async move { trading.balance().await }
     });
     tokio::time::sleep(Duration::from_millis(50)).await;
-    trading.set_enabled(OrdersSwitchInput { enabled: false, confirm_account_tail: None }).await.unwrap();
+    trading.set_enabled(OrdersSwitchInput { enabled: false, confirm_account_tail: None, key_id: None }).await.unwrap();
     let outcome = reading.await.unwrap();
     assert!(matches!(outcome, Err(TradingError::Off)), "{outcome:?}");
     assert_eq!(trading_sends(&fake)[sent..], ["ka00001"], "끈 뒤에는 잔고 TR이 나가지 않는다");
@@ -684,9 +687,10 @@ async fn realtime_registration_follows_the_switch_file_even_when_it_changes_behi
     std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).unwrap();
     assert_eq!(trading.status().state, crate::api::OrdersState::On);
     assert!(feed.wanted());
-    let mut record = store().load().unwrap().unwrap();
+    let fixed = crate::kiwoom::key_file::KeyId::parse(super::service::FIXED_KEY_ID).unwrap();
+    let mut record = store().load(&fixed).unwrap().unwrap();
     record.enabled = false;
-    store().save(&record).unwrap();
+    store().save(&fixed, &record).unwrap();
     assert_eq!(trading.status().state, crate::api::OrdersState::Off);
     assert!(!feed.wanted(), "파일이 꺼짐으로 바뀌면 00·04를 해지한다");
 }
@@ -717,7 +721,7 @@ async fn an_off_switch_stops_a_read_that_is_still_queued_behind_the_send_spacing
         async move { trading.balance().await.map(drop) }
     });
     tokio::time::sleep(Duration::from_millis(100)).await;
-    trading.set_enabled(OrdersSwitchInput { enabled: false, confirm_account_tail: None }).await.unwrap();
+    trading.set_enabled(OrdersSwitchInput { enabled: false, confirm_account_tail: None, key_id: None }).await.unwrap();
     let outcome = reading.await.unwrap();
     assert!(matches!(outcome, Err(TradingError::Off)), "{outcome:?}");
     tokio::time::sleep(Duration::from_millis(700)).await;
@@ -741,7 +745,7 @@ async fn the_realtime_registration_matches_the_switch_right_after_every_change_e
         })
         .collect();
     for round in 0..300 {
-        trading.set_enabled(OrdersSwitchInput { enabled: false, confirm_account_tail: None }).await.unwrap();
+        trading.set_enabled(OrdersSwitchInput { enabled: false, confirm_account_tail: None, key_id: None }).await.unwrap();
         assert!(!feed.wanted(), "끈 직후 {round}번째");
         trading.set_enabled(confirm("01")).await.unwrap();
         assert!(feed.wanted(), "켠 직후 {round}번째");

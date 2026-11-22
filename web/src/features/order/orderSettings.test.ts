@@ -9,7 +9,7 @@ describe("호가주문 설정", () => {
   });
 
   it("저장된 값을 읽는다", () => {
-    expect(parseOrderSettings({ sharePresets: [1, 2, 3, 4], amountPresets: [5, 6, 7, 8], averageDot: false, divider: false, rate: false, skipSpreadGap: true, maskAccount: false, keepLastEntry: false, venue: "nxt" })).toEqual({ sharePresets: [1, 2, 3, 4], amountPresets: [5, 6, 7, 8], averageDot: false, divider: false, rate: false, skipSpreadGap: true, maskAccount: false, keepLastEntry: false, venue: "nxt" });
+    expect(parseOrderSettings({ sharePresets: [1, 2, 3, 4], amountPresets: [5, 6, 7, 8], averageDot: false, divider: false, rate: false, skipSpreadGap: true, maskAccount: false, keepLastEntry: false, venue: "nxt", account: "ref-b" })).toEqual({ sharePresets: [1, 2, 3, 4], amountPresets: [5, 6, 7, 8], averageDot: false, divider: false, rate: false, skipSpreadGap: true, maskAccount: false, keepLastEntry: false, venue: "nxt", account: "ref-b" });
   });
 
   it("호가 사이 빈 가격 건너뛰기는 기본이 꺼짐이고 옛 저장값에 없거나 불이 아니면 꺼짐이며 있으면 그 값이다", () => {
@@ -66,5 +66,12 @@ describe("호가주문 설정", () => {
   it.each(["sharePresets", "amountPresets"] as const)("%s는 0, 빈 값, 소수, 상한 초과를 받지 않는다", (kind) => {
     for (const text of ["0", "", " ", "1.5", String(MAX_PRESET_SHARES + 1), "-3", "abc"]) expect(withPresetOf(DEFAULT_ORDER_SETTINGS, kind, 0, text)).toBe(DEFAULT_ORDER_SETTINGS);
     expect(withPresetOf(DEFAULT_ORDER_SETTINGS, kind, 0, String(MAX_PRESET_SHARES))[kind][0]).toBe(MAX_PRESET_SHARES);
+  });
+
+  it("고른 계좌는 기본이 없음이고 문자열이 아니거나 비었으면 없음이다", () => {
+    expect(DEFAULT_ORDER_SETTINGS.account).toBeNull();
+    expect(parseOrderSettings({ account: 3 }).account).toBeNull();
+    expect(parseOrderSettings({ account: "" }).account).toBeNull();
+    expect(parseOrderSettings({ account: "ref-b" }).account).toBe("ref-b");
   });
 });

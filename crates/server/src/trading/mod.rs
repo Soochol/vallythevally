@@ -1,3 +1,4 @@
+mod accounts;
 mod journal;
 mod memory;
 mod orders;
@@ -9,10 +10,13 @@ mod tick;
 mod tr;
 
 pub use routes::routes;
+pub use accounts::Accounts;
 pub use service::{AccountChanged, Trading, TradingError};
 pub use switch::{ORDER_SWITCH_FILE_NAME, SwitchStore};
 pub use tr::TradingApiId;
 
+#[cfg(test)]
+mod accounts_tests;
 #[cfg(test)]
 mod command_tests;
 #[cfg(test)]

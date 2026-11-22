@@ -1,8 +1,9 @@
-import type { Locator, Page } from "@playwright/test";
+import type { Locator, Page, Request } from "@playwright/test";
 import type { FeedKind } from "../src/api/generated/FeedKind";
 import type { LayoutWindow } from "../src/api/generated/LayoutWindow";
 import type { OrderCommand } from "../src/api/generated/OrderCommand";
 import type { MarginPolicy } from "../src/api/generated/MarginPolicy";
+import type { OrdersAccount } from "../src/api/generated/OrdersAccount";
 import type { OrderSide } from "../src/api/generated/OrderSide";
 import type { TradingOpenOrder } from "../src/api/generated/TradingOpenOrder";
 import type { TradingExecution } from "../src/api/generated/TradingExecution";
@@ -27,7 +28,16 @@ export const infoValues = (page: Page): Locator => page.getByTestId("ladder-info
 export const infoCard = (page: Page): Locator => page.getByTestId("ladder-info-card");
 export const infoTab = (page: Page, name: "시세" | "종목"): Locator => infoCard(page).getByRole("tab", { name });
 
-export type Write = { path: string; body: Record<string, unknown>; header: string | undefined };
+export type Write = { path: string; body: Record<string, unknown>; header: string | undefined; account: string | null };
+
+export interface AccountData {
+  open: TradingOpenOrder[];
+  holdings: TradingHolding[];
+  executions: TradingExecution[];
+  orderable: Partial<TradingOrderable>;
+}
+
+export type Seen = { path: string; account: string | null };
 
 export interface Api {
   open: TradingOpenOrder[];
@@ -43,6 +53,8 @@ export interface Api {
   policyWrites: Record<string, unknown>[];
   policyFailure: { status: number; body: unknown } | null;
   executions: TradingExecution[];
+  accounts: Record<string, AccountData>;
+  seen: Seen[];
 }
 
 export const HELD: TradingHolding = { code: CODE, name: "삼성전자", quantity: 100_000, sellableQuantity: 100_000, averagePrice: 70_040, currentPrice: BASE, evaluationProfit: 0, profitRateCenti: 0 };
@@ -96,25 +108,41 @@ export const feedSubscriptions = (scenario: Scenario, kind: FeedKind, venue: Ven
 export const requestedVenues = (scenario: Scenario, path: string): (string | null)[] =>
   scenario.requests.map((request) => new URL(request.url())).filter((url) => url.pathname === path).map((url) => url.searchParams.get("venue"));
 
-export function ordersOn(scenario: Scenario): void {
-  scenario.live.orders = { state: "on", accountRef: ACCOUNT, accountTail: "01", message: "주문 사용이 켜져 있습니다" };
+export const MARKET_KEY = "k1";
+export const SECOND_ACCOUNT = "synthetic-account-b";
+
+export const otherAccount = (patch: Partial<OrdersAccount> = {}): OrdersAccount => ({ keyId: "k2", alias: "위탁 2", market: false, state: "on", accountRef: SECOND_ACCOUNT, accountTail: "05", ...patch });
+
+export function ordersOn(scenario: Scenario, others: OrdersAccount[] = []): void {
+  const market: OrdersAccount = { keyId: MARKET_KEY, alias: "키 1", market: true, state: "on", accountRef: ACCOUNT, accountTail: "01" };
+  scenario.live.orders = { state: "on", accountRef: ACCOUNT, accountTail: "01", message: "주문 사용이 켜져 있습니다", accounts: [market, ...others] };
 }
 
+export const accountData = (patch: Partial<AccountData> = {}): AccountData => ({ open: [], holdings: [], executions: [], orderable: {}, ...patch });
+
 export function tradingApi(scenario: Scenario, open: TradingOpenOrder[] = []): Api {
-  const api: Api = { open, blocked: false, writes: [], placeReply: {}, batchFailures: 0, holdings: [HELD], orderableQueries: [], buyableFailure: null, policy: "cash_only", orderable: {}, policyWrites: [], policyFailure: null, executions: [] };
+  const api: Api = { open, blocked: false, writes: [], placeReply: {}, batchFailures: 0, holdings: [HELD], orderableQueries: [], buyableFailure: null, policy: "cash_only", orderable: {}, policyWrites: [], policyFailure: null, executions: [], accounts: {}, seen: [] };
   const apiError = (message: string) => ({ status: 503, body: { error: { code: "internal", message, reason: null, retryAt: null, manualActionRequired: false } } });
-  scenario.on((url) => url.pathname === "/api/trading/open-orders", () => ({ body: { accountRef: ACCOUNT, orders: api.open } }));
-  scenario.on((url) => url.pathname === "/api/trading/balance", () => ({ body: { accountRef: ACCOUNT, holdings: api.holdings, totalPurchase: 0, totalEvaluation: 0, totalProfit: 0 } }));
-  scenario.on((url) => url.pathname === "/api/trading/executions", () => ({ body: { accountRef: ACCOUNT, day: "2026-11-18", executions: api.executions } }));
-  scenario.on((url) => url.pathname === "/api/trading/commands", () => ({ body: { accountRef: ACCOUNT, blocked: api.blocked, commands: [] } }));
+  const scopeOf = (request: Request) => {
+    const url = new URL(request.url());
+    const account = url.searchParams.get("account");
+    api.seen.push({ path: url.pathname, account });
+    const other = account === null ? undefined : api.accounts[account];
+    return { ref: account ?? ACCOUNT, data: other ?? { open: api.open, holdings: api.holdings, executions: api.executions, orderable: api.orderable } };
+  };
+  scenario.on((url) => url.pathname === "/api/trading/open-orders", (request) => { const { ref, data } = scopeOf(request); return { body: { accountRef: ref, orders: data.open } }; });
+  scenario.on((url) => url.pathname === "/api/trading/balance", (request) => { const { ref, data } = scopeOf(request); return { body: { accountRef: ref, holdings: data.holdings, totalPurchase: 0, totalEvaluation: 0, totalProfit: 0 } }; });
+  scenario.on((url) => url.pathname === "/api/trading/executions", (request) => { const { ref, data } = scopeOf(request); return { body: { accountRef: ref, day: "2026-11-18", executions: data.executions } }; });
+  scenario.on((url) => url.pathname === "/api/trading/commands", (request) => ({ body: { accountRef: scopeOf(request).ref, blocked: api.blocked, commands: [] } }));
   scenario.on((url) => url.pathname === "/api/trading/orderable", (request) => {
+    const { ref, data } = scopeOf(request);
     const side = new URL(request.url()).searchParams.get("side") ?? "";
     api.orderableQueries.push(side);
     if (side === "buy" && api.buyableFailure) return api.buyableFailure;
-    const figures = { amount: 0, quantity: 0, cashAmount: 500_000_000, cashQuantity: 100_000, marginAmount: 1_500_000_000, marginQuantity: 300_000, ...api.orderable };
+    const figures = { amount: 0, quantity: 0, cashAmount: 500_000_000, cashQuantity: 100_000, marginAmount: 1_500_000_000, marginQuantity: 300_000, ...data.orderable };
     const margined = api.policy === "allow_margin" && figures.marginAmount !== null && figures.marginQuantity !== null;
     const body: TradingOrderable = {
-      accountRef: ACCOUNT, code: CODE, side: side as OrderSide, price: BASE, deposit: 520_000_000, unpaid: 0, stockRate: 100, accountRate: 40, appliedRate: 100, ...figures,
+      accountRef: ref, code: CODE, side: side as OrderSide, price: BASE, deposit: 520_000_000, unpaid: 0, stockRate: 100, accountRate: 40, appliedRate: 100, ...figures,
       policy: api.policy, amount: margined ? figures.marginAmount! : figures.cashAmount, quantity: margined ? figures.marginQuantity! : figures.cashQuantity,
     };
     return { body };
@@ -128,15 +156,18 @@ export function tradingApi(scenario: Scenario, open: TradingOpenOrder[] = []): A
     return { body: { policy: api.policy } };
   });
   scenario.on((url, request) => url.pathname.startsWith("/api/trading/commands/") && request.method() === "POST", (request) => {
-    const path = new URL(request.url()).pathname;
+    const url = new URL(request.url());
+    const path = url.pathname;
     const body = request.postDataJSON() as Record<string, unknown>;
-    api.writes.push({ path, body, header: request.headers()["x-vally-order"] });
-    if (path.endsWith("/place")) return { body: commandOf(body.side === "sell" ? "sell" : "buy", { quantity: Number(body.quantity), price: Number(body.price), ...api.placeReply }) };
-    if (path.endsWith("/modify")) return { body: commandOf("modify", { price: Number(body.price), targetOrderNo: String(body.orderNo) }) };
-    if (path.endsWith("/cancel")) return { body: commandOf("cancel", { targetOrderNo: String(body.orderNo) }) };
-    if (path.endsWith("/reconcile")) { api.blocked = false; return { body: { accountRef: ACCOUNT, cleared: 1, openOrders: api.open, executions: [] } }; }
+    const account = typeof body.account === "string" ? body.account : url.searchParams.get("account");
+    const ref = account ?? ACCOUNT;
+    api.writes.push({ path, body, header: request.headers()["x-vally-order"], account });
+    if (path.endsWith("/place")) return { body: commandOf(body.side === "sell" ? "sell" : "buy", { accountRef: ref, quantity: Number(body.quantity), price: Number(body.price), ...api.placeReply }) };
+    if (path.endsWith("/modify")) return { body: commandOf("modify", { accountRef: ref, price: Number(body.price), targetOrderNo: String(body.orderNo) }) };
+    if (path.endsWith("/cancel")) return { body: commandOf("cancel", { accountRef: ref, targetOrderNo: String(body.orderNo) }) };
+    if (path.endsWith("/reconcile")) { api.blocked = false; return { body: { accountRef: ref, cleared: 1, openOrders: api.open, executions: [] } }; }
     if (api.batchFailures > 0) { api.batchFailures -= 1; return apiError("서버가 응답하지 못했습니다"); }
-    return { body: { accountRef: ACCOUNT, blocked: false, commands: [commandOf("cancel")] } };
+    return { body: { accountRef: ref, blocked: false, commands: [commandOf("cancel", { accountRef: ref })] } };
   });
   return api;
 }
