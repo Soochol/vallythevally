@@ -910,6 +910,33 @@ test("421px 호가주문창에서 수량은 쉼표 숫자 그대로 끝까지 �
   await page.screenshot({ path: "../target/ux-screens/order-421.png" });
 });
 
+test("호가주문창 체결이 8건보다 많아 스크롤바가 보일 때 체결량 오른쪽 끝과 스크롤바 왼쪽 사이가 6px 이상이다", async ({ page, scenario }) => {
+  ordersOn(scenario);
+  tradingApi(scenario);
+  await openOrderWindow(page, scenario);
+  for (let i = 0; i < 14; i++) lastTrade(scenario, 70_000 + i, i + 1, 1_000 + i);
+  await expect(page.getByTestId("ladder-trade")).toHaveCount(14);
+  const gaps = await page.getByTestId("ladder-trade").evaluateAll((rows) => rows.map((row) => {
+    const scroller = row.parentElement!;
+    return scroller.getBoundingClientRect().left + scroller.clientWidth - row.children[1]!.getBoundingClientRect().right;
+  }));
+  for (const gap of gaps) expect(gap).toBeGreaterThanOrEqual(5.99);
+});
+
+test("호가주문창 체결 가격 왼쪽 끝과 같은 행 매도 주문 칸 오른쪽 끝 사이가 6px 이상이다", async ({ page, scenario }) => {
+  ordersOn(scenario);
+  tradingApi(scenario);
+  await openOrderWindow(page, scenario);
+  lastTrade(scenario, 70_000, 1, 3);
+  await expect(page.getByTestId("ladder-trade")).toHaveCount(1);
+  const gap = await page.evaluate(() => {
+    const price = document.querySelector("[data-testid=ladder-trade]")!.children[0]!.getBoundingClientRect();
+    const cells = [...document.querySelectorAll("[data-order-cell][data-side=sell]")].map((cell) => cell.getBoundingClientRect()).filter((rect) => rect.top < price.bottom && rect.bottom > price.top);
+    return price.left - Math.max(...cells.map((rect) => rect.right));
+  });
+  expect(gap).toBeGreaterThanOrEqual(5.99);
+});
+
 test("체결 상자 아래 10행에서도 매도 주문 칸 더블클릭은 주문을 보낸다", async ({ page, scenario }) => {
   ordersOn(scenario);
   const api = tradingApi(scenario);
