@@ -805,6 +805,33 @@ class CollectorRestartTest(FakeCollectorHost):
         self.assertEqual(self.recorded(), [])
 
 
+    def test_the_paths_that_only_move_files_or_reload_reject_a_bad_lock_wait_before_touching_anything(self):
+        units = self.home_units()
+        (units / ".vally-collector-reload-pending").write_text("")
+        (self.stubs / "collector.next").write_text("#!/bin/sh\n# next\n")
+        (units / "vally-collector.service").write_text("old")
+        (units / "vally-collector.service.next").write_text("new")
+        before = (self.stubs / "collector").read_text()
+        for path in ["--promote", "--retry-reload", "--before-start"]:
+            for value in ["1.5", "abc", "0", "3601"]:
+                result = self.restart(path, VALLY_COLLECTOR_LOCK_SECONDS=value)
+                self.assertEqual(result.returncode, 2, (path, value))
+                self.assertIn("VALLY_COLLECTOR_LOCK_SECONDS", result.stderr)
+                self.assertEqual(len(result.stderr.strip().splitlines()), 1, result.stderr)
+                self.assertEqual(self.recorded(), [], (path, value))
+                self.assertEqual((self.stubs / "collector").read_text(), before)
+                self.assertTrue((self.stubs / "collector.next").exists())
+                self.assertEqual((units / "vally-collector.service").read_text(), "old")
+                self.assertTrue((units / "vally-collector.service.next").exists())
+                self.assertTrue((units / ".vally-collector-reload-pending").exists())
+
+    def test_the_paths_that_only_move_files_or_reload_still_work_with_a_valid_lock_wait(self):
+        (self.stubs / "collector.next").write_text("#!/bin/sh\n# next\n")
+        for path in ["--promote", "--retry-reload", "--before-start"]:
+            result = self.restart(path, VALLY_COLLECTOR_LOCK_SECONDS="3600")
+            self.assertEqual(result.returncode, 0, (path, result.stderr))
+        self.assertEqual((self.stubs / "collector").read_text(), "#!/bin/sh\n# next\n")
+
     def home_units(self):
         folder = Path(self.temp.name) / ".config/systemd/user"
         folder.mkdir(parents=True, exist_ok=True)
