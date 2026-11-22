@@ -647,11 +647,16 @@ async fn a_symbol_jump_with_the_kis_source_reads_minute_and_daily_bars_and_never
 }
 
 #[tokio::test(start_paused = true)]
-async fn index_minute_pages_that_stay_empty_stop_at_the_page_budget_without_a_cursor() {
-    let rig = rig_at(friday_morning(), synthetic_master(), |_| ok_more(r#"{"rt_cd":"0","output2":[]}"#, true));
+async fn index_minute_pages_that_never_fill_a_bucket_stop_at_the_page_budget_with_an_error_not_a_finished_series() {
+    let rig = rig_at(friday_morning(), synthetic_master(), |sent| {
+        let day = friday_morning().kst_date();
+        let first = sent.tr_cont.is_none();
+        let rows = if first { format!(r#"{{"stck_bsop_date":"{}","stck_cntg_hour":"090100","bstp_nmix_prpr":"2700.00","bstp_nmix_oprc":"2700.00","bstp_nmix_hgpr":"2700.00","bstp_nmix_lwpr":"2700.00","cntg_vol":"1"}}"#, day.yyyymmdd()) } else { String::new() };
+        ok_more(format!(r#"{{"rt_cd":"0","output2":[{rows}]}}"#), true)
+    });
     let source: &dyn MarketSource = rig.market.as_ref();
-    let key = SeriesKey { feed: Feed::Index(IndexCode::KOSPI), period: Period::M5 };
-    let page = source.chart_page(key, friday_morning().kst_date(), None, Priority::Screen, MergeScope::Shared).await.unwrap();
-    assert!(page.bars.is_empty() && page.next.is_none(), "빈 봉에 연속조회 키를 주지 않는다");
+    let key = SeriesKey { feed: Feed::Index(IndexCode::KOSPI), period: Period::M60 };
+    let result = source.chart_page(key, friday_morning().kst_date(), None, Priority::Screen, MergeScope::Shared).await;
+    assert!(matches!(result, Err(SourceError::Malformed(_))), "{result:?}");
     assert_eq!(rig.transport.sent_to(KisApiId::IndexMinuteChart).len(), MINUTE_PAGE_BUDGET);
 }

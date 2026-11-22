@@ -285,7 +285,10 @@ impl KisMarket {
                 continue;
             }
             let built = build(period, &minutes, more).map_err(|bad| malformed_minute(&bad))?;
-            let next = (more && !built.bars.is_empty()).then(|| Cursor::new(MinuteCursor { position: Position::IndexNextPage, carried: built.held_back }.encode()));
+            if more && built.bars.is_empty() {
+                return Err(SourceError::Malformed("한투 지수 분봉이 쪽 예산 안에 한 칸도 채우지 못했습니다".into()));
+            }
+            let next = more.then(|| Cursor::new(MinuteCursor { position: Position::IndexNextPage, carried: built.held_back }.encode()));
             return Ok(ChartPage { bars: built.bars, next });
         }
     }
