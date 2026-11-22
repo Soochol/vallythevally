@@ -167,9 +167,19 @@ fn scrub_failed_cards(value: &mut serde_json::Value, retry_at: i64) -> bool {
                 error.insert("retryAt".into(), retry_at.into());
                 scrubbed = true;
             }
-            object.values_mut().fold(scrubbed, |any, child| scrub_failed_cards(child, retry_at) || any)
+            let mut deeper = false;
+            for child in object.values_mut() {
+                deeper |= scrub_failed_cards(child, retry_at);
+            }
+            scrubbed || deeper
         }
-        serde_json::Value::Array(items) => items.iter_mut().fold(false, |any, child| scrub_failed_cards(child, retry_at) || any),
+        serde_json::Value::Array(items) => {
+            let mut scrubbed = false;
+            for child in items {
+                scrubbed |= scrub_failed_cards(child, retry_at);
+            }
+            scrubbed
+        }
         _ => false,
     }
 }
