@@ -44,6 +44,8 @@ pub struct AppState {
     pub etf: crate::etf::EtfBook,
     pub kiwoom_catalog: crate::kiwoom_themes::CatalogStore,
     pub public_usage: Arc<crate::public::usage::Usage>,
+    pub heatmap_quotes: Arc<crate::heatmap_board::QuoteCache>,
+    pub heatmap_flow: Arc<crate::heatmap_flow::FlowCache>,
 }
 
 pub fn router(state: Arc<AppState>) -> Router {
@@ -67,9 +69,9 @@ pub fn router(state: Arc<AppState>) -> Router {
         .merge(crate::rankings::routes())
         .merge(crate::market_overview::routes())
         .merge(crate::etf::routes())
-        .merge(crate::heatmap_board::routes())
+        .merge(crate::heatmap_board::routes(state.heatmap_quotes.clone()))
         .merge(crate::kiwoom_themes::routes())
-        .merge(crate::heatmap_flow::routes())
+        .merge(crate::heatmap_flow::routes(state.heatmap_flow.clone()))
         .merge(crate::system_routes::routes(state.clone()))
         .merge(crate::account_routes::routes(state.clone()))
         .merge(crate::collector::routes())

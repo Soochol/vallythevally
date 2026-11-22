@@ -2,7 +2,10 @@
 use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
+use std::time::Duration;
+
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
+use tokio::time::Instant;
 
 pub(super) fn locked<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
     mutex.lock().unwrap_or_else(PoisonError::into_inner)
@@ -54,14 +57,27 @@ pub(super) struct MinuteWindow {
 
 impl MinuteWindow {
     pub fn admit(&mut self, limit: u32, now: i64) -> Result<(), i64> {
-        while self.starts.front().is_some_and(|&at| at + 60 <= now) {
+        self.admit_within(60, limit, now)
+    }
+
+    pub fn admit_within(&mut self, span: i64, limit: u32, now: i64) -> Result<(), i64> {
+        self.has_room(span, limit, now)?;
+        self.starts.push_back(now);
+        Ok(())
+    }
+
+    pub fn has_room(&mut self, span: i64, limit: u32, now: i64) -> Result<(), i64> {
+        while self.starts.front().is_some_and(|&at| at + span <= now) {
             self.starts.pop_front();
         }
         if self.starts.len() < limit as usize {
-            self.starts.push_back(now);
             return Ok(());
         }
-        Err(self.starts.front().map_or(now + 1, |&at| at + 60))
+        Err(self.starts.front().map_or(now + 1, |&at| at + span))
+    }
+
+    pub fn record(&mut self, now: i64) {
+        self.starts.push_back(now);
     }
 }
 
@@ -81,6 +97,37 @@ impl<T> PerAccount<T> {
         let mut entries = locked(&self.entries);
         let entry = entries.entry(account.to_owned()).or_insert_with(make);
         use_entry(entry)
+    }
+}
+
+#[derive(Debug)]
+pub(super) struct SendPacer {
+    span: Duration,
+    limit: usize,
+    sent: Mutex<VecDeque<Instant>>,
+}
+
+impl SendPacer {
+    pub fn new(span: Duration, limit: usize) -> Self {
+        SendPacer { span, limit: limit.max(1), sent: Mutex::new(VecDeque::new()) }
+    }
+
+    pub async fn pass(&self) {
+        loop {
+            let wait = {
+                let mut sent = locked(&self.sent);
+                let now = Instant::now();
+                while sent.front().is_some_and(|&at| at + self.span <= now) {
+                    sent.pop_front();
+                }
+                if sent.len() < self.limit {
+                    sent.push_back(now);
+                    return;
+                }
+                sent[sent.len() - self.limit] + self.span - now
+            };
+            tokio::time::sleep(wait).await;
+        }
     }
 }
 
@@ -154,6 +201,30 @@ mod tests {
         assert_eq!(window.admit(2, 30), Err(70));
         assert!(window.admit(2, 70).is_ok());
         assert_eq!(window.admit(2, 71), Err(80));
+    }
+
+    #[test]
+    fn a_window_of_any_span_lets_a_slot_back_in_when_its_oldest_use_leaves() {
+        let mut window = MinuteWindow::default();
+        assert!(window.admit_within(45, 2, 100).is_ok());
+        assert!(window.admit_within(45, 2, 120).is_ok());
+        assert_eq!(window.admit_within(45, 2, 144), Err(145));
+        assert!(window.admit_within(45, 2, 145).is_ok());
+        assert_eq!(window.has_room(45, 2, 146), Err(165));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_pacer_lets_its_limit_through_per_span_and_holds_the_rest_for_the_next_span() {
+        let pacer = SendPacer::new(Duration::from_millis(1050), 3);
+        let started = Instant::now();
+        let mut passed = Vec::new();
+        for _ in 0..7 {
+            pacer.pass().await;
+            passed.push(started.elapsed());
+        }
+        assert_eq!(passed[0..3], [Duration::ZERO; 3]);
+        assert_eq!(passed[3..6], [Duration::from_millis(1050); 3]);
+        assert_eq!(passed[6], Duration::from_millis(2100));
     }
 
     #[test]

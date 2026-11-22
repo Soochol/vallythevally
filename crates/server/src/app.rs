@@ -135,7 +135,7 @@ pub fn application_with_source(inputs: ApplicationInputs, mut system: SystemStat
         None => KeyRing::unconfigured(market_lane),
     });
     let accounts = crate::trading::Accounts::new(keys.clone(), rest.clone(), account_feed, clock.clone(), system.take_order_switch_store(), db.clone(), symbols.clone());
-    Arc::new(AppState { symbols, bars, rest, source, kiwoom, db, clock, static_dir, hub, screener, link, keys, system, registered, seat_rules, accounts, rankings: Default::default(), market_overview: Default::default(), etf: Default::default(), kiwoom_catalog: Default::default(), public_usage: Default::default() })
+    Arc::new(AppState { symbols, bars, rest, source, kiwoom, db, clock, static_dir, hub, screener, link, keys, system, registered, seat_rules, accounts, rankings: Default::default(), market_overview: Default::default(), etf: Default::default(), kiwoom_catalog: Default::default(), public_usage: Default::default(), heatmap_quotes: Default::default(), heatmap_flow: Default::default() })
 }
 
 pub async fn daily_maintenance(state: Arc<AppState>) {

@@ -30,10 +30,26 @@ impl Bundle {
             Bundle::MarketOverview
         } else if path == "/api/screener/run" {
             Bundle::ScreenerRun
+        } else if path == "/api/heatmap/board" {
+            Bundle::Board
+        } else if path == "/api/heatmap/flow" {
+            Bundle::Flow
+        } else if is_user_data_path(path) {
+            Bundle::UserData
         } else {
             Bundle::Shared
         }
     }
+}
+
+const USER_DATA_PATHS: &[&str] = &["/api/watchlists", "/api/screens", "/api/heatmap/themes", "/api/ui-state", "/api/layouts", "/api/drawings"];
+
+fn is_user_data_path(path: &str) -> bool {
+    USER_DATA_PATHS.iter().any(|prefix| path == *prefix || path.strip_prefix(prefix).is_some_and(|rest| rest.starts_with('/')))
+}
+
+fn is_zero(count: &u64) -> bool {
+    *count == 0
 }
 
 #[derive(Debug, Clone, Default, Serialize, PartialEq, Eq)]
@@ -45,6 +61,12 @@ pub struct BundleCounters {
     pub wait_total_ms: u64,
     pub wait_max_ms: u64,
     pub tr_calls: u64,
+    #[serde(skip_serializing_if = "is_zero")]
+    pub cached_symbols: u64,
+    #[serde(skip_serializing_if = "is_zero")]
+    pub over_budget_symbols: u64,
+    #[serde(skip_serializing_if = "is_zero")]
+    pub rejected_symbols: u64,
 }
 
 #[derive(Debug, Clone, Default, Serialize, PartialEq, Eq)]
@@ -153,6 +175,15 @@ impl Usage {
         locked(&self.counted).bundles.entry(bundle).or_default().tr_calls += count;
     }
 
+    pub fn symbols(&self, bundle: Bundle, cached: u32, fetched: u32, over_budget: u32, rejected: u32) {
+        let mut counted = locked(&self.counted);
+        let counters = counted.bundles.entry(bundle).or_default();
+        counters.cached_symbols += u64::from(cached);
+        counters.tr_calls += u64::from(fetched);
+        counters.over_budget_symbols += u64::from(over_budget);
+        counters.rejected_symbols += u64::from(rejected);
+    }
+
     pub fn waited(&self, bundle: Bundle, wait: Duration) {
         let mut counted = locked(&self.counted);
         let counters = counted.bundles.entry(bundle).or_default();
@@ -217,6 +248,26 @@ mod tests {
         assert_eq!((rankings.responses, rankings.too_many_requests, rankings.unavailable, rankings.tr_calls, rankings.wait_max_ms), (3, 1, 1, 5, 0));
         assert_eq!(snapshot.cache_hits.market_overview, 1);
         assert_eq!(snapshot.top_accounts[0], TopAccount { account: "google:a".into(), requests: 2 });
+    }
+
+    #[test]
+    fn heatmap_symbol_counts_stay_out_of_the_json_until_something_is_counted() {
+        let usage = Usage::default();
+        usage.response(Bundle::Board, 200, None);
+        let quiet = serde_json::to_value(usage.snapshot(0).bundles[&Bundle::Board].clone()).unwrap();
+        assert!(quiet.get("cachedSymbols").is_none() && quiet.get("overBudgetSymbols").is_none() && quiet.get("rejectedSymbols").is_none(), "{quiet}");
+        usage.symbols(Bundle::Board, 3, 2, 1, 4);
+        let loud = serde_json::to_value(usage.snapshot(0).bundles[&Bundle::Board].clone()).unwrap();
+        assert_eq!((loud["cachedSymbols"].as_u64(), loud["trCalls"].as_u64(), loud["overBudgetSymbols"].as_u64(), loud["rejectedSymbols"].as_u64()), (Some(3), Some(2), Some(1), Some(4)));
+    }
+
+    #[test]
+    fn user_data_and_heatmap_paths_have_their_own_bundles() {
+        for path in ["/api/watchlists", "/api/screens", "/api/heatmap/themes", "/api/ui-state", "/api/layouts", "/api/layouts/abc", "/api/drawings", "/api/drawings/d1"] {
+            assert_eq!(Bundle::of_path(path), Bundle::UserData, "{path}");
+        }
+        assert_eq!((Bundle::of_path("/api/heatmap/board"), Bundle::of_path("/api/heatmap/flow")), (Bundle::Board, Bundle::Flow));
+        assert_eq!(Bundle::of_path("/api/layoutsx"), Bundle::Shared);
     }
 
     #[test]
