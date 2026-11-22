@@ -3,7 +3,7 @@ use serde::Serialize;
 use std::collections::HashMap;
 use std::fmt;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Provider {
     Google,
@@ -66,7 +66,7 @@ fn is_unreserved(value: &str) -> bool {
         .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'.' | b'_' | b'~'))
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct StartRequest {
     pub port: ConnectorPort,
     pub state: ConnectorState,
@@ -121,4 +121,10 @@ impl CodeChallenge {
     pub fn from_stored(value: String) -> Self {
         Self(value)
     }
+}
+
+#[derive(Clone, Debug)]
+pub enum LoginFlow {
+    Connector(StartRequest),
+    Browser,
 }

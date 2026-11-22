@@ -1,4 +1,6 @@
+use crate::model::Provider;
 use crate::secrets::Secret;
+use std::collections::HashSet;
 use std::fmt;
 use url::{Host, Url};
 
@@ -41,9 +43,12 @@ impl PublicUrl {
         self.0.scheme() == "https"
     }
 
+    pub fn origin(&self) -> &str {
+        self.0.as_str().trim_end_matches('/')
+    }
+
     pub fn callback_url(&self, provider: &str) -> String {
-        let origin = self.0.as_str().trim_end_matches('/');
-        format!("{origin}/v1/auth/{provider}/callback")
+        format!("{}/v1/auth/{provider}/callback", self.origin())
     }
 }
 
@@ -89,7 +94,51 @@ pub struct AccountConfig {
     pub naver: NaverConfig,
 }
 
+#[derive(Clone, Debug, Default)]
+pub struct BlockedIdentities(HashSet<(Provider, String)>);
+
+impl BlockedIdentities {
+    pub fn new(identities: impl IntoIterator<Item = (Provider, String)>) -> Self {
+        Self(identities.into_iter().collect())
+    }
+
+    pub fn parse_list(value: &str) -> Result<Self, ConfigError> {
+        let identities = value
+            .split(',')
+            .map(str::trim)
+            .filter(|entry| !entry.is_empty())
+            .map(|entry| {
+                let (provider, subject) = entry
+                    .split_once(':')
+                    .filter(|(_, subject)| !subject.is_empty())
+                    .ok_or_else(|| ConfigError("차단 목록은 provider:subject를 쉼표로 이어 적습니다".into()))?;
+                let provider = Provider::parse(provider).map_err(|_| ConfigError("차단 목록의 provider는 google이나 naver여야 합니다".into()))?;
+                Ok((provider, subject.to_owned()))
+            })
+            .collect::<Result<Vec<_>, ConfigError>>()?;
+        Ok(Self::new(identities))
+    }
+
+    pub(crate) fn contains(&self, provider: Provider, subject: &str) -> bool {
+        self.0.iter().any(|(blocked_provider, blocked_subject)| *blocked_provider == provider && blocked_subject == subject)
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct AccountOptions {
+    pub pending_login_limit: u32,
+    pub max_accounts: u32,
+    pub blocked: BlockedIdentities,
+}
+
+impl Default for AccountOptions {
+    fn default() -> Self {
+        Self { pending_login_limit: DEFAULT_PENDING_LOGIN_LIMIT, max_accounts: DEFAULT_MAX_ACCOUNTS, blocked: BlockedIdentities::default() }
+    }
+}
+
 pub const DEFAULT_PENDING_LOGIN_LIMIT: u32 = 10_000;
+pub const DEFAULT_MAX_ACCOUNTS: u32 = 100;
 pub const GOOGLE_AUTHORIZE_URL: &str = "https://accounts.google.com/o/oauth2/v2/auth";
 pub const GOOGLE_TOKEN_URL: &str = "https://oauth2.googleapis.com/token";
 pub const NAVER_AUTHORIZE_URL: &str = "https://nid.naver.com/oauth2.0/authorize";

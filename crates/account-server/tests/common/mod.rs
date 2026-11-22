@@ -1,7 +1,7 @@
 #![allow(dead_code)]
 use account_server::fake_idp::{ClientCredentials, FakeIdp};
 use account_server::{
-    AccountConfig, GoogleConfig, IdpUrl, ManualClock, NaverConfig, PublicUrl, Secret, UnixSeconds, open_database, router_with_pending_login_limit,
+    AccountConfig, AccountOptions, Accounts, GoogleConfig, IdpUrl, ManualClock, NaverConfig, PublicUrl, Secret, UnixSeconds, open_database,
 };
 use base64::Engine;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
@@ -80,7 +80,7 @@ pub fn location(response: &reqwest::Response) -> Url {
 
 pub struct Harness {
     pub clock: Arc<ManualClock>,
-    pub idp: FakeIdp,
+    pub idp: Arc<FakeIdp>,
     pub base: String,
     pub pool: SqlitePool,
     pub dir: tempfile::TempDir,
@@ -104,14 +104,22 @@ impl Harness {
     }
 
     pub async fn start_with_limit(pending_login_limit: u32) -> Self {
+        Self::start_with_options(AccountOptions { pending_login_limit, ..AccountOptions::default() }).await
+    }
+
+    pub async fn start_with_options(options: AccountOptions) -> Self {
+        Self::start_configured(options, None).await
+    }
+
+    pub async fn start_configured(options: AccountOptions, public_origin: Option<&str>) -> Self {
         let clock = Arc::new(ManualClock::new(UnixSeconds(START_TIME)));
-        let idp = FakeIdp::start(credentials(GOOGLE_ID, GOOGLE_SECRET), credentials(NAVER_ID, NAVER_SECRET), clock.clone()).await;
+        let idp = Arc::new(FakeIdp::start(credentials(GOOGLE_ID, GOOGLE_SECRET), credentials(NAVER_ID, NAVER_SECRET), clock.clone()).await);
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let base = format!("http://{}", listener.local_addr().unwrap());
-        let config = test_config(&base, &idp);
+        let config = test_config(public_origin.unwrap_or(&base), &idp);
         let dir = tempfile::tempdir().unwrap();
         let pool = open_database(&dir.path().join("account.db")).await.unwrap();
-        let app = router_with_pending_login_limit(config, pool.clone(), clock.clone(), pending_login_limit);
+        let app = Accounts::new(config, options, pool.clone(), clock.clone()).router();
         tokio::spawn(async move {
             axum::serve(listener, app).await.unwrap();
         });
@@ -196,6 +204,8 @@ impl Harness {
             "pending_logins" => "SELECT COUNT(*) FROM pending_logins",
             "auth_codes" => "SELECT COUNT(*) FROM auth_codes",
             "connector_tokens" => "SELECT COUNT(*) FROM connector_tokens",
+            "sessions" => "SELECT COUNT(*) FROM sessions",
+            "setup_documents" => "SELECT COUNT(*) FROM setup_documents",
             other => panic!("모르는 표 {other}"),
         };
         sqlx::query_scalar(sql).fetch_one(&self.pool).await.unwrap()

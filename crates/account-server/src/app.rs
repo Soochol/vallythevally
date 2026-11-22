@@ -1,10 +1,11 @@
 use crate::clock::Clock;
-use crate::config::{AccountConfig, DEFAULT_PENDING_LOGIN_LIMIT};
+use crate::config::{AccountConfig, AccountOptions};
 use crate::error::ApiError;
 use crate::idp::{AuthorizeParams, CodeGrant, IdpClient};
-use crate::model::{ConnectorPort, Provider, StartRequest};
+use crate::model::{ConnectorPort, LoginFlow, Provider, StartRequest};
 use crate::secrets::{random_string, s256_challenge};
-use crate::store::{PendingLoginSlot, Store};
+use crate::setup_api::{ChangesResponse, PushResponse, SummaryResponse};
+use crate::store::{AccountSlot, PendingLoginSlot, Store};
 use axum::body::Bytes;
 use axum::extract::{DefaultBodyLimit, Path, RawQuery, State};
 use axum::http::header::{CACHE_CONTROL, CONTENT_TYPE, COOKIE, LOCATION, RETRY_AFTER, SET_COOKIE};
@@ -22,15 +23,17 @@ pub(crate) struct AppState {
     pub(crate) store: Store,
     idp: IdpClient,
     pub(crate) clock: Arc<dyn Clock>,
+    pub(crate) public_origin: String,
     cookie_prefix: &'static str,
-    secure_cookie: bool,
-    pending_login_limit: u32,
+    pub(crate) session_cookie_name: &'static str,
+    pub(crate) secure_cookie: bool,
+    pub(crate) options: AccountOptions,
 }
 
 pub(crate) type Shared = State<Arc<AppState>>;
 
 pub fn router(config: AccountConfig, pool: SqlitePool, clock: Arc<dyn Clock>) -> Router {
-    router_with_pending_login_limit(config, pool, clock, DEFAULT_PENDING_LOGIN_LIMIT)
+    Accounts::new(config, AccountOptions::default(), pool, clock).router()
 }
 
 pub fn router_with_pending_login_limit(
@@ -39,27 +42,77 @@ pub fn router_with_pending_login_limit(
     clock: Arc<dyn Clock>,
     pending_login_limit: u32,
 ) -> Router {
-    let secure_cookie = config.public_url.is_secure();
-    let state = Arc::new(AppState {
-        store: Store::new(pool),
-        idp: IdpClient::new(&config),
-        clock,
-        cookie_prefix: if secure_cookie { "__Host-vally_login_" } else { "vally_login_" },
-        secure_cookie,
-        pending_login_limit,
-    });
-    Router::new()
-        .route("/v1/auth/{provider}/start", get(start))
-        .route("/v1/auth/{provider}/callback", get(callback))
-        .route("/v1/auth/token", post(exchange_token).delete(revoke_token))
-        .route("/v1/me", get(me))
-        .route("/v1/account", delete(delete_account))
-        .layer(DefaultBodyLimit::max(4096))
-        .merge(crate::setup_api::routes())
-        .fallback(|| async { ApiError::not_found() })
-        .method_not_allowed_fallback(|| async { ApiError::method_not_allowed() })
-        .layer(axum::middleware::map_response(no_store))
-        .with_state(state)
+    Accounts::new(config, AccountOptions { pending_login_limit, ..AccountOptions::default() }, pool, clock).router()
+}
+
+pub struct SessionAccount {
+    pub account_id: String,
+    pub provider: Provider,
+    pub subject: String,
+    pub created_at: i64,
+}
+
+#[derive(Clone)]
+pub struct Accounts(Arc<AppState>);
+
+impl Accounts {
+    pub fn new(config: AccountConfig, options: AccountOptions, pool: SqlitePool, clock: Arc<dyn Clock>) -> Self {
+        let secure_cookie = config.public_url.is_secure();
+        Self(Arc::new(AppState {
+            store: Store::new(pool),
+            idp: IdpClient::new(&config),
+            clock,
+            public_origin: config.public_url.origin().to_owned(),
+            cookie_prefix: if secure_cookie { "__Host-vally_login_" } else { "vally_login_" },
+            session_cookie_name: if secure_cookie { "__Host-vally_session" } else { "vally_session" },
+            secure_cookie,
+            options,
+        }))
+    }
+
+    pub fn router(&self) -> Router {
+        let routes = Router::new()
+            .route("/v1/auth/{provider}/start", get(start))
+            .route("/v1/auth/token", post(exchange_token).delete(revoke_token))
+            .route("/v1/me", get(me))
+            .merge(self.shared_routes());
+        self.finish(routes.layer(DefaultBodyLimit::max(4096)).merge(crate::setup_api::routes()))
+    }
+
+    pub fn browser_router(&self) -> Router {
+        self.finish(self.shared_routes().layer(DefaultBodyLimit::max(4096)))
+    }
+
+    fn shared_routes(&self) -> Router<Arc<AppState>> {
+        Router::new()
+            .route("/v1/auth/{provider}/callback", get(callback))
+            .route("/v1/account", delete(delete_account))
+            .merge(crate::session::routes())
+    }
+
+    fn finish(&self, routes: Router<Arc<AppState>>) -> Router {
+        routes
+            .fallback(|| async { ApiError::not_found() })
+            .method_not_allowed_fallback(|| async { ApiError::method_not_allowed() })
+            .layer(axum::middleware::map_response(no_store))
+            .with_state(self.0.clone())
+    }
+
+    pub async fn session_account(&self, headers: &HeaderMap) -> Result<Option<SessionAccount>, sqlx::Error> {
+        crate::session::session_account(&self.0, headers).await
+    }
+
+    pub async fn setup_push(&self, account_id: &str, body: &[u8]) -> Result<PushResponse, ApiError> {
+        crate::setup_api::push(&self.0.store, self.0.clock.now().0.saturating_mul(1000), account_id, body).await
+    }
+
+    pub async fn setup_changes(&self, account_id: &str, since: i64, limit: i64) -> Result<ChangesResponse, ApiError> {
+        crate::setup_api::changes(&self.0.store, account_id, since, limit).await
+    }
+
+    pub async fn setup_summary(&self, account_id: &str) -> Result<SummaryResponse, ApiError> {
+        crate::setup_api::summary(&self.0.store, account_id).await
+    }
 }
 
 async fn no_store(response: Response) -> Response {
@@ -96,6 +149,17 @@ fn with_cookie(mut response: Response, cookie: &str) -> Response {
     response
 }
 
+pub(crate) fn cookie_value(headers: &HeaderMap, name: &str) -> Option<String> {
+    headers
+        .get_all(COOKIE)
+        .iter()
+        .filter_map(|value| value.to_str().ok())
+        .flat_map(|line| line.split(';'))
+        .filter_map(|pair| pair.trim().split_once('='))
+        .find(|(cookie_name, _)| *cookie_name == name)
+        .map(|(_, value)| value.to_owned())
+}
+
 impl AppState {
     fn login_cookie(&self, idp_state: &str, value: &str, max_age: u32) -> String {
         let secure = if self.secure_cookie { "; Secure" } else { "" };
@@ -103,15 +167,7 @@ impl AppState {
     }
 
     fn browser_secret(&self, headers: &HeaderMap, idp_state: &str) -> Option<String> {
-        let cookie_name = format!("{}{idp_state}", self.cookie_prefix);
-        headers
-            .get_all(COOKIE)
-            .iter()
-            .filter_map(|value| value.to_str().ok())
-            .flat_map(|line| line.split(';'))
-            .filter_map(|pair| pair.trim().split_once('='))
-            .find(|(name, _)| *name == cookie_name)
-            .map(|(_, value)| value.to_owned())
+        cookie_value(headers, &format!("{}{idp_state}", self.cookie_prefix))
     }
 }
 
@@ -122,6 +178,10 @@ async fn start(
 ) -> Result<Response, ApiError> {
     let provider = Provider::parse(&provider)?;
     let request = StartRequest::parse(&query_map(raw))?;
+    begin_login(&state, provider, LoginFlow::Connector(request)).await
+}
+
+pub(crate) async fn begin_login(state: &AppState, provider: Provider, flow: LoginFlow) -> Result<Response, ApiError> {
     let now = state.clock.now();
     state.store.purge_expired(now).await?;
     let idp_state = random_string(32);
@@ -135,12 +195,10 @@ async fn start(
                 provider,
                 browser_secret: &browser_secret,
                 nonce: &nonce,
-                port: request.port,
-                connector_state: &request.state,
-                code_challenge: &request.code_challenge,
+                flow: &flow,
             },
             now,
-            state.pending_login_limit,
+            state.options.pending_login_limit,
         )
         .await?;
     if matches!(slot, PendingLoginSlot::Full) {
@@ -175,6 +233,60 @@ fn connector_url(port: ConnectorPort, pairs: &[(&str, &str)]) -> String {
     url.into()
 }
 
+#[derive(Clone, Copy)]
+enum Refusal {
+    Cancelled,
+    IdpFailed,
+    AccountLimit,
+    Blocked,
+}
+
+impl Refusal {
+    fn code(self) -> &'static str {
+        match self {
+            Self::Cancelled => "cancelled",
+            Self::IdpFailed => "idp_failed",
+            Self::AccountLimit => "account_limit",
+            Self::Blocked => "blocked",
+        }
+    }
+}
+
+async fn verified_subject(
+    state: &AppState,
+    provider: Provider,
+    query: &HashMap<String, String>,
+    idp_state: &str,
+    nonce: &str,
+    now: crate::clock::UnixSeconds,
+) -> Result<String, Refusal> {
+    if query.contains_key("error") {
+        return Err(Refusal::Cancelled);
+    }
+    let Some(code) = query.get("code") else {
+        return Err(Refusal::IdpFailed);
+    };
+    state.idp.subject(provider, CodeGrant { code, state: idp_state, nonce, now }).await.map_err(|failure| {
+        tracing::warn!(%provider, reason = failure.0, "IdP 로그인 실패");
+        Refusal::IdpFailed
+    })
+}
+
+async fn admitted_account(
+    state: &AppState,
+    provider: Provider,
+    subject: &str,
+    now: crate::clock::UnixSeconds,
+) -> Result<Result<String, Refusal>, ApiError> {
+    if state.options.blocked.contains(provider, subject) {
+        return Ok(Err(Refusal::Blocked));
+    }
+    Ok(match state.store.account_for_identity(provider, subject, now, state.options.max_accounts).await? {
+        AccountSlot::Existing(account_id) | AccountSlot::Created(account_id) => Ok(account_id),
+        AccountSlot::Full => Err(Refusal::AccountLimit),
+    })
+}
+
 async fn callback(
     State(state): Shared,
     Path(provider): Path<String>,
@@ -194,27 +306,38 @@ async fn callback(
         return Ok(login_error_page());
     };
     let clear = state.login_cookie(idp_state, "", 0);
-    let back = |pairs: &[(&str, &str)]| with_cookie(redirect(&connector_url(pending.port, pairs)), &clear);
-    let connector_state = pending.connector_state.as_str();
-    if query.contains_key("error") {
-        return Ok(back(&[("error", "cancelled"), ("state", connector_state)]));
-    }
-    let Some(code) = query.get("code") else {
-        return Ok(back(&[("error", "idp_failed"), ("state", connector_state)]));
+    let admission = match verified_subject(&state, provider, &query, idp_state, &pending.nonce, now).await {
+        Ok(subject) => admitted_account(&state, provider, &subject, now).await?,
+        Err(refusal) => Err(refusal),
     };
-    let grant = CodeGrant { code, state: idp_state, nonce: &pending.nonce, now };
-    let subject = match state.idp.subject(provider, grant).await {
-        Ok(subject) => subject,
-        Err(failure) => {
-            tracing::warn!(%provider, reason = failure.0, "IdP 로그인 실패");
-            return Ok(back(&[("error", "idp_failed"), ("state", connector_state)]));
+    match pending.flow {
+        LoginFlow::Connector(request) => {
+            let back = |pairs: &[(&str, &str)]| with_cookie(redirect(&connector_url(request.port, pairs)), &clear);
+            let connector_state = request.state.as_str();
+            match admission {
+                Err(refusal) => Ok(back(&[("error", refusal.code()), ("state", connector_state)])),
+                Ok(account_id) => {
+                    let one_time_code = random_string(32);
+                    state.store.insert_auth_code(&one_time_code, &account_id, &request.code_challenge, now).await?;
+                    tracing::info!(%provider, account_id, "로그인 코드 발급");
+                    Ok(back(&[("code", &one_time_code), ("state", connector_state)]))
+                }
+            }
         }
-    };
-    let account_id = state.store.account_for_identity(provider, &subject, now).await?;
-    let one_time_code = random_string(32);
-    state.store.insert_auth_code(&one_time_code, &account_id, &pending.code_challenge, now).await?;
-    tracing::info!(%provider, account_id, "로그인 코드 발급");
-    Ok(back(&[("code", &one_time_code), ("state", connector_state)]))
+        LoginFlow::Browser => {
+            let landing = match admission {
+                Err(refusal) => format!("{}/?login=error&reason={}", state.public_origin, refusal.code()),
+                Ok(account_id) => {
+                    let session = random_string(32);
+                    state.store.insert_session(&session, &account_id, now).await?;
+                    tracing::info!(%provider, account_id, "브라우저 로그인");
+                    let response = with_cookie(redirect(&format!("{}/", state.public_origin)), &clear);
+                    return Ok(with_cookie(response, &state.session_cookie(&session)));
+                }
+            };
+            Ok(with_cookie(redirect(&landing), &clear))
+        }
+    }
 }
 
 #[derive(Deserialize)]
@@ -287,9 +410,12 @@ async fn revoke_token(State(state): Shared, headers: HeaderMap) -> Result<Status
     Ok(StatusCode::NO_CONTENT)
 }
 
-async fn delete_account(State(state): Shared, headers: HeaderMap) -> Result<StatusCode, ApiError> {
-    let (_, account_id) = authenticate(&state, &headers).await?;
-    state.store.delete_account(&account_id).await?;
-    tracing::info!(account_id, "계정 삭제");
-    Ok(StatusCode::NO_CONTENT)
+async fn delete_account(State(state): Shared, headers: HeaderMap) -> Result<Response, ApiError> {
+    if headers.contains_key("authorization") {
+        let (_, account_id) = authenticate(&state, &headers).await?;
+        state.store.delete_account(&account_id).await?;
+        tracing::info!(account_id, "계정 삭제");
+        return Ok(StatusCode::NO_CONTENT.into_response());
+    }
+    crate::session::delete_session_account(&state, &headers).await
 }
