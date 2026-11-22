@@ -237,9 +237,10 @@ test.describe("로그인 뒤", () => {
     await expect(flowLine(page)).toHaveCount(2);
     const loaded = asked.length;
     const now = await page.evaluate(() => Date.now());
-    await page.clock.pauseAt(now + 1);
-    const untilNextMinute = KST_MINUTE_MS - (now % KST_MINUTE_MS);
-    await page.clock.runFor(untilNextMinute + 1_900 - 1);
+    const pausedAt = now + 1_000;
+    await page.clock.pauseAt(pausedAt);
+    const untilNextMinute = KST_MINUTE_MS - (pausedAt % KST_MINUTE_MS);
+    await page.clock.runFor(untilNextMinute + 1_900);
     expect(asked).toHaveLength(loaded);
     await page.clock.runFor(8_200);
     await expect.poll(() => asked.length).toBe(loaded * 2);
