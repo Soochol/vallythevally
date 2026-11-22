@@ -7,6 +7,7 @@ import type { MinutePeriod } from "../lib/symbol";
 import type { WatchColumn } from "../lib/watchlist";
 import type { DrawingPrefs } from "../chart/drawings/prefs";
 import { actualKeys, type ActionKeys, type HotkeyOverrides } from "../lib/hotkeys";
+import { type OrderEntry, withOrderEntry } from "../features/order/orderEntries";
 import type { OrderSettings } from "../features/order/orderSettings";
 import { DEFAULT_UI_PREFS, MAX_RECENT, sortColumns, type IndicatorWindow, type Theme, type UiExtra, type UiPrefs } from "../persist/uiState";
 
@@ -27,6 +28,7 @@ interface UiStore {
   setLayoutMode(mode: LayoutMode): void;
   setVenue(venue: Venue): void;
   setOrderSettings(settings: OrderSettings): void;
+  rememberOrderEntry(key: string, entry: OrderEntry): void;
   setHotkeys(hotkeys: HotkeyOverrides): void;
   setPageLink(link: LinkColor | null): void;
 }
@@ -54,6 +56,7 @@ export const useUiStore = create<UiStore>()((set) => {
     setActiveWatchlist: (id) => edit((p) => (p.activeWatchlistId === id ? p : { ...p, activeWatchlistId: id })),
     setLayoutMode: (layoutMode) => edit((p) => (p.layoutMode === layoutMode ? p : { ...p, layoutMode })),
     setOrderSettings: (orderSettings) => edit((p) => (p.orderSettings === orderSettings ? p : { ...p, orderSettings })),
+    rememberOrderEntry: (key, entry) => edit((p) => ({ ...p, orderEntries: withOrderEntry(p.orderEntries, key, entry) })),
     setHotkeys: (hotkeys) => edit((p) => (p.hotkeys === hotkeys ? p : { ...p, hotkeys })),
     setPageLink: (pageLink) => edit((p) => (p.pageLink === pageLink ? p : { ...p, pageLink })),
     setVenue: (venue) => edit((p) => (p.venue === venue ? p : { ...p, venue })),

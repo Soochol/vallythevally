@@ -258,6 +258,7 @@ test("UI 설정을 바꾸면 모르는 키와 함께 UiState를 보낸다", asyn
         layoutMode: "dock",
         venue: "combined",
         orderSettings: DEFAULT_UI_PREFS.orderSettings,
+        orderEntries: {},
         hotkeys: {},
         pageLink: "a",
         revision: expect.any(Number),
