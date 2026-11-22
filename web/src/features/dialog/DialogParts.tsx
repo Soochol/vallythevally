@@ -31,13 +31,13 @@ interface FrameProps {
   width: string;
   onClose(reason?: "escape" | "outside"): void;
   panelRef?: Ref<HTMLDivElement>;
-  variant?: "command";
+  variant?: "command" | "drawer";
   children: ReactNode;
 }
 
 export function DialogFrame({ labelledBy, width, onClose, panelRef, children, variant }: FrameProps) {
   return (
-    <Popover backdrop data-command-frame={variant === "command" ? "" : undefined} onClose={onClose}
+    <Popover backdrop data-command-frame={variant === "command" ? "" : undefined} data-drawer={variant === "drawer" ? "" : undefined} onClose={onClose}
       className="ui-dialog-backdrop fixed inset-0 z-50 flex justify-center bg-[var(--scrim)]"
     >
       <div
@@ -45,6 +45,7 @@ export function DialogFrame({ labelledBy, width, onClose, panelRef, children, va
         role="dialog"
         aria-modal="true"
         aria-labelledby={labelledBy}
+        data-drawer={variant === "drawer" ? "" : undefined}
         tabIndex={-1}
         onKeyDown={(e) => onDialogKeyDown(e, onClose)}
         className={
