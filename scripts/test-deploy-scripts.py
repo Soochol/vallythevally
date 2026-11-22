@@ -1102,6 +1102,10 @@ class CollectorRestartTest(FakeCollectorHost):
 
     def test_a_value_with_other_control_or_line_separator_characters_is_shown_escaped_on_one_line(self):
         cases = [
+            ("5\\6", "5\\\\6"),
+            ("5\\n6", "5\\\\n6"),
+            ("5\\\n6", "5\\\\\\n6"),
+            ("5\\x1b6", "5\\\\x1b6"),
             ("5\x016", "5\\x016"),
             ("5\x0b6", "5\\x0b6"),
             ("5\x7f6", "5\\x7f6"),
