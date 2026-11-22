@@ -14,6 +14,7 @@ Environment=VALLY_STATE=%h/.local/state/vallythevally/collector
 Environment=VALLY_HOLIDAY_KEY=%h/.config/vally/holiday-service-key
 Environment=RUST_LOG=info
 WorkingDirectory=%h
+ExecStartPre=-%h/.local/bin/vally-collector-restart --before-start
 ExecStart=%h/.local/bin/collector supervise --keys ${VALLY_KEYS} --data ${VALLY_DATA} --state ${VALLY_STATE} --holiday-key ${VALLY_HOLIDAY_KEY}
 ExecStopPost=/bin/sh -c 'test "$SERVICE_RESULT" = success || exec systemctl --user start --no-block vally-collector-alert.service'
 Restart=on-failure

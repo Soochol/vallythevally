@@ -13,7 +13,14 @@ tab="$(printf '\t')"
 bin_dir="$(dirname "$collector")"
 unit_dir="${VALLY_SYSTEMD_USER_DIR:-${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user}"
 reload_pending="$unit_dir/.vally-collector-reload-pending"
+install_verdict="$unit_dir/.vally-collector-install-verdict"
+lock_file="$unit_dir/.vally-collector-deploy.lock"
+alert_script="$bin_dir/vally-collector-alert-telegram"
 stable_max=600
+lock_wait_seconds="${VALLY_COLLECTOR_LOCK_SECONDS:-120}"
+install_verdict_minutes=30
+alert_on_failure=no
+units_promoted=no
 
 check_window() {
     judge="$collector"
@@ -22,35 +29,140 @@ check_window() {
     "$judge" restart-window --data "$data_dir" --finalize-allowance-minutes "$allowance" $schedule_args
 }
 
+resolve_link() {
+    if resolved="$(readlink -f "$1")"; then
+        printf '%s\n' "$resolved"
+    elif [ -L "$1" ]; then
+        echo "vally-deploy collector-restart: $1의 심볼릭 링크를 풀지 못해 건드리지 않습니다" >&2
+        return 1
+    else
+        printf '%s\n' "$1"
+    fi
+}
+
+acquire_lock() {
+    mkdir -p "$unit_dir"
+    exec 9>"$lock_file"
+    if ! command -v flock >/dev/null 2>&1; then
+        echo "vally-deploy collector-restart: flock이 없어 동시 실행을 막지 못합니다" >&2
+        return 0
+    fi
+    if ! flock -w "$lock_wait_seconds" 9; then
+        echo "vally-deploy collector-restart: 다른 배포 단계가 ${lock_wait_seconds}초 넘게 잠금을 쥐고 있습니다($lock_file)" >&2
+        return 1
+    fi
+}
+
+release_lock() {
+    exec 9>&-
+}
+
+alert_failure() {
+    [ "$alert_on_failure" = yes ] || return 0
+    [ -x "$alert_script" ] || return 0
+    "$alert_script" "$1" || echo "vally-deploy collector-restart: 경보를 보내지 못했습니다" >&2
+}
+
+roll_back() {
+    for real in "$@"; do
+        if [ -e "$real.prev" ]; then
+            { ln -f "$real" "$real.next" && mv -f "$real.prev" "$real"; } || echo "vally-deploy collector-restart: $real을 되돌리지 못했습니다" >&2
+        else
+            mv -f "$real" "$real.next" || echo "vally-deploy collector-restart: $real을 되돌리지 못했습니다" >&2
+        fi
+    done
+}
+
+fail_promotion() {
+    reason="$1"
+    shift
+    roll_back "$@"
+    release_lock
+    echo "vally-deploy collector-restart: $reason. 옮긴 파일을 되돌려 옛 판 그대로 두었습니다" >&2
+    alert_failure "[수집 경보] 수집 데몬 새 판 적용이 멈췄다: $reason. 옛 판 그대로 돌고 있다. 마감 뒤 collector-restart를 다시 돌려라."
+    return 1
+}
+
 promote_pending() {
-    for target in "$collector" "$bin_dir/vally-collector-alert-telegram" "$unit_dir/vally-collector.service" "$unit_dir/vally-collector-alert.service"; do
-        real="$(readlink -f "$target" || echo "$target")"
+    units_promoted=no
+    acquire_lock || return 1
+    set --
+    for target in "$collector" "$bin_dir/vally-collector-alert-telegram" "$bin_dir/vally-collector-restart" "$unit_dir/vally-collector.service" "$unit_dir/vally-collector-alert.service"; do
+        if ! real="$(resolve_link "$target")"; then
+            fail_promotion "$target의 심볼릭 링크를 풀지 못함" "$@"
+            return 1
+        fi
         [ -e "$real.next" ] || continue
         case "$target" in
-            "$unit_dir"/*) mkdir -p "$unit_dir" && : > "$reload_pending" ;;
+            "$unit_dir"/*) : > "$reload_pending"; units_promoted=yes ;;
         esac
-        mv -f "$real.next" "$real"
-        echo "옆 자리의 새 판을 제자리로 옮김: $real"
+        if { [ ! -e "$real" ] || ln -f "$real" "$real.prev"; } && mv -f "$real.next" "$real"; then
+            set -- "$@" "$real"
+            echo "옆 자리의 새 판을 제자리로 옮김: $real"
+        else
+            rm -f "$real.prev"
+            fail_promotion "$real을 옮기지 못함" "$@"
+            return 1
+        fi
     done
     if [ -e "$reload_pending" ]; then
-        systemctl --user daemon-reload
-        rm -f "$reload_pending"
-        echo "유닛이 바뀌어 daemon-reload를 했습니다"
+        if systemctl --user daemon-reload; then
+            rm -f "$reload_pending"
+            echo "유닛이 바뀌어 daemon-reload를 했습니다"
+        else
+            fail_promotion "daemon-reload에 실패함" "$@"
+            return 1
+        fi
+    fi
+    for real in "$@"; do
+        rm -f "$real.prev"
+    done
+    release_lock
+}
+
+retry_reload() {
+    acquire_lock || return 1
+    if [ -e "$reload_pending" ]; then
+        if systemctl --user daemon-reload; then
+            rm -f "$reload_pending"
+            echo "앞서 실패한 daemon-reload를 다시 했습니다"
+        else
+            release_lock
+            echo "vally-deploy collector-restart: 앞서 실패한 daemon-reload가 또 실패했습니다" >&2
+            return 1
+        fi
+    fi
+    release_lock
+}
+
+before_start() {
+    alert_on_failure=yes
+    promote_pending || return 0
+    if [ "$units_promoted" = yes ]; then
+        systemd-run --user --unit="$reservation-after-start" --on-active=10 --collect systemctl --user restart "$service" >/dev/null || true
+        echo "유닛이 바뀌었으니 시작 뒤 10초에 한 번 다시 시작해 새 유닛 정의를 씁니다"
     fi
 }
 
 case "${1:-}" in
     --check) check_window; exit 0 ;;
     --promote) promote_pending; exit 0 ;;
+    --retry-reload) retry_reload; exit 0 ;;
+    --before-start) before_start; exit 0 ;;
 esac
 
+stable_digits="${stable#"${stable%%[!0]*}"}"
 case "$stable" in
-    ''|*[!0-9]*|?????*) echo "vally-deploy collector-restart: VALLY_COLLECTOR_STABLE_SECONDS는 1 이상 ${stable_max} 이하의 정수여야 합니다($stable)" >&2; exit 2 ;;
+    ''|*[!0-9]*) stable_digits="" ;;
 esac
-if [ "$stable" -lt 1 ] || [ "$stable" -gt "$stable_max" ]; then
+case "$stable_digits" in
+    ''|????*) echo "vally-deploy collector-restart: VALLY_COLLECTOR_STABLE_SECONDS는 1 이상 ${stable_max} 이하의 정수여야 합니다($stable)" >&2; exit 2 ;;
+esac
+if [ "$stable_digits" -gt "$stable_max" ]; then
     echo "vally-deploy collector-restart: VALLY_COLLECTOR_STABLE_SECONDS는 1 이상 ${stable_max} 이하의 정수여야 합니다($stable)" >&2
     exit 2
 fi
+stable="$stable_digits"
 
 cancel_reservation() {
     systemctl --user stop "$reservation.timer" 2>/dev/null || true
@@ -71,11 +183,28 @@ restart_and_watch() {
     echo "$service를 재시작했고 ${stable}초 동안 active입니다"
 }
 
+install_judged_now() {
+    [ -e "$install_verdict" ] || return 1
+    [ -n "$(find "$install_verdict" -mmin "-$install_verdict_minutes" 2>/dev/null)" ] || return 1
+    [ "$(cat "$install_verdict")" = now ]
+}
+
 if [ "${1:-}" = "--scheduled" ]; then
+    alert_on_failure=yes
+    rm -f "$install_verdict"
     echo "예약된 재시작: 마감 정리 여유가 끝난 시각이라 바로 재시작합니다"
     restart_and_watch
     exit 0
 fi
+
+if install_judged_now; then
+    rm -f "$install_verdict"
+    echo "재시작: 설치 단계가 수집 시간 밖이라 판정하고 새 판을 제자리에 두었으므로 같은 판정을 따릅니다"
+    cancel_reservation
+    restart_and_watch
+    exit 0
+fi
+rm -f "$install_verdict"
 
 if ! verdict="$(check_window)"; then
     echo "vally-deploy collector-restart: 재시작해도 되는지 판정하지 못했습니다($collector restart-window 실패). 재시작하지 않았습니다" >&2

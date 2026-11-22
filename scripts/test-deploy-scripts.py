@@ -1,3 +1,4 @@
+import fcntl
 import os
 from pathlib import Path
 import shutil
@@ -5,6 +6,8 @@ import sqlite3
 import stat
 import subprocess
 import tempfile
+import threading
+import time
 import unittest
 
 
@@ -182,7 +185,10 @@ class CollectorInstallTest(FakeCollectorHost):
             (self.units / name).write_text("[Service]\nExecStart=/old\n")
 
     def names(self, folder):
-        return sorted(path.name for path in folder.iterdir())
+        return sorted(path.name for path in folder.iterdir() if not path.name.startswith("."))
+
+    def inodes(self):
+        return {path.name: path.stat().st_ino for path in [*self.bin.iterdir(), *self.units.iterdir()] if not path.name.startswith(".")}
 
     def test_missing_build_fails_without_touching_anything(self):
         self.built.unlink()
@@ -201,14 +207,14 @@ class CollectorInstallTest(FakeCollectorHost):
         self.assertEqual(target.read_text(), self.script_text("new collector"))
         self.assertNotEqual(target.stat().st_ino, old_inode)
         self.assertTrue(target.stat().st_mode & stat.S_IXUSR)
-        self.assertEqual(self.names(self.bin), ["collector"])
+        self.assertEqual(self.names(self.bin), ["collector", "vally-collector-restart"])
 
     def test_installs_the_executable_when_none_is_there_yet_even_inside_collection_hours(self):
         self.say("wait\t2026-11-24 22:05:00 Asia/Seoul\t수집 시간 안이다")
         result = self.install()
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual((self.bin / "collector").read_text(), self.script_text("new collector"))
-        self.assertEqual(self.names(self.bin), ["collector"])
+        self.assertEqual(self.names(self.bin), ["collector", "vally-collector-restart"])
 
     def test_the_window_is_asked_of_the_new_build_with_the_installed_settings(self):
         self.install_collector()
@@ -223,10 +229,11 @@ class CollectorInstallTest(FakeCollectorHost):
         self.install_units_like_repo("vally-collector.service", "vally-collector-alert.service")
         shutil.copy(DEPLOY / "systemd/vally-collector-alert-telegram", self.bin / "vally-collector-alert-telegram")
         shutil.copy(self.built, self.bin / "collector")
-        inodes = {path.name: path.stat().st_ino for path in [*self.bin.iterdir(), *self.units.iterdir()]}
+        shutil.copy(DEPLOY / "collector-restart", self.bin / "vally-collector-restart")
+        inodes = self.inodes()
         result = self.install()
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(inodes, {path.name: path.stat().st_ino for path in [*self.bin.iterdir(), *self.units.iterdir()]})
+        self.assertEqual(inodes, self.inodes())
         self.assertEqual(self.recorded(), [])
 
     def test_a_changed_unit_is_replaced_and_daemon_reload_runs_once(self):
@@ -290,7 +297,7 @@ class CollectorInstallTest(FakeCollectorHost):
         self.build("newer collector")
         result = self.install()
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(self.names(self.bin), ["collector", "collector.next", "vally-collector-alert-telegram", "vally-collector-alert-telegram.next"])
+        self.assertEqual(self.names(self.bin), ["collector", "collector.next", "vally-collector-alert-telegram", "vally-collector-alert-telegram.next", "vally-collector-restart.next"])
         self.assertEqual((self.bin / "collector.next").read_text(), self.script_text("newer collector"))
         self.assertEqual((self.bin / "collector").read_text(), self.script_text("old collector"))
 
@@ -301,14 +308,14 @@ class CollectorInstallTest(FakeCollectorHost):
         self.say("wait\t2026-11-24 22:05:00 Asia/Seoul\t수집 시간 안이다")
         result = self.install()
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(self.names(self.bin), ["collector"])
+        self.assertEqual(self.names(self.bin), ["collector", "vally-collector-restart.next"])
 
     def test_outside_collection_hours_removes_a_stale_pending_copy_by_installing_over_it(self):
         self.install_collector()
         (self.bin / "collector.next").write_text("stale")
         result = self.install()
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(self.names(self.bin), ["collector"])
+        self.assertEqual(self.names(self.bin), ["collector", "vally-collector-restart"])
         self.assertEqual((self.bin / "collector").read_text(), self.script_text("new collector"))
 
     def test_a_window_check_that_fails_leaves_the_running_files_alone(self):
@@ -377,6 +384,85 @@ class CollectorInstallTest(FakeCollectorHost):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(stat.S_IMODE((self.units / "vally-collector.service.next").stat().st_mode), 0o644)
 
+    def test_the_install_step_judging_now_leaves_a_verdict_for_the_restart_step_and_waiting_removes_it(self):
+        self.install_collector()
+        verdict = self.units / ".vally-collector-install-verdict"
+        result = self.install()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(verdict.read_text(), "now\n")
+        self.say("wait\t2026-11-24 22:05:00 Asia/Seoul\t수집 시간 안이다")
+        self.build("newer collector")
+        result = self.install()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertFalse(verdict.exists())
+
+    def test_a_pending_copy_with_the_same_content_but_a_wrong_mode_gets_the_right_mode(self):
+        self.install_everything_old()
+        self.say("wait\t2026-11-24 22:05:00 Asia/Seoul\t수집 시간 안이다")
+        self.install()
+        for name, wrong in [("vally-collector.service.next", 0o600), ("vally-collector-alert.service.next", 0o755)]:
+            (self.units / name).chmod(wrong)
+        (self.bin / "collector.next").chmod(0o644)
+        result = self.install()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        for name in ["vally-collector.service.next", "vally-collector-alert.service.next"]:
+            self.assertEqual(stat.S_IMODE((self.units / name).stat().st_mode), 0o644, name)
+        self.assertEqual(stat.S_IMODE((self.bin / "collector.next").stat().st_mode), 0o755)
+
+    def test_a_deploy_inside_collection_hours_retries_a_daemon_reload_that_failed_earlier(self):
+        self.install_everything_old()
+        self.say("wait\t2026-11-24 22:05:00 Asia/Seoul\t수집 시간 안이다")
+        marker = self.units / ".vally-collector-reload-pending"
+        marker.write_text("")
+        result = self.install()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.recorded(), ["systemctl --user daemon-reload"])
+        self.assertFalse(marker.exists())
+        self.assertEqual((self.units / "vally-collector.service").read_text(), "[Service]\nExecStart=/old\n")
+
+    def test_a_retry_that_fails_inside_collection_hours_warns_and_keeps_the_mark(self):
+        self.install_everything_old()
+        self.say("wait\t2026-11-24 22:05:00 Asia/Seoul\t수집 시간 안이다")
+        marker = self.units / ".vally-collector-reload-pending"
+        marker.write_text("")
+        (self.state / "reload-fails").write_text("")
+        result = self.install()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("daemon-reload", result.stderr)
+        self.assertTrue(marker.exists())
+
+    def test_a_link_that_cannot_be_resolved_is_not_replaced_by_a_regular_file(self):
+        self.install_collector()
+        elsewhere = Path(self.temp.name) / "dotfiles"
+        elsewhere.mkdir()
+        (elsewhere / "vally-collector.service").write_text("[Service]\nExecStart=/old\n")
+        (self.units / "vally-collector.service").symlink_to(elsewhere / "vally-collector.service")
+        write_stub(self.stubs, "readlink", '[ "$1" = -f ] && exit 1\nexec /usr/bin/readlink "$@"\n')
+        result = self.install()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("심볼릭 링크를 풀지 못해", result.stderr)
+        self.assertTrue((self.units / "vally-collector.service").is_symlink())
+        self.assertEqual((elsewhere / "vally-collector.service").read_text(), "[Service]\nExecStart=/old\n")
+
+    def test_the_restart_helper_the_daemon_unit_calls_before_it_starts_is_installed_with_the_daemon(self):
+        result = self.install()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        helper = self.bin / "vally-collector-restart"
+        self.assertEqual(helper.read_text(), (DEPLOY / "collector-restart").read_text())
+        self.assertTrue(helper.stat().st_mode & stat.S_IXUSR)
+        unit = (DEPLOY / "systemd/vally-collector.service").read_text()
+        self.assertIn("ExecStartPre=-%h/.local/bin/vally-collector-restart --before-start\n", unit)
+
+    def test_an_install_waits_for_the_deploy_lock_and_fails_when_it_is_held_too_long(self):
+        self.install_collector()
+        with open(self.units / ".vally-collector-deploy.lock", "w") as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX)
+            result = self.install(VALLY_COLLECTOR_LOCK_SECONDS="1")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("잠금", result.stderr)
+        self.assertEqual((self.bin / "collector").read_text(), self.script_text("old collector"))
+        self.assertEqual(self.install().returncode, 0)
+
 
 class DeferredDeployTest(FakeCollectorHost):
     def setUp(self):
@@ -417,7 +503,7 @@ class DeferredDeployTest(FakeCollectorHost):
         self.assertFalse(any(" restart " in call for call in self.recorded()))
 
         env = self.deploy("second")
-        self.assertEqual(self.names_with_next(), ["collector.next", "vally-collector-alert.service.next", "vally-collector.service.next"])
+        self.assertEqual(self.names_with_next(), ["collector.next", "vally-collector-alert.service.next", "vally-collector-restart.next", "vally-collector.service.next"])
         self.assertEqual((self.bin / "collector.next").read_text(), self.script_text("second"))
         self.assertEqual(self.reservations(), ["vally-collector-restart.timer"])
         self.assertFalse(any(" restart " in call for call in self.recorded()))
@@ -443,6 +529,77 @@ class DeferredDeployTest(FakeCollectorHost):
         self.assertEqual((self.state / "binary-at-restart").read_text(), self.script_text("fresh"))
         self.assertEqual(self.reservations(), [])
         self.assertIn("systemctl --user restart vally-collector.service", self.recorded())
+
+    def test_a_deploy_that_judged_now_restarts_even_when_the_hours_began_before_the_restart_step(self):
+        self.say("now\t지금은 수집 시간 밖이다")
+        self.built.write_text(self.script_text("fresh"))
+        self.built.chmod(0o755)
+        env = {"VALLY_COLLECTOR_BIN_DIR": str(self.bin), "VALLY_COLLECTOR_BIN": str(self.running), "VALLY_SYSTEMD_USER_DIR": str(self.units), "VALLY_COLLECTOR_STABLE_SECONDS": "2"}
+        self.assertEqual(self.run_script("collector-install", **env).returncode, 0)
+        self.assertEqual(self.running.read_text(), self.script_text("fresh"))
+        self.say("wait\t2026-11-25 22:05:00 Asia/Seoul\t수집 시간 안이다")
+        restarted = self.run_script("collector-restart", **env)
+        self.assertEqual(restarted.returncode, 0, restarted.stderr)
+        self.assertIn("systemctl --user restart vally-collector.service", self.recorded())
+        self.assertEqual(self.reservations(), [])
+        self.assertFalse((self.units / ".vally-collector-install-verdict").exists())
+
+    def test_a_deploy_that_judged_wait_follows_the_calendar_of_the_restart_step_when_the_hours_ended_between(self):
+        self.say("wait\t2026-11-24 22:05:00 Asia/Seoul\t수집 시간 안이다")
+        self.built.write_text(self.script_text("late"))
+        self.built.chmod(0o755)
+        env = {"VALLY_COLLECTOR_BIN_DIR": str(self.bin), "VALLY_COLLECTOR_BIN": str(self.running), "VALLY_SYSTEMD_USER_DIR": str(self.units), "VALLY_COLLECTOR_STABLE_SECONDS": "2"}
+        self.assertEqual(self.run_script("collector-install", **env).returncode, 0)
+        self.assertEqual(self.running.read_text(), self.script_text("running"))
+        self.say("now\t마감 정리 여유가 끝났다")
+        restarted = self.run_script("collector-restart", **env)
+        self.assertEqual(restarted.returncode, 0, restarted.stderr)
+        self.assertEqual(self.running.read_text(), self.script_text("late"))
+        self.assertEqual(self.names_with_next(), [])
+        self.assertIn("systemctl --user restart vally-collector.service", self.recorded())
+
+    def test_a_scheduled_run_and_the_restart_step_at_the_same_time_both_succeed_and_leave_the_new_files(self):
+        self.say("wait\t2026-11-24 22:05:00 Asia/Seoul\t수집 시간 안이다")
+        env = self.deploy("racing")
+        scheduled_env = {key: env[key] for key in ["VALLY_COLLECTOR_BIN", "VALLY_SYSTEMD_USER_DIR", "VALLY_COLLECTOR_STABLE_SECONDS"]}
+        self.say("now\t마감 정리 여유가 끝났다")
+        results = []
+        def run(arguments):
+            results.append(self.run_script("collector-restart", *arguments, **scheduled_env))
+        threads = [threading.Thread(target=run, args=(arguments,)) for arguments in [("--scheduled",), ()]]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+        for result in results:
+            self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.running.read_text(), self.script_text("racing"))
+        self.assertEqual(self.names_with_next(), [])
+
+    def test_a_daemon_reload_that_fails_in_the_scheduled_run_leaves_the_old_files_and_tells_the_alert_script(self):
+        self.say("wait\t2026-11-24 22:05:00 Asia/Seoul\t수집 시간 안이다")
+        env = self.deploy("new")
+        write_stub(self.bin, "vally-collector-alert-telegram", f'echo "alert $1" >> "{self.calls}"\n')
+        (self.state / "reload-fails").write_text("")
+        scheduled_env = {key: env[key] for key in ["VALLY_COLLECTOR_BIN", "VALLY_SYSTEMD_USER_DIR", "VALLY_COLLECTOR_STABLE_SECONDS"]}
+        result = self.run_script("collector-restart", "--scheduled", **scheduled_env)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(self.running.read_text(), self.script_text("running"))
+        self.assertEqual((self.units / "vally-collector.service").read_text(), "[Service]\nExecStart=/old\n")
+        self.assertEqual((self.units / "vally-collector-alert.service").read_text(), "[Service]\nExecStart=/old\n")
+        self.assertEqual((self.bin / "collector.next").read_text(), self.script_text("new"))
+        self.assertEqual((self.units / "vally-collector.service.next").read_text(), (DEPLOY / "systemd/vally-collector.service").read_text())
+        self.assertEqual(sorted(path.name for path in self.bin.iterdir() if path.name.endswith(".prev")), [])
+        self.assertFalse(any(" restart " in call for call in self.recorded()))
+        alerts = [call for call in self.recorded() if call.startswith("alert ")]
+        self.assertEqual(len(alerts), 1, self.recorded())
+        self.assertIn("daemon-reload", alerts[0])
+        (self.state / "reload-fails").unlink()
+        again = self.run_script("collector-restart", "--scheduled", **scheduled_env)
+        self.assertEqual(again.returncode, 0, again.stderr)
+        self.assertEqual(self.running.read_text(), self.script_text("new"))
+        self.assertEqual(self.names_with_next(), [])
+        self.assertEqual(len([call for call in self.recorded() if call.startswith("alert ")]), 1)
 
     def names_with_next(self):
         return sorted(path.name for folder in (self.bin, self.units) for path in folder.iterdir() if path.name.endswith(".next"))
@@ -634,6 +791,162 @@ class CollectorRestartTest(FakeCollectorHost):
             self.assertEqual(result.returncode, 2, value)
             self.assertIn("VALLY_COLLECTOR_STABLE_SECONDS", result.stderr)
         self.assertEqual(self.recorded(), [])
+
+
+    def home_units(self):
+        folder = Path(self.temp.name) / ".config/systemd/user"
+        folder.mkdir(parents=True, exist_ok=True)
+        return folder
+
+    def alert_stub(self):
+        write_stub(self.stubs, "vally-collector-alert-telegram", f'echo "alert $1" >> "{self.calls}"\n')
+
+    def alerts(self):
+        return [call for call in self.recorded() if call.startswith("alert ")]
+
+    def test_a_fresh_install_verdict_of_now_restarts_even_when_the_check_now_says_wait_and_is_used_up(self):
+        units = self.home_units()
+        verdict = units / ".vally-collector-install-verdict"
+        verdict.write_text("now\n")
+        self.say("wait\t2026-11-24 22:05:00 Asia/Seoul\t수집 시간 안이다")
+        result = self.restart()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("systemctl --user restart vally-collector.service", self.recorded())
+        self.assertFalse(any(call.startswith(("collector", "systemd-run")) for call in self.recorded()))
+        self.assertFalse(verdict.exists())
+
+    def test_an_old_install_verdict_is_ignored_and_removed(self):
+        units = self.home_units()
+        verdict = units / ".vally-collector-install-verdict"
+        verdict.write_text("now\n")
+        long_ago = time.time() - 3 * 3600
+        os.utime(verdict, (long_ago, long_ago))
+        self.say("wait\t2026-11-24 22:05:00 Asia/Seoul\t수집 시간 안이다")
+        result = self.restart()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertFalse(any(" restart " in call for call in self.recorded()))
+        self.assertEqual(self.reservations(), ["vally-collector-restart.timer"])
+        self.assertFalse(verdict.exists())
+
+    def test_a_daemon_reload_that_fails_puts_every_moved_file_back_beside_the_running_ones(self):
+        units = self.home_units()
+        (self.stubs / "collector.next").write_text("#!/bin/sh\n# next\n")
+        (units / "vally-collector.service").write_text("old")
+        (units / "vally-collector.service.next").write_text("new")
+        (self.state / "reload-fails").write_text("")
+        before = (self.stubs / "collector").read_text()
+        result = self.restart("--scheduled")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual((self.stubs / "collector").read_text(), before)
+        self.assertEqual((self.stubs / "collector.next").read_text(), "#!/bin/sh\n# next\n")
+        self.assertEqual((units / "vally-collector.service").read_text(), "old")
+        self.assertEqual((units / "vally-collector.service.next").read_text(), "new")
+        self.assertFalse(list(self.stubs.glob("*.prev")) or list(units.glob("*.prev")))
+        self.assertTrue((units / ".vally-collector-reload-pending").exists())
+        self.assertIn("옛 판 그대로", result.stderr)
+
+    def test_a_failed_scheduled_promotion_is_told_to_the_alert_script_but_a_missing_script_is_skipped(self):
+        units = self.home_units()
+        (units / "vally-collector.service.next").write_text("new")
+        (self.state / "reload-fails").write_text("")
+        self.assertNotEqual(self.restart("--scheduled").returncode, 0)
+        self.assertEqual(self.alerts(), [])
+        self.alert_stub()
+        self.assertNotEqual(self.restart("--scheduled").returncode, 0)
+        self.assertEqual(len(self.alerts()), 1)
+        self.assertIn("daemon-reload", self.alerts()[0])
+
+    def test_a_failure_of_the_restart_step_run_by_the_deploy_is_not_sent_to_the_alert_script(self):
+        units = self.home_units()
+        (units / "vally-collector.service.next").write_text("new")
+        (self.state / "reload-fails").write_text("")
+        self.alert_stub()
+        self.say("now\tx")
+        self.assertNotEqual(self.restart().returncode, 0)
+        self.assertEqual(self.alerts(), [])
+
+    def test_the_cleanup_before_the_daemon_starts_moves_every_pending_file_without_asking_the_calendar(self):
+        units = self.home_units()
+        (self.stubs / "collector.next").write_text("#!/bin/sh\n# next\n")
+        (units / "vally-collector.service").write_text("old")
+        (units / "vally-collector.service.next").write_text("new")
+        self.say("wait\t2026-11-24 22:05:00 Asia/Seoul\t수집 시간 안이다")
+        result = self.restart("--before-start")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual((self.stubs / "collector").read_text(), "#!/bin/sh\n# next\n")
+        self.assertEqual((units / "vally-collector.service").read_text(), "new")
+        calls = self.recorded()
+        self.assertEqual(calls[0], "systemctl --user daemon-reload")
+        self.assertFalse(any(call.startswith("collector") for call in calls))
+        self.assertFalse(any(" restart vally-collector.service" in call and call.startswith("systemctl") for call in calls))
+        self.assertTrue(any(call.startswith("systemd-run --user --unit=vally-collector-restart-after-start --on-active=10 --collect systemctl --user restart vally-collector.service") for call in calls), calls)
+
+    def test_the_cleanup_before_the_daemon_starts_does_not_schedule_a_restart_when_no_unit_changed(self):
+        (self.stubs / "collector.next").write_text("#!/bin/sh\n# next\n")
+        result = self.restart("--before-start")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual((self.stubs / "collector").read_text(), "#!/bin/sh\n# next\n")
+        self.assertEqual(self.recorded(), [])
+
+    def test_the_cleanup_before_the_daemon_starts_does_nothing_without_pending_files(self):
+        result = self.restart("--before-start")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.recorded(), [])
+
+    def test_the_cleanup_before_the_daemon_starts_never_blocks_the_start_and_reports_a_failed_reload(self):
+        units = self.home_units()
+        (units / "vally-collector.service").write_text("old")
+        (units / "vally-collector.service.next").write_text("new")
+        (self.state / "reload-fails").write_text("")
+        self.alert_stub()
+        result = self.restart("--before-start")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual((units / "vally-collector.service").read_text(), "old")
+        self.assertEqual(len(self.alerts()), 1)
+        self.assertFalse(any(call.startswith("systemd-run") for call in self.recorded()))
+
+    def test_a_link_that_cannot_be_resolved_is_left_alone_instead_of_becoming_a_regular_file(self):
+        units = self.home_units()
+        elsewhere = Path(self.temp.name) / "dotfiles"
+        elsewhere.mkdir()
+        (elsewhere / "vally-collector.service").write_text("old")
+        (elsewhere / "vally-collector.service.next").write_text("new")
+        (units / "vally-collector.service").symlink_to(elsewhere / "vally-collector.service")
+        (units / "vally-collector.service.next").write_text("beside the link")
+        write_stub(self.stubs, "readlink", '[ "$1" = -f ] && exit 1\nexec /usr/bin/readlink "$@"\n')
+        result = self.restart("--scheduled")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertTrue((units / "vally-collector.service").is_symlink())
+        self.assertEqual((elsewhere / "vally-collector.service").read_text(), "old")
+        self.assertFalse(any(" restart " in call for call in self.recorded()))
+
+    def test_the_promotion_waits_for_the_deploy_lock_and_fails_when_it_is_held_too_long(self):
+        units = self.home_units()
+        (units / "vally-collector.service.next").write_text("new")
+        with open(units / ".vally-collector-deploy.lock", "w") as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX)
+            result = self.restart("--scheduled", VALLY_COLLECTOR_LOCK_SECONDS="1")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("잠금", result.stderr)
+        self.assertTrue((units / "vally-collector.service.next").exists())
+        self.assertEqual(self.recorded(), [])
+
+    def test_a_late_run_after_the_files_were_moved_succeeds_with_nothing_to_move(self):
+        (self.stubs / "collector.next").write_text("#!/bin/sh\n# next\n")
+        first = self.restart("--scheduled")
+        second = self.restart("--scheduled")
+        self.assertEqual(first.returncode, 0, first.stderr)
+        self.assertEqual(second.returncode, 0, second.stderr)
+        self.assertEqual((self.stubs / "collector").read_text(), "#!/bin/sh\n# next\n")
+
+    def test_stable_seconds_with_leading_zeros_count_by_their_value(self):
+        for value in ["00600", "0600", "007", "01"]:
+            result = self.restart("--scheduled", VALLY_COLLECTOR_STABLE_SECONDS=value)
+            self.assertEqual(result.returncode, 0, f"{value}: {result.stderr}")
+            self.assertIn(f"{int(value)}초 동안 active", result.stdout)
+        for value in ["00601", "0000", "000"]:
+            result = self.restart("--scheduled", VALLY_COLLECTOR_STABLE_SECONDS=value)
+            self.assertEqual(result.returncode, 2, value)
 
 
 class WebBuildTest(DeployScriptCase):

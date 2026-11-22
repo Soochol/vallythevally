@@ -6,16 +6,47 @@ bin_dir="${VALLY_COLLECTOR_BIN_DIR:-$HOME/.local/bin}"
 unit_dir="${VALLY_SYSTEMD_USER_DIR:-${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user}"
 built="$root/target/release/collector"
 tab="$(printf '\t')"
+install_verdict="$unit_dir/.vally-collector-install-verdict"
+lock_file="$unit_dir/.vally-collector-deploy.lock"
+lock_wait_seconds="${VALLY_COLLECTOR_LOCK_SECONDS:-120}"
 if [ ! -x "$built" ]; then
     echo "vally-deploy collector-install: $built가 없습니다. deploy/collector-build를 먼저 돌리세요" >&2
     exit 1
 fi
 
+resolve_link() {
+    if resolved="$(readlink -f "$1")"; then
+        printf '%s\n' "$resolved"
+    elif [ -L "$1" ]; then
+        echo "vally-deploy collector-install: $1의 심볼릭 링크를 풀지 못해 건드리지 않습니다" >&2
+        return 1
+    else
+        printf '%s\n' "$1"
+    fi
+}
+
+acquire_lock() {
+    mkdir -p "$unit_dir"
+    exec 9>"$lock_file"
+    if ! command -v flock >/dev/null 2>&1; then
+        echo "vally-deploy collector-install: flock이 없어 동시 실행을 막지 못합니다" >&2
+        return 0
+    fi
+    if ! flock -w "$lock_wait_seconds" 9; then
+        echo "vally-deploy collector-install: 다른 배포 단계가 ${lock_wait_seconds}초 넘게 잠금을 쥐고 있습니다($lock_file)" >&2
+        exit 1
+    fi
+}
+
+release_lock() {
+    exec 9>&-
+}
+
 stage() {
     source="$1"
     target="$2"
     mode="$3"
-    real="$(readlink -f "$target" || echo "$target")"
+    real="$(resolve_link "$target")" || exit 1
     pending="$real.next"
     if [ -e "$real" ] && cmp -s "$source" "$real"; then
         rm -f "$pending"
@@ -23,6 +54,7 @@ stage() {
         return 0
     fi
     if [ -e "$pending" ] && cmp -s "$source" "$pending"; then
+        chmod "$mode" "$pending"
         echo "이미 옆 자리에 있음: $pending"
         return 0
     fi
@@ -47,7 +79,9 @@ stage_if_installed() {
 daemon_installed=no
 [ -e "$bin_dir/collector" ] && daemon_installed=yes
 
+acquire_lock
 stage "$built" "$bin_dir/collector" 755
+stage "$here/collector-restart" "$bin_dir/vally-collector-restart" 755
 stage_if_installed "$here/systemd/vally-collector-alert-telegram" "$bin_dir/vally-collector-alert-telegram" 755
 for unit in vally-collector.service vally-collector-alert.service; do
     stage_if_installed "$here/systemd/$unit" "$unit_dir/$unit" 644
@@ -63,8 +97,16 @@ else
 fi
 
 if [ "$decision" = now ]; then
+    printf 'now\n' > "$install_verdict"
+else
+    rm -f "$install_verdict"
+fi
+release_lock
+
+if [ "$decision" = now ]; then
     VALLY_COLLECTOR_BIN="$bin_dir/collector" VALLY_SYSTEMD_USER_DIR="$unit_dir" "$here/collector-restart" --promote
 else
     echo "수집 시간 안이라 새 판을 옆 자리(.next)에만 두었습니다. 마감 뒤 collector-restart가 제자리로 옮기고 재시작합니다"
+    VALLY_COLLECTOR_BIN="$bin_dir/collector" VALLY_SYSTEMD_USER_DIR="$unit_dir" "$here/collector-restart" --retry-reload || echo "vally-deploy collector-install: 앞서 실패한 daemon-reload를 다시 하지 못했습니다. 다음 collector-restart가 다시 합니다" >&2
 fi
 exit 0
