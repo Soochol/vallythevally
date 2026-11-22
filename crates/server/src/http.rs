@@ -18,7 +18,8 @@ use crate::db::AppDb;
 use crate::kiwoom::link::Link;
 use crate::kiwoom::rest::{KiwoomError, KiwoomRest};
 use crate::market::hub::{HubHandle, HubSnapshot};
-use crate::market_source::{KiwoomHandle, MarketSource, SourceFailure};
+use crate::market_source::route::FeatureRoute;
+use crate::market_source::{MarketSource, SourceFailure};
 use crate::screener::Screener;
 use crate::symbols::{NotReady, SearchFilter, SymbolDirectory};
 
@@ -27,7 +28,7 @@ pub struct AppState {
     pub bars: Arc<BarService>,
     pub rest: KiwoomRest,
     pub source: Arc<dyn MarketSource>,
-    pub kiwoom: KiwoomHandle,
+    pub route: Arc<FeatureRoute>,
     pub db: AppDb,
     pub clock: Clock,
     pub static_dir: PathBuf,
@@ -43,6 +44,9 @@ pub struct AppState {
     pub market_overview: crate::market_overview::MarketOverview,
     pub etf: crate::etf::EtfBook,
     pub kiwoom_catalog: crate::kiwoom_themes::CatalogStore,
+    pub generation: crate::market_source::SourceGeneration,
+    pub source_switch: Arc<crate::market_source::switch::SourceSwitch>,
+    pub market_source_board: Arc<crate::market_source::status::MarketSourceBoard>,
     pub public_usage: Arc<crate::public::usage::Usage>,
     pub shared_data: Arc<crate::shared_data::SharedData>,
     pub heatmap_quotes: Arc<crate::heatmap_board::QuoteCache>,
@@ -268,6 +272,14 @@ pub(crate) async fn symbol_list(st: &AppState) -> Result<Arc<crate::symbols::Dir
         NotReady::Source(e) => Lookup::Symbols.failure(e.into(), st.clock.now()),
         NotReady::Timeout => ApiFailure::list_not_ready(st.clock.now()),
     })
+}
+
+pub(crate) async fn feature_symbol_list(st: &AppState) -> Result<Arc<crate::symbols::Directory>, ApiFailure> {
+    let loaded = st.symbols.updates().borrow().clone();
+    match loaded {
+        Some(loaded) => Ok(loaded),
+        None => symbol_list(st).await,
+    }
 }
 
 pub(crate) async fn search(State(st): State<Arc<AppState>>, Query(q): Query<HashMap<String, String>>) -> Result<Json<Vec<api::SymbolInfo>>, ApiFailure> {
@@ -1394,6 +1406,7 @@ mod tests {
         assert_eq!((hello["type"].as_str(), hello["protocol"].as_i64()), (Some("hello"), Some(1)), "{hello}");
         assert_eq!(recv_json(&mut ws).await["type"], "kiwoom_link", "hello 바로 뒤에 키움 연결 상태가 온다");
         assert_eq!(recv_json(&mut ws).await, json!({"type": "account", "status": {"state": "local_only"}}), "그 뒤에 계정 상태가 온다");
+        assert_eq!(recv_json(&mut ws).await["type"], "market_source", "계정 상태 뒤에 시세 공급원 상태가 온다");
         for text in [
             "not json",
             r#"{"type":"subscribe","sub":"bad","symbol":"IDX:001","venue":"krx","period":"D"}"#,

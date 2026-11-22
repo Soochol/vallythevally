@@ -1,6 +1,7 @@
 #![allow(dead_code, unused_imports)]
 
 pub mod investors;
+pub mod kis_server;
 pub mod krx;
 pub mod summary;
 

@@ -12,9 +12,10 @@ use axum::Router;
 use axum::routing::get;
 use domain::{KstDate, KstTime};
 
-use crate::api::Market;
+use crate::api::{Broker, Market};
 use crate::http::AppState;
-use crate::market_source::OverviewSource;
+use crate::market_source::route::Picked;
+use crate::market_source::{GenerationTicket, OverviewSource, SourceGeneration};
 
 pub use dto::*;
 pub use kiwoom_overview::KiwoomOverview;
@@ -35,7 +36,8 @@ pub fn routes() -> Router<Arc<AppState>> {
 #[derive(Default)]
 struct InvestorDays {
     observation_day: Option<KstDate>,
-    days: HashMap<(Market, KstDate), MarketOverviewInvestorDay>,
+    filled_in: Option<GenerationTicket>,
+    days: HashMap<(Broker, Market, KstDate), MarketOverviewInvestorDay>,
 }
 
 #[derive(Default)]
@@ -43,39 +45,53 @@ pub struct MarketOverview {
     pub samples: SampleBook,
     investor_days: Mutex<InvestorDays>,
     chosen: Mutex<Option<Arc<dyn OverviewSource>>>,
+    generation: SourceGeneration,
 }
 
-pub fn overview_source(st: &AppState) -> Arc<dyn OverviewSource> {
+pub fn overview_source(st: &AppState) -> Picked<dyn OverviewSource> {
     match st.market_overview.chosen.lock().expect("공급원 잠금").clone() {
-        Some(source) => source,
-        None => Arc::new(KiwoomOverview::new(st.kiwoom.clone())),
+        Some(source) => Picked { broker: source.broker(), source },
+        None => st.route.overview(),
     }
 }
 
 impl MarketOverview {
+    pub fn with_generation(generation: SourceGeneration) -> MarketOverview {
+        MarketOverview { samples: SampleBook::with_generation(generation.clone()), investor_days: Mutex::default(), chosen: Mutex::default(), generation }
+    }
+
+    pub fn ticket(&self) -> GenerationTicket {
+        self.generation.ticket()
+    }
+
     pub fn choose(&self, source: Option<Arc<dyn OverviewSource>>) {
-        *self.chosen.lock().expect("공급원 잠금") = source;
-        self.investor_days.lock().expect("투자자 캐시 잠금").days.clear();
+        let mut chosen = self.chosen.lock().expect("공급원 잠금");
+        self.generation.advance();
+        *chosen = source;
     }
 
-    fn cached_investor_day(&self, now: KstTime, market: Market, day: KstDate) -> Option<MarketOverviewInvestorDay> {
+    pub fn cached_investor_day(&self, now: KstTime, broker: Broker, market: Market, day: KstDate) -> Option<MarketOverviewInvestorDay> {
         let mut cache = self.investor_days.lock().expect("투자자 캐시 잠금");
-        cache.roll(now);
-        cache.days.get(&(market, day)).cloned()
+        cache.roll(now, self.generation.ticket());
+        cache.days.get(&(broker, market, day)).cloned()
     }
 
-    fn cache_investor_day(&self, now: KstTime, market: Market, row: MarketOverviewInvestorDay) {
+    pub fn cache_investor_day(&self, now: KstTime, broker: Broker, market: Market, row: MarketOverviewInvestorDay, started: GenerationTicket) {
         let mut cache = self.investor_days.lock().expect("투자자 캐시 잠금");
-        cache.roll(now);
-        cache.days.insert((market, row.date.0), row);
+        let current = self.generation.ticket();
+        cache.roll(now, current);
+        if started == current {
+            cache.days.insert((broker, market, row.date.0), row);
+        }
     }
 }
 
 impl InvestorDays {
-    fn roll(&mut self, now: KstTime) {
+    fn roll(&mut self, now: KstTime, generation: GenerationTicket) {
         let day = observation_day(now);
-        if self.observation_day != Some(day) {
+        if self.observation_day != Some(day) || self.filled_in != Some(generation) {
             self.observation_day = Some(day);
+            self.filled_in = Some(generation);
             self.days.clear();
         }
     }

@@ -2,6 +2,8 @@ use std::fmt;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
+use tokio::sync::watch;
+
 use domain::{KstDate, KstTime, TimeOfDay};
 use serde::{Deserialize, Serialize};
 
@@ -68,6 +70,7 @@ struct State {
     stale: bool,
     issued_count: u64,
     halt: Option<Halt>,
+    disconnected: bool,
 }
 
 struct Inner {
@@ -77,6 +80,7 @@ struct Inner {
     transport: Arc<dyn Transport>,
     clock: Clock,
     state: Mutex<State>,
+    halted: watch::Sender<Option<Halt>>,
     issuing: tokio::sync::Mutex<()>,
 }
 
@@ -124,7 +128,8 @@ impl KisAuth {
         let credential_id = credential_id(credentials.app_key.expose());
         let file = TokenFile::new(token_path);
         let state = loaded_state(&file, &credential_id);
-        KisAuth(Arc::new(Inner { credentials, credential_id, file, transport, clock, state: Mutex::new(state), issuing: tokio::sync::Mutex::new(()) }))
+        let halted = watch::channel(state.halt.clone()).0;
+        KisAuth(Arc::new(Inner { credentials, credential_id, file, transport, clock, state: Mutex::new(state), halted, issuing: tokio::sync::Mutex::new(()) }))
     }
 
     fn lock(&self) -> std::sync::MutexGuard<'_, State> {
@@ -140,7 +145,66 @@ impl KisAuth {
     }
 
     pub fn halt(&self, failure: Failure) {
-        self.lock().halt.get_or_insert(Halt::Rejected(failure));
+        let mut st = self.lock();
+        let halt = st.halt.get_or_insert(Halt::Rejected(failure)).clone();
+        self.0.halted.send_replace(Some(halt));
+    }
+
+    pub fn watch_halted(&self) -> watch::Receiver<Option<Halt>> {
+        self.0.halted.subscribe()
+    }
+
+    pub fn has_usable_token(&self) -> bool {
+        matches!(self.usable(), Ok(Some(_)))
+    }
+
+    pub fn issue_blocked_until(&self) -> Option<KstTime> {
+        let now = self.0.clock.now();
+        let until = self.lock().last_request_at?.plus_secs(MIN_ISSUE_INTERVAL_SECS);
+        (now < until).then_some(until)
+    }
+
+    pub fn app_key_tail(&self) -> Option<String> {
+        let key = self.0.credentials.app_key.expose();
+        (key.chars().count() >= 8).then(|| key.chars().rev().take(4).collect::<Vec<_>>().into_iter().rev().collect())
+    }
+
+    pub fn credential_prefix(&self) -> String {
+        self.0.credential_id.trim_start_matches("sha256:").chars().take(8).collect()
+    }
+
+    pub fn kept_disconnected(&self) -> bool {
+        self.lock().disconnected
+    }
+
+    pub fn keep_disconnected(&self) {
+        self.record_disconnected(true);
+    }
+
+    pub fn clear_disconnected(&self) {
+        self.record_disconnected(false);
+    }
+
+    fn record_disconnected(&self, kept: bool) {
+        let mut st = self.lock();
+        if st.disconnected == kept || matches!(st.halt, Some(Halt::TokenFileUnreadable(_))) {
+            return;
+        }
+        st.disconnected = kept;
+        if let Err(e) = self.save(&st) {
+            tracing::warn!(error = %e, "끊어 둔 기록을 한투 토큰 파일에 쓰지 못했습니다");
+            st.disconnected = !kept;
+        }
+    }
+
+    pub fn due_daily_reissue(&self, now: KstTime, at: TimeOfDay) -> bool {
+        let cutoff = KstTime::from_kst_civil(now.kst_date(), at);
+        now >= cutoff && self.lock().issued.as_ref().is_some_and(|issued| issued.issued_at < cutoff)
+    }
+
+    pub async fn reissue(&self) -> Result<TokenLease, AuthError> {
+        let _issuing = self.0.issuing.lock().await;
+        self.issue().await
     }
 
     pub fn token_expires_at(&self) -> Option<KstTime> {
@@ -257,6 +321,7 @@ impl KisAuth {
             credential: Some(self.0.credential_id.clone()),
             token: st.issued.as_ref().map(|issued| SavedToken { value: issued.token.expose().clone(), expires_at: issued.expires_at.unix(), issued_at: issued.issued_at.unix() }),
             last_request_at: st.last_request_at.map_or(0, KstTime::unix),
+            disconnected: st.disconnected.then(|| self.0.credential_id.clone()),
         })
     }
 
@@ -298,7 +363,8 @@ fn loaded_state(file: &TokenFile, credential_id: &str) -> State {
                 expires_at: KstTime::from_unix(t.expires_at),
                 generation: TokenGen(1),
             });
-            State { issued_count: u64::from(issued.is_some()), issued, last_request_at: Some(saved.last_request_at).filter(|at| *at > 0).map(KstTime::from_unix), ..State::default() }
+            let disconnected = ours && saved.disconnected.as_deref() == Some(credential_id);
+            State { issued_count: u64::from(issued.is_some()), issued, last_request_at: Some(saved.last_request_at).filter(|at| *at > 0).map(KstTime::from_unix), disconnected, ..State::default() }
         }
         Err(e) => {
             tracing::error!(error = %e, "한투 토큰 파일을 읽지 못했습니다. 마지막 발급 요청 시각을 모르므로 토큰 발급을 멈춥니다");

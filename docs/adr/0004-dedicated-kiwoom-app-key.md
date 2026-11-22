@@ -3,6 +3,7 @@
 키움 접근토큰을 다시 발급받으면 기존 토큰이 폐기될 수 있다(FAQ25). 또 토큰 하나에 WebSocket 세션은 하나뿐이다(공지 49). 그래서 같은 키로 두 곳에서 토큰을 받으면 서로의 실시간 연결을 끊는다.
 
 - (2026-11-22 개정) 실전 키는 최대 5개이고 시세는 시세 키 하나만 쓴다. 토큰 파일·발급 간격·8050 차단·자동 연결·대기열은 키마다 따로다. [ADR 0037](0037-kiwoom-keys-are-a-list-with-one-market-key.md). 아래 "키는 하나"와 "하나의 키" 문구는 이 개정 전의 결정이다.
+- (2026-11-23 개정) 키 목록에 한투 키도 들고 키는 증권사마다 5개다. 토큰을 쥔 프로세스가 키마다 하나라는 규칙과, 토큰 파일·발급 간격·차단 기록이 키마다 따로라는 규칙은 한투 키에도 같다. [ADR 0043](0043-market-source-is-one-key-of-either-broker-and-switching-drops-the-cache.md).
 - **키는 하나**(호가 복기 수집기의 전용 두 번째 키는 [ADR 0022](0022-hoga-replay-collects-quotes-on-disk.md)): vallythevally는 실계좌 앱키 하나(`VALLY_KIWOOM_APP_KEY`, `VALLY_KIWOOM_APP_SECRET`, `VALLY_ENV_FILE`이 가리키는 파일. 로컬에서는 메인 체크아웃 루트의 `.env`)만 쓴다. 모의투자 키는 쓰지 않는다.
   - (2026-11-18 개정) 모의투자는 [ADR 0030](0030-kiwoom-mock-trading-runs-as-its-own-server-process.md).
   - (2026-11-16 개정) 화면에서 저장한 키 파일(`VALLY_KIWOOM_KEY_PATH`, 기본 `$XDG_STATE_HOME/vallythevally/kiwoom-key.json`, 디렉터리 700, 파일 600)도 입력 경로다. 환경에 키가 있으면 환경이 앞선다. 어느 경로든 키는 하나다. ADR 0021.

@@ -8,7 +8,9 @@ use super::{Cursor, Priority, SourceError, SourceFailure};
 use crate::api::{self, ApiErrorCode, ApiErrorReason, Excludes, Percent, Ranking, RankingFigures, Venue, Won};
 use domain::StockCode;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize, ts_rs::TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
 pub enum RankingKind {
     TradeAmount,
     TradeVolume,

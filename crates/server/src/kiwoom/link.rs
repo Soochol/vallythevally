@@ -1,4 +1,5 @@
 
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -94,6 +95,7 @@ struct MarketData {
 struct Inner {
     rest: KiwoomRest,
     market: Option<MarketData>,
+    market_duty: AtomicBool,
     clock: Clock,
     state: watch::Sender<LinkState>,
     flight: Mutex<Option<(bool, Flight)>>,
@@ -115,7 +117,7 @@ impl Link {
 
     fn with_market(rest: KiwoomRest, market: Option<MarketData>, clock: Clock) -> Link {
         rest.set_access(Access::Closed);
-        let link = Link(Arc::new(Inner { rest, market, clock, state: watch::channel(LinkState::Disconnected).0, flight: Mutex::new(None), released_8050: Mutex::new(None), epoch: watch::channel(0).0 }));
+        let link = Link(Arc::new(Inner { rest, market, market_duty: AtomicBool::new(true), clock, state: watch::channel(LinkState::Disconnected).0, flight: Mutex::new(None), released_8050: Mutex::new(None), epoch: watch::channel(0).0 }));
         link.0.state.send_replace(link.resting_state());
         link.watch_halts();
         link
@@ -150,6 +152,14 @@ impl Link {
         slot.take();
         self.0.rest.set_access(Access::Closed);
         self.set(self.resting_state());
+    }
+
+    pub fn set_market_duty(&self, on: bool) {
+        self.0.market_duty.store(on, Ordering::Relaxed);
+    }
+
+    fn has_market_duty(&self) -> bool {
+        self.0.market.is_some() && self.0.market_duty.load(Ordering::Relaxed)
     }
 
     pub fn state(&self) -> LinkState {
@@ -303,7 +313,7 @@ impl Link {
                 return self.fail(&error, epoch);
             }
         }
-        if self.0.market.is_some() {
+        if self.has_market_duty() {
             self.step(epoch, LinkState::Connecting(ConnectStep::Symbols))?;
             if let Err(error) = self.load_symbols(epoch).await {
                 return self.fail(&error, epoch);
@@ -419,6 +429,9 @@ impl Link {
     }
 
     fn start_screener_update(&self) {
+        if !self.has_market_duty() {
+            return;
+        }
         let Some(market) = &self.0.market else { return };
         let screener = market.screener.clone();
         let update_on_start = market.update_on_start;

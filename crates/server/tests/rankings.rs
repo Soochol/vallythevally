@@ -853,3 +853,19 @@ async fn a_request_joining_a_continued_walk_after_its_snapshot_went_stale_gets_a
     assert_eq!(deep.1["fetchedAt"], first["fetchedAt"], "이어 받은 스냅숏의 받은 시각은 처음 받은 때 그대로다");
     assert!(late.1["fetchedAt"].as_i64().unwrap() > first["fetchedAt"].as_i64().unwrap(), "8초 지나 온 요청은 새로 받는다");
 }
+
+#[tokio::test]
+async fn a_walk_that_lands_after_the_source_changed_is_not_served_to_the_next_request() {
+    let h = Harness::start(true).await;
+    h.fake.respond_with("ka10032", 200, trade_amount_page(&["000001"], None));
+    let held = h.fake.hold("거래대금 순위", |call| call.api_id == "ka10032");
+    let slow = tokio::spawn(post_to(h.app.clone(), trade_amount(KEEP_ALL), 1, "user"));
+    held.arrived().await;
+    h.state.generation.advance();
+    held.release();
+    assert_eq!(slow.await.unwrap().0, 200, "바꾸기 전에 시작한 요청은 자기 응답을 받는다");
+    h.show(trade_amount(KEEP_ALL), 1).await;
+    assert_eq!(h.calls("ka10032").len(), 2, "바꾸는 중 늦게 온 옛 공급원 응답은 캐시에 남지 않아 다시 받는다");
+    h.show(trade_amount(KEEP_ALL), 1).await;
+    assert_eq!(h.calls("ka10032").len(), 2, "바꾼 뒤 받은 것은 8초 동안 그대로 쓴다");
+}

@@ -172,6 +172,7 @@ impl Home {
                 credential: Some(credential_id(APP_KEY)),
                 token: Some(SavedToken { value: TOKEN.into(), expires_at: now.unix() + 86_400, issued_at: now.unix() - 3600 }),
                 last_request_at: now.unix() - 3600,
+                disconnected: None,
             })
             .unwrap();
         Home { _dir: dir, path }

@@ -55,7 +55,7 @@ export function serveRankings(scenario: Scenario, options: ServeOptions = {}): R
     const all = rows(version);
     const shown = all.slice(0, asked.pages * pageSize);
     const end = shown.length >= all.length;
-    const page: RankingPage = { rows: shown, pages: asked.pages, end, limited: !end && options.limited === true, hidden: options.hidden ?? 0, fetchedAt: Math.floor(scenario.now / 1000) + version };
+    const page: RankingPage = { rows: shown, pages: asked.pages, end, limited: !end && options.limited === true, hidden: options.hidden ?? 0, fetchedAt: Math.floor(scenario.now / 1000) + version, source: "kiwoom" };
     version++;
     return { body: page };
   });

@@ -7,7 +7,7 @@ use std::time::Duration;
 use domain::{IndexCode, Market, Symbol, SymbolInfo, SymbolKind};
 use tokio::sync::watch;
 
-use crate::market_source::{MarketSource, Priority, ScreenerListing, SourceError};
+use crate::market_source::{GenerationTicket, MarketSource, Priority, ScreenerListing, SourceError, SourceGeneration};
 
 pub use crate::kiwoom::market_source::{ListingPages, fetch_listing_rows};
 
@@ -150,6 +150,7 @@ fn choseong_of(c: char) -> char {
 /// 브라우저 요청이 기다리는 목록. 처음 받기 전에는 비어 있다.
 pub struct SymbolDirectory {
     current: watch::Sender<Option<Arc<Directory>>>,
+    generation: SourceGeneration,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -160,7 +161,7 @@ pub enum NotReady {
 
 impl Default for SymbolDirectory {
     fn default() -> Self {
-        SymbolDirectory { current: watch::channel(None).0 }
+        SymbolDirectory { current: watch::channel(None).0, generation: SourceGeneration::default() }
     }
 }
 
@@ -170,14 +171,33 @@ impl SymbolDirectory {
         self.current.subscribe()
     }
 
+    pub fn generation(&self) -> SourceGeneration {
+        self.generation.clone()
+    }
+
     pub fn replace(&self, dir: Directory) {
         self.current.send_replace(Some(Arc::new(dir)));
     }
 
+    pub fn replace_if_current(&self, started: GenerationTicket, dir: Directory) -> bool {
+        let replaced = self.current.send_if_modified(|current| {
+            if !self.generation.is_current(started) {
+                return false;
+            }
+            *current = Some(Arc::new(dir));
+            true
+        });
+        if !replaced {
+            tracing::info!("공급원이 바뀌는 중 늦게 도착한 종목 목록은 넣지 않았습니다");
+        }
+        replaced
+    }
+
     /// 새 목록을 받아 통째로 바꾼다. 실패하면 이전 목록을 그대로 둔다.
     pub async fn refresh(&self, source: &dyn MarketSource, priority: Priority) -> Result<(), SourceError> {
+        let started = self.generation.ticket();
         let dir = source.directory(priority).await?;
-        self.replace(dir);
+        self.replace_if_current(started, dir);
         Ok(())
     }
 

@@ -8,7 +8,7 @@ use tokio::sync::watch;
 use crate::api::{MAX_RANKING_PAGES, Ranking};
 use crate::clock::Clock;
 use crate::market_source::rankings::{Demand, QueryKey, RankedRow, RankingError, RankingFetch, RankingSource, Unsupported};
-use crate::market_source::{Cursor, Priority, SourceError};
+use crate::market_source::{Cursor, GenerationTicket, Priority, SourceError, SourceGeneration};
 
 const FRESH_SECS: i64 = 8;
 const IDLE_SECS: i64 = 60;
@@ -192,8 +192,15 @@ impl Drop for Landing {
 }
 
 #[derive(Default)]
+struct Slots {
+    filled_in: Option<GenerationTicket>,
+    by_query: HashMap<QueryKey, Arc<Slot>>,
+}
+
+#[derive(Default)]
 pub struct RankingCache {
-    slots: Mutex<HashMap<QueryKey, Arc<Slot>>>,
+    slots: Mutex<Slots>,
+    generation: SourceGeneration,
 }
 
 async fn walk_snapshot(base: Option<Snapshot>, wanted: usize, source: &dyn RankingSource, ranking: &Ranking, clock: &Clock, demand: &mut Demand) -> Outcome {
@@ -211,21 +218,36 @@ async fn walk_snapshot(base: Option<Snapshot>, wanted: usize, source: &dyn Ranki
 }
 
 impl RankingCache {
-    pub fn slots(&self) -> usize {
-        self.slots.lock().expect("순위 캐시 잠금").len()
+    pub fn with_generation(generation: SourceGeneration) -> RankingCache {
+        RankingCache { slots: Mutex::default(), generation }
     }
 
-    fn slot(&self, key: QueryKey, now: KstTime) -> Arc<Slot> {
-        let mut slots = self.slots.lock().expect("순위 캐시 잠금");
+    pub fn slots(&self) -> usize {
+        self.slots.lock().expect("순위 캐시 잠금").by_query.len()
+    }
+
+    fn slot(&self, key: QueryKey, now: KstTime, started: GenerationTicket) -> Arc<Slot> {
+        let fresh_slot = || Arc::new(Slot { state: Mutex::default(), wants: Wants::new(), last_read: AtomicI64::new(now.unix()) });
+        let mut guard = self.slots.lock().expect("순위 캐시 잠금");
+        match guard.filled_in {
+            Some(filled) if started < filled => return fresh_slot(),
+            Some(filled) if started == filled => {}
+            _ => {
+                guard.filled_in = Some(started);
+                guard.by_query.clear();
+            }
+        }
+        let slots = &mut guard.by_query;
         slots.retain(|_, slot| Arc::strong_count(slot) > 1 || now.unix() - slot.last_read.load(Ordering::SeqCst) < IDLE_SECS);
-        let slot = slots.entry(key).or_insert_with(|| Arc::new(Slot { state: Mutex::default(), wants: Wants::new(), last_read: AtomicI64::new(now.unix()) }));
+        let slot = slots.entry(key).or_insert_with(fresh_slot);
         slot.last_read.store(now.unix(), Ordering::SeqCst);
         slot.clone()
     }
 
     pub async fn serve(&self, source: Arc<dyn RankingSource>, ranking: Ranking, wanted: usize, priority: Priority, clock: &Clock) -> Result<Served, WalkError> {
+        let started = self.generation.ticket();
         source.check(&ranking).map_err(WalkError::Unsupported)?;
-        let slot = self.slot(source.query_key(&ranking), clock.now());
+        let slot = self.slot(source.query_key(&ranking), clock.now(), started);
         let _want = slot.wants.add(priority);
         loop {
             let now = clock.now();

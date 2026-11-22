@@ -162,4 +162,5 @@ pub trait MarketStream: Send + Sync + 'static {
     fn seat_rules(&self) -> Arc<dyn SeatRules>;
     fn set_desired(&self, desired: DesiredFeeds);
     fn watch_desired(&self) -> watch::Receiver<DesiredFeeds>;
+    fn set_venue(&self, _venue: Venue) {}
 }

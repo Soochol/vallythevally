@@ -272,7 +272,7 @@ impl<'a> Spec<'a> {
         let fake = self.fake.unwrap_or_default();
         let lock = server::instance::InstanceLock::acquire(&config.lock_path).unwrap();
         let (events, stream_events) = tokio::sync::mpsc::channel(16);
-        let adapters = Adapters { kiwoom: fake.transport(), stream: StreamSource::Detached(stream_events), kiwoom_spacing: None, dart_spacing: Some(Duration::from_millis(1)) };
+        let adapters = Adapters { kiwoom: fake.transport(), kis: None, kis_feed: None, stream: StreamSource::Detached(stream_events), kiwoom_spacing: None, dart_spacing: Some(Duration::from_millis(1)) };
         let started = server::app::start(&config, &lock, adapters).await.unwrap_or_else(|_| panic!("서버가 시작하지 못했다"));
         let server::app::Started { state, router, listener, automatic, public } = started;
         drop(automatic);

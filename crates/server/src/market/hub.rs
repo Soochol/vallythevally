@@ -98,6 +98,10 @@ impl HubHandle {
         self.send(HubInput::DailyReset);
     }
 
+    pub fn source_switched(&self) {
+        self.send(HubInput::SourceSwitched);
+    }
+
     fn send(&self, input: HubInput) {
         if self.tx.send(input).is_err() {
             tracing::error!("MarketHub가 멈췄습니다");
@@ -115,6 +119,7 @@ enum HubInput {
     Watch { conn: ConnId, symbols: Vec<Symbol>, venue: Venue },
     Snapshot { key: SeriesKey, reply: oneshot::Sender<Option<HubSnapshot>> },
     DailyReset,
+    SourceSwitched,
     Seeded { key: SeriesKey, generation: u64, result: Result<Seed, BarError> },
     Verified { key: SeriesKey, generation: u64, bucket: Bucket, attempt: u32, result: Result<Option<ConfirmedBar>, BarError> },
     DayVolumes { requests: Vec<(StockCode, u64)>, result: Result<HashMap<StockCode, DayVolumes>, SourceError> },
@@ -375,6 +380,13 @@ impl MarketHub {
                 tracing::info!(keys = self.keys.len(), "07:45 실시간 키를 모두 다시 시드합니다");
                 self.reseed_all(SeedPurpose::Reload { reason: ReloadReason::DailyReset, from: None });
             }
+            HubInput::SourceSwitched => {
+                self.manager.reseat(self.stream.seat_rules());
+                self.replan(now);
+                self.broker_history.clear();
+                tracing::info!(keys = self.keys.len(), "시세 공급원이 바뀌어 실시간 키를 모두 다시 시드합니다");
+                self.reseed_all(SeedPurpose::Reload { reason: ReloadReason::DailyReset, from: None });
+            }
             HubInput::Seeded { key, generation, result } => self.on_seeded(key, generation, result, now),
             HubInput::Verified { key, generation, bucket, attempt, result } => self.on_verified(key, generation, bucket, attempt, result, now),
             HubInput::DayVolumes { requests, result } => self.on_day_volumes(requests, result, now),
@@ -513,6 +525,7 @@ impl MarketHub {
         };
         c.requested_watch = symbols;
         c.watch_venue = venue;
+        self.stream.set_venue(venue);
         c.outbox.set_quote_venue(venue.into());
         self.hold_listed_watch_rows(conn, now);
         self.sync_day_volumes(now);
@@ -718,6 +731,10 @@ impl MarketHub {
     fn reseed_all(&mut self, purpose: SeedPurpose) {
         let keys: Vec<SeriesKey> = self.keys.keys().copied().collect();
         for key in keys {
+            let ks = self.keys.get_mut(&key).expect("방금 본 키");
+            let gap_fill = matches!(purpose, SeedPurpose::Reload { reason: ReloadReason::GapFilled, .. });
+            let reset_pending = matches!(ks.feed, KeyFeed::Seeding { purpose: SeedPurpose::Reload { reason: ReloadReason::DailyReset, .. }, .. });
+            let key_purpose = if gap_fill && reset_pending { SeedPurpose::Reload { reason: ReloadReason::DailyReset, from: None } } else { purpose };
             let generation = self.new_generation();
             let ks = self.keys.get_mut(&key).expect("방금 본 키");
             if matches!(purpose, SeedPurpose::Reload { reason: ReloadReason::DailyReset, .. }) {
@@ -730,7 +747,7 @@ impl MarketHub {
                 }
             }
             ks.generation = generation;
-            ks.feed = KeyFeed::Seeding { purpose, attempt: 0, reported: false, last_dropped: None };
+            ks.feed = KeyFeed::Seeding { purpose: key_purpose, attempt: 0, reported: false, last_dropped: None };
             ks.contiguous = false;
             self.start_seed(key, Duration::ZERO);
         }
@@ -2145,6 +2162,43 @@ mod tests {
         let messages = out.take(true).messages;
         assert_eq!(messages.iter().filter(|m| matches!(m, ServerMessage::Reload { reason: ReloadReason::DailyReset, .. })).count(), 1);
         assert!(!messages.iter().any(|m| matches!(m, ServerMessage::Reload { reason: ReloadReason::Replaced, .. })), "reset 전 진행 중 결과를 알리지 않는다: {messages:?}");
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_gap_that_opens_after_the_source_switch_does_not_replace_the_pending_daily_reset() {
+        let h = harness(at(9, 0, 5), Chart::default(), Duration::from_secs(3));
+        let out = subscribe_with_dropped_tick(&h, (9, 0, 7)).await;
+        h.bars.clear_all();
+        h.hub.source_switched();
+        h.events.send(StreamEvent::Down { at: h.clock.now() }).await.unwrap();
+        h.chart.lock().unwrap().set(at(9, 0, 0), [100, 100, 100, 100, 7]);
+        live(&h).await;
+        tokio::time::sleep(Duration::from_secs(10)).await;
+        let reloads: Vec<ReloadReason> = out.take(true).messages.iter().filter_map(|m| match m { ServerMessage::Reload { reason, .. } => Some(*reason), _ => None }).collect();
+        assert_eq!(reloads, [ReloadReason::DailyReset], "바꾼 뒤 열린 끊김 구간이 비우기 알림을 밀어내지 않는다: {reloads:?}");
+        let current = h.hub.snapshot(samsung()).await.unwrap().current;
+        assert_eq!(current.map(|bar| bar.ohlcv().volume().0), Some(7), "끊긴 동안의 체결은 Live 뒤 시드로 받는다: {current:?}");
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_gap_after_the_source_switch_keeps_the_verification_of_a_trade_dropped_during_the_reset_seed() {
+        let h = harness(at(9, 0, 5), Chart::default(), Duration::from_secs(3));
+        live(&h).await;
+        let (conn, out) = connect(&h).await;
+        h.hub.subscribe(conn, sub("a"), samsung());
+        tokio::time::sleep(Duration::from_secs(4)).await;
+        h.bars.clear_all();
+        h.hub.source_switched();
+        settle().await;
+        h.events.send(trade(&h, (9, 0, 10), 100, 7, Some(Exchange::Krx))).await.unwrap();
+        settle().await;
+        h.events.send(StreamEvent::Down { at: h.clock.now() }).await.unwrap();
+        live(&h).await;
+        tokio::time::sleep(Duration::from_secs(4)).await;
+        h.chart.lock().unwrap().set(at(9, 0, 0), [100, 100, 100, 100, 7]);
+        h.clock.sleep_until(at(9, 1, 50)).await;
+        let reasons: Vec<ReloadReason> = take(&out).await.iter().filter_map(|m| match m { ServerMessage::Reload { reason, .. } => Some(*reason), _ => None }).collect();
+        assert!(reasons.contains(&ReloadReason::Replaced), "시드 중 버려진 체결의 대조가 살아 봉을 고친다: {reasons:?}");
     }
 
     #[tokio::test(start_paused = true)]
