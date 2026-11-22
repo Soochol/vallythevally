@@ -364,3 +364,29 @@ async fn a_key_list_file_entry_with_a_broker_other_than_kiwoom_or_kis_is_a_file_
     assert!(listed["keyFileProblem"].is_string(), "{listed}");
     server.stop().await;
 }
+
+#[tokio::test]
+async fn the_kiwoom_lane_follows_a_kiwoom_key_while_the_source_is_a_kis_key_and_hands_over_when_that_key_is_removed() {
+    let (fake, kis, env) = (ScriptedTransport::new(), FakeKis::new(), Env::new());
+    let server = env.spawn(&fake, &kis, &[NO_KIWOOM_KEY, START]);
+    let client = Client::of(&server).await;
+    for (broker, alias, key) in [(None, "키움 하나", KIWOOM_KEY), (None, "키움 둘", "FAKE-APPKEY-kiskeys-kiwoom-second-8F5K"), (Some("kis"), "한투", SCREEN_KIS_KEY)] {
+        assert_eq!(client.add(broker, alias, key, "FAKE-SECRET-kiskeys").await.0, 200);
+    }
+    for id in ["k1", "k2", "k3"] {
+        client.until_key_state(id, "connected").await;
+    }
+    assert_eq!(client.send(reqwest::Method::PUT, "/api/system/kiwoom/market-key", Some(json!({"keyId": "k3"}))).await.0, 200);
+    let lane = client.get("/api/system/kiwoom").await.1;
+    assert_eq!((lane["state"].as_str(), lane["appKeyTail"].as_str()), (Some("connected"), Some(&KIWOOM_KEY[KIWOOM_KEY.len() - 4..])), "시세 공급원이 한투여도 키움 레인은 키움 키에 묶여 있다: {lane}");
+    assert_eq!(client.send(reqwest::Method::DELETE, "/api/system/kiwoom/keys/k1", None).await.0, 200);
+    let lane = until("키움 레인이 둘째 키움 키로 넘어옴", || async {
+        let lane = client.get("/api/system/kiwoom").await.1;
+        (lane["state"] == "connected" && lane["appKeyTail"] == "8F5K").then_some(lane)
+    })
+    .await;
+    assert_eq!(lane["keySource"], "file");
+    assert_eq!(client.key("k3").await["market"], true, "공급원은 한투 키 그대로");
+    assert_eq!(client.key("k2").await["link"]["state"], "connected");
+    server.stop().await;
+}

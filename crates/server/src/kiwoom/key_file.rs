@@ -542,7 +542,7 @@ mod tests {
         let loaded = file.load().unwrap();
         assert_eq!(loaded.keys.iter().map(|key| key.broker).collect::<Vec<_>>(), [Broker::Kiwoom, Broker::Kis]);
         write_list(&file, &format!(r#"{{"version":1,"keys":[{}]}}"#, entry_json("k1", Some("mirae"), "FAKE-APPKEY-odd-1")));
-        let error = file.load().err().expect("모르는 증권사는 파일 오류").to_string();
+        let error = file.load().expect_err("모르는 증권사는 파일 오류").to_string();
         assert!(error.contains("kiwoom-keys.json") && !error.contains("FAKE-"), "{error}");
     }
 

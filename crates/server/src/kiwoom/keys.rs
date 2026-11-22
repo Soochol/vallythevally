@@ -640,9 +640,10 @@ impl KeyRing {
         self.persist(&proposed)?;
         inner.market = Some(id.clone());
         let next_holder = inner.desired_lane_holder(None);
+        let previous_holder = inner.market_lane_holder.clone();
         let moved = self.hand_over_market_lane(&mut inner, next_holder);
         self.apply_market_duty(&inner);
-        let lanes: Vec<EntryLane> = inner.entries.iter().enumerate().filter(|(at, entry)| *at == to || (moved && Some(&entry.id) == inner.market_lane_holder.as_ref())).map(|(_, entry)| entry.lane.clone()).collect();
+        let lanes: Vec<EntryLane> = inner.entries.iter().enumerate().filter(|(at, entry)| *at == to || (moved && (Some(&entry.id) == previous_holder.as_ref() || Some(&entry.id) == inner.market_lane_holder.as_ref()))).map(|(_, entry)| entry.lane.clone()).collect();
         for lane in lanes {
             lane.connect_at_start();
         }
