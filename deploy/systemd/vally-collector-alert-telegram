@@ -5,13 +5,28 @@ export LC_ALL
 name=vally-collector-alert-telegram
 file=${VALLY_TELEGRAM:-${HOME:-}/.config/vally/telegram}
 api=${VALLY_TELEGRAM_API:-https://api.telegram.org}
+longest_bot_token=256
+longest_chat_id=128
 message=${1:-}
 if [ -z "$message" ]; then
     echo "$name: 보낼 메시지가 없습니다" >&2
     exit 2
 fi
-[ -e "$file" ] || exit 0
-mode=$(stat -L -c %a "$file") || exit 1
+case $file in
+    /*) stat_path=$file ;;
+    *) stat_path=./$file ;;
+esac
+if ! mode=$(stat -L -c %a "$stat_path" 2>&1); then
+    case $mode in
+        *'No such file or directory') exit 0 ;;
+    esac
+    echo "$name: $file 을 열 수 없습니다: ${mode##*: }" >&2
+    exit 1
+fi
+if ! { true < "$file"; } 2>/dev/null; then
+    echo "$name: $file 을 읽을 수 없습니다" >&2
+    exit 1
+fi
 if [ $((0$mode & 077)) -ne 0 ]; then
     echo "$name: $file 의 권한이 $mode 라 쓰지 않습니다. chmod 600 $file" >&2
     exit 1
@@ -64,8 +79,15 @@ case $chat_id in
     -[0-9]* | [0-9]* | @*) valid_chat=yes ;;
     *) valid_chat=no ;;
 esac
+if [ "${#bot_token}" -gt "$longest_bot_token" ]; then
+    echo "$name: $file 의 bot_token이 ${longest_bot_token}자를 넘어 쓰지 않습니다" >&2
+    exit 1
+fi
+if [ "${#chat_id}" -gt "$longest_chat_id" ]; then
+    valid_chat=no
+fi
 if [ "$valid_chat" != yes ]; then
-    echo "$name: $file 의 chat_id가 없거나 숫자(음수 가능)나 @이름이 아니라 쓰지 않습니다" >&2
+    echo "$name: $file 의 chat_id가 없거나 숫자(음수 가능)나 @이름이 아니거나 ${longest_chat_id}자를 넘어 쓰지 않습니다" >&2
     exit 1
 fi
 control_escapes=
