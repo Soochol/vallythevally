@@ -166,8 +166,21 @@ seconds_digits() {
 }
 
 visible_text() {
-    printf '%s' "$1" | LC_ALL=C awk 'BEGIN { RS = "\001"; ORS = ""; for (code = 1; code < 32; code++) name[sprintf("%c", code)] = sprintf("\\x%02x", code); name["\n"] = "\\n"; name["\t"] = "\\t"; name["\r"] = "\\r"; name[sprintf("%c", 127)] = "\\x7f" }
-        { for (i = 1; i <= length($0); i++) { c = substr($0, i, 1); if (c in name) c = name[c]; print c } }'
+    printf '%s' "$1" | LC_ALL=C od -An -v -tx1 | LC_ALL=C awk '
+        function value(hex) { return (index("0123456789abcdef", substr(hex, 1, 1)) - 1) * 16 + index("0123456789abcdef", substr(hex, 2, 1)) - 1 }
+        BEGIN { ORS = ""; names[10] = "\\n"; names[9] = "\\t"; names[13] = "\\r" }
+        { for (field = 1; field <= NF; field++) byte[++count] = value($field) }
+        END {
+            for (i = 1; i <= count; i++) {
+                code = byte[i]
+                if (code in names) print names[code]
+                else if (code < 32 || code == 127) printf "\\x%02x", code
+                else if (code == 194 && byte[i + 1] == 133) { print "\\u0085"; i += 1 }
+                else if (code == 226 && byte[i + 1] == 128 && byte[i + 2] == 168) { print "\\u2028"; i += 2 }
+                else if (code == 226 && byte[i + 1] == 128 && byte[i + 2] == 169) { print "\\u2029"; i += 2 }
+                else printf "%c", code
+            }
+        }'
 }
 
 check_lock_seconds() {
