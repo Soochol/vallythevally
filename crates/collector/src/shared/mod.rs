@@ -7,6 +7,7 @@ pub mod child;
 mod job;
 mod probe;
 mod runner;
+mod themes;
 mod usage;
 mod wire;
 
@@ -20,12 +21,14 @@ pub use wire::{JobStat, TrMinute};
 #[serde(rename_all = "snake_case")]
 pub enum JobName {
     Probe,
+    KiwoomThemes,
 }
 
 impl JobName {
     pub fn job(self) -> Arc<dyn SharedJob> {
         match self {
             JobName::Probe => Arc::new(probe::ProbeJob),
+            JobName::KiwoomThemes => Arc::new(themes::KiwoomThemesJob::default()),
         }
     }
 }

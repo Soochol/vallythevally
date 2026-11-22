@@ -79,3 +79,6 @@ TR 줄:
 | 종류 | 폴더 | 한 파일(`.json`) | 덧붙임(`.jsonl`) | 본문 |
 |---|---|---|---|---|
 | `probe` (시험용) | `probe/` | `probe/<YYYYMMDD>.json` | `probe/<YYYYMMDD>.jsonl` | `ProbeBody`, `ProbeItem` |
+| `kiwoom_themes` | `kiwoom_themes/` | `kiwoom_themes/<YYYYMMDD>.json` | | `ThemesBody`, `ThemeEntry` |
+
+`kiwoom_themes`는 ADR 0042의 테마 목록·구성종목이다. 머리의 `asOf`가 받은 시각이고 본문은 테마마다 코드·이름·구성종목 코드다. 일 이름은 `kiwoom_themes`, 키움 키만 받는다.
