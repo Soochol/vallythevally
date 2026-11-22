@@ -136,7 +136,9 @@ async fn reopened_feed_writer_drops_a_torn_tail_and_keeps_the_header() {
     let mut writer = FeedWriter::open(tmp.path(), header(noon())).unwrap();
     writer.append(&ProbeItem { seq: 1 }).unwrap();
     OpenOptions::new().append(true).open(feed_path(tmp.path())).unwrap().write_all(b"{\"seq\":").unwrap();
-    let mut again = FeedWriter::open(tmp.path(), header(noon())).unwrap();
+    let mut later = header(noon());
+    later.written_at += 5;
+    let mut again = FeedWriter::open(tmp.path(), later).unwrap();
     again.append(&ProbeItem { seq: 2 }).unwrap();
     let data = SharedData::new();
     data.poll_once(tmp.path()).await;
@@ -220,12 +222,28 @@ async fn recreated_file_at_the_same_path_is_read_from_the_start() {
         writer.append(&ProbeItem { seq }).unwrap();
     }
     data.poll_once(tmp.path()).await;
+    drop(writer);
     std::fs::remove_file(feed_path(tmp.path())).unwrap();
-    let mut again = FeedWriter::open(tmp.path(), header(noon())).unwrap();
+    let mut later = header(noon());
+    later.written_at += 5;
+    let mut again = FeedWriter::open(tmp.path(), later).unwrap();
     for seq in 100..110 {
         again.append(&ProbeItem { seq }).unwrap();
     }
     data.poll_once(tmp.path()).await;
     assert_eq!(seqs(&data), (100..110).collect::<Vec<_>>());
     assert_eq!(data.error_count(DataKind::Probe), 0);
+}
+
+#[tokio::test]
+async fn bad_header_file_rewritten_in_place_with_a_good_header_is_read() {
+    let tmp = tempfile::tempdir().unwrap();
+    let data = SharedData::new();
+    std::fs::create_dir_all(tmp.path().join("probe")).unwrap();
+    std::fs::write(feed_path(tmp.path()), b"garbage that is longer than the good header line ................................................................................................................................\n{\"seq\":1}\n").unwrap();
+    data.poll_once(tmp.path()).await;
+    assert_eq!(data.error_count(DataKind::Probe), 1);
+    std::fs::write(feed_path(tmp.path()), format!("{}\n{{\"seq\":7}}\n", serde_json::to_string(&header(noon())).unwrap())).unwrap();
+    data.poll_once(tmp.path()).await;
+    assert_eq!(seqs(&data), vec![7]);
 }

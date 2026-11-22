@@ -13,6 +13,7 @@ struct Cursor {
     identity: u64,
     offset: u64,
     rejected: bool,
+    head: Vec<u8>,
 }
 
 pub struct Feed<T> {
@@ -50,9 +51,9 @@ impl<T: DeserializeOwned> Feed<T> {
         let Ok(meta) = file.metadata() else { return };
         let (len, identity) = (meta.len(), super::format::file_identity(&meta));
         let mut cursor = self.cursor.lock().unwrap_or_else(|e| e.into_inner());
-        let replaced = cursor.as_ref().is_none_or(|c| c.path != path || c.identity != identity || len < c.offset);
+        let replaced = cursor.as_ref().is_none_or(|c| c.path != path || c.identity != identity || len < c.offset || !head_matches(&mut file, &c.head));
         if replaced {
-            *cursor = Some(Cursor { path: path.clone(), identity, offset: 0, rejected: false });
+            *cursor = Some(Cursor { path: path.clone(), identity, offset: 0, rejected: false, head: Vec::new() });
         }
         let cursor = cursor.as_mut().expect("위에서 채웠다");
         if cursor.rejected || len == cursor.offset {
@@ -66,6 +67,7 @@ impl<T: DeserializeOwned> Feed<T> {
         let mut fresh = Vec::new();
         for (index, line) in chunk[..complete].split(|b| *b == b'\n').filter(|l| !l.is_empty()).enumerate() {
             if cursor.offset == 0 && index == 0 {
+                cursor.head = [line, b"\n"].concat();
                 if let Err(reason) = check_header(line, kind) {
                     self.errors.fetch_add(1, Ordering::Relaxed);
                     tracing::warn!(path = %path.display(), %reason, "덧붙이는 공용 자료의 머리를 읽지 못했습니다");
@@ -88,6 +90,11 @@ impl<T: DeserializeOwned> Feed<T> {
             self.items.write().unwrap_or_else(|e| e.into_inner()).extend(fresh);
         }
     }
+}
+
+fn head_matches(file: &mut File, head: &[u8]) -> bool {
+    let mut seen = vec![0; head.len()];
+    file.seek(SeekFrom::Start(0)).and_then(|_| file.read_exact(&mut seen)).is_ok() && seen == head
 }
 
 fn check_header(line: &[u8], kind: DataKind) -> Result<(), String> {
