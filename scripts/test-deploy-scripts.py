@@ -991,13 +991,56 @@ class CollectorRestartTest(FakeCollectorHost):
         marker = self.seed_marker_of_a_restart_finishing_in_the_future()
         write_stub(self.stubs, "systemctl", f'echo "systemctl $*" >> "{self.calls}"\ncase "$*" in *is-active*) exit 3 ;; esac\nexit 0\n')
         self.restart("--scheduled", VALLY_COLLECTOR_STABLE_SECONDS="1")
-        self.assertFalse(marker.exists())
+        self.assertEqual(len(marker.read_text().splitlines()), 1)
 
-    def test_lock_seconds_with_leading_zeros_or_decimals_still_restart_without_complaint(self):
-        for value in ["08", "1.5", "010"]:
+    def test_lock_seconds_with_leading_zeros_count_by_their_value_and_restart_without_complaint(self):
+        for value in ["08", "010", "3600"]:
             result = self.restart("--scheduled", VALLY_COLLECTOR_STABLE_SECONDS="1", VALLY_COLLECTOR_LOCK_SECONDS=value)
             self.assertEqual(result.returncode, 0, f"{value}: {result.stderr}")
             self.assertEqual(result.stderr, "")
+
+    def test_lock_seconds_that_are_decimal_text_zero_or_above_the_cap_fail_before_anything_runs(self):
+        for value in ["1.5", "abc", "0", "000", "-1", " 5", "3601", "99999999999999999999"]:
+            result = self.restart("--scheduled", VALLY_COLLECTOR_STABLE_SECONDS="1", VALLY_COLLECTOR_LOCK_SECONDS=value)
+            self.assertEqual(result.returncode, 2, f"{value!r}: {result.stderr}")
+            self.assertIn("VALLY_COLLECTOR_LOCK_SECONDS", result.stderr)
+        self.assertEqual(self.recorded(), [])
+
+    def test_a_decimal_lock_seconds_does_not_shorten_the_wait_for_another_restart(self):
+        units = self.home_units()
+        with open(units / ".vally-collector-restart.lock", "w") as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX)
+            result = self.restart("--scheduled", VALLY_COLLECTOR_STABLE_SECONDS="1", VALLY_COLLECTOR_LOCK_SECONDS="1.5")
+        self.assertEqual(result.returncode, 2)
+        self.assertNotIn("다른 재시작", result.stderr)
+        self.assertEqual(self.recorded(), [])
+
+    def test_a_marker_whose_numbers_are_not_a_generation_never_skips_a_restart(self):
+        units = self.home_units()
+        marker = units / ".vally-collector-last-restart"
+        fingerprint = "\n".join([subprocess.run(["cksum"], input=(self.stubs / "collector").read_bytes(), capture_output=True).stdout.decode().strip(), "missing"])
+        for first_line in ["", "abc", "9" * 40, "-5"]:
+            marker.write_text(f"{first_line}\n{fingerprint}\n")
+            result = self.restart("--scheduled", VALLY_COLLECTOR_STABLE_SECONDS="1")
+            self.assertEqual(result.returncode, 0, result.stderr)
+        restarts = [call for call in self.recorded() if call == "systemctl --user restart vally-collector.service"]
+        self.assertEqual(len(restarts), 4, self.recorded())
+
+    def test_a_marker_stamped_with_a_future_time_does_not_make_the_run_skip_a_restart_that_never_happened(self):
+        marker = self.seed_marker_of_a_restart_finishing_in_the_future()
+        result = self.restart("--scheduled", VALLY_COLLECTOR_STABLE_SECONDS="1")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertNotIn("다시 시작하지 않습니다", result.stdout)
+        self.assertIn("systemctl --user restart vally-collector.service", self.recorded())
+        self.assertTrue(marker.exists())
+
+    def test_the_restart_records_count_up_so_an_overlapping_one_only_skips_for_a_restart_finished_after_it_asked(self):
+        marker = self.home_units() / ".vally-collector-last-restart"
+        for expected in ["1", "2", "3"]:
+            self.assertEqual(self.restart("--scheduled", VALLY_COLLECTOR_STABLE_SECONDS="1").returncode, 0)
+            self.assertEqual(marker.read_text().splitlines()[0], expected)
+        restarts = [call for call in self.recorded() if call == "systemctl --user restart vally-collector.service"]
+        self.assertEqual(len(restarts), 3)
 
     def test_the_wait_for_another_restart_is_longer_than_that_restarts_check_even_when_the_check_outlasts_the_lock_seconds(self):
         results = self.overlapped_restarts(VALLY_COLLECTOR_STABLE_SECONDS="3", VALLY_COLLECTOR_LOCK_SECONDS="2")
