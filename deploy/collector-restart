@@ -16,6 +16,7 @@ reload_pending="$unit_dir/.vally-collector-reload-pending"
 install_verdict="$unit_dir/.vally-collector-install-verdict"
 lock_file="$unit_dir/.vally-collector-deploy.lock"
 restart_lock_file="$unit_dir/.vally-collector-restart.lock"
+last_restart_file="$unit_dir/.vally-collector-last-restart"
 alert_script="$bin_dir/vally-collector-alert-telegram"
 stable_max=600
 lock_wait_seconds="${VALLY_COLLECTOR_LOCK_SECONDS:-120}"
@@ -170,19 +171,55 @@ if [ "$stable_digits" -gt "$stable_max" ]; then
     exit 2
 fi
 stable="$stable_digits"
+lock_digits="${lock_wait_seconds#"${lock_wait_seconds%%[!0]*}"}"
+case "$lock_wait_seconds" in
+    ''|*[!0-9]*) restart_lock_wait_seconds="$lock_wait_seconds" ;;
+    *) restart_lock_wait_seconds=$((stable + ${lock_digits:-0})) ;;
+esac
 
 cancel_reservation() {
     systemctl --user stop "$reservation.timer" 2>/dev/null || true
 }
 
+nanoseconds_now() {
+    now_ns="$(date +%s%N 2>/dev/null || true)"
+    case "$now_ns" in
+        ''|*[!0-9]*) now_ns=0 ;;
+    esac
+    printf '%s\n' "$now_ns"
+}
+
+running_files_fingerprint() {
+    for file in "$collector" "$unit_dir/vally-collector.service"; do
+        { cksum < "$file"; } 2>/dev/null || echo missing
+    done
+}
+
+restarted_with_same_files_since() {
+    [ "$1" -gt 0 ] || return 1
+    [ -r "$last_restart_file" ] || return 1
+    { read -r finished_at && fingerprint="$(cat)"; } < "$last_restart_file" || return 1
+    case "$finished_at" in
+        ''|*[!0-9]*) return 1 ;;
+    esac
+    [ "$finished_at" -ge "$1" ] && [ "$fingerprint" = "$2" ]
+}
+
 restart_and_watch() {
+    asked_at="$(nanoseconds_now)"
     mkdir -p "$unit_dir"
     exec 8>"$restart_lock_file"
-    if command -v flock >/dev/null 2>&1 && ! flock -w "$lock_wait_seconds" 8; then
-        echo "vally-deploy collector-restart: 다른 재시작이 ${lock_wait_seconds}초 넘게 끝나지 않습니다($restart_lock_file)" >&2
+    if command -v flock >/dev/null 2>&1 && ! flock -w "$restart_lock_wait_seconds" 8; then
+        echo "vally-deploy collector-restart: 다른 재시작이 ${restart_lock_wait_seconds}초 넘게 끝나지 않습니다($restart_lock_file)" >&2
         exit 1
     fi
     promote_pending
+    files_fingerprint="$(running_files_fingerprint)"
+    if restarted_with_same_files_since "$asked_at" "$files_fingerprint" && systemctl --user is-active --quiet "$service"; then
+        echo "$service는 이 실행이 시작된 뒤 다른 재시작이 같은 판으로 다시 시작하고 확인까지 마쳤으므로 다시 시작하지 않습니다"
+        return 0
+    fi
+    rm -f "$last_restart_file"
     systemctl --user restart "$service"
     elapsed=0
     while [ "$elapsed" -lt "$stable" ]; do
@@ -193,6 +230,7 @@ restart_and_watch() {
         fi
         elapsed=$((elapsed + 1))
     done
+    { nanoseconds_now; printf '%s\n' "$files_fingerprint"; } > "$last_restart_file"
     echo "$service를 재시작했고 ${stable}초 동안 active입니다"
 }
 

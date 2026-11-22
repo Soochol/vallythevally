@@ -573,6 +573,7 @@ class DeferredDeployTest(FakeCollectorHost):
         env = self.deploy("racing")
         scheduled_env = {key: env[key] for key in ["VALLY_COLLECTOR_BIN", "VALLY_SYSTEMD_USER_DIR", "VALLY_COLLECTOR_STABLE_SECONDS"]}
         self.say("now\t마감 정리 여유가 끝났다")
+        (self.stubs / "sleep").unlink()
         results = []
         def run(arguments):
             results.append(self.run_script("collector-restart", *arguments, **scheduled_env))
@@ -583,6 +584,7 @@ class DeferredDeployTest(FakeCollectorHost):
             thread.join()
         for result in results:
             self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(len([call for call in self.recorded() if " restart " in call]), 1, self.recorded())
         self.assertEqual(self.running.read_text(), self.script_text("racing"))
         self.assertEqual(self.names_with_next(), [])
 
@@ -916,6 +918,92 @@ class CollectorRestartTest(FakeCollectorHost):
         self.assertIn("다른 재시작", result.stderr)
         self.assertEqual(self.recorded(), [])
         self.assertEqual(self.restart("--scheduled").returncode, 0)
+
+    def overlapped_restarts(self, **env):
+        (self.stubs / "sleep").unlink()
+        results = []
+        def run(arguments):
+            results.append(self.restart(*arguments, **env))
+        first = threading.Thread(target=run, args=(("--scheduled",),))
+        first.start()
+        deadline = time.time() + 10
+        while not any(" restart " in call for call in self.recorded()) and time.time() < deadline:
+            time.sleep(0.05)
+        second = threading.Thread(target=run, args=(("--scheduled",),))
+        second.start()
+        first.join()
+        second.join()
+        return results
+
+    def test_a_restart_that_overlaps_another_with_the_same_files_does_not_restart_the_daemon_again(self):
+        results = self.overlapped_restarts(VALLY_COLLECTOR_STABLE_SECONDS="2")
+        for result in results:
+            self.assertEqual(result.returncode, 0, result.stderr)
+        restarts = [call for call in self.recorded() if call == "systemctl --user restart vally-collector.service"]
+        self.assertEqual(len(restarts), 1, self.recorded())
+        self.assertEqual(sum("다시 시작하지 않습니다" in result.stdout for result in results), 1)
+
+    def test_a_restart_that_overlaps_another_still_restarts_when_the_files_changed_in_between(self):
+        (self.stubs / "sleep").unlink()
+        results = []
+        first = threading.Thread(target=lambda: results.append(self.restart("--scheduled", VALLY_COLLECTOR_STABLE_SECONDS="2")))
+        first.start()
+        deadline = time.time() + 10
+        while not any(" restart " in call for call in self.recorded()) and time.time() < deadline:
+            time.sleep(0.05)
+        (self.stubs / "collector.next").write_text("#!/bin/sh\n# newer\n")
+        second = self.restart("--scheduled", VALLY_COLLECTOR_STABLE_SECONDS="2")
+        first.join()
+        self.assertEqual(second.returncode, 0, second.stderr)
+        self.assertEqual(results[0].returncode, 0, results[0].stderr)
+        restarts = [call for call in self.recorded() if call == "systemctl --user restart vally-collector.service"]
+        self.assertEqual(len(restarts), 2, self.recorded())
+        self.assertEqual((self.stubs / "collector").read_text(), "#!/bin/sh\n# newer\n")
+
+    def test_a_restart_after_another_one_finished_restarts_again_even_with_the_same_files(self):
+        self.assertEqual(self.restart("--scheduled", VALLY_COLLECTOR_STABLE_SECONDS="1").returncode, 0)
+        self.assertEqual(self.restart("--scheduled", VALLY_COLLECTOR_STABLE_SECONDS="1").returncode, 0)
+        restarts = [call for call in self.recorded() if call == "systemctl --user restart vally-collector.service"]
+        self.assertEqual(len(restarts), 2)
+
+    def test_a_restart_that_failed_its_check_does_not_make_an_overlapping_one_skip_its_own(self):
+        write_stub(self.stubs, "systemctl", f'echo "systemctl $*" >> "{self.calls}"\ncase "$*" in *is-active*) exit 3 ;; esac\nexit 0\n')
+        results = self.overlapped_restarts(VALLY_COLLECTOR_STABLE_SECONDS="2")
+        self.assertEqual([result.returncode for result in results], [1, 1])
+        restarts = [call for call in self.recorded() if call == "systemctl --user restart vally-collector.service"]
+        self.assertEqual(len(restarts), 2, self.recorded())
+
+    def seed_marker_of_a_restart_finishing_in_the_future(self):
+        units = self.home_units()
+        marker = units / ".vally-collector-last-restart"
+        fingerprint = "\n".join([subprocess.run(["cksum"], input=(self.stubs / "collector").read_bytes(), capture_output=True).stdout.decode().strip(), "missing"])
+        marker.write_text(f"{time.time_ns() + 60_000_000_000}\n{fingerprint}\n")
+        return marker
+
+    def test_a_restart_does_not_skip_when_the_daemon_is_no_longer_active(self):
+        self.seed_marker_of_a_restart_finishing_in_the_future()
+        write_stub(self.stubs, "systemctl", f'echo "systemctl $*" >> "{self.calls}"\ncase "$*" in *is-active*) exit 3 ;; esac\nexit 0\n')
+        result = self.restart("--scheduled", VALLY_COLLECTOR_STABLE_SECONDS="1")
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("systemctl --user restart vally-collector.service", self.recorded())
+
+    def test_a_restart_that_fails_its_check_forgets_the_earlier_restart_so_nothing_skips_on_it(self):
+        marker = self.seed_marker_of_a_restart_finishing_in_the_future()
+        write_stub(self.stubs, "systemctl", f'echo "systemctl $*" >> "{self.calls}"\ncase "$*" in *is-active*) exit 3 ;; esac\nexit 0\n')
+        self.restart("--scheduled", VALLY_COLLECTOR_STABLE_SECONDS="1")
+        self.assertFalse(marker.exists())
+
+    def test_lock_seconds_with_leading_zeros_or_decimals_still_restart_without_complaint(self):
+        for value in ["08", "1.5", "010"]:
+            result = self.restart("--scheduled", VALLY_COLLECTOR_STABLE_SECONDS="1", VALLY_COLLECTOR_LOCK_SECONDS=value)
+            self.assertEqual(result.returncode, 0, f"{value}: {result.stderr}")
+            self.assertEqual(result.stderr, "")
+
+    def test_the_wait_for_another_restart_is_longer_than_that_restarts_check_even_when_the_check_outlasts_the_lock_seconds(self):
+        results = self.overlapped_restarts(VALLY_COLLECTOR_STABLE_SECONDS="3", VALLY_COLLECTOR_LOCK_SECONDS="2")
+        for result in results:
+            self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertNotIn("끝나지 않습니다", "".join(result.stderr for result in results))
 
     def test_the_cleanup_before_the_daemon_starts_does_nothing_without_pending_files(self):
         result = self.restart("--before-start")
