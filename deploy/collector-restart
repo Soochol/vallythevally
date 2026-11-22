@@ -165,16 +165,21 @@ seconds_digits() {
     printf '%s\n' "$digits"
 }
 
+visible_text() {
+    printf '%s' "$1" | LC_ALL=C awk 'BEGIN { RS = "\001"; ORS = ""; for (code = 1; code < 32; code++) name[sprintf("%c", code)] = sprintf("\\x%02x", code); name["\n"] = "\\n"; name["\t"] = "\\t"; name["\r"] = "\\r"; name[sprintf("%c", 127)] = "\\x7f" }
+        { for (i = 1; i <= length($0); i++) { c = substr($0, i, 1); if (c in name) c = name[c]; print c } }'
+}
+
 check_lock_seconds() {
     if ! lock_wait_seconds="$(seconds_digits "$lock_wait_seconds" "$lock_max")"; then
-        echo "vally-deploy collector-restart: VALLY_COLLECTOR_LOCK_SECONDS는 1 이상 ${lock_max} 이하의 정수여야 합니다(${VALLY_COLLECTOR_LOCK_SECONDS:-120})" >&2
+        printf '%s\n' "vally-deploy collector-restart: VALLY_COLLECTOR_LOCK_SECONDS는 1 이상 ${lock_max} 이하의 정수여야 합니다($(visible_text "${VALLY_COLLECTOR_LOCK_SECONDS:-120}"))" >&2
         return 1
     fi
 }
 
 check_stable_seconds() {
     if ! stable="$(seconds_digits "$stable" "$stable_max")"; then
-        echo "vally-deploy collector-restart: VALLY_COLLECTOR_STABLE_SECONDS는 1 이상 ${stable_max} 이하의 정수여야 합니다(${VALLY_COLLECTOR_STABLE_SECONDS:-10})" >&2
+        printf '%s\n' "vally-deploy collector-restart: VALLY_COLLECTOR_STABLE_SECONDS는 1 이상 ${stable_max} 이하의 정수여야 합니다($(visible_text "${VALLY_COLLECTOR_STABLE_SECONDS:-10}"))" >&2
         return 1
     fi
 }
