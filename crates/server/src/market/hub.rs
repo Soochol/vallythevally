@@ -731,6 +731,11 @@ impl MarketHub {
     fn reseed_all(&mut self, purpose: SeedPurpose) {
         let keys: Vec<SeriesKey> = self.keys.keys().copied().collect();
         for key in keys {
+            let ks = self.keys.get_mut(&key).expect("방금 본 키");
+            let gap_fill = matches!(purpose, SeedPurpose::Reload { reason: ReloadReason::GapFilled, .. });
+            if gap_fill && matches!(ks.feed, KeyFeed::Seeding { purpose: SeedPurpose::Reload { reason: ReloadReason::DailyReset, .. }, .. }) {
+                continue;
+            }
             let generation = self.new_generation();
             let ks = self.keys.get_mut(&key).expect("방금 본 키");
             if matches!(purpose, SeedPurpose::Reload { reason: ReloadReason::DailyReset, .. }) {
@@ -2158,6 +2163,18 @@ mod tests {
         let messages = out.take(true).messages;
         assert_eq!(messages.iter().filter(|m| matches!(m, ServerMessage::Reload { reason: ReloadReason::DailyReset, .. })).count(), 1);
         assert!(!messages.iter().any(|m| matches!(m, ServerMessage::Reload { reason: ReloadReason::Replaced, .. })), "reset 전 진행 중 결과를 알리지 않는다: {messages:?}");
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_gap_that_opens_after_the_source_switch_does_not_replace_the_pending_daily_reset() {
+        let h = harness(at(9, 0, 5), Chart::default(), Duration::from_secs(3));
+        let out = subscribe_with_dropped_tick(&h, (9, 0, 7)).await;
+        h.hub.source_switched();
+        h.events.send(StreamEvent::Down { at: h.clock.now() }).await.unwrap();
+        live(&h).await;
+        tokio::time::sleep(Duration::from_secs(60)).await;
+        let reloads: Vec<ReloadReason> = out.take(true).messages.iter().filter_map(|m| match m { ServerMessage::Reload { reason, .. } => Some(*reason), _ => None }).collect();
+        assert_eq!(reloads, [ReloadReason::DailyReset], "바꾼 뒤 열린 끊김 구간이 비우기 알림을 밀어내지 않는다: {reloads:?}");
     }
 
     #[tokio::test(start_paused = true)]

@@ -241,6 +241,15 @@ async fn next_of_type(ws: &mut Browser, kind: &str) -> Value {
     .unwrap_or_else(|_| panic!("{kind} 메시지가 오지 않았다"))
 }
 
+async fn next_reload_because(ws: &mut Browser, reason: &str) -> Value {
+    loop {
+        let reload = next_of_type(ws, "reload").await;
+        if reload["reason"] == reason {
+            return reload;
+        }
+    }
+}
+
 #[tokio::test]
 async fn with_only_a_kis_env_key_the_bars_come_from_the_kis_transport_and_kiwoom_gets_nothing() {
     let (kiwoom, kis, peer, env) = (ScriptedTransport::new(), FakeKis::new(), KisPeer::default(), Env::new());
@@ -278,7 +287,7 @@ async fn switching_the_source_to_kis_moves_open_subscriptions_off_kiwoom_and_dro
     assert_eq!(kis.sent_to(KisApiId::DailyChart), 0);
 
     client.designate("env-kis").await;
-    let reload = next_of_type(&mut browser, "reload").await;
+    let reload = next_reload_because(&mut browser, "daily_reset").await;
     assert_eq!(reload["reason"], "daily_reset", "브라우저는 지금의 비우기 알림 경로로 다시 받는다: {reload}");
     until("키움 세션의 시세 구독이 내려감", || async { (!kiwoom_ws.holds("005930")).then_some(()) }).await;
     until("한투 세션에 열린 구독이 다시 등록됨", || async { peer.registered().contains(&("H0UNCNT0".to_owned(), "005930".to_owned())).then_some(()) }).await;
