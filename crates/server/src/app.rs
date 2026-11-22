@@ -135,7 +135,7 @@ pub fn application_with_source(inputs: ApplicationInputs, mut system: SystemStat
         None => KeyRing::unconfigured(market_lane),
     });
     let accounts = crate::trading::Accounts::new(keys.clone(), rest.clone(), account_feed, clock.clone(), system.take_order_switch_store(), db.clone(), symbols.clone());
-    Arc::new(AppState { symbols, bars, rest, source, kiwoom, db, clock, static_dir, hub, screener, link, keys, system, registered, seat_rules, accounts, rankings: Default::default(), market_overview: Default::default(), etf: Default::default(), kiwoom_catalog: Default::default(), public_usage: Default::default() })
+    Arc::new(AppState { symbols, bars, rest, source, kiwoom, db, clock, static_dir, hub, screener, link, keys, system, registered, seat_rules, accounts, rankings: Default::default(), market_overview: Default::default(), etf: Default::default(), kiwoom_catalog: Default::default(), public_usage: Default::default(), shared_data: crate::shared_data::SharedData::new() })
 }
 
 pub async fn daily_maintenance(state: Arc<AppState>) {
@@ -319,6 +319,7 @@ pub async fn start(config: &Config, lock: &InstanceLock, adapters: Adapters) -> 
     tokio::spawn(daily_maintenance(state.clone()));
     tokio::spawn(crate::account::sync::run(state.clone()));
     tokio::spawn(crate::collector::run(state.clone()));
+    state.shared_data.start(config.shared_data.as_ref());
     crate::market_overview::start(state.clone(), config.market_samples_dir.clone());
     crate::etf::start_collection(state.clone(), config.etf_pdf_dir.clone(), config.naver_base_url.clone());
     crate::kiwoom_themes::start_collection(state.clone(), config.kiwoom_themes_dir.clone());

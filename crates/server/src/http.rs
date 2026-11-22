@@ -44,6 +44,7 @@ pub struct AppState {
     pub etf: crate::etf::EtfBook,
     pub kiwoom_catalog: crate::kiwoom_themes::CatalogStore,
     pub public_usage: Arc<crate::public::usage::Usage>,
+    pub shared_data: Arc<crate::shared_data::SharedData>,
 }
 
 pub fn router(state: Arc<AppState>) -> Router {

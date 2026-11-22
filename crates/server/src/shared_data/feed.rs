@@ -1,0 +1,102 @@
+use std::fs::File;
+use std::io::{Read, Seek, SeekFrom};
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Mutex, RwLock};
+
+use serde::de::DeserializeOwned;
+
+use super::format::{DataKind, FEED_EXTENSION, FORMAT_VERSION, Header, newest_file};
+
+struct Cursor {
+    path: PathBuf,
+    offset: u64,
+}
+
+pub struct Feed<T> {
+    kind: DataKind,
+    items: RwLock<Vec<T>>,
+    errors: AtomicU64,
+    cursor: Mutex<Option<Cursor>>,
+}
+
+impl<T: DeserializeOwned> Feed<T> {
+    pub fn new(kind: DataKind) -> Self {
+        Feed { kind, items: RwLock::new(Vec::new()), errors: AtomicU64::new(0), cursor: Mutex::new(None) }
+    }
+
+    pub fn errors(&self) -> u64 {
+        self.errors.load(Ordering::Relaxed)
+    }
+
+    pub fn len(&self) -> usize {
+        self.items.read().unwrap_or_else(|e| e.into_inner()).len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
+    pub fn read<R>(&self, f: impl FnOnce(&[T]) -> R) -> R {
+        f(&self.items.read().unwrap_or_else(|e| e.into_inner()))
+    }
+
+    pub fn poll(&self, dir: &Path) {
+        let kind = self.kind;
+        let Some(path) = newest_file(dir, kind, FEED_EXTENSION) else { return };
+        let mut cursor = self.cursor.lock().unwrap_or_else(|e| e.into_inner());
+        if cursor.as_ref().is_none_or(|c| c.path != path) {
+            self.items.write().unwrap_or_else(|e| e.into_inner()).clear();
+            *cursor = Some(Cursor { path: path.clone(), offset: 0 });
+        }
+        let cursor = cursor.as_mut().expect("위에서 채웠다");
+        let Ok(mut file) = File::open(&path) else { return };
+        let Ok(len) = file.metadata().map(|m| m.len()) else { return };
+        if len < cursor.offset {
+            self.items.write().unwrap_or_else(|e| e.into_inner()).clear();
+            cursor.offset = 0;
+        }
+        if len == cursor.offset {
+            return;
+        }
+        let mut chunk = Vec::new();
+        if file.seek(SeekFrom::Start(cursor.offset)).and_then(|_| file.read_to_end(&mut chunk)).is_err() {
+            return;
+        }
+        let complete = chunk.iter().rposition(|b| *b == b'\n').map_or(0, |i| i + 1);
+        let mut fresh = Vec::new();
+        for (index, line) in chunk[..complete].split(|b| *b == b'\n').filter(|l| !l.is_empty()).enumerate() {
+            if cursor.offset == 0 && index == 0 {
+                if let Err(reason) = check_header(line, kind) {
+                    self.errors.fetch_add(1, Ordering::Relaxed);
+                    tracing::warn!(path = %path.display(), %reason, "덧붙이는 공용 자료의 머리를 읽지 못했습니다");
+                    cursor.offset = len;
+                    return;
+                }
+                continue;
+            }
+            match serde_json::from_slice::<T>(line) {
+                Ok(item) => fresh.push(item),
+                Err(e) => {
+                    self.errors.fetch_add(1, Ordering::Relaxed);
+                    tracing::warn!(path = %path.display(), error = %e, "덧붙이는 공용 자료의 줄을 건너뜁니다");
+                }
+            }
+        }
+        cursor.offset += complete as u64;
+        if !fresh.is_empty() {
+            self.items.write().unwrap_or_else(|e| e.into_inner()).extend(fresh);
+        }
+    }
+}
+
+fn check_header(line: &[u8], kind: DataKind) -> Result<(), String> {
+    let header: Header = serde_json::from_slice(line).map_err(|e| e.to_string())?;
+    if header.format_version != FORMAT_VERSION {
+        return Err(format!("모르는 형식 버전 {}", header.format_version));
+    }
+    if header.kind != kind {
+        return Err("폴더와 자료 종류가 다릅니다".to_owned());
+    }
+    Ok(())
+}
