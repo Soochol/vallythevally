@@ -281,12 +281,11 @@ impl KisMarket {
             let body: ChartBody = parse_body(KisApiId::IndexMinuteChart, &page)?;
             minutes.extend(minute_rows(&body.output2, None)?);
             let more = page.more;
-            let must_continue = more && (pages < MINUTE_PAGE_BUDGET || build(period, &minutes, true).map_err(|bad| malformed_minute(&bad))?.bars.is_empty());
-            if must_continue {
+            if more && pages < MINUTE_PAGE_BUDGET {
                 continue;
             }
             let built = build(period, &minutes, more).map_err(|bad| malformed_minute(&bad))?;
-            let next = more.then(|| Cursor::new(MinuteCursor { position: Position::IndexNextPage, carried: built.held_back }.encode()));
+            let next = (more && !built.bars.is_empty()).then(|| Cursor::new(MinuteCursor { position: Position::IndexNextPage, carried: built.held_back }.encode()));
             return Ok(ChartPage { bars: built.bars, next });
         }
     }

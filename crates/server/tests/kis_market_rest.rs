@@ -645,3 +645,13 @@ async fn a_symbol_jump_with_the_kis_source_reads_minute_and_daily_bars_and_never
     assert!(page.unadjusted_days.is_empty(), "그날 일봉이 있어 수정 비율을 구했다");
     assert!(rig.transport.count(&[KisApiId::DailyChart]) > 0, "수정 비율을 위해 일봉을 받는다");
 }
+
+#[tokio::test(start_paused = true)]
+async fn index_minute_pages_that_stay_empty_stop_at_the_page_budget_without_a_cursor() {
+    let rig = rig_at(friday_morning(), synthetic_master(), |_| ok_more(r#"{"rt_cd":"0","output2":[]}"#, true));
+    let source: &dyn MarketSource = rig.market.as_ref();
+    let key = SeriesKey { feed: Feed::Index(IndexCode::KOSPI), period: Period::M5 };
+    let page = source.chart_page(key, friday_morning().kst_date(), None, Priority::Screen, MergeScope::Shared).await.unwrap();
+    assert!(page.bars.is_empty() && page.next.is_none(), "빈 봉에 연속조회 키를 주지 않는다");
+    assert_eq!(rig.transport.sent_to(KisApiId::IndexMinuteChart).len(), MINUTE_PAGE_BUDGET);
+}
