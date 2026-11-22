@@ -1,6 +1,7 @@
 mod error;
 mod feature;
 mod kiwoom_handle;
+pub mod stream;
 mod types;
 
 #[cfg(test)]

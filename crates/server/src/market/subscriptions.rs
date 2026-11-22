@@ -1,26 +1,22 @@
 //! 구독 관리자(backend.md §5.3). 순수하다. 같은 상태와 같은 `now`면 언제나 같은 계획을 낸다.
-//!
-//! 키움 쪽 구독 단위는 종목이다. 자리는 등록 코드마다 하나라서, 거래소 호가(KRX·NXT 0D)를 받는 종목은 통합 코드 자리에 그 거래소 코드 자리를 더 쓴다(ADR 0032).
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::sync::Arc;
 
 use domain::{KstTime, Symbol};
 
 use super::{ConnId, SubId};
-use crate::kiwoom::stream::DesiredFeeds;
-use crate::kiwoom::wire::RealType;
+use crate::market_source::stream::{DesiredFeeds, SeatRules, StreamKind};
 
 /// 보유자가 모두 빠진 종목을 이만큼 더 받는다. 칸의 종목을 바꿨다가 바로 돌아와도 다시 받기를 기다리지 않는다.
 pub const RELEASE_GRACE_SECS: i64 = 30;
-/// 키움 접속 전체 한도. 0B 종목과 0J 지수, 거래소 호가 코드를 더해서 센다(kiwoom.md §10.7).
-pub const REALTIME_LIMIT: usize = 200;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum Holder {
     /// 브라우저 연결 하나의 구독 하나.
     Cell { conn: ConnId, sub: SubId },
     Watch { conn: ConnId, symbol: Symbol },
-    Feed { conn: ConnId, sub: SubId, kind: RealType },
+    Feed { conn: ConnId, sub: SubId, kind: StreamKind },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -38,25 +34,38 @@ impl Rank {
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct Plan {
-    /// 키움에 REG 할 종목 집합. 자리 수(`kiwoom::stream::seats(&feeds)`) ≤ REALTIME_LIMIT.
     pub realtime: BTreeSet<Symbol>,
     pub feeds: DesiredFeeds,
     pub rejected: BTreeSet<Holder>,
 }
 
-#[derive(Debug, Default)]
 pub struct SubscriptionManager {
+    rules: Arc<dyn SeatRules>,
     holders: BTreeMap<Symbol, BTreeSet<Holder>>,
     held_order: BTreeMap<Symbol, u64>,
     next_order: u64,
     released_at: BTreeMap<Symbol, KstTime>,
-    kind_released_at: BTreeMap<(Symbol, RealType), KstTime>,
+    kind_released_at: BTreeMap<(Symbol, StreamKind), KstTime>,
     admitted: BTreeSet<Symbol>,
-    admitted_venue: BTreeSet<(Symbol, RealType)>,
+    admitted_venue: BTreeSet<(Symbol, StreamKind)>,
     watch_rows: BTreeMap<ConnId, BTreeMap<Symbol, usize>>,
 }
 
 impl SubscriptionManager {
+    pub fn new(rules: Arc<dyn SeatRules>) -> SubscriptionManager {
+        SubscriptionManager {
+            rules,
+            holders: BTreeMap::new(),
+            held_order: BTreeMap::new(),
+            next_order: 0,
+            released_at: BTreeMap::new(),
+            kind_released_at: BTreeMap::new(),
+            admitted: BTreeSet::new(),
+            admitted_venue: BTreeSet::new(),
+            watch_rows: BTreeMap::new(),
+        }
+    }
+
     /// 유예 중인 종목이면 유예를 취소한다.
     pub fn hold(&mut self, symbol: Symbol, h: Holder) {
         if self.has_seat(symbol, &h) || !self.admitted.contains(&symbol) {
@@ -86,12 +95,12 @@ impl SubscriptionManager {
         }
     }
 
-    fn kind_is_held(&self, symbol: Symbol, kind: RealType) -> bool {
+    fn kind_is_held(&self, symbol: Symbol, kind: StreamKind) -> bool {
         self.holders.get(&symbol).into_iter().flatten().any(|h| h.feed_kind() == Some(kind))
     }
 
-    fn has_kind_seat(&self, symbol: Symbol, kind: RealType) -> bool {
-        !kind.has_own_code() || self.admitted_venue.contains(&(symbol, kind))
+    fn has_kind_seat(&self, symbol: Symbol, kind: StreamKind) -> bool {
+        !self.rules.takes_own_seat(kind) || self.admitted_venue.contains(&(symbol, kind))
     }
 
     fn has_seat(&self, symbol: Symbol, holder: &Holder) -> bool {
@@ -99,18 +108,18 @@ impl SubscriptionManager {
     }
 
     fn needs_only_venue_codes(&self, symbol: Symbol) -> bool {
-        self.holders.get(&symbol).into_iter().flatten().all(|h| h.feed_kind().is_some_and(RealType::has_own_code))
+        self.holders.get(&symbol).into_iter().flatten().all(|h| h.feed_kind().is_some_and(|kind| self.rules.takes_own_seat(kind)))
     }
 
     fn is_served(&self, symbol: Symbol) -> bool {
         self.holders.get(&symbol).into_iter().flatten().any(|h| h.feed_kind().is_none_or(|kind| self.has_kind_seat(symbol, kind)))
     }
 
-    fn held_venue_kinds(&self, symbol: Symbol) -> BTreeSet<RealType> {
-        self.holders.get(&symbol).into_iter().flatten().filter_map(Holder::feed_kind).filter(|kind| kind.has_own_code()).collect()
+    fn held_venue_kinds(&self, symbol: Symbol) -> BTreeSet<StreamKind> {
+        self.holders.get(&symbol).into_iter().flatten().filter_map(Holder::feed_kind).filter(|kind| self.rules.takes_own_seat(*kind)).collect()
     }
 
-    fn venue_kind_wanted(&self, symbol: Symbol, kind: RealType) -> bool {
+    fn venue_kind_wanted(&self, symbol: Symbol, kind: StreamKind) -> bool {
         self.kind_is_held(symbol, kind) || self.kind_released_at.contains_key(&(symbol, kind))
     }
 
@@ -207,7 +216,7 @@ impl SubscriptionManager {
             self.admitted.insert(s);
             self.admitted_venue.extend(venue_kinds.into_iter().map(|kind| (s, kind)));
         }
-        let mut wanting: Vec<(Rank, Symbol, RealType)> = Vec::new();
+        let mut wanting: Vec<(Rank, Symbol, StreamKind)> = Vec::new();
         for &s in &self.admitted {
             let seatless = self.held_venue_kinds(s).into_iter().filter(|kind| !self.admitted_venue.contains(&(s, *kind)));
             wanting.extend(seatless.map(|kind| (self.rank(s), s, kind)));
@@ -227,15 +236,15 @@ impl SubscriptionManager {
         Plan { realtime: self.admitted.clone(), feeds, rejected }
     }
 
-    fn kinds_to_receive(&self, symbol: Symbol) -> BTreeSet<RealType> {
+    fn kinds_to_receive(&self, symbol: Symbol) -> BTreeSet<StreamKind> {
         let held = self.holders.get(&symbol).into_iter().flatten().filter(|h| self.has_seat(symbol, h)).filter_map(Holder::feed_kind);
         let in_grace = self.kind_released_at.keys().filter(|(s, kind)| *s == symbol && self.has_kind_seat(symbol, *kind)).map(|(_, kind)| *kind);
-        let feeds: Vec<RealType> = held.chain(in_grace).collect();
-        std::iter::once(RealType::of(symbol)).chain(feeds.iter().copied()).chain(feeds.iter().filter_map(|kind| kind.companion())).collect()
+        let feeds: Vec<StreamKind> = held.chain(in_grace).collect();
+        std::iter::once(StreamKind::base(symbol)).chain(feeds.iter().copied()).chain(feeds.iter().filter_map(|kind| self.rules.companion(*kind))).collect()
     }
 
     fn seats_fit(&mut self, cost: usize, rank: Rank, keep: Option<Symbol>) -> bool {
-        let needed = (self.seats_used() + cost).saturating_sub(REALTIME_LIMIT);
+        let needed = (self.seats_used() + cost).saturating_sub(self.rules.limit());
         needed == 0 || self.make_room(rank, needed, keep)
     }
 
@@ -259,11 +268,11 @@ impl SubscriptionManager {
     }
 
     fn eviction_order(&self, rank: Rank) -> Vec<Eviction> {
-        let mut graces: Vec<(KstTime, Symbol, Option<RealType>)> = self.released_at.iter().map(|(s, at)| (*at, *s, None)).collect();
+        let mut graces: Vec<(KstTime, Symbol, Option<StreamKind>)> = self.released_at.iter().map(|(s, at)| (*at, *s, None)).collect();
         graces.extend(
             self.kind_released_at
                 .iter()
-                .filter(|((s, kind), _)| kind.has_own_code() && !self.released_at.contains_key(s) && self.admitted_venue.contains(&(*s, *kind)))
+                .filter(|((s, kind), _)| self.rules.takes_own_seat(*kind) && !self.released_at.contains_key(s) && self.admitted_venue.contains(&(*s, *kind)))
                 .map(|((s, kind), at)| (*at, *s, Some(*kind))),
         );
         graces.sort();
@@ -283,7 +292,7 @@ impl SubscriptionManager {
     }
 
     fn seats_freed_by(&self, victim: Eviction, chosen: &[Eviction]) -> usize {
-        let already_out = |kind: RealType, s: Symbol| chosen.iter().any(|c| matches!(*c, Eviction::Venue(x, k) if x == s && k == kind));
+        let already_out = |kind: StreamKind, s: Symbol| chosen.iter().any(|c| matches!(*c, Eviction::Venue(x, k) if x == s && k == kind));
         match victim {
             Eviction::Symbol(s) => 1 + self.admitted_venue.iter().filter(|&&(x, kind)| x == s && !already_out(kind, s)).count(),
             Eviction::Venue(s, _) if chosen.iter().any(|c| matches!(*c, Eviction::Symbol(x) if x == s)) => 0,
@@ -321,7 +330,7 @@ impl SubscriptionManager {
 #[derive(Debug, Clone, Copy)]
 enum Eviction {
     Symbol(Symbol),
-    Venue(Symbol, RealType),
+    Venue(Symbol, StreamKind),
 }
 
 impl Eviction {
@@ -339,9 +348,9 @@ impl Holder {
         }
     }
 
-    fn feed_kind(&self) -> Option<RealType> {
+    fn feed_kind(&self) -> Option<StreamKind> {
         match self {
-            Holder::Feed { kind, .. } if *kind != RealType::Trade => Some(*kind),
+            Holder::Feed { kind, .. } if *kind != StreamKind::Trades => Some(*kind),
             _ => None,
         }
     }
@@ -349,10 +358,15 @@ impl Holder {
 
 #[cfg(test)]
 mod tests {
-    use domain::{IndexCode, KstDate};
+    use domain::{IndexCode, KstDate, Venue};
 
     use super::*;
     use crate::clock::kst;
+    use crate::kiwoom::stream::{KIWOOM_REALTIME_LIMIT as REALTIME_LIMIT, KiwoomSeats};
+
+    fn manager() -> SubscriptionManager {
+        SubscriptionManager::new(Arc::new(KiwoomSeats))
+    }
 
     fn t(s: i64) -> KstTime {
         kst(KstDate::new(2026, 11, 9).unwrap(), 10, 0, 0).plus_secs(s)
@@ -382,7 +396,7 @@ mod tests {
 
     #[test]
     fn hold_admits_and_release_keeps_the_symbol_for_the_grace() {
-        let mut m = SubscriptionManager::default();
+        let mut m = manager();
         m.hold(stock(0), cell(1, "a"));
         assert_eq!(m.plan(t(0)).realtime, BTreeSet::from([stock(0)]));
         m.release(stock(0), &cell(1, "a"), t(0));
@@ -392,7 +406,7 @@ mod tests {
 
     #[test]
     fn resubscribe_within_the_grace_keeps_the_symbol() {
-        let mut m = SubscriptionManager::default();
+        let mut m = manager();
         m.hold(stock(0), cell(1, "a"));
         m.plan(t(0));
         m.release(stock(0), &cell(1, "a"), t(0));
@@ -402,7 +416,7 @@ mod tests {
 
     #[test]
     fn one_holder_leaving_keeps_the_symbol_while_another_holds_it() {
-        let mut m = SubscriptionManager::default();
+        let mut m = manager();
         m.hold(stock(0), cell(1, "a"));
         m.hold(stock(0), cell(2, "a"));
         m.plan(t(0));
@@ -415,7 +429,7 @@ mod tests {
 
     #[test]
     fn indices_count_toward_the_limit() {
-        let mut m = SubscriptionManager::default();
+        let mut m = manager();
         m.hold(Symbol::Index(IndexCode::KOSPI), cell(9, "k"));
         m.hold(Symbol::Index(IndexCode::KOSDAQ), cell(9, "q"));
         fill(&mut m, REALTIME_LIMIT - 1);
@@ -427,7 +441,7 @@ mod tests {
 
     #[test]
     fn a_new_symbol_never_pushes_out_an_admitted_held_one() {
-        let mut m = SubscriptionManager::default();
+        let mut m = manager();
         fill(&mut m, REALTIME_LIMIT);
         let before = m.plan(t(0)).realtime;
         m.hold(stock(500), cell(2, "new"));
@@ -438,7 +452,7 @@ mod tests {
 
     #[test]
     fn a_symbol_in_grace_makes_room_and_the_oldest_release_goes_first() {
-        let mut m = SubscriptionManager::default();
+        let mut m = manager();
         fill(&mut m, REALTIME_LIMIT);
         m.plan(t(0));
         m.release(stock(7), &cell(1, "s7"), t(1));
@@ -454,7 +468,7 @@ mod tests {
 
     #[test]
     fn rejected_holders_recover_when_room_frees() {
-        let mut m = SubscriptionManager::default();
+        let mut m = manager();
         fill(&mut m, REALTIME_LIMIT);
         m.hold(stock(500), cell(2, "x"));
         m.hold(stock(500), cell(3, "y"));
@@ -468,7 +482,7 @@ mod tests {
 
     #[test]
     fn a_rejected_holder_leaving_frees_nothing_and_needs_no_grace() {
-        let mut m = SubscriptionManager::default();
+        let mut m = manager();
         fill(&mut m, REALTIME_LIMIT);
         m.hold(stock(500), cell(2, "x"));
         m.plan(t(0));
@@ -480,7 +494,7 @@ mod tests {
 
     #[test]
     fn forget_drops_the_symbol_without_grace() {
-        let mut m = SubscriptionManager::default();
+        let mut m = manager();
         m.hold(stock(0), cell(1, "a"));
         m.plan(t(0));
         m.forget(stock(0), &cell(1, "a"));
@@ -489,7 +503,7 @@ mod tests {
 
     #[test]
     fn watch_rows_get_places_from_the_top_of_the_list() {
-        let mut m = SubscriptionManager::default();
+        let mut m = manager();
         m.set_watch(ConnId(1), stocks(0..REALTIME_LIMIT + 3), t(0));
         let plan = m.plan(t(0));
         assert_eq!(plan.realtime, stocks(0..REALTIME_LIMIT).into_iter().collect());
@@ -498,7 +512,7 @@ mod tests {
 
     #[test]
     fn moving_a_row_to_the_top_takes_the_place_of_the_last_realtime_row() {
-        let mut m = SubscriptionManager::default();
+        let mut m = manager();
         m.set_watch(ConnId(1), stocks(0..REALTIME_LIMIT + 1), t(0));
         m.plan(t(0));
         let mut moved = vec![stock(REALTIME_LIMIT)];
@@ -512,7 +526,7 @@ mod tests {
 
     #[test]
     fn a_cell_takes_the_place_of_the_last_watch_only_symbol() {
-        let mut m = SubscriptionManager::default();
+        let mut m = manager();
         m.set_watch(ConnId(1), stocks(0..REALTIME_LIMIT), t(0));
         m.plan(t(0));
         m.hold(stock(500), cell(2, "c"));
@@ -523,7 +537,7 @@ mod tests {
 
     #[test]
     fn a_symbol_held_by_a_cell_and_a_watch_row_ranks_as_a_cell() {
-        let mut m = SubscriptionManager::default();
+        let mut m = manager();
         m.set_watch(ConnId(1), stocks(0..REALTIME_LIMIT), t(0));
         m.hold(stock(REALTIME_LIMIT - 1), cell(2, "c"));
         m.plan(t(0));
@@ -535,7 +549,7 @@ mod tests {
 
     #[test]
     fn a_watch_row_never_pushes_out_a_cell() {
-        let mut m = SubscriptionManager::default();
+        let mut m = manager();
         fill(&mut m, REALTIME_LIMIT);
         m.plan(t(0));
         m.set_watch(ConnId(2), vec![stock(500)], t(1));
@@ -546,7 +560,7 @@ mod tests {
 
     #[test]
     fn rows_of_two_connections_share_places_by_row() {
-        let mut m = SubscriptionManager::default();
+        let mut m = manager();
         m.set_watch(ConnId(1), stocks(0..REALTIME_LIMIT), t(0));
         m.plan(t(0));
         m.set_watch(ConnId(2), vec![stock(500)], t(1));
@@ -557,7 +571,7 @@ mod tests {
 
     #[test]
     fn a_dropped_row_keeps_the_symbol_for_the_grace() {
-        let mut m = SubscriptionManager::default();
+        let mut m = manager();
         m.set_watch(ConnId(1), stocks(0..2), t(0));
         m.plan(t(0));
         m.set_watch(ConnId(1), vec![stock(1)], t(0));
@@ -570,7 +584,7 @@ mod tests {
 
     #[test]
     fn release_conn_releases_watch_rows() {
-        let mut m = SubscriptionManager::default();
+        let mut m = manager();
         m.set_watch(ConnId(1), vec![stock(0)], t(0));
         m.plan(t(0));
         m.release_conn(ConnId(1), t(0));
@@ -582,7 +596,7 @@ mod tests {
     #[test]
     fn same_state_and_now_give_the_same_plan() {
         let build = || {
-            let mut m = SubscriptionManager::default();
+            let mut m = manager();
             fill(&mut m, REALTIME_LIMIT - 10);
             m.set_watch(ConnId(2), stocks(300..320), t(0));
             m.plan(t(0));
@@ -596,59 +610,59 @@ mod tests {
         assert_eq!(pa, a.plan(t(2)), "다시 불러도 같다");
     }
 
-    fn feed(conn: u64, sub: &str, kind: RealType) -> Holder {
+    fn feed(conn: u64, sub: &str, kind: StreamKind) -> Holder {
         Holder::Feed { conn: ConnId(conn), sub: SubId(sub.into()), kind }
     }
 
-    fn kinds(plan: &Plan, i: usize) -> BTreeSet<RealType> {
+    fn kinds(plan: &Plan, i: usize) -> BTreeSet<StreamKind> {
         plan.feeds.get(&stock(i)).cloned().unwrap_or_default()
     }
 
-    fn with_book() -> BTreeSet<RealType> {
-        BTreeSet::from([RealType::Trade, RealType::Book, RealType::AfterHours])
+    fn with_book() -> BTreeSet<StreamKind> {
+        BTreeSet::from([StreamKind::Trades, StreamKind::Book(Venue::Combined), StreamKind::AfterHours])
     }
 
     #[test]
     fn book_holder_adds_book_type_for_its_symbol_only() {
-        let mut m = SubscriptionManager::default();
+        let mut m = manager();
         m.set_watch(ConnId(1), stocks(0..2), t(0));
-        m.hold(stock(0), feed(2, "b", RealType::Book));
+        m.hold(stock(0), feed(2, "b", StreamKind::Book(Venue::Combined)));
         let plan = m.plan(t(0));
         assert_eq!(kinds(&plan, 0), with_book());
-        assert_eq!(kinds(&plan, 1), BTreeSet::from([RealType::Trade]), "관심종목 종목에는 0D와 0E가 들지 않는다");
+        assert_eq!(kinds(&plan, 1), BTreeSet::from([StreamKind::Trades]), "관심종목 종목에는 0D와 0E가 들지 않는다");
     }
 
     #[test]
     fn each_feed_kind_adds_only_its_own_real_type() {
-        let mut m = SubscriptionManager::default();
-        m.hold(stock(0), feed(1, "t", RealType::Trade));
-        m.hold(stock(1), feed(1, "p", RealType::Program));
-        m.hold(stock(2), feed(1, "k", RealType::Broker));
+        let mut m = manager();
+        m.hold(stock(0), feed(1, "t", StreamKind::Trades));
+        m.hold(stock(1), feed(1, "p", StreamKind::Program));
+        m.hold(stock(2), feed(1, "k", StreamKind::Brokers));
         let plan = m.plan(t(0));
-        assert_eq!(kinds(&plan, 0), BTreeSet::from([RealType::Trade]));
-        assert_eq!(kinds(&plan, 1), BTreeSet::from([RealType::Trade, RealType::Program]));
-        assert_eq!(kinds(&plan, 2), BTreeSet::from([RealType::Trade, RealType::Broker]));
+        assert_eq!(kinds(&plan, 0), BTreeSet::from([StreamKind::Trades]));
+        assert_eq!(kinds(&plan, 1), BTreeSet::from([StreamKind::Trades, StreamKind::Program]));
+        assert_eq!(kinds(&plan, 2), BTreeSet::from([StreamKind::Trades, StreamKind::Brokers]));
     }
 
     #[test]
     fn feed_holders_rank_like_cells_under_the_limit() {
-        let mut m = SubscriptionManager::default();
+        let mut m = manager();
         m.set_watch(ConnId(1), stocks(0..REALTIME_LIMIT), t(0));
         m.plan(t(0));
-        m.hold(stock(500), feed(2, "b", RealType::Book));
+        m.hold(stock(500), feed(2, "b", StreamKind::Book(Venue::Combined)));
         let plan = m.plan(t(1));
         assert!(plan.realtime.contains(&stock(500)));
         assert_eq!(plan.rejected, BTreeSet::from([watch(1, REALTIME_LIMIT - 1)]));
-        assert!(plan.feeds[&stock(500)].contains(&RealType::Book));
+        assert!(plan.feeds[&stock(500)].contains(&StreamKind::Book(Venue::Combined)));
     }
 
     #[test]
     fn adding_a_book_feed_to_a_full_plan_keeps_the_slots_and_rejects_nothing_more() {
-        let mut m = SubscriptionManager::default();
+        let mut m = manager();
         fill(&mut m, REALTIME_LIMIT);
         let before = m.plan(t(0));
         assert_eq!((before.realtime.len(), before.rejected.len()), (REALTIME_LIMIT, 0));
-        m.hold(stock(0), feed(2, "b", RealType::Book));
+        m.hold(stock(0), feed(2, "b", StreamKind::Book(Venue::Combined)));
         let plan = m.plan(t(1));
         assert_eq!((plan.realtime.len(), plan.rejected.len()), (REALTIME_LIMIT, 0));
         assert_eq!(kinds(&plan, 0), with_book());
@@ -656,58 +670,58 @@ mod tests {
 
     #[test]
     fn released_feed_type_is_kept_for_the_grace_period() {
-        let mut m = SubscriptionManager::default();
+        let mut m = manager();
         m.hold(stock(0), cell(1, "chart"));
-        m.hold(stock(0), feed(2, "b", RealType::Book));
+        m.hold(stock(0), feed(2, "b", StreamKind::Book(Venue::Combined)));
         m.plan(t(0));
-        m.release(stock(0), &feed(2, "b", RealType::Book), t(0));
+        m.release(stock(0), &feed(2, "b", StreamKind::Book(Venue::Combined)), t(0));
         assert_eq!(kinds(&m.plan(t(29)), 0), with_book(), "30초 유예 동안 0D와 0E를 유지한다");
-        assert_eq!(kinds(&m.plan(t(30)), 0), BTreeSet::from([RealType::Trade]));
+        assert_eq!(kinds(&m.plan(t(30)), 0), BTreeSet::from([StreamKind::Trades]));
     }
 
     #[test]
     fn a_feed_kind_still_held_by_another_window_is_not_released() {
-        let mut m = SubscriptionManager::default();
-        m.hold(stock(0), feed(1, "a", RealType::Book));
-        m.hold(stock(0), feed(2, "b", RealType::Book));
+        let mut m = manager();
+        m.hold(stock(0), feed(1, "a", StreamKind::Book(Venue::Combined)));
+        m.hold(stock(0), feed(2, "b", StreamKind::Book(Venue::Combined)));
         m.plan(t(0));
-        m.release(stock(0), &feed(1, "a", RealType::Book), t(0));
+        m.release(stock(0), &feed(1, "a", StreamKind::Book(Venue::Combined)), t(0));
         assert_eq!(kinds(&m.plan(t(100)), 0), with_book());
     }
 
     #[test]
     fn resubscribing_a_feed_kind_within_the_grace_cancels_it() {
-        let mut m = SubscriptionManager::default();
+        let mut m = manager();
         m.hold(stock(0), cell(1, "chart"));
-        m.hold(stock(0), feed(2, "b", RealType::Book));
+        m.hold(stock(0), feed(2, "b", StreamKind::Book(Venue::Combined)));
         m.plan(t(0));
-        m.release(stock(0), &feed(2, "b", RealType::Book), t(0));
-        m.hold(stock(0), feed(3, "b2", RealType::Book));
+        m.release(stock(0), &feed(2, "b", StreamKind::Book(Venue::Combined)), t(0));
+        m.hold(stock(0), feed(3, "b2", StreamKind::Book(Venue::Combined)));
         assert_eq!(kinds(&m.plan(t(60)), 0), with_book());
     }
 
     #[test]
     fn feed_kinds_of_a_symbol_that_leaves_the_plan_do_not_come_back() {
-        let mut m = SubscriptionManager::default();
-        m.hold(stock(0), feed(1, "b", RealType::Book));
+        let mut m = manager();
+        m.hold(stock(0), feed(1, "b", StreamKind::Book(Venue::Combined)));
         m.plan(t(0));
-        m.release(stock(0), &feed(1, "b", RealType::Book), t(0));
+        m.release(stock(0), &feed(1, "b", StreamKind::Book(Venue::Combined)), t(0));
         assert!(m.plan(t(30)).feeds.is_empty());
         m.hold(stock(0), cell(2, "chart"));
-        assert_eq!(kinds(&m.plan(t(31)), 0), BTreeSet::from([RealType::Trade]));
+        assert_eq!(kinds(&m.plan(t(31)), 0), BTreeSet::from([StreamKind::Trades]));
     }
 
     fn seats(plan: &Plan) -> usize {
-        crate::kiwoom::stream::seats(&plan.feeds)
+        KiwoomSeats.seats(&plan.feeds)
     }
 
     #[test]
     fn a_venue_book_costs_a_second_place_and_keeps_trades_on_the_combined_code() {
-        let mut m = SubscriptionManager::default();
-        m.hold(stock(0), feed(1, "k", RealType::BookKrx));
-        m.hold(stock(1), feed(1, "a", RealType::Book));
+        let mut m = manager();
+        m.hold(stock(0), feed(1, "k", StreamKind::Book(Venue::Krx)));
+        m.hold(stock(1), feed(1, "a", StreamKind::Book(Venue::Combined)));
         let plan = m.plan(t(0));
-        assert_eq!(kinds(&plan, 0), BTreeSet::from([RealType::Trade, RealType::BookKrx, RealType::AfterHours]));
+        assert_eq!(kinds(&plan, 0), BTreeSet::from([StreamKind::Trades, StreamKind::Book(Venue::Krx), StreamKind::AfterHours]));
         assert_eq!(kinds(&plan, 1), with_book());
         assert_eq!(seats(&plan), 3);
         assert!(plan.rejected.is_empty());
@@ -715,122 +729,122 @@ mod tests {
 
     #[test]
     fn krx_and_nxt_books_of_one_symbol_take_two_extra_places() {
-        let mut m = SubscriptionManager::default();
-        m.hold(stock(0), feed(1, "k", RealType::BookKrx));
-        m.hold(stock(0), feed(2, "n", RealType::BookNxt));
+        let mut m = manager();
+        m.hold(stock(0), feed(1, "k", StreamKind::Book(Venue::Krx)));
+        m.hold(stock(0), feed(2, "n", StreamKind::Book(Venue::Nxt)));
         assert_eq!(seats(&m.plan(t(0))), 3);
     }
 
     #[test]
     fn a_venue_book_on_a_full_house_is_rejected_without_pushing_out_a_held_symbol() {
-        let mut m = SubscriptionManager::default();
+        let mut m = manager();
         fill(&mut m, REALTIME_LIMIT);
         let before = m.plan(t(0));
-        m.hold(stock(0), feed(2, "n", RealType::BookNxt));
+        m.hold(stock(0), feed(2, "n", StreamKind::Book(Venue::Nxt)));
         let plan = m.plan(t(1));
         assert_eq!(plan.realtime, before.realtime);
-        assert_eq!(plan.rejected, BTreeSet::from([feed(2, "n", RealType::BookNxt)]));
-        assert_eq!(kinds(&plan, 0), BTreeSet::from([RealType::Trade]), "자리를 못 받은 보유자는 0D도 0E도 부르지 않는다");
+        assert_eq!(plan.rejected, BTreeSet::from([feed(2, "n", StreamKind::Book(Venue::Nxt))]));
+        assert_eq!(kinds(&plan, 0), BTreeSet::from([StreamKind::Trades]), "자리를 못 받은 보유자는 0D도 0E도 부르지 않는다");
         assert_eq!(seats(&plan), REALTIME_LIMIT);
     }
 
     #[test]
     fn a_rejected_venue_book_recovers_when_a_symbol_in_grace_frees_a_place() {
-        let mut m = SubscriptionManager::default();
+        let mut m = manager();
         fill(&mut m, REALTIME_LIMIT);
         m.plan(t(0));
-        m.hold(stock(0), feed(2, "n", RealType::BookNxt));
+        m.hold(stock(0), feed(2, "n", StreamKind::Book(Venue::Nxt)));
         assert_eq!(m.plan(t(1)).rejected.len(), 1);
         m.release(stock(7), &cell(1, "s7"), t(2));
         let plan = m.plan(t(2));
         assert!(plan.rejected.is_empty());
         assert!(!plan.realtime.contains(&stock(7)));
-        assert!(kinds(&plan, 0).contains(&RealType::BookNxt));
+        assert!(kinds(&plan, 0).contains(&StreamKind::Book(Venue::Nxt)));
         assert_eq!(seats(&plan), REALTIME_LIMIT);
     }
 
     #[test]
     fn a_venue_book_takes_the_place_of_the_last_watch_row() {
-        let mut m = SubscriptionManager::default();
+        let mut m = manager();
         m.set_watch(ConnId(1), stocks(0..REALTIME_LIMIT), t(0));
         m.plan(t(0));
-        m.hold(stock(0), feed(2, "n", RealType::BookNxt));
+        m.hold(stock(0), feed(2, "n", StreamKind::Book(Venue::Nxt)));
         let plan = m.plan(t(1));
         assert!(plan.rejected.contains(&watch(1, REALTIME_LIMIT - 1)));
-        assert!(!plan.rejected.contains(&feed(2, "n", RealType::BookNxt)));
+        assert!(!plan.rejected.contains(&feed(2, "n", StreamKind::Book(Venue::Nxt))));
         assert_eq!(seats(&plan), REALTIME_LIMIT);
     }
 
     #[test]
     fn a_new_symbol_that_needs_two_places_is_rejected_whole_when_only_one_is_left() {
-        let mut m = SubscriptionManager::default();
+        let mut m = manager();
         fill(&mut m, REALTIME_LIMIT - 1);
-        m.hold(stock(500), feed(2, "n", RealType::BookNxt));
+        m.hold(stock(500), feed(2, "n", StreamKind::Book(Venue::Nxt)));
         let plan = m.plan(t(0));
         assert!(!plan.realtime.contains(&stock(500)), "통합 자리만 받고 거래소 자리를 못 받은 채로 남지 않는다");
-        assert_eq!(plan.rejected, BTreeSet::from([feed(2, "n", RealType::BookNxt)]));
+        assert_eq!(plan.rejected, BTreeSet::from([feed(2, "n", StreamKind::Book(Venue::Nxt))]));
         assert_eq!(seats(&plan), REALTIME_LIMIT - 1);
     }
 
     #[test]
     fn the_last_holder_of_a_venue_book_leaving_drops_its_code_after_the_grace_and_keeps_the_rest() {
-        let mut m = SubscriptionManager::default();
-        m.hold(stock(0), feed(1, "a", RealType::Book));
-        m.hold(stock(0), feed(2, "n", RealType::BookNxt));
+        let mut m = manager();
+        m.hold(stock(0), feed(1, "a", StreamKind::Book(Venue::Combined)));
+        m.hold(stock(0), feed(2, "n", StreamKind::Book(Venue::Nxt)));
         m.plan(t(0));
-        m.release(stock(0), &feed(2, "n", RealType::BookNxt), t(0));
-        assert!(kinds(&m.plan(t(29)), 0).contains(&RealType::BookNxt));
+        m.release(stock(0), &feed(2, "n", StreamKind::Book(Venue::Nxt)), t(0));
+        assert!(kinds(&m.plan(t(29)), 0).contains(&StreamKind::Book(Venue::Nxt)));
         assert_eq!(kinds(&m.plan(t(30)), 0), with_book());
         assert_eq!(seats(&m.plan(t(30))), 1);
     }
 
     #[test]
     fn a_venue_book_resubscribed_within_the_grace_keeps_its_place() {
-        let mut m = SubscriptionManager::default();
-        m.hold(stock(0), feed(1, "n", RealType::BookNxt));
+        let mut m = manager();
+        m.hold(stock(0), feed(1, "n", StreamKind::Book(Venue::Nxt)));
         m.plan(t(0));
-        m.release(stock(0), &feed(1, "n", RealType::BookNxt), t(0));
-        m.hold(stock(0), feed(2, "n2", RealType::BookNxt));
+        m.release(stock(0), &feed(1, "n", StreamKind::Book(Venue::Nxt)), t(0));
+        m.hold(stock(0), feed(2, "n2", StreamKind::Book(Venue::Nxt)));
         let plan = m.plan(t(60));
-        assert!(kinds(&plan, 0).contains(&RealType::BookNxt));
+        assert!(kinds(&plan, 0).contains(&StreamKind::Book(Venue::Nxt)));
         assert_eq!(seats(&plan), 2);
     }
 
     #[test]
     fn a_venue_book_in_grace_gives_its_place_to_a_new_symbol_before_a_held_one_moves() {
-        let mut m = SubscriptionManager::default();
+        let mut m = manager();
         fill(&mut m, REALTIME_LIMIT - 1);
-        m.hold(stock(0), feed(2, "n", RealType::BookNxt));
+        m.hold(stock(0), feed(2, "n", StreamKind::Book(Venue::Nxt)));
         assert_eq!(seats(&m.plan(t(0))), REALTIME_LIMIT);
-        m.release(stock(0), &feed(2, "n", RealType::BookNxt), t(1));
+        m.release(stock(0), &feed(2, "n", StreamKind::Book(Venue::Nxt)), t(1));
         m.hold(stock(500), cell(3, "new"));
         let plan = m.plan(t(2));
         assert!(plan.realtime.contains(&stock(500)) && plan.rejected.is_empty());
-        assert!(!kinds(&plan, 0).contains(&RealType::BookNxt));
+        assert!(!kinds(&plan, 0).contains(&StreamKind::Book(Venue::Nxt)));
         assert_eq!(seats(&plan), REALTIME_LIMIT);
     }
 
     #[test]
     fn a_watch_only_symbol_with_a_venue_grace_is_not_counted_twice_when_it_makes_room() {
-        let mut m = SubscriptionManager::default();
+        let mut m = manager();
         m.set_watch(ConnId(1), stocks(0..REALTIME_LIMIT - 1), t(0));
-        m.hold(stock(198), feed(2, "n", RealType::BookNxt));
+        m.hold(stock(198), feed(2, "n", StreamKind::Book(Venue::Nxt)));
         assert_eq!(seats(&m.plan(t(0))), REALTIME_LIMIT);
-        m.release(stock(198), &feed(2, "n", RealType::BookNxt), t(1));
+        m.release(stock(198), &feed(2, "n", StreamKind::Book(Venue::Nxt)), t(1));
         assert_eq!(seats(&m.plan(t(1))), REALTIME_LIMIT);
-        m.hold(stock(500), feed(3, "k", RealType::BookKrx));
-        m.hold(stock(500), feed(3, "n", RealType::BookNxt));
+        m.hold(stock(500), feed(3, "k", StreamKind::Book(Venue::Krx)));
+        m.hold(stock(500), feed(3, "n", StreamKind::Book(Venue::Nxt)));
         let plan = m.plan(t(2));
         assert!(seats(&plan) <= REALTIME_LIMIT, "seats {} > {}", seats(&plan), REALTIME_LIMIT);
     }
 
     #[test]
     fn a_rejected_venue_book_does_not_reject_its_chart_or_let_a_newer_symbol_jump_ahead() {
-        let mut m = SubscriptionManager::default();
+        let mut m = manager();
         fill(&mut m, REALTIME_LIMIT);
         m.plan(t(0));
         m.hold(stock(500), cell(2, "chart"));
-        m.hold(stock(500), feed(2, "n", RealType::BookNxt));
+        m.hold(stock(500), feed(2, "n", StreamKind::Book(Venue::Nxt)));
         m.plan(t(0));
         m.hold(stock(600), cell(3, "later"));
         m.plan(t(0));
@@ -841,12 +855,12 @@ mod tests {
 
     #[test]
     fn a_symbol_held_only_by_a_rejected_venue_book_gives_its_place_back() {
-        let mut m = SubscriptionManager::default();
+        let mut m = manager();
         fill(&mut m, REALTIME_LIMIT - 1);
         m.hold(stock(500), cell(2, "chart"));
         assert!(m.plan(t(0)).rejected.is_empty());
-        m.hold(stock(500), feed(2, "n", RealType::BookNxt));
-        assert_eq!(m.plan(t(0)).rejected, BTreeSet::from([feed(2, "n", RealType::BookNxt)]));
+        m.hold(stock(500), feed(2, "n", StreamKind::Book(Venue::Nxt)));
+        assert_eq!(m.plan(t(0)).rejected, BTreeSet::from([feed(2, "n", StreamKind::Book(Venue::Nxt))]));
         m.release(stock(500), &cell(2, "chart"), t(1));
         m.hold(stock(600), cell(3, "new"));
         let plan = m.plan(t(100));
@@ -855,12 +869,12 @@ mod tests {
 
     #[test]
     fn probe_last_served_holder_leaving_beside_a_rejected_venue_book_keeps_grace() {
-        let mut m = SubscriptionManager::default();
+        let mut m = manager();
         fill(&mut m, REALTIME_LIMIT - 1);
         m.hold(stock(500), cell(2, "chart"));
-        m.hold(stock(500), feed(3, "n", RealType::BookNxt));
+        m.hold(stock(500), feed(3, "n", StreamKind::Book(Venue::Nxt)));
         let plan = m.plan(t(0));
-        assert_eq!(plan.rejected, BTreeSet::from([feed(3, "n", RealType::BookNxt)]));
+        assert_eq!(plan.rejected, BTreeSet::from([feed(3, "n", StreamKind::Book(Venue::Nxt))]));
         m.release(stock(500), &cell(2, "chart"), t(1));
         assert!(m.plan(t(1)).realtime.contains(&stock(500)), "30초 유예 동안 계속 받는다");
         assert!(m.plan(t(30)).realtime.contains(&stock(500)));
@@ -869,58 +883,58 @@ mod tests {
 
     #[test]
     fn releasing_another_rejected_holder_during_the_grace_does_not_extend_it() {
-        let mut m = SubscriptionManager::default();
+        let mut m = manager();
         fill(&mut m, REALTIME_LIMIT - 1);
         m.hold(stock(500), cell(2, "chart"));
-        m.hold(stock(500), feed(3, "n1", RealType::BookNxt));
-        m.hold(stock(500), feed(4, "n2", RealType::BookNxt));
+        m.hold(stock(500), feed(3, "n1", StreamKind::Book(Venue::Nxt)));
+        m.hold(stock(500), feed(4, "n2", StreamKind::Book(Venue::Nxt)));
         m.plan(t(0));
         m.release(stock(500), &cell(2, "chart"), t(1));
         m.plan(t(1));
-        m.release(stock(500), &feed(3, "n1", RealType::BookNxt), t(20));
+        m.release(stock(500), &feed(3, "n1", StreamKind::Book(Venue::Nxt)), t(20));
         m.plan(t(20));
         assert!(!m.plan(t(31)).realtime.contains(&stock(500)), "마지막 서비스 보유자가 빠진 뒤 30초가 지나면 해지한다");
     }
 
     #[test]
     fn a_new_rejected_venue_holder_during_the_grace_does_not_drop_the_symbol_at_once() {
-        let mut m = SubscriptionManager::default();
+        let mut m = manager();
         fill(&mut m, REALTIME_LIMIT - 1);
         m.hold(stock(500), cell(2, "chart"));
-        m.hold(stock(500), feed(3, "n", RealType::BookNxt));
+        m.hold(stock(500), feed(3, "n", StreamKind::Book(Venue::Nxt)));
         m.plan(t(0));
         m.release(stock(500), &cell(2, "chart"), t(1));
         assert!(m.plan(t(1)).realtime.contains(&stock(500)));
-        m.hold(stock(500), feed(4, "k", RealType::BookKrx));
+        m.hold(stock(500), feed(4, "k", StreamKind::Book(Venue::Krx)));
         assert!(m.plan(t(5)).realtime.contains(&stock(500)), "유예 중에 받지 못할 거래소 호가가 더 와도 30초 유예를 지킨다");
     }
 
     #[test]
     fn a_combined_book_moved_to_a_venue_code_at_the_limit_keeps_the_old_place_for_the_grace() {
-        let mut m = SubscriptionManager::default();
+        let mut m = manager();
         fill(&mut m, REALTIME_LIMIT - 1);
-        m.hold(stock(500), feed(3, "n", RealType::Book));
+        m.hold(stock(500), feed(3, "n", StreamKind::Book(Venue::Combined)));
         assert!(m.plan(t(0)).realtime.contains(&stock(500)));
-        m.release(stock(500), &feed(3, "n", RealType::Book), t(1));
-        m.hold(stock(500), feed(3, "n", RealType::BookNxt));
+        m.release(stock(500), &feed(3, "n", StreamKind::Book(Venue::Combined)), t(1));
+        m.hold(stock(500), feed(3, "n", StreamKind::Book(Venue::Nxt)));
         assert!(m.plan(t(1)).realtime.contains(&stock(500)), "옛 코드는 30초 유예 뒤에 놓는다");
     }
 
     #[test]
     fn a_symbol_evicted_while_the_venue_places_are_handed_out_gets_no_place_and_leaves_the_plan_stable() {
-        let mut m = SubscriptionManager::default();
+        let mut m = manager();
         fill(&mut m, REALTIME_LIMIT - 5);
         m.hold(stock(500), cell(9, "a"));
-        m.hold(stock(500), feed(9, "an", RealType::BookNxt));
-        m.hold(stock(501), feed(3, "sk", RealType::BookKrx));
+        m.hold(stock(500), feed(9, "an", StreamKind::Book(Venue::Nxt)));
+        m.hold(stock(501), feed(3, "sk", StreamKind::Book(Venue::Krx)));
         m.hold(stock(502), cell(5, "b"));
         assert_eq!(seats(&m.plan(t(0))), REALTIME_LIMIT);
-        m.hold(stock(501), feed(4, "sn", RealType::BookNxt));
+        m.hold(stock(501), feed(4, "sn", StreamKind::Book(Venue::Nxt)));
         m.plan(t(1));
-        m.release(stock(501), &feed(3, "sk", RealType::BookKrx), t(2));
+        m.release(stock(501), &feed(3, "sk", StreamKind::Book(Venue::Krx)), t(2));
         m.plan(t(2));
-        m.hold(stock(500), feed(9, "ak", RealType::BookKrx));
-        m.hold(stock(502), feed(5, "bn", RealType::BookNxt));
+        m.hold(stock(500), feed(9, "ak", StreamKind::Book(Venue::Krx)));
+        m.hold(stock(502), feed(5, "bn", StreamKind::Book(Venue::Nxt)));
         let first = m.plan(t(3));
         let second = m.plan(t(3));
         assert_eq!(first, second, "seats first={} second={}", seats(&first), seats(&second));
@@ -928,12 +942,12 @@ mod tests {
 
     #[test]
     fn the_same_state_with_venue_graces_gives_the_same_plan() {
-        let mut m = SubscriptionManager::default();
+        let mut m = manager();
         m.set_watch(ConnId(1), stocks(0..REALTIME_LIMIT - 1), t(0));
-        m.hold(stock(198), feed(2, "n", RealType::BookNxt));
+        m.hold(stock(198), feed(2, "n", StreamKind::Book(Venue::Nxt)));
         m.plan(t(0));
-        m.release(stock(198), &feed(2, "n", RealType::BookNxt), t(1));
-        m.hold(stock(500), feed(3, "n", RealType::BookNxt));
+        m.release(stock(198), &feed(2, "n", StreamKind::Book(Venue::Nxt)), t(1));
+        m.hold(stock(500), feed(3, "n", StreamKind::Book(Venue::Nxt)));
         let a = m.plan(t(2));
         let b = m.plan(t(2));
         assert_eq!(a, b);

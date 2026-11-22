@@ -11,7 +11,7 @@ use serde_json::{Value, json};
 use super::api::{InvestorUnit, kiwoom_stock_code};
 use crate::api::{self, ExcludeKind};
 use super::error::{WsRejection, judge_ws_ack};
-use super::stream::{BOOK_DEPTH, BookLevel, BookSnapshot, BrokerEntry, BrokerSnapshot, DayTotals, ExpectedTrade, Exchange, RealProgramTrade, RealTick, TradeSide};
+use crate::market_source::stream::{AfterHoursTotals, BOOK_DEPTH, BookLevel, BookSnapshot, BrokerEntry, BrokerSnapshot, DayTotals, Exchange, ExpectedTrade, RealProgramTrade, RealTick, StreamKind, TradeSide};
 use crate::config::Secret;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -2107,6 +2107,32 @@ impl RealType {
 
 pub type Registrations = BTreeSet<(RealType, Symbol)>;
 
+impl From<StreamKind> for RealType {
+    fn from(kind: StreamKind) -> RealType {
+        match kind {
+            StreamKind::Trades => RealType::Trade,
+            StreamKind::Index => RealType::Index,
+            StreamKind::Book(venue) => RealType::book(venue),
+            StreamKind::AfterHours => RealType::AfterHours,
+            StreamKind::Program => RealType::Program,
+            StreamKind::Brokers => RealType::Broker,
+        }
+    }
+}
+
+impl From<RealType> for StreamKind {
+    fn from(kind: RealType) -> StreamKind {
+        match kind {
+            RealType::Trade => StreamKind::Trades,
+            RealType::Index => StreamKind::Index,
+            RealType::Book | RealType::BookKrx | RealType::BookNxt => StreamKind::Book(kind.item_venue()),
+            RealType::AfterHours => StreamKind::AfterHours,
+            RealType::Program => StreamKind::Program,
+            RealType::Broker => StreamKind::Brokers,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AccountKind {
     OrderFill,
@@ -2137,14 +2163,6 @@ pub enum WsFrame {
     Ack { control: WsControl, result: Result<(), WsRejection> },
     Real(Vec<Result<RealItem, WireError>>),
     Other(String),
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct AfterHoursTotals {
-    pub symbol: Symbol,
-    pub hhmmss: TimeOfDay,
-    pub total_ask_qty: Volume,
-    pub total_bid_qty: Volume,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

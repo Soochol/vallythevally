@@ -481,7 +481,7 @@ fn link_status(st: &AppState, rest: &crate::kiwoom::rest::KiwoomRest, link: &cra
             status.message = "키움에 연결됨".to_owned();
             status.token_expires_at = rest.auth().token_expires_at().map(|t| UnixSeconds(t.unix()));
             if market {
-                status.realtime_registered = Some(count(crate::kiwoom::stream::seats(&st.registered.borrow())));
+                status.realtime_registered = Some(count(st.seat_rules.seats(&st.registered.borrow())));
                 status.symbol_count = st.symbols.updates().borrow().as_ref().map(|directory| count(directory.len()));
             }
         }

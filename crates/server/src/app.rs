@@ -28,6 +28,7 @@ use crate::kiwoom::auth::{DAILY_REISSUE_AT, KiwoomAuth};
 use crate::kiwoom::link::{Link, LinkState};
 use crate::kiwoom::rest::{KiwoomRest, Priority};
 use crate::kiwoom::stream::KiwoomStream;
+use crate::market_source::stream::{MarketStream, StreamEvent};
 use crate::kiwoom::token_file::TokenFile;
 use crate::kiwoom::transport::{ReqwestTransport, Transport};
 use crate::screener::Screener;
@@ -104,7 +105,7 @@ pub struct ApplicationInputs {
     pub symbols: Arc<SymbolDirectory>,
     pub db: AppDb,
     pub screener_store: Store,
-    pub stream: (KiwoomStream, tokio::sync::mpsc::Receiver<crate::kiwoom::stream::StreamEvent>),
+    pub stream: (KiwoomStream, tokio::sync::mpsc::Receiver<StreamEvent>),
     pub static_dir: std::path::PathBuf,
     pub screener_update_on_connect: bool,
 }
@@ -124,8 +125,9 @@ pub fn application_with_source(inputs: ApplicationInputs, mut system: SystemStat
     let bars = Arc::new(BarService::new(source.clone(), symbols.clone(), clock.clone()));
     let screener = Arc::new(Screener::new(screener_store, kiwoom.clone(), bars.clone(), symbols.clone(), clock.clone()));
     let registered = stream.watch_desired();
+    let seat_rules = stream.seat_rules();
     let account_feed = stream.account_feed();
-    let hub = MarketHub::spawn(bars.clone(), stream, events, clock.clone());
+    let hub = MarketHub::spawn(bars.clone(), Arc::new(stream), events, clock.clone());
     let link = Link::new(rest.clone(), symbols.clone(), screener.clone(), clock.clone(), screener_update_on_connect);
     let market_lane = Lane::market(rest.clone(), link.clone(), account_feed.clone());
     let keys = Arc::new(match system.take_key_setup() {
@@ -133,7 +135,7 @@ pub fn application_with_source(inputs: ApplicationInputs, mut system: SystemStat
         None => KeyRing::unconfigured(market_lane),
     });
     let accounts = crate::trading::Accounts::new(keys.clone(), rest.clone(), account_feed, clock.clone(), system.take_order_switch_store(), db.clone(), symbols.clone());
-    Arc::new(AppState { symbols, bars, rest, source, kiwoom, db, clock, static_dir, hub, screener, link, keys, system, registered, accounts, rankings: Default::default(), market_overview: Default::default(), etf: Default::default() })
+    Arc::new(AppState { symbols, bars, rest, source, kiwoom, db, clock, static_dir, hub, screener, link, keys, system, registered, seat_rules, accounts, rankings: Default::default(), market_overview: Default::default(), etf: Default::default() })
 }
 
 pub async fn daily_maintenance(state: Arc<AppState>) {
@@ -145,7 +147,7 @@ pub async fn daily_maintenance(state: Arc<AppState>) {
 
 pub enum StreamSource {
     Connect,
-    Detached(tokio::sync::mpsc::Receiver<crate::kiwoom::stream::StreamEvent>),
+    Detached(tokio::sync::mpsc::Receiver<StreamEvent>),
 }
 
 pub struct Adapters {
@@ -395,7 +397,8 @@ mod tests {
 
     use super::*;
     use crate::config::Secret;
-    use crate::kiwoom::stream::{KiwoomStream, StreamEvent};
+    use crate::kiwoom::stream::KiwoomStream;
+    use crate::market_source::stream::StreamEvent;
 
     #[derive(Clone, Default)]
     struct Captured(Arc<Mutex<Vec<u8>>>);
