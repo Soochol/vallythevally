@@ -6,10 +6,12 @@ use server::symbols::fetch_listing_rows;
 use crate::kst::KstTime;
 
 mod diff;
+mod listing;
 mod model;
 mod store;
 
 pub use diff::{Diff, Named, Renamed, diff};
+pub use listing::{LISTING_FORMAT_VERSION, ListedStock, ListingFile, listing_path, read_listing_upto, write_listing};
 pub use model::{AfterCloseFile, Entry, FORMAT_VERSION, MarketName, RejectedFile, ReplaceReason, Replacement, StockKind, UniverseFile};
 pub use store::{SkippedFile, StoreError, after_close_path, read_universe, read_universe_if_present, universe_path};
 
@@ -90,7 +92,7 @@ struct Rejection {
 }
 
 enum Fetched {
-    Whole { stocks: Vec<Entry>, warnings: Vec<String> },
+    Whole { stocks: Vec<Entry>, warnings: Vec<String>, listed: Vec<ListedStock> },
     Rejected(Rejection),
 }
 
@@ -116,7 +118,7 @@ async fn fetch_stocks(rest: &KiwoomRest, previous: Option<&UniverseFile>) -> Fet
             warnings: classified.warnings,
         });
     }
-    Fetched::Whole { stocks: classified.stocks, warnings: classified.warnings }
+    Fetched::Whole { stocks: classified.stocks, warnings: classified.warnings, listed: listing::listed_stocks(&pages.rows) }
 }
 
 fn failed(error: KiwoomError) -> Rejection {
@@ -167,10 +169,15 @@ pub async fn collect_morning(rest: &KiwoomRest, data_dir: &Path, date: u32, fetc
     let fetched_at = kst_stamp(fetched_at);
     let mut warnings = Vec::new();
     match fetch_stocks(rest, previous.as_ref()).await {
-        Fetched::Whole { stocks, warnings: list_warnings } => {
+        Fetched::Whole { stocks, warnings: list_warnings, listed } => {
             let diff = previous.as_ref().map(|previous| diff::diff(&previous.stocks, &stocks)).unwrap_or_default();
             let file = UniverseFile { format_version: FORMAT_VERSION, date, fetched_at, stocks, warnings: list_warnings, diff, replaced: None };
             store::write_universe(data_dir, &file)?;
+            let listing_file = ListingFile { format_version: LISTING_FORMAT_VERSION, date, fetched_at: file.fetched_at.clone(), stocks: listed };
+            if let Err(error) = write_listing(data_dir, &listing_file) {
+                tracing::warn!(date, %error, "그날의 전체 종목 행 파일을 쓰지 못했습니다");
+                warnings.push(error.to_string());
+            }
             if let Err(error) = store::remove_rejected(data_dir, date) {
                 tracing::warn!(date, %error, "그날의 rejected 파일을 지우지 못했습니다");
                 warnings.push(error.to_string());
