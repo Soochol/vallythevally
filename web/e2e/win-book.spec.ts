@@ -492,6 +492,26 @@ test("체결이 8건보다 많으면 상자 안에서 스크롤되고 스크롤�
   expect(await tops(ladderRows(page))).toEqual(rowTops);
 });
 
+test("체결이 8건보다 많아 스크롤바가 보일 때 체결량 오른쪽 끝과 스크롤바 왼쪽 사이가 6px 이상이다", async ({ page, scenario }) => {
+  await open(page, scenario, 70000);
+  await emitTrades(scenario, 1, Array.from({ length: 14 }, (_, i) => [70000 + i, 1 + i]));
+  await expect(page.getByTestId("ladder-trade")).toHaveCount(14);
+  const gaps = await page.getByTestId("ladder-trade").evaluateAll((rows) => rows.map((row) => {
+    const scroller = row.parentElement!;
+    const barLeft = scroller.getBoundingClientRect().left + scroller.clientWidth;
+    return barLeft - row.children[1]!.getBoundingClientRect().right;
+  }));
+  for (const gap of gaps) expect(gap).toBeGreaterThanOrEqual(5.99);
+  await bookGroup(page).evaluate((element) => { element.style.flex = "none"; element.style.width = "420px"; });
+  const lines = await page.getByTestId("ladder-strength").evaluate((element) => {
+    const text = document.createRange();
+    text.selectNodeContents(element.querySelector("b")!);
+    const qty = document.querySelector("[data-testid=ladder-trade] .mw-trade-qty")!.getBoundingClientRect();
+    return { strength: text.getBoundingClientRect().right, qty: qty.right };
+  });
+  expect(Math.abs(lines.strength - lines.qty)).toBeLessThan(1);
+});
+
 test("스크롤을 내린 동안 새 체결이 와도 보던 행이 그대로이고 맨 위로 올리면 새 체결이 맨 위에 보인다", async ({ page, scenario }) => {
   await open(page, scenario, 70000);
   await emitTrades(scenario, 1, Array.from({ length: 14 }, (_, i) => [70000 + i, 1 + i]));
