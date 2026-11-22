@@ -8,6 +8,7 @@ import type { ClientMessage } from "../../src/api/generated/ClientMessage";
 import type { CollectorAccess } from "../../src/api/generated/CollectorAccess";
 import type { ConnectionStatus } from "../../src/api/generated/ConnectionStatus";
 import type { FinancialsPage } from "../../src/api/generated/FinancialsPage";
+import type { HeatmapThemes } from "../../src/api/generated/HeatmapThemes";
 import type { JumpBarsPage } from "../../src/api/generated/JumpBarsPage";
 import type { FinancialUpdatePage } from "../../src/api/generated/FinancialUpdatePage";
 import type { AccountStatus } from "../../src/api/generated/AccountStatus";
@@ -38,6 +39,7 @@ import type { Venue } from "../../src/api/generated/Venue";
 import type { Watchlist } from "../../src/api/generated/Watchlist";
 import type { Watchlists } from "../../src/api/generated/Watchlists";
 import { etfBaseline } from "./etf-data";
+import { boardOf, parseOrder } from "./heatmap-board";
 import { marketOverviewBaseline } from "./market-data";
 import { barsPage, findSymbol, publicInfo, quoteOf, resolveVenue, search, SYMBOLS } from "../../dev/fakeMarket";
 
@@ -66,6 +68,7 @@ export class UserDocuments {
   private layouts = new Map<string, Layout>([[DEFAULT_LAYOUT_ID, { id: DEFAULT_LAYOUT_ID, name: "기본", sync: { crosshair: true, scroll: true, crosshairScope: "all" }, windows: [{ id: "cell-0", link: null, kind: "chart", symbol: "IDX:001", venue: null, period: "D", chartSettings: { v: 1, style: "candle", scale: "normal", indicators: [], compare: [], panels: [] } }, { id: "watchlist", link: null, kind: "watchlist" }, { id: "screener", link: null, kind: "screener" }], placement: {}, updatedAt: 0, revision: 0 }]]);
   private watchlistValue: Watchlists = { lists: [{ id: FIRST_WATCHLIST_ID, name: "기본", symbols: [], groups: [] }], revision: 0 };
   private screenValue: Screens = { screens: [], revision: 0 };
+  private heatmapThemeValue: HeatmapThemes = { themes: [], revision: 0 };
   private uiValue: UiState = { lastLayoutId: DEFAULT_LAYOUT_ID, theme: "dark", revision: 0 };
   private drawingValues = new Map<string, Drawing>();
   private drawingRevisions = new Map<string, number>();
@@ -94,6 +97,8 @@ export class UserDocuments {
     this.watchlistValue = { revision: value.revision, lists: value.lists.map((l) => ({ ...clone(l), groups: clone(l.groups ?? []) })) };
     return this.watchlists();
   }
+  heatmapThemes(): HeatmapThemes { return clone(this.heatmapThemeValue); }
+  saveHeatmapThemes(value: HeatmapThemes): HeatmapThemes { this.heatmapThemeValue = clone(value); return this.heatmapThemes(); }
   screens(): Screens { return clone(this.screenValue); }
   saveScreens(value: Screens): Screens { this.screenValue = clone(value); return this.screens(); }
   uiPrefs() { return parseUiState(this.uiValue).prefs; }
@@ -306,6 +311,21 @@ export class Scenario {
     if (path === "/api/watchlists") {
       if (method === "GET") return { body: this.documents.watchlists() };
       if (method === "PUT") { const value: Watchlists = request.postDataJSON(); return value.revision <= this.documents.watchlists().revision ? stale() : { body: this.documents.saveWatchlists(value) }; }
+    }
+    if (path === "/api/heatmap/themes") {
+      if (method === "GET") return { body: this.documents.heatmapThemes() };
+      if (method === "PUT") { const value: HeatmapThemes = request.postDataJSON(); return value.revision <= this.documents.heatmapThemes().revision ? stale() : { body: this.documents.saveHeatmapThemes(value) }; }
+    }
+    if (path === "/api/heatmap/board" && method === "GET") {
+      const venue = url.searchParams.get("venue") ?? "combined";
+      const order = parseOrder(url.searchParams.get("order"));
+      if ((venue !== "combined" && venue !== "krx" && venue !== "nxt") || order === null) return error(400, "bad_request", "Invalid venue or order");
+      const memberOf = (code: string) => {
+        const quote = this.market.quote(code, venue);
+        const name = this.market.symbols.find((value) => value.code === code)?.name ?? code;
+        return quote ? { symbol: code, name, changeRate: quote.changeRate, ...(quote.tradedMillionWon === undefined ? {} : { tradedMillionWon: quote.tradedMillionWon }) } : null;
+      };
+      return { body: boardOf(this.documents.heatmapThemes(), memberOf, order, null) };
     }
     if (path === "/api/screens") {
       if (method === "GET") return { body: this.documents.screens() };

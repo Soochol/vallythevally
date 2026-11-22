@@ -1,12 +1,16 @@
 import { expect, test } from "vitest";
-import type { Quote } from "../../api/generated/Quote";
+import type { HeatmapBoardMember } from "../../api/generated/HeatmapBoardMember";
 import type { SymbolCode } from "../../api/generated/SymbolCode";
-import { arrange, snapshotRows, tileWeights } from "./arrange";
+import { arrange, boardRows, tileWeights } from "./arrange";
 
 const code = (c: string) => c as SymbolCode;
-const quote = (symbol: string, changeRate: number, tradedMillionWon?: number): Quote => ({ symbol: code(symbol), price: 1000, change: 0, changeRate, volume: 1, t: 0, source: "polled", venue: "combined", ...(tradedMillionWon === undefined ? {} : { tradedMillionWon }) });
-const names = new Map([[code("A"), "가"], [code("B"), "나"], [code("C"), "다"]]);
-const rows = (quotes: Quote[]) => snapshotRows([code("A"), code("B"), code("C")], names, quotes);
+const NAMES: Record<string, string> = { A: "가", B: "나", C: "다" };
+const quote = (symbol: string, changeRate: number, tradedMillionWon?: number): HeatmapBoardMember => ({ symbol: code(symbol), name: NAMES[symbol] ?? symbol, changeRate, ...(tradedMillionWon === undefined ? {} : { tradedMillionWon }) });
+const names = new Map(Object.entries(NAMES).map(([c, name]) => [code(c), name] as const));
+const rows = (members: HeatmapBoardMember[]) => {
+  const quoted = new Set(members.map((m) => m.symbol));
+  return boardRows({ id: "T", name: "테마", summary: null, members, missing: ["A", "B", "C"].map(code).filter((c) => !quoted.has(c)) }, names);
+};
 
 test("정렬 기준마다 순서가 정해진다", () => {
   const data = rows([quote("A", 1, 30), quote("B", 5, 10), quote("C", -2, 20)]);

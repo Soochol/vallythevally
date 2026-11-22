@@ -3,11 +3,11 @@ import { DEFAULT_SETTINGS, parseSettings, withSettings } from "./settings";
 
 test("주소에 없거나 잘못된 값은 기본값이다", () => {
   expect(parseSettings(new URLSearchParams(""))).toEqual(DEFAULT_SETTINGS);
-  expect(parseSettings(new URLSearchParams("range=4&size=x&sort=&view=y"))).toEqual(DEFAULT_SETTINGS);
+  expect(parseSettings(new URLSearchParams("range=4&size=x&sort=&view=y&order=name"))).toEqual(DEFAULT_SETTINGS);
 });
 
-test("색 범위·크기·정렬·보기를 주소에서 읽는다", () => {
-  expect(parseSettings(new URLSearchParams("range=3&size=equal&sort=name&view=flow"))).toEqual({ range: 3, size: "equal", sort: "name", view: "flow" });
+test("색 범위·크기·정렬·보기·테마 순서를 주소에서 읽는다", () => {
+  expect(parseSettings(new URLSearchParams("range=3&size=equal&sort=name&view=flow&order=custom"))).toEqual({ range: 3, size: "equal", sort: "name", view: "flow", order: "custom" });
 });
 
 test("기본값은 주소에서 빼고 다른 query는 지키지 않고 보존한다", () => {

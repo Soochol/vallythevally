@@ -1,5 +1,7 @@
 import type { HeatmapFlowSeries } from "../../src/api/generated/HeatmapFlowSeries";
+import type { HeatmapThemes } from "../../src/api/generated/HeatmapThemes";
 import type { Quote } from "../../src/api/generated/Quote";
+import { boardOf, parseOrder } from "./heatmap-board";
 import type { Scenario } from "./scenario";
 
 export interface HeatmapRow {
@@ -19,24 +21,38 @@ export const HEATMAP_TABLE: HeatmapTable = {
 export const HEATMAP_NAMES: Record<string, string> = { "005930": "삼성전자", "000660": "SK하이닉스", "028260": "삼성물산", "086520": "에코프로" };
 
 export const BASE_PRICE = 100_000;
+export const QUOTED_AT = 1_794_186_000;
 
 export function heatmapQuote(symbol: string, row: HeatmapRow, source: Quote["source"] = "polled"): Quote {
   const change = (BASE_PRICE * row.rate) / 100;
-  return { symbol, price: BASE_PRICE + change, change, changeRate: row.rate, volume: 1_000_000, t: 1_794_186_000, source, venue: "combined", ...(source === "polled" ? { tradedMillionWon: row.traded } : {}) };
+  return { symbol, price: BASE_PRICE + change, change, changeRate: row.rate, volume: 1_000_000, t: QUOTED_AT, source, venue: "combined", ...(source === "polled" ? { tradedMillionWon: row.traded } : {}) };
 }
 
-export function seedHeatmapGroups(scenario: Scenario, table: HeatmapTable): void {
-  scenario.documents.saveWatchlists({
-    revision: 100,
-    lists: [{ id: "L", name: "기본", symbols: ["005930", "000660", "028260", "086520"], groups: [
-      { id: "chips", name: "반도체", symbols: ["005930", "000660"] },
-      { id: "holding", name: "지주", symbols: ["028260", "086520"] },
-    ] }],
-  });
+export const HEATMAP_THEMES: HeatmapThemes = {
+  revision: 100,
+  themes: [
+    { id: "chips", name: "반도체", symbols: ["005930", "000660"] },
+    { id: "holding", name: "지주", symbols: ["028260", "086520"] },
+  ],
+};
+
+export function seedHeatmapThemes(scenario: Scenario, table: HeatmapTable, themes: HeatmapThemes = HEATMAP_THEMES): string[] {
+  const asked: string[] = [];
+  scenario.documents.saveHeatmapThemes(themes);
   scenario.on("/api/quotes", (request) => {
-    const asked = (new URL(request.url()).searchParams.get("symbols") ?? "").split(",");
-    return { body: asked.flatMap((symbol) => (table[symbol] ? [heatmapQuote(symbol, table[symbol])] : [])) };
+    const symbols = (new URL(request.url()).searchParams.get("symbols") ?? "").split(",");
+    return { body: symbols.flatMap((symbol) => (table[symbol] ? [heatmapQuote(symbol, table[symbol])] : [])) };
   });
+  scenario.on("/api/heatmap/board", (request) => {
+    const order = parseOrder(new URL(request.url()).searchParams.get("order")) ?? "rate";
+    asked.push(order);
+    const memberOf = (code: string) => {
+      const row = table[code];
+      return row ? { symbol: code, name: HEATMAP_NAMES[code] ?? code, changeRate: row.rate, tradedMillionWon: row.traded } : null;
+    };
+    return { body: boardOf(scenario.documents.heatmapThemes(), memberOf, order, QUOTED_AT) };
+  });
+  return asked;
 }
 
 const NINE_KST = Date.UTC(2026, 10, 9, 0, 0, 0) / 1000;
