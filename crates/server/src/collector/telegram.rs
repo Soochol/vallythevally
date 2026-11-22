@@ -119,17 +119,21 @@ fn is_chat_id(value: &str) -> bool {
     (!digits.is_empty() && digits.bytes().all(|byte| byte.is_ascii_digit())) || channel_name.is_some_and(|name| !name.is_empty() && name.bytes().all(|byte| byte.is_ascii_alphanumeric() || byte == b'_'))
 }
 
+fn is_blank(character: char) -> bool {
+    matches!(character, ' ' | '\t' | '\n' | '\x0B' | '\x0C' | '\r')
+}
+
 fn parse_settings(text: &str) -> Result<Settings, &'static str> {
     let mut bot_token = None;
     let mut chat_id = None;
-    for line in text.lines().map(str::trim).filter(|line| !line.is_empty()) {
+    for line in text.lines().map(|line| line.trim_matches(is_blank)).filter(|line| !line.is_empty()) {
         let (key, value) = line.split_once('=').ok_or("key=value 꼴이 아닌 줄이 있습니다")?;
-        let slot = match key.trim() {
+        let slot = match key.trim_matches(is_blank) {
             "bot_token" => &mut bot_token,
             "chat_id" => &mut chat_id,
             _ => return Err("알 수 없는 키가 있습니다"),
         };
-        if slot.replace(value.trim().to_owned()).is_some() {
+        if slot.replace(value.trim_matches(is_blank).to_owned()).is_some() {
             return Err("같은 키가 두 번 나옵니다");
         }
     }
@@ -288,5 +292,14 @@ mod tests {
     fn blank_lines_and_spaces_around_the_equals_sign_are_allowed() {
         let (_folder, path) = file_with(0o600, "\n bot_token = 1:a \n\nchat_id = @alerts_room\n");
         assert!(Telegram::load(&path).unwrap().is_some());
+    }
+
+    #[test]
+    fn only_ascii_blanks_around_lines_keys_and_values_are_ignored() {
+        let settings = parse_settings("\x0b bot_token\t=\x0c1:a\r\r\nchat_id=-100777 \n").unwrap();
+        assert_eq!((settings.bot_token.as_str(), settings.chat_id.as_str()), ("1:a", "-100777"));
+        for text in ["bot_token=1:a\nchat_id=-100777\u{a0}\n", "bot_token=1:a\nchat_id=-100\r777\n", "bot_token=1:a\nchat_id=-100\u{0}777\n", "bot_token=1:a\nchat_id=\nchat_id=-100777\n", "bot_token=1:a\nchat_id=-100777\n\u{3000}\n"] {
+            assert!(parse_settings(text).is_err(), "{text:?}");
+        }
     }
 }
