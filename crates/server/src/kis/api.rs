@@ -10,10 +10,18 @@ pub enum KisApiId {
     OrderBook,
     TodayTrades,
     ProgramTrades,
+    VolumeRank,
+    Fluctuation,
+    ExpectedUpDown,
+    InvestorTotal,
+    QuoteBalance,
+    CreditBalance,
+    HtsTopView,
+    OvertimeVolume,
 }
 
 impl KisApiId {
-    pub const ALL: [KisApiId; 10] = [
+    pub const ALL: [KisApiId; 18] = [
         KisApiId::CurrentPrice,
         KisApiId::MultiPrice,
         KisApiId::DailyChart,
@@ -24,6 +32,14 @@ impl KisApiId {
         KisApiId::OrderBook,
         KisApiId::TodayTrades,
         KisApiId::ProgramTrades,
+        KisApiId::VolumeRank,
+        KisApiId::Fluctuation,
+        KisApiId::ExpectedUpDown,
+        KisApiId::InvestorTotal,
+        KisApiId::QuoteBalance,
+        KisApiId::CreditBalance,
+        KisApiId::HtsTopView,
+        KisApiId::OvertimeVolume,
     ];
 
     pub fn tr_id(self) -> &'static str {
@@ -38,6 +54,14 @@ impl KisApiId {
             KisApiId::OrderBook => "FHKST01010200",
             KisApiId::TodayTrades => "FHPST01060000",
             KisApiId::ProgramTrades => "FHPPG04650101",
+            KisApiId::VolumeRank => "FHPST01710000",
+            KisApiId::Fluctuation => "FHPST01700000",
+            KisApiId::ExpectedUpDown => "FHPST01820000",
+            KisApiId::InvestorTotal => "FHPTJ04400000",
+            KisApiId::QuoteBalance => "FHPST01720000",
+            KisApiId::CreditBalance => "FHKST17010000",
+            KisApiId::HtsTopView => "HHMCM000100C0",
+            KisApiId::OvertimeVolume => "FHPST02350000",
         }
     }
 
@@ -53,6 +77,14 @@ impl KisApiId {
             KisApiId::OrderBook => "/uapi/domestic-stock/v1/quotations/inquire-asking-price-exp-ccn",
             KisApiId::TodayTrades => "/uapi/domestic-stock/v1/quotations/inquire-time-itemconclusion",
             KisApiId::ProgramTrades => "/uapi/domestic-stock/v1/quotations/program-trade-by-stock",
+            KisApiId::VolumeRank => "/uapi/domestic-stock/v1/quotations/volume-rank",
+            KisApiId::Fluctuation => "/uapi/domestic-stock/v1/ranking/fluctuation",
+            KisApiId::ExpectedUpDown => "/uapi/domestic-stock/v1/ranking/exp-trans-updown",
+            KisApiId::InvestorTotal => "/uapi/domestic-stock/v1/quotations/foreign-institution-total",
+            KisApiId::QuoteBalance => "/uapi/domestic-stock/v1/ranking/quote-balance",
+            KisApiId::CreditBalance => "/uapi/domestic-stock/v1/ranking/credit-balance",
+            KisApiId::HtsTopView => "/uapi/domestic-stock/v1/ranking/hts-top-view",
+            KisApiId::OvertimeVolume => "/uapi/domestic-stock/v1/ranking/overtime-volume",
         }
     }
 }
@@ -62,13 +94,13 @@ mod tests {
     use super::*;
 
     #[test]
-    fn every_api_has_a_distinct_tr_id_and_a_quotation_path() {
+    fn every_api_has_a_distinct_tr_id_and_a_domestic_stock_path() {
         let mut seen = std::collections::HashSet::new();
         let mut paths = std::collections::HashSet::new();
         for api in KisApiId::ALL {
             assert!(seen.insert(api.tr_id()), "{api:?}");
             assert!(paths.insert(api.path()), "{api:?}");
-            assert!(api.path().starts_with("/uapi/domestic-stock/v1/quotations/"), "{api:?}");
+            assert!(api.path().starts_with("/uapi/domestic-stock/v1/quotations/") || api.path().starts_with("/uapi/domestic-stock/v1/ranking/"), "{api:?}");
         }
     }
 }

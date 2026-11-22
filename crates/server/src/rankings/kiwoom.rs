@@ -1,36 +1,89 @@
 use std::collections::HashMap;
-
 use domain::{StockCode, Venue};
+use futures::future::BoxFuture;
 
-use super::cache::{Demand, WalkError};
 use crate::api::{self, Percent, RankingFigures, Shares, Won};
 use crate::kiwoom::api::{
     BalanceOrder, CreditRatioRanking, ExpectedExecutionRanking, ExpectedOrder, ForeignStreakRanking, InvestorGroup, InvestorNetRanking, InvestorUnit, LimitMoves, ListedMarket, ManagedIssues,
     MarketRequest, MinimumTradeValue, MostViewedRanking, NetSide, OrderBookBalanceRanking, PriceChangeRanking, PriceDirection, ProgramNetRanking, ProgramSide, RankMarket, StockQuotes, StreakSide,
     SurgeBaseline, SurgeOrder, TradeValueRanking, TradingSession, TradingVolumeRanking, ViewWindow, VolumeOrder, VolumeSurgeRanking,
 };
-use crate::kiwoom::rest::{ContKey, KiwoomRest};
+use crate::kiwoom::error::Category;
+use crate::kiwoom::rest::{ContKey, KiwoomError, KiwoomRest, MergeScope, Page};
 use crate::kiwoom::wire::{CreditRatioColumns, ExpectedExecutionColumns, ForeignStreakColumns, InvestorNetColumns, MostViewedColumns, OrderBookBalanceColumns, ParsedRows, PriceChangeColumns, ProgramNetColumns, RankRow, TradeValueColumns, TradingVolumeColumns, VolumeSurgeColumns, parse_quotes};
+use crate::market_source::rankings::{Demand, RankedRow, RankingChoices, RankingError, RankingFetch, RankingKind, RankingSource};
+use crate::market_source::{Cursor, SourceError};
 
-#[derive(Debug, Clone, PartialEq)]
-pub struct RawRow {
-    pub code: StockCode,
-    pub name: String,
-    pub price: Option<Won>,
-    pub change_rate: Option<Percent>,
-    pub figures: RankingFigures,
+pub struct KiwoomRankings {
+    rest: KiwoomRest,
 }
 
-pub struct FetchedPage {
-    pub rows: Vec<RawRow>,
-    pub next: Option<ContKey>,
-    pub continues_without_key: bool,
+impl KiwoomRankings {
+    pub fn new(rest: KiwoomRest) -> Self {
+        KiwoomRankings { rest }
+    }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct QueryKey {
-    api_id: &'static str,
-    body: String,
+impl RankingSource for KiwoomRankings {
+    fn name(&self) -> &'static str {
+        "kiwoom"
+    }
+
+    fn kinds(&self) -> &'static [RankingKind] {
+        &RankingKind::ALL
+    }
+
+    fn choices(&self, _kind: RankingKind) -> RankingChoices {
+        RankingChoices {
+            venues: vec![api::Venue::Combined, api::Venue::Krx, api::Venue::Nxt],
+            sessions: vec![api::TradingSession::All, api::TradingSession::Regular, api::TradingSession::PreMarket, api::TradingSession::AfterHours],
+            baselines: vec![api::SurgeBaseline::PreviousDay, api::SurgeBaseline::Minutes1, api::SurgeBaseline::Minutes5, api::SurgeBaseline::Minutes10],
+            surge_sorts: vec![api::SurgeSort::SurgeVolume, api::SurgeSort::SurgeRate, api::SurgeSort::DropRate],
+            min_trade_amounts: vec![api::MinTradeAmount::Any, api::MinTradeAmount::AtLeast100Million, api::MinTradeAmount::AtLeast1Billion, api::MinTradeAmount::AtLeast10Billion],
+            investors: vec![
+                api::RankingInvestor::Foreign,
+                api::RankingInvestor::ForeignFirm,
+                api::RankingInvestor::FinancialInvestment,
+                api::RankingInvestor::InvestmentTrust,
+                api::RankingInvestor::OtherFinancial,
+                api::RankingInvestor::Bank,
+                api::RankingInvestor::Insurance,
+                api::RankingInvestor::PensionFund,
+                api::RankingInvestor::State,
+                api::RankingInvestor::OtherCorporation,
+                api::RankingInvestor::Institution,
+            ],
+            spans: vec![api::ViewSpan::Seconds30, api::ViewSpan::Minute1, api::ViewSpan::Minutes10, api::ViewSpan::Hour1, api::ViewSpan::Today],
+            excludes_managed: true,
+        }
+    }
+
+    fn page<'a>(&'a self, ranking: &'a api::Ranking, cursor: Option<&'a Cursor>, demand: &'a mut Demand) -> BoxFuture<'a, Result<RankingFetch, RankingError>> {
+        Box::pin(async move {
+            let cont = cursor.map(|cursor| ContKey::new(cursor.as_str()));
+            let fetched = plan(*ranking).fetch(&self.rest, cont.as_ref(), demand).await;
+            fetched.map_err(|error| match error {
+                KiwoomFailure::Call(e) if cont.is_some() && key_was_refused(&e) => RankingError::CursorRefused(e.into()),
+                KiwoomFailure::Call(e) => RankingError::Source(SourceError::from(e)),
+                KiwoomFailure::Unreadable => RankingError::Unreadable,
+            })
+        })
+    }
+}
+
+fn key_was_refused(error: &KiwoomError) -> bool {
+    matches!(error, KiwoomError::Failed(failure) if matches!(failure.category(), Category::InvalidRequest | Category::Unknown))
+}
+
+enum KiwoomFailure {
+    Call(KiwoomError),
+    Unreadable,
+}
+
+impl From<KiwoomError> for KiwoomFailure {
+    fn from(error: KiwoomError) -> Self {
+        KiwoomFailure::Call(error)
+    }
 }
 
 pub enum Query {
@@ -48,35 +101,33 @@ pub enum Query {
     MostViewed(MostViewedRanking),
 }
 
-pub fn plan(ranking: api::Ranking) -> (Query, api::Excludes) {
+fn plan(ranking: api::Ranking) -> Query {
     use api::Ranking as R;
     match ranking {
-        R::TradeAmount { market, venue, excludes, exclude_managed } => (Query::TradeAmount(TradeValueRanking::new(market.into(), venue.into(), managed(exclude_managed))), excludes),
-        R::TradeVolume { market, venue, session, excludes, exclude_managed } => {
-            (Query::TradeVolume(TradingVolumeRanking::new(VolumeOrder::Volume, market.into(), venue.into(), trading_session(session), managed(exclude_managed))), excludes)
+        R::TradeAmount { market, venue, exclude_managed, .. } => Query::TradeAmount(TradeValueRanking::new(market.into(), venue.into(), managed(exclude_managed))),
+        R::TradeVolume { market, venue, session, exclude_managed, .. } => {
+            Query::TradeVolume(TradingVolumeRanking::new(VolumeOrder::Volume, market.into(), venue.into(), trading_session(session), managed(exclude_managed)))
         }
-        R::Turnover { market, venue, excludes, exclude_managed } => {
-            (Query::Turnover(TradingVolumeRanking::new(VolumeOrder::Turnover, market.into(), venue.into(), TradingSession::All, managed(exclude_managed))), excludes)
+        R::Turnover { market, venue, exclude_managed, .. } => {
+            Query::Turnover(TradingVolumeRanking::new(VolumeOrder::Turnover, market.into(), venue.into(), TradingSession::All, managed(exclude_managed)))
         }
-        R::VolumeSurge { market, venue, baseline, sort, excludes, exclude_managed } => {
-            (Query::VolumeSurge(VolumeSurgeRanking::new(market.into(), venue.into(), surge_baseline(baseline), surge_order(sort), managed(exclude_managed))), excludes)
+        R::VolumeSurge { market, venue, baseline, sort, exclude_managed, .. } => {
+            Query::VolumeSurge(VolumeSurgeRanking::new(market.into(), venue.into(), surge_baseline(baseline), surge_order(sort), managed(exclude_managed)))
         }
-        R::Gainers { market, venue, include_limit, min_trade_amount, excludes, exclude_managed } => (
-            Query::Movers(PriceChangeRanking::new(PriceDirection::Rising, market.into(), venue.into(), limit_moves(include_limit), minimum_trade_value(min_trade_amount), managed(exclude_managed))),
-            excludes,
-        ),
-        R::Losers { market, venue, include_limit, min_trade_amount, excludes, exclude_managed } => (
-            Query::Movers(PriceChangeRanking::new(PriceDirection::Falling, market.into(), venue.into(), limit_moves(include_limit), minimum_trade_value(min_trade_amount), managed(exclude_managed))),
-            excludes,
-        ),
-        R::Expected { market, venue, sort, excludes, exclude_managed } => {
+        R::Gainers { market, venue, include_limit, min_trade_amount, exclude_managed, .. } => {
+            Query::Movers(PriceChangeRanking::new(PriceDirection::Rising, market.into(), venue.into(), limit_moves(include_limit), minimum_trade_value(min_trade_amount), managed(exclude_managed)))
+        }
+        R::Losers { market, venue, include_limit, min_trade_amount, exclude_managed, .. } => {
+            Query::Movers(PriceChangeRanking::new(PriceDirection::Falling, market.into(), venue.into(), limit_moves(include_limit), minimum_trade_value(min_trade_amount), managed(exclude_managed)))
+        }
+        R::Expected { market, venue, sort, exclude_managed, .. } => {
             let order = match sort {
                 api::ExpectedSort::Gainers => ExpectedOrder::Rising,
                 api::ExpectedSort::Losers => ExpectedOrder::Falling,
             };
-            (Query::Expected(ExpectedExecutionRanking::new(order, market.into(), venue.into(), managed(exclude_managed))), excludes)
+            Query::Expected(ExpectedExecutionRanking::new(order, market.into(), venue.into(), managed(exclude_managed)))
         }
-        R::InvestorNetBuy { market, investor, direction, unit, excludes } => {
+        R::InvestorNetBuy { market, investor, direction, unit, .. } => {
             let unit = match unit {
                 api::TradeUnit::Amount => InvestorUnit::Amount,
                 api::TradeUnit::Quantity => InvestorUnit::Quantity,
@@ -85,33 +136,33 @@ pub fn plan(ranking: api::Ranking) -> (Query, api::Excludes) {
                 api::NetDirection::NetBuy => NetSide::Buying,
                 api::NetDirection::NetSell => NetSide::Selling,
             };
-            (Query::InvestorNet(InvestorNetRanking::new(investor_group(investor), side, unit, market.into()), unit), excludes)
+            Query::InvestorNet(InvestorNetRanking::new(investor_group(investor), side, unit, market.into()), unit)
         }
-        R::ForeignStreak { market, venue, direction, excludes } => {
+        R::ForeignStreak { market, venue, direction, .. } => {
             let side = match direction {
                 api::NetDirection::NetBuy => StreakSide::Buying,
                 api::NetDirection::NetSell => StreakSide::Selling,
             };
-            (Query::ForeignStreak(ForeignStreakRanking::new(side, market.into(), venue.into())), excludes)
+            Query::ForeignStreak(ForeignStreakRanking::new(side, market.into(), venue.into()))
         }
-        R::Program { market, venue, direction, excludes } => {
+        R::Program { market, venue, direction, .. } => {
             let side = match direction {
                 api::NetDirection::NetBuy => ProgramSide::NetBuying,
                 api::NetDirection::NetSell => ProgramSide::NetSelling,
             };
-            (Query::Program(ProgramNetRanking::new(side, listed_market(market), venue.into())), excludes)
+            Query::Program(ProgramNetRanking::new(side, listed_market(market), venue.into()))
         }
-        R::BidAskBalance { market, venue, sort, excludes, exclude_managed } => {
+        R::BidAskBalance { market, venue, sort, exclude_managed, .. } => {
             let order = match sort {
                 api::BalanceSort::NetBuyRemaining => BalanceOrder::NetBuyBalance,
                 api::BalanceSort::NetSellRemaining => BalanceOrder::NetSellBalance,
                 api::BalanceSort::BuyRatio => BalanceOrder::BuyRatio,
                 api::BalanceSort::SellRatio => BalanceOrder::SellRatio,
             };
-            (Query::BidAskBalance(OrderBookBalanceRanking::new(order, listed_market(market), venue.into(), managed(exclude_managed))), excludes)
+            Query::BidAskBalance(OrderBookBalanceRanking::new(order, listed_market(market), venue.into(), managed(exclude_managed)))
         }
-        R::CreditRatio { market, venue, excludes, exclude_managed } => (Query::CreditRatio(CreditRatioRanking::new(market.into(), venue.into(), managed(exclude_managed))), excludes),
-        R::MostViewed { span, excludes } => {
+        R::CreditRatio { market, venue, exclude_managed, .. } => Query::CreditRatio(CreditRatioRanking::new(market.into(), venue.into(), managed(exclude_managed))),
+        R::MostViewed { span, .. } => {
             let window = match span {
                 api::ViewSpan::Seconds30 => ViewWindow::ThirtySeconds,
                 api::ViewSpan::Minute1 => ViewWindow::OneMinute,
@@ -119,7 +170,7 @@ pub fn plan(ranking: api::Ranking) -> (Query, api::Excludes) {
                 api::ViewSpan::Hour1 => ViewWindow::OneHour,
                 api::ViewSpan::Today => ViewWindow::Today,
             };
-            (Query::MostViewed(MostViewedRanking::new(window)), excludes)
+            Query::MostViewed(MostViewedRanking::new(window))
         }
     }
 }
@@ -201,26 +252,7 @@ fn investor_group(investor: api::RankingInvestor) -> InvestorGroup {
 }
 
 impl Query {
-    pub fn key(&self) -> QueryKey {
-        fn key_of<R: MarketRequest>(request: &R) -> QueryKey {
-            QueryKey { api_id: R::API_ID.as_str(), body: serde_json::to_string(request).expect("요청 타입은 언제나 직렬화된다") }
-        }
-        match self {
-            Query::TradeAmount(r) => key_of(r),
-            Query::TradeVolume(r) | Query::Turnover(r) => key_of(r),
-            Query::VolumeSurge(r) => key_of(r),
-            Query::Movers(r) => key_of(r),
-            Query::Expected(r) => key_of(r),
-            Query::InvestorNet(r, _) => key_of(r),
-            Query::ForeignStreak(r) => key_of(r),
-            Query::Program(r) => key_of(r),
-            Query::BidAskBalance(r) => key_of(r),
-            Query::CreditRatio(r) => key_of(r),
-            Query::MostViewed(r) => key_of(r),
-        }
-    }
-
-    pub async fn fetch(&self, rest: &KiwoomRest, cont: Option<&ContKey>, demand: &mut Demand) -> Result<FetchedPage, WalkError> {
+    async fn fetch(&self, rest: &KiwoomRest, cont: Option<&ContKey>, demand: &mut Demand) -> Result<RankingFetch, KiwoomFailure> {
         match self {
             Query::TradeAmount(r) => page(rest, r, cont, demand, |body| rows(body.rows(), trade_amount)).await,
             Query::TradeVolume(r) => page(rest, r, cont, demand, |body| rows(body.rows(), trade_volume)).await,
@@ -242,17 +274,21 @@ impl Query {
     }
 }
 
-async fn page<R: MarketRequest>(rest: &KiwoomRest, request: &R, cont: Option<&ContKey>, demand: &mut Demand, read: impl FnOnce(R::Response) -> ReadRows) -> Result<FetchedPage, WalkError> {
-    let page = demand.call(rest, request, cont).await?;
+async fn call<R: MarketRequest>(rest: &KiwoomRest, request: &R, cont: Option<&ContKey>, demand: &mut Demand) -> Result<Page<R::Response>, KiwoomError> {
+    demand.run(|priority| rest.call(request, cont, priority, MergeScope::default())).await
+}
+
+async fn page<R: MarketRequest>(rest: &KiwoomRest, request: &R, cont: Option<&ContKey>, demand: &mut Demand, read: impl FnOnce(R::Response) -> ReadRows) -> Result<RankingFetch, KiwoomFailure> {
+    let page = call(rest, request, cont, demand).await?;
     let read = read(page.body);
     if read.all_unreadable {
-        return Err(WalkError::PageUnreadable);
+        return Err(KiwoomFailure::Unreadable);
     }
-    Ok(FetchedPage { rows: read.rows, next: page.next, continues_without_key: page.continues_without_key })
+    Ok(RankingFetch { rows: read.rows, next: page.next.map(|key| Cursor::new(key.as_str())), continues_without_cursor: page.continues_without_key })
 }
 
 struct ReadRows {
-    rows: Vec<RawRow>,
+    rows: Vec<RankedRow>,
     all_unreadable: bool,
 }
 
@@ -264,7 +300,7 @@ struct Fields {
 
 fn rows<C>(parsed: ParsedRows<RankRow<C>>, read: impl Fn(&C) -> Fields) -> ReadRows {
     let received = parsed.rows.len() + parsed.skipped as usize;
-    let rows: Vec<RawRow> = parsed
+    let rows: Vec<RankedRow> = parsed
         .rows
         .into_iter()
         .filter_map(|row| {
@@ -273,7 +309,7 @@ fn rows<C>(parsed: ParsedRows<RankRow<C>>, read: impl Fn(&C) -> Fields) -> ReadR
                 tracing::warn!(code = row.code.as_str(), "순위 행의 값이 너무 커서 그 행만 빼고 받습니다");
                 return None;
             };
-            Some(RawRow { code: row.code, name: row.name, price: price.and_then(won), change_rate: change_rate.map(Percent), figures })
+            Some(RankedRow { code: row.code, name: row.name, price: price.and_then(won), change_rate: change_rate.map(Percent), figures })
         })
         .collect();
     ReadRows { all_unreadable: received > 0 && rows.is_empty(), rows }
@@ -404,7 +440,7 @@ fn most_viewed(c: &MostViewedColumns) -> Fields {
     }
 }
 
-async fn fill_quotes(rest: &KiwoomRest, rows: &mut [RawRow], demand: &mut Demand) {
+async fn fill_quotes(rest: &KiwoomRest, rows: &mut [RankedRow], demand: &mut Demand) {
     let mut codes: Vec<StockCode> = Vec::new();
     for row in rows.iter() {
         if codes.len() < StockQuotes::MAX && !codes.contains(&row.code) {
@@ -412,7 +448,7 @@ async fn fill_quotes(rest: &KiwoomRest, rows: &mut [RawRow], demand: &mut Demand
         }
     }
     let Some(request) = StockQuotes::new(&codes, Venue::Krx) else { return };
-    let page = match demand.call(rest, &request, None).await {
+    let page = match call(rest, &request, None, demand).await {
         Ok(page) => page,
         Err(reason) => {
             tracing::warn!(%reason, "투자자별 순매수의 현재가·등락률을 받지 못해 비워 둡니다");

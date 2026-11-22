@@ -1,5 +1,5 @@
 mod cache;
-mod query;
+mod kiwoom;
 
 use std::collections::HashSet;
 use std::sync::Arc;
@@ -14,11 +14,13 @@ use domain::{Symbol, SymbolKind};
 use crate::api::{self, RankingPages, RankingRow, SymbolCode, UnixSeconds};
 use crate::bars::BarError;
 use crate::http::{ApiFailure, AppState, Lookup, symbol_list};
-use crate::kiwoom::rest::Priority;
+use crate::market_source::Priority;
+use crate::market_source::rankings::{RankingSource, excludes_of};
 use crate::symbols::Directory;
 use crate::user_routes::read_json;
 
 pub use cache::RankingCache;
+pub use kiwoom::KiwoomRankings;
 use cache::{Served, WalkError};
 
 const REQUEST_LIMIT: usize = 4 * 1024;
@@ -33,16 +35,18 @@ async fn rankings(State(st): State<Arc<AppState>>, body: Body) -> Result<Json<ap
         api::RankingTrigger::User => Priority::Screen,
         api::RankingTrigger::Refresh => Priority::Background,
     };
-    let (query, excludes) = query::plan(request.ranking);
-    let rest = st.kiwoom.rest().map_err(|e| failure(WalkError::Kiwoom(e), &st))?;
-    let served = st.rankings.serve(query, usize::from(u8::from(request.pages)), priority, rest, &st.clock).await.map_err(|e| failure(e, &st))?;
+    let excludes = excludes_of(&request.ranking);
+    let rest = st.kiwoom.rest().map_err(|e| failure(WalkError::Source(e.into()), &st))?;
+    let source: Arc<dyn RankingSource> = Arc::new(KiwoomRankings::new(rest.clone()));
+    let served = st.rankings.serve(source, request.ranking, usize::from(u8::from(request.pages)), priority, &st.clock).await.map_err(|e| failure(e, &st))?;
     let directory = symbol_list(&st).await?;
     present(served, excludes, &directory).map(Json).map_err(|e| Lookup::Rankings.failure(e, st.clock.now()))
 }
 
 fn failure(error: WalkError, st: &AppState) -> ApiFailure {
     match error {
-        WalkError::Kiwoom(e) => Lookup::Rankings.failure(e.into(), st.clock.now()),
+        WalkError::Source(e) | WalkError::CursorRefused(e) => Lookup::Rankings.failure(e.into(), st.clock.now()),
+        WalkError::Unsupported(unsupported) => Lookup::Rankings.failure(BarError::Source(unsupported.into_failure()), st.clock.now()),
         WalkError::KeyRepeated => ApiFailure::kiwoom_protocol("키움 순위의 연속조회 키가 되풀이돼 끝까지 받지 못했습니다"),
         WalkError::KeyMissing => ApiFailure::kiwoom_protocol("키움 순위가 다음 페이지가 있다고 하면서 연속조회 키를 주지 않았습니다"),
         WalkError::PageUnreadable => ApiFailure::kiwoom_protocol("키움 순위 페이지의 행을 하나도 읽지 못했습니다"),
@@ -74,7 +78,7 @@ fn present(served: Served, excludes: api::Excludes, directory: &Directory) -> Re
         rows.push(RankingRow {
             rank: u32::try_from(rows.len() + 1).map_err(|_| BarError::Internal("순위 줄 수가 너무 많습니다".into()))?,
             code: SymbolCode(symbol.as_wire()),
-            name: raw.name.clone(),
+            name: if raw.name.is_empty() { info.map(|info| info.name.clone()).unwrap_or_default() } else { raw.name.clone() },
             listed: info.is_some(),
             price: raw.price,
             change_rate: raw.change_rate,

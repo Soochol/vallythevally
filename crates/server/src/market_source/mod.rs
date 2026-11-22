@@ -1,6 +1,7 @@
 mod error;
 mod feature;
 mod kiwoom_handle;
+pub mod rankings;
 pub mod stream;
 mod types;
 
