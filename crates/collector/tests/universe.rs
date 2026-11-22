@@ -470,6 +470,50 @@ async fn a_valid_today_list_that_cannot_be_opened_stays_where_it_is_and_the_morn
 }
 
 #[tokio::test(start_paused = true)]
+async fn a_previous_list_that_cannot_be_opened_fails_the_morning_instead_of_falling_back_to_an_older_one() {
+    use std::os::unix::fs::PermissionsExt;
+    for failing in [Kiwoom::Failing, listing(fillers(90))] {
+        let data = tempfile::tempdir().unwrap();
+        morning(data.path(), 20261116, listing(fillers(100))).await.unwrap();
+        morning(data.path(), 20261117, listing(fillers(100))).await.unwrap();
+        let previous = data.path().join("universe/20261117.json");
+        let original = std::fs::read(&previous).unwrap();
+        std::fs::set_permissions(&previous, std::fs::Permissions::from_mode(0o000)).unwrap();
+        if std::fs::read(&previous).is_ok() {
+            return;
+        }
+
+        let failed = morning_outcome(data.path(), 20261118, failing).await.unwrap_err();
+
+        std::fs::set_permissions(&previous, std::fs::Permissions::from_mode(0o644)).unwrap();
+        let UniverseError::Store(StoreError::Read { path, .. }) = &failed else { panic!("{failed:?}") };
+        assert_eq!(*path, previous);
+        assert!(failed.to_string().contains("20261117.json"), "{failed}");
+        assert_eq!(std::fs::read(&previous).unwrap(), original, "열지 못한 파일은 옮기지도 바꾸지도 않는다");
+        assert_eq!(universe_files(data.path()), ["20261116.json", "20261117.json"]);
+    }
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_today_path_that_is_a_dangling_symlink_fails_the_morning_and_stays_a_link() {
+    for failing in [Kiwoom::Failing, listing(fillers(90))] {
+        let data = tempfile::tempdir().unwrap();
+        morning(data.path(), 20261117, listing(fillers(100))).await.unwrap();
+        let today = data.path().join("universe/20261118.json");
+        let target = data.path().join("nowhere.json");
+        std::os::unix::fs::symlink(&target, &today).unwrap();
+
+        let failed = morning_outcome(data.path(), 20261118, failing).await.unwrap_err();
+
+        let UniverseError::Store(StoreError::Read { path, .. }) = &failed else { panic!("{failed:?}") };
+        assert_eq!(*path, today);
+        assert!(failed.to_string().contains("20261118.json"), "{failed}");
+        assert_eq!(std::fs::read_link(&today).unwrap(), target);
+        assert!(!target.exists());
+    }
+}
+
+#[tokio::test(start_paused = true)]
 async fn an_unreadable_today_list_without_any_previous_list_still_fails() {
     for (label, bytes) in broken_today_lists().await {
         let data = tempfile::tempdir().unwrap();
