@@ -35,7 +35,7 @@
 
 ## 구성종목 하루 저장
 
-`kiwoom_themes::start_collection`이 매일 08:30(KST) 이후 첫 기회에 `ka90001`(1일, 통합)로 테마 목록을, 테마마다 `ka90002`로 구성종목 코드를 받아 `<사용자 DB 폴더>/kiwoom-themes/YYYYMMDD.json`에 둔다(`VALLY_KIWOOM_THEMES_DIR`로 바꾼다). 배경 우선순위이고 키움이 연결돼 있을 때만 받는다. 연결돼 있지 않거나 목록을 받지 못하면 5분 뒤 다시 본다. 오늘 파일이 있으면 받지 않는다. 서버가 켜질 때 가장 최근 파일을 읽는다. 결정은 [ADR 0042](adr/0042-heatmap-adds-kiwoom-themes-as-a-second-source.md)이다.
+`kiwoom_themes::start_collection`이 매일 08:30(KST) 이후 첫 기회에 `ka90001`(1일, 통합)로 테마 목록을, 테마마다 `ka90002`로 구성종목 코드를 받아 `<사용자 DB 폴더>/kiwoom-themes/YYYYMMDD.json`에 둔다(`VALLY_KIWOOM_THEMES_DIR`로 바꾼다). 배경 우선순위다. 목록을 받지 못하면(키움이 연결되지 않은 때 포함) 5분 뒤 다시 받는다. 오늘 파일이 있으면 받지 않는다. 서버가 켜질 때 가장 최근 파일을 읽는다. 결정은 [ADR 0042](adr/0042-heatmap-adds-kiwoom-themes-as-a-second-source.md)이다.
 
 ```json
 { "date": "20261123", "collected_at": 1795000000, "themes": [ { "code": "319", "name": "조선", "members": ["042660", "010140"] } ] }
