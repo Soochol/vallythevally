@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use axum::Router;
@@ -10,25 +10,8 @@ use domain::{KstDate, StockCode, Symbol};
 use crate::api;
 use crate::bars::BarError;
 use crate::http::{ApiFailure, AppState, Lookup, symbol_list};
-use crate::kiwoom::api::{MarketRequest, StockForeignHoldings, StockInvestorNetShares};
-use crate::kiwoom::rest::{ContKey, KiwoomRest, MergeScope, Priority};
-use crate::kiwoom::wire::DayPage;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct DayRange {
-    from: KstDate,
-    to: KstDate,
-}
-
-impl DayRange {
-    pub fn new(from: KstDate, to: KstDate) -> Option<Self> {
-        (from <= to).then_some(DayRange { from, to })
-    }
-
-    fn contains(self, day: KstDate) -> bool {
-        (self.from..=self.to).contains(&day)
-    }
-}
+use crate::market_overview::overview_source;
+use crate::market_source::{DayRange, Priority};
 
 pub fn routes() -> Router<Arc<AppState>> {
     Router::new()
@@ -38,16 +21,14 @@ pub fn routes() -> Router<Arc<AppState>> {
 
 async fn foreign_holdings(State(st): State<Arc<AppState>>, Path(code): Path<String>, Query(q): Query<HashMap<String, String>>) -> Result<Json<api::DayHistory<api::ForeignHoldingDay>>, ApiFailure> {
     let (stock, range) = history_query(&st, &code, &q).await?;
-    let rest = st.kiwoom.rest().map_err(|e| Lookup::ForeignHoldings.failure(e.into(), st.clock.now()))?;
-    let history = walk(rest, &StockForeignHoldings::new(stock), stock, range).await;
-    Ok(Json(history.map_err(|e| Lookup::ForeignHoldings.failure(e, st.clock.now()))?))
+    let history = overview_source(&st).foreign_holdings(stock, range, st.clock.now(), Priority::Background).await;
+    Ok(Json(history.map_err(|e| Lookup::ForeignHoldings.failure(BarError::from(e), st.clock.now()))?))
 }
 
 async fn investor_net_shares(State(st): State<Arc<AppState>>, Path(code): Path<String>, Query(q): Query<HashMap<String, String>>) -> Result<Json<api::DayHistory<api::InvestorNetSharesDay>>, ApiFailure> {
     let (stock, range) = history_query(&st, &code, &q).await?;
-    let rest = st.kiwoom.rest().map_err(|e| Lookup::InvestorNetShares.failure(e.into(), st.clock.now()))?;
-    let history = walk(rest, &StockInvestorNetShares::new(stock, st.clock.now().kst_date()), stock, range).await;
-    Ok(Json(history.map_err(|e| Lookup::InvestorNetShares.failure(e, st.clock.now()))?))
+    let history = overview_source(&st).stock_investors(stock, range, st.clock.now(), Priority::Background).await;
+    Ok(Json(history.map_err(|e| Lookup::InvestorNetShares.failure(BarError::from(e), st.clock.now()))?))
 }
 
 async fn history_query(st: &AppState, code: &str, q: &HashMap<String, String>) -> Result<(StockCode, DayRange), ApiFailure> {
@@ -64,87 +45,4 @@ async fn history_query(st: &AppState, code: &str, q: &HashMap<String, String>) -
         return Err(ApiFailure::new(api::ApiErrorCode::UnknownSymbol, format!("없는 종목입니다: {code}")));
     }
     Ok((stock, range))
-}
-
-async fn walk<R>(rest: &KiwoomRest, req: &R, code: StockCode, range: DayRange) -> Result<api::DayHistory<<R::Response as DayPage>::Day>, BarError>
-where
-    R: MarketRequest,
-    R::Response: DayPage,
-{
-    let (mut days, mut skipped, mut undated) = (Vec::new(), Vec::new(), Vec::new());
-    let mut undated_pages = Vec::new();
-    let mut seen_keys = HashSet::new();
-    let mut reached: Option<KstDate> = None;
-    let mut cont: Option<ContKey> = None;
-    loop {
-        let page = rest.call(req, cont.as_ref(), Priority::Background, MergeScope::default()).await?;
-        if undated_pages.contains(&page.body) {
-            tracing::warn!(api_id = R::API_ID.as_str(), code = code.as_str(), "키움 연속조회가 날짜 없는 페이지를 반복해 여기서 멈춥니다");
-            break;
-        }
-        let rows = page.body.days();
-        let oldest = rows.oldest();
-        if rows.rows.is_empty() && rows.undated.is_empty() {
-            if reached.is_none() && undated.is_empty() {
-                return Err(BarError::UnknownSymbol);
-            }
-            break;
-        }
-        if oldest.is_none() {
-            undated_pages.push(page.body);
-        }
-        for row in rows.undated {
-            tracing::warn!(api_id = R::API_ID.as_str(), code = code.as_str(), dt = %row.dt, reason = %row.reason, "키움 행을 읽지 못해 그 행만 빼고 받습니다");
-            undated.push(api::UndatedRow { dt: row.dt, reason: row.reason.to_string() });
-        }
-        if let Some(oldest) = oldest {
-            if reached.is_some_and(|r| oldest >= r) {
-                tracing::warn!(api_id = R::API_ID.as_str(), code = code.as_str(), %oldest, "키움 연속조회가 더 오래된 날을 주지 않아 여기서 멈춥니다");
-                break;
-            }
-            reached = Some(oldest);
-        }
-        for (day, row) in rows.rows {
-            match row {
-                Ok(row) if range.contains(day) => days.push((day, row)),
-                Ok(_) => {}
-                Err(e) => {
-                    tracing::warn!(api_id = R::API_ID.as_str(), code = code.as_str(), dt = %day.yyyymmdd(), field = e.field, reason = %e.reason, "키움 행을 읽지 못해 그 행만 빼고 받습니다");
-                    if range.contains(day) {
-                        skipped.push(api::SkippedDay { day: api::KstDate(day), field: e.field.to_owned(), reason: e.reason.to_string() });
-                    }
-                }
-            }
-        }
-        if oldest.is_some_and(|d| d <= range.from) {
-            break;
-        }
-        match page.next {
-            Some(next) if seen_keys.insert(next.clone()) => cont = Some(next),
-            Some(_) => {
-                tracing::warn!(api_id = R::API_ID.as_str(), code = code.as_str(), "키움 연속조회가 next-key를 반복해 여기서 멈춥니다");
-                break;
-            }
-            None => break,
-        }
-    }
-    days.sort_by_key(|(day, _)| *day);
-    days.dedup_by_key(|(day, _)| *day);
-    skipped.sort_by_key(|s| s.day);
-    skipped.dedup_by_key(|s| s.day);
-    skipped.retain(|s| days.binary_search_by_key(&s.day.0, |(day, _)| *day).is_err());
-    let coverage = match reached {
-        Some(first_day) if first_day <= range.from => api::RangeCoverage::WholeRange,
-        Some(first_day) => api::RangeCoverage::KiwoomStartsLater { first_day: api::KstDate(first_day) },
-        None => api::RangeCoverage::NoReadableDates,
-    };
-    Ok(api::DayHistory {
-        symbol: api::SymbolCode(Symbol::Stock(code).as_wire()),
-        from: api::KstDate(range.from),
-        to: api::KstDate(range.to),
-        coverage,
-        days: days.into_iter().map(|(_, day)| day).collect(),
-        skipped_days: skipped,
-        undated_rows: undated,
-    })
 }
