@@ -125,7 +125,7 @@ impl SubscriptionManager {
 
     fn seat_wanted_without(&self, symbol: Symbol, seat: StreamKind, evicted: &[Eviction]) -> bool {
         let gone = |kind: StreamKind| evicted.iter().any(|e| matches!(*e, Eviction::Venue(s, k) if s == symbol && k == kind));
-        let held = self.holders.get(&symbol).into_iter().flatten().filter_map(Holder::feed_kind);
+        let held = self.holders.get(&symbol).into_iter().flatten().filter_map(Holder::feed_kind).filter(|kind| self.has_kind_seat(symbol, *kind));
         let in_grace = self.kind_released_at.keys().filter(|(s, kind)| *s == symbol && !gone(*kind)).map(|(_, kind)| *kind);
         held.chain(in_grace).any(|kind| self.rules.own_seats(symbol, kind).contains(&seat))
     }
@@ -1072,5 +1072,25 @@ mod tests {
         let plan = m.plan(t(2));
         assert_eq!(rules.seats(&plan.feeds), plan.feeds.len() + plan.feeds.values().map(|kinds| kinds.iter().filter(|k| rules.takes_own_seat(**k)).count()).sum::<usize>());
         assert!(plan.feeds[&stock(0)].contains(&StreamKind::Book(Venue::Nxt)) && plan.feeds[&stock(0)].contains(&StreamKind::AfterHours), "{plan:?}");
+    }
+
+    #[test]
+    fn a_refused_book_does_not_keep_the_companion_seat_of_an_evicted_book() {
+        let rules = Arc::new(SeatRulesFor {
+            limit: 3,
+            own_seat: |kind| matches!(kind, StreamKind::Book(_) | StreamKind::AfterHours),
+            companion: |kind| matches!(kind, StreamKind::Book(_)).then_some(StreamKind::AfterHours),
+        });
+        let mut m = SubscriptionManager::new(rules.clone());
+        let combined = feed(1, "combined", StreamKind::Book(Venue::Combined));
+        m.hold(stock(2), combined.clone());
+        m.plan(t(0));
+        m.set_watch(ConnId(1), vec![stock(2), stock(3)], t(0));
+        m.hold(stock(2), feed(1, "nxt", StreamKind::Book(Venue::Nxt)));
+        m.plan(t(0));
+        m.hold(stock(0), feed(1, "trades", StreamKind::Trades));
+        m.release(stock(2), &combined, t(0));
+        let plan = m.plan(t(0));
+        assert!(rules.seats(&plan.feeds) <= 3, "{plan:?}");
     }
 }
