@@ -64,6 +64,7 @@ pub fn router(state: Arc<AppState>) -> Router {
         .merge(crate::market_overview::routes())
         .merge(crate::etf::routes())
         .merge(crate::heatmap_board::routes())
+        .merge(crate::kiwoom_themes::routes())
         .merge(crate::heatmap_flow::routes())
         .merge(crate::system_routes::routes(state.clone()))
         .merge(crate::account_routes::routes(state.clone()))
@@ -205,6 +206,7 @@ pub(crate) enum Lookup {
     ScreenerRun,
     Rankings,
     MarketOverview,
+    KiwoomThemes,
 }
 
 impl Lookup {
@@ -223,6 +225,7 @@ impl Lookup {
             Lookup::ScreenerRun => "스크리너 실행",
             Lookup::Rankings => "순위",
             Lookup::MarketOverview => "시장 종합",
+            Lookup::KiwoomThemes => "키움 테마",
         }
     }
 

@@ -1575,6 +1575,195 @@ pub fn index_trade_days(body: IndexDailyChartResponse) -> ParsedRows<IndexTradeD
     parsed
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LimitMove {
+    Upper,
+    Lower,
+}
+
+fn limit_move(sign: &str) -> Option<LimitMove> {
+    match sign.trim() {
+        "1" => Some(LimitMove::Upper),
+        "4" => Some(LimitMove::Lower),
+        _ => None,
+    }
+}
+
+fn unknown_keys<'a>(extras: impl IntoIterator<Item = &'a BTreeMap<String, Value>>) -> BTreeSet<String> {
+    extras.into_iter().flat_map(|extra| extra.keys().cloned()).collect()
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(default)]
+pub struct ThemeGroupsResponse {
+    thema_grp: Vec<ThemeGroupWireRow>,
+    #[serde(flatten)]
+    extra: BTreeMap<String, Value>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(default)]
+struct ThemeGroupWireRow {
+    thema_grp_cd: String,
+    thema_nm: String,
+    stk_num: String,
+    flu_rt: String,
+    rising_stk_num: String,
+    fall_stk_num: String,
+    dt_prft_rt: String,
+    main_stk: String,
+    #[serde(flatten)]
+    extra: BTreeMap<String, Value>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ThemeGroupRow {
+    pub code: String,
+    pub name: String,
+    pub stock_count: u64,
+    pub change_rate: f64,
+    pub period_return: f64,
+    pub rising: u64,
+    pub falling: u64,
+    pub leaders: Vec<String>,
+}
+
+impl ThemeGroupsResponse {
+    pub fn rows(&self) -> ParsedRows<ThemeGroupRow> {
+        collect_rows(&self.thema_grp, |r| {
+            let code = r.thema_grp_cd.trim();
+            if code.is_empty() {
+                return Err(WireError("테마그룹코드가 비었습니다".into()));
+            }
+            Ok(ThemeGroupRow {
+                code: code.to_owned(),
+                name: r.thema_nm.trim().to_owned(),
+                stock_count: rank_count(&r.stk_num)?,
+                change_rate: signed_decimal(&r.flu_rt)?,
+                period_return: signed_decimal(&r.dt_prft_rt)?,
+                rising: rank_count(&r.rising_stk_num)?,
+                falling: rank_count(&r.fall_stk_num)?,
+                leaders: r.main_stk.split(',').map(str::trim).filter(|name| !name.is_empty()).map(str::to_owned).collect(),
+            })
+        }, "ka90001")
+    }
+
+    pub fn unknown_fields(&self) -> BTreeSet<String> {
+        unknown_keys(std::iter::once(&self.extra).chain(self.thema_grp.iter().map(|r| &r.extra)))
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.thema_grp.is_empty()
+    }
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(default)]
+pub struct ThemeMembersResponse {
+    flu_rt: String,
+    dt_prft_rt: String,
+    thema_comp_stk: Vec<ThemeMemberWireRow>,
+    #[serde(flatten)]
+    extra: BTreeMap<String, Value>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(default)]
+struct ThemeMemberWireRow {
+    stk_cd: String,
+    stk_nm: String,
+    cur_prc: String,
+    flu_sig: String,
+    flu_rt: String,
+    acc_trde_qty: String,
+    dt_prft_rt_n: String,
+    #[serde(flatten)]
+    extra: BTreeMap<String, Value>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ThemeMemberRow {
+    pub code: StockCode,
+    pub name: String,
+    pub price_won: u64,
+    pub change_rate: f64,
+    pub volume: u64,
+    pub period_return: Option<f64>,
+    pub limit: Option<LimitMove>,
+}
+
+impl ThemeMembersResponse {
+    pub fn rows(&self) -> ParsedRows<ThemeMemberRow> {
+        collect_rows(&self.thema_comp_stk, |r| {
+            Ok(ThemeMemberRow {
+                code: rank_code(&r.stk_cd)?,
+                name: r.stk_nm.trim().to_owned(),
+                price_won: rank_price(&r.cur_prc)?,
+                change_rate: signed_decimal(&r.flu_rt)?,
+                volume: rank_count(&r.acc_trde_qty)?,
+                period_return: optional(&r.dt_prft_rt_n, signed_decimal)?,
+                limit: limit_move(&r.flu_sig),
+            })
+        }, "ka90002")
+    }
+
+    pub fn theme_change_rate(&self) -> Option<f64> {
+        optional(&self.flu_rt, signed_decimal).ok().flatten()
+    }
+
+    pub fn theme_period_return(&self) -> Option<f64> {
+        optional(&self.dt_prft_rt, signed_decimal).ok().flatten()
+    }
+
+    pub fn unknown_fields(&self) -> BTreeSet<String> {
+        unknown_keys(std::iter::once(&self.extra).chain(self.thema_comp_stk.iter().map(|r| &r.extra)))
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.thema_comp_stk.is_empty()
+    }
+}
+
+#[cfg(test)]
+mod theme_tests {
+    use super::*;
+
+    #[test]
+    fn theme_groups_read_signed_rates_counts_and_the_leader_list() {
+        let body: ThemeGroupsResponse = serde_json::from_value(json!({
+            "return_code": 0, "return_msg": "정상",
+            "thema_grp": [
+                {"thema_grp_cd": "319", "thema_nm": "조선", "stk_num": "12", "flu_sig": "2", "flu_rt": "+3.21", "rising_stk_num": "9", "fall_stk_num": "2", "dt_prft_rt": "-1.05", "main_stk": "한화오션, HD현대중공업,"},
+                {"thema_grp_cd": "", "thema_nm": "빈 코드"},
+                {"thema_grp_cd": "7", "thema_nm": "원전", "stk_num": "8", "flu_rt": "--0.50", "rising_stk_num": "1", "fall_stk_num": "6", "dt_prft_rt": "+12.30", "main_stk": "", "new_field": "x"}
+            ]
+        })).unwrap();
+        let rows = body.rows();
+        assert_eq!(rows.skipped, 1);
+        assert_eq!(rows.rows[0], ThemeGroupRow { code: "319".into(), name: "조선".into(), stock_count: 12, change_rate: 3.21, period_return: -1.05, rising: 9, falling: 2, leaders: vec!["한화오션".into(), "HD현대중공업".into()] });
+        assert_eq!((rows.rows[1].change_rate, rows.rows[1].period_return, rows.rows[1].leaders.len()), (-0.5, 12.3, 0));
+        assert_eq!(body.unknown_fields(), ["flu_sig", "new_field", "return_code", "return_msg"].map(String::from).into());
+    }
+
+    #[test]
+    fn theme_members_read_venue_codes_limit_signs_and_an_absent_period_return() {
+        let body: ThemeMembersResponse = serde_json::from_value(json!({
+            "flu_rt": "+2.00", "dt_prft_rt": "",
+            "thema_comp_stk": [
+                {"stk_cd": "042660_AL", "stk_nm": "한화오션", "cur_prc": "+91,000", "flu_sig": "1", "pred_pre": "+21000", "flu_rt": "+29.99", "acc_trde_qty": "1,234,567", "dt_prft_rt_n": "+35.10"},
+                {"stk_cd": "010140", "stk_nm": "삼성중공업", "cur_prc": "-15000", "flu_sig": "5", "flu_rt": "-1.20", "acc_trde_qty": "500", "dt_prft_rt_n": ""},
+                {"stk_cd": "bad", "stk_nm": "?"}
+            ]
+        })).unwrap();
+        let rows = body.rows();
+        assert_eq!(rows.skipped, 1);
+        assert_eq!(rows.rows[0], ThemeMemberRow { code: StockCode::parse("042660").unwrap(), name: "한화오션".into(), price_won: 91_000, change_rate: 29.99, volume: 1_234_567, period_return: Some(35.1), limit: Some(LimitMove::Upper) });
+        assert_eq!((rows.rows[1].price_won, rows.rows[1].change_rate, rows.rows[1].period_return, rows.rows[1].limit), (15_000, -1.2, None, None));
+        assert_eq!((body.theme_change_rate(), body.theme_period_return()), (Some(2.0), None));
+        assert_eq!(body.unknown_fields(), ["pred_pre"].map(String::from).into());
+    }
+}
+
 #[cfg(test)]
 mod market_overview_tests {
     use super::*;
