@@ -6,7 +6,9 @@ import { confirmAction } from "../overlay/Confirm";
 import { canSaveKey, EMPTY_KEY_FORM, keyFormReducer, keyLocked, keySaveNote, maskedAppKey } from "./kiwoomPanel";
 import type { Command } from "./useCommand";
 
-const FIELD = "h-9 min-w-0 flex-1 rounded-s border border-line bg-bg px-2 text-m text-text focus:border-accent focus:outline-none disabled:opacity-60";
+export const MOCK_KEY_NOTICE = "모의투자 키는 환경 설정(VALLY_KIWOOM_MOCK_APP_KEY)에서만 받습니다";
+
+export const FIELD = "h-9 min-w-0 flex-1 rounded-s border border-line bg-bg px-2 text-m text-text focus:border-accent focus:outline-none disabled:opacity-60";
 
 export function KiwoomKeyForm({ status, command, onSaved, onOpenIpHelp }: { status: KiwoomLinkStatus | null; command: Command; onSaved(): void; onOpenIpHelp?(): void }) {
   const [form, dispatch] = useReducer(keyFormReducer, EMPTY_KEY_FORM);
@@ -73,7 +75,7 @@ export function KiwoomKeyForm({ status, command, onSaved, onOpenIpHelp }: { stat
   );
 }
 
-function SaveNote({ note, onOpenIpHelp }: { note: ReturnType<typeof keySaveNote>; onOpenIpHelp?(): void }) {
+export function SaveNote({ note, onOpenIpHelp }: { note: ReturnType<typeof keySaveNote>; onOpenIpHelp?(): void }) {
   if (note === null) return null;
   if (note === "blockedBy8050") return <p className="text-s text-text-3">8050 확인을 마치기 전에는 저장해도 연결하지 않습니다</p>;
   return (
@@ -84,7 +86,7 @@ function SaveNote({ note, onOpenIpHelp }: { note: ReturnType<typeof keySaveNote>
   );
 }
 
-function ReadOnlyRow({ label, value }: { label: string; value: string }) {
+export function ReadOnlyRow({ label, value }: { label: string; value: string }) {
   return (
     <div className="flex items-center gap-2 text-m max-md:flex-col max-md:items-start max-md:gap-0.5">
       <span className="w-16 flex-none text-text-2">{label}</span>
@@ -98,7 +100,7 @@ function MockKeyNotice({ target }: { target: SystemSettings["kiwoomTarget"] | un
     <section aria-label="키움 키" className="flex flex-col gap-3 rounded-m border border-line bg-surface p-4">
       <h3 className="text-m font-semibold">키</h3>
       <p className="text-s text-text-3">접속 대상: {target ? `${target.kind === "kiwoom" ? "키움 모의투자" : "로컬 시험 서버"}${target.host ? ` · ${target.host}` : ""} (고정)` : "—"}</p>
-      <p className="text-m text-text" data-testid="mock-key-notice">모의투자 키는 환경 설정(VALLY_KIWOOM_MOCK_APP_KEY)에서만 받습니다</p>
+      <p className="text-m text-text" data-testid="mock-key-notice">{MOCK_KEY_NOTICE}</p>
     </section>
   );
 }

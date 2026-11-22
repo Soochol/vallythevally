@@ -2,7 +2,10 @@ import { mkdir } from "node:fs/promises";
 import path from "node:path";
 import type { Page } from "@playwright/test";
 import type { KiwoomConnectInput } from "../src/api/generated/KiwoomConnectInput";
-import type { KiwoomKeyInput } from "../src/api/generated/KiwoomKeyInput";
+import type { KiwoomKey } from "../src/api/generated/KiwoomKey";
+import type { KiwoomKeyAdd } from "../src/api/generated/KiwoomKeyAdd";
+import type { KiwoomKeyAlias } from "../src/api/generated/KiwoomKeyAlias";
+import type { KiwoomMarketKeyInput } from "../src/api/generated/KiwoomMarketKeyInput";
 import type { KiwoomLinkStatus } from "../src/api/generated/KiwoomLinkStatus";
 import type { KiwoomUsage } from "../src/api/generated/KiwoomUsage";
 import type { KiwoomUsageTr } from "../src/api/generated/KiwoomUsageTr";
@@ -10,7 +13,7 @@ import type { OrdersSwitchInput } from "../src/api/generated/OrdersSwitchInput";
 import type { PublicIpCheck } from "../src/api/generated/PublicIpCheck";
 import type { RegisteredIpInput } from "../src/api/generated/RegisteredIpInput";
 import { cell, expect, fixedWait, test, type Scenario, pollSaved } from "./harness";
-import { CONNECTED_KIWOOM } from "./fixtures/scenario";
+import { CONNECTED_KIWOOM, keyEntry, keyListOf } from "./fixtures/scenario";
 
 const SCREENS = path.resolve("../target/ux-screens");
 const FAKE_APP_KEY = "FAKEAPPKEYabcdefgh7Z2D";
@@ -32,6 +35,14 @@ const passTime = async (page: Page, ms: number) => {
   await page.clock.runFor(ms);
   await fixedWait(page, ms, "요청이 나가지 않았음을 보려면 원래 대기만큼 실제 시간이 지나야 한다");
 };
+
+const KEYS = "/api/system/kiwoom/keys";
+const accounts = (page: Page) => panel(page).getByRole("region", { name: "계좌 목록" });
+const marketCard = (page: Page) => panel(page).getByRole("region", { name: "시세 공급원" });
+const keyRows = (page: Page) => accounts(page).getByRole("listitem");
+const expandKey = (page: Page, alias: string) => accounts(page).getByRole("button", { name: alias, exact: false }).first().click();
+const singleKey = (link: KiwoomLinkStatus) => keyListOf(keyEntry("k1", "키 1", link, { market: true }));
+const refusal = (message: string) => ({ status: 400, body: { error: { code: "bad_request", message, reason: null, retryAt: null, manualActionRequired: false } } });
 
 const USAGE_PATH = "/api/system/kiwoom/usage";
 const usageTr = (apiId: string, minute: Partial<KiwoomUsageTr["lastMinute"]> = {}, rest: Partial<KiwoomUsageTr> = {}): KiwoomUsageTr => ({
@@ -59,11 +70,11 @@ test.describe("1440×900", () => {
     const consoleText: string[] = [];
     page.on("console", (m) => consoleText.push(m.text()));
     scenario.live.kiwoomLink = NO_KEY;
-    const saved: KiwoomKeyInput[] = [];
-    scenario.on(route("PUT", "/api/system/kiwoom/key"), (request) => {
+    const saved: KiwoomKeyAdd[] = [];
+    scenario.on(route("POST", KEYS), (request) => {
       saved.push(request.postDataJSON());
       scenario.live.link(DISCONNECTED);
-      return { body: DISCONNECTED };
+      return { body: singleKey(DISCONNECTED) };
     });
     const connect = scenario.hold(route("POST", "/api/system/kiwoom/connect"));
 
@@ -80,13 +91,15 @@ test.describe("1440×900", () => {
     await page.getByLabel("시크릿", { exact: true }).fill(FAKE_APP_SECRET);
     await page.getByRole("button", { name: "입력 보기" }).click();
     await expect(page.getByLabel("앱키", { exact: true })).toHaveAttribute("type", "text");
-    await page.getByRole("button", { name: "저장" }).click();
+    await expect(page.getByLabel("별칭", { exact: true })).toHaveValue("키움 1");
+    await page.getByRole("button", { name: "저장하고 연결" }).click();
 
-    await expect(panel(page).getByRole("button", { name: "바꾸기" })).toBeVisible();
-    expect(saved).toEqual([{ appKey: FAKE_APP_KEY, appSecret: FAKE_APP_SECRET }]);
+    await expect(accounts(page).getByRole("button", { name: "닫기" })).toBeVisible();
+    expect(saved).toEqual([{ alias: "키움 1", appKey: FAKE_APP_KEY, appSecret: FAKE_APP_SECRET }]);
     expect(callsTo(scenario, "POST", "/api/system/kiwoom/connect")).toHaveLength(0);
+    await expandKey(page, "키 1");
     await expect(panel(page)).toContainText("••••••••••••7Z2D");
-    await expect(panel(page)).toContainText("저장됨 · 다시 볼 수 없음");
+    await expect(panel(page)).toContainText("화면에서 저장");
     await expect(page.locator("input[type=password], input[type=text]")).toHaveCount(0);
 
     const html = await page.content();
@@ -103,9 +116,9 @@ test.describe("1440×900", () => {
         expect(JSON.stringify(await request.allHeaders())).not.toContain(secret);
       }
     }
-    const [put] = callsTo(scenario, "PUT", "/api/system/kiwoom/key");
-    expect(new URL(put!.url()).search).toBe("");
-    expect(await put!.headerValue("content-type")).toContain("application/json");
+    const [post] = callsTo(scenario, "POST", KEYS);
+    expect(new URL(post!.url()).search).toBe("");
+    expect(await post!.headerValue("content-type")).toContain("application/json");
 
     await panel(page).getByRole("button", { name: "키움에 연결" }).dblclick();
     await connect.received;
@@ -113,7 +126,7 @@ test.describe("1440×900", () => {
     await expect(panel(page).getByRole("heading", { name: "연결 중" })).toBeVisible();
     await expect(panel(page).getByRole("listitem").filter({ hasText: "2. 토큰" })).toHaveAttribute("aria-current", "step");
     await expect(panel(page).getByRole("button", { name: /취소/ })).toHaveCount(0);
-    await expect(panel(page).getByRole("button", { name: "바꾸기" })).toBeDisabled();
+    await expect(panel(page).getByRole("button", { name: "별칭·키 바꾸기" })).toBeDisabled();
 
     const connected: KiwoomLinkStatus = { ...DISCONNECTED, state: "connected", message: "키움에 연결됨", tokenExpiresAt: serverSeconds(scenario) + 86_400, realtimeRegistered: 3, symbolCount: 2812 };
     scenario.live.link(connected);
@@ -159,7 +172,8 @@ test.describe("1440×900", () => {
     scenario.live.kiwoomLink = failed("authBlocked8050", null, BLOCKED_MESSAGE, { needsAcknowledgement: true });
     await openKiwoom(page);
     await expect(panel(page)).toContainText("서버를 다시 켜도 차단은 풀리지 않고 자동 연결도 하지 않습니다");
-    await panel(page).getByRole("button", { name: "바꾸기" }).click();
+    await expandKey(page, "키 1");
+    await panel(page).getByRole("button", { name: "별칭·키 바꾸기" }).click();
     await expect(panel(page)).toContainText("8050 확인을 마치기 전에는 저장해도 연결하지 않습니다");
     await expect(panel(page)).not.toContainText("저장하면 바로 키움에 연결합니다");
   });
@@ -181,39 +195,46 @@ test.describe("1440×900", () => {
 
   test("키를 지우기 전에 확인을 받고 확인하면 지운다", async ({ page, scenario }) => {
     scenario.live.kiwoomLink = DISCONNECTED;
-    scenario.on(route("DELETE", "/api/system/kiwoom/key"), () => { scenario.live.link(NO_KEY); return { body: NO_KEY }; });
+    scenario.on(route("DELETE", `${KEYS}/k1`), () => { scenario.live.link(NO_KEY); return { body: keyListOf() }; });
     await openKiwoom(page);
+    await expandKey(page, "키 1");
     await panel(page).getByRole("button", { name: "지우기" }).click();
-    await page.getByRole("dialog", { name: "저장한 키움 키를 지웁니다" }).getByRole("button", { name: "취소" }).click();
-    expect(callsTo(scenario, "DELETE", "/api/system/kiwoom/key")).toHaveLength(0);
+    await page.getByRole("dialog", { name: /시세 키입니다/ }).getByRole("button", { name: "취소" }).click();
+    expect(callsTo(scenario, "DELETE", `${KEYS}/k1`)).toHaveLength(0);
     await panel(page).getByRole("button", { name: "지우기" }).click();
-    await page.getByRole("dialog", { name: "저장한 키움 키를 지웁니다" }).getByRole("button", { name: "키 지우기" }).click();
+    await page.getByRole("dialog", { name: /시세 키입니다/ }).getByRole("button", { name: "키 지우기" }).click();
     await expect(panel(page).getByRole("heading", { name: "키 없음" })).toBeVisible();
-    const deletes = callsTo(scenario, "DELETE", "/api/system/kiwoom/key");
+    const deletes = callsTo(scenario, "DELETE", `${KEYS}/k1`);
     expect(deletes).toHaveLength(1);
     expect(await deletes[0]!.headerValue("content-type")).toContain("application/json");
   });
 
   test("저장하고 지워 키 없음으로 돌아오면 입력칸은 비어 있다", async ({ page, scenario }) => {
     scenario.live.kiwoomLink = NO_KEY;
-    scenario.on(route("PUT", "/api/system/kiwoom/key"), () => { scenario.live.link(DISCONNECTED); return { body: DISCONNECTED }; });
-    scenario.on(route("DELETE", "/api/system/kiwoom/key"), () => { scenario.live.link(NO_KEY); return { body: NO_KEY }; });
+    scenario.on(route("POST", KEYS), () => { scenario.live.link(DISCONNECTED); return { body: singleKey(DISCONNECTED) }; });
+    scenario.on(route("DELETE", `${KEYS}/k1`), () => { scenario.live.link(NO_KEY); return { body: keyListOf() }; });
     await openKiwoom(page);
     await page.getByLabel("앱키", { exact: true }).fill(FAKE_APP_KEY);
     await page.getByLabel("시크릿", { exact: true }).fill(FAKE_APP_SECRET);
-    await page.getByRole("button", { name: "저장" }).click();
+    await page.getByRole("button", { name: "저장하고 연결" }).click();
+    await accounts(page).getByRole("button", { name: "닫기" }).click();
+    await expandKey(page, "키 1");
     await panel(page).getByRole("button", { name: "지우기" }).click();
-    await page.getByRole("dialog", { name: "저장한 키움 키를 지웁니다" }).getByRole("button", { name: "키 지우기" }).click();
+    await page.getByRole("dialog", { name: /시세 키입니다/ }).getByRole("button", { name: "키 지우기" }).click();
     await expect(page.getByLabel("앱키", { exact: true })).toHaveValue("");
     await expect(page.getByLabel("시크릿", { exact: true })).toHaveValue("");
   });
 
-  test("환경 키면 폼이 막히고 배지와 가린 값만 보인다", async ({ page, scenario }) => {
+  test("env 키 줄은 .env 표시가 있고 바꾸기·지우기 단추가 없다", async ({ page, scenario }) => {
     scenario.live.kiwoomLink = { ...DISCONNECTED, keySource: "env", appKeyTail: "ENV4" };
     await openKiwoom(page);
+    await expect(keyRows(page)).toHaveCount(1);
+    await expect(keyRows(page).first()).toContainText(".env");
+    await expandKey(page, "환경 설정 키");
     await expect(panel(page)).toContainText(".env에서 읽음 · 읽기 전용");
     await expect(panel(page)).toContainText("••••••••••••ENV4");
-    await expect(panel(page).getByRole("button", { name: "바꾸기" })).toHaveCount(0);
+    await expect(panel(page)).toContainText("바꾸려면 .env에서 해당 줄을 지우세요");
+    await expect(panel(page).getByRole("button", { name: /바꾸기/ })).toHaveCount(0);
     await expect(panel(page).getByRole("button", { name: "지우기" })).toHaveCount(0);
     await expect(panel(page).getByRole("button", { name: "저장" })).toHaveCount(0);
     await expect(panel(page).locator("input")).toHaveCount(0);
@@ -321,15 +342,16 @@ test.describe("1440×900", () => {
   test("8050에서 확인한 뒤 키를 바꾸면 확인 칸을 다시 받는다", async ({ page, scenario }) => {
     const blocked = failed("authBlocked8050", null, BLOCKED_MESSAGE, { needsAcknowledgement: true });
     scenario.live.kiwoomLink = blocked;
-    scenario.on(route("PUT", "/api/system/kiwoom/key"), () => ({ body: { ...blocked, appKeyTail: "9X9X" } }));
+    scenario.on(route("PUT", `${KEYS}/k1/key`), () => { const next = { ...blocked, appKeyTail: "9X9X" }; scenario.live.link(next); return { body: singleKey(next) }; });
     await openKiwoom(page);
     await panel(page).getByLabel("포털에 지금 공인 IP를 등록했습니다").check();
     await panel(page).getByLabel("반복 발급 잠금이 풀렸는지 확인했습니다").check();
     await expect(panel(page).getByRole("button", { name: /^다시 연결/ })).toBeEnabled();
-    await panel(page).getByRole("button", { name: "바꾸기" }).click();
+    await expandKey(page, "키 1");
+    await panel(page).getByRole("button", { name: "별칭·키 바꾸기" }).click();
     await page.getByLabel("앱키", { exact: true }).fill(FAKE_APP_KEY);
     await page.getByLabel("시크릿", { exact: true }).fill(FAKE_APP_SECRET);
-    await page.getByRole("button", { name: "저장" }).click();
+    await page.getByRole("button", { name: "저장", exact: true }).click();
     await expect(panel(page).getByLabel("반복 발급 잠금이 풀렸는지 확인했습니다")).not.toBeChecked();
     await expect(panel(page).getByLabel("포털에 지금 공인 IP를 등록했습니다")).not.toBeChecked();
     await expect(panel(page).getByRole("button", { name: /^다시 연결/ })).toBeDisabled();
@@ -411,14 +433,15 @@ test.describe("1440×900", () => {
     await expect(panel(page).getByRole("heading", { name: "연결 안 함" })).toBeVisible();
     scenario.live.link(failed("pathStopped", null, "경로가 멈췄습니다"));
     await expect(panel(page)).toContainText("서버 로그를 확인하세요");
-    await expect(panel(page).getByRole("button", { name: /연결/ })).toHaveCount(0);
+    await expect(panel(page).getByRole("button", { name: /^(키움에 연결|다시 연결|다시 시도|연결 끊기)/ })).toHaveCount(0);
   });
 
   test("8050이 아닌 인증 차단은 키 확인 한 문장과 키 바꾸기를 보인다", async ({ page, scenario }) => {
     scenario.live.kiwoomLink = failed("keyNeedsCheck", null, "키움 인증에 실패했습니다");
     await openKiwoom(page);
     await expect(panel(page)).toContainText("앱키·시크릿을 확인하세요");
-    await expect(panel(page).getByRole("button", { name: "바꾸기" })).toBeEnabled();
+    await expandKey(page, "키 1");
+    await expect(panel(page).getByRole("button", { name: "별칭·키 바꾸기" })).toBeEnabled();
     await expect(panel(page).getByRole("checkbox")).toHaveCount(0);
   });
 
@@ -525,7 +548,7 @@ test.describe("1440×900", () => {
     await expect(usageCard(page).getByRole("table")).toHaveCount(0);
     scenario.live.kiwoomUsage = { lastMinuteStartedAt: serverSeconds(scenario), totalRateLimited: 0, trs: [] };
     await page.getByRole("tab", { name: /^일반/ }).click();
-    await page.getByRole("tab", { name: /^키움 연결/ }).click();
+    await page.getByRole("tab", { name: /^증권사 · 계좌/ }).click();
     await expect(usageCard(page)).toContainText("지난 1분에 보낸 키움 조회가 없습니다");
     await expect(usageCard(page).getByTestId("usage-total-limited")).toHaveText("서버를 켠 뒤 제한 응답 0건");
   });
@@ -551,6 +574,196 @@ test.describe("1440×900", () => {
     await fixedWait(page, 300, "카드를 닫은 뒤 요청이 나가지 않았음을 보려면 요청이 나갈 만큼 실제 시간이 지나야 한다");
     expect(calls()).toBe(first + 1);
   });
+
+  test("메뉴 이름이 증권사 · 계좌이고 시세 공급원 카드 → 계좌 목록 순서다", async ({ page, scenario }) => {
+    scenario.live.kiwoomLink = CONNECTED_KIWOOM;
+    await openKiwoom(page);
+    await expect(dialog(page).getByRole("tab", { name: /^증권사 · 계좌/ })).toHaveAttribute("aria-selected", "true");
+    await expect(dialog(page).getByRole("tab", { name: /^키움 연결/ })).toHaveCount(0);
+    expect(await panel(page).getByRole("region").evaluateAll((sections) => sections.map((section) => section.getAttribute("aria-label")))).toEqual(["시세 공급원", "계좌 목록", "주문 사용", "호출 한도", "IP 도움"]);
+  });
+
+  test("키 둘을 더하면 키움증권 묶음에 두 줄과 2 / 5가 보이고 첫 키에 시세 표시가 있으며 응답과 화면 어디에도 시크릿이 없다", async ({ page, scenario }) => {
+    scenario.live.kiwoomLink = NO_KEY;
+    const keys: KiwoomKey[] = [];
+    const added: KiwoomKeyAdd[] = [];
+    scenario.on(route("POST", KEYS), (request) => {
+      const input: KiwoomKeyAdd = request.postDataJSON();
+      added.push(input);
+      const link = { ...CONNECTED_KIWOOM, appKeyTail: input.appKey.slice(-4) };
+      keys.push(keyEntry(`k${keys.length + 1}`, input.alias, link, { market: keys.length === 0 }));
+      scenario.live.kiwoomKeys = keyListOf(...keys);
+      if (keys.length === 1) scenario.live.link(link);
+      return { body: scenario.live.kiwoomKeys };
+    });
+    await openKiwoom(page);
+    await expect(accounts(page)).toContainText("0 / 5");
+    await page.getByLabel("앱키", { exact: true }).fill(FAKE_APP_KEY);
+    await page.getByLabel("시크릿", { exact: true }).fill(FAKE_APP_SECRET);
+    await page.getByRole("button", { name: "저장하고 연결" }).click();
+    await expect(accounts(page)).toContainText("토큰 받음");
+    await accounts(page).getByRole("button", { name: "닫기" }).click();
+
+    await accounts(page).getByRole("button", { name: "＋ 계좌 연결 더하기" }).click();
+    await expect(page.getByLabel("별칭", { exact: true })).toHaveValue("키움 2");
+    await page.getByLabel("앱키", { exact: true }).fill(`${FAKE_APP_KEY}-second`);
+    await page.getByLabel("시크릿", { exact: true }).fill(FAKE_APP_SECRET);
+    await page.getByRole("button", { name: "저장하고 연결" }).click();
+    await accounts(page).getByRole("button", { name: "닫기" }).click();
+
+    expect(added.map((input) => input.alias)).toEqual(["키움 1", "키움 2"]);
+    await expect(accounts(page)).toContainText("키움증권");
+    await expect(accounts(page)).toContainText("2 / 5");
+    await expect(keyRows(page)).toHaveCount(2);
+    await expect(keyRows(page).nth(0)).toContainText("시세");
+    await expect(keyRows(page).nth(1)).not.toContainText("시세");
+    const shown = (await page.content()) + (await page.locator("body").innerText());
+    for (const secret of [FAKE_APP_KEY, FAKE_APP_SECRET]) {
+      expect(shown).not.toContain(secret);
+      expect(JSON.stringify(scenario.live.kiwoomKeys)).not.toContain(secret);
+    }
+  });
+
+  test("시세 공급원 고르기에서 둘째 키를 고르면 확인 뒤에만 시세 키 지정 요청이 나가고 시세 표시가 옮겨 간다. 취소하면 요청이 없다", async ({ page, scenario }) => {
+    const first = keyEntry("k1", "주계좌", CONNECTED_KIWOOM, { market: true });
+    const second = keyEntry("k2", "보조", { ...CONNECTED_KIWOOM, appKeyTail: "5678" });
+    scenario.live.kiwoomKeys = keyListOf(first, second);
+    const designated: KiwoomMarketKeyInput[] = [];
+    scenario.on(route("PUT", "/api/system/kiwoom/market-key"), (request) => {
+      designated.push(request.postDataJSON());
+      scenario.live.kiwoomKeys = keyListOf({ ...first, market: false }, { ...second, market: true });
+      scenario.live.link(second.link);
+      return { body: scenario.live.kiwoomKeys };
+    });
+    await openKiwoom(page);
+    const picker = marketCard(page).getByRole("combobox", { name: "시세 키" });
+    await expect(picker).toHaveValue("k1");
+    await picker.selectOption("k2");
+    const confirmation = page.getByRole("dialog", { name: /시세를 ‘보조’에서 받습니다/ });
+    await expect(confirmation).toContainText("열린 차트·호가·체결을 새로 받습니다");
+    await expect(confirmation).toContainText("주문 계좌는 바뀌지 않습니다");
+    await confirmation.getByRole("button", { name: "취소" }).click();
+    expect(designated).toEqual([]);
+    await expect(picker).toHaveValue("k1");
+
+    await picker.selectOption("k2");
+    await page.getByRole("dialog", { name: /시세를 ‘보조’에서 받습니다/ }).getByRole("button", { name: "시세 바꾸기" }).click();
+    await pollSaved(() => designated).toEqual([{ keyId: "k2" }]);
+    await expect(picker).toHaveValue("k2");
+    await expect(keyRows(page).filter({ hasText: "보조" })).toContainText("시세");
+    await expect(keyRows(page).filter({ hasText: "주계좌" })).not.toContainText("시세");
+  });
+
+  test("5개면 더하기 단추 대신 상한 안내가 보인다", async ({ page, scenario }) => {
+    scenario.live.kiwoomKeys = keyListOf(...[1, 2, 3, 4, 5].map((n) => keyEntry(`k${n}`, `키 ${n}`, CONNECTED_KIWOOM, { market: n === 1 })));
+    await openKiwoom(page);
+    await expect(accounts(page)).toContainText("5 / 5");
+    await expect(accounts(page)).toContainText("키는 5개까지입니다");
+    await expect(accounts(page).getByRole("button", { name: "＋ 계좌 연결 더하기" })).toHaveCount(0);
+  });
+
+  test("같은 앱키·빈 별칭이면 서버 문구를 보이고 입력이 남는다", async ({ page, scenario }) => {
+    scenario.live.kiwoomKeys = keyListOf(keyEntry("k1", "주계좌", CONNECTED_KIWOOM, { market: true }));
+    let message = "이미 등록한 앱키입니다";
+    scenario.on(route("POST", KEYS), () => refusal(message));
+    await openKiwoom(page);
+    await accounts(page).getByRole("button", { name: "＋ 계좌 연결 더하기" }).click();
+    const form = accounts(page).getByRole("form", { name: "키 더하기" });
+    await form.getByLabel("앱키", { exact: true }).fill(FAKE_APP_KEY);
+    await form.getByLabel("시크릿", { exact: true }).fill(FAKE_APP_SECRET);
+    await form.getByRole("button", { name: "저장하고 연결" }).click();
+    await expect(form.getByRole("alert")).toHaveText("이미 등록한 앱키입니다");
+    await expect(form.getByLabel("앱키", { exact: true })).toHaveValue(FAKE_APP_KEY);
+    await expect(form.getByLabel("시크릿", { exact: true })).toHaveValue(FAKE_APP_SECRET);
+
+    message = "별칭이 비어 있습니다";
+    await form.getByLabel("별칭", { exact: true }).fill("");
+    await form.getByRole("button", { name: "저장하고 연결" }).click();
+    await expect(form.getByRole("alert")).toHaveText("별칭이 비어 있습니다");
+    await expect(form.getByLabel("앱키", { exact: true })).toHaveValue(FAKE_APP_KEY);
+    expect(callsTo(scenario, "POST", KEYS)).toHaveLength(2);
+  });
+
+  test("바꾸기에서 별칭만 고치면 별칭 바꾸기 요청만 나간다", async ({ page, scenario }) => {
+    const first = keyEntry("k1", "주계좌", CONNECTED_KIWOOM, { market: true });
+    const second = keyEntry("k2", "보조", { ...CONNECTED_KIWOOM, appKeyTail: "5678" });
+    scenario.live.kiwoomKeys = keyListOf(first, second);
+    const renamed: KiwoomKeyAlias[] = [];
+    scenario.on(route("PUT", `${KEYS}/k2/alias`), (request) => {
+      renamed.push(request.postDataJSON());
+      scenario.live.kiwoomKeys = keyListOf(first, { ...second, alias: renamed.at(-1)!.alias });
+      return { body: scenario.live.kiwoomKeys };
+    });
+    await openKiwoom(page);
+    await expandKey(page, "보조");
+    await panel(page).getByRole("button", { name: "별칭·키 바꾸기" }).click();
+    const form = accounts(page).getByRole("form", { name: "키 바꾸기" });
+    await expect(form.getByLabel("별칭", { exact: true })).toHaveValue("보조");
+    await expect(form.getByRole("button", { name: "저장", exact: true })).toBeDisabled();
+    await form.getByLabel("별칭", { exact: true }).fill("새 이름");
+    await form.getByRole("button", { name: "저장", exact: true }).click();
+    await expect(keyRows(page).filter({ hasText: "새 이름" })).toHaveCount(1);
+    expect(renamed).toEqual([{ alias: "새 이름" }]);
+    expect(callsTo(scenario, "PUT", `${KEYS}/k2/key`)).toHaveLength(0);
+  });
+
+  test("지우기는 확인 뒤에만 요청이 나가고 시세 키를 지울 때 확인 문구가 다음 시세 키를 말한다", async ({ page, scenario }) => {
+    const first = keyEntry("k1", "주계좌", CONNECTED_KIWOOM, { market: true });
+    const second = keyEntry("k2", "보조", { ...CONNECTED_KIWOOM, appKeyTail: "5678" });
+    scenario.live.kiwoomKeys = keyListOf(first, second);
+    scenario.on(route("DELETE", `${KEYS}/k1`), () => {
+      scenario.live.kiwoomKeys = keyListOf({ ...second, market: true });
+      scenario.live.link(second.link);
+      return { body: scenario.live.kiwoomKeys };
+    });
+    await openKiwoom(page);
+    await expandKey(page, "주계좌");
+    await panel(page).getByRole("button", { name: "지우기" }).click();
+    const confirmation = page.getByRole("dialog", { name: /‘주계좌’는 시세 키입니다/ });
+    await expect(confirmation).toContainText("시세를 ‘보조’에서 받습니다");
+    await confirmation.getByRole("button", { name: "취소" }).click();
+    expect(callsTo(scenario, "DELETE", `${KEYS}/k1`)).toHaveLength(0);
+    await panel(page).getByRole("button", { name: "지우기" }).click();
+    await page.getByRole("dialog", { name: /‘주계좌’는 시세 키입니다/ }).getByRole("button", { name: "키 지우기" }).click();
+    await expect(keyRows(page)).toHaveCount(1);
+    await expect(keyRows(page).first()).toContainText("시세");
+    expect(callsTo(scenario, "DELETE", `${KEYS}/k1`)).toHaveLength(1);
+
+    await expandKey(page, "보조");
+    await panel(page).getByRole("button", { name: "지우기" }).click();
+    await expect(page.getByRole("dialog", { name: /‘보조’는 시세 키입니다. 지우면 키가 없어/ })).toBeVisible();
+  });
+
+  test("다른 키가 8050으로 막히면 그 줄에만 오류가 보이고 메뉴 점이 노랑이며, 두 확인을 고른 뒤에만 그 줄의 다시 연결이 그 키 연결 요청을 보낸다. 시세 공급원 카드는 시세 키를 보인다", async ({ page, scenario }) => {
+    const blocked = failed("authBlocked8050", null, BLOCKED_MESSAGE, { needsAcknowledgement: true, appKeyTail: "5678" });
+    const first = keyEntry("k1", "주계좌", CONNECTED_KIWOOM, { market: true });
+    const second = keyEntry("k2", "보조", blocked);
+    scenario.live.kiwoomKeys = keyListOf(first, second);
+    const connect = scenario.hold(route("POST", `${KEYS}/k2/connect`));
+    await openKiwoom(page);
+    await expect(dialog(page).getByRole("tab", { name: /^증권사 · 계좌/ }).locator(".conn-dot")).toHaveAttribute("data-tone", "amber");
+    await expect(marketCard(page).getByRole("heading", { name: "연결됨" })).toBeVisible();
+    await expect(marketCard(page).getByRole("combobox", { name: "시세 키" })).toHaveValue("k1");
+    await expect(keyRows(page).filter({ hasText: "보조" })).toContainText("8050 인증 차단");
+    await expect(keyRows(page).filter({ hasText: "주계좌" })).not.toContainText("8050");
+
+    await expandKey(page, "보조");
+    const reconnect = accounts(page).getByRole("button", { name: /^다시 연결/ });
+    await expect(reconnect).toBeDisabled();
+    await accounts(page).getByLabel("포털에 지금 공인 IP를 등록했습니다").check();
+    await expect(reconnect).toBeDisabled();
+    await accounts(page).getByLabel("반복 발급 잠금이 풀렸는지 확인했습니다").check();
+    await expect(reconnect).toBeEnabled();
+    expect(callsTo(scenario, "POST", `${KEYS}/k2/connect`)).toHaveLength(0);
+    await reconnect.click();
+    await connect.received;
+    expect(callsTo(scenario, "POST", `${KEYS}/k2/connect`)[0]!.postDataJSON()).toEqual({ acknowledged: true } satisfies KiwoomConnectInput);
+    expect(callsTo(scenario, "POST", "/api/system/kiwoom/connect")).toHaveLength(0);
+    scenario.live.kiwoomKeys = keyListOf(first, { ...second, link: { ...blocked, state: "connected", problem: null, needsAcknowledgement: false } });
+    connect.reply({ body: scenario.live.kiwoomKeys });
+    await expect(keyRows(page).filter({ hasText: "보조" })).not.toContainText("8050");
+    await expect(dialog(page).getByRole("tab", { name: /^증권사 · 계좌/ }).locator(".conn-dot")).toHaveAttribute("data-tone", "mint");
+  });
 });
 
 test.describe("360px 폭", () => {
@@ -562,11 +775,12 @@ test.describe("360px 폭", () => {
     await page.goto("/?symbol=005930");
     await expect(cell(page)).toBeVisible();
     await page.getByRole("button", { name: "시스템 설정", exact: true }).click();
-    await dialog(page).getByRole("tab", { name: /^키움 연결/ }).click();
+    await dialog(page).getByRole("tab", { name: /^증권사 · 계좌/ }).click();
     await expect(panel(page)).toContainText(BLOCKED_MESSAGE);
     await panel(page).getByRole("button", { name: "내 공인 IP 확인" }).click();
     await expect(panel(page).getByRole("alert")).toBeVisible();
-    await panel(page).getByRole("button", { name: "바꾸기" }).click();
+    await expandKey(page, "키 1");
+    await panel(page).getByRole("button", { name: "별칭·키 바꾸기" }).click();
     const overflow = () => page.evaluate(() => ({ page: document.documentElement.scrollWidth - innerWidth, content: Math.max(...[...document.querySelectorAll('[role="tabpanel"] *')].map((el) => el.getBoundingClientRect().right)) - innerWidth }));
     const sizes = await overflow();
     expect(sizes.page).toBe(0);

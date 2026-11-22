@@ -126,8 +126,11 @@ async function openKiwoomTab(page: import("@playwright/test").Page) {
 }
 
 test("모의: 시스템 설정 키움 탭에 키 입력 칸이 없고 안내와 투자구분이 보인다", async ({ page, scenario }) => {
-  environmentIs(scenario, "mock", { ...DISCONNECTED, keySource: "none", appKeyTail: null, state: "noKey" });
+  environmentIs(scenario, "mock", { ...DISCONNECTED, keySource: "env", appKeyTail: "MOCK" });
   const panel = await openKiwoomTab(page);
+  await expect(panel.getByRole("listitem")).toHaveCount(1);
+  await expect(panel.getByRole("listitem")).toContainText("모의투자");
+  await expect(panel.getByRole("button", { name: "＋ 계좌 연결 더하기" })).toHaveCount(0);
   await expect(panel.getByTestId("mock-key-notice")).toHaveText("모의투자 키는 환경 설정(VALLY_KIWOOM_MOCK_APP_KEY)에서만 받습니다");
   await expect(panel.getByTestId("kiwoom-environment")).toContainText("모의투자");
   await expect(page.getByLabel("앱키", { exact: true })).toHaveCount(0);

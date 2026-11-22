@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import type { KiwoomLinkStatus } from "../../api/generated/KiwoomLinkStatus";
 import { useSystemSettings } from "../../api/system";
 import { formatKstClockSeconds } from "../../chart/time";
@@ -31,11 +32,14 @@ interface Props {
   onConnect(acknowledged: boolean): void;
   onDisconnect(): void;
   onRecheckTokenFile(): void;
+  label?: string;
+  header?: ReactNode;
 }
 
-export function KiwoomStatusCard({ status, view, confirmations, onConfirm, busy, onConnect, onDisconnect, onRecheckTokenFile }: Props) {
+export function KiwoomStatusCard({ status, view, confirmations, onConfirm, busy, onConnect, onDisconnect, onRecheckTokenFile, label = "연결 상태", header }: Props) {
   return (
-    <section aria-label="연결 상태" className="flex flex-col gap-3 rounded-m border border-line bg-surface p-4">
+    <section aria-label={label} className="flex flex-col gap-3 rounded-m border border-line bg-surface p-4">
+      {header}
       <div className="flex items-center gap-2">
         <span aria-hidden="true" className="conn-dot" data-tone={linkDotTone(status)} />
         <h3 className="text-m font-semibold">{TITLES[view.stage]}</h3>
