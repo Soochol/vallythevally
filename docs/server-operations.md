@@ -157,7 +157,7 @@ tailscale serve status
 
 ### 한투 환경 변수
 
-`server.env`에 적는다. 값은 이 문서에 적지 않는다([ADR 0038](adr/0038-kis-key-and-token-are-vally-only.md)).
+`server.env`에 적는다. 값은 이 문서에 적지 않는다([ADR 0039](adr/0039-kis-key-and-token-are-vally-only.md)).
 
 | 변수 | 뜻 | 비고 |
 |---|---|---|

@@ -52,7 +52,9 @@ pub struct KisCredentials {
 pub const KIS_BASE_URL: &str = "https://openapi.koreainvestment.com:9443";
 pub const KIS_WS_URL: &str = "ws://ops.koreainvestment.com:21000";
 const KIS_BASE_HOST: &str = "openapi.koreainvestment.com";
+const KIS_BASE_PORT: u16 = 9443;
 const KIS_WS_HOST: &str = "ops.koreainvestment.com";
+const KIS_WS_PORT: u16 = 21000;
 const KIS_TOKEN_FILE_NAME: &str = "kis-token.json";
 
 pub const KIWOOM_BASE_URL: &str = "https://api.kiwoom.com";
@@ -303,8 +305,8 @@ impl Config {
             (None, None) => None,
             _ => return Err(ConfigError("VALLY_KIS_APP_KEY와 VALLY_KIS_APP_SECRET은 둘 다 적거나 둘 다 비워 둡니다".into())),
         };
-        let kis_base_endpoint = KisEndpoint::of("VALLY_KIS_BASE_URL", &kis_base_url, KIS_BASE_HOST, "https")?;
-        if kis_base_endpoint != KisEndpoint::of("VALLY_KIS_WS_URL", &kis_ws_url, KIS_WS_HOST, "ws")? {
+        let kis_base_endpoint = KisEndpoint::of("VALLY_KIS_BASE_URL", &kis_base_url, KIS_BASE_HOST, KIS_BASE_PORT, "https")?;
+        if kis_base_endpoint != KisEndpoint::of("VALLY_KIS_WS_URL", &kis_ws_url, KIS_WS_HOST, KIS_WS_PORT, "ws")? {
             return Err(ConfigError("VALLY_KIS_BASE_URL과 VALLY_KIS_WS_URL은 둘 다 실제 한투이거나 둘 다 루프백 주소여야 합니다".into()));
         }
         if clock_start.is_some() && (kis_credentials.is_some() || kis_urls_given) && kis_base_endpoint == KisEndpoint::Official {
@@ -475,13 +477,13 @@ enum KisEndpoint {
 }
 
 impl KisEndpoint {
-    fn of(key: &str, url: &str, official_host: &str, official_scheme: &str) -> Result<KisEndpoint, ConfigError> {
-        let invalid = || ConfigError(format!("{key}는 공식 한투({official_scheme}://{official_host})이거나 루프백 주소여야 합니다"));
+    fn of(key: &str, url: &str, official_host: &str, official_port: u16, official_scheme: &str) -> Result<KisEndpoint, ConfigError> {
+        let invalid = || ConfigError(format!("{key}는 공식 한투({official_scheme}://{official_host}:{official_port})이거나 루프백 주소여야 합니다"));
         let parsed = reqwest::Url::parse(url).map_err(|_| invalid())?;
         let host = parsed.host_str().ok_or_else(invalid)?.trim_end_matches('.');
         let plain_scheme = if official_scheme == "https" { "http" } else { "ws" };
         let clean = parsed.username().is_empty() && parsed.password().is_none() && parsed.query().is_none() && parsed.fragment().is_none();
-        if host == official_host && parsed.scheme() == official_scheme && clean {
+        if host == official_host && parsed.scheme() == official_scheme && parsed.port() == Some(official_port) && parsed.path() == "/" && clean {
             return Ok(KisEndpoint::Official);
         }
         let loopback = host == "localhost" || host.trim_start_matches('[').trim_end_matches(']').parse::<IpAddr>().is_ok_and(|ip| ip.is_loopback());
@@ -1136,6 +1138,10 @@ mod tests {
             ("https://user:pass@openapi.koreainvestment.com:9443", KIS_WS_URL),
             (KIS_BASE_URL, "ws://evil.example.com:21000"),
             (KIS_BASE_URL, "wss://ops.koreainvestment.com:21000"),
+            ("https://openapi.koreainvestment.com:29443", KIS_WS_URL),
+            ("https://openapi.koreainvestment.com", KIS_WS_URL),
+            (KIS_BASE_URL, "ws://ops.koreainvestment.com:31000"),
+            (KIS_BASE_URL, "ws://ops.koreainvestment.com:21000/extra"),
             ("https://127.0.0.1:5", "ws://127.0.0.1:6"),
             ("http://127.0.0.1:5", "wss://127.0.0.1:6"),
         ] {
