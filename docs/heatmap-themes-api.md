@@ -43,7 +43,7 @@
 |---|---|
 | `venue` | `combined`(기본), `krx`, `nxt`. `/api/quotes`와 같다 |
 | `order` | 테마 순서. `rate`(가중 평균 등락률 높은 순, 기본), `custom`(저장 순서), `traded`(거래대금 합 큰 순). 값이 같으면 저장 순서를 따르고, 값이 없는 테마는 맨 뒤다. 다른 값은 400이다 |
-| `source` | `mine`(내 테마, 기본) 또는 `kiwoom`(서버가 저장한 **키움 테마** 구성종목, [ADR 0040](adr/0040-heatmap-adds-kiwoom-themes-as-a-second-source.md)). 다른 값은 400이다 |
+| `source` | `mine`(내 테마, 기본) 또는 `kiwoom`(서버가 저장한 **키움 테마** 구성종목, [ADR 0042](adr/0042-heatmap-adds-kiwoom-themes-as-a-second-source.md)). 다른 값은 400이다 |
 
 | 칸 | 뜻 |
 |---|---|
