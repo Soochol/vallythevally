@@ -98,12 +98,6 @@ impl Write {
     }
 }
 
-pub(super) fn unconfirmed_on(conn: &Connection, day: KstDate) -> Result<HashSet<StockCode>, StoreError> {
-    let mut stmt = conn.prepare(UNCONFIRMED_ON)?;
-    let rows = stmt.query_map(params![date_value(day)], |row| row.get::<_, String>(0))?;
-    rows.map(|code| stock_code(&code?)).collect()
-}
-
 pub(super) fn exclusion_mask(kinds: &[ExcludeKind]) -> u16 {
     kinds.iter().fold(0, |mask, kind| mask | 1 << *kind as u16)
 }
@@ -159,8 +153,9 @@ impl Store {
         Ok((self.generation.load(Ordering::SeqCst), codes))
     }
 
-    pub(super) fn reader(&self) -> Result<Connection, StoreError> {
-        Ok(self.conn().try_clone()?)
+    pub(super) fn reader_at_generation(&self) -> Result<(u64, Connection), StoreError> {
+        let conn = self.conn();
+        Ok((self.generation.load(Ordering::SeqCst), conn.try_clone()?))
     }
 
     pub fn summary(&self) -> Result<Summary, StoreError> {

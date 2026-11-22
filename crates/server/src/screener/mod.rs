@@ -3,6 +3,7 @@ mod exact;
 mod indicator;
 mod line;
 mod market_cap;
+pub mod memory;
 mod rules;
 pub mod store;
 pub mod summary;
@@ -27,7 +28,7 @@ use crate::symbols::SymbolDirectory;
 use crate::setup_documents::parse_stored_screen;
 use crate::user_routes::read_json;
 use setup::JSON_LIMIT;
-use engine::Snapshot;
+use memory::{Edition, Memory};
 pub(crate) use rules::{Invalid, RunnableScreen, parse_screen};
 use summary::{CollectionBasis, CollectionError, SummaryCollector};
 use store::{Listed, Store, StoreError};
@@ -99,6 +100,7 @@ impl Calendar {
 
 pub struct Screener {
     store: Arc<Store>,
+    memory: Memory,
     summaries: Arc<SummaryCollector>,
     kiwoom: KiwoomHandle,
     bars: Arc<BarService>,
@@ -115,6 +117,7 @@ impl Screener {
         let kiwoom = kiwoom.into();
         Screener {
             store: Arc::new(store),
+            memory: Memory::default(),
             summaries: SummaryCollector::new(kiwoom.clone(), clock.clone()),
             kiwoom,
             bars,
@@ -140,6 +143,22 @@ impl Screener {
         self.store.generation()
     }
 
+    pub fn warm_memory(self: &Arc<Self>) {
+        let me = self.clone();
+        tokio::spawn(async move {
+            let generation = match me.with_store(|store| Ok(store.generation())).await {
+                Ok(generation) => generation,
+                Err(e) => {
+                    tracing::warn!(error = %e, "저장소 세대를 읽지 못해 스크리너 메모리 판을 미리 올리지 못했습니다");
+                    return;
+                }
+            };
+            if let Err(e) = me.memory.edition_for(&me.store, generation).await {
+                tracing::warn!(error = %e, "스크리너 메모리 판을 미리 올리지 못했습니다. 실행할 때 다시 올립니다");
+            }
+        });
+    }
+
     pub async fn recent_closes(&self, codes: Vec<domain::StockCode>, count: usize) -> Result<store::RecentCloses, StoreError> {
         self.with_store(move |store| store.recent_closes(&codes, count)).await
     }
@@ -154,6 +173,7 @@ impl Screener {
         let task = tokio::spawn(async move {
             let outcome = me.update(id, full).await;
             me.finish(id, outcome);
+            me.warm_memory();
         });
         *run = Run::Running { id, progress: Progress { phase: UpdatePhase::Symbols, done: 0, total: 0, full }, task: task.abort_handle() };
     }
@@ -290,55 +310,50 @@ impl Screener {
         self.recents_started_outside_recent()?;
         let update_epoch = self.next_run.load(Ordering::SeqCst);
         let (generation, codes) = self.with_store(Store::collection_targets).await?;
-        let me = self.clone();
-        tokio::task::spawn_blocking(move || me.ready_snapshot(need_day, now)).await.map_err(|e| StoreError(e.to_string()))??;
+        let edition = self.memory.edition_for(&self.store, generation).await?;
+        let edition_generation = edition.generation();
+        self.check_ready(&edition, need_day, now)?;
         let basis = CollectionBasis { generation, update_epoch };
         let batch = self.summaries.collect(codes, basis).await.map_err(|error| match error {
             CollectionError::Kiwoom(error) => Lookup::ScreenerRun.failure(error.into(), self.clock.now()),
             error => data_changed(error.to_string()),
         })?;
         let me = self.clone();
-        tokio::task::spawn_blocking(move || {
+        let judging = std::time::Instant::now();
+        let judged = tokio::task::spawn_blocking(move || {
             if me.clock.now().kst_date() != batch.target || batch.target != now.kst_date() {
                 return Err(data_changed("실행 중 날짜가 바뀌었습니다. 다시 실행하세요"));
             }
             if batch.basis != basis || me.store.generation() != generation || me.next_run.load(Ordering::SeqCst) != update_epoch {
                 return Err(data_changed("수집 중 확정 이력이 바뀌었습니다. 업데이트가 끝난 뒤 다시 실행하세요"));
             }
-            let mut conn = me.store.reader()?;
-            let snapshot = Snapshot::begin(&mut conn)?;
-            me.check_ready(&snapshot, need_day, now)?;
-            let adjustments = snapshot.adjustments(&batch)?;
+            me.check_ready(&edition, need_day, now)?;
+            let adjustments = engine::adjustments(&edition, &batch);
             if !adjustments.is_empty() {
-                drop(snapshot);
                 me.store.require_refetch(&adjustments, Some(generation))?;
                 let named: Vec<&str> = adjustments.iter().take(5).map(|code| code.as_str()).collect();
                 let more = if adjustments.len() > named.len() { " 등" } else { "" };
                 return Err(data_changed(format!("기준가와 확정 이력의 차이가 커 수정 이력을 확인해야 합니다: {}{more}. 업데이트 후 다시 실행하세요. 업데이트 뒤에도 같은 종목이 거절되면 키움이 준 이력이 기준가와 맞지 않는 것이라, 그 종목의 이력이 바뀔 때까지 실행할 수 없습니다", named.join(", "))));
             }
-            let result = snapshot.screen(&screen, &batch, calendar.observation(me.clock.now()))?;
+            let result = engine::screen(&edition, &screen, &batch, calendar.observation(me.clock.now()))?;
             if me.store.generation() != generation || me.next_run.load(Ordering::SeqCst) != update_epoch || me.clock.now().kst_date() != batch.target {
                 return Err(data_changed("판정 중 날짜나 확정 이력이 바뀌었습니다. 다시 실행하세요"));
             }
             Ok(result)
-        }).await.map_err(|e| StoreError(format!("실행 작업이 끝나지 못했습니다: {e}")))?
+        }).await.map_err(|e| StoreError(format!("실행 작업이 끝나지 못했습니다: {e}")))?;
+        tracing::info!(judging_us = judging.elapsed().as_micros() as u64, edition = edition_generation, ok = judged.is_ok(), "스크리너 판정을 마쳤습니다");
+        judged
     }
 
-    fn ready_snapshot(&self, need_day: Option<KstDate>, now: KstTime) -> Result<(), ApiFailure> {
-        let mut conn = self.store.reader()?;
-        let snapshot = Snapshot::begin(&mut conn)?;
-        self.check_ready(&snapshot, need_day, now)
-    }
-
-    fn check_ready(&self, snapshot: &Snapshot<'_>, need_day: Option<KstDate>, now: KstTime) -> Result<(), ApiFailure> {
+    fn check_ready(&self, edition: &Edition, need_day: Option<KstDate>, now: KstTime) -> Result<(), ApiFailure> {
         self.recents_started_outside_recent()?;
-        if snapshot.refetching {
+        if edition.refetching {
             return Err(data_changed("확정 이력을 다시 받는 중입니다. 업데이트가 끝난 뒤 다시 실행하세요"));
         }
-        if snapshot.listing_lost {
+        if edition.listing_lost {
             return Err(Lookup::ScreenerRun.failure(BarError::ListNotReady, now));
         }
-        if snapshot.last_day.is_none_or(|last| need_day.is_some_and(|need| last < need)) {
+        if edition.last_day.is_none_or(|last| need_day.is_some_and(|need| last < need)) {
             let message = match need_day {
                 Some(need) => format!("저장소에 필요 관측일 {need}의 자료가 없습니다. 업데이트하세요"),
                 None => "스크리너 저장소가 비어 있습니다. 업데이트하세요".to_owned(),

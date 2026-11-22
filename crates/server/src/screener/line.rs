@@ -115,8 +115,12 @@ impl Series {
         self.column(field)[from..end].iter().map(|&stored| natural_value(field, stored)).collect()
     }
 
-    pub(super) fn push_cells(&mut self, cells: &[Cell]) {
-        self.cells.extend_from_slice(cells);
+    pub(super) fn extend_cells(&mut self, cells: impl Iterator<Item = Cell>) {
+        self.cells.extend(cells);
+    }
+
+    pub(super) fn last_cell(&self) -> Option<Cell> {
+        self.cells.last().copied()
     }
 
     pub(super) fn column_mut(&mut self, field: BarField) -> &mut Vec<u128> {
@@ -212,7 +216,7 @@ mod tests {
 
     fn series(prices: &[u128]) -> Series {
         let mut series = Series::default();
-        series.push_cells(&(0..prices.len() as i64).map(|i| i * 10).collect::<Vec<_>>());
+        series.extend_cells((0..prices.len() as i64).map(|i| i * 10));
         for field in [BarField::Open, BarField::High, BarField::Low, BarField::Close] {
             series.column_mut(field).extend(prices.iter().map(|p| p * 100));
         }

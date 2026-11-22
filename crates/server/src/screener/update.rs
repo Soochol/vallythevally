@@ -1,5 +1,6 @@
 use std::collections::{HashMap, HashSet};
 use std::fmt;
+use std::sync::Arc;
 
 use domain::{IndexCode, KstDate, Price, StockCode, Venue};
 use futures::{StreamExt, TryFutureExt, TryStreamExt, stream};
@@ -56,8 +57,10 @@ fn stopped_on(code: StockCode, e: &BarError) {
 }
 
 impl Screener {
-    pub async fn fill_lost_listing(&self) {
-        match self.refill_listing().await {
+    pub async fn fill_lost_listing(self: &Arc<Self>) {
+        let outcome = self.refill_listing().await;
+        self.warm_memory();
+        match outcome {
             Ok(Listed::Present) => {}
             Ok(Listed::Filled) => tracing::info!("스크리너 저장소에 일봉은 있는데 종목 목록이 비어 있어, 서버가 받은 종목 목록으로 채웠습니다"),
             Ok(Listed::Lost) => tracing::warn!("서버가 받은 종목 목록이 비어 스크리너 종목 목록을 채우지 못했습니다. 비지 않은 목록을 받을 때까지 실행을 막습니다"),
