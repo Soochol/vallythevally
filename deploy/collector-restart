@@ -3,7 +3,7 @@ set -eu
 self="$(cd "$(dirname "$0")" && pwd)/collector-restart"
 service="${VALLY_COLLECTOR_SERVICE:-vally-collector.service}"
 collector="${VALLY_COLLECTOR_BIN:-$HOME/.local/bin/collector}"
-data_dir="${VALLY_DATA:-$HOME/vally-data/hoga}"
+data_dir="${VALLY_DATA:-}"
 schedule_args="${VALLY_COLLECTOR_SCHEDULE_ARGS:-}"
 allowance="${VALLY_COLLECTOR_FINALIZE_MINUTES:-120}"
 stable="${VALLY_COLLECTOR_STABLE_SECONDS:-10}"
@@ -29,7 +29,7 @@ check_window() {
     judge="$collector"
     pending_judge="$(readlink -f "$collector" || echo "$collector").next"
     [ -x "$pending_judge" ] && judge="$pending_judge"
-    "$judge" restart-window --data "$data_dir" --finalize-allowance-minutes "$allowance" $schedule_args
+    "$judge" restart-window --data "${data_dir:-$HOME/vally-data/hoga}" --finalize-allowance-minutes "$allowance" $schedule_args
 }
 
 resolve_link() {

@@ -506,12 +506,18 @@ class CollectorInstallTest(FakeCollectorHost):
             result = self.install(**env)
             self.assertEqual(result.returncode, 0, (env, result.stderr))
 
-    def test_the_install_validates_without_needing_home_when_the_paths_are_given(self):
-        full = {key: value for key, value in os.environ.items() if not key.startswith(("VALLY_", "ORCH_DEPLOY_", "HOME"))}
-        full["PATH"] = f"{self.stubs}:{full['PATH']}"
-        full.update(VALLY_COLLECTOR_BIN_DIR=str(self.bin), VALLY_SYSTEMD_USER_DIR=str(self.units), VALLY_DATA=str(self.root / "data"))
-        result = subprocess.run([str(self.root / "deploy/collector-install")], cwd="/", env=full, capture_output=True, text=True, timeout=60)
-        self.assertEqual(result.returncode, 0, result.stderr)
+    def test_the_install_runs_without_home_when_the_paths_are_given(self):
+        for data_given, installed in [(True, False), (True, True), (False, True)]:
+            with self.subTest(data_given=data_given, installed=installed):
+                full = {key: value for key, value in os.environ.items() if not key.startswith(("VALLY_", "ORCH_DEPLOY_", "HOME"))}
+                full["PATH"] = f"{self.stubs}:{full['PATH']}"
+                full.update(VALLY_COLLECTOR_BIN_DIR=str(self.bin), VALLY_SYSTEMD_USER_DIR=str(self.units))
+                if data_given:
+                    full["VALLY_DATA"] = str(self.root / "data")
+                if installed:
+                    self.install_collector()
+                result = subprocess.run([str(self.root / "deploy/collector-install")], cwd="/", env=full, capture_output=True, text=True, timeout=60)
+                self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_the_installed_restart_helper_runs_alone_without_the_repository(self):
         self.assertEqual(self.install().returncode, 0)
