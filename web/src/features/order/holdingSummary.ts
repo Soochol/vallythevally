@@ -6,7 +6,8 @@ import { formatPercent } from "../../lib/format";
 import { isEtfOrEtn } from "../../lib/symbol";
 import { formatWon } from "../market-window/format";
 import { secondOfDay } from "../trades/tape";
-import type { PriceGroup } from "./orderRules";
+import { groupKey, type PriceGroup } from "./orderRules";
+import type { PendingWrite } from "./pendingWrites";
 
 export type ProfitUnit = "won" | "percent";
 
@@ -23,9 +24,10 @@ export const toggledUnit = (unit: ProfitUnit): ProfitUnit => (unit === "won" ? "
 
 export const ALL_SELLING_TEXT = "모두 매도 주문 중입니다";
 
-export function sellOrderQuantity(groups: ReadonlyMap<string, PriceGroup>): number {
+export function sellOrderQuantity(groups: ReadonlyMap<string, PriceGroup>, writes: readonly PendingWrite[], code: string): number {
   let quantity = 0;
   for (const group of groups.values()) if (group.side === "sell") quantity += group.quantity;
+  for (const write of writes) if (write.code === code && write.kind === "sending" && write.side === "sell" && (groups.get(groupKey("sell", write.price))?.orders.length ?? 0) > 0) quantity += write.quantity;
   return quantity;
 }
 

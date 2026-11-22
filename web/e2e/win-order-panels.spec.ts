@@ -1420,3 +1420,19 @@ test("설정 단추의 아이콘이 톱니바퀴이고 단추 이름은 호가�
   await expect(button.locator("svg circle")).toHaveCount(1);
   await expect(button.locator("svg")).toHaveAttribute("width", "14");
 });
+
+test("접수된 매도와 같은 가격에 보내는 중인 매도도 남은 수량에서 뺀다", async ({ page, scenario }) => {
+  ordersOn(scenario);
+  const api = tradingApi(scenario, [openOrder("0000001", "sell", 70_800, 50)]);
+  api.holdings = [SELL_HOLDING];
+  await openOrderWindow(page, scenario);
+  await expect(page.getByTestId("summary-remaining")).toHaveText("남은 70");
+  const held = scenario.hold((url, request) => url.pathname === "/api/trading/commands/place" && request.method() === "POST");
+  await quantityField(page).fill("30");
+  await cellAt(page, "sell", 70_800).dblclick();
+  await held.received;
+  await expect(page.getByTestId("summary-remaining")).toHaveText("남은 40");
+  await page.getByTestId("summary-quantity").click();
+  await expect(quantityField(page)).toHaveValue("40");
+  held.reply({ body: commandOf("sell", { price: 70_800, quantity: 30 }) });
+});

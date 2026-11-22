@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import type { TradingHolding } from "../../api/generated/TradingHolding";
 import { averageRowPrice, costTitle, formatFillTime, holdingOf, isEtfOrEtnAfterHours, profitText, remainingToSell, sellableFill, sellOrderQuantity, toggledUnit } from "./holdingSummary";
-import { groupOpenOrders } from "./orderRules";
+import { groupOpenOrders, groupWithPending } from "./orderRules";
+import type { PendingWrite } from "./pendingWrites";
 
 const HOLDING: TradingHolding = { code: "005930", name: "삼성전자", quantity: 120, sellableQuantity: 100, averagePrice: 70_050, currentPrice: 70_000, evaluationProfit: -6_000, profitRateCenti: -71 };
 
@@ -58,8 +59,20 @@ describe("매입수량 누르기", () => {
   it("매도 주문 잔량은 접수된 매도 주문의 합이고 매수는 세지 않는다", () => {
     const order = (orderNo: string, side: "buy" | "sell", price: number, openQuantity: number) => ({ orderNo, code: "005930", name: "삼성전자", side, quantity: openQuantity, price, openQuantity, status: "접수", orderedAt: "100000", originalOrderNo: null, venue: "krx" as const });
     const groups = groupOpenOrders([order("1", "sell", 71_000, 30), order("2", "sell", 72_000, 20), order("3", "buy", 69_000, 40)], "005930");
-    expect(sellOrderQuantity(groups)).toBe(50);
-    expect(sellOrderQuantity(new Map())).toBe(0);
+    expect(sellOrderQuantity(groups, [], "005930")).toBe(50);
+    expect(sellOrderQuantity(new Map(), [], "005930")).toBe(0);
+  });
+
+  it("접수된 매도와 같은 가격으로 보내는 중인 매도도 더하고 다른 종목·매수 쓰기는 세지 않는다", () => {
+    const order = { orderNo: "1", code: "005930", name: "삼성전자", side: "sell" as const, quantity: 50, price: 71_000, openQuantity: 50, status: "접수", orderedAt: "100000", originalOrderNo: null, venue: "krx" as const };
+    const sending = (code: string, side: "buy" | "sell", price: number, quantity: number, key: string): PendingWrite => ({ kind: "sending", code, since: 0, key, side, price, quantity });
+    const writes = [sending("005930", "sell", 71_000, 30, "a"), sending("005930", "sell", 71_000, 5, "b"), sending("000660", "sell", 71_000, 99, "c"), sending("005930", "buy", 71_000, 7, "d")];
+    expect(sellOrderQuantity(groupWithPending([order], writes, "005930"), writes, "005930")).toBe(85);
+  });
+
+  it("접수된 묶음이 없는 가격의 보내는 중 매도는 묶음이 이미 더해 두 번 세지 않는다", () => {
+    const writes: PendingWrite[] = [{ kind: "sending", code: "005930", since: 0, key: "a", side: "sell", price: 72_000, quantity: 30 }, { kind: "sending", code: "005930", since: 0, key: "b", side: "sell", price: 72_000, quantity: 5 }];
+    expect(sellOrderQuantity(groupWithPending([], writes, "005930"), writes, "005930")).toBe(35);
   });
 
   it("현재 종목의 보유만 고른다", () => {
