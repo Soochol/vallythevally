@@ -69,6 +69,19 @@ impl SwitchStore {
 
     pub fn claim_legacy(&self, key: &KeyId) {
         self.legacy_owner.lock().expect("옛 스위치 주인 잠금").get_or_insert_with(|| key.clone());
+        if let Err(e) = self.move_legacy_to_keyed() {
+            tracing::warn!(error = %e, "옛 주문 사용 스위치 파일을 키별 칸으로 옮기지 못했습니다");
+        }
+    }
+
+    fn move_legacy_to_keyed(&self) -> Result<(), FileError> {
+        let Backing::File { file, environment } = &self.backing else { return Ok(()) };
+        let Some(text) = file.read()? else { return Ok(()) };
+        let Ok((stored, StoredRecords::Legacy(_))) = parse_stamped::<StoredRecords>(&text) else { return Ok(()) };
+        if stored != *environment {
+            return Ok(());
+        }
+        self.update(|_| {})
     }
 
     fn legacy_key(&self) -> String {
@@ -121,16 +134,24 @@ impl SwitchStore {
         })
     }
 
-    pub fn switch_off_except(&self, present: &[KeyId]) -> Result<(), FileError> {
-        let records = self.read_records()?;
-        if records.iter().all(|(key, record)| !record.enabled || present.iter().any(|present| present.as_str() == key)) {
+    pub fn clear_key(&self, key: &KeyId) -> Result<(), FileError> {
+        let blank = |record: &SwitchRecord| SwitchRecord { enabled: false, salt: record.salt.clone(), account_ref: None, account_tail: None, legacy_product_tail: None, confirm_won: None, cap_won: None, margin_policy: MarginPolicy::default() };
+        self.update(|records| {
+            if let Some(record) = records.get_mut(key.as_str()) {
+                *record = blank(record);
+            }
+        })
+    }
+
+    pub fn clear_except(&self, present: &[KeyId]) -> Result<(), FileError> {
+        let is_present = |key: &str| present.iter().any(|present| present.as_str() == key);
+        let blank = |record: &SwitchRecord| record.enabled || record.account_ref.is_some() || record.account_tail.is_some() || record.legacy_product_tail.is_some() || record.margin_policy != MarginPolicy::default() || record.confirm_won.is_some() || record.cap_won.is_some();
+        if self.read_records()?.iter().all(|(key, record)| is_present(key) || !blank(record)) {
             return Ok(());
         }
         self.update(|records| {
-            for (key, record) in records.iter_mut() {
-                if record.enabled && !present.iter().any(|present| present.as_str() == key) {
-                    record.enabled = false;
-                }
+            for (key, record) in records.iter_mut().filter(|(key, _)| !is_present(key)) {
+                *record = SwitchRecord { enabled: false, salt: record.salt.clone(), account_ref: None, account_tail: None, legacy_product_tail: None, confirm_won: None, cap_won: None, margin_policy: MarginPolicy::default() };
             }
         })
     }
@@ -331,13 +352,29 @@ mod tests {
     }
 
     #[test]
-    fn switching_off_the_keys_that_left_the_list_keeps_the_rest() {
+    fn clearing_the_keys_that_left_the_list_keeps_the_rest_and_the_salt() {
         let store = SwitchStore::memory();
         let (a, b) = (KeyId::numbered(1), KeyId::numbered(2));
         store.save(&a, &record(true)).unwrap();
-        store.save(&b, &record(true)).unwrap();
-        store.switch_off_except(std::slice::from_ref(&a)).unwrap();
+        store.save(&b, &SwitchRecord { margin_policy: MarginPolicy::AllowMargin, ..record(true) }).unwrap();
+        store.clear_except(std::slice::from_ref(&a)).unwrap();
         assert!(store.load(&a).unwrap().unwrap().enabled);
-        assert!(!store.load(&b).unwrap().unwrap().enabled);
+        let left = store.load(&b).unwrap().unwrap();
+        assert_eq!((left.enabled, left.account_ref, left.account_tail, left.margin_policy, left.salt), (false, None, None, MarginPolicy::CashOnly, "00ff".to_owned()));
+    }
+
+    #[test]
+    fn a_legacy_file_is_rewritten_per_key_when_claimed_so_a_later_market_change_cannot_move_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("state").join(ORDER_SWITCH_FILE_NAME);
+        SwitchStore::file(PrivateFile::new(path.clone()), KiwoomEnvironment::Real).save(&key(), &record(false)).unwrap();
+        std::fs::write(&path, r#"{"environment":"real","enabled":true,"salt":"00ff","accountRef":"ref","accountNumberTail":"01","marginPolicy":"cash_only"}"#).unwrap();
+        let first = SwitchStore::file(PrivateFile::new(path.clone()), KiwoomEnvironment::Real);
+        let k1 = KeyId::numbered(1);
+        first.claim_legacy(&k1);
+        let restarted = SwitchStore::file(PrivateFile::new(path), KiwoomEnvironment::Real);
+        restarted.claim_legacy(&KeyId::numbered(2));
+        assert_eq!(restarted.load(&k1).unwrap().map(|r| r.enabled), Some(true));
+        assert_eq!(restarted.load(&KeyId::numbered(2)).unwrap(), None);
     }
 }

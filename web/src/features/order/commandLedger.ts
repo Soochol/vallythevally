@@ -48,3 +48,5 @@ export const placeAction = (code: string, side: string, price: number, quantity:
 export const modifyAction = (orderNo: string, price: number): string => `modify|${orderNo}|${price}`;
 export const cancelAction = (orderNo: string): string => `cancel|${orderNo}`;
 export const cancelBatchAction = (code: string, side: string, price: number): string => `batch|${code}|${side}|${price}`;
+
+export const actionInAccount = (action: string, accountRef: string | null): string => `${action}|${accountRef ?? ""}`;

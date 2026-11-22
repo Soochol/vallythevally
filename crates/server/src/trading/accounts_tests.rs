@@ -332,7 +332,7 @@ async fn trading_realtime_follows_each_key_when_the_market_key_changes() {
 }
 
 #[tokio::test]
-async fn trading_removing_a_key_switches_its_account_off() {
+async fn trading_removing_a_key_clears_its_record_so_a_reused_key_id_starts_blank() {
     let f = keyed(&[0, 1]).await;
     assert_eq!(f.enable(1, "02").await.0, StatusCode::OK);
     let reference_b = f.account_ref(1).await;
@@ -350,4 +350,33 @@ async fn trading_removing_a_key_switches_its_account_off() {
     .expect("지운 키의 계좌 참조는 모르는 계좌가 된다");
     let (_, status) = get(&f.app, "/api/system/orders").await;
     assert_eq!(status["accounts"].as_array().unwrap().len(), 1);
+}
+
+#[tokio::test]
+async fn trading_a_key_added_under_a_removed_keys_id_does_not_inherit_its_account() {
+    let f = keyed(&[0, 1]).await;
+    assert_eq!(f.enable(1, "02").await.0, StatusCode::OK);
+    let reference_b = f.account_ref(1).await;
+    let (_, policy) = call(&f.app, "PUT", "/api/system/orders/margin", Some(json!({"policy": "allow_margin", "account": reference_b}))).await;
+    assert_eq!(policy["policy"], json!("allow_margin"));
+    f.state.keys.remove(&KeyId::parse(KEYS[1].0).unwrap()).unwrap();
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while get(&f.app, &format!("/api/trading/balance?account={reference_b}")).await.0 != StatusCode::NOT_FOUND {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("지운 키의 계좌 참조는 모르는 계좌다");
+    let credentials = KiwoomCredentials { app_key: Secret::new(KEYS[2].2.into()), app_secret: Secret::new("FAKE-SECRET-order".into()) };
+    let id = f.state.keys.add("새 키", credentials).unwrap();
+    assert_eq!(id.as_str(), "k2", "지운 번호를 다시 쓴다");
+    let added = get(&f.app, "/api/system/orders").await.1["accounts"][1].clone();
+    assert_eq!((added["accountRef"].clone(), added["accountTail"].clone()), (Value::Null, Value::Null), "{added}");
+    for view in f.state.keys.views() {
+        view.lane.rest.set_access(Access::Open);
+    }
+    let (code, _) = call(&f.app, "PUT", "/api/system/orders", Some(json!({"enabled": true, "confirmAccountTail": "01", "keyId": "k2"}))).await;
+    assert_eq!(code, StatusCode::OK);
+    let (_, margin) = get(&f.app, &format!("/api/system/orders/margin?account={}", f.account_ref(1).await)).await;
+    assert_eq!(margin["policy"], json!("cash_only"));
 }

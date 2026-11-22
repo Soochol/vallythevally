@@ -18,6 +18,12 @@ use crate::api::{Broker, KiwoomEnvironment, RegisteredIp};
 use crate::clock::Clock;
 use crate::config::{KiwoomCredentials, Secret};
 
+static NEXT_SERIAL: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+
+fn next_serial() -> u64 {
+    NEXT_SERIAL.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+}
+
 struct LaneTasks {
     _stream: KiwoomStream,
     tasks: Vec<JoinHandle<()>>,
@@ -118,6 +124,7 @@ impl fmt::Display for KeyError {
 }
 
 struct Entry {
+    serial: u64,
     id: KeyId,
     alias: String,
     origin: KeyOrigin,
@@ -161,6 +168,7 @@ impl Inner {
 
 #[derive(Clone)]
 pub struct KeyView {
+    pub serial: u64,
     pub id: KeyId,
     pub alias: String,
     pub origin: KeyOrigin,
@@ -205,7 +213,7 @@ impl KeyRing {
             .map(|key| {
                 let lane = if Some(&key.id) == market.as_ref() { market_lane.clone() } else { factory.account_lane(&key.paths, &key.credentials) };
                 let registered_ip = load_ip(&key.paths.registered_ip);
-                Entry { id: key.id, alias: key.alias, origin: key.origin, broker: key.broker, credentials: key.credentials, paths: key.paths, lane, registered_ip }
+                Entry { serial: next_serial(), id: key.id, alias: key.alias, origin: key.origin, broker: key.broker, credentials: key.credentials, paths: key.paths, lane, registered_ip }
             })
             .collect();
         let idle_registered_ip = if entries.is_empty() { load_ip(&factory.bases.registered_ip) } else { None };
@@ -226,6 +234,7 @@ impl KeyRing {
 
     fn view(inner: &Inner, entry: &Entry) -> KeyView {
         KeyView {
+            serial: entry.serial,
             id: entry.id.clone(),
             alias: entry.alias.clone(),
             origin: entry.origin,
@@ -320,7 +329,7 @@ impl KeyRing {
         let paths = factory.paths_for(&credentials, base_taken, &listed);
         let lane = if first { self.market_lane.clone() } else { factory.account_lane(&paths, &credentials) };
         let registered_ip = registered_ip_file(paths.registered_ip.clone()).load().ok().flatten();
-        let entry = Entry { id: id.clone(), alias, origin: KeyOrigin::File, broker: Broker::Kiwoom, credentials, paths, lane, registered_ip };
+        let entry = Entry { serial: next_serial(), id: id.clone(), alias, origin: KeyOrigin::File, broker: Broker::Kiwoom, credentials, paths, lane, registered_ip };
         if first {
             inner.market = Some(id.clone());
             inner.idle_registered_ip = None;

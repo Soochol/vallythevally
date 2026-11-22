@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { cancelAction, cancelBatchAction, createLedger, modifyAction, newIdFor, placeAction } from "./commandLedger";
+import { actionInAccount, cancelAction, cancelBatchAction, createLedger, modifyAction, newIdFor, placeAction } from "./commandLedger";
 
 const counter = () => {
   let n = 0;
@@ -71,4 +71,13 @@ test("일괄 취소는 요청마다 새 batchId를 만들고 답을 못 받은 �
   const later = ledger.issue(at71000);
   expect(later.send).toBe(true);
   expect(later.id).not.toBe(first.id);
+});
+
+it("같은 가격 일괄 취소도 계좌가 다르면 서로 합쳐지지 않는다", () => {
+  const ledger = createLedger(newIdFor);
+  const action = cancelBatchAction("005930", "buy", 71_000);
+  const first = ledger.issue(actionInAccount(action, "account-a"));
+  const second = ledger.issue(actionInAccount(action, "account-b"));
+  expect([first.send, second.send]).toEqual([true, true]);
+  expect(ledger.issue(actionInAccount(action, "account-a")).send).toBe(false);
 });

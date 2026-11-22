@@ -5,7 +5,7 @@ import type { OrderCommands } from "../../api/generated/OrderCommands";
 import type { OrderSide } from "../../api/generated/OrderSide";
 import type { TradingOpenOrder } from "../../api/generated/TradingOpenOrder";
 import type { Venue } from "../../api/generated/Venue";
-import { cancelAction, cancelBatchAction, createLedger, modifyAction, newIdFor, placeAction, type Settlement } from "./commandLedger";
+import { actionInAccount, cancelAction, cancelBatchAction, createLedger, modifyAction, newIdFor, placeAction, type Settlement } from "./commandLedger";
 import type { CurrentAccount } from "./orderAccount";
 import { cancelOrder, cancelOrdersAtPrice, modifyOrder, placeOrder, reconcileOrders } from "./orderApi";
 import { needsHighValueConfirm } from "./orderRules";
@@ -80,9 +80,10 @@ export function useOrderWrites(account: CurrentAccount | null, code: string, ven
   useEffect(() => () => pendingWrites.clear(code), [code, writeScope]);
 
   const enqueue = useCallback(<T,>(plan: Plan<T>) => {
-    const coalesced = plan.coalesce ? ledger.issue(plan.action) : null;
+    const ledgerKey = actionInAccount(plan.action, accountRef);
+    const coalesced = plan.coalesce ? ledger.issue(ledgerKey) : null;
     if (coalesced && !coalesced.send) return;
-    const commandId = coalesced?.id ?? ledger.issueEach(plan.action);
+    const commandId = coalesced?.id ?? ledger.issueEach(ledgerKey);
     pendingWrites.begin(plan.mark);
     setQueued((n) => n + 1);
     tail.current = tail.current.then(async () => {
@@ -97,13 +98,13 @@ export function useOrderWrites(account: CurrentAccount | null, code: string, ven
         setStatus(statusOfFailure(error));
       } finally {
         pendingWrites.resolve(plan.mark.key, []);
-        if (coalesced) ledger.settle(plan.action, settlement);
-        else ledger.settleEach(plan.action, commandId, settlement);
+        if (coalesced) ledger.settle(ledgerKey, settlement);
+        else ledger.settleEach(ledgerKey, commandId, settlement);
         setQueued((n) => n - 1);
         void queryClient.invalidateQueries({ queryKey: ORDER_QUERY_KEY });
       }
     });
-  }, [queryClient]);
+  }, [queryClient, accountRef]);
 
   const place = useCallback((r: PlaceRequest) => {
     const action = placeAction(code, r.side, r.price, r.quantity, venue);

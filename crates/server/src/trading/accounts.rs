@@ -10,7 +10,7 @@ use super::switch::SwitchStore;
 use crate::api::{self, OrderSide};
 use crate::clock::Clock;
 use crate::kiwoom::key_file::KeyId;
-use crate::kiwoom::keys::KeyRing;
+use crate::kiwoom::keys::{KeyRing, KeyView};
 use crate::kiwoom::rest::KiwoomRest;
 use crate::kiwoom::stream::AccountFeed;
 use crate::symbols::SymbolDirectory;
@@ -28,7 +28,7 @@ pub struct Accounts {
     store: Arc<SwitchStore>,
     shared: Shared,
     fixed_feed: AccountFeed,
-    services: Mutex<HashMap<String, Arc<Trading>>>,
+    services: Mutex<HashMap<String, (u64, Arc<Trading>)>>,
     enabling: tokio::sync::Mutex<()>,
 }
 
@@ -50,23 +50,34 @@ impl Accounts {
         if views.is_empty() {
             return vec![Line { alias: FIXED_ALIAS.to_owned(), market: true, service: self.fixed() }];
         }
-        views.into_iter().map(|view| Line { service: self.service_of(&view.id), alias: view.alias, market: view.market }).collect()
+        views.into_iter().map(|view| Line { service: self.service_of(&view), alias: view.alias, market: view.market }).collect()
     }
 
     fn fixed(&self) -> Arc<Trading> {
         let key = fixed_id();
         let mut services = self.services.lock().expect("계좌 서비스 잠금");
-        services.entry(key.as_str().to_owned()).or_insert_with(|| Trading::assemble(Lanes::Fixed { rest: self.shared.quote_rest.clone(), feed: self.fixed_feed.clone() }, key, self.store.clone(), self.shared.clone_parts())).clone()
+        services.entry(key.as_str().to_owned()).or_insert_with(|| (0, Trading::assemble(Lanes::Fixed { rest: self.shared.quote_rest.clone(), feed: self.fixed_feed.clone() }, key, self.store.clone(), self.shared.clone_parts()))).1.clone()
     }
 
-    fn service_of(&self, key: &KeyId) -> Arc<Trading> {
+    fn service_of(&self, view: &KeyView) -> Arc<Trading> {
         let mut services = self.services.lock().expect("계좌 서비스 잠금");
-        services.entry(key.as_str().to_owned()).or_insert_with(|| Trading::assemble(Lanes::Keyed { ring: self.ring.clone(), key: key.clone() }, key.clone(), self.store.clone(), self.shared.clone_parts())).clone()
+        match services.get(view.id.as_str()) {
+            Some((serial, service)) if *serial == view.serial => return service.clone(),
+            Some(_) => {
+                if let Err(e) = self.store.clear_key(&view.id) {
+                    tracing::warn!(error = %e, "지운 키와 같은 번호를 쓰는 새 키의 주문 사용 칸을 비우지 못했습니다");
+                }
+            }
+            None => {}
+        }
+        let service = Trading::assemble(Lanes::Keyed { ring: self.ring.clone(), key: view.id.clone() }, view.id.clone(), self.store.clone(), self.shared.clone_parts());
+        services.insert(view.id.as_str().to_owned(), (view.serial, service.clone()));
+        service
     }
 
     pub fn market(&self) -> Arc<Trading> {
         match self.ring.market() {
-            Some(market) => self.service_of(&market.id),
+            Some(market) => self.service_of(&market),
             None => self.fixed(),
         }
     }
@@ -74,8 +85,8 @@ impl Accounts {
     fn by_key(&self, key_id: Option<&str>) -> Result<Arc<Trading>, TradingError> {
         let Some(text) = key_id else { return Ok(self.market()) };
         let key = KeyId::parse(text).ok_or(TradingError::UnknownKey)?;
-        if self.ring.view_of(&key).is_some() {
-            return Ok(self.service_of(&key));
+        if let Some(view) = self.ring.view_of(&key) {
+            return Ok(self.service_of(&view));
         }
         if self.ring.views().is_empty() && key == fixed_id() {
             return Ok(self.fixed());
@@ -103,13 +114,13 @@ impl Accounts {
     fn sync(&self) {
         let views = self.ring.views();
         let present: Vec<KeyId> = if views.is_empty() { vec![fixed_id()] } else { views.iter().map(|view| view.id.clone()).collect() };
-        if let Err(e) = self.store.switch_off_except(&present) {
-            tracing::warn!(error = %e, "목록에서 빠진 키의 주문 사용을 끄지 못했습니다");
+        if let Err(e) = self.store.clear_except(&present) {
+            tracing::warn!(error = %e, "목록에서 빠진 키의 주문 사용 칸을 비우지 못했습니다");
         }
         let kept: Vec<Arc<Trading>> = {
             let mut services = self.services.lock().expect("계좌 서비스 잠금");
             services.retain(|id, _| present.iter().any(|key| key.as_str() == id));
-            services.values().cloned().collect()
+            services.values().map(|(_, service)| service.clone()).collect()
         };
         for view in &views {
             view.lane.account.set_wanted(false);
@@ -119,12 +130,11 @@ impl Accounts {
             service.forget_verified();
             service.republish();
         }
-        for key in &present {
-            if views.is_empty() {
-                drop(self.fixed());
-            } else {
-                drop(self.service_of(key));
-            }
+        if views.is_empty() {
+            drop(self.fixed());
+        }
+        for view in &views {
+            drop(self.service_of(view));
         }
     }
 
