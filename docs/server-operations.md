@@ -161,15 +161,15 @@ tailscale serve status
 | `~/vally-data/server/financials.db` | 재무 DB. 수십 GB | 미리 복사한다 |
 | `~/vally-data/server/market-samples/` | 시장 표본 | 있으면 |
 | `~/.config/vally/server.env` | 설정과 비밀값 | 권한 600 |
-| `~/.local/state/vallythevally/kiwoom-keys.json` | 실전 키 목록(최대 5개). 옛 `kiwoom-key.json`은 처음 켤 때 이 파일로 옮겨지고 지워진다 | 권한 600 |
+| `~/.local/state/vallythevally/kiwoom-keys.json` | 실전 키 목록(증권사마다 최대 5개)과 시세 공급원 키 표시. 항목마다 증권사 칸(`kiwoom`/`kis`)이 있고, 칸이 없는 옛 항목은 키움으로 읽는다. 옛 `kiwoom-key.json`은 처음 켤 때 이 파일로 옮겨지고 지워진다 | 권한 600 |
 | `~/.local/state/vallythevally/kiwoom-orders.json` | 주문 사용 스위치 | |
 | `~/.local/state/vallythevally/token.json`, `token.<키 ID>.json` | 접근 토큰(키마다 하나) | |
-| `~/.local/state/vallythevally/kis-token.json` | 한투 접근 토큰. 앱키 해시와 마지막 발급 요청 시각이 함께 있다 | 한투 키를 쓸 때만 있다. 권한 600 |
+| `~/.local/state/vallythevally/kis-token.json`, `kis-token.<해시>.json` | 한투 접근 토큰(한투 키마다 하나). 앱키 해시, 마지막 발급 요청 시각, 끊어 둠 기록이 함께 있다. 환경 한투 키는 `kis-token.json`(`VALLY_KIS_TOKEN_PATH`), 화면에서 저장한 한투 키는 앱키 해시 앞 8자를 붙인 이름이다 | 한투 키를 쓸 때만 있다. 권한 600 |
 | `~/.local/state/vallythevally/kiwoom-ip.json`, `kiwoom-ip.<키 ID>.json` | 등록 IP 확인 상태(키마다 하나) | 있으면 |
 
 옮기지 않는 것: 모의 서버의 `mock/`과 `collector/`(개발 PC에 남는다).
 
-비밀값 파일(`server.env`, `kiwoom-*.json`, `token.json`, `kis-token.json`)의 규칙:
+비밀값 파일(`server.env`, `kiwoom-*.json`, `token*.json`, `kis-token*.json`)의 규칙:
 
 - `scp -p`나 `rsync -a`로 파일째 보낸다. `cat`, `diff`, `grep`, 로그 출력으로 내용을 보지 않는다.
 - 받은 쪽은 권한이 600인지 `stat`로만 확인한다.
@@ -184,6 +184,8 @@ tailscale serve status
 | `VALLY_KIS_APP_KEY`, `VALLY_KIS_APP_SECRET` | 한투 앱키와 시크릿 | 둘 다 적거나 둘 다 비운다. hoga-ops와 공유하지 않는다. 모의 서버(`VALLY_KIWOOM_ENV=mock`)에는 적지 않는다 |
 | `VALLY_KIS_BASE_URL`, `VALLY_KIS_WS_URL` | 한투 REST·실시간 주소 | 시험용이다. 공식 실전 주소나 루프백만 되고 둘 다 적거나 둘 다 비운다. 비우면 공식 주소다 |
 | `VALLY_KIS_TOKEN_PATH` | 한투 토큰 파일 | 기본은 `VALLY_TOKEN_PATH`와 같은 폴더의 `kis-token.json`이다 |
+
+환경 한투 키는 키 목록에 읽기 전용 줄(키 ID `env-kis`)로 보이고 한투 키 5개 가운데 하나로 센다. 목록 순서는 키움 환경 키, 한투 환경 키, 파일 키다. 연결 규칙(자동 연결, 끊어 둠, 차단 기억, 발급 간격)은 키움 키와 같고, 한투 키가 멈춰도 키움 키는 연결된 채다([ADR 0043](adr/0043-market-source-is-one-key-of-either-broker-and-switching-drops-the-cache.md)).
 
 받는 쪽 폴더를 먼저 만든다.
 
@@ -244,7 +246,7 @@ rsync -a --delete --info=progress2 --exclude='/mock/' --exclude='/collector/' ~/
 
 ```sh
 rsync -a ~/.config/vally/server.env <서버 PC>:.config/vally/server.env
-rsync -a --ignore-missing-args ~/.local/state/vallythevally/kiwoom-key.json ~/.local/state/vallythevally/kiwoom-keys.json ~/.local/state/vallythevally/kiwoom-orders.json ~/.local/state/vallythevally/token*.json ~/.local/state/vallythevally/kiwoom-ip*.json <서버 PC>:.local/state/vallythevally/
+rsync -a --ignore-missing-args ~/.local/state/vallythevally/kiwoom-key.json ~/.local/state/vallythevally/kiwoom-keys.json ~/.local/state/vallythevally/kiwoom-orders.json ~/.local/state/vallythevally/token*.json ~/.local/state/vallythevally/kis-token*.json ~/.local/state/vallythevally/kiwoom-ip*.json <서버 PC>:.local/state/vallythevally/
 ssh -o BatchMode=yes <서버 PC> 'stat -c "%a %n" ~/.config/vally/server.env ~/.local/state/vallythevally/*.json'
 ```
 
@@ -316,6 +318,34 @@ curl -sS --max-time 5 http://<서버 PC의 Tailscale IP>:8080/api/screener/statu
 ```
 
 두 명령 모두 연결 거부여야 한다. 응답이 오면 서버가 루프백이 아닌 주소에 바인드돼 있다는 뜻이니 즉시 서비스를 멈추고 `server.env`의 `VALLY_BIND`를 확인한다(서버는 루프백이 아닌 값을 거절하므로 일어나지 않는 것이 정상이다).
+
+## 시세 공급원 바꾸기
+
+시세 공급원은 키 목록의 키(키움이든 한투든) 가운데 하나다. 고른 값은 `kiwoom-keys.json`에 남아 서버를 다시 켜도 이어진다. 바꾸는 규칙은 [ADR 0043](adr/0043-market-source-is-one-key-of-either-broker-and-switching-drops-the-cache.md)이다.
+
+1. 바꾸기 전 상태를 저장해 둔다.
+
+   ```sh
+   curl -sS http://127.0.0.1:8080/api/system/market-source
+   curl -sS http://127.0.0.1:8080/api/system/kiwoom/keys
+   ```
+
+2. 시스템 설정의 키 목록에서 새 공급원으로 쓸 키를 시세용으로 고른다. 서버는 `PUT /api/system/kiwoom/market-key`로 그 키 ID를 받는다.
+3. 바꾸는 순간 실시간 시세가 잠깐 끊기고, 열린 화면은 07:45 비우기와 같이 새 공급원에서 다시 받는다. 새 키가 토큰을 새로 받아야 하는데 발급 간격 안이면 그 간격이 지날 때까지 시세가 없다.
+
+확인:
+
+```sh
+curl -sS http://127.0.0.1:8080/api/system/market-source
+journalctl --user -u vally-server.service -n 200 --no-pager
+```
+
+- `market-source` 응답의 증권사와 키 ID가 고른 키이고 연결 상태가 연결됨이다. 응답에 시크릿, 전체 앱키, 계좌번호가 없어야 한다.
+- 순위·시장 개요·투자자를 받는 증권사는 공급원과 상관없이 연결된 키움 키가 있으면 키움이다. 키움 키가 없으면 한투이고, 한투에 없는 항목은 `unsupported_by_source`다.
+- 연결된 키움 키가 없으면 스크리너 갱신이 거절된다. 스크리너 실행과 검색은 된다.
+- 로그에 새 공급원의 연결이 보이고 반복되는 오류가 없다.
+
+되돌리려면 같은 방법으로 앞서 저장한 키 ID를 다시 시세용으로 고른다.
 
 ## 배포(orch deploy)
 
@@ -407,12 +437,12 @@ ssh -o BatchMode=yes <서버 PC> true
    rsync -a --ignore-missing-args <서버 PC>:vally-data/server/vally.db <서버 PC>:vally-data/server/vally.db-wal <서버 PC>:vally-data/server/vally.db-shm ~/vally-data/server/
    ```
 
-   상태 파일도 같은 방식으로 되돌린다. 주문 사용 스위치(`kiwoom-orders.json`)와 토큰이 서버 PC에서 바뀌었을 수 있다.
+   상태 파일도 같은 방식으로 되돌린다. 주문 사용 스위치(`kiwoom-orders.json`), 시세 공급원 키 표시(`kiwoom-keys.json`), 키움·한투 토큰이 서버 PC에서 바뀌었을 수 있다.
 
    ```sh
    cd ~/.local/state/vallythevally
-   for name in kiwoom-key.json kiwoom-keys.json kiwoom-orders.json token*.json kiwoom-ip*.json; do [ -e "$name" ] && mv "$name" "$name.before-rollback"; done
-   rsync -a --ignore-missing-args <서버 PC>:.local/state/vallythevally/kiwoom-key.json <서버 PC>:.local/state/vallythevally/kiwoom-keys.json <서버 PC>:.local/state/vallythevally/kiwoom-orders.json '<서버 PC>:.local/state/vallythevally/token*.json' '<서버 PC>:.local/state/vallythevally/kiwoom-ip*.json' ~/.local/state/vallythevally/
+   for name in kiwoom-key.json kiwoom-keys.json kiwoom-orders.json token*.json kis-token*.json kiwoom-ip*.json; do [ -e "$name" ] && mv "$name" "$name.before-rollback"; done
+   rsync -a --ignore-missing-args <서버 PC>:.local/state/vallythevally/kiwoom-key.json <서버 PC>:.local/state/vallythevally/kiwoom-keys.json <서버 PC>:.local/state/vallythevally/kiwoom-orders.json '<서버 PC>:.local/state/vallythevally/token*.json' '<서버 PC>:.local/state/vallythevally/kis-token*.json' '<서버 PC>:.local/state/vallythevally/kiwoom-ip*.json' ~/.local/state/vallythevally/
    stat -c "%a %n" ~/.local/state/vallythevally/*.json
    ```
 
