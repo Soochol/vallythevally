@@ -2,8 +2,7 @@ import type { ReactNode } from "react";
 import { direction, formatPercent, formatPrice } from "../../lib/format";
 import { formatQuantity, withSign } from "./format";
 import { type BookLevel, type LadderRow, ROWS_ABOVE_BASE } from "./ladder";
-
-export const TOP_RIGHT_ROWS = 9;
+import { infoCardRows } from "./quoteInfo";
 
 export interface LadderSlots {
   readonly left?: (row: LadderRow) => ReactNode;
@@ -11,7 +10,7 @@ export interface LadderSlots {
 }
 
 export interface LadderRowSlots {
-  readonly topRight?: (slot: number) => ReactNode;
+  readonly infoCard?: (rowCount: number) => ReactNode;
   readonly bottomLeft?: (rowCount: number) => ReactNode;
 }
 
@@ -75,6 +74,7 @@ export function PriceLadder({ rows, previousClose, slots, rowSlots, mark, expect
   const columns = `${slots?.left ? "var(--size-64) " : ""}minmax(0, 1fr) var(--size-133) minmax(0, 1fr)${slots?.right ? " var(--size-64)" : ""}`;
   const boxStart = tradeBoxStart(rows);
   const boxRows = rows.length - boxStart;
+  const cardRows = infoCardRows(rows);
   return (
     <div className="mw-ladder" data-testid="price-ladder">
       {rows.map((row, index) => (
@@ -82,10 +82,15 @@ export function PriceLadder({ rows, previousClose, slots, rowSlots, mark, expect
           {slots?.left?.(row)}
           {row.ask ? <Quantity side="ask" level={row.ask} ratio={row.askRatio} /> : <div className="mw-qty" data-side="ask" />}
           <Price row={row} previousClose={previousClose} mark={mark} />
-          {row.bid ? <Quantity side="bid" level={row.bid} ratio={row.bidRatio} /> : <div className="mw-qty" data-side="bid">{index < TOP_RIGHT_ROWS && rowSlots?.topRight?.(index)}</div>}
+          {row.bid ? <Quantity side="bid" level={row.bid} ratio={row.bidRatio} /> : <div className="mw-qty" data-side="bid" />}
           {slots?.right?.(row)}
         </div>
       ))}
+      {cardRows > 0 && rowSlots?.infoCard && (
+        <div className="mw-info-layer" data-testid="ladder-info-layer" style={{ gridTemplateColumns: columns, top: "var(--s1)", height: `calc(${cardRows} * var(--size-24))` }}>
+          <div className="mw-info-cell" style={{ gridColumn: slots?.left ? 4 : 3 }}>{rowSlots.infoCard(cardRows)}</div>
+        </div>
+      )}
       {boxRows > 0 && rowSlots?.bottomLeft && (
         <div className="mw-box-layer" data-testid="ladder-box-layer" style={{ gridTemplateColumns: columns, top: `calc(var(--s1) + ${boxStart} * var(--size-24))`, height: `calc(${boxRows} * var(--size-24))` }}>
           <div className="mw-box" style={slots?.left ? { gridColumn: 2 } : undefined}>{rowSlots.bottomLeft(boxRows)}</div>

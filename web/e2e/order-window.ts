@@ -19,11 +19,13 @@ export const BASE = 70_000;
 export const FUNDAMENTAL_FIGURES = { marketCap: 82_400_000_000, listedShares: null, per: 14.21, pbr: 1.1, roe: null, eps: null, bps: null, foreignExhaustionRate: 54.12, high52w: 88_000, low52w: 51_000 };
 
 export const INFO_PAGE_1 = ["시가", "고가", "저가", "기준가", "전일대비", "거래량", "거래대금"];
-export const INFO_PAGE_2 = ["상한가", "하한가", "52주 최고", "52주 최저", "시가총액", "PER", "PBR", "외국인소진율"];
-export const INFO_PAGE_2_VALUES = ["91,000", "49,000", "88,000", "51,000", "824억", "14.21배", "1.10배", "54.12%"];
+export const INFO_PAGE_2 = ["상한가", "하한가", "시가총액", "PER·PBR", "외국인소진율"];
+export const INFO_PAGE_2_VALUES = ["91,000", "49,000", "824억", "14.21·1.10", "54.12%"];
+export const INFO_PAGE_2_ENDS = ["51,000", "88,000"];
 export const infoLabels = (page: Page): Locator => page.getByTestId("ladder-info").locator(":scope > span:first-child");
 export const infoValues = (page: Page): Locator => page.getByTestId("ladder-info").locator(":scope > b");
-export const infoPager = (page: Page): Locator => page.getByRole("button", { name: /^정보 \d\/2쪽, 눌러서 다음 쪽$/ });
+export const infoCard = (page: Page): Locator => page.getByTestId("ladder-info-card");
+export const infoTab = (page: Page, name: "시세" | "종목"): Locator => infoCard(page).getByRole("tab", { name });
 
 export type Write = { path: string; body: Record<string, unknown>; header: string | undefined };
 

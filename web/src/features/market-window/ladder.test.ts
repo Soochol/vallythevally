@@ -1,6 +1,6 @@
 import { expect, test } from "vitest";
 import { basePrice, buildDefaultLadder, buildLadder, buildLadderRows, defaultLadderPrices, gridPrices, isSinglePriceBook, LADDER_ROWS, ratioSplit, type BookLevel } from "./ladder";
-import { expectedInfoItems, placeInfoItems, quoteInfoItems } from "./quoteInfo";
+import { expectedInfoItems, infoCardRows, placeInfoItems, quoteInfoItems } from "./quoteInfo";
 
 const NO_BOUNDS = { lower: null, upper: null };
 const level = (price: number, quantity: number, change = 0): BookLevel => ({ price, quantity, change });
@@ -144,10 +144,13 @@ test("동시호가 캡처: 매도 3단은 가운데 선 위, 매수 3단은 아�
   expect(rows.slice(10, 13).map((row) => [row.ask, row.bid?.quantity])).toEqual([[null, 3_012], [null, 61], [null, 57]]);
 });
 
-test("동시호가 캡처: 정보 일곱 칸과 예상체결 두 칸이 하나도 가려지지 않는다", () => {
+test("동시호가 캡처: 카드는 사다리 1~9행 자리를 다 쓰고 예상체결 두 줄이 맨 아래에 있다", () => {
+  const rows = auction();
   const info = quoteInfoItems(0, { price: 810_000, previousClose: 810_000, summary: { open: null, high: null, low: null, volume: 0, tradeValueWon: null }, fundamentals: null });
-  const slots = placeInfoItems(auction(), info, expectedInfoItems({ price: 819_000, qty: 100 }, 810_000));
-  expect(slots.filter((slot) => slot !== null).map((slot) => slot!.label)).toEqual([...info.map((item) => item.label), "예상체결가", "예상체결량"]);
+  const lines = placeInfoItems(rows, info, expectedInfoItems({ price: 819_000, qty: 100 }));
+  expect(infoCardRows(rows)).toBe(9);
+  expect(lines.length + 1).toBe(9);
+  expect(lines.slice(-2).map((line) => (line.kind === "item" ? line.item.label : line.kind))).toEqual(["예상체결가", "예상체결량"]);
 });
 
 test("교차 호가(매도 1호가 70,000, 매수 1호가 70,100)도 매도는 선 위, 매수는 선 아래이고 행 키가 겹치지 않는다", () => {

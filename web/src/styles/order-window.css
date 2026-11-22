@@ -107,8 +107,6 @@ button.od-cellbtn:hover:not(:disabled) { background:var(--hover); }
 
 .od-ladder[data-divider] .mw-lr + .mw-lr { box-shadow:inset 0 var(--size-1) 0 var(--line); }
 .od-ladder[data-divider] .mw-lr[data-side=ask] + .mw-lr[data-side=bid] { box-shadow:inset 0 var(--size-1) 0 var(--text-3); }
-.od-ladder[data-divider] .mw-qty:has(> .mw-info) { background:var(--surface); }
-.od-ladder[data-divider] .mw-lr:hover .mw-qty:has(> .mw-info) { background-image:linear-gradient(var(--hover), var(--hover)); }
 .od-ladder[data-divider] .mw-box { background:linear-gradient(var(--surface), var(--surface)) 0 var(--size-1) / 100% calc(100% - var(--size-1)) no-repeat; }
 
 .od-ladder-wrap[data-exploring] { box-shadow:inset 0 0 0 var(--size-1) var(--accent); }

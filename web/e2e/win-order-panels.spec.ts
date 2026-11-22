@@ -4,7 +4,7 @@ import type { LinkColor } from "../src/api/generated/LinkColor";
 import type { TradingExecution } from "../src/api/generated/TradingExecution";
 import type { TradingHolding } from "../src/api/generated/TradingHolding";
 import { type Scenario, cell, DEFAULT_LAYOUT_ID, expect, pollSaved, test, windowTabs } from "./harness";
-import { ACCOUNT, askAtLastSnapshot, SETTINGS, BASE, CODE, cellAt, center, chipAt, dragChip, INFO_PAGE_1, INFO_PAGE_2, INFO_PAGE_2_VALUES, infoLabels, infoPager, infoValues, openOrder, openOrderWindow, ordersOn, status, tradingApi, win, writesTo } from "./order-window";
+import { ACCOUNT, askAtLastSnapshot, SETTINGS, BASE, CODE, cellAt, center, chipAt, dragChip, INFO_PAGE_1, INFO_PAGE_2, INFO_PAGE_2_ENDS, INFO_PAGE_2_VALUES, infoCard, infoLabels, infoTab, infoValues, openOrder, openOrderWindow, ordersOn, status, tradingApi, win, writesTo } from "./order-window";
 
 const HOLDING: TradingHolding = { code: CODE, name: "삼성전자", quantity: 120, sellableQuantity: 100, averagePrice: 70_040, currentPrice: BASE, evaluationProfit: -4_800, profitRateCenti: -57 };
 const FILL: TradingExecution = { orderNo: "0000010", code: CODE, name: "삼성전자", side: "buy", quantity: 5, price: 70_000, time: "093015", venue: "krx" };
@@ -448,7 +448,7 @@ const stripAt = (page: Page, box: { x: number; y: number; width: number }, down:
 const hasLineOnTop = async (page: Page, box: { x: number; y: number; width: number }) => !(await stripAt(page, box, 0)).equals(await stripAt(page, box, 1));
 const boxOfCell = async (locator: Locator) => (await locator.boundingBox())!;
 
-test("구분선을 켜도 상세 정보란과 체결 상자 안에는 가로줄이 없고 주문·가격 칸 사이에는 있으며 끄면 어디에도 없다", async ({ page, scenario }) => {
+test("구분선을 켜도 상세 정보 카드와 체결 상자 안에는 가로줄이 없고 주문·가격 칸 사이에는 있으며 끄면 어디에도 없다", async ({ page, scenario }) => {
   ordersOn(scenario);
   tradingApi(scenario);
   await openOrderWindow(page, scenario);
@@ -474,9 +474,12 @@ test("구분선을 켜도 상세 정보란과 체결 상자 안에는 가로줄�
   expect(lines.filter((line) => line !== middle)).toHaveLength(18);
   expect(new Set(await heights())).toEqual(new Set([24]));
 
+  const card = await boxOfCell(infoCard(page));
   for (const row of [1, 3, 6]) {
-    await expect(ladderRows(page).nth(row).getByTestId("ladder-info")).toHaveCount(1);
-    expect(await hasLineOnTop(page, await boxOfCell(infoCell(row))), `정보 칸 ${row}행`).toBe(false);
+    const cell = await boxOfCell(infoCell(row));
+    expect(cell.y).toBeGreaterThanOrEqual(card.y);
+    expect(cell.y + cell.height).toBeLessThanOrEqual(card.y + card.height);
+    expect(await hasLineOnTop(page, cell), `카드 ${row}행`).toBe(false);
     expect(await hasLineOnTop(page, await boxOfCell(askCell(row))), `매도 잔량 칸 ${row}행`).toBe(true);
     expect(await hasLineOnTop(page, await underRowTop(priceCell(row), row)), `가격 칸 ${row}행`).toBe(true);
     expect(await hasLineOnTop(page, await boxOfCell(orderCell(row))), `주문 칸 ${row}행`).toBe(true);
@@ -746,7 +749,7 @@ test("현재가보다 작은 금액이면 수량 칸이 0이 되고 주문은 �
   expect(writesTo(api, "place")).toHaveLength(0);
 });
 
-test("정보 7항목이 사다리 1~7행과 같은 top에 있고 값이 맞다", async ({ page, scenario }) => {
+test("상세 정보 카드가 사다리 1~9행 자리에 있고 시세 쪽에 시가·고가·저가·기준가·전일대비·거래량·거래대금 값이 맞다", async ({ page, scenario }) => {
   ordersOn(scenario);
   tradingApi(scenario);
   await openOrderWindow(page, scenario);
@@ -754,54 +757,81 @@ test("정보 7항목이 사다리 1~7행과 같은 top에 있고 값이 맞다",
   await expect(info).toHaveCount(7);
   await expect(infoLabels(page)).toHaveText(INFO_PAGE_1);
   await expect(infoValues(page)).toHaveText(["69,900", "70,400", "69,400", "70,000", "0 0.00%", "123만", "864억"]);
-  expect(await tops(info)).toEqual((await tops(ladderRows(page))).slice(0, 7));
+  const rowTops = await tops(ladderRows(page));
+  expect(await tops(info)).toEqual([1, 2, 3, 5, 6, 7, 8].map((row) => rowTops[row]));
+  const card = (await infoCard(page).boundingBox())!;
+  const price = (await ladderRows(page).first().locator(".mw-px").boundingBox())!;
+  expect(card.y).toBeCloseTo(rowTops[0]!, 0);
+  expect(card.height).toBe(9 * 24);
+  expect(card.x).toBeGreaterThanOrEqual(price.x + price.width - 1);
+  await expect(page.getByTestId("ladder-info-range")).toHaveCount(1);
 });
 
-test("정보란을 누르면 2쪽으로 바뀌고 다시 누르면 1쪽이다", async ({ page, scenario }) => {
+test("종목 탭을 누르면 상·하한가·52주 범위·시가총액·PER·PBR·외국인소진율이 보이고 시세 탭으로 돌아온다", async ({ page, scenario }) => {
   ordersOn(scenario);
   tradingApi(scenario);
   await openOrderWindow(page, scenario);
-  await expect(infoPager(page)).toHaveAccessibleName("정보 1/2쪽, 눌러서 다음 쪽");
+  await expect(infoTab(page, "시세")).toHaveAttribute("aria-selected", "true");
   await expect(infoLabels(page)).toHaveText(INFO_PAGE_1);
 
   await page.getByTestId("ladder-info").nth(4).click();
-  await expect(infoPager(page)).toHaveAccessibleName("정보 2/2쪽, 눌러서 다음 쪽");
-  await expect(infoLabels(page)).toHaveText(INFO_PAGE_2);
-  await expect(infoValues(page)).toHaveText(INFO_PAGE_2_VALUES);
-  expect(await tops(page.getByTestId("ladder-info"))).toEqual((await tops(ladderRows(page))).slice(0, 8));
-
-  await infoPager(page).click();
   await expect(infoLabels(page)).toHaveText(INFO_PAGE_1);
 
-  await infoPager(page).focus();
+  await infoTab(page, "종목").click();
+  await expect(infoTab(page, "종목")).toHaveAttribute("aria-selected", "true");
+  await expect(infoLabels(page)).toHaveText(INFO_PAGE_2);
+  await expect(infoValues(page)).toHaveText(INFO_PAGE_2_VALUES);
+  await expect(page.getByTestId("ladder-info-ends").locator("span")).toHaveText(INFO_PAGE_2_ENDS);
+  const rowTops = await tops(ladderRows(page));
+  expect(await tops(page.getByTestId("ladder-info"))).toEqual([1, 2, 5, 6, 7].map((row) => rowTops[row]));
+
+  await infoTab(page, "시세").click();
+  await expect(infoLabels(page)).toHaveText(INFO_PAGE_1);
+});
+
+test("탭은 초점이 가면 화살표·Enter·Space로 바뀐다", async ({ page, scenario }) => {
+  ordersOn(scenario);
+  tradingApi(scenario);
+  await openOrderWindow(page, scenario);
+  await infoTab(page, "시세").focus();
+  await page.keyboard.press("ArrowRight");
+  await expect(infoLabels(page)).toHaveText(INFO_PAGE_2);
+  await expect(infoTab(page, "종목")).toBeFocused();
+  await page.keyboard.press("ArrowLeft");
+  await expect(infoLabels(page)).toHaveText(INFO_PAGE_1);
+  await infoTab(page, "종목").focus();
   await page.keyboard.press("Enter");
   await expect(infoLabels(page)).toHaveText(INFO_PAGE_2);
+  await infoTab(page, "시세").focus();
   await page.keyboard.press("Space");
   await expect(infoLabels(page)).toHaveText(INFO_PAGE_1);
 });
 
-test("정보란에서 고른 쪽은 종목이 바뀌어도 유지된다", async ({ page, scenario }) => {
+test("고른 탭은 종목이 바뀌어도 유지된다", async ({ page, scenario }) => {
   ordersOn(scenario);
   tradingApi(scenario);
   await openOrderWindow(page, scenario, true);
-  await infoPager(page).click();
+  await infoTab(page, "종목").click();
   await expect(infoLabels(page)).toHaveText(INFO_PAGE_2);
   await cell(page, 2).click();
   await expect(win(page)).toHaveAttribute("data-symbol", "000660");
-  await expect(infoPager(page)).toHaveAccessibleName("정보 2/2쪽, 눌러서 다음 쪽");
-  await expect(infoLabels(page)).toHaveText(INFO_PAGE_2);
+  await expect(infoTab(page, "종목")).toHaveAttribute("aria-selected", "true");
+  await expect(infoLabels(page).first()).toHaveText("상한가");
+  await expect(infoLabels(page)).toHaveCount(6);
   await cell(page, 1).click();
   await expect(win(page)).toHaveAttribute("data-symbol", CODE);
   await expect(infoLabels(page)).toHaveText(INFO_PAGE_2);
 });
 
-test("호가주문창에서 정보란을 더블클릭해도 주문 요청이 없다", async ({ page, scenario }) => {
+test("호가주문창에서 카드를 더블클릭해도 주문 요청이 없다", async ({ page, scenario }) => {
   ordersOn(scenario);
   const api = tradingApi(scenario);
   await openOrderWindow(page, scenario);
   const info = page.getByTestId("ladder-info");
   await info.first().dblclick();
   await info.last().dblclick();
+  await infoCard(page).dblclick({ position: { x: 3, y: 3 } });
+  await infoTab(page, "시세").dblclick();
   await expect(infoLabels(page)).toHaveText(INFO_PAGE_1);
   await expect(page.getByTestId("order-ladder")).not.toHaveAttribute("data-dragging", "");
   expect(scenario.requests.filter((request) => request.method() !== "GET" && new URL(request.url()).pathname.startsWith("/api/trading/"))).toEqual([]);
@@ -987,7 +1017,7 @@ test("교차 단일가 호가에서 같은 가격이 두 행에 있어도 주문
   expect(writesTo(api, "place")[0]!.body).toMatchObject({ side: "buy", price: 70_100 });
 });
 
-test("교차 호가로 위 오른쪽 칸에 매수 잔량이 있으면 그 행은 잔량을 보이고 그 정보 항목은 보이지 않는다", async ({ page, scenario }) => {
+test("교차 호가로 카드 자리 행에 매수 잔량이 있으면 잔량이 가려지지 않고 카드는 그 행 위까지만이다", async ({ page, scenario }) => {
   ordersOn(scenario);
   tradingApi(scenario);
   await openOrderWindow(page, scenario);
@@ -1000,11 +1030,13 @@ test("교차 호가로 위 오른쪽 칸에 매수 잔량이 있으면 그 행�
   scenario.live.emit({ type: "feed_book", sub, book: { t: 1, asks: [{ price: 70_100, qty: 50 }, { price: 70_200, qty: 40 }, { price: 70_300, qty: 30 }, { price: 70_400, qty: 20 }], bids: [{ price: 70_700, qty: 33 }, { price: 70_000, qty: 80 }], totalAskQty: 140, totalBidQty: 113, expected: null } });
   const crossed = ladderRows(page).filter({ has: page.locator(".mw-px-num", { hasText: /^70,700$/ }) });
   await expect(crossed.locator(".mw-qty[data-side=bid] .mw-qty-value")).toHaveText("33");
-  await expect(crossed.getByTestId("ladder-info")).toHaveCount(0);
+  const rowTop = (await crossed.boundingBox())!.y;
+  const card = (await infoCard(page).boundingBox())!;
+  expect(card.y + card.height).toBeLessThanOrEqual(rowTop + 0.5);
   const info = page.getByTestId("ladder-info");
-  await expect(info).toHaveCount(6);
-  await expect(info.filter({ hasText: "기준가" })).toHaveCount(0);
-  await expect(info.filter({ hasText: "거래대금" })).toContainText("864억");
+  await expect(info.filter({ hasText: "거래대금" })).toHaveCount(0);
+  const crossedIndex = (await tops(ladderRows(page))).indexOf(Math.round(rowTop * 10) / 10);
+  expect(card.height).toBe(crossedIndex * 24);
 });
 
 test.describe("수요일 08:55 동시호가", () => {
@@ -1014,7 +1046,7 @@ test.describe("수요일 08:55 동시호가", () => {
     await page.clock.setFixedTime(new Date(scenario.now));
   });
 
-  test("호가주문창 상세정보란에 예상체결 두 항목이 보이고 70,000원 행이 강조된다", async ({ page, scenario }) => {
+  test("호가주문창 상세 정보 카드에 예상체결 두 항목이 보이고 70,000원 행이 강조된다", async ({ page, scenario }) => {
     ordersOn(scenario);
     tradingApi(scenario);
     await openOrderWindow(page, scenario);

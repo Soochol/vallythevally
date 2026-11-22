@@ -44,8 +44,8 @@ function BookBody({ code, pager }: { code: SymbolCode; pager: InfoPager }) {
     if (view === null) return <EmptyState title={feed.snapshotFailed ? "호가를 불러오지 못했습니다" : "호가를 기다리는 중입니다"} />;
     const rows = buildDefaultLadder({ asks: view.asks, bids: view.bids, lastPrice: feed.lastPrice, previousClose: feed.previousClose, bounds, skipSpreadGap, tickRule: tickRuleOf(kind, [...view.asks, ...view.bids].map((level) => level.price)) });
     const expected = visibleExpected(view.t, nowSeconds, view.expected);
-    const infoSlots = placeInfoItems(rows, info, expectedItemsOnPage(pager.page, expected, feed.previousClose));
-    return <PriceLadder rows={rows} previousClose={feed.previousClose} expectedPrice={expected?.price ?? null} rowSlots={{ topRight: infoSlot(infoSlots, pager, rows), bottomLeft: tradeSlot(trades, feed.previousClose) }} />;
+    const infoSlots = placeInfoItems(rows, info, expectedItemsOnPage(pager.page, expected));
+    return <PriceLadder rows={rows} previousClose={feed.previousClose} expectedPrice={expected?.price ?? null} rowSlots={{ infoCard: infoSlot(infoSlots, pager), bottomLeft: tradeSlot(trades, feed.previousClose) }} />;
   })();
   return (
     <div className="bk" data-testid="book-window" data-symbol={code} data-connected={feed.connected ? "" : undefined}>
