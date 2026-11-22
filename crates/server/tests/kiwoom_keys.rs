@@ -549,3 +549,23 @@ async fn a_blocked_key_added_back_under_a_new_id_is_still_blocked() {
     assert_eq!(issued_for(&fake, SECOND_KEY), 1);
     server.stop().await;
 }
+
+#[tokio::test]
+async fn replacing_onto_an_app_key_that_already_has_a_file_keeps_the_block_of_the_replaced_key() {
+    let fake = ScriptedTransport::new();
+    let env = Env::new();
+    let server = env.spawn(&fake, &[OFF]);
+    let client = Client::of(&server).await;
+    assert_eq!(client.put_market_credentials(FIRST_KEY, FIRST_SECRET).await.0, 200);
+    client.until_key_state("k1", "connected").await;
+    assert_eq!(client.add("셋째", THIRD_KEY, THIRD_SECRET).await.0, 200);
+    client.until_key_state("k2", "connected").await;
+    assert_eq!(client.send(reqwest::Method::DELETE, "/api/system/kiwoom/keys/k2", None).await.0, 200);
+    fake.script("au10001", vec![ScriptedReply { status: 200, body: json!({"return_code": 3, "return_msg": EIGHT_FIFTY}), delay: Duration::ZERO }]);
+    assert_eq!(client.add("막힌 키", SECOND_KEY, SECOND_SECRET).await.0, 200);
+    client.until_key_state("k2", "failed").await;
+    let replaced = client.send(reqwest::Method::PUT, "/api/system/kiwoom/keys/k2/key", Some(json!({"appKey": THIRD_KEY, "appSecret": THIRD_SECRET}))).await;
+    assert_eq!(replaced.0, 200, "{}", replaced.1);
+    assert_eq!(client.key("k2").await["link"]["problem"], "authBlocked8050", "이미 파일이 있는 앱키로 바꿔도 8050은 남는다");
+    server.stop().await;
+}

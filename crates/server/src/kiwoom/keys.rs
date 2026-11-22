@@ -11,7 +11,7 @@ use super::link::Link;
 use super::private_file::FileError;
 use super::rest::KiwoomRest;
 use super::stream::KiwoomStream;
-use super::token_file::TokenFile;
+use super::token_file::{Saved, TokenFile};
 use super::transport::Transport;
 use crate::api::{Broker, KiwoomEnvironment, RegisteredIp};
 use crate::clock::Clock;
@@ -57,8 +57,8 @@ impl LaneFactory {
         TokenFile::held(paths.token.clone(), self.bases.held).with_environment(self.environment)
     }
 
-    fn paths_for(&self, credentials: &KiwoomCredentials, first_claimant: bool, listed: &[KiwoomCredentials]) -> KeyPaths {
-        paths_for_key(&self.bases, self.environment, credentials, first_claimant, listed)
+    fn paths_for(&self, credentials: &KiwoomCredentials, base_taken: bool, listed: &[KiwoomCredentials]) -> KeyPaths {
+        paths_for_key(&self.bases, self.environment, credentials, base_taken, listed)
     }
 
     fn account_lane(&self, paths: &KeyPaths, credentials: &KiwoomCredentials) -> Lane {
@@ -305,7 +305,8 @@ impl KeyRing {
         }
         self.persist(&proposed)?;
         let listed: Vec<KiwoomCredentials> = inner.entries.iter().map(|entry| entry.credentials.clone()).chain([credentials.clone()]).collect();
-        let paths = factory.paths_for(&credentials, first, &listed);
+        let base_taken = inner.entries.iter().any(|entry| entry.paths.token == factory.bases.token);
+        let paths = factory.paths_for(&credentials, base_taken, &listed);
         let lane = if first { self.market_lane.clone() } else { factory.account_lane(&paths, &credentials) };
         let registered_ip = registered_ip_file(paths.registered_ip.clone()).load().ok().flatten();
         let entry = Entry { id: id.clone(), alias, origin: KeyOrigin::File, broker: Broker::Kiwoom, credentials, paths, lane, registered_ip };
@@ -348,16 +349,40 @@ impl KeyRing {
         entry.credentials = credentials;
         let owns_base = entry.paths.token == factory.bases.token;
         let new_paths = if owns_base { entry.paths.clone() } else { derived_paths(&factory.bases, &entry.credentials) };
-        for (from, to) in [(&entry.paths.token, &new_paths.token), (&entry.paths.registered_ip, &new_paths.registered_ip)] {
-            if from != to && from.exists() && !to.exists() && let Err(e) = std::fs::rename(from, to) {
-                tracing::warn!(error = %e, "키를 바꾸면서 키별 파일을 새 이름으로 옮기지 못했습니다");
-            }
+        if entry.paths.token != new_paths.token && entry.paths.token.exists() {
+            Self::move_token_file(factory, &entry.paths, &new_paths);
+        }
+        if entry.paths.registered_ip != new_paths.registered_ip && entry.paths.registered_ip.exists() && !new_paths.registered_ip.exists() && let Err(e) = std::fs::rename(&entry.paths.registered_ip, &new_paths.registered_ip) {
+            tracing::warn!(error = %e, "키를 바꾸면서 등록 IP 기록을 새 이름으로 옮기지 못했습니다");
         }
         entry.paths = new_paths;
         entry.lane.link.rebind(identity(factory, entry));
         entry.lane.link.record_key_in_token_file();
         entry.lane.link.connect_in_background();
         Ok(())
+    }
+
+    fn move_token_file(factory: &LaneFactory, from: &KeyPaths, to: &KeyPaths) {
+        let (source, target) = (factory.token_file(from), factory.token_file(to));
+        let merged = match (source.load(), target.load()) {
+            (Ok(Some(source)), Ok(Some(target))) => Saved {
+                credential: target.credential,
+                token: target.token,
+                last_request_at: source.last_request_at.max(target.last_request_at),
+                disconnected: None,
+                auth_block: source.auth_block.or(target.auth_block),
+            },
+            (Ok(Some(source)), Ok(None)) => source,
+            (Ok(None), _) => return,
+            (Err(e), _) | (_, Err(e)) => {
+                tracing::warn!(error = %e, "키를 바꾸면서 토큰 파일을 새 이름으로 옮기지 못했습니다");
+                return;
+            }
+        };
+        match target.save(&merged) {
+            Ok(()) => drop(std::fs::remove_file(&from.token)),
+            Err(e) => tracing::warn!(error = %e, "키를 바꾸면서 토큰 파일을 새 이름으로 옮기지 못했습니다"),
+        }
     }
 
     pub fn remove(&self, id: &KeyId) -> Result<(), KeyError> {
