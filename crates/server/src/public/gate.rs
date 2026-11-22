@@ -38,7 +38,7 @@ fn kind_of(method: &Method, path: &str) -> Kind {
     }
 }
 
-pub(super) struct Meters {
+pub(crate) struct Meters {
     account: super::limits::PerAccount<TokenBucket>,
     total: std::sync::Mutex<TokenBucket>,
     anon: std::sync::Mutex<TokenBucket>,
@@ -67,7 +67,7 @@ impl Meters {
     }
 }
 
-pub(super) struct Flight {
+pub(crate) struct Flight {
     total: super::limits::Slots,
     anon: super::limits::Slots,
     account: super::limits::AccountSlots,

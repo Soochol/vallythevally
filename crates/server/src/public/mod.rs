@@ -12,6 +12,9 @@ pub mod static_files;
 pub mod usage;
 
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
+use futures::future::BoxFuture;
+use crate::kiwoom::transport::{HttpRequest, HttpResponse, Transport, TransportError};
 use std::time::{Duration, Instant};
 
 use axum::Router;
@@ -19,7 +22,7 @@ use axum::extract::{Request, State};
 use axum::http::{Method, Uri};
 use axum::middleware::{Next, from_fn_with_state, map_response};
 use axum::response::{Json, Response};
-use axum::routing::{any, any_service, get};
+use axum::routing::{any, get};
 use tokio::net::TcpListener;
 use tower_http::catch_panic::CatchPanicLayer;
 use tower_http::compression::predicate::{DefaultPredicate, NotForContentType, Predicate};
@@ -60,6 +63,7 @@ pub(crate) struct Runtime {
     pub(super) meters: gate::Meters,
     pub(super) flight: gate::Flight,
     pub(super) kiwoom: kiwoom_guard::KiwoomGuard,
+    pub(super) sends: Arc<AtomicU64>,
 }
 
 pub struct PublicListener {
@@ -70,7 +74,25 @@ pub struct PublicListener {
     site: Arc<StaticSite>,
 }
 
-pub async fn start(config: &Config, state: Arc<AppState>, financial_routes: Router) -> Result<Option<PublicListener>, StartFailure> {
+struct CountingTransport {
+    inner: Arc<dyn Transport>,
+    sent: Arc<AtomicU64>,
+}
+
+impl Transport for CountingTransport {
+    fn send(&self, request: HttpRequest) -> BoxFuture<'static, Result<HttpResponse, TransportError>> {
+        self.sent.fetch_add(1, Ordering::Relaxed);
+        self.inner.send(request)
+    }
+}
+
+/// 키움으로 나가는 요청 수를 센다. 공개 요청 앞뒤의 차이가 그 요청의 TR 수 추정이다(운영자 호출이 같은 때 섞일 수 있다).
+pub fn counted(inner: Arc<dyn Transport>) -> (Arc<dyn Transport>, Arc<AtomicU64>) {
+    let sent = Arc::new(AtomicU64::new(0));
+    (Arc::new(CountingTransport { inner, sent: sent.clone() }), sent)
+}
+
+pub async fn start(config: &Config, state: Arc<AppState>, financial_routes: Router, sends: Arc<AtomicU64>) -> Result<Option<PublicListener>, StartFailure> {
     let Some(settings) = config.public.clone() else { return Ok(None) };
     let PublicSettings { bind, origin, account, limits } = settings;
     let listener = TcpListener::bind(bind.socket_addr()).await.map_err(|e| {
@@ -105,6 +127,7 @@ pub async fn start(config: &Config, state: Arc<AppState>, financial_routes: Rout
         meters: gate::Meters::new(&limits, now),
         flight: gate::Flight::new(&limits),
         kiwoom: kiwoom_guard::KiwoomGuard::new(&limits),
+        sends,
         limits,
         state,
     });
@@ -153,7 +176,8 @@ impl PublicListener {
             .route("/api", any(not_found))
             .route("/api/{*rest}", any(not_found))
             .route("/v1", any(not_found))
-            .route("/v1/{*rest}", any_service(self.browser_login.clone()))
+            .route("/auth/{*rest}", any(not_found))
+            .route("/v1/{*rest}", any(v1_proxy).with_state(self.browser_login.clone()))
             .layer(from_fn_with_state(runtime.clone(), gate::gate));
         let finish_state = runtime.clone();
         Router::new()
@@ -179,10 +203,18 @@ impl PublicListener {
     }
 }
 
-pub fn compression() -> CompressionLayer<impl Predicate + Clone> {
+pub fn compression() -> CompressionLayer<impl Predicate> {
     CompressionLayer::new()
         .quality(CompressionLevel::Precise(COMPRESSION_QUALITY))
         .compress_when(DefaultPredicate::new().and(NotForContentType::const_new("font/woff2")).and(NotForContentType::const_new("font/woff")).and(NotForContentType::const_new("application/zip")))
+}
+
+async fn v1_proxy(State(login): State<Router>, mut request: Request) -> Response {
+    *request.extensions_mut() = axum::http::Extensions::new();
+    match tower::ServiceExt::oneshot(login, request).await {
+        Ok(response) => response,
+        Err(never) => match never {},
+    }
 }
 
 async fn not_found() -> Response {

@@ -21,7 +21,7 @@ const REQUEST_BODY_LIMIT: usize = 64 * 1024;
 const CACHE_ENTRIES: usize = 256;
 const BUSY_RETRY_SECS: i64 = 2;
 
-pub(super) enum Refusal {
+pub(crate) enum Refusal {
     Busy,
     Limited { retry_at: i64 },
 }
@@ -35,7 +35,7 @@ impl Refusal {
     }
 }
 
-pub(super) struct Held {
+pub(crate) struct Held {
     _account: OwnedSemaphorePermit,
     _bundle: Option<OwnedSemaphorePermit>,
 }
@@ -56,7 +56,7 @@ impl Cached {
     }
 }
 
-pub(super) struct KiwoomGuard {
+pub(crate) struct KiwoomGuard {
     ranking_max_pages: u8,
     market_cache_secs: i64,
     status_cache_secs: i64,
@@ -148,7 +148,7 @@ fn principal_key(request: &Request) -> Option<String> {
 }
 
 fn total_trs_sent(runtime: &Runtime) -> u64 {
-    runtime.state.rest.usage().trs.iter().map(|tr| tr.total_sent).sum()
+    runtime.sends.load(std::sync::atomic::Ordering::Relaxed)
 }
 
 async fn cache_if_ok(response: Response) -> (Response, Option<Cached>) {

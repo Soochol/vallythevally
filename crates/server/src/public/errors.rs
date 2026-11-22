@@ -81,7 +81,7 @@ pub(super) async fn shape(response: Response, now: i64) -> Response {
     let Ok(bytes) = axum::body::to_bytes(inner, SHAPED_BODY_LIMIT).await else { return internal() };
     let Ok(mut error) = serde_json::from_slice::<api::ApiError>(&bytes) else { return Response::from_parts(parts, Body::from(bytes)) };
     let mut status = status;
-    if is_kiwoom_code(error.error.code) {
+    if is_kiwoom_code(error.error.code) && status != StatusCode::TOO_MANY_REQUESTS {
         let soonest = now + KIWOOM_RETRY_SECS;
         let retry_at = error.error.retry_at.map_or(soonest, |at| at.0.min(soonest));
         error.error.message = KIWOOM_FIXED.to_owned();
