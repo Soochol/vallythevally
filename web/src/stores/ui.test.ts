@@ -1,5 +1,6 @@
 import { beforeEach, expect, test } from "vitest";
 import { DEFAULT_UI_PREFS } from "../persist/uiState";
+import { orderEntryKey, type OrderEntry } from "../features/order/orderEntries";
 import { useUiStore } from "./ui";
 
 beforeEach(() => useUiStore.getState().load(DEFAULT_UI_PREFS, {}));
@@ -26,5 +27,19 @@ test("창 배치 방식을 바꾸면 한 번 저장하고 같은 값은 저장�
   expect(useUiStore.getState().prefs.layoutMode).toBe("canvas");
   expect(useUiStore.getState().revision).toBe(revision + 1);
   useUiStore.getState().setLayoutMode("canvas");
+  expect(useUiStore.getState().revision).toBe(revision + 1);
+});
+
+test("호가주문창의 기억을 지우면 그 레이아웃의 그 창 기억만 지우고 없으면 저장하지 않는다", () => {
+  const entry: OrderEntry = { presetKind: "sharePresets", quantity: 5, usedAt: 1 };
+  const s = useUiStore.getState();
+  for (const key of [orderEntryKey("L", "order-2", "A"), orderEntryKey("L", "order-2", "B"), orderEntryKey("L", "order-20", "A"), orderEntryKey("L", "order", "A"), orderEntryKey("M", "order-2", "A")]) s.rememberOrderEntry(key, entry);
+  const revision = useUiStore.getState().revision;
+  s.forgetOrderWindow("L", "order-2");
+  expect(Object.keys(useUiStore.getState().prefs.orderEntries).sort()).toEqual([orderEntryKey("L", "order", "A"), orderEntryKey("L", "order-20", "A"), orderEntryKey("M", "order-2", "A")].sort());
+  expect(useUiStore.getState().revision).toBe(revision + 1);
+  const prefs = useUiStore.getState().prefs;
+  s.forgetOrderWindow("L", "order-2");
+  expect(useUiStore.getState().prefs).toBe(prefs);
   expect(useUiStore.getState().revision).toBe(revision + 1);
 });
