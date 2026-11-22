@@ -9,7 +9,7 @@ describe("호가주문 설정", () => {
   });
 
   it("저장된 값을 읽는다", () => {
-    expect(parseOrderSettings({ sharePresets: [1, 2, 3, 4], amountPresets: [5, 6, 7, 8], averageDot: false, divider: false, rate: false, skipSpreadGap: true, maskAccount: false, venue: "nxt" })).toEqual({ sharePresets: [1, 2, 3, 4], amountPresets: [5, 6, 7, 8], averageDot: false, divider: false, rate: false, skipSpreadGap: true, maskAccount: false, venue: "nxt" });
+    expect(parseOrderSettings({ sharePresets: [1, 2, 3, 4], amountPresets: [5, 6, 7, 8], averageDot: false, divider: false, rate: false, skipSpreadGap: true, maskAccount: false, keepLastEntry: false, venue: "nxt" })).toEqual({ sharePresets: [1, 2, 3, 4], amountPresets: [5, 6, 7, 8], averageDot: false, divider: false, rate: false, skipSpreadGap: true, maskAccount: false, keepLastEntry: false, venue: "nxt" });
   });
 
   it("호가 사이 빈 가격 건너뛰기는 기본이 꺼짐이고 옛 저장값에 없거나 불이 아니면 꺼짐이며 있으면 그 값이다", () => {
@@ -19,6 +19,15 @@ describe("호가주문 설정", () => {
     expect(parseOrderSettings({ skipSpreadGap: 1 }).skipSpreadGap).toBe(false);
     expect(parseOrderSettings({ skipSpreadGap: true }).skipSpreadGap).toBe(true);
     expect(parseOrderSettings({ skipSpreadGap: false }).skipSpreadGap).toBe(false);
+  });
+
+  it("마지막 주문 수량 유지는 기본이 켜짐이고 옛 저장값에 없거나 깨졌으면 켜짐이며 있으면 그 값이다", () => {
+    expect(DEFAULT_ORDER_SETTINGS.keepLastEntry).toBe(true);
+    expect(parseOrderSettings({ sharePresets: [1, 2, 3, 4] }).keepLastEntry).toBe(true);
+    expect(parseOrderSettings({ keepLastEntry: "no" }).keepLastEntry).toBe(true);
+    expect(parseOrderSettings({ keepLastEntry: 0 }).keepLastEntry).toBe(true);
+    expect(parseOrderSettings({ keepLastEntry: false }).keepLastEntry).toBe(false);
+    expect(parseOrderSettings({ keepLastEntry: true }).keepLastEntry).toBe(true);
   });
 
   it("계좌번호 가리기는 기본이 켜짐이고 옛 저장값에 없거나 깨졌으면 켜짐이다", () => {

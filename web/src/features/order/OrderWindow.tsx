@@ -9,6 +9,7 @@ import { useOrdersStatus } from "../../api/system";
 import { formatPrice } from "../../lib/format";
 import { isIndexCode } from "../../lib/symbol";
 import { useMockEnvironment } from "../../stores/kiwoomLink";
+import { useLayoutStore } from "../../stores/layout";
 import { useOrderSettings, useUiStore } from "../../stores/ui";
 import { useBookFeed } from "../book/useBookFeed";
 import { basePrice, buildLadderRows, defaultLadderPrices, type LadderPrices, type LadderRow } from "../market-window/ladder";
@@ -24,7 +25,7 @@ import { useShownVenue } from "../market-window/useShownVenue";
 import { EmptyState } from "../overlay/State";
 import { openSystemSettings } from "../system-settings/open";
 import { AccountBand } from "./AccountBand";
-import { averageRowPrice, ETF_ETN_AFTER_HOURS_TEXT, holdingOf, isEtfOrEtnAfterHours, type ProfitUnit, toggledUnit } from "./holdingSummary";
+import { averageRowPrice, ETF_ETN_AFTER_HOURS_TEXT, holdingOf, isEtfOrEtnAfterHours, type ProfitUnit, sellOrderQuantity, toggledUnit } from "./holdingSummary";
 import { HoldingSummary } from "./HoldingSummary";
 import { OrderSettingsPopover } from "./OrderSettingsPopover";
 import { tickRuleOf } from "../market-window/tick";
@@ -32,6 +33,7 @@ import { fullRangePrices } from "./priceRange";
 import { HighValueConfirm, type HighValueRequest } from "./HighValueConfirm";
 import { DragGhost } from "./DragGhost";
 import { type HoverCell, OrderLadder } from "./OrderLadder";
+import { orderEntryKey } from "./orderEntries";
 import { OrderTotals } from "./OrderTotals";
 import { OrderStatusBar } from "./OrderStatusBar";
 import { REJECT_TEXT } from "./statusText";
@@ -59,8 +61,10 @@ function OrderBody({ id, code, infoPager }: { id: WindowId; code: SymbolCode; in
   const quoteVenue = useShownVenue(code);
   const feed = useBookFeed(code, quoteVenue);
   const access = useOrderAccess();
-  const [presetKind, setPresetKind] = useState<PresetKind>("sharePresets");
-  const [input, setInput] = useState("10");
+  const entryKey = useLayoutStore((s) => orderEntryKey(s.layout.id, id, code));
+  const [kept] = useState(() => { const { prefs } = useUiStore.getState(); return prefs.orderSettings.keepLastEntry ? prefs.orderEntries[entryKey] ?? null : null; });
+  const [presetKind, setPresetKind] = useState<PresetKind>(kept?.presetKind ?? "sharePresets");
+  const [input, setInput] = useState(kept === null ? "10" : String(kept.quantity));
   const [hover, setHover] = useState<HoverCell | null>(null);
   const [confirm, setConfirm] = useState<HighValueRequest | null>(null);
   const [exploring, setExploring] = useState(false);
@@ -73,6 +77,7 @@ function OrderBody({ id, code, infoPager }: { id: WindowId; code: SymbolCode; in
   const settings = useOrderSettings();
   const orderVenue: Venue = mock ? "krx" : settings.venue;
   const setSettings = useUiStore((s) => s.setOrderSettings);
+  const rememberEntry = useUiStore((s) => s.rememberOrderEntry);
   const limits = useFundamentals(code).data;
   const symbolInfo = useSymbolInfo(code).data;
   const nxtNotTraded = orderVenue === "nxt" && symbolInfo?.nxtEnabled === false;
@@ -139,7 +144,10 @@ function OrderBody({ id, code, infoPager }: { id: WindowId; code: SymbolCode; in
 
   const submit = (side: OrderSide, price: number, quantity: number) => {
     const margin = side === "buy" ? marginOf(orderAmount(price, quantity), data.capacity.buying) : 0;
-    const send = (confirmHighValue: boolean) => writes.place({ side, price, quantity, confirmHighValue, margin });
+    const send = (confirmHighValue: boolean) => {
+      writes.place({ side, price, quantity, confirmHighValue, margin });
+      if (settings.keepLastEntry) rememberEntry(entryKey, { presetKind, quantity, usedAt: Date.now() });
+    };
     if (needsHighValueConfirm(price, quantity)) setConfirm({ title: `${SIDE_LABEL[side]} ${formatQuantity(quantity)} · ${formatPrice(price, false)}원`, amount: price * quantity, run: () => send(true) });
     else send(false);
   };
@@ -175,9 +183,9 @@ function OrderBody({ id, code, infoPager }: { id: WindowId; code: SymbolCode; in
         </div>
       )}
       <AccountBand windowId={id} accountTail={accountTail} maskAccount={settings.maskAccount} openOrders={data.openOrders} balance={data.balance} executions={data.executions} writable={writable} mock={mock} policy={data.orderable?.policy ?? null} onCancel={writes.cancelOne} />
-      <HoldingSummary holding={holding} orderable={data.orderable} buyableProblem={data.buyableProblem} unit={profitUnit} onUnit={() => setProfitUnit(toggledUnit)} onFill={setInput} />
+      <HoldingSummary holding={holding} orderable={data.orderable} buyableProblem={data.buyableProblem} sellOrdered={sellOrderQuantity(data.groups)} unit={profitUnit} onUnit={() => setProfitUnit(toggledUnit)} onFill={setInput} />
       <div className="od-entry">
-        <QuantityRow presetKind={presetKind} input={input} sharePresets={settings.sharePresets} amountPresets={settings.amountPresets} referencePrice={referencePrice} onPresetKind={setPresetKind} onInput={setInput} />
+        <QuantityRow presetKind={presetKind} input={input} sharePresets={settings.sharePresets} amountPresets={settings.amountPresets} referencePrice={referencePrice} keepLastEntry={settings.keepLastEntry} onPresetKind={setPresetKind} onInput={setInput} />
         <div className="od-toolbar">
           <OrderEstimate estimate={estimate} note={estimate !== null && hover?.side !== "sell" ? estimateNote(estimate, data.capacity.buying) : null} />
           <button type="button" className="od-tool" data-testid="order-explorer" aria-pressed={explorerOn} disabled={referencePrice === null || fullPrices === null} title={fullPrices === null ? EXPLORER_UNAVAILABLE : undefined} onClick={() => { if (!explorerOn) setCenterToken((token) => token + 1); setExploring(!explorerOn); }}>전체 호가</button>

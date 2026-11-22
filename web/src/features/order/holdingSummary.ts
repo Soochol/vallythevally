@@ -6,6 +6,7 @@ import { formatPercent } from "../../lib/format";
 import { isEtfOrEtn } from "../../lib/symbol";
 import { formatWon } from "../market-window/format";
 import { secondOfDay } from "../trades/tape";
+import type { PriceGroup } from "./orderRules";
 
 export type ProfitUnit = "won" | "percent";
 
@@ -20,9 +21,20 @@ export function profitText(holding: TradingHolding | null, unit: ProfitUnit): st
 
 export const toggledUnit = (unit: ProfitUnit): ProfitUnit => (unit === "won" ? "percent" : "won");
 
-export function sellableFill(holding: TradingHolding | null): string | null {
-  if (holding === null || !(holding.sellableQuantity > 0)) return null;
-  return String(holding.sellableQuantity);
+export const ALL_SELLING_TEXT = "모두 매도 주문 중입니다";
+
+export function sellOrderQuantity(groups: ReadonlyMap<string, PriceGroup>): number {
+  let quantity = 0;
+  for (const group of groups.values()) if (group.side === "sell") quantity += group.quantity;
+  return quantity;
+}
+
+export const remainingToSell = (holding: TradingHolding, sellOrdered: number): number => Math.min(holding.sellableQuantity, holding.quantity - sellOrdered);
+
+export function sellableFill(holding: TradingHolding | null, sellOrdered: number): string | null {
+  if (holding === null) return null;
+  const remaining = remainingToSell(holding, sellOrdered);
+  return remaining > 0 ? String(remaining) : null;
 }
 
 export const costTitle = (holding: TradingHolding | null): string | undefined => (holding === null ? undefined : `매입총금액 ${formatWon(Math.round(holding.averagePrice * holding.quantity))}`);

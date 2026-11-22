@@ -5,6 +5,7 @@ export const SHARE_PRESET_COUNT = 4;
 export const MAX_PRESET_SHARES = 999_999;
 export const MAX_PRESET_AMOUNT_MAN = 999_999;
 export const AMOUNT_UNIT_WON = 10_000;
+export const KEEP_LAST_ENTRY_LABEL = "마지막 주문 수량 유지";
 
 export interface OrderSettings {
   readonly sharePresets: readonly number[];
@@ -14,16 +15,17 @@ export interface OrderSettings {
   readonly rate: boolean;
   readonly skipSpreadGap: boolean;
   readonly maskAccount: boolean;
+  readonly keepLastEntry: boolean;
   readonly venue: Venue;
 }
 
-export const DEFAULT_ORDER_SETTINGS: OrderSettings = { sharePresets: [10, 50, 100, 500], amountPresets: [100, 500, 1_000, 5_000], averageDot: true, divider: true, rate: true, skipSpreadGap: false, maskAccount: true, venue: "combined" };
+export const DEFAULT_ORDER_SETTINGS: OrderSettings = { sharePresets: [10, 50, 100, 500], amountPresets: [100, 500, 1_000, 5_000], averageDot: true, divider: true, rate: true, skipSpreadGap: false, maskAccount: true, keepLastEntry: true, venue: "combined" };
 
 const isPreset = (x: unknown): x is number => typeof x === "number" && Number.isInteger(x) && x > 0 && x <= MAX_PRESET_SHARES;
 
 export function parseOrderSettings(raw: unknown): OrderSettings {
   if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return DEFAULT_ORDER_SETTINGS;
-  const { sharePresets, amountPresets, averageDot, divider, rate, skipSpreadGap, maskAccount, venue } = raw as Record<string, unknown>;
+  const { sharePresets, amountPresets, averageDot, divider, rate, skipSpreadGap, maskAccount, keepLastEntry, venue } = raw as Record<string, unknown>;
   const flag = (value: unknown, fallback: boolean) => (typeof value === "boolean" ? value : fallback);
   return {
     sharePresets: Array.isArray(sharePresets) && sharePresets.length === SHARE_PRESET_COUNT && sharePresets.every(isPreset) ? sharePresets : DEFAULT_ORDER_SETTINGS.sharePresets,
@@ -33,6 +35,7 @@ export function parseOrderSettings(raw: unknown): OrderSettings {
     rate: flag(rate, DEFAULT_ORDER_SETTINGS.rate),
     skipSpreadGap: flag(skipSpreadGap, DEFAULT_ORDER_SETTINGS.skipSpreadGap),
     maskAccount: flag(maskAccount, DEFAULT_ORDER_SETTINGS.maskAccount),
+    keepLastEntry: flag(keepLastEntry, DEFAULT_ORDER_SETTINGS.keepLastEntry),
     venue: typeof venue === "string" && isVenue(venue) ? venue : DEFAULT_ORDER_SETTINGS.venue,
   };
 }

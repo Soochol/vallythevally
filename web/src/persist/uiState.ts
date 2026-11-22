@@ -10,6 +10,7 @@ import { NO_HOTKEY_OVERRIDES, parseHotkeys, type HotkeyOverrides } from "../lib/
 import { DEFAULT_DRAWING_PREFS, parseDrawingPrefs, type DrawingPrefs } from "../chart/drawings/prefs";
 
 import type { LayoutMode } from "../layout/modes";
+import { NO_ORDER_ENTRIES, parseOrderEntries, type OrderEntries } from "../features/order/orderEntries";
 import { DEFAULT_ORDER_SETTINGS, parseOrderSettings, type OrderSettings } from "../features/order/orderSettings";
 
 export type Theme = UiState["theme"];
@@ -31,6 +32,7 @@ export interface UiPrefs {
   layoutMode: LayoutMode;
   venue: Venue;
   orderSettings: OrderSettings;
+  orderEntries: OrderEntries;
   hotkeys: HotkeyOverrides;
   pageLink: LinkColor | null;
 }
@@ -50,6 +52,7 @@ export const DEFAULT_UI_PREFS: UiPrefs = {
   layoutMode: "dock",
   venue: "combined",
   orderSettings: DEFAULT_ORDER_SETTINGS,
+  orderEntries: NO_ORDER_ENTRIES,
   hotkeys: NO_HOTKEY_OVERRIDES,
   pageLink: "a",
 };
@@ -63,7 +66,7 @@ export function parseUiState(raw: unknown): { prefs: UiPrefs; extra: UiExtra } {
     console.warn("UiState가 객체가 아니어서 기본값으로 엽니다", raw);
     return { prefs: DEFAULT_UI_PREFS, extra: {} };
   }
-  const { rightPanel: _rightPanel, panelWidth: _panelWidth, rightPanelWidth: _rightPanelWidth, lastLayoutId, theme, watchCollapsed: _watchCollapsed, recentSymbols, activeWatchlistId, watchColumns, drawing, lastMinute, pinnedMinutes: _pinnedMinutes, collapsedWatchGroups, indicatorWindow, layoutMode, venue, orderSettings, hotkeys, pageLink, revision: _revision, ...extra } = raw as Record<string, unknown>;
+  const { rightPanel: _rightPanel, panelWidth: _panelWidth, rightPanelWidth: _rightPanelWidth, lastLayoutId, theme, watchCollapsed: _watchCollapsed, recentSymbols, activeWatchlistId, watchColumns, drawing, lastMinute, pinnedMinutes: _pinnedMinutes, collapsedWatchGroups, indicatorWindow, layoutMode, venue, orderSettings, orderEntries, hotkeys, pageLink, revision: _revision, ...extra } = raw as Record<string, unknown>;
   const bad: string[] = [];
   const pick = <T>(key: string, value: unknown, ok: (x: unknown) => x is T, fallback: T, missingOk = false): T => {
     if (ok(value)) return value;
@@ -85,6 +88,7 @@ export function parseUiState(raw: unknown): { prefs: UiPrefs; extra: UiExtra } {
     layoutMode: pick("layoutMode", layoutMode, (x): x is LayoutMode => x === "dock" || x === "canvas", "dock", true),
     venue: pick("venue", venue, (x): x is Venue => typeof x === "string" && isVenue(x), DEFAULT_UI_PREFS.venue, true),
     orderSettings: parseOrderSettings(orderSettings),
+    orderEntries: parseOrderEntries(orderEntries),
     hotkeys: parsedHotkeys.hotkeys,
     pageLink: pick("pageLink", pageLink, (x): x is LinkColor | null => x === null || (typeof x === "string" && (LINK_COLORS as string[]).includes(x)), DEFAULT_UI_PREFS.pageLink, true),
     lastMinute: pick("lastMinute", lastMinute, (x): x is MinutePeriod => typeof x === "string" && isMinutePeriod(x), DEFAULT_UI_PREFS.lastMinute, true),

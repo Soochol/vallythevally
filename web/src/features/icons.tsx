@@ -188,6 +188,13 @@ export const GearIcon = ({ size = 16 }: P) => (
   </Icon>
 );
 
+export const CogIcon = ({ size = 16 }: P) => (
+  <Icon size={size}>
+    <path d="M10.0 5.4L10.1 1.6L13.9 1.6L14.0 5.4L16.7 7.0L20.1 5.1L22.0 8.5L18.7 10.4L18.7 13.6L22.0 15.5L20.1 18.9L16.7 17.0L14.0 18.6L13.9 22.4L10.1 22.4L10.0 18.6L7.3 17.0L3.9 18.9L2.0 15.5L5.3 13.6L5.3 10.4L2.0 8.5L3.9 5.1L7.3 7.0z" />
+    <circle cx="12" cy="12" r="2.6" />
+  </Icon>
+);
+
 export const WorkspaceIcon = ({ size }: P) => (
   <Icon size={size}>
     <rect x="3" y="4" width="18" height="16" rx="2" />

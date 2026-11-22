@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import type { Venue } from "../../api/generated/Venue";
-import { GearIcon } from "../icons";
+import { CogIcon } from "../icons";
 import { Segmented } from "../market-window/parts";
-import { type OrderSettings, type PresetKind, SHARE_PRESET_COUNT, withPresetOf } from "./orderSettings";
+import { KEEP_LAST_ENTRY_LABEL, type OrderSettings, type PresetKind, SHARE_PRESET_COUNT, withPresetOf } from "./orderSettings";
 import { MOCK_KRX_ONLY_TEXT, REJECT_TEXT } from "./statusText";
 
 const ROUTES = [{ value: "combined", label: "SOR" }, { value: "krx", label: "KRX" }, { value: "nxt", label: "NXT" }] as const;
@@ -18,7 +18,8 @@ interface Props {
   readonly onChange: (settings: OrderSettings) => void;
 }
 
-const FLAGS: readonly { readonly key: "averageDot" | "divider" | "rate" | "skipSpreadGap" | "maskAccount"; readonly label: string; readonly title?: string }[] = [
+const FLAGS: readonly { readonly key: "keepLastEntry" | "averageDot" | "divider" | "rate" | "skipSpreadGap" | "maskAccount"; readonly label: string; readonly note?: string; readonly title?: string }[] = [
+  { key: "keepLastEntry", label: KEEP_LAST_ENTRY_LABEL, note: "창·종목마다 따로 기억합니다", title: "주문을 보낼 때의 수량과 수량·금액 방식을 그 창의 그 종목마다 기억해 다시 열 때 그 값으로 시작합니다" },
   { key: "averageDot", label: "평단가 점" },
   { key: "divider", label: "구분선" },
   { key: "rate", label: "등락률 표시" },
@@ -79,7 +80,7 @@ export function OrderSettingsPopover({ settings, venue, mock, nxtNotTraded, hold
     <div className="od-settings" ref={root}>
       <button type="button" className="od-gear" data-testid="order-settings-button" aria-label={`호가주문 설정 · 주문 경로 ${routeLabel(venue)}`} aria-expanded={open} data-warn={nxtNotTraded ? "" : undefined} title={nxtNotTraded ? REJECT_TEXT.nxt_unavailable : undefined} onClick={() => setOpen((was) => !was)}>
         <span className="od-gear-route">{routeLabel(venue)}</span>
-        <GearIcon size={14} />
+        <CogIcon size={14} />
       </button>
       {open && (
         <div className="od-settings-pop" role="dialog" aria-label="호가주문 설정" data-testid="order-settings">
@@ -99,10 +100,11 @@ export function OrderSettingsPopover({ settings, venue, mock, nxtNotTraded, hold
               </div>
             </fieldset>
           ))}
-          {FLAGS.map(({ key, label, title }) => (
-            <label key={key} className="od-settings-flag" title={title}>
+          {FLAGS.map(({ key, label, note, title }) => (
+            <label key={key} className="od-settings-flag" data-note={note ? "" : undefined} title={title}>
               <input type="checkbox" checked={settings[key]} onChange={(e) => onChange({ ...settings, [key]: e.target.checked })} />
               {label}
+              {note && <small>{note}</small>}
               {key === "averageDot" && !holding && <small>보유 종목일 때 보입니다</small>}
             </label>
           ))}

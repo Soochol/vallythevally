@@ -32,11 +32,12 @@ test("옛 라이트 설정은 다크로 옮기고 다른 설정과 모르는 키
     layoutMode: "dock",
     venue: "krx",
     orderSettings: DEFAULT_UI_PREFS.orderSettings,
+    orderEntries: {},
     hotkeys: {},
     pageLink: "a",
   });
   expect(extra).toEqual({ phone: { symbol: "000660" } });
-  expect(toUiState(prefs, extra)).toEqual({ ...raw, theme: "dark", orderSettings: DEFAULT_UI_PREFS.orderSettings, hotkeys: {}, pageLink: "a" });
+  expect(toUiState(prefs, extra)).toEqual({ ...raw, theme: "dark", orderSettings: DEFAULT_UI_PREFS.orderSettings, orderEntries: {}, hotkeys: {}, pageLink: "a" });
 });
 
 test("마이그레이션이 넣은 처음 값(접힘·최근 종목 없음)은 경고 없이 기본값을 채운다", () => {
@@ -192,4 +193,13 @@ test("페이지에서 보낼 연동 색은 없으면 경고 없이 A, 색 이름
   expect(toUiState(parseUiState({ pageLink: null }).prefs, {})).toMatchObject({ pageLink: null });
   expect(parseUiState({ pageLink: "z" }).prefs.pageLink).toBe("a");
   expect(warned()).toBe(1);
+});
+
+test("호가주문 기억은 틀린 항목만 버리고 저장 때 그대로 돌려준다", () => {
+  const raw = { orderEntries: { "L1|order|005930": { presetKind: "amountPresets", quantity: 37, usedAt: 9 }, "L1|order|000660": { presetKind: "nope", quantity: 1, usedAt: 1 } } };
+  const { prefs, extra } = parseUiState(raw);
+  expect(prefs.orderEntries).toEqual({ "L1|order|005930": { presetKind: "amountPresets", quantity: 37, usedAt: 9 } });
+  expect(extra).toEqual({});
+  expect(toUiState(prefs, extra)["orderEntries"]).toEqual(prefs.orderEntries);
+  expect(parseUiState({}).prefs.orderEntries).toEqual({});
 });

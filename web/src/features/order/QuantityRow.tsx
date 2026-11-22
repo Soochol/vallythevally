@@ -2,7 +2,7 @@ import { type ChangeEvent, useId, useLayoutEffect, useRef } from "react";
 import { formatWon } from "../market-window/format";
 import { Segmented } from "../market-window/parts";
 import { type EstimateNote, quantityForAmount } from "./orderRules";
-import { AMOUNT_UNIT_WON, type PresetKind } from "./orderSettings";
+import { AMOUNT_UNIT_WON, KEEP_LAST_ENTRY_LABEL, type PresetKind } from "./orderSettings";
 
 const PRESET_KINDS = [{ value: "sharePresets", label: "수량" }, { value: "amountPresets", label: "금액" }] as const;
 
@@ -14,11 +14,12 @@ interface Props {
   readonly sharePresets: readonly number[];
   readonly amountPresets: readonly number[];
   readonly referencePrice: number | null;
+  readonly keepLastEntry: boolean;
   readonly onPresetKind: (kind: PresetKind) => void;
   readonly onInput: (input: string) => void;
 }
 
-export function QuantityRow({ presetKind, input, sharePresets, amountPresets, referencePrice, onPresetKind, onInput }: Props) {
+export function QuantityRow({ presetKind, input, sharePresets, amountPresets, referencePrice, keepLastEntry, onPresetKind, onInput }: Props) {
   const inputId = useId();
   const field = useRef<HTMLInputElement>(null);
   const digitsBeforeCaret = useRef<number | null>(null);
@@ -44,7 +45,10 @@ export function QuantityRow({ presetKind, input, sharePresets, amountPresets, re
   const fillAmount = (won: number) => onInput(String(quantityForAmount(won, referencePrice) ?? 0));
   return (
     <div className="od-qty" data-testid="order-quantity-row">
-      <label className="od-qty-label" htmlFor={inputId}>수량</label>
+      <span className="od-qty-name">
+        <label className="od-qty-label" htmlFor={inputId}>수량</label>
+        {keepLastEntry && <span className="od-qty-keep" data-testid="order-keep-mark" title={KEEP_LAST_ENTRY_LABEL}>유지</span>}
+      </span>
       <input id={inputId} ref={field} className="od-qty-input" inputMode="numeric" autoComplete="off" value={input} onChange={change} />
       <Segmented label="수량 방식" options={PRESET_KINDS} value={presetKind} onChange={onPresetKind} />
       <div className="od-presets" role="group" aria-label="수량 프리셋">
