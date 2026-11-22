@@ -13,6 +13,7 @@ pub mod drawing_api;
 pub mod drawings;
 pub mod etf;
 pub mod fundamentals;
+pub mod heatmap_board;
 pub mod heatmap_flow;
 pub mod intraday_feed;
 pub mod financials;

@@ -35,6 +35,33 @@
 
 거절한 PUT은 저장된 테마를 바꾸지 않는다.
 
+## `GET /api/heatmap/board?venue=combined&order=rate`
+
+히트맵 보드다. 서버가 테마마다 종목 시세를 모으고 테마 요약을 계산해 한 응답으로 준다. 응답은 `HeatmapBoard`(`web/src/api/generated/HeatmapBoard.ts`)다.
+
+| 인수 | 뜻 |
+|---|---|
+| `venue` | `combined`(기본), `krx`, `nxt`. `/api/quotes`와 같다 |
+| `order` | 테마 순서. `rate`(가중 평균 등락률 높은 순, 기본), `custom`(저장 순서), `traded`(거래대금 합 큰 순). 값이 같으면 저장 순서를 따르고, 값이 없는 테마는 맨 뒤다. 다른 값은 400이다 |
+
+| 칸 | 뜻 |
+|---|---|
+| `revision` | 계산에 쓴 테마 문서의 revision |
+| `order` | 적용한 순서 |
+| `asOf` | 받은 시세 가운데 가장 늦은 시각(Unix 초). 시세가 하나도 없으면 `null` |
+| `themes[].members` | 시세를 받은 종목, 테마 안 저장 순서. `symbol`, `name`(종목 목록의 이름, 없으면 코드), `changeRate`(%), `tradedMillionWon`(당일 누적 거래대금, 백만원. 없으면 빠진다) |
+| `themes[].missing` | 시세를 받지 못한 종목. 요약에서 빠진다 |
+| `themes[].summary` | 테마 요약. 시세를 받은 종목이 없으면 `null` |
+
+요약의 칸:
+
+- `weightedRate`: 거래대금 가중 평균 등락률, Σ(등락률 × 거래대금) / Σ거래대금이다. 소수 넷째 자리에서 반올림한다. 거래대금이 없는 종목은 평균에 들지 않는다. 거래대금 합이 0이면 `null`이다. 흐름 비교와 같은 정의다([히트맵 흐름 비교 API](heatmap-flow-api.md)).
+- `tradedMillionWon`: 거래대금 합(백만원).
+- `rising`, `flat`, `falling`: 상승·보합·하락 종목 수.
+- `leader`: 등락률이 가장 높은 종목. 같으면 테마 안에서 앞선 종목이다.
+
+시세는 `/api/quotes`와 같은 `ka10095`로 받는다. 모든 테마의 종목을 중복 없이 모아 100종목씩 묻는다. 받은 시세는 종목·거래소마다 서버 메모리에 45초(`FRESH_SECS`) 둔다. 그래서 테마를 고친 뒤에는 새로 든 종목만 키움에 묻는다. 웹은 60초마다 다시 부르므로 45초는 매번 새로 받는 값이다. 상한(테마 100개 × 60종목)이 모두 다른 종목이어도 `ka10095` 60건이다. 이는 새로 고침 간격의 3분의 1 안에 끝난다. `heatmap_board::tests`가 이 관계를 확인한다. 키움 호출이 실패하면 `/api/quotes`와 같은 오류를 준다.
+
 ## 셋업
 
 테마 문서는 셋업 문서 종류 `heatmap_themes`(id `main`)다. `GET /api/setup/export`에 들어가고, 계정 동기화가 다른 문서와 같은 규칙으로 주고받는다. 테마 문서가 없는 예전 묶음을 가져오면 테마는 빈 문서가 된다.
@@ -43,3 +70,5 @@
 
 - `python3 scripts/dev.py cargo test -p server --lib heatmap_theme`: 경로의 왕복·검사별 거절·revision 충돌(`http::tests`), 마이그레이션이 동기화 기록을 보존하는지(`userdata::tests`).
 - `python3 scripts/dev.py cargo test -p server --test setup_bundle --test setup_sync`: 내보내기·가져오기와 두 PC 사이 동기화에 테마가 함께 가는지.
+- `python3 scripts/dev.py cargo test -p server --lib heatmap_board`: 요약과 순서 계산, 호출 예산.
+- `python3 scripts/dev.py cargo test -p server --test heatmap_board`: 합성 transport로 손 계산한 요약, `order`, 시세 캐시와 새 종목만 묻기, 테마가 없을 때 키움을 부르지 않음.
