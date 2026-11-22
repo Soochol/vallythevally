@@ -1,4 +1,6 @@
 import { type KeyboardEvent, useEffect, useId, useReducer, useRef } from "react";
+import { PublicSystemSettings } from "../../public-mode/PublicSystemSettings";
+import { usePublicMode } from "../../public-mode/serverMode";
 import { collectorAllowed, useCollectorAccess } from "../../api/collector";
 import { DESKTOP_QUERY, useMediaQuery } from "../../lib/media";
 import { useKiwoomKeys } from "../../api/system";
@@ -18,7 +20,9 @@ import { ReadOnlyMenuContent } from "./ReadOnlyMenuContent";
 
 export function SystemSettingsDialog() {
   const dialog = useSelectionStore((s) => s.dialog);
-  return dialog?.kind === "system-settings" ? <SystemSettingsBody menu={dialog.menu} /> : null;
+  const publicMode = usePublicMode();
+  if (dialog?.kind !== "system-settings") return null;
+  return publicMode ? <PublicSystemSettings menu={dialog.menu} /> : <SystemSettingsBody menu={dialog.menu} />;
 }
 
 function SystemSettingsBody({ menu }: { menu: SystemMenuId | null }) {

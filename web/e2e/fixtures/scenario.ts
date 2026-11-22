@@ -42,6 +42,7 @@ import type { Watchlists } from "../../src/api/generated/Watchlists";
 import { etfBaseline } from "./etf-data";
 import { boardOf, EMPTY_KIWOOM_CATALOG, kiwoomBoardOf, parseOrder, parseSource, type KiwoomCatalog } from "../../dev/fakeHeatmapBoard";
 import { marketOverviewBaseline } from "./market-data";
+import { PublicMode } from "./public-mode-data";
 import { barsPage, findSymbol, publicInfo, quoteOf, resolveVenue, search, SYMBOLS } from "../../dev/fakeMarket";
 
 export const DEFAULT_LAYOUT_ID = "01900000-0000-7000-8000-000000000001";
@@ -63,6 +64,7 @@ export function withFirstChart(layout: { windows: LayoutWindow[] }, patch: Parti
   return layout.windows.map((w) => (w === chart ? { ...chart, ...patch } : w));
 }
 export type WatchlistSeed = Omit<Watchlist, "groups"> & Partial<Pick<Watchlist, "groups">>;
+const isScenarioPath = (pathname: string) => pathname.startsWith("/api/") || pathname.startsWith("/v1/");
 const matches = (match: Matcher, request: Request) => typeof match === "string" ? new URL(request.url()).pathname === match : match(new URL(request.url()), request);
 
 export class UserDocuments {
@@ -193,6 +195,7 @@ export class LiveFrames {
   kiwoomLink: KiwoomLinkStatus = CONNECTED_KIWOOM;
   kiwoomKeys: KiwoomKeyList | null = null;
   account: AccountStatus = { state: "local_only" };
+  opened = 0;
   orders: OrdersStatus = { state: "off", accountRef: null, accountTail: null, message: ORDERS_OFF_MESSAGE, accounts: [{ keyId: "k1", alias: "키 1", market: true, state: "off", accountRef: null, accountTail: null }] };
   ordersAccountTail = "01";
   ordersAccountTails: Record<string, string> = {};
@@ -201,6 +204,7 @@ export class LiveFrames {
   constructor(private readonly now: number, private readonly market: MarketFixtures) { this.state = { realtime: "live", since: Math.floor(now / 1000), backfilling: false }; }
   connect(socket: WebSocketRoute) {
     const subscriptions = new Map<string, Subscription>();
+    this.opened++;
     this.peers.set(socket, subscriptions);
     socket.send(JSON.stringify({ type: "hello", protocol: 1, serverTime: Math.floor(this.now / 1000), status: this.state } satisfies ServerMessage));
     socket.send(JSON.stringify({ type: "kiwoom_link", status: this.kiwoomLink } satisfies ServerMessage));
@@ -246,6 +250,7 @@ export class Scenario {
   readonly market: MarketFixtures;
   readonly live: LiveFrames;
   readonly requests: Request[] = [];
+  readonly publicMode = new PublicMode();
   kiwoomCatalog: KiwoomCatalog = EMPTY_KIWOOM_CATALOG;
   private handlers: Array<{ match: Matcher; handler: Handler }> = [];
   private failures: string[] = [];
@@ -267,14 +272,14 @@ export class Scenario {
   async install(context: BrowserContext): Promise<void> {
     if (this.contexts.has(context)) return;
     this.contexts.add(context);
-    context.on("request", request => { if (new URL(request.url()).pathname.startsWith("/api/")) this.requests.push(request); });
+    context.on("request", request => { if (isScenarioPath(new URL(request.url()).pathname)) this.requests.push(request); });
     await context.route("**/*", async route => {
       const url = new URL(route.request().url());
       if (url.origin !== (process.env.VALLY_E2E_BASE_URL ?? `http://127.0.0.1:${process.env.VALLY_E2E_PORT ?? "4173"}`)) {
         this.failures.push(`Unexpected network request: ${url.origin}${url.pathname}`);
         return route.abort("blockedbyclient");
       }
-      if (url.pathname.startsWith("/api/")) return this.fulfill(route);
+      if (isScenarioPath(url.pathname)) return this.fulfill(route);
       await route.continue();
     });
     await context.routeWebSocket("**/*", socket => {
@@ -293,6 +298,8 @@ export class Scenario {
     return this.baseline(request);
   }
   private baseline(request: Request): FixtureReply {
+    const publicReply = this.publicMode.baseline(request);
+    if (publicReply) return publicReply;
     const url = new URL(request.url());
     const path = url.pathname;
     const method = request.method();

@@ -1,6 +1,8 @@
 import { useState } from "react";
 import { startLogin } from "../../api/account";
 import type { AccountProvider } from "../../api/generated/AccountProvider";
+import { loginStartPath } from "../../public-mode/session";
+import { isPublicMode } from "../../public-mode/serverMode";
 import { markLoginStarted } from "../setup-wizard/wizardOpen";
 
 export function useLoginStart() {
@@ -11,7 +13,7 @@ export function useLoginStart() {
     setLeaving(provider);
     setError(null);
     try {
-      const { url } = await startLogin(provider);
+      const url = isPublicMode() ? loginStartPath(provider) : (await startLogin(provider)).url;
       markLoginStarted();
       window.location.assign(url);
     } catch (e) {

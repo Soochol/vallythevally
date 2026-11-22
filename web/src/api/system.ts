@@ -1,4 +1,5 @@
 import { type QueryClient, useQuery } from "@tanstack/react-query";
+import { isPublicMode } from "../public-mode/serverMode";
 import { receiveKiwoomLinkPush, useKiwoomLinkStore } from "../stores/kiwoomLink";
 import type { KiwoomLinkStatus } from "./generated/KiwoomLinkStatus";
 import type { SystemSettings } from "./generated/SystemSettings";
@@ -17,6 +18,7 @@ import type { RegisteredIpInput } from "./generated/RegisteredIpInput";
 import { getJson, putJson, sendJson } from "./http";
 
 export async function loadKiwoomLink(signal?: AbortSignal): Promise<void> {
+  if (isPublicMode()) return;
   const pushesAtRequest = useKiwoomLinkStore.getState().pushes;
   try {
     const status = await getJson<KiwoomLinkStatus>("/api/system/kiwoom", signal);
