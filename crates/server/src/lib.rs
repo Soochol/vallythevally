@@ -33,6 +33,7 @@ pub mod quotes;
 pub mod rankings;
 pub mod screener;
 pub mod setup_bundle;
+pub mod shared_data;
 pub mod symbols;
 mod sync_log;
 pub mod system_routes;

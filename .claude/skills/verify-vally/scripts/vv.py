@@ -79,8 +79,11 @@ def http(url, timeout=3):
         return r.status, r.read()
 
 
+SANDBOX_ENV_NAMES = ("PATH", "HOME", "USER", "LOGNAME", "LANG", "TZ", "TMPDIR")
+
+
 def sandbox_env():
-    env = {k: v for k, v in os.environ.items() if not k.startswith("VALLY_") and k != "OPENDART_API_KEY" and not k.lower().endswith("_proxy")}
+    env = {k: v for k, v in os.environ.items() if k in SANDBOX_ENV_NAMES or k.startswith("LC_")}
     env["NO_PROXY"] = env["no_proxy"] = "127.0.0.1,localhost"
     return env
 

@@ -4,6 +4,7 @@ use std::collections::BTreeMap;
 use std::fmt;
 use std::net::{IpAddr, SocketAddr};
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 use domain::KstTime;
 
@@ -178,6 +179,8 @@ const KNOWN_KEYS: &[&str] = &[
     "VALLY_COLLECTOR_SOCKET",
     "VALLY_COLLECTOR_ADMINS",
     "VALLY_COLLECTOR_TELEGRAM",
+    "VALLY_SHARED_DATA_DIR",
+    "VALLY_SHARED_DATA_POLL_MILLIS",
 ];
 
 #[derive(Debug, Clone)]
@@ -220,6 +223,23 @@ pub struct Config {
     pub collector_admins: Vec<ProviderSubject>,
     pub collector_telegram: Option<PathBuf>,
     pub public: Option<crate::public::settings::PublicSettings>,
+    pub shared_data: Option<crate::shared_data::SharedDataSettings>,
+}
+
+fn shared_data_settings(vars: &BTreeMap<String, String>) -> Result<Option<crate::shared_data::SharedDataSettings>, ConfigError> {
+    let Some(dir) = vars.get("VALLY_SHARED_DATA_DIR").filter(|v| !v.is_empty()) else { return Ok(None) };
+    let dir = PathBuf::from(dir);
+    if !dir.is_absolute() {
+        return Err(ConfigError(format!("VALLY_SHARED_DATA_DIR은 절대 경로입니다: {}", dir.display())));
+    }
+    let poll = match vars.get("VALLY_SHARED_DATA_POLL_MILLIS").filter(|v| !v.is_empty()) {
+        None => crate::shared_data::DEFAULT_POLL,
+        Some(s) => match s.parse::<u64>() {
+            Ok(millis) if millis > 0 => Duration::from_millis(millis),
+            _ => return Err(ConfigError(format!("VALLY_SHARED_DATA_POLL_MILLIS는 1 이상의 정수입니다: {s}"))),
+        },
+    };
+    Ok(Some(crate::shared_data::SharedDataSettings { dir, poll }))
 }
 
 /// 설정을 읽으며 모은 경고. 로그를 켜기 전에 읽으므로 호출자가 나중에 남긴다.
@@ -342,6 +362,7 @@ impl Config {
         let (default_db, default_screener_db, default_bind) = if mock { ("data/mock/vally.db", "data/mock/screener.duckdb", "127.0.0.1:8081") } else { ("data/vally.db", "data/screener.duckdb", "127.0.0.1:8080") };
         let db_path = PathBuf::from(vars.get("VALLY_DB_PATH").map_or(default_db, String::as_str));
         let bind = BindAddr::parse(vars.get("VALLY_BIND").map_or(default_bind, String::as_str))?;
+        let shared_data = shared_data_settings(&vars)?;
         let public = crate::public::settings::PublicSettings::from_vars(crate::public::settings::Inputs { vars: &vars, operator_bind: bind.socket_addr(), mock, connector_mode: account_server_url.is_some(), default_account_db: db_path.with_file_name("public-accounts.db") })?;
         let config = Config {
             kiwoom_environment,
@@ -367,6 +388,7 @@ impl Config {
             },
             bind,
             public,
+            shared_data,
             tailnet_hosts: TailnetHosts::parse(vars.get("VALLY_TAILNET_HOSTS").map_or("", String::as_str))?,
             static_dir: PathBuf::from(vars.get("VALLY_STATIC_DIR").map_or("web/dist", String::as_str)),
             screener_db_path: PathBuf::from(vars.get("VALLY_SCREENER_DB_PATH").map_or(default_screener_db, String::as_str)),
@@ -644,6 +666,28 @@ mod tests {
             process.insert("VALLY_KIS_MASTER_BASE_URL".into(), endpoint.into());
             assert!(Config::from_vars(file.clone(), process, lock, token, key, account).is_err(), "{endpoint}");
         }
+    }
+
+    #[test]
+    fn shared_data_is_off_without_directory_and_needs_absolute_path() {
+        let file = BTreeMap::new();
+        let (config, _) = Config::from_vars(file.clone(), vars(&REAL), lock, token, key, account).unwrap();
+        assert_eq!(config.shared_data, None);
+        let mut process = vars(&REAL);
+        process.insert("VALLY_SHARED_DATA_DIR".into(), "/srv/shared".into());
+        let (config, warnings) = Config::from_vars(file.clone(), process.clone(), lock, token, key, account).unwrap();
+        assert!(warnings.is_empty());
+        let settings = config.shared_data.unwrap();
+        assert_eq!((settings.dir, settings.poll), (PathBuf::from("/srv/shared"), Duration::from_millis(1000)));
+        process.insert("VALLY_SHARED_DATA_POLL_MILLIS".into(), "250".into());
+        assert_eq!(Config::from_vars(file.clone(), process.clone(), lock, token, key, account).unwrap().0.shared_data.unwrap().poll, Duration::from_millis(250));
+        for bad in ["0", "abc"] {
+            process.insert("VALLY_SHARED_DATA_POLL_MILLIS".into(), bad.into());
+            assert!(Config::from_vars(file.clone(), process.clone(), lock, token, key, account).is_err(), "{bad}");
+        }
+        process.insert("VALLY_SHARED_DATA_POLL_MILLIS".into(), "250".into());
+        process.insert("VALLY_SHARED_DATA_DIR".into(), "relative/shared".into());
+        assert!(Config::from_vars(file, process, lock, token, key, account).is_err());
     }
 
     #[test]
