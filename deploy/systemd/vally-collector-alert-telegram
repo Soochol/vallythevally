@@ -12,7 +12,11 @@ if [ -z "$message" ]; then
     echo "$name: 보낼 메시지가 없습니다" >&2
     exit 2
 fi
-if ! mode=$(stat -L -c %a -- "$file" 2>&1); then
+case $file in
+    /*) stat_path=$file ;;
+    *) stat_path=./$file ;;
+esac
+if ! mode=$(stat -L -c %a "$stat_path" 2>&1); then
     case $mode in
         *'No such file or directory') exit 0 ;;
     esac
@@ -20,7 +24,7 @@ if ! mode=$(stat -L -c %a -- "$file" 2>&1); then
     exit 1
 fi
 if ! { true < "$file"; } 2>/dev/null; then
-    echo "$name: $file 을 열 수 없습니다: Permission denied" >&2
+    echo "$name: $file 을 읽을 수 없습니다" >&2
     exit 1
 fi
 if [ $((0$mode & 077)) -ne 0 ]; then

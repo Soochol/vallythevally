@@ -229,7 +229,8 @@ enum Layout {
     UnderAFile,
     Missing,
     DanglingSymlink,
-    DashRelative,
+    Relative(&'static str),
+    MissingRelative(&'static str),
 }
 
 #[derive(Debug, PartialEq)]
@@ -276,7 +277,10 @@ fn parity_cases() -> Vec<Case> {
         case("권한 000 파일", &two_lines, Layout::NoAccess, Outcome::Fails),
         case("심볼릭 링크 고리", &two_lines, Layout::SymlinkLoop, Outcome::Fails),
         case("경로 중간이 파일", &two_lines, Layout::UnderAFile, Outcome::Fails),
-        case("-로 시작하는 상대 경로", &two_lines, Layout::DashRelative, sends("-100777")),
+        case("-로 시작하는 상대 경로", &two_lines, Layout::Relative("-telegram"), sends("-100777")),
+        case("이름이 -뿐인 상대 경로", &two_lines, Layout::Relative("-"), sends("-100777")),
+        case("-로 시작하는 없는 상대 경로", &two_lines, Layout::MissingRelative("-nothing-here"), Outcome::TurnsOff),
+        case("이름이 -뿐인 없는 상대 경로", &two_lines, Layout::MissingRelative("-"), Outcome::TurnsOff),
         case("상한 길이의 토큰", &with_token_of(256), Layout::File, sends("-100777")),
         case("상한을 넘는 토큰", &with_token_of(257), Layout::File, Outcome::Fails),
         case("수만 자 토큰", &with_token_of(40_000), Layout::File, Outcome::Fails),
@@ -316,11 +320,11 @@ fn place(folder: &Path, case: &Case) -> PathBuf {
             std::os::unix::fs::symlink(folder.join("nothing-here"), &link).unwrap();
             link
         }
-        Layout::DashRelative => {
-            let dashed = PathBuf::from("-telegram");
-            std::fs::rename(&target, folder.join(&dashed)).unwrap();
-            dashed
+        Layout::Relative(name) => {
+            std::fs::rename(&target, folder.join(name)).unwrap();
+            PathBuf::from(name)
         }
+        Layout::MissingRelative(name) => PathBuf::from(name),
     }
 }
 
