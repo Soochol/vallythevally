@@ -398,13 +398,13 @@ async fn start_update(State(st): State<Arc<AppState>>, body: Body) -> Result<Jso
 }
 
 fn refuse_without_kiwoom_key(st: &AppState) -> Result<(), ApiFailure> {
-    if !st.route.kis_receives() {
+    if !st.route.kis_listed_without_connected_kiwoom() {
         return Ok(());
     }
     let refusal = SourceFailure {
         code: api::ApiErrorCode::BadRequest,
         reason: ApiErrorReason::UnsupportedBySource,
-        message: "스크리너 갱신은 연결된 키움 키가 있어야 합니다. 지금은 한투 키만 연결돼 있습니다".to_owned(),
+        message: "스크리너 갱신은 연결된 키움 키가 있어야 합니다. 지금은 연결된 키움 키가 없습니다".to_owned(),
         retry_at: None,
         manual_action_required: false,
     };

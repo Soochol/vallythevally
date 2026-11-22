@@ -72,8 +72,9 @@ impl FeatureRoute {
         matches!(self.receiver(), Receiver::Kiwoom(_))
     }
 
-    pub fn kis_receives(&self) -> bool {
-        matches!(self.receiver(), Receiver::Kis(_))
+    pub fn kis_listed_without_connected_kiwoom(&self) -> bool {
+        let kis_listed = self.keys.get().and_then(Weak::upgrade).is_some_and(|keys| keys.listing().iter().any(|key| key.broker == Broker::Kis));
+        kis_listed && !self.kiwoom_connected()
     }
 
     pub fn rankings(&self) -> Picked<dyn RankingSource> {

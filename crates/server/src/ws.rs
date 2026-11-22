@@ -39,8 +39,8 @@ async fn serve(socket: WebSocket, st: Arc<AppState>, hub: HubHandle) {
     hub.send_to(conn, ServerMessage::KiwoomLink { status: kiwoom_status(&st) });
     let mut market_source_changes = st.market_source_board.subscribe();
     let mut market_source_sent = st.market_source_board.snapshot();
-    hub.send_to(conn, ServerMessage::MarketSource { status: market_source_sent.clone() });
     send_account(&st, &hub, conn).await;
+    hub.send_to(conn, ServerMessage::MarketSource { status: market_source_sent.clone() });
     loop {
         tokio::select! {
             changed = account_changes.changed() => {

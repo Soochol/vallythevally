@@ -1400,6 +1400,7 @@ mod tests {
         assert_eq!((hello["type"].as_str(), hello["protocol"].as_i64()), (Some("hello"), Some(1)), "{hello}");
         assert_eq!(recv_json(&mut ws).await["type"], "kiwoom_link", "hello 바로 뒤에 키움 연결 상태가 온다");
         assert_eq!(recv_json(&mut ws).await, json!({"type": "account", "status": {"state": "local_only"}}), "그 뒤에 계정 상태가 온다");
+        assert_eq!(recv_json(&mut ws).await["type"], "market_source", "계정 상태 뒤에 시세 공급원 상태가 온다");
         for text in [
             "not json",
             r#"{"type":"subscribe","sub":"bad","symbol":"IDX:001","venue":"krx","period":"D"}"#,

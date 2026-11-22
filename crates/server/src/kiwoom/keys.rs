@@ -467,9 +467,11 @@ impl KeyRing {
         }
     }
 
-    fn persist(&self, list: &KeyList) -> Result<(), KeyError> {
+    fn persist(&self, inner: &Inner, list: &KeyList) -> Result<(), KeyError> {
         let store = self.store.as_ref().ok_or(KeyError::NoStore)?;
-        let written = if list.keys.is_empty() { store.remove() } else { store.save(list) };
+        let default_source = inner.entries.iter().find(|entry| entry.origin == KeyOrigin::Env).map(|entry| &entry.id);
+        let chose_other_source = list.market.is_some() && list.market.as_ref() != default_source;
+        let written = if list.keys.is_empty() && !chose_other_source { store.remove() } else { store.save(list) };
         written.map_err(KeyError::File)
     }
 
@@ -498,7 +500,7 @@ impl KeyRing {
         if becomes_source {
             proposed.market = Some(id.clone());
         }
-        self.persist(&proposed)?;
+        self.persist(&inner, &proposed)?;
         let entry = match kis {
             Some(kis) => {
                 let paths = KeyPaths { token: kis_token_path(&kis.token_base, &credentials), registered_ip: derived_paths(&factory.bases, &credentials).registered_ip };
@@ -542,7 +544,7 @@ impl KeyRing {
         if let Some(key) = proposed.keys.iter_mut().find(|key| key.id == *id) {
             key.alias.clone_from(&alias);
         }
-        self.persist(&proposed)?;
+        self.persist(&inner, &proposed)?;
         inner.entries[at].alias = alias;
         Ok(())
     }
@@ -558,7 +560,7 @@ impl KeyRing {
         if let Some(key) = proposed.keys.iter_mut().find(|key| key.id == *id) {
             key.credentials = credentials.clone();
         }
-        self.persist(&proposed)?;
+        self.persist(&inner, &proposed)?;
         let factory = self.factory.as_ref().ok_or(KeyError::NoStore)?;
         if broker == Broker::Kis {
             let kis = self.kis.as_ref().ok_or(KeyError::NoStore)?;
@@ -628,7 +630,7 @@ impl KeyRing {
         let mut proposed = inner.file_list();
         proposed.keys.retain(|key| key.id != *id);
         proposed.market.clone_from(&next_market);
-        self.persist(&proposed)?;
+        self.persist(&inner, &proposed)?;
         inner.market = next_market;
         let next_holder = inner.desired_lane_holder(Some(id));
         let moved = self.hand_over_market_lane(&mut inner, next_holder);
@@ -656,7 +658,7 @@ impl KeyRing {
         }
         let mut proposed = inner.file_list();
         proposed.market = Some(id.clone());
-        self.persist(&proposed)?;
+        self.persist(&inner, &proposed)?;
         inner.market = Some(id.clone());
         let next_holder = inner.desired_lane_holder(None);
         let previous_holder = inner.market_lane_holder.clone();

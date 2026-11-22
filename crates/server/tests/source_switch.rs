@@ -484,3 +484,72 @@ async fn the_socket_sends_the_market_source_on_connect_and_again_only_when_it_ch
     assert_eq!(lost_kiwoom["broker"], "kis", "{lost_kiwoom}");
     server.stop().await;
 }
+
+async fn symbol_found(client: &Client, code: &str) -> bool {
+    let (status, found) = client.get(&format!("/api/symbols?q={code}")).await;
+    status == 200 && found.to_string().contains(code)
+}
+
+#[tokio::test]
+async fn a_kiwoom_symbol_list_that_lands_after_the_switch_to_kis_does_not_replace_the_kis_directory() {
+    let (kiwoom, kis, peer, env) = (ScriptedTransport::new(), FakeKis::new(), KisPeer::default(), Env::new());
+    let held = kiwoom.hold("키움 종목 목록", |call| call.api_id == "ka10099");
+    let mut extra = vec![START];
+    extra.extend(KIS_ENV);
+    let server = env.spawn(&kiwoom, &kis, &peer, &extra);
+    let client = Client::of(&server).await;
+    held.arrived().await;
+    client.until_key_state("env-kis", "connected").await;
+    client.designate("env-kis").await;
+    until("한투 마스터 목록", || async { symbol_found(&client, "247540").await.then_some(()) }).await;
+    held.release();
+    client.until_key_state("env", "connected").await;
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    assert!(symbol_found(&client, "247540").await, "한투 목록이 그대로다");
+    assert!(!symbol_found(&client, "094800").await, "늦게 온 키움 종목 목록이 디렉터리를 덮지 않는다");
+    server.stop().await;
+}
+
+async fn update_screener(client: &Client) -> (u16, Value) {
+    client.send(reqwest::Method::POST, "/api/screener/update", Some(json!({"full": false}))).await
+}
+
+#[tokio::test]
+async fn the_screener_update_is_refused_while_no_kiwoom_key_is_connected_whatever_the_reason() {
+    let (kiwoom, kis, peer, env) = (ScriptedTransport::new(), FakeKis::new(), KisPeer::default(), Env::new());
+    let mut extra = vec![NO_KIWOOM_KEY, START];
+    extra.extend(KIS_ENV);
+    let server = env.spawn(&kiwoom, &kis, &peer, &extra);
+    let client = Client::of(&server).await;
+    client.until_key_state("env-kis", "connected").await;
+    let (status, body) = update_screener(&client).await;
+    assert_eq!((status, body["error"]["reason"].as_str()), (400, Some("unsupported_by_source")), "{body}");
+    let (status, _) = client.send(reqwest::Method::POST, "/api/system/kiwoom/keys/env-kis/disconnect", None).await;
+    assert_eq!(status, 200);
+    client.until_key_state("env-kis", "disconnected").await;
+    let (status, body) = update_screener(&client).await;
+    assert_eq!((status, body["error"]["reason"].as_str()), (400, Some("unsupported_by_source")), "한투도 끊겨 아무 키도 연결되지 않았다: {body}");
+    assert_eq!(kiwoom.api_ids(), Vec::<String>::new());
+    server.stop().await;
+}
+
+#[tokio::test]
+async fn a_market_key_chosen_among_environment_keys_alone_survives_a_restart() {
+    let (kiwoom, kis, peer, env) = (ScriptedTransport::new(), FakeKis::new(), KisPeer::default(), Env::new());
+    let mut extra = vec![START];
+    extra.extend(KIS_ENV);
+    let server = env.spawn(&kiwoom, &kis, &peer, &extra);
+    let client = Client::of(&server).await;
+    client.until_key_state("env-kis", "connected").await;
+    client.designate("env-kis").await;
+    server.stop().await;
+    let server = env.spawn(&kiwoom, &FakeKis::new(), &peer, &extra);
+    let client = Client::of(&server).await;
+    assert_eq!(client.key("env-kis").await["market"], true, "고른 시세 공급원이 다시 켠 뒤에도 남는다");
+    client.designate("env").await;
+    server.stop().await;
+    let server = env.spawn(&kiwoom, &FakeKis::new(), &peer, &extra);
+    let client = Client::of(&server).await;
+    assert_eq!(client.key("env").await["market"], true, "기본값으로 돌아오면 다시 켠 뒤에도 기본값이다");
+    server.stop().await;
+}

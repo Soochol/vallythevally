@@ -28,7 +28,7 @@ use crate::market_overview::MarketOverview;
 use crate::market_source::active::{ActiveSource, ActiveStream};
 use crate::market_source::switch::{SourceSwitch, SwitchParts};
 use crate::market_source::route::FeatureRoute;
-use crate::market_source::{KiwoomHandle, MarketSource, SourceGeneration};
+use crate::market_source::{KiwoomHandle, MarketSource};
 use crate::rankings::RankingCache;
 use crate::kiwoom::auth::{DAILY_REISSUE_AT, KiwoomAuth};
 use crate::kiwoom::link::{Link, LinkState};
@@ -127,7 +127,7 @@ pub fn application_with_system(inputs: ApplicationInputs, system: SystemState) -
 
 pub fn application_with_source(inputs: ApplicationInputs, mut system: SystemState, source: Arc<dyn MarketSource>) -> Arc<AppState> {
     let ApplicationInputs { rest, clock, symbols, db, screener_store, stream: (stream, events), static_dir, screener_update_on_connect } = inputs;
-    let generation = SourceGeneration::default();
+    let generation = symbols.generation();
     let route = Arc::new(FeatureRoute::new(rest.clone(), clock.clone()));
     let active_source = Arc::new(ActiveSource::new(source.clone()));
     let shared_source: Arc<dyn MarketSource> = active_source.clone();
