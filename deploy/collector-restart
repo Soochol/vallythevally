@@ -19,6 +19,7 @@ restart_lock_file="$unit_dir/.vally-collector-restart.lock"
 last_restart_file="$unit_dir/.vally-collector-last-restart"
 alert_script="$bin_dir/vally-collector-alert-telegram"
 stable_max=600
+lock_max=3600
 lock_wait_seconds="${VALLY_COLLECTOR_LOCK_SECONDS:-120}"
 install_verdict_minutes=30
 alert_on_failure=no
@@ -159,34 +160,44 @@ case "${1:-}" in
     --before-start) before_start; exit 0 ;;
 esac
 
-stable_digits="${stable#"${stable%%[!0]*}"}"
-case "$stable" in
-    ''|*[!0-9]*) stable_digits="" ;;
-esac
-case "$stable_digits" in
-    ''|????*) echo "vally-deploy collector-restart: VALLY_COLLECTOR_STABLE_SECONDS는 1 이상 ${stable_max} 이하의 정수여야 합니다($stable)" >&2; exit 2 ;;
-esac
-if [ "$stable_digits" -gt "$stable_max" ]; then
-    echo "vally-deploy collector-restart: VALLY_COLLECTOR_STABLE_SECONDS는 1 이상 ${stable_max} 이하의 정수여야 합니다($stable)" >&2
+seconds_digits() {
+    digits="${1#"${1%%[!0]*}"}"
+    case "$1" in
+        ''|*[!0-9]*) return 1 ;;
+    esac
+    case "$digits" in
+        ''|?????*) return 1 ;;
+    esac
+    [ "$digits" -le "$2" ] || return 1
+    printf '%s\n' "$digits"
+}
+
+if ! stable="$(seconds_digits "$stable" "$stable_max")"; then
+    echo "vally-deploy collector-restart: VALLY_COLLECTOR_STABLE_SECONDS는 1 이상 ${stable_max} 이하의 정수여야 합니다(${VALLY_COLLECTOR_STABLE_SECONDS:-10})" >&2
     exit 2
 fi
-stable="$stable_digits"
-lock_digits="${lock_wait_seconds#"${lock_wait_seconds%%[!0]*}"}"
-case "$lock_wait_seconds" in
-    ''|*[!0-9]*) restart_lock_wait_seconds="$lock_wait_seconds" ;;
-    *) restart_lock_wait_seconds=$((stable + ${lock_digits:-0})) ;;
-esac
+if ! lock_wait_seconds="$(seconds_digits "$lock_wait_seconds" "$lock_max")"; then
+    echo "vally-deploy collector-restart: VALLY_COLLECTOR_LOCK_SECONDS는 1 이상 ${lock_max} 이하의 정수여야 합니다(${VALLY_COLLECTOR_LOCK_SECONDS:-120})" >&2
+    exit 2
+fi
+restart_lock_wait_seconds=$((stable + lock_wait_seconds))
 
 cancel_reservation() {
     systemctl --user stop "$reservation.timer" 2>/dev/null || true
 }
 
-nanoseconds_now() {
-    now_ns="$(date +%s%N 2>/dev/null || true)"
-    case "$now_ns" in
-        ''|*[!0-9]*) now_ns=0 ;;
+restart_generation() {
+    [ -e "$last_restart_file" ] || { echo 0; return 0; }
+    [ -r "$last_restart_file" ] || return 0
+    read -r generation < "$last_restart_file" || return 0
+    case "$generation" in
+        ''|*[!0-9]*) return 0 ;;
     esac
-    printf '%s\n' "$now_ns"
+    generation="${generation#"${generation%%[!0]*}"}"
+    case "$generation" in
+        ????????????????*) return 0 ;;
+    esac
+    printf '%s\n' "${generation:-0}"
 }
 
 running_files_fingerprint() {
@@ -196,17 +207,16 @@ running_files_fingerprint() {
 }
 
 restarted_with_same_files_since() {
-    [ "$1" -gt 0 ] || return 1
-    [ -r "$last_restart_file" ] || return 1
-    { read -r finished_at && fingerprint="$(cat)"; } < "$last_restart_file" || return 1
-    case "$finished_at" in
-        ''|*[!0-9]*) return 1 ;;
-    esac
-    [ "$finished_at" -ge "$1" ] && [ "$fingerprint" = "$2" ]
+    [ -n "$1" ] || return 1
+    finished_generation="$(restart_generation)"
+    [ -n "$finished_generation" ] || return 1
+    [ "$finished_generation" -gt "$1" ] || return 1
+    { read -r _ && fingerprint="$(cat)"; } < "$last_restart_file" || return 1
+    [ "$fingerprint" = "$2" ]
 }
 
 restart_and_watch() {
-    asked_at="$(nanoseconds_now)"
+    asked_generation="$(restart_generation)"
     mkdir -p "$unit_dir"
     exec 8>"$restart_lock_file"
     if command -v flock >/dev/null 2>&1 && ! flock -w "$restart_lock_wait_seconds" 8; then
@@ -215,11 +225,13 @@ restart_and_watch() {
     fi
     promote_pending
     files_fingerprint="$(running_files_fingerprint)"
-    if restarted_with_same_files_since "$asked_at" "$files_fingerprint" && systemctl --user is-active --quiet "$service"; then
+    if restarted_with_same_files_since "$asked_generation" "$files_fingerprint" && systemctl --user is-active --quiet "$service"; then
         echo "$service는 이 실행이 시작된 뒤 다른 재시작이 같은 판으로 다시 시작하고 확인까지 마쳤으므로 다시 시작하지 않습니다"
         return 0
     fi
+    generation_before="$(restart_generation)"
     rm -f "$last_restart_file"
+    printf '%s\n' "${generation_before:-0}" > "$last_restart_file"
     systemctl --user restart "$service"
     elapsed=0
     while [ "$elapsed" -lt "$stable" ]; do
@@ -230,7 +242,7 @@ restart_and_watch() {
         fi
         elapsed=$((elapsed + 1))
     done
-    { nanoseconds_now; printf '%s\n' "$files_fingerprint"; } > "$last_restart_file"
+    { printf '%s\n' "$((${generation_before:-0} + 1))"; printf '%s\n' "$files_fingerprint"; } > "$last_restart_file"
     echo "$service를 재시작했고 ${stable}초 동안 active입니다"
 }
 
