@@ -96,15 +96,12 @@ else
     echo "수집 시간인지 판정하지 못해 제자리 파일은 바꾸지 않습니다" >&2
 fi
 
-if [ "$decision" = now ]; then
-    printf 'now\n' > "$install_verdict"
-else
-    rm -f "$install_verdict"
-fi
+rm -f "$install_verdict"
 release_lock
 
 if [ "$decision" = now ]; then
     VALLY_COLLECTOR_BIN="$bin_dir/collector" VALLY_SYSTEMD_USER_DIR="$unit_dir" "$here/collector-restart" --promote
+    printf 'now\n' > "$install_verdict"
 else
     echo "수집 시간 안이라 새 판을 옆 자리(.next)에만 두었습니다. 마감 뒤 collector-restart가 제자리로 옮기고 재시작합니다"
     VALLY_COLLECTOR_BIN="$bin_dir/collector" VALLY_SYSTEMD_USER_DIR="$unit_dir" "$here/collector-restart" --retry-reload || echo "vally-deploy collector-install: 앞서 실패한 daemon-reload를 다시 하지 못했습니다. 다음 collector-restart가 다시 합니다" >&2

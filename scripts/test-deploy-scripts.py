@@ -396,6 +396,16 @@ class CollectorInstallTest(FakeCollectorHost):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertFalse(verdict.exists())
 
+    def test_a_promotion_that_fails_leaves_no_verdict_for_the_restart_step_to_trust(self):
+        self.install_collector()
+        self.install_units_like_repo("vally-collector-alert.service")
+        (self.units / "vally-collector.service").write_text("[Service]\nExecStart=/old\n")
+        (self.units / ".vally-collector-install-verdict").write_text("now\n")
+        (self.state / "reload-fails").write_text("")
+        result = self.install()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertFalse((self.units / ".vally-collector-install-verdict").exists())
+
     def test_a_pending_copy_with_the_same_content_but_a_wrong_mode_gets_the_right_mode(self):
         self.install_everything_old()
         self.say("wait\t2026-11-24 22:05:00 Asia/Seoul\t수집 시간 안이다")
