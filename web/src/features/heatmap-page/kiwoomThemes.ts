@@ -7,16 +7,19 @@ const MIN_AREA_SHARE = 0.001;
 const knownTraded = (theme: HeatmapBoardTheme): number | null => (theme.summary && theme.summary.tradedMillionWon > 0 ? theme.summary.tradedMillionWon : null);
 
 export function themeTileWeights(themes: readonly HeatmapBoardTheme[]): number[] {
-  const known = themes.flatMap((theme) => knownTraded(theme) ?? []);
+  const known = themes.flatMap((theme) => knownTraded(theme) ?? []).map(Math.sqrt);
   if (known.length === 0) return themes.map(() => 1);
   const smallest = Math.min(...known);
-  const visibleFloor = known.reduce((sum, traded) => sum + traded, 0) * MIN_AREA_SHARE;
-  return themes.map((theme) => Math.max(knownTraded(theme) ?? smallest, visibleFloor));
+  const visibleFloor = known.reduce((sum, weight) => sum + weight, 0) * MIN_AREA_SHARE;
+  return themes.map((theme) => {
+    const traded = knownTraded(theme);
+    return Math.max(traded === null ? smallest : Math.sqrt(traded), visibleFloor);
+  });
 }
 
 export function arrangeThemes(themes: readonly HeatmapBoardTheme[], width: number, height: number): Map<string, TileRect> {
   const weights = themeTileWeights(themes);
-  const tiles = themes.map((theme, i) => ({ key: theme.id, weight: weights[i]! }));
+  const tiles = themes.map((theme, i) => ({ key: theme.id, weight: weights[i]! })).sort((a, b) => b.weight - a.weight);
   return new Map(layoutTiles(tiles, width, height).map((rect) => [rect.key, rect]));
 }
 
