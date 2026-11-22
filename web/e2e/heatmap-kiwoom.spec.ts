@@ -90,18 +90,14 @@ test("테마 칸의 크기는 테마 거래대금 합을 따른다", async ({ pa
   expect(ship).toBeGreaterThan(small);
 });
 
-test("테마 순서 설정이 지도의 칸 순서를 바꾸고 키움 탭에서는 내 순서 대신 키움 순서라 부른다", async ({ page, scenario }) => {
+test("키움 테마 지도는 큰 테마부터 놓고 테마 순서 설정은 보이지 않는다", async ({ page, scenario }) => {
   seedKiwoom(scenario);
-  const ids = () => themeTiles(page).evaluateAll((tiles) => tiles.map((tile) => tile.getAttribute("data-theme")));
   await page.goto("/heatmap?source=kiwoom");
-  await expect.poll(ids).toEqual([SHIPBUILDING, "kiwoom-101", "kiwoom-777"]);
-  const order = main(page).getByRole("group", { name: "테마 순서" });
-  await expect(order.getByRole("button", { name: "내 순서" })).toHaveCount(0);
-  await order.getByRole("button", { name: "거래대금" }).click();
-  await expect.poll(ids).toEqual(["kiwoom-101", SHIPBUILDING, "kiwoom-777"]);
-  await order.getByRole("button", { name: "키움 순서" }).click();
-  await expect.poll(ids).toEqual([SHIPBUILDING, "kiwoom-101", "kiwoom-777"]);
-  await expect(page).toHaveURL(/[?&]order=custom(&|$)/);
+  await expect(themeTiles(page)).toHaveCount(3);
+  const areas = await themeTiles(page).evaluateAll((tiles) => tiles.map((tile) => tile.getBoundingClientRect()).map((box) => box.width * box.height));
+  expect(areas).toEqual([...areas].sort((a, b) => b - a));
+  await expect(main(page).getByRole("group", { name: "테마 순서" })).toHaveCount(0);
+  await expect(main(page).getByRole("group", { name: "색 범위" })).toBeVisible();
 });
 
 test("테마 칸을 누르면 그 테마의 칸 지도가 열리고 주소에 테마가 남는다", async ({ page, scenario }) => {
