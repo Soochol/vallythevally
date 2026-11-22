@@ -1,4 +1,4 @@
-import { useQuery } from "@tanstack/react-query";
+import { type QueryClient, useQuery } from "@tanstack/react-query";
 import { receiveKiwoomLinkPush, useKiwoomLinkStore } from "../stores/kiwoomLink";
 import type { KiwoomLinkStatus } from "./generated/KiwoomLinkStatus";
 import type { SystemSettings } from "./generated/SystemSettings";
@@ -61,6 +61,10 @@ const keyPath = (keyId: string, tail = "") => `${KEYS}/${encodeURIComponent(keyI
 
 export function useKiwoomKeys(refreshMs: number) {
   return useQuery({ queryKey: KIWOOM_KEYS_QUERY_KEY, queryFn: ({ signal }) => getJson<KiwoomKeyList>(KEYS, signal), refetchInterval: refreshMs, staleTime: 0 });
+}
+export async function storeKiwoomKeys(queryClient: QueryClient, list: KiwoomKeyList): Promise<void> {
+  await queryClient.cancelQueries({ queryKey: KIWOOM_KEYS_QUERY_KEY });
+  queryClient.setQueryData(KIWOOM_KEYS_QUERY_KEY, list);
 }
 export const addKiwoomKey = (input: KiwoomKeyAdd) => sendJson<KiwoomKeyList>("POST", KEYS, JSON.stringify(input));
 export const renameKiwoomKey = (keyId: string, input: KiwoomKeyAlias) => putJson<KiwoomKeyList>(keyPath(keyId, "/alias"), input);

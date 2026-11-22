@@ -2,7 +2,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useEffect, useReducer, useState } from "react";
 import type { Broker } from "../../api/generated/Broker";
 import type { KiwoomKeyList } from "../../api/generated/KiwoomKeyList";
-import { addKiwoomKey, KIWOOM_KEYS_QUERY_KEY, loadKiwoomLink } from "../../api/system";
+import { addKiwoomKey, loadKiwoomLink, storeKiwoomKeys } from "../../api/system";
 import { BROKERS, brokerOrder } from "./brokers";
 import { KeyFields } from "./KiwoomKeyFields";
 import { SaveNote } from "./KiwoomKeyForm";
@@ -22,7 +22,7 @@ export function AddKeyPanel({ list, now, onOpenIpHelp }: { list: KiwoomKeyList; 
   const [entry, dispatch] = useReducer(keyEntryReducer, defaultAlias(list.keys, brokers[0]!), emptyEntry);
   const empty = list.keys.length === 0;
   const showingResult = phase.step === "confirm" && list.keys.some((key) => key.keyId === phase.keyId);
-  const shown: Phase = empty && !showingResult ? firstInputPhase(steps, brokers) : phase;
+  const shown: Phase = showingResult ? phase : empty ? firstInputPhase(steps, brokers) : phase.step === "confirm" ? CLOSED : phase;
   const close = () => {
     dispatch({ type: "reset", alias: defaultAlias(list.keys, brokers[0]!) });
     setPhase(CLOSED);
@@ -70,7 +70,7 @@ export function AddKeyPanel({ list, now, onOpenIpHelp }: { list: KiwoomKeyList; 
     let keyId: string | null = null;
     const saved = await command.run(async () => {
       const next = await addKiwoomKey(input);
-      queryClient.setQueryData(KIWOOM_KEYS_QUERY_KEY, next);
+      await storeKiwoomKeys(queryClient, next);
       keyId = addedKey(list.keys, next.keys)?.keyId ?? null;
       if (list.keys.length === 0) await loadKiwoomLink();
     });

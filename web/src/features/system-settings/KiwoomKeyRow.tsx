@@ -2,15 +2,16 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useReducer, useState } from "react";
 import type { KiwoomKey } from "../../api/generated/KiwoomKey";
 import type { KiwoomKeyList } from "../../api/generated/KiwoomKeyList";
-import { connectKiwoomKey, disconnectKiwoomKey, KIWOOM_KEYS_QUERY_KEY, loadKiwoomLink, removeKiwoomKey, renameKiwoomKey, replaceKiwoomKey } from "../../api/system";
+import { connectKiwoomKey, disconnectKiwoomKey, loadKiwoomLink, removeKiwoomKey, renameKiwoomKey, replaceKiwoomKey, storeKiwoomKeys } from "../../api/system";
 import { confirmAction } from "../overlay/Confirm";
 import { KeyFields } from "./KiwoomKeyFields";
 import { ReadOnlyRow, SaveNote } from "./KiwoomKeyForm";
 import { Confirm } from "./KiwoomStatusCard";
 import { emptyEntry, editRequest, keyEntryReducer, removeText, shortReason } from "./kiwoomKeys";
-import { keySaveNote, maskedAppKey, NO_CONFIRMATIONS, panelView, type Confirmations } from "./kiwoomPanel";
+import { keySaveNote, maskedAppKey, NO_CONFIRMATIONS } from "./kiwoomPanel";
 import { linkDotTone } from "./linkDot";
 import { useCommand } from "./useCommand";
+import { useConfirmations } from "./useConfirmations";
 
 interface Props {
   entry: KiwoomKey;
@@ -46,14 +47,14 @@ function KeyDetails({ entry, keys, now, onOpenIpHelp }: { entry: KiwoomKey; keys
   const [editing, setEditing] = useState(false);
   const [form, dispatch] = useReducer(keyEntryReducer, entry.alias, emptyEntry);
   const locked = entry.link.state === "connecting" || command.busy;
-  const keep = (list: KiwoomKeyList) => queryClient.setQueryData(KIWOOM_KEYS_QUERY_KEY, list);
+  const keep = (list: KiwoomKeyList) => storeKiwoomKeys(queryClient, list);
   const request = editRequest(form, entry);
 
   const save = async () => {
     if (!request) return;
     const saved = await command.run(async () => {
-      if (request.alias !== null) keep(await renameKiwoomKey(entry.keyId, { alias: request.alias }));
-      if (request.credentials !== null) keep(await replaceKiwoomKey(entry.keyId, request.credentials));
+      if (request.alias !== null) await keep(await renameKiwoomKey(entry.keyId, { alias: request.alias }));
+      if (request.credentials !== null) await keep(await replaceKiwoomKey(entry.keyId, request.credentials));
       if (entry.market) await loadKiwoomLink();
     });
     if (!saved) return;
@@ -63,7 +64,7 @@ function KeyDetails({ entry, keys, now, onOpenIpHelp }: { entry: KiwoomKey; keys
   const remove = async () => {
     if (!(await confirmAction(removeText(keys, entry), { action: "키 지우기", danger: true }))) return;
     await command.run(async () => {
-      keep(await removeKiwoomKey(entry.keyId));
+      await keep(await removeKiwoomKey(entry.keyId));
       if (entry.market) await loadKiwoomLink();
     });
   };
@@ -98,15 +99,14 @@ function KeyDetails({ entry, keys, now, onOpenIpHelp }: { entry: KiwoomKey; keys
   );
 }
 
-function RowConnection({ entry, now, keep }: { entry: KiwoomKey; now: number; keep(list: KiwoomKeyList): void }) {
+function RowConnection({ entry, now, keep }: { entry: KiwoomKey; now: number; keep(list: KiwoomKeyList): Promise<void> }) {
   const command = useCommand();
-  const [confirmations, setConfirmations] = useState<Confirmations>(NO_CONFIRMATIONS);
-  const view = panelView(entry.link, now, confirmations);
+  const { confirmations, setConfirmations, view } = useConfirmations(entry.link, now);
   const connect = async (acknowledged: boolean) => {
     let again = false;
     await command.run(async () => {
       const list = await connectKiwoomKey(entry.keyId, { acknowledged });
-      keep(list);
+      await keep(list);
       again = list.keys.find((key) => key.keyId === entry.keyId)?.link.problem === "authBlocked8050";
     });
     if (again) setConfirmations(NO_CONFIRMATIONS);

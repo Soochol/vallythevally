@@ -1,6 +1,6 @@
 import { useQueryClient } from "@tanstack/react-query";
 import type { KiwoomKey } from "../../api/generated/KiwoomKey";
-import { designateMarketKey, KIWOOM_KEYS_QUERY_KEY, loadKiwoomLink } from "../../api/system";
+import { designateMarketKey, loadKiwoomLink, storeKiwoomKeys } from "../../api/system";
 import { confirmAction } from "../overlay/Confirm";
 import { marketChangeText, marketKeyOf, pickerLabel } from "./kiwoomKeys";
 import { useCommand } from "./useCommand";
@@ -17,7 +17,7 @@ export function MarketKeyPicker({ keys, now }: { keys: readonly KiwoomKey[]; now
     if (!chosen || chosen.market) return;
     if (!(await confirmAction(marketChangeText(chosen.alias), { action: "시세 바꾸기" }))) return;
     await command.run(async () => {
-      queryClient.setQueryData(KIWOOM_KEYS_QUERY_KEY, await designateMarketKey({ keyId }));
+      await storeKiwoomKeys(queryClient, await designateMarketKey({ keyId }));
       await loadKiwoomLink();
     });
   };

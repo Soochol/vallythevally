@@ -1,33 +1,19 @@
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
 import type { PublicIpCheck } from "../../api/generated/PublicIpCheck";
 import { connectKiwoom, disconnectKiwoom, recheckKiwoomTokenFile, saveRegisteredIp } from "../../api/system";
 import { useKiwoomLinkStore } from "../../stores/kiwoomLink";
 import { useServerTime } from "../status/useServerTime";
-import { type Confirmations, NO_CONFIRMATIONS, panelView } from "./kiwoomPanel";
+import { type Confirmations, NO_CONFIRMATIONS } from "./kiwoomPanel";
 import { useCommand } from "./useCommand";
+import { useConfirmations } from "./useConfirmations";
 
 export function useKiwoomPanel(holdConfirmations = false) {
   const status = useKiwoomLinkStore((s) => s.status);
   const now = useServerTime();
   const command = useCommand();
   const ipCommand = useCommand();
-  const [confirmations, setConfirmations] = useState<Confirmations>(NO_CONFIRMATIONS);
   const [checkedIp, setCheckedIp] = useState<PublicIpCheck | null>(null);
-  const view = panelView(status, now, confirmations);
-
-  const previousStage = useRef(view.stage);
-  useEffect(() => {
-    if (previousStage.current === "connecting" && view.stage === "authBlocked") setConfirmations(NO_CONFIRMATIONS);
-    previousStage.current = view.stage;
-  }, [view.stage]);
-
-  const appKeyTail = status?.appKeyTail;
-  useEffect(() => setConfirmations(NO_CONFIRMATIONS), [appKeyTail]);
-
-  const keepsConfirmations = holdConfirmations || view.needsConfirmations || view.stage === "connecting";
-  useEffect(() => {
-    if (!keepsConfirmations) setConfirmations(NO_CONFIRMATIONS);
-  }, [keepsConfirmations]);
+  const { confirmations, setConfirmations, view } = useConfirmations(status, now, holdConfirmations);
 
   const confirm = async (next: Confirmations, registeredIpChecked: boolean) => {
     setConfirmations(next);
