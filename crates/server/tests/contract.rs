@@ -13,6 +13,7 @@ use server::collector::{CollectorAccess, CollectorAccessState, CollectorStatusPa
 use server::drawing_api::*;
 use server::market_overview::*;
 use server::etf::*;
+use server::heatmap_board::{HeatmapBoard, HeatmapBoardMember, HeatmapBoardTheme, HeatmapThemeOrder, HeatmapThemeSummary};
 use server::heatmap_flow::{HeatmapFlowPoint, HeatmapFlowSeries};
 use ts_rs::TS;
 
@@ -255,6 +256,11 @@ fn generated_typescript_matches_the_committed_files() {
         generated::<Watchlists>(),
         generated::<HeatmapTheme>(),
         generated::<HeatmapThemes>(),
+        generated::<HeatmapBoard>(),
+        generated::<HeatmapBoardMember>(),
+        generated::<HeatmapBoardTheme>(),
+        generated::<HeatmapThemeOrder>(),
+        generated::<HeatmapThemeSummary>(),
         generated::<BalanceSort>(),
         generated::<Excludes>(),
         generated::<ExpectedSort>(),

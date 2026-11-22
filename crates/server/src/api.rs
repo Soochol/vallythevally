@@ -16,7 +16,7 @@ impl UnixSeconds {
 }
 
 /// 주식·ETF "005930", 지수 "IDX:001"(코스피) "IDX:101"(코스닥).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, TS)]
 #[ts(export)]
 pub struct SymbolCode(pub String);
 
