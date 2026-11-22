@@ -15,6 +15,7 @@ use server::market_overview::*;
 use server::etf::*;
 use server::heatmap_board::{HeatmapBoard, HeatmapBoardMember, HeatmapBoardTheme, HeatmapThemeOrder, HeatmapThemeSummary};
 use server::heatmap_flow::{HeatmapFlowPoint, HeatmapFlowSeries};
+use server::kiwoom_themes::{KiwoomLimitMove, KiwoomTheme, KiwoomThemeList, KiwoomThemeMember, KiwoomThemeMembers};
 use ts_rs::TS;
 
 const DIR: &str = "web/src/api/generated";
@@ -259,6 +260,11 @@ fn generated_typescript_matches_the_committed_files() {
         generated::<HeatmapTheme>(),
         generated::<HeatmapThemes>(),
         generated::<HeatmapBoard>(),
+        generated::<KiwoomTheme>(),
+        generated::<KiwoomThemeList>(),
+        generated::<KiwoomLimitMove>(),
+        generated::<KiwoomThemeMember>(),
+        generated::<KiwoomThemeMembers>(),
         generated::<HeatmapBoardMember>(),
         generated::<HeatmapBoardTheme>(),
         generated::<HeatmapThemeOrder>(),

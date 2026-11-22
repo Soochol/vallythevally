@@ -59,6 +59,8 @@ pub enum ApiId {
     Ka90005,
     Ka90010,
     Ka10131,
+    Ka90001,
+    Ka90002,
 }
 
 impl ApiId {
@@ -84,6 +86,7 @@ impl ApiId {
             | ApiId::Ka10033 => "/api/dostk/rkinfo",
             ApiId::Ka10004 | ApiId::Ka90008 | ApiId::Ka90005 | ApiId::Ka90010 => "/api/dostk/mrkcond",
             ApiId::Ka10008 | ApiId::Ka10131 => "/api/dostk/frgnistt",
+            ApiId::Ka90001 | ApiId::Ka90002 => "/api/dostk/thme",
             ApiId::Ka20003 | ApiId::Ka10051 => "/api/dostk/sect",
             ApiId::Ka10080
             | ApiId::Ka10081
@@ -136,6 +139,8 @@ impl ApiId {
             ApiId::Ka90005 => "ka90005",
             ApiId::Ka90010 => "ka90010",
             ApiId::Ka10131 => "ka10131",
+            ApiId::Ka90001 => "ka90001",
+            ApiId::Ka90002 => "ka90002",
         }
     }
 }
@@ -1113,6 +1118,43 @@ impl ProgramTrendByDay {
 
 market_request!(ProgramTrendByDay, Ka90010, wire::ProgramTrendByDayResponse);
 
+pub const THEME_PERIOD_DAYS: std::ops::RangeInclusive<u8> = 1..=99;
+
+#[derive(Serialize)]
+pub struct ThemeGroups {
+    qry_tp: &'static str,
+    stk_cd: &'static str,
+    date_tp: String,
+    thema_nm: &'static str,
+    flu_pl_amt_tp: &'static str,
+    stex_tp: &'static str,
+}
+
+impl ThemeGroups {
+    pub fn by_change_rate(period_days: u8, venue: Venue) -> Option<Self> {
+        THEME_PERIOD_DAYS.contains(&period_days).then(|| ThemeGroups { qry_tp: "0", stk_cd: "", date_tp: period_days.to_string(), thema_nm: "", flu_pl_amt_tp: "3", stex_tp: exchange_code(venue) })
+    }
+}
+
+market_request!(ThemeGroups, Ka90001, wire::ThemeGroupsResponse);
+
+#[derive(Serialize)]
+pub struct ThemeMembers {
+    date_tp: String,
+    thema_grp_cd: String,
+    stex_tp: &'static str,
+}
+
+impl ThemeMembers {
+    pub fn new(theme_code: &str, period_days: u8, venue: Venue) -> Option<Self> {
+        let code = theme_code.trim();
+        let plain = !code.is_empty() && code.len() <= 6 && code.bytes().all(|b| b.is_ascii_alphanumeric());
+        (plain && THEME_PERIOD_DAYS.contains(&period_days)).then(|| ThemeMembers { date_tp: period_days.to_string(), thema_grp_cd: code.to_owned(), stex_tp: exchange_code(venue) })
+    }
+}
+
+market_request!(ThemeMembers, Ka90002, wire::ThemeMembersResponse);
+
 #[derive(Serialize)]
 pub struct InstitutionForeignStreak {
     dt: &'static str,
@@ -1252,6 +1294,21 @@ mod tests {
         assert_eq!(<TradeValueRanking as MarketRequest>::API_ID, ApiId::Ka10032);
         assert_eq!(<MostViewedRanking as MarketRequest>::API_ID, ApiId::Ka00198);
         assert_eq!(<ProgramNetRanking as MarketRequest>::API_ID, ApiId::Ka90003);
+    }
+
+    #[test]
+    fn theme_bodies_follow_the_guide_and_refuse_bad_periods_and_codes() {
+        assert_eq!((ApiId::Ka90001.path(), ApiId::Ka90002.path()), ("/api/dostk/thme", "/api/dostk/thme"));
+        assert_eq!((<ThemeGroups as MarketRequest>::API_ID.as_str(), <ThemeMembers as MarketRequest>::API_ID.as_str()), ("ka90001", "ka90002"));
+        assert_eq!(
+            body(ThemeGroups::by_change_rate(20, Venue::Combined).unwrap()),
+            json!({"qry_tp": "0", "stk_cd": "", "date_tp": "20", "thema_nm": "", "flu_pl_amt_tp": "3", "stex_tp": "3"})
+        );
+        assert_eq!(body(ThemeMembers::new(" 319 ", 5, Venue::Krx).unwrap()), json!({"date_tp": "5", "thema_grp_cd": "319", "stex_tp": "1"}));
+        assert!(ThemeGroups::by_change_rate(0, Venue::Combined).is_none() && ThemeGroups::by_change_rate(100, Venue::Combined).is_none());
+        for code in ["", "1234567", "31/9", "가나"] {
+            assert!(ThemeMembers::new(code, 1, Venue::Combined).is_none(), "{code:?}");
+        }
     }
 
     #[test]
