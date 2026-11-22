@@ -353,3 +353,134 @@ async fn a_kis_source_key_refused_at_issue_or_stopped_by_opsp8996_on_its_stream_
     assert_eq!(client.get("/api/system/kiwoom").await.1["state"], "connected");
     restarted.stop().await;
 }
+
+async fn market_source(client: &Client) -> Value {
+    let (status, body) = client.get("/api/system/market-source").await;
+    assert_eq!(status, 200, "{body}");
+    body
+}
+
+async fn until_market_source(client: &Client, what: &str, ready: impl Fn(&Value) -> bool) -> Value {
+    until(what, || async {
+        let body = market_source(client).await;
+        ready(&body).then_some(body)
+    })
+    .await
+}
+
+fn feature_names(status: &Value) -> Vec<String> {
+    status["features"].as_array().unwrap().iter().map(|name| name.as_str().unwrap().to_owned()).collect()
+}
+
+#[tokio::test]
+async fn the_market_source_status_follows_the_source_key_and_the_broker_that_receives_rankings() {
+    let (kiwoom, kis, peer, env) = (ScriptedTransport::new(), FakeKis::new(), KisPeer::default(), Env::new());
+    let mut extra = vec![START];
+    extra.extend(KIS_ENV);
+    let server = env.spawn(&kiwoom, &kis, &peer, &extra);
+    let client = Client::of(&server).await;
+    client.until_key_state("env", "connected").await;
+    client.until_key_state("env-kis", "connected").await;
+
+    let on_kiwoom = until_market_source(&client, "키움 공급원과 키움 수신", |status| status["broker"] == "kiwoom" && status["state"] == "connected" && status["feedBroker"]["broker"] == "kiwoom").await;
+    assert_eq!(on_kiwoom["keyId"], "env", "{on_kiwoom}");
+    assert!(feature_names(&on_kiwoom).contains(&"dayBars".to_owned()), "{on_kiwoom}");
+    assert!(on_kiwoom["feedBroker"]["rankingKinds"].as_array().unwrap().iter().any(|kind| kind == "foreignStreak"), "{on_kiwoom}");
+    assert!(on_kiwoom["feedBroker"]["overviewFeatures"].as_array().unwrap().iter().any(|feature| feature == "streaks"), "{on_kiwoom}");
+    assert!(!on_kiwoom["feedBroker"]["rankingChoices"].as_array().unwrap().is_empty(), "{on_kiwoom}");
+
+    client.designate("env-kis").await;
+    let on_kis = until_market_source(&client, "한투 공급원, 수신은 키움 그대로", |status| status["broker"] == "kis" && status["state"] == "connected").await;
+    assert_eq!(on_kis["keyId"], "env-kis", "{on_kis}");
+    assert_eq!(on_kis["feedBroker"]["broker"], "kiwoom", "연결된 키움 키가 있으면 공급원이 한투여도 수신은 키움이다: {on_kis}");
+
+    let (status, _) = client.send(reqwest::Method::POST, "/api/system/kiwoom/keys/env/disconnect", None).await;
+    assert_eq!(status, 200);
+    let kis_only = until_market_source(&client, "키움을 끊으면 수신은 한투", |status| status["feedBroker"]["broker"] == "kis").await;
+    assert_eq!(kis_only["broker"], "kis", "{kis_only}");
+    let kis_kinds: Vec<&str> = kis_only["feedBroker"]["rankingKinds"].as_array().unwrap().iter().map(|kind| kind.as_str().unwrap()).collect();
+    assert!(!kis_kinds.contains(&"foreignStreak") && !kis_kinds.contains(&"program"), "한투에 없는 순위는 기능 집합에 없다: {kis_kinds:?}");
+    assert!(!kis_only["feedBroker"]["overviewFeatures"].as_array().unwrap().iter().any(|feature| feature == "streaks"), "{kis_only}");
+    server.stop().await;
+}
+
+#[tokio::test]
+async fn no_connected_key_means_no_feed_broker_and_the_status_names_the_link_state() {
+    let (kiwoom, kis, peer, env) = (ScriptedTransport::new(), FakeKis::new(), KisPeer::default(), Env::new());
+    let server = env.spawn(&kiwoom, &kis, &peer, &[NO_KIWOOM_KEY]);
+    let client = Client::of(&server).await;
+    let status = market_source(&client).await;
+    assert_eq!(status["broker"], "kiwoom", "{status}");
+    assert_eq!(status["state"], "noKey", "{status}");
+    assert!(status["feedBroker"].is_null(), "{status}");
+    assert!(status["keyId"].is_null(), "{status}");
+    server.stop().await;
+}
+
+#[tokio::test]
+async fn the_key_list_and_the_market_source_status_never_carry_a_secret_or_a_whole_app_key() {
+    let (kiwoom, kis, peer, env) = (ScriptedTransport::new(), FakeKis::new(), KisPeer::default(), Env::new());
+    let mut extra = vec![START];
+    extra.extend(KIS_ENV);
+    let server = env.spawn(&kiwoom, &kis, &peer, &extra);
+    let client = Client::of(&server).await;
+    client.until_key_state("env", "connected").await;
+    client.until_key_state("env-kis", "connected").await;
+    let saved_kiwoom = ("FAKE-KIWOOM-APPKEY-saved-1Q2W", "FAKE-KIWOOM-SECRET-saved-3E4R");
+    let saved_kis = ("FAKE-KIS-APPKEY-saved-5T6Y", "FAKE-KIS-SECRET-saved-7U8I");
+    for (broker, (app_key, secret)) in [("kiwoom", saved_kiwoom), ("kis", saved_kis)] {
+        let (status, body) = client.send(reqwest::Method::POST, "/api/system/kiwoom/keys", Some(json!({"alias": broker, "appKey": app_key, "appSecret": secret, "broker": broker}))).await;
+        assert_eq!(status, 200, "{body}");
+    }
+    let listing = client.get("/api/system/kiwoom/keys").await.1.to_string();
+    let sources = [market_source(&client).await.to_string(), client.get("/api/system/kiwoom").await.1.to_string()];
+    let carried = [KIS_KEY, KIS_SECRET, saved_kiwoom.0, saved_kiwoom.1, saved_kis.0, saved_kis.1];
+    for text in sources.iter().chain([&listing]) {
+        for secret in carried {
+            assert!(!text.contains(secret), "응답에 {secret}가 들어 있다: {text}");
+        }
+    }
+    assert!(listing.contains("\"broker\":\"kis\""), "{listing}");
+    server.stop().await;
+}
+
+#[tokio::test]
+async fn the_socket_sends_the_market_source_on_connect_and_again_only_when_it_changes() {
+    let (kiwoom, kis, peer, env) = (ScriptedTransport::new(), FakeKis::new(), KisPeer::default(), Env::new());
+    let mut extra = vec![START];
+    extra.extend(KIS_ENV);
+    let server = env.spawn(&kiwoom, &kis, &peer, &extra);
+    let client = Client::of(&server).await;
+    client.until_key_state("env", "connected").await;
+    client.until_key_state("env-kis", "connected").await;
+    let (mut ws, _) = tokio_tungstenite::connect_async(format!("ws://{}/api/ws", server.addr().await)).await.unwrap();
+    let first = next_of_type(&mut ws, "market_source").await;
+    assert_eq!(first["status"]["broker"], "kiwoom", "{first}");
+    assert_eq!(first["status"]["feedBroker"]["broker"], "kiwoom", "{first}");
+
+    client.designate("env-kis").await;
+    let mut previous = first["status"].clone();
+    let switched = loop {
+        let next = next_of_type(&mut ws, "market_source").await["status"].clone();
+        assert_ne!(next, previous, "같은 값을 되풀이해 보내지 않는다");
+        if next["broker"] == "kis" && next["state"] == "connected" {
+            break next;
+        }
+        previous = next;
+    };
+    assert_eq!(switched["keyId"], "env-kis", "{switched}");
+
+    let (status, _) = client.send(reqwest::Method::POST, "/api/system/kiwoom/keys/env/disconnect", None).await;
+    assert_eq!(status, 200);
+    let mut previous = switched;
+    let lost_kiwoom = loop {
+        let next = next_of_type(&mut ws, "market_source").await["status"].clone();
+        assert_ne!(next, previous, "같은 값을 되풀이해 보내지 않는다");
+        if next["feedBroker"]["broker"] == "kis" {
+            break next;
+        }
+        previous = next;
+    };
+    assert_eq!(lost_kiwoom["broker"], "kis", "{lost_kiwoom}");
+    server.stop().await;
+}

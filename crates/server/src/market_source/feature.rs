@@ -1,6 +1,8 @@
 use domain::{Feed, Period, SeriesKey};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize, ts_rs::TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
 pub enum MarketFeature {
     Directory,
     Fundamentals,

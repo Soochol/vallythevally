@@ -162,6 +162,7 @@ pub fn application_with_source(inputs: ApplicationInputs, mut system: SystemStat
         symbols: symbols.clone(),
         generation: generation.clone(),
     }));
+    let market_source_board = crate::market_source::status::MarketSourceBoard::start(source_switch.clone(), route.clone(), &keys, link.clone());
     let accounts = crate::trading::Accounts::new(keys.clone(), rest.clone(), account_feed, clock.clone(), system.take_order_switch_store(), db.clone(), symbols.clone());
     Arc::new(AppState {
         symbols,
@@ -186,6 +187,7 @@ pub fn application_with_source(inputs: ApplicationInputs, mut system: SystemStat
         kiwoom_catalog: Default::default(),
         generation,
         source_switch,
+        market_source_board,
     })
 }
 

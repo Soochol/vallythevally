@@ -47,6 +47,7 @@ pub struct AppState {
     pub kiwoom_catalog: crate::kiwoom_themes::CatalogStore,
     pub generation: crate::market_source::SourceGeneration,
     pub source_switch: Arc<crate::market_source::switch::SourceSwitch>,
+    pub market_source_board: Arc<crate::market_source::status::MarketSourceBoard>,
 }
 
 pub fn router(state: Arc<AppState>) -> Router {

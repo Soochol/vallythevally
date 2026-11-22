@@ -15,6 +15,7 @@ import type { AccountStatus } from "../../src/api/generated/AccountStatus";
 import type { KiwoomKey } from "../../src/api/generated/KiwoomKey";
 import type { KiwoomKeyList } from "../../src/api/generated/KiwoomKeyList";
 import type { KiwoomLinkStatus } from "../../src/api/generated/KiwoomLinkStatus";
+import type { MarketSourceStatus } from "../../src/api/generated/MarketSourceStatus";
 import type { KiwoomUsage } from "../../src/api/generated/KiwoomUsage";
 import type { ScreenerStatus } from "../../src/api/generated/ScreenerStatus";
 import type { SyncStatus } from "../../src/api/generated/SyncStatus";
@@ -162,6 +163,12 @@ export const CONNECTED_KIWOOM: KiwoomLinkStatus = {
   retryAt: null, needsAcknowledgement: false, step: null, tokenExpiresAt: null, realtimeRegistered: 0, symbolCount: 2800, atStart: "connects",
 };
 
+export const KIWOOM_MARKET_SOURCE: MarketSourceStatus = {
+  broker: "kiwoom", keyId: "k1", alias: "키 1", state: "connected", problem: null, step: null, retryAt: null,
+  features: ["directory", "fundamentals", "quotes", "dayBars", "weekBars", "monthBars", "yearBars", "minuteBars", "indexBars", "orderBook", "trades", "programTrades"],
+  feedBroker: { broker: "kiwoom", rankingKinds: [], rankingChoices: [], overviewFeatures: ["index", "sectors", "flow", "intradayFlow", "turnover", "streaks", "stockInvestors", "foreignHoldings"] },
+};
+
 export const ORDERS_OFF_MESSAGE = "주문 사용이 꺼져 있습니다";
 export const KEY_LIMIT = 5;
 
@@ -192,6 +199,7 @@ export class LiveFrames {
   private state: ConnectionStatus;
   kiwoomLink: KiwoomLinkStatus = CONNECTED_KIWOOM;
   kiwoomKeys: KiwoomKeyList | null = null;
+  marketSource: MarketSourceStatus = KIWOOM_MARKET_SOURCE;
   account: AccountStatus = { state: "local_only" };
   orders: OrdersStatus = { state: "off", accountRef: null, accountTail: null, message: ORDERS_OFF_MESSAGE, accounts: [{ keyId: "k1", alias: "키 1", market: true, state: "off", accountRef: null, accountTail: null }] };
   ordersAccountTail = "01";
@@ -204,6 +212,7 @@ export class LiveFrames {
     this.peers.set(socket, subscriptions);
     socket.send(JSON.stringify({ type: "hello", protocol: 1, serverTime: Math.floor(this.now / 1000), status: this.state } satisfies ServerMessage));
     socket.send(JSON.stringify({ type: "kiwoom_link", status: this.kiwoomLink } satisfies ServerMessage));
+    socket.send(JSON.stringify({ type: "market_source", status: this.marketSource } satisfies ServerMessage));
     socket.send(JSON.stringify({ type: "account", status: this.account } satisfies ServerMessage));
     socket.onMessage(message => {
       const input: ClientMessage = JSON.parse(String(message));
@@ -355,6 +364,7 @@ export class Scenario {
     if (path === "/api/collector/access" && method === "GET") return { body: { access: "off" } satisfies CollectorAccess };
     if (path === "/api/system/kiwoom" && method === "GET") return { body: this.live.kiwoomLink };
     if (path === "/api/system/kiwoom/keys" && method === "GET") return { body: this.live.kiwoomKeys ?? keyListFromLink(this.live.kiwoomLink) };
+    if (path === "/api/system/market-source" && method === "GET") return { body: this.live.marketSource };
     if (path === "/api/system/kiwoom/usage" && method === "GET") return { body: this.live.kiwoomUsage };
     if (path === "/api/system/orders" && method === "GET") return this.ordersFor(url.searchParams.get("account"));
     if (path === "/api/system/orders/check-account" && method === "POST") return { body: { accountTail: this.live.ordersAccountTails[url.searchParams.get("keyId") ?? ""] ?? this.live.ordersAccountTail } satisfies OrdersAccountCheck };

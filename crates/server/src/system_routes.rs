@@ -169,6 +169,7 @@ fn is_loopback_host(host: &str) -> bool {
 pub fn routes(state: Arc<AppState>) -> Router<Arc<AppState>> {
     Router::new()
         .route("/api/system/kiwoom", get(get_kiwoom))
+        .route("/api/system/market-source", get(get_market_source))
         .route("/api/system/kiwoom/usage", get(get_kiwoom_usage))
         .route("/api/system/kiwoom/key", put(put_key).delete(delete_key))
         .route("/api/system/kiwoom/keys", get(list_keys).post(add_key))
@@ -203,6 +204,10 @@ fn mock_key_conflict() -> ApiFailure {
 
 async fn get_kiwoom(State(st): State<Arc<AppState>>) -> Json<KiwoomLinkStatus> {
     Json(kiwoom_status(&st))
+}
+
+async fn get_market_source(State(st): State<Arc<AppState>>) -> Json<api::MarketSourceStatus> {
+    Json(st.market_source_board.snapshot())
 }
 
 async fn get_kiwoom_usage(State(st): State<Arc<AppState>>) -> Json<api::KiwoomUsage> {
@@ -569,7 +574,7 @@ fn count(n: usize) -> u32 {
     u32::try_from(n).unwrap_or(u32::MAX)
 }
 
-fn connect_step(step: ConnectStep) -> KiwoomConnectStep {
+pub(crate) fn connect_step(step: ConnectStep) -> KiwoomConnectStep {
     match step {
         ConnectStep::CheckingKey => KiwoomConnectStep::CheckingKey,
         ConnectStep::Token => KiwoomConnectStep::Token,
@@ -579,7 +584,7 @@ fn connect_step(step: ConnectStep) -> KiwoomConnectStep {
     }
 }
 
-fn problem(problem: Problem) -> KiwoomLinkProblem {
+pub(crate) fn problem(problem: Problem) -> KiwoomLinkProblem {
     match problem {
         Problem::AuthBlocked8050 => KiwoomLinkProblem::AuthBlocked8050,
         Problem::KeyNeedsCheck => KiwoomLinkProblem::KeyNeedsCheck,

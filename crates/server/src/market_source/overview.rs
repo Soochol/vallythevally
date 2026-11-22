@@ -4,7 +4,9 @@ use futures::future::BoxFuture;
 use super::{Priority, SourceError, SourceFailure};
 use crate::api::{self, ApiErrorCode, ApiErrorReason, Market};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize, ts_rs::TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
 pub enum OverviewFeature {
     Index,
     Sectors,
