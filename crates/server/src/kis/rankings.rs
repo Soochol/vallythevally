@@ -137,7 +137,7 @@ impl RankingSource for KisRankings {
                 excludes_managed: true,
                 ..RankingChoices::default()
             },
-            RankingKind::Expected | RankingKind::CreditRatio => RankingChoices { venues: two_venues, excludes_managed: kind == RankingKind::Expected, ..RankingChoices::default() },
+            RankingKind::Expected | RankingKind::CreditRatio => RankingChoices { venues: two_venues, ..RankingChoices::default() },
             RankingKind::InvestorNetBuy => RankingChoices { investors: SUPPORTED_INVESTORS.to_vec(), ..RankingChoices::default() },
             RankingKind::MostViewed => RankingChoices { spans: vec![api::ViewSpan::Today], ..RankingChoices::default() },
             RankingKind::ForeignStreak | RankingKind::Program => RankingChoices::default(),
@@ -274,6 +274,7 @@ impl KisRankings {
             Ranking::TradeAmount { market, venue, exclude_managed, .. } => Self::volume_rank(venue, market, BY_TRADE_AMOUNT, exclude_managed, VolumeColumns::TradeAmount),
             Ranking::TradeVolume { market, venue, session, exclude_managed, .. } => match session {
                 api::TradingSession::All | api::TradingSession::Regular => Self::volume_rank(venue, market, BY_AVERAGE_VOLUME, exclude_managed, VolumeColumns::TradeVolume),
+                api::TradingSession::AfterHours if exclude_managed => return Err(Unsupported::Choice(RankingKind::TradeVolume, "관리종목 제외")),
                 api::TradingSession::AfterHours => Plan {
                     api: KisApiId::OvertimeVolume,
                     query: query([
@@ -576,8 +577,8 @@ struct ReadRows {
     rows: Vec<RankedRow>,
 }
 
-fn collect<R>(rows: Vec<R>, read: impl Fn(&R) -> Option<RankedRow>) -> ReadRows {
-    ReadRows { received: rows.len(), rows: rows.iter().filter_map(read).collect() }
+fn collect<R>(rows: Vec<Option<R>>, read: impl Fn(&R) -> Option<RankedRow>) -> ReadRows {
+    ReadRows { received: rows.len(), rows: rows.iter().flatten().filter_map(read).collect() }
 }
 
 impl Read {
@@ -593,7 +594,11 @@ impl Read {
         let field = self.rows_field();
         let read = match self {
             Read::Volume(columns) => collect(parse::<VolumeRow>(api, page, field)?, |row| volume_row(columns, row)),
-            Read::Movers { direction, include_limit } => collect(parse::<MoversRow>(api, page, field)?, |row| mover_row(direction, include_limit, row)),
+            Read::Movers { direction, include_limit } => {
+                let mut parsed = parse::<MoversRow>(api, page, field)?;
+                parsed.retain(|row| include_limit || !row.as_ref().is_some_and(|row| at_limit(direction, row)));
+                collect(parsed, mover_row)
+            }
             Read::Expected => collect(parse::<ExpectedRow>(api, page, field)?, expected_row),
             Read::Investor { investor, unit } => collect(parse::<InvestorRow>(api, page, field)?, |row| investor_row(investor, unit, row)),
             Read::Balance => collect(parse::<BalanceRow>(api, page, field)?, balance_row),
@@ -608,12 +613,22 @@ impl Read {
     }
 }
 
-fn parse<R: for<'de> Deserialize<'de>>(api: KisApiId, page: &KisPage, field: &str) -> Result<Vec<R>, SourceError> {
+fn parse<R: for<'de> Deserialize<'de>>(api: KisApiId, page: &KisPage, field: &str) -> Result<Vec<Option<R>>, SourceError> {
     let mut body: serde_json::Value = serde_json::from_str(&page.body).map_err(|_| protocol_failure(api))?;
-    match body.get_mut(field).map(serde_json::Value::take) {
-        None | Some(serde_json::Value::Null) => Ok(Vec::new()),
-        Some(rows) => serde_json::from_value(rows).map_err(|_| protocol_failure(api)),
-    }
+    let rows = match body.get_mut(field).map(serde_json::Value::take) {
+        None | Some(serde_json::Value::Null) => return Ok(Vec::new()),
+        Some(serde_json::Value::Array(rows)) => rows,
+        Some(_) => return Err(protocol_failure(api)),
+    };
+    Ok(rows
+        .into_iter()
+        .map(|mut row| {
+            if let serde_json::Value::Object(columns) = &mut row {
+                columns.retain(|_, value| !value.is_null());
+            }
+            serde_json::from_value(row).ok()
+        })
+        .collect())
 }
 
 fn volume_row(columns: VolumeColumns, row: &VolumeRow) -> Option<RankedRow> {
@@ -633,11 +648,11 @@ fn volume_row(columns: VolumeColumns, row: &VolumeRow) -> Option<RankedRow> {
     Some(RankedRow { code: stock_code(&row.mksc_shrn_iscd)?, name: row.hts_kor_isnm.trim().to_owned(), price: Some(won(&row.stck_prpr)?), change_rate: percent(&row.prdy_ctrt), figures })
 }
 
-fn mover_row(direction: Direction, include_limit: bool, row: &MoversRow) -> Option<RankedRow> {
-    let at_limit = row.prdy_vrss_sign.trim() == if direction == Direction::Rising { LIMIT_UP_SIGN } else { LIMIT_DOWN_SIGN };
-    if at_limit && !include_limit {
-        return None;
-    }
+fn at_limit(direction: Direction, row: &MoversRow) -> bool {
+    row.prdy_vrss_sign.trim() == if direction == Direction::Rising { LIMIT_UP_SIGN } else { LIMIT_DOWN_SIGN }
+}
+
+fn mover_row(row: &MoversRow) -> Option<RankedRow> {
     Some(RankedRow {
         code: stock_code(&row.stck_shrn_iscd)?,
         name: row.hts_kor_isnm.trim().to_owned(),

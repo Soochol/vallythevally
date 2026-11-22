@@ -435,3 +435,34 @@ fn a_refused_request_closes_as_the_unsupported_by_source_reason() {
     assert!(failure.message.contains("투자자별 순매수 순위") && failure.message.contains("투자자 구분"), "{}", failure.message);
     assert!(Unsupported::Kind(RankingKind::Program).into_failure().message.contains("프로그램 순매수 순위"));
 }
+
+#[tokio::test(start_paused = true)]
+async fn expected_executions_and_after_hours_volume_refuse_the_managed_filter_they_cannot_send() {
+    let rig = rig(|_| ok("{}"));
+    let expected = Ranking::Expected { market: RankingMarket::All, venue: Venue::Krx, sort: api::ExpectedSort::Gainers, excludes: KEEP_ALL, exclude_managed: true };
+    assert!(!rig.source.choices(RankingKind::Expected).excludes_managed);
+    assert_unsupported(rows(&rig.source, expected).await, RankingKind::Expected, Some("관리종목 제외"));
+    let after_hours = Ranking::TradeVolume { market: RankingMarket::All, venue: Venue::Krx, session: TradingSession::AfterHours, excludes: KEEP_ALL, exclude_managed: true };
+    assert_unsupported(rows(&rig.source, after_hours).await, RankingKind::TradeVolume, Some("관리종목 제외"));
+    let regular = Ranking::TradeVolume { market: RankingMarket::All, venue: Venue::Krx, session: TradingSession::Regular, excludes: KEEP_ALL, exclude_managed: true };
+    assert!(rig.source.check(&regular).is_ok(), "정규장 거래량은 관리종목 제외를 보낸다");
+    assert_eq!(rig.transport.total(), 0);
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_page_of_only_limit_rows_is_an_empty_page_when_limit_rows_are_left_out() {
+    let only_limit = r#"{"rt_cd":"0","msg_cd":"MCA00000","msg1":"ok","output":[{"stck_shrn_iscd":"086520","hts_kor_isnm":"에코프로","stck_prpr":"130000","prdy_vrss":"30000","prdy_vrss_sign":"1","prdy_ctrt":"30.00","acml_vol":"1200000"}]}"#;
+    let rig = rig(move |_| ok(only_limit));
+    assert!(rows(&rig.source, gainers(false, MinTradeAmount::Any)).await.unwrap().is_empty());
+    assert_eq!(rows(&rig.source, gainers(true, MinTradeAmount::Any)).await.unwrap().len(), 1);
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_null_column_or_a_non_object_row_costs_only_that_row() {
+    let body = fixture("volume_rank.json").replacen(r#""prdy_vol":"12000000""#, r#""prdy_vol":null"#, 1).replacen(r#""stck_prpr":"201000""#, r#""stck_prpr":null"#, 1).replacen(r#"{"hts_kor_isnm":"에코프로""#, r#"7,{"hts_kor_isnm":"에코프로""#, 1);
+    let rig = rig(move |_| ok(body.clone()));
+    let amount = rows(&rig.source, trade_amount(RankingMarket::All, Venue::Combined)).await.unwrap();
+    assert_eq!(amount.iter().map(|row| row.code.as_str()).collect::<Vec<_>>(), ["005930", "086520"], "가격이 null인 행과 객체가 아닌 행만 빠진다");
+    let volume = rows(&rig.source, Ranking::TradeVolume { market: RankingMarket::All, venue: Venue::Combined, session: TradingSession::All, excludes: KEEP_ALL, exclude_managed: false }).await.unwrap();
+    assert!(matches!(volume[0].figures, RankingFigures::TradeVolume { previous_day_volume_rate: None, .. }), "null인 칸은 비운다");
+}
