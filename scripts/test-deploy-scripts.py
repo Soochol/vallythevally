@@ -473,6 +473,50 @@ class CollectorInstallTest(FakeCollectorHost):
         self.assertEqual((self.bin / "collector").read_text(), self.script_text("old collector"))
         self.assertEqual(self.install().returncode, 0)
 
+    def seed_everything_old_with_a_pending_reload(self):
+        self.install_everything_old()
+        (self.units / ".vally-collector-reload-pending").write_text("")
+        return self.seed_snapshot()
+
+    def test_bad_lock_or_stable_seconds_fail_the_install_before_any_file_changes_or_systemctl_runs(self):
+        before = self.seed_everything_old_with_a_pending_reload()
+        for name in ["VALLY_COLLECTOR_LOCK_SECONDS", "VALLY_COLLECTOR_STABLE_SECONDS"]:
+            for value in ["1.5", "abc", "0", "00", "-1"]:
+                result = self.install(**{name: value})
+                self.assertNotEqual(result.returncode, 0, (name, value))
+                self.assertIn(name, result.stderr)
+                self.assertEqual(len(result.stderr.strip().splitlines()), 1, result.stderr)
+                self.assertEqual(self.recorded(), [], (name, value))
+                self.assertEqual(self.seed_snapshot(), before, (name, value))
+
+    def seed_snapshot(self):
+        return self.inodes(), {path.name: path.read_text() for path in [*self.bin.iterdir(), *self.units.iterdir()]}
+
+    def test_a_bad_lock_seconds_fails_the_install_even_when_nothing_is_installed_yet(self):
+        result = self.install(VALLY_COLLECTOR_LOCK_SECONDS="1.5")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("VALLY_COLLECTOR_LOCK_SECONDS", result.stderr)
+        self.assertEqual(list(self.bin.iterdir()), [])
+        self.assertEqual(list(self.units.iterdir()), [])
+        self.assertEqual(self.recorded(), [])
+
+    def test_the_install_accepts_the_cap_leading_zeros_and_no_value(self):
+        for env in [{}, {"VALLY_COLLECTOR_LOCK_SECONDS": "3600", "VALLY_COLLECTOR_STABLE_SECONDS": "600"}, {"VALLY_COLLECTOR_LOCK_SECONDS": "007"}]:
+            self.install_collector()
+            result = self.install(**env)
+            self.assertEqual(result.returncode, 0, (env, result.stderr))
+
+    def test_the_installed_restart_helper_runs_alone_without_the_repository(self):
+        self.assertEqual(self.install().returncode, 0)
+        helper = self.bin / "vally-collector-restart"
+        lone = Path(self.temp.name) / "lone"
+        lone.mkdir()
+        shutil.copy(helper, lone / "vally-collector-restart")
+        env = {"HOME": self.temp.name, "PATH": f"{self.stubs}:{os.environ['PATH']}", "VALLY_SYSTEMD_USER_DIR": str(self.units), "VALLY_COLLECTOR_BIN": str(self.bin / "collector")}
+        for path in ["--before-start", "--promote", "--retry-reload", "--validate"]:
+            result = subprocess.run([str(lone / "vally-collector-restart"), path], cwd="/", env=env, capture_output=True, text=True, timeout=60)
+            self.assertEqual(result.returncode, 0, (path, result.stderr))
+
 
 class DeferredDeployTest(FakeCollectorHost):
     def setUp(self):

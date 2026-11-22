@@ -172,17 +172,22 @@ check_lock_seconds() {
     fi
 }
 
+check_stable_seconds() {
+    if ! stable="$(seconds_digits "$stable" "$stable_max")"; then
+        echo "vally-deploy collector-restart: VALLY_COLLECTOR_STABLE_SECONDS는 1 이상 ${stable_max} 이하의 정수여야 합니다(${VALLY_COLLECTOR_STABLE_SECONDS:-10})" >&2
+        return 1
+    fi
+}
+
 case "${1:-}" in
+    --validate) check_stable_seconds && check_lock_seconds || exit 2; exit 0 ;;
     --check) check_window; exit 0 ;;
     --promote) check_lock_seconds || exit 2; promote_pending; exit 0 ;;
     --retry-reload) check_lock_seconds || exit 2; retry_reload; exit 0 ;;
     --before-start) check_lock_seconds || exit 2; before_start; exit 0 ;;
 esac
 
-if ! stable="$(seconds_digits "$stable" "$stable_max")"; then
-    echo "vally-deploy collector-restart: VALLY_COLLECTOR_STABLE_SECONDS는 1 이상 ${stable_max} 이하의 정수여야 합니다(${VALLY_COLLECTOR_STABLE_SECONDS:-10})" >&2
-    exit 2
-fi
+check_stable_seconds || exit 2
 check_lock_seconds || exit 2
 restart_lock_wait_seconds=$((stable + lock_wait_seconds))
 
