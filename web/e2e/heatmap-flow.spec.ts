@@ -17,8 +17,8 @@ test("흐름 비교로 바꾸면 그룹마다 선이 있고 주소에 보기가 
   await expect(line(page, "chips")).toBeVisible();
   await expect(line(page, "holding")).toBeVisible();
   await expect(page).toHaveURL(/[?&]view=flow(&|$)/);
-  await expect(main(page).getByRole("img", { name: "그룹별 장중 평균 등락률" }).getByText("반도체 +2.10%")).toBeVisible();
-  await expect(main(page).getByRole("img", { name: "그룹별 장중 평균 등락률" }).getByText("지주 −0.20%")).toBeVisible();
+  await expect(main(page).getByRole("img", { name: "그룹별 장중 가중 평균 등락률" }).getByText("반도체 +2.10%")).toBeVisible();
+  await expect(main(page).getByRole("img", { name: "그룹별 장중 가중 평균 등락률" }).getByText("지주 −0.20%")).toBeVisible();
   expect(asked.toSorted()).toEqual(["005930,000660", "028260,086520"]);
 
   await page.reload();

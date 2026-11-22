@@ -127,12 +127,12 @@ fn pair() -> Chart {
 }
 
 #[tokio::test]
-async fn the_five_minute_average_matches_the_hand_computed_rates() {
+async fn the_five_minute_traded_weighted_average_matches_the_hand_computed_rates() {
     let h = Harness::start(pair(), &listed(&["005930", "000660"])).await;
     let flow = h.ok("005930,000660").await;
     assert_eq!(flow["date"], "2026-11-19");
     assert_eq!(flow["bucketMinutes"], 5);
-    assert_eq!(flow["points"], json!([{"t": unix(9, 0), "rate": 2.0}, {"t": unix(9, 5), "rate": 2.5}]));
+    assert_eq!(flow["points"], json!([{"t": unix(9, 0), "rate": 2.0}, {"t": unix(9, 5), "rate": 1.8468}]));
     assert_eq!(flow["used"], json!(["005930", "000660"]));
     assert_eq!(flow["missing"], json!([]));
     assert_eq!(flow["overLimit"], json!([]));
@@ -183,7 +183,7 @@ async fn a_symbol_whose_minute_bars_fail_is_left_out_and_the_series_still_comes(
     let flow = h.ok("005930,005380,000660").await;
     assert_eq!(flow["used"], json!(["005930", "000660"]));
     assert_eq!(flow["missing"], json!(["005380"]));
-    assert_eq!(flow["points"], json!([{"t": unix(9, 0), "rate": 2.0}, {"t": unix(9, 5), "rate": 2.5}]));
+    assert_eq!(flow["points"], json!([{"t": unix(9, 0), "rate": 2.0}, {"t": unix(9, 5), "rate": 1.8468}]));
 }
 
 #[tokio::test]

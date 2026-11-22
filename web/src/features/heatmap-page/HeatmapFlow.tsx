@@ -60,7 +60,7 @@ export function HeatmapFlow({ sections, names, venue }: Props) {
     <section className="hm-flow" aria-label="그룹 흐름 비교">
       <header className="hm-flow-head">
         <h2>그룹 흐름 비교</h2>
-        <span>5분마다 · 그룹 평균 등락률(전일 종가 대비)</span>
+        <span>5분마다 · 그룹의 거래대금 가중 평균 등락률(전일 종가 대비)</span>
       </header>
       <div className="hm-flow-legend" role="group" aria-label="그룹 표시">
         {sections.map((section) => (
@@ -73,7 +73,7 @@ export function HeatmapFlow({ sections, names, venue }: Props) {
       {geometry === null ? (
         <p className="hm-flow-empty" role="status">{groups.some((group) => group.calculating) ? "흐름을 계산하는 중입니다" : "그릴 흐름이 없습니다. 그룹을 켜거나 장이 열린 뒤에 다시 보세요"}</p>
       ) : (
-        <svg className="hm-flow-chart" viewBox={`0 0 ${width} ${height}`} role="img" aria-label="그룹별 장중 평균 등락률">
+        <svg className="hm-flow-chart" viewBox={`0 0 ${width} ${height}`} role="img" aria-label="그룹별 장중 가중 평균 등락률">
           {geometry.rateTicks.map((rate) => (
             <g key={rate} className="hm-flow-grid" data-zero={rate === 0}>
               <line x1={left} x2={width - right} y1={geometry.y(rate)} y2={geometry.y(rate)} />

@@ -1,9 +1,9 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
-use domain::{Feed, KstTime, Period, SeriesKey};
+use domain::{Bucket, Feed, KstTime, Ohlcv, Period, SeriesKey, Symbol};
 
-use super::series::SymbolDay;
+use super::series::{MinuteBar, SymbolDay, Weighting};
 use crate::bars::{BarError, BarService};
 use crate::clock::Clock;
 
@@ -28,8 +28,13 @@ impl FlowCache {
             return Ok(day);
         }
         let page = bars.page(SeriesKey { feed, period: Period::M1 }, None, MINUTE_BARS_WANTED).await?;
-        let closes = page.bars.iter().map(|b| (b.bucket.start(), b.ohlcv.close().centi())).chain(page.current.iter().map(|c| (c.bucket.start(), c.ohlcv.close().centi())));
-        let day = SymbolDay::from_minute_closes(now.kst_date(), closes).ok_or_else(|| BarError::Internal("전일 종가를 알 수 없습니다".into()))?;
+        let weighting = match feed.symbol() {
+            Symbol::Stock(_) => Weighting::TradedValue,
+            Symbol::Index(_) => Weighting::Excluded,
+        };
+        let minute = |bucket: Bucket, ohlcv: &Ohlcv| MinuteBar { start: bucket.start(), close_centi: ohlcv.close().centi(), volume: ohlcv.volume().0 };
+        let bars = page.bars.iter().map(|b| minute(b.bucket, &b.ohlcv)).chain(page.current.iter().map(|c| minute(c.bucket, &c.ohlcv)));
+        let day = SymbolDay::from_minute_bars(now.kst_date(), weighting, bars).ok_or_else(|| BarError::Internal("전일 종가를 알 수 없습니다".into()))?;
         let day = Arc::new(day);
         let mut entries = self.entries.lock().expect("흐름 캐시 잠금");
         entries.retain(|_, e| e.fetched_at.kst_date() == now.kst_date());
