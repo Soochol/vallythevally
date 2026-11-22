@@ -92,21 +92,36 @@ test("가격이 빈 단이 낀 0D 프레임이 와도 호가주문 사다리의 
   await expect(quantities).toHaveText(shown);
 });
 
-test("같은 동작을 중복해서 더블클릭해도 명령은 하나다", async ({ page, scenario }) => {
+test("같은 칸을 응답 전에 두 번 더블클릭하면 신규가 두 건 나간다", async ({ page, scenario }) => {
   ordersOn(scenario);
-  const api = tradingApi(scenario);
+  tradingApi(scenario);
   await openOrderWindow(page, scenario);
   const held = scenario.hold((url, request) => url.pathname === "/api/trading/commands/place" && request.method() === "POST");
   const target = cellAt(page, "sell", 70_100);
   await target.dblclick();
   await held.received;
   await target.dblclick();
-  await expect(page.getByTestId("order-queue")).toHaveText("줄 서는 중 · 1건");
+  await expect(page.getByTestId("order-queue")).toHaveText("줄 서는 중 · 2건");
   held.reply({ body: commandOf("sell", { price: 70_100 }) });
   await expect(status(page)).toContainText("접수 · 매도 10 · 70,100원");
-  expect(api.writes).toHaveLength(0);
+  await expect(page.getByTestId("order-queue")).toHaveCount(0);
   const placed = scenario.requests.filter((r) => new URL(r.url()).pathname === "/api/trading/commands/place");
-  expect(placed).toHaveLength(1);
+  expect(placed).toHaveLength(2);
+  const ids = placed.map((r) => (r.postDataJSON() as { commandId: string }).commandId);
+  expect(new Set(ids).size).toBe(2);
+});
+
+test("칩 위에 올리면 더해질 수량이 칩 안에 보이고 칩 숫자는 그대로다", async ({ page, scenario }) => {
+  ordersOn(scenario);
+  tradingApi(scenario, [openOrder("0000001", "buy", 70_000, 12)]);
+  await openOrderWindow(page, scenario);
+  const chip = chipAt(page, "buy", 70_000);
+  await expect(chip).not.toHaveAttribute("data-add", /.*/);
+  await chip.hover();
+  await expect(chip).toHaveAttribute("data-add", "＋10");
+  await expect(chip).toHaveText("12");
+  await page.mouse.move(0, 0);
+  await expect(chip).not.toHaveAttribute("data-add", /.*/);
 });
 
 const routeButton = (page: Page) => page.getByTestId("order-settings-button");
@@ -491,6 +506,45 @@ test("답을 못 받은 신규는 다른 종목을 보고 돌아와 다시 해�
   await pollSaved(() => placeIds(scenario).length).toBe(2);
   const [first, second] = placeIds(scenario);
   expect(second).toBe(first);
+});
+
+test("답을 못 받은 첫 신규 뒤에 줄 서 있던 두 번째 신규는 새 commandId로 나간다", async ({ page, scenario }) => {
+  ordersOn(scenario);
+  tradingApi(scenario);
+  await openOrderWindow(page, scenario);
+  const held = scenario.hold((url, request) => url.pathname === "/api/trading/commands/place" && request.method() === "POST");
+  const target = cellAt(page, "buy", 70_000);
+  await target.dblclick();
+  await held.received;
+  await target.dblclick();
+  await expect(page.getByTestId("order-queue")).toHaveText("줄 서는 중 · 2건");
+  held.reply({ status: 503, body: { error: { code: "internal", message: "서버가 응답하지 못했습니다", reason: null, retryAt: null, manualActionRequired: false } } });
+  await pollSaved(() => placeIds(scenario).length).toBe(2);
+  const [first, second] = placeIds(scenario);
+  expect(second).not.toBe(first);
+});
+
+test("답을 못 받은 신규를 다시 보내는 동안 또 누른 신규는 새 commandId로 나간다", async ({ page, scenario }) => {
+  ordersOn(scenario);
+  tradingApi(scenario);
+  await openOrderWindow(page, scenario);
+  const noAnswer = { status: 503, body: { error: { code: "internal", message: "서버가 응답하지 못했습니다", reason: null, retryAt: null, manualActionRequired: false } } };
+  const target = cellAt(page, "buy", 70_000);
+  const firstHold = scenario.hold((url, request) => url.pathname === "/api/trading/commands/place" && request.method() === "POST");
+  await target.dblclick();
+  await firstHold.received;
+  firstHold.reply(noAnswer);
+  await expect(status(page)).toContainText("같은 동작을 다시 하면 같은 명령으로 보냅니다");
+  const retryHold = scenario.hold((url, request) => url.pathname === "/api/trading/commands/place" && request.method() === "POST");
+  await target.dblclick();
+  await retryHold.received;
+  await target.dblclick();
+  await expect(page.getByTestId("order-queue")).toHaveText("줄 서는 중 · 2건");
+  retryHold.reply({ body: commandOf("buy", { price: 70_000 }) });
+  await pollSaved(() => placeIds(scenario).length).toBe(3);
+  const [first, retried, fresh] = placeIds(scenario);
+  expect(retried).toBe(first);
+  expect(fresh).not.toBe(first);
 });
 
 const daySummaryRequests = (scenario: Scenario, symbol: string) => scenario.requests.filter((r) => new URL(r.url()).pathname === `/api/symbols/${symbol}/day-summary`).length;

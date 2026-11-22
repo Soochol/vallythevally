@@ -6,12 +6,18 @@ import type { LadderRow } from "./ladder";
 export interface QuoteInfo {
   readonly label: string;
   readonly value: string;
-  readonly tone: "up" | "down" | null;
+  readonly tone: "up" | "down" | "warning" | null;
+  readonly band?: true;
 }
 
+export type InfoLine =
+  | { readonly kind: "item"; readonly item: QuoteInfo }
+  | { readonly kind: "range"; readonly label: string; readonly position: number | null }
+  | { readonly kind: "ends"; readonly low: string; readonly high: string };
+
 export type InfoPage = 0 | 1;
-export const INFO_PAGES: readonly InfoPage[] = [0, 1];
-export const nextInfoPage = (page: InfoPage): InfoPage => (page === 0 ? 1 : 0);
+export const INFO_TABS: readonly { readonly page: InfoPage; readonly label: string }[] = [{ page: 0, label: "시세" }, { page: 1, label: "종목" }];
+export const otherInfoPage = (page: InfoPage): InfoPage => (page === 0 ? 1 : 0);
 
 export interface QuoteInfoInput {
   readonly price: number | null;
@@ -38,35 +44,48 @@ export function formatKoreanWon(amount: number): string {
   return `${grouped(amount)}원`;
 }
 
-export function quoteInfoItems(page: InfoPage, { price, previousClose, summary, fundamentals }: QuoteInfoInput): QuoteInfo[] {
+const rangePosition = (price: number | null, low: number, high: number): number | null => {
+  if (price === null) return null;
+  if (high === low) return 0.5;
+  return Math.min(1, Math.max(0, (price - low) / (high - low)));
+};
+
+const item = (value: QuoteInfo): InfoLine => ({ kind: "item", item: value });
+
+export function quoteInfoItems(page: InfoPage, { price, previousClose, summary, fundamentals }: QuoteInfoInput): InfoLine[] {
   const base = previousClose !== null && previousClose > 0 ? previousClose : null;
-  const against = (value: number | null | undefined): QuoteInfo["tone"] => {
+  const against = (value: number | null | undefined): "up" | "down" | null => {
     if (value == null || base === null) return null;
     const side = direction(value - base);
     return side === "flat" ? null : side;
   };
-  const priced = (label: string, value: number | null | undefined): QuoteInfo => ({ label, value: orDash(value, won), tone: against(value) });
-  const plain = (label: string, value: string): QuoteInfo => ({ label, value, tone: null });
+  const priced = (label: string, value: number | null | undefined): InfoLine => item({ label, value: orDash(value, won), tone: against(value) });
+  const plain = (label: string, value: string): InfoLine => item({ label, value, tone: null });
+  const rangeLines = (label: string, low: number | null | undefined, high: number | null | undefined, ends: boolean): InfoLine[] => {
+    if (low == null || high == null || high < low) return ends ? [plain(label, "-")] : [];
+    const range: InfoLine = { kind: "range", label, position: rangePosition(price, low, high) };
+    return ends ? [range, { kind: "ends", low: won(low), high: won(high) }] : [range];
+  };
   if (page === 1) {
     return [
       priced("상한가", fundamentals?.upperLimit),
       priced("하한가", fundamentals?.lowerLimit),
-      plain("52주 최고", orDash(fundamentals?.high52w, won)),
-      plain("52주 최저", orDash(fundamentals?.low52w, won)),
+      ...rangeLines("52주 범위", fundamentals?.low52w, fundamentals?.high52w, true),
       plain("시가총액", orDash(fundamentals?.marketCap, formatKoreanWon)),
-      plain("PER", orDash(fundamentals?.per, (value) => `${formatDecimal(value)}배`)),
-      plain("PBR", orDash(fundamentals?.pbr, (value) => `${formatDecimal(value)}배`)),
+      plain("PER·PBR", fundamentals?.per == null && fundamentals?.pbr == null ? "-" : `${orDash(fundamentals?.per, formatDecimal)}·${orDash(fundamentals?.pbr, formatDecimal)}`),
       plain("외국인소진율", orDash(fundamentals?.foreignExhaustionRate, (value) => `${formatDecimal(value)}%`)),
     ];
   }
   const change = price !== null && base !== null ? price - base : null;
   const rate = change !== null && base !== null ? (change / base) * 100 : null;
+  const changeTone = against(price);
   return [
     priced("시가", summary?.open),
     priced("고가", summary?.high),
     priced("저가", summary?.low),
+    ...rangeLines("당일 범위", summary?.low, summary?.high, false),
     plain("기준가", orDash(previousClose, won)),
-    { label: "전일대비", value: change === null || rate === null ? "-" : `${formatChange(change, false)} ${formatPercent(rate)}`, tone: against(price) },
+    item({ label: "전일대비", value: change === null || rate === null ? "-" : `${formatChange(change, false)} ${formatPercent(rate)}`, tone: changeTone, ...(changeTone === null ? {} : { band: true as const }) }),
     plain("거래량", orDash(summary?.volume, formatVolume)),
     plain("거래대금", orDash(summary?.tradeValueWon, formatKoreanWon)),
   ];
@@ -77,35 +96,28 @@ export interface ExpectedFillInput {
   readonly qty: number;
 }
 
-export const INFO_SLOT_ROWS = 9;
-const FIRST_FREE_SLOT = 7;
-const SHIFTED_FIRST_SLOT = 5;
+export const INFO_CARD_ROWS = 9;
+const EXPECTED_LINES = 2;
 
-export function expectedInfoItems(expected: ExpectedFillInput, previousClose: number | null): QuoteInfo[] {
-  const side = previousClose === null || !(previousClose > 0) ? "flat" : direction(expected.price - previousClose);
+export function expectedInfoItems(expected: ExpectedFillInput): QuoteInfo[] {
   return [
-    { label: "예상체결가", value: won(expected.price), tone: side === "flat" ? null : side },
-    { label: "예상체결량", value: formatPrice(expected.qty, false), tone: null },
+    { label: "예상체결가", value: won(expected.price), tone: "warning" },
+    { label: "예상체결량", value: formatPrice(expected.qty, false), tone: "warning" },
   ];
 }
 
-export const firstShownInfoSlot = (rows: readonly LadderRow[], slots: readonly (QuoteInfo | null)[]): number =>
-  slots.findIndex((item, slot) => item !== null && rows[slot]?.bid == null);
-
-export function expectedItemsOnPage(page: InfoPage, expected: ExpectedFillInput | null, previousClose: number | null): QuoteInfo[] {
-  return page === 0 && expected !== null ? expectedInfoItems(expected, previousClose) : [];
+export function infoCardRows(rows: readonly LadderRow[]): number {
+  const crossed = rows.slice(0, INFO_CARD_ROWS).findIndex((row) => row.bid != null);
+  return crossed < 0 ? Math.min(INFO_CARD_ROWS, rows.length) : crossed;
 }
 
-export function placeInfoItems(rows: readonly LadderRow[], items: readonly QuoteInfo[], expectedItems: readonly QuoteInfo[]): (QuoteInfo | null)[] {
-  const taken = (slot: number): boolean => rows[slot]?.bid != null;
-  const slots: (QuoteInfo | null)[] = Array.from({ length: INFO_SLOT_ROWS }, () => null);
-  if (expectedItems.length === 0) {
-    items.forEach((item, slot) => { slots[slot] = item; });
-    return slots;
-  }
-  const freeBelow = !taken(FIRST_FREE_SLOT) && !taken(FIRST_FREE_SLOT + 1);
-  const firstExpected = freeBelow ? FIRST_FREE_SLOT : SHIFTED_FIRST_SLOT;
-  items.slice(0, firstExpected).forEach((item, slot) => { slots[slot] = item; });
-  expectedItems.forEach((item, offset) => { if (!taken(firstExpected + offset)) slots[firstExpected + offset] = item; });
-  return slots;
+export function expectedItemsOnPage(page: InfoPage, expected: ExpectedFillInput | null): QuoteInfo[] {
+  return page === 0 && expected !== null ? expectedInfoItems(expected) : [];
+}
+
+export function placeInfoItems(rows: readonly LadderRow[], body: readonly InfoLine[], expectedItems: readonly QuoteInfo[]): InfoLine[] {
+  const capacity = infoCardRows(rows) - 1;
+  if (capacity <= 0) return [];
+  if (expectedItems.length === 0 || capacity < EXPECTED_LINES) return body.slice(0, capacity);
+  return [...body.slice(0, capacity - EXPECTED_LINES), ...expectedItems.map(item)];
 }

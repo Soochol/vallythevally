@@ -103,7 +103,7 @@ function OrderBody({ id, code, infoPager }: { id: WindowId; code: SymbolCode; in
   const info = useQuoteInfo({ code, venue: quoteVenue, lastPrice: feed.lastPrice, previousClose: feed.previousClose, fundamentals: limits, page: infoPager.page });
   const trades = useLadderTrades(code, quoteVenue);
   const expected = view ? visibleExpected(view.t, Math.floor(now / 1000), view.expected) : null;
-  const infoSlots = placeInfoItems(rows, info, expectedItemsOnPage(infoPager.page, expected, feed.previousClose));
+  const infoSlots = placeInfoItems(rows, info, expectedItemsOnPage(infoPager.page, expected));
   const totals = stripTotals(view && { ask: view.totalAsk, bid: view.totalBid }, visibleAfterHours(feed.afterHours?.totals ?? null, Math.floor(now / 1000)));
   const data = useOrderData(code, access.open, referencePrice);
   const writes = useOrderWrites(code, orderVenue);
@@ -195,7 +195,7 @@ function OrderBody({ id, code, infoPager }: { id: WindowId; code: SymbolCode; in
       </div>
       <div className="bk-ladder od-ladder-wrap" data-stale={feed.connected ? undefined : ""} data-exploring={explorerOn ? "" : undefined}>
         {view
-            ? <OrderLadder rows={rows} previousClose={feed.previousClose} groups={data.groups} writable={writable} previewQuantity={quantity} buyPreview={(price) => buyPreview(price, quantity, data.capacity.buying)} hover={hover} onHover={setHover} averagePrice={averagePrice} divider={settings.divider} explorer={explorerOn ? { centerPrice: referencePrice, centerToken } : undefined} ladder={ladder} drag={drag} expectedPrice={expected?.price ?? null} rowSlots={{ topRight: infoSlot(infoSlots, infoPager, rows), bottomLeft: tradeSlot(trades, feed.previousClose) }}
+            ? <OrderLadder rows={rows} previousClose={feed.previousClose} groups={data.groups} writable={writable} previewQuantity={quantity} buyPreview={(price) => buyPreview(price, quantity, data.capacity.buying)} hover={hover} onHover={setHover} averagePrice={averagePrice} divider={settings.divider} explorer={explorerOn ? { centerPrice: referencePrice, centerToken } : undefined} ladder={ladder} drag={drag} expectedPrice={expected?.price ?? null} rowSlots={{ infoCard: infoSlot(infoSlots, infoPager), bottomLeft: tradeSlot(trades, feed.previousClose) }}
                 actions={{ place, cancelOne: writes.cancelOne, cancelAtPrice: writes.cancelAtPrice, cancelGroups: (targets) => targets.forEach((g) => writes.cancelAtPrice(g.side, g.price)) }} />
             : <EmptyState title={feed.snapshotFailed ? "호가를 불러오지 못했습니다" : "호가를 기다리는 중입니다"} />}
         <OrderStatusBar status={writes.status} queued={writes.queued} blocked={data.blocked} onUndo={writes.cancelOne} onReconcile={writes.reconcile} onDismiss={writes.dismiss} />

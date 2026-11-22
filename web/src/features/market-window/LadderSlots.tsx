@@ -3,42 +3,55 @@ import { formatPrice } from "../../lib/format";
 import { formatStrength } from "./format";
 import type { InfoPager, LadderTrades } from "./useLadderSlots";
 import { priceTone } from "./PriceLadder";
-import type { LadderRow } from "./ladder";
-import { firstShownInfoSlot, INFO_PAGES, type QuoteInfo } from "./quoteInfo";
+import { INFO_TABS, type InfoLine, type InfoPage, otherInfoPage } from "./quoteInfo";
 
-const pagerLabel = (page: number): string => `정보 ${page + 1}/${INFO_PAGES.length}쪽, 눌러서 다음 쪽`;
-
-function PageDots({ page }: { page: number }) {
+function InfoRow({ line }: { line: InfoLine }) {
+  if (line.kind === "range") {
+    return (
+      <div className="mw-card-range" data-testid="ladder-info-range" data-label={line.label} role="img" aria-label={line.label}>
+        <span className="mw-range-track">{line.position !== null && <i className="mw-range-tick" data-testid="ladder-info-tick" style={{ left: `${line.position * 100}%` }} />}</span>
+      </div>
+    );
+  }
+  if (line.kind === "ends") {
+    return <div className="mw-card-ends" data-testid="ladder-info-ends"><span>{line.low}</span><span>{line.high}</span></div>;
+  }
+  const { item } = line;
   return (
-    <span className="mw-info-dots" aria-hidden>
-      {INFO_PAGES.map((dot) => <i key={dot} data-current={dot === page ? "" : undefined} />)}
-    </span>
+    <div className="mw-card-row" data-testid="ladder-info" data-label={item.label} data-band={item.band ? item.tone : undefined} data-warn={item.tone === "warning" ? "" : undefined}>
+      <span>{item.label}</span>
+      <b data-tone={item.tone ?? undefined}>{item.value}</b>
+    </div>
   );
 }
 
-export const infoSlot = (items: readonly (QuoteInfo | null)[], pager: InfoPager, rows: readonly LadderRow[]) => {
-  const pagerSlot = firstShownInfoSlot(rows, items);
-  return (slot: number): ReactNode => {
-    const item = items[slot];
-    if (!item) return <div className="mw-slot mw-info-fill" onClick={pager.next} />;
-    if (slot !== pagerSlot) {
-      return (
-        <div className="mw-slot mw-info" data-testid="ladder-info" data-label={item.label} onClick={pager.next}>
-          <span>{item.label}</span>
-          <b data-tone={item.tone ?? undefined}>{item.value}</b>
-        </div>
-      );
-    }
-    return (
-      <div className="mw-slot mw-info" data-testid="ladder-info" data-label={item.label} data-pager="" role="button" tabIndex={0} aria-label={pagerLabel(pager.page)} onClick={pager.next}
-        onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); pager.next(); } }}>
-        <span>{item.label}</span>
-        <PageDots page={pager.page} />
-        <b data-tone={item.tone ?? undefined}>{item.value}</b>
-      </div>
-    );
+function InfoTabs({ pager }: { pager: InfoPager }) {
+  const refs = useRef<Partial<Record<InfoPage, HTMLButtonElement | null>>>({});
+  const choose = (page: InfoPage) => {
+    pager.select(page);
+    refs.current[page]?.focus();
   };
-};
+  return (
+    <div className="mw-card-tabs" role="tablist" aria-label="상세 정보">
+      {INFO_TABS.map(({ page, label }) => (
+        <button key={page} ref={(node) => { refs.current[page] = node; }} type="button" role="tab" aria-selected={pager.page === page} tabIndex={pager.page === page ? 0 : -1}
+          onClick={() => pager.select(page)}
+          onKeyDown={(event) => {
+            if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+            event.preventDefault();
+            choose(otherInfoPage(page));
+          }}>{label}</button>
+      ))}
+    </div>
+  );
+}
+
+export const infoSlot = (lines: readonly InfoLine[], pager: InfoPager) => (): ReactNode => (
+  <div className="mw-card" data-testid="ladder-info-card" style={{ height: `calc(${lines.length + 1} * var(--size-24))` }}>
+    <InfoTabs pager={pager} />
+    {lines.map((line, index) => <InfoRow key={index} line={line} />)}
+  </div>
+);
 
 export const scrollAction = (scrollTop: number): "hold" | "release" => (scrollTop > 0 ? "hold" : "release");
 

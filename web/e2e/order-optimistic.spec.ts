@@ -29,6 +29,41 @@ test("더블클릭하면 응답 전에 그 칸에 보내는 중 칩과 상태줄
   await expect(status(page)).toContainText("접수 · 매수 10 · 70,000원");
 });
 
+test("같은 가격에 걸린 주문이 있어도 그 칸을 더블클릭하면 신규가 나가고 칩이 합계가 된다", async ({ page, scenario }) => {
+  const api = await ready(page, scenario, [openOrder("0000001", "buy", BASE, 12)]);
+  const chip = chipAt(page, "buy", BASE);
+  await expect(chip).toHaveText("12");
+  const place = holdWrite(scenario, "place");
+  await chip.dblclick();
+  await place.received;
+  await expect(chip).toHaveText("12");
+  const refetch = holdOpenOrders(scenario);
+  place.reply({ body: commandOf("buy", { orderNo: "0000099" }) });
+  await refetch.received;
+  await expect(chip).toHaveText("22");
+  api.open.push(openOrder("0000099", "buy", BASE, 10));
+  refetch.reply(openOrdersBody(api.open));
+  await expect(status(page)).toContainText("접수 · 매수 10 · 70,000원");
+  await expect(chip).toHaveText("22");
+  const placed = scenario.requests.filter((r) => new URL(r.url()).pathname === "/api/trading/commands/place");
+  expect(placed).toHaveLength(1);
+  expect(placed[0]!.postDataJSON()).toMatchObject({ side: "buy", price: BASE, quantity: 10 });
+});
+
+test("보내는 중 칩은 응답 전 두 건의 수량 합계를 보인다", async ({ page, scenario }) => {
+  await ready(page, scenario);
+  const place = holdWrite(scenario, "place");
+  const cell = cellAt(page, "buy", BASE);
+  await cell.dblclick();
+  await place.received;
+  await expect(chipAt(page, "buy", BASE)).toHaveText("10");
+  await chipAt(page, "buy", BASE).dblclick();
+  await expect(chipAt(page, "buy", BASE)).toHaveText("20");
+  await expect(chipAt(page, "buy", BASE)).toHaveAttribute("data-pending", "sending");
+  place.reply({ body: commandOf("buy", { orderNo: "0000098" }) });
+  await expect(status(page)).toContainText("접수 · 매수 10 · 70,000원");
+});
+
 test("접수 응답이 오면 미체결 재조회 전에 칩이 접수로 바뀌고 재조회 뒤에도 하나다", async ({ page, scenario }) => {
   const api = await ready(page, scenario);
   const place = holdWrite(scenario, "place");
