@@ -8,7 +8,7 @@ use crate::setup_access::SetupPut;
 use crate::setup_api::{ChangesResponse, PushResponse, SummaryResponse};
 use crate::setup_store::{LayoutHead, Removal, SetupDocument};
 use setup::DocumentKind;
-use crate::store::{AccountSlot, PendingLoginSlot, Store};
+use crate::store::{AccountSlot, AccountView, PendingLoginSlot, Store};
 use axum::body::Bytes;
 use axum::extract::{DefaultBodyLimit, Path, RawQuery, State};
 use axum::http::header::{CACHE_CONTROL, CONTENT_TYPE, COOKIE, LOCATION, RETRY_AFTER, SET_COOKIE};
@@ -395,6 +395,9 @@ async fn exchange_token(State(state): Shared, body: Bytes) -> Result<Json<TokenR
         return Err(ApiError::invalid_grant());
     }
     let account = state.store.account(&account_id).await?.ok_or_else(ApiError::invalid_grant)?;
+    if is_blocked(state.as_ref(), &account) {
+        return Err(ApiError::invalid_grant());
+    }
     let token = random_string(32);
     state.store.insert_token(&token, &account_id, now).await.map_err(|error| {
         if ApiError::is_foreign_key_violation(&error) { ApiError::invalid_grant() } else { error.into() }
@@ -413,12 +416,15 @@ pub(crate) async fn authenticate(state: &AppState, headers: &HeaderMap) -> Resul
     let account_id = state.store.touch_token(token, state.clock.now()).await?.ok_or_else(ApiError::unauthorized)?;
     if !state.options.blocked.is_empty() {
         let account = state.store.account(&account_id).await?.ok_or_else(ApiError::unauthorized)?;
-        let blocked = Provider::parse(&account.provider).is_ok_and(|provider| state.options.blocked.contains(provider, &account.subject));
-        if blocked {
+        if is_blocked(state, &account) {
             return Err(ApiError::unauthorized());
         }
     }
     Ok((token.to_owned(), account_id))
+}
+
+fn is_blocked(state: &AppState, account: &AccountView) -> bool {
+    Provider::parse(&account.provider).is_ok_and(|provider| state.options.blocked.contains(provider, &account.subject))
 }
 
 #[derive(Serialize)]
