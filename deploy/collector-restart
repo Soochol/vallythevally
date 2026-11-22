@@ -168,7 +168,7 @@ seconds_digits() {
 visible_text() {
     printf '%s' "$1" | LC_ALL=C od -An -v -tx1 | LC_ALL=C awk '
         function value(hex) { return (index("0123456789abcdef", substr(hex, 1, 1)) - 1) * 16 + index("0123456789abcdef", substr(hex, 2, 1)) - 1 }
-        BEGIN { ORS = ""; names[10] = "\\n"; names[9] = "\\t"; names[13] = "\\r" }
+        BEGIN { ORS = ""; names[10] = "\\n"; names[9] = "\\t"; names[13] = "\\r"; names[92] = "\\\\" }
         { for (field = 1; field <= NF; field++) byte[++count] = value($field) }
         function continuation(position, low, high) { return position <= count && byte[position] >= low && byte[position] <= high }
         function sequence_length(i,    lead) {
