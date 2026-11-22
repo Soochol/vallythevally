@@ -42,7 +42,7 @@
  "jobs": {"probe": {"keys": ["rest-01", "rest-02"], "period_secs": 30, "options": {"calls_per_tr": 4}}}}
 ```
 
-- `jobs`의 이름은 닫힌 열거형이다(`crates/collector/src/shared/mod.rs`의 `JobName`). 지금은 시험용 `probe` 하나다. 뒤 작업이 자기 일을 한 줄씩 더한다.
+- `jobs`의 이름은 닫힌 열거형이다(`crates/collector/src/shared/mod.rs`의 `JobName`). 지금은 시험용 `probe`와 `snapshot`이다. 뒤 작업이 자기 일을 한 줄씩 더한다.
 - 일마다 `keys`(순서가 우선순위), `period_secs`(1 이상), `options`(일이 정하는 선택값, 없으면 일의 기본값)를 둔다. `keys`의 키는 모두 활성 `rest` 키여야 하고 그 일이 받는 증권사여야 한다. 같은 키를 두 번 적을 수 없다.
 - 같은 일에 키가 여럿이면 일이 나눌 단위를 키 수로 나눠 그 키들이 동시에 부른다. 키 `i`가 단위 `u`를 `u % 키 수 == i`일 때 맡는다. 키 하나가 멈추면(재시작 한도, 8050 등) 남은 키들이 몫을 다시 나눠 갖는다. 마지막 키까지 멈추면 그 일은 서고 상태 API에 경보가 난다.
 - `keys.<이름>.total_per_second`(선택)를 적으면 그 키의 `KiwoomRest` 합계 창을 그 값으로 켜서 모든 TR의 1초 전송 합계가 그 값을 넘지 않게 한다. 적지 않으면 TR별 창(5)만 지킨다.
@@ -72,6 +72,18 @@ TR 줄:
   - 키 줄이 5를 넘었는데 `rate_limited`가 0이면 TR이 독립이다. 한 키에 TR이 다른 일 여럿을 둘 수 있다.
   - `crates/collector/src/shared/usage.rs`의 `judge_limit`이 이 규칙이다. 확인하기 전에는 `total_per_second: 5`를 켠 배정으로 돈다.
 
+## 오늘 시세 스냅샷 (`snapshot`)
+
+플랜 결정 C1이다. 전 종목 오늘 시세를 거래소마다 한 판씩 받아 최신 하나만 덮어쓴다.
+
+- 시각: 관측일 08:00부터 KST :00·:30에 한 판씩 받는다. 20:00 이전 마지막 판은 19:59:30이다. 20:00 뒤 20:00:30에 한 번 더 받아 마감 시세(`closing: true`)로 두고, 다음 관측일 첫 판까지 그대로 둔다. 일은 데몬이 관측일 자식에게 배정할 때만 돌아서 휴장일·주말에는 받지 않는다. 새 관측일의 첫 판을 쓴 뒤 지난 관측일 파일을 지운다.
+- 대상: 그날 데몬이 받은 `ka10099`의 모든 행(ETF·ETN 포함, 서버 종목 목록과 같은 분류). 데몬이 아침 목록을 받을 때 `<--data>/listing/<YYYYMMDD>.json`에 종목 코드와 NXT 거래 여부(`nxtEnable == "Y"`)를 남기고 최근 3일 것만 둔다. 일은 그날 파일을 읽고, 없으면 가장 가까운 이전 날 것을 읽는다. 이전 날 것을 쓰는 동안에도 판마다 그날 파일이 생겼는지 보고, 생기면 그 목록으로 바꾼다. 둘 다 없으면 호출 없이 실패한다. 이 파일은 공용 자료 폴더가 데이터 폴더 바로 아래 `shared`일 때(기본값) 찾는다.
+- 호출: 거래소마다 `ka10095`(100종목 묶음, 통합은 `_AL`, NXT는 `_NX` 접미사, NXT는 NXT 거래 종목만)와 코스피·코스닥 종합지수 `ka20003` 각 1회. 호출 수는 판마다 (종목 수 ÷ 100 올림) × 2 + (NXT 종목 수 ÷ 100 올림) + 2다(거래소 셋 기준).
+- 키가 여럿이면 거래소 순서로 늘어놓은 묶음(지수 둘은 맨 끝)을 번호 `u`가 `u % 키 수 == 슬라이스`인 키가 맡는다. 키는 서로 다른 프로세스라 각자 `<공용 자료 폴더>/snapshot-parts/<날짜>.<판 시각>.<슬라이스>-<키 수>.json`에 조각을 쓰고, 마지막 조각을 쓴 키가 조각을 모아 거래소별 파일을 쓴다. 두 키가 동시에 모아도 같은 내용이다.
+- 한 묶음이라도 실패하면 그 키는 조각을 쓰지 않아 그 판은 만들어지지 않고 이전 판이 남는다. 모든 거래소·키의 응답을 합쳐 읽히는 행이 하나도 없거나(조각을 모으는 키가 판정하고 이전 판을 둔다) ka20003 응답에 종합지수 행이 없는 것도 실패다. 그날 목록 파일을 읽지 못하면 이미 읽은 목록으로 계속 돈다. 일의 `failures()`와 일 통계의 마지막 오류에 남는다. 정상 응답에서 일부 종목 행이 빠지거나 읽히지 않으면 본문 `missing`에 센다.
+- 선택값: `options.venues`(기본 `["krx","combined","nxt"]`)로 받을 거래소를 고른다. 모르는 칸·중복·빈 목록은 읽기 오류다.
+- 본문(`SnapshotBody`): `closing`, `requested`(요청한 종목 수), `missing`, `stocks`(종목 행), `indices`(종합지수 행. 세 파일에 같다). 종목 행은 `code`, `day`(응답 날짜), `currentWon`, `baseWon`, `openWon`, `highWon`, `lowWon`, `volume`, `tradedMillionWon`, `tradedAt`(체결 시각, Unix 초. 없으면 null)이고 가격은 원 단위 양수다. 머리 `asOf`는 마지막 조각을 마친 시각이다.
+
 ## 폴더 배치
 
 `<VALLY_SHARED_DATA_DIR>/<종류 폴더>/<관측일>.<확장자>`다. 뒤 작업이 자기 줄을 더한다.
@@ -79,3 +91,6 @@ TR 줄:
 | 종류 | 폴더 | 한 파일(`.json`) | 덧붙임(`.jsonl`) | 본문 |
 |---|---|---|---|---|
 | `probe` (시험용) | `probe/` | `probe/<YYYYMMDD>.json` | `probe/<YYYYMMDD>.jsonl` | `ProbeBody`, `ProbeItem` |
+| `snapshotKrx` | `snapshot-krx/` | `snapshot-krx/<YYYYMMDD>.json` | | `SnapshotBody` |
+| `snapshotCombined` | `snapshot-combined/` | `snapshot-combined/<YYYYMMDD>.json` | | `SnapshotBody` |
+| `snapshotNxt` | `snapshot-nxt/` | `snapshot-nxt/<YYYYMMDD>.json` | | `SnapshotBody` |
