@@ -43,6 +43,20 @@ pub struct KiwoomCredentials {
     pub app_secret: Secret<String>,
 }
 
+#[derive(Debug, Clone)]
+pub struct KisCredentials {
+    pub app_key: Secret<String>,
+    pub app_secret: Secret<String>,
+}
+
+pub const KIS_BASE_URL: &str = "https://openapi.koreainvestment.com:9443";
+pub const KIS_WS_URL: &str = "ws://ops.koreainvestment.com:21000";
+const KIS_BASE_HOST: &str = "openapi.koreainvestment.com";
+const KIS_BASE_PORT: u16 = 9443;
+const KIS_WS_HOST: &str = "ops.koreainvestment.com";
+const KIS_WS_PORT: u16 = 21000;
+const KIS_TOKEN_FILE_NAME: &str = "kis-token.json";
+
 pub const KIWOOM_BASE_URL: &str = "https://api.kiwoom.com";
 pub const KIWOOM_WS_URL: &str = "wss://api.kiwoom.com:10000/api/dostk/websocket";
 pub const KIWOOM_MOCK_BASE_URL: &str = "https://mockapi.kiwoom.com";
@@ -129,6 +143,11 @@ const KNOWN_KEYS: &[&str] = &[
     "VALLY_KIWOOM_APP_SECRET",
     "VALLY_KIWOOM_BASE_URL",
     "VALLY_KIWOOM_WS_URL",
+    "VALLY_KIS_APP_KEY",
+    "VALLY_KIS_APP_SECRET",
+    "VALLY_KIS_BASE_URL",
+    "VALLY_KIS_WS_URL",
+    "VALLY_KIS_TOKEN_PATH",
     "VALLY_CLOCK_START",
     "VALLY_DB_PATH",
     "VALLY_SCREENER_DB_PATH",
@@ -164,6 +183,10 @@ pub struct Config {
     pub kiwoom_credentials: Option<KiwoomCredentials>,
     pub kiwoom_base_url: String,
     pub kiwoom_ws_url: String,
+    pub kis_credentials: Option<KisCredentials>,
+    pub kis_base_url: String,
+    pub kis_ws_url: String,
+    pub kis_token_path: Option<PathBuf>,
     /// 시험용. 서버 시계가 이 KST 시각에서 시작해 실제 시간만큼 흐른다. 실제 키움 주소와 함께 주면 시작하지 않는다.
     pub clock_start: Option<KstTime>,
     pub lock_path: PathBuf,
@@ -265,6 +288,30 @@ impl Config {
         if clock_start.is_some() && rest_endpoint == Endpoint::Official {
             return Err(ConfigError("VALLY_CLOCK_START는 루프백 키움 주소(VALLY_KIWOOM_BASE_URL, VALLY_KIWOOM_WS_URL)와만 쓸 수 있습니다".into()));
         }
+        let kis_urls = (url("VALLY_KIS_BASE_URL"), url("VALLY_KIS_WS_URL"));
+        let kis_urls_given = kis_urls.0.is_some() || kis_urls.1.is_some();
+        let (kis_base_url, kis_ws_url) = match kis_urls {
+            (Some(base), Some(ws)) => (base, ws),
+            (None, None) => (KIS_BASE_URL.to_owned(), KIS_WS_URL.to_owned()),
+            _ => {
+                return Err(ConfigError(format!("VALLY_KIS_BASE_URL과 VALLY_KIS_WS_URL은 둘 다 적거나 둘 다 비워 둡니다. 둘 다 비우면 공식 한투({KIS_BASE_URL}, {KIS_WS_URL})를 씁니다")));
+            }
+        };
+        if mock && let Some(key) = ["VALLY_KIS_APP_KEY", "VALLY_KIS_APP_SECRET"].into_iter().find(|key| present(key).is_some()) {
+            return Err(ConfigError(format!("VALLY_KIWOOM_ENV=mock이면 한투 키 변수 {key}를 쓰지 않습니다. 한투 키는 실전 서버만 씁니다")));
+        }
+        let kis_credentials = match (present("VALLY_KIS_APP_KEY"), present("VALLY_KIS_APP_SECRET")) {
+            (Some(app_key), Some(app_secret)) => Some(KisCredentials { app_key: Secret::new(app_key), app_secret: Secret::new(app_secret) }),
+            (None, None) => None,
+            _ => return Err(ConfigError("VALLY_KIS_APP_KEY와 VALLY_KIS_APP_SECRET은 둘 다 적거나 둘 다 비워 둡니다".into())),
+        };
+        let kis_base_endpoint = KisEndpoint::of("VALLY_KIS_BASE_URL", &kis_base_url, KIS_BASE_HOST, KIS_BASE_PORT, "https")?;
+        if kis_base_endpoint != KisEndpoint::of("VALLY_KIS_WS_URL", &kis_ws_url, KIS_WS_HOST, KIS_WS_PORT, "ws")? {
+            return Err(ConfigError("VALLY_KIS_BASE_URL과 VALLY_KIS_WS_URL은 둘 다 실제 한투이거나 둘 다 루프백 주소여야 합니다".into()));
+        }
+        if clock_start.is_some() && (kis_credentials.is_some() || kis_urls_given) && kis_base_endpoint == KisEndpoint::Official {
+            return Err(ConfigError("VALLY_CLOCK_START는 루프백 한투 주소(VALLY_KIS_BASE_URL, VALLY_KIS_WS_URL)와만 쓸 수 있습니다".into()));
+        }
         let dart_base_url = public_or_loopback("VALLY_DART_BASE_URL", url("VALLY_DART_BASE_URL"), "https://opendart.fss.or.kr")?;
         let kind_base_url = public_or_loopback("VALLY_KIND_BASE_URL", url("VALLY_KIND_BASE_URL"), "https://kind.krx.co.kr")?;
         let naver_base_url = public_or_loopback("VALLY_NAVER_BASE_URL", url("VALLY_NAVER_BASE_URL"), "https://stock.naver.com")?;
@@ -292,6 +339,10 @@ impl Config {
             kiwoom_credentials,
             kiwoom_base_url,
             kiwoom_ws_url,
+            kis_credentials,
+            kis_base_url,
+            kis_ws_url,
+            kis_token_path: None,
             clock_start,
             lock_path: match vars.get("VALLY_LOCK_PATH") {
                 Some(p) => PathBuf::from(p),
@@ -336,6 +387,12 @@ impl Config {
             db_path,
             log_filter: vars.get("VALLY_LOG").cloned().unwrap_or_else(|| "info".to_owned()),
         };
+        let mut config = config;
+        config.kis_token_path = match vars.get("VALLY_KIS_TOKEN_PATH") {
+            Some(path) => Some(PathBuf::from(path)),
+            None if config.kis_credentials.is_some() => Some(config.token_path.with_file_name(KIS_TOKEN_FILE_NAME)),
+            None => None,
+        };
         let registered_ip_path = config.kiwoom_key_path.with_file_name(REGISTERED_IP_FILE_NAME);
         let other_files = [
             ("VALLY_KIWOOM_KEY_PATH", &config.kiwoom_key_path),
@@ -345,6 +402,12 @@ impl Config {
             ("VALLY_SCREENER_DB_PATH", &config.screener_db_path),
             ("VALLY_FINANCIAL_DB_PATH", &config.financial_db_path),
         ];
+        if let Some((key, _)) = other_files.iter().find(|(_, path)| Some(*path) == config.kis_token_path.as_ref()) {
+            return Err(ConfigError(format!("{key}가 한투 토큰 파일(VALLY_KIS_TOKEN_PATH)과 같은 파일입니다")));
+        }
+        if let Some(path) = config.kis_token_path.as_ref().filter(|path| Some(*path) == config.account_state_path.as_ref()) {
+            return Err(ConfigError(format!("VALLY_KIS_TOKEN_PATH가 계정 상태 파일(VALLY_ACCOUNT_STATE_PATH)과 같은 파일입니다: {}", path.display())));
+        }
         if let Some((key, _)) = other_files.iter().find(|(_, path)| Some(*path) == config.account_state_path.as_ref()) {
             return Err(ConfigError(format!("{key}가 계정 상태 파일(VALLY_ACCOUNT_STATE_PATH)과 같은 파일입니다")));
         }
@@ -404,6 +467,27 @@ impl Endpoint {
         }
         let loopback = host == "localhost" || host.trim_start_matches('[').trim_end_matches(']').parse::<IpAddr>().is_ok_and(|ip| ip.is_loopback());
         if loopback { Ok(Endpoint::Loopback) } else { Err(invalid()) }
+    }
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum KisEndpoint {
+    Official,
+    Loopback,
+}
+
+impl KisEndpoint {
+    fn of(key: &str, url: &str, official_host: &str, official_port: u16, official_scheme: &str) -> Result<KisEndpoint, ConfigError> {
+        let invalid = || ConfigError(format!("{key}는 공식 한투({official_scheme}://{official_host}:{official_port})이거나 루프백 주소여야 합니다"));
+        let parsed = reqwest::Url::parse(url).map_err(|_| invalid())?;
+        let host = parsed.host_str().ok_or_else(invalid)?.trim_end_matches('.');
+        let plain_scheme = if official_scheme == "https" { "http" } else { "ws" };
+        let clean = parsed.username().is_empty() && parsed.password().is_none() && parsed.query().is_none() && parsed.fragment().is_none();
+        if host == official_host && parsed.scheme() == official_scheme && parsed.port() == Some(official_port) && parsed.path() == "/" && clean {
+            return Ok(KisEndpoint::Official);
+        }
+        let loopback = host == "localhost" || host.trim_start_matches('[').trim_end_matches(']').parse::<IpAddr>().is_ok_and(|ip| ip.is_loopback());
+        if loopback && parsed.scheme() == plain_scheme && clean { Ok(KisEndpoint::Loopback) } else { Err(invalid()) }
     }
 }
 
@@ -979,5 +1063,125 @@ mod tests {
     fn the_mock_keys_and_the_environment_are_known_settings() {
         let (_, warnings) = Config::from_vars(vars(&[]), vars(&MOCK_KEYS), lock, token, key, account).unwrap();
         assert!(warnings.is_empty(), "{warnings:?}");
+    }
+
+    const KIS_APP_KEY: &str = "FAKE-KIS-APPKEY-cfg-3333";
+    const KIS_APP_SECRET: &str = "FAKE-KIS-SECRET-cfg-4444";
+    const KIS_KEYS: [(&str, &str); 2] = [("VALLY_KIS_APP_KEY", KIS_APP_KEY), ("VALLY_KIS_APP_SECRET", KIS_APP_SECRET)];
+    const KIS_LOOPBACK: [(&str, &str); 2] = [("VALLY_KIS_BASE_URL", "http://127.0.0.1:5"), ("VALLY_KIS_WS_URL", "ws://127.0.0.1:6")];
+
+    fn start_kis(pairs: &[(&str, &str)]) -> Result<Config, ConfigError> {
+        Config::from_vars(vars(&[]), vars(pairs), lock, token, key, account).map(|(config, _)| config)
+    }
+
+    #[test]
+    fn kis_keys_are_both_given_or_both_empty_and_the_error_has_no_value() {
+        let config = start_kis(&KIS_KEYS).unwrap();
+        let credentials = config.kis_credentials.expect("한투 키");
+        assert_eq!((credentials.app_key.expose().as_str(), credentials.app_secret.expose().as_str()), (KIS_APP_KEY, KIS_APP_SECRET));
+        assert_eq!((config.kis_base_url.as_str(), config.kis_ws_url.as_str()), (KIS_BASE_URL, KIS_WS_URL));
+        assert!(start_kis(&[]).unwrap().kis_credentials.is_none());
+        assert!(start_kis(&[("VALLY_KIS_APP_KEY", ""), ("VALLY_KIS_APP_SECRET", "")]).unwrap().kis_credentials.is_none(), "빈 값은 없는 것과 같다");
+        for half in [&KIS_KEYS[..1], &KIS_KEYS[1..]] {
+            let error = start_kis(half).expect_err("한쪽만").to_string();
+            assert!(error.contains("VALLY_KIS_APP_KEY") && !error.contains("FAKE-"), "{error}");
+        }
+    }
+
+    #[test]
+    fn kis_variables_are_known_settings() {
+        let mut pairs = KIS_KEYS.to_vec();
+        pairs.extend([("VALLY_KIS_TOKEN_PATH", "/x/kis-token.json")]);
+        pairs.extend(KIS_LOOPBACK);
+        let (_, warnings) = Config::from_vars(vars(&[]), vars(&pairs), lock, token, key, account).unwrap();
+        assert!(warnings.is_empty(), "{warnings:?}");
+    }
+
+    #[test]
+    fn the_mock_process_refuses_kis_keys_without_printing_values() {
+        for kis_key in ["VALLY_KIS_APP_KEY", "VALLY_KIS_APP_SECRET"] {
+            let mut pairs = MOCK_KEYS.to_vec();
+            pairs.push((kis_key, "FAKE-KIS-VALUE-must-not-print"));
+            let error = start_kis(&pairs).expect_err(kis_key).to_string();
+            assert!(error.contains(kis_key) && !error.contains("FAKE-"), "{error}");
+        }
+        let mut both = MOCK_KEYS.to_vec();
+        both.extend(KIS_KEYS);
+        let error = start_kis(&both).expect_err("모의 + 한투 키").to_string();
+        assert!(error.contains("VALLY_KIS_APP_KEY") && !error.contains(KIS_APP_KEY) && !error.contains(KIS_APP_SECRET), "{error}");
+        let mut empty = MOCK_KEYS.to_vec();
+        empty.extend([("VALLY_KIS_APP_KEY", ""), ("VALLY_KIS_APP_SECRET", "")]);
+        assert!(start_kis(&empty).is_ok(), "빈 한투 키 변수는 없는 것과 같다");
+    }
+
+    #[test]
+    fn kis_urls_must_both_be_official_or_both_loopback() {
+        let official = [("VALLY_KIS_BASE_URL", KIS_BASE_URL), ("VALLY_KIS_WS_URL", KIS_WS_URL)];
+        assert!(start_kis(&official).is_ok());
+        let config = start_kis(&KIS_LOOPBACK).unwrap();
+        assert_eq!((config.kis_base_url.as_str(), config.kis_ws_url.as_str()), ("http://127.0.0.1:5", "ws://127.0.0.1:6"));
+        assert!(start_kis(&KIS_LOOPBACK[..1]).is_err(), "REST 주소만");
+        assert!(start_kis(&KIS_LOOPBACK[1..]).is_err(), "WS 주소만");
+        assert!(start_kis(&official[..1]).is_err(), "공식 REST만");
+        assert!(start_kis(&[KIS_LOOPBACK[0], ("VALLY_KIS_WS_URL", "")]).is_err(), "빈 값");
+        assert!(start_kis(&[KIS_LOOPBACK[0], official[1]]).is_err(), "루프백 REST + 공식 WS");
+        assert!(start_kis(&[official[0], KIS_LOOPBACK[1]]).is_err(), "공식 REST + 루프백 WS");
+    }
+
+    #[test]
+    fn kis_urls_that_are_neither_official_nor_loopback_are_refused() {
+        let mock_hosts = [("VALLY_KIS_BASE_URL", "https://openapivts.koreainvestment.com:29443"), ("VALLY_KIS_WS_URL", "ws://ops.koreainvestment.com:31000")];
+        assert!(start_kis(&mock_hosts).is_err(), "모의투자 주소");
+        for (base, ws) in [
+            ("https://evil.example.com", KIS_WS_URL),
+            ("http://openapi.koreainvestment.com:9443", KIS_WS_URL),
+            ("https://user:pass@openapi.koreainvestment.com:9443", KIS_WS_URL),
+            (KIS_BASE_URL, "ws://evil.example.com:21000"),
+            (KIS_BASE_URL, "wss://ops.koreainvestment.com:21000"),
+            ("https://openapi.koreainvestment.com:29443", KIS_WS_URL),
+            ("https://openapi.koreainvestment.com", KIS_WS_URL),
+            (KIS_BASE_URL, "ws://ops.koreainvestment.com:31000"),
+            (KIS_BASE_URL, "ws://ops.koreainvestment.com:21000/extra"),
+            ("https://127.0.0.1:5", "ws://127.0.0.1:6"),
+            ("http://127.0.0.1:5", "wss://127.0.0.1:6"),
+        ] {
+            let error = start_kis(&[("VALLY_KIS_BASE_URL", base), ("VALLY_KIS_WS_URL", ws)]).expect_err(base).to_string();
+            assert!(error.contains("VALLY_KIS_") && !error.contains("pass"), "{error}");
+        }
+    }
+
+    #[test]
+    fn the_test_clock_starts_only_with_loopback_kis_addresses() {
+        let clock = ("VALLY_CLOCK_START", "20261110090000");
+        let kiwoom_loopback = [("VALLY_KIWOOM_BASE_URL", "http://127.0.0.1:5"), ("VALLY_KIWOOM_WS_URL", "ws://127.0.0.1:5/api/dostk/websocket")];
+        let with = |extra: &[(&str, &str)]| {
+            let mut pairs = kiwoom_loopback.to_vec();
+            pairs.push(clock);
+            pairs.extend(extra.iter().copied());
+            start_kis(&pairs)
+        };
+        assert!(with(&[]).is_ok(), "한투를 쓰지 않으면 상관없다");
+        assert!(with(&KIS_LOOPBACK).is_ok());
+        let mut loopback_with_keys = KIS_KEYS.to_vec();
+        loopback_with_keys.extend(KIS_LOOPBACK);
+        assert!(with(&loopback_with_keys).is_ok());
+        let error = with(&KIS_KEYS).expect_err("공식 한투 키와 시험 시계").to_string();
+        assert!(error.contains("VALLY_CLOCK_START") && !error.contains("FAKE-"), "{error}");
+        assert!(with(&[("VALLY_KIS_BASE_URL", KIS_BASE_URL), ("VALLY_KIS_WS_URL", KIS_WS_URL)]).is_err(), "공식 한투 주소와 시험 시계");
+    }
+
+    #[test]
+    fn the_kis_token_file_defaults_beside_the_kiwoom_token_file_and_cannot_be_another_state_file() {
+        assert_eq!(start_kis(&KIS_KEYS).unwrap().kis_token_path, Some(PathBuf::from("/nonexistent/kis-token.json")));
+        assert_eq!(start_kis(&[]).unwrap().kis_token_path, None, "한투를 쓰지 않으면 경로도 없다");
+        let mut explicit = KIS_KEYS.to_vec();
+        explicit.push(("VALLY_KIS_TOKEN_PATH", "/x/kis.json"));
+        assert_eq!(start_kis(&explicit).unwrap().kis_token_path, Some(PathBuf::from("/x/kis.json")));
+        for other in ["VALLY_TOKEN_PATH", "VALLY_KIWOOM_KEY_PATH", "VALLY_LOCK_PATH", "VALLY_DB_PATH", "VALLY_ACCOUNT_STATE_PATH"] {
+            let mut same = KIS_KEYS.to_vec();
+            same.extend([("VALLY_KIS_TOKEN_PATH", "/x/shared.json"), (other, "/x/shared.json")]);
+            let error = start_kis(&same).expect_err(other).to_string();
+            assert!(error.contains("VALLY_KIS_TOKEN_PATH"), "{other}: {error}");
+        }
     }
 }
