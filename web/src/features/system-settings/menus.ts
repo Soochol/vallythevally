@@ -1,5 +1,5 @@
 export const SYSTEM_MENUS = [
-  { id: "kiwoom", label: "키움 연결", ready: true },
+  { id: "kiwoom", label: "증권사 · 계좌", ready: true },
   { id: "general", label: "일반", ready: true },
   { id: "hotkeys", label: "단축키", ready: true },
   { id: "telegram", label: "알림 · 텔레그램", ready: false },

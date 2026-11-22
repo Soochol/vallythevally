@@ -1,6 +1,7 @@
 import { type KeyboardEvent, useEffect, useId, useReducer, useRef } from "react";
 import { collectorAllowed, useCollectorAccess } from "../../api/collector";
 import { DESKTOP_QUERY, useMediaQuery } from "../../lib/media";
+import { useKiwoomKeys } from "../../api/system";
 import { useKiwoomLinkStore } from "../../stores/kiwoomLink";
 import { useSelectionStore } from "../../stores/selection";
 import { DialogFrame } from "../dialog/DialogParts";
@@ -10,7 +11,7 @@ import { CloseIcon } from "../icons";
 import { HotkeysMenuContent } from "./HotkeysMenuContent";
 import { cancelHotkeyRecording } from "./hotkeyRecording";
 import { KiwoomMenuContent } from "./KiwoomMenuContent";
-import { linkDotTone } from "./linkDot";
+import { KEY_LIST_REFRESH_MS, menuDotTone } from "./kiwoomKeys";
 import { menuAfterKey, type SystemMenuId, visibleMenus } from "./menus";
 import { focusTarget, navigate, openNavigation } from "./navigation";
 import { ReadOnlyMenuContent } from "./ReadOnlyMenuContent";
@@ -25,7 +26,7 @@ function SystemSettingsBody({ menu }: { menu: SystemMenuId | null }) {
   const desktop = useMediaQuery(DESKTOP_QUERY);
   const ids = useId();
   const [{ selected, view }, dispatch] = useReducer(navigate, menu, openNavigation);
-  const tone = linkDotTone(useKiwoomLinkStore((s) => s.status));
+  const tone = menuDotTone(useKiwoomLinkStore((s) => s.status), useKiwoomKeys(KEY_LIST_REFRESH_MS).data?.keys);
   const title = useRef<HTMLHeadingElement>(null);
   const tabId = (id: SystemMenuId) => `${ids}-tab-${id}`;
   const showList = desktop || view === "list";

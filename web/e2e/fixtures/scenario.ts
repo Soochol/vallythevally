@@ -11,6 +11,8 @@ import type { FinancialsPage } from "../../src/api/generated/FinancialsPage";
 import type { JumpBarsPage } from "../../src/api/generated/JumpBarsPage";
 import type { FinancialUpdatePage } from "../../src/api/generated/FinancialUpdatePage";
 import type { AccountStatus } from "../../src/api/generated/AccountStatus";
+import type { KiwoomKey } from "../../src/api/generated/KiwoomKey";
+import type { KiwoomKeyList } from "../../src/api/generated/KiwoomKeyList";
 import type { KiwoomLinkStatus } from "../../src/api/generated/KiwoomLinkStatus";
 import type { KiwoomUsage } from "../../src/api/generated/KiwoomUsage";
 import type { ScreenerStatus } from "../../src/api/generated/ScreenerStatus";
@@ -154,6 +156,16 @@ export const CONNECTED_KIWOOM: KiwoomLinkStatus = {
   retryAt: null, needsAcknowledgement: false, step: null, tokenExpiresAt: null, realtimeRegistered: 0, symbolCount: 2800, atStart: "connects",
 };
 
+export const KEY_LIMIT = 5;
+
+export const keyEntry = (keyId: string, alias: string, link: KiwoomLinkStatus, patch: Partial<KiwoomKey> = {}): KiwoomKey =>
+  ({ keyId, alias, broker: "kiwoom", source: link.keySource === "env" ? "env" : "file", appKeyTail: link.appKeyTail, market: false, link, ...patch });
+
+export const keyListOf = (...keys: KiwoomKey[]): KiwoomKeyList => ({ limit: KEY_LIMIT, keys, keyFileProblem: null });
+
+const keyListFromLink = (link: KiwoomLinkStatus): KiwoomKeyList =>
+  keyListOf(...(link.keySource === "none" ? [] : [keyEntry(link.keySource === "env" ? "env" : "k1", link.keySource === "env" ? "환경 설정 키" : "키 1", link, { market: true })]));
+
 export const SYNCED: SyncStatus = { state: "running", lastSuccessAt: 1_762_650_000, pendingDocuments: 0, refusedDocuments: 0, lastError: null };
 
 export const DEFAULT_SYSTEM_SETTINGS: SystemSettings = {
@@ -172,6 +184,7 @@ export class LiveFrames {
   private seq = 0;
   private state: ConnectionStatus;
   kiwoomLink: KiwoomLinkStatus = CONNECTED_KIWOOM;
+  kiwoomKeys: KiwoomKeyList | null = null;
   account: AccountStatus = { state: "local_only" };
   orders: OrdersStatus = { state: "off", accountRef: null, accountTail: null, message: "주문 사용이 꺼져 있습니다" };
   ordersAccountTail = "01";
@@ -315,6 +328,7 @@ export class Scenario {
     if (path === "/api/account" && method === "GET") return { body: this.live.account };
     if (path === "/api/collector/access" && method === "GET") return { body: { access: "off" } satisfies CollectorAccess };
     if (path === "/api/system/kiwoom" && method === "GET") return { body: this.live.kiwoomLink };
+    if (path === "/api/system/kiwoom/keys" && method === "GET") return { body: this.live.kiwoomKeys ?? keyListFromLink(this.live.kiwoomLink) };
     if (path === "/api/system/kiwoom/usage" && method === "GET") return { body: this.live.kiwoomUsage };
     if (path === "/api/system/orders" && method === "GET") return { body: this.live.orders };
     if (path === "/api/system/orders/check-account" && method === "POST") return { body: { accountTail: this.live.ordersAccountTail } satisfies OrdersAccountCheck };

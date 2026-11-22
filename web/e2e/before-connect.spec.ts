@@ -41,7 +41,7 @@ test("키 없음: 차트 칸 카드의 단추가 키움 연결 내용을 열고 
   await expect(statusBar(page).getByRole("button", { name: /키움 키가 없습니다/ }).locator(".conn-dot")).toHaveAttribute("data-tone", "gray");
   await expect(statusBar(page)).not.toHaveClass(/danger/);
   await guide(page).getByRole("button", { name: "시스템 설정 열기" }).click();
-  await expect(dialog(page).getByRole("tab", { name: /^키움 연결/ })).toHaveAttribute("aria-selected", "true");
+  await expect(dialog(page).getByRole("tab", { name: /^증권사 · 계좌/ })).toHaveAttribute("aria-selected", "true");
   await expect(dialog(page).getByRole("tabpanel")).toContainText("키움 키가 없습니다");
 });
 

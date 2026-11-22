@@ -19,7 +19,7 @@ test("위 막대 단추로 열면 키움 연결이 선택돼 있고 Esc로 닫�
   await expect(dialog(page)).toHaveCount(0);
   await page.getByRole("button", { name: "시스템 설정", exact: true }).click();
   await expect(dialog(page)).toBeVisible();
-  await expect(menu(page, "키움 연결")).toHaveAttribute("aria-selected", "true");
+  await expect(menu(page, "증권사 · 계좌")).toHaveAttribute("aria-selected", "true");
   await expect(dialog(page).getByRole("tabpanel")).toContainText("키움에 연결되어 있습니다");
   await expect(dialog(page).getByRole("tablist")).toHaveAttribute("aria-orientation", "vertical");
   await page.keyboard.press("Escape");
@@ -29,7 +29,7 @@ test("위 막대 단추로 열면 키움 연결이 선택돼 있고 Esc로 닫�
 test("상태 줄의 연결 문장, Alt+쉼표, 명령 찾기로도 열린다", async ({ page }) => {
   await openDesktop(page);
   await page.locator("footer").last().getByRole("button", { name: connectionSentence }).click();
-  await expect(menu(page, "키움 연결")).toHaveAttribute("aria-selected", "true");
+  await expect(menu(page, "증권사 · 계좌")).toHaveAttribute("aria-selected", "true");
   await page.keyboard.press("Escape");
   await expect(dialog(page)).toHaveCount(0);
 
@@ -49,7 +49,7 @@ test("방향키와 Home·End로 메뉴를 옮기고 준비 중 메뉴는 고를 
   await expect(menu(page, "알림 · 텔레그램")).toBeDisabled();
   await expect(menu(page, "재무자료 · DART")).toBeDisabled();
   await expect(menu(page, "알림 · 텔레그램")).toContainText("준비 중");
-  await expect(menu(page, "키움 연결")).toBeFocused();
+  await expect(menu(page, "증권사 · 계좌")).toBeFocused();
   await page.keyboard.press("ArrowDown");
   await expect(menu(page, "일반")).toBeFocused();
   await expect(menu(page, "일반")).toHaveAttribute("aria-selected", "true");
@@ -60,7 +60,7 @@ test("방향키와 Home·End로 메뉴를 옮기고 준비 중 메뉴는 고를 
   await page.keyboard.press("End");
   await expect(menu(page, "정보")).toBeFocused();
   await page.keyboard.press("Home");
-  await expect(menu(page, "키움 연결")).toBeFocused();
+  await expect(menu(page, "증권사 · 계좌")).toBeFocused();
 });
 
 test("일반·데이터·정보는 서버 설정 값을 읽기 전용으로 보인다", async ({ page }) => {
@@ -82,7 +82,7 @@ test("일반·데이터·정보는 서버 설정 값을 읽기 전용으로 보�
 test("연결 상태 메시지가 오면 상태 점과 문장이 바뀐다", async ({ page, scenario }) => {
   await openDesktop(page);
   await page.getByRole("button", { name: "시스템 설정", exact: true }).click();
-  const dot = menu(page, "키움 연결").locator(".conn-dot");
+  const dot = menu(page, "증권사 · 계좌").locator(".conn-dot");
   await expect(dot).toHaveAttribute("data-tone", "mint");
   scenario.live.link({ ...scenario.live.kiwoomLink, state: "failed", problem: "authBlocked8050", message: "키움이 지정단말기 인증을 거절했습니다" });
   await expect(dot).toHaveAttribute("data-tone", "red");
@@ -121,7 +121,7 @@ test("1440×900 화면", async ({ page }) => {
   const box = await dialog(page).boundingBox();
   expect(Math.round(box!.width)).toBe(940);
   expect(Math.round(box!.height)).toBe(680);
-  expect(Math.round((await menu(page, "키움 연결").boundingBox())!.width)).toBeLessThanOrEqual(208);
+  expect(Math.round((await menu(page, "증권사 · 계좌").boundingBox())!.width)).toBeLessThanOrEqual(208);
 });
 
 test.describe("360px 폭", () => {
@@ -158,7 +158,7 @@ test.describe("360px 폭", () => {
     await expect(cell(page)).toBeVisible();
     await page.getByRole("status").filter({ hasText: connectionSentence }).getByRole("button").click();
     await expect(dialog(page).getByRole("tabpanel")).toContainText("키움에 연결되어 있습니다");
-    await expect(dialog(page).getByRole("heading", { name: "키움 연결" })).toBeFocused();
+    await expect(dialog(page).getByRole("heading", { name: "증권사 · 계좌" })).toBeFocused();
     await noHorizontalScroll(page);
   });
 });

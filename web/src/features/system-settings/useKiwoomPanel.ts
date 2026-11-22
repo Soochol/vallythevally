@@ -21,6 +21,9 @@ export function useKiwoomPanel(holdConfirmations = false) {
     previousStage.current = view.stage;
   }, [view.stage]);
 
+  const appKeyTail = status?.appKeyTail;
+  useEffect(() => setConfirmations(NO_CONFIRMATIONS), [appKeyTail]);
+
   const keepsConfirmations = holdConfirmations || view.needsConfirmations || view.stage === "connecting";
   useEffect(() => {
     if (!keepsConfirmations) setConfirmations(NO_CONFIRMATIONS);
