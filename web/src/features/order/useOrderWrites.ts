@@ -17,6 +17,7 @@ const OK_STATUS_MS = 4_000;
 export const ORDER_QUERY_KEY = ["order"] as const;
 
 const ledger = createLedger(newIdFor);
+let placeSequence = 0;
 
 export function statusOfBatch(result: OrderCommands): OrderStatus {
   if (result.commands.length === 0) return { tone: "info", text: "취소할 주문이 없습니다" };
@@ -29,8 +30,9 @@ export function statusOfBatch(result: OrderCommands): OrderStatus {
 
 interface Plan<T> {
   readonly action: string;
-  readonly mark: PendingDraft;
+  readonly mark: Extract<PendingDraft, { readonly key: string }>;
   readonly starting: OrderStatus;
+  readonly coalesce: boolean;
   call(id: string): Promise<T>;
   describe(result: T): OrderStatus;
   settled(result: T): readonly PendingDraft[];
@@ -76,23 +78,25 @@ export function useOrderWrites(code: string, venue: Venue): OrderWrites {
   useEffect(() => () => pendingWrites.clear(code), [code, writeScope]);
 
   const enqueue = useCallback(<T,>(plan: Plan<T>) => {
-    const issued = ledger.issue(plan.action);
-    if (!issued.send) return;
+    const coalesced = plan.coalesce ? ledger.issue(plan.action) : null;
+    if (coalesced && !coalesced.send) return;
+    const commandId = coalesced?.id ?? ledger.issueEach(plan.action);
     pendingWrites.begin(plan.mark);
     setQueued((n) => n + 1);
     tail.current = tail.current.then(async () => {
       let settlement: Settlement = "answered";
       setStatus(plan.starting);
       try {
-        const result = await plan.call(issued.id);
-        pendingWrites.resolve(plan.action, plan.settled(result));
+        const result = await plan.call(commandId);
+        pendingWrites.resolve(plan.mark.key, plan.settled(result));
         setStatus(plan.describe(result));
       } catch (error) {
         if (isUnanswered(error)) settlement = "unanswered";
         setStatus(statusOfFailure(error));
       } finally {
-        pendingWrites.resolve(plan.action, []);
-        ledger.settle(plan.action, settlement);
+        pendingWrites.resolve(plan.mark.key, []);
+        if (coalesced) ledger.settle(plan.action, settlement);
+        else ledger.settleEach(plan.action, commandId, settlement);
         setQueued((n) => n - 1);
         void queryClient.invalidateQueries({ queryKey: ORDER_QUERY_KEY });
       }
@@ -103,7 +107,8 @@ export function useOrderWrites(code: string, venue: Venue): OrderWrites {
     const action = placeAction(code, r.side, r.price, r.quantity, venue);
     enqueue<OrderCommand>({
       action,
-      mark: { kind: "sending", key: action, code, side: r.side, price: r.price, quantity: r.quantity },
+      coalesce: false,
+      mark: { kind: "sending", key: `${action}|${++placeSequence}`, code, side: r.side, price: r.price, quantity: r.quantity },
       starting: statusOfSending(r.side, r.quantity, r.price),
       call: (commandId) => placeOrder({ commandId, code, side: r.side, quantity: r.quantity, price: r.price, venue, confirmHighValue: r.confirmHighValue }),
       describe: (command) => withMargin(statusOfCommand(command), r.margin ?? 0),
@@ -119,6 +124,7 @@ export function useOrderWrites(code: string, venue: Venue): OrderWrites {
       const action = modifyAction(order.orderNo, price);
       enqueue<OrderCommand>({
         action,
+        coalesce: true,
         mark: { kind: "modifying", key: action, code, orderNo: order.orderNo },
         starting: statusOfModifying(order.price, price),
         call: (commandId) => modifyOrder({ commandId, orderNo: order.orderNo, price, confirmHighValue: needsHighValueConfirm(price, order.openQuantity) }),
@@ -136,6 +142,7 @@ export function useOrderWrites(code: string, venue: Venue): OrderWrites {
     const action = cancelAction(orderNo);
     enqueue<OrderCommand>({
       action,
+      coalesce: true,
       mark: { kind: "canceling", key: action, code, orderNo },
       starting: statusOfCanceling(),
       call: (commandId) => cancelOrder({ commandId, orderNo }),
@@ -148,6 +155,7 @@ export function useOrderWrites(code: string, venue: Venue): OrderWrites {
     const action = cancelBatchAction(code, side, price);
     enqueue<OrderCommands>({
       action,
+      coalesce: true,
       mark: { kind: "canceling-price", key: action, code, side, price },
       starting: statusOfCanceling({ side, price }),
       call: (batchId) => cancelOrdersAtPrice({ batchId, code, side, price }),

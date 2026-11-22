@@ -64,11 +64,15 @@ export function groupWithPending(orders: readonly TradingOpenOrder[], writes: re
       if (key !== null) mark(key, write.kind);
     } else if (write.kind === "canceling-price") mark(groupKey(write.side, write.price), "canceling");
   }
+  const sendingOnly = new Map<string, PriceGroup>();
   for (const write of mine) {
     if (write.kind !== "sending") continue;
     const key = groupKey(write.side, write.price);
-    if (!groups.has(key)) groups.set(key, { side: write.side, price: write.price, quantity: write.quantity, orders: [], pending: "sending" });
+    if (groups.has(key)) continue;
+    const sent = sendingOnly.get(key);
+    sendingOnly.set(key, { side: write.side, price: write.price, quantity: (sent?.quantity ?? 0) + write.quantity, orders: [], pending: "sending" });
   }
+  for (const [key, group] of sendingOnly) groups.set(key, group);
   return groups;
 }
 
@@ -137,6 +141,8 @@ export function dragGhostText(target: DragTarget, source: DragSource): string {
 }
 
 export const previewText = (side: OrderSide, quantity: number): string => `${SIDE_LABEL[side]} ${quantity}`;
+
+export const addQuantityText = (quantity: number): string => `＋${quantity}`;
 
 export function typedQuantity(input: string): number {
   const typed = Number(input);

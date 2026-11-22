@@ -130,6 +130,18 @@ test("미수 막기에서 현금을 넘는 매수는 보내지 않고 최대 수
   expect(api.writes).toHaveLength(1);
 });
 
+test("같은 가격 칩 더블클릭도 매수 한도를 넘으면 막히고 줄여 보내기를 보인다", async ({ page, scenario }) => {
+  const api = await ready(page, scenario, CASH_700K, "cash_only", [openOrder("0000001", "buy", BASE, 12)]);
+  await expect(buyable(page).locator("b")).toHaveText("700,000원");
+  await quantity(page).fill("11");
+  await chipAt(page, "buy", BASE).dblclick();
+  await expect(status(page)).toContainText("현금 주문가능 700,000원을 넘습니다 (미수 막음) · 최대 10");
+  expect(api.writes).toHaveLength(0);
+  await page.getByTestId("order-status-action").click();
+  await pollSaved(() => writesTo(api, "place")).toHaveLength(1);
+  expect(writesTo(api, "place")[0]!.body).toMatchObject({ side: "buy", quantity: 10, price: BASE });
+});
+
 test("현금이 0이면 살 수 있는 수량이 없다고 보인다", async ({ page, scenario }) => {
   const api = await ready(page, scenario, { cashAmount: 0, cashQuantity: 0 });
   await expect(buyable(page).locator("b")).toHaveText("0원");
