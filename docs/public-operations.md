@@ -63,16 +63,31 @@
 | `VALLY_PUBLIC_SCREENER_ACCOUNT_PER_MINUTE` | 2 | 계정당 스크리너 실행 |
 | `VALLY_PUBLIC_SCREENER_TOTAL_PER_MINUTE` | 3 (0 = 한도 없음) | 전체 스크리너 실행 |
 | `VALLY_PUBLIC_SCREENER_STATUS_CACHE_SECS` | 2 | 스크리너 상태 공용 캐시 |
-| `VALLY_PUBLIC_BOARD_CONCURRENCY`, `_FLOW_CONCURRENCY` | 1, 1 | 히트맵 보드·흐름 묶음 동시. `public-user-data`가 쓴다 |
-| `VALLY_PUBLIC_FLOW_TR_PER_MINUTE`, `_FLOW_ACCOUNT_TR_PER_MINUTE`, `_FLOW_FETCH_CONCURRENCY`, `_BOARD_TR_PER_WINDOW` | 60, 60, 5, 45 | 히트맵 TR 예산. `public-user-data`가 쓴다 |
+| `VALLY_PUBLIC_BOARD_CONCURRENCY`, `_FLOW_CONCURRENCY` | 1, 1 | 히트맵 보드·흐름 묶음 동시. 자리는 캐시에 없어 키움을 불러야 할 종목이 있을 때만 잡는다 |
+| `VALLY_PUBLIC_FLOW_TR_PER_MINUTE`, `_FLOW_ACCOUNT_TR_PER_MINUTE` | 60, 60 | 흐름 TR 예산. 캐시에 없는 종목 하나가 TR 하나이고, 예산이 없는 종목은 `missing`이다 |
+| `VALLY_PUBLIC_BOARD_TR_PER_WINDOW` | 45 | 보드 TR 예산. 45초 창마다 전체 한도이고 100종목 묶음 하나가 TR 하나다. 예산이 없는 묶음의 종목은 `missing`이다 |
+| `VALLY_PUBLIC_FLOW_FETCH_CONCURRENCY` | 5 | 흐름 한 요청 안에서 동시에 받는 종목 수 |
+| `VALLY_PUBLIC_KIWOOM_SENDS_PER_WINDOW` | 3 | 흐름 `ka10080`과 보드 `ka10095`가 키움 전송 창(1.05초, 한도 5) 하나에 낼 수 있는 공개 전송 수. 나머지 칸은 운영자 몫이다. 속도만 맞추고 거절하지 않는다 |
 
 키움 경로가 대기열 `Gated`나 한도 대기를 받으면 기다리지 않고 바로 `503`과 짧은 `retryAt`(5초 안)을 낸다. 공개 오류 응답에는 키움 오류 원문이나 `manualActionRequired`가 없고, 고정 문구와 `retryAt`만 있다.
 
-운영자 화면의 같은 TR 요청이 공개 부하 때문에 더 기다리는 시간의 상한은 (묶음 동시 한도 × 공개 요청 하나가 그 TR을 동시에 쌓는 최대 수) ÷ 5초다. 기본값에서 순위는 2초, 시장 개요 웜은 2.4초다. 시장 개요 `flow`의 하루 첫 콜드(기간마다 최대 약 62회)는 한 번 약 12초까지 늘 수 있다.
+히트맵 흐름은 같은 KST 분에 받은 값을 유효로 보는 분 맞춤 캐시를 쓴다(운영자 리스너는 45초 규칙 그대로). 같은 분 안에서는 공개 사용자가 몇 명이든 종목마다 TR이 한 번이다. 보드의 45초 시세 캐시와 흐름 캐시는 두 리스너와 모든 계정이 같이 쓴다. 흐름의 `symbols`는 세션 계정의 히트맵 테마 문서에 있는 종목만 받고, 없는 종목은 받지 않고 응답의 `notInThemes`로 돌려준다(운영자 리스너 응답에는 이 칸이 없다).
+
+운영자 화면의 같은 TR 요청이 공개 부하 때문에 더 기다리는 시간의 상한은 (묶음 동시 한도 × 공개 요청 하나가 그 TR을 동시에 쌓는 최대 수) ÷ 5초다. 기본값에서 순위는 2초, 시장 개요 웜은 2.4초다. 흐름 `ka10080`과 보드 `ka10095`는 이 계산이 맞지 않는다. 키움 대기열이 TR마다 1.05초 창에 5건을 보내므로, 공개 호출이 창을 가득 채우면 운영자 요청은 창이 다시 열릴 때까지(최대 두 창, 약 2.1초) 기다린다. 그래서 두 경로는 전송 직전에 `VALLY_PUBLIC_KIWOOM_SENDS_PER_WINDOW`로 속도를 맞춰 창에 운영자 몫을 남긴다. 기본값에서 상한은 흐름 1초, 보드 0.2초이고 시험은 0을 잰다. 시장 개요 `flow`의 하루 첫 콜드(기간마다 최대 약 62회)는 한 번 약 12초까지 늘 수 있다.
 
 ### 본문 크기
 
 공개 리스너는 모든 요청 본문을 8 MiB로 자른다. 넘으면 `413`이다. 라우트마다 더 작은 한도가 따로 있다.
+
+### 계정별 사용자 자료
+
+공개 리스너의 관심종목, 조건식, 히트맵 테마, 화면 상태, 레이아웃, 드로잉 라우트(`GET`·`PUT`·`DELETE`)는 운영자 리스너와 같은 경로·본문·응답이다. 저장은 로컬 SQLite가 아니라 세션 계정의 셋업 문서(`crates/account-server`의 `setup_documents`)에 하며, 코드는 `crates/server/src/public/user_data.rs`에 있다. 두 리스너의 저장소는 서로 보이지 않는다.
+
+- 검증 함수와 크기 한도는 운영자 리스너와 같은 함수(`setup_documents.rs`)를 쓴다. 계정 전체 본문이 32MB를 넘으면 `413 payload_too_large`다.
+- revision 규칙은 같다. 같거나 작으면 `409 stale_revision`이다. 삭제는 revision을 가진 삭제 표시이고, 삭제 revision은 `max(저장된 revision + 1, 서버 시각 밀리초)`다. 삭제 표시보다 크지 않은 revision은 다시 저장하지 못한다.
+- 저장된 적 없는 계정은 새 로컬 DB와 같은 기본값(기본 레이아웃 하나, 빈 목록, 화면 상태 `dark`)을 본다. 기본 레이아웃은 그 계정이 레이아웃 라우트를 처음 쓸 때 셋업 문서로 저장되고, 마지막 레이아웃은 지울 수 없다. 레이아웃 목록은 만든 순서다.
+- 드로잉 질의(`symbol=`)는 SQLite 표현식 색인(`setup_drawings_by_symbol`, 종목·`z`·`id`)으로 그 종목의 문서만 읽는다. 계정 전체 드로잉을 해석하지 않고 정렬도 색인 순서다. 레이아웃 이름 중복 검사도 색인(`setup_layouts_by_name`)을 쓴다.
+- 운영자 리스너와 다르다: 레이아웃을 저장할 때 창이 사라진 칸 범위 드로잉을 레이아웃 범위로 넓히는 일, 드로잉이 걸린 레이아웃을 지울 때의 거절은 하지 않는다. 드로잉의 `scope`가 가리키는 레이아웃·차트 창이 있는지는 저장할 때 확인한다.
 
 ## 서버 PC 배포에 더할 값
 
@@ -158,6 +173,7 @@ P5 되돌리기: Funnel을 끄고, 공개 설정(`VALLY_PUBLIC_*`)을 지우고,
 - **운영자 리스너 전용 `GET /api/public-usage`.** 공개 리스너에서는 세션이 없으면 401, 세션이 있으면 404다. 시작 뒤 누적값을 낸다.
   - `bundles`: 묶음별 계수. 묶음은 `rankings`, `market_overview`, `screener_run`, `board`, `flow`, `shared`(그 밖 공용 자료), `user_data`, `login`이다. 값은 `responses`(응답 수), `tooManyRequests`(429 횟수), `unavailable`(503 횟수), `waitTotalMs`·`waitMaxMs`(동시 한도에서 기다린 시간. 바로 거절하는 경로는 0이다), `trCalls`(공개 요청이 낸 TR 수. 순위·시장 개요·스크리너는 요청 앞뒤의 키움 대기열 전송 수 차이로 추정하므로 같은 시간의 운영자 호출이 섞일 수 있다).
   - `cacheHits`: 시장 개요 응답 캐시와 스크리너 상태 캐시의 적중 수.
+  - `board`·`flow` 묶음에는 `trCalls`(공개 요청이 새로 받은 TR 수, 정확히 센다)와 함께 `cachedSymbols`(캐시에서 찾은 종목 수), `overBudgetSymbols`(예산이 없어 `missing`으로 돌린 종목 수), `rejectedSymbols`(테마에 없어 거절한 종목 수, 흐름만)가 있다. 0인 값은 나오지 않는다.
   - `topAccounts`: 요청 수 상위 계정 10개(`provider:subject`).
   - `operatorKiwoomLatency`: 운영자 리스너의 키움 경로 응답 시간. 이번 분(`current`)과 지난 분(`lastMinute`)의 표본 수, p50, 최대(밀리초).
 - **분마다 로그 한 줄.** 그 분에 공개 요청이 하나라도 있었을 때만 `공개 사용량 {…}` 한 줄에 위 JSON을 담는다.

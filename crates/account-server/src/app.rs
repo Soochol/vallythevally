@@ -4,7 +4,10 @@ use crate::error::ApiError;
 use crate::idp::{AuthorizeParams, CodeGrant, IdpClient};
 use crate::model::{ConnectorPort, LoginFlow, Provider, StartRequest};
 use crate::secrets::{random_string, s256_challenge};
+use crate::setup_access::SetupPut;
 use crate::setup_api::{ChangesResponse, PushResponse, SummaryResponse};
+use crate::setup_store::{LayoutHead, Removal, SetupDocument};
+use setup::DocumentKind;
 use crate::store::{AccountSlot, PendingLoginSlot, Store};
 use axum::body::Bytes;
 use axum::extract::{DefaultBodyLimit, Path, RawQuery, State};
@@ -111,6 +114,30 @@ impl Accounts {
 
     pub async fn setup_summary(&self, account_id: &str) -> Result<SummaryResponse, ApiError> {
         crate::setup_api::summary(&self.0.store, account_id).await
+    }
+
+    pub async fn setup_document(&self, account_id: &str, kind: DocumentKind, id: &str) -> Result<Option<SetupDocument>, sqlx::Error> {
+        self.0.store.setup_document(account_id, kind, id).await
+    }
+
+    pub async fn setup_put(&self, account_id: &str, document: &SetupDocument) -> Result<SetupPut, sqlx::Error> {
+        crate::setup_access::put(&self.0.store, self.0.clock.now().0.saturating_mul(1000), account_id, document).await
+    }
+
+    pub async fn setup_remove(&self, account_id: &str, kind: DocumentKind, id: &str, floor_revision: i64) -> Result<Removal, sqlx::Error> {
+        self.0.store.remove_document(account_id, kind, id, floor_revision).await
+    }
+
+    pub async fn setup_layout_heads(&self, account_id: &str) -> Result<Vec<LayoutHead>, sqlx::Error> {
+        self.0.store.layout_heads(account_id).await
+    }
+
+    pub async fn setup_layout_name_taken(&self, account_id: &str, name: &str, except_id: &str) -> Result<bool, sqlx::Error> {
+        self.0.store.layout_name_taken(account_id, name, except_id).await
+    }
+
+    pub async fn setup_drawings_of(&self, account_id: &str, symbol: &str) -> Result<Vec<SetupDocument>, sqlx::Error> {
+        self.0.store.drawings_of(account_id, symbol).await
     }
 }
 

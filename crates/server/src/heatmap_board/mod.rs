@@ -8,6 +8,7 @@ use axum::response::Json;
 use axum::routing::get;
 use axum::{Extension, Router};
 use domain::{KstTime, Symbol, Venue};
+use futures::future::BoxFuture;
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
@@ -17,6 +18,37 @@ use crate::userdata;
 pub use board::{HeatmapBoardMember, HeatmapBoardTheme, HeatmapThemeOrder, HeatmapThemeSummary, board_theme, in_order};
 
 pub const FRESH_SECS: i64 = 45;
+
+pub struct Busy;
+
+pub enum Refused {
+    Busy,
+    Failed(ApiFailure),
+}
+
+pub trait QuoteGate: Sync {
+    fn begin(&self) -> Result<Box<dyn Send>, Busy>;
+    fn grant_tr(&self) -> BoxFuture<'_, bool>;
+}
+
+struct Unlimited;
+
+impl QuoteGate for Unlimited {
+    fn begin(&self) -> Result<Box<dyn Send>, Busy> {
+        Ok(Box::new(()))
+    }
+
+    fn grant_tr(&self) -> BoxFuture<'_, bool> {
+        Box::pin(async { true })
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct BoardTally {
+    pub cached: u32,
+    pub fetched: u32,
+    pub over_budget: u32,
+}
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
@@ -95,12 +127,18 @@ impl QuoteCache {
     }
 }
 
-pub fn routes() -> Router<Arc<AppState>> {
-    Router::new().route("/api/heatmap/board", get(board)).layer(Extension(Arc::new(QuoteCache::default())))
+pub fn routes(cache: Arc<QuoteCache>) -> Router<Arc<AppState>> {
+    Router::new().route("/api/heatmap/board", get(board)).layer(Extension(cache))
 }
 
-async fn board(State(st): State<Arc<AppState>>, Extension(cache): Extension<Arc<QuoteCache>>, Query(q): Query<HashMap<String, String>>) -> Result<Json<HeatmapBoard>, ApiFailure> {
-    let venue = venue_param(&q)?.unwrap_or(Venue::Combined);
+struct BoardParams {
+    venue: Venue,
+    order: HeatmapThemeOrder,
+    source: HeatmapSource,
+}
+
+fn board_params(q: &HashMap<String, String>) -> Result<BoardParams, ApiFailure> {
+    let venue = venue_param(q)?.unwrap_or(Venue::Combined);
     let order = match q.get("order") {
         None => HeatmapThemeOrder::default(),
         Some(raw) => HeatmapThemeOrder::parse(raw).ok_or_else(|| ApiFailure::bad_request("order는 rate, custom 또는 traded여야 합니다"))?,
@@ -110,22 +148,55 @@ async fn board(State(st): State<Arc<AppState>>, Extension(cache): Extension<Arc<
         Some("kiwoom") => HeatmapSource::Kiwoom,
         Some(_) => return Err(ApiFailure::bad_request("source는 mine 또는 kiwoom이어야 합니다")),
     };
+    Ok(BoardParams { venue, order, source })
+}
+
+async fn board(State(st): State<Arc<AppState>>, Extension(cache): Extension<Arc<QuoteCache>>, Query(q): Query<HashMap<String, String>>) -> Result<Json<HeatmapBoard>, ApiFailure> {
+    let params = board_params(&q)?;
+    let mine = match params.source {
+        HeatmapSource::Mine => userdata::get_heatmap_themes(&st.db).await?,
+        HeatmapSource::Kiwoom => HeatmapThemes { themes: Vec::new(), revision: Revision(0) },
+    };
+    match assemble(&st, &cache, params, mine, &Unlimited).await {
+        Ok((board, _)) => Ok(Json(board)),
+        Err(Refused::Failed(failure)) => Err(failure),
+        Err(Refused::Busy) => Err(ApiFailure::new(crate::api::ApiErrorCode::Internal, "제한 없는 호출이 자리를 얻지 못했습니다")),
+    }
+}
+
+pub async fn board_within(st: &AppState, cache: &QuoteCache, q: &HashMap<String, String>, mine: HeatmapThemes, gate: &dyn QuoteGate) -> Result<(HeatmapBoard, BoardTally), Refused> {
+    let params = board_params(q).map_err(Refused::Failed)?;
+    assemble(st, cache, params, mine, gate).await
+}
+
+async fn assemble(st: &AppState, cache: &QuoteCache, params: BoardParams, mine: HeatmapThemes, gate: &dyn QuoteGate) -> Result<(HeatmapBoard, BoardTally), Refused> {
+    let BoardParams { venue, order, source } = params;
     let (document, catalog) = match source {
-        HeatmapSource::Mine => (userdata::get_heatmap_themes(&st.db).await?, None),
+        HeatmapSource::Mine => (mine, None),
         HeatmapSource::Kiwoom => (kiwoom_document(&st.kiwoom_catalog), Some(st.kiwoom_catalog.info())),
     };
     let mut wanted: Vec<Symbol> = Vec::new();
     for code in document.themes.iter().flat_map(|t| &t.symbols) {
-        let symbol = Symbol::parse(&code.0).map_err(|e| ApiFailure::bad_request(format!("저장된 테마의 종목 코드가 틀렸습니다: {e}")))?;
+        let symbol = Symbol::parse(&code.0).map_err(|e| Refused::Failed(ApiFailure::bad_request(format!("저장된 테마의 종목 코드가 틀렸습니다: {e}"))))?;
         if !wanted.contains(&symbol) {
             wanted.push(symbol);
         }
     }
-    let directory = if wanted.is_empty() { None } else { Some(symbol_list(&st).await?) };
+    let directory = if wanted.is_empty() { None } else { Some(symbol_list(st).await.map_err(Refused::Failed)?) };
     let now = st.clock.now();
     let (mut quotes, stale) = cache.fresh(&wanted, venue, now);
+    let mut tally = BoardTally { cached: quotes.len() as u32, ..BoardTally::default() };
     if !stale.is_empty() {
-        let fetched = crate::quotes::quotes(st.source.as_ref(), &st.bars, directory.as_deref(), &stale, venue).await.map_err(|e| Lookup::Quotes.failure(e, now))?;
+        let _held = gate.begin().map_err(|_| Refused::Busy)?;
+        let mut fetched = Vec::new();
+        for group in stale.chunks(crate::kiwoom::api::StockQuotes::MAX) {
+            if !gate.grant_tr().await {
+                tally.over_budget += group.len() as u32;
+                continue;
+            }
+            fetched.extend(crate::quotes::quotes(st.source.as_ref(), &st.bars, directory.as_deref(), group, venue).await.map_err(|e| Refused::Failed(Lookup::Quotes.failure(e, now)))?);
+            tally.fetched += 1;
+        }
         cache.keep(venue, now, &fetched);
         quotes.extend(fetched.into_iter().filter_map(|quote| Symbol::parse(&quote.symbol.0).ok().map(|symbol| (symbol, quote))));
     }
@@ -135,7 +206,7 @@ async fn board(State(st): State<Arc<AppState>>, Extension(cache): Extension<Arc<
         Symbol::parse(&code.0).ok().and_then(|symbol| directory.as_deref().and_then(|d| d.get(symbol))).map_or_else(|| code.0.clone(), |info| info.name.clone())
     };
     let themes = document.themes.iter().map(|theme| board_theme(theme, &by_code, name_of)).collect();
-    Ok(Json(HeatmapBoard { revision: document.revision, order, as_of, source, catalog, themes: in_order(themes, order) }))
+    Ok((HeatmapBoard { revision: document.revision, order, as_of, source, catalog, themes: in_order(themes, order) }, tally))
 }
 
 pub const KIWOOM_THEME_ID_PREFIX: &str = "kiwoom-";

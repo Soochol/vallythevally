@@ -7,6 +7,7 @@ mod origin;
 mod server_mode;
 pub mod settings;
 pub mod static_files;
+mod user_data;
 pub mod usage;
 
 use std::sync::Arc;
@@ -62,6 +63,7 @@ pub(crate) struct Runtime {
     pub(super) flight: gate::Flight,
     pub(super) kiwoom: kiwoom_guard::KiwoomGuard,
     pub(super) sends: Arc<AtomicU64>,
+    pub(super) setup: user_data::Setup,
 }
 
 pub struct PublicListener {
@@ -114,6 +116,10 @@ pub async fn start(config: &Config, state: Arc<AppState>, financial_routes: Rout
         StartFailure
     })?;
     tracing::info!(path = %config.static_dir.display(), elapsed_ms = loading.elapsed().as_millis() as u64, "공개 화면 파일을 메모리에 올렸습니다");
+    let setup = user_data::Setup::load().await.map_err(|e| {
+        tracing::error!(error = %e, "공개 셋업 기본값을 만들 수 없습니다");
+        StartFailure
+    })?;
     let now = state.clock.now().unix();
     state.public_usage.started(now);
     let runtime = Arc::new(Runtime {
@@ -125,6 +131,7 @@ pub async fn start(config: &Config, state: Arc<AppState>, financial_routes: Rout
         flight: gate::Flight::new(&limits),
         kiwoom: kiwoom_guard::KiwoomGuard::new(&limits),
         sends,
+        setup,
         limits,
         state,
     });
@@ -155,8 +162,14 @@ impl PublicListener {
         let rankings = crate::rankings::routes().route_layer(from_fn_with_state(runtime.clone(), kiwoom_guard::rankings));
         let market = crate::market_overview::routes().route_layer(from_fn_with_state(runtime.clone(), kiwoom_guard::market_overview));
         let screener = crate::screener::routes().route_layer(from_fn_with_state(runtime.clone(), kiwoom_guard::screener));
+        let heatmap = Router::<Arc<Runtime>>::new()
+            .route("/api/heatmap/board", get(kiwoom_guard::heatmap_board))
+            .route("/api/heatmap/flow", get(kiwoom_guard::heatmap_flow))
+            .merge(user_data::routes())
+            .with_state(runtime.clone());
         let shared = Router::new()
             .route("/api/server-mode", get(server_mode::public))
+            .merge(heatmap)
             .route("/api/symbols", get(crate::http::search))
             .route("/api/symbols/{code}", get(crate::http::symbol))
             .merge(rankings)

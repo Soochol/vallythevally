@@ -3,21 +3,32 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 use axum::body::{Body, Bytes};
-use axum::extract::{Request, State};
+use axum::extract::{Extension, Request, State};
 use axum::http::{HeaderValue, Method, StatusCode, header};
 use axum::middleware::Next;
-use axum::response::{IntoResponse, Response};
+use axum::response::{IntoResponse, Json, Response};
 use tokio::sync::OwnedSemaphorePermit;
 
-use super::limits::{AccountSlots, MinuteWindow, PerAccount, Slots, locked};
+use std::collections::HashSet;
+
+use axum::extract::Query;
+use futures::future::BoxFuture;
+use domain::{KstTime, Symbol};
+
+use super::limits::{AccountSlots, MinuteWindow, PerAccount, SendPacer, Slots, locked};
 use super::settings::Limits;
 use super::usage::Bundle;
-use super::{Principal, Runtime, errors};
+use super::{Principal, Runtime, errors, user_data};
+use crate::heatmap_board::{Busy, QuoteGate, Refused as BoardRefused};
+use crate::heatmap_flow::{FlowGate, Freshness, same_kst_minute};
 
 const CACHED_BODY_LIMIT: usize = 8 * 1024 * 1024;
 const REQUEST_BODY_LIMIT: usize = 64 * 1024;
 const CACHE_ENTRIES: usize = 256;
 const BUSY_RETRY_SECS: i64 = 2;
+const BOARD_WINDOW_SECS: i64 = 45;
+const FLOW_WINDOW_SECS: i64 = 60;
+const KIWOOM_SEND_WINDOW: std::time::Duration = std::time::Duration::from_millis(1050);
 
 pub(crate) enum Refusal {
     Busy,
@@ -68,6 +79,15 @@ pub(crate) struct KiwoomGuard {
     screener_total_per_minute: u32,
     screener_account: PerAccount<MinuteWindow>,
     screener_total: Mutex<MinuteWindow>,
+    board_tr_per_window: u32,
+    board_trs: Mutex<MinuteWindow>,
+    flow_tr_per_minute: u32,
+    flow_account_tr_per_minute: u32,
+    flow_fetch_concurrency: usize,
+    flow_trs: Mutex<MinuteWindow>,
+    flow_account_trs: PerAccount<MinuteWindow>,
+    board_pacer: SendPacer,
+    flow_pacer: SendPacer,
     market_cache: Mutex<HashMap<String, Cached>>,
     status_cache: Mutex<Option<Cached>>,
 }
@@ -88,6 +108,15 @@ impl KiwoomGuard {
             screener_total_per_minute: limits.screener_total_per_minute,
             screener_account: PerAccount::default(),
             screener_total: Mutex::new(MinuteWindow::default()),
+            board_tr_per_window: limits.board_tr_per_window,
+            board_trs: Mutex::new(MinuteWindow::default()),
+            flow_tr_per_minute: limits.flow_tr_per_minute,
+            flow_account_tr_per_minute: limits.flow_account_tr_per_minute,
+            flow_fetch_concurrency: limits.flow_fetch_concurrency,
+            flow_trs: Mutex::new(MinuteWindow::default()),
+            flow_account_trs: PerAccount::default(),
+            board_pacer: SendPacer::new(KIWOOM_SEND_WINDOW, limits.kiwoom_sends_per_window),
+            flow_pacer: SendPacer::new(KIWOOM_SEND_WINDOW, limits.kiwoom_sends_per_window),
             market_cache: Mutex::new(HashMap::new()),
             status_cache: Mutex::new(None),
         }
@@ -118,6 +147,33 @@ impl KiwoomGuard {
             locked(&self.screener_total).admit(self.screener_total_per_minute, now).map_err(|retry_at| Refusal::Limited { retry_at })?;
         }
         Ok(())
+    }
+
+    async fn take_board_tr(&self, now: i64) -> bool {
+        if locked(&self.board_trs).admit_within(BOARD_WINDOW_SECS, self.board_tr_per_window, now).is_err() {
+            return false;
+        }
+        self.board_pacer.pass().await;
+        true
+    }
+
+    async fn take_flow_tr(&self, account: &str, now: i64) -> bool {
+        let granted = {
+            let mut total = locked(&self.flow_trs);
+            self.flow_account_trs.with(account, MinuteWindow::default, |mine| {
+                if total.has_room(FLOW_WINDOW_SECS, self.flow_tr_per_minute, now).is_err() || mine.has_room(FLOW_WINDOW_SECS, self.flow_account_tr_per_minute, now).is_err() {
+                    return false;
+                }
+                total.record(now);
+                mine.record(now);
+                true
+            })
+        };
+        if !granted {
+            return false;
+        }
+        self.flow_pacer.pass().await;
+        true
     }
 
     fn fresh_market(&self, key: &str, now: i64) -> Option<Response> {
@@ -309,4 +365,79 @@ pub(super) async fn financial_reads(request: Request, next: Next) -> Response {
     let path = request.uri().path();
     let listed = *request.method() == Method::GET && (path == "/api/financial-update" || (path.starts_with("/api/symbols/") && (path.ends_with("/financial-source") || path.ends_with("/financials"))));
     if listed { next.run(request).await } else { errors::not_found() }
+}
+
+struct BoardGate<'a> {
+    runtime: &'a Runtime,
+    account: &'a str,
+}
+
+impl QuoteGate for BoardGate<'_> {
+    fn begin(&self) -> Result<Box<dyn Send>, Busy> {
+        self.runtime.kiwoom.hold(Bundle::Board, self.account).map(|held| Box::new(held) as Box<dyn Send>).map_err(|_| Busy)
+    }
+
+    fn grant_tr(&self) -> BoxFuture<'_, bool> {
+        Box::pin(self.runtime.kiwoom.take_board_tr(self.runtime.clock.now().unix()))
+    }
+}
+
+struct FlowAdmission<'a> {
+    runtime: &'a Runtime,
+    account: &'a str,
+}
+
+impl Freshness for FlowAdmission<'_> {
+    fn is_fresh(&self, fetched_at: KstTime, now: KstTime) -> bool {
+        same_kst_minute(fetched_at, now)
+    }
+
+    fn grant_tr(&self) -> BoxFuture<'_, bool> {
+        Box::pin(self.runtime.kiwoom.take_flow_tr(self.account, self.runtime.clock.now().unix()))
+    }
+}
+
+impl FlowGate for FlowAdmission<'_> {
+    fn begin(&self) -> Result<Box<dyn Send>, Busy> {
+        self.runtime.kiwoom.hold(Bundle::Flow, self.account).map(|held| Box::new(held) as Box<dyn Send>).map_err(|_| Busy)
+    }
+
+    fn fetch_concurrency(&self) -> usize {
+        self.runtime.kiwoom.flow_fetch_concurrency
+    }
+}
+
+pub(super) async fn heatmap_board(State(runtime): State<Arc<Runtime>>, Extension(who): Extension<Principal>, Query(query): Query<HashMap<String, String>>) -> Response {
+    let now = runtime.clock.now().unix();
+    let themes = match user_data::heatmap_themes_of(&runtime, &who.account_id).await {
+        Ok(themes) => themes,
+        Err(failure) => return failure.into_response(),
+    };
+    let gate = BoardGate { runtime: &runtime, account: &who.key };
+    match crate::heatmap_board::board_within(&runtime.state, &runtime.state.heatmap_quotes, &query, themes, &gate).await {
+        Ok((board, tally)) => {
+            runtime.usage.symbols(Bundle::Board, tally.cached, tally.fetched, tally.over_budget, 0);
+            Json(board).into_response()
+        }
+        Err(BoardRefused::Busy) => errors::busy(now, BUSY_RETRY_SECS),
+        Err(BoardRefused::Failed(failure)) => failure.into_response(),
+    }
+}
+
+pub(super) async fn heatmap_flow(State(runtime): State<Arc<Runtime>>, Extension(who): Extension<Principal>, Query(query): Query<HashMap<String, String>>) -> Response {
+    let now = runtime.clock.now().unix();
+    let themes = match user_data::heatmap_themes_of(&runtime, &who.account_id).await {
+        Ok(themes) => themes,
+        Err(failure) => return failure.into_response(),
+    };
+    let allowed: HashSet<Symbol> = themes.themes.iter().flat_map(|theme| &theme.symbols).filter_map(|code| Symbol::parse(&code.0).ok()).collect();
+    let gate = FlowAdmission { runtime: &runtime, account: &who.key };
+    match crate::heatmap_flow::flow_within(&runtime.state, &runtime.state.heatmap_flow, &query, &allowed, &gate).await {
+        Ok((series, tally)) => {
+            runtime.usage.symbols(Bundle::Flow, tally.cached, tally.fetched, tally.over_budget, tally.rejected);
+            Json(series).into_response()
+        }
+        Err(BoardRefused::Busy) => errors::busy(now, BUSY_RETRY_SECS),
+        Err(BoardRefused::Failed(failure)) => failure.into_response(),
+    }
 }
