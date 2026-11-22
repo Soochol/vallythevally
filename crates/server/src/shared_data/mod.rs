@@ -1,6 +1,7 @@
 mod board;
 mod feed;
 mod format;
+mod minute;
 mod write;
 
 use std::path::PathBuf;
@@ -10,6 +11,7 @@ use std::time::Duration;
 pub use board::Board;
 pub use feed::Feed;
 pub use format::{Broker, DataKind, FORMAT_VERSION, Header, Loaded, Probe, ProbeBody, ProbeItem, SourceKey};
+pub use minute::{MinuteBar, MinuteBarKey, MinuteInstrument, MinuteTrade, MinuteVenue, minute_path};
 pub use write::{FeedWriter, write_snapshot};
 
 use domain::KstTime;
@@ -61,12 +63,14 @@ impl SharedData {
     pub fn error_count(&self, kind: DataKind) -> u64 {
         match kind {
             DataKind::Probe => self.probe.errors() + self.probe_feed.errors(),
+            DataKind::Minute => 0,
         }
     }
 
     pub fn age_secs(&self, kind: DataKind, now: KstTime) -> Option<i64> {
         match kind {
             DataKind::Probe => self.probe.age_secs(now),
+            DataKind::Minute => None,
         }
     }
 }

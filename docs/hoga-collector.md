@@ -182,6 +182,7 @@ data/hoga/
 #### 인수
 
 - `--key <이름>`: 영문자·숫자·`-`·`_` 64자까지. 원문 폴더 이름이 된다. `--child`와 함께만 쓴다.
+- `--shared <폴더>`: 공용 자료 폴더. 주면 받은 `0B`·`0J`로 1분봉을 만들어 `<폴더>/minute/<YYYYMMDD>/<키 이름>.jsonl`에 덧붙인다([1분봉](collector-shared-data.md#1분봉)). 없으면 집계하지 않는다. `--child`와 함께만 쓴다.
 - `--child`는 `--items`를 받지 않는다. 틀린 인수는 stdout에 아무것도 쓰기 전에 stderr에 적고 종료 코드 2로 끝난다.
 - `VALLY_COLLECTOR_WS_URL`: 시험용으로만 키움 WebSocket 주소를 바꾼다. `ws://127.0.0.1…`, `ws://localhost…`, `ws://[::1]…`만 받고 그 밖의 주소는 종료 코드 2로 끝난다. 토큰을 밖으로 보내지 않으려는 제한이다. 정해지지 않았으면 키움 주소(`wss://api.kiwoom.com:10000/api/dostk/websocket`)다.
 
@@ -651,7 +652,7 @@ data/hoga/calendar/
 
 ### 자식과 재시작
 
-- 자식은 같은 실행 파일을 `collect --child --key <이름> --data <폴더>`로 띄운다. 환경변수는 비우고 `VALLY_COLLECTOR_WS_URL`, `VALLY_COLLECTOR_REST_URL`(공용 자료 자식만 쓴다), `RUST_LOG`만 넘긴다. stdin·stdout은 프로토콜 줄이고 stderr는 데몬 로그(`자식: …`)로 잇는다. 띄우는 부분은 `Launcher` trait이고 실제 구현은 `tokio::process`(`TokioLauncher`)다.
+- 자식은 같은 실행 파일을 `collect --child --key <이름> --data <폴더> --shared <공용 자료 폴더>`로 띄운다. 환경변수는 비우고 `VALLY_COLLECTOR_WS_URL`, `VALLY_COLLECTOR_REST_URL`(공용 자료 자식만 쓴다), `RUST_LOG`만 넘긴다. stdin·stdout은 프로토콜 줄이고 stderr는 데몬 로그(`자식: …`)로 잇는다. 띄우는 부분은 `Launcher` trait이고 실제 구현은 `tokio::process`(`TokioLauncher`)다.
 - `PR_SET_PDEATHSIG`는 자식이 건다. 리눅스는 이 신호를 부모를 만든 스레드가 끝날 때 보내므로, 데몬은 자식을 tokio 런타임의 작업 스레드(`spawn_blocking`이 아님)에서 띄운다.
 - `hello`가 오면 토큰과 계획의 몫을 `register`로 보낸다. 자식이 다시 뜨면 토큰과 등록을 처음부터 다시 보낸다.
 - 하트비트가 `heartbeat_timeout`(15초) 동안 오지 않거나 자식이 끝나면 그 자식을 SIGTERM으로 끝내고, `shutdown_grace`(10초) 안에 끝나지 않으면 SIGKILL로 끝낸 뒤 같은 키로 다시 띄운다.
