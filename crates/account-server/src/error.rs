@@ -45,6 +45,14 @@ impl ApiError {
         Self::new(StatusCode::UNAUTHORIZED, "unauthorized", "토큰이 올바르지 않거나 만료됐습니다")
     }
 
+    pub fn forbidden() -> Self {
+        Self::new(StatusCode::FORBIDDEN, "forbidden", "이 출처의 요청만 받습니다")
+    }
+
+    pub fn unsupported_media_type() -> Self {
+        Self::new(StatusCode::UNSUPPORTED_MEDIA_TYPE, "unsupported_media_type", "본문은 application/json이어야 합니다")
+    }
+
     pub fn from_rejection(status: StatusCode) -> Self {
         match status {
             StatusCode::PAYLOAD_TOO_LARGE => Self::new(status, "payload_too_large", "본문이 너무 큽니다"),

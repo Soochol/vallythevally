@@ -46,6 +46,19 @@ async fn client_secrets_never_appear_in_logs_responses_or_the_database() {
     harness.finish_error(&mut failing, &callback).await;
     browsers.push(failing);
 
+    harness.idp.set_fault(Fault::None);
+    let mut signed_in = harness.browser();
+    let start = signed_in.get(&format!("{}/v1/session/google/start", harness.base)).await;
+    let authorize = location(&start);
+    let idp_state = authorize.query_pairs().find(|(name, _)| name == "state").unwrap().1.into_owned();
+    let flow_cookie = signed_in.cookies.values().next().unwrap().clone();
+    let idp = signed_in.get(authorize.as_str()).await;
+    let callback = location(&idp);
+    let landed = signed_in.get(&format!("{}{}?{}", harness.base, callback.path(), callback.query().unwrap())).await;
+    assert_eq!(landed.status(), 302);
+    let session_cookie = signed_in.cookies.iter().find(|(name, _)| name.ends_with("vally_session")).unwrap().1.clone();
+    assert_eq!(signed_in.get(&format!("{}/v1/session", harness.base)).await.status(), 200);
+
     let logs = sink.0.lock().unwrap().clone();
     assert!(!logs.is_empty());
     let dump = harness.dump().await;
@@ -57,5 +70,10 @@ async fn client_secrets_never_appear_in_logs_responses_or_the_database() {
         }
     }
     assert!(!contains(&logs, "subject-1"));
+    assert!(!contains(&dump, &session_cookie), "DB에는 세션 값 해시만 있다");
+    assert!(!contains(&dump, &flow_cookie));
+    for secret in [&session_cookie, &flow_cookie, &idp_state] {
+        assert!(!contains(&logs, secret), "로그에 쿠키 값이나 state가 있다");
+    }
 }
 
