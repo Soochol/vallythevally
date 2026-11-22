@@ -1009,6 +1009,21 @@ pub struct Watchlists {
     pub revision: Revision,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct HeatmapTheme {
+    pub id: String,
+    pub name: String,
+    pub symbols: Vec<SymbolCode>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct HeatmapThemes {
+    pub themes: Vec<HeatmapTheme>,
+    pub revision: Revision,
+}
+
 /// 칸 동기화. 저장된 값에 키가 빠져 있으면 true로 읽는다.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]

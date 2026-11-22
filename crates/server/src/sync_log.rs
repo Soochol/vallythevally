@@ -27,7 +27,7 @@ pub(crate) struct Entry {
 }
 
 fn kind_of(wire: &str) -> DocumentKind {
-    DocumentKind::ALL.into_iter().find(|kind| kind.wire_name() == wire).expect("동기화 기록의 종류는 CHECK가 다섯 가지로 막는다")
+    DocumentKind::ALL.into_iter().find(|kind| kind.wire_name() == wire).expect("동기화 기록의 종류는 CHECK가 DocumentKind::ALL로 막는다")
 }
 
 pub(crate) async fn saved(conn: &mut SqliteConnection, kind: DocumentKind, id: &str, revision: i64) -> Result<(), sqlx::Error> {
@@ -171,6 +171,7 @@ pub(crate) async fn raise_revisions(conn: &mut SqliteConnection, floor: i64) -> 
     sqlx::query("UPDATE screens SET revision = MAX(revision, ?)").bind(floor).execute(&mut *conn).await?;
     sqlx::query("UPDATE ui_state SET revision = MAX(revision, ?)").bind(floor).execute(&mut *conn).await?;
     sqlx::query("UPDATE watchlist_revision SET revision = MAX(revision, ?)").bind(floor).execute(&mut *conn).await?;
+    sqlx::query("UPDATE heatmap_theme_revision SET revision = MAX(revision, ?)").bind(floor).execute(&mut *conn).await?;
     sqlx::query("UPDATE sync_documents SET revision = MAX(revision, ?)").bind(floor).execute(&mut *conn).await?;
     Ok(())
 }

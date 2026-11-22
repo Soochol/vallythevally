@@ -1,9 +1,9 @@
 use std::collections::HashSet;
 
 use domain::{Feed, Symbol, Venue};
-use setup::{DocumentKind, JSON_LIMIT, MAX_CHART_WINDOWS, MAX_WATCHLIST_ID_BYTES, MAX_WATCHLIST_NAME_CHARS, MAX_WATCHLISTS, MAX_WATCH_GROUPS};
+use setup::{DocumentKind, JSON_LIMIT, MAX_CHART_WINDOWS, MAX_HEATMAP_THEME_ID_BYTES, MAX_HEATMAP_THEME_NAME_CHARS, MAX_HEATMAP_THEME_SYMBOLS, MAX_HEATMAP_THEMES, MAX_WATCHLIST_ID_BYTES, MAX_WATCHLIST_NAME_CHARS, MAX_WATCHLISTS, MAX_WATCH_GROUPS};
 
-use crate::api::{self, ApiErrorCode, LayoutInput, Screen, Screens, Watchlist, Watchlists, WindowContent};
+use crate::api::{self, ApiErrorCode, HeatmapThemes, LayoutInput, Screen, Screens, Watchlist, Watchlists, WindowContent};
 use crate::drawing_api::DrawingInput;
 use crate::http::{ApiFailure, AppState, symbol_list};
 use crate::screener::{RunnableScreen, parse_screen};
@@ -100,6 +100,39 @@ fn check_watch_groups<'a>(list: &'a Watchlist, ids: &mut HashSet<&'a str>) -> Re
             }
             if !grouped.insert(code.0.as_str()) {
                 return Err(invalid(format!("관심종목 그룹 {name}에 같은 종목이 두 번 있습니다: {}", code.0)));
+            }
+        }
+    }
+    Ok(())
+}
+
+pub(crate) fn check_heatmap_themes(all: &HeatmapThemes) -> Result<(), Refusal> {
+    if all.themes.len() > MAX_HEATMAP_THEMES {
+        return Err(invalid(format!("테마는 {MAX_HEATMAP_THEMES}개까지입니다: {}개", all.themes.len())));
+    }
+    let (mut ids, mut names) = (HashSet::new(), HashSet::new());
+    for theme in &all.themes {
+        if theme.id.is_empty() || theme.id.len() > MAX_HEATMAP_THEME_ID_BYTES || !ids.insert(theme.id.as_str()) {
+            return Err(invalid(format!("테마 id가 비었거나 길거나 겹칩니다: {}", theme.id)));
+        }
+        let name = theme.name.trim();
+        if name.is_empty() || name != theme.name || name.chars().count() > MAX_HEATMAP_THEME_NAME_CHARS {
+            return Err(invalid(format!("테마 이름은 앞뒤 공백 없이 1~{MAX_HEATMAP_THEME_NAME_CHARS}자여야 합니다: {:?}", theme.name)));
+        }
+        if !names.insert(name) {
+            return Err(invalid(format!("같은 이름의 테마가 두 개 있습니다: {name}")));
+        }
+        if theme.symbols.len() > MAX_HEATMAP_THEME_SYMBOLS {
+            return Err(invalid(format!("테마 {name}의 종목은 {MAX_HEATMAP_THEME_SYMBOLS}개까지입니다: {}개", theme.symbols.len())));
+        }
+        let mut seen = HashSet::new();
+        for code in &theme.symbols {
+            let symbol = parse_symbol(&code.0)?;
+            if matches!(symbol, Symbol::Index(_)) {
+                return Err(invalid(format!("테마 {name}에는 지수를 넣을 수 없습니다: {}", code.0)));
+            }
+            if !seen.insert(symbol) {
+                return Err(invalid(format!("테마 {name}에 같은 종목이 두 번 있습니다: {}", code.0)));
             }
         }
     }

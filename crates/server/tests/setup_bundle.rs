@@ -84,6 +84,7 @@ impl Machine {
             "layoutList": list,
             "layouts": layouts,
             "drawings": drawings,
+            "heatmapThemes": self.get("/api/heatmap/themes").await.1,
         })
     }
 }
@@ -123,6 +124,10 @@ async fn fill(machine: &Machine) {
     machine.saved("/api/ui-state", &json!({"lastLayoutId": LAYOUT_TWO, "theme": "light", "watchCollapsed": true, "revision": 1_794_152_040_005_i64})).await;
     machine.saved("/api/drawings/D1", &drawing("D1", "005930", json!({"kind": "symbol"}), 1_794_152_040_006_i64)).await;
     machine.saved("/api/drawings/D2", &drawing("D2", "000660", json!({"kind": "layout", "layoutId": LAYOUT_ONE}), 1_794_152_040_007_i64)).await;
+    machine.saved("/api/heatmap/themes", &json!({"themes": [
+        {"id": "T1", "name": "반도체 소부장", "symbols": ["042700", "000660"]},
+        {"id": "T2", "name": "AI 반도체", "symbols": ["005930", "000660"]},
+    ], "revision": 1_794_152_040_009_i64})).await;
     machine.saved("/api/drawings/D3", &drawing("D3", "005930", json!({"kind": "cell", "layoutId": LAYOUT_TWO, "windowId": "cell-1"}), 1_794_152_040_008_i64)).await;
 }
 
@@ -148,18 +153,31 @@ async fn an_exported_setup_imports_into_an_empty_database_with_every_response_eq
     let parsed: Bundle = serde_json::from_value(bundle.clone()).unwrap();
     parsed.check().unwrap();
     let counts: Vec<_> = DocumentKind::ALL.iter().map(|kind| documents_of(&bundle, kind.wire_name()).len()).collect();
-    assert_eq!(counts, [1, 1, 1, 3, 3], "관심종목·조건식·화면 상태 하나씩, 기본 레이아웃과 둘, 드로잉 셋(모든 종목)");
+    assert_eq!(counts, [1, 1, 1, 3, 3, 1], "관심종목·조건식·화면 상태 하나씩, 기본 레이아웃과 둘, 드로잉 셋(모든 종목), 테마 하나");
     let ui_state = &documents_of(&bundle, "ui_state")[0];
     assert!(ui_state["body"].get("revision").is_none() && ui_state["revision"] == 1_794_152_040_005_i64, "{ui_state}");
 
     let (status, answer) = into.import(&bundle).await;
-    assert_eq!((status, &answer["documents"]), (200, &json!(9)), "{answer}");
+    assert_eq!((status, &answer["documents"]), (200, &json!(10)), "{answer}");
     let got = into.snapshot().await;
     assert_eq!(got, want);
     assert_eq!(got["layoutList"].as_array().unwrap().len(), 3);
     assert_eq!(into.export().await, bundle, "가져온 셋업을 다시 내보내면 같은 묶음이다");
     assert_eq!(into.import(&bundle).await.0, 200, "같은 묶음을 다시 가져와도 같다");
     assert_eq!(into.snapshot().await, want);
+}
+
+#[tokio::test]
+async fn a_bundle_made_before_heatmap_themes_imports_and_leaves_no_themes() {
+    let (from, into) = (machine().await, machine().await);
+    fill(&from).await;
+    into.saved("/api/heatmap/themes", &json!({"themes": [{"id": "OLD", "name": "지울 것", "symbols": ["005930"]}], "revision": 5})).await;
+    let mut bundle = from.export().await;
+    bundle["documents"].as_array_mut().unwrap().retain(|d| d["kind"] != "heatmap_themes");
+    let (status, answer) = into.import(&bundle).await;
+    assert_eq!(status, 200, "{answer}");
+    assert_eq!(into.get("/api/heatmap/themes").await.1, json!({"themes": [], "revision": 0}));
+    assert_eq!(into.get("/api/watchlists").await.1, from.get("/api/watchlists").await.1);
 }
 
 #[tokio::test]
@@ -192,6 +210,7 @@ async fn a_bundle_with_one_bad_document_is_refused_whole_and_names_the_document(
         ("같은 이름의 레이아웃", with_document(&bundle, "layout", LAYOUT_TWO, |d| d["body"]["name"] = json!("하나")), "layout", LAYOUT_TWO, 400),
         ("종목 코드가 틀린 관심종목", with_document(&bundle, "watchlists", "main", |d| d["body"]["lists"][1]["symbols"] = json!(["abc"])), "watchlists", "main", 400),
         ("겹치는 조건식 id", with_document(&bundle, "screens", "main", |d| { let first = d["body"]["screens"][0].clone(); d["body"]["screens"].as_array_mut().unwrap().push(first); }), "screens", "main", 400),
+        ("지수를 담은 테마", with_document(&bundle, "heatmap_themes", "main", |d| d["body"]["themes"][0]["symbols"] = json!(["IDX:001"])), "heatmap_themes", "main", 400),
         ("객체가 아닌 화면 상태", with_document(&bundle, "ui_state", "main", |d| d["body"] = json!([1])), "ui_state", "main", 400),
         ("고정 id가 아닌 관심종목", with_document(&bundle, "watchlists", "main", |d| d["id"] = json!("W1")), "watchlists", "W1", 400),
         ("삭제 문서", with_document(&bundle, "drawing", "D1", |d| { d["deleted"] = json!(true); d.as_object_mut().unwrap().remove("body"); }), "drawing", "D1", 400),
@@ -346,7 +365,7 @@ async fn the_bundle_never_carries_kiwoom_keys_tokens_the_registered_ip_or_the_op
         assert!(!text.contains(secret), "묶음에 {secret}이 있다");
     }
     let kinds: std::collections::BTreeSet<&str> = bundle["documents"].as_array().unwrap().iter().map(|d| d["kind"].as_str().unwrap()).collect();
-    assert_eq!(kinds, ["drawing", "layout", "screens", "ui_state", "watchlists"].into());
+    assert_eq!(kinds, ["drawing", "heatmap_themes", "layout", "screens", "ui_state", "watchlists"].into());
     let logs = machine.server.stop().await;
     assert!(!logs.contains(APP_SECRET) && !logs.contains(DART_KEY), "로그에 비밀값이 있다");
 }

@@ -13,12 +13,12 @@ use serde::de::DeserializeOwned;
 use serde_json::{Map, Value, json};
 use setup::{BUNDLE_LIMIT, Bundle, Document, DocumentKind, FORMAT_VERSION, SINGLETON_ID};
 
-use crate::api::{ApiErrorCode, Layout, LayoutInput, Revision, Screens, UiState, UnixSeconds, Watchlists};
+use crate::api::{ApiErrorCode, HeatmapThemes, Layout, LayoutInput, Revision, Screens, UiState, UnixSeconds, Watchlists};
 use crate::db::AppDb;
 use crate::drawing_api::{Drawing, DrawingInput, DrawingScope};
 use crate::drawings::{self, DrawingError};
 use crate::http::{ApiFailure, AppState};
-use crate::setup_documents::{check_drawing, check_layout_input, check_nxt_traded, check_screens, check_watchlists};
+use crate::setup_documents::{check_drawing, check_heatmap_themes, check_layout_input, check_nxt_traded, check_screens, check_watchlists};
 use crate::user_routes::read_json;
 use crate::sync_log::{self, Direction};
 use crate::userdata::{self, StoreError};
@@ -37,6 +37,7 @@ struct Setup {
     ui_state_revision: Revision,
     layouts: Vec<Layout>,
     drawings: Vec<Drawing>,
+    heatmap_themes: HeatmapThemes,
 }
 
 fn live(kind: DocumentKind, id: &str, revision: Revision, mut body: Value) -> Document {
@@ -66,7 +67,8 @@ impl Setup {
             layouts.push(userdata::get_layout_in(tx, &summary.id).await?);
         }
         let drawings = drawings::list_all_drawings_in(tx).await?;
-        Ok(Setup { watchlists, screens, ui_state, ui_state_revision, layouts, drawings })
+        let heatmap_themes = userdata::get_heatmap_themes_in(tx).await?;
+        Ok(Setup { watchlists, screens, ui_state, ui_state_revision, layouts, drawings, heatmap_themes })
     }
 
     fn into_bundle(self) -> Bundle {
@@ -74,6 +76,7 @@ impl Setup {
             live(DocumentKind::Watchlists, SINGLETON_ID, self.watchlists.revision, json_of(&self.watchlists)),
             live(DocumentKind::Screens, SINGLETON_ID, self.screens.revision, json_of(&self.screens)),
             live(DocumentKind::UiState, SINGLETON_ID, self.ui_state_revision, json_of(&self.ui_state)),
+            live(DocumentKind::HeatmapThemes, SINGLETON_ID, self.heatmap_themes.revision, json_of(&self.heatmap_themes)),
         ];
         documents.extend(self.layouts.iter().map(|layout| live(DocumentKind::Layout, &layout.id, layout.revision, json_of(layout))));
         documents.extend(self.drawings.iter().map(|drawing| live(DocumentKind::Drawing, &drawing.id, drawing.revision, json_of(drawing))));
@@ -126,6 +129,7 @@ enum Parsed {
     UiState(UiState, Revision),
     Layout(Layout, Vec<Symbol>),
     Drawing(Drawing),
+    HeatmapThemes(HeatmapThemes),
 }
 
 fn parse_document(document: &Document) -> Result<Parsed, ApiFailure> {
@@ -157,6 +161,11 @@ fn parse_document(document: &Document) -> Result<Parsed, ApiFailure> {
             check_drawing(&document.id, &drawing_input(&drawing)).map_err(|e| refused(document, e.reason()))?;
             Ok(Parsed::Drawing(drawing))
         }
+        DocumentKind::HeatmapThemes => {
+            let themes: HeatmapThemes = typed(document)?;
+            check_heatmap_themes(&themes).map_err(|e| refused(document, e.reason()))?;
+            Ok(Parsed::HeatmapThemes(themes))
+        }
     }
 }
 
@@ -175,6 +184,7 @@ fn check_bundle(bundle: &Bundle) -> Result<Checked, ApiFailure> {
     let mut layouts = Vec::new();
     let mut nxt = Vec::new();
     let mut drawings = Vec::new();
+    let mut heatmap_themes = HeatmapThemes { themes: Vec::new(), revision: Revision(0) };
     for document in &bundle.documents {
         match parse_document(document)? {
             Parsed::Watchlists(parsed) => watchlists = Some(parsed),
@@ -185,6 +195,7 @@ fn check_bundle(bundle: &Bundle) -> Result<Checked, ApiFailure> {
                 layouts.push(layout);
             }
             Parsed::Drawing(drawing) => drawings.push(drawing),
+            Parsed::HeatmapThemes(parsed) => heatmap_themes = parsed,
         }
     }
     let watchlists = watchlists.ok_or_else(|| ApiFailure::bad_request(format!("묶음에 {} 문서가 없습니다", DocumentKind::Watchlists.wire_name())))?;
@@ -193,7 +204,7 @@ fn check_bundle(bundle: &Bundle) -> Result<Checked, ApiFailure> {
     if layouts.is_empty() {
         return Err(ApiFailure::bad_request("묶음에 layout 문서가 하나도 없습니다"));
     }
-    Ok(Checked { setup: Setup { watchlists, screens, ui_state, ui_state_revision, layouts, drawings }, nxt })
+    Ok(Checked { setup: Setup { watchlists, screens, ui_state, ui_state_revision, layouts, drawings, heatmap_themes }, nxt })
 }
 
 fn drawing_input(d: &Drawing) -> DrawingInput {
@@ -274,6 +285,7 @@ async fn replace_all_in(tx: &mut sqlx::Transaction<'static, sqlx::Sqlite>, setup
     userdata::store_watchlists(tx, &setup.watchlists).await.map_err(|e| store_failure(DocumentKind::Watchlists, SINGLETON_ID, e))?;
     userdata::store_screens(tx, &setup.screens).await.map_err(|e| store_failure(DocumentKind::Screens, SINGLETON_ID, e))?;
     userdata::store_ui_state(tx, &setup.ui_state, setup.ui_state_revision).await.map_err(|e| store_failure(DocumentKind::UiState, SINGLETON_ID, e))?;
+    userdata::store_heatmap_themes(tx, &setup.heatmap_themes).await.map_err(|e| store_failure(DocumentKind::HeatmapThemes, SINGLETON_ID, e))?;
     for layout in &setup.layouts {
         userdata::store_layout(tx, &layout_input(layout), layout.updated_at).await.map_err(|e| store_failure(DocumentKind::Layout, &layout.id, e))?;
     }
@@ -383,6 +395,7 @@ async fn apply_in(tx: &mut sqlx::Transaction<'static, sqlx::Sqlite>, document: &
         Some(Parsed::Watchlists(watchlists)) => userdata::store_watchlists(tx, &watchlists).await?,
         Some(Parsed::Screens(screens)) => userdata::store_screens(tx, &screens).await?,
         Some(Parsed::UiState(state, revision)) => userdata::store_ui_state(tx, &state, revision).await?,
+        Some(Parsed::HeatmapThemes(themes)) => userdata::store_heatmap_themes(tx, &themes).await?,
         Some(Parsed::Layout(layout, _)) => match userdata::store_layout(tx, &layout_input(&layout), layout.updated_at).await {
             Ok(()) => {}
             Err(StoreError::Conflict(why)) => return refuse(why),

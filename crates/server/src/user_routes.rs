@@ -9,17 +9,18 @@ use axum::response::Json;
 use axum::routing::get;
 use domain::Symbol;
 use serde::de::DeserializeOwned;
-use setup::{JSON_LIMIT, LAYOUT_LIMIT, SCREENS_LIMIT, WATCHLISTS_LIMIT};
+use setup::{HEATMAP_THEMES_LIMIT, JSON_LIMIT, LAYOUT_LIMIT, SCREENS_LIMIT, WATCHLISTS_LIMIT};
 
-use crate::api::{ApiErrorCode, Layout, LayoutInput, LayoutSummary, Revision, Screens, UiState, UnixSeconds, Watchlists};
+use crate::api::{ApiErrorCode, HeatmapThemes, Layout, LayoutInput, LayoutSummary, Revision, Screens, UiState, UnixSeconds, Watchlists};
 use crate::http::{ApiFailure, AppState};
-use crate::setup_documents::{check_layout_input, check_nxt_traded, check_screens, check_watchlists, too_large_text};
+use crate::setup_documents::{check_heatmap_themes, check_layout_input, check_nxt_traded, check_screens, check_watchlists, too_large_text};
 use crate::userdata::{self, StoreError};
 
 pub fn routes() -> Router<Arc<AppState>> {
     Router::new()
         .route("/api/watchlists", get(get_watchlists).put(put_watchlists))
         .route("/api/screens", get(get_screens).put(put_screens))
+        .route("/api/heatmap/themes", get(get_heatmap_themes).put(put_heatmap_themes))
         .route("/api/layouts", get(list_layouts))
         .route("/api/layouts/{id}", get(get_layout).put(put_layout).delete(delete_layout))
         .route("/api/ui-state", get(get_ui_state).put(put_ui_state))
@@ -54,6 +55,17 @@ pub(crate) async fn read_json<T: DeserializeOwned>(body: Body, limit: usize, wha
 
 pub(crate) fn parse_symbol(code: &str) -> Result<Symbol, ApiFailure> {
     Symbol::parse(code).map_err(|e| ApiFailure::bad_request(format!("{e}: {code}")))
+}
+
+async fn get_heatmap_themes(State(st): State<Arc<AppState>>) -> Result<Json<HeatmapThemes>, ApiFailure> {
+    Ok(Json(userdata::get_heatmap_themes(&st.db).await?))
+}
+
+async fn put_heatmap_themes(State(st): State<Arc<AppState>>, body: Body) -> Result<Json<HeatmapThemes>, ApiFailure> {
+    let all: HeatmapThemes = read_json(body, HEATMAP_THEMES_LIMIT, "테마 본문").await?;
+    check_heatmap_themes(&all)?;
+    userdata::put_heatmap_themes(&st.db, &all).await?;
+    Ok(Json(all))
 }
 
 type WatchlistsResponse = ([(&'static str, &'static str); 1], Json<Watchlists>);
