@@ -432,3 +432,72 @@ fn settings_read_the_account_cap_and_the_blocked_identities() {
     values.insert("VALLY_ACCOUNT_MAX_ACCOUNTS".into(), "lots".into());
     assert!(Settings::from_values(&values).is_err());
 }
+
+#[tokio::test]
+async fn a_blocked_identity_loses_its_connector_token_too() {
+    let harness = Harness::start().await;
+    harness.idp.set_subject("bad");
+    let (bad_token, _) = harness.token_for("google", "a").await;
+    harness.idp.set_subject("good");
+    let (good_token, _) = harness.token_for("google", "b").await;
+    let blocked = BlockedIdentities::new([(Provider::Google, "bad".to_owned())]);
+    let restarted = serve_again(&harness, AccountOptions { blocked, ..AccountOptions::default() }).await;
+    let push = json!({"documents": [{"kind": "watchlists", "id": "main", "revision": 1, "deleted": false, "body": {"lists": []}}]});
+    for (token, expected) in [(&bad_token, 401), (&good_token, 200)] {
+        assert_eq!(restarted.me(token).await.status(), expected);
+        let pushed = restarted.http.post(format!("{}/v1/setup/push", restarted.base)).bearer_auth(token).json(&push).send().await.unwrap();
+        assert_eq!(pushed.status(), expected);
+    }
+    let deleted = restarted.http.delete(format!("{}/v1/account", restarted.base)).bearer_auth(&bad_token).send().await.unwrap();
+    assert_eq!(deleted.status(), 401);
+    assert_eq!(harness.count("accounts").await, 2);
+}
+
+#[tokio::test]
+async fn blocked_lists_tolerate_spaces_and_reject_unreadable_entries() {
+    let blocked = BlockedIdentities::parse_list("google: bad , naver :  worse ").unwrap();
+    let harness = Harness::start_with_options(AccountOptions { blocked, ..AccountOptions::default() }).await;
+    for (provider, subject) in [("google", "bad"), ("naver", "worse")] {
+        harness.idp.set_subject(subject);
+        let mut browser = harness.browser();
+        let response = callback_response(&harness, &mut browser, provider).await;
+        assert_eq!(location(&response).as_str(), error_landing(&harness, "blocked"), "{provider}:{subject}");
+    }
+    assert_eq!(harness.count("sessions").await, 0);
+    for unreadable in ["google", "google:", "google:  ", "kakao:bad", ":bad"] {
+        assert!(BlockedIdentities::parse_list(unreadable).is_err(), "{unreadable:?}");
+    }
+}
+
+#[tokio::test]
+async fn the_browser_router_takes_only_session_cookies() {
+    let harness = Harness::start().await;
+    harness.idp.set_subject("owner");
+    let (token, _) = harness.token_for("google", "a").await;
+    let browser = sign_in(&harness, "google").await;
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let base = format!("http://{}", listener.local_addr().unwrap());
+    let accounts = Accounts::new(test_config(&harness.base, &harness.idp), AccountOptions::default(), harness.pool.clone(), harness.clock.clone());
+    tokio::spawn(async move {
+        axum::serve(listener, accounts.browser_router()).await.unwrap();
+    });
+    for path in ["/v1/me", "/v1/setup/summary", "/v1/auth/token", "/v1/auth/google/start"] {
+        let response = harness.http.get(format!("{base}{path}")).bearer_auth(&token).send().await.unwrap();
+        assert_eq!(response.status(), 404, "{path}");
+    }
+    let by_token = harness.http.delete(format!("{base}/v1/account")).bearer_auth(&token).send().await.unwrap();
+    assert_eq!(by_token.status(), 401);
+    assert_eq!(harness.count("accounts").await, 1);
+    let by_session = harness
+        .http
+        .delete(format!("{base}/v1/account"))
+        .header("cookie", cookie_header(&browser))
+        .header("origin", &harness.base)
+        .header("content-type", "application/json")
+        .body("{}")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(by_session.status(), 204);
+    assert_eq!(harness.count("accounts").await, 0);
+}

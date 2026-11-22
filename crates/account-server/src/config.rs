@@ -110,6 +110,7 @@ impl BlockedIdentities {
             .map(|entry| {
                 let (provider, subject) = entry
                     .split_once(':')
+                    .map(|(provider, subject)| (provider.trim(), subject.trim()))
                     .filter(|(_, subject)| !subject.is_empty())
                     .ok_or_else(|| ConfigError("차단 목록은 provider:subject를 쉼표로 이어 적습니다".into()))?;
                 let provider = Provider::parse(provider).map_err(|_| ConfigError("차단 목록의 provider는 google이나 naver여야 합니다".into()))?;
@@ -117,6 +118,10 @@ impl BlockedIdentities {
             })
             .collect::<Result<Vec<_>, ConfigError>>()?;
         Ok(Self::new(identities))
+    }
+
+    pub(crate) fn is_empty(&self) -> bool {
+        self.0.is_empty()
     }
 
     pub(crate) fn contains(&self, provider: Provider, subject: &str) -> bool {

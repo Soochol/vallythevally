@@ -75,19 +75,18 @@ impl Accounts {
             .route("/v1/auth/{provider}/start", get(start))
             .route("/v1/auth/token", post(exchange_token).delete(revoke_token))
             .route("/v1/me", get(me))
+            .route("/v1/account", delete(delete_account))
             .merge(self.shared_routes());
         self.finish(routes.layer(DefaultBodyLimit::max(4096)).merge(crate::setup_api::routes()))
     }
 
     pub fn browser_router(&self) -> Router {
-        self.finish(self.shared_routes().layer(DefaultBodyLimit::max(4096)))
+        let routes = Router::new().route("/v1/account", delete(crate::session::delete_account)).merge(self.shared_routes());
+        self.finish(routes.layer(DefaultBodyLimit::max(4096)))
     }
 
     fn shared_routes(&self) -> Router<Arc<AppState>> {
-        Router::new()
-            .route("/v1/auth/{provider}/callback", get(callback))
-            .route("/v1/account", delete(delete_account))
-            .merge(crate::session::routes())
+        Router::new().route("/v1/auth/{provider}/callback", get(callback)).merge(crate::session::routes())
     }
 
     fn finish(&self, routes: Router<Arc<AppState>>) -> Router {
@@ -385,6 +384,13 @@ pub(crate) async fn authenticate(state: &AppState, headers: &HeaderMap) -> Resul
         .filter(|token| token.len() == 43)
         .ok_or_else(ApiError::unauthorized)?;
     let account_id = state.store.touch_token(token, state.clock.now()).await?.ok_or_else(ApiError::unauthorized)?;
+    if !state.options.blocked.is_empty() {
+        let account = state.store.account(&account_id).await?.ok_or_else(ApiError::unauthorized)?;
+        let blocked = Provider::parse(&account.provider).is_ok_and(|provider| state.options.blocked.contains(provider, &account.subject));
+        if blocked {
+            return Err(ApiError::unauthorized());
+        }
+    }
     Ok((token.to_owned(), account_id))
 }
 

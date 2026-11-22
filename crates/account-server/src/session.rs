@@ -93,6 +93,10 @@ async fn logout(State(state): Shared, headers: HeaderMap) -> Result<Response, Ap
     Ok(clearing(&state))
 }
 
+pub(crate) async fn delete_account(State(state): Shared, headers: HeaderMap) -> Result<Response, ApiError> {
+    delete_session_account(&state, &headers).await
+}
+
 pub(crate) async fn delete_session_account(state: &AppState, headers: &HeaderMap) -> Result<Response, ApiError> {
     if state.session_token(headers).is_none() {
         return Err(ApiError::unauthorized());
