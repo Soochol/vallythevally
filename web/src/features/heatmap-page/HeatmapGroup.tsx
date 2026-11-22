@@ -1,4 +1,5 @@
-import { useMemo, useSyncExternalStore } from "react";
+import { useQueryClient } from "@tanstack/react-query";
+import { useMemo, useRef, useState, useSyncExternalStore } from "react";
 import type { HeatmapThemeSummary } from "../../api/generated/HeatmapThemeSummary";
 import type { SymbolCode } from "../../api/generated/SymbolCode";
 import { formatPercent, formatWonAmount } from "../../lib/format";
@@ -8,6 +9,8 @@ import { arrange, boardRows, type SnapshotRow } from "./arrange";
 import { rateFill, rateSide } from "./colors";
 import type { HeatmapSection } from "./HeatmapPage";
 import type { HeatmapSettings } from "./settings";
+import { TileMenu, type TileMenuState } from "./TileMenu";
+import { addSymbolToThemeNow, removeSymbolFromThemeNow, type ThemeChoice } from "./themeQuickEdit";
 import type { TileRect } from "./treemap";
 
 export const MAP_WIDTH = 160;
@@ -25,6 +28,7 @@ interface TileProps {
   range: HeatmapSettings["range"];
   themeName: string;
   themeTraded: number;
+  onMenu(code: SymbolCode, x: number, y: number): void;
 }
 
 function tileDetail(row: SnapshotRow, text: string, themeName: string, themeTraded: number): string {
@@ -39,7 +43,7 @@ function useLiveRate(code: SymbolCode, fallback: number | null): number | null {
   return live.quote?.changeRate ?? fallback;
 }
 
-function Tile({ row, rect, range, themeName, themeTraded }: TileProps) {
+function Tile({ row, rect, range, themeName, themeTraded, onMenu }: TileProps) {
   const send = useSendSymbol();
   const rate = useLiveRate(row.code, row.changeRate);
   const text = rate === null ? "–" : formatPercent(rate);
@@ -51,6 +55,8 @@ function Tile({ row, rect, range, themeName, themeTraded }: TileProps) {
       data-code={row.code}
       data-side={rate === null ? "none" : rateSide(rate)}
       aria-label={`${row.name} ${text}`}
+      aria-haspopup="menu"
+      aria-keyshortcuts="Shift+F10"
       title={tileDetail(row, text, themeName, themeTraded)}
       style={{
         left: `${(rect.x / MAP_WIDTH) * 100}%`,
@@ -60,6 +66,16 @@ function Tile({ row, rect, range, themeName, themeTraded }: TileProps) {
         background: rate === null ? "var(--raised)" : rateFill(rate, range),
       }}
       onClick={() => send({ code: row.code, name: row.name })}
+      onContextMenu={(event) => {
+        event.preventDefault();
+        onMenu(row.code, event.clientX, event.clientY);
+      }}
+      onKeyDown={(event) => {
+        if (event.key !== "ContextMenu" && !(event.shiftKey && event.key === "F10")) return;
+        event.preventDefault();
+        const box = event.currentTarget.getBoundingClientRect();
+        onMenu(row.code, box.x, box.bottom);
+      }}
     >
       {labelled && (
         <span className="hm-tile-text">
@@ -75,6 +91,7 @@ interface GroupProps {
   section: HeatmapSection;
   settings: HeatmapSettings;
   names: ReadonlyMap<SymbolCode, string>;
+  themes: readonly ThemeChoice[];
 }
 
 function Breadth({ summary }: { summary: HeatmapThemeSummary }) {
@@ -104,8 +121,16 @@ function SummaryLine({ summary, names }: { summary: HeatmapThemeSummary; names: 
   );
 }
 
-export function HeatmapGroup({ section, settings, names }: GroupProps) {
+export function HeatmapGroup({ section, settings, names, themes }: GroupProps) {
   const { theme } = section;
+  const client = useQueryClient();
+  const map = useRef<HTMLDivElement>(null);
+  const [menu, setMenu] = useState<TileMenuState | null>(null);
+  const openMenu = (code: SymbolCode, x: number, y: number) => {
+    map.current?.querySelector<HTMLButtonElement>(`.hm-tile[data-code="${code}"]`)?.focus();
+    setMenu({ code, kind: "actions", x, y });
+  };
+  const current: ThemeChoice = { id: section.key, name: section.title, symbols: section.symbols };
   const rows = useMemo(() => boardRows(theme, names), [theme, names]);
   const arrangement = useMemo(() => arrange(rows, settings.size, settings.sort, MAP_WIDTH, MAP_HEIGHT), [rows, settings.size, settings.sort]);
   const weighted = theme.summary?.weightedRate ?? null;
@@ -127,12 +152,26 @@ export function HeatmapGroup({ section, settings, names }: GroupProps) {
       {rows.length === 0 ? (
         <p className="hm-group-empty">이 테마에 종목이 없습니다</p>
       ) : (
-        <div className="hm-map" role="group" aria-label={`${section.title} 칸`}>
+        <div ref={map} className="hm-map" role="group" aria-label={`${section.title} 칸`}>
           {arrangement.rows.map((row) => {
             const rect = arrangement.rects.get(row.code);
-            return rect ? <Tile key={row.code} row={row} rect={rect} range={settings.range} themeName={section.title} themeTraded={theme.summary?.tradedMillionWon ?? 0} /> : null;
+            return rect ? <Tile key={row.code} row={row} rect={rect} range={settings.range} themeName={section.title} themeTraded={theme.summary?.tradedMillionWon ?? 0} onMenu={openMenu} /> : null;
           })}
         </div>
+      )}
+      {menu && (
+        <TileMenu
+          name={names.get(menu.code) ?? menu.code}
+          code={menu.code}
+          current={current}
+          themes={themes}
+          menu={menu}
+          root={map}
+          onShowThemes={() => setMenu({ ...menu, kind: "themes" })}
+          onAdd={(target) => void addSymbolToThemeNow(client, target, menu.code, names.get(menu.code) ?? menu.code)}
+          onRemove={() => void removeSymbolFromThemeNow(client, current, menu.code, names.get(menu.code) ?? menu.code)}
+          onClose={() => setMenu((open) => (open === menu ? null : open))}
+        />
       )}
       {missingNames.length > 0 && <p className="hm-group-note" role="note">시세를 받지 못해 요약에서 뺀 종목: {missingNames.join(", ")}</p>}
     </section>

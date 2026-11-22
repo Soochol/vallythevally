@@ -212,6 +212,8 @@ html.dock-resizing-junction, html.dock-resizing-junction * { cursor:move !import
 .sentence-lines > li > :not(:first-child) { order: 2; }
 
 .ui-popover.ui-dialog-backdrop[data-command-frame] { background:transparent; }
+.ui-popover.ui-dialog-backdrop[data-drawer] { padding:0; align-items:stretch; justify-content:flex-end; }
+.ui-dialog[data-drawer] { height:100dvh; max-height:none; border-radius:0; }
 
 .chart-extreme { position:absolute; left:0; top:0; z-index:3; pointer-events:none; }
 .chart-extreme[hidden] { display:none; }

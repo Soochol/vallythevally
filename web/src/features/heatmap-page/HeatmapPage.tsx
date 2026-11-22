@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { useCallback, useEffect, useMemo, useReducer } from "react";
+import { useCallback, useEffect, useMemo, useReducer, useState } from "react";
 import { useSearchParams } from "react-router";
 import type { HeatmapBoardTheme } from "../../api/generated/HeatmapBoardTheme";
 import type { SymbolCode } from "../../api/generated/SymbolCode";
@@ -13,6 +13,8 @@ import { PageFrame } from "../pages/PageFrame";
 import { HeatmapFlow } from "./HeatmapFlow";
 import { HeatmapGroup } from "./HeatmapGroup";
 import { HeatmapToolbar } from "./HeatmapToolbar";
+import { ThemeEditor, type ThemeEditorStart } from "./ThemeEditor";
+import type { ThemeChoice } from "./themeQuickEdit";
 import { boardRows, hasTradedValue } from "./arrange";
 import { themeColors } from "./groupColors";
 import { parseSettings, withSettings, type HeatmapSettings } from "./settings";
@@ -50,8 +52,10 @@ export function HeatmapPage() {
   const settings = useMemo(() => parseSettings(params), [params]);
   const change = useCallback((next: HeatmapSettings) => setParams((current) => withSettings(current, next), { replace: true }), [setParams]);
   const venue = useVenue();
+  const [editor, setEditor] = useState<ThemeEditorStart | null>(null);
   const board = useQuery(heatmapBoardQuery(venue, settings.order));
   const sections = useMemo(() => heatmapSections(board.data?.themes ?? []), [board.data]);
+  const choices = useMemo((): ThemeChoice[] => sections.map((section) => ({ id: section.key, name: section.title, symbols: section.symbols })), [sections]);
   const codes = useMemo(() => [...new Set(sections.flatMap((section) => section.symbols))], [sections]);
   useEffect(() => (codes.length > 0 ? quoteBook.lease(codes) : undefined), [codes]);
   const tick = useBookTick(codes);
@@ -67,20 +71,26 @@ export function HeatmapPage() {
   const freshness = latest === null ? "시세를 기다리는 중" : `시세 ${formatKstClockSeconds(latest)} 기준 · 자리는 1분마다 바꿈`;
   return (
     <PageFrame title="히트맵" freshness={freshness}>
-      <HeatmapToolbar settings={settings} onChange={change} tradedKnown={!settled || tradedKnown} />
+      <HeatmapToolbar settings={settings} onChange={change} tradedKnown={!settled || tradedKnown} onEdit={() => setEditor("browse")} />
       {settled && sections.length === 0 ? (
         <EmptyState title="테마가 없습니다">
-          <p className="hm-empty-hint">히트맵은 내가 고른 종목 묶음인 테마마다 지도를 그립니다. 테마를 만들고 종목을 넣으면 여기에 나타납니다.</p>
+          <p className="hm-empty-hint">히트맵은 내가 고른 종목 묶음인 테마마다 지도를 그립니다. 관심종목 그룹을 그대로 테마로 가져오거나, 빈 테마를 만들어 종목을 넣어 보세요.</p>
+          <div className="hm-empty-actions">
+            <button type="button" className="btn-primary" onClick={() => setEditor("import")}>관심종목 그룹에서 가져오기</button>
+            <button type="button" className="tb-btn hm-edit-open" onClick={() => setEditor("create")}>테마 직접 만들기</button>
+          </div>
+          <p className="hm-empty-hint">가져와도 관심종목은 그대로 남습니다.</p>
         </EmptyState>
       ) : settings.view === "flow" ? (
         <HeatmapFlow sections={sections} names={nameOf} venue={venue} />
       ) : (
         <div className="hm-groups">
           {sections.map((section) => (
-            <HeatmapGroup key={section.key} section={section} settings={settings} names={nameOf} />
+            <HeatmapGroup key={section.key} section={section} settings={settings} names={nameOf} themes={choices} />
           ))}
         </div>
       )}
+      {editor !== null && <ThemeEditor start={editor} onClose={() => setEditor(null)} />}
     </PageFrame>
   );
 }

@@ -6,6 +6,7 @@ interface Props {
   settings: HeatmapSettings;
   onChange(next: HeatmapSettings): void;
   tradedKnown: boolean;
+  onEdit(): void;
 }
 
 export function Legend({ range }: { range: HeatmapSettings["range"] }) {
@@ -24,7 +25,7 @@ export function Legend({ range }: { range: HeatmapSettings["range"] }) {
   );
 }
 
-export function HeatmapToolbar({ settings, onChange, tradedKnown }: Props) {
+export function HeatmapToolbar({ settings, onChange, tradedKnown, onEdit }: Props) {
   const set = <K extends keyof HeatmapSettings>(key: K, value: HeatmapSettings[K]) => onChange({ ...settings, [key]: value });
   return (
     <div className="hm-toolbar">
@@ -45,9 +46,12 @@ export function HeatmapToolbar({ settings, onChange, tradedKnown }: Props) {
             칸 정렬: {SORT_LABEL[settings.sort]}{settings.sort === "name" ? " 가나다순" : " 높은 순"} · 크기: {SIZE_LABEL[settings.size]}
             {!tradedKnown && settings.size === "traded" ? " (거래대금을 받지 못해 같은 크기로 보입니다)" : ""}
           </span>
-          <Legend range={settings.range} />
         </>
       )}
+      <div className="hm-toolbar-end">
+        {settings.view === "board" && <Legend range={settings.range} />}
+        <button type="button" className="tb-btn hm-edit-open" aria-haspopup="dialog" onClick={onEdit}>테마 편집</button>
+      </div>
     </div>
   );
 }
