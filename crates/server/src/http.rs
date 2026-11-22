@@ -10,7 +10,6 @@ use axum::http::{HeaderValue, Method, StatusCode, Uri, header};
 use axum::response::{IntoResponse, Json, Response};
 use axum::routing::{any, get};
 use domain::{Feed, KstTime, Period, SeriesKey, Symbol, Venue};
-use tower_http::compression::CompressionLayer;
 
 use crate::api;
 use crate::bars::{BarError, BarService, DEFAULT_LIMIT, MAX_LIMIT};
@@ -44,10 +43,13 @@ pub struct AppState {
     pub market_overview: crate::market_overview::MarketOverview,
     pub etf: crate::etf::EtfBook,
     pub kiwoom_catalog: crate::kiwoom_themes::CatalogStore,
+    pub public_usage: Arc<crate::public::usage::Usage>,
 }
 
 pub fn router(state: Arc<AppState>) -> Router {
     Router::new()
+        .route("/api/server-mode", get(crate::public::server_mode_local))
+        .route("/api/public-usage", get(crate::public::usage_page))
         .route("/api/symbols", get(search))
         .route("/api/symbols/{code}", get(symbol))
         .route("/api/symbols/{code}/fundamentals", get(fundamentals))
@@ -76,7 +78,7 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/api/{*rest}", any(api_not_found))
         .method_not_allowed_fallback(method_not_allowed)
         .fallback(static_file)
-        .layer(CompressionLayer::new())
+        .layer(crate::public::compression())
         .with_state(state)
 }
 
@@ -166,6 +168,7 @@ pub fn status_of(code: api::ApiErrorCode) -> StatusCode {
         // 키움이 우리 인증을 거절했다. 다시 시도해도 낫지 않으므로 503이 아니라 502로 둔다.
         KiwoomAuthFailed | AccountServerUnavailable => StatusCode::BAD_GATEWAY,
         Forbidden => StatusCode::FORBIDDEN,
+        SignedOut => StatusCode::UNAUTHORIZED,
         CollectorUnavailable => StatusCode::SERVICE_UNAVAILABLE,
         Conflict | StaleRevision | ScreenerNotReady => StatusCode::CONFLICT,
         PayloadTooLarge => StatusCode::PAYLOAD_TOO_LARGE,
@@ -264,7 +267,7 @@ pub(crate) async fn symbol_list(st: &AppState) -> Result<Arc<crate::symbols::Dir
     })
 }
 
-async fn search(State(st): State<Arc<AppState>>, Query(q): Query<HashMap<String, String>>) -> Result<Json<Vec<api::SymbolInfo>>, ApiFailure> {
+pub(crate) async fn search(State(st): State<Arc<AppState>>, Query(q): Query<HashMap<String, String>>) -> Result<Json<Vec<api::SymbolInfo>>, ApiFailure> {
     let filter = SearchFilter {
         market: match q.get("market").map(String::as_str) {
             None => None,
@@ -293,7 +296,7 @@ async fn search(State(st): State<Arc<AppState>>, Query(q): Query<HashMap<String,
     Ok(Json(dir.search(query, filter).iter().map(api::SymbolInfo::from).collect()))
 }
 
-async fn symbol(State(st): State<Arc<AppState>>, Path(code): Path<String>) -> Result<Json<api::SymbolInfo>, ApiFailure> {
+pub(crate) async fn symbol(State(st): State<Arc<AppState>>, Path(code): Path<String>) -> Result<Json<api::SymbolInfo>, ApiFailure> {
     let symbol = Symbol::parse(&code).map_err(|e| ApiFailure::bad_request(e.to_string()))?;
     let dir = symbol_list(&st).await?;
     dir.get(symbol)

@@ -1754,6 +1754,7 @@ pub enum ApiErrorCode {
     AccountServerUnavailable,
     Forbidden,
     CollectorUnavailable,
+    SignedOut,
     Internal,
 }
 

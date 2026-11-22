@@ -219,6 +219,7 @@ pub struct Config {
     pub collector_socket: Option<PathBuf>,
     pub collector_admins: Vec<ProviderSubject>,
     pub collector_telegram: Option<PathBuf>,
+    pub public: Option<crate::public::settings::PublicSettings>,
 }
 
 /// 설정을 읽으며 모은 경고. 로그를 켜기 전에 읽으므로 호출자가 나중에 남긴다.
@@ -252,7 +253,7 @@ impl Config {
         vars.extend(process);
         let warnings = vars
             .keys()
-            .filter(|k| k.starts_with("VALLY_") && !KNOWN_KEYS.contains(&k.as_str()))
+            .filter(|k| k.starts_with("VALLY_") && !KNOWN_KEYS.contains(&k.as_str()) && !crate::public::settings::KEYS.contains(&k.as_str()))
             .map(|k| format!("모르는 설정 키 {k}가 있습니다. 오타인지 확인하세요"))
             .collect();
         let present = |k: &str| vars.get(k).filter(|v| !v.is_empty()).cloned();
@@ -340,6 +341,8 @@ impl Config {
         let state_default = |default: Result<PathBuf, ConfigError>| -> Result<PathBuf, ConfigError> { default.map(|path| if mock { under_mock(path) } else { path }) };
         let (default_db, default_screener_db, default_bind) = if mock { ("data/mock/vally.db", "data/mock/screener.duckdb", "127.0.0.1:8081") } else { ("data/vally.db", "data/screener.duckdb", "127.0.0.1:8080") };
         let db_path = PathBuf::from(vars.get("VALLY_DB_PATH").map_or(default_db, String::as_str));
+        let bind = BindAddr::parse(vars.get("VALLY_BIND").map_or(default_bind, String::as_str))?;
+        let public = crate::public::settings::PublicSettings::from_vars(crate::public::settings::Inputs { vars: &vars, operator_bind: bind.socket_addr(), mock, connector_mode: account_server_url.is_some(), default_account_db: db_path.with_file_name("public-accounts.db") })?;
         let config = Config {
             kiwoom_environment,
             kiwoom_credentials,
@@ -362,7 +365,8 @@ impl Config {
                 Some(p) => PathBuf::from(p),
                 None => state_default(default_key())?,
             },
-            bind: BindAddr::parse(vars.get("VALLY_BIND").map_or(default_bind, String::as_str))?,
+            bind,
+            public,
             tailnet_hosts: TailnetHosts::parse(vars.get("VALLY_TAILNET_HOSTS").map_or("", String::as_str))?,
             static_dir: PathBuf::from(vars.get("VALLY_STATIC_DIR").map_or("web/dist", String::as_str)),
             screener_db_path: PathBuf::from(vars.get("VALLY_SCREENER_DB_PATH").map_or(default_screener_db, String::as_str)),

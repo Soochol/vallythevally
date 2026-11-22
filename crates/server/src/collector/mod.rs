@@ -7,6 +7,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use axum::Router;
+use axum::Extension;
 use axum::extract::State;
 use axum::http::{Method, Uri, header};
 use axum::response::{IntoResponse, Json, Response};
@@ -89,33 +90,43 @@ pub fn routes() -> Router<Arc<AppState>> {
         .route("/api/collector/disk", any(other_method).get(disk))
 }
 
-async fn other_method(State(st): State<Arc<AppState>>, method: Method, uri: Uri) -> Response {
-    match allowed_board(&st) {
+#[derive(Debug, Clone)]
+pub struct SessionIdentity(pub ProviderSubject);
+
+fn identity_of(st: &AppState, session: Option<Extension<SessionIdentity>>) -> Option<ProviderSubject> {
+    match session {
+        Some(Extension(SessionIdentity(identity))) => Some(identity),
+        None => st.system.account().signed_in_identity(),
+    }
+}
+
+async fn other_method(State(st): State<Arc<AppState>>, session: Option<Extension<SessionIdentity>>, method: Method, uri: Uri) -> Response {
+    match allowed_board(&st, session) {
         Ok(_) => ([(header::ALLOW, "GET,HEAD")], ApiFailure::new(ApiErrorCode::MethodNotAllowed, format!("{}에는 {method}를 쓸 수 없습니다", uri.path()))).into_response(),
         Err(failure) => failure.into_response(),
     }
 }
 
-fn allowed_board(st: &AppState) -> Result<&CollectorBoard, ApiFailure> {
+fn allowed_board(st: &AppState, session: Option<Extension<SessionIdentity>>) -> Result<&CollectorBoard, ApiFailure> {
     let board = st.system.collector().ok_or_else(|| ApiFailure::new(ApiErrorCode::NotFound, "없는 경로입니다"))?;
-    if board.allows(st.system.account().signed_in_identity().as_ref()) {
+    if board.allows(identity_of(st, session).as_ref()) {
         Ok(board)
     } else {
         Err(ApiFailure::new(ApiErrorCode::Forbidden, "수집 현황판을 볼 수 있는 계정이 아닙니다"))
     }
 }
 
-async fn access(State(st): State<Arc<AppState>>) -> Json<CollectorAccess> {
+async fn access(State(st): State<Arc<AppState>>, session: Option<Extension<SessionIdentity>>) -> Json<CollectorAccess> {
     let access = match st.system.collector() {
         None => CollectorAccessState::Off,
-        Some(board) if board.allows(st.system.account().signed_in_identity().as_ref()) => CollectorAccessState::Allowed,
+        Some(board) if board.allows(identity_of(&st, session).as_ref()) => CollectorAccessState::Allowed,
         Some(_) => CollectorAccessState::Denied,
     };
     Json(CollectorAccess { access })
 }
 
-async fn status(State(st): State<Arc<AppState>>) -> Result<Json<CollectorStatusPage>, ApiFailure> {
-    let view = allowed_board(&st)?.watcher.view();
+async fn status(State(st): State<Arc<AppState>>, session: Option<Extension<SessionIdentity>>) -> Result<Json<CollectorStatusPage>, ApiFailure> {
+    let view = allowed_board(&st, session)?.watcher.view();
     let (status, sent_at, received_at) = match view.last_status {
         Some(received) => (Some(received.status), Some(received.sent_at), Some(received.received_at)),
         None => (None, None, None),
@@ -123,8 +134,8 @@ async fn status(State(st): State<Arc<AppState>>) -> Result<Json<CollectorStatusP
     Ok(Json(CollectorStatusPage { judgment: view.judgment, status, sent_at, received_at }))
 }
 
-async fn ask(st: &AppState, question: Question) -> Result<Answer, ApiFailure> {
-    let board = allowed_board(st)?;
+async fn ask(st: &AppState, session: Option<Extension<SessionIdentity>>, question: Question) -> Result<Answer, ApiFailure> {
+    let board = allowed_board(st, session)?;
     watch::ask(&board.socket, question).await.map_err(|failure| {
         let message = match failure {
             AskFailure::Down => "감독 데몬이 꺼져 있습니다",
@@ -136,15 +147,15 @@ async fn ask(st: &AppState, question: Question) -> Result<Answer, ApiFailure> {
     })
 }
 
-async fn coverage(State(st): State<Arc<AppState>>) -> Result<Json<CollectorCoverage>, ApiFailure> {
-    match ask(&st, Question::Coverage).await? {
+async fn coverage(State(st): State<Arc<AppState>>, session: Option<Extension<SessionIdentity>>) -> Result<Json<CollectorCoverage>, ApiFailure> {
+    match ask(&st, session, Question::Coverage).await? {
         Answer::Coverage(coverage) => Ok(Json(coverage)),
         Answer::Disk(_) => unreachable!("커버리지 질문에는 커버리지 답만 돌려준다"),
     }
 }
 
-async fn disk(State(st): State<Arc<AppState>>) -> Result<Json<CollectorDisk>, ApiFailure> {
-    match ask(&st, Question::Disk).await? {
+async fn disk(State(st): State<Arc<AppState>>, session: Option<Extension<SessionIdentity>>) -> Result<Json<CollectorDisk>, ApiFailure> {
+    match ask(&st, session, Question::Disk).await? {
         Answer::Disk(disk) => Ok(Json(disk)),
         Answer::Coverage(_) => unreachable!("디스크 질문에는 디스크 답만 돌려준다"),
     }
