@@ -231,6 +231,8 @@ fn generated_typescript_matches_the_committed_files() {
         generated::<ScreenerUpdateRequest>(),
         generated::<Screens>(),
         generated::<ServerMessage>(),
+        generated::<server::public::ServerMode>(),
+        generated::<server::public::ServerModeKind>(),
         generated::<Side>(),
         generated::<SkippedDay>(),
         generated::<StochasticTest>(),
