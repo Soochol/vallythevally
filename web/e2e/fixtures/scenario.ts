@@ -39,7 +39,7 @@ import type { Venue } from "../../src/api/generated/Venue";
 import type { Watchlist } from "../../src/api/generated/Watchlist";
 import type { Watchlists } from "../../src/api/generated/Watchlists";
 import { etfBaseline } from "./etf-data";
-import { boardOf, parseOrder } from "./heatmap-board";
+import { boardOf, parseOrder } from "../../dev/fakeHeatmapBoard";
 import { marketOverviewBaseline } from "./market-data";
 import { barsPage, findSymbol, publicInfo, quoteOf, resolveVenue, search, SYMBOLS } from "../../dev/fakeMarket";
 

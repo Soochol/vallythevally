@@ -12,6 +12,7 @@ import type { Screen } from "../src/api/generated/Screen.ts";
 import type { ScreenPeriod } from "../src/api/generated/ScreenPeriod.ts";
 import type { Resume } from "../src/api/http.ts";
 import { barsPage, findSymbol, publicInfo, quoteOf, resolveVenue, search } from "./fakeMarket.ts";
+import { boardOf, parseOrder } from "./fakeHeatmapBoard.ts";
 import { createScreener, parseScenario } from "./fakeScreener.ts";
 import { createUserData, type Reply } from "./fakeUserData.ts";
 
@@ -96,6 +97,26 @@ export function fakeApi(screenerScenario: string | undefined): Plugin {
         if (path === "/watchlists") {
           if (method === "GET") return reply(res, user.getWatchlists());
           if (method === "PUT") return reply(res, user.putWatchlists(await readJson(req)));
+        }
+        if (path === "/heatmap/themes") {
+          if (method === "GET") return send(res, 200, user.getHeatmapThemes());
+          if (method === "PUT") return reply(res, user.putHeatmapThemes(await readJson(req)));
+        }
+        if (path === "/heatmap/board" && method === "GET") {
+          const venue = url.searchParams.get("venue") ?? "combined";
+          const order = parseOrder(url.searchParams.get("order"));
+          if ((venue !== "combined" && venue !== "krx" && venue !== "nxt") || order === null) return fail(res, 400, "bad_request", "venue나 order가 틀렸습니다");
+          const now = Date.now();
+          const memberOf = (code: string) => {
+            const s = findSymbol(code);
+            const q = s && quoteOf(s, now, venue);
+            return s && q ? { symbol: code, name: s.name, changeRate: q.changeRate, ...(q.tradedMillionWon === undefined ? {} : { tradedMillionWon: q.tradedMillionWon }) } : null;
+          };
+          return send(res, 200, boardOf(user.getHeatmapThemes(), memberOf, order, Math.floor(now / 1000)));
+        }
+        if (path === "/heatmap/flow" && method === "GET") {
+          const used = (url.searchParams.get("symbols") ?? "").split(",").filter(Boolean);
+          return send(res, 200, { date: new Date().toISOString().slice(0, 10), bucketMinutes: 5, points: [], used, missing: [], overLimit: [], limit: 60 });
         }
         if (path === "/screens") {
           if (method === "GET") return reply(res, user.getScreens());

@@ -1,9 +1,9 @@
-import type { HeatmapBoard } from "../../src/api/generated/HeatmapBoard";
-import type { HeatmapBoardMember } from "../../src/api/generated/HeatmapBoardMember";
-import type { HeatmapBoardTheme } from "../../src/api/generated/HeatmapBoardTheme";
-import type { HeatmapThemeOrder } from "../../src/api/generated/HeatmapThemeOrder";
-import type { HeatmapThemes } from "../../src/api/generated/HeatmapThemes";
-import type { HeatmapThemeSummary } from "../../src/api/generated/HeatmapThemeSummary";
+import type { HeatmapBoard } from "../src/api/generated/HeatmapBoard.ts";
+import type { HeatmapBoardMember } from "../src/api/generated/HeatmapBoardMember.ts";
+import type { HeatmapBoardTheme } from "../src/api/generated/HeatmapBoardTheme.ts";
+import type { HeatmapThemeOrder } from "../src/api/generated/HeatmapThemeOrder.ts";
+import type { HeatmapThemes } from "../src/api/generated/HeatmapThemes.ts";
+import type { HeatmapThemeSummary } from "../src/api/generated/HeatmapThemeSummary.ts";
 
 export type MemberOf = (code: string) => HeatmapBoardMember | null;
 

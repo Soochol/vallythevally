@@ -20,8 +20,17 @@ const MIN_MIX_PERCENT = 8;
 export function rateFill(rate: number, range: ColorRange): string {
   const side = rateSide(rate);
   if (side === "flat") return "var(--raised)";
-  const mix = Math.round(MIN_MIX_PERCENT + rateStrength(rate, range) * (MAX_MIX_PERCENT - MIN_MIX_PERCENT));
-  return `color-mix(in srgb, var(--${side}) ${mix}%, var(--surface))`;
+  return `color-mix(in srgb, var(--tile-${side}) ${mixPercent(rate, range)}%, var(--surface))`;
+}
+
+const STRONG_MIX_PERCENT = 62;
+
+export function mixPercent(rate: number, range: ColorRange): number {
+  return Math.round(MIN_MIX_PERCENT + rateStrength(rate, range) * (MAX_MIX_PERCENT - MIN_MIX_PERCENT));
+}
+
+export function needsStrongInk(rate: number, range: ColorRange): boolean {
+  return rateSide(rate) !== "flat" && mixPercent(rate, range) >= STRONG_MIX_PERCENT;
 }
 
 export interface LegendStop {

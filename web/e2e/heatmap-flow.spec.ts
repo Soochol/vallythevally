@@ -104,3 +104,19 @@ test("오늘 분봉이 아직 없으면 그릴 흐름이 없다고 알린다", a
   await expect(main(page).getByText(/그릴 흐름이 없습니다/)).toBeVisible();
   await expect(line(page)).toHaveCount(0);
 });
+
+test("선 위에 포인터를 올리면 그 시각의 테마 값을 높은 순으로 보인다", async ({ page, scenario }) => {
+  seedHeatmapThemes(scenario, structuredClone(HEATMAP_TABLE));
+  seedHeatmapFlow(scenario, HEATMAP_FLOWS);
+  await page.goto("/heatmap?view=flow");
+  await expect(line(page)).toHaveCount(2);
+  const chart = main(page).getByRole("img", { name: "테마별 장중 가중 평균 등락률" });
+  const box = (await chart.boundingBox())!;
+  await page.mouse.move(box.x + box.width * 0.2, box.y + box.height / 2);
+  const tip = main(page).getByRole("status", { name: "포인터 시각의 테마 값" });
+  await expect(tip).toBeVisible();
+  await expect(tip.locator("span")).toHaveCount(2);
+  await expect(tip.locator('span[data-group="chips"]')).toContainText("반도체");
+  await page.mouse.move(box.x + box.width + 40, box.y + box.height + 40);
+  await expect(tip).toHaveCount(0);
+});

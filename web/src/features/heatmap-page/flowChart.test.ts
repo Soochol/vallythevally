@@ -1,7 +1,7 @@
 import { expect, test } from "vitest";
 import type { HeatmapFlowPoint } from "../../api/generated/HeatmapFlowPoint";
 import type { UnixSeconds } from "../../api/generated/UnixSeconds";
-import { hourTicks, linePath, rateExtent, rateTicks, spreadLabels, timeExtent } from "./flowChart";
+import { hourTicks, linePath, nearestTime, rateAt, rateExtent, rateTicks, spreadLabels, timeExtent } from "./flowChart";
 
 const point = (t: number, rate: number): HeatmapFlowPoint => ({ t: t as UnixSeconds, rate });
 
@@ -38,4 +38,14 @@ test("가까운 끝 라벨은 간격을 벌리고 아래 끝을 넘지 않는다
   expect(spreadLabels([100, 102, 300], 14, 400)).toEqual([100, 114, 300]);
   expect(spreadLabels([390, 392], 14, 400)).toEqual([386, 400]);
   expect(spreadLabels([50], 14, 400)).toEqual([50]);
+});
+
+test("포인터 시각에 가장 가까운 칸을 고르고 그 시각까지의 마지막 값을 읽는다", () => {
+  expect(nearestTime([0, 300, 600], 420)).toBe(300);
+  expect(nearestTime([0, 300, 600], 460)).toBe(600);
+  expect(nearestTime([], 10)).toBeNull();
+  const points = [{ t: 300, rate: 1 }, { t: 600, rate: 2 }];
+  expect(rateAt(points, 0)).toBeNull();
+  expect(rateAt(points, 300)).toBe(1);
+  expect(rateAt(points, 900)).toBe(2);
 });

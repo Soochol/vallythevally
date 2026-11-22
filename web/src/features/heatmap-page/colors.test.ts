@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { COLOR_RANGES, legendStops, rateFill, rateSide, rateStrength } from "./colors";
+import { COLOR_RANGES, legendStops, needsStrongInk, rateFill, rateSide, rateStrength } from "./colors";
 
 test("색 세기는 범위에서 포화한다", () => {
   expect(rateStrength(1.5, 3)).toBeCloseTo(0.5);
@@ -13,8 +13,8 @@ test("같은 등락률도 색 범위가 넓으면 옅다", () => {
   const narrow = mix(rateFill(2.4, 3));
   const wide = mix(rateFill(2.4, 15));
   expect(narrow).toBeGreaterThan(wide);
-  expect(rateFill(2.4, 3)).toContain("var(--up)");
-  expect(rateFill(-2.4, 3)).toContain("var(--down)");
+  expect(rateFill(2.4, 3)).toContain("var(--tile-up)");
+  expect(rateFill(-2.4, 3)).toContain("var(--tile-down)");
 });
 
 test("범위를 넘는 값은 같은 색이고 보합은 중립색이다", () => {
@@ -34,4 +34,11 @@ test("범례는 −범위에서 +범위까지 같은 간격이다", () => {
     expect(stops[3]!.rate).toBeCloseTo(0);
     expect(stops[0]!.fill).toBe(rateFill(-range, range));
   }
+});
+
+test("진한 칸만 밝은 글자를 쓴다", () => {
+  expect(needsStrongInk(8, 8)).toBe(true);
+  expect(needsStrongInk(-8, 8)).toBe(true);
+  expect(needsStrongInk(1, 8)).toBe(false);
+  expect(needsStrongInk(0, 3)).toBe(false);
 });

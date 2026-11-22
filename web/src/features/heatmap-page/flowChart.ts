@@ -58,3 +58,12 @@ export function spreadLabels(ys: readonly number[], gap: number, lowest: number)
   const overflow = Math.max(0, Math.max(...placed) - lowest);
   return placed.map((y) => y - overflow);
 }
+
+export function nearestTime(times: readonly number[], t: number): number | null {
+  return times.reduce<number | null>((best, candidate) => (best === null || Math.abs(candidate - t) < Math.abs(best - t) ? candidate : best), null);
+}
+
+export function rateAt(points: readonly HeatmapFlowPoint[], t: number): number | null {
+  const reached = points.filter((point) => point.t <= t);
+  return reached.length === 0 ? null : reached[reached.length - 1]!.rate;
+}

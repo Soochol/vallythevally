@@ -54,4 +54,4 @@ python3 scripts/themes.py add "AI 반도체" 삼성전자 --dry-run
 python3 -I scripts/test-themes.py
 ```
 
-루프백의 가짜 서버에 붙어 명령별 결과, 이름 해석, 409 뒤 다시 적용, `--dry-run`, 종료 코드를 확인한다. 실제 서버는 부르지 않는다. 머지 검사(`chute.toml`)는 이 시험을 돌리지 않으므로 `scripts/themes.py`를 고치면 직접 돌린다.
+루프백의 가짜 서버에 붙어 명령별 결과, 이름 해석, 409 뒤 다시 적용, `--dry-run`, 종료 코드를 확인한다. 실제 서버는 부르지 않는다. 머지 검사(`chute.toml`의 `themes-cli-test`)는 `scripts/themes.py`나 이 시험이 바뀐 PR에서 이 시험을 돌린다.
