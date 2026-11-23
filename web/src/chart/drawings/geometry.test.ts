@@ -12,7 +12,9 @@ import {
   idsInBox,
   nudge,
 } from "./geometry";
-import type { Shape } from "./toolSpec";
+import { renderItem } from "./frame";
+import type { Shape, ToolContext } from "./toolSpec";
+import type { DrawingBody } from "./types";
 import type { Fill, Stroke } from "./types";
 
 const pane = { width: 800, height: 400 };
@@ -106,6 +108,20 @@ describe("겹쳤을 때: 고른 드로잉의 핸들, 그다음 가장 위에 그
     const above: HitItem = { id: "above", z: 2, shapes: [line(0, 104, 200, 104)], handles: [] };
     expect(hitTest([anchored, above], { x: 52, y: 103 }, pane)).toEqual({ kind: "body", id: "anchored", part: "line" });
     expect(hitTest([anchored, above], { x: 100, y: 103 }, pane)).toEqual({ kind: "body", id: "above", part: "line" });
+  });
+
+  test("붓은 점이 궤적이라 꼭짓점 우선이 없고 z 순서로 겨룬다", () => {
+    const ctx: ToolContext = {
+      toScreen: (p) => ({ x: p.t, y: p.price }), fromScreen: (s) => ({ t: s.x, price: s.y }),
+      xOf: (t) => t, yOf: (price) => price, timeAt: (x) => x, priceAt: (y) => y, shiftBars: (t, n) => t + n,
+      barsBetween: () => null, barsIn: () => [], period: "D", fineBarsIn: () => ({ kind: "loading" }),
+      paneWidth: 800, paneHeight: 400, formatPrice: String, formatTime: String, logScale: false,
+    };
+    const base = { symbol: "005930", text: null, style: {}, locked: false, hidden: false, periods: null, group: null, scope: { kind: "symbol" }, revision: 0 } as const;
+    const brushStroke: DrawingBody = { ...base, id: "brush", tool: "brush", z: 1, points: Array.from({ length: 401 }, (_, t) => ({ t, price: 100 })) };
+    const trend: DrawingBody = { ...base, id: "trend", tool: "trendline", z: 2, points: [{ t: 100, price: 50 }, { t: 300, price: 150 }] };
+    const items = [brushStroke, trend].flatMap((d) => renderItem(d, false, ctx) ?? []);
+    expect(hitTest(items, { x: 200, y: 100 }, pane)).toEqual({ kind: "body", id: "trend", part: "line" });
   });
 
   test("고른 드로잉의 핸들이 선을 이긴다", () => {

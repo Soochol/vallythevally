@@ -206,7 +206,8 @@ function nearestHandle(handles: readonly ScreenPoint[], p: ScreenPoint): number 
 function itemHit(item: HitItem, p: ScreenPoint, pane: Pane, measure: TextMeasure): Ranked | null {
   const handle = nearestHandle(item.handles, p);
   if (handle >= 0) return { hit: { kind: "handle", id: item.id, index: handle }, z: item.z, rank: "handle", anchorDistance: 0 };
-  const anchorDistance = Math.min(...(item.anchors ?? []).map((a) => dist(a, p)));
+  let anchorDistance = Infinity;
+  for (const a of item.anchors ?? []) anchorDistance = Math.min(anchorDistance, dist(a, p));
   if (anchorDistance <= HANDLE_HIT_PX) return { hit: { kind: "body", id: item.id, part: "line" }, z: item.z, rank: "anchor", anchorDistance };
   let part: ShapeHit = null;
   for (const s of item.shapes) {
