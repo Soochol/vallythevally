@@ -35,8 +35,10 @@ fn friday(hour: u32, minute: u32, second: u32) -> i64 {
     kst(KstDate::new(2026, 11, 6).unwrap(), hour, minute, second).unix()
 }
 
-fn free_port() -> u16 {
-    std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port()
+fn open_public_listener() -> (std::net::TcpListener, u16) {
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    (listener, port)
 }
 
 fn operator_vars(work: &Path) -> BTreeMap<String, String> {
@@ -159,7 +161,7 @@ impl Site {
     async fn start(fake: ScriptedTransport) -> Site {
         let idp = start_idp().await;
         let work = work_folder();
-        let public_port = free_port();
+        let (opened, public_port) = open_public_listener();
         let public_origin = format!("http://127.0.0.1:{public_port}");
         let mut vars = operator_vars(work.path());
         vars.extend(public_vars(&idp, &format!("127.0.0.1:{public_port}"), &public_origin));
@@ -170,7 +172,7 @@ impl Site {
         let lock = server::instance::InstanceLock::acquire(&config.lock_path).unwrap();
         let (events, stream_events) = tokio::sync::mpsc::channel(16);
         let adapters = Adapters { kiwoom: fake.transport(), kis: None, kis_feed: None, stream: StreamSource::Detached(stream_events), kiwoom_spacing: None };
-        let started = server::app::start(&config, &lock, adapters).await.unwrap_or_else(|_| panic!("서버가 시작하지 못했다"));
+        let started = server::app::start_with(&config, &lock, adapters, server::app::StartOptions { public_listener: Some(opened), frozen_clock: false }).await.unwrap_or_else(|_| panic!("서버가 시작하지 못했다"));
         let server::app::Started { state, router, listener, public } = started;
         state.rest.set_access(Access::Open);
         let public = public.expect("공개 설정이 있다");

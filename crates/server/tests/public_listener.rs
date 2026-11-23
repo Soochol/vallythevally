@@ -951,7 +951,7 @@ async fn a_request_body_over_eight_mebibytes_is_413_payload_too_large() {
 async fn two_sessions_of_one_account_share_a_bucket_and_other_accounts_are_untouched() {
     let work = Work::new();
     let idp = start_idp().await;
-    let site = Spec::new(&work, &idp).start().await;
+    let site = Spec::new(&work, &idp).frozen_clock().start().await;
     let first = site.login("alice").await;
     let second = site.login("alice").await;
     let bob = site.login("bob").await;
@@ -973,7 +973,7 @@ async fn two_sessions_of_one_account_share_a_bucket_and_other_accounts_are_untou
 async fn the_sum_of_many_accounts_over_the_total_bucket_is_429() {
     let work = Work::new();
     let idp = start_idp().await;
-    let site = Spec::new(&work, &idp).env(&[("VALLY_PUBLIC_TOTAL_BURST", "10"), ("VALLY_PUBLIC_TOTAL_RATE", "1")]).start().await;
+    let site = Spec::new(&work, &idp).env(&[("VALLY_PUBLIC_TOTAL_BURST", "10"), ("VALLY_PUBLIC_TOTAL_RATE", "1")]).frozen_clock().start().await;
     let sessions = [site.login("a").await, site.login("b").await, site.login("c").await];
     let mut statuses = Vec::new();
     for turn in 0..12 {
@@ -1012,7 +1012,7 @@ async fn a_hundred_and_fifty_symbol_lookups_fit_the_default_account_bucket() {
 async fn anonymous_requests_over_their_own_bucket_do_not_stop_signed_in_accounts() {
     let work = Work::new();
     let idp = start_idp().await;
-    let site = Spec::new(&work, &idp).start().await;
+    let site = Spec::new(&work, &idp).frozen_clock().start().await;
     let who = site.login("alice").await;
     let mut statuses = Vec::new();
     for _ in 0..25 {
@@ -1028,7 +1028,7 @@ async fn anonymous_requests_over_their_own_bucket_do_not_stop_signed_in_accounts
 async fn the_login_start_bucket_is_its_own_and_retry_at_matches_retry_after() {
     let work = Work::new();
     let idp = start_idp().await;
-    let site = Spec::new(&work, &idp).env(&[("VALLY_PUBLIC_LOGIN_PER_MINUTE", "3")]).start().await;
+    let site = Spec::new(&work, &idp).env(&[("VALLY_PUBLIC_LOGIN_PER_MINUTE", "3")]).frozen_clock().start().await;
     let who = site.login("alice").await;
     for turn in 0..3 {
         let reply = Reply::of(site.public_get("/v1/session/google/start").send().await.unwrap()).await;
@@ -1190,7 +1190,7 @@ async fn a_kiwoom_failure_leaves_the_public_listener_with_fixed_words_and_no_kiw
 async fn screener_site<'a>(work: &'a Work, idp: &'a Arc<FakeIdp>, env: &[(&'a str, &str)]) -> (Site, ScriptedTransport) {
     let fake = ScriptedTransport::new();
     fake.set_krx_market(screener_market());
-    let site = Spec::new(work, idp).env(env).with_fake(fake.clone()).start().await;
+    let site = Spec::new(work, idp).env(env).with_fake(fake.clone()).frozen_clock().start().await;
     update_screener_store(&site).await;
     (site, fake)
 }
