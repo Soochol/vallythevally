@@ -169,6 +169,8 @@ fn generated_typescript_matches_the_committed_files() {
         generated::<KiwoomConnectStep>(),
         generated::<KiwoomEnvironment>(),
         generated::<Broker>(),
+        generated::<KisAccountInput>(),
+        generated::<KisAccountListing>(),
         generated::<KiwoomKey>(),
         generated::<KiwoomKeyAdd>(),
         generated::<KiwoomKeyAlias>(),
