@@ -8,13 +8,13 @@ mod themes;
 mod write;
 
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
 pub use board::Board;
 pub use feed::Feed;
 pub use format::{Broker, DataKind, FORMAT_VERSION, Header, Loaded, Probe, ProbeBody, ProbeItem, SNAPSHOT_EXTENSION, SourceKey, data_path};
-pub use minute::{MinuteBar, MinuteBarKey, MinuteInstrument, MinuteTrade, MinuteVenue, minute_path};
+pub use minute::{CELL_MINUTES, MinuteBar, MinuteBarKey, MinuteBook, MinuteCell, MinuteCells, MinuteInstrument, MinuteSeries, MinuteTrade, MinuteVenue, minute_path};
 pub use snapshot::{IndexRow, SnapshotBody, SnapshotRow, snapshot_kind};
 pub use overview::{CardSlot, CardValue, MadeCard, MarketCards, OverviewBody};
 pub use themes::{ThemeEntry, ThemesBody};
@@ -38,6 +38,8 @@ pub struct SharedData {
     pub snapshot_krx: Board<SnapshotBody>,
     pub snapshot_combined: Board<SnapshotBody>,
     pub snapshot_nxt: Board<SnapshotBody>,
+    pub minutes: MinuteBook,
+    dir: OnceLock<PathBuf>,
 }
 
 impl SharedData {
@@ -50,7 +52,17 @@ impl SharedData {
             snapshot_nxt: Board::new(DataKind::SnapshotNxt),
             kiwoom_themes: Board::new(DataKind::KiwoomThemes),
             market_overview: Board::new(DataKind::MarketOverview),
+            minutes: MinuteBook::new(),
+            dir: OnceLock::new(),
         })
+    }
+
+    pub fn enable(&self, dir: PathBuf) {
+        let _ = self.dir.set(dir);
+    }
+
+    pub fn is_enabled(&self) -> bool {
+        self.dir.get().is_some()
     }
 
     pub fn snapshot(&self, venue: Venue) -> &Board<SnapshotBody> {
@@ -63,6 +75,7 @@ impl SharedData {
 
     pub fn start(self: &Arc<Self>, settings: Option<&SharedDataSettings>) -> Option<tokio::task::JoinHandle<()>> {
         let settings = settings?.clone();
+        self.enable(settings.dir.clone());
         let data = self.clone();
         Some(tokio::spawn(async move {
             let mut tick = tokio::time::interval(settings.poll);
@@ -82,6 +95,7 @@ impl SharedData {
             data.probe_feed.poll(&dir);
             data.kiwoom_themes.poll(&dir);
             data.market_overview.poll(&dir);
+            data.minutes.poll(&dir);
             for venue in Venue::ALL {
                 data.snapshot(venue).poll(&dir);
             }
@@ -100,7 +114,7 @@ impl SharedData {
             DataKind::SnapshotKrx => self.snapshot_krx.errors(),
             DataKind::SnapshotCombined => self.snapshot_combined.errors(),
             DataKind::SnapshotNxt => self.snapshot_nxt.errors(),
-            DataKind::Minute => 0,
+            DataKind::Minute => self.minutes.errors(),
         }
     }
 
