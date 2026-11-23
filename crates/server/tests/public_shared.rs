@@ -442,7 +442,6 @@ async fn every_public_shared_route(site: &Site, who: &Session) -> Vec<(String, u
         "/api/screener/status",
         "/api/etf/funds",
         "/api/etf/stocks/005930",
-        "/api/financial-update",
         "/api/symbols/005930/financials",
         "/api/symbols/005930/financial-source",
         "/api/heatmap/board?venue=krx",
