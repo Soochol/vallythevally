@@ -11,7 +11,7 @@ interface Stamped {
 }
 
 export type PendingWrite = Stamped & (
-  | { readonly kind: "sending"; readonly key: string; readonly side: OrderSide; readonly price: number; readonly quantity: number }
+  | { readonly kind: "sending"; readonly key: string; readonly side: OrderSide; readonly price: number; readonly quantity: number; readonly listedWhenIn: number }
   | { readonly kind: "canceling"; readonly key: string; readonly orderNo: string }
   | { readonly kind: "canceling-price"; readonly key: string; readonly side: OrderSide; readonly price: number }
   | { readonly kind: "modifying"; readonly key: string; readonly orderNo: string }

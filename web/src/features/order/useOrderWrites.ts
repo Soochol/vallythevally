@@ -47,6 +47,7 @@ export interface PlaceRequest {
   readonly price: number;
   readonly quantity: number;
   readonly confirmHighValue: boolean;
+  readonly listedWhenIn: number;
   readonly margin?: number;
 }
 
@@ -65,7 +66,7 @@ export interface OrderWrites {
 const openOrderOf = (orderNo: string, code: string, venue: Venue, side: OrderSide, price: number, quantity: number): TradingOpenOrder =>
   ({ orderNo, code, name: "", side, quantity, price, openQuantity: quantity, status: "접수", orderedAt: "", originalOrderNo: null, venue });
 
-export function useOrderWrites(account: CurrentAccount | null, code: string, venue: Venue): OrderWrites {
+export function useOrderWrites(account: CurrentAccount | null, code: string, venue: Venue, windowId: string): OrderWrites {
   const queryClient = useQueryClient();
   const [status, setStatus] = useState<OrderStatus | null>(null);
   const [queued, setQueued] = useState(0);
@@ -83,7 +84,7 @@ export function useOrderWrites(account: CurrentAccount | null, code: string, ven
     const ledgerKey = actionInAccount(plan.action, accountRef);
     const coalesced = plan.coalesce ? ledger.issue(ledgerKey) : null;
     if (coalesced && !coalesced.send) return;
-    const commandId = coalesced?.id ?? ledger.issueEach(ledgerKey);
+    const commandId = coalesced?.id ?? ledger.issueEach(windowId, ledgerKey);
     pendingWrites.begin(plan.mark);
     setQueued((n) => n + 1);
     tail.current = tail.current.then(async () => {
@@ -99,19 +100,19 @@ export function useOrderWrites(account: CurrentAccount | null, code: string, ven
       } finally {
         pendingWrites.resolve(plan.mark.key, []);
         if (coalesced) ledger.settle(ledgerKey, settlement);
-        else ledger.settleEach(ledgerKey, commandId, settlement);
+        else ledger.settleEach(windowId, ledgerKey, commandId, settlement);
         setQueued((n) => n - 1);
         void queryClient.invalidateQueries({ queryKey: ORDER_QUERY_KEY });
       }
     });
-  }, [queryClient, accountRef]);
+  }, [queryClient, accountRef, windowId]);
 
   const place = useCallback((r: PlaceRequest) => {
     const action = placeAction(code, r.side, r.price, r.quantity, venue);
     enqueue<OrderCommand>({
       action,
       coalesce: false,
-      mark: { kind: "sending", key: `${action}|${++placeSequence}`, code, side: r.side, price: r.price, quantity: r.quantity },
+      mark: { kind: "sending", key: `${action}|${++placeSequence}`, code, side: r.side, price: r.price, quantity: r.quantity, listedWhenIn: r.listedWhenIn },
       starting: statusOfSending(r.side, r.quantity, r.price),
       call: (commandId) => placeOrder({ ...accountField(accountRef), commandId, code, side: r.side, quantity: r.quantity, price: r.price, venue, confirmHighValue: r.confirmHighValue }),
       describe: (command) => withMargin(statusOfCommand(command), r.margin ?? 0),

@@ -16,22 +16,61 @@ test("취소·정정의 응답 전 같은 동작은 명령 하나로 묶인다",
   }
 });
 
+const WINDOW = "order";
+
 test("신규처럼 묶지 않는 동작은 요청마다 새 id이고 답을 못 받은 뒤 같은 동작을 다시 할 때만 그 id를 쓴다", () => {
   const ledger = createLedger(counter());
   const action = placeAction("005930", "buy", 71_000, 10, "krx");
-  const first = ledger.issueEach(action);
-  const second = ledger.issueEach(action);
+  const first = ledger.issueEach(WINDOW, action);
+  const second = ledger.issueEach(WINDOW, action);
   expect(first).toBe("id-1");
   expect(second).toBe("id-2");
-  ledger.settleEach(action, first, "unanswered");
-  ledger.settleEach(action, second, "answered");
-  const retry = ledger.issueEach(action);
-  const whileRetrying = ledger.issueEach(action);
+  ledger.settleEach(WINDOW, action, first, "unanswered");
+  ledger.settleEach(WINDOW, action, second, "answered");
+  const retry = ledger.issueEach(WINDOW, action);
+  const whileRetrying = ledger.issueEach(WINDOW, action);
   expect(retry).toBe(first);
   expect(whileRetrying).toBe("id-3");
-  ledger.settleEach(action, retry, "answered");
-  ledger.settleEach(action, whileRetrying, "answered");
-  expect(ledger.issueEach(action)).toBe("id-4");
+  ledger.settleEach(WINDOW, action, retry, "answered");
+  ledger.settleEach(WINDOW, action, whileRetrying, "answered");
+  expect(ledger.issueEach(WINDOW, action)).toBe("id-4");
+});
+
+test("응답 없는 신규 id가 둘이면 다음 두 신규가 앞 id, 뒤 id 순서로 쓰고 세 번째는 새 id다", () => {
+  const ledger = createLedger(counter());
+  const action = placeAction("005930", "buy", 71_000, 10, "krx");
+  const first = ledger.issueEach(WINDOW, action);
+  const second = ledger.issueEach(WINDOW, action);
+  ledger.settleEach(WINDOW, action, first, "unanswered");
+  ledger.settleEach(WINDOW, action, second, "unanswered");
+  expect([ledger.issueEach(WINDOW, action), ledger.issueEach(WINDOW, action), ledger.issueEach(WINDOW, action)]).toEqual(["id-1", "id-2", "id-3"]);
+});
+
+test("답을 받은 신규 id는 다시 나오지 않는다", () => {
+  const ledger = createLedger(counter());
+  const action = placeAction("005930", "buy", 71_000, 10, "krx");
+  const first = ledger.issueEach(WINDOW, action);
+  const second = ledger.issueEach(WINDOW, action);
+  ledger.settleEach(WINDOW, action, first, "answered");
+  ledger.settleEach(WINDOW, action, second, "unanswered");
+  expect(ledger.issueEach(WINDOW, action)).toBe("id-2");
+  expect(ledger.issueEach(WINDOW, action)).toBe("id-3");
+});
+
+test("한 창에서 응답 없던 신규 id는 다른 창의 같은 동작에 나오지 않고 그 창의 다음 같은 동작에는 나온다", () => {
+  const ledger = createLedger(counter());
+  const action = placeAction("005930", "buy", 71_000, 10, "krx");
+  const inA = ledger.issueEach("order", action);
+  ledger.settleEach("order", action, inA, "unanswered");
+  expect(ledger.issueEach("order-2", action)).toBe("id-2");
+  expect(ledger.issueEach("order", action)).toBe(inA);
+});
+
+test("정정·취소는 창이 달라도 응답 전 같은 동작을 하나로 묶는다", () => {
+  const ledger = createLedger(counter());
+  const action = cancelAction("0000001");
+  expect(ledger.issue(action)).toEqual({ id: "id-1", send: true });
+  expect(ledger.issue(action)).toEqual({ id: "id-1", send: false });
 });
 
 test("끝난 동작을 다시 하면 새 명령이다", () => {
