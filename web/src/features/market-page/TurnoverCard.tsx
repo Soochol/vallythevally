@@ -5,7 +5,7 @@ import { useOverviewOn } from "../status/marketFeed";
 import { CardShell, FeedUnavailable, Loaded, PartView } from "./CardPart";
 import { formatEok } from "./marketFormat";
 
-const TURNOVER_SKELETON = { shape: "chart", minHeight: "var(--size-180)" } as const;
+const TURNOVER_SKELETON = { shape: "chart", minHeight: "var(--mk-skeleton-turnover)" } as const;
 
 const shortDate = (date: string): string => date.slice(5).replace("-", ".");
 

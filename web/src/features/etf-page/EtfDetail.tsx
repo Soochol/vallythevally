@@ -1,3 +1,4 @@
+import { useMemo } from "react";
 import { useEtfFund } from "../../api/etf";
 import { ApiRequestError } from "../../api/http";
 import type { EtfFundSummary } from "../../api/generated/EtfFundSummary";
@@ -12,7 +13,7 @@ import { HoldingsTable } from "./HoldingsTable";
 import { Treemap } from "./Treemap";
 import { OverlapTab } from "./OverlapTab";
 import { ReverseTab } from "./ReverseTab";
-import { formatPercent } from "./etfModel";
+import { formatPercent, rankHoldings } from "./etfModel";
 
 export const TABS = [
   { id: "holdings", label: "구성" },
@@ -43,6 +44,22 @@ function SummaryCells({ fund }: { fund: EtfFundSummary }) {
   );
 }
 
+function RankedHoldings({ holdings, pick }: { holdings: readonly EtfHolding[]; pick: (holding: EtfHolding) => void }) {
+  const ranked = useMemo(() => rankHoldings(holdings), [holdings]);
+  return (
+    <>
+      <section className="etf-card" aria-label="누적 비중">
+        <h3>누적 비중 곡선</h3>
+        <CumulativeCurve curve={ranked} />
+      </section>
+      <section className="etf-card etf-card-wide" aria-label="구성 표">
+        <h3>구성 표</h3>
+        <HoldingsTable ranked={ranked} onPick={pick} />
+      </section>
+    </>
+  );
+}
+
 function HoldingsTab({ code }: { code: string }) {
   const detail = useEtfFund(code);
   const send = useSendSymbol();
@@ -59,14 +76,7 @@ function HoldingsTab({ code }: { code: string }) {
         <h3>전 종목 트리맵</h3>
         <Treemap holdings={holdings} onPick={pick} />
       </section>
-      <section className="etf-card" aria-label="누적 비중">
-        <h3>누적 비중 곡선</h3>
-        <CumulativeCurve weightsBps={holdings.map((holding) => holding.weightBps)} />
-      </section>
-      <section className="etf-card etf-card-wide" aria-label="구성 표">
-        <h3>구성 표</h3>
-        <HoldingsTable holdings={holdings} onPick={pick} />
-      </section>
+      <RankedHoldings holdings={holdings} pick={pick} />
     </>
   );
 }

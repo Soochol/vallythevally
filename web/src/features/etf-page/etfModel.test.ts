@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { EtfFundSummary } from "../../api/generated/EtfFundSummary";
 import type { EtfChangePair } from "../../api/generated/EtfChangePair";
-import { commonHoldings, cumulativeCurve, filterFunds, formatRealChange, formatScale, issuersOf, NO_FILTER, overlapBps, pairOf, parseBasket, rankHoldings, sortFunds, squarify } from "./etfModel";
+import { commonHoldings, filterFunds, formatRealChange, formatScale, issuersOf, NO_FILTER, overlapBps, pairOf, parseBasket, rankHoldings, sortFunds, squarify } from "./etfModel";
 
 const fund = (code: string, name: string, style: EtfFundSummary["style"], issuer: string): EtfFundSummary => ({
   code, name, issuer, style, benchmark: "", holdingsCount: 1, top5WeightBps: 100, effectiveHoldings: 1,
@@ -62,17 +62,6 @@ describe("squarify", () => {
   });
 });
 
-describe("cumulativeCurve", () => {
-  it("큰 비중부터 쌓고 합을 다시 맞추지 않는다", () => {
-    expect(cumulativeCurve([500, 1900, 1000])).toEqual([
-      { rank: 1, cumulativeBps: 1900 },
-      { rank: 2, cumulativeBps: 2900 },
-      { rank: 3, cumulativeBps: 3400 },
-    ]);
-    expect(cumulativeCurve([])).toEqual([]);
-  });
-});
-
 describe("sortFunds", () => {
   const sized = [
     { ...fund("a", "다", "passive", "x"), top5WeightBps: 3000, holdingsCount: 10 },
@@ -89,9 +78,14 @@ describe("sortFunds", () => {
 });
 
 describe("rankHoldings", () => {
-  it("큰 비중부터 순위와 누적 비중을 매긴다", () => {
-    const ranked = rankHoldings([{ code: "a", name: "a", weightBps: 500 }, { code: "b", name: "b", weightBps: 1900 }, { code: "c", name: "c", weightBps: 1000 }]);
+  it("서버가 준 순서대로 순위와 누적 비중을 매기고 다시 정렬하지 않는다", () => {
+    const ranked = rankHoldings([{ code: "b", name: "b", weightBps: 1900 }, { code: "c", name: "c", weightBps: 1000 }, { code: "a", name: "a", weightBps: 500 }]);
     expect(ranked.map((r) => [r.holding.code, r.rank, r.cumulativeBps])).toEqual([["b", 1, 1900], ["c", 2, 2900], ["a", 3, 3400]]);
+    const unsorted = rankHoldings([{ code: "a", name: "a", weightBps: 500 }, { code: "b", name: "b", weightBps: 1900 }]);
+    expect(unsorted.map((r) => r.holding.code)).toEqual(["a", "b"]);
+  });
+  it("비면 빈 목록이다", () => {
+    expect(rankHoldings([])).toEqual([]);
   });
 });
 

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import type { SymbolCode } from "../../api/generated/SymbolCode";
 import type { Venue } from "../../api/generated/Venue";
 import type { WindowId } from "../../layout/kinds";
@@ -14,8 +14,11 @@ import { useWindowedRows } from "../market-window/useWindowedRows";
 import { TradeRow } from "./TradeRow";
 import type { TradeRow as TradeRowData } from "./tape";
 import { cumulativeQuantity, formatSecond, MIN_AMOUNT_OPTIONS, minAmountWon, recentBuySell, visibleEntries, type MinAmountKey } from "./tape";
+import { useBelowHeight } from "./useBelowHeight";
 import { useTradeTape } from "./useTradeTape";
 import "./trades.css";
+
+const COMPACT_STRIPS_BELOW_HEIGHT_PX = 260;
 
 export function TradesWindow({ id }: { id: WindowId }) {
   const venue = useVenue();
@@ -23,6 +26,8 @@ export function TradesWindow({ id }: { id: WindowId }) {
 }
 
 function TradesBody({ code, venue }: { code: SymbolCode; venue: Venue }) {
+  const frame = useRef<HTMLDivElement>(null);
+  const compactStrips = useBelowHeight(frame, COMPACT_STRIPS_BELOW_HEIGHT_PX);
   const { state, dispatch, history, feedError, retry } = useTradeTape(marketSocket, code, venue);
   const quote = useDayQuote(code, venue);
   const previousClose = quote.previousClose;
@@ -35,18 +40,18 @@ function TradesBody({ code, venue }: { code: SymbolCode; venue: Venue }) {
   const empty = view.entries.length === 0;
   const lastPrice = view.entries.find((entry): entry is TradeRowData => entry.kind === "trade")?.price ?? null;
   return (
-    <div className="tr-window" data-testid="trades-window" data-symbol={code}>
+    <div ref={frame} className="tr-window" data-testid="trades-window" data-symbol={code} data-compact-strips={compactStrips ? "" : undefined}>
       <MarketHead code={code} venue={venue} lastPrice={lastPrice} previousClose={previousClose} />
       <div className="tr-strips">
       <Strip>
-        <span>체결강도 <b data-testid="trade-strength">{state.strength === null ? "—" : `${formatDecimal(state.strength)}%`}</b></span>
+        <span className="tr-figure" data-figure="strength" title="체결강도"><span className="tr-name">체결강도 </span><b data-testid="trade-strength">{state.strength === null ? "—" : `${formatDecimal(state.strength)}%`}</b></span>
         <RatioBar buy={split.buy} sell={split.sell} label="최근 체결의 매수·매도 비율" />
-        <span>누적 <b data-testid="trade-cumulative">{formatQuantity(cumulativeQuantity(state, effectiveVenue))}</b></span>
+        <span className="tr-figure" data-figure="cumulative" title="누적"><span className="tr-name">누적 </span><b data-testid="trade-cumulative">{formatQuantity(cumulativeQuantity(state, effectiveVenue))}</b></span>
       </Strip>
       <Strip>
-        <span>최소 금액</span>
+        <span className="tr-name">최소 금액</span>
         <Segmented<MinAmountKey> label="최소 체결 금액" options={MIN_AMOUNT_OPTIONS} value={minKey} onChange={setMinKey} />
-        {integratedOnly && <span className="mw-integrated" data-testid="trade-integrated-only" title="이 종목은 선택한 거래소로 조회되지 않아 통합 값을 보입니다">통합 기준</span>}
+        {integratedOnly && <span className="mw-integrated" data-testid="trade-integrated-only" title="이 종목은 선택한 거래소로 조회되지 않아 통합 값을 보입니다"><span>통합</span><span className="tr-detail"> 기준</span></span>}
       </Strip>
       </div>
       {feedError !== null && <Notice tone="danger" className="mw-notice">실시간 체결을 받지 못합니다</Notice>}

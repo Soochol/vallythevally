@@ -31,7 +31,7 @@ export function rankingOf(tab: "value" | "gainers" | "losers", market: Market): 
 }
 
 const VISIBLE_ROWS = 10;
-const STOCK_SKELETON = { shape: "card", minHeight: "var(--size-220)" } as const;
+const STOCK_SKELETON = { shape: "card", minHeight: "var(--mk-skeleton-stocks)" } as const;
 
 function SymbolName({ code, name }: { code: string; name: string }) {
   return (

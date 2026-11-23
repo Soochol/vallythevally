@@ -47,6 +47,7 @@ export function CardError({ message, retry }: { message: string; retry?: () => v
 export interface SkeletonSpec {
   shape: SkeletonShape;
   minHeight: string;
+  placeholder?: ReactNode;
 }
 
 export function EmptyNote({ children }: { children: ReactNode }) {
@@ -56,6 +57,7 @@ export function EmptyNote({ children }: { children: ReactNode }) {
 export function Loaded<T>({ query, label, skeleton, children }: { query: UseQueryResult<T>; label: string; skeleton: SkeletonSpec; children: (data: T) => ReactNode }) {
   if (query.data !== undefined) return <>{children(query.data)}</>;
   if (query.isError) return <CardError message={query.error instanceof Error ? query.error.message : `${label}을 받지 못했습니다`} retry={() => void query.refetch()} />;
+  if (skeleton.placeholder !== undefined) return <div role="status" aria-label={`${label}을 받는 중`} className="mk-placeholder">{skeleton.placeholder}</div>;
   return <Skeleton label={`${label}을 받는 중`} shape={skeleton.shape} minHeight={skeleton.minHeight} />;
 }
 

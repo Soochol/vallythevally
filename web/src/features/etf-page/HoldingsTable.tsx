@@ -1,7 +1,7 @@
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import type { EtfHolding } from "../../api/generated/EtfHolding";
 import type { EtfMaState } from "../../api/generated/EtfMaState";
-import { formatPercent, rankHoldings } from "./etfModel";
+import { formatPercent, type RankedHolding } from "./etfModel";
 
 const MA_PERIODS = [20, 60, 120] as const;
 const STATE_LABEL: Record<EtfMaState, string> = { above: "상회", equal: "일치", below: "하회" };
@@ -14,13 +14,12 @@ function MaMark({ period, state }: { period: (typeof MA_PERIODS)[number]; state:
 }
 
 interface HoldingsTableProps {
-  holdings: readonly EtfHolding[];
+  ranked: readonly RankedHolding<EtfHolding>[];
   onPick: (holding: EtfHolding) => void;
 }
 
-export function HoldingsTable({ holdings, onPick }: HoldingsTableProps) {
+export function HoldingsTable({ ranked, onPick }: HoldingsTableProps) {
   const [all, setAll] = useState(false);
-  const ranked = useMemo(() => rankHoldings(holdings), [holdings]);
   const shown = all ? ranked : ranked.slice(0, VISIBLE_ROWS);
   return (
     <div className="etf-table-wrap">

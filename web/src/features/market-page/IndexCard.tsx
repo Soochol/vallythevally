@@ -27,14 +27,50 @@ function BreadthBar({ breadth }: { breadth: MarketOverviewBreadth }) {
   );
 }
 
-const INDEX_SKELETON = { shape: "line", minHeight: "var(--size-84)" } as const;
+const BLANK = "\u00a0";
+
+function IndexPlaceholder({ market }: { market: Market }) {
+  return (
+    <dl className="mk-index" aria-hidden="true">
+      <div className="mk-index-cell mk-index-level">
+        <dt>{BLANK}</dt>
+        <dd className="mk-blank-big">{BLANK}</dd>
+        <dd>{BLANK}</dd>
+      </div>
+      <div className="mk-index-cell">
+        <dt>{BLANK}</dt>
+        <dd className="mk-blank-mid">{BLANK}</dd>
+      </div>
+      <div className="mk-index-cell mk-index-wide">
+        <dt>{BLANK}</dt>
+        <dd>
+          <div className="mk-breadth">
+            <div className="mk-breadth-bar" />
+            <div className="mk-breadth-count"><span>{BLANK}</span></div>
+          </div>
+        </dd>
+      </div>
+      <div className="mk-index-cell">
+        <dt>{BLANK}</dt>
+        <dd>{BLANK}</dd>
+      </div>
+      {market === "kospi" && (
+        <div className="mk-index-cell">
+          <dt>{BLANK}</dt>
+          <dd className="mk-blank-mid">{BLANK}</dd>
+          <dd>{BLANK}</dd>
+        </div>
+      )}
+    </dl>
+  );
+}
 
 export function IndexCard({ market, enabled }: { market: Market; enabled: boolean }) {
   const on = useOverviewOn("index");
   const query = useMarketIndex(market, { enabled: enabled && on });
   return (
     <CardShell title="지수·폭" card="index" source={query.data?.context.source}>
-      {!on ? <FeedUnavailable /> : <Loaded query={query} label="지수" skeleton={INDEX_SKELETON}>
+      {!on ? <FeedUnavailable /> : <Loaded query={query} label="지수" skeleton={{ shape: "line", minHeight: "var(--size-84)", placeholder: <IndexPlaceholder market={market} /> }}>
         {(card) => (
           <PartView part={card.index}>
             {(index) => (

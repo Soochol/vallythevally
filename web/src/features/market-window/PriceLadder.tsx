@@ -60,8 +60,8 @@ const Quantity = memo(function Quantity({ side, quantity, change, ratio }: { sid
 export const priceTone = (price: number, previousClose: number | null): "up" | "down" | "flat" =>
   previousClose === null || !(previousClose > 0) ? "flat" : direction(price - previousClose);
 
-export function tradeBoxStart(rows: readonly LadderRow[]): number {
-  let start = ROWS_ABOVE_BASE;
+export function tradeBoxStart(rows: readonly LadderRow[], firstBidIndex = ROWS_ABOVE_BASE): number {
+  let start = firstBidIndex;
   rows.forEach((row, index) => {
     if (index >= start && row.ask) start = index + 1;
   });
@@ -126,7 +126,7 @@ export const ladderColumns = (hasLeft: boolean, hasRight: boolean): string =>
 
 export function PriceLadder({ rows, previousClose, slots, rowSlots, mark, expectedPrice = null, firstBidIndex = ROWS_ABOVE_BASE }: Props) {
   const columns = ladderColumns(slots?.left !== undefined, slots?.right !== undefined);
-  const boxStart = tradeBoxStart(rows);
+  const boxStart = tradeBoxStart(rows, firstBidIndex);
   const boxRows = rows.length - boxStart;
   const cardRows = infoCardRows(rows);
   return (

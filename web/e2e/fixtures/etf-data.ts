@@ -16,6 +16,7 @@ export const NO_MA: EtfMaStates = { ma20: null, ma60: null, ma120: null };
 const holding = (code: string, name: string, weightBps: number, ma: EtfMaStates = NO_MA): EtfHolding => ({ code, name, weightBps, ma });
 
 const MEGA_TECH: EtfHolding[] = [
+  holding("005380", "현대차", 2400),
   holding("005930", "삼성전자", 2200, { ma20: "above", ma60: "below", ma120: "equal" }),
   holding("000660", "SK하이닉스", 1800, { ma20: "below", ma60: "below", ma120: "above" }),
   holding("035420", "NAVER", 1100, { ma20: "above", ma60: "above", ma120: "above" }),
@@ -24,21 +25,20 @@ const MEGA_TECH: EtfHolding[] = [
   holding("028260", "삼성물산", 500),
   holding("086520", "에코프로", 300),
   holding("0222D0", "합성종목", 100),
-  holding("005380", "현대차", 2400),
 ];
 
 const SEMICONDUCTOR: EtfHolding[] = [
+  holding("402340", "SK스퀘어", 3900),
   holding("005930", "삼성전자", 3100),
   holding("000660", "SK하이닉스", 2600),
   holding("086520", "에코프로", 400),
-  holding("402340", "SK스퀘어", 3900),
 ];
 
 const NASDAQ: EtfHolding[] = [
+  holding("005380", "현대차", 6500),
   holding("035420", "NAVER", 1500),
   holding("051910", "LG화학", 1200),
   holding("000270", "기아", 800),
-  holding("005380", "현대차", 6500),
 ];
 
 const effectiveHoldings = (holdings: readonly EtfHolding[]) => {

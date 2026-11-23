@@ -12,8 +12,8 @@ import { signedEok, toneOf } from "./marketFormat";
 const FRAME = { width: 320, height: 120 };
 const GRID_FRACTIONS = [0, 0.5, 1] as const;
 const LABEL_GAP = 0.12;
-const BARS_SKELETON = { shape: "line", minHeight: "var(--size-120)" } as const;
-const LINES_SKELETON = { shape: "chart", minHeight: "var(--size-180)" } as const;
+const BARS_SKELETON = { shape: "line", minHeight: "var(--mk-skeleton-flow-bars)" } as const;
+const LINES_SKELETON = { shape: "chart", minHeight: "var(--mk-skeleton-flow-lines)" } as const;
 
 function SubjectBars({ totals }: { totals: Record<Subject, number | null> }) {
   const largest = Math.max(1, ...SUBJECTS.map((subject) => Math.abs(totals[subject] ?? 0)));
