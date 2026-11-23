@@ -32,6 +32,10 @@ impl KisSeats {
     pub fn with_notices(reserved: usize, notices: KisNotices) -> KisSeats {
         KisSeats { reserved, notices: Some(notices) }
     }
+
+    fn market_capacity(&self) -> usize {
+        KIS_REALTIME_LIMIT.saturating_sub(self.reserved)
+    }
 }
 
 impl SeatRules for KisSeats {
@@ -308,8 +312,10 @@ impl Bridge {
                 changed = async { self.notice_wanted.as_mut().expect("체결통보 구독 바람").changed().await }, if self.notice_wanted.is_some() => {
                     if changed.is_err() {
                         self.notice_wanted = None;
+                        true
+                    } else {
+                        self.send(StreamEvent::SeatsChanged).await
                     }
-                    true
                 }
                 changed = self.status.changed(), if status_alive => {
                     status_alive = changed.is_ok();
@@ -329,11 +335,14 @@ impl Bridge {
 
     fn sync_registrations(&mut self) {
         let mut wanted = subscriptions(&self.desired.borrow(), *self.venue.borrow(), self.directory.borrow().as_deref());
-        if wanted.len() > self.seats.limit() {
+        let notice = self.notices.as_ref().and_then(KisNotices::subscription);
+        if wanted.len() > self.seats.market_capacity() {
             tracing::warn!(wanted = wanted.len(), limit = self.seats.limit(), "한투 실시간 자리보다 많이 요청돼 자리 수만큼만 등록합니다");
             wanted = wanted.into_iter().take(self.seats.limit()).collect();
+            wanted.extend(notice);
+        } else if wanted.len() <= self.seats.limit() {
+            wanted.extend(notice);
         }
-        wanted.extend(self.notices.as_ref().and_then(KisNotices::subscription));
         if wanted != self.registered {
             self.session.set_desired(wanted.clone());
             self.registered = wanted;

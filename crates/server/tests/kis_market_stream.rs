@@ -191,6 +191,10 @@ fn rig() -> Rig {
 }
 
 fn rig_with(hts_id: Option<&str>) -> (Rig, Option<KisNotices>) {
+    rig_with_notices(hts_id, true)
+}
+
+fn rig_with_notices(hts_id: Option<&str>, wanted: bool) -> (Rig, Option<KisNotices>) {
     let dir = tempfile::tempdir().unwrap();
     let token_path: PathBuf = dir.path().join("state/vallythevally/kis-token.json");
     let transport = Arc::new(TokenAndApproval { approvals: Mutex::new(0) });
@@ -201,7 +205,9 @@ fn rig_with(hts_id: Option<&str>) -> (Rig, Option<KisNotices>) {
     let symbols = Arc::new(SymbolDirectory::default());
     let notices = hts_id.map(|hts_id| {
         let notices = KisNotices::new(None, auth.clone(), tokio::sync::watch::channel(LinkState::Disconnected).1);
-        notices.want(Some(Secret::new(hts_id.to_owned())));
+        if wanted {
+            notices.want(Some(Secret::new(hts_id.to_owned())));
+        }
         notices
     });
     let (stream, events) = KisMarketStream::spawn(Box::new(connector.clone()), auth, clock.clone(), symbols.updates(), 0, notices.clone());
@@ -288,7 +294,10 @@ fn listed(n: usize) -> Vec<Symbol> {
 }
 
 async fn hub_rig(count: usize) -> HubRig {
-    let mut rig = rig();
+    hub_rig_on(rig(), count)
+}
+
+fn hub_rig_on(mut rig: Rig, count: usize) -> HubRig {
     let peer = rig.connector.queue_connection();
     rig.symbols.replace(nxt_listing(&listed(count).into_iter().map(|s| (s, true)).collect::<Vec<_>>()));
     let kiwoom = KiwoomRest::new(ScriptedTransport::new().transport(), KiwoomAuth::new(Secret::new("k".into()), Secret::new("s".into()), None), rig.clock.clone());
@@ -733,4 +742,98 @@ async fn a_rejected_fill_notice_registration_does_not_log_the_hts_id() {
     let text = String::from_utf8(logs.0.lock().unwrap().clone()).unwrap();
     assert!(text.contains("등록이 거절"), "거절 로그가 있어야 한다: {text}");
     assert!(!text.contains("fakehtslog77"), "HTS ID가 로그에 나왔다: {text}");
+}
+
+const SEAT_HTS_ID: &str = "fakehtsseats";
+
+fn refused_subs(messages: Vec<ServerMessage>) -> Vec<String> {
+    messages.into_iter().filter_map(|message| match message {
+        ServerMessage::SubError { sub, code: SubErrorCode::RealtimeLimit } => Some(sub),
+        _ => None,
+    }).collect()
+}
+
+struct NoticeSeatRig {
+    h: HubRig,
+    notices: KisNotices,
+    out: Arc<Outbox>,
+    symbols: Vec<Symbol>,
+    heard: Vec<Control>,
+}
+
+async fn forty_trade_seats_with_notices_off() -> NoticeSeatRig {
+    let (rig, notices) = rig_with_notices(Some(SEAT_HTS_ID), false);
+    let notices = notices.unwrap();
+    let mut h = hub_rig_on(rig, LIMIT);
+    let (conn, out) = connect(&h).await;
+    let symbols = listed(LIMIT);
+    for (i, symbol) in symbols.iter().enumerate().rev() {
+        h.hub.subscribe_feed(conn, sub(&format!("t{i}")), *symbol, FeedKind::Trades, Venue::Combined);
+    }
+    settle().await;
+    let heard = settled(&mut h.peer).await;
+    assert_eq!(open_registrations(&heard).last().copied(), Some(LIMIT), "체결 구독 마흔 개가 마흔 자리를 채운다: {heard:?}");
+    assert!(refused_subs(out.take(true).messages).is_empty(), "마흔 개까지는 모두 받는다");
+    NoticeSeatRig { h, notices, out, symbols, heard }
+}
+
+fn refused_symbol(rig: &NoticeSeatRig, refused: &str) -> String {
+    let index: usize = refused.strip_prefix('t').and_then(|i| i.parse().ok()).unwrap_or_else(|| panic!("모르는 구독 이름: {refused}"));
+    rig.symbols[index].as_wire()
+}
+
+async fn turn_notices_on(rig: &mut NoticeSeatRig) -> String {
+    rig.notices.want(Some(Secret::new(SEAT_HTS_ID.to_owned())));
+    settle().await;
+    let after = settled(&mut rig.h.peer).await;
+    rig.heard.extend(after.iter().cloned());
+    let refused = refused_subs(rig.out.take(true).messages);
+    assert_eq!(refused.len(), 1, "체결통보 자리 때문에 구독 하나만 한도 오류를 받는다: {refused:?}");
+    let symbol = refused_symbol(rig, &refused[0]);
+    assert!(after.contains(&Control::register("H0STCNI0", SEAT_HTS_ID)), "체결통보가 등록된다: {after:?}");
+    assert!(after.contains(&Control::unregister("H0UNCNT0", &symbol)), "밀려난 구독의 종목이 해지된다: {after:?}");
+    let interrupted: Vec<&Control> = after.iter().filter(|control| !control.registers && control.tr_id == "H0UNCNT0" && control.tr_key != symbol).collect();
+    assert!(interrupted.is_empty(), "허브가 남긴 종목은 한 번도 해지되지 않는다(밀려난 것은 {symbol}): {interrupted:?}");
+    refused[0].clone()
+}
+
+#[tokio::test(start_paused = true)]
+async fn turning_on_fill_notices_with_forty_trade_seats_refuses_one_holder_and_never_registers_past_forty() {
+    let mut rig = forty_trade_seats_with_notices_off().await;
+    let refused = turn_notices_on(&mut rig).await;
+    let refused_symbol = refused_symbol(&rig, &refused);
+    let opens = open_registrations(&rig.heard);
+    assert!(opens.iter().all(|&open| open <= LIMIT), "어느 순간에도 열린 등록은 {LIMIT}을 넘지 않는다: {opens:?}");
+    assert_eq!(opens.last().copied(), Some(LIMIT), "체결통보와 서른아홉 종목이 마흔 자리를 채운다");
+    let mut open = BTreeSet::new();
+    for control in &rig.heard {
+        let key = (control.tr_id.clone(), control.tr_key.clone());
+        if control.registers { open.insert(key) } else { open.remove(&key) };
+    }
+    for symbol in rig.symbols.iter().map(Symbol::as_wire) {
+        assert_eq!(open.contains(&("H0UNCNT0".to_owned(), symbol.clone())), symbol != refused_symbol, "{symbol}의 등록 상태");
+    }
+    settle().await;
+    tokio::time::sleep(Duration::from_secs(60)).await;
+    assert!(settled(&mut rig.h.peer).await.is_empty(), "다음 재계획에서도 등록이 다시 넘치지 않는다");
+    assert!(refused_subs(rig.out.take(true).messages).is_empty(), "같은 구독에 오류를 거듭 보내지 않는다");
+}
+
+#[tokio::test(start_paused = true)]
+async fn turning_fill_notices_off_again_brings_the_refused_holder_back() {
+    let mut rig = forty_trade_seats_with_notices_off().await;
+    let refused = turn_notices_on(&mut rig).await;
+    let refused_symbol = refused_symbol(&rig, &refused);
+    rig.notices.want(None);
+    settle().await;
+    let after = settled(&mut rig.h.peer).await;
+    rig.heard.extend(after.iter().cloned());
+    assert!(after.contains(&Control::unregister("H0STCNI0", SEAT_HTS_ID)), "체결통보 등록이 풀린다: {after:?}");
+    assert!(after.contains(&Control::register("H0UNCNT0", &refused_symbol)), "밀려난 종목이 다시 등록된다: {after:?}");
+    let opens = open_registrations(&rig.heard);
+    assert!(opens.iter().all(|&open| open <= LIMIT), "어느 순간에도 열린 등록은 {LIMIT}을 넘지 않는다: {opens:?}");
+    assert_eq!(opens.last().copied(), Some(LIMIT));
+    let messages = rig.out.take(true).messages;
+    assert!(messages.contains(&ServerMessage::FeedSubscribed { sub: refused.clone(), kind: FeedKind::Trades }), "밀려난 구독이 다시 받는다고 알린다: {messages:?}");
+    assert!(refused_subs(messages).is_empty());
 }

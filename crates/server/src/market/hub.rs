@@ -877,6 +877,10 @@ impl MarketHub {
                 self.gap_from.get_or_insert(now);
                 self.session_down(RealtimeState::Halted, now);
             }
+            StreamEvent::SeatsChanged => {
+                let now = self.clock.now();
+                self.replan(now);
+            }
             StreamEvent::Live { since } => {
                 self.publish_feed_link(true, since);
                 self.session_live = true;
