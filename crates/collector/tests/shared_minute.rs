@@ -452,6 +452,14 @@ impl Gate {
     }
 }
 
+struct ReleaseOnDrop(Arc<Gate>);
+
+impl Drop for ReleaseOnDrop {
+    fn drop(&mut self) {
+        self.0.release();
+    }
+}
+
 struct HeldStore {
     inner: Box<dyn MinuteStore>,
     gate: Arc<Gate>,
@@ -549,6 +557,7 @@ async fn a_wait_with_no_new_write_signal_fails_naming_what_it_waited_for() {
     let folder = tempfile::tempdir().unwrap();
     let shared = folder.path().join("shared");
     let gate = Gate::new();
+    let _release_on_failure = ReleaseOnDrop(gate.clone());
     let held = HeldStore { inner: file_store(&shared, "k1").0, gate: gate.clone() };
     let written = Beacon::new();
     let watched = Watched { inner: Box::new(held), written: written.clone() };
