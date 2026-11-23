@@ -46,6 +46,57 @@ pub fn credential_id(app_key: &str) -> String {
 pub use super::private_file::FileError;
 use super::private_file::PrivateFile;
 
+#[derive(Serialize, Deserialize, PartialEq, Eq, Default, Clone, Debug)]
+pub struct KeyRecords {
+    pub credential: String,
+    #[serde(default)]
+    pub last_request_at: i64,
+    #[serde(default)]
+    pub disconnected: bool,
+    #[serde(default)]
+    pub auth_block: Option<SavedAuthBlock>,
+}
+
+pub struct RecordFile {
+    file: PrivateFile,
+    environment: KiwoomEnvironment,
+    credential: String,
+}
+
+impl RecordFile {
+    pub fn path(&self) -> &Path {
+        self.file.path()
+    }
+
+    pub fn load(&self) -> Result<Option<KeyRecords>, FileError> {
+        let Some(text) = self.file.read()? else { return Ok(None) };
+        let (stored, records): (_, KeyRecords) = parse_stamped(&text).map_err(|e| self.file.error(format_args!("JSON {:?} 오류, {}번째 줄", e.classify(), e.line())))?;
+        if stored != self.environment {
+            return Err(self.file.error_for_other_environment(stored, self.environment));
+        }
+        if records.credential != self.credential {
+            return Err(self.file.error("다른 앱키의 기록이라 쓰지 않습니다"));
+        }
+        Ok(Some(records))
+    }
+
+    pub fn save(&self, records: &KeyRecords) -> Result<(), FileError> {
+        if let Some(stored) = self.file.stored_environment()?
+            && stored != self.environment
+        {
+            return Err(self.file.error_for_other_environment(stored, self.environment));
+        }
+        self.file.write(&render_stamped(self.environment, records))
+    }
+}
+
+fn records_path(token_path: &Path, credential: &str) -> PathBuf {
+    let tag: String = credential.trim_start_matches("sha256:").chars().take(16).collect();
+    let name = token_path.file_name().map(|name| name.to_string_lossy().into_owned()).unwrap_or_default();
+    let prefix = name.split('.').next().unwrap_or_default();
+    token_path.with_file_name(format!("{prefix}-records.{tag}.json"))
+}
+
 pub struct TokenFile {
     file: PrivateFile,
     environment: KiwoomEnvironment,
@@ -67,6 +118,10 @@ impl TokenFile {
 
     pub fn path(&self) -> &Path {
         self.file.path()
+    }
+
+    pub fn records_for(&self, credential: &str) -> RecordFile {
+        RecordFile { file: PrivateFile::new(records_path(self.path(), credential)), environment: self.environment, credential: credential.to_owned() }
     }
 
     pub fn load(&self) -> Result<Option<Saved>, FileError> {

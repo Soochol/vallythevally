@@ -518,6 +518,15 @@ impl Link {
         self.state()
     }
 
+    pub fn rebind_replacing(&self, identity: Option<(Secret<String>, Secret<String>, Option<super::token_file::TokenFile>)>) -> LinkState {
+        self.abandon_connect(|| {
+            self.0.rest.set_access(Access::Closed);
+            self.0.rest.auth().rebind_replacing(identity);
+            self.set(self.resting_state());
+        });
+        self.state()
+    }
+
     pub fn record_key_in_token_file(&self) {
         self.0.rest.auth().persist();
     }

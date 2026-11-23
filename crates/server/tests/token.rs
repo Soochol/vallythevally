@@ -207,7 +207,7 @@ async fn an_unreadable_token_file_issues_nothing_across_restarts_and_is_left_as_
 }
 
 #[tokio::test]
-async fn a_token_saved_for_another_app_key_is_never_sent_and_the_interval_still_holds() {
+async fn a_token_saved_for_another_app_key_is_never_sent_and_the_interval_stays_with_the_app_key_that_made_it() {
     const OTHER_KEY: &str = "FAKE-APPKEY-other-b2b2b2b2";
     let other: &[(&str, &std::ffi::OsStr)] = &[("VALLY_KIWOOM_APP_KEY", OTHER_KEY.as_ref())];
     let fake = ScriptedTransport::new();
@@ -218,25 +218,20 @@ async fn a_token_saved_for_another_app_key_is_never_sent_and_the_interval_still_
     assert_eq!(fake.issued(), 1);
     let sent_before = fake.requests();
 
-    let server = Server::spawn_with(&fake, &lock, &dist, other);
-    let base = format!("http://{}", server.addr().await);
-    let until = waiting_until(server.link_state());
-    let (status, body) = get(&base, "/api/bars?symbol=005930&period=D").await;
-    let logs = server.stop().await;
-    assert_eq!((status, body["error"]["reason"].as_str()), (503, Some("not_connected")), "{body}\n{logs}");
-    assert!(until > now_unix() && until <= now_unix() + 600, "{until}");
-    assert_eq!(fake.requests(), sent_before, "앱키가 바뀌어도 10분 안에는 아무것도 보내지 않는다: {:?}", fake.api_ids());
-
-    let path = token_path(&lock);
-    let mut saved: Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
-    saved["last_request_at"] = json!(now_unix() - 3600);
-    std::fs::write(&path, saved.to_string()).unwrap();
     run_until_symbols_load_with(&fake, &lock, &dist, other).await;
     let bodies = fake.seen.token_bodies.lock().unwrap().clone();
-    assert_eq!(bodies.iter().map(|b| b["appkey"].as_str().unwrap()).collect::<Vec<_>>(), [APP_KEY, OTHER_KEY]);
+    assert_eq!(bodies.iter().map(|b| b["appkey"].as_str().unwrap()).collect::<Vec<_>>(), [APP_KEY, OTHER_KEY], "다른 앱키는 남의 발급 간격을 기다리지 않고 자기 토큰을 받는다");
     let auths = fake.seen.authorizations.lock().unwrap()[sent_before..].to_vec();
     assert!(!auths.contains(&format!("Bearer {TOKEN}")), "옛 앱키의 토큰을 보냈다: {auths:?}");
     assert!(auths.contains(&format!("Bearer {}", token_for(OTHER_KEY))), "{auths:?}");
+
+    let sent_before = fake.requests();
+    let server = Server::spawn_with(&fake, &lock, &dist, &[]);
+    server.addr().await;
+    let until = waiting_until(server.link_state());
+    server.stop().await;
+    assert!(until > now_unix() && until <= now_unix() + 600, "{until}");
+    assert_eq!(fake.requests(), sent_before, "토큰 파일을 다른 앱키가 써도 처음 앱키의 발급 간격은 따라와 10분 안에는 아무것도 보내지 않는다: {:?}", fake.api_ids());
 }
 
 #[tokio::test]
@@ -270,12 +265,19 @@ async fn the_block_and_disconnect_records_are_read_again_at_the_next_start() {
 
     let fake = ScriptedTransport::new();
     let lock = tmp.path().join("eight/server.lock");
-    write_token_file(&lock, json!({"credential": credential_id(APP_KEY), "token": null, "last_request_at": at, "auth_block": {"detail": {"rest": 8050}, "credential": credential_id("FAKE-APPKEY-another"), "at": at}}));
+    write_token_file(&lock, json!({"credential": credential_id(APP_KEY), "token": null, "last_request_at": at, "auth_block": {"detail": {"rest": 8050}, "credential": null, "at": at}}));
     let server = Server::spawn_with(&fake, &lock, &dist, start);
     server.addr().await;
     let (problem, _, _) = failure_of(server.link_state());
-    assert_eq!(problem, Problem::AuthBlocked8050, "8050은 다른 앱키 해시로 쓴 기록이어도 복원한다");
+    assert_eq!(problem, Problem::AuthBlocked8050, "앱키가 적히지 않은 옛 8050 기록은 그 파일을 가진 키의 것으로 복원한다");
     assert!(server.link().needs_acknowledgement());
+    server.stop().await;
+
+    let lock = tmp.path().join("another/server.lock");
+    write_token_file(&lock, json!({"credential": credential_id(APP_KEY), "token": null, "last_request_at": at, "auth_block": {"detail": {"rest": 8050}, "credential": credential_id("FAKE-APPKEY-another"), "at": at}}));
+    let server = Server::spawn_with(&fake, &lock, &dist, start);
+    server.addr().await;
+    server.wait_for_state(|state| *state == LinkState::Connected).await;
     server.stop().await;
 
     let lock = tmp.path().join("rejected/server.lock");

@@ -220,8 +220,8 @@ async fn a_key_file_others_can_read_is_not_read_and_the_status_names_the_cause()
     assert_eq!(mode(&env.list_path()), 0o644, "읽지 않은 파일은 건드리지 않는다");
 
     assert_eq!(client.put_key(OTHER_APP_KEY, OTHER_APP_SECRET).await.0, 200, "새 키를 저장하면 파일이 새로 쓰여 문제가 풀린다");
-    let (_, fixed) = client.get("/api/system/kiwoom").await;
-    assert_eq!((fixed["state"].as_str(), fixed["problem"].as_str()), (Some("connecting"), None), "{fixed}");
+    let fixed = client.until_state("connected").await;
+    assert_eq!(fixed["problem"].as_str(), None, "{fixed}");
     assert_eq!(mode(&env.list_path()), 0o600);
 }
 
