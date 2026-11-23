@@ -121,3 +121,24 @@ test("paint 전에 새로 예약한 명령은 이전 예약의 paint 뒤 정리�
   f.paint();
   expect(scroll.position(f.scale)).toBe(start + 2);
 });
+
+test("변경 중에 라이브러리가 오른쪽 오프셋을 동기로 바꿔도 예약이 없으면 그 변화를 흡수한다", () => {
+  const f = scaleOf([2015, 2016, 2021, 2022, 2023, 2024, 2025, 2026].map(year), true);
+  const scroll = new PendingScroll(f.afterNextPaint);
+  preserveTimeRange(f.scale, "Y", scroll, () => { f.change([2015, 2016, 2021, 2022, 2023, 2024, 2025, 2026, 2027, 2028].map(year)); f.jump(f.scale.scrollPosition() - 2); });
+  f.paint();
+  const index = chartTimeProjection(f.scale, "Y").toLogical(year(2028))!;
+  expect(f.scale.scrollPosition()).toBeCloseTo(0, 8);
+  expect(f.scale.getVisibleLogicalRange()!.to - index).toBeCloseTo(0, 8);
+});
+
+test("변경 중에 라이브러리가 오른쪽 오프셋을 동기로 바꿔도 예약이 있으면 변화와 예약을 둘 다 반영한다", () => {
+  const f = scaleOf([2015, 2016, 2021, 2022, 2023, 2024, 2025, 2026].map(year), true);
+  const scroll = new PendingScroll(f.afterNextPaint);
+  scroll.scrollTo(f.scale, scroll.position(f.scale) - 1.2);
+  preserveTimeRange(f.scale, "Y", scroll, () => { f.change([2015, 2016, 2021, 2022, 2023, 2024, 2025, 2026, 2027, 2028].map(year)); f.jump(f.scale.scrollPosition() - 2); });
+  f.paint();
+  const index = chartTimeProjection(f.scale, "Y").toLogical(year(2028))!;
+  expect(f.scale.scrollPosition()).toBeCloseTo(-1.2, 8);
+  expect(f.scale.getVisibleLogicalRange()!.to - index).toBeCloseTo(-1.2, 8);
+});

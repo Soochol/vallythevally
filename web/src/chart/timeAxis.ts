@@ -86,10 +86,10 @@ export function preserveTimeRange(scale: ChartTimeScale, period: Period, scroll:
   const range = scale.getVisibleLogicalRange();
   const index = range ? Math.max(0, Math.floor(range.to)) : 0;
   const anchor = chartTimeProjection(scale, period).toTime(index);
-  const base = scroll.position(scale);
+  const unappliedShift = scroll.position(scale) - scale.scrollPosition();
   change();
   if (!range || anchor === null) return;
   const moved = chartTimeProjection(scale, period).toLogical(anchor);
   const current = scale.getVisibleLogicalRange();
-  if (moved !== null && current) scroll.scrollTo(scale, base + range.to + moved - index - current.to);
+  if (moved !== null && current) scroll.scrollTo(scale, scale.scrollPosition() + unappliedShift + range.to + moved - index - current.to);
 }
