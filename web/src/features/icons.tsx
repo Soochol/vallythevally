@@ -276,3 +276,5 @@ export const DocumentIcon = ({ size = 16 }: P) => (
     <path d="M14 3v5h5M8 13h8M8 17h5" />
   </Icon>
 );
+export const UndoIcon = ({ size = 16 }: P) => <Icon size={size} path="M9 8H15a4.5 4.5 0 0 1 0 9H8M9 4 5 8l4 4" />;
+export const LogScaleIcon = ({ size = 16 }: P) => <Icon size={size} path="M4 20h16M4 4v16M7 17c4 0 5-3 7-6s3-4 5-5" />;

@@ -19,7 +19,7 @@ const unsubscribes = (scenario: Scenario) => scenario.live.messages.filter((m) =
 test("세로 메뉴의 아이콘을 누르면 그 주소로 이동하고 지금 페이지가 표시된다", async ({ page }) => {
   await page.goto("/");
   await expect(railLink(page, "작업 영역")).toHaveAttribute("aria-current", "page");
-  await expect(rail(page).getByRole("button", { name: "설정" })).toBeVisible();
+  await expect(rail(page).getByRole("button", { name: "단축키" })).toBeVisible();
   for (const [label, path] of PAGES) {
     await railLink(page, label).click();
     await expect(page).toHaveURL(new RegExp(`${path}$`));
@@ -34,10 +34,10 @@ test("세로 메뉴의 아이콘을 누르면 그 주소로 이동하고 지금 
   await expect(railLink(page, "작업 영역")).toHaveAttribute("aria-current", "page");
 });
 
-test("맨 아래 설정 단추는 시스템 설정 대화상자를 연다", async ({ page }) => {
+test("맨 아래 단축키 단추는 단축키 판을 연다", async ({ page }) => {
   await page.goto("/market");
-  await rail(page).getByRole("button", { name: "설정" }).click();
-  await expect(page.getByRole("dialog", { name: "시스템 설정" })).toBeVisible();
+  await rail(page).getByRole("button", { name: "단축키" }).click();
+  await expect(page.getByRole("dialog", { name: "단축키", exact: true })).toBeVisible();
   await expect(page).toHaveURL(/\/market$/);
 });
 

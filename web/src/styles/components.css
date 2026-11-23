@@ -55,6 +55,8 @@
   .ui-skeleton[data-shape=line] > span:nth-child(2) { width:75%; }
   .ui-skeleton[data-shape=line] > span:nth-child(3n) { width:55%; }
   .ui-skeleton[data-shape=card] > span:not(.sr-only) { height:var(--size-60); border-radius:var(--r-m); }
+  .ui-skeleton[data-shape=row] { gap:var(--size-4); padding:var(--size-4); }
+  .ui-skeleton[data-shape=row] > span:not(.sr-only) { height:var(--size-36); border-radius:var(--r-m); }
   .ui-skeleton[data-shape=chart] { justify-content:stretch; }
   .ui-skeleton[data-shape=chart] > span:not(.sr-only) { flex:1; height:auto; min-height:var(--size-140); border-radius:var(--r-m); }
   @keyframes ui-state-reveal { from { opacity:0; } }

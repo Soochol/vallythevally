@@ -1,16 +1,28 @@
 import type { QueryClient } from "@tanstack/react-query";
+import type { ComponentType } from "react";
 import type { WindowId } from "../../layout/kinds";
 
 export interface CommandContext {
   cellId: WindowId;
   queryClient: QueryClient;
+  navigate?(path: string): void;
 }
+
+export type CommandGroup = "chart" | "window" | "layout" | "system";
+
+export const COMMAND_GROUPS: readonly CommandGroup[] = ["chart", "window", "layout", "system"];
+
+export const COMMAND_GROUP_LABEL: Readonly<Record<CommandGroup, string>> = { chart: "차트", window: "창", layout: "배치", system: "시스템" };
+
+export type CommandIcon = ComponentType<{ size?: number }>;
 
 export interface SearchCommand {
   id: string;
   label: string;
   keywords?: string;
   shortcut?: string;
+  group?: CommandGroup;
+  icon?: CommandIcon;
   run(context: CommandContext): void | Promise<void>;
 }
 

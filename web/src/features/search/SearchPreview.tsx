@@ -4,7 +4,6 @@ import type { Quote } from "../../api/generated/Quote";
 import type { SymbolInfo } from "../../api/generated/SymbolInfo";
 import { getJson } from "../../api/http";
 import { usePublicMode } from "../../public-mode/serverMode";
-import type { SearchPurpose } from "../../stores/selection";
 import { KIND_LABEL, MARKET_LABEL } from "../../lib/symbol";
 import { shownVenue } from "../../lib/venue";
 import { useVenue } from "../../stores/ui";
@@ -12,13 +11,13 @@ import { EmptyState, ErrorState, Skeleton } from "../overlay/State";
 
 export function QuoteValue({ quote, large = false }: { quote: Quote | undefined; large?: boolean }) {
   const color = quote && quote.changeRate > 0 ? "text-up" : quote && quote.changeRate < 0 ? "text-down" : "text-text-2";
-  return <span className={`flex items-baseline justify-end gap-2 ${color}`}>
-    <span className={large ? "text-[24px] font-bold" : "text-text"} aria-label="현재가">{quote ? quote.price.toLocaleString("ko-KR") : "—"}</span>
-    <span className="min-w-[60px] text-right font-semibold" aria-label="등락률">{quote ? `${quote.changeRate > 0 ? "+" : ""}${quote.changeRate.toFixed(2)}%` : "—"}</span>
+  return <span className="flex items-baseline justify-end gap-2">
+    <span className={`text-text ${large ? "text-h font-bold" : ""}`} aria-label="현재가">{quote ? quote.price.toLocaleString("ko-KR") : "—"}</span>
+    <span className={`min-w-[60px] text-right font-semibold ${color}`} aria-label="등락률">{quote ? `${quote.changeRate > 0 ? "+" : ""}${quote.changeRate.toFixed(2)}%` : "—"}</span>
   </span>;
 }
 
-export function SearchPreview({ info, quote, purpose }: { info: SymbolInfo; quote: Quote | undefined; purpose: SearchPurpose }) {
+export function SearchPreview({ info, quote }: { info: SymbolInfo; quote: Quote | undefined }) {
   const venue = shownVenue(info.code, useVenue(), info);
   const publicMode = usePublicMode();
   const trend = useQuery({
@@ -39,6 +38,5 @@ export function SearchPreview({ info, quote, purpose }: { info: SymbolInfo; quot
     <div className="rounded-m border border-line bg-chart-bg p-2"><p className="mb-2 text-xs text-text-3">60일 추세</p>
       {publicMode ? <EmptyState title="차트 연결은 준비 중입니다" /> : trend.isPending ? <Skeleton label="추세 불러오는 중" /> : trend.isError ? <ErrorState message="추세를 받지 못했습니다" retry={() => void trend.refetch()} /> : values.length === 0 ? <EmptyState title="일봉이 없습니다">다른 종목을 골라 보세요.</EmptyState> : <svg role="img" aria-label={`${info.name} 60일 추세`} viewBox="0 0 260 100" className={`w-full ${values.at(-1)! >= values[0]! ? "text-up" : "text-down"}`}><polyline points={points} fill="none" stroke="currentColor" strokeWidth="1.5" /></svg>}
     </div>
-    <div className="space-y-2 border-t border-line pt-4 text-xs text-text-2"><p><kbd>↵</kbd> {purpose === "watch" ? "넣기" : "이 칸에 열기"}</p><p><kbd>☆·Ctrl+↵</kbd> 관심종목 넣기·빼기</p><p><kbd>Shift+↵</kbd> 비교에 추가</p></div>
   </aside>;
 }

@@ -120,7 +120,7 @@ test("시장 필터와 > 명령 모드에서 명령을 실행한다", async ({ p
   await expect(dialog.getByRole("option")).toHaveCount(0);
   await dialog.getByRole("button", { name: "전체", exact: true }).click();
   await expect(dialog.getByRole("option")).toHaveCount(1);
-  await input.fill("> 로그");
+  await input.fill("> 로그 축");
   await expect(dialog.getByRole("option")).toHaveCount(1);
   await input.press("Enter");
   await expect(dialog).toBeHidden();
@@ -145,10 +145,70 @@ test("일부 시세 누락·추세 실패에도 다른 종목과 명령을 계�
   await dialog.getByRole("combobox").fill("ㅅㅅ");
   const samsung = dialog.getByRole("option").filter({ hasText: "005930" });
   await expect(samsung.getByLabel("현재가")).not.toHaveText("—");
-  await expect(dialog.getByRole("option").filter({ hasText: "006400" }).getByLabel("현재가")).toHaveText("—");
+  await expect(dialog.getByRole("option").filter({ hasText: "006400" }).getByLabel("현재가")).toHaveText("");
+  await expect(dialog.getByRole("option").filter({ hasText: "006400" }).getByLabel("등락률")).toHaveText("—");
   await expect(dialog.getByRole("alert")).toContainText("추세를 받지 못했습니다");
   await samsung.click();
   await expect(cell(page)).toHaveAttribute("aria-label", "칸 1: 삼성전자 통합 일");
+});
+
+test("시장 표시는 값이 없는 줄도 있는 줄과 같은 왼쪽 끝에 서고 맞은 글자는 강조색이 아니다", async ({ scenario, page }) => {
+  await page.route("**/api/quotes?*", async (route) => {
+    const response = await scenario.respond(route.request());
+    const quotes = (response.body ?? []) as { symbol: string }[];
+    await route.fulfill({ json: quotes.filter((q: { symbol: string }) => q.symbol !== "006400") });
+  });
+  await page.goto("/");
+  await expect(cell(page)).toHaveAttribute("aria-busy", "false");
+  await page.keyboard.press("/");
+  const dialog = page.getByRole("dialog", { name: "종목 검색" });
+  await dialog.getByRole("combobox").fill("ㅅㅅ");
+  const withValue = dialog.getByRole("option").filter({ hasText: "005930" });
+  const withoutValue = dialog.getByRole("option").filter({ hasText: "006400" });
+  await expect(withValue.getByLabel("현재가")).not.toHaveText("");
+  await expect(withoutValue.getByLabel("등락률")).toHaveText("—");
+  const left = async (row: Locator) => (await row.locator('[data-cell="market"]').boundingBox())!.x;
+  expect(await left(withoutValue)).toBe(await left(withValue));
+  const colors = await dialog.evaluate((root) => {
+    const probe = document.createElement("span");
+    probe.style.color = "var(--accent)";
+    root.append(probe);
+    const accent = getComputedStyle(probe).color;
+    probe.remove();
+    return { accent, marked: getComputedStyle(root.querySelector("mark")!).color };
+  });
+  expect(colors.marked).not.toBe(colors.accent);
+});
+
+test("코스닥 필터로 결과가 없으면 전체에서 찾기가 보이고 누르면 결과가 나온다", async ({ page }) => {
+  await page.goto("/");
+  await expect(cell(page)).toHaveAttribute("aria-busy", "false");
+  await page.keyboard.press("/");
+  const dialog = page.getByRole("dialog", { name: "종목 검색" });
+  await dialog.getByRole("combobox").fill("005930");
+  await expect(dialog.getByRole("option")).toHaveAttribute("aria-disabled", "false");
+  await dialog.getByRole("button", { name: "코스닥", exact: true }).click();
+  await expect(dialog.getByRole("option")).toHaveCount(0);
+  await expect(dialog).toContainText("조건에 맞는 종목이 없습니다");
+  await expect(dialog).toContainText("코스닥 안에서는 찾지 못했습니다");
+  await dialog.getByRole("button", { name: "전체에서 찾기", exact: true }).click();
+  await expect(dialog.getByRole("option")).toHaveCount(1);
+  await expect(dialog.getByRole("button", { name: "전체", exact: true })).toHaveAttribute("aria-pressed", "true");
+});
+
+test("명령 모드의 명령 아이콘은 서로 다르고 미리보기 칸은 접히며 바닥 안내는 실행과 닫기뿐이다", async ({ page }) => {
+  await page.goto("/");
+  await expect(cell(page)).toHaveAttribute("aria-busy", "false");
+  await page.keyboard.press("/");
+  const dialog = page.getByRole("dialog", { name: "종목 검색" });
+  await dialog.getByRole("combobox").fill(">");
+  const icons = await dialog.getByRole("option").evaluateAll((rows) => rows.slice(0, 3).map((row) => row.querySelector("svg")?.innerHTML ?? ""));
+  expect(icons).toHaveLength(3);
+  expect(icons.every((markup) => markup !== "")).toBe(true);
+  expect(new Set(icons).size).toBe(3);
+  await expect(dialog.getByRole("complementary")).toHaveCount(0);
+  await expect(dialog.getByText("고르기")).toHaveCount(0);
+  await expect(dialog.locator("kbd", { hasText: "↵" })).toHaveCount(1);
 });
 
 test.describe("검색에서 스크리너 실행", () => {
@@ -313,7 +373,7 @@ test("시세의 첫 실패는 다시 받고 도중 실패에도 종목 열기를
   await expect(cell(page)).toHaveAttribute("aria-label", "칸 1: 삼성SDI 통합 일");
 });
 
-test("관심종목 용도로 연 검색은 미리보기의 Enter 안내도 넣기이며 차트를 바꾸지 않고 창을 닫지 않는다", async ({ page }) => {
+test("관심종목 용도로 연 검색은 바닥 줄의 Enter 안내가 넣기이며 차트를 바꾸지 않고 창을 닫지 않는다", async ({ page }) => {
   await page.goto("/");
   await expect(cell(page)).toHaveAttribute("aria-busy", "false");
   const before = await cell(page).getAttribute("aria-label");
@@ -324,8 +384,11 @@ test("관심종목 용도로 연 검색은 미리보기의 Enter 안내도 넣�
   await input.fill("005930");
   await expect(dialog.getByRole("option")).toHaveAttribute("aria-disabled", "false");
   const preview = dialog.getByRole("complementary", { name: "종목 미리보기" });
-  await expect(preview.getByText("↵ 넣기", { exact: true })).toBeVisible();
-  await expect(preview.getByText("↵ 이 칸에 열기", { exact: true })).toHaveCount(0);
+  await expect(preview.locator("kbd")).toHaveCount(0);
+  const footer = dialog.getByRole("group", { name: "키 안내" });
+  await expect(footer.locator("kbd")).toHaveText(["↵", "Tab", "Esc"]);
+  await expect(footer).toContainText("넣기");
+  await expect(footer).not.toContainText("열기");
   await input.press("Enter");
   await expect(dialog).toBeVisible();
   await expect(watchlist.locator('li[data-code="005930"]')).toHaveCount(1);

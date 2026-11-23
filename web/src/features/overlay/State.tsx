@@ -1,9 +1,9 @@
 import type { CSSProperties, ReactNode } from "react";
 import { EmptyBoxIcon, WarningIcon } from "../icons";
 
-export type SkeletonShape = "line" | "card" | "chart";
+export type SkeletonShape = "line" | "card" | "chart" | "row";
 
-const SKELETON_ROWS: Record<SkeletonShape, number> = { line: 3, card: 3, chart: 1 };
+const SKELETON_ROWS: Record<SkeletonShape, number> = { line: 3, card: 3, chart: 1, row: 6 };
 
 export function Skeleton({ label = "불러오는 중", rows, shape = "line", minHeight }: { label?: string; rows?: number; shape?: SkeletonShape; minHeight?: number | string }) {
   const style: CSSProperties | undefined = minHeight === undefined ? undefined : { minHeight };

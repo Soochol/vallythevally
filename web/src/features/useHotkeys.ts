@@ -15,6 +15,12 @@ import { wizardVisible, useWizardStore } from "./setup-wizard/wizardOpen";
 import { useAccountStore } from "../stores/account";
 import { currentActionKeys } from "../stores/ui";
 
+const CHART_CELL = "section[aria-label^='칸 ']";
+
+function opensHotkeySheet(e: KeyboardEvent): boolean {
+  return e.code === "Slash" && e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey && !(e.target instanceof Element && e.target.closest(CHART_CELL));
+}
+
 /** 화면 전체의 단축키. 대화상자가 열려 있거나 입력칸에 초점이 있으면 쓰지 않는다. */
 export function useHotkeys(enabled: boolean) {
   useEffect(() => {
@@ -28,6 +34,10 @@ export function useHotkeys(enabled: boolean) {
         return;
       }
       if (isTypingTarget(e.target)) return;
+      if (opensHotkeySheet(e)) {
+        e.preventDefault();
+        return sel.openHotkeySheet();
+      }
       const action = matchHotkey(e, matchMedia(DESKTOP_QUERY).matches ? "desktop" : "phone", currentActionKeys());
       if (!action) return;
       e.preventDefault();

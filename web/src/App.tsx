@@ -30,6 +30,7 @@ import { needsChoice, useWizardOpening, useWizardStore, wizardVisible } from "./
 import { SetupChangedNotice } from "./features/status/SetupChangedNotice";
 import { ReplaceLocalScreen } from "./features/account/ReplaceLocalScreen";
 import { useAccountStore } from "./stores/account";
+import { HotkeySheet } from "./features/hotkey-sheet/HotkeySheet";
 import { SearchDialog } from "./features/search/SearchDialog";
 import { StatusBar } from "./features/status/StatusBar";
 import { Toast } from "./features/toast/Toast";
@@ -139,6 +140,7 @@ function ChartScreen({ page }: { page: PageId }) {
       <PhoneScreener />
       <PhoneSaveBand />
       <SearchDialog />
+      <HotkeySheet />
       <IndicatorCommand />
       <ScreenDialog />
       <FinancialUpdateDialog />

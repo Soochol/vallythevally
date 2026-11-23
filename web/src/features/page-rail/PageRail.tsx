@@ -1,6 +1,6 @@
 import { Link } from "react-router";
-import { EtfIcon, GearIcon, HeatmapIcon, MarketIcon, WorkspaceIcon } from "../icons";
-import { openSystemSettings } from "../system-settings/open";
+import { EtfIcon, HeatmapIcon, KeyboardIcon, MarketIcon, WorkspaceIcon } from "../icons";
+import { useSelectionStore } from "../../stores/selection";
 import { RAIL_PAGES, type PageId } from "./pages";
 import "./pageRail.css";
 
@@ -19,9 +19,9 @@ export function PageRail({ page }: { page: PageId }) {
         );
       })}
       <span className="page-rail-spacer" />
-      <button type="button" className="page-rail-item" title="시스템 설정" aria-haspopup="dialog" onClick={() => openSystemSettings()}>
-        <GearIcon size={19} />
-        <span>설정</span>
+      <button type="button" className="page-rail-item" title="단축키 (?)" aria-haspopup="dialog" onClick={() => useSelectionStore.getState().openHotkeySheet()}>
+        <KeyboardIcon size={19} />
+        <span>단축키</span>
       </button>
     </nav>
   );
