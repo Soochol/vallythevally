@@ -90,7 +90,7 @@ promote_pending() {
     daemon_unit_promoted=no
     acquire_lock || return 1
     set --
-    for target in "$collector" "$bin_dir/vally-collector-alert-telegram" "$bin_dir/vally-collector-restart" "$unit_dir/vally-collector.service" "$unit_dir/vally-collector-alert.service"; do
+    for target in "$collector" "$bin_dir/vally-collector-alert-telegram" "$bin_dir/vally-collector-restart" "$unit_dir/vally-collector.service" "$unit_dir/vally-collector-alert.service" "$unit_dir/vally-financials.service"; do
         if ! real="$(resolve_link "$target")"; then
             fail_promotion "$target의 심볼릭 링크를 풀지 못함" "$@"
             return 1

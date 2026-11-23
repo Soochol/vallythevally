@@ -84,7 +84,7 @@ acquire_lock
 stage "$built" "$bin_dir/collector" 755
 stage "$here/collector-restart" "$bin_dir/vally-collector-restart" 755
 stage_if_installed "$here/systemd/vally-collector-alert-telegram" "$bin_dir/vally-collector-alert-telegram" 755
-for unit in vally-collector.service vally-collector-alert.service; do
+for unit in vally-collector.service vally-collector-alert.service vally-financials.service; do
     stage_if_installed "$here/systemd/$unit" "$unit_dir/$unit" 644
 done
 

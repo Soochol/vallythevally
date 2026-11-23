@@ -150,6 +150,24 @@ loginctl show-user <서버 PC 사용자> --property=Linger
 - 한도 확인(ADR 0035의 미확인 사항) 전에는 `rest` 키마다 `total_per_second: 5`를 켠 배정으로 돈다. 확인 방법은 [키별 TR 사용량](collector-shared-data.md#키별-tr-사용량)의 B5 규칙이고 줄은 `~/vally-data/hoga/usage/<날짜>.jsonl`에 남는다.
 - 이 변경으로 데몬과 자식의 줄 JSON 형식이 버전 2가 된다. 데몬 재시작은 마감 뒤에만 되므로(위 "수집 데몬 재시작") 배포한 날 새 판은 마감 뒤에 켜지고 다음 관측일부터 자료를 만든다.
 
+### 재무 유닛 첫 설치
+
+재무자료는 수집기의 별도 프로세스 `collector financials run`이 모은다([수집기 문서](hoga-collector.md#재무-프로세스), [ADR 0046](adr/0046-financials-are-collected-by-the-collector-and-the-server-only-reads-them.md)). `collector-install`은 이미 설치된 유닛만 바꾸므로 처음 설치는 손으로 한다. 새 `collector`가 `~/.local/bin/collector`에 들어간 뒤여야 한다. 수집 시간 안에 배포했으면 마감 뒤 데몬 재시작이 `.next`를 옮긴 다음에 한다. OpenDART 키 파일(`~/.config/vally/opendart-key`, 권한 600)이 먼저 있어야 한다("재무 수집 전환" 5단계).
+
+```sh
+cp ~/apps/vallythevally/deploy/systemd/vally-financials.service ~/.config/systemd/user/
+systemd-analyze --user verify ~/.config/systemd/user/vally-financials.service
+systemctl --user daemon-reload
+systemctl --user enable --now vally-financials.service
+systemctl --user is-active vally-financials.service
+~/.local/bin/collector financials status
+```
+
+- 첫 설치 뒤에는 `orch deploy`의 `collector-install`이 이 유닛도 저장소 판으로 바꾼다. 수집 시간 안이면 `.next`에 두고 마감 뒤 `collector-restart`가 옮긴다.
+- 값을 바꿀 때는 유닛 파일이 아니라 `systemctl --user edit vally-financials.service`의 드롭인에 둔다.
+- 데몬이 재시작되면 `PartOf=` 때문에 이 유닛도 함께 다시 뜬다. 혼자 다시 띄울 때는 `systemctl --user restart vally-financials.service`다. 수집은 일지로 이어진다.
+- 종료 코드 2(인수 오류, 키 파일 권한·내용, 쓰기 잠금을 못 쥠)는 다시 띄우지 않는다. `journalctl --user -u vally-financials.service`로 이유를 본다.
+
 ### tailscale serve
 
 serve 설정은 전환 순서의 마지막에 한다. 명령과 확인은 다음과 같다.
@@ -328,6 +346,169 @@ curl -sS --max-time 5 http://<서버 PC의 Tailscale IP>:8080/api/screener/statu
 
 두 명령 모두 연결 거부여야 한다. 응답이 오면 서버가 루프백이 아닌 주소에 바인드돼 있다는 뜻이니 즉시 서비스를 멈추고 `server.env`의 `VALLY_BIND`를 확인한다(서버는 루프백이 아닌 값을 거절하므로 일어나지 않는 것이 정상이다).
 
+## 재무 수집 전환
+
+재무 수집을 `vally-server`에서 수집기의 `vally-financials.service`로 옮기는 절차다([플랜](plans/financials-collector.md), [ADR 0046](adr/0046-financials-are-collected-by-the-collector-and-the-server-only-reads-them.md)). 사용자 승인 뒤 서버 PC에서 한다. 2~6단계 사이에는 재무를 모으지 않는다. 서버의 차트 조회는 3단계 동안 계속된다. 디스크는 원본 약 77GB에 압축 사본 약 18GB가 더 든다. 키 값은 화면에 내지 않는다. 아래 명령은 값을 출력하지 않는다.
+
+아래에서 `~/vally-data/server`는 서버 PC의 재무 DB 폴더이고, 서버 주소는 `http://127.0.0.1:8080`이다.
+
+1. **배포한다.** `orch deploy`로 서버와 수집 바이너리를 배포한다. 이 단계에서 재무 유닛은 설치하지 않는다. 새 `collector`가 제자리에 있는지 본다(수집 시간 안이면 마감 뒤 재시작이 옮긴다).
+
+   ```sh
+   ls ~/.local/bin/collector.next
+   ~/.local/bin/collector financials status; echo "종료 코드 $?"
+   ```
+
+   첫 명령은 파일이 없다고 나와야 하고, 둘째는 "재무 수집 프로세스가 꺼져 있습니다"와 0이 아닌 종료 코드를 내야 한다.
+
+2. **서버의 자동 확인을 끈다.** 먼저 전환 전 응답을 저장한다. 7단계가 이것과 견준다.
+
+   ```sh
+   mkdir -p ~/financials-before
+   curl -sS http://127.0.0.1:8080/api/financial-update > ~/financials-before/financial-update.json
+   for code in 005930 000660 005935; do
+       for period in Y Q; do
+           curl -sS "http://127.0.0.1:8080/api/symbols/$code/financials?period=$period" > ~/financials-before/$code-$period.json
+       done
+   done
+   ```
+
+   유닛 드롭인으로 `VALLY_FINANCIAL_AUTOMATIC=off`를 넣고 서버를 다시 띄운다. 프로세스 환경이 `server.env`를 덮는다.
+
+   ```sh
+   mkdir -p ~/.config/systemd/user/vally-server.service.d
+   printf '[Service]\nEnvironment=VALLY_FINANCIAL_AUTOMATIC=off\n' > ~/.config/systemd/user/vally-server.service.d/financials-off.conf
+   systemctl --user daemon-reload
+   systemctl --user restart vally-server.service
+   systemctl --user is-active vally-server.service
+   ```
+
+   진행 중이던 작업은 `interrupted`로 남고 일지는 그대로다. 이제 아무도 DB에 쓰지 않는다. 비어 있는 공간을 확인한다.
+
+   ```sh
+   df -h ~/vally-data/server
+   ```
+
+3. **압축 사본을 만든다.** 서버 PC에 `sqlite3`가 없을 수 있어 `python3 -I`를 쓴다. 원본은 읽기 전용으로 연다. 약 18GB를 읽고 쓰며, 걸린 시간을 잰다.
+
+   ```sh
+   cd ~/vally-data/server
+   rm -f financials.db.compact
+   started=$(date +%s)
+   python3 -I -c 'import sqlite3, sys; original = sqlite3.connect("file:" + sys.argv[1] + "?mode=ro", uri=True); original.execute("VACUUM INTO ?", (sys.argv[2],)); original.close()' financials.db financials.db.compact
+   echo "VACUUM INTO: $(( $(date +%s) - started ))초"
+   ls -l financials.db financials.db.compact
+   ```
+
+   사본에 `PRAGMA integrity_check`를 하고, 표마다 행 수를 원본과 대조한다. 하나라도 다르면 종료 코드 1이다. `time`으로 걸린 시간을 함께 잰다.
+
+   ```sh
+   time python3 -I -c '
+   import sqlite3, sys
+   copy = sqlite3.connect("file:" + sys.argv[1] + "?mode=ro", uri=True)
+   print("integrity_check:", copy.execute("PRAGMA integrity_check").fetchone()[0])
+   original = sqlite3.connect("file:" + sys.argv[2] + "?mode=ro", uri=True)
+   tables = [name for (name,) in original.execute("SELECT name FROM sqlite_master WHERE type = \"table\" AND name NOT LIKE \"sqlite_%\" ORDER BY name")]
+   different = False
+   for table in tables:
+       before = original.execute(f"SELECT count(*) FROM \"{table}\"").fetchone()[0]
+       after = copy.execute(f"SELECT count(*) FROM \"{table}\"").fetchone()[0]
+       different = different or before != after
+       print(table, before, after, "같음" if before == after else "다름")
+   sys.exit(1 if different else 0)
+   ' financials.db.compact financials.db; echo "종료 코드 $?"
+   ```
+
+   `integrity_check`가 `ok`가 아니거나 종료 코드가 0이 아니면 사본을 지우고 4단계로 가지 않는다.
+
+4. **바꿔 끼운다.** 서버가 옛 파일을 열고 있으므로 멈춘 채 바꾸고 다시 띄운다. 원본은 `financials.db.before-collector`로 남긴다.
+
+   ```sh
+   systemctl --user stop vally-server.service
+   cd ~/vally-data/server
+   ls financials.db-wal financials.db-shm 2>/dev/null
+   mv financials.db financials.db.before-collector
+   mv financials.db.compact financials.db
+   chmod --reference=financials.db.before-collector financials.db
+   systemctl --user start vally-server.service
+   systemctl --user is-active vally-server.service
+   ```
+
+   `ls`가 `-wal`·`-shm`을 보이면 서버가 정상 종료하지 않은 것이다. 멈추고 보고한다.
+
+5. **키 파일을 만든다.** `server.env`에서 `OPENDART_API_KEY` 줄의 값만 파일로 옮긴다. 값은 화면에 나오지 않는다. 크기와 권한만 본다.
+
+   ```sh
+   ( umask 077; grep '^OPENDART_API_KEY=' ~/.config/vally/server.env | cut -d= -f2- > ~/.config/vally/opendart-key )
+   chmod 600 ~/.config/vally/opendart-key
+   stat -c '%a %s' ~/.config/vally/opendart-key
+   ```
+
+   `600`과 0보다 큰 크기가 나와야 한다. 크기가 0이면 `server.env`에 그 이름이 없는 것이다.
+
+6. **재무 유닛을 설치하고 켠다.** "재무 유닛 첫 설치"를 따른다. 새 `collector`가 제자리에 들어간 뒤여야 한다. 첫 `run`이 저장소를 WAL로 바꾸고, 자동 확인이 `interrupted` 작업을 같은 세대로 이어 간다.
+
+   ```sh
+   ~/.local/bin/collector financials status
+   sleep 60
+   ~/.local/bin/collector financials status
+   ```
+
+   작업 번호와 세대가 `~/financials-before/financial-update.json`의 값과 같은지, 회사 수가 늘어나는지 본다.
+
+7. **확인한다.** 2단계에서 받은 응답과 지금 응답을 견준다. 수집이 그 회사를 바꾸기 전이라면 같아야 한다.
+
+   ```sh
+   for code in 005930 000660 005935; do
+       for period in Y Q; do
+           curl -sS "http://127.0.0.1:8080/api/symbols/$code/financials?period=$period" | cmp - ~/financials-before/$code-$period.json && echo "같음 $code $period"
+       done
+   done
+   ```
+
+   다르면 그 회사를 수집이 이미 갱신했는지 `collector financials status`로 본다. 갱신한 것이 아니면 4단계의 사본을 의심하고 되돌린다.
+
+8. **서버 쪽을 정리한다.** `fin-server-read`를 배포한 뒤에 한다. `server.env`에서 키 줄을 지우고(값은 출력하지 않는다) 드롭인을 걷는다.
+
+   ```sh
+   sed -i '/^OPENDART_API_KEY=/d' ~/.config/vally/server.env
+   stat -c '%a' ~/.config/vally/server.env
+   rm ~/.config/systemd/user/vally-server.service.d/financials-off.conf
+   rmdir ~/.config/systemd/user/vally-server.service.d
+   systemctl --user daemon-reload
+   systemctl --user restart vally-server.service
+   ```
+
+   `stat`은 600이어야 한다. `~/financials-before`는 지운다. `financials.db.before-collector`는 전환이 끝났다고 확인한 뒤에 지운다.
+
+### 재무 수집 전환 되돌리기
+
+재무 유닛을 멈추고 드롭인을 걷어 서버를 다시 띄운다. 서버가 같은 파일로 다시 수집한다. 형식이 같으므로 옛 파일로 돌아갈 필요가 없다.
+
+```sh
+systemctl --user disable --now vally-financials.service
+rm ~/.config/systemd/user/vally-server.service.d/financials-off.conf
+systemctl --user daemon-reload
+systemctl --user restart vally-server.service
+```
+
+파일이 깨졌을 때만 `financials.db.before-collector`로 돌아간다. 서버와 재무 유닛을 모두 멈춘 뒤 한다. 깨진 파일의 `-wal`·`-shm`도 함께 치운다.
+
+```sh
+systemctl --user stop vally-server.service vally-financials.service
+cd ~/vally-data/server
+mv financials.db financials.db.broken
+for suffix in -wal -shm; do [ -e "financials.db$suffix" ] && mv "financials.db$suffix" "financials.db.broken$suffix"; done
+mv financials.db.before-collector financials.db
+systemctl --user start vally-server.service
+```
+
+`fin-server-read`를 배포한 뒤의 되돌리기는 그 커밋을 되돌린 배포다. 그때는 서버가 `OPENDART_API_KEY`를 다시 읽어야 하므로 키 파일의 값을 `server.env`에 되돌린다. 값은 화면에 나오지 않는다.
+
+```sh
+printf 'OPENDART_API_KEY=%s\n' "$(cat ~/.config/vally/opendart-key)" >> ~/.config/vally/server.env
+```
+
 ## 시세 공급원 바꾸기
 
 시세 공급원은 키 목록의 키(키움이든 한투든) 가운데 하나다. 고른 값은 `kiwoom-keys.json`에 남아 서버를 다시 켜도 이어진다. 바꾸는 규칙은 [ADR 0043](adr/0043-market-source-is-one-key-of-either-broker-and-switching-drops-the-cache.md)이다.
@@ -369,7 +550,7 @@ journalctl --user -u vally-server.service -n 200 --no-pager
 | `deploy/server-build` | `ORCH_DEPLOY_SHA`가 있고 checkout HEAD와 다르면 `cargo`를 부르지 않고 실패한다. 같으면 공용 `compile.lock`(`git rev-parse --git-common-dir` 아래)을 `flock`으로 잡고 `cargo build --locked --release -p server`를 한다 | `VALLY_CARGO_BIN`(`$HOME/.cargo/bin`): PATH 앞에 더할 cargo 폴더. `VALLY_BUILD_JOBS`(`4`): `CARGO_BUILD_JOBS` |
 | `deploy/web-build` | `web/`에서 `pnpm install --frozen-lockfile` 뒤 `pnpm build` | `VALLY_NODE_BIN`(필수): node와 pnpm이 있는 폴더로, `~` 없는 절대 경로다. 없거나 그 폴더에 `pnpm`이 없으면 0이 아닌 코드로 멈추고 찾는 법을 알린다. `VALLY_CARGO_BIN`, `VALLY_BUILD_JOBS`는 위와 같다 |
 | `deploy/collector-build` | `server-build`와 같은 방식으로 `ORCH_DEPLOY_SHA`와 checkout HEAD를 대조하고 공용 `compile.lock`을 잡은 뒤 `cargo build --locked --release -p collector`를 한다 | `VALLY_CARGO_BIN`, `VALLY_BUILD_JOBS`: `server-build`와 같다 |
-| `deploy/collector-install` | `target/release/collector`를 `~/.local/bin/collector`로, `collector-restart`를 `~/.local/bin/vally-collector-restart`(데몬 유닛의 시작 전 정리)로, 이미 설치된 경보 스크립트(`vally-collector-alert-telegram`)와 유닛(`vally-collector.service`, `vally-collector-alert.service`)을 저장소 판으로 바꾼다. 수집 시간 밖(`collector-restart --check`가 `now`)이면 같은 폴더에 새 파일을 쓰고 rename해 바로 바꾸고(돌고 있는 데몬의 실행 파일이 깨지지 않는다) 남은 `.next`를 지운다. 수집 시간 안이면 제자리 파일은 그대로 두고 `<이름>.next`로만 둔다(위 "수집 데몬 재시작"). 내용이 같으면 건드리지 않는다. 바뀐 유닛이 제자리에 들어갈 때만 `systemctl --user daemon-reload`를 부르고, 실패하면 다음 실행(수집 시간 안의 설치 포함)이 다시 부른다. 수집 시간 밖이면 `.vally-collector-install-verdict`를 남기고 안이면 지운다(위 "수집 데몬 재시작"). 파일을 두는 동안 `.vally-collector-deploy.lock`을 잡는다. `.next`가 같은 내용이어도 모드는 다시 맞춘다. 설치되지 않은 스크립트와 유닛은 만들지 않고 건너뛴다(처음 설치는 [수집기 문서](hoga-collector.md)의 설치 절). 유닛 모드는 저장소 파일 모드와 상관없이 644다. 설치된 유닛이 심볼릭 링크면 링크를 두고 가리키는 파일을 바꾼다. `vally-server.service`는 서버 PC 판이 다르므로 건드리지 않는다. 서버 PC에서 유닛을 고칠 때는 `systemctl --user edit`의 드롭인(`<유닛>.d/`)으로 한다. 유닛 파일 자체를 고치면 이 단계가 저장소 판으로 덮는다 | `VALLY_COLLECTOR_BIN_DIR`(`$HOME/.local/bin`), `VALLY_SYSTEMD_USER_DIR`(`${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user`). 판정에는 재시작 단계와 같은 `VALLY_DATA`, `VALLY_COLLECTOR_SCHEDULE_ARGS`, `VALLY_COLLECTOR_FINALIZE_MINUTES`를 쓴다 |
+| `deploy/collector-install` | `target/release/collector`를 `~/.local/bin/collector`로, `collector-restart`를 `~/.local/bin/vally-collector-restart`(데몬 유닛의 시작 전 정리)로, 이미 설치된 경보 스크립트(`vally-collector-alert-telegram`)와 유닛(`vally-collector.service`, `vally-collector-alert.service`, `vally-financials.service`)을 저장소 판으로 바꾼다. 수집 시간 밖(`collector-restart --check`가 `now`)이면 같은 폴더에 새 파일을 쓰고 rename해 바로 바꾸고(돌고 있는 데몬의 실행 파일이 깨지지 않는다) 남은 `.next`를 지운다. 수집 시간 안이면 제자리 파일은 그대로 두고 `<이름>.next`로만 둔다(위 "수집 데몬 재시작"). 내용이 같으면 건드리지 않는다. 바뀐 유닛이 제자리에 들어갈 때만 `systemctl --user daemon-reload`를 부르고, 실패하면 다음 실행(수집 시간 안의 설치 포함)이 다시 부른다. 수집 시간 밖이면 `.vally-collector-install-verdict`를 남기고 안이면 지운다(위 "수집 데몬 재시작"). 파일을 두는 동안 `.vally-collector-deploy.lock`을 잡는다. `.next`가 같은 내용이어도 모드는 다시 맞춘다. 설치되지 않은 스크립트와 유닛은 만들지 않고 건너뛴다(처음 설치는 [수집기 문서](hoga-collector.md)의 설치 절). 유닛 모드는 저장소 파일 모드와 상관없이 644다. 설치된 유닛이 심볼릭 링크면 링크를 두고 가리키는 파일을 바꾼다. `vally-server.service`는 서버 PC 판이 다르므로 건드리지 않는다. 서버 PC에서 유닛을 고칠 때는 `systemctl --user edit`의 드롭인(`<유닛>.d/`)으로 한다. 유닛 파일 자체를 고치면 이 단계가 저장소 판으로 덮는다 | `VALLY_COLLECTOR_BIN_DIR`(`$HOME/.local/bin`), `VALLY_SYSTEMD_USER_DIR`(`${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user`). 판정에는 재시작 단계와 같은 `VALLY_DATA`, `VALLY_COLLECTOR_SCHEDULE_ARGS`, `VALLY_COLLECTOR_FINALIZE_MINUTES`를 쓴다 |
 | `deploy/collector-restart` | 데몬을 재시작해도 되는지 `collector restart-window`(데몬과 같은 달력·시각 설정, 아래 "수집 데몬 재시작")로 판정한다. 수집 시간 밖이거나 쉬는 날이면 바로 재시작하고 `VALLY_COLLECTOR_STABLE_SECONDS`초 동안 active인지 본다. 중간에 active가 아니면 `journalctl` 안내와 함께 실패한다. 수집 시간 안이거나 판정이 불확실하면 재시작하지 않고 `systemd-run --user`의 일회 타이머(`vally-collector-restart`) 하나를 마감 정리 여유가 끝나는 시각에 걸고, 이미 있던 예약은 새 시각으로 바꾼다. 어느 쪽인지 출력에 한 줄로 남는다. 타이머는 `VALLY_COLLECTOR_SERVICE`, `VALLY_COLLECTOR_STABLE_SECONDS`, `VALLY_COLLECTOR_BIN`, `VALLY_SYSTEMD_USER_DIR`를 `--setenv`로 이어받아 `collector-restart --scheduled`를 불러 판정 없이 재시작한다. 재시작 전에는 늘 `.next`를 제자리로 옮기고(유닛이 바뀌면 `daemon-reload`) `systemctl --user restart`를 한다. 수동 인수는 `--check`(판정만 출력), `--promote`(`.next` 옮기기만), `--retry-reload`(남은 reload 표시만 다시), `--before-start`(데몬 유닛의 `ExecStartPre=`가 부르는 정리), `--validate`(두 초 값만 검사하고 끝. `collector-install`이 아무것도 바꾸기 전에 부른다)가 있다. 설치 단계의 판정 파일이 30분 안의 `now`면 자기 판정을 묻지 않고 재시작한다 | `VALLY_COLLECTOR_SERVICE`(`vally-collector.service`), `VALLY_COLLECTOR_BIN`(`$HOME/.local/bin/collector`), `VALLY_DATA`(`$HOME/vally-data/hoga`): 유닛의 `VALLY_DATA`와 같아야 한다. `VALLY_COLLECTOR_SCHEDULE_ARGS`(비어 있음): 유닛 `ExecStart=`에 `--judge-at`·`--plan-at`·`--launch-at`·`--close-at`을 적었다면 같은 인수. `VALLY_COLLECTOR_FINALIZE_MINUTES`(`120`): 마감 시각 뒤 정리를 기다리는 분. `VALLY_COLLECTOR_STABLE_SECONDS`(`10`, 1 이상 600 이하의 정수이고 아니면 재시작 전에 종료 코드 2로 실패. `00600`처럼 앞의 0은 값으로 센다), `VALLY_SYSTEMD_USER_DIR`(설치 단계와 같다), `VALLY_COLLECTOR_LOCK_SECONDS`(`120`, 1 이상 3600 이하의 정수이고 소수나 문자면 재시작 전에 종료 코드 2로 실패. 앞의 0은 값으로 센다. 설치 단계도 파일을 바꾸기 전에 `collector-restart --validate`로 이 값과 `VALLY_COLLECTOR_STABLE_SECONDS`를 검사하고 잘못되면 그 이름을 담은 한 줄과 종료 코드 2로 끝난다. 재시작 잠금의 대기는 여기에 확인 시간을 더한 값이다. `--promote`·`--retry-reload`·`--before-start`도 잠금을 잡기 전에 같은 규칙으로 검사하고 아니면 파일을 옮기거나 `systemctl`을 부르지 않고 종료 코드 2로 끝난다) |
 | `deploy/backup` | `vally.db`를 SQLite backup API로 떠서 `integrity_check`가 `ok`일 때만 fsync 뒤 원자 교체로 남기고, 보관 개수를 넘는 오래된 백업을 지운다. 원본이 없으면 경로를 알리고 실패한다 | `VALLY_DATA_DIR`(`$HOME/vally-data`): 원본 `server/vally.db`, 보관 폴더 `backups/`. `VALLY_BACKUP_KEEP`(`30`): 1 이상 |
 | `deploy/restart` | 서비스를 재시작하고, 서비스가 active이고 확인 주소가 응답할 때까지 1초마다 본다. 기다림 안에 안 되면 `journalctl` 안내와 함께 실패한다 | `VALLY_SERVICE`(`vally-server.service`), `VALLY_HEALTH_URL`(`http://127.0.0.1:8080/api/screener/status`), `VALLY_RESTART_WAIT`(`120`초, 1 이상의 정수. 아니면 재시작 전에 멈춘다) |

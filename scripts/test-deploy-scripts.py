@@ -255,6 +255,25 @@ class CollectorInstallTest(FakeCollectorHost):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(self.recorded(), ["systemctl --user daemon-reload"])
 
+    def test_the_financials_unit_is_replaced_when_it_is_already_installed(self):
+        self.install_collector()
+        self.install_units_like_repo("vally-collector.service", "vally-collector-alert.service")
+        (self.units / "vally-financials.service").write_text("[Service]\nExecStart=/old\n")
+        result = self.install()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual((self.units / "vally-financials.service").read_text(), (DEPLOY / "systemd/vally-financials.service").read_text())
+        self.assertEqual(self.recorded(), ["systemctl --user daemon-reload"])
+
+    def test_the_financials_unit_is_not_created_when_it_is_not_installed(self):
+        self.install_collector()
+        self.install_units_like_repo("vally-collector.service", "vally-collector-alert.service")
+        result = self.install()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("설치 안 됨, 건너뜀", result.stdout)
+        self.assertFalse((self.units / "vally-financials.service").exists())
+        self.assertFalse((self.units / "vally-financials.service.next").exists())
+        self.assertEqual(self.recorded(), [])
+
     def test_units_that_are_not_installed_and_the_app_server_unit_are_not_created(self):
         (self.units / "vally-server.service").write_text("server pc version\n")
         result = self.install()
@@ -587,6 +606,18 @@ class DeferredDeployTest(FakeCollectorHost):
         self.assertEqual((self.units / "vally-collector.service").read_text(), (DEPLOY / "systemd/vally-collector.service").read_text())
         calls = self.recorded()
         self.assertLess(calls.index("systemctl --user daemon-reload"), calls.index("systemctl --user restart vally-collector.service"))
+
+    def test_an_installed_financials_unit_waits_beside_inside_collection_hours_and_the_scheduled_run_moves_it(self):
+        (self.units / "vally-financials.service").write_text("[Service]\nExecStart=/old\n")
+        self.say("wait\t2026-11-24 22:05:00 Asia/Seoul\t수집 시간 안이다")
+        env = self.deploy("first")
+        self.assertEqual((self.units / "vally-financials.service").read_text(), "[Service]\nExecStart=/old\n")
+        self.assertEqual((self.units / "vally-financials.service.next").read_text(), (DEPLOY / "systemd/vally-financials.service").read_text())
+        scheduled_env = {key: env[key] for key in ["VALLY_COLLECTOR_BIN", "VALLY_SYSTEMD_USER_DIR", "VALLY_COLLECTOR_STABLE_SECONDS"]}
+        result = self.run_script("collector-restart", "--scheduled", **scheduled_env)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual((self.units / "vally-financials.service").read_text(), (DEPLOY / "systemd/vally-financials.service").read_text())
+        self.assertEqual(self.names_with_next(), [])
 
     def test_a_deploy_outside_collection_hours_replaces_and_restarts_without_a_pending_copy(self):
         self.say("now\t지금은 수집 시간 밖이다")
