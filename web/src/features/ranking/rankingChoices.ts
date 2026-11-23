@@ -158,3 +158,26 @@ const CHOICE_LABELS: Readonly<Record<string, Readonly<Record<string, string>>>> 
 });
 
 export const choiceLabel = (field: string, value: string): string => CHOICE_LABELS[field]?.[value] ?? value;
+
+export interface ChangedCondition {
+  id: string;
+  text: string;
+}
+
+const defaultRankingFor = (ranking: Ranking, venue: Venue): Ranking => startRanking(ranking.kind, { market: "all", venue, excludes: { etfEtn: true, preferred: false }, excludeManaged: false });
+
+export function changedConditions(ranking: Ranking, venue: Venue): readonly ChangedCondition[] {
+  const defaults = new Map(conditionsOf(defaultRankingFor(ranking, venue)).map((c) => [c.id, c]));
+  const changed: ChangedCondition[] = [];
+  for (const condition of conditionsOf(ranking)) {
+    const base = defaults.get(condition.id);
+    if (condition.type === "choice") {
+      if (base?.type === "choice" && base.value === condition.value) continue;
+      changed.push({ id: condition.id, text: `${condition.label} ${condition.options.find((o) => o.value === condition.value)?.label ?? condition.value}` });
+    } else {
+      if (base?.type === "toggle" && base.on === condition.on) continue;
+      changed.push({ id: condition.id, text: condition.on ? condition.label : `${condition.label} 끔` });
+    }
+  }
+  return changed;
+}

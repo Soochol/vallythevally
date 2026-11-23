@@ -276,3 +276,8 @@ export const DocumentIcon = ({ size = 16 }: P) => (
     <path d="M14 3v5h5M8 13h8M8 17h5" />
   </Icon>
 );
+export const PauseIcon = ({ size = 14 }: P) => (
+  <Icon size={size}>
+    <path d="M9 6v12M15 6v12" />
+  </Icon>
+);

@@ -1,7 +1,7 @@
 import { expect, test } from "vitest";
 import type { RankingFigures } from "../../api/generated/RankingFigures";
 import type { RankingRow } from "../../api/generated/RankingRow";
-import { columnsFor, placesOf } from "./rankingColumns";
+import { columnsFor, fitRankingColumns, placesOf, rankingFixedWidth } from "./rankingColumns";
 import { startRanking } from "./rankingChoices";
 import { RANKING_KINDS } from "./rankingKinds";
 
@@ -63,4 +63,36 @@ test("순위 변동은 올랐으면 ▲n, 내렸으면 ▼n, 같으면 –이고
   expect(placesOf(traded(null))).toEqual({ text: "–", tone: "flat" });
   expect(placesOf(row({ kind: "mostViewed", referencePrice: 1, changeFromReferenceRate: 1, placesGained: 5 }))?.text).toBe("▲5");
   expect(placesOf(row({ kind: "turnover", turnoverRate: 1, volume: 1 }))).toBeNull();
+});
+
+const fitted = (kind: Parameters<typeof startRanking>[0], width: number) => fitRankingColumns(kind, columnsFor(startRanking(kind, common)), width).map((c) => c.key);
+
+test("창 폭 358px의 거래대금 순위는 거래대금과 등락률을 남기고 현재가와 거래량을 뺀다", () => {
+  expect(fitted("tradeAmount", 358)).toEqual(["changeRate", "tradeAmount"]);
+});
+
+test("창 폭 242px에서도 그 순위의 값 열 하나는 남는다", () => {
+  expect(fitted("tradeAmount", 242)).toEqual(["tradeAmount"]);
+  expect(fitted("foreignStreak", 242)).toEqual(["netTotal"]);
+  expect(fitted("gainers", 242)).toEqual(["changeRate"]);
+});
+
+test("넓어질수록 그 순위의 값, 등락률, 현재가, 나머지 차례로 열이 늘고 열 차례는 지킨다", () => {
+  const widths = [242, 358, 440, 520, 600].map((w) => fitted("tradeAmount", w));
+  expect(widths).toEqual([["tradeAmount"], ["changeRate", "tradeAmount"], ["price", "changeRate", "tradeAmount"], ["price", "changeRate", "tradeAmount", "volume"], ["price", "changeRate", "tradeAmount", "volume"]]);
+});
+
+test("13종 순위 모두 358px에서 남은 열과 번호·이름 칸이 창 폭을 넘지 않는다", () => {
+  for (const kind of RANKING_KINDS) {
+    const columns = fitRankingColumns(kind, columnsFor(startRanking(kind, common)), 358);
+    expect(columns.length).toBeGreaterThan(0);
+    const used = rankingFixedWidth + columns.reduce((sum, c) => sum + 8 + c.width, 0);
+    expect(used + 64).toBeLessThanOrEqual(358);
+  }
+});
+
+test("열 폭은 현재가 76, 등락률 64, 그 밖 72px이다", () => {
+  const widths = (kind: Parameters<typeof startRanking>[0]) => columnsFor(startRanking(kind, common)).map((c) => [c.key, c.width]);
+  expect(widths("tradeAmount")).toEqual([["price", 76], ["changeRate", 64], ["tradeAmount", 72], ["volume", 72]]);
+  expect(widths("mostViewed")).toEqual([["referencePrice", 76], ["changeFromReferenceRate", 64]]);
 });

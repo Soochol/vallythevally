@@ -32,6 +32,9 @@ const savedRanking = (scenario: Scenario) => {
 const dialog = (page: Page) => page.getByRole("dialog", { name: "시스템 설정", exact: true });
 const rankingWindow = (page: Page) => page.getByTestId("ranking-window");
 const field = (page: Page, label: string) => page.getByRole("combobox", { name: `순위 ${label}` });
+const openConditions = async (page: Page) => {
+  if (!(await page.getByRole("dialog", { name: "순위 조건" }).isVisible())) await page.getByRole("button", { name: "조건", exact: true }).click();
+};
 const statusBar = (page: Page) => page.locator("footer.status-bar");
 const main = (page: Page) => page.getByRole("main", { name: "시장 종합", exact: true });
 
@@ -112,14 +115,17 @@ test("한투로 받을 때 많이 본 종목의 30초 기간과 투자자 순매
   serveRankings(scenario, { source: "kis" });
   openLayout(scenario, INVESTOR);
   await openRanking(page);
+  await openConditions(page);
   const trust = field(page, "투자자").locator('option[value="investmentTrust"]');
   await expect(trust).toBeDisabled();
   await expect(trust).toHaveAttribute("title", "한투로 받을 때는 고를 수 없습니다");
   await expect(field(page, "투자자").locator('option[value="foreign"]')).toBeEnabled();
   await expect(field(page, "투자자").locator('option[value="institution"]')).toBeEnabled();
 
+  await page.keyboard.press("Escape");
   await page.getByRole("tab", { name: "기타", exact: true }).click();
   await page.getByRole("tab", { name: "많이 본 종목" }).click();
+  await openConditions(page);
   await expect(field(page, "구간").locator('option[value="seconds30"]')).toBeDisabled();
   await expect(field(page, "구간").locator('option[value="seconds30"]')).toHaveAttribute("title", "한투로 받을 때는 고를 수 없습니다");
   await expect(field(page, "구간").locator('option[value="today"]')).toBeEnabled();
@@ -133,6 +139,7 @@ test("이미 고른 값을 한투가 받지 않으면 첫 받는 값으로 바�
   serveRankings(scenario, { source: "kis" });
   openLayout(scenario, MOST_VIEWED_MINUTE);
   await openRanking(page);
+  await openConditions(page);
   await expect(field(page, "구간")).toHaveValue("today");
   await expect(page.getByRole("status").filter({ hasText: "조회 기간을 ‘당일 누적’으로 바꿨습니다" })).toBeVisible();
   await pollSaved(() => savedRanking(scenario)).toEqual({ ...MOST_VIEWED_MINUTE, span: "today" });

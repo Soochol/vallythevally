@@ -1,6 +1,6 @@
 import { expect, test } from "vitest";
 import type { Ranking } from "../../api/generated/Ranking";
-import { RANKING_CATEGORIES, changeRankingKind, conditionsOf, marketOptions, startRanking } from "./rankingChoices";
+import { RANKING_CATEGORIES, changeRankingKind, changedConditions, conditionsOf, marketOptions, startRanking } from "./rankingChoices";
 import { RANKING_KINDS } from "./rankingKinds";
 
 const common = { market: "all", venue: "combined", excludes: { etfEtn: true, preferred: false }, excludeManaged: false } as const;
@@ -62,4 +62,12 @@ test("조건을 바꾸면 그 필드만 바뀐 새 순위를 만든다", () => {
   expect(managed?.type === "toggle" && managed.set(true)).toEqual({ ...ranking, excludeManaged: true });
   const etf = conditionsOf(ranking).find((c) => c.id === "etfEtn");
   expect(etf?.type === "toggle" && etf.set(false)).toEqual({ ...ranking, excludes: { etfEtn: false, preferred: false } });
+});
+
+test("기본값에서 바뀐 조건만 요약하고 기본값이면 비어 있다", () => {
+  const base = startRanking("tradeAmount", common);
+  expect(changedConditions(base, "combined")).toEqual([]);
+  const changed: Ranking = { ...base, market: "kosdaq", venue: "krx", excludes: { etfEtn: false, preferred: true }, excludeManaged: true } as Ranking;
+  expect(changedConditions(changed, "combined").map((c) => c.text)).toEqual(["시장 코스닥", "거래소 KRX", "ETF·ETN 빼기 끔", "우선주 빼기", "관리종목 빼기"]);
+  expect(changedConditions({ ...base, venue: "nxt" } as Ranking, "nxt")).toEqual([]);
 });
