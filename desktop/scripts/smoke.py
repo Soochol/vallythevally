@@ -22,9 +22,10 @@ SAME_ORIGIN_TIMEOUT = 60
 ORPHAN_DEADLINE = 5.0
 WINDOW_CLOSE_DEADLINE = 25.0
 SECOND_LAUNCH_DEADLINE = 15.0
+UPDATE_SILENCE_SECONDS = 8.0
 BROKER_LINE = re.compile(r"(키움|한투|kiwoom|kis).*(연결했|연결되었|연결 성공|접속|인증 성공|토큰을 받)", re.IGNORECASE)
 REQUEST_LINE = re.compile(r"\b(GET|POST|PUT|DELETE) (/[^ \\\"]*) HTTP/1\.1")
-CONNECT_LINE = re.compile(r'connect\(\d+, \{sa_family=(AF_INET6?), sin6?_port=htons\((\d+)\), (?:sin_addr=inet_addr|sin6_addr=inet_pton\(AF_INET6, )"([^"]+)"')
+CONNECT_LINE = re.compile(r'connect\(\d+, \{sa_family=(AF_INET6?), sin6?_port=htons\((\d+)\), (?:sin_addr=inet_addr\(|sin6_addr=inet_pton\(AF_INET6, )"([^"]+)"')
 HOST_SECRETS = {
     "VALLY_KIWOOM_APP_KEY": "smoke-canary-key",
     "VALLY_KIWOOM_APP_SECRET": "smoke-canary-secret",
@@ -114,7 +115,7 @@ def server_mode_status(port):
 
 
 class Run:
-    def __init__(self, name, bus_address):
+    def __init__(self, name, bus_address, app_trace=None):
         self.name = name
         self.directory = RUNS / name
         self.data_home = self.directory / "xdg-data"
@@ -122,7 +123,15 @@ class Run:
         self.host_canary = self.directory / HOST_CANARY_FILE_NAME
         self.log_path = self.directory / "app.log"
         self.bus_address = bus_address
-        self.app = self.launch()
+        self.app_trace = app_trace
+        self.launcher = self.launch()
+        self.app = self.launcher
+        if app_trace is not None:
+            app_pid = wait_until(30, lambda: next((child for child in children_of(self.launcher.pid) if exe_name(child) == APP.name), None))
+            if app_pid is None:
+                fatal(f"{self.name}: strace 아래에서 앱이 뜨지 않았습니다\n{self.log_text()[-3000:]}")
+            self.app = ProcessId(app_pid)
+            cleanup_processes.append(self.app)
         engine_pid = wait_until(30, lambda: engine_child(self.app.pid))
         if engine_pid is None:
             fatal(f"{self.name}: 앱이 엔진 자식 프로세스를 띄우지 않았습니다\n{self.log_text()[-3000:]}")
@@ -144,7 +153,10 @@ class Run:
 
     def launch(self):
         log = open(self.log_path, "ab")
-        process = subprocess.Popen([str(APP)], env=self.environment(), stdout=log, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL)
+        command = [str(APP)]
+        if self.app_trace is not None:
+            command = ["strace", "-f", "-qq", "-e", "trace=connect", "-o", str(self.app_trace), "--", *command]
+        process = subprocess.Popen(command, env=self.environment(), stdout=log, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL)
         cleanup_processes.append(process)
         return process
 
@@ -246,6 +258,10 @@ def stop_tracer(tracer):
         tracer.kill()
 
 
+def inet_connects(trace_text):
+    return [(found.group(3), int(found.group(2))) for line in trace_text.splitlines() if (found := CONNECT_LINE.search(line))]
+
+
 def non_loopback_connects(trace_text):
     outside = []
     loopback = 0
@@ -316,6 +332,20 @@ def scenario_window_and_lifetime(bus):
     check(is_gone(engine), "(나) 창을 닫으면 엔진도 끝났다")
 
 
+def scenario_default_build_sends_no_update_request(bus):
+    trace_path = RUNS / "silent" / "app-trace.txt"
+    (RUNS / "silent").mkdir(parents=True)
+    run = Run("silent-run", bus, app_trace=trace_path)
+    say(f"앱 pid={run.app.pid}, 엔진 pid={run.engine_pid}, 엔진 포트={run.port}")
+    time.sleep(UPDATE_SILENCE_SECONDS)
+    os.kill(run.app.pid, signal.SIGTERM)
+    wait_until(WINDOW_CLOSE_DEADLINE, lambda: run.launcher.poll() is not None)
+    connects = inet_connects(trace_path.read_text(errors="replace"))
+    strangers = [target for target in connects if target not in {("127.0.0.1", run.port), ("::1", run.port)}]
+    check(any(target == ("127.0.0.1", run.port) for target in connects), f"앱 프로세스 트리의 연결을 strace가 봤다 (엔진 루프백 연결 {sum(1 for target in connects if target[1] == run.port)}건)")
+    check(not strangers, f"기본 설정 앱은 엔진 밖으로 연결을 시도하지 않는다. 갱신 확인도 없다 (시도 {strangers})")
+
+
 def scenario_killed_app(bus):
     run = Run("killed", bus)
     engine = run.engine_pid
@@ -351,6 +381,7 @@ def main():
     try:
         scenario_window_and_lifetime(bus)
         scenario_killed_app(bus)
+        scenario_default_build_sends_no_update_request(bus)
     finally:
         finish()
     if failures:

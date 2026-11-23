@@ -1,0 +1,7 @@
+body { place-items: start center; padding: 20px 0; box-sizing: border-box; }
+main { width: min(440px, 90vw); }
+pre#notes { max-height: 72px; margin-bottom: 12px; }
+progress { width: 100%; margin-bottom: 12px; }
+.actions { display: flex; gap: 8px; }
+button { font: inherit; padding: 6px 14px; border: 1px solid #3a4a63; border-radius: 6px; background: #1b2740; color: #e6edf3; cursor: pointer; }
+button#primary { background: #2f6fed; border-color: #2f6fed; }
