@@ -79,7 +79,7 @@ test("업데이트 상태와 조건식 결과를 표시하고 종목을 칸의 �
     await savedEditor(dialog);
     await expect(screenChooser(page)).toHaveText(SCREEN_NAME);
     expect(scenario.documents.screens().screens[0]!.exclude).toEqual(["etf", "etn", "infrastructure", "mutual_fund"]);
-    await expectSentences(panel(page), ["신고가 일봉 최근 20일 이내에 고가가 60일 신고가인 봉이 있다"]);
+    await expectSentences(panel(page), ["신고가 일봉 최근 20일 이내에 고가가 60일 최고인 봉이 있다"]);
     await expect(panel(page).getByText("ETF", { exact: true })).toBeVisible();
     for (const label of ["ETN", "인프라", "뮤추얼펀드"]) await expect(panel(page).getByText(label, { exact: true })).toBeVisible();
     await expect(panel(page).locator("[data-screen-summary]")).toHaveText("두 시장 · ETF·ETN·인프라·뮤추얼펀드 제외 · 조건 1개: 일봉 최근 20일 이내 고가가 60일 신고가인 봉이 있다");
@@ -244,7 +244,7 @@ test("시가총액 줄이나 줄마다 다른 봉 주기가 든 조건식도 편
     const dialog = await edit(mixed.name);
     await expect(dialog.getByRole("combobox", { name: "조건 1 봉 주기" })).toHaveAttribute("data-value", "D");
     await expect(dialog.getByRole("combobox", { name: "조건 2 봉 주기" })).toHaveAttribute("data-value", "W");
-    await expectSentence(dialog, 2, "그리고 신고가 주봉 최근 1주 이내에 종가가 52주 신고가인 봉이 있다");
+    await expectSentence(dialog, 2, "그리고 신고가 주봉 최근 1주 이내에 종가가 52주 최고인 봉이 있다");
     await expect(dialog.getByRole("group", { name: "대상 시장" }).getByRole("button", { name: "코스닥" })).toHaveAttribute("aria-pressed", "true");
     await expect(dialog.getByRole("group", { name: "대상 시장" }).getByRole("button", { name: "코스피" })).toHaveAttribute("aria-pressed", "false");
     await renameAndSave(dialog, "주봉 섞임 바꿈");
@@ -255,7 +255,7 @@ test("시가총액 줄이나 줄마다 다른 봉 주기가 든 조건식도 편
     await expectKind(dialog, 1, "traded_value_high");
     await expect(dialog.getByRole("button", { name: "조건 1 신고거래대금 기간" })).toHaveText("60");
     await expect(dialog.getByRole("button", { name: "조건 1 최근 기간" })).toHaveText("1");
-    await expectSentence(dialog, 1, "신고거래대금 일봉 최근 1일 이내에 60일 신고거래대금인 봉이 있다");
+    await expectSentence(dialog, 1, "신고거래대금 일봉 최근 1일 이내에 거래대금이 60일 최고인 봉이 있다");
     await renameAndSave(dialog, "신고거래대금 바꿈");
   });
 
@@ -280,7 +280,7 @@ test("패널 머리는 줄마다 그 줄의 봉 주기로 조건을 풀고, 시�
   const selectedMarkets = markets.locator('button[aria-pressed="true"]');
   const exclusions = panel(page).getByRole("button", { name: / 제외 해제$/ });
   await expect(screenChooser(page)).toHaveText(mixed.name);
-  await expectSentences(panel(page), ["신고가 주봉 최근 1주 이내에 종가가 52주 신고가인 봉이 있다", "그리고 신고거래량 일봉 최근 5일 이내에 60일 신고거래량인 봉이 있다"]);
+  await expectSentences(panel(page), ["신고가 주봉 최근 1주 이내에 종가가 52주 최고인 봉이 있다", "그리고 신고거래량 일봉 최근 5일 이내에 거래량이 60일 최고인 봉이 있다"]);
   await expect(selectedMarkets).toHaveText(["코스닥"]);
   await expect(exclusions).toHaveText(["ETF", "관리종목"]);
   await expect(markets.getByRole("button", { name: "코스닥", exact: true })).toHaveAttribute("aria-pressed", "true");
@@ -290,7 +290,7 @@ test("패널 머리는 줄마다 그 줄의 봉 주기로 조건을 풀고, 시�
   await screenChooser(page).click();
   await expect(page.getByRole("menu", { name: "조건식 고르기" }).getByRole("menuitemradio")).toHaveText([mixed.name, plain.name]);
   await page.getByRole("menuitemradio", { name: plain.name, exact: true }).click();
-  await expectSentences(panel(page), ["신고가 월봉 최근 1개월 이내에 고가가 12개월 신고가인 봉이 있다"]);
+  await expectSentences(panel(page), ["신고가 월봉 최근 1개월 이내에 고가가 12개월 최고인 봉이 있다"]);
   await expect(markets.getByText("두 시장 모두", { exact: true })).toBeVisible();
   await expect(selectedMarkets).toHaveCount(0);
   await expect(exclusions).toHaveCount(0);

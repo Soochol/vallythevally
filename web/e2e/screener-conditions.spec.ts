@@ -8,7 +8,7 @@ import { editor, excludedLine, expectCellOn, expectRows, openScreener, panel, pi
 
 const SCREEN_NAME = "교차 급증 주봉 신고가";
 const CROSS = "이평 교차 일봉 최근 5일 이내에 단순 짧은 이평 5일선이 20일선을 위로 교차한 봉이 있다";
-const WEEKLY_HIGH = "신고가 주봉 최근 1주 이내에 종가가 52주 신고가인 봉이 있다";
+const WEEKLY_HIGH = "신고가 주봉 최근 1주 이내에 종가가 52주 최고인 봉이 있다";
 const SURGE = "거래 급증 일봉 최근 10일 이내에 거래량이 직전 20일 평균의 3배 이상인 봉이 있다";
 const RISE = "등락률 일봉 최근 10일 이내에 종가가 1일 전보다 5% 이상인 봉이 있다";
 const MARKET_CAP = "시가총액 3000억 원 이상이다";

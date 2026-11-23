@@ -146,13 +146,13 @@ test("종류 검색은 묶음별로 15가지와 신고거래량·신고거래대
   expect(markup).toMatch(/aria-label="조건 1 값"[^>]*data-value="high"/);
 });
 
-test("거래대금 신고가 줄은 종류 낱말이 신고거래대금이고 값 칸 없이 신고거래대금으로 읽힌다", () => {
+test("거래대금 신고가 줄은 종류 낱말이 신고거래대금이고 값 칸 없이 거래대금이 최고인 문장으로 읽힌다", () => {
   const traded = draftOf({ id: "s", name: "신고거래대금", markets: [], exclude: [], conditions: [{ kind: "new_high", period: "D", recentBars: 1, field: "traded_value", n: 60 }] });
   const markup = markupOf(traded);
   expect(markup).toMatch(/aria-label="조건 1 종류"[^>]*>신고거래대금<svg/);
   expect(labelsIn(markup).filter((l) => l.startsWith("조건 1 "))).toEqual(["조건 1 순서 끌어서 바꾸기", "조건 1 종류", "조건 1 봉 주기", "조건 1 최근 기간", "조건 1 신고거래대금 기간", "조건 1 메뉴"]);
   expect(tokenOf(markup, "조건 1 신고거래대금 기간")).toBe("60");
-  expect(markup).toMatch(/>60<\/button>일<\/span><span>신고거래대금인<\/span>/);
+  expect(markup).toMatch(/<span>거래대금이<\/span>[^]*?>60<\/button>일<\/span><span>최고인<\/span>/);
 });
 
 test("모든 봉 조건과 거래 신고 항목은 최근 기간을 세부 값 앞에 두고 D/W/M 단위를 붙이며 도움말은 맨 아래 한 번이다", () => {

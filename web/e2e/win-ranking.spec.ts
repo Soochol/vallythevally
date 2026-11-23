@@ -486,6 +486,21 @@ test("창 안쪽 폭 242px에서도 넘치지 않고 그 순위의 값 열이 �
   await expect(rowOf(page, "005930").locator('td[data-col="tradeAmount"]')).toHaveText("1,000억");
 });
 
+for (const width of [160, 200, 220]) {
+  test(`창 안쪽 폭 ${width}px에서는 값 열을 빼서 이름 칸이 64px 아래로 줄지 않고 넘치지도 않는다`, async ({ page, scenario }) => {
+    serveRankings(scenario);
+    openLayout(scenario);
+    await open(page);
+    await shapeWindow(page, { width });
+    await expect(rows(page).first()).toBeVisible();
+    await expect.poll(() => scroller(page).evaluate((el) => el.clientWidth)).toBe(width);
+    expect(await overflow(page)).toBeLessThanOrEqual(0);
+    await expect(rows(page).first().locator("td[data-col]")).toHaveCount(0);
+    const nameWidth = await rows(page).first().locator("td.rk-name").evaluate((el) => el.getBoundingClientRect().width);
+    expect(nameWidth).toBeGreaterThanOrEqual(64);
+  });
+}
+
 for (const category of RANKING_CATEGORIES) {
   test(`순위 종류 ${category.name} 묶음은 358px에서 모두 가로로 넘치지 않는다`, async ({ page, scenario }) => {
     serveByKind(scenario);

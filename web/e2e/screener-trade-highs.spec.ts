@@ -12,9 +12,9 @@ const newHigh = (period: "D" | "W" | "M", field: "high" | "volume" | "traded_val
 const WEEKLY_HIGH: Screen = { id: "plain", name: "주봉 신고가", markets: [], exclude: [], conditions: [newHigh("W", "high", 52, 4)] };
 const PICKED = "신고거래대금과 주봉 신고거래량";
 
-const TRADED_START_TEXT = "신고거래대금 일봉 최근 100일 이내에 200일 신고거래대금인 봉이 있다";
-const VOLUME_START_TEXT = "신고거래량 일봉 최근 100일 이내에 200일 신고거래량인 봉이 있다";
-const WEEKLY_VOLUME_TEXT = "신고거래량 주봉 최근 8주 이내에 52주 신고거래량인 봉이 있다";
+const TRADED_START_TEXT = "신고거래대금 일봉 최근 100일 이내에 거래대금이 200일 최고인 봉이 있다";
+const VOLUME_START_TEXT = "신고거래량 일봉 최근 100일 이내에 거래량이 200일 최고인 봉이 있다";
+const WEEKLY_VOLUME_TEXT = "신고거래량 주봉 최근 8주 이내에 거래량이 52주 최고인 봉이 있다";
 const EXCLUDED = "대상 16종목 · 빠짐: 상장 기간 부족 2 · 이력 덜 참 0";
 
 const choice = (dialog: Locator, line: number, name: string) => dialog.getByRole("combobox", { name: `조건 ${line} ${name}` });

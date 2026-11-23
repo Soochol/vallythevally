@@ -37,7 +37,7 @@ test("패널은 조건 요약 한 줄만 보이고 편집 창은 패널 왼쪽�
   await expect(editButton(page)).toHaveAttribute("aria-expanded", "true");
   await expect(editorWindow(page).getByRole("group", { name: "문장형 조건식" })).toBeVisible();
   await expect(nameField(page)).toHaveValue(SEEDED.name);
-  await expect(editorWindow(page).getByRole("list", { name: "조건" })).toContainText(/신고가\s*일봉\s*최근\s*20일\s*이내에\s*고가가\s*60일\s*신고가인\s*봉이 있다/);
+  await expect(editorWindow(page).getByRole("list", { name: "조건" })).toContainText(/신고가\s*일봉\s*최근\s*20일\s*이내에\s*고가가\s*60일\s*최고인\s*봉이 있다/);
   await expect(editorWindow(page).getByRole("group", { name: "대상 시장" }).getByRole("button", { name: "코스피", exact: true })).toHaveAttribute("aria-pressed", "true");
   const panelBox = (await panel(page).boundingBox())!;
   const windowBox = (await editorWindow(page).boundingBox())!;

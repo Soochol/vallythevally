@@ -156,6 +156,5 @@ export function fitRankingColumns(kind: Ranking["kind"], columns: readonly Colum
     if (room < floor) break;
     kept.push(column);
   }
-  if (kept.length === 0 && ordered[0]) kept.push(ordered[0]);
   return columns.filter((column) => kept.includes(column));
 }
