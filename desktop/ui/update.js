@@ -48,6 +48,10 @@ function render(status) {
       showButton(primary, "다시 시도", () => invoke("install_update").catch(() => {}));
       showButton(secondary, "닫기", () => invoke("dismiss_update_notice"));
     }
+  } else if (status.state === "check_failed") {
+    headline.textContent = "업데이트를 확인하지 못했습니다";
+    detail.textContent = status.reason;
+    showButton(secondary, "닫기", () => invoke("dismiss_update_notice"));
   } else if (status.state === "current") {
     headline.textContent = "업데이트가 없습니다";
     detail.textContent = "";

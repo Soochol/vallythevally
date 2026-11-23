@@ -46,6 +46,12 @@ impl UpdateStatus {
     }
 }
 
+enum CheckOutcome {
+    Found(Box<Update>),
+    NothingNewer,
+    Failed(String),
+}
+
 #[derive(Default)]
 struct Inner {
     status: UpdateStatus,
@@ -71,12 +77,29 @@ impl UpdateCenter {
         self.inner().status = status;
     }
 
-    fn offer(&self, update: Update) -> UpdateStatus {
-        let status = UpdateStatus::Available { version: update.version.clone(), notes: update.body.clone() };
+    fn record_check(&self, outcome: CheckOutcome) -> Option<UpdateStatus> {
         let mut inner = self.inner();
-        inner.status = status.clone();
-        inner.offered = Some(update);
-        status
+        let status = &inner.status;
+        let mid_install = status.in_progress() || matches!(status, UpdateStatus::InstallFailed { engine_stopped: true, .. });
+        let retryable = matches!(status, UpdateStatus::InstallFailed { .. });
+        let offered = matches!(status, UpdateStatus::Available { .. });
+        let next = match outcome {
+            _ if mid_install => return None,
+            CheckOutcome::Found(update) => {
+                let next = UpdateStatus::Available { version: update.version.clone(), notes: update.body.clone() };
+                inner.offered = Some(*update);
+                next
+            }
+            CheckOutcome::NothingNewer if retryable => return None,
+            CheckOutcome::NothingNewer => {
+                inner.offered = None;
+                UpdateStatus::Current
+            }
+            CheckOutcome::Failed(_) if retryable || offered => return None,
+            CheckOutcome::Failed(reason) => UpdateStatus::CheckFailed { reason },
+        };
+        inner.status = next.clone();
+        Some(next)
     }
 
     fn start_download(&self) -> Result<Update, &'static str> {
@@ -139,14 +162,19 @@ pub async fn check_once<R: Runtime>(app: &AppHandle<R>) {
     if !center.checking_is_allowed() {
         return;
     }
-    match find_update(app).await {
-        Ok(Some(update)) => {
-            let status = center.offer(update);
-            apply_status(app, &status);
+    let outcome = match find_update(app).await {
+        Ok(Some(update)) => CheckOutcome::Found(Box::new(update)),
+        Ok(None) => CheckOutcome::NothingNewer,
+        Err(reason) => {
+            eprintln!("[update] {reason}");
+            CheckOutcome::Failed(reason)
+        }
+    };
+    if let Some(status) = center.record_check(outcome) {
+        apply_status(app, &status);
+        if matches!(status, UpdateStatus::Available { .. }) {
             show_notice(app);
         }
-        Ok(None) => publish(app, UpdateStatus::Current),
-        Err(reason) => publish(app, UpdateStatus::CheckFailed { reason }),
     }
 }
 

@@ -127,7 +127,7 @@ class CommandLine(Fixture):
 
 class NoSecretsInTheRepository(unittest.TestCase):
     def test_no_tracked_file_holds_a_private_key(self):
-        patterns = ["BEGIN .*PRIVATE", "untrusted comment: " + "minisign secret"]
+        patterns = ["BEGIN" + " .*PRIV" + "ATE", "untrusted comment: " + "minisign secret"]
         found = subprocess.run(["git", "grep", "-nI", "-e", patterns[0], "-e", patterns[1]], cwd=ROOT, capture_output=True, text=True)
         self.assertEqual(found.stdout, "", "추적하는 파일에 비밀키가 있습니다")
 

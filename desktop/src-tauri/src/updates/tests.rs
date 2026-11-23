@@ -332,7 +332,7 @@ fn the_notice_window_reads_the_status_shape_the_command_sends() {
         assert_eq!(serde_json::to_value(&status).unwrap(), shape);
     }
     let script = fs::read_to_string(source("../ui/update.js")).unwrap();
-    for state in ["current", "available", "downloading", "installing", "install_failed"] {
+    for state in ["current", "check_failed", "available", "downloading", "installing", "install_failed"] {
         assert!(script.contains(&format!("\"{state}\"")), "update.js가 {state} 상태를 다루지 않습니다");
     }
 }
@@ -348,4 +348,59 @@ fn a_second_install_request_while_one_is_running_is_refused() {
     assert!(first.is_ok());
     assert!(center.start_download().is_err());
     assert!(!center.checking_is_allowed(), "받는 중에는 새 확인으로 상태를 덮어쓰지 않는다");
+}
+
+fn announced_update(app: &App<MockRuntime>) -> Update {
+    run(find_update(app.handle())).unwrap().unwrap()
+}
+
+#[test]
+fn a_failed_check_after_a_new_release_was_announced_keeps_the_offer() {
+    let release = Release::honest("0.2.0");
+    let app = release.app();
+    assert!(enable(app.handle()));
+    run(check_once(app.handle()));
+    let center = app.state::<UpdateCenter>();
+    assert_eq!(center.record_check(CheckOutcome::Failed("흔들린 네트워크".into())), None);
+    assert!(matches!(status_of(&app), UpdateStatus::Available { .. }));
+    assert!(center.start_download().is_ok(), "이미 알린 새 판은 다음 확인이 실패해도 설치할 수 있다");
+}
+
+#[test]
+fn a_check_that_finishes_during_a_download_does_not_overwrite_it() {
+    let release = Release::honest("0.2.0");
+    let app = release.app();
+    assert!(enable(app.handle()));
+    run(check_once(app.handle()));
+    let center = app.state::<UpdateCenter>();
+    center.start_download().unwrap();
+    let downloading = status_of(&app);
+    assert_eq!(center.record_check(CheckOutcome::Found(Box::new(announced_update(&app)))), None);
+    assert_eq!(center.record_check(CheckOutcome::NothingNewer), None);
+    assert_eq!(center.record_check(CheckOutcome::Failed("x".into())), None);
+    assert_eq!(status_of(&app), downloading);
+    assert!(center.start_download().is_err(), "받는 중에 확인이 끝나도 두 번째 설치는 시작되지 않는다");
+}
+
+#[test]
+fn an_install_failure_that_stopped_the_engine_survives_later_checks() {
+    let release = Release::honest("0.2.0");
+    let app = release.app();
+    assert!(enable(app.handle()));
+    let center = app.state::<UpdateCenter>();
+    center.set(UpdateStatus::InstallFailed { reason: "x".into(), engine_stopped: true });
+    assert_eq!(center.record_check(CheckOutcome::Failed("y".into())), None);
+    assert_eq!(center.record_check(CheckOutcome::NothingNewer), None);
+    assert!(matches!(status_of(&app), UpdateStatus::InstallFailed { engine_stopped: true, .. }));
+}
+
+#[test]
+fn a_release_pulled_after_it_was_announced_clears_the_offer() {
+    let release = Release::honest("0.2.0");
+    let app = release.app();
+    assert!(enable(app.handle()));
+    run(check_once(app.handle()));
+    let center = app.state::<UpdateCenter>();
+    assert_eq!(center.record_check(CheckOutcome::NothingNewer), Some(UpdateStatus::Current));
+    assert!(center.start_download().is_err());
 }
