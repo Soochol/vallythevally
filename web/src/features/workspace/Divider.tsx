@@ -8,6 +8,7 @@ import { listGroups, type Branch, type SplitPath } from "../../layout/dock/tree"
 import type { DockNode, DockPlacement, Rect } from "../../layout/placement";
 import { useSelectionStore } from "../../stores/selection";
 import { DIVIDER_REACH, reachesDivider, yieldsToContent } from "./dividerReach";
+import { watchPointerCapture } from "./pointerCapture";
 import { DividerMenu } from "./DividerMenu";
 import { DockSizeBalloon, sharePercent, sideName, speakSize, type Point, type SideSize } from "./DockSizeBalloon";
 
@@ -136,8 +137,10 @@ export function Divider({ box, dock, space, onDraft, onCommit }: { box: GutterBo
       stops: dividerStops(now.dock, now.box.path, now.space),
       layout: layoutDock(now.dock.root, px.area, px.gap),
     };
+    const current = drag.current;
     document.documentElement.classList.add(start.row ? "dock-resizing-col" : "dock-resizing-row");
     setDragging(true);
+    watchPointerCapture(target, pointer, () => drag.current === current, () => finish(true));
   };
   const end = () => {
     drag.current = null;

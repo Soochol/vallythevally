@@ -6,6 +6,7 @@ import { useSelectionStore } from "../../stores/selection";
 import type { CommitRatios } from "./Divider";
 import { DockSizeBalloon, sideName, type Point, type SideSize } from "./DockSizeBalloon";
 import { junctionStart, junctionStopNotice, moveJunction, type JunctionAxis, type JunctionMove, type JunctionStart } from "./junctionDrag";
+import { watchPointerCapture } from "./pointerCapture";
 
 const GUIDE_THICKNESS = 2;
 const LINE_INSET = 16;
@@ -115,9 +116,11 @@ export function DockJunction({ junction, layout, dock, space, onDraft, onCommit 
     event.stopPropagation();
     event.currentTarget.setPointerCapture(event.pointerId);
     const at = { x: event.clientX, y: event.clientY };
-    drag.current = { pointer: event.pointerId, from: at, at, alt: event.altKey, start: origin, dock: now.dock, notified: { row: false, column: false }, result: null };
+    const current: Drag = { pointer: event.pointerId, from: at, at, alt: event.altKey, start: origin, dock: now.dock, notified: { row: false, column: false }, result: null };
+    drag.current = current;
     document.documentElement.classList.add("dock-resizing-junction");
     setDragging(true);
+    watchPointerCapture(event.currentTarget, event.pointerId, () => drag.current === current, () => finish(true));
   };
   const move = (event: ReactPointerEvent<HTMLDivElement>) => {
     const current = drag.current;
