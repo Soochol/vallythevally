@@ -62,6 +62,7 @@ function revenueSnapshot(financial: FinancialFixture, version: number, years: re
 const starts = {
   near: { dragPixels: 120, lastBarShown: true },
   lastBarHidden: { dragPixels: 700, lastBarShown: false },
+  initialHeld: { dragPixels: 0, lastBarShown: true },
 } as const;
 const lastBarIndex = 19;
 
@@ -77,13 +78,20 @@ async function shiftAroundFinancialReplacement(page: Page, scenario: Scenario, f
   await expect.poll(() => page.evaluate(() => Boolean(window.chartProbe) && window.financialViewportProbe.hasController())).toBe(true);
   const initial = await settledViewport(page);
   const box = (await chartOf(cell(page)).boundingBox())!;
-  await page.mouse.move(box.x + box.width * 0.15, box.y + box.height * 0.35);
-  await page.mouse.down();
-  await page.mouse.move(box.x + box.width * 0.15 + dragPixels, box.y + box.height * 0.35, { steps: 12 });
-  await page.mouse.up();
+  if (dragPixels > 0) {
+    await page.mouse.move(box.x + box.width * 0.15, box.y + box.height * 0.35);
+    await page.mouse.down();
+    await page.mouse.move(box.x + box.width * 0.15 + dragPixels, box.y + box.height * 0.35, { steps: 12 });
+    await page.mouse.up();
+  }
   const revealed = await settledViewport(page);
-  expect(revealed.locked).toBe(false);
-  expect(revealed.range!.to).toBeLessThan(initial.range!.to);
+  if (dragPixels > 0) {
+    expect(revealed.locked).toBe(false);
+    expect(revealed.range!.to).toBeLessThan(initial.range!.to);
+  } else {
+    expect(revealed.locked).toBe(true);
+    expect(revealed).toEqual(initial);
+  }
   expect(revealed.rayX).not.toBeNull();
   expect(revealed.range!.to > lastBarIndex + 0.5).toBe(lastBarShown);
 
@@ -130,4 +138,12 @@ financialTest("마지막 봉을 화면 밖으로 끈 화면에서 재무 교체�
 
 financialTest("마지막 봉을 화면 밖으로 끈 화면에서 재무 교체가 Shift 이동의 첫 paint보다 먼저 와도 이동이 남는다", async ({ page, scenario, financial }) => {
   await shiftAroundFinancialReplacement(page, scenario, financial, "lastBarHidden", "before first paint");
+});
+
+financialTest("초기 범위를 지키는 화면에서 재무 교체가 Shift 이동의 첫 paint 뒤에 와도 이동이 남는다", async ({ page, scenario, financial }) => {
+  await shiftAroundFinancialReplacement(page, scenario, financial, "initialHeld", "after first paint");
+});
+
+financialTest("초기 범위를 지키는 화면에서 재무 교체가 Shift 이동의 첫 paint보다 먼저 와도 이동이 남는다", async ({ page, scenario, financial }) => {
+  await shiftAroundFinancialReplacement(page, scenario, financial, "initialHeld", "before first paint");
 });
