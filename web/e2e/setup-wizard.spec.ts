@@ -389,7 +389,7 @@ test.describe("셋업 알림과 선택 대기의 경계", () => {
     await page.goto("/");
     await (await loaded).finished();
     await expect(chartOf(cell(page))).toHaveAttribute("data-bar-count", /^[1-9]\d*$/);
-    await expect(page.getByRole("contentinfo")).toContainText("자동 저장됨");
+    await expect(page.getByRole("contentinfo")).toContainText("저장됨");
     const held = scenario.hold((url, request) => url.pathname.startsWith("/api/drawings/") && request.method() === "PUT");
     const bounds = await chartOf(cell(page)).boundingBox();
     await cell(page).focus();

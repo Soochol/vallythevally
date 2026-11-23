@@ -336,12 +336,12 @@ for (const mode of MODES) {
     const draft = mode === "dock" ? page.locator("[data-dock-preview]") : frame(page, "watchlist");
     const dragging = await boxOf(draft);
     pending.reply({ status: 503, body: { error: { code: "internal", message: "저장 연결 끊김" } } });
-    await expect(page.getByRole("contentinfo")).toContainText("저장하지 못했습니다");
+    await expect(page.getByTestId("shell-banner")).toContainText("저장하지 못했습니다");
     expect(await boxOf(draft)).toEqual(dragging);
     await page.mouse.up();
     const moved = await boxOf(mode === "dock" ? group(page, "screener") : frame(page, "watchlist"));
     expect(moved).not.toEqual(original);
-    await expect(page.getByRole("contentinfo")).toContainText("저장하지 못했습니다");
+    await expect(page.getByTestId("shell-banner")).toContainText("저장하지 못했습니다");
     if (mode === "canvas") await page.getByRole("navigation", { name: "창 종류" }).getByRole("button", { name: "지표 창 더하기" }).click();
     else {
       await topbar(page).getByRole("button", { name: "창 더하기", exact: true }).click();
@@ -349,10 +349,10 @@ for (const mode of MODES) {
     }
     await page.getByRole("button", { name: "지표 닫기", exact: true }).click();
     await expect.poll(() => page.getByRole("button", { name: "지표 닫기", exact: true }).count()).toBe(0);
-    await expect(page.getByRole("contentinfo")).toContainText("저장하지 못했습니다");
+    await expect(page.getByTestId("shell-banner")).toContainText("저장하지 못했습니다");
     scenario.on((url, request) => url.pathname === `/api/layouts/${DEFAULT_LAYOUT_ID}` && request.method() === "PUT", (request) => ({ body: scenario.documents.saveLayout(request.postDataJSON()) }));
-    await page.getByRole("contentinfo").getByRole("button", { name: "다시 시도" }).click();
-    await expect(page.getByRole("contentinfo")).toContainText("자동 저장됨");
+    await page.getByTestId("shell-banner").getByRole("button", { name: "다시 시도" }).click();
+    await expect(page.getByRole("contentinfo")).toContainText("저장됨");
     expect(await boxOf(mode === "dock" ? group(page, "screener") : frame(page, "watchlist"))).toEqual(moved);
     expect(windows(scenario).map((window) => window.kind)).toEqual(["chart", "watchlist", "screener"]);
     const saved = placement(scenario);
@@ -375,7 +375,7 @@ for (const mode of MODES) {
     const stale = page.waitForResponse((response) => new URL(response.url()).pathname === `/api/layouts/${DEFAULT_LAYOUT_ID}` && response.request().method() === "PUT" && response.status() === 409);
     await topbar(page).getByRole("button", { name: "월", exact: true }).click();
     expect(await (await stale).json()).toMatchObject({ error: { code: "stale_revision" } });
-    await expect(page.getByRole("contentinfo")).toContainText("저장하지 못했습니다");
+    await expect(page.getByTestId("shell-banner")).toContainText("저장하지 못했습니다");
     expect(charts(scenario)[0]?.period).toBe("W");
     await expect(cell(page)).toHaveAttribute("aria-label", / 월$/);
     await expect.poll(() => page.evaluate(() => {

@@ -1,0 +1,1 @@
+export const STATUS_BUTTON = "flex h-5 flex-none items-center gap-1.5 rounded-s bg-raised px-2 text-s text-text hover:bg-overlay disabled:cursor-not-allowed disabled:text-text-3 disabled:hover:bg-raised";

@@ -29,6 +29,7 @@ import { SetupChangedNotice } from "./features/status/SetupChangedNotice";
 import { ReplaceLocalScreen } from "./features/account/ReplaceLocalScreen";
 import { useAccountStore } from "./stores/account";
 import { SearchDialog } from "./features/search/SearchDialog";
+import { ShellBanner } from "./features/status/ShellBanner";
 import { StatusBar } from "./features/status/StatusBar";
 import { Toast } from "./features/toast/Toast";
 import { Topbar } from "./features/topbar/Topbar";
@@ -131,6 +132,7 @@ function ChartScreen({ page }: { page: PageId }) {
           {shownPage && <PageStage page={shownPage} />}
         </>
       )}
+      <ShellBanner />
       <StatusBar />
       {onWorkspace && <PhoneTabs />}
       <PhoneWatch />

@@ -20,7 +20,7 @@ async function prepare(page: Page, scenario: Scenario) {
   await row(page, "086520").click({ button: "right" });
   await page.getByRole("menuitem", { name: /^관심종목에서 빼기/ }).click();
   await pollSaved(async () => (await serverLists(scenario))[0]!.symbols).toEqual(["005930", "005935"]);
-  await expect(page.getByRole("contentinfo")).toContainText("자동 저장됨");
+  await expect(page.getByRole("contentinfo")).toContainText("저장됨");
 }
 
 async function holdReads(page: Page, scenario: Scenario) {
@@ -120,7 +120,7 @@ test("빼기와 조건부 저장이 모두 실패하면 옛 자동 재시도가 
   });
   await row(page, "086520").click({ button: "right" });
   await page.getByRole("menuitem", { name: /^관심종목에서 빼기/ }).click();
-  await expect(page.getByRole("contentinfo").getByRole("alert")).toContainText("저장하지 못했습니다");
+  await expect(page.getByTestId("shell-banner")).toContainText("저장하지 못했습니다");
   await page.clock.install();
   await page.getByRole("button", { name: "되돌리기", exact: true }).click();
   await expect(page.getByRole("status").getByText("관심종목을 확인하지 못해 되돌리지 않았습니다. 다시 불러와 주세요")).toBeVisible();
@@ -153,7 +153,7 @@ test("조건부 저장 ACK 전에 새로고침해도 옛 실패 본문을 다시
   });
   await row(page, "086520").click({ button: "right" });
   await page.getByRole("menuitem", { name: /^관심종목에서 빼기/ }).click();
-  await expect(page.getByRole("contentinfo").getByRole("alert")).toContainText("저장하지 못했습니다");
+  await expect(page.getByTestId("shell-banner")).toContainText("저장하지 못했습니다");
   await page.getByRole("button", { name: "되돌리기", exact: true }).click();
   await pollSaved(() => accepted).toBe(true);
   await page.reload();
@@ -191,7 +191,7 @@ test("다른 로컬 편집이 없는 조건부 저장 성공 뒤 자동 저장�
   });
   await page.getByRole("button", { name: "되돌리기", exact: true }).click();
   await pollSaved(async () => (await serverLists(scenario))[0]!.symbols).toEqual(["005930", "086520", "005935"]);
-  await expect(page.getByRole("contentinfo")).toContainText("자동 저장됨");
+  await expect(page.getByRole("contentinfo")).toContainText("저장됨");
   expect(puts).toBe(1);
   expect(bodies[0]!.revision).toBe(before.revision + 1);
   await row(page, "005935").locator("[data-main]").press("Alt+ArrowUp");

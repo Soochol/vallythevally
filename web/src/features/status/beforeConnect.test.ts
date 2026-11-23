@@ -23,4 +23,16 @@ describe("차트 칸 연결 안내", () => {
     expect(beforeConnect(link({ state: "failed", problem: "authBlocked8050" }))).toMatchObject({ action: null, canOpenSettings: true });
     expect(beforeConnect(link({ state: "failed", problem: "keyNeedsCheck" }))).toMatchObject({ action: null, canOpenSettings: true });
   });
+  it("키 없음은 세 걸음과 키 등록 시작 단추를 준다", () => {
+    const notice = beforeConnect(link({ state: "noKey" }))!;
+    expect(notice.steps.map((step) => step.title)).toEqual(["포털에서 앱키 받기", "공인 IP 등록", "키 붙여넣기"]);
+    expect(notice).toMatchObject({ settingsLabel: "키 등록 시작", canOpenSettings: true });
+  });
+  it("실패 제목은 원인별로 나뉘고 다음 행동을 말한다", () => {
+    expect(beforeConnect(link({ state: "failed", problem: "authBlocked8050" }))).toMatchObject({ title: "키움이 이 PC의 IP를 거절했습니다(8050)", settingsLabel: "시스템 설정 열기" });
+    expect(beforeConnect(link({ state: "failed", problem: "network" }))!.title).toBe("키움에 닿지 못했습니다");
+    expect(beforeConnect(link({ state: "failed", problem: "pathStopped" }))!.title).toBe("실시간 연결이 멈췄습니다");
+    expect(beforeConnect(link({ state: "failed", problem: "authBlocked8050" }))!.next).not.toBeNull();
+    expect(beforeConnect(link({ state: "failed", problem: null }))).toMatchObject({ title: "키움에 연결하지 못했습니다", next: null });
+  });
 });

@@ -102,7 +102,7 @@ for (const offset of [0, -60_000]) {
       expect.soft(beforeAck?.want.kind, "the later unsent DELETE must replace the pending PUT journal").toBe("delete");
 
       release();
-      await expect(page.getByText(/^자동 저장됨 /)).toBeVisible();
+      await expect(page.getByText(/^저장됨$/)).toBeVisible();
       const afterAck = await journal(other, created.id);
       expect.soft(afterAck?.want.kind, "the old PUT acknowledgement must preserve the newer DELETE journal").toBe("delete");
       await info.attach("journal-order.json", {
