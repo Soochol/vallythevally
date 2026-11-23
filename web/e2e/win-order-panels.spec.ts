@@ -868,7 +868,7 @@ test("체결강도는 11행, 체결은 12행부터 같은 top에 있고 새 체�
   await expect(page.locator(".mw-trade i")).toHaveCount(0);
 });
 
-type TradePart = { price: string | null; shown: string | null; fontSize: string; qtyScrollWidth: number; qtyClientWidth: number; qtyLeft: number; qtyRight: number; boxLeft: number; boxRight: number; priceLeft: number; priceRight: number; qtyZ: string; priceZ: string; qtyBackground: string; topAtOverlap: string | null };
+type TradePart = { gapToScrollbar: number; price: string | null; shown: string | null; fontSize: string; qtyScrollWidth: number; qtyClientWidth: number; qtyLeft: number; qtyRight: number; boxLeft: number; boxRight: number; priceLeft: number; priceRight: number; qtyZ: string; priceZ: string; qtyBackground: string; topAtOverlap: string | null };
 
 const readTradeParts = (page: Page): Promise<TradePart[]> => page.getByTestId("ladder-trade").evaluateAll((rows) => rows.map((row) => {
   const [price, qty] = [row.children[0]!, row.children[1]!];
@@ -881,7 +881,7 @@ const readTradeParts = (page: Page): Promise<TradePart[]> => page.getByTestId("l
   const point = [qtyRect.left + 1, qtyRect.top + qtyRect.height / 2] as const;
   const stack = overlaps ? document.elementsFromPoint(point[0], point[1]) : [];
   const topAtOverlap = !overlaps ? null : !stack.includes(row) ? "offscreen" : stack[0] === qty ? "qty" : "other";
-  return { price: price.textContent, shown: qty.textContent, fontSize: getComputedStyle(qty).fontSize, qtyScrollWidth: qty.scrollWidth, qtyClientWidth: qty.clientWidth, qtyLeft: qtyRect.left, qtyRight: qtyRect.right, boxLeft: box.left, boxRight: box.right, priceLeft: priceRect.left, priceRight, qtyZ: getComputedStyle(qty).zIndex, priceZ: getComputedStyle(price).zIndex, qtyBackground: getComputedStyle(qty).backgroundColor, topAtOverlap };
+  return { gapToScrollbar: box.left + row.parentElement!.clientWidth - qtyRect.right, price: price.textContent, shown: qty.textContent, fontSize: getComputedStyle(qty).fontSize, qtyScrollWidth: qty.scrollWidth, qtyClientWidth: qty.clientWidth, qtyLeft: qtyRect.left, qtyRight: qtyRect.right, boxLeft: box.left, boxRight: box.right, priceLeft: priceRect.left, priceRight, qtyZ: getComputedStyle(qty).zIndex, priceZ: getComputedStyle(price).zIndex, qtyBackground: getComputedStyle(qty).backgroundColor, topAtOverlap };
 }));
 
 const OVERLAP_TRADES: [number, number][] = [[70_000, 7], [70_100, 600], [70_200, 9_999], [70_300, 12_345], [70_400, 999_999], [70_500, 9_999_999]];
@@ -901,6 +901,7 @@ test("421px 호가주문창에서 수량은 쉼표 숫자 그대로 끝까지 �
     expect(part.qtyScrollWidth, note).toBeLessThanOrEqual(part.qtyClientWidth);
     expect(part.qtyLeft, note).toBeGreaterThanOrEqual(part.boxLeft);
     expect(part.qtyRight, note).toBeLessThanOrEqual(part.boxRight);
+    expect(part.gapToScrollbar, note).toBeGreaterThanOrEqual(5.99);
     expect(Number(part.qtyZ), note).toBeGreaterThan(Number(part.priceZ === "auto" ? 0 : part.priceZ));
     expect(part.qtyBackground, note).toBe("rgb(20, 25, 20)");
     if (part.topAtOverlap !== null && part.topAtOverlap !== "offscreen") expect(part.topAtOverlap, note).toBe("qty");
