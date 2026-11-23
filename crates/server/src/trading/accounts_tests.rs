@@ -54,7 +54,7 @@ async fn keyed_with_switch_file(listed: &[usize], switch_file: Option<String>) -
     let dir = tempfile::tempdir().unwrap();
     let lock = InstanceLock::acquire(&dir.path().join("state").join("server.lock")).unwrap();
     let key_file = KeyFile::new(dir.path().join("keys").join("kiwoom-key.json"), &lock);
-    let stored = listed.iter().map(|&i| StoredKey { id: KeyId::parse(KEYS[i].0).unwrap(), alias: KEYS[i].1.into(), broker: Broker::Kiwoom, credentials: KiwoomCredentials { app_key: Secret::new(KEYS[i].2.into()), app_secret: Secret::new("FAKE-SECRET-order".into()) } }).collect();
+    let stored = listed.iter().map(|&i| StoredKey { id: KeyId::parse(KEYS[i].0).unwrap(), alias: KEYS[i].1.into(), broker: Broker::Kiwoom, credentials: KiwoomCredentials { app_key: Secret::new(KEYS[i].2.into()), app_secret: Secret::new("FAKE-SECRET-order".into()) }, account: Default::default() }).collect();
     key_file.save(&KeyList { keys: stored, market: KeyId::parse(KEYS[listed[0]].0) }).unwrap();
     if let Some(text) = switch_file {
         let path = dir.path().join("keys").join(super::ORDER_SWITCH_FILE_NAME);

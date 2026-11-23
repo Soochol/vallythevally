@@ -450,7 +450,7 @@ async fn the_key_list_and_the_market_source_status_never_carry_a_secret_or_a_who
     let saved_kiwoom = ("FAKE-KIWOOM-APPKEY-saved-1Q2W", "FAKE-KIWOOM-SECRET-saved-3E4R");
     let saved_kis = ("FAKE-KIS-APPKEY-saved-5T6Y", "FAKE-KIS-SECRET-saved-7U8I");
     for (broker, (app_key, secret)) in [("kiwoom", saved_kiwoom), ("kis", saved_kis)] {
-        let (status, body) = client.send(reqwest::Method::POST, "/api/system/kiwoom/keys", Some(json!({"alias": broker, "appKey": app_key, "appSecret": secret, "broker": broker}))).await;
+        let (status, body) = client.send(reqwest::Method::POST, "/api/system/kiwoom/keys", Some(json!({"alias": broker, "appKey": app_key, "appSecret": secret, "broker": broker, "accountNo": if broker == "kis" { Some("50012399-01") } else { None }}))).await;
         assert_eq!(status, 200, "{body}");
     }
     let listing = client.get("/api/system/kiwoom/keys").await.1.to_string();

@@ -8,6 +8,7 @@ use crate::api::{Broker, KiwoomEnvironment};
 use crate::config::{KIS_TOKEN_FILE_NAME, KisCredentials, KiwoomCredentials, Secret};
 use super::token_file::{TokenFile, credential_id};
 use crate::instance::{Held, InstanceLock};
+use crate::trading::KisAccountSettings;
 
 pub const KEY_LIMIT: usize = 5;
 pub const KEY_LIST_FILE_NAME: &str = "kiwoom-keys.json";
@@ -70,6 +71,7 @@ pub struct StoredKey {
     pub alias: String,
     pub broker: Broker,
     pub credentials: KiwoomCredentials,
+    pub account: KisAccountSettings,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -121,6 +123,10 @@ struct StoredEntry {
     broker: Broker,
     app_key: String,
     app_secret: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    account_no: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    hts_id: Option<String>,
 }
 
 fn kiwoom() -> Broker {
@@ -186,7 +192,11 @@ impl KeyFile {
             if keys.iter().any(|key| key.id == id || (key.broker == entry.broker && key.credentials.app_key.expose() == &entry.app_key)) {
                 return Err(self.list.error("같은 키 ID나 앱키가 두 번 있어 쓰지 않습니다"));
             }
-            keys.push(StoredKey { id, alias, broker: entry.broker, credentials: KiwoomCredentials { app_key: Secret::new(entry.app_key), app_secret: Secret::new(entry.app_secret) } });
+            let account = match entry.broker {
+                Broker::Kiwoom => KisAccountSettings::default(),
+                Broker::Kis => KisAccountSettings::read(entry.account_no.as_deref(), entry.hts_id.as_deref()).map_err(|reason| self.list.error(format_args!("{reason}, 쓰지 않습니다")))?,
+            };
+            keys.push(StoredKey { id, alias, broker: entry.broker, credentials: KiwoomCredentials { app_key: Secret::new(entry.app_key), app_secret: Secret::new(entry.app_secret) }, account });
         }
         let market = stored.market_key_id.and_then(|id| KeyId::parse(&id)).filter(|id| id.is_env() || keys.iter().any(|key| key.id == *id));
         Ok(KeyList { keys, market })
@@ -199,7 +209,7 @@ impl KeyFile {
             return Err(self.legacy.error("앱키나 시크릿이 비어 있어 쓰지 않습니다"));
         }
         let id = KeyId::numbered(1);
-        let key = StoredKey { id: id.clone(), alias: MIGRATED_KEY_ALIAS.to_owned(), broker: Broker::Kiwoom, credentials: KiwoomCredentials { app_key: Secret::new(stored.app_key), app_secret: Secret::new(stored.app_secret) } };
+        let key = StoredKey { id: id.clone(), alias: MIGRATED_KEY_ALIAS.to_owned(), broker: Broker::Kiwoom, credentials: KiwoomCredentials { app_key: Secret::new(stored.app_key), app_secret: Secret::new(stored.app_secret) }, account: KisAccountSettings::default() };
         let list = KeyList { keys: vec![key], market: Some(id) };
         self.save(&list)?;
         match self.legacy.remove() {
@@ -220,7 +230,15 @@ impl KeyFile {
             keys: list
                 .keys
                 .iter()
-                .map(|key| StoredEntry { id: key.id.as_str().to_owned(), alias: key.alias.clone(), broker: key.broker, app_key: key.credentials.app_key.expose().clone(), app_secret: key.credentials.app_secret.expose().clone() })
+                .map(|key| StoredEntry {
+                    id: key.id.as_str().to_owned(),
+                    alias: key.alias.clone(),
+                    broker: key.broker,
+                    app_key: key.credentials.app_key.expose().clone(),
+                    app_secret: key.credentials.app_secret.expose().clone(),
+                    account_no: key.account.number.as_ref().map(|number| number.stored()),
+                    hts_id: key.account.hts_id.as_ref().map(|id| id.expose().to_owned()),
+                })
                 .collect(),
         };
         self.list.write(&serde_json::to_vec(&stored).expect("문자열만 담은 구조체"))
@@ -283,6 +301,7 @@ pub struct StartupKey {
     pub broker: Broker,
     pub credentials: KiwoomCredentials,
     pub paths: KeyPaths,
+    pub account: KisAccountSettings,
 }
 
 pub struct StartupKeys {
@@ -298,12 +317,13 @@ pub fn market_lane_key<'a>(keys: &'a [StartupKey], market: Option<&KeyId>) -> Op
 
 pub struct KisStartup {
     pub env: Option<KisCredentials>,
+    pub env_account: KisAccountSettings,
     pub token_base: PathBuf,
 }
 
 impl KisStartup {
     pub fn none(bases: &FileBases) -> KisStartup {
-        KisStartup { env: None, token_base: bases.token.with_file_name(KIS_TOKEN_FILE_NAME) }
+        KisStartup { env: None, env_account: KisAccountSettings::default(), token_base: bases.token.with_file_name(KIS_TOKEN_FILE_NAME) }
     }
 }
 
@@ -325,12 +345,12 @@ pub fn startup_keys_with_kis(env: Option<KiwoomCredentials>, kis: KisStartup, fi
     let listed: Vec<KiwoomCredentials> = env.iter().cloned().chain(file_list.iter().flat_map(|list| list.keys.iter().filter(|key| key.broker == Broker::Kiwoom).map(|key| key.credentials.clone()))).collect();
     if let Some(credentials) = env.clone() {
         let paths = paths_for_key(bases, environment, &credentials, false, &listed);
-        keys.push(StartupKey { id: KeyId::env(), alias: ENV_KEY_ALIAS.to_owned(), origin: KeyOrigin::Env, broker: Broker::Kiwoom, credentials, paths });
+        keys.push(StartupKey { id: KeyId::env(), alias: ENV_KEY_ALIAS.to_owned(), origin: KeyOrigin::Env, broker: Broker::Kiwoom, credentials, paths, account: KisAccountSettings::default() });
     }
     if let Some(env_kis) = kis.env {
         let credentials = KiwoomCredentials { app_key: env_kis.app_key, app_secret: env_kis.app_secret };
         let paths = kis_paths(bases, kis.token_base.clone(), &credentials);
-        keys.push(StartupKey { id: KeyId::env_kis(), alias: ENV_KIS_KEY_ALIAS.to_owned(), origin: KeyOrigin::Env, broker: Broker::Kis, credentials, paths });
+        keys.push(StartupKey { id: KeyId::env_kis(), alias: ENV_KIS_KEY_ALIAS.to_owned(), origin: KeyOrigin::Env, broker: Broker::Kis, credentials, paths, account: kis.env_account.clone() });
     }
     if environment == KiwoomEnvironment::Mock {
         let market = keys.first().map(|key| key.id.clone());
@@ -352,7 +372,7 @@ pub fn startup_keys_with_kis(env: Option<KiwoomCredentials>, kis: KisStartup, fi
             Broker::Kiwoom => paths_for_key(bases, environment, &stored.credentials, keys.iter().any(|key| key.broker == Broker::Kiwoom && key.paths.token == bases.token), &listed),
             Broker::Kis => kis_paths(bases, kis_token_path(&kis.token_base, &stored.credentials), &stored.credentials),
         };
-        keys.push(StartupKey { id: stored.id, alias: stored.alias, origin: KeyOrigin::File, broker: stored.broker, credentials: stored.credentials, paths });
+        keys.push(StartupKey { id: stored.id, alias: stored.alias, origin: KeyOrigin::File, broker: stored.broker, credentials: stored.credentials, paths, account: stored.account });
     }
     let market = list.market.filter(|id| keys.iter().any(|key| key.id == *id)).or_else(|| keys.first().map(|key| key.id.clone()));
     StartupKeys { keys, market, file_problem }
@@ -382,7 +402,7 @@ mod tests {
     }
 
     fn stored(number: u32, alias: &str, key: &str) -> StoredKey {
-        StoredKey { id: KeyId::numbered(number), alias: alias.into(), broker: Broker::Kiwoom, credentials: credentials(key, &format!("FAKE-SECRET-{key}")) }
+        StoredKey { id: KeyId::numbered(number), alias: alias.into(), broker: Broker::Kiwoom, credentials: credentials(key, &format!("FAKE-SECRET-{key}")), account: KisAccountSettings::default() }
     }
 
     fn mode(p: &Path) -> u32 {
@@ -547,6 +567,26 @@ mod tests {
     }
 
     #[test]
+    fn a_kis_entry_keeps_its_account_number_and_hts_id_and_an_old_entry_without_them_still_reads() {
+        let (_dir, _lock, file) = temp_key_file();
+        write_list(&file, &format!(r#"{{"version":1,"keys":[{}]}}"#, entry_json("k1", Some("kis"), "FAKE-KIS-APPKEY-old-1")));
+        let old = file.load().unwrap();
+        assert_eq!(old.keys[0].account, KisAccountSettings::default(), "계좌번호 칸이 없는 옛 한투 항목은 그대로 읽힌다");
+
+        let account = KisAccountSettings::read(Some("50012356-01"), Some("fakehts01")).unwrap();
+        file.save(&KeyList { keys: vec![StoredKey { account: account.clone(), ..kis_stored(1, "FAKE-KIS-APPKEY-acct-1") }], market: None }).unwrap();
+        let text = std::fs::read_to_string(file.path()).unwrap();
+        assert!(text.contains(r#""accountNo":"50012356-01""#) && text.contains(r#""htsId":"fakehts01""#), "{text}");
+        assert_eq!(mode(file.path()), 0o600);
+        assert_eq!(mode(file.path().parent().unwrap()), 0o700);
+        assert_eq!(file.load().unwrap().keys[0].account, account);
+
+        write_list(&file, &text.replace("50012356-01", "5001-01"));
+        let error = file.load().expect_err("모양이 틀린 계좌번호는 파일 오류").to_string();
+        assert!(!error.contains("5001"), "{error}");
+    }
+
+    #[test]
     fn the_five_key_limit_and_the_duplicate_app_key_rule_are_counted_per_broker() {
         let (_dir, _lock, file) = temp_key_file();
         let kiwoom: Vec<String> = (1..=5).map(|n| entry_json(&format!("k{n}"), None, &format!("FAKE-APPKEY-a-{n}"))).collect();
@@ -569,7 +609,7 @@ mod tests {
         let bases = bases(&dir);
         file.save(&KeyList { keys: vec![stored(1, "키움", "FAKE-APPKEY-start-1"), kis_stored(2, "FAKE-KIS-APPKEY-start-2"), kis_stored(3, "FAKE-KIS-APPKEY-start-3")], market: None }).unwrap();
         let kis_base = dir.path().join("state/vallythevally/kis-token.json");
-        let kis = KisStartup { env: Some(KisCredentials { app_key: Secret::new("FAKE-KIS-APPKEY-env".into()), app_secret: Secret::new("FAKE-KIS-SECRET-env".into()) }), token_base: kis_base.clone() };
+        let kis = KisStartup { env: Some(KisCredentials { app_key: Secret::new("FAKE-KIS-APPKEY-env".into()), app_secret: Secret::new("FAKE-KIS-SECRET-env".into()) }), env_account: KisAccountSettings::default(), token_base: kis_base.clone() };
         let startup = startup_keys_with_kis(Some(credentials("FAKE-APPKEY-env", "FAKE-SECRET-env")), kis, &file, KiwoomEnvironment::Real, &bases);
         assert_eq!(startup.keys.iter().map(|key| (key.id.as_str(), key.broker, key.origin)).collect::<Vec<_>>(), [("env", Broker::Kiwoom, KeyOrigin::Env), ("env-kis", Broker::Kis, KeyOrigin::Env), ("k1", Broker::Kiwoom, KeyOrigin::File), ("k2", Broker::Kis, KeyOrigin::File), ("k3", Broker::Kis, KeyOrigin::File)]);
         assert_eq!(startup.market, Some(KeyId::env()), "환경 키가 둘 다 있고 고른 적이 없으면 키움 환경 키");
@@ -582,7 +622,7 @@ mod tests {
     fn a_kis_environment_key_alone_is_the_market_source_and_a_chosen_file_key_wins() {
         let (dir, _lock, file) = temp_key_file();
         let bases = bases(&dir);
-        let kis = || KisStartup { env: Some(KisCredentials { app_key: Secret::new("FAKE-KIS-APPKEY-env".into()), app_secret: Secret::new("FAKE-KIS-SECRET-env".into()) }), token_base: dir.path().join("kis-token.json") };
+        let kis = || KisStartup { env: Some(KisCredentials { app_key: Secret::new("FAKE-KIS-APPKEY-env".into()), app_secret: Secret::new("FAKE-KIS-SECRET-env".into()) }), env_account: KisAccountSettings::default(), token_base: dir.path().join("kis-token.json") };
         let startup = startup_keys_with_kis(None, kis(), &file, KiwoomEnvironment::Real, &bases);
         assert_eq!(startup.market, Some(KeyId::env_kis()));
         file.save(&KeyList { keys: vec![stored(1, "키움", "FAKE-APPKEY-start-1")], market: Some(KeyId::numbered(1)) }).unwrap();

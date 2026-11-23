@@ -121,6 +121,44 @@ impl KisApiId {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum KisEndpoint {
+    Market(KisApiId),
+    Trading(crate::trading::KisTradingApiId),
+}
+
+impl KisEndpoint {
+    pub fn tr_id(self) -> &'static str {
+        match self {
+            KisEndpoint::Market(api) => api.tr_id(),
+            KisEndpoint::Trading(api) => api.tr_id(),
+        }
+    }
+
+    pub fn path(self) -> &'static str {
+        match self {
+            KisEndpoint::Market(api) => api.path(),
+            KisEndpoint::Trading(api) => api.path(),
+        }
+    }
+
+    pub fn is_order_write(self) -> bool {
+        matches!(self, KisEndpoint::Trading(api) if api.is_order_write())
+    }
+}
+
+impl From<KisApiId> for KisEndpoint {
+    fn from(api: KisApiId) -> Self {
+        KisEndpoint::Market(api)
+    }
+}
+
+impl From<crate::trading::KisTradingApiId> for KisEndpoint {
+    fn from(api: crate::trading::KisTradingApiId) -> Self {
+        KisEndpoint::Trading(api)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

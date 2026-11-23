@@ -620,6 +620,12 @@ pub struct RegisteredIpInput {
 pub struct KiwoomKeyInput {
     pub app_key: String,
     pub app_secret: String,
+    #[serde(default)]
+    #[ts(optional)]
+    pub account_no: Option<String>,
+    #[serde(default)]
+    #[ts(optional)]
+    pub hts_id: Option<String>,
 }
 
 impl std::fmt::Debug for KiwoomKeyInput {
@@ -647,6 +653,33 @@ pub struct KiwoomKey {
     pub app_key_tail: Option<String>,
     pub market: bool,
     pub link: KiwoomLinkStatus,
+    pub kis_account: Option<KisAccountListing>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct KisAccountListing {
+    pub account_tail: Option<String>,
+    pub account_masked: Option<String>,
+    pub hts_id_set: bool,
+    pub source: KeySource,
+}
+
+#[derive(Clone, PartialEq, Eq, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct KisAccountInput {
+    pub account_no: String,
+    #[serde(default)]
+    #[ts(optional)]
+    pub hts_id: Option<String>,
+}
+
+impl std::fmt::Debug for KisAccountInput {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("KisAccountInput([가림])")
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -668,6 +701,12 @@ pub struct KiwoomKeyAdd {
     #[serde(default)]
     #[ts(optional)]
     pub broker: Option<Broker>,
+    #[serde(default)]
+    #[ts(optional)]
+    pub account_no: Option<String>,
+    #[serde(default)]
+    #[ts(optional)]
+    pub hts_id: Option<String>,
 }
 
 impl std::fmt::Debug for KiwoomKeyAdd {
@@ -1893,6 +1932,7 @@ pub struct OrdersStatus {
 #[ts(export)]
 pub struct OrdersAccount {
     pub key_id: String,
+    pub broker: Broker,
     pub alias: String,
     pub market: bool,
     pub state: OrdersState,
@@ -1930,6 +1970,7 @@ pub struct OrdersMarginInput {
 #[serde(rename_all = "camelCase")]
 #[ts(export)]
 pub struct OrdersAccountCheck {
+    pub broker: Broker,
     pub account_tail: String,
 }
 

@@ -5,12 +5,13 @@ use std::sync::Arc;
 use domain::{StockCode, Symbol, SymbolInfo, Venue};
 
 use super::journal::{BatchBegun, Begun, JournalError, Prepared, PreparedBatch};
+use super::kis::{KisOrigin, KisOutbound, KisTarget, kis_order_number, kis_reason, settle_kis};
 use super::memory::PriceBand;
 use super::request::{BuyOrder, CancelOrder, LimitOrder, ModifyOrder, OrderAck, OrderNumber, OrderRoute, SellOrder, TradingRequest};
 use super::service::{OpenEntry, Trading, TradingError};
 use super::switch::SwitchRecord;
 use super::tick;
-use crate::api::{self, KiwoomEnvironment, OrderCommandKind, OrderCommandState, OrderRejectReason, OrderSide};
+use crate::api::{self, Broker, KiwoomEnvironment, OrderCommandKind, OrderCommandState, OrderRejectReason, OrderSide};
 use crate::kiwoom::api::StockBasicInfo;
 use crate::kiwoom::error::{Category, Failure};
 use crate::kiwoom::rest::{Dispatch, KiwoomError, MergeScope, Page, Priority, SendOnce, Transmitted};
@@ -35,7 +36,7 @@ impl OrderLimits {
 enum Work {
     Place { code: StockCode, side: OrderSide, quantity: NonZeroU64, price: NonZeroU64, venue: Venue, confirmed: bool },
     Modify { order_no: OrderNumber, price: NonZeroU64, confirmed: bool },
-    Cancel { order_no: OrderNumber, listed: Option<OpenEntry> },
+    Cancel { order_no: OrderNumber, listed: Option<Box<OpenEntry>> },
 }
 
 struct ResolvedTarget {
@@ -44,6 +45,7 @@ struct ResolvedTarget {
     remaining: NonZeroU64,
     side: OrderSide,
     price: u64,
+    kis: Option<KisOrigin>,
 }
 
 enum Outbound {
@@ -51,6 +53,7 @@ enum Outbound {
     Sell(SellOrder),
     Modify(ModifyOrder),
     Cancel(CancelOrder),
+    Kis(KisOutbound),
 }
 
 enum Stop {
@@ -82,6 +85,9 @@ impl From<TradingError> for Stop {
             TradingError::Off | TradingError::FileUnusable(_) => Stop::Refuse(OrderRejectReason::OrdersOff),
             TradingError::AccountChanged => Stop::Refuse(OrderRejectReason::AccountChanged),
             TradingError::Kiwoom(e) => e.into(),
+            TradingError::Kis(e) => Stop::Refuse(kis_reason(&e)),
+            TradingError::NoKisAccount => Stop::Refuse(OrderRejectReason::OrdersOff),
+            TradingError::KisNotConnected => Stop::Refuse(OrderRejectReason::NotConnected),
             TradingError::Journal(why) => Stop::Broken(why),
             TradingError::TailMismatch | TradingError::Unreadable(_) | TradingError::BadRequest(_) | TradingError::CommandNotFound | TradingError::UnknownAccount | TradingError::UnknownKey | TradingError::SameAccount(_) => Stop::Refuse(OrderRejectReason::KiwoomUnavailable),
         }
@@ -137,7 +143,18 @@ fn positive(value: u64, what: &'static str) -> Result<NonZeroU64, TradingError> 
     NonZeroU64::new(value).filter(|v| i64::try_from(v.get()).is_ok()).ok_or(TradingError::BadRequest(what))
 }
 
+fn kis_target(target: &ResolvedTarget, order_no: &OrderNumber) -> Result<KisTarget, Stop> {
+    KisTarget::of(target.kis.as_ref(), order_no, target.remaining).ok_or(Stop::Refuse(OrderRejectReason::InvalidOrder))
+}
+
 impl Trading {
+    fn order_number(&self, text: &str) -> Result<OrderNumber, TradingError> {
+        match self.broker() {
+            Broker::Kiwoom => OrderNumber::parse(text).ok_or(TradingError::BadRequest("주문번호는 7자리 숫자여야 합니다")),
+            Broker::Kis => kis_order_number(text).ok_or(TradingError::BadRequest("주문번호는 10자리까지의 숫자여야 합니다")),
+        }
+    }
+
     async fn ready(&self) -> Result<(), TradingError> {
         self.recovered.get_or_init(|| async { self.journal.recover(self.clock.now().unix()).await.map_err(|e| e.to_string()) }).await.clone().map_err(TradingError::Journal)
     }
@@ -180,7 +197,7 @@ impl Trading {
         if !valid_command_id(&input.command_id) {
             return Err(TradingError::BadRequest("command_id는 영문자·숫자·`-`·`_` 8~64자여야 합니다"));
         }
-        let order_no = OrderNumber::parse(&input.order_no).ok_or(TradingError::BadRequest("주문번호는 7자리 숫자여야 합니다"))?;
+        let order_no = self.order_number(&input.order_no)?;
         let price = positive(input.price, "가격은 0보다 크고 너무 크지 않아야 합니다")?;
         let account_ref = Self::account_ref_of_record(self.enabled_record()?)?;
         let prepared = Prepared { command_id: input.command_id, account_ref, kind: OrderCommandKind::Modify, code: None, venue: None, quantity: None, price: Some(price.get()), target_order_no: Some(order_no.as_str().to_owned()) };
@@ -191,7 +208,7 @@ impl Trading {
         if !valid_command_id(&input.command_id) {
             return Err(TradingError::BadRequest("command_id는 영문자·숫자·`-`·`_` 8~64자여야 합니다"));
         }
-        let order_no = OrderNumber::parse(&input.order_no).ok_or(TradingError::BadRequest("주문번호는 7자리 숫자여야 합니다"))?;
+        let order_no = self.order_number(&input.order_no)?;
         let account_ref = Self::account_ref_of_record(self.enabled_record()?)?;
         let prepared = Prepared { command_id: input.command_id, account_ref, kind: OrderCommandKind::Cancel, code: None, venue: None, quantity: None, price: None, target_order_no: Some(order_no.as_str().to_owned()) };
         self.run_one(prepared, Work::Cancel { order_no, listed: None }).await
@@ -226,8 +243,8 @@ impl Trading {
             return self.batch_reply(account_ref, begun).await;
         };
         for command in commands.iter().filter(|c| c.state == OrderCommandState::Prepared) {
-            let target = OrderNumber::parse(command.target_order_no.as_deref().expect("일괄 취소 명령은 대상 주문번호를 가진다")).expect("목록에서 읽은 주문번호는 형식을 이미 확인했다");
-            let listed = listed.get(target.as_str()).cloned();
+            let target = self.order_number(command.target_order_no.as_deref().expect("일괄 취소 명령은 대상 주문번호를 가진다")).expect("목록에서 읽은 주문번호는 형식을 이미 확인했다");
+            let listed = listed.get(target.as_str()).cloned().map(Box::new);
             if let Err(e) = self.execute(&command.command_id, &account_ref, Work::Cancel { order_no: target, listed }).await {
                 tracing::error!(error = %e, "일괄 취소의 한 명령이 저널 오류로 끝났습니다");
             }
@@ -306,8 +323,21 @@ impl Trading {
             Err(Stop::Broken(why)) => return Err(TradingError::Journal(why)),
         };
         self.journal.mark_sending(command_id, now()).await?;
-        let (result, transmitted) = self.send_once(outbound).await;
-        let settled = settle(result, transmitted.happened(), self.open.load(std::sync::atomic::Ordering::SeqCst));
+        let orders_on = || self.open.load(std::sync::atomic::Ordering::SeqCst);
+        let settled = match outbound {
+            Outbound::Kis(outbound) => {
+                let (result, transmitted) = match self.kis_desk() {
+                    Ok(desk) => self.kis_send_once(&desk, &outbound).await,
+                    Err(_) => (Err(crate::kis::rest::KisError::NotAdmitted), false),
+                };
+                let settled = settle_kis(result, transmitted, orders_on());
+                Settled { state: settled.state, reason: settled.reason, order_no: settled.order_no }
+            }
+            kiwoom => {
+                let (result, transmitted) = self.send_once(kiwoom).await;
+                settle(result, transmitted.happened(), orders_on())
+            }
+        };
         if matches!(settled.state, OrderCommandState::Accepted | OrderCommandState::Unknown) {
             self.recent_open.forget();
         }
@@ -325,6 +355,7 @@ impl Trading {
             Outbound::Sell(order) => self.dispatch_once(&order).await,
             Outbound::Modify(order) => self.dispatch_once(&order).await,
             Outbound::Cancel(order) => self.dispatch_once(&order).await,
+            Outbound::Kis(_) => (Err(KiwoomError::NotConnected), Transmitted::default()),
         }
     }
 
@@ -358,16 +389,28 @@ impl Trading {
             return Err(OrderRejectReason::AccountChanged.into());
         }
         let limits = OrderLimits::of(&record);
-        let rest = self.rest()?;
-        if let Some(blocked) = rest.blocked() {
-            return Err(blocked.into());
-        }
+        let mock = match self.broker() {
+            Broker::Kiwoom => {
+                let rest = self.rest()?;
+                if let Some(blocked) = rest.blocked() {
+                    return Err(blocked.into());
+                }
+                rest.environment() == KiwoomEnvironment::Mock
+            }
+            Broker::Kis => {
+                let desk = self.kis_desk()?;
+                if desk.rest.auth().halted().is_some() {
+                    return Err(OrderRejectReason::AuthBlocked.into());
+                }
+                false
+            }
+        };
         if self.journal.blocking_unknown(account_ref).await? > 0 {
             return Err(OrderRejectReason::UnknownPending.into());
         }
         match work {
             Work::Place { code, side, quantity, price, venue, confirmed } => {
-                if rest.environment() == KiwoomEnvironment::Mock && *venue != Venue::Krx {
+                if mock && *venue != Venue::Krx {
                     return Err(OrderRejectReason::MockKrxOnly.into());
                 }
                 let info = self.info_of(*code)?;
@@ -393,6 +436,9 @@ impl Trading {
                         }
                     }
                 }
+                if self.broker() == Broker::Kis {
+                    return Ok(Outbound::Kis(KisOutbound::place(*side, *venue, *code, *quantity, *price)));
+                }
                 let order = LimitOrder::new(OrderRoute::from(*venue), *code, *quantity, *price);
                 Ok(match side {
                     OrderSide::Buy => Outbound::Buy(BuyOrder(order)),
@@ -400,7 +446,9 @@ impl Trading {
                 })
             }
             Work::Modify { order_no, price, confirmed } => {
-                let ResolvedTarget { code, venue, remaining, side, price: original_price } = self.resolve_target(command_id, order_no, true, None).await?;
+                let target = self.resolve_target(command_id, order_no, true, None).await?;
+                let kis = if self.broker() == Broker::Kis { Some(kis_target(&target, order_no)?) } else { None };
+                let ResolvedTarget { code, venue, remaining, side, price: original_price, .. } = target;
                 let info = self.info_of(code)?;
                 if venue == Venue::Nxt && !info.nxt_enabled {
                     return Err(OrderRejectReason::NxtUnavailable.into());
@@ -414,10 +462,16 @@ impl Trading {
                         return Err(OrderRejectReason::BuyOverBuyingPower.into());
                     }
                 }
-                Ok(Outbound::Modify(ModifyOrder::new(OrderRoute::from(venue), order_no, code, remaining, *price)))
+                Ok(match kis {
+                    Some(target) => Outbound::Kis(KisOutbound::Modify { target, price: *price }),
+                    None => Outbound::Modify(ModifyOrder::new(OrderRoute::from(venue), order_no, code, remaining, *price)),
+                })
             }
             Work::Cancel { order_no, listed } => {
-                let target = self.resolve_target(command_id, order_no, false, listed.clone()).await?;
+                let target = self.resolve_target(command_id, order_no, false, listed.as_deref().cloned()).await?;
+                if self.broker() == Broker::Kis {
+                    return Ok(Outbound::Kis(KisOutbound::Cancel { target: kis_target(&target, order_no)? }));
+                }
                 Ok(Outbound::Cancel(CancelOrder::new(OrderRoute::from(target.venue), order_no, target.code, target.remaining)))
             }
         }
@@ -448,7 +502,7 @@ impl Trading {
         let remaining = NonZeroU64::new(entry.order.open_quantity).ok_or(OrderRejectReason::OrderNotFound)?;
         let venue: Venue = entry.order.venue.into();
         self.journal.resolve_target(command_id, code.as_str(), venue, remaining.get(), self.clock.now().unix()).await?;
-        Ok(ResolvedTarget { code, venue, remaining, side: entry.order.side, price: entry.order.price })
+        Ok(ResolvedTarget { code, venue, remaining, side: entry.order.side, price: entry.order.price, kis: entry.kis })
     }
 
     async fn fetch_price_band(&self, code: StockCode) -> Result<PriceBand, Stop> {

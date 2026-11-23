@@ -340,7 +340,7 @@ pub async fn start(config: &Config, lock: &InstanceLock, adapters: Adapters) -> 
     };
     let bases = FileBases { token: config.token_path.clone(), registered_ip: config.kiwoom_key_path.with_file_name(crate::config::REGISTERED_IP_FILE_NAME), held: lock.held() };
     let kis_token_base = config.kis_token_path.clone().unwrap_or_else(|| bases.token.with_file_name(crate::config::KIS_TOKEN_FILE_NAME));
-    let kis_startup = KisStartup { env: config.kis_credentials.clone(), token_base: kis_token_base.clone() };
+    let kis_startup = KisStartup { env: config.kis_credentials.clone(), env_account: config.kis_account.clone(), token_base: kis_token_base.clone() };
     let startup = startup_keys_with_kis(config.kiwoom_credentials.clone(), kis_startup, &key_file, config.kiwoom_environment, &bases);
     let token_file_for = |paths: &KeyPaths| TokenFile::held(paths.token.clone(), lock.held()).with_environment(config.kiwoom_environment);
     let market_key = market_lane_key(&startup.keys, startup.market.as_ref());

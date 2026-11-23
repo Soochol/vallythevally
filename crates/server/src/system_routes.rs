@@ -17,6 +17,7 @@ use crate::kiwoom::link::{ConnectStep, LinkState, Problem};
 use crate::kiwoom::private_file::FileError;
 use crate::kiwoom::rest::Usage;
 use crate::public_ip::{self, PublicIpTransport};
+use crate::trading::KisAccountSettings;
 
 const BODY_LIMIT: usize = 4096;
 
@@ -176,6 +177,7 @@ pub fn routes(state: Arc<AppState>) -> Router<Arc<AppState>> {
         .route("/api/system/kiwoom/keys/{id}", axum::routing::delete(delete_key_by_id))
         .route("/api/system/kiwoom/keys/{id}/alias", put(rename_key))
         .route("/api/system/kiwoom/keys/{id}/key", put(replace_key))
+        .route("/api/system/kiwoom/keys/{id}/account", put(put_kis_account))
         .route("/api/system/kiwoom/keys/{id}/connect", post(connect_key))
         .route("/api/system/kiwoom/keys/{id}/disconnect", post(disconnect_key))
         .route("/api/system/kiwoom/market-key", put(put_market_key))
@@ -241,7 +243,7 @@ fn kiwoom_usage(usage: &Usage) -> api::KiwoomUsage {
 
 fn key_failure(error: KeyError) -> ApiFailure {
     match error {
-        KeyError::Limit | KeyError::DuplicateAppKey | KeyError::Alias(_) => ApiFailure::bad_request(error.to_string()),
+        KeyError::Limit | KeyError::DuplicateAppKey | KeyError::DuplicateAccount | KeyError::AccountRequired | KeyError::NotKis | KeyError::Alias(_) => ApiFailure::bad_request(error.to_string()),
         KeyError::Unknown => ApiFailure::new(ApiErrorCode::NotFound, error.to_string()),
         KeyError::EnvReadOnly => env_key_conflict(),
         KeyError::NoStore | KeyError::File(_) => ApiFailure::new(ApiErrorCode::Internal, error.to_string()),
@@ -261,6 +263,10 @@ fn checked_credentials(app_key: &str, app_secret: &str) -> Result<KiwoomCredenti
         return Err(ApiFailure::bad_request("시크릿이 비어 있습니다"));
     }
     Ok(KiwoomCredentials { app_key: Secret::new(app_key.to_owned()), app_secret: Secret::new(app_secret.to_owned()) })
+}
+
+fn checked_kis_account(account_no: Option<&str>, hts_id: Option<&str>) -> Result<KisAccountSettings, ApiFailure> {
+    KisAccountSettings::read(account_no, hts_id).map_err(ApiFailure::bad_request)
 }
 
 fn refuse_mock(st: &AppState) -> Result<(), ApiFailure> {
@@ -305,7 +311,8 @@ async fn add_key(State(st): State<Arc<AppState>>, body: Body) -> Result<Json<api
     refuse_mock(&st)?;
     let credentials = checked_credentials(&input.app_key, &input.app_secret)?;
     let broker = input.broker.unwrap_or(Broker::Kiwoom);
-    st.keys.add_for(broker, &input.alias, credentials).map_err(key_failure)?;
+    let account = checked_kis_account(input.account_no.as_deref(), input.hts_id.as_deref())?;
+    st.keys.add_for(broker, &input.alias, credentials, account).map_err(key_failure)?;
     st.source_switch.sync().await;
     st.system.set_key_file_problem(None);
     tracing::info!(broker = ?broker, "키를 더했습니다");
@@ -327,10 +334,32 @@ async fn replace_key(State(st): State<Arc<AppState>>, Path(id): Path<String>, bo
     let _write = st.system.write.lock().await;
     refuse_mock(&st)?;
     let credentials = checked_credentials(&input.app_key, &input.app_secret)?;
+    let account = match input.account_no.as_deref() {
+        Some(account_no) => {
+            let account = checked_kis_account(Some(account_no), input.hts_id.as_deref())?;
+            st.keys.check_kis_account(&id, &account).map_err(key_failure)?;
+            Some(account)
+        }
+        None => None,
+    };
     st.keys.replace_credentials(&id, credentials).map_err(key_failure)?;
+    if let Some(account) = account {
+        st.keys.set_kis_account(&id, account).map_err(key_failure)?;
+    }
     st.source_switch.sync().await;
     st.system.set_key_file_problem(None);
     tracing::info!("키움 키를 바꿨습니다");
+    Ok(Json(key_list(&st)))
+}
+
+async fn put_kis_account(State(st): State<Arc<AppState>>, Path(id): Path<String>, body: Body) -> Result<Json<api::KiwoomKeyList>, ApiFailure> {
+    let input: api::KisAccountInput = read_body(body).await?;
+    let id = key_id(&id)?;
+    let _write = st.system.write.lock().await;
+    refuse_mock(&st)?;
+    let account = checked_kis_account(Some(&input.account_no), input.hts_id.as_deref())?;
+    st.keys.set_kis_account(&id, account).map_err(key_failure)?;
+    tracing::info!("한투 키의 계좌번호·HTS ID를 바꿨습니다");
     Ok(Json(key_list(&st)))
 }
 
@@ -447,7 +476,13 @@ fn key_entry(st: &AppState, key: &ListedKey) -> api::KiwoomKey {
         Connection::Kiwoom { lane, registered_ip } => link_status(st, &lane.rest, &lane.link, source, registered_ip.clone(), key.market),
         Connection::Kis(lane) => kis_link_status(st, lane, source),
     };
-    api::KiwoomKey { key_id: key.id.to_string(), alias: key.alias.clone(), broker: key.broker, source, app_key_tail: key.app_key_tail.clone(), market: key.market, link }
+    let kis_account = (key.broker == Broker::Kis).then(|| api::KisAccountListing {
+        account_tail: key.account.number.as_ref().map(|number| number.tail()),
+        account_masked: key.account.number.as_ref().map(|number| number.masked()),
+        hts_id_set: key.account.hts_id.is_some(),
+        source,
+    });
+    api::KiwoomKey { key_id: key.id.to_string(), alias: key.alias.clone(), broker: key.broker, source, app_key_tail: key.app_key_tail.clone(), market: key.market, link, kis_account }
 }
 
 fn kis_link_status(st: &AppState, lane: &crate::kis::link::KisLane, key_source: KeySource) -> KiwoomLinkStatus {

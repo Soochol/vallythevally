@@ -123,6 +123,15 @@ impl ApiFailure {
                 tracing::warn!(reason = %kiwoom, "계좌 조회에 답하지 못했습니다");
                 failure
             }
+            T::Kis(kis) => {
+                tracing::warn!(reason = %kis, "한투 계좌 요청에 답하지 못했습니다");
+                match crate::kis::market_rest::failure_of(kis) {
+                    crate::market_source::SourceError::Failed(failure) => ApiFailure::source(&failure),
+                    other => ApiFailure::new(KiwoomUnavailable, other.to_string()),
+                }
+            }
+            T::KisNotConnected => with_reason(KiwoomUnavailable, api::ApiErrorReason::NotConnected),
+            T::NoKisAccount => ApiFailure::bad_request(e.to_string()),
             T::Off | T::FileUnusable(_) => with_reason(Conflict, api::ApiErrorReason::OrdersOff),
             T::AccountChanged => with_reason(Conflict, api::ApiErrorReason::AccountChanged),
             T::TailMismatch | T::BadRequest(_) => ApiFailure::bad_request(e.to_string()),

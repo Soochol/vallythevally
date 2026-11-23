@@ -66,6 +66,11 @@ impl Transport for FakeKis {
     }
 }
 
+fn synthetic_account(key: &str) -> String {
+    let digits = key.bytes().fold(0_u64, |sum, byte| (sum * 31 + u64::from(byte)) % 100_000_000);
+    format!("{digits:08}-01")
+}
+
 struct Env {
     _tmp: tempfile::TempDir,
     lock: PathBuf,
@@ -126,6 +131,9 @@ impl Client {
         if let Some(broker) = broker {
             body["broker"] = json!(broker);
         }
+        if broker == Some("kis") {
+            body["accountNo"] = json!(synthetic_account(key));
+        }
         self.send(reqwest::Method::POST, "/api/system/kiwoom/keys", Some(body)).await
     }
 
@@ -182,6 +190,25 @@ async fn the_kis_env_key_is_a_read_only_line_after_the_kiwoom_env_key_and_connec
     for secret in [KIS_KEY, KIS_SECRET, KIWOOM_KEY, KIWOOM_SECRET, "FAKE-KIS-TOKEN"] {
         assert!(!listed.contains(secret), "{secret}");
     }
+    server.stop().await;
+}
+
+#[tokio::test]
+async fn the_kis_env_account_number_and_hts_id_show_as_env_values_with_only_the_tail_and_cannot_be_changed_on_screen() {
+    let (fake, kis, env) = (ScriptedTransport::new(), FakeKis::new(), Env::new());
+    let mut pairs = WITH_KIS_ENV.to_vec();
+    pairs.extend([("VALLY_KIS_ACCOUNT_NO", "50012356-01"), ("VALLY_KIS_HTS_ID", "fakehtsenv")]);
+    let server = env.spawn(&fake, &kis, &pairs);
+    let client = Client::of(&server).await;
+    client.until_key_state("env-kis", "connected").await;
+    let keys = client.keys().await;
+    let line = keys.iter().find(|key| key["keyId"] == "env-kis").unwrap();
+    assert_eq!(line["kisAccount"], json!({"accountTail": "56", "accountMasked": "****-**56", "htsIdSet": true, "source": "env"}));
+    assert_eq!(keys.iter().find(|key| key["keyId"] == "env").unwrap()["kisAccount"], Value::Null, "키움 키에는 한투 계좌 칸이 없다");
+    let (status, body) = client.send(reqwest::Method::PUT, "/api/system/kiwoom/keys/env-kis/account", Some(json!({"accountNo": "50012357-01"}))).await;
+    assert_eq!(status, 409, "{body}");
+    let listed = client.get("/api/system/kiwoom/keys").await.1.to_string();
+    assert!(!listed.contains("50012356") && !listed.contains("fakehtsenv"), "{listed}");
     server.stop().await;
 }
 
