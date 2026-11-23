@@ -1,7 +1,7 @@
 import type { Coordinate, Logical, Time } from "lightweight-charts";
 import { expect, test } from "vitest";
 import { fromScreen, timelineOf, toScreen } from "./drawings/anchor";
-import { chartTimeProjection, preserveTimeRange, type ChartTimeScale } from "./timeAxis";
+import { chartTimeProjection, PendingScroll, preserveTimeRange, type ChartTimeScale } from "./timeAxis";
 import { toChartTime } from "./time";
 
 const year = (n: number) => Date.UTC(n, 0, 1) / 1000 - 32400;
@@ -10,8 +10,10 @@ function range(from: number, to: number) {
   if (!logical(from) || !logical(to)) throw new Error("잘못된 범위");
   return { from, to };
 }
-function scaleOf(initial: number[]) {
+function scaleOf(initial: number[], deferred = false) {
   let times = initial;
+  let queued: number | null = null;
+  const afterPaint: (() => void)[] = [];
   let offset = 2;
   let width = 1000;
   const spacing = 100;
@@ -36,9 +38,9 @@ function scaleOf(initial: number[]) {
     },
     getVisibleLogicalRange: visible,
     scrollPosition: () => offset,
-    scrollToPosition: (next) => { offset = next; },
+    scrollToPosition: (next) => { if (deferred) queued = next; else offset = next; },
   };
-  return { scale, spacing, width: () => width, change: (next: number[], nextWidth = width) => { times = next; width = nextWidth; } };
+  return { scale, spacing, width: () => width, afterNextPaint: (callback: () => void) => { afterPaint.push(callback); }, jump: (next: number) => { offset = next; }, paint: () => { if (queued !== null) offset = queued; queued = null; afterPaint.splice(0).forEach((callback) => callback()); }, change: (next: number[], nextWidth = width) => { times = next; width = nextWidth; } };
 }
 
 test("전역 금융 시각과 가격·미래 시각을 양방향으로 변환한다", () => {
@@ -70,8 +72,73 @@ test("과거 봉이 기존 금융 시각을 채우거나 금융 시각이 사라
     return f.width() - f.scale.logicalToCoordinate(index)!;
   };
   const before = distance();
-  preserveTimeRange(f.scale, "Y", () => f.change([2015, 2016, 2017, 2018, 2019, 2020, 2021, 2022, 2023, 2024, 2025, 2026].map(year), 1018));
+  preserveTimeRange(f.scale, "Y", new PendingScroll(f.afterNextPaint), () => f.change([2015, 2016, 2017, 2018, 2019, 2020, 2021, 2022, 2023, 2024, 2025, 2026].map(year), 1018));
   expect(distance()).toBeCloseTo(before, 8);
-  preserveTimeRange(f.scale, "Y", () => f.change([2016, 2017, 2018, 2019, 2020, 2021, 2022, 2023, 2024, 2025, 2026].map(year), 1000));
+  preserveTimeRange(f.scale, "Y", new PendingScroll(f.afterNextPaint), () => f.change([2016, 2017, 2018, 2019, 2020, 2021, 2022, 2023, 2024, 2025, 2026].map(year), 1000));
   expect(distance()).toBeCloseTo(before, 8);
+});
+
+test("아직 paint되지 않은 위치 명령이 있으면 그 위치를 기준으로 보정한다", () => {
+  const f = scaleOf([2015, 2016, 2021, 2022, 2023, 2024, 2025, 2026].map(year), true);
+  const scroll = new PendingScroll(f.afterNextPaint);
+  scroll.scrollTo(f.scale, scroll.position(f.scale) - 1.2);
+  preserveTimeRange(f.scale, "Y", scroll, () => f.change([2013, 2014, 2015, 2016, 2021, 2022, 2023, 2024, 2025, 2026].map(year)));
+  f.paint();
+  expect(f.scale.scrollPosition()).toBeCloseTo(0.8, 8);
+});
+
+test("한 프레임에 위치 명령이 두 번 와도 이동이 쌓이고 paint 뒤에는 실제 위치를 쓴다", () => {
+  const f = scaleOf([2015, 2016, 2021].map(year), true);
+  const scroll = new PendingScroll(f.afterNextPaint);
+  scroll.scrollTo(f.scale, scroll.position(f.scale) + 1);
+  scroll.scrollTo(f.scale, scroll.position(f.scale) + 1);
+  f.paint();
+  expect(f.scale.scrollPosition()).toBe(4);
+  expect(scroll.position(f.scale)).toBe(4);
+});
+
+test("paint로 적용된 예약은 다른 경로로 위치가 예약 전 값에 정확히 돌아와도 쓰이지 않는다", () => {
+  const f = scaleOf([2015, 2016, 2021].map(year), true);
+  const scroll = new PendingScroll(f.afterNextPaint);
+  const start = f.scale.scrollPosition();
+  scroll.scrollTo(f.scale, scroll.position(f.scale) + 3);
+  f.paint();
+  expect(f.scale.scrollPosition()).toBe(start + 3);
+  f.jump(start);
+  expect(scroll.position(f.scale)).toBe(start);
+  scroll.scrollTo(f.scale, scroll.position(f.scale) + 1);
+  f.paint();
+  expect(f.scale.scrollPosition()).toBe(start + 1);
+});
+
+test("paint 전에 새로 예약한 명령은 이전 예약의 paint 뒤 정리에 지워지지 않는다", () => {
+  const f = scaleOf([2015, 2016, 2021].map(year), true);
+  const scroll = new PendingScroll(f.afterNextPaint);
+  const start = f.scale.scrollPosition();
+  scroll.scrollTo(f.scale, start + 1);
+  scroll.scrollTo(f.scale, scroll.position(f.scale) + 1);
+  expect(scroll.position(f.scale)).toBe(start + 2);
+  f.paint();
+  expect(scroll.position(f.scale)).toBe(start + 2);
+});
+
+test("변경 중에 라이브러리가 오른쪽 오프셋을 동기로 바꿔도 예약이 없으면 그 변화를 흡수한다", () => {
+  const f = scaleOf([2015, 2016, 2021, 2022, 2023, 2024, 2025, 2026].map(year), true);
+  const scroll = new PendingScroll(f.afterNextPaint);
+  preserveTimeRange(f.scale, "Y", scroll, () => { f.change([2015, 2016, 2021, 2022, 2023, 2024, 2025, 2026, 2027, 2028].map(year)); f.jump(f.scale.scrollPosition() - 2); });
+  f.paint();
+  const index = chartTimeProjection(f.scale, "Y").toLogical(year(2028))!;
+  expect(f.scale.scrollPosition()).toBeCloseTo(0, 8);
+  expect(f.scale.getVisibleLogicalRange()!.to - index).toBeCloseTo(0, 8);
+});
+
+test("변경 중에 라이브러리가 오른쪽 오프셋을 동기로 바꿔도 예약이 있으면 변화와 예약을 둘 다 반영한다", () => {
+  const f = scaleOf([2015, 2016, 2021, 2022, 2023, 2024, 2025, 2026].map(year), true);
+  const scroll = new PendingScroll(f.afterNextPaint);
+  scroll.scrollTo(f.scale, scroll.position(f.scale) - 1.2);
+  preserveTimeRange(f.scale, "Y", scroll, () => { f.change([2015, 2016, 2021, 2022, 2023, 2024, 2025, 2026, 2027, 2028].map(year)); f.jump(f.scale.scrollPosition() - 2); });
+  f.paint();
+  const index = chartTimeProjection(f.scale, "Y").toLogical(year(2028))!;
+  expect(f.scale.scrollPosition()).toBeCloseTo(-1.2, 8);
+  expect(f.scale.getVisibleLogicalRange()!.to - index).toBeCloseTo(-1.2, 8);
 });

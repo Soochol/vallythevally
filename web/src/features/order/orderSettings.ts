@@ -5,6 +5,8 @@ export const SHARE_PRESET_COUNT = 4;
 export const MAX_PRESET_SHARES = 999_999;
 export const MAX_PRESET_AMOUNT_MAN = 999_999;
 export const AMOUNT_UNIT_WON = 10_000;
+export const ORDER_ROUTES = [{ value: "combined", label: "SOR" }, { value: "krx", label: "KRX" }, { value: "nxt", label: "NXT" }] as const;
+export const routeLabel = (venue: Venue): string => ORDER_ROUTES.find((route) => route.value === venue)!.label;
 export const KEEP_LAST_ENTRY_LABEL = "마지막 주문 수량 유지";
 
 export interface OrderSettings {

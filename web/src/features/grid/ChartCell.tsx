@@ -35,8 +35,6 @@ function runIndicatorCommand(cellId: WindowId, id: string, command: IndicatorCom
   const config = chartWindows(store.layout).find((c) => c.id === cellId)?.chartSettings.indicators.find((i) => i.id === id);
   if (!config) return;
   switch (command) {
-    case "refresh":
-      return;
     case "edit":
       return;
     case "collapse":
@@ -90,7 +88,6 @@ export function ChartCell({ cellId, status, onStatus }: Props) {
       onStatus: (s) => onStatusRef.current(s),
       socket: marketSocket,
       onIndicatorCommand: (id, command, anchor) => {
-        if (command === "refresh") return useSelectionStore.getState().openFinancialUpdate();
         if (command !== "edit") return runIndicatorCommand(cellIdRef.current, id, command);
         if (shownIndicatorWindow() === "inspector") return openIndicatorCommand(cellIdRef.current, "current", id);
         const initial = chartWindows(useLayoutStore.getState().layout).find((c) => c.id === cellIdRef.current)?.chartSettings.indicators.find((i) => i.id === id);
@@ -122,7 +119,7 @@ export function ChartCell({ cellId, status, onStatus }: Props) {
   }, [cell, chartSettings, venue, info, preview, compareNames]);
 
   useEffect(() => {
-    ctl.current?.setFinancials(financial.data ?? null, financial.error ? "재무자료 조회 실패 · 재무자료 창에서 다시 확인하세요" : undefined);
+    ctl.current?.setFinancials(financial.data ?? null, financial.error ? "재무자료 조회 실패" : undefined);
   }, [cell.symbol, cell.period, financial.data, financial.error]);
 
   useEffect(() => {

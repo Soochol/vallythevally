@@ -3,14 +3,24 @@ use std::fmt;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
-use domain::{KstDate, KstTime, StockCode, Venue};
+use domain::{KstDate, KstTime, Ohlcv, Price, StockCode, TimeOfDay, Venue, Volume};
 use tokio::sync::watch;
 
+use super::Observation;
+use crate::api::Broker;
 use crate::clock::Clock;
+use crate::kis::market_rest::{DayRow, DayValues, MULTI_PRICE_MAX_ROWS, multi_price_day_rows};
+use crate::kis::rest::KisRest;
 use crate::kiwoom::api::StockQuotes;
 use crate::kiwoom::rest::KiwoomError;
-use crate::market_source::{KiwoomHandle, MergeScope, Priority};
-use crate::kiwoom::wire::{KrxSummary, StockQuotesResponse, WireError, parse_krx_summary};
+use crate::market_source::{KiwoomHandle, MergeScope, Priority, SourceError};
+use crate::kiwoom::wire::{KrxSummary, KrxSummaryValues, MillionWon, StockQuotesResponse, WireError, parse_krx_summary};
+
+const WON_PER_MILLION: u64 = 1_000_000;
+const KIS_ROWS_TRADE_FROM: TimeOfDay = match TimeOfDay::hms(9, 0, 0) {
+    Some(t) => t,
+    None => unreachable!(),
+};
 
 static NEXT_COLLECTION: AtomicU64 = AtomicU64::new(1);
 
@@ -35,6 +45,7 @@ pub enum MissingSummary {
     DuplicateRow,
     Unreadable(WireError),
     OtherDate(KstDate),
+    DayUnknown,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -48,6 +59,7 @@ pub struct SummaryBatch {
     pub id: CollectionId,
     pub basis: CollectionBasis,
     pub target: KstDate,
+    pub broker: Broker,
     pub venue: Venue,
     pub started_at: KstTime,
     pub completed_at: KstTime,
@@ -63,6 +75,7 @@ impl SummaryBatch {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CollectionError {
     Kiwoom(KiwoomError),
+    Kis(SourceError),
     DateChanged,
     Cancelled,
     TargetsChanged,
@@ -74,6 +87,7 @@ impl fmt::Display for CollectionError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Kiwoom(e) => e.fmt(f),
+            Self::Kis(e) => e.fmt(f),
             Self::DateChanged => f.write_str("수집 중 날짜가 바뀌었습니다"),
             Self::Cancelled => f.write_str("당일 요약 수집을 취소했습니다"),
             Self::BasisChanged => f.write_str("수집을 시작한 확정 이력 세대가 다릅니다. 다시 실행하세요"),
@@ -87,10 +101,24 @@ impl std::error::Error for CollectionError {}
 
 type Outcome = Result<Arc<SummaryBatch>, CollectionError>;
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Receiving {
+    Kiwoom,
+    Kis(Observation),
+}
+
+struct Collecting {
+    id: CollectionId,
+    basis: CollectionBasis,
+    target: KstDate,
+    started_at: KstTime,
+}
+
 struct Flight {
     id: CollectionId,
     basis: CollectionBasis,
     target: KstDate,
+    receiving: Receiving,
     codes: Vec<StockCode>,
     outcome: watch::Sender<Option<Outcome>>,
     task: tokio::task::AbortHandle,
@@ -122,7 +150,11 @@ impl SummaryCollector {
         stop(&mut state, CollectionError::Cancelled);
     }
 
-    pub async fn collect(self: &Arc<Self>, mut codes: Vec<StockCode>, basis: CollectionBasis) -> Outcome {
+    pub async fn collect(self: &Arc<Self>, codes: Vec<StockCode>, basis: CollectionBasis) -> Outcome {
+        self.collect_observing(codes, basis, Observation::Unresolved).await
+    }
+
+    pub(super) async fn collect_observing(self: &Arc<Self>, mut codes: Vec<StockCode>, basis: CollectionBasis, observation: Observation) -> Outcome {
         codes.sort_unstable();
         codes.dedup();
         let mut receiver = {
@@ -131,8 +163,10 @@ impl SummaryCollector {
             if state.flight.as_ref().is_some_and(|f| f.target != target) {
                 stop(&mut state, CollectionError::DateChanged);
             }
+            let kis = self.kiwoom.kis_receiving_instead().map(|lane| lane.rest);
+            let receiving = if kis.is_some() { Receiving::Kis(observation) } else { Receiving::Kiwoom };
             if let Some(flight) = &state.flight {
-                if flight.basis != basis {
+                if flight.basis != basis || flight.receiving != receiving {
                     return Err(CollectionError::BasisChanged);
                 }
                 if flight.codes != codes {
@@ -146,10 +180,13 @@ impl SummaryCollector {
                 let me = self.clone();
                 let targets = codes.clone();
                 let task = tokio::spawn(async move {
-                    let result = me.receive(id, basis, target, started_at, &targets).await;
+                    let result = match kis {
+                        Some(rest) => me.receive_from_kis(&rest, Collecting { id, basis, target, started_at }, observation, &targets).await,
+                        None => me.receive(id, basis, target, started_at, &targets).await,
+                    };
                     me.finish(id, result);
                 });
-                state.flight = Some(Flight { id, basis, target, codes, outcome, task: task.abort_handle() });
+                state.flight = Some(Flight { id, basis, target, receiving, codes, outcome, task: task.abort_handle() });
                 receiver
             }
         };
@@ -177,7 +214,22 @@ impl SummaryCollector {
             stocks.extend(read_stocks(chunk, page.body, target, received_at));
         }
         self.check_date(target)?;
-        Ok(Arc::new(SummaryBatch { id, basis, target, venue: Venue::Krx, started_at, completed_at: self.clock.now(), stocks }))
+        Ok(Arc::new(SummaryBatch { id, basis, target, broker: Broker::Kiwoom, venue: Venue::Krx, started_at, completed_at: self.clock.now(), stocks }))
+    }
+
+    async fn receive_from_kis(&self, rest: &KisRest, collecting: Collecting, observation: Observation, codes: &[StockCode]) -> Outcome {
+        let Collecting { id, basis, target, started_at } = collecting;
+        let mut stocks = BTreeMap::new();
+        for chunk in codes.chunks(MULTI_PRICE_MAX_ROWS) {
+            self.check_date(target)?;
+            let wanted: Vec<(StockCode, Venue)> = chunk.iter().map(|code| (*code, Venue::Krx)).collect();
+            let rows = multi_price_day_rows(rest, &wanted, Priority::Screen).await.map_err(CollectionError::Kis)?;
+            let received_at = self.clock.now();
+            self.check_date(target)?;
+            stocks.extend(read_kis_stocks(chunk, rows, KisReading { observation, target, received_at }));
+        }
+        self.check_date(target)?;
+        Ok(Arc::new(SummaryBatch { id, basis, target, broker: Broker::Kis, venue: Venue::Krx, started_at, completed_at: self.clock.now(), stocks }))
     }
 
     fn check_date(&self, target: KstDate) -> Result<(), CollectionError> {
@@ -227,4 +279,64 @@ fn read_stocks(codes: &[StockCode], response: StockQuotesResponse, target: KstDa
         }
         (*code, StockSummary { received_at, result })
     }).collect()
+}
+
+#[derive(Clone, Copy)]
+struct KisReading {
+    observation: Observation,
+    target: KstDate,
+    received_at: KstTime,
+}
+
+impl KisReading {
+    fn row_day(self) -> Option<KstDate> {
+        match self.observation {
+            Observation::Current => Some(self.target),
+            Observation::PreviousOnly(previous) => Some(previous),
+            Observation::Unresolved if self.before_trading_on(self.target) => Some(self.target),
+            Observation::Unresolved => None,
+        }
+    }
+
+    fn before_trading_on(self, day: KstDate) -> bool {
+        self.received_at < KstTime::from_kst_civil(day, KIS_ROWS_TRADE_FROM)
+    }
+}
+
+fn read_kis_stocks(codes: &[StockCode], rows: Vec<DayRow>, reading: KisReading) -> BTreeMap<StockCode, StockSummary> {
+    let mut by_code: BTreeMap<StockCode, Vec<DayRow>> = BTreeMap::new();
+    for row in rows {
+        by_code.entry(row.code).or_default().push(row);
+    }
+    codes.iter().map(|code| {
+        let result = match by_code.remove(code) {
+            None => Err(MissingSummary::MissingRow),
+            Some(rows) if rows.len() != 1 => Err(MissingSummary::DuplicateRow),
+            Some(rows) => kis_summary(&rows[0], reading).and_then(|q| if q.day == reading.target { Ok(q) } else { Err(MissingSummary::OtherDate(q.day)) }),
+        };
+        if let Err(reason) = &result {
+            tracing::warn!(code = code.as_str(), ?reason, "당일 한투 요약을 확인하지 못했습니다");
+        }
+        (*code, StockSummary { received_at: reading.received_at, result })
+    }).collect()
+}
+
+fn kis_summary(row: &DayRow, reading: KisReading) -> Result<KrxSummary, MissingSummary> {
+    let day = reading.row_day().ok_or(MissingSummary::DayUnknown)?;
+    let values = row.values.as_ref().map_err(|reason| MissingSummary::Unreadable(WireError(reason.clone())))?;
+    kis_values(values, reading.before_trading_on(day)).map(|(base, values)| KrxSummary { day, trade_time: None, base, values }).map_err(MissingSummary::Unreadable)
+}
+
+fn kis_values(row: &DayValues, before_trading: bool) -> Result<(Price, KrxSummaryValues), WireError> {
+    let price = |centi: u64| Price::from_centi(centi).ok_or_else(|| WireError(format!("가격이 0입니다: {centi}")));
+    let base = price(row.base_centi)?;
+    if before_trading {
+        return Ok((base, KrxSummaryValues::NoTrades { current_centi: row.base_centi }));
+    }
+    let session = row.session.map_err(|name| WireError(format!("{name}을 읽을 수 없습니다")))?;
+    if session.volume == 0 {
+        return Ok((base, KrxSummaryValues::NoTrades { current_centi: row.price_centi }));
+    }
+    let ohlcv = Ohlcv::try_new(price(session.open_centi)?, price(session.high_centi)?, price(session.low_centi)?, price(row.price_centi)?, Volume(session.volume)).map_err(|e| WireError(e.to_string()))?;
+    Ok((base, KrxSummaryValues::Traded { ohlcv, traded: MillionWon(session.traded_won / WON_PER_MILLION) }))
 }

@@ -1,12 +1,12 @@
 # 보고기간별 재무지표 API
 
-`GET /api/symbols/{code}/financials?period=Q` 또는 `period=Y`는 SQLite의 저장 자료만 계산한다. 회사 연결 확인·원천 호출·수집을 시작하지 않으며 업데이트 전 상태는 `not_collected`다. 같은 URL의 `POST`는 `POST /api/financial-update`와 같은 전체 최근 자료 업데이트를 시작한다. 전체 진행은 `GET /api/financial-update`, 종목의 계산 결과는 기존 `GET`으로 읽는다. 거래소 인자는 없으며 알 수 없는 쿼리나 Q/Y 이외 주기는 400이다. 기존 `financial-source` 원자료 API와 수집기를 공유한다.
+`GET /api/symbols/{code}/financials?period=Q` 또는 `period=Y`는 SQLite의 저장 자료만 계산한다. 회사 연결 확인·원천 호출·수집을 시작하지 않으며 업데이트 전 상태는 `not_collected`다. 서버는 읽기만 한다. 같은 URL의 `POST`와 `/api/financial-update*`는 없다(404·405). 수집은 `collector financials`가 하고, 진행은 `collector financials status`로 본다([DART 재무 원자료 수집](dart-financial-source.md)). 거래소 인자는 없으며 알 수 없는 쿼리나 Q/Y 이외 주기는 400이다. 기존 `financial-source` 원자료 API와 같은 저장 자료를 읽는다.
 
 응답 타입은 `api.rs`에서 `FinancialsPage`와 관련 웹 타입으로 생성한다. 여섯 `series`의 `metric`은 `revenue`, `operating_income`, `owner_roe`, `investing_cash_flow`, `dps`, `debt_ratio`다. 금액은 원천 통화의 자연 단위, DPS는 원, 두 비율은 %다. 그림에 쓸 숫자는 `value`이며 없으면 `null`이다. 원금액 문자열은 `inputs[].amount`와 `fields`에 보존한다. 차트 숫자는 유한한 f64이며 원금액의 정밀도를 대신하지 않는다.
 
 ## 상태와 갱신
 
-최상위 `status`는 원자료 수집 상태(`not_configured`, `unsupported`, `collecting`, `ready`, `stale`, `partial_failure`, `failed`)를 그대로 따른다. `reason`은 상품 미지원 또는 회사 매핑 미확인 사유다. ETF·ETN·인프라투자금융·뮤추얼펀드·업종지수 등 미지원 상품은 DART를 호출하지 않고 `unsupported`로 응답한다. 우선주 회사 연결과 주식 종류는 기존 `Security` 계약을 소비하며 추측하지 않는다.
+최상위 `status`는 저장 자료로 정한 상태(`not_configured`, `unsupported`, `not_collected`, `ready`, `stale`, `partial_failure`, `failed`)를 따른다. `not_configured`는 이 서버에 재무 DB 파일이 없다는 뜻이다. 다른 프로세스가 수집 중인지는 서버가 모르므로 `collecting`은 내지 않는다. `reason`은 상품 미지원 또는 회사 매핑 미확인 사유다. ETF·ETN·인프라투자금융·뮤추얼펀드·업종지수 등 미지원 상품은 DART를 호출하지 않고 `unsupported`로 응답한다. 우선주 회사 연결과 주식 종류는 기존 `Security` 계약을 소비하며 추측하지 않는다.
 
 `lastCheckedAt`은 공시 목록을 끝까지 확인한 시각이다. `lastAttemptAt`, `disclosureFailure`, `failure`, `refreshVersion`, `disclosureVersion`은 수집 계약의 동명 필드를 보존한다. `progress`는 현재 저장된 요청들에 대한 `total`, `completed`, `failed`, `pending` 개수다. 정정 중에는 갱신 중 자료의 진행을 세고 차트 값은 마지막 일관된 표시 자료를 사용한다. 사업보고서는 재무제표와 배당을 각각 한 요청으로 센다. 아직 저장하지 않은 미래 요청을 전체 개수에 넣지 않으므로 최초 수집 중 total은 늘어날 수 있다. 재사용한 보고서는 최신 목록에서 검증되면 실제 수집 시각을 바꾸지 않고 완료로 센다. 전체 수집 완료 여부는 최상위 status로 판단한다.
 

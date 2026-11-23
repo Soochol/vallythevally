@@ -1,10 +1,20 @@
 import type { Locator, Page } from "@playwright/test";
 import type { LayoutWindow } from "../src/api/generated/LayoutWindow";
 import type { Ranking } from "../src/api/generated/Ranking";
+import type { RankingFigures } from "../src/api/generated/RankingFigures";
 import type { RankingPage } from "../src/api/generated/RankingPage";
+import type { RankingRequest } from "../src/api/generated/RankingRequest";
+import type { RankingRow } from "../src/api/generated/RankingRow";
+import { RANKING_CATEGORIES } from "../src/features/ranking/rankingChoices";
+import { RANKING_NAME } from "../src/features/ranking/rankingKinds";
 import { type Scenario, cell, DEFAULT_LAYOUT_ID, expect, fixedWait, pollSaved, test, windowTab, windowTabs } from "./harness";
 import { CONNECTED_KIWOOM } from "./fixtures/scenario";
 import { isRankingRequest, rankingCalls, rankingRows, serveRankings, tradeAmountRow, UNLISTED_CODE } from "./fixtures/ranking-data";
+import { DENSITY_STORAGE_KEY } from "../src/persist/density";
+
+test.beforeEach(async ({ page }) => {
+  await page.addInitScript((key) => localStorage.setItem(key, "regular"), DENSITY_STORAGE_KEY);
+});
 
 const SETTINGS = { v: 1, style: "candle", scale: "normal", indicators: [], compare: [], panels: [] };
 const TRADE_AMOUNT: Ranking = { kind: "tradeAmount", market: "all", venue: "combined", excludes: { etfEtn: true, preferred: false }, excludeManaged: false };
@@ -24,10 +34,20 @@ const savedRanking = (scenario: Scenario) => {
 const rows = (page: Page) => page.getByTestId("ranking-row");
 const rowOf = (page: Page, code: string) => page.locator(`[data-testid=ranking-row][data-code="${code}"]`);
 const scroller = (page: Page) => page.getByTestId("ranking-scroll");
+const conditions = (page: Page) => page.getByRole("dialog", { name: "순위 조건" });
 const field = (page: Page, label: string) => page.getByRole("combobox", { name: `순위 ${label}` });
+const openConditions = async (page: Page) => {
+  if (!(await conditions(page).isVisible())) await page.getByRole("button", { name: "조건", exact: true }).click();
+};
+const closeConditions = (page: Page) => page.keyboard.press("Escape");
+const pickShared = async (page: Page, label: "시장" | "거래소", value: string) => {
+  await field(page, label).click();
+  await page.getByRole("menu", { name: `순위 ${label}`, exact: true }).locator(`[data-option-value="${value}"]`).click();
+};
 const toast = (page: Page, text: string) => page.getByRole("status").filter({ hasText: text });
 const more = (page: Page) => page.getByTestId("ranking-more");
-const stop = (page: Page) => page.getByRole("button", { name: /^멈/ });
+const stop = (page: Page) => page.getByRole("button", { name: /^(멈추기|이어 받기)$/ });
+const amountOf = (page: Page, code: string) => rowOf(page, code).locator('td[data-col="tradeAmount"]');
 
 async function open(page: Page) {
   await page.setViewportSize({ width: 1440, height: 900 });
@@ -52,40 +72,58 @@ test("분류와 순위를 고르면 그 순위의 조건만 보이고 고른 순
   openLayout(scenario, null);
   await open(page);
   await expect(page.getByRole("tab", { name: "거래대금", selected: true })).toBeVisible();
-  await expect(field(page, "거래소")).toHaveValue("combined");
+  await openConditions(page);
+  await expect(field(page, "거래소")).toHaveAttribute("data-value", "combined");
   await expect(page.getByRole("button", { name: "관리종목 빼기" })).toHaveAttribute("aria-pressed", "false");
+  await closeConditions(page);
 
   await page.getByRole("tab", { name: "등락", exact: true }).click();
   await expect(page.getByRole("tab", { name: "상승률", selected: true })).toBeVisible();
+  await openConditions(page);
   await expect(page.getByRole("button", { name: "상·하한가 포함" })).toHaveAttribute("aria-pressed", "true");
   await expect(field(page, "거래대금")).toHaveValue("any");
-  await field(page, "시장").selectOption("kosdaq");
-  await field(page, "거래소").selectOption("krx");
+  await pickShared(page, "시장", "kosdaq");
+  await pickShared(page, "거래소", "krx");
   await page.getByRole("button", { name: "관리종목 빼기" }).click();
   await page.getByRole("button", { name: "상·하한가 포함" }).click();
+  await closeConditions(page);
+  await expect(page.getByTestId("ranking-conditions").locator(".rk-mini")).toHaveText(["시장 코스닥", "거래소 KRX", "상·하한가 포함 끔", "관리종목 빼기"]);
   await page.getByRole("tab", { name: "하락률" }).click();
-  await expect(field(page, "시장")).toHaveValue("kosdaq");
-  await expect(field(page, "거래소")).toHaveValue("krx");
+  await openConditions(page);
+  await expect(field(page, "시장")).toHaveAttribute("data-value", "kosdaq");
+  await expect(field(page, "거래소")).toHaveAttribute("data-value", "krx");
   await expect(page.getByRole("button", { name: "관리종목 빼기" })).toHaveAttribute("aria-pressed", "true");
   await expect(page.getByRole("button", { name: "상·하한가 포함" })).toHaveAttribute("aria-pressed", "true");
+  await closeConditions(page);
 
   await page.getByRole("tab", { name: "호가", exact: true }).click();
   await expect(page.getByRole("tab", { name: "호가잔량", selected: true })).toBeVisible();
-  await expect(field(page, "시장").locator("option")).toHaveText(["코스피", "코스닥"]);
-  await expect(field(page, "시장")).toHaveValue("kosdaq");
+  await openConditions(page);
+  await field(page, "시장").click();
+  await expect(page.getByRole("menu", { name: "순위 시장", exact: true }).getByRole("menuitemradio")).toHaveText(["코스피", "코스닥"]);
+  await page.keyboard.press("Escape");
+  await expect(field(page, "시장")).toHaveAttribute("data-value", "kosdaq");
   await expect(page.getByRole("button", { name: "상·하한가 포함" })).toHaveCount(0);
+  await closeConditions(page);
 
   await page.getByRole("tab", { name: "수급", exact: true }).click();
   await expect(page.getByRole("tab", { name: "투자자별 순매수", selected: true })).toBeVisible();
+  await openConditions(page);
   await expect(field(page, "거래소")).toHaveCount(0);
   await expect(page.getByRole("button", { name: "관리종목 빼기" })).toHaveCount(0);
   await field(page, "투자자").selectOption("foreignFirm");
+  await closeConditions(page);
   await page.getByRole("tab", { name: "프로그램" }).click();
-  await expect(field(page, "시장").locator("option")).toHaveText(["코스피", "코스닥"]);
-  await expect(field(page, "거래소")).toHaveValue("combined");
+  await openConditions(page);
+  await field(page, "시장").click();
+  await expect(page.getByRole("menu", { name: "순위 시장", exact: true }).getByRole("menuitemradio")).toHaveText(["코스피", "코스닥"]);
+  await page.keyboard.press("Escape");
+  await expect(field(page, "거래소")).toHaveAttribute("data-value", "combined");
+  await closeConditions(page);
 
   await page.getByRole("tab", { name: "기타", exact: true }).click();
   await page.getByRole("tab", { name: "많이 본 종목" }).click();
+  await openConditions(page);
   await expect(field(page, "시장")).toHaveCount(0);
   await field(page, "구간").selectOption("hour1");
   const expected: Ranking = { kind: "mostViewed", span: "hour1", excludes: { etfEtn: true, preferred: false } };
@@ -93,6 +131,7 @@ test("분류와 순위를 고르면 그 순위의 조건만 보이고 고른 순
 
   await page.reload();
   await expect(page.getByRole("tab", { name: "많이 본 종목", selected: true })).toBeVisible();
+  await openConditions(page);
   await expect(field(page, "구간")).toHaveValue("hour1");
   expect(savedRanking(scenario)).toEqual(expected);
 });
@@ -157,7 +196,8 @@ test("끝까지 내리면 pages 2 요청이 나가 줄이 붙고 더 보기 버�
   await open(page);
   await expect(rows(page)).toHaveCount(100);
   expect(server.calls()).toEqual([{ ranking: TRADE_AMOUNT, pages: 1, trigger: "user" }]);
-  await expect(page.getByTestId("ranking-foot")).toContainText("키움 ka10032 · 통합 · 100위까지");
+  await expect(page.getByTestId("ranking-foot")).toContainText("100위까지");
+  await expect(page.getByTestId("ranking-foot").locator(".rk-source")).toHaveAttribute("title", "키움 ka10032 · 통합");
 
   await toBottom(scroller(page));
   await expect(rows(page)).toHaveCount(200);
@@ -194,7 +234,8 @@ test("end가 참인 응답 뒤에는 마지막 순위입니다를 보이고 더 
   await expect(rows(page)).toHaveCount(120);
   await expect(page.getByTestId("ranking-end")).toHaveText("마지막 순위입니다 · 모두 120종목");
   await expect(more(page)).toHaveCount(0);
-  await expect(page.getByTestId("ranking-hidden")).toHaveText("목록에 없거나 뺀 종목 7개");
+  await expect(page.getByTestId("ranking-hidden")).toHaveText("뺀 종목 7");
+  await expect(page.getByTestId("ranking-hidden")).toHaveAttribute("title", "목록에 없거나 뺀 종목 7개");
   expect(server.calls().map((c) => c.pages)).toEqual([1, 2]);
   await scroller(page).evaluate((el) => { el.scrollTop = 0; });
   await toBottom(scroller(page));
@@ -222,7 +263,7 @@ test("10초가 지나면 같은 pages로 갱신 요청이 나가고 응답이 �
   await scroller(page).evaluate((el) => { el.scrollTop = 1000; });
   await page.keyboard.press("ArrowDown");
   const cursor = (await page.locator("[data-testid=ranking-row][aria-selected=true]").getAttribute("data-code"))!;
-  const firstAmount = await rowOf(page, "005930").locator("td").nth(4).innerText();
+  const firstAmount = await amountOf(page, "005930").innerText();
   await pause();
   const before = await scroller(page).evaluate((el) => el.scrollTop);
   const status = await page.getByTestId("ranking-status").innerText();
@@ -233,7 +274,7 @@ test("10초가 지나면 같은 pages로 갱신 요청이 나가고 응답이 �
   await expect.poll(() => server.calls().length).toBe(3);
   expect(server.calls()[2]).toEqual({ ranking: TRADE_AMOUNT, pages: 2, trigger: "refresh" });
   await expect(page.getByTestId("ranking-status")).not.toHaveText(status);
-  await expect(rowOf(page, "005930").locator("td").nth(4)).not.toHaveText(firstAmount);
+  await expect(amountOf(page, "005930")).not.toHaveText(firstAmount);
   await expect(rows(page)).toHaveCount(200);
   expect(Math.abs((await scroller(page).evaluate((el) => el.scrollTop)) - before)).toBeLessThan(2);
   await expect(rowOf(page, cursor)).toHaveAttribute("aria-selected", "true");
@@ -248,7 +289,7 @@ test("멈추기를 누르면 10초가 지나도 갱신 요청이 없고 다시 �
   await pause();
   await expect(page.getByTestId("ranking-live")).toHaveAttribute("data-state", "live");
   await stop(page).click();
-  await expect(stop(page)).toHaveAttribute("aria-pressed", "true");
+  await expect(stop(page)).toHaveAccessibleName("이어 받기");
   await expect(page.getByTestId("ranking-live")).toHaveAttribute("data-state", "idle");
   await page.clock.runFor(30_000);
   await fixedWait(page, 300, "멈춘 창에서 갱신 요청이 나가지 않음을 보려면 그 시간이 지나야 한다");
@@ -259,7 +300,7 @@ test("멈추기를 누르면 10초가 지나도 갱신 요청이 없고 다시 �
   expect(server.calls()[1]).toEqual({ ranking: TRADE_AMOUNT, pages: 2, trigger: "user" });
 
   await stop(page).click();
-  await expect(stop(page)).toHaveAttribute("aria-pressed", "false");
+  await expect(stop(page)).toHaveAccessibleName("멈추기");
   await page.clock.runFor(10_000);
   await expect.poll(() => server.calls().length).toBe(3);
   expect(server.calls()[2]).toEqual({ ranking: TRADE_AMOUNT, pages: 2, trigger: "refresh" });
@@ -327,6 +368,7 @@ test("조건을 바꾸면 pages 1 요청이 나가고 표가 맨 위로 간다",
   await toBottom(scroller(page));
   await expect(rows(page)).toHaveCount(200);
   await expect.poll(() => scroller(page).evaluate((el) => el.scrollTop)).toBeGreaterThan(1000);
+  await openConditions(page);
   await page.getByRole("button", { name: "우선주 빼기" }).click();
   await expect.poll(() => server.calls().length).toBe(3);
   expect(server.calls()[2]).toEqual({ ranking: { ...TRADE_AMOUNT, excludes: { etfEtn: true, preferred: true } }, pages: 1, trigger: "user" });
@@ -347,17 +389,18 @@ test("키움 연결 전이면 요청 없이 연결 전 상태를 보이고 연�
   expect(rankingCalls(scenario)).toHaveLength(1);
 });
 
-test("서버 오류는 오류 상태와 다시 받기를 보이고 빈 목록은 순위가 비어 있습니다를 보인다", async ({ page, scenario }) => {
+test("서버 오류는 오류 상태와 다시 시도를 보이고 빈 목록은 순위가 비어 있습니다를 보인다", async ({ page, scenario }) => {
   const server = serveRankings(scenario);
   server.failNext();
   openLayout(scenario);
   await open(page);
   const window = page.getByTestId("ranking-window");
   await expect(window.getByRole("alert")).toContainText("키움이 응답하지 않습니다");
-  await window.getByRole("button", { name: "다시 받기" }).click();
+  await window.getByRole("button", { name: "다시 시도" }).click();
   await expect(rows(page)).toHaveCount(100);
 
   serveRankings(scenario, { rows: () => [] });
+  await openConditions(page);
   await page.getByRole("button", { name: "우선주 빼기" }).click();
   await expect(window.getByText("순위가 비어 있습니다")).toBeVisible();
   await expect(rows(page)).toHaveCount(0);
@@ -372,6 +415,148 @@ test("갱신이 실패해도 보이던 표는 지우지 않고 상태 줄에 실
   await pause();
   server.failNext();
   await page.clock.runFor(10_000);
-  await expect(page.getByTestId("ranking-status")).toContainText("받지 못했습니다 · 키움이 응답하지 않습니다");
+  await expect(page.getByTestId("ranking-failure")).toContainText("받지 못했습니다 · 키움이 응답하지 않습니다");
+  await expect(page.getByTestId("ranking-live")).toHaveAttribute("data-state", "failed");
   await expect(rows(page)).toHaveCount(100);
+});
+
+const window358 = { width: 358 };
+const shapeWindow = (page: Page, size: { width?: number; height?: number }) => page.getByTestId("ranking-window").evaluate((el, next) => {
+  el.style.flex = "none";
+  if (next.width !== undefined) el.style.width = `${next.width}px`;
+  if (next.height !== undefined) el.style.height = `${next.height}px`;
+}, size);
+const overflow = (page: Page) => scroller(page).evaluate((el) => el.scrollWidth - el.clientWidth);
+const visibleRows = (page: Page) => scroller(page).evaluate((el) => {
+  const box = el.getBoundingClientRect();
+  const head = el.querySelector("thead")!.getBoundingClientRect().bottom;
+  return [...el.querySelectorAll("[data-testid=ranking-row]")].filter((line) => { const at = line.getBoundingClientRect(); return at.top >= head - 0.5 && at.bottom <= box.bottom + 0.5; }).length;
+});
+
+const FIGURES: Record<Ranking["kind"], RankingFigures> = {
+  tradeAmount: { kind: "tradeAmount", tradeAmount: 123_400_000_000, volume: 1_234_000, placesGained: 2 },
+  tradeVolume: { kind: "tradeVolume", volume: 9_876_000, previousDayVolumeRate: 150.5 },
+  turnover: { kind: "turnover", turnoverRate: 12.34, volume: 4_321_000 },
+  volumeSurge: { kind: "volumeSurge", surgeRate: 345.67, surgeVolume: 2_345_000, volume: 5_678_000 },
+  gainers: { kind: "movers", priceChange: 12_300, volume: 3_210_000 },
+  losers: { kind: "movers", priceChange: -12_300, volume: 3_210_000 },
+  expected: { kind: "expected", expectedPrice: 71_200, expectedChangeRate: 2.5, expectedVolume: 8_765_000 },
+  investorNetBuy: { kind: "netAmounts", net: 54_300_000_000, buy: 98_700_000_000, sell: 44_400_000_000 },
+  foreignStreak: { kind: "foreignStreak", netD1: 1_234_000, netD2: -2_345_000, netD3: 3_456_000, netTotal: 2_345_000, limitExhaustionRate: 45.67 },
+  program: { kind: "netAmounts", net: -54_300_000_000, buy: 98_700_000_000, sell: 153_000_000_000 },
+  bidAskBalance: { kind: "bidAskBalance", totalSellRemaining: 1_234_000, totalBuyRemaining: 2_345_000, netBuyRemaining: 1_111_000, buyRatio: 65.43 },
+  creditRatio: { kind: "creditRatio", creditRatio: 7.89, volume: 1_234_000 },
+  mostViewed: { kind: "mostViewed", referencePrice: 71_000, changeFromReferenceRate: 1.23, placesGained: 3 },
+};
+
+const rowsOfKind = (kind: Ranking["kind"], count = 30): RankingRow[] => Array.from({ length: count }, (_, i) => ({
+  rank: i + 1, code: String(100_000 + i), name: i === 0 ? "삼성전자" : `종목 ${i + 1}`, listed: true, price: 70_000 + i, changeRate: i % 2 === 0 ? 1.5 : -0.5, figures: FIGURES[kind],
+}));
+
+function serveByKind(scenario: Scenario) {
+  scenario.on(isRankingRequest, (request) => {
+    const asked: RankingRequest = request.postDataJSON();
+    const page: RankingPage = { rows: rowsOfKind(asked.ranking.kind), pages: asked.pages, end: true, limited: false, hidden: 0, fetchedAt: Math.floor(scenario.now / 1000), source: "kiwoom" };
+    return { body: page };
+  });
+}
+
+test("창 안쪽 폭 358px의 거래대금 순위는 가로로 넘치지 않고 거래대금과 등락률 열이 보인다", async ({ page, scenario }) => {
+  serveRankings(scenario);
+  openLayout(scenario);
+  await open(page);
+  await shapeWindow(page, window358);
+  await expect(rows(page).first()).toBeVisible();
+  await expect.poll(() => scroller(page).evaluate((el) => el.clientWidth)).toBe(358);
+  expect(await overflow(page)).toBeLessThanOrEqual(0);
+  await expect(rowOf(page, "005930").locator('td[data-col="tradeAmount"]')).toBeVisible();
+  await expect(rowOf(page, "005930").locator('td[data-col="changeRate"]')).toBeVisible();
+  await expect(rowOf(page, "005930").locator('td[data-col="price"]')).toHaveCount(0);
+});
+
+test("창 안쪽 폭 242px에서도 넘치지 않고 그 순위의 값 열이 보인다", async ({ page, scenario }) => {
+  serveRankings(scenario);
+  openLayout(scenario);
+  await open(page);
+  await shapeWindow(page, { width: 242 });
+  await expect(rows(page).first()).toBeVisible();
+  await expect.poll(() => scroller(page).evaluate((el) => el.clientWidth)).toBe(242);
+  expect(await overflow(page)).toBeLessThanOrEqual(0);
+  await expect(rowOf(page, "005930").locator('td[data-col="tradeAmount"]')).toBeVisible();
+  await expect(rowOf(page, "005930").locator('td[data-col="tradeAmount"]')).toHaveText("1,000억");
+});
+
+for (const category of RANKING_CATEGORIES) {
+  test(`순위 종류 ${category.name} 묶음은 358px에서 모두 가로로 넘치지 않는다`, async ({ page, scenario }) => {
+    serveByKind(scenario);
+    openLayout(scenario);
+    await open(page);
+    await shapeWindow(page, window358);
+    await page.getByRole("tab", { name: category.name, exact: true }).click();
+    for (const kind of category.kinds) {
+      await page.getByRole("tab", { name: RANKING_NAME[kind], exact: true }).click();
+      await expect(page.getByTestId("ranking-window")).toHaveAttribute("data-ranking", kind);
+      await expect(rows(page)).toHaveCount(30);
+      await expect.poll(() => scroller(page).evaluate((el) => el.clientWidth)).toBe(358);
+      expect(await overflow(page), `${kind} 가로 넘침`).toBeLessThanOrEqual(0);
+      expect(await rows(page).first().locator("td[data-col]").count(), `${kind} 값 열`).toBeGreaterThan(0);
+    }
+  });
+}
+
+test("줄은 34px 한 줄이고 종목코드 글자가 없으며 754px 높이 창에서 17줄 이상 보인다", async ({ page, scenario }) => {
+  serveRankings(scenario);
+  openLayout(scenario);
+  await open(page);
+  await shapeWindow(page, { height: 754 });
+  await expect(rows(page).first()).toBeVisible();
+  for (const code of ["005930", "000660"]) {
+    expect((await rowOf(page, code).boundingBox())!.height).toBe(34);
+    expect(await rowOf(page, code).innerText()).not.toMatch(/\d{6}/);
+    await expect(rowOf(page, code).locator(".rk-name b")).toHaveAttribute("title", /^.+ \d{6}$/);
+  }
+  await expect.poll(() => visibleRows(page)).toBeGreaterThanOrEqual(17);
+});
+
+test("시장을 공용 콤보박스로 바꾸면 저장된 순위 설정이 바뀐다", async ({ page, scenario }) => {
+  serveRankings(scenario);
+  openLayout(scenario);
+  await open(page);
+  await openConditions(page);
+  await expect(field(page, "시장")).toHaveAttribute("data-value", "all");
+  await pickShared(page, "시장", "kosdaq");
+  await pollSaved(() => savedRanking(scenario)).toEqual({ ...TRADE_AMOUNT, market: "kosdaq" });
+  await expect(field(page, "시장")).toHaveAttribute("data-value", "kosdaq");
+});
+
+test("줄을 우클릭하면 관심종목에 넣기가 있는 메뉴가 열리고 눌러 목록을 고를 수 있다", async ({ page, scenario }) => {
+  serveRankings(scenario);
+  openLayout(scenario);
+  await open(page);
+  await rowOf(page, "035420").click({ button: "right" });
+  const menu = page.getByRole("menu", { name: "NAVER 행 동작" });
+  await expect(menu.getByRole("menuitem", { name: "이 칸에 열기" })).toBeVisible();
+  await expect(menu.getByRole("menuitem", { name: "관심종목에 넣기" })).toBeVisible();
+  await menu.getByRole("menuitem", { name: "관심종목에 넣기" }).click();
+  await expect(page.getByRole("menu", { name: "NAVER 관심종목에 넣기" }).getByRole("menuitem").first()).toBeVisible();
+  await expect(cell(page, 1)).toHaveAttribute("aria-label", /^칸 1: 삼성전자 /);
+});
+
+test("10초 갱신 응답에서 값의 자릿수가 바뀌어도 열의 x 좌표는 변하지 않는다", async ({ page, scenario }) => {
+  serveRankings(scenario, {
+    rows: (version) => rankingRows(30).map((row) => row.figures.kind === "tradeAmount" ? { ...row, figures: { ...row.figures, tradeAmount: version === 0 ? 123_400_000_000 : 9_800_000_000, volume: version === 0 ? 12_000_000 : 1_234 } } : row),
+  });
+  openLayout(scenario);
+  const pause = await pauseClock(page);
+  await open(page);
+  await shapeWindow(page, { width: 520 });
+  await expect(rows(page)).toHaveCount(30);
+  await pause();
+  const columns = () => rowOf(page, "005930").locator("td").evaluateAll((cells) => cells.map((c) => { const box = c.getBoundingClientRect(); return [box.left, box.right]; }));
+  const before = await columns();
+  expect(before.length).toBeGreaterThanOrEqual(5);
+  const volume = await rowOf(page, "005930").locator('td[data-col="volume"]').innerText();
+  await page.clock.runFor(10_000);
+  await expect.poll(() => rowOf(page, "005930").locator('td[data-col="volume"]').innerText()).not.toBe(volume);
+  expect(await columns()).toEqual(before);
 });

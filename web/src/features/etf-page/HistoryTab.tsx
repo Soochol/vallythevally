@@ -3,22 +3,20 @@ import type { EtfChangeKind } from "../../api/generated/EtfChangeKind";
 import type { EtfChangePair } from "../../api/generated/EtfChangePair";
 import type { EtfChangeRow } from "../../api/generated/EtfChangeRow";
 import { useSendSymbol } from "../pages/sendSymbol";
+import { Badge, type BadgeTone } from "../ui/Badge";
+import { Failure, Loading, Notice } from "./EtfStates";
+import { HelpTip } from "./HelpTip";
 import { formatQuantity, formatRealChange, formatScale, pairOf } from "./etfModel";
 
 const KIND_LABEL: Record<EtfChangeKind, string> = { added: "편입", removed: "편출", increased: "늘림", decreased: "줄임", unchanged: "유지" };
+const KIND_TONE: Record<EtfChangeKind, BadgeTone> = { added: "accent", removed: "warning", increased: "success", decreased: "danger", unchanged: "neutral" };
+const COUNT_KINDS = [["added", "편입"], ["removed", "편출"], ["increased", "늘림"], ["decreased", "줄임"]] as const;
 
 interface HistoryTabProps {
   code: string;
   pair: string | null;
   onPair: (after: string) => void;
 }
-
-const failure = (what: string, retry: () => void) => (
-  <div className="etf-empty" role="alert">
-    {what}을 불러오지 못했습니다
-    <button type="button" className="etf-retry" onClick={retry}>다시 시도</button>
-  </div>
-);
 
 function Timeline({ pairs, selected, onPair }: { pairs: readonly EtfChangePair[]; selected: EtfChangePair; onPair: (after: string) => void }) {
   return (
@@ -30,10 +28,7 @@ function Timeline({ pairs, selected, onPair }: { pairs: readonly EtfChangePair[]
             <button type="button" data-pair={pair.after} aria-pressed={pair === selected} aria-label={`${pair.before}부터 ${pair.after}까지`} onClick={() => onPair(pair.after)}>
               <span className="etf-pair-range">{pair.before} → {pair.after}</span>
               <span className="etf-pair-counts">
-                <span data-kind="added">편입 {pair.added}</span>
-                <span data-kind="removed">편출 {pair.removed}</span>
-                <span data-kind="increased">늘림 {pair.increased}</span>
-                <span data-kind="decreased">줄임 {pair.decreased}</span>
+                {COUNT_KINDS.filter(([kind]) => pair[kind] > 0).map(([kind, label]) => <span key={kind} data-kind={kind}>{label} {pair[kind]}</span>)}
               </span>
             </button>
           </li>
@@ -53,7 +48,7 @@ function ChangeRow({ row, onPick }: { row: EtfChangeRow; onPick: (row: EtfChange
       <td className="etf-num">{formatQuantity(row.beforeQuantity)}</td>
       <td className="etf-num">{formatQuantity(row.afterQuantity)}</td>
       <td className="etf-num" data-direction={row.kind === "increased" ? "up" : row.kind === "decreased" ? "down" : "flat"}>{row.realChange === null ? "-" : formatRealChange(row.realChange)}</td>
-      <td><span className="etf-kind" data-kind={row.kind}>{KIND_LABEL[row.kind]}</span></td>
+      <td><Badge tone={KIND_TONE[row.kind]}>{KIND_LABEL[row.kind]}</Badge></td>
     </tr>
   );
 }
@@ -61,14 +56,16 @@ function ChangeRow({ row, onPick }: { row: EtfChangeRow; onPick: (row: EtfChange
 function Changes({ code, pair }: { code: string; pair: EtfChangePair }) {
   const changes = useEtfChanges(code, pair);
   const send = useSendSymbol();
-  if (changes.isPending) return <div className="etf-empty" role="status">증감을 불러오는 중입니다</div>;
-  if (changes.isError) return failure("증감", () => void changes.refetch());
+  if (changes.isPending) return <Loading label="증감을 불러오는 중입니다" />;
+  if (changes.isError) return <Failure what="증감" retry={() => void changes.refetch()} />;
   const { rows, commonScale } = changes.data;
   return (
     <section className="etf-card etf-card-wide" aria-label="종목별 증감">
-      <h3>CU당 수량 변화 · {pair.before} → {pair.after} · 공통 배율 <span className="etf-scale">{formatScale(commonScale)}</span></h3>
-      <p className="etf-note">실질 증감 = (뒤 ÷ 앞) ÷ 공통 배율 − 1. ±1% 이내는 유지입니다. 공시된 바스켓의 차이이며 실제 체결 내역이 아닙니다.</p>
-      <div className="etf-table-wrap">
+      <h3>
+        CU당 수량 변화 · {pair.before} → {pair.after} · 공통 배율 <span className="etf-scale">{formatScale(commonScale)}</span>
+        <HelpTip label="실질 증감 설명" text="실질 증감 = (뒤 ÷ 앞) ÷ 공통 배율 − 1. ±1% 이내는 유지입니다. 공시된 바스켓의 차이이며 실제 체결 내역이 아닙니다." />
+      </h3>
+      <div className="etf-table-wrap" data-scroll="">
         <table className="etf-table" aria-label="종목별 증감 표">
           <thead>
             <tr>
@@ -92,17 +89,12 @@ function Changes({ code, pair }: { code: string; pair: EtfChangePair }) {
 
 export function HistoryTab({ code, pair, onPair }: HistoryTabProps) {
   const history = useEtfHistory(code);
-  if (history.isPending) return <div className="etf-empty" role="status">편입 변경을 불러오는 중입니다</div>;
-  if (history.isError) return failure("편입 변경", () => void history.refetch());
+  if (history.isPending) return <Loading label="편입 변경을 불러오는 중입니다" />;
+  if (history.isError) return <Failure what="편입 변경" retry={() => void history.refetch()} />;
   const { pairs, firstCollectedOn } = history.data;
   const selected = pairOf(pairs, pair);
   if (selected === null) {
-    return (
-      <div className="etf-empty etf-card-wide" role="status">
-        <strong>수집을 시작한 날부터 쌓입니다</strong>
-        <span>{firstCollectedOn === null ? "아직 수집한 날짜가 없습니다" : `첫 수집일 ${firstCollectedOn}`}</span>
-      </div>
-    );
+    return <Notice title="수집을 시작한 날부터 쌓입니다">{firstCollectedOn === null ? "아직 수집한 날짜가 없습니다" : `첫 수집일 ${firstCollectedOn}`}</Notice>;
   }
   return (
     <>

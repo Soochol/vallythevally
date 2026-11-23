@@ -255,8 +255,6 @@ fn settings() -> SystemSettings {
         screener_db_path: String::new(),
         financial_db_path: String::new(),
         screener_update_on_start: false,
-        financial_automatic: false,
-        opendart_key_present: false,
         token_path: String::new(),
         key_path: String::new(),
         lock_path: String::new(),

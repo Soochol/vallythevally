@@ -10,6 +10,7 @@ import { formatPrice, MINUS } from "../../lib/format";
 import { marketSocket } from "../../stores/realtime";
 import { MarketWindowGate } from "../market-window/MarketWindowGate";
 import { formatQuantity, withSign } from "../market-window/format";
+import { useWindowedRows } from "../market-window/useWindowedRows";
 import { ErrorState, EmptyState, Skeleton } from "../overlay/State";
 import { boldKeys, type ColumnWidths, eokFromMillionWon, formatEokAmount, historyRows, isNoProgramData, joinHistoryAndLive, liveRow, type ProgramLine, type ProgramRow, rowsOf, sparklinePoints, widestSoFar } from "./program";
 
@@ -79,24 +80,27 @@ function Table({ lines }: { lines: readonly ProgramLine[] }) {
   const rows = useMemo(() => rowsOf(visible), [visible]);
   const bold = useMemo(() => boldKeys(rows), [rows]);
   const widths = useWidestColumns(rows);
+  const windowed = useWindowedRows(visible.length);
   const style = { "--pg-time": `${widths[0]}ch`, "--pg-price": `${widths[1]}ch` } as CSSProperties;
   return (
     <div className="pg-table" role="table" aria-label="프로그램 체결" style={style}>
       <div className="pg-tr pg-th" role="row"><span role="columnheader">시각</span><span role="columnheader">현재가</span><span role="columnheader">순매수 증감</span></div>
-      <div className="pg-body">
-        {visible.map((line) =>
-          line.kind === "gap" ? (
-            <div key={line.key} className="pg-gap" role="row" data-testid="program-gap">{line.time} 연결이 끊겼다 이어졌습니다 · 이 사이는 비어 있습니다</div>
-          ) : (
-            <div key={line.row.key} className="pg-tr" role="row" data-testid="program-row" data-source={line.row.source} data-bold={bold.has(line.row.key) ? "" : undefined}>
-              <span role="cell" className="pg-time">{line.row.time}</span>
-              <span role="cell" className="pg-price">{priceText(line.row)}</span>
-              <span role="cell" className="pg-change" data-testid="program-change">
-                <em className={line.row.netQtyChange > 0 ? "mw-up" : line.row.netQtyChange < 0 ? "mw-down" : undefined}>{changeText(line.row).replace("-", MINUS)}</em>
-              </span>
-            </div>
-          ),
-        )}
+      <div ref={windowed.scroller} className="pg-body" onScroll={windowed.onScroll}>
+        <div ref={windowed.list} className="pg-rows" style={windowed.spacing}>
+          {visible.slice(windowed.range.start, windowed.range.end).map((line) =>
+            line.kind === "gap" ? (
+              <div key={line.key} className="pg-gap" role="row" data-testid="program-gap">{line.time} 연결이 끊겼다 이어졌습니다 · 이 사이는 비어 있습니다</div>
+            ) : (
+              <div key={line.row.key} className="pg-tr" role="row" data-testid="program-row" data-source={line.row.source} data-bold={bold.has(line.row.key) ? "" : undefined}>
+                <span role="cell" className="pg-time">{line.row.time}</span>
+                <span role="cell" className="pg-price">{priceText(line.row)}</span>
+                <span role="cell" className="pg-change" data-testid="program-change">
+                  <em className={line.row.netQtyChange > 0 ? "mw-up" : line.row.netQtyChange < 0 ? "mw-down" : undefined}>{changeText(line.row).replace("-", MINUS)}</em>
+                </span>
+              </div>
+            ),
+          )}
+        </div>
       </div>
     </div>
   );

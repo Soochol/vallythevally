@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { OrdersAccount } from "../../api/generated/OrdersAccount";
 import type { OrdersStatus } from "../../api/generated/OrdersStatus";
-import { accountNumberOf, canConfirmEnable, enableTail, mergeOrdersStatus, orderCanTurnOff, orderCanTurnOn, orderInUse, orderMarkOf } from "./orderUse";
+import { accountNumberOf, canConfirmEnable, enableTail, enableWarning, mergeOrdersStatus, orderCanTurnOff, orderCanTurnOn, orderInUse, orderMarkOf, orderStateSentence } from "./orderUse";
 
 const row = (patch: Partial<OrdersAccount> = {}): OrdersAccount => ({ keyId: "k", broker: "kiwoom", alias: "k", market: false, state: "on", accountRef: "r", accountTail: "12", ...patch });
 const status = (patch: Partial<OrdersStatus> = {}): OrdersStatus => ({ state: "on", accountRef: "ref-a", accountTail: "01", message: "켜짐", accounts: [row({ keyId: "a", market: true })], ...patch });
@@ -59,5 +59,17 @@ describe("주문 사용 켜기의 끝 2자리", () => {
   it("키움은 확인 상자를, 한투는 두 자리 입력을 마쳐야 켤 수 있다", () => {
     expect([canConfirmEnable("kiwoom", false, ""), canConfirmEnable("kiwoom", true, "")]).toEqual([false, true]);
     expect([canConfirmEnable("kis", true, ""), canConfirmEnable("kis", false, "34")]).toEqual([false, true]);
+  });
+});
+
+describe("주문 사용 문장", () => {
+  it("켜짐은 실제 체결을, 꺼짐은 주문이 나가지 않음을 말한다", () => {
+    expect(orderStateSentence("on", false)).toContain("실제 체결");
+    expect(orderStateSentence("off", false)).toBe("꺼짐 · 이 계좌로 주문이 나가지 않습니다");
+  });
+  it("모의투자는 실제 체결이라는 말을 쓰지 않는다", () => {
+    expect(orderStateSentence("on", true)).not.toContain("실제 체결");
+    expect(enableWarning(true)).toContain("실제 체결은 아닙니다");
+    expect(enableWarning(false)).toBe("켜면 호가주문 창에서 누른 주문이 이 계좌로 실제 체결됩니다");
   });
 });

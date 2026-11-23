@@ -367,9 +367,10 @@ async fn collects_only_requested_companies_and_reads_disk_after_restart() {
     let restarted = Financials::new(Some(fake.client()),reopened,clock.clone());
     assert_eq!(restarted.read("005930").await.state,ReadState::Ready);
     assert_eq!(fake.count("list.json"),before);
-    let disabled = Financials::new(None,store,clock);
-    let saved = disabled.read("005930").await;
-    assert_eq!(saved.state,ReadState::NotConfigured);
+    drop(store);
+    let reader = Financials::read_only(&dir.path().join("financials.db"),clock);
+    let saved = reader.read("005930").await;
+    assert_eq!(saved.state,ReadState::Ready);
     assert_eq!(saved.collection.reports.len(),4);
     let bytes = serde_json::to_string(&(&result.security, &result.collection)).unwrap();
     assert!(!bytes.contains(KEY));
@@ -460,35 +461,24 @@ async fn incomplete_run_resumes_and_disclosure_failures_do_not_discard_saved_dat
 mod common;
 
 #[tokio::test]
-async fn real_price_api_remains_available_without_key_and_during_collection_and_logs_redact_key() {
-    let fake = Fake::start().await;
-    fake.state.lock().unwrap().delayed = true;
+async fn real_price_api_remains_available_without_a_financial_database_and_none_is_created() {
     let kiwoom = common::ScriptedTransport::new();
     let client = reqwest::Client::new();
-    for configured in [false,true] {
-        let dir = tempfile::tempdir().unwrap();
-        let key = if configured { KEY } else { "" };
-        let server = common::Server::spawn_with(&kiwoom,&dir.path().join("run/server.lock"),dir.path(),&[
-            ("OPENDART_API_KEY",std::ffi::OsStr::new(key)),
-            ("VALLY_DART_BASE_URL",std::ffi::OsStr::new(&fake.url)),
-            ("VALLY_KIND_BASE_URL",std::ffi::OsStr::new(&fake.url)),
-        ]);
-        let addr = server.addr().await;
-        let price_url = format!("http://{addr}/api/bars?symbol=005930&period=D&limit=5");
-        let initial = client.get(&price_url).send().await.unwrap();
-        let status = initial.status();
-        let body = initial.text().await.unwrap();
-        assert_eq!(status,StatusCode::OK,"{body}\n{}",server.logs());
-        let response = client.get(format!("http://{addr}/api/symbols/005930/financial-source")).send().await.unwrap();
-        assert_eq!(response.status(),StatusCode::OK);
-        let value:Value = serde_json::from_slice(&response.bytes().await.unwrap()).unwrap();
-        assert_eq!(value["status"],if configured {"not_collected"} else {"not_configured"});
-        http_start(&client, &format!("http://{addr}")).await;
-        let price = tokio::time::timeout(Duration::from_secs(1),client.get(&price_url).send()).await.unwrap().unwrap();
-        assert_eq!(price.status(),StatusCode::OK);
-        let logs = server.stop().await;
-        assert!(!logs.contains(KEY),"{logs}");
-    }
+    let dir = tempfile::tempdir().unwrap();
+    let server = common::Server::spawn_with(&kiwoom,&dir.path().join("run/server.lock"),dir.path(),&[]);
+    let addr = server.addr().await;
+    let price_url = format!("http://{addr}/api/bars?symbol=005930&period=D&limit=5");
+    let initial = client.get(&price_url).send().await.unwrap();
+    let status = initial.status();
+    let body = initial.text().await.unwrap();
+    assert_eq!(status,StatusCode::OK,"{body}\n{}",server.logs());
+    let response = client.get(format!("http://{addr}/api/symbols/005930/financial-source")).send().await.unwrap();
+    assert_eq!(response.status(),StatusCode::OK);
+    let value:Value = serde_json::from_slice(&response.bytes().await.unwrap()).unwrap();
+    assert_eq!(value["status"],"not_configured");
+    assert_eq!(client.get(&price_url).send().await.unwrap().status(),StatusCode::OK);
+    assert!(!dir.path().join("run/financials.db").exists());
+    server.stop().await;
 }
 
 #[tokio::test]
@@ -566,12 +556,6 @@ async fn json_escaped_secrets_are_redacted_after_decoding() {
     assert_eq!(rows[0]["value"],"[redacted]");
 }
 
-async fn http_snapshot(client: &reqwest::Client, base: &str) -> Value {
-    let response = client.get(format!("{base}/api/symbols/005930/financial-source")).send().await.unwrap();
-    assert_eq!(response.status(),StatusCode::OK);
-    serde_json::from_slice(&response.bytes().await.unwrap()).unwrap()
-}
-
 fn assert_saved_report_fetches(current: &Value, previous: &Value) {
     for (key, report) in previous["reports"].as_object().unwrap() {
         for fetch in ["statement", "dividends"] {
@@ -582,29 +566,20 @@ fn assert_saved_report_fetches(current: &Value, previous: &Value) {
     }
 }
 
-async fn http_start(client: &reqwest::Client, base: &str) {
-    client.post(format!("{base}/api/financial-update")).send().await.unwrap().error_for_status().unwrap();
+fn private_run_dir(dir: &std::path::Path) {
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::create_dir_all(dir.join("run")).unwrap();
+    std::fs::set_permissions(dir.join("run"),std::fs::Permissions::from_mode(0o700)).unwrap();
 }
 
-async fn http_settled(fake: &Fake, client: &reqwest::Client, base: &str) -> Value {
-    updates::finished(fake, client, base).await;
-    let snapshot = http_snapshot(client, base).await;
-    assert_ne!(snapshot["status"], "collecting", "a terminal job must leave readable company data");
-    snapshot
-}
-
-fn process(fake: &Fake, kiwoom: &common::ScriptedTransport, dir: &std::path::Path, start: &str) -> common::Server {
-    process_spaced(fake, kiwoom, dir, start, "1")
-}
-
-fn process_spaced(fake: &Fake, kiwoom: &common::ScriptedTransport, dir: &std::path::Path, start: &str, dart_spacing_millis: &str) -> common::Server {
-    common::Server::spawn_with(kiwoom,&dir.join("run/server.lock"),dir,&[
-        ("DART_SPACING_MILLIS",std::ffi::OsStr::new(dart_spacing_millis)),
-        ("OPENDART_API_KEY",std::ffi::OsStr::new(KEY)),
-        ("VALLY_DART_BASE_URL",std::ffi::OsStr::new(&fake.url)),
-        ("VALLY_KIND_BASE_URL",std::ffi::OsStr::new(&fake.url)),
-        ("VALLY_CLOCK_START",std::ffi::OsStr::new(start)),
-    ])
+async fn symbols_loaded(client: &reqwest::Client, base: &str) {
+    tokio::time::timeout(Duration::from_secs(30),async {
+        loop {
+            client.get(format!("{base}/api/bars?symbol=005930&period=D&limit=5")).send().await.unwrap();
+            if client.get(format!("{base}/api/symbols/005930")).send().await.unwrap().status() == StatusCode::OK { return; }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+    }).await.expect("the symbol directory loads");
 }
 
 fn report_calls(fake: &Fake, code: &str) -> usize {
@@ -615,14 +590,10 @@ fn report_calls(fake: &Fake, code: &str) -> usize {
 async fn review_restart_resumes_corrections_after_list_commit_and_partial_report_commit() {
     for paused in ["11013","11014"] {
         let fake = Fake::start().await;
-        let kiwoom = common::ScriptedTransport::new();
         let dir = tempfile::tempdir().unwrap();
-        let client = reqwest::Client::new();
-        let server = process(&fake,&kiwoom,dir.path(),"20151231120000");
-        let base = format!("http://{}",server.addr().await);
-        assert_eq!(client.get(format!("{base}/api/symbols/005930")).send().await.unwrap().status(),StatusCode::OK);
-        http_start(&client, &base).await;
-        let original = http_settled(&fake,&client,&base).await;
+        let first = collector::Collector::open(&fake,dir.path(),"20151231120000",&[("005930",false)]).await;
+        first.start().await;
+        let original = first.settled(&fake).await;
         assert_eq!(original["status"],"ready");
         let before = report_calls(&fake,paused);
         {
@@ -630,32 +601,29 @@ async fn review_restart_resumes_corrections_after_list_commit_and_partial_report
             state.correction = true;
             state.paused_report = Some(paused.into());
         }
-        client.post(format!("{base}/api/symbols/005930/financial-source")).send().await.unwrap();
+        first.start().await;
         fake.wait_for_source(paused, || report_calls(&fake, paused) > before).await;
-        let update: Value = serde_json::from_slice(&client.get(format!("{base}/api/financial-update")).send().await.unwrap().bytes().await.unwrap()).unwrap();
+        let update = first.status().await;
         assert!(report_calls(&fake,paused) > before, "manual update did not request {paused}: {update}");
-        let interrupted = http_snapshot(&client,&base).await;
+        let interrupted = first.snapshot().await;
         assert_eq!(interrupted["collection"]["disclosures"][1]["rcept_no"],"20160401000002");
         if paused == "11014" {
             assert_eq!(interrupted["collection"]["reports"]["2015/11013"]["statement"]["data"]["accounts"][0]["fields"]["thstrm_amount"],"100","displayed reports retain the last coherent snapshot until all changed inputs are ready");
         }
-        server.stop().await;
+        first.crash().await;
         fake.state.lock().unwrap().paused_report = None;
         let first_calls = report_calls(&fake,"11013");
-        let restarted = process(&fake,&kiwoom,dir.path(),"20160101120000");
-        let base = format!("http://{}",restarted.addr().await);
-        assert_eq!(client.get(format!("{base}/api/symbols/005930")).send().await.unwrap().status(),StatusCode::OK);
-        http_start(&client, &base).await;
-        let recovered = http_settled(&fake,&client,&base).await;
+        let restarted = collector::Collector::open(&fake,dir.path(),"20160101120000",&[("005930",false)]).await;
+        restarted.start().await;
+        let recovered = restarted.settled(&fake).await;
         assert_eq!(recovered["status"],"ready");
         for code in ["11013","11012","11014","11011"] {
             assert_eq!(recovered["collection"]["reports"][format!("2015/{code}")]["statement"]["data"]["accounts"][0]["fields"]["thstrm_amount"],"120","restart at {paused}, report {code}");
         }
         if paused == "11014" { assert_eq!(report_calls(&fake,"11013"),first_calls,"already refreshed report must be reused"); }
         let counts = fake.count("fnlttSinglAcntAll.json");
-        assert_eq!(http_snapshot(&client,&base).await["status"],"ready");
+        assert_eq!(restarted.snapshot().await["status"],"ready");
         assert_eq!(fake.count("fnlttSinglAcntAll.json"),counts,"ordinary reads must not refetch all years");
-        restarted.stop().await;
     }
 }
 
@@ -729,33 +697,26 @@ async fn review_same_day_disclosure_failure_retries_failed_endpoint_and_finds_co
 
 #[tokio::test]
 async fn review_unavailable_financial_store_keeps_real_price_and_user_data_routes_running() {
-    let fake = Fake::start().await;
     let kiwoom = common::ScriptedTransport::new();
-    for configured in [false,true] {
-        let dir = tempfile::tempdir().unwrap();
-        let db_directory = dir.path().join("db-is-directory");
-        std::fs::create_dir(&db_directory).unwrap();
-        let key = if configured { KEY } else { "" };
-        let server = common::Server::spawn_with(&kiwoom,&dir.path().join("run/server.lock"),dir.path(),&[
-            ("OPENDART_API_KEY",std::ffi::OsStr::new(key)),
-            ("VALLY_DART_BASE_URL",std::ffi::OsStr::new(&fake.url)),
-            ("VALLY_KIND_BASE_URL",std::ffi::OsStr::new(&fake.url)),
-            ("VALLY_FINANCIAL_DB_PATH",db_directory.as_os_str()),
-        ]);
-        let base = format!("http://{}",server.addr().await);
-        let client = reqwest::Client::new();
-        let price = client.get(format!("{base}/api/bars?symbol=005930&period=D&limit=5")).send().await.expect("price server must remain running");
-        assert_eq!(price.status(),StatusCode::OK);
-        assert_eq!(client.get(format!("{base}/api/layouts")).send().await.unwrap().status(),StatusCode::OK);
-        let failed = http_snapshot(&client,&base).await;
-        assert_eq!(failed["status"],"failed");
-        assert_eq!(failed["failure"],"storage");
-        assert_eq!(http_snapshot(&client,&base).await["failure"],"storage");
-        let calculated:Value = serde_json::from_slice(&client.get(format!("{base}/api/symbols/005930/financials?period=Y")).send().await.unwrap().bytes().await.unwrap()).unwrap();
-        assert_eq!(calculated["status"],"failed");assert_eq!(calculated["failure"],"storage");
-        assert_eq!(fake.count("corpCode.xml"),0);
-        server.stop().await;
-    }
+    let dir = tempfile::tempdir().unwrap();
+    let db_directory = dir.path().join("db-is-directory");
+    std::fs::create_dir(&db_directory).unwrap();
+    let server = common::Server::spawn_with(&kiwoom,&dir.path().join("run/server.lock"),dir.path(),&[
+        ("VALLY_FINANCIAL_DB_PATH",db_directory.as_os_str()),
+    ]);
+    let base = format!("http://{}",server.addr().await);
+    let client = reqwest::Client::new();
+    let price = client.get(format!("{base}/api/bars?symbol=005930&period=D&limit=5")).send().await.expect("price server must remain running");
+    assert_eq!(price.status(),StatusCode::OK);
+    assert_eq!(client.get(format!("{base}/api/layouts")).send().await.unwrap().status(),StatusCode::OK);
+    let snapshot = |url: String| { let client = client.clone(); async move { serde_json::from_slice::<Value>(&client.get(url).send().await.unwrap().bytes().await.unwrap()).unwrap() } };
+    let failed = snapshot(format!("{base}/api/symbols/005930/financial-source")).await;
+    assert_eq!(failed["status"],"failed");
+    assert_eq!(failed["failure"],"storage");
+    assert_eq!(snapshot(format!("{base}/api/symbols/005930/financial-source")).await["failure"],"storage");
+    let calculated = snapshot(format!("{base}/api/symbols/005930/financials?period=Y")).await;
+    assert_eq!(calculated["status"],"failed");assert_eq!(calculated["failure"],"storage");
+    server.stop().await;
 }
 
 #[tokio::test]
@@ -779,9 +740,9 @@ async fn review_write_failure_retains_saved_data_and_earlier_company() {
         assert_eq!(failed.failure,Some(Failure::Storage));
         if let Some(original) = &original {
             assert_eq!(serde_json::to_value(&failed.collection).unwrap(),serde_json::to_value(&original.collection).unwrap());
-            let disabled = Financials::new(None,store.clone(),clock.clone());
-            let readable = disabled.read("005930").await;
-            assert_eq!(readable.state,ReadState::NotConfigured);
+            let reader = Financials::read_only(&path,clock.clone());
+            let readable = reader.read("005930").await;
+            assert_eq!(readable.state,ReadState::Ready);
             assert!(readable.collection.reports["2015/11011"].statement.data.is_some());
         }
         let other = service.read("000001").await;
@@ -950,40 +911,28 @@ async fn review2_security_save_failure_resumes_and_applies_manual_refresh() {
 }
 
 #[tokio::test]
-async fn review2_failed_list_storage_keeps_real_price_usable_and_preserves_verified_data() {
+async fn review2_failed_list_storage_preserves_verified_data_and_a_new_update_repairs_it() {
     use sqlx::Connection;
-    use std::os::unix::fs::PermissionsExt;
     let fake = Fake::start().await;
-    let kiwoom = common::ScriptedTransport::new();
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("run/financials.db");
-    let service = Financials::new(Some(fake.client()),Store::open(&path).await.unwrap(),clock());
+    let service = Financials::new(Some(fake.client()),Store::open_for_collection(&path).await.unwrap(),clock());
     let original = settled(&service).await.collection;
     release(service).await;
-    std::fs::set_permissions(dir.path().join("run"),std::fs::Permissions::from_mode(0o700)).unwrap();
     let mut connection = sqlx::SqliteConnection::connect_with(&sqlx::sqlite::SqliteConnectOptions::new().filename(&path)).await.unwrap();
     sqlx::query("CREATE TRIGGER fail_list_storage BEFORE INSERT ON companies WHEN NEW.corp_code = '00126380' BEGIN SELECT RAISE(FAIL,'synthetic list storage failure'); END").execute(&mut connection).await.unwrap();
-    let server = common::Server::spawn_with(&kiwoom,&dir.path().join("run/server.lock"),dir.path(),&[
-        ("OPENDART_API_KEY",std::ffi::OsStr::new(KEY)),
-        ("VALLY_DART_BASE_URL",std::ffi::OsStr::new(&fake.url)),
-        ("VALLY_KIND_BASE_URL",std::ffi::OsStr::new(&fake.url)),
-        ("VALLY_CLOCK_START",std::ffi::OsStr::new("20171231120000")),
-    ]);
-    let base = format!("http://{}",server.addr().await);
-    let client = reqwest::Client::new();
-    let price_url = format!("{base}/api/bars?symbol=005930&period=D&limit=5");
-    assert_eq!(client.get(&price_url).send().await.unwrap().status(),StatusCode::OK);
+    let collector = collector::Collector::open(&fake,dir.path(),"20171231120000",&[("005930",false)]).await;
     fake.state.lock().unwrap().correction = true;
-    client.post(format!("{base}/api/symbols/005930/financial-source")).send().await.unwrap();
-    let failed = http_settled(&fake,&client,&base).await;
+    collector.start().await;
+    let failed = collector.finished(&fake).await;
     assert_eq!(failed["failure"],"storage");
-    assert_eq!(failed["collection"]["reports"],serde_json::to_value(&original.reports).unwrap());
-    assert_eq!(tokio::time::timeout(Duration::from_secs(1),client.get(&price_url).send()).await.unwrap().unwrap().status(),StatusCode::OK);
+    let snapshot = collector.snapshot().await;
+    assert_eq!(snapshot["collection"]["reports"],serde_json::to_value(&original.reports).unwrap());
     sqlx::query("DROP TRIGGER fail_list_storage").execute(&mut connection).await.unwrap();
-    client.post(format!("{base}/api/symbols/005930/financial-source")).send().await.unwrap();
+    collector.start().await;
     let mut repaired = false;
     for _ in 0..300 {
-        let snapshot = http_snapshot(&client,&base).await;
+        let snapshot = collector.snapshot().await;
         let collection: server::financials::model::Collection = serde_json::from_value(snapshot["collection"].clone()).unwrap();
         if collection.reports["2015/11011"].statement.data.as_ref().unwrap().accounts[0].fields["thstrm_amount"] == "120" {
             assert_corrected_report(&collection);
@@ -993,94 +942,71 @@ async fn review2_failed_list_storage_keeps_real_price_usable_and_preserves_verif
         tokio::time::sleep(Duration::from_millis(20)).await;
     }
     assert!(repaired);
-    assert_eq!(tokio::time::timeout(Duration::from_secs(1),client.get(&price_url).send()).await.unwrap().unwrap().status(),StatusCode::OK);
-    server.stop().await;
 }
 
 #[tokio::test]
-async fn calculated_http_contract_validates_period_and_preserves_price_during_collection() {
-    let fake = Fake::start().await;
-    fake.state.lock().unwrap().delayed = true;
+async fn calculated_http_contract_validates_period_and_reads_the_stored_state() {
     let kiwoom = common::ScriptedTransport::new();
     let client = reqwest::Client::new();
-    for configured in [false,true] {
+    for stored in [false,true] {
         let dir = tempfile::tempdir().unwrap();
-        let key = if configured { KEY } else { "" };
-        let server = common::Server::spawn_with(&kiwoom,&dir.path().join("run/server.lock"),dir.path(),&[
-            ("OPENDART_API_KEY",std::ffi::OsStr::new(key)),
-            ("VALLY_DART_BASE_URL",std::ffi::OsStr::new(&fake.url)),
-            ("VALLY_KIND_BASE_URL",std::ffi::OsStr::new(&fake.url)),
-        ]);
+        if stored { Store::open_for_collection(&dir.path().join("run/financials.db")).await.unwrap(); }
+        private_run_dir(dir.path());
+        let server = common::Server::spawn_with(&kiwoom,&dir.path().join("run/server.lock"),dir.path(),&[]);
         let base = format!("http://{}",server.addr().await);
-        let price = format!("{base}/api/bars?symbol=005930&period=Q&limit=5");
-        assert_eq!(client.get(&price).send().await.unwrap().status(),StatusCode::OK);
+        symbols_loaded(&client,&base).await;
         let url = format!("{base}/api/symbols/005930/financials");
         for query in ["","?period=D","?period=Q&venue=krx"] {
             assert_eq!(client.get(format!("{url}{query}")).send().await.unwrap().status(),StatusCode::BAD_REQUEST);
         }
         let response:Value = client.get(format!("{url}?period=Q")).send().await.unwrap().bytes().await.map(|bytes| serde_json::from_slice(&bytes).unwrap()).unwrap();
-        assert_eq!(response["status"],if configured { "not_collected" } else { "not_configured" });
+        assert_eq!(response["status"],if stored { "not_collected" } else { "not_configured" });
         assert_eq!(response["series"].as_array().unwrap().len(),6);
         assert_eq!(response["period"],"Q");
         for code in ["IDX:001","102780"] {
             let unsupported:Value = serde_json::from_slice(&client.get(format!("{base}/api/symbols/{code}/financials?period=Y")).send().await.unwrap().bytes().await.unwrap()).unwrap();
             assert_eq!(unsupported["status"],"unsupported");assert_eq!(unsupported["reason"],"unsupported_product");
         }
-        assert_eq!(tokio::time::timeout(Duration::from_secs(1),client.get(&price).send()).await.unwrap().unwrap().status(),StatusCode::OK);
-        let refresh:Value = client.post(format!("{url}?period=Y")).send().await.unwrap().bytes().await.map(|bytes| serde_json::from_slice(&bytes).unwrap()).unwrap();
-        assert!(["not_collected", "collecting", "not_configured"].contains(&refresh["status"].as_str().unwrap()));
-        if configured { assert!(["planning", "collecting"].contains(&serde_json::from_slice::<Value>(&client.get(format!("{base}/api/financial-update")).send().await.unwrap().bytes().await.unwrap()).unwrap()["status"].as_str().unwrap())); }
-        assert!(!server.stop().await.contains(KEY));
+        server.stop().await;
     }
 }
 
 #[tokio::test]
-async fn calculated_http_reads_saved_values_without_key_and_applies_correction_with_metadata() {
-    use std::os::unix::fs::PermissionsExt;
+async fn calculated_http_reads_saved_values_and_applies_a_correction_another_process_stored() {
     let fake = Fake::start().await;
     let kiwoom = common::ScriptedTransport::new();
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("run/financials.db");
-    let service = Financials::new(Some(fake.client()),Store::open(&path).await.unwrap(),clock());
+    let service = Financials::new(Some(fake.client()),Store::open_for_collection(&path).await.unwrap(),clock());
     settled(&service).await;
     release(service).await;
-    std::fs::set_permissions(dir.path().join("run"),std::fs::Permissions::from_mode(0o700)).unwrap();
+    private_run_dir(dir.path());
+    let server = common::Server::spawn_with(&kiwoom,&dir.path().join("run/server.lock"),dir.path(),&[]);
+    let base = format!("http://{}",server.addr().await);
     let client = reqwest::Client::new();
-    for configured in [false,true] {
-        let key = if configured { KEY } else { "" };
-        let server = common::Server::spawn_with(&kiwoom,&dir.path().join("run/server.lock"),dir.path(),&[
-            ("OPENDART_API_KEY",std::ffi::OsStr::new(key)),
-            ("VALLY_DART_BASE_URL",std::ffi::OsStr::new(&fake.url)),
-            ("VALLY_KIND_BASE_URL",std::ffi::OsStr::new(&fake.url)),
-            ("VALLY_CLOCK_START",std::ffi::OsStr::new("20171231120000")),
-        ]);
-        let base = format!("http://{}",server.addr().await);
-        let price = format!("{base}/api/bars?symbol=005930&period=D&limit=5");
-        assert_eq!(client.get(&price).send().await.unwrap().status(),StatusCode::OK);
-        let url = format!("{base}/api/symbols/005930/financials?period=Y");
-        if configured {fake.state.lock().unwrap().correction=true;}
-        let first:Value = client.get(&url).send().await.unwrap().bytes().await.map(|bytes| serde_json::from_slice(&bytes).unwrap()).unwrap();
-        assert_eq!(first["status"],if configured {"ready"} else {"not_configured"});
-        let p = &first["series"][0]["points"][0];
-        assert_eq!(p["value"],100.0);assert_eq!(p["inputs"][0]["receipt"],RECEIPT);
-        if configured {
-            client.post(&url).send().await.unwrap();
-            let mut corrected=None;
-            for _ in 0..500 {
-                let response:Value=client.get(&url).send().await.unwrap().bytes().await.map(|bytes| serde_json::from_slice(&bytes).unwrap()).unwrap();
-                if response["series"][0]["points"][0]["value"]==120.0 {corrected=Some(response);break;}
-                tokio::time::sleep(Duration::from_millis(20)).await;
-            }
-            let corrected=corrected.expect("latest verified correction must be returned before entire history completes");
-            let p=&corrected["series"][0]["points"][0];
-            assert_eq!(p["inputs"][0]["receipt"],"20160401000002");assert_eq!(p["inputs"][0]["disclosedAt"],"2016-04-01");
-            assert_eq!(p["period"]["start"],"2015-01-01");assert_eq!(p["basis"],"CFS");assert!(p["priceBucket"].is_number());
-            assert_eq!(corrected["fiscalMonth"],12);assert_eq!(corrected["latestCorrections"],true);
-            assert!(p["inputs"][0]["lastSuccessAt"].is_number());
-        }
-        assert_eq!(tokio::time::timeout(Duration::from_secs(1),client.get(&price).send()).await.unwrap().unwrap().status(),StatusCode::OK);
-        server.stop().await;
+    symbols_loaded(&client,&base).await;
+    let url = format!("{base}/api/symbols/005930/financials?period=Y");
+    let read = || async { client.get(&url).send().await.unwrap().bytes().await.map(|bytes| serde_json::from_slice::<Value>(&bytes).unwrap()).unwrap() };
+    let first = read().await;
+    assert_eq!(first["status"],"ready");
+    let p = &first["series"][0]["points"][0];
+    assert_eq!(p["value"],100.0);assert_eq!(p["inputs"][0]["receipt"],RECEIPT);
+    fake.state.lock().unwrap().correction = true;
+    let collector = collector::Collector::open(&fake,dir.path(),"20171231120000",&[("005930",false)]).await;
+    collector.start().await;
+    let mut corrected=None;
+    for _ in 0..500 {
+        let response = read().await;
+        if response["series"][0]["points"][0]["value"]==120.0 {corrected=Some(response);break;}
+        tokio::time::sleep(Duration::from_millis(20)).await;
     }
+    let corrected=corrected.expect("latest verified correction must be returned before entire history completes");
+    let p=&corrected["series"][0]["points"][0];
+    assert_eq!(p["inputs"][0]["receipt"],"20160401000002");assert_eq!(p["inputs"][0]["disclosedAt"],"2016-04-01");
+    assert_eq!(p["period"]["start"],"2015-01-01");assert_eq!(p["basis"],"CFS");assert!(p["priceBucket"].is_number());
+    assert_eq!(corrected["fiscalMonth"],12);assert_eq!(corrected["latestCorrections"],true);
+    assert!(p["inputs"][0]["lastSuccessAt"].is_number());
+    server.stop().await;
 }
 
 #[path = "financials/schedule.rs"]
@@ -1088,6 +1014,12 @@ mod schedule;
 
 #[path = "financials/writer.rs"]
 mod writer;
+
+#[path = "financials/read_only.rs"]
+mod read_only;
+
+#[path = "financials/collector.rs"]
+mod collector;
 
 #[tokio::test(start_paused = true)]
 async fn source_observation_waits_while_earlier_paced_requests_are_progressing() {

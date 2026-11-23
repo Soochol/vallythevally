@@ -4,7 +4,7 @@ import path from "node:path";
 import { cell, expect, test } from "./harness";
 
 const SHORT = { code: "005930", name: "삼성", kind: "common", market: "kospi", nxtEnabled: false };
-const LONG = { code: "0000D0", name: "KODEX 미국배당다우존스타겟커버드콜액티브", kind: "etf", market: "kospi", nxtEnabled: false };
+const LONG = { code: "0000D0", name: "KODEX 미국배당다우존스타겟커버드콜액티브 합성 레버리지 인컴 프리미엄 혼합형 상장지수투자신탁", kind: "etf", market: "kospi", nxtEnabled: false };
 
 const toolbar = (page: Page) => page.getByRole("toolbar", { name: "차트 도구 막대" });
 
@@ -33,7 +33,10 @@ test("종목 이름 길이가 달라도 가운데 검색창과 위 막대의 메
     await page.screenshot({ path: path.resolve(`../target/ux-screens/header-long-${size.width}.png`), clip: { x: 0, y: 0, width: size.width, height: 72 } });
     expect(long).toEqual(short);
     await expect(toolbar(page).getByText(LONG.name)).toHaveAttribute("title", LONG.name);
-    if (size.width === 1024) expect(await toolbar(page).getByText(LONG.name).evaluate((el) => el.scrollWidth > el.clientWidth)).toBe(true);
+    expect(await toolbar(page).getByText(LONG.name).evaluate((el) => {
+      const style = getComputedStyle(el);
+      return { overflows: el.scrollWidth > el.clientWidth, clipped: style.overflowX !== "visible", ellipsis: style.textOverflow };
+    })).toEqual({ overflows: true, clipped: true, ellipsis: "ellipsis" });
   }
 });
 

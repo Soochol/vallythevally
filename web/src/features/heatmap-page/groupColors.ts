@@ -1,4 +1,4 @@
-export const THEME_COLORS = ["#C7F36B", "#5ED4E8", "#E88AE0", "#EBC074", "#B9A6FF", "#F59047", "#64F7DE", "#DEBDBA"] as const;
+export const THEME_COLORS = ["var(--series-1)", "var(--series-2)", "var(--series-3)", "var(--series-4)", "var(--series-5)", "var(--series-6)", "var(--series-7)", "var(--series-8)"] as const;
 
 export function themeColors(ids: readonly string[]): Map<string, string> {
   const ranked = [...new Set(ids)].sort();

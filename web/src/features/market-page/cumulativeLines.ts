@@ -69,3 +69,43 @@ export function zeroY(lines: CumulativeLines, frame: Frame): number {
   const spanY = Math.max(lines.max - lines.min, 1);
   return frame.height - ((0 - lines.min) / spanY) * frame.height;
 }
+
+export function pointTimes(lines: CumulativeLines): number[] {
+  const times = new Set<number>();
+  for (const subject of SUBJECTS) for (const segment of lines.series[subject]) for (const point of segment) times.add(point.at);
+  return [...times].toSorted((a, b) => a - b);
+}
+
+export function nearestTime(lines: CumulativeLines, at: number): number {
+  const times = pointTimes(lines);
+  return times.reduce((best, time) => (Math.abs(time - at) < Math.abs(best - at) ? time : best), times[0] ?? lines.from);
+}
+
+export function valuesAt(lines: CumulativeLines, at: number): Record<Subject, number | null> {
+  const found = {} as Record<Subject, number | null>;
+  for (const subject of SUBJECTS) found[subject] = lines.series[subject].flat().find((point) => point.at === at)?.eok ?? null;
+  return found;
+}
+
+export function lastValues(lines: CumulativeLines): Record<Subject, number | null> {
+  const found = {} as Record<Subject, number | null>;
+  for (const subject of SUBJECTS) found[subject] = lines.series[subject].at(-1)?.at(-1)?.eok ?? null;
+  return found;
+}
+
+export function yFraction(lines: CumulativeLines, eok: number): number {
+  return 1 - (eok - lines.min) / Math.max(lines.max - lines.min, 1);
+}
+
+export function spreadLabels(fractions: readonly number[], gap: number): number[] {
+  const order = fractions.map((fraction, index) => ({ fraction, index })).toSorted((a, b) => a.fraction - b.fraction);
+  const placed = order.map((entry) => entry.fraction);
+  for (let i = 1; i < placed.length; i += 1) placed[i] = Math.max(placed[i]!, placed[i - 1]! + gap);
+  if ((placed.at(-1) ?? 0) > 1) {
+    placed[placed.length - 1] = 1;
+    for (let i = placed.length - 2; i >= 0; i -= 1) placed[i] = Math.min(placed[i]!, placed[i + 1]! - gap);
+  }
+  const result = new Array<number>(fractions.length).fill(0);
+  order.forEach((entry, i) => { result[entry.index] = placed[i]!; });
+  return result;
+}

@@ -74,6 +74,7 @@ export function useOrderData(account: string | null, code: string, open: boolean
   const fetchedAt = openOrders.dataUpdatedAt;
   useEffect(() => { if (orders) pendingWrites.observe(code, { orders, at: fetchedAt }); }, [orders, fetchedAt, code]);
   const groups = useMemo(() => groupWithPending(orders ?? NONE, writes, code), [orders, writes, code]);
+  const capacity = useMemo(() => ({ sellableQuantity: sellableQuantityOf(balance.data ?? null, code), buying: buyingPowerOf(buyable.data ?? null) }), [balance.data, buyable.data, code]);
   return {
     groups,
     blocked: commands.data?.blocked ?? false,
@@ -82,7 +83,7 @@ export function useOrderData(account: string | null, code: string, open: boolean
     balance: balance.data ?? null,
     executions: executions.data?.executions ?? NONE,
     orderable: buyable.data ?? null,
-    capacity: { sellableQuantity: sellableQuantityOf(balance.data ?? null, code), buying: buyingPowerOf(buyable.data ?? null) },
+    capacity,
     buyableProblem: buyable.error?.message ?? null,
   };
 }

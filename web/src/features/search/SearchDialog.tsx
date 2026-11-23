@@ -9,6 +9,7 @@ import { type SearchPurpose, useSelectionStore } from "../../stores/selection";
 import { useActionKeys, useUiStore } from "../../stores/ui";
 import { useActiveWatchlist, useWatchlistStore } from "../../stores/watchlist";
 import { removalUndo } from "../watch/removalUndo";
+import { useSendSymbol } from "../pages/sendSymbol";
 import { PutTargetPill } from "./PutTargetPill";
 import { type SearchCommand, searchCommandsSnapshot, subscribeSearchCommands } from "../commands/registry";
 import { CloseIcon, Icon, ICON_PATHS, SearchIcon } from "../icons";
@@ -42,6 +43,7 @@ function SearchDialogBody({ purpose }: { purpose: SearchPurpose }) {
   const registered = useSyncExternalStore(subscribeSearchCommands, searchCommandsSnapshot);
   const commands = [...defaultSearchCommands(useActionKeys()).filter((c) => !registered.some((r) => r.id === c.id)), ...registered];
   const queryClient = useQueryClient();
+  const sendToLinkedChart = useSendSymbol();
   const [input, setInput] = useState("");
   const [market, setMarket] = useState<MarketFilter>("all");
   const [active, setActive] = useState(0);
@@ -85,7 +87,7 @@ function SearchDialogBody({ purpose }: { purpose: SearchPurpose }) {
       useSelectionStore.getState().showToast(`${watchlist.name}에서 뺐습니다: ${info.name}`);
     } else put(info);
   };
-  const chooseSymbol = (info: SymbolInfo, action: "open" | "watch" | "toggleWatch" | "compare") => {
+  const chooseSymbol = (info: SymbolInfo, action: "open" | "watch" | "toggleWatch" | "compare" | "page") => {
     queryClient.setQueryData(["symbol", info.code], info);
     const selection = useSelectionStore.getState();
     if (action === "compare") {
@@ -104,6 +106,8 @@ function SearchDialogBody({ purpose }: { purpose: SearchPurpose }) {
         inputRef.current?.focus();
         return;
       }
+    } else if (purpose === "page") {
+      sendToLinkedChart(info);
     } else {
       const { notice } = useLayoutStore.getState().setSymbol(cellId, info);
       if (notice) selection.showToast(notice);

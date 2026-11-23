@@ -3,7 +3,9 @@ import type { SymbolCode } from "../../api/generated/SymbolCode";
 import { changeThemesNow } from "../../api/heatmapThemes";
 import { ApiRequestError } from "../../api/http";
 import { addSymbolToTheme, appendThemeCopy, MAX_THEMES, MAX_THEME_NAME_CHARS, MAX_THEME_SYMBOLS, removeSymbolFromTheme, type SymbolOutcome, type ThemeCopy } from "../../lib/heatmapThemes";
-import { useSelectionStore } from "../../stores/selection";
+import { type ToastUndo, useSelectionStore } from "../../stores/selection";
+import { activeWatchlist, useWatchlistStore } from "../../stores/watchlist";
+import { useUiStore } from "../../stores/ui";
 
 export interface ThemeChoice {
   id: string;
@@ -37,16 +39,54 @@ export async function addSymbolToThemeNow(client: QueryClient, theme: ThemeChoic
   }
 }
 
-export async function removeSymbolFromThemeNow(client: QueryClient, theme: ThemeChoice, code: SymbolCode, symbolName: string): Promise<void> {
+function restoreUndo(restore: () => void): ToastUndo & { done(): void } {
+  const listeners = new Set<() => void>();
+  let used = false;
+  const done = () => { used = true; listeners.forEach((listener) => listener()); };
+  return { available: () => !used, run: () => { done(); restore(); }, subscribe: (listener) => { listeners.add(listener); return () => void listeners.delete(listener); }, done };
+}
+
+async function restoreSymbolToTheme(client: QueryClient, theme: ThemeChoice, code: SymbolCode, index: number, symbolName: string): Promise<void> {
   try {
     const { result } = await changeThemesNow(client, (themes) => {
-      const held = themes.find((candidate) => candidate.id === theme.id)?.symbols.includes(code) ?? false;
-      return { themes: removeSymbolFromTheme(themes, theme.id, code), result: held };
+      const target = themes.find((candidate) => candidate.id === theme.id);
+      if (!target) return { themes, result: "missing" as const };
+      if (target.symbols.includes(code)) return { themes, result: "duplicate" as const };
+      if (target.symbols.length >= MAX_THEME_SYMBOLS) return { themes, result: "full" as const };
+      const symbols = [...target.symbols.slice(0, index), code, ...target.symbols.slice(index)];
+      return { themes: themes.map((candidate) => (candidate.id === theme.id ? { ...candidate, symbols } : candidate)), result: "added" as const };
     });
-    toast(result ? `‘${theme.name}’ 테마에서 뺐습니다: ${symbolName}` : `‘${theme.name}’ 테마에 이미 없습니다: ${symbolName}`);
+    toast(addedText(result, theme.name, symbolName));
   } catch (error) {
     toast(failureText(error));
   }
+}
+
+export async function removeSymbolFromThemeNow(client: QueryClient, theme: ThemeChoice, code: SymbolCode, symbolName: string): Promise<void> {
+  try {
+    const { result } = await changeThemesNow(client, (themes) => {
+      const index = themes.find((candidate) => candidate.id === theme.id)?.symbols.indexOf(code) ?? -1;
+      return { themes: removeSymbolFromTheme(themes, theme.id, code), result: index };
+    });
+    if (result < 0) {
+      toast(`‘${theme.name}’ 테마에 이미 없습니다: ${symbolName}`);
+      return;
+    }
+    const undo = restoreUndo(() => void restoreSymbolToTheme(client, theme, code, result, symbolName));
+    useSelectionStore.getState().showToast(`‘${theme.name}’ 테마에서 뺐습니다: ${symbolName}`, undo);
+  } catch (error) {
+    toast(failureText(error));
+  }
+}
+
+export function addToActiveWatchlist(code: SymbolCode, symbolName: string): void {
+  const watchlist = activeWatchlist(useWatchlistStore.getState().lists, useUiStore.getState().prefs.activeWatchlistId);
+  if (watchlist.symbols.includes(code)) {
+    toast(`이미 ${watchlist.name}에 있습니다: ${symbolName}`);
+    return;
+  }
+  useWatchlistStore.getState().add(watchlist.id, code);
+  toast(`${watchlist.name}에 넣었습니다: ${symbolName}`);
 }
 
 const copiedText = (result: ThemeCopy, name: string): string => {

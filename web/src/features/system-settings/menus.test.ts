@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { menuAfterKey, visibleMenus } from "./menus";
+import { groupedMenus, menuAfterKey, visibleMenus } from "./menus";
 
 describe("세로 탭 키보드", () => {
   test("↑↓는 준비 중인 메뉴를 건너뛰고 끝에서 멈춘다", () => {
@@ -30,5 +30,20 @@ describe("세로 탭 키보드", () => {
     expect(menuAfterKey("data", "ArrowDown", visibleMenus(true))).toBe("collector");
     expect(menuAfterKey("collector", "ArrowDown", visibleMenus(true))).toBe("account");
     expect(menuAfterKey("account", "ArrowUp", visibleMenus(true))).toBe("collector");
+  });
+});
+
+describe("메뉴 묶음", () => {
+  test("연결, 화면, 서버·계정 순이고 준비 중인 메뉴는 맨 아래 묶음이다", () => {
+    expect(groupedMenus(visibleMenus(true)).map((entry) => [entry.group, entry.menus.map((m) => m.id)])).toEqual([
+      ["연결", ["kiwoom"]],
+      ["화면", ["general", "hotkeys"]],
+      ["서버·계정", ["data", "collector", "account", "about"]],
+      ["준비 중", ["telegram"]],
+    ]);
+  });
+
+  test("수집 현황판이 빠지면 그 묶음에서만 빠진다", () => {
+    expect(groupedMenus(visibleMenus(false)).flatMap((entry) => entry.menus.map((m) => m.id))).not.toContain("collector");
   });
 });

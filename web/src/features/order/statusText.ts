@@ -72,6 +72,10 @@ export function withMargin(status: OrderStatus, margin: number): OrderStatus {
 
 export const PENDING_TEXT: Readonly<Record<PendingState, string>> = { sending: "보내는 중", canceling: "취소 중", modifying: "정정 중" };
 
+export const PENDING_CHIP_TEXT: Readonly<Record<PendingState, string>> = { sending: "보냄…", canceling: "취소…", modifying: "정정…" };
+
+export const RETRY_LABEL = "다시 보내기";
+
 const won = (price: number): string => `${formatPrice(price, false)}원`;
 
 export const statusOfSending = (side: OrderSide, quantity: number, price: number): OrderStatus =>
@@ -85,7 +89,10 @@ export const statusOfModifying = (from: number, to: number): OrderStatus =>
 
 export const isUnanswered = (error: unknown): boolean => !(error instanceof ApiRequestError) || error.code === "network" || error.code === "internal";
 
-export function statusOfFailure(error: unknown): OrderStatus {
-  if (!(error instanceof ApiRequestError) || isUnanswered(error)) return { tone: "error", text: "서버의 답을 받지 못했습니다. 같은 동작을 다시 하면 같은 명령으로 보냅니다" };
+export function statusOfFailure(error: unknown, retry?: () => void): OrderStatus {
+  if (!(error instanceof ApiRequestError) || isUnanswered(error)) {
+    const text = "서버의 답을 받지 못했습니다. 다시 보내면 같은 명령으로 보냅니다";
+    return retry ? { tone: "error", text, action: { label: RETRY_LABEL, run: retry } } : { tone: "error", text };
+  }
   return { tone: "error", text: `거절 · ${error.message}` };
 }

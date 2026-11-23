@@ -1,5 +1,7 @@
 # 당일 스크리너는 조회한 KRX 시세로 현재 봉의 조건을 따진다
 
+- (2026-11-23 개정) 키움 키가 없고 한투가 연결돼 있으면 오늘 요약과 달력을 한투로 받는다. [ADR 0047](0047-screener-today-summary-falls-back-to-kis-multi-price.md).
+
 - (2026-11-23 개정) `VALLY_SHARED_DATA_DIR`이 있으면 오늘 시세를 실행 때 받지 않고 수집 데몬의 30초 KRX 스냅샷을 읽는다. 아래 "실행할 때 조회한 오늘 시세"는 변수가 없을 때의 결정이다. [ADR 0044](0044-screener-reads-the-shared-quote-snapshot.md).
 
 봉 범위를 지정하는 방식과 기존 조건식의 이전 규칙은 [ADR 0015](0015-screener-recent-period-from-latest-bar.md)에서 최근 기간 하나를 입력하는 방식으로 변경했다. 현재 봉과 실제 봉 개수를 사용하는 판정 규칙은 유지한다.

@@ -1,4 +1,4 @@
-import { type ActionKeys, type HotkeyActionDef, type HotkeyGroup, HOTKEY_ACTIONS, HOTKEY_GROUP_LABEL, keyLabel, parseKey } from "../../lib/hotkeys";
+import { type ActionKeys, type HotkeyActionDef, type HotkeyGroup, HOTKEY_ACTIONS, HOTKEY_GROUP_LABEL, keyCapsLabel, keyLabel, parseKey } from "../../lib/hotkeys";
 
 export interface HotkeyGroupRows {
   readonly group: HotkeyGroup;
@@ -44,3 +44,14 @@ export function lockedReason(key: string): string {
   if (ctrl && (code === "KeyZ" || code === "KeyY")) return "되돌리기·다시 하기에 쓰는 키입니다";
   return "브라우저가 쓰는 키입니다";
 }
+
+const MODIFIER_LABELS: ReadonlySet<string> = new Set(["Ctrl", "Alt", "Shift"]);
+
+export function keyPieces(key: string): string[] {
+  const tokens = keyCapsLabel(key).split(" ");
+  let modifiers = 0;
+  while (modifiers < tokens.length - 1 && MODIFIER_LABELS.has(tokens[modifiers]!)) modifiers++;
+  return [...tokens.slice(0, modifiers), tokens.slice(modifiers).join(" ")];
+}
+
+export const lockedKeyPieces = (keysText: string): string[][] => keysText.split(" · ").map((group) => group.split("+"));

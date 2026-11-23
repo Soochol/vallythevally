@@ -3,7 +3,7 @@ import type { UseQueryResult } from "@tanstack/react-query";
 import type { MarketOverviewPart } from "../../api/generated/MarketOverviewPart";
 import type { Broker } from "../../api/generated/Broker";
 import { useMarketSource } from "../../stores/kiwoomLink";
-import { Skeleton } from "../overlay/State";
+import { EmptyState, Skeleton, type SkeletonShape } from "../overlay/State";
 import { brokerShortName, FEED_UNAVAILABLE_TEXT, feedMarkOf } from "../status/marketFeed";
 import { openSystemSettings } from "../system-settings/open";
 
@@ -17,14 +17,14 @@ export function FeedUnavailable() {
   return (
     <div className="mk-unavailable" data-testid="feed-unavailable">
       <p className="mk-empty">{FEED_UNAVAILABLE_TEXT}</p>
-      <button type="button" className="tb-btn" onClick={() => openSystemSettings("kiwoom")}>시스템 설정 이어가기</button>
+      <button type="button" className="btn btn-sm" onClick={() => openSystemSettings("kiwoom")}>시스템 설정 이어가기</button>
     </div>
   );
 }
 
-export function CardShell({ title, note, source, children }: { title: string; note?: ReactNode; source?: Broker; children: ReactNode }) {
+export function CardShell({ title, note, source, card, children }: { title: string; note?: ReactNode; source?: Broker; card: string; children: ReactNode }) {
   return (
-    <section className="mk-card" aria-label={title}>
+    <section className="mk-card" aria-label={title} data-card={card}>
       <header className="mk-card-head">
         <h2>{title}</h2>
         <FeedMark received={source} />
@@ -39,15 +39,24 @@ export function CardError({ message, retry }: { message: string; retry?: () => v
   return (
     <div role="alert" className="mk-error">
       <span>{message}</span>
-      {retry !== undefined && <button type="button" className="tb-btn" onClick={retry}>다시 받기</button>}
+      {retry !== undefined && <button type="button" className="btn btn-sm" onClick={retry}>다시 시도</button>}
     </div>
   );
 }
 
-export function Loaded<T>({ query, label, children }: { query: UseQueryResult<T>; label: string; children: (data: T) => ReactNode }) {
+export interface SkeletonSpec {
+  shape: SkeletonShape;
+  minHeight: string;
+}
+
+export function EmptyNote({ children }: { children: ReactNode }) {
+  return <div className="mk-empty-state"><EmptyState title={String(children)} /></div>;
+}
+
+export function Loaded<T>({ query, label, skeleton, children }: { query: UseQueryResult<T>; label: string; skeleton: SkeletonSpec; children: (data: T) => ReactNode }) {
   if (query.data !== undefined) return <>{children(query.data)}</>;
   if (query.isError) return <CardError message={query.error instanceof Error ? query.error.message : `${label}을 받지 못했습니다`} retry={() => void query.refetch()} />;
-  return <Skeleton label={`${label}을 받는 중`} />;
+  return <Skeleton label={`${label}을 받는 중`} shape={skeleton.shape} minHeight={skeleton.minHeight} />;
 }
 
 export function PartView<T>({ part, children }: { part: MarketOverviewPart<T>; children: (value: T) => ReactNode }) {

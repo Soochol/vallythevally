@@ -232,7 +232,7 @@ test("키움 테마를 받은 적이 없으면 08:30 이후 받는다고 안내�
 
 test("신선도 줄에 구성종목 기준일이 붙고 내 테마 탭에는 붙지 않는다", async ({ page, scenario }) => {
   seedKiwoom(scenario);
-  const freshness = main(page).getByRole("status", { name: "자료 신선도" });
+  const freshness = page.getByRole("status", { name: "자료 신선도" });
   await page.goto("/heatmap?source=kiwoom");
   await expect(themeTiles(page)).toHaveCount(3);
   await expect(freshness).toContainText("구성종목 2026-11-09 기준");

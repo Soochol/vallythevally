@@ -66,9 +66,15 @@ export function layoutSectorMap(sectors: readonly SectorTileInput[], width: numb
 
 export const SECTOR_RATE_RANGE = 3;
 
-export function sectorFill(changeRate: number): string {
-  if (changeRate === 0) return "var(--raised)";
-  const side = changeRate > 0 ? "up" : "down";
-  const mix = Math.round(8 + Math.min(Math.abs(changeRate) / SECTOR_RATE_RANGE, 1) * 74);
-  return `color-mix(in srgb, var(--${side}) ${mix}%, var(--surface))`;
+export type SectorTileLabel = "full" | "rate" | "none";
+
+const FULL_MIN_WIDTH_PX = 56;
+const FULL_MIN_HEIGHT_PX = 34;
+const RATE_MIN_WIDTH_PX = 40;
+const RATE_MIN_HEIGHT_PX = 20;
+
+export function sectorTileLabel(widthPx: number, heightPx: number): SectorTileLabel {
+  if (widthPx >= FULL_MIN_WIDTH_PX && heightPx >= FULL_MIN_HEIGHT_PX) return "full";
+  if (widthPx >= RATE_MIN_WIDTH_PX && heightPx >= RATE_MIN_HEIGHT_PX) return "rate";
+  return "none";
 }

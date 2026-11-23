@@ -2,10 +2,12 @@ import { useState } from "react";
 import { useSearchParams } from "react-router";
 import { useEtfFunds } from "../../api/etf";
 import type { EtfDataStatus } from "../../api/generated/EtfDataStatus";
+import { ErrorState } from "../overlay/State";
 import { PageFrame } from "../pages/PageFrame";
 import { EtfDetail, tabOf } from "./EtfDetail";
 import { EtfList } from "./EtfList";
-import { BASKET_LIMIT, NO_FILTER, type FundFilter, parseBasket } from "./etfModel";
+import { Notice } from "./EtfStates";
+import { BASKET_LIMIT, NO_FILTER, type FundFilter, type FundSort, parseBasket } from "./etfModel";
 import "./etfPage.css";
 
 const SOURCE_LABEL: Record<EtfDataStatus["source"], string> = { snapshot: "스냅샷", collected: "수집" };
@@ -20,6 +22,7 @@ export function EtfPage() {
   const funds = useEtfFunds();
   const [params, setParams] = useSearchParams();
   const [filter, setFilter] = useState<FundFilter>(NO_FILTER);
+  const [sort, setSort] = useState<FundSort>("name");
   const [basketNotice, setBasketNotice] = useState<string | null>(null);
   const code = params.get("code");
   const tab = tabOf(params.get("tab"));
@@ -56,40 +59,50 @@ export function EtfPage() {
     }
   };
   const standalone = code === null && (tab === "overlap" || tab === "reverse");
+  const detailOpen = code !== null || standalone;
   return (
-    <PageFrame title="ETF" freshness={<Freshness status={(selected ?? list?.[0])?.status ?? null} />}>
-      {funds.isPending && <div className="etf-empty" role="status">ETF 목록을 불러오는 중입니다</div>}
-      {funds.isError && (
-        <div className="etf-empty" role="alert">
-          ETF 목록을 불러오지 못했습니다
-          <button type="button" className="etf-retry" onClick={() => void funds.refetch()}>다시 시도</button>
-        </div>
-      )}
-      {list && (
-        <div className="etf-layout">
-          <EtfList funds={list} selected={code} filter={filter} onFilter={setFilter} onSelect={(next) => go({ code: next })} basket={basket} basketNotice={basketNotice} onToggleBasket={toggleBasket} />
+    <PageFrame title="ETF" fresh={{ failed: (selected ?? list?.[0])?.status.refreshFailed === true }} freshness={<Freshness status={(selected ?? list?.[0])?.status ?? null} />}>
+      {funds.isError ? (
+        <ErrorState message="ETF 목록을 불러오지 못했습니다" retry={() => void funds.refetch()} />
+      ) : (
+        <div className="etf-layout" data-view={detailOpen ? "detail" : "list"}>
+          <EtfList
+            funds={list}
+            selected={code}
+            filter={filter}
+            sort={sort}
+            onFilter={setFilter}
+            onSort={setSort}
+            onSelect={(next) => go({ code: next })}
+            basket={basket}
+            basketNotice={basketNotice}
+            onToggleBasket={toggleBasket}
+            onShowOverlap={() => go({ tab: "overlap", code: null })}
+          />
           <div className="etf-main">
-            {selected || standalone ? (
-              <EtfDetail
-                fund={selected}
-                funds={list}
-                tab={tab}
-                basket={basket}
-                stock={stock}
-                pair={pair}
-                onPair={(next) => go({ pair: next })}
-                onTab={(next) => go({ tab: next })}
-                onRemoveFromBasket={toggleBasket}
-                onStock={(next) => go({ stock: next })}
-                onOpenFund={(next) => go({ code: next, tab: "holdings" })}
-              />
-            ) : code !== null ? (
-              <div className="etf-empty" role="alert">
-                <strong>찾을 수 없음</strong>
-                <span>{code} 코드의 ETF가 목록에 없습니다. 왼쪽 목록에서 고르세요.</span>
-              </div>
-            ) : (
-              <div className="etf-empty" role="status">왼쪽 목록에서 ETF를 고르세요</div>
+            {list !== null && (
+              <>
+                <button type="button" className="btn etf-back" onClick={() => go({ code: null, tab: "holdings" })}>목록</button>
+                {selected || standalone ? (
+                  <EtfDetail
+                    fund={selected}
+                    funds={list}
+                    tab={tab}
+                    basket={basket}
+                    stock={stock}
+                    pair={pair}
+                    onPair={(next) => go({ pair: next })}
+                    onTab={(next) => go({ tab: next })}
+                    onRemoveFromBasket={toggleBasket}
+                    onStock={(next) => go({ stock: next })}
+                    onOpenFund={(next) => go({ code: next, tab: "holdings" })}
+                  />
+                ) : code !== null ? (
+                  <Notice title="찾을 수 없음" role="alert" wide={false}>{code} 코드의 ETF가 목록에 없습니다. 왼쪽 목록에서 고르세요.</Notice>
+                ) : (
+                  <Notice title="ETF를 고르세요" wide={false}>왼쪽 목록에서 ETF를 고르세요</Notice>
+                )}
+              </>
             )}
           </div>
         </div>

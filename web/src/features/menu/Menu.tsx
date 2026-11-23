@@ -6,7 +6,7 @@ import { Kbd } from "../ui/Kbd";
 
 export type MenuItem =
   | { kind: "radio"; label: string; value?: string; icon?: ReactNode; hint?: string; shortcut?: string; checked: boolean; onSelect(): void }
-  | { kind: "check"; label: string; value?: string; icon?: ReactNode; shortcut?: string; checked: boolean; onSelect(): void }
+  | { kind: "check"; label: string; value?: string; icon?: ReactNode; hint?: string; shortcut?: string; checked: boolean; onSelect(): void }
   | { kind: "action"; label: string; icon?: ReactNode; hint?: string; shortcut?: string; disabled?: boolean; disabledReason?: string; danger?: boolean; onSelect(): void }
   | { kind: "heading"; label: string }
   | { kind: "group"; label: string; labelShown: boolean; items: readonly Focusable[] }

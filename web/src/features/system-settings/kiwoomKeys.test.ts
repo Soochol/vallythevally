@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { KiwoomKey } from "../../api/generated/KiwoomKey";
 import type { KiwoomLinkStatus } from "../../api/generated/KiwoomLinkStatus";
 import type { MarketSourceStatus } from "../../api/generated/MarketSourceStatus";
-import { accountRequest, addedKey, addInput, addSteps, brokersShown, canAdd, defaultAlias, editRequest, emptyEntry, feedLine, marketChangeText, menuDotTone, removeText, shortReason } from "./kiwoomKeys";
+import { accountRequest, addedKey, addInput, addSteps, brokersShown, canAdd, defaultAlias, editRequest, emptyEntry, feedLine, fieldOfError, marketChangeText, menuDotTone, pickerOption, reasonTone, removeText, shortReason, systemButtonSentence } from "./kiwoomKeys";
 import { panelView } from "./kiwoomPanel";
 
 const link = (patch: Partial<KiwoomLinkStatus> = {}): KiwoomLinkStatus => ({
@@ -22,21 +22,20 @@ describe("키 목록 화면의 판단", () => {
   });
   it("지우기 문구는 시세 키일 때 다음 시세 키를 말한다", () => {
     const keys = [key("k1", "주계좌", { market: true }), key("k2", "보조")];
-    expect(removeText(keys, keys[0]!)).toContain("‘보조’");
-    expect(removeText(keys, keys[1]!)).not.toContain("시세");
-    expect(removeText([keys[0]!], keys[0]!)).toContain("키가 없어");
+    expect(removeText(keys, keys[0]!)).toEqual({ title: "‘주계좌’ 키를 지웁니다", detail: ["시세 키입니다. 지우면 시세를 ‘보조’에서 받습니다"] });
+    expect(removeText(keys, keys[1]!)).toEqual({ title: "‘보조’ 키를 지웁니다", detail: [] });
+    expect(removeText([keys[0]!], keys[0]!).detail).toEqual(["시세 키입니다. 지우면 키가 없어 시세를 받지 못합니다"]);
   });
   it("주문 사용 중인 키를 지우면 호가주문창이 시세 공급원 계좌로 돌아간다고 더한다", () => {
     const keys = [key("k1", "주계좌", { market: true }), key("k2", "보조")];
-    expect(removeText(keys, keys[1]!, true)).toBe("‘보조’ 키를 지웁니다. 주문 사용이 꺼지고, 이 계좌를 고른 호가주문창은 시세 공급원 계좌로 돌아갑니다");
-    expect(removeText(keys, keys[1]!)).not.toContain("호가주문창");
-    expect(removeText(keys, keys[0]!, true)).toContain("시세를 ‘보조’에서 받습니다. 주문 사용이 꺼지고");
+    expect(removeText(keys, keys[1]!, true)).toEqual({ title: "‘보조’ 키를 지웁니다", detail: ["주문 사용이 꺼지고, 이 계좌를 고른 호가주문창은 시세 공급원 계좌로 돌아갑니다"] });
+    expect(removeText(keys, keys[1]!).detail.join("")).not.toContain("호가주문창");
+    expect(removeText(keys, keys[0]!, true).detail).toEqual(["시세 키입니다. 지우면 시세를 ‘보조’에서 받습니다", "주문 사용이 꺼지고, 이 계좌를 고른 호가주문창은 시세 공급원 계좌로 돌아갑니다"]);
   });
   it("시세 키 바꾸기 문구는 세 사실을 말한다", () => {
     const text = marketChangeText("보조");
-    expect(text).toContain("시세를 ‘보조’에서 받습니다");
-    expect(text).toContain("열린 차트·호가·체결을 새로 받습니다");
-    expect(text).toContain("주문 계좌는 바뀌지 않습니다");
+    expect(text.title).toBe("시세를 ‘보조’에서 받습니다");
+    expect(text.detail).toEqual(["열린 차트·호가·체결을 새로 받습니다", "주문 계좌는 바뀌지 않습니다"]);
   });
   it("증권사가 하나면 증권사 단계를 건너뛴다", () => {
     expect(addSteps(["kiwoom"])).toEqual(["input", "confirm"]);
@@ -72,10 +71,9 @@ describe("한투", () => {
   const source = (feed: "kiwoom" | "kis" | null): MarketSourceStatus => ({ broker: "kis", keyId: "kis1", alias: "한투 1", state: "connected", problem: null, step: null, retryAt: null, features: [], feedBroker: feed && { broker: feed, rankingKinds: [], rankingChoices: [], overviewFeatures: [] } });
 
   it("증권사가 바뀔 때만 확인 문구에 한투 제약이 붙는다", () => {
-    expect(marketChangeText("한투 1", "kiwoom", "kis")).toContain("한투는 분봉을 1분봉에서 만들고, 실시간은 40건까지입니다");
-    expect(marketChangeText("한투 1", "kis", "kis")).not.toContain("분봉");
-    expect(marketChangeText("주계좌", "kis", "kiwoom")).not.toContain("분봉");
-    expect(marketChangeText("보조")).toBe("시세를 ‘보조’에서 받습니다. 열린 차트·호가·체결을 새로 받습니다. 주문 계좌는 바뀌지 않습니다");
+    expect(marketChangeText("한투 1", "kiwoom", "kis").detail).toContain("한투는 분봉을 1분봉에서 만들고, 실시간은 40건까지입니다");
+    expect(marketChangeText("한투 1", "kis", "kis").detail.join("")).not.toContain("분봉");
+    expect(marketChangeText("주계좌", "kis", "kiwoom").detail.join("")).not.toContain("분봉");
   });
   it("OPSP8996은 한투 키일 때만 다른 프로그램 사용 중이고 단추는 다시 연결이다", () => {
     expect(shortReason(inUse, 0, "kis")).toBe("다른 프로그램이 사용 중");
@@ -97,7 +95,7 @@ describe("한투", () => {
   });
   it("시세 키를 지울 때 다음 시세 키가 다른 증권사면 제약을 붙인다", () => {
     const keys = [key("k1", "주계좌", { market: true }), kis("kis1")];
-    expect(removeText(keys, keys[0]!)).toContain("한투는 분봉을 1분봉에서 만들고");
+    expect(removeText(keys, keys[0]!).detail).toContain("한투는 분봉을 1분봉에서 만들고, 실시간은 40건까지입니다");
   });
 });
 
@@ -122,5 +120,37 @@ describe("한투 계좌 입력", () => {
     expect(accountRequest({ ...emptyEntry(""), htsId: "id" })).toBeNull();
     expect(accountRequest({ ...emptyEntry(""), accountNo: "12345678-01" })).toEqual({ accountNo: "12345678-01" });
     expect(accountRequest({ ...emptyEntry(""), accountNo: "12345678-01", htsId: "id" })).toEqual({ accountNo: "12345678-01", htsId: "id" });
+  });
+});
+
+describe("서버 문구가 가리키는 입력 칸", () => {
+  it("문구에 든 낱말로 칸을 고른다", () => {
+    expect(fieldOfError("이미 등록한 앱키입니다")).toBe("appKey");
+    expect(fieldOfError("별칭이 비어 있습니다")).toBe("alias");
+    expect(fieldOfError("같은 계좌번호의 한투 키가 이미 있습니다")).toBe("accountNo");
+    expect(fieldOfError("한투 키는 계좌번호를 넣어야 더할 수 있습니다")).toBe("accountNo");
+  });
+  it("어느 칸도 가리키지 않는 문구는 칸에 붙이지 않는다", () => {
+    expect(fieldOfError("계좌번호와 HTS ID는 한투 키에만 넣습니다")).toBeNull();
+    expect(fieldOfError("키는 5개까지 등록할 수 있습니다")).toBeNull();
+  });
+});
+
+describe("시스템 버튼 풍선말", () => {
+  it("상태를 한 문장으로 말한다", () => {
+    expect(systemButtonSentence(null)).toBe("시세 연결 상태를 불러오는 중입니다");
+    expect(systemButtonSentence(link())).toBe("시세 연결 연결됨");
+    expect(systemButtonSentence(blocked)).toBe("시세 연결 오류");
+  });
+});
+
+describe("시세 공급원 고르기", () => {
+  it("선택지는 별칭을 이름으로 하고 증권사 묶음과 끝자리·상태를 곁들인다", () => {
+    expect(pickerOption(key("k1", "주계좌"), 0)).toEqual({ value: "k1", label: "주계좌", hint: "••••1234 · 연결됨", group: "키움증권" });
+    expect(pickerOption(key("k2", "한투 1", { broker: "kis", appKeyTail: null, link: blocked }), 0)).toEqual({ value: "k2", label: "한투 1", hint: "8050 인증 차단", group: "한국투자증권" });
+  });
+  it("줄 사유의 색은 연결 점과 같다", () => {
+    expect(reasonTone(blocked)).toBe("danger");
+    expect(reasonTone(link({ state: "failed", problem: "issueIntervalWait" }))).toBe("warning");
   });
 });

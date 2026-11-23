@@ -1,4 +1,3 @@
-import { FinancialUpdateButton } from "../financial-update/FinancialUpdateButton";
 import type { SymbolInfo } from "../../api/generated/SymbolInfo";
 import type { CellStatus } from "../../chart/ChartController";
 import { direction, formatChange, formatPercent, formatPrice } from "../../lib/format";
@@ -36,7 +35,6 @@ export function PhoneHeader({ cell, info, status }: { cell: ChartWindowState; in
             <b className="text-l font-[650]">{info?.name ?? cell.symbol}</b>
             <small className="ml-1 text-s text-text-3">{symbolSub(cell.symbol, info)}</small>
           </button>
-          <FinancialUpdateButton />
           <PhoneSystemButton />
           <button type="button" className="icon-btn h-9 w-9 flex-none" title="차트 이미지 내려받기" aria-label="차트 이미지 내려받기" onClick={() => saveSnapshot(cell.id, "download")}><CameraIcon size={20} /></button>
         </div>

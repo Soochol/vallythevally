@@ -1,15 +1,15 @@
 import { useQueryClient } from "@tanstack/react-query";
 import type { KiwoomKey } from "../../api/generated/KiwoomKey";
 import { connectKiwoomKey, disconnectKiwoomKey, loadKiwoomLink, storeKiwoomKeys } from "../../api/system";
-import { useServerTime } from "../status/useServerTime";
 import { type Confirmations, NO_CONFIRMATIONS } from "./kiwoomPanel";
 import { useCommand } from "./useCommand";
 import { useConfirmations } from "./useConfirmations";
+import { useWaitingClock } from "./useWaitingClock";
 import type { KiwoomPanel } from "./useKiwoomPanel";
 
 export function useMarketPanel(kiwoom: KiwoomPanel, marketKey: KiwoomKey | undefined): KiwoomPanel {
   const queryClient = useQueryClient();
-  const now = useServerTime();
+  const now = useWaitingClock([marketKey?.link.retryAt]);
   const command = useCommand();
   const key = marketKey?.broker === "kis" ? marketKey : null;
   const { confirmations, setConfirmations, view } = useConfirmations(key?.link ?? null, now, false, "kis");

@@ -1,0 +1,37 @@
+import { useRef, useState } from "react";
+import { useUiStore } from "../../stores/ui";
+import { useLayoutStore } from "../../stores/layout";
+import { equalizeDockSizes, setLayoutMode } from "../workspace/canvasCommands";
+import { DockIcon } from "../icons";
+import { Menu, type MenuItem } from "../menu/Menu";
+import { layoutCommands } from "./controller";
+
+export function ArrangeMenu() {
+  const root = useRef<HTMLDivElement>(null);
+  const [open, setOpen] = useState(false);
+  const mode = useUiStore((s) => s.prefs.layoutMode);
+  const hasDock = useLayoutStore((s) => !!s.layout.placement.dock);
+  const canUndo = useLayoutStore((s) => s.steps.length > 0);
+  const canRedo = useLayoutStore((s) => s.redos.length > 0);
+  const items: MenuItem[] = [
+    { kind: "action", label: "기본 배치로", onSelect: layoutCommands.resetPlacement },
+    { kind: "action", label: "크기 모두 고르게", disabled: mode !== "dock" || !hasDock, disabledReason: mode !== "dock" ? "도킹 배치에서만 쓸 수 있습니다" : "고를 도킹 배치가 없습니다", onSelect: equalizeDockSizes },
+    { kind: "separator" },
+    { kind: "action", label: "배치 되돌리기", shortcut: "Ctrl+Z", disabled: !canUndo, disabledReason: "되돌릴 배치 변경이 없습니다", onSelect: () => useLayoutStore.getState().undoArrangement() },
+    { kind: "action", label: "배치 다시 하기", shortcut: "Ctrl+Shift+Z", disabled: !canRedo, disabledReason: "되돌린 배치가 없습니다", onSelect: () => useLayoutStore.getState().redoArrangement() },
+  ];
+  return (
+    <div ref={root} className="contents">
+      <button type="button" className="tb-btn aria-expanded:bg-accent-soft aria-expanded:text-accent" aria-label="배치" title="창 배치" aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen((now) => !now)}><DockIcon /></button>
+      {open && <Menu label="배치" root={root} items={items} onClose={() => setOpen(false)}>
+        <div className="layout-mode-control" onKeyDown={(event) => event.stopPropagation()}>
+          <span id="layout-mode-label">창 배치 방식</span>
+          <div role="group" aria-labelledby="layout-mode-label" className="layout-mode-segments">
+            <button type="button" aria-pressed={mode === "dock"} onClick={() => setLayoutMode("dock")}>도킹</button>
+            <button type="button" aria-pressed={mode === "canvas"} onClick={() => setLayoutMode("canvas")}>캔버스</button>
+          </div>
+        </div>
+      </Menu>}
+    </div>
+  );
+}

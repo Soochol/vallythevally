@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { layoutSectorMap, sectorFill } from "./sectorMap";
+import { layoutSectorMap, sectorTileLabel } from "./sectorMap";
 
 const SECTORS = [
   { code: "a", tradeValueEok: 600 },
@@ -36,11 +36,12 @@ describe("layoutSectorMap", () => {
   });
 });
 
-describe("sectorFill", () => {
-  it("부호에 따라 색을 고르고 ±3%에서 포화한다", () => {
-    expect(sectorFill(0)).toBe("var(--raised)");
-    expect(sectorFill(1)).toContain("var(--up)");
-    expect(sectorFill(-1)).toContain("var(--down)");
-    expect(sectorFill(3)).toBe(sectorFill(9));
+describe("sectorTileLabel", () => {
+  it("작은 칸은 등락률만, 더 작은 칸은 글자가 없다", () => {
+    expect(sectorTileLabel(80, 40)).toBe("full");
+    expect(sectorTileLabel(55, 40)).toBe("rate");
+    expect(sectorTileLabel(80, 33)).toBe("rate");
+    expect(sectorTileLabel(39, 40)).toBe("none");
+    expect(sectorTileLabel(80, 19)).toBe("none");
   });
 });

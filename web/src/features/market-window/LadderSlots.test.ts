@@ -11,7 +11,7 @@ import { tradeRows } from "./recentTrades";
 
 const trade = (price: number, side: TradeRow["side"], key = `l${price}`): TradeRow => ({ kind: "trade", key, origin: "live", secondOfDay: 0, price, quantity: 12, side, venue: "krx", receivedAt: 0 });
 const noop = () => {};
-const renderBox = (trades: TradeRow[], previousClose: number | null) => renderToStaticMarkup(tradeSlot({ strength: 101.5, trades, hold: noop, release: noop }, previousClose)() as never);
+const renderBox = (trades: TradeRow[], previousClose: number | null) => renderToStaticMarkup(tradeSlot({ strength: 101.5, lastTrade: null, trades, hold: noop, release: noop }, previousClose)() as never);
 const priceToneOf = (html: string, price: number) => new RegExp(`data-price="${price}"[^>]*><span class="mw-trade-price" data-tone="(\\w+)"`).exec(html)?.[1];
 
 test("체결 행은 방향을 data-side로 싣고 수량 색은 그 값으로 칠해지며 방향 없는 체결도 행으로 나온다", () => {

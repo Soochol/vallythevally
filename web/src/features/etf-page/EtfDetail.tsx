@@ -3,6 +3,9 @@ import { ApiRequestError } from "../../api/http";
 import type { EtfFundSummary } from "../../api/generated/EtfFundSummary";
 import type { EtfHolding } from "../../api/generated/EtfHolding";
 import { useSendSymbol } from "../pages/sendSymbol";
+import { Tabs, panelDomId, tabDomId } from "../ui/Tabs";
+import { Failure, Loading, Notice } from "./EtfStates";
+import { HelpTip } from "./HelpTip";
 import { CumulativeCurve } from "./CumulativeCurve";
 import { HistoryTab } from "./HistoryTab";
 import { HoldingsTable } from "./HoldingsTable";
@@ -23,16 +26,16 @@ export const tabOf = (value: string | null): TabId => TABS.find((tab) => tab.id 
 
 function SummaryCells({ fund }: { fund: EtfFundSummary }) {
   const cells = [
-    ["종목 수", `${fund.holdingsCount}개`],
-    ["상위 5 비중", formatPercent(fund.top5WeightBps)],
-    ["실효 종목 수", fund.effectiveHoldings.toFixed(1)],
-    ["구성 기준일", fund.status.holdingsAsOf],
+    ["종목 수", `${fund.holdingsCount}개`, null],
+    ["상위 5 비중", formatPercent(fund.top5WeightBps), null],
+    ["실효 종목 수", fund.effectiveHoldings.toFixed(1), "비중이 같은 종목 몇 개와 맞먹는지 나타냅니다. 1 ÷ Σ(비중²)이며 작을수록 몇몇 종목에 몰려 있습니다."],
+    ["구성 기준일", fund.status.holdingsAsOf, null],
   ] as const;
   return (
     <dl className="etf-summary" aria-label="요약 지표">
-      {cells.map(([label, value]) => (
+      {cells.map(([label, value, help]) => (
         <div key={label} className="etf-summary-cell">
-          <dt>{label}</dt>
+          <dt>{label}{help !== null && <HelpTip label={`${label} 설명`} text={help} />}</dt>
           <dd>{value}</dd>
         </div>
       ))}
@@ -44,15 +47,10 @@ function HoldingsTab({ code }: { code: string }) {
   const detail = useEtfFund(code);
   const send = useSendSymbol();
   const pick = (holding: EtfHolding) => send({ code: holding.code, name: holding.name });
-  if (detail.isPending) return <div className="etf-empty" role="status">구성을 불러오는 중입니다</div>;
+  if (detail.isPending) return <Loading label="구성을 불러오는 중입니다" />;
   if (detail.isError) {
     const missing = detail.error instanceof ApiRequestError && detail.error.code === "not_found";
-    return (
-      <div className="etf-empty" role="alert">
-        {missing ? "찾을 수 없는 ETF입니다" : "구성을 불러오지 못했습니다"}
-        {!missing && <button type="button" className="etf-retry" onClick={() => void detail.refetch()}>다시 시도</button>}
-      </div>
-    );
+    return missing ? <Notice title="찾을 수 없는 ETF입니다" role="alert" /> : <Failure what="구성" retry={() => void detail.refetch()} />;
   }
   const { holdings } = detail.data;
   return (
@@ -92,7 +90,7 @@ function Panel({ fund, funds, tab, basket, stock, pair, onPair, onRemoveFromBask
   if (tab === "reverse") return <ReverseTab stock={stock} onStock={onStock} onOpenFund={onOpenFund} />;
   if (tab === "holdings" && fund) return <HoldingsTab code={fund.code} />;
   if (tab === "history" && fund) return <HistoryTab code={fund.code} pair={pair} onPair={onPair} />;
-  return <div className="etf-empty" role="status">준비 중입니다</div>;
+  return <Notice title="준비 중입니다" />;
 }
 
 export function EtfDetail(props: EtfDetailProps) {
@@ -113,14 +111,8 @@ export function EtfDetail(props: EtfDetailProps) {
           <SummaryCells fund={fund} />
         </>
       )}
-      <div role="tablist" aria-label="ETF 상세" className="etf-tabs">
-        {TABS.map((entry) => (
-          <button key={entry.id} type="button" role="tab" id={`etf-tab-${entry.id}`} aria-selected={tab === entry.id} aria-controls="etf-panel" onClick={() => onTab(entry.id)}>
-            {entry.label}
-          </button>
-        ))}
-      </div>
-      <div role="tabpanel" id="etf-panel" aria-labelledby={`etf-tab-${tab}`} className="etf-panel">
+      <Tabs label="ETF 상세" idPrefix="etf" className="etf-tabs" items={TABS} value={tab} onChange={(id) => onTab(tabOf(id))} />
+      <div role="tabpanel" id={panelDomId("etf", tab)} aria-labelledby={tabDomId("etf", tab)} className="etf-panel">
         <Panel {...props} />
       </div>
     </section>

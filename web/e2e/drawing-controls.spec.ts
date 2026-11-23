@@ -69,7 +69,7 @@ test("드로잉 그룹의 별표 고정은 새로고침 뒤 도구와 메뉴에 
   await page.keyboard.press("Escape");
   await expandDock(page);
   await expect(page.getByRole("button", { name: "수평선 고정 도구", exact: true })).toBeVisible();
-  await expect(page.getByRole("contentinfo")).toContainText("자동 저장됨");
+  await expect(page.getByRole("contentinfo")).toContainText("저장됨");
   await pollSaved(async () => scenario.documents.uiPrefs().drawing.pinnedTools).toContain("hline");
   await page.reload();
   await expandDock(page);

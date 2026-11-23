@@ -1,28 +1,42 @@
 import type { KiwoomLinkStatus } from "../../api/generated/KiwoomLinkStatus";
 
-export const WIZARD_STEPS = [
-  { id: "login", label: "로그인" },
-  { id: "ip", label: "IP 확인" },
-  { id: "key", label: "키움 키" },
-  { id: "connect", label: "연결" },
-  { id: "setup", label: "기본 셋업" },
-] as const;
+export type WizardStepId = "prepare" | "paste" | "setup" | "done";
 
-export type WizardStepId = (typeof WIZARD_STEPS)[number]["id"];
-
-const ORDER = WIZARD_STEPS.map((s) => s.id);
-const indexOf = (id: WizardStepId) => ORDER.indexOf(id);
-
-export const isSkippable = (id: WizardStepId) => id === "key" || id === "ip" || id === "connect";
-
-export function firstStep(link: KiwoomLinkStatus): WizardStepId {
-  if (link.state === "connected") return "setup";
-  return "ip";
+export interface WizardStep {
+  id: WizardStepId;
+  label: string;
 }
 
-export const nextStep = (id: WizardStepId): WizardStepId => ORDER[Math.min(ORDER.length - 1, indexOf(id) + 1)]!;
-export const previousStep = (id: WizardStepId): WizardStepId => ORDER[Math.max(1, indexOf(id) - 1)]!;
-export const skipToSetup: WizardStepId = "setup";
+const PREPARE: WizardStep = { id: "prepare", label: "키 준비" };
+const PASTE: WizardStep = { id: "paste", label: "키 붙여넣기" };
+const SETUP: WizardStep = { id: "setup", label: "셋업 고르기" };
+const DONE: WizardStep = { id: "done", label: "끝" };
+
+const PLAIN_STEPS: readonly WizardStep[] = [PREPARE, PASTE, DONE];
+const CHOICE_STEPS: readonly WizardStep[] = [PREPARE, PASTE, SETUP, DONE];
+
+export const wizardSteps = (withChoice: boolean): readonly WizardStep[] => (withChoice ? CHOICE_STEPS : PLAIN_STEPS);
+
+const indexOf = (steps: readonly WizardStep[], id: WizardStepId) => steps.findIndex((s) => s.id === id);
+
+export const isSkippable = (id: WizardStepId) => id === "prepare" || id === "paste";
+
+export function firstStep(link: KiwoomLinkStatus, choosing: boolean): WizardStepId {
+  if (link.state !== "connected") return "prepare";
+  return choosing ? "setup" : "done";
+}
+
+export const nextStep = (id: WizardStepId, withChoice: boolean): WizardStepId => {
+  const steps = wizardSteps(withChoice);
+  return steps[Math.min(steps.length - 1, indexOf(steps, id) + 1)]!.id;
+};
+
+const PREVIOUS: Record<WizardStepId, WizardStepId> = { prepare: "prepare", paste: "prepare", setup: "paste", done: "paste" };
+export const previousStep = (id: WizardStepId): WizardStepId => PREVIOUS[id];
+
+export const skipTarget = (choosing: boolean): WizardStepId => (choosing ? "setup" : "done");
+
+export const advancesOnConnect = (id: WizardStepId, wasConnected: boolean, connected: boolean): boolean => id === "paste" && !wasConnected && connected;
 
 export interface StepFacts {
   link: KiwoomLinkStatus;
@@ -31,24 +45,22 @@ export interface StepFacts {
 
 export function isDone(id: WizardStepId, facts: StepFacts): boolean {
   switch (id) {
-    case "login":
-      return true;
-    case "key":
-      return facts.link.keySource !== "none";
-    case "ip":
+    case "prepare":
       return facts.portalIpConfirmed || facts.link.state === "connected";
-    case "connect":
+    case "paste":
       return facts.link.state === "connected";
     case "setup":
+      return true;
+    case "done":
       return false;
   }
 }
 
 export type StepMark = "done" | "current" | "later" | "upcoming";
 
-export function stepMark(id: WizardStepId, current: WizardStepId, facts: StepFacts): StepMark {
+export function stepMark(steps: readonly WizardStep[], id: WizardStepId, current: WizardStepId, facts: StepFacts): StepMark {
   if (id === current) return "current";
-  if (indexOf(id) > indexOf(current)) return "upcoming";
+  if (indexOf(steps, id) > indexOf(steps, current)) return "upcoming";
   return isDone(id, facts) ? "done" : "later";
 }
 
