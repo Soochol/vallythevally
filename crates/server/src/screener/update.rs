@@ -9,10 +9,10 @@ use super::{Calendar, CalendarUse, Screener};
 use super::store::{DayBar, Listed, Store, Tail, Write};
 use crate::api::UpdatePhase;
 use crate::bars::BarError;
-use crate::kiwoom::api::{DailyChart, StockQuotes};
+use crate::kiwoom::api::{DailyChart, IndexDailyChart, StockQuotes};
 use crate::kiwoom::error::{Failure, Surface};
 use crate::kiwoom::rest::{ContKey, KiwoomError, MergeScope, Priority};
-use crate::kiwoom::wire::{KrxDayQuote, parse_krx_daily, parse_krx_quotes};
+use crate::kiwoom::wire::{KrxDayQuote, index_days, parse_krx_daily, parse_krx_quotes};
 
 const IN_FLIGHT: usize = 2;
 const MAX_HISTORY_PAGES: usize = 100;
@@ -102,6 +102,9 @@ impl Screener {
     }
 
     async fn kospi_days_back_to(&self, stored_through: Option<KstDate>) -> Result<Vec<KstDate>, BarError> {
+        if self.kiwoom.kis_receiving_instead().is_none() {
+            return self.kiwoom_kospi_days_back_to(stored_through).await;
+        }
         let key = SeriesKey { feed: Feed::Index(IndexCode::KOSPI), period: Period::Day };
         let base = self.clock.now().kst_date();
         let mut pages = Vec::new();
@@ -109,6 +112,25 @@ impl Screener {
         for _ in 0..MAX_HISTORY_PAGES {
             let page = self.bars.source().chart_page(key, base, cont, Priority::Background, MergeScope::default()).await?;
             let days: Vec<KstDate> = page.bars.iter().map(|bar| bar.bucket.start().kst_date()).collect();
+            let reaches_stored = stored_through.is_some_and(|last| days.first().is_some_and(|oldest| *oldest <= last));
+            pages.push(days);
+            cont = page.next;
+            if reaches_stored || cont.is_none() {
+                let mut days: Vec<KstDate> = pages.into_iter().rev().flatten().collect();
+                days.dedup();
+                return Ok(days);
+            }
+        }
+        Err(BarError::Internal(format!("코스피 일봉이 {MAX_HISTORY_PAGES}페이지를 넘어 관측일 달력 받기를 멈췄습니다")))
+    }
+
+    async fn kiwoom_kospi_days_back_to(&self, stored_through: Option<KstDate>) -> Result<Vec<KstDate>, BarError> {
+        let req = IndexDailyChart::new(IndexCode::KOSPI, self.clock.now().kst_date());
+        let mut pages = Vec::new();
+        let mut cont = None;
+        for _ in 0..MAX_HISTORY_PAGES {
+            let page = self.kiwoom.rest()?.call(&req, cont.as_ref(), Priority::Background, MergeScope::default()).await?;
+            let days = index_days(page.body).map_err(|e| BarError::Internal(format!("코스피 일봉 응답을 읽지 못했습니다: {e}")))?;
             let reaches_stored = stored_through.is_some_and(|last| days.first().is_some_and(|oldest| *oldest <= last));
             pages.push(days);
             cont = page.next;

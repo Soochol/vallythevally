@@ -330,10 +330,13 @@ fn kis_summary(row: &DayRow, reading: KisReading) -> Result<KrxSummary, MissingS
 fn kis_values(row: &DayValues, before_trading: bool) -> Result<(Price, KrxSummaryValues), WireError> {
     let price = |centi: u64| Price::from_centi(centi).ok_or_else(|| WireError(format!("가격이 0입니다: {centi}")));
     let base = price(row.base_centi)?;
-    if before_trading || row.volume == 0 {
-        let current_centi = if before_trading { row.base_centi } else { row.price_centi };
-        return Ok((base, KrxSummaryValues::NoTrades { current_centi }));
+    if before_trading {
+        return Ok((base, KrxSummaryValues::NoTrades { current_centi: row.base_centi }));
     }
-    let ohlcv = Ohlcv::try_new(price(row.open_centi)?, price(row.high_centi)?, price(row.low_centi)?, price(row.price_centi)?, Volume(row.volume)).map_err(|e| WireError(e.to_string()))?;
-    Ok((base, KrxSummaryValues::Traded { ohlcv, traded: MillionWon(row.traded_won / WON_PER_MILLION) }))
+    let session = row.session.map_err(|name| WireError(format!("{name}을 읽을 수 없습니다")))?;
+    if session.volume == 0 {
+        return Ok((base, KrxSummaryValues::NoTrades { current_centi: row.price_centi }));
+    }
+    let ohlcv = Ohlcv::try_new(price(session.open_centi)?, price(session.high_centi)?, price(session.low_centi)?, price(row.price_centi)?, Volume(session.volume)).map_err(|e| WireError(e.to_string()))?;
+    Ok((base, KrxSummaryValues::Traded { ohlcv, traded: MillionWon(session.traded_won / WON_PER_MILLION) }))
 }

@@ -600,6 +600,11 @@ async fn multi_price_body(rest: &KisRest, chunk: &[(StockCode, Venue)], priority
 pub struct DayValues {
     pub price_centi: u64,
     pub base_centi: u64,
+    pub session: Result<SessionValues, &'static str>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SessionValues {
     pub open_centi: u64,
     pub high_centi: u64,
     pub low_centi: u64,
@@ -739,9 +744,12 @@ struct MultiPriceRow {
 impl MultiPriceRow {
     fn day_values(&self) -> Result<DayValues, String> {
         let field = |name: &str, value: Option<u64>| value.ok_or_else(|| format!("{name}을 읽을 수 없습니다"));
-        Ok(DayValues {
-            price_centi: field("inter2_prpr", centi(&self.inter2_prpr))?,
-            base_centi: field("inter2_sdpr", centi(&self.inter2_sdpr))?,
+        Ok(DayValues { price_centi: field("inter2_prpr", centi(&self.inter2_prpr))?, base_centi: field("inter2_sdpr", centi(&self.inter2_sdpr))?, session: self.session_values() })
+    }
+
+    fn session_values(&self) -> Result<SessionValues, &'static str> {
+        let field = |name: &'static str, value: Option<u64>| value.ok_or(name);
+        Ok(SessionValues {
             open_centi: field("inter2_oprc", centi(&self.inter2_oprc))?,
             high_centi: field("inter2_hgpr", centi(&self.inter2_hgpr))?,
             low_centi: field("inter2_lwpr", centi(&self.inter2_lwpr))?,

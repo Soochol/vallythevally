@@ -329,7 +329,9 @@ async fn an_intraday_kis_row_joins_todays_bar_with_its_open_high_low_close_volum
 async fn a_row_received_before_nine_on_the_observation_day_is_no_trades_and_makes_no_bar() {
     let today = day(2026, 11, 9);
     let stored = last_open_days(20, today.add_days(-1));
-    let scene = Scene::prepare(today, "0830", stored.clone(), with_today(&stored, today), market_quotes(ACTIVE)).await;
+    let mut quotes = market_quotes(ACTIVE);
+    quotes.iter_mut().find(|row| row["inter_shrn_iscd"] == json!(code_of(1))).unwrap()["inter2_oprc"] = json!("");
+    let scene = Scene::prepare(today, "0830", stored.clone(), with_today(&stored, today), quotes).await;
     let server = scene.boot_without_kiwoom_key(&[]);
     let api = Api::of(&server).await;
     api.until_kis_connected().await;
