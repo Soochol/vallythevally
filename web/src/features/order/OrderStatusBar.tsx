@@ -15,6 +15,7 @@ interface Props {
   readonly queued: number;
   readonly blocked: boolean;
   readonly confirm: CancelConfirm | null;
+  readonly onConfirm: () => void;
   readonly onUndo: (orderNo: string) => void;
   readonly onReconcile: () => void;
   readonly onDismiss: () => void;
@@ -31,7 +32,7 @@ function ToneIcon({ tone }: { tone: StatusTone }) {
   return <InfoIcon size={ICON_SIZE} />;
 }
 
-export function OrderStatusBar({ status, queued, blocked, confirm, onUndo, onReconcile, onDismiss }: Props) {
+export function OrderStatusBar({ status, queued, blocked, confirm, onConfirm, onUndo, onReconcile, onDismiss }: Props) {
   const unknown = blocked || status?.unknown === true;
   const shown = confirm !== null || status !== null || queued > 0 || unknown;
   const tone: StatusTone = confirm !== null || unknown ? "warn" : status?.tone ?? "info";
@@ -42,7 +43,7 @@ export function OrderStatusBar({ status, queued, blocked, confirm, onUndo, onRec
         <div className="od-status" role="status" data-testid="order-status" data-tone={tone}>
           <span className="od-status-icon" aria-hidden="true"><ToneIcon tone={tone} /></span>
           {confirm !== null
-            ? <button type="button" className="od-status-confirm" data-testid="order-cancel-confirm" onClick={confirm.run}>{confirm.text}</button>
+            ? <button type="button" className="od-status-confirm" data-testid="order-cancel-confirm" onClick={onConfirm}>{confirm.text}</button>
             : text !== null && <span className="od-status-text">{text}</span>}
           {queued > 0 && <span className="od-queue" data-testid="order-queue">줄 서는 중 · {queued}건</span>}
           {confirm === null && status?.action && <button type="button" className="od-status-button" data-testid="order-status-action" onClick={status.action.run}>{status.action.label}</button>}

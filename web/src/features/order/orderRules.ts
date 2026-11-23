@@ -33,6 +33,39 @@ export interface PriceGroup {
 
 export const groupKey = (side: OrderSide, price: number): string => `${side}:${price}`;
 
+export interface PriceKey {
+  readonly side: OrderSide;
+  readonly price: number;
+}
+
+export const targetSignature = (groups: ReadonlyMap<string, PriceGroup>, targets: readonly PriceKey[]): string =>
+  targets.flatMap((target) => groups.get(groupKey(target.side, target.price))?.orders.map((order) => order.orderNo) ?? []).sort().join(",");
+
+export const sendingAt = (writes: readonly PendingWrite[], code: string, targets: readonly PriceKey[]): boolean =>
+  writes.some((write) => write.kind === "sending" && write.code === code && targets.some((target) => target.side === write.side && target.price === write.price));
+
+export type CancelPlan =
+  | { readonly kind: "empty" }
+  | { readonly kind: "sending" }
+  | { readonly kind: "ready"; readonly targets: readonly PriceGroup[]; readonly orderCount: number; readonly signature: string };
+
+export function planCancel(groups: ReadonlyMap<string, PriceGroup>, writes: readonly PendingWrite[], code: string, keys: readonly PriceKey[]): CancelPlan {
+  const targets = keys.flatMap((key) => {
+    const group = groups.get(groupKey(key.side, key.price));
+    return group !== undefined && group.orders.length > 0 ? [group] : [];
+  });
+  if (targets.length === 0) return { kind: "empty" };
+  if (sendingAt(writes, code, targets)) return { kind: "sending" };
+  return { kind: "ready", targets, orderCount: orderCountOf(targets), signature: targetSignature(groups, targets) };
+}
+
+export type ConfirmCheck =
+  | { readonly kind: "refused" }
+  | { readonly kind: "ready"; readonly confirm: string | null; readonly target: string };
+
+export const cancelCheckOf = (prefix: string, plan: CancelPlan): ConfirmCheck =>
+  plan.kind === "ready" ? { kind: "ready", confirm: needsCancelConfirm(plan.orderCount) ? `${prefix} ${cancelConfirmText(plan.orderCount)}` : null, target: plan.signature } : { kind: "refused" };
+
 export function groupOpenOrders(orders: readonly TradingOpenOrder[], code: string): ReadonlyMap<string, PriceGroup> {
   const byKey = new Map<string, TradingOpenOrder[]>();
   for (const order of orders) {

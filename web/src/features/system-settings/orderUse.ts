@@ -33,6 +33,7 @@ export function orderMarkOf(state: OrdersState): { readonly text: string; readon
 
 export const orderCanTurnOn = (state: OrdersState): boolean => state === "off" || state === "account_changed";
 export const orderCanTurnOff = (state: OrdersState): boolean => state === "on" || state === "account_changed";
+export const orderSwitchOn = (state: OrdersState): boolean => state === "on";
 export const orderInUse = (account: OrdersAccount | undefined): boolean => account !== undefined && orderCanTurnOff(account.state);
 
 export function mergeOrdersStatus(old: OrdersStatus | undefined, result: OrdersStatus, market: boolean): OrdersStatus {

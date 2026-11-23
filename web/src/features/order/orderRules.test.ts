@@ -2,7 +2,7 @@ import { expect, test } from "vitest";
 import type { TradingOpenOrder } from "../../api/generated/TradingOpenOrder";
 import type { TradingOrderable } from "../../api/generated/TradingOrderable";
 import type { PendingWrite } from "./pendingWrites";
-import { type BuyingPower, buyBlock, buyingPowerOf, buyPreview, CANCEL_CONFIRM_MS, cancelConfirmText, capacityProblem, dragCancels, type DragSource, estimateNote, marginOf, maxBuyQuantity, modifyBuyProblem, type DragTarget, dragGhostText, dragQuantity, dragSide, groupOpenOrders, groupWithPending, HIGH_VALUE_WON, judgeDrag, needsCancelConfirm, needsHighValueConfirm, orderCountOf, type PriceGroup, quantityForAmount, sideTotal, typedQuantity } from "./orderRules";
+import { type BuyingPower, buyBlock, buyingPowerOf, buyPreview, CANCEL_CONFIRM_MS, cancelCheckOf, cancelConfirmText, capacityProblem, dragCancels, type DragSource, estimateNote, marginOf, maxBuyQuantity, modifyBuyProblem, type DragTarget, dragGhostText, dragQuantity, dragSide, groupOpenOrders, groupWithPending, HIGH_VALUE_WON, judgeDrag, needsCancelConfirm, needsHighValueConfirm, orderCountOf, planCancel, type PriceGroup, quantityForAmount, sideTotal, typedQuantity } from "./orderRules";
 
 const order = (orderNo: string, side: "buy" | "sell", price: number, openQuantity: number, code = "005930"): TradingOpenOrder => ({
   orderNo, code, name: "삼성전자", side, quantity: openQuantity, price, openQuantity, status: "접수", orderedAt: "090000", originalOrderNo: null, venue: "krx",
@@ -256,4 +256,29 @@ test("사다리 밖에 놓는 끌기만 취소로 본다", () => {
   expect(dragCancels({ kind: "outside" }, source)).toBe(true);
   expect(dragCancels({ kind: "ladder" }, source)).toBe(false);
   expect(dragCancels({ kind: "cell", side: "buy", price: 69_900 }, source)).toBe(false);
+});
+
+test("여러 건 취소 대상은 지금 그 가격들에 걸린 주문이고 보내는 중 칩만 있는 가격은 빼며 건수와 주문 번호를 함께 낸다", () => {
+  const sending = (price: number): PendingWrite => ({ ...stamped, kind: "sending", key: `s${price}`, side: "buy", price, quantity: 1, listedWhenIn: 0 });
+  const groups = groupWithPending([order("0000001", "buy", 70_000, 5), order("0000002", "buy", 70_000, 7), order("0000003", "buy", 69_900, 3)], [sending(69_800)], "005930");
+  const keys = [{ side: "buy", price: 70_000 }, { side: "buy", price: 69_900 }, { side: "buy", price: 69_800 }] as const;
+  const plan = planCancel(groups, [sending(69_800)], "005930", keys);
+  expect(plan).toMatchObject({ kind: "ready", orderCount: 3, signature: "0000001,0000002,0000003" });
+  expect(plan.kind === "ready" ? plan.targets.map((group) => group.price) : []).toEqual([70_000, 69_900]);
+  expect(planCancel(groups, [], "005930", [{ side: "sell", price: 70_000 }])).toEqual({ kind: "empty" });
+});
+
+test("대상 가격에 보내는 중인 주문이 있으면 여러 건 취소를 계획하지 않는다", () => {
+  const writes: PendingWrite[] = [{ ...stamped, kind: "sending", key: "s", side: "buy", price: 70_000, quantity: 1, listedWhenIn: 0 }];
+  const groups = groupWithPending([order("0000001", "buy", 70_000, 5), order("0000003", "buy", 69_900, 3)], writes, "005930");
+  expect(planCancel(groups, writes, "005930", [{ side: "buy", price: 70_000 }, { side: "buy", price: 69_900 }])).toEqual({ kind: "sending" });
+  expect(planCancel(groups, writes, "005930", [{ side: "buy", price: 69_900 }])).toMatchObject({ kind: "ready", orderCount: 1 });
+  expect(planCancel(groups, writes, "000660", [{ side: "buy", price: 70_000 }])).toMatchObject({ kind: "ready" });
+});
+
+test("메뉴 확인은 두 건부터 건수 문구를 내고 대상이 같은지 주문 번호로 본다", () => {
+  const groups = groupOpenOrders([order("0000001", "buy", 70_000, 5), order("0000002", "buy", 70_000, 7), order("0000003", "buy", 69_900, 3)], "005930");
+  expect(cancelCheckOf("이 가격", planCancel(groups, [], "005930", [{ side: "buy", price: 70_000 }]))).toEqual({ kind: "ready", confirm: "이 가격 2건 취소 · 한 번 더 누르기", target: "0000001,0000002" });
+  expect(cancelCheckOf("이 가격", planCancel(groups, [], "005930", [{ side: "buy", price: 69_900 }]))).toEqual({ kind: "ready", confirm: null, target: "0000003" });
+  expect(cancelCheckOf("매수", { kind: "sending" })).toEqual({ kind: "refused" });
 });

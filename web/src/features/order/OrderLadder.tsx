@@ -5,7 +5,7 @@ import { useStoreValue, type ValueStore } from "../../lib/valueStore";
 import type { LadderRow } from "../market-window/ladder";
 import { ladderColumns, type LadderRowSlots, PriceLadder } from "../market-window/PriceLadder";
 import { formatShares } from "../market-window/format";
-import { addQuantityText, type BuyingPower, buyPreview, cancelConfirmText, groupKey, needsCancelConfirm, orderCountOf, type PriceGroup, previewText, SIDE_LABEL } from "./orderRules";
+import { addQuantityText, type BuyingPower, buyPreview, type CancelPlan, cancelCheckOf, groupKey, type PriceGroup, type PriceKey, previewText, SIDE_LABEL } from "./orderRules";
 import { PENDING_CHIP_TEXT, PENDING_TEXT } from "./statusText";
 import { LADDER_ROW_HEIGHT_PX, type RowRange, scrollTopToCenter, visibleRowRange } from "./priceRange";
 import { OrderList, type OrderListItem } from "./OrderList";
@@ -24,8 +24,8 @@ export interface ExplorerScroll {
 export interface LadderActions {
   place(side: OrderSide, price: number): void;
   cancelOne(orderNo: string): void;
-  cancelAtPrice(side: OrderSide, price: number): void;
-  cancelGroups(groups: readonly PriceGroup[]): void;
+  cancelGroups(keys: readonly PriceKey[]): void;
+  planCancel(keys: readonly PriceKey[]): CancelPlan;
 }
 
 interface Props {
@@ -47,7 +47,7 @@ interface Props {
   readonly expectedPrice?: number | null;
 }
 
-type MenuState = { readonly x: number; readonly y: number; readonly group: PriceGroup | null };
+type MenuState = { readonly x: number; readonly y: number; readonly group: PriceKey | null };
 
 const SIDE_OF_SLOT: Readonly<Record<"left" | "right", OrderSide>> = { left: "sell", right: "buy" };
 
@@ -67,8 +67,6 @@ interface CellProps {
   readonly buying: BuyingPower | null;
   readonly api: CellApi;
 }
-
-const confirmOf = (prefix: string, orderCount: number): string | undefined => (needsCancelConfirm(orderCount) ? `${prefix} ${cancelConfirmText(orderCount)}` : undefined);
 
 const COLUMN_NAMES = ["매도주문", "매도잔량", "호가", "매수잔량", "매수주문"] as const;
 const HEAD_COLUMNS = ladderColumns(true, true);
@@ -194,15 +192,17 @@ export function OrderLadder({ rows, previousClose, groups, writable, previewQuan
   const items = (state: MenuState): OrderListItem[] => {
     const { group } = state;
     if (group) {
+      const keys = [group];
+      const orders = groups.get(groupKey(group.side, group.price))?.orders ?? [];
       return [
         { kind: "heading", label: `${formatPrice(group.price, false)}원 ${SIDE_LABEL[group.side]} 주문` },
-        ...group.orders.map((order): OrderListItem => ({ kind: "order", label: `${order.openQuantity.toLocaleString("ko-KR")} 취소`, order, disabled: !writable, onSelect: () => actions.cancelOne(order.orderNo) })),
+        ...orders.map((order): OrderListItem => ({ kind: "order", label: `${order.openQuantity.toLocaleString("ko-KR")} 취소`, order, disabled: !writable, onSelect: () => actions.cancelOne(order.orderNo) })),
         { kind: "separator" },
-        { kind: "action", label: "이 가격 모두 취소", danger: true, disabled: !writable, confirm: confirmOf("이 가격", group.orders.length), onSelect: () => actions.cancelAtPrice(group.side, group.price) },
+        { kind: "action", label: "이 가격 모두 취소", danger: true, disabled: !writable || orders.length === 0, check: () => cancelCheckOf("이 가격", actions.planCancel(keys)), onSelect: () => actions.cancelGroups(keys) },
       ];
     }
     const side = (s: OrderSide) => all.filter((g) => g.side === s);
-    const entry = (prefix: string, targets: readonly PriceGroup[]): OrderListItem => ({ kind: "action", label: `${prefix} 모두 취소`, danger: true, disabled: !writable || targets.length === 0, confirm: confirmOf(prefix, orderCountOf(targets)), onSelect: () => actions.cancelGroups(targets) });
+    const entry = (prefix: string, targets: readonly PriceGroup[]): OrderListItem => ({ kind: "action", label: `${prefix} 모두 취소`, danger: true, disabled: !writable || targets.length === 0, check: () => cancelCheckOf(prefix, actions.planCancel(targets)), onSelect: () => actions.cancelGroups(targets) });
     return [entry("매수", side("buy")), entry("매도", side("sell")), entry("전체", all)];
   };
 

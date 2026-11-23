@@ -1,7 +1,7 @@
 import { expect, test } from "vitest";
 import { ApiRequestError } from "../../api/http";
 import type { OrderCommand } from "../../api/generated/OrderCommand";
-import { isUnanswered, statusOfCanceling, statusOfCommand, PENDING_CHIP_TEXT, RETRY_LABEL, statusOfFailure, statusOfModifying, statusOfSending } from "./statusText";
+import { isUnanswered, statusOfCanceling, statusOfCommand, PENDING_CHIP_TEXT, RETRY_LABEL, retryLabelOf, statusOfFailure, statusOfModifying, statusOfSending } from "./statusText";
 
 test("서버의 답을 읽지 못한 실패는 답을 못 받은 것으로 본다", () => {
   expect(isUnanswered(new ApiRequestError("network", "서버에 연결하지 못했습니다"))).toBe(true);
@@ -37,6 +37,8 @@ test("답을 못 받은 실패에만 다시 보내기가 붙고 누르면 넘겨
   expect(unanswered.action?.label).toBe(RETRY_LABEL);
   unanswered.action?.run();
   expect(sent).toBe(1);
+  expect(statusOfFailure(new ApiRequestError("network", "x"), retry, "키움 ****-**01").action?.label).toBe("다시 보내기 · 키움 ****-**01");
+  expect(retryLabelOf(null)).toBe(RETRY_LABEL);
   expect(statusOfFailure(new ApiRequestError("network", "x")).action).toBeUndefined();
   expect(statusOfFailure(new ApiRequestError("conflict", "주문 사용이 꺼져 있습니다"), retry).action).toBeUndefined();
 });
