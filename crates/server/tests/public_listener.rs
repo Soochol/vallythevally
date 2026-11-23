@@ -1060,7 +1060,7 @@ async fn anonymous_requests_over_the_anonymous_in_flight_cap_leave_signed_in_acc
             sockets.push(socket);
         }
     });
-    let site = Spec::new(&work, &idp).env(&[("VALLY_PUBLIC_GOOGLE_TOKEN_URL", &hanging_url), ("VALLY_PUBLIC_ANON_IN_FLIGHT", "2"), ("VALLY_PUBLIC_ANON_BURST", "1000"), ("VALLY_PUBLIC_LOGIN_PER_MINUTE", "1000")]).start().await;
+    let site = Spec::new(&work, &idp).env(&[("VALLY_PUBLIC_GOOGLE_TOKEN_URL", &hanging_url), ("VALLY_PUBLIC_ANON_IN_FLIGHT", "2"), ("VALLY_PUBLIC_ANON_BURST", "1000"), ("VALLY_PUBLIC_LOGIN_PER_MINUTE", "1000")]).frozen_clock().start().await;
     let who = site.login_as("naver", "alice").await;
     let mut callbacks = Vec::new();
     for turn in 0..2 {
@@ -1092,7 +1092,7 @@ async fn anonymous_requests_over_the_anonymous_in_flight_cap_leave_signed_in_acc
 async fn a_full_account_in_flight_cap_refuses_that_account_at_once_and_spares_others() {
     let work = Work::new();
     let idp = start_idp().await;
-    let site = Spec::new(&work, &idp).env(&[("VALLY_PUBLIC_ACCOUNT_IN_FLIGHT", "2")]).start().await;
+    let site = Spec::new(&work, &idp).env(&[("VALLY_PUBLIC_ACCOUNT_IN_FLIGHT", "2")]).frozen_clock().start().await;
     let alice = site.login("alice").await;
     let bob = site.login("bob").await;
     let pending: Vec<_> = (0..2).map(|_| tokio::spawn({
@@ -1117,7 +1117,7 @@ async fn a_full_account_in_flight_cap_refuses_that_account_at_once_and_spares_ot
 async fn a_full_total_in_flight_cap_refuses_public_requests_while_the_operator_listener_answers() {
     let work = Work::new();
     let idp = start_idp().await;
-    let site = Spec::new(&work, &idp).env(&[("VALLY_PUBLIC_MAX_IN_FLIGHT", "3")]).start().await;
+    let site = Spec::new(&work, &idp).env(&[("VALLY_PUBLIC_MAX_IN_FLIGHT", "3")]).frozen_clock().start().await;
     let sessions = [site.login("a").await, site.login("b").await, site.login("c").await, site.login("d").await];
     let pending: Vec<_> = sessions[..3].iter().map(|who| tokio::spawn({
         let request = site.public_get("/api/test/hold").header("cookie", &who.cookie);
@@ -1142,7 +1142,7 @@ async fn a_full_total_in_flight_cap_refuses_public_requests_while_the_operator_l
 async fn a_request_over_the_time_cap_is_503() {
     let work = Work::new();
     let idp = start_idp().await;
-    let site = Spec::new(&work, &idp).env(&[("VALLY_PUBLIC_REQUEST_TIMEOUT_SECS", "1")]).start().await;
+    let site = Spec::new(&work, &idp).env(&[("VALLY_PUBLIC_REQUEST_TIMEOUT_SECS", "1")]).frozen_clock().start().await;
     let who = site.login("alice").await;
     let started = Instant::now();
     let reply = site.get(&who, "/api/test/hold").await;
@@ -1174,7 +1174,7 @@ async fn a_panicking_route_is_500_and_both_listeners_keep_answering() {
 async fn a_kiwoom_failure_leaves_the_public_listener_with_fixed_words_and_no_kiwoom_text() {
     let work = Work::new();
     let idp = start_idp().await;
-    let site = Spec::new(&work, &idp).start().await;
+    let site = Spec::new(&work, &idp).frozen_clock().start().await;
     let alice = site.login("alice").await;
     let failed = site.get(&alice, "/api/test/kiwoom-error").await;
     assert_eq!(failed.status, 503, "{}", head(&failed.text()));
