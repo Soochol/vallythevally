@@ -1,6 +1,6 @@
 import type { Page } from "@playwright/test";
 import { type Scenario, expect, pollSaved, test } from "./harness";
-import { BASE, cellAt, chipAt, openOrder, openOrderWindow, ordersOn, status, tradingApi, win, writesTo } from "./order-window";
+import { accountData, BASE, cellAt, center, chipAt, dragChip, openOrder, openOrderWindow, ordersOn, otherAccount, SECOND_ACCOUNT, status, tradingApi, win, writesTo } from "./order-window";
 
 const THREE = () => [openOrder("0000001", "buy", 70_000, 5), openOrder("0000002", "buy", 69_900, 3), openOrder("0000003", "sell", 70_100, 4)];
 const ROUTE_LABEL = { combined: "SOR", krx: "KRX", nxt: "NXT" } as const;
@@ -190,4 +190,39 @@ test("여러 주문을 가진 합계 칸을 사다리 밖에 놓으면 상태 �
   await confirm.click();
   await pollSaved(() => writesTo(api, "cancel-batch")).toHaveLength(2);
   await expect(confirm).toHaveCount(0);
+});
+
+test("여러 건 취소 확인이 떠 있는 동안 계좌를 바꾸면 확인이 사라지고 아무 요청도 나가지 않는다", async ({ page, scenario }) => {
+  await page.clock.install({ time: CLOCK_START });
+  ordersOn(scenario, [otherAccount()]);
+  const api = tradingApi(scenario, THREE());
+  api.accounts[SECOND_ACCOUNT] = accountData();
+  await openOrderWindow(page, scenario);
+  await page.clock.pauseAt(new Date("2026-11-18T10:05:00+09:00"));
+  const total = page.getByTestId("order-total-buy");
+  const box = (await total.boundingBox())!;
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(box.x + 20, box.y - 10, { steps: 3 });
+  await page.mouse.move(5, 5, { steps: 8 });
+  await page.mouse.up();
+  const confirm = page.getByTestId("order-cancel-confirm");
+  await expect(confirm).toHaveText("매수 2건 취소 · 한 번 더 누르기");
+  await page.locator('button[data-testid="account-label"]').click();
+  await page.getByTestId("account-option").nth(1).click();
+  await expect(page.locator('button[data-testid="account-label"]')).toHaveText("위탁 2 · 키움 ****-**05");
+  await expect(confirm).toHaveCount(0);
+  expect(commandWrites(scenario)).toHaveLength(0);
+  expect(api.writes).toHaveLength(0);
+});
+
+test("정정 고액 확인 상자의 주문 경로는 창의 경로가 아니라 원주문의 거래소를 보인다", async ({ page, scenario }) => {
+  ordersOn(scenario);
+  tradingApi(scenario, [{ ...openOrder("N-0001", "buy", 70_000, 1500), venue: "nxt" }]);
+  await openOrderWindow(page, scenario);
+  expect(await win(page).getAttribute("data-venue")).not.toBe("nxt");
+  await dragChip(page, chipAt(page, "buy", 70_000), await center(cellAt(page, "buy", 69_900)));
+  const where = page.getByRole("dialog").getByTestId("order-confirm-where");
+  await expect(where).toContainText("주문 경로 NXT");
+  await expect(page.getByRole("dialog").getByTestId("order-confirm")).toContainText("정정");
 });

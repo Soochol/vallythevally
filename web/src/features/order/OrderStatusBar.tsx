@@ -3,6 +3,8 @@ import type { OrderStatus, StatusTone } from "./statusText";
 
 export interface CancelConfirm {
   readonly text: string;
+  readonly account: string | null;
+  readonly orderNos: readonly string[];
   readonly run: () => void;
 }
 
