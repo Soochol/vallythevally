@@ -47,15 +47,20 @@ export function Field({ label, help, error, layout, id, className = "", "aria-de
 
 type SecretFieldProps = FieldCommon & Omit<InputHTMLAttributes<HTMLInputElement>, "children" | "type" | "value" | "onChange"> & {
   value: string;
-  onChange(value: string): void;
+  onChange(value: string, edit: SecretEdit): void;
 };
+
+export interface SecretEdit { trimmed: boolean }
+
+const TYPED: SecretEdit = { trimmed: false };
+const TRIMMED: SecretEdit = { trimmed: true };
 
 export function SecretField({ label, help, error, layout, id, value, onChange, className = "", "aria-describedby": describedBy, onBlur, ...input }: SecretFieldProps) {
   const ids = useFieldIds(id, help, error, describedBy);
   const field = useRef<HTMLInputElement>(null);
   const [shown, setShown] = useState(false);
   const paste = () => {
-    navigator.clipboard.readText().then((text) => onChange(trimSecret(text)), () => field.current?.focus());
+    navigator.clipboard.readText().then((text) => onChange(trimSecret(text), trimSecret(text) !== text ? TRIMMED : TYPED), () => field.current?.focus());
   };
   return (
     <FieldShell label={label} help={help} error={error} layout={layout} inputId={ids.inputId} helpId={ids.helpId} errorId={ids.errorId}>
@@ -72,9 +77,9 @@ export function SecretField({ label, help, error, layout, id, value, onChange, c
           aria-invalid={error ? true : undefined}
           aria-describedby={ids.described}
           className={`ui-field ${className}`}
-          onChange={(event) => onChange(event.target.value)}
+          onChange={(event) => onChange(event.target.value, TYPED)}
           onBlur={(event) => {
-            if (trimSecret(value) !== value) onChange(trimSecret(value));
+            if (trimSecret(value) !== value) onChange(trimSecret(value), TRIMMED);
             onBlur?.(event);
           }}
         />
