@@ -8,11 +8,11 @@ export const PORTAL_URL = "https://openapi.kiwoom.com";
 
 type SecretName = Exclude<KeyFieldName, "alias">;
 
-const TRIMMED_HELP = "앞뒤 공백을 지웠습니다";
+export const TRIMMED_HELP = "앞뒤 공백을 지웠습니다";
 
-function useTrimNotice(dispatch: Dispatch<KeyEntryEvent>) {
-  const [trimmed, setTrimmed] = useState<ReadonlySet<SecretName>>(new Set());
-  const change = (field: SecretName) => (value: string, edit: SecretEdit) => {
+export function useTrimNotice<Name extends SecretName>(dispatch: (event: { type: Name; value: string }) => void) {
+  const [trimmed, setTrimmed] = useState<ReadonlySet<Name>>(new Set());
+  const change = (field: Name) => (value: string, edit: SecretEdit) => {
     setTrimmed((names) => {
       const next = new Set(names);
       if (edit.trimmed) next.add(field);

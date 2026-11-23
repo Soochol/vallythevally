@@ -5,7 +5,7 @@ import { deleteKiwoomKey, saveKiwoomKey, useSystemSettings } from "../../api/sys
 import { confirmAction } from "../overlay/Confirm";
 import { Badge } from "../ui/Badge";
 import { SecretField } from "../ui/Field";
-import { FormActions, KeyPortalNote } from "./KiwoomKeyFields";
+import { FormActions, KeyPortalNote, TRIMMED_HELP, useTrimNotice } from "./KiwoomKeyFields";
 import { canSaveKey, EMPTY_KEY_FORM, keyFormReducer, keyLocked, keySaveNote, maskedAppKey } from "./kiwoomPanel";
 import type { Command } from "./useCommand";
 
@@ -13,6 +13,7 @@ export const MOCK_KEY_NOTICE = "모의투자 키는 환경 설정(VALLY_KIWOOM_M
 
 export function KiwoomKeyForm({ status, command, onSaved, onOpenIpHelp, onEditingChange }: { status: KiwoomLinkStatus | null; command: Command; onSaved(): void; onOpenIpHelp?(): void; onEditingChange?(editing: boolean): void }) {
   const [form, dispatch] = useReducer(keyFormReducer, EMPTY_KEY_FORM);
+  const { trimmed, change } = useTrimNotice<"appKey" | "appSecret">(dispatch);
   const target = useSystemSettings().data?.kiwoomTarget;
   const keySource = status?.keySource;
   useLayoutEffect(() => {
@@ -52,8 +53,8 @@ export function KiwoomKeyForm({ status, command, onSaved, onOpenIpHelp, onEditin
       ) : inputs ? (
         <form className="flex flex-col gap-3" autoComplete="off" onSubmit={(e) => { e.preventDefault(); if (canSaveKey(form) && !command.busy) void save(); }}>
           <KeyPortalNote />
-          <SecretField label="앱키" name="kiwoom-app-key" disabled={locked || command.busy} value={form.appKey} onChange={(value) => dispatch({ type: "appKey", value })} />
-          <SecretField label="시크릿" name="kiwoom-app-secret" disabled={locked || command.busy} value={form.appSecret} onChange={(value) => dispatch({ type: "appSecret", value })} />
+          <SecretField label="앱키" name="kiwoom-app-key" disabled={locked || command.busy} value={form.appKey} help={trimmed.has("appKey") ? TRIMMED_HELP : undefined} onChange={change("appKey")} />
+          <SecretField label="시크릿" name="kiwoom-app-secret" disabled={locked || command.busy} value={form.appSecret} help={trimmed.has("appSecret") ? TRIMMED_HELP : undefined} onChange={change("appSecret")} />
           <FormActions>
             {form.editing && <button type="button" className="btn" onClick={() => dispatch({ type: "cancel" })}>취소</button>}
             <button type="submit" className="btn-primary" disabled={locked || command.busy || !canSaveKey(form)}>저장</button>
