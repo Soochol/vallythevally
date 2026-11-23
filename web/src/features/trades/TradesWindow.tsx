@@ -51,7 +51,7 @@ function TradesBody({ code, venue }: { code: SymbolCode; venue: Venue }) {
       <Strip>
         <span className="tr-name">최소 금액</span>
         <Segmented<MinAmountKey> label="최소 체결 금액" options={MIN_AMOUNT_OPTIONS} value={minKey} onChange={setMinKey} />
-        {integratedOnly && <span className="mw-integrated" data-testid="trade-integrated-only" title="이 종목은 선택한 거래소로 조회되지 않아 통합 값을 보입니다">통합 기준</span>}
+        {integratedOnly && <span className="mw-integrated" data-testid="trade-integrated-only" title="이 종목은 선택한 거래소로 조회되지 않아 통합 값을 보입니다"><span>통합</span><span className="tr-detail"> 기준</span></span>}
       </Strip>
       </div>
       {feedError !== null && <Notice tone="danger" className="mw-notice">실시간 체결을 받지 못합니다</Notice>}

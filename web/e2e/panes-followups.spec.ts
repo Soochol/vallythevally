@@ -320,6 +320,8 @@ async function expectNarrowStrip(page: Page, where: string, integrated: boolean)
   if (integrated) {
     await expect(page.getByTestId("trade-integrated-only"), note).toBeVisible();
     expect((await page.getByTestId("trade-integrated-only").boundingBox())!.width, note).toBeGreaterThan(0);
+    await expect(page.getByTestId("trade-integrated-only"), note).toHaveText("통합 기준");
+    expect(await page.getByTestId("trade-integrated-only").locator(".tr-detail").evaluate((detail) => getComputedStyle(detail).display), note).not.toBe("none");
   }
 }
 
