@@ -240,8 +240,9 @@ test("접수 합계 칸을 누르면 주문 메뉴가 열려 주문 하나 또�
   await total.click();
   const menu = page.getByRole("menu", { name: "매수 접수 주문" });
   await expect(menu).toContainText("매수 접수 2건");
-  await expect(menu.getByRole("menuitem")).toHaveText(["70,000원 · 5", "70,000원 · 7", "매수 모두 취소"]);
-  await menu.getByRole("menuitem", { name: "70,000원 · 5" }).click();
+  await expect(menu.getByRole("menuitem")).toHaveText(["취소", "취소", "매수 모두 취소"]);
+  await expect(menu.getByTestId("order-list-row")).toHaveText(["70,000원 · 5취소", "70,000원 · 7취소"]);
+  await menu.getByRole("menuitem", { name: "70,000원 · 5 취소" }).click();
   await pollSaved(() => writesTo(api, "cancel")).toHaveLength(1);
   expect(writesTo(api, "cancel")[0]!.body).toMatchObject({ orderNo: "0000001" });
   await total.click();
@@ -300,6 +301,7 @@ test("빈 곳 우클릭의 전체 취소는 가격과 방향마다 새 batchId�
   await page.getByTestId("price-ladder").locator(".mw-px").first().click({ button: "right" });
   await expect(page.getByRole("menu", { name: "주문 취소" })).toBeVisible();
   await page.getByRole("menuitem", { name: "전체 모두 취소" }).click();
+  await page.getByRole("menuitem", { name: "전체 3건 취소 · 한 번 더 누르기" }).click();
   await pollSaved(() => writesTo(api, "cancel-batch")).toHaveLength(3);
   const batches = writesTo(api, "cancel-batch").map((w) => w.body);
   expect(batches.map((b) => `${b.side}:${b.price}`).sort()).toEqual(["buy:69900", "buy:70000", "sell:70100"]);
@@ -496,7 +498,7 @@ test("답을 못 받은 신규는 다른 종목을 보고 돌아와 다시 해�
   await cellAt(page, "buy", 70_000).dblclick();
   await held.received;
   held.reply({ status: 503, body: { error: { code: "internal", message: "서버가 응답하지 못했습니다", reason: null, retryAt: null, manualActionRequired: false } } });
-  await expect(status(page)).toContainText("같은 동작을 다시 하면 같은 명령으로 보냅니다");
+  await expect(status(page)).toContainText("다시 보내면 같은 명령으로 보냅니다");
   await cell(page, 2).click();
   await expect(win(page)).toHaveAttribute("data-symbol", "000660");
   await cell(page, 1).click();
@@ -534,7 +536,7 @@ test("답을 못 받은 신규를 다시 보내는 동안 또 누른 신규는 �
   await target.dblclick();
   await firstHold.received;
   firstHold.reply(noAnswer);
-  await expect(status(page)).toContainText("같은 동작을 다시 하면 같은 명령으로 보냅니다");
+  await expect(status(page)).toContainText("다시 보내면 같은 명령으로 보냅니다");
   const retryHold = scenario.hold((url, request) => url.pathname === "/api/trading/commands/place" && request.method() === "POST");
   await target.dblclick();
   await retryHold.received;
@@ -706,6 +708,9 @@ test("같은 가격 두 건의 칩을 사다리 밖에 놓으면 고스트가 �
   await dragChip(page, chipAt(page, "buy", 70_000), { x: 5, y: 5 }, false);
   await expect(page.getByTestId("order-ghost")).toContainText("놓으면 70,000원 매수 2건 취소");
   await page.mouse.up();
+  await expect(page.getByTestId("order-cancel-confirm")).toHaveText("매수 2건 취소 · 한 번 더 누르기");
+  expect(writesTo(api, "cancel-batch")).toHaveLength(0);
+  await page.getByTestId("order-cancel-confirm").click();
   await pollSaved(() => writesTo(api, "cancel-batch")).toHaveLength(1);
   expect(writesTo(api, "cancel-batch")[0]!.body).toMatchObject({ code: CODE, side: "buy", price: 70_000 });
   expect(writesTo(api, "cancel")).toHaveLength(0);
@@ -757,6 +762,9 @@ test("매수 합계 칸을 사다리 밖으로 끌면 매수 가격마다 일괄
   await dragChip(page, page.getByTestId("order-total-buy"), { x: 5, y: 5 }, false);
   await expect(page.getByTestId("order-ghost")).toContainText("놓으면 매수 3건 모두 취소");
   await page.mouse.up();
+  await expect(page.getByTestId("order-cancel-confirm")).toHaveText("매수 3건 취소 · 한 번 더 누르기");
+  expect(writesTo(api, "cancel-batch")).toHaveLength(0);
+  await page.getByTestId("order-cancel-confirm").click();
   await pollSaved(() => writesTo(api, "cancel-batch")).toHaveLength(2);
   expect(writesTo(api, "cancel-batch").map((w) => `${w.body.side}:${w.body.price}`).sort()).toEqual(["buy:69900", "buy:70000"]);
   await expect(page.getByRole("menu", { name: "매수 접수 주문" })).toHaveCount(0);

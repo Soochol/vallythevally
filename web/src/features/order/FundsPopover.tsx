@@ -59,8 +59,8 @@ export function FundsPopover({ account, orderable, opener, onClose }: Props) {
         <div className="od-funds-confirm" role="alertdialog" aria-label="미수 허용 확인" data-testid="margin-confirm">
           <p>{MARGIN_CONFIRM_TEXT}</p>
           <div className="od-funds-confirm-actions">
-            <button type="button" className="od-link" onClick={() => setConfirming(false)}>그대로 두기</button>
-            <button type="button" className="od-link" data-danger="" onClick={() => void change("allow_margin")}>허용으로 바꾸기</button>
+            <button type="button" className="btn btn-sm" onClick={() => setConfirming(false)}>그대로 두기</button>
+            <button type="button" className="btn-primary btn-sm" onClick={() => void change("allow_margin")}>허용으로 바꾸기</button>
           </div>
         </div>
       )}

@@ -37,13 +37,13 @@ import { DragGhost } from "./DragGhost";
 import { type HoverCell, type LadderActions, OrderLadder } from "./OrderLadder";
 import { orderEntryKey } from "./orderEntries";
 import { OrderTotals } from "./OrderTotals";
-import { OrderStatusBar } from "./OrderStatusBar";
+import { type CancelConfirm, OrderStatusBar } from "./OrderStatusBar";
 import { REJECT_TEXT } from "./statusText";
-import { buyBlock, capacityProblem, type DragOutcome, marginOf, modifyBuyProblem, type DragSource, needsHighValueConfirm, orderAmount, SIDE_LABEL, typedQuantity } from "./orderRules";
-import type { PresetKind } from "./orderSettings";
+import { buyBlock, CANCEL_CONFIRM_MS, cancelConfirmText, capacityProblem, type DragOutcome, marginOf, modifyBuyProblem, type DragSource, needsCancelConfirm, needsHighValueConfirm, orderAmount, orderCountOf, SIDE_LABEL, typedQuantity } from "./orderRules";
+import { type PresetKind, routeLabel } from "./orderSettings";
 import { withDirectionJosa } from "./josa";
 import { pendingWrites } from "./pendingWrites";
-import { FALLBACK_NOTICE } from "./orderAccount";
+import { accountNumberText, FALLBACK_NOTICE } from "./orderAccount";
 import { useOrderAccess, useOrderData } from "./useOrderData";
 import { useOrderAccount } from "./useOrderAccount";
 import { useOrderDrag } from "./useOrderDrag";
@@ -75,6 +75,7 @@ function OrderBody({ id, code, infoPager }: { id: WindowId; code: SymbolCode; in
   const [input, setInput] = useState(kept === null ? "10" : String(kept.quantity));
   const [hover] = useState(() => createValueStore<HoverCell | null>(null));
   const [confirm, setConfirm] = useState<HighValueRequest | null>(null);
+  const [cancelConfirm, setCancelConfirm] = useState<CancelConfirm | null>(null);
   const [exploring, setExploring] = useState(false);
   const [centerToken, setCenterToken] = useState(0);
   const ladder = useRef<HTMLDivElement>(null);
@@ -89,6 +90,12 @@ function OrderBody({ id, code, infoPager }: { id: WindowId; code: SymbolCode; in
   const limits = useFundamentals(code).data;
   const symbolInfo = useSymbolInfo(code).data;
   const nxtNotTraded = orderVenue === "nxt" && symbolInfo?.nxtEnabled === false;
+
+  useEffect(() => {
+    if (cancelConfirm === null) return;
+    const timer = setTimeout(() => setCancelConfirm(null), CANCEL_CONFIRM_MS);
+    return () => clearTimeout(timer);
+  }, [cancelConfirm]);
 
   useEffect(() => {
     const timer = setInterval(() => setNow(Date.now()), CLOCK_MS);
@@ -156,13 +163,21 @@ function OrderBody({ id, code, infoPager }: { id: WindowId; code: SymbolCode; in
 
   latestPlace.current = place;
 
+  const confirmContext = () => ({
+    name: symbolInfo?.name ?? code,
+    code,
+    account: accountNumberText(choice.current?.broker ?? "kiwoom", choice.current?.tail ?? null),
+    route: routeLabel(orderVenue),
+    mock,
+  });
+
   const submit = (side: OrderSide, price: number, quantity: number) => {
     const margin = side === "buy" ? marginOf(orderAmount(price, quantity), data.capacity.buying) : 0;
     const send = (confirmHighValue: boolean) => {
       writes.place({ side, price, quantity, confirmHighValue, margin, listedWhenIn: side === "sell" ? sellQuantityAtPrice(data.groups, pending, code, price, data.openOrdersListedAt) + quantity : 0 });
       if (settings.keepLastEntry) rememberEntry(entryKey, { presetKind, quantity, usedAt: Date.now() });
     };
-    if (needsHighValueConfirm(price, quantity)) setConfirm({ title: `${SIDE_LABEL[side]} ${formatQuantity(quantity)} · ${formatPrice(price, false)}원`, amount: price * quantity, run: () => send(true) });
+    if (needsHighValueConfirm(price, quantity)) setConfirm({ ...confirmContext(), side, verb: "주문", detail: `${formatQuantity(quantity)} · ${formatPrice(price, false)}원`, amount: price * quantity, run: () => send(true) });
     else send(false);
   };
 
@@ -173,19 +188,24 @@ function OrderBody({ id, code, infoPager }: { id: WindowId; code: SymbolCode; in
       return;
     }
     const run = () => writes.modifyAll(orders, to);
-    if (orders.some((order) => needsHighValueConfirm(to, order.openQuantity))) setConfirm({ title: `${SIDE_LABEL[side]} 정정 · ${formatPrice(price, false)}원 → ${formatPrice(to, false)}원`, amount: to * orders.reduce((sum, order) => sum + order.openQuantity, 0), run });
+    if (orders.some((order) => needsHighValueConfirm(to, order.openQuantity))) setConfirm({ ...confirmContext(), side, verb: "정정", detail: `${formatPrice(price, false)}원 → ${formatPrice(to, false)}원`, amount: to * orders.reduce((sum, order) => sum + order.openQuantity, 0), run });
+    else run();
+  };
+
+  const cancelMany = (side: OrderSide, orderCount: number, run: () => void) => {
+    if (needsCancelConfirm(orderCount)) setCancelConfirm({ text: `${SIDE_LABEL[side]} ${cancelConfirmText(orderCount)}`, run: () => { setCancelConfirm(null); run(); } });
     else run();
   };
 
   const drop = (source: DragSource, outcome: DragOutcome) => {
     if (outcome.kind === "abort") return;
     if (source.kind === "chip") {
-      if (outcome.kind === "cancel") writes.cancelAtPrice(source.group.side, source.group.price);
+      if (outcome.kind === "cancel") cancelMany(source.group.side, source.group.orders.length, () => writes.cancelAtPrice(source.group.side, source.group.price));
       else modifyOrders(source.group.side, source.group.price, source.group.orders, outcome.price);
     } else if (source.kind === "order") {
       if (outcome.kind === "cancel") writes.cancelOne(source.order.orderNo);
       else modifyOrders(source.order.side, source.order.price, [source.order], outcome.price);
-    } else source.groups.forEach((group) => writes.cancelAtPrice(group.side, group.price));
+    } else cancelMany(source.side, orderCountOf(source.groups), () => source.groups.forEach((group) => writes.cancelAtPrice(group.side, group.price)));
   };
 
   const pickAccount = useStableCallback((account: string) => setSettings({ ...settings, account }));
@@ -221,8 +241,8 @@ function OrderBody({ id, code, infoPager }: { id: WindowId; code: SymbolCode; in
         {view
             ? <OrderLadder rows={rows} previousClose={feed.previousClose} groups={data.groups} writable={writable} previewQuantity={quantity} buying={data.capacity.buying} hover={hover} averagePrice={averagePrice} divider={settings.divider} explorer={explorerOn ? { centerPrice: referencePrice, centerToken } : undefined} currentToken={centerToken} ladder={ladder} drag={drag} expectedPrice={expected?.price ?? null} rowSlots={{ infoCard: infoSlot(infoSlots, infoPager), bottomLeft: tradeSlot(trades, feed.previousClose) }} actions={ladderActions} />
             : feed.snapshotFailed ? <ErrorState message="호가를 불러오지 못했습니다" retry={feed.retry} /> : <EmptyState title="호가를 기다리는 중입니다" />}
-        <OrderStatusBar status={writes.status} queued={writes.queued} blocked={data.blocked} onUndo={writes.cancelOne} onReconcile={writes.reconcile} onDismiss={writes.dismiss} />
       </div>
+      <OrderStatusBar status={writes.status} queued={writes.queued} blocked={data.blocked} confirm={cancelConfirm} onUndo={writes.cancelOne} onReconcile={writes.reconcile} onDismiss={writes.dismiss} />
       <OrderTotals groups={data.groups} writable={writable} actions={totalsActions} drag={drag} />
       <Strip>
         <TotalFigure testId="order-total-ask" tone="down" value={totals.ask} afterHours={totals.source === "afterHours"} description={totals.description} />

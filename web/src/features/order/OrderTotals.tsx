@@ -4,7 +4,7 @@ import { formatPrice } from "../../lib/format";
 import { useStoreValue } from "../../lib/valueStore";
 import { formatShares } from "../market-window/format";
 import { OrderList, type OrderListItem } from "./OrderList";
-import { type PriceGroup, SIDE_LABEL, sideTotal } from "./orderRules";
+import { cancelConfirmText, needsCancelConfirm, type PriceGroup, SIDE_LABEL, sideTotal } from "./orderRules";
 import type { OrderDrag } from "./useOrderDrag";
 
 const COMPACT_FROM = 10_000;
@@ -29,7 +29,7 @@ function OrderTotalCell({ side, groups, writable, actions, drag }: { side: Order
     : [
       { kind: "heading", label: `${SIDE_LABEL[side]} 접수 ${total.count}건` },
       ...sideGroups.flatMap((group) => group.orders.map((order): OrderListItem => ({
-        kind: "order",
+        kind: "cancelRow",
         order,
         label: `${formatPrice(order.price, false)}원 · ${order.openQuantity.toLocaleString("ko-KR")}`,
         disabled: !writable,
@@ -41,13 +41,14 @@ function OrderTotalCell({ side, groups, writable, actions, drag }: { side: Order
         label: `${SIDE_LABEL[side]} 모두 취소`,
         danger: true,
         disabled: !writable,
+        confirm: needsCancelConfirm(total.count) ? `${SIDE_LABEL[side]} ${cancelConfirmText(total.count)}` : undefined,
         onSelect: () => sideGroups.forEach((group) => actions.cancelAtPrice(group.side, group.price)),
       },
     ];
   return (
     <>
       <button ref={button} type="button" className="od-total" data-testid={`order-total-${side}`} data-side={side} data-empty={total.count === 0 ? "" : undefined}
-        aria-label={`${SIDE_LABEL[side]} 접수 ${formatShares(total.quantity)} ${total.count}건`} aria-haspopup="menu" aria-expanded={open}
+        title={`${SIDE_LABEL[side]} 접수 ${formatShares(total.quantity)} ${total.count}건`} aria-label={`${SIDE_LABEL[side]} 접수 ${formatShares(total.quantity)} ${total.count}건`} aria-haspopup="menu" aria-expanded={open}
         data-dragging={dragging ? "" : undefined}
         onPointerDown={(e) => { if (writable && total.count > 0) drag.begin({ source: { kind: "total", side, groups: sideGroups }, origin: e.currentTarget.getBoundingClientRect(), onMoved: () => setOpen(false) }, e); }}
         onClick={() => setOpen((was) => !was)}>

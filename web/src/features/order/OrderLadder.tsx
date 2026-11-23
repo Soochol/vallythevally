@@ -5,8 +5,8 @@ import { useStoreValue, type ValueStore } from "../../lib/valueStore";
 import type { LadderRow } from "../market-window/ladder";
 import { ladderColumns, type LadderRowSlots, PriceLadder } from "../market-window/PriceLadder";
 import { formatShares } from "../market-window/format";
-import { addQuantityText, type BuyingPower, buyPreview, groupKey, type PriceGroup, previewText, SIDE_LABEL } from "./orderRules";
-import { PENDING_TEXT } from "./statusText";
+import { addQuantityText, type BuyingPower, buyPreview, cancelConfirmText, groupKey, needsCancelConfirm, orderCountOf, type PriceGroup, previewText, SIDE_LABEL } from "./orderRules";
+import { PENDING_CHIP_TEXT, PENDING_TEXT } from "./statusText";
 import { LADDER_ROW_HEIGHT_PX, type RowRange, scrollTopToCenter, visibleRowRange } from "./priceRange";
 import { OrderList, type OrderListItem } from "./OrderList";
 import type { OrderDrag } from "./useOrderDrag";
@@ -68,6 +68,8 @@ interface CellProps {
   readonly api: CellApi;
 }
 
+const confirmOf = (prefix: string, orderCount: number): string | undefined => (needsCancelConfirm(orderCount) ? `${prefix} ${cancelConfirmText(orderCount)}` : undefined);
+
 const COLUMN_NAMES = ["매도주문", "매도잔량", "호가", "매수잔량", "매수주문"] as const;
 const HEAD_COLUMNS = ladderColumns(true, true);
 
@@ -111,7 +113,7 @@ const OrderCell = memo(function OrderCell({ side, price, group, writable, previe
             aria-label={`${SIDE_LABEL[side]} ${formatPrice(price, false)}원 ${formatShares(group.quantity)} 주문${group.pending ? ` ${PENDING_TEXT[group.pending]}` : ""}`}
             onPointerDown={(e) => { if (writable && !group.pending) api.drag.begin({ source: { kind: "chip", group }, origin: null }, e); }}
             onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); if (!group.pending) api.openMenu({ x: e.clientX, y: e.clientY, group }); }}>
-            {group.quantity.toLocaleString("ko-KR")}
+            {group.quantity.toLocaleString("ko-KR")}{group.pending && <span className="od-chip-state"> {PENDING_CHIP_TEXT[group.pending]}</span>}
           </button>
         : showsPreview && <span className="od-preview" data-testid="order-preview" data-over={previewTone === "over" ? "" : undefined} data-margin={previewTone === "margin" ? "" : undefined}>{previewText(side, previewQuantity)}</span>}
     </div>
@@ -196,12 +198,12 @@ export function OrderLadder({ rows, previousClose, groups, writable, previewQuan
         { kind: "heading", label: `${formatPrice(group.price, false)}원 ${SIDE_LABEL[group.side]} 주문` },
         ...group.orders.map((order): OrderListItem => ({ kind: "order", label: `${order.openQuantity.toLocaleString("ko-KR")} 취소`, order, disabled: !writable, onSelect: () => actions.cancelOne(order.orderNo) })),
         { kind: "separator" },
-        { kind: "action", label: "이 가격 모두 취소", danger: true, disabled: !writable, onSelect: () => actions.cancelAtPrice(group.side, group.price) },
+        { kind: "action", label: "이 가격 모두 취소", danger: true, disabled: !writable, confirm: confirmOf("이 가격", group.orders.length), onSelect: () => actions.cancelAtPrice(group.side, group.price) },
       ];
     }
     const side = (s: OrderSide) => all.filter((g) => g.side === s);
-    const entry = (label: string, targets: readonly PriceGroup[]): OrderListItem => ({ kind: "action", label, danger: true, disabled: !writable || targets.length === 0, onSelect: () => actions.cancelGroups(targets) });
-    return [entry("매수 모두 취소", side("buy")), entry("매도 모두 취소", side("sell")), entry("전체 모두 취소", all)];
+    const entry = (prefix: string, targets: readonly PriceGroup[]): OrderListItem => ({ kind: "action", label: `${prefix} 모두 취소`, danger: true, disabled: !writable || targets.length === 0, confirm: confirmOf(prefix, orderCountOf(targets)), onSelect: () => actions.cancelGroups(targets) });
+    return [entry("매수", side("buy")), entry("매도", side("sell")), entry("전체", all)];
   };
 
   const shown = exploring ? rows.slice(range.start, range.end) : rows;

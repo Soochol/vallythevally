@@ -22,7 +22,7 @@ test("더블클릭하면 응답 전에 그 칸에 보내는 중 칩과 상태줄
   await place.received;
   const chip = chipAt(page, "buy", BASE);
   await expect(chip).toHaveAttribute("data-pending", "sending");
-  await expect(chip).toHaveText("10");
+  await expect(chip).toHaveText("10 보냄…");
   await expect(chip).toHaveAccessibleName("매수 70,000원 10주 주문 보내는 중");
   await expect(status(page)).toContainText("보내는 중 · 매수 10 · 70,000원");
   place.reply({ body: commandOf("buy") });
@@ -56,9 +56,9 @@ test("보내는 중 칩은 응답 전 두 건의 수량 합계를 보인다", as
   const cell = cellAt(page, "buy", BASE);
   await cell.dblclick();
   await place.received;
-  await expect(chipAt(page, "buy", BASE)).toHaveText("10");
+  await expect(chipAt(page, "buy", BASE)).toHaveText("10 보냄…");
   await chipAt(page, "buy", BASE).dblclick();
-  await expect(chipAt(page, "buy", BASE)).toHaveText("20");
+  await expect(chipAt(page, "buy", BASE)).toHaveText("20 보냄…");
   await expect(chipAt(page, "buy", BASE)).toHaveAttribute("data-pending", "sending");
   place.reply({ body: commandOf("buy", { orderNo: "0000098" }) });
   await expect(status(page)).toContainText("접수 · 매수 10 · 70,000원");
@@ -134,6 +134,7 @@ test("일괄 취소에서 일부가 거절되면 그 주문만 칩에 남는다"
   const batch = holdWrite(scenario, "cancel-batch");
   await chipAt(page, "buy", BASE).click({ button: "right" });
   await page.getByRole("menuitem", { name: "이 가격 모두 취소" }).click();
+  await page.getByRole("menuitem", { name: "이 가격 2건 취소 · 한 번 더 누르기" }).click();
   await batch.received;
   await expect(chipAt(page, "buy", BASE)).toHaveAttribute("data-pending", "canceling");
   batch.reply({ body: { accountRef: ACCOUNT, blocked: false, commands: [
@@ -275,7 +276,7 @@ test("같은 종목 호가주문창 둘에서 한 창의 신규가 응답 없음
   await noReply.received;
   noReply.reply(noAnswer);
   await expect.poll(() => placeIds(scenario).length).toBe(1);
-  await expect(status(page)).toContainText("같은 동작을 다시 하면 같은 명령으로 보냅니다");
+  await expect(status(page)).toContainText("다시 보내면 같은 명령으로 보냅니다");
 
   await orderTab("order-2").click();
   await expect(orderTab("order-2")).toHaveAttribute("aria-selected", "true");

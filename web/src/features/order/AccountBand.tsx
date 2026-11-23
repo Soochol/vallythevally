@@ -49,20 +49,36 @@ function SymbolName({ code, name, goTo }: { code: string; name: string; goTo: Go
   return <button type="button" className="od-name od-symbol" aria-label={`${name}로 이동`} onClick={() => goTo({ code, name })}>{name}</button>;
 }
 
+type RowsKind = "open" | "holdings" | "fills";
+
+const HEADS: Readonly<Record<RowsKind, readonly string[]>> = {
+  open: ["시각", "방향", "종목", "수량", "가격", ""],
+  holdings: ["종목", "수량", "평단", "평가손익"],
+  fills: ["시각", "방향", "종목", "수량", "가격"],
+};
+
+function RowsHead({ kind }: { kind: RowsKind }) {
+  return <div className="od-rows-head" data-kind={kind} aria-hidden="true">{HEADS[kind].map((name, index) => <span key={index}>{name}</span>)}</div>;
+}
+
 function OpenPanel({ orders, writable, onCancel, goTo }: { orders: readonly TradingOpenOrder[]; writable: boolean; onCancel(orderNo: string): void; goTo: GoTo }) {
   if (orders.length === 0) return <p className="od-list-empty">미체결 주문이 없습니다</p>;
   return (
-    <ul className="od-rows" data-testid="account-open-orders">
-      {orders.map((order) => (
-        <li key={order.orderNo} data-side={order.side} data-testid="account-open-order">
-          <span className="od-side">{SIDE_LABEL[order.side]}</span>
-          <SymbolName code={order.code} name={order.name} goTo={goTo} />
-          <b>{formatPrice(order.price, false)}원</b>
-          <span>{formatQuantity(order.openQuantity)}</span>
-          <button type="button" className="od-link" disabled={!writable} onClick={() => onCancel(order.orderNo)}>취소</button>
-        </li>
-      ))}
-    </ul>
+    <>
+      <RowsHead kind="open" />
+      <ul className="od-rows" data-kind="open" data-testid="account-open-orders">
+        {orders.map((order) => (
+          <li key={order.orderNo} data-side={order.side} data-testid="account-open-order">
+            <span className="od-time">{formatFillTime(order.orderedAt)}</span>
+            <span className="od-side">{SIDE_LABEL[order.side]}</span>
+            <SymbolName code={order.code} name={order.name} goTo={goTo} />
+            <span className="od-figure">{formatQuantity(order.openQuantity)}</span>
+            <b className="od-figure">{formatPrice(order.price, false)}원</b>
+            <button type="button" className="od-row-cancel" disabled={!writable} onClick={() => onCancel(order.orderNo)}>취소</button>
+          </li>
+        ))}
+      </ul>
+    </>
   );
 }
 
@@ -70,33 +86,39 @@ function HoldingsPanel({ balance, goTo }: { balance: TradingBalance | null; goTo
   const holdings = balance?.holdings ?? [];
   if (holdings.length === 0) return <p className="od-list-empty">보유종목이 없습니다</p>;
   return (
-    <ul className="od-rows" data-testid="account-holdings">
-      {holdings.map((holding) => (
-        <li key={holding.code} data-testid="account-holding">
-          <SymbolName code={holding.code} name={holding.name} goTo={goTo} />
-          <span>{formatQuantity(holding.quantity)}</span>
-          <span>평단 {formatPrice(holding.averagePrice, false)}</span>
-          <b data-tone={holding.evaluationProfit > 0 ? "up" : holding.evaluationProfit < 0 ? "down" : undefined}>{profitText(holding, "won")}</b>
-        </li>
-      ))}
-    </ul>
+    <>
+      <RowsHead kind="holdings" />
+      <ul className="od-rows" data-kind="holdings" data-testid="account-holdings">
+        {holdings.map((holding) => (
+          <li key={holding.code} data-testid="account-holding">
+            <SymbolName code={holding.code} name={holding.name} goTo={goTo} />
+            <span className="od-figure">{formatQuantity(holding.quantity)}</span>
+            <span className="od-figure">{formatPrice(holding.averagePrice, false)}</span>
+            <b className="od-figure" data-tone={holding.evaluationProfit > 0 ? "up" : holding.evaluationProfit < 0 ? "down" : undefined}>{profitText(holding, "won")}</b>
+          </li>
+        ))}
+      </ul>
+    </>
   );
 }
 
 function FillsPanel({ executions, goTo }: { executions: readonly TradingExecution[]; goTo: GoTo }) {
   if (executions.length === 0) return <p className="od-list-empty">오늘 체결이 없습니다</p>;
   return (
-    <ul className="od-rows" data-testid="account-fills">
-      {newestFirst(executions).map((fill, index) => (
-        <li key={`${fill.orderNo}:${fill.time}:${index}`} data-side={fill.side} data-testid="account-fill">
-          <span className="od-time">{formatFillTime(fill.time)}</span>
-          <span className="od-side">{SIDE_LABEL[fill.side]}</span>
-          <SymbolName code={fill.code} name={fill.name} goTo={goTo} />
-          <b>{formatPrice(fill.price, false)}원</b>
-          <span>{formatQuantity(fill.quantity)}</span>
-        </li>
-      ))}
-    </ul>
+    <>
+      <RowsHead kind="fills" />
+      <ul className="od-rows" data-kind="fills" data-testid="account-fills">
+        {newestFirst(executions).map((fill, index) => (
+          <li key={`${fill.orderNo}:${fill.time}:${index}`} data-side={fill.side} data-testid="account-fill">
+            <span className="od-time">{formatFillTime(fill.time)}</span>
+            <span className="od-side">{SIDE_LABEL[fill.side]}</span>
+            <SymbolName code={fill.code} name={fill.name} goTo={goTo} />
+            <span className="od-figure">{formatQuantity(fill.quantity)}</span>
+            <b className="od-figure">{formatPrice(fill.price, false)}원</b>
+          </li>
+        ))}
+      </ul>
+    </>
   );
 }
 
