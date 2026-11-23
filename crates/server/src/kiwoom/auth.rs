@@ -8,7 +8,7 @@ use serde::Serialize;
 use tokio::sync::watch;
 
 use super::error::{Category, CodeKey, Failure};
-use super::token_file::{FileError, KeyRecords, Saved, SavedAuthBlock, SavedToken, TokenFile, credential_id};
+use super::token_file::{FileError, KeyRecords, RecordFile, Saved, SavedAuthBlock, SavedToken, TokenFile, credential_id};
 use super::wire::{TokenResponse, parse_kst_datetime};
 use crate::config::Secret;
 
@@ -88,6 +88,30 @@ struct State {
     disconnected: bool,
     auth_block: Option<SavedAuthBlock>,
     file: Option<TokenFile>,
+}
+
+impl State {
+    fn records(&self) -> Option<(RecordFile, KeyRecords)> {
+        let (file, credentials) = (self.file.as_ref()?, self.credentials.as_ref()?);
+        let records = KeyRecords {
+            credential: credentials.id.clone(),
+            last_request_at: self.last_request_at.map_or(0, KstTime::unix),
+            disconnected: self.disconnected,
+            auth_block: self.auth_block.clone(),
+        };
+        Some((file.records_for(&credentials.id), records))
+    }
+
+    fn adopt_legacy_records(&self) {
+        let Some((file, records)) = self.records() else { return };
+        let nothing_to_keep = records.last_request_at == 0 && !records.disconnected && records.auth_block.is_none();
+        if nothing_to_keep || file.path().exists() {
+            return;
+        }
+        if let Err(e) = file.save(&records) {
+            tracing::warn!(error = %e, "옛 토큰 파일의 발급 간격과 차단 기록을 앱키의 기록 파일로 옮기지 못했습니다");
+        }
+    }
 }
 
 pub struct KiwoomAuth {
@@ -211,13 +235,10 @@ impl KiwoomAuth {
     }
 
     fn save_records(&self, st: &State) -> Result<(), FileError> {
-        let (Some(file), Some(credentials)) = (&st.file, &st.credentials) else { return Ok(()) };
-        file.records_for(&credentials.id).save(&KeyRecords {
-            credential: credentials.id.clone(),
-            last_request_at: st.last_request_at.map_or(0, KstTime::unix),
-            disconnected: st.disconnected,
-            auth_block: st.auth_block.clone(),
-        })
+        match st.records() {
+            Some((file, records)) => file.save(&records),
+            None => Ok(()),
+        }
     }
 
     pub fn persist(&self) {
@@ -491,6 +512,9 @@ fn loaded_state(credentials: Option<Credentials>, file: Option<TokenFile>) -> (S
     };
     state.credentials = credentials;
     state.file = file;
+    if halt.is_none() || matches!(halt, Some(Halt::Rejected(_))) {
+        state.adopt_legacy_records();
+    }
     (state, halt)
 }
 
@@ -740,5 +764,22 @@ mod tests {
             let a = KiwoomAuth::new(Secret::new(KEY.into()), Secret::new(SECRET.into()), Some(file));
             assert_eq!(a.halted().is_some(), blocked, "{owner:?}");
         }
+    }
+
+    #[test]
+    fn records_read_from_an_old_token_file_are_kept_for_the_app_key_after_the_file_is_overwritten() {
+        let (_dir, lock, file) = crate::kiwoom::token_file::testing::temp_token_file();
+        let path = file.path().to_owned();
+        let t0 = kst(d(9), 9, 0, 0);
+        let block = SavedAuthBlock { detail: CodeKey::Rest(8050), credential: Some(credential_id(KEY)), at: t0.unix() };
+        file.save(&Saved { credential: Some(credential_id(KEY)), last_request_at: t0.unix(), auth_block: Some(block), ..Saved::default() }).unwrap();
+        let first = KiwoomAuth::new(Secret::new(KEY.into()), Secret::new(SECRET.into()), Some(file));
+        assert!(first.halted().is_some_and(|halt| halt.is_8050()));
+        first.clear_credentials();
+        drop(first);
+
+        let again = KiwoomAuth::new(Secret::new(KEY.into()), Secret::new(SECRET.into()), Some(TokenFile::new(path, &lock)));
+        assert!(again.halted().is_some_and(|halt| halt.is_8050()), "옛 파일을 비워도 앱키의 8050 차단은 남는다");
+        assert_eq!(again.issue_blocked_until(t0.plus_secs(60)), Some(t0.plus_secs(600)));
     }
 }
