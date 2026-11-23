@@ -147,8 +147,8 @@ impl SourceSwitch {
         tracing::info!(to = if matches!(next, Supplier::Kiwoom) { "kiwoom" } else { "kis" }, "시세 공급원을 바꿉니다");
         parts.active_stream.activate(&stream).await;
         parts.active_source.replace(source);
-        parts.generation.advance();
         parts.bars.clear_all();
+        parts.generation.advance();
         parts.hub.source_switched();
         if let Supplier::Kis(supplier) = &next {
             supplier.lane.link.set_duty(Some(supplier.feed.duty(parts.symbols.clone(), supplier.source.clone())));
