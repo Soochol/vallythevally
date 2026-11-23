@@ -753,6 +753,7 @@ fn market_lines(market: MasterMarket, codes: &[&str]) -> Vec<Vec<u8>> {
 
 #[tokio::test(start_paused = true)]
 async fn a_market_file_losing_almost_all_rows_is_refused() {
+    let _logs = tracing::subscriber::set_default(tracing_subscriber::fmt().with_writer(std::io::sink).with_max_level(tracing::Level::TRACE).finish());
     let kospi = market_lines(MasterMarket::Kospi, &["005930", "000660", "035420", "051910", "006400", "207940", "068270", "105560", "055550", "012330"]);
     let kosdaq = market_lines(MasterMarket::Kosdaq, &["247540", "086520", "035720", "091990"]);
     let master = FakeMaster::serving(&kospi, &kosdaq);
