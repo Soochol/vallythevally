@@ -528,6 +528,34 @@ async fn a_kiwoom_symbol_list_that_lands_after_the_switch_to_kis_does_not_replac
     server.stop().await;
 }
 
+#[tokio::test]
+async fn a_symbol_list_that_arrives_after_switching_away_and_back_is_requested_again() {
+    let (kiwoom, kis, peer, env) = (ScriptedTransport::new(), FakeKis::new(), KisPeer::default(), Env::new());
+    let first_list_request = AtomicBool::new(true);
+    let held = kiwoom.hold("처음 나간 키움 종목 목록", move |call| call.api_id == "ka10099" && first_list_request.swap(false, Ordering::SeqCst));
+    let mut extra = vec![START];
+    extra.extend(KIS_ENV);
+    let server = env.spawn(&kiwoom, &kis, &peer, &extra);
+    let client = Client::of(&server).await;
+    held.arrived().await;
+    client.until_key_state("env-kis", "connected").await;
+    client.designate("env-kis").await;
+    until("한투 마스터 목록", || async { symbol_found(&client, "247540").await.then_some(()) }).await;
+    let switching_back = tokio::spawn({
+        let client = Client { base: client.base.clone(), http: reqwest::Client::new() };
+        async move { client.designate("env").await }
+    });
+    until("키움 공급원으로 되돌리는 전환이 한투 구독을 내림", || async { peer.registered().is_empty().then_some(()) }).await;
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    held.release();
+    switching_back.await.unwrap();
+    client.until_key_state("env", "connected").await;
+    until("마지막 키움 응답으로 채워진 종목 목록", || async { symbol_found(&client, "094800").await.then_some(()) }).await;
+    let listings_after_the_last_switch = kiwoom.calls().iter().filter(|call| call.api_id == "ka10099" && call.body["mrkt_tp"] == "0").count() - 1;
+    assert!(listings_after_the_last_switch <= 1, "마지막 전환 뒤 키움 목록 요청은 한 번 이하다: {listings_after_the_last_switch}");
+    server.stop().await;
+}
+
 async fn update_screener(client: &Client) -> (u16, Value) {
     client.send(reqwest::Method::POST, "/api/screener/update", Some(json!({"full": false}))).await
 }
