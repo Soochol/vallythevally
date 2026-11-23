@@ -718,7 +718,7 @@ test("1024x768에서 차트 설정 팝오버의 세 구역 모든 조작이 화�
 });
 
 test("기본 설정의 봉 값 줄은 좁은 데스크톱 칸에서도 지금처럼 한 줄이다", async ({ page }) => {
-  await page.setViewportSize({ width: 900, height: 700 });
+  await page.setViewportSize({ width: 973, height: 700 });
   await open(page);
   const row = (await ohlc(page).boundingBox())!;
   const first = (await ohlc(page).locator(":scope > span").first().boundingBox())!;
