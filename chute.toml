@@ -63,6 +63,7 @@ paths = ["crates/setup/", "Cargo.toml", "Cargo.lock", "scripts/dev.py", "scripts
 [[verify]]
 name = "server-test"
 run = "env VALLY_COMPILE_LANE=gate python3 scripts/dev.py cargo test -p server"
+timeout = 1200
 failed = 'test (\S+) \.\.\. FAILED'
 paths = [
   "crates/server/",
