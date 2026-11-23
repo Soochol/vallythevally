@@ -115,6 +115,67 @@ struct Run {
     task: JoinHandle<Finish>,
 }
 
+struct Beacon {
+    state: Mutex<(u64, bool)>,
+    changed: Condvar,
+}
+
+impl Beacon {
+    fn new() -> Arc<Beacon> {
+        Arc::new(Beacon { state: Mutex::new((0, false)), changed: Condvar::new() })
+    }
+
+    fn ring(&self) {
+        self.state.lock().unwrap().0 += 1;
+        self.changed.notify_all();
+    }
+
+    fn close(&self) {
+        self.state.lock().unwrap().1 = true;
+        self.changed.notify_all();
+    }
+
+    async fn until(&self, what: &str, condition: impl Fn() -> bool) {
+        loop {
+            if condition() {
+                return;
+            }
+            let state = self.state.lock().unwrap();
+            assert!(!state.1, "집계가 끝나 더는 오지 않는다: {what}");
+            let rung = state.0;
+            drop(self.changed.wait_timeout_while(state, Duration::from_millis(1), |state| state.0 == rung && !state.1).unwrap());
+            tokio::task::yield_now().await;
+        }
+    }
+}
+
+struct Watched {
+    inner: Box<dyn MinuteStore>,
+    written: Arc<Beacon>,
+}
+
+impl MinuteStore for Watched {
+    fn load(&mut self, date: u32) -> io::Result<Vec<MinuteBar>> {
+        self.inner.load(date)
+    }
+
+    fn append(&mut self, date: u32, bars: &[MinuteBar], as_of: i64) -> io::Result<()> {
+        let result = self.inner.append(date, bars, as_of);
+        self.written.ring();
+        result
+    }
+
+    fn finish(&mut self) -> io::Result<()> {
+        self.inner.finish()
+    }
+}
+
+impl Drop for Watched {
+    fn drop(&mut self) {
+        self.written.close();
+    }
+}
+
 async fn yield_until(what: &str, condition: impl Fn() -> bool) {
     for _ in 0..20_000 {
         if condition() {
@@ -175,8 +236,10 @@ fn index(item: &str, time: &str, price: &str, quantity: &str, cumulative_value: 
     json!({"trnm": "REAL", "data": [{"type": "0J", "item": item, "name": "업종지수", "values": {"20": time, "10": price, "15": quantity, "14": cumulative_value}}]}).to_string()
 }
 
-fn file_store(shared: &Path, key: &str) -> Box<dyn MinuteStore> {
-    Box::new(FileMinuteStore::new(shared.to_owned(), KeyName::parse(key).unwrap()))
+fn file_store(shared: &Path, key: &str) -> (Box<dyn MinuteStore>, Arc<Beacon>) {
+    let written = Beacon::new();
+    let store = Watched { inner: Box::new(FileMinuteStore::new(shared.to_owned(), KeyName::parse(key).unwrap())), written: written.clone() };
+    (Box::new(store), written)
 }
 
 fn minute_file(shared: &Path, key: &str) -> PathBuf {
@@ -191,21 +254,14 @@ fn appended(shared: &Path, key: &str) -> Vec<MinuteBar> {
     file_text(shared, key).lines().skip(1).map(|line| serde_json::from_str(line).unwrap()).collect()
 }
 
-async fn wait_for_lines(shared: &Path, key: &str, count: usize) {
-    for _ in 0..5_000 {
-        if appended(shared, key).len() >= count {
-            return;
-        }
-        std::thread::sleep(Duration::from_millis(2));
-        tokio::task::yield_now().await;
-    }
-    panic!("분봉 줄 {count}개가 쓰이지 않았다: {:?}", appended(shared, key).len());
+async fn wait_for_lines(shared: &Path, key: &str, count: usize, written: &Beacon) {
+    written.until(&format!("분봉 줄 {count}개"), || appended(shared, key).len() >= count).await;
 }
 
-async fn flush(shared: &Path, key: &str, expected_lines: usize) {
+async fn flush(shared: &Path, key: &str, expected_lines: usize, written: &Beacon) {
     settle().await;
     tokio::time::advance(FLUSH_EVERY).await;
-    wait_for_lines(shared, key, expected_lines).await;
+    wait_for_lines(shared, key, expected_lines, written).await;
     settle().await;
     assert_eq!(appended(shared, key).len(), expected_lines, "{}", file_text(shared, key));
 }
@@ -250,14 +306,15 @@ fn handover_ticks() -> [String; 5] {
 async fn a_hand_computed_batch_becomes_per_exchange_and_combined_one_minute_bars() {
     let folder = tempfile::tempdir().unwrap();
     let (data, shared) = (folder.path().join("data"), folder.path().join("shared"));
-    let run = start(&data, "k1", file_store(&shared, "k1")).await;
+    let (store, written) = file_store(&shared, "k1");
+    let run = start(&data, "k1", store).await;
     for tick in handover_ticks() {
         run.push(&tick);
     }
     run.push(&stock("005930", "090100", "70200", "3", "NXT"));
     run.push(&index("001", "090010", "+2650.35", "100", "1000000"));
     run.push(&index("001", "090040", "+2651.10", "50", "1500000"));
-    flush(&shared, "k1", 6).await;
+    flush(&shared, "k1", 6, &written).await;
     let bars = latest(appended(&shared, "k1"));
     let want = [
         expect("005930", KRX, 540, [70000.0, 71000.0, 69900.0, 69900.0], (14, 980_850, 4), (32401, 32459)),
@@ -278,13 +335,14 @@ async fn a_hand_computed_batch_becomes_per_exchange_and_combined_one_minute_bars
 async fn only_bars_changed_since_the_last_tick_are_appended_and_a_later_line_replaces_an_earlier_one() {
     let folder = tempfile::tempdir().unwrap();
     let (data, shared) = (folder.path().join("data"), folder.path().join("shared"));
-    let run = start(&data, "k1", file_store(&shared, "k1")).await;
+    let (store, written) = file_store(&shared, "k1");
+    let run = start(&data, "k1", store).await;
     run.push(&stock("005930", "090001", "70000", "10", "KRX"));
     run.push(&stock("000660", "090002", "200000", "1", "KRX"));
-    flush(&shared, "k1", 4).await;
+    flush(&shared, "k1", 4, &written).await;
     flush_without_change(&shared, "k1", 4).await;
     run.push(&stock("005930", "090010", "70500", "2", "KRX"));
-    flush(&shared, "k1", 6).await;
+    flush(&shared, "k1", 6, &written).await;
     let lines = appended(&shared, "k1");
     assert!(lines[4..].iter().all(|bar| bar.symbol == "005930" && bar.minute == 540), "{lines:?}");
     let replaced = latest(lines);
@@ -309,16 +367,18 @@ async fn flush_without_change(shared: &Path, key: &str, expected_lines: usize) {
 async fn a_restarted_child_continues_the_bars_from_the_file_of_the_day() {
     let folder = tempfile::tempdir().unwrap();
     let (data, shared) = (folder.path().join("data"), folder.path().join("shared"));
-    let first = start(&data, "k1", file_store(&shared, "k1")).await;
+    let (first_store, first_written) = file_store(&shared, "k1");
+    let first = start(&data, "k1", first_store).await;
     first.push(&stock("005930", "090001", "70000", "10", "KRX"));
     first.push(&stock("005930", "090030", "70400", "4", "KRX"));
-    flush(&shared, "k1", 2).await;
+    flush(&shared, "k1", 2, &first_written).await;
     assert!(matches!(first.stop().await, Finish::Shutdown));
 
-    let second = start(&data, "k1", file_store(&shared, "k1")).await;
+    let (second_store, second_written) = file_store(&shared, "k1");
+    let second = start(&data, "k1", second_store).await;
     second.push(&stock("005930", "090045", "69800", "6", "KRX"));
     second.push(&stock("005930", "090100", "69900", "1", "KRX"));
-    flush(&shared, "k1", 6).await;
+    flush(&shared, "k1", 6, &second_written).await;
     let bars = latest(appended(&shared, "k1"));
     let continued = &bars[&("005930".to_owned(), KRX, 540)];
     assert_eq!(*continued, expect("005930", KRX, 540, [70000.0, 70400.0, 69800.0, 69800.0], (20, 700_000 + 281_600 + 418_800, 3), (32401, 32445)));
@@ -334,17 +394,19 @@ async fn a_minute_split_between_two_key_files_merges_to_the_hand_computed_bar() 
     let folder = tempfile::tempdir().unwrap();
     let (data, shared) = (folder.path().join("data"), folder.path().join("shared"));
     let ticks = handover_ticks();
-    let before = start(&data, "k1", file_store(&shared, "k1")).await;
+    let (before_store, before_written) = file_store(&shared, "k1");
+    let before = start(&data, "k1", before_store).await;
     for tick in &ticks[..2] {
         before.push(tick);
     }
     before.push(&ticks[4]);
-    flush(&shared, "k1", 3).await;
+    flush(&shared, "k1", 3, &before_written).await;
     assert!(matches!(before.stop().await, Finish::Shutdown));
-    let after = start(&data, "k2", file_store(&shared, "k2")).await;
+    let (after_store, after_written) = file_store(&shared, "k2");
+    let after = start(&data, "k2", after_store).await;
     after.push(&ticks[2]);
     after.push(&ticks[3]);
-    flush(&shared, "k2", 2).await;
+    flush(&shared, "k2", 2, &after_written).await;
     assert!(matches!(after.stop().await, Finish::Shutdown));
 
     let from_first = latest(appended(&shared, "k1"));
@@ -358,15 +420,20 @@ async fn a_minute_split_between_two_key_files_merges_to_the_hand_computed_bar() 
 struct Gate {
     state: Mutex<(bool, bool)>,
     changed: Condvar,
+    arrivals: Arc<Beacon>,
 }
 
 impl Gate {
     fn new() -> Arc<Gate> {
-        Arc::new(Gate { state: Mutex::new((true, false)), changed: Condvar::new() })
+        Arc::new(Gate { state: Mutex::new((true, false)), changed: Condvar::new(), arrivals: Beacon::new() })
     }
 
     fn arrived(&self) -> bool {
         self.state.lock().unwrap().1
+    }
+
+    async fn until_arrived(&self) {
+        self.arrivals.until("집계가 붙잡힌다", || self.arrived()).await;
     }
 
     fn release(&self) {
@@ -380,6 +447,12 @@ struct HeldStore {
     gate: Arc<Gate>,
 }
 
+impl Drop for HeldStore {
+    fn drop(&mut self) {
+        self.gate.arrivals.close();
+    }
+}
+
 impl MinuteStore for HeldStore {
     fn load(&mut self, date: u32) -> io::Result<Vec<MinuteBar>> {
         self.inner.load(date)
@@ -389,6 +462,7 @@ impl MinuteStore for HeldStore {
         let mut state = self.gate.state.lock().unwrap();
         state.1 = true;
         self.gate.changed.notify_all();
+        self.gate.arrivals.ring();
         while state.0 {
             state = self.gate.changed.wait(state).unwrap();
         }
@@ -410,18 +484,12 @@ async fn a_held_aggregation_leaves_raw_writing_complete() {
     let folder = tempfile::tempdir().unwrap();
     let (data, shared) = (folder.path().join("data"), folder.path().join("shared"));
     let gate = Gate::new();
-    let held = HeldStore { inner: file_store(&shared, "k1"), gate: gate.clone() };
+    let held = HeldStore { inner: file_store(&shared, "k1").0, gate: gate.clone() };
     let run = start(&data, "k1", Box::new(held)).await;
     run.push(&stock("005930", "090001", "70000", "10", "KRX"));
     settle().await;
     tokio::time::advance(FLUSH_EVERY).await;
-    for _ in 0..5_000 {
-        if gate.arrived() {
-            break;
-        }
-        std::thread::sleep(Duration::from_millis(2));
-        tokio::task::yield_now().await;
-    }
+    gate.until_arrived().await;
     assert!(gate.arrived(), "집계가 붙잡혔다");
     run.push(&json!({"trnm": "REAL", "data": [{"type": "0D", "item": "005930_AL", "values": {"21": "090001"}}]}).to_string());
     let burst = 20_000;
@@ -443,20 +511,14 @@ async fn a_full_aggregation_queue_drops_frames_on_the_aggregation_side_and_count
     let folder = tempfile::tempdir().unwrap();
     let shared = folder.path().join("shared");
     let gate = Gate::new();
-    let held = HeldStore { inner: file_store(&shared, "k1"), gate: gate.clone() };
+    let held = HeldStore { inner: file_store(&shared, "k1").0, gate: gate.clone() };
     let (feed, worker) = spawn(Box::new(held), DAY_START_MS + 9 * 3_600_000);
     let stats = worker.stats();
     let frame = tokio_tungstenite::tungstenite::Utf8Bytes::from(stock("005930", "090001", "70000", "1", "KRX"));
     feed.offer(DAY_START_MS, &frame);
     settle().await;
     tokio::time::advance(FLUSH_EVERY).await;
-    for _ in 0..5_000 {
-        if gate.arrived() {
-            break;
-        }
-        std::thread::sleep(Duration::from_millis(2));
-        tokio::task::yield_now().await;
-    }
+    gate.until_arrived().await;
     assert!(gate.arrived());
     assert_eq!(stats.ticks(), 1);
     let capacity = 16_384;
