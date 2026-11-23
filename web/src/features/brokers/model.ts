@@ -121,3 +121,21 @@ export function lineSegments(row: BrokerRow): readonly LineSegment[] {
 export function startedAt(grid: BrokerGrid): UnixSeconds | null {
   return grid.times[0] ?? null;
 }
+
+export interface TimeTick {
+  readonly column: number;
+  readonly time: UnixSeconds;
+}
+
+const TICK_SECONDS = 30 * 60;
+
+export function halfHourTicks(times: readonly UnixSeconds[]): readonly TimeTick[] {
+  const ticks: TimeTick[] = [];
+  let previousSlot: number | null = null;
+  times.forEach((time, column) => {
+    const slot = Math.floor(time / TICK_SECONDS);
+    if (previousSlot !== null && slot > previousSlot) ticks.push({ column, time: slot * TICK_SECONDS });
+    previousSlot = slot;
+  });
+  return ticks;
+}
