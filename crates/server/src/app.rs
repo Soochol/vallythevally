@@ -348,7 +348,6 @@ pub async fn start(config: &Config, lock: &InstanceLock, adapters: Adapters) -> 
         Some(key) => KiwoomAuth::new(key.credentials.app_key.clone(), key.credentials.app_secret.clone(), Some(token_file_for(&key.paths))),
         None => KiwoomAuth::keyless(Some(TokenFile::new(config.token_path.clone(), lock).with_environment(config.kiwoom_environment))),
     };
-    let (kiwoom, sends) = if config.public.is_some() { crate::public::counted(kiwoom) } else { (kiwoom, Arc::new(std::sync::atomic::AtomicU64::new(0))) };
     let lane_transport = kiwoom.clone();
     let rest = match kiwoom_spacing {
         None => KiwoomRest::for_environment(kiwoom, auth, clock.clone(), config.kiwoom_environment),
@@ -420,7 +419,7 @@ pub async fn start(config: &Config, lock: &InstanceLock, adapters: Adapters) -> 
     let financials = crate::financials::Financials::with_store(dart, financial_store, clock.clone());
     let automatic = config.financial_automatic.then(|| financials.start_automatic(crate::financials::symbol_listings(&symbols)));
     let financial_routes = crate::financials::routes(financials, symbols.clone());
-    let public = crate::public::start(config, state.clone(), financial_routes.clone(), sends).await?;
+    let public = crate::public::start(config, state.clone(), financial_routes.clone()).await?;
     let router = router(state.clone())
         .merge(financial_routes)
         .layer(axum::middleware::from_fn_with_state(state.clone(), crate::public::measure_operator_kiwoom))

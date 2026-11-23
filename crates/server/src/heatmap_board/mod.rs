@@ -9,7 +9,6 @@ use axum::response::Json;
 use axum::routing::get;
 use axum::{Extension, Router};
 use domain::{KstTime, Symbol, Venue};
-use futures::future::BoxFuture;
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
@@ -20,37 +19,6 @@ use crate::userdata;
 pub use board::{HeatmapBoardMember, HeatmapBoardTheme, HeatmapThemeOrder, HeatmapThemeSummary, board_theme, in_order};
 
 pub const FRESH_SECS: i64 = 45;
-
-pub struct Busy;
-
-pub enum Refused {
-    Busy,
-    Failed(ApiFailure),
-}
-
-pub trait QuoteGate: Sync {
-    fn begin(&self) -> Result<Box<dyn Send>, Busy>;
-    fn grant_tr(&self) -> BoxFuture<'_, bool>;
-}
-
-struct Unlimited;
-
-impl QuoteGate for Unlimited {
-    fn begin(&self) -> Result<Box<dyn Send>, Busy> {
-        Ok(Box::new(()))
-    }
-
-    fn grant_tr(&self) -> BoxFuture<'_, bool> {
-        Box::pin(async { true })
-    }
-}
-
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub struct BoardTally {
-    pub cached: u32,
-    pub fetched: u32,
-    pub over_budget: u32,
-}
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
@@ -168,69 +136,72 @@ async fn board(State(st): State<Arc<AppState>>, Extension(cache): Extension<Arc<
         HeatmapSource::Mine => userdata::get_heatmap_themes(&st.db).await?,
         HeatmapSource::Kiwoom => HeatmapThemes { themes: Vec::new(), revision: Revision(0) },
     };
-    match assemble(&st, &cache, params, mine, &Unlimited).await {
-        Ok((board, _)) => Ok(Json(board)),
-        Err(Refused::Failed(failure)) => Err(failure),
-        Err(Refused::Busy) => Err(ApiFailure::new(crate::api::ApiErrorCode::Internal, "제한 없는 호출이 자리를 얻지 못했습니다")),
+    let wanted = wanted_by(&st, params.source, mine).await?;
+    let (quotes, as_of) = if st.shared_data.is_enabled() {
+        let shared = shared::quotes(&st.shared_data, &wanted.symbols, params.venue, wanted.directory.as_deref());
+        (shared.quotes, shared.as_of)
+    } else {
+        let quotes = polled_quotes(&st, &cache, &wanted.symbols, params.venue, wanted.directory.as_deref()).await?;
+        let as_of = quotes.values().map(|quote| quote.t.0).max().map(UnixSeconds);
+        (quotes, as_of)
+    };
+    Ok(Json(board_of(&params, wanted, quotes, as_of)))
+}
+
+pub async fn board_within(st: &AppState, q: &HashMap<String, String>, mine: HeatmapThemes) -> Result<HeatmapBoard, ApiFailure> {
+    let params = board_params(q)?;
+    if !st.shared_data.is_enabled() {
+        return Err(ApiFailure::new(crate::api::ApiErrorCode::NotPrepared, "공용 자료 폴더가 없어 보드를 만들 수 없습니다"));
     }
+    let wanted = wanted_by(st, params.source, mine).await?;
+    let shared = shared::quotes(&st.shared_data, &wanted.symbols, params.venue, wanted.directory.as_deref());
+    Ok(board_of(&params, wanted, shared.quotes, shared.as_of))
 }
 
-pub async fn board_within(st: &AppState, cache: &QuoteCache, q: &HashMap<String, String>, mine: HeatmapThemes, gate: &dyn QuoteGate) -> Result<(HeatmapBoard, BoardTally), Refused> {
-    let params = board_params(q).map_err(Refused::Failed)?;
-    assemble(st, cache, params, mine, gate).await
+struct Wanted {
+    document: HeatmapThemes,
+    catalog: Option<KiwoomCatalogInfo>,
+    symbols: Vec<Symbol>,
+    directory: Option<Arc<crate::symbols::Directory>>,
 }
 
-async fn assemble(st: &AppState, cache: &QuoteCache, params: BoardParams, mine: HeatmapThemes, gate: &dyn QuoteGate) -> Result<(HeatmapBoard, BoardTally), Refused> {
-    let BoardParams { venue, order, source } = params;
+async fn wanted_by(st: &AppState, source: HeatmapSource, mine: HeatmapThemes) -> Result<Wanted, ApiFailure> {
     let (document, catalog) = match source {
         HeatmapSource::Mine => (mine, None),
         HeatmapSource::Kiwoom => (kiwoom_document(&st.kiwoom_catalog), Some(st.kiwoom_catalog.info())),
     };
-    let mut wanted: Vec<Symbol> = Vec::new();
+    let mut symbols: Vec<Symbol> = Vec::new();
     for code in document.themes.iter().flat_map(|t| &t.symbols) {
-        let symbol = Symbol::parse(&code.0).map_err(|e| Refused::Failed(ApiFailure::bad_request(format!("저장된 테마의 종목 코드가 틀렸습니다: {e}"))))?;
-        if !wanted.contains(&symbol) {
-            wanted.push(symbol);
+        let symbol = Symbol::parse(&code.0).map_err(|e| ApiFailure::bad_request(format!("저장된 테마의 종목 코드가 틀렸습니다: {e}")))?;
+        if !symbols.contains(&symbol) {
+            symbols.push(symbol);
         }
     }
-    let directory = if wanted.is_empty() { None } else { Some(symbol_list(st).await.map_err(Refused::Failed)?) };
-    let (quotes, as_of, tally) = if st.shared_data.is_enabled() {
-        let shared = shared::quotes(&st.shared_data, &wanted, venue, directory.as_deref());
-        let tally = BoardTally { cached: shared.quotes.len() as u32, ..BoardTally::default() };
-        (shared.quotes, shared.as_of, tally)
-    } else {
-        let (quotes, tally) = polled_quotes(st, cache, &wanted, venue, directory.as_deref(), gate).await?;
-        let as_of = quotes.values().map(|quote| quote.t.0).max().map(UnixSeconds);
-        (quotes, as_of, tally)
-    };
+    let directory = if symbols.is_empty() { None } else { Some(symbol_list(st).await?) };
+    Ok(Wanted { document, catalog, symbols, directory })
+}
+
+fn board_of(params: &BoardParams, wanted: Wanted, quotes: HashMap<Symbol, Quote>, as_of: Option<UnixSeconds>) -> HeatmapBoard {
+    let Wanted { document, catalog, directory, .. } = wanted;
     let by_code: HashMap<SymbolCode, Quote> = quotes.into_iter().map(|(symbol, quote)| (SymbolCode(symbol.as_wire()), quote)).collect();
     let name_of = |code: &SymbolCode| {
         Symbol::parse(&code.0).ok().and_then(|symbol| directory.as_deref().and_then(|d| d.get(symbol))).map_or_else(|| code.0.clone(), |info| info.name.clone())
     };
     let themes = document.themes.iter().map(|theme| board_theme(theme, &by_code, name_of)).collect();
-    Ok((HeatmapBoard { revision: document.revision, order, as_of, source, catalog, themes: in_order(themes, order) }, tally))
+    HeatmapBoard { revision: document.revision, order: params.order, as_of, source: params.source, catalog, themes: in_order(themes, params.order) }
 }
 
-async fn polled_quotes(st: &AppState, cache: &QuoteCache, wanted: &[Symbol], venue: Venue, directory: Option<&crate::symbols::Directory>, gate: &dyn QuoteGate) -> Result<(HashMap<Symbol, Quote>, BoardTally), Refused> {
+async fn polled_quotes(st: &AppState, cache: &QuoteCache, wanted: &[Symbol], venue: Venue, directory: Option<&crate::symbols::Directory>) -> Result<HashMap<Symbol, Quote>, ApiFailure> {
     let now = st.clock.now();
     let started = cache.ticket();
     let (mut quotes, stale) = cache.fresh(wanted, venue, now);
-    let mut tally = BoardTally { cached: quotes.len() as u32, ..BoardTally::default() };
-    if !stale.is_empty() {
-        let _held = gate.begin().map_err(|_| Refused::Busy)?;
-        let mut fetched = Vec::new();
-        for group in stale.chunks(crate::kiwoom::api::StockQuotes::MAX) {
-            if !gate.grant_tr().await {
-                tally.over_budget += group.len() as u32;
-                continue;
-            }
-            fetched.extend(crate::quotes::quotes(st.source.as_ref(), &st.bars, directory, group, venue).await.map_err(|e| Refused::Failed(Lookup::Quotes.failure(e, now)))?);
-            tally.fetched += 1;
-        }
-        cache.keep(started, venue, now, &fetched);
-        quotes.extend(fetched.into_iter().filter_map(|quote| Symbol::parse(&quote.symbol.0).ok().map(|symbol| (symbol, quote))));
+    let mut fetched = Vec::new();
+    for group in stale.chunks(crate::kiwoom::api::StockQuotes::MAX) {
+        fetched.extend(crate::quotes::quotes(st.source.as_ref(), &st.bars, directory, group, venue).await.map_err(|e| Lookup::Quotes.failure(e, now))?);
     }
-    Ok((quotes, tally))
+    cache.keep(started, venue, now, &fetched);
+    quotes.extend(fetched.into_iter().filter_map(|quote| Symbol::parse(&quote.symbol.0).ok().map(|symbol| (symbol, quote))));
+    Ok(quotes)
 }
 
 pub const KIWOOM_THEME_ID_PREFIX: &str = "kiwoom-";

@@ -9,16 +9,14 @@ use axum::extract::{Query, State};
 use axum::response::Json;
 use axum::routing::get;
 use axum::{Extension, Router};
-use domain::{Feed, KstTime, Symbol, Venue};
-use futures::StreamExt;
+use domain::{Feed, Symbol, Venue};
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
 use crate::api::{KstDate, SymbolCode, UnixSeconds};
 use crate::http::{ApiFailure, AppState, Lookup, symbol_list, venue_param};
 use crate::quotes::effective_venue;
-pub use crate::heatmap_board::{Busy, Refused};
-pub use cache::{DayError, FRESH_SECS, FlowCache, Freshness, Origin, Rolling};
+pub use cache::{DayError, FRESH_SECS, FlowCache};
 pub use series::{BUCKET_MINUTES, Cell, CollectedCell, SymbolDay, Weighting, group_cells};
 
 pub const REFRESH_SECS: u64 = 60;
@@ -51,19 +49,6 @@ pub struct HeatmapFlowSeries {
     #[ts(optional = nullable)]
     pub as_of: Option<UnixSeconds>,
     pub limit: u32,
-}
-
-pub trait FlowGate: Freshness {
-    fn begin(&self) -> Result<Box<dyn Send>, Busy>;
-    fn fetch_concurrency(&self) -> usize;
-}
-
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub struct FlowTally {
-    pub cached: u32,
-    pub fetched: u32,
-    pub over_budget: u32,
-    pub rejected: u32,
 }
 
 pub fn routes(cache: Arc<FlowCache>) -> Router<Arc<AppState>> {
@@ -122,7 +107,6 @@ fn sorted_outcomes(symbols: &[Symbol], outcomes: Vec<Result<Arc<series::SymbolDa
                 sorted.days.push(day);
                 sorted.used.push(code(*symbol));
             }
-            Err(DayError::OutOfBudget) => sorted.missing.push(code(*symbol)),
             Err(DayError::NotCollected) => sorted.not_collected.push(code(*symbol)),
             Err(DayError::Bars(e)) => {
                 tracing::info!(symbol = %symbol.as_wire(), reason = %e, "히트맵 흐름에서 종목을 뺍니다");
@@ -174,50 +158,17 @@ async fn flow(State(st): State<Arc<AppState>>, Extension(cache): Extension<Arc<F
     Ok(Json(series_of(&st, sorted_outcomes(&symbols, outcomes), over_limit, Vec::new())?))
 }
 
-pub async fn flow_within(st: &AppState, cache: &FlowCache, q: &HashMap<String, String>, allowed: &HashSet<Symbol>, gate: &dyn FlowGate) -> Result<(HeatmapFlowSeries, FlowTally), Refused> {
-    let requested_symbols = parse_symbols(q).map_err(Refused::Failed)?;
-    let requested = venue_param(q).map_err(Refused::Failed)?.unwrap_or(Venue::Combined);
+pub async fn flow_within(st: &AppState, q: &HashMap<String, String>, allowed: &HashSet<Symbol>) -> Result<HeatmapFlowSeries, ApiFailure> {
+    if !st.shared_data.is_enabled() {
+        return Err(ApiFailure::new(crate::api::ApiErrorCode::NotPrepared, "공용 자료 폴더가 없어 흐름을 만들 수 없습니다"));
+    }
+    let requested_symbols = parse_symbols(q)?;
+    let requested = venue_param(q)?.unwrap_or(Venue::Combined);
     let (mut symbols, not_in_themes): (Vec<Symbol>, Vec<Symbol>) = requested_symbols.into_iter().partition(|symbol| allowed.contains(symbol));
     let over_limit = symbols.split_off(symbols.len().min(MAX_SYMBOLS));
-    let feeds = feeds_of(st, &symbols, requested).await.map_err(Refused::Failed)?;
-    if st.shared_data.is_enabled() {
-        let outcomes: Vec<_> = feeds.iter().map(|feed| shared::day(st, *feed)).collect();
-        let tally = FlowTally { cached: outcomes.iter().filter(|outcome| outcome.is_ok()).count() as u32, rejected: not_in_themes.len() as u32, ..FlowTally::default() };
-        let series = series_of(st, sorted_outcomes(&symbols, outcomes), over_limit, not_in_themes).map_err(Refused::Failed)?;
-        return Ok((series, tally));
-    }
-    let wanted_fetch = cache.stale_count(&feeds, st.clock.now(), gate) > 0;
-    let _held = if wanted_fetch { Some(gate.begin().map_err(|_| Refused::Busy)?) } else { None };
-    let fetched: Vec<_> = futures::stream::iter(feeds.iter().copied())
-        .map(|feed| cache.day_by(&st.bars, &st.clock, feed, gate))
-        .buffered(gate.fetch_concurrency().max(1))
-        .collect()
-        .await;
-    let mut tally = FlowTally { rejected: not_in_themes.len() as u32, ..FlowTally::default() };
-    let outcomes = fetched
-        .into_iter()
-        .map(|outcome| match outcome {
-            Ok((day, Origin::Cached)) => {
-                tally.cached += 1;
-                Ok(day)
-            }
-            Ok((day, Origin::Fetched)) => {
-                tally.fetched += 1;
-                Ok(day)
-            }
-            Err(DayError::OutOfBudget) => {
-                tally.over_budget += 1;
-                Err(DayError::OutOfBudget)
-            }
-            Err(e) => Err(e),
-        })
-        .collect();
-    let series = series_of(st, sorted_outcomes(&symbols, outcomes), over_limit, not_in_themes).map_err(Refused::Failed)?;
-    Ok((series, tally))
-}
-
-pub fn same_kst_minute(fetched_at: KstTime, now: KstTime) -> bool {
-    fetched_at.unix().div_euclid(60) == now.unix().div_euclid(60)
+    let feeds = feeds_of(st, &symbols, requested).await?;
+    let outcomes: Vec<_> = feeds.iter().map(|feed| shared::day(st, *feed)).collect();
+    series_of(st, sorted_outcomes(&symbols, outcomes), over_limit, not_in_themes)
 }
 
 #[cfg(test)]

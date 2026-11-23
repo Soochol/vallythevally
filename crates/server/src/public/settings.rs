@@ -37,6 +37,11 @@ pub const KEYS: &[&str] = &[
     "VALLY_PUBLIC_ACCOUNT_IN_FLIGHT",
     "VALLY_PUBLIC_ANON_IN_FLIGHT",
     "VALLY_PUBLIC_REQUEST_TIMEOUT_SECS",
+    "VALLY_PUBLIC_SCREENER_ACCOUNT_PER_MINUTE",
+    "VALLY_PUBLIC_SCREENER_STATUS_CACHE_SECS",
+];
+
+pub const REMOVED_KEYS: &[&str] = &[
     "VALLY_PUBLIC_KIWOOM_ACCOUNT_IN_FLIGHT",
     "VALLY_PUBLIC_MARKET_CONCURRENCY",
     "VALLY_PUBLIC_RANKINGS_CONCURRENCY",
@@ -50,10 +55,13 @@ pub const KEYS: &[&str] = &[
     "VALLY_PUBLIC_MARKET_CACHE_SECS",
     "VALLY_PUBLIC_RANKING_MAX_PAGES",
     "VALLY_PUBLIC_SCREENER_CONCURRENCY",
-    "VALLY_PUBLIC_SCREENER_ACCOUNT_PER_MINUTE",
     "VALLY_PUBLIC_SCREENER_TOTAL_PER_MINUTE",
-    "VALLY_PUBLIC_SCREENER_STATUS_CACHE_SECS",
 ];
+
+pub fn removed_keys_in(vars: &BTreeMap<String, String>) -> Option<String> {
+    let present: Vec<&str> = REMOVED_KEYS.iter().copied().filter(|key| vars.get(*key).is_some_and(|value| !value.is_empty())).collect();
+    (!present.is_empty()).then(|| format!("{}는 공개 리스너가 키움을 부르지 않게 되면서 걷은 한도라 무시합니다. 설정에서 지우세요", present.join(", ")))
+}
 
 const ACCOUNT_NAME_FOR_PUBLIC_NAME: &[(&str, &str)] = &[
     ("VALLY_ACCOUNT_PUBLIC_URL", "VALLY_PUBLIC_ORIGIN"),
@@ -149,21 +157,7 @@ pub struct Limits {
     pub account_in_flight: usize,
     pub anon_in_flight: usize,
     pub request_timeout: Duration,
-    pub kiwoom_account_in_flight: usize,
-    pub market_concurrency: usize,
-    pub rankings_concurrency: usize,
-    pub board_concurrency: usize,
-    pub flow_concurrency: usize,
-    pub flow_tr_per_minute: u32,
-    pub flow_account_tr_per_minute: u32,
-    pub flow_fetch_concurrency: usize,
-    pub board_tr_per_window: u32,
-    pub kiwoom_sends_per_window: usize,
-    pub market_cache: Duration,
-    pub ranking_max_pages: u8,
-    pub screener_concurrency: usize,
     pub screener_account_per_minute: u32,
-    pub screener_total_per_minute: u32,
     pub screener_status_cache: Duration,
 }
 
@@ -176,17 +170,17 @@ impl Reader<'_> {
         self.vars.get(name).map(String::as_str).filter(|v| !v.is_empty())
     }
 
-    fn number<T: std::str::FromStr + PartialOrd + Default + Copy>(&self, name: &str, default: T, zero_means_none: bool) -> Result<T, ConfigError> {
+    fn number<T: std::str::FromStr + PartialOrd + Default + Copy>(&self, name: &str, default: T) -> Result<T, ConfigError> {
         let Some(text) = self.raw(name) else { return Ok(default) };
         let value: T = text.trim().parse().map_err(|_| ConfigError(format!("{name}를 숫자로 읽을 수 없습니다: {text}")))?;
-        if value < T::default() || (value == T::default() && !zero_means_none) {
-            return Err(ConfigError(format!("{name}는 0보다 커야 합니다{}: {text}", if zero_means_none { "(0은 한도 없음)" } else { "" })));
+        if value <= T::default() {
+            return Err(ConfigError(format!("{name}는 0보다 커야 합니다: {text}")));
         }
         Ok(value)
     }
 
     fn positive_float(&self, name: &str, default: f64, at_least: f64) -> Result<f64, ConfigError> {
-        let value = self.number::<f64>(name, default, false)?;
+        let value = self.number::<f64>(name, default)?;
         if !value.is_finite() || value < at_least {
             return Err(ConfigError(format!("{name}는 {at_least} 이상의 유한한 수여야 합니다: {value}")));
         }
@@ -201,10 +195,6 @@ impl Limits {
         if light_cost > 1.0 {
             return Err(ConfigError(format!("VALLY_PUBLIC_LIGHT_COST는 1 이하여야 합니다: {light_cost}")));
         }
-        let ranking_max_pages = r.number::<u8>("VALLY_PUBLIC_RANKING_MAX_PAGES", 5, false)?;
-        if ranking_max_pages > 30 {
-            return Err(ConfigError(format!("VALLY_PUBLIC_RANKING_MAX_PAGES는 30 이하여야 합니다: {ranking_max_pages}")));
-        }
         Ok(Limits {
             account_rate: r.positive_float("VALLY_PUBLIC_ACCOUNT_RATE", 20.0, f64::MIN_POSITIVE)?,
             account_burst: r.positive_float("VALLY_PUBLIC_ACCOUNT_BURST", 100.0, 1.0)?,
@@ -213,27 +203,13 @@ impl Limits {
             total_burst: r.positive_float("VALLY_PUBLIC_TOTAL_BURST", 400.0, 1.0)?,
             anon_rate: r.positive_float("VALLY_PUBLIC_ANON_RATE", 5.0, f64::MIN_POSITIVE)?,
             anon_burst: r.positive_float("VALLY_PUBLIC_ANON_BURST", 20.0, 1.0)?,
-            login_per_minute: r.number("VALLY_PUBLIC_LOGIN_PER_MINUTE", 30, false)?,
-            max_in_flight: r.number("VALLY_PUBLIC_MAX_IN_FLIGHT", 64, false)?,
-            account_in_flight: r.number("VALLY_PUBLIC_ACCOUNT_IN_FLIGHT", 8, false)?,
-            anon_in_flight: r.number("VALLY_PUBLIC_ANON_IN_FLIGHT", 16, false)?,
-            request_timeout: Duration::from_secs(r.number("VALLY_PUBLIC_REQUEST_TIMEOUT_SECS", 60, false)?),
-            kiwoom_account_in_flight: r.number("VALLY_PUBLIC_KIWOOM_ACCOUNT_IN_FLIGHT", 1, false)?,
-            market_concurrency: r.number("VALLY_PUBLIC_MARKET_CONCURRENCY", 4, false)?,
-            rankings_concurrency: r.number("VALLY_PUBLIC_RANKINGS_CONCURRENCY", 2, false)?,
-            board_concurrency: r.number("VALLY_PUBLIC_BOARD_CONCURRENCY", 1, false)?,
-            flow_concurrency: r.number("VALLY_PUBLIC_FLOW_CONCURRENCY", 1, false)?,
-            flow_tr_per_minute: r.number("VALLY_PUBLIC_FLOW_TR_PER_MINUTE", 60, false)?,
-            flow_account_tr_per_minute: r.number("VALLY_PUBLIC_FLOW_ACCOUNT_TR_PER_MINUTE", 60, false)?,
-            flow_fetch_concurrency: r.number("VALLY_PUBLIC_FLOW_FETCH_CONCURRENCY", 5, false)?,
-            board_tr_per_window: r.number("VALLY_PUBLIC_BOARD_TR_PER_WINDOW", 45, false)?,
-            kiwoom_sends_per_window: r.number("VALLY_PUBLIC_KIWOOM_SENDS_PER_WINDOW", 3, false)?,
-            market_cache: Duration::from_secs(r.number("VALLY_PUBLIC_MARKET_CACHE_SECS", 15, false)?),
-            ranking_max_pages,
-            screener_concurrency: r.number("VALLY_PUBLIC_SCREENER_CONCURRENCY", 4, true)?,
-            screener_account_per_minute: r.number("VALLY_PUBLIC_SCREENER_ACCOUNT_PER_MINUTE", 2, false)?,
-            screener_total_per_minute: r.number("VALLY_PUBLIC_SCREENER_TOTAL_PER_MINUTE", 3, true)?,
-            screener_status_cache: Duration::from_secs(r.number("VALLY_PUBLIC_SCREENER_STATUS_CACHE_SECS", 2, false)?),
+            login_per_minute: r.number("VALLY_PUBLIC_LOGIN_PER_MINUTE", 30)?,
+            max_in_flight: r.number("VALLY_PUBLIC_MAX_IN_FLIGHT", 64)?,
+            account_in_flight: r.number("VALLY_PUBLIC_ACCOUNT_IN_FLIGHT", 8)?,
+            anon_in_flight: r.number("VALLY_PUBLIC_ANON_IN_FLIGHT", 16)?,
+            request_timeout: Duration::from_secs(r.number("VALLY_PUBLIC_REQUEST_TIMEOUT_SECS", 60)?),
+            screener_account_per_minute: r.number("VALLY_PUBLIC_SCREENER_ACCOUNT_PER_MINUTE", 2)?,
+            screener_status_cache: Duration::from_secs(r.number("VALLY_PUBLIC_SCREENER_STATUS_CACHE_SECS", 2)?),
         })
     }
 }
@@ -337,9 +313,7 @@ mod tests {
         let l = settings.limits;
         assert_eq!((l.account_rate, l.account_burst, l.light_cost, l.total_rate, l.total_burst, l.anon_rate, l.anon_burst), (20.0, 100.0, 0.1, 200.0, 400.0, 5.0, 20.0));
         assert_eq!((l.login_per_minute, l.max_in_flight, l.account_in_flight, l.anon_in_flight, l.request_timeout), (30, 64, 8, 16, Duration::from_secs(60)));
-        assert_eq!((l.kiwoom_account_in_flight, l.market_concurrency, l.rankings_concurrency, l.ranking_max_pages), (1, 4, 2, 5));
-        assert_eq!((l.screener_concurrency, l.screener_account_per_minute, l.screener_total_per_minute), (4, 2, 3));
-        assert_eq!((l.market_cache, l.screener_status_cache), (Duration::from_secs(15), Duration::from_secs(2)));
+        assert_eq!((l.screener_account_per_minute, l.screener_status_cache), (2, Duration::from_secs(2)));
         assert_eq!(settings.account.0.max_accounts, 100);
     }
 
@@ -363,7 +337,6 @@ mod tests {
             ("VALLY_PUBLIC_MAX_IN_FLIGHT", "0"),
             ("VALLY_PUBLIC_MAX_IN_FLIGHT", "-1"),
             ("VALLY_PUBLIC_REQUEST_TIMEOUT_SECS", "0"),
-            ("VALLY_PUBLIC_RANKING_MAX_PAGES", "31"),
             ("VALLY_PUBLIC_SCREENER_ACCOUNT_PER_MINUTE", "0"),
             ("VALLY_PUBLIC_ACCOUNT_LIMIT", "0"),
             ("VALLY_PUBLIC_TOTAL_RATE", "inf"),
@@ -382,9 +355,13 @@ mod tests {
     }
 
     #[test]
-    fn zero_means_no_limit_only_where_the_table_says() {
-        let l = start(&[("VALLY_PUBLIC_SCREENER_CONCURRENCY", "0"), ("VALLY_PUBLIC_SCREENER_TOTAL_PER_MINUTE", "0")]).unwrap().unwrap().limits;
-        assert_eq!((l.screener_concurrency, l.screener_total_per_minute), (0, 0));
+    fn removed_limits_are_named_in_one_warning_and_do_not_stop_the_start() {
+        let settings = start(&[("VALLY_PUBLIC_FLOW_TR_PER_MINUTE", "x"), ("VALLY_PUBLIC_RANKING_MAX_PAGES", "99"), ("VALLY_PUBLIC_SCREENER_CONCURRENCY", "0")]);
+        assert!(settings.unwrap().is_some());
+        let line = removed_keys_in(&vars(&[("VALLY_PUBLIC_FLOW_TR_PER_MINUTE", "60"), ("VALLY_PUBLIC_MARKET_CACHE_SECS", "15"), ("VALLY_PUBLIC_ACCOUNT_RATE", "20")])).unwrap();
+        assert!(line.contains("VALLY_PUBLIC_FLOW_TR_PER_MINUTE") && line.contains("VALLY_PUBLIC_MARKET_CACHE_SECS") && !line.contains("ACCOUNT_RATE"), "{line}");
+        assert!(!line.contains('\n'));
+        assert!(removed_keys_in(&vars(&[("VALLY_PUBLIC_ACCOUNT_RATE", "20")])).is_none());
     }
 
     #[test]
