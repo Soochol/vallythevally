@@ -171,11 +171,9 @@ function WatchRowFrame({ list, code, groupId, index, last, columns, template, va
           <SymbolName id={ids.name} name={name} code={code} />
         </span>
         {unknown ? (
-          columns.length > 0 && (
-            <span id={unknownId} className="text-right text-s text-text-3" style={{ gridColumn: `span ${columns.length}` }}>
-              찾을 수 없음
-            </span>
-          )
+          <span id={unknownId} className={columns.length > 0 ? "text-right text-s text-text-3" : "sr-only"} style={columns.length > 0 ? { gridColumn: `span ${columns.length}` } : undefined}>
+            찾을 수 없음
+          </span>
         ) : (
           <QuoteCells code={code} columns={columns} ids={ids} />
         )}

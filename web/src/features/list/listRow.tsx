@@ -26,12 +26,13 @@ interface ListHeadProps {
   template: CSSProperties;
   className?: string;
   title?: string;
+  indent?: number;
   children: ReactNode;
 }
 
-export function ListHead({ template, className = "", title, children }: ListHeadProps) {
+export function ListHead({ template, className = "", title, indent, children }: ListHeadProps) {
   return (
-    <div className={`grid h-7 flex-none items-center border-b border-line px-3 ${LIST_HEAD} ${className}`} style={{ ...template, columnGap: LIST_COLUMN_GAP }} aria-hidden="true" title={title}>
+    <div className={`grid h-7 flex-none items-center border-b border-line px-3 ${LIST_HEAD} ${className}`} style={{ ...template, columnGap: LIST_COLUMN_GAP, paddingLeft: indent }} aria-hidden="true" title={title}>
       {children}
     </div>
   );

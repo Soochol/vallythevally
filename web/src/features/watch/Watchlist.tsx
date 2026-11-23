@@ -40,6 +40,7 @@ import { useBeforeConnect } from "../status/beforeConnect";
 
 const COPY_KEY_IS_OPTION = /Mac|iPhone|iPad/.test(navigator.platform);
 const copyKeyHeld = (e: React.DragEvent) => (COPY_KEY_IS_OPTION ? e.altKey : e.ctrlKey);
+const GROUPED_INDENT = 20;
 const NO_COLUMNS: readonly WatchColumn[] = [];
 
 const NEW_GROUP_SLOT = "flex h-[34px] w-full items-center gap-1.5 rounded-m px-2.5 text-s text-text-2 hover:bg-[var(--hover)] hover:text-text disabled:cursor-not-allowed disabled:text-text-3 disabled:hover:bg-transparent disabled:hover:text-text-3";
@@ -424,7 +425,7 @@ function WatchList({ variant, sender, editing, naming, onNaming, columns }: Watc
 
   return (
     <>
-      <ListHead template={template} className="max-md:px-4" title="끌거나 Alt+↑↓로 순서를 바꿉니다">
+      <ListHead template={template} className="max-md:px-4" indent={grouped && variant === "desktop" ? GROUPED_INDENT : undefined} title="끌거나 Alt+↑↓로 순서를 바꿉니다">
         <span>종목</span>
         {columns.map((c) => (
           <span key={c} className="text-right">
