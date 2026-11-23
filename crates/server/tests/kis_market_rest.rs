@@ -827,3 +827,24 @@ async fn a_market_file_losing_almost_all_rows_is_refused() {
     assert!(!Arc::ptr_eq(&before, &symbols.updates().borrow().clone().unwrap()), "시장별로 절반 이상이면 받는다");
     assert!(rig.market.list_outage().is_none());
 }
+
+#[tokio::test(start_paused = true)]
+async fn a_kis_daily_series_that_reached_its_origin_asks_only_the_latest_window_on_each_refresh() {
+    let today = friday_evening().kst_date();
+    let rig = rig(daily_history_of(weekdays_back_from(today, 30)));
+    let symbols = ready_directory(&rig.market).await;
+    let market = Arc::try_unwrap(rig.market).ok().expect("한 곳에서만 쓴다");
+    let transport = rig.transport.clone();
+    let service = BarService::new(market, symbols, rig.clock.clone());
+    let key = samsung_key(Venue::Krx, Period::Day);
+    let mut requests = Vec::new();
+    let mut shown = Vec::new();
+    for _ in 0..3 {
+        let before = transport.sent_to(KisApiId::DailyChart).len();
+        let page = service.page(key, None, 250).await.unwrap();
+        requests.push(transport.sent_to(KisApiId::DailyChart).len() - before);
+        shown.push(page.bars.len());
+    }
+    assert!(shown[0] >= 29 && shown.iter().all(|&n| n == shown[0]), "부를 때마다 같은 봉을 받는다: {shown:?}");
+    assert_eq!(requests, [2, 1, 1], "끝에 닿은 뒤의 새로고침은 최신 창 하나만 받는다");
+}
