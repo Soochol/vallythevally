@@ -48,6 +48,24 @@ test("13종목이 34px 한 줄로 세로 스크롤 없이 보인다", async ({ s
   await page.screenshot({ path: path.resolve("../target/ux-screens/watchlist-390x844.png") });
 });
 
+test("Alt 없는 위아래 화살표는 줄 사이 초점만 옮기고 순서와 저장을 바꾸지 않는다", async ({ scenario, page }) => {
+  await seed(scenario);
+  await page.goto("/?symbol=005930");
+  await expect(row(page, "005935")).toContainText("삼성전자우");
+  const main = (code: string) => row(page, code).locator("[data-main]");
+  await main("005930").focus();
+  await page.keyboard.press("ArrowDown");
+  await expect(main("086520")).toBeFocused();
+  await page.keyboard.press("ArrowDown");
+  await expect(main("005935")).toBeFocused();
+  await page.keyboard.press("ArrowDown");
+  await expect(main("005935")).toBeFocused();
+  await page.keyboard.press("ArrowUp");
+  await expect(main("086520")).toBeFocused();
+  expect(await codes(page)).toEqual(["005930", "086520", "005935"]);
+  expect(scenario.documents.watchlists().revision).toBe(100);
+});
+
 test("긴 종목명도 숫자 열을 밀지 않고 보통 이름은 기본 폭에서 모두 보인다", async ({ scenario, page }) => {
   const symbols = ["005930", "0205H0", "0000D0", "005490", "207940"];
   await seed(scenario, symbols);
@@ -68,7 +86,7 @@ test("긴 종목명도 숫자 열을 밀지 않고 보통 이름은 기본 폭�
       return { left: box.left, right: box.right, client: el.clientWidth, scroll: el.scrollWidth,
         headings: [...panel.querySelectorAll("div[aria-hidden=true] > span")].slice(1).map((cell) => { const box = cell.getBoundingClientRect(); return { left: box.left, right: box.right }; }),
         rows: [...el.querySelectorAll<HTMLButtonElement>("[data-main]")].map((button) => ({
-          cells: [...button.children].slice(1).map((cell) => { const rect = cell.getBoundingClientRect(); return { left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom }; }),
+          cells: [...button.querySelectorAll("[data-cell]")].map((cell) => { const rect = cell.getBoundingClientRect(); return { left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom }; }),
         })),
       };
     });
