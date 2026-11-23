@@ -19,10 +19,10 @@ export function RatioBar({ buy, sell, sellFirst, label }: { buy: number; sell: n
   return <div className="mw-ratio" role="img" aria-label={label} title={label}>{sellFirst ? [sellPart, buyPart] : [buyPart, sellPart]}</div>;
 }
 
-export function TotalFigure({ testId, tone, value, afterHours, description }: { testId: string; tone: "up" | "down"; value: number | null; afterHours: boolean; description: string | null }) {
+export function TotalFigure({ testId, tone, value, afterHours, description, hideAfterHoursTag }: { testId: string; tone: "up" | "down"; value: number | null; afterHours: boolean; description: string | null; hideAfterHoursTag?: boolean }) {
   return (
     <b data-testid={testId} className={tone === "up" ? "mw-up" : "mw-down"} data-source={afterHours ? "after-hours" : "regular"} title={description ?? undefined}>
-      {afterHours && <small className="mw-total-tag">시간외</small>}
+      {afterHours && !hideAfterHoursTag && <small className="mw-total-tag">시간외</small>}
       {value === null ? "-" : formatQuantity(value)}
     </b>
   );
