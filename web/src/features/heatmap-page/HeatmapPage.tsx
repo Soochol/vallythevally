@@ -128,7 +128,7 @@ export function HeatmapPage() {
     <KiwoomThemeMap themes={sections.map((section) => section.theme)} range={settings.range} hrefOf={hrefOf} />
   );
   return (
-    <PageFrame title="히트맵" freshness={<>{freshness}{boardData && <DataAgeNote recordedAt={boardData.asOf} cadence="heatmapBoard" />}</>}>
+    <PageFrame title="히트맵" fresh={{ receivedAt: latest }} freshness={<>{freshness}{boardData && <DataAgeNote recordedAt={boardData.asOf} cadence="heatmapBoard" />}</>}>
       <SourceTabs settings={settings} onSelect={(source) => source !== settings.source && navigate({ ...settings, source, theme: null })} />
       <HeatmapToolbar settings={settings} onChange={change} tradedKnown={!settled || tradedKnown} onEdit={() => setEditor("browse")} />
       {kiwoom ? (

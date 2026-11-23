@@ -1,7 +1,7 @@
 .page-rail {
   display: flex; flex: none; flex-direction: column; align-items: center; gap: var(--size-2);
   width: var(--size-54); margin: var(--island-gap) var(--island-gap) var(--island-gap) 0; padding: var(--size-8) 0;
-  border-radius: var(--r-m); overflow-y: auto; scrollbar-width: none;
+  border-radius: var(--r-l); overflow-y: auto; scrollbar-width: none;
 }
 .page-rail-spacer { flex: 1; }
 .page-rail-item {
@@ -12,11 +12,8 @@
 .page-rail-item:hover { background: var(--hover); color: var(--text); }
 .page-rail-item[aria-current="page"] { background: var(--accent-soft); color: var(--accent); }
 
-.page-topbar-path {
-  padding: var(--size-4) var(--size-10); border-radius: var(--r-pill); background: var(--raised);
-  color: var(--text-2); font-size: var(--fs-s);
-}
-.page-topbar-spacer { flex: 1; }
+.page-topbar-slot { display: contents; }
+.page-topbar .page-find kbd { flex: none; }
 
-.page-stage { position: absolute; inset: 0; margin: var(--island-gap); overflow-x: hidden; overflow-y: auto; border-radius: var(--r-m); }
+.page-stage { position: absolute; inset: 0; margin: var(--island-gap); overflow-x: hidden; overflow-y: auto; border-radius: var(--r-l); }
 @media (width < 48rem) { .page-stage { position: static; grid-area: grid; margin: 0; padding: var(--size-8); } }

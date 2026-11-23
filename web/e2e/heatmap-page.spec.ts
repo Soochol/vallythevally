@@ -25,7 +25,7 @@ test("테마마다 타일 지도가 보이고 칸 색이 등락률 부호를 따
   await expect(tile(page, "005930")).toHaveAccessibleName("삼성전자 +2.00%");
   await expect(tile(page, "086520")).toHaveAccessibleName("에코프로 −4.00%");
   await expect(legend(page)).toHaveAccessibleName("색 범위 −8%에서 +8%");
-  await expect(main(page).getByRole("status", { name: "자료 신선도" })).toContainText("시세");
+  await expect(page.getByRole("status", { name: "자료 신선도" })).toContainText("시세");
   await expect(legend(page)).toContainText("칸 색 = 등락률");
   await expect(legend(page)).toContainText("시세 없음");
   for (const label of ["테마 순서", "색 범위", "칸 크기", "칸 정렬"]) await expect(main(page).locator(".hm-control-label", { hasText: label })).toBeVisible();

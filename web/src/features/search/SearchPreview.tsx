@@ -39,6 +39,6 @@ export function SearchPreview({ info, quote, purpose }: { info: SymbolInfo; quot
     <div className="rounded-m border border-line bg-chart-bg p-2"><p className="mb-2 text-xs text-text-3">60일 추세</p>
       {publicMode ? <EmptyState title="차트 연결은 준비 중입니다" /> : trend.isPending ? <Skeleton label="추세 불러오는 중" /> : trend.isError ? <ErrorState message="추세를 받지 못했습니다" retry={() => void trend.refetch()} /> : values.length === 0 ? <EmptyState title="일봉이 없습니다">다른 종목을 골라 보세요.</EmptyState> : <svg role="img" aria-label={`${info.name} 60일 추세`} viewBox="0 0 260 100" className={`w-full ${values.at(-1)! >= values[0]! ? "text-up" : "text-down"}`}><polyline points={points} fill="none" stroke="currentColor" strokeWidth="1.5" /></svg>}
     </div>
-    <div className="space-y-2 border-t border-line pt-4 text-xs text-text-2"><p><kbd>↵</kbd> {purpose === "watch" ? "넣기" : "이 칸에 열기"}</p><p><kbd>☆·Ctrl+↵</kbd> 관심종목 넣기·빼기</p><p><kbd>Shift+↵</kbd> 비교에 추가</p></div>
+    <div className="space-y-2 border-t border-line pt-4 text-xs text-text-2"><p><kbd>↵</kbd> {purpose === "watch" ? "넣기" : purpose === "page" ? "보낼 연동 색 차트에 열기" : "이 칸에 열기"}</p><p><kbd>☆·Ctrl+↵</kbd> 관심종목 넣기·빼기</p><p><kbd>Shift+↵</kbd> 비교에 추가</p></div>
   </aside>;
 }

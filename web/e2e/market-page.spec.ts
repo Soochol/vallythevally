@@ -13,7 +13,7 @@ test("시장을 코스닥으로 바꾸면 모든 칸이 코스닥 요청으로 �
   await expect(card(page, "지수·폭").getByText("코스피", { exact: true })).toBeVisible();
   for (const route of ROUTES) expect(marketOverviewCalls(scenario, route, "kosdaq")).toBe(0);
 
-  await main(page).getByRole("group", { name: "시장" }).getByRole("button", { name: "코스닥" }).click();
+  await page.getByRole("group", { name: "시장" }).getByRole("button", { name: "코스닥" }).click();
   await expect(page).toHaveURL(/market=kosdaq/);
   await expect(card(page, "지수·폭").getByText("코스닥", { exact: true })).toBeVisible();
   await expect(card(page, "업종 지도").getByRole("button", { name: new RegExp(`^${SECTOR_NAMES.kosdaq[0]}`) })).toBeVisible();
@@ -22,7 +22,7 @@ test("시장을 코스닥으로 바꾸면 모든 칸이 코스닥 요청으로 �
 
   await page.reload();
   await expect(page).toHaveURL(/market=kosdaq/);
-  await expect(main(page).getByRole("group", { name: "시장" }).getByRole("button", { name: "코스닥" })).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByRole("group", { name: "시장" }).getByRole("button", { name: "코스닥" })).toHaveAttribute("aria-pressed", "true");
 });
 
 test("지수 종목 수가 없으면 '-'로 보이고 막대는 그리지 않는다", async ({ page, scenario }) => {
@@ -39,7 +39,7 @@ test("지수 종목 수가 없으면 '-'로 보이고 막대는 그리지 않는
 
 test("기간을 바꾸면 기간 인자가 달린 칸만 그 기간으로 다시 받는다", async ({ page, scenario }) => {
   await page.goto("/market");
-  await main(page).getByRole("group", { name: "기간" }).getByRole("button", { name: "60일" }).click();
+  await page.getByRole("group", { name: "기간" }).getByRole("button", { name: "60일" }).click();
   await expect(page).toHaveURL(/period=60/);
   await expect.poll(() => scenario.requests.some((r) => /flow\?market=kospi&period=60/.test(r.url()))).toBe(true);
   await expect.poll(() => scenario.requests.some((r) => /turnover\?market=kospi&period=60/.test(r.url()))).toBe(true);

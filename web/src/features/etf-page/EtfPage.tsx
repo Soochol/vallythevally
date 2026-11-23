@@ -57,7 +57,7 @@ export function EtfPage() {
   };
   const standalone = code === null && (tab === "overlap" || tab === "reverse");
   return (
-    <PageFrame title="ETF" freshness={<Freshness status={(selected ?? list?.[0])?.status ?? null} />}>
+    <PageFrame title="ETF" fresh={{ failed: (selected ?? list?.[0])?.status.refreshFailed === true }} freshness={<Freshness status={(selected ?? list?.[0])?.status ?? null} />}>
       {funds.isPending && <div className="etf-empty" role="status">ETF 목록을 불러오는 중입니다</div>}
       {funds.isError && (
         <div className="etf-empty" role="alert">

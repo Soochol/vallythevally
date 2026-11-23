@@ -77,6 +77,7 @@ export function MarketPage() {
     query.set("period", next.period ?? period);
     setParams(query, { replace: true });
   };
+  const card = useMarketIndex(market, { enabled: connected }).data;
   const controls = (
     <div className="mk-controls">
       <Volatility market={market} enabled={connected} />
@@ -85,7 +86,7 @@ export function MarketPage() {
     </div>
   );
   return (
-    <PageFrame title="시장 종합" freshness={connected ? <Freshness market={market} enabled={connected} /> : null} actions={controls}>
+    <PageFrame title="시장 종합" freshness={connected ? <Freshness market={market} enabled={connected} /> : null} fresh={connected ? { receivedAt: card?.context.receivedAt ?? null, live: card === undefined ? undefined : card.context.phase !== "closed" } : undefined} actions={controls}>
       {!connected ? (
         <EmptyState title="키움 연결 전입니다">{link?.message && <p>{link.message}</p>}</EmptyState>
       ) : (
