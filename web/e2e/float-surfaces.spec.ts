@@ -17,7 +17,7 @@ test("명령 입력창은 차트를 어둡게 하거나 흐리게 하지 않고 
   await page.keyboard.type("이평 20");
   await expect(cell(page).getByText("이동평균 단순 20", { exact: false }).first()).toBeVisible();
   expect(await styleOf(page.locator("[data-command-frame]"))).toMatchObject({ background: "rgba(0, 0, 0, 0)", blur: "none" });
-  expect(await styleOf(dialog)).toMatchObject({ background: "rgba(27, 33, 27, 0.74)", blur: "blur(22px) saturate(1.6)", radius: "16px" });
+  expect(await styleOf(dialog)).toMatchObject({ background: "rgba(27, 33, 27, 0.74)", blur: "blur(22px) saturate(1.6)", radius: "10px" });
   await page.screenshot({ path: info.outputPath("1440-indicator-preview.png") });
   await page.keyboard.press("Escape");
 
@@ -39,7 +39,7 @@ test("메뉴와 팝오버는 같은 유리 표면을 쓰고 재무자료 상태�
   await minuteButton.click();
   const minutes = page.locator(".minute-menu");
   await expect(minutes).toBeVisible();
-  expect(await styleOf(minutes)).toMatchObject({ background: "rgba(27, 33, 27, 0.74)", blur: "blur(22px) saturate(1.6)", radius: "16px" });
+  expect(await styleOf(minutes)).toMatchObject({ background: "rgba(27, 33, 27, 0.74)", blur: "blur(22px) saturate(1.6)", radius: "10px" });
   await page.screenshot({ path: info.outputPath("1440-minute-menu.png") });
   await page.keyboard.press("Escape");
 

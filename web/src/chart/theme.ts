@@ -9,7 +9,9 @@ export interface ThemeTokens {
   text3: string;
   line: string;
   grid: string;
+  gridH: string;
   raised: string;
+  onData: string;
   crosshair: string;
   up: string;
   down: string;
@@ -33,7 +35,9 @@ export function readThemeTokens(root: HTMLElement = document.documentElement): T
     text3: v("--text-3"),
     line: v("--line"),
     grid: v("--grid"),
+    gridH: v("--grid-h"),
     raised: v("--raised"),
+    onData: v("--on-data"),
     crosshair: v("--crosshair"),
     up: v("--up"),
     down: v("--down"),

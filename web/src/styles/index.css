@@ -20,6 +20,8 @@
   --color-chart-bg: var(--chart-bg);
   --color-surface: var(--surface);
   --color-raised: var(--raised);
+  --color-overlay: var(--overlay);
+  --color-hover: var(--hover);
   --color-line: var(--line);
   --color-text: var(--text);
   --color-text-2: var(--text-2);
@@ -33,13 +35,21 @@
   --color-danger: var(--danger);
   --color-warning: var(--warning);
   --color-success: var(--success);
+  --color-on-data: var(--on-data);
+  --color-danger-soft: var(--danger-soft);
+  --color-warning-soft: var(--warning-soft);
+  --color-success-soft: var(--success-soft);
+  --color-up-soft: var(--up-soft);
+  --color-down-soft: var(--down-soft);
   --color-transparent: transparent;
 
   --text-*: initial;
   --text-xs: var(--fs-xs);
   --text-s: var(--fs-s);
+  --text-b: var(--fs-b);
   --text-m: var(--fs-m);
   --text-l: var(--fs-l);
+  --text-h: var(--fs-h);
   --text-xl: var(--fs-xl);
   --text-display: var(--fs-display);
   --text-title: var(--fs-title);
@@ -52,7 +62,10 @@
   --radius-xl: var(--r-xl);
 
   --font-sans: var(--font-sans);
+  --font-mono: var(--font-mono);
   --shadow-dialog: var(--shadow);
+  --shadow-small: var(--shadow-s);
+  --ease-ui: var(--ease);
 }
 
 @layer base {
