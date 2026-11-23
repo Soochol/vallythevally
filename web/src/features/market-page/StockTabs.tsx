@@ -4,11 +4,13 @@ import type { Market } from "../../api/generated/Market";
 import type { MarketOverviewStreaksCard } from "../../api/generated/MarketOverviewStreaksCard";
 import type { MarketOverviewStreak } from "../../api/generated/MarketOverviewStreak";
 import type { Ranking } from "../../api/generated/Ranking";
+import type { RankingPage } from "../../api/generated/RankingPage";
 import type { RankingRow } from "../../api/generated/RankingRow";
 import { useMarketRanking, useMarketStreaks } from "../../api/marketOverview";
 import { formatPrice } from "../../lib/format";
 import { useSendSymbol } from "../pages/sendSymbol";
-import { CardShell, Loaded, PartView } from "./CardPart";
+import { useOverviewOn } from "../status/marketFeed";
+import { CardShell, FeedUnavailable, Loaded, PartView } from "./CardPart";
 import { formatCount, signedEok, signedRate, toneOf } from "./marketFormat";
 
 export const STOCK_TABS = [
@@ -34,8 +36,7 @@ function SymbolButton({ code, name }: { code: string; name: string }) {
 
 const eokOfWon = (won: number): string => signedEok(Math.round(won / 1e8));
 
-function RankingTable({ market, tab, enabled }: { market: Market; tab: "value" | "gainers" | "losers"; enabled: boolean }) {
-  const query = useMarketRanking(rankingOf(tab, market), { enabled });
+function RankingTable({ query, tab }: { query: UseQueryResult<RankingPage>; tab: "value" | "gainers" | "losers" }) {
   return (
     <Loaded query={query} label="종목 순위">
       {(page) => (
@@ -103,9 +104,12 @@ function StreakTable({ query, subject }: { query: UseQueryResult<MarketOverviewS
 
 export function StockTabs({ market, enabled }: { market: Market; enabled: boolean }) {
   const [tab, setTab] = useState<StockTab>("value");
-  const streaks = useMarketStreaks(market, { enabled });
+  const streaksOn = useOverviewOn("streaks");
+  const streakTab = tab === "foreign" || tab === "institution";
+  const streaks = useMarketStreaks(market, { enabled: enabled && streaksOn });
+  const ranking = useMarketRanking(rankingOf(streakTab ? "value" : tab, market), { enabled: enabled && !streakTab });
   return (
-    <CardShell title="종목">
+    <CardShell title="종목" source={streakTab ? streaks.data?.context.source : ranking.data?.source}>
       <div role="tablist" aria-label="종목 보기" className="mk-tabs">
         {STOCK_TABS.map((entry) => (
           <button key={entry.id} type="button" role="tab" id={`mk-tab-${entry.id}`} aria-selected={tab === entry.id} aria-controls="mk-stock-panel" onClick={() => setTab(entry.id)}>
@@ -114,7 +118,7 @@ export function StockTabs({ market, enabled }: { market: Market; enabled: boolea
         ))}
       </div>
       <div role="tabpanel" id="mk-stock-panel" aria-labelledby={`mk-tab-${tab}`} className="mk-stock-panel">
-        {tab === "foreign" || tab === "institution" ? <StreakTable query={streaks} subject={tab} /> : <RankingTable market={market} tab={tab} enabled={enabled} />}
+        {tab === "foreign" || tab === "institution" ? (streaksOn ? <StreakTable query={streaks} subject={tab} /> : <FeedUnavailable />) : <RankingTable query={ranking} tab={tab} />}
       </div>
     </CardShell>
   );

@@ -1,7 +1,8 @@
 import type { Market } from "../../api/generated/Market";
 import type { MarketOverviewPeriod } from "../../api/generated/MarketOverviewPeriod";
 import { useMarketFlow, useMarketIntraday } from "../../api/marketOverview";
-import { CardError, CardShell, Loaded } from "./CardPart";
+import { useOverviewOn } from "../status/marketFeed";
+import { CardError, CardShell, FeedUnavailable, Loaded } from "./CardPart";
 import { cumulativeLines, linePath, SUBJECT_LABEL, SUBJECTS, zeroY, type Subject } from "./cumulativeLines";
 import { investorTotals } from "./investorTotals";
 import { signedEok, toneOf } from "./marketFormat";
@@ -29,7 +30,9 @@ function SubjectBars({ totals }: { totals: Record<Subject, number | null> }) {
 }
 
 function IntradayLines({ market, enabled }: { market: Market; enabled: boolean }) {
-  const query = useMarketIntraday(market, { enabled });
+  const on = useOverviewOn("intradayFlow");
+  const query = useMarketIntraday(market, { enabled: enabled && on });
+  if (!on) return <FeedUnavailable />;
   return (
     <Loaded query={query} label="장중 누적선">
       {(flow) => {
@@ -56,12 +59,13 @@ function IntradayLines({ market, enabled }: { market: Market; enabled: boolean }
 }
 
 export function FlowCard({ market, period, enabled }: { market: Market; period: MarketOverviewPeriod; enabled: boolean }) {
-  const query = useMarketFlow(market, period, { enabled });
+  const on = useOverviewOn("flow");
+  const query = useMarketFlow(market, period, { enabled: enabled && on });
   return (
-    <CardShell title="누가 사고 파나" note={`최근 ${period}거래일 순매수 · 오늘 누적선`}>
+    <CardShell title="누가 사고 파나" note={`최근 ${period}거래일 순매수 · 오늘 누적선`} source={query.data?.context.source}>
       <div className="mk-flow">
         <div className="mk-flow-bars">
-          <Loaded query={query} label="주체별 수급">
+          {!on ? <FeedUnavailable /> : <Loaded query={query} label="주체별 수급">
             {(card) => {
               const investors = card.investors.status === "ok" ? card.investors.value : null;
               const program = card.program.status === "ok" ? card.program.value : null;
@@ -73,7 +77,7 @@ export function FlowCard({ market, period, enabled }: { market: Market; period: 
                 </>
               );
             }}
-          </Loaded>
+          </Loaded>}
         </div>
         <IntradayLines market={market} enabled={enabled} />
       </div>

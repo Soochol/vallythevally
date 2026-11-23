@@ -1,14 +1,16 @@
 import type { Market } from "../../api/generated/Market";
 import type { MarketOverviewPeriod } from "../../api/generated/MarketOverviewPeriod";
 import { useMarketTurnover } from "../../api/marketOverview";
-import { CardShell, Loaded, PartView } from "./CardPart";
+import { useOverviewOn } from "../status/marketFeed";
+import { CardShell, FeedUnavailable, Loaded, PartView } from "./CardPart";
 import { formatEok } from "./marketFormat";
 
 export function TurnoverCard({ market, period, enabled }: { market: Market; period: MarketOverviewPeriod; enabled: boolean }) {
-  const query = useMarketTurnover(market, period, { enabled });
+  const on = useOverviewOn("turnover");
+  const query = useMarketTurnover(market, period, { enabled: enabled && on });
   return (
-    <CardShell title="거래대금 추이" note={`최근 ${period}거래일 · 업종 일봉`}>
-      <Loaded query={query} label="거래대금 추이">
+    <CardShell title="거래대금 추이" note={`최근 ${period}거래일 · 업종 일봉`} source={query.data?.context.source}>
+      {!on ? <FeedUnavailable /> : <Loaded query={query} label="거래대금 추이">
         {(card) => (
           <PartView part={card.days}>
             {(days) => {
@@ -25,7 +27,7 @@ export function TurnoverCard({ market, period, enabled }: { market: Market; peri
             }}
           </PartView>
         )}
-      </Loaded>
+      </Loaded>}
     </CardShell>
   );
 }

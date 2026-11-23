@@ -38,3 +38,5 @@
 .rk-foot { display:flex; flex:none; flex-wrap:wrap; align-items:center; gap:var(--s4); padding:var(--s3) var(--s4); border-top:1px solid var(--line); font-size:var(--fs-s); color:var(--text-2); }
 .rk-source, .rk-hidden { color:var(--text-3); font-size:var(--fs-xs); }
 .rk-foot > :last-child { margin-left:auto; }
+.rk-mark { padding:var(--size-2) var(--s3); border:1px solid var(--line); border-radius:var(--r-pill); font-size:var(--fs-xs); color:var(--text-3); }
+.rk-field option:disabled { color:var(--text-3); }

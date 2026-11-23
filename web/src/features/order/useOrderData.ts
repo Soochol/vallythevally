@@ -4,7 +4,7 @@ import type { TradingBalance } from "../../api/generated/TradingBalance";
 import type { TradingExecution } from "../../api/generated/TradingExecution";
 import type { TradingOpenOrder } from "../../api/generated/TradingOpenOrder";
 import { marketSocket } from "../../stores/realtime";
-import { useKiwoomLinkStore } from "../../stores/kiwoomLink";
+import { useKiwoomOnlyLink } from "../../stores/kiwoomLink";
 import type { TradingOrderable } from "../../api/generated/TradingOrderable";
 import type { OrderAccountChoice } from "./orderAccount";
 import { buyingPowerOf, type Capacity, groupWithPending, type PriceGroup } from "./orderRules";
@@ -24,7 +24,7 @@ export interface OrderAccess {
 }
 
 export function useOrderAccess(choice: OrderAccountChoice): OrderAccess {
-  const link = useKiwoomLinkStore((s) => s.status);
+  const link = useKiwoomOnlyLink();
   if (link !== null && link.state !== "connected") return { open: false, reason: "키움에 연결되지 않아 주문할 수 없습니다" };
   if (!choice.current) return { open: false, reason: "주문 사용 상태를 확인하는 중입니다" };
   if (choice.current.state !== "on") return { open: false, reason: choice.current.message || "주문 사용이 꺼져 있습니다" };

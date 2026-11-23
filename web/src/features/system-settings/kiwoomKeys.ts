@@ -1,18 +1,20 @@
 import type { Broker } from "../../api/generated/Broker";
+import type { MarketSourceStatus } from "../../api/generated/MarketSourceStatus";
 import type { KiwoomKey } from "../../api/generated/KiwoomKey";
 import type { KiwoomKeyList } from "../../api/generated/KiwoomKeyList";
 import type { KiwoomLinkStatus } from "../../api/generated/KiwoomLinkStatus";
 import type { ConnectionTone } from "../status/connectionView";
 import { BROKERS, brokerOrder } from "./brokers";
-import { formatRemaining } from "./kiwoomPanel";
+import { formatRemaining, inUseElsewhere } from "./kiwoomPanel";
 import { linkDotTone } from "./linkDot";
 import { REMOVE_ORDERS_NOTE } from "./orderUse";
 
 export const KEY_LIST_REFRESH_MS = 5000;
 
-export function shortReason(link: KiwoomLinkStatus, now: number): string | null {
+export function shortReason(link: KiwoomLinkStatus, now: number, broker: Broker = "kiwoom"): string | null {
   if (link.state === "connecting" && link.step === "issueInterval") return waiting("발급 간격 대기", link, now);
   if (link.state !== "failed") return null;
+  if (inUseElsewhere(link, broker)) return "다른 프로그램이 사용 중";
   switch (link.problem) {
     case "authBlocked8050":
       return "8050 인증 차단";
@@ -23,7 +25,7 @@ export function shortReason(link: KiwoomLinkStatus, now: number): string | null 
     case "authUncertain":
       return waiting("인증 확인 대기", link, now);
     case "network":
-      return waiting("키움에 닿지 못함", link, now);
+      return waiting(`${BROKERS[broker].shortName}에 닿지 못함`, link, now);
     case "tokenFileUnusable":
       return "토큰 파일 사용 불가";
     case "keyFileUnusable":
@@ -44,6 +46,8 @@ function waiting(label: string, link: KiwoomLinkStatus, now: number): string {
   return remaining > 0 ? `${label} ${formatRemaining(remaining)}` : label;
 }
 
+export const brokersShown = (list: KiwoomKeyList): Broker[] => brokerOrder().filter((broker) => broker === "kiwoom" || brokerKeys(list, broker).length > 0);
+
 export const hasKeyError = (key: KiwoomKey): boolean => key.link.state === "failed";
 
 export function menuDotTone(market: KiwoomLinkStatus | null, keys: readonly KiwoomKey[] | undefined): ConnectionTone {
@@ -58,7 +62,11 @@ export function nextMarketKey(keys: readonly KiwoomKey[], removing: KiwoomKey): 
   return keys.find((key) => key.keyId !== removing.keyId);
 }
 
-export const marketChangeText = (alias: string) => `시세를 ‘${alias}’에서 받습니다. 열린 차트·호가·체결을 새로 받습니다. 주문 계좌는 바뀌지 않습니다`;
+export function marketChangeText(alias: string, from: Broker | null = null, to: Broker | null = null): string {
+  const base = `시세를 ‘${alias}’에서 받습니다. 열린 차트·호가·체결을 새로 받습니다. 주문 계좌는 바뀌지 않습니다`;
+  const note = from !== null && to !== null && from !== to ? BROKERS[to].sourceNote : null;
+  return note === null ? base : `${base}. ${note}`;
+}
 
 export function removeText(keys: readonly KiwoomKey[], removing: KiwoomKey, ordersInUse = false): string {
   const base = removeBaseText(keys, removing);
@@ -68,13 +76,14 @@ export function removeText(keys: readonly KiwoomKey[], removing: KiwoomKey, orde
 function removeBaseText(keys: readonly KiwoomKey[], removing: KiwoomKey): string {
   if (!removing.market) return `‘${removing.alias}’ 키를 지웁니다`;
   const next = nextMarketKey(keys, removing);
+  const switched = next && next.broker !== removing.broker ? BROKERS[next.broker].sourceNote : null;
   return next
-    ? `‘${removing.alias}’는 시세 키입니다. 지우면 시세를 ‘${next.alias}’에서 받습니다`
+    ? `‘${removing.alias}’는 시세 키입니다. 지우면 시세를 ‘${next.alias}’에서 받습니다${switched ? `. ${switched}` : ""}`
     : `‘${removing.alias}’는 시세 키입니다. 지우면 키가 없어 시세를 받지 못합니다`;
 }
 
 export function pickerLabel(key: KiwoomKey, now: number): string {
-  const reason = shortReason(key.link, now);
+  const reason = shortReason(key.link, now, key.broker);
   const tail = key.appKeyTail ? ` · ••••${key.appKeyTail}` : "";
   return `${key.alias}${tail}${reason ? ` · ${reason}` : ` · ${linkStateText(key.link)}`}`;
 }
@@ -164,4 +173,12 @@ export function editRequest(entry: KeyEntry, current: KiwoomKey): EditRequest | 
   const credentials = filled(entry.appKey) ? { appKey: entry.appKey.trim(), appSecret: entry.appSecret.trim() } : null;
   const renamed = alias !== current.alias ? alias : null;
   return renamed === null && credentials === null ? null : { alias: renamed, credentials };
+}
+
+export function feedLine(source: MarketSourceStatus | null, keys: readonly KiwoomKey[]): string | null {
+  if (source === null) return null;
+  const feed = source.feedBroker?.broker;
+  if (feed === undefined) return "순위·시장 개요·투자자: 받을 연결이 없습니다";
+  const alias = keys.find((key) => key.broker === feed && key.link.state === "connected")?.alias;
+  return `순위·시장 개요·투자자: ${BROKERS[feed].shortName}${alias ? ` · ‘${alias}’` : ""}`;
 }

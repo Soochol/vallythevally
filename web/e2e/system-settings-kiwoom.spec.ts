@@ -15,6 +15,7 @@ import type { PublicIpCheck } from "../src/api/generated/PublicIpCheck";
 import type { RegisteredIpInput } from "../src/api/generated/RegisteredIpInput";
 import { cell, expect, fixedWait, test, type Scenario, pollSaved } from "./harness";
 import { CONNECTED_KIWOOM, keyEntry, keyListOf } from "./fixtures/scenario";
+import { KIS_MARKET_SOURCE, KIS_SOURCE_KIWOOM_FEED, KIWOOM_FEED } from "./fixtures/market-source";
 
 const SCREENS = path.resolve("../target/ux-screens");
 const FAKE_APP_KEY = "FAKEAPPKEYabcdefgh7Z2D";
@@ -40,6 +41,7 @@ const passTime = async (page: Page, ms: number) => {
 const KEYS = "/api/system/kiwoom/keys";
 const accounts = (page: Page) => panel(page).getByRole("region", { name: "계좌 목록" });
 const marketCard = (page: Page) => panel(page).getByRole("region", { name: "시세 공급원" });
+const chooseBroker = (page: Page, name: "키움증권" | "한국투자증권") => accounts(page).getByRole("group", { name: "증권사 고르기" }).getByRole("button", { name: new RegExp(`^${name}`) }).click();
 const keyRows = (page: Page) => accounts(page).getByRole("listitem");
 const expandKey = (page: Page, alias: string) => accounts(page).getByRole("button", { name: alias, exact: false }).first().click();
 const singleKey = (link: KiwoomLinkStatus) => keyListOf(keyEntry("k1", "키 1", link, { market: true }));
@@ -90,6 +92,7 @@ test.describe("1440×900", () => {
     await openKiwoom(page);
     await expect(panel(page)).toContainText("키 없음");
     await expect(panel(page).getByRole("button", { name: "키움에 연결" })).toBeDisabled();
+    await chooseBroker(page, "키움증권");
     await expect(panel(page)).toContainText("저장하면 바로 키움에 연결합니다. 포털에 지금 공인 IP를 먼저 등록하세요");
     await expect(panel(page)).toContainText("키움 REST · api.kiwoom.com (고정)");
     await expect(page.getByLabel("앱키", { exact: true })).toHaveAttribute("type", "password");
@@ -190,6 +193,7 @@ test.describe("1440×900", () => {
   test("키 폼 안내의 링크가 공인 IP 도움말을 연다", async ({ page, scenario }) => {
     scenario.live.kiwoomLink = NO_KEY;
     await openKiwoom(page);
+    await chooseBroker(page, "키움증권");
     const help = panel(page).getByRole("button", { name: "공인 IP 확인 · 포털 안내", exact: true });
     await expect(help).toHaveAttribute("aria-expanded", "false");
     await panel(page).getByRole("button", { name: "공인 IP 확인 · 포털 안내 열기" }).click();
@@ -223,6 +227,7 @@ test.describe("1440×900", () => {
     scenario.on(route("POST", KEYS), () => { scenario.live.link(DISCONNECTED); return { body: singleKey(DISCONNECTED) }; });
     scenario.on(route("DELETE", `${KEYS}/k1`), () => { scenario.live.link(NO_KEY); return { body: keyListOf() }; });
     await openKiwoom(page);
+    await chooseBroker(page, "키움증권");
     await page.getByLabel("앱키", { exact: true }).fill(FAKE_APP_KEY);
     await page.getByLabel("시크릿", { exact: true }).fill(FAKE_APP_SECRET);
     await page.getByRole("button", { name: "저장하고 연결" }).click();
@@ -230,6 +235,7 @@ test.describe("1440×900", () => {
     await expandKey(page, "키 1");
     await panel(page).getByRole("button", { name: "지우기" }).click();
     await page.getByRole("dialog", { name: /시세 키입니다/ }).getByRole("button", { name: "키 지우기" }).click();
+    await chooseBroker(page, "키움증권");
     await expect(page.getByLabel("앱키", { exact: true })).toHaveValue("");
     await expect(page.getByLabel("시크릿", { exact: true })).toHaveValue("");
   });
@@ -662,6 +668,7 @@ test.describe("1440×900", () => {
     });
     await openKiwoom(page);
     await expect(accounts(page)).toContainText("0 / 5");
+    await chooseBroker(page, "키움증권");
     await page.getByLabel("앱키", { exact: true }).fill(FAKE_APP_KEY);
     await page.getByLabel("시크릿", { exact: true }).fill(FAKE_APP_SECRET);
     await page.getByRole("button", { name: "저장하고 연결" }).click();
@@ -669,6 +676,7 @@ test.describe("1440×900", () => {
     await accounts(page).getByRole("button", { name: "닫기" }).click();
 
     await accounts(page).getByRole("button", { name: "＋ 계좌 연결 더하기" }).click();
+    await chooseBroker(page, "키움증권");
     await expect(page.getByLabel("별칭", { exact: true })).toHaveValue("키움 2");
     await page.getByLabel("앱키", { exact: true }).fill(`${FAKE_APP_KEY}-second`);
     await page.getByLabel("시크릿", { exact: true }).fill(FAKE_APP_SECRET);
@@ -718,8 +726,11 @@ test.describe("1440×900", () => {
     await expect(keyRows(page).filter({ hasText: "주계좌" })).not.toContainText("시세");
   });
 
-  test("5개면 더하기 단추 대신 상한 안내가 보인다", async ({ page, scenario }) => {
-    scenario.live.kiwoomKeys = keyListOf(...[1, 2, 3, 4, 5].map((n) => keyEntry(`k${n}`, `키 ${n}`, CONNECTED_KIWOOM, { market: n === 1 })));
+  test("두 증권사가 모두 5개면 더하기 단추 대신 상한 안내가 보인다", async ({ page, scenario }) => {
+    scenario.live.kiwoomKeys = keyListOf(
+      ...[1, 2, 3, 4, 5].map((n) => keyEntry(`k${n}`, `키 ${n}`, CONNECTED_KIWOOM, { market: n === 1 })),
+      ...[1, 2, 3, 4, 5].map((n) => keyEntry(`kis${n}`, `한투 ${n}`, CONNECTED_KIWOOM, { broker: "kis" })),
+    );
     await openKiwoom(page);
     await expect(accounts(page)).toContainText("5 / 5");
     await expect(accounts(page)).toContainText("키는 5개까지입니다");
@@ -732,6 +743,7 @@ test.describe("1440×900", () => {
     scenario.on(route("POST", KEYS), () => refusal(message));
     await openKiwoom(page);
     await accounts(page).getByRole("button", { name: "＋ 계좌 연결 더하기" }).click();
+    await chooseBroker(page, "키움증권");
     const form = accounts(page).getByRole("form", { name: "키 더하기" });
     await form.getByLabel("앱키", { exact: true }).fill(FAKE_APP_KEY);
     await form.getByLabel("시크릿", { exact: true }).fill(FAKE_APP_SECRET);
@@ -827,6 +839,162 @@ test.describe("1440×900", () => {
     connect.reply({ body: scenario.live.kiwoomKeys });
     await expect(keyRows(page).filter({ hasText: "보조" })).not.toContainText("8050");
     await expect(dialog(page).getByRole("tab", { name: /^증권사 · 계좌/ }).locator(".conn-dot")).toHaveAttribute("data-tone", "mint");
+  });
+});
+
+test.describe("한투", () => {
+  test.use({ viewport: { width: 1440, height: 900 } });
+
+  const IN_USE = "한투 실시간 접속을 다른 곳에서 쓰고 있어 끊었습니다(OPSP8996). 다른 프로그램의 한투 실시간 연결을 끈 뒤 다시 연결하세요";
+  const IN_USE_NOTICE = "다른 프로그램이 이 한투 키로 실시간을 쓰고 있습니다. 그 프로그램을 끈 뒤 다시 연결하세요";
+  const kiwoomKey = () => keyEntry("k1", "주계좌", CONNECTED_KIWOOM, { market: true });
+  const kisKey = (patch: Partial<KiwoomKey> = {}, link: KiwoomLinkStatus = { ...CONNECTED_KIWOOM, appKeyTail: "KIS1" }) => keyEntry("kis1", "한투 1", link, { broker: "kis", ...patch });
+
+  test("계좌 연결 더하기에서 한투를 고르고 저장하면 한국투자증권 묶음에 줄이 생기고, 응답과 화면 어디에도 시크릿이 없다", async ({ page, scenario }) => {
+    scenario.live.kiwoomKeys = keyListOf(kiwoomKey());
+    const added: KiwoomKeyAdd[] = [];
+    scenario.on(route("POST", KEYS), (request) => {
+      const input: KiwoomKeyAdd = request.postDataJSON();
+      added.push(input);
+      scenario.live.kiwoomKeys = keyListOf(kiwoomKey(), kisKey({ alias: input.alias }, { ...CONNECTED_KIWOOM, appKeyTail: input.appKey.slice(-4) }));
+      return { body: scenario.live.kiwoomKeys };
+    });
+    await openKiwoom(page);
+    await expect(accounts(page)).not.toContainText("한국투자증권");
+    await accounts(page).getByRole("button", { name: "＋ 계좌 연결 더하기" }).click();
+    const brokers = accounts(page).getByRole("group", { name: "증권사 고르기" });
+    await expect(brokers.getByRole("button", { name: /^키움증권/ })).toBeEnabled();
+    await expect(brokers.getByRole("button", { name: /^한국투자증권/ })).toBeEnabled();
+    await chooseBroker(page, "한국투자증권");
+    await expect(page.getByLabel("별칭", { exact: true })).toHaveValue("한투 1");
+    await expect(accounts(page).getByTestId("kis-source-only")).toContainText("한투 키는 지금 시세 공급원으로만 씁니다");
+    await expect(accounts(page)).not.toContainText("공인 IP");
+    await page.getByLabel("앱키", { exact: true }).fill(FAKE_APP_KEY);
+    await page.getByLabel("시크릿", { exact: true }).fill(FAKE_APP_SECRET);
+    await page.getByRole("button", { name: "저장하고 연결" }).click();
+    await expect(accounts(page)).toContainText("토큰 받음");
+    await accounts(page).getByRole("button", { name: "닫기" }).click();
+
+    expect(added).toEqual([{ alias: "한투 1", appKey: FAKE_APP_KEY, appSecret: FAKE_APP_SECRET, broker: "kis" }]);
+    await expect(accounts(page).getByText("한국투자증권", { exact: true })).toBeVisible();
+    await expect(accounts(page).getByLabel("1개 / 상한 5개")).toHaveCount(2);
+    await expect(keyRows(page)).toHaveCount(2);
+    await expect(keyRows(page).filter({ hasText: "한투 1" })).not.toContainText("시세");
+    const shown = (await page.content()) + (await page.locator("body").innerText());
+    for (const secret of [FAKE_APP_KEY, FAKE_APP_SECRET]) {
+      expect(shown).not.toContain(secret);
+      expect(JSON.stringify(scenario.live.kiwoomKeys)).not.toContain(secret);
+    }
+  });
+
+  test("키움 키가 5개면 더하기 1단계의 키움 칸이 흐리고 고를 수 없다", async ({ page, scenario }) => {
+    scenario.live.kiwoomKeys = keyListOf(...[1, 2, 3, 4, 5].map((n) => keyEntry(`k${n}`, `키 ${n}`, CONNECTED_KIWOOM, { market: n === 1 })));
+    await openKiwoom(page);
+    await accounts(page).getByRole("button", { name: "＋ 계좌 연결 더하기" }).click();
+    const brokers = accounts(page).getByRole("group", { name: "증권사 고르기" });
+    await expect(brokers.getByRole("button", { name: /^키움증권/ })).toBeDisabled();
+    await expect(brokers.getByRole("button", { name: /^키움증권/ })).toContainText("5개까지입니다");
+    await expect(brokers.getByRole("button", { name: /^한국투자증권/ })).toBeEnabled();
+  });
+
+  test("시세 공급원 고르기에서 한투 키를 고르면 한투 제약 문구가 있는 확인 뒤에만 공급원 지정 요청이 나가고, 시세 표시와 위 막대의 증권사 이름이 한투로 바뀐다. 취소하면 요청이 없다", async ({ page, scenario }) => {
+    scenario.live.kiwoomKeys = keyListOf(kiwoomKey(), kisKey());
+    const designated: KiwoomMarketKeyInput[] = [];
+    scenario.on(route("PUT", "/api/system/kiwoom/market-key"), (request) => {
+      designated.push(request.postDataJSON());
+      scenario.live.kiwoomKeys = keyListOf({ ...kiwoomKey(), market: false }, kisKey({ market: true }));
+      scenario.live.source(KIS_MARKET_SOURCE);
+      return { body: scenario.live.kiwoomKeys };
+    });
+    await openKiwoom(page);
+    const picker = marketCard(page).getByRole("combobox", { name: "시세 키" });
+    await expect(picker.locator("optgroup")).toHaveCount(2);
+    expect(await picker.locator("optgroup").evaluateAll((groups) => groups.map((group) => group.getAttribute("label")))).toEqual(["키움증권", "한국투자증권"]);
+    await expect(page.locator("footer.status-bar").getByRole("status")).toHaveText("실시간 연결됨");
+
+    await picker.selectOption("kis1");
+    const confirmation = page.getByRole("dialog", { name: /시세를 ‘한투 1’에서 받습니다/ });
+    await expect(confirmation).toContainText("한투는 분봉을 1분봉에서 만들고, 실시간은 40건까지입니다");
+    await confirmation.getByRole("button", { name: "취소" }).click();
+    expect(designated).toEqual([]);
+    await expect(picker).toHaveValue("k1");
+
+    await picker.selectOption("kis1");
+    await page.getByRole("dialog", { name: /시세를 ‘한투 1’에서 받습니다/ }).getByRole("button", { name: "시세 바꾸기" }).click();
+    await pollSaved(() => designated).toEqual([{ keyId: "kis1" }]);
+    await expect(picker).toHaveValue("kis1");
+    await expect(keyRows(page).filter({ hasText: "한투 1" })).toContainText("시세");
+    await expect(keyRows(page).filter({ hasText: "주계좌" })).not.toContainText("시세");
+    await expect(page.locator("footer.status-bar").getByRole("status")).toHaveText("한투 실시간 연결됨");
+    await expect(page.locator('footer.status-bar button[title="한투 연결 설정 열기"]')).toBeVisible();
+  });
+
+  test("같은 증권사 안에서 시세 공급원을 바꾸면 한투 제약 문구가 없다", async ({ page, scenario }) => {
+    scenario.live.kiwoomKeys = keyListOf(kiwoomKey(), keyEntry("k2", "보조", { ...CONNECTED_KIWOOM, appKeyTail: "5678" }));
+    await openKiwoom(page);
+    await marketCard(page).getByRole("combobox", { name: "시세 키" }).selectOption("k2");
+    const confirmation = page.getByRole("dialog", { name: /시세를 ‘보조’에서 받습니다/ });
+    await expect(confirmation).toBeVisible();
+    await expect(confirmation).not.toContainText("한투는 분봉을");
+  });
+
+  test("시세 공급원이 한투이고 키움 키가 있으면 시세 공급원 카드의 순위·시장 개요·투자자 줄이 키움을 말한다", async ({ page, scenario }) => {
+    scenario.live.marketSource = KIS_SOURCE_KIWOOM_FEED;
+    scenario.live.kiwoomKeys = keyListOf({ ...kiwoomKey(), market: false }, kisKey({ market: true }));
+    await openKiwoom(page);
+    await expect(marketCard(page).getByRole("heading", { name: "연결됨" })).toBeVisible();
+    await expect(marketCard(page).getByTestId("feed-line")).toHaveText("순위·시장 개요·투자자: 키움 · ‘주계좌’");
+
+    scenario.live.source({ ...KIS_MARKET_SOURCE, feedBroker: { ...KIWOOM_FEED, broker: "kis" } });
+    await expect(marketCard(page).getByTestId("feed-line")).toHaveText("순위·시장 개요·투자자: 한투 · ‘한투 1’");
+    scenario.live.source({ ...KIS_MARKET_SOURCE, feedBroker: null });
+    await expect(marketCard(page).getByTestId("feed-line")).toHaveText("순위·시장 개요·투자자: 받을 연결이 없습니다");
+  });
+
+  test("시세 공급원 한투 키가 OPSP8996이면 시세 공급원 카드가, 시세 공급원이 아닌 한투 키면 그 줄이 다른 프로그램 사용 중 문구와 다시 연결 단추를 보인다", async ({ page, scenario }) => {
+    const stolen: KiwoomLinkStatus = { ...CONNECTED_KIWOOM, appKeyTail: "KIS1", state: "failed", problem: "network", message: IN_USE, realtimeRegistered: null, symbolCount: null };
+    scenario.live.marketSource = { ...KIS_MARKET_SOURCE, state: "failed", problem: "network", feedBroker: null };
+    scenario.live.kiwoomKeys = keyListOf({ ...kiwoomKey(), market: false }, kisKey({ market: true }, stolen));
+    const connect = scenario.hold(route("POST", `${KEYS}/kis1/connect`));
+    await openKiwoom(page);
+    await expect(marketCard(page).getByTestId("in-use-elsewhere")).toHaveText(IN_USE_NOTICE);
+    await expect(marketCard(page).getByRole("heading", { name: "다른 프로그램이 사용 중" })).toBeVisible();
+    await marketCard(page).getByRole("button", { name: "다시 연결" }).click();
+    await connect.received;
+    expect(callsTo(scenario, "POST", `${KEYS}/kis1/connect`)[0]!.postDataJSON()).toEqual({ acknowledged: false } satisfies KiwoomConnectInput);
+    scenario.live.kiwoomKeys = keyListOf({ ...kiwoomKey(), market: false }, kisKey({ market: true }));
+    scenario.live.source(KIS_MARKET_SOURCE);
+    connect.reply({ body: scenario.live.kiwoomKeys });
+    await expect(marketCard(page).getByRole("heading", { name: "연결됨" })).toBeVisible();
+    await expect(marketCard(page).getByTestId("in-use-elsewhere")).toHaveCount(0);
+  });
+
+  test("시세 공급원이 아닌 한투 키가 OPSP8996이면 그 줄 안에 문구와 다시 연결 단추가 있고 시세 공급원 카드는 연결됨이다", async ({ page, scenario }) => {
+    const stolen: KiwoomLinkStatus = { ...CONNECTED_KIWOOM, appKeyTail: "KIS1", state: "failed", problem: "network", message: IN_USE, realtimeRegistered: null, symbolCount: null };
+    scenario.live.kiwoomKeys = keyListOf(kiwoomKey(), kisKey({}, stolen));
+    const connect = scenario.hold(route("POST", `${KEYS}/kis1/connect`));
+    await openKiwoom(page);
+    await expect(marketCard(page).getByTestId("in-use-elsewhere")).toHaveCount(0);
+    await expect(keyRows(page).filter({ hasText: "한투 1" })).toContainText("다른 프로그램이 사용 중");
+    await expandKey(page, "한투 1");
+    await expect(accounts(page).getByTestId("in-use-elsewhere")).toHaveText(IN_USE_NOTICE);
+    await accounts(page).getByRole("button", { name: "다시 연결" }).click();
+    await connect.received;
+    expect(callsTo(scenario, "POST", `${KEYS}/kis1/connect`)).toHaveLength(1);
+    connect.reply({ body: keyListOf(kiwoomKey(), kisKey()) });
+  });
+
+  test("한투 환경 키 줄은 읽기 전용이고 단추가 없다", async ({ page, scenario }) => {
+    const env: KiwoomLinkStatus = { ...CONNECTED_KIWOOM, keySource: "env", appKeyTail: "ENV4" };
+    scenario.live.kiwoomKeys = keyListOf(kiwoomKey(), keyEntry("env-kis", "환경 설정 키", env, { broker: "kis" }));
+    await openKiwoom(page);
+    const row = keyRows(page).filter({ hasText: "환경 설정 키" });
+    await expect(row).toContainText(".env");
+    await expandKey(page, "환경 설정 키");
+    await expect(accounts(page)).toContainText(".env에서 읽음 · 읽기 전용");
+    await expect(accounts(page)).toContainText("바꾸려면 .env에서 해당 줄을 지우세요");
+    await expect(accounts(page).getByRole("button", { name: "별칭·키 바꾸기" })).toHaveCount(0);
+    await expect(accounts(page).getByRole("button", { name: "지우기" })).toHaveCount(0);
   });
 });
 

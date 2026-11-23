@@ -1,7 +1,9 @@
 import type { Ranking } from "../../api/generated/Ranking";
 import { RANKING_CATEGORIES, categoryOf, changeRankingKind, conditionsOf } from "./rankingChoices";
 import { RANKING_NAME, type RankingKind } from "./rankingKinds";
+import { useMarketSource } from "../../stores/kiwoomLink";
 import { useVenue } from "../../stores/ui";
+import { choiceOn, FEED_CHOICE_TOOLTIP } from "../status/marketFeed";
 
 interface Props {
   ranking: Ranking;
@@ -33,6 +35,7 @@ export function RankingPickers({ ranking, onChange }: Props) {
 }
 
 export function RankingConditionRow({ ranking, onChange, children }: Props & { children?: React.ReactNode }) {
+  const source = useMarketSource();
   return (
     <div className="rk-row rk-conditions" data-testid="ranking-conditions">
       {conditionsOf(ranking).map((condition) =>
@@ -41,7 +44,7 @@ export function RankingConditionRow({ ranking, onChange, children }: Props & { c
             <span>{condition.label}</span>
             <select aria-label={`순위 ${condition.label}`} value={condition.value} onChange={(e) => onChange(condition.set(e.target.value))}>
               {condition.options.map((option) => (
-                <option key={option.value} value={option.value}>
+                <option key={option.value} value={option.value} {...(choiceOn(source, ranking, condition.id, option.value) ? {} : { disabled: true, title: FEED_CHOICE_TOOLTIP, "data-feed-refused": "" })}>
                   {option.label}
                 </option>
               ))}
