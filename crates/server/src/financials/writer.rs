@@ -33,16 +33,24 @@ pub fn writer_lock_path(database: &Path) -> PathBuf {
 #[derive(Default)]
 pub(super) struct WriterSeat(Mutex<Option<InstanceLock>>);
 
+pub fn acquire_writer_lock(database: &Path) -> Result<InstanceLock, WriterError> {
+    match InstanceLock::acquire(&writer_lock_path(database)) {
+        Ok(lock) => Ok(lock),
+        Err(LockError::Held { pid, path }) => Err(WriterError::Held { pid, path }),
+        Err(LockError::Io { path, error }) => Err(WriterError::Unavailable { path, error }),
+    }
+}
+
 impl WriterSeat {
     fn claim(&self, database: &Path) -> Result<(), WriterError> {
         let mut held = self.0.lock().unwrap_or_else(PoisonError::into_inner);
-        if held.is_some() { return Ok(()); }
-        let path = writer_lock_path(database);
-        match InstanceLock::acquire(&path) {
-            Ok(lock) => { *held = Some(lock); Ok(()) }
-            Err(LockError::Held { pid, path }) => Err(WriterError::Held { pid, path }),
-            Err(LockError::Io { path, error }) => Err(WriterError::Unavailable { path, error }),
-        }
+        if held.is_none() { *held = Some(acquire_writer_lock(database)?); }
+        Ok(())
+    }
+
+    fn adopt(&self, lock: InstanceLock) {
+        let mut held = self.0.lock().unwrap_or_else(PoisonError::into_inner);
+        if held.is_none() { *held = Some(lock); }
     }
 }
 
@@ -53,6 +61,8 @@ impl Financials {
             Err(_) => Ok(()),
         }
     }
+
+    pub fn hold_writer(&self, lock: InstanceLock) { self.writer.adopt(lock); }
 
     pub(super) fn may_write(&self) -> bool {
         if self.client.is_none() { return true; }

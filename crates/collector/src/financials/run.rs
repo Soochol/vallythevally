@@ -2,7 +2,7 @@ use std::process::ExitCode;
 use std::sync::Arc;
 
 use server::clock::Clock;
-use server::financials::{Financials, client::Client, store::Store};
+use server::financials::{Financials, acquire_writer_lock, client::Client, store::Store};
 use tokio::sync::watch;
 
 use super::alert;
@@ -51,15 +51,17 @@ async fn execute(config: RunConfig) -> ExitCode {
         None => Client::new(key, dart_base_url, kind_base_url),
     };
     let Ok(client) = client else { return failure("OpenDART HTTP 클라이언트를 만들지 못했습니다") };
+    let writer = match acquire_writer_lock(&database) {
+        Ok(writer) => writer,
+        Err(error) => return usage_error(error),
+    };
     let store = match Store::open_for_collection(&database).await {
         Ok(store) => store,
         Err(failure_kind) => return failure(format_args!("재무 저장소 {}를 열 수 없습니다({failure_kind:?})", database.display())),
     };
     let clock = Clock::system();
     let service = Financials::new(Some(client), store, clock.clone());
-    if let Err(error) = service.claim_writer() {
-        return usage_error(error);
-    }
+    service.hold_writer(writer);
     let socket = match socket::bind(&state_folder.join(SOCKET_FILE_NAME)) {
         Ok(socket) => socket,
         Err(error) => return usage_error(format_args!("상태 소켓을 열 수 없습니다: {error}")),

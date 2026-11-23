@@ -474,3 +474,22 @@ async fn the_listing_watcher_follows_new_and_replaced_files_and_skips_unreadable
     until("an unreadable newest file falls back to an older readable one", async || feed.info.borrow().as_ref().is_some_and(|info| (info.date, info.stocks) == (20200101, 2))).await;
     task.abort();
 }
+
+#[tokio::test]
+async fn a_refused_run_leaves_a_busy_database_untouched_and_exits_with_code_two() {
+    let dart = FakeDart::start().await;
+    let workspace = Workspace::new();
+    let database = workspace.database();
+    std::fs::create_dir_all(database.parent().unwrap()).unwrap();
+    let store = Store::open(&database).await.unwrap();
+    let _held = server::financials::acquire_writer_lock(&database).unwrap();
+    let mut busy = <sqlx::SqliteConnection as sqlx::Connection>::connect_with(&sqlx::sqlite::SqliteConnectOptions::new().filename(&database)).await.unwrap();
+    sqlx::query("BEGIN EXCLUSIVE").execute(&mut busy).await.unwrap();
+    let (status, output) = Running::spawn(&workspace.run_arguments(&dart), workspace.root.path()).finished().await;
+    assert_eq!(status.code(), Some(2), "{output}");
+    assert!(output.contains("다른 프로세스가 재무 저장소에 쓰고 있습니다"), "{output}");
+    sqlx::query("ROLLBACK").execute(&mut busy).await.unwrap();
+    let mode = sqlx::query_scalar::<_, String>("PRAGMA journal_mode").fetch_one(&mut busy).await.unwrap();
+    assert_eq!(mode, "delete", "a refused run does not switch the journal mode");
+    drop(store);
+}

@@ -23,7 +23,7 @@ use store::Store;
 
 pub use routes::routes;
 pub use schedule::symbol_listings;
-pub use writer::{WriterError, writer_lock_path};
+pub use writer::{WriterError, acquire_writer_lock, writer_lock_path};
 use writer::WriterSeat;
 use control::{CollectionState, JobContext, UpdateControl};
 
