@@ -78,9 +78,14 @@ describe("sortFunds", () => {
 });
 
 describe("rankHoldings", () => {
-  it("큰 비중부터 순위와 누적 비중을 매긴다", () => {
-    const ranked = rankHoldings([{ code: "a", name: "a", weightBps: 500 }, { code: "b", name: "b", weightBps: 1900 }, { code: "c", name: "c", weightBps: 1000 }]);
+  it("서버가 준 순서대로 순위와 누적 비중을 매기고 다시 정렬하지 않는다", () => {
+    const ranked = rankHoldings([{ code: "b", name: "b", weightBps: 1900 }, { code: "c", name: "c", weightBps: 1000 }, { code: "a", name: "a", weightBps: 500 }]);
     expect(ranked.map((r) => [r.holding.code, r.rank, r.cumulativeBps])).toEqual([["b", 1, 1900], ["c", 2, 2900], ["a", 3, 3400]]);
+    const unsorted = rankHoldings([{ code: "a", name: "a", weightBps: 500 }, { code: "b", name: "b", weightBps: 1900 }]);
+    expect(unsorted.map((r) => r.holding.code)).toEqual(["a", "b"]);
+  });
+  it("비면 빈 목록이다", () => {
+    expect(rankHoldings([])).toEqual([]);
   });
 });
 

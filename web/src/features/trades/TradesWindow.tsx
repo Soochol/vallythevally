@@ -44,12 +44,12 @@ function TradesBody({ code, venue }: { code: SymbolCode; venue: Venue }) {
       <MarketHead code={code} venue={venue} lastPrice={lastPrice} previousClose={previousClose} />
       <div className="tr-strips">
       <Strip>
-        <span>체결강도 <b data-testid="trade-strength">{state.strength === null ? "—" : `${formatDecimal(state.strength)}%`}</b></span>
+        <span title="체결강도"><span className="tr-name">체결강도 </span><b data-testid="trade-strength">{state.strength === null ? "—" : `${formatDecimal(state.strength)}%`}</b></span>
         <RatioBar buy={split.buy} sell={split.sell} label="최근 체결의 매수·매도 비율" />
-        <span>누적 <b data-testid="trade-cumulative">{formatQuantity(cumulativeQuantity(state, effectiveVenue))}</b></span>
+        <span title="누적"><span className="tr-name">누적 </span><b data-testid="trade-cumulative">{formatQuantity(cumulativeQuantity(state, effectiveVenue))}</b></span>
       </Strip>
       <Strip>
-        <span>최소 금액</span>
+        <span className="tr-name">최소 금액</span>
         <Segmented<MinAmountKey> label="최소 체결 금액" options={MIN_AMOUNT_OPTIONS} value={minKey} onChange={setMinKey} />
         {integratedOnly && <span className="mw-integrated" data-testid="trade-integrated-only" title="이 종목은 선택한 거래소로 조회되지 않아 통합 값을 보입니다">통합 기준</span>}
       </Strip>

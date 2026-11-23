@@ -120,7 +120,7 @@ export interface RankedHolding<T extends WeightedHolding> {
 
 export function rankHoldings<T extends WeightedHolding>(holdings: readonly T[]): RankedHolding<T>[] {
   let sum = 0;
-  return holdings.toSorted((a, b) => b.weightBps - a.weightBps).map((holding, index) => {
+  return holdings.map((holding, index) => {
     sum += holding.weightBps;
     return { holding, rank: index + 1, cumulativeBps: sum };
   });

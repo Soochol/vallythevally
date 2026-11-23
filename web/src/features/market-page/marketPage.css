@@ -7,7 +7,12 @@
 .mk-grid > [data-card="stocks"] { grid-column: span 7; min-height: var(--size-480); }
 .mk-grid { --mk-skeleton-sector: var(--size-220); --mk-skeleton-flow-bars: var(--size-120); --mk-skeleton-flow-lines: var(--size-180); --mk-skeleton-turnover: var(--size-180); --mk-skeleton-stocks: var(--size-220); }
 @media (max-width: 1024px) {
-  .mk-grid { --mk-skeleton-sector: calc(max(var(--size-220), 100cqw * 0.56) + var(--size-10) + var(--size-120)); --mk-skeleton-flow-bars: calc(var(--size-84) + var(--size-5)); --mk-skeleton-flow-lines: calc(var(--size-120) + var(--size-42)); --mk-skeleton-turnover: calc(var(--size-180) + var(--size-38)); --mk-skeleton-stocks: calc(var(--size-340) + var(--size-40) - var(--size-1)); }
+  .mk-grid { --mk-flow-bars-body: var(--size-96); --mk-flow-lines-body: var(--size-168); --mk-turnover-body: var(--size-220); --mk-stocks-body: calc(10 * var(--size-32) + var(--size-60)); }
+  .mk-grid { --mk-skeleton-sector: calc(max(var(--size-220), 100cqw * 0.56) + var(--size-10) + var(--size-120)); --mk-skeleton-flow-bars: var(--mk-flow-bars-body); --mk-skeleton-flow-lines: var(--mk-flow-lines-body); --mk-skeleton-turnover: var(--mk-turnover-body); --mk-skeleton-stocks: var(--mk-stocks-body); }
+  .mk-bars { min-height: var(--mk-flow-bars-body); }
+  .mk-lines { min-height: var(--mk-flow-lines-body); }
+  .mk-turnover-chart { min-height: var(--mk-turnover-body); }
+  .mk-stock-panel { min-height: var(--mk-stocks-body); }
   .mk-grid > section { grid-column: 1 / -1 !important; min-height: 0 !important; }
   .mk-grid > [data-card="sector"] { container-type: inline-size; }
   .mk-card .ui-skeleton { padding-block: 0; }
