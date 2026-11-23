@@ -8,7 +8,7 @@ use serde::Serialize;
 use tokio::sync::watch;
 
 use super::error::{Category, CodeKey, Failure};
-use super::token_file::{FileError, Saved, SavedAuthBlock, SavedToken, TokenFile, credential_id};
+use super::token_file::{FileError, KeyRecords, RecordFile, Saved, SavedAuthBlock, SavedToken, TokenFile, credential_id};
 use super::wire::{TokenResponse, parse_kst_datetime};
 use crate::config::Secret;
 
@@ -85,9 +85,33 @@ struct State {
     /// 토큰 무효 응답을 받아 다시 발급해야 한다.
     stale: bool,
     issued_count: u64,
-    disconnected: Option<String>,
+    disconnected: bool,
     auth_block: Option<SavedAuthBlock>,
     file: Option<TokenFile>,
+}
+
+impl State {
+    fn records(&self) -> Option<(RecordFile, KeyRecords)> {
+        let (file, credentials) = (self.file.as_ref()?, self.credentials.as_ref()?);
+        let records = KeyRecords {
+            credential: credentials.id.clone(),
+            last_request_at: self.last_request_at.map_or(0, KstTime::unix),
+            disconnected: self.disconnected,
+            auth_block: self.auth_block.clone(),
+        };
+        Some((file.records_for(&credentials.id), records))
+    }
+
+    fn adopt_legacy_records(&self) {
+        let Some((file, records)) = self.records() else { return };
+        let nothing_to_keep = records.last_request_at == 0 && !records.disconnected && records.auth_block.is_none();
+        if nothing_to_keep || file.path().exists() {
+            return;
+        }
+        if let Err(e) = file.save(&records) {
+            tracing::warn!(error = %e, "옛 토큰 파일의 발급 간격과 차단 기록을 앱키의 기록 파일로 옮기지 못했습니다");
+        }
+    }
 }
 
 pub struct KiwoomAuth {
@@ -134,11 +158,25 @@ impl KiwoomAuth {
     }
 
     pub fn rebind(&self, identity: Option<(Secret<String>, Secret<String>, Option<TokenFile>)>) {
-        let (mut state, halt) = match identity {
+        self.rebind_with(identity, false);
+    }
+
+    pub fn rebind_replacing(&self, identity: Option<(Secret<String>, Secret<String>, Option<TokenFile>)>) {
+        self.rebind_with(identity, true);
+    }
+
+    fn rebind_with(&self, identity: Option<(Secret<String>, Secret<String>, Option<TokenFile>)>, carry_records: bool) {
+        let (mut state, mut halt) = match identity {
             Some((app_key, app_secret, file)) => loaded_state(Some(Credentials::new(app_key, app_secret)), file),
             None => loaded_state(None, None),
         };
         let mut current = self.lock();
+        if carry_records && state.credentials.is_some() {
+            carry_replaced_records(&current, &mut state);
+            if halt.is_none() {
+                halt = restored_halt(&state);
+            }
+        }
         state.issuing_for = current.issuing_for.take();
         *current = state;
         drop(current);
@@ -176,6 +214,11 @@ impl KiwoomAuth {
     }
 
     fn save(&self, st: &State) -> Result<(), FileError> {
+        self.save_records(st)?;
+        self.save_token(st)
+    }
+
+    fn save_token(&self, st: &State) -> Result<(), FileError> {
         let Some(file) = &st.file else { return Ok(()) };
         let saved = Saved {
             credential: st.credentials.as_ref().map(|c| c.id.clone()),
@@ -184,23 +227,18 @@ impl KiwoomAuth {
                 expires_dt: format_kst_datetime(i.expires_at),
                 issued_at: i.issued_at.unix(),
             }),
-            last_request_at: st.last_request_at.map_or(0, KstTime::unix),
-            disconnected: st.disconnected.clone(),
-            auth_block: st.auth_block.clone(),
+            last_request_at: st.credentials.as_ref().and(st.last_request_at).map_or(0, KstTime::unix),
+            disconnected: None,
+            auth_block: None,
         };
         file.save(&saved)
     }
 
     fn save_records(&self, st: &State) -> Result<(), FileError> {
-        let Some(file) = &st.file else { return Ok(()) };
-        let mut saved = match file.load()? {
-            Some(saved) => saved,
-            None if st.disconnected.is_none() && st.auth_block.is_none() => return Ok(()),
-            None => Saved { credential: st.credentials.as_ref().map(|c| c.id.clone()), ..Saved::default() },
-        };
-        saved.disconnected = st.disconnected.clone();
-        saved.auth_block = st.auth_block.clone();
-        file.save(&saved)
+        match st.records() {
+            Some((file, records)) => file.save(&records),
+            None => Ok(()),
+        }
     }
 
     pub fn persist(&self) {
@@ -212,13 +250,15 @@ impl KiwoomAuth {
 
     pub fn kept_disconnected(&self) -> bool {
         let st = self.lock();
-        st.disconnected.is_some() && st.disconnected.as_deref() == st.credentials.as_ref().map(|c| c.id.as_str())
+        st.disconnected && st.credentials.is_some()
     }
 
     pub fn keep_disconnected(&self) {
         let mut st = self.lock();
-        let Some(id) = st.credentials.as_ref().map(|c| c.id.clone()) else { return };
-        let previous = st.disconnected.replace(id);
+        if st.credentials.is_none() {
+            return;
+        }
+        let previous = std::mem::replace(&mut st.disconnected, true);
         if let Err(e) = self.save_records(&st) {
             tracing::warn!(error = %e, "끊어 둔 기록을 파일에 쓰지 못했습니다. 다시 켜면 자동으로 연결합니다");
             st.disconnected = previous;
@@ -227,10 +267,10 @@ impl KiwoomAuth {
 
     pub fn clear_connect_records(&self) {
         let mut st = self.lock();
-        if st.disconnected.is_none() && st.auth_block.is_none() {
+        if !st.disconnected && st.auth_block.is_none() {
             return;
         }
-        let previous = (st.disconnected.take(), st.auth_block.take());
+        let previous = (std::mem::take(&mut st.disconnected), st.auth_block.take());
         if let Err(e) = self.save_records(&st) {
             tracing::warn!(error = %e, "연결했으니 끊어 둔 기록과 인증 차단 기록을 지워야 하는데 파일에 쓰지 못했습니다");
             (st.disconnected, st.auth_block) = previous;
@@ -244,32 +284,40 @@ impl KiwoomAuth {
         if !same_key {
             st.issued = None;
             st.stale = false;
-            let from_file = st.file.as_ref().and_then(|f| f.load().ok().flatten()).and_then(|saved| restore(saved, Some(&next.id)).issued);
-            if let Some(mut issued) = from_file {
-                st.issued_count += 1;
-                issued.generation = TokenGen(st.issued_count);
-                st.issued = Some(issued);
+            let loaded = st.file.as_ref().and_then(|f| read_state(f, Some(&next.id)).ok());
+            if let Some(mut loaded) = loaded {
+                carry_replaced_records(&loaded, &mut st);
+                if let Some(mut issued) = loaded.issued.take() {
+                    st.issued_count += 1;
+                    issued.generation = TokenGen(st.issued_count);
+                    st.issued = Some(issued);
+                }
             }
         }
         st.credentials = Some(next);
         let released_block = st.auth_block.as_ref().is_some_and(|block| block.detail != CodeKey::Rest(8050));
-        if released_block || st.disconnected.is_some() {
-            if released_block {
-                st.auth_block = None;
-            }
-            st.disconnected = None;
+        if released_block {
+            st.auth_block = None;
+        }
+        if !same_key || released_block || st.disconnected {
+            st.disconnected = false;
             if let Err(e) = self.save_records(&st) {
-                tracing::warn!(error = %e, "키를 저장하면서 지울 끊어 둔 기록과 인증 차단 기록을 파일에서 지우지 못했습니다");
+                tracing::warn!(error = %e, "키를 저장하면서 새 앱키의 기록을 파일에 쓰지 못했습니다");
             }
         }
     }
 
     pub fn clear_credentials(&self) {
         let mut st = self.lock();
+        if st.disconnected {
+            st.disconnected = false;
+            if let Err(e) = self.save_records(&st) {
+                tracing::warn!(error = %e, "키를 지우면서 끊어 둔 기록을 파일에서 지우지 못했습니다");
+            }
+        }
         st.credentials = None;
         st.issued = None;
         st.stale = false;
-        st.disconnected = None;
         if matches!(self.halted(), Some(Halt::TokenFileUnreadable(_))) {
             return;
         }
@@ -312,22 +360,23 @@ impl KiwoomAuth {
         if !matches!(self.halted(), Some(Halt::TokenFileUnreadable(_))) {
             return Ok(());
         }
-        let loaded = match &self.lock().file {
-            Some(file) => file.load(),
-            None => return Ok(()),
+        let loaded = {
+            let st = self.lock();
+            match &st.file {
+                Some(file) => read_state(file, st.credentials.as_ref().map(|c| c.id.as_str())),
+                None => return Ok(()),
+            }
         };
         match loaded {
-            Ok(saved) => {
+            Ok(restored) => {
                 let mut st = self.lock();
-                let id = st.credentials.as_ref().map(|c| c.id.clone());
-                let restored = saved.map_or_else(State::default, |saved| restore(saved, id.as_deref()));
                 st.issued = restored.issued;
                 st.issued_count = restored.issued_count;
                 st.last_request_at = restored.last_request_at;
                 st.stale = false;
                 st.disconnected = restored.disconnected;
                 st.auth_block = restored.auth_block;
-                let halt = restored_halt(&st, id.as_deref());
+                let halt = restored_halt(&st);
                 drop(st);
                 self.halted.send_replace(halt);
                 Ok(())
@@ -424,7 +473,7 @@ impl KiwoomAuth {
         let generation = TokenGen(st.issued_count);
         st.issued = Some(Issued { token: Secret::new(resp.token), issued_at: now, expires_at, generation });
         st.stale = false;
-        if let Err(e) = self.save(&st) {
+        if let Err(e) = self.save_token(&st) {
             tracing::error!(error = %e, "받은 토큰을 파일에 쓰지 못했습니다. 다시 켜면 발급 간격이 지난 뒤 새로 받습니다");
         }
         Ok(generation)
@@ -450,12 +499,10 @@ impl KiwoomAuth {
 
 fn loaded_state(credentials: Option<Credentials>, file: Option<TokenFile>) -> (State, Option<Halt>) {
     let id = credentials.as_ref().map(|c| c.id.clone());
-    let id = id.as_deref();
-    let (mut state, halt) = match file.as_ref().map(TokenFile::load) {
-        None | Some(Ok(None)) => (State::default(), None),
-        Some(Ok(Some(saved))) => {
-            let state = restore(saved, id);
-            let halt = restored_halt(&state, id);
+    let (mut state, halt) = match file.as_ref().map(|file| read_state(file, id.as_deref())) {
+        None => (State::default(), None),
+        Some(Ok(state)) => {
+            let halt = restored_halt(&state);
             (state, halt)
         }
         Some(Err(e)) => {
@@ -465,10 +512,25 @@ fn loaded_state(credentials: Option<Credentials>, file: Option<TokenFile>) -> (S
     };
     state.credentials = credentials;
     state.file = file;
+    if halt.is_none() || matches!(halt, Some(Halt::Rejected(_))) {
+        state.adopt_legacy_records();
+    }
     (state, halt)
 }
 
-fn restore(saved: Saved, credential: Option<&str>) -> State {
+fn read_state(file: &TokenFile, credential: Option<&str>) -> Result<State, FileError> {
+    let saved = file.load()?;
+    let records = match credential {
+        Some(id) => file.records_for(id).load()?,
+        None => None,
+    };
+    Ok(match (saved, records) {
+        (None, None) => State::default(),
+        (saved, records) => restore(saved.unwrap_or_default(), records, credential),
+    })
+}
+
+fn restore(saved: Saved, records: Option<KeyRecords>, credential: Option<&str>) -> State {
     let ours = credential.is_some() && saved.credential.as_deref() == credential;
     if saved.token.is_some() && !ours {
         tracing::warn!("토큰 파일의 토큰은 지금 앱키로 받은 것이 아니라 쓰지 않습니다. 발급 요청 간격은 그대로 지킵니다");
@@ -480,24 +542,36 @@ fn restore(saved: Saved, credential: Option<&str>) -> State {
         }
         Some(Issued { token: Secret::new(t.value), issued_at: KstTime::from_unix(t.issued_at), expires_at: expires_at?, generation: TokenGen(1) })
     });
+    let file_is_ours = credential.is_none() || saved.credential.is_none() || ours;
+    let legacy_request_at = if file_is_ours { saved.last_request_at } else { 0 };
+    let (last_request_at, disconnected, auth_block) = match records {
+        Some(records) => (records.last_request_at.max(legacy_request_at), records.disconnected, records.auth_block),
+        None => {
+            let disconnected = credential.is_some() && saved.disconnected.as_deref() == credential;
+            let auth_block = saved.auth_block.filter(|block| credential.is_some() && block.credential.as_deref().is_none_or(|owner| Some(owner) == credential));
+            (legacy_request_at, disconnected, auth_block)
+        }
+    };
     State {
         issued_count: u64::from(issued.is_some()),
         issued,
-        last_request_at: (saved.last_request_at > 0).then(|| KstTime::from_unix(saved.last_request_at)),
-        disconnected: saved.disconnected,
-        auth_block: saved.auth_block,
+        last_request_at: (last_request_at > 0).then(|| KstTime::from_unix(last_request_at)),
+        disconnected,
+        auth_block,
         ..State::default()
     }
 }
 
-fn restored_halt(state: &State, credential: Option<&str>) -> Option<Halt> {
+fn restored_halt(state: &State) -> Option<Halt> {
     let block = state.auth_block.as_ref()?;
-    let applies = block.detail == CodeKey::Rest(8050) || (credential.is_some() && block.credential.as_deref() == credential);
-    if !applies {
-        return None;
-    }
     tracing::warn!(detail = %block.detail, "파일에 인증 차단 기록이 있어 차단된 채로 켭니다. 키움에는 아무것도 보내지 않습니다");
     Some(Halt::Rejected(Failure::restored_auth_block(block.detail)))
+}
+
+fn carry_replaced_records(from: &State, to: &mut State) {
+    to.last_request_at = to.last_request_at.max(from.last_request_at);
+    let carried = from.auth_block.clone().filter(|block| block.detail == CodeKey::Rest(8050));
+    to.auth_block = carried.or_else(|| to.auth_block.take());
 }
 
 fn format_kst_datetime(t: KstTime) -> String {
@@ -647,16 +721,65 @@ mod tests {
     }
 
     #[test]
-    fn a_token_from_another_or_unknown_app_key_is_dropped_but_its_request_time_is_kept() {
+    fn a_token_from_another_app_key_is_dropped_with_its_request_time_and_an_unknown_ones_time_is_kept() {
         let t0 = kst(d(9), 9, 0, 0);
-        for credential in [Some(credential_id("FAKE-APPKEY-other")), None] {
+        for (credential, kept) in [(Some(credential_id("FAKE-APPKEY-other")), false), (None, true)] {
             let (_dir, _lock, file) = crate::kiwoom::token_file::testing::temp_token_file();
             let token = SavedToken { value: TOKEN.into(), expires_dt: "20991231000000".into(), issued_at: t0.unix() };
             file.save(&Saved { credential: credential.clone(), token: Some(token), last_request_at: t0.unix(), ..Saved::default() }).unwrap();
             let a = KiwoomAuth::new(Secret::new(KEY.into()), Secret::new(SECRET.into()), Some(file));
             let later = t0.plus_secs(60);
             assert!(a.current(later).is_none(), "{credential:?}");
-            assert_eq!(a.issue_blocked_until(later), Some(t0.plus_secs(600)), "{credential:?}");
+            assert_eq!(a.issue_blocked_until(later), kept.then(|| t0.plus_secs(600)), "{credential:?}");
         }
+    }
+
+    #[test]
+    fn records_follow_the_app_key_across_token_files() {
+        let (_dir, lock, file) = crate::kiwoom::token_file::testing::temp_token_file();
+        let path = file.path().to_owned();
+        let t0 = kst(d(9), 9, 0, 0);
+        let first = KiwoomAuth::new(Secret::new(KEY.into()), Secret::new(SECRET.into()), Some(file));
+        first.begin_issue(t0).unwrap();
+        first.halt(crate::kiwoom::error::judge(crate::kiwoom::api::ApiId::Au10001, 200, r#"{"return_code": 3, "return_msg": "[8050:지정단말기]"}"#).unwrap_err(), t0);
+        drop(first);
+
+        let other_file = TokenFile::new(path.with_file_name("token.other.json"), &lock);
+        let moved = KiwoomAuth::new(Secret::new(KEY.into()), Secret::new(SECRET.into()), Some(other_file));
+        assert_eq!(moved.issue_blocked_until(t0.plus_secs(60)), Some(t0.plus_secs(600)), "다른 토큰 파일로 옮겨도 발급 간격이 따라온다");
+        assert!(moved.halted().is_some_and(|halt| halt.is_8050()), "8050 차단도 따라온다");
+
+        let stranger = KiwoomAuth::new(Secret::new("FAKE-APPKEY-stranger".into()), Secret::new(SECRET.into()), Some(TokenFile::new(path, &lock)));
+        assert_eq!(stranger.issue_blocked_until(t0.plus_secs(60)), None, "같은 파일을 받아도 다른 앱키는 남의 기록을 보지 않는다");
+        assert!(stranger.halted().is_none());
+    }
+
+    #[test]
+    fn an_old_block_without_an_app_key_belongs_to_whoever_holds_the_file_and_a_named_one_does_not() {
+        let t0 = kst(d(9), 9, 0, 0);
+        let block = |credential: Option<String>| SavedAuthBlock { detail: CodeKey::Rest(8050), credential, at: t0.unix() };
+        for (owner, blocked) in [(None, true), (Some(credential_id(KEY)), true), (Some(credential_id("FAKE-APPKEY-other")), false)] {
+            let (_dir, _lock, file) = crate::kiwoom::token_file::testing::temp_token_file();
+            file.save(&Saved { auth_block: Some(block(owner.clone())), last_request_at: t0.unix(), ..Saved::default() }).unwrap();
+            let a = KiwoomAuth::new(Secret::new(KEY.into()), Secret::new(SECRET.into()), Some(file));
+            assert_eq!(a.halted().is_some(), blocked, "{owner:?}");
+        }
+    }
+
+    #[test]
+    fn records_read_from_an_old_token_file_are_kept_for_the_app_key_after_the_file_is_overwritten() {
+        let (_dir, lock, file) = crate::kiwoom::token_file::testing::temp_token_file();
+        let path = file.path().to_owned();
+        let t0 = kst(d(9), 9, 0, 0);
+        let block = SavedAuthBlock { detail: CodeKey::Rest(8050), credential: Some(credential_id(KEY)), at: t0.unix() };
+        file.save(&Saved { credential: Some(credential_id(KEY)), last_request_at: t0.unix(), auth_block: Some(block), ..Saved::default() }).unwrap();
+        let first = KiwoomAuth::new(Secret::new(KEY.into()), Secret::new(SECRET.into()), Some(file));
+        assert!(first.halted().is_some_and(|halt| halt.is_8050()));
+        first.clear_credentials();
+        drop(first);
+
+        let again = KiwoomAuth::new(Secret::new(KEY.into()), Secret::new(SECRET.into()), Some(TokenFile::new(path, &lock)));
+        assert!(again.halted().is_some_and(|halt| halt.is_8050()), "옛 파일을 비워도 앱키의 8050 차단은 남는다");
+        assert_eq!(again.issue_blocked_until(t0.plus_secs(60)), Some(t0.plus_secs(600)));
     }
 }

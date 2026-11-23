@@ -569,3 +569,160 @@ async fn replacing_onto_an_app_key_that_already_has_a_file_keeps_the_block_of_th
     assert_eq!(client.key("k2").await["link"]["problem"], "authBlocked8050", "이미 파일이 있는 앱키로 바꿔도 8050은 남는다");
     server.stop().await;
 }
+
+const ENV_SECRET: (&str, &str) = ("VALLY_KIWOOM_APP_SECRET", "FAKE-SECRET-keys-env");
+const ENV_PAIR: (&str, &str) = ("VALLY_KIWOOM_APP_KEY", ENV_KEY);
+
+impl Client {
+    async fn until_waiting_for_the_issue_interval(&self, id: &str) -> Value {
+        until(&format!("키 {id}의 발급 간격 대기"), || async {
+            let key = self.key(id).await;
+            (key["link"]["state"] == "connecting" && key["link"]["step"] == "issueInterval").then_some(key)
+        })
+        .await
+    }
+
+    async fn remove(&self, id: &str) -> u16 {
+        self.send(reqwest::Method::DELETE, &format!("/api/system/kiwoom/keys/{id}"), None).await.0
+    }
+
+    async fn replace_key(&self, id: &str, key: &str, secret: &str) -> (u16, Value) {
+        self.send(reqwest::Method::PUT, &format!("/api/system/kiwoom/keys/{id}/key"), Some(json!({"appKey": key, "appSecret": secret}))).await
+    }
+}
+
+fn eight_fifty() -> Vec<ScriptedReply> {
+    vec![ScriptedReply { status: 200, body: json!({"return_code": 3, "return_msg": EIGHT_FIFTY}), delay: Duration::ZERO }]
+}
+
+#[tokio::test]
+async fn a_new_key_does_not_inherit_the_8050_block_of_a_deleted_key() {
+    let fake = ScriptedTransport::new();
+    let env = Env::new();
+    let server = env.spawn(&fake, &[OFF]);
+    let client = Client::of(&server).await;
+    fake.script("au10001", eight_fifty());
+    assert_eq!(client.put_market_credentials(FIRST_KEY, FIRST_SECRET).await.0, 200);
+    let blocked = client.until_key_state("k1", "failed").await;
+    assert_eq!(blocked["link"]["problem"], "authBlocked8050", "{blocked}");
+    assert_eq!(client.add("둘째", SECOND_KEY, SECOND_SECRET).await.0, 200);
+    client.until_key_state("k2", "connected").await;
+    assert_eq!(client.remove("k1").await, 200);
+    assert_eq!(client.add("셋째", THIRD_KEY, THIRD_SECRET).await.0, 200);
+    let third = client.until_key_state("k3", "connected").await;
+    assert_ne!(third["link"]["problem"], "authBlocked8050", "{third}");
+    assert_eq!(issued_for(&fake, THIRD_KEY), 1, "남의 차단 기록 때문에 발급을 미루지 않는다");
+    server.stop().await;
+}
+
+#[tokio::test]
+async fn a_key_moved_off_an_unreadable_base_file_keeps_its_issue_spacing() {
+    let fake = ScriptedTransport::new();
+    let env = Env::new();
+    let server = env.spawn(&fake, &[OFF]);
+    let client = Client::of(&server).await;
+    assert_eq!(client.put_market_credentials(FIRST_KEY, FIRST_SECRET).await.0, 200);
+    client.until_key_state("k1", "connected").await;
+    server.stop().await;
+
+    let base_file = env.lock.parent().unwrap().join("token.json");
+    std::fs::set_permissions(&base_file, std::fs::Permissions::from_mode(0o644)).unwrap();
+    let restarted_fake = ScriptedTransport::new();
+    let restarted = env.spawn(&restarted_fake, &[START, ENV_PAIR, ENV_SECRET]);
+    let client = Client::of(&restarted).await;
+    client.until_waiting_for_the_issue_interval("k1").await;
+    assert_eq!(issued_for(&restarted_fake, FIRST_KEY), 0, "기본 파일을 못 읽어 빈 파일로 옮겨도 발급 간격은 앱키를 따라온다");
+    restarted.stop().await;
+}
+
+#[tokio::test]
+async fn an_old_app_key_added_back_keeps_its_issue_spacing() {
+    let fake = ScriptedTransport::new();
+    let env = Env::new();
+    let server = env.spawn(&fake, &[OFF, ("VALLY_CLOCK_START", "20261119110000")]);
+    let client = Client::of(&server).await;
+    assert_eq!(client.put_market_credentials(FIRST_KEY, FIRST_SECRET).await.0, 200);
+    client.until_key_state("k1", "connected").await;
+    assert_eq!(client.replace_key("k1", SECOND_KEY, SECOND_SECRET).await.0, 200);
+    assert_eq!(client.add("옛 앱키", FIRST_KEY, FIRST_SECRET).await.0, 200);
+    client.until_waiting_for_the_issue_interval("k2").await;
+    assert_eq!(issued_for(&fake, FIRST_KEY), 1, "간격 안에서는 옛 앱키의 발급을 다시 보내지 않는다");
+    server.clock().jump(601);
+    client.until_key_state("k2", "connected").await;
+    assert_eq!(issued_for(&fake, FIRST_KEY), 2, "간격이 지나면 보낸다");
+    server.stop().await;
+}
+
+#[tokio::test]
+async fn an_app_key_moving_from_env_to_file_keeps_its_issue_spacing() {
+    let fake = ScriptedTransport::new();
+    let env = Env::new();
+    let server = env.spawn(&fake, &[START, ENV_PAIR, ENV_SECRET]);
+    let client = Client::of(&server).await;
+    client.until_key_state("env", "connected").await;
+    assert_eq!(issued_for(&fake, ENV_KEY), 1);
+    server.stop().await;
+
+    let restarted_fake = ScriptedTransport::new();
+    let restarted = env.spawn(&restarted_fake, &[OFF]);
+    let client = Client::of(&restarted).await;
+    assert_eq!(client.add("다른 키", SECOND_KEY, SECOND_SECRET).await.0, 200);
+    client.until_key_state("k1", "connected").await;
+    assert_eq!(client.add("환경에서 옮긴 키", ENV_KEY, "FAKE-SECRET-keys-env").await.0, 200);
+    client.until_waiting_for_the_issue_interval("k2").await;
+    assert_eq!(issued_for(&restarted_fake, ENV_KEY), 0, "환경 키였던 앱키를 파일 키로 더해도 발급 간격 안에는 보내지 않는다");
+    restarted.stop().await;
+}
+
+#[tokio::test]
+async fn a_blocked_key_stays_blocked_after_a_restart() {
+    let fake = ScriptedTransport::new();
+    let env = Env::new();
+    fake.script("au10001", eight_fifty());
+    let server = env.spawn(&fake, &[OFF]);
+    let client = Client::of(&server).await;
+    assert_eq!(client.put_market_credentials(FIRST_KEY, FIRST_SECRET).await.0, 200);
+    client.until_key_state("k1", "failed").await;
+    server.stop().await;
+
+    let restarted_fake = ScriptedTransport::new();
+    let restarted = env.spawn(&restarted_fake, &[START]);
+    let client = Client::of(&restarted).await;
+    let blocked = client.until_key_state("k1", "failed").await;
+    assert_eq!(blocked["link"]["problem"], "authBlocked8050", "{blocked}");
+    assert_eq!(issued_for(&restarted_fake, FIRST_KEY), 0);
+    restarted.stop().await;
+}
+
+struct TokenOnlyKis;
+
+impl server::kis::transport::Transport for TokenOnlyKis {
+    fn send(&self, req: server::kis::transport::HttpRequest) -> futures::future::BoxFuture<'static, Result<server::kis::transport::HttpResponse, server::kis::transport::TransportError>> {
+        let body = if req.path == "/oauth2/tokenP" { json!({"access_token": "FAKE-KIS-TOKEN-keys", "expires_in": 86_400}).to_string() } else { String::new() };
+        let status = if req.path == "/oauth2/tokenP" { 200 } else { 500 };
+        Box::pin(async move { Ok(server::kis::transport::HttpResponse { status, tr_cont: None, body }) })
+    }
+}
+
+#[tokio::test]
+async fn five_kiwoom_keys_and_one_kis_key_in_the_file_all_load() {
+    let entry = |id: &str, broker: &str, key: &str| json!({"id": id, "alias": id, "broker": broker, "appKey": key, "appSecret": "FAKE-SECRET-keys-limit", "accountNo": (broker == "kis").then_some("50012356-01")});
+    let file_keys: Vec<Value> = (1..=5).map(|n| entry(&format!("k{n}"), "kiwoom", &format!("FAKE-APPKEY-keys-limit-{n}"))).chain([entry("k6", "kis", "FAKE-KIS-APPKEY-keys-limit-6")]).collect();
+    for with_env_key in [false, true] {
+        let env = Env::new();
+        std::fs::create_dir_all(env.list_path().parent().unwrap()).unwrap();
+        std::fs::set_permissions(env.list_path().parent().unwrap(), std::fs::Permissions::from_mode(0o700)).unwrap();
+        std::fs::write(env.list_path(), json!({"version": 1, "keys": file_keys}).to_string()).unwrap();
+        std::fs::set_permissions(env.list_path(), std::fs::Permissions::from_mode(0o600)).unwrap();
+        let overrides: Vec<(&str, &std::ffi::OsStr)> = [Some(OFF), Some(NO_KEY), Some(("VALLY_KIWOOM_KEY_PATH", env.key_path.to_str().unwrap())), with_env_key.then_some(ENV_PAIR), with_env_key.then_some(ENV_SECRET)].into_iter().flatten().map(|(key, value)| (key, std::ffi::OsStr::new(value))).collect();
+        let kis: Arc<dyn server::kis::transport::Transport> = Arc::new(TokenOnlyKis);
+        let server = Server::spawn_with_kis(&ScriptedTransport::new(), Some(kis), &env.lock, &env.dist, &overrides);
+        let client = Client::of(&server).await;
+        let loaded: Vec<String> = client.keys().await.iter().map(|key| key["keyId"].as_str().unwrap().to_owned()).collect();
+        let expected = usize::from(with_env_key) + 6;
+        assert_eq!(loaded.len(), expected, "환경 키 {with_env_key}: {loaded:?}");
+        let (_, status) = client.get("/api/system/kiwoom").await;
+        assert_ne!(status["problem"], "keyFileUnusable", "{status}");
+        server.stop().await;
+    }
+}

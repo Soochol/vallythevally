@@ -53,6 +53,16 @@ fn token_file_of(env: &Env) -> Value {
     serde_json::from_str(&std::fs::read_to_string(token_path(&env.lock)).unwrap()).unwrap()
 }
 
+fn records_file_of(env: &Env) -> Value {
+    records_file_for(env, APP_KEY)
+}
+
+fn records_file_for(env: &Env, app_key: &str) -> Value {
+    let tag: String = credential_id(app_key).trim_start_matches("sha256:").chars().take(16).collect();
+    let path = token_path(&env.lock).with_file_name(format!("token-records.{tag}.json"));
+    serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap()
+}
+
 fn is_connected(state: &LinkState) -> bool {
     *state == LinkState::Connected
 }
@@ -313,12 +323,12 @@ async fn clearing_the_key_empties_the_token_and_keeps_the_last_request_time() {
     let server = spawn(&fake, &env, &[OFF]);
     server.addr().await;
     assert_eq!(server.connect(false).await, LinkState::Connected);
-    let before: Value = serde_json::from_str(&std::fs::read_to_string(token_path(&env.lock)).unwrap()).unwrap();
-    assert!(before["token"].is_object());
+    assert!(token_file_of(&env)["token"].is_object());
+    let before = records_file_of(&env);
 
     assert_eq!(server.link().clear_key(), LinkState::NoKey);
-    let after: Value = serde_json::from_str(&std::fs::read_to_string(token_path(&env.lock)).unwrap()).unwrap();
-    assert_eq!((after["token"].clone(), after["last_request_at"].clone()), (Value::Null, before["last_request_at"].clone()));
+    assert_eq!(token_file_of(&env)["token"], Value::Null);
+    assert_eq!(records_file_of(&env)["last_request_at"], before["last_request_at"], "앱키의 기록 파일은 키를 지워도 발급 시각을 지킨다");
     server.stop().await;
 }
 
@@ -1003,7 +1013,7 @@ async fn a_restart_after_a_key_rejection_stays_blocked_until_a_new_key_is_saved(
     first.addr().await;
     let blocked = first.wait_for_state(is_failed).await;
     assert_eq!(failure(blocked.clone()).problem, Problem::KeyNeedsCheck);
-    assert_eq!(token_file_of(&env)["auth_block"]["credential"], credential_id(APP_KEY));
+    assert_eq!(records_file_of(&env)["auth_block"]["credential"], credential_id(APP_KEY));
     first.stop().await;
     fake.reset();
 
@@ -1016,7 +1026,8 @@ async fn a_restart_after_a_key_rejection_stays_blocked_until_a_new_key_is_saved(
 
     let state = server.link().replace_key(Secret::new("FAKE-new-key".into()), Secret::new("FAKE-new-secret".into()));
     assert_eq!(state, LinkState::Disconnected);
-    assert!(token_file_of(&env)["auth_block"].is_null());
+    assert!(records_file_for(&env, "FAKE-new-key")["auth_block"].is_null(), "새 앱키는 키 거절 기록을 이어받지 않는다");
+    assert!(!records_file_of(&env)["auth_block"].is_null(), "옛 앱키의 기록은 그대로 남는다");
     assert_eq!(server.connect(false).await, LinkState::Connected);
     assert_eq!(fake.issued(), 2);
     server.stop().await;
@@ -1049,7 +1060,7 @@ async fn a_restart_after_the_user_disconnects_stays_disconnected() {
     first.wait_for_state(is_connected).await;
     first.link().disconnect_by_user();
     assert_eq!(first.link_state(), LinkState::Disconnected);
-    assert_eq!(token_file_of(&env)["disconnected"], credential_id(APP_KEY));
+    assert_eq!(records_file_of(&env)["disconnected"], true);
     first.stop().await;
     let sent = fake.requests();
 
@@ -1059,7 +1070,7 @@ async fn a_restart_after_the_user_disconnects_stays_disconnected() {
     assert_eq!(second.link_state(), LinkState::Disconnected);
     assert_eq!(fake.requests(), sent, "끊어 둔 키는 켤 때 아무것도 보내지 않는다: {:?}", fake.api_ids());
     assert_eq!(second.connect(false).await, LinkState::Connected);
-    assert!(token_file_of(&env)["disconnected"].is_null(), "다시 연결하면 끊어 둔 기록이 지워진다");
+    assert!(records_file_of(&env)["disconnected"] == false, "다시 연결하면 끊어 둔 기록이 지워진다");
     second.stop().await;
 
     let third = spawn(&fake, &env, &[START]);
@@ -1078,10 +1089,10 @@ async fn a_disconnect_that_a_key_save_or_delete_makes_is_not_remembered() {
     server.wait_for_state(is_connected).await;
     server.link().disconnect();
     server.link().replace_key(Secret::new(APP_KEY.into()), Secret::new("FAKE-SECRET".into()));
-    assert!(token_file_of(&env)["disconnected"].is_null());
+    assert!(records_file_of(&env)["disconnected"] == false);
     server.link().disconnect();
     server.link().clear_key();
-    assert!(token_file_of(&env)["disconnected"].is_null());
+    assert!(records_file_of(&env)["disconnected"] == false);
     server.stop().await;
 }
 

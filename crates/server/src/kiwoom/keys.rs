@@ -667,7 +667,7 @@ impl KeyRing {
         }
         entry.paths = new_paths;
         if let EntryLane::Kiwoom(lane) = &entry.lane {
-            lane.link.rebind(identity(factory, entry));
+            lane.link.rebind_replacing(identity(factory, entry));
             lane.link.record_key_in_token_file();
             lane.link.connect_in_background();
         }
