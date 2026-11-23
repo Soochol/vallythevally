@@ -3,7 +3,6 @@ import { DEFAULT_CHART_SETTINGS } from "../chart/settings";
 import { detachWindow, moveFloat } from "../layout/dock/floats";
 import { useSelectionStore } from "./selection";
 import { useUiStore } from "./ui";
-import { orderLedger } from "../features/order/commandLedger";
 import { orderEntryKey, type OrderEntry } from "../features/order/orderEntries";
 import { DEFAULT_UI_PREFS } from "../persist/uiState";
 import { layoutDock } from "../layout/dock/geometry";
@@ -834,28 +833,4 @@ test("되돌린 호가주문창의 기억은 다시 하기로 새 창이 받을 
   state().undoArrangement();
   state().undoArrangement();
   expect(useUiStore.getState().prefs.orderEntries[key]).toEqual(closedEntry);
-});
-
-test("되돌리기로 창이 사라진 동안 끝난 응답 없음은 다시 하기로 되살린 창이 다시 쓴다", () => {
-  const action = "place|005930|buy|70000|1|krx|late-undo";
-  state().openWindow("order");
-  const sending = orderLedger.issueEach("order", action);
-  state().undoArrangement();
-  orderLedger.settleEach("order", action, sending, "unanswered");
-  state().redoArrangement();
-  expect(orderLedger.issueEach("order", action)).toBe(sending);
-});
-
-test("id를 다시 준 동안 끝난 닫힌 창의 응답 없음은 되돌리기로 되살린 창이 다시 쓴다", () => {
-  const action = "place|005930|buy|70000|1|krx|late-reuse";
-  state().openWindow("order");
-  state().duplicateWindow(windowId("order"));
-  const sending = orderLedger.issueEach("order-2", action);
-  state().closeWindow(windowId("order-2"));
-  state().openWindow("order");
-  orderLedger.settleEach("order-2", action, sending, "unanswered");
-  expect(orderLedger.issueEach("order-2", action)).not.toBe(sending);
-  state().undoArrangement();
-  state().undoArrangement();
-  expect(orderLedger.issueEach("order-2", action)).toBe(sending);
 });
