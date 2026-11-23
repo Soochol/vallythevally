@@ -15,9 +15,11 @@ import { RankingConditionRow, RankingPickers } from "./RankingConditions";
 import { RankingTable } from "./RankingTable";
 import { choiceLabel, KIWOOM_TR, VENUE_LABEL } from "./rankingChoices";
 import { formatClock } from "../market-window/format";
+import { DataAgeNote } from "../data-age/DataAgeNote";
 import { useDocumentVisible, useRankingFeed } from "./useRankingFeed";
 import "./ranking.css";
 
+export const NOT_PREPARED_NOTICE = "미리 만든 조건만 볼 수 있습니다";
 export const UNLISTED_NOTICE = "차트로 열 수 없는 종목입니다";
 
 function useWindowRanking(id: WindowId): Ranking | null {
@@ -85,6 +87,8 @@ function RankingBody({ id, ranking }: { id: WindowId; ranking: Ranking }) {
             <p>{FEED_UNAVAILABLE_TEXT}</p>
             <button type="button" className="tb-btn" onClick={() => openSystemSettings("kiwoom")}>시스템 설정 이어가기</button>
           </div>
+        ) : page === null && feed.notPrepared ? (
+          <EmptyState title={NOT_PREPARED_NOTICE} />
         ) : page === null && feed.error !== null ? (
           <div role="alert" className="ui-state">
             <p>{feed.error}</p>
@@ -125,7 +129,7 @@ function LiveStatus({ fetchedAt, failure, live, stopped, onToggle }: { fetchedAt
   return (
     <span className="rk-status" data-testid="ranking-status">
       <span className="rk-dot" data-testid="ranking-live" data-state={live ? "live" : "idle"} aria-hidden="true" />
-      {failure !== null ? <span className="rk-failure" role="status">받지 못했습니다 · {failure}</span> : fetchedAt !== null && <span>받은 시각 {formatClock(fetchedAt)}</span>}
+      {failure !== null ? <span className="rk-failure" role="status">받지 못했습니다 · {failure}</span> : fetchedAt !== null && <><span>받은 시각 {formatClock(fetchedAt)}</span><DataAgeNote recordedAt={fetchedAt} cadence="ranking" /></>}
       <button type="button" className="tb-btn" aria-pressed={stopped} onClick={onToggle}>
         {stopped ? "멈춤" : "멈추기"}
       </button>

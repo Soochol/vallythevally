@@ -278,6 +278,12 @@ DOM 범례는 `iconMarkup("gear" | "eye" | "eyeOff" | "close" | "up" | "down")`�
 | 빨강 | 인증 차단(8050), 키 확인, 토큰 파일, 키 파일, 경로 멈춤 |
 | 초록 | 연결됨 |
 
+## 자료 나이와 낡음 표시
+
+순위 창(`fetchedAt`), 시장 종합 페이지(`context.receivedAt`), 히트맵 보드(`asOf`)와 흐름(`asOf`, 테마 가운데 가장 오래된 값), 스크리너 결과(`collectionCompletedAt`)는 `DataAgeNote`(`data-testid="data-age"`)로 자료 나이를 보인다. 판정은 `lib/dataAge.ts`의 `assessDataAge`가 하고 자료 주기(순위 10초, 보드 30초, 흐름 60초, 시장 개요 60초, 스크리너 30초)는 그 파일의 한 상수에 있다. 나이가 주기의 두 배를 넘어야 "○초 전 자료", "○분 전 자료"(1시간부터 "○시간 전 자료", 하루부터 "○일 전 자료")를 `--text-3` 색으로 보인다. 장중에 5분을 넘으면 `--warning` 색으로 바뀌고 " · 자료가 늦어지고 있습니다"가 붙으며 `data-stale="true"`다. 장중은 시장 종합이 응답의 `phase`(`closed`가 아님), 나머지는 `isMarketOpen`(평일 08:00~20:00 KST)으로 가른다. 장 밖에는 나이만 보인다. 시계는 서버 시각(`useServerTime`)이다.
+
+순위 창은 `not_prepared`(공개 모드의 미리 만들지 않은 순위 조건)를 받으면 본문에 "미리 만든 조건만 볼 수 있습니다"만 보이고 창과 조건은 그대로다. 흐름은 `notCollected` 종목이 있는 테마마다 "실시간 수집 대상이 아닌 종목 N개"를 알리고 종목 이름은 `title` 툴팁에 둔다. 히트맵 보드는 30초마다, 흐름과 시장 개요는 60초마다, 순위는 10초마다 다시 받는다.
+
 ## 수집 현황판
 
 `features/collector-board/`가 [ADR 0026](adr/0026-collector-supervisor-collects-common-and-preferred-stocks.md)의 수집 현황판을 그린다. 읽기 전용이라 재시작·인계 단추를 두지 않는다. 눌러서 하는 일은 브라우저 알림 허락과 불러오기 실패 뒤의 다시 시도뿐이다.

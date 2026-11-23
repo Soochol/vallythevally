@@ -5,7 +5,7 @@ import type { HeatmapThemeOrder } from "./generated/HeatmapThemeOrder";
 import type { Venue } from "./generated/Venue";
 import { getJson } from "./http";
 
-export const HEATMAP_BOARD_REFRESH_MS = 60_000;
+export const HEATMAP_BOARD_REFRESH_MS = 30_000;
 
 export const heatmapBoardQuery = (venue: Venue, order: HeatmapThemeOrder, source: HeatmapSource) =>
   queryOptions({

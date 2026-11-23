@@ -4,6 +4,7 @@ import type { MarketOverviewPeriod } from "../../api/generated/MarketOverviewPer
 import type { MarketOverviewPhase } from "../../api/generated/MarketOverviewPhase";
 import { MARKET_REFRESH_MS, useMarketIndex } from "../../api/marketOverview";
 import { useKiwoomLinkStore } from "../../stores/kiwoomLink";
+import { DataAgeNote } from "../data-age/DataAgeNote";
 import { formatClock } from "../market-window/format";
 import { EmptyState } from "../overlay/State";
 import { PageFrame } from "../pages/PageFrame";
@@ -36,6 +37,7 @@ function Freshness({ market, enabled }: { market: Market; enabled: boolean }) {
     <>
       <span data-phase={phase}>{PHASE_LABEL[phase]}</span>
       <span>받은 시각 {receivedAt === null ? "—" : formatClock(receivedAt)}</span>
+      <DataAgeNote recordedAt={receivedAt} cadence="marketOverview" live={phase !== "closed"} />
       <span>{MARKET_REFRESH_MS / 60_000}분마다 갱신</span>
     </>
   );

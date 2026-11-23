@@ -1,0 +1,2 @@
+.data-age { color:var(--text-3); font-variant-numeric:tabular-nums; }
+.data-age[data-stale="true"] { color:var(--warning); }
