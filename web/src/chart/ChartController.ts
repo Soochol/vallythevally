@@ -4,6 +4,7 @@ import {
   CrosshairMode,
   type DeepPartial,
   type IChartApi,
+  type IRange,
   LineStyle,
   MismatchDirection,
   PriceScaleMode,
@@ -375,8 +376,13 @@ export class ChartController {
     const draw = () => this.indicators.setFinancials(page, message);
     this.withDataGuard(() => {
       if (this.initialRange.held) {
+        const timeScale = this.chart.timeScale();
+        const userShift = this.pendingScroll.unpaintedUserShift;
         draw();
-        this.fitInitialRange();
+        const drawn = timeScale.getVisibleLogicalRange();
+        const lastPointIndex = drawn ? drawn.to - timeScale.scrollPosition() : null;
+        const fitted = this.fitInitialRange();
+        if (userShift !== 0 && fitted && lastPointIndex !== null) this.pendingScroll.scrollTo(timeScale, fitted.to - lastPointIndex + userShift);
       } else preserveTimeRange(this.chart.timeScale(), this.period(), this.pendingScroll, draw);
     });
     this.requestLegendSources("indicators");
@@ -485,7 +491,7 @@ export class ChartController {
       event.stopImmediatePropagation();
       const unit = event.deltaMode === WheelEvent.DOM_DELTA_LINE ? 32 : event.deltaMode === WheelEvent.DOM_DELTA_PAGE ? 120 : 1;
       const shift = event.deltaY * unit * 0.8 / timeScale.options().barSpacing;
-      this.pendingScroll.scrollTo(timeScale, this.pendingScroll.position(timeScale) + shift);
+      this.pendingScroll.scrollByUser(timeScale, shift);
       return;
     }
     if (!wheelScale) {
@@ -747,8 +753,8 @@ export class ChartController {
     }
   }
 
-  private fitInitialRange(): void {
-    this.initialRange.fit({ bars: this.bars, period: this.period(), visibleBars: this.view?.settings.visibleBars ?? null, narrow: matchMedia("(max-width: 767px)").matches });
+  private fitInitialRange(): IRange<number> | null {
+    return this.initialRange.fit({ bars: this.bars, period: this.period(), visibleBars: this.view?.settings.visibleBars ?? null, narrow: matchMedia("(max-width: 767px)").matches });
   }
 
   private rightEdgeT(): UnixSeconds | null {

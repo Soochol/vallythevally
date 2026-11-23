@@ -40,19 +40,20 @@ export class InitialRange {
     return this.fitted !== null;
   }
 
-  fit(input: FitInput): void {
+  fit(input: FitInput): IRange<number> | null {
     const first = input.bars[0];
     const last = input.bars.at(-1);
-    if (!first || !last) return;
+    if (!first || !last) return null;
     const scale = this.scale();
     const start = scale.timeToIndex(toChartTime(first.t), false);
     const end = scale.timeToIndex(toChartTime(last.t), false);
-    if (start === null || end === null) return;
+    if (start === null || end === null) return null;
     const range = initialRangeOf(input, start, end);
     this.fitted = null;
     scale.applyOptions({ lockVisibleTimeRangeOnResize: true });
     scale.setVisibleLogicalRange(range);
     this.fitted = { range, host: this.host() };
+    return range;
   }
 
   release(): void {
