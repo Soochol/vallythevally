@@ -7,11 +7,11 @@ import { editor, excludedLine, expectCellOn, expectRows, openScreener, panel, pi
 
 
 const SCREEN_NAME = "교차 급증 주봉 신고가";
-const CROSS = "일봉최근5일 이내에단순짧은 이평5일선이20일선을위로교차인 봉이 있다";
-const WEEKLY_HIGH = "주봉최근1주 이내에종가52주 신고가인 봉이 있다";
-const SURGE = "일봉최근10일 이내에거래량직전20일 평균의3배 이상인 봉이 있다";
-const RISE = "일봉최근10일 이내에종가1일 전보다5%이상인 봉이 있다";
-const MARKET_CAP = "시가총액이3000억 원이상이다";
+const CROSS = "이평 교차 일봉 최근 5일 이내에 단순 짧은 이평 5일선이 20일선을 위로 교차한 봉이 있다";
+const WEEKLY_HIGH = "신고가 주봉 최근 1주 이내에 종가가 52주 신고가인 봉이 있다";
+const SURGE = "거래 급증 일봉 최근 10일 이내에 거래량이 직전 20일 평균의 3배 이상인 봉이 있다";
+const RISE = "등락률 일봉 최근 10일 이내에 종가가 1일 전보다 5% 이상인 봉이 있다";
+const MARKET_CAP = "시가총액 3000억 원 이상이다";
 
 const KOSPI_HIT = ["120010", "가상교차급증", "11-05"] as const;
 const KOSDAQ_HIT = ["120020", "가상코스닥교차", "11-04"] as const;

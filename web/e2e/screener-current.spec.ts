@@ -114,7 +114,7 @@ test("처음 수집 실패는 빈 상태이며 실행 중과 실패 뒤에는 �
   await expect(meta(page)).toHaveText(original!);
   expect(await rows(page).allTextContents()).toEqual(originalRows);
   held.reply({ status: 503, body: runError() });
-  await expect(panel(page).getByRole("alert")).toContainText("이전 결과와 수집 시각을 유지합니다");
+  await expect(panel(page).getByRole("alert")).toContainText("이전 결과를 그대로 보입니다");
   await expect(meta(page)).toHaveText(original!);
   expect(await rows(page).allTextContents()).toEqual(originalRows);
 });
@@ -158,14 +158,14 @@ test("이전된 조건식은 안내 없이 열리고 편집·저장·새로 고�
   await page.goto("/");
   await openScreener(page);
   await expandEditor(page);
-  await expect(panel(page).getByRole("list", { name: "조건" })).toContainText(/최근\s*3일 이내/);
+  await expect(panel(page).getByRole("list", { name: "조건" })).toContainText(/최근\s*3일\s*이내에/);
   await expect(page.getByRole("alert")).toHaveCount(0);
   await expect(page.getByText(/변환|이전되었습니다|새 규칙으로/)).toHaveCount(0);
   await editRecent(page, "M", 2);
   await page.reload();
   await openScreener(page);
   await expandEditor(page);
-  await expect(panel(page).getByRole("list", { name: "조건" })).toContainText(/월봉\s*최근\s*2개월 이내/);
+  await expect(panel(page).getByRole("list", { name: "조건" })).toContainText(/월봉\s*최근\s*2개월\s*이내에/);
   expect(scenario.documents.screens().revision).toBe(13);
   await expect(page.getByText(/변환|이전되었습니다|새 규칙으로/)).toHaveCount(0);
 });

@@ -79,17 +79,17 @@ async function editorMarkup(editing: boolean, invalid = false) {
   const { entries, chosen } = screenEditing.view();
   if (!chosen) throw new Error("문장 편집기에 보일 조건식이 있어야 합니다");
   const client = new QueryClient();
-  const editor = createElement(SentenceEditor, { screenEditing, chosen, entries, blocked: false, resultActions: null, editing, onEditingChange: () => {}, onRun: () => {} });
+  const editor = createElement(SentenceEditor, { screenEditing, chosen, entries, blocked: false, menu: () => null, editing, onEditingChange: () => {}, onRun: () => {} });
   const markup = renderToStaticMarkup(createElement(QueryClientProvider, { client }, editor));
   client.clear();
   return markup;
 }
 
-test("패널은 실행·편집만 보이고 문장 편집은 편집 창에서 연다", async () => {
+test("패널은 실행·편집과 조건 요약 한 줄만 보이고 문장 편집은 편집 창에서 연다", async () => {
   const closed = await editorMarkup(false);
-  expect(closed).not.toContain("52주 신고가");
-  expect(closed).not.toContain("코스피 · ETF 제외");
-  expect(closed).not.toContain('aria-label="조건 요약"');
+  expect(closed).toContain('data-screen-summary="true" title="코스피 · ETF 제외\n1. 주봉 최근 5주 이내 고가가 52주 신고가인 봉이 있다"');
+  expect(closed).toContain(">코스피 · ETF 제외 · 조건 1개: 주봉 최근 5주 이내 고가가 52주 신고가인 봉이 있다</p>");
+  expect(closed).not.toContain(">저장<");
   expect(closed).toContain('aria-haspopup="dialog" aria-expanded="false"');
   expect(closed).toContain('aria-keyshortcuts="Control+Enter Meta+Enter"');
   expect(closed).not.toContain('aria-label="문장형 조건식"');
