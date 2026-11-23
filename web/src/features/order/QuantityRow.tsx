@@ -1,7 +1,9 @@
-import { type ChangeEvent, useId, useLayoutEffect, useRef } from "react";
+import { type ChangeEvent, type KeyboardEvent, useId, useLayoutEffect, useRef } from "react";
+import { useStoreValue, type ValueStore } from "../../lib/valueStore";
 import { formatWon } from "../market-window/format";
 import { Segmented } from "../market-window/parts";
-import { type EstimateNote, quantityForAmount } from "./orderRules";
+import type { HoverCell } from "./OrderLadder";
+import { type BuyingPower, type EstimateNote, estimateNote, quantityForAmount } from "./orderRules";
 import { AMOUNT_UNIT_WON, KEEP_LAST_ENTRY_LABEL, type PresetKind } from "./orderSettings";
 
 const PRESET_KINDS = [{ value: "sharePresets", label: "수량" }, { value: "amountPresets", label: "금액" }] as const;
@@ -40,6 +42,12 @@ export function QuantityRow({ presetKind, input, sharePresets, amountPresets, re
     digitsBeforeCaret.current = digitsBefore;
     onInput(digits);
   };
+  const nudge = (event: KeyboardEvent<HTMLInputElement>) => {
+    if (event.key !== "ArrowUp" && event.key !== "ArrowDown") return;
+    event.preventDefault();
+    const step = (event.key === "ArrowUp" ? 1 : -1) * (event.shiftKey ? 10 : 1);
+    onInput(String(Math.max(0, (Number(input) || 0) + step)));
+  };
   const amountKind = presetKind === "amountPresets";
   const noPrice = amountKind && (referencePrice === null || !(referencePrice > 0));
   const fillAmount = (won: number) => onInput(String(quantityForAmount(won, referencePrice) ?? 0));
@@ -49,11 +57,11 @@ export function QuantityRow({ presetKind, input, sharePresets, amountPresets, re
         <label className="od-qty-label" htmlFor={inputId}>수량</label>
         {keepLastEntry && <span className="od-qty-keep" data-testid="order-keep-mark" title={KEEP_LAST_ENTRY_LABEL}>유지</span>}
       </span>
-      <input id={inputId} ref={field} className="od-qty-input" inputMode="numeric" autoComplete="off" value={input} onChange={change} />
+      <input id={inputId} ref={field} className="od-qty-input" inputMode="numeric" autoComplete="off" value={input} onChange={change} onKeyDown={nudge} />
       <Segmented label="수량 방식" options={PRESET_KINDS} value={presetKind} onChange={onPresetKind} />
       <div className="od-presets" role="group" aria-label="수량 프리셋">
         {amountKind
-          ? amountPresets.map((man) => <button key={man} type="button" className="od-preset" disabled={noPrice} title={noPrice ? NO_REFERENCE_PRICE_TEXT : undefined} onClick={() => fillAmount(man * AMOUNT_UNIT_WON)}>{`${man}만`}</button>)
+          ? amountPresets.map((man) => <button key={man} type="button" className="od-preset" disabled={noPrice} title={noPrice ? NO_REFERENCE_PRICE_TEXT : undefined} onClick={() => fillAmount(man * AMOUNT_UNIT_WON)}>{`${man.toLocaleString("ko-KR")}만`}</button>)
           : sharePresets.map((shares) => <button key={shares} type="button" className="od-preset" onClick={() => onInput(String(shares))}>{shares}</button>)}
       </div>
     </div>
@@ -71,4 +79,12 @@ export function OrderEstimate({ estimate, note }: EstimateProps) {
       <span className="od-estimate-amount" title={estimate === null ? undefined : `예상 주문금액 ${formatWon(estimate)}`}>예상 주문금액 <b data-testid="order-estimate">{estimate === null ? "-" : formatWon(estimate)}</b>{note && <span className="od-estimate-note" data-testid="order-estimate-note" data-tone={note.tone}> · {note.text}</span>}</span>
     </div>
   );
+}
+
+export function HoverOrderEstimate({ hover, quantity, referencePrice, buying }: { hover: ValueStore<HoverCell | null>; quantity: number; referencePrice: number | null; buying: BuyingPower | null }) {
+  const hoveredPrice = useStoreValue(hover, (cell) => cell?.price ?? null);
+  const hoveredSide = useStoreValue(hover, (cell) => cell?.side ?? null);
+  const unitPrice = hoveredPrice ?? referencePrice ?? 0;
+  const estimate = unitPrice > 0 && quantity > 0 ? unitPrice * quantity : null;
+  return <OrderEstimate estimate={estimate} note={estimate !== null && hoveredSide !== "sell" ? estimateNote(estimate, buying) : null} />;
 }

@@ -2,7 +2,7 @@ import { expect, test } from "vitest";
 import type { TradingOpenOrder } from "../../api/generated/TradingOpenOrder";
 import type { TradingOrderable } from "../../api/generated/TradingOrderable";
 import type { PendingWrite } from "./pendingWrites";
-import { type BuyingPower, buyBlock, buyingPowerOf, buyPreview, capacityProblem, type DragSource, estimateNote, marginOf, maxBuyQuantity, modifyBuyProblem, type DragTarget, dragGhostText, dragQuantity, dragSide, groupOpenOrders, groupWithPending, HIGH_VALUE_WON, judgeDrag, needsHighValueConfirm, type PriceGroup, quantityForAmount, sideTotal, typedQuantity } from "./orderRules";
+import { type BuyingPower, buyBlock, buyingPowerOf, buyPreview, CANCEL_CONFIRM_MS, cancelConfirmText, capacityProblem, dragCancels, type DragSource, estimateNote, marginOf, maxBuyQuantity, modifyBuyProblem, type DragTarget, dragGhostText, dragQuantity, dragSide, groupOpenOrders, groupWithPending, HIGH_VALUE_WON, judgeDrag, needsCancelConfirm, needsHighValueConfirm, orderCountOf, type PriceGroup, quantityForAmount, sideTotal, typedQuantity } from "./orderRules";
 
 const order = (orderNo: string, side: "buy" | "sell", price: number, openQuantity: number, code = "005930"): TradingOpenOrder => ({
   orderNo, code, name: "삼성전자", side, quantity: openQuantity, price, openQuantity, status: "접수", orderedAt: "090000", originalOrderNo: null, venue: "krx",
@@ -234,4 +234,26 @@ test("접수한 신규를 곧바로 취소하면 재조회 전에도 그 칩에�
   const placed = order("0000099", "buy", 70_000, 10);
   const writes: PendingWrite[] = [{ ...stamped, kind: "placed", order: placed }, { ...stamped, kind: "gone", orderNo: "0000099" }];
   expect(groupWithPending([], writes, "005930").size).toBe(0);
+});
+
+test("둘 이상의 주문을 한 번에 취소할 때만 두 번 누르기가 필요하다", () => {
+  expect(needsCancelConfirm(0)).toBe(false);
+  expect(needsCancelConfirm(1)).toBe(false);
+  expect(needsCancelConfirm(2)).toBe(true);
+  expect(needsCancelConfirm(3)).toBe(true);
+  expect(cancelConfirmText(3)).toBe("3건 취소 · 한 번 더 누르기");
+  expect(CANCEL_CONFIRM_MS).toBe(3_000);
+});
+
+test("가격 묶음들의 주문 수를 센다", () => {
+  const groups = [{ orders: [1, 2] }, { orders: [3] }];
+  expect(orderCountOf(groups)).toBe(3);
+  expect(orderCountOf([])).toBe(0);
+});
+
+test("사다리 밖에 놓는 끌기만 취소로 본다", () => {
+  const source: DragSource = { kind: "order", order: order("0000001", "buy", 70_000, 5) };
+  expect(dragCancels({ kind: "outside" }, source)).toBe(true);
+  expect(dragCancels({ kind: "ladder" }, source)).toBe(false);
+  expect(dragCancels({ kind: "cell", side: "buy", price: 69_900 }, source)).toBe(false);
 });

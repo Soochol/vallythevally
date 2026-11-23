@@ -168,7 +168,7 @@ test("보유 요약이 값을 보이고 평가손익을 원과 퍼센트로 바�
   await page.getByTestId("summary-quantity").click();
   await expect(page.getByRole("textbox", { name: "수량" })).toHaveValue("100");
   await expect(page.getByRole("group", { name: "수량 방식" }).getByRole("button", { name: "금액" })).toHaveAttribute("aria-pressed", "true");
-  await expect(page.getByRole("group", { name: "수량 프리셋" }).getByRole("button")).toHaveText(["100만", "500만", "1000만", "5000만"]);
+  await expect(page.getByRole("group", { name: "수량 프리셋" }).getByRole("button")).toHaveText(["100만", "500만", "1,000만", "5,000만"]);
   await expect(page.getByTestId("ladder-mark")).toHaveCount(1);
 });
 
@@ -188,7 +188,7 @@ test("전체 호가는 상한부터 하한까지 스크롤하고 현재가 단�
   tradingApi(scenario);
   await openOrderWindow(page, scenario);
   lastTrade(scenario, BASE);
-  await expect(page.getByTestId("order-current")).toBeDisabled();
+  await expect(page.getByTestId("order-current")).toBeEnabled();
   await page.getByTestId("order-explorer").click();
   await expect(page.getByTestId("order-explorer")).toHaveAttribute("aria-pressed", "true");
   const ladder = page.getByTestId("order-ladder");
@@ -466,6 +466,7 @@ test("구분선을 켜도 상세 정보 카드와 체결 상자 안에는 가로
   const underRowTop = async (cellLocator: Locator, row: number) => ({ ...(await boxOfCell(cellLocator)), y: (await boxOfCell(ladderRows(page).nth(row))).y });
   await expect(ladderRows(page)).toHaveCount(20);
   await expect(page.getByTestId("ladder-info")).toHaveCount(7);
+  await scrollLadder(page, 0);
 
   const on = await rowShadows();
   expect(on[0]).toBeNull();
@@ -483,8 +484,9 @@ test("구분선을 켜도 상세 정보 카드와 체결 상자 안에는 가로
     expect(await hasLineOnTop(page, cell), `카드 ${row}행`).toBe(false);
     expect(await hasLineOnTop(page, await boxOfCell(askCell(row))), `매도 잔량 칸 ${row}행`).toBe(true);
     expect(await hasLineOnTop(page, await underRowTop(priceCell(row), row)), `가격 칸 ${row}행`).toBe(true);
-    expect(await hasLineOnTop(page, await boxOfCell(orderCell(row))), `주문 칸 ${row}행`).toBe(true);
+    expect(await hasLineOnTop(page, await underRowTop(orderCell(row), row)), `주문 칸 ${row}행`).toBe(true);
   }
+  await scrollLadder(page, "end");
   expect(await hasLineOnTop(page, await boxOfCell(infoCell(12))), "정보 칸이 없는 행의 매수 잔량 칸").toBe(true);
   const layer = await boxOfCell(boxLayer);
   expect(await hasLineOnTop(page, layer), "체결 상자 위 가장자리의 가운데 선").toBe(true);
@@ -499,11 +501,14 @@ test("구분선을 켜도 상세 정보 카드와 체결 상자 안에는 가로
   expect((await rowShadows()).every((line) => line === null)).toBe(true);
   expect(new Set(await heights())).toEqual(new Set([24]));
   await page.keyboard.press("Escape");
-  for (const row of [1, 3, 6, 13]) {
+  await scrollLadder(page, 0);
+  for (const row of [1, 3, 6]) {
     expect(await hasLineOnTop(page, await boxOfCell(infoCell(row))), `끈 뒤 매수 잔량 칸 ${row}행`).toBe(false);
     expect(await hasLineOnTop(page, await boxOfCell(askCell(row))), `끈 뒤 매도 잔량 칸 ${row}행`).toBe(false);
     expect(await hasLineOnTop(page, await underRowTop(priceCell(row), row)), `끈 뒤 가격 칸 ${row}행`).toBe(false);
   }
+  await scrollLadder(page, "end");
+  expect(await hasLineOnTop(page, await underRowTop(priceCell(13), 13)), "끈 뒤 가격 칸 13행").toBe(false);
   expect(await hasLineOnTop(page, await boxOfCell(boxLayer)), "끈 뒤 체결 상자 위").toBe(false);
 });
 
@@ -578,7 +583,7 @@ test("금액 프리셋을 바꾸면 금액 방식의 프리셋 단추가 그 값
   await page.keyboard.press("Escape");
   await page.getByRole("button", { name: "금액" }).click();
   const buttons = page.getByRole("group", { name: "수량 프리셋" }).getByRole("button");
-  await expect(buttons).toHaveText(["200만", "500만", "1000만", "5000만"]);
+  await expect(buttons).toHaveText(["200만", "500만", "1,000만", "5,000만"]);
   await buttons.first().click();
   await expect(page.getByRole("textbox", { name: "수량" })).toHaveValue("28");
 });
@@ -615,8 +620,10 @@ test("주문 입력은 두 줄로 사다리 위에, 총잔량 띠와 그 위 접
   const firstRow = ladderRows(page).first();
   await expect(page.getByTestId("order-status")).toHaveCount(0);
   await expect(win(page)).not.toContainText("호가 칸을 더블클릭해 주문합니다");
-  const gap = (await topOf(firstRow)) - (await page.getByTestId("order-explorer").evaluate((element) => element.getBoundingClientRect().bottom));
-  expect(gap).toBeLessThan(16);
+  const toolbarBottom = await page.getByTestId("order-explorer").evaluate((element) => element.getBoundingClientRect().bottom);
+  const columnHead = (await page.getByTestId("order-colhead").boundingBox())!;
+  expect(columnHead.y - toolbarBottom).toBeLessThan(16);
+  expect((await topOf(firstRow)) - (columnHead.y + columnHead.height)).toBeLessThan(8);
   expect(await topOf(page.getByTestId("order-total-ask"))).toBeGreaterThanOrEqual(ladderBottom);
   expect(await topOf(page.getByTestId("order-total-sell"))).toBeGreaterThanOrEqual(ladderBottom);
   expect(await topOf(page.getByTestId("order-total-sell"))).toBeLessThan(await topOf(page.getByTestId("order-total-ask")));
@@ -631,7 +638,7 @@ test("금액 방식이면 같은 줄의 프리셋이 100만·500만·1000만·50
   await win(page).evaluate((element) => { element.style.flex = "none"; element.style.width = "421px"; });
   await page.getByRole("group", { name: "수량 방식" }).getByRole("button", { name: "금액" }).click();
   const presets = page.getByRole("group", { name: "수량 프리셋" }).getByRole("button");
-  await expect(presets).toHaveText(["100만", "500만", "1000만", "5000만"]);
+  await expect(presets).toHaveText(["100만", "500만", "1,000만", "5,000만"]);
   const input = Math.round(await topOf(page.getByRole("textbox", { name: "수량" })));
   expect((await tops(presets)).map(Math.round)).toEqual([input, input, input, input]);
 });
@@ -726,7 +733,7 @@ test("수량·금액 단추는 프리셋 묶음만 바꾸고 수량 칸 값은 �
   await quantityField(page).fill("37");
   await expect(amountPresetButtons(page)).toHaveText(["10", "50", "100", "500"]);
   await presetKindButton(page, "금액").click();
-  await expect(amountPresetButtons(page)).toHaveText(["100만", "500만", "1000만", "5000만"]);
+  await expect(amountPresetButtons(page)).toHaveText(["100만", "500만", "1,000만", "5,000만"]);
   await expect(quantityField(page)).toHaveValue("37");
   await presetKindButton(page, "수량").click();
   await expect(amountPresetButtons(page)).toHaveText(["10", "50", "100", "500"]);
@@ -886,11 +893,11 @@ const readTradeParts = (page: Page): Promise<TradePart[]> => page.getByTestId("l
 
 const OVERLAP_TRADES: [number, number][] = [[70_000, 7], [70_100, 600], [70_200, 9_999], [70_300, 12_345], [70_400, 999_999], [70_500, 9_999_999]];
 
-test("421px 호가주문창에서 수량은 쉼표 숫자 그대로 끝까지 상자 안에 보이고 겹친 가격 위에 불투명 배경으로 놓이며 열이 정렬된다", async ({ page, scenario }) => {
+test("470px 호가주문창에서 수량은 쉼표 숫자 그대로 끝까지 상자 안에 보이고 겹친 가격 위에 불투명 배경으로 놓이며 열이 정렬된다", async ({ page, scenario }) => {
   ordersOn(scenario);
   tradingApi(scenario);
   await openOrderWindow(page, scenario);
-  await win(page).evaluate((element) => { element.style.flex = "none"; element.style.width = "421px"; });
+  await win(page).evaluate((element) => { element.style.flex = "none"; element.style.width = "470px"; });
   OVERLAP_TRADES.forEach(([price, qty], index) => lastTrade(scenario, price, index + 1, qty));
   await expect(page.getByTestId("ladder-trade")).toHaveCount(OVERLAP_TRADES.length);
   const parts = await readTradeParts(page);
@@ -909,7 +916,28 @@ test("421px 호가주문창에서 수량은 쉼표 숫자 그대로 끝까지 �
   expect(parts.filter((part) => part.topAtOverlap === "qty").length).toBeGreaterThan(0);
   expect(new Set(parts.map((part) => Math.round(part.priceLeft * 10))).size).toBe(1);
   expect(new Set(parts.map((part) => Math.round(part.qtyRight * 10))).size).toBe(1);
-  await page.screenshot({ path: "../target/ux-screens/order-421.png" });
+  await page.screenshot({ path: "../target/ux-screens/order-470.png" });
+});
+
+test("421px 호가주문창에서는 체결 상자가 가격을 빼고 수량만 상자 안에 쉼표 숫자 그대로 보인다", async ({ page, scenario }) => {
+  ordersOn(scenario);
+  tradingApi(scenario);
+  await openOrderWindow(page, scenario);
+  await win(page).evaluate((element) => { element.style.flex = "none"; element.style.width = "421px"; });
+  OVERLAP_TRADES.forEach(([price, qty], index) => lastTrade(scenario, price, index + 1, qty));
+  await expect(page.getByTestId("ladder-trade")).toHaveCount(OVERLAP_TRADES.length);
+  await expect(page.locator(".mw-trade-price").first()).toBeHidden();
+  const parts = await readTradeParts(page);
+  expect(parts.map((part) => part.shown)).toEqual(["9,999,999", "999,999", "12,345", "9,999", "600", "7"]);
+  for (const part of parts) {
+    const note = JSON.stringify(part);
+    expect(part.fontSize).toBe("11px");
+    expect(part.qtyScrollWidth, note).toBeLessThanOrEqual(part.qtyClientWidth);
+    expect(part.qtyLeft, note).toBeGreaterThanOrEqual(part.boxLeft);
+    expect(part.qtyRight, note).toBeLessThanOrEqual(part.boxRight);
+    expect(part.gapToScrollbar, note).toBeGreaterThanOrEqual(5.99);
+  }
+  expect(new Set(parts.map((part) => Math.round(part.qtyRight * 10))).size).toBe(1);
 });
 
 test("호가주문창 체결이 8건보다 많아 스크롤바가 보일 때 체결량 오른쪽 끝과 스크롤바 왼쪽 사이가 6px 이상이다", async ({ page, scenario }) => {
@@ -1020,6 +1048,7 @@ test("단일가 호가에서 칩을 끄는 도중 단 가격이 바뀌어도 놓
   const api = tradingApi(scenario, [openOrder("0000001", "buy", 69_500, 5)]);
   await openOrderWindow(page, scenario);
   await emitSingleBook(scenario, SINGLE_PRICE_ASKS, SINGLE_PRICE_BIDS);
+  await expect(ladderRows(page).nth(10).locator(".mw-px-num")).toHaveText("69,500");
   await expect(chipAt(page, "buy", 69_500)).toBeVisible();
   await dragChip(page, chipAt(page, "buy", 69_500), await center(cellAt(page, "buy", 69_400)), false);
   await expect(page.getByTestId("order-ghost")).toContainText("→ 69,400원");
@@ -1321,6 +1350,7 @@ test("유지를 끄면 종목을 바꿀 때 10과 수량 방식으로 시작한�
   await pollSaved(() => keptEntries(scenario)).toMatchObject({ [entryKeyOf("order")]: { quantity: 37 } });
   await openSettings(page);
   await page.getByRole("checkbox", { name: /마지막 주문 수량 유지/ }).uncheck();
+  await page.keyboard.press("Escape");
   await cell(page, 2).click();
   await expect(win(page)).toHaveAttribute("data-symbol", OTHER);
   await expectStart(page, "10", "수량");
