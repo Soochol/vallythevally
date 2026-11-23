@@ -90,7 +90,6 @@ impl UpdateCenter {
                 inner.offered = Some(*update);
                 next
             }
-            CheckOutcome::NothingNewer if retryable => return None,
             CheckOutcome::NothingNewer => {
                 inner.offered = None;
                 UpdateStatus::Current

@@ -404,3 +404,16 @@ fn a_release_pulled_after_it_was_announced_clears_the_offer() {
     assert_eq!(center.record_check(CheckOutcome::NothingNewer), Some(UpdateStatus::Current));
     assert!(center.start_download().is_err());
 }
+
+#[test]
+fn a_release_pulled_after_a_failed_install_cannot_be_retried() {
+    let release = Release::honest("0.2.0");
+    let app = release.app();
+    assert!(enable(app.handle()));
+    run(check_once(app.handle()));
+    let center = app.state::<UpdateCenter>();
+    center.start_download().unwrap();
+    center.set(UpdateStatus::InstallFailed { reason: "x".into(), engine_stopped: false });
+    assert_eq!(center.record_check(CheckOutcome::NothingNewer), Some(UpdateStatus::Current));
+    assert!(center.start_download().is_err(), "서버가 내린 판은 다시 시도로 설치되지 않는다");
+}
