@@ -15,7 +15,7 @@ fn ranking() -> Ranking {
 }
 
 fn received(at: i64, broker: Broker) -> ReceivedRanking {
-    ReceivedRanking { rows: Vec::new(), pages: 5, end: false, limited: false, received_at: at, broker }
+    ReceivedRanking { rows: Vec::new(), pages: 5, end: false, limited: false, received_at: at, broker, page_rows: Vec::new() }
 }
 
 fn write(dir: &Path, date: &str, key: &str, broker: Broker, as_of: i64, conditions: Vec<ConditionEntry>) {

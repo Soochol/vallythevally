@@ -9,6 +9,7 @@ use domain::{KstTime, Symbol, SymbolKind};
 use super::dto::*;
 use super::overview_source;
 use super::samples::SampleValue;
+use super::shared;
 use super::session::{observation_day, phase};
 use super::MarketOverview;
 use crate::api::{self, ApiErrorBody, Broker, Market};
@@ -95,6 +96,9 @@ fn env_of<'a>(st: &'a AppState, picked: &'a crate::market_source::route::Picked<
 
 pub async fn index(State(st): State<Arc<AppState>>, Query(query): Query<HashMap<String, String>>) -> Result<Json<MarketOverviewIndexCard>, ApiFailure> {
     let params = Params::parse(&query)?;
+    if let Some(shared) = shared::answer(&st, params.market, "지수 칸", |cards| cards.index.as_ref()) {
+        return shared;
+    }
     let picked = overview_source(&st);
     Ok(Json(index_card(&env_of(&st, &picked), params.market).await))
 }
@@ -120,6 +124,9 @@ fn index_dto(snapshot: MarketIndexSnapshot) -> MarketOverviewIndex {
 
 pub async fn sectors(State(st): State<Arc<AppState>>, Query(query): Query<HashMap<String, String>>) -> Result<Json<MarketOverviewSectorsCard>, ApiFailure> {
     let params = Params::parse(&query)?;
+    if let Some(shared) = shared::answer(&st, params.market, "업종 칸", |cards| cards.sectors.as_ref()) {
+        return shared;
+    }
     let picked = overview_source(&st);
     Ok(Json(sectors_card(&env_of(&st, &picked), params.market).await))
 }
@@ -151,6 +158,9 @@ async fn trading_days(env: &CardEnv<'_>, market: Market, period: MarketOverviewP
 
 pub async fn turnover(State(st): State<Arc<AppState>>, Query(query): Query<HashMap<String, String>>) -> Result<Json<MarketOverviewTurnoverCard>, ApiFailure> {
     let params = Params::parse(&query)?;
+    if let Some(shared) = shared::answer(&st, params.market, "거래대금 칸", |cards| cards.turnover.iter().find(|card| card.period == params.period)) {
+        return shared;
+    }
     let picked = overview_source(&st);
     Ok(Json(turnover_card(&env_of(&st, &picked), params.market, params.period).await))
 }
@@ -163,6 +173,9 @@ pub async fn turnover_card(env: &CardEnv<'_>, market: Market, period: MarketOver
 
 pub async fn flow(State(st): State<Arc<AppState>>, Query(query): Query<HashMap<String, String>>) -> Result<Json<MarketOverviewFlowCard>, ApiFailure> {
     let params = Params::parse(&query)?;
+    if let Some(shared) = shared::answer(&st, params.market, "수급 칸", |cards| cards.flow.iter().find(|card| card.period == params.period)) {
+        return shared;
+    }
     let picked = overview_source(&st);
     Ok(Json(flow_card(&env_of(&st, &picked), params.market, params.period).await))
 }
@@ -203,7 +216,10 @@ async fn program_days(env: &CardEnv<'_>, market: Market, period: MarketOverviewP
 pub async fn intraday_flow(State(st): State<Arc<AppState>>, Query(query): Query<HashMap<String, String>>) -> Result<Json<MarketOverviewIntradayFlow>, ApiFailure> {
     let params = Params::parse(&query)?;
     let now = st.clock.now();
-    let samples = st.market_overview.samples.samples(now, params.market);
+    let (samples, source) = match st.shared_data.serving() {
+        true => (shared::samples(&st, now, params.market), shared::broker(&st)),
+        false => (st.market_overview.samples.samples(now, params.market), overview_source(&st).broker),
+    };
     let mut points: BTreeMap<i64, MarketOverviewIntradayPoint> = BTreeMap::new();
     for sample in &samples {
         let point = points.entry(sample.at).or_insert(MarketOverviewIntradayPoint { at: api::UnixSeconds(sample.at), individual_eok: None, foreign_eok: None, institution_eok: None, program_eok: None });
@@ -215,13 +231,16 @@ pub async fn intraday_flow(State(st): State<Arc<AppState>>, Query(query): Query<
         }
     }
     let latest = samples.iter().map(|s| s.received_at).max().map(KstTime::from_unix);
-    Ok(Json(MarketOverviewIntradayFlow { context: Answers { latest, source: overview_source(&st).broker }.context(&st.clock, params.market), day: api::KstDate(observation_day(now)), points: points.into_values().collect() }))
+    Ok(Json(MarketOverviewIntradayFlow { context: Answers { latest, source }.context(&st.clock, params.market), day: api::KstDate(observation_day(now)), points: points.into_values().collect() }))
 }
 
 const MILLION_WON_PER_EOK: f64 = 100.0;
 
 pub async fn streaks(State(st): State<Arc<AppState>>, Query(query): Query<HashMap<String, String>>) -> Result<Json<MarketOverviewStreaksCard>, ApiFailure> {
     let params = Params::parse(&query)?;
+    if let Some(shared) = shared::answer(&st, params.market, "연속 매매 칸", |cards| cards.streaks.as_ref()) {
+        return shared;
+    }
     let picked = overview_source(&st);
     let directory = feature_symbol_list(&st).await.map_err(ApiFailure::into_body);
     let shown = |row: &StreakRow| !directory.as_ref().ok().and_then(|directory| directory.get(Symbol::Stock(row.code))).is_some_and(|info| matches!(info.kind, SymbolKind::Etf | SymbolKind::Etn));

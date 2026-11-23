@@ -1808,6 +1808,7 @@ pub enum ApiErrorCode {
     Forbidden,
     CollectorUnavailable,
     SignedOut,
+    NotPrepared,
     Internal,
 }
 
