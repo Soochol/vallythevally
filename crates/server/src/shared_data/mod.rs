@@ -17,7 +17,7 @@ pub use minute::{MinuteBar, MinuteBarKey, MinuteInstrument, MinuteTrade, MinuteV
 pub use snapshot::{IndexRow, SnapshotBody, SnapshotRow, snapshot_kind};
 pub use rankings::{
     ConditionEntry, ConditionState, DEFAULT_PAGES, DEFAULT_PERIOD_SECS, MergedCondition, MergedRankings, RankingsBoard, RankingsPartBody, ReceivedRanking, SharedRankingRow, broker_of_part,
-    default_rankings, part_path,
+    default_rankings, part_path, read_own_part,
 };
 pub use write::{FeedWriter, write_snapshot, write_snapshot_at};
 

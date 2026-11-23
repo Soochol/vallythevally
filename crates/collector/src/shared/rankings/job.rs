@@ -8,7 +8,7 @@ use server::market_source::rankings::{RankedRow, RankingSource};
 use server::api::SymbolCode;
 use server::kis::rankings::KisRankings;
 use server::rankings::KiwoomRankings;
-use server::shared_data::{Broker, ConditionEntry, ConditionState, DEFAULT_PERIOD_SECS, DataKind, Header, RankingsPartBody, ReceivedRanking, SharedRankingRow, SourceKey, part_path, write_snapshot_at};
+use server::shared_data::{Broker, ConditionEntry, ConditionState, DEFAULT_PERIOD_SECS, DataKind, Header, RankingsPartBody, ReceivedRanking, SharedRankingRow, SourceKey, part_path, read_own_part, write_snapshot_at};
 use tokio::sync::watch;
 
 use super::capability::Capability;
@@ -30,6 +30,7 @@ const CLOSES_AT: TimeOfDay = match TimeOfDay::hms(20, 0, 0) {
 pub struct RankingsJob {
     capability: OnceLock<Capability>,
     last_good: Mutex<BTreeMap<String, ReceivedRanking>>,
+    resumed: OnceLock<()>,
 }
 
 fn row_of(row: RankedRow) -> SharedRankingRow {
@@ -75,6 +76,14 @@ async fn fetch_one(source: &dyn RankingSource, condition: &Condition, pages: u8)
 }
 
 impl RankingsJob {
+    fn resume_from_file(&self, call: &JobCall<'_>) {
+        self.resumed.get_or_init(|| {
+            let Some(body) = read_own_part(call.shared_dir, &call.observation_date.yyyymmdd(), call.key.as_str()) else { return };
+            let mut memory = self.last_good.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+            memory.extend(body.conditions.into_iter().filter_map(|entry| entry.last.map(|last| (entry.key, last))));
+        });
+    }
+
     fn remember(&self, key: &str, received: Option<ReceivedRanking>) -> Option<ReceivedRanking> {
         let mut memory = self.last_good.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
         match received {
@@ -111,6 +120,7 @@ impl SharedJob for RankingsJob {
     fn run<'a>(&'a self, call: JobCall<'a>) -> JobFuture<'a> {
         Box::pin(async move {
             let options = options_of(call.options).map_err(JobError)?;
+            self.resume_from_file(&call);
             let own = broker_of(&call.market);
             let peers: &[Broker] = if call.peers.is_empty() { std::slice::from_ref(&own) } else { call.peers };
             let capability = self.capability.get_or_init(|| Capability::new(call.clock));

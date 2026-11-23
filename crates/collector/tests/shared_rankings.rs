@@ -21,7 +21,9 @@ use server::kis::token_file::{Saved, SavedToken, TokenFile, credential_id};
 use server::kiwoom::auth::KiwoomAuth;
 use server::kiwoom::rest::KiwoomRest;
 use server::kiwoom::transport::{HttpRequest, HttpResponse, Transport, TransportError};
-use server::market_source::rankings::condition_key;
+use server::market_source::Priority;
+use server::market_source::rankings::{Demand, RankingSource, condition_key};
+use server::rankings::KiwoomRankings;
 use server::shared_data::{Broker, ConditionState, MergedRankings, SharedData, default_rankings};
 use tokio::time::sleep;
 
@@ -322,4 +324,60 @@ async fn when_one_condition_fails_the_others_are_new_and_it_keeps_its_old_value_
     assert!(matches!(failed.state, ConditionState::Failed { .. }), "{:?}", failed.state);
     let (new, old) = (fresh.last.as_ref().unwrap().received_at, failed.last.as_ref().expect("이전 값이 남는다").received_at);
     assert_eq!(new - old, 10, "성공한 조건은 두 번째 틱 값, 실패한 조건은 첫 틱 값");
+}
+
+#[tokio::test(start_paused = true)]
+async fn the_pages_option_sets_how_many_pages_each_condition_walks() {
+    let folder = tempfile::tempdir().unwrap();
+    let clock = Clock::fake(ten_o_clock());
+    let fake = FakeKiwoom::new(usize::MAX);
+    let (stats, job_loop) = (LoopStats::default(), loop_of(json!({"variants": [trade_amount_variant()], "pages": 2}), Slice::WHOLE, &[Broker::Kiwoom]));
+    run_for(&job_loop, Market::Kiwoom(&kiwoom_rest(&fake, &clock)), "rest-01", folder.path(), &clock, &stats, 5).await;
+
+    assert_eq!(fake.per_api(), BTreeMap::from([("ka10032".to_owned(), 2)]));
+    let last = merged_of(folder.path()).find(&default_rankings()[0], 2).and_then(|found| found.last.clone()).expect("거래대금 전체");
+    assert_eq!(last.pages, 2);
+}
+
+#[tokio::test(start_paused = true)]
+async fn the_rows_in_the_file_are_the_rows_the_source_returned() {
+    let folder = tempfile::tempdir().unwrap();
+    let clock = Clock::fake(ten_o_clock());
+    let fake = FakeKiwoom::new(usize::MAX);
+    let rest = kiwoom_rest(&fake, &clock);
+    let (stats, job_loop) = (LoopStats::default(), loop_of(json!({"variants": [trade_amount_variant()], "pages": 1}), Slice::WHOLE, &[Broker::Kiwoom]));
+    run_for(&job_loop, Market::Kiwoom(&rest), "rest-01", folder.path(), &clock, &stats, 5).await;
+
+    let ranking = default_rankings()[0];
+    let (_keep, best) = tokio::sync::watch::channel(Priority::Background);
+    let fetched = KiwoomRankings::new(rest).page(&ranking, None, &mut Demand::new(best)).await.ok().expect("한 쪽을 받는다");
+    let merged = merged_of(folder.path());
+    let written = &merged.find(&ranking, 1).and_then(|found| found.last.clone()).expect("거래대금 전체").rows;
+    assert!(!fetched.rows.is_empty());
+    assert_eq!(written.len(), fetched.rows.len());
+    for (row, source) in written.iter().zip(&fetched.rows) {
+        assert_eq!((row.code.0.as_str(), &row.name, row.price, row.change_rate, &row.figures), (source.code.as_str(), &source.name, source.price, source.change_rate, &source.figures));
+    }
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_job_started_after_a_reassignment_keeps_the_previous_value_when_its_first_run_fails() {
+    let folder = tempfile::tempdir().unwrap();
+    let clock = Clock::fake(ten_o_clock());
+    let fake = FakeKiwoom::new(usize::MAX);
+    let rest = kiwoom_rest(&fake, &clock);
+    let options = json!({"variants": [trade_amount_variant(), gainers_variant()], "pages": 1});
+    let first = loop_of(options.clone(), Slice::WHOLE, &[Broker::Kiwoom]);
+    run_for(&first, Market::Kiwoom(&rest), "rest-01", folder.path(), &clock, &LoopStats::default(), 5).await;
+    let before = merged_of(folder.path()).find(&default_rankings()[0], 1).map(|found| found.last.is_some());
+    assert_eq!(before, Some(true));
+
+    fake.fail("ka10027");
+    let restarted = loop_of(options, Slice::WHOLE, &[Broker::Kiwoom]);
+    run_for(&restarted, Market::Kiwoom(&rest), "rest-01", folder.path(), &clock, &LoopStats::default(), 5).await;
+    let merged = merged_of(folder.path());
+    let gainers = Ranking::Gainers { market: RankingMarket::Kospi, venue: Venue::Combined, include_limit: true, min_trade_amount: server::api::MinTradeAmount::Any, excludes: KEEP_ALL, exclude_managed: false };
+    let found = merged.find(&gainers, 1).unwrap();
+    assert!(matches!(found.state, ConditionState::Failed { .. }), "{:?}", found.state);
+    assert!(found.last.is_some(), "새로 뜬 일도 파일의 이전 값을 이어받는다");
 }

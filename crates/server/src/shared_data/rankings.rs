@@ -129,9 +129,8 @@ impl MergedRankings {
     }
 }
 
-fn prefers(candidate: &MergedCondition, held: &MergedCondition) -> bool {
-    let received = |condition: &MergedCondition| condition.last.as_ref().map(|last| last.received_at);
-    (received(candidate), candidate.part_as_of) > (received(held), held.part_as_of)
+fn received_at(condition: &MergedCondition) -> Option<i64> {
+    condition.last.as_ref().map(|last| last.received_at)
 }
 
 fn merge(observation_date: String, parts: &[Arc<Loaded>]) -> MergedRankings {
@@ -146,10 +145,16 @@ fn merge(observation_date: String, parts: &[Arc<Loaded>]) -> MergedRankings {
                 period_secs: part.body.period_secs,
                 pages: part.body.pages,
             };
-            match by_condition.get(&entry.key) {
-                Some(held) if !prefers(&candidate, held) => {}
-                _ => {
+            match by_condition.get_mut(&entry.key) {
+                None => {
                     by_condition.insert(entry.key.clone(), candidate);
+                }
+                Some(held) => {
+                    let newest_value = if received_at(&candidate) > received_at(held) { candidate.last.clone() } else { held.last.clone() };
+                    if candidate.part_as_of > held.part_as_of {
+                        *held = candidate;
+                    }
+                    held.last = newest_value;
                 }
             }
         }
@@ -268,6 +273,10 @@ fn fragment_files(folder: &Path) -> Vec<(PathBuf, String)> {
             (!key_name.is_empty() && !key_name.starts_with('.')).then(|| (entry.path(), key_name.to_owned()))
         })
         .collect()
+}
+
+pub fn read_own_part(dir: &Path, observation_date: &str, key_name: &str) -> Option<RankingsPartBody> {
+    read_part(&part_path(dir, observation_date, key_name), key_name).ok().map(|loaded| loaded.body)
 }
 
 fn read_part(path: &Path, key_name: &str) -> Result<Loaded, String> {
