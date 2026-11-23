@@ -44,12 +44,12 @@ async function geometry(page: Page) {
       const r = element.getBoundingClientRect();
       return { x: r.x, y: r.y, width: r.width, height: r.height, right: r.right, bottom: r.bottom };
     };
-    const textRects = (element: Element) => {
+    const textRects = (element: Element, skip?: string) => {
       const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
       const boxes = [];
       while (walker.nextNode()) {
         const node = walker.currentNode;
-        if (!node.textContent?.trim() || !(node.parentElement instanceof HTMLElement) || node.parentElement.closest("[hidden],svg")) continue;
+        if (!node.textContent?.trim() || !(node.parentElement instanceof HTMLElement) || node.parentElement.closest("[hidden],svg") || (skip && node.parentElement.closest(skip))) continue;
         const range = document.createRange();
         range.selectNodeContents(node);
         for (const r of range.getClientRects()) if (r.width > 0 && r.height > 0) boxes.push({ text: node.textContent, x: r.x, y: r.y, width: r.width, height: r.height, right: r.right, bottom: r.bottom });
@@ -73,7 +73,7 @@ async function geometry(page: Page) {
       const timeAxis = { x: chartBox.x, y: chartBox.bottom - chart.timeScale().height(), right: chartBox.right, bottom: chartBox.bottom };
       return {
         body: rect(body), panes, timeAxis,
-        rows: { head: { box: rect(head), text: head.textContent, texts: textRects(head) }, price: { box: rect(price), text: price.textContent, texts: textRects(price) }, ohlc: { box: rect(ohlc), text: ohlc.textContent, texts: textRects(ohlc) } },
+        rows: { head: { box: rect(head), text: head.textContent, texts: textRects(head, "[data-price-row]") }, price: { box: rect(price), text: price.textContent, texts: textRects(price) }, ohlc: { box: rect(ohlc), text: ohlc.textContent, texts: textRects(ohlc) } },
         volume: { box: rect(volume), text: volume.textContent, texts: textRects(volume), commands: [...volume.querySelectorAll("button[data-indicator-command]:not([hidden])")].map((button) => ({ label: button.getAttribute("aria-label"), ...rect(button) })) },
       };
     });

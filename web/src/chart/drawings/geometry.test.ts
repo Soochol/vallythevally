@@ -101,6 +101,13 @@ describe("겹쳤을 때: 고른 드로잉의 핸들, 그다음 가장 위에 그
     expect(hitTest([low, high], { x: 50, y: 101 }, pane)).toEqual({ kind: "body", id: "high", part: "line" });
   });
 
+  test("고르지 않은 드로잉의 꼭짓점 6px 안을 누르면 위에 있는 다른 선보다 그 드로잉이 골라진다", () => {
+    const anchored: HitItem = { id: "anchored", z: 1, shapes: [line(0, 100, 200, 100)], handles: [], anchors: [{ x: 50, y: 100 }] };
+    const above: HitItem = { id: "above", z: 2, shapes: [line(0, 104, 200, 104)], handles: [] };
+    expect(hitTest([anchored, above], { x: 52, y: 103 }, pane)).toEqual({ kind: "body", id: "anchored", part: "line" });
+    expect(hitTest([anchored, above], { x: 100, y: 103 }, pane)).toEqual({ kind: "body", id: "above", part: "line" });
+  });
+
   test("고른 드로잉의 핸들이 선을 이긴다", () => {
     const selected: HitItem = { ...low, z: 0, handles: [{ x: 50, y: 104 }] };
     expect(hitTest([high, selected], { x: 50, y: 101 }, pane)).toEqual({ kind: "handle", id: "low", index: 0 });

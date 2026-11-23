@@ -156,6 +156,9 @@ for (const size of [{ width: 1440, height: 900 }, { width: 1024, height: 768 }, 
   test(`범례 팝오버 화면 ${size.width}×${size.height}`, async ({ page, scenario }) => {
     await page.setViewportSize(size);
     await open(page, scenario);
+    const fold = cell(page).locator("[data-indicator-fold]:visible");
+    if (await fold.count()) await fold.first().hover();
+    await row(page, "ma").hover();
     await row(page, "ma").getByRole("button", { name: /설정 열기/ }).click();
     await expect(page.getByRole("dialog", { name: /이동평균.*설정/ })).toBeVisible();
     expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBe(0);

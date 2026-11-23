@@ -9,6 +9,7 @@ export interface JumpBadgeState {
 
 export function jumpBadgeNotes(state: JumpBadgeState): string[] {
   return [
+    "실시간 멈춤",
     ...(state.receiving ? ["받는 중"] : []),
     ...(state.compareHidden ? ["비교 숨김"] : []),
   ];
@@ -44,16 +45,12 @@ export class JumpBadge {
   show(state: JumpBadgeState | null): void {
     this.root.hidden = state === null;
     if (!state) return;
-    this.date.textContent = `바로가기 · ${state.date}`;
+    this.date.textContent = `과거 보기 ${state.date}`;
     const notes = jumpBadgeNotes(state);
     this.notes.textContent = notes.map((note) => ` · ${note}`).join("");
     const unadjusted = state.unadjustedDays.length > 0;
     this.warning.textContent = unadjusted ? ` · ${UNADJUSTED_NOTE}` : "";
     this.warning.title = unadjusted ? `수정주가를 반영하지 못한 날짜: ${state.unadjustedDays.join(", ")}` : "";
-  }
-
-  setBottom(axisHeight: number): void {
-    this.root.style.bottom = `calc(${axisHeight}px + var(--size-8))`;
   }
 
   dispose(): void {

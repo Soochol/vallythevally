@@ -1,3 +1,38 @@
+export type LegendTier = "full" | "compact" | "minimal";
+
+export interface LegendTierInput {
+  readonly chartWidth: number;
+  readonly paneHeight: number;
+  readonly phone: boolean;
+}
+
+export const COMPACT_BELOW_WIDTH = 480;
+export const MINIMAL_BELOW_WIDTH = 320;
+export const COMPACT_BELOW_PANE_HEIGHT = 300;
+export const FOLD_ABOVE_ROWS = 3;
+export const MIN_TOP_MARGIN = 0.08;
+export const MAX_TOP_MARGIN = 0.6;
+export const LEGEND_GAP_PX = 6;
+
+export function legendTier({ chartWidth, paneHeight, phone }: LegendTierInput): LegendTier {
+  if (phone || chartWidth < MINIMAL_BELOW_WIDTH) return "minimal";
+  return chartWidth < COMPACT_BELOW_WIDTH || paneHeight < COMPACT_BELOW_PANE_HEIGHT ? "compact" : "full";
+}
+
+export function denserTier(tier: LegendTier): LegendTier | null {
+  return tier === "full" ? "compact" : tier === "compact" ? "minimal" : null;
+}
+
+export function indicatorRowsFolded(tier: LegendTier, rowCount: number, pinnedOpen: boolean): boolean {
+  if (tier === "minimal") return rowCount > 0;
+  return rowCount > FOLD_ABOVE_ROWS && !pinnedOpen;
+}
+
+export function priceTopMargin(legendBottom: number, paneHeight: number): number {
+  if (!(paneHeight > 0)) return MIN_TOP_MARGIN;
+  return Math.min(MAX_TOP_MARGIN, Math.max(MIN_TOP_MARGIN, (legendBottom + LEGEND_GAP_PX) / paneHeight));
+}
+
 export interface LegendField {
   element: HTMLElement;
   alternatives: readonly string[];

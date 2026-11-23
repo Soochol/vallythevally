@@ -126,6 +126,7 @@ for (const phone of [false, true]) test.describe(phone ? "휴대폰 재무지표
     await refresh(page);
     await expect(row(page, "revenue")).toContainText("갱신 실패");
     await choosePeriod(page, phone, "일");
+    if (phone) await cell(page).locator("[data-indicator-fold]:visible").click();
     await expect(row(page, "ma")).toBeVisible();
     await choosePeriod(page, phone, "연");
     financial.show();

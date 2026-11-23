@@ -125,7 +125,7 @@ test("일봉에서 우클릭하면 화면 가장 오른쪽 봉 날짜로 이름�
   await expect(menu.getByRole("menuitem", { name: `바로가기 · ${date}` })).toBeVisible();
   await menu.getByRole("menuitem", { name: `바로가기 · ${date}` }).click();
 
-  await expect(badge(page, 2)).toContainText(`바로가기 · ${date}`);
+  await expect(badge(page, 2)).toContainText(`과거 보기 ${date}`);
   const expected = lastBarOfDate(scenario, date);
   await expect(chartOf(cell(page, 2))).toHaveAttribute("data-last-bar-t", String(expected));
   expect(jumpCalls(scenario).map((q) => ({ symbol: q.get("symbol"), period: q.get("period"), date: q.get("date"), before: q.get("before") }))).toEqual([{ symbol: SYMBOL, period: "5m", date, before: null }]);
@@ -153,7 +153,7 @@ test("모드 중에는 실시간 프레임이 와도 봉이 늘지 않고, 뱃�
   const date = dateBack(scenario, 8);
   await scrollTo(page, 1, 8);
   await (await openJumpMenu(page, scenario, 20)).getByRole("menuitem", { name: /^바로가기 · / }).click();
-  await expect(badge(page, 2)).toContainText(`바로가기 · ${date}`);
+  await expect(badge(page, 2)).toContainText(`과거 보기 ${date}`);
   await expect(chartOf(cell(page, 2))).toHaveAttribute("data-last-bar-t", String(lastBarOfDate(scenario, date)));
   const inMode = (await viewOf(page, 2)).count;
 
@@ -210,7 +210,7 @@ test("Alt+G는 포인터가 다른 봉 위에 있어도 차트 밖에 있어도 
   const point = await pointOnBar(page, 1, dailyBars(scenario).at(-1 - 20)!.t);
   await page.mouse.move(point.x, point.y);
   await page.keyboard.press("Alt+KeyG");
-  await expect(badge(page, 2)).toContainText(`바로가기 · ${date}`);
+  await expect(badge(page, 2)).toContainText(`과거 보기 ${date}`);
   expect(jumpCalls(scenario).map((q) => q.get("date"))).toEqual([date]);
   await expect(chartOf(cell(page, 2))).toHaveAttribute("data-last-bar-t", String(lastBarOfDate(scenario, date)));
 
@@ -219,7 +219,7 @@ test("Alt+G는 포인터가 다른 봉 위에 있어도 차트 밖에 있어도 
   await cell(page, 1).focus();
   await page.mouse.move(2, 2);
   await page.keyboard.press("Alt+KeyG");
-  await expect(badge(page, 2)).toContainText(`바로가기 · ${date}`);
+  await expect(badge(page, 2)).toContainText(`과거 보기 ${date}`);
   expect(jumpCalls(scenario).map((q) => q.get("date"))).toEqual([date, date]);
 });
 
@@ -277,7 +277,7 @@ test("다른 종목의 분봉 차트는 움직이지 않는다", async ({ page, 
   await scrollTo(page, 1, 8);
   await cell(page, 1).focus();
   await page.keyboard.press("Alt+KeyG");
-  await expect(badge(page, 2)).toContainText(`바로가기 · ${date}`);
+  await expect(badge(page, 2)).toContainText(`과거 보기 ${date}`);
   expect(jumpCalls(scenario).map((q) => q.get("symbol"))).toEqual([SYMBOL]);
   await expect(chartOf(cell(page, 3))).toHaveAttribute("data-last-bar-t", String(scenario.market.page({ symbol: "000660", period: "5m" }).current!.t));
 });
@@ -342,7 +342,7 @@ test("고르지 않은 탭에 숨은 분봉 차트도 모드에 들고, 그 탭�
   await expect.poll(() => jumpCalls(scenario).map((q) => q.get("date"))).toEqual([date]);
   await page.getByRole("tab", { name: /5분/ }).click();
   await expect(cell(page, 3)).toBeVisible();
-  await expect(badge(page, 3)).toContainText(`바로가기 · ${date}`);
+  await expect(badge(page, 3)).toContainText(`과거 보기 ${date}`);
   const expected = lastBarOfDate(scenario, date);
   await expect(chartOf(cell(page, 3))).toHaveAttribute("data-last-bar-t", String(expected));
   await expect.poll(async () => (await viewOf(page, 3)).edgeT).toBe(expected);
@@ -393,13 +393,13 @@ test("모드 중 더 이른 날짜로 바로가기하면 새 기준일로 다시
   await scrollTo(page, 1, 8);
   await cell(page, 1).focus();
   await page.keyboard.press("Alt+KeyG");
-  await expect(badge(page, 2)).toContainText(`바로가기 · ${first}`);
+  await expect(badge(page, 2)).toContainText(`과거 보기 ${first}`);
   await expect(chartOf(cell(page, 2))).toHaveAttribute("data-last-bar-t", String(lastBarOfDate(scenario, first)));
 
   await scrollTo(page, 1, 9);
   await cell(page, 1).focus();
   await page.keyboard.press("Alt+KeyG");
-  await expect(badge(page, 2)).toContainText(`바로가기 · ${earlier}`);
+  await expect(badge(page, 2)).toContainText(`과거 보기 ${earlier}`);
   expect(jumpCalls(scenario).map((q) => q.get("date"))).toEqual([first, earlier]);
   const expected = lastBarOfDate(scenario, earlier);
   await expect(chartOf(cell(page, 2))).toHaveAttribute("data-last-bar-t", String(expected));

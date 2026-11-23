@@ -47,6 +47,7 @@ import { type IndicatorCommand, IndicatorLegend, type PaneBounds } from "./indic
 import { chartIndicators, chartPanels } from "./indicators/shown";
 import { isTailChange } from "./indicators/sync";
 import { Legend, legendParts } from "./legend";
+import { priceTopMargin } from "./legendProjection";
 import { addMainSeries, applyMainColors, type MainSeries, priceFormat, setMainData, updateMainBar } from "./series";
 import { type ChartSettings, type Panel, type PriceScale, shownScale } from "./settings";
 import { composeSnapshot, snapshotFileName } from "./snapshot";
@@ -58,6 +59,8 @@ import { InitialRange, RIGHT_OFFSET } from "./initialRange";
 
 /** 왼쪽 끝이 이 봉 수 안으로 들어오면 과거 페이지를 받는다(frontend.md §5.7). */
 const LOAD_OLDER_WITHIN = 50;
+const DEFAULT_PRICE_TOP_MARGIN = 0.14;
+const PRICE_BOTTOM_MARGIN = 0.08;
 const STATUS_INTERVAL_MS = 250;
 
 const SUB_ERROR_TEXT: Record<SubErrorCode, string> = {
@@ -154,6 +157,7 @@ export class ChartController {
   private hoverIndex: number | null = null;
   private readonly pendingLegendSources = new Set<"base" | "indicators" | "compare">(["base", "indicators", "compare"]);
   private legendLeftT: UnixSeconds | null = null;
+  private priceTopMargin = DEFAULT_PRICE_TOP_MARGIN;
   private ready: ReadyStatus | null = null;
   private settingData = false;
   private readonly initialRange: InitialRange;
@@ -194,9 +198,11 @@ export class ChartController {
     this.legend = new Legend(el, {
       projectRows: () => [this.indicatorLegend.projection(), this.compareLegend.projection()],
       readViewport: () => ({ pricePane: this.paneBounds()[0] ?? null, axisWidth: this.chart.priceScale("right").width() }),
+      applyTier: (tier) => this.indicatorLegend.setTier(tier),
+      reserveTop: (legendBottom, paneHeight) => this.reservePriceTop(legendBottom, paneHeight),
     });
     this.extremeTags = new ExtremeTags(el);
-    this.badge = new JumpBadge(el, () => this.feed.endMode());
+    this.badge = new JumpBadge(this.legend.statusAnchor, () => this.feed.endMode());
     this.daySeparators = new DaySeparators(this.chart, {
       shown: () => this.view !== null && this.view.settings.showDaySeparators && isIntraday(this.view.period),
       bars: () => this.bars,
@@ -216,7 +222,7 @@ export class ChartController {
       },
       deps.indicators ?? openIndicatorPort,
     );
-    this.indicatorLegend = new IndicatorLegend(el, (id, command, anchor) => deps.onIndicatorCommand?.(id, command, anchor));
+    this.indicatorLegend = new IndicatorLegend(el, (id, command, anchor) => deps.onIndicatorCommand?.(id, command, anchor), () => this.legend.fit("content"));
     this.compareLegend = new CompareLegend((code) => deps.onCompareRemove?.(code));
     this.legend.body.append(this.indicatorLegend.priceBox, this.compareLegend.box);
     this.resize = new ResizeObserver(() => {
@@ -224,7 +230,6 @@ export class ChartController {
       this.crosshairMarker.refresh();
       this.applyAxisWidth();
       this.indicators.applyStretch();
-      this.badge.setBottom(this.chart.timeScale().height());
       this.reportCorner();
       this.scheduleFrame();
     });
@@ -538,6 +543,13 @@ export class ChartController {
     return matchMedia("(max-width: 767px)").matches ? AXIS_WIDTH : this.axisStep;
   }
 
+  private reservePriceTop(legendBottom: number, paneHeight: number): void {
+    const margin = priceTopMargin(legendBottom, paneHeight);
+    if (Math.abs(margin - this.priceTopMargin) * paneHeight < 0.5) return;
+    this.priceTopMargin = margin;
+    this.chart.priceScale("right").applyOptions({ scaleMargins: { top: margin, bottom: PRICE_BOTTOM_MARGIN } });
+  }
+
   private applyAxisWidth(): void {
     const width = this.axisWidth();
     if (this.chart.options().rightPriceScale.minimumWidth !== width) this.chart.priceScale("right").applyOptions({ minimumWidth: width });
@@ -558,7 +570,7 @@ export class ChartController {
       },
       grid: { vertLines: { color: t.grid }, horzLines: { color: t.gridH } },
       crosshair: { mode: CrosshairMode.Normal, vertLine: crossLine, horzLine: crossLine },
-      rightPriceScale: { minimumWidth: this.axisWidth(), alignLabels: true, entireTextOnly: true, borderColor: t.line, scaleMargins: { top: 0.14, bottom: 0.08 } },
+      rightPriceScale: { minimumWidth: this.axisWidth(), alignLabels: true, entireTextOnly: true, borderColor: t.line, scaleMargins: { top: this.priceTopMargin, bottom: PRICE_BOTTOM_MARGIN } },
       timeScale: {
         borderColor: t.line,
         rightOffset: RIGHT_OFFSET,
@@ -683,8 +695,9 @@ export class ChartController {
     while (info && lastIndex >= first && !onScreen(lastIndex)) lastIndex--;
     const found = info && findExtremes(this.bars, first, lastIndex);
     const last = this.bars[lastIndex];
-    if (!view || !last || !found) return this.extremeTags.show(null, paneWidth);
     const paneHeight = this.chart.panes()[0]?.getHeight() ?? 0;
+    const surface = { paneWidth, paneHeight, avoid: this.legend.avoid };
+    if (!view || !last || !found) return this.extremeTags.show(null, surface);
     const isIndex = isIndexCode(view.symbol);
     const tag = ({ index, price }: Extreme): ExtremeTag | null => {
       const x = xOf(index);
@@ -692,7 +705,7 @@ export class ChartController {
       if (x === null || y === null || y < 0 || y > paneHeight) return null;
       return { x, y, price: formatPrice(price, isIndex), change: extremeChange(price, last.c, view.settings.extremeBasis) };
     };
-    this.extremeTags.show({ high: tag(found.high), low: tag(found.low) }, paneWidth);
+    this.extremeTags.show({ high: tag(found.high), low: tag(found.low) }, surface);
   }
 
   private flushPendingDraw(): void {
@@ -991,7 +1004,7 @@ export class ChartController {
       isIndex: isIndexCode(view.symbol),
       period: view.period,
       stalledAt: this.stalledAt,
-    });
+    }, this.hoverIndex !== null);
   }
 }
 
