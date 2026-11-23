@@ -5,7 +5,7 @@ import type { SeriesKey } from "../src/api/bars";
 import type { Drawing } from "../src/api/generated/Drawing";
 import type { Layout } from "../src/api/generated/Layout";
 import { type Scenario, cell, chartOf, DEFAULT_LAYOUT_ID, expect, test, firstChart, withFirstChart, pickDesktopVenue, pollSaved } from "./harness";
-import { mirror } from "./drawing-probe";
+import { foldedMenuItems, mirror } from "./drawing-probe";
 
 const TEN_MINUTES = 600;
 
@@ -245,6 +245,7 @@ test.describe("분석 도구", () => {
       const box = (await chartOf(cell(page)).boundingBox())!;
       await page.mouse.click(box.x + box.width / 2, box.y + line.y);
       await page.getByRole("button", { name: "드로잉 더 보기" }).click();
+      await foldedMenuItems(page);
       await page.getByRole("menuitem", { name: item, exact: true }).click();
     };
 

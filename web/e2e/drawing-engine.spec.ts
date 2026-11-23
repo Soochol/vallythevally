@@ -4,7 +4,7 @@ import type { Page } from "@playwright/test";
 import type { Bar } from "../src/api/generated/Bar";
 import type { DrawingBody } from "../src/chart/drawings/types";
 import { completionKey } from "../src/chart/drawings/journal";
-import { chartPoint, drawings, mirror, open, settledMirror as settled, expandDock, showOnAllPeriods, type Mirror } from "./drawing-probe";
+import { chartPoint, drawings, mirror, open, settledMirror as settled, expandDock, showOnAllPeriods, foldedMenuItems, type Mirror } from "./drawing-probe";
 import { installChartProbe } from "./chart-probe";
 
 async function draw(page: Page, tool = "T", shift = false) {
@@ -132,6 +132,7 @@ test("drawing engine: lock, order and multi-selection", async ({ page, scenario 
   await page.keyboard.press("Control+z"); await pollSaved(async () => (await drawings(scenario)).map((d) => d.points)).toEqual(before.map((d) => d.points));
   await page.mouse.click(trend.x, trend.y);
   await page.getByRole("button", { name: "드로잉 더 보기" }).click();
+  await foldedMenuItems(page);
   await page.getByRole("menuitem", { name: "맨 앞으로", exact: true }).click();
   await pollSaved(async () => { const ds = await drawings(scenario); return ds.find((d) => d.tool === "trendline")!.z > ds.find((d) => d.tool === "hline")!.z; }).toBe(true);
 });
@@ -154,9 +155,9 @@ test("drawing engine: settings preview, cancellation, coordinates and text", asy
   await dialog.getByRole("button", { name: "취소", exact: true }).click();
   expect((await drawings(scenario))[0]!.style).toEqual(original.style);
   await page.getByRole("button", { name: "드로잉 세부 설정" }).click();
-  await dialog.locator("summary").filter({ hasText: /^좌표$/ }).click();
+  await dialog.getByRole("tab", { name: "좌표", exact: true }).click();
   await dialog.getByLabel("시작 가격").fill(String(original.points[0]!.price + 10));
-  await dialog.locator("summary").filter({ hasText: /^글자$/ }).click();
+  await dialog.getByRole("tab", { name: "글자", exact: true }).click();
   await expect(dialog.getByRole("button", { name: "글자 색 선택", exact: true })).toContainText(defaultColor.toUpperCase());
   await dialog.getByRole("textbox", { name: "글자", exact: true }).fill("지지 구간");
   await page.screenshot({ path: testInfo.outputPath("settings.png") });
@@ -173,7 +174,7 @@ test("drawing engine: settings preview, cancellation, coordinates and text", asy
   await inline.press("Enter");
   await pollSaved(async () => (await drawings(scenario))[0]!.text).toBe("한글 조합");
   await page.getByRole("button", { name: "드로잉 세부 설정" }).click();
-  await dialog.locator("summary").filter({ hasText: /^글자$/ }).click();
+  await dialog.getByRole("tab", { name: "글자", exact: true }).click();
   await dialog.getByRole("textbox", { name: "글자", exact: true }).fill("   ");
   await dialog.getByRole("button", { name: "확인", exact: true }).click();
   await pollSaved(async () => (await drawings(scenario))[0]!.text).toBeNull();
@@ -197,7 +198,7 @@ test("drawing engine: Alt tool aliases consume browser shortcuts and text fields
   await expect.poll(async () => (await mirror(page)).find((d) => d.tool === "hline")?.selected).toBe(true);
   await page.getByRole("button", { name: "드로잉 세부 설정" }).click();
   const dialog = page.getByRole("dialog", { name: "수평선 세부 설정" });
-  await dialog.locator("summary").filter({ hasText: /^글자$/ }).click();
+  await dialog.getByRole("tab", { name: "글자", exact: true }).click();
   const input = dialog.getByRole("textbox", { name: "글자", exact: true });
   await input.fill("A"); await input.press("Control+a"); await input.press("Control+c");
   await expect(dialog).toBeVisible(); await pollSaved(async () => (await drawings(scenario)).length).toBe(2);

@@ -7,6 +7,7 @@ import type { Scenario } from "./fixtures/scenario";
 import { parseChartSettings, type ChartSettings } from "../src/chart/settings";
 import { installFrameProbe } from "./frame-probe";
 import { cell, chartOf, DEFAULT_LAYOUT_ID, expect, SEARCH_BUTTON_TITLE, firstChart, withFirstChart, pickDesktopVenue, pollSaved } from "./harness";
+import { useCenterIndicatorWindow } from "./indicator-window";
 
 const METRICS = ["revenue", "operating_income", "owner_roe", "investing_cash_flow", "dps", "debt_ratio"] as const;
 const LABELS = ["매출액", "영업이익", "지배주주 ROE", "투자활동 현금흐름", "DPS", "부채비율"];
@@ -40,6 +41,7 @@ for (const phone of [false, true]) test.describe(phone ? "휴대폰 재무지표
   test.use({ ...(phone ? { viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true } : {}) });
 
   test("메뉴 6종 추가·Q/D/Y 숨김 복원·음수와 0·설정 재열기", async ({ page, scenario }, testInfo) => {
+  useCenterIndicatorWindow(scenario);
     const errors: string[] = [];
     page.on("pageerror", (e) => errors.push(e.message));
     await page.addInitScript(installFrameProbe);
@@ -123,6 +125,7 @@ for (const phone of [false, true]) test.describe(phone ? "휴대폰 재무지표
     await refresh(page);
     await expect(row(page, "revenue")).toContainText("갱신 실패");
     await choosePeriod(page, phone, "일");
+    if (phone) await cell(page).locator("[data-indicator-fold]:visible").click();
     await expect(row(page, "ma")).toBeVisible();
     await choosePeriod(page, phone, "연");
     financial.show();
@@ -246,6 +249,7 @@ test("서버에 재무자료가 없어도 가격과 기술지표를 사용하고
 });
 
 test("재무지표 미리보기 중에도 재무 수집 상태가 보이고 취소하면 사라진다", async ({ page, scenario }) => {
+  useCenterIndicatorWindow(scenario);
   await page.goto("/?symbol=005930&period=Q");
   await expect(cell(page)).toHaveAttribute("aria-busy", "false");
   const status = page.getByLabel("재무 수집 상태");

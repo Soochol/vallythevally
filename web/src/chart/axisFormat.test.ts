@@ -1,5 +1,5 @@
 import { expect, test, vi } from "vitest";
-import { axisPriceFormat, distinctAxisTicks, financialAxisUnit, fitAxisValue, formatAxisTicks, formatAxisValue, MIN_AXIS_FONT_SIZE, priceAxisFontSize } from "./axisFormat";
+import { axisPriceFormat, distinctAxisTicks, financialAxisUnit, fitAxisValue, formatAxisTicks, formatAxisValue, priceAxisWidth } from "./axisFormat";
 
 test.each([
   [-48_054_251_000_000, "KRW", "−48.1조"],
@@ -146,27 +146,28 @@ function stubCanvasText(glyphEm: number) {
   return { mockRestore: () => vi.unstubAllGlobals() };
 }
 
-test("가격 글자는 7자리 가격이 맞을 때까지만 줄고 6자리 이하는 기본 크기를 지킨다", () => {
+test("축 폭은 6자리 이하는 72px이고 7자리 가격부터 80·88px로 넓어지며 글자는 줄이지 않는다", () => {
   const canvas = stubCanvasText(0.55);
   try {
-    expect(priceAxisFontSize(193_400, 11)).toBe(11);
-    expect(priceAxisFontSize(1_160_000, 11)).toBeLessThan(11);
-    expect(priceAxisFontSize(1_160_000, 11)).toBeGreaterThanOrEqual(MIN_AXIS_FONT_SIZE);
-    expect(priceAxisFontSize(9_990_000, 11)).toBe(priceAxisFontSize(1_160_000, 11));
-    expect(priceAxisFontSize(123_456_789, 11)).toBe(11);
+    expect(priceAxisWidth(193_400, 11)).toBe(72);
+    expect(priceAxisWidth(1_160_000, 11)).toBe(80);
+    expect(priceAxisWidth(1_523_000, 11)).toBe(80);
+    expect(priceAxisWidth(99_999_999, 11)).toBe(88);
+    expect(priceAxisWidth(123_456_789, 11)).toBe(88);
+    expect(priceAxisWidth(Number.NaN, 11)).toBe(72);
   } finally {
     canvas.mockRestore();
   }
 });
 
-test("가격 눈금은 현재 글자 크기로 폭을 재고 줄어든 글자에서 쉼표 숫자를 남긴다", () => {
+test("가격 눈금은 현재 축 폭으로 맞춰 7자리 가격에서 폭을 넓히면 쉼표 숫자를 남긴다", () => {
   const canvas = stubCanvasText(0.55);
-  let size = 11;
+  let width = 72;
   try {
-    const geometry = { fontSize: () => size, toCoordinate: () => null, lastCoordinates: () => [] };
+    const geometry = { width: () => width, toCoordinate: () => null, lastCoordinates: () => [] };
     const values = [1_160_000, 1_200_000, 1_240_000];
     expect(axisPriceFormat("price", 1, geometry).tickmarksFormatter(values)).toEqual(["116만", "120만", "124만"]);
-    size = priceAxisFontSize(1_240_000, 11);
+    width = priceAxisWidth(1_240_000, 11);
     expect(axisPriceFormat("price", 1, geometry).tickmarksFormatter(values)).toEqual(["1,160,000", "1,200,000", "1,240,000"]);
     expect(axisPriceFormat("price", 1, geometry).formatter(1_160_000)).toBe("1,160,000");
   } finally {

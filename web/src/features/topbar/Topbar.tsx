@@ -1,6 +1,5 @@
 import { useRef, useState } from "react";
 import { ChartSettingsDialog } from "../chart-settings/ChartSettingsDialog";
-import { type ChartSettingsMenuId, FIRST_CHART_SETTINGS_MENU } from "../chart-settings/menus";
 import { BrandLink } from "../page-rail/BrandLink";
 import { MinuteMenu } from "./MinuteMenu";
 import { MockBadge } from "./MockBadge";
@@ -9,8 +8,8 @@ import { useSymbolInfo } from "../../api/queries";
 import { PERIOD_LABEL, PERIODS, symbolSub } from "../../lib/symbol";
 import { useCell, useLayoutStore } from "../../stores/layout";
 import { useSelectionStore } from "../../stores/selection";
-import { useActionKeys, useUiStore } from "../../stores/ui";
-import { openIndicatorCommand } from "../indicator-command/open";
+import { useActionKeys } from "../../stores/ui";
+import { openIndicatorCommand, useShownIndicatorWindow } from "../indicator-command/open";
 import { IndicatorIcon, MoreIcon, SearchIcon, SlidersIcon, CompareIcon } from "../icons";
 import { Menu, type MenuItem } from "../menu/Menu";
 import { ArrangeMenu } from "../layouts/ArrangeMenu";
@@ -23,16 +22,16 @@ export function Topbar() {
   const cellId = useSelectionStore((s) => s.activeCell);
   const openSearch = useSelectionStore((s) => s.openSearch);
   const cell = useCell(cellId);
-  const opensDialog = useUiStore((s) => s.prefs.indicatorWindow) === "dialog";
+  const opensDialog = useShownIndicatorWindow() === "dialog";
   const info = useSymbolInfo(cell.symbol).data;
   const name = info?.name ?? cell.symbol;
   const { setPeriod } = useLayoutStore.getState();
   const keys = useActionKeys();
   const settingsButton = useRef<HTMLButtonElement>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [settingsMenu, setSettingsMenu] = useState<ChartSettingsMenuId>(FIRST_CHART_SETTINGS_MENU);
 
   const moreRoot = useRef<HTMLDivElement>(null);
+  const visibleSettingsAnchorRect = () => (settingsButton.current?.getClientRects().length ? settingsButton.current : moreRoot.current)?.getBoundingClientRect();
   const [moreOpen, setMoreOpen] = useState(false);
   const moreItems: MenuItem[] = [
     { kind: "action", label: "비교", icon: <CompareIcon />, onSelect: () => openIndicatorCommand(cellId, "compare") },
@@ -62,7 +61,7 @@ export function Topbar() {
           <button type="button" className="tb-btn aria-expanded:bg-accent-soft aria-expanded:text-accent" aria-label="더 보기" aria-haspopup="menu" aria-expanded={moreOpen} title="더 보기" onClick={() => setMoreOpen((open) => !open)}><MoreIcon /></button>
           {moreOpen && <Menu label="더 보기" root={moreRoot} items={moreItems} onClose={() => setMoreOpen(false)} />}
         </div>
-        {settingsOpen && <ChartSettingsDialog cellId={cellId} menu={settingsMenu} onMenu={setSettingsMenu} onClose={() => setSettingsOpen(false)} />}
+        {settingsOpen && <ChartSettingsDialog cellId={cellId} anchor={settingsButton} anchorRect={visibleSettingsAnchorRect} onClose={() => setSettingsOpen(false)} />}
       </div>
       <div className="topbar-search-slot">
         <button type="button" className="shell-search" aria-haspopup="dialog" aria-label="종목·지표·명령 찾기" title={searchTitle(keys)} onClick={() => openSearch()}>

@@ -12,6 +12,7 @@
 @import "./market-window.css";
 @import "./order-window.css";
 @import "./colors.css";
+@import "./chart-tools.css";
 @import "./landing.css";
 
 /* Tailwind 테마는 토큰 변수만 가리킨다. 기본 색·글자 크기는 지워 토큰 밖의 값을 못 쓰게 한다. */

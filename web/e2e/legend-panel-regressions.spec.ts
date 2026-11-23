@@ -2,11 +2,13 @@ import type { Page } from "@playwright/test";
 import type { Layout } from "../src/api/generated/Layout";
 import { installChartProbe } from "./chart-probe";
 import { type Scenario, cell, DEFAULT_LAYOUT_ID, expect, test, firstChart, withFirstChart, pollSaved } from "./harness";
+import { useCenterIndicatorWindow } from "./indicator-window";
 
 const row = (page: Page, id: string) => cell(page).locator(`[data-indicator-row="${id}"]`);
 const layout = async (scenario: Scenario): Promise<Layout> => scenario.documents.layout(DEFAULT_LAYOUT_ID);
 
 async function open(page: Page, scenario: Scenario, height = 900, stretches = Array.from({ length: 6 }, () => 0.25)) {
+  useCenterIndicatorWindow(scenario);
   const saved = await layout(scenario);
   const chartSettings = { v: 2, style: "candle", scale: "normal", compare: [], indicators: [
     ...[5, 20].map((period, i) => ({ id: `ma${i}`, spec: { kind: "ma", method: "sma", period }, panel: "price", visible: true, style: { colors: ["ind-1"], width: 1 } })),
@@ -83,6 +85,7 @@ test("음수·0으로 저장된 패널 높이는 다른 설정을 보존하며 �
 test("같은 지표 이름을 다시 눌러도 Esc는 처음 연 설정으로 돌아간다", async ({ page, scenario }) => {
   await open(page, scenario);
   const name = row(page, "ma0").getByRole("button", { name: /설정 열기/ });
+  await row(page, "ma0").hover();
   await name.click();
   const popup = page.getByRole("dialog", { name: "이동평균 단순 5 설정", exact: true });
   await popup.getByRole("textbox", { name: "기간", exact: true }).fill("9");
@@ -100,6 +103,7 @@ test("다른 지표 이름은 한 번 눌러 전환하고 각 창의 Esc 원본�
   await row(page, "ma0").getByRole("button", { name: "이동평균 단순 5 설정", exact: true }).click();
   await page.getByRole("dialog", { name: "이동평균 단순 5 설정", exact: true }).getByRole("textbox", { name: "기간", exact: true }).fill("9");
   await expect(row(page, "ma0")).toContainText("단순 9");
+  await row(page, "ma1").hover();
   await row(page, "ma1").getByRole("button", { name: /설정 열기/ }).click();
   const next = page.getByRole("dialog", { name: "이동평균 단순 20 설정", exact: true });
   await expect(next).toBeVisible();
@@ -109,6 +113,7 @@ test("다른 지표 이름은 한 번 눌러 전환하고 각 창의 Esc 원본�
   await page.keyboard.press("Escape");
   await expect(row(page, "ma0")).toContainText("단순 9");
   await expect(row(page, "ma1")).toContainText("단순 20");
+  await row(page, "ma0").hover();
   await row(page, "ma0").getByRole("button", { name: /설정 열기/ }).click();
   await page.getByRole("dialog", { name: "이동평균 단순 9 설정", exact: true }).getByRole("textbox", { name: "기간", exact: true }).fill("11");
   await page.keyboard.press("Escape");

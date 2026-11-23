@@ -4,6 +4,7 @@ import {
   type CloneModifier,
   GESTURES,
   gestureHelp,
+  gestureSections,
   gesturesFor,
   holds,
   type ModeId,
@@ -122,4 +123,16 @@ test("도움말은 등록되지 않은 모드의 끌기를 보이지 않는다",
   expect(help.map((h) => h.label)).not.toContain("시연 커서");
   expect(help.map((h) => h.label)).not.toContain("붓 획 일부 지우기");
   expect(help).toContainEqual({ keys: "Ctrl+빈 곳 끌기", label: "상자로 고르기" });
+});
+
+test("도움말 묶음은 그리기·고르기·옮기기와 복제·지우기 넷이고 모든 줄이 한 번씩 들어간다", () => {
+  const sections = gestureSections(all);
+  expect(sections.map((section) => section.title)).toEqual(["그리기", "고르기", "옮기기·복제", "지우기"]);
+  expect(sections.flatMap((section) => section.rows)).toHaveLength(GESTURES.length);
+  const titleOf = (label: string) => sections.find((section) => section.rows.some((row) => row.label === label))?.title;
+  expect(titleOf("점 찍기")).toBe("그리기");
+  expect(titleOf("상자로 고르기")).toBe("고르기");
+  expect(titleOf("복제")).toBe("옮기기·복제");
+  expect(titleOf("수평·수직으로만 옮기기")).toBe("옮기기·복제");
+  expect(titleOf("지나간 드로잉 지우기")).toBe("지우기");
 });

@@ -12,27 +12,43 @@
 .chart-extreme>span { position:absolute; left:0; transform:translateX(calc(-1 * var(--size-10))); padding:var(--size-2) var(--size-8); border-radius:var(--r-s); background:var(--raised); box-shadow:0 0 0 var(--size-1) var(--line-strong); color:var(--text); font-size:var(--fs-xs); white-space:nowrap; font-variant-numeric:tabular-nums; }
 .chart-extreme[data-flip]>span { transform:translateX(calc(-100% + var(--size-10))); }
 .chart-extreme b { font-weight:600; }
-.chart-jump { position:absolute; left:var(--size-8); bottom:var(--size-34); z-index:6; display:flex; align-items:center; max-width:calc(100% - var(--size-16)); padding:var(--size-2) var(--size-4) var(--size-2) var(--size-8); border-radius:var(--r-pill); background:var(--raised); box-shadow:0 0 0 var(--size-1) var(--accent); color:var(--text); font-size:var(--fs-xs); white-space:nowrap; font-variant-numeric:tabular-nums; }
+.chart-jump { pointer-events:auto; display:flex; align-items:center; max-width:100%; min-height:var(--size-24); padding:0 var(--size-2) 0 var(--size-8); border:var(--size-1) solid var(--warning); border-radius:var(--r-pill); color:var(--warning); font-size:var(--fs-xs); white-space:nowrap; font-variant-numeric:tabular-nums; }
 .chart-jump[hidden] { display:none; }
-.chart-jump-date { font-weight:600; color:var(--accent); }
+.chart-jump-date { font-weight:600; color:var(--warning); }
 .chart-jump-notes { color:var(--text-2); }
 .chart-jump-warning { color:var(--warning); }
-.chart-jump-close { display:grid; place-items:center; flex:none; width:var(--size-18); height:var(--size-18); margin-left:var(--size-4); border-radius:var(--r-pill); color:var(--text-2); font-size:var(--fs-s); line-height:1; }
+.chart-jump-close { display:grid; place-items:center; flex:none; width:var(--size-24); height:var(--size-24); margin-left:var(--size-2); border-radius:var(--r-pill); color:var(--text-2); font-size:var(--fs-s); line-height:1; }
 .chart-jump-close:hover, .chart-jump-close:focus-visible { background:var(--hover); color:var(--text); }
+.chart-legend [data-indicator-row] button[data-indicator-command] { width:var(--size-24); height:var(--size-24); }
+[data-status-anchor]:not(:has(.chart-jump:not([hidden]))) { display:none; }
+[data-indicator-fold-box][data-folded]>:last-child { display:none; }
+[data-indicator-fold-box][data-folded]:is(:hover,:focus-within,[data-open])>:last-child { display:flex; position:absolute; left:0; top:100%; z-index:7; }
+@media (width < 48rem) {
+  [data-legend-head]:not(:has(.chart-jump:not([hidden]))) { display:none; }
+  [data-legend-head]>:not([data-status-anchor]) { display:none; }
+}
 .chart-extreme[data-extreme=high]>i { background:var(--up); }
-.chart-extreme[data-extreme=high]>span { top:calc(-1 * var(--size-30)); }
 .chart-extreme[data-extreme=high] b { color:var(--up); }
 .chart-extreme[data-extreme=low]>i { background:var(--down); }
-.chart-extreme[data-extreme=low]>span { top:var(--size-10); }
 .chart-extreme[data-extreme=low] b { color:var(--down); }
 @media (width >= 48rem) {
-  [data-legend-density=compact] .chart-legend { top:4px; gap:2px; }
-  [data-legend-density=compact] .chart-legend>div:first-child { min-height:24px; font-size:11px; }
-  [data-legend-density=compact] .chart-legend>div:first-child>span { font-size:11px; }
-  [data-legend-density=compact] .chart-legend>div:nth-child(2) { gap:2px; }
-  [data-legend-density=compact] .chart-legend [data-price-row] { min-height:18px; line-height:18px; }
-  [data-legend-density=compact] .chart-legend [data-price-row]>span { font-size:11px; line-height:18px; }
-  [data-legend-density=compact] .chart-legend [data-price-row]>span.self-center { line-height:14px; }
-  [data-legend-density=compact] .chart-legend [data-price-row]>span:first-child { font-size:14px; }
-  [data-legend-density=compact] .chart-legend [data-ohlc] { font-size:11px; line-height:14px; }
+  :is([data-legend-tier=compact],[data-legend-tier=minimal]) .chart-legend { top:var(--size-4); gap:var(--size-2); }
+  :is([data-legend-tier=compact],[data-legend-tier=minimal]) .chart-legend>div { gap:var(--size-2); }
+  :is([data-legend-tier=compact],[data-legend-tier=minimal]) .chart-legend>[data-legend-head] { min-height:var(--size-24); gap:var(--size-8); font-size:var(--fs-xs); }
+  :is([data-legend-tier=compact],[data-legend-tier=minimal]) .chart-legend>[data-legend-head]>span { font-size:var(--fs-xs); }
+  :is([data-legend-tier=compact],[data-legend-tier=minimal]) .chart-legend>[data-legend-head]>[role=heading] { font-size:var(--fs-s); font-weight:600; }
+  :is([data-legend-tier=compact],[data-legend-tier=minimal]) .chart-legend [data-price-row] { min-height:var(--size-18); padding:0; background:none; line-height:var(--size-18); }
+  :is([data-legend-tier=compact],[data-legend-tier=minimal]) .chart-legend [data-price-row]>span { font-size:var(--fs-xs); line-height:var(--size-18); }
+  :is([data-legend-tier=compact],[data-legend-tier=minimal]) .chart-legend [data-price-row]>span:first-child { font-size:var(--fs-m); }
+  :is([data-legend-tier=compact],[data-legend-tier=minimal]) .chart-legend [data-price-row]>span:nth-child(3) { display:none !important; }
+  :is([data-legend-tier=compact],[data-legend-tier=minimal]) .chart-legend [data-price-row]>span.self-center { line-height:var(--size-14); }
+  :is([data-legend-tier=compact],[data-legend-tier=minimal]) .chart-legend [data-ohlc] { font-size:var(--fs-xs); line-height:var(--size-14); }
+  :is([data-legend-tier=compact],[data-legend-tier=minimal]) .chart-legend:not([data-pointed],[data-bare]) [data-ohlc-line] { display:none; }
+  [data-legend-tier=minimal] .chart-legend>[data-legend-head]>:is([data-legend-sub],[data-legend-period]) { display:none; }
+  [data-legend-tier=minimal] .chart-legend [data-price-row]>span:nth-child(2) { display:none !important; }
+  [data-legend-tier=compact] .chart-legend [data-indicator-row] { position:relative; min-height:var(--size-18); }
+  [data-legend-tier=compact] .chart-legend [data-indicator-row]>[data-indicator-edit] { max-width:0; opacity:0; overflow:hidden; }
+  [data-legend-tier=compact] .chart-legend [data-indicator-row]:is(:hover,:focus-within)>[data-indicator-edit] { max-width:none; opacity:1; }
+  [data-legend-tier=compact] .chart-legend [data-indicator-row]>[data-indicator-tools] { position:absolute; left:100%; top:50%; translate:0 -50%; opacity:0; pointer-events:none; }
+  [data-legend-tier=compact] .chart-legend [data-indicator-row]:is(:hover,:focus-within)>[data-indicator-tools] { opacity:1; pointer-events:auto; }
 }

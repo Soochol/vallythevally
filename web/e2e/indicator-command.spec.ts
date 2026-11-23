@@ -3,10 +3,12 @@ import { resolve } from "node:path";
 import { parseChartSettings } from "../src/chart/settings";
 import { installFrameProbe } from "./frame-probe";
 import { cell, DEFAULT_LAYOUT_ID, expect, test, type Scenario, firstChart, pollSaved } from "./harness";
+import { useCenterIndicatorWindow } from "./indicator-window";
 
 const settings = async (scenario: Scenario) => parseChartSettings(firstChart(scenario.documents.layout(DEFAULT_LAYOUT_ID)).chartSettings);
 
 test("입력창에서 Enter로 연속 추가하고 Shift+Enter로 닫은 뒤 숨김·삭제·저장을 복원한다", async ({ page, scenario }) => {
+  useCenterIndicatorWindow(scenario);
   await page.goto("/?symbol=005930");
   await expect(cell(page)).toHaveAttribute("aria-busy", "false");
   await cell(page).focus();
@@ -46,6 +48,7 @@ test("입력창에서 Enter로 연속 추가하고 Shift+Enter로 닫은 뒤 숨
 });
 
 test("설정 검사기를 받기 전에 누른 Shift+Enter는 검사기가 준비되면 지표를 추가하고 창을 닫는다", async ({ page, scenario }) => {
+  useCenterIndicatorWindow(scenario);
   await page.goto("/?symbol=005930");
   await expect(cell(page)).toHaveAttribute("aria-busy", "false");
   let releaseWasm!: () => void;
@@ -66,6 +69,7 @@ test("설정 검사기를 받기 전에 누른 Shift+Enter는 검사기가 준�
 });
 
 test("설정 검사기를 받기 전에 누른 Shift+Enter는 그 뒤 다른 후보로 바꾸면 아무것도 추가하지 않는다", async ({ page, scenario }) => {
+  useCenterIndicatorWindow(scenario);
   await page.goto("/?symbol=005930");
   await expect(cell(page)).toHaveAttribute("aria-busy", "false");
   let releaseWasm!: () => void;
@@ -85,6 +89,7 @@ test("설정 검사기를 받기 전에 누른 Shift+Enter는 그 뒤 다른 후
 });
 
 test("입력창 설정 미리보기는 실제 선을 바꾸고 Esc는 선과 저장값을 복원한다", async ({ page, scenario }) => {
+  useCenterIndicatorWindow(scenario);
   await page.addInitScript(installFrameProbe);
   await page.goto("/?symbol=005930");
   await expect(cell(page)).toHaveAttribute("aria-busy", "false");
@@ -107,6 +112,7 @@ test("입력창 설정 미리보기는 실제 선을 바꾸고 Esc는 선과 저
 });
 
 test("지표 창은 띄운 지표 탭으로 열고 글자를 치면 지표 추가 탭으로 넘어가며 탭으로 비교 종목을 오간다", async ({ page, scenario }) => {
+  useCenterIndicatorWindow(scenario);
   await page.goto("/?symbol=005930");
   await expect(cell(page)).toHaveAttribute("aria-busy", "false");
   await page.getByRole("button", { name: "지표", exact: true }).click();

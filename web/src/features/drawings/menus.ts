@@ -49,7 +49,7 @@ function chartItems(surface: DrawingSurface, at: ScreenPoint): MenuItem[] {
   ];
 }
 
-export function drawingMenu(surface: DrawingSurface, empty = false, at: ScreenPoint | null = null): MenuItem[] {
+export function drawingMenu(surface: DrawingSurface, empty = false, at: ScreenPoint | null = null, more = false, toggleMore: () => void = () => {}): MenuItem[] {
   const session = useDrawingSession.getState(); const prefs = useUiStore.getState().prefs.drawing;
   const selected = surface.selected();
   if (empty) {
@@ -75,11 +75,14 @@ export function drawingMenu(surface: DrawingSurface, empty = false, at: ScreenPo
     action("세부 설정…", () => surface.openEditor(first.id)), action("복사", () => surface.copy()), action("복제", () => surface.clone()),
     ...(toolOf(first.tool)?.text ? [action("글자 고치기…", () => surface.openEditor(first.id, "text"))] : []),
     { kind: "separator" }, action(locked ? "잠금 풀기" : "잠금", () => surface.updateSelected((d) => ({ ...d, locked: !locked }))),
-    { kind: "heading", label: "순서" },
-    ...([ ["맨 앞으로", "front"], ["앞으로", "forward"], ["뒤로", "backward"], ["맨 뒤로", "back"] ] as const).map(([label, direction]) => action(label, () => surface.reorder(first.id, direction))),
-    { kind: "heading", label: "보이는 봉 주기" }, action("모든 봉 주기", () => periods(null)),
-    action("분봉만", () => periods(periodGroup("1m"))), action("일 이상만", () => periods(periodGroup("D"))),
-    action("지금 봉 주기만", () => periods([surface.host.view()?.period ?? "D"])),
+    { kind: "check", label: "순서·보이는 봉 주기", checked: more, onSelect: toggleMore },
+    ...(more ? [
+      { kind: "heading" as const, label: "순서" },
+      ...([ ["맨 앞으로", "front"], ["앞으로", "forward"], ["뒤로", "backward"], ["맨 뒤로", "back"] ] as const).map(([label, direction]) => action(label, () => surface.reorder(first.id, direction))),
+      { kind: "heading" as const, label: "보이는 봉 주기" }, action("모든 봉 주기", () => periods(null)),
+      action("분봉만", () => periods(periodGroup("1m"))), action("일 이상만", () => periods(periodGroup("D"))),
+      action("지금 봉 주기만", () => periods([surface.host.view()?.period ?? "D"])),
+    ] : []),
     { kind: "separator" }, action("기본 스타일로", () => surface.updateSelected((d) => ({ ...d, style: defaultObjectStyle(d) }))),
     { kind: "action", label: "지우기", icon: glyph(DRAWING_ICONS.trash), danger: true, onSelect: () => surface.remove(true) },
   ];

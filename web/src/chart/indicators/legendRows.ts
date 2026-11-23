@@ -2,7 +2,8 @@ import { domSelect } from "../../features/menu/domSelect";
 import { mountLayer } from "../../features/overlay/topLayer";
 import { iconMarkup, type MarkupIcon } from "../../features/icons";
 import { indicatorErrorText, type IndicatorRow, type PriceLegendValues } from "./layer";
-import type { LegendField, LegendProjection } from "../legendProjection";
+import { FOLD_ABOVE_ROWS, indicatorRowsFolded, type LegendField, type LegendProjection, type LegendTier } from "../legendProjection";
+import { indicatorsPinnedOpen, onIndicatorsPinnedChange, setIndicatorsPinnedOpen } from "../legendFold";
 
 export type IndicatorCommand = "edit" | "toggle" | "remove" | "up" | "down" | "collapse";
 
@@ -10,6 +11,9 @@ const ROW =
   "group pointer-events-auto flex w-max max-w-full items-center gap-1.5 whitespace-nowrap rounded-s pr-1 text-s " +
   "bg-[color-mix(in_srgb,var(--chart-bg)_78%,transparent)]";
 const BTN = "grid size-[18px] place-items-center rounded-s text-xs text-text-2 hover:bg-raised hover:text-text disabled:opacity-40";
+const TOOL_FADE = "opacity-0 group-hover:opacity-100 group-focus-within:opacity-100";
+const FOLD_BUTTON = "pointer-events-auto flex min-h-6 w-max items-center gap-1 rounded-s px-1.5 text-xs text-text-2 hover:text-text bg-[color-mix(in_srgb,var(--chart-bg)_78%,transparent)]";
+const ROWS_BOX = "flex flex-col gap-px";
 
 interface RowEls {
   root: HTMLDivElement;
@@ -48,9 +52,24 @@ export interface PaneBounds { readonly top: number; readonly height: number }
 
 type RowKey = "panel" | "price";
 
+function foldButton(): HTMLButtonElement {
+  const button = el("button", FOLD_BUTTON);
+  button.type = "button";
+  button.dataset.chartControl = "";
+  button.dataset.indicatorFold = "";
+  button.append(el("span", ""), el("span", "", "▾"));
+  button.lastElementChild?.setAttribute("aria-hidden", "true");
+  return button;
+}
+
 export class IndicatorLegend {
-  readonly priceBox = el("div", "flex flex-col gap-px");
+  readonly priceBox = el("div", "relative flex flex-col gap-px");
+  private readonly rowsBox = el("div", ROWS_BOX);
+  private readonly fold = foldButton();
   private readonly rows = new Map<string, RowEls>();
+  private tier: LegendTier = "full";
+  private open = false;
+  private readonly unsubscribePinned: () => void;
 
   private layoutRows: readonly IndicatorRow[] = [];
   private layoutValues: readonly PriceLegendValues[] = [];
@@ -58,10 +77,52 @@ export class IndicatorLegend {
   constructor(
     private readonly overlay: HTMLElement,
     private readonly onCommand: (id: string, command: IndicatorCommand, anchor: HTMLElement) => void,
-  ) {}
+    private readonly onFoldChange: () => void = () => {},
+  ) {
+    this.priceBox.dataset.indicatorFoldBox = "";
+    this.priceBox.append(this.fold, this.rowsBox);
+    this.fold.addEventListener("click", () => this.toggleFold());
+    this.unsubscribePinned = onIndicatorsPinnedChange(() => { this.syncFold(); this.onFoldChange(); });
+    this.syncFold();
+  }
+
+  setTier(tier: LegendTier): void {
+    if (this.tier === tier) return;
+    this.tier = tier;
+    this.open = false;
+    this.syncFold();
+  }
+
+  private toggleFold(): void {
+    if (this.tier === "minimal") {
+      this.open = !this.open;
+      this.syncFold();
+      return;
+    }
+    setIndicatorsPinnedOpen(!indicatorsPinnedOpen());
+  }
+
+  private syncFold(): void {
+    const count = this.layoutRows.length;
+    const folded = indicatorRowsFolded(this.tier, count, indicatorsPinnedOpen());
+    const foldable = this.tier === "minimal" ? count > 0 : count > FOLD_ABOVE_ROWS;
+    const expanded = this.tier === "minimal" ? this.open : !folded;
+    this.priceBox.toggleAttribute("data-folded", folded);
+    this.priceBox.toggleAttribute("data-open", folded && this.open);
+    this.fold.hidden = !foldable;
+    this.fold.setAttribute("aria-expanded", String(expanded));
+    const label = this.fold.firstElementChild;
+    if (label && label.textContent !== `지표 ${count}`) label.textContent = `지표 ${count}`;
+  }
 
   render(rows: IndicatorRow[], panes: readonly PaneBounds[], axisWidth = 72): void {
     const focused = document.activeElement;
+    let priceRowCount = 0;
+    for (const row of rows) if (!row.panel) priceRowCount++;
+    if (priceRowCount !== this.layoutRows.length) {
+      this.layoutRows = rows.filter((row) => !row.panel);
+      this.syncFold();
+    }
     const seen = new Set<string>();
     for (const row of rows) {
       seen.add(row.id);
@@ -81,8 +142,8 @@ export class IndicatorLegend {
       }
     }
     const price = rows.filter((row) => !row.panel).map((row) => this.rows.get(row.id)!.root);
-    if (price.some((root, i) => this.priceBox.children[i] !== root) || this.priceBox.children.length !== price.length) {
-      this.priceBox.replaceChildren(...price);
+    if (price.some((root, i) => this.rowsBox.children[i] !== root) || this.rowsBox.children.length !== price.length) {
+      this.rowsBox.replaceChildren(...price);
     }
     for (const [id, r] of this.rows) {
       if (seen.has(id)) continue;
@@ -96,10 +157,20 @@ export class IndicatorLegend {
   setLayoutRows(rows: readonly IndicatorRow[], values: readonly PriceLegendValues[]): void {
     this.layoutRows = rows.filter((row) => !row.panel);
     this.layoutValues = values;
+    this.syncFold();
   }
 
   projection(): LegendProjection {
     const root = el("div", this.priceBox.className);
+    root.dataset.indicatorFoldBox = "";
+    root.toggleAttribute("data-folded", this.priceBox.hasAttribute("data-folded"));
+    const rowsBox = el("div", ROWS_BOX);
+    if (!this.fold.hidden) {
+      const fold = foldButton();
+      fold.firstElementChild!.textContent = this.fold.firstElementChild?.textContent ?? "";
+      root.append(fold);
+    }
+    root.append(rowsBox);
     const choices = new Map(this.layoutValues.map((row) => [row.id, row.slots]));
     const fields: LegendField[] = [];
     for (const row of this.layoutRows) {
@@ -108,7 +179,7 @@ export class IndicatorLegend {
       this.place(elements, "price");
       const values = this.fill(elements, { ...row, values: slots.map((texts, i) => ({ text: texts[0] ?? "", color: row.values[i]?.color ?? row.color })) }, false);
       fields.push(...values.map((element, i) => ({ element, alternatives: slots[i] ?? [] })));
-      root.append(elements.root);
+      rowsBox.append(elements.root);
     }
     return { root, fields };
   }
@@ -116,6 +187,7 @@ export class IndicatorLegend {
   dispose(): void {
     for (const r of this.rows.values()) { r.dispose(); r.root.remove(); }
     this.rows.clear();
+    this.unsubscribePinned();
     this.priceBox.remove();
   }
 
@@ -140,9 +212,10 @@ export class IndicatorLegend {
     name.dataset.indicatorEdit = id;
     const values = el("span", "flex gap-1.5 font-medium");
     const badge = el("span", "rounded-[9px] border border-line px-1.5 text-xs text-text-3");
-    const tools = el("span", "flex gap-px opacity-0 group-hover:opacity-100 group-focus-within:opacity-100");
+    const tools = el("span", "flex gap-px");
+    tools.dataset.indicatorTools = "";
     const button = (icon: MarkupIcon, label: string, command: IndicatorCommand) => {
-      const b = el("button", BTN);
+      const b = el("button", `${BTN} ${TOOL_FADE}`);
       b.innerHTML = iconMarkup(icon);
       b.type = "button";
       b.dataset.chartControl = "";
@@ -226,6 +299,7 @@ export class IndicatorLegend {
     r.swatch.style.background = row.color;
     r.name.textContent = row.name;
     r.name.title = row.name;
+    r.root.title = row.name;
     r.name.setAttribute("aria-label", `${row.name} ${row.panel?.collapsed ? "펼치기" : "설정 열기"}`);
     if (interactive) r.name.onclick = () => this.onCommand(row.id, row.panel?.collapsed ? "collapse" : "edit", r.name);
     const values = row.values.map((v) => {
@@ -240,6 +314,7 @@ export class IndicatorLegend {
     const hidden = row.state === "hidden";
     const icon = hidden ? "eyeOff" : "eye";
     if (r.toggle.dataset.icon !== icon) { r.toggle.innerHTML = iconMarkup(icon); r.toggle.dataset.icon = icon; }
+    r.toggle.className = hidden ? BTN : `${BTN} ${TOOL_FADE}`;
     labelButton(r.toggle, hidden ? "보이기" : "숨기기");
     r.root.querySelectorAll<HTMLButtonElement>("button[data-indicator-command]").forEach((b) => b.setAttribute("aria-label", `${row.name} ${b.dataset.label}`));
     return values;

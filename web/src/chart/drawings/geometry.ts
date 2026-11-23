@@ -21,6 +21,7 @@ export interface HitItem {
   z: number;
   shapes: readonly Shape[];
   handles: readonly ScreenPoint[];
+  anchors?: readonly ScreenPoint[];
 }
 
 export type Hit =
@@ -202,34 +203,40 @@ function nearestHandle(handles: readonly ScreenPoint[], p: ScreenPoint): number 
   return best;
 }
 
-function itemHit(item: HitItem, p: ScreenPoint, pane: Pane, measure: TextMeasure): Hit | null {
+function itemHit(item: HitItem, p: ScreenPoint, pane: Pane, measure: TextMeasure): Ranked | null {
   const handle = nearestHandle(item.handles, p);
-  if (handle >= 0) return { kind: "handle", id: item.id, index: handle };
+  if (handle >= 0) return { hit: { kind: "handle", id: item.id, index: handle }, z: item.z, rank: "handle", anchorDistance: 0 };
+  let anchorDistance = Infinity;
+  for (const a of item.anchors ?? []) anchorDistance = Math.min(anchorDistance, dist(a, p));
+  if (anchorDistance <= HANDLE_HIT_PX) return { hit: { kind: "body", id: item.id, part: "line" }, z: item.z, rank: "anchor", anchorDistance };
   let part: ShapeHit = null;
   for (const s of item.shapes) {
     const h = hitShape(s, p, pane, measure);
-    if (h === "line") return { kind: "body", id: item.id, part: h };
+    if (h === "line") return { hit: { kind: "body", id: item.id, part: h }, z: item.z, rank: "body", anchorDistance: Infinity };
     part ??= h;
   }
-  return part === null ? null : { kind: "body", id: item.id, part };
+  return part === null ? null : { hit: { kind: "body", id: item.id, part }, z: item.z, rank: "body", anchorDistance: Infinity };
 }
+
+const RANK = { handle: 2, anchor: 1, body: 0 } as const;
 
 interface Ranked {
   hit: Hit;
   z: number;
+  rank: keyof typeof RANK;
+  anchorDistance: number;
 }
 
 function beats(next: Ranked, best: Ranked): boolean {
-  const nextHandle = next.hit.kind === "handle";
-  const bestHandle = best.hit.kind === "handle";
-  return nextHandle === bestHandle ? next.z >= best.z : nextHandle;
+  if (next.rank !== best.rank) return RANK[next.rank] > RANK[best.rank];
+  if (next.rank === "anchor" && next.anchorDistance !== best.anchorDistance) return next.anchorDistance < best.anchorDistance;
+  return next.z >= best.z;
 }
 
 export function hitTest(items: readonly HitItem[], p: ScreenPoint, pane: Pane, measure: TextMeasure = approxTextMeasure): Hit {
   let best: Ranked | null = null;
   for (const item of items) {
-    const hit = itemHit(item, p, pane, measure);
-    const next = hit === null ? null : { hit, z: item.z };
+    const next = itemHit(item, p, pane, measure);
     if (next !== null && (best === null || beats(next, best))) best = next;
   }
   return best === null ? { kind: "empty" } : best.hit;

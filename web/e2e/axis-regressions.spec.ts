@@ -10,7 +10,7 @@ type Axes = ReturnType<Window["axisTexts"]>;
 function assertAxes(axes: Axes) {
   expect(axes.length).toBeGreaterThan(0);
   for (const axis of axes) {
-    expect(axis.width).toBeLessThanOrEqual(72);
+    expect([72, 80, 88]).toContain(axis.width);
     const labels = axis.texts.toSorted((a, b) => a.y - b.y);
     for (const label of labels) expect(label.x + label.width).toBeLessThanOrEqual(axis.width);
     for (let i = 1; i < labels.length; i++) {

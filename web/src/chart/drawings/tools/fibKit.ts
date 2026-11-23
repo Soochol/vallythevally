@@ -1,4 +1,4 @@
-import { at, DRAW, EXTEND_OPTIONS, EXTENDS, readBool, readNumber, readOneOf, readRecord, readString, readStroke, select } from "../styleKit";
+import { at, DRAW, EXTEND_OPTIONS, EXTENDS, labelBox, readBool, readNumber, readOneOf, readRecord, readString, readStroke, select } from "../styleKit";
 import { type AxisLabel, defineTool, type HandleSpec, type Lens, type Level, type PointRole, type Shape, type Tool, type ToolContext } from "../toolSpec";
 import type { Color, Dash, DrawingPoint, Extend, Fill, ScreenPoint, Stroke, Width } from "../types";
 
@@ -150,7 +150,7 @@ function levelShapes(style: FibStyle, anchor: FibAnchor, xs: readonly number[], 
   const labels: Shape[] = drawn.flatMap(({ level, price, y }): Shape[] => {
     const text = levelLabel(level, price, style, ctx);
     if (text === null) return [];
-    return [{ kind: "text", at: { x: place.x, y: y + place.dy }, text, align: place.align, baseline: place.baseline, style: { color: level.color, size: 12, bold: false, italic: false } }];
+    return [{ kind: "text", at: { x: place.x, y: y + place.dy }, text, align: place.align, baseline: place.baseline, style: { color: level.color, size: 12, bold: false, italic: false }, box: labelBox(level.color) }];
   });
   return [...bands, ...lines, ...labels];
 }

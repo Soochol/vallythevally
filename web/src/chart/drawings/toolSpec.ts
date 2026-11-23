@@ -40,7 +40,7 @@ export type Shape =
       align: "left" | "center" | "right";
       baseline: "top" | "middle" | "bottom";
       orientation?: "horizontal" | "vertical";
-      box?: { background?: Fill; border?: Stroke; padding: number; wrapWidth: number | null };
+      box?: { background?: Fill; border?: Stroke; padding: number; wrapWidth: number | null; band?: Color };
     }
   | { kind: "hband"; y1: number; y2: number; x1: number; x2: number; fill: Fill }
   | { kind: "vline"; x: number; stroke: Stroke; allPanes: boolean };

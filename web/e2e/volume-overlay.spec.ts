@@ -3,6 +3,7 @@ import type { Layout } from "../src/api/generated/Layout";
 import { parseChartSettings } from "../src/chart/settings";
 import { installChartProbe } from "./chart-probe";
 import { type Scenario, cell, chartOf, DEFAULT_LAYOUT_ID, expect, test, firstChart, withFirstChart, pollSaved } from "./harness";
+import { useCenterIndicatorWindow } from "./indicator-window";
 
 const VOLUME = { id: "volume", spec: { kind: "volume", maPeriod: null }, panel: "p-volume", visible: true, style: { colors: ["ind-1"], width: 1 } };
 const RSI = { id: "rsi", spec: { kind: "rsi", period: 14, signal: null }, panel: "p-rsi", visible: true, style: { colors: ["ind-2"], width: 1 } };
@@ -34,6 +35,7 @@ function volumeBars(page: Page) {
 }
 
 async function open(page: Page, scenario: Scenario, indicators: object[] = [VOLUME], panels: object[] = [{ id: "p-volume", stretch: 0.25 }]) {
+  useCenterIndicatorWindow(scenario);
   const layout: Layout = scenario.documents.layout(DEFAULT_LAYOUT_ID);
   const chartSettings = { v: 2, style: "candle", scale: "normal", compare: [], indicators, panels };
   scenario.documents.saveLayout({ ...layout, revision: layout.revision + 1, windows: withFirstChart(layout, { symbol: "005930", venue: "combined", period: "D", chartSettings }) });

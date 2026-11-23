@@ -5,6 +5,11 @@ export const DRAW: Color = "$draw";
 export const UP: Color = "$up";
 export const DOWN: Color = "$down";
 
+export const CHART_BACKGROUND: Color = "$chart-bg";
+const LABEL_BOX_OPACITY = 0.85;
+const LABEL_BOX_PADDING = 4;
+export const labelBox = (band: Color) => ({ background: { on: true, color: CHART_BACKGROUND, opacity: LABEL_BOX_OPACITY }, padding: LABEL_BOX_PADDING, wrapWidth: null, band });
+
 export const defaultStroke = (): Stroke => ({ color: DRAW, width: 2, dash: "solid" });
 export const defaultFill = (): Fill => ({ on: true, color: DRAW, opacity: 0.2 });
 export const TEXT_SIZE = { min: 8, max: 72 } as const;

@@ -1,7 +1,7 @@
 import type { Page } from "@playwright/test";
 import type { Period } from "../src/api/generated/Period";
 import { type Scenario, cell, expect, pollSaved, test } from "./harness";
-import { chartPoint, drawings, mirror, open } from "./drawing-probe";
+import { chartPoint, drawings, foldedMenuItems, mirror, open } from "./drawing-probe";
 import { selectMinute } from "./select-option";
 
 const MINUTES: Period[] = ["1m", "3m", "5m", "10m", "15m", "30m", "60m"];
@@ -113,6 +113,7 @@ test("고른 드로잉의 보이는 봉 주기를 모든 봉 주기와 일 이�
   const line = await drawHorizontalLine(page, scenario, 1);
   const choose = async (name: string) => {
     await page.getByRole("button", { name: "드로잉 더 보기", exact: true }).click();
+    await foldedMenuItems(page);
     await page.getByRole("menu", { name: "드로잉 메뉴", exact: true }).getByRole("menuitem", { name, exact: true }).click();
   };
   await choose("모든 봉 주기");
