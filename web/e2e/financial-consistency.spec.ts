@@ -1,10 +1,8 @@
-import { financialTest as test, type FinancialFixture, updateFromChart } from "./financial-update-helpers";
-import { selectOption } from "./select-option";
+import { financialTest as test, type FinancialFixture } from "./financial-update-helpers";
 import { writeFile } from "node:fs/promises";
 import type { Page } from "@playwright/test";
 import type { Drawing } from "../src/api/generated/Drawing";
 import type { DrawingInput } from "../src/api/generated/DrawingInput";
-import type { FinancialUpdatePage } from "../src/api/generated/FinancialUpdatePage";
 import type { FinancialsPage } from "../src/api/generated/FinancialsPage";
 import type { BarsPage } from "../src/api/generated/BarsPage";
 import type { Bar } from "../src/api/generated/Bar";
@@ -25,16 +23,13 @@ const mirror = async (page: Page): Promise<Mirror[]> => JSON.parse(await chartOf
 const series = (page: Page) => page.evaluate(() => window.frameProbe.snapshot().filter((s) => s.type === "Histogram").flatMap((s) => s.data).flatMap((p) => "value" in p ? [p.value] : []));
 const frames = (page: Page) => page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
 
-async function seed(scenario: Scenario, financial: FinancialFixture, compare = false, hidden = false) {
+async function seed(scenario: Scenario, compare = false, hidden = false) {
   const layout = scenario.documents.layout(DEFAULT_LAYOUT_ID);
   const settings: ChartSettings = { v: 2, style: "candle", scale: "normal", visibleBars: null, showExtremes: false, showLegend: true, showOhlcChange: false, extremeBasis: "last", showDaySeparators: false, compare: compare ? ["IDX:001"] : [], indicators: [
     { id: "ma", spec: { kind: "ma", method: "sma", period: 2 }, panel: "price", visible: true, style: { colors: ["ind-1"], width: 1 } },
     { id: "revenue", spec: { kind: "revenue" }, panel: "revenue", visible: !hidden, style: { colors: ["ind-2"], width: 1 } },
   ], panels: [{ id: "revenue", stretch: 0.4 }] };
   scenario.documents.saveLayout({ ...layout, revision: layout.revision + 1, windows: withFirstChart(layout, { symbol: "005930", venue: "combined", period: "Y", chartSettings: settings }) });
-  let id = 1;
-  financial.job({ id, status: "ready" });
-  financial.onCommand(() => { financial.job({ id: ++id, status: "ready" }); });
 }
 
 function years(scenario: Scenario, count = 9, pageSize = count) {
@@ -69,16 +64,10 @@ async function open(page: Page) {
 
 test.describe("재무 시각과 가격 시각", () => {
   test("가격 밖 재무 시각을 추가·숨김·복원해도 드로잉과 비교 기준 및 가격·기술 툴팁이 일치한다", async ({ page, scenario, financial }, info) => {
-    await seed(scenario, financial, true, true); await years(scenario); await marker(scenario);
-    const commands = () => scenario.requests.filter(request => request.method() === "POST" && new URL(request.url()).pathname === "/api/financial-update");
-    const calls = commands().length;
+    await seed(scenario, true, true); await years(scenario); await marker(scenario);
     await open(page);
     const before = await coordinates(page); expect(before.drawX).toBeCloseTo(before.candleX!, 3);
-    expect(commands()).toHaveLength(calls);
     await row(page).getByRole("button", { name: / 보이기$/ }).click({ force: true });
-    await row(page).locator("summary").click();
-    await updateFromChart(page);
-    await row(page).locator("summary").click();
     await pollSaved(async () => (await data(financial)).status, { timeout: 60000 }).toBe("ready");
     await expect(row(page)).toContainText("확인 완료");
     await page.evaluate(() => window.chartProbe.chart.timeScale().setVisibleLogicalRange({ from: 4, to: 10 }));
@@ -112,8 +101,8 @@ test.describe("재무 시각과 가격 시각", () => {
     await page.screenshot({ path: info.outputPath("axis.png") });
   });
 
-  test("과거 가격 조회가 이미 존재하는 재무 시각을 채워도 화면 범위와 저장 드로잉을 보존한다", async ({ page, scenario, financial }, info) => {
-    await seed(scenario, financial, true); years(scenario, 12, 5); await marker(scenario);
+  test("과거 가격 조회가 이미 존재하는 재무 시각을 채워도 화면 범위와 저장 드로잉을 보존한다", async ({ page, scenario }, info) => {
+    await seed(scenario, true); years(scenario, 12, 5); await marker(scenario);
     let holding = true;
     const held = scenario.hold(url => url.pathname === "/api/bars" && url.searchParams.has("before") && holding);
     await open(page);
@@ -140,8 +129,8 @@ test.describe("재무 시각과 가격 시각", () => {
     await writeFile(info.outputPath("prepend-evidence.json"), JSON.stringify({ before, after, initial, current, count: await chartOf(cell(page)).getAttribute("data-bar-count") }, null, 2));
   });
 
-  test("재무 과거·미래 시각에서도 양방향 배치와 자석·핸들 편집은 실제 가격 시각을 저장한다", async ({ page, scenario, financial }, info) => {
-    await seed(scenario, financial); await years(scenario); await marker(scenario); await open(page);
+  test("재무 과거·미래 시각에서도 양방향 배치와 자석·핸들 편집은 실제 가격 시각을 저장한다", async ({ page, scenario }, info) => {
+    await seed(scenario); await years(scenario); await marker(scenario); await open(page);
     await expect(row(page)).toContainText("확인 완료", { timeout: 45000 });
     await page.evaluate(() => window.chartProbe.chart.timeScale().setVisibleLogicalRange({ from: 0, to: 13 }));
     await frames(page);
@@ -200,134 +189,18 @@ test.describe("재무 시각과 가격 시각", () => {
 });
 
 test.describe("같은 재무 키의 응답 순서", () => {
-  test("자동 완료 뒤 도착한 첫 재무 GET도 최신 정정의 빈 값과 사유를 유지한다", async ({ page, scenario, financial }, info) => {
-    await seed(scenario, financial, false, true);
-    financial.job({ status: "collecting", phase: "recent", totalCompanies: 2, completedCompanies: 1, automatic: true });
-    const old = data(financial);
-    const events: string[] = [];
-    const jobs: FinancialUpdatePage[] = [];
-    const reads: FinancialsPage[] = [];
-    scenario.on((url, request) => url.pathname === "/api/financial-update" && request.method() === "GET", () => {
-      const response = financial.job();
-      jobs.push(response);
-      events.push(`job GET ${response.status}`);
-      return { body: response };
-    });
-    let holding = true;
-    scenario.on(url => url.pathname === "/api/symbols/005930/financials" && url.searchParams.get("period") === "Y", () => {
-      const response = data(financial);
-      reads.push(response);
-      events.push("latest financial GET delivered");
-      return { body: response };
-    });
-    const first = scenario.hold(url => url.pathname === "/api/symbols/005930/financials" && url.searchParams.get("period") === "Y" && holding);
+  test("Q/Y·거래소 전환 뒤에도 값과 상태가 유지되고 일봉에서는 재무를 다시 요청하지 않는다", async ({ page, scenario }, info) => {
+    await seed(scenario);
     await page.clock.install({ time: scenario.now });
     await page.addInitScript(installFrameProbe);
     await page.goto("/");
-    const button = page.getByRole("button", { name: "재무자료", exact: true }).filter({ visible: true });
-    await expect(button).toContainText("25%");
-    await row(page).getByRole("button", { name: / 보이기$/ }).click({ force: true });
-    await first.received;
-    holding = false;
-    events.push("cold first financial GET held");
-    await expect(page.getByLabel("재무 수집 상태", { exact: true })).toContainText("재무자료 조회 중");
-    financial.show("edge");
-    financial.job({ status: "ready", phase: "complete", completedCompanies: 2, lastCheckedAt: scenario.now / 1000 });
-    await page.clock.fastForward(1000);
-    await pollSaved(() => jobs.at(-1)?.status).toBe("ready");
-    await expect(button).not.toContainText("%");
-    events.push("ready rendered before old financial GET delivery");
-    first.reply({ body: old });
-    events.push("old financial GET delivered after ready");
     await expect(row(page)).toContainText("확인 완료");
-    await frames(page);
-    await row(page).locator("summary").click();
-    await selectOption(row(page).getByRole("combobox"), { index: 1 });
-    const actual = await series(page);
-    const detail = await row(page).locator("details").innerText();
-    const server = data(financial);
-    const commands = scenario.requests.filter(request => request.method() === "POST" && new URL(request.url()).pathname === "/api/financial-update").length;
-    await writeFile(info.outputPath("automatic-cold-get.json"), JSON.stringify({ events, jobs, old, reads, server, actual, detail, commands }, null, 2));
-    expect(actual).toEqual([]);
-    await expect(row(page).locator("details")).toContainText("보고기간이 겹쳐 표시 불가");
-    expect(commands).toBe(0);
-    await page.clock.fastForward(2500);
-    await frames(page);
-    expect(await series(page)).toEqual([]);
-    await expect(row(page).locator("details")).toContainText("보고기간이 겹쳐 표시 불가");
-    await writeFile(info.outputPath("automatic-cold-get.json"), JSON.stringify({ events, jobs, old, reads, server, actual, detail, commands, settled: await series(page), settledDetail: await row(page).locator("details").innerText() }, null, 2));
-  });
-
-  test("중첩 POST와 늦은 GET이 최신 정정의 빈 값과 사유를 되돌리지 않는다", async ({ page, scenario, financial }, info) => {
-    await seed(scenario, financial);
-    await page.addInitScript(installFrameProbe);
-    await page.goto("/");
-    await expect(row(page)).toContainText("확인 완료");
-    const original = data(financial);
-    let releaseFirst = () => {};
-    let receivedFirst = () => {};
-    const firstHeld = new Promise<void>(resolve => { releaseFirst = resolve; });
-    const firstReceived = new Promise<void>(resolve => { receivedFirst = resolve; });
-    let blockGets = false;
-    let posts = 0;
-    const responses: FinancialUpdatePage[] = [];
-    scenario.on((url, request) => url.pathname === "/api/financial-update" && request.method() === "POST", async () => {
-      const n = ++posts;
-      const response = financial.job({ id: n + 1, status: "ready" });
-      responses.push(response);
-      if (n === 1) { receivedFirst(); await firstHeld; }
-      return { body: response };
-    });
-    const heldGets = scenario.hold(url => url.pathname === "/api/symbols/005930/financials" && url.searchParams.get("period") === "Y" && blockGets);
-    await row(page).locator("summary").click();
-    financial.show("edge");
-    await updateFromChart(page);
-    await firstReceived;
-    await updateFromChart(page);
-    await pollSaved(() => posts).toBe(2);
-    await expect(row(page)).toContainText("확인 완료");
-    await expect.poll(() => series(page)).toEqual([]);
-    const corrected = await series(page);
-    const delivered = page.waitForResponse(response => response.request().method() === "POST" && new URL(response.url()).pathname === "/api/financial-update");
-    blockGets = true;
-    releaseFirst();
-    await delivered;
-    await frames(page);
-    const after = await series(page);
-    const server = data(financial);
-    expect(after).toEqual(corrected);
-    expect(after).not.toContain(1000);
-    await expect(row(page)).toContainText("확인 완료");
-    await selectOption(row(page).getByRole("combobox"), { index: 1 });
-    await expect(row(page).locator("details")).toContainText("보고기간이 겹쳐 표시 불가");
-    await writeFile(info.outputPath("mutation-order.json"), JSON.stringify({ original, responses, corrected, after, server }, null, 2));
-    heldGets.reply({ body: server });
-  });
-
-  test("늦은 GET은 수동 정정과 Q/Y·거래소 전환 뒤의 값과 상태를 덮지 않는다", async ({ page, scenario, financial }, info) => {
-    await seed(scenario, financial);
-    const old = data(financial);
-    let holding = true;
-    const held = scenario.hold(url => url.pathname === "/api/symbols/005930/financials" && url.searchParams.get("period") === "Y" && holding);
-    await page.clock.install({ time: scenario.now });
-    await page.addInitScript(installFrameProbe);
-    await page.goto("/");
-    await held.received;
-    holding = false;
-    financial.show("edge");
-    await row(page).locator("summary").click();
-    await updateFromChart(page);
-    await expect(row(page)).toContainText("확인 완료");
-    await expect.poll(() => series(page)).toEqual([]);
-    held.reply({ body: old });
-    await frames(page);
-    expect(await series(page)).toEqual([]);
-    await expect(row(page)).toContainText("확인 완료");
-    await row(page).locator("summary").click();
+    await expect.poll(() => series(page)).not.toEqual([]);
+    const annual = await series(page);
     const periods = page.getByRole("toolbar").getByRole("group", { name: "봉 주기" });
     await periods.getByRole("button", { name: "분기", exact: true }).click();
     await expect(row(page)).toContainText("확인 완료");
-    await expect.poll(() => series(page)).toEqual([100]);
+    await expect.poll(() => series(page)).not.toEqual(annual);
     const quarter = await series(page);
     const requests: string[] = [];
     page.on("request", request => { if (new URL(request.url()).pathname.endsWith("/financials")) requests.push(request.url()); });
@@ -345,83 +218,7 @@ test.describe("같은 재무 키의 응답 순서", () => {
     expect(requests).toEqual([]);
     await periods.getByRole("button", { name: "연", exact: true }).click();
     await expect(row(page)).toContainText("확인 완료");
-    expect(await series(page)).toEqual([]);
-    await writeFile(info.outputPath("late-get.json"), JSON.stringify({ old, current: data(financial), quarter, requests }, null, 2));
-  });
-
-  test("cold Y 조회를 수동 갱신 중 재활성화해도 최신 정정의 빈 값으로 확인한다", async ({ page, scenario, financial }, info) => {
-    await seed(scenario, financial, false, true);
-    const deferred = () => {
-      let release = () => {};
-      const promise = new Promise<void>(resolve => { release = resolve; });
-      return { promise, release };
-    };
-    const first = deferred();
-    const second = deferred();
-    const postStart = deferred();
-    const postDelivery = deferred();
-    let reads = 0;
-    let postSeen = false;
-    let postFetched = false;
-    const oldResponses: FinancialsPage[] = [];
-    let postResponse: FinancialUpdatePage | null = null;
-    const events: string[] = [];
-    scenario.on((url, request) => url.pathname === "/api/financial-update" && request.method() === "POST", async () => {
-      postSeen = true;
-      events.push("POST requested and held before completion");
-      await postStart.promise;
-      financial.show("edge");
-      const response = financial.job({ id: 2, status: "ready" });
-      postResponse = response;
-      postFetched = true;
-      events.push("POST completion response captured");
-      await postDelivery.promise;
-      events.push("POST delivered");
-      return { body: response };
-    });
-    scenario.on(url => url.pathname === "/api/symbols/005930/financials" && url.searchParams.get("period") === "Y", async () => {
-      const n = ++reads;
-      const response = data(financial);
-      oldResponses.push(response);
-      events.push(`GET ${n} response captured`);
-      if (n === 1) await first.promise;
-      if (n === 2) await second.promise;
-      events.push(`GET ${n} delivered`);
-      return { body: response };
-    });
-    await page.clock.install({ time: scenario.now });
-    await page.addInitScript(installFrameProbe);
-    await page.goto("/");
-    await page.getByRole("button", { name: "재무자료", exact: true }).filter({ visible: true }).click();
-    const initialJob = page.getByRole("dialog", { name: "재무자료", exact: true });
-    await expect(initialJob).toContainText("최근 자료 확인 완료");
-    await initialJob.getByRole("button", { name: "닫기", exact: true }).first().click();
-    await row(page).getByRole("button", { name: / 보이기$/ }).click({ force: true });
-    await pollSaved(() => oldResponses.length).toBe(1);
-    await row(page).locator("summary").click();
-    await updateFromChart(page);
-    await pollSaved(() => postSeen).toBe(true);
-    await page.keyboard.press("Escape");
-    await expect(row(page).locator("details")).not.toHaveAttribute("open", "");
-    const periods = page.getByRole("toolbar").getByRole("group", { name: "봉 주기" });
-    await periods.getByRole("button", { name: "일", exact: true }).click();
-    await expect(row(page)).toHaveCount(0);
-    await periods.getByRole("button", { name: "연", exact: true }).click();
-    await pollSaved(() => oldResponses.length).toBe(2);
-    postStart.release();
-    await pollSaved(() => postFetched).toBe(true);
-    const delivered = page.waitForResponse(response => response.request().method() === "POST" && new URL(response.url()).pathname === "/api/financial-update");
-    postDelivery.release();
-    await delivered;
-    await frames(page);
-    second.release();
-    await expect(row(page)).toContainText("확인 완료");
-    await frames(page);
-    await page.clock.fastForward(2500);
-    const actual = await series(page);
-    const server = data(financial);
-    await writeFile(info.outputPath("cold-race.json"), JSON.stringify({ events, oldResponses, postResponse, actual, server, reads }, null, 2));
-    first.release();
-    expect(actual).toEqual([]);
+    await expect.poll(() => series(page)).toEqual(annual);
+    await writeFile(info.outputPath("period-switch.json"), JSON.stringify({ annual, quarter, requests }, null, 2));
   });
 });

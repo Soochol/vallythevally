@@ -14,8 +14,8 @@ export function Strip({ children, divided }: { children: ReactNode; divided?: bo
 
 export function RatioBar({ buy, sell, sellFirst, label }: { buy: number; sell: number; sellFirst?: boolean; label: string }) {
   const split = ratioSplit(buy, sell);
-  const sellPart = <i key="sell" className="mw-ratio-sell" style={{ width: `${split.sell}%` }} />;
-  const buyPart = <i key="buy" className="mw-ratio-buy" style={{ width: `${split.buy}%` }} />;
+  const sellPart = <i key="sell" className="mw-ratio-sell" style={{ transform: `scaleX(${split.sell / 100})` }} />;
+  const buyPart = <i key="buy" className="mw-ratio-buy" style={{ transform: `scaleX(${split.buy / 100})` }} />;
   return <div className="mw-ratio" role="img" aria-label={label} title={label}>{sellFirst ? [sellPart, buyPart] : [buyPart, sellPart]}</div>;
 }
 

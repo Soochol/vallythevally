@@ -139,7 +139,7 @@ test("탭 여섯 개가 한 묶음에 있는 도킹에서 처음 캔버스로 �
   const windows: LayoutWindow[] = [CHART, { id: "watchlist", link: null, kind: "watchlist" }, { id: "screener", link: null, kind: "screener" }, { id: "trades", link: null, kind: "trades" }, { id: "book", link: null, kind: "book" }, { id: "program", link: null, kind: "program" }];
   seed(scenario, windows, group("g1", windows.map((window) => window.id)));
   await open(page);
-  await page.getByRole("button", { name: /^레이아웃:/ }).click();
+  await page.getByRole("button", { name: "배치", exact: true }).click();
   const canvas = page.getByRole("group", { name: "창 배치 방식" }).getByRole("button", { name: "캔버스", exact: true });
   await canvas.click();
   await expect(canvas).toHaveAttribute("aria-pressed", "true");

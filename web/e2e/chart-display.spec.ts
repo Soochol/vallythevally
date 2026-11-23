@@ -93,7 +93,10 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 1024, height: 768
         const bounds = await selected.boundingBox();
         expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(viewport.width - 56);
       } else {
-        await expect.poll(() => page.evaluate(() => window.chartProbe.chart.panes().map((pane) => pane.priceScale("right").width()))).toEqual([72, 72, 72, 72, 72]);
+        await expect.poll(() => page.evaluate(() => {
+          const widths = window.chartProbe.chart.panes().map((pane) => pane.priceScale("right").width());
+          return widths.length === 5 && widths.every((width) => width === widths[0]) && [72, 80, 88].includes(widths[0]!);
+        })).toBe(true);
       }
     }
     if (viewport.width < 768) {

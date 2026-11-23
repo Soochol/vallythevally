@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { FeedBrokers } from "../../api/generated/FeedBrokers";
-import { EMPTY_BROKER_STATE, cumulativeAt, lineSegments, reduceBrokers, sortedRows, startedAt, type BrokerEvent, type BrokerState } from "./model";
+import { EMPTY_BROKER_STATE, cumulativeAt, halfHourTicks, lineSegments, reduceBrokers, sortedRows, startedAt, type BrokerEvent, type BrokerState } from "./model";
 
 const member = (code: string, qty: number) => ({ code, name: `사${code}`, qty, qtyChange: 0 });
 const snapshot = (t: number, buys: [string, number][], sells: [string, number][]): BrokerEvent => ({
@@ -90,5 +90,23 @@ describe("끊김과 중복", () => {
   it("처음 기록된 시각을 준다", () => {
     expect(startedAt(EMPTY_BROKER_STATE.grid)).toBeNull();
     expect(startedAt(run([snapshot(60, [["a", 1]], [])]).grid)).toBe(60);
+  });
+});
+
+describe("거래원 시간 눈금", () => {
+  const at = (clock: string) => Date.parse(`2026-11-09T${clock}+09:00`) / 1000;
+
+  it("30분 경계를 처음 넘은 스냅샷 칸에 그 경계 시각을 단다", () => {
+    const times = [at("09:20:00"), at("09:29:59"), at("09:31:00"), at("09:45:00"), at("10:05:00")];
+    expect(halfHourTicks(times)).toEqual([{ column: 2, time: at("09:30:00") }, { column: 4, time: at("10:00:00") }]);
+  });
+
+  it("경계 두 개를 한 번에 건너면 마지막 경계 하나만 단다", () => {
+    expect(halfHourTicks([at("09:10:00"), at("10:15:00")])).toEqual([{ column: 1, time: at("10:00:00") }]);
+  });
+
+  it("스냅샷이 없거나 하나면 눈금이 없다", () => {
+    expect(halfHourTicks([])).toEqual([]);
+    expect(halfHourTicks([at("09:10:00")])).toEqual([]);
   });
 });

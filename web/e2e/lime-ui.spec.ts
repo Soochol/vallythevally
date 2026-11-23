@@ -1,10 +1,12 @@
 import { installFrameProbe } from "./frame-probe";
 import { readFile } from "node:fs/promises";
 import { cell, chartOf, DEFAULT_LAYOUT_ID, expect, test, firstChart, pollSaved } from "./harness";
+import { useCenterIndicatorWindow } from "./indicator-window";
 
 test.use({ clockStart: "20261109100030" });
 
 test("색상표와 직접 고른 색·굵기 5를 지표에 적용하고 관리 탭에서 편집하며 다시 열어도 실제 차트와 이미지에 남는다", async ({ scenario, page }, info) => {
+  useCenterIndicatorWindow(scenario);
   const errors: string[] = [];
   page.on("pageerror", (e) => errors.push(e.message));
   await page.addInitScript(installFrameProbe);
@@ -18,7 +20,7 @@ test("색상표와 직접 고른 색·굵기 5를 지표에 적용하고 관리 
   await dialog.getByRole("group", { name: "굵기", exact: true }).getByRole("button", { name: "5", exact: true }).click();
   await expect(dialog.getByRole("group", { name: "색상표", exact: true }).getByRole("button")).toHaveCount(40);
   await dialog.getByRole("button", { name: "직접 고르기", exact: true }).click();
-  const picker = page.getByRole("dialog", { name: "선 색상", exact: true });
+  const picker = page.getByRole("dialog", { name: "선 색", exact: true });
   await expect(picker.getByRole("tab", { name: "사용자 지정", exact: true })).toHaveAttribute("aria-selected", "true");
   await picker.getByRole("slider", { name: "색조", exact: true }).press("Enter");
   await expect(picker).toHaveCount(0);
@@ -68,9 +70,9 @@ test("색상표와 직접 고른 색·굵기 5를 지표에 적용하고 관리 
   await expect(page.getByRole("group", { name: "굵기", exact: true }).getByRole("button", { name: "5", exact: true })).toHaveAttribute("aria-pressed", "true");
   await expect(page.getByRole("button", { name: "최근 색상 #8B5CF6", exact: true })).toBeVisible();
   await page.getByRole("button", { name: "직접 고르기", exact: true }).click();
-  await expect(page.getByRole("dialog", { name: "선 색상", exact: true })).toBeVisible();
+  await expect(page.getByRole("dialog", { name: "선 색", exact: true })).toBeVisible();
   await page.keyboard.press("Escape");
-  await expect(page.getByRole("dialog", { name: "선 색상", exact: true })).toHaveCount(0);
+  await expect(page.getByRole("dialog", { name: "선 색", exact: true })).toHaveCount(0);
   await expect(page.getByRole("dialog", { name: "지표·비교 입력창", exact: true })).toBeVisible();
   await page.screenshot({ path: info.outputPath("indicator.png"), fullPage: true });
   expect(errors).toEqual([]);

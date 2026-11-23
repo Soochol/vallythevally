@@ -11,10 +11,12 @@ import { type SearchPurpose, useSelectionStore } from "../../stores/selection";
 import { useActionKeys, useUiStore } from "../../stores/ui";
 import { useActiveWatchlist, useWatchlistStore } from "../../stores/watchlist";
 import { removalUndo } from "../watch/removalUndo";
+import { useSendSymbol } from "../pages/sendSymbol";
 import { PutTargetPill } from "./PutTargetPill";
 import { COMMAND_GROUPS, COMMAND_GROUP_LABEL, type CommandGroup, type SearchCommand, searchCommandsSnapshot, subscribeSearchCommands } from "../commands/registry";
 import { ChevronIcon, CloseIcon, Icon, ICON_PATHS, SearchIcon } from "../icons";
 import { RateBadge, type ChangeDirection } from "../list/listRow";
+import { formatPercent } from "../../lib/format";
 import { Kbd } from "../ui/Kbd";
 import { CommandFrame } from "../commands/CommandFrame";
 import { EmptyState, ErrorState, Skeleton } from "../overlay/State";
@@ -63,6 +65,7 @@ function SearchDialogBody({ purpose }: { purpose: SearchPurpose }) {
   const commands = [...defaultSearchCommands(useActionKeys()).filter((c) => !registered.some((r) => r.id === c.id)), ...registered];
   const queryClient = useQueryClient();
   const navigate = useNavigate();
+  const sendToLinkedChart = useSendSymbol();
   const [input, setInput] = useState("");
   const [market, setMarket] = useState<MarketFilter>("all");
   const [active, setActive] = useState(0);
@@ -106,7 +109,7 @@ function SearchDialogBody({ purpose }: { purpose: SearchPurpose }) {
       useSelectionStore.getState().showToast(`${watchlist.name}에서 뺐습니다: ${info.name}`);
     } else put(info);
   };
-  const chooseSymbol = (info: SymbolInfo, action: "open" | "watch" | "toggleWatch" | "compare") => {
+  const chooseSymbol = (info: SymbolInfo, action: "open" | "watch" | "toggleWatch" | "compare" | "page") => {
     queryClient.setQueryData(["symbol", info.code], info);
     const selection = useSelectionStore.getState();
     if (action === "compare") {
@@ -125,6 +128,8 @@ function SearchDialogBody({ purpose }: { purpose: SearchPurpose }) {
         inputRef.current?.focus();
         return;
       }
+    } else if (purpose === "page") {
+      sendToLinkedChart(info);
     } else {
       const { notice } = useLayoutStore.getState().setSymbol(cellId, info);
       if (notice) selection.showToast(notice);
@@ -169,7 +174,7 @@ function SearchDialogBody({ purpose }: { purpose: SearchPurpose }) {
     ? <><Hint keys={["↵"]}>실행</Hint><Hint keys={["Esc"]}>닫기</Hint></>
     : purpose === "watch"
       ? <><Hint keys={["↵"]}>넣기</Hint><Hint keys={["Tab"]}>넣을 곳</Hint><Hint keys={["Esc"]}>닫기</Hint></>
-      : <><Hint keys={["↑", "↓"]}>고르기</Hint><Hint keys={["↵"]}>열기</Hint><Hint keys={["☆", "Ctrl+↵"]} joiner="·">관심종목</Hint><Hint keys={["Shift+↵"]}>비교</Hint><Hint keys={["Esc"]}>닫기</Hint></>;
+      : <><Hint keys={["↑", "↓"]}>고르기</Hint><Hint keys={["↵"]}>{purpose === "page" ? "보낼 연동 색 차트에 열기" : "열기"}</Hint><Hint keys={["☆", "Ctrl+↵"]} joiner="·">관심종목</Hint><Hint keys={["Shift+↵"]}>비교</Hint><Hint keys={["Esc"]}>닫기</Hint></>;
 
   return <CommandFrame solid labelledBy={`${ids}-title`} onClose={close} width="h-[min(640px,80dvh)] w-[min(840px,calc(100vw-32px))] max-md:h-[80dvh]">
     <div className="flex min-h-0 flex-1 flex-col">
@@ -247,7 +252,7 @@ function QuoteCells({ quote }: { quote: Quote | undefined }) {
   return <>
     <span aria-label="현재가" className="whitespace-nowrap text-right text-text">{quote ? quote.price.toLocaleString("ko-KR") : ""}</span>
     <span aria-label="등락률" className="min-w-0">
-      {quote ? <RateBadge direction={directionOf(quote.changeRate)}>{`${quote.changeRate > 0 ? "+" : ""}${quote.changeRate.toFixed(2)}%`}</RateBadge> : <span className="block px-1 py-0.5 text-right text-text-3">—</span>}
+      {quote ? <RateBadge direction={directionOf(quote.changeRate)}>{formatPercent(quote.changeRate)}</RateBadge> : <span className="block px-1 py-0.5 text-right text-text-3">—</span>}
     </span>
   </>;
 }

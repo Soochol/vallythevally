@@ -4,6 +4,7 @@ import type { Layout } from "../src/api/generated/Layout";
 import { installFrameProbe } from "./frame-probe";
 import { parseChartSettings } from "../src/chart/settings";
 import { type Scenario, barTimes, cell, chartOf, DEFAULT_LAYOUT_ID, dragTowardPast, expect, test, firstChart, withFirstChart, pollSaved } from "./harness";
+import { useCenterIndicatorWindow } from "./indicator-window";
 
 test.use({ clockStart: "20261109100030" });
 
@@ -336,6 +337,7 @@ test.describe("체결 없던 분 뒤", () => {
 });
 
 test("지표 창에서 테마 색을 고르면 토큰을, 색상표의 색을 고르면 HEX를 저장하고 고친 색도 같은 규칙을 따른다", async ({ page, scenario }) => {
+  useCenterIndicatorWindow(scenario);
   const saved = async () => parseChartSettings(firstChart(scenario.documents.layout(DEFAULT_LAYOUT_ID)).chartSettings).indicators.filter((i) => i.spec.kind === "ma").map((i) => i.style.colors);
   await page.goto("/?symbol=005930");
   await expect(cell(page)).toHaveAttribute("aria-busy", "false");
@@ -348,7 +350,7 @@ test("지표 창에서 테마 색을 고르면 토큰을, 색상표의 색을 �
   await expect(theme.getByRole("button", { name: /^테마 2 / })).toHaveAttribute("aria-pressed", "true");
   await theme.getByRole("button", { name: /^테마 4 / }).click();
   await expect(theme.getByRole("button", { name: /^테마 4 / })).toHaveAttribute("aria-pressed", "true");
-  await expect(dialog.getByRole("group", { name: "선 색상", exact: true })).toContainText("테마 4");
+  await expect(dialog.getByRole("group", { name: "선 색", exact: true })).toContainText("테마 4");
   await dialog.getByRole("button", { name: "이동평균 단순 9 추가", exact: true }).click();
   await pollSaved(saved).toEqual([["ind-4"]]);
   await input.fill("이평 11");

@@ -47,10 +47,29 @@ export interface Arrangement {
   rects: Map<SymbolCode, TileRect>;
 }
 
+type Side = "up" | "flat" | "down";
+
+const sideOf = (row: SnapshotRow): Side => (row.changeRate === null || row.changeRate === 0 ? "flat" : row.changeRate > 0 ? "up" : "down");
+
+function layoutByWeight(rows: readonly SnapshotRow[], weights: ReadonlyMap<SymbolCode, number>, width: number, height: number): TileRect[] {
+  const ranked = [...rows].sort((a, b) => weights.get(b.code)! - weights.get(a.code)!);
+  return layoutTiles(ranked.map((row) => ({ key: row.code, weight: weights.get(row.code)! })), width, height);
+}
+
+function layoutBySide(rows: readonly SnapshotRow[], weights: ReadonlyMap<SymbolCode, number>, width: number, height: number): TileRect[] {
+  const sides = (["up", "flat", "down"] as const).map((side) => ({ side, rows: rows.filter((row) => sideOf(row) === side) })).filter((band) => band.rows.length > 0);
+  const total = (band: { rows: readonly SnapshotRow[] }) => band.rows.reduce((sum, row) => sum + weights.get(row.code)!, 0);
+  const bands = layoutTiles(sides.map((band) => ({ key: band.side, weight: total(band) })), width, height);
+  return bands.flatMap((area) => {
+    const members = sides.find((band) => band.side === area.key)!.rows;
+    return layoutByWeight(members, weights, area.w, area.h).map((rect) => ({ ...rect, x: rect.x + area.x, y: rect.y + area.y }));
+  });
+}
+
 export function arrange(rows: readonly SnapshotRow[], size: SizeMode, sort: SortMode, width: number, height: number): Arrangement {
   const sorted = sortRows(rows, sort);
-  const weights = tileWeights(sorted, size);
-  const ranked = sorted.map((row, i) => ({ key: row.code, weight: weights[i]! }));
-  const rects = new Map(layoutTiles(ranked, width, height).map((rect) => [rect.key as SymbolCode, rect]));
-  return { rows: sorted, rects };
+  const weightList = tileWeights(sorted, size);
+  const weights = new Map(sorted.map((row, i) => [row.code, weightList[i]!] as const));
+  const placed = sort === "rate" ? layoutBySide(sorted, weights, width, height) : layoutTiles(sorted.map((row) => ({ key: row.code, weight: weights.get(row.code)! })), width, height);
+  return { rows: sorted, rects: new Map(placed.map((rect) => [rect.key as SymbolCode, rect])) };
 }

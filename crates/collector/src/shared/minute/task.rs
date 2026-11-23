@@ -106,20 +106,23 @@ struct Aggregator {
 }
 
 async fn run(mut frames: mpsc::Receiver<Frame>, store: Box<dyn MinuteStore>, stats: Arc<MinuteStats>, now_ms: i64) {
-    let mut aggregator = Aggregator { store: Some(store), day: None, as_of_ms: now_ms, stats };
-    aggregator.open_day(KstTime::from_unix_ms(now_ms).date).await;
     let mut flush = interval_at(Instant::now() + FLUSH_EVERY, FLUSH_EVERY);
     let mut report = interval_at(Instant::now() + REPORT_EVERY, REPORT_EVERY);
     for tick in [&mut flush, &mut report] {
         tick.set_missed_tick_behavior(MissedTickBehavior::Delay);
     }
+    let mut aggregator = Aggregator { store: Some(store), day: None, as_of_ms: now_ms, stats };
+    aggregator.open_day(KstTime::from_unix_ms(now_ms).date).await;
     loop {
         tokio::select! {
             received = frames.recv() => match received {
                 Some(frame) => aggregator.take(frame).await,
                 None => break,
             },
-            _ = flush.tick() => aggregator.flush().await,
+            _ = flush.tick() => {
+                aggregator.take_queued(&mut frames).await;
+                aggregator.flush().await;
+            }
             _ = report.tick() => aggregator.report(),
         }
     }
@@ -179,6 +182,15 @@ impl Aggregator {
         match read {
             Ok(reading) => MinuteStats::add(&stats.skipped, reading.skipped),
             Err(_) => MinuteStats::add(&stats.unreadable, 1),
+        }
+    }
+
+    async fn take_queued(&mut self, frames: &mut mpsc::Receiver<Frame>) {
+        for _ in 0..frames.len() {
+            match frames.try_recv() {
+                Ok(frame) => self.take(frame).await,
+                Err(_) => break,
+            }
         }
     }
 

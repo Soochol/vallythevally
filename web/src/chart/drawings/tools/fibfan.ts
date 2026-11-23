@@ -1,4 +1,4 @@
-import { at, readBool, readRecord } from "../styleKit";
+import { at, labelBox, readBool, readRecord } from "../styleKit";
 import { defineTool, type Level, type Shape, type ToolContext } from "../toolSpec";
 import type { ScreenPoint } from "../types";
 import { type Band, fanRay, fanSide, fanWedge, levelColor, type LineLook, mainColor, MAX_LEVELS, pointHandles, readBand, readLevels, readLineLook } from "./fibKit";
@@ -108,6 +108,7 @@ export const fibfan = defineTool<FibFanStyle>({
           align: side === "right" ? "left" : "right",
           baseline: "middle",
           style: { color: level.color, size: 12, bold: false, italic: false },
+          box: labelBox(level.color),
         }))
       : [];
     return [...wedges, ...rays, ...labels];

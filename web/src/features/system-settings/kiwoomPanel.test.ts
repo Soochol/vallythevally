@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { KiwoomLinkStatus } from "../../api/generated/KiwoomLinkStatus";
-import { canSaveKey, EMPTY_KEY_FORM, formatRemaining, ipDiffers, keyFormReducer, keyLocked, keySaveNote, maskedAppKey, NO_CONFIRMATIONS, panelView } from "./kiwoomPanel";
+import { canSaveKey, connectBlockReason, EMPTY_KEY_FORM, formatRemaining, ipDiffers, keyFormReducer, keyLocked, keySaveNote, maskedAppKey, NO_CONFIRMATIONS, panelView } from "./kiwoomPanel";
 
 const base: KiwoomLinkStatus = {
   environment: "real", keySource: "file", appKeyTail: "7Q2D", credentialId: null, state: "disconnected", problem: null, message: "", retryAt: null, needsAcknowledgement: false,
@@ -10,8 +10,8 @@ const failed = (problem: NonNullable<KiwoomLinkStatus["problem"]>, retryAt: numb
 const both = { registeredIp: true, lockChecked: true };
 
 describe("상태별 행동", () => {
-  it("키 없음은 연결 단추가 있되 꺼져 있다", () => {
-    expect(panelView({ ...base, state: "noKey", keySource: "none" }, 0).connect).toMatchObject({ label: "키움에 연결", enabled: false });
+  it("키 없음은 연결 단추가 없다", () => {
+    expect(panelView({ ...base, state: "noKey", keySource: "none" }, 0)).toMatchObject({ stage: "noKey", connect: null });
   });
   it("연결 안 함은 바로 연결할 수 있다", () => {
     expect(panelView(base, 0).connect).toMatchObject({ label: "키움에 연결", enabled: true, acknowledged: false });
@@ -93,12 +93,25 @@ describe("인증 차단 8050", () => {
   });
 });
 
+describe("꺼진 연결 단추의 이유", () => {
+  const blocked = failed("authBlocked8050", 1000);
+  it("확인이 모자라면 확인을 말한다", () => {
+    expect(connectBlockReason(panelView(blocked, 500), NO_CONFIRMATIONS)).toBe("위 확인 두 칸을 모두 체크하면 켜집니다");
+  });
+  it("확인을 마치면 간격이 지나기를 기다린다고 말한다", () => {
+    expect(connectBlockReason(panelView(blocked, 500, both), both)).toBe("발급 간격이 지나면 누를 수 있습니다");
+  });
+  it("누를 수 있거나 단추가 없으면 이유가 없다", () => {
+    expect(connectBlockReason(panelView(blocked, 1000, both), both)).toBeNull();
+    expect(connectBlockReason(panelView({ ...base, state: "noKey", keySource: "none" }, 0), NO_CONFIRMATIONS)).toBeNull();
+  });
+});
+
 describe("키 폼", () => {
-  it("저장이 끝나면 입력 값과 보기 상태가 모두 비어 있다", () => {
+  it("저장이 끝나면 입력 값이 모두 비어 있다", () => {
     let form = keyFormReducer(EMPTY_KEY_FORM, { type: "edit" });
     form = keyFormReducer(form, { type: "appKey", value: "AAAA-APPKEY-7Q2D" });
     form = keyFormReducer(form, { type: "appSecret", value: "SECRET-VALUE" });
-    form = keyFormReducer(form, { type: "toggleReveal" });
     expect(canSaveKey(form)).toBe(true);
     expect(keyFormReducer(form, { type: "saved" })).toEqual(EMPTY_KEY_FORM);
   });

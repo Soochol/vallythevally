@@ -64,31 +64,42 @@ export function nextMarketKey(keys: readonly KiwoomKey[], removing: KiwoomKey): 
   return keys.find((key) => key.keyId !== removing.keyId);
 }
 
-export function marketChangeText(alias: string, from: Broker | null = null, to: Broker | null = null): string {
-  const base = `시세를 ‘${alias}’에서 받습니다. 열린 차트·호가·체결을 새로 받습니다. 주문 계좌는 바뀌지 않습니다`;
+export interface ConfirmText {
+  readonly title: string;
+  readonly detail: readonly string[];
+}
+
+export function marketChangeText(alias: string, from: Broker | null = null, to: Broker | null = null): ConfirmText {
   const note = from !== null && to !== null && from !== to ? BROKERS[to].sourceNote : null;
-  return note === null ? base : `${base}. ${note}`;
+  return { title: `시세를 ‘${alias}’에서 받습니다`, detail: ["열린 차트·호가·체결을 새로 받습니다", "주문 계좌는 바뀌지 않습니다", ...(note === null ? [] : [note])] };
 }
 
-export function removeText(keys: readonly KiwoomKey[], removing: KiwoomKey, ordersInUse = false): string {
-  const base = removeBaseText(keys, removing);
-  return ordersInUse ? `${base}. ${REMOVE_ORDERS_NOTE}` : base;
+export function removeText(keys: readonly KiwoomKey[], removing: KiwoomKey, ordersInUse = false): ConfirmText {
+  return { title: `‘${removing.alias}’ 키를 지웁니다`, detail: [...removeConsequences(keys, removing), ...(ordersInUse ? [REMOVE_ORDERS_NOTE] : [])] };
 }
 
-function removeBaseText(keys: readonly KiwoomKey[], removing: KiwoomKey): string {
-  if (!removing.market) return `‘${removing.alias}’ 키를 지웁니다`;
+function removeConsequences(keys: readonly KiwoomKey[], removing: KiwoomKey): string[] {
+  if (!removing.market) return [];
   const next = nextMarketKey(keys, removing);
-  const switched = next && next.broker !== removing.broker ? BROKERS[next.broker].sourceNote : null;
-  return next
-    ? `‘${removing.alias}’는 시세 키입니다. 지우면 시세를 ‘${next.alias}’에서 받습니다${switched ? `. ${switched}` : ""}`
-    : `‘${removing.alias}’는 시세 키입니다. 지우면 키가 없어 시세를 받지 못합니다`;
+  if (!next) return ["시세 키입니다. 지우면 키가 없어 시세를 받지 못합니다"];
+  const switched = next.broker !== removing.broker ? BROKERS[next.broker].sourceNote : null;
+  return [`시세 키입니다. 지우면 시세를 ‘${next.alias}’에서 받습니다`, ...(switched ? [switched] : [])];
 }
 
-export function pickerLabel(key: KiwoomKey, now: number): string {
-  const reason = shortReason(key.link, now, key.broker);
-  const tail = key.appKeyTail ? ` · ••••${key.appKeyTail}` : "";
-  return `${key.alias}${tail}${reason ? ` · ${reason}` : ` · ${linkStateText(key.link)}`}`;
+export interface PickerOption {
+  readonly value: string;
+  readonly label: string;
+  readonly hint: string;
+  readonly group: string;
 }
+
+export function pickerOption(key: KiwoomKey, now: number): PickerOption {
+  const reason = shortReason(key.link, now, key.broker);
+  const tail = key.appKeyTail ? `••••${key.appKeyTail}` : null;
+  return { value: key.keyId, label: key.alias, hint: [tail, reason ?? linkStateText(key.link)].filter((part) => part !== null).join(" · "), group: BROKERS[key.broker].name };
+}
+
+export const reasonTone = (link: KiwoomLinkStatus): "danger" | "warning" => (linkDotTone(link) === "red" ? "danger" : "warning");
 
 export function linkStateText(link: KiwoomLinkStatus): string {
   switch (link.state) {
@@ -108,6 +119,8 @@ export function linkStateText(link: KiwoomLinkStatus): string {
     }
   }
 }
+
+export const systemButtonSentence = (link: KiwoomLinkStatus | null): string => (link === null ? "시세 연결 상태를 불러오는 중입니다" : `시세 연결 ${linkStateText(link)}`);
 
 export function addResult(link: KiwoomLinkStatus, now: number): { tone: "ok" | "wait" | "error"; text: string } {
   if (link.state === "connected") return { tone: "ok", text: "토큰 받음" };
@@ -138,7 +151,6 @@ export interface KeyEntry {
   appSecret: string;
   accountNo: string;
   htsId: string;
-  reveal: boolean;
 }
 
 export type KeyEntryEvent =
@@ -147,10 +159,9 @@ export type KeyEntryEvent =
   | { type: "appSecret"; value: string }
   | { type: "accountNo"; value: string }
   | { type: "htsId"; value: string }
-  | { type: "toggleReveal" }
   | { type: "reset"; alias: string };
 
-export const emptyEntry = (alias: string): KeyEntry => ({ alias, appKey: "", appSecret: "", accountNo: "", htsId: "", reveal: false });
+export const emptyEntry = (alias: string): KeyEntry => ({ alias, appKey: "", appSecret: "", accountNo: "", htsId: "" });
 
 export function keyEntryReducer(entry: KeyEntry, event: KeyEntryEvent): KeyEntry {
   switch (event.type) {
@@ -164,8 +175,6 @@ export function keyEntryReducer(entry: KeyEntry, event: KeyEntryEvent): KeyEntry
       return { ...entry, accountNo: event.value };
     case "htsId":
       return { ...entry, htsId: event.value };
-    case "toggleReveal":
-      return { ...entry, reveal: !entry.reveal };
     case "reset":
       return emptyEntry(event.alias);
   }
@@ -202,4 +211,21 @@ export function feedLine(source: MarketSourceStatus | null, keys: readonly Kiwoo
   if (feed === undefined) return "순위·시장 개요·투자자: 받을 연결이 없습니다";
   const alias = keys.find((key) => key.broker === feed && key.link.state === "connected")?.alias;
   return `순위·시장 개요·투자자: ${BROKERS[feed].shortName}${alias ? ` · ‘${alias}’` : ""}`;
+}
+
+export type KeyFieldName = "alias" | "appKey" | "appSecret" | "accountNo";
+
+export type KeyFieldErrors = Partial<Record<KeyFieldName, string>>;
+
+export function fieldErrors(message: string | null): KeyFieldErrors {
+  const field = message === null ? null : fieldOfError(message);
+  return message === null || field === null ? {} : { [field]: message };
+}
+
+export function fieldOfError(message: string): KeyFieldName | null {
+  if (message.includes("별칭")) return "alias";
+  if (message.includes("앱키")) return "appKey";
+  if (message.includes("시크릿")) return "appSecret";
+  if (message.includes("계좌번호") && !message.includes("한투 키에만")) return "accountNo";
+  return null;
 }

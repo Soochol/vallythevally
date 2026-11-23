@@ -1,4 +1,3 @@
-import { ErrorState, EmptyState } from "../overlay/State";
 import { createPortal } from "react-dom";
 import { VenueFallbackBadge } from "../venue/VenuePicker";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -16,7 +15,9 @@ import { marketSocket } from "../../stores/realtime";
 import { useSelectionStore } from "../../stores/selection";
 import { openIndicatorCommand, shownIndicatorWindow } from "../indicator-command/open";
 import { useTheme, useVenue } from "../../stores/ui";
-import { cellErrorView, olderErrorView } from "./cellError";
+import { type CellAction, cellErrorView, olderErrorView } from "./cellError";
+import { CellState } from "./CellState";
+import { openSystemSettings } from "../system-settings/open";
 import { NOT_CONNECTED_FALLBACK, beforeConnect } from "../status/beforeConnect";
 import { useKiwoomLinkStore } from "../../stores/kiwoomLink";
 import { BeforeConnectCard } from "../status/BeforeConnectCard";
@@ -34,8 +35,6 @@ function runIndicatorCommand(cellId: WindowId, id: string, command: IndicatorCom
   const config = chartWindows(store.layout).find((c) => c.id === cellId)?.chartSettings.indicators.find((i) => i.id === id);
   if (!config) return;
   switch (command) {
-    case "refresh":
-      return;
     case "edit":
       return;
     case "collapse":
@@ -89,7 +88,6 @@ export function ChartCell({ cellId, status, onStatus }: Props) {
       onStatus: (s) => onStatusRef.current(s),
       socket: marketSocket,
       onIndicatorCommand: (id, command, anchor) => {
-        if (command === "refresh") return useSelectionStore.getState().openFinancialUpdate();
         if (command !== "edit") return runIndicatorCommand(cellIdRef.current, id, command);
         if (shownIndicatorWindow() === "inspector") return openIndicatorCommand(cellIdRef.current, "current", id);
         const initial = chartWindows(useLayoutStore.getState().layout).find((c) => c.id === cellIdRef.current)?.chartSettings.indicators.find((i) => i.id === id);
@@ -121,7 +119,7 @@ export function ChartCell({ cellId, status, onStatus }: Props) {
   }, [cell, chartSettings, venue, info, preview, compareNames]);
 
   useEffect(() => {
-    ctl.current?.setFinancials(financial.data ?? null, financial.error ? "재무자료 조회 실패 · 재무자료 창에서 다시 확인하세요" : undefined);
+    ctl.current?.setFinancials(financial.data ?? null, financial.error ? "재무자료 조회 실패" : undefined);
   }, [cell.symbol, cell.period, financial.data, financial.error]);
 
   useEffect(() => {
@@ -142,6 +140,11 @@ export function ChartCell({ cellId, status, onStatus }: Props) {
     if (connected && failedRef.current) ctl.current?.reload();
   }, [connected]);
   const error = status.kind === "error" && notice === null ? cellErrorView(status.error, cell.symbol) : null;
+  const runCellAction = (action: CellAction) => {
+    if (action === "retry") ctl.current?.reload();
+    else if (action === "search") openSearch();
+    else openSystemSettings("kiwoom");
+  };
   const olderError = status.kind === "ready" && status.olderError ? olderErrorView(status.olderError, cell.symbol) : null;
 
   return (
@@ -152,7 +155,7 @@ export function ChartCell({ cellId, status, onStatus }: Props) {
       className="relative min-h-0 min-w-0 bg-chart-bg focus-visible:outline-offset-[-2px]"
     >
       <div ref={chartEl} className="absolute inset-0" />
-      <AxisMode cellId={cellId} corner={corner} />
+      {status.kind === "ready" && <AxisMode cellId={cellId} corner={corner} />}
       {venueAnchor && venue !== null && venue !== appVenue && createPortal(<VenueFallbackBadge />, venueAnchor)}
       <DrawingOverlay cellId={cellId} />
       {editing && cell.chartSettings.indicators.some((i) => i.id === editing.initial.id) && <IndicatorPopover key={editing.initial.id} cellId={cellId} {...editing} editRoot={chartEl.current!} onClose={() => setEditing(null)} />}
@@ -189,7 +192,7 @@ export function ChartCell({ cellId, status, onStatus }: Props) {
       {notice && <BeforeConnectCard notice={notice} />}
       {error && (
         <div className="absolute inset-0 z-[5] grid place-items-center bg-chart-bg p-6">
-          {error.action === "retry" ? <ErrorState message={error.text} retry={() => ctl.current?.reload()} /> : <div role="alert"><EmptyState title={error.text} action={error.action === "search" ? "종목 검색" : undefined} onAction={openSearch} /></div>}
+          <CellState view={error} onAction={runCellAction} />
         </div>
       )}
     </section>

@@ -67,7 +67,7 @@ for (const edits of ["put", "delete", "put-put", "put-delete"] as const) {
     await pollSaved(async () => (await drawings(scenario)).length).toBe(1);
     const [original] = await drawings(scenario);
     if (original === undefined) throw new Error("Expected the seeded drawing");
-    await expect(page.getByText(/^자동 저장됨 /)).toBeVisible();
+    await expect(page.getByText(/^저장됨$/)).toBeVisible();
 
     const editing = await context.newPage();
     await open(editing);

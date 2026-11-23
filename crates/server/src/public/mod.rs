@@ -70,13 +70,16 @@ pub struct PublicListener {
     site: Arc<StaticSite>,
 }
 
-pub async fn start(config: &Config, state: Arc<AppState>, financial_routes: Router) -> Result<Option<PublicListener>, StartFailure> {
+pub async fn start(config: &Config, state: Arc<AppState>, financial_routes: Router, opened: Option<std::net::TcpListener>) -> Result<Option<PublicListener>, StartFailure> {
     let Some(settings) = config.public.clone() else { return Ok(None) };
     let PublicSettings { bind, origin, account, limits } = settings;
-    let listener = TcpListener::bind(bind.socket_addr()).await.map_err(|e| {
-        tracing::error!(addr = %bind.socket_addr(), error = %e, "공개 포트를 열 수 없습니다");
-        StartFailure
-    })?;
+    let listener = match opened {
+        Some(opened) => adopt_opened(opened, bind.socket_addr())?,
+        None => TcpListener::bind(bind.socket_addr()).await.map_err(|e| {
+            tracing::error!(addr = %bind.socket_addr(), error = %e, "공개 포트를 열 수 없습니다");
+            StartFailure
+        })?,
+    };
     let account_settings = account.0;
     if let Some(parent) = account_settings.database_path.parent().filter(|p| !p.as_os_str().is_empty()) {
         std::fs::create_dir_all(parent).map_err(|e| {
@@ -117,6 +120,21 @@ pub async fn start(config: &Config, state: Arc<AppState>, financial_routes: Rout
     let financial_reads = financial_routes.route_layer(axum::middleware::from_fn(shared_guard::financial_reads));
     tracing::info!(addr = %bind.socket_addr(), origin = %runtime.origin.origin, "공개 리스너를 엽니다");
     Ok(Some(PublicListener { listener, runtime, browser_login: accounts.browser_router(), financial_reads, site: Arc::new(site) }))
+}
+
+fn adopt_opened(opened: std::net::TcpListener, bind: std::net::SocketAddr) -> Result<TcpListener, StartFailure> {
+    let actual = opened.local_addr().map_err(|e| {
+        tracing::error!(error = %e, "넘겨받은 공개 리스너의 주소를 읽을 수 없습니다");
+        StartFailure
+    })?;
+    if actual != bind {
+        tracing::error!(%actual, %bind, "넘겨받은 공개 리스너가 VALLY_PUBLIC_BIND와 다릅니다");
+        return Err(StartFailure);
+    }
+    opened.set_nonblocking(true).and_then(|()| TcpListener::from_std(opened)).map_err(|e| {
+        tracing::error!(addr = %bind, error = %e, "넘겨받은 공개 리스너를 쓸 수 없습니다");
+        StartFailure
+    })
 }
 
 async fn log_usage_every_minute(state: Arc<AppState>) {

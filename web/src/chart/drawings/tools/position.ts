@@ -1,7 +1,7 @@
-import { at, DOWN, DRAW, defaultText, readFill, readRecord, readTextStyle, UP } from "../styleKit";
+import { at, DOWN, DRAW, defaultText, labelBox, readFill, readRecord, readTextStyle, UP } from "../styleKit";
 import { type AxisLabel, defineTool, type Shape, type Tool, type ToolContext } from "../toolSpec";
-import type { DrawingPoint, Fill, TextStyle } from "../types";
-import { MEASURE_GAP, measureLabel, signedPercent, thinStroke } from "./pricerange";
+import type { Color, DrawingPoint, Fill, ScreenPoint, TextStyle } from "../types";
+import { MEASURE_GAP, signedPercent, thinStroke } from "./pricerange";
 
 export type PositionSide = "long" | "short";
 
@@ -74,6 +74,8 @@ function positionMoves(side: PositionSide) {
 
 const awayFrom = (y: number, entryY: number) => (y <= entryY ? { dy: -MEASURE_GAP, baseline: "bottom" as const } : { dy: MEASURE_GAP, baseline: "top" as const });
 
+const positionLabel = (at: ScreenPoint, text: string, style: TextStyle, band: Color, baseline: "top" | "middle" | "bottom", align: "left" | "center" | "right"): Shape => ({ kind: "text", at, text, style, align, baseline, box: labelBox(band) });
+
 function levelText(name: string, entry: number, price: number, ctx: ToolContext): string {
   const percent = signedPercent(entry, price);
   return percent === null ? `${name} ${ctx.formatPrice(price)}` : `${name} ${ctx.formatPrice(price)} (${percent})`;
@@ -119,13 +121,13 @@ function positionTool(side: PositionSide): Tool {
         if (point === undefined || y === null) return;
         const { dy, baseline } = awayFrom(y, a.y);
         shapes.push({ kind: "rect", a, b: { x: right, y }, fill });
-        if (labelled) shapes.push(measureLabel({ x, y: y + dy }, levelText(name, entry.price, point.price, ctx), style.label, fill.color, baseline, align));
+        if (labelled) shapes.push(positionLabel({ x, y: y + dy }, levelText(name, entry.price, point.price, ctx), style.label, fill.color, baseline, align));
       };
       level(target, "목표", style.profit);
       level(stop, "손절", style.stop);
       shapes.push({ kind: "segment", a, b: { x: right, y: a.y }, stroke: thinStroke(DRAW) });
       const ratio = target === undefined || stop === undefined ? null : riskReward(entry.price, target.price, stop.price);
-      if (labelled && ratio !== null) shapes.push(measureLabel({ x, y: a.y }, `손익비 ${ratio.toFixed(2)}`, style.label, DRAW, "middle", align));
+      if (labelled && ratio !== null) shapes.push(positionLabel({ x, y: a.y }, `손익비 ${ratio.toFixed(2)}`, style.label, DRAW, "middle", align));
       return shapes;
     },
     setPoint(points, index, to, ctx) {

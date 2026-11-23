@@ -85,7 +85,6 @@ const frame = (page: Page) => page.evaluate(() => new Promise<void>((resolve) =>
 
 for (const limit of ["minimum", "maximum"] satisfies Limit[]) financialTest(`a wheel that cannot move the ${limit} zoom limit keeps the pending financial correction`, async ({ page, scenario, financial }, info) => {
   const stored = seed(scenario);
-  financial.job({ status: "ready" });
   await page.addInitScript(installChartProbe);
   await page.addInitScript(installFinancialViewportProbe);
   const results = [];

@@ -265,7 +265,7 @@ test.describe("로그인 뒤", () => {
     layoutWith(scenario, [rankingWindow()]);
     await page.clock.install({ time: scenario.now });
     await page.goto("/");
-    const retry = page.getByRole("button", { name: "다시 받기" });
+    const retry = page.getByRole("button", { name: "다시 시도" });
     await expect(retry).toBeVisible();
     expect(answered).toBe(1);
     await page.clock.runFor(10_000);

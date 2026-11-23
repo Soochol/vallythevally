@@ -157,10 +157,7 @@ impl Signal {
 }
 
 #[derive(Default)]
-struct UpdateRun { running: bool, probing: bool, failure: Option<Failure>, pending_symbols: Option<Vec<SymbolInfo>>, collecting: Option<String>, company_failures: BTreeMap<String, Failure> }
-
-#[derive(Default)]
-pub(super) struct CollectionState { pub collecting: bool, pub failure: Option<Failure> }
+struct UpdateRun { running: bool, probing: bool, failure: Option<Failure>, pending_symbols: Option<Vec<SymbolInfo>>, company_failures: BTreeMap<String, Failure> }
 
 pub(super) struct UpdateControl { configured: bool, clock: Clock, automatic: AtomicBool, run: tokio::sync::Mutex<UpdateRun>, signal: Arc<Signal>, finished: tokio::sync::Notify }
 
@@ -197,22 +194,19 @@ impl UpdateControl {
 
     pub(super) async fn begin_company(&self, corp: &str) {
         let mut run = self.run.lock().await;
-        run.collecting = Some(corp.into());
         run.company_failures.remove(corp);
     }
 
     pub(super) async fn finish_company(&self, corp: &str, result: &Result<Collection, Interrupt>) {
         let mut run = self.run.lock().await;
-        run.collecting = None;
         if let Err(Interrupt::Failure(failure)) = *result {
             tracing::warn!(?failure, "재무 자료를 수집하지 못했습니다");
             run.company_failures.insert(corp.into(), failure);
         }
     }
 
-    pub(super) async fn collection_state(&self, corp: &str) -> CollectionState {
-        let run = self.run.lock().await;
-        CollectionState { collecting: run.running && run.collecting.as_deref() == Some(corp), failure: run.company_failures.get(corp).copied() }
+    pub(super) async fn company_failure(&self, corp: &str) -> Option<Failure> {
+        self.run.lock().await.company_failures.get(corp).copied()
     }
 
     fn run_state(&self, run: &UpdateRun) -> RunState {

@@ -1,7 +1,7 @@
 import { expect, test } from "vitest";
 import type { FinancialPoint } from "../api/generated/FinancialPoint";
 import type { FinancialsPage } from "../api/generated/FinancialsPage";
-import { adjacentBucket, financialBuckets, financialDetail, financialSummary, financialValue } from "./financials";
+import { adjacentBucket, financialBuckets, financialDetail, financialStatus, financialSummary, financialValue } from "./financials";
 import { addIndicator, DEFAULT_CHART_SETTINGS, movePanel, parseChartSettings, setPanelStretches, updateIndicator } from "./settings";
 
 const kst = (date: string) => Date.parse(`${date}T00:00:00+09:00`) / 1000;
@@ -45,4 +45,8 @@ test("비교자료와 배당 기간근거의 상태·원금액·시각·실패�
 test("마지막 확인과 일부 실패·저장값 갱신 실패를 함께 표시한다", () => {
   const page: FinancialsPage = { symbol: "005930", period: "Q", status: "partial_failure", reason: null, failure: "storage", corpCode: null, fiscalMonth: 12, shareClass: null, shareClassReason: null, lastCheckedAt: 100, lastAttemptAt: 200, disclosureFailure: "network", refreshVersion: 1, disclosureVersion: 1, latestCorrections: true, progress: { total: 10, completed: 8, failed: 1, pending: 1 }, series: [{ metric: "revenue", points: [{ ...point, value: 100 }] }] };
   expect(financialSummary(page)).toContain("일부 조회 실패 · 실패 1건 · 갱신 실패 · 저장 자료 유지 · 마지막 확인");
+});
+test("서버에 재무자료가 없는 상태를 DART 설정이 아닌 자료 없음으로 안내한다", () => {
+  expect(financialStatus("not_configured")).toBe("이 서버에 재무자료가 없습니다");
+  expect(financialStatus("collecting")).toBe("collecting");
 });

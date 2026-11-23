@@ -24,15 +24,16 @@ export function DrawingOverlay({ cellId }: { cellId: WindowId }) {
   const desktop = useMediaQuery(DESKTOP_QUERY);
   const cell = useDrawingSession((s) => cellDrawing(s, cellId)); const sync = drawingSync(useQueryClient(), layoutReceipt); useDrawingVersion(sync);
   const root = useRef<HTMLDivElement>(null);
+  const [more, setMore] = useState(false);
   const surface = surfaceFor(cellId);
   if (!desktop || !surface) return null;
   const error = sync.loadError(surface.host.view()?.symbol ?? "");
   return <div data-chart-control ref={root} className="drawing-overlay" onPointerDown={(e) => e.stopPropagation()}>
     {error && <div className="draw-load-error"><ErrorState message={error} retry={() => sync.refresh()} /></div>}
     {cell.selected.length > 0 && cell.editor?.kind !== "text" && <FloatingBar cellId={cellId} />}
-    {cell.popup && <Menu label="드로잉 메뉴" root={root} items={drawingMenu(surface, cell.popup.id === null, cell.popup.fromChart ? { x: cell.popup.x, y: cell.popup.y } : null)}
+    {cell.popup && <Menu label="드로잉 메뉴" root={root} items={drawingMenu(surface, cell.popup.id === null, cell.popup.fromChart ? { x: cell.popup.x, y: cell.popup.y } : null, more, () => setMore((open) => !open))}
       className="fixed max-h-[min(600px,85vh)] overflow-y-auto text-s" style={{ left: cell.popup.x, top: cell.popup.y, minWidth: 220 }}
-      onClose={(restore) => { useDrawingSession.getState().patchCell(cellId, { popup: null }); if (restore) surface.focus(); }} />}
+      onClose={(restore) => { setMore(false); useDrawingSession.getState().patchCell(cellId, { popup: null }); if (restore) surface.focus(); }} />}
     {cell.editor?.kind === "text" && <DrawingTextEditor cellId={cellId} editor={cell.editor} />}
   </div>;
 }
@@ -81,7 +82,7 @@ function FloatingBar({ cellId }: { cellId: WindowId }) {
   const change = (update: (d: DrawingBody) => DrawingBody) => {
     surface.updateSelected(update);
   };
-  return <div ref={root} style={{ position: "absolute", left: position?.x, top: position?.y, visibility: shown ? undefined : "hidden" }}>{position && <Popover anchor={root} follow focus={false} dismiss={false} blockChartKeys={false} restoreFocus={false} onClose={() => {}} role="toolbar" aria-label="드로잉 스타일" className="drawing-floating" onPointerDown={(e) => { if (e.target instanceof HTMLButtonElement) e.preventDefault(); }}>
+  return <div ref={root} style={{ position: "absolute", left: position?.x, top: position?.y, visibility: shown ? undefined : "hidden" }}>{position && <Popover anchor={root} follow solid focus={false} dismiss={false} blockChartKeys={false} restoreFocus={false} onClose={() => {}} role="toolbar" aria-label="드로잉 스타일" className="drawing-floating" onPointerDown={(e) => { if (e.target instanceof HTMLButtonElement) e.preventDefault(); }}>
     <button type="button" className="draw-grip" aria-label="스타일 막대 옮기기" title="끌어서 막대 옮기기" onPointerDown={(e) => { e.preventDefault(); e.currentTarget.setPointerCapture(e.pointerId); drag.current = { x: e.clientX, y: e.clientY, baseX: position?.x ?? 0, baseY: position?.y ?? 0 }; }}
       onPointerMove={(e) => { const d = drag.current; if (d) useDrawingSession.getState().patchCell(cellId, { toolbarAt: { x: d.baseX + e.clientX - d.x, y: d.baseY + e.clientY - d.y } }); }} onPointerUp={() => { drag.current = null; }}><Icon path={DRAWING_ICONS.grip} /></button>
     {common("lineColor") && tool.bar.lineColor && <ColorPicker compact label="선 색" value={drawingColor(tool.bar.lineColor.get(first.style))} width={tool.bar.width?.get(first.style)} onChange={(color) => change((d) => ({ ...d, style: toolOf(d.tool)?.bar.lineColor?.set(d.style, color) ?? d.style }))} />}

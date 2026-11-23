@@ -19,8 +19,8 @@ export async function renameScreen(scope: Locator, name: string) {
 }
 
 export async function screenAction(scope: Locator, action: string) {
-  await scope.getByRole("button", { name: "조건식 메뉴", exact: true }).click();
-  await scope.page().getByRole("menu", { name: "조건식 메뉴", exact: true }).getByRole("menuitem", { name: action, exact: true }).click();
+  await scope.getByRole("button", { name: "스크리너 메뉴", exact: true }).click();
+  await scope.page().getByRole("menu", { name: "스크리너 메뉴", exact: true }).getByRole("menuitem", { name: action, exact: true }).click();
 }
 
 export async function addCondition(scope: Locator, label = "신고가") {
@@ -37,8 +37,10 @@ export async function conditionAction(scope: Locator, line: number, action: stri
 
 export async function chooseKind(scope: Locator, line: number, choice: string | { label: string }) {
   const label = typeof choice === "string" ? KIND_NAMES[choice] ?? choice : choice.label;
-  await scope.getByRole("button", { name: `조건 ${line} 메뉴`, exact: true }).click();
-  await scope.page().getByRole("menu", { name: `조건 ${line} 메뉴`, exact: true }).getByRole("menuitemradio", { name: label, exact: true }).click();
+  await scope.getByRole("button", { name: `조건 ${line} 종류`, exact: true }).click();
+  const popup = scope.page().getByRole("dialog", { name: `조건 ${line} 종류 바꾸기`, exact: true });
+  await popup.getByRole("button").filter({ has: popup.page().locator("span", { hasText: new RegExp(`^${label}$`) }) }).click();
+  await expect(popup).toBeHidden();
 }
 
 export async function toggleExclude(scope: Locator, group: "종류" | "상태", name: string) {
@@ -49,18 +51,21 @@ export async function toggleExclude(scope: Locator, group: "종류" | "상태", 
 
 export async function savedEditor(scope: Locator) {
   await expect(scope.getByText("변경됨", { exact: true })).toHaveCount(0);
-  await expect(scope.getByRole("button", { name: "저장", exact: true })).toBeDisabled();
+  const save = scope.getByRole("button", { name: "저장", exact: true });
+  const panelHeadOnly = await editorWindow(scope.page()).count() === 0 && await scope.evaluate((el) => el.tagName === "SECTION" && el.getAttribute("aria-label") === "조건식 편집");
+  if (panelHeadOnly) await expect(save).toHaveCount(0);
+  else await expect(save).toBeDisabled();
 }
 
 export async function fillNumber(trigger: Locator, value: string) {
   const label = await trigger.getAttribute("aria-label");
   if (label === null) throw new Error("숫자 값 버튼에 이름이 없습니다");
   await trigger.click();
-  const popup = trigger.page().getByRole("dialog", { name: `${label} 편집`, exact: true });
-  const input = popup.getByRole("textbox", { name: label, exact: true });
+  const input = trigger.page().getByRole("textbox", { name: label, exact: true });
   await input.fill(value);
   await input.press("Enter");
-  await expect(popup).toBeHidden();
+  await expect(input).toHaveCount(0);
+  await expect(trigger.page().getByRole("dialog", { name: `${label} 자주 쓰는 값`, exact: true })).toHaveCount(0);
 }
 
 export async function expandEditor(page: Page) {
@@ -83,11 +88,7 @@ const KIND_NAMES: Readonly<Record<string, string>> = {
 };
 
 export async function expectKind(scope: Locator, line: number, value: string) {
-  await scope.getByRole("button", { name: `조건 ${line} 메뉴`, exact: true }).click();
-  const item = scope.page().getByRole("menu", { name: `조건 ${line} 메뉴`, exact: true }).getByRole("menuitemradio", { name: KIND_NAMES[value] ?? value, exact: true });
-  await expect(item).toHaveAttribute("aria-checked", "true");
-  await expect(item).toHaveText(KIND_NAMES[value] ?? value);
-  await scope.page().keyboard.press("Escape");
+  await expect(scope.getByRole("button", { name: `조건 ${line} 종류`, exact: true })).toHaveText(KIND_NAMES[value] ?? value);
 }
 
 export async function expectSentences(scope: Locator, expected: readonly string[]) {
@@ -95,6 +96,12 @@ export async function expectSentences(scope: Locator, expected: readonly string[
   await expect(lines).toHaveCount(expected.length);
   await expect.poll(() => lines.evaluateAll((items) => items.map((item) => {
     const errors = [...item.querySelectorAll('[role="alert"]')];
-    return (errors.length ? errors.map((e) => e.textContent).join("") : item.querySelector(".sentence-condition")?.textContent ?? item.textContent ?? "").replace(/^그리고/, "").trim();
-  }))).toEqual(expected.map((text) => text.replace(/^그리고/, "")));
+    if (errors.length) return errors.map((e) => e.textContent).join("");
+    return [...(item.querySelector(".sentence-condition")?.children ?? [])].map((part) => part.textContent?.trim() ?? "").filter(Boolean).join(" ").replace(/^그리고/, "").trim();
+  }))).toEqual(expected.map((text) => text.replace(/^그리고/, "").trim()));
+}
+
+export async function expectSentence(scope: Locator, line: number, expected: string) {
+  const item = scope.getByRole("list", { name: "조건", exact: true }).getByRole("listitem").nth(line - 1);
+  await expect.poll(() => item.evaluate((element) => [...(element.querySelector(".sentence-condition")?.children ?? [])].map((part) => part.textContent?.trim() ?? "").filter(Boolean).join(" "))).toBe(expected);
 }

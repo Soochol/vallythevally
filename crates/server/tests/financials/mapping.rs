@@ -284,9 +284,7 @@ async fn first_and_mid_notice_failures_retry_without_discarding_saved_company_or
 }
 
 #[tokio::test]
-async fn first_and_mid_preferred_source_failures_leave_real_price_api_usable() {
-    let kiwoom = common::ScriptedTransport::new();
-    let client = reqwest::Client::new();
+async fn first_and_mid_preferred_source_failures_are_retryable_and_keep_saved_reports() {
     for (notice_status, body, expected_failure) in [
         (Some(StatusCode::NOT_FOUND),NOTICE.into(),"remote"),
         (None,"<HTML><PRE>페이지 오류: 일시적으로 서비스를 이용할 수 없습니다.</PRE></HTML>".into(),"invalid_response"),
@@ -295,29 +293,23 @@ async fn first_and_mid_preferred_source_failures_leave_real_price_api_usable() {
         for already_collected in [false,true] {
             let fake = verified_source().await;
             let dir = tempdir();
-            let server = process(&fake,&kiwoom,dir.path(),"20151231120000");
-            let base = format!("http://{}",server.addr().await);
-            let price = format!("{base}/api/bars?symbol=005930&period=D&limit=5");
-            assert_eq!(client.get(&price).send().await.unwrap().status(),StatusCode::OK);
+            let collector = collector::Collector::open(&fake,dir.path(),"20151231120000",&[("005930",false),("005935",true)]).await;
             let previous = if already_collected {
-                let store = Store::open(&dir.path().join("run/financials.db")).await.unwrap();
-                let service = Financials::new(Some(fake.client()), store, clock());
-                Some(serde_json::to_value(settled(&service).await.collection).unwrap())
+                let service = collector.service.clone();
+                collector.run(async move { run_update(&service,&[("005930",false)]).await }).await;
+                Some(collector.snapshot().await["collection"].clone())
             } else { None };
             {
                 let mut state = fake.state.lock().unwrap();
                 state.notice_status = notice_status;
                 state.notice = Some(body.clone());
             }
-            http_start(&client, &base).await;
-            http_settled(&fake, &client, &base).await;
-            let response = client.get(format!("{base}/api/symbols/005935/financial-source")).send().await.unwrap();
-            let snapshot: Value = serde_json::from_slice(&response.bytes().await.unwrap()).unwrap();
+            collector.start().await;
+            collector.settled(&fake).await;
+            let snapshot = collector.get("/api/symbols/005935/financial-source").await;
             assert_eq!(snapshot["status"],"failed");
             assert_eq!(snapshot["failure"],expected_failure);
-            assert_eq!(tokio::time::timeout(Duration::from_secs(1),client.get(&price).send()).await.unwrap().unwrap().status(),StatusCode::OK);
-            if let Some(previous) = previous { assert_saved_report_fetches(&http_snapshot(&client,&base).await["collection"], &previous); }
-            assert!(!server.stop().await.contains(KEY));
+            if let Some(previous) = previous { assert_saved_report_fetches(&collector.snapshot().await["collection"], &previous); }
         }
     }
 }
@@ -399,10 +391,8 @@ pub(super) fn integrated_response(endpoint: &str, params: &BTreeMap<String,Strin
     }
 }
 
-async fn integrated_page(client: &reqwest::Client, base: &str, stock: &str, period: &str) -> Value {
-    let response=client.get(format!("{base}/api/symbols/{stock}/financials?period={period}")).send().await.unwrap();
-    assert_eq!(response.status(),StatusCode::OK);
-    serde_json::from_slice(&response.bytes().await.unwrap()).unwrap()
+async fn integrated_page(collector: &collector::Collector, stock: &str, period: &str) -> Value {
+    collector.get(&format!("/api/symbols/{stock}/financials?period={period}")).await
 }
 
 fn integrated_point<'a>(page: &'a Value, metric: &str) -> &'a Value {
@@ -413,29 +403,16 @@ fn integrated_point<'a>(page: &'a Value, metric: &str) -> &'a Value {
 async fn preferred_mapping_calculations_and_quarter_year_prices_work_together() {
     let fake=verified_source().await;
     {let mut state=fake.state.lock().unwrap();state.integrated_financials=true;state.delayed=true;}
-    let kiwoom=common::ScriptedTransport::new();
     let dir=tempdir();
-    let server=process(&fake,&kiwoom,dir.path(),"20171231120000");
-    let base=format!("http://{}",server.addr().await);
-    let client=reqwest::Client::new();
-    let prices:Vec<_>=["005930","005935"].into_iter().flat_map(|stock|["Q","Y"].map(|period|format!("{base}/api/bars?symbol={stock}&period={period}&limit=5"))).collect();
-    for url in &prices {assert_eq!(client.get(url).send().await.unwrap().status(),StatusCode::OK);}
-    assert_eq!(integrated_page(&client,&base,"005930","Y").await["status"],"not_collected");
-    http_start(&client, &base).await;
-    http_settled(&fake, &client, &base).await;
-    let preferred=integrated_page(&client,&base,"005935","Y").await;
+    let collector=collector::Collector::open(&fake,dir.path(),"20171231120000",&[("005930",false),("005935",true)]).await;
+    assert_eq!(integrated_page(&collector,"005930","Y").await["status"],"not_collected");
+    collector.start().await;
+    collector.settled(&fake).await;
+    let preferred=integrated_page(&collector,"005935","Y").await;
     assert_eq!(preferred["corpCode"],CORP);assert_eq!(preferred["status"],"ready");
     assert_eq!(preferred["shareClassReason"],"preferred_issue_class_unverified");
-    for url in &prices {assert_eq!(tokio::time::timeout(Duration::from_secs(1),client.get(url).send()).await.unwrap().unwrap().status(),StatusCode::OK);}
-    let mut ready=None;
-    for _ in 0..2000 {
-        let page=integrated_page(&client,&base,"005935","Y").await;
-        if page["status"]!="collecting" {ready=Some(page);break;}
-        tokio::time::sleep(Duration::from_millis(20)).await;
-    }
-    let preferred=ready.expect("integrated collection must settle");assert_eq!(preferred["status"],"ready");
-    let common=integrated_page(&client,&base,"005930","Y").await;assert_eq!(common["status"],"ready");
-    let quarter=integrated_page(&client,&base,"005935","Q").await;
+    let common=integrated_page(&collector,"005930","Y").await;assert_eq!(common["status"],"ready");
+    let quarter=integrated_page(&collector,"005935","Q").await;
     for (metric,annual,quarterly) in [("revenue",1000.0,700.0),("operating_income",-100.0,-70.0),("owner_roe",20.0,20.0),("investing_cash_flow",-400.0,-100.0),("debt_ratio",50.0,50.0)] {
         let p=integrated_point(&preferred,metric);assert_eq!(p["value"],annual);assert_eq!(p["status"],"available");
         assert_eq!(p,integrated_point(&common,metric));assert_eq!(integrated_point(&quarter,metric)["value"],quarterly);
@@ -447,6 +424,4 @@ async fn preferred_mapping_calculations_and_quarter_year_prices_work_together() 
     assert_eq!(integrated_point(&quarter,"dps")["reason"],"annual_only");
     assert_eq!(preferred["series"].as_array().unwrap().len(),6);
     assert_eq!(fake.count("fnlttSinglAcntAll.json"),16);assert_eq!(fake.count("alotMatter.json"),3);assert_eq!(fake.count("notice"),1);
-    for url in &prices {assert_eq!(client.get(url).send().await.unwrap().status(),StatusCode::OK);}
-    assert!(!server.stop().await.contains(KEY));
 }

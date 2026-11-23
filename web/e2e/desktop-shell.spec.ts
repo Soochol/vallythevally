@@ -1,11 +1,13 @@
-import { financialPage, financialUpdatePage } from "./financial-update-helpers";
+import { financialPage } from "./financial-update-helpers";
 import { mkdir } from "node:fs/promises";
 import path from "node:path";
 import { cell, DEFAULT_LAYOUT_ID, expect, test, windowTabs, withFirstChart } from "./harness";
+import { useCenterIndicatorWindow } from "./indicator-window";
 
 const tabs = windowTabs;
 
-test("한 줄 셸과 탭은 작은 창에서도 넘치지 않고 휴대폰 경로를 유지한다", async ({ page }) => {
+test("한 줄 셸과 탭은 작은 창에서도 넘치지 않고 휴대폰 경로를 유지한다", async ({ page, scenario }) => {
+  useCenterIndicatorWindow(scenario);
   await page.goto("/?symbol=005930");
   await expect(cell(page)).toHaveAttribute("aria-busy", "false");
   await page.getByRole("button", { name: "비교", exact: true }).click();
@@ -39,29 +41,24 @@ test("한 줄 셸과 탭은 작은 창에서도 넘치지 않고 휴대폰 경�
   await page.screenshot({ path: path.resolve("../target/ux-screens/shell-390x844.png") });
 });
 
-test("상태 막대는 연결·저장·서버 시계와 공유 재무 조회의 진행·실패를 표시한다", async ({ page, scenario }) => {
+test("상태 막대는 연결·저장·서버 시계와 공유 재무 조회의 상태·실패를 표시한다", async ({ page, scenario }) => {
   const layout = scenario.documents.layout(DEFAULT_LAYOUT_ID);
   const financial = financialPage();
-  financial.status = "collecting";
+  financial.status = "stale";
   financial.progress = { completed: 3, total: 10, failed: 1, pending: 6 };
-  const update = financialUpdatePage();
-  update.status = "collecting";
-  await page.route("**/api/financial-update", (route) => route.fulfill({ json: update }));
   await page.route("**/financials?period=Y", (route) => route.fulfill({ json: financial }));
   const settings = { v: 2, style: "candle", scale: "normal", compare: [], indicators: [{ id: "revenue", spec: { kind: "revenue" }, panel: "revenue", visible: true, style: { colors: ["ind-1"], width: 1 } }], panels: [{ id: "revenue", stretch: 0.3 }] };
   scenario.documents.saveLayout({ ...layout, revision: layout.revision + 1, windows: withFirstChart(layout, { symbol: "005930", venue: "combined", period: "Y", chartSettings: settings }) });
   await page.goto("/");
   const footer = page.locator("footer").last();
   await expect(footer).toContainText(/실시간 연결됨|장 닫힘: 체결 없음/);
-  await expect(footer.getByLabel("장 상태와 서버 시계")).toHaveText(/장(중| 마감) · \d{2}:\d{2}:\d{2}/);
-  await expect(footer.getByLabel("재무 수집 상태")).toContainText("3/10");
+  await expect(footer.getByLabel("장 상태와 서버 시계")).toHaveText(/^장(중| 마감) \d{2}:\d{2}$/);
+  await expect(footer.getByLabel("재무 수집 상태")).toContainText("저장 자료 · 갱신 대기");
   await expect(footer.getByLabel("재무 수집 상태")).toContainText("실패 1");
-  await expect(footer.getByRole("progressbar", { name: "재무 수집 진행률" })).toHaveAttribute("value", "3");
+  await expect(footer.getByRole("progressbar")).toHaveCount(0);
   await tabs(page).getByRole("tab", { name: "스크리너", exact: true }).click();
-  await expect(footer).toContainText("자동 저장됨");
+  await expect(footer).toContainText("저장됨");
   financial.status = "partial_failure";
-  update.status = "partial_failure";
-  await expect(footer.getByLabel("재무 수집 상태")).toContainText("일부 조회 실패");
   await page.reload();
   await expect(footer.getByLabel("재무 수집 상태")).toContainText("일부 조회 실패");
   await expect(footer.getByLabel("재무 수집 상태")).toContainText("실패 1");

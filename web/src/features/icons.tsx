@@ -276,5 +276,38 @@ export const DocumentIcon = ({ size = 16 }: P) => (
     <path d="M14 3v5h5M8 13h8M8 17h5" />
   </Icon>
 );
+export const PauseIcon = ({ size = 14 }: P) => (
+  <Icon size={size}>
+    <path d="M9 6v12M15 6v12" />
+  </Icon>
+);
+export const SyncIcon = ({ size = 12 }: P) => (
+  <Icon size={size}>
+    <path d="M20 11a8 8 0 0 0-14.5-4M4 4v4h4M4 13a8 8 0 0 0 14.5 4M20 20v-4h-4" />
+  </Icon>
+);
+export const UserIcon = ({ size = 16 }: P) => (
+  <Icon size={size}>
+    <circle cx="12" cy="8.5" r="3.5" />
+    <path d="M5 20a7 7 0 0 1 14 0" />
+  </Icon>
+);
+export const DatabaseIcon = ({ size = 16 }: P) => (
+  <Icon size={size}>
+    <ellipse cx="12" cy="6" rx="7.5" ry="3" />
+    <path d="M4.5 6v6c0 1.7 3.4 3 7.5 3s7.5-1.3 7.5-3V6M4.5 12v6c0 1.7 3.4 3 7.5 3s7.5-1.3 7.5-3v-6" />
+  </Icon>
+);
+export const BellIcon = ({ size = 16 }: P) => (
+  <Icon size={size}>
+    <path d="M6 16.5V11a6 6 0 0 1 12 0v5.5l1.5 2h-15zM10 20.5a2 2 0 0 0 4 0" />
+  </Icon>
+);
+export const ClockIcon = ({ size = 12 }: P) => (
+  <Icon size={size}>
+    <circle cx="12" cy="12" r="8.5" />
+    <path d="M12 7.5V12l3 2" />
+  </Icon>
+);
 export const UndoIcon = ({ size = 16 }: P) => <Icon size={size} path="M9 8H15a4.5 4.5 0 0 1 0 9H8M9 4 5 8l4 4" />;
 export const LogScaleIcon = ({ size = 16 }: P) => <Icon size={size} path="M4 20h16M4 4v16M7 17c4 0 5-3 7-6s3-4 5-5" />;

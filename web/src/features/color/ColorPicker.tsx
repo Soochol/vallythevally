@@ -1,13 +1,12 @@
 import { Popover } from "../overlay/Popover";
+import { belowTopbar } from "../overlay/position";
 import { useId, useRef, useState } from "react";
-import { hexToHsv, hsvToHex, isHexColor, normalizeHex, type HexColor, type HsvColor } from "../../lib/colors";
+import { FALLBACK_PICKED_COLOR, hexToHsv, hsvToHex, isHexColor, normalizeHex, type HexColor, type HsvColor } from "../../lib/colors";
 import { CheckIcon, ChevronIcon, CloseIcon } from "../icons";
 import { ColorGrid } from "./ColorGrid";
 
 const RECENT_KEY = "vv.recent-colors.v1";
-const FALLBACK = normalizeHex("#C7F36B");
-if (!FALLBACK) throw new Error("기본 색상이 올바르지 않습니다");
-const DEFAULT_COLOR = FALLBACK;
+
 
 export function rememberColor(color: HexColor): void {
   try { localStorage.setItem(RECENT_KEY, JSON.stringify([color, ...readRecent().filter((c) => c !== color)].slice(0, 8))); } catch {}
@@ -26,7 +25,7 @@ export function resolvedColor(value: string): HexColor {
   const direct = normalizeHex(value);
   if (direct) return direct;
   const variable = typeof document === "undefined" ? undefined : /^var\((--[\w-]+)\)$/.exec(value)?.[1];
-  return (variable ? normalizeHex(getComputedStyle(document.documentElement).getPropertyValue(variable)) : null) ?? DEFAULT_COLOR;
+  return (variable ? normalizeHex(getComputedStyle(document.documentElement).getPropertyValue(variable)) : null) ?? FALLBACK_PICKED_COLOR;
 }
 
 export function ColorPicker({ label, value, width = 1, compact = false, onChange }: { label: string; value: string; width?: number; compact?: boolean; onChange(color: HexColor): void }) {
@@ -80,7 +79,7 @@ export function ColorDialog({ label, initial, width, trigger, startCustom = fals
   );
 
   return (
-    <Popover data-chart-control="" anchor={trigger} onClose={onCancel} role="dialog" aria-modal="false" aria-labelledby={`${id}-title`} className="color-popover"
+    <Popover data-chart-control="" anchor={trigger} solid minTop={belowTopbar} onClose={onCancel} role="dialog" aria-modal="false" aria-labelledby={`${id}-title`} className="color-popover"
       onKeyDown={(e) => {
         if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); onCancel(); }
         if (e.key === "Enter" && e.target instanceof HTMLInputElement) { e.preventDefault(); e.stopPropagation(); apply(); }
@@ -99,7 +98,7 @@ export function ColorDialog({ label, initial, width, trigger, startCustom = fals
       </div>
       {custom ? (
         <div id={`${id}-custom`} role="tabpanel" aria-labelledby={`${id}-custom-tab`}>
-          <div className="color-sv" style={{ backgroundColor: `hsl(${hsv.h} 100% 50%)` }} role="group" tabIndex={0} aria-label="채도와 밝기. 화살표로 조절" onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); e.currentTarget.focus(); e.currentTarget.setPointerCapture(e.pointerId); selectSv(e); }} onPointerMove={(e) => { if (e.currentTarget.hasPointerCapture(e.pointerId)) selectSv(e); }} onPointerUp={(e) => { if (e.currentTarget.hasPointerCapture(e.pointerId)) e.currentTarget.releasePointerCapture(e.pointerId); }} onKeyDown={(e) => {
+          <div className="color-sv" style={{ backgroundColor: hsvToHex({ h: hsv.h, s: 1, v: 1 }) }} role="group" tabIndex={0} aria-label="채도와 밝기. 화살표로 조절" onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); e.currentTarget.focus(); e.currentTarget.setPointerCapture(e.pointerId); selectSv(e); }} onPointerMove={(e) => { if (e.currentTarget.hasPointerCapture(e.pointerId)) selectSv(e); }} onPointerUp={(e) => { if (e.currentTarget.hasPointerCapture(e.pointerId)) e.currentTarget.releasePointerCapture(e.pointerId); }} onKeyDown={(e) => {
             const step = e.shiftKey ? 0.1 : 0.01;
             if (e.key === "ArrowLeft") changeHsv({ ...hsv, s: Math.max(0, hsv.s - step) });
             else if (e.key === "ArrowRight") changeHsv({ ...hsv, s: Math.min(1, hsv.s + step) });
@@ -113,7 +112,7 @@ export function ColorDialog({ label, initial, width, trigger, startCustom = fals
           {!valid && <p id={`${id}-error`} role="alert" className="mt-2 text-xs text-danger"># 뒤에 6자리 색상 코드를 입력하세요.</p>}
         </div>
       ) : <div id={`${id}-palette`} role="tabpanel" aria-labelledby={`${id}-palette-tab`}><ColorGrid label="기본 색상" selected={color} onChoose={choose} /></div>}
-      <div className="color-recent"><span>최근 사용</span><div className="color-grid" aria-label="최근 사용 색상">{recent.length ? recent.map((c) => swatch(c, "최근 색상")) : <p>색상을 선택하면 여기에 모입니다.</p>}</div></div>
+      <div className="color-recent"><span>최근</span><div className="color-grid" aria-label="최근 쓴 색상">{recent.length ? recent.map((c) => swatch(c, "최근 색상")) : <p>고른 색이 여기에 모입니다</p>}</div></div>
       <div className="color-picker-sample"><span>선 샘플</span><div><i style={{ background: color, height: width }} /></div><span>{width} px</span></div>
       <div className="color-picker-foot"><button type="button" className="tb-btn border border-line" onClick={onCancel}>취소</button><button type="button" className="btn-primary" disabled={!valid} onClick={apply}>선택</button></div>
     </Popover>

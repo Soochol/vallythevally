@@ -119,12 +119,12 @@ impl ReportUpdate<'_> {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum ReadState { NotConfigured, Unsupported, Collecting, PartialFailure, NotCollected, Stale, Ready, Failed }
+pub enum ReadState { NotConfigured, Unsupported, PartialFailure, NotCollected, Stale, Ready, Failed }
 
 impl ReadState {
     pub fn as_str(self) -> &'static str {
         match self {
-            Self::NotConfigured => "not_configured", Self::Unsupported => "unsupported", Self::Collecting => "collecting",
+            Self::NotConfigured => "not_configured", Self::Unsupported => "unsupported",
             Self::PartialFailure => "partial_failure", Self::NotCollected => "not_collected", Self::Stale => "stale", Self::Ready => "ready", Self::Failed => "failed",
         }
     }
@@ -147,7 +147,7 @@ pub enum ReadContext {
     StorageFailed(Failure),
     NotConfigured,
     Unsupported(UnsupportedReason),
-    Configured { collecting: bool, failure: Option<Failure>, resolution: ReadResolution },
+    Configured { failure: Option<Failure>, resolution: ReadResolution },
 }
 
 #[derive(Clone, Debug)]
@@ -169,9 +169,8 @@ impl ReadSnapshot {
             ReadContext::StorageFailed(failure) => (ReadState::Failed, Some(failure), None),
             ReadContext::NotConfigured => (ReadState::NotConfigured, None, None),
             ReadContext::Unsupported(reason) => (ReadState::Unsupported, None, Some(reason)),
-            ReadContext::Configured { collecting, failure, resolution } => {
-                let state = if collecting { ReadState::Collecting }
-                    else if has_failures(&collection) || failure.is_some() { ReadState::PartialFailure }
+            ReadContext::Configured { failure, resolution } => {
+                let state = if has_failures(&collection) || failure.is_some() { ReadState::PartialFailure }
                     else if collection.reports.is_empty() { ReadState::NotCollected }
                     else if has_pending(&collection) { ReadState::Stale }
                     else { ReadState::Ready };

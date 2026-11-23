@@ -12,7 +12,7 @@ export function PageRail({ page }: { page: PageId }) {
       {RAIL_PAGES.map(({ id, path, label }) => {
         const Glyph = ICONS[id];
         return (
-          <Link key={id} to={path} className="page-rail-item" title={label} aria-current={page === id ? "page" : undefined}>
+          <Link key={id} to={path} className="page-rail-item" aria-current={page === id ? "page" : undefined}>
             <Glyph size={19} />
             <span>{label}</span>
           </Link>

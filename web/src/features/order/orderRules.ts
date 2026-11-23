@@ -13,6 +13,16 @@ export const needsHighValueConfirm = (price: number, quantity: number): boolean 
 
 export const SIDE_LABEL: Readonly<Record<OrderSide, string>> = { buy: "매수", sell: "매도" };
 
+export const CANCEL_CONFIRM_MS = 3_000;
+
+export const CANCEL_CONFIRM_FROM = 2;
+
+export const needsCancelConfirm = (orderCount: number): boolean => orderCount >= CANCEL_CONFIRM_FROM;
+
+export const cancelConfirmText = (orderCount: number): string => `${orderCount}건 취소 · 한 번 더 누르기`;
+
+export const orderCountOf = (groups: readonly { readonly orders: readonly unknown[] }[]): number => groups.reduce((sum, group) => sum + group.orders.length, 0);
+
 export interface PriceGroup {
   readonly side: OrderSide;
   readonly price: number;
@@ -119,7 +129,7 @@ export const dragSide = (source: DragSource): OrderSide =>
 export const dragQuantity = (source: DragSource): number =>
   source.kind === "chip" ? source.group.quantity : source.kind === "order" ? source.order.openQuantity : source.groups.reduce((sum, group) => sum + group.quantity, 0);
 
-const dragOrderCount = (source: DragSource): number =>
+export const dragOrderCount = (source: DragSource): number =>
   source.kind === "chip" ? source.group.orders.length : source.kind === "order" ? 1 : source.groups.reduce((sum, group) => sum + group.orders.length, 0);
 
 export function judgeDrag({ source, target, escaped }: DragJudgement): DragOutcome {
@@ -130,6 +140,8 @@ export function judgeDrag({ source, target, escaped }: DragJudgement): DragOutco
   if (target.kind === "cell" && target.side === side && target.price !== price) return { kind: "modify", price: target.price };
   return { kind: "abort" };
 }
+
+export const dragCancels = (target: DragTarget, source: DragSource): boolean => judgeDrag({ source, target, escaped: false }).kind === "cancel";
 
 export function dragGhostText(target: DragTarget, source: DragSource): string {
   const outcome = judgeDrag({ source, target, escaped: false });

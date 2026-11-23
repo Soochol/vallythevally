@@ -29,7 +29,7 @@ test("피보나치 되돌림과 확장을 놓고, 수준을 끄고, 새로고침
 
   await page.getByRole("button", { name: "드로잉 세부 설정" }).click();
   const dialog = page.getByRole("dialog", { name: "피보나치 확장 세부 설정" });
-  await dialog.getByRole("checkbox", { name: "수준 2 켜기", exact: true }).uncheck();
+  await dialog.getByRole("switch", { name: "수준 2 켜기", exact: true }).uncheck();
   await dialog.getByRole("button", { name: "확인", exact: true }).click();
   const levels = async () => ((await drawings(scenario)).find((d) => d.id === ext.id)?.style as { levels: { value: number; on: boolean }[] }).levels;
   await pollSaved(async () => (await levels()).map((l) => [l.value, l.on])).toEqual([[0, true], [0.618, false], [1, true], [1.272, true], [1.618, true], [2.618, false]]);
@@ -78,7 +78,7 @@ test("피보나치 팬·시간대와 갠 팬·상자를 놓고, 핸들을 끌고
   const fan = await place("피보나치 팬", "fibfan", [[0.08, 0.75], [0.22, 0.45]]);
   await page.getByRole("button", { name: "드로잉 세부 설정" }).click();
   const dialog = page.getByRole("dialog", { name: "피보나치 팬 세부 설정" });
-  await dialog.getByRole("checkbox", { name: "수준 2 켜기", exact: true }).uncheck();
+  await dialog.getByRole("switch", { name: "수준 2 켜기", exact: true }).uncheck();
   await dialog.getByRole("button", { name: "확인", exact: true }).click();
   const fanLevels = async () => ((await savedOf("fibfan")).style as { levels: { value: number; on: boolean }[] }).levels;
   await pollSaved(async () => (await fanLevels()).map((l) => [l.value, l.on])).toEqual([[0, true], [0.25, false], [0.382, true], [0.5, true], [0.618, true], [0.75, true], [1, true]]);

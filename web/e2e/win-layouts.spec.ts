@@ -19,6 +19,10 @@ async function action(page: Page, name: string) {
   await trigger(page).click();
   await menu(page).getByRole("menuitem", { name, exact: true }).click();
 }
+async function arrangeAction(page: Page, name: RegExp | string) {
+  await topbar(page).getByRole("button", { name: "배치", exact: true }).click();
+  await page.getByRole("menu", { name: "배치", exact: true }).getByRole("menuitem", { name: typeof name === "string" ? new RegExp(`^${name}`) : name }).click();
+}
 async function nameLayout(page: Page, kind: "새 이름으로 저장" | "이름 바꾸기", name: string) {
   await action(page, `${kind}…`);
   const dialog = page.getByRole("dialog", { name: kind, exact: true });
@@ -197,14 +201,14 @@ test("닫은 창과 기본 도킹 배치는 메뉴의 배치 되돌리기로 되
   await expect(cell(page)).toHaveAttribute("aria-busy", "false");
   const before = await page.locator("[data-dock-group]").filter({ has: cell(page) }).boundingBox();
   await page.getByRole("button", { name: "스크리너 닫기", exact: true }).click();
-  await action(page, "배치 되돌리기");
+  await arrangeAction(page, "배치 되돌리기");
   await expect(page.getByRole("tab", { name: "스크리너", exact: true })).toBeVisible();
-  await action(page, "기본 배치로");
+  await arrangeAction(page, "기본 배치로");
   const chart = await page.locator("[data-dock-group]").filter({ has: cell(page) }).boundingBox();
   const side = await page.locator("[data-dock-group]").filter({ has: page.getByRole("tab", { name: "관심종목", exact: true }) }).boundingBox();
   expect(chart!.x).toBeLessThan(side!.x);
   await expect(page.locator("[data-dock-group]").filter({ has: page.getByRole("tab", { name: "관심종목", exact: true }) }).getByRole("tab")).toHaveText([/^관심종목/, /^스크리너/]);
-  await action(page, "배치 되돌리기");
+  await arrangeAction(page, "배치 되돌리기");
   const restored = await page.locator("[data-dock-group]").filter({ has: cell(page) }).boundingBox();
   expect(restored!.x).toBeCloseTo(before!.x, 0);
 });
@@ -219,7 +223,7 @@ test("레이아웃 메뉴를 키보드로 열고 이동·선택·닫기와 초�
   await page.keyboard.press("ArrowDown");
   await expect(menu(page).getByRole("menuitemradio", { name: "복기", exact: true })).toBeFocused();
   await page.keyboard.press("End");
-  await expect(menu(page).getByRole("menuitem", { name: "기본 배치로", exact: true })).toBeFocused();
+  await expect(menu(page).getByRole("menuitemradio", { name: "같은 연동 색", exact: true })).toBeFocused();
   await page.keyboard.press("Home");
   await page.keyboard.press("ArrowDown");
   await page.keyboard.press("Enter");
@@ -235,7 +239,7 @@ test("레이아웃 메뉴를 키보드로 열고 이동·선택·닫기와 초�
   await expect(menu(page).getByRole("menuitemradio", { name: "복기", exact: true })).toBeFocused();
   await page.keyboard.press("Tab");
   await expect(menu(page)).toBeHidden();
-  await expect(topbar(page).getByRole("button", { name: "창 더하기", exact: true })).toBeFocused();
+  await expect(topbar(page).getByRole("button", { name: "배치", exact: true })).toBeFocused();
 });
 
 const SECOND_LAYOUT = "01900000-0000-7000-8000-0000000000b1";
@@ -284,9 +288,7 @@ test("↓↑는 레이아웃 목록 묶음을 넘어 십자선 연동 묶음의 
     await page.keyboard.press("ArrowDown");
     await expect(crosshair(name)).toBeFocused();
   }
-  await page.keyboard.press("ArrowDown");
-  await expect(item("기본 배치로")).toBeFocused();
-  for (const name of [...CROSSHAIR_CHOICES].reverse()) {
+  for (const name of [...CROSSHAIR_CHOICES].reverse().slice(1)) {
     await page.keyboard.press("ArrowUp");
     await expect(crosshair(name)).toBeFocused();
   }
@@ -364,7 +366,7 @@ test("이름 입력을 키보드로 저장·취소하고 서버가 거절해도 
   await expect(renamed).toBeHidden();
   await expect(trigger(page)).toHaveAccessibleName("레이아웃: 키보드");
   await expect(trigger(page)).toBeFocused();
-  await expect(page.getByRole("contentinfo")).toContainText("자동 저장됨");
+  await expect(page.getByRole("contentinfo")).toContainText("저장됨");
   for (const kind of ["이름 바꾸기", "새 이름으로 저장"] as const) {
     const cancelled = await open(kind);
     await page.keyboard.press("Escape");

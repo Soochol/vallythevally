@@ -80,7 +80,7 @@ export function useOrderWrites(account: CurrentAccount | null, code: string, ven
   const writeScope = `${account?.state ?? ""}|${accountRef ?? ""}`;
   useEffect(() => () => pendingWrites.clear(code), [code, writeScope]);
 
-  const enqueue = useCallback(<T,>(plan: Plan<T>) => {
+  const enqueue: <T>(plan: Plan<T>) => void = useCallback(<T,>(plan: Plan<T>) => {
     const ledgerKey = actionInAccount(plan.action, accountRef);
     const coalesced = plan.coalesce ? ledger.issue(ledgerKey) : null;
     if (coalesced && !coalesced.send) return;
@@ -96,7 +96,7 @@ export function useOrderWrites(account: CurrentAccount | null, code: string, ven
         setStatus(plan.describe(result));
       } catch (error) {
         if (isUnanswered(error)) settlement = "unanswered";
-        setStatus(statusOfFailure(error));
+        setStatus(statusOfFailure(error, () => enqueue(plan)));
       } finally {
         pendingWrites.resolve(plan.mark.key, []);
         if (coalesced) ledger.settle(ledgerKey, settlement);

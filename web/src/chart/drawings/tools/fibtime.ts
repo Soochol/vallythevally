@@ -1,4 +1,4 @@
-import { at, readBool, readRecord } from "../styleKit";
+import { at, labelBox, readBool, readRecord } from "../styleKit";
 import { type AxisLabel, defineTool, type Level, type Shape, type ToolContext } from "../toolSpec";
 import type { DrawingPoint, Stroke } from "../types";
 import { levelColor, type LineLook, mainColor, MAX_LEVELS, readLevels, readLineLook } from "./fibKit";
@@ -108,6 +108,7 @@ export const fibtime = defineTool<FibTimeStyle>({
           align: "left",
           baseline: "bottom",
           style: { color: level.color, size: 12, bold: false, italic: false },
+          box: labelBox(level.color),
         },
       ];
     });

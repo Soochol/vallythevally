@@ -116,7 +116,7 @@ test.describe("1440×900", () => {
     await expect(panel.getByText("Google", { exact: true })).toBeVisible();
     await expect(panel.getByText(ACCOUNT_ID.slice(0, 8), { exact: true })).toBeVisible();
     await expect(panel.getByText(ACCOUNT_ID)).toHaveCount(0);
-    await expect(panel.getByText("2026. 11. 9.")).toBeVisible();
+    await expect(panel.getByText("2026-11-09 09:30")).toBeVisible();
     await shot(page, "account-menu-desktop.png");
 
     await panel.getByRole("button", { name: "로그아웃", exact: true }).click();
@@ -152,6 +152,7 @@ test.describe("1440×900", () => {
     await page.goto("/?symbol=005930&login=error&reason=storage");
     await expect(cell(page)).toHaveAttribute("aria-busy", "false");
     await expect(page.getByText("이 PC에 로그인 정보를 저장하지 못했습니다", { exact: false })).toBeVisible();
+    await expect(page.locator(".ui-toast[data-tone=error]").filter({ hasText: "이 PC에 로그인 정보를 저장하지 못했습니다" })).toBeVisible();
     await expect.poll(() => ["login", "reason"].some((key) => new URL(page.url()).searchParams.has(key))).toBe(false);
   });
 
@@ -184,16 +185,23 @@ test.describe("1440×900", () => {
     expect(setupCalls(scenario)).toHaveLength(0);
     await shot(page, "account-mismatch-desktop.png");
 
-    await page.getByRole("button", { name: "이 PC 셋업 지우고 바꾸기" }).click();
+    await page.getByRole("button", { name: "이 PC를 지금 계정으로 바꾸기" }).click();
     expect(callsTo(scenario, "POST", "/api/account/replace-local")).toHaveLength(0);
     await expect(page.getByRole("button", { name: "취소" })).toBeFocused();
     await shot(page, "account-mismatch-confirm-desktop.png");
     await page.getByRole("button", { name: "취소" }).click();
-    await expect(page.getByRole("button", { name: "이 PC 셋업 지우고 바꾸기" })).toBeFocused();
+    await expect(page.getByRole("button", { name: "이 PC를 지금 계정으로 바꾸기" })).toBeFocused();
     expect(callsTo(scenario, "POST", "/api/account/replace-local")).toHaveLength(0);
 
-    await page.getByRole("button", { name: "이 PC 셋업 지우고 바꾸기" }).click();
-    await page.getByRole("button", { name: "지우고 바꾸기", exact: true }).click();
+    await page.getByRole("button", { name: "이 PC를 지금 계정으로 바꾸기" }).click();
+    const confirm = page.getByRole("button", { name: "지우고 바꾸기", exact: true });
+    await expect(confirm).toBeDisabled();
+    await page.getByRole("textbox").fill("지우고");
+    await expect(confirm).toBeDisabled();
+    await page.getByRole("textbox").fill("지우고 바꾸기");
+    await expect(confirm).toBeEnabled();
+    await expect(confirm).toHaveClass(/btn-danger/);
+    await confirm.click();
     await expect(cell(page)).toBeVisible();
     const calls = callsTo(scenario, "POST", "/api/account/replace-local");
     expect(calls).toHaveLength(1);
@@ -207,7 +215,8 @@ test.describe("1440×900", () => {
     await page.addInitScript(() => localStorage.setItem("vv.unsaved.watchlist", JSON.stringify({ path: "/api/watchlists", revision: 9_999_999_999_999, body: JSON.stringify({ lists: [{ id: "old", name: "이전계정목록", symbols: [] }], revision: 9_999_999_999_999 }) })));
     await page.clock.install();
     await page.goto("/");
-    await page.getByRole("button", { name: "이 PC 셋업 지우고 바꾸기" }).click();
+    await page.getByRole("button", { name: "이 PC를 지금 계정으로 바꾸기" }).click();
+    await page.getByRole("textbox").fill("지우고 바꾸기");
     await page.getByRole("button", { name: "지우고 바꾸기", exact: true }).click();
     await expect(cell(page)).toBeVisible();
     await passTime(page, 1500);
@@ -215,12 +224,13 @@ test.describe("1440×900", () => {
     expect(await page.evaluate(() => localStorage.getItem("vv.unsaved.watchlist"))).toBeNull();
   });
 
-  test("owner_mismatch에서 로그아웃하면 랜딩이 된다", async ({ page, scenario }) => {
+  test("owner_mismatch에서 이전 계정으로 다시 로그인하면 로그아웃해 랜딩이 되고 아무것도 지우지 않는다", async ({ page, scenario }) => {
     scenario.live.account = MISMATCH;
     answerStatus(scenario, "/api/account/logout", SIGNED_OUT);
     await page.goto("/");
-    await page.getByRole("button", { name: "로그아웃", exact: true }).click();
+    await page.getByRole("button", { name: "이전 계정으로 다시 로그인", exact: true }).click();
     await expect(landing(page)).toBeVisible();
+    expect(callsTo(scenario, "POST", "/api/account/replace-local")).toHaveLength(0);
   });
 
   test("계정 삭제: 확인 문구를 넣기 전에는 단추가 꺼져 있고, 서버가 실패하면 아무것도 지워지지 않았다고 보인다", async ({ page, scenario }) => {
@@ -290,7 +300,7 @@ test.describe("휴대폰 폭", () => {
   test("계정 바꾸기 확인 화면과 계정 메뉴도 화면 안에 들어온다", async ({ page, scenario }) => {
     scenario.live.account = MISMATCH;
     await page.goto("/");
-    await page.getByRole("button", { name: "이 PC 셋업 지우고 바꾸기" }).click();
+    await page.getByRole("button", { name: "이 PC를 지금 계정으로 바꾸기" }).click();
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
     await shot(page, "account-mismatch-phone.png");
     scenario.live.setAccount(SIGNED_IN);

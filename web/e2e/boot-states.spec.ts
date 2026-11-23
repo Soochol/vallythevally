@@ -83,7 +83,7 @@ test("기본 화면으로 열기는 마지막 레이아웃을 건너뛰고 저�
   await screen.getByRole("button", { name: "기본 화면으로 열기", exact: true }).click();
   await loaded;
   await expect(TOPBAR(page)).toBeVisible();
-  await expect(STATUS_BAR(page)).toContainText("기본 화면으로 열었습니다");
+  await expect(page.getByRole("status").filter({ hasText: "마지막 화면을 건너뛰고 기본 화면으로 열었습니다" }).first()).toBeVisible();
   const reopened = scenario.requests.slice(requestsBefore);
   const calls = reopened.map((request) => `${request.method()} ${new URL(request.url()).pathname}`);
   expect(calls.filter((call) => call.includes("/api/layouts"))).toEqual([]);

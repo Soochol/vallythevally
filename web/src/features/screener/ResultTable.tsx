@@ -10,7 +10,7 @@ import { WATCH_COLUMN_LABEL } from "../../lib/watchlist";
 import { useCell } from "../../stores/layout";
 import { useSelectionStore } from "../../stores/selection";
 import { addRowToCompare } from "../list/symbolRowMenu";
-import { SortIcon } from "../icons";
+import { ClockIcon, SortIcon } from "../icons";
 import { ResultRowMenu, type ResultMenuState } from "./ResultRowMenu";
 import { LIST_COLUMN_GAP, LIST_EDGE, LIST_HEAD, LIST_PRICE_WIDTH, LIST_RATE_WIDTH, LIST_ROW_HEIGHT, PriceText, RateBadge, SymbolName, listRowFill } from "../list/listRow";
 
@@ -20,6 +20,7 @@ const COLUMNS: readonly { key: ResultSortKey; label: string }[] = [
   { key: "changeRate", label: "등락률" },
 ];
 const CELL_AFTER_FIRST = "pl-1";
+export const RESULT_KEYS_HINT = "↑↓ 결과 이동 · ↵ 칸에 열기";
 
 interface Props {
   screen: Screen;
@@ -53,10 +54,10 @@ export function ResultTable({ screen, asOf, rows, selected, sort, onSort, onSele
   return <>
   <table ref={table} aria-label={`${screen.name} 결과`} className="w-full table-fixed border-collapse text-m tabular-nums">
     <colgroup><col /><col style={{ width: LIST_PRICE_WIDTH + LIST_COLUMN_GAP }} /><col style={{ width: LIST_RATE_WIDTH + LIST_COLUMN_GAP + LIST_EDGE }} /></colgroup>
-    <thead className={`sticky top-0 z-10 bg-bg ${LIST_HEAD}`}><tr>
-      {COLUMNS.map(({ key, label }) => <th key={key} scope="col" aria-sort={sort.key === key ? sort.descending ? "descending" : "ascending" : "none"} className={`py-1 font-normal ${key === "name" ? "pl-3" : key === "close" ? CELL_AFTER_FIRST : `${CELL_AFTER_FIRST} pr-3`}`}>
+    <thead className={`sticky top-0 z-10 bg-bg ${LIST_HEAD}`}><tr title={RESULT_KEYS_HINT}>
+      {COLUMNS.map(({ key, label }) => <th key={key} scope="col" aria-sort={sort.key === key ? sort.descending ? "descending" : "ascending" : "none"} className={`h-7 font-normal ${key === "name" ? "pl-3" : key === "close" ? CELL_AFTER_FIRST : `${CELL_AFTER_FIRST} pr-3`}`}>
         <button type="button" data-chart-control aria-label={`${label} 순으로 정렬`} onClick={() => onSort(nextSort(sort, key))}
-          className={`flex h-[var(--size-26)] w-full items-center gap-1 hover:text-text ${key === "name" ? "" : "justify-end"} ${sort.key === key ? "text-text" : ""}`}>
+          className={`-mx-1 flex h-[var(--ctl-xs)] w-[calc(100%+var(--size-8))] items-center gap-1 rounded-s px-1 hover:bg-[var(--hover)] hover:text-text ${key === "name" ? "" : "justify-end"} ${sort.key === key ? "text-text" : ""}`}>
           {label}{sort.key === key && <SortIcon dir={sort.descending ? "down" : "up"} />}
         </button>
       </th>)}
@@ -65,7 +66,7 @@ export function ResultTable({ screen, asOf, rows, selected, sort, onSort, onSele
       const active = row.symbol === selected;
       return <tr key={row.symbol} data-code={row.symbol} aria-selected={active} onClick={() => onSelect(row.symbol)}
         onContextMenu={desktop ? (e) => { e.preventDefault(); openMenu(row.symbol, e.clientX, e.clientY); } : undefined}
-        className={`${LIST_ROW_HEIGHT} cursor-pointer ${listRowFill(active)}`}>
+        className={`${LIST_ROW_HEIGHT} cursor-pointer max-md:h-12 ${listRowFill(active)}`}>
         <td className="pl-3">
           <button type="button" data-chart-control data-result-row aria-current={active || undefined} className="block w-full min-w-0 text-left"
             aria-haspopup={desktop ? "menu" : undefined} aria-expanded={desktop ? menu?.code === row.symbol : undefined}
@@ -84,8 +85,13 @@ export function ResultTable({ screen, asOf, rows, selected, sort, onSort, onSele
           </button>
         </td>
         <td className={CELL_AFTER_FIRST} title={`최신 일봉 ${row.latestBarDate}${row.provisional ? " · 당일 요약 잠정" : ""}`}>
-          <PriceText>{formatPrice(row.close, false)}{row.provisional && <span aria-label="잠정" className="ml-1 text-warning">*</span>}</PriceText>
-          {row.latestBarDate !== asOf && <small className="block text-right text-xs text-text-3">{row.latestBarDate.slice(5)}</small>}
+          <PriceText>
+            <span className="inline-flex flex-row-reverse items-center gap-0.5">
+              {formatPrice(row.close, false)}
+              {row.provisional && <span aria-label="잠정" className="text-warning">*</span>}
+              {row.latestBarDate !== asOf && <span role="img" aria-label={`최신 일봉 ${row.latestBarDate.slice(5)}`} className="mr-0.5 inline-flex text-text-3"><ClockIcon /></span>}
+            </span>
+          </PriceText>
         </td>
         <td className={`${CELL_AFTER_FIRST} pr-3`}>
           {row.changeRate === null ? <span className="block text-right text-text-3">—</span> : <RateBadge direction={direction(row.changeRate)}>{formatPercent(row.changeRate)}</RateBadge>}

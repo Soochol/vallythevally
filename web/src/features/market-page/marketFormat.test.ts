@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatEok, signedEok, signedRate } from "./marketFormat";
+import { formatEok, pointChangeOf, signedEok, signedPoints, signedRate } from "./marketFormat";
 
 describe("marketFormat", () => {
   it("1만억 이상은 조로 묶는다", () => {
@@ -12,5 +12,10 @@ describe("marketFormat", () => {
     expect(signedEok(-45)).toBe("−45억");
     expect(signedRate(-0.67)).toBe("−0.67%");
     expect(signedRate(1.2)).toBe("+1.20%");
+  });
+  it("등락률과 수준에서 포인트를 계산한다", () => {
+    expect(pointChangeOf(2650, 1)).toBeCloseTo(26.2376, 3);
+    expect(signedPoints(pointChangeOf(850.5, -0.3))).toBe("−2.56");
+    expect(signedPoints(0)).toBe("0.00");
   });
 });

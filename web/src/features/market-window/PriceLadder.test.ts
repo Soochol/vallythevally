@@ -24,14 +24,14 @@ test("행은 스무 개이고 현재가 행에만 강조가 붙으며 등락률�
 
 test("잔량 막대는 가장 큰 잔량 900을 100%로 잡는다", () => {
   const html = render();
-  expect(html).toContain("width:100%");
-  expect(html).toContain("width:50%");
+  expect(html).toContain("transform:scaleX(1)");
+  expect(html).toContain("transform:scaleX(0.5)");
 });
 
 test("모든 행의 열 정의가 같고 왼쪽·오른쪽 칸은 slot이 있을 때만 고정 폭 열이 생긴다", () => {
   const slotted = render({ slots: { left: (row) => createElement("em", { className: "left" }, row.key), right: (row) => createElement("em", { className: "right" }, row.key) } });
-  expect(render().match(/grid-template-columns:([^"]*)"/g)?.every((style) => style === 'grid-template-columns:minmax(0, 1fr) var(--size-133) minmax(0, 1fr)"')).toBe(true);
-  expect(new Set(slotted.match(/grid-template-columns:[^"]*/g))).toEqual(new Set(["grid-template-columns:var(--size-64) minmax(0, 1fr) var(--size-133) minmax(0, 1fr) var(--size-64)"]));
+  expect(render().match(/grid-template-columns:([^"]*)"/g)?.every((style) => style === 'grid-template-columns:minmax(0, 1fr) var(--mw-price-col, var(--size-133)) minmax(0, 1fr)"')).toBe(true);
+  expect(new Set(slotted.match(/grid-template-columns:[^"]*/g))).toEqual(new Set(["grid-template-columns:var(--size-64) minmax(0, 1fr) var(--mw-price-col, var(--size-133)) minmax(0, 1fr) var(--size-64)"]));
   expect(slotted.match(/class="left"/g)).toHaveLength(20);
   expect(slotted.match(/class="right"/g)).toHaveLength(20);
 });

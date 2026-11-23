@@ -39,7 +39,7 @@ export function AccountLabel({ choice, maskAccount, onPick }: Props) {
         <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" aria-hidden="true"><path d="M6 9l6 6 6-6" /></svg>
       </button>
       {open && (
-        <Popover anchor={opener} anchorRect={() => listAnchorRect(opener.current)} style={window && { width: listWidthIn(window) }} releasesClick={(target) => opener.current?.contains(target) === true} onClose={() => setOpen(false)} role="dialog" aria-label="주문 계좌" className="od-list-pop od-account-menu" data-testid="account-menu">
+        <Popover solid anchor={opener} anchorRect={() => listAnchorRect(opener.current)} style={window && { width: listWidthIn(window) }} releasesClick={(target) => opener.current?.contains(target) === true} onClose={() => setOpen(false)} role="dialog" aria-label="주문 계좌" className="od-list-pop od-account-menu" data-testid="account-menu">
           <p className="od-account-menu-head">주문 계좌 · 모든 호가주문창에 적용</p>
           <div role="radiogroup" aria-label="주문 계좌">
             {choice.accounts.map((account) => {

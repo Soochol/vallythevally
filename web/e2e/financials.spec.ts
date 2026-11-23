@@ -1,4 +1,4 @@
-import { financialTest as test, financialPage, updateFromChart, type FinancialFixture } from "./financial-update-helpers";
+import { financialTest as test, financialPage, type FinancialFixture } from "./financial-update-helpers";
 import { selectOption } from "./select-option";
 import type { Page } from "@playwright/test";
 import type { FinancialsPage } from "../src/api/generated/FinancialsPage";
@@ -7,6 +7,7 @@ import type { Scenario } from "./fixtures/scenario";
 import { parseChartSettings, type ChartSettings } from "../src/chart/settings";
 import { installFrameProbe } from "./frame-probe";
 import { cell, chartOf, DEFAULT_LAYOUT_ID, expect, SEARCH_BUTTON_TITLE, firstChart, withFirstChart, pickDesktopVenue, pollSaved } from "./harness";
+import { useCenterIndicatorWindow } from "./indicator-window";
 
 const METRICS = ["revenue", "operating_income", "owner_roe", "investing_cash_flow", "dps", "debt_ratio"] as const;
 const LABELS = ["매출액", "영업이익", "지배주주 ROE", "투자활동 현금흐름", "DPS", "부채비율"];
@@ -32,16 +33,15 @@ async function choosePeriod(page: Page, phone: boolean, label: string) {
 }
 
 async function refresh(page: Page) {
-  const detail = row(page, "revenue").locator("details");
-  if (await detail.getAttribute("open") === null) await detail.locator("summary").click();
-  await updateFromChart(page);
-  await detail.locator("summary").click();
+  await page.reload();
+  await expect(cell(page)).toHaveAttribute("aria-busy", "false");
 }
 
 for (const phone of [false, true]) test.describe(phone ? "휴대폰 재무지표" : "데스크톱 재무지표", () => {
   test.use({ ...(phone ? { viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true } : {}) });
 
   test("메뉴 6종 추가·Q/D/Y 숨김 복원·음수와 0·설정 재열기", async ({ page, scenario }, testInfo) => {
+  useCenterIndicatorWindow(scenario);
     const errors: string[] = [];
     page.on("pageerror", (e) => errors.push(e.message));
     await page.addInitScript(installFrameProbe);
@@ -98,25 +98,24 @@ for (const phone of [false, true]) test.describe(phone ? "휴대폰 재무지표
   });
 
   test("수집과 최초·도중·갱신 실패가 가격·다른 지표를 막지 않고 재시도로 복구", async ({ page, scenario, financial }) => {
-    financial.show("ready", { status: "collecting" });
-    financial.job({ id: 1, status: "collecting", phase: "recent" });
+    financial.show("ready", { status: "not_collected" });
     const release = () => {
       const partial = financialPage("005930", "Q").series;
       const revenue = partial.find(series => series.metric === "revenue");
       if (revenue?.points[0]) revenue.points[0] = { ...revenue.points[0], status: "failed", value: null };
       financial.show("ready", { status: "partial_failure", series: partial });
-      financial.job({ status: "ready", phase: "complete" });
     };
     await seed(scenario);
     await page.addInitScript(installFrameProbe);
     await page.goto("/");
     await expect(cell(page)).toHaveAttribute("aria-busy", "false");
-    await expect(row(page, "revenue")).toContainText("수집 중");
+    await expect(row(page, "revenue")).toContainText("미수집");
     await choosePeriod(page, phone, "분기");
     await expect(row(page, "dps")).toContainText("연간 전용");
     await expect.poll(() => page.evaluate(() => window.frameProbe.snapshot().filter((s) => s.type === "Histogram").flatMap((s) => s.data).some((p) => "value" in p && p.value === 100))).toBe(true);
-    await expect(row(page, "revenue")).toContainText("수집 중");
+    await expect(row(page, "revenue")).toContainText("미수집");
     release();
+    await refresh(page);
     await expect(row(page, "revenue")).toContainText("일부 조회 실패");
     expect(Number(await chartOf(cell(page)).getAttribute("data-bar-count"))).toBeGreaterThan(0);
     financial.show();
@@ -126,6 +125,7 @@ for (const phone of [false, true]) test.describe(phone ? "휴대폰 재무지표
     await refresh(page);
     await expect(row(page, "revenue")).toContainText("갱신 실패");
     await choosePeriod(page, phone, "일");
+    if (phone) await cell(page).locator("[data-indicator-fold]:visible").click();
     await expect(row(page, "ma")).toBeVisible();
     await choosePeriod(page, phone, "연");
     financial.show();
@@ -157,7 +157,7 @@ test.describe("재무지원 경계", () => {
     await pickDesktopVenue(page, "KRX");
     await expect(cell(page)).toHaveAttribute("aria-busy", "false");
     await expect(row(page, "revenue")).toContainText("확인 완료");
-    await expect(page.getByRole("contentinfo")).toContainText("자동 저장됨");
+    await expect(page.getByRole("contentinfo")).toContainText("저장됨");
     const stored: Layout = await scenario.documents.layout(DEFAULT_LAYOUT_ID);
     expect(firstChart(stored).chartSettings).toEqual(settings);
   });
@@ -235,20 +235,21 @@ test.describe("재무지원 경계", () => {
   });
 });
 
-test("DART 미설정 상태에서도 가격과 기술지표를 사용하고 재무 설정은 유지한다", async ({ page, scenario, financial }) => {
+test("서버에 재무자료가 없어도 가격과 기술지표를 사용하고 재무 설정은 유지한다", async ({ page, scenario, financial }) => {
   financial.show("ready", { status: "not_configured", series: [] });
   await seed(scenario);
   await page.goto("/");
   await expect(cell(page)).toHaveAttribute("aria-busy", "false");
-  await expect(row(page, "revenue")).toContainText("DART 연동 미설정");
+  await expect(row(page, "revenue")).toContainText("이 서버에 재무자료가 없습니다");
   await expect(row(page, "ma")).toBeVisible();
   await choosePeriod(page, false, "일");
   await expect(row(page, "revenue")).toHaveCount(0);
   await choosePeriod(page, false, "연");
-  await expect(row(page, "revenue")).toContainText("DART 연동 미설정");
+  await expect(row(page, "revenue")).toContainText("이 서버에 재무자료가 없습니다");
 });
 
 test("재무지표 미리보기 중에도 재무 수집 상태가 보이고 취소하면 사라진다", async ({ page, scenario }) => {
+  useCenterIndicatorWindow(scenario);
   await page.goto("/?symbol=005930&period=Q");
   await expect(cell(page)).toHaveAttribute("aria-busy", "false");
   const status = page.getByLabel("재무 수집 상태");

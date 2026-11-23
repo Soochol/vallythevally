@@ -9,7 +9,7 @@ use server::clock::{Clock, kst};
 use server::config::{KisCredentials, Secret};
 use server::kis::api::KisApiId;
 use server::kis::auth::KisAuth;
-use server::kis::market_rest::{KisMarket, MINUTE_PAGE_BUDGET, SUPPORTED_FEATURES};
+use server::kis::market_rest::{DayValues, KisMarket, SessionValues, MINUTE_PAGE_BUDGET, SUPPORTED_FEATURES, multi_price_day_rows};
 use server::kis::master::{MasterDownload, MasterError, MasterMarket};
 use server::kis::rest::KisRest;
 use server::kis::token_file::{Saved, SavedToken, TokenFile, credential_id};
@@ -181,6 +181,7 @@ impl Home {
 
 struct Rig {
     market: Arc<KisMarket>,
+    rest: KisRest,
     transport: Arc<FakeKis>,
     clock: Clock,
     _home: Home,
@@ -193,8 +194,9 @@ fn rig_at(now: KstTime, master: Arc<FakeMaster>, handler: impl Fn(&Sent) -> Http
     let transport_dyn: Arc<dyn Transport> = transport.clone();
     let credentials = KisCredentials { app_key: Secret::new(APP_KEY.into()), app_secret: Secret::new(APP_SECRET.into()) };
     let auth = KisAuth::new(credentials, home.path.clone(), transport_dyn.clone(), clock.clone());
-    let market = Arc::new(KisMarket::new(KisRest::new(transport_dyn, auth), clock.clone(), master));
-    Rig { market, transport, clock, _home: home }
+    let rest = KisRest::new(transport_dyn, auth);
+    let market = Arc::new(KisMarket::new(rest.clone(), clock.clone(), master));
+    Rig { market, rest, transport, clock, _home: home }
 }
 
 fn rig(handler: impl Fn(&Sent) -> HttpResponse + Send + Sync + 'static) -> Rig {
@@ -540,6 +542,27 @@ async fn many_quotes_go_out_in_chunks_of_thirty_and_come_back_per_requested_venu
 }
 
 #[tokio::test(start_paused = true)]
+async fn multi_price_day_rows_carry_open_high_low_and_name_the_field_they_cannot_read() {
+    let rig = rig(|_| ok(fixture("multprice.json")));
+    let wanted = [(code("005930"), Venue::Krx), (code("000660"), Venue::Krx)];
+    let rows = multi_price_day_rows(&rig.rest, &wanted, Priority::Screen).await.unwrap();
+    assert_eq!(rows.iter().map(|row| row.code).collect::<Vec<_>>(), [code("005930"), code("000660")]);
+    assert_eq!(
+        rows[0].values,
+        Ok(DayValues { price_centi: 7_100_000, base_centi: 7_000_000, session: Ok(SessionValues { open_centi: 7_050_000, high_centi: 7_150_000, low_centi: 6_980_000, volume: 1_234_567, traded_won: 87_654_321_000 }) })
+    );
+    let quotes = rig.market.quotes(wanted.to_vec(), Priority::Screen).await.unwrap();
+    assert_eq!((quotes[0].price_centi, quotes[0].base_centi, quotes[0].volume.0, quotes[0].traded_million_won), (7_100_000, 7_000_000, 1_234_567, Some(87_654)), "quotes()의 결과는 그대로다");
+
+    assert_eq!(server::kis::market_rest::whole("184467440737095516"), None, "u64을 넘기는 값은 읽을 수 없는 값이다");
+    let blank_open = r#"{"rt_cd":"0","output":[{"inter_shrn_iscd":"005930","inter2_prpr":"71000","inter2_sdpr":"70000","inter2_oprc":"","inter2_hgpr":"71500","inter2_lwpr":"69800","acml_vol":"1","acml_tr_pbmn":"1"}]}"#;
+    let broken = rig_at(friday_evening(), synthetic_master(), move |_| ok(blank_open));
+    let rows = multi_price_day_rows(&broken.rest, &wanted[..1], Priority::Screen).await.unwrap();
+    let values = rows[0].values.as_ref().unwrap();
+    assert_eq!((values.price_centi, values.base_centi, values.session), (7_100_000, 7_000_000, Err("inter2_oprc")), "시가를 읽지 못해도 현재가와 기준가는 읽는다");
+}
+
+#[tokio::test(start_paused = true)]
 async fn the_first_screen_reads_the_order_book_the_tape_and_the_program_trades() {
     let rig = rig(|sent| match sent.path {
         path if path == KisApiId::OrderBook.path() => ok(fixture("book.json")),
@@ -803,4 +826,25 @@ async fn a_market_file_losing_almost_all_rows_is_refused() {
     symbols.refresh(source, Priority::Background).await.unwrap();
     assert!(!Arc::ptr_eq(&before, &symbols.updates().borrow().clone().unwrap()), "시장별로 절반 이상이면 받는다");
     assert!(rig.market.list_outage().is_none());
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_kis_daily_series_that_reached_its_origin_asks_only_the_latest_window_on_each_refresh() {
+    let today = friday_evening().kst_date();
+    let rig = rig(daily_history_of(weekdays_back_from(today, 30)));
+    let symbols = ready_directory(&rig.market).await;
+    let market = Arc::try_unwrap(rig.market).ok().expect("한 곳에서만 쓴다");
+    let transport = rig.transport.clone();
+    let service = BarService::new(market, symbols, rig.clock.clone());
+    let key = samsung_key(Venue::Krx, Period::Day);
+    let mut requests = Vec::new();
+    let mut shown = Vec::new();
+    for _ in 0..3 {
+        let before = transport.sent_to(KisApiId::DailyChart).len();
+        let page = service.page(key, None, 250).await.unwrap();
+        requests.push(transport.sent_to(KisApiId::DailyChart).len() - before);
+        shown.push(page.bars.len());
+    }
+    assert!(shown[0] >= 29 && shown.iter().all(|&n| n == shown[0]), "부를 때마다 같은 봉을 받는다: {shown:?}");
+    assert_eq!(requests, [2, 1, 1], "끝에 닿은 뒤의 새로고침은 최신 창 하나만 받는다");
 }

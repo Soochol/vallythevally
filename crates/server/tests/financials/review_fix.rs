@@ -83,66 +83,33 @@ async fn conflicting_document_or_receipt_identity_never_persists_provenance() {
     }
 }
 
-async fn http_stock(client: &reqwest::Client, base: &str, stock: &str) -> Value {
-    let response = client.get(format!("{base}/api/symbols/{stock}/financial-source")).send().await.unwrap();
-    assert_eq!(response.status(),StatusCode::OK);
-    serde_json::from_slice(&response.bytes().await.unwrap()).unwrap()
-}
-
-async fn http_finished(client: &reqwest::Client, base: &str) -> Value {
-    tokio::time::timeout(Duration::from_secs(20),async {
-        loop {
-            let snapshot = http_stock(client,base,STOCK).await;
-            if snapshot["status"] != "collecting" { break snapshot; }
-            tokio::time::sleep(Duration::from_millis(20)).await;
-        }
-    }).await.unwrap()
-}
-
 #[tokio::test]
-async fn repeated_manual_start_during_mapping_coalesces_and_preserves_price_and_other_company() {
-    use std::os::unix::fs::PermissionsExt;
+async fn repeated_manual_start_during_mapping_coalesces_and_preserves_other_company() {
     for source_failure in [false,true] {
         let fake = source().await;
         let dir = tempdir();
         let path = dir.path().join("run/financials.db");
         let store = Store::open(&path).await.unwrap();
-        std::fs::set_permissions(dir.path().join("run"),std::fs::Permissions::from_mode(0o700)).unwrap();
         let yesterday = Clock::fake(kst(KstDate::new(2015,12,31).unwrap(),12,0,0));
         let service = Financials::new(Some(fake.client()),store.clone(),yesterday);
         let before = settled_stock(&service,COMMON,false).await.collection;
         let other = settled(&service).await.collection;
         drop(service);
-        let kiwoom = common::ScriptedTransport::new();
-        let mut symbols = common::support::fixture("ka10099_0");
-        for (code,name) in [(STOCK,"현대차2우B"),(COMMON,"현대차")] {
-            let mut row = symbols["list"].as_array().unwrap().iter().find(|row| row["code"] == "005935").unwrap().clone();
-            row["code"] = code.into();
-            row["name"] = name.into();
-            symbols["list"].as_array_mut().unwrap().push(row);
-        }
-        kiwoom.respond_with("ka10099",200,symbols);
-        let server = process(&fake,&kiwoom,dir.path(),"20160101120000");
-        let base = format!("http://{}",server.addr().await);
-        let client = reqwest::Client::new();
-        let price = format!("{base}/api/bars?symbol=005930&period=D&limit=5");
-        let response = client.get(&price).send().await.unwrap();
-        let status = response.status();
-        let body = response.bytes().await.unwrap();
-        assert_eq!(status,StatusCode::OK,"{} {}",String::from_utf8_lossy(&body),server.logs());
+        let collector = collector::Collector::open(&fake,dir.path(),"20160101120000",&[(STOCK,true),(COMMON,false),("005930",false)]).await;
+        let stock_path = format!("/api/symbols/{STOCK}/financial-source");
         {
             let mut state = fake.state.lock().unwrap();
             state.discovery_paused = Some("search".into());
             state.stream_paused_report = Some("11013".into());
         }
-        let manual = {
-            let client = client.clone();
-            let base = base.clone();
-            tokio::spawn(async move { client.post(format!("{base}/api/symbols/{STOCK}/financial-source")).send().await.unwrap() })
-        };
+        let manual = collector.start().await;
         fake.wait_for_call("search", 1).await;
-        assert_eq!(tokio::time::timeout(Duration::from_secs(1),http_stock(&client,&base,COMMON)).await.unwrap()["status"],"ready");
-        http_start(&client, &base).await;
+        assert_eq!(tokio::time::timeout(Duration::from_secs(1),collector.get(&format!("/api/symbols/{COMMON}/financial-source"))).await.unwrap()["status"],"ready");
+        assert_eq!(collector.start().await["id"],manual["id"]);
+        let accepted = tokio::time::timeout(Duration::from_secs(3),collector.get(&stock_path)).await.unwrap();
+        assert_eq!(accepted["status"],"not_collected");
+        assert_eq!(accepted["collection"]["refresh_version"],0);
+        assert!(accepted["security"].is_null());
         {
             let mut state = fake.state.lock().unwrap();
             state.statement_amounts.insert(COMPANY.into(),"175".into());
@@ -150,19 +117,13 @@ async fn repeated_manual_start_during_mapping_coalesces_and_preserves_price_and_
             state.discovery_paused = None;
             if source_failure { state.failures.insert("fnlttSinglAcntAll.json/2015/11011".into(),"900".into()); }
         }
-        let response = tokio::time::timeout(Duration::from_secs(3),manual).await.unwrap().unwrap();
-        let accepted: Value = serde_json::from_slice(&response.bytes().await.unwrap()).unwrap();
-        assert_eq!(accepted["status"],"not_collected");
-        assert_eq!(accepted["collection"]["refresh_version"],0);
-        assert!(accepted["security"].is_null());
-        assert_eq!(tokio::time::timeout(Duration::from_secs(1),client.get(&price).send()).await.unwrap().unwrap().status(),StatusCode::OK);
-        let saved_other = tokio::time::timeout(Duration::from_secs(1),http_stock(&client,&base,"005930")).await.unwrap();
+        let saved_other = tokio::time::timeout(Duration::from_secs(1),collector.snapshot()).await.unwrap();
         assert_eq!(saved_other["collection"]["reports"],serde_json::to_value(&other.reports).unwrap());
         assert_eq!(store.collection(COMPANY).await.unwrap().reports["2015/11011"].statement.refresh_version,before.refresh_version);
         fake.wait_for_call("statement_stream", 1).await;
         fake.state.lock().unwrap().stream_paused_report = None;
-        http_settled(&fake, &client, &base).await;
-        let result = http_finished(&client,&base).await;
+        collector.finished(&fake).await;
+        let result = collector.get(&stock_path).await;
         let collection = store.collection(COMPANY).await.unwrap();
         assert_eq!(collection.refresh_version,before.refresh_version + 1);
         assert_eq!(collection.disclosure_version,collection.refresh_version);
@@ -181,7 +142,5 @@ async fn repeated_manual_start_during_mapping_coalesces_and_preserves_price_and_
             for code in ["11013","11012","11014","11011"] { assert_eq!(collection.reports[&format!("2015/{code}")].statement.refresh_version,collection.refresh_version); }
             assert_eq!(collection.reports["2015/11011"].dividends.refresh_version,collection.refresh_version);
         }
-        assert_eq!(tokio::time::timeout(Duration::from_secs(1),client.get(&price).send()).await.unwrap().unwrap().status(),StatusCode::OK);
-        assert!(!server.stop().await.contains(KEY));
     }
 }

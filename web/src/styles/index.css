@@ -12,6 +12,7 @@
 @import "./market-window.css";
 @import "./order-window.css";
 @import "./colors.css";
+@import "./chart-tools.css";
 @import "./landing.css";
 
 /* Tailwind 테마는 토큰 변수만 가리킨다. 기본 색·글자 크기는 지워 토큰 밖의 값을 못 쓰게 한다. */
@@ -127,12 +128,13 @@
   }
   .tb-sep { width: 1px; height: 20px; background: var(--line); margin: 0 var(--s2); flex: none; }
 
-  .conn-dot { width: 7px; height: 7px; border-radius: 50%; flex: none; background: var(--text-3); }
-  .conn-dot[data-tone="mint"] { background: var(--success); box-shadow: 0 0 0 3px color-mix(in srgb, var(--success) 22%, transparent); }
+  .conn-dot { position: relative; width: 7px; height: 7px; border-radius: 50%; flex: none; background: var(--text-3); }
+  .conn-dot[data-tone="mint"] { background: var(--success); }
   .conn-dot[data-tone="amber"] { background: var(--warning); }
   .conn-dot[data-tone="red"] { background: var(--danger); }
+  .conn-dot[data-tone="mint"]::after { content: ""; position: absolute; inset: 0; border-radius: 50%; background: var(--success); opacity: 0.22; transform: scale(1.9); }
   @media (prefers-reduced-motion: no-preference) {
-    .conn-dot[data-pulse] { animation: conn-pulse 2.4s ease-in-out infinite; }
+    .conn-dot[data-pulse]::after { animation: conn-pulse 2.4s ease-in-out infinite; }
   }
-  @keyframes conn-pulse { 50% { box-shadow: 0 0 0 5px color-mix(in srgb, var(--success) 0%, transparent); } }
+  @keyframes conn-pulse { 50% { opacity: 0; transform: scale(2.6); } }
 }

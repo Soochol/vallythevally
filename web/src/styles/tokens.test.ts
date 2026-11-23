@@ -33,6 +33,7 @@ const CHIP_TEXT_PAIRS = [
   ["--on-data", "--up"],
   ["--on-data", "--down"],
   ["--on-data", "--accent"],
+  ["--on-data", "--draw"],
   ["--accent-ink", "--accent"],
 ] as const;
 
@@ -94,6 +95,24 @@ describe("범주색 열 --series-1~10", () => {
 
   it("창 바탕 --bg 위에서 4.5:1 이상이다", () => {
     for (const name of SERIES) expect(ratio(name, SURFACES["--bg"]), name).toBeGreaterThanOrEqual(MIN_TEXT_CONTRAST);
+  });
+});
+
+describe("드로잉 기본색 --draw", () => {
+  const NEIGHBOURS = ["--accent", "--up", "--down", ...[..."abcdefghij"].map((letter) => `--link-${letter}`), ...[1, 2, 3, 4, 5].map((index) => `--ind-${index}`)];
+
+  it("창 바탕 --bg 위에서 7:1 이상이다", () => {
+    expect(ratio("--draw", SURFACES["--bg"])).toBeGreaterThanOrEqual(7);
+  });
+
+  it("강조색·방향색·연동색·지표색과 ΔE00 14 이상 떨어진다", () => {
+    for (const neighbour of NEIGHBOURS) {
+      expect(deltaE2000(color("--draw"), color(neighbour)), `--draw × ${neighbour}`).toBeGreaterThanOrEqual(MIN_SERIES_DISTANCE);
+    }
+  });
+
+  it("강조색과 같은 값이 아니다", () => {
+    expect(token("--draw").toLowerCase()).not.toBe(token("--accent").toLowerCase());
   });
 });
 

@@ -1,7 +1,7 @@
 import { expect, test } from "vitest";
 import type { SymbolInfo } from "../../api/generated/SymbolInfo";
 import { DEFAULT_CHART_SETTINGS, type ChartSettings } from "../../chart/settings";
-import { commandKey, commandRows, modeAfterInput, selectedRow } from "./model";
+import { commandHints, commandKey, commandRows, modeAfterInput, selectedRow } from "./model";
 
 const empty = { rows: [], selectable: true, empty: true };
 const info: SymbolInfo = { code: "005930", name: "삼성전자", market: "kospi", kind: "common", nxtEnabled: true };
@@ -50,4 +50,12 @@ test("Enter는 계속 추가하고 Shift+Enter만 추가 뒤 닫으며 한글 �
   expect(commandKey({ key: "ArrowDown", shiftKey: false, isComposing: false })).toEqual({ kind: "move", step: 1 });
   expect(commandKey({ key: "ArrowUp", shiftKey: false, isComposing: false })).toEqual({ kind: "move", step: -1 });
   expect(commandKey({ key: "Escape", shiftKey: false, isComposing: false })).toEqual({ kind: "ignore" });
+});
+
+test("단축키 안내는 탭에 맞는 것만 보인다", () => {
+  expect(commandHints("current").map((hint) => hint.keys)).toEqual(["↑↓", "Tab", "Enter", "Shift+Enter", "Esc"]);
+  expect(commandHints("current")[2]!.action).toBe("적용하고 계속");
+  expect(commandHints("add")[3]!.action).toBe("추가하고 닫기");
+  expect(commandHints("compare").map((hint) => hint.keys)).toEqual(["↑↓", "Enter", "Shift+Enter", "Esc"]);
+  expect(commandHints("compare").at(-1)!.action).toBe("닫기");
 });

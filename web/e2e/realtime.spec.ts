@@ -45,11 +45,11 @@ test("실시간 중단 상태에서도 HTTP 조회 차트와 주기 전환을 �
   await page.goto("/?symbol=005930");
   await expect(cell(page)).toHaveAttribute("aria-busy", "false");
   scenario.live.status({ realtime: "halted", since: AT_1000, backfilling: false });
-  await expect(page.getByRole("contentinfo")).toContainText("실시간 멈춤: 서버를 다시 켜야 합니다");
+  await expect(page.getByTestId("shell-banner")).toContainText("실시간 멈춤: 서버를 다시 켜야 합니다");
   await page.goto("/?symbol=005930&period=1m");
   await expect(cell(page)).toHaveAttribute("aria-busy", "false");
   await expect.poll(async () => Number(await chartOf(cell(page)).getAttribute("data-bar-count"))).toBeGreaterThan(0);
-  await expect(page.getByRole("contentinfo")).toContainText("실시간 멈춤: 서버를 다시 켜야 합니다");
+  await expect(page.getByTestId("shell-banner")).toContainText("실시간 멈춤: 서버를 다시 켜야 합니다");
 });
 
 test("둘째 탭에 HTTP 페이지보다 늦게 온 옛 subscribed가 새 봉을 되돌리지 않는다", async ({ page, scenario, context }) => {

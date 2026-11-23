@@ -1,11 +1,10 @@
-import { FinancialUpdateButton } from "../financial-update/FinancialUpdateButton";
-import { SentenceEditor } from "./SentenceEditor";
+import { PANEL_MENU, SentenceEditor } from "./SentenceEditor";
 import { useScreenEditing } from "./useScreenEditing";
 import { CHANGED, ChangedBadge } from "./ChangedBadge";
 import { type ChosenScreen, FIX_INVALID, type ScreenEditing, type ScreenEntry } from "./screenEditing";
 import { confirmAction } from "../overlay/Confirm";
 import { useQueryClient, type UseQueryResult } from "@tanstack/react-query";
-import { type ReactNode, useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
+import { type ReactNode, useCallback, useEffect, useId, useMemo, useReducer, useRef, useState } from "react";
 import type { ApiErrorBody } from "../../api/generated/ApiErrorBody";
 import type { KstDate } from "../../api/generated/KstDate";
 import type { Screen } from "../../api/generated/Screen";
@@ -17,7 +16,7 @@ import type { Screens } from "../../api/generated/Screens";
 import type { SymbolCode } from "../../api/generated/SymbolCode";
 import type { UpdatePhase } from "../../api/generated/UpdatePhase";
 import { useScreenerStatus, useUpdateCommands } from "../../api/screener";
-import { useBeforeConnect } from "../status/beforeConnect";
+import { useFeedBeforeConnect } from "../status/beforeConnect";
 import { SCREENER_REFRESH_TOOLTIP, useScreenerRefreshNeedsKiwoom } from "../status/marketFeed";
 import { isTypingTarget } from "../../lib/typingTarget";
 import { DESKTOP_QUERY, useMediaQuery } from "../../lib/media";
@@ -44,11 +43,14 @@ import { type Rerun, rerunReason, type ScreenRun, shownResult, useScreenerStore 
 import { useSelectionStore } from "../../stores/selection";
 import { serverNow, useServerClock } from "../../stores/serverClock";
 import { useWatchlistStore } from "../../stores/watchlist";
-import { ChevronIcon, MoreIcon, PenIcon, PlayIcon, PlusIcon, SpinnerIcon, StarIcon } from "../icons";
+import { ChevronIcon, EmptyBoxIcon, InfoIcon, MoreIcon, PenIcon, PlayIcon, PlusIcon, SpinnerIcon, WarningIcon } from "../icons";
+import { OVERLAY_GAP, placeOverlay } from "../overlay/position";
+import { Skeleton } from "../overlay/State";
+import { Badge } from "../ui/Badge";
 import { Menu, type MenuItem } from "../menu/Menu";
 import { ownsChartKeyboard } from "../overlay/topLayer";
 import { DataAgeNote } from "../data-age/DataAgeNote";
-import { ResultTable } from "./ResultTable";
+import { RESULT_KEYS_HINT, ResultTable } from "./ResultTable";
 import { dropPendingOpen, openResult, pendingResultCode, sendToNewWatchlist, sendToWatchlist } from "./resultActions";
 import { nextResult, resultKeyAction } from "./results";
 
@@ -123,11 +125,11 @@ export function ScreenerBadge({ id }: { id: WindowId | null }) {
   }
   if (shown === undefined) return null;
   return (
-    <span className="min-w-[16px] rounded-full bg-hover px-1 text-center text-xs font-[650] leading-[15px] text-text">
+    <Badge>
       <span className="sr-only">결과 </span>
       {shown > BADGE_MAX ? `${BADGE_MAX}+` : shown}
       <span className="sr-only">종목</span>
-    </span>
+    </Badge>
   );
 }
 
@@ -174,7 +176,7 @@ export function ScreenerPanel({ id }: { id: WindowId | null }) {
   useResultKeys({ rows, active, onSelect: select, onRun: execute }, () => ownsKeys(id));
   useEffect(() => dropPendingOpen, []);
   const band = status !== undefined && showsUpdateBand(status);
-  const offline = useBeforeConnect() !== null;
+  const offline = useFeedBeforeConnect() !== null;
   return (
     <aside aria-label="스크리너" data-chart-control className="flex min-h-0 min-w-0 flex-1 flex-col" onPointerDownCapture={() => { lastTouchedWindow = id; }} onFocusCapture={() => { lastTouchedWindow = id; }}>
       {offline && status?.lastDay && <p className="flex-none border-b border-line px-3 py-1.5 text-xs text-text-2">저장된 일봉 {status.lastDay.slice(5).replace("-", "/")}까지 · 오늘 시세는 연결 뒤에 합칩니다</p>}
@@ -182,14 +184,13 @@ export function ScreenerPanel({ id }: { id: WindowId | null }) {
         <div className="max-h-[50%] flex-none overflow-y-auto">
           {band && <UpdateBand status={status} />}
           {chosen && desktop ? (
-            <SentenceEditor screenEditing={screenEditing} chosen={chosen} entries={view.entries} blocked={!status || block !== null} resultActions={<PanelMenu screen={screen} rows={rows} status={status} />} editing={editing} onEditingChange={setEditing} onRun={execute} />
+            <SentenceEditor screenEditing={screenEditing} chosen={chosen} entries={view.entries} blocked={!status || block !== null} menu={(screenItems) => <PanelMenu screen={screen} rows={rows} status={status} lead={screenItems} />} editing={editing} onEditingChange={setEditing} onRun={execute} />
           ) : chosen ? (
             <ScreenHeader windowId={id} screenEditing={screenEditing} chosen={chosen} entries={view.entries} block={block} status={status} rows={rows} onRun={execute} />
           ) : (
             <header className="flex h-11 flex-none items-center gap-1 border-b border-line pl-3 pr-1.5">
               <h2 className="text-l font-[700]">스크리너</h2>
               <span className="flex-1" />
-              <FinancialUpdateButton className="md:hidden" />
               <PanelMenu screen={null} rows={rows} status={status} />
             </header>
           )}
@@ -269,7 +270,6 @@ function ScreenHeader({ windowId, screenEditing, chosen, entries, block, status,
   return (
     <header className="flex-none border-b border-line px-3 pb-3 pt-2">
       <div className="flex items-center gap-1">
-        <FinancialUpdateButton className="md:hidden" />
         <ScreenPicker windowId={windowId} screenEditing={screenEditing} entries={entries} chosen={chosen} />
         {chosen.dirty && <ChangedBadge />}
         <span className="flex-1" />
@@ -290,7 +290,7 @@ function ScreenHeader({ windowId, screenEditing, chosen, entries, block, status,
           onClick={onRun}
         >
           {running ? <SpinnerIcon /> : <PlayIcon />}
-          {running ? "실행 중" : "실행"}<kbd className="ml-1 text-xs">Ctrl+↵</kbd>
+          {running ? "실행 중" : "실행"}<kbd className="ml-1 text-xs max-md:hidden">Ctrl+↵</kbd>
         </button>
         <span className="min-w-0 text-xs leading-[1.4] text-text-2">{runHint(block, status)}</span>
       </div>
@@ -318,7 +318,7 @@ function ScreenPicker({ windowId, screenEditing, entries, chosen }: { windowId: 
         onClick={menu.toggle}
         className="flex min-w-0 max-w-full items-center gap-1.5 rounded-m px-1.5 py-1 hover:bg-raised"
       >
-        <span className="truncate text-l font-[700]">{name}</span>
+        <span className="truncate text-l font-[600]">{name}</span>
         <ChevronIcon />
       </button>
       {menu.open && (
@@ -328,7 +328,7 @@ function ScreenPicker({ windowId, screenEditing, entries, chosen }: { windowId: 
   );
 }
 
-function PanelMenu({ screen, rows, status, saveOnly = false }: { screen: Screen | null; rows: readonly ScreenerRow[]; status: ScreenerStatus | undefined; saveOnly?: boolean }) {
+function PanelMenu({ screen, rows, status, lead = [] }: { screen: Screen | null; rows: readonly ScreenerRow[]; status: ScreenerStatus | undefined; lead?: readonly MenuItem[] }) {
   const menu = useMenuToggle();
   const lists = useWatchlistStore((s) => s.lists);
   const { start } = useUpdateCommands();
@@ -341,84 +341,87 @@ function PanelMenu({ screen, rows, status, saveOnly = false }: { screen: Screen 
     fresh === null
       ? []
       : [{ kind: "action", label: `새 목록 "${fresh}"`, disabled: nothing || lists.length >= MAX_WATCHLISTS, onSelect: () => sendToNewWatchlist(fresh, codes) }];
-  const offline = useBeforeConnect() !== null;
+  const offline = useFeedBeforeConnect() !== null;
   const needsKiwoom = useScreenerRefreshNeedsKiwoom();
   const reload = async () => {
     if (await confirmAction(FULL_RELOAD_CONFIRM, { action: "전체 다시 받기" })) void start(true).catch(showCommandError);
   };
   const items: MenuItem[] = [
-    { kind: "heading", label: nothing ? "관심종목으로 보내기" : `결과 ${count(codes.length)}종목을 관심종목으로 보내기` },
+    ...(lead.length ? [...lead, { kind: "separator" } satisfies MenuItem] : []),
+    { kind: "heading", label: nothing ? "결과를 관심종목으로 보내기" : `결과 ${count(codes.length)}종목을 관심종목으로 보내기` },
     ...lists.map((l): MenuItem => ({ kind: "action", label: l.name, disabled: nothing, onSelect: () => sendToWatchlist(l.id, codes) })),
     ...newList,
-    ...(!saveOnly ? [
-      { kind: "separator" } satisfies MenuItem,
-      { kind: "action", label: "전체 다시 받기…", hint: waiting?.from ?? (needsKiwoom ? SCREENER_REFRESH_TOOLTIP : undefined), disabled: isUpdating(status) || waiting !== null || offline || needsKiwoom, onSelect: reload } satisfies MenuItem,
-    ] : []),
+    { kind: "separator" },
+    { kind: "action", label: "전체 다시 받기…", hint: waiting?.from ?? (needsKiwoom ? SCREENER_REFRESH_TOOLTIP : undefined), disabled: isUpdating(status) || waiting !== null || offline || needsKiwoom, onSelect: reload },
   ];
   return (
-    <div ref={menu.root} className="relative">
+    <div ref={menu.root} className="relative flex-none">
       <button
         ref={menu.button}
         type="button"
-        className={saveOnly ? "tb-btn h-[var(--size-26)] gap-1 whitespace-nowrap text-xs" : "icon-btn"}
-        title={saveOnly ? "결과를 관심종목으로 저장" : "관심종목으로 보내기, 전체 다시 받기"}
-        aria-label={saveOnly ? "결과를 관심종목으로 저장" : "스크리너 메뉴"}
+        className="icon-btn"
+        title={lead.length ? "조건식 저장·이름 바꾸기, 관심종목으로 보내기, 전체 다시 받기" : "관심종목으로 보내기, 전체 다시 받기"}
+        aria-label={PANEL_MENU}
         aria-haspopup="menu"
         aria-expanded={menu.open}
         onClick={menu.toggle}
       >
-        {saveOnly ? <><StarIcon size={12} />관심종목으로</> : <MoreIcon />}
+        <MoreIcon />
       </button>
       {menu.open && (
-        <Menu label="스크리너 메뉴" items={items} onClose={menu.close} root={menu.root} className="absolute right-0 top-[calc(100%+4px)] max-h-[60vh] min-w-[220px] overflow-auto" />
+        <Menu label={PANEL_MENU} items={items} onClose={menu.close} root={menu.root} className="absolute right-0 top-[calc(100%+4px)] max-h-[60vh] min-w-[220px] overflow-auto" />
       )}
     </div>
   );
 }
 
-function Notice({ title, children, action, tone = "plain" }: { title: string; children?: ReactNode; action?: ReactNode; tone?: "plain" | "alert" }) {
+function StatePanel({ title, children, action, tone, icon, busy }: { title: string; children?: ReactNode; action?: ReactNode; tone?: "danger"; icon?: ReactNode; busy?: boolean }) {
   return (
-    <div role={tone === "alert" ? "alert" : undefined} className="flex min-h-0 flex-1 flex-col items-start gap-2 px-6 pt-10">
-      <p className="text-m font-[650]">{title}</p>
-      {children && <p className={`text-s leading-[1.5] ${tone === "alert" ? "text-danger" : "text-text-2"}`}>{children}</p>}
+    <div role={tone === "danger" ? "alert" : busy ? "status" : undefined} data-tone={tone} className="ui-state min-h-0 flex-1 justify-start pt-10">
+      <span className="ui-state-icon">{icon ?? (tone === "danger" ? <WarningIcon size={24} /> : <EmptyBoxIcon />)}</span>
+      <p className="ui-state-title">{title}</p>
+      {children && <div className="ui-state-body">{children}</div>}
       {action}
     </div>
   );
 }
 
 function NoScreen({ query, onCreate }: { query: UseQueryResult<Screens>; onCreate(): void }) {
-  if (query.isPending) return <Notice title="조건식을 불러오는 중입니다" />;
+  if (query.isPending) return <Skeleton label="조건식을 불러오는 중" rows={6} />;
   if (query.isError) {
     return (
-      <Notice title="조건식을 불러오지 못했습니다" tone="alert" action={<RetryButton onClick={() => void query.refetch()} />}>
+      <StatePanel title="조건식을 불러오지 못했습니다" tone="danger" action={<RetryButton onClick={() => void query.refetch()} />}>
         {query.error.message}
-      </Notice>
+      </StatePanel>
     );
   }
   return (
-    <Notice
+    <StatePanel
       title="저장한 조건식이 없습니다"
       action={
-        <button type="button" className="btn-primary mt-1 flex h-8 items-center gap-1.5 px-3 text-s" onClick={onCreate}>
+        <button type="button" className="btn-primary btn-sm" onClick={onCreate}>
           <PlusIcon size={14} />새 조건식
         </button>
       }
     >
       조건식에 이름과 조건을 정해 저장하면 여기서 골라 실행합니다.
-    </Notice>
+    </StatePanel>
   );
 }
 
-function RetryButton({ onClick, label = "다시 시도", disabled = false }: { onClick(): void; label?: string; disabled?: boolean }) {
+function RetryButton({ onClick, label = RETRY, disabled = false }: { onClick(): void; label?: ReactNode; disabled?: boolean }) {
   return (
-    <button type="button" className="tb-btn h-8 border border-line text-s disabled:opacity-40" disabled={disabled} onClick={onClick}>
+    <button type="button" className="btn btn-sm flex-none" disabled={disabled} onClick={onClick}>
       {label}
     </button>
   );
 }
 
+const RETRY = "다시 시도";
+const KEPT_RESULT = "이전 결과를 그대로 보입니다";
+
 const NOT_RUN: Record<RunBlock | "ready", { title: string; body: string }> = {
-  ready: { title: "실행하면 결과가 여기에 나옵니다", body: "행을 누르거나 ↑↓로 결과를 차례로 칸에 엽니다." },
+  ready: { title: "실행하면 결과가 여기에 나옵니다", body: `행을 누르거나 ↑↓로 결과를 차례로 칸에 엽니다. ${RESULT_KEYS_HINT}` },
   updating: { title: "최근 관측일을 채우고 있습니다", body: "끝나면 실행할 수 있습니다." },
   missing_day: { title: "새 자료가 필요합니다", body: "위에서 업데이트하면 빠진 관측일을 채웁니다." },
   empty: { title: "저장소가 비어 있습니다", body: "위에서 처음 받기를 누르면 KRX 일봉을 받습니다." },
@@ -446,18 +449,44 @@ function Results({ screen, run, rows, status, block, onRun, onEdit, selected, on
     : failure?.error.message;
   if (result) return (
     <>
-      {failure && <p role="alert" className="flex-none border-b border-line px-3 py-2 text-s text-danger">실행하지 못했습니다. {message} 이전 결과와 수집 시각을 유지합니다.</p>}
+      {failure && (
+        <div role="alert" className="flex flex-none items-start gap-2 border-b border-line px-3 py-2">
+          <span className="min-w-0 flex-1 text-s">
+            <span className="block text-danger">실행하지 못했습니다: {message}</span>
+            <span className="block text-xs text-text-2">{KEPT_RESULT}</span>
+          </span>
+          <RetryButton disabled={block !== null} onClick={onRun} />
+        </div>
+      )}
       <ResultList screen={screen} result={result} rows={rows} running={run?.kind === "running"} rerun={rerun} onRun={onRun} onEdit={onEdit} selected={selected} onSelect={onSelect} />
     </>
   );
   if (failure) return (
-    <Notice title="실행하지 못했습니다" tone="alert" action={<RetryButton label="다시 실행" disabled={block !== null} onClick={onRun} />}>
+    <StatePanel title="실행하지 못했습니다" tone="danger" action={<RetryButton disabled={block !== null} onClick={onRun} />}>
       결과 없음. {message}
-    </Notice>
+    </StatePanel>
   );
-  if (run?.kind === "running") return <Notice title="찾는 중입니다" />;
+  if (run?.kind === "running") return <FirstRun universe={status?.fullHistory.total ?? null} />;
   const { title, body } = NOT_RUN[block ?? "ready"];
-  return <Notice title={title}>{body}</Notice>;
+  return <StatePanel title={title}>{body}</StatePanel>;
+}
+
+function FirstRun({ universe }: { universe: number | null }) {
+  const label = universe ? `찾는 중 · 대상 ${count(universe)}종목` : "찾는 중";
+  return (
+    <section aria-label="결과" aria-busy="true" className="flex flex-col">
+      <p role="status" className="flex h-7 flex-none items-center gap-1.5 px-3 text-s text-text-2"><SpinnerIcon size={12} />{label}</p>
+      <div aria-hidden="true" className="border-t border-line">
+        {Array.from({ length: 6 }, (_, index) => (
+          <div key={index} className="flex h-[var(--row-h)] items-center gap-2 px-3">
+            <span className="h-3 flex-1 rounded-s bg-raised" style={{ maxWidth: `${60 - (index % 3) * 12}%` }} />
+            <span className="h-3 w-16 rounded-s bg-raised" />
+            <span className="h-4 w-16 rounded-s bg-raised" />
+          </div>
+        ))}
+      </div>
+    </section>
+  );
 }
 
 interface ResultListProps extends Omit<ResultsProps, "run" | "status" | "block"> {
@@ -470,56 +499,74 @@ const collectionTime = (seconds: number) => new Intl.DateTimeFormat("sv-SE", {
   timeZone: "Asia/Seoul", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23",
 }).format(new Date(seconds * 1000));
 
+const RESULT_INFO = "수집 시각과 제외 내역";
+
+function ResultInfo({ result }: { result: ScreenerResult }) {
+  const button = useRef<HTMLButtonElement>(null);
+  const pop = useRef<HTMLDivElement>(null);
+  const [open, setOpen] = useState(false);
+  const id = useId();
+  const toggle = () => {
+    const node = pop.current;
+    const anchor = button.current?.getBoundingClientRect();
+    if (!node || !anchor) return;
+    if (node.matches(":popover-open")) { node.hidePopover(); return; }
+    node.showPopover();
+    const place = placeOverlay(anchor, node.getBoundingClientRect(), { width: window.innerWidth, height: window.innerHeight }, "bottom");
+    node.style.left = `${Math.max(OVERLAY_GAP, Math.min(anchor.right - node.offsetWidth, place.left))}px`;
+    node.style.top = `${place.top}px`;
+  };
+  return (
+    <>
+      <button ref={button} type="button" data-chart-control className="icon-btn h-[var(--ctl-xs)] w-[var(--ctl-xs)] flex-none" aria-label={RESULT_INFO} title={RESULT_INFO} aria-expanded={open} aria-describedby={id} onClick={toggle}>
+        <InfoIcon size={14} />
+      </button>
+      <div ref={pop} id={id} popover="auto" role="tooltip" aria-label="결과 자료" className="ui-popover ui-tooltip" onToggle={(event) => setOpen((event.nativeEvent as ToggleEvent).newState === "open")}>
+        <div className="space-y-1 text-xs leading-relaxed text-text-2">
+          <p>기준 관측일 {result.asOf} · KRX</p>
+          <p>수집 범위 (KST) <time>{collectionTime(result.collectionStartedAt)}</time> ~ <time>{collectionTime(result.collectionCompletedAt)}</time></p>
+          <p>현재가는 일봉 0봉 가격 · 등락률은 직전 거래 일봉 대비</p>
+          <p>잠정은 이번 수집의 당일 요약입니다</p>
+          <p>자료 누락 {count(result.missingSummary)}종목{result.missingSummary > 0 && " · 자료를 확인하지 못해 판정에서 빠졌습니다"}</p>
+          <p>대상 {count(result.universe)}종목 · 빠짐: {excludedText(result.excluded)}</p>
+        </div>
+      </div>
+    </>
+  );
+}
+
 function ResultList({ screen, result, rows, running, rerun, onRun, onEdit, selected, onSelect }: ResultListProps) {
   const sort = useScreenerStore((s) => s.sort);
   const left = result.excluded.listedTooShort + result.excluded.historyShort;
   return (
     <section aria-label="결과" aria-busy={running} className={`flex flex-col ${running ? "opacity-50" : ""}`}>
-      <div className="flex flex-none items-baseline gap-1.5 px-3 pt-2.5">
-        <span className="text-xl font-[700] leading-none">{count(rows.length)}</span>
-        <span className="min-w-0 flex-1 text-s text-text-2">종목 · {dayLabel(result.asOf, result.asOf)} 기준</span>
+      <div className="flex h-7 flex-none items-center gap-1.5 pl-3 pr-1.5 text-s">
+        <span className="min-w-0 flex-1 truncate text-text-2"><span className="font-[600] text-text">{count(rows.length)}종목</span> · {dayLabel(result.asOf, result.asOf)} 기준</span>
         <DataAgeNote recordedAt={result.collectionCompletedAt} cadence="screener" />
-        <PanelMenu screen={screen} rows={rows} status={undefined} saveOnly />
+        <ResultInfo result={result} />
       </div>
-      <details className="px-3 py-1 text-xs text-text-3"><summary className="cursor-pointer">결과 자료 · 수집 시각과 제외 내역</summary>
-      <div aria-label="결과 자료" className="flex-none space-y-1 px-3 pt-1 text-xs leading-relaxed text-text-2">
-        <p>기준 관측일 {result.asOf} · KRX</p>
-        <p>수집 범위 (KST) <time>{collectionTime(result.collectionStartedAt)}</time> ~ <time>{collectionTime(result.collectionCompletedAt)}</time></p>
-        <p>현재가는 일봉 0봉 가격 · 등락률은 직전 거래 일봉 대비</p>
-        <p>잠정은 이번 수집의 당일 요약입니다</p>
-        <p>자료 누락 {count(result.missingSummary)}종목{result.missingSummary > 0 && " · 자료를 확인하지 못해 판정에서 빠졌습니다"}</p>
-      </div>
-      <p className="flex-none px-3 pb-2 pt-1 text-xs text-text-3">
-        대상 {count(result.universe)}종목 · 빠짐: {excludedText(result.excluded)}
-      </p>
-      </details>
       {rerun && (
         <p className="mx-3 mb-2 flex flex-none items-center gap-2 rounded-s bg-accent-soft px-2 py-1.5 text-xs text-accent">
           {rerun.kind === "new_day" ? `${dayLabel(rerun.day, result.asOf)} 자료가 들어왔습니다` : "저장소 자료가 바뀌었습니다"}
           <span className="flex-1" />
-          <button type="button" className="font-[650] underline underline-offset-2" disabled={running} onClick={onRun}>
+          <button type="button" className="font-[600] underline underline-offset-2" disabled={running} onClick={onRun}>
             새 자료로 다시 실행
           </button>
         </p>
       )}
       {rows.length === 0 ? (
-        <div className="border-t border-line px-6 py-8">
-          <p className="text-m font-[650]">결과 없음</p>
-          <p className="mt-1.5 text-s leading-[1.5] text-text-2">
-            {result.missingSummary > 0
-              ? `확인한 자료에서는 조건을 모두 만족하는 종목이 없습니다. 자료 누락 ${count(result.missingSummary)}종목은 판정할 수 없습니다.`
-              : `대상 ${count(result.universe)}종목 가운데 조건을 모두 만족하는 종목이 없습니다.`}
-            {left > 0 && ` 상장 기간이나 이력이 짧아 ${count(left)}종목이 빠졌습니다.`}
-          </p>
-          <button type="button" className="tb-btn mt-3 h-8 border border-line text-s" onClick={onEdit}>
-            <PenIcon size={14} />
-            조건식 고치기
-          </button>
-        </div>
+        <StatePanel
+          title="결과 없음"
+          action={<button type="button" className="btn btn-sm" onClick={onEdit}><PenIcon size={14} />조건식 고치기</button>}
+        >
+          {result.missingSummary > 0
+            ? `확인한 자료에서는 조건을 모두 만족하는 종목이 없습니다. 자료 누락 ${count(result.missingSummary)}종목은 판정할 수 없습니다.`
+            : `대상 ${count(result.universe)}종목 가운데 조건을 모두 만족하는 종목이 없습니다.`}
+          {left > 0 && ` 상장 기간이나 이력이 짧아 ${count(left)}종목이 빠졌습니다.`}
+        </StatePanel>
       ) : (
         <ResultTable screen={screen} asOf={result.asOf} rows={rows} selected={selected} sort={sort} onSort={useScreenerStore.getState().setSort} onSelect={onSelect} />
       )}
-      <p className="px-3 py-2 text-xs text-text-3">↑↓ 결과 이동 · ↵ 칸에 열기</p>
     </section>
   );
 }
@@ -530,8 +577,11 @@ const PHASE_NOTE: Record<UpdatePhase, string> = {
   backfill: "지금도 실행할 수 있고, 아직 덜 찬 과거는 이력 부족으로 빠집니다.",
 };
 
-const progressText = ({ phase, done, total }: ScreenerUpdate) =>
-  phase === "symbols" ? `${total > 0 ? Math.floor((done * 100) / total) : 0}%` : `${count(done)}/${count(total)}종목`;
+const progressPercent = ({ done, total }: ScreenerUpdate) => (total > 0 ? Math.floor((done * 100) / total) : 0);
+const progressText = (update: ScreenerUpdate) =>
+  update.phase === "symbols" ? `${progressPercent(update)}%` : `${count(update.done)}/${count(update.total)}종목`;
+const progressLabel = (update: ScreenerUpdate) =>
+  update.phase === "symbols" ? progressText(update) : `${progressPercent(update)}% · ${progressText(update)}`;
 
 const todayNote = (status: ScreenerStatus) => (todayConfirmed(status) ? "오늘 자료까지 받습니다." : "당일 봉은 20:00 뒤에 받습니다.");
 
@@ -550,7 +600,7 @@ function useUpdateRetry(error: ApiErrorBody | null): UpdateRetry | null {
 
 function UpdateBand({ status }: { status: ScreenerStatus }) {
   const { start, cancel } = useUpdateCommands();
-  const offline = useBeforeConnect() !== null;
+  const offline = useFeedBeforeConnect() !== null;
   const needsKiwoom = useScreenerRefreshNeedsKiwoom();
   const refreshTitle = needsKiwoom ? SCREENER_REFRESH_TOOLTIP : undefined;
   const waitLabel = (label: string) => (offline ? "연결 뒤" : label);
@@ -563,20 +613,20 @@ function UpdateBand({ status }: { status: ScreenerStatus }) {
   const kind = updateBandKind(status);
 
   if (kind === "running" && update) {
-    const percent = update.total > 0 ? Math.floor((update.done * 100) / update.total) : 0;
+    const percent = progressPercent(update);
     return (
       <section aria-label="업데이트" role="status" className={frame}>
         <div className="flex items-center gap-2">
           <span className="text-accent">
             <SpinnerIcon />
           </span>
-          <span className="min-w-0 truncate text-s font-[650]">
+          <span className="min-w-0 truncate text-s font-[600]">
             {update.full && "전체 다시 받기 · "}
             {PHASE_LABEL[update.phase]}
           </span>
-          <span className="flex-none text-s text-text-2">{progressText(update)}</span>
+          <span className="flex-none text-s tabular-nums text-text-2">{progressLabel(update)}</span>
           <span className="flex-1" />
-          <button type="button" className="tb-btn h-7 flex-none border border-line px-2.5 text-s" onClick={() => void cancel().catch(showCommandError)}>
+          <button type="button" className="btn btn-sm flex-none" onClick={() => void cancel().catch(showCommandError)}>
             취소
           </button>
         </div>
@@ -588,7 +638,7 @@ function UpdateBand({ status }: { status: ScreenerStatus }) {
           aria-valuenow={percent}
           className="mt-2 h-1.5 overflow-hidden rounded-full bg-raised"
         >
-          <span className="block h-full bg-accent" style={{ width: `${percent}%` }} />
+          <span className="block h-full origin-left bg-accent" style={{ transform: `scaleX(${percent / 100})` }} />
         </div>
         <p className="mt-1.5 text-xs leading-[1.45] text-text-2">
           {stored} {PHASE_NOTE[update.phase]} {todayNote(status)}
@@ -602,17 +652,18 @@ function UpdateBand({ status }: { status: ScreenerStatus }) {
       <section aria-label="업데이트" role="alert" className={frame}>
         <div className="flex items-center gap-2">
           <span className="conn-dot" data-tone="red" />
-          <span className="text-s font-[650]">업데이트가 멈췄습니다</span>
+          <span className="text-s font-[600]">업데이트가 멈췄습니다</span>
           <span className="flex-1" />
           {retry.kind !== "operator" && (
             <button
               type="button"
-              className="btn-primary h-7 flex-none px-3 text-s disabled:cursor-not-allowed disabled:opacity-40"
+              className="btn-primary btn-sm flex-none"
               disabled={retry.kind === "waiting" || offline || needsKiwoom}
               title={refreshTitle}
               onClick={() => run(update.full)}
             >
-              {waitLabel("다시 시도")}
+              {waitLabel(RETRY)}
+              {!offline && retry.kind === "waiting" && <span className="font-[400]">· {retry.from}</span>}
             </button>
           )}
         </div>
@@ -621,7 +672,7 @@ function UpdateBand({ status }: { status: ScreenerStatus }) {
         </p>
         <p className="mt-0.5 text-xs leading-[1.45] text-text-2">
           {stored}
-          {retry.kind !== "operator" && ` ${retry.note}`}
+          {retry.kind === "ready" && ` ${retry.note}`}
         </p>
       </section>
     );
@@ -631,10 +682,10 @@ function UpdateBand({ status }: { status: ScreenerStatus }) {
     return (
       <section aria-label="업데이트" className={frame}>
         <div className="flex items-center gap-2">
-          <span className="conn-dot" data-tone="red" />
-          <span className="text-s font-[650]">아직 받은 KRX 일봉이 없습니다</span>
+          <span className="conn-dot" data-tone="amber" />
+          <span className="text-s font-[600]">아직 받은 KRX 일봉이 없습니다</span>
           <span className="flex-1" />
-          <button type="button" className="btn-primary h-7 flex-none px-3 text-s disabled:cursor-not-allowed disabled:opacity-40" disabled={offline || needsKiwoom} title={refreshTitle} aria-label={offline ? "처음 받기 (연결 뒤에 쓸 수 있습니다)" : undefined} onClick={() => run(false)}>
+          <button type="button" className="btn-primary btn-sm flex-none" disabled={offline || needsKiwoom} title={refreshTitle} aria-label={offline ? "처음 받기 (연결 뒤에 쓸 수 있습니다)" : undefined} onClick={() => run(false)}>
             {waitLabel("처음 받기")}
           </button>
         </div>
@@ -649,10 +700,10 @@ function UpdateBand({ status }: { status: ScreenerStatus }) {
     return (
       <section aria-label="업데이트" className={frame}>
         <div className="flex items-center gap-2">
-          <span className="conn-dot" data-tone="red" />
-          <span className="text-s font-[650]">자료가 모자랍니다</span>
+          <span className="conn-dot" data-tone="amber" />
+          <span className="text-s font-[600]">자료가 모자랍니다</span>
           <span className="flex-1" />
-          <button type="button" className="btn-primary h-7 flex-none px-3 text-s disabled:cursor-not-allowed disabled:opacity-40" disabled={offline || needsKiwoom} title={refreshTitle} aria-label={offline ? "업데이트 (연결 뒤에 쓸 수 있습니다)" : undefined} onClick={() => run(false)}>
+          <button type="button" className="btn-primary btn-sm flex-none" disabled={offline || needsKiwoom} title={refreshTitle} aria-label={offline ? "업데이트 (연결 뒤에 쓸 수 있습니다)" : undefined} onClick={() => run(false)}>
             {waitLabel("업데이트")}
           </button>
         </div>
@@ -682,7 +733,7 @@ function StatusFooterLine({ footer, status, onRetry }: { footer: StatusFooter; s
 
 function StoreLine({ status, lastDay }: { status: ScreenerStatus; lastDay: KstDate }) {
   const { start } = useUpdateCommands();
-  const offline = useBeforeConnect() !== null;
+  const offline = useFeedBeforeConnect() !== null;
   const needsKiwoom = useScreenerRefreshNeedsKiwoom();
   const today = status.todayAvailable;
   const history = status.fullHistory.done < status.fullHistory.total ? `과거 이력 ${count(status.fullHistory.done)}/${count(status.fullHistory.total)}종목` : null;
@@ -697,7 +748,7 @@ function StoreLine({ status, lastDay }: { status: ScreenerStatus; lastDay: KstDa
       </span>
       <button
         type="button"
-        className={`tb-btn h-7 flex-none px-2.5 text-s font-[600] disabled:cursor-not-allowed disabled:opacity-40 ${today ? "border border-accent text-accent" : "text-text-2"}`}
+        className={`btn btn-sm flex-none ${today ? "border-accent text-accent" : ""}`}
         disabled={offline || needsKiwoom}
         title={needsKiwoom ? SCREENER_REFRESH_TOOLTIP : undefined}
         aria-label={offline ? "업데이트 (연결 뒤에 쓸 수 있습니다)" : undefined}

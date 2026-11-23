@@ -1,4 +1,4 @@
-import { at, DRAW, readBool, readRecord, readStroke, strokeFields } from "../styleKit";
+import { at, DRAW, labelBox, readBool, readRecord, readStroke, strokeFields } from "../styleKit";
 import { defineTool, type Shape } from "../toolSpec";
 import type { Stroke } from "../types";
 import { type Band, fanRay, fanSide, fanWedge, pointHandles, readBand } from "./fibKit";
@@ -91,6 +91,7 @@ export const gannfan = defineTool<GannFanStyle>({
           align: side === "right" ? "left" : "right",
           baseline: "middle",
           style: { color: style.line.color, size: 12, bold: false, italic: false },
+          box: labelBox(style.line.color),
         }))
       : [];
     return [...wedges, ...rays, ...labels];

@@ -5,6 +5,7 @@ import { loadValidator } from "../../chart/indicators/validate";
 import { BAR_OPACITY_MAX, BAR_OPACITY_MIN, type LineWidth } from "../../chart/settings";
 import { Errors, Row, Segment } from "../dialog/DialogParts";
 import { ColorTable, type ThemeSwatch } from "../color/ColorTable";
+import { useColorMore } from "../color/colorMore";
 import { canOverlayPrice, hasBarOpacity, hasColor, placeErrors, type Draft, type FieldError, type Validate } from "./indicatorForm";
 
 const METHODS = [
@@ -46,14 +47,16 @@ export function useValidator(): Validate | "loading" | "failed" {
   return validate;
 }
 
-export function IndicatorSettingsForm({ draft, color, errors, onChange, lineSample = true }: {
+export function IndicatorSettingsForm({ draft, color, errors, onChange, lineSample = true, foldColors = false }: {
   draft: Draft;
   color: IndicatorColor;
   errors: readonly FieldError[];
   onChange(draft: Draft): void;
   lineSample?: boolean;
+  foldColors?: boolean;
 }) {
   const ids = useId();
+  const more = useColorMore();
   const kind = draft.form.kind;
   const placed = placeErrors(kind, errors);
   const setText = (key: string, value: string) => onChange({ ...draft, form: { ...draft.form, text: { ...draft.form.text, [key]: value } } });
@@ -86,10 +89,10 @@ export function IndicatorSettingsForm({ draft, color, errors, onChange, lineSamp
             <Row key={f.key} label={f.label} labelFor={inputId}>
               <span className="flex flex-wrap items-center gap-x-3 gap-y-1">
                 {f.type === "optionalInt" && (
-                  <label className="flex items-center gap-1.5 text-s">
-                    <input type="checkbox" checked={on} onChange={(e) => setEnabled(f.key, e.target.checked)} />
-                    {f.toggle}
-                  </label>
+                  <button type="button" role="switch" aria-checked={on} className="ui-switch min-h-[var(--size-30)] text-s" onClick={() => setEnabled(f.key, !on)}>
+                    <span className="flex-1 text-left">{f.toggle}</span>
+                    <span aria-hidden="true" className="ui-switch-track"><span /></span>
+                  </button>
                 )}
                 {kind === "ma" && f.key === "period" && <span role="group" aria-label="자주 쓰는 기간" className="flex items-center gap-1">
                   {PERIOD_PRESETS.map((preset) => <button key={preset} type="button" aria-pressed={text === preset} className="h-6 rounded-m bg-[var(--hover)] px-2 text-xs text-text-2 aria-pressed:bg-accent-soft aria-pressed:text-accent" onClick={() => setText(f.key, preset)}>{preset}</button>)}
@@ -137,7 +140,7 @@ export function IndicatorSettingsForm({ draft, color, errors, onChange, lineSamp
             </button>)}
           </div>
         </Row>
-        <ColorTable label="선 색상" value={color} theme={THEME_SWATCHES} width={draft.width} onChange={(next) => onChange({ ...draft, color: next })} />
+        <ColorTable label="선 색" value={color} theme={THEME_SWATCHES} width={draft.width} more={foldColors ? more : undefined} onChange={(next) => onChange({ ...draft, color: next })} />
       </section>}
     </div>
   </div>;

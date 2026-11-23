@@ -28,6 +28,13 @@ export const STEP_NAMES: Record<KiwoomConnectStep, string> = {
 
 export const isWaitingStep = (link: KiwoomLinkStatus): boolean => link.state === "connecting" && link.step === "issueInterval";
 
+export function countsDownSeconds(link: KiwoomLinkStatus | null): boolean {
+  if (!link) return false;
+  if (isWaitingStep(link)) return true;
+  const action = linkAction(link);
+  return action?.kind === "retry" && action.retryAt !== null;
+}
+
 export function linkAction(link: KiwoomLinkStatus): LinkAction | null {
   if (link.state === "disconnected") return { kind: "connect", retryAt: null };
   if (link.state === "failed" && link.problem === "network" && !link.needsAcknowledgement) return { kind: "retry", retryAt: link.retryAt };

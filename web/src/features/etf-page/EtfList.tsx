@@ -1,72 +1,106 @@
+import { Field } from "../ui/Field";
+import { Badge } from "../ui/Badge";
+import { Segmented, type SegmentedOption } from "../ui/Segmented";
+import { Select } from "../menu/Select";
+import { EmptyState, Skeleton } from "../overlay/State";
+import { BASKET_LIMIT, type FundFilter, type FundSort, SORT_CHOICES, filterFunds, formatPercent, issuersOf, sortFunds } from "./etfModel";
 import type { EtfFundSummary } from "../../api/generated/EtfFundSummary";
-import { BASKET_LIMIT, type FundFilter, type StyleFilter, filterFunds, formatPercent, issuersOf } from "./etfModel";
 
-const STYLE_CHOICES: readonly { id: StyleFilter; label: string }[] = [
-  { id: "all", label: "전체" },
-  { id: "active", label: "액티브" },
-  { id: "passive", label: "패시브" },
+const STYLE_CHOICES: readonly SegmentedOption<FundFilter["style"]>[] = [
+  { value: "all", label: "전체" },
+  { value: "active", label: "액티브" },
+  { value: "passive", label: "패시브" },
 ];
 
+const ALL_ISSUERS = "";
+
 interface EtfListProps {
-  funds: readonly EtfFundSummary[];
+  funds: readonly EtfFundSummary[] | null;
   selected: string | null;
   filter: FundFilter;
+  sort: FundSort;
   onFilter: (filter: FundFilter) => void;
+  onSort: (sort: FundSort) => void;
   onSelect: (code: string) => void;
   basket: readonly string[];
   basketNotice: string | null;
   onToggleBasket: (code: string) => void;
+  onShowOverlap: () => void;
 }
 
-export function EtfList({ funds, selected, filter, onFilter, onSelect, basket, basketNotice, onToggleBasket }: EtfListProps) {
-  const shown = filterFunds(funds, filter);
+function BasketChips({ funds, basket, onToggleBasket, onShowOverlap }: Pick<EtfListProps, "basket" | "onToggleBasket" | "onShowOverlap"> & { funds: readonly EtfFundSummary[] }) {
+  const nameOf = (code: string) => funds.find((fund) => fund.code === code)?.name ?? code;
+  return (
+    <div className="etf-basket">
+      <div className="etf-basket-count" role="status">비교 바구니 {basket.length}/{BASKET_LIMIT}</div>
+      {basket.length > 0 && (
+        <ul className="etf-basket-chips" aria-label="비교 바구니">
+          {basket.map((code) => (
+            <li key={code} className="etf-basket-chip">
+              <span>{nameOf(code)}</span>
+              <button type="button" aria-label={`${nameOf(code)} 비교에서 빼기`} onClick={() => onToggleBasket(code)}>×</button>
+            </li>
+          ))}
+        </ul>
+      )}
+      <button type="button" className="btn etf-overlap-link" disabled={basket.length < 2} onClick={onShowOverlap}>겹침 보기</button>
+    </div>
+  );
+}
+
+export function EtfList({ funds, selected, filter, sort, onFilter, onSort, onSelect, basket, basketNotice, onToggleBasket, onShowOverlap }: EtfListProps) {
+  const shown = funds === null ? [] : sortFunds(filterFunds(funds, filter), sort);
+  const issuerChoices = [{ value: ALL_ISSUERS, label: "운용사 전체" }, ...(funds === null ? [] : issuersOf(funds)).map((issuer) => ({ value: issuer, label: issuer }))];
   return (
     <aside className="etf-rail" aria-label="ETF 목록">
       <div className="etf-rail-top">
-        <input
+        <Field
           type="search"
-          className="etf-search"
+          label="검색"
           aria-label="ETF 이름·코드 검색"
+          className="etf-search"
           placeholder="이름·코드 검색"
           value={filter.query}
           onChange={(event) => onFilter({ ...filter, query: event.target.value })}
         />
-        <div className="etf-seg" role="group" aria-label="운용 방식">
-          {STYLE_CHOICES.map((choice) => (
-            <button key={choice.id} type="button" aria-pressed={filter.style === choice.id} onClick={() => onFilter({ ...filter, style: choice.id })}>
-              {choice.label}
-            </button>
-          ))}
+        <Segmented label="운용 방식" mode="pressed" size="sm" className="etf-seg" options={STYLE_CHOICES} value={filter.style} onChange={(style) => onFilter({ ...filter, style })} />
+        <div className="etf-selects">
+          <Select label="운용사" className="etf-select" value={filter.issuer ?? ALL_ISSUERS} options={issuerChoices} onChange={(value) => onFilter({ ...filter, issuer: value === ALL_ISSUERS ? null : value })} />
+          <Select label="정렬" className="etf-select" value={sort} options={SORT_CHOICES} onChange={onSort} />
         </div>
-        <select className="etf-issuer" aria-label="운용사" value={filter.issuer ?? ""} onChange={(event) => onFilter({ ...filter, issuer: event.target.value === "" ? null : event.target.value })}>
-          <option value="">운용사 전체</option>
-          {issuersOf(funds).map((issuer) => <option key={issuer} value={issuer}>{issuer}</option>)}
-        </select>
       </div>
-      <div className="etf-basket" role="status">
-        비교 바구니 {basket.length}/{BASKET_LIMIT}
-      </div>
+      {funds !== null && <BasketChips funds={funds} basket={basket} onToggleBasket={onToggleBasket} onShowOverlap={onShowOverlap} />}
       {basketNotice !== null && <div className="etf-basket-notice" role="alert">{basketNotice}</div>}
-      <ul className="etf-list" aria-label="ETF">
-        {shown.map((fund) => (
-          <li key={fund.code} className="etf-item">
-            <button type="button" className="etf-fund" data-code={fund.code} aria-pressed={fund.code === selected} onClick={() => onSelect(fund.code)}>
-              <span className="etf-fund-name">{fund.name}</span>
-              <span className="etf-fund-code">{fund.code}</span>
-              <span className="etf-fund-meta">
-                <span className="etf-badge" data-style={fund.style}>{fund.style === "active" ? "액티브" : "패시브"}</span>
-                <span className="etf-fund-issuer">{fund.issuer}</span>
-                <span className="etf-conc" role="img" aria-label={`상위 5 비중 ${formatPercent(fund.top5WeightBps)}`} title={`상위 5 비중 ${formatPercent(fund.top5WeightBps)}`}>
-                  <i style={{ width: `${Math.min(100, fund.top5WeightBps / 100)}%` }} />
-                </span>
-              </span>
-            </button>
-            <input type="checkbox" className="etf-basket-box" aria-label={`${fund.name} 비교 바구니에 담기`} data-basket-code={fund.code} checked={basket.includes(fund.code)} onChange={() => onToggleBasket(fund.code)} />
-          </li>
-        ))}
-        {shown.length === 0 && <li className="etf-empty">조건에 맞는 ETF가 없습니다</li>}
-      </ul>
-      <div className="etf-rail-foot" role="status">{shown.length}개 / 전체 {funds.length}개</div>
+      {funds === null ? (
+        <div className="etf-list-loading"><Skeleton label="ETF 목록을 불러오는 중입니다" rows={8} /></div>
+      ) : (
+        <ul className="etf-list" aria-label="ETF">
+          {shown.map((fund) => {
+            const picked = basket.includes(fund.code);
+            return (
+              <li key={fund.code} className="etf-item">
+                <button type="button" className="etf-fund" data-code={fund.code} aria-pressed={fund.code === selected} onClick={() => onSelect(fund.code)}>
+                  <span className="etf-fund-name">{fund.name}</span>
+                  <span className="etf-fund-code">{fund.code}</span>
+                  <span className="etf-fund-meta">
+                    <Badge tone={fund.style === "active" ? "accent" : "neutral"}>{fund.style === "active" ? "액티브" : "패시브"}</Badge>
+                    <span className="etf-fund-issuer">{fund.issuer}</span>
+                    <span className="etf-conc" role="img" aria-label={`상위 5 비중 ${formatPercent(fund.top5WeightBps)}`} title={`상위 5 비중 ${formatPercent(fund.top5WeightBps)}`}>
+                      <i style={{ width: `${Math.min(100, fund.top5WeightBps / 100)}%` }} />
+                    </span>
+                    <span className="etf-conc-value">{formatPercent(fund.top5WeightBps)}</span>
+                  </span>
+                </button>
+                <button type="button" className="etf-compare" aria-pressed={picked} aria-label={`${fund.name} 비교`} data-basket-code={fund.code} onClick={() => onToggleBasket(fund.code)}>
+                  비교
+                </button>
+              </li>
+            );
+          })}
+          {shown.length === 0 && <li><EmptyState title="조건에 맞는 ETF가 없습니다" /></li>}
+        </ul>
+      )}
+      <div className="etf-rail-foot" role="status">{funds === null ? "" : `${shown.length}개 / 전체 ${funds.length}개`}</div>
     </aside>
   );
 }

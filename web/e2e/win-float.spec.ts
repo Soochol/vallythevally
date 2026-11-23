@@ -42,8 +42,8 @@ async function shiftMove(page: Page, id: string, dx: number, dy: number, release
   if (release) { await page.mouse.up(); await page.keyboard.up("Shift"); }
 }
 async function undo(page: Page) {
-  await page.getByRole("button", { name: /^레이아웃:/ }).click();
-  await page.getByRole("menuitem", { name: "배치 되돌리기", exact: true }).click();
+  await page.getByRole("button", { name: "배치", exact: true }).click();
+  await page.getByRole("menuitem", { name: /^배치 되돌리기/ }).click();
 }
 function twoCharts(scenario: Scenario) {
   const layout = scenario.documents.layout(DEFAULT_LAYOUT_ID);
@@ -226,12 +226,12 @@ test("띄우기 되돌리기와 기본 배치로는 모두 붙이고 첫 캔버�
   await expect(frame(page)).toHaveCount(0);
   await expect(tab(page, "스크리너")).toBeVisible();
   await detach(page);
-  await page.getByRole("button", { name: /^레이아웃:/ }).click();
+  await page.getByRole("button", { name: "배치", exact: true }).click();
   await page.getByRole("menuitem", { name: "기본 배치로", exact: true }).click();
   await expect(page.locator("[data-dock-float]")).toHaveCount(0);
   await detach(page);
   const before = await boxOf(frame(page));
-  await page.getByRole("button", { name: /^레이아웃:/ }).click();
+  await page.getByRole("button", { name: "배치", exact: true }).click();
   await page.getByRole("group", { name: "창 배치 방식" }).getByRole("button", { name: "캔버스", exact: true }).click();
   await page.keyboard.press("Escape");
   const canvas = page.locator('[data-canvas-window="screener"]');
@@ -408,7 +408,7 @@ test("화면에서 최소 크기로 커진 떠 있는 창은 캔버스로 전환
   await page.goto("/");
   await expect(cell(page)).toHaveAttribute("aria-busy", "false");
   const before = await boxOf(frame(page));
-  await page.getByRole("button", { name: /^레이아웃:/ }).click();
+  await page.getByRole("button", { name: "배치", exact: true }).click();
   await page.getByRole("group", { name: "창 배치 방식" }).getByRole("button", { name: "캔버스", exact: true }).click();
   await page.keyboard.press("Escape");
   await expect(page.locator('[data-canvas-window="screener"]')).toBeVisible();

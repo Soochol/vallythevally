@@ -1,5 +1,6 @@
-import { type RefObject, useCallback, useEffect, useRef, useState } from "react";
+import { type RefObject, useCallback, useEffect, useMemo, useRef } from "react";
 import type { OrderSide } from "../../api/generated/OrderSide";
+import { createValueStore, type ValueStore } from "../../lib/valueStore";
 import { type DragOutcome, type DragSource, type DragTarget, judgeDrag } from "./orderRules";
 
 export interface DragView {
@@ -16,7 +17,7 @@ export interface DragStart {
 }
 
 export interface OrderDrag {
-  readonly view: DragView | null;
+  readonly views: ValueStore<DragView | null>;
   begin(start: DragStart, event: React.PointerEvent): void;
   abort(): void;
 }
@@ -40,7 +41,7 @@ function swallowNextClick(): void {
 }
 
 export function useOrderDrag(ladder: RefObject<HTMLElement | null>, onDrop: (source: DragSource, outcome: DragOutcome) => void): OrderDrag {
-  const [view, setView] = useState<DragView | null>(null);
+  const views = useMemo(() => createValueStore<DragView | null>(null), []);
   const stop = useRef<(() => void) | null>(null);
   const aborting = useRef<(() => void) | null>(null);
   const drop = useRef(onDrop);
@@ -60,7 +61,7 @@ export function useOrderDrag(ladder: RefObject<HTMLElement | null>, onDrop: (sou
       finished = true;
       stop.current?.();
       stop.current = null;
-      setView(null);
+      views.set(null);
       if (!moved) return;
       if (escaped) window.addEventListener("pointerup", swallowNextClick, { once: true });
       else swallowNextClick();
@@ -71,7 +72,7 @@ export function useOrderDrag(ladder: RefObject<HTMLElement | null>, onDrop: (sou
       if (!moved) onMoved?.();
       moved = true;
       target = targetAt(area, origin, e.clientX, e.clientY);
-      setView({ source, x: e.clientX, y: e.clientY, target });
+      views.set({ source, x: e.clientX, y: e.clientY, target });
     };
     const onUp = () => finish(false);
     const onKey = (e: KeyboardEvent) => {
@@ -89,9 +90,9 @@ export function useOrderDrag(ladder: RefObject<HTMLElement | null>, onDrop: (sou
       window.removeEventListener("keydown", onKey, true);
     };
     aborting.current = () => finish(true);
-  }, [ladder]);
+  }, [ladder, views]);
 
   const abort = useCallback(() => aborting.current?.(), []);
 
-  return { view, begin, abort };
+  return useMemo(() => ({ views, begin, abort }), [views, begin, abort]);
 }

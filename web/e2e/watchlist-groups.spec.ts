@@ -469,15 +469,17 @@ test("그룹이 가득 차면 새 그룹 칸 위에서 앞서 가리키던 놓�
   await page.mouse.down();
   const over = (await ungroupedRow(page, "000660").boundingBox())!;
   await page.mouse.move(over.x + 20, over.y + over.height / 2, { steps: 8 });
+  await page.mouse.move(over.x + 22, over.y + over.height / 2);
   await expect.poll(fill).not.toBe(idle);
   const target = (await slot(page).boundingBox())!;
   await page.mouse.move(target.x + 20, target.y + target.height / 2, { steps: 8 });
+  await page.mouse.move(target.x + 22, target.y + target.height / 2);
   await expect.poll(fill).toBe(idle);
   await page.mouse.up();
   await expect(ungroupedRow(page, "000660")).toBeVisible();
 });
 
-test("그룹 머리 이름은 바탕 없이 11px --text-2로 보이고 종목 이름은 더 밝은 --text-name이다", async ({ scenario, page }) => {
+test("그룹 머리 이름은 바탕 없이 12px --text-2로 보이고 종목 이름은 더 밝은 --text-name이다", async ({ scenario, page }) => {
   await seed(scenario, [{ id: "A", name: "첫째", symbols: ["005935", "086520"] }]);
   await open(page);
   const colors = await page.evaluate(() => {
@@ -489,7 +491,7 @@ test("그룹 머리 이름은 바탕 없이 11px --text-2로 보이고 종목 �
   const head = headBox(page, "첫째");
   const label = groupHead(page, "첫째").locator("span.truncate");
   await expect(label).toHaveCSS("color", colors.text2);
-  await expect(label).toHaveCSS("font-size", "11px");
+  await expect(label).toHaveCSS("font-size", "12px");
   await expect(head).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
   const name = row(page, "086520").locator("b");
   await expect(name).toHaveCSS("color", colors.name);

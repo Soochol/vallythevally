@@ -1,38 +1,54 @@
-import { useEffect, useReducer, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import type { SymbolCode } from "../../api/generated/SymbolCode";
 import type { TradeTape } from "../../api/generated/TradeTape";
 import type { Venue } from "../../api/generated/Venue";
 import { getJson } from "../../api/http";
 import type { MarketSocketLike } from "../../api/socket";
-import { emptyTape, MAX_TAPE_ROWS, tapeReducer } from "./tape";
+import { useFrameFold } from "../../lib/useFrameFold";
+import { emptyTape, MAX_TAPE_ROWS, type TapeAction, type TapeState, tapeReducer } from "./tape";
 
 export type HistoryStatus = "loading" | "ready" | "failed";
 
 export const tradeHistoryPath = (code: SymbolCode, venue: Venue, pages?: number): string =>
   `/api/symbols/${encodeURIComponent(code)}/trades?venue=${venue}&limit=${MAX_TAPE_ROWS}${pages === undefined ? "" : `&pages=${pages}`}`;
 
+interface Held {
+  readonly code: SymbolCode;
+  readonly venue: Venue;
+  readonly tape: TapeState;
+}
+
 export function useTradeTape(socket: Pick<MarketSocketLike, "subscribeFeed">, code: SymbolCode, venue: Venue, historyPages?: number) {
-  const [state, dispatch] = useReducer(tapeReducer, emptyTape);
+  const [held, fold] = useFrameFold<Held>(() => ({ code, venue, tape: emptyTape }));
+  const state = held.code === code && held.venue === venue ? held.tape : emptyTape;
+  const dispatch = useCallback((action: TapeAction) => fold((previous) => ({ code, venue, tape: tapeReducer(previous.code === code && previous.venue === venue ? previous.tape : emptyTape, action) })), [fold, code, venue]);
   const [history, setHistory] = useState<HistoryStatus>("loading");
   const [feedError, setFeedError] = useState<string | null>(null);
+  const [attempt, setAttempt] = useState(0);
+  const retry = useCallback(() => {
+    setHistory("loading");
+    setAttempt((count) => count + 1);
+  }, []);
   const [source, setSource] = useState({ code, venue });
   if (source.code !== code || source.venue !== venue) {
     setSource({ code, venue });
-    dispatch({ type: "reset" });
     setHistory("loading");
     setFeedError(null);
   }
 
   useEffect(() => {
-    const controller = new AbortController();
     const nowSeconds = () => Date.now() / 1000;
-    const unsubscribe = socket.subscribeFeed({ symbol: code, kind: "trades", venue }, (event) => {
+    return socket.subscribeFeed({ symbol: code, kind: "trades", venue }, (event) => {
       if (event.type === "feed_trades") dispatch({ type: "live", trades: event.trades, receivedAt: Date.now() });
       else if (event.type === "feed_link") dispatch({ type: "link", live: event.live, at: event.at });
       else if (event.type === "resync") dispatch({ type: "resync", at: nowSeconds() });
       else if (event.type === "feed_subscribed") setFeedError(null);
       else if (event.type === "sub_error") setFeedError(event.code);
     });
+  }, [socket, code, venue, dispatch]);
+
+  useEffect(() => {
+    const controller = new AbortController();
     const settle = (tape: TradeTape) => {
       dispatch({ type: "history", tape });
       setHistory("ready");
@@ -61,11 +77,8 @@ export function useTradeTape(socket: Pick<MarketSocketLike, "subscribeFeed">, co
         },
       );
     }
-    return () => {
-      controller.abort();
-      unsubscribe();
-    };
-  }, [socket, code, venue, historyPages]);
+    return () => controller.abort();
+  }, [code, venue, historyPages, dispatch, attempt]);
 
-  return { state, dispatch, history, feedError };
+  return { state, dispatch, history, feedError, retry };
 }

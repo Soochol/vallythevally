@@ -71,7 +71,7 @@ test("모의: 주문 경로 SOR·NXT는 꺼진 채로이고 시세는 위 막대
   venueScene(scenario, { nxt: 65_000 });
   await expect(win(page)).toHaveAttribute("data-quote-venue", "combined");
   await pickDesktopVenue(page, "NXT");
-  await pollSaved(() => feedSubscriptions(scenario, "trades", "nxt").length).toBe(2);
+  await pollSaved(() => feedSubscriptions(scenario, "trades", "nxt").length).toBe(1);
   await expect(win(page)).toHaveAttribute("data-quote-venue", "nxt");
   await expect(win(page)).toHaveAttribute("data-venue", "krx");
   expect(feedSubscriptions(scenario, "trades", "krx")).toHaveLength(0);

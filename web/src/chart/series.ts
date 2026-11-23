@@ -11,6 +11,7 @@ import type { Bar } from "../api/generated/Bar";
 import { axisPriceFormat, type AxisGeometry } from "./axisFormat";
 import type { ChartStyle } from "./settings";
 import type { ThemeTokens } from "./theme";
+import { type LastPriceHost, LastPriceTag } from "./lastPriceTag";
 import { toChartTime } from "./time";
 
 /** 봉 모양마다 시리즈 종류가 다르다. 모양을 바꾸면 지우고 새로 만든다(frontend.md §5.7). */
@@ -37,18 +38,22 @@ function colors(style: ChartStyle, t: ThemeTokens) {
   }
 }
 
-export function addMainSeries(chart: IChartApi, style: ChartStyle, t: ThemeTokens, isIndex: boolean, geometry?: AxisGeometry): MainSeries {
-  const common = { priceFormat: priceFormat(isIndex, geometry) };
-  switch (style) {
-    case "candle":
-      return { style, api: chart.addSeries(CandlestickSeries, { ...common, ...colors(style, t) }) };
-    case "bar":
-      return { style, api: chart.addSeries(BarSeries, { ...common, ...colors(style, t), thinBars: false }) };
-    case "line":
-      return { style, api: chart.addSeries(LineSeries, { ...common, ...colors(style, t), lineWidth: 2 }) };
-    case "area":
-      return { style, api: chart.addSeries(AreaSeries, { ...common, ...colors(style, t), lineWidth: 2 }) };
-  }
+export function addMainSeries(chart: IChartApi, style: ChartStyle, t: ThemeTokens, isIndex: boolean, lastPrice: LastPriceHost, geometry?: AxisGeometry): MainSeries {
+  const common = { priceFormat: priceFormat(isIndex, geometry), lastValueVisible: false, priceLineVisible: false };
+  const main = ((): MainSeries => {
+    switch (style) {
+      case "candle":
+        return { style, api: chart.addSeries(CandlestickSeries, { ...common, ...colors(style, t) }) };
+      case "bar":
+        return { style, api: chart.addSeries(BarSeries, { ...common, ...colors(style, t), thinBars: false }) };
+      case "line":
+        return { style, api: chart.addSeries(LineSeries, { ...common, ...colors(style, t), lineWidth: 2 }) };
+      case "area":
+        return { style, api: chart.addSeries(AreaSeries, { ...common, ...colors(style, t), lineWidth: 2 }) };
+    }
+  })();
+  main.api.attachPrimitive(new LastPriceTag(lastPrice));
+  return main;
 }
 
 export function applyMainColors(main: MainSeries, t: ThemeTokens): void {

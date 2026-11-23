@@ -42,3 +42,23 @@ test("자리는 스냅샷으로만 정해져 실시간 등락률이 바뀌어도
   expect(nextMinute.rows.map((r) => r.code)).toEqual(["A", "B", "C"]);
   expect(before.rows.map((r) => r.code)).toEqual(["B", "A", "C"]);
 });
+
+test("등락률순은 상승·보합·하락 묶음으로 나눠 묶음마다 모여 있다", () => {
+  const data = rows([quote("A", 1, 30), quote("B", 5, 10), quote("C", -2, 20)]);
+  const placed = arrange(data, "traded", "rate", 160, 90);
+  const rect = (c: string) => placed.rects.get(code(c))!;
+  const upBox = { x0: Math.min(rect("A").x, rect("B").x), x1: Math.max(rect("A").x + rect("A").w, rect("B").x + rect("B").w), y0: Math.min(rect("A").y, rect("B").y), y1: Math.max(rect("A").y + rect("A").h, rect("B").y + rect("B").h) };
+  const down = rect("C");
+  const apart = down.x >= upBox.x1 - 1e-9 || down.x + down.w <= upBox.x0 + 1e-9 || down.y >= upBox.y1 - 1e-9 || down.y + down.h <= upBox.y0 + 1e-9;
+  expect(apart).toBe(true);
+  expect([...placed.rects.values()].reduce((sum, r) => sum + r.w * r.h, 0)).toBeCloseTo(160 * 90, 6);
+});
+
+test("등락률순 묶음 배치는 길쭉한 칸을 줄인다", () => {
+  const members = Array.from({ length: 24 }, (_, i) => quote(`S${i}`, ((i * 7) % 15) - 7, 1000 / (i + 1)));
+  const data = boardRows({ id: "T", name: "테마", summary: null, members, missing: [] }, new Map());
+  const placed = arrange(data, "traded", "rate", 160, 90);
+  const stretched = [...placed.rects.values()].filter((r) => Math.max(r.w / r.h, r.h / r.w) > 4);
+  expect(placed.rects.size).toBe(24);
+  expect(stretched.length).toBeLessThanOrEqual(2);
+});

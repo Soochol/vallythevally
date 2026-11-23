@@ -3,14 +3,14 @@ import type { Period } from "../api/generated/Period";
 import type { UnixSeconds } from "../api/generated/UnixSeconds";
 import { type Direction, direction, formatChange, formatPercent, formatPrice, formatVolume } from "../lib/format";
 import type { PaneBounds } from "./indicators/legendRows";
-import { reserveLegendFields, type LegendField, type LegendProjection } from "./legendProjection";
+import { legendTier, reserveLegendFields, type LegendField, type LegendProjection, type LegendTier } from "./legendProjection";
 import type { ChartSettings } from "./settings";
 import { formatBarTime, formatKstClock } from "./time";
 
 const ROW_SURFACE = "pr-1 rounded-s bg-[color-mix(in_srgb,var(--chart-bg)_78%,transparent)]";
 const ROW = `w-max ${ROW_SURFACE}`;
 const OHLC_LINE = `relative z-[6] flex items-center ${ROW_SURFACE} max-md:w-auto`;
-const OHLC = "flex flex-wrap gap-x-2 whitespace-nowrap text-s max-md:gap-x-1.5";
+const OHLC = "flex flex-wrap gap-x-3 whitespace-nowrap text-s max-md:gap-x-1.5";
 const VENUE_AND_OHLC = "flex min-w-0 items-baseline gap-x-2 gap-y-1 [&>:empty]:hidden";
 const OHLC_ALONE = { line: `w-max ${OHLC_LINE}`, group: VENUE_AND_OHLC, values: OHLC };
 const OHLC_ALONE_WITH_CHANGE = { ...OHLC_ALONE, line: `w-fit max-w-full ${OHLC_LINE}` };
@@ -20,6 +20,9 @@ const OHLC_WITH_VENUE_AND_NOTICE = {
   values: `grow basis-0 ${OHLC}`,
 };
 const DIR_CLASS = { up: "text-up", down: "text-down", flat: "text-text-2" } as const;
+const STATUS_PILL = "self-center rounded-[9px] border px-1.5 text-xs";
+const NEUTRAL_PILL = `${STATUS_PILL} border-line text-text-2`;
+const WARNING_PILL = `${STATUS_PILL} border-warning text-warning`;
 
 export interface LegendBar {
   bar: Bar;
@@ -84,8 +87,8 @@ function priceFields() {
     close: el("span", "text-xl font-semibold tracking-[-0.02em]"),
     change: el("span", "text-s whitespace-pre"),
     time: el("span", "text-xs text-text-2"),
-    fetched: el("span", "self-center rounded-[9px] border border-line px-1.5 text-xs text-text-3", "조회 값"),
-    stalled: el("span", "self-center rounded-[9px] border border-accent px-1.5 text-xs text-accent"),
+    fetched: el("span", NEUTRAL_PILL, "조회 값"),
+    stalled: el("span", WARNING_PILL),
   };
   row.append(fields.close, fields.change, fields.time, fields.fetched, fields.stalled);
   return { row, fields };
@@ -97,7 +100,7 @@ function ohlcClasses({ showLegend, showOhlcChange }: LegendDisplay) {
 
 function ohlcCell([label, value, change]: LegendParts["cells"][number], withChange: boolean) {
   const root = el("span", "");
-  const name = el("i", "mr-[3px] not-italic text-text-3", label);
+  const name = el("i", "mr-[3px] not-italic text-text-2", label);
   root.append(name, value);
   if (change && withChange) root.append(" ", el("span", DIR_CLASS[change.dir], `(${change.text})`));
   return { root, name };
@@ -115,9 +118,12 @@ function emptyAlternatives(): LayoutAlternatives {
 }
 
 type LegendViewport = { readonly pricePane: PaneBounds | null; readonly axisWidth: number };
+export type LegendBox = { readonly left: number; readonly top: number; readonly right: number; readonly bottom: number };
 type LegendHost = {
   readonly projectRows: () => readonly LegendProjection[];
   readonly readViewport: () => LegendViewport;
+  readonly applyTier: (tier: LegendTier) => void;
+  readonly reserveTop: (legendBottom: number, paneHeight: number) => void;
 };
 type GeometryBox = Pick<DOMRectReadOnly, "x" | "y" | "width" | "height">;
 type LegendGeometryInputs = {
@@ -149,14 +155,15 @@ function sameGeometryInputs(first: LegendGeometryInputs, second: LegendGeometryI
  */
 export class Legend {
   readonly root = el("div", "chart-legend pointer-events-none absolute left-5 top-4 flex max-w-[calc(100%-90px)] flex-col gap-2");
+  readonly statusAnchor = el("span", "inline-flex flex-none");
   readonly body = el("div", "relative z-[4] flex min-w-0 flex-col gap-2");
-  private readonly name = el("span", "pointer-events-none min-w-0 truncate text-l font-[650]");
+  private readonly name = el("span", "pointer-events-none min-w-0 truncate text-l font-semibold");
   private readonly sub = el("span", "flex-none text-s text-text-3");
   readonly venueAnchor = el("span", "inline-flex flex-none max-md:hidden");
   private readonly period = el("span", "flex-none text-s text-text-3");
   private readonly price = priceFields();
-  private readonly notice = el("span", "break-keep text-xs text-accent max-md:hidden");
-  private readonly head = el("div", "relative z-[6] flex min-w-0 max-w-full items-center gap-1.5 overflow-hidden whitespace-nowrap rounded-s bg-[color-mix(in_srgb,var(--chart-bg)_78%,transparent)] pr-1 max-md:hidden");
+  private readonly notice = el("span", `${WARNING_PILL} break-keep max-md:hidden`);
+  private readonly head = el("div", "relative z-[6] flex min-w-0 max-w-full items-center gap-1.5 overflow-hidden whitespace-nowrap rounded-s bg-[color-mix(in_srgb,var(--chart-bg)_78%,transparent)] pr-1");
   private readonly ohlcLine = el("div", OHLC_ALONE.line);
   private readonly venueAndOhlc = el("div", OHLC_ALONE.group);
   private readonly ohlc = el("div", OHLC_ALONE.values);
@@ -169,18 +176,26 @@ export class Legend {
   private readonly presentationMutations: MutationObserver;
   private presentation: PresentationState = { kind: "invalidated" };
   private presentationFrame: number | null = null;
+  private tier: LegendTier = "full";
+  private avoidBox: LegendBox | null = null;
+  private pointed = false;
   private disposed = false;
   private readonly fontsChanged = () => this.fit("content");
 
   constructor(private readonly parent: HTMLElement, private readonly presentationHost: LegendHost) {
     this.host = parent.closest<HTMLElement>("[data-chart-overlay-host]") ?? parent;
-    this.head.append(this.name, this.sub, this.venueAnchor, this.period, this.notice);
+    this.head.dataset.legendHead = "";
+    this.sub.dataset.legendSub = "";
+    this.period.dataset.legendPeriod = "";
+    this.statusAnchor.dataset.statusAnchor = "";
+    this.ohlcLine.dataset.ohlcLine = "";
+    this.head.append(this.name, this.sub, this.venueAnchor, this.period, this.notice, this.statusAnchor);
     this.name.setAttribute("role", "heading");
     this.name.setAttribute("aria-level", "2");
     this.notice.hidden = true;
     this.price.row.dataset.priceRow = "";
     this.ohlc.dataset.ohlc = "";
-    this.price.fields.fetched.title = "키움에서 조회한 값입니다. 체결마다 바뀌지 않습니다.";
+    this.price.fields.fetched.title = "실시간이 아니라 조회로 받은 값";
     this.price.fields.stalled.title = "실시간 시세가 멈췄습니다. 마지막으로 받은 값입니다.";
     this.venueAndOhlc.append(this.ohlc);
     this.ohlcLine.append(this.venueAndOhlc);
@@ -191,6 +206,7 @@ export class Legend {
     this.presentationResize.observe(parent);
     this.presentationMutations = new MutationObserver(() => this.fit("content"));
     this.presentationMutations.observe(this.venueAnchor, { subtree: true, childList: true, characterData: true, attributes: true });
+    this.presentationMutations.observe(this.statusAnchor, { subtree: true, childList: true, characterData: true, attributes: true });
     document.fonts.addEventListener("loadingdone", this.fontsChanged);
     void document.fonts.ready.then(this.fontsChanged);
   }
@@ -218,20 +234,40 @@ export class Legend {
     this.display = { showLegend: display.showLegend, showOhlcChange: display.showOhlcChange };
     this.fit("content");
     if (!moved) return;
+    this.root.toggleAttribute("data-bare", !display.showLegend);
     this.head.hidden = !display.showLegend;
     this.body.hidden = !display.showLegend;
     if (display.showLegend) {
       this.period.before(this.venueAnchor);
-      this.head.append(this.notice);
-      this.price.row.after(this.ohlcLine);
+      this.head.append(this.notice, this.statusAnchor);
+      this.mountPriceRow();
     } else {
       this.ohlc.before(this.venueAnchor);
-      this.ohlcLine.append(this.notice);
+      this.ohlcLine.append(this.notice, this.statusAnchor);
       this.head.after(this.ohlcLine);
     }
   }
 
-  show(v: LegendBar | null): void {
+  get avoid(): LegendBox | null {
+    return this.avoidBox;
+  }
+
+  private mountPriceRow(): void {
+    if (!this.display.showLegend) return;
+    if (this.tier === "full") {
+      this.body.prepend(this.price.row);
+      this.price.row.after(this.ohlcLine);
+    } else {
+      this.notice.before(this.price.row);
+      this.body.prepend(this.ohlcLine);
+    }
+  }
+
+  show(v: LegendBar | null, pointed = false): void {
+    if (this.pointed !== pointed) {
+      this.pointed = pointed;
+      this.root.toggleAttribute("data-pointed", pointed);
+    }
     this.price.row.hidden = v === null;
     this.ohlc.hidden = v === null;
     this.ohlcLine.hidden = v === null && this.display.showLegend;
@@ -311,7 +347,9 @@ export class Legend {
     root.inert = true;
     root.style.visibility = "hidden";
     root.style.pointerEvents = "none";
-    const head = this.head.cloneNode(true);
+    const head = this.head.cloneNode(true) as HTMLElement;
+    head.querySelector("[data-price-row]")?.remove();
+    head.querySelector(".chart-jump[hidden]")?.remove();
     const body = el("div", this.body.className);
     body.hidden = !this.display.showLegend;
     const price = priceFields();
@@ -326,6 +364,7 @@ export class Legend {
     const fields = [field("close"), field("change"), field("time"), field("fetched"), field("stalled")];
     const classes = ohlcClasses(this.display);
     const line = el("div", classes.line);
+    line.dataset.ohlcLine = "";
     const group = el("div", classes.group);
     const ohlc = el("div", classes.values);
     ohlc.dataset.ohlc = "";
@@ -342,7 +381,8 @@ export class Legend {
     group.append(ohlc);
     line.append(group);
     if (!this.display.showLegend) line.append(this.notice.cloneNode(true));
-    body.append(price.row);
+    if (this.tier === "full") body.append(price.row);
+    else if (this.display.showLegend) head.append(price.row);
     if (this.display.showLegend) body.append(line);
     for (const projected of this.presentationHost.projectRows()) {
       body.append(projected.root);
@@ -354,28 +394,47 @@ export class Legend {
     return { root, fields };
   }
 
+  private applyTier(tier: LegendTier, desktop: boolean): void {
+    this.tier = tier;
+    if (this.host.dataset.legendTier !== tier) this.host.dataset.legendTier = tier;
+    if (desktop && tier !== "full") {
+      if (this.host.dataset.legendDensity !== "compact") this.host.dataset.legendDensity = "compact";
+    } else delete this.host.dataset.legendDensity;
+    this.presentationHost.applyTier(tier);
+    this.mountPriceRow();
+  }
+
   private refreshPresentation(): void {
     const inputs = this.readGeometryInputs();
     if (this.presentation.kind === "settled" && sameGeometryInputs(this.presentation.inputs, inputs)) return;
     this.presentation = { kind: "invalidated" };
     const { viewport, chart: chartBox } = inputs;
-    if (this.host.dataset.legendDensity) delete this.host.dataset.legendDensity;
-    if (!inputs.desktop || !viewport.pricePane) {
+    if (!viewport.pricePane) {
+      delete this.host.dataset.legendDensity;
+      delete this.host.dataset.legendTier;
+      this.avoidBox = null;
       this.presentation = { kind: "settled", inputs };
       return;
     }
+    this.applyTier(legendTier({ chartWidth: chartBox.width, paneHeight: viewport.pricePane.height, phone: !inputs.desktop }), inputs.desktop);
     const projection = this.projection();
     this.parent.append(projection.root);
     try {
       reserveLegendFields(projection.fields);
       const paneBottom = chartBox.y + viewport.pricePane.top + viewport.pricePane.height;
-      if (this.contentBounds(projection.root).bottom > paneBottom + 0.5) {
-        this.host.dataset.legendDensity = "compact";
+      if (this.tier === "full" && this.contentBounds(projection.root).bottom > paneBottom + 0.5) {
+        this.applyTier("compact", inputs.desktop);
+        const priceRow = projection.root.querySelector("[data-price-row]");
+        if (priceRow) projection.root.querySelector("[data-legend-head]")?.append(priceRow);
         reserveLegendFields(projection.fields);
       }
+      const content = this.contentBounds(projection.root);
+      const origin = projection.root.getBoundingClientRect();
+      this.avoidBox = { left: origin.left - chartBox.x, top: origin.top - chartBox.y, right: content.right - chartBox.x, bottom: content.bottom - chartBox.y };
     } finally {
       projection.root.remove();
     }
+    this.presentationHost.reserveTop(this.avoidBox.bottom - viewport.pricePane.top, viewport.pricePane.height);
     this.presentation = { kind: "settled", inputs };
   }
 
@@ -386,6 +445,7 @@ export class Legend {
     this.presentationResize.disconnect();
     this.presentationMutations.disconnect();
     delete this.host.dataset.legendDensity;
+    delete this.host.dataset.legendTier;
     this.root.remove();
   }
 }

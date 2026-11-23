@@ -5,6 +5,7 @@ import type { Locator } from "@playwright/test";
 import type { ScreenerResult } from "../src/api/generated/ScreenerResult";
 import { panel, rows, runButton, updateBand, waitForUpdateToFinish } from "./screener-page";
 import { barTimes, cell, chartOf, dragTowardPast, expect, SEARCH_BUTTON_TITLE, test, pollSaved } from "./harness";
+import { useCenterIndicatorWindow } from "./indicator-window";
 
 test("초성으로 찾은 종목을 열고 과거로 끌면 과거 봉이 앞에 붙는다", async ({ page }) => {
   await page.goto("/");
@@ -74,7 +75,10 @@ test("초성 결과의 현재가·등락률·강조와 고른 한 종목의 추�
   await expect(samsung).toHaveAttribute("aria-disabled", "false");
   const quotes = [scenario.market.quote("005930")!];
   await expect(samsung.getByLabel("현재가")).toHaveText(quotes[0]!.price.toLocaleString("ko-KR"));
-  await expect(samsung.getByLabel("등락률")).toHaveText(`${quotes[0]!.changeRate > 0 ? "+" : ""}${quotes[0]!.changeRate.toFixed(2)}%`);
+  const rate = quotes[0]!.changeRate;
+  const magnitude = `${Math.abs(rate).toFixed(2)}%`;
+  await expect(samsung.getByLabel("등락률").locator('[aria-hidden="true"]')).toHaveText(`${rate > 0 ? "▲ " : rate < 0 ? "▼ " : ""}${magnitude}`);
+  await expect(samsung.getByLabel("등락률").locator(".sr-only")).toHaveText(`${rate > 0 ? "+" : rate < 0 ? "\u2212" : ""}${magnitude}`);
   await expect(samsung.locator("mark")).toHaveText(["삼성"]);
   await samsung.hover();
   await expect(dialog.getByRole("img", { name: "삼성전자 60일 추세" })).toBeVisible();
@@ -108,7 +112,8 @@ test("Ctrl+Enter로 관심종목을 넣고 빼며 Shift+Enter는 비교에 추�
   await expect(cell(page)).toHaveAttribute("aria-label", before!);
 });
 
-test("시장 필터와 > 명령 모드에서 명령을 실행한다", async ({ page }) => {
+test("시장 필터와 > 명령 모드에서 명령을 실행한다", async ({ page, scenario }) => {
+  useCenterIndicatorWindow(scenario);
   await page.goto("/");
   await expect(cell(page)).toHaveAttribute("aria-busy", "false");
   await page.keyboard.press("/");

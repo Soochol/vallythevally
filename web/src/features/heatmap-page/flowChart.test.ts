@@ -1,7 +1,7 @@
 import { expect, test } from "vitest";
 import type { HeatmapFlowPoint } from "../../api/generated/HeatmapFlowPoint";
 import type { UnixSeconds } from "../../api/generated/UnixSeconds";
-import { hourTicks, linePath, nearestTime, rateAt, rateExtent, rateTicks, spreadLabels, timeExtent } from "./flowChart";
+import { fitLabel, hourTicks, linePath, nearestTime, rateAt, rateExtent, rateTicks, rightMargin, spreadLabels, textWidth, timeExtent } from "./flowChart";
 
 const point = (t: number, rate: number): HeatmapFlowPoint => ({ t: t as UnixSeconds, rate });
 
@@ -48,4 +48,18 @@ test("포인터 시각에 가장 가까운 칸을 고르고 그 시각까지의 
   expect(rateAt(points, 0)).toBeNull();
   expect(rateAt(points, 300)).toBe(1);
   expect(rateAt(points, 900)).toBe(2);
+});
+
+test("선 끝 이름은 최대 폭에서 말줄임한다", () => {
+  expect(fitLabel("반도체", 100, 12)).toBe("반도체");
+  const fitted = fitLabel("삼성그룹대표테마이름이아주긴경우", 60, 12);
+  expect(fitted.endsWith("…")).toBe(true);
+  expect(textWidth(fitted, 12)).toBeLessThanOrEqual(60);
+  expect(fitLabel("ABCDEFGHIJKLMNOP", 50, 12).endsWith("…")).toBe(true);
+});
+
+test("오른쪽 여백은 폭에 따라 줄지만 범위를 지킨다", () => {
+  expect(rightMargin(1400)).toBe(150);
+  expect(rightMargin(350)).toBe(98);
+  expect(rightMargin(200)).toBe(96);
 });

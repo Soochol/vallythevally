@@ -1,5 +1,4 @@
 import { useRefetchNamesOnConnect } from "./api/refetchNamesOnConnect";
-import { FinancialUpdateDialog } from "./features/financial-update/FinancialUpdateDialog";
 import { ConfirmHost } from "./features/overlay/Confirm";
 import { TooltipHost } from "./features/overlay/Tooltip";
 import { useEffect, useState } from "react";
@@ -32,6 +31,7 @@ import { ReplaceLocalScreen } from "./features/account/ReplaceLocalScreen";
 import { useAccountStore } from "./stores/account";
 import { HotkeySheet } from "./features/hotkey-sheet/HotkeySheet";
 import { SearchDialog } from "./features/search/SearchDialog";
+import { ShellBanner } from "./features/status/ShellBanner";
 import { StatusBar } from "./features/status/StatusBar";
 import { Toast } from "./features/toast/Toast";
 import { Topbar } from "./features/topbar/Topbar";
@@ -48,6 +48,9 @@ import { DrawingToolbar } from "./features/drawings/DrawingToolbar";
 import { Workspace } from "./features/workspace/Workspace";
 import { DESKTOP_QUERY, useMediaQuery } from "./lib/media";
 import type { WindowId } from "./layout/kinds";
+import { applyStoredDensity } from "./persist/density";
+
+applyStoredDensity();
 
 export function ChartRoute() {
   const page = pageOfPath(useLocation().pathname) ?? "workspace";
@@ -85,7 +88,7 @@ function ChartScreen({ page }: { page: PageId }) {
   useEffect(() => {
     const { loginFailure, showLoginFailure } = useAccountStore.getState();
     if (loginFailure === null) return;
-    useSelectionStore.getState().showToast(loginFailure);
+    useSelectionStore.getState().showToast(loginFailure, { tone: "error" });
     showLoginFailure(null);
   }, []);
   useEffect(() => {
@@ -112,7 +115,7 @@ function ChartScreen({ page }: { page: PageId }) {
         (page === "home" ? " invisible" : "")
       }
     >
-      {onWorkspace ? <Topbar /> : <PageTopbar page={page} />}
+      {onWorkspace ? <Topbar /> : <PageTopbar />}
       {onWorkspace && <PhoneHeader cell={cell} info={info} status={status} />}
       {onWorkspace && <PeriodChips cell={cell} />}
       {desktop ? (
@@ -134,6 +137,7 @@ function ChartScreen({ page }: { page: PageId }) {
           {shownPage && <PageStage page={shownPage} />}
         </>
       )}
+      <ShellBanner />
       <StatusBar />
       {onWorkspace && <PhoneTabs />}
       <PhoneWatch />
@@ -143,7 +147,6 @@ function ChartScreen({ page }: { page: PageId }) {
       <HotkeySheet />
       <IndicatorCommand />
       <ScreenDialog />
-      <FinancialUpdateDialog />
       <SystemSettingsDialog />
       <SetupChangedNotice />
       <Toast />

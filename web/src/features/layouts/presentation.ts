@@ -7,6 +7,7 @@ import { layoutCommands, layoutNameProblem, showLayoutError, useLayoutsStore } f
 
 export type LayoutNaming = { kind: "naming"; operation: "saveAs" | "rename"; value: string; error: string | null };
 type Surface = { kind: "closed" } | { kind: "menu" } | { kind: "confirming" } | LayoutNaming;
+const LAYOUT_DELETE_EFFECT = "창 배치와 이 레이아웃에만 그린 드로잉이 함께 지워집니다. 되돌릴 수 없습니다";
 type FocusRequest = { revision: number; target: "trigger" | "name" };
 
 export const useLayoutMenuPresentation = create<{ surface: Surface; focus: FocusRequest | null }>()(() => ({ surface: { kind: "closed" }, focus: null }));
@@ -55,7 +56,7 @@ export const layoutMenu = {
   startNaming(operation: LayoutNaming["operation"]) {
     if (!available()) return;
     handoff();
-    focus({ kind: "naming", operation, value: operation === "rename" ? useLayoutStore.getState().layout.name : "", error: null }, "name");
+    focus({ kind: "naming", operation, value: operation === "rename" ? useLayoutStore.getState().layout.name : `${useLayoutStore.getState().layout.name.slice(0, 17)} 사본`, error: null }, "name");
   },
   changeName(value: string) {
     const { surface } = useLayoutMenuPresentation.getState();
@@ -78,7 +79,7 @@ export const layoutMenu = {
     handoff();
     useLayoutMenuPresentation.setState({ surface: { kind: "confirming" }, focus: null });
     try {
-      if (await confirmAction(`${name} 레이아웃을 지웁니다`, { action: "레이아웃 지우기", danger: true })) await layoutCommands.delete();
+      if (await confirmAction(`${name} 레이아웃을 지웁니다`, { action: "레이아웃 지우기", danger: true, detail: [LAYOUT_DELETE_EFFECT] })) await layoutCommands.delete();
     } catch (error) { showLayoutError(error); }
     finally { close(); }
   },

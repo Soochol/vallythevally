@@ -59,7 +59,7 @@ function replyBook(scenario: Scenario, base: number, change = 1000, history: Tra
 }
 
 async function tradesSubs(scenario: Scenario): Promise<string[]> {
-  await pollSaved(() => scenario.live.messages.filter((m) => m.type === "subscribe_feed" && m.kind === "trades" && m.symbol === CODE).length).toBe(2);
+  await pollSaved(() => scenario.live.messages.filter((m) => m.type === "subscribe_feed" && m.kind === "trades" && m.symbol === CODE).length).toBe(1);
   return scenario.live.messages.flatMap((m) => (m.type === "subscribe_feed" && m.kind === "trades" && m.symbol === CODE ? [m.sub] : []));
 }
 
@@ -660,7 +660,7 @@ test("위 막대 거래소를 KRX로 바꾸면 호가·체결을 krx로 다시 �
   await pollSaved(() => feedSubscriptions(scenario, "book", "combined").length).toBe(1);
   await pickDesktopVenue(page, "KRX");
   await pollSaved(() => feedSubscriptions(scenario, "book", "krx").length).toBe(1);
-  await pollSaved(() => feedSubscriptions(scenario, "trades", "krx").length).toBe(2);
+  await pollSaved(() => feedSubscriptions(scenario, "trades", "krx").length).toBe(1);
   await expect(ladderRows(page).locator(".mw-px-num").first()).toHaveText("61,000");
   await expect(page.locator(".mw-lr[data-current]")).toContainText("60,000");
   expect(requestedVenues(scenario, "/api/symbols/005930/order-book")).toEqual(["combined", "krx"]);
@@ -685,7 +685,7 @@ test("거래소를 바꾼 뒤 앞 거래소 구독으로 온 호가는 사다리
 });
 
 async function emitCombinedTrade(scenario: Scenario, price: number, strength: number) {
-  await pollSaved(() => feedSubscriptions(scenario, "trades", "combined").length).toBe(2);
+  await pollSaved(() => feedSubscriptions(scenario, "trades", "combined").length).toBe(1);
   for (const message of feedSubscriptions(scenario, "trades", "combined")) if (message.type === "subscribe_feed") scenario.live.emit({ type: "feed_trades", sub: message.sub, seq: 1, trades: [{ t: scenario.now / 1000, price, qty: 3, venue: "nxt", strength }] });
 }
 
@@ -694,7 +694,7 @@ test("거래소를 바꾸면 앞 거래소의 체결강도가 사다리에 남�
   await emitCombinedTrade(scenario, 70000, 150);
   await expect(page.getByTestId("ladder-strength")).toContainText("150.00%");
   await pickDesktopVenue(page, "KRX");
-  await pollSaved(() => feedSubscriptions(scenario, "trades", "krx").length).toBe(2);
+  await pollSaved(() => feedSubscriptions(scenario, "trades", "krx").length).toBe(1);
   await expect(page.getByTestId("ladder-strength")).not.toContainText("150.00%");
 });
 

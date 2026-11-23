@@ -2,7 +2,8 @@ import type { Locator, Page } from "@playwright/test";
 import type { Screen } from "../src/api/generated/Screen";
 import type { Screens } from "../src/api/generated/Screens";
 import { type Scenario, expect, test } from "./screener-harness";
-import { openScreener, panel, savedTo, screenChooser } from "./screener-page";
+import { openScreener, panel, rows, runButton, savedTo, screenChooser } from "./screener-page";
+import { allResult, readyStatus } from "./fixtures/screener";
 import { renameScreen, sentenceEditor } from "./sentence-editor";
 
 const PHONE = { width: 390, height: 844 };
@@ -234,4 +235,28 @@ test("휴대폰에서 삭제가 서버 오류로 실패하면 대화상자와 �
   await expect(dialog).toBeHidden();
   await expect(screenChooser(page)).toHaveAccessibleName("조건식: 둘째");
   expect((await stored(scenario)).screens.map((screen) => screen.id)).toEqual(["b"]);
+});
+
+test("휴대폰 대화상자의 조건은 문장 한 줄로 120px 안에 들고 토큰은 32px이다", async ({ scenario, page }) => {
+  const screen: Screen = { id: "h", name: "문장 조건", markets: [], exclude: [], conditions: [{ kind: "new_high", period: "D", recentBars: 20, field: "high", n: 60 }] };
+  await startPhone(scenario, page, [screen]);
+  const dialog = await editChosen(page);
+  const line = dialog.getByRole("list", { name: "조건", exact: true }).getByRole("listitem");
+  await expect(line).toHaveCount(1);
+  expect((await line.boundingBox())!.height).toBeLessThanOrEqual(120);
+  expect((await dialog.getByRole("button", { name: "조건 1 신고가 기간", exact: true }).boundingBox())!.height).toBe(32);
+  await expect(dialog.getByText("최근 기간은 마지막 봉을 포함한 실제 봉 개수입니다", { exact: false })).toHaveCount(1);
+  const name = (await dialog.getByText("이름", { exact: true }).boundingBox())!;
+  const field = (await nameField(dialog).boundingBox())!;
+  expect(field.y).toBeGreaterThan(name.y + name.height - 1);
+});
+
+test("휴대폰 결과 줄은 48px이고 실행 버튼에 키 안내가 없다", async ({ scenario, screener, page }) => {
+  screener.showStatus(readyStatus());
+  screener.showResult(allResult());
+  await startPhone(scenario, page, [{ id: "r", name: "결과", markets: [], exclude: [], conditions: [] }]);
+  await expect(runButton(page).locator("kbd")).toBeHidden();
+  await runButton(page).click();
+  await expect(rows(page).first()).toBeVisible();
+  expect((await rows(page).first().boundingBox())!.height).toBe(48);
 });

@@ -19,6 +19,8 @@ const SETTINGS = { v: 1, style: "candle", scale: "normal", indicators: [], compa
 const topbar = (page: Page) => page.getByRole("toolbar", { name: "차트 도구 막대" });
 const layoutButton = (page: Page) => topbar(page).getByRole("button", { name: /^레이아웃:/ });
 const layoutMenu = (page: Page) => page.getByRole("menu", { name: "레이아웃", exact: true });
+const arrangeButton = (page: Page) => topbar(page).getByRole("button", { name: "배치", exact: true });
+const arrangeMenu = (page: Page) => page.getByRole("menu", { name: "배치", exact: true });
 const tab = (page: Page, id: string) => page.locator(`[role=tab][data-window-id="${id}"]`);
 const head = (page: Page, id: string) => page.locator(`[data-window-header="${id}"]`);
 const frame = (page: Page, id: string) => page.locator(`[data-canvas-window="${id}"], [data-dock-float="${id}"]`);
@@ -52,7 +54,7 @@ async function ready(page: Page, count = 1) {
 }
 
 async function setMode(page: Page, next: typeof MODES[number]) {
-  await layoutButton(page).click();
+  await arrangeButton(page).click();
   const button = page.getByRole("group", { name: "창 배치 방식" }).getByRole("button", { name: next === "dock" ? "도킹" : "캔버스", exact: true });
   await button.click();
   await expect(button).toHaveAttribute("aria-pressed", "true");
@@ -299,6 +301,9 @@ for (const mode of MODES) {
     await inspector.getByRole("searchbox").fill("이평 9");
     await inspector.getByRole("button", { name: "이동평균 단순 9 추가", exact: true }).click();
     await inspector.getByRole("searchbox").fill("");
+    const fold = cell(page).locator("[data-indicator-fold]:visible");
+    if (await fold.count()) await fold.first().hover();
+    await cell(page).locator("[data-indicator-row][title=\"이동평균 단순 9\"]").hover();
     await expect(cell(page).getByRole("button", { name: "이동평균 단순 9 설정 열기", exact: true })).toBeVisible();
     if (mode === "dock") await tab(page, "cell-1").click();
     else await head(page, "cell-1").click({ position: { x: 60, y: 17 } });
@@ -336,12 +341,12 @@ for (const mode of MODES) {
     const draft = mode === "dock" ? page.locator("[data-dock-preview]") : frame(page, "watchlist");
     const dragging = await boxOf(draft);
     pending.reply({ status: 503, body: { error: { code: "internal", message: "저장 연결 끊김" } } });
-    await expect(page.getByRole("contentinfo")).toContainText("저장하지 못했습니다");
+    await expect(page.getByTestId("shell-banner")).toContainText("저장하지 못했습니다");
     expect(await boxOf(draft)).toEqual(dragging);
     await page.mouse.up();
     const moved = await boxOf(mode === "dock" ? group(page, "screener") : frame(page, "watchlist"));
     expect(moved).not.toEqual(original);
-    await expect(page.getByRole("contentinfo")).toContainText("저장하지 못했습니다");
+    await expect(page.getByTestId("shell-banner")).toContainText("저장하지 못했습니다");
     if (mode === "canvas") await page.getByRole("navigation", { name: "창 종류" }).getByRole("button", { name: "지표 창 더하기" }).click();
     else {
       await topbar(page).getByRole("button", { name: "창 더하기", exact: true }).click();
@@ -349,10 +354,10 @@ for (const mode of MODES) {
     }
     await page.getByRole("button", { name: "지표 닫기", exact: true }).click();
     await expect.poll(() => page.getByRole("button", { name: "지표 닫기", exact: true }).count()).toBe(0);
-    await expect(page.getByRole("contentinfo")).toContainText("저장하지 못했습니다");
+    await expect(page.getByTestId("shell-banner")).toContainText("저장하지 못했습니다");
     scenario.on((url, request) => url.pathname === `/api/layouts/${DEFAULT_LAYOUT_ID}` && request.method() === "PUT", (request) => ({ body: scenario.documents.saveLayout(request.postDataJSON()) }));
-    await page.getByRole("contentinfo").getByRole("button", { name: "다시 시도" }).click();
-    await expect(page.getByRole("contentinfo")).toContainText("자동 저장됨");
+    await page.getByTestId("shell-banner").getByRole("button", { name: "다시 시도" }).click();
+    await expect(page.getByRole("contentinfo")).toContainText("저장됨");
     expect(await boxOf(mode === "dock" ? group(page, "screener") : frame(page, "watchlist"))).toEqual(moved);
     expect(windows(scenario).map((window) => window.kind)).toEqual(["chart", "watchlist", "screener"]);
     const saved = placement(scenario);
@@ -375,7 +380,7 @@ for (const mode of MODES) {
     const stale = page.waitForResponse((response) => new URL(response.url()).pathname === `/api/layouts/${DEFAULT_LAYOUT_ID}` && response.request().method() === "PUT" && response.status() === 409);
     await topbar(page).getByRole("button", { name: "월", exact: true }).click();
     expect(await (await stale).json()).toMatchObject({ error: { code: "stale_revision" } });
-    await expect(page.getByRole("contentinfo")).toContainText("저장하지 못했습니다");
+    await expect(page.getByTestId("shell-banner")).toContainText("저장하지 못했습니다");
     expect(charts(scenario)[0]?.period).toBe("W");
     await expect(cell(page)).toHaveAttribute("aria-label", / 월$/);
     await expect.poll(() => page.evaluate(() => {
@@ -512,9 +517,9 @@ test("키보드만으로 창 더하기·탭·나누기·경계·캔버스·닫�
   const old = Number(await divider.getAttribute("aria-valuenow"));
   await page.keyboard.press("ArrowLeft");
   await expect.poll(async () => Number(await divider.getAttribute("aria-valuenow"))).toBe(old - 16);
-  await tabTo(page, layoutButton(page));
+  await tabTo(page, arrangeButton(page));
   await page.keyboard.press("Enter");
-  await expect(layoutMenu(page).getByRole("menuitemradio").first()).toBeFocused();
+  await expect(arrangeMenu(page).getByRole("menuitem").first()).toBeFocused();
   await page.keyboard.press("End");
   await page.keyboard.press("Tab");
   await page.keyboard.press("Tab");
@@ -766,8 +771,8 @@ for (const mode of MODES) {
     await expect(stage).not.toHaveAttribute(dragging);
     await expect(frame(page, "indicators")).toHaveAttribute("style", beforeStyle);
     expect(placement(scenario)).toEqual(before);
-    await layoutButton(page).click();
-    await expect(layoutMenu(page).getByRole("menuitem", { name: "배치 되돌리기", exact: true })).toBeDisabled();
+    await arrangeButton(page).click();
+    await expect(arrangeMenu(page).getByRole("menuitem", { name: /^배치 되돌리기/ })).toBeDisabled();
     expect(placement(scenario)).toEqual(before);
   });
 }

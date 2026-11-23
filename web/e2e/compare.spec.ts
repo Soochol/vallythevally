@@ -4,6 +4,7 @@ import { installChartProbe } from "./chart-probe";
 import { installFrameProbe } from "./frame-probe";
 import { selectOption } from "./select-option";
 import { type Scenario, cell, chartOf, DEFAULT_LAYOUT_ID, expect, test, firstChart, withFirstChart, pollSaved } from "./harness";
+import { useCenterIndicatorWindow } from "./indicator-window";
 
 test.use({ clockStart: "20261109100030" });
 
@@ -50,6 +51,7 @@ async function addCompare(dialog: Locator, name: string) {
 }
 
 test("비교 종목 탭에서 3개까지 넣고 4번째는 막히며, 빼면 그 구독을 풀고, 새로고침해도 남는다", async ({ page, scenario }) => {
+  useCenterIndicatorWindow(scenario);
   const errors: string[] = [];
   page.on("pageerror", (e) => errors.push(e.message));
   const sent = sentFrames(scenario);
@@ -88,6 +90,7 @@ test("비교 종목 탭에서 3개까지 넣고 4번째는 막히며, 빼면 그
 });
 
 test("% 축은 비교 종목 없이도 켜고 끄며, 비교 종목이 있는 동안은 %로 고정되고 다 빼면 저장된 축으로 돌아간다", async ({ page, scenario }) => {
+  useCenterIndicatorWindow(scenario);
   await seed(scenario);
   await page.goto("/");
   await expect(cell(page)).toHaveAttribute("aria-busy", "false");
@@ -146,6 +149,7 @@ test("비교 종목도 체결마다 움직인다", async ({ page, scenario }) =>
 });
 
 test("일반 축에서 그린 드로잉은 % 축이 되고 스크롤로 기준 봉이 바뀌어도 주 봉 시리즈의 가격 좌표에 붙어 있다", async ({ page, scenario }) => {
+  useCenterIndicatorWindow(scenario);
   await seed(scenario, {}, "D");
   await page.addInitScript(installFrameProbe);
   await page.goto("/");
@@ -196,6 +200,7 @@ test("일반 축에서 그린 드로잉은 % 축이 되고 스크롤로 기준 �
 });
 
 test("비교 종목이 저장된 칸을 열어도 지표 패널 축은 % 축이 아니다", async ({ page, scenario }) => {
+  useCenterIndicatorWindow(scenario);
   await seed(scenario, { compare: ["IDX:001"], indicators: [VOLUME], panels: [{ id: "p1", stretch: 0.25 }] }, "D");
   await page.addInitScript(installFrameProbe);
   await page.goto("/");

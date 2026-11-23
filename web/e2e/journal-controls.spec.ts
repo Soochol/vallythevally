@@ -53,7 +53,7 @@ async function pendingRecords(page: Page) {
 test("frontend journal + saved documents: delayed older admission cannot replace the same document's newer DELETE", async ({ page, scenario }, info) => {
   await open(page);
   await createLine(page);
-  await expect(page.getByText(/^자동 저장됨 /)).toBeVisible();
+  await expect(page.getByText(/^저장됨$/)).toBeVisible();
   const [original] = await storedDrawings(scenario);
   if (original === undefined) throw new Error("Expected the seeded drawing");
   const requests: string[] = [];
@@ -78,7 +78,7 @@ test("frontend journal + saved documents: delayed older admission cannot replace
     expect(locks.pending?.filter((lock) => lock.name === `vv.drawing.journal.${original.id}`).length).toBeGreaterThan(0);
     expect(requests).toEqual([]);
     await page.evaluate(() => window.dispatchEvent(new Event("release-journal-control")));
-    await expect(page.getByText(/^자동 저장됨 /)).toBeVisible();
+    await expect(page.getByText(/^저장됨$/)).toBeVisible();
     await pollSaved(() => storedDrawings(scenario)).toEqual([]);
     await expect.poll(() => pendingRecords(page)).toEqual([]);
     expect(requests).toEqual(["DELETE"]);
@@ -131,7 +131,7 @@ for (const failure of ["locks-unsupported", "locks-rejected", "staging-write", "
 test("frontend journal + saved documents: reload transmits the staged PUT's fixed revision", async ({ page, scenario }, info) => {
   await open(page);
   await createLine(page);
-  await expect(page.getByText(/^자동 저장됨 /)).toBeVisible();
+  await expect(page.getByText(/^저장됨$/)).toBeVisible();
   const [original] = await storedDrawings(scenario);
   if (original === undefined) throw new Error("Expected the seeded drawing");
   await page.evaluate(() => {
@@ -193,7 +193,7 @@ test("frontend journal + saved documents: completion quota failure retains recov
   expect(requests.map(request => request.method)).toEqual(["PUT"]);
   await page.evaluate(() => { document.documentElement.dataset.denyCompletion = "false"; });
   await retry.click();
-  await expect(page.getByText(/^자동 저장됨 /)).toBeVisible();
+  await expect(page.getByText(/^저장됨$/)).toBeVisible();
   await expect.poll(() => pendingRecords(page)).toEqual([]);
   const completion = await page.evaluate(key => JSON.parse(localStorage.getItem(key) ?? "null"), completionKey(saved.id));
   expect(completion).toMatchObject({ id: saved.id, lastRevision: saved.revision });

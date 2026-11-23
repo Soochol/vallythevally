@@ -1,4 +1,4 @@
-import { at, defaultFill, DRAW, readBool, readFill, readRecord, readStroke, strokeFields } from "../styleKit";
+import { at, defaultFill, DRAW, labelBox, readBool, readFill, readRecord, readStroke, strokeFields } from "../styleKit";
 import { defineTool, type Lens, type Level, type Shape } from "../toolSpec";
 import type { Color, Fill, Stroke } from "../types";
 import { MAX_LEVELS, readLevels, recolor } from "./fibKit";
@@ -81,7 +81,7 @@ export const gannbox = defineTool<GannBoxStyle>({
     const bottom = Math.max(a.y, b.y);
     const levels = style.levels.filter((l) => l.on);
     const stroke = (level: Level): Stroke => ({ color: level.color, width: style.border.width, dash: style.border.dash });
-    const text = (level: Level) => ({ text: String(level.value), style: { color: level.color, size: 12, bold: false, italic: false } });
+    const text = (level: Level) => ({ text: String(level.value), style: { color: level.color, size: 12, bold: false, italic: false }, box: labelBox(level.color) });
     const priceLines = levels.flatMap((level): Shape[] => {
       const y = a.y + (b.y - a.y) * level.value;
       const line: Shape = { kind: "segment", a: { x: left, y }, b: { x: right, y }, stroke: stroke(level) };

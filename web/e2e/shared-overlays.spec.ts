@@ -2,8 +2,10 @@ import { mkdir } from "node:fs/promises";
 import path from "node:path";
 import { cell, expect, test, pollSaved } from "./harness";
 import { expandDock } from "./drawing-probe";
+import { useCenterIndicatorWindow } from "./indicator-window";
 
 test("공통 메뉴는 잘리지 않고 선택·키보드·포커스와 마지막 분봉 복원을 지원한다", async ({ scenario, page }) => {
+  useCenterIndicatorWindow(scenario);
   await page.goto("/?symbol=005930");
   await expect(cell(page)).toHaveAttribute("aria-busy", "false");
   await page.setViewportSize({ width: 390, height: 844 });
@@ -67,7 +69,8 @@ test("공통 메뉴는 잘리지 않고 선택·키보드·포커스와 마지�
   await expect(page.getByRole("button", { name: "지표", exact: true })).toBeFocused();
 });
 
-test("공통 범례 SVG와 화면 크기별 메뉴·페이지 경계를 확인한다", async ({ page }) => {
+test("공통 범례 SVG와 화면 크기별 메뉴·페이지 경계를 확인한다", async ({ page, scenario }) => {
+  useCenterIndicatorWindow(scenario);
   await page.goto("/?symbol=005930");
   await expect(cell(page)).toHaveAttribute("aria-busy", "false");
   await page.getByRole("button", { name: "지표", exact: true }).click();

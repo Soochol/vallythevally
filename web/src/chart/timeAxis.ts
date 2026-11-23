@@ -61,13 +61,47 @@ export function chartTimeProjection(scale: ChartTimeScale, period: Period) {
   };
 }
 
-export function preserveTimeRange(scale: ChartTimeScale, period: Period, change: () => void): void {
+type ScrollScale = Pick<ChartTimeScale, "scrollPosition" | "scrollToPosition">;
+
+export class PendingScroll {
+  private pending: { target: number; userShift: number } | null = null;
+
+  constructor(private readonly afterNextPaint: (callback: () => void) => void) {}
+
+  position(scale: ScrollScale): number {
+    return this.pending ? this.pending.target : scale.scrollPosition();
+  }
+
+  get unpaintedUserShift(): number {
+    return this.pending ? this.pending.userShift : 0;
+  }
+
+  scrollTo(scale: ScrollScale, target: number): void {
+    this.schedule(scale, target, this.unpaintedUserShift);
+  }
+
+  scrollByUser(scale: ScrollScale, shift: number): void {
+    this.schedule(scale, this.position(scale) + shift, this.unpaintedUserShift + shift);
+  }
+
+  private schedule(scale: ScrollScale, target: number, userShift: number): void {
+    const command = { target, userShift };
+    this.pending = command;
+    scale.scrollToPosition(target, false);
+    this.afterNextPaint(() => {
+      if (this.pending === command) this.pending = null;
+    });
+  }
+}
+
+export function preserveTimeRange(scale: ChartTimeScale, period: Period, scroll: PendingScroll, change: () => void): void {
   const range = scale.getVisibleLogicalRange();
   const index = range ? Math.max(0, Math.floor(range.to)) : 0;
   const anchor = chartTimeProjection(scale, period).toTime(index);
+  const unappliedShift = scroll.position(scale) - scale.scrollPosition();
   change();
   if (!range || anchor === null) return;
   const moved = chartTimeProjection(scale, period).toLogical(anchor);
   const current = scale.getVisibleLogicalRange();
-  if (moved !== null && current) scale.scrollToPosition(scale.scrollPosition() + range.to + moved - index - current.to, false);
+  if (moved !== null && current) scroll.scrollTo(scale, scale.scrollPosition() + unappliedShift + range.to + moved - index - current.to);
 }

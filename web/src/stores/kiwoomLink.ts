@@ -64,4 +64,6 @@ export const receiveMarketSourcePush = (source: MarketSourceStatus) => useKiwoom
 
 export const useMarketSource = (): MarketSourceStatus | null => useKiwoomLinkStore((s) => s.source);
 export const useSourceBroker = (): Broker => useKiwoomLinkStore((s) => s.source?.broker ?? "kiwoom");
+const kiwoomReceivesFeed = (s: Pick<KiwoomLinkStore, "source">): boolean => s.source !== null && s.source.broker !== "kiwoom" && s.source.feedBroker?.broker === "kiwoom";
+export const useFeedLink = (): KiwoomLinkStatus | null => useKiwoomLinkStore((s) => (kiwoomReceivesFeed(s) ? null : s.status));
 export const useKiwoomOnlyLink = (): KiwoomLinkStatus | null => useKiwoomLinkStore((s) => s.kiwoom);

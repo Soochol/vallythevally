@@ -8,7 +8,7 @@ use tokio::sync::OnceCell;
 
 use super::Observation;
 use super::summary::{CollectionBasis, CollectionId, MissingSummary, StockSummary, SummaryBatch};
-use crate::api::{ApiErrorReason, Screen, ScreenerResult};
+use crate::api::{ApiErrorReason, Broker, Screen, ScreenerResult};
 use crate::http::ApiFailure;
 use crate::kiwoom::wire::{KrxSummary, KrxSummaryValues, MillionWon, WireError};
 use crate::shared_data::{Loaded, SharedData, SnapshotBody, SnapshotRow};
@@ -159,7 +159,7 @@ fn batch_of(snapshot: &Snapshot, codes: impl Iterator<Item = StockCode>, basis: 
             (code, StockSummary { received_at, result })
         })
         .collect();
-    SummaryBatch { id: CollectionId::next(), basis, target, venue: Venue::Krx, started_at: received_at, completed_at: received_at, stocks }
+    SummaryBatch { id: CollectionId::next(), basis, target, broker: Broker::Kiwoom, venue: Venue::Krx, started_at: received_at, completed_at: received_at, stocks }
 }
 
 fn summary_of(row: &SnapshotRow) -> Result<KrxSummary, WireError> {

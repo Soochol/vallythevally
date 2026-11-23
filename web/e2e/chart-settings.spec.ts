@@ -34,9 +34,9 @@ async function open(page: Page) {
   await expect(cell(page)).toHaveAttribute("aria-busy", "false");
 }
 
-const tab = (page: Page, name: string) => popover(page).getByRole("tab", { name, exact: true });
+const section = (page: Page, name: string) => popover(page).getByRole("region", { name, exact: true });
 
-test("위 막대의 차트 설정 버튼은 지표 창이 아니라 화면 가운데에 720x480 차트 설정 창을 연다", async ({ page }) => {
+test("위 막대의 차트 설정 버튼은 지표 창이 아니라 버튼 아래에 340px 한 열 팝오버를 연다", async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   await open(page);
   await expect(page.getByRole("button", { name: "봉 모양", exact: true })).toHaveCount(0);
@@ -44,16 +44,14 @@ test("위 막대의 차트 설정 버튼은 지표 창이 아니라 화면 가�
   await expect(popover(page)).toBeVisible();
   await expect(settingsButton(page)).toHaveAttribute("aria-expanded", "true");
   await expect(page.getByRole("dialog", { name: "지표·비교 입력창" })).toHaveCount(0);
-  const menu = popover(page).getByRole("tablist", { name: "차트 설정 메뉴" });
-  await expect(menu).toHaveAttribute("aria-orientation", "vertical");
-  for (const name of ["봉·축", "표시", "지표 창"]) await expect(tab(page, name)).toBeVisible();
-  await expect(tab(page, "봉·축")).toHaveAttribute("aria-selected", "true");
-  await expect(tab(page, "봉·축")).toBeFocused();
-  await expect(popover(page).getByText("삼성전자 · 일에 적용").first()).toBeVisible();
+  await expect(popover(page).getByRole("tablist")).toHaveCount(0);
+  for (const name of ["봉·축", "표시", "지표 창"]) await expect(section(page, name)).toBeVisible();
+  await expect(popover(page).getByText("삼성전자 · 일").first()).toBeVisible();
   const box = (await popover(page).boundingBox())!;
-  expect(Math.abs(box.x + box.width / 2 - 720)).toBeLessThanOrEqual(2);
-  expect(box.width).toBe(720);
-  expect(box.height).toBe(480);
+  const button = (await settingsButton(page).boundingBox())!;
+  expect(box.width).toBe(340);
+  expect(box.y).toBeGreaterThanOrEqual(button.y + button.height);
+  expect(box.y + box.height).toBeLessThanOrEqual(900);
 });
 
 test("차트 설정 창은 Esc, 바깥 클릭, 닫기 버튼으로 닫히고 바꾼 설정은 남는다", async ({ page, scenario }) => {
@@ -80,42 +78,37 @@ test("차트 설정 창은 Esc, 바깥 클릭, 닫기 버튼으로 닫히고 바
   expect(saved(scenario).style).toBe("line");
 });
 
-test("메뉴는 방향키·Home·End로 옮기고 마지막 메뉴를 다시 열 때 기억하며 새로고침하면 처음으로 돌아간다", async ({ page }) => {
+test("구역 셋이 세로로 쌓이고 구역 제목 오른쪽에 적용 범위가 붙으며 새로고침해도 처음 모양으로 열린다", async ({ page }) => {
   await open(page);
   await openSettings(page);
-  await page.keyboard.press("ArrowDown");
-  await expect(tab(page, "표시")).toHaveAttribute("aria-selected", "true");
-  await expect(popover(page).getByRole("switch", { name: "범례" })).toBeVisible();
-  await page.keyboard.press("End");
-  await expect(tab(page, "지표 창")).toHaveAttribute("aria-selected", "true");
-  await expect(popover(page).getByText("모든 차트에 적용")).not.toHaveCount(0);
-  await page.keyboard.press("Home");
-  await expect(tab(page, "봉·축")).toHaveAttribute("aria-selected", "true");
-  await page.keyboard.press("ArrowDown");
+  const names = ["봉·축", "표시", "지표 창"];
+  const tops: number[] = [];
+  for (const name of names) tops.push((await section(page, name).boundingBox())!.y);
+  expect([...tops].sort((a, b) => a - b)).toEqual(tops);
+  expect(new Set(tops).size).toBe(3);
+  const scopes = ["이 칸", "이 칸", "모든 차트"];
+  for (const [i, name] of names.entries()) await expect(section(page, name).getByText(scopes[i]!, { exact: true })).toBeVisible();
   await page.keyboard.press("Escape");
   await expect(popover(page)).toBeHidden();
-  await settingsButton(page).click();
-  await expect(tab(page, "표시")).toHaveAttribute("aria-selected", "true");
-  await expect(tab(page, "표시")).toBeFocused();
   await reload(page);
   await settingsButton(page).click();
-  await expect(tab(page, "봉·축")).toHaveAttribute("aria-selected", "true");
+  for (const name of names) await expect(section(page, name)).toBeVisible();
 });
 
-test("메뉴마다 그 메뉴의 항목만 보인다", async ({ page }) => {
+test("구역마다 그 구역의 항목이 한 열에 함께 보인다", async ({ page }) => {
   await open(page);
   const dialog = await openSettings(page);
-  for (const name of ["봉 모양", "가격 축", "화면에 보이는 봉"]) await expect(dialog.getByRole("group", { name })).toBeVisible();
-  await expect(dialog.getByRole("spinbutton", { name: "보이는 봉 수 직접 입력" })).toBeVisible();
-  await expect(dialog.getByRole("switch")).toHaveCount(0);
-  await chooseSettingsMenu(page, "표시");
-  for (const name of ["범례", "봉 값 등락률", "화면 내 최고·최저", "날짜 구분선"]) await expect(dialog.getByRole("switch", { name: new RegExp(`^${name}`) })).toBeVisible();
-  await expect(dialog.getByRole("group", { name: "최고·최저 등락률" })).toBeVisible();
-  await expect(dialog.getByRole("group", { name: "봉 모양" })).toHaveCount(0);
-  await chooseSettingsMenu(page, "지표 창");
-  await expect(dialog.getByRole("group", { name: "지표 창" })).toBeVisible();
-  await expect(dialog.getByText("모든 차트에 적용").first()).toBeVisible();
-  await expect(dialog.getByRole("group", { name: "가격 축" })).toHaveCount(0);
+  const bars = section(page, "봉·축");
+  for (const name of ["봉 모양", "가격 축", "화면에 보이는 봉"]) await expect(bars.getByRole("group", { name })).toBeVisible();
+  await expect(bars.getByRole("spinbutton", { name: "보이는 봉 수 직접 입력" })).toBeVisible();
+  await expect(bars.getByRole("switch")).toHaveCount(0);
+  const display = section(page, "표시");
+  for (const name of ["범례", "봉 값 등락률", "화면 내 최고·최저", "날짜 구분선"]) await expect(display.getByRole("switch", { name: new RegExp(`^${name}`) })).toBeVisible();
+  await expect(display.getByRole("group", { name: "최고·최저 등락률" })).toBeVisible();
+  await expect(display.getByRole("group", { name: "봉 모양" })).toHaveCount(0);
+  await expect(section(page, "지표 창").getByRole("group", { name: "지표 창" })).toBeVisible();
+  await expect(dialog.getByText("모든 차트", { exact: true })).toHaveCount(1);
+  await expect(section(page, "지표 창").getByRole("group", { name: "가격 축" })).toHaveCount(0);
 });
 
 test("보이는 봉 수는 고른 대로 맞추고, 봉 주기를 바꿔도 유지하며, 새로고침 뒤 복원한다", async ({ page, scenario }) => {
@@ -148,7 +141,7 @@ test("보이는 봉 수는 고른 대로 맞추고, 봉 주기를 바꿔도 유�
   await expectShownBars(page, 800);
   await openSettings(page);
   await expect(input).toHaveValue("800");
-  await expect(popover(page).getByRole("tab", { name: "봉·축" })).toBeFocused();
+  await expect(popover(page).locator(":focus")).toHaveCount(1);
 
   await input.fill("5");
   await input.press("Enter");
@@ -362,7 +355,7 @@ test("봉이 없는 화면은 두 등락률 기준 모두 최고·최저 꼬리�
   expect(errors).toEqual([]);
 });
 
-test("비교 종목이 있어 축 고정 안내가 붙어도 1280x600에서 창이 화면 안에 다 들어가고 지표 창 방식을 고른다", async ({ page, scenario }) => {
+test("비교 종목이 있어 축 고정 안내가 붙어도 1280x600에서 팝오버가 화면 안에 다 들어가고 지표 창 방식을 고른다", async ({ page, scenario }) => {
   const layout = scenario.documents.layout(DEFAULT_LAYOUT_ID);
   scenario.documents.saveLayout({ ...layout, revision: layout.revision + 1, windows: withFirstChart(layout, { chartSettings: { ...saved(scenario), compare: ["000660"] } }) });
   await page.setViewportSize({ width: 1280, height: 600 });
@@ -380,9 +373,10 @@ test("비교 종목이 있어 축 고정 안내가 붙어도 1280x600에서 창�
   expect(note.y).toBeGreaterThan(scaleBox.y);
   await chooseSettingsMenu(page, "지표 창");
   const choices = settings.getByRole("group", { name: "지표 창" });
+  await expect(choices.getByRole("button", { name: "차트 옆", exact: true })).toHaveAttribute("aria-pressed", "true");
+  await choices.getByRole("button", { name: "가운데 창", exact: true }).click();
   await expect(choices.getByRole("button", { name: "가운데 창", exact: true })).toHaveAttribute("aria-pressed", "true");
-  await choices.getByRole("button", { name: "차트 옆", exact: true }).click();
-  await pollSaved(() => scenario.documents.uiState().indicatorWindow).toBe("inspector");
+  await pollSaved(() => scenario.documents.uiState().indicatorWindow).toBe("dialog");
 });
 
 const won = (x: number) => new Intl.NumberFormat("ko-KR", { maximumFractionDigits: 0 }).format(x);
@@ -696,7 +690,7 @@ test("최고·최저 등락률을 고가·저가 대비로 바꾸면 꼬리표�
   await pollSaved(() => saved(scenario)).toMatchObject({ showExtremes: false, extremeBasis: "extreme" });
 });
 
-test("1024x768에서 차트 설정 창의 세 메뉴 모든 조작이 화면 안에 있고, 등락률이 붙은 봉 값 줄은 범례 폭 안에서 줄을 바꾼다", async ({ page }) => {
+test("1024x768에서 차트 설정 팝오버의 세 구역 모든 조작이 화면 안에 있고, 등락률이 붙은 봉 값 줄은 범례 폭 안에서 줄을 바꾼다", async ({ page }) => {
   await page.setViewportSize({ width: 1024, height: 768 });
   await open(page);
   const settings = await openSettings(page);

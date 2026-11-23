@@ -8,6 +8,7 @@ const SETTINGS = { v: 1, style: "candle", scale: "normal", indicators: [], compa
 const main = (page: Page) => page.getByRole("main", { name: "히트맵", exact: true });
 const group = (page: Page, name: string) => main(page).getByRole("region", { name: `${name} 지도` });
 const tile = (page: Page, code: string) => main(page).locator(`.hm-tile[data-code="${code}"]`);
+const settings = (page: Page) => page.getByRole("dialog", { name: "보기 설정" });
 const legend = (page: Page) => main(page).getByRole("img", { name: /^색 범위/ });
 const fill = (target: Locator) => target.evaluate((el) => (el as HTMLElement).style.background);
 const table = (): HeatmapTable => structuredClone(HEATMAP_TABLE);
@@ -25,10 +26,12 @@ test("테마마다 타일 지도가 보이고 칸 색이 등락률 부호를 따
   await expect(tile(page, "005930")).toHaveAccessibleName("삼성전자 +2.00%");
   await expect(tile(page, "086520")).toHaveAccessibleName("에코프로 −4.00%");
   await expect(legend(page)).toHaveAccessibleName("색 범위 −8%에서 +8%");
-  await expect(main(page).getByRole("status", { name: "자료 신선도" })).toContainText("시세");
+  await expect(page.getByRole("status", { name: "자료 신선도" })).toContainText("시세");
   await expect(legend(page)).toContainText("칸 색 = 등락률");
   await expect(legend(page)).toContainText("시세 없음");
-  for (const label of ["테마 순서", "색 범위", "칸 크기", "칸 정렬"]) await expect(main(page).locator(".hm-control-label", { hasText: label })).toBeVisible();
+  await expect(main(page).getByRole("group", { name: "색 범위" })).toBeVisible();
+  await main(page).getByRole("button", { name: "보기 설정" }).click();
+  for (const label of ["테마 순서", "칸 크기", "칸 정렬"]) await expect(settings(page).getByRole("group", { name: label })).toBeVisible();
   const big = (await tile(page, "005930").boundingBox())!;
   const small = (await tile(page, "000660").boundingBox())!;
   expect(big.width * big.height).toBeGreaterThan(small.width * small.height);
@@ -57,11 +60,12 @@ test("크기 기준과 칸 정렬은 주소에 남고 정렬 기준을 글자로
   const a = (await tile(page, "005930").boundingBox())!;
   const b = (await tile(page, "000660").boundingBox())!;
   expect(a.width * a.height).toBeCloseTo(b.width * b.height, 0);
-  await expect(main(page).getByText("칸 정렬: 이름 가나다순")).toBeVisible();
-  await main(page).getByRole("group", { name: "칸 정렬" }).getByRole("button", { name: "거래대금" }).click();
-  await expect(main(page).getByText(/칸 정렬: 거래대금 높은 순/)).toBeVisible();
+  await main(page).getByRole("button", { name: "보기 설정" }).click();
+  await expect(settings(page).getByText("칸 정렬: 이름 가나다순")).toBeVisible();
+  await settings(page).getByRole("group", { name: "칸 정렬" }).getByRole("button", { name: "거래대금" }).click();
+  await expect(settings(page).getByText(/칸 정렬: 거래대금 높은 순/)).toBeVisible();
   await expect(page).toHaveURL(/sort=traded/);
-  await main(page).getByRole("group", { name: "칸 크기" }).getByRole("button", { name: "거래대금" }).click();
+  await settings(page).getByRole("group", { name: "칸 크기" }).getByRole("button", { name: "거래대금" }).click();
   await expect(page).not.toHaveURL(/size=/);
 });
 
@@ -116,7 +120,14 @@ test("테마 머리에 거래대금 가중 평균과 거래대금 합, 상승·�
   await expect(summary).toContainText("거래대금 5,000억");
   await expect(summary).toContainText("상승 1 · 보합 0 · 하락 1");
   await expect(summary).toContainText("대장주 삼성전자");
-  await expect(tile(page, "005930")).toHaveAttribute("title", "삼성전자 +2.00%\n005930 · 거래대금 3,000억 · 반도체 안 비중 60.0%");
+  await expect(tile(page, "005930")).not.toHaveAttribute("title", /.+/);
+  await tile(page, "005930").hover();
+  const card = page.getByRole("tooltip");
+  await expect(card).toContainText("삼성전자");
+  await expect(card).toContainText("005930");
+  await expect(card.getByText("등락률", { exact: true }).locator("xpath=following-sibling::dd[1]")).toHaveText("+2.00%");
+  await expect(card.getByText("거래대금", { exact: true }).locator("xpath=following-sibling::dd[1]")).toHaveText("3,000억");
+  await expect(card.getByText("반도체 안 비중", { exact: true }).locator("xpath=following-sibling::dd[1]")).toHaveText("60.0%");
 });
 
 test("테마 순서는 기본이 가중 평균 등락률 높은 순이고 바꾸면 주소에 남는다", async ({ page, scenario }) => {
@@ -124,7 +135,8 @@ test("테마 순서는 기본이 가중 평균 등락률 높은 순이고 바꾸
   const titles = () => main(page).locator(".hm-group h2").allTextContents();
   await page.goto("/heatmap");
   await expect.poll(titles).toEqual(["지주", "반도체"]);
-  const order = main(page).getByRole("group", { name: "테마 순서" });
+  await main(page).getByRole("button", { name: "보기 설정" }).click();
+  const order = settings(page).getByRole("group", { name: "테마 순서" });
   await order.getByRole("button", { name: "내 순서" }).click();
   await expect.poll(titles).toEqual(["반도체", "지주"]);
   await expect(page).toHaveURL(/[?&]order=custom(&|$)/);

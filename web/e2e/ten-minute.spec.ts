@@ -5,7 +5,7 @@ import type { SeriesKey } from "../src/api/bars";
 import type { Drawing } from "../src/api/generated/Drawing";
 import type { Layout } from "../src/api/generated/Layout";
 import { type Scenario, cell, chartOf, DEFAULT_LAYOUT_ID, expect, test, firstChart, withFirstChart, pickDesktopVenue, pollSaved } from "./harness";
-import { mirror } from "./drawing-probe";
+import { foldedMenuItems, mirror } from "./drawing-probe";
 
 const TEN_MINUTES = 600;
 
@@ -125,7 +125,7 @@ test.describe("데스크톱", () => {
     const saved = layoutSaved(page, { venue: "combined", period: "10m" });
     await choose(periods, "10분");
     await saved;
-    await expect(page.getByRole("contentinfo").getByText(/자동 저장됨/)).toBeVisible();
+    await expect(page.getByRole("contentinfo").getByText(/^저장됨$/)).toBeVisible();
 
     const expectRestored = async () => {
       await expectTenMinuteBars(page, requested, "삼성전자 통합 10분", { symbol: "005930", venue: "combined", period: "10m" });
@@ -245,6 +245,7 @@ test.describe("분석 도구", () => {
       const box = (await chartOf(cell(page)).boundingBox())!;
       await page.mouse.click(box.x + box.width / 2, box.y + line.y);
       await page.getByRole("button", { name: "드로잉 더 보기" }).click();
+      await foldedMenuItems(page);
       await page.getByRole("menuitem", { name: item, exact: true }).click();
     };
 

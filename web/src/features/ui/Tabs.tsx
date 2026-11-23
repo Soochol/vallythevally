@@ -1,7 +1,7 @@
 import { type KeyboardEvent, type ReactNode, useRef } from "react";
 import { rovingTarget } from "./roving";
 
-export interface TabItem { id: string; label: ReactNode; count?: number; disabled?: boolean }
+export interface TabItem { id: string; label: ReactNode; count?: number; disabled?: boolean; ariaLabel?: string }
 
 export const tabDomId = (prefix: string, id: string): string => `${prefix}-tab-${id}`;
 export const panelDomId = (prefix: string, id: string): string => `${prefix}-panel-${id}`;
@@ -39,6 +39,7 @@ export function Tabs({ label, idPrefix, items, value, onChange, className = "" }
             role="tab"
             aria-selected={selected}
             aria-controls={panelDomId(idPrefix, item.id)}
+            aria-label={item.ariaLabel}
             tabIndex={item.id === entry ? 0 : -1}
             disabled={item.disabled}
             onClick={() => onChange(item.id)}

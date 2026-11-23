@@ -28,9 +28,11 @@ test("지표 창은 세 탭과 띄운 지표 목록, 공유 설정 양식, 입�
   expect(html).toContain("변경 적용");
   expect(html).toContain('data-chart-control=""');
   expect(html).toContain('data-command-frame=""');
-  expect(html).toContain("976px");
-  expect(html).toContain("300px");
+  expect(html).toContain("ic-frame");
+  expect(html).toContain('data-solid=""');
+  expect(html).toContain('data-placement="top-end"');
   expect(html).toContain("Shift+Enter");
+  expect(html.match(/<footer/g)).toHaveLength(1);
 });
 
 test("지표 추가 탭은 종류별 묶음에 추가 후보를 두고 추가 버튼을 보인다", () => {
@@ -52,5 +54,6 @@ test("비교 종목 탭은 같은 틀에서 비교 수·가격축·추가 동작
   expect(html).toContain("비교 종목 0/3");
   expect(html).toContain("가격축을 % 변화로");
   expect(html).toContain("비교 종목 추가");
+  expect(html).not.toContain("<kbd class=\"ui-kbd \">Tab</kbd>");
   expect(html).toContain('data-chart-control=""');
 });

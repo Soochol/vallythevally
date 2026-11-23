@@ -1,11 +1,11 @@
 import { useQuery } from "@tanstack/react-query";
-import { useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import type { Fundamentals } from "../../api/generated/Fundamentals";
 import type { SymbolCode } from "../../api/generated/SymbolCode";
 import type { Venue } from "../../api/generated/Venue";
 import { daySummaryQuery } from "../../api/userData";
 import { marketSocket } from "../../stores/realtime";
-import type { TradeRow } from "../trades/tape";
+import type { LastTrade, TradeRow } from "../trades/tape";
 import { useTradeTape } from "../trades/useTradeTape";
 import { type InfoLine, type InfoPage, quoteInfoItems } from "./quoteInfo";
 import { tradeRows } from "./recentTrades";
@@ -38,6 +38,7 @@ export function useInfoPager(): InfoPager {
 
 export interface LadderTrades {
   readonly strength: number | null;
+  readonly lastTrade: LastTrade | null;
   readonly trades: readonly TradeRow[];
   readonly hold: () => void;
   readonly release: () => void;
@@ -45,5 +46,9 @@ export interface LadderTrades {
 
 export function useLadderTrades(code: SymbolCode, venue: Venue): LadderTrades {
   const { state, dispatch } = useTradeTape(marketSocket, code, venue, HISTORY_PAGES);
-  return { strength: state.strength, trades: tradeRows(state, state.historyVenue ?? venue), hold: () => dispatch({ type: "hold" }), release: () => dispatch({ type: "release" }) };
+  const shownVenue = state.historyVenue ?? venue;
+  const trades = useMemo(() => tradeRows(state, shownVenue), [state, shownVenue]);
+  const hold = useCallback(() => dispatch({ type: "hold" }), [dispatch]);
+  const release = useCallback(() => dispatch({ type: "release" }), [dispatch]);
+  return { strength: state.strength, lastTrade: state.lastTrade, trades, hold, release };
 }

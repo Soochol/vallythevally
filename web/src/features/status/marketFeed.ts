@@ -59,10 +59,34 @@ export function acceptedChoices(source: MarketSourceStatus | null, ranking: Rank
 
 export const choiceOn = (source: MarketSourceStatus | null, ranking: Ranking, field: string, value: string): boolean => acceptedChoices(source, ranking, field)?.includes(value) ?? true;
 
-const lastSyllable = (text: string): number => text.charCodeAt(text.length - 1) - 0xac00;
-const hasFinalConsonant = (text: string): boolean => lastSyllable(text) % 28 !== 0;
-const objectParticle = (text: string): string => (hasFinalConsonant(text) ? "을" : "를");
-const directionParticle = (text: string): string => (!hasFinalConsonant(text) || lastSyllable(text) % 28 === 8 ? "로" : "으로");
+export const managedExcludable = (source: MarketSourceStatus | null, kind: Ranking["kind"]): boolean => rankingChoicesFor(source, kind)?.excludesManaged ?? true;
+
+const HANGUL_START = 0xac00;
+const HANGUL_END = 0xd7a3;
+const RIEUL_FINAL = 8;
+const LATIN_LETTERS_WITH_FINAL = new Set("LMNR");
+
+interface FinalSound {
+  present: boolean;
+  rieul: boolean;
+}
+
+function finalSoundOf(text: string): FinalSound {
+  const last = text.charAt(text.length - 1);
+  const code = last.charCodeAt(0);
+  if (code >= HANGUL_START && code <= HANGUL_END) {
+    const final = (code - HANGUL_START) % 28;
+    return { present: final !== 0, rieul: final === RIEUL_FINAL };
+  }
+  const upper = last.toUpperCase();
+  return { present: LATIN_LETTERS_WITH_FINAL.has(upper), rieul: upper === "L" || upper === "R" };
+}
+
+const objectParticle = (text: string): string => (finalSoundOf(text).present ? "을" : "를");
+const directionParticle = (text: string): string => {
+  const sound = finalSoundOf(text);
+  return !sound.present || sound.rieul ? "로" : "으로";
+};
 
 export interface Adapted {
   ranking: Ranking;
@@ -83,6 +107,10 @@ export function adaptRanking(source: MarketSourceStatus | null, ranking: Ranking
     const label = FIELD_LABEL[field] ?? field;
     const shown = labelOf(field, first);
     changes.push(`${label}${objectParticle(label)} ‘${shown}’${directionParticle(shown)} 바꿨습니다`);
+  }
+  if ("excludeManaged" in ranking && ranking.excludeManaged && !managedExcludable(source, ranking.kind)) {
+    next = { ...next, excludeManaged: false };
+    changes.push("관리종목 빼기를 껐습니다");
   }
   return { ranking: next as Ranking, changes };
 }

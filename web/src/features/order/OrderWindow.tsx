@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import type { OrderSide } from "../../api/generated/OrderSide";
 import type { TradingOpenOrder } from "../../api/generated/TradingOpenOrder";
 import type { Venue } from "../../api/generated/Venue";
@@ -7,6 +7,8 @@ import type { WindowId } from "../../layout/kinds";
 import { useFundamentals, useSymbolInfo } from "../../api/queries";
 import { formatPrice } from "../../lib/format";
 import { isIndexCode } from "../../lib/symbol";
+import { createValueStore, useStoreValue } from "../../lib/valueStore";
+import { useStableCallback } from "../../lib/useStableCallback";
 import { useMockEnvironment } from "../../stores/kiwoomLink";
 import { useLayoutStore } from "../../stores/layout";
 import { useOrderSettings, useUiStore } from "../../stores/ui";
@@ -21,30 +23,34 @@ import { stripTotals } from "../book/bookModel";
 import { visibleAfterHours, visibleExpected } from "../book/sessionWindows";
 import { type InfoPager, useInfoPager, useLadderTrades, useQuoteInfo } from "../market-window/useLadderSlots";
 import { useShownVenue } from "../market-window/useShownVenue";
-import { EmptyState } from "../overlay/State";
+import { EmptyState, ErrorState } from "../overlay/State";
+import { isMarketOpen } from "../../chart/time";
+import { FeedStrip, useFeedDownSince } from "../market-window/FeedStrip";
+import { SymbolHead } from "../market-window/SymbolHead";
 import { openSystemSettings } from "../system-settings/open";
-import { AccountBand } from "./AccountBand";
+import { AccountPart } from "./AccountPart";
 import { averageRowPrice, ETF_ETN_AFTER_HOURS_TEXT, holdingOf, isEtfOrEtnAfterHours, type ProfitUnit, sellOrderQuantity, sellQuantityAtPrice, toggledUnit } from "./holdingSummary";
-import { HoldingSummary } from "./HoldingSummary";
-import { OrderSettingsPopover } from "./OrderSettingsPopover";
 import { tickRuleOf } from "../market-window/tick";
 import { fullRangePrices } from "./priceRange";
 import { HighValueConfirm, type HighValueRequest } from "./HighValueConfirm";
 import { DragGhost } from "./DragGhost";
-import { type HoverCell, OrderLadder } from "./OrderLadder";
+import { type HoverCell, type LadderActions, OrderLadder } from "./OrderLadder";
 import { orderEntryKey } from "./orderEntries";
 import { OrderTotals } from "./OrderTotals";
-import { OrderStatusBar } from "./OrderStatusBar";
+import { type CancelConfirm, OrderStatusBar } from "./OrderStatusBar";
 import { REJECT_TEXT } from "./statusText";
-import { OrderEstimate, QuantityRow } from "./QuantityRow";
-import { buyBlock, buyPreview, capacityProblem, type DragOutcome, estimateNote, marginOf, modifyBuyProblem, type DragSource, needsHighValueConfirm, orderAmount, SIDE_LABEL, typedQuantity } from "./orderRules";
-import type { PresetKind } from "./orderSettings";
+import { buyBlock, CANCEL_CONFIRM_MS, cancelConfirmText, capacityProblem, type DragOutcome, groupKey, marginOf, modifyBuyProblem, type DragSource, needsCancelConfirm, needsHighValueConfirm, orderAmount, orderCountOf, type PriceGroup, SIDE_LABEL, typedQuantity } from "./orderRules";
+import { type PresetKind, routeLabel } from "./orderSettings";
+import { withDirectionJosa } from "./josa";
 import { pendingWrites } from "./pendingWrites";
-import { FALLBACK_NOTICE } from "./orderAccount";
+import { accountNumberText, FALLBACK_NOTICE } from "./orderAccount";
 import { useOrderAccess, useOrderData } from "./useOrderData";
 import { useOrderAccount } from "./useOrderAccount";
 import { useOrderDrag } from "./useOrderDrag";
 import { useOrderWrites } from "./useOrderWrites";
+
+const targetSignature = (groups: ReadonlyMap<string, PriceGroup>, targets: readonly { readonly side: OrderSide; readonly price: number }[]): string =>
+  targets.flatMap((target) => groups.get(groupKey(target.side, target.price))?.orders.map((order) => order.orderNo) ?? []).sort().join(",");
 
 const EXPLORER_UNAVAILABLE = "상·하한가를 아직 받지 못했습니다";
 const CLOCK_MS = 30_000;
@@ -61,7 +67,8 @@ const sameLadderPrices = (a: LadderPrices | null, b: LadderPrices | null): boole
 function OrderBody({ id, code, infoPager }: { id: WindowId; code: SymbolCode; infoPager: InfoPager }) {
   const mock = useMockEnvironment();
   const quoteVenue = useShownVenue(code);
-  const feed = useBookFeed(code, quoteVenue);
+  const trades = useLadderTrades(code, quoteVenue);
+  const feed = useBookFeed(code, quoteVenue, trades.lastTrade);
   const choice = useOrderAccount();
   const access = useOrderAccess(choice);
   const accountRef = choice.current?.ref ?? null;
@@ -69,13 +76,14 @@ function OrderBody({ id, code, infoPager }: { id: WindowId; code: SymbolCode; in
   const [kept] = useState(() => { const { prefs } = useUiStore.getState(); return prefs.orderSettings.keepLastEntry ? prefs.orderEntries[entryKey] ?? null : null; });
   const [presetKind, setPresetKind] = useState<PresetKind>(kept?.presetKind ?? "sharePresets");
   const [input, setInput] = useState(kept === null ? "10" : String(kept.quantity));
-  const [hover, setHover] = useState<HoverCell | null>(null);
+  const [hover] = useState(() => createValueStore<HoverCell | null>(null));
   const [confirm, setConfirm] = useState<HighValueRequest | null>(null);
+  const [cancelConfirm, setCancelConfirm] = useState<CancelConfirm | null>(null);
   const [exploring, setExploring] = useState(false);
   const [centerToken, setCenterToken] = useState(0);
   const ladder = useRef<HTMLDivElement>(null);
   const drag = useOrderDrag(ladder, (source, outcome) => drop(source, outcome));
-  const dragging = drag.view !== null;
+  const dragging = useStoreValue(drag.views, (view) => view !== null);
   const [profitUnit, setProfitUnit] = useState<ProfitUnit>("won");
   const [now, setNow] = useState(() => Date.now());
   const settings = useOrderSettings();
@@ -87,10 +95,18 @@ function OrderBody({ id, code, infoPager }: { id: WindowId; code: SymbolCode; in
   const nxtNotTraded = orderVenue === "nxt" && symbolInfo?.nxtEnabled === false;
 
   useEffect(() => {
+    if (cancelConfirm === null) return;
+    const timer = setTimeout(() => setCancelConfirm(null), CANCEL_CONFIRM_MS);
+    return () => clearTimeout(timer);
+  }, [cancelConfirm]);
+
+  useEffect(() => {
     const timer = setInterval(() => setNow(Date.now()), CLOCK_MS);
     return () => clearInterval(timer);
   }, []);
 
+  const downSince = useFeedDownSince(feed.connected);
+  const marketOpen = isMarketOpen(Math.floor(now / 1000));
   const view = feed.book.phase === "empty" ? null : feed.book.view;
   const bounds = { lower: limits?.lowerLimit ?? null, upper: limits?.upperLimit ?? null };
   const quotes = view ? { asks: view.asks, bids: view.bids, lastPrice: feed.lastPrice, previousClose: feed.previousClose } : null;
@@ -104,11 +120,15 @@ function OrderBody({ id, code, infoPager }: { id: WindowId; code: SymbolCode; in
   const shownRows: LadderRow[] = quotes && heldLadder ? (explorerOn ? buildLadderRows(fullPrices, quotes) : buildLadderRows(heldLadder.prices, quotes, heldLadder.sidesSplit)) : [];
   const rows = settings.rate ? shownRows : shownRows.map((row) => ({ ...row, rate: null }));
   const info = useQuoteInfo({ code, venue: quoteVenue, lastPrice: feed.lastPrice, previousClose: feed.previousClose, fundamentals: limits, page: infoPager.page });
-  const trades = useLadderTrades(code, quoteVenue);
   const expected = view ? visibleExpected(view.t, Math.floor(now / 1000), view.expected) : null;
   const infoSlots = placeInfoItems(rows, info, expectedItemsOnPage(infoPager.page, expected));
   const totals = stripTotals(view && { ask: view.totalAsk, bid: view.totalBid }, visibleAfterHours(feed.afterHours?.totals ?? null, Math.floor(now / 1000)));
   const data = useOrderData(accountRef, code, access.open, referencePrice);
+
+  const cancelConfirmStale = cancelConfirm !== null && (cancelConfirm.account !== accountRef || targetSignature(data.groups, cancelConfirm.targets) !== cancelConfirm.signature);
+  useEffect(() => {
+    if (cancelConfirmStale) setCancelConfirm(null);
+  }, [cancelConfirmStale]);
   const writes = useOrderWrites(choice.current, code, orderVenue, id);
   const fellBack = choice.fellBack;
   useEffect(() => {
@@ -123,8 +143,6 @@ function OrderBody({ id, code, infoPager }: { id: WindowId; code: SymbolCode; in
   const writable = access.open && !data.blocked && writes.status?.unknown !== true;
 
   const quantity = typedQuantity(input);
-  const unitPrice = hover?.price ?? referencePrice ?? 0;
-  const estimate = unitPrice > 0 && quantity > 0 ? unitPrice * quantity : null;
 
   const latestPlace = useRef<(side: OrderSide, price: number, cappedQuantity?: number) => void>(() => undefined);
 
@@ -145,7 +163,7 @@ function OrderBody({ id, code, infoPager }: { id: WindowId; code: SymbolCode; in
     }
     const block = side === "buy" ? buyBlock(price, orderQuantity, data.capacity.buying) : null;
     if (block) {
-      writes.say({ tone: "error", text: block.text, action: block.maxQuantity > 0 ? { label: `${block.maxQuantity.toLocaleString("ko-KR")}로 보내기`, run: () => latestPlace.current(side, price, block.maxQuantity) } : undefined });
+      writes.say({ tone: "error", text: block.text, action: block.maxQuantity > 0 ? { label: `${withDirectionJosa(block.maxQuantity)} 보내기`, run: () => latestPlace.current(side, price, block.maxQuantity) } : undefined });
       return;
     }
     submit(side, price, orderQuantity);
@@ -153,13 +171,21 @@ function OrderBody({ id, code, infoPager }: { id: WindowId; code: SymbolCode; in
 
   latestPlace.current = place;
 
+  const confirmContext = (route: string) => ({
+    name: symbolInfo?.name ?? code,
+    code,
+    account: accountNumberText(choice.current?.broker ?? "kiwoom", choice.current?.tail ?? null),
+    route,
+    mock,
+  });
+
   const submit = (side: OrderSide, price: number, quantity: number) => {
     const margin = side === "buy" ? marginOf(orderAmount(price, quantity), data.capacity.buying) : 0;
     const send = (confirmHighValue: boolean) => {
       writes.place({ side, price, quantity, confirmHighValue, margin, listedWhenIn: side === "sell" ? sellQuantityAtPrice(data.groups, pending, code, price, data.openOrdersListedAt) + quantity : 0 });
       if (settings.keepLastEntry) rememberEntry(entryKey, { presetKind, quantity, usedAt: Date.now() });
     };
-    if (needsHighValueConfirm(price, quantity)) setConfirm({ title: `${SIDE_LABEL[side]} ${formatQuantity(quantity)} · ${formatPrice(price, false)}원`, amount: price * quantity, run: () => send(true) });
+    if (needsHighValueConfirm(price, quantity)) setConfirm({ ...confirmContext(routeLabel(orderVenue)), side, verb: "주문", detail: `${formatQuantity(quantity)} · ${formatPrice(price, false)}원`, amount: price * quantity, run: () => send(true) });
     else send(false);
   };
 
@@ -170,20 +196,40 @@ function OrderBody({ id, code, infoPager }: { id: WindowId; code: SymbolCode; in
       return;
     }
     const run = () => writes.modifyAll(orders, to);
-    if (orders.some((order) => needsHighValueConfirm(to, order.openQuantity))) setConfirm({ title: `${SIDE_LABEL[side]} 정정 · ${formatPrice(price, false)}원 → ${formatPrice(to, false)}원`, amount: to * orders.reduce((sum, order) => sum + order.openQuantity, 0), run });
+    if (orders.some((order) => needsHighValueConfirm(to, order.openQuantity))) setConfirm({ ...confirmContext([...new Set(orders.map((order) => routeLabel(order.venue)))].join("·")), side, verb: "정정", detail: `${formatPrice(price, false)}원 → ${formatPrice(to, false)}원`, amount: to * orders.reduce((sum, order) => sum + order.openQuantity, 0), run });
+    else run();
+  };
+
+  const cancelMany = (side: OrderSide, targets: readonly PriceGroup[], run: () => void) => {
+    const orderCount = orderCountOf(targets);
+    if (needsCancelConfirm(orderCount)) setCancelConfirm({ text: `${SIDE_LABEL[side]} ${cancelConfirmText(orderCount)}`, account: accountRef, targets, signature: targetSignature(data.groups, targets), run: () => { setCancelConfirm(null); run(); } });
     else run();
   };
 
   const drop = (source: DragSource, outcome: DragOutcome) => {
     if (outcome.kind === "abort") return;
     if (source.kind === "chip") {
-      if (outcome.kind === "cancel") writes.cancelAtPrice(source.group.side, source.group.price);
+      if (outcome.kind === "cancel") cancelMany(source.group.side, [source.group], () => writes.cancelAtPrice(source.group.side, source.group.price));
       else modifyOrders(source.group.side, source.group.price, source.group.orders, outcome.price);
     } else if (source.kind === "order") {
       if (outcome.kind === "cancel") writes.cancelOne(source.order.orderNo);
       else modifyOrders(source.order.side, source.order.price, [source.order], outcome.price);
-    } else source.groups.forEach((group) => writes.cancelAtPrice(group.side, group.price));
+    } else cancelMany(source.side, source.groups, () => source.groups.forEach((group) => writes.cancelAtPrice(group.side, group.price)));
   };
+
+  const pickAccount = useStableCallback((account: string) => setSettings({ ...settings, account }));
+  const toggleProfitUnit = useCallback(() => setProfitUnit(toggledUnit), []);
+  const toggleExplorer = useStableCallback(() => {
+    if (!explorerOn) setCenterToken((token) => token + 1);
+    setExploring(!explorerOn);
+  });
+  const centerOnCurrent = useCallback(() => setCenterToken((token) => token + 1), []);
+  const placeOrder = useStableCallback(place);
+  const cancelOne = useStableCallback(writes.cancelOne);
+  const cancelAtPrice = useStableCallback(writes.cancelAtPrice);
+  const ladderActions = useMemo<LadderActions>(() => ({ place: placeOrder, cancelOne, cancelAtPrice, cancelGroups: (targets) => targets.forEach((g) => cancelAtPrice(g.side, g.price)) }), []);
+  const totalsActions = useMemo(() => ({ cancelOne, cancelAtPrice }), []);
+  const sellOrdered = sellOrderQuantity(data.groups, pending, code, data.openOrdersListedAt);
 
   return (
     <div className="od" data-testid="order-window" data-symbol={code} data-venue={orderVenue} data-quote-venue={quoteVenue} data-writable={writable ? "" : undefined}>
@@ -193,31 +239,26 @@ function OrderBody({ id, code, infoPager }: { id: WindowId; code: SymbolCode; in
           <button type="button" className="od-link" onClick={() => openSystemSettings("kiwoom")}>시스템 설정 열기</button>
         </div>
       )}
-      <AccountBand windowId={id} choice={choice} onPick={(account) => setSettings({ ...settings, account })} maskAccount={settings.maskAccount} openOrders={data.openOrders} balance={data.balance} executions={data.executions} writable={writable} mock={mock} policy={data.orderable?.policy ?? null} onCancel={writes.cancelOne} />
-      <HoldingSummary account={accountRef} holding={holding} orderable={data.orderable} buyableProblem={data.buyableProblem} sellOrdered={sellOrderQuantity(data.groups, pending, code, data.openOrdersListedAt)} unit={profitUnit} onUnit={() => setProfitUnit(toggledUnit)} onFill={setInput} />
-      <div className="od-entry">
-        <QuantityRow presetKind={presetKind} input={input} sharePresets={settings.sharePresets} amountPresets={settings.amountPresets} referencePrice={referencePrice} keepLastEntry={settings.keepLastEntry} onPresetKind={setPresetKind} onInput={setInput} />
-        <div className="od-toolbar">
-          <OrderEstimate estimate={estimate} note={estimate !== null && hover?.side !== "sell" ? estimateNote(estimate, data.capacity.buying) : null} />
-          <button type="button" className="od-tool" data-testid="order-explorer" aria-pressed={explorerOn} disabled={referencePrice === null || fullPrices === null} title={fullPrices === null ? EXPLORER_UNAVAILABLE : undefined} onClick={() => { if (!explorerOn) setCenterToken((token) => token + 1); setExploring(!explorerOn); }}>전체 호가</button>
-          <button type="button" className="od-tool" data-testid="order-current" disabled={!explorerOn} onClick={() => setCenterToken((token) => token + 1)}>현재가</button>
-          <OrderSettingsPopover settings={settings} venue={orderVenue} mock={mock} nxtNotTraded={nxtNotTraded} holding={holding !== null} onChange={setSettings} />
-        </div>
-      </div>
+      <SymbolHead code={code} name={symbolInfo?.name ?? null} lastPrice={feed.lastPrice} previousClose={feed.previousClose} marketOpen={marketOpen} mock={mock} />
+      <AccountPart windowId={id} choice={choice} accountRef={accountRef} onPickAccount={pickAccount} openOrders={data.openOrders} balance={data.balance} executions={data.executions} writable={writable} mock={mock} policy={data.orderable?.policy ?? null} onCancel={cancelOne}
+        holding={holding} orderable={data.orderable} buyableProblem={data.buyableProblem} sellOrdered={sellOrdered} profitUnit={profitUnit} onProfitUnit={toggleProfitUnit}
+        presetKind={presetKind} input={input} referencePrice={referencePrice} onPresetKind={setPresetKind} onInput={setInput} quantity={quantity} buying={data.capacity.buying} hover={hover}
+        explorerOn={explorerOn} explorerUnavailable={referencePrice === null || fullPrices === null} explorerTitle={fullPrices === null ? EXPLORER_UNAVAILABLE : undefined} onToggleExplorer={toggleExplorer} onCurrent={centerOnCurrent}
+        settings={settings} orderVenue={orderVenue} nxtNotTraded={nxtNotTraded} onSettings={setSettings} />
+      {!feed.connected && <FeedStrip since={downSince} />}
       <div className="bk-ladder od-ladder-wrap" data-stale={feed.connected ? undefined : ""} data-exploring={explorerOn ? "" : undefined}>
         {view
-            ? <OrderLadder rows={rows} previousClose={feed.previousClose} groups={data.groups} writable={writable} previewQuantity={quantity} buyPreview={(price) => buyPreview(price, quantity, data.capacity.buying)} hover={hover} onHover={setHover} averagePrice={averagePrice} divider={settings.divider} explorer={explorerOn ? { centerPrice: referencePrice, centerToken } : undefined} ladder={ladder} drag={drag} expectedPrice={expected?.price ?? null} rowSlots={{ infoCard: infoSlot(infoSlots, infoPager), bottomLeft: tradeSlot(trades, feed.previousClose) }}
-                actions={{ place, cancelOne: writes.cancelOne, cancelAtPrice: writes.cancelAtPrice, cancelGroups: (targets) => targets.forEach((g) => writes.cancelAtPrice(g.side, g.price)) }} />
-            : <EmptyState title={feed.snapshotFailed ? "호가를 불러오지 못했습니다" : "호가를 기다리는 중입니다"} />}
-        <OrderStatusBar status={writes.status} queued={writes.queued} blocked={data.blocked} onUndo={writes.cancelOne} onReconcile={writes.reconcile} onDismiss={writes.dismiss} />
+            ? <OrderLadder rows={rows} previousClose={feed.previousClose} groups={data.groups} writable={writable} previewQuantity={quantity} buying={data.capacity.buying} hover={hover} averagePrice={averagePrice} divider={settings.divider} explorer={explorerOn ? { centerPrice: referencePrice, centerToken } : undefined} currentToken={centerToken} ladder={ladder} drag={drag} expectedPrice={expected?.price ?? null} rowSlots={{ infoCard: infoSlot(infoSlots, infoPager), bottomLeft: tradeSlot(trades, feed.previousClose) }} actions={ladderActions} />
+            : feed.snapshotFailed ? <ErrorState message="호가를 불러오지 못했습니다" retry={feed.retry} /> : <EmptyState title="호가를 기다리는 중입니다" />}
       </div>
-      <OrderTotals groups={data.groups} writable={writable} actions={writes} drag={drag} />
+      <OrderStatusBar status={writes.status} queued={writes.queued} blocked={data.blocked} confirm={cancelConfirmStale ? null : cancelConfirm} onUndo={writes.cancelOne} onReconcile={writes.reconcile} onDismiss={writes.dismiss} />
+      <OrderTotals groups={data.groups} writable={writable} actions={totalsActions} drag={drag} />
       <Strip>
         <TotalFigure testId="order-total-ask" tone="down" value={totals.ask} afterHours={totals.source === "afterHours"} description={totals.description} />
         <RatioBar buy={totals.bid ?? 0} sell={totals.ask ?? 0} sellFirst label={totals.description ?? "총잔량 매도·매수 비율"} />
         <TotalFigure testId="order-total-bid" tone="up" value={totals.bid} afterHours={totals.source === "afterHours"} description={totals.description} />
       </Strip>
-      {drag.view && <DragGhost view={drag.view} />}
+      <DragGhost drag={drag} />
       {confirm && <HighValueConfirm request={confirm} onClose={() => setConfirm(null)} />}
     </div>
   );

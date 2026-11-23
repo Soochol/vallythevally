@@ -1,6 +1,24 @@
 import type { HeatmapFlowPoint } from "../../api/generated/HeatmapFlowPoint";
 
-export const FLOW_FRAME = { width: 900, height: 360, left: 52, right: 150, top: 14, bottom: 30 } as const;
+export const FLOW_FRAME = { left: 52, top: 14, bottom: 30, minRight: 96, maxRight: 150, rightShare: 0.28 } as const;
+
+export function rightMargin(width: number): number {
+  return Math.min(FLOW_FRAME.maxRight, Math.max(FLOW_FRAME.minRight, Math.round(width * FLOW_FRAME.rightShare)));
+}
+
+const WIDE_CHAR = /[\u1100-\u11ff\u3130-\u318f\uac00-\ud7af\u4e00-\u9fff]/;
+const NARROW_EM = 0.62;
+
+export function textWidth(text: string, fontPx: number): number {
+  return [...text].reduce((sum, char) => sum + (WIDE_CHAR.test(char) ? fontPx : fontPx * NARROW_EM), 0);
+}
+
+export function fitLabel(text: string, maxPx: number, fontPx: number): string {
+  if (textWidth(text, fontPx) <= maxPx) return text;
+  const chars = [...text];
+  while (chars.length > 1 && textWidth(`${chars.join("")}…`, fontPx) > maxPx) chars.pop();
+  return `${chars.join("")}…`;
+}
 
 const KST_OFFSET_SECONDS = 9 * 3600;
 const HOUR_SECONDS = 3600;

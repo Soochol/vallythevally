@@ -104,6 +104,22 @@ function keysOf(row: GestureRow): string {
   return `${prefix}${MODE_TEXT[row.mode]}${TARGET_TEXT[row.target]}${row.kind === "click" ? "클릭" : "끌기"}`;
 }
 
+export type HelpSection = "그리기" | "고르기" | "옮기기·복제" | "지우기";
+export const HELP_SECTIONS: readonly HelpSection[] = ["그리기", "고르기", "옮기기·복제", "지우기"];
+
+function sectionOf(row: GestureRow): HelpSection {
+  if (row.kind === "hold") return row.effect === "axisLock" ? "옮기기·복제" : "그리기";
+  if (row.mode === "erase") return "지우기";
+  if (row.mode === "draw") return "그리기";
+  if (row.kind === "click" || row.action === "box") return "고르기";
+  return "옮기기·복제";
+}
+
+export function gestureSections(registered: ReadonlySet<ModeId>, rows: readonly GestureRow[] = GESTURES): readonly { title: HelpSection; rows: readonly { keys: string; label: string }[] }[] {
+  const shown = rows.filter((row) => isAvailable(row, registered));
+  return HELP_SECTIONS.map((title) => ({ title, rows: shown.filter((row) => sectionOf(row) === title).map((row) => ({ keys: keysOf(row), label: row.label })) }));
+}
+
 export function gestureHelp(registered: ReadonlySet<ModeId>, rows: readonly GestureRow[] = GESTURES): readonly { keys: string; label: string }[] {
-  return rows.filter((row) => isAvailable(row, registered)).map((row) => ({ keys: keysOf(row), label: row.label }));
+  return gestureSections(registered, rows).flatMap((section) => section.rows);
 }

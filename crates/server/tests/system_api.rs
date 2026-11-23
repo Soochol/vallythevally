@@ -519,30 +519,39 @@ async fn a_write_from_another_site_host_or_content_type_is_refused_and_leaves_th
 }
 
 #[tokio::test]
-async fn settings_report_the_values_but_never_the_opendart_key() {
-    const DART_KEY: &str = "FAKE-OPENDART-system-key";
+async fn settings_report_the_values_and_no_longer_carry_the_financial_collection_switches() {
     let (env, fake) = (Env::new(), ScriptedTransport::new());
-    let dart = [("OPENDART_API_KEY", DART_KEY), ("VALLY_DART_BASE_URL", "http://127.0.0.1:9"), ("VALLY_KIND_BASE_URL", "http://127.0.0.1:9")];
-    let server = env.spawn(&fake, &dart);
+    let server = env.spawn(&fake, &[]);
     let client = Client::of(&server).await;
     let (status, settings) = client.get("/api/system/settings").await;
     assert_eq!(status, 200);
-    assert!(!settings.to_string().contains(DART_KEY), "{settings}");
-    assert_eq!(settings["opendartKeyPresent"], true);
     assert_eq!(settings["keyPath"].as_str(), env.list_path().to_str());
     assert_eq!(settings["kiwoomTarget"], json!({"kind": "loopback", "host": null}));
     assert_eq!(settings["serverVersion"], env!("CARGO_PKG_VERSION"));
     for field in ["bind", "logFilter", "staticDir", "dbPath", "screenerDbPath", "financialDbPath", "tokenPath", "lockPath"] {
         assert!(settings[field].as_str().is_some_and(|value| !value.is_empty()), "{field}: {settings}");
     }
-    for field in ["screenerUpdateOnStart", "financialAutomatic"] {
-        assert!(settings[field].is_boolean(), "{field}: {settings}");
+    assert!(settings["screenerUpdateOnStart"].is_boolean(), "{settings}");
+    for retired in ["financialAutomatic", "opendartKeyPresent"] {
+        assert!(settings.get(retired).is_none(), "{retired}: {settings}");
     }
     server.stop().await;
+}
 
-    let without = env.spawn(&fake, &[]);
-    let client = Client::of(&without).await;
-    assert_eq!(client.get("/api/system/settings").await.1["opendartKeyPresent"], false);
+#[tokio::test]
+async fn a_retired_opendart_key_in_the_environment_starts_the_server_and_never_shows_up() {
+    const DART_KEY: &str = "FAKE-OPENDART-system-key";
+    let (env, fake) = (Env::new(), ScriptedTransport::new());
+    let retired = [("OPENDART_API_KEY", DART_KEY), ("VALLY_FINANCIAL_AUTOMATIC", "on"), ("VALLY_DART_BASE_URL", "http://127.0.0.1:9")];
+    let server = env.spawn(&fake, &retired);
+    let client = Client::of(&server).await;
+    let (status, settings) = client.get("/api/system/settings").await;
+    assert_eq!(status, 200);
+    assert!(!settings.to_string().contains(DART_KEY), "{settings}");
+    let (status, source) = client.get("/api/symbols/005930/financial-source").await;
+    assert!(!source.to_string().contains(DART_KEY), "{status} {source}");
+    let logs = server.stop().await;
+    assert!(!logs.contains(DART_KEY), "{logs}");
 }
 
 #[test]

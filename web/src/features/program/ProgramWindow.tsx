@@ -9,7 +9,10 @@ import type { WindowId } from "../../layout/kinds";
 import { formatPrice, MINUS } from "../../lib/format";
 import { marketSocket } from "../../stores/realtime";
 import { MarketWindowGate } from "../market-window/MarketWindowGate";
+import { MarketHead, useDayQuote } from "../market-window/MarketHead";
+import { priceTone } from "../market-window/PriceLadder";
 import { formatQuantity, withSign } from "../market-window/format";
+import { useWindowedRows } from "../market-window/useWindowedRows";
 import { ErrorState, EmptyState, Skeleton } from "../overlay/State";
 import { boldKeys, type ColumnWidths, eokFromMillionWon, formatEokAmount, historyRows, isNoProgramData, joinHistoryAndLive, liveRow, type ProgramLine, type ProgramRow, rowsOf, sparklinePoints, widestSoFar } from "./program";
 
@@ -62,41 +65,47 @@ function Summary({ rows }: { rows: readonly ProgramRow[] }) {
       <div className="pg-net">
         <span className="pg-cap">순매수</span>
         <b data-testid="program-net-qty">{withSign(net, formatQuantity(Math.abs(net)))}</b>
+        <span className="pg-unit">주</span>
         <span className="pg-amount" data-testid="program-net-amount">{withSign(amount, formatEokAmount(Math.abs(amount)))}</span>
         <svg className="pg-spark" viewBox={`0 0 ${SPARK_WIDTH} ${SPARK_HEIGHT}`} preserveAspectRatio="none" role="img" aria-label="순매수 누적 추이" data-testid="program-trend">
           {points && <polyline points={points} fill="none" vectorEffect="non-scaling-stroke" />}
         </svg>
       </div>
       <div className="pg-totals">
-        매수 <b data-testid="program-buy-qty">{formatQuantity(buy)}</b> · 매도 <b data-testid="program-sell-qty">{formatQuantity(sell)}</b>
+        매수 <b data-testid="program-buy-qty">{formatQuantity(buy)}</b>주 · 매도 <b data-testid="program-sell-qty">{formatQuantity(sell)}</b>주
       </div>
     </div>
   );
 }
 
-function Table({ lines }: { lines: readonly ProgramLine[] }) {
+const TONE_CLASS = { up: "mw-up", down: "mw-down", flat: undefined } as const;
+
+function Table({ lines, previousClose }: { lines: readonly ProgramLine[]; previousClose: number | null }) {
   const visible = useMemo(() => lines.slice(-VISIBLE_ROWS).reverse(), [lines]);
   const rows = useMemo(() => rowsOf(visible), [visible]);
   const bold = useMemo(() => boldKeys(rows), [rows]);
   const widths = useWidestColumns(rows);
+  const windowed = useWindowedRows(visible.length);
   const style = { "--pg-time": `${widths[0]}ch`, "--pg-price": `${widths[1]}ch` } as CSSProperties;
   return (
     <div className="pg-table" role="table" aria-label="프로그램 체결" style={style}>
-      <div className="pg-tr pg-th" role="row"><span role="columnheader">시각</span><span role="columnheader">현재가</span><span role="columnheader">순매수 증감</span></div>
-      <div className="pg-body">
-        {visible.map((line) =>
-          line.kind === "gap" ? (
-            <div key={line.key} className="pg-gap" role="row" data-testid="program-gap">{line.time} 연결이 끊겼다 이어졌습니다 · 이 사이는 비어 있습니다</div>
-          ) : (
-            <div key={line.row.key} className="pg-tr" role="row" data-testid="program-row" data-source={line.row.source} data-bold={bold.has(line.row.key) ? "" : undefined}>
-              <span role="cell" className="pg-time">{line.row.time}</span>
-              <span role="cell" className="pg-price">{priceText(line.row)}</span>
-              <span role="cell" className="pg-change" data-testid="program-change">
-                <em className={line.row.netQtyChange > 0 ? "mw-up" : line.row.netQtyChange < 0 ? "mw-down" : undefined}>{changeText(line.row).replace("-", MINUS)}</em>
-              </span>
-            </div>
-          ),
-        )}
+      <div className="pg-tr pg-th" role="row"><span role="columnheader">시각</span><span role="columnheader" className="pg-num">현재가</span><span role="columnheader" className="pg-num">순매수 증감</span></div>
+      <div ref={windowed.scroller} className="pg-body" onScroll={windowed.onScroll}>
+        <div ref={windowed.list} className="pg-rows" style={windowed.spacing}>
+          {visible.slice(windowed.range.start, windowed.range.end).map((line) =>
+            line.kind === "gap" ? (
+              <div key={line.key} className="pg-gap" role="row" data-testid="program-gap" title="연결이 끊겼다 이어진 사이는 비어 있습니다">{line.time} 끊김 · 이 사이 비어 있음</div>
+            ) : (
+              <div key={line.row.key} className="pg-tr" role="row" data-testid="program-row" data-source={line.row.source} data-bold={bold.has(line.row.key) ? "" : undefined}>
+                <span role="cell" className="pg-time">{line.row.time}</span>
+                <span role="cell" className={`pg-price pg-num ${line.row.price === null ? "" : TONE_CLASS[priceTone(line.row.price, previousClose)] ?? ""}`}>{priceText(line.row)}</span>
+                <span role="cell" className="pg-change pg-num" data-testid="program-change">
+                  <em className={line.row.netQtyChange > 0 ? "mw-up" : line.row.netQtyChange < 0 ? "mw-down" : undefined}>{changeText(line.row).replace("-", MINUS)}</em>
+                </span>
+              </div>
+            ),
+          )}
+        </div>
       </div>
     </div>
   );
@@ -114,13 +123,20 @@ function ProgramBody({ code }: { code: SymbolCode }) {
   const past = useMemo(() => historyRows(history.data?.points ?? []), [history.data]);
   const lines = useMemo(() => joinHistoryAndLive(past, live), [past, live]);
   const liveRows = rowsOf(live);
-  if (history.isPending && liveRows.length === 0) return <Skeleton label="프로그램 매매 불러오는 중" />;
-  if (history.isError && liveRows.length === 0) return <ErrorState message="프로그램 매매를 불러오지 못했습니다" retry={() => void history.refetch()} />;
-  if (history.isSuccess && isNoProgramData(past, live)) return <EmptyState title="이 종목은 프로그램 매매 자료가 없습니다" />;
+  const { previousClose } = useDayQuote(code, "combined");
+  const content = history.isPending && liveRows.length === 0 ? <Skeleton label="프로그램 매매 불러오는 중" />
+    : history.isError && liveRows.length === 0 ? <ErrorState message="프로그램 매매를 불러오지 못했습니다" retry={() => void history.refetch()} />
+    : history.isSuccess && isNoProgramData(past, live) ? <EmptyState title="이 종목은 프로그램 매매 자료가 없습니다" />
+    : (
+      <div className="pg" data-testid="program-window" data-symbol={code}>
+        <Summary rows={rowsOf(lines)} />
+        <Table lines={lines} previousClose={previousClose} />
+      </div>
+    );
   return (
-    <div className="pg" data-testid="program-window" data-symbol={code}>
-      <Summary rows={rowsOf(lines)} />
-      <Table lines={lines} />
+    <div className="mw-frame">
+      <MarketHead code={code} venue="combined" />
+      {content}
     </div>
   );
 }
