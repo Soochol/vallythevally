@@ -111,17 +111,22 @@ test("같은 칸을 응답 전에 두 번 더블클릭하면 신규가 두 건 �
   expect(new Set(ids).size).toBe(2);
 });
 
-test("칩 위에 올리면 더해질 수량이 칩 안에 보이고 칩 숫자는 그대로다", async ({ page, scenario }) => {
+test("칩 위에 올려도 더해질 수량을 덧붙이지 않고 칩 숫자만 보인다", async ({ page, scenario }) => {
   ordersOn(scenario);
   tradingApi(scenario, [openOrder("0000001", "buy", 70_000, 12)]);
   await openOrderWindow(page, scenario);
+  await cellAt(page, "sell", 70_200).hover();
+  await expect(cellAt(page, "sell", 70_200).getByTestId("order-preview")).toHaveText("매도 10");
   const chip = chipAt(page, "buy", 70_000);
-  await expect(chip).not.toHaveAttribute("data-add", /.*/);
   await chip.hover();
-  await expect(chip).toHaveAttribute("data-add", "＋10");
-  await expect(chip).toHaveText("12");
-  await page.mouse.move(0, 0);
+  await expect(cellAt(page, "sell", 70_200).getByTestId("order-preview")).toHaveCount(0);
+  await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
   await expect(chip).not.toHaveAttribute("data-add", /.*/);
+  await expect(chip).not.toHaveAttribute("data-add-over", /.*/);
+  await expect(chip).not.toHaveAttribute("data-add-margin", /.*/);
+  expect(await chip.evaluate((element) => getComputedStyle(element, "::after").content)).toBe("none");
+  await expect(chip).toHaveText("12");
+  await expect(cellAt(page, "buy", 70_000).getByTestId("order-preview")).toHaveCount(0);
 });
 
 const routeButton = (page: Page) => page.getByTestId("order-settings-button");

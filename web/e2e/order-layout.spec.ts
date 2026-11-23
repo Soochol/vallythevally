@@ -209,7 +209,6 @@ test("창 안의 모든 글자는 11px 이상이다", async ({ page, scenario })
   pushTrades(scenario, [70_000]);
   await expect(page.getByTestId("ladder-trade")).toHaveCount(1);
   await chipAt(page, "buy", 70_000).hover();
-  await expect(chipAt(page, "buy", 70_000)).toHaveAttribute("data-add", /.+/);
   const small = () => win(page).evaluate((root) => {
     const found: string[] = [];
     for (const element of [root, ...Array.from(root.querySelectorAll("*"))]) {

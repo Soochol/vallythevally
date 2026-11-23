@@ -5,7 +5,7 @@ import { useStoreValue, type ValueStore } from "../../lib/valueStore";
 import type { LadderRow } from "../market-window/ladder";
 import { ladderColumns, type LadderRowSlots, PriceLadder } from "../market-window/PriceLadder";
 import { formatShares } from "../market-window/format";
-import { addQuantityText, type BuyingPower, buyPreview, type CancelPlan, cancelCheckOf, groupKey, type PriceGroup, type PriceKey, previewText, SIDE_LABEL } from "./orderRules";
+import { type BuyingPower, buyPreview, type CancelPlan, cancelCheckOf, groupKey, type PriceGroup, type PriceKey, previewText, SIDE_LABEL } from "./orderRules";
 import { PENDING_CHIP_TEXT, PENDING_TEXT } from "./statusText";
 import { LADDER_ROW_HEIGHT_PX, type RowRange, scrollTopToCenter, visibleRowRange } from "./priceRange";
 import { OrderList, type OrderListItem } from "./OrderList";
@@ -91,7 +91,7 @@ const OrderCell = memo(function OrderCell({ side, price, group, writable, previe
   const hovered = useStoreValue(api.hover, (cell) => cell !== null && cell.side === side && cell.price === price);
   const targeted = useStoreValue(api.drag.views, (view) => view?.target.kind === "cell" && view.target.side === side && view.target.price === price);
   const chipDragging = useStoreValue(api.drag.views, (view) => group !== undefined && view?.source.kind === "chip" && view.source.group === group);
-  const showsPreview = hovered && writable && previewQuantity > 0;
+  const showsPreview = hovered && writable && group === undefined && previewQuantity > 0;
   const previewTone = showsPreview && side === "buy" ? buyPreview(price, previewQuantity, buying) : null;
   return (
     <div
@@ -107,7 +107,6 @@ const OrderCell = memo(function OrderCell({ side, price, group, writable, previe
     >
       {group
         ? <button type="button" className="od-chip" data-testid="order-chip" data-side={side} data-price={price} data-dragging={chipDragging ? "" : undefined} data-pending={group.pending}
-            data-add={showsPreview ? addQuantityText(previewQuantity) : undefined} data-add-over={showsPreview && previewTone === "over" ? "" : undefined} data-add-margin={showsPreview && previewTone === "margin" ? "" : undefined}
             aria-label={`${SIDE_LABEL[side]} ${formatPrice(price, false)}원 ${formatShares(group.quantity)} 주문${group.pending ? ` ${PENDING_TEXT[group.pending]}` : ""}`}
             onPointerDown={(e) => { if (writable && !group.pending) api.drag.begin({ source: { kind: "chip", group }, origin: null }, e); }}
             onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); if (!group.pending) api.openMenu({ x: e.clientX, y: e.clientY, group }); }}>
