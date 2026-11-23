@@ -195,7 +195,7 @@ async fn assemble(st: &AppState, cache: &QuoteCache, params: BoardParams, mine: 
     }
     let directory = if wanted.is_empty() { None } else { Some(symbol_list(st).await.map_err(Refused::Failed)?) };
     let (quotes, as_of, tally) = if st.shared_data.is_enabled() {
-        let shared = shared::quotes(&st.shared_data, &wanted, venue, directory.as_deref());
+        let shared = shared::quotes(&st.shared_data, st.clock.now().kst_date(), &wanted, venue, directory.as_deref());
         let tally = BoardTally { cached: shared.quotes.len() as u32, ..BoardTally::default() };
         (shared.quotes, shared.as_of, tally)
     } else {

@@ -64,7 +64,7 @@
 - `rising`, `flat`, `falling`: 상승·보합·하락 종목 수.
 - `leader`: 등락률이 가장 높은 종목. 같으면 테마 안에서 앞선 종목이다.
 
-`VALLY_SHARED_DATA_DIR`이 있으면 시세를 키움에서 받지 않고 수집 데몬의 스냅샷 판(`snapshot-krx`·`snapshot-combined`·`snapshot-nxt`)에서 꺼낸다. 요청 거래소의 판에서 읽고, NXT 비대상 종목의 NXT 요청은 통합 판에서 읽는다(`quotes::effective_venue`). 지수는 판의 지수 행이다. 판에 없는 종목은 `missing`이고 `asOf`는 읽은 판의 기준 시각이다. 45초 캐시와 TR 예산은 쓰지 않는다. `source=kiwoom`의 테마 목록도 공용 자료의 `kiwoom-themes` 판에서 읽고, 서버는 08:30에 테마를 받지 않는다. `/api/kiwoom-themes` 라이브 경로는 운영자 리스너에서 그대로 키움을 부른다.
+`VALLY_SHARED_DATA_DIR`이 있으면 시세를 키움에서 받지 않고 수집 데몬의 스냅샷 판(`snapshot-krx`·`snapshot-combined`·`snapshot-nxt`)에서 꺼낸다. 요청 거래소의 판에서 읽고, NXT 비대상 종목의 NXT 요청은 통합 판에서 읽는다(`quotes::effective_venue`). 지수는 판의 지수 행이다. 관측일이 오늘(KST)이 아닌 판은 없는 것으로 본다. 판에 없는 종목은 `missing`이고 `asOf`는 읽은 판의 기준 시각이다. 45초 캐시와 TR 예산은 쓰지 않는다. `source=kiwoom`의 테마 목록도 공용 자료의 `kiwoom-themes` 판에서 읽고, 서버는 08:30에 테마를 받지 않는다. `/api/kiwoom-themes` 라이브 경로는 운영자 리스너에서 그대로 키움을 부른다.
 
 변수가 없으면 시세는 `/api/quotes`와 같은 `ka10095`로 받는다. 모든 테마의 종목을 중복 없이 모아 100종목씩 묻는다. 받은 시세는 종목·거래소마다 서버 메모리에 45초(`FRESH_SECS`) 둔다. 그래서 테마를 고친 뒤에는 새로 든 종목만 키움에 묻는다. 웹은 60초마다 다시 부르므로 45초는 매번 새로 받는 값이다. 상한(테마 100개 × 60종목)이 모두 다른 종목이어도 `ka10095` 60건이다. 이는 새로 고침 간격의 3분의 1 안에 끝난다. `heatmap_board::tests`가 이 관계를 확인한다. 키움 호출이 실패하면 `/api/quotes`와 같은 오류를 준다.
 

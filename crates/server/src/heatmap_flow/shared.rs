@@ -7,7 +7,7 @@ use super::series::{BUCKET_MINUTES, CollectedCell, SymbolDay, Weighting};
 use crate::bars::BarError;
 use crate::clock::kst;
 use crate::http::AppState;
-use crate::shared_data::{CELL_MINUTES, MinuteInstrument, MinuteSeries, MinuteVenue, SharedData};
+use crate::shared_data::{CELL_MINUTES, MinuteInstrument, MinuteSeries, MinuteVenue, Loaded, SharedData, SnapshotBody};
 
 const _: () = assert!(CELL_MINUTES as u32 == BUCKET_MINUTES);
 
@@ -31,21 +31,25 @@ fn centi(value: f64) -> Option<u64> {
     (centi.is_finite() && centi >= 0.0).then_some(centi as u64)
 }
 
-fn index_base_centi(data: &SharedData, code: IndexCode) -> Option<u64> {
-    let row = Venue::ALL.iter().find_map(|venue| data.snapshot(*venue).current()?.body.indices.iter().find(|row| row.code == code.as_str()).cloned())?;
+fn index_base_centi(data: &SharedData, code: IndexCode, today: KstDate) -> Option<u64> {
+    let row = Venue::ALL.iter().find_map(|venue| todays(data, *venue, today)?.body.indices.iter().find(|row| row.code == code.as_str()).cloned())?;
     let base = row.level / (1.0 + row.change_rate / 100.0);
     (row.change_rate > -100.0).then(|| centi(base)).flatten()
 }
 
-fn stock_base_centi(data: &SharedData, code: domain::StockCode, venue: Venue) -> Option<u64> {
-    let loaded = data.snapshot(venue).current()?;
+fn todays(data: &SharedData, venue: Venue, today: KstDate) -> Option<Arc<Loaded<SnapshotBody>>> {
+    data.snapshot(venue).current().filter(|loaded| loaded.header.observation_date == today.yyyymmdd())
+}
+
+fn stock_base_centi(data: &SharedData, code: domain::StockCode, venue: Venue, today: KstDate) -> Option<u64> {
+    let loaded = todays(data, venue, today)?;
     loaded.body.stocks.iter().find(|row| row.code == code.as_str()).and_then(|row| row.base_won.checked_mul(100))
 }
 
-fn base_of(data: &SharedData, feed: Feed) -> Option<(u64, Weighting)> {
+fn base_of(data: &SharedData, feed: Feed, today: KstDate) -> Option<(u64, Weighting)> {
     match feed {
-        Feed::Stock(code, venue) => Some((stock_base_centi(data, code, venue)?, Weighting::TradedValue)),
-        Feed::Index(code) => Some((index_base_centi(data, code)?, Weighting::Excluded)),
+        Feed::Stock(code, venue) => Some((stock_base_centi(data, code, venue, today)?, Weighting::TradedValue)),
+        Feed::Index(code) => Some((index_base_centi(data, code, today)?, Weighting::Excluded)),
     }
 }
 
@@ -57,7 +61,7 @@ pub(super) fn day(st: &AppState, feed: Feed) -> Result<Arc<SymbolDay>, DayError>
     let today = st.clock.now().kst_date();
     let data = &st.shared_data;
     let collected = data.minutes.cells(today, &series_of(feed)).ok_or(DayError::NotCollected)?;
-    let (base_centi, weighting) = base_of(data, feed).ok_or_else(|| DayError::Bars(BarError::Internal("공용 스냅샷에 전일 종가가 없습니다".into())))?;
+    let (base_centi, weighting) = base_of(data, feed, today).ok_or_else(|| DayError::Bars(BarError::Internal("오늘 날짜의 공용 스냅샷에 전일 종가가 없습니다".into())))?;
     let cells = collected.cells.iter().filter_map(|cell| Some(CollectedCell { start: unix_of(today, u32::from(cell.start_minute), 0), close_centi: centi(cell.close)?, traded_won: cell.traded_won }));
     let as_of = Some(unix_of(today, 0, collected.last_sec));
     SymbolDay::from_collected_cells(base_centi, weighting, as_of, cells).map(Arc::new).ok_or_else(|| DayError::Bars(BarError::Internal("전일 종가를 알 수 없습니다".into())))

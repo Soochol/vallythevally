@@ -423,3 +423,38 @@ async fn a_symbol_never_collected_stays_out_of_the_flow_without_failing_it() {
     assert_eq!(series.not_collected, vec![SymbolCode("069500".into())]);
     assert_eq!(series.as_of, None);
 }
+
+fn write_yesterdays_krx_board(dir: &Path) {
+    let yesterday = day().add_days(-1);
+    let stocks = vec![SnapshotRow { day: yesterday.yyyymmdd(), ..row("005930", 50_000, 48_000, 5_000) }];
+    let body = SnapshotBody { closing: true, requested: 1, missing: 0, stocks, indices: Vec::new() };
+    write_snapshot(dir, Header::new(DataKind::SnapshotKrx, yesterday, unix(15, 30, 0) - 86_400, unix(15, 30, 0) - 86_400, sources()), body).unwrap();
+}
+
+#[tokio::test]
+async fn a_snapshot_of_another_day_never_supplies_todays_previous_close() {
+    let h = Harness::start(true).await;
+    write_yesterdays_krx_board(&h.shared);
+    write_board(&h.shared, DataKind::SnapshotCombined, unix(10, 0, 30), vec![row("005930", 51_000, 50_000, 5_000)], vec![kospi()]);
+    write_two_key_minutes(&h.shared);
+    h.poll().await;
+
+    let flow = h.ok("/api/heatmap/flow?symbols=005930,IDX:001&venue=krx").await;
+    assert_eq!((flow["used"].clone(), flow["missing"].clone()), (json!(["IDX:001"]), json!(["005930"])), "어제 판의 기준가 48,000으로 5.2083%를 내지 않는다");
+    assert_eq!(flow["points"].as_array().unwrap().len(), 1);
+}
+
+#[tokio::test]
+async fn a_board_of_another_day_is_not_used_as_todays_quotes() {
+    let h = Harness::start(true).await;
+    h.themes(chip_theme()).await;
+    write_yesterdays_krx_board(&h.shared);
+    h.poll().await;
+
+    let board = h.ok("/api/heatmap/board?venue=krx").await;
+    let chip = &board["themes"][0];
+    assert_eq!((chip["members"].clone(), chip["summary"].clone()), (json!([]), Value::Null));
+    assert_eq!(chip["missing"], json!(["005930", "000660", "042700", "999990"]));
+    assert_eq!(board["asOf"], Value::Null);
+    assert_eq!(h.kiwoom.total(), 0);
+}
