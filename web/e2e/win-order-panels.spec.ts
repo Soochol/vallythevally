@@ -1131,7 +1131,7 @@ test.describe("수요일 08:35 시간외 종가 잔량", () => {
     await page.clock.setFixedTime(new Date(scenario.now));
   });
 
-  test("호가주문창 총잔량 띠의 숫자 자리에 시간외 잔량이 보인다", async ({ page, scenario }) => {
+  test("호가주문창 총잔량 띠는 시간외 잔량이어도 시간외 글자 없이 숫자만 보인다", async ({ page, scenario }) => {
     ordersOn(scenario);
     tradingApi(scenario);
     await openOrderWindow(page, scenario);
@@ -1144,8 +1144,10 @@ test.describe("수요일 08:35 시간외 종가 잔량", () => {
     await expect(page.getByTestId("order-total-ask")).toHaveAttribute("data-source", "regular");
     scenario.live.emit({ type: "feed_after_hours", sub, totals: { t: scenario.now / 1000, askQty: 13_770, bidQty: 0 } });
     await expect(page.getByTestId("order-total-ask")).toHaveAttribute("data-source", "after-hours");
-    await expect(page.getByTestId("order-total-ask")).toContainText("13,770");
-    await expect(page.getByTestId("order-total-bid")).toContainText("0");
+    await expect(page.getByTestId("order-total-ask")).toHaveText("13,770");
+    await expect(page.getByTestId("order-total-bid")).toHaveAttribute("data-source", "after-hours");
+    await expect(page.getByTestId("order-total-bid")).toHaveText("0");
+    await expect(page.getByTestId("order-total-ask").locator("..")).not.toContainText("시간외");
   });
 });
 
