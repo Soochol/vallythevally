@@ -65,6 +65,14 @@ export interface PanelView {
   disconnectNote: string | null;
 }
 
+export function connectBlockReason(view: PanelView, confirmations: Confirmations): string | null {
+  const connect = view.connect;
+  if (!connect || connect.enabled) return null;
+  if (view.needsConfirmations && !(confirmations.registeredIp && confirmations.lockChecked)) return "위 확인 두 칸을 모두 체크하면 켜집니다";
+  if (view.countdown && view.countdown.remainingSeconds > 0) return "발급 간격이 지나면 누를 수 있습니다";
+  return null;
+}
+
 export function countdownOf(retryAt: UnixSeconds | null, now: UnixSeconds): Countdown | null {
   if (retryAt === null) return null;
   const remainingSeconds = Math.max(0, Math.ceil(retryAt - now));
@@ -83,7 +91,7 @@ export function panelView(status: KiwoomLinkStatus | null, now: UnixSeconds, con
   if (!status) return view;
   switch (status.state) {
     case "noKey":
-      return { ...view, stage: "noKey", connect: { label: `${BROKERS[broker].shortName}에 연결`, enabled: false, acknowledged: false, readyNotice: false } };
+      return { ...view, stage: "noKey" };
     case "disconnected":
       return { ...view, stage: "disconnected", startNote: disconnectedNote(status), connect: { label: `${BROKERS[broker].shortName}에 연결`, enabled: true, acknowledged: false, readyNotice: false } };
     case "connecting":
@@ -172,19 +180,17 @@ export function maskedAppKey(tail: string | null): string {
 export interface KeyForm {
   appKey: string;
   appSecret: string;
-  reveal: boolean;
   editing: boolean;
 }
 
 export type KeyFormEvent =
   | { type: "appKey"; value: string }
   | { type: "appSecret"; value: string }
-  | { type: "toggleReveal" }
   | { type: "edit" }
   | { type: "cancel" }
   | { type: "saved" };
 
-export const EMPTY_KEY_FORM: KeyForm = { appKey: "", appSecret: "", reveal: false, editing: false };
+export const EMPTY_KEY_FORM: KeyForm = { appKey: "", appSecret: "", editing: false };
 
 export function keyFormReducer(form: KeyForm, event: KeyFormEvent): KeyForm {
   switch (event.type) {
@@ -192,8 +198,6 @@ export function keyFormReducer(form: KeyForm, event: KeyFormEvent): KeyForm {
       return { ...form, appKey: event.value };
     case "appSecret":
       return { ...form, appSecret: event.value };
-    case "toggleReveal":
-      return { ...form, reveal: !form.reveal };
     case "edit":
       return { ...EMPTY_KEY_FORM, editing: true };
     case "cancel":

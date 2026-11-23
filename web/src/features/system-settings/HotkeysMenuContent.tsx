@@ -1,16 +1,30 @@
-import { useEffect, useId, useState } from "react";
+import { Fragment, useEffect, useId, useState } from "react";
 import { addKey, type HotkeyActionDef, keyLabel, keyOf, moveKey, removeKey, resetAction, resetAllActions } from "../../lib/hotkeys";
 import { useActionKeys, useUiStore } from "../../stores/ui";
+import { WarningIcon } from "../icons";
+import { Badge } from "../ui/Badge";
+import { Kbd } from "../ui/Kbd";
 import { useHotkeyRecording } from "./hotkeyRecording";
-import { groupedRows, LOCKED_KEY_ROWS, lockedReason } from "./hotkeysView";
+import { groupedRows, keyPieces, LOCKED_KEY_ROWS, lockedKeyPieces, lockedReason } from "./hotkeysView";
 
 type Notice =
   | { actionId: string; kind: "taken"; key: string; by: HotkeyActionDef }
   | { actionId: string; kind: "locked" | "owned"; key: string };
 
 const MODIFIER_ONLY = /^(Control|Alt|Shift|Meta)(Left|Right)$/;
-const chip = "inline-flex h-6 items-center gap-1 rounded-m border border-line bg-hover pl-2 pr-1 font-mono text-s text-text";
-const textButton = "tb-btn px-2";
+
+function Pieces({ pieces }: { pieces: readonly string[] }) {
+  return (
+    <>
+      {pieces.map((piece, index) => (
+        <Fragment key={index}>
+          {index > 0 && <span aria-hidden="true" className="text-text-3">+</span>}
+          <Kbd>{piece}</Kbd>
+        </Fragment>
+      ))}
+    </>
+  );
+}
 
 export function HotkeysMenuContent() {
   const hotkeys = useUiStore((s) => s.prefs.hotkeys);
@@ -64,7 +78,7 @@ export function HotkeysMenuContent() {
 
   return (
     <div className="flex min-w-0 flex-col gap-4">
-      <div className="flex flex-wrap items-center gap-2">
+      <div className="sticky top-0 z-10 -mx-5 flex flex-wrap items-center gap-2 bg-[var(--glass-solid)] px-5 pb-2 pt-1 max-md:-mx-4 max-md:px-4">
         <input
           id={searchId}
           type="search"
@@ -72,15 +86,15 @@ export function HotkeysMenuContent() {
           onChange={(e) => setQuery(e.target.value)}
           aria-label="단축키 찾기"
           placeholder="동작 이름이나 키로 찾기"
-          className="h-8 min-w-0 flex-1 basis-48 rounded-m border border-line bg-transparent px-2 text-m text-text"
+          className="ui-field min-w-0 flex-1 basis-48"
         />
-        <button type="button" className={textButton} disabled={changedCount === 0} onClick={() => { stopRecording(); setNotice(null); setConfirmingAll(true); }}>모두 기본값으로</button>
+        <button type="button" className="btn" disabled={changedCount === 0} onClick={() => { stopRecording(); setNotice(null); setConfirmingAll(true); }}>모두 기본값으로</button>
       </div>
       {confirmingAll && (
-        <div role="group" aria-label="기본값 확인" className="flex flex-wrap items-center gap-2 rounded-m border border-line px-3 py-2 text-m">
+        <div role="group" aria-label="기본값 확인" className="flex flex-wrap items-center gap-2 rounded-m border border-line bg-raised px-3 py-2 text-m">
           <span className="min-w-0 flex-1">바꾼 키를 모두 되돌릴까요?</span>
-          <button type="button" className={textButton} onClick={() => { setHotkeys(resetAllActions()); setConfirmingAll(false); }}>되돌리기</button>
-          <button type="button" className={textButton} onClick={() => setConfirmingAll(false)}>취소</button>
+          <button type="button" className="btn" onClick={() => { setHotkeys(resetAllActions()); setConfirmingAll(false); }}>되돌리기</button>
+          <button type="button" className="btn" onClick={() => setConfirmingAll(false)}>취소</button>
         </div>
       )}
       {groups.length === 0 && <p className="text-m text-text-2">맞는 단축키가 없습니다</p>}
@@ -94,37 +108,38 @@ export function HotkeysMenuContent() {
               const recording = recordingId === a.id;
               const rowNotice = notice?.actionId === a.id ? notice : null;
               return (
-                <li key={a.id} data-action={a.id} className="flex min-w-0 flex-col gap-1 border-t border-line py-2 first:border-t-0">
-                  <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
+                <li key={a.id} data-action={a.id} data-recording={recording || undefined} className="flex min-w-0 flex-col gap-1 rounded-m border-t border-line px-2 py-1 first:border-t-0 data-[recording]:bg-accent-soft">
+                  <div className="flex min-h-9 min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
                     <span className="flex min-w-0 basis-40 items-center gap-2 text-m text-text">
                       <span className="min-w-0 truncate">{a.name}</span>
-                      {a.desktopOnly && <span className="flex-none text-xs text-text-3">데스크톱</span>}
-                      {changed && <span className="flex-none text-xs text-accent">바꿈</span>}
+                      {a.desktopOnly && <Badge>데스크톱</Badge>}
+                      {changed && <Badge tone="accent">바꿈</Badge>}
                     </span>
                     <span className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5">
                       {own.length === 0 && <span className="text-s text-text-3">없음</span>}
                       {own.map((key) => (
-                        <span key={key} className={chip}>
-                          {keyLabel(key)}
+                        <span key={key} className="sys-keychip">
+                          <Pieces pieces={keyPieces(key)} />
                           <button type="button" className="icon-btn !h-5 !w-5" aria-label={`${a.name}에서 ${keyLabel(key)} 빼기`} onClick={() => { setNotice(null); setHotkeys(removeKey(hotkeys, a.id, key)); }}>×</button>
                         </span>
                       ))}
-                      <button type="button" className={textButton} aria-label={`${a.name}에 키 더하기`} aria-pressed={recording} onClick={() => record(a.id)}>
+                      <button type="button" className="sys-keychip sys-keychip-add" aria-label={`${a.name}에 키 더하기`} aria-pressed={recording} onClick={() => record(a.id)}>
                         {recording ? "키를 누르세요 · Esc 취소" : "+ 키"}
                       </button>
                     </span>
-                    {changed && <button type="button" className={textButton} onClick={() => { setNotice(null); setHotkeys(resetAction(hotkeys, a.id)); }}>기본값</button>}
+                    {changed && <button type="button" className="btn btn-sm" onClick={() => { setNotice(null); setHotkeys(resetAction(hotkeys, a.id)); }}>기본값</button>}
                   </div>
                   {rowNotice && (
-                    <p role="status" className="flex flex-wrap items-center gap-2 text-s text-text-2">
-                      <span className="min-w-0">{noticeText(rowNotice)}</span>
+                    <div role="status" data-tone="warning" className="ui-notice mb-1">
+                      <WarningIcon />
+                      <span className="ui-notice-text">{noticeText(rowNotice)}</span>
                       {rowNotice.kind === "taken" && (
                         <>
-                          <button type="button" className={textButton} onClick={() => { setHotkeys(moveKey(hotkeys, a.id, rowNotice.key)); setNotice(null); }}>옮기기</button>
-                          <button type="button" className={textButton} onClick={() => setNotice(null)}>취소</button>
+                          <button type="button" className="btn btn-sm" onClick={() => { setHotkeys(moveKey(hotkeys, a.id, rowNotice.key)); setNotice(null); }}>옮기기</button>
+                          <button type="button" className="btn btn-sm" onClick={() => setNotice(null)}>취소</button>
                         </>
                       )}
-                    </p>
+                    </div>
                   )}
                 </li>
               );
@@ -135,10 +150,17 @@ export function HotkeysMenuContent() {
       {query.trim() === "" && (
         <section aria-label="바꿀 수 없는 키" className="flex min-w-0 flex-col">
           <h3 className="pb-1 text-s font-semibold text-text-2">바꿀 수 없는 키</h3>
-          <dl className="grid grid-cols-[minmax(0,12rem)_minmax(0,1fr)] gap-x-4 gap-y-1 text-m max-md:grid-cols-1">
+          <dl className="grid grid-cols-[minmax(0,14rem)_minmax(0,1fr)] gap-x-4 gap-y-2 text-m max-md:grid-cols-1">
             {LOCKED_KEY_ROWS.map(([keysText, what]) => (
               <div key={keysText} className="contents">
-                <dt className="min-w-0 break-words font-mono text-s text-text">{keysText}</dt>
+                <dt className="flex min-w-0 flex-wrap items-center gap-1">
+                  {lockedKeyPieces(keysText).map((pieces, index) => (
+                    <Fragment key={index}>
+                      {index > 0 && <span aria-hidden="true" className="text-text-3">·</span>}
+                      <Pieces pieces={pieces} />
+                    </Fragment>
+                  ))}
+                </dt>
                 <dd className="min-w-0 text-text-2 max-md:mb-1">{what}</dd>
               </div>
             ))}

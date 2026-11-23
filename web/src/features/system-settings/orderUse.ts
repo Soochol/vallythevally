@@ -38,3 +38,22 @@ export const orderInUse = (account: OrdersAccount | undefined): boolean => accou
 export function mergeOrdersStatus(old: OrdersStatus | undefined, result: OrdersStatus, market: boolean): OrdersStatus {
   return old === undefined || market ? result : { ...old, accounts: result.accounts };
 }
+
+export function orderStateSentence(state: OrdersState, mock: boolean): string {
+  switch (state) {
+    case "on":
+      return mock ? "켜짐 · 호가주문 창에서 누른 주문이 이 모의투자 계좌로 나갑니다" : "켜짐 · 호가주문 창에서 누른 주문이 이 계좌로 실제 체결됩니다";
+    case "off":
+      return "꺼짐 · 이 계좌로 주문이 나가지 않습니다";
+    case "account_changed":
+      return "계좌가 바뀌었습니다 · 끄거나 계좌를 다시 확인해 켜세요";
+    case "file_unusable":
+      return "꺼짐 · 주문 설정을 읽을 수 없어 지금은 켤 수 없습니다";
+    default: {
+      const _exhaustive: never = state;
+      return _exhaustive;
+    }
+  }
+}
+
+export const enableWarning = (mock: boolean): string => (mock ? "켜면 호가주문 창에서 누른 주문이 이 모의투자 계좌로 나갑니다. 실제 체결은 아닙니다" : "켜면 호가주문 창에서 누른 주문이 이 계좌로 실제 체결됩니다");

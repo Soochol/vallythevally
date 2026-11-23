@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
 import { DEFAULT_KEYS } from "../../lib/hotkeys";
-import { groupedRows, lockedReason } from "./hotkeysView";
+import { groupedRows, keyPieces, lockedKeyPieces, lockedReason } from "./hotkeysView";
 
 const names = (query: string) => groupedRows(DEFAULT_KEYS, query).flatMap((g) => g.actions.map((a) => a.name));
 
@@ -29,5 +29,18 @@ describe("바꿀 수 없는 이유", () => {
     expect(lockedReason("Ctrl+Shift+KeyC")).toContain("복사");
     expect(lockedReason("Shift+Slash")).toContain("도움말");
     expect(lockedReason("Ctrl+KeyW")).toContain("브라우저");
+  });
+});
+
+describe("키 조각", () => {
+  test("조합 키는 보조 키와 글쇠로 나뉘고 숫자패드 글쇠는 한 조각이다", () => {
+    expect(keyPieces("KeyD")).toEqual(["D"]);
+    expect(keyPieces("Ctrl+KeyK")).toEqual(["Ctrl", "K"]);
+    expect(keyPieces("Alt+Shift+NumpadAdd")).toEqual(["Alt", "Shift", "Num +"]);
+  });
+
+  test("바꿀 수 없는 키 줄은 · 로 묶음을 + 로 조각을 나눈다", () => {
+    expect(lockedKeyPieces("Ctrl+C · Ctrl+V")).toEqual([["Ctrl", "C"], ["Ctrl", "V"]]);
+    expect(lockedKeyPieces("방향키")).toEqual([["방향키"]]);
   });
 });

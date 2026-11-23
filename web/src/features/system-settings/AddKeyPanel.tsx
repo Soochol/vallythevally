@@ -6,9 +6,9 @@ import type { KiwoomKeyList } from "../../api/generated/KiwoomKeyList";
 import { addKiwoomKey, checkOrdersAccount, loadKiwoomLink, storeKiwoomKeys } from "../../api/system";
 import { BROKERS, brokerOrder, takesAccountNumber } from "./brokers";
 import { type AccountCheck, accountCheckLine, kisListingOf, kisMissingHtsId } from "./kisAccount";
-import { KeyFields, KisAccountFields } from "./KiwoomKeyFields";
+import { CommandAlert, FormActions, KeyFields, KeyPortalNote, KisAccountFields } from "./KiwoomKeyFields";
 import { SaveNote } from "./KiwoomKeyForm";
-import { addedKey, addInput, addResult, addSteps, atLimit, canAdd, defaultAlias, emptyEntry, keyEntryReducer } from "./kiwoomKeys";
+import { addedKey, addInput, addResult, addSteps, atLimit, brokerKeys, canAdd, defaultAlias, emptyEntry, fieldErrors, keyEntryReducer } from "./kiwoomKeys";
 import { useCommand } from "./useCommand";
 
 type Phase = { step: "closed" } | { step: "broker" } | { step: "input"; broker: Broker } | { step: "confirm"; keyId: string | null };
@@ -39,19 +39,26 @@ export function AddKeyPanel({ list, now, onOpenIpHelp, onOpenOrders }: { list: K
     return full ? (
       <p className="text-m text-text-2">키는 {list.limit}개까지입니다</p>
     ) : (
-      <button type="button" className="tb-btn h-9 self-start px-3" onClick={() => { dispatch({ type: "reset", alias: defaultAlias(list.keys, brokers[0]!) }); setPhase(firstInputPhase(steps, brokers)); }}>＋ 계좌 연결 더하기</button>
+      <button type="button" className="btn self-start" onClick={() => { dispatch({ type: "reset", alias: defaultAlias(list.keys, brokers[0]!) }); setPhase(firstInputPhase(steps, brokers)); }}>＋ 계좌 연결 더하기</button>
     );
   }
 
   if (shown.step === "broker") {
     return (
       <div className="flex flex-col gap-2" aria-label="증권사 고르기" role="group">
-        {brokers.map((broker) => (
-          <button key={broker} type="button" className="tb-btn h-9 justify-start px-3 disabled:opacity-50" disabled={atLimit(list, broker)} onClick={() => { dispatch({ type: "reset", alias: defaultAlias(list.keys, broker) }); setPhase({ step: "input", broker }); }}>
-            {BROKERS[broker].name}{atLimit(list, broker) ? ` · ${list.limit}개까지입니다` : ""}
-          </button>
-        ))}
-        {!empty && <button type="button" className="tb-btn h-9 self-start px-3" onClick={close}>취소</button>}
+        <div className="grid grid-cols-2 gap-2 max-md:grid-cols-1">
+          {brokers.map((broker) => {
+            const full = atLimit(list, broker);
+            return (
+              <button key={broker} type="button" disabled={full} className="flex min-h-16 flex-col items-start gap-0.5 rounded-m border border-[var(--line-strong)] bg-raised p-3 text-left hover:bg-overlay disabled:cursor-not-allowed disabled:border-line disabled:text-text-3 disabled:hover:bg-raised" onClick={() => { dispatch({ type: "reset", alias: defaultAlias(list.keys, broker) }); setPhase({ step: "input", broker }); }}>
+                <span className="font-semibold">{BROKERS[broker].name}</span>
+                <span className="text-s text-text-2">{BROKERS[broker].blurb}</span>
+                <span className="text-s text-text-3">{full ? `${list.limit}개까지입니다` : `남은 자리 ${list.limit - brokerKeys(list, broker).length}개`}</span>
+              </button>
+            );
+          })}
+        </div>
+        {!empty && <FormActions><button type="button" className="btn" onClick={close}>취소</button></FormActions>}
       </div>
     );
   }
@@ -60,13 +67,13 @@ export function AddKeyPanel({ list, now, onOpenIpHelp, onOpenOrders }: { list: K
     const added = list.keys.find((key) => key.keyId === shown.keyId);
     const result = added ? addResult(added.link, now) : null;
     return (
-      <div role="status" className="flex flex-col items-start gap-2" data-testid="add-result">
-        {added && result && <p className="text-m text-text"><span className="font-semibold">{added.alias}</span> · <span data-tone={result.tone}>{result.text}</span></p>}
+      <div role="status" className="flex flex-col gap-2" data-testid="add-result">
+        {added && result && <p className="text-m text-text"><span className="font-semibold">{added.alias}</span> · <span data-tone={result.tone} className="data-[tone=error]:text-danger data-[tone=ok]:text-success data-[tone=wait]:text-warning">{result.text}</span></p>}
         {added && kisListingOf(added) !== null && <KisAccountResult added={added} />}
-        <div className="flex flex-wrap gap-2">
-          <button type="button" className="tb-btn h-9 px-3" onClick={close}>닫기</button>
-          {added && kisListingOf(added) !== null && <button type="button" className="btn-primary h-9 px-4" onClick={() => { const keyId = added.keyId; close(); onOpenOrders(keyId); }}>주문 사용 켜기로</button>}
-        </div>
+        <FormActions>
+          <button type="button" className="btn" onClick={close}>닫기</button>
+          {added && kisListingOf(added) !== null && <button type="button" className="btn-primary" onClick={() => { const keyId = added.keyId; close(); onOpenOrders(keyId); }}>주문 사용 켜기로</button>}
+        </FormActions>
       </div>
     );
   }
@@ -86,25 +93,27 @@ export function AddKeyPanel({ list, now, onOpenIpHelp, onOpenOrders }: { list: K
     setPhase({ step: "confirm", keyId });
   };
 
+  const errors = fieldErrors(command.error);
+
   return (
-    <form aria-label="키 더하기" className="flex flex-col gap-2" autoComplete="off" onSubmit={(e) => { e.preventDefault(); if (canAdd(entry, inputBroker) && !command.busy) void save(); }}>
+    <form aria-label="키 더하기" className="flex flex-col gap-3" autoComplete="off" onSubmit={(e) => { e.preventDefault(); if (canAdd(entry, inputBroker) && !command.busy) void save(); }}>
       {brokers.length > 1 && <p className="text-s font-semibold text-text-2" data-testid="add-broker">{BROKERS[inputBroker].name}</p>}
-      <KeyFields entry={entry} dispatch={dispatch} disabled={command.busy} />
-      {takesAccountNumber(inputBroker) && <KisAccountFields entry={entry} dispatch={dispatch} disabled={command.busy} />}
-      <div className="flex flex-wrap items-center gap-2">
-        <button type="button" className="tb-btn h-9 px-3" onClick={() => dispatch({ type: "toggleReveal" })}>{entry.reveal ? "입력 가리기" : "입력 보기"}</button>
-        <button type="submit" className="btn-primary h-9 px-4 disabled:cursor-not-allowed disabled:opacity-50" disabled={command.busy || !canAdd(entry, inputBroker)}>저장하고 연결</button>
-        {!empty && <button type="button" className="tb-btn h-9 px-3" onClick={close}>취소</button>}
-      </div>
+      <KeyPortalNote broker={inputBroker} />
+      <KeyFields entry={entry} dispatch={dispatch} disabled={command.busy} errors={errors} />
+      {takesAccountNumber(inputBroker) && <KisAccountFields entry={entry} dispatch={dispatch} disabled={command.busy} errors={errors} />}
+      <FormActions>
+        {!empty && <button type="button" className="btn" onClick={close}>취소</button>}
+        <button type="submit" className="btn-primary" disabled={command.busy || !canAdd(entry, inputBroker)}>저장하고 연결</button>
+      </FormActions>
       {inputBroker === "kis" ? (
         <>
           <SaveNote note="kisConnectsAtOnce" />
-          <p className="text-s text-text-3">이 계좌로 잔고 조회를 한 번 해 계좌를 확인합니다. 주문 사용은 따로 켭니다</p>
+          <p className="text-s text-text-2">이 계좌로 잔고 조회를 한 번 해 계좌를 확인합니다. 주문 사용은 따로 켭니다</p>
         </>
       ) : (
         <SaveNote note="connectsAtOnce" onOpenIpHelp={onOpenIpHelp} />
       )}
-      {command.error && <p role="alert" className="text-m text-danger">{command.error}</p>}
+      <CommandAlert error={command.error} mapped={Object.keys(errors).length > 0} />
     </form>
   );
 }
@@ -132,9 +141,9 @@ function KisAccountResult({ added }: { added: KiwoomKey }) {
   const line = accountCheckLine(check);
   return (
     <>
-      {!settled && <p className="text-m text-text" data-testid="kis-account-check" data-tone={line.tone}>{line.text}</p>}
-      {kisMissingHtsId(kisListingOf(added)) && <p className="text-s text-text-3">HTS ID가 없어 체결 알림은 받지 않습니다</p>}
-      <p className="text-s text-text-3">주문은 아직 꺼져 있습니다</p>
+      {!settled && <p className="text-m text-text data-[tone=error]:text-danger data-[tone=ok]:text-success" data-testid="kis-account-check" data-tone={line.tone}>{line.text}</p>}
+      {kisMissingHtsId(kisListingOf(added)) && <p className="text-s text-text-2">HTS ID가 없어 체결 알림은 받지 않습니다</p>}
+      <p className="text-s text-text-2">주문은 아직 꺼져 있습니다</p>
     </>
   );
 }

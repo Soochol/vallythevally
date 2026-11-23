@@ -2,14 +2,14 @@ import { useState } from "react";
 import type { PublicIpCheck } from "../../api/generated/PublicIpCheck";
 import { connectKiwoom, disconnectKiwoom, recheckKiwoomTokenFile, saveRegisteredIp } from "../../api/system";
 import { useKiwoomOnlyLink, useKiwoomLinkStore } from "../../stores/kiwoomLink";
-import { useServerTime } from "../status/useServerTime";
 import { type Confirmations, NO_CONFIRMATIONS } from "./kiwoomPanel";
 import { useCommand } from "./useCommand";
 import { useConfirmations } from "./useConfirmations";
+import { useWaitingClock } from "./useWaitingClock";
 
 export function useKiwoomPanel(holdConfirmations = false) {
   const status = useKiwoomOnlyLink();
-  const now = useServerTime();
+  const now = useWaitingClock([status?.retryAt]);
   const command = useCommand();
   const ipCommand = useCommand();
   const [checkedIp, setCheckedIp] = useState<PublicIpCheck | null>(null);
