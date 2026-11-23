@@ -24,6 +24,11 @@ export function useTradeTape(socket: Pick<MarketSocketLike, "subscribeFeed">, co
   const dispatch = useCallback((action: TapeAction) => fold((previous) => ({ code, venue, tape: tapeReducer(previous.code === code && previous.venue === venue ? previous.tape : emptyTape, action) })), [fold, code, venue]);
   const [history, setHistory] = useState<HistoryStatus>("loading");
   const [feedError, setFeedError] = useState<string | null>(null);
+  const [attempt, setAttempt] = useState(0);
+  const retry = useCallback(() => {
+    setHistory("loading");
+    setAttempt((count) => count + 1);
+  }, []);
   const [source, setSource] = useState({ code, venue });
   if (source.code !== code || source.venue !== venue) {
     setSource({ code, venue });
@@ -32,15 +37,18 @@ export function useTradeTape(socket: Pick<MarketSocketLike, "subscribeFeed">, co
   }
 
   useEffect(() => {
-    const controller = new AbortController();
     const nowSeconds = () => Date.now() / 1000;
-    const unsubscribe = socket.subscribeFeed({ symbol: code, kind: "trades", venue }, (event) => {
+    return socket.subscribeFeed({ symbol: code, kind: "trades", venue }, (event) => {
       if (event.type === "feed_trades") dispatch({ type: "live", trades: event.trades, receivedAt: Date.now() });
       else if (event.type === "feed_link") dispatch({ type: "link", live: event.live, at: event.at });
       else if (event.type === "resync") dispatch({ type: "resync", at: nowSeconds() });
       else if (event.type === "feed_subscribed") setFeedError(null);
       else if (event.type === "sub_error") setFeedError(event.code);
     });
+  }, [socket, code, venue, dispatch]);
+
+  useEffect(() => {
+    const controller = new AbortController();
     const settle = (tape: TradeTape) => {
       dispatch({ type: "history", tape });
       setHistory("ready");
@@ -69,11 +77,8 @@ export function useTradeTape(socket: Pick<MarketSocketLike, "subscribeFeed">, co
         },
       );
     }
-    return () => {
-      controller.abort();
-      unsubscribe();
-    };
-  }, [socket, code, venue, historyPages, dispatch]);
+    return () => controller.abort();
+  }, [code, venue, historyPages, dispatch, attempt]);
 
-  return { state, dispatch, history, feedError };
+  return { state, dispatch, history, feedError, retry };
 }

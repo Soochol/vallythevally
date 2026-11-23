@@ -1,27 +1,35 @@
 .br { display:flex; flex:1; flex-direction:column; min-height:0; min-width:0; overflow:hidden; font-variant-numeric:tabular-nums; }
 .br-scrub { display:flex; align-items:center; gap:var(--s3); padding:var(--s3) var(--s4); color:var(--text-3); font-size:var(--fs-xs); }
 .br-scrub input { flex:1; min-width:0; accent-color:var(--accent); }
-.br-scrub output { min-width:var(--size-60); color:var(--text); font-weight:600; text-align:right; }
+.br-scrub output { min-width:var(--size-60); color:var(--text); font-size:var(--fs-s); font-weight:600; text-align:right; }
 .br-scroll { flex:1; min-height:0; overflow:auto; padding:0 var(--s4); }
 .br-body { display:grid; grid-template-columns:max-content minmax(0, 1fr) max-content; align-items:start; column-gap:var(--s3); }
 .br-names, .br-values { display:flex; flex-direction:column; }
-.br-name { height:var(--br-row); padding:0 var(--s2); border-radius:var(--r-s); color:var(--text-2); font-size:var(--fs-xs); text-align:left; white-space:nowrap; }
+.br-name { height:var(--br-row); padding:0 var(--s2); border-radius:var(--r-s); color:var(--text-2); font-size:var(--fs-s); text-align:left; white-space:nowrap; }
 .br-name:hover { background:var(--hover); color:var(--text); }
 .br-name[aria-pressed=true] { background:var(--accent-soft); color:var(--text); font-weight:600; }
+.br-plot { position:relative; min-width:0; padding-bottom:var(--size-20); }
 .br-canvas { display:block; width:100%; }
-.br-value { position:relative; display:flex; align-items:center; justify-content:flex-end; height:var(--br-row); font-size:var(--fs-xs); }
-.br-value i { position:absolute; top:4px; bottom:4px; right:0; border-radius:3px; opacity:.28; }
+.br-ticks { position:absolute; left:0; right:0; bottom:0; height:var(--size-20); border-top:var(--size-1) solid var(--line); color:var(--text-3); font-size:var(--fs-xs); }
+.br-ticks span { position:absolute; top:0; padding-top:var(--size-2); padding-left:var(--size-2); border-left:var(--size-1) solid var(--line-strong); line-height:var(--size-16); white-space:nowrap; }
+.br-value { position:relative; display:flex; align-items:center; justify-content:flex-end; height:var(--br-row); font-size:var(--fs-s); }
+.br-value i { position:absolute; top:var(--size-4); bottom:var(--size-4); right:0; border-radius:var(--r-s); opacity:.28; }
 .br-value[data-kind=buy] i { background:var(--up); } .br-value[data-kind=sell] i { background:var(--down); }
 .br-value span { position:relative; padding:0 var(--s2); white-space:nowrap; }
 .br-value[data-kind=buy] span { color:var(--up); } .br-value[data-kind=sell] span { color:var(--down); }
-.br-legend { display:flex; flex-wrap:wrap; gap:var(--s4); padding:var(--s3) var(--s4); border-top:var(--size-1) solid var(--line); color:var(--text-3); font-size:var(--fs-xs); }
+.br-legend { display:flex; flex-wrap:nowrap; align-items:center; gap:var(--s4); box-sizing:border-box; height:var(--size-32); padding:0 var(--s4); overflow:hidden; border-top:var(--size-1) solid var(--line); color:var(--text-3); font-size:var(--fs-xs); white-space:nowrap; }
 .br-legend span { display:inline-flex; align-items:center; gap:var(--s2); }
-.br-swatch { display:inline-block; width:12px; height:12px; border-radius:3px; }
+.br-legend[data-testid=brokers-hover] { color:var(--text); font-size:var(--fs-s); }
+.br-swatch { display:inline-block; width:var(--size-12); height:var(--size-12); border-radius:var(--r-s); }
 .br-swatch[data-kind=buy] { background:var(--up); } .br-swatch[data-kind=sell] { background:var(--down); }
-.br-swatch[data-kind=out] { border:1px dashed var(--text-3); opacity:.6; }
-.br-line { flex:none; margin:0; padding:var(--s3) var(--s4); border-top:var(--size-1) solid var(--line); }
-.br-line figcaption { margin-bottom:var(--s2); color:var(--text-2); font-size:var(--fs-xs); font-weight:600; }
-.br-line svg { display:block; width:100%; height:80px; overflow:visible; }
-.br-path { fill:none; stroke:var(--accent); stroke-width:1.5; vector-effect:non-scaling-stroke; }
+.br-swatch[data-kind=out] { box-sizing:border-box; border:var(--size-1) dashed var(--text-3); opacity:.6; }
+.br-line { --br-line-color:var(--up); flex:none; margin:0; padding:var(--s3) var(--s4); border-top:var(--size-1) solid var(--line); }
+.br-line[data-sign=down] { --br-line-color:var(--down); }
+.br-line figcaption { display:flex; gap:var(--s3); margin-bottom:var(--s2); color:var(--text-2); font-size:var(--fs-xs); font-weight:600; }
+.br-line figcaption b { margin-left:auto; color:var(--br-line-color); font-size:var(--fs-s); font-weight:600; }
+.br-line-plot { position:relative; padding-left:var(--size-16); }
+.br-zero-label { position:absolute; left:0; transform:translateY(-50%); color:var(--text-3); font-size:var(--fs-xs); line-height:1; }
+.br-line svg { display:block; width:100%; height:var(--size-84); overflow:visible; }
+.br-path { fill:none; stroke:var(--br-line-color); stroke-width:1.5; vector-effect:non-scaling-stroke; }
 .br-zero { stroke:var(--text-3); stroke-dasharray:3 3; opacity:.5; vector-effect:non-scaling-stroke; }
 .br-now { stroke:var(--text-3); opacity:.6; vector-effect:non-scaling-stroke; }

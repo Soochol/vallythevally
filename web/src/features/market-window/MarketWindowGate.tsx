@@ -7,6 +7,7 @@ import { useKiwoomLinkStore } from "../../stores/kiwoomLink";
 import { linkedWindowSymbol, useLayoutStore } from "../../stores/layout";
 import { useSelectionStore } from "../../stores/selection";
 import { EmptyState } from "../overlay/State";
+import { openSystemSettings } from "../system-settings/open";
 
 export function useLinkedSymbol(id: WindowId): SymbolCode | null {
   const activeCell = useSelectionStore((s) => s.activeCell);
@@ -18,7 +19,7 @@ export function MarketWindowGate({ id, children }: { id: WindowId; children(code
   const link = useKiwoomLinkStore((s) => s.status);
   if (code === null) return <EmptyState title="연동된 종목이 없습니다" />;
   if (isIndexCode(code)) return <EmptyState title="이 창은 주식만 보입니다" />;
-  if (link !== null && link.state !== "connected") return <EmptyState title="키움 연결 전입니다">{link.message && <p>{link.message}</p>}</EmptyState>;
+  if (link !== null && link.state !== "connected") return <div className="mw-gate" data-testid="market-window-gate" title={link.message ?? undefined}><EmptyState title="키움 연결 전입니다" action="연결" onAction={() => openSystemSettings("kiwoom")} /></div>;
   return <>{children(code)}</>;
 }
 

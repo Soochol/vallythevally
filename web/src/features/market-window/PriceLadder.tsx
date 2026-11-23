@@ -122,7 +122,7 @@ const LadderLine = memo(function LadderLine({ row, side, columns, previousClose,
 }, sameLine);
 
 export const ladderColumns = (hasLeft: boolean, hasRight: boolean): string =>
-  `${hasLeft ? "var(--size-64) " : ""}minmax(0, 1fr) var(--size-133) minmax(0, 1fr)${hasRight ? " var(--size-64)" : ""}`;
+  `${hasLeft ? "var(--size-64) " : ""}minmax(0, 1fr) var(--mw-price-col, var(--size-133)) minmax(0, 1fr)${hasRight ? " var(--size-64)" : ""}`;
 
 export function PriceLadder({ rows, previousClose, slots, rowSlots, mark, expectedPrice = null, firstBidIndex = ROWS_ABOVE_BASE }: Props) {
   const columns = ladderColumns(slots?.left !== undefined, slots?.right !== undefined);

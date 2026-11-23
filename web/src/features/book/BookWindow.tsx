@@ -13,7 +13,11 @@ import { RatioBar, Strip, TotalFigure } from "../market-window/parts";
 import { formatQuantity } from "../market-window/format";
 import { type InfoPager, useInfoPager, useLadderTrades, useQuoteInfo } from "../market-window/useLadderSlots";
 import { useShownVenue } from "../market-window/useShownVenue";
-import { EmptyState } from "../overlay/State";
+import { EmptyState, ErrorState } from "../overlay/State";
+import { Notice } from "../ui/Notice";
+import { MarketHead } from "../market-window/MarketHead";
+import { ladderColumns } from "../market-window/PriceLadder";
+import { ratioSplit } from "../market-window/ladder";
 import { stripTotals } from "./bookModel";
 import { visibleAfterHours, visibleExpected } from "./sessionWindows";
 import { useBookFeed } from "./useBookFeed";
@@ -43,7 +47,7 @@ function BookBody({ code, pager }: { code: SymbolCode; pager: InfoPager }) {
   const notice = feed.rejected ? REJECTION[feed.rejected] : null;
   const downSince = useFeedDownSince(feed.connected);
   const ladder = (() => {
-    if (view === null) return <EmptyState title={feed.snapshotFailed ? "호가를 불러오지 못했습니다" : "호가를 기다리는 중입니다"} />;
+    if (view === null) return feed.snapshotFailed ? <ErrorState message="호가를 불러오지 못했습니다" retry={feed.retry} /> : <EmptyState title="호가를 기다리는 중입니다" />;
     const rows = buildDefaultLadder({ asks: view.asks, bids: view.bids, lastPrice: feed.lastPrice, previousClose: feed.previousClose, bounds, skipSpreadGap, tickRule: tickRuleOf(kind, [...view.asks, ...view.bids].map((level) => level.price)) });
     const expected = visibleExpected(view.t, nowSeconds, view.expected);
     const infoSlots = placeInfoItems(rows, info, expectedItemsOnPage(pager.page, expected));
@@ -51,16 +55,39 @@ function BookBody({ code, pager }: { code: SymbolCode; pager: InfoPager }) {
   })();
   return (
     <div className="bk" data-testid="book-window" data-symbol={code} data-connected={feed.connected ? "" : undefined}>
-      {notice && <div className="bk-alert" role="status">{notice}</div>}
+      <MarketHead code={code} venue={venue} lastPrice={feed.lastPrice} previousClose={feed.previousClose} />
+      {notice && <Notice tone="warning" className="mw-notice">{notice}</Notice>}
       {!feed.connected && notice === null && <FeedStrip since={downSince} />}
-      <div className="bk-ladder" data-stale={feed.connected ? undefined : ""}>{ladder}</div>
+      {view !== null && <BookColumnHead />}
+      <div className="bk-ladder" data-stale={feed.connected ? undefined : ""} data-state={view === null ? "" : undefined}>{ladder}</div>
       <Strip divided>
+        <span className="mw-strip-name">매도</span>
         <TotalFigure testId="book-total-ask" tone="down" value={totals.ask} afterHours={afterHours} description={totals.description} />
         <RatioBar buy={totals.bid ?? 0} sell={totals.ask ?? 0} sellFirst label={totals.description ?? `매도 ${formatQuantity(totals.ask ?? 0)} · 매수 ${formatQuantity(totals.bid ?? 0)}`} />
         <TotalFigure testId="book-total-bid" tone="up" value={totals.bid} afterHours={afterHours} description={totals.description} />
+        <span className="mw-strip-name">매수</span>
+        <RatioFigures ask={totals.ask} bid={totals.bid} />
       </Strip>
     </div>
   );
+}
+
+const BOOK_COLUMNS = ladderColumns(false, false);
+
+function BookColumnHead() {
+  return (
+    <div className="mw-lhead" role="row" data-testid="book-column-head" style={{ gridTemplateColumns: BOOK_COLUMNS }}>
+      <span role="columnheader">매도잔량</span>
+      <span role="columnheader">호가</span>
+      <span role="columnheader">매수잔량</span>
+    </div>
+  );
+}
+
+function RatioFigures({ ask, bid }: { ask: number | null; bid: number | null }) {
+  if (ask === null || bid === null) return null;
+  const split = ratioSplit(bid, ask);
+  return <span className="mw-ratio-figures" data-testid="book-total-ratio"><span className="mw-down">{Math.round(split.sell)}%</span> : <span className="mw-up">{Math.round(split.buy)}%</span></span>;
 }
 
 export function BookWindow({ id }: { id: WindowId }) {
