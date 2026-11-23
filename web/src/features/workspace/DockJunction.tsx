@@ -105,7 +105,12 @@ export function DockJunction({ junction, layout, dock, space, onDraft, onCommit 
     };
   }, [dragging]);
 
-  useEffect(() => () => document.documentElement.classList.remove("dock-resizing-junction"), []);
+  useEffect(() => () => {
+    document.documentElement.classList.remove("dock-resizing-junction");
+    if (!drag.current) return;
+    drag.current = null;
+    live.current.onDraft(null);
+  }, []);
 
   const start = (event: ReactPointerEvent<HTMLDivElement>) => {
     if (event.button !== 0 || !event.isPrimary || drag.current) return;

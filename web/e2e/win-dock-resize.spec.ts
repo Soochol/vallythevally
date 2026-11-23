@@ -270,3 +270,52 @@ test("경계 중심에서 5px 떨어진 곳도 잡히고 떠 있는 창 머리�
   const moved = await boxOf(header);
   expect(moved.x).toBeGreaterThan(placed.x + 20);
 });
+
+const loseCapture = (target: Locator) => target.evaluate((element) => {
+  window.addEventListener("lostpointercapture", (event) => event.stopImmediatePropagation(), true);
+  element.releasePointerCapture(1);
+});
+
+async function splitScreenerRight(page: Page) {
+  await open(page);
+  await dragBy(page, sideways(page), -350, { alt: true });
+  await tab(page, "스크리너").press("Shift+F10");
+  await menu(page).getByRole("menuitem", { name: "오른쪽에 나눠 놓기", exact: true }).click();
+  await expect(groups(page)).toHaveCount(3);
+}
+
+test("잡기를 잃으면 다음 포인터 이벤트 없이도 끌던 경계를 놓인 자리에서 확정한다", async ({ page, scenario }) => {
+  await splitScreenerRight(page);
+  const handle = sideways(page).last();
+  const before = await handle.getAttribute("aria-valuenow");
+  const at = center(await boxOf(handle));
+  await grab(page, at);
+  await page.mouse.move(at.x - 60, at.y, { steps: 8 });
+  await expect(handle).toHaveAttribute("data-dragging", "");
+  await loseCapture(handle);
+  await expect(handle).not.toHaveAttribute("data-dragging");
+  await expect(handle).not.toHaveAttribute("aria-valuenow", before!);
+  const after = await handle.getAttribute("aria-valuenow");
+  await page.mouse.up();
+  await expect(handle).toHaveAttribute("aria-valuenow", after!);
+  await pollSaved(() => saved(scenario)).not.toBeNull();
+});
+
+test("경계를 끄는 중 화면이 좁아져 경계가 사라져도 확정하지 않아 넓힌 뒤 배치와 저장이 그대로다", async ({ page, scenario }) => {
+  await splitScreenerRight(page);
+  await pollSaved(() => saved(scenario)).not.toBeNull();
+  const savedBefore = JSON.stringify(saved(scenario));
+  const widthsBefore = [await widthOf(group(page, 1)), await widthOf(group(page, 2)), await widthOf(group(page, 3))];
+  const handle = sideways(page).last();
+  const at = center(await boxOf(handle));
+  await grab(page, at);
+  await page.mouse.move(at.x - 60, at.y, { steps: 8 });
+  await expect(handle).toHaveAttribute("data-dragging", "");
+  await page.setViewportSize({ width: 640, height: 860 });
+  await expect(handle).toHaveCount(0);
+  await page.mouse.up();
+  await page.setViewportSize({ width: 1440, height: 860 });
+  await expect(groups(page)).toHaveCount(3);
+  expect([await widthOf(group(page, 1)), await widthOf(group(page, 2)), await widthOf(group(page, 3))]).toEqual(widthsBefore);
+  expect(JSON.stringify(saved(scenario))).toBe(savedBefore);
+});

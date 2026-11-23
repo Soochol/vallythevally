@@ -128,3 +128,40 @@ test("한 방향이 최소에 닿아도 다른 방향은 계속 움직이고 닿
   expect(after.chart.height).toBe(before.chart.height - 40);
   expect(after.screener.height).toBe(before.screener.height + 40);
 });
+
+const loseCapture = (target: Locator) => target.evaluate((element) => {
+  window.addEventListener("lostpointercapture", (event) => event.stopImmediatePropagation(), true);
+  element.releasePointerCapture(1);
+});
+
+test("잡기를 잃으면 다음 포인터 이벤트 없이도 끌던 두 경계를 놓인 자리에서 확정한다", async ({ page, scenario }) => {
+  await openThreeGroups(page);
+  const before = await sizes(page);
+  const at = await grabHandle(page);
+  await page.mouse.move(at.x - 60, at.y - 40, { steps: 8 });
+  await expect(handle(page)).toHaveAttribute("data-dragging", "");
+  await loseCapture(handle(page));
+  await expect(handle(page)).not.toHaveAttribute("data-dragging");
+  const placed = await sizes(page);
+  expect(placed.chart.width).not.toBe(before.chart.width);
+  await page.mouse.up();
+  expect(await sizes(page)).toEqual(placed);
+  await pollSaved(() => JSON.stringify(saved(scenario))).toContain('"ratio"');
+});
+
+test("교차점을 끄는 중 화면이 좁아져 교차점이 사라져도 확정하지 않아 넓힌 뒤 크기와 저장이 그대로다", async ({ page, scenario }) => {
+  await openThreeGroups(page);
+  await pollSaved(() => saved(scenario)).not.toBeNull();
+  const savedBefore = JSON.stringify(saved(scenario));
+  const before = await sizes(page);
+  const at = await grabHandle(page);
+  await page.mouse.move(at.x - 60, at.y - 40, { steps: 8 });
+  await expect(handle(page)).toHaveAttribute("data-dragging", "");
+  await page.setViewportSize({ width: 640, height: 860 });
+  await expect(handle(page)).toHaveCount(0);
+  await page.mouse.up();
+  await page.setViewportSize({ width: 1440, height: 860 });
+  await expect(page.locator("[data-dock-group]")).toHaveCount(3);
+  expect(await sizes(page)).toEqual(before);
+  expect(JSON.stringify(saved(scenario))).toBe(savedBefore);
+});

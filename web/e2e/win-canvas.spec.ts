@@ -468,3 +468,24 @@ test("포인터 취소·캡처 상실·초점 상실·작업 영역 변경은 �
   await header(page, "cell-1").click({ position: { x: 60, y: 17 } });
   await expect(frame(page, "cell-1")).toHaveAttribute("data-active-cell", "");
 });
+
+const loseCapture = (target: Locator) => target.evaluate((element) => {
+  window.addEventListener("lostpointercapture", (event) => event.stopImmediatePropagation(), true);
+  element.releasePointerCapture(1);
+});
+
+test("잡기를 잃으면 다음 포인터 이벤트 없이도 끌기를 확정 없이 끝내 창이 제자리에 있고 저장도 바뀌지 않는다", async ({ page, scenario }) => {
+  seedCanvas(scenario);
+  await page.goto("/");
+  await expect(cell(page, 2)).toHaveAttribute("aria-busy", "false");
+  const original = await boxOf(frame(page, "cell-1"));
+  const persisted = saved(scenario).canvas;
+  await drag(page, header(page, "cell-1"), 100, 80, false);
+  await expect(stage(page)).toHaveAttribute("data-canvas-dragging", "");
+  await loseCapture(header(page, "cell-1"));
+  await expect(stage(page)).not.toHaveAttribute("data-canvas-dragging");
+  expect(await boxOf(frame(page, "cell-1"))).toEqual(original);
+  await page.mouse.up();
+  expect(await boxOf(frame(page, "cell-1"))).toEqual(original);
+  expect(saved(scenario).canvas).toEqual(persisted);
+});

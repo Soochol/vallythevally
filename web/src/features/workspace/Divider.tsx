@@ -207,6 +207,9 @@ export function Divider({ box, dock, space, onDraft, onCommit }: { box: GutterBo
   useEffect(() => () => {
     window.clearTimeout(balloonTimer.current);
     document.documentElement.classList.remove("dock-resizing-col", "dock-resizing-row");
+    if (!drag.current) return;
+    drag.current = null;
+    live.current.onDraft(null);
   }, []);
 
   const start = (event: ReactPointerEvent<HTMLDivElement>) => {
