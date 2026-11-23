@@ -98,7 +98,7 @@ pub enum MasterError {
     Encoding(MasterMarket),
     Columns { market: MasterMarket, line: usize },
     Empty(MasterMarket),
-    Shrunk { previous: usize, now: usize },
+    Shrunk { market: MasterMarket, previous: usize, now: usize },
 }
 
 impl fmt::Display for MasterError {
@@ -109,7 +109,7 @@ impl fmt::Display for MasterError {
             MasterError::Encoding(market) => write!(f, "한투 {} 종목 마스터가 cp949 글자가 아닙니다", market.label()),
             MasterError::Columns { market, line } => write!(f, "한투 {} 종목 마스터 {line}번째 줄에 열이 모자랍니다", market.label()),
             MasterError::Empty(market) => write!(f, "한투 {} 종목 마스터에 종목이 없습니다", market.label()),
-            MasterError::Shrunk { previous, now } => write!(f, "한투 종목 마스터의 종목 수가 {previous}개에서 {now}개로 절반 넘게 줄었습니다"),
+            MasterError::Shrunk { market, previous, now } => write!(f, "한투 {} 종목 마스터의 종목 수가 {previous}개에서 {now}개로 절반 넘게 줄었습니다", market.label()),
         }
     }
 }
@@ -151,27 +151,53 @@ impl MasterDownload for HttpMasterDownload {
     }
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct MasterCounts {
+    pub kospi: usize,
+    pub kosdaq: usize,
+}
+
+impl MasterCounts {
+    fn of(self, market: MasterMarket) -> usize {
+        match market {
+            MasterMarket::Kospi => self.kospi,
+            MasterMarket::Kosdaq => self.kosdaq,
+        }
+    }
+
+    fn add(&mut self, market: MasterMarket, count: usize) {
+        match market {
+            MasterMarket::Kospi => self.kospi += count,
+            MasterMarket::Kosdaq => self.kosdaq += count,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MasterListing {
     pub stocks: Vec<SymbolInfo>,
+    pub counts: MasterCounts,
     pub unrecognized: Vec<String>,
 }
 
-pub async fn load_master(download: &dyn MasterDownload, previous_count: Option<usize>) -> Result<MasterListing, MasterError> {
+pub async fn load_master(download: &dyn MasterDownload, previous: Option<MasterCounts>) -> Result<MasterListing, MasterError> {
     let (kospi, kosdaq) = futures::future::join(download.download(MasterMarket::Kospi), download.download(MasterMarket::Kosdaq)).await;
-    let mut listing = MasterListing { stocks: Vec::new(), unrecognized: Vec::new() };
+    let mut listing = MasterListing { stocks: Vec::new(), counts: MasterCounts::default(), unrecognized: Vec::new() };
     for (market, archive) in [(MasterMarket::Kospi, kospi?), (MasterMarket::Kosdaq, kosdaq?)] {
         let text = unpack(market, &archive)?;
         let rows = parse_master(market, &text)?;
         for row in rows {
             match classify(&row) {
-                Listing::Include(info) => listing.stocks.push(info),
+                Listing::Include(info) => {
+                    listing.counts.add(market, 1);
+                    listing.stocks.push(info);
+                }
                 Listing::Unknown(why) => listing.unrecognized.push(why),
             }
         }
-    }
-    if let Some(previous) = previous_count.filter(|previous| listing.stocks.len() < previous / SHRINK_DENOMINATOR) {
-        return Err(MasterError::Shrunk { previous, now: listing.stocks.len() });
+        if let Some(previous) = previous.map(|counts| counts.of(market)).filter(|previous| listing.counts.of(market) < previous / SHRINK_DENOMINATOR) {
+            return Err(MasterError::Shrunk { market, previous, now: listing.counts.of(market) });
+        }
     }
     Ok(listing)
 }

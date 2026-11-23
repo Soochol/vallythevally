@@ -118,11 +118,11 @@ pub struct IndexLevel {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct IndexBreadth {
-    pub rising: u32,
-    pub flat: u32,
-    pub falling: u32,
-    pub upper_limit: u32,
-    pub lower_limit: u32,
+    pub rising: Option<u32>,
+    pub flat: Option<u32>,
+    pub falling: Option<u32>,
+    pub upper_limit: Option<u32>,
+    pub lower_limit: Option<u32>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]

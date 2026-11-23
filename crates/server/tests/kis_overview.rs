@@ -50,6 +50,7 @@ fn at(h: u32, m: u32, s: u32) -> KstTime {
 struct Sent {
     path: &'static str,
     query: Vec<(String, String)>,
+    continuing: bool,
 }
 
 impl Sent {
@@ -94,7 +95,7 @@ impl FakeKis {
 
 impl Transport for FakeKis {
     fn send(&self, req: HttpRequest) -> BoxFuture<'static, Result<HttpResponse, TransportError>> {
-        let sent = Sent { path: req.path, query: req.query.iter().map(|(n, v)| (n.to_string(), v.clone())).collect() };
+        let sent = Sent { path: req.path, query: req.query.iter().map(|(n, v)| (n.to_string(), v.clone())).collect(), continuing: req.header("tr_cont").is_some_and(|v| !v.is_empty()) };
         let response = (self.handler)(&sent);
         let held = self.held.lock().unwrap().take_if(|held| sent.is(held.api));
         self.sent.lock().unwrap().push(sent);
@@ -110,6 +111,10 @@ impl Transport for FakeKis {
 
 fn ok(body: impl Into<String>) -> HttpResponse {
     HttpResponse { status: 200, tr_cont: None, body: body.into() }
+}
+
+fn ok_more(body: impl Into<String>, more: bool) -> HttpResponse {
+    HttpResponse { status: 200, tr_cont: Some(if more { "M" } else { "D" }.into()), body: body.into() }
 }
 
 fn route(sent: &Sent) -> HttpResponse {
@@ -247,6 +252,56 @@ async fn the_kospi_index_card_asks_the_kis_index_tr_once_and_fills_the_neutral_c
     assert_eq!((sent[0].get("FID_COND_MRKT_DIV_CODE"), sent[0].get("FID_INPUT_ISCD")), ("U", "0001"));
     assert_eq!(KisApiId::IndexPrice.tr_id(), "FHPUP02100000");
     assert_eq!(h.kis.total(), 1);
+}
+
+fn paged_index_days(days: Vec<KstDate>, rows_per_page: usize) -> impl Fn(&Sent) -> HttpResponse + Send + Sync + 'static {
+    let served = std::sync::atomic::AtomicUsize::new(0);
+    move |sent| {
+        assert!(sent.is(KisApiId::IndexChart), "{}", sent.path);
+        let from = if sent.continuing { served.load(std::sync::atomic::Ordering::SeqCst) } else { 0 };
+        let page: Vec<Value> = days[from..].iter().take(rows_per_page).map(|d| json!({"stck_bsop_date": d.yyyymmdd(), "bstp_nmix_prpr": "2700.00", "acml_tr_pbmn": "20000000"})).collect();
+        served.store(from + page.len(), std::sync::atomic::Ordering::SeqCst);
+        ok_more(json!({"rt_cd": "0", "output1": {}, "output2": page}).to_string(), from + page.len() < days.len())
+    }
+}
+
+#[tokio::test]
+async fn index_trading_days_follow_continuation_until_the_period_is_covered() {
+    let newest_first = weekdays_back_from(monday(), 120);
+    let h = Harness::start(at(10, 0, 0), paged_index_days(newest_first.clone(), 50)).await;
+    let days = h.source.trading_days(server::api::Market::Kospi, monday(), Priority::Screen).await.unwrap();
+    assert!(days.len() >= 60, "{}", days.len());
+    assert!(days.windows(2).all(|pair| pair[0].date < pair[1].date), "오름차순이다");
+    let sent = h.kis.sent_to(KisApiId::IndexChart);
+    assert_eq!((sent.len(), sent[0].continuing, sent[1].continuing), (2, false, true), "50행 쪽 둘로 60일을 채우고 멈춘다");
+
+    let h = Harness::start(at(10, 0, 0), paged_index_days(newest_first, 100)).await;
+    let days = h.source.trading_days(server::api::Market::Kospi, monday(), Priority::Screen).await.unwrap();
+    assert_eq!(days.len(), 100);
+    assert_eq!(h.kis.sent_to(KisApiId::IndexChart).len(), 1, "쪽이 100행이면 한 번이다");
+}
+
+#[tokio::test]
+async fn an_empty_breadth_count_is_none() {
+    let h = Harness::start(at(10, 0, 0), |sent| {
+        assert!(sent.is(KisApiId::IndexPrice));
+        let mut body: Value = serde_json::from_str(&fixture("index_price.json")).unwrap();
+        for column in ["ascn_issu_cnt", "uplm_issu_cnt", "stnr_issu_cnt", "down_issu_cnt", "lslm_issu_cnt"] {
+            body["output"][column] = json!("");
+        }
+        ok(body.to_string())
+    })
+    .await;
+    let snapshot = h.source.index(server::api::Market::Kospi, Priority::Screen).await.unwrap();
+    let b = snapshot.breadth;
+    assert_eq!((b.rising, b.flat, b.falling, b.upper_limit, b.lower_limit), (None, None, None, None, None));
+
+    let body = h.ok("/api/market-overview/index?market=kospi").await;
+    assert_eq!(body["index"]["value"]["breadth"], json!({"rising": null, "flat": null, "falling": null, "upperLimit": null, "lowerLimit": null}));
+
+    let h = Harness::start(at(10, 0, 0), route).await;
+    let b = h.source.index(server::api::Market::Kospi, Priority::Screen).await.unwrap().breadth;
+    assert_eq!((b.rising, b.flat, b.falling, b.upper_limit, b.lower_limit), (Some(410), Some(52), Some(498), Some(3), Some(0)));
 }
 
 #[tokio::test]

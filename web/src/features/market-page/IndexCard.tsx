@@ -3,22 +3,25 @@ import type { MarketOverviewBreadth } from "../../api/generated/MarketOverviewBr
 import { useMarketIndex } from "../../api/marketOverview";
 import { useOverviewOn } from "../status/marketFeed";
 import { CardShell, FeedUnavailable, Loaded, PartView } from "./CardPart";
-import { formatCount, formatEok, formatLevel, signedRate, toneOf } from "./marketFormat";
+import { breadthShares, formatOptionalCount } from "./breadth";
+import { formatEok, formatLevel, signedRate, toneOf } from "./marketFormat";
 
 function BreadthBar({ breadth }: { breadth: MarketOverviewBreadth }) {
-  const total = Math.max(breadth.rising + breadth.flat + breadth.falling, 1);
-  const share = (count: number) => `${(count / total) * 100}%`;
+  const shares = breadthShares(breadth);
+  const label = `상승 ${formatOptionalCount(breadth.rising)} 보합 ${formatOptionalCount(breadth.flat)} 하락 ${formatOptionalCount(breadth.falling)}`;
   return (
-    <div className="mk-breadth" role="img" aria-label={`상승 ${breadth.rising} 보합 ${breadth.flat} 하락 ${breadth.falling}`}>
-      <div className="mk-breadth-bar">
-        <i data-side="up" style={{ width: share(breadth.rising) }} />
-        <i data-side="flat" style={{ width: share(breadth.flat) }} />
-        <i data-side="down" style={{ width: share(breadth.falling) }} />
-      </div>
+    <div className="mk-breadth" role="img" aria-label={label}>
+      {shares !== null && (
+        <div className="mk-breadth-bar">
+          <i data-side="up" style={{ width: `${shares.up}%` }} />
+          <i data-side="flat" style={{ width: `${shares.flat}%` }} />
+          <i data-side="down" style={{ width: `${shares.down}%` }} />
+        </div>
+      )}
       <div className="mk-breadth-count">
-        <span data-tone="up">상승 {formatCount(breadth.rising)}</span>
-        <span>보합 {formatCount(breadth.flat)}</span>
-        <span data-tone="down">하락 {formatCount(breadth.falling)}</span>
+        <span data-tone="up">상승 {formatOptionalCount(breadth.rising)}</span>
+        <span>보합 {formatOptionalCount(breadth.flat)}</span>
+        <span data-tone="down">하락 {formatOptionalCount(breadth.falling)}</span>
       </div>
     </div>
   );
@@ -49,7 +52,7 @@ export function IndexCard({ market, enabled }: { market: Market; enabled: boolea
                 </div>
                 <div className="mk-index-cell" data-cell="limit">
                   <dt>상한·하한</dt>
-                  <dd><span data-tone="up">{formatCount(index.breadth.upperLimit)}</span> / <span data-tone="down">{formatCount(index.breadth.lowerLimit)}</span></dd>
+                  <dd><span data-tone="up">{formatOptionalCount(index.breadth.upperLimit)}</span> / <span data-tone="down">{formatOptionalCount(index.breadth.lowerLimit)}</span></dd>
                 </div>
               </dl>
             )}

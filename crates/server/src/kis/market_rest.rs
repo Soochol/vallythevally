@@ -7,7 +7,7 @@ use serde::Deserialize;
 
 use super::api::KisApiId;
 use super::error::Category;
-use super::master::{MasterDownload, MasterError, load_master};
+use super::master::{MasterCounts, MasterDownload, MasterError, load_master};
 use super::minute_bars::{Minute, MinuteCursor, Position, build};
 use super::rest::{KisError, KisPage, KisRequest, KisRest, Priority as KisPriority};
 use crate::api::{self, ApiErrorCode, ApiErrorReason};
@@ -19,8 +19,8 @@ use crate::market_source::{
 use crate::symbols::Directory;
 
 pub const MULTI_PRICE_MAX_ROWS: usize = 30;
-pub const DAILY_PAGE_ROWS: usize = 100;
 pub const TODAY_MINUTE_PAGE_ROWS: usize = 30;
+const TODAY_TRADES_PAGE_ROWS: usize = 30;
 pub const PAST_MINUTE_PAGE_ROWS: usize = 120;
 pub const MINUTE_PAGE_BUDGET: usize = 20;
 const MAX_EMPTY_SESSION_DAYS: usize = 10;
@@ -129,7 +129,7 @@ pub struct KisMarket {
     rest: KisRest,
     clock: Clock,
     master: Arc<dyn MasterDownload>,
-    directory_size: Mutex<Option<usize>>,
+    directory_counts: Mutex<Option<MasterCounts>>,
     list_outage: Mutex<Option<SourceError>>,
 }
 
@@ -141,7 +141,7 @@ impl From<KisMarket> for Arc<dyn MarketSource> {
 
 impl KisMarket {
     pub fn new(rest: KisRest, clock: Clock, master: Arc<dyn MasterDownload>) -> Self {
-        KisMarket { rest, clock, master, directory_size: Mutex::new(None), list_outage: Mutex::new(None) }
+        KisMarket { rest, clock, master, directory_counts: Mutex::new(None), list_outage: Mutex::new(None) }
     }
 
     async fn page(&self, api: KisApiId, query: Vec<(&'static str, String)>, priority: Priority) -> Result<KisPage, SourceError> {
@@ -172,7 +172,7 @@ impl KisMarket {
         ];
         let body: ChartBody = self.body(KisApiId::DailyChart, query, priority).await?;
         let bars = calendar_bars(period, &body.output2)?;
-        let next = (body.output2.len() >= DAILY_PAGE_ROWS).then(|| bars.first().map(|oldest| oldest.bucket.start().kst_date().add_days(-1))).flatten();
+        let next = bars.first().map(|oldest| oldest.bucket.start().kst_date().add_days(-1));
         Ok(ChartPage { bars, next: next.map(|date| Cursor::new(date.yyyymmdd())) })
     }
 
@@ -279,8 +279,10 @@ impl KisMarket {
             let page = if continuing { self.next_page(KisApiId::IndexMinuteChart, query(), priority).await? } else { self.page(KisApiId::IndexMinuteChart, query(), priority).await? };
             continuing = true;
             let body: ChartBody = parse_body(KisApiId::IndexMinuteChart, &page)?;
-            minutes.extend(minute_rows(&body.output2, None)?);
-            let more = page.more;
+            let rows = minute_rows(&body.output2, None)?;
+            let empty_page = rows.is_empty();
+            minutes.extend(rows);
+            let more = page.more && !empty_page;
             if more && pages < MINUTE_PAGE_BUDGET {
                 continue;
             }
@@ -331,13 +333,13 @@ impl MarketSource for KisMarket {
 
     fn directory(&self, _priority: Priority) -> BoxFuture<'_, Result<Directory, SourceError>> {
         Box::pin(async move {
-            let previous = *self.directory_size.lock().expect("목록 크기 잠금");
+            let previous = *self.directory_counts.lock().expect("목록 크기 잠금");
             match load_master(self.master.as_ref(), previous).await {
                 Ok(listing) => {
                     if !listing.unrecognized.is_empty() {
                         tracing::warn!(count = listing.unrecognized.len(), first = %listing.unrecognized[0], "한투 종목 마스터에 표에 없는 행이 있어 넣지 않았습니다");
                     }
-                    *self.directory_size.lock().expect("목록 크기 잠금") = Some(listing.stocks.len());
+                    *self.directory_counts.lock().expect("목록 크기 잠금") = Some(listing.counts);
                     *self.list_outage.lock().expect("목록 장애 잠금") = None;
                     let dir = Directory::build(listing.stocks);
                     tracing::info!(count = dir.len(), "한투 종목 마스터를 받았습니다");
@@ -492,6 +494,11 @@ impl MarketSource for KisMarket {
                 Cursor::new(format!("{}:{carried}", oldest.stck_cntg_hour))
             });
             let progressed = !rows.is_empty() || skipped > 0;
+            let stuck_in_one_second = !progressed && body.output2.len() >= TODAY_TRADES_PAGE_ROWS && body.output2.iter().all(|row| row.stck_cntg_hour == hour);
+            if stuck_in_one_second {
+                let next = second_before(&hour).map(|earlier| Cursor::new(format!("{earlier}:0")));
+                return Ok(TapePage { rows, skipped: 1, next });
+            }
             Ok(TapePage { rows, skipped, next: next.filter(|_| progressed) })
         })
     }
@@ -518,6 +525,11 @@ const END_OF_DAY_HOUR: &str = "200000";
 fn parse_tape_cursor(text: &str) -> Option<(String, usize)> {
     let (hour, seen) = text.split_once(':')?;
     (hour.len() == 6 && hour.bytes().all(|b| b.is_ascii_digit())).then(|| seen.parse().ok().map(|seen| (hour.to_owned(), seen)))?
+}
+
+fn second_before(hour: &str) -> Option<String> {
+    let secs = clock_of(hour)?.secs();
+    secs.checked_sub(1).map(hms_text_plain)
 }
 
 pub(crate) fn kis_priority(priority: Priority) -> KisPriority {

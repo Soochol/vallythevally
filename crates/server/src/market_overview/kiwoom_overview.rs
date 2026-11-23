@@ -67,7 +67,13 @@ fn index_snapshot(market: Market, rows: &[IndexBreadthRow]) -> Result<MarketInde
     let volatility = rows.iter().find(|r| r.code == VOLATILITY_INDEX_CODE).map(|r| VolatilityLevel { level: r.level, change_rate: r.change_rate });
     Ok(MarketIndexSnapshot {
         whole: index_level(whole),
-        breadth: IndexBreadth { rising: count(whole.rising), flat: count(whole.flat), falling: count(whole.falling), upper_limit: count(whole.upper_limit), lower_limit: count(whole.lower_limit) },
+        breadth: IndexBreadth {
+            rising: Some(count(whole.rising)),
+            flat: Some(count(whole.flat)),
+            falling: Some(count(whole.falling)),
+            upper_limit: Some(count(whole.upper_limit)),
+            lower_limit: Some(count(whole.lower_limit)),
+        },
         volatility,
     })
 }
