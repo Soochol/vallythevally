@@ -57,7 +57,7 @@ python3 .claude/skills/verify-vally/scripts/build_ui.py web/dist
 cd desktop && pnpm install --frozen-lockfile --ignore-workspace && pnpm tauri build --config src-tauri/tauri.bundle.conf.json
 ```
 
-`desktop/src-tauri/binaries/`는 저장소에 넣지 않는다. Windows 설치본 빌드와 코드 서명은 이 작업의 범위 밖이다.
+`desktop/src-tauri/binaries/`는 저장소에 넣지 않는다. Windows 설치본 빌드, 코드 서명, 자동 업데이트, 릴리스 올리기는 [데스크톱 앱 릴리스와 자동 업데이트](desktop-release.md)에 있다.
 
 ## 앱 자료 폴더
 
