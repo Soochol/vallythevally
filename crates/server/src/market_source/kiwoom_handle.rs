@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use super::route::FeatureRoute;
+use crate::kis::link::KisLane;
 use crate::kiwoom::rest::{KiwoomError, KiwoomRest};
 
 #[derive(Clone)]
@@ -31,6 +32,13 @@ impl KiwoomHandle {
             Held::Fixed(rest) => Ok(rest.clone()),
             Held::Absent => Err(KiwoomError::NotConnected),
             Held::Routed(route) => Ok(route.kiwoom_rest()),
+        }
+    }
+
+    pub fn kis_receiving_instead(&self) -> Option<KisLane> {
+        match &self.0 {
+            Held::Routed(route) => route.kis_receiving_instead_of_kiwoom(),
+            Held::Fixed(_) | Held::Absent => None,
         }
     }
 }

@@ -385,8 +385,9 @@ impl Screener {
         let edition = self.memory.edition_for(&self.store, generation).await?;
         self.check_ready(&edition, need_day, now)?;
         let basis = CollectionBasis { generation, update_epoch };
-        let batch = self.summaries.collect(codes, basis).await.map_err(|error| match error {
+        let batch = self.summaries.collect_observing(codes, basis, calendar.observation(now)).await.map_err(|error| match error {
             CollectionError::Kiwoom(error) => Lookup::ScreenerRun.failure(error.into(), self.clock.now()),
+            CollectionError::Kis(error) => Lookup::ScreenerRun.failure(error.into(), self.clock.now()),
             error => data_changed(error.to_string()),
         })?;
         self.judge(Judging { screen, edition, batch, calendar, need_day, now, basis }).await

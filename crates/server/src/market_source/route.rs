@@ -68,6 +68,13 @@ impl FeatureRoute {
         }
     }
 
+    pub fn kis_receiving_instead_of_kiwoom(&self) -> Option<KisLane> {
+        match self.receiver() {
+            Receiver::Kis(lane) => Some(lane),
+            Receiver::Kiwoom(_) | Receiver::Nobody => None,
+        }
+    }
+
     pub fn kiwoom_connected(&self) -> bool {
         matches!(self.receiver(), Receiver::Kiwoom(_))
     }
