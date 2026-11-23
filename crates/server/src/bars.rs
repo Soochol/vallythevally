@@ -378,7 +378,12 @@ impl BarService {
             s.cont = None;
             s.reached_origin = false;
         }
+        let origin_kept = connects && s.reached_origin;
         Self::ingest(s, confirmed, page.next);
+        if origin_kept {
+            s.reached_origin = true;
+            s.cont = None;
+        }
         Ok(())
     }
 
