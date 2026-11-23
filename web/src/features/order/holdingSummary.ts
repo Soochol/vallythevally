@@ -32,18 +32,18 @@ const listedSellQuantity = (groups: ReadonlyMap<string, PriceGroup>, price: numb
 const sendingSells = (writes: readonly PendingWrite[], code: string) =>
   writes.flatMap((write) => write.code === code && write.kind === "sending" && write.side === "sell" ? [write] : []);
 
-const notYetListed = (groups: ReadonlyMap<string, PriceGroup>, write: { readonly price: number; readonly listedWhenIn: number }): boolean => {
+const notYetListed = (groups: ReadonlyMap<string, PriceGroup>, write: { readonly price: number; readonly since: number; readonly listedWhenIn: number }, listedAt: number): boolean => {
   const listed = listedSellQuantity(groups, write.price);
-  return listed > 0 && listed < write.listedWhenIn;
+  return listed > 0 && (listed < write.listedWhenIn || listedAt < write.since);
 };
 
-export const sellQuantityAtPrice = (groups: ReadonlyMap<string, PriceGroup>, writes: readonly PendingWrite[], code: string, price: number): number =>
-  (groups.get(groupKey("sell", price))?.quantity ?? 0) + sendingSells(writes, code).reduce((sum, write) => sum + (write.price === price && notYetListed(groups, write) ? write.quantity : 0), 0);
+export const sellQuantityAtPrice = (groups: ReadonlyMap<string, PriceGroup>, writes: readonly PendingWrite[], code: string, price: number, listedAt: number): number =>
+  (groups.get(groupKey("sell", price))?.quantity ?? 0) + sendingSells(writes, code).reduce((sum, write) => sum + (write.price === price && notYetListed(groups, write, listedAt) ? write.quantity : 0), 0);
 
-export function sellOrderQuantity(groups: ReadonlyMap<string, PriceGroup>, writes: readonly PendingWrite[], code: string): number {
+export function sellOrderQuantity(groups: ReadonlyMap<string, PriceGroup>, writes: readonly PendingWrite[], code: string, listedAt: number): number {
   let quantity = 0;
   for (const group of groups.values()) if (group.side === "sell") quantity += group.quantity;
-  for (const write of sendingSells(writes, code)) if (notYetListed(groups, write)) quantity += write.quantity;
+  for (const write of sendingSells(writes, code)) if (notYetListed(groups, write, listedAt)) quantity += write.quantity;
   return quantity;
 }
 

@@ -156,7 +156,7 @@ function OrderBody({ id, code, infoPager }: { id: WindowId; code: SymbolCode; in
   const submit = (side: OrderSide, price: number, quantity: number) => {
     const margin = side === "buy" ? marginOf(orderAmount(price, quantity), data.capacity.buying) : 0;
     const send = (confirmHighValue: boolean) => {
-      writes.place({ side, price, quantity, confirmHighValue, margin, listedWhenIn: side === "sell" ? sellQuantityAtPrice(data.groups, pending, code, price) + quantity : 0 });
+      writes.place({ side, price, quantity, confirmHighValue, margin, listedWhenIn: side === "sell" ? sellQuantityAtPrice(data.groups, pending, code, price, data.openOrdersListedAt) + quantity : 0 });
       if (settings.keepLastEntry) rememberEntry(entryKey, { presetKind, quantity, usedAt: Date.now() });
     };
     if (needsHighValueConfirm(price, quantity)) setConfirm({ title: `${SIDE_LABEL[side]} ${formatQuantity(quantity)} · ${formatPrice(price, false)}원`, amount: price * quantity, run: () => send(true) });
@@ -194,7 +194,7 @@ function OrderBody({ id, code, infoPager }: { id: WindowId; code: SymbolCode; in
         </div>
       )}
       <AccountBand windowId={id} choice={choice} onPick={(account) => setSettings({ ...settings, account })} maskAccount={settings.maskAccount} openOrders={data.openOrders} balance={data.balance} executions={data.executions} writable={writable} mock={mock} policy={data.orderable?.policy ?? null} onCancel={writes.cancelOne} />
-      <HoldingSummary account={accountRef} holding={holding} orderable={data.orderable} buyableProblem={data.buyableProblem} sellOrdered={sellOrderQuantity(data.groups, pending, code)} unit={profitUnit} onUnit={() => setProfitUnit(toggledUnit)} onFill={setInput} />
+      <HoldingSummary account={accountRef} holding={holding} orderable={data.orderable} buyableProblem={data.buyableProblem} sellOrdered={sellOrderQuantity(data.groups, pending, code, data.openOrdersListedAt)} unit={profitUnit} onUnit={() => setProfitUnit(toggledUnit)} onFill={setInput} />
       <div className="od-entry">
         <QuantityRow presetKind={presetKind} input={input} sharePresets={settings.sharePresets} amountPresets={settings.amountPresets} referencePrice={referencePrice} keepLastEntry={settings.keepLastEntry} onPresetKind={setPresetKind} onInput={setInput} />
         <div className="od-toolbar">

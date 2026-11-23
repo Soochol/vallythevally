@@ -59,13 +59,13 @@ describe("매입수량 누르기", () => {
   it("매도 주문 잔량은 접수된 매도 주문의 합이고 매수는 세지 않는다", () => {
     const order = (orderNo: string, side: "buy" | "sell", price: number, openQuantity: number) => ({ orderNo, code: "005930", name: "삼성전자", side, quantity: openQuantity, price, openQuantity, status: "접수", orderedAt: "100000", originalOrderNo: null, venue: "krx" as const });
     const groups = groupOpenOrders([order("1", "sell", 71_000, 30), order("2", "sell", 72_000, 20), order("3", "buy", 69_000, 40)], "005930");
-    expect(sellOrderQuantity(groups, [], "005930")).toBe(50);
-    expect(sellOrderQuantity(new Map(), [], "005930")).toBe(0);
+    expect(sellOrderQuantity(groups, [], "005930", 0)).toBe(50);
+    expect(sellOrderQuantity(new Map(), [], "005930", 0)).toBe(0);
   });
 
   const sellOrder = (orderNo: string, quantity: number, price = 71_000) => ({ orderNo, code: "005930", name: "삼성전자", side: "sell" as const, quantity, price, openQuantity: quantity, status: "접수", orderedAt: "100000", originalOrderNo: null, venue: "krx" as const });
   const sending = (key: string, price: number, quantity: number, listedWhenIn: number, code = "005930", side: "buy" | "sell" = "sell"): PendingWrite => ({ kind: "sending", code, since: 10, key, side, price, quantity, listedWhenIn });
-  const ordered = (orders: ReturnType<typeof sellOrder>[], writes: PendingWrite[]) => sellOrderQuantity(groupWithPending(orders, writes, "005930"), writes, "005930");
+  const ordered = (orders: ReturnType<typeof sellOrder>[], writes: PendingWrite[], listedAt = 20) => sellOrderQuantity(groupWithPending(orders, writes, "005930"), writes, "005930", listedAt);
 
   it("접수된 매도와 같은 가격으로 보내는 중인 매도도 더하고 다른 종목·매수 쓰기는 세지 않는다", () => {
     const writes = [sending("a", 71_000, 30, 80), sending("b", 71_000, 5, 85), sending("c", 71_000, 99, 149, "000660"), sending("d", 71_000, 7, 0, "005930", "buy")];
@@ -101,16 +101,23 @@ describe("매입수량 누르기", () => {
   it("새 보내는 중 매도의 목록 기준은 이미 보내는 중인 매도를 포함한다", () => {
     const writes = [sending("a", 71_000, 30, 80)];
     const groups = groupWithPending([sellOrder("1", 50)], writes, "005930");
-    expect(sellQuantityAtPrice(groups, writes, "005930", 71_000)).toBe(80);
-    expect(sellQuantityAtPrice(groups, writes, "005930", 72_000)).toBe(0);
+    expect(sellQuantityAtPrice(groups, writes, "005930", 71_000, 20)).toBe(80);
+    expect(sellQuantityAtPrice(groups, writes, "005930", 72_000, 20)).toBe(0);
     const listed = groupWithPending([sellOrder("1", 50), sellOrder("2", 30)], writes, "005930");
-    expect(sellQuantityAtPrice(listed, writes, "005930", 71_000)).toBe(80);
+    expect(sellQuantityAtPrice(listed, writes, "005930", 71_000, 20)).toBe(80);
+  });
+
+  it("보내는 중 매도보다 먼저 읽은 목록은 수량이 기준에 닿아도 그 매도가 든 것으로 보지 않는다", () => {
+    const writes = [sending("a", 71_000, 30, 80)];
+    expect(ordered([sellOrder("1", 50), sellOrder("2", 30)], writes, 5)).toBe(110);
+    expect(ordered([sellOrder("1", 50), sellOrder("2", 30)], writes, 9)).toBe(110);
+    expect(ordered([sellOrder("1", 50), sellOrder("2", 30)], writes, 10)).toBe(80);
   });
 
   it("접수된 묶음이 없는 가격의 보내는 중 매도는 묶음이 이미 더해 두 번 세지 않는다", () => {
     const writes = [sending("a", 72_000, 30, 30), sending("b", 72_000, 5, 35)];
     expect(ordered([], writes)).toBe(35);
-    expect(sellQuantityAtPrice(groupWithPending([], writes, "005930"), writes, "005930", 72_000)).toBe(35);
+    expect(sellQuantityAtPrice(groupWithPending([], writes, "005930"), writes, "005930", 72_000, 20)).toBe(35);
   });
 
   it("현재 종목의 보유만 고른다", () => {
