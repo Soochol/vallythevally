@@ -9,10 +9,16 @@ use domain::{KstDate, KstTime, TimeOfDay};
 #[derive(Clone, Debug)]
 pub struct Clock(Arc<Source>);
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Flow {
+    WithTokioTime,
+    OnlyByJump,
+}
+
 #[derive(Debug)]
 enum Source {
     System,
-    Fake { base: KstTime, start: tokio::time::Instant, jump: AtomicI64, changed: tokio::sync::Notify },
+    Fake { base: KstTime, start: tokio::time::Instant, flow: Flow, jump: AtomicI64, changed: tokio::sync::Notify },
 }
 
 impl Clock {
@@ -22,7 +28,15 @@ impl Clock {
 
     /// tokio 런타임 안에서 만든다. tokio 시간이 흐른 만큼 함께 흐른다.
     pub fn fake(start: KstTime) -> Self {
-        Clock(Arc::new(Source::Fake { base: start, start: tokio::time::Instant::now(), jump: AtomicI64::new(0), changed: tokio::sync::Notify::new() }))
+        Self::fake_with(start, Flow::WithTokioTime)
+    }
+
+    pub fn frozen(start: KstTime) -> Self {
+        Self::fake_with(start, Flow::OnlyByJump)
+    }
+
+    fn fake_with(start: KstTime, flow: Flow) -> Self {
+        Clock(Arc::new(Source::Fake { base: start, start: tokio::time::Instant::now(), flow, jump: AtomicI64::new(0), changed: tokio::sync::Notify::new() }))
     }
 
     pub fn now(&self) -> KstTime {
@@ -33,8 +47,12 @@ impl Clock {
                     .map_or(0, |d| d.as_secs() as i64);
                 KstTime::from_unix(secs)
             }
-            Source::Fake { base, start, jump, .. } => {
-                base.plus_secs(start.elapsed().as_secs() as i64 + jump.load(Ordering::SeqCst))
+            Source::Fake { base, start, flow, jump, .. } => {
+                let flowed = match flow {
+                    Flow::WithTokioTime => start.elapsed().as_secs() as i64,
+                    Flow::OnlyByJump => 0,
+                };
+                base.plus_secs(flowed + jump.load(Ordering::SeqCst))
             }
         }
     }
@@ -54,15 +72,20 @@ impl Clock {
     pub async fn sleep_until(&self, t: KstTime) {
         loop {
             match &*self.0 {
-                Source::Fake { changed, .. } => {
+                Source::Fake { changed, flow, .. } => {
                     let notified = changed.notified();
                     tokio::pin!(notified);
                     notified.as_mut().enable();
                     let secs = t.unix() - self.now().unix();
                     if secs <= 0 { return; }
-                    tokio::select! {
-                        _ = tokio::time::sleep(Duration::from_secs(secs as u64)) => {}
-                        _ = notified => {}
+                    match flow {
+                        Flow::WithTokioTime => {
+                            tokio::select! {
+                                _ = tokio::time::sleep(Duration::from_secs(secs as u64)) => {}
+                                _ = notified => {}
+                            }
+                        }
+                        Flow::OnlyByJump => notified.await,
                     }
                 }
                 Source::System => {
@@ -99,6 +122,22 @@ mod tests {
         assert_eq!(next_daily(kst(d(9), 0, 34, 0), at), kst(d(9), 7, 45, 0));
         assert_eq!(next_daily(kst(d(9), 7, 45, 0), at), kst(d(10), 7, 45, 0));
         assert_eq!(next_daily(kst(d(9), 23, 0, 0), at), kst(d(10), 7, 45, 0));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn frozen_clock_moves_only_by_jump() {
+        let c = Clock::frozen(kst(d(9), 0, 0, 0));
+        tokio::time::sleep(Duration::from_secs(90)).await;
+        assert_eq!(c.now(), kst(d(9), 0, 0, 0));
+        let waiter = tokio::spawn({
+            let c = c.clone();
+            async move { c.sleep_until(kst(d(9), 0, 0, 30)).await }
+        });
+        tokio::time::sleep(Duration::from_secs(90)).await;
+        assert!(!waiter.is_finished());
+        c.jump(30);
+        waiter.await.unwrap();
+        assert_eq!(c.now(), kst(d(9), 0, 0, 30));
     }
 
     #[tokio::test(start_paused = true)]

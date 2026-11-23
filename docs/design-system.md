@@ -16,10 +16,25 @@
 
 ## 화면과 대화상자 추가하기
 
-1. 기존 버튼의 `tb-btn`, `seg-btn`, `icon-btn`, `btn-primary`를 사용한다. 크기와 상태 표현을 새 화면마다 다시 정의하지 않는다.
-2. 입력에는 `ui-field`, 대화상자에는 `DialogFrame`을 사용한다. 머리와 하단 행동은 `ui-dialog-head`, `ui-dialog-foot`에 맞춘다. 설정 항목에는 `Row`, 짧은 선택에는 `Segment`, 검증 메시지에는 `Errors`를 사용한다.
-3. 탭은 `ui-tabs`와 `tablist`, `tab`, `tabpanel` 역할을 함께 사용한다. 좌우 화살표, Tab, Escape와 닫은 뒤 포커스 복귀를 확인한다.
-4. 화면 높이가 줄면 내용 영역 안에서 스크롤하게 한다. 대화상자 하단의 저장과 취소는 내용 밖에 둔다. 페이지 자체의 크기를 늘리거나 필요한 조작을 잘라 숨기지 않는다.
+새 화면은 아래 표의 부품만 쓰고 크기와 상태 표현을 다시 정의하지 않는다. 스타일은 `web/src/styles/index.css`(버튼)와 `components.css`(나머지)에 있고, 컴포넌트는 `web/src/features/ui/`(표식 `.ui2`가 있어 굵기·글자 크기·색 직접 값 규칙을 지킨다)와 각 기능 폴더에 있다.
+
+| 쓰는 곳 | 부품 | 규칙 |
+|---|---|---|
+| 버튼 | `.btn-primary`(화면에 하나) · `.btn` · `.btn-ghost`(도구 막대 안) · `.btn-danger` | 크기는 `.btn-sm` 26px · 기본 30px · `.btn-lg` 36px. 비활성(`:disabled`·`aria-disabled`)은 `--raised` 면과 `--text-3` 글자이고 `opacity`를 쓰지 않는다. `tb-btn`·`seg-btn`·`icon-btn`은 지금 화면이 쓰므로 남긴다 |
+| 하나 고르기 | `Segmented`(2~6개, `radiogroup`+화살표 또는 `aria-pressed`) · 공용 `Select` | 고른 조각은 `--raised` 면과 `--text`. 브라우저 기본 `select`는 쓰지 않는다 |
+| 켜고 끄기 | `Chip`(`pressed`·`onPressedChange`) · `ui-switch` | 켜지면 `--accent-soft` 면과 `--accent` 글자. 설정의 참·거짓은 `ui-switch` |
+| 탭 | `Tabs`(밑줄, `tablist`·`tab`, 좌우 화살표·Home·End) | `tabDomId`·`panelDomId`로 탭과 `tabpanel`을 잇는다. 값 고르기는 `Segmented` |
+| 입력 | `Field` · `SecretField` | 높이 36px. 라벨·도움말·오류를 `aria-describedby`로, 오류를 `aria-invalid`로 잇는다. `SecretField`는 칸 안에 보기·붙여넣기를 두고 앞뒤 공백을 자른다. 좁은 폭에서 세로로 쌓여도 높이는 줄지 않는다 |
+| 배지·키캡 | `Badge`(neutral·accent·success·warning·danger) · `Kbd` | 배지 11px, 높이 18px. 키 하나에 `Kbd` 하나 |
+| 상태 판 | `EmptyState` · `ErrorState`(`detail`은 "자세히" 안) · `Skeleton`(`rows`·`shape`·`minHeight`) | 가운데 정렬, 아이콘 24px, 제목 14px/600, 설명 12px `--text-2`, 버튼은 `.btn`. 뼈대는 움직이지 않고 0.4초 뒤에 보인다 |
+| 알림 띠 | `Notice`(info·warning·danger) | 아이콘, 문장, 버튼 하나 |
+| 알림 | `showToast(text, { tone, undo })` | `tone`은 info(기본)·success·warning·error. 아래 가운데(상태 줄 위 12px)에 셋까지 쌓이고 닫기 버튼이 있다. error는 저절로 사라지지 않는다. 포인터를 올리거나 초점이 있으면 시간을 멈춘다. 둘째 인수로 되돌리기만 주는 옛 호출도 된다 |
+| 메뉴 | `Menu` 항목의 `shortcut`·`icon`·`disabledReason` | 비활성 사유는 둘째 줄(11px `--text-2`). 최대 폭 320px, 긴 이름은 줄인다 |
+| 확인창 | `confirmAction(제목, { action, danger, detail })` | `detail`은 결과 줄 목록. 위험 단추는 `.btn-danger`, 취소는 `.btn`이고 처음 초점을 받는다. 열린 대화상자 위에서는 가림막이 `--scrim-nested`다 |
+| 대화상자 | `DialogFrame`(`size="compact"`·`solid`) · `ui-dialog-head`·`ui-dialog-foot` · `Row`·`Errors` | `compact`는 머리 여백 16px, 제목 17px, 구분선 없음. 설정 항목에는 `Row`, 검증 메시지에는 `Errors` |
+| 겹침 표면 | `.ui-island`·`.ui-toast`·`.ui-tooltip`·가림막 위 `.ui-dialog`는 불투명, `Popover`·`Menu`는 유리 | 작고 잠깐 뜨는 메뉴·팝오버만 흐림(`backdrop-filter`)을 쓴다. `Popover`·`DialogFrame`의 `solid`는 흐림 없이 `--overlay`(대화상자는 `--glass-solid`)로 그린다 |
+
+화면 높이가 줄면 내용 영역 안에서 스크롤하게 한다. 대화상자 하단의 저장과 취소는 내용 밖에 둔다. 페이지 자체의 크기를 늘리거나 필요한 조작을 잘라 숨기지 않는다. 탭은 좌우 화살표, Tab, Escape와 닫은 뒤 포커스 복귀를 확인한다.
 
 ### 화면 틀
 

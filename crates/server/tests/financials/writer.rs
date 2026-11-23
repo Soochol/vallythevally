@@ -12,6 +12,18 @@ async fn connect(path: &std::path::Path) -> sqlx::SqliteConnection {
     sqlx::SqliteConnection::connect_with(&sqlx::sqlite::SqliteConnectOptions::new().filename(path)).await.unwrap()
 }
 
+async fn finished_while_calls_continue(fake: &Fake, service: &Arc<Financials>) {
+    let mut seen = fake.state.lock().unwrap().calls.len();
+    let mut last_progress = tokio::time::Instant::now();
+    loop {
+        if !matches!(service.update_status().await.status, FinancialUpdateStatus::Planning | FinancialUpdateStatus::Collecting | FinancialUpdateStatus::Pausing | FinancialUpdateStatus::Checking) { return; }
+        let calls = fake.state.lock().unwrap().calls.len();
+        if calls != seen { (seen, last_progress) = (calls, tokio::time::Instant::now()); }
+        assert!(last_progress.elapsed() < Duration::from_secs(30), "the update made no OpenDART call for 30 seconds: {:?}", fake.observed());
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+}
+
 async fn control_rows(path: &std::path::Path) -> Vec<String> {
     let mut connection = connect(path).await;
     let mut rows = Vec::new();
@@ -63,7 +75,7 @@ async fn a_writer_is_taken_by_the_first_launch_and_kept_until_the_service_is_dro
     drop(InstanceLock::acquire(&lock).expect("constructing and reading do not take the lock"));
     service.start_update(vec![samsung()]).await;
     assert!(matches!(InstanceLock::acquire(&lock), Err(server::instance::LockError::Held { .. })), "the first launch takes the lock");
-    tokio::time::sleep(Duration::from_millis(300)).await;
+    finished_while_calls_continue(&fake, &service).await;
     assert!(matches!(InstanceLock::acquire(&lock), Err(server::instance::LockError::Held { .. })), "the lock stays until the process ends");
     release(service).await;
     drop(InstanceLock::acquire(&lock).expect("dropping the service releases the lock"));

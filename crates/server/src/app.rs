@@ -285,7 +285,18 @@ async fn serve(config: Config, lock: &InstanceLock) -> ExitCode {
     ExitCode::SUCCESS
 }
 
+#[derive(Default)]
+pub struct StartOptions {
+    pub public_listener: Option<std::net::TcpListener>,
+    pub frozen_clock: bool,
+}
+
 pub async fn start(config: &Config, lock: &InstanceLock, adapters: Adapters) -> Result<Started, StartFailure> {
+    start_with(config, lock, adapters, StartOptions::default()).await
+}
+
+pub async fn start_with(config: &Config, lock: &InstanceLock, adapters: Adapters, options: StartOptions) -> Result<Started, StartFailure> {
+    let StartOptions { public_listener, frozen_clock } = options;
     let Adapters { kiwoom, kis, kis_feed, stream: stream_source, kiwoom_spacing } = adapters;
     let key_file = KeyFile::new(config.kiwoom_key_path.clone(), lock).with_environment(config.kiwoom_environment);
     let account_file = config.account_state_path.clone().map(|path| AccountStateFile::new(path, lock));
@@ -333,7 +344,7 @@ pub async fn start(config: &Config, lock: &InstanceLock, adapters: Adapters) -> 
         None => Clock::system(),
         Some(start) => {
             tracing::warn!(%start, "시험용 시계로 켭니다(VALLY_CLOCK_START)");
-            Clock::fake(start)
+            if frozen_clock { Clock::frozen(start) } else { Clock::fake(start) }
         }
     };
     let bases = FileBases { token: config.token_path.clone(), registered_ip: config.kiwoom_key_path.with_file_name(crate::config::REGISTERED_IP_FILE_NAME), held: lock.held() };
@@ -411,7 +422,7 @@ pub async fn start(config: &Config, lock: &InstanceLock, adapters: Adapters) -> 
 
     let financials = crate::financials::Financials::read_only(&config.financial_db_path, clock.clone());
     let financial_routes = crate::financials::routes(financials, symbols.clone());
-    let public = crate::public::start(config, state.clone(), financial_routes.clone()).await?;
+    let public = crate::public::start(config, state.clone(), financial_routes.clone(), public_listener).await?;
     let router = router(state.clone())
         .merge(financial_routes)
         .layer(axum::middleware::from_fn_with_state(state.clone(), crate::public::measure_operator_kiwoom))

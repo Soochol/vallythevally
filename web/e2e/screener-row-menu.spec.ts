@@ -11,7 +11,7 @@ const [first, second] = result.rows;
 const last = result.rows.at(-1)!;
 const menu = (page: Page) => page.getByRole("menu", { name: /행 동작$/ });
 const listMenu = (page: Page) => page.getByRole("menu", { name: /관심종목에 넣기$/ });
-const toast = (page: Page) => page.locator(".ui-toast");
+const toast = (page: Page) => page.locator(".ui-toast").last();
 const compareOf = async (scenario: Scenario) => (firstChart(await scenario.documents.layout(DEFAULT_LAYOUT_ID)).chartSettings as { compare: string[] }).compare;
 
 test.beforeEach(async ({ scenario, screener, page }) => {

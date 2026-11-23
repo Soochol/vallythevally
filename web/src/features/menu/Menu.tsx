@@ -2,11 +2,12 @@ import { type ReactNode, type RefObject, useEffect, useId, useRef } from "react"
 import { Popover } from "../overlay/Popover";
 import { menuIndex, type Placement } from "../overlay/position";
 import { CheckIcon } from "../icons";
+import { Kbd } from "../ui/Kbd";
 
 export type MenuItem =
-  | { kind: "radio"; label: string; value?: string; icon?: ReactNode; hint?: string; checked: boolean; onSelect(): void }
-  | { kind: "check"; label: string; value?: string; checked: boolean; onSelect(): void }
-  | { kind: "action"; label: string; icon?: ReactNode; hint?: string; disabled?: boolean; danger?: boolean; onSelect(): void }
+  | { kind: "radio"; label: string; value?: string; icon?: ReactNode; hint?: string; shortcut?: string; checked: boolean; onSelect(): void }
+  | { kind: "check"; label: string; value?: string; icon?: ReactNode; shortcut?: string; checked: boolean; onSelect(): void }
+  | { kind: "action"; label: string; icon?: ReactNode; hint?: string; shortcut?: string; disabled?: boolean; disabledReason?: string; danger?: boolean; onSelect(): void }
   | { kind: "heading"; label: string }
   | { kind: "group"; label: string; labelShown: boolean; items: readonly Focusable[] }
   | { kind: "separator" };
@@ -130,24 +131,33 @@ function MenuGroup({ item, onClose, register }: { item: Extract<MenuItem, { kind
 
 function MenuButton({ item, onClose, register }: { item: Focusable; onClose: Props["onClose"]; register(el: HTMLButtonElement | null): void }) {
   const checkable = item.kind !== "action";
+  const labelId = useId();
+  const reasonId = useId();
+  const reason = item.kind === "action" && item.disabled ? item.disabledReason : undefined;
   return (
     <button
       ref={register}
       type="button"
       role={ROLE[item.kind]}
       aria-checked={checkable ? item.checked : undefined}
+      aria-labelledby={reason ? labelId : undefined}
+      aria-describedby={reason ? reasonId : undefined}
       data-option-value={checkable ? item.value : undefined}
       disabled={item.kind === "action" ? item.disabled : undefined}
-      className={`group flex h-8 shrink-0 items-center gap-2 rounded-m px-2 text-left hover:bg-[var(--hover)] focus-visible:bg-[var(--hover)] disabled:hover:bg-transparent aria-checked:text-accent max-md:h-[40px] ${item.kind === "action" && item.danger ? "text-danger" : ""}`}
+      className={`group flex min-h-8 shrink-0 items-center gap-2 rounded-m px-2 text-left hover:bg-[var(--hover)] focus-visible:bg-[var(--hover)] disabled:hover:bg-transparent aria-checked:text-accent max-md:min-h-[40px] ${item.kind === "action" && item.danger ? "text-danger" : ""}`}
       onClick={() => {
         item.onSelect();
         if (item.kind !== "check") onClose(true);
       }}
     >
       <span className="grid w-4 place-items-center">{item.kind === "action" ? item.icon : item.checked && <CheckIcon />}</span>
-      {item.kind === "radio" && item.icon}
-      <span className="group-disabled:opacity-40">{item.label}</span>
+      {item.kind !== "action" && item.icon}
+      <span className="flex min-w-0 flex-col py-1">
+        <span id={labelId} className="truncate group-disabled:text-text-3">{item.label}</span>
+        {reason && <span id={reasonId} className="whitespace-normal text-xs text-text-2">{reason}</span>}
+      </span>
       {"hint" in item && item.hint && <span className="ml-auto pl-4 text-xs text-text-2">{item.hint}</span>}
+      {item.shortcut && <Kbd className={"hint" in item && item.hint ? "" : "ml-auto"} aria-hidden="true">{item.shortcut}</Kbd>}
     </button>
   );
 }

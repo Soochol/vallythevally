@@ -12,6 +12,13 @@ export interface ToastUndo {
   shortcut?: string;
 }
 
+export type ToastTone = "info" | "success" | "warning" | "error";
+export interface ToastOptions { tone?: ToastTone; undo?: ToastUndo }
+export interface ToastEntry { id: number; text: string; tone: ToastTone; undo?: ToastUndo }
+export const MAX_TOASTS = 3;
+
+const isUndo = (value: ToastUndo | ToastOptions): value is ToastUndo => "run" in value;
+
 export type SearchPurpose = "open" | "watch";
 export interface PutTarget { listId: string; groupId: string | null }
 export type IndicatorCommandMode = "current" | "add" | "compare";
@@ -29,7 +36,8 @@ interface SelectionState {
   dialog: null | Dialog;
   inspector: InspectorRequest | null;
   phoneTab: PhoneTab;
-  toast: null | { id: number; text: string; undo?: ToastUndo };
+  toast: ToastEntry | null;
+  toasts: readonly ToastEntry[];
   putTarget: PutTarget | null;
   setActiveCell(cellId: WindowId): void;
   openSearch(purpose?: SearchPurpose, putTarget?: PutTarget): void;
@@ -41,8 +49,9 @@ interface SelectionState {
   openSystemSettings(menu: SystemMenuId | null): void;
   closeDialog(): void;
   setPhoneTab(tab: PhoneTab): void;
-  showToast(text: string, undo?: ToastUndo): void;
+  showToast(text: string, options?: ToastUndo | ToastOptions): void;
   clearToast(id: number): void;
+  clearToasts(): void;
 }
 
 let toastId = 0;
@@ -58,6 +67,7 @@ export const useSelectionStore = create<SelectionState>()((set, get) => ({
   inspector: null,
   phoneTab: "chart",
   toast: null,
+  toasts: [],
   putTarget: null,
   setActiveCell: (activeCell) => set((s) => (s.activeCell === activeCell ? s : { activeCell })),
   openSearch: (purpose = "open", putTarget) => set({ dialog: { kind: "search", purpose }, ...(putTarget ? { putTarget } : {}) }),
@@ -77,9 +87,33 @@ export const useSelectionStore = create<SelectionState>()((set, get) => ({
   openSystemSettings: (menu) => set({ dialog: { kind: "system-settings", menu } }),
   closeDialog: () => set({ dialog: null }),
   setPhoneTab: (phoneTab) => set({ phoneTab }),
-  showToast: (text, undo) => set({ toast: { id: ++toastId, text, undo } }),
-  clearToast: (id) => set((s) => (s.toast?.id === id ? { toast: null } : s)),
+  showToast: (text, options = {}) => set((s) => {
+    const { tone = "info", undo } = isUndo(options) ? { undo: options } : options;
+    const entry: ToastEntry = { id: ++toastId, text, tone, undo };
+    return toastState(keepNewest([...visibleToasts(s).filter((toast) => toast.text !== text || toast.tone !== tone), entry]));
+  }),
+  clearToast: (id) => set((s) => (visibleToasts(s).some((toast) => toast.id === id) ? toastState(visibleToasts(s).filter((toast) => toast.id !== id)) : s)),
+  clearToasts: () => set(toastState([])),
 }));
+
+function keepNewest(toasts: readonly ToastEntry[]): readonly ToastEntry[] {
+  const kept = [...toasts];
+  while (kept.length > MAX_TOASTS) {
+    const evicted = kept.slice(0, -1).findIndex((toast) => toast.tone !== "error");
+    kept.splice(evicted < 0 ? 0 : evicted, 1);
+  }
+  return kept;
+}
+
+function toastState(toasts: readonly ToastEntry[]): Pick<SelectionState, "toast" | "toasts"> {
+  return { toasts, toast: toasts.at(-1) ?? null };
+}
+
+const NO_TOASTS: readonly ToastEntry[] = [];
+
+export function visibleToasts(state: Pick<SelectionState, "toast" | "toasts">): readonly ToastEntry[] {
+  return state.toast === null ? NO_TOASTS : state.toasts;
+}
 
 useUiStore.subscribe((state, previous) => {
   const { lists } = useWatchlistStore.getState();

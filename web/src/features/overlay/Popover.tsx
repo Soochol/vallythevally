@@ -16,9 +16,10 @@ interface Props extends HTMLAttributes<HTMLDivElement> {
   fitBelow?: number;
   backdrop?: boolean;
   blockChartKeys?: boolean;
+  solid?: boolean;
   onClose(reason: "escape" | "outside"): void;
 }
-export function Popover({ isInside, releasesClick, anchor, focusTarget, point, anchorRect, placement, focus, restoreFocus, dismiss, follow, fitBelow, backdrop, blockChartKeys, onClose, className = "", ...props }: Props) {
+export function Popover({ isInside, releasesClick, anchor, focusTarget, point, anchorRect, placement, focus, restoreFocus, dismiss, follow, fitBelow, backdrop, blockChartKeys, solid, onClose, className = "", ...props }: Props) {
   const panel = useRef<HTMLDivElement>(null);
   const opener = useRef(typeof document !== "undefined" && document.activeElement instanceof HTMLElement ? document.activeElement : null);
   const close = useRef(onClose); close.current = onClose;
@@ -36,5 +37,5 @@ export function Popover({ isInside, releasesClick, anchor, focusTarget, point, a
       onClose: (reason) => close.current(reason),
     });
   }, []);
-  return <div ref={panel} popover="manual" tabIndex={-1} className={`ui-popover ${className}`} {...props} />;
+  return <div ref={panel} popover="manual" tabIndex={-1} data-solid={solid ? "" : undefined} className={`ui-popover ${className}`} {...props} />;
 }
