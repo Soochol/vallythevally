@@ -8,6 +8,7 @@ import { useSymbolInfos } from "../../api/queries";
 import { formatKstClockSeconds } from "../../chart/time";
 import { quoteBook } from "../../stores/realtime";
 import { useVenue } from "../../stores/ui";
+import { DataAgeNote } from "../data-age/DataAgeNote";
 import { EmptyState } from "../overlay/State";
 import { PageFrame } from "../pages/PageFrame";
 import { HeatmapFlow } from "./HeatmapFlow";
@@ -78,7 +79,7 @@ export function HeatmapPage() {
   const settled = boardData !== undefined;
   const tradedKnown = useMemo(() => hasTradedValue(shown.flatMap((section) => boardRows(section.theme, nameOf))), [shown, nameOf]);
   const latest = useMemo(() => freshestTime(boardData?.asOf ?? null, codes), [boardData, codes, tick]);
-  const quoteFreshness = latest === null ? "시세를 기다리는 중" : `시세 ${formatKstClockSeconds(latest)} 기준 · 자리는 1분마다 바꿈`;
+  const quoteFreshness = latest === null ? "시세를 기다리는 중" : `시세 ${formatKstClockSeconds(latest)} 기준 · 자리는 30초마다 바꿈`;
   const catalogDate = kiwoom ? catalogFreshness(boardData?.catalog ?? null) : null;
   const freshness = catalogDate === null ? quoteFreshness : `${quoteFreshness} · ${catalogDate}`;
   const notice = kiwoom && settled ? catalogNotice(boardData.catalog) : null;
@@ -127,7 +128,7 @@ export function HeatmapPage() {
     <KiwoomThemeMap themes={sections.map((section) => section.theme)} range={settings.range} hrefOf={hrefOf} />
   );
   return (
-    <PageFrame title="히트맵" freshness={freshness}>
+    <PageFrame title="히트맵" freshness={<>{freshness}{boardData && <DataAgeNote recordedAt={boardData.asOf} cadence="heatmapBoard" />}</>}>
       <SourceTabs settings={settings} onSelect={(source) => source !== settings.source && navigate({ ...settings, source, theme: null })} />
       <HeatmapToolbar settings={settings} onChange={change} tradedKnown={!settled || tradedKnown} onEdit={() => setEditor("browse")} />
       {kiwoom ? (

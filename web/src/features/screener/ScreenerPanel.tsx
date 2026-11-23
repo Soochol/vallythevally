@@ -47,6 +47,7 @@ import { useWatchlistStore } from "../../stores/watchlist";
 import { ChevronIcon, MoreIcon, PenIcon, PlayIcon, PlusIcon, SpinnerIcon, StarIcon } from "../icons";
 import { Menu, type MenuItem } from "../menu/Menu";
 import { ownsChartKeyboard } from "../overlay/topLayer";
+import { DataAgeNote } from "../data-age/DataAgeNote";
 import { ResultTable } from "./ResultTable";
 import { dropPendingOpen, openResult, pendingResultCode, sendToNewWatchlist, sendToWatchlist } from "./resultActions";
 import { nextResult, resultKeyAction } from "./results";
@@ -477,6 +478,7 @@ function ResultList({ screen, result, rows, running, rerun, onRun, onEdit, selec
       <div className="flex flex-none items-baseline gap-1.5 px-3 pt-2.5">
         <span className="text-xl font-[700] leading-none">{count(rows.length)}</span>
         <span className="min-w-0 flex-1 text-s text-text-2">종목 · {dayLabel(result.asOf, result.asOf)} 기준</span>
+        <DataAgeNote recordedAt={result.collectionCompletedAt} cadence="screener" />
         <PanelMenu screen={screen} rows={rows} status={undefined} saveOnly />
       </div>
       <details className="px-3 py-1 text-xs text-text-3"><summary className="cursor-pointer">결과 자료 · 수집 시각과 제외 내역</summary>

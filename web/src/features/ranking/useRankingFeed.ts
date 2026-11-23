@@ -11,14 +11,17 @@ export const REFRESH_MS = 10_000;
 interface Feed {
   page: RankingPage | null;
   error: string | null;
+  notPrepared: boolean;
   failure: string | null;
   loadingMore: boolean;
   settledAt: number | null;
 }
 
-const EMPTY: Feed = { page: null, error: null, failure: null, loadingMore: false, settledAt: null };
+const EMPTY: Feed = { page: null, error: null, notPrepared: false, failure: null, loadingMore: false, settledAt: null };
 
-const reasonOf = (e: unknown) => (e instanceof ApiRequestError ? e.message : "순위를 받지 못했습니다");
+const NOT_PREPARED_REASON = "미리 만든 조건만 볼 수 있습니다";
+const isNotPrepared = (e: unknown) => e instanceof ApiRequestError && e.code === "not_prepared";
+const reasonOf = (e: unknown) => (isNotPrepared(e) ? NOT_PREPARED_REASON : e instanceof ApiRequestError ? e.message : "순위를 받지 못했습니다");
 
 export function useDocumentVisible(): boolean {
   const [visible, setVisible] = useState(() => document.visibilityState === "visible");
@@ -48,12 +51,12 @@ export function useRankingFeed(ranking: Ranking, enabled: boolean, refreshing: b
     if (trigger === "user") setFeed((f) => (pages > 1 ? { ...f, loadingMore: true } : f.page === null ? { ...f, error: null } : f));
     fetchRanking(asked, pages, trigger).then(
       (page) => {
-        if (mine === latest.current) setFeed({ page: capRankingPage(page), error: null, failure: null, loadingMore: false, settledAt: Date.now() });
+        if (mine === latest.current) setFeed({ page: capRankingPage(page), error: null, notPrepared: false, failure: null, loadingMore: false, settledAt: Date.now() });
       },
       (e: unknown) => {
         if (mine !== latest.current) return;
         const message = reasonOf(e);
-        setFeed((f) => (f.page === null ? { ...EMPTY, error: message, settledAt: Date.now() } : { ...f, failure: message, loadingMore: false, settledAt: Date.now() }));
+        setFeed((f) => (f.page === null ? { ...EMPTY, error: message, notPrepared: isNotPrepared(e), settledAt: Date.now() } : { ...f, failure: message, loadingMore: false, settledAt: Date.now() }));
       },
     );
   }, []);
