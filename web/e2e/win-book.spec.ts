@@ -573,7 +573,7 @@ test("10호가창의 좁은 상자에서도 수량은 7자리까지 끝까지 �
 
 const bookGroup = (page: Page) => page.locator("[data-dock-group]").filter({ has: book(page) });
 
-test("10호가창을 최소 폭 280px까지 줄여도 7자리 가격 옆 7자리 수량이 상자 오른쪽 끝에 붙어 끝까지 보인다", async ({ page, scenario }) => {
+test("10호가창을 최소 폭 280px까지 줄여도 7자리 가격 옆 7자리 수량이 스크롤바와 6px 떨어져 끝까지 보인다", async ({ page, scenario }) => {
   await open(page, scenario, 70000);
   const handle = (await page.getByRole("separator", { name: "좌우 창 경계" }).first().boundingBox())!;
   const at = { x: handle.x + handle.width / 2, y: handle.y + handle.height / 2 };
@@ -589,14 +589,15 @@ test("10호가창을 최소 폭 280px까지 줄여도 7자리 가격 옆 7자리
   await expect(page.getByTestId("ladder-trade")).toHaveCount(trades.length);
   const parts = await page.getByTestId("ladder-trade").evaluateAll((rows) => rows.map((row) => {
     const qty = row.children[1]!;
-    const box = row.parentElement!.getBoundingClientRect();
+    const scroller = row.parentElement!;
+    const box = scroller.getBoundingClientRect();
     const rect = qty.getBoundingClientRect();
-    return { shown: qty.textContent, left: rect.left - box.left, right: rect.right - box.right, scroll: qty.scrollWidth <= qty.clientWidth };
+    return { shown: qty.textContent, left: rect.left - box.left, gap: box.left + scroller.clientWidth - rect.right, scroll: qty.scrollWidth <= qty.clientWidth };
   }));
   for (const part of parts) {
     const note = JSON.stringify(part);
     expect(part.left, note).toBeGreaterThanOrEqual(-1);
-    expect(part.right, note).toBeLessThanOrEqual(0.01);
+    expect(part.gap, note).toBeGreaterThanOrEqual(5.99);
     expect(part.scroll, note).toBe(true);
   }
 });
