@@ -275,7 +275,7 @@ test("작은 나누기 거절은 떠 있던 위치와 기록을 그대로 둔다
   await page.mouse.up();
   expect(await boxOf(frame(page))).toEqual(before);
   expect(saved(scenario).dock).toEqual(persisted);
-  await expect(page.getByRole("status").filter({ hasText: "자리가 작아 나눌 수 없습니다" })).toBeVisible();
+  await expect(page.getByRole("status").filter({ hasText: "자리가 작습니다 · 가운데에 놓으면 탭" })).toBeVisible();
   await undo(page);
   await expect(frame(page)).toHaveCount(0);
 });

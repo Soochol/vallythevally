@@ -73,7 +73,7 @@ test("좁은 창에서는 왼쪽 2/3이 비활성이고 이유 힌트가 있다"
   await page.getByRole("menu", { name: "창 더하기" }).getByRole("menuitem", { name: /^스크리너/ }).click();
   await sideways(page).click({ button: "right" });
   await expect(choice(page, "왼쪽 2/3")).toBeDisabled();
-  await expect(choice(page, "왼쪽 2/3")).toContainText("최소 폭");
+  await expect(dividerMenu(page).getByText("최소 폭 때문에 맞출 수 없습니다")).toHaveCount(1);
   await expect(choice(page, "반반")).toBeEnabled();
 });
 

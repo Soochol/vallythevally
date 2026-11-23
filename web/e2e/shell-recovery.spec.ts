@@ -34,9 +34,7 @@ test("긴 ETF 이름은 범례에서 잘리고 탭을 누를 수 있다", async 
   const tabs = page.getByRole("tablist", { name: "창 묶음 2" });
   await tabs.getByRole("tab", { name: /^스크리너/ }).click({ timeout: 3000 });
   const watch = tabs.getByRole("tab", { name: "관심종목", exact: true });
-  const watchBox = await watch.boundingBox();
-  if (!watchBox) throw new Error("관심종목 탭이 없습니다");
-  await page.mouse.click(watchBox.x + watchBox.width / 2, watchBox.y + watchBox.height / 2);
+  await watch.click();
   await expect(watch).toHaveAttribute("aria-selected", "true");
   const chartBox = await cell(page).boundingBox();
   if (!chartBox) throw new Error("차트가 없습니다");

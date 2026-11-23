@@ -42,3 +42,5 @@ export function focusAfterClose(active: WindowId) {
   const add = document.querySelector<HTMLElement>('button[aria-label="창 더하기"]');
   if (add && exposed(add)) focusWithoutActivation(add);
 }
+
+export const tabLabel = (id: WindowId): string => Array.from(document.getElementById(`window-tab-${id}`)?.querySelectorAll(".dock-tab-name,.dock-tab-sub") ?? []).map((part) => part.textContent).join(" ");

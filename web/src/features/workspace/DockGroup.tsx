@@ -1,4 +1,4 @@
-import { type KeyboardEvent, useLayoutEffect, useRef, useState } from "react";
+import { type KeyboardEvent, type RefObject, useLayoutEffect, useRef, useState } from "react";
 import { useSymbolInfo } from "../../api/queries";
 import type { GroupNode } from "../../layout/dock/tree";
 import type { WindowId } from "../../layout/kinds";
@@ -6,16 +6,17 @@ import type { Rect } from "../../layout/placement";
 import { PERIOD_LABEL } from "../../lib/symbol";
 import { chartNumber, chartWindows, useCell, useLayoutStore, useWindowName, type WindowState } from "../../stores/layout";
 import { useSelectionStore } from "../../stores/selection";
-import { CloseIcon } from "../icons";
+import { ChevronIcon, CloseIcon } from "../icons";
 import { IntegratedBadge } from "../market-window/parts";
 import { ScreenerBadge } from "../screener/ScreenerPanel";
+import { Menu, type MenuItem } from "../menu/Menu";
 import { AddWindowMenu } from "./AddWindowMenu";
 import type { DockInteraction } from "./dockInteraction";
 import { WINDOW_CONTENT } from "./contents";
 import { LinkDot } from "./LinkDot";
 import { closeWindow, LAST_CHART_REASON } from "./manage";
 import { WindowSymbol } from "./WindowSymbol";
-import { focusWithoutActivation, revealTab } from "./focus";
+import { focusWithoutActivation, revealTab, tabLabel } from "./focus";
 
 export const tabId = (window: WindowId) => `window-tab-${window}`;
 const panelId = (group: string) => `window-panel-${group}`;
@@ -79,6 +80,50 @@ function focusShownTab(group: string) {
   });
 }
 
+type StripOverflow = { overflowing: boolean; hiddenBefore: boolean; hiddenAfter: boolean };
+const NO_OVERFLOW: StripOverflow = { overflowing: false, hiddenBefore: false, hiddenAfter: false };
+
+function useStripOverflow(scroller: RefObject<HTMLDivElement | null>, tabs: string): StripOverflow {
+  const [overflow, setOverflow] = useState(NO_OVERFLOW);
+  useLayoutEffect(() => {
+    const strip = scroller.current;
+    if (!strip) return;
+    const measure = () => {
+      const next: StripOverflow = { overflowing: strip.scrollWidth > strip.clientWidth, hiddenBefore: strip.scrollLeft > 1, hiddenAfter: strip.scrollLeft + strip.clientWidth < strip.scrollWidth - 1 };
+      setOverflow((now) => (now.overflowing === next.overflowing && now.hiddenBefore === next.hiddenBefore && now.hiddenAfter === next.hiddenAfter ? now : next));
+    };
+    const observer = new ResizeObserver(measure);
+    observer.observe(strip);
+    Array.from(strip.children).forEach((tab) => observer.observe(tab));
+    const turnWheel = (event: WheelEvent) => {
+      if (strip.scrollWidth <= strip.clientWidth || Math.abs(event.deltaY) <= Math.abs(event.deltaX)) return;
+      event.preventDefault();
+      strip.scrollLeft += event.deltaY;
+    };
+    strip.addEventListener("scroll", measure, { passive: true });
+    strip.addEventListener("wheel", turnWheel, { passive: false });
+    measure();
+    return () => {
+      observer.disconnect();
+      strip.removeEventListener("scroll", measure);
+      strip.removeEventListener("wheel", turnWheel);
+    };
+  }, [scroller, tabs]);
+  return overflow;
+}
+
+function TabListMenu({ group, onSelect }: { group: GroupNode; onSelect(tab: WindowId): void }) {
+  const root = useRef<HTMLDivElement>(null);
+  const [open, setOpen] = useState(false);
+  const items: MenuItem[] = group.tabs.map((tab) => ({ kind: "radio", label: tabLabel(tab), checked: tab === group.active, onSelect: () => onSelect(tab) }));
+  return (
+    <div ref={root} className="contents">
+      <button type="button" className="dock-tab-list" aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen((now) => !now)}>탭 {group.tabs.length}개<ChevronIcon /></button>
+      {open && <Menu label="탭 목록" root={root} items={items} onClose={() => setOpen(false)} />}
+    </div>
+  );
+}
+
 const TAB_KEYS: Record<string, (index: number, count: number) => number> = {
   ArrowLeft: (index, count) => (index + count - 1) % count,
   ArrowRight: (index, count) => (index + 1) % count,
@@ -86,11 +131,12 @@ const TAB_KEYS: Record<string, (index: number, count: number) => number> = {
   End: (_index, count) => count - 1,
 };
 
-export function DockGroup({ group, rect, number, interaction, maximized, onToggleMaximize }: { group: GroupNode; rect: Rect; number: number; interaction: Pick<DockInteraction, "selectTab" | "keyTab" | "pressTab" | "contextTab">; maximized: boolean; onToggleMaximize(): void }) {
+export function DockGroup({ group, rect, number, interaction, maximized, onToggleMaximize }: { group: GroupNode; rect: Rect; number: number; interaction: Pick<DockInteraction, "selectTab" | "keyTab" | "pressTab" | "contextTab" | "grabbed">; maximized: boolean; onToggleMaximize(): void }) {
   const windows = useLayoutStore((s) => s.layout.windows);
   const activeCell = useSelectionStore((s) => s.activeCell);
   const shown = windows.find((w) => w.id === group.active);
   const strip = useRef<HTMLDivElement>(null);
+  const stripOverflow = useStripOverflow(strip, group.tabs.join(" "));
   useLayoutEffect(() => {
     const selected = strip.current?.querySelector<HTMLElement>('[role=tab][aria-selected=true]');
     if (selected) revealTab(selected);
@@ -110,25 +156,30 @@ export function DockGroup({ group, rect, number, interaction, maximized, onToggl
   return (
     <div data-dock-group={group.id} data-kind={shown.kind} data-active-cell={shown.id === activeCell ? "" : undefined} className="dock-group"
       style={{ left: rect.x, top: rect.y, width: rect.w, height: rect.h }}>
-      <div ref={strip} role="tablist" aria-label={`창 묶음 ${number}`} className="dock-tabs" onDoubleClick={(event) => { if (!(event.target instanceof Element) || !event.target.closest("button, .link-dot")) onToggleMaximize(); }}>
-        {group.tabs.map((tab) => {
-          const window = windows.find((w) => w.id === tab);
-          if (!window) return null;
-          const selected = tab === group.active;
-          return (
-            <span key={tab} className="dock-tab-group">
-              <button id={tabId(tab)} type="button" role="tab" data-window-id={tab} data-active-cell={tab === activeCell ? "" : undefined}
-                aria-selected={selected} aria-controls={selected ? panelId(group.id) : undefined} tabIndex={selected ? 0 : -1}
-                className="dock-tab" onClick={() => select(tab)} onKeyDown={(event) => move(event, tab)}
-                onPointerDown={(event) => interaction.pressTab(event, tab)} onContextMenu={(event) => interaction.contextTab(event, tab)} onDragStart={(event) => event.preventDefault()}>
-                <TabLabel window={window} />
-              </button>
-              <LinkDot window={window} selected={selected} />
-              <WindowSymbol window={window} selected={selected} />
-              <CloseTab window={window} selected={selected} onClosed={() => focusShownTab(group.id)} />
-            </span>
-          );
-        })}
+      <div className="dock-tabs" onDoubleClick={(event) => { if (!(event.target instanceof Element) || !event.target.closest("button, .link-dot")) onToggleMaximize(); }}>
+        <div className="dock-tab-viewport" data-hidden-before={stripOverflow.hiddenBefore ? "" : undefined} data-hidden-after={stripOverflow.hiddenAfter ? "" : undefined}>
+          <div ref={strip} role="tablist" aria-label={`창 묶음 ${number}`} className="dock-tab-scroll">
+            {group.tabs.map((tab) => {
+              const window = windows.find((w) => w.id === tab);
+              if (!window) return null;
+              const selected = tab === group.active;
+              return (
+                <span key={tab} className="dock-tab-group" data-selected={selected ? "" : undefined} data-active-cell={tab === activeCell ? "" : undefined} data-grabbed={tab === interaction.grabbed ? "" : undefined}>
+                  <button id={tabId(tab)} type="button" role="tab" data-window-id={tab} data-active-cell={tab === activeCell ? "" : undefined}
+                    aria-selected={selected} aria-controls={selected ? panelId(group.id) : undefined} tabIndex={selected ? 0 : -1}
+                    className="dock-tab" onClick={() => select(tab)} onKeyDown={(event) => move(event, tab)}
+                    onPointerDown={(event) => interaction.pressTab(event, tab)} onContextMenu={(event) => interaction.contextTab(event, tab)} onDragStart={(event) => event.preventDefault()}>
+                    <TabLabel window={window} />
+                  </button>
+                  <LinkDot window={window} selected={selected} />
+                  <WindowSymbol window={window} selected={selected} />
+                  <CloseTab window={window} selected={selected} onClosed={() => focusShownTab(group.id)} />
+                </span>
+              );
+            })}
+          </div>
+        </div>
+        {stripOverflow.overflowing && <TabListMenu group={group} onSelect={select} />}
         <AddWindowMenu targetGroup={group.id} />
         {maximized && <button type="button" className="dock-restore" aria-label="원래 크기로" title="원래 크기로" onClick={onToggleMaximize}>↙</button>}
       </div>

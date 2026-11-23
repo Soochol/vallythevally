@@ -12,7 +12,7 @@ const frame = (page: Page) => page.locator("[data-dock-level-frame]");
 const steps = (page: Page) => page.locator("[data-dock-preview] .dock-drop-steps li");
 const area = (page: Page) => page.getByRole("main", { name: "작업 영역" });
 const saved = (scenario: Scenario) => parsePlacement(scenario.documents.layout(DEFAULT_LAYOUT_ID).placement).dock;
-const SMALL = "자리가 작아 나눌 수 없습니다. 가운데에 놓아 탭으로 넣으세요";
+const SMALL = "자리가 작습니다 · 가운데에 놓으면 탭";
 
 async function boxOf(locator: Locator) {
   const box = await locator.boundingBox();

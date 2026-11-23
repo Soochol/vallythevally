@@ -6,6 +6,7 @@ import { layoutDock, wholePixels, type DockSpace, type GutterBox } from "../../l
 import type { DockPlacement } from "../../layout/placement";
 import { useLayoutStore } from "../../stores/layout";
 import { Menu, type MenuItem } from "../menu/Menu";
+import { mergeRepeatedReasons } from "./menuReasons";
 
 type Preset = { label: string; preset: SharePreset };
 
@@ -28,8 +29,8 @@ export function DividerMenu({ box, dock, space, root, at, onClose }: { box: Gutt
   const preset = ({ label, preset }: Preset): MenuItem => {
     const target = presetLead(dock, box.path, space, preset);
     const unchanged = target?.lead === current;
-    const hint = unchanged ? undefined : target?.clamped !== false ? LEAST_REASON[dir] : undefined;
-    return { kind: "action", label, disabled: unchanged || target === null || target.clamped, hint, onSelect: () => useLayoutStore.getState().setDock(applyPreset(dock, box.path, preset, space).dock) };
+    const disabledReason = unchanged ? undefined : target?.clamped !== false ? LEAST_REASON[dir] : undefined;
+    return { kind: "action", label, disabled: unchanged || target === null || target.clamped, disabledReason, onSelect: () => useLayoutStore.getState().setDock(applyPreset(dock, box.path, preset, space).dock) };
   };
   const apply = (next: DockPlacement) => {
     if (rectsOf(next, space) !== rectsOf(dock, space)) useLayoutStore.getState().setDock(next);
@@ -42,5 +43,5 @@ export function DividerMenu({ box, dock, space, root, at, onClose }: { box: Gutt
     { kind: "separator" },
     { kind: "action", label: "배치 되돌리기", disabled: !canUndo, onSelect: () => useLayoutStore.getState().undoArrangement() },
   ];
-  return <Menu label="경계 크기" root={root} items={items} style={{ left: at.x, top: at.y }} onClose={onClose} />;
+  return <Menu label="경계 크기" root={root} items={mergeRepeatedReasons(items)} style={{ left: at.x, top: at.y }} onClose={onClose} />;
 }

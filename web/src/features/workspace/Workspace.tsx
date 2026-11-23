@@ -16,6 +16,7 @@ import { Divider } from "./Divider";
 import { DockJunction } from "./DockJunction";
 import { DockDropPreview } from "./DockDropPreview";
 import { DockFloats } from "./DockFloats";
+import { DockTabGhost } from "./DockTabGhost";
 import { DockGroup } from "./DockGroup";
 import { DockTabMenu } from "./DockTabMenu";
 import { floatPanelId, useDockInteraction } from "./dockInteraction";
@@ -78,6 +79,7 @@ export function Workspace() {
       })}
       {mode === "dock" && interaction.dragging && <div className="dock-input-shield" aria-hidden="true" />}
       {mode === "dock" && preview && preview.kind !== "unchanged" && <DockDropPreview preview={preview} />}
+      {mode === "dock" && interaction.grab && <DockTabGhost grab={interaction.grab} />}
       <div role="status" className="sr-only">{mode === "dock" && preview && preview.kind !== "unchanged" ? preview.label : ""}</div>
       {mode === "dock" && interaction.menu && space && <DockTabMenu key={interaction.menu.window} interaction={interaction} dock={dock} space={space} root={root} maximized={maximize.maximized} onToggleMaximize={maximize.toggle} />}
     </main>

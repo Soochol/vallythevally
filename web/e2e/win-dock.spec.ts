@@ -147,7 +147,7 @@ test("최소 크기 거절은 미리 보기와 메뉴에 이유를 보이고 배
   const chart = await boxOf(groups(page).first());
   await startDrag(page, tab(page, "스크리너"));
   await page.mouse.move(chart.x + chart.width / 2, chart.y + chart.height - 45, { steps: 10 });
-  const reason = "자리가 작아 나눌 수 없습니다. 가운데에 놓아 탭으로 넣으세요";
+  const reason = "자리가 작습니다 · 가운데에 놓으면 탭";
   await expect(preview(page)).toHaveAttribute("data-dock-preview", "blocked");
   await expect(preview(page)).toContainText(reason);
   await page.mouse.up();

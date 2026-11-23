@@ -174,9 +174,9 @@ test("하루의 창 편집을 두 방식과 이름 저장·다시 열기·새로
   await expect(frame(page, "cell-0")).toBeVisible();
   const source = await boxOf(head(page, "cell-0"));
   await drag(page, head(page, first.id), { x: source.x + 100, y: source.y + 60 });
-  await expect(page.getByRole("button", { name: /^가지런히/ }).getByLabel("겹친 곳")).not.toHaveText("0");
+  await expect(page.getByRole("button", { name: /^가지런히/ }).locator(".ui-badge")).toHaveCount(1);
   await page.getByRole("button", { name: /^가지런히/ }).click();
-  await expect(page.getByRole("button", { name: /^가지런히/ }).getByLabel("겹친 곳")).toHaveText("0");
+  await expect(page.getByRole("button", { name: /^가지런히/ }).locator(".ui-badge")).toHaveCount(0);
   await pollSaved(() => placement(scenario).canvas).not.toBeNull();
   await layoutButton(page).click();
   await layoutMenu(page).getByRole("menuitem", { name: "새 이름으로 저장…", exact: true }).click();

@@ -18,7 +18,8 @@ export type TabMenu = { window: WindowId; x: number; y: number };
 type Point = { x: number; y: number };
 type Operation = { kind: "tab" } | { kind: "float-move"; rect: Rect } | { kind: "float-resize"; rect: Rect; handle: ResizeHandle };
 type Start = { pointer: number; window: WindowState; operation: Operation; point: Point; area: Area; dock: DockPlacement; expected: DockPlacement | null; session: number; topology: string; capture: HTMLElement };
-type Outcome = { draft: DockPlacement; next: DockPlacement; preview: DockPlan; guides: Guides; atMinimum: boolean };
+export type TabGrab = { window: WindowId; point: Point };
+type Outcome = { draft: DockPlacement; next: DockPlacement; preview: DockPlan; guides: Guides; atMinimum: boolean; grab: TabGrab | null };
 type Gesture = { kind: "idle" } | { kind: "pressed"; start: Start } | { kind: "dragging"; start: Start; point: Point; shift: boolean };
 const NO_GUIDES: Guides = { x: null, y: null };
 const ARROWS: Record<string, Point> = { ArrowLeft: { x: -16, y: 0 }, ArrowRight: { x: 16, y: 0 }, ArrowUp: { x: 0, y: -16 }, ArrowDown: { x: 0, y: 16 } };
@@ -74,7 +75,7 @@ export function useDockInteraction({ root, dock, space, enabled }: { root: RefOb
     const room = current.current.space!;
     const area = start.operation.kind === "tab" ? workArea(root.current!.clientWidth, root.current!.clientHeight)! : start.area;
     const currentRoom = start.operation.kind === "tab" ? { ...room, area } : room;
-    const idle: Outcome = { draft: start.dock, next: start.dock, preview: { kind: "unchanged" }, guides: NO_GUIDES, atMinimum: false };
+    const idle: Outcome = { draft: start.dock, next: start.dock, preview: { kind: "unchanged" }, guides: NO_GUIDES, atMinimum: false, grab: start.operation.kind === "tab" ? { window: start.window.id, point } : null };
     if (start.operation.kind === "tab" && shift) {
       const bounds = root.current!.getBoundingClientRect();
       const rect = detachedRect(start.dock, start.window.id, currentRoom, area, { x: point.x - bounds.left, y: point.y - bounds.top })!;
@@ -103,7 +104,7 @@ export function useDockInteraction({ root, dock, space, enabled }: { root: RefOb
     const state = useLayoutStore.getState();
     if (!latest.enabled || !latest.space || (state.layout.placement.dock !== null && state.layout.placement.dock !== latest.dock)) return;
     const plan = evaluateDock(latest.dock, command, latest.space);
-    if (plan.kind === "blocked") useSelectionStore.getState().showToast(plan.label);
+    if (plan.kind === "blocked") useSelectionStore.getState().showToast(plan.label, { tone: "warning" });
     if (plan.kind === "change") { state.commitDock({ session: state.session, expected: state.layout.placement.dock, next: plan.dock }); choose(command.window); }
     else if (plan.kind === "unchanged" && command.kind === "tab") selectTab(command.window);
     focusTab(command.window);
@@ -133,7 +134,7 @@ export function useDockInteraction({ root, dock, space, enabled }: { root: RefOb
       finishRef.current(false);
       if (!accepted) return;
       if (result) {
-        if (result.preview.kind === "blocked") useSelectionStore.getState().showToast(result.preview.label);
+        if (result.preview.kind === "blocked") useSelectionStore.getState().showToast(result.preview.label, { tone: "warning" });
         if (result.next !== active.start.dock) useLayoutStore.getState().commitDock({ session: active.start.session, expected: active.start.expected, next: result.next });
         if (result.atMinimum) minimumNotice(active.start.window);
         if (active.start.operation.kind !== "tab" || result.next !== active.start.dock) choose(active.start.window.id);
@@ -202,7 +203,7 @@ export function useDockInteraction({ root, dock, space, enabled }: { root: RefOb
     gesture.current = { kind: "pressed", start: { pointer: event.pointerId, window, operation, point: { x: event.clientX, y: event.clientY }, dock, expected: state.layout.placement.dock, area, session: state.session, topology: topologyOf(state.layout.windows), capture } };
     focusWithoutActivation(event.currentTarget);
     capture.setPointerCapture(event.pointerId);
-    if (operation.kind !== "tab") { choose(window.id); setOutcome({ draft: frontFloat(dock, window.id), next: dock, preview: { kind: "unchanged" }, guides: NO_GUIDES, atMinimum: false }); }
+    if (operation.kind !== "tab") { choose(window.id); setOutcome({ draft: frontFloat(dock, window.id), next: dock, preview: { kind: "unchanged" }, guides: NO_GUIDES, atMinimum: false, grab: null }); }
   };
   const openMenu = (window: WindowId, x: number, y: number) => {
     focusWithoutActivation(document.getElementById(`window-tab-${window}`));
@@ -267,7 +268,7 @@ export function useDockInteraction({ root, dock, space, enabled }: { root: RefOb
       resize: (handle) => (event) => { if (rect) press(event, window, { kind: "float-resize", rect, handle }); },
     };
   };
-  return { shown: outcome?.draft ?? dock, guides: outcome?.guides ?? NO_GUIDES, dragging, preview: outcome?.preview ?? null, menu, setMenu, execute, detach, canDetach: (window: WindowId) => canDetach(dock, window), floatBindings, pressTab: (event: PointerEvent<HTMLButtonElement>, id: WindowId) => { const window = windows.find((window) => window.id === id); if (window) press(event, window, { kind: "tab" }); }, contextTab, keyTab, selectTab, lostCapture };
+  return { grab: outcome?.grab ?? null, grabbed: outcome?.grab?.window ?? null, shown: outcome?.draft ?? dock, guides: outcome?.guides ?? NO_GUIDES, dragging, preview: outcome?.preview ?? null, menu, setMenu, execute, detach, canDetach: (window: WindowId) => canDetach(dock, window), floatBindings, pressTab: (event: PointerEvent<HTMLButtonElement>, id: WindowId) => { const window = windows.find((window) => window.id === id); if (window) press(event, window, { kind: "tab" }); }, contextTab, keyTab, selectTab, lostCapture };
 }
 
 export type DockInteraction = ReturnType<typeof useDockInteraction>;

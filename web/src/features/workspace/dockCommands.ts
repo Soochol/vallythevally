@@ -18,7 +18,7 @@ export type DockPlan =
   | { kind: "blocked"; rect: Rect; label: string; levels?: DockLevelView }
   | { kind: "change"; dock: DockPlacement; rect: Rect; label: string; levels?: DockLevelView };
 
-export const SMALL_DOCK_NOTICE = "자리가 작아 나눌 수 없습니다. 가운데에 놓아 탭으로 넣으세요";
+export const SMALL_DOCK_NOTICE = "자리가 작습니다 · 가운데에 놓으면 탭";
 export const EDGE_LABEL: Record<Edge, string> = { left: "왼쪽에 나눠 놓기", right: "오른쪽에 나눠 놓기", top: "위에 나눠 놓기", bottom: "아래에 나눠 놓기" };
 
 export function levelStepName(step: DockLevelStep): string {
