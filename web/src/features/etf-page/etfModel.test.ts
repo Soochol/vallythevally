@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { EtfFundSummary } from "../../api/generated/EtfFundSummary";
 import type { EtfChangePair } from "../../api/generated/EtfChangePair";
-import { commonHoldings, cumulativeCurve, filterFunds, formatRealChange, formatScale, issuersOf, NO_FILTER, overlapBps, pairOf, parseBasket, rankHoldings, sortFunds, squarify } from "./etfModel";
+import { commonHoldings, filterFunds, formatRealChange, formatScale, issuersOf, NO_FILTER, overlapBps, pairOf, parseBasket, rankHoldings, sortFunds, squarify } from "./etfModel";
 
 const fund = (code: string, name: string, style: EtfFundSummary["style"], issuer: string): EtfFundSummary => ({
   code, name, issuer, style, benchmark: "", holdingsCount: 1, top5WeightBps: 100, effectiveHoldings: 1,
@@ -59,17 +59,6 @@ describe("squarify", () => {
   });
   it("가장 큰 칸이 먼저 놓인다", () => {
     expect(tiles[0]!.key).toBe("a");
-  });
-});
-
-describe("cumulativeCurve", () => {
-  it("큰 비중부터 쌓고 합을 다시 맞추지 않는다", () => {
-    expect(cumulativeCurve([500, 1900, 1000])).toEqual([
-      { rank: 1, cumulativeBps: 1900 },
-      { rank: 2, cumulativeBps: 2900 },
-      { rank: 3, cumulativeBps: 3400 },
-    ]);
-    expect(cumulativeCurve([])).toEqual([]);
   });
 });
 

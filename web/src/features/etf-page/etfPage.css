@@ -32,7 +32,7 @@
 .etf-rail-foot { padding: var(--size-8) var(--size-12); border-top: 1px solid var(--line); color: var(--text-2); font-size: var(--fs-xs); }
 .etf-basket { display: flex; flex-wrap: wrap; align-items: center; gap: var(--size-5) var(--size-8); padding: var(--size-8) var(--size-12); border-bottom: 1px solid var(--line); }
 .etf-basket-count { flex: 1; color: var(--text-2); font-size: var(--fs-xs); }
-.etf-basket-chips { display: flex; flex-wrap: wrap; flex-basis: 100%; gap: var(--size-4); order: 3; margin: 0; padding: 0; list-style: none; }
+.etf-basket-chips { display: flex; flex-wrap: wrap; flex-basis: 100%; min-width: 0; gap: var(--size-4); order: 3; margin: 0; padding: 0; list-style: none; }
 .etf-basket-chip { display: inline-flex; align-items: center; gap: var(--size-4); max-width: 100%; padding: 0 var(--size-4) 0 var(--size-8); border-radius: var(--r-pill); background: var(--accent-soft); color: var(--text); font-size: var(--fs-xs); }
 .etf-basket-chip span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .etf-basket-chip button { width: var(--size-20); height: var(--size-20); color: var(--text-2); }

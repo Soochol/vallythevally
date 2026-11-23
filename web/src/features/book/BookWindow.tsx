@@ -1,3 +1,4 @@
+import { useRef } from "react";
 import type { SymbolCode } from "../../api/generated/SymbolCode";
 import { useFundamentals, useSymbolInfo } from "../../api/queries";
 import type { WindowId } from "../../layout/kinds";
@@ -22,6 +23,7 @@ import { stripTotals } from "./bookModel";
 import { visibleAfterHours, visibleExpected } from "./sessionWindows";
 import { useBookFeed } from "./useBookFeed";
 import { useNowMs } from "./useNowMs";
+import { useRowsPerSide, visibleLadderRows } from "./useRowsPerSide";
 
 const REJECTION: Record<string, string> = {
   realtime_limit: "실시간 자리가 부족해 호가가 갱신되지 않습니다",
@@ -32,6 +34,8 @@ const REJECTION: Record<string, string> = {
 
 function BookBody({ code, pager }: { code: SymbolCode; pager: InfoPager }) {
   const venue = useShownVenue(code);
+  const ladderBox = useRef<HTMLDivElement>(null);
+  const rowsPerSide = useRowsPerSide(ladderBox);
   const { skipSpreadGap } = useOrderSettings();
   const trades = useLadderTrades(code, venue);
   const feed = useBookFeed(code, venue, trades.lastTrade);
@@ -48,10 +52,10 @@ function BookBody({ code, pager }: { code: SymbolCode; pager: InfoPager }) {
   const downSince = useFeedDownSince(feed.connected);
   const ladder = (() => {
     if (view === null) return feed.snapshotFailed ? <ErrorState message="호가를 불러오지 못했습니다" retry={feed.retry} /> : <EmptyState title="호가를 기다리는 중입니다" />;
-    const rows = buildDefaultLadder({ asks: view.asks, bids: view.bids, lastPrice: feed.lastPrice, previousClose: feed.previousClose, bounds, skipSpreadGap, tickRule: tickRuleOf(kind, [...view.asks, ...view.bids].map((level) => level.price)) });
+    const rows = visibleLadderRows(buildDefaultLadder({ asks: view.asks, bids: view.bids, lastPrice: feed.lastPrice, previousClose: feed.previousClose, bounds, skipSpreadGap, tickRule: tickRuleOf(kind, [...view.asks, ...view.bids].map((level) => level.price)) }), rowsPerSide);
     const expected = visibleExpected(view.t, nowSeconds, view.expected);
     const infoSlots = placeInfoItems(rows, info, expectedItemsOnPage(pager.page, expected));
-    return <PriceLadder rows={rows} previousClose={feed.previousClose} expectedPrice={expected?.price ?? null} rowSlots={{ infoCard: infoSlot(infoSlots, pager), bottomLeft: tradeSlot(trades, feed.previousClose) }} />;
+    return <PriceLadder rows={rows} firstBidIndex={rowsPerSide} previousClose={feed.previousClose} expectedPrice={expected?.price ?? null} rowSlots={{ infoCard: infoSlot(infoSlots, pager), bottomLeft: tradeSlot(trades, feed.previousClose) }} />;
   })();
   return (
     <div className="bk" data-testid="book-window" data-symbol={code} data-connected={feed.connected ? "" : undefined}>
@@ -59,7 +63,7 @@ function BookBody({ code, pager }: { code: SymbolCode; pager: InfoPager }) {
       {notice && <Notice tone="warning" className="mw-notice">{notice}</Notice>}
       {!feed.connected && notice === null && <FeedStrip since={downSince} />}
       {view !== null && <BookColumnHead />}
-      <div className="bk-ladder" data-stale={feed.connected ? undefined : ""} data-state={view === null ? "" : undefined}>{ladder}</div>
+      <div ref={ladderBox} className="bk-ladder" data-stale={feed.connected ? undefined : ""} data-state={view === null ? "" : undefined}>{ladder}</div>
       <Strip divided>
         <span className="mw-strip-name">매도</span>
         <TotalFigure testId="book-total-ask" tone="down" value={totals.ask} afterHours={afterHours} description={totals.description} />

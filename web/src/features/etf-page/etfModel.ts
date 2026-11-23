@@ -112,15 +112,6 @@ export interface CurvePoint {
   cumulativeBps: number;
 }
 
-/** 비중 큰 순으로 쌓은 누적 비중. 비중은 다시 100%로 맞추지 않는다. */
-export function cumulativeCurve(weightsBps: readonly number[]): CurvePoint[] {
-  let sum = 0;
-  return weightsBps.toSorted((a, b) => b - a).map((weight, index) => {
-    sum += weight;
-    return { rank: index + 1, cumulativeBps: sum };
-  });
-}
-
 export interface RankedHolding<T extends WeightedHolding> {
   holding: T;
   rank: number;

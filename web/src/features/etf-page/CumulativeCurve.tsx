@@ -1,7 +1,7 @@
 import { useRef } from "react";
 import { EmptyState } from "../overlay/State";
 import { useElementSize } from "../heatmap-page/useElementSize";
-import { cumulativeCurve, formatPercent } from "./etfModel";
+import { type CurvePoint, formatPercent } from "./etfModel";
 
 const PAD_LEFT = 44;
 const PAD_RIGHT = 100;
@@ -24,10 +24,9 @@ function spreadLabels(ys: readonly number[], floor: number): number[] {
   return placed;
 }
 
-export function CumulativeCurve({ weightsBps }: { weightsBps: readonly number[] }) {
+export function CumulativeCurve({ curve }: { curve: readonly CurvePoint[] }) {
   const box = useRef<HTMLDivElement>(null);
   const { w: width, h: height } = useElementSize(box);
-  const curve = cumulativeCurve(weightsBps);
   if (curve.length === 0) return <EmptyState title="구성 종목이 없습니다" />;
   const top = Math.max(FULL_BPS, curve[curve.length - 1]!.cumulativeBps);
   const plotRight = width - PAD_RIGHT;

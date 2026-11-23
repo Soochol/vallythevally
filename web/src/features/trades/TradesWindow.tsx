@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import type { SymbolCode } from "../../api/generated/SymbolCode";
 import type { Venue } from "../../api/generated/Venue";
 import type { WindowId } from "../../layout/kinds";
@@ -14,8 +14,11 @@ import { useWindowedRows } from "../market-window/useWindowedRows";
 import { TradeRow } from "./TradeRow";
 import type { TradeRow as TradeRowData } from "./tape";
 import { cumulativeQuantity, formatSecond, MIN_AMOUNT_OPTIONS, minAmountWon, recentBuySell, visibleEntries, type MinAmountKey } from "./tape";
+import { useBelowHeight } from "./useBelowHeight";
 import { useTradeTape } from "./useTradeTape";
 import "./trades.css";
+
+const COMPACT_STRIPS_BELOW_HEIGHT_PX = 260;
 
 export function TradesWindow({ id }: { id: WindowId }) {
   const venue = useVenue();
@@ -23,6 +26,8 @@ export function TradesWindow({ id }: { id: WindowId }) {
 }
 
 function TradesBody({ code, venue }: { code: SymbolCode; venue: Venue }) {
+  const frame = useRef<HTMLDivElement>(null);
+  const compactStrips = useBelowHeight(frame, COMPACT_STRIPS_BELOW_HEIGHT_PX);
   const { state, dispatch, history, feedError, retry } = useTradeTape(marketSocket, code, venue);
   const quote = useDayQuote(code, venue);
   const previousClose = quote.previousClose;
@@ -35,7 +40,7 @@ function TradesBody({ code, venue }: { code: SymbolCode; venue: Venue }) {
   const empty = view.entries.length === 0;
   const lastPrice = view.entries.find((entry): entry is TradeRowData => entry.kind === "trade")?.price ?? null;
   return (
-    <div className="tr-window" data-testid="trades-window" data-symbol={code}>
+    <div ref={frame} className="tr-window" data-testid="trades-window" data-symbol={code} data-compact-strips={compactStrips ? "" : undefined}>
       <MarketHead code={code} venue={venue} lastPrice={lastPrice} previousClose={previousClose} />
       <div className="tr-strips">
       <Strip>

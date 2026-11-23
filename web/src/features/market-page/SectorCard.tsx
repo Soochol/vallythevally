@@ -13,7 +13,7 @@ import { layoutSectorMap, SECTOR_RATE_RANGE, sectorTileLabel } from "./sectorMap
 const MAP_WIDTH = 100;
 const MAP_HEIGHT = 56;
 const RANGE = SECTOR_RATE_RANGE satisfies ColorRange;
-const SECTOR_SKELETON = { shape: "chart", minHeight: "var(--size-220)" } as const;
+const SECTOR_SKELETON = { shape: "chart", minHeight: "var(--mk-skeleton-sector)" } as const;
 
 function SectorLegend() {
   return (

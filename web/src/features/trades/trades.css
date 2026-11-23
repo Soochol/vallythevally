@@ -16,6 +16,11 @@
 .tr-price[data-dir=down] { color:var(--down); }
 .tr-row[data-big] .tr-qty { font-weight:700; }
 .tr-strips { flex:none; }
+.tr-window[data-compact-strips] .tr-strips { box-sizing:border-box; display:flex; align-items:center; height:var(--size-24); overflow:hidden; border-bottom:var(--size-1) solid var(--line); }
+.tr-window[data-compact-strips] .tr-strips > .mw-strip { flex:none; flex-wrap:nowrap; gap:var(--s3); min-width:0; padding:0 var(--s3); border:0; white-space:nowrap; }
+.tr-window[data-compact-strips] .tr-strips > .mw-strip:first-child { flex:1 1 0; overflow:hidden; }
+.tr-window[data-compact-strips] .tr-strips .mw-ratio { min-width:var(--size-24); }
+.tr-window[data-compact-strips] .tr-strips .mw-seg { padding:0; gap:0; }
 .tr-gap { display:flex; align-items:center; justify-content:center; box-sizing:border-box; height:var(--size-24); padding:0 var(--s4); border-block:var(--size-1) dashed var(--line); overflow:hidden; color:var(--text-3); font-size:var(--fs-xs); white-space:nowrap; }
 .tr-empty { margin:0; padding:var(--s6) var(--s4); color:var(--text-3); font-size:var(--fs-xs); text-align:center; }
 .tr-pill { position:absolute; bottom:var(--s4); left:50%; z-index:3; transform:translateX(-50%); padding:var(--s2) var(--s5); border-radius:var(--r-pill); background:var(--accent); color:var(--accent-ink); font-size:var(--fs-xs); font-weight:600; box-shadow:var(--shadow); }
