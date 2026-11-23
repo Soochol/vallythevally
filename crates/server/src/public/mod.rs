@@ -137,9 +137,9 @@ impl PublicListener {
 
     pub fn router_with(&self, extra: Router<Arc<AppState>>) -> Router {
         let runtime = self.runtime.clone();
-        let rankings = crate::rankings::routes().route_layer(axum::Extension(crate::rankings::PublicRoute));
+        let rankings = crate::rankings::routes().route_layer(axum::Extension(crate::http::PublicRoute));
         let market = crate::market_overview::routes().route_layer(from_fn_with_state(runtime.clone(), shared_guard::market_overview));
-        let screener = crate::screener::routes().route_layer(from_fn_with_state(runtime.clone(), shared_guard::screener));
+        let screener = crate::screener::routes().route_layer(axum::Extension(crate::http::PublicRoute)).route_layer(from_fn_with_state(runtime.clone(), shared_guard::screener));
         let heatmap = user_data::routes().with_state(runtime.clone());
         let shared = Router::new()
             .route("/api/server-mode", get(server_mode::public))

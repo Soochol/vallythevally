@@ -1,13 +1,10 @@
 mod common;
 
-use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use account_server::SystemClock;
-use account_server::fake_idp::{ClientCredentials, FakeIdp};
 use common::support::kis_server::{FakeMaster, KisPeer};
 use common::{ScriptedTransport, Server};
 use domain::KstDate;
@@ -698,143 +695,5 @@ async fn a_kiwoom_minute_answer_that_lands_after_the_switch_is_not_kept_in_the_h
     assert!(late.as_array().is_some_and(|points| !points.is_empty()), "바꾸기 전에 보낸 요청은 자기 응답(키움)을 받는다: {late}");
     assert_ne!(flow_points(&client).await, late, "늦게 온 키움 분봉은 새 캐시에 남지 않는다");
     assert!(kis.minute_charts_sent() >= 1);
-    server.stop().await;
-}
-
-const FRIDAY_EVENING: &str = "20261106203000";
-const GOOGLE_SECRET: &str = "google-secret-source-switch-5t2q";
-const NAVER_SECRET: &str = "naver-secret-source-switch-8d4m";
-const MARKET_CARD: &str = "/api/market-overview/index?market=kospi";
-
-fn weekdays_before_friday(count: usize) -> Vec<String> {
-    let mut days: Vec<String> = weekdays_ending(KstDate::new(2026, 11, 5).unwrap(), count).into_iter().map(|day| day.yyyymmdd().to_string()).collect();
-    days.reverse();
-    days
-}
-
-fn script_market_card(kiwoom: &ScriptedTransport) {
-    let indices = json!({"all_inds_idex": [
-        {"stk_cd": "001", "stk_nm": "종합(KOSPI)", "cur_prc": "-6613.59", "flu_rt": "-0.67", "rising": "410", "stdns": "52", "fall": "+498", "upl": "3", "lst": "0", "trde_prica": "13,485,976"},
-        {"stk_cd": "101", "stk_nm": "종합(KOSDAQ)", "cur_prc": "-6613.59", "flu_rt": "-0.67", "rising": "410", "stdns": "52", "fall": "+498", "upl": "3", "lst": "0", "trde_prica": "13,485,976"}
-    ], "return_code": 0, "return_msg": "정상적으로 처리되었습니다"});
-    let days: Vec<Value> = weekdays_before_friday(24).iter().map(|day| json!({"dt": day, "cur_prc": "505969", "open_pric": "505969", "high_pric": "505969", "low_pric": "505969", "trde_qty": "1", "trde_prica": "100"})).collect();
-    kiwoom.respond_with("ka20003", 200, indices);
-    kiwoom.respond_with("ka20006", 200, json!({"inds_dt_pole_qry": days, "return_code": 0, "return_msg": "정상적으로 처리되었습니다"}));
-}
-
-fn public_vars(idp: &FakeIdp, port: u16) -> Vec<(String, String)> {
-    [
-        ("VALLY_PUBLIC_BIND", format!("127.0.0.1:{port}")),
-        ("VALLY_PUBLIC_ORIGIN", format!("http://127.0.0.1:{port}")),
-        ("VALLY_PUBLIC_GOOGLE_CLIENT_ID", "google-id".to_owned()),
-        ("VALLY_PUBLIC_GOOGLE_CLIENT_SECRET", GOOGLE_SECRET.to_owned()),
-        ("VALLY_PUBLIC_GOOGLE_AUTHORIZE_URL", idp.url("/google/authorize")),
-        ("VALLY_PUBLIC_GOOGLE_TOKEN_URL", idp.url("/google/token")),
-        ("VALLY_PUBLIC_NAVER_CLIENT_ID", "naver-id".to_owned()),
-        ("VALLY_PUBLIC_NAVER_CLIENT_SECRET", NAVER_SECRET.to_owned()),
-        ("VALLY_PUBLIC_NAVER_AUTHORIZE_URL", idp.url("/naver/authorize")),
-        ("VALLY_PUBLIC_NAVER_TOKEN_URL", idp.url("/naver/token")),
-        ("VALLY_PUBLIC_NAVER_PROFILE_URL", idp.url("/naver/profile")),
-        ("VALLY_CLOCK_START", FRIDAY_EVENING.to_owned()),
-        ("VALLY_KIS_BASE_URL", "http://127.0.0.1:1".to_owned()),
-        ("VALLY_KIS_WS_URL", "ws://127.0.0.1:1".to_owned()),
-    ]
-    .into_iter()
-    .map(|(key, value)| (key.to_owned(), value))
-    .collect()
-}
-
-fn set_cookies(headers: &reqwest::header::HeaderMap) -> BTreeMap<String, String> {
-    headers.get_all("set-cookie").iter().filter_map(|line| line.to_str().ok()?.split(';').next()?.split_once('=').map(|(name, value)| (name.to_owned(), value.to_owned()))).collect()
-}
-
-fn location(response: &reqwest::Response) -> String {
-    response.headers()["location"].to_str().unwrap().to_owned()
-}
-
-struct PublicSide {
-    base: String,
-    http: reqwest::Client,
-    session: String,
-}
-
-impl PublicSide {
-    async fn login(base: &str, idp: &FakeIdp) -> PublicSide {
-        let http = reqwest::Client::builder().redirect(reqwest::redirect::Policy::none()).no_proxy().timeout(Duration::from_secs(15)).build().unwrap();
-        idp.set_subject("alice");
-        let start = http.get(format!("{base}/v1/session/google/start")).send().await.unwrap();
-        assert_eq!(start.status(), 302, "로그인 시작은 IdP로 보낸다");
-        let mut cookies = set_cookies(start.headers());
-        let at_idp = http.get(location(&start)).send().await.unwrap();
-        assert_eq!(at_idp.status(), 302);
-        let callback = location(&at_idp);
-        let callback = callback.strip_prefix(base).unwrap_or_else(|| panic!("callback이 공개 출처로 온다: {callback}")).to_owned();
-        let sent: Vec<String> = cookies.iter().map(|(name, value)| format!("{name}={value}")).collect();
-        let done = http.get(format!("{base}{callback}")).header("cookie", sent.join("; ")).send().await.unwrap();
-        assert_eq!(done.status(), 302, "callback은 화면 첫 주소로 보낸다");
-        cookies.extend(set_cookies(done.headers()));
-        let (name, value) = cookies.iter().find(|(name, value)| name.ends_with("vally_session") && !value.is_empty()).unwrap_or_else(|| panic!("세션 쿠키가 없다: {cookies:?}"));
-        PublicSide { base: base.to_owned(), http, session: format!("{name}={value}") }
-    }
-
-    async fn market_card(&self) -> (u16, Vec<u8>) {
-        let response = self.http.get(format!("{}{MARKET_CARD}", self.base)).header("cookie", &self.session).send().await.unwrap();
-        (response.status().as_u16(), response.bytes().await.unwrap().to_vec())
-    }
-}
-
-async fn public_pair(kiwoom: &ScriptedTransport, kis: &Arc<FakeKis>, peer: &KisPeer, env: &Env) -> (Server, Client, PublicSide) {
-    let idp = Arc::new(FakeIdp::start(ClientCredentials { id: "google-id".into(), secret: GOOGLE_SECRET.into() }, ClientCredentials { id: "naver-id".into(), secret: NAVER_SECRET.into() }, Arc::new(SystemClock)).await);
-    let port = std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port();
-    let mut vars: Vec<(String, String)> = public_vars(&idp, port);
-    vars.extend(KIS_ENV.iter().chain([&START]).map(|(key, value)| ((*key).to_owned(), (*value).to_owned())));
-    let extra: Vec<(&str, &str)> = vars.iter().map(|(key, value)| (key.as_str(), value.as_str())).collect();
-    let server = env.spawn(kiwoom, kis, peer, &extra);
-    let client = Client::of(&server).await;
-    client.until_key_state("env", "connected").await;
-    client.until_key_state("env-kis", "connected").await;
-    let public = PublicSide::login(&format!("http://127.0.0.1:{port}"), &idp).await;
-    (server, client, public)
-}
-
-fn market_card_calls(kiwoom: &ScriptedTransport) -> usize {
-    kiwoom.api_ids().iter().filter(|id| *id == "ka20003").count()
-}
-
-#[tokio::test]
-async fn switching_the_source_drops_the_public_market_cache_so_the_next_card_is_asked_again() {
-    let (kiwoom, kis, peer, env) = (ScriptedTransport::new(), FakeKis::new(), KisPeer::default(), Env::new());
-    script_market_card(&kiwoom);
-    let (server, client, public) = public_pair(&kiwoom, &kis, &peer, &env).await;
-    let (status, first) = public.market_card().await;
-    assert_eq!(status, 200, "{}", String::from_utf8_lossy(&first));
-    assert_eq!(market_card_calls(&kiwoom), 1);
-    assert_eq!(public.market_card().await, (200, first.clone()));
-    assert_eq!(market_card_calls(&kiwoom), 1, "바꾸기 전에는 캐시가 답한다");
-
-    switched_to_kis(&client).await;
-    assert_eq!(public.market_card().await.0, 200);
-    assert_eq!(market_card_calls(&kiwoom), 2, "바꾼 뒤 첫 요청은 캐시에 남은 응답이 아니라 새로 받은 응답이다");
-    server.stop().await;
-}
-
-#[tokio::test]
-async fn a_market_answer_that_lands_after_the_switch_is_not_kept_in_the_public_market_cache() {
-    let (kiwoom, kis, peer, env) = (ScriptedTransport::new(), FakeKis::new(), KisPeer::default(), Env::new());
-    script_market_card(&kiwoom);
-    let (server, client, public) = public_pair(&kiwoom, &kis, &peer, &env).await;
-    let held = kiwoom.hold("키움 지수", |call| call.api_id == "ka20003");
-    let public = Arc::new(public);
-    let slow = tokio::spawn({
-        let public = public.clone();
-        async move { public.market_card().await }
-    });
-    held.arrived().await;
-    switched_to_kis(&client).await;
-    held.release();
-    assert_eq!(slow.await.unwrap().0, 200, "바꾸기 전에 보낸 요청은 자기 응답을 받는다");
-    assert_eq!(market_card_calls(&kiwoom), 1);
-    assert_eq!(public.market_card().await.0, 200);
-    assert_eq!(market_card_calls(&kiwoom), 2, "늦게 온 응답은 새 캐시에 남지 않는다");
     server.stop().await;
 }

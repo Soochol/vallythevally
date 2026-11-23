@@ -16,7 +16,7 @@ use std::time::Duration;
 
 use axum::Router;
 use axum::body::Body;
-use axum::extract::State;
+use axum::extract::{Extension, State};
 use axum::response::Json;
 use axum::routing::{get, post};
 use domain::{Feed, IndexCode, KstDate, KstTime, Period, SeriesKey, TimeOfDay, Weekday};
@@ -24,6 +24,7 @@ use domain::{Feed, IndexCode, KstDate, KstTime, Period, SeriesKey, TimeOfDay, We
 use crate::api::{self, ApiErrorBody, ApiErrorReason, FullHistory, Screen, ScreenerResult, ScreenerStatus, ScreenerUpdate, ScreenerUpdateRequest, UpdatePhase};
 use crate::bars::{BarError, BarService};
 use crate::clock::Clock;
+use crate::http::PublicRoute;
 use crate::http::{ApiFailure, AppState, Lookup};
 use crate::market_source::{KiwoomHandle, Priority, SourceFailure};
 use crate::symbols::SymbolDirectory;
@@ -58,6 +59,13 @@ enum Run {
 enum CalendarUse {
     Status,
     Update,
+    Cached,
+}
+
+impl CalendarUse {
+    fn of_request(from_shared_data_only: bool) -> CalendarUse {
+        if from_shared_data_only { CalendarUse::Cached } else { CalendarUse::Status }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -284,6 +292,7 @@ impl Screener {
         let (reuse, priority) = match using {
             CalendarUse::Status => (true, Priority::Screen),
             CalendarUse::Update => (false, Priority::Background),
+            CalendarUse::Cached => return cached.clone().ok_or_else(|| BarError::Internal("서버가 아직 거래일 달력을 받지 못했습니다".into())),
         };
         if let Some(c) = cached.as_ref().filter(|c| reuse && c.fetched_at.kst_date() == now.kst_date() && now.unix() - c.fetched_at.unix() < CALENDAR_FRESH_SECS) {
             return Ok(c.clone());
@@ -296,6 +305,10 @@ impl Screener {
     }
 
     pub async fn status(&self) -> Result<ScreenerStatus, StoreError> {
+        self.status_for(false).await
+    }
+
+    pub async fn status_for(&self, from_shared_data_only: bool) -> Result<ScreenerStatus, StoreError> {
         let mut summary = self.with_store(Store::summary).await?;
         if summary.listing_lost {
             let current = self.symbols.updates().borrow().clone();
@@ -305,7 +318,7 @@ impl Screener {
                 summary = self.with_store(Store::summary).await?;
             }
         }
-        let calendar = match self.calendar(CalendarUse::Status).await {
+        let calendar = match self.calendar(CalendarUse::of_request(from_shared_data_only)).await {
             Ok(c) => Some(c),
             Err(e) => {
                 tracing::warn!(error = %e, "코스피 일봉을 받지 못해 필요 관측일을 모릅니다");
@@ -337,9 +350,9 @@ impl Screener {
         Ok(self.with_store(move |s| s.fill_lost_listing(directory.screener_listing())).await?)
     }
 
-    async fn run_screen(self: &Arc<Self>, screen: RunnableScreen, screen_key: String) -> Result<ScreenerResult, ApiFailure> {
+    async fn run_screen(self: &Arc<Self>, screen: RunnableScreen, screen_key: String, from_shared_data_only: bool) -> Result<ScreenerResult, ApiFailure> {
         let now = self.clock.now();
-        let calendar = self.calendar(CalendarUse::Status).await.map_err(|e| Lookup::ScreenerRun.failure(e, now))?;
+        let calendar = self.calendar(CalendarUse::of_request(from_shared_data_only)).await.map_err(|e| Lookup::ScreenerRun.failure(e, now))?;
         let need_day = calendar.need_day(now);
         self.refill_listing().await.map_err(|e| Lookup::ScreenerRun.failure(e, now))?;
         self.recents_started_outside_recent()?;
@@ -501,14 +514,14 @@ async fn cancel_update(State(st): State<Arc<AppState>>) -> Result<Json<ScreenerS
     Ok(Json(st.screener.status().await?))
 }
 
-async fn status(State(st): State<Arc<AppState>>) -> Result<Json<ScreenerStatus>, ApiFailure> {
-    Ok(Json(st.screener.status().await?))
+async fn status(State(st): State<Arc<AppState>>, public: Option<Extension<PublicRoute>>) -> Result<Json<ScreenerStatus>, ApiFailure> {
+    Ok(Json(st.screener.status_for(public.is_some()).await?))
 }
 
-async fn run_screen(State(st): State<Arc<AppState>>, body: Body) -> Result<Json<ScreenerResult>, ApiFailure> {
+async fn run_screen(State(st): State<Arc<AppState>>, public: Option<Extension<PublicRoute>>, body: Body) -> Result<Json<ScreenerResult>, ApiFailure> {
     let screen: Screen = read_json(body, JSON_LIMIT, "조건식 본문").await?;
     let runnable = parse_stored_screen(&screen)?;
-    Ok(Json(st.screener.run_screen(runnable, screen_key(&screen)).await?))
+    Ok(Json(st.screener.run_screen(runnable, screen_key(&screen), public.is_some()).await?))
 }
 
 impl From<Invalid> for ApiFailure {

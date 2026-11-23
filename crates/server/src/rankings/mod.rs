@@ -27,8 +27,7 @@ use cache::{Served, WalkError};
 
 const REQUEST_LIMIT: usize = 4 * 1024;
 
-#[derive(Clone, Copy)]
-pub struct PublicRoute;
+pub use crate::http::PublicRoute;
 
 pub fn routes() -> Router<Arc<AppState>> {
     Router::new().route("/api/rankings", post(rankings))

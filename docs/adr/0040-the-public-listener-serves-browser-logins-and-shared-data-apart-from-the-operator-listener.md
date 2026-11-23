@@ -1,5 +1,7 @@
 # 공개 리스너는 운영자 리스너와 따로 열려 브라우저 로그인과 공용 자료를 주고, 계정 기능은 라이브러리로 붙인다
 
+- (2026-11-23 개정) 임시 장치는 collector-shared-data로 걷었다. 공개 리스너는 `VALLY_SHARED_DATA_DIR` 없이는 켜지지 않고, 공개 요청은 키움 transport를 한 번도 부르지 않는다. 아래 "임시 장치와 걷어낼 것" 표대로 걷었고, 남긴 것은 공개 오류 문구 고정, 흐름 `symbols`의 계정 테마 제한, 버킷과 격리, 스크리너 계정 버킷과 상태 캐시, 압축·CSP·출처 검사다. [ADR 0043](0043-collector-makes-shared-data-and-the-server-only-reads-it.md).
+
 [ADR 0038](0038-user-kiwoom-keys-stay-in-the-browser-and-collection-runs-on-one-server.md)에 따라 이 도구를 여러 사람이 웹 화면만 열어 쓰는 서비스로 연다. 공개 방법은 Tailscale Funnel이다(사용자가 정했다, 2026-11-22). 지금 코드로는 다음이 막는다.
 
 - 로그인은 루프백 흐름뿐이다. 계정 서버가 일회용 코드를 `http://127.0.0.1:<포트>/auth/complete`로 보내고 커넥터가 그것을 커넥터 토큰으로 바꾼다. 원격 브라우저에서는 끝나지 않고, 계정 서버에는 브라우저 세션이 없다.
