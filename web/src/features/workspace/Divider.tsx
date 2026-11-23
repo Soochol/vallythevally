@@ -6,7 +6,6 @@ import { pushDivider } from "../../layout/dock/push";
 import { dividerStops, nextStop, snapLead, type Stop } from "../../layout/dock/stops";
 import { listGroups, type Branch, type SplitPath } from "../../layout/dock/tree";
 import type { DockNode, DockPlacement, Rect } from "../../layout/placement";
-import { useLayoutStore } from "../../stores/layout";
 import { useSelectionStore } from "../../stores/selection";
 import { DIVIDER_REACH, reachesDivider, yieldsToContent } from "./dividerReach";
 import { DividerMenu } from "./DividerMenu";
@@ -21,7 +20,8 @@ const KEY_STEP: Record<"row" | "column", Partial<Record<string, -1 | 1>>> = { ro
 
 type Drag = { pointer: number; from: number; lead: number; raw: number | null; at: Point; alt: boolean; clamped: boolean; sides: string; stops: Stop[]; layout: DockLayout };
 type Hud = { point: Point | null; guide: Rect | null };
-type Live = { dock: DockPlacement; box: GutterBox; space: DockSpace; onDraft(dock: DockPlacement | null): void };
+type Live = { dock: DockPlacement; box: GutterBox; space: DockSpace; onDraft(dock: DockPlacement | null): void; onCommit: CommitRatios };
+export type CommitRatios = (next: DockPlacement, from: DockPlacement) => void;
 
 function sidesAt(root: DockNode, path: SplitPath): string {
   let node = root;
@@ -87,12 +87,12 @@ const sizes = (box: GutterBox, space: DockSpace): { lead: SideSize; second: Side
   return { lead: { name: sideName(box.node.first, space.windows), px: m.lead }, second: { name: sideName(box.node.second, space.windows), px: m.second } };
 };
 
-export function Divider({ box, dock, space, onDraft }: { box: GutterBox; dock: DockPlacement; space: DockSpace; onDraft(dock: DockPlacement | null): void }) {
+export function Divider({ box, dock, space, onDraft, onCommit }: { box: GutterBox; dock: DockPlacement; space: DockSpace; onDraft(dock: DockPlacement | null): void; onCommit: CommitRatios }) {
   const element = useRef<HTMLDivElement>(null);
   const drag = useRef<Drag | null>(null);
   const balloonTimer = useRef<number | undefined>(undefined);
-  const live = useRef<Live>({ dock, box, space, onDraft });
-  live.current = { dock, box, space, onDraft };
+  const live = useRef<Live>({ dock, box, space, onDraft, onCommit });
+  live.current = { dock, box, space, onDraft, onCommit };
   const [dragging, setDragging] = useState(false);
   const [hud, setHud] = useState<Hud | null>(null);
   const [menuAt, setMenuAt] = useState<Point | null>(null);
@@ -150,7 +150,7 @@ export function Divider({ box, dock, space, onDraft }: { box: GutterBox; dock: D
     if (!current) return;
     const now = live.current;
     end();
-    if (commit && current.raw !== null && sidesAt(now.dock.root, now.box.path) === current.sides) useLayoutStore.getState().setDock(settle(now, current.raw, alt ?? current.alt, current.stops).dock);
+    if (commit && current.raw !== null && sidesAt(now.dock.root, now.box.path) === current.sides) now.onCommit(settle(now, current.raw, alt ?? current.alt, current.stops).dock, now.dock);
     now.onDraft(null);
   };
   const cancel = () => {
@@ -253,7 +253,7 @@ export function Divider({ box, dock, space, onDraft }: { box: GutterBox; dock: D
     event.preventDefault();
     const result = settle(now, target, true, []);
     if (result.clamped) notify(now, target);
-    useLayoutStore.getState().setDock(result.dock);
+    now.onCommit(result.dock, now.dock);
     flashBalloon();
   };
   const doubleClick = () => {
@@ -261,7 +261,7 @@ export function Divider({ box, dock, space, onDraft }: { box: GutterBox; dock: D
     const px = wholePixels(now.space);
     const next = equalizeRun(now.dock, now.box.path, now.space);
     const rects = (placement: DockPlacement) => JSON.stringify(layoutDock(placement.root, px.area, px.gap).groups.map(({ rect }) => rect));
-    if (rects(next) !== rects(now.dock)) useLayoutStore.getState().setDock(next);
+    if (rects(next) !== rects(now.dock)) now.onCommit(next, now.dock);
   };
 
   const balloonPoint = hud && (hud.point ?? { x: box.rect.x + box.rect.w / 2, y: box.rect.y + box.rect.h / 2 });
@@ -279,7 +279,7 @@ export function Divider({ box, dock, space, onDraft }: { box: GutterBox; dock: D
           if (event.clientX === 0 && event.clientY === 0) openMenuAtCenter();
           else openMenu(event.clientX, event.clientY);
         }} />
-      {menuAt && <DividerMenu box={box} dock={dock} space={space} root={element} at={menuAt} onClose={() => {
+      {menuAt && <DividerMenu box={box} dock={dock} space={space} onCommit={onCommit} root={element} at={menuAt} onClose={() => {
         setMenuAt(null);
         element.current?.focus({ preventScroll: true });
       }} />}

@@ -153,3 +153,71 @@ test("탭 여섯 개가 한 묶음에 있는 도킹에서 처음 캔버스로 �
   expect(countOverlaps(rects)).toBe(0);
   await pollSaved(() => Object.keys(parsePlacement(scenario.documents.layout(DEFAULT_LAYOUT_ID).placement).canvas?.rects ?? {}).length).toBe(6);
 });
+
+const WATCH: LayoutWindow = { id: "watchlist", link: null, kind: "watchlist" };
+const savedPuts = (scenario: Scenario) => layoutPuts(scenario).map((put) => parsePlacement((put.postDataJSON() as { placement: unknown }).placement).dock?.root);
+const savedRoot = (scenario: Scenario) => parsePlacement(scenario.documents.layout(DEFAULT_LAYOUT_ID).placement).dock?.root;
+const ratioOf = (node: DockNode | undefined) => (node?.kind === "split" ? node.ratio : null);
+
+test("접힌 동안 경계선을 화살표 키로 옮기면 저장에는 세 묶음과 옮긴 경계의 비율만 실리고 넓히면 세 묶음이 돌아온다", async ({ page, scenario }) => {
+  const inner = row(0.45, group("g2", ["brokers"]), group("g3", ["order"]));
+  seed(scenario, [CHART, BROKERS, ORDER], row(0.35, group("g1", ["cell-0"]), inner));
+  await open(page);
+  await page.setViewportSize({ width: 1024, height: 900 });
+  await expect.poll(() => shownGroups(page)).toEqual([["cell-0"], ["brokers", "order"]]);
+  const divider = page.getByRole("separator", { name: "좌우 창 경계" });
+  await expect(divider).toHaveCount(1);
+  const before = Number(await divider.getAttribute("aria-valuenow"));
+
+  await divider.focus();
+  await page.keyboard.press("ArrowLeft");
+  await expect(divider).toHaveAttribute("aria-valuenow", String(before - 16));
+  await pollSaved(() => layoutPuts(scenario).length).toBeGreaterThan(0);
+  for (const root of savedPuts(scenario)) {
+    expect(root && listGroups(root).map((node) => node.tabs)).toEqual([["cell-0"], ["brokers"], ["order"]]);
+    expect(root?.kind === "split" && root.second).toEqual(inner);
+  }
+  expect(ratioOf(savedRoot(scenario))).toBeLessThan(0.35);
+  expect(await shownGroups(page)).toEqual([["cell-0"], ["brokers", "order"]]);
+
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await expect.poll(() => shownGroups(page)).toEqual([["cell-0"], ["brokers"], ["order"]]);
+  expect(savedRoot(scenario)?.kind === "split" && (savedRoot(scenario) as Extract<DockNode, { kind: "split" }>).second).toEqual(inner);
+});
+
+test("접힌 묶음에서 탭 메뉴로 탭 순서를 바꾸면 그 탭의 원래 묶음 안에서만 바뀌어 저장되고 넓히면 세 묶음과 비율이 돌아온다", async ({ page, scenario }) => {
+  seed(scenario, [CHART, BROKERS, WATCH, ORDER], row(0.35, group("g1", ["cell-0"]), row(0.45, group("g2", ["brokers", "watchlist"]), group("g3", ["order"]))));
+  await open(page);
+  await page.setViewportSize({ width: 1024, height: 900 });
+  await expect.poll(() => shownGroups(page)).toEqual([["cell-0"], ["brokers", "watchlist", "order"]]);
+
+  await tabOf(page, "brokers").click({ button: "right" });
+  await page.getByRole("menu", { name: "창 배치" }).getByRole("menuitem", { name: /^뒤로 옮기기/ }).click();
+  await expect.poll(() => shownGroups(page)).toEqual([["cell-0"], ["watchlist", "brokers", "order"]]);
+  await pollSaved(() => layoutPuts(scenario).length).toBeGreaterThan(0);
+  const expected = row(0.35, group("g1", ["cell-0"]), row(0.45, { kind: "group", id: "g2", tabs: ["watchlist", "brokers"] as never, active: "brokers" as never }, group("g3", ["order"])));
+  for (const root of savedPuts(scenario)) expect(root).toEqual(expected);
+
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await expect.poll(() => shownGroups(page)).toEqual([["cell-0"], ["watchlist", "brokers"], ["order"]]);
+  expect(savedRoot(scenario)).toEqual(expected);
+});
+
+test("비율만 눌린 동안 탭 메뉴로 탭 순서를 바꾸면 저장 비율은 그대로이고 넓히면 호가주문 묶음 폭이 돌아온다", async ({ page, scenario }) => {
+  seed(scenario, [CHART, WATCH, ORDER], row(0.6, group("g1", ["cell-0", "watchlist"]), group("g2", ["order"])));
+  await open(page);
+  const wideOrder = (await boxOf(groupHolding(page, "order"))).width;
+  await page.setViewportSize({ width: 1024, height: 900 });
+  await expect.poll(async () => (await boxOf(groupHolding(page, "order"))).width).toBe(WINDOW_KINDS.order.minSize.w);
+
+  await tabOf(page, "cell-0").click({ button: "right" });
+  await page.getByRole("menu", { name: "창 배치" }).getByRole("menuitem", { name: /^뒤로 옮기기/ }).click();
+  await expect.poll(() => shownGroups(page)).toEqual([["watchlist", "cell-0"], ["order"]]);
+  await pollSaved(() => layoutPuts(scenario).length).toBeGreaterThan(0);
+  for (const root of savedPuts(scenario)) expect(ratioOf(root)).toBe(0.6);
+  expect((await boxOf(groupHolding(page, "order"))).width).toBe(WINDOW_KINDS.order.minSize.w);
+
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await expect.poll(async () => (await boxOf(groupHolding(page, "order"))).width).toBe(wideOrder);
+  expect(ratioOf(savedRoot(scenario))).toBe(0.6);
+});

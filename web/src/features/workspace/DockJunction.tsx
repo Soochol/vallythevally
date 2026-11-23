@@ -2,8 +2,8 @@ import { type PointerEvent as ReactPointerEvent, useEffect, useRef, useState } f
 import { wholePixels, type DockLayout, type DockSpace, type GutterBox } from "../../layout/dock/geometry";
 import type { Junction } from "../../layout/dock/junction";
 import type { DockPlacement, Rect } from "../../layout/placement";
-import { useLayoutStore } from "../../stores/layout";
 import { useSelectionStore } from "../../stores/selection";
+import type { CommitRatios } from "./Divider";
 import { DockSizeBalloon, sideName, type Point, type SideSize } from "./DockSizeBalloon";
 import { junctionStart, junctionStopNotice, moveJunction, type JunctionAxis, type JunctionMove, type JunctionStart } from "./junctionDrag";
 
@@ -35,11 +35,11 @@ function sidesOf(box: GutterBox, space: DockSpace): { lead: SideSize; second: Si
   return { lead: { name: sideName(box.node.first, space.windows), px: lead }, second: { name: sideName(box.node.second, space.windows), px: along - lead - gutter } };
 }
 
-export function DockJunction({ junction, layout, dock, space, onDraft }: { junction: Junction; layout: DockLayout; dock: DockPlacement; space: DockSpace; onDraft(dock: DockPlacement | null): void }) {
+export function DockJunction({ junction, layout, dock, space, onDraft, onCommit }: { junction: Junction; layout: DockLayout; dock: DockPlacement; space: DockSpace; onDraft(dock: DockPlacement | null): void; onCommit: CommitRatios }) {
   const element = useRef<HTMLDivElement>(null);
   const drag = useRef<Drag | null>(null);
-  const live = useRef({ dock, junction, space, onDraft });
-  live.current = { dock, junction, space, onDraft };
+  const live = useRef({ dock, junction, space, onDraft, onCommit });
+  live.current = { dock, junction, space, onDraft, onCommit };
   const [hovered, setHovered] = useState(false);
   const [dragging, setDragging] = useState(false);
   const [hud, setHud] = useState<Hud | null>(null);
@@ -70,7 +70,7 @@ export function DockJunction({ junction, layout, dock, space, onDraft }: { junct
     const current = drag.current;
     if (!current) return;
     end();
-    if (commit && current.result) useLayoutStore.getState().setDock(current.result.dock);
+    if (commit && current.result) live.current.onCommit(current.result.dock, current.dock);
     live.current.onDraft(null);
   };
   const cancel = () => {

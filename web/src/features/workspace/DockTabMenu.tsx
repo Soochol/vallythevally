@@ -1,18 +1,20 @@
 import { type RefObject, useRef } from "react";
 import { LAST_DOCKED_NOTICE } from "../../layout/dock/floats";
-import type { DockSpace, Edge } from "../../layout/dock/geometry";
+import type { Edge } from "../../layout/dock/geometry";
 import { groupOfWindow, listGroups } from "../../layout/dock/tree";
 import { allowsMany, MAX_WINDOWS } from "../../layout/kinds";
 import type { DockPlacement } from "../../layout/placement";
 import { chartNumber, chartWindows, useLayoutStore, windowName } from "../../stores/layout";
 import { Menu, type MenuItem } from "../menu/Menu";
 import { closeWindow, LAST_CHART_REASON, WINDOW_LIMIT_REASON } from "./manage";
-import { evaluateDock, EDGE_LABEL, type DockCommand } from "./dockCommands";
+import { EDGE_LABEL, type DockCommand } from "./dockCommands";
 import { focusTab, type DockInteraction } from "./dockInteraction";
 import { focusWithoutActivation, tabLabel } from "./focus";
 import { mergeRepeatedReasons } from "./menuReasons";
 
-export function DockTabMenu({ interaction, dock, space, root, maximized, onToggleMaximize }: { interaction: DockInteraction; dock: DockPlacement; space: DockSpace; root: RefObject<HTMLElement | null>; maximized: string | null; onToggleMaximize(group: string): void }) {
+const FOLDED_ORDER_REASON = "자리가 좁아 접혀 들어온 탭과는 순서를 바꿀 수 없습니다";
+
+export function DockTabMenu({ interaction, dock, root, maximized, onToggleMaximize }: { interaction: DockInteraction; dock: DockPlacement; root: RefObject<HTMLElement | null>; maximized: string | null; onToggleMaximize(group: string): void }) {
   const acted = useRef(false);
   const menu = interaction.menu;
   const layout = useLayoutStore((s) => s.layout);
@@ -23,7 +25,7 @@ export function DockTabMenu({ interaction, dock, space, root, maximized, onToggl
   if (!window || !source) return null;
   const name = window.kind === "chart" ? `칸 ${chartNumber(layout, window.id)} ${document.getElementById(`window-tab-${window.id}`)?.querySelector(".dock-tab-name")?.textContent ?? window.symbol}` : windowName(layout.windows, window);
   const action = (label: string, command: DockCommand): MenuItem => {
-    const plan = evaluateDock(dock, command, space);
+    const plan = interaction.plan(command);
     const disabledReason = plan.kind === "blocked" ? plan.label : plan.kind === "unchanged" ? "이 묶음에 다른 탭이 있어야 나눌 수 있습니다" : undefined;
     return { kind: "action", label, disabled: plan.kind !== "change", disabledReason, onSelect: () => { acted.current = true; interaction.execute(command); } };
   };
@@ -40,7 +42,11 @@ export function DockTabMenu({ interaction, dock, space, root, maximized, onToggl
   }
   if (source.tabs.length > 1) {
     const index = source.tabs.indexOf(window.id);
-    const shift = (label: string, shortcut: string, to: number): MenuItem => ({ kind: "action", label, shortcut, disabled: to < 0 || to >= source.tabs.length, onSelect: () => { acted.current = true; interaction.execute({ kind: "tab", window: window.id, group: source.id, at: to }); } });
+    const shift = (label: string, shortcut: string, to: number): MenuItem => {
+      const outside = to < 0 || to >= source.tabs.length;
+      const folded = !outside && interaction.plan({ kind: "tab", window: window.id, group: source.id, at: to }).kind !== "change";
+      return { kind: "action", label, shortcut, disabled: outside || folded, disabledReason: folded ? FOLDED_ORDER_REASON : undefined, onSelect: () => { acted.current = true; interaction.execute({ kind: "tab", window: window.id, group: source.id, at: to }); } };
+    };
     items.push({ kind: "separator" }, shift("앞으로 옮기기", "Alt+←", index - 1), shift("뒤로 옮기기", "Alt+→", index + 1));
   }
   const destinations = listGroups(dock.root).filter((group) => group.id !== source.id);

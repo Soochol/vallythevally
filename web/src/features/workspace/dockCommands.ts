@@ -1,5 +1,6 @@
 import { dockLevels, levelAtDistance, splitLevel, type DockLevelKind } from "../../layout/dock/levels";
 import { dropTarget, EDGE_ZONE_SHARE, layoutDock, wholePixels, type DockSpace, type Edge, type GroupBox } from "../../layout/dock/geometry";
+import { carryMove } from "../../layout/dock/carry";
 import { splitArea } from "../../layout/dock/split";
 import { groupOfWindow, putTab, withoutWindow } from "../../layout/dock/tree";
 import type { WindowId } from "../../layout/kinds";
@@ -61,6 +62,16 @@ export function evaluateDock(dock: DockPlacement, command: DockCommand, space: D
   if (!box) return { kind: "unchanged" };
   const label = command.kind === "tab" ? "이 묶음에 탭으로 넣기" : edgeLabel(command.edge, command.kind === "area-edge" ? { kind: "area", groupCount: 0 } : chosen);
   return { kind: "change", dock: result.dock, rect: box.rect, label, levels };
+}
+
+export type DockView = { saved: DockPlacement; drawn: DockPlacement };
+export type ViewPlan = { plan: DockPlan; next: DockPlacement };
+
+export function evaluateView(view: DockView, command: DockCommand, space: DockSpace): ViewPlan {
+  const plan = evaluateDock(view.drawn, command, space);
+  if (plan.kind !== "change") return { plan, next: view.saved };
+  const next = carryMove(view.saved, plan.dock, command.window);
+  return JSON.stringify(next) === JSON.stringify(view.saved) ? { plan: { kind: "unchanged" }, next: view.saved } : { plan, next };
 }
 
 export function commandAt(root: HTMLElement, dock: DockPlacement, window: WindowId, point: { x: number; y: number }, space: DockSpace, origin: { x: number; y: number }): DockCommand | null {

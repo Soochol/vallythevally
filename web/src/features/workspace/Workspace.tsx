@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { fitCanvas } from "../../layout/canvas/arrange";
 import { workArea } from "../../layout/canvas/geometry";
 import { placementForMode } from "../../layout/modes";
+import { carryRatios } from "../../layout/dock/carry";
 import { fitDock } from "../../layout/dock/fit";
 import { drawDock, layoutDock, type DockSpace } from "../../layout/dock/geometry";
 import { findJunctions } from "../../layout/dock/junction";
@@ -50,6 +51,7 @@ export function Workspace() {
   const activeCell = useSelectionStore((s) => s.activeCell);
   const shownCharts = useMemo(() => [...listGroups(drawn.dock.root).filter((group) => maximize.maximized === null || group.id === maximize.maximized).map((group) => group.active), ...drawn.dock.floats.map((float) => float.window)].filter((id) => windows.some((w) => w.id === id && w.kind === "chart")), [drawn.dock, windows, maximize.maximized]);
   const folded = drawn.folds > 0;
+  const commitRatios = (next: DockPlacement, from: DockPlacement) => useLayoutStore.getState().setDock(carryRatios(dock, from, next));
 
   useEffect(() => {
     if (folded) useSelectionStore.getState().showToast(FOLD_NOTICE);
@@ -79,8 +81,8 @@ export function Workspace() {
     <main ref={root} aria-label="작업 영역" className="workspace" data-dock-dragging={interaction.dragging ? "" : undefined} onLostPointerCapture={interaction.lostCapture}>
       {mode === "canvas" && canvas && canvasArea ? <CanvasWorkspace canvas={canvas} windows={windows} area={canvasArea} /> : null}
       {mode === "dock" && boxes?.groups.map(({ group, rect }, index) => (maximizedGroup && group.id !== maximizedGroup.group.id ? null : <DockGroup key={group.id} group={group} rect={maximizedGroup && space ? { x: 0, y: 0, w: space.area.w, h: space.area.h } : rect} number={index + 1} interaction={interaction} maximized={maximizedGroup !== undefined} onToggleMaximize={() => maximize.toggle(group.id)} />))}
-      {mode === "dock" && space && !maximizedGroup && boxes?.gutters.map((box) => <Divider key={box.path.join("-") || "root"} box={box} dock={drawn.dock} space={space} onDraft={setDraft} />)}
-      {mode === "dock" && space && !maximizedGroup && boxes && findJunctions(boxes).map((junction) => <DockJunction key={`${junction.rowPath.join("-")}|${junction.columnPath.join("-")}`} junction={junction} layout={boxes} dock={drawn.dock} space={space} onDraft={setDraft} />)}
+      {mode === "dock" && space && !maximizedGroup && boxes?.gutters.map((box) => <Divider key={box.path.join("-") || "root"} box={box} dock={drawn.dock} space={space} onDraft={setDraft} onCommit={commitRatios} />)}
+      {mode === "dock" && space && !maximizedGroup && boxes && findJunctions(boxes).map((junction) => <DockJunction key={`${junction.rowPath.join("-")}|${junction.columnPath.join("-")}`} junction={junction} layout={boxes} dock={drawn.dock} space={space} onDraft={setDraft} onCommit={commitRatios} />)}
       {mode === "dock" && area && <DockFloats dock={shown} windows={windows} area={area} interaction={interaction} />}
       <div ref={parking} hidden inert />
       {windows.map((window) => {
@@ -92,7 +94,7 @@ export function Workspace() {
       {mode === "dock" && preview && preview.kind !== "unchanged" && <DockDropPreview preview={preview} />}
       {mode === "dock" && interaction.grab && <DockTabGhost grab={interaction.grab} />}
       <div role="status" className="sr-only">{mode === "dock" && preview && preview.kind !== "unchanged" ? preview.label : ""}</div>
-      {mode === "dock" && interaction.menu && space && <DockTabMenu key={interaction.menu.window} interaction={interaction} dock={drawn.dock} space={space} root={root} maximized={maximize.maximized} onToggleMaximize={maximize.toggle} />}
+      {mode === "dock" && interaction.menu && space && <DockTabMenu key={interaction.menu.window} interaction={interaction} dock={drawn.dock} root={root} maximized={maximize.maximized} onToggleMaximize={maximize.toggle} />}
     </main>
   );
 }
