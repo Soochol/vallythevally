@@ -1,13 +1,15 @@
 import type { ReactNode } from "react";
+import type { Broker } from "../../api/generated/Broker";
 import type { KiwoomLinkStatus } from "../../api/generated/KiwoomLinkStatus";
 import { useSystemSettings } from "../../api/system";
 import { formatKstClockSeconds } from "../../chart/time";
 import { linkDotTone } from "./linkDot";
-import { CONNECT_STEPS, type Confirmations, formatRemaining, type PanelView } from "./kiwoomPanel";
+import { BROKERS } from "./brokers";
+import { CONNECT_STEPS, type Confirmations, formatRemaining, IN_USE_ELSEWHERE_NOTICE, type PanelView } from "./kiwoomPanel";
 
 const dateTime = new Intl.DateTimeFormat("ko-KR", { timeZone: "Asia/Seoul", month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit", hourCycle: "h23" });
 
-const TITLES: Record<PanelView["stage"], string> = {
+const titlesOf = (broker: Broker): Record<PanelView["stage"], string> => ({
   loading: "연결 상태를 불러오는 중입니다",
   noKey: "키 없음",
   disconnected: "연결 안 함",
@@ -17,11 +19,12 @@ const TITLES: Record<PanelView["stage"], string> = {
   wait: "발급 간격 대기",
   authBlocked: "인증 차단",
   keyNeedsCheck: "키 확인 필요",
-  network: "키움에 닿지 못함",
+  network: `${BROKERS[broker].shortName}에 닿지 못함`,
   tokenFileUnusable: "토큰 파일 사용 불가",
   keyFileUnusable: "키 파일 사용 불가",
   pathStopped: "멈춤",
-};
+  inUseElsewhere: "다른 프로그램이 사용 중",
+});
 
 interface Props {
   status: KiwoomLinkStatus | null;
@@ -34,25 +37,28 @@ interface Props {
   onRecheckTokenFile(): void;
   label?: string;
   header?: ReactNode;
+  footer?: ReactNode;
+  broker?: Broker;
 }
 
-export function KiwoomStatusCard({ status, view, confirmations, onConfirm, busy, onConnect, onDisconnect, onRecheckTokenFile, label = "연결 상태", header }: Props) {
+export function KiwoomStatusCard({ status, view, confirmations, onConfirm, busy, onConnect, onDisconnect, onRecheckTokenFile, label = "연결 상태", header, footer, broker = "kiwoom" }: Props) {
   return (
     <section aria-label={label} className="flex flex-col gap-3 rounded-m border border-line bg-surface p-4">
       {header}
       <div className="flex items-center gap-2">
         <span aria-hidden="true" className="conn-dot" data-tone={linkDotTone(status)} />
-        <h3 className="text-m font-semibold">{TITLES[view.stage]}</h3>
+        <h3 className="text-m font-semibold">{titlesOf(broker)[view.stage]}</h3>
       </div>
       {status?.environment === "mock" && <p className="text-s text-warning" data-testid="kiwoom-environment">투자구분 · 모의투자</p>}
-      {status && <p className="text-m leading-relaxed text-text-2">{status.message}</p>}
+      {status && view.stage !== "inUseElsewhere" && <p className="text-m leading-relaxed text-text-2">{status.message}</p>}
+      {view.stage === "inUseElsewhere" && <p className="text-m leading-relaxed text-text" data-testid="in-use-elsewhere">{IN_USE_ELSEWHERE_NOTICE}</p>}
       {status && view.stage === "connecting" && <Steps step={status.step} />}
       {status && view.stage === "connected" && <ConnectedFacts status={status} />}
       {view.countdown && status?.retryAt != null && <Waiting retryAt={status.retryAt} remaining={view.countdown.remainingSeconds} progress={view.countdown.progress} automatic={view.stage === "connectingWait"} />}
       {view.startNote && <p className="text-m text-text">{view.startNote}</p>}
       {view.stage === "keyNeedsCheck" && <p className="text-m text-text">{status?.keySource === "env" ? "앱키·시크릿을 확인하세요." : "앱키·시크릿을 확인하세요. 새 키를 저장하면 풀립니다."}</p>}
       {view.stage === "pathStopped" && <p className="text-m text-text">서버 로그를 확인하세요. 이 상태만 서버를 다시 켜야 풀립니다.</p>}
-      {view.stage === "tokenFileUnusable" && <TokenFile busy={busy} onRecheck={onRecheckTokenFile} />}
+      {view.stage === "tokenFileUnusable" && broker === "kiwoom" && <TokenFile busy={busy} onRecheck={onRecheckTokenFile} />}
       {view.needsConfirmations && <Confirm confirmations={confirmations} onConfirm={onConfirm} />}
       {view.connect && (
         <div className="flex flex-col items-start gap-2">
@@ -69,6 +75,7 @@ export function KiwoomStatusCard({ status, view, confirmations, onConfirm, busy,
           {view.disconnectNote && <p className="text-s text-text-3">{view.disconnectNote}</p>}
         </div>
       )}
+      {footer}
     </section>
   );
 }

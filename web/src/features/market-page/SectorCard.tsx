@@ -3,7 +3,8 @@ import type { Market } from "../../api/generated/Market";
 import type { MarketOverviewSector } from "../../api/generated/MarketOverviewSector";
 import type { MarketOverviewSectorFlow } from "../../api/generated/MarketOverviewSectorFlow";
 import { useMarketSectors } from "../../api/marketOverview";
-import { CardError, CardShell, Loaded, PartView } from "./CardPart";
+import { useOverviewOn } from "../status/marketFeed";
+import { CardError, CardShell, FeedUnavailable, Loaded, PartView } from "./CardPart";
 import { formatEok, signedEok, signedRate, toneOf } from "./marketFormat";
 import { layoutSectorMap, sectorFill } from "./sectorMap";
 
@@ -68,11 +69,12 @@ function SectorFlowDetail({ sector, flow, whole }: { sector: MarketOverviewSecto
 }
 
 export function SectorCard({ market, enabled }: { market: Market; enabled: boolean }) {
-  const query = useMarketSectors(market, { enabled });
+  const on = useOverviewOn("sectors");
+  const query = useMarketSectors(market, { enabled: enabled && on });
   const [picked, setPicked] = useState<string | null>(null);
   return (
-    <CardShell title="업종 지도" note="칸 크기 거래대금 · 색 등락률">
-      <Loaded query={query} label="업종 지도">
+    <CardShell title="업종 지도" note="칸 크기 거래대금 · 색 등락률" source={query.data?.context.source}>
+      {!on ? <FeedUnavailable /> : <Loaded query={query} label="업종 지도">
         {(card) => (
           <PartView part={card.sectors}>
             {(sectors) => {
@@ -93,7 +95,7 @@ export function SectorCard({ market, enabled }: { market: Market; enabled: boole
             }}
           </PartView>
         )}
-      </Loaded>
+      </Loaded>}
     </CardShell>
   );
 }

@@ -2,6 +2,7 @@ import { type QueryClient, useQuery } from "@tanstack/react-query";
 import { isPublicMode } from "../public-mode/serverMode";
 import { receiveKiwoomLinkPush, useKiwoomLinkStore } from "../stores/kiwoomLink";
 import type { KiwoomLinkStatus } from "./generated/KiwoomLinkStatus";
+import type { MarketSourceStatus } from "./generated/MarketSourceStatus";
 import type { SystemSettings } from "./generated/SystemSettings";
 import type { KiwoomConnectInput } from "./generated/KiwoomConnectInput";
 import type { KiwoomKeyAdd } from "./generated/KiwoomKeyAdd";
@@ -19,10 +20,24 @@ import { getJson, putJson, sendJson } from "./http";
 
 export async function loadKiwoomLink(signal?: AbortSignal): Promise<void> {
   if (isPublicMode()) return;
+  await Promise.all([loadKiwoomStatus(signal), loadMarketSource(signal)]);
+}
+
+async function loadKiwoomStatus(signal?: AbortSignal): Promise<void> {
   const pushesAtRequest = useKiwoomLinkStore.getState().pushes;
   try {
     const status = await getJson<KiwoomLinkStatus>("/api/system/kiwoom", signal);
     useKiwoomLinkStore.getState().receiveSnapshot(status, pushesAtRequest);
+  } catch {
+    return;
+  }
+}
+
+async function loadMarketSource(signal?: AbortSignal): Promise<void> {
+  const pushesAtRequest = useKiwoomLinkStore.getState().sourcePushes;
+  try {
+    const source = await getJson<MarketSourceStatus>("/api/system/market-source", signal);
+    useKiwoomLinkStore.getState().receiveSourceSnapshot(source, pushesAtRequest);
   } catch {
     return;
   }
@@ -52,7 +67,7 @@ export const disconnectKiwoom = () => applyLink(() => post(`${KIWOOM}/disconnect
 export const recheckKiwoomTokenFile = () => applyLink(() => post(`${KIWOOM}/recheck-token-file`));
 export async function saveRegisteredIp(input: RegisteredIpInput): Promise<void> {
   const { registeredIp } = await putJson<KiwoomLinkStatus>(`${KIWOOM}/registered-ip`, input);
-  const current = useKiwoomLinkStore.getState().status;
+  const current = useKiwoomLinkStore.getState().kiwoom;
   if (current) receiveKiwoomLinkPush({ ...current, registeredIp });
 }
 export const checkPublicIp = () => sendJson<PublicIpCheck>("POST", `${KIWOOM}/ip-check`, "{}");

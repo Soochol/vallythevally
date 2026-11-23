@@ -41,6 +41,7 @@ import type { Venue } from "../../src/api/generated/Venue";
 import type { Watchlist } from "../../src/api/generated/Watchlist";
 import type { Watchlists } from "../../src/api/generated/Watchlists";
 import { etfBaseline } from "./etf-data";
+import { KIWOOM_MARKET_SOURCE } from "./market-source";
 import { boardOf, EMPTY_KIWOOM_CATALOG, kiwoomBoardOf, parseOrder, parseSource, type KiwoomCatalog } from "../../dev/fakeHeatmapBoard";
 import { marketOverviewBaseline } from "./market-data";
 import { PublicMode } from "./public-mode-data";
@@ -165,11 +166,7 @@ export const CONNECTED_KIWOOM: KiwoomLinkStatus = {
   retryAt: null, needsAcknowledgement: false, step: null, tokenExpiresAt: null, realtimeRegistered: 0, symbolCount: 2800, atStart: "connects",
 };
 
-export const KIWOOM_MARKET_SOURCE: MarketSourceStatus = {
-  broker: "kiwoom", keyId: "k1", alias: "키 1", state: "connected", problem: null, step: null, retryAt: null,
-  features: ["directory", "fundamentals", "quotes", "dayBars", "weekBars", "monthBars", "yearBars", "minuteBars", "indexBars", "orderBook", "trades", "programTrades"],
-  feedBroker: { broker: "kiwoom", rankingKinds: [], rankingChoices: [], overviewFeatures: ["index", "sectors", "flow", "intradayFlow", "turnover", "streaks", "stockInvestors", "foreignHoldings"] },
-};
+export { KIWOOM_MARKET_SOURCE } from "./market-source";
 
 export const ORDERS_OFF_MESSAGE = "주문 사용이 꺼져 있습니다";
 export const KEY_LIMIT = 5;
@@ -249,6 +246,7 @@ export class LiveFrames {
     return delivered;
   }
   link(status: KiwoomLinkStatus): void { this.kiwoomLink = clone(status); this.emit({ type: "kiwoom_link", status }); }
+  source(status: MarketSourceStatus): void { this.marketSource = clone(status); this.emit({ type: "market_source", status }); }
   setAccount(status: AccountStatus): void { this.account = clone(status); this.emit({ type: "account", status }); }
   status(status: ConnectionStatus): void { this.state = clone(status); this.emit({ type: "status", status }); }
   close(code = 1000, reason = "fixture close"): void { for (const socket of this.peers.keys()) socket.close({ code, reason }); this.peers.clear(); }
