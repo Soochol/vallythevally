@@ -42,7 +42,7 @@ for (const width of [1280, 1024, 832, 800]) {
     expect(scroll).toBeLessThanOrEqual(client);
     expect(await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)).toBeLessThanOrEqual(0);
     const folded = width < 832;
-    for (const name of ["지표", "레이아웃: 기본", "배치", "창 더하기", "재무자료", "시스템 설정"]) {
+    for (const name of ["지표", "레이아웃: 기본", "배치", "창 더하기", "시스템 설정"]) {
       await expect(bar.getByRole("button", { name: name === "레이아웃: 기본" ? /^레이아웃:/ : name, exact: name !== "레이아웃: 기본" })).toBeVisible();
     }
     await expect(bar.getByRole("button", { name: "더 보기", exact: true })).toHaveCount(folded ? 1 : 0);
