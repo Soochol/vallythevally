@@ -40,7 +40,7 @@ export function FundsPopover({ account, orderable, opener, onClose }: Props) {
   };
 
   return (
-    <Popover anchor={opener} anchorRect={() => listAnchorRect(opener.current)} style={window && { width: listWidthIn(window) }} releasesClick={(target) => opener.current?.contains(target) === true} onClose={onClose} role="dialog" aria-label="자금" className="od-list-pop od-funds" data-testid="funds-panel">
+    <Popover solid anchor={opener} anchorRect={() => listAnchorRect(opener.current)} style={window && { width: listWidthIn(window) }} releasesClick={(target) => opener.current?.contains(target) === true} onClose={onClose} role="dialog" aria-label="자금" className="od-list-pop od-funds" data-testid="funds-panel">
       <h4 className="od-funds-title" data-testid="funds-title">{fundsTitle(orderable)}</h4>
       <ul className="od-rows od-funds-rows" data-testid="funds-rows">
         {fundsRows(orderable).map((row) => (

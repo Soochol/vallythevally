@@ -590,7 +590,7 @@ test("위 막대를 NXT로 바꾸면 호가주문창의 호가·체결 구독이
   await expect(win(page)).toHaveAttribute("data-quote-venue", "combined");
   await pickDesktopVenue(page, "NXT");
   await pollSaved(() => feedSubscriptions(scenario, "book", "nxt").length).toBe(1);
-  await pollSaved(() => feedSubscriptions(scenario, "trades", "nxt").length).toBe(2);
+  await pollSaved(() => feedSubscriptions(scenario, "trades", "nxt").length).toBe(1);
   await expect(win(page)).toHaveAttribute("data-quote-venue", "nxt");
   await expect(page.getByTestId("price-ladder").locator(".mw-px-num").first()).toHaveText("66,000");
   await expect(page.locator(".mw-lr[data-current]")).toContainText("65,000");

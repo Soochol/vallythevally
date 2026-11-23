@@ -1,8 +1,9 @@
-import { type ReactNode, useEffect, useRef, useState } from "react";
+import { memo, type ReactNode, useEffect, useRef, useState } from "react";
 import { formatPrice } from "../../lib/format";
 import { formatStrength } from "./format";
 import type { InfoPager, LadderTrades } from "./useLadderSlots";
 import { priceTone } from "./PriceLadder";
+import type { TradeRow } from "../trades/tape";
 import { INFO_TABS, type InfoLine, type InfoPage, otherInfoPage } from "./quoteInfo";
 
 function InfoRow({ line }: { line: InfoLine }) {
@@ -46,16 +47,36 @@ function InfoTabs({ pager }: { pager: InfoPager }) {
   );
 }
 
+const sameLines = (a: readonly InfoLine[], b: readonly InfoLine[]): boolean =>
+  a === b || (a.length === b.length && a.every((line, index) => JSON.stringify(line) === JSON.stringify(b[index])));
+
+const InfoCard = memo(function InfoCard({ lines, page, select }: { lines: readonly InfoLine[]; page: InfoPage; select: InfoPager["select"] }) {
+  return (
+    <div className="mw-card" data-testid="ladder-info-card" style={{ height: `calc(${lines.length + 1} * var(--size-24))` }}>
+      <InfoTabs pager={{ page, select }} />
+      {lines.map((line, index) => <InfoRow key={index} line={line} />)}
+    </div>
+  );
+}, (a, b) => a.page === b.page && a.select === b.select && sameLines(a.lines, b.lines));
+
 export const infoSlot = (lines: readonly InfoLine[], pager: InfoPager) => (): ReactNode => (
-  <div className="mw-card" data-testid="ladder-info-card" style={{ height: `calc(${lines.length + 1} * var(--size-24))` }}>
-    <InfoTabs pager={pager} />
-    {lines.map((line, index) => <InfoRow key={index} line={line} />)}
-  </div>
+  <InfoCard lines={lines} page={pager.page} select={pager.select} />
 );
 
 export const scrollAction = (scrollTop: number): "hold" | "release" => (scrollTop > 0 ? "hold" : "release");
 
-function TradeBox({ trades, strength, hold, release, previousClose }: LadderTrades & { previousClose: number | null }) {
+type TradeBoxProps = Pick<LadderTrades, "trades" | "strength" | "hold" | "release"> & { readonly previousClose: number | null };
+
+const BoxTrade = memo(function BoxTrade({ row, previousClose }: { row: TradeRow; previousClose: number | null }) {
+  return (
+    <div className="mw-slot mw-trade" data-testid="ladder-trade" data-side={row.side} data-price={row.price}>
+      <span className="mw-trade-price" data-tone={priceTone(row.price, previousClose)}>{formatPrice(row.price, false)}</span>
+      <span className="mw-trade-qty">{formatPrice(row.quantity, false)}</span>
+    </div>
+  );
+});
+
+const TradeBox = memo(function TradeBox({ trades, strength, hold, release, previousClose }: TradeBoxProps) {
   const [held, setHeld] = useState(false);
   const heldRef = useRef(false);
   const releaseRef = useRef(release);
@@ -74,17 +95,12 @@ function TradeBox({ trades, strength, hold, release, previousClose }: LadderTrad
     <div className="mw-tbox">
       <div className="mw-slot mw-strength" data-testid="ladder-strength">체결강도 <b>{formatStrength(strength)}</b></div>
       <div className="mw-tscroll" data-testid="ladder-trades" data-held={held ? "" : undefined} onScroll={(event) => onScroll(event.currentTarget.scrollTop)}>
-        {trades.map((row) => (
-          <div key={row.key} className="mw-slot mw-trade" data-testid="ladder-trade" data-side={row.side} data-price={row.price}>
-            <span className="mw-trade-price" data-tone={priceTone(row.price, previousClose)}>{formatPrice(row.price, false)}</span>
-            <span className="mw-trade-qty">{formatPrice(row.quantity, false)}</span>
-          </div>
-        ))}
+        {trades.map((row) => <BoxTrade key={row.key} row={row} previousClose={previousClose} />)}
       </div>
     </div>
   );
-}
+});
 
 export const tradeSlot = (ladderTrades: LadderTrades, previousClose: number | null) => (): ReactNode => (
-  <TradeBox {...ladderTrades} previousClose={previousClose} />
+  <TradeBox trades={ladderTrades.trades} strength={ladderTrades.strength} hold={ladderTrades.hold} release={ladderTrades.release} previousClose={previousClose} />
 );

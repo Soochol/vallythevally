@@ -33,6 +33,11 @@ export interface TradeRow {
   readonly receivedAt: number;
 }
 
+export interface LastTrade {
+  readonly price: number;
+  readonly t: number;
+}
+
 export interface GapRow {
   readonly kind: "gap";
   readonly key: string;
@@ -60,6 +65,7 @@ export interface TapeState {
   readonly holding: boolean;
   readonly firstLiveSecond: number | null;
   readonly strength: number | null;
+  readonly lastTrade: LastTrade | null;
   readonly nextKey: number;
 }
 
@@ -73,6 +79,7 @@ export const emptyTape: TapeState = {
   holding: false,
   firstLiveSecond: null,
   strength: null,
+  lastTrade: null,
   nextKey: 0,
 };
 
@@ -176,7 +183,8 @@ function liveTrades(state: TapeState, trades: readonly FeedTrade[], receivedAt: 
   }));
   const firstLiveSecond = state.firstLiveSecond ?? Math.min(...rows.map((row) => row.secondOfDay));
   const strength = [...trades].reverse().find((trade) => trade.strength !== null)?.strength ?? state.strength;
-  const added = withNewest({ ...state, firstLiveSecond, strength, nextKey: state.nextKey + rows.length }, rows.toReversed());
+  const last = trades[trades.length - 1]!;
+  const added = withNewest({ ...state, firstLiveSecond, strength, lastTrade: { price: last.price, t: last.t }, nextKey: state.nextKey + rows.length }, rows.toReversed());
   return settleHistory({ ...added, liveTotals: rows.reduce(addTotals, state.liveTotals) });
 }
 

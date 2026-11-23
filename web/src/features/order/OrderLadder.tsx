@@ -1,10 +1,11 @@
-import { type ReactNode, type RefObject, useCallback, useLayoutEffect, useState } from "react";
+import { memo, type ReactNode, type RefObject, useCallback, useLayoutEffect, useMemo, useState } from "react";
 import type { OrderSide } from "../../api/generated/OrderSide";
 import { formatPrice } from "../../lib/format";
+import { useStoreValue, type ValueStore } from "../../lib/valueStore";
 import type { LadderRow } from "../market-window/ladder";
 import { type LadderRowSlots, PriceLadder } from "../market-window/PriceLadder";
 import { formatShares } from "../market-window/format";
-import { addQuantityText, type BuyPreview, groupKey, type PriceGroup, previewText, SIDE_LABEL } from "./orderRules";
+import { addQuantityText, type BuyingPower, buyPreview, groupKey, type PriceGroup, previewText, SIDE_LABEL } from "./orderRules";
 import { PENDING_TEXT } from "./statusText";
 import { LADDER_ROW_HEIGHT_PX, type RowRange, scrollTopToCenter, visibleRowRange } from "./priceRange";
 import { OrderList, type OrderListItem } from "./OrderList";
@@ -33,9 +34,8 @@ interface Props {
   readonly groups: ReadonlyMap<string, PriceGroup>;
   readonly writable: boolean;
   readonly previewQuantity: number;
-  readonly buyPreview: (price: number) => BuyPreview | null;
-  readonly hover: HoverCell | null;
-  readonly onHover: (cell: HoverCell | null) => void;
+  readonly buying: BuyingPower | null;
+  readonly hover: ValueStore<HoverCell | null>;
   readonly actions: LadderActions;
   readonly averagePrice: number | null;
   readonly divider: boolean;
@@ -50,9 +50,58 @@ type MenuState = { readonly x: number; readonly y: number; readonly group: Price
 
 const SIDE_OF_SLOT: Readonly<Record<"left" | "right", OrderSide>> = { left: "sell", right: "buy" };
 
-export function OrderLadder({ rows, previousClose, groups, writable, previewQuantity, buyPreview, hover, onHover, actions, averagePrice, divider, explorer, ladder, drag, rowSlots, expectedPrice }: Props) {
+interface CellApi {
+  readonly hover: ValueStore<HoverCell | null>;
+  readonly drag: OrderDrag;
+  readonly actions: LadderActions;
+  readonly openMenu: (menu: MenuState) => void;
+}
+
+interface CellProps {
+  readonly side: OrderSide;
+  readonly price: number;
+  readonly group: PriceGroup | undefined;
+  readonly writable: boolean;
+  readonly previewQuantity: number;
+  readonly buying: BuyingPower | null;
+  readonly api: CellApi;
+}
+
+const OrderCell = memo(function OrderCell({ side, price, group, writable, previewQuantity, buying, api }: CellProps) {
+  const hovered = useStoreValue(api.hover, (cell) => cell !== null && cell.side === side && cell.price === price);
+  const targeted = useStoreValue(api.drag.views, (view) => view?.target.kind === "cell" && view.target.side === side && view.target.price === price);
+  const chipDragging = useStoreValue(api.drag.views, (view) => group !== undefined && view?.source.kind === "chip" && view.source.group === group);
+  const showsPreview = hovered && writable && previewQuantity > 0;
+  const previewTone = showsPreview && side === "buy" ? buyPreview(price, previewQuantity, buying) : null;
+  return (
+    <div
+      className="od-cell"
+      data-order-cell=""
+      data-side={side}
+      data-price={price}
+      data-disabled={writable ? undefined : ""}
+      data-target={targeted ? "" : undefined}
+      onDoubleClick={() => { if (writable) api.actions.place(side, price); }}
+      onPointerEnter={() => api.hover.set({ side, price })}
+      onPointerLeave={() => api.hover.set(null)}
+    >
+      {group
+        ? <button type="button" className="od-chip" data-testid="order-chip" data-side={side} data-price={price} data-dragging={chipDragging ? "" : undefined} data-pending={group.pending}
+            data-add={showsPreview ? addQuantityText(previewQuantity) : undefined} data-add-over={showsPreview && previewTone === "over" ? "" : undefined} data-add-margin={showsPreview && previewTone === "margin" ? "" : undefined}
+            aria-label={`${SIDE_LABEL[side]} ${formatPrice(price, false)}원 ${formatShares(group.quantity)} 주문${group.pending ? ` ${PENDING_TEXT[group.pending]}` : ""}`}
+            onPointerDown={(e) => { if (writable && !group.pending) api.drag.begin({ source: { kind: "chip", group }, origin: null }, e); }}
+            onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); if (!group.pending) api.openMenu({ x: e.clientX, y: e.clientY, group }); }}>
+            {group.quantity.toLocaleString("ko-KR")}
+          </button>
+        : showsPreview && <span className="od-preview" data-testid="order-preview" data-over={previewTone === "over" ? "" : undefined} data-margin={previewTone === "margin" ? "" : undefined}>{previewText(side, previewQuantity)}</span>}
+    </div>
+  );
+});
+
+export function OrderLadder({ rows, previousClose, groups, writable, previewQuantity, buying, hover, actions, averagePrice, divider, explorer, ladder, drag, rowSlots, expectedPrice }: Props) {
   const [menu, setMenu] = useState<MenuState | null>(null);
-  const { view, begin } = drag;
+  const dragging = useStoreValue(drag.views, (view) => view !== null);
+  const api = useMemo<CellApi>(() => ({ hover, drag, actions, openMenu: setMenu }), [hover, drag, actions]);
 
   const exploring = explorer !== undefined;
   const [range, setRange] = useState<RowRange>({ start: 0, end: 0 });
@@ -87,35 +136,8 @@ export function OrderLadder({ rows, previousClose, groups, writable, previewQuan
 
   const cell = (slot: "left" | "right") => (row: LadderRow): ReactNode => {
     const side = SIDE_OF_SLOT[slot];
-    const price = row.price;
-    if (price === null) return <div className="od-cell" data-empty="" />;
-    const group = groups.get(groupKey(side, price));
-    const hovered = hover?.side === side && hover.price === price;
-    const showsPreview = hovered && writable && previewQuantity > 0;
-    const previewTone = side === "buy" ? buyPreview(price) : null;
-    return (
-      <div
-        className="od-cell"
-        data-order-cell=""
-        data-side={side}
-        data-price={price}
-        data-disabled={writable ? undefined : ""}
-        data-target={view?.target.kind === "cell" && view.target.side === side && view.target.price === price ? "" : undefined}
-        onDoubleClick={() => { if (writable) actions.place(side, price); }}
-        onPointerEnter={() => onHover({ side, price })}
-        onPointerLeave={() => onHover(null)}
-      >
-        {group && !row.repeat
-          ? <button type="button" className="od-chip" data-testid="order-chip" data-side={side} data-price={price} data-dragging={view?.source.kind === "chip" && view.source.group === group ? "" : undefined} data-pending={group.pending}
-              data-add={showsPreview ? addQuantityText(previewQuantity) : undefined} data-add-over={showsPreview && previewTone === "over" ? "" : undefined} data-add-margin={showsPreview && previewTone === "margin" ? "" : undefined}
-              aria-label={`${SIDE_LABEL[side]} ${formatPrice(price, false)}원 ${formatShares(group.quantity)} 주문${group.pending ? ` ${PENDING_TEXT[group.pending]}` : ""}`}
-              onPointerDown={(e) => { if (writable && !group.pending) begin({ source: { kind: "chip", group }, origin: null }, e); }}
-              onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); if (!group.pending) setMenu({ x: e.clientX, y: e.clientY, group }); }}>
-              {group.quantity.toLocaleString("ko-KR")}
-            </button>
-          : showsPreview && <span className="od-preview" data-testid="order-preview" data-over={previewTone === "over" ? "" : undefined} data-margin={previewTone === "margin" ? "" : undefined}>{previewText(side, previewQuantity)}</span>}
-      </div>
-    );
+    if (row.price === null) return <div className="od-cell" data-empty="" />;
+    return <OrderCell side={side} price={row.price} group={row.repeat ? undefined : groups.get(groupKey(side, row.price))} writable={writable} previewQuantity={previewQuantity} buying={buying} api={api} />;
   };
   const slots = { left: cell("left"), right: cell("right") };
 
@@ -139,7 +161,7 @@ export function OrderLadder({ rows, previousClose, groups, writable, previewQuan
   const ladderView = <PriceLadder rows={shown} previousClose={previousClose} slots={slots} rowSlots={exploring ? undefined : rowSlots} mark={{ price: averagePrice, label: "평단가" }} expectedPrice={expectedPrice} firstBidIndex={exploring ? Math.max(0, (centerIndex < 0 ? rowCount : centerIndex) - range.start) : undefined} />;
 
   return (
-    <div ref={ladder} className="od-ladder" data-testid="order-ladder" data-explorer={exploring ? "" : undefined} data-dragging={view ? "" : undefined} data-divider={divider ? "" : undefined}
+    <div ref={ladder} className="od-ladder" data-testid="order-ladder" data-explorer={exploring ? "" : undefined} data-dragging={dragging ? "" : undefined} data-divider={divider ? "" : undefined}
       onScroll={exploring ? measureRange : undefined}
       onContextMenu={(e) => { e.preventDefault(); setMenu({ x: e.clientX, y: e.clientY, group: null }); }}>
       {exploring

@@ -1,7 +1,9 @@
 import { type ChangeEvent, useId, useLayoutEffect, useRef } from "react";
+import { useStoreValue, type ValueStore } from "../../lib/valueStore";
 import { formatWon } from "../market-window/format";
 import { Segmented } from "../market-window/parts";
-import { type EstimateNote, quantityForAmount } from "./orderRules";
+import type { HoverCell } from "./OrderLadder";
+import { type BuyingPower, type EstimateNote, estimateNote, quantityForAmount } from "./orderRules";
 import { AMOUNT_UNIT_WON, KEEP_LAST_ENTRY_LABEL, type PresetKind } from "./orderSettings";
 
 const PRESET_KINDS = [{ value: "sharePresets", label: "수량" }, { value: "amountPresets", label: "금액" }] as const;
@@ -71,4 +73,12 @@ export function OrderEstimate({ estimate, note }: EstimateProps) {
       <span className="od-estimate-amount" title={estimate === null ? undefined : `예상 주문금액 ${formatWon(estimate)}`}>예상 주문금액 <b data-testid="order-estimate">{estimate === null ? "-" : formatWon(estimate)}</b>{note && <span className="od-estimate-note" data-testid="order-estimate-note" data-tone={note.tone}> · {note.text}</span>}</span>
     </div>
   );
+}
+
+export function HoverOrderEstimate({ hover, quantity, referencePrice, buying }: { hover: ValueStore<HoverCell | null>; quantity: number; referencePrice: number | null; buying: BuyingPower | null }) {
+  const hoveredPrice = useStoreValue(hover, (cell) => cell?.price ?? null);
+  const hoveredSide = useStoreValue(hover, (cell) => cell?.side ?? null);
+  const unitPrice = hoveredPrice ?? referencePrice ?? 0;
+  const estimate = unitPrice > 0 && quantity > 0 ? unitPrice * quantity : null;
+  return <OrderEstimate estimate={estimate} note={estimate !== null && hoveredSide !== "sell" ? estimateNote(estimate, buying) : null} />;
 }

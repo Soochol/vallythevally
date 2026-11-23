@@ -1,12 +1,14 @@
 import { useQuery } from "@tanstack/react-query";
-import { useEffect, useState } from "react";
+import { useEffect } from "react";
 import { getJson } from "../../api/http";
 import type { OrderBook } from "../../api/generated/OrderBook";
 import type { SubErrorCode } from "../../api/generated/SubErrorCode";
 import type { SymbolCode } from "../../api/generated/SymbolCode";
 import type { Venue } from "../../api/generated/Venue";
 import { daySummaryQuery } from "../../api/userData";
+import { useFrameFold } from "../../lib/useFrameFold";
 import { marketSocket } from "../../stores/realtime";
+import type { LastTrade } from "../trades/tape";
 import { acceptAfterHoursLive, acceptAfterHoursSnapshot, acceptLive, acceptSnapshot, EMPTY_BOOK, type AfterHoursState, type BookState } from "./bookModel";
 
 export interface BookFeed {
@@ -19,32 +21,26 @@ export interface BookFeed {
   readonly snapshotFailed: boolean;
 }
 
-interface LastTrade {
-  readonly price: number;
-  readonly t: number;
-}
-
 interface Live {
   readonly code: SymbolCode;
   readonly venue: Venue;
   readonly book: BookState;
   readonly afterHours: AfterHoursState | null;
-  readonly lastTrade: LastTrade | null;
   readonly linkLive: boolean;
   readonly socketOpen: boolean;
   readonly rejected: SubErrorCode | null;
 }
 
-const fresh = (code: SymbolCode, venue: Venue, socketOpen: boolean): Live => ({ code, venue, book: EMPTY_BOOK, afterHours: null, lastTrade: null, linkLive: true, socketOpen, rejected: null });
+const fresh = (code: SymbolCode, venue: Venue, socketOpen: boolean): Live => ({ code, venue, book: EMPTY_BOOK, afterHours: null, linkLive: true, socketOpen, rejected: null });
 
 const isCurrent = (state: Live, code: SymbolCode, venue: Venue) => state.code === code && state.venue === venue;
 
-export function useBookFeed(code: SymbolCode, venue: Venue): BookFeed {
-  const [live, setLive] = useState<Live>(() => fresh(code, venue, true));
+export function useBookFeed(code: SymbolCode, venue: Venue, lastTrade: LastTrade | null): BookFeed {
+  const [live, fold] = useFrameFold<Live>(() => fresh(code, venue, true));
   const current = isCurrent(live, code, venue) ? live : fresh(code, venue, live.socketOpen);
 
   useEffect(() => {
-    const update = (change: (state: Live) => Live) => setLive((state) => change(isCurrent(state, code, venue) ? state : fresh(code, venue, state.socketOpen)));
+    const update = (change: (state: Live) => Live) => fold((state) => change(isCurrent(state, code, venue) ? state : fresh(code, venue, state.socketOpen)));
     const stopWatch = marketSocket.watch((connection) => update((state) => ({ ...state, socketOpen: connection.socket === "open" })));
     const stopBook = marketSocket.subscribeFeed({ symbol: code, kind: "book", venue }, (m) => {
       if (m.type === "feed_book") update((state) => ({ ...state, book: acceptLive(state.book, m.book) }));
@@ -54,15 +50,11 @@ export function useBookFeed(code: SymbolCode, venue: Venue): BookFeed {
       else if (m.type === "sub_error") update((state) => ({ ...state, rejected: m.code }));
       else if (m.type === "resync") update((state) => ({ ...state, rejected: null }));
     });
-    const stopTrades = marketSocket.subscribeFeed({ symbol: code, kind: "trades", venue }, (m) => {
-      if (m.type === "feed_trades") update((state) => ({ ...state, lastTrade: m.trades.at(-1) ?? state.lastTrade }));
-    });
     return () => {
       stopWatch();
       stopBook();
-      stopTrades();
     };
-  }, [code, venue]);
+  }, [code, venue, fold]);
 
   const snapshot = useQuery({
     queryKey: ["order-book", code, venue],
@@ -79,7 +71,7 @@ export function useBookFeed(code: SymbolCode, venue: Venue): BookFeed {
   return {
     book,
     afterHours,
-    lastPrice: laterPrice(current.lastTrade, quoted),
+    lastPrice: laterPrice(lastTrade, quoted),
     previousClose: summary.data?.previousClose ?? null,
     connected: current.socketOpen && current.linkLive,
     rejected: current.rejected,

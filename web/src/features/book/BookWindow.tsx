@@ -28,12 +28,12 @@ const REJECTION: Record<string, string> = {
 function BookBody({ code, pager }: { code: SymbolCode; pager: InfoPager }) {
   const venue = useShownVenue(code);
   const { skipSpreadGap } = useOrderSettings();
-  const feed = useBookFeed(code, venue);
+  const trades = useLadderTrades(code, venue);
+  const feed = useBookFeed(code, venue, trades.lastTrade);
   const limits = useFundamentals(code).data;
   const kind = useSymbolInfo(code).data?.kind ?? null;
   const bounds = { lower: limits?.lowerLimit ?? null, upper: limits?.upperLimit ?? null };
   const info = useQuoteInfo({ code, venue, lastPrice: feed.lastPrice, previousClose: feed.previousClose, fundamentals: limits, page: pager.page });
-  const trades = useLadderTrades(code, venue);
   const now = useNowMs();
   const nowSeconds = Math.floor(now / 1000);
   const view = feed.book.phase === "empty" ? null : feed.book.view;

@@ -47,7 +47,7 @@ export function OrderList({ label, items, drag, root, point, placement, onClose 
   buttons.current = [];
   const register = (el: HTMLButtonElement | null) => { buttons.current.push(el); };
   return (
-    <Popover anchor={trigger} point={point} placement={placement} focusTarget={focusTarget} onClose={(reason) => { if (reason === "escape") drag.abort(); onClose(); }} role="menu" aria-label={label} onKeyDown={onKeyDown}
+    <Popover solid anchor={trigger} point={point} placement={placement} focusTarget={focusTarget} onClose={(reason) => { if (reason === "escape") drag.abort(); onClose(); }} role="menu" aria-label={label} onKeyDown={onKeyDown}
       className="z-40 flex min-w-[120px] flex-col whitespace-nowrap p-1">
       {items.map((item, i) => {
         if (item.kind === "separator") return <div key={i} role="separator" className="my-1 border-t border-line" />;

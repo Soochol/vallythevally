@@ -122,7 +122,7 @@ export function AccountBand({ windowId, choice, onPick, maskAccount, openOrders,
         ))}
       </div>
       {panel !== null && (
-        <Popover key={panel} anchor={opener} anchorRect={() => listAnchorRect(opener.current)} style={listWindow && { width: listWidthIn(listWindow) }} releasesClick={isTab} onClose={() => setPanel(null)} role="dialog" aria-label={label} className="od-list-pop" data-testid="account-panel" data-panel={panel}>
+        <Popover solid key={panel} anchor={opener} anchorRect={() => listAnchorRect(opener.current)} style={listWindow && { width: listWidthIn(listWindow) }} releasesClick={isTab} onClose={() => setPanel(null)} role="dialog" aria-label={label} className="od-list-pop" data-testid="account-panel" data-panel={panel}>
           {panel === "open" && <OpenPanel orders={openOrders} writable={writable} onCancel={onCancel} goTo={goTo} />}
           {panel === "holdings" && <HoldingsPanel balance={balance} goTo={goTo} />}
           {panel === "fills" && <FillsPanel executions={executions} goTo={goTo} />}
