@@ -35,74 +35,76 @@ function showFailedKisWithConnectedKiwoom(scenario: Scenario, source: MarketSour
   scenario.live.marketSource = source;
 }
 
-test.describe("한투 연결이 실패했고 키움이 받는 곳일 때", () => {
-  test.beforeEach(({ scenario }) => showFailedKisWithConnectedKiwoom(scenario, KIS_FAILED_KIWOOM_RECEIVES));
+test.describe("한투 연결이 실패해도 키움이 받는 시장 종합·순위 창·스크리너 갱신은 막지 않는다", () => {
+  test.describe("한투 연결이 실패했고 키움이 받는 곳일 때", () => {
+    test.beforeEach(({ scenario }) => showFailedKisWithConnectedKiwoom(scenario, KIS_FAILED_KIWOOM_RECEIVES));
 
-  test("시장 종합이 막히지 않고 지수 카드와 수급 카드가 보인다", async ({ page, scenario }) => {
-    serveMarketRankings(scenario);
-    await page.goto("/market");
-    await expect(card(page, "지수·폭").getByText("코스피", { exact: true })).toBeVisible();
-    await expect(card(page, "누가 사고 파나").locator('[data-subject="foreign"]').first()).toBeVisible();
-    await expect(main(page).getByText("키움 연결 전입니다")).toHaveCount(0);
+    test("시장 종합이 막히지 않고 지수 카드와 수급 카드가 보인다", async ({ page, scenario }) => {
+      serveMarketRankings(scenario);
+      await page.goto("/market");
+      await expect(card(page, "지수·폭").getByText("코스피", { exact: true })).toBeVisible();
+      await expect(card(page, "누가 사고 파나").locator('[data-subject="foreign"]').first()).toBeVisible();
+      await expect(main(page).getByText("키움 연결 전입니다")).toHaveCount(0);
+    });
+
+    test("순위 창이 행을 보인다", async ({ page, scenario }) => {
+      serveRankings(scenario, { source: "kiwoom" });
+      openRankingLayout(scenario);
+      await page.setViewportSize({ width: 1440, height: 900 });
+      await page.goto("/");
+      await expect(page.getByTestId("ranking-row").first()).toBeVisible();
+      await expect(page.getByTestId("ranking-window").getByText("키움 연결 전입니다")).toHaveCount(0);
+    });
+
+    test("스크리너 업데이트 단추가 '연결 뒤'가 아니라 눌린다", async ({ page, scenario, screener }) => {
+      screener.showStatus(readyStatus());
+      scenario.documents.saveScreens({ screens: [{ id: "high", name: "고점", markets: [], exclude: [], conditions: [NEW_HIGH] }], revision: 1 });
+      await page.goto("/");
+      await openScreener(page);
+      await expect(update(page)).toHaveText("업데이트");
+      await expect(update(page)).toBeEnabled();
+    });
   });
 
-  test("순위 창이 행을 보인다", async ({ page, scenario }) => {
-    serveRankings(scenario, { source: "kiwoom" });
-    openRankingLayout(scenario);
+  test.describe("한투 연결이 실패했고 받을 곳이 없을 때", () => {
+    test.beforeEach(({ scenario }) => showFailedKisWithConnectedKiwoom(scenario, KIS_FAILED_NOBODY_RECEIVES));
+
+    test("시장 종합은 키움 연결 전 안내로 막는다", async ({ page, scenario }) => {
+      serveMarketRankings(scenario);
+      await page.goto("/market");
+      await expect(main(page).getByText("키움 연결 전입니다")).toBeVisible();
+      await expect(card(page, "지수·폭")).toHaveCount(0);
+    });
+
+    test("순위 창은 키움 연결 전 안내로 막는다", async ({ page, scenario }) => {
+      serveRankings(scenario, { source: "kiwoom" });
+      openRankingLayout(scenario);
+      await page.setViewportSize({ width: 1440, height: 900 });
+      await page.goto("/");
+      await expect(page.getByTestId("ranking-window").getByText("키움 연결 전입니다")).toBeVisible();
+      await expect(page.getByTestId("ranking-row")).toHaveCount(0);
+    });
+
+    test("스크리너 업데이트 단추는 '연결 뒤'로 막힌다", async ({ page, scenario, screener }) => {
+      screener.showStatus(readyStatus());
+      scenario.documents.saveScreens({ screens: [{ id: "high", name: "고점", markets: [], exclude: [], conditions: [NEW_HIGH] }], revision: 1 });
+      await page.goto("/");
+      await openScreener(page);
+      await expect(update(page)).toHaveText("연결 뒤");
+      await expect(update(page)).toBeDisabled();
+    });
+  });
+
+  test("한투가 받는 예상체결 순위는 관리종목 빼기를 끄고 쓸 수 없게 보인다", async ({ page, scenario }) => {
+    scenario.live.marketSource = KIS_MARKET_SOURCE;
+    serveRankings(scenario, { source: "kis" });
+    openRankingLayout(scenario, EXPECTED);
     await page.setViewportSize({ width: 1440, height: 900 });
     await page.goto("/");
-    await expect(page.getByTestId("ranking-row").first()).toBeVisible();
-    await expect(page.getByTestId("ranking-window").getByText("키움 연결 전입니다")).toHaveCount(0);
+    await page.getByRole("button", { name: "조건", exact: true }).click();
+    const managed = page.getByRole("dialog", { name: "순위 조건" }).getByRole("button", { name: "관리종목 빼기" });
+    await expect(managed).toBeDisabled();
+    await expect(managed).toHaveAttribute("aria-pressed", "false");
+    await expect(managed).toHaveAttribute("title", "한투로 받을 때는 고를 수 없습니다");
   });
-
-  test("스크리너 업데이트 단추가 '연결 뒤'가 아니라 눌린다", async ({ page, scenario, screener }) => {
-    screener.showStatus(readyStatus());
-    scenario.documents.saveScreens({ screens: [{ id: "high", name: "고점", markets: [], exclude: [], conditions: [NEW_HIGH] }], revision: 1 });
-    await page.goto("/");
-    await openScreener(page);
-    await expect(update(page)).toHaveText("업데이트");
-    await expect(update(page)).toBeEnabled();
-  });
-});
-
-test.describe("한투 연결이 실패했고 받을 곳이 없을 때", () => {
-  test.beforeEach(({ scenario }) => showFailedKisWithConnectedKiwoom(scenario, KIS_FAILED_NOBODY_RECEIVES));
-
-  test("시장 종합은 키움 연결 전 안내로 막는다", async ({ page, scenario }) => {
-    serveMarketRankings(scenario);
-    await page.goto("/market");
-    await expect(main(page).getByText("키움 연결 전입니다")).toBeVisible();
-    await expect(card(page, "지수·폭")).toHaveCount(0);
-  });
-
-  test("순위 창은 키움 연결 전 안내로 막는다", async ({ page, scenario }) => {
-    serveRankings(scenario, { source: "kiwoom" });
-    openRankingLayout(scenario);
-    await page.setViewportSize({ width: 1440, height: 900 });
-    await page.goto("/");
-    await expect(page.getByTestId("ranking-window").getByText("키움 연결 전입니다")).toBeVisible();
-    await expect(page.getByTestId("ranking-row")).toHaveCount(0);
-  });
-
-  test("스크리너 업데이트 단추는 '연결 뒤'로 막힌다", async ({ page, scenario, screener }) => {
-    screener.showStatus(readyStatus());
-    scenario.documents.saveScreens({ screens: [{ id: "high", name: "고점", markets: [], exclude: [], conditions: [NEW_HIGH] }], revision: 1 });
-    await page.goto("/");
-    await openScreener(page);
-    await expect(update(page)).toHaveText("연결 뒤");
-    await expect(update(page)).toBeDisabled();
-  });
-});
-
-test("한투가 받는 예상체결 순위는 관리종목 빼기를 끄고 쓸 수 없게 보인다", async ({ page, scenario }) => {
-  scenario.live.marketSource = KIS_MARKET_SOURCE;
-  serveRankings(scenario, { source: "kis" });
-  openRankingLayout(scenario, EXPECTED);
-  await page.setViewportSize({ width: 1440, height: 900 });
-  await page.goto("/");
-  await page.getByRole("button", { name: "조건", exact: true }).click();
-  const managed = page.getByRole("dialog", { name: "순위 조건" }).getByRole("button", { name: "관리종목 빼기" });
-  await expect(managed).toBeDisabled();
-  await expect(managed).toHaveAttribute("aria-pressed", "false");
-  await expect(managed).toHaveAttribute("title", "한투로 받을 때는 고를 수 없습니다");
 });
