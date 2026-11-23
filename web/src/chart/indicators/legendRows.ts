@@ -117,6 +117,12 @@ export class IndicatorLegend {
 
   render(rows: IndicatorRow[], panes: readonly PaneBounds[], axisWidth = 72): void {
     const focused = document.activeElement;
+    let priceRowCount = 0;
+    for (const row of rows) if (!row.panel) priceRowCount++;
+    if (priceRowCount !== this.layoutRows.length) {
+      this.layoutRows = rows.filter((row) => !row.panel);
+      this.syncFold();
+    }
     const seen = new Set<string>();
     for (const row of rows) {
       seen.add(row.id);
