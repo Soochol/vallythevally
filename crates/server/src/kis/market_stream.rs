@@ -308,8 +308,10 @@ impl Bridge {
                 changed = async { self.notice_wanted.as_mut().expect("체결통보 구독 바람").changed().await }, if self.notice_wanted.is_some() => {
                     if changed.is_err() {
                         self.notice_wanted = None;
+                        true
+                    } else {
+                        self.send(StreamEvent::SeatsChanged).await
                     }
-                    true
                 }
                 changed = self.status.changed(), if status_alive => {
                     status_alive = changed.is_ok();

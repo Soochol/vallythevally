@@ -224,6 +224,7 @@ impl SubscriptionManager {
         for s in unserved {
             self.admitted.remove(&s);
         }
+        self.shed_seats_over_limit();
         let mut candidates: Vec<(Rank, Symbol)> =
             self.holders.keys().filter(|s| !self.admitted.contains(s)).map(|s| (self.rank(*s), *s)).collect();
         candidates.sort();
@@ -269,10 +270,23 @@ impl SubscriptionManager {
         needed == 0 || self.make_room(rank, needed, keep)
     }
 
+    fn shed_seats_over_limit(&mut self) {
+        let excess = self.seats_used().saturating_sub(self.rules.limit());
+        if excess > 0 {
+            let order = self.evictions(|_| true);
+            self.evict_for(order, excess, None);
+        }
+    }
+
     fn make_room(&mut self, rank: Rank, needed: usize, keep: Option<Symbol>) -> bool {
+        let order = self.evictions(|candidate| candidate.is_watch_only() && candidate > rank);
+        self.evict_for(order, needed, keep)
+    }
+
+    fn evict_for(&mut self, order: Vec<Eviction>, needed: usize, keep: Option<Symbol>) -> bool {
         let mut victims: Vec<Eviction> = Vec::new();
         let mut freed = 0;
-        for victim in self.eviction_order(rank).into_iter().filter(|victim| keep != Some(victim.symbol())) {
+        for victim in order.into_iter().filter(|victim| keep != Some(victim.symbol())) {
             freed += self.seats_freed_by(victim, &victims);
             victims.push(victim);
             if freed >= needed {
@@ -288,7 +302,7 @@ impl SubscriptionManager {
         true
     }
 
-    fn eviction_order(&self, rank: Rank) -> Vec<Eviction> {
+    fn evictions(&self, evictable: impl Fn(Rank) -> bool) -> Vec<Eviction> {
         let mut graces: Vec<(KstTime, Symbol, Option<StreamKind>)> = self.released_at.iter().map(|(s, at)| (*at, *s, None)).collect();
         graces.extend(
             self.kind_released_at
@@ -302,7 +316,7 @@ impl SubscriptionManager {
             .iter()
             .filter(|s| self.holders.contains_key(s) && !self.released_at.contains_key(s))
             .map(|s| (self.rank(*s), *s))
-            .filter(|(r, _)| r.is_watch_only() && *r > rank)
+            .filter(|(r, _)| evictable(*r))
             .collect();
         watch_only.sort_by(|a, b| b.cmp(a));
         graces
@@ -418,6 +432,52 @@ mod tests {
 
     fn stocks(range: impl Iterator<Item = usize>) -> Vec<Symbol> {
         range.map(stock).collect()
+    }
+
+    struct ShrinkingSeats(std::sync::atomic::AtomicUsize);
+
+    impl SeatRules for ShrinkingSeats {
+        fn limit(&self) -> usize {
+            self.0.load(std::sync::atomic::Ordering::Relaxed)
+        }
+
+        fn takes_own_seat(&self, _: StreamKind) -> bool {
+            false
+        }
+
+        fn companion(&self, _: StreamKind) -> Option<StreamKind> {
+            None
+        }
+    }
+
+    #[test]
+    fn a_shrinking_limit_sheds_the_lowest_ranked_symbol_and_a_growing_one_takes_it_back() {
+        let rules = Arc::new(ShrinkingSeats(std::sync::atomic::AtomicUsize::new(3)));
+        let mut m = SubscriptionManager::new(rules.clone());
+        fill(&mut m, 3);
+        assert!(m.plan(t(0)).rejected.is_empty());
+        rules.0.store(2, std::sync::atomic::Ordering::Relaxed);
+        let shrunk = m.plan(t(0));
+        assert_eq!(shrunk.realtime, BTreeSet::from([stock(0), stock(1)]), "나중에 잡은 종목부터 나간다");
+        assert_eq!(shrunk.rejected, BTreeSet::from([cell(1, "s2")]));
+        assert_eq!(m.plan(t(1)), shrunk, "한도가 그대로면 다시 계획해도 같다");
+        rules.0.store(3, std::sync::atomic::Ordering::Relaxed);
+        let grown = m.plan(t(2));
+        assert_eq!(grown.realtime.len(), 3);
+        assert!(grown.rejected.is_empty());
+    }
+
+    #[test]
+    fn a_shrinking_limit_sheds_watch_rows_before_cells() {
+        let rules = Arc::new(ShrinkingSeats(std::sync::atomic::AtomicUsize::new(2)));
+        let mut m = SubscriptionManager::new(rules.clone());
+        m.hold(stock(0), cell(1, "a"));
+        m.set_watch(ConnId(1), vec![stock(5)], t(0));
+        assert!(m.plan(t(0)).rejected.is_empty());
+        rules.0.store(1, std::sync::atomic::Ordering::Relaxed);
+        let shrunk = m.plan(t(0));
+        assert_eq!(shrunk.realtime, BTreeSet::from([stock(0)]));
+        assert_eq!(shrunk.rejected, BTreeSet::from([watch(1, 5)]));
     }
 
     fn fill(m: &mut SubscriptionManager, n: usize) {

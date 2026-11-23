@@ -98,6 +98,7 @@ pub enum StreamEvent {
     Broker { snapshot: BrokerSnapshot, received_at: KstTime },
     AfterHours { totals: AfterHoursTotals, received_at: KstTime },
     Live { since: KstTime },
+    SeatsChanged,
     Down { at: KstTime },
     Idle,
     Halted,
