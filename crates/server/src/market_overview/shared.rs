@@ -8,7 +8,7 @@ use crate::http::{ApiFailure, AppState};
 use crate::shared_data::{MarketCards, broker_of_part, to_api_broker};
 
 pub(super) fn answer<T: Clone>(st: &AppState, market: Market, card: &str, pick: impl FnOnce(&MarketCards) -> Option<&T>) -> Option<Result<Json<T>, ApiFailure>> {
-    if !st.shared_data.serving() {
+    if !st.shared_data.is_enabled() {
         return None;
     }
     let board = st.shared_data.market_overview.current();

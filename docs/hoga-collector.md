@@ -796,6 +796,46 @@ REST용 키는 키 목록의 예비 키이고, 예비 키가 없으면 첫 활�
 
 `tests/supervise_day.rs`: 가짜 자식, 합성 `Transport`(`au10001`, `ka10099`, `ka20006`), 합성 `HolidayTransport`, 실제 `finalize::run`을 같은 인수로 부르는 `FinalizeRunner`, 멈춘 tokio 시간과 `Clock::fake`로 하루를 몇 초에 돌린다. 평일 하루의 순서와 시각, 쉬는 날, 판단 모름, `0s`가 오지 않음, 지수 일봉 어긋남과 실패, 개장 시각이 바뀐 날, 11:00과 21:00에 뜬 데몬, 마감 뒤에 직접 시작한 `Supervisor`, 상태 소켓의 단계별 응답과 계약 예시 모양, 종료 신호, 정리 실패와 다음 날 다시 하기, 월요일에 뜬 데몬이 금요일을 포함해 밀린 날을 오래된 순으로 정리하는 것, 밀린 날이 길면 07:20 앞에서 멈추고 나머지를 다음 날 시작에 정리하는 것, 마감 뒤에 뜬 데몬이 밀린 날 때문에 07:20에 닿으면 그날 정리를 시작하지 않는 것, 보관 옵션이 지우기 판단에 닿는 것, 끝 줄바꿈 없이 잘린 사건 기록 뒤의 판단이 `complete.json`에 나오는 것을 확인한다. `python3 scripts/dev.py cargo test -p collector --test supervise_day`.
 
+## 재무 프로세스
+
+`collector financials`는 재무자료(OpenDART)를 모으는 별도 프로세스다. 감독 데몬의 자식이 아니고 키움 키나 관측일 일정을 쓰지 않는다. 휴장일과 주말에도 매일 07:00에 확인한다. 서버는 저장된 재무자료를 읽기만 한다([ADR 0046](adr/0046-financials-are-collected-by-the-collector-and-the-server-only-reads-them.md)).
+
+### 명령
+
+```sh
+collector financials run --db <파일> --data <수집 데이터 폴더> --dart-key <파일> [--state <폴더>] [--telegram <파일>]
+collector financials status [--json] [--state <폴더>]
+collector financials start|pause|resume [--state <폴더>]
+```
+
+- `run`은 재무자료 DB(`--db`)를 열어 자동 확인을 돈다. 유닛은 [`vally-financials.service`](../deploy/systemd/vally-financials.service)다.
+- `--state`의 기본은 감독 데몬과 같다. `$XDG_STATE_HOME/vallythevally/collector`이고, `XDG_STATE_HOME`이 없으면 `~/.local/state/vallythevally/collector`다.
+- `--telegram`의 기본은 데몬과 같은 `~/.config/vally/telegram`이다.
+- `--dart-base-url`, `--kind-base-url`, `--telegram-api`는 시험용이고 루프백 주소만 받는다. `--dart-spacing-millis`는 `--dart-base-url`이 루프백일 때만 받는다. 운영에서는 쓰지 않는다.
+- 시험은 `python3 scripts/dev.py cargo test -p collector --test financials_process`다. 합성 OpenDART와 합성 텔레그램(루프백)으로 실제 `collector` 프로세스를 띄운다.
+
+### 파일
+
+| 파일 | 뜻 |
+|---|---|
+| `--db` | 재무자료 DB. 쓰는 쪽이 열 때 `journal_mode=WAL`을 건다. 서버는 읽기 전용으로 연다 |
+| `<--db>.writer.lock` | 쓰는 쪽 잠금. 아래 "잠금" |
+| `--dart-key` | OpenDART 키 파일. 권한 600, 비어 있지 않아야 한다. 아니면 종료 코드 2로 시작하지 않는다. 값은 출력과 로그에 나오지 않는다 |
+| `<--data>/universe/<YYYYMMDD>.json` | 대상 종목. 가장 최근 파일의 코스피·코스닥 `stocks` 전체를 쓴다. 하나도 없으면 OpenDART를 부르지 않고 상태에 종목 목록 없음을 보인다 |
+| `<state>/financials.sock` | 상태와 조작 소켓. 권한 600 |
+
+### 잠금
+
+`run`은 시작할 때 `<DB 경로>.writer.lock`을 배타 잠금으로 쥔다. 못 쥐면 종료 코드 2로 끝난다. 서버(`OPENDART_API_KEY`가 있을 때)도 처음 업데이트를 띄울 때 쥐고 프로세스가 끝날 때까지 놓지 않는다. 그래서 같은 DB에 쓰는 프로세스는 하나다.
+
+### 상태와 조작
+
+`status`, `start`, `pause`, `resume`은 `<state>/financials.sock`으로 `run`에 묻는다. `status`는 상태, 단계, 회사 진행, 실패 수, 중단 사유, 다음 확인 시각을 몇 줄로 내고 `--json`이면 JSON으로 낸다. 프로세스가 꺼져 있으면 "재무 수집 프로세스가 꺼져 있습니다"를 내고 0이 아닌 종료 코드로 끝난다. 일시정지와 재개 규칙은 [ADR 0015](adr/0015-financial-charts-read-collected-data.md)를 따른다.
+
+### 경보
+
+인증 중단, 호출 한도 중단, 저장 실패로 바뀌면 `--telegram` 설정으로 텔레그램에 한 번 보낸다. 같은 상태가 이어지는 동안 다시 보내지 않는다. 설정 파일이 없으면 보내지 않는다.
+
 ## 운영
 
 감독 데몬 `collector supervise`를 systemd 사용자 서비스로 올려 날마다 돌리는 절차다. systemd 사용자 서비스는 데몬 하나뿐이고 자식(`collect`, `finalize`)은 데몬이 띄운다. 유닛 파일은 [`deploy/systemd/`](../deploy/systemd/)에 있다.
@@ -805,6 +845,7 @@ REST용 키는 키 목록의 예비 키이고, 예비 키가 없으면 첫 활�
 | [`vally-collector.service`](../deploy/systemd/vally-collector.service) | `collector supervise`를 띄운다. `Restart=on-failure`, 30초 뒤 다시 뜬다. 인수 오류(종료 코드 2)는 다시 띄우지 않는다. 1시간에 5번 넘게 죽으면 멈춘다 |
 | [`vally-collector-alert.service`](../deploy/systemd/vally-collector-alert.service) | 데몬이 뜻하지 않게 끝나면 `OnFailure=`와 `ExecStopPost=`가 부른다. journal에 `crit` 줄 하나를 남기고, 텔레그램 설정 파일이 있으면 텔레그램으로도 보낸다 |
 | [`vally-collector-alert-telegram`](../deploy/systemd/vally-collector-alert-telegram) | 경보 유닛이 부르는 `curl` 스크립트. 봇 토큰을 파일에서 읽어 명령줄과 로그에 남기지 않는다 |
+| [`vally-financials.service`](../deploy/systemd/vally-financials.service) | `collector financials run`을 띄운다. `PartOf=vally-collector.service`라 데몬과 함께 멈추고 다시 뜬다. `Restart=on-failure`, 인수 오류와 잠금 실패(종료 코드 2)는 다시 띄우지 않는다. 처음 설치는 [서버 운영 문서](server-operations.md#재무-유닛-첫-설치)를 따른다 |
 
 - 경보처는 journal의 `vally-collector-alert` 줄과 텔레그램이다(아래 "텔레그램 경보"). 메일 같은 다른 경보처는 아직 정하지 않았다([ADR 0026](adr/0026-collector-supervisor-collects-common-and-preferred-stocks.md) "아직 정하지 않은 것").
 - `OnFailure=`만으로는 한 번 죽고 다시 뜬 경우를 알릴 수 없다. systemd는 `Restart=`로 다시 뜨는 동안 유닛을 failed로 보지 않고 재시작 한도를 넘긴 뒤에야 `OnFailure=`를 부른다. 그래서 `ExecStopPost=`가 비정상 종료마다 같은 경보 유닛을 부른다. 한도를 넘기면 두 경로가 모두 불러 경보 줄이 두 번 나올 수 있다.

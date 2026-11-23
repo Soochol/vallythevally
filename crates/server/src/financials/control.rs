@@ -388,11 +388,12 @@ impl Financials {
     pub async fn resume_update(self: &Arc<Self>, symbols: Vec<SymbolInfo>) -> FinancialUpdatePage { self.launch_update(symbols, Launch::Resume).await }
 
     pub async fn pause_update(&self) -> FinancialUpdatePage {
-        self.control.pause(self.store()).await;
+        if self.may_write() { self.control.pause(self.store()).await; }
         self.update_status().await
     }
 
     pub(super) async fn launch_update(self: &Arc<Self>, symbols: Vec<SymbolInfo>, mode: Launch) -> FinancialUpdatePage {
+        if !self.may_write() { return self.update_status().await; }
         if let Some(begun) = self.control.launch(self.store(), self.client.as_ref(), symbols, mode).await {
             let service = self.clone();
             tokio::spawn(async move { service.execute_update(begun).await; });

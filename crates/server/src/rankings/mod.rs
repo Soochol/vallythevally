@@ -37,7 +37,7 @@ pub fn routes() -> Router<Arc<AppState>> {
 async fn rankings(State(st): State<Arc<AppState>>, public: Option<Extension<PublicRoute>>, body: Body) -> Result<Json<api::RankingPage>, ApiFailure> {
     let request: api::RankingRequest = read_json(body, REQUEST_LIMIT, "순위 요청 본문").await?;
     let excludes = excludes_of(&request.ranking);
-    if st.shared_data.serving() && let Some(page) = from_shared(&st, &request, excludes, public.is_some()).await? {
+    if st.shared_data.is_enabled() && let Some(page) = from_shared(&st, &request, excludes, public.is_some()).await? {
         return Ok(Json(page));
     }
     let priority = match request.trigger {

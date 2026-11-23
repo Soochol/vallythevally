@@ -61,7 +61,7 @@ impl Harness {
         rest.set_access(Access::Open);
         let shared = tmp.path().join("shared");
         if shared_dir {
-            state.shared_data.serve_from(&shared);
+            state.shared_data.enable(shared.clone());
         }
         let operator = router(state.clone());
         let public = server::rankings::routes().layer(Extension(PublicRoute)).merge(server::market_overview::routes()).with_state(state.clone());

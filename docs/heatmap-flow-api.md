@@ -22,6 +22,8 @@
 | `points` | 칸마다 `{t, rate}`. `t`는 칸 시작 시각(Unix 초), `rate`는 그 칸 끝까지의 그룹 거래대금 가중 평균 등락률(%)이다. 오른쪽으로 갈수록 늦다. 오늘 분봉이 없으면 빈 목록이다. |
 | `used` | 평균에 든 종목, 요청 순서 |
 | `missing` | 분봉이나 전일 종가를 받지 못해 뺀 종목 |
+| `notCollected` | 공용 자료에 분봉이 없는 종목(수집 대상이 아닌 ETF, 키 몫 밖 종목). 공용 자료를 읽지 않으면 빈 목록이다 |
+| `asOf` | 계산에 든 종목의 가장 늦은 분봉 시각(Unix 초). 칸이 없으면 `null` |
 | `overLimit` | 상한을 넘어 계산하지 않은 종목. 요청 순서에서 상한 뒤에 있던 것들이다. |
 | `limit` | 한 요청이 계산하는 종목 수 상한 |
 
@@ -45,11 +47,23 @@
 
 종목별 계산 결과는 서버 메모리에 45초(`FRESH_SECS`) 둔다. 이 안의 요청은 같은 종목의 분봉을 키움에서 다시 받지 않는다. 다른 그룹이 같은 종목을 담아도 한 번만 받는다. 웹이 60초마다 다시 부르므로 45초는 매번 새로 받는 값이다. 날이 바뀌면 지난 항목은 버린다. 실패한 종목은 캐시하지 않는다.
 
+## 공용 자료에서 읽기
+
+`VALLY_SHARED_DATA_DIR`이 있으면 분봉을 키움에서 받지 않고 수집 데몬이 쓴 분봉 파일(`minute/<날짜>/<키 이름>.jsonl`, [공용 자료 형식](collector-shared-data.md))에서 계산한다. 서버는 파일마다 새로 덧붙은 줄만 읽고, 두 키 파일에 나뉜 같은 분은 `MinuteBar::merged_with`로 합친 뒤 종목·거래소별 5분 칸(칸 종가, 칸 끝까지의 체결 거래대금 합)으로 줄여 메모리에 둔다. 응답마다 이 칸 값만 읽는다.
+
+- 가중치는 체결 합계 `value`(원)의 누적이다. 위 "칸별 근사 거래대금"은 쓰지 않는다. 식과 반올림은 같다.
+- 전일 종가는 요청 거래소 스냅샷 판의 기준가다. 판의 관측일이 오늘(KST)이 아니면 그 판은 없는 것으로 보고 종목을 `missing`에 넣는다. 지수는 지수 행의 `level`과 `changeRate`로 거꾸로 구한다. 판에 종목이 없으면 `missing`이다.
+- NXT 요청에서 NXT 비대상 종목은 통합 분봉·통합 판을 쓴다.
+- 오늘 분봉 계열이 없는 종목은 `notCollected`다. 운영자 리스너는 이 종목만 위의 `ka10080`으로 채우고(종목 수 상한 그대로), 채운 종목은 `used`에 든다. 채우지 못한 종목은 `missing`이다. 공개 진입 함수는 키움도 TR 예산도 쓰지 않고 `notCollected`로 둔다.
+- 분봉 파일이 자라면 다음 폴링(`VALLY_SHARED_DATA_POLL_MILLIS`) 뒤 새 칸이 나온다. 종목별 45초 캐시는 쓰지 않는다.
+- 분봉 파일이 없는 날(장 전, 휴장)은 모든 종목이 `notCollected`다.
+
 ## 종목 수 상한
 
 한 요청은 앞에서부터 60종목(`MAX_SYMBOLS`)까지만 계산한다. 분봉 조회는 같은 TR(`ka10080`) 한 줄이고 키움 대기열이 그 TR을 최근 1초에 5건까지 보내므로(ADR 0035), 60종목이 모두 새로 받아야 하면 `same_tr_burst_duration(60)`인 11.55초다. 새로 받는 간격 60초의 3분의 1 아래로 묶어 다른 화면의 키움 호출을 막지 않으려는 값이다. `heatmap_flow::tests`가 이 관계를 확인한다. 넘은 종목은 `overLimit`에 적는다.
 
 ## 시험
 
+- 공용 자료 경로: `python3 scripts/dev.py cargo test -p server --test heatmap_shared`가 손 계산한 분봉 파일로 칸 값, `asOf`, 거래소 규칙, `notCollected`, 키움 호출 0을 확인한다.
 - 서버: `python3 scripts/dev.py cargo test -p server --test heatmap_flow`가 합성 transport로 손 계산한 가중 평균, 캐시, 상한, 종목 실패, 잘못된 요청을 확인한다. 칸 계산의 단위 시험은 `crates/server/src/heatmap_flow/series.rs`에 있다.
 - 웹: `python3 scripts/web.py e2e e2e/heatmap-flow.spec.ts`.

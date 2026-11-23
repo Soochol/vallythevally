@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use sqlx::{Row, SqlitePool, sqlite::{SqliteConnectOptions, SqlitePoolOptions}};
+use sqlx::{Row, SqlitePool, sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions}};
 
 use super::model::{Collection, Failure, Security};
 
@@ -9,10 +9,23 @@ pub struct Store(SqlitePool);
 
 impl Store {
     pub async fn open(path: &Path) -> Result<Self, Failure> {
+        Self::open_with(SqliteConnectOptions::new().filename(path).create_if_missing(true)).await
+    }
+
+    pub async fn open_for_collection(path: &Path) -> Result<Self, Failure> {
+        Self::open_with(SqliteConnectOptions::new().filename(path).create_if_missing(true).journal_mode(SqliteJournalMode::Wal)).await
+    }
+
+    pub fn path(&self) -> std::path::PathBuf {
+        self.0.connect_options().get_filename().to_owned()
+    }
+
+    async fn open_with(options: SqliteConnectOptions) -> Result<Self, Failure> {
+        let path = options.get_filename().to_owned();
         if let Some(parent) = path.parent().filter(|p| !p.as_os_str().is_empty()) {
             tokio::fs::create_dir_all(parent).await.map_err(|_| Failure::Storage)?;
         }
-        let pool = SqlitePoolOptions::new().max_connections(1).connect_with(SqliteConnectOptions::new().filename(path).create_if_missing(true)).await.map_err(|_| Failure::Storage)?;
+        let pool = SqlitePoolOptions::new().max_connections(1).connect_with(options).await.map_err(|_| Failure::Storage)?;
         for query in [
             "CREATE TABLE IF NOT EXISTS securities (stock_code TEXT PRIMARY KEY, body TEXT NOT NULL)",
             "CREATE TABLE IF NOT EXISTS companies (corp_code TEXT PRIMARY KEY, body TEXT NOT NULL)",

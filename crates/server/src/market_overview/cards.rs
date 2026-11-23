@@ -216,7 +216,7 @@ async fn program_days(env: &CardEnv<'_>, market: Market, period: MarketOverviewP
 pub async fn intraday_flow(State(st): State<Arc<AppState>>, Query(query): Query<HashMap<String, String>>) -> Result<Json<MarketOverviewIntradayFlow>, ApiFailure> {
     let params = Params::parse(&query)?;
     let now = st.clock.now();
-    let (samples, source) = match st.shared_data.serving() {
+    let (samples, source) = match st.shared_data.is_enabled() {
         true => (shared::samples(&st, now, params.market), shared::broker(&st)),
         false => (st.market_overview.samples.samples(now, params.market), overview_source(&st).broker),
     };

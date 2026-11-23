@@ -14,7 +14,7 @@ const MARKETS: [Market; 2] = [Market::Kospi, Market::Kosdaq];
 const MILLION_WON_PER_EOK: f64 = 100.0;
 
 pub fn start(state: Arc<AppState>, dir: PathBuf) -> tokio::task::JoinHandle<()> {
-    if state.shared_data.serving() {
+    if state.shared_data.is_enabled() {
         tracing::info!("장중 표본은 수집 데몬이 공용 자료 폴더에 쌓으므로 서버 샘플러를 돌리지 않습니다");
         return tokio::spawn(async {});
     }
