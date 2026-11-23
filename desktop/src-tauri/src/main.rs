@@ -1,5 +1,9 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+#[cfg(feature = "bench")]
+mod bench;
+#[cfg(test)]
+mod capabilities;
 mod engine;
 mod environment;
 mod layout;
@@ -45,6 +49,11 @@ fn engine_status(status: State<StatusCell>) -> EngineStatus {
 }
 
 fn main() {
+    let context = tauri::generate_context!();
+    #[cfg(feature = "bench")]
+    if let Some(request) = bench::requested() {
+        return bench::run(request, context);
+    }
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, _arguments, _working_dir| focus_main_window(app)))
         .manage(StatusCell::starting())
@@ -54,7 +63,7 @@ fn main() {
             start_engine(app.handle());
             Ok(())
         })
-        .build(tauri::generate_context!())
+        .build(context)
         .expect("Tauri 앱을 만들 수 없습니다");
     app.run(|app, event| {
         if let RunEvent::Exit = event {

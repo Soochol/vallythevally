@@ -31,12 +31,22 @@ def build():
 
 def clippy():
     under_compile_lock(["clippy", "--locked", "--all-targets", "--", "-D", "warnings"])
+    under_compile_lock(["clippy", "--locked", "--all-targets", "--features", "bench", "--", "-D", "warnings"])
+
+
+def bench_build():
+    under_compile_lock(["build", "--locked", "--release", "--features", "bench"])
 
 
 def test():
     under_compile_lock(["test", "--locked", "--no-run"])
     print("desktop: cargo test --locked", flush=True)
     subprocess.run(["cargo", "test", "--locked"], cwd=CRATE, check=True)
+    under_compile_lock(["test", "--locked", "--features", "bench", "--no-run"])
+    print("desktop: cargo test --locked --features bench", flush=True)
+    subprocess.run(["cargo", "test", "--locked", "--features", "bench"], cwd=CRATE, check=True)
+    print("desktop: 성능 문서와 측정 JSON 대조", flush=True)
+    subprocess.run([sys.executable, "-m", "unittest", "test_doc"], cwd=ROOT / "desktop" / "bench", check=True)
 
 
 def check():
@@ -44,7 +54,7 @@ def check():
     test()
 
 
-COMMANDS = {"build": build, "clippy": clippy, "test": test, "check": check}
+COMMANDS = {"build": build, "clippy": clippy, "test": test, "check": check, "bench-build": bench_build}
 
 if __name__ == "__main__":
     if len(sys.argv) != 2 or sys.argv[1] not in COMMANDS:
