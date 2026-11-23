@@ -1,7 +1,7 @@
 import { expect, test } from "vitest";
 import type { FinancialPoint } from "../api/generated/FinancialPoint";
 import type { FinancialsPage } from "../api/generated/FinancialsPage";
-import { adjacentBucket, financialBuckets, financialDetail, financialStatus, financialSummary, financialValue } from "./financials";
+import { adjacentBucket, checkedTime, financialBuckets, financialDetail, financialDetailRows, financialStatus, financialSummary, financialValue } from "./financials";
 import { addIndicator, DEFAULT_CHART_SETTINGS, movePanel, parseChartSettings, setPanelStretches, updateIndicator } from "./settings";
 
 const kst = (date: string) => Date.parse(`${date}T00:00:00+09:00`) / 1000;
@@ -49,4 +49,19 @@ test("마지막 확인과 일부 실패·저장값 갱신 실패를 함께 표�
 test("서버에 재무자료가 없는 상태를 DART 설정이 아닌 자료 없음으로 안내한다", () => {
   expect(financialStatus("not_configured")).toBe("이 서버에 재무자료가 없습니다");
   expect(financialStatus("collecting")).toBe("collecting");
+});
+
+test("확인 시각은 한국 시각 YYYY-MM-DD HH:MM이고 없으면 아직 없음이다", () => {
+  expect(checkedTime(Date.parse("2026-11-09T09:05:59+09:00") / 1000)).toBe("2026-11-09 09:05");
+  expect(checkedTime(Date.parse("2026-12-31T23:59:00+09:00") / 1000)).toBe("2026-12-31 23:59");
+  expect(checkedTime(null)).toBe("아직 없음");
+});
+
+test("재무 상세 글은 빈 줄 없이 줄마다 첫 구분점 앞을 이름, 뒤를 값으로 나누고 붙은 가운뎃점은 나누지 않는다", () => {
+  expect(financialDetailRows("확인 완료 · 마지막 확인 2026-11-09 09:05\n\n\n  \n최근 시도 2026-11-09 09:00\n확인 · \n연결·별도 기준 변경 · 연결 · KRW")).toEqual([
+    { name: "확인 완료", value: "마지막 확인 2026-11-09 09:05" },
+    { name: "최근 시도 2026-11-09 09:00", value: "" },
+    { name: "확인", value: "" },
+    { name: "연결·별도 기준 변경", value: "연결 · KRW" },
+  ]);
 });

@@ -31,7 +31,17 @@ const SOURCE_REASON: Record<string, string> = {
 };
 export const financialReason = (reason: FinancialReason | null) => reason ? REASON[reason] : "";
 export const financialStatus = (status: string) => STATUS[status] ?? status;
-export const checkedTime = (t: UnixSeconds | null) => t === null ? "아직 없음" : new Date(t * 1000).toLocaleString("ko-KR", { timeZone: "Asia/Seoul" });
+const KST_OFFSET_SECONDS = 9 * 3600;
+export const checkedTime = (t: UnixSeconds | null) => t === null ? "아직 없음" : new Date((t + KST_OFFSET_SECONDS) * 1000).toISOString().slice(0, 16).replace("T", " ");
+
+export interface FinancialDetailRow { readonly name: string; readonly value: string }
+
+export function financialDetailRows(text: string): FinancialDetailRow[] {
+  return text.split("\n").map((line) => line.trim()).filter(Boolean).map((line) => {
+    const [name = "", ...rest] = line.split(/\s+·(?=\s|$)/).map((part) => part.trim()).filter(Boolean);
+    return { name, value: rest.join(" · ") };
+  });
+}
 export const reportingPeriod = (p: FinancialReportingPeriod | null): string => p === null ? "실제 보고기간 미확인" : p.kind === "instant" ? `${p.date} 기말` : `${p.start} ~ ${p.end}`;
 export const financialUnit = (metric: FinancialMetric, currency: string | null) => metric === "owner_roe" || metric === "debt_ratio" ? "%" : metric === "dps" ? "원/주" : currency ?? "통화 미확인";
 export const financialValue = (v: number, metric: FinancialMetric, currency: string | null) => `${v.toLocaleString("ko-KR", { maximumFractionDigits: 2 })} ${financialUnit(metric, currency)}`;

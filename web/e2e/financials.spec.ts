@@ -231,7 +231,8 @@ test.describe("재무지원 경계", () => {
     expect(overlap).toBeGreaterThanOrEqual(0);
     await row(page, "revenue").locator("summary").click();
     await selectOption(row(page, "revenue").getByRole("combobox"), { index: overlap + 1 });
-    await expect(row(page, "revenue").locator("details")).toContainText("원래 보고값 1,000 KRW · 합산하지 않음");
+    const reported = row(page, "revenue").locator("details dl > div").filter({ has: page.locator("dt", { hasText: "원래 보고값 1,000 KRW" }) });
+    await expect(reported.locator("dd")).toHaveText("합산하지 않음");
   });
 });
 

@@ -122,6 +122,8 @@ function DrawingRail({ help, setHelp, helpAnchor, helpDialog }: RailHelp) {
 
 const LONG_PRESS_MS = 300;
 
+const pointerClick = (e: React.MouseEvent) => e.detail > 0;
+
 interface GroupPress {
   "aria-haspopup": "menu";
   "aria-expanded": boolean;
@@ -155,7 +157,7 @@ function ToolGroup({ label, tools, keys, onChoose, pinnable = true, children }: 
     onPointerDown: (e) => { if (e.button !== 0) return; held.current = false; clear(); timer.current = setTimeout(() => { held.current = true; setOpen(true); }, LONG_PRESS_MS); },
     onPointerUp: clear, onPointerCancel: clear, onPointerLeave: clear,
     onKeyDown: (e) => { if (e.key === "ArrowRight" && !e.nativeEvent.isComposing) { e.preventDefault(); setOpen(true); } },
-    onClickCapture: (e) => { if (held.current) { held.current = false; e.preventDefault(); e.stopPropagation(); } },
+    onClickCapture: (e) => { const swallow = held.current && pointerClick(e); held.current = false; if (swallow) { e.preventDefault(); e.stopPropagation(); } },
   };
   return <div className="draw-group" ref={wrapper}>{children(press)}<div className="draw-group-toggle"><button ref={trigger} type="button" aria-label={`${label} 펼치기`} title={label} aria-haspopup="menu" aria-expanded={open} className="draw-group-dot" onClick={() => setOpen(!open)}><svg viewBox="0 0 8 8" width="8" height="8" aria-hidden="true"><circle cx="4" cy="4" r="2" fill="currentColor" /></svg></button>
     {open && <Popover data-chart-control anchor={trigger} anchorRect={besideRail} follow placement="right" role="menu" aria-label={label} className="draw-tool-menu" onClose={() => setOpen(false)} onKeyDown={(e) => {
@@ -200,7 +202,7 @@ function MagnetButton({ action, keys }: { action(f: () => void): void; keys: Act
       onContextMenu={(e) => { e.preventDefault(); held.current = true; setOpen(true); }}
       onPointerDown={(e) => { if (e.button !== 0) return; held.current = false; timer.current = setTimeout(() => { held.current = true; setOpen(true); }, 500); }}
       onPointerUp={clear} onPointerCancel={clear} onPointerLeave={clear}
-      onClick={() => { if (!held.current) action(() => useUiStore.getState().setDrawingPrefs({ magnet: !prefs.magnet })); held.current = false; }}><Icon path={DRAWING_ICONS.magnet} /></button>
+      onClick={(e) => { const swallow = held.current && pointerClick(e); held.current = false; if (!swallow) action(() => useUiStore.getState().setDrawingPrefs({ magnet: !prefs.magnet })); }}><Icon path={DRAWING_ICONS.magnet} /></button>
     {open && <Menu label="자석 세기" root={root} placement="right" onClose={() => setOpen(false)} items={[
       { kind: "radio", label: "약", checked: prefs.magnetStrength === "weak", onSelect: () => useUiStore.getState().setDrawingPrefs({ magnetStrength: "weak" }) },
       { kind: "radio", label: "강", checked: prefs.magnetStrength === "strong", onSelect: () => useUiStore.getState().setDrawingPrefs({ magnetStrength: "strong" }) },

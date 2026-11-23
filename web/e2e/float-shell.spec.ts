@@ -59,7 +59,7 @@ test("가격축 방식은 가격축과 시간축이 만나는 모서리의 콤�
   await open(page);
   await expect(toolbar(page).getByRole("button", { name: "로그", exact: true })).toHaveCount(0);
   const axis = axisMode(page);
-  await expect(axis).toHaveText("자동");
+  await expect(axis).toHaveText("일반");
   await selectOption(axis, "log");
   await expect(chartOf(cell(page))).toHaveAttribute("data-price-scale", "log");
   await expect(axis).toHaveText("로그");
@@ -69,9 +69,9 @@ test("가격축 방식은 가격축과 시간축이 만나는 모서리의 콤�
   await selectOption(axis, "normal");
   await expect(chartOf(cell(page))).toHaveAttribute("data-price-scale", "normal");
   await axis.click();
-  await expect(page.getByRole("menuitemradio", { name: /^자동/ })).toHaveAttribute("aria-checked", "true");
+  await expect(page.getByRole("menuitemradio", { name: /^일반/ })).toHaveAttribute("aria-checked", "true");
   await expect(page.getByRole("menuitemradio", { name: /^로그/ })).toContainText("L");
-  await expect(page.getByRole("menuitemradio", { name: /^자동/ })).toContainText("가격 그대로");
+  await expect(page.getByRole("menuitemradio", { name: /^일반/ })).toContainText("가격 그대로");
   await expect(page.getByRole("menuitemradio", { name: /^%/ })).toContainText("왼쪽 끝 봉 기준");
   const menu = await boxOf(page.getByRole("menu", { name: "가격축 방식" }));
   const box = await boxOf(axis);

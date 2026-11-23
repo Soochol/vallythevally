@@ -11,3 +11,7 @@
 .financial-status-dot[data-status="ready"] { background: var(--success); }
 .financial-status-dot[data-status="pending"] { background: var(--warning); }
 .financial-status-dot[data-status="failed"], .financial-status-dot[data-status="partial_failure"] { background: var(--danger); }
+.financial-detail-rows { display: grid; grid-template-columns: fit-content(45%) minmax(0, 1fr); column-gap: var(--size-12); row-gap: var(--size-2); margin: 0; }
+.financial-detail-rows > div { display: contents; }
+.financial-detail-rows dt { color: var(--text-2); overflow-wrap: anywhere; }
+.financial-detail-rows dd { margin: 0; color: var(--text); overflow-wrap: anywhere; }

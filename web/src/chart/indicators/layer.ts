@@ -161,7 +161,11 @@ export class IndicatorLayer {
   }
 
   setConfigs(configs: IndicatorConfig[], panels: Panel[]): void {
-    this.host.guard(() => this.applyConfigs(configs, panels));
+    try {
+      this.host.guard(() => this.applyConfigs(configs, panels));
+    } finally {
+      this.host.requestFrame();
+    }
   }
 
   private applyConfigs(configs: IndicatorConfig[], panels: Panel[]): void {

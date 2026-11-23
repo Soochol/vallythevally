@@ -2,6 +2,7 @@ import { domSelect } from "../../features/menu/domSelect";
 import { mountLayer } from "../../features/overlay/topLayer";
 import { iconMarkup, type MarkupIcon } from "../../features/icons";
 import { indicatorErrorText, type IndicatorRow, type PriceLegendValues } from "./layer";
+import { financialDetailRows } from "../financials";
 import { FOLD_ABOVE_ROWS, indicatorRowsFolded, type LegendField, type LegendProjection, type LegendTier } from "../legendProjection";
 import { indicatorsPinnedOpen, onIndicatorsPinnedChange, setIndicatorsPinnedOpen } from "../legendFold";
 
@@ -29,7 +30,7 @@ interface RowEls {
   key: RowKey | null;
   detail: HTMLDetailsElement;
   summary: HTMLElement;
-  text: HTMLElement;
+  text: HTMLDListElement;
   select: HTMLButtonElement;
   reportOptions: { label: string; text: string }[];
   dispose(): void;
@@ -41,6 +42,16 @@ function el<K extends keyof HTMLElementTagNameMap>(tag: K, className: string, te
   e.className = className;
   e.textContent = text;
   return e;
+}
+
+function showDetailText(list: HTMLDListElement, text: string): void {
+  if (list.dataset.text === text) return;
+  list.dataset.text = text;
+  list.replaceChildren(...financialDetailRows(text).map(({ name, value }) => {
+    const line = el("div", "");
+    line.append(el("dt", "", name), el("dd", "", value));
+    return line;
+  }));
 }
 
 function labelButton(button: HTMLButtonElement, label: string) {
@@ -249,7 +260,7 @@ export class IndicatorLegend {
     const select = el("button", "mb-2 w-full bg-surface text-s");
     select.dataset.chartControl = "";
     select.setAttribute("aria-label", "보고기간 자료");
-    const text = el("p", "whitespace-pre-wrap text-xs");
+    const text = el("dl", "financial-detail-rows text-xs");
     box.append(select, text);
     detail.append(summary, box);
     root.append(swatch, name, detail, values, badge, tools);
@@ -257,7 +268,7 @@ export class IndicatorLegend {
     const disposeSelect = interactive ? domSelect(select, () => row.reportOptions.map((option, i) => ({ label: option.label, value: String(i) })), (value) => {
       select.dataset.value = value;
       const option = row.reportOptions[Number(value)];
-      select.textContent = option?.label ?? ""; text.textContent = option?.text ?? "";
+      select.textContent = option?.label ?? ""; showDetailText(text, option?.text ?? "");
     }) : null;
     row.dispose = () => { cleanup?.(); disposeSelect?.(); };
     return row;
@@ -283,7 +294,7 @@ export class IndicatorLegend {
       if (current) current.text = row.detail.text;
       const selected = r.reportOptions[Number(r.select.dataset.value)] ?? current;
       r.select.textContent = selected?.label ?? "";
-      r.text.textContent = selected?.text ?? row.detail.text;
+      showDetailText(r.text, selected?.text ?? row.detail.text);
     }
     labelButton(r.collapse, row.panel?.collapsed ? "패널 펼치기" : "패널 접기");
     r.collapse.setAttribute("aria-expanded", String(!row.panel?.collapsed));
