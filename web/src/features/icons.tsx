@@ -221,3 +221,58 @@ export const EtfIcon = ({ size }: P) => (
     <path d="M12 4v8l6 4" />
   </Icon>
 );
+
+export const WarningIcon = ({ size = 16 }: P) => (
+  <Icon size={size}>
+    <path d="M12 4 2.8 19.5h18.4z" />
+    <path d="M12 10v4.5M12 17.2h.01" />
+  </Icon>
+);
+export const InfoIcon = ({ size = 16 }: P) => (
+  <Icon size={size}>
+    <circle cx="12" cy="12" r="8.5" />
+    <path d="M12 11v5.5M12 7.8h.01" />
+  </Icon>
+);
+export const RetryIcon = ({ size = 16 }: P) => <Icon size={size} path="M4 12a8 8 0 0 1 14-5.3L20 9M20 4v5h-5M20 12a8 8 0 0 1-14 5.3L4 15M4 20v-5h5" />;
+export const EmptyBoxIcon = ({ size = 24 }: P) => (
+  <Icon size={size}>
+    <path d="M3.5 13 6 5.5h12l2.5 7.5" />
+    <path d="M3.5 13v6h17v-6h-5.5a3 3 0 0 1-6 0z" />
+  </Icon>
+);
+export const KeyboardIcon = ({ size = 16 }: P) => (
+  <Icon size={size}>
+    <rect x="2.5" y="6" width="19" height="12" rx="2" />
+    <path d="M6.5 10h.01M10 10h.01M14 10h.01M17.5 10h.01M7 14h10" />
+  </Icon>
+);
+export const WalletIcon = ({ size = 16 }: P) => (
+  <Icon size={size}>
+    <path d="M4 7.5A2.5 2.5 0 0 1 6.5 5H18v3" />
+    <rect x="3" y="8" width="18" height="11.5" rx="2" />
+    <path d="M16.5 13.8h.01" />
+  </Icon>
+);
+export const ExternalLinkIcon = ({ size = 16 }: P) => <Icon size={size} path="M10 5H6.5A2.5 2.5 0 0 0 4 7.5v10A2.5 2.5 0 0 0 6.5 20h10a2.5 2.5 0 0 0 2.5-2.5V14M13.5 4H20v6.5M20 4l-9 9" />;
+export const CollapseIcon = ({ size = 16 }: P) => <Icon size={size} path="M3 8h5V3M21 8h-5V3M3 16h5v5M21 16h-5v5" />;
+export const DockIcon = ({ size = 16 }: P) => (
+  <Icon size={size}>
+    <rect x="3" y="4" width="18" height="16" rx="2" />
+    <path d="M3 9h18M8 9v11" />
+  </Icon>
+);
+export const MinimizeIcon = ({ size = 16 }: P) => <Icon size={size} path="M5 19h14" />;
+export const CheckCircleIcon = ({ size = 16 }: P) => (
+  <Icon size={size}>
+    <circle cx="12" cy="12" r="8.5" />
+    <path d="m8.5 12.3 2.4 2.4 4.6-5" />
+  </Icon>
+);
+export const CloudIcon = ({ size = 24 }: P) => <Icon size={size} path="M7 18.5a4.5 4.5 0 0 1-.6-8.96A6 6 0 0 1 18 10.5a4 4 0 0 1-.5 8z" />;
+export const DocumentIcon = ({ size = 16 }: P) => (
+  <Icon size={size}>
+    <path d="M6.5 3h7.8L19 7.7V19a2 2 0 0 1-2 2H6.5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z" />
+    <path d="M14 3v5h5M8 13h8M8 17h5" />
+  </Icon>
+);

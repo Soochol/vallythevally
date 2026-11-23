@@ -7,7 +7,7 @@ const dialog = (page: Page) => page.getByRole("dialog", { name: "관심종목에
 const input = (page: Page) => dialog(page).getByRole("combobox", { name: "종목 검색" });
 const pill = (page: Page, name: string) => dialog(page).getByRole("button", { name: `넣을 곳: ${name}`, exact: true });
 const menu = (page: Page) => page.getByRole("menu", { name: "넣을 곳" });
-const toast = (page: Page) => page.locator(".ui-toast");
+const toast = (page: Page) => page.locator(".ui-toast").last();
 const served = (scenario: Scenario) => scenario.documents.watchlists().lists[0]!;
 const servedGroups = (scenario: Scenario) => served(scenario).groups.map((g) => [g.name, g.symbols]);
 

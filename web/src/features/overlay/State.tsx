@@ -1,10 +1,38 @@
-import type { ReactNode } from "react";
-export function Skeleton({ label = "불러오는 중" }: { label?: string }) {
-  return <div role="status" aria-label={label} className="ui-state ui-skeleton"><span /><span /><span /><span className="sr-only">{label}</span></div>;
+import type { CSSProperties, ReactNode } from "react";
+import { EmptyBoxIcon, WarningIcon } from "../icons";
+
+export type SkeletonShape = "line" | "card" | "chart";
+
+const SKELETON_ROWS: Record<SkeletonShape, number> = { line: 3, card: 3, chart: 1 };
+
+export function Skeleton({ label = "불러오는 중", rows, shape = "line", minHeight }: { label?: string; rows?: number; shape?: SkeletonShape; minHeight?: number | string }) {
+  const style: CSSProperties | undefined = minHeight === undefined ? undefined : { minHeight };
+  return (
+    <div role="status" aria-label={label} data-shape={shape} style={style} className="ui-state ui-skeleton">
+      {Array.from({ length: rows ?? SKELETON_ROWS[shape] }, (_, index) => <span key={index} />)}
+      <span className="sr-only">{label}</span>
+    </div>
+  );
 }
-export function EmptyState({ title, children, action, onAction }: { title: string; children?: ReactNode; action?: string; onAction?: () => void }) {
-  return <div className="ui-state"><p>{title}</p>{children}{action && onAction && <button className="tb-btn" onClick={onAction}>{action}</button>}</div>;
+
+export function EmptyState({ title, children, action, onAction, icon }: { title: string; children?: ReactNode; action?: string; onAction?: () => void; icon?: ReactNode }) {
+  return (
+    <div className="ui-state">
+      <span className="ui-state-icon">{icon ?? <EmptyBoxIcon />}</span>
+      <p className="ui-state-title">{title}</p>
+      {children && <div className="ui-state-body">{children}</div>}
+      {action && onAction && <button type="button" className="btn" onClick={onAction}>{action}</button>}
+    </div>
+  );
 }
-export function ErrorState({ message, retry }: { message: string; retry(): void }) {
-  return <div role="alert" className="ui-state"><p>{message}</p><button className="tb-btn" onClick={retry}>다시 시도</button></div>;
+
+export function ErrorState({ message, retry, detail, icon }: { message: string; retry(): void; detail?: string; icon?: ReactNode }) {
+  return (
+    <div role="alert" className="ui-state" data-tone="danger">
+      <span className="ui-state-icon">{icon ?? <WarningIcon size={24} />}</span>
+      <p className="ui-state-title">{message}</p>
+      <button type="button" className="btn" onClick={retry}>다시 시도</button>
+      {detail && <details className="ui-state-detail"><summary>자세히</summary><pre>{detail}</pre></details>}
+    </div>
+  );
 }

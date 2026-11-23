@@ -140,7 +140,7 @@ test("휴대폰에서 목록이 20개여도 옮기기·복사 메뉴의 모든 �
     await expect(targets).toHaveCount(38);
     for (const target of await targets.all()) await target.click({ trial: true, timeout: 2_000 });
     await targets.last().click();
-    await expect(page.getByText(new RegExp(`^복사했습니다: .+ → 목록 19$`))).toBeVisible();
+    await expect(page.getByText(new RegExp(`^복사했습니다: .+ → 목록 19$`)).last()).toBeVisible();
   }
 });
 
