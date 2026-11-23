@@ -19,6 +19,7 @@ use server::kis::market_stream::{KisMarketStream, KisSeats};
 use server::kis::notice::KisNotices;
 use server::kiwoom::link::LinkState;
 use server::kis::stream::{Connector, Socket, StreamStatus};
+use server::market_source::active::ActiveStream;
 use server::kis::transport::{HttpRequest, HttpResponse, Transport, TransportError};
 use server::kiwoom::auth::KiwoomAuth;
 use server::kiwoom::rest::{Access, KiwoomRest};
@@ -609,6 +610,68 @@ async fn reseating_the_manager_for_the_kis_limit_keeps_the_first_forty_holders_a
     assert_eq!(plan.realtime.len(), LIMIT);
     assert_eq!(plan.rejected.len(), 10);
     assert!(symbols.iter().take(LIMIT).all(|symbol| plan.realtime.contains(symbol)), "먼저 잡은 종목이 남는다");
+}
+
+struct KiwoomSideStream {
+    desired: tokio::sync::watch::Sender<DesiredFeeds>,
+}
+
+impl MarketStream for KiwoomSideStream {
+    fn seat_rules(&self) -> Arc<dyn SeatRules> {
+        Arc::new(server::kiwoom::stream::KiwoomSeats)
+    }
+
+    fn set_desired(&self, desired: DesiredFeeds) {
+        self.desired.send_replace(desired);
+    }
+
+    fn watch_desired(&self) -> tokio::sync::watch::Receiver<DesiredFeeds> {
+        self.desired.subscribe()
+    }
+
+    fn set_venue(&self, _: Venue) {}
+}
+
+fn open_registrations(heard: &[Control]) -> Vec<usize> {
+    let mut open = BTreeSet::new();
+    heard
+        .iter()
+        .map(|control| {
+            let key = (control.tr_id.clone(), control.tr_key.clone());
+            if control.registers { open.insert(key) } else { open.remove(&key) };
+            open.len()
+        })
+        .collect()
+}
+
+#[tokio::test(start_paused = true)]
+async fn registrations_never_exceed_the_realtime_limit_between_activate_and_replan() {
+    let mut rig = rig();
+    let mut peer = rig.connector.queue_connection();
+    let (kiwoom_events_in, kiwoom_events) = mpsc::channel(1);
+    drop(kiwoom_events_in);
+    let kiwoom_side = Arc::new(KiwoomSideStream { desired: tokio::sync::watch::channel(DesiredFeeds::new()).0 });
+    let (active, _merged, _first) = ActiveStream::new(kiwoom_side, kiwoom_events, rig.clock.clone());
+    let (stub_events, replaced) = mpsc::channel(1);
+    drop(stub_events);
+    let kis_events = std::mem::replace(&mut rig.events, replaced);
+    let kis = active.attach(rig.stream.clone(), kis_events);
+    let crowded = listed(60);
+    let trades: &[StreamKind] = &[StreamKind::Trades];
+    let kiwoom_plan = feeds(&crowded.iter().map(|symbol| (*symbol, trades)).collect::<Vec<_>>());
+    active.set_desired(kiwoom_plan.clone());
+    assert!(KisSeats::new(0).seats(&kiwoom_plan) > LIMIT, "키움 자리 규칙에서는 예순 종목이 다 들어간다");
+
+    active.activate(&kis).await;
+    let before_replan = settled(&mut peer).await;
+    assert!(open_registrations(&before_replan).into_iter().all(|open| open <= LIMIT), "재계획 전에 한투 세션에 나간 등록이 {LIMIT}을 넘었다: {}", before_replan.len());
+
+    let kis_plan = feeds(&crowded.iter().take(LIMIT).map(|symbol| (*symbol, trades)).collect::<Vec<_>>());
+    active.set_desired(kis_plan);
+    let after_replan = settled(&mut peer).await;
+    let heard: Vec<Control> = before_replan.into_iter().chain(after_replan).collect();
+    assert!(open_registrations(&heard).into_iter().all(|open| open <= LIMIT), "어느 순간에도 등록은 {LIMIT}을 넘지 않는다");
+    assert_eq!(open_registrations(&heard).last().copied(), Some(LIMIT), "재계획 뒤에는 마흔 자리가 찬다");
 }
 
 #[tokio::test(start_paused = true)]

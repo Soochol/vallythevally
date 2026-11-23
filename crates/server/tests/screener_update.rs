@@ -146,6 +146,36 @@ fn first_load(market: &KrxMarket) -> BTreeMap<String, Vec<Option<String>>> {
         .collect()
 }
 
+async fn raw_update(api: &Api) -> (u16, Value) {
+    let response = api.client.post(format!("{}/update", api.base)).header("content-type", "application/json").body(json!({"full": false}).to_string()).send().await.unwrap();
+    let status = response.status().as_u16();
+    (status, serde_json::from_str(&response.text().await.unwrap()).unwrap_or(Value::Null))
+}
+
+#[tokio::test]
+async fn screener_update_is_refused_without_any_kiwoom_key() {
+    let fake = ScriptedTransport::new();
+    let tmp = tempfile::tempdir().unwrap();
+    let server = Server::spawn_with(&fake, &tmp.path().join("run/server.lock"), tmp.path(), &[("VALLY_KIWOOM_APP_KEY", OsStr::new("")), ("VALLY_KIWOOM_CONNECT", OsStr::new("off"))]);
+    let api = Api::of(&server).await;
+    let (status, body) = raw_update(&api).await;
+    assert_eq!((status, body["error"]["reason"].as_str()), (400, Some("unsupported_by_source")), "{body}");
+    assert!(body["error"]["message"].as_str().is_some_and(|message| message.contains("키움 키")), "{body}");
+    assert_eq!(fake.api_ids(), Vec::<String>::new(), "키움 요청이 나가지 않는다");
+    server.stop().await;
+}
+
+#[tokio::test]
+async fn screener_update_waits_for_a_listed_kiwoom_key_that_is_not_connected_yet() {
+    let fake = ScriptedTransport::new();
+    let tmp = tempfile::tempdir().unwrap();
+    let server = Server::spawn_with(&fake, &tmp.path().join("run/server.lock"), tmp.path(), &[("VALLY_KIWOOM_CONNECT", OsStr::new("off"))]);
+    let api = Api::of(&server).await;
+    let (status, body) = raw_update(&api).await;
+    assert_eq!(status, 200, "등록됐지만 아직 연결되지 않은 키움 키는 거절하지 않는다: {body}");
+    server.stop().await;
+}
+
 #[tokio::test]
 async fn first_load_fills_every_recent_page_then_follows_each_history_to_cont_yn_n() {
     let fake = ScriptedTransport::new();

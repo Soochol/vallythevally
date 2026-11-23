@@ -91,6 +91,22 @@ pub fn counted(inner: Arc<dyn Transport>) -> (Arc<dyn Transport>, Arc<AtomicU64>
     (Arc::new(CountingTransport { inner, sent: sent.clone() }), sent)
 }
 
+struct CountingKisTransport {
+    inner: Arc<dyn crate::kis::transport::Transport>,
+    sent: Arc<AtomicU64>,
+}
+
+impl crate::kis::transport::Transport for CountingKisTransport {
+    fn send(&self, request: crate::kis::transport::HttpRequest) -> BoxFuture<'static, Result<crate::kis::transport::HttpResponse, TransportError>> {
+        self.sent.fetch_add(1, Ordering::Relaxed);
+        self.inner.send(request)
+    }
+}
+
+pub fn counted_kis(inner: Arc<dyn crate::kis::transport::Transport>, sent: Arc<AtomicU64>) -> Arc<dyn crate::kis::transport::Transport> {
+    Arc::new(CountingKisTransport { inner, sent })
+}
+
 pub async fn start(config: &Config, state: Arc<AppState>, financial_routes: Router, sends: Arc<AtomicU64>) -> Result<Option<PublicListener>, StartFailure> {
     let Some(settings) = config.public.clone() else { return Ok(None) };
     let PublicSettings { bind, origin, account, limits } = settings;

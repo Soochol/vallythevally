@@ -483,7 +483,7 @@ async fn start_update(State(st): State<Arc<AppState>>, body: Body) -> Result<Jso
 }
 
 fn refuse_without_kiwoom_key(st: &AppState) -> Result<(), ApiFailure> {
-    if !st.route.kis_listed_without_connected_kiwoom() {
+    if !st.route.kis_listed_without_connected_kiwoom() && !st.route.kiwoom_key_missing() {
         return Ok(());
     }
     let refusal = SourceFailure {

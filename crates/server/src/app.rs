@@ -349,6 +349,7 @@ pub async fn start(config: &Config, lock: &InstanceLock, adapters: Adapters) -> 
         None => KiwoomAuth::keyless(Some(TokenFile::new(config.token_path.clone(), lock).with_environment(config.kiwoom_environment))),
     };
     let (kiwoom, sends) = if config.public.is_some() { crate::public::counted(kiwoom) } else { (kiwoom, Arc::new(std::sync::atomic::AtomicU64::new(0))) };
+    let kis = kis.map(|transport| if config.public.is_some() { crate::public::counted_kis(transport, sends.clone()) } else { transport });
     let lane_transport = kiwoom.clone();
     let rest = match kiwoom_spacing {
         None => KiwoomRest::for_environment(kiwoom, auth, clock.clone(), config.kiwoom_environment),

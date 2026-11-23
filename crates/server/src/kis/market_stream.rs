@@ -60,6 +60,10 @@ pub struct KisMarketStream {
 impl KisMarketStream {
     pub fn spawn(connector: Box<dyn Connector>, auth: KisAuth, clock: Clock, directory: watch::Receiver<Option<Arc<Directory>>>, reserved_seats: usize, notices: Option<KisNotices>) -> (KisMarketStream, mpsc::Receiver<StreamEvent>) {
         let claim = notices.as_ref().map(KisNotices::claim);
+        let seats = Arc::new(match &notices {
+            Some(notices) => KisSeats::with_notices(reserved_seats, notices.clone()),
+            None => KisSeats::new(reserved_seats),
+        });
         let (session, session_events) = KisStream::spawn(connector, auth);
         let (desired, desired_rx) = watch::channel(DesiredFeeds::new());
         let (venue, venue_rx) = watch::channel(Venue::Combined);
@@ -76,16 +80,13 @@ impl KisMarketStream {
             clock,
             notice_wanted: notices.as_ref().map(KisNotices::watch_wanted),
             notices: notices.clone(),
+            seats: seats.clone(),
             registered: BTreeSet::new(),
             open: false,
             index_cumulative: HashMap::new(),
             program_last: HashMap::new(),
         };
         tokio::spawn(bridge.run());
-        let seats = Arc::new(match notices {
-            Some(notices) => KisSeats::with_notices(reserved_seats, notices),
-            None => KisSeats::new(reserved_seats),
-        });
         (KisMarketStream { desired, venue, status, seats, _claim: claim }, out_rx)
     }
 
@@ -283,6 +284,7 @@ struct Bridge {
     out: mpsc::Sender<StreamEvent>,
     clock: Clock,
     notices: Option<KisNotices>,
+    seats: Arc<KisSeats>,
     notice_wanted: Option<watch::Receiver<Option<crate::config::Secret<String>>>>,
     registered: BTreeSet<Subscription>,
     open: bool,
@@ -327,6 +329,10 @@ impl Bridge {
 
     fn sync_registrations(&mut self) {
         let mut wanted = subscriptions(&self.desired.borrow(), *self.venue.borrow(), self.directory.borrow().as_deref());
+        if wanted.len() > self.seats.limit() {
+            tracing::warn!(wanted = wanted.len(), limit = self.seats.limit(), "한투 실시간 자리보다 많이 요청돼 자리 수만큼만 등록합니다");
+            wanted = wanted.into_iter().take(self.seats.limit()).collect();
+        }
         wanted.extend(self.notices.as_ref().and_then(KisNotices::subscription));
         if wanted != self.registered {
             self.session.set_desired(wanted.clone());
