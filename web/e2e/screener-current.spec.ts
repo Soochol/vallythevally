@@ -114,7 +114,7 @@ test("처음 수집 실패는 빈 상태이며 실행 중과 실패 뒤에는 �
   await expect(meta(page)).toHaveText(original!);
   expect(await rows(page).allTextContents()).toEqual(originalRows);
   held.reply({ status: 503, body: runError() });
-  await expect(panel(page).getByRole("alert")).toContainText("이전 결과와 수집 시각을 유지합니다");
+  await expect(panel(page).getByRole("alert")).toContainText("이전 결과를 그대로 보입니다");
   await expect(meta(page)).toHaveText(original!);
   expect(await rows(page).allTextContents()).toEqual(originalRows);
 });

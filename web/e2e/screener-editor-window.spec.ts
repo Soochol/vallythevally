@@ -12,7 +12,7 @@ const SENTENCE = "일봉 최근 20일 이내 고가가 60일 신고가인 봉이
 
 const editButton = (page: Page) => panel(page).getByRole("button", { name: "편집", exact: true });
 const nameField = (page: Page) => editorWindow(page).getByRole("textbox", { name: "조건식 이름", exact: true });
-const summary = (page: Page) => panel(page).getByLabel("조건 요약", { exact: true });
+const summary = (page: Page) => panel(page).locator("[data-screen-summary]");
 const resultRows = (page: Page) => panel(page).locator("tr[data-code]");
 const savedScreens = (scenario: Scenario) => scenario.documents.screens().screens;
 
@@ -23,13 +23,12 @@ async function seed(scenario: Scenario, page: Page) {
   await expect(editButton(page)).toBeVisible();
 }
 
-test("패널은 요약만 보이고 편집 창은 패널 왼쪽에 떠서 패널을 눌러도 남으며 Esc로 닫으면 편집 버튼으로 돌아온다", async ({ scenario, page }, info) => {
+test("패널은 조건 요약 한 줄만 보이고 편집 창은 패널 왼쪽에 떠서 패널을 눌러도 남으며 Esc로 닫으면 편집 버튼으로 돌아온다", async ({ scenario, page }, info) => {
   const errors: string[] = [];
   page.on("pageerror", (error) => errors.push(error.message));
   await seed(scenario, page);
-  await expect(summary(page)).toHaveCount(0);
-  await expect(panel(page).getByText(SENTENCE)).toHaveCount(0);
-  await expect(panel(page).getByText("코스피 · ETF 제외")).toHaveCount(0);
+  await expect(summary(page)).toHaveText(`코스피 · ETF 제외 · 조건 1개: ${SENTENCE}`);
+  await expect(summary(page)).toHaveAttribute("title", `코스피 · ETF 제외\n1. ${SENTENCE}`);
   await expect(panel(page).getByRole("group", { name: "문장형 조건식" })).toHaveCount(0);
   await expect(editButton(page)).toHaveAttribute("aria-expanded", "false");
 
@@ -64,7 +63,7 @@ test("창에서 고친 초안은 닫아도 남고 Ctrl+S로 저장하며 N으로
   await page.keyboard.press("Escape");
   await expect(editorWindow(page)).toHaveCount(0);
   await expect(panel(page).getByText("변경됨", { exact: true })).toBeVisible();
-  await expect(summary(page)).toHaveCount(0);
+  await expect(summary(page)).toHaveText(`코스피·코스닥 · ETF 제외 · 조건 1개: ${SENTENCE}`);
   expect((await savedScreens(scenario))[0]!.markets).toEqual(["kospi"]);
 
   await editButton(page).click();
@@ -143,13 +142,13 @@ test("저장한 조건식이 없을 때 새 조건식을 누르면 편집 창이
   await expect(editorWindow(page)).toBeVisible();
   await expect(nameField(page)).toHaveValue("새 조건식");
   await expect(editorWindow(page).getByText("조건 없음 · 대상 종목 전체", { exact: true })).toBeVisible();
-  await expect(summary(page)).toHaveCount(0);
+  await expect(summary(page)).toHaveText("두 시장 · 조건 없음 · 대상 종목 전체");
   await page.keyboard.press("n");
   await page.getByRole("dialog", { name: "조건 추가", exact: true }).getByRole("textbox", { name: "조건 종류 검색" }).fill("신저가");
   await page.keyboard.press("Enter");
   await editorWindow(page).getByRole("button", { name: "저장", exact: true }).click();
   await pollSaved(async () => await savedScreens(scenario)).toMatchObject([{ name: "새 조건식", conditions: [{ kind: "new_low" }] }]);
-  await expect(summary(page)).toHaveCount(0);
+  await expect(summary(page)).toContainText("두 시장 · 조건 1개: 일봉 최근 1일 이내 저가가 ");
 });
 
 test.describe("자료가 있는 저장소", () => {

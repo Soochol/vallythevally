@@ -82,7 +82,7 @@ test("업데이트 상태와 조건식 결과를 표시하고 종목을 칸의 �
     await expect(panel(page).getByRole("list", { name: "조건" })).toHaveText("일봉최근20일 이내에고가60일 신고가인 봉이 있다");
     await expect(panel(page).getByText("ETF", { exact: true })).toBeVisible();
     for (const label of ["ETN", "인프라", "뮤추얼펀드"]) await expect(panel(page).getByText(label, { exact: true })).toBeVisible();
-    await expect(panel(page).getByText("저장 전에도 실행할 수 있습니다")).toBeVisible();
+    await expect(panel(page).locator("[data-screen-summary]")).toHaveText("두 시장 · ETF·ETN·인프라·뮤추얼펀드 제외 · 조건 1개: 일봉 최근 20일 이내 고가가 60일 신고가인 봉이 있다");
   });
 
   await test.step("실행", async () => {
@@ -431,7 +431,8 @@ test.describe("서버와 시계가 어긋난 브라우저", () => {
     const opensFrom = `${kstClock(retryAt + 1)}부터`;
     for (const p of [ahead, behind]) {
       await expect(retryButton(p)).toBeDisabled();
-      await expect(panel(p).getByRole("alert")).toContainText(`${opensFrom} 다시 시도할 수 있습니다.`);
+      await expect(retryButton(p)).toContainText(opensFrom);
+      await expect(panel(p).getByRole("alert")).not.toContainText("다시 시도할 수 있습니다");
       await expectFullReload(p, async item => { await expect(item).toBeDisabled(); await expect(item).toContainText(opensFrom); });
     }
     await ahead.clock.setSystemTime(scenario.now);

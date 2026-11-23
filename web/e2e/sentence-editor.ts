@@ -19,8 +19,8 @@ export async function renameScreen(scope: Locator, name: string) {
 }
 
 export async function screenAction(scope: Locator, action: string) {
-  await scope.getByRole("button", { name: "조건식 메뉴", exact: true }).click();
-  await scope.page().getByRole("menu", { name: "조건식 메뉴", exact: true }).getByRole("menuitem", { name: action, exact: true }).click();
+  await scope.getByRole("button", { name: "스크리너 메뉴", exact: true }).click();
+  await scope.page().getByRole("menu", { name: "스크리너 메뉴", exact: true }).getByRole("menuitem", { name: action, exact: true }).click();
 }
 
 export async function addCondition(scope: Locator, label = "신고가") {
@@ -49,7 +49,10 @@ export async function toggleExclude(scope: Locator, group: "종류" | "상태", 
 
 export async function savedEditor(scope: Locator) {
   await expect(scope.getByText("변경됨", { exact: true })).toHaveCount(0);
-  await expect(scope.getByRole("button", { name: "저장", exact: true })).toBeDisabled();
+  const save = scope.getByRole("button", { name: "저장", exact: true });
+  const panelHeadOnly = await editorWindow(scope.page()).count() === 0 && await scope.evaluate((el) => el.tagName === "SECTION" && el.getAttribute("aria-label") === "조건식 편집");
+  if (panelHeadOnly) await expect(save).toHaveCount(0);
+  else await expect(save).toBeDisabled();
 }
 
 export async function fillNumber(trigger: Locator, value: string) {

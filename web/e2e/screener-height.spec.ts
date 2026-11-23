@@ -1,9 +1,9 @@
 import { writeFile } from "node:fs/promises";
 import type { Locator, Page } from "@playwright/test";
-import { currentResult, runError } from "./fixtures/screener";
+import { allResult, currentResult, emptyStatus, readyStatus, runError } from "./fixtures/screener";
 import type { Screen } from "../src/api/generated/Screen";
 import { cell, chartOf, expect, test } from "./screener-harness";
-import { closeEditorWindow, expandEditor } from "./sentence-editor";
+import { closeEditorWindow, expandEditor, renameScreen, sentenceEditor } from "./sentence-editor";
 import { openResultDetails, openScreener, panel, results, rowOf, rows, runButton, storeLine, updateBand, waitForUpdateToFinish } from "./screener-page";
 
 
@@ -98,7 +98,7 @@ for (const { width, height } of surfaces) {
     const running = await rowGeometry(first);
     await page.screenshot({ path: info.outputPath("running.png"), fullPage: true });
     held.reply({ status: 503, body: runError() });
-    await expect(panel(page).getByRole("alert")).toContainText("이전 결과와 수집 시각을 유지합니다");
+    await expect(panel(page).getByRole("alert")).toContainText("이전 결과를 그대로 보입니다");
     await expect(metadata(page)).toHaveText(original!);
     const failed = await rowGeometry(first);
     await writeFile(info.outputPath("geometry.json"), JSON.stringify({ width, height, success, running, failed }, null, 2));
@@ -184,7 +184,7 @@ for (const [width, height] of [[320, 568], [1280, 600]]) {
     await runButton(page).click();
     const alert = panel(page).getByRole("alert");
     await expect(alert).toContainText("오류 설명 끝");
-    await expect(alert).toContainText("이전 결과와 수집 시각을 유지합니다");
+    await expect(alert).toContainText("이전 결과를 그대로 보입니다");
     await expect(metadata(page)).toHaveText(original!);
     await alert.evaluate((e) => e.scrollIntoView({ block: "start" }));
     await page.screenshot({ path: info.outputPath("long-error-start.png"), fullPage: true });
@@ -202,3 +202,143 @@ for (const [width, height] of [[320, 568], [1280, 600]]) {
     expect(await page.evaluate(() => document.documentElement.scrollHeight <= window.innerHeight)).toBe(true);
   });
 }
+
+const manyRows = () => ({
+  ...allResult(),
+  rows: Array.from({ length: 30 }, (_, index) => ({
+    symbol: `1102${String(index).padStart(2, "0")}`,
+    name: `가상목록${index}`,
+    close: 10_000 + index * 125,
+    changeRate: (index % 5) - 2,
+    matchedDate: "2026-11-06",
+    latestBarDate: "2026-11-06",
+    provisional: index === 1,
+  })),
+});
+
+async function runReady(page: Page, scenario: { documents: { saveScreens(value: { screens: Screen[]; revision: number }): void } }, screener: { showStatus(value: ReturnType<typeof readyStatus>): void; showResult(value: ReturnType<typeof allResult>): void }) {
+  scenario.documents.saveScreens({ screens: [screen], revision: 1 });
+  screener.showStatus(readyStatus());
+  screener.showResult(manyRows());
+  await page.goto("/");
+  await openScreener(page);
+  await runButton(page).click();
+  await expect(rows(page)).toHaveCount(30);
+  await expect(results(page)).toHaveAttribute("aria-busy", "false");
+}
+
+const wholeRowsShown = (page: Page) => rows(page).evaluateAll((list) => list.filter((row) => {
+  const box = row.getBoundingClientRect();
+  let top = 0;
+  let bottom = window.innerHeight;
+  for (let ancestor = row.parentElement; ancestor; ancestor = ancestor.parentElement) {
+    if (!["auto", "scroll", "hidden", "clip"].includes(getComputedStyle(ancestor).overflowY)) continue;
+    const clip = ancestor.getBoundingClientRect();
+    top = Math.max(top, clip.top);
+    bottom = Math.min(bottom, clip.bottom);
+  }
+  const head = row.closest("table")?.querySelector("thead")?.getBoundingClientRect();
+  if (head) top = Math.max(top, head.bottom);
+  return box.height > 0 && box.top >= top - 0.5 && box.bottom <= bottom + 0.5;
+}).length);
+
+test("스크리너 창이 754px이면 결과가 18줄 이상 보이고, 패널이 274px이면 세 줄 이상 보인다", async ({ scenario, screener, page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await runReady(page, scenario, screener);
+  const tall = await panel(page).evaluate((el) => el.getBoundingClientRect().height);
+  await page.setViewportSize({ width: 1440, height: Math.round(900 + 754 - tall) });
+  await expect.poll(() => panel(page).evaluate((el) => Math.round(el.getBoundingClientRect().height))).toBe(754);
+  expect(await wholeRowsShown(page)).toBeGreaterThanOrEqual(18);
+  await page.setViewportSize({ width: 1440, height: Math.round(900 + 274 - tall) });
+  await expect.poll(() => panel(page).evaluate((el) => Math.round(el.getBoundingClientRect().height))).toBe(274);
+  expect(await wholeRowsShown(page)).toBeGreaterThanOrEqual(3);
+});
+
+test("창의 … 메뉴는 하나이고 조건식 일과 전체 다시 받기를 함께 담으며, 저장은 바뀐 것이 있을 때만 보인다", async ({ scenario, screener, page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await runReady(page, scenario, screener);
+  await expect(panel(page).getByRole("button", { name: /메뉴$/ })).toHaveCount(1);
+  const head = sentenceEditor(page);
+  await expect(head.getByRole("button", { name: "저장", exact: true })).toHaveCount(0);
+  await head.getByRole("button", { name: "스크리너 메뉴", exact: true }).click();
+  const menu = page.getByRole("menu", { name: "스크리너 메뉴", exact: true });
+  await expect(menu.getByRole("menuitem", { name: "이름 바꾸기", exact: true })).toBeVisible();
+  await expect(menu.getByRole("menuitem", { name: "전체 다시 받기…", exact: true })).toBeVisible();
+  await expect(menu.getByRole("menuitem", { name: "저장", exact: true })).toBeDisabled();
+  await page.keyboard.press("Escape");
+  await renameScreen(head, "이름 바꾼 조건식");
+  const save = head.getByRole("button", { name: "저장", exact: true });
+  await expect(save).toBeVisible();
+  await expect(save).toHaveCSS("border-top-style", "solid");
+  const [saveBox, runBox] = [(await save.boundingBox())!, (await runButton(page).boundingBox())!];
+  expect(saveBox.x + saveBox.width).toBeLessThan(runBox.x);
+});
+
+test("머리 아래 조건 요약 한 줄이 조건을 줄여 보이고 풍선말에 전체 문장을 둔다", async ({ scenario, screener, page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await runReady(page, scenario, screener);
+  const summary = sentenceEditor(page).locator("[data-screen-summary]");
+  await expect(summary).toHaveText("두 시장 · 조건 3개: 일봉 최근 1일 이내 종가가 1일 신고가인 봉이 있다, 일봉 최근 1일 이내 고가가 1일 신고가인 봉이 있다, 일봉 최근 1일 이내 거래량이 1일 신고거래량인 봉이 있다");
+  await expect(summary).toHaveAttribute("title", "두 시장\n1. 일봉 최근 1일 이내 종가가 1일 신고가인 봉이 있다\n2. 일봉 최근 1일 이내 고가가 1일 신고가인 봉이 있다\n3. 일봉 최근 1일 이내 거래량이 1일 신고거래량인 봉이 있다");
+  await expect(summary).toHaveCSS("font-size", "12px");
+  expect(await summary.evaluate((el) => [getComputedStyle(el).textOverflow, getComputedStyle(el).whiteSpace, el.scrollWidth > el.clientWidth])).toEqual(["ellipsis", "nowrap", true]);
+  const [summaryBox, runBox] = [(await summary.boundingBox())!, (await runButton(page).boundingBox())!];
+  expect(summaryBox.y).toBeGreaterThanOrEqual(runBox.y + runBox.height);
+});
+
+test("잠정 값이 있는 줄과 없는 줄의 현재가 숫자 끝이 같다", async ({ scenario, screener, page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await runReady(page, scenario, screener);
+  const numberEnd = (code: string) => rowOf(page, code).locator("td").nth(1).evaluate((td) => {
+    const text = document.createTreeWalker(td, NodeFilter.SHOW_TEXT, { acceptNode: (node) => /\d/.test(node.textContent ?? "") ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_SKIP }).nextNode()!;
+    const range = document.createRange();
+    range.selectNodeContents(text);
+    return range.getBoundingClientRect().right;
+  });
+  await expect(rowOf(page, "110201").getByLabel("잠정", { exact: true })).toBeVisible();
+  expect(await numberEnd("110201")).toBeCloseTo(await numberEnd("110200"), 1);
+  expect(await numberEnd("110201")).toBeCloseTo(await numberEnd("110202"), 1);
+});
+
+const toneOf = (page: Page, token: string) => page.evaluate((name) => {
+  const probe = document.createElement("span");
+  probe.style.color = `var(${name})`;
+  document.body.append(probe);
+  const color = getComputedStyle(probe).color;
+  probe.remove();
+  return color;
+}, token);
+const dotColor = (page: Page) => updateBand(page).locator(".conn-dot").evaluate((el) => getComputedStyle(el).backgroundColor);
+
+test("일봉 자료가 없으면 점이 경고색이고 업데이트가 멈추면 위험색이다", async ({ scenario, screener, page }) => {
+  scenario.documents.saveScreens({ screens: [screen], revision: 1 });
+  screener.showStatus(emptyStatus());
+  screener.updateTo({ ...emptyStatus(), update: { phase: "recent", done: 3, total: 10, full: false, error: runError("키움에 연결하지 못했습니다", "kiwoom_unreachable").error } });
+  await page.goto("/");
+  await openScreener(page);
+  await expect(updateBand(page)).toContainText("아직 받은 KRX 일봉이 없습니다");
+  expect(await dotColor(page)).toBe(await toneOf(page, "--warning"));
+  await updateBand(page).getByRole("button", { name: "처음 받기" }).click();
+  await expect(updateBand(page)).toContainText("업데이트가 멈췄습니다");
+  expect(await dotColor(page)).toBe(await toneOf(page, "--danger"));
+  expect(await toneOf(page, "--warning")).not.toBe(await toneOf(page, "--danger"));
+});
+
+test("실행이 실패해도 이전 결과 줄이 남고 다시 시도는 테두리 있는 버튼이다", async ({ scenario, screener, page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await runReady(page, scenario, screener);
+  screener.failRun(runError("키움이 응답하지 않습니다"));
+  await runButton(page).click();
+  const alert = panel(page).getByRole("alert");
+  await expect(alert).toContainText("실행하지 못했습니다: 키움이 응답하지 않습니다");
+  await expect(alert).toContainText("이전 결과를 그대로 보입니다");
+  await expect(rows(page)).toHaveCount(30);
+  const retry = alert.getByRole("button", { name: "다시 시도", exact: true });
+  await expect(retry).toBeEnabled();
+  await expect(retry).toHaveCSS("border-top-style", "solid");
+  await expect(retry).toHaveCSS("border-top-width", "1px");
+  screener.showResult(manyRows());
+  await retry.click();
+  await expect(alert).toHaveCount(0);
+  await expect(rows(page)).toHaveCount(30);
+});

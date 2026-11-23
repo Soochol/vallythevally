@@ -214,7 +214,7 @@ test("스크리너의 정렬 표시, 잠정 별표, 옛 일봉 날짜가 그대�
   await expect(screenerPanel(page).getByRole("columnheader", { name: "현재가 순으로 정렬", exact: true })).toHaveAttribute("aria-sort", /ascending|descending/);
   await expect(screenerPanel(page).getByRole("columnheader", { name: "종목 순으로 정렬", exact: true })).toHaveAttribute("aria-sort", "none");
   await expect(rowOf(page, rows[4]!.symbol).getByLabel("잠정", { exact: true })).toBeVisible();
-  await expect(rowOf(page, rows[5]!.symbol)).toContainText("11-04");
+  await expect(rowOf(page, rows[5]!.symbol).getByRole("img", { name: "최신 일봉 11-04", exact: true })).toBeVisible();
   await expect(rowOf(page, rows[5]!.symbol).locator("td").nth(1)).toHaveAttribute("title", /최신 일봉 2026-11-04/);
 });
 

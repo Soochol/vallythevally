@@ -47,8 +47,8 @@ export async function expectCellOn(page: Page, row: Locator, label: string) {
 export const savedTo = (page: Page, path: string) => page.waitForResponse((r) => r.request().method() === "PUT" && new URL(r.url()).pathname === path && r.ok());
 
 export async function openResultDetails(page: Page) {
-  const details = results(page).locator("details");
-  if (await details.count() && await details.getAttribute("open") === null) await details.locator("summary").click();
+  const info = results(page).getByRole("button", { name: "수집 시각과 제외 내역", exact: true });
+  if (await info.count() && await info.getAttribute("aria-expanded") !== "true") await info.click();
 }
 
 export const screenChooser = (page: Page) => panel(page).getByRole("button", { name: "조건식 고르기", exact: true }).or(panel(page).getByRole("button", { name: /^조건식: / }));
