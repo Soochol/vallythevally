@@ -475,6 +475,17 @@ impl Harness {
         }
     }
 
+    async fn until_journal_event(&self, event: &str) {
+        for _ in 0..200_000 {
+            if !self.journal_of(event).is_empty() {
+                return;
+            }
+            sleep(Duration::from_secs(1)).await;
+        }
+        let recorded: Vec<Value> = self.journal().into_iter().map(|record| record["event"].clone()).collect();
+        panic!("{event} 기록이 일지에 오지 않았다: 일지 {recorded:?}, 경보 {:?}", self.status_now().alerts);
+    }
+
     async fn until_finalize_finished(&self, runs: usize) {
         for _ in 0..200_000 {
             if self.finalizer.finished.load(Ordering::SeqCst) >= runs {
@@ -719,6 +730,7 @@ async fn a_zero_s_that_arrives_at_the_changed_open_time_is_seen_before_the_chang
 #[tokio::test(start_paused = true)]
 async fn an_index_without_todays_candle_alerts_a_mismatch_and_reaches_the_complete_file() {
     let harness = Harness::start(Config { candles: Candles::Days(vec![20261112, 20261113, 20261116, 20261117]), ..Config::default() });
+    harness.until_journal_event("index_checked").await;
     harness.until_finalize_finished(1).await;
     assert!(harness.alert_kinds().contains(&"index_mismatch".to_owned()), "{:?}", harness.status_now().alerts);
     let checked = harness.journal_of("index_checked");
@@ -733,6 +745,7 @@ async fn an_index_without_todays_candle_alerts_a_mismatch_and_reaches_the_comple
 #[tokio::test(start_paused = true)]
 async fn a_failed_index_request_is_recorded_as_failed_and_the_day_goes_on() {
     let harness = Harness::start(Config { candles: Candles::Failing, ..Config::default() });
+    harness.until_journal_event("index_checked").await;
     harness.until_finalize_finished(1).await;
     let checked = harness.journal_of("index_checked");
     assert_eq!(checked[0]["result"], "failed");
