@@ -1,8 +1,9 @@
 import { expect, test } from "vitest";
-import { windowId, type WindowKind, type WindowRef } from "../kinds";
+import { WINDOW_HEAD_HEIGHT, WINDOW_KIND_LIST, WINDOW_KINDS, windowId, type WindowKind, type WindowRef } from "../kinds";
 import type { DockNode, DockPlacement } from "../placement";
 import { defaultDock, fitDock, type WindowList } from "./fit";
-import { layoutDock } from "./geometry";
+import { drawDock, layoutDock, type DockSpace } from "./geometry";
+import { listGroups, selectTab } from "./tree";
 
 const ref = (id: string, kind: WindowKind): WindowRef => ({ id: windowId(id), kind });
 const group = (id: string, tabs: string[], active = tabs[0] ?? ""): DockNode => ({ kind: "group", id, tabs: tabs.map(windowId), active: windowId(active) });
@@ -87,4 +88,50 @@ test("모든 묶음이 사라지면 떠 있지 않은 창으로 기본 배치를
 test("맞출 것이 없으면 받은 배치를 그대로 돌려준다", () => {
   const dock: DockPlacement = { root: row(0.7, group("g1", ["c1", "c2"], "c2"), group("g2", ["w", "s"])), floats: [float("o")] };
   expect(fitDock(dock, [c1, c2, w, s, o])).toBe(dock);
+});
+
+const kindOf = (windows: readonly WindowRef[], id: string) => windows.find((window) => window.id === id)!.kind;
+const lowGroups = (dock: DockPlacement, space: DockSpace) =>
+  layoutDock(drawDock(dock, space).dock.root, space.area, space.gap).groups
+    .filter(({ group: node, rect }) => rect.h < WINDOW_KINDS[kindOf(space.windows, node.active)].minSize.h + WINDOW_HEAD_HEIGHT)
+    .map(({ group: node, rect }) => [node.active, rect.h]);
+
+test("빈 레이아웃에 창 열 가지를 차례로 더해도 어느 묶음도 고른 탭 종류의 최소 높이보다 낮게 그려지지 않는다", () => {
+  const area = { w: 1392, h: 790 };
+  let windows: WindowList = [c1];
+  let dock = fitDock(null, windows);
+  for (const kind of WINDOW_KIND_LIST) {
+    const added = ref(`${kind}-new`, kind);
+    windows = [...windows, added];
+    dock = selectTab(fitDock(dock, windows), added.id);
+    expect({ kind, low: lowGroups(dock, { area, gap: 6, windows }) }).toEqual({ kind, low: [] });
+  }
+  expect(listGroups(dock.root).flatMap((node) => node.tabs)).toHaveLength(11);
+});
+
+test("창 열 가지를 한꺼번에 기본 배치해도 어느 묶음도 고른 탭 종류의 최소 높이보다 낮게 그려지지 않는다", () => {
+  const windows: WindowList = [c1, ...WINDOW_KIND_LIST.filter((kind) => kind !== "chart").map((kind) => ref(kind, kind))];
+  const area = { w: 1392, h: 790 };
+  for (const dock of [defaultDock(windows), defaultDock(windows, { h: area.h, gap: 6 })]) {
+    expect(listGroups(dock.root).map((node) => node.tabs)).toEqual([["c1"], ["brokers"], ["watchlist", "screener", "indicators", "trades", "book", "program", "order", "ranking"]]);
+    expect(lowGroups(dock, { area, gap: 6, windows })).toEqual([]);
+  }
+});
+
+test("넓은 자리 종류를 세로로 쌓아 최소 높이를 못 지키면 둘째부터 한 묶음의 탭으로 둔다", () => {
+  const b = ref("b", "brokers");
+  const windows: WindowList = [c1, c2, b, w];
+  expect(listGroups(defaultDock(windows).root).map((node) => node.tabs)).toEqual([["c1"], ["c2"], ["b"], ["w"]]);
+  expect(listGroups(defaultDock(windows, { h: 790, gap: 6 }).root).map((node) => node.tabs)).toEqual([["c1"], ["c2"], ["b"], ["w"]]);
+  const short = defaultDock(windows, { h: 600, gap: 6 });
+  expect(listGroups(short.root).map((node) => [node.id, node.tabs, node.active])).toEqual([["g1", ["c1"], "c1"], ["g2", ["c2", "b"], "c2"], ["g3", ["w"], "w"]]);
+  expect(lowGroups(short, { area: { w: 1392, h: 600 }, gap: 6, windows })).toEqual([]);
+});
+
+test("호가주문은 세로 자리의 탭으로 들어가 높이를 가득 받는다", () => {
+  const order = ref("o", "order");
+  const dock = selectTab(fitDock(defaultDock([c1, w, s]), [c1, w, s, order]), order.id);
+  expect(dock.root).toEqual(row(0.72, group("g1", ["c1"]), group("g2", ["w", "s", "o"], "o")));
+  const boxes = layoutDock(dock.root, { w: 1392, h: 790 }, 6).groups;
+  expect(boxes.find((box) => box.group.active === order.id)?.rect.h).toBe(790);
 });

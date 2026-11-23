@@ -104,3 +104,15 @@ test("최소 크기로 커져 보이는 떠 있는 창도 첫 캔버스에서 �
   expect(rectsForArea(result, windows, room.canvas)[c]).toEqual(shown);
   expect(result.order.at(-1)).toBe(c);
 });
+
+test("처음 캔버스로 옮길 때 픽셀 그대로면 겹친 쌍이 셋을 넘는 배치는 가지런히 놓는다", () => {
+  const six: WindowList = [{ id: a, kind: "chart" }, { id: c, kind: "watchlist" }, { id: d, kind: "trades" }, { id: windowId("s"), kind: "screener" }, { id: windowId("k"), kind: "book" }, { id: windowId("p"), kind: "program" }];
+  const dock: DockPlacement = { root: { kind: "group", id: "g1", tabs: six.map((window) => window.id), active: a }, floats: [] };
+  const canvas = canvasFromDock(dock, six, room);
+  expect(countOverlaps(Object.values(rectsForArea(canvas, six, room.canvas)))).toBe(0);
+  expect(canvas.order).toEqual(six.map((window) => window.id));
+  const three: DockPlacement = { root: { kind: "group", id: "g1", tabs: [a, c, d], active: a }, floats: [] };
+  const kept = canvasFromDock(three, [six[0], six[1]!, six[2]!], room);
+  expect(toPx(kept.rects[a]!, room.canvas)).toEqual({ x: 0, y: 0, ...room.dock.area });
+  expect(countOverlaps(Object.values(rectsForArea(kept, [six[0], six[1]!, six[2]!], room.canvas)))).toBe(3);
+});

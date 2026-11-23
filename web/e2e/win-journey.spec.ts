@@ -445,7 +445,12 @@ for (const mode of MODES) {
   test(`${mode}: 차트 넷과 옆 창의 배치를 두 화면 크기로 기록한다`, async ({ page, scenario }, testInfo) => {
     seed(scenario, 4, mode);
     await page.goto("/");
-    await ready(page, 4);
+    await ready(page, mode === "dock" ? 3 : 4);
+    if (mode === "dock") {
+      await page.locator("#window-tab-cell-3").click();
+      await expect(cell(page, 4)).toHaveAttribute("aria-busy", "false");
+      await expect(chartOf(cell(page, 4))).toHaveAttribute("data-bar-count", /^[1-9]\d*$/);
+    }
     if (mode === "canvas") await page.getByRole("button", { name: /^가지런히/ }).click();
     await atSizes(page, testInfo, `${mode}-four-charts`);
     await noScroll(page);

@@ -419,8 +419,9 @@ test("일반 차트 탭을 영역 밖이나 거절한 자리에 놓으면 활성
   twoCharts(scenario);
   await page.setViewportSize({ width: 1440, height: 450 });
   await page.goto("/");
-  await expect(cell(page, 2)).toHaveAttribute("aria-busy", "false");
+  await expect(cell(page)).toHaveAttribute("aria-busy", "false");
   await page.locator("#window-tab-cell-1").click();
+  await expect(cell(page, 2)).toHaveAttribute("aria-busy", "false");
   const active = page.locator("#window-tab-cell-1");
   await expect(active).toHaveAttribute("data-active-cell", "");
   for (const outside of [true, false]) {

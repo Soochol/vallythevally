@@ -302,11 +302,12 @@ test("작은 데스크톱 창에서도 문서가 넘치지 않는다", async ({ 
   twoCharts(scenario);
   await page.goto("/");
   await expect(cell(page, 2)).toHaveAttribute("aria-busy", "false");
-  for (const size of [{ width: 1024, height: 768 }, { width: 1280, height: 300 }]) {
+  for (const { groups, ...size } of [{ width: 1024, height: 768, groups: 3 }, { width: 1280, height: 300, groups: 2 }]) {
     await page.setViewportSize(size);
     await expect.poll(() => pageScroll(page)).toEqual([0, 0]);
+    await expect(page.locator("[data-dock-group]")).toHaveCount(groups);
     const area = await boxOf(workspace(page));
-    for (const n of [1, 2, 3]) expect(inside(await boxOf(group(page, n)), area)).toBe(true);
+    for (let n = 1; n <= groups; n += 1) expect(inside(await boxOf(group(page, n)), area)).toBe(true);
   }
 });
 

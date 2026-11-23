@@ -1,6 +1,6 @@
 import { WINDOW_HEAD_HEIGHT, WINDOW_KINDS, type WindowId, type WindowRef } from "../kinds";
 import type { DockNode, DockPlacement, Rect } from "../placement";
-import { updateSplit, type GroupNode, type SplitNode, type SplitPath } from "./tree";
+import { listGroups, rewriteGroups, updateSplit, type GroupNode, type SplitNode, type SplitPath } from "./tree";
 
 export type Size = { w: number; h: number };
 export type DockSpace = { area: Size; gap: number; windows: readonly WindowRef[] };
@@ -88,6 +88,72 @@ export function layoutDock(root: DockNode, area: Size, gap: number): DockLayout 
   };
   visit(root, { x: 0, y: 0, ...space.area }, []);
   return layout;
+}
+
+export type DrawnDock = { dock: DockPlacement; folds: number };
+
+function overflowOf(root: DockNode, space: DockSpace): number {
+  const least = dockMinSize(root, space);
+  return Math.max(0, least.w - space.area.w) + Math.max(0, least.h - space.area.h);
+}
+
+function foldInto(lone: GroupNode, sibling: DockNode, leads: boolean): DockNode {
+  const groups = listGroups(sibling);
+  const target = leads ? groups[0] : groups.at(-1);
+  return rewriteGroups(sibling, (group) => (group === target ? { ...group, tabs: leads ? [...lone.tabs, ...group.tabs] : [...group.tabs, ...lone.tabs] } : group));
+}
+
+function foldGroup(node: DockNode, id: string): DockNode {
+  if (node.kind === "group") return node;
+  if (node.first.kind === "group" && node.first.id === id) return foldInto(node.first, node.second, true);
+  if (node.second.kind === "group" && node.second.id === id) return foldInto(node.second, node.first, false);
+  const first = foldGroup(node.first, id);
+  const second = foldGroup(node.second, id);
+  return first === node.first && second === node.second ? node : { ...node, first, second };
+}
+
+function foldToFit(root: DockNode, space: DockSpace): { root: DockNode; folds: number } {
+  let current = root;
+  let folds = 0;
+  for (let over = overflowOf(current, space); over > 0 && current.kind === "split"; over = overflowOf(current, space)) {
+    const groups = listGroups(current).reverse();
+    const relieved = groups.map((group) => foldGroup(current, group.id)).find((tried) => overflowOf(tried, space) < over);
+    if (!relieved) break;
+    current = relieved;
+    folds += 1;
+  }
+  return { root: current, folds };
+}
+
+function pickTab(root: DockNode, before: DockNode, pick: WindowId | null): DockNode {
+  if (pick === null) return root;
+  const tabCounts = new Map(listGroups(before).map((group) => [group.id, group.tabs.length]));
+  return rewriteGroups(root, (group) => (group.tabs.length > (tabCounts.get(group.id) ?? 0) && group.tabs.includes(pick) && group.active !== pick ? { ...group, active: pick } : group));
+}
+
+function pressNode(node: DockNode, size: Size, space: DockSpace): DockNode {
+  if (node.kind === "group") return node;
+  const row = node.dir === "row";
+  const along = row ? size.w : size.h;
+  const firstMin = dockMinSize(node.first, space);
+  const secondMin = dockMinSize(node.second, space);
+  const firstLeast = row ? firstMin.w : firstMin.h;
+  const secondLeast = row ? secondMin.w : secondMin.h;
+  const savedLead = leadLength(node.ratio, along, space.gap);
+  const lead = firstLeast + space.gap + secondLeast > along ? savedLead : Math.max(firstLeast, Math.min(along - space.gap - secondLeast, savedLead));
+  const ratio = lead === savedLead ? node.ratio : ratioForLead(lead, along, space.gap);
+  const rest = along - lead - Math.min(space.gap, along - lead);
+  const first = pressNode(node.first, row ? { w: lead, h: size.h } : { w: size.w, h: lead }, space);
+  const second = pressNode(node.second, row ? { w: rest, h: size.h } : { w: size.w, h: rest }, space);
+  return ratio === node.ratio && first === node.first && second === node.second ? node : { ...node, ratio, first, second };
+}
+
+export function drawDock(dock: DockPlacement, space: DockSpace, pick: WindowId | null = null): DrawnDock {
+  const px = wholePixels(space);
+  if (px.area.w <= 0 || px.area.h <= 0) return { dock, folds: 0 };
+  const folded = foldToFit(dock.root, px);
+  const root = pressNode(pickTab(folded.root, dock.root, pick), px.area, px);
+  return { dock: root === dock.root ? dock : { ...dock, root }, folds: folded.folds };
 }
 
 export type DividerResult = { dock: DockPlacement; clamped: boolean };

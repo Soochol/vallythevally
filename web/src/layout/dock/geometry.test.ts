@@ -1,7 +1,8 @@
 import { expect, test } from "vitest";
 import { windowId, type WindowKind, type WindowRef } from "../kinds";
 import type { DockNode, DockPlacement, Rect } from "../placement";
-import { dockMinSize, dropTarget, heldMinSize, layoutDock, moveDivider, tabsMinSize, type DockSpace } from "./geometry";
+import { dockMinSize, drawDock, dropTarget, heldMinSize, layoutDock, moveDivider, tabsMinSize, type DockSpace } from "./geometry";
+import { listGroups } from "./tree";
 
 const ref = (id: string, kind: WindowKind): WindowRef => ({ id: windowId(id), kind });
 const group = (id: string, tabs: string[]): DockNode => ({ kind: "group", id, tabs: tabs.map(windowId), active: windowId(tabs[0] ?? "") });
@@ -137,4 +138,49 @@ test("무한대 비율은 끝까지 밀고, 크기를 모르는 영역에서는 
   expect(pushed.clamped).toBe(true);
   expect(layoutDock(pushed.dock.root, space.area, space.gap).groups[2]?.rect.w).toBe(280);
   for (const w of [NaN, Infinity]) expect(moveDivider(dock, [], 0.5, { ...space, area: { w, h: 684 } })).toEqual({ dock, clamped: true });
+});
+
+const tradingWindows = [ref("c1", "chart"), ref("b", "brokers"), ref("o", "order"), ref("w", "watchlist")];
+const rowOf = (ratio: number, first: DockNode, second: DockNode): DockNode => ({ kind: "split", dir: "row", ratio, first, second });
+const at = (w: number, h = 790): DockSpace => ({ area: { w, h }, gap: 6, windows: tradingWindows });
+const drawnBoxes = (saved: DockPlacement, room: DockSpace) => layoutDock(drawDock(saved, room).dock.root, room.area, room.gap).groups;
+
+test("그릴 때 자리가 줄어도 호가주문 묶음은 최소 폭 420px을 지키고 저장된 비율은 그대로 둔다", () => {
+  const saved: DockPlacement = { root: rowOf(0.6, group("g1", ["c1"]), group("g2", ["o"])), floats: [] };
+  const wide = drawDock(saved, at(1392));
+  expect(wide).toEqual({ dock: saved, folds: 0 });
+  expect(wide.dock).toBe(saved);
+  const narrow = drawDock(saved, at(976));
+  expect(narrow.folds).toBe(0);
+  expect(drawnBoxes(saved, at(976)).map((box) => [box.group.id, box.rect.w])).toEqual([["g1", 976 - 6 - 420], ["g2", 420]]);
+  expect(saved.root.kind === "split" && saved.root.ratio).toBe(0.6);
+  expect(undersized(narrow.dock.root, at(976))).toEqual([]);
+  expect(drawDock(narrow.dock, at(976)).dock).toBe(narrow.dock);
+});
+
+test("최소 크기를 다 담을 수 없으면 뒤 묶음을 이웃 묶음의 탭으로 접어 그리고 넓히면 원래 묶음이 돌아온다", () => {
+  const saved: DockPlacement = { root: rowOf(0.35, group("g1", ["c1"]), rowOf(0.45, group("g2", ["b"]), group("g3", ["o"]))), floats: [] };
+  const narrow = drawDock(saved, at(976));
+  expect(narrow.folds).toBe(1);
+  expect(listGroups(narrow.dock.root).map((node) => [node.id, node.tabs, node.active])).toEqual([["g1", ["c1"], "c1"], ["g2", ["b", "o"], "b"]]);
+  expect(undersized(narrow.dock.root, at(976))).toEqual([]);
+  expect(listGroups(saved.root).map((node) => node.tabs)).toEqual([["c1"], ["b"], ["o"]]);
+  expect(drawDock(saved, at(1392))).toEqual({ dock: saved, folds: 0 });
+});
+
+test("접힌 묶음에서 고른 탭만 그 묶음의 보이는 탭이 되고 접히지 않은 묶음은 고른 탭을 따르지 않는다", () => {
+  const saved: DockPlacement = { root: rowOf(0.5, group("g1", ["c1", "w"]), rowOf(0.5, group("g2", ["b"]), group("g3", ["o"]))), floats: [] };
+  const picked = drawDock(saved, at(976), windowId("o")).dock;
+  expect(listGroups(picked.root).map((node) => node.active)).toEqual(["c1", "o"]);
+  expect(listGroups(drawDock(saved, at(976), windowId("w")).dock.root).map((node) => node.active)).toEqual(["c1", "b"]);
+});
+
+test("높이가 모자란 세로 쌓기는 높이를 넘긴 묶음을 접고, 묶음 하나뿐이면 그대로 그린다", () => {
+  const stacked: DockPlacement = { root: { kind: "split", dir: "column", ratio: 0.5, first: group("g1", ["c1"]), second: group("g2", ["o"]) }, floats: [] };
+  const short = drawDock(stacked, at(1392, 600));
+  expect(short.folds).toBe(1);
+  expect(listGroups(short.dock.root).map((node) => node.tabs)).toEqual([["c1", "o"]]);
+  const lone: DockPlacement = { root: group("g1", ["o"]), floats: [] };
+  expect(drawDock(lone, at(300, 300))).toEqual({ dock: lone, folds: 0 });
+  expect(drawDock(stacked, at(0, 0)).dock).toBe(stacked);
 });

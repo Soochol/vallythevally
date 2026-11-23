@@ -3,10 +3,11 @@ import { fitCanvas } from "../../layout/canvas/arrange";
 import { workArea } from "../../layout/canvas/geometry";
 import { placementForMode } from "../../layout/modes";
 import { fitDock } from "../../layout/dock/fit";
-import { layoutDock, type DockSpace } from "../../layout/dock/geometry";
+import { drawDock, layoutDock, type DockSpace } from "../../layout/dock/geometry";
 import { findJunctions } from "../../layout/dock/junction";
 import type { DockPlacement } from "../../layout/placement";
 import { groupOfWindow, listGroups } from "../../layout/dock/tree";
+import type { WindowId } from "../../layout/kinds";
 import { useLayoutStore, windowRefs } from "../../stores/layout";
 import { useSelectionStore } from "../../stores/selection";
 import { useUiStore } from "../../stores/ui";
@@ -24,6 +25,8 @@ import { useDockMaximize } from "./useDockMaximize";
 import { WindowHost } from "./WindowHost";
 import { CANVAS_DOCK_HEIGHT, DOCK_GAP, useElementSize } from "./size";
 
+const FOLD_NOTICE = "자리가 좁아 창 묶음 일부를 탭으로 접었습니다 · 창을 넓히면 돌아옵니다";
+
 export function Workspace() {
   const root = useRef<HTMLElement>(null);
   const parking = useRef<HTMLDivElement>(null);
@@ -37,12 +40,20 @@ export function Workspace() {
   const dock = useMemo(() => fitDock(saved, refs), [saved, refs]);
   const canvas = useMemo(() => canvasArea && fitCanvas(placement.canvas, refs, canvasArea), [placement.canvas, refs, canvasArea]);
   const [draft, setDraft] = useState<DockPlacement | null>(null);
-  const space: DockSpace | null = area && { area, gap: DOCK_GAP, windows: refs };
-  const interaction = useDockInteraction({ root, dock, space, enabled: mode === "dock" });
-  const shown = draft ?? interaction.shown;
-  const maximize = useDockMaximize({ dock, enabled: mode === "dock", dragging: interaction.dragging });
+  const [pick, setPick] = useState<WindowId | null>(null);
+  const space: DockSpace | null = useMemo(() => area && { area, gap: DOCK_GAP, windows: refs }, [area, refs]);
+  const drawn = useMemo(() => (space && mode === "dock" ? drawDock(dock, space, pick) : { dock, folds: 0 }), [dock, space, mode, pick]);
+  const interaction = useDockInteraction({ root, dock: drawn.dock, saved: dock, space, enabled: mode === "dock", onPick: setPick });
+  const pending = draft ?? interaction.shown;
+  const shown = useMemo(() => (space && pending !== drawn.dock ? drawDock(pending, space, pick).dock : pending), [pending, drawn.dock, space, pick]);
+  const maximize = useDockMaximize({ dock: drawn.dock, enabled: mode === "dock", dragging: interaction.dragging });
   const activeCell = useSelectionStore((s) => s.activeCell);
-  const shownCharts = useMemo(() => [...listGroups(dock.root).filter((group) => maximize.maximized === null || group.id === maximize.maximized).map((group) => group.active), ...dock.floats.map((float) => float.window)].filter((id) => windows.some((w) => w.id === id && w.kind === "chart")), [dock, windows, maximize.maximized]);
+  const shownCharts = useMemo(() => [...listGroups(drawn.dock.root).filter((group) => maximize.maximized === null || group.id === maximize.maximized).map((group) => group.active), ...drawn.dock.floats.map((float) => float.window)].filter((id) => windows.some((w) => w.id === id && w.kind === "chart")), [drawn.dock, windows, maximize.maximized]);
+  const folded = drawn.folds > 0;
+
+  useEffect(() => {
+    if (folded) useSelectionStore.getState().showToast(FOLD_NOTICE);
+  }, [folded]);
 
   useEffect(() => {
     if (mode === "dock" && saved && dock !== saved) useLayoutStore.getState().settleDock(dock);
@@ -68,8 +79,8 @@ export function Workspace() {
     <main ref={root} aria-label="작업 영역" className="workspace" data-dock-dragging={interaction.dragging ? "" : undefined} onLostPointerCapture={interaction.lostCapture}>
       {mode === "canvas" && canvas && canvasArea ? <CanvasWorkspace canvas={canvas} windows={windows} area={canvasArea} /> : null}
       {mode === "dock" && boxes?.groups.map(({ group, rect }, index) => (maximizedGroup && group.id !== maximizedGroup.group.id ? null : <DockGroup key={group.id} group={group} rect={maximizedGroup && space ? { x: 0, y: 0, w: space.area.w, h: space.area.h } : rect} number={index + 1} interaction={interaction} maximized={maximizedGroup !== undefined} onToggleMaximize={() => maximize.toggle(group.id)} />))}
-      {mode === "dock" && space && !maximizedGroup && boxes?.gutters.map((box) => <Divider key={box.path.join("-") || "root"} box={box} dock={dock} space={space} onDraft={setDraft} />)}
-      {mode === "dock" && space && !maximizedGroup && boxes && findJunctions(boxes).map((junction) => <DockJunction key={`${junction.rowPath.join("-")}|${junction.columnPath.join("-")}`} junction={junction} layout={boxes} dock={dock} space={space} onDraft={setDraft} />)}
+      {mode === "dock" && space && !maximizedGroup && boxes?.gutters.map((box) => <Divider key={box.path.join("-") || "root"} box={box} dock={drawn.dock} space={space} onDraft={setDraft} />)}
+      {mode === "dock" && space && !maximizedGroup && boxes && findJunctions(boxes).map((junction) => <DockJunction key={`${junction.rowPath.join("-")}|${junction.columnPath.join("-")}`} junction={junction} layout={boxes} dock={drawn.dock} space={space} onDraft={setDraft} />)}
       {mode === "dock" && area && <DockFloats dock={shown} windows={windows} area={area} interaction={interaction} />}
       <div ref={parking} hidden inert />
       {windows.map((window) => {
@@ -81,7 +92,7 @@ export function Workspace() {
       {mode === "dock" && preview && preview.kind !== "unchanged" && <DockDropPreview preview={preview} />}
       {mode === "dock" && interaction.grab && <DockTabGhost grab={interaction.grab} />}
       <div role="status" className="sr-only">{mode === "dock" && preview && preview.kind !== "unchanged" ? preview.label : ""}</div>
-      {mode === "dock" && interaction.menu && space && <DockTabMenu key={interaction.menu.window} interaction={interaction} dock={dock} space={space} root={root} maximized={maximize.maximized} onToggleMaximize={maximize.toggle} />}
+      {mode === "dock" && interaction.menu && space && <DockTabMenu key={interaction.menu.window} interaction={interaction} dock={drawn.dock} space={space} root={root} maximized={maximize.maximized} onToggleMaximize={maximize.toggle} />}
     </main>
   );
 }

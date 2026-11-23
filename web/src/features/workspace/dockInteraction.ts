@@ -30,19 +30,20 @@ export const focusTab = (id: WindowId) => requestAnimationFrame(() => focusWitho
 function choose(id: WindowId) {
   if (useLayoutStore.getState().layout.windows.some((window) => window.id === id && window.kind === "chart")) useSelectionStore.getState().setActiveCell(id);
 }
-function selectTab(id: WindowId) {
-  useLayoutStore.getState().selectTab(id);
-  choose(id);
-}
 function minimumNotice(window: WindowState) {
   const min = minWindowSize(window.kind);
   useSelectionStore.getState().showToast(`${windowName(useLayoutStore.getState().layout.windows, window)} 창은 ${min.w}×${min.h}보다 작게 줄일 수 없습니다`);
 }
 
-export function useDockInteraction({ root, dock, space, enabled }: { root: RefObject<HTMLElement | null>; dock: DockPlacement; space: DockSpace | null; enabled: boolean }) {
+export function useDockInteraction({ root, dock, saved, space, enabled, onPick }: { root: RefObject<HTMLElement | null>; dock: DockPlacement; saved: DockPlacement; space: DockSpace | null; enabled: boolean; onPick(window: WindowId): void }) {
   const gesture = useRef<Gesture>({ kind: "idle" });
-  const current = useRef({ dock, space, enabled });
-  current.current = { dock, space, enabled };
+  const current = useRef({ dock, saved, space, enabled, onPick });
+  current.current = { dock, saved, space, enabled, onPick };
+  const selectTab = (id: WindowId) => {
+    current.current.onPick(id);
+    useLayoutStore.getState().selectTab(id);
+    choose(id);
+  };
   const [outcome, setOutcome] = useState<Outcome | null>(null);
   const [dragging, setDragging] = useState(false);
   const [menu, setMenu] = useState<TabMenu | null>(null);
@@ -102,7 +103,7 @@ export function useDockInteraction({ root, dock, space, enabled }: { root: RefOb
   const execute = (command: DockCommand) => {
     const latest = current.current;
     const state = useLayoutStore.getState();
-    if (!latest.enabled || !latest.space || (state.layout.placement.dock !== null && state.layout.placement.dock !== latest.dock)) return;
+    if (!latest.enabled || !latest.space || (state.layout.placement.dock !== null && state.layout.placement.dock !== latest.saved)) return;
     const plan = evaluateDock(latest.dock, command, latest.space);
     if (plan.kind === "blocked") useSelectionStore.getState().showToast(plan.label, { tone: "warning" });
     if (plan.kind === "change") { state.commitDock({ session: state.session, expected: state.layout.placement.dock, next: plan.dock }); choose(command.window); }
@@ -198,12 +199,12 @@ export function useDockInteraction({ root, dock, space, enabled }: { root: RefOb
     if (operation.kind === "float-move" && event.target instanceof Element && event.target.closest("button, input, a, select")) return;
     const area = workArea(space.area.w, space.area.h);
     const state = useLayoutStore.getState();
-    if (!area || (state.layout.placement.dock !== null && state.layout.placement.dock !== dock)) return;
+    if (!area || (state.layout.placement.dock !== null && state.layout.placement.dock !== saved)) return;
     const capture = operation.kind === "tab" ? root.current! : event.currentTarget;
-    gesture.current = { kind: "pressed", start: { pointer: event.pointerId, window, operation, point: { x: event.clientX, y: event.clientY }, dock, expected: state.layout.placement.dock, area, session: state.session, topology: topologyOf(state.layout.windows), capture } };
+    gesture.current = { kind: "pressed", start: { pointer: event.pointerId, window, operation, point: { x: event.clientX, y: event.clientY }, dock: operation.kind === "tab" ? dock : saved, expected: state.layout.placement.dock, area, session: state.session, topology: topologyOf(state.layout.windows), capture } };
     focusWithoutActivation(event.currentTarget);
     capture.setPointerCapture(event.pointerId);
-    if (operation.kind !== "tab") { choose(window.id); setOutcome({ draft: frontFloat(dock, window.id), next: dock, preview: { kind: "unchanged" }, guides: NO_GUIDES, atMinimum: false, grab: null }); }
+    if (operation.kind !== "tab") { choose(window.id); setOutcome({ draft: frontFloat(saved, window.id), next: saved, preview: { kind: "unchanged" }, guides: NO_GUIDES, atMinimum: false, grab: null }); }
   };
   const openMenu = (window: WindowId, x: number, y: number) => {
     focusWithoutActivation(document.getElementById(`window-tab-${window}`));
@@ -223,14 +224,14 @@ export function useDockInteraction({ root, dock, space, enabled }: { root: RefOb
   const detach = (window: WindowId) => {
     const state = useLayoutStore.getState();
     const area = space && workArea(space.area.w, space.area.h);
-    if (!enabled || !space || !area || (state.layout.placement.dock !== null && state.layout.placement.dock !== dock)) return;
+    if (!enabled || !space || !area || (state.layout.placement.dock !== null && state.layout.placement.dock !== saved)) return;
     const rect = detachedRect(dock, window, space, area);
     if (rect && state.commitDock({ session: state.session, expected: state.layout.placement.dock, next: detachWindow(dock, window, rect) })) { choose(window); focusTab(window); }
   };
   const lostCapture = (event: PointerEvent<HTMLElement>) => { const active = gesture.current; if (active.kind !== "idle" && active.start.pointer === event.pointerId) finishRef.current(true); };
   const floatBindings = (window: WindowState): FrameBindings => {
     const area = space && workArea(space.area.w, space.area.h);
-    const rect = area && floatRects(dock, space!.windows, area)[window.id];
+    const rect = area && floatRects(saved, space!.windows, area)[window.id];
     return {
       activate: (event) => {
         if (!enabled || gesture.current.kind !== "idle") return;
@@ -238,7 +239,7 @@ export function useDockInteraction({ root, dock, space, enabled }: { root: RefOb
         if (target instanceof Element && (target.closest("[data-resize-handle]") || (target.closest("[data-window-header]") && !target.closest("button")))) return;
         choose(window.id);
         if (target instanceof Element && target.closest(".window-action")) return;
-        useLayoutStore.getState().commitDock({ session, expected: dock, next: frontFloat(dock, window.id) });
+        useLayoutStore.getState().commitDock({ session, expected: saved, next: frontFloat(saved, window.id) });
       },
       header: {
         onFocus: (event) => {
@@ -257,10 +258,10 @@ export function useDockInteraction({ root, dock, space, enabled }: { root: RefOb
           const offset = ARROWS[event.key];
           if (!offset || event.altKey || event.ctrlKey || event.metaKey) return;
           event.preventDefault();
-          const boxes = floatRects(dock, space!.windows, area);
-          const others = dock.floats.filter((float) => float.window !== window.id).map((float) => boxes[float.window]!);
+          const boxes = floatRects(saved, space!.windows, area);
+          const others = saved.floats.filter((float) => float.window !== window.id).map((float) => boxes[float.window]!);
           const result = event.shiftKey ? resizeRect(rect, offset.x ? "e" : "s", offset, minWindowSize(window.kind), others, area) : { ...moveRect(rect, offset, others, area), atMinimum: false };
-          useLayoutStore.getState().commitDock({ session, expected: dock, next: moveFloat(frontFloat(dock, window.id), window.id, toRatio(result.rect, area)) });
+          useLayoutStore.getState().commitDock({ session, expected: saved, next: moveFloat(frontFloat(saved, window.id), window.id, toRatio(result.rect, area)) });
           choose(window.id);
           if (result.atMinimum) minimumNotice(window);
         },
