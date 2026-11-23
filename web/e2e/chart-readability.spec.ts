@@ -14,9 +14,10 @@ const SIZES = [{ width: 1440, height: 900 }, { width: 1024, height: 768 }, { wid
 
 const chartWindows = (count: number): LayoutWindow[] => Array.from({ length: count }, (_, i) => ({ id: `cell-${i}`, kind: "chart", link: null, symbol: "005930", venue: "combined", period: "D", chartSettings: SETTINGS }));
 const chartGroup = (i: number) => ({ kind: "group", id: `g${i + 1}`, tabs: [`cell-${i}`], active: `cell-${i}` }) as const;
-const chartRow = (left: number, ratio: number) => ({ kind: "split", dir: "row", ratio, first: chartGroup(left), second: chartGroup(left + 1) }) as const;
-const WIDE_FIRST_CHART_SHARE = 0.7;
-const FOUR_CHART_GRID = { kind: "split", dir: "column", ratio: 0.5, first: chartRow(0, WIDE_FIRST_CHART_SHARE), second: chartRow(2, 0.5) } as const;
+const SHORTEST_FOUR_CHART_STACK = {
+  kind: "split", dir: "column", ratio: 1 / 3, first: chartGroup(0),
+  second: { kind: "split", dir: "column", ratio: 1 / 2, first: chartGroup(1), second: { kind: "split", dir: "row", ratio: 1 / 2, first: chartGroup(2), second: chartGroup(3) } },
+} as const;
 
 function seed(scenario: Scenario) {
   const base = scenario.documents.layout();
@@ -26,7 +27,7 @@ function seed(scenario: Scenario) {
 
 function seedFourCharts(scenario: Scenario) {
   const base = scenario.documents.layout();
-  scenario.documents.saveLayout({ ...base, windows: chartWindows(4), placement: { v: 1, dock: { root: FOUR_CHART_GRID, floats: [] }, canvas: null }, revision: base.revision + 1 });
+  scenario.documents.saveLayout({ ...base, windows: chartWindows(4), placement: { v: 1, dock: { root: SHORTEST_FOUR_CHART_STACK, floats: [] }, canvas: null }, revision: base.revision + 1 });
   seedDockState(scenario);
 }
 
