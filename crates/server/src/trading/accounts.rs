@@ -10,7 +10,7 @@ use super::switch::SwitchStore;
 use crate::api::{self, OrderSide};
 use crate::clock::Clock;
 use crate::kiwoom::key_file::KeyId;
-use crate::kiwoom::keys::{KeyRing, KeyView};
+use crate::kiwoom::keys::{KeyRing, KeyView, KisAccountView};
 use crate::kiwoom::rest::KiwoomRest;
 use crate::kiwoom::stream::AccountFeed;
 use crate::symbols::SymbolDirectory;
@@ -46,11 +46,13 @@ impl Accounts {
     }
 
     fn lines(&self) -> Vec<Line> {
-        let views = self.ring.views();
-        if views.is_empty() {
+        let (views, kis_views) = (self.ring.views(), self.ring.kis_views());
+        if views.is_empty() && kis_views.is_empty() {
             return vec![Line { alias: FIXED_ALIAS.to_owned(), market: true, service: self.fixed() }];
         }
-        views.into_iter().map(|view| Line { service: self.service_of(&view), alias: view.alias, market: view.market }).collect()
+        let kiwoom = views.into_iter().map(|view| Line { service: self.service_of(&view), alias: view.alias, market: view.market });
+        let kis = kis_views.into_iter().map(|view| Line { service: self.kis_service_of(&view), alias: view.alias, market: false });
+        kiwoom.chain(kis).collect()
     }
 
     fn fixed(&self) -> Arc<Trading> {
@@ -60,18 +62,26 @@ impl Accounts {
     }
 
     fn service_of(&self, view: &KeyView) -> Arc<Trading> {
+        self.service_for(&view.id, view.serial, || Lanes::Keyed { ring: self.ring.clone(), key: view.id.clone() })
+    }
+
+    fn kis_service_of(&self, view: &KisAccountView) -> Arc<Trading> {
+        self.service_for(&view.id, view.serial, || Lanes::Kis { ring: self.ring.clone(), key: view.id.clone() })
+    }
+
+    fn service_for(&self, id: &KeyId, serial: u64, lanes: impl FnOnce() -> Lanes) -> Arc<Trading> {
         let mut services = self.services.lock().expect("계좌 서비스 잠금");
-        match services.get(view.id.as_str()) {
-            Some((serial, service)) if *serial == view.serial => return service.clone(),
+        match services.get(id.as_str()) {
+            Some((kept, service)) if *kept == serial => return service.clone(),
             Some(_) => {
-                if let Err(e) = self.store.clear_key(&view.id) {
+                if let Err(e) = self.store.clear_key(id) {
                     tracing::warn!(error = %e, "지운 키와 같은 번호를 쓰는 새 키의 주문 사용 칸을 비우지 못했습니다");
                 }
             }
             None => {}
         }
-        let service = Trading::assemble(Lanes::Keyed { ring: self.ring.clone(), key: view.id.clone() }, view.id.clone(), self.store.clone(), self.shared.clone_parts());
-        services.insert(view.id.as_str().to_owned(), (view.serial, service.clone()));
+        let service = Trading::assemble(lanes(), id.clone(), self.store.clone(), self.shared.clone_parts());
+        services.insert(id.as_str().to_owned(), (serial, service.clone()));
         service
     }
 
@@ -88,7 +98,10 @@ impl Accounts {
         if let Some(view) = self.ring.view_of(&key) {
             return Ok(self.service_of(&view));
         }
-        if self.ring.views().is_empty() && key == fixed_id() {
+        if let Some(view) = self.ring.kis_view_of(&key) {
+            return Ok(self.kis_service_of(&view));
+        }
+        if self.ring.views().is_empty() && self.ring.kis_views().is_empty() && key == fixed_id() {
             return Ok(self.fixed());
         }
         Err(TradingError::UnknownKey)
@@ -112,8 +125,8 @@ impl Accounts {
     }
 
     fn sync(&self) {
-        let views = self.ring.views();
-        let present: Vec<KeyId> = if views.is_empty() { vec![fixed_id()] } else { views.iter().map(|view| view.id.clone()).collect() };
+        let (views, kis_views) = (self.ring.views(), self.ring.kis_views());
+        let present: Vec<KeyId> = if views.is_empty() && kis_views.is_empty() { vec![fixed_id()] } else { views.iter().map(|view| view.id.clone()).chain(kis_views.iter().map(|view| view.id.clone())).collect() };
         if let Err(e) = self.store.clear_except(&present) {
             tracing::warn!(error = %e, "목록에서 빠진 키의 주문 사용 칸을 비우지 못했습니다");
         }
@@ -130,11 +143,14 @@ impl Accounts {
             service.forget_verified();
             service.republish();
         }
-        if views.is_empty() {
+        if views.is_empty() && kis_views.is_empty() {
             drop(self.fixed());
         }
         for view in &views {
             drop(self.service_of(view));
+        }
+        for view in &kis_views {
+            drop(self.kis_service_of(view));
         }
     }
 

@@ -16,6 +16,8 @@ use server::clock::{Clock, kst};
 use server::config::{KisCredentials, Secret};
 use server::kis::auth::KisAuth;
 use server::kis::market_stream::{KisMarketStream, KisSeats};
+use server::kis::notice::KisNotices;
+use server::kiwoom::link::LinkState;
 use server::kis::stream::{Connector, Socket, StreamStatus};
 use server::kis::transport::{HttpRequest, HttpResponse, Transport, TransportError};
 use server::kiwoom::auth::KiwoomAuth;
@@ -184,6 +186,10 @@ fn nxt_listing(listed: &[(Symbol, bool)]) -> Directory {
 }
 
 fn rig() -> Rig {
+    rig_with(None).0
+}
+
+fn rig_with(hts_id: Option<&str>) -> (Rig, Option<KisNotices>) {
     let dir = tempfile::tempdir().unwrap();
     let token_path: PathBuf = dir.path().join("state/vallythevally/kis-token.json");
     let transport = Arc::new(TokenAndApproval { approvals: Mutex::new(0) });
@@ -192,8 +198,13 @@ fn rig() -> Rig {
     let auth = KisAuth::new(credentials, token_path, transport.clone(), clock.clone());
     let connector = ScriptedConnector::default();
     let symbols = Arc::new(SymbolDirectory::default());
-    let (stream, events) = KisMarketStream::spawn(Box::new(connector.clone()), auth, clock.clone(), symbols.updates(), 0);
-    Rig { stream: Arc::new(stream), events, connector, transport, symbols, clock, _dir: dir }
+    let notices = hts_id.map(|hts_id| {
+        let notices = KisNotices::new(None, auth.clone(), tokio::sync::watch::channel(LinkState::Disconnected).1);
+        notices.want(Some(Secret::new(hts_id.to_owned())));
+        notices
+    });
+    let (stream, events) = KisMarketStream::spawn(Box::new(connector.clone()), auth, clock.clone(), symbols.updates(), 0, notices.clone());
+    (Rig { stream: Arc::new(stream), events, connector, transport, symbols, clock, _dir: dir }, notices)
 }
 
 async fn next_event(events: &mut mpsc::Receiver<StreamEvent>) -> StreamEvent {
@@ -598,4 +609,65 @@ async fn reseating_the_manager_for_the_kis_limit_keeps_the_first_forty_holders_a
     assert_eq!(plan.realtime.len(), LIMIT);
     assert_eq!(plan.rejected.len(), 10);
     assert!(symbols.iter().take(LIMIT).all(|symbol| plan.realtime.contains(symbol)), "먼저 잡은 종목이 남는다");
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_wanted_fill_notice_takes_one_seat_on_the_market_session_and_its_sealed_frame_opens_into_a_notice() {
+    use aes::Aes256;
+    use base64::Engine;
+    use cbc::cipher::block_padding::Pkcs7;
+    use cbc::cipher::{BlockEncryptMut, KeyIvInit};
+    let (mut rig, notices) = rig_with(Some("fakehtsmarket"));
+    let notices = notices.unwrap();
+    let mut received = notices.subscribe();
+    let mut peer = rig.connector.queue_connection();
+    let samsung = stock("005930");
+    let desired = feeds(&[(samsung, &[StreamKind::Trades])]);
+    rig.stream.set_desired(desired.clone());
+    let registered = [peer.heard().await, peer.heard().await].iter().map(Control::of).collect::<BTreeSet<_>>();
+    assert_eq!(registered, BTreeSet::from([Control::register("H0STCNI0", "fakehtsmarket"), Control::register("H0UNCNT0", "005930")]));
+    assert_eq!(rig.stream.seat_rules().limit(), LIMIT - 1, "체결통보가 자리 하나를 먼저 잡는다");
+    assert!(matches!(next_event(&mut rig.events).await, StreamEvent::Live { .. }));
+
+    let (key, iv) = ("FAKE-NOTICE-KEY-market-012345678", "FAKE-NOTICE-IV-1");
+    peer.say(&serde_json::json!({"header": {"tr_id": "H0STCNI0", "tr_key": "fakehtsmarket", "encrypt": "N"}, "body": {"rt_cd": "0", "msg_cd": "OPSP0000", "msg1": "SUBSCRIBE SUCCESS", "output": {"iv": iv, "key": key}}}).to_string());
+    let plain = "fakehtsmarket^5001235601^0000117057^^02^0^00^0^005930^1^71000^093001^0^2^2^91252^1^합성^0^4^Y^^^^^71000";
+    let sealed = base64::engine::general_purpose::STANDARD.encode(cbc::Encryptor::<Aes256>::new_from_slices(key.as_bytes(), iv.as_bytes()).unwrap().encrypt_padded_vec_mut::<Pkcs7>(plain.as_bytes()));
+    peer.say(&format!("1|H0STCNI0|001|{sealed}"));
+    let notice = tokio::time::timeout(WAIT, received.recv()).await.unwrap().unwrap();
+    assert_eq!((notice.order_no.as_str(), notice.filled, notice.venue), ("0000117057", true, Some(Venue::Nxt)));
+    notices.want(None);
+    assert_eq!(rig.stream.seat_rules().limit(), LIMIT, "구독하지 않으면 자리를 돌려준다");
+}
+
+#[derive(Clone, Default)]
+struct CapturedLogs(Arc<Mutex<Vec<u8>>>);
+
+impl std::io::Write for CapturedLogs {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        self.0.lock().unwrap().extend_from_slice(buf);
+        Ok(buf.len())
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_rejected_fill_notice_registration_does_not_log_the_hts_id() {
+    let logs = CapturedLogs::default();
+    let writer = logs.clone();
+    let subscriber = tracing_subscriber::fmt().with_writer(move || writer.clone()).with_ansi(false).with_max_level(tracing::Level::TRACE).finish();
+    let _guard = tracing::subscriber::set_default(subscriber);
+    let (mut rig, _notices) = rig_with(Some("fakehtslog77"));
+    let mut peer = rig.connector.queue_connection();
+    let samsung = stock("005930");
+    rig.stream.set_desired(feeds(&[(samsung, &[StreamKind::Trades])]));
+    let _ = [peer.heard().await, peer.heard().await];
+    assert!(matches!(next_event(&mut rig.events).await, StreamEvent::Live { .. }));
+    peer.say(&serde_json::json!({"header": {"tr_id": "H0STCNI0", "tr_key": "fakehtslog77", "encrypt": "N"}, "body": {"rt_cd": "1", "msg_cd": "OPSP0011", "msg1": "invalid tr_key"}}).to_string());
+    tokio::time::sleep(Duration::from_secs(1)).await;
+    let text = String::from_utf8(logs.0.lock().unwrap().clone()).unwrap();
+    assert!(text.contains("등록이 거절"), "거절 로그가 있어야 한다: {text}");
+    assert!(!text.contains("fakehtslog77"), "HTS ID가 로그에 나왔다: {text}");
 }

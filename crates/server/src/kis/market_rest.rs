@@ -520,7 +520,7 @@ fn parse_tape_cursor(text: &str) -> Option<(String, usize)> {
     (hour.len() == 6 && hour.bytes().all(|b| b.is_ascii_digit())).then(|| seen.parse().ok().map(|seen| (hour.to_owned(), seen)))?
 }
 
-pub(super) fn kis_priority(priority: Priority) -> KisPriority {
+pub(crate) fn kis_priority(priority: Priority) -> KisPriority {
     match priority {
         Priority::Order => KisPriority::Order,
         Priority::Screen => KisPriority::Screen,
@@ -925,7 +925,7 @@ fn halt_error(halt: &Halt) -> SourceError {
     }
 }
 
-pub(super) fn failure_of(error: &KisError) -> SourceError {
+pub(crate) fn failure_of(error: &KisError) -> SourceError {
     let unavailable = |reason| SourceFailure { code: ApiErrorCode::KiwoomUnavailable, reason, message: error.to_string(), retry_at: None, manual_action_required: false };
     let failure = match error {
         KisError::Failed(failure) => unavailable(match failure.category() {
@@ -944,7 +944,7 @@ pub(super) fn failure_of(error: &KisError) -> SourceError {
         KisError::TokenFile(_) => SourceFailure { code: ApiErrorCode::KiwoomAuthFailed, manual_action_required: true, ..unavailable(ApiErrorReason::TokenFile) },
         KisError::Transport(transport) => unavailable(if transport.timed_out { ApiErrorReason::KiwoomTimeout } else { ApiErrorReason::KiwoomUnreachable }),
         KisError::BadTokenResponse => unavailable(ApiErrorReason::Protocol),
-        KisError::QueueGone => unavailable(ApiErrorReason::KiwoomUnreachable),
+        KisError::QueueGone | KisError::NotAdmitted => unavailable(ApiErrorReason::KiwoomUnreachable),
     };
     SourceError::Failed(failure)
 }

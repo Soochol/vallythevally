@@ -1,13 +1,15 @@
+import type { Broker } from "../../api/generated/Broker";
 import type { OrdersAccount } from "../../api/generated/OrdersAccount";
 import type { OrdersState } from "../../api/generated/OrdersState";
 import type { OrdersStatus } from "../../api/generated/OrdersStatus";
+import { BROKERS } from "../system-settings/brokers";
 
 export const FALLBACK_NOTICE = "고른 계좌가 꺼져 시세 키 계좌로 돌아갑니다";
 export const MANAGE_ACCOUNTS_TEXT = "시스템 설정에서 계좌 관리";
-const BROKER = "키움";
 
 export interface CurrentAccount {
   readonly keyId: string | null;
+  readonly broker: Broker;
   readonly ref: string | null;
   readonly tail: string | null;
   readonly state: OrdersState;
@@ -22,7 +24,7 @@ export interface OrderAccountChoice {
 
 export const isPickable = (account: OrdersAccount): boolean => account.state === "on" && account.accountRef !== null;
 
-const currentOf = (account: OrdersAccount): CurrentAccount => ({ keyId: account.keyId, ref: account.accountRef, tail: account.accountTail, state: account.state, message: "" });
+const currentOf = (account: OrdersAccount): CurrentAccount => ({ keyId: account.keyId, broker: account.broker, ref: account.accountRef, tail: account.accountTail, state: account.state, message: "" });
 
 export function chooseAccount(status: OrdersStatus | undefined, saved: string | null): OrderAccountChoice {
   if (status === undefined) return { accounts: [], current: null, fellBack: false };
@@ -30,14 +32,14 @@ export function chooseAccount(status: OrdersStatus | undefined, saved: string | 
   const picked = saved === null ? undefined : accounts.find((account) => account.accountRef === saved && isPickable(account));
   if (picked) return { accounts, current: currentOf(picked), fellBack: false };
   const market = accounts.find((account) => account.market);
-  return { accounts, current: { keyId: market?.keyId ?? null, ref: status.accountRef, tail: status.accountTail, state: status.state, message: status.message }, fellBack: saved !== null };
+  return { accounts, current: { keyId: market?.keyId ?? null, broker: market?.broker ?? "kiwoom", ref: status.accountRef, tail: status.accountTail, state: status.state, message: status.message }, fellBack: saved !== null };
 }
 
 export const canPick = (accounts: readonly OrdersAccount[]): boolean => accounts.length > 1;
 
-export const accountNumberText = (tail: string | null): string => (tail === null ? `${BROKER} —` : `${BROKER} ****-**${tail}`);
+export const accountNumberText = (broker: Broker, tail: string | null): string => (tail === null ? `${BROKERS[broker].shortName} —` : `${BROKERS[broker].shortName} ****-**${tail}`);
 
-export const optionText = (account: OrdersAccount): string => `${account.alias} · ${account.accountTail === null ? "계좌 미확인" : accountNumberText(account.accountTail)}`;
+export const optionText = (account: OrdersAccount): string => `${account.alias} · ${account.accountTail === null ? "계좌 미확인" : accountNumberText(account.broker, account.accountTail)}`;
 
 export function optionNote(account: OrdersAccount): string | null {
   if (account.state === "account_changed") return "계좌 바뀜";

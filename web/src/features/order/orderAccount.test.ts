@@ -3,7 +3,7 @@ import type { OrdersAccount } from "../../api/generated/OrdersAccount";
 import type { OrdersStatus } from "../../api/generated/OrdersStatus";
 import { accountNumberText, canPick, chooseAccount, optionNote, optionText } from "./orderAccount";
 
-const account = (keyId: string, patch: Partial<OrdersAccount> = {}): OrdersAccount => ({ keyId, alias: keyId, market: false, state: "on", accountRef: `ref-${keyId}`, accountTail: "12", ...patch });
+const account = (keyId: string, patch: Partial<OrdersAccount> = {}): OrdersAccount => ({ keyId, broker: "kiwoom", alias: keyId, market: false, state: "on", accountRef: `ref-${keyId}`, accountTail: "12", ...patch });
 const status = (accounts: OrdersAccount[], patch: Partial<OrdersStatus> = {}): OrdersStatus => ({ state: "on", accountRef: "ref-a", accountTail: "01", message: "", accounts, ...patch });
 const accounts = [account("a", { market: true, accountTail: "01" }), account("b", { accountTail: "05" }), account("c", { state: "off", accountTail: null, accountRef: null })];
 
@@ -44,10 +44,17 @@ describe("호가주문창이 쓸 계좌 고르기", () => {
 
 describe("계좌 목록 글자", () => {
   it("끝 2자리만 보인다", () => {
-    expect(accountNumberText("12")).toBe("키움 ****-**12");
-    expect(accountNumberText(null)).toBe("키움 —");
+    expect(accountNumberText("kiwoom", "12")).toBe("키움 ****-**12");
+    expect(accountNumberText("kiwoom", null)).toBe("키움 —");
+    expect(accountNumberText("kis", "34")).toBe("한투 ****-**34");
     expect(optionText(account("b", { alias: "위탁 2", accountTail: "05" }))).toBe("위탁 2 · 키움 ****-**05");
     expect(optionText(account("c", { alias: "연금", accountTail: null }))).toBe("연금 · 계좌 미확인");
+  });
+  it("한투 계좌는 한투로 보이고 고르면 그 계좌 참조와 증권사를 쓴다", () => {
+    const withKis = [accounts[0]!, account("kis", { broker: "kis", alias: "한투 1", accountTail: "34" })];
+    expect(optionText(withKis[1]!)).toBe("한투 1 · 한투 ****-**34");
+    expect(chooseAccount(status(withKis), "ref-kis").current).toMatchObject({ keyId: "kis", broker: "kis", ref: "ref-kis", tail: "34" });
+    expect(chooseAccount(status(withKis), null).current?.broker).toBe("kiwoom");
   });
   it("시세 키는 시세, 주문이 꺼진 계좌는 주문 꺼짐이다", () => {
     expect(optionNote(accounts[0]!)).toBe("시세");

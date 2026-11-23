@@ -9,16 +9,20 @@ use tokio::sync::broadcast;
 
 use super::request::{AccountNumber, Balance, Executions, OpenOrders, Orderable, OrderableReply, Rows, TradingRequest};
 use super::switch::{SwitchRecord, SwitchStore};
-use crate::api::{self, OrderSide};
+use super::kis::{KisDesk, KisOrigin};
+use super::kis_account::KisAccountNumber;
+use crate::api::{self, Broker, OrderSide};
 use crate::clock::Clock;
 use crate::config::Secret;
 use crate::kiwoom::key_file::KeyId;
 use crate::kiwoom::keys::KeyRing;
 use crate::kiwoom::rest::{Admission, ContKey, Dispatch, KiwoomError, KiwoomRest, MergeScope, Page, Priority};
 use super::journal::Journal;
-use super::memory::{PriceBands, RecentOpenOrders};
+use super::memory::{FillVenues, PriceBands, RecentOpenOrders};
 use crate::symbols::SymbolDirectory;
 use crate::kiwoom::stream::{AccountEvent, AccountFeed};
+use crate::kis::notice::{FillNotice, KisNotices};
+use crate::kis::rest::KisError;
 
 const VERIFY_TTL_SECS: i64 = 60;
 const MAX_PAGES: usize = 100;
@@ -47,6 +51,9 @@ pub enum TradingError {
     UnknownAccount,
     UnknownKey,
     SameAccount(String),
+    Kis(KisError),
+    NoKisAccount,
+    KisNotConnected,
 }
 
 impl fmt::Display for TradingError {
@@ -54,16 +61,19 @@ impl fmt::Display for TradingError {
         match self {
             TradingError::Off => f.write_str("주문 사용이 꺼져 있어 계좌를 조회하지 않습니다. 시스템 설정 증권사 · 계좌에서 켜세요"),
             TradingError::FileUnusable(why) => write!(f, "주문 사용 스위치 파일을 쓸 수 없어 꺼진 것으로 봅니다({why})"),
-            TradingError::AccountChanged => f.write_str("확인한 계좌와 지금 키움이 알려 주는 계좌가 다릅니다. 시스템 설정에서 주문 사용을 다시 켜 확인하세요"),
-            TradingError::TailMismatch => f.write_str("입력한 끝 2자리가 키움이 알려 준 계좌와 다릅니다"),
+            TradingError::AccountChanged => f.write_str("확인한 계좌와 지금 계좌가 다릅니다. 시스템 설정에서 주문 사용을 다시 켜 확인하세요"),
+            TradingError::TailMismatch => f.write_str("입력한 끝 2자리가 이 키의 계좌번호와 다릅니다"),
             TradingError::Kiwoom(e) => e.fmt(f),
-            TradingError::Unreadable(what) => write!(f, "키움이 준 계좌 자료를 읽지 못했습니다({what})"),
+            TradingError::Unreadable(what) => write!(f, "증권사가 준 계좌 자료를 읽지 못했습니다({what})"),
             TradingError::BadRequest(what) => f.write_str(what),
             TradingError::Journal(why) => f.write_str(why),
             TradingError::CommandNotFound => f.write_str("그 command_id의 명령이 없습니다"),
             TradingError::UnknownAccount => f.write_str("알 수 없는 계좌입니다. 시스템 설정 증권사 · 계좌에서 계좌를 확인하세요"),
             TradingError::UnknownKey => f.write_str("그 키가 없습니다"),
             TradingError::SameAccount(alias) => write!(f, "‘{alias}’와 같은 계좌입니다. 주문은 한 줄에서만 씁니다"),
+            TradingError::Kis(e) => e.fmt(f),
+            TradingError::NoKisAccount => f.write_str("계좌번호를 넣어야 주문 사용을 켤 수 있습니다"),
+            TradingError::KisNotConnected => f.write_str("한투에 연결되지 않아 계좌 요청을 보내지 않았습니다. 시스템 설정에서 연결하세요"),
         }
     }
 }
@@ -77,6 +87,12 @@ impl From<super::journal::JournalError> for TradingError {
 impl From<KiwoomError> for TradingError {
     fn from(e: KiwoomError) -> Self {
         TradingError::Kiwoom(e)
+    }
+}
+
+impl From<KisError> for TradingError {
+    fn from(e: KisError) -> Self {
+        TradingError::Kis(e)
     }
 }
 
@@ -96,13 +112,22 @@ struct State {
 pub(super) enum Lanes {
     Fixed { rest: KiwoomRest, feed: AccountFeed },
     Keyed { ring: Arc<KeyRing>, key: KeyId },
+    Kis { ring: Arc<KeyRing>, key: KeyId },
 }
 
 impl Lanes {
+    fn broker(&self) -> Broker {
+        match self {
+            Lanes::Fixed { .. } | Lanes::Keyed { .. } => Broker::Kiwoom,
+            Lanes::Kis { .. } => Broker::Kis,
+        }
+    }
+
     fn rest(&self) -> Result<KiwoomRest, TradingError> {
         match self {
             Lanes::Fixed { rest, .. } => Ok(rest.clone()),
             Lanes::Keyed { ring, key } => ring.view_of(key).map(|view| view.lane.rest).ok_or(TradingError::UnknownKey),
+            Lanes::Kis { .. } => Err(TradingError::UnknownKey),
         }
     }
 
@@ -110,7 +135,29 @@ impl Lanes {
         match self {
             Lanes::Fixed { feed, .. } => Some(feed.clone()),
             Lanes::Keyed { ring, key } => ring.view_of(key).map(|view| view.lane.account),
+            Lanes::Kis { .. } => None,
         }
+    }
+
+    fn notices(&self) -> Option<(KisNotices, Option<Secret<String>>)> {
+        let Lanes::Kis { ring, key } = self else { return None };
+        let view = ring.kis_view_of(key)?;
+        Some((view.lane.notices, view.account.hts_id.map(|id| Secret::new(id.expose().to_owned()))))
+    }
+
+    fn kis_account(&self) -> Result<KisAccountNumber, TradingError> {
+        let Lanes::Kis { ring, key } = self else { return Err(TradingError::UnknownKey) };
+        ring.kis_view_of(key).ok_or(TradingError::UnknownKey)?.account.number.ok_or(TradingError::NoKisAccount)
+    }
+
+    fn kis_desk(&self) -> Result<KisDesk, TradingError> {
+        let Lanes::Kis { ring, key } = self else { return Err(TradingError::UnknownKey) };
+        let view = ring.kis_view_of(key).ok_or(TradingError::UnknownKey)?;
+        let account = view.account.number.ok_or(TradingError::NoKisAccount)?;
+        if !view.lane.link.is_connected() {
+            return Err(TradingError::KisNotConnected);
+        }
+        Ok(KisDesk { rest: view.lane.rest, account })
     }
 }
 
@@ -151,6 +198,7 @@ pub struct Trading {
     pub(super) turns: Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>,
     pub(super) bands: Arc<PriceBands>,
     pub(super) recent_open: RecentOpenOrders,
+    pub(super) fill_venues: FillVenues,
     feed_task: Mutex<Option<tokio::task::JoinHandle<()>>>,
 }
 
@@ -159,9 +207,16 @@ fn hex(bytes: &[u8]) -> String {
 }
 
 pub(super) fn account_ref_of(salt: &str, number: &str) -> String {
+    account_ref_for(Broker::Kiwoom, salt, number)
+}
+
+pub(super) fn account_ref_for(broker: Broker, salt: &str, number: &str) -> String {
     let mut hasher = Sha256::new();
     hasher.update(salt.as_bytes());
-    hasher.update(b":");
+    hasher.update(match broker {
+        Broker::Kiwoom => b":".as_slice(),
+        Broker::Kis => b":kis:".as_slice(),
+    });
     hasher.update(number.as_bytes());
     hex(&hasher.finalize())[..REF_HEX_CHARS].to_owned()
 }
@@ -205,6 +260,7 @@ impl Trading {
             turns: Mutex::new(HashMap::new()),
             bands,
             recent_open: RecentOpenOrders::default(),
+            fill_venues: FillVenues::default(),
             feed_task: Mutex::new(None),
         });
         if let Err(e) = trading.store.load(&trading.key) {
@@ -217,8 +273,11 @@ impl Trading {
     }
 
     pub(super) fn follow_feed(self: &Arc<Self>) {
-        let Some(feed) = self.lanes.feed() else { return };
-        let task = tokio::spawn(forward_events(Arc::downgrade(self), feed.subscribe()));
+        let task = match (self.lanes.feed(), self.lanes.notices()) {
+            (Some(feed), _) => tokio::spawn(forward_events(Arc::downgrade(self), feed.subscribe())),
+            (None, Some((notices, _))) => tokio::spawn(forward_notices(Arc::downgrade(self), notices.subscribe())),
+            (None, None) => return,
+        };
         if let Some(old) = self.feed_task.lock().expect("계좌 실시간 작업 잠금").replace(task) {
             old.abort();
         }
@@ -234,6 +293,14 @@ impl Trading {
 
     pub(super) fn rest(&self) -> Result<KiwoomRest, TradingError> {
         self.lanes.rest()
+    }
+
+    pub(super) fn broker(&self) -> Broker {
+        self.lanes.broker()
+    }
+
+    pub(super) fn kis_desk(&self) -> Result<KisDesk, TradingError> {
+        self.lanes.kis_desk()
     }
 
     pub fn subscribe_changes(&self) -> broadcast::Receiver<AccountChanged> {
@@ -268,6 +335,9 @@ impl Trading {
         if let Some(feed) = self.lanes.feed() {
             feed.set_wanted(enabled);
         }
+        if let Some((notices, hts_id)) = self.lanes.notices() {
+            notices.want(hts_id.filter(|_| enabled));
+        }
     }
 
     async fn read<R: TradingRequest>(&self, req: &R, cont: Option<&ContKey>, priority: Priority) -> Result<Page<R::Response>, TradingError> {
@@ -284,7 +354,11 @@ impl Trading {
             Ok(record) => record,
         };
         let Some(record) = record.filter(|r| r.enabled) else {
-            return api::OrdersStatus { state: api::OrdersState::Off, account_ref: None, account_tail: None, message: "주문 사용이 꺼져 있습니다. 키움에는 계좌 요청을 보내지 않습니다".to_owned(), accounts: Vec::new() };
+            let message = match self.broker() {
+                Broker::Kiwoom => "주문 사용이 꺼져 있습니다. 키움에는 계좌 요청을 보내지 않습니다",
+                Broker::Kis => "주문 사용이 꺼져 있습니다. 한투에는 계좌 요청을 보내지 않습니다",
+            };
+            return api::OrdersStatus { state: api::OrdersState::Off, account_ref: None, account_tail: None, message: message.to_owned(), accounts: Vec::new() };
         };
         let (state, message) = if self.lock().mismatch {
             (api::OrdersState::AccountChanged, TradingError::AccountChanged.to_string())
@@ -297,7 +371,7 @@ impl Trading {
     pub(super) fn listing(&self, alias: &str, market: bool) -> api::OrdersAccount {
         let state = self.status().state;
         let (account_ref, account_tail) = self.record().ok().flatten().map_or((None, None), |record| (record.account_ref, record.account_tail));
-        api::OrdersAccount { key_id: self.key.as_str().to_owned(), alias: alias.to_owned(), market, state, account_ref, account_tail }
+        api::OrdersAccount { key_id: self.key.as_str().to_owned(), broker: self.broker(), alias: alias.to_owned(), market, state, account_ref, account_tail }
     }
 
     async fn send<R: TradingRequest>(&self, req: &R, cont: Option<&ContKey>, guarded: bool, priority: Priority) -> Result<Page<R::Response>, TradingError> {
@@ -326,6 +400,25 @@ impl Trading {
         Err(TradingError::Unreadable("연속조회 페이지 수 초과"))
     }
 
+    async fn current_account(&self, guarded: bool, priority: Priority) -> Result<Secret<String>, TradingError> {
+        match self.broker() {
+            Broker::Kiwoom => self.account_number(guarded, priority).await,
+            Broker::Kis => self.lanes.kis_account().map(|number| number.digits()),
+        }
+    }
+
+    async fn confirm_account(&self) -> Result<Secret<String>, TradingError> {
+        match self.broker() {
+            Broker::Kiwoom => self.account_number(false, Priority::Screen).await,
+            Broker::Kis => {
+                self.lanes.kis_account()?;
+                let desk = self.kis_desk()?;
+                self.kis_balance_reachable(&desk).await?;
+                Ok(desk.account.digits())
+            }
+        }
+    }
+
     async fn account_number(&self, guarded: bool, priority: Priority) -> Result<Secret<String>, TradingError> {
         let number = self.send(&AccountNumber {}, None, guarded, priority).await?.body.account.ok_or(TradingError::Unreadable("계좌번호 없음"))?;
         let digits = number.expose();
@@ -336,8 +429,8 @@ impl Trading {
     }
 
     pub async fn check_account(&self) -> Result<api::OrdersAccountCheck, TradingError> {
-        let number = self.account_number(false, Priority::Screen).await?;
-        Ok(api::OrdersAccountCheck { account_tail: tail_of(number.expose()) })
+        let number = self.confirm_account().await?;
+        Ok(api::OrdersAccountCheck { broker: self.broker(), account_tail: tail_of(number.expose()) })
     }
 
     pub async fn confirmed_account_number(&self) -> Result<api::TradingAccountNumber, TradingError> {
@@ -365,15 +458,18 @@ impl Trading {
             return Ok(self.status());
         }
         let saved = self.record().map_err(|e| TradingError::FileUnusable(e.to_string()))?;
+        if self.broker() == Broker::Kis {
+            self.lanes.kis_account()?;
+        }
         let tail = input.confirm_account_tail.ok_or(TradingError::BadRequest("켜려면 확인한 계좌 끝 2자리를 보내야 합니다"))?;
-        let number = self.account_number(false, Priority::Screen).await?;
+        let number = self.confirm_account().await?;
         if tail_of(number.expose()) != tail.trim() {
             return Err(TradingError::TailMismatch);
         }
         let (confirm_won, cap_won, margin_policy) = saved.as_ref().map_or((None, None, api::MarginPolicy::default()), |r| (r.confirm_won, r.cap_won, r.margin_policy));
         let shared_salt = self.store.shared_salt().map_err(|e| TradingError::FileUnusable(e.to_string()))?;
         let salt = saved.map(|r| r.salt).or(shared_salt).unwrap_or_else(new_salt);
-        let account_ref = account_ref_of(&salt, number.expose());
+        let account_ref = account_ref_for(self.broker(), &salt, number.expose());
         if let Some(alias) = taken_by(&account_ref) {
             tracing::info!("같은 계좌가 다른 줄에서 주문 사용 중이라 켜지 않았습니다");
             return Err(TradingError::SameAccount(alias));
@@ -400,9 +496,9 @@ impl Trading {
                 return Ok(v.clone());
             }
         }
-        let number = self.account_number(true, priority).await?;
+        let number = self.current_account(true, priority).await?;
         let record = self.enabled_record()?;
-        let account_ref = account_ref_of(&record.salt, number.expose());
+        let account_ref = account_ref_for(self.broker(), &record.salt, number.expose());
         let same_account = record.account_ref.as_deref() == Some(account_ref.as_str());
         if same_account && record.account_tail.is_none() {
             self.fill_account_tail(&account_ref, tail_of(number.expose()))?;
@@ -442,6 +538,9 @@ impl Trading {
 
     pub(super) async fn balance_at(&self, priority: Priority) -> Result<api::TradingBalance, TradingError> {
         let account = self.verified(priority).await?;
+        if self.broker() == Broker::Kis {
+            return self.kis_balance(&self.kis_desk()?, &account, priority).await;
+        }
         let pages = self.pages(&Balance::individual_krx(), priority).await?;
         let first = pages.first().ok_or(TradingError::Unreadable("빈 응답"))?;
         let (total_purchase, total_evaluation, total_profit) = (integer(&first.tot_pur_amt)?, integer(&first.tot_evlt_amt)?, integer(&first.tot_evlt_pl)?);
@@ -477,9 +576,18 @@ impl Trading {
     pub(super) async fn open_entries(&self, priority: Priority) -> Result<(String, Vec<OpenEntry>), TradingError> {
         let account = self.verified(priority).await?;
         let ticket = self.recent_open.ticket();
+        let entries = match self.broker() {
+            Broker::Kiwoom => self.kiwoom_open_entries(&account, priority).await?,
+            Broker::Kis => self.kis_open_entries(&self.kis_desk()?, priority).await?,
+        };
+        self.recent_open.keep(ticket, &account.account_ref, self.clock.now().unix(), &entries);
+        Ok((account.account_ref, entries))
+    }
+
+    async fn kiwoom_open_entries(&self, account: &Verified, priority: Priority) -> Result<Vec<OpenEntry>, TradingError> {
         let mut entries = Vec::new();
         for row in self.pages(&OpenOrders::all(), priority).await?.into_iter().flat_map(Rows::into_rows) {
-            Self::own_row(&account, row.acnt_no.as_ref())?;
+            Self::own_row(account, row.acnt_no.as_ref())?;
             let (quantity, open_quantity) = (unsigned(&row.ord_qty)?, unsigned(&row.oso_qty)?);
             if open_quantity > quantity {
                 return Err(TradingError::Unreadable("미체결수량이 주문수량보다 큼"));
@@ -498,10 +606,9 @@ impl Trading {
                 original_order_no: (!original.is_empty() && original != "0000000").then(|| original.to_owned()),
                 venue: if row.sor_yn.trim() == "Y" { Venue::Combined } else { venue(&[&row.stex_tp, &row.stex_tp_txt])? }.into(),
             };
-            entries.push(OpenEntry { order, ordinary_limit: matches!(row.trde_tp.trim(), "보통" | "0") });
+            entries.push(OpenEntry { order, ordinary_limit: matches!(row.trde_tp.trim(), "보통" | "0"), kis: None });
         }
-        self.recent_open.keep(ticket, &account.account_ref, self.clock.now().unix(), &entries);
-        Ok((account.account_ref, entries))
+        Ok(entries)
     }
 
     pub async fn orderable(&self, code: StockCode, order_side: OrderSide, order_price: u64) -> Result<api::TradingOrderable, TradingError> {
@@ -513,6 +620,9 @@ impl Trading {
 
     pub(super) async fn orderable_at(&self, code: StockCode, order_side: OrderSide, order_price: u64, priority: Priority) -> Result<api::TradingOrderable, TradingError> {
         let account = self.verified(priority).await?;
+        if self.broker() == Broker::Kis {
+            return self.kis_orderable(&self.kis_desk()?, &account, code, order_side, order_price, priority).await;
+        }
         let reply = self.read(&Orderable::new(code, order_price), None, priority).await?.body;
         let policy = self.enabled_record()?.margin_policy;
         orderable_of(account.account_ref, code, order_side, order_price, policy, &reply)
@@ -538,6 +648,10 @@ impl Trading {
     pub(super) async fn executions_at(&self, priority: Priority) -> Result<api::TradingExecutions, TradingError> {
         let account = self.verified(priority).await?;
         let day = self.clock.now().kst_date();
+        if self.broker() == Broker::Kis {
+            let executions = self.kis_executions(&self.kis_desk()?, day, priority).await?;
+            return Ok(api::TradingExecutions { account_ref: account.account_ref, day: api::KstDate(day), executions });
+        }
         let mut executions = Vec::new();
         for row in self.pages(&Executions::of_day(day), priority).await?.into_iter().flat_map(Rows::into_rows) {
             let quantity = unsigned(&row.cntr_qty)?;
@@ -569,6 +683,20 @@ impl Trading {
         self.notify(account_ref);
     }
 
+    fn on_fill_notice(&self, notice: &FillNotice) {
+        let Ok(record) = self.enabled_record() else { return };
+        let (Some(account_ref), Ok(number)) = (record.account_ref, self.lanes.kis_account()) else { return };
+        let account = notice.account.expose();
+        if account != number.digits().expose() && account != number.cano() {
+            return;
+        }
+        if let Some(venue) = notice.venue.filter(|_| notice.filled) {
+            self.fill_venues.remember(&notice.order_no, self.clock.now().kst_date(), venue);
+        }
+        self.recent_open.forget();
+        self.notify(account_ref);
+    }
+
     pub(super) fn notify(&self, account_ref: String) {
         let _ = self.changes.send(AccountChanged { account_ref });
     }
@@ -593,13 +721,26 @@ async fn forward_events(trading: std::sync::Weak<Trading>, mut events: broadcast
     }
 }
 
+async fn forward_notices(trading: std::sync::Weak<Trading>, mut notices: broadcast::Receiver<FillNotice>) {
+    loop {
+        let received = notices.recv().await;
+        let Some(trading) = trading.upgrade() else { return };
+        match received {
+            Ok(notice) => trading.on_fill_notice(&notice),
+            Err(broadcast::error::RecvError::Lagged(_)) => trading.on_events_missed(),
+            Err(broadcast::error::RecvError::Closed) => return,
+        }
+    }
+}
+
 #[derive(Clone)]
 pub(super) struct OpenEntry {
     pub(super) order: api::TradingOpenOrder,
     pub(super) ordinary_limit: bool,
+    pub(super) kis: Option<KisOrigin>,
 }
 
-fn integer(text: &str) -> Result<i64, TradingError> {
+pub(super) fn integer(text: &str) -> Result<i64, TradingError> {
     text.trim().parse::<i64>().map_err(|_| TradingError::Unreadable("숫자가 아닌 값"))
 }
 
@@ -631,7 +772,7 @@ fn orderable_of(account_ref: String, code: StockCode, side: OrderSide, order_pri
     })
 }
 
-fn non_negative(text: &str) -> Result<u64, TradingError> {
+pub(super) fn non_negative(text: &str) -> Result<u64, TradingError> {
     integer(text).map(|value| u64::try_from(value).unwrap_or(0))
 }
 
@@ -641,15 +782,15 @@ fn percent(text: &str) -> Option<f64> {
     text[..end].parse::<f64>().ok().filter(|value| value.is_finite())
 }
 
-fn unsigned(text: &str) -> Result<u64, TradingError> {
+pub(super) fn unsigned(text: &str) -> Result<u64, TradingError> {
     u64::try_from(integer(text)?).map_err(|_| TradingError::Unreadable("음수 수량·금액"))
 }
 
-fn price(text: &str) -> Result<u64, TradingError> {
+pub(super) fn price(text: &str) -> Result<u64, TradingError> {
     integer(text).map(i64::unsigned_abs)
 }
 
-fn centi(text: &str) -> Option<i64> {
+pub(super) fn centi(text: &str) -> Option<i64> {
     let text = text.trim();
     let (negative, digits) = match text.strip_prefix('-') {
         Some(rest) => (true, rest),
@@ -664,7 +805,7 @@ fn centi(text: &str) -> Option<i64> {
     Some(if negative { -value } else { value })
 }
 
-fn stock_code(text: &str) -> Result<String, TradingError> {
+pub(super) fn stock_code(text: &str) -> Result<String, TradingError> {
     let text = text.trim();
     let bare = if text.len() == 7 && matches!(text.as_bytes()[0], b'A' | b'J' | b'Q') { &text[1..] } else { text };
     StockCode::parse(bare).map(|code| code.as_str().to_owned()).map_err(|_| TradingError::Unreadable("종목코드"))

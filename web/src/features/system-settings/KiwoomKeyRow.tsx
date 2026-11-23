@@ -3,13 +3,15 @@ import { useReducer, useState } from "react";
 import type { KiwoomKey } from "../../api/generated/KiwoomKey";
 import type { OrdersAccount } from "../../api/generated/OrdersAccount";
 import type { KiwoomKeyList } from "../../api/generated/KiwoomKeyList";
-import { connectKiwoomKey, disconnectKiwoomKey, loadKiwoomLink, removeKiwoomKey, renameKiwoomKey, replaceKiwoomKey, storeKiwoomKeys } from "../../api/system";
+import type { KisAccountListing } from "../../api/generated/KisAccountListing";
+import { connectKiwoomKey, disconnectKiwoomKey, loadKiwoomLink, removeKiwoomKey, renameKiwoomKey, replaceKiwoomKey, replaceKisAccount, storeKiwoomKeys } from "../../api/system";
 import { confirmAction } from "../overlay/Confirm";
-import { KeyFields } from "./KiwoomKeyFields";
+import { ENV_ACCOUNT_NOTE, kisAccountText, kisListingOf, kisMissingHtsId, NO_HTS_ID_NOTE } from "./kisAccount";
+import { KeyFields, KisAccountFields } from "./KiwoomKeyFields";
 import { ReadOnlyRow, SaveNote } from "./KiwoomKeyForm";
 import { KiwoomRowOrders } from "./KiwoomRowOrders";
 import { Confirm } from "./KiwoomStatusCard";
-import { emptyEntry, editRequest, keyEntryReducer, removeText, shortReason } from "./kiwoomKeys";
+import { accountRequest, emptyEntry, editRequest, keyEntryReducer, removeText, shortReason } from "./kiwoomKeys";
 import { IN_USE_ELSEWHERE_NOTICE, keySaveNote, maskedAppKey, NO_CONFIRMATIONS } from "./kiwoomPanel";
 import { linkDotTone } from "./linkDot";
 import { accountNumberOf, orderInUse, orderMarkOf } from "./orderUse";
@@ -31,6 +33,7 @@ const orderMarkStyle = (tone: "on" | "off" | "warn") => ({ color: tone === "on" 
 
 export function KiwoomKeyRow({ entry, order, keys, mock, expanded, now, onToggle, onOpenIpHelp }: Props) {
   const reason = shortReason(entry.link, now, entry.broker);
+  const listing = kisListingOf(entry);
   return (
     <li className="flex flex-col border-b border-line last:border-b-0">
       <button type="button" aria-expanded={expanded} className="flex min-h-11 w-full items-center gap-2 px-1 py-2 text-left max-md:flex-wrap" onClick={onToggle}>
@@ -38,7 +41,8 @@ export function KiwoomKeyRow({ entry, order, keys, mock, expanded, now, onToggle
         <span className="min-w-0 truncate text-m font-semibold text-text">{entry.alias}</span>
         {entry.market && <span className="flex-none rounded-s bg-accent-soft px-2 py-0.5 text-xs text-accent">시세</span>}
         {entry.source === "env" && <span className="flex-none rounded-s bg-raised px-2 py-0.5 text-xs text-text-2">{mock ? "모의투자" : ".env"}</span>}
-        {order && <span className="flex-none text-s text-text-2" data-testid="key-account">{accountNumberOf(order.accountTail)}</span>}
+        {listing ? <span className="flex-none text-s text-text-2" data-testid="key-account">{kisAccountText(listing)}</span> : order && <span className="flex-none text-s text-text-2" data-testid="key-account">{accountNumberOf(order.accountTail)}</span>}
+        {kisMissingHtsId(listing) && <span className="flex-none rounded-s bg-raised px-2 py-0.5 text-xs text-warning" data-testid="key-hts-missing">HTS ID 없음</span>}
         {order && <span className="flex-none rounded-s px-2 py-0.5 text-xs" data-testid="key-order-mark" data-tone={orderMarkOf(order.state).tone} style={orderMarkStyle(orderMarkOf(order.state).tone)}>{orderMarkOf(order.state).text}</span>}
         <span className="flex-1" />
         {reason && <span className="min-w-0 truncate text-s text-warning">{reason}</span>}
@@ -57,6 +61,7 @@ function KeyDetails({ entry, order, keys, now, onOpenIpHelp }: { entry: KiwoomKe
   const locked = entry.link.state === "connecting" || command.busy;
   const keep = (list: KiwoomKeyList) => storeKiwoomKeys(queryClient, list);
   const request = editRequest(form, entry);
+  const listing = kisListingOf(entry);
 
   const save = async () => {
     if (!request) return;
@@ -101,7 +106,8 @@ function KeyDetails({ entry, order, keys, now, onOpenIpHelp }: { entry: KiwoomKe
           <button type="button" className="tb-btn h-9 px-3 text-danger" disabled={locked} onClick={() => void remove()}>지우기</button>
         </div>
       )}
-      {order && <KiwoomRowOrders keyId={entry.keyId} order={order} />}
+      {listing && <KisAccountSection entry={entry} listing={listing} keep={keep} locked={locked} />}
+      {order && <KiwoomRowOrders entry={entry} order={order} />}
       {!entry.market && <RowConnection entry={entry} now={now} keep={keep} />}
       {command.error && <p role="alert" className="text-m text-danger">{command.error}</p>}
     </div>
@@ -129,6 +135,45 @@ function RowConnection({ entry, now, keep }: { entry: KiwoomKey; now: number; ke
         <button type="button" className="tb-btn h-9 px-3 disabled:cursor-not-allowed disabled:opacity-50" disabled={!view.connect.enabled || command.busy} onClick={() => void connect(view.connect!.acknowledged)}>{view.connect.label}</button>
       )}
       {view.disconnect && <button type="button" className="tb-btn h-9 px-3" disabled={command.busy} onClick={() => void command.run(async () => keep(await disconnectKiwoomKey(entry.keyId)))}>연결 끊기</button>}
+      {command.error && <p role="alert" className="text-m text-danger">{command.error}</p>}
+    </div>
+  );
+}
+
+function KisAccountSection({ entry, listing, keep, locked }: { entry: KiwoomKey; listing: KisAccountListing; keep(list: KiwoomKeyList): Promise<void>; locked: boolean }) {
+  const command = useCommand();
+  const [editing, setEditing] = useState(false);
+  const [form, dispatch] = useReducer(keyEntryReducer, "", emptyEntry);
+  const request = accountRequest(form);
+  const close = () => {
+    setEditing(false);
+    dispatch({ type: "reset", alias: "" });
+  };
+  const save = async () => {
+    if (!request) return;
+    if (await command.run(async () => keep(await replaceKisAccount(entry.keyId, request)))) close();
+  };
+  const busy = locked || command.busy;
+
+  return (
+    <div className="flex flex-col gap-2" data-testid="kis-account">
+      <ReadOnlyRow label="계좌번호" value={kisAccountText(listing)} />
+      <ReadOnlyRow label="HTS ID" value={listing.htsIdSet ? "설정됨" : "없음"} />
+      {kisMissingHtsId(listing) && <p className="text-s text-warning" data-testid="kis-hts-note">{NO_HTS_ID_NOTE}</p>}
+      {listing.source === "env" ? (
+        <p className="text-s text-text-3">{ENV_ACCOUNT_NOTE}</p>
+      ) : editing ? (
+        <form aria-label="계좌 바꾸기" className="flex flex-col gap-2" autoComplete="off" onSubmit={(e) => { e.preventDefault(); if (request && !busy) void save(); }}>
+          <KisAccountFields entry={form} dispatch={dispatch} disabled={busy} />
+          <div className="flex flex-wrap items-center gap-2">
+            <button type="button" className="tb-btn h-9 px-3" onClick={() => dispatch({ type: "toggleReveal" })}>{form.reveal ? "입력 가리기" : "입력 보기"}</button>
+            <button type="submit" className="btn-primary h-9 px-4 disabled:cursor-not-allowed disabled:opacity-50" disabled={busy || !request}>저장</button>
+            <button type="button" className="tb-btn h-9 px-3" onClick={close}>취소</button>
+          </div>
+        </form>
+      ) : (
+        <button type="button" className="tb-btn h-9 self-start px-3" disabled={busy} onClick={() => setEditing(true)}>{listing.accountTail === null ? "계좌번호 넣기" : "계좌번호·HTS ID 바꾸기"}</button>
+      )}
       {command.error && <p role="alert" className="text-m text-danger">{command.error}</p>}
     </div>
   );

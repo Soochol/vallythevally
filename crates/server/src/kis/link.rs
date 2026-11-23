@@ -7,6 +7,7 @@ use tokio::sync::watch;
 
 use super::auth::{AuthError, Halt};
 use super::error::Category;
+use super::notice::{KisNotices, NoticeConnect};
 use super::rest::{KisError, KisRest};
 use crate::clock::Clock;
 use crate::kiwoom::auth::DAILY_REISSUE_AT;
@@ -30,6 +31,7 @@ const IN_USE_ELSEWHERE_MESSAGE: &str = "한투 실시간 접속을 다른 곳에
 pub struct KisLane {
     pub rest: KisRest,
     pub link: KisLink,
+    pub notices: KisNotices,
 }
 
 struct Stale;
@@ -71,7 +73,7 @@ fn failure_of(error: &KisError) -> LinkFailure {
             Category::BusinessRejected | Category::Unknown => (Problem::PathStopped, None),
         },
         KisError::TokenFile(_) => (Problem::TokenFileUnusable, None),
-        KisError::Transport(_) | KisError::QueueGone => (Problem::Network, None),
+        KisError::Transport(_) | KisError::QueueGone | KisError::NotAdmitted => (Problem::Network, None),
         KisError::BadTokenResponse => (Problem::AuthUncertain, None),
     };
     LinkFailure { problem, retry_at, message: error.to_string() }
@@ -87,7 +89,13 @@ impl KisLink {
     }
 
     pub fn lane(rest: KisRest, clock: Clock) -> KisLane {
-        KisLane { link: KisLink::new(rest.clone(), clock), rest }
+        KisLink::lane_with_notices(rest, clock, None)
+    }
+
+    pub fn lane_with_notices(rest: KisRest, clock: Clock, connect: Option<NoticeConnect>) -> KisLane {
+        let link = KisLink::new(rest.clone(), clock);
+        let notices = KisNotices::new(connect, rest.auth().clone(), link.subscribe());
+        KisLane { link, rest, notices }
     }
 
     pub fn same(&self, other: &KisLink) -> bool {

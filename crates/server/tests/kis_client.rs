@@ -701,7 +701,7 @@ async fn the_realtime_session_registers_confirms_answers_pingpong_and_splits_fra
     assert_eq!((approval_body["appkey"].as_str(), approval_body["secretkey"].as_str()), (Some(APP_KEY), Some(APP_SECRET)));
 
     peer.say(&fixture("subscribe_ack.json"));
-    assert_eq!(next_event(&mut events).await, StreamEvent::Registered(samsung.clone()));
+    assert_eq!(next_event(&mut events).await, StreamEvent::Registered { subscription: samsung.clone(), cipher: None });
     assert_eq!(stream.status(), StreamStatus::Open);
 
     let pingpong = fixture("pingpong.json");

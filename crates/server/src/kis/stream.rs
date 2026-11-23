@@ -9,6 +9,7 @@ use tokio_tungstenite::connect_async;
 use tokio_tungstenite::tungstenite::{Error as WsError, Message};
 
 use super::auth::{AuthError, KisAuth};
+use super::notice::NoticeCipher;
 use super::error::{Category, Failure, judge_control};
 
 pub const KIS_REALTIME_LIMIT: usize = 40;
@@ -30,6 +31,19 @@ pub struct RealFrame {
     pub tr_id: String,
     pub count: u32,
     pub fields: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SealedFrame {
+    pub tr_id: String,
+    pub count: u32,
+    pub payload: String,
+}
+
+pub fn parse_sealed(text: &str) -> Option<SealedFrame> {
+    let mut parts = text.splitn(4, '|');
+    let (Some("1"), Some(tr_id), Some(count), Some(payload)) = (parts.next(), parts.next(), parts.next(), parts.next()) else { return None };
+    Some(SealedFrame { tr_id: tr_id.to_owned(), count: count.parse().ok()?, payload: payload.to_owned() })
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -70,7 +84,8 @@ pub enum StreamStatus {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum StreamEvent {
-    Registered(Subscription),
+    Registered { subscription: Subscription, cipher: Option<NoticeCipher> },
+    Sealed(SealedFrame),
     Rejected { subscription: Option<Subscription>, failure: Failure },
     Frame(RealFrame),
     Disconnected(End),
@@ -123,6 +138,16 @@ struct ControlBody {
     rt_cd: String,
     #[serde(default)]
     msg_cd: String,
+    #[serde(default)]
+    output: Option<ControlOutput>,
+}
+
+#[derive(Deserialize)]
+struct ControlOutput {
+    #[serde(default)]
+    key: String,
+    #[serde(default)]
+    iv: String,
 }
 
 impl Control {
@@ -269,6 +294,7 @@ impl Session {
         if !text.starts_with('{') {
             return match parse_frame(text) {
                 Ok(frame) => self.emit(StreamEvent::Frame(frame)).await,
+                Err(FrameError::Encrypted) if let Some(sealed) = parse_sealed(text) => self.emit(StreamEvent::Sealed(sealed)).await,
                 Err(error) => {
                     tracing::debug!(?error, "한투 실시간 프레임을 나누지 못해 버립니다");
                     Flow::Continue
@@ -284,8 +310,9 @@ impl Session {
         }
         let Some(body) = &control.body else { return Flow::Continue };
         let Some(failure) = judge_control(&body.rt_cd, &body.msg_cd) else {
+            let cipher = body.output.as_ref().and_then(|output| NoticeCipher::new(output.key.clone(), output.iv.clone()));
             return match control.subscription() {
-                Some(subscription) => self.emit(StreamEvent::Registered(subscription)).await,
+                Some(subscription) => self.emit(StreamEvent::Registered { subscription, cipher }).await,
                 None => Flow::Continue,
             };
         };
@@ -342,6 +369,14 @@ mod tests {
         assert_eq!(parse_frame("1|H0STCNI0|001|CIPHERTEXT"), Err(FrameError::Encrypted));
         for bad in ["", "0|H0STCNT0", "0|H0STCNT0|x|a^b", "2|H0STCNT0|001|a", "{\"header\":{}}"] {
             assert_eq!(parse_frame(bad), Err(FrameError::Malformed), "{bad}");
+        }
+    }
+
+    #[test]
+    fn an_encrypted_frame_keeps_its_tr_id_count_and_sealed_payload_for_the_notice_reader() {
+        assert_eq!(parse_sealed("1|H0STCNI0|001|U0VBTEVE"), Some(SealedFrame { tr_id: "H0STCNI0".into(), count: 1, payload: "U0VBTEVE".into() }));
+        for not_sealed in ["0|H0STCNI0|001|a^b", "1|H0STCNI0|x|U0VBTEVE", "1|H0STCNI0"] {
+            assert_eq!(parse_sealed(not_sealed), None, "{not_sealed}");
         }
     }
 

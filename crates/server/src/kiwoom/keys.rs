@@ -21,6 +21,7 @@ use super::transport::Transport;
 use crate::api::{Broker, KiwoomEnvironment, RegisteredIp};
 use crate::clock::Clock;
 use crate::config::{KisCredentials, KiwoomCredentials, Secret};
+use crate::trading::KisAccountSettings;
 
 static NEXT_SERIAL: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
 
@@ -107,7 +108,7 @@ impl KisFactory {
     fn lane(&self, token_path: PathBuf, credentials: &KiwoomCredentials) -> KisLane {
         let kis_credentials = KisCredentials { app_key: credentials.app_key.clone(), app_secret: credentials.app_secret.clone() };
         let auth = KisAuth::new(kis_credentials, token_path, self.transport.clone(), self.clock.clone());
-        KisLink::lane(KisRest::new(self.transport.clone(), auth), self.clock.clone())
+        KisLink::lane_with_notices(KisRest::new(self.transport.clone(), auth), self.clock.clone(), self.feed.as_ref().map(|feed| feed.connect.clone()))
     }
 }
 
@@ -122,6 +123,9 @@ pub struct KeySetup {
 pub enum KeyError {
     Limit,
     DuplicateAppKey,
+    DuplicateAccount,
+    AccountRequired,
+    NotKis,
     Alias(&'static str),
     Unknown,
     EnvReadOnly,
@@ -134,6 +138,9 @@ impl fmt::Display for KeyError {
         match self {
             KeyError::Limit => write!(f, "키는 {KEY_LIMIT}개까지 등록할 수 있습니다"),
             KeyError::DuplicateAppKey => f.write_str("이미 등록한 앱키입니다"),
+            KeyError::DuplicateAccount => f.write_str("같은 계좌번호의 한투 키가 이미 있습니다"),
+            KeyError::AccountRequired => f.write_str("한투 키는 계좌번호를 넣어야 더할 수 있습니다"),
+            KeyError::NotKis => f.write_str("계좌번호와 HTS ID는 한투 키에만 넣습니다"),
             KeyError::Alias(reason) => f.write_str(reason),
             KeyError::Unknown => f.write_str("그 키가 없습니다"),
             KeyError::EnvReadOnly => f.write_str(".env에서 읽은 키라 화면에서 바꿀 수 없습니다"),
@@ -175,11 +182,12 @@ struct Entry {
     paths: KeyPaths,
     lane: EntryLane,
     registered_ip: Option<RegisteredIp>,
+    account: KisAccountSettings,
 }
 
 impl Entry {
     fn stored(&self) -> StoredKey {
-        StoredKey { id: self.id.clone(), alias: self.alias.clone(), broker: self.broker, credentials: self.credentials.clone() }
+        StoredKey { id: self.id.clone(), alias: self.alias.clone(), broker: self.broker, credentials: self.credentials.clone(), account: self.account.clone() }
     }
 
     fn kiwoom_lane(&self) -> Option<&Lane> {
@@ -213,6 +221,11 @@ impl Inner {
 
     fn has_app_key(&self, broker: Broker, app_key: &str, except: Option<&KeyId>) -> bool {
         self.entries.iter().any(|entry| entry.broker == broker && Some(&entry.id) != except && entry.credentials.app_key.expose() == app_key)
+    }
+
+    fn has_account(&self, account: &KisAccountSettings, except: Option<&KeyId>) -> bool {
+        let Some(number) = account.number.as_ref() else { return false };
+        self.entries.iter().any(|entry| entry.broker == Broker::Kis && Some(&entry.id) != except && entry.account.number.as_ref() == Some(number))
     }
 
     fn count(&self, broker: Broker) -> usize {
@@ -266,6 +279,17 @@ pub struct ListedKey {
     pub market: bool,
     pub app_key_tail: Option<String>,
     pub connection: Connection,
+    pub account: KisAccountSettings,
+}
+
+#[derive(Clone)]
+pub struct KisAccountView {
+    pub serial: u64,
+    pub id: KeyId,
+    pub alias: String,
+    pub origin: KeyOrigin,
+    pub lane: KisLane,
+    pub account: KisAccountSettings,
 }
 
 pub struct ConnectedLanes {
@@ -324,7 +348,7 @@ impl KeyRing {
                         (EntryLane::Kis(kis.lane(key.paths.token.clone(), &key.credentials)), None)
                     }
                 };
-                Some(Entry { serial: next_serial(), id: key.id, alias: key.alias, origin: key.origin, broker: key.broker, credentials: key.credentials, paths: key.paths, lane, registered_ip })
+                Some(Entry { serial: next_serial(), id: key.id, alias: key.alias, origin: key.origin, broker: key.broker, credentials: key.credentials, paths: key.paths, lane, registered_ip, account: key.account })
             })
             .collect();
         let market = market.filter(|id| entries.iter().any(|entry| entry.id == *id));
@@ -378,7 +402,21 @@ impl KeyRing {
             market: inner.market.as_ref() == Some(&entry.id),
             app_key_tail: app_key_tail(entry.credentials.app_key.expose()),
             connection,
+            account: entry.account.clone(),
         }
+    }
+
+    fn kis_view(entry: &Entry) -> Option<KisAccountView> {
+        let EntryLane::Kis(lane) = &entry.lane else { return None };
+        Some(KisAccountView { serial: entry.serial, id: entry.id.clone(), alias: entry.alias.clone(), origin: entry.origin, lane: lane.clone(), account: entry.account.clone() })
+    }
+
+    pub fn kis_views(&self) -> Vec<KisAccountView> {
+        self.lock().entries.iter().filter_map(Self::kis_view).collect()
+    }
+
+    pub fn kis_view_of(&self, id: &KeyId) -> Option<KisAccountView> {
+        self.lock().entries.iter().find(|entry| entry.id == *id).and_then(Self::kis_view)
     }
 
     pub fn views(&self) -> Vec<KeyView> {
@@ -476,15 +514,23 @@ impl KeyRing {
     }
 
     pub fn add(&self, alias: &str, credentials: KiwoomCredentials) -> Result<KeyId, KeyError> {
-        self.add_for(Broker::Kiwoom, alias, credentials)
+        self.add_for(Broker::Kiwoom, alias, credentials, KisAccountSettings::default())
     }
 
-    pub fn add_for(&self, broker: Broker, alias: &str, credentials: KiwoomCredentials) -> Result<KeyId, KeyError> {
+    pub fn add_for(&self, broker: Broker, alias: &str, credentials: KiwoomCredentials, account: KisAccountSettings) -> Result<KeyId, KeyError> {
         let alias = checked_alias(alias).map_err(KeyError::Alias)?;
         let factory = self.factory.as_ref().ok_or(KeyError::NoStore)?;
+        match broker {
+            Broker::Kiwoom if account != KisAccountSettings::default() => return Err(KeyError::NotKis),
+            Broker::Kis if account.number.is_none() => return Err(KeyError::AccountRequired),
+            _ => {}
+        }
         let mut inner = self.lock();
         if inner.has_app_key(broker, credentials.app_key.expose(), None) {
             return Err(KeyError::DuplicateAppKey);
+        }
+        if inner.has_account(&account, None) {
+            return Err(KeyError::DuplicateAccount);
         }
         if inner.count(broker) >= KEY_LIMIT {
             return Err(KeyError::Limit);
@@ -496,7 +542,7 @@ impl KeyRing {
         let mut proposed = inner.file_list();
         let id = proposed.next_id();
         let becomes_source = inner.market.is_none();
-        proposed.keys.push(StoredKey { id: id.clone(), alias: alias.clone(), broker, credentials: credentials.clone() });
+        proposed.keys.push(StoredKey { id: id.clone(), alias: alias.clone(), broker, credentials: credentials.clone(), account: account.clone() });
         if becomes_source {
             proposed.market = Some(id.clone());
         }
@@ -505,7 +551,7 @@ impl KeyRing {
             Some(kis) => {
                 let paths = KeyPaths { token: kis_token_path(&kis.token_base, &credentials), registered_ip: derived_paths(&factory.bases, &credentials).registered_ip };
                 let lane = kis.lane(paths.token.clone(), &credentials);
-                Entry { serial: next_serial(), id: id.clone(), alias, origin: KeyOrigin::File, broker, credentials, paths, lane: EntryLane::Kis(lane), registered_ip: None }
+                Entry { serial: next_serial(), id: id.clone(), alias, origin: KeyOrigin::File, broker, credentials, paths, lane: EntryLane::Kis(lane), registered_ip: None, account }
             }
             None => {
                 let listed: Vec<KiwoomCredentials> = inner.entries.iter().filter(|entry| entry.broker == Broker::Kiwoom).map(|entry| entry.credentials.clone()).chain([credentials.clone()]).collect();
@@ -514,7 +560,7 @@ impl KeyRing {
                 let takes_market_lane = inner.market_lane_holder.is_none();
                 let lane = if takes_market_lane { self.market_lane.clone() } else { factory.account_lane(&paths, &credentials) };
                 let registered_ip = registered_ip_file(paths.registered_ip.clone()).load().ok().flatten();
-                let entry = Entry { serial: next_serial(), id: id.clone(), alias, origin: KeyOrigin::File, broker, credentials, paths, lane: EntryLane::Kiwoom(lane.clone()), registered_ip };
+                let entry = Entry { serial: next_serial(), id: id.clone(), alias, origin: KeyOrigin::File, broker, credentials, paths, lane: EntryLane::Kiwoom(lane.clone()), registered_ip, account };
                 if takes_market_lane {
                     inner.market_lane_holder = Some(id.clone());
                     inner.idle_registered_ip = None;
@@ -546,6 +592,37 @@ impl KeyRing {
         }
         self.persist(&inner, &proposed)?;
         inner.entries[at].alias = alias;
+        Ok(())
+    }
+
+    fn kis_account_problem(inner: &Inner, id: &KeyId, account: &KisAccountSettings) -> Result<usize, KeyError> {
+        let at = inner.file_position(id)?;
+        if inner.entries[at].broker != Broker::Kis {
+            return Err(KeyError::NotKis);
+        }
+        if account.number.is_none() {
+            return Err(KeyError::AccountRequired);
+        }
+        if inner.has_account(account, Some(id)) {
+            return Err(KeyError::DuplicateAccount);
+        }
+        Ok(at)
+    }
+
+    pub fn check_kis_account(&self, id: &KeyId, account: &KisAccountSettings) -> Result<(), KeyError> {
+        Self::kis_account_problem(&self.lock(), id, account).map(drop)
+    }
+
+    pub fn set_kis_account(&self, id: &KeyId, account: KisAccountSettings) -> Result<(), KeyError> {
+        let mut inner = self.lock();
+        let at = Self::kis_account_problem(&inner, id, &account)?;
+        let mut proposed = inner.file_list();
+        if let Some(key) = proposed.keys.iter_mut().find(|key| key.id == *id) {
+            key.account = account.clone();
+        }
+        self.persist(&inner, &proposed)?;
+        inner.entries[at].account = account;
+        self.announce_change();
         Ok(())
     }
 

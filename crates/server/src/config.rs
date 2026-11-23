@@ -150,6 +150,8 @@ const KNOWN_KEYS: &[&str] = &[
     "VALLY_KIS_BASE_URL",
     "VALLY_KIS_WS_URL",
     "VALLY_KIS_TOKEN_PATH",
+    "VALLY_KIS_ACCOUNT_NO",
+    "VALLY_KIS_HTS_ID",
     "VALLY_CLOCK_START",
     "VALLY_DB_PATH",
     "VALLY_SCREENER_DB_PATH",
@@ -191,6 +193,7 @@ pub struct Config {
     pub kiwoom_base_url: String,
     pub kiwoom_ws_url: String,
     pub kis_credentials: Option<KisCredentials>,
+    pub kis_account: crate::trading::KisAccountSettings,
     pub kis_base_url: String,
     pub kis_ws_url: String,
     pub kis_token_path: Option<PathBuf>,
@@ -345,6 +348,10 @@ impl Config {
             (None, None) => None,
             _ => return Err(ConfigError("VALLY_KIS_APP_KEY와 VALLY_KIS_APP_SECRET은 둘 다 적거나 둘 다 비워 둡니다".into())),
         };
+        let kis_account = crate::trading::KisAccountSettings::read(present("VALLY_KIS_ACCOUNT_NO").as_deref(), present("VALLY_KIS_HTS_ID").as_deref()).map_err(|reason| ConfigError(format!("VALLY_KIS_ACCOUNT_NO·VALLY_KIS_HTS_ID: {reason}")))?;
+        if kis_credentials.is_none() && let Some(key) = [("VALLY_KIS_ACCOUNT_NO", kis_account.number.is_some()), ("VALLY_KIS_HTS_ID", kis_account.hts_id.is_some())].into_iter().find_map(|(key, given)| given.then_some(key)) {
+            return Err(ConfigError(format!("{key}는 한투 환경 키(VALLY_KIS_APP_KEY, VALLY_KIS_APP_SECRET)와 함께 씁니다")));
+        }
         let kis_base_endpoint = KisEndpoint::of("VALLY_KIS_BASE_URL", &kis_base_url, KIS_BASE_HOST, KIS_BASE_PORT, "https")?;
         if kis_base_endpoint != KisEndpoint::of("VALLY_KIS_WS_URL", &kis_ws_url, KIS_WS_HOST, KIS_WS_PORT, "ws")? {
             return Err(ConfigError("VALLY_KIS_BASE_URL과 VALLY_KIS_WS_URL은 둘 다 실제 한투이거나 둘 다 루프백 주소여야 합니다".into()));
@@ -384,6 +391,7 @@ impl Config {
             kiwoom_base_url,
             kiwoom_ws_url,
             kis_credentials,
+            kis_account,
             kis_base_url,
             kis_ws_url,
             kis_token_path: None,
@@ -1188,6 +1196,18 @@ mod tests {
             let error = start_kis(half).expect_err("한쪽만").to_string();
             assert!(error.contains("VALLY_KIS_APP_KEY") && !error.contains("FAKE-"), "{error}");
         }
+    }
+
+    #[test]
+    fn kis_account_number_and_hts_id_come_with_the_kis_key_and_a_bad_shape_names_only_the_variable() {
+        let config = start_kis(&[KIS_KEYS[0], KIS_KEYS[1], ("VALLY_KIS_ACCOUNT_NO", "50012356-01"), ("VALLY_KIS_HTS_ID", "fakehts01")]).unwrap();
+        assert_eq!(config.kis_account.number.as_ref().map(|number| number.tail()), Some("56".to_owned()));
+        assert_eq!(config.kis_account.hts_id.as_ref().map(|id| id.expose().to_owned()), Some("fakehts01".to_owned()));
+        assert_eq!(start_kis(&KIS_KEYS).unwrap().kis_account, crate::trading::KisAccountSettings::default());
+        let error = start_kis(&[KIS_KEYS[0], KIS_KEYS[1], ("VALLY_KIS_ACCOUNT_NO", "5001235601")]).expect_err("모양이 틀림").to_string();
+        assert!(error.contains("VALLY_KIS_ACCOUNT_NO") && !error.contains("5001235601"), "{error}");
+        let error = start_kis(&[("VALLY_KIS_ACCOUNT_NO", "50012356-01")]).expect_err("한투 키 없이").to_string();
+        assert!(error.contains("VALLY_KIS_ACCOUNT_NO") && !error.contains("50012356"), "{error}");
     }
 
     #[test]

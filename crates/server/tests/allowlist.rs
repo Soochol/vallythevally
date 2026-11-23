@@ -219,3 +219,60 @@ fn kis_tr_id_scanner_finds_words_only_and_the_list_check_notices_an_extra_id() {
     assert_ne!(listed(&format!("{} FHKST99999999", KIS_MARKET_TR_IDS.join(" "))), want, "더해진 id를 알아채야 한다");
     assert_ne!(listed(&KIS_MARKET_TR_IDS[1..].join(" ")), want, "빠진 id를 알아채야 한다");
 }
+
+fn kis_trading_tr_ids(text: &str) -> Vec<String> {
+    let b = text.as_bytes();
+    let word = |i: usize| b.get(i).is_some_and(|c| c.is_ascii_alphanumeric() || *c == b'_');
+    (0..b.len().saturating_sub(8))
+        .filter(|&i| {
+            (i == 0 || !word(i - 1))
+                && (b[i..i + 4] == *b"TTTC" || b[i..i + 4] == *b"VTTC")
+                && b[i + 4..i + 8].iter().all(u8::is_ascii_digit)
+                && b[i + 8].is_ascii_uppercase()
+                && !word(i + 9)
+        })
+        .map(|i| text[i..i + 9].to_owned())
+        .collect()
+}
+
+const KIS_TRADING_TR_IDS: [&str; 7] = ["TTTC0011U", "TTTC0012U", "TTTC0013U", "TTTC8434R", "TTTC0084R", "TTTC8908R", "TTTC0081R"];
+
+fn kis_trading_path() -> String {
+    ["/uapi/domestic-stock/v1/", "trading/"].concat()
+}
+
+#[test]
+fn kis_order_and_account_tr_ids_and_the_trading_path_live_only_in_trading_and_are_exactly_the_listed_ones() {
+    let sources = server_sources();
+    for source in sources.iter().filter(|s| !s.in_trading()) {
+        assert_eq!(kis_trading_tr_ids(&source.text), Vec::<String>::new(), "{}에 한투 주문·계좌 tr_id가 있습니다", source.relative);
+        assert!(!source.text.contains(&kis_trading_path()), "{}에 한투 주문·계좌 경로가 있습니다", source.relative);
+    }
+    let seen: BTreeSet<String> = sources.iter().filter(|s| s.in_trading()).flat_map(|s| kis_trading_tr_ids(&s.text)).collect();
+    let want: BTreeSet<String> = KIS_TRADING_TR_IDS.iter().map(|id| (*id).to_owned()).collect();
+    assert_eq!(seen, want, "trading 안의 한투 tr_id가 허용 목록과 다릅니다");
+    assert!(sources.iter().any(|s| s.in_trading() && s.text.contains(&kis_trading_path())), "trading 안에서 한투 주문 경로를 찾지 못했습니다");
+}
+
+#[test]
+fn kis_trading_scanner_finds_words_only_and_notices_a_mock_or_an_extra_id() {
+    assert_eq!(kis_trading_tr_ids("\"TTTC0011U\", VTTC8434R x TTTC0081R"), ["TTTC0011U", "VTTC8434R", "TTTC0081R"]);
+    assert!(kis_trading_tr_ids("XTTTC0011U TTTC0011UX TTTC001U TTTC0011u").is_empty());
+    let listed = |text: &str| kis_trading_tr_ids(text).into_iter().collect::<BTreeSet<String>>();
+    let want: BTreeSet<String> = KIS_TRADING_TR_IDS.iter().map(|id| (*id).to_owned()).collect();
+    assert_eq!(listed(&KIS_TRADING_TR_IDS.join(" ")), want);
+    assert_ne!(listed(&format!("{} VTTC0012U", KIS_TRADING_TR_IDS.join(" "))), want, "모의 tr_id가 들어오면 알아채야 한다");
+    assert_ne!(listed(&format!("{} TTTC8408R", KIS_TRADING_TR_IDS.join(" "))), want, "더해진 id를 알아채야 한다");
+    assert_ne!(listed(&KIS_TRADING_TR_IDS[1..].join(" ")), want, "빠진 id를 알아채야 한다");
+}
+
+#[test]
+fn the_kis_fill_notice_tr_lives_only_in_the_kis_module() {
+    let notice = ["H0ST", "CNI0"].concat();
+    let sources = server_sources();
+    for source in sources.iter().filter(|s| !s.relative.starts_with("kis/") && !s.relative.ends_with("_tests.rs")) {
+        assert!(!source.text.contains(&notice), "{}에 한투 체결통보 tr_id가 있습니다", source.relative);
+    }
+    assert!(sources.iter().any(|s| s.relative.starts_with("kis/") && s.text.contains(&notice)), "kis 안에서 체결통보 tr_id를 찾지 못했습니다");
+    assert!(sources.iter().all(|s| !s.text.contains(&["H0ST", "CNI9"].concat())), "모의 체결통보 tr_id는 넣지 않는다");
+}

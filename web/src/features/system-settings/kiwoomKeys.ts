@@ -4,7 +4,9 @@ import type { KiwoomKey } from "../../api/generated/KiwoomKey";
 import type { KiwoomKeyList } from "../../api/generated/KiwoomKeyList";
 import type { KiwoomLinkStatus } from "../../api/generated/KiwoomLinkStatus";
 import type { ConnectionTone } from "../status/connectionView";
-import { BROKERS, brokerOrder } from "./brokers";
+import type { KiwoomKeyAdd } from "../../api/generated/KiwoomKeyAdd";
+import type { KisAccountInput } from "../../api/generated/KisAccountInput";
+import { BROKERS, brokerOrder, takesAccountNumber } from "./brokers";
 import { formatRemaining, inUseElsewhere } from "./kiwoomPanel";
 import { linkDotTone } from "./linkDot";
 import { REMOVE_ORDERS_NOTE } from "./orderUse";
@@ -134,6 +136,8 @@ export interface KeyEntry {
   alias: string;
   appKey: string;
   appSecret: string;
+  accountNo: string;
+  htsId: string;
   reveal: boolean;
 }
 
@@ -141,10 +145,12 @@ export type KeyEntryEvent =
   | { type: "alias"; value: string }
   | { type: "appKey"; value: string }
   | { type: "appSecret"; value: string }
+  | { type: "accountNo"; value: string }
+  | { type: "htsId"; value: string }
   | { type: "toggleReveal" }
   | { type: "reset"; alias: string };
 
-export const emptyEntry = (alias: string): KeyEntry => ({ alias, appKey: "", appSecret: "", reveal: false });
+export const emptyEntry = (alias: string): KeyEntry => ({ alias, appKey: "", appSecret: "", accountNo: "", htsId: "", reveal: false });
 
 export function keyEntryReducer(entry: KeyEntry, event: KeyEntryEvent): KeyEntry {
   switch (event.type) {
@@ -154,6 +160,10 @@ export function keyEntryReducer(entry: KeyEntry, event: KeyEntryEvent): KeyEntry
       return { ...entry, appKey: event.value };
     case "appSecret":
       return { ...entry, appSecret: event.value };
+    case "accountNo":
+      return { ...entry, accountNo: event.value };
+    case "htsId":
+      return { ...entry, htsId: event.value };
     case "toggleReveal":
       return { ...entry, reveal: !entry.reveal };
     case "reset":
@@ -163,7 +173,18 @@ export function keyEntryReducer(entry: KeyEntry, event: KeyEntryEvent): KeyEntry
 
 const filled = (value: string) => value.trim() !== "";
 
-export const canAdd = (entry: KeyEntry): boolean => filled(entry.appKey) && filled(entry.appSecret);
+export const canAdd = (entry: KeyEntry, broker: Broker = "kiwoom"): boolean => filled(entry.appKey) && filled(entry.appSecret) && (!takesAccountNumber(broker) || filled(entry.accountNo));
+
+export function addInput(entry: KeyEntry, broker: Broker): KiwoomKeyAdd {
+  const base = { alias: entry.alias.trim(), appKey: entry.appKey.trim(), appSecret: entry.appSecret.trim() };
+  if (broker === "kiwoom") return base;
+  return { ...base, broker, ...(takesAccountNumber(broker) ? { accountNo: entry.accountNo.trim() } : {}), ...(takesAccountNumber(broker) && filled(entry.htsId) ? { htsId: entry.htsId.trim() } : {}) };
+}
+
+export function accountRequest(entry: KeyEntry): KisAccountInput | null {
+  if (!filled(entry.accountNo)) return null;
+  return filled(entry.htsId) ? { accountNo: entry.accountNo.trim(), htsId: entry.htsId.trim() } : { accountNo: entry.accountNo.trim() };
+}
 
 export type EditRequest = { alias: string | null; credentials: { appKey: string; appSecret: string } | null };
 

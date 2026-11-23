@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
 import type { OrdersAccount } from "../../api/generated/OrdersAccount";
 import type { OrdersStatus } from "../../api/generated/OrdersStatus";
-import { accountNumberOf, mergeOrdersStatus, orderCanTurnOff, orderCanTurnOn, orderInUse, orderMarkOf } from "./orderUse";
+import { accountNumberOf, canConfirmEnable, enableTail, mergeOrdersStatus, orderCanTurnOff, orderCanTurnOn, orderInUse, orderMarkOf } from "./orderUse";
 
-const row = (patch: Partial<OrdersAccount> = {}): OrdersAccount => ({ keyId: "k", alias: "k", market: false, state: "on", accountRef: "r", accountTail: "12", ...patch });
+const row = (patch: Partial<OrdersAccount> = {}): OrdersAccount => ({ keyId: "k", broker: "kiwoom", alias: "k", market: false, state: "on", accountRef: "r", accountTail: "12", ...patch });
 const status = (patch: Partial<OrdersStatus> = {}): OrdersStatus => ({ state: "on", accountRef: "ref-a", accountTail: "01", message: "켜짐", accounts: [row({ keyId: "a", market: true })], ...patch });
 
 describe("계좌 줄의 주문 사용 표시", () => {
@@ -46,5 +46,18 @@ describe("주문 사용 응답을 저장된 상태에 합치기", () => {
   it("저장된 상태가 없으면 응답을 그대로 둔다", () => {
     const result = status();
     expect(mergeOrdersStatus(undefined, result, false)).toBe(result);
+  });
+});
+
+describe("주문 사용 켜기의 끝 2자리", () => {
+  it("키움은 서버가 알려 준 끝 2자리를 싣고 한투는 사용자가 넣은 두 자리 숫자를 싣는다", () => {
+    expect(enableTail("kiwoom", "12", "")).toBe("12");
+    expect(enableTail("kis", "12", "34")).toBe("34");
+    expect(enableTail("kis", "12", "3")).toBeNull();
+    expect(enableTail("kis", "12", "3a")).toBeNull();
+  });
+  it("키움은 확인 상자를, 한투는 두 자리 입력을 마쳐야 켤 수 있다", () => {
+    expect([canConfirmEnable("kiwoom", false, ""), canConfirmEnable("kiwoom", true, "")]).toEqual([false, true]);
+    expect([canConfirmEnable("kis", true, ""), canConfirmEnable("kis", false, "34")]).toEqual([false, true]);
   });
 });

@@ -1,12 +1,12 @@
 import { useQuery } from "@tanstack/react-query";
 import { useRef, useState } from "react";
 import { Popover } from "../overlay/Popover";
+import { BROKERS } from "../system-settings/brokers";
 import { openSystemSettings } from "../system-settings/open";
 import { fetchAccountNumber } from "./orderApi";
 import { accountNumberText, canPick, MANAGE_ACCOUNTS_TEXT, type OrderAccountChoice, optionNote, optionText, selectedKeyAlias } from "./orderAccount";
 import { listAnchorRect, listWidthIn, listWindowOf } from "./listPopover";
 
-const BROKER = "키움";
 const groupedAccountNumber = (digits: string) => `${digits.slice(0, 4)}-${digits.slice(4, 8)}`;
 
 function useAccountNumberText(choice: OrderAccountChoice, maskAccount: boolean): { text: string; failure: string | undefined } {
@@ -15,7 +15,7 @@ function useAccountNumberText(choice: OrderAccountChoice, maskAccount: boolean):
   const reveal = !maskAccount && current !== null && current.tail !== null && ref !== null;
   const lookup = useQuery({ queryKey: ["trading", "account-number", ref], queryFn: ({ signal }) => fetchAccountNumber(ref, signal), enabled: reveal, gcTime: 0, staleTime: Infinity, retry: false, refetchOnWindowFocus: false });
   const failure = reveal && lookup.isError ? (lookup.error instanceof Error ? lookup.error.message : "계좌번호를 불러오지 못했습니다") : undefined;
-  const text = reveal && lookup.data ? `${BROKER} ${groupedAccountNumber(lookup.data.accountNumber)}` : accountNumberText(current?.tail ?? null);
+  const text = reveal && lookup.data ? `${BROKERS[current.broker].shortName} ${groupedAccountNumber(lookup.data.accountNumber)}` : accountNumberText(current?.broker ?? "kiwoom", current?.tail ?? null);
   return { text, failure };
 }
 

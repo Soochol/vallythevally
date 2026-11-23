@@ -4,6 +4,7 @@ import { receiveKiwoomLinkPush, useKiwoomLinkStore } from "../stores/kiwoomLink"
 import type { KiwoomLinkStatus } from "./generated/KiwoomLinkStatus";
 import type { MarketSourceStatus } from "./generated/MarketSourceStatus";
 import type { SystemSettings } from "./generated/SystemSettings";
+import type { KisAccountInput } from "./generated/KisAccountInput";
 import type { KiwoomConnectInput } from "./generated/KiwoomConnectInput";
 import type { KiwoomKeyAdd } from "./generated/KiwoomKeyAdd";
 import type { KiwoomKeyAlias } from "./generated/KiwoomKeyAlias";
@@ -87,6 +88,7 @@ export async function storeKiwoomKeys(queryClient: QueryClient, list: KiwoomKeyL
 export const addKiwoomKey = (input: KiwoomKeyAdd) => sendJson<KiwoomKeyList>("POST", KEYS, JSON.stringify(input));
 export const renameKiwoomKey = (keyId: string, input: KiwoomKeyAlias) => putJson<KiwoomKeyList>(keyPath(keyId, "/alias"), input);
 export const replaceKiwoomKey = (keyId: string, input: KiwoomKeyInput) => putJson<KiwoomKeyList>(keyPath(keyId, "/key"), input);
+export const replaceKisAccount = (keyId: string, input: KisAccountInput) => putJson<KiwoomKeyList>(keyPath(keyId, "/account"), input);
 export const removeKiwoomKey = (keyId: string) => sendJson<KiwoomKeyList>("DELETE", keyPath(keyId), "{}");
 export const designateMarketKey = (input: KiwoomMarketKeyInput) => putJson<KiwoomKeyList>(`${KIWOOM}/market-key`, input);
 export const connectKiwoomKey = (keyId: string, input: KiwoomConnectInput) => sendJson<KiwoomKeyList>("POST", keyPath(keyId, "/connect"), JSON.stringify(input));

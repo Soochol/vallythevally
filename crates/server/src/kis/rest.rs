@@ -7,7 +7,7 @@ use domain::KstTime;
 use tokio::sync::{Notify, oneshot};
 use tokio::time::{Instant, sleep_until};
 
-use super::api::KisApiId;
+use super::api::KisEndpoint;
 use super::auth::{AuthError, Halt, KisAuth, TokenLease};
 use super::error::{Failure, Policy, judge_market};
 use super::token_file::FileError;
@@ -44,17 +44,47 @@ impl Priority {
     }
 }
 
+pub type Admission = Arc<dyn Fn() -> bool + Send + Sync>;
+
+#[derive(Clone)]
+pub struct SendOnce {
+    pub transmitted: Arc<std::sync::atomic::AtomicBool>,
+    pub admit: Admission,
+}
+
+impl SendOnce {
+    pub fn new(admit: Admission) -> SendOnce {
+        SendOnce { transmitted: Arc::default(), admit }
+    }
+
+    pub fn happened(&self) -> bool {
+        self.transmitted.load(std::sync::atomic::Ordering::SeqCst)
+    }
+}
+
+impl fmt::Debug for SendOnce {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("SendOnce").field("transmitted", &self.happened()).finish_non_exhaustive()
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct KisRequest {
-    pub api: KisApiId,
+    pub api: KisEndpoint,
     pub query: Vec<(&'static str, String)>,
     pub next_page: bool,
     pub priority: Priority,
+    pub body: Option<Secret<String>>,
+    pub once: Option<SendOnce>,
 }
 
 impl KisRequest {
-    pub fn new(api: KisApiId, query: Vec<(&'static str, String)>, priority: Priority) -> Self {
-        KisRequest { api, query, next_page: false, priority }
+    pub fn new(api: impl Into<KisEndpoint>, query: Vec<(&'static str, String)>, priority: Priority) -> Self {
+        KisRequest { api: api.into(), query, next_page: false, priority, body: None, once: None }
+    }
+
+    pub fn write_once(api: impl Into<KisEndpoint>, body: Secret<String>, once: SendOnce) -> Self {
+        KisRequest { api: api.into(), query: Vec::new(), next_page: false, priority: Priority::Order, body: Some(body), once: Some(once) }
     }
 
     pub fn next_page(self) -> Self {
@@ -77,6 +107,7 @@ pub enum KisError {
     Transport(TransportError),
     BadTokenResponse,
     QueueGone,
+    NotAdmitted,
 }
 
 impl fmt::Display for KisError {
@@ -88,6 +119,7 @@ impl fmt::Display for KisError {
             KisError::Transport(e) => write!(f, "한투 요청 실패: {e}"),
             KisError::BadTokenResponse => f.write_str("한투 인증 응답에서 값을 읽지 못했습니다"),
             KisError::QueueGone => f.write_str("한투 요청 대기열이 요청을 끝내지 못했습니다"),
+            KisError::NotAdmitted => f.write_str("주문 사용이 꺼져 한투에 보내지 않았습니다"),
         }
     }
 }
@@ -109,18 +141,22 @@ impl From<AuthError> for KisError {
 
 type JobResult = Result<KisPage, KisError>;
 
+static NEXT_WRITE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+
 #[derive(Clone, PartialEq, Eq, Hash)]
 struct DedupeKey {
-    api: KisApiId,
+    api: KisEndpoint,
     query: Vec<(&'static str, String)>,
     next_page: bool,
+    write: Option<u64>,
 }
 
 impl DedupeKey {
     fn of(request: &KisRequest) -> Self {
         let mut query = request.query.clone();
         query.sort();
-        DedupeKey { api: request.api, query, next_page: request.next_page }
+        let write = request.once.is_some().then(|| NEXT_WRITE.fetch_add(1, std::sync::atomic::Ordering::Relaxed));
+        DedupeKey { api: request.api, query, next_page: request.next_page, write }
     }
 }
 
@@ -219,7 +255,7 @@ struct Inner {
     scheduler: Mutex<Scheduler>,
     changed: Notify,
     merged: Mutex<HashMap<DedupeKey, Vec<oneshot::Sender<JobResult>>>>,
-    stopped: Mutex<HashMap<KisApiId, Failure>>,
+    stopped: Mutex<HashMap<KisEndpoint, Failure>>,
 }
 
 #[derive(Clone)]
@@ -256,8 +292,8 @@ impl KisRest {
         &self.0.auth
     }
 
-    pub fn stopped(&self, api: KisApiId) -> Option<Failure> {
-        self.0.stopped.lock().expect("멈춘 경로 잠금").get(&api).cloned()
+    pub fn stopped(&self, api: impl Into<KisEndpoint>) -> Option<Failure> {
+        self.0.stopped.lock().expect("멈춘 경로 잠금").get(&api.into()).cloned()
     }
 
     pub async fn call(&self, request: KisRequest) -> Result<KisPage, KisError> {
@@ -344,7 +380,8 @@ impl Inner {
         headers.push(("tr_id", Secret::new(request.api.tr_id().to_owned())));
         headers.push(("custtype", Secret::new(CUSTOMER_TYPE_PERSONAL.to_owned())));
         headers.push(("tr_cont", Secret::new(if request.next_page { "N" } else { "" }.to_owned())));
-        HttpRequest { method: Method::Get, path: request.api.path(), headers, query: request.query.clone(), body: None }
+        let method = if request.body.is_some() { Method::Post } else { Method::Get };
+        HttpRequest { method, path: request.api.path(), headers, query: request.query.clone(), body: request.body.clone() }
     }
 
     async fn execute(&self, key: &DedupeKey, request: &KisRequest) -> JobResult {
@@ -354,8 +391,17 @@ impl Inner {
             if self.abandoned(key) {
                 return Err(KisError::QueueGone);
             }
+            if request.once.as_ref().is_some_and(|once| !(once.admit)()) {
+                return Err(KisError::NotAdmitted);
+            }
             let lease = self.auth.token().await?;
             let oldest_in_window = self.admit(request.priority).await;
+            if request.once.as_ref().is_some_and(|once| !(once.admit)()) {
+                return Err(KisError::NotAdmitted);
+            }
+            if let Some(once) = &request.once {
+                once.transmitted.store(true, std::sync::atomic::Ordering::SeqCst);
+            }
             let response = self.transport.send(self.build(request, &lease)).await.map_err(KisError::Transport)?;
             let Some(failure) = judge_market(response.status, &response.body) else {
                 let more = response.tr_cont.as_deref().is_some_and(|flag| MORE_PAGES.contains(&flag));
@@ -369,6 +415,12 @@ impl Inner {
                         return Err(KisError::Failed(failure));
                     }
                     self.hold_window(oldest_in_window);
+                }
+                Policy::ReissueOnce | Policy::HaltPath if request.once.is_some() => {
+                    if failure.policy() == Policy::ReissueOnce {
+                        self.auth.invalidate(lease.generation);
+                    }
+                    return Err(KisError::Failed(failure));
                 }
                 Policy::ReissueOnce if !reissued => {
                     reissued = true;

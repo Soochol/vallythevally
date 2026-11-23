@@ -33,7 +33,7 @@ pub(super) const OTHER_ACCOUNT: &str = "5559870210";
 pub(super) const HOST: &str = "127.0.0.1:7777";
 
 #[derive(Clone, Default)]
-struct Logs(Arc<Mutex<Vec<u8>>>);
+pub(super) struct Logs(Arc<Mutex<Vec<u8>>>);
 
 impl Write for Logs {
     fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
@@ -47,7 +47,7 @@ impl Write for Logs {
 }
 
 impl Logs {
-    fn text(&self) -> String {
+    pub(super) fn text(&self) -> String {
         String::from_utf8_lossy(&self.0.lock().unwrap()).into_owned()
     }
 }
@@ -394,7 +394,7 @@ async fn account_reads_stop_when_the_key_is_auth_blocked() {
 async fn enabling_needs_the_confirmed_account_tail() {
     let f = fixture().await;
     let (code, check) = call(&f.app, "POST", "/api/system/orders/check-account", Some(json!({}))).await;
-    assert_eq!((code, check), (StatusCode::OK, json!({"accountTail": "01"})));
+    assert_eq!((code, check), (StatusCode::OK, json!({"broker": "kiwoom", "accountTail": "01"})));
     assert!(!f.feed.wanted(), "확인만으로는 켜지지 않는다");
 
     let (code, body) = enable(&f.app, "02").await;
@@ -846,7 +846,7 @@ async fn the_account_tail_is_the_last_two_of_the_eight_digits_users_know() {
     let f = fixture().await;
     *f.account.lock().unwrap() = EIGHT_DIGIT_EXAMPLE.to_owned();
     let (code, check) = call(&f.app, "POST", "/api/system/orders/check-account", Some(json!({}))).await;
-    assert_eq!((code, check), (StatusCode::OK, json!({"accountTail": "78"})));
+    assert_eq!((code, check), (StatusCode::OK, json!({"broker": "kiwoom", "accountTail": "78"})));
 
     let (code, body) = enable(&f.app, "10").await;
     assert_eq!(code, StatusCode::BAD_REQUEST, "상품 구분 두 자리는 맞지 않는다: {body}");

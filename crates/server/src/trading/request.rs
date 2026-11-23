@@ -383,6 +383,10 @@ impl OrderNumber {
         (text.len() == 7 && text.bytes().all(|b| b.is_ascii_digit())).then(|| OrderNumber(text.to_owned()))
     }
 
+    pub(super) fn trusted(text: &str) -> OrderNumber {
+        OrderNumber(text.to_owned())
+    }
+
     pub fn as_str(&self) -> &str {
         &self.0
     }
