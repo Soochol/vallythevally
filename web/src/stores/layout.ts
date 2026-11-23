@@ -23,7 +23,7 @@ import { MAX_WINDOWS, windowId, WINDOW_KINDS, type WindowId, type WindowKind, ty
 import type { CanvasPlacement, DockPlacement, Placement } from "../layout/placement";
 import { isIndexCode } from "../lib/symbol";
 import { readDockOrigins, writeDockOrigins } from "../persist/dockOrigins";
-import { NO_WINDOW_RESENDS, orderLedger, type WindowResends } from "../features/order/commandLedger";
+import { newWindowResends, orderLedger, type WindowResends } from "../features/order/commandLedger";
 import type { OrderEntries } from "../features/order/orderEntries";
 import { useUiStore } from "./ui";
 
@@ -247,7 +247,7 @@ const withReclaimed = (step: ArrangementStep, reclaimed: ReclaimedWindow | undef
 
 export const useLayoutStore = create<LayoutState>()((set, get) => {
   const reclaimWindowId = (layoutId: string, window: string) => {
-    const reclaimed = swapReclaimed({ layoutId, window, entries: {}, resends: NO_WINDOW_RESENDS });
+    const reclaimed = swapReclaimed({ layoutId, window, entries: {}, resends: newWindowResends() });
     set((s) => ({ steps: s.steps.map((step, i) => (i === s.steps.length - 1 ? withReclaimed(step, reclaimed) : step)) }));
   };
   const canvasActive = () => useUiStore.getState().prefs.layoutMode === "canvas" && get().canvasArea !== null;

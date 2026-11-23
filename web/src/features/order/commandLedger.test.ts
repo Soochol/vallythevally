@@ -136,7 +136,7 @@ test("창의 재전송 줄을 꺼내면 그 창만 비고 되돌려 넣으면 �
   expect(ledger.takeWindowResends("order-9").queues.size).toBe(0);
 });
 
-test("창이 받아 간 id는 그 창이 줄을 꺼낸 뒤에 끝나도 줄에 들어가지 않고 되돌려 넣으면 그 창 줄에 들어간다", () => {
+test("창을 꺼낸 동안 끝난 응답 없음은 버려지지 않고 되돌려 넣은 창에서 다시 쓴다", () => {
   const ledger = createLedger(counter());
   const action = placeAction("005930", "buy", 71_000, 10, "krx");
   const sending = ledger.issueEach("order-2", action);
@@ -145,6 +145,15 @@ test("창이 받아 간 id는 그 창이 줄을 꺼낸 뒤에 끝나도 줄에 �
   expect(ledger.issueEach("order-2", action)).toBe("id-2");
   ledger.takeWindowResends("order-2");
   ledger.restoreWindowResends("order-2", taken);
-  ledger.settleEach("order-2", action, sending, "unanswered");
   expect(ledger.issueEach("order-2", action)).toBe(sending);
+});
+
+test("끝난 id는 받아 간 기록에 남지 않아 다시 끝나도 줄에 두 번 들어가지 않는다", () => {
+  const ledger = createLedger(counter());
+  const action = placeAction("005930", "buy", 71_000, 10, "krx");
+  const sending = ledger.issueEach(WINDOW, action);
+  ledger.settleEach(WINDOW, action, sending, "unanswered");
+  ledger.settleEach(WINDOW, action, sending, "unanswered");
+  expect(ledger.issueEach(WINDOW, action)).toBe(sending);
+  expect(ledger.issueEach(WINDOW, action)).toBe("id-2");
 });
