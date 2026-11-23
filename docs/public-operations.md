@@ -59,6 +59,7 @@
 | `VALLY_PUBLIC_SCREENER_STATUS_CACHE_SECS` | 2 | 스크리너 상태 공용 캐시 |
 
 - 걷은 한도의 설정 변수(`VALLY_PUBLIC_KIWOOM_ACCOUNT_IN_FLIGHT`, `_MARKET_CONCURRENCY`, `_RANKINGS_CONCURRENCY`, `_BOARD_CONCURRENCY`, `_FLOW_CONCURRENCY`, `_FLOW_TR_PER_MINUTE`, `_FLOW_ACCOUNT_TR_PER_MINUTE`, `_FLOW_FETCH_CONCURRENCY`, `_BOARD_TR_PER_WINDOW`, `_KIWOOM_SENDS_PER_WINDOW`, `_MARKET_CACHE_SECS`, `_RANKING_MAX_PAGES`, `_SCREENER_CONCURRENCY`, `_SCREENER_TOTAL_PER_MINUTE`)가 남아 있으면 시작할 때 경고 한 줄을 내고 무시한다. 설정에서 지운다.
+- 스크리너 상태와 실행이 쓰는 거래일 달력은 공개 요청이 키움에서 받지 않는다. 서버가 5분마다 스스로 받아 두고(운영자 쪽 호출이 먼저 받아도 된다), 달력이 아직 없으면 공개 실행은 `404 not_prepared`다.
 - 순위는 수집 데몬이 미리 만든 조건과 쪽 수(기본 5쪽)만 답한다. 판에 없는 조건이나 더 많은 쪽 수는 공개 리스너에서 `404 not_prepared`다. 시장 개요 칸이 판에 없어도 `404 not_prepared`다.
 - 공개 오류 응답에는 키움 오류 원문이나 `manualActionRequired`가 없고 고정 문구와 `retryAt`만 있다. 시장 개요 응답 안의 실패한 칸의 `error`도 같은 고정 문구로 바뀐다.
 - 흐름의 `symbols`는 세션 계정의 히트맵 테마 문서에 있는 종목만 받고, 없는 종목은 응답의 `notInThemes`로 돌려준다(운영자 리스너 응답에는 이 칸이 없다). 수집 데몬이 분봉을 모으지 않은 종목은 `notCollected`다.

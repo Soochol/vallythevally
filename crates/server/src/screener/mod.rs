@@ -40,6 +40,7 @@ use store::{Listed, Store, StoreError};
 
 const CALENDAR_DAYS: usize = 10;
 const CALENDAR_FRESH_SECS: i64 = 5 * 60;
+const CALENDAR_REFRESH: Duration = Duration::from_secs(CALENDAR_FRESH_SECS as u64);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct Progress {
@@ -59,13 +60,6 @@ enum Run {
 enum CalendarUse {
     Status,
     Update,
-    Cached,
-}
-
-impl CalendarUse {
-    fn of_request(from_shared_data_only: bool) -> CalendarUse {
-        if from_shared_data_only { CalendarUse::Cached } else { CalendarUse::Status }
-    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -186,6 +180,20 @@ impl Screener {
         self.store.generation()
     }
 
+    pub fn keep_calendar_fresh(self: &Arc<Self>) {
+        let me = self.clone();
+        tokio::spawn(async move {
+            let mut ticks = tokio::time::interval_at(tokio::time::Instant::now() + CALENDAR_REFRESH, CALENDAR_REFRESH);
+            ticks.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+            loop {
+                ticks.tick().await;
+                if let Err(e) = me.calendar(CalendarUse::Update).await {
+                    tracing::warn!(error = %e, "거래일 달력을 새로 받지 못했습니다");
+                }
+            }
+        });
+    }
+
     pub fn warm_memory(self: &Arc<Self>) {
         let me = self.clone();
         tokio::spawn(async move {
@@ -292,7 +300,6 @@ impl Screener {
         let (reuse, priority) = match using {
             CalendarUse::Status => (true, Priority::Screen),
             CalendarUse::Update => (false, Priority::Background),
-            CalendarUse::Cached => return cached.clone().ok_or_else(|| BarError::Internal("서버가 아직 거래일 달력을 받지 못했습니다".into())),
         };
         if let Some(c) = cached.as_ref().filter(|c| reuse && c.fetched_at.kst_date() == now.kst_date() && now.unix() - c.fetched_at.unix() < CALENDAR_FRESH_SECS) {
             return Ok(c.clone());
@@ -318,11 +325,15 @@ impl Screener {
                 summary = self.with_store(Store::summary).await?;
             }
         }
-        let calendar = match self.calendar(CalendarUse::of_request(from_shared_data_only)).await {
-            Ok(c) => Some(c),
-            Err(e) => {
-                tracing::warn!(error = %e, "코스피 일봉을 받지 못해 필요 관측일을 모릅니다");
-                None
+        let calendar = if from_shared_data_only {
+            self.calendar.lock().await.clone()
+        } else {
+            match self.calendar(CalendarUse::Status).await {
+                Ok(c) => Some(c),
+                Err(e) => {
+                    tracing::warn!(error = %e, "코스피 일봉을 받지 못해 필요 관측일을 모릅니다");
+                    None
+                }
             }
         };
         let now = self.clock.now();
@@ -352,7 +363,11 @@ impl Screener {
 
     async fn run_screen(self: &Arc<Self>, screen: RunnableScreen, screen_key: String, from_shared_data_only: bool) -> Result<ScreenerResult, ApiFailure> {
         let now = self.clock.now();
-        let calendar = self.calendar(CalendarUse::of_request(from_shared_data_only)).await.map_err(|e| Lookup::ScreenerRun.failure(e, now))?;
+        let calendar = if from_shared_data_only {
+            self.calendar.lock().await.clone().ok_or_else(|| ApiFailure::new(api::ApiErrorCode::NotPrepared, "서버가 아직 거래일 달력을 받지 못했습니다"))?
+        } else {
+            self.calendar(CalendarUse::Status).await.map_err(|e| Lookup::ScreenerRun.failure(e, now))?
+        };
         let need_day = calendar.need_day(now);
         self.refill_listing().await.map_err(|e| Lookup::ScreenerRun.failure(e, now))?;
         self.recents_started_outside_recent()?;

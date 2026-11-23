@@ -405,6 +405,7 @@ pub async fn start(config: &Config, lock: &InstanceLock, adapters: Adapters) -> 
     state.shared_data.start(config.shared_data.as_ref());
     if config.shared_data.is_some() {
         state.screener.read_shared_snapshots(state.shared_data.clone(), config.screener_snapshot_stale_limit);
+        state.screener.keep_calendar_fresh();
     }
     crate::market_overview::start(state.clone(), config.market_samples_dir.clone());
     crate::etf::start_collection(state.clone(), config.etf_pdf_dir.clone(), config.naver_base_url.clone());

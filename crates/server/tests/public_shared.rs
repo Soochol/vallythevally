@@ -595,3 +595,35 @@ async fn the_usage_page_reports_each_boards_age_its_read_errors_and_screener_res
     site.state.clock.jump(60);
     assert_eq!(site.usage().await["sharedData"]["snapshot-krx"]["ageSecs"], 90, "나이는 가짜 시계를 따라 늘어난다");
 }
+
+#[tokio::test]
+async fn a_public_screener_run_before_the_server_has_a_calendar_is_not_prepared_and_calls_nothing() {
+    let site = Site::start(ScriptedTransport::new()).await;
+    site.load_symbols();
+    write_every_board(&site.shared);
+    site.poll().await;
+    let who = site.login("alice").await;
+    let before = transport_calls(&site);
+    let status = site.get(&who, "/api/screener/status").await;
+    assert_eq!(status.status, 200, "{}", status.text());
+    assert!(status.json()["needDay"].is_null());
+    let run = site.send_json(&who, reqwest::Method::POST, "/api/screener/run", &new_high_screen()).await;
+    assert_eq!((run.status, run.json()["error"]["code"].as_str().map(str::to_owned)), (404, Some("not_prepared".to_owned())), "{}", run.text());
+    assert_eq!(transport_calls(&site), before);
+}
+
+#[tokio::test]
+async fn the_server_renews_the_calendar_by_itself_so_public_requests_never_have_to() {
+    let site = Site::start(ScriptedTransport::new()).await;
+    site.fill_screener_store().await;
+    site.load_symbols();
+    let index_days = || site.fake.calls().iter().filter(|call| call.api_id == "ka20006").count();
+    let fetched_before = index_days();
+    tokio::time::pause();
+    tokio::time::sleep(Duration::from_secs(301)).await;
+    for _ in 0..50 {
+        tokio::task::yield_now().await;
+    }
+    tokio::time::resume();
+    assert!(index_days() > fetched_before, "5분마다 서버가 스스로 달력을 새로 받는다");
+}
