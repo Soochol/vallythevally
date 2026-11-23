@@ -63,6 +63,28 @@ describe("정의되지 않은 토큰 규칙", () => {
     expect(findUndefinedTokens([{ path: "/src/features/a/a.css", text }], TOKENS_PATH, TOKENS_TEXT)).toEqual([]);
   });
 
+  it("앱 진입 파일이 import하는 CSS에서 @import로 닿는 시트만 다른 폴더의 정의를 쓴다", () => {
+    const definer: SourceFile = { path: "/src/features/q/Q.tsx", text: `node.style.setProperty("--far", "1px");` };
+    const reached: SourceFile[] = [
+      { path: "/src/main.tsx", text: `import "./styles/index.css";` },
+      { path: "/src/styles/index.css", text: `@import "./part.css";` },
+      { path: "/src/styles/part.css", text: ".p { width: var(--far); }" },
+      definer,
+    ];
+    expect(findUndefinedTokens(reached, TOKENS_PATH, TOKENS_TEXT)).toEqual([]);
+    const featureOnly: SourceFile[] = [
+      { path: "/src/main.tsx", text: `import "./styles/index.css";` },
+      { path: "/src/styles/index.css", text: ".i { color: var(--text); }" },
+      { path: "/src/features/b/b.css", text: `@import "./c.css"; .b { width: var(--far); }` },
+      { path: "/src/features/b/c.css", text: ".c { height: var(--far); }" },
+      definer,
+    ];
+    expect(findUndefinedTokens(featureOnly, TOKENS_PATH, TOKENS_TEXT).map((violation) => `${violation.path} ${violation.detail}`)).toEqual([
+      "/src/features/b/b.css --far",
+      "/src/features/b/c.css --far",
+    ]);
+  });
+
   it("지금 저장소에서 정의되지 않은 토큰 사용이 0건이다", () => {
     const tokensText = rawSources[TOKENS_PATH];
     expect(tokensText).toBeDefined();
@@ -92,6 +114,21 @@ describe("표식(.ui2)이 있는 폴더 규칙", () => {
     const found = ui2(".a { color: #fff; background: rgba(0, 0, 0, 0.5); border-color: rgb(1, 2, 3); }");
     expect(found.map((violation) => violation.detail)).toEqual(["#fff", "rgba(", "rgb("]);
     expect(ui2(".a { color: var(--text); background: color-mix(in srgb, var(--accent) 20%, transparent); }")).toEqual([]);
+  });
+
+  it("선택자에 콜론이 있는 블록과 @media 안의 선언도 잡는다", () => {
+    const cases: readonly { text: string; rule: string }[] = [
+      { text: ".a:hover { font-weight: 800 }", rule: "글자 굵기" },
+      { text: ".a::before { font-size: 9px }", rule: "글자 크기" },
+      { text: "@media (max-width: 600px) { .a { font-size: 9px } }", rule: "글자 크기" },
+      { text: ".a:hover { color: red }", rule: "색 직접 값" },
+      { text: ".a:hover{font-size:9px}", rule: "글자 크기" },
+      { text: ".a:hover{color:red}", rule: "색 직접 값" },
+    ];
+    for (const { text, rule } of cases) {
+      expect({ text, caught: ui2(text).some((violation) => violation.rule === rule) }).toEqual({ text, caught: true });
+    }
+    expect(ui2("@media (max-width: 600px) { .a:hover { font-size: var(--fs-s); color: var(--text); } }")).toEqual([]);
   });
 
   it("표식이 없는 폴더와 tokens.css는 검사하지 않는다", () => {
