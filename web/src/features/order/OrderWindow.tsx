@@ -29,7 +29,7 @@ import { FeedStrip, useFeedDownSince } from "../market-window/FeedStrip";
 import { SymbolHead } from "../market-window/SymbolHead";
 import { openSystemSettings } from "../system-settings/open";
 import { AccountPart } from "./AccountPart";
-import { averageRowPrice, ETF_ETN_AFTER_HOURS_TEXT, holdingOf, isEtfOrEtnAfterHours, type ProfitUnit, sellOrderQuantity, sellQuantityAtPrice, toggledUnit } from "./holdingSummary";
+import { atLivePrice, averageRowPrice, ETF_ETN_AFTER_HOURS_TEXT, holdingOf, isEtfOrEtnAfterHours, type ProfitUnit, sellOrderQuantity, sellQuantityAtPrice, toggledUnit } from "./holdingSummary";
 import { tickRuleOf } from "../market-window/tick";
 import { fullRangePrices } from "./priceRange";
 import { HighValueConfirm, type HighValueRequest } from "./HighValueConfirm";
@@ -142,7 +142,11 @@ function OrderBody({ id, code, infoPager }: { id: WindowId; code: SymbolCode; in
     const { prefs } = useUiStore.getState();
     setSettings({ ...prefs.orderSettings, account: null });
   }, [fellBack]);
-  const holding = holdingOf(data.balance?.holdings ?? [], code);
+  const holding = atLivePrice(holdingOf(data.balance?.holdings ?? [], code), feed.lastPrice);
+  const balance = useMemo(
+    () => data.balance === null || holding === null ? data.balance : { ...data.balance, holdings: data.balance.holdings.map((row) => row.code === holding.code ? holding : row) },
+    [data.balance, holding?.code, holding?.currentPrice],
+  );
   const averagePrice = settings.averageDot ? averageRowPrice(rows.map((row) => row.price), holding?.averagePrice ?? null) : null;
   const writable = access.open && !data.blocked && writes.status?.unknown !== true;
 
@@ -260,7 +264,7 @@ function OrderBody({ id, code, infoPager }: { id: WindowId; code: SymbolCode; in
         </div>
       )}
       <SymbolHead code={code} name={symbolInfo?.name ?? null} lastPrice={feed.lastPrice} previousClose={feed.previousClose} marketOpen={marketOpen} mock={mock} />
-      <AccountPart windowId={id} choice={choice} accountRef={accountRef} onPickAccount={pickAccount} openOrders={data.openOrders} balance={data.balance} executions={data.executions} writable={writable} mock={mock} policy={data.orderable?.policy ?? null} onCancel={cancelOne}
+      <AccountPart windowId={id} choice={choice} accountRef={accountRef} onPickAccount={pickAccount} openOrders={data.openOrders} balance={balance} executions={data.executions} writable={writable} mock={mock} policy={data.orderable?.policy ?? null} onCancel={cancelOne}
         holding={holding} orderable={data.orderable} buyableProblem={data.buyableProblem} sellOrdered={sellOrdered} profitUnit={profitUnit} onProfitUnit={toggleProfitUnit}
         presetKind={presetKind} input={input} referencePrice={referencePrice} onPresetKind={setPresetKind} onInput={setInput} quantity={quantity} buying={data.capacity.buying} hover={hover}
         explorerOn={explorerOn} explorerUnavailable={referencePrice === null || fullPrices === null} explorerTitle={fullPrices === null ? EXPLORER_UNAVAILABLE : undefined} onToggleExplorer={toggleExplorer} onCurrent={centerOnCurrent}

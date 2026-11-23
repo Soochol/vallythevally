@@ -13,6 +13,19 @@ export type ProfitUnit = "won" | "percent";
 
 export const holdingOf = (holdings: readonly TradingHolding[], code: string): TradingHolding | null => holdings.find((h) => h.code === code && h.quantity > 0) ?? null;
 
+export function atLivePrice(holding: TradingHolding | null, lastPrice: number | null): TradingHolding | null {
+  if (holding === null || lastPrice === null || lastPrice === holding.currentPrice) return holding;
+  const priceChange = lastPrice - holding.currentPrice;
+  const profitChange = priceChange * holding.quantity;
+  const rateChangeCenti = Math.round((profitChange * 10_000) / (holding.averagePrice * holding.quantity));
+  return {
+    ...holding,
+    currentPrice: lastPrice,
+    evaluationProfit: holding.evaluationProfit + profitChange,
+    profitRateCenti: holding.profitRateCenti === null ? null : holding.profitRateCenti + rateChangeCenti,
+  };
+}
+
 export function profitText(holding: TradingHolding | null, unit: ProfitUnit): string {
   if (holding === null) return "-";
   if (unit === "percent") return holding.profitRateCenti === null ? "-" : formatPercent(holding.profitRateCenti / 100);
