@@ -21,6 +21,7 @@ use super::usage::Bundle;
 use super::{Principal, Runtime, errors, user_data};
 use crate::heatmap_board::{Busy, QuoteGate, Refused as BoardRefused};
 use crate::heatmap_flow::{FlowGate, Freshness, same_kst_minute};
+use crate::market_source::{GenerationScoped, GenerationTicket, SourceGeneration};
 
 const CACHED_BODY_LIMIT: usize = 8 * 1024 * 1024;
 const REQUEST_BODY_LIMIT: usize = 64 * 1024;
@@ -88,12 +89,12 @@ pub(crate) struct KiwoomGuard {
     flow_account_trs: PerAccount<MinuteWindow>,
     board_pacer: SendPacer,
     flow_pacer: SendPacer,
-    market_cache: Mutex<HashMap<String, Cached>>,
+    market_cache: GenerationScoped<HashMap<String, Cached>>,
     status_cache: Mutex<Option<Cached>>,
 }
 
 impl KiwoomGuard {
-    pub fn new(limits: &Limits) -> Self {
+    pub fn new(limits: &Limits, generation: SourceGeneration) -> Self {
         KiwoomGuard {
             ranking_max_pages: limits.ranking_max_pages,
             market_cache_secs: limits.market_cache.as_secs() as i64,
@@ -117,7 +118,7 @@ impl KiwoomGuard {
             flow_account_trs: PerAccount::default(),
             board_pacer: SendPacer::new(KIWOOM_SEND_WINDOW, limits.kiwoom_sends_per_window),
             flow_pacer: SendPacer::new(KIWOOM_SEND_WINDOW, limits.kiwoom_sends_per_window),
-            market_cache: Mutex::new(HashMap::new()),
+            market_cache: GenerationScoped::new(generation),
             status_cache: Mutex::new(None),
         }
     }
@@ -176,19 +177,24 @@ impl KiwoomGuard {
         true
     }
 
-    fn fresh_market(&self, key: &str, now: i64) -> Option<Response> {
-        locked(&self.market_cache).get(key).filter(|c| now - c.at < self.market_cache_secs).map(Cached::response)
+    fn market_ticket(&self) -> GenerationTicket {
+        self.market_cache.ticket()
     }
 
-    fn keep_market(&self, key: String, cached: Cached, now: i64) {
-        let mut cache = locked(&self.market_cache);
-        if cache.len() >= CACHE_ENTRIES {
-            let ttl = self.market_cache_secs;
-            cache.retain(|_, c| now - c.at < ttl);
-        }
-        if cache.len() < CACHE_ENTRIES {
-            cache.insert(key, cached);
-        }
+    fn fresh_market(&self, key: &str, now: i64) -> Option<Response> {
+        self.market_cache.read(|cache| cache.get(key).filter(|c| now - c.at < self.market_cache_secs).map(Cached::response))
+    }
+
+    fn keep_market(&self, started: GenerationTicket, key: String, cached: Cached, now: i64) {
+        self.market_cache.keep(started, |cache| {
+            if cache.len() >= CACHE_ENTRIES {
+                let ttl = self.market_cache_secs;
+                cache.retain(|_, c| now - c.at < ttl);
+            }
+            if cache.len() < CACHE_ENTRIES {
+                cache.insert(key, cached);
+            }
+        });
     }
 
     fn fresh_status(&self, now: i64) -> Option<Response> {
@@ -299,6 +305,7 @@ pub(super) async fn market_overview(State(runtime): State<Arc<Runtime>>, request
     }
     let now = runtime.clock.now().unix();
     let key = cache_key(request.uri());
+    let started = runtime.kiwoom.market_ticket();
     if let Some(hit) = runtime.kiwoom.fresh_market(&key, now) {
         runtime.usage.market_cache_hit();
         return hit;
@@ -314,7 +321,7 @@ pub(super) async fn market_overview(State(runtime): State<Arc<Runtime>>, request
     drop(held);
     let (response, cached) = cache_if_ok(response, Some(now)).await;
     if let Some(cached) = cached {
-        runtime.kiwoom.keep_market(key, Cached { at: runtime.clock.now().unix(), ..cached }, now);
+        runtime.kiwoom.keep_market(started, key, Cached { at: runtime.clock.now().unix(), ..cached }, now);
     }
     response
 }

@@ -97,6 +97,11 @@ impl Server {
             }
             address.send_replace(Some(started.listener.local_addr().unwrap()));
             let automatic = started.automatic.map(AbortOnDrop);
+            if let Some(public) = started.public {
+                let router = public.router();
+                let public_listener = public.listener;
+                background.spawn(async move { axum::serve(public_listener, router).await.unwrap(); });
+            }
             let listener = started.listener;
             let app = started.router;
             axum::serve(listener, app).await.unwrap();

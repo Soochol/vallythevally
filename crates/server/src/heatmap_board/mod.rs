@@ -1,7 +1,7 @@
 mod board;
 
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use axum::extract::{Query, State};
 use axum::response::Json;
@@ -14,6 +14,7 @@ use ts_rs::TS;
 
 use crate::api::{HeatmapTheme, HeatmapThemes, KstDate, Quote, Revision, SymbolCode, UnixSeconds};
 use crate::http::{ApiFailure, AppState, Lookup, symbol_list, venue_param};
+use crate::market_source::{GenerationScoped, GenerationTicket, SourceGeneration};
 use crate::userdata;
 pub use board::{HeatmapBoardMember, HeatmapBoardTheme, HeatmapThemeOrder, HeatmapThemeSummary, board_theme, in_order};
 
@@ -95,35 +96,44 @@ struct Entry {
     quote: Quote,
 }
 
-#[derive(Default)]
 pub struct QuoteCache {
-    entries: Mutex<HashMap<(Symbol, Venue), Entry>>,
+    entries: GenerationScoped<HashMap<(Symbol, Venue), Entry>>,
 }
 
 impl QuoteCache {
-    fn fresh(&self, wanted: &[Symbol], venue: Venue, now: KstTime) -> (HashMap<Symbol, Quote>, Vec<Symbol>) {
-        let mut entries = self.entries.lock().expect("보드 시세 캐시 잠금");
-        entries.retain(|_, e| e.fetched_at.kst_date() == now.kst_date());
-        let mut hits = HashMap::new();
-        let mut stale = Vec::new();
-        for symbol in wanted {
-            match entries.get(&(*symbol, venue)) {
-                Some(e) if now.unix() - e.fetched_at.unix() < FRESH_SECS => {
-                    hits.insert(*symbol, e.quote.clone());
-                }
-                _ => stale.push(*symbol),
-            }
-        }
-        (hits, stale)
+    pub fn with_generation(generation: SourceGeneration) -> QuoteCache {
+        QuoteCache { entries: GenerationScoped::new(generation) }
     }
 
-    fn keep(&self, venue: Venue, now: KstTime, quotes: &[Quote]) {
-        let mut entries = self.entries.lock().expect("보드 시세 캐시 잠금");
-        for quote in quotes {
-            if let Ok(symbol) = Symbol::parse(&quote.symbol.0) {
-                entries.insert((symbol, venue), Entry { fetched_at: now, quote: quote.clone() });
+    fn ticket(&self) -> GenerationTicket {
+        self.entries.ticket()
+    }
+
+    fn fresh(&self, wanted: &[Symbol], venue: Venue, now: KstTime) -> (HashMap<Symbol, Quote>, Vec<Symbol>) {
+        self.entries.read(|entries| {
+            entries.retain(|_, e| e.fetched_at.kst_date() == now.kst_date());
+            let mut hits = HashMap::new();
+            let mut stale = Vec::new();
+            for symbol in wanted {
+                match entries.get(&(*symbol, venue)) {
+                    Some(e) if now.unix() - e.fetched_at.unix() < FRESH_SECS => {
+                        hits.insert(*symbol, e.quote.clone());
+                    }
+                    _ => stale.push(*symbol),
+                }
             }
-        }
+            (hits, stale)
+        })
+    }
+
+    fn keep(&self, started: GenerationTicket, venue: Venue, now: KstTime, quotes: &[Quote]) {
+        self.entries.keep(started, |entries| {
+            for quote in quotes {
+                if let Ok(symbol) = Symbol::parse(&quote.symbol.0) {
+                    entries.insert((symbol, venue), Entry { fetched_at: now, quote: quote.clone() });
+                }
+            }
+        });
     }
 }
 
@@ -184,6 +194,7 @@ async fn assemble(st: &AppState, cache: &QuoteCache, params: BoardParams, mine: 
     }
     let directory = if wanted.is_empty() { None } else { Some(symbol_list(st).await.map_err(Refused::Failed)?) };
     let now = st.clock.now();
+    let started = cache.ticket();
     let (mut quotes, stale) = cache.fresh(&wanted, venue, now);
     let mut tally = BoardTally { cached: quotes.len() as u32, ..BoardTally::default() };
     if !stale.is_empty() {
@@ -197,7 +208,7 @@ async fn assemble(st: &AppState, cache: &QuoteCache, params: BoardParams, mine: 
             fetched.extend(crate::quotes::quotes(st.source.as_ref(), &st.bars, directory.as_deref(), group, venue).await.map_err(|e| Refused::Failed(Lookup::Quotes.failure(e, now)))?);
             tally.fetched += 1;
         }
-        cache.keep(venue, now, &fetched);
+        cache.keep(started, venue, now, &fetched);
         quotes.extend(fetched.into_iter().filter_map(|quote| Symbol::parse(&quote.symbol.0).ok().map(|symbol| (symbol, quote))));
     }
     let as_of = quotes.values().map(|quote| quote.t.0).max().map(UnixSeconds);

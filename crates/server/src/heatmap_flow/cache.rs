@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use futures::future::BoxFuture;
 use domain::{Bucket, Feed, KstTime, Ohlcv, Period, SeriesKey, Symbol};
@@ -7,6 +7,7 @@ use domain::{Bucket, Feed, KstTime, Ohlcv, Period, SeriesKey, Symbol};
 use super::series::{MinuteBar, SymbolDay, Weighting};
 use crate::bars::{BarError, BarService};
 use crate::clock::Clock;
+use crate::market_source::{GenerationScoped, SourceGeneration};
 
 pub const FRESH_SECS: i64 = 45;
 
@@ -46,12 +47,15 @@ struct Entry {
     day: Arc<SymbolDay>,
 }
 
-#[derive(Default)]
 pub struct FlowCache {
-    entries: Mutex<HashMap<Feed, Entry>>,
+    entries: GenerationScoped<HashMap<Feed, Entry>>,
 }
 
 impl FlowCache {
+    pub fn with_generation(generation: SourceGeneration) -> FlowCache {
+        FlowCache { entries: GenerationScoped::new(generation) }
+    }
+
     pub async fn day(&self, bars: &BarService, clock: &Clock, feed: Feed) -> Result<Arc<SymbolDay>, BarError> {
         match self.day_by(bars, clock, feed, &Rolling).await {
             Ok((day, _)) => Ok(day),
@@ -61,6 +65,7 @@ impl FlowCache {
     }
 
     pub async fn day_by(&self, bars: &BarService, clock: &Clock, feed: Feed, freshness: &dyn Freshness) -> Result<(Arc<SymbolDay>, Origin), DayError> {
+        let started = self.entries.ticket();
         let now = clock.now();
         if let Some(day) = self.fresh(feed, now, freshness) {
             return Ok((day, Origin::Cached));
@@ -77,9 +82,10 @@ impl FlowCache {
         let bars = page.bars.iter().map(|b| minute(b.bucket, &b.ohlcv)).chain(page.current.iter().map(|c| minute(c.bucket, &c.ohlcv)));
         let day = SymbolDay::from_minute_bars(now.kst_date(), weighting, bars).ok_or_else(|| DayError::Bars(BarError::Internal("전일 종가를 알 수 없습니다".into())))?;
         let day = Arc::new(day);
-        let mut entries = self.entries.lock().expect("흐름 캐시 잠금");
-        entries.retain(|_, e| e.fetched_at.kst_date() == now.kst_date());
-        entries.insert(feed, Entry { fetched_at: now, day: day.clone() });
+        self.entries.keep(started, |entries| {
+            entries.retain(|_, e| e.fetched_at.kst_date() == now.kst_date());
+            entries.insert(feed, Entry { fetched_at: now, day: day.clone() });
+        });
         Ok((day, Origin::Fetched))
     }
 
@@ -88,8 +94,9 @@ impl FlowCache {
     }
 
     fn fresh(&self, feed: Feed, now: KstTime, freshness: &dyn Freshness) -> Option<Arc<SymbolDay>> {
-        let entries = self.entries.lock().expect("흐름 캐시 잠금");
-        let entry = entries.get(&feed)?;
-        (entry.fetched_at.kst_date() == now.kst_date() && freshness.is_fresh(entry.fetched_at, now)).then(|| entry.day.clone())
+        self.entries.read(|entries| {
+            let entry = entries.get(&feed)?;
+            (entry.fetched_at.kst_date() == now.kst_date() && freshness.is_fresh(entry.fetched_at, now)).then(|| entry.day.clone())
+        })
     }
 }

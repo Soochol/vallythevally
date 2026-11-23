@@ -185,13 +185,13 @@ pub fn application_with_source(inputs: ApplicationInputs, mut system: SystemStat
         market_overview: MarketOverview::with_generation(generation.clone()),
         etf: Default::default(),
         kiwoom_catalog: Default::default(),
-        generation,
         source_switch,
         market_source_board,
         public_usage: Default::default(),
         shared_data: crate::shared_data::SharedData::new(),
-        heatmap_quotes: Default::default(),
-        heatmap_flow: Default::default(),
+        heatmap_quotes: Arc::new(crate::heatmap_board::QuoteCache::with_generation(generation.clone())),
+        heatmap_flow: Arc::new(crate::heatmap_flow::FlowCache::with_generation(generation.clone())),
+        generation,
     })
 }
 
