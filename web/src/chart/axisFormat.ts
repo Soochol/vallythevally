@@ -7,6 +7,7 @@ export interface AxisGeometry {
   toCoordinate(value: number): number | null;
   lastCoordinates(): number[];
   fontSize?(): number;
+  width?(): number;
   formatted?(): void;
   failed?(error: unknown): void;
 }
@@ -141,9 +142,9 @@ export function formatAxisTicks(values: number[], labels: string[], geometry: Ax
   return result;
 }
 
-export const AXIS_WIDTH = 72;
-export const MIN_AXIS_FONT_SIZE = 9;
-const axisBudget = (fontSize: number) => AXIS_WIDTH - (11 + fontSize * 5 / 6);
+export const AXIS_WIDTH_STEPS = [72, 80, 88] as const;
+export const AXIS_WIDTH = AXIS_WIDTH_STEPS[0];
+const axisBudget = (fontSize: number, width: number) => width - (11 + fontSize * 5 / 6);
 
 let measureContext: CanvasRenderingContext2D | null | undefined;
 function attachedMeasureContext(): CanvasRenderingContext2D | null {
@@ -172,14 +173,12 @@ function axisMeasurer(): { baseSize: number; widthAt(text: string, fontSize: num
   };
 }
 
-export function priceAxisFontSize(maxPrice: number, baseSize: number): number {
+export function priceAxisWidth(maxPrice: number, fontSize: number): number {
   const measurer = axisMeasurer();
-  if (!measurer || !Number.isFinite(maxPrice)) return baseSize;
+  if (!measurer || !Number.isFinite(maxPrice)) return AXIS_WIDTH;
   const widest = numberText(Math.ceil(Math.abs(maxPrice)), 0, true);
-  const fitsAt = (size: number) => measurer.widthAt(widest, size) <= axisBudget(size);
-  if (fitsAt(baseSize)) return baseSize;
-  for (let size = baseSize - 0.5; size >= MIN_AXIS_FONT_SIZE; size -= 0.5) if (fitsAt(size)) return size;
-  return baseSize;
+  const textWidth = measurer.widthAt(widest, fontSize);
+  return AXIS_WIDTH_STEPS.find((width) => textWidth <= axisBudget(fontSize, width)) ?? AXIS_WIDTH_STEPS[AXIS_WIDTH_STEPS.length - 1]!;
 }
 
 export function axisPriceFormat(unit: AxisUnit, minMove: number, geometry?: AxisGeometry) {
@@ -188,7 +187,7 @@ export function axisPriceFormat(unit: AxisUnit, minMove: number, geometry?: Axis
   const fontSize = () => geometry?.fontSize?.() ?? baseSize;
   const fits = (text: string) => {
     const size = fontSize();
-    return !measurer || measurer.widthAt(text, size) <= axisBudget(size);
+    return !measurer || measurer.widthAt(text, size) <= axisBudget(size, geometry?.width?.() ?? AXIS_WIDTH);
   };
   return {
     type: "custom", minMove,

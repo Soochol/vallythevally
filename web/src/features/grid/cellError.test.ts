@@ -4,27 +4,29 @@ import { cellErrorView, olderErrorView } from "./cellError";
 
 test("unknown_symbol은 정해진 문장과 종목 검색 버튼", () => {
   expect(cellErrorView(new ApiRequestError("unknown_symbol", "서버 문장"), "005930")).toEqual({
-    text: "종목 005930을 찾을 수 없습니다. 상장 폐지되었거나 코드가 바뀌었을 수 있습니다.",
-    action: "search",
+    title: "종목 005930을 찾을 수 없습니다",
+    detail: "상장 폐지되었거나 코드가 바뀌었을 수 있습니다.",
+    actions: ["search"],
   });
 });
 
 test("kiwoom_unavailable은 서버 문장과 다시 시도 버튼", () => {
   expect(cellErrorView(new ApiRequestError("kiwoom_unavailable", "키움 조회가 응답하지 않습니다."), "005930")).toEqual({
-    text: "키움 조회가 응답하지 않습니다.",
-    action: "retry",
+    title: "차트를 불러오지 못했습니다",
+    detail: "키움 조회가 응답하지 않습니다.",
+    actions: ["retry"],
   });
 });
 
 test("서버에 닿지 못해도 다시 시도할 수 있다", () => {
-  expect(cellErrorView(new ApiRequestError("network", "서버에 연결하지 못했습니다"), "005930").action).toBe("retry");
+  expect(cellErrorView(new ApiRequestError("network", "서버에 연결하지 못했습니다"), "005930").actions).toEqual(["retry"]);
 });
 
-test("사람이 고쳐야 하는 실패는 다시 시도 버튼이 없다", () => {
+test("사람이 고쳐야 하는 실패는 다시 시도 대신 시스템 설정 열기 버튼을 준다", () => {
   const stopped = new ApiRequestError("kiwoom_auth_failed", "키움 인증 실패", { reason: "auth_blocked", manualActionRequired: true });
-  expect(cellErrorView(stopped, "005930").action).toBeNull();
+  expect(cellErrorView(stopped, "005930")).toEqual({ title: "조회가 멈췄습니다", detail: "키움 인증 실패", actions: ["systemSettings"] });
   const path = new ApiRequestError("internal", "응답 형식이 다릅니다", { reason: "protocol", manualActionRequired: true });
-  expect(cellErrorView(path, "005930").action).toBeNull();
+  expect(cellErrorView(path, "005930").actions).toEqual(["systemSettings"]);
 });
 
 test("과거 페이지 실패는 서버 문장을 붙이고, 사람이 고쳐야 할 때만 다시 시도를 두지 않는다", () => {

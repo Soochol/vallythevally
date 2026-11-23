@@ -12,7 +12,8 @@ import {
   type UTCTimestamp,
 } from "lightweight-charts";
 import { AxisLabelCache } from "./axisLabelCache";
-import { axisPriceFormat, priceAxisFontSize, type AxisGeometry } from "./axisFormat";
+import { AXIS_WIDTH, axisPriceFormat, priceAxisWidth, type AxisGeometry } from "./axisFormat";
+import type { LastPriceHost } from "./lastPriceTag";
 import { fetchBarsPage, fetchJumpPage } from "../api/bars";
 import type { Bar } from "../api/generated/Bar";
 import type { FinancialsPage } from "../api/generated/FinancialsPage";
@@ -183,11 +184,11 @@ export class ChartController {
     });
     this.hostResize.observe(el);
     this.chart = createChart(el, { ...this.chartOptions(), autoSize: true });
-    this.axisLabels = new AxisLabelCache(this.chart, () => this.scheduleFrame());
+    this.axisLabels = new AxisLabelCache(this.chart, () => this.scheduleFrame(), (series) => series === this.main.api);
     this.chart.chartElement().addEventListener("wheel", this.onWheel, { capture: true, passive: false });
     // 주 시리즈를 바꿔 붙이는 동안 가격 pane이 비어도 라이브러리가 지우지 않게 한다. 지우면 지표 패널이 0번이 된다.
     this.chart.panes()[0]?.setPreserveEmptyPane(true);
-    this.main = addMainSeries(this.chart, "candle", this.tokens, false, this.priceAxisGeometry());
+    this.main = addMainSeries(this.chart, "candle", this.tokens, false, this.lastPriceHost, this.priceAxisGeometry());
     this.crosshairMarker = new CrosshairMarker({ element: el, chart: this.chart, bars: () => this.bars, period: () => this.period() });
     el.addEventListener("pointerleave", this.clearPointedBar);
     this.legend = new Legend(el, {
@@ -221,8 +222,7 @@ export class ChartController {
     this.resize = new ResizeObserver(() => {
       if (!crosshairVisible(el)) this.clearPointedBar();
       this.crosshairMarker.refresh();
-      const width = this.axisWidth();
-      if (this.chart.options().rightPriceScale.minimumWidth !== width) this.chart.priceScale("right").applyOptions({ minimumWidth: width });
+      this.applyAxisWidth();
       this.indicators.applyStretch();
       this.badge.setBottom(this.chart.timeScale().height());
       this.reportCorner();
@@ -495,24 +495,52 @@ export class ChartController {
     if (timeScale.options().rightBarStaysOnScroll !== rightBarStaysOnScroll) timeScale.applyOptions({ rightBarStaysOnScroll });
   };
 
+  private readonly lastPriceHost: LastPriceHost = {
+    text: (price) => {
+      if (this.view && shownScale(this.view.settings) === "percent") {
+        const base = this.percentBase();
+        if (base !== null) return axisPriceFormat("%", 0.01).formatter((price - base) / Math.abs(base) * 100);
+      }
+      return this.main.api.priceFormatter().format(price);
+    },
+    textColor: () => this.tokens.onData,
+  };
+
+  private percentBase(): number | null {
+    const range = this.chart.timeScale().getVisibleLogicalRange();
+    const first = range ? this.main.api.dataByIndex(Math.floor(range.from), MismatchDirection.NearestRight) : null;
+    const base = first && "close" in first ? first.close : first && "value" in first ? first.value : null;
+    return typeof base === "number" ? base : null;
+  }
+
   private priceAxisGeometry(percent = false): AxisGeometry {
     return {
       fontSize: () => this.chart.options().layout.fontSize,
+      width: () => this.axisBudgetWidth(),
       formatted: () => this.axisLabels.record(this.main.api.getPane()),
       failed: (error) => this.axisLabels.failed(this.main.api.getPane(), error),
       toCoordinate: (value) => {
         if (!percent) return this.main.api.priceToCoordinate(value);
-        const range = this.chart.timeScale().getVisibleLogicalRange();
-        const first = range ? this.main.api.dataByIndex(Math.floor(range.from), MismatchDirection.NearestRight) : null;
-        const base = first && "close" in first ? first.close : first && "value" in first ? first.value : null;
-        return typeof base !== "number" ? null : this.main.api.priceToCoordinate(base + value / 100 * Math.abs(base));
+        const base = this.percentBase();
+        return base === null ? null : this.main.api.priceToCoordinate(base + value / 100 * Math.abs(base));
       },
       lastCoordinates: () => this.axisLabels.lastCoordinates(this.main.api.getPane()),
     };
   }
 
+  private axisStep: number = AXIS_WIDTH;
+
   private axisWidth(): number {
-    return matchMedia("(max-width: 767px)").matches ? 52 : 72;
+    return matchMedia("(max-width: 767px)").matches ? 52 : this.axisStep;
+  }
+
+  private axisBudgetWidth(): number {
+    return matchMedia("(max-width: 767px)").matches ? AXIS_WIDTH : this.axisStep;
+  }
+
+  private applyAxisWidth(): void {
+    const width = this.axisWidth();
+    if (this.chart.options().rightPriceScale.minimumWidth !== width) this.chart.priceScale("right").applyOptions({ minimumWidth: width });
   }
 
   private chartOptions(): DeepPartial<ChartOptions> {
@@ -528,7 +556,7 @@ export class ChartController {
         attributionLogo: false,
         panes: { enableResize: false, separatorColor: t.line, separatorHoverColor: t.raised },
       },
-      grid: { vertLines: { color: t.grid }, horzLines: { color: t.grid } },
+      grid: { vertLines: { color: t.grid }, horzLines: { color: t.gridH } },
       crosshair: { mode: CrosshairMode.Normal, vertLine: crossLine, horzLine: crossLine },
       rightPriceScale: { minimumWidth: this.axisWidth(), alignLabels: true, entireTextOnly: true, borderColor: t.line, scaleMargins: { top: 0.14, bottom: 0.08 } },
       timeScale: {
@@ -555,7 +583,7 @@ export class ChartController {
     this.indicators.flush();
     this.withDataGuard(() => preserveTimeRange(this.chart.timeScale(), this.period(), () => {
       const replaced = this.main;
-      this.main = addMainSeries(this.chart, this.view?.settings.style ?? "candle", this.tokens, isIndex, this.priceAxisGeometry());
+      this.main = addMainSeries(this.chart, this.view?.settings.style ?? "candle", this.tokens, isIndex, this.lastPriceHost, this.priceAxisGeometry());
       this.main.api.setSeriesOrder(replaced.api.seriesOrder());
       this.chart.removeSeries(replaced.api);
       this.extensions.forEach((ext) => ext.reattach());
@@ -629,17 +657,17 @@ export class ChartController {
     this.flushPendingDraw();
     this.compare.flush(this.bars);
     this.indicators.flush();
-    this.fitAxisFontSize();
+    this.fitAxisWidth();
     if (this.axisLabels.refresh(time)) this.scheduleFrame();
     this.renderLegend();
     this.renderExtremes();
     this.crosshairMarker.refresh();
   }
 
-  private fitAxisFontSize(): void {
+  private fitAxisWidth(): void {
     const range = this.view && shownScale(this.view.settings) !== "percent" ? this.main.api.priceScale().getVisibleRange() : null;
-    const size = range ? priceAxisFontSize(Math.max(Math.abs(range.from), Math.abs(range.to)), this.tokens.fontSize) : this.tokens.fontSize;
-    if (this.chart.options().layout.fontSize !== size) this.chart.applyOptions({ layout: { fontSize: size } });
+    this.axisStep = range ? priceAxisWidth(Math.max(Math.abs(range.from), Math.abs(range.to)), this.tokens.fontSize) : AXIS_WIDTH;
+    this.applyAxisWidth();
   }
 
   private renderExtremes(): void {

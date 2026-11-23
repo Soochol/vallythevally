@@ -522,10 +522,14 @@ export class IndicatorLayer {
 
   private lineOptions(config: IndicatorConfig, id: LineId, i: number) {
     const color = indicatorColorValue(this.host.tokens(), lineColor(config.spec, config.style.colors, i));
-    const common = { visible: config.visible, priceLineVisible: false, lastValueVisible: config.panel !== "price", title: "" };
+    const common = { visible: config.visible, priceLineVisible: false, lastValueVisible: config.panel !== "price" && i === 0 && this.firstInPanel(config), title: "" };
     if (isBarLine(id) || (isFinancial(config.spec) && isFinancialBar(config.spec.kind))) return common;
     const line = { ...common, color, lineWidth: config.style.width };
     return isOverlay(config, id) ? { ...line, halo: config.id === this.previewId } : { ...line, crosshairMarkerVisible: false };
+  }
+
+  private firstInPanel(config: IndicatorConfig): boolean {
+    return this.configs.find((other) => other.panel === config.panel)?.id === config.id;
   }
 
   private styleLines(s: Shown): void {

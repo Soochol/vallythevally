@@ -11,6 +11,7 @@ interface AxisInput {
   inverted: boolean;
   font: string;
   fontSize: number;
+  minimumWidth: number;
   last: { series: object; price: number; y: number | null }[];
 }
 interface CachedAxis {
@@ -24,7 +25,7 @@ interface CachedAxis {
 
 function sameInput(a: AxisInput, b: AxisInput): boolean {
   return a.from === b.from && a.to === b.to && a.min === b.min && a.max === b.max
-    && a.height === b.height && a.mode === b.mode && a.inverted === b.inverted && a.font === b.font && a.fontSize === b.fontSize
+    && a.height === b.height && a.mode === b.mode && a.inverted === b.inverted && a.font === b.font && a.fontSize === b.fontSize && a.minimumWidth === b.minimumWidth
     && a.last.length === b.last.length && a.last.every((last, i) => {
       const next = b.last[i]!;
       return last.series === next.series && last.price === next.price && last.y === next.y;
@@ -34,7 +35,7 @@ function sameInput(a: AxisInput, b: AxisInput): boolean {
 export class AxisLabelCache {
   private readonly axes = new WeakMap<HTMLElement, CachedAxis>();
 
-  constructor(private readonly chart: IChartApi, private readonly requestFrame: () => void) {}
+  constructor(private readonly chart: IChartApi, private readonly requestFrame: () => void, private readonly labelled: (series: object) => boolean = () => false) {}
 
   record(pane: Pane): void {
     const key = pane.getHTMLElement();
@@ -113,10 +114,10 @@ export class AxisLabelCache {
     const layout = this.chart.options().layout;
     return {
       from: visible?.from ?? null, to: visible?.to ?? null, min: range?.from ?? null, max: range?.to ?? null,
-      height: pane.getHeight(), mode: options.mode, inverted: options.invertScale, font: layout.fontFamily, fontSize: layout.fontSize,
+      height: pane.getHeight(), mode: options.mode, inverted: options.invertScale, font: layout.fontFamily, fontSize: layout.fontSize, minimumWidth: options.minimumWidth,
       last: pane.getSeries().flatMap((series) => {
         const options = series.options();
-        if (!options.visible || !options.lastValueVisible) return [];
+        if (!options.visible || !(options.lastValueVisible || this.labelled(series))) return [];
         const last = series.lastValueData(false);
         return last.noData ? [] : [{ series, price: last.price, y: series.priceToCoordinate(last.price) }];
       }),

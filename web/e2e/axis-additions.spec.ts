@@ -98,27 +98,30 @@ test("비교 종목 추가 뒤 오류 없이 차트를 계속 그리고 축 폭 
   await assertDrawing(page, errors);
 });
 
-const axisLabels = (page: Page, pane: number) => page.evaluate((index) => window.axisTexts().filter((axis) => axis.width === 72)[index]?.texts.map((label) => label.text) ?? [], pane);
+const AXIS_WIDTH_STEPS = [72, 80, 88];
+const axisLabels = (page: Page, pane: number) => page.evaluate(([index, steps]) => window.axisTexts().filter((axis) => steps!.includes(axis.width as number))[index as number]?.texts.map((label) => label.text) ?? [], [pane, AXIS_WIDTH_STEPS] as const);
 
 test.describe("축 표기 규칙", () => {
-  test("100만 원대 가격축은 글자를 줄여 쉼표 숫자로 보이고 축 폭 안에 든다", async ({ page, scenario }) => {
+  test("100만 원대 가격축은 글자를 줄이지 않고 축 폭을 넓혀 쉼표 숫자로 보이고 축 폭 안에 든다", async ({ page, scenario }) => {
     const errors = await open(page, scenario, "D", (daysAgo) => ({ price: 1_160_000 - daysAgo * 2000, volume: 1000000 }));
     await expect.poll(() => axisLabels(page, 0).then((labels) => labels.length)).toBeGreaterThan(2);
-    const texts = () => page.evaluate(() => window.axisTexts().filter((axis) => axis.width === 72)[0]?.texts ?? []);
+    const axis = () => page.evaluate((steps) => window.axisTexts().find((candidate) => steps.includes(candidate.width)), AXIS_WIDTH_STEPS);
+    const texts = async () => (await axis())?.texts ?? [];
     await expect.poll(async () => (await texts()).every((label) => /^[\d,]+$/.test(label.text))).toBe(true);
     const labels = await texts();
+    const width = (await axis())!.width;
+    expect(width).toBeGreaterThan(72);
     for (const label of labels) {
       expect(label.text).toMatch(/^\d{1,3}(,\d{3})+$/);
       expect(label.text).not.toMatch(/[만KMBT]/);
-      expect(label.x + label.width).toBeLessThanOrEqual(72);
+      expect(label.x + label.width).toBeLessThanOrEqual(width);
     }
     expect(labels.some((label) => label.text.length === 9)).toBe(true);
     expect(new Set(labels.map((label) => label.text)).size).toBe(labels.length);
     const ys = labels.map((label) => label.y).sort((a, b) => a - b);
     ys.slice(1).forEach((y, i) => expect(y - ys[i]!).toBeGreaterThan(labels[0]!.height));
     const fontSize = await page.evaluate(() => window.chartProbe.chart.options().layout.fontSize);
-    expect(fontSize).toBeLessThan(11);
-    expect(fontSize).toBeGreaterThanOrEqual(9);
+    expect(fontSize).toBe(11);
     expect(errors).toEqual([]);
   });
 
