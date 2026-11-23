@@ -189,6 +189,10 @@ fn estimate_window(now: KstTime) -> bool {
 }
 
 impl OverviewSource for KisOverview {
+    fn broker(&self) -> api::Broker {
+        api::Broker::Kis
+    }
+
     fn features(&self) -> OverviewFeatures {
         OverviewFeatures::of(SUPPORTED_OVERVIEW_FEATURES)
     }
@@ -395,6 +399,7 @@ impl OverviewSource for KisOverview {
                 to: api::KstDate(range.to()),
                 coverage,
                 days,
+                source: api::Broker::Kis,
                 skipped_days: Vec::new(),
                 undated_rows: Vec::new(),
                 estimated_days: None,
@@ -429,6 +434,7 @@ impl StockRows {
             to: api::KstDate(range.to()),
             coverage,
             days: self.days.into_iter().map(|(_, day)| day).collect(),
+            source: api::Broker::Kis,
             skipped_days: self.skipped,
             undated_rows: Vec::new(),
             estimated_days,

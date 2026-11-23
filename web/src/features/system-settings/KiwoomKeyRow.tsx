@@ -10,7 +10,7 @@ import { ReadOnlyRow, SaveNote } from "./KiwoomKeyForm";
 import { KiwoomRowOrders } from "./KiwoomRowOrders";
 import { Confirm } from "./KiwoomStatusCard";
 import { emptyEntry, editRequest, keyEntryReducer, removeText, shortReason } from "./kiwoomKeys";
-import { keySaveNote, maskedAppKey, NO_CONFIRMATIONS } from "./kiwoomPanel";
+import { IN_USE_ELSEWHERE_NOTICE, keySaveNote, maskedAppKey, NO_CONFIRMATIONS } from "./kiwoomPanel";
 import { linkDotTone } from "./linkDot";
 import { accountNumberOf, orderInUse, orderMarkOf } from "./orderUse";
 import { useCommand } from "./useCommand";
@@ -30,7 +30,7 @@ interface Props {
 const orderMarkStyle = (tone: "on" | "off" | "warn") => ({ color: tone === "on" ? "var(--success)" : tone === "warn" ? "var(--warning)" : "var(--text-3)", background: "var(--raised)" });
 
 export function KiwoomKeyRow({ entry, order, keys, mock, expanded, now, onToggle, onOpenIpHelp }: Props) {
-  const reason = shortReason(entry.link, now);
+  const reason = shortReason(entry.link, now, entry.broker);
   return (
     <li className="flex flex-col border-b border-line last:border-b-0">
       <button type="button" aria-expanded={expanded} className="flex min-h-11 w-full items-center gap-2 px-1 py-2 text-left max-md:flex-wrap" onClick={onToggle}>
@@ -93,7 +93,7 @@ function KeyDetails({ entry, order, keys, now, onOpenIpHelp }: { entry: KiwoomKe
             <button type="submit" className="btn-primary h-9 px-4 disabled:cursor-not-allowed disabled:opacity-50" disabled={locked || !request}>저장</button>
             <button type="button" className="tb-btn h-9 px-3" onClick={() => { setEditing(false); dispatch({ type: "reset", alias: entry.alias }); }}>취소</button>
           </div>
-          <SaveNote note={keySaveNote(entry.link)} onOpenIpHelp={onOpenIpHelp} />
+          <SaveNote note={keySaveNote(entry.link, entry.broker)} onOpenIpHelp={onOpenIpHelp} />
         </form>
       ) : (
         <div className="flex flex-wrap gap-2">
@@ -110,7 +110,7 @@ function KeyDetails({ entry, order, keys, now, onOpenIpHelp }: { entry: KiwoomKe
 
 function RowConnection({ entry, now, keep }: { entry: KiwoomKey; now: number; keep(list: KiwoomKeyList): Promise<void> }) {
   const command = useCommand();
-  const { confirmations, setConfirmations, view } = useConfirmations(entry.link, now);
+  const { confirmations, setConfirmations, view } = useConfirmations(entry.link, now, false, entry.broker);
   const connect = async (acknowledged: boolean) => {
     let again = false;
     await command.run(async () => {
@@ -123,7 +123,7 @@ function RowConnection({ entry, now, keep }: { entry: KiwoomKey; now: number; ke
   if (!view.connect && !view.disconnect) return null;
   return (
     <div className="flex flex-col items-start gap-2">
-      {entry.link.state === "failed" && <p className="text-m leading-relaxed text-text-2">{entry.link.message}</p>}
+      {view.stage === "inUseElsewhere" ? <p className="text-m leading-relaxed text-text" data-testid="in-use-elsewhere">{IN_USE_ELSEWHERE_NOTICE}</p> : entry.link.state === "failed" && <p className="text-m leading-relaxed text-text-2">{entry.link.message}</p>}
       {view.needsConfirmations && <Confirm confirmations={confirmations} onConfirm={(next) => setConfirmations(next)} />}
       {view.connect && entry.link.state !== "noKey" && (
         <button type="button" className="tb-btn h-9 px-3 disabled:cursor-not-allowed disabled:opacity-50" disabled={!view.connect.enabled || command.busy} onClick={() => void connect(view.connect!.acknowledged)}>{view.connect.label}</button>

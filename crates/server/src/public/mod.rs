@@ -129,7 +129,7 @@ pub async fn start(config: &Config, state: Arc<AppState>, financial_routes: Rout
         usage: state.public_usage.clone(),
         meters: gate::Meters::new(&limits, now),
         flight: gate::Flight::new(&limits),
-        kiwoom: kiwoom_guard::KiwoomGuard::new(&limits),
+        kiwoom: kiwoom_guard::KiwoomGuard::new(&limits, state.generation.clone()),
         sends,
         setup,
         limits,

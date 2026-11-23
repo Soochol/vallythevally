@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState } from "react";
+import type { Broker } from "../../api/generated/Broker";
 import type { KiwoomLinkStatus } from "../../api/generated/KiwoomLinkStatus";
 import { type Confirmations, NO_CONFIRMATIONS, panelView } from "./kiwoomPanel";
 
-export function useConfirmations(link: KiwoomLinkStatus | null, now: number, holdConfirmations = false) {
+export function useConfirmations(link: KiwoomLinkStatus | null, now: number, holdConfirmations = false, broker: Broker = "kiwoom") {
   const [confirmations, setConfirmations] = useState<Confirmations>(NO_CONFIRMATIONS);
-  const view = panelView(link, now, confirmations);
+  const view = panelView(link, now, confirmations, broker);
 
   const appKeyTail = link?.appKeyTail;
   useEffect(() => setConfirmations(NO_CONFIRMATIONS), [appKeyTail]);

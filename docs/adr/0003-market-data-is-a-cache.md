@@ -2,6 +2,8 @@
 
 시세의 원본은 언제나 키움 REST API와 WebSocket이다. 우리 쪽에는 키움에서 받은 확정 봉의 사본, 즉 캐시만 둔다. 캐시는 **서버 메모리에만** 둔다.
 
+> (2026-11-23 개정) 시세의 원본은 키움 하나가 아니라 **시세 공급원**(키움 키나 한투 키 가운데 하나)이다. 공급원을 바꾸면 메모리 캐시를 07:45 비우기와 같은 경로로 모두 버린다. 한투 공급원이 N분봉을 1분봉에서 만드는 예외는 [ADR 0040](0040-kis-source-builds-minute-bars-from-one-minute-bars-and-reads-the-symbol-master-file.md)을 따른다. [ADR 0043](0043-market-source-is-one-key-of-either-broker-and-switching-drops-the-cache.md). 아래 "키움"은 시세 공급원으로 읽는다.
+
 > 적용 범위: 차트, 현재가처럼 화면에 보여 주는 시세. 스크리너가 읽는 일봉 저장소는 ADR 0010을 따른다.
 
 > 분기봉을 키움 월봉에서 만드는 예외는 ADR 0012를 따른다.

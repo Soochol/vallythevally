@@ -1,0 +1,7 @@
+:root { color-scheme: dark; }
+body { margin: 0; min-height: 100vh; display: grid; place-items: center; background: #121826; color: #e6edf3; font: 16px/1.5 system-ui, "Malgun Gothic", sans-serif; }
+main { width: min(720px, 90vw); }
+h1 { font-size: 20px; font-weight: 600; margin: 0 0 8px; }
+p { margin: 0 0 16px; color: #9fb0c3; }
+pre { margin: 0; padding: 12px; max-height: 50vh; overflow: auto; background: #0b101b; border-radius: 6px; font: 12px/1.5 ui-monospace, Consolas, monospace; white-space: pre-wrap; word-break: break-all; }
+body.failed h1 { color: #ff8a80; }

@@ -5,6 +5,7 @@ import type { SymbolCode } from "./generated/SymbolCode";
 import type { SymbolDaySummary } from "./generated/SymbolDaySummary";
 import type { Venue } from "./generated/Venue";
 import type { Watchlists } from "./generated/Watchlists";
+import { isPublicMode } from "../public-mode/serverMode";
 import { getJson } from "./http";
 
 export const QUOTES_MAX_SYMBOLS = 200;
@@ -19,6 +20,7 @@ export const fetchUiState = (signal?: AbortSignal) => getJson<unknown>(UI_STATE_
 export const fetchWatchlists = (signal?: AbortSignal) => getJson<Watchlists>(WATCHLISTS_PATH, signal);
 
 export async function fetchQuotes(symbols: readonly SymbolCode[], venue: Venue, signal?: AbortSignal): Promise<Quote[]> {
+  if (isPublicMode()) return [];
   const chunks: SymbolCode[][] = [];
   for (let i = 0; i < symbols.length; i += QUOTES_MAX_SYMBOLS) chunks.push(symbols.slice(i, i + QUOTES_MAX_SYMBOLS));
   const pages = await Promise.all(

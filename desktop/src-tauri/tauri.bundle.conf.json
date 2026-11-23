@@ -1,0 +1,8 @@
+{
+  "bundle": {
+    "externalBin": ["binaries/vally-server"],
+    "resources": {
+      "../../web/dist": "web-dist"
+    }
+  }
+}

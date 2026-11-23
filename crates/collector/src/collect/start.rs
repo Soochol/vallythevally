@@ -64,6 +64,7 @@ pub async fn execute(
         timings: injected.timings,
         shutdown,
         child: None,
+        minutes: None,
     });
     let finish = session.run().await;
     drop(lock);

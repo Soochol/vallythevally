@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
-use crate::api::{ApiErrorBody, KstDate, Market, SymbolCode, UnixSeconds};
+use crate::api::{ApiErrorBody, Broker, KstDate, Market, SymbolCode, UnixSeconds};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, TS)]
 #[ts(export)]
@@ -44,6 +44,7 @@ pub struct MarketOverviewContext {
     pub market: Market,
     pub phase: MarketOverviewPhase,
     pub received_at: Option<UnixSeconds>,
+    pub source: Broker,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]

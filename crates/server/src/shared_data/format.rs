@@ -13,13 +13,21 @@ pub const FEED_EXTENSION: &str = "jsonl";
 pub enum DataKind {
     Probe,
     KiwoomThemes,
+    SnapshotKrx,
+    SnapshotCombined,
+    SnapshotNxt,
+    Minute,
 }
 
 impl DataKind {
     pub fn folder(self) -> &'static str {
         match self {
             DataKind::Probe => "probe",
-            DataKind::KiwoomThemes => "kiwoom_themes",
+            DataKind::KiwoomThemes => "kiwoom-themes",
+            DataKind::SnapshotKrx => "snapshot-krx",
+            DataKind::SnapshotCombined => "snapshot-combined",
+            DataKind::SnapshotNxt => "snapshot-nxt",
+            DataKind::Minute => "minute",
         }
     }
 }

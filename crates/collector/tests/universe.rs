@@ -4,7 +4,7 @@ use std::time::Duration;
 
 use collector::kst::KstTime;
 use collector::universe::{
-    Entry, Morning, ReplaceReason, StockKind, StoreError, UniverseError, UniverseFile, Written, collect_after_close, collect_morning, read_universe,
+    Entry, Morning, ReplaceReason, StockKind, StoreError, UniverseError, UniverseFile, Written, collect_after_close, collect_morning, listing_path, read_listing_upto, read_universe,
 };
 use domain::KstDate;
 use futures::future::BoxFuture;
@@ -140,6 +140,29 @@ async fn common_preferred_and_spac_stay_while_etf_reit_etn_infrastructure_fund_a
     assert!(file.replaced.is_none());
     assert_eq!(read_universe(data.path(), 20261118).unwrap(), file);
     assert_eq!(universe_files(data.path()), ["20261118.json"]);
+}
+
+#[tokio::test(start_paused = true)]
+async fn the_morning_fetch_keeps_every_listed_row_with_its_nxt_flag_for_the_snapshot_and_a_failed_fetch_falls_back_to_the_latest_one() {
+    let data = tempfile::tempdir().unwrap();
+    let mut nxt_stock = plain("000660", "SK하이닉스");
+    nxt_stock["nxtEnable"] = json!("Y");
+    let kiwoom = Kiwoom::Listing {
+        kospi: vec![vec![plain("005930", "삼성전자"), nxt_stock, row("0000D0", "ETF종목", "8", "정상"), row("520100", "ETN종목", "60", "정상"), row("000350", "정지주", "0", "거래정지"), row("123450", "모르는종목", "77", "정상")]],
+        kosdaq: vec![vec![row("12345K", "가나스팩", "10", "정상")]],
+    };
+    morning(data.path(), 20261118, kiwoom).await.unwrap();
+
+    let listed = read_listing_upto(data.path(), 20261118).unwrap().unwrap();
+    assert_eq!(listed.date, 20261118);
+    let flags: Vec<(&str, bool)> = listed.stocks.iter().map(|stock| (stock.code.as_str(), stock.nxt_enabled)).collect();
+    assert_eq!(flags, [("0000D0", false), ("000350", false), ("000660", true), ("005930", false), ("12345K", false), ("520100", false)], "ETF·ETN·거래정지 종목도 든다. 모르는 시장 코드만 빠진다");
+    assert_eq!(universe_files(data.path()), ["20261118.json"], "목록 폴더는 그대로다");
+
+    assert_eq!(morning(data.path(), 20261119, Kiwoom::Failing).await.unwrap().replaced.map(|replaced| replaced.source_date), Some(20261118));
+    assert!(!listing_path(data.path(), 20261119).exists(), "받지 못한 날은 전체 종목 행 파일을 새로 쓰지 않는다");
+    assert_eq!(read_listing_upto(data.path(), 20261119).unwrap().unwrap().date, 20261118, "가장 가까운 이전 날 것을 쓴다");
+    assert!(read_listing_upto(data.path(), 20261117).unwrap().is_none());
 }
 
 #[tokio::test(start_paused = true)]

@@ -1,7 +1,8 @@
 import type { Market } from "../../api/generated/Market";
 import type { MarketOverviewBreadth } from "../../api/generated/MarketOverviewBreadth";
 import { useMarketIndex } from "../../api/marketOverview";
-import { CardShell, Loaded, PartView } from "./CardPart";
+import { useOverviewOn } from "../status/marketFeed";
+import { CardShell, FeedUnavailable, Loaded, PartView } from "./CardPart";
 import { formatCount, formatEok, formatLevel, signedRate, toneOf } from "./marketFormat";
 
 function BreadthBar({ breadth }: { breadth: MarketOverviewBreadth }) {
@@ -24,10 +25,11 @@ function BreadthBar({ breadth }: { breadth: MarketOverviewBreadth }) {
 }
 
 export function IndexCard({ market, enabled }: { market: Market; enabled: boolean }) {
-  const query = useMarketIndex(market, { enabled });
+  const on = useOverviewOn("index");
+  const query = useMarketIndex(market, { enabled: enabled && on });
   return (
-    <CardShell title="지수·폭">
-      <Loaded query={query} label="지수">
+    <CardShell title="지수·폭" source={query.data?.context.source}>
+      {!on ? <FeedUnavailable /> : <Loaded query={query} label="지수">
         {(card) => (
           <PartView part={card.index}>
             {(index) => (
@@ -53,7 +55,7 @@ export function IndexCard({ market, enabled }: { market: Market; enabled: boolea
             )}
           </PartView>
         )}
-      </Loaded>
+      </Loaded>}
     </CardShell>
   );
 }

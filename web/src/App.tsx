@@ -21,6 +21,9 @@ import { IndicatorCommand } from "./features/indicator-command/IndicatorCommand"
 import { ScreenDialog } from "./features/screen-dialog/ScreenDialog";
 import { PhoneScreener } from "./features/screener/ScreenerPanel";
 import { Landing } from "./features/landing/Landing";
+import { PublicSetupWizard } from "./public-mode/PublicSetupWizard";
+import { PublicUnavailable } from "./public-mode/PublicUnavailable";
+import { usePublicMode } from "./public-mode/serverMode";
 import { SetupWizard } from "./features/setup-wizard/SetupWizard";
 import { needsChoice, useWizardOpening, useWizardStore, wizardVisible } from "./features/setup-wizard/wizardOpen";
 import { SetupChangedNotice } from "./features/status/SetupChangedNotice";
@@ -49,6 +52,7 @@ export function ChartRoute() {
   const restoring = usePersistStore((s) => s.phase.kind === "restoring");
   const account = useAccountStore((s) => s.status);
   const wizardOpen = useWizardStore((s) => s.open);
+  const publicMode = usePublicMode();
   useWizardOpening(account);
   useRefetchNamesOnConnect();
   if (account?.state === "signed_out") return <Landing />;
@@ -57,7 +61,7 @@ export function ChartRoute() {
     <>
       {restoring || needsChoice(account) ? <div className="h-dvh bg-bg" aria-busy="true" aria-label="마지막 화면을 불러오는 중" /> : <ChartScreen page={page} />}
       {page === "home" && <div className="fixed inset-0 z-50 bg-bg"><Landing /></div>}
-      {wizardVisible(account, wizardOpen) && <SetupWizard />}
+      {wizardVisible(account, wizardOpen) && (publicMode ? <PublicSetupWizard /> : <SetupWizard />)}
     </>
   );
 }
@@ -69,6 +73,7 @@ function ChartScreen({ page }: { page: PageId }) {
   const info = useSymbolInfo(cell.symbol).data;
   const pushRecent = useUiStore((s) => s.pushRecent);
   const desktop = useMediaQuery(DESKTOP_QUERY);
+  const publicMode = usePublicMode();
   const [phoneStatus, setPhoneStatus] = useState<{ cellId: WindowId; status: CellStatus } | null>(null);
   const status: CellStatus = phoneStatus?.cellId === cellId ? phoneStatus.status : { kind: "loading" };
 
@@ -122,7 +127,7 @@ function ChartScreen({ page }: { page: PageId }) {
       ) : (
         <>
           <main aria-label="칸" inert={!onWorkspace} className={"grid min-h-0 min-w-0 grid-cols-1 grid-rows-1 [grid-area:grid]" + (onWorkspace ? "" : " invisible")}>
-            <ChartCell key={cellId} cellId={cellId} status={status} onStatus={(next) => setPhoneStatus({ cellId, status: next })} />
+            {publicMode ? <PublicUnavailable /> : <ChartCell key={cellId} cellId={cellId} status={status} onStatus={(next) => setPhoneStatus({ cellId, status: next })} />}
           </main>
           {shownPage && <PageStage page={shownPage} />}
         </>

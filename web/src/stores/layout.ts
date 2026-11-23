@@ -383,11 +383,13 @@ export const useLayoutStore = create<LayoutState>()((set, get) => {
       const canvasArea = get().canvasArea;
       if (canvasActive() && canvasArea) {
         arrangeCanvas(next, bringToFront(fitCanvas(placement.canvas, windowRefs(next), canvasArea), id));
+        useUiStore.getState().forgetOrderWindow(get().layout.id, id);
         return id;
       }
       const dock = fittedDock(get().layout);
       if (targetGroup && !findGroup(dock.root, targetGroup)) return null;
       arrangeDock(next, targetGroup ? putTab(dock, id, targetGroup) : selectTab(fitDock(placement.dock, windowRefs(next)), id));
+      useUiStore.getState().forgetOrderWindow(get().layout.id, id);
       return id;
     },
     duplicateWindow: (window) => {
@@ -400,6 +402,7 @@ export const useLayoutStore = create<LayoutState>()((set, get) => {
       if (!group) return null;
       const id = freeWindowId(layout.windows, source.kind);
       arrangeDock([...layout.windows, { ...source, id }], putTab(dock, id, group.id, group.tabs.indexOf(window) + 1));
+      useUiStore.getState().forgetOrderWindow(layout.id, id);
       return id;
     },
     addChart: (from, room, targetGroup) => {

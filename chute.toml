@@ -79,6 +79,12 @@ paths = [
   "scripts/duckdb-prebuilt.json",
 ]
 
+[[verify]]
+name = "desktop"
+run = "env VALLY_COMPILE_LANE=gate python3 desktop/scripts/cargo.py check"
+failed = 'test (\S+) \.\.\. FAILED'
+paths = ["desktop/"]
+
 [[post_verify]]
 name = "e2e"
 run = "env VALLY_COMPILE_LANE=gate python3 scripts/web.py e2e --workers=6"

@@ -1,13 +1,33 @@
 import type { ReactNode } from "react";
 import type { UseQueryResult } from "@tanstack/react-query";
 import type { MarketOverviewPart } from "../../api/generated/MarketOverviewPart";
+import type { Broker } from "../../api/generated/Broker";
+import { useMarketSource } from "../../stores/kiwoomLink";
 import { Skeleton } from "../overlay/State";
+import { brokerShortName, FEED_UNAVAILABLE_TEXT, feedMarkOf } from "../status/marketFeed";
+import { openSystemSettings } from "../system-settings/open";
 
-export function CardShell({ title, note, children }: { title: string; note?: ReactNode; children: ReactNode }) {
+export function FeedMark({ received }: { received: Broker | undefined }) {
+  const source = useMarketSource();
+  const mark = received === undefined ? null : feedMarkOf(source, received);
+  return mark === null ? null : <span className="mk-feed-mark" data-testid="feed-source-mark" title={`이 칸은 ${brokerShortName(mark)}에서 받았습니다`}>{brokerShortName(mark)}</span>;
+}
+
+export function FeedUnavailable() {
+  return (
+    <div className="mk-unavailable" data-testid="feed-unavailable">
+      <p className="mk-empty">{FEED_UNAVAILABLE_TEXT}</p>
+      <button type="button" className="tb-btn" onClick={() => openSystemSettings("kiwoom")}>시스템 설정 이어가기</button>
+    </div>
+  );
+}
+
+export function CardShell({ title, note, source, children }: { title: string; note?: ReactNode; source?: Broker; children: ReactNode }) {
   return (
     <section className="mk-card" aria-label={title}>
       <header className="mk-card-head">
         <h2>{title}</h2>
+        <FeedMark received={source} />
         {note !== undefined && <span className="mk-card-note">{note}</span>}
       </header>
       {children}

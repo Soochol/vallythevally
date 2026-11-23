@@ -27,10 +27,13 @@ pub struct FeedWriter {
 
 impl FeedWriter {
     pub fn open(dir: &Path, header: Header) -> io::Result<FeedWriter> {
+        FeedWriter::open_at(&data_path(dir, header.kind, &header.observation_date, FEED_EXTENSION), header)
+    }
+
+    pub fn open_at(path: &Path, header: Header) -> io::Result<FeedWriter> {
         assert_eq!(header.format_version, FORMAT_VERSION);
-        let path = data_path(dir, header.kind, &header.observation_date, FEED_EXTENSION);
-        std::fs::create_dir_all(path.parent().expect("자료 파일은 종류 폴더 안에 있다"))?;
-        let mut file = OpenOptions::new().read(true).append(true).create(true).open(&path)?;
+        std::fs::create_dir_all(path.parent().expect("자료 파일은 폴더 안에 있다"))?;
+        let mut file = OpenOptions::new().read(true).append(true).create(true).open(path)?;
         let complete_len = complete_prefix_len(&mut file)?;
         file.set_len(complete_len)?;
         if complete_len == 0 {

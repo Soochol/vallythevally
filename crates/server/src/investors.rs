@@ -9,7 +9,7 @@ use domain::{KstDate, StockCode, Symbol};
 
 use crate::api;
 use crate::bars::BarError;
-use crate::http::{ApiFailure, AppState, Lookup, symbol_list};
+use crate::http::{ApiFailure, AppState, Lookup, feature_symbol_list};
 use crate::market_overview::overview_source;
 use crate::market_source::{DayRange, Priority};
 
@@ -21,13 +21,13 @@ pub fn routes() -> Router<Arc<AppState>> {
 
 async fn foreign_holdings(State(st): State<Arc<AppState>>, Path(code): Path<String>, Query(q): Query<HashMap<String, String>>) -> Result<Json<api::DayHistory<api::ForeignHoldingDay>>, ApiFailure> {
     let (stock, range) = history_query(&st, &code, &q).await?;
-    let history = overview_source(&st).foreign_holdings(stock, range, st.clock.now(), Priority::Background).await;
+    let history = overview_source(&st).source.foreign_holdings(stock, range, st.clock.now(), Priority::Background).await;
     Ok(Json(history.map_err(|e| Lookup::ForeignHoldings.failure(BarError::from(e), st.clock.now()))?))
 }
 
 async fn investor_net_shares(State(st): State<Arc<AppState>>, Path(code): Path<String>, Query(q): Query<HashMap<String, String>>) -> Result<Json<api::DayHistory<api::InvestorNetSharesDay>>, ApiFailure> {
     let (stock, range) = history_query(&st, &code, &q).await?;
-    let history = overview_source(&st).stock_investors(stock, range, st.clock.now(), Priority::Background).await;
+    let history = overview_source(&st).source.stock_investors(stock, range, st.clock.now(), Priority::Background).await;
     Ok(Json(history.map_err(|e| Lookup::InvestorNetShares.failure(BarError::from(e), st.clock.now()))?))
 }
 
@@ -41,7 +41,7 @@ async fn history_query(st: &AppState, code: &str, q: &HashMap<String, String>) -
     };
     let (from, to) = (day("from")?, day("to")?);
     let range = DayRange::new(from, to).ok_or_else(|| ApiFailure::bad_request(format!("from({from})이 to({to})보다 늦습니다")))?;
-    if symbol_list(st).await?.get(Symbol::Stock(stock)).is_none() {
+    if feature_symbol_list(st).await?.get(Symbol::Stock(stock)).is_none() {
         return Err(ApiFailure::new(api::ApiErrorCode::UnknownSymbol, format!("없는 종목입니다: {code}")));
     }
     Ok((stock, range))

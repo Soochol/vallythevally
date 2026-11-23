@@ -153,5 +153,5 @@ async fn a_theme_that_cannot_be_asked_keeps_the_previous_days_members() {
     sleep(Duration::from_secs(10)).await;
     task.abort();
     assert_eq!(stored(shared.path()).unwrap(), [("319".to_owned(), vec!["000319".to_owned()]), ("100".to_owned(), vec!["000100".to_owned()])], "받지 못한 테마는 지난 구성종목");
-    assert!(shared.path().join("kiwoom_themes/20261123.json").exists());
+    assert!(shared.path().join("kiwoom-themes/20261123.json").exists());
 }

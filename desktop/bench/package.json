@@ -1,0 +1,7 @@
+{
+  "name": "vally-desktop-bench",
+  "private": true,
+  "devDependencies": {
+    "lightweight-charts": "5.2.1"
+  }
+}

@@ -5,9 +5,11 @@ use serde::{Deserialize, Serialize};
 mod assignment;
 pub mod child;
 mod job;
+pub mod minute;
 mod probe;
 mod runner;
 mod themes;
+pub mod snapshot;
 mod usage;
 mod wire;
 
@@ -22,6 +24,7 @@ pub use wire::{JobStat, TrMinute};
 pub enum JobName {
     Probe,
     KiwoomThemes,
+    Snapshot,
 }
 
 impl JobName {
@@ -29,6 +32,7 @@ impl JobName {
         match self {
             JobName::Probe => Arc::new(probe::ProbeJob),
             JobName::KiwoomThemes => Arc::new(themes::KiwoomThemesJob::default()),
+            JobName::Snapshot => Arc::new(snapshot::SnapshotJob::default()),
         }
     }
 }

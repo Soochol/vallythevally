@@ -146,3 +146,15 @@ export function conditionsOf(ranking: Ranking): readonly Condition[] {
 }
 
 export const rankingName = (ranking: Ranking): string => RANKING_NAME[ranking.kind];
+
+const CHOICE_LABELS: Readonly<Record<string, Readonly<Record<string, string>>>> = Object.freeze({
+  venue: VENUE_LABEL,
+  session: Object.fromEntries(SESSION.map((o) => [o.value, o.label])),
+  baseline: Object.fromEntries(BASELINE.map((o) => [o.value, o.label])),
+  sort: Object.fromEntries([...SURGE_SORT, ...EXPECTED_SORT, ...BALANCE_SORT].map((o) => [o.value, o.label])),
+  minTradeAmount: Object.fromEntries(MIN_TRADE_AMOUNT.map((o) => [o.value, o.label])),
+  investor: Object.fromEntries(INVESTOR.map((o) => [o.value, o.label])),
+  span: Object.fromEntries(SPAN.map((o) => [o.value, o.label])),
+});
+
+export const choiceLabel = (field: string, value: string): string => CHOICE_LABELS[field]?.[value] ?? value;

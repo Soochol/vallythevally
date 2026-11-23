@@ -1,14 +1,14 @@
 import { useState } from "react";
 import type { PublicIpCheck } from "../../api/generated/PublicIpCheck";
 import { connectKiwoom, disconnectKiwoom, recheckKiwoomTokenFile, saveRegisteredIp } from "../../api/system";
-import { useKiwoomLinkStore } from "../../stores/kiwoomLink";
+import { useKiwoomOnlyLink, useKiwoomLinkStore } from "../../stores/kiwoomLink";
 import { useServerTime } from "../status/useServerTime";
 import { type Confirmations, NO_CONFIRMATIONS } from "./kiwoomPanel";
 import { useCommand } from "./useCommand";
 import { useConfirmations } from "./useConfirmations";
 
 export function useKiwoomPanel(holdConfirmations = false) {
-  const status = useKiwoomLinkStore((s) => s.status);
+  const status = useKiwoomOnlyLink();
   const now = useServerTime();
   const command = useCommand();
   const ipCommand = useCommand();
@@ -23,7 +23,7 @@ export function useKiwoomPanel(holdConfirmations = false) {
 
   const connect = async (acknowledged: boolean) => {
     await command.run(() => connectKiwoom({ acknowledged }));
-    if (useKiwoomLinkStore.getState().status?.problem === "authBlocked8050") setConfirmations(NO_CONFIRMATIONS);
+    if (useKiwoomLinkStore.getState().kiwoom?.problem === "authBlocked8050") setConfirmations(NO_CONFIRMATIONS);
   };
 
   return {

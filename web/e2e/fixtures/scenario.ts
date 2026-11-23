@@ -15,6 +15,7 @@ import type { AccountStatus } from "../../src/api/generated/AccountStatus";
 import type { KiwoomKey } from "../../src/api/generated/KiwoomKey";
 import type { KiwoomKeyList } from "../../src/api/generated/KiwoomKeyList";
 import type { KiwoomLinkStatus } from "../../src/api/generated/KiwoomLinkStatus";
+import type { MarketSourceStatus } from "../../src/api/generated/MarketSourceStatus";
 import type { KiwoomUsage } from "../../src/api/generated/KiwoomUsage";
 import type { ScreenerStatus } from "../../src/api/generated/ScreenerStatus";
 import type { SyncStatus } from "../../src/api/generated/SyncStatus";
@@ -40,8 +41,10 @@ import type { Venue } from "../../src/api/generated/Venue";
 import type { Watchlist } from "../../src/api/generated/Watchlist";
 import type { Watchlists } from "../../src/api/generated/Watchlists";
 import { etfBaseline } from "./etf-data";
+import { KIWOOM_MARKET_SOURCE } from "./market-source";
 import { boardOf, EMPTY_KIWOOM_CATALOG, kiwoomBoardOf, parseOrder, parseSource, type KiwoomCatalog } from "../../dev/fakeHeatmapBoard";
 import { marketOverviewBaseline } from "./market-data";
+import { PublicMode } from "./public-mode-data";
 import { barsPage, findSymbol, publicInfo, quoteOf, resolveVenue, search, SYMBOLS } from "../../dev/fakeMarket";
 
 export const DEFAULT_LAYOUT_ID = "01900000-0000-7000-8000-000000000001";
@@ -63,6 +66,7 @@ export function withFirstChart(layout: { windows: LayoutWindow[] }, patch: Parti
   return layout.windows.map((w) => (w === chart ? { ...chart, ...patch } : w));
 }
 export type WatchlistSeed = Omit<Watchlist, "groups"> & Partial<Pick<Watchlist, "groups">>;
+const isScenarioPath = (pathname: string) => pathname.startsWith("/api/") || pathname.startsWith("/v1/");
 const matches = (match: Matcher, request: Request) => typeof match === "string" ? new URL(request.url()).pathname === match : match(new URL(request.url()), request);
 
 export class UserDocuments {
@@ -162,6 +166,8 @@ export const CONNECTED_KIWOOM: KiwoomLinkStatus = {
   retryAt: null, needsAcknowledgement: false, step: null, tokenExpiresAt: null, realtimeRegistered: 0, symbolCount: 2800, atStart: "connects",
 };
 
+export { KIWOOM_MARKET_SOURCE } from "./market-source";
+
 export const ORDERS_OFF_MESSAGE = "주문 사용이 꺼져 있습니다";
 export const KEY_LIMIT = 5;
 
@@ -192,7 +198,9 @@ export class LiveFrames {
   private state: ConnectionStatus;
   kiwoomLink: KiwoomLinkStatus = CONNECTED_KIWOOM;
   kiwoomKeys: KiwoomKeyList | null = null;
+  marketSource: MarketSourceStatus = KIWOOM_MARKET_SOURCE;
   account: AccountStatus = { state: "local_only" };
+  opened = 0;
   orders: OrdersStatus = { state: "off", accountRef: null, accountTail: null, message: ORDERS_OFF_MESSAGE, accounts: [{ keyId: "k1", alias: "키 1", market: true, state: "off", accountRef: null, accountTail: null }] };
   ordersAccountTail = "01";
   ordersAccountTails: Record<string, string> = {};
@@ -201,10 +209,12 @@ export class LiveFrames {
   constructor(private readonly now: number, private readonly market: MarketFixtures) { this.state = { realtime: "live", since: Math.floor(now / 1000), backfilling: false }; }
   connect(socket: WebSocketRoute) {
     const subscriptions = new Map<string, Subscription>();
+    this.opened++;
     this.peers.set(socket, subscriptions);
     socket.send(JSON.stringify({ type: "hello", protocol: 1, serverTime: Math.floor(this.now / 1000), status: this.state } satisfies ServerMessage));
     socket.send(JSON.stringify({ type: "kiwoom_link", status: this.kiwoomLink } satisfies ServerMessage));
     socket.send(JSON.stringify({ type: "account", status: this.account } satisfies ServerMessage));
+    socket.send(JSON.stringify({ type: "market_source", status: this.marketSource } satisfies ServerMessage));
     socket.onMessage(message => {
       const input: ClientMessage = JSON.parse(String(message));
       this.messages.push(input);
@@ -236,6 +246,7 @@ export class LiveFrames {
     return delivered;
   }
   link(status: KiwoomLinkStatus): void { this.kiwoomLink = clone(status); this.emit({ type: "kiwoom_link", status }); }
+  source(status: MarketSourceStatus): void { this.marketSource = clone(status); this.emit({ type: "market_source", status }); }
   setAccount(status: AccountStatus): void { this.account = clone(status); this.emit({ type: "account", status }); }
   status(status: ConnectionStatus): void { this.state = clone(status); this.emit({ type: "status", status }); }
   close(code = 1000, reason = "fixture close"): void { for (const socket of this.peers.keys()) socket.close({ code, reason }); this.peers.clear(); }
@@ -246,6 +257,7 @@ export class Scenario {
   readonly market: MarketFixtures;
   readonly live: LiveFrames;
   readonly requests: Request[] = [];
+  readonly publicMode = new PublicMode();
   kiwoomCatalog: KiwoomCatalog = EMPTY_KIWOOM_CATALOG;
   private handlers: Array<{ match: Matcher; handler: Handler }> = [];
   private failures: string[] = [];
@@ -267,14 +279,14 @@ export class Scenario {
   async install(context: BrowserContext): Promise<void> {
     if (this.contexts.has(context)) return;
     this.contexts.add(context);
-    context.on("request", request => { if (new URL(request.url()).pathname.startsWith("/api/")) this.requests.push(request); });
+    context.on("request", request => { if (isScenarioPath(new URL(request.url()).pathname)) this.requests.push(request); });
     await context.route("**/*", async route => {
       const url = new URL(route.request().url());
       if (url.origin !== (process.env.VALLY_E2E_BASE_URL ?? `http://127.0.0.1:${process.env.VALLY_E2E_PORT ?? "4173"}`)) {
         this.failures.push(`Unexpected network request: ${url.origin}${url.pathname}`);
         return route.abort("blockedbyclient");
       }
-      if (url.pathname.startsWith("/api/")) return this.fulfill(route);
+      if (isScenarioPath(url.pathname)) return this.fulfill(route);
       await route.continue();
     });
     await context.routeWebSocket("**/*", socket => {
@@ -293,6 +305,8 @@ export class Scenario {
     return this.baseline(request);
   }
   private baseline(request: Request): FixtureReply {
+    const publicReply = this.publicMode.baseline(request);
+    if (publicReply) return publicReply;
     const url = new URL(request.url());
     const path = url.pathname;
     const method = request.method();
@@ -355,6 +369,7 @@ export class Scenario {
     if (path === "/api/collector/access" && method === "GET") return { body: { access: "off" } satisfies CollectorAccess };
     if (path === "/api/system/kiwoom" && method === "GET") return { body: this.live.kiwoomLink };
     if (path === "/api/system/kiwoom/keys" && method === "GET") return { body: this.live.kiwoomKeys ?? keyListFromLink(this.live.kiwoomLink) };
+    if (path === "/api/system/market-source" && method === "GET") return { body: this.live.marketSource };
     if (path === "/api/system/kiwoom/usage" && method === "GET") return { body: this.live.kiwoomUsage };
     if (path === "/api/system/orders" && method === "GET") return this.ordersFor(url.searchParams.get("account"));
     if (path === "/api/system/orders/check-account" && method === "POST") return { body: { accountTail: this.live.ordersAccountTails[url.searchParams.get("keyId") ?? ""] ?? this.live.ordersAccountTail } satisfies OrdersAccountCheck };
@@ -400,7 +415,7 @@ export class Scenario {
     if (etf) return etf;
     const marketOverview = marketOverviewBaseline(url, method);
     if (marketOverview) return marketOverview;
-    if (path === "/api/rankings" && method === "POST") return { body: { rows: [], pages: 1, end: true, limited: false, hidden: 0, fetchedAt: Math.floor(this.now / 1000) } satisfies RankingPage };
+    if (path === "/api/rankings" && method === "POST") return { body: { rows: [], pages: 1, end: true, limited: false, hidden: 0, fetchedAt: Math.floor(this.now / 1000), source: "kiwoom" } satisfies RankingPage };
     if (path === "/api/screener/status" && method === "GET") return { body: { lastDay: null, needDay: "2026-11-06", todayAvailable: false, fullHistory: { done: 0, total: 0 }, unconfirmed: 0, update: null } satisfies ScreenerStatus };
     if (path === "/api/financial-update" && method === "GET") return { body: { id: 0, status: "not_configured", phase: "planning", stopReason: null, nextCheckAt: null, canResume: false, automatic: false, latestCheckPending: false, historyCompletedCompanies: 0, historyFailedCompanies: 0, recentFailedCompanies: 0, historyComplete: false, fromYear: 2015, throughYear: 2026, totalSymbols: 0, processedSymbols: 0, unsupportedSymbols: 0, unverifiedSymbols: 0, unverifiedDividends: 0, totalCompanies: 0, completedCompanies: 0, failedCompanies: 0, startedAt: null, lastCheckedAt: null, failure: null, failures: [] } satisfies FinancialUpdatePage };
     if (/\/financials$/.test(path) && method === "GET") return { body: { symbol: decodeURIComponent(path.split("/")[3] ?? ""), period: url.searchParams.get("period") === "Q" ? "Q" : "Y", status: "not_collected", reason: null, failure: null, corpCode: null, fiscalMonth: null, shareClass: null, shareClassReason: null, lastCheckedAt: null, lastAttemptAt: null, disclosureFailure: null, refreshVersion: 0, disclosureVersion: 0, latestCorrections: false, progress: { total: 0, completed: 0, failed: 0, pending: 0 }, series: [] } satisfies FinancialsPage };

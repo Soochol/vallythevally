@@ -1,0 +1,323 @@
+{
+  "environment": {
+    "platform": "Linux-7.0.0-43-generic-x86_64-with-glibc2.43",
+    "machine": "x86_64",
+    "cpuCount": 32,
+    "display": ":101",
+    "webkitgtk": "2.52.6",
+    "chromium": "/home/dev/.cache/ms-playwright/chromium-1254/chrome-linux64/chrome",
+    "softwareRendering": true
+  },
+  "seconds": 30,
+  "rates": [
+    1000,
+    3000
+  ],
+  "comm": [
+    {
+      "name": "comm-ws-1000",
+      "kind": "comm",
+      "path": "ws",
+      "perSecond": 1000,
+      "seconds": 30,
+      "sent": 30000,
+      "received": 30000,
+      "latencyMs": {
+        "count": 30000,
+        "p50": -0.277099609375,
+        "p99": -0.27587890625,
+        "max": 2.721435546875,
+        "mean": -0.27427933756510414
+      },
+      "clockOffsetMs": 1.043212890625,
+      "frames": null,
+      "environment": {
+        "userAgent": "Mozilla/5.0 (X11; Ubuntu; Linux x86_64) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/60.5 Safari/605.1.15",
+        "renderer": "Apple GPU",
+        "devicePixelRatio": 1
+      },
+      "cpu": {
+        "screen": {
+          "percent": 3.2,
+          "processes": 1
+        },
+        "host": {
+          "percent": 3.4,
+          "processes": 2
+        }
+      }
+    },
+    {
+      "name": "comm-ws-3000",
+      "kind": "comm",
+      "path": "ws",
+      "perSecond": 3000,
+      "seconds": 30,
+      "sent": 90000,
+      "received": 90000,
+      "latencyMs": {
+        "count": 90000,
+        "p50": 0.280029296875,
+        "p99": 0.63134765625,
+        "max": 2.61474609375,
+        "mean": 0.1985834716796875
+      },
+      "clockOffsetMs": 1.099365234375,
+      "frames": null,
+      "environment": {
+        "userAgent": "Mozilla/5.0 (X11; Ubuntu; Linux x86_64) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/60.5 Safari/605.1.15",
+        "renderer": "Apple GPU",
+        "devicePixelRatio": 1
+      },
+      "cpu": {
+        "screen": {
+          "percent": 6.2,
+          "processes": 1
+        },
+        "host": {
+          "percent": 7.5,
+          "processes": 2
+        }
+      }
+    },
+    {
+      "name": "comm-ipc-1000",
+      "kind": "comm",
+      "path": "ipc",
+      "perSecond": 1000,
+      "seconds": 30,
+      "sent": 30000,
+      "received": 30000,
+      "latencyMs": {
+        "count": 30000,
+        "p50": 0.470947265625,
+        "p99": 0.471923828125,
+        "max": 4.470458984375,
+        "mean": 0.4733568359375
+      },
+      "clockOffsetMs": 0.998046875,
+      "frames": null,
+      "environment": {
+        "userAgent": "Mozilla/5.0 (X11; Ubuntu; Linux x86_64) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/60.5 Safari/605.1.15",
+        "renderer": "Apple GPU",
+        "devicePixelRatio": 1
+      },
+      "cpu": {
+        "screen": {
+          "percent": 8.1,
+          "processes": 1
+        },
+        "host": {
+          "percent": 8.4,
+          "processes": 2
+        }
+      }
+    },
+    {
+      "name": "comm-ipc-3000",
+      "kind": "comm",
+      "path": "ipc",
+      "perSecond": 3000,
+      "seconds": 30,
+      "sent": 90000,
+      "received": 90000,
+      "latencyMs": {
+        "count": 90000,
+        "p50": 0.015625,
+        "p99": 0.364013671875,
+        "max": 5.333251953125,
+        "mean": 0.025222089301215278
+      },
+      "clockOffsetMs": 1.332275390625,
+      "frames": null,
+      "environment": {
+        "userAgent": "Mozilla/5.0 (X11; Ubuntu; Linux x86_64) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/60.5 Safari/605.1.15",
+        "renderer": "Apple GPU",
+        "devicePixelRatio": 1
+      },
+      "cpu": {
+        "screen": {
+          "percent": 16.7,
+          "processes": 1
+        },
+        "host": {
+          "percent": 23.4,
+          "processes": 2
+        }
+      }
+    }
+  ],
+  "chart": [
+    {
+      "name": "chart-tauri-1000",
+      "browser": "tauri",
+      "kind": "chart",
+      "path": "websocket",
+      "perSecond": 1000,
+      "seconds": 30,
+      "sent": 30000,
+      "received": 30000,
+      "latencyMs": {
+        "count": 30000,
+        "p50": 0.16943359375,
+        "p99": 7.16943359375,
+        "max": 12.168701171875,
+        "mean": 1.594396687825521
+      },
+      "clockOffsetMs": 1.011474609375,
+      "frames": {
+        "count": 1799,
+        "p50": 17,
+        "p99": 19,
+        "max": 20,
+        "mean": 16.66425792106726,
+        "missedFrameMs": 25,
+        "missedFrames": 0,
+        "missedRatio": 0,
+        "framesPerSecond": 60.00867273758298
+      },
+      "environment": {
+        "userAgent": "Mozilla/5.0 (X11; Ubuntu; Linux x86_64) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/60.5 Safari/605.1.15",
+        "renderer": "Apple GPU",
+        "devicePixelRatio": 1
+      },
+      "cpu": {
+        "screen": {
+          "percent": 251.6,
+          "processes": 1
+        },
+        "host": {
+          "percent": 8.4,
+          "processes": 2
+        }
+      }
+    },
+    {
+      "name": "chart-tauri-3000",
+      "browser": "tauri",
+      "kind": "chart",
+      "path": "websocket",
+      "perSecond": 3000,
+      "seconds": 30,
+      "sent": 90000,
+      "received": 90000,
+      "latencyMs": {
+        "count": 90000,
+        "p50": 0.3916015625,
+        "p99": 9.041259765625,
+        "max": 14.732421875,
+        "mean": 1.7720243923611112
+      },
+      "clockOffsetMs": 0.866943359375,
+      "frames": {
+        "count": 1796,
+        "p50": 17,
+        "p99": 20,
+        "max": 24,
+        "mean": 16.69153674832962,
+        "missedFrameMs": 25,
+        "missedFrames": 0,
+        "missedRatio": 0,
+        "framesPerSecond": 59.91060110747882
+      },
+      "environment": {
+        "userAgent": "Mozilla/5.0 (X11; Ubuntu; Linux x86_64) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/60.5 Safari/605.1.15",
+        "renderer": "Apple GPU",
+        "devicePixelRatio": 1
+      },
+      "cpu": {
+        "screen": {
+          "percent": 266.9,
+          "processes": 1
+        },
+        "host": {
+          "percent": 14.9,
+          "processes": 2
+        }
+      }
+    },
+    {
+      "name": "chart-chromium-1000",
+      "browser": "chromium",
+      "kind": "chart",
+      "path": "websocket",
+      "perSecond": 1000,
+      "seconds": 30,
+      "sent": 30000,
+      "received": 30000,
+      "latencyMs": {
+        "count": 30000,
+        "p50": 0.076904296875,
+        "p99": 1.57763671875,
+        "max": 7.374267578125,
+        "mean": 0.17807832845052082
+      },
+      "clockOffsetMs": 0.0966796875,
+      "frames": {
+        "count": 1800,
+        "p50": 16.69999999999891,
+        "p99": 16.80000000000109,
+        "max": 16.80000000000291,
+        "mean": 16.666000000000132,
+        "missedFrameMs": 25,
+        "missedFrames": 0,
+        "missedRatio": 0,
+        "framesPerSecond": 60.00240009600383
+      },
+      "environment": {
+        "userAgent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/158.0.0.0 Safari/537.36",
+        "renderer": null,
+        "devicePixelRatio": 1
+      },
+      "cpu": {
+        "screen": {
+          "percent": 24.8,
+          "processes": 3
+        },
+        "host": null
+      }
+    },
+    {
+      "name": "chart-chromium-3000",
+      "browser": "chromium",
+      "kind": "chart",
+      "path": "websocket",
+      "perSecond": 3000,
+      "seconds": 30,
+      "sent": 90000,
+      "received": 90000,
+      "latencyMs": {
+        "count": 90000,
+        "p50": 0.011474609375,
+        "p99": 1.55712890625,
+        "max": 4.0869140625,
+        "mean": 0.10744000922309027
+      },
+      "clockOffsetMs": 0.03759765625,
+      "frames": {
+        "count": 1799,
+        "p50": 16.699999999999818,
+        "p99": 16.80000000000109,
+        "max": 16.80000000000291,
+        "mean": 16.665981100611575,
+        "missedFrameMs": 25,
+        "missedFrames": 0,
+        "missedRatio": 0,
+        "framesPerSecond": 60.002468139323135
+      },
+      "environment": {
+        "userAgent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/158.0.0.0 Safari/537.36",
+        "renderer": null,
+        "devicePixelRatio": 1
+      },
+      "cpu": {
+        "screen": {
+          "percent": 29.0,
+          "processes": 3
+        },
+        "host": null
+      }
+    }
+  ],
+  "countProblems": []
+}

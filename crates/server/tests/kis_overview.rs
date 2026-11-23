@@ -64,9 +64,16 @@ impl Sent {
 
 type Handler = dyn Fn(&Sent) -> HttpResponse + Send + Sync;
 
+struct Held {
+    api: KisApiId,
+    arrived: Arc<tokio::sync::Notify>,
+    gate: Arc<tokio::sync::Semaphore>,
+}
+
 struct FakeKis {
     sent: Mutex<Vec<Sent>>,
     handler: Box<Handler>,
+    held: Mutex<Option<Held>>,
 }
 
 impl FakeKis {
@@ -77,14 +84,27 @@ impl FakeKis {
     fn total(&self) -> usize {
         self.sent.lock().unwrap().len()
     }
+
+    fn hold_next(&self, api: KisApiId) -> (Arc<tokio::sync::Notify>, Arc<tokio::sync::Semaphore>) {
+        let (arrived, gate) = (Arc::new(tokio::sync::Notify::new()), Arc::new(tokio::sync::Semaphore::new(0)));
+        *self.held.lock().unwrap() = Some(Held { api, arrived: arrived.clone(), gate: gate.clone() });
+        (arrived, gate)
+    }
 }
 
 impl Transport for FakeKis {
     fn send(&self, req: HttpRequest) -> BoxFuture<'static, Result<HttpResponse, TransportError>> {
         let sent = Sent { path: req.path, query: req.query.iter().map(|(n, v)| (n.to_string(), v.clone())).collect() };
         let response = (self.handler)(&sent);
+        let held = self.held.lock().unwrap().take_if(|held| sent.is(held.api));
         self.sent.lock().unwrap().push(sent);
-        Box::pin(async move { Ok(response) })
+        Box::pin(async move {
+            if let Some(held) = held {
+                held.arrived.notify_one();
+                held.gate.acquire().await.unwrap().forget();
+            }
+            Ok(response)
+        })
     }
 }
 
@@ -115,6 +135,7 @@ struct Harness {
     kiwoom: ScriptedTransport,
     clock: Clock,
     source: Arc<KisOverview>,
+    state: Arc<server::http::AppState>,
     sampler: Option<tokio::task::JoinHandle<()>>,
     _dir: tempfile::TempDir,
 }
@@ -136,9 +157,9 @@ impl Harness {
         let dir = tempfile::tempdir().unwrap();
         let token_path: PathBuf = dir.path().join("state/vallythevally/kis-token.json");
         TokenFile::new(token_path.clone())
-            .save(&Saved { credential: Some(credential_id(APP_KEY)), token: Some(SavedToken { value: TOKEN.into(), expires_at: now.unix() + 86_400, issued_at: now.unix() - 3600 }), last_request_at: now.unix() - 3600 })
+            .save(&Saved { credential: Some(credential_id(APP_KEY)), token: Some(SavedToken { value: TOKEN.into(), expires_at: now.unix() + 86_400, issued_at: now.unix() - 3600 }), last_request_at: now.unix() - 3600, disconnected: None })
             .unwrap();
-        let kis = Arc::new(FakeKis { sent: Mutex::default(), handler: Box::new(handler) });
+        let kis = Arc::new(FakeKis { sent: Mutex::default(), handler: Box::new(handler), held: Mutex::default() });
         let clock = Clock::fake(now);
         let transport: Arc<dyn Transport> = kis.clone();
         let credentials = KisCredentials { app_key: Secret::new(APP_KEY.into()), app_secret: Secret::new(APP_SECRET.into()) };
@@ -159,8 +180,8 @@ impl Harness {
         state.market_overview.choose(Some(source.clone() as Arc<dyn OverviewSource>));
         let app = router(state.clone());
         tokio::time::pause();
-        let sampler = samples.map(|samples| server::market_overview::start(state, samples.to_owned()));
-        Harness { app, kis, kiwoom, clock, source, sampler, _dir: dir }
+        let sampler = samples.map(|samples| server::market_overview::start(state.clone(), samples.to_owned()));
+        Harness { app, kis, kiwoom, clock, source, state, sampler, _dir: dir }
     }
 
     async fn get(&self, path: &str) -> (u16, Value) {
@@ -212,7 +233,7 @@ async fn the_kospi_index_card_asks_the_kis_index_tr_once_and_fills_the_neutral_c
     assert_eq!(
         body,
         json!({
-            "context": {"market": "kospi", "phase": "regular"},
+            "context": {"market": "kospi", "phase": "regular", "source": "kis"},
             "index": {"status": "ok", "value": {
                 "code": "0001", "name": "코스피", "level": 2705.38, "changeRate": -0.67,
                 "breadth": {"rising": 410, "flat": 52, "falling": 498, "upperLimit": 3, "lowerLimit": 0},
@@ -312,6 +333,45 @@ async fn the_twenty_day_flow_is_filled_from_three_trs_and_the_amounts_are_in_eok
     assert_eq!(KisApiId::IndexChart.tr_id(), "FHKUP03500100");
     let turnover = h.ok("/api/market-overview/turnover?market=kospi&period=5").await;
     assert_eq!(turnover["days"]["value"][0]["tradeValueEok"], 200_000.0, "20000000백만원은 20만억원이다");
+}
+
+#[tokio::test]
+async fn an_investor_day_that_lands_after_the_overview_source_changed_is_not_cached() {
+    let mut days = weekdays_back_from(monday(), 25);
+    days.reverse();
+    let h = Harness::start(at(10, 0, 0), flow_day_handler(days)).await;
+    let (arrived, gate) = h.kis.hold_next(KisApiId::InvestorDailyByMarket);
+    let request = Request::get("/api/market-overview/flow?market=kospi&period=20").body(Body::empty()).unwrap();
+    let slow = tokio::spawn(h.app.clone().oneshot(request));
+    arrived.notified().await;
+    h.state.market_overview.choose(Some(h.source.clone() as Arc<dyn OverviewSource>));
+    gate.add_permits(1);
+    assert_eq!(slow.await.unwrap().unwrap().status().as_u16(), 200);
+    let per_day = || h.kis.sent_to(KisApiId::InvestorDailyByMarket).len();
+    assert_eq!(per_day(), 20);
+    h.ok("/api/market-overview/flow?market=kospi&period=20").await;
+    assert_eq!(per_day(), 40, "받는 쪽이 바뀌기 전에 시작한 요청의 지난날 행은 캐시에 남지 않는다");
+    h.ok("/api/market-overview/flow?market=kospi&period=20").await;
+    assert_eq!(per_day(), 41, "바뀐 뒤 받은 지난날 행은 캐시에서 쓰고 오늘 행만 다시 묻는다");
+}
+
+#[tokio::test]
+async fn an_intraday_sample_that_lands_after_the_overview_source_changed_is_not_recorded_and_the_next_minute_continues() {
+    let samples = tempfile::tempdir().unwrap();
+    let h = Harness::start_sampling(at(9, 59, 30), route, Some(samples.path())).await;
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    let (arrived, gate) = h.kis.hold_next(KisApiId::InvestorTimeByMarket);
+    h.clock.jump(60);
+    arrived.notified().await;
+    h.state.market_overview.choose(Some(h.source.clone() as Arc<dyn OverviewSource>));
+    gate.add_permits(1);
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    h.minute().await;
+    let text = std::fs::read_to_string(samples.path().join("20261109.jsonl")).unwrap();
+    let lines: Vec<Value> = text.lines().map(|line| serde_json::from_str(line).unwrap()).collect();
+    let at_mark = |mark: KstTime, kind: &str| lines.iter().filter(|line| line["at"] == mark.unix() && line["value"]["kind"] == kind).count();
+    assert_eq!((at_mark(at(10, 0, 0), "investors"), at_mark(at(10, 0, 0), "program")), (1, 2), "바뀌는 중 늦게 온 표본 하나는 쌓지 않는다: {text}");
+    assert_eq!((at_mark(at(10, 1, 0), "investors"), at_mark(at(10, 1, 0), "program")), (2, 2), "바뀐 뒤 분부터 이어 쌓는다: {text}");
 }
 
 #[tokio::test]

@@ -4,10 +4,10 @@ import { KIWOOM_KEYS_QUERY_KEY, useKiwoomKeys, useOrdersStatus, useSystemSetting
 import { useKiwoomLinkStore } from "../../stores/kiwoomLink";
 import { useServerTime } from "../status/useServerTime";
 import { AddKeyPanel } from "./AddKeyPanel";
-import { BROKERS, brokerOrder } from "./brokers";
+import { BROKERS } from "./brokers";
 import { MOCK_KEY_NOTICE } from "./KiwoomKeyForm";
 import { KiwoomKeyRow } from "./KiwoomKeyRow";
-import { brokerKeys, KEY_LIST_REFRESH_MS } from "./kiwoomKeys";
+import { brokerKeys, brokersShown, KEY_LIST_REFRESH_MS } from "./kiwoomKeys";
 
 export function KiwoomAccountList({ onOpenIpHelp }: { onOpenIpHelp(): void }) {
   const queryClient = useQueryClient();
@@ -30,7 +30,7 @@ export function KiwoomAccountList({ onOpenIpHelp }: { onOpenIpHelp(): void }) {
     <section aria-label="계좌 목록" className="flex flex-col gap-3 rounded-m border border-line bg-surface p-4">
       <p className="text-s text-text-3">접속 대상: {target ? `${target.kind === "kiwoom" ? (mock ? "키움 모의투자" : "키움 REST") : "로컬 시험 서버"}${target.host ? ` · ${target.host}` : ""} (고정)` : "—"}</p>
       {list.keyFileProblem && <p role="alert" className="text-m text-danger">{list.keyFileProblem}</p>}
-      {brokerOrder().map((broker) => {
+      {brokersShown(list).map((broker) => {
         const keys = brokerKeys(list, broker);
         return (
           <div key={broker} className="flex flex-col">

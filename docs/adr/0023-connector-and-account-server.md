@@ -1,5 +1,7 @@
 # 사용자는 각자 계정으로 로그인하고, 시세는 각자 PC의 커넥터에서만 다룬다
 
+2026-11-23 [ADR 0045](0045-desktop-app-runs-a-personal-engine-and-the-server-keeps-login-and-shared-data.md)가 이 결정의 방향을 되돌렸다. 커넥터는 데스크톱 앱 안의 개인 엔진으로 돌아오고, 사용자 키와 키로 하는 일은 다시 사용자 PC에 둔다. 앱 로그인은 이 ADR의 루프백 흐름과 커넥터 토큰을 다시 쓰는 것이 기대값이다.
+
 2026-11-22 [ADR 0038](0038-user-kiwoom-keys-stay-in-the-browser-and-collection-runs-on-one-server.md)이 이 결정의 일부를 바꿨다. 사용자 키움 키와 사용자 키로 하는 일(내가 보는 종목의 실시간, 계좌 실시간, 토큰·계좌 조회·주문)은 커넥터가 아니라 각 사용자의 브라우저에 둔다. 순위·시장 개요·히트맵 같은 공용 자료는 운영 서버가 운영자 키로 만들어 모든 사용자에게 준다. 루프백 로그인 흐름과 커넥터 토큰은 새 로그인 ADR로 다시 정한다. IdP, 계정 식별, 셋업 범위는 그대로다.
 
 공개 모드에서는 [ADR 0040](0040-the-public-listener-serves-browser-logins-and-shared-data-apart-from-the-operator-listener.md)이 브라우저가 계정 서버에 직접 로그인하는 세션 쿠키 방식을 골랐다. 이 ADR의 루프백 로그인 흐름과 커넥터 토큰은 커넥터 계정 모드에만 남는다.

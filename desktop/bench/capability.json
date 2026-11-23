@@ -1,0 +1,14 @@
+{
+  "identifier": "bench-remote",
+  "windows": [
+    "main"
+  ],
+  "remote": {
+    "urls": [
+      "http://127.0.0.1:*/*"
+    ]
+  },
+  "permissions": [
+    "allow-bench-stream"
+  ]
+}

@@ -65,9 +65,16 @@ impl<T: DeserializeOwned> Feed<T> {
         }
         let complete = chunk.iter().rposition(|b| *b == b'\n').map_or(0, |i| i + 1);
         let mut fresh = Vec::new();
-        for (index, line) in chunk[..complete].split(|b| *b == b'\n').filter(|l| !l.is_empty()).enumerate() {
-            if cursor.offset == 0 && index == 0 {
-                cursor.head = [line, b"\n"].concat();
+        let mut header_pending = cursor.offset == 0;
+        let mut line_end = 0;
+        for line in chunk[..complete].split(|b| *b == b'\n') {
+            line_end += line.len() + 1;
+            if line.is_empty() {
+                continue;
+            }
+            if header_pending {
+                header_pending = false;
+                cursor.head = chunk[..line_end].to_vec();
                 if let Err(reason) = check_header(line, kind) {
                     self.errors.fetch_add(1, Ordering::Relaxed);
                     tracing::warn!(path = %path.display(), %reason, "덧붙이는 공용 자료의 머리를 읽지 못했습니다");

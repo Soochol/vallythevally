@@ -78,6 +78,7 @@ export function KiwoomKeyForm({ status, command, onSaved, onOpenIpHelp }: { stat
 export function SaveNote({ note, onOpenIpHelp }: { note: ReturnType<typeof keySaveNote>; onOpenIpHelp?(): void }) {
   if (note === null) return null;
   if (note === "blockedBy8050") return <p className="text-s text-text-3">8050 확인을 마치기 전에는 저장해도 연결하지 않습니다</p>;
+  if (note === "kisConnectsAtOnce") return <p className="text-s text-text-3">저장하면 바로 한투에 연결합니다</p>;
   return (
     <p className="text-s text-text-3">
       저장하면 바로 키움에 연결합니다. 포털에 지금 공인 IP를 먼저 등록하세요.{" "}

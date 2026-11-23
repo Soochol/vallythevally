@@ -136,12 +136,13 @@ impl Home {
                 credential: Some(credential_id(APP_KEY)),
                 token: Some(SavedToken { value: FILE_TOKEN.into(), expires_at: now().unix() + 86_400, issued_at: now().unix() - issue_requested_secs_ago }),
                 last_request_at: now().unix() - issue_requested_secs_ago,
+                disconnected: None,
             })
             .unwrap();
     }
 
     fn requested_issue_secs_ago(&self, secs: i64) {
-        self.file().save(&Saved { credential: Some(credential_id(APP_KEY)), token: None, last_request_at: now().unix() - secs }).unwrap();
+        self.file().save(&Saved { credential: Some(credential_id(APP_KEY)), token: None, last_request_at: now().unix() - secs, disconnected: None }).unwrap();
     }
 
     fn auth(&self, transport: &Arc<FakeTransport>) -> KisAuth {

@@ -141,6 +141,7 @@ test("모의: 시스템 설정 키움 탭에 키 입력 칸이 없고 안내와 
 test("실전: 시스템 설정 키움 탭에 키 입력 칸이 있고 모의 표시가 없다", async ({ page, scenario }) => {
   environmentIs(scenario, "real", { ...DISCONNECTED, keySource: "none", appKeyTail: null, state: "noKey" });
   const panel = await openKiwoomTab(page);
+  await panel.getByRole("group", { name: "증권사 고르기" }).getByRole("button", { name: /^키움증권/ }).click();
   await expect(page.getByLabel("앱키", { exact: true })).toBeVisible();
   await expect(panel.getByTestId("mock-key-notice")).toHaveCount(0);
   await expect(panel.getByTestId("kiwoom-environment")).toHaveCount(0);
