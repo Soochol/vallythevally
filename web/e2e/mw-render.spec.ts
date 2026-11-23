@@ -203,3 +203,15 @@ test("체결 창에 포인터를 올리면 목록이 멈추고 새 체결 건수
   await expect(page.getByTestId("trade-pending")).toHaveCount(0);
   await expect(rows.first()).toContainText("10:00:02");
 });
+
+for (const reducedMotion of ["no-preference", "reduce"] as const) {
+  test(`움직임 설정이 ${reducedMotion}여도 잔량 증감 글자는 다음 프레임 없이 사라진다`, async ({ page, scenario }) => {
+    await page.emulateMedia({ reducedMotion });
+    const { book, sub } = await openLiveOrderWindow(page, scenario);
+    scenario.live.emit({ type: "feed_book", sub, book: book.setAsk(3, 40).frame() });
+    await expect(askQuantity(page, 3)).toHaveText("40");
+    const change = page.locator(".mw-qty-change").first();
+    await expect(change).toBeVisible();
+    await expect.poll(() => change.evaluate((element) => getComputedStyle(element).opacity)).toBe("0");
+  });
+}
