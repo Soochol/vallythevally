@@ -1,20 +1,21 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use account_server::fake_idp::{ClientCredentials, FakeIdp};
 use account_server::{AccountConfig, AccountOptions, Accounts, GoogleConfig, IdpUrl, NaverConfig, PublicUrl, Secret, SystemClock, open_database};
 use axum::Router;
-use domain::{Market, Symbol, SymbolInfo, SymbolKind};
+use domain::{KstDate, Market, Symbol, SymbolInfo, SymbolKind};
 use futures::future::BoxFuture;
 use serde_json::{Value, json};
 use server::app::{Adapters, StreamSource};
+use server::clock::kst;
 use server::config::Config;
 use server::http::AppState;
 use server::kiwoom::rest::Access;
 use server::kiwoom::transport::{HttpRequest, HttpResponse, Transport, TransportError};
+use server::shared_data::{Broker, DataKind, FeedWriter, Header, MinuteBar, MinuteInstrument, MinuteVenue, SnapshotBody, SnapshotRow, SourceKey, minute_path, write_snapshot};
 use server::symbols::Directory;
 use tower::ServiceExt;
 
@@ -45,19 +46,7 @@ fn minute_row(time: &str, close: u64) -> Value {
 struct WireState {
     minute_codes: Mutex<Vec<String>>,
     quote_batches: Mutex<Vec<Vec<String>>>,
-    in_flight: AtomicUsize,
-    max_in_flight: AtomicUsize,
-    minute_delay: Mutex<Duration>,
-    hold_minutes: Mutex<Option<Arc<tokio::sync::Semaphore>>>,
-    minute_arrivals: AtomicUsize,
-}
-
-struct InFlight<'a>(&'a AtomicUsize);
-
-impl Drop for InFlight<'_> {
-    fn drop(&mut self) {
-        self.0.fetch_sub(1, Ordering::SeqCst);
-    }
+    api_ids: Mutex<Vec<String>>,
 }
 
 #[derive(Clone, Default)]
@@ -70,36 +59,12 @@ impl Wire {
         self.state.minute_codes.lock().unwrap().len()
     }
 
-    fn minute_calls_for(&self, code: &str) -> usize {
-        self.state.minute_codes.lock().unwrap().iter().filter(|c| *c == code).count()
-    }
-
     fn quote_batches(&self) -> Vec<Vec<String>> {
         self.state.quote_batches.lock().unwrap().clone()
     }
 
-    fn max_in_flight(&self) -> usize {
-        self.state.max_in_flight.load(Ordering::SeqCst)
-    }
-
-    fn delay_minutes(&self, delay: Duration) {
-        *self.state.minute_delay.lock().unwrap() = delay;
-    }
-
-    fn hold_minutes(&self) -> Arc<tokio::sync::Semaphore> {
-        let gate = Arc::new(tokio::sync::Semaphore::new(0));
-        *self.state.hold_minutes.lock().unwrap() = Some(gate.clone());
-        gate
-    }
-
-    async fn minute_arrivals(&self, count: usize) {
-        for _ in 0..4000 {
-            if self.state.minute_arrivals.load(Ordering::SeqCst) >= count {
-                return;
-            }
-            tokio::time::sleep(Duration::from_millis(5)).await;
-        }
-        panic!("분봉 호출 {count}건이 도착하지 않았다: {}", self.state.minute_arrivals.load(Ordering::SeqCst));
+    fn api_calls(&self) -> Vec<String> {
+        self.state.api_ids.lock().unwrap().clone()
     }
 }
 
@@ -108,6 +73,7 @@ impl Transport for Wire {
         let state = self.state.clone();
         let reply = |body: Value| HttpResponse { status: 200, next_key: None, body: body.to_string() };
         let id = req.api_id.as_str().to_owned();
+        state.api_ids.lock().unwrap().push(id.clone());
         if id == "au10001" {
             let response = reply(json!({"return_code": 0, "token": "fake-token", "expires_dt": "20991231000000"}));
             return Box::pin(async move { Ok(response) });
@@ -117,23 +83,9 @@ impl Transport for Wire {
             MINUTE_API => {
                 let code = body["stk_cd"].as_str().unwrap().split('_').next().unwrap().to_owned();
                 state.minute_codes.lock().unwrap().push(code);
-                state.minute_arrivals.fetch_add(1, Ordering::SeqCst);
-                let now = state.in_flight.fetch_add(1, Ordering::SeqCst) + 1;
-                state.max_in_flight.fetch_max(now, Ordering::SeqCst);
                 let rows: Vec<Value> = [("20261119090500", 10_500), ("20261119090400", 10_200), ("20261119090000", 10_100), ("20261118153000", 10_000)].iter().map(|(t, c)| minute_row(t, *c)).collect();
                 let response = reply(json!({"return_code": 0, "return_msg": "정상적으로 처리되었습니다", "stk_min_pole_chart_qry": rows}));
-                let delay = *state.minute_delay.lock().unwrap();
-                let hold = state.hold_minutes.lock().unwrap().clone();
-                Box::pin(async move {
-                    let _flight = InFlight(&state.in_flight);
-                    if let Some(hold) = hold {
-                        let _ = hold.acquire().await;
-                    }
-                    if !delay.is_zero() {
-                        tokio::time::sleep(delay).await;
-                    }
-                    Ok(response)
-                })
+                Box::pin(async move { Ok(response) })
             }
             QUOTE_API => {
                 let asked: Vec<String> = body["stk_cd"].as_str().unwrap().split('|').map(|c| c.split('_').next().unwrap().to_owned()).collect();
@@ -291,6 +243,9 @@ async fn start_site(idp: &Arc<FakeIdp>, env: &[(&str, &str)]) -> Site {
     let public_port = free_port();
     let public_origin = format!("http://127.0.0.1:{public_port}");
     let mut vars = operator_vars(work.path());
+    let shared = work.path().join("shared");
+    std::fs::create_dir_all(&shared).unwrap();
+    vars.insert("VALLY_SHARED_DATA_DIR".to_owned(), shared.display().to_string());
     vars.extend(public_vars(idp, &format!("127.0.0.1:{public_port}"), &public_origin));
     vars.extend(env.iter().map(|(key, value)| ((*key).to_owned(), (*value).to_owned())));
     let config = Config::from_values(vars).map(|(config, _)| config).unwrap_or_else(|e| panic!("설정 오류: {e}"));
@@ -443,11 +398,59 @@ impl Site {
         through(&self.operator_router, request).await
     }
 
+    fn shared_dir(&self) -> PathBuf {
+        self._work.path().join("shared")
+    }
+
+    async fn publish_shared(&self, board: &[(&str, u64)], minute_codes: &[String]) {
+        let dir = self.shared_dir();
+        write_board(&dir, board);
+        write_minutes(&dir, minute_codes);
+        self.state.shared_data.poll_once(&dir).await;
+    }
+
     async fn usage(&self) -> Value {
         let reply = self.operator("GET", "/api/public-usage", None).await;
         assert_eq!(reply.status, 200, "{}", head(&reply.text()));
         reply.json()
     }
+}
+
+fn collection_day() -> KstDate {
+    KstDate::new(2026, 11, 19).unwrap()
+}
+
+fn collection_unix(hour: u32, minute: u32) -> i64 {
+    kst(collection_day(), hour, minute, 0).unix()
+}
+
+fn collection_sources() -> Vec<SourceKey> {
+    vec![SourceKey { key_name: "rest-01".into(), broker: Broker::Kiwoom }]
+}
+
+fn write_board(dir: &Path, rows: &[(&str, u64)]) {
+    let stocks: Vec<SnapshotRow> = rows
+        .iter()
+        .map(|(code, current)| SnapshotRow { code: (*code).into(), day: "20261119".into(), current_won: *current, base_won: 50_000, open_won: 50_000, high_won: *current.max(&50_000), low_won: *current.min(&50_000), volume: 100, traded_million_won: 1_000, traded_at: Some(collection_unix(9, 59)) })
+        .collect();
+    let requested = stocks.len() as u32;
+    let as_of = collection_unix(10, 0);
+    write_snapshot(dir, Header::new(DataKind::SnapshotCombined, collection_day(), as_of, as_of, collection_sources()), SnapshotBody { closing: false, requested, missing: 0, stocks, indices: Vec::new() }).unwrap();
+}
+
+fn write_minutes(dir: &Path, codes: &[String]) {
+    if codes.is_empty() {
+        return;
+    }
+    let as_of = collection_unix(10, 0);
+    let header = Header::new(DataKind::Minute, collection_day(), as_of, as_of, collection_sources());
+    let mut writer = FeedWriter::open_at(&minute_path(dir, "20261119", "collect-01"), header).unwrap();
+    for code in codes {
+        for (minute, close, first_sec) in [(540_u16, 50_500.0, 32_400_u32), (544, 51_000.0, 32_640)] {
+            writer.append(&MinuteBar { symbol: code.clone(), instrument: MinuteInstrument::Stock, venue: Some(MinuteVenue::Combined), minute, open: close, high: close, low: close, close, volume: 10, value: 1_000_000, trades: 1, first_sec, last_sec: first_sec + 30 }).unwrap();
+        }
+    }
+    writer.sync().unwrap();
 }
 
 async fn through(router: &Router, request: axum::http::Request<axum::body::Body>) -> Reply {
@@ -833,8 +836,11 @@ async fn two_accounts_get_boards_from_their_own_themes_and_the_operator_from_the
     save_themes(&site, &bob, &[("b1", "밥 테마", vec!["000660".into()]), ("b2", "밥 둘째", vec!["005930".into()])]).await;
     let local = themes_body(1, &[("l", "로컬 테마", vec!["005930".into(), "000660".into()])]);
     assert_eq!(site.operator("PUT", "/api/heatmap/themes", Some(&local)).await.status, 200);
+    site.publish_shared(&[("005930", 51_000), ("000660", 55_000)], &[]).await;
+    let before = site.wire.api_calls();
 
     let (a, b) = (board_of(&site, &alice).await, board_of(&site, &bob).await);
+    assert_eq!(site.wire.api_calls(), before, "공개 보드는 키움 transport를 부르지 않는다");
     let operator = site.operator("GET", "/api/heatmap/board", None).await;
     assert_eq!(operator.status, 200, "{}", head(&operator.text()));
     let mut theme_names = vec![names(&a["themes"], "name"), names(&b["themes"], "name"), names(&operator.json()["themes"], "name")];
@@ -843,141 +849,52 @@ async fn two_accounts_get_boards_from_their_own_themes_and_the_operator_from_the
     }
     assert_eq!(theme_names, [vec!["앨리스 테마"], vec!["밥 둘째", "밥 테마"], vec!["로컬 테마"]]);
     assert_eq!(a["revision"], 1);
-    let member_codes = |board: &Value, theme: usize| -> Vec<String> { board["themes"][theme]["members"].as_array().unwrap().iter().map(|m| m["symbol"].as_str().unwrap().to_owned()).collect() };
-    assert_eq!(member_codes(&a, 0), ["005930"]);
+    assert_eq!(a["asOf"], collection_unix(10, 0), "시세는 공용 자료 판에서 나온다");
+    let members = |board: &Value, id: &str| -> Vec<(String, f64)> {
+        let theme = board["themes"].as_array().unwrap().iter().find(|t| t["id"] == id).unwrap_or_else(|| panic!("{id} 테마가 없다"));
+        theme["members"].as_array().unwrap().iter().map(|m| (m["symbol"].as_str().unwrap().to_owned(), m["changeRate"].as_f64().unwrap())).collect()
+    };
+    assert_eq!(members(&a, "a"), [("005930".to_owned(), 2.0)]);
+    assert_eq!(members(&b, "b1"), [("000660".to_owned(), 10.0)]);
+    assert_eq!(members(&b, "b2"), [("005930".to_owned(), 2.0)]);
     let operator = operator.json();
-    let mut local_members = member_codes(&operator, 0);
-    local_members.sort();
-    assert_eq!(local_members, ["000660", "005930"]);
-}
-
-fn board_site_symbols(site: &Site, count: usize) -> Vec<String> {
-    let all = codes(count, 100_000);
-    site.load_symbols(&all);
-    all
+    let mut local_members = members(&operator, "l");
+    local_members.sort_by(|x, y| x.0.cmp(&y.0));
+    assert_eq!(local_members, [("000660".to_owned(), 10.0), ("005930".to_owned(), 2.0)]);
+    assert_eq!(site.wire.api_calls(), before, "운영자 보드도 판에서 읽는다");
 }
 
 #[tokio::test]
-async fn bundles_over_the_board_budget_in_a_window_are_missing_and_come_back_with_the_next_window() {
-    let (Pair { site, alice, .. }, _idp) = pair(&[("VALLY_PUBLIC_BOARD_TR_PER_WINDOW", "1")]).await;
-    let all = board_site_symbols(&site, 180);
-    save_themes(&site, &alice, &[("t1", "하나", all[0..60].to_vec()), ("t2", "둘", all[60..120].to_vec()), ("t3", "셋", all[120..180].to_vec())]).await;
-
-    let first = board_of(&site, &alice).await;
-    let missing = |board: &Value| -> Vec<usize> { board["themes"].as_array().unwrap().iter().map(|t| t["missing"].as_array().unwrap().len()).collect() };
-    let by_theme = |board: &Value| -> BTreeMap<String, Vec<String>> { board["themes"].as_array().unwrap().iter().map(|t| (t["id"].as_str().unwrap().to_owned(), strings(&t["missing"]))).collect() };
-    assert_eq!(site.wire.quote_batches().len(), 1, "예산 1이면 100종목 묶음 하나만 받는다");
-    assert_eq!(site.wire.quote_batches()[0], all[0..100].to_vec());
-    let mut sizes = missing(&first);
-    sizes.sort();
-    assert_eq!(sizes, [0, 20, 60], "예산이 없는 묶음의 종목은 missing이다: {:?}", by_theme(&first).iter().map(|(k, v)| (k.clone(), v.len())).collect::<Vec<_>>());
-    assert_eq!(by_theme(&first)["t3"], all[120..180].to_vec());
-
-    site.jump(1);
-    board_of(&site, &alice).await;
-    assert_eq!(site.wire.quote_batches().len(), 1, "같은 창에서는 예산이 없고, 캐시에 있는 100종목은 다시 받지 않는다");
-
-    site.jump(46);
-    let later = board_of(&site, &alice).await;
-    assert_eq!(site.wire.quote_batches().len(), 2, "창이 지나면 다시 받는다");
-    assert_eq!(missing(&later), missing(&first));
-}
-
-#[tokio::test]
-async fn two_accounts_asking_for_the_same_symbols_in_one_window_cost_one_batch() {
-    let (Pair { site, alice, bob }, _idp) = pair(&[]).await;
-    let all = board_site_symbols(&site, 60);
-    for who in [&alice, &bob] {
-        save_themes(&site, who, &[("t", "같은 종목", all.clone())]).await;
-    }
-    let first = board_of(&site, &alice).await;
-    let second = board_of(&site, &bob).await;
-    assert_eq!(site.wire.quote_batches().len(), 1, "두 번째 계정은 같은 종목 묶음을 다시 부르지 않는다");
-    assert_eq!(first["themes"][0]["members"], second["themes"][0]["members"]);
-    assert_eq!(second["themes"][0]["members"].as_array().unwrap().len(), 60);
-
-    let operator_themes = themes_body(1, &[("l", "운영자", all.clone())]);
-    assert_eq!(site.operator("PUT", "/api/heatmap/themes", Some(&operator_themes)).await.status, 200);
-    assert_eq!(site.operator("GET", "/api/heatmap/board", None).await.status, 200);
-    assert_eq!(site.wire.quote_batches().len(), 1, "45초 시세 캐시는 운영자 리스너와도 같이 쓴다");
-}
-
-#[tokio::test]
-async fn a_symbol_outside_the_accounts_themes_is_not_fetched_and_comes_back_apart() {
+async fn a_symbol_outside_the_accounts_themes_comes_back_apart_and_nothing_reaches_kiwoom() {
     let (Pair { site, alice, .. }, _idp) = pair(&[]).await;
-    let all = codes(4, 100_000);
+    let all = codes(5, 100_000);
     site.load_symbols(&all);
-    save_themes(&site, &alice, &[("t", "셋", all[0..3].to_vec())]).await;
+    save_themes(&site, &alice, &[("t", "셋과 미수집", [all[0..3].to_vec(), vec![all[4].clone()]].concat())]).await;
+    let rows: Vec<(&str, u64)> = all.iter().map(|code| (code.as_str(), 51_000)).collect();
+    site.publish_shared(&rows, &all[0..4]).await;
+    let before = site.wire.api_calls();
     let reply = flow_of(&site, &alice, &[all[0].clone(), all[3].clone(), all[1].clone()]).await;
     assert_eq!(reply.status, 200, "{}", head(&reply.text()));
     let flow = reply.json();
-    assert_eq!(strings(&flow["used"]), [all[0].clone(), all[1].clone()]);
+    assert_eq!(strings(&flow["used"]), [all[0].clone(), all[1].clone()], "{flow}");
     assert_eq!(strings(&flow["notInThemes"]), [all[3].clone()]);
     assert_eq!((flow["overLimit"].clone(), flow["missing"].clone()), (json!([]), json!([])));
-    assert_eq!(site.wire.minute_calls_for(&all[3]), 0, "테마에 없는 종목은 transport를 부르지 않는다");
-    assert!(site.wire.minute_calls_for(&all[0]) >= 1);
+    assert!(!flow["points"].as_array().unwrap().is_empty(), "공용 분봉으로 흐름이 만들어진다");
 
     let only_outside = flow_of(&site, &alice, &[all[3].clone()]).await;
     assert_eq!(only_outside.status, 200, "{}", head(&only_outside.text()));
     assert_eq!(strings(&only_outside.json()["notInThemes"]), [all[3].clone()]);
     assert_eq!(only_outside.json()["points"], json!([]));
-    assert_eq!(site.wire.minute_calls_for(&all[3]), 0);
+    assert_eq!(site.wire.api_calls(), before, "공개 흐름은 키움 transport를 부르지 않는다");
+
+    let uncollected = flow_of(&site, &alice, &all[4..5]).await;
+    assert_eq!(uncollected.status, 200, "{}", head(&uncollected.text()));
+    assert_eq!(strings(&uncollected.json()["notCollected"]), all[4..5].to_vec());
+    assert_eq!(site.wire.api_calls(), before, "분봉이 없어도 키움으로 채우지 않는다");
 
     let operator = site.operator("GET", &format!("/api/heatmap/flow?symbols={}", all[3]), None).await;
     assert_eq!(operator.status, 200, "운영자 리스너는 테마와 상관없이 받는다: {}", head(&operator.text()));
     assert!(operator.json().get("notInThemes").is_none(), "운영자 응답에는 새 칸이 없다");
-}
-
-#[tokio::test]
-async fn symbols_over_the_per_account_or_the_total_minute_budget_are_missing() {
-    let (Pair { site, alice, bob }, _idp) = pair(&[("VALLY_PUBLIC_FLOW_ACCOUNT_TR_PER_MINUTE", "3"), ("VALLY_PUBLIC_FLOW_TR_PER_MINUTE", "5")]).await;
-    let all = codes(12, 100_000);
-    site.load_symbols(&all);
-    save_themes(&site, &alice, &[("a", "앨리스", all[0..6].to_vec())]).await;
-    save_themes(&site, &bob, &[("b", "밥", all[6..12].to_vec())]).await;
-
-    let first = flow_of(&site, &alice, &all[0..6]).await.json();
-    assert_eq!((strings(&first["used"]), strings(&first["missing"])), (all[0..3].to_vec(), all[3..6].to_vec()), "계정당 분당 3");
-    assert!(all[3..6].iter().all(|code| site.wire.minute_calls_for(code) == 0));
-    let second = flow_of(&site, &bob, &all[6..12]).await.json();
-    assert_eq!((strings(&second["used"]), strings(&second["missing"])), (all[6..8].to_vec(), all[8..12].to_vec()), "전체 분당 5에서 앨리스가 3을 썼으니 2");
-
-    site.jump(61);
-    let later = flow_of(&site, &alice, &all[0..6]).await.json();
-    assert_eq!(strings(&later["used"]), all[0..3].to_vec(), "분이 지나면 예산이 돌아온다");
-}
-
-#[tokio::test]
-async fn one_request_never_has_more_than_five_symbols_in_flight_at_the_transport() {
-    let (Pair { site, alice, .. }, _idp) = pair(&[]).await;
-    let all = codes(20, 100_000);
-    site.load_symbols(&all);
-    save_themes(&site, &alice, &[("t", "스무 종목", all.clone())]).await;
-    site.wire.delay_minutes(Duration::from_secs(3));
-    tokio::time::pause();
-    let reply = flow_of(&site, &alice, &all).await;
-    assert_eq!(reply.status, 200, "{}", head(&reply.text()));
-    assert_eq!(strings(&reply.json()["used"]).len(), 20);
-    assert_eq!(site.wire.max_in_flight(), 5, "한 요청 안의 동시 호출은 5다(스무 종목을 한꺼번에 받으면 15쯤 된다)");
-}
-
-#[tokio::test]
-async fn another_account_in_the_same_kst_minute_does_not_refetch_and_the_next_minute_does() {
-    let (Pair { site, alice, bob }, _idp) = pair(&[]).await;
-    let all = codes(2, 100_000);
-    site.load_symbols(&all);
-    for who in [&alice, &bob] {
-        save_themes(&site, who, &[("t", "같은 종목", all.clone())]).await;
-    }
-    assert_eq!(flow_of(&site, &alice, &all).await.status, 200);
-    let after_first = site.wire.minute_calls();
-    assert!(after_first >= 2);
-    site.jump(50);
-    assert_eq!(flow_of(&site, &bob, &all).await.status, 200);
-    assert_eq!(site.wire.minute_calls(), after_first, "50초 뒤여도 같은 분이면 다시 받지 않는다(45초 규칙이면 받는다)");
-    site.jump(11);
-    assert_eq!(flow_of(&site, &bob, &all).await.status, 200);
-    assert!(site.wire.minute_calls() > after_first, "분이 바뀌면 다시 받는다");
 }
 
 #[tokio::test]
@@ -998,201 +915,63 @@ async fn the_operator_flow_keeps_its_forty_five_second_rule() {
 }
 
 #[tokio::test]
-async fn a_held_flow_slot_turns_the_next_flow_request_into_503_but_cache_only_requests_still_answer() {
+async fn public_board_and_flow_requests_from_many_accounts_never_call_kiwoom() {
     let (Pair { site, alice, bob }, _idp) = pair(&[]).await;
-    let all = codes(6, 100_000);
+    let carol = site.login("carol").await;
+    let all = codes(30, 100_000);
     site.load_symbols(&all);
-    for who in [&alice, &bob] {
-        save_themes(&site, who, &[("t", "여섯", all.clone())]).await;
+    for (n, who) in [&alice, &bob, &carol].into_iter().enumerate() {
+        save_themes(&site, who, &[("t", "열 종목", all[n * 10..(n + 1) * 10].to_vec())]).await;
     }
-    assert_eq!(flow_of(&site, &alice, &all[0..1]).await.status, 200, "하나는 캐시에 넣어 둔다");
-    let gate = site.wire.hold_minutes();
-    let site = Arc::new(site);
-    let slow = tokio::spawn({
-        let (site, alice, all) = (site.clone(), alice.clone(), all.clone());
-        async move { flow_of(&site, &alice, &all[1..4]).await }
-    });
-    site.wire.minute_arrivals(site.wire.minute_calls() + 1).await;
+    let rows: Vec<(&str, u64)> = all.iter().map(|code| (code.as_str(), 51_000)).collect();
+    site.publish_shared(&rows, &all[0..20]).await;
+    let before = site.wire.api_calls();
 
-    let started = std::time::Instant::now();
-    let second = flow_of(&site, &alice, &all[4..5]).await;
-    assert_eq!((second.status, second.code().as_str()), (503, "kiwoom_unavailable"), "{}", head(&second.text()));
-    assert!(started.elapsed() < Duration::from_secs(1), "기다리지 않고 바로 503이다");
-    let body = second.json();
-    let retry_at = body["error"]["retryAt"].as_i64().expect("retryAt");
-    assert_eq!(retry_at, site.now() + second.headers["retry-after"].to_str().unwrap().parse::<i64>().unwrap());
-    let others = flow_of(&site, &bob, &all[4..5]).await;
-    assert_eq!(others.status, 503, "흐름 묶음 자리는 모든 계정이 나눠 쓴다: {}", head(&others.text()));
-
-    let cached = flow_of(&site, &alice, &all[0..1]).await;
-    assert_eq!(cached.status, 200, "캐시만으로 끝나는 요청은 자리를 쓰지 않는다: {}", head(&cached.text()));
-    assert_eq!(strings(&cached.json()["used"]), all[0..1].to_vec());
-
-    gate.add_permits(10_000);
-    let done = slow.await.unwrap();
-    assert_eq!(done.status, 200, "{}", head(&done.text()));
-    assert_eq!(flow_of(&site, &alice, &all[4..5]).await.status, 200, "자리가 돌아왔다");
+    for _ in 0..2 {
+        for (n, who) in [&alice, &bob, &carol].into_iter().enumerate() {
+            let board = board_of(&site, who).await;
+            assert_eq!(board["themes"][0]["members"].as_array().unwrap().len(), 10);
+            let flow = flow_of(&site, who, &all[n * 10..(n + 1) * 10]).await;
+            assert_eq!(flow.status, 200, "{}", head(&flow.text()));
+            site.jump(50);
+        }
+    }
+    assert_eq!(site.wire.api_calls(), before, "공개 보드·흐름은 계정 수와 시간과 상관없이 키움 transport를 부르지 않는다");
+    assert_eq!(site.wire.minute_calls() + site.wire.quote_batches().len(), 0);
 }
 
 #[tokio::test]
-async fn the_usage_page_counts_cache_hits_new_trs_budget_drops_and_theme_rejections() {
-    let (Pair { site, alice, .. }, _idp) = pair(&[("VALLY_PUBLIC_FLOW_ACCOUNT_TR_PER_MINUTE", "4")]).await;
+async fn the_usage_page_counts_theme_rejections_and_shared_data_ages() {
+    let (Pair { site, alice, .. }, _idp) = pair(&[]).await;
     let all = codes(7, 100_000);
     site.load_symbols(&all);
     save_themes(&site, &alice, &[("t", "여섯", all[0..6].to_vec())]).await;
-    let ask = |range: &[String]| range.to_vec();
+    let rows: Vec<(&str, u64)> = all.iter().map(|code| (code.as_str(), 51_000)).collect();
+    site.publish_shared(&rows, &all).await;
 
     assert_eq!(flow_of(&site, &alice, &[all[0].clone(), all[1].clone(), all[6].clone()]).await.status, 200);
-    assert_eq!(flow_of(&site, &alice, &ask(&all[0..3])).await.status, 200);
-    let third = flow_of(&site, &alice, &[all[2].clone(), all[4].clone(), all[5].clone()]).await.json();
-    assert_eq!((strings(&third["used"]), strings(&third["missing"])), ([all[2].clone(), all[4].clone()].to_vec(), [all[5].clone()].to_vec()));
+    assert_eq!(flow_of(&site, &alice, &all[0..3]).await.status, 200);
+    assert_eq!(flow_of(&site, &alice, &[all[6].clone(), all[2].clone()]).await.status, 200);
     let usage = site.usage().await;
     let flow = &usage["bundles"]["flow"];
-    assert_eq!(
-        (flow["trCalls"].as_u64(), flow["cachedSymbols"].as_u64(), flow["overBudgetSymbols"].as_u64(), flow["rejectedSymbols"].as_u64(), flow["responses"].as_u64()),
-        (Some(4), Some(3), Some(1), Some(1), Some(3)),
-        "{flow}"
-    );
+    assert_eq!((flow["rejectedSymbols"].as_u64(), flow["responses"].as_u64()), (Some(2), Some(3)), "{flow}");
+    for gone in ["trCalls", "cachedSymbols", "overBudgetSymbols", "waitTotalMs", "waitMaxMs"] {
+        assert!(flow.get(gone).is_none(), "{gone}는 JSON에 없다: {flow}");
+    }
+    assert!(usage["cacheHits"].get("marketOverview").is_none());
 
     board_of(&site, &alice).await;
-    board_of(&site, &alice).await;
-    let board = &site.usage().await["bundles"]["board"];
-    assert_eq!((board["trCalls"].as_u64(), board["cachedSymbols"].as_u64(), board["overBudgetSymbols"].as_u64(), board["responses"].as_u64()), (Some(1), Some(6), None, Some(2)), "{board}");
-    assert_eq!(site.usage().await["bundles"]["user_data"]["responses"].as_u64(), Some(1), "테마 저장 한 번");
-}
+    let usage = site.usage().await;
+    let board = &usage["bundles"]["board"];
+    assert_eq!(board["responses"].as_u64(), Some(1), "{board}");
+    assert!(board.get("rejectedSymbols").is_none() && board.get("trCalls").is_none(), "{board}");
+    assert_eq!(usage["bundles"]["user_data"]["responses"].as_u64(), Some(1), "테마 저장 한 번");
 
-async fn wait_until(what: &str, mut ready: impl FnMut() -> bool) {
-    for _ in 0..4000 {
-        if ready() {
-            return;
-        }
-        tokio::time::sleep(Duration::from_millis(5)).await;
+    let shared = usage["sharedData"].as_object().expect("sharedData");
+    for kind in [DataKind::SnapshotCombined, DataKind::Minute, DataKind::SnapshotKrx] {
+        assert!(shared[kind.folder()]["readErrors"].is_u64(), "{kind:?}: {shared:?}");
     }
-    panic!("기다리던 일이 일어나지 않았다: {what}");
-}
-
-async fn flow_delay_of_an_operator_bar_request(env: &[(&str, &str)]) -> (Duration, usize) {
-    let (Pair { site, alice, bob }, _idp) = pair(env).await;
-    let (carol, dave) = (site.login("carol").await, site.login("dave").await);
-    let all = codes(240, 100_000);
-    site.load_symbols(&all);
-    let sessions = [&alice, &bob, &carol, &dave];
-    for (n, who) in sessions.iter().enumerate() {
-        save_themes(&site, who, &[("t", "육십", all[n * 60..(n + 1) * 60].to_vec())]).await;
-    }
-    let site = Arc::new(site);
-    let operator_bars = || site.operator_request("GET", "/api/bars?symbol=005930&period=1m&limit=5&venue=combined", None);
-    tokio::time::pause();
-    let started = tokio::time::Instant::now();
-    assert_eq!(through(&site.operator_router, operator_bars()).await.status, 200);
-    let alone = started.elapsed();
-    tokio::time::sleep(Duration::from_secs(10)).await;
-    tokio::time::resume();
-    let before = site.wire.minute_calls();
-    let loads: Vec<_> = sessions
-        .iter()
-        .enumerate()
-        .map(|(n, who)| {
-            let (site, who, symbols) = (site.clone(), (*who).clone(), all[n * 60..(n + 1) * 60].to_vec());
-            tokio::spawn(async move { flow_of(&site, &who, &symbols).await })
-        })
-        .collect();
-    wait_until("공개 흐름이 키움 대기열에 들어갔다", || site.wire.minute_calls() >= before + 5).await;
-    tokio::time::sleep(Duration::from_millis(300)).await;
-    tokio::time::pause();
-    let public_sends = site.wire.minute_calls() - before;
-    assert!(loads.iter().any(|load| !load.is_finished()), "공개 흐름이 이미 끝나 버렸다(시험이 부하 중에 재지 않는다)");
-    let started = tokio::time::Instant::now();
-    let reply = through(&site.operator_router, operator_bars()).await;
-    let loaded = started.elapsed();
-    assert_eq!(reply.status, 200, "{}", head(&reply.text()));
-    let mut admitted = 0;
-    for load in loads {
-        let reply = load.await.unwrap();
-        match reply.status {
-            200 => admitted += 1,
-            503 => {}
-            other => panic!("공개 흐름이 {other}: {}", head(&reply.text())),
-        }
-    }
-    assert_eq!(admitted, 1, "흐름 묶음 자리는 하나라서 한 계정만 받는다");
-    (loaded.saturating_sub(alone), public_sends)
-}
-
-#[tokio::test]
-async fn public_flow_at_its_limit_delays_an_operator_one_minute_bar_request_by_at_most_one_second() {
-    let (extra, public_sends) = flow_delay_of_an_operator_bar_request(&[]).await;
-    eprintln!("D10(9) 흐름: 더 기다림 {extra:?}, 측정 전 공개 분봉 호출 {public_sends}");
-    assert!(public_sends >= 3, "공개 흐름이 대기열에 호출을 넣지 않았다: {public_sends}");
-    assert!(extra <= Duration::from_secs(1), "공개 흐름이 운영자 분봉 요청을 {extra:?} 늦췄다");
-}
-
-#[tokio::test]
-async fn without_the_send_pacer_the_same_public_flow_load_does_delay_the_operator_past_that_bound() {
-    let (extra, public_sends) = flow_delay_of_an_operator_bar_request(&[("VALLY_PUBLIC_KIWOOM_SENDS_PER_WINDOW", "1000")]).await;
-    eprintln!("D10(9) 흐름(페이서 끔): 더 기다림 {extra:?}, 측정 전 공개 분봉 호출 {public_sends}");
-    assert!(extra > Duration::from_secs(1), "페이서 없이도 상한 안이면 위 시험은 아무것도 재지 못한다: {extra:?}");
-}
-
-async fn board_delay_of_an_operator_quotes_request(env: &[(&str, &str)]) -> (Duration, usize) {
-    let (Pair { site, alice, bob }, _idp) = pair(env).await;
-    let all = codes(1200, 100_000);
-    site.load_symbols(&all);
-    let sessions = [&alice, &bob];
-    for (n, who) in sessions.iter().enumerate() {
-        let base = n * 600;
-        let themes: Vec<(String, String, Vec<String>)> = (0..10).map(|t| (format!("t{t}"), format!("테마{t}"), all[base + t * 60..base + (t + 1) * 60].to_vec())).collect();
-        let borrowed: Vec<(&str, &str, Vec<String>)> = themes.iter().map(|(id, name, symbols)| (id.as_str(), name.as_str(), symbols.clone())).collect();
-        save_themes(&site, who, &borrowed).await;
-    }
-    let site = Arc::new(site);
-    let operator_quotes = || site.operator_request("GET", "/api/quotes?symbols=005930&venue=combined", None);
-    tokio::time::pause();
-    let started = tokio::time::Instant::now();
-    assert_eq!(through(&site.operator_router, operator_quotes()).await.status, 200);
-    let alone = started.elapsed();
-    tokio::time::sleep(Duration::from_secs(10)).await;
-    tokio::time::resume();
-    let before = site.wire.quote_batches().len();
-    let loads: Vec<_> = sessions
-        .iter()
-        .map(|who| {
-            let (site, who) = (site.clone(), (*who).clone());
-            tokio::spawn(async move { site.public(&who, "GET", "/api/heatmap/board", None).await })
-        })
-        .collect();
-    wait_until("공개 보드가 키움 대기열에 들어갔다", || site.wire.quote_batches().len() >= before + 2).await;
-    tokio::time::pause();
-    let public_sends = site.wire.quote_batches().len() - before;
-    assert!(loads.iter().any(|load| !load.is_finished()), "공개 보드가 이미 끝나 버렸다(시험이 부하 중에 재지 않는다)");
-    let started = tokio::time::Instant::now();
-    let reply = through(&site.operator_router, operator_quotes()).await;
-    let loaded = started.elapsed();
-    assert_eq!(reply.status, 200, "{}", head(&reply.text()));
-    let mut admitted = 0;
-    for load in loads {
-        let reply = load.await.unwrap();
-        match reply.status {
-            200 => admitted += 1,
-            503 => {}
-            other => panic!("공개 보드가 {other}: {}", head(&reply.text())),
-        }
-    }
-    assert!(admitted >= 1);
-    (loaded.saturating_sub(alone), public_sends)
-}
-
-#[tokio::test]
-async fn public_board_at_its_limit_delays_an_operator_quotes_request_by_at_most_two_tenths_of_a_second() {
-    let (extra, public_sends) = board_delay_of_an_operator_quotes_request(&[]).await;
-    eprintln!("D10(9) 보드: 더 기다림 {extra:?}, 측정 전 공개 묶음 호출 {public_sends}");
-    assert!(public_sends >= 2, "공개 보드가 대기열에 호출을 넣지 않았다: {public_sends}");
-    assert!(extra <= Duration::from_millis(200), "공개 보드가 운영자 현재가 요청을 {extra:?} 늦췄다");
-}
-
-#[tokio::test]
-async fn without_the_send_pacer_the_same_public_board_load_does_delay_the_operator_past_that_bound() {
-    let (extra, public_sends) = board_delay_of_an_operator_quotes_request(&[("VALLY_PUBLIC_KIWOOM_SENDS_PER_WINDOW", "1000")]).await;
-    eprintln!("D10(9) 보드(페이서 끔): 더 기다림 {extra:?}, 측정 전 공개 묶음 호출 {public_sends}");
-    assert!(extra > Duration::from_millis(200), "페이서 없이도 상한 안이면 위 시험은 아무것도 재지 못한다: {extra:?}");
+    assert!(shared[DataKind::SnapshotCombined.folder()]["ageSecs"].is_i64(), "통합 스냅샷은 썼다: {shared:?}");
+    assert!(shared[DataKind::SnapshotKrx.folder()]["ageSecs"].is_null(), "KRX 스냅샷은 쓰지 않았다: {shared:?}");
+    assert!(shared[DataKind::SnapshotNxt.folder()]["ageSecs"].is_null(), "{shared:?}");
 }

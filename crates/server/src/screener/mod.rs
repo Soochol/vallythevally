@@ -16,7 +16,7 @@ use std::time::Duration;
 
 use axum::Router;
 use axum::body::Body;
-use axum::extract::State;
+use axum::extract::{Extension, State};
 use axum::response::Json;
 use axum::routing::{get, post};
 use domain::{Feed, IndexCode, KstDate, KstTime, Period, SeriesKey, TimeOfDay, Weekday};
@@ -24,6 +24,7 @@ use domain::{Feed, IndexCode, KstDate, KstTime, Period, SeriesKey, TimeOfDay, We
 use crate::api::{self, ApiErrorBody, ApiErrorReason, FullHistory, Screen, ScreenerResult, ScreenerStatus, ScreenerUpdate, ScreenerUpdateRequest, UpdatePhase};
 use crate::bars::{BarError, BarService};
 use crate::clock::Clock;
+use crate::http::PublicRoute;
 use crate::http::{ApiFailure, AppState, Lookup};
 use crate::market_source::{KiwoomHandle, Priority, SourceFailure};
 use crate::symbols::SymbolDirectory;
@@ -39,6 +40,7 @@ use store::{Listed, Store, StoreError};
 
 const CALENDAR_DAYS: usize = 10;
 const CALENDAR_FRESH_SECS: i64 = 5 * 60;
+const CALENDAR_REFRESH: Duration = Duration::from_secs(CALENDAR_FRESH_SECS as u64);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct Progress {
@@ -178,6 +180,20 @@ impl Screener {
         self.store.generation()
     }
 
+    pub fn keep_calendar_fresh(self: &Arc<Self>) {
+        let me = self.clone();
+        tokio::spawn(async move {
+            let mut ticks = tokio::time::interval_at(tokio::time::Instant::now() + CALENDAR_REFRESH, CALENDAR_REFRESH);
+            ticks.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+            loop {
+                ticks.tick().await;
+                if let Err(e) = me.calendar(CalendarUse::Update).await {
+                    tracing::warn!(error = %e, "거래일 달력을 새로 받지 못했습니다");
+                }
+            }
+        });
+    }
+
     pub fn warm_memory(self: &Arc<Self>) {
         let me = self.clone();
         tokio::spawn(async move {
@@ -278,24 +294,34 @@ impl Screener {
         };
     }
 
-    async fn calendar(&self, using: CalendarUse) -> Result<Arc<Calendar>, BarError> {
-        let mut cached = self.calendar.lock().await;
+    async fn fetch_calendar(&self, priority: Priority) -> Result<Arc<Calendar>, BarError> {
         let now = self.clock.now();
-        let (reuse, priority) = match using {
-            CalendarUse::Status => (true, Priority::Screen),
-            CalendarUse::Update => (false, Priority::Background),
-        };
-        if let Some(c) = cached.as_ref().filter(|c| reuse && c.fetched_at.kst_date() == now.kst_date() && now.unix() - c.fetched_at.unix() < CALENDAR_FRESH_SECS) {
-            return Ok(c.clone());
-        }
         let page = self.bars.page_with(SeriesKey { feed: Feed::Index(IndexCode::KOSPI), period: Period::Day }, None, CALENDAR_DAYS, priority).await?;
         let days = page.bars.iter().map(|b| b.bucket).chain(page.current.map(|c| c.bucket)).map(|b| b.start().kst_date()).collect();
-        let calendar = Arc::new(Calendar { fetched_at: now, days });
+        Ok(Arc::new(Calendar { fetched_at: now, days }))
+    }
+
+    async fn calendar(&self, using: CalendarUse) -> Result<Arc<Calendar>, BarError> {
+        if using == CalendarUse::Update {
+            let calendar = self.fetch_calendar(Priority::Background).await?;
+            *self.calendar.lock().await = Some(calendar.clone());
+            return Ok(calendar);
+        }
+        let mut cached = self.calendar.lock().await;
+        let now = self.clock.now();
+        if let Some(c) = cached.as_ref().filter(|c| c.fetched_at.kst_date() == now.kst_date() && now.unix() - c.fetched_at.unix() < CALENDAR_FRESH_SECS) {
+            return Ok(c.clone());
+        }
+        let calendar = self.fetch_calendar(Priority::Screen).await?;
         *cached = Some(calendar.clone());
         Ok(calendar)
     }
 
     pub async fn status(&self) -> Result<ScreenerStatus, StoreError> {
+        self.status_for(false).await
+    }
+
+    pub async fn status_for(&self, from_shared_data_only: bool) -> Result<ScreenerStatus, StoreError> {
         let mut summary = self.with_store(Store::summary).await?;
         if summary.listing_lost {
             let current = self.symbols.updates().borrow().clone();
@@ -305,11 +331,15 @@ impl Screener {
                 summary = self.with_store(Store::summary).await?;
             }
         }
-        let calendar = match self.calendar(CalendarUse::Status).await {
-            Ok(c) => Some(c),
-            Err(e) => {
-                tracing::warn!(error = %e, "코스피 일봉을 받지 못해 필요 관측일을 모릅니다");
-                None
+        let calendar = if from_shared_data_only {
+            self.calendar.lock().await.clone()
+        } else {
+            match self.calendar(CalendarUse::Status).await {
+                Ok(c) => Some(c),
+                Err(e) => {
+                    tracing::warn!(error = %e, "코스피 일봉을 받지 못해 필요 관측일을 모릅니다");
+                    None
+                }
             }
         };
         let now = self.clock.now();
@@ -337,9 +367,13 @@ impl Screener {
         Ok(self.with_store(move |s| s.fill_lost_listing(directory.screener_listing())).await?)
     }
 
-    async fn run_screen(self: &Arc<Self>, screen: RunnableScreen, screen_key: String) -> Result<ScreenerResult, ApiFailure> {
+    async fn run_screen(self: &Arc<Self>, screen: RunnableScreen, screen_key: String, from_shared_data_only: bool) -> Result<ScreenerResult, ApiFailure> {
         let now = self.clock.now();
-        let calendar = self.calendar(CalendarUse::Status).await.map_err(|e| Lookup::ScreenerRun.failure(e, now))?;
+        let calendar = if from_shared_data_only {
+            self.calendar.lock().await.clone().ok_or_else(|| ApiFailure::new(api::ApiErrorCode::NotPrepared, "서버가 아직 거래일 달력을 받지 못했습니다"))?
+        } else {
+            self.calendar(CalendarUse::Status).await.map_err(|e| Lookup::ScreenerRun.failure(e, now))?
+        };
         let need_day = calendar.need_day(now);
         self.refill_listing().await.map_err(|e| Lookup::ScreenerRun.failure(e, now))?;
         self.recents_started_outside_recent()?;
@@ -501,14 +535,14 @@ async fn cancel_update(State(st): State<Arc<AppState>>) -> Result<Json<ScreenerS
     Ok(Json(st.screener.status().await?))
 }
 
-async fn status(State(st): State<Arc<AppState>>) -> Result<Json<ScreenerStatus>, ApiFailure> {
-    Ok(Json(st.screener.status().await?))
+async fn status(State(st): State<Arc<AppState>>, public: Option<Extension<PublicRoute>>) -> Result<Json<ScreenerStatus>, ApiFailure> {
+    Ok(Json(st.screener.status_for(public.is_some()).await?))
 }
 
-async fn run_screen(State(st): State<Arc<AppState>>, body: Body) -> Result<Json<ScreenerResult>, ApiFailure> {
+async fn run_screen(State(st): State<Arc<AppState>>, public: Option<Extension<PublicRoute>>, body: Body) -> Result<Json<ScreenerResult>, ApiFailure> {
     let screen: Screen = read_json(body, JSON_LIMIT, "조건식 본문").await?;
     let runnable = parse_stored_screen(&screen)?;
-    Ok(Json(st.screener.run_screen(runnable, screen_key(&screen)).await?))
+    Ok(Json(st.screener.run_screen(runnable, screen_key(&screen), public.is_some()).await?))
 }
 
 impl From<Invalid> for ApiFailure {

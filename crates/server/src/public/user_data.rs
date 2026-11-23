@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 
 use account_server::{Removal, SetupDocument, SetupPut};
@@ -8,6 +8,7 @@ use axum::extract::{Extension, Path, Query, State};
 use axum::http::StatusCode;
 use axum::response::Json;
 use axum::routing::get;
+use domain::Symbol;
 use serde::Deserialize;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
@@ -15,9 +16,12 @@ use serde_json::Value;
 use setup::{DocumentKind, HEATMAP_THEMES_LIMIT, JSON_LIMIT, LAYOUT_LIMIT, SCREENS_LIMIT, SINGLETON_ID, WATCHLISTS_LIMIT};
 
 use super::limits::locked;
+use super::usage::Bundle;
 use super::{Principal, Runtime};
 use crate::api::{ApiErrorCode, HeatmapThemes, Layout, LayoutInput, LayoutSummary, Screens, UiState, UnixSeconds, Watchlists};
 use crate::db::AppDb;
+use crate::heatmap_board::HeatmapBoard;
+use crate::heatmap_flow::HeatmapFlowSeries;
 use crate::drawing_api::{Drawing, DrawingInput, DrawingScope};
 use crate::http::ApiFailure;
 use crate::setup_documents::{check_drawing, check_heatmap_themes, check_layout_input, check_nxt_traded, check_screens, check_watchlists};
@@ -61,6 +65,8 @@ pub(super) fn routes() -> Router<Arc<Runtime>> {
         .route("/api/watchlists", get(get_watchlists).put(put_watchlists))
         .route("/api/screens", get(get_screens).put(put_screens))
         .route("/api/heatmap/themes", get(get_heatmap_themes).put(put_heatmap_themes))
+        .route("/api/heatmap/board", get(heatmap_board))
+        .route("/api/heatmap/flow", get(heatmap_flow))
         .route("/api/ui-state", get(get_ui_state).put(put_ui_state))
         .route("/api/layouts", get(list_layouts))
         .route("/api/layouts/{id}", get(get_layout).put(put_layout).delete(delete_layout))
@@ -137,6 +143,19 @@ async fn put_heatmap_themes(State(runtime): State<Arc<Runtime>>, Extension(who):
     check_heatmap_themes(&all)?;
     save_singleton(&runtime, &who.account_id, DocumentKind::HeatmapThemes, &all, all.revision.0).await?;
     Ok(Json(all))
+}
+
+async fn heatmap_board(State(runtime): State<Arc<Runtime>>, Extension(who): Extension<Principal>, Query(query): Query<HashMap<String, String>>) -> Result<Json<HeatmapBoard>, ApiFailure> {
+    let themes = heatmap_themes_of(&runtime, &who.account_id).await?;
+    Ok(Json(crate::heatmap_board::board_within(&runtime.state, &query, themes).await?))
+}
+
+async fn heatmap_flow(State(runtime): State<Arc<Runtime>>, Extension(who): Extension<Principal>, Query(query): Query<HashMap<String, String>>) -> Result<Json<HeatmapFlowSeries>, ApiFailure> {
+    let themes = heatmap_themes_of(&runtime, &who.account_id).await?;
+    let allowed: HashSet<Symbol> = themes.themes.iter().flat_map(|theme| &theme.symbols).filter_map(|code| Symbol::parse(&code.0).ok()).collect();
+    let series = crate::heatmap_flow::flow_within(&runtime.state, &query, &allowed).await?;
+    runtime.usage.rejected_symbols(Bundle::Flow, series.not_in_themes.len() as u64);
+    Ok(Json(series))
 }
 
 type WatchlistsResponse = ([(&'static str, &'static str); 1], Json<Watchlists>);

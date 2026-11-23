@@ -1,19 +1,16 @@
 
 mod errors;
 mod gate;
-mod kiwoom_guard;
 mod limits;
 mod origin;
 mod server_mode;
+mod shared_guard;
 pub mod settings;
 pub mod static_files;
 mod user_data;
 pub mod usage;
 
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, Ordering};
-use futures::future::BoxFuture;
-use crate::kiwoom::transport::{HttpRequest, HttpResponse, Transport, TransportError};
 use std::time::{Duration, Instant};
 
 use axum::Router;
@@ -32,7 +29,7 @@ use tower_http::timeout::TimeoutLayer;
 pub use self::server_mode::{ServerMode, ServerModeKind, local as server_mode_local};
 use self::settings::{Limits, PublicOrigin, PublicSettings};
 use self::static_files::StaticSite;
-use self::usage::{Bundle, Usage, UsageSnapshot};
+use self::usage::{Bundle, SharedReading, Usage, UsageSnapshot};
 use crate::app::StartFailure;
 use crate::clock::Clock;
 use crate::config::Config;
@@ -61,8 +58,7 @@ pub(crate) struct Runtime {
     pub(super) usage: Arc<Usage>,
     pub(super) meters: gate::Meters,
     pub(super) flight: gate::Flight,
-    pub(super) kiwoom: kiwoom_guard::KiwoomGuard,
-    pub(super) sends: Arc<AtomicU64>,
+    pub(super) guard: shared_guard::SharedGuard,
     pub(super) setup: user_data::Setup,
 }
 
@@ -74,40 +70,7 @@ pub struct PublicListener {
     site: Arc<StaticSite>,
 }
 
-struct CountingTransport {
-    inner: Arc<dyn Transport>,
-    sent: Arc<AtomicU64>,
-}
-
-impl Transport for CountingTransport {
-    fn send(&self, request: HttpRequest) -> BoxFuture<'static, Result<HttpResponse, TransportError>> {
-        self.sent.fetch_add(1, Ordering::Relaxed);
-        self.inner.send(request)
-    }
-}
-
-pub fn counted(inner: Arc<dyn Transport>) -> (Arc<dyn Transport>, Arc<AtomicU64>) {
-    let sent = Arc::new(AtomicU64::new(0));
-    (Arc::new(CountingTransport { inner, sent: sent.clone() }), sent)
-}
-
-struct CountingKisTransport {
-    inner: Arc<dyn crate::kis::transport::Transport>,
-    sent: Arc<AtomicU64>,
-}
-
-impl crate::kis::transport::Transport for CountingKisTransport {
-    fn send(&self, request: crate::kis::transport::HttpRequest) -> BoxFuture<'static, Result<crate::kis::transport::HttpResponse, TransportError>> {
-        self.sent.fetch_add(1, Ordering::Relaxed);
-        self.inner.send(request)
-    }
-}
-
-pub fn counted_kis(inner: Arc<dyn crate::kis::transport::Transport>, sent: Arc<AtomicU64>) -> Arc<dyn crate::kis::transport::Transport> {
-    Arc::new(CountingKisTransport { inner, sent })
-}
-
-pub async fn start(config: &Config, state: Arc<AppState>, financial_routes: Router, sends: Arc<AtomicU64>) -> Result<Option<PublicListener>, StartFailure> {
+pub async fn start(config: &Config, state: Arc<AppState>, financial_routes: Router) -> Result<Option<PublicListener>, StartFailure> {
     let Some(settings) = config.public.clone() else { return Ok(None) };
     let PublicSettings { bind, origin, account, limits } = settings;
     let listener = TcpListener::bind(bind.socket_addr()).await.map_err(|e| {
@@ -145,24 +108,23 @@ pub async fn start(config: &Config, state: Arc<AppState>, financial_routes: Rout
         usage: state.public_usage.clone(),
         meters: gate::Meters::new(&limits, now),
         flight: gate::Flight::new(&limits),
-        kiwoom: kiwoom_guard::KiwoomGuard::new(&limits, state.generation.clone()),
-        sends,
+        guard: shared_guard::SharedGuard::new(&limits),
         setup,
         limits,
         state,
     });
-    tokio::spawn(log_usage_every_minute(runtime.usage.clone(), runtime.clock.clone()));
-    let financial_reads = financial_routes.route_layer(axum::middleware::from_fn(kiwoom_guard::financial_reads));
+    tokio::spawn(log_usage_every_minute(runtime.state.clone()));
+    let financial_reads = financial_routes.route_layer(axum::middleware::from_fn(shared_guard::financial_reads));
     tracing::info!(addr = %bind.socket_addr(), origin = %runtime.origin.origin, "공개 리스너를 엽니다");
     Ok(Some(PublicListener { listener, runtime, browser_login: accounts.browser_router(), financial_reads, site: Arc::new(site) }))
 }
 
-async fn log_usage_every_minute(usage: Arc<Usage>, clock: Clock) {
+async fn log_usage_every_minute(state: Arc<AppState>) {
     let mut ticks = tokio::time::interval(USAGE_LOG_EVERY);
     ticks.tick().await;
     loop {
         ticks.tick().await;
-        if let Some(line) = usage.take_minute_line(clock.now().unix()) {
+        if let Some(line) = state.public_usage.take_minute_line(state.clock.now().unix(), || SharedReading::of(&state)) {
             tracing::info!("{line}");
         }
     }
@@ -175,14 +137,10 @@ impl PublicListener {
 
     pub fn router_with(&self, extra: Router<Arc<AppState>>) -> Router {
         let runtime = self.runtime.clone();
-        let rankings = crate::rankings::routes().route_layer(axum::Extension(crate::rankings::PublicRoute)).route_layer(from_fn_with_state(runtime.clone(), kiwoom_guard::rankings));
-        let market = crate::market_overview::routes().route_layer(from_fn_with_state(runtime.clone(), kiwoom_guard::market_overview));
-        let screener = crate::screener::routes().route_layer(from_fn_with_state(runtime.clone(), kiwoom_guard::screener));
-        let heatmap = Router::<Arc<Runtime>>::new()
-            .route("/api/heatmap/board", get(kiwoom_guard::heatmap_board))
-            .route("/api/heatmap/flow", get(kiwoom_guard::heatmap_flow))
-            .merge(user_data::routes())
-            .with_state(runtime.clone());
+        let rankings = crate::rankings::routes().route_layer(axum::Extension(crate::http::PublicRoute));
+        let market = crate::market_overview::routes().route_layer(from_fn_with_state(runtime.clone(), shared_guard::market_overview));
+        let screener = crate::screener::routes().route_layer(axum::Extension(crate::http::PublicRoute)).route_layer(from_fn_with_state(runtime.clone(), shared_guard::screener));
+        let heatmap = user_data::routes().with_state(runtime.clone());
         let shared = Router::new()
             .route("/api/server-mode", get(server_mode::public))
             .merge(heatmap)
@@ -278,7 +236,7 @@ async fn finish(State(runtime): State<Arc<Runtime>>, request: Request, next: Nex
 }
 
 pub async fn usage_page(State(state): State<Arc<AppState>>) -> Json<UsageSnapshot> {
-    Json(state.public_usage.snapshot(state.clock.now().unix()))
+    Json(state.public_usage.snapshot(state.clock.now().unix(), SharedReading::of(&state)))
 }
 
 fn is_kiwoom_path(path: &str) -> bool {

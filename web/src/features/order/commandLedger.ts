@@ -10,21 +10,28 @@ type Entry = { readonly id: string; readonly phase: "inflight" | "retry" };
 export interface CommandLedger {
   issue(action: string): Issued;
   settle(action: string, settlement: Settlement): void;
-  issueEach(action: string): string;
-  settleEach(action: string, id: string, settlement: Settlement): void;
+  issueEach(windowId: string, action: string): string;
+  settleEach(windowId: string, action: string, id: string, settlement: Settlement): void;
 }
 
 export function createLedger(newId: (action: string) => string): CommandLedger {
   const entries = new Map<string, Entry>();
-  const resendIds = new Map<string, string>();
+  const resendQueues = new Map<string, string[]>();
+  const queueKey = (windowId: string, action: string) => `${windowId}\n${action}`;
   return {
-    issueEach(action) {
-      const resend = resendIds.get(action);
-      resendIds.delete(action);
+    issueEach(windowId, action) {
+      const key = queueKey(windowId, action);
+      const queue = resendQueues.get(key);
+      const resend = queue?.shift();
+      if (queue?.length === 0) resendQueues.delete(key);
       return resend ?? newId(action);
     },
-    settleEach(action, id, settlement) {
-      if (settlement === "unanswered") resendIds.set(action, id);
+    settleEach(windowId, action, id, settlement) {
+      if (settlement !== "unanswered") return;
+      const key = queueKey(windowId, action);
+      const queue = resendQueues.get(key);
+      if (queue) queue.push(id);
+      else resendQueues.set(key, [id]);
     },
     issue(action) {
       const entry = entries.get(action);

@@ -232,3 +232,60 @@ test("정정이 접수된 뒤 재조회가 원래 주문을 아직 돌려줘도 
   await expect(chipAt(page, "buy", BASE - 200)).toHaveText("5");
   await expect(chipAt(page, "buy", BASE)).toHaveCount(0);
 });
+
+const placeIds = (scenario: Scenario): string[] => scenario.requests
+  .filter((r) => new URL(r.url()).pathname === "/api/trading/commands/place" && r.method() === "POST")
+  .map((r) => String((r.postDataJSON() as Record<string, unknown>).commandId));
+
+test("두 신규가 연달아 응답 없음이면 다음 두 신규가 두 id를 차례로 다시 쓴다", async ({ page, scenario }) => {
+  await ready(page, scenario);
+  const target = cellAt(page, "buy", BASE);
+  const firstRound = holdWrite(scenario, "place");
+  await target.dblclick();
+  await firstRound.received;
+  await target.dblclick();
+  await expect(page.getByTestId("order-queue")).toHaveText("줄 서는 중 · 2건");
+  firstRound.reply(noAnswer);
+  await expect.poll(() => placeIds(scenario).length).toBe(2);
+  await expect(page.getByTestId("order-queue")).toHaveCount(0);
+  const [first, second] = placeIds(scenario);
+  expect(second).not.toBe(first);
+
+  const secondRound = holdWrite(scenario, "place");
+  await target.dblclick();
+  await secondRound.received;
+  await target.dblclick();
+  await expect(page.getByTestId("order-queue")).toHaveText("줄 서는 중 · 2건");
+  secondRound.reply({ body: commandOf("buy") });
+  await expect.poll(() => placeIds(scenario).length).toBe(4);
+  expect(placeIds(scenario).slice(2)).toEqual([first, second]);
+});
+
+test("같은 종목 호가주문창 둘에서 한 창의 신규가 응답 없음이면 다른 창의 같은 신규는 새 id로 나간다", async ({ page, scenario }) => {
+  ordersOn(scenario);
+  tradingApi(scenario);
+  await openOrderWindow(page, scenario);
+  const orderTab = (id: string) => page.locator(`[role=tab][data-window-id="${id}"]`);
+  await orderTab("order").click({ button: "right" });
+  await page.getByRole("menu", { name: "창 배치" }).getByRole("menuitem", { name: "복제" }).click();
+  await expect(orderTab("order-2")).toHaveAttribute("aria-selected", "true");
+  await orderTab("order").click();
+  const noReply = holdWrite(scenario, "place");
+  await cellAt(page, "buy", BASE).dblclick();
+  await noReply.received;
+  noReply.reply(noAnswer);
+  await expect.poll(() => placeIds(scenario).length).toBe(1);
+  await expect(status(page)).toContainText("같은 동작을 다시 하면 같은 명령으로 보냅니다");
+
+  await orderTab("order-2").click();
+  await expect(orderTab("order-2")).toHaveAttribute("aria-selected", "true");
+  await cellAt(page, "buy", BASE).dblclick();
+  await expect.poll(() => placeIds(scenario).length).toBe(2);
+  const [inFirst, inSecond] = placeIds(scenario);
+  expect(inSecond).not.toBe(inFirst);
+
+  await orderTab("order").click();
+  await cellAt(page, "buy", BASE).dblclick();
+  await expect.poll(() => placeIds(scenario).length).toBe(3);
+  expect(placeIds(scenario)[2]).toBe(inFirst);
+});
