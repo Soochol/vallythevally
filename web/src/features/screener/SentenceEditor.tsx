@@ -130,7 +130,7 @@ function EditorWindow({ draft, section, opener, flagged, nameError, canSave, bus
     else if (command && !event.shiftKey && !event.altKey && event.key.toLowerCase() === "s") { event.preventDefault(); onSave(); }
     else if (!command && !event.altKey && event.key.toLowerCase() === "n" && !isTypingTarget(event.target)) { event.preventDefault(); event.currentTarget.querySelector<HTMLButtonElement>("[data-add-condition]")?.click(); }
   };
-  return <Popover role="dialog" aria-label="조건 편집 창" anchor={opener} anchorRect={beside} placement="left" focus={false} blockChartKeys={false} isInside={(target) => panelOf()?.contains(target) ?? false} onClose={onClose} onKeyDown={onKeyDown} className="flex w-[476px] flex-col">
+  return <Popover role="dialog" aria-label="조건 편집 창" anchor={opener} anchorRect={beside} placement="left" focus={false} blockChartKeys={false} isInside={(target) => panelOf()?.contains(target) ?? false} onClose={onClose} onKeyDown={onKeyDown} solid className="sentence-editor-window flex w-[476px] flex-col">
     <header className="flex flex-none items-center gap-2 border-b border-line py-2 pl-3 pr-2">
       <input aria-label="조건식 이름" aria-invalid={nameError !== null} disabled={busy} autoComplete="off" value={draft.name} onChange={(e) => onChange((d) => ({ ...d, name: e.target.value }))} className="min-w-0 flex-1 rounded-m border border-transparent bg-transparent px-2 py-1 text-l font-semibold text-text outline-none hover:border-line focus:border-accent aria-invalid:border-danger" />
       <button type="button" className="icon-btn flex-none" aria-label="닫기" title="닫기 (Esc)" onClick={onClose}><CloseIcon /></button>
@@ -141,9 +141,9 @@ function EditorWindow({ draft, section, opener, flagged, nameError, canSave, bus
     <footer className="flex flex-none items-center gap-2 border-t border-line px-3 py-2">
       <div className="min-w-0 flex-1 text-xs">
         {[nameError, ...alerts].map((message) => message && <p key={message} role="alert" className="text-danger">{message}</p>)}
-        {nameError === null && alerts.length === 0 && <p className="text-text-3">{KEEPS_DRAFT}</p>}
+        {nameError === null && alerts.length === 0 && <p className="text-text-2">{KEEPS_DRAFT}</p>}
       </div>
-      <button type="button" title="저장 (Ctrl+S)" aria-keyshortcuts="Control+S Meta+S" className="tb-btn h-8 flex-none border border-line px-3 text-s disabled:opacity-40" disabled={!canSave} onClick={onSave}>{busy ? "저장 중" : "저장"}</button>
+      <button type="button" title="저장 (Ctrl+S)" aria-keyshortcuts="Control+S Meta+S" className="btn btn-sm flex-none" disabled={!canSave} onClick={onSave}>{busy ? "저장 중" : "저장"}</button>
       <RunButton running={running} disabled={blocked || running || busy} onRun={onRun} />
     </footer>
   </Popover>;

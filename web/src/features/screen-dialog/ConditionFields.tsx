@@ -21,10 +21,8 @@ export interface LineUi {
   base: string;
   kind: KindChoice;
   errors: ConditionErrors;
-  sentence?: boolean;
-  numberPeriod?: { value: ScreenPeriod; apply(field: FieldKey, value: string, period: ScreenPeriod): void };
+  numberPeriod: { value: ScreenPeriod; apply(field: FieldKey, value: string, period: ScreenPeriod): void };
 }
-const FIELD_BOX = "ui-field";
 type Options<T extends string> = readonly (readonly [T, string])[];
 const optionsOf = <T extends string>(labels: Record<T, string>, values: readonly T[]): Options<T> => values.map((v) => [v, labels[v]] as const);
 
@@ -44,20 +42,20 @@ const FAST_LINES: Options<CloseOrMa> = [
 ];
 const RSI_TESTS: Options<"range" | "breakout"> = [
   ["range", "범위"],
-  ["breakout", "돌파"],
+  ["breakout", "기준값"],
 ];
 const MACD_TESTS: Options<MacdTest["kind"]> = [
-  ["signal_cross", "시그널 교차"],
-  ["zero_breakout", "0선 돌파"],
+  ["signal_cross", "시그널선"],
+  ["zero_breakout", "0선"],
   ["vs_signal", "시그널 대비"],
 ];
 const STOCHASTIC_TESTS: Options<"cross" | "range"> = [
-  ["cross", "%K·%D 교차"],
-  ["range", "%K 범위"],
+  ["cross", "%D"],
+  ["range", "범위"],
 ];
 const BOLLINGER_TESTS: Options<"outside" | "cross"> = [
-  ["outside", "밴드 밖"],
-  ["cross", "밴드 교차"],
+  ["outside", "벗어난"],
+  ["cross", "교차한"],
 ];
 const BOLLINGER_SIDES: Options<Side> = [
   ["above", "상단 위"],
@@ -65,7 +63,7 @@ const BOLLINGER_SIDES: Options<Side> = [
 ];
 const ICHIMOKU_TESTS: Options<"cloud" | "cross"> = [
   ["cloud", "구름"],
-  ["cross", "전환선·기준선 교차"],
+  ["cross", "전환선"],
 ];
 
 export const CHOICE_LABEL: Record<KindChoice, string> = { ...KIND_LABEL, volume_high: NEW_HIGH_NAME.volume, traded_value_high: NEW_HIGH_NAME.traded_value };
@@ -114,37 +112,53 @@ export function fieldName(kind: KindChoice, key: FieldKey): string {
   return KIND_FIELD_NAME[kind]?.[key] ?? FIELD_NAME[key];
 }
 
+const BAR_COUNTS: Record<ScreenPeriod, readonly string[]> = { D: ["5", "20", "60", "120", "250"], W: ["4", "13", "26", "52"], M: ["3", "6", "12", "24"] };
+const RECENT_BARS: Record<ScreenPeriod, readonly string[]> = { D: ["1", "3", "5", "10", "20"], W: ["1", "2", "4", "8"], M: ["1", "2", "3", "6"] };
+const INDICATOR_PRESETS: { [K in KindChoice]?: Partial<Record<FieldKey, readonly string[]>> } = {
+  rsi: { length: ["9", "14", "21"], min: ["20", "30", "50"], max: ["50", "70", "80"], value: ["30", "50", "70"] },
+  macd: { fast: ["5", "12"], slow: ["26", "35"], signal: ["5", "9"] },
+  stochastic: { k: ["5", "9", "14"], d: ["3", "5"], smooth: ["1", "3"], min: ["20", "50"], max: ["50", "80"] },
+  bollinger: { length: ["10", "20", "40"], k: ["1.5", "2", "2.5", "3"] },
+  ichimoku: { conversion: ["9"], base: ["26"], spanB: ["52"], displacement: ["26"] },
+  surge: { times: ["2", "3", "5", "10"] },
+  near_extreme: { withinPct: ["1", "3", "5", "10"] },
+  change: { minPct: ["-5", "0", "3", "5", "10"], maxPct: ["-5", "0", "3", "5", "10"] },
+};
+const BAR_COUNT_FIELDS: ReadonlySet<FieldKey> = new Set(["n", "back"]);
+const MA_FIELDS: ReadonlySet<KindChoice> = new Set(["ma_position", "ma_alignment", "ma_cross"]);
 
-type Width = "count" | "length" | "amount" | "percent";
-const WIDTH: Record<Width, string> = { count: "w-[72px]", length: "w-[52px]", amount: "w-[88px]", percent: "w-[60px]" };
+function presetsOf(kind: KindChoice, field: FieldKey): { values: (period: ScreenPeriod) => readonly string[]; periodic: boolean } {
+  if (field === "recentBars") return { values: (period) => RECENT_BARS[period], periodic: true };
+  if (BAR_COUNT_FIELDS.has(field) || (MA_FIELDS.has(kind) && (isLengthKey(field) || field === "length" || field === "fast" || field === "slow"))) return { values: (period) => BAR_COUNTS[period], periodic: true };
+  const values = INDICATOR_PRESETS[kind]?.[field] ?? [];
+  return { values: () => values, periodic: false };
+}
+
+const hasFinal = (word: string) => {
+  const code = word.charCodeAt(word.length - 1) - 0xac00;
+  return code >= 0 && code <= 11171 && code % 28 !== 0;
+};
+const subjectMark = (word: string) => (hasFinal(word) ? "이" : "가");
+const objectMark = (word: string) => (hasFinal(word) ? "을" : "를");
+const towardMark = (word: string) => (hasFinal(word) && (word.charCodeAt(word.length - 1) - 0xac00) % 28 !== 8 ? "으로" : "로");
+const labelOf = <T extends string>(options: Options<T>, value: T) => options.find(([v]) => v === value)?.[1] ?? "";
+
+export const Word = ({ children }: { children: ReactNode }) => <span className="sentence-word">{children}</span>;
 
 interface NumberProps {
   ui: LineUi;
   field: FieldKey;
   value: string;
-  width?: Width;
   onChange(value: string): void;
 }
 
-export function NumberBox({ ui, field, value, width = "count", onChange }: NumberProps) {
+export function NumberBox({ ui, field, value, onChange }: NumberProps) {
   const error = ui.errors[field];
-  if (ui.sentence) {
-    const numberPeriod = width === "percent" || width === "amount" ? undefined : ui.numberPeriod;
-    return <NumberToken label={`${ui.label} ${fieldName(ui.kind, field)}`} value={value} error={error} describedBy={error ? `${ui.base}-${field}-error` : undefined} presets={numberPeriod ? ["5", "20", "52", "104", "260"] : []} period={numberPeriod?.value} onChange={(value, period) => { if (numberPeriod && period) numberPeriod.apply(field, value, period); else onChange(value); }} />;
-  }
-  return (
-    <input
-      type="text"
-      inputMode="decimal"
-      aria-label={`${ui.label} ${fieldName(ui.kind, field)}`}
-      value={value}
-      onChange={(e) => onChange(e.target.value)}
-      aria-invalid={error !== undefined}
-      aria-describedby={error !== undefined ? `${ui.base}-${field}-error` : undefined}
-      autoComplete="off"
-      className={`${FIELD_BOX} ${WIDTH[width]} px-2 text-right`}
-    />
-  );
+  const name = fieldName(ui.kind, field);
+  const { values, periodic } = presetsOf(ui.kind, field);
+  const period = ui.numberPeriod.value;
+  return <NumberToken label={`${ui.label} ${name}`} meaning={periodic ? `${name} (${UNIT[period]} 단위 봉 개수)` : name} value={value} error={error} describedBy={error ? `${ui.base}-${field}-error` : undefined} presets={values(period)} period={periodic ? period : undefined}
+    onChange={(next, nextPeriod) => { if (periodic && nextPeriod) ui.numberPeriod.apply(field, next, nextPeriod); else onChange(next); }} />;
 }
 
 interface ChoiceProps<T extends string> {
@@ -155,43 +169,30 @@ interface ChoiceProps<T extends string> {
 }
 
 export function Choice<T extends string>({ label, value, options, onChange }: ChoiceProps<T>) {
-  return <Select label={label} value={value} options={options.map(([value, label]) => ({ value, label }))} onChange={onChange} className={`${FIELD_BOX} px-1.5`} />;
+  return <Select label={label} value={value} options={options.map(([value, label]) => ({ value, label }))} onChange={onChange} className="ui-field px-1.5" />;
 }
-
-export const Together = ({ children }: { children: ReactNode }) => <span className="flex flex-none items-center gap-1.5">{children}</span>;
 
 interface RangeProps {
   ui: LineUi;
   keys: readonly ["min", "max"] | readonly ["minPct", "maxPct"];
   unit: string;
-  width: Width;
   min: string;
   max: string;
+  end: string;
   onChange(min: string, max: string): void;
 }
 
-function RangeBoxes({ ui, keys: [minKey, maxKey], unit, width, min, max, onChange }: RangeProps) {
-  if (ui.sentence) {
-    const mode = min !== "" && max !== "" ? "range" : max !== "" ? "max" : "min";
-    return <>
-      {mode !== "max" && <><NumberBox ui={ui} field={minKey} value={min} width={width} onChange={(v) => onChange(v, max)} />{unit && <span>{unit}</span>}</>}
-      {mode === "range" && <span>~</span>}
-      {mode !== "min" && <><NumberBox ui={ui} field={maxKey} value={max} width={width} onChange={(v) => onChange(min, v)} />{unit && <span>{unit}</span>}</>}
-      <Choice label={`${ui.label} 비교`} value={mode} options={[["min", "이상"], ["max", "이하"], ["range", "범위"]]} onChange={(next) => onChange(next === "max" ? "" : min || max, next === "min" ? "" : max || min)} />
-    </>;
-  }
-  return (
-    <>
-      <Together>
-        <NumberBox ui={ui} field={minKey} value={min} width={width} onChange={(v) => onChange(v, max)} />
-        <span>{`${unit} 이상`.trim()}</span>
-      </Together>
-      <Together>
-        <NumberBox ui={ui} field={maxKey} value={max} width={width} onChange={(v) => onChange(min, v)} />
-        <span>{`${unit} 이하`.trim()}</span>
-      </Together>
-    </>
-  );
+const RANGE_MODES: Options<"min" | "max" | "range"> = [["min", "이상"], ["max", "이하"], ["range", "이상 ~"]];
+
+function RangeTokens({ ui, keys: [minKey, maxKey], unit, min, max, end, onChange }: RangeProps) {
+  const mode = min !== "" && max !== "" ? "range" : max !== "" ? "max" : "min";
+  const modeChoice = <Select label={`${ui.label} 비교`} value={mode} options={RANGE_MODES.map(([value, label]) => ({ value, label, hint: value === "range" ? "범위" : undefined }))} onChange={(next) => onChange(next === "max" ? "" : min || max, next === "min" ? "" : max || min)} className="ui-field px-1.5" />;
+  return <>
+    {mode !== "max" && <Word><NumberBox ui={ui} field={minKey} value={min} onChange={(v) => onChange(v, max)} />{unit}</Word>}
+    {mode === "max" ? <Word><NumberBox ui={ui} field={maxKey} value={max} onChange={(v) => onChange(min, v)} />{unit}</Word> : <Word>{modeChoice}{mode === "min" && end}</Word>}
+    {mode === "range" && <Word><NumberBox ui={ui} field={maxKey} value={max} onChange={(v) => onChange(min, v)} />{unit}</Word>}
+    {mode === "max" ? <Word>{modeChoice}{end}</Word> : mode === "range" && <span>이하{end}</span>}
+  </>;
 }
 
 const BOUNDS = ["min", "max"] as const;
@@ -205,8 +206,9 @@ interface KindProps {
 export function KindFields({ ui, line, onChange }: KindProps) {
   const unit = UNIT[line.period];
   const choice = (name: string) => `${ui.label} ${name}`;
-  const direction = <L extends Extract<ConditionDraft, { direction: Direction }>>(directed: L) => (
-    <Choice label={choice("방향")} value={directed.direction} options={DIRECTIONS} onChange={(direction) => onChange({ ...directed, direction })} />
+  const number = (field: FieldKey, value: string, apply: (value: string) => void) => <NumberBox ui={ui} field={field} value={value} onChange={apply} />;
+  const direction = <L extends Extract<ConditionDraft, { direction: Direction }>>(directed: L, after = "") => (
+    <Word><Choice label={choice("방향")} value={directed.direction} options={DIRECTIONS} onChange={(direction) => onChange({ ...directed, direction })} />{after}</Word>
   );
   switch (line.kind) {
     case "new_high":
@@ -214,216 +216,211 @@ export function KindFields({ ui, line, onChange }: KindProps) {
       const fields = VALUE_FIELDS[ui.kind];
       return (
         <>
-          {fields && <Choice label={choice("값")} value={line.field} options={fields} onChange={(field) => onChange({ ...line, field })} />}
-          <Together>
-            <NumberBox ui={ui} field="n" value={line.n} onChange={(n) => onChange({ ...line, n })} />
-            <span>
-              {unit} {(line.kind === "new_high" ? NEW_HIGH_NAME : NEW_LOW_NAME)[line.field]}
-            </span>
-          </Together>
+          {fields && <Word><Choice label={choice("값")} value={line.field} options={fields} onChange={(field) => onChange({ ...line, field })} />{subjectMark(FIELD_LABEL[line.field])}</Word>}
+          <Word>{number("n", line.n, (n) => onChange({ ...line, n }))}{unit}</Word>
+          <span>{(line.kind === "new_high" ? NEW_HIGH_NAME : NEW_LOW_NAME)[line.field]}인</span>
         </>
       );
     }
     case "value_range":
       return (
         <>
-          <Choice label={choice("값")} value={line.field} options={BAR_FIELDS} onChange={(field) => onChange({ ...line, field })} />
-          <RangeBoxes ui={ui} keys={BOUNDS} unit={VALUE_UNIT[line.field]} width="amount" min={line.min} max={line.max} onChange={(min, max) => onChange({ ...line, min, max })} />
+          <Word><Choice label={choice("값")} value={line.field} options={BAR_FIELDS} onChange={(field) => onChange({ ...line, field })} />{subjectMark(FIELD_LABEL[line.field])}</Word>
+          <RangeTokens ui={ui} keys={BOUNDS} unit={VALUE_UNIT[line.field]} min={line.min} max={line.max} end="인" onChange={(min, max) => onChange({ ...line, min, max })} />
         </>
       );
     case "change":
       return (
         <>
-          <Together>
-            <span>종가</span>
-            <NumberBox ui={ui} field="back" value={line.back} onChange={(back) => onChange({ ...line, back })} />
-            <span>{unit} 전보다</span>
-          </Together>
-          <RangeBoxes ui={ui} keys={["minPct", "maxPct"]} unit="%" width="percent" min={line.minPct} max={line.maxPct} onChange={(minPct, maxPct) => onChange({ ...line, minPct, maxPct })} />
+          <span>종가가</span>
+          <Word>{number("back", line.back, (back) => onChange({ ...line, back }))}{unit}</Word>
+          <span>전보다</span>
+          <RangeTokens ui={ui} keys={["minPct", "maxPct"]} unit="%" min={line.minPct} max={line.maxPct} end="인" onChange={(minPct, maxPct) => onChange({ ...line, minPct, maxPct })} />
         </>
       );
     case "near_extreme":
       return (
         <>
-          <Together>
-            <span>종가가</span>
-            <NumberBox ui={ui} field="n" value={line.n} onChange={(n) => onChange({ ...line, n })} />
-            <span>{unit}</span>
-          </Together>
-          <Together>
-            <Choice label={choice("고점·저점")} value={line.extreme} options={EXTREMES} onChange={(extreme) => onChange({ ...line, extreme })} />
-            <span>에서</span>
-          </Together>
-          <Together>
-            <NumberBox ui={ui} field="withinPct" value={line.withinPct} width="percent" onChange={(withinPct) => onChange({ ...line, withinPct })} />
-            <span>% 안</span>
-          </Together>
+          <span>종가가</span>
+          <Word>{number("n", line.n, (n) => onChange({ ...line, n }))}{unit}</Word>
+          <Word><Choice label={choice("고점·저점")} value={line.extreme} options={EXTREMES} onChange={(extreme) => onChange({ ...line, extreme })} />에서</Word>
+          <Word>{number("withinPct", line.withinPct, (withinPct) => onChange({ ...line, withinPct }))}%</Word>
+          <span>이내인</span>
         </>
       );
     case "surge":
       return (
         <>
-          <Choice label={choice("값")} value={line.field} options={SURGE_FIELDS} onChange={(field) => onChange({ ...line, field })} />
-          <Together>
-            <span>직전</span>
-            <NumberBox ui={ui} field="n" value={line.n} onChange={(n) => onChange({ ...line, n })} />
-            <span>{unit} 평균의</span>
-          </Together>
-          <Together>
-            <NumberBox ui={ui} field="times" value={line.times} width="percent" onChange={(times) => onChange({ ...line, times })} />
-            <span>배 이상</span>
-          </Together>
+          <Word><Choice label={choice("값")} value={line.field} options={SURGE_FIELDS} onChange={(field) => onChange({ ...line, field })} />{subjectMark(FIELD_LABEL[line.field])}</Word>
+          <span>직전</span>
+          <Word>{number("n", line.n, (n) => onChange({ ...line, n }))}{unit}</Word>
+          <span>평균의</span>
+          <Word>{number("times", line.times, (times) => onChange({ ...line, times }))}배</Word>
+          <span>이상인</span>
         </>
       );
     case "ma_position":
       return (
         <>
-          <Choice label={choice("값")} value={line.field} options={PRICE_FIELDS} onChange={(field) => onChange({ ...line, field })} />
-          <Together>
-            <NumberBox ui={ui} field="length" value={line.length} width="length" onChange={(length) => onChange({ ...line, length })} />
-            <span>{unit}</span>
-          </Together>
-          <Together>
-            <Choice label={choice("계산 방식")} value={line.method} options={METHODS} onChange={(method) => onChange({ ...line, method })} />
-            <span>이동평균</span>
-          </Together>
-          <Choice label={choice("위치")} value={line.side} options={SIDES} onChange={(side) => onChange({ ...line, side })} />
+          <Word><Choice label={choice("값")} value={line.field} options={PRICE_FIELDS} onChange={(field) => onChange({ ...line, field })} />{subjectMark(FIELD_LABEL[line.field])}</Word>
+          <Word>{number("length", line.length, (length) => onChange({ ...line, length }))}{unit}</Word>
+          <Choice label={choice("계산 방식")} value={line.method} options={METHODS} onChange={(method) => onChange({ ...line, method })} />
+          <span>이동평균</span>
+          <Word><Choice label={choice("위치")} value={line.side} options={SIDES} onChange={(side) => onChange({ ...line, side })} />인</Word>
         </>
       );
     case "ma_alignment":
       return (
         <>
-          <Together>
-            <Choice label={choice("계산 방식")} value={line.method} options={METHODS} onChange={(method) => onChange({ ...line, method })} />
-            <span>이동평균</span>
-          </Together>
-          {line.lengths.map((length, i) => (
-            <Together key={i}>
-              {i > 0 && <span>·</span>}
-              <NumberBox
-                ui={ui}
-                field={`lengths.${i}`}
-                value={length}
-                width="length"
-                onChange={(value) => onChange({ ...line, lengths: line.lengths.map((l, j) => (j === i ? value : l)) })}
-              />
-              {i === line.lengths.length - 1 && <span>{unit}</span>}
-            </Together>
-          ))}
-          <Together>
-            <button type="button" className="icon-btn h-7 w-7 max-md:h-10 max-md:w-10" aria-label={`${ui.label} 이평 더하기`} title="이평 더하기" disabled={line.lengths.length >= MAX_MA_LINES} onClick={() => onChange(addMaLine(line))}>
-              <PlusIcon size={14} />
+          <Word>
+            {line.lengths.map((length, i) => (
+              <span key={i} className="contents">
+                {i > 0 && "·"}
+                {number(`lengths.${i}`, length, (value) => onChange({ ...line, lengths: line.lengths.map((l, j) => (j === i ? value : l)) }))}
+              </span>
+            ))}
+            {unit}
+          </Word>
+          <span className="inline-flex">
+            <button type="button" className="icon-btn h-6 w-6" aria-label={`${ui.label} 이평 더하기`} title="이평 더하기" disabled={line.lengths.length >= MAX_MA_LINES} onClick={() => onChange(addMaLine(line))}>
+              <PlusIcon size={12} />
             </button>
-            <button type="button" className="icon-btn h-7 w-7 max-md:h-10 max-md:w-10" aria-label={`${ui.label} 이평 빼기`} title="이평 빼기" disabled={line.lengths.length <= MIN_MA_LINES} onClick={() => onChange(removeMaLine(line))}>
-              <CloseIcon size={12} />
+            <button type="button" className="icon-btn h-6 w-6" aria-label={`${ui.label} 이평 빼기`} title="이평 빼기" disabled={line.lengths.length <= MIN_MA_LINES} onClick={() => onChange(removeMaLine(line))}>
+              <CloseIcon size={10} />
             </button>
-          </Together>
-          <Choice label={choice("배열")} value={line.order} options={ORDERS} onChange={(order) => onChange({ ...line, order })} />
+          </span>
+          <Choice label={choice("계산 방식")} value={line.method} options={METHODS} onChange={(method) => onChange({ ...line, method })} />
+          <span>이동평균이</span>
+          <Word><Choice label={choice("배열")} value={line.order} options={ORDERS} onChange={(order) => onChange({ ...line, order })} />인</Word>
         </>
       );
     case "ma_cross":
       return (
         <>
           <Choice label={choice("계산 방식")} value={line.method} options={METHODS} onChange={(method) => onChange({ ...line, method })} />
-          <Choice label={choice("짧은 선")} value={line.fastLine} options={FAST_LINES} onChange={(fastLine) => onChange({ ...line, fastLine })} />
-          {line.fastLine === "ma" && (
-            <Together>
-              <NumberBox ui={ui} field="fast" value={line.fast} width="length" onChange={(fast) => onChange({ ...line, fast })} />
-              <span>{unit}선이</span>
-            </Together>
+          {line.fastLine === "ma" ? (
+            <>
+              <Choice label={choice("짧은 선")} value={line.fastLine} options={FAST_LINES} onChange={(fastLine) => onChange({ ...line, fastLine })} />
+              <Word>{number("fast", line.fast, (fast) => onChange({ ...line, fast }))}{unit}선이</Word>
+            </>
+          ) : (
+            <Word><Choice label={choice("짧은 선")} value={line.fastLine} options={FAST_LINES} onChange={(fastLine) => onChange({ ...line, fastLine })} />가</Word>
           )}
-          <Together>
-            <NumberBox ui={ui} field="slow" value={line.slow} width="length" onChange={(slow) => onChange({ ...line, slow })} />
-            <span>{unit}선을</span>
-          </Together>
-          <Together>
-            {direction(line)}
-            <span>교차</span>
-          </Together>
+          <Word>{number("slow", line.slow, (slow) => onChange({ ...line, slow }))}{unit}선을</Word>
+          {direction(line)}
+          <span>교차한</span>
         </>
       );
     case "rsi":
       return (
         <>
-          <Together>
-            <span>RSI</span>
-            <NumberBox ui={ui} field="length" value={line.length} width="length" onChange={(length) => onChange({ ...line, length })} />
-          </Together>
+          <Word>RSI({number("length", line.length, (length) => onChange({ ...line, length }))})가</Word>
           <Choice label={choice("판정")} value={line.test} options={RSI_TESTS} onChange={(test) => onChange({ ...line, test })} />
           {line.test === "range" ? (
-            <RangeBoxes ui={ui} keys={BOUNDS} unit="" width="percent" min={line.min} max={line.max} onChange={(min, max) => onChange({ ...line, min, max })} />
+            <RangeTokens ui={ui} keys={BOUNDS} unit="" min={line.min} max={line.max} end="인" onChange={(min, max) => onChange({ ...line, min, max })} />
           ) : (
-            <Together>
-              <NumberBox ui={ui} field="value" value={line.value} width="percent" onChange={(value) => onChange({ ...line, value })} />
+            <>
+              <Word>{number("value", line.value, (value) => onChange({ ...line, value }))}{objectMark(line.value)}</Word>
               {direction(line)}
-            </Together>
+              <span>돌파한</span>
+            </>
           )}
         </>
       );
     case "macd":
       return (
         <>
-          <Together>
-            <span>MACD</span>
-            <NumberBox ui={ui} field="fast" value={line.fast} width="length" onChange={(fast) => onChange({ ...line, fast })} />
-          </Together>
-          <NumberBox ui={ui} field="slow" value={line.slow} width="length" onChange={(slow) => onChange({ ...line, slow })} />
-          <NumberBox ui={ui} field="signal" value={line.signal} width="length" onChange={(signal) => onChange({ ...line, signal })} />
-          <Choice label={choice("판정")} value={line.test} options={MACD_TESTS} onChange={(test) => onChange({ ...line, test })} />
-          {line.test === "vs_signal" ? <Choice label={choice("위치")} value={line.side} options={SIDES} onChange={(side) => onChange({ ...line, side })} /> : direction(line)}
+          <span>MACD(빠른</span>
+          <Word>{number("fast", line.fast, (fast) => onChange({ ...line, fast }))},</Word>
+          <span>느린</span>
+          <Word>{number("slow", line.slow, (slow) => onChange({ ...line, slow }))},</Word>
+          <span>시그널</span>
+          <Word>{number("signal", line.signal, (signal) => onChange({ ...line, signal }))})가</Word>
+          {line.test === "vs_signal" ? (
+            <>
+              <Choice label={choice("판정")} value={line.test} options={MACD_TESTS} onChange={(test) => onChange({ ...line, test })} />
+              <Word><Choice label={choice("위치")} value={line.side} options={SIDES} onChange={(side) => onChange({ ...line, side })} />인</Word>
+            </>
+          ) : (
+            <>
+              <Word><Choice label={choice("판정")} value={line.test} options={MACD_TESTS} onChange={(test) => onChange({ ...line, test })} />{objectMark(labelOf(MACD_TESTS, line.test))}</Word>
+              {direction(line)}
+              <span>{line.test === "signal_cross" ? "교차한" : "돌파한"}</span>
+            </>
+          )}
         </>
       );
     case "stochastic":
       return (
         <>
-          <Together>
-            <span>스토캐스틱</span>
-            <NumberBox ui={ui} field="k" value={line.k} width="length" onChange={(k) => onChange({ ...line, k })} />
-          </Together>
-          <NumberBox ui={ui} field="d" value={line.d} width="length" onChange={(d) => onChange({ ...line, d })} />
-          <NumberBox ui={ui} field="smooth" value={line.smooth} width="length" onChange={(smooth) => onChange({ ...line, smooth })} />
-          <Choice label={choice("판정")} value={line.test} options={STOCHASTIC_TESTS} onChange={(test) => onChange({ ...line, test })} />
+          <span>스토캐스틱(%K</span>
+          <Word>{number("k", line.k, (k) => onChange({ ...line, k }))},</Word>
+          <span>%D</span>
+          <Word>{number("d", line.d, (d) => onChange({ ...line, d }))},</Word>
+          <span>평활</span>
+          <Word>{number("smooth", line.smooth, (smooth) => onChange({ ...line, smooth }))})의</Word>
+          <span>%K가</span>
           {line.test === "cross" ? (
-            direction(line)
+            <>
+              <Word><Choice label={choice("판정")} value={line.test} options={STOCHASTIC_TESTS} onChange={(test) => onChange({ ...line, test })} />를</Word>
+              {direction(line)}
+              <span>교차한</span>
+            </>
           ) : (
-            <RangeBoxes ui={ui} keys={BOUNDS} unit="" width="percent" min={line.min} max={line.max} onChange={(min, max) => onChange({ ...line, min, max })} />
+            <>
+              <Choice label={choice("판정")} value={line.test} options={STOCHASTIC_TESTS} onChange={(test) => onChange({ ...line, test })} />
+              <RangeTokens ui={ui} keys={BOUNDS} unit="" min={line.min} max={line.max} end="인" onChange={(min, max) => onChange({ ...line, min, max })} />
+            </>
           )}
         </>
       );
     case "bollinger":
       return (
         <>
-          <Together>
-            <span>볼린저</span>
-            <NumberBox ui={ui} field="length" value={line.length} width="length" onChange={(length) => onChange({ ...line, length })} />
-          </Together>
-          <NumberBox ui={ui} field="k" value={line.k} width="length" onChange={(k) => onChange({ ...line, k })} />
-          <Choice label={choice("판정")} value={line.test} options={BOLLINGER_TESTS} onChange={(test) => onChange({ ...line, test })} />
+          <span>볼린저 밴드(기간</span>
+          <Word>{number("length", line.length, (length) => onChange({ ...line, length }))},</Word>
+          <span>배수</span>
+          <Word>{number("k", line.k, (k) => onChange({ ...line, k }))})의</Word>
           {line.test === "outside" ? (
-            <Choice label={choice("위치")} value={line.side} options={BOLLINGER_SIDES} onChange={(side) => onChange({ ...line, side })} />
+            <Word><Choice label={choice("위치")} value={line.side} options={BOLLINGER_SIDES} onChange={(side) => onChange({ ...line, side })} />{towardMark(labelOf(BOLLINGER_SIDES, line.side))}</Word>
           ) : (
-            <Together>
-              <Choice label={choice("밴드")} value={line.band} options={BANDS} onChange={(band) => onChange({ ...line, band })} />
+            <>
+              <Word><Choice label={choice("밴드")} value={line.band} options={BANDS} onChange={(band) => onChange({ ...line, band })} />{objectMark(BAND_LABEL[line.band])}</Word>
               {direction(line)}
-            </Together>
+            </>
           )}
+          <Choice label={choice("판정")} value={line.test} options={BOLLINGER_TESTS} onChange={(test) => onChange({ ...line, test })} />
         </>
       );
     case "ichimoku":
       return (
         <>
-          <Together>
-            <span>일목</span>
-            <NumberBox ui={ui} field="conversion" value={line.conversion} width="length" onChange={(conversion) => onChange({ ...line, conversion })} />
-          </Together>
-          <NumberBox ui={ui} field="base" value={line.base} width="length" onChange={(base) => onChange({ ...line, base })} />
-          <NumberBox ui={ui} field="spanB" value={line.spanB} width="length" onChange={(spanB) => onChange({ ...line, spanB })} />
-          <NumberBox ui={ui} field="displacement" value={line.displacement} width="length" onChange={(displacement) => onChange({ ...line, displacement })} />
-          <Choice label={choice("판정")} value={line.test} options={ICHIMOKU_TESTS} onChange={(test) => onChange({ ...line, test })} />
-          {line.test === "cloud" ? <Choice label={choice("위치")} value={line.side} options={SIDES} onChange={(side) => onChange({ ...line, side })} /> : direction(line)}
+          <span>일목균형표(전환</span>
+          <Word>{number("conversion", line.conversion, (conversion) => onChange({ ...line, conversion }))},</Word>
+          <span>기준</span>
+          <Word>{number("base", line.base, (base) => onChange({ ...line, base }))},</Word>
+          <span>선행</span>
+          <Word>{number("spanB", line.spanB, (spanB) => onChange({ ...line, spanB }))},</Word>
+          <span>이동</span>
+          <Word>{number("displacement", line.displacement, (displacement) => onChange({ ...line, displacement }))})의</Word>
+          {line.test === "cloud" ? (
+            <>
+              <Choice label={choice("판정")} value={line.test} options={ICHIMOKU_TESTS} onChange={(test) => onChange({ ...line, test })} />
+              <Word><Choice label={choice("위치")} value={line.side} options={SIDES} onChange={(side) => onChange({ ...line, side })} />인</Word>
+            </>
+          ) : (
+            <>
+              <Word><Choice label={choice("판정")} value={line.test} options={ICHIMOKU_TESTS} onChange={(test) => onChange({ ...line, test })} />이</Word>
+              <span>기준선을</span>
+              {direction(line)}
+              <span>교차한</span>
+            </>
+          )}
         </>
       );
     case "market_cap":
-      return <RangeBoxes ui={ui} keys={BOUNDS} unit="억 원" width="amount" min={line.min} max={line.max} onChange={(min, max) => onChange({ ...line, min, max })} />;
+      return <>
+        <RangeTokens ui={ui} keys={BOUNDS} unit="억 원" min={line.min} max={line.max} end="이다" onChange={(min, max) => onChange({ ...line, min, max })} />
+      </>;
   }
 }

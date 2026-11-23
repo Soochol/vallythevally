@@ -290,7 +290,7 @@ function ScreenHeader({ windowId, screenEditing, chosen, entries, block, status,
           onClick={onRun}
         >
           {running ? <SpinnerIcon /> : <PlayIcon />}
-          {running ? "실행 중" : "실행"}<kbd className="ml-1 text-xs">Ctrl+↵</kbd>
+          {running ? "실행 중" : "실행"}<kbd className="ml-1 text-xs max-md:hidden">Ctrl+↵</kbd>
         </button>
         <span className="min-w-0 text-xs leading-[1.4] text-text-2">{runHint(block, status)}</span>
       </div>

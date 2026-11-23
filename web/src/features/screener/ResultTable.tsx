@@ -66,7 +66,7 @@ export function ResultTable({ screen, asOf, rows, selected, sort, onSort, onSele
       const active = row.symbol === selected;
       return <tr key={row.symbol} data-code={row.symbol} aria-selected={active} onClick={() => onSelect(row.symbol)}
         onContextMenu={desktop ? (e) => { e.preventDefault(); openMenu(row.symbol, e.clientX, e.clientY); } : undefined}
-        className={`${LIST_ROW_HEIGHT} cursor-pointer ${listRowFill(active)}`}>
+        className={`${LIST_ROW_HEIGHT} cursor-pointer max-md:h-12 ${listRowFill(active)}`}>
         <td className="pl-3">
           <button type="button" data-chart-control data-result-row aria-current={active || undefined} className="block w-full min-w-0 text-left"
             aria-haspopup={desktop ? "menu" : undefined} aria-expanded={desktop ? menu?.code === row.symbol : undefined}

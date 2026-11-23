@@ -1,47 +1,21 @@
-import { Choice, CHOICE_LABEL, fieldName, KindFields, NumberBox, PERIODS, Together, type LineUi } from "./ConditionFields";
-import { Select } from "../menu/Select";
-import { type Ref, useEffect, useId, useRef } from "react";
-import {
-  conditionSentence,
-  EXCLUDE_LABEL,
-  MARKET_LABEL,
-  NO_CONDITIONS_SENTENCE,
-  UNIT,
-} from "../../lib/screener";
+import { type ReactNode, type Ref, useEffect, useId, useRef } from "react";
+import { EXCLUDE_LABEL, MARKET_LABEL } from "../../lib/screener";
 import type { WindowId } from "../../layout/kinds";
 import { useSelectionStore } from "../../stores/selection";
-import { DialogFrame, Errors, Row } from "../dialog/DialogParts";
-import { ArrowIcon, CloseIcon, PlusIcon } from "../icons";
+import { DialogFrame, Errors } from "../dialog/DialogParts";
+import { CloseIcon } from "../icons";
+import { SentenceConditions } from "../screener/SentenceFields";
 import { removeChosen, useScreenEditing } from "../screener/useScreenEditing";
-import {
-  addCondition,
-  changeKind,
-  type ConditionDraft,
-  checkCondition,
-  editCondition,
-  type ExcludeGroup,
-  excludesIn,
-  type FieldKey,
-  KIND_GROUPS,
-  type KindChoice,
-  kindChoiceOf,
-  MARKETS,
-  MAX_CONDITIONS,
-  moveCondition,
-  removeCondition,
-  type ScreenDraft,
-  toggleExclude,
-  toggleMarket,
-} from "./screenForm";
+import { type ExcludeGroup, excludesIn, MARKETS, type ScreenDraft, toggleExclude, toggleMarket } from "./screenForm";
 
 const EXCLUDE_ROWS: readonly { group: ExcludeGroup; label: string }[] = [
   { group: "kind", label: "종류 제외" },
   { group: "status", label: "상태 제외" },
 ];
-const FIELD_BOX = "ui-field";
 const CHIP =
   "h-9 rounded-m border border-line px-3 text-s text-text-2 hover:text-text " +
-  "aria-pressed:border-accent aria-pressed:bg-accent-soft aria-pressed:font-[600] aria-pressed:text-accent max-md:h-9";
+  "aria-pressed:border-accent aria-pressed:bg-accent-soft aria-pressed:font-[600] aria-pressed:text-accent";
+const TARGETS_NOTE = "고른 시장의 종목만 남기고, 고른 종류와 상태의 종목은 결과에서 뺍니다. 아무것도 고르지 않으면 전 종목이 대상입니다.";
 export function ScreenDialog() {
   const dialog = useSelectionStore((s) => s.dialog);
   return dialog?.kind === "screen" ? <ScreenDialogBody window={dialog.window} /> : null;
@@ -77,7 +51,7 @@ function ScreenDialogBody({ window }: { window: WindowId | null }) {
   return (
     <DialogFrame labelledBy={`${ids}-title`} width="w-[min(980px,calc(100vw-32px))]" onClose={dismiss}>
       <div className="ui-dialog-head">
-        <h2 id={`${ids}-title`} className="min-w-0 flex-1 truncate text-l font-[650]">
+        <h2 id={`${ids}-title`} className="min-w-0 flex-1 truncate text-l font-[600]">
           {chosen.stored ? "조건식 편집" : "새 조건식"}
         </h2>
         <button type="button" className="icon-btn flex-none" aria-label="닫기" title="닫기 (Esc)" onClick={dismiss}>
@@ -122,141 +96,64 @@ interface FieldsProps {
   onChange(change: (draft: ScreenDraft) => ScreenDraft): void;
 }
 
-export function ScreenFields({ ids, draft, nameError, nameRef, locked, onChange }: FieldsProps) {
-  const lines = draft.conditions.length;
+function FieldRow({ label, labelFor, children }: { label: string; labelFor?: string; children: ReactNode }) {
+  const caption = "text-s leading-[30px] text-text-2 max-md:leading-normal";
   return (
-    <div className={`screen-fields flex min-h-0 flex-1 flex-col overflow-auto ${locked ? "opacity-60" : ""}`}>
-      <fieldset disabled={locked} className="contents">
-        <section className="screen-section"><h3>조건식 이름</h3>
-        <Row label="이름" labelFor={`${ids}-name`}>
-          <input
-            ref={nameRef}
-            id={`${ids}-name`}
-            value={draft.name}
-            onChange={(e) => onChange((d) => ({ ...d, name: e.target.value }))}
-            aria-invalid={nameError !== null}
-            aria-describedby={nameError ? `${ids}-name-error` : undefined}
-            placeholder="예: 고가 200일 신고가"
-            autoComplete="off"
-            spellCheck={false}
-            className={`${FIELD_BOX} w-full max-w-[360px] px-2 placeholder:text-text-3`}
-          />
-          <Errors id={`${ids}-name-error`} messages={nameError ? [nameError] : []} />
-        </Row>
-
-        </section>
-        <section className="screen-section"><h3>대상 종목</h3><div className="flex flex-col gap-5">
-        <Row label="시장">
-          <div role="group" aria-label="시장" className="flex flex-wrap gap-1.5 pt-px">
-            {MARKETS.map((m) => (
-              <button key={m} type="button" aria-pressed={draft.markets.includes(m)} onClick={() => onChange((d) => toggleMarket(d, m))} className={CHIP}>
-                {MARKET_LABEL[m]}
-              </button>
-            ))}
-          </div>
-          <p className="text-xs leading-[1.5] text-text-3">고른 시장의 종목만 남깁니다. 아무것도 고르지 않으면 두 시장 모두입니다.</p>
-        </Row>
-
-        {EXCLUDE_ROWS.map(({ group, label }) => (
-          <Row key={group} label={label}>
-            <div role="group" aria-label={label} className="flex flex-wrap gap-1.5 pt-px">
-              {excludesIn(group).map((k) => (
-                <button key={k} type="button" aria-pressed={draft.exclude.includes(k)} onClick={() => onChange((d) => toggleExclude(d, k))} className={CHIP}>
-                  {EXCLUDE_LABEL[k]}
-                </button>
-              ))}
-            </div>
-            {group === "status" && <p className="text-xs leading-[1.5] text-text-3">고른 종류와 상태의 종목은 결과에서 뺍니다. 아무것도 고르지 않으면 전 종목이 대상입니다.</p>}
-          </Row>
-        ))}
-        </div></section>
-        <section className="screen-section"><h3>조건 <span className="ml-2 text-s font-normal text-text-3">모든 조건 충족</span></h3>
-        <Row label="조건">
-          {lines === 0 ? (
-            <p className="pt-1.5 text-s text-text-2">{NO_CONDITIONS_SENTENCE}</p>
-          ) : (
-            <ol aria-label="조건" className="flex flex-col gap-2.5">
-              {draft.conditions.map((c, i) => (
-                <ConditionLine
-                  key={c.key}
-                  ids={ids}
-                  index={i}
-                  last={i === lines - 1}
-                  condition={c}
-                  onChange={(line) => onChange((d) => editCondition(d, line))}
-                  onKind={(kind) => onChange((d) => changeKind(d, c.key, kind))}
-                  onMove={(by) => onChange((d) => moveCondition(d, c.key, by))}
-                  onRemove={() => onChange((d) => removeCondition(d, c.key))}
-                />
-              ))}
-            </ol>
-          )}
-          <span className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1">
-            <button type="button" className="tb-btn h-8 border border-line px-2.5 text-s disabled:opacity-40" disabled={lines >= MAX_CONDITIONS} onClick={() => onChange(addCondition)}>
-              <PlusIcon size={14} />
-              조건 더하기
-            </button>
-            <span className="text-xs text-text-3">
-              조건을 모두 만족하는 종목만 찾습니다 · {lines}/{MAX_CONDITIONS}줄
-            </span>
-          </span>
-        </Row>
-
-        </section>
-      </fieldset>
+    <div className="grid grid-cols-[92px_minmax(0,1fr)] items-start gap-3 max-md:grid-cols-1 max-md:gap-1.5">
+      {labelFor ? <label htmlFor={labelFor} className={caption}>{label}</label> : <span className={caption}>{label}</span>}
+      <div className="flex min-w-0 flex-col gap-1">{children}</div>
     </div>
   );
 }
 
-interface LineProps {
-  ids: string;
-  index: number;
-  last: boolean;
-  condition: ConditionDraft;
-  onChange(line: ConditionDraft): void;
-  onKind(kind: KindChoice): void;
-  onMove(by: -1 | 1): void;
-  onRemove(): void;
-}
-
-function ConditionLine({ ids, index, last, condition, onChange, onKind, onMove, onRemove }: LineProps) {
-  const label = `조건 ${index + 1}`;
-  const row = checkCondition(condition);
-  const kind = kindChoiceOf(condition);
-  const ui: LineUi = { label, base: `${ids}-condition-${condition.key}`, kind, errors: row.ok ? {} : row.errors };
-  const barLine = condition.kind !== "market_cap";
+export function ScreenFields({ ids, draft, nameError, nameRef, locked, onChange }: FieldsProps) {
   return (
-    <li className="condition-card flex flex-col gap-3">
-      <header><strong className="font-semibold">{label}</strong><span className="text-xs text-text-3">{index > 0 ? "그리고" : "첫 번째 조건"}</span></header>
-      <div className="flex flex-wrap items-center gap-x-1.5 gap-y-1.5 text-s text-text-2">
-        <Select label={`${label} 종류`} value={kind} onChange={onKind} className={`${FIELD_BOX} px-1.5`} options={KIND_GROUPS.flatMap((group) => group.kinds.map((choice) => ({ value: choice, label: CHOICE_LABEL[choice], group: group.label })))} />
-        {barLine && <Choice label={`${label} 봉 주기`} value={condition.period} options={PERIODS} onChange={(period) => onChange({ ...condition, period })} />}
-        {barLine && (
-          <Together>
-            <span>최근</span>
-            <NumberBox ui={ui} field="recentBars" value={condition.recentBars} onChange={(recentBars) => onChange({ ...condition, recentBars })} />
-            <span>{UNIT[condition.period]} 이내</span>
-          </Together>
-        )}
-        <KindFields ui={ui} line={condition} onChange={onChange} />
-        <span className="flex-1" />
-        <span className="flex flex-none items-center">
-          <button type="button" className="icon-btn h-7 w-7 max-md:h-10 max-md:w-10" aria-label={`${label} 위로 옮기기`} title="위로 옮기기" disabled={index === 0} onClick={() => onMove(-1)}>
-            <ArrowIcon dir="up" size={14} />
-          </button>
-          <button type="button" className="icon-btn h-7 w-7 max-md:h-10 max-md:w-10" aria-label={`${label} 아래로 옮기기`} title="아래로 옮기기" disabled={last} onClick={() => onMove(1)}>
-            <ArrowIcon dir="down" size={14} />
-          </button>
-          <button type="button" className="icon-btn h-7 w-7 max-md:h-10 max-md:w-10" aria-label={`${label} 빼기`} title="조건 빼기" onClick={onRemove}>
-            <CloseIcon />
-          </button>
-        </span>
-      </div>
-      {(Object.entries(ui.errors) as [FieldKey, string][]).map(([key, message]) => (
-        <Errors key={key} id={`${ui.base}-${key}-error`} messages={[`${fieldName(kind, key)}: ${message}`]} />
-      ))}
-      {barLine && <small className="text-xs text-text-3">마지막 봉을 포함한 실제 봉 개수입니다. 거래가 없어 봉이 없는 기간은 세지 않습니다.</small>}
-      {row.ok && <p className="text-xs text-text-3">{conditionSentence(row.condition)}</p>}
-    </li>
+    <div className={`screen-fields flex min-h-0 flex-1 flex-col overflow-auto ${locked ? "opacity-60" : ""}`}>
+      <fieldset disabled={locked} className="contents">
+        <section className="screen-part"><h3>조건식 이름</h3>
+          <FieldRow label="이름" labelFor={`${ids}-name`}>
+            <input
+              ref={nameRef}
+              id={`${ids}-name`}
+              value={draft.name}
+              onChange={(e) => onChange((d) => ({ ...d, name: e.target.value }))}
+              aria-invalid={nameError !== null}
+              aria-describedby={nameError ? `${ids}-name-error` : undefined}
+              placeholder="예: 고가 200일 신고가"
+              autoComplete="off"
+              spellCheck={false}
+              className="ui-field w-full max-w-[360px] px-2 placeholder:text-text-3"
+            />
+            <Errors id={`${ids}-name-error`} messages={nameError ? [nameError] : []} />
+          </FieldRow>
+        </section>
+        <section className="screen-part"><h3>대상 종목</h3>
+          <FieldRow label="시장">
+            <div role="group" aria-label="시장" className="flex flex-wrap gap-1.5 pt-px">
+              {MARKETS.map((m) => (
+                <button key={m} type="button" aria-pressed={draft.markets.includes(m)} onClick={() => onChange((d) => toggleMarket(d, m))} className={CHIP}>
+                  {MARKET_LABEL[m]}
+                </button>
+              ))}
+            </div>
+          </FieldRow>
+          {EXCLUDE_ROWS.map(({ group, label }) => (
+            <FieldRow key={group} label={label}>
+              <div role="group" aria-label={label} className="flex flex-wrap gap-1.5 pt-px">
+                {excludesIn(group).map((k) => (
+                  <button key={k} type="button" aria-pressed={draft.exclude.includes(k)} onClick={() => onChange((d) => toggleExclude(d, k))} className={CHIP}>
+                    {EXCLUDE_LABEL[k]}
+                  </button>
+                ))}
+              </div>
+            </FieldRow>
+          ))}
+        </section>
+        <section className="screen-part text-s"><h3>조건</h3>
+          <SentenceConditions ids={ids} draft={draft} locked={locked} onChange={onChange} />
+        </section>
+        <p className="text-xs leading-[1.5] text-text-2">{TARGETS_NOTE}</p>
+      </fieldset>
+    </div>
   );
 }

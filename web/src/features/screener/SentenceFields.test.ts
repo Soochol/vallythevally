@@ -7,13 +7,15 @@ import { conditionChoices, SentenceCondition, SentenceFields } from "./SentenceF
 
 const markupOf = (draft: ScreenDraft, locked = false) => renderToStaticMarkup(createElement(SentenceFields, { draft, locked, onChange: () => {} }));
 
-test("모든 조건 종류를 문장의 밑줄 값과 메뉴로 편집하고 숫자 입력 상자는 팝오버에만 둔다", () => {
+test("모든 조건 종류를 문장의 값 토큰과 메뉴로 편집하고 숫자 입력 상자는 누른 뒤에만 둔다", () => {
   for (const kind of KIND_GROUPS.flatMap((group) => group.kinds)) {
     const draft = changeKind(addCondition(draftOf(null)), 0, kind);
     const line = draft.conditions[0]!;
     expect(checkCondition(line).ok, kind).toBe(true);
     const markup = markupOf(draft);
     expect(markup, kind).toContain('aria-label="조건 1 메뉴"');
+    expect(markup, kind).toContain(`aria-label="조건 1 종류" aria-haspopup="dialog"`);
+    expect(markup, kind).toMatch(/class="sentence-token"[^>]*>|title="[^"]+"[^>]*class="sentence-token"/);
     expect(markup, kind).toContain('aria-haspopup="dialog"');
     expect(markup, kind).not.toContain("<input");
     expect(markup, kind).toContain('aria-label="조건 1 순서 끌어서 바꾸기"');
@@ -30,13 +32,12 @@ test("주·월봉, 최근 기간, 억 원과 비교 메뉴를 문장에 유지�
   ] };
   const markup = markupOf(draftOf(screen));
   expect(markup).toContain('data-value="W"');
-  expect(markup).toContain("이내에");
-  expect(markup).toContain("52");
+  expect(markup).toContain("<span>이내에</span>");
+  expect(markup).toMatch(/>52<\/button>주<\/span><span>신고거래량인<\/span>/);
   expect(markup).toContain("신고거래량");
-  expect(markup).toContain("3000");
-  expect(markup).toContain("억 원");
+  expect(markup).toMatch(/>3000<\/button>억 원<\/span>/);
   expect(markup).toContain('aria-label="조건 2 비교"');
-  expect(markup).toContain("이상");
+  expect(markup).toMatch(/aria-label="조건 2 비교"[^]*?<span>이상<\/span>[^]*?<\/button><\/span>이다<\/span>/);
   expect(markup).toContain('aria-label="ETF 제외 해제"');
   expect(markup).toContain('aria-label="거래정지 제외 해제"');
   expect(markup).toContain('aria-pressed="true"');
@@ -45,7 +46,7 @@ test("주·월봉, 최근 기간, 억 원과 비교 메뉴를 문장에 유지�
 test("잘못된 숫자는 값 버튼과 연결된 오류를 보이고 행의 다른 값도 계속 편집한다", () => {
   const draft = addCondition(draftOf(null));
   const line = { ...draft.conditions[0]!, n: "0", recentBars: "0" };
-  const markup = renderToStaticMarkup(createElement(SentenceCondition, { ids: "t", line, index: 0, onChange: () => {} }));
+  const markup = renderToStaticMarkup(createElement(SentenceCondition, { ids: "t", line, index: 0, onChange: () => {}, onKind: () => {} }));
   expect(markup).toContain('aria-invalid="true"');
   expect(markup).toContain('aria-describedby="t-condition-0-n-error"');
   expect(markup).toContain('id="t-condition-0-n-error"');
