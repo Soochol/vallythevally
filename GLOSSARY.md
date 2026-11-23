@@ -137,7 +137,7 @@ _Avoid_: 회원, 유저, 방문자, 고객, 운영자
 _Avoid_: 회원, 프로필, 아이디
 
 **공개 모드**:
-서버가 **공개 리스너**를 더 열어 여러 **사용자**가 웹 화면만 열어 쓰게 하는 운영. `VALLY_PUBLIC_BIND`와 `VALLY_PUBLIC_ORIGIN`이 둘 다 있을 때만 켜지고, 없으면 지금과 같다. 사용자는 브라우저로 **계정 서버** 기능에 직접 로그인하고, 키움 키는 자기 브라우저에만 둔다([ADR 0040](docs/adr/0040-the-public-listener-serves-browser-logins-and-shared-data-apart-from-the-operator-listener.md)).
+서버가 **공개 리스너**를 더 열어 여러 **사용자**가 웹 화면만 열어 쓰게 하는 운영. `VALLY_PUBLIC_BIND`와 `VALLY_PUBLIC_ORIGIN`이 둘 다 있을 때만 켜지고, 없으면 지금과 같다. 사용자는 브라우저로 **계정 서버** 기능에 직접 로그인하고, 키움 키는 자기 브라우저에만 둔다([ADR 0040](docs/adr/0040-the-public-listener-serves-browser-logins-and-shared-data-apart-from-the-operator-listener.md)). 웹 공개판은 운영하지 않기로 했다([ADR 0045](docs/adr/0045-desktop-app-runs-a-personal-engine-and-the-server-keeps-login-and-shared-data.md)).
 _Avoid_: 서비스 모드, 호스팅 모드
 
 **공개 리스너**:
@@ -176,8 +176,20 @@ _Avoid_: 마스터 비밀번호, 로그인 비밀번호
 사용자 키로 키움을 부르는 일(내가 보는 종목의 실시간, 계좌 실시간, 토큰·계좌 조회·주문)을 브라우저에서 하는 것. `kiwoom-core`를 WASM으로 쓰고 SharedWorker가 키별 연결을 쥔다. 다음 단계이며 아직 없다.
 _Avoid_: 프론트 키움 클라이언트
 
+**데스크톱 앱**:
+화면(`web/`)과 **개인 엔진**을 한 껍데기(Tauri 2)에 담아 사용자에게 배포하는 최종 배포물. 화면 너비를 가리키는 "데스크톱 폭"과 다르다. 화면은 엔진의 루프백 HTTP/WS만 부른다([ADR 0045](docs/adr/0045-desktop-app-runs-a-personal-engine-and-the-server-keeps-login-and-shared-data.md)).
+_Avoid_: 클라이언트 앱, 설치형 웹
+
+**개인 엔진**:
+**데스크톱 앱** 안에서 도는 Rust 엔진. 사용자 키로 증권사에 직접 연결해 시세 캐시, 실시간, 계좌, 주문을 맡고, 키는 사용자 PC 밖으로 나가지 않는다. 지금의 **커넥터**(`vally-server`)가 이 모양이다.
+_Avoid_: 로컬 서버, 에이전트
+
+**공용 서버**:
+운영자가 한 곳에서 돌리며 로그인, **계정**별 **셋업**, **공용 자료**만 맡는 서버. 사용자 키를 받지 않는다. **계정 서버**와 **공개 리스너**가 그 입구다.
+_Avoid_: 백엔드, 중계 서버
+
 **커넥터**:
-사용자 PC에서 도는 `vally-server`. 키움 키와 시세를 다루고 화면을 서빙한다. **계정 서버** 주소가 없으면 로컬 전용 모드로 돈다. **공개 모드**에서는 사용자가 커넥터 없이 브라우저만 쓴다.
+사용자 PC에서 도는 `vally-server`. 키움 키와 시세를 다루고 화면을 서빙한다. **계정 서버** 주소가 없으면 로컬 전용 모드로 돈다. **공개 모드**에서는 사용자가 커넥터 없이 브라우저만 쓴다. 새 방향에서는 **데스크톱 앱** 안의 **개인 엔진**으로 돌아온다([ADR 0045](docs/adr/0045-desktop-app-runs-a-personal-engine-and-the-server-keeps-login-and-shared-data.md)).
 _Avoid_: 에이전트, 클라이언트, 로컬 서버, 연결
 
 **계정 서버**:
