@@ -1,7 +1,5 @@
 import type { FinancialsPage } from "../../src/api/generated/FinancialsPage";
 
-import type { FinancialUpdatePage } from "../../src/api/generated/FinancialUpdatePage";
-
 export const readyData: Record<"Q" | "Y", FinancialsPage> = {
   "Q": {
     "symbol": "005930",
@@ -6281,32 +6279,3 @@ export const preferredDps: FinancialsPage["series"][number]["points"] = [
     ]
   }
 ];
-
-export const readyJob: FinancialUpdatePage = {
-  "id": 1,
-  "status": "ready",
-  "phase": "complete",
-  "stopReason": null,
-  "nextCheckAt": null,
-  "canResume": false,
-  "automatic": false,
-  "latestCheckPending": false,
-  "historyCompletedCompanies": 2,
-  "historyFailedCompanies": 0,
-  "recentFailedCompanies": 0,
-  "historyComplete": true,
-  "fromYear": 2015,
-  "throughYear": 2017,
-  "totalSymbols": 7,
-  "processedSymbols": 7,
-  "unsupportedSymbols": 3,
-  "unverifiedSymbols": 0,
-  "unverifiedDividends": 1,
-  "totalCompanies": 2,
-  "completedCompanies": 2,
-  "failedCompanies": 0,
-  "startedAt": 1514689203,
-  "lastCheckedAt": 1514689241,
-  "failure": null,
-  "failures": []
-};

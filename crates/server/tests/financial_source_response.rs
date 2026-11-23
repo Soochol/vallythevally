@@ -19,7 +19,7 @@ fn symbols() -> Arc<SymbolDirectory> {
 }
 
 #[tokio::test]
-async fn source_http_preserves_all_record_fields_and_nested_tags_without_configuration() {
+async fn source_http_preserves_all_record_fields_and_nested_tags_from_a_read_only_store() {
     let report = json!({
         "business_year": 2024, "report_code": "11011", "statement_request": null,
         "statement": {
@@ -46,7 +46,7 @@ async fn source_http_preserves_all_record_fields_and_nested_tags_without_configu
     separate["report_code"] = json!("11013");
     separate["statement_request"] = json!({ "next": "separate" });
     let expected = json!({
-        "status": "not_configured", "reason": null, "failure": null,
+        "status": "partial_failure", "reason": null, "failure": null,
         "security": { "stock_code": "005930", "company": { "corp_code": "00126380", "name": "합성 회사", "fiscal_month": 12 }, "share_class": "보통주", "share_class_reason": null, "evidence": "synthetic" },
         "collection": {
             "reports": { "2024/11011": report }, "staged_reports": { "2024/11011": staged, "2025/11013": separate },
@@ -55,12 +55,13 @@ async fn source_http_preserves_all_record_fields_and_nested_tags_without_configu
         }
     });
     let dir = tempfile::tempdir().unwrap();
-    let store = Store::open(&dir.path().join("financials.db")).await.unwrap();
+    let path = dir.path().join("financials.db");
+    let store = Store::open_for_collection(&path).await.unwrap();
     let security: Security = serde_json::from_value(expected["security"].clone()).unwrap();
     let collection: Collection = serde_json::from_value(expected["collection"].clone()).unwrap();
     store.save_security(&security).await.unwrap();
     store.save(&security.company.corp_code, &collection).await.unwrap();
-    let app = routes(Financials::new(None, store, Clock::fake(domain::KstTime::from_unix(300))), symbols());
+    let app = routes(Financials::read_only(&path, Clock::fake(domain::KstTime::from_unix(300))), symbols());
     let response = app.oneshot(Request::builder().uri("/api/symbols/005930/financial-source").body(Body::empty()).unwrap()).await.unwrap();
     assert_eq!(response.status(), StatusCode::OK);
     let actual: Value = serde_json::from_slice(&to_bytes(response.into_body(), usize::MAX).await.unwrap()).unwrap();
@@ -68,10 +69,10 @@ async fn source_http_preserves_all_record_fields_and_nested_tags_without_configu
 }
 
 #[tokio::test]
-async fn unsupported_product_http_returns_before_storage_failure_or_update() {
-    for (method, code) in ["GET", "POST"].into_iter().flat_map(|method| ["102780", "520100", "088980", "094800"].map(|code| (method, code))) {
+async fn unsupported_product_http_returns_before_storage_failure() {
+    for code in ["102780", "520100", "088980", "094800"] {
         let service = Financials::with_store(None, Err(Failure::Storage), Clock::fake(domain::KstTime::from_unix(300)));
-        let response = routes(service, symbols()).oneshot(Request::builder().method(method).uri(format!("/api/symbols/{code}/financial-source")).body(Body::empty()).unwrap()).await.unwrap();
+        let response = routes(service, symbols()).oneshot(Request::builder().uri(format!("/api/symbols/{code}/financial-source")).body(Body::empty()).unwrap()).await.unwrap();
         assert_eq!(response.status(), StatusCode::OK);
         let actual: Value = serde_json::from_slice(&to_bytes(response.into_body(), usize::MAX).await.unwrap()).unwrap();
         assert_eq!(actual, json!({
@@ -79,4 +80,34 @@ async fn unsupported_product_http_returns_before_storage_failure_or_update() {
             "collection": { "reports": {}, "staged_reports": null, "disclosures": [], "last_checked_at": null, "last_attempt_at": null, "disclosure_failure": null, "refresh_version": 0, "disclosure_version": 0, "unpublished_check_version": 0 }
         }));
     }
+}
+
+#[tokio::test]
+async fn the_update_routes_are_gone_and_a_post_to_a_read_route_is_refused() {
+    let dir = tempfile::tempdir().unwrap();
+    let service = Financials::read_only(&dir.path().join("financials.db"), Clock::fake(domain::KstTime::from_unix(300)));
+    for (method, uri, expected) in [
+        ("POST", "/api/financial-update", StatusCode::NOT_FOUND),
+        ("GET", "/api/financial-update", StatusCode::NOT_FOUND),
+        ("POST", "/api/financial-update/pause", StatusCode::NOT_FOUND),
+        ("POST", "/api/financial-update/resume", StatusCode::NOT_FOUND),
+        ("POST", "/api/symbols/005930/financials?period=Y", StatusCode::METHOD_NOT_ALLOWED),
+        ("POST", "/api/symbols/005930/financial-source", StatusCode::METHOD_NOT_ALLOWED),
+    ] {
+        let response = routes(service.clone(), symbols()).oneshot(Request::builder().method(method).uri(uri).body(Body::empty()).unwrap()).await.unwrap();
+        assert_eq!(response.status(), expected, "{method} {uri}");
+    }
+}
+
+#[tokio::test]
+async fn a_database_that_does_not_exist_reads_as_not_configured_and_stays_absent() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("financials.db");
+    for uri in ["/api/symbols/005930/financial-source", "/api/symbols/005930/financials?period=Y"] {
+        let response = routes(Financials::read_only(&path, Clock::fake(domain::KstTime::from_unix(300))), symbols()).oneshot(Request::builder().uri(uri).body(Body::empty()).unwrap()).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let actual: Value = serde_json::from_slice(&to_bytes(response.into_body(), usize::MAX).await.unwrap()).unwrap();
+        assert_eq!(actual["status"], "not_configured", "{uri}");
+    }
+    assert!(!path.exists());
 }

@@ -213,7 +213,6 @@ pub struct Adapters {
     pub kis_feed: Option<KisFeedParts>,
     pub stream: StreamSource,
     pub kiwoom_spacing: Option<Duration>,
-    pub dart_spacing: Option<Duration>,
 }
 
 impl Adapters {
@@ -236,7 +235,7 @@ impl Adapters {
         let connect: KisConnect = Arc::new(move || Box::new(crate::kis::stream::WebSocketConnector::new(ws_url.clone())));
         let kis_feed = Some(KisFeedParts { connect, master });
         match ReqwestTransport::new(config.kiwoom_base_url.clone()) {
-            Ok(transport) => Ok(Adapters { kiwoom: Arc::new(transport), kis, kis_feed, stream: StreamSource::Connect, kiwoom_spacing: None, dart_spacing: None }),
+            Ok(transport) => Ok(Adapters { kiwoom: Arc::new(transport), kis, kis_feed, stream: StreamSource::Connect, kiwoom_spacing: None }),
             Err(e) => {
                 tracing::error!(error = %e, "HTTP 클라이언트를 만들 수 없습니다");
                 Err(StartFailure)
@@ -252,7 +251,6 @@ pub struct Started {
     pub state: Arc<AppState>,
     pub router: axum::Router,
     pub listener: TcpListener,
-    pub automatic: Option<tokio::task::JoinHandle<()>>,
     pub public: Option<crate::public::PublicListener>,
 }
 
@@ -299,7 +297,7 @@ pub async fn start(config: &Config, lock: &InstanceLock, adapters: Adapters) -> 
 
 pub async fn start_with(config: &Config, lock: &InstanceLock, adapters: Adapters, options: StartOptions) -> Result<Started, StartFailure> {
     let StartOptions { public_listener, frozen_clock } = options;
-    let Adapters { kiwoom, kis, kis_feed, stream: stream_source, kiwoom_spacing, dart_spacing } = adapters;
+    let Adapters { kiwoom, kis, kis_feed, stream: stream_source, kiwoom_spacing } = adapters;
     let key_file = KeyFile::new(config.kiwoom_key_path.clone(), lock).with_environment(config.kiwoom_environment);
     let account_file = config.account_state_path.clone().map(|path| AccountStateFile::new(path, lock));
     tracing::info!(environment = config.kiwoom_environment.as_str(), host = %crate::system_routes::kiwoom_target(&config.kiwoom_base_url).host.as_deref().unwrap_or("loopback"), "키움 투자구분으로 켭니다");
@@ -422,21 +420,14 @@ pub async fn start_with(config: &Config, lock: &InstanceLock, adapters: Adapters
     crate::etf::start_collection(state.clone(), config.etf_pdf_dir.clone(), config.naver_base_url.clone());
     crate::kiwoom_themes::start_collection(state.clone(), config.kiwoom_themes_dir.clone());
 
-    let financial_store = crate::financials::store::Store::open(&config.financial_db_path).await;
-    if let Err(failure) = financial_store { tracing::warn!(?failure, "재무 저장소를 열 수 없습니다"); }
-    let dart = config.opendart_api_key.clone().and_then(|key| match dart_spacing {
-        None => crate::financials::client::Client::new(key, config.dart_base_url.clone(), config.kind_base_url.clone()),
-        Some(spacing) => crate::financials::client::Client::with_spacing(key, config.dart_base_url.clone(), config.kind_base_url.clone(), spacing),
-    }.ok());
-    let financials = crate::financials::Financials::with_store(dart, financial_store, clock.clone());
-    let automatic = config.financial_automatic.then(|| financials.start_automatic(crate::financials::symbol_listings(&symbols)));
+    let financials = crate::financials::Financials::read_only(&config.financial_db_path, clock.clone());
     let financial_routes = crate::financials::routes(financials, symbols.clone());
     let public = crate::public::start(config, state.clone(), financial_routes.clone(), public_listener).await?;
     let router = router(state.clone())
         .merge(financial_routes)
         .layer(axum::middleware::from_fn_with_state(state.clone(), crate::public::measure_operator_kiwoom))
         .layer(axum::middleware::from_fn_with_state(state.clone(), crate::write_guard::guard_origin));
-    Ok(Started { state, router, listener, automatic, public })
+    Ok(Started { state, router, listener, public })
 }
 
 async fn shutdown_signal() {

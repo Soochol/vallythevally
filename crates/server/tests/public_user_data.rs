@@ -156,7 +156,6 @@ fn operator_vars(work: &Path) -> BTreeMap<String, String> {
         ("VALLY_KIWOOM_WS_URL", "ws://127.0.0.1:1".to_owned()),
         ("VALLY_PUBLIC_IP_URL", "http://127.0.0.1:1".to_owned()),
         ("VALLY_SCREENER_UPDATE_ON_START", "off".to_owned()),
-        ("VALLY_FINANCIAL_AUTOMATIC", "off".to_owned()),
         ("VALLY_CLOCK_START", THURSDAY_MORNING.to_owned()),
         ("VALLY_KIWOOM_APP_KEY", "test-app-key".to_owned()),
         ("VALLY_KIWOOM_APP_SECRET", "test-app-secret".to_owned()),
@@ -255,11 +254,10 @@ async fn start_site(idp: &Arc<FakeIdp>, env: &[(&str, &str)]) -> Site {
     let wire = Wire::default();
     let lock = server::instance::InstanceLock::acquire(&config.lock_path).unwrap();
     let (events, stream_events) = tokio::sync::mpsc::channel(16);
-    let adapters = Adapters { kiwoom: Arc::new(wire.clone()), kis: None, kis_feed: None, stream: StreamSource::Detached(stream_events), kiwoom_spacing: None, dart_spacing: Some(Duration::from_millis(1)) };
+    let adapters = Adapters { kiwoom: Arc::new(wire.clone()), kis: None, kis_feed: None, stream: StreamSource::Detached(stream_events), kiwoom_spacing: None };
     let options = server::app::StartOptions { public_listener: Some(opened), frozen_clock: false };
     let started = server::app::start_with(&config, &lock, adapters, options).await.unwrap_or_else(|_| panic!("서버가 시작하지 못했다. 원인은 위 tracing 줄(server=error)에 있다"));
-    let server::app::Started { state, router, listener, automatic, public } = started;
-    drop(automatic);
+    let server::app::Started { state, router, listener, public } = started;
     state.rest.set_access(Access::Open);
     let mut tasks = Vec::new();
     let operator_port = listener.local_addr().unwrap().port();

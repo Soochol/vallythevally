@@ -166,9 +166,6 @@ const KNOWN_KEYS: &[&str] = &[
     "VALLY_TELEGRAM_CHAT_ID",
     "VALLY_STATIC_DIR",
     "VALLY_LOG",
-    "OPENDART_API_KEY",
-    "VALLY_DART_BASE_URL",
-    "VALLY_KIND_BASE_URL",
     "VALLY_NAVER_BASE_URL",
     "VALLY_KIS_MASTER_BASE_URL",
     "VALLY_ETF_PDF_DIR",
@@ -176,7 +173,6 @@ const KNOWN_KEYS: &[&str] = &[
     "VALLY_FINANCIAL_DB_PATH",
     "VALLY_MARKET_SAMPLES_DIR",
     "VALLY_KIWOOM_THEMES_DIR",
-    "VALLY_FINANCIAL_AUTOMATIC",
     "VALLY_ACCOUNT_SERVER_URL",
     "VALLY_ACCOUNT_STATE_PATH",
     "VALLY_COLLECTOR_SOCKET",
@@ -211,9 +207,6 @@ pub struct Config {
     pub screener_update_on_start: bool,
     pub screener_snapshot_stale_limit: Duration,
     pub log_filter: String,
-    pub opendart_api_key: Option<Secret<String>>,
-    pub dart_base_url: String,
-    pub kind_base_url: String,
     pub naver_base_url: String,
     pub kis_master_base_url: String,
     pub etf_pdf_dir: PathBuf,
@@ -221,7 +214,6 @@ pub struct Config {
     pub financial_db_path: PathBuf,
     pub market_samples_dir: PathBuf,
     pub kiwoom_themes_dir: PathBuf,
-    pub financial_automatic: bool,
     pub account_server_url: Option<AccountServerUrl>,
     pub account_state_path: Option<PathBuf>,
     pub collector_socket: Option<PathBuf>,
@@ -259,6 +251,13 @@ fn screener_snapshot_stale_limit(vars: &BTreeMap<String, String>) -> Result<Dura
     }
 }
 
+const RETIRED_FINANCIAL_KEYS: &[&str] = &["OPENDART_API_KEY", "VALLY_FINANCIAL_AUTOMATIC", "VALLY_DART_BASE_URL", "VALLY_KIND_BASE_URL"];
+
+fn retired_financial_keys_in(vars: &BTreeMap<String, String>) -> Option<String> {
+    let present: Vec<&str> = RETIRED_FINANCIAL_KEYS.iter().copied().filter(|key| vars.get(*key).is_some_and(|value| !value.is_empty())).collect();
+    (!present.is_empty()).then(|| format!("{}는 서버가 더 쓰지 않아 무시합니다. 재무 수집은 collector financials가 합니다. 설정에서 지우세요", present.join(", ")))
+}
+
 /// 설정을 읽으며 모은 경고. 로그를 켜기 전에 읽으므로 호출자가 나중에 남긴다.
 pub type ConfigWarnings = Vec<String>;
 
@@ -290,9 +289,10 @@ impl Config {
         vars.extend(process);
         let warnings = vars
             .keys()
-            .filter(|k| k.starts_with("VALLY_") && !KNOWN_KEYS.contains(&k.as_str()) && !crate::public::settings::KEYS.contains(&k.as_str()) && !crate::public::settings::REMOVED_KEYS.contains(&k.as_str()))
+            .filter(|k| k.starts_with("VALLY_") && !KNOWN_KEYS.contains(&k.as_str()) && !RETIRED_FINANCIAL_KEYS.contains(&k.as_str()) && !crate::public::settings::KEYS.contains(&k.as_str()) && !crate::public::settings::REMOVED_KEYS.contains(&k.as_str()))
             .map(|k| format!("모르는 설정 키 {k}가 있습니다. 오타인지 확인하세요"))
             .chain(crate::public::settings::removed_keys_in(&vars))
+            .chain(retired_financial_keys_in(&vars))
             .collect();
         let present = |k: &str| vars.get(k).filter(|v| !v.is_empty()).cloned();
         let url = |k: &str| vars.get(k).filter(|v| !v.is_empty()).map(|s| s.trim_end_matches('/').to_owned());
@@ -360,8 +360,6 @@ impl Config {
         if clock_start.is_some() && (kis_credentials.is_some() || kis_urls_given) && kis_base_endpoint == KisEndpoint::Official {
             return Err(ConfigError("VALLY_CLOCK_START는 루프백 한투 주소(VALLY_KIS_BASE_URL, VALLY_KIS_WS_URL)와만 쓸 수 있습니다".into()));
         }
-        let dart_base_url = public_or_loopback("VALLY_DART_BASE_URL", url("VALLY_DART_BASE_URL"), "https://opendart.fss.or.kr")?;
-        let kind_base_url = public_or_loopback("VALLY_KIND_BASE_URL", url("VALLY_KIND_BASE_URL"), "https://kind.krx.co.kr")?;
         let naver_base_url = public_or_loopback("VALLY_NAVER_BASE_URL", url("VALLY_NAVER_BASE_URL"), "https://stock.naver.com")?;
         let kis_master_base_url = public_or_loopback("VALLY_KIS_MASTER_BASE_URL", url("VALLY_KIS_MASTER_BASE_URL"), KIS_MASTER_BASE_URL)?;
         let public_ip_url = public_or_loopback("VALLY_PUBLIC_IP_URL", url("VALLY_PUBLIC_IP_URL"), "https://api.ipify.org")?;
@@ -430,14 +428,6 @@ impl Config {
             collector_socket,
             collector_admins,
             collector_telegram: present("VALLY_COLLECTOR_TELEGRAM").map(PathBuf::from),
-            financial_automatic: match vars.get("VALLY_FINANCIAL_AUTOMATIC").map(String::as_str) {
-                None | Some("on") => true,
-                Some("off") => false,
-                Some(other) => return Err(ConfigError(format!("VALLY_FINANCIAL_AUTOMATIC는 on이나 off입니다: {other}"))),
-            },
-            opendart_api_key: vars.get("OPENDART_API_KEY").filter(|s| !s.is_empty()).cloned().map(Secret::new),
-            dart_base_url,
-            kind_base_url,
             naver_base_url,
             kis_master_base_url,
             etf_pdf_dir: vars.get("VALLY_ETF_PDF_DIR").map(PathBuf::from).unwrap_or_else(|| db_path.with_file_name("etf-pdf")),
@@ -718,22 +708,26 @@ mod tests {
     }
 
     #[test]
-    fn dart_is_optional_redacted_and_uses_separate_rebuildable_storage() {
+    fn retired_financial_keys_still_start_with_one_warning_that_names_no_value() {
         let file = vars(&[("VALLY_KIWOOM_APP_KEY", KEY), ("VALLY_KIWOOM_APP_SECRET", SECRET), ("VALLY_DB_PATH", "isolated/user.db"), ("OPENDART_API_KEY", "file-dart-secret")]);
         let mut process = vars(&REAL);
         process.insert("OPENDART_API_KEY".into(), "process-dart-secret".into());
-        let (config, warnings) = Config::from_vars(file.clone(),process,lock,token,key, account).unwrap();
-        assert!(warnings.is_empty());
-        assert_eq!(config.opendart_api_key.as_ref().unwrap().expose(), "process-dart-secret");
+        process.insert("VALLY_FINANCIAL_AUTOMATIC".into(), "off".into());
+        process.insert("VALLY_DART_BASE_URL".into(), "https://example.com".into());
+        let (config, warnings) = Config::from_vars(file, process, lock, token, key, account).unwrap();
+        let [warning] = warnings.as_slice() else { panic!("{warnings:?}") };
+        assert!(warning.contains("OPENDART_API_KEY") && warning.contains("VALLY_FINANCIAL_AUTOMATIC") && warning.contains("VALLY_DART_BASE_URL") && warning.contains("collector financials"));
+        assert!(!warning.contains("dart-secret") && !warning.contains("example.com") && !warning.contains("unknown"));
         assert_eq!(config.financial_db_path, PathBuf::from("isolated/financials.db"));
         assert_eq!(config.market_samples_dir, PathBuf::from("isolated/market-samples"));
         assert_eq!(config.kiwoom_themes_dir, PathBuf::from("isolated/kiwoom-themes"));
         assert!(!format!("{config:?}").contains("dart-secret"));
-        for endpoint in ["https://example.com", "https://opendart.fss.or.kr.evil.test", "http://user:pass@localhost:19", "http://localhost:19/?key=value"] {
-            let mut process = vars(&REAL);
-            process.insert("VALLY_DART_BASE_URL".into(),endpoint.into());
-            assert!(Config::from_vars(file.clone(),process,lock,token,key, account).is_err());
-        }
+    }
+
+    #[test]
+    fn a_config_without_retired_financial_keys_has_no_warning() {
+        let (_, warnings) = Config::from_vars(vars(&[("VALLY_KIWOOM_APP_KEY", KEY), ("VALLY_KIWOOM_APP_SECRET", SECRET)]), vars(&REAL), lock, token, key, account).unwrap();
+        assert!(warnings.is_empty());
     }
 
     #[test]

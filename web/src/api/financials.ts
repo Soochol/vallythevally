@@ -1,7 +1,6 @@
 import { queryOptions, useQuery } from "@tanstack/react-query";
 import type { FinancialPeriod } from "./generated/FinancialPeriod";
 import type { FinancialsPage } from "./generated/FinancialsPage";
-import { useFinancialJob } from "./financialUpdate";
 import { getJson } from "./http";
 
 interface FinancialRequest {
@@ -20,12 +19,5 @@ export const financialsQuery = (request: FinancialRequest) => queryOptions({
 });
 
 export function useFinancials(symbol: string, period: FinancialPeriod, enabled: boolean) {
-  const { active } = useFinancialJob(enabled);
-  const request = { symbol, period };
-  const query = useQuery({
-    ...financialsQuery(request),
-    enabled,
-    refetchInterval: () => enabled && active ? 1000 : false,
-  });
-  return query;
+  return useQuery({ ...financialsQuery({ symbol, period }), enabled });
 }
