@@ -68,7 +68,6 @@ const lastBarIndex = 19;
 async function shiftAroundFinancialReplacement(page: Page, scenario: Scenario, financial: FinancialFixture, start: keyof typeof starts, replacement: "after first paint" | "before first paint") {
   const { dragPixels, lastBarShown } = starts[start];
   const stored = seedChart(scenario);
-  financial.job({ status: "ready" });
   await page.addInitScript(installChartProbe);
   await page.addInitScript(installFinancialViewportProbe);
   const held = scenario.hold((url) => url.pathname === "/api/symbols/005930/financials");
