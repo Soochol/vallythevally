@@ -4,6 +4,8 @@ use sqlx::{Row, SqlitePool, sqlite::{SqliteConnectOptions, SqliteJournalMode, Sq
 
 use super::model::{Collection, Failure, Security};
 
+const READ_CONNECTIONS: u32 = 4;
+
 #[derive(Clone)]
 pub struct Store(SqlitePool);
 
@@ -14,6 +16,13 @@ impl Store {
 
     pub async fn open_for_collection(path: &Path) -> Result<Self, Failure> {
         Self::open_with(SqliteConnectOptions::new().filename(path).create_if_missing(true).journal_mode(SqliteJournalMode::Wal)).await
+    }
+
+    pub async fn open_read_only(path: &Path) -> Result<Option<Self>, Failure> {
+        if !tokio::fs::try_exists(path).await.map_err(|_| Failure::Storage)? { return Ok(None); }
+        let options = SqliteConnectOptions::new().filename(path).read_only(true).create_if_missing(false);
+        let pool = SqlitePoolOptions::new().max_connections(READ_CONNECTIONS).connect_with(options).await.map_err(|_| Failure::Storage)?;
+        Ok(Some(Self(pool)))
     }
 
     pub fn path(&self) -> std::path::PathBuf {

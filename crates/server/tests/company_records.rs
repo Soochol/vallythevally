@@ -244,7 +244,7 @@ fn an_annual_statement_can_publish_at_its_checkpoint_before_absent_dividends_are
 }
 
 #[test]
-fn collecting_takes_priority_over_failures_and_empty_published_reports() {
+fn failures_decide_the_state_even_while_no_report_is_published() {
     let security = Security {
         stock_code: "005930".into(),
         company: Company { corp_code: "00126380".into(), name: "합성 회사".into(), fiscal_month: Some(12) },
@@ -255,12 +255,11 @@ fn collecting_takes_priority_over_failures_and_empty_published_reports() {
     let collection = Collection { disclosure_failure: Some(Failure::Network), ..Default::default() };
 
     let snapshot = ReadSnapshot::resolve(Some(security), collection, ReadContext::Configured {
-        collecting: true,
         failure: Some(Failure::Storage),
         resolution: ReadResolution::Unchanged,
     });
 
-    assert_eq!(snapshot.state, ReadState::Collecting);
+    assert_eq!(snapshot.state, ReadState::PartialFailure);
     assert_eq!(snapshot.failure, Some(Failure::Storage));
     assert_eq!(snapshot.collection.disclosure_failure, Some(Failure::Network));
     assert!(snapshot.collection.reports.is_empty());
@@ -280,7 +279,7 @@ fn mapping_results_override_company_state_only_without_a_saved_security() {
         for saved in [None, Some(security.clone())] {
             let mapped = saved.is_some();
             let snapshot = ReadSnapshot::resolve(saved, Collection::default(), ReadContext::Configured {
-                collecting: false, failure: None, resolution,
+                failure: None, resolution,
             });
             assert_eq!(snapshot.state, if mapped { ReadState::NotCollected } else { expected });
             assert_eq!(snapshot.reason, if mapped { None } else { reason });
@@ -305,7 +304,7 @@ fn only_published_reports_can_be_ready_or_stale() {
         (Collection { staged_reports: Some(reports), refresh_version: 2, disclosure_version: 1, ..Default::default() }, ReadState::NotCollected),
     ] {
         let snapshot = ReadSnapshot::resolve(None, collection, ReadContext::Configured {
-            collecting: false, failure: None, resolution: ReadResolution::Unchanged,
+            failure: None, resolution: ReadResolution::Unchanged,
         });
         assert_eq!(snapshot.state, expected);
     }
@@ -343,7 +342,6 @@ fn report_failure_takes_priority_over_empty_published_reports_without_top_level_
     };
 
     let snapshot = ReadSnapshot::resolve(None, collection, ReadContext::Configured {
-        collecting: false,
         failure: None,
         resolution: ReadResolution::Unchanged,
     });
