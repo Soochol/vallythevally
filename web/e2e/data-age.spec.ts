@@ -51,7 +51,7 @@ test("순위 창은 미리 만들지 않은 조건이면 안내만 보이고 창
   await expect(page.getByTestId("ranking-window").getByText("미리 만든 조건만 볼 수 있습니다")).toBeVisible();
   await expect(page.getByTestId("ranking-window")).toHaveAttribute("data-ranking", "tradeAmount");
   await expect(page.getByRole("tab", { name: "거래대금", selected: true })).toBeVisible();
-  await expect(page.getByRole("button", { name: "다시 받기" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "다시 시도" })).toHaveCount(0);
 });
 
 test("시장 종합은 장중이면 낡음까지, 장 마감이면 나이만 보인다", async ({ page, scenario }) => {

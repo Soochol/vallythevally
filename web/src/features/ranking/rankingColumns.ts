@@ -1,6 +1,7 @@
 import type { Ranking } from "../../api/generated/Ranking";
 import type { RankingFigures } from "../../api/generated/RankingFigures";
 import type { RankingRow } from "../../api/generated/RankingRow";
+import { LIST_COLUMN_GAP, LIST_PRICE_WIDTH, LIST_RATE_WIDTH } from "../list/listRow";
 import {
   type Cell,
   DASH,
@@ -18,17 +19,30 @@ import {
 export interface Column {
   key: string;
   label: string;
+  width: number;
+  rate: boolean;
   cell(row: RankingRow): Cell;
 }
 
+const PRICE_WIDTH = LIST_PRICE_WIDTH;
+const RATE_WIDTH = LIST_RATE_WIDTH;
+const FIGURE_WIDTH = 72;
+export const RANK_WIDTH = 56;
+const PADDING_X = 24;
+const NAME_MIN = 96;
+const NAME_FLOOR = 64;
+
 type FiguresOf<K extends RankingFigures["kind"]> = Extract<RankingFigures, { kind: K }>;
 
-function figure<K extends RankingFigures["kind"]>(kind: K, key: string, label: string, cell: (figures: FiguresOf<K>) => Cell): Column {
-  return { key, label, cell: (row) => (row.figures.kind === kind ? cell(row.figures as FiguresOf<K>) : DASH) };
+type Shape = "price" | "rate" | "figure";
+const WIDTH: Record<Shape, number> = { price: PRICE_WIDTH, rate: RATE_WIDTH, figure: FIGURE_WIDTH };
+
+function figure<K extends RankingFigures["kind"]>(kind: K, key: string, label: string, cell: (figures: FiguresOf<K>) => Cell, shape: Shape = "figure"): Column {
+  return { key, label, width: WIDTH[shape], rate: shape === "rate", cell: (row) => (row.figures.kind === kind ? cell(row.figures as FiguresOf<K>) : DASH) };
 }
 
-const PRICE: Column = { key: "price", label: "현재가", cell: (row) => priceCell(row.price) };
-const RATE: Column = { key: "changeRate", label: "등락률", cell: (row) => rateCell(row.changeRate) };
+const PRICE: Column = { key: "price", label: "현재가", width: PRICE_WIDTH, rate: false, cell: (row) => priceCell(row.price) };
+const RATE: Column = { key: "changeRate", label: "등락률", width: RATE_WIDTH, rate: true, cell: (row) => rateCell(row.changeRate) };
 
 const NET_AMOUNTS = [
   figure("netAmounts", "net", "순매수", (f) => signedEokCell(f.net)),
@@ -67,8 +81,8 @@ export function columnsFor(ranking: Ranking): readonly Column[] {
       return [PRICE, RATE, figure("movers", "priceChange", "전일대비", (f) => signedWonCell(f.priceChange)), figure("movers", "volume", "거래량", (f) => sharesCell(f.volume))];
     case "expected":
       return [
-        figure("expected", "expectedPrice", "예상체결가", (f) => priceCell(f.expectedPrice)),
-        figure("expected", "expectedChangeRate", "예상 등락률", (f) => rateCell(f.expectedChangeRate)),
+        figure("expected", "expectedPrice", "예상체결가", (f) => priceCell(f.expectedPrice), "price"),
+        figure("expected", "expectedChangeRate", "예상 등락률", (f) => rateCell(f.expectedChangeRate), "rate"),
         figure("expected", "expectedVolume", "예상체결량", (f) => sharesCell(f.expectedVolume)),
       ];
     case "investorNetBuy":
@@ -96,8 +110,8 @@ export function columnsFor(ranking: Ranking): readonly Column[] {
       return [PRICE, RATE, figure("creditRatio", "creditRatio", "신용비율", (f) => percentCell(f.creditRatio)), figure("creditRatio", "volume", "거래량", (f) => sharesCell(f.volume))];
     case "mostViewed":
       return [
-        figure("mostViewed", "referencePrice", "기준 시점 가격", (f) => priceCell(f.referencePrice)),
-        figure("mostViewed", "changeFromReferenceRate", "기준가 대비", (f) => rateCell(f.changeFromReferenceRate)),
+        figure("mostViewed", "referencePrice", "기준 시점 가격", (f) => priceCell(f.referencePrice), "price"),
+        figure("mostViewed", "changeFromReferenceRate", "기준가 대비", (f) => rateCell(f.changeFromReferenceRate), "rate"),
       ];
   }
 }
@@ -105,4 +119,43 @@ export function columnsFor(ranking: Ranking): readonly Column[] {
 export function placesOf(row: RankingRow): Cell | null {
   const { figures } = row;
   return figures.kind === "tradeAmount" || figures.kind === "mostViewed" ? placesGained(figures.placesGained) : null;
+}
+
+const PRIMARY: Readonly<Record<Ranking["kind"], string>> = Object.freeze({
+  tradeAmount: "tradeAmount",
+  tradeVolume: "volume",
+  turnover: "turnoverRate",
+  volumeSurge: "surgeRate",
+  gainers: "changeRate",
+  losers: "changeRate",
+  expected: "expectedChangeRate",
+  investorNetBuy: "net",
+  foreignStreak: "netTotal",
+  program: "net",
+  bidAskBalance: "netBuyRemaining",
+  creditRatio: "creditRatio",
+  mostViewed: "changeFromReferenceRate",
+});
+
+function keepOrder(kind: Ranking["kind"], columns: readonly Column[]): readonly Column[] {
+  const primary = PRIMARY[kind];
+  const rank = (column: Column) => (column.key === primary ? 0 : column.key === "changeRate" || column.rate ? 1 : column.key === "price" ? 2 : 3);
+  return [...columns].sort((a, b) => rank(a) - rank(b) || columns.indexOf(a) - columns.indexOf(b));
+}
+
+export const rankingFixedWidth = PADDING_X + RANK_WIDTH + LIST_COLUMN_GAP;
+
+const widthOf = (columns: readonly Column[]) => columns.reduce((sum, c) => sum + LIST_COLUMN_GAP + c.width, 0);
+
+export function fitRankingColumns(kind: Ranking["kind"], columns: readonly Column[], width: number): readonly Column[] {
+  const ordered = keepOrder(kind, columns);
+  const kept: Column[] = [];
+  for (const column of ordered) {
+    const room = width - rankingFixedWidth - widthOf(kept) - LIST_COLUMN_GAP - column.width;
+    const floor = kept.length === 0 ? NAME_FLOOR : NAME_MIN;
+    if (room < floor) break;
+    kept.push(column);
+  }
+  if (kept.length === 0 && ordered[0]) kept.push(ordered[0]);
+  return columns.filter((column) => kept.includes(column));
 }
