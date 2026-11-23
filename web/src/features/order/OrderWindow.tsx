@@ -39,7 +39,7 @@ import { orderEntryKey } from "./orderEntries";
 import { OrderTotals } from "./OrderTotals";
 import { type CancelConfirm, OrderStatusBar } from "./OrderStatusBar";
 import { REJECT_TEXT } from "./statusText";
-import { buyBlock, CANCEL_CONFIRM_MS, cancelConfirmText, capacityProblem, type DragOutcome, marginOf, modifyBuyProblem, type DragSource, needsCancelConfirm, needsHighValueConfirm, orderAmount, SIDE_LABEL, typedQuantity } from "./orderRules";
+import { buyBlock, CANCEL_CONFIRM_MS, cancelConfirmText, capacityProblem, type DragOutcome, groupKey, marginOf, modifyBuyProblem, type DragSource, needsCancelConfirm, needsHighValueConfirm, orderAmount, orderCountOf, type PriceGroup, SIDE_LABEL, typedQuantity } from "./orderRules";
 import { type PresetKind, routeLabel } from "./orderSettings";
 import { withDirectionJosa } from "./josa";
 import { pendingWrites } from "./pendingWrites";
@@ -48,6 +48,9 @@ import { useOrderAccess, useOrderData } from "./useOrderData";
 import { useOrderAccount } from "./useOrderAccount";
 import { useOrderDrag } from "./useOrderDrag";
 import { useOrderWrites } from "./useOrderWrites";
+
+const targetSignature = (groups: ReadonlyMap<string, PriceGroup>, targets: readonly { readonly side: OrderSide; readonly price: number }[]): string =>
+  targets.flatMap((target) => groups.get(groupKey(target.side, target.price))?.orders.map((order) => order.orderNo) ?? []).sort().join(",");
 
 const EXPLORER_UNAVAILABLE = "상·하한가를 아직 받지 못했습니다";
 const CLOCK_MS = 30_000;
@@ -122,8 +125,7 @@ function OrderBody({ id, code, infoPager }: { id: WindowId; code: SymbolCode; in
   const totals = stripTotals(view && { ask: view.totalAsk, bid: view.totalBid }, visibleAfterHours(feed.afterHours?.totals ?? null, Math.floor(now / 1000)));
   const data = useOrderData(accountRef, code, access.open, referencePrice);
 
-  const openOrderNos = useMemo(() => new Set(data.openOrders.map((order) => order.orderNo)), [data.openOrders]);
-  const cancelConfirmStale = cancelConfirm !== null && (cancelConfirm.account !== accountRef || cancelConfirm.orderNos.some((orderNo) => !openOrderNos.has(orderNo)));
+  const cancelConfirmStale = cancelConfirm !== null && (cancelConfirm.account !== accountRef || targetSignature(data.groups, cancelConfirm.targets) !== cancelConfirm.signature);
   useEffect(() => {
     if (cancelConfirmStale) setCancelConfirm(null);
   }, [cancelConfirmStale]);
@@ -198,20 +200,21 @@ function OrderBody({ id, code, infoPager }: { id: WindowId; code: SymbolCode; in
     else run();
   };
 
-  const cancelMany = (side: OrderSide, orders: readonly TradingOpenOrder[], run: () => void) => {
-    if (needsCancelConfirm(orders.length)) setCancelConfirm({ text: `${SIDE_LABEL[side]} ${cancelConfirmText(orders.length)}`, account: accountRef, orderNos: orders.map((order) => order.orderNo), run: () => { setCancelConfirm(null); run(); } });
+  const cancelMany = (side: OrderSide, targets: readonly PriceGroup[], run: () => void) => {
+    const orderCount = orderCountOf(targets);
+    if (needsCancelConfirm(orderCount)) setCancelConfirm({ text: `${SIDE_LABEL[side]} ${cancelConfirmText(orderCount)}`, account: accountRef, targets, signature: targetSignature(data.groups, targets), run: () => { setCancelConfirm(null); run(); } });
     else run();
   };
 
   const drop = (source: DragSource, outcome: DragOutcome) => {
     if (outcome.kind === "abort") return;
     if (source.kind === "chip") {
-      if (outcome.kind === "cancel") cancelMany(source.group.side, source.group.orders, () => writes.cancelAtPrice(source.group.side, source.group.price));
+      if (outcome.kind === "cancel") cancelMany(source.group.side, [source.group], () => writes.cancelAtPrice(source.group.side, source.group.price));
       else modifyOrders(source.group.side, source.group.price, source.group.orders, outcome.price);
     } else if (source.kind === "order") {
       if (outcome.kind === "cancel") writes.cancelOne(source.order.orderNo);
       else modifyOrders(source.order.side, source.order.price, [source.order], outcome.price);
-    } else cancelMany(source.side, source.groups.flatMap((group) => group.orders), () => source.groups.forEach((group) => writes.cancelAtPrice(group.side, group.price)));
+    } else cancelMany(source.side, source.groups, () => source.groups.forEach((group) => writes.cancelAtPrice(group.side, group.price)));
   };
 
   const pickAccount = useStableCallback((account: string) => setSettings({ ...settings, account }));

@@ -1,6 +1,6 @@
 import type { Page } from "@playwright/test";
 import { type Scenario, expect, pollSaved, test } from "./harness";
-import { accountData, BASE, cellAt, center, chipAt, dragChip, openOrder, openOrderWindow, ordersOn, otherAccount, SECOND_ACCOUNT, status, tradingApi, win, writesTo } from "./order-window";
+import { ACCOUNT, accountData, BASE, cellAt, center, chipAt, dragChip, openOrder, openOrderWindow, ordersOn, otherAccount, SECOND_ACCOUNT, status, tradingApi, win, writesTo } from "./order-window";
 
 const THREE = () => [openOrder("0000001", "buy", 70_000, 5), openOrder("0000002", "buy", 69_900, 3), openOrder("0000003", "sell", 70_100, 4)];
 const ROUTE_LABEL = { combined: "SOR", krx: "KRX", nxt: "NXT" } as const;
@@ -225,4 +225,55 @@ test("정정 고액 확인 상자의 주문 경로는 창의 경로가 아니라
   const where = page.getByRole("dialog").getByTestId("order-confirm-where");
   await expect(where).toContainText("주문 경로 NXT");
   await expect(page.getByRole("dialog").getByTestId("order-confirm")).toContainText("정정");
+});
+
+test("정정 직후 목록에 아직 없는 낙관적 주문이 든 가격도 여러 건 취소 확인이 뜬다", async ({ page, scenario }) => {
+  ordersOn(scenario);
+  const api = tradingApi(scenario, [openOrder("0000001", "buy", 70_000, 5), openOrder("0000002", "buy", 69_900, 3)]);
+  await openOrderWindow(page, scenario);
+  await dragChip(page, chipAt(page, "buy", 69_900), await center(cellAt(page, "buy", 70_000)));
+  await pollSaved(() => writesTo(api, "modify")).toHaveLength(1);
+  await expect(chipAt(page, "buy", 70_000)).toContainText("8");
+  await dragChip(page, chipAt(page, "buy", 70_000), { x: 5, y: 5 });
+  const confirm = page.getByTestId("order-cancel-confirm");
+  await expect(confirm).toHaveText("매수 2건 취소 · 한 번 더 누르기");
+  expect(writesTo(api, "cancel-batch")).toHaveLength(0);
+});
+
+test("여러 건 취소 확인이 떠 있는 동안 같은 가격에 새 주문이 들어오면 확인이 사라지고 요청이 없다", async ({ page, scenario }) => {
+  await page.clock.install({ time: CLOCK_START });
+  ordersOn(scenario);
+  const api = tradingApi(scenario, [openOrder("0000001", "buy", 70_000, 5), openOrder("0000002", "buy", 70_000, 7)]);
+  await openOrderWindow(page, scenario);
+  await page.clock.pauseAt(new Date("2026-11-18T10:05:00+09:00"));
+  await dragChip(page, chipAt(page, "buy", 70_000), { x: 5, y: 5 });
+  const confirm = page.getByTestId("order-cancel-confirm");
+  await expect(confirm).toHaveText("매수 2건 취소 · 한 번 더 누르기");
+  api.open.push(openOrder("0000003", "buy", 70_000, 9));
+  const listed = page.waitForResponse((response) => new URL(response.url()).pathname === "/api/trading/open-orders");
+  scenario.live.emit({ type: "trading_account_changed", accountRef: ACCOUNT });
+  await listed;
+  await page.clock.fastForward(50);
+  await expect(chipAt(page, "buy", 70_000)).toContainText("21");
+  await expect(confirm).toHaveCount(0);
+  expect(api.writes).toHaveLength(0);
+});
+
+test("여러 건 취소 확인이 떠 있는 동안 같은 대상 주문의 목록이 다시 와도 확인이 남고 누르면 나간다", async ({ page, scenario }) => {
+  await page.clock.install({ time: CLOCK_START });
+  ordersOn(scenario);
+  const api = tradingApi(scenario, [openOrder("0000001", "buy", 70_000, 5), openOrder("0000002", "buy", 70_000, 7)]);
+  await openOrderWindow(page, scenario);
+  await page.clock.pauseAt(new Date("2026-11-18T10:05:00+09:00"));
+  await dragChip(page, chipAt(page, "buy", 70_000), { x: 5, y: 5 });
+  const confirm = page.getByTestId("order-cancel-confirm");
+  await expect(confirm).toHaveText("매수 2건 취소 · 한 번 더 누르기");
+  const listed = page.waitForResponse((response) => new URL(response.url()).pathname === "/api/trading/open-orders");
+  scenario.live.emit({ type: "trading_account_changed", accountRef: ACCOUNT });
+  await listed;
+  await page.clock.fastForward(50);
+  await expect(chipAt(page, "buy", 70_000)).toContainText("12");
+  await expect(confirm).toHaveText("매수 2건 취소 · 한 번 더 누르기");
+  await confirm.click();
+  await pollSaved(() => writesTo(api, "cancel-batch")).toHaveLength(1);
 });

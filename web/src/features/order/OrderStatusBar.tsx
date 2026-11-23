@@ -1,10 +1,12 @@
+import type { OrderSide } from "../../api/generated/OrderSide";
 import { CheckCircleIcon, CloseIcon, InfoIcon, WarningIcon } from "../icons";
 import type { OrderStatus, StatusTone } from "./statusText";
 
 export interface CancelConfirm {
   readonly text: string;
   readonly account: string | null;
-  readonly orderNos: readonly string[];
+  readonly targets: readonly { readonly side: OrderSide; readonly price: number }[];
+  readonly signature: string;
   readonly run: () => void;
 }
 
