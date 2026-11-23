@@ -199,9 +199,17 @@ export function useDockInteraction({ root, dock, space, enabled }: { root: RefOb
     const state = useLayoutStore.getState();
     if (!area || (state.layout.placement.dock !== null && state.layout.placement.dock !== dock)) return;
     const capture = operation.kind === "tab" ? root.current! : event.currentTarget;
-    gesture.current = { kind: "pressed", start: { pointer: event.pointerId, window, operation, point: { x: event.clientX, y: event.clientY }, dock, expected: state.layout.placement.dock, area, session: state.session, topology: topologyOf(state.layout.windows), capture } };
+    const start: Start = { pointer: event.pointerId, window, operation, point: { x: event.clientX, y: event.clientY }, dock, expected: state.layout.placement.dock, area, session: state.session, topology: topologyOf(state.layout.windows), capture };
+    gesture.current = { kind: "pressed", start };
     focusWithoutActivation(event.currentTarget);
     capture.setPointerCapture(event.pointerId);
+    const watchCapture = () => {
+      const active = gesture.current;
+      if (active.kind === "idle" || active.start !== start) return;
+      if (capture.hasPointerCapture(start.pointer)) requestAnimationFrame(watchCapture);
+      else finishRef.current(true);
+    };
+    requestAnimationFrame(watchCapture);
     if (operation.kind !== "tab") { choose(window.id); setOutcome({ draft: frontFloat(dock, window.id), next: dock, preview: { kind: "unchanged" }, guides: NO_GUIDES, atMinimum: false }); }
   };
   const openMenu = (window: WindowId, x: number, y: number) => {
