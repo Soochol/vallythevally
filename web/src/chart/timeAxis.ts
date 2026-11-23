@@ -61,13 +61,32 @@ export function chartTimeProjection(scale: ChartTimeScale, period: Period) {
   };
 }
 
-export function preserveTimeRange(scale: ChartTimeScale, period: Period, change: () => void): void {
+type ScrollScale = Pick<ChartTimeScale, "scrollPosition" | "scrollToPosition">;
+
+export class PendingScroll {
+  private pending: { from: number; target: number } | null = null;
+
+  position(scale: ScrollScale): number {
+    const position = scale.scrollPosition();
+    return this.pending && this.pending.from === position ? this.pending.target : position;
+  }
+
+  scrollTo(scale: ScrollScale, target: number): void {
+    const position = scale.scrollPosition();
+    const from = this.pending && this.pending.from === position ? this.pending.from : position;
+    this.pending = { from, target };
+    scale.scrollToPosition(target, false);
+  }
+}
+
+export function preserveTimeRange(scale: ChartTimeScale, period: Period, scroll: PendingScroll, change: () => void): void {
   const range = scale.getVisibleLogicalRange();
   const index = range ? Math.max(0, Math.floor(range.to)) : 0;
   const anchor = chartTimeProjection(scale, period).toTime(index);
+  const base = scroll.position(scale);
   change();
   if (!range || anchor === null) return;
   const moved = chartTimeProjection(scale, period).toLogical(anchor);
   const current = scale.getVisibleLogicalRange();
-  if (moved !== null && current) scale.scrollToPosition(scale.scrollPosition() + range.to + moved - index - current.to, false);
+  if (moved !== null && current) scroll.scrollTo(scale, base + range.to + moved - index - current.to);
 }
