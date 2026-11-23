@@ -120,3 +120,40 @@ test("같은 가격 일괄 취소도 계좌가 다르면 서로 합쳐지지 않
   expect([first.send, second.send]).toEqual([true, true]);
   expect(ledger.issue(actionInAccount(action, "account-a")).send).toBe(false);
 });
+
+test("창의 재전송 줄을 꺼내면 그 창만 비고 되돌려 넣으면 그대로 되찾는다", () => {
+  const ledger = createLedger(counter());
+  const action = placeAction("005930", "buy", 71_000, 10, "krx");
+  const left2 = ledger.issueEach("order-2", action);
+  const left3 = ledger.issueEach("order-3", action);
+  ledger.settleEach("order-2", action, left2, "unanswered");
+  ledger.settleEach("order-3", action, left3, "unanswered");
+  const taken = ledger.takeWindowResends("order-2");
+  expect(ledger.issueEach("order-2", action)).toBe("id-3");
+  expect(ledger.issueEach("order-3", action)).toBe(left3);
+  ledger.restoreWindowResends("order-2", taken);
+  expect(ledger.issueEach("order-2", action)).toBe(left2);
+  expect(ledger.takeWindowResends("order-9").queues.size).toBe(0);
+});
+
+test("창을 꺼낸 동안 끝난 응답 없음은 버려지지 않고 되돌려 넣은 창에서 다시 쓴다", () => {
+  const ledger = createLedger(counter());
+  const action = placeAction("005930", "buy", 71_000, 10, "krx");
+  const sending = ledger.issueEach("order-2", action);
+  const taken = ledger.takeWindowResends("order-2");
+  ledger.settleEach("order-2", action, sending, "unanswered");
+  expect(ledger.issueEach("order-2", action)).toBe("id-2");
+  ledger.takeWindowResends("order-2");
+  ledger.restoreWindowResends("order-2", taken);
+  expect(ledger.issueEach("order-2", action)).toBe(sending);
+});
+
+test("끝난 id는 받아 간 기록에 남지 않아 다시 끝나도 줄에 두 번 들어가지 않는다", () => {
+  const ledger = createLedger(counter());
+  const action = placeAction("005930", "buy", 71_000, 10, "krx");
+  const sending = ledger.issueEach(WINDOW, action);
+  ledger.settleEach(WINDOW, action, sending, "unanswered");
+  ledger.settleEach(WINDOW, action, sending, "unanswered");
+  expect(ledger.issueEach(WINDOW, action)).toBe(sending);
+  expect(ledger.issueEach(WINDOW, action)).toBe("id-2");
+});

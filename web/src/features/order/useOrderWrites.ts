@@ -1,11 +1,12 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useRef, useState } from "react";
+import type { Broker } from "../../api/generated/Broker";
 import type { OrderCommand } from "../../api/generated/OrderCommand";
 import type { OrderCommands } from "../../api/generated/OrderCommands";
 import type { OrderSide } from "../../api/generated/OrderSide";
 import type { TradingOpenOrder } from "../../api/generated/TradingOpenOrder";
 import type { Venue } from "../../api/generated/Venue";
-import { actionInAccount, cancelAction, cancelBatchAction, createLedger, modifyAction, newIdFor, placeAction, type Settlement } from "./commandLedger";
+import { actionInAccount, cancelAction, cancelBatchAction, modifyAction, orderLedger, placeAction, type Settlement } from "./commandLedger";
 import type { CurrentAccount } from "./orderAccount";
 import { cancelOrder, cancelOrdersAtPrice, modifyOrder, placeOrder, reconcileOrders } from "./orderApi";
 import { needsHighValueConfirm } from "./orderRules";
@@ -18,15 +19,14 @@ export const ORDER_QUERY_KEY = ["order"] as const;
 
 const accountField = (ref: string | null): { account?: string } => (ref === null ? {} : { account: ref });
 
-const ledger = createLedger(newIdFor);
 let placeSequence = 0;
 
-export function statusOfBatch(result: OrderCommands): OrderStatus {
+export function statusOfBatch(result: OrderCommands, broker: Broker): OrderStatus {
   if (result.commands.length === 0) return { tone: "info", text: "취소할 주문이 없습니다" };
   const worst = result.commands.find((c) => c.state === "unknown") ?? result.commands.find((c) => c.state === "rejected") ?? result.commands[0]!;
   const done = result.commands.filter((c) => c.state === "accepted").length;
   if (worst.state === "accepted") return { tone: "ok", text: `취소 접수 · ${done}건` };
-  const status = statusOfCommand(worst);
+  const status = statusOfCommand(worst, broker);
   return done > 0 ? { ...status, text: `${status.text} (접수 ${done}건)` } : status;
 }
 
@@ -77,14 +77,15 @@ export function useOrderWrites(account: CurrentAccount | null, code: string, ven
   }, [status]);
   const tail = useRef<Promise<void>>(Promise.resolve());
   const accountRef = account?.ref ?? null;
+  const broker = account?.broker ?? "kiwoom";
   const writeScope = `${account?.state ?? ""}|${accountRef ?? ""}`;
   useEffect(() => () => pendingWrites.clear(code), [code, writeScope]);
 
   const enqueue: <T>(plan: Plan<T>) => void = useCallback(<T,>(plan: Plan<T>) => {
     const ledgerKey = actionInAccount(plan.action, accountRef);
-    const coalesced = plan.coalesce ? ledger.issue(ledgerKey) : null;
+    const coalesced = plan.coalesce ? orderLedger.issue(ledgerKey) : null;
     if (coalesced && !coalesced.send) return;
-    const commandId = coalesced?.id ?? ledger.issueEach(windowId, ledgerKey);
+    const commandId = coalesced?.id ?? orderLedger.issueEach(windowId, ledgerKey);
     pendingWrites.begin(plan.mark);
     setQueued((n) => n + 1);
     tail.current = tail.current.then(async () => {
@@ -99,8 +100,8 @@ export function useOrderWrites(account: CurrentAccount | null, code: string, ven
         setStatus(statusOfFailure(error, () => enqueue(plan)));
       } finally {
         pendingWrites.resolve(plan.mark.key, []);
-        if (coalesced) ledger.settle(ledgerKey, settlement);
-        else ledger.settleEach(windowId, ledgerKey, commandId, settlement);
+        if (coalesced) orderLedger.settle(ledgerKey, settlement);
+        else orderLedger.settleEach(windowId, ledgerKey, commandId, settlement);
         setQueued((n) => n - 1);
         void queryClient.invalidateQueries({ queryKey: ORDER_QUERY_KEY });
       }
@@ -115,13 +116,13 @@ export function useOrderWrites(account: CurrentAccount | null, code: string, ven
       mark: { kind: "sending", key: `${action}|${++placeSequence}`, code, side: r.side, price: r.price, quantity: r.quantity, listedWhenIn: r.listedWhenIn },
       starting: statusOfSending(r.side, r.quantity, r.price),
       call: (commandId) => placeOrder({ ...accountField(accountRef), commandId, code, side: r.side, quantity: r.quantity, price: r.price, venue, confirmHighValue: r.confirmHighValue }),
-      describe: (command) => withMargin(statusOfCommand(command), r.margin ?? 0),
+      describe: (command) => withMargin(statusOfCommand(command, broker), r.margin ?? 0),
       settled: (command) => {
         const orderNo = acceptedOrderNo(command);
         return orderNo === null ? [] : [{ kind: "placed", code, order: openOrderOf(orderNo, code, venue, r.side, r.price, r.quantity) }];
       },
     });
-  }, [code, venue, enqueue, accountRef]);
+  }, [code, venue, enqueue, accountRef, broker]);
 
   const modifyAll = useCallback((targets: readonly TradingOpenOrder[], price: number) => {
     for (const order of targets) {
@@ -132,7 +133,7 @@ export function useOrderWrites(account: CurrentAccount | null, code: string, ven
         mark: { kind: "modifying", key: action, code, orderNo: order.orderNo },
         starting: statusOfModifying(order.price, price),
         call: (commandId) => modifyOrder({ ...accountField(accountRef), commandId, orderNo: order.orderNo, price, confirmHighValue: needsHighValueConfirm(price, order.openQuantity) }),
-        describe: statusOfCommand,
+        describe: (command) => statusOfCommand(command, broker),
         settled: (command) => {
           if (command.state !== "accepted") return [];
           const replaced: PendingDraft = { kind: "gone", code, orderNo: order.orderNo };
@@ -140,7 +141,7 @@ export function useOrderWrites(account: CurrentAccount | null, code: string, ven
         },
       });
     }
-  }, [code, enqueue, accountRef]);
+  }, [code, enqueue, accountRef, broker]);
 
   const cancelOne = useCallback((orderNo: string) => {
     const action = cancelAction(orderNo);
@@ -150,10 +151,10 @@ export function useOrderWrites(account: CurrentAccount | null, code: string, ven
       mark: { kind: "canceling", key: action, code, orderNo },
       starting: statusOfCanceling(),
       call: (commandId) => cancelOrder({ ...accountField(accountRef), commandId, orderNo }),
-      describe: statusOfCommand,
+      describe: (command) => statusOfCommand(command, broker),
       settled: (command) => command.state === "accepted" ? [{ kind: "gone", code, orderNo }] : [],
     });
-  }, [code, enqueue, accountRef]);
+  }, [code, enqueue, accountRef, broker]);
 
   const cancelAtPrice = useCallback((side: OrderSide, price: number) => {
     const action = cancelBatchAction(code, side, price);
@@ -163,10 +164,10 @@ export function useOrderWrites(account: CurrentAccount | null, code: string, ven
       mark: { kind: "canceling-price", key: action, code, side, price },
       starting: statusOfCanceling({ side, price }),
       call: (batchId) => cancelOrdersAtPrice({ ...accountField(accountRef), batchId, code, side, price }),
-      describe: statusOfBatch,
+      describe: (result) => statusOfBatch(result, broker),
       settled: (result) => result.commands.flatMap((command) => command.state === "accepted" && command.targetOrderNo !== null ? [{ kind: "gone", code, orderNo: command.targetOrderNo } satisfies PendingDraft] : []),
     });
-  }, [code, enqueue, accountRef]);
+  }, [code, enqueue, accountRef, broker]);
 
   const reconcile = useCallback(() => {
     reconcileOrders(accountRef).then(

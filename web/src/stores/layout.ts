@@ -23,6 +23,8 @@ import { MAX_WINDOWS, windowId, WINDOW_KINDS, type WindowId, type WindowKind, ty
 import type { CanvasPlacement, DockPlacement, Placement } from "../layout/placement";
 import { isIndexCode } from "../lib/symbol";
 import { readDockOrigins, writeDockOrigins } from "../persist/dockOrigins";
+import { newWindowResends, orderLedger, type WindowResends } from "../features/order/commandLedger";
+import type { OrderEntries } from "../features/order/orderEntries";
 import { useUiStore } from "./ui";
 
 type ChartWindowWire = Extract<LayoutWindow, { kind: "chart" }>;
@@ -139,7 +141,8 @@ function freeChartId(windows: readonly WindowState[]): WindowId {
 
 export const ARRANGEMENT_STEPS = 20;
 export type Arrangement = Pick<EditableLayout, "windows" | "placement">;
-export type ArrangementStep = { id: number; before: Arrangement; dockOrigins: DockOrigins };
+export type ReclaimedWindow = { layoutId: string; window: string; entries: OrderEntries; resends: WindowResends };
+export type ArrangementStep = { id: number; before: Arrangement; dockOrigins: DockOrigins; reclaimed?: ReclaimedWindow };
 export type DockRoom = { area: Size; gap: number };
 
 let lastStepId = 0;
@@ -232,7 +235,21 @@ function returnTo(s: Pick<LayoutState, "layout" | "revision">, step: Arrangement
   return { dockOrigins: step.dockOrigins, layout: { ...s.layout, windows, placement: step.before.placement }, revision: s.revision + 1 };
 }
 
+function swapReclaimed(reclaimed: ReclaimedWindow): ReclaimedWindow {
+  const ui = useUiStore.getState();
+  const current = { layoutId: reclaimed.layoutId, window: reclaimed.window, entries: ui.takeOrderWindow(reclaimed.layoutId, reclaimed.window), resends: orderLedger.takeWindowResends(reclaimed.window) };
+  ui.restoreOrderWindow(reclaimed.layoutId, reclaimed.window, reclaimed.entries);
+  orderLedger.restoreWindowResends(reclaimed.window, reclaimed.resends);
+  return current;
+}
+
+const withReclaimed = (step: ArrangementStep, reclaimed: ReclaimedWindow | undefined): ArrangementStep => (reclaimed ? { ...step, reclaimed } : step);
+
 export const useLayoutStore = create<LayoutState>()((set, get) => {
+  const reclaimWindowId = (layoutId: string, window: string) => {
+    const reclaimed = swapReclaimed({ layoutId, window, entries: {}, resends: newWindowResends() });
+    set((s) => ({ steps: s.steps.map((step, i) => (i === s.steps.length - 1 ? withReclaimed(step, reclaimed) : step)) }));
+  };
   const canvasActive = () => useUiStore.getState().prefs.layoutMode === "canvas" && get().canvasArea !== null;
   const arrangeCanvas = (windows: WindowState[], canvas: CanvasPlacement) => {
     const { layout } = get();
@@ -332,20 +349,24 @@ export const useLayoutStore = create<LayoutState>()((set, get) => {
     setCrosshairSync: (enabled) => set((s) => s.layout.sync.crosshair === enabled ? s : { layout: { ...s.layout, sync: { ...s.layout.sync, crosshair: enabled } }, revision: s.revision + 1 }),
     setCrosshairScope: (scope) => set((s) => s.layout.sync.crosshair && s.layout.sync.crosshairScope === scope ? s : { layout: { ...s.layout, sync: { ...s.layout.sync, crosshair: true, crosshairScope: scope } }, revision: s.revision + 1 }),
     arrange,
-    undoArrangement: () =>
+    undoArrangement: () => {
+      const step = get().steps.at(-1);
+      if (!step) return;
+      const current = step.reclaimed && swapReclaimed(step.reclaimed);
       set((s) => {
-        const step = s.steps.at(-1);
-        if (!step) return s;
-        const redo = { id: ++lastStepId, dockOrigins: s.dockOrigins, before: { windows: s.layout.windows, placement: s.layout.placement } };
+        const redo = withReclaimed({ id: ++lastStepId, dockOrigins: s.dockOrigins, before: { windows: s.layout.windows, placement: s.layout.placement } }, current);
         return { ...returnTo(s, step), steps: s.steps.slice(0, -1), redos: [...s.redos, redo].slice(-ARRANGEMENT_STEPS) };
-      }),
-    redoArrangement: () =>
+      });
+    },
+    redoArrangement: () => {
+      const redo = get().redos.at(-1);
+      if (!redo) return;
+      const current = redo.reclaimed && swapReclaimed(redo.reclaimed);
       set((s) => {
-        const redo = s.redos.at(-1);
-        if (!redo) return s;
-        const step = { id: ++lastStepId, dockOrigins: s.dockOrigins, before: { windows: s.layout.windows, placement: s.layout.placement } };
+        const step = withReclaimed({ id: ++lastStepId, dockOrigins: s.dockOrigins, before: { windows: s.layout.windows, placement: s.layout.placement } }, current);
         return { ...returnTo(s, redo), steps: [...s.steps, step].slice(-ARRANGEMENT_STEPS), redos: s.redos.slice(0, -1) };
-      }),
+      });
+    },
     setDock: (dock) => arrangeDock(get().layout.windows, dock),
     settleDock: settle,
     selectTab: (window) => {
@@ -383,13 +404,13 @@ export const useLayoutStore = create<LayoutState>()((set, get) => {
       const canvasArea = get().canvasArea;
       if (canvasActive() && canvasArea) {
         arrangeCanvas(next, bringToFront(fitCanvas(placement.canvas, windowRefs(next), canvasArea), id));
-        useUiStore.getState().forgetOrderWindow(get().layout.id, id);
+        reclaimWindowId(get().layout.id, id);
         return id;
       }
       const dock = fittedDock(get().layout);
       if (targetGroup && !findGroup(dock.root, targetGroup)) return null;
       arrangeDock(next, targetGroup ? putTab(dock, id, targetGroup) : selectTab(fitDock(placement.dock, windowRefs(next)), id));
-      useUiStore.getState().forgetOrderWindow(get().layout.id, id);
+      reclaimWindowId(get().layout.id, id);
       return id;
     },
     duplicateWindow: (window) => {
@@ -402,7 +423,7 @@ export const useLayoutStore = create<LayoutState>()((set, get) => {
       if (!group) return null;
       const id = freeWindowId(layout.windows, source.kind);
       arrangeDock([...layout.windows, { ...source, id }], putTab(dock, id, group.id, group.tabs.indexOf(window) + 1));
-      useUiStore.getState().forgetOrderWindow(layout.id, id);
+      reclaimWindowId(layout.id, id);
       return id;
     },
     addChart: (from, room, targetGroup) => {
