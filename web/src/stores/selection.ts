@@ -102,7 +102,7 @@ export const useSelectionStore = create<SelectionState>()((set, get) => ({
 function keepNewest(toasts: readonly ToastEntry[]): readonly ToastEntry[] {
   const kept = [...toasts];
   while (kept.length > MAX_TOASTS) {
-    const evicted = kept.findIndex((toast) => toast.tone !== "error");
+    const evicted = kept.slice(0, -1).findIndex((toast) => toast.tone !== "error");
     kept.splice(evicted < 0 ? 0 : evicted, 1);
   }
   return kept;

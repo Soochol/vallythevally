@@ -1,5 +1,5 @@
 import { Popover } from "../overlay/Popover";
-import { useEffect, useState, useSyncExternalStore } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { useSelectionStore, visibleToasts, type ToastEntry, type ToastTone, type ToastUndo } from "../../stores/selection";
 import { CheckCircleIcon, CloseIcon, InfoIcon, WarningIcon } from "../icons";
 import { Kbd } from "../ui/Kbd";
@@ -14,10 +14,27 @@ const TONE_ICON: Record<ToastTone, () => React.ReactNode> = {
   error: () => <WarningIcon />,
 };
 
+function raiseToTop(stack: HTMLElement) {
+  const focused = document.activeElement;
+  const restore = focused instanceof HTMLElement && stack.contains(focused) ? focused : null;
+  stack.hidePopover();
+  stack.showPopover();
+  restore?.focus({ preventScroll: true });
+}
+
 export function Toast() {
   const toasts = useSelectionStore((s) => visibleToasts(s));
+  const newest = toasts.at(-1)?.id;
+  const shownNewest = useRef<number | undefined>(undefined);
+  useEffect(() => {
+    const previous = shownNewest.current;
+    shownNewest.current = newest;
+    if (previous === undefined || newest === undefined || previous === newest) return;
+    const stack = document.querySelector<HTMLElement>(".ui-toast-stack");
+    if (stack?.matches(":popover-open")) raiseToTop(stack);
+  }, [newest]);
   if (toasts.length === 0) return null;
-  return <Popover key={toasts[toasts.length - 1]!.id} dismiss={false} focus={false} blockChartKeys={false} restoreFocus={false} onClose={KEEP_OPEN} data-layer-passthrough="" className="ui-toast-stack">
+  return <Popover dismiss={false} focus={false} blockChartKeys={false} restoreFocus={false} onClose={KEEP_OPEN} data-layer-passthrough="" className="ui-toast-stack">
     {toasts.map((toast) => <ToastItem key={toast.id} toast={toast} />)}
   </Popover>;
 }

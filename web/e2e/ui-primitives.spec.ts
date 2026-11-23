@@ -141,3 +141,18 @@ test("알림이 떠 있는 채 대화상자 안에서 뜬 알림도 가림막 �
   await added.getByRole("button", { name: "되돌리기" }).click();
   await expect(dialog).toBeVisible();
 });
+
+test("새 알림이 떠도 이미 떠 있는 알림은 다시 만들어지지 않아 남은 시간을 잃지 않는다", async ({ page, scenario }) => {
+  await page.clock.install({ time: scenario.now });
+  await open(page);
+  await closeButton(page, "스크리너").click();
+  const first = toasts(page).filter({ hasText: "스크리너 창을 닫았습니다" });
+  await expect(first).toBeVisible();
+  await first.evaluate((node) => node.setAttribute("data-mark", "kept"));
+  await page.clock.fastForward(1000);
+  await closeButton(page, "관심종목").evaluate((button) => (button as HTMLElement).click());
+  await expect(toasts(page).filter({ hasText: "관심종목 창을 닫았습니다" })).toBeVisible();
+  await expect(first).toHaveAttribute("data-mark", "kept");
+  await page.clock.fastForward(5500);
+  await expect(first).toHaveCount(0);
+});

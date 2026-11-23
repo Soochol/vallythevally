@@ -60,3 +60,9 @@ test("error만 셋이 쌓인 뒤에는 가장 오래된 error가 밀려난다", 
   for (const text of ["가", "나", "다", "라"]) store().showToast(text, { tone: "error" });
   expect(texts()).toEqual(["나", "다", "라"]);
 });
+
+test("error가 셋 쌓인 뒤에 온 알림은 밀려나지 않고 가장 오래된 error가 밀려난다", () => {
+  for (const text of ["가", "나", "다"]) store().showToast(text, { tone: "error" });
+  store().showToast("관심종목에서 뺐습니다", undo);
+  expect(texts()).toEqual(["나", "다", "관심종목에서 뺐습니다"]);
+});
