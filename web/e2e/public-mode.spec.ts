@@ -15,7 +15,7 @@ const SESSION: PublicSession = { provider: "google", createdAt: Date.parse("2026
 const SETTINGS = { v: 1, style: "candle", scale: "normal", indicators: [], compare: [], panels: [] } as const;
 const TRADE_AMOUNT: Ranking = { kind: "tradeAmount", market: "all", venue: "combined", excludes: { etfEtn: true, preferred: false }, excludeManaged: false };
 const EMPTY_TITLE = "실시간·차트 연결은 준비 중입니다";
-const KST_MINUTE_MS = 60_000;
+const FLOW_REFRESH_MS = 60_000;
 
 const landing = (page: Page) => page.getByTestId("landing");
 const loginDialog = (page: Page) => page.getByRole("dialog", { name: "로그인", exact: true });
@@ -229,20 +229,17 @@ test.describe("로그인 뒤", () => {
     expect(Math.max(...rankingCalls(scenario).map((call) => call.pages))).toBe(5);
   });
 
-  test("흐름은 KST 분이 바뀐 뒤 2~10초 사이에 다시 요청한다", async ({ page, scenario }) => {
+  test("흐름은 첫 로딩 뒤 60초가 지나야 다시 요청한다", async ({ page, scenario }) => {
     seedHeatmapThemes(scenario, structuredClone(HEATMAP_TABLE));
     const asked = seedHeatmapFlow(scenario, HEATMAP_FLOWS);
     await page.clock.install({ time: scenario.now });
     await page.goto("/heatmap?view=flow");
     await expect(flowLine(page)).toHaveCount(2);
     const loaded = asked.length;
-    const now = await page.evaluate(() => Date.now());
-    const pausedAt = now + 1_000;
-    await page.clock.pauseAt(pausedAt);
-    const untilNextMinute = KST_MINUTE_MS - (pausedAt % KST_MINUTE_MS);
-    await page.clock.runFor(untilNextMinute + 1_900);
+    await page.clock.pauseAt(await page.evaluate(() => Date.now()) + 1_000);
+    await page.clock.runFor(FLOW_REFRESH_MS - 5_000);
     expect(asked).toHaveLength(loaded);
-    await page.clock.runFor(8_200);
+    await page.clock.runFor(10_000);
     await expect.poll(() => asked.length).toBe(loaded * 2);
   });
 
