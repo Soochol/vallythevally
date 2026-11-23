@@ -2,17 +2,17 @@ use std::collections::{HashMap, HashSet};
 use std::fmt;
 use std::sync::Arc;
 
-use domain::{IndexCode, KstDate, Price, StockCode, Venue};
+use domain::{Feed, IndexCode, KstDate, Period, Price, SeriesKey, StockCode, Venue};
 use futures::{StreamExt, TryFutureExt, TryStreamExt, stream};
 
 use super::{Calendar, CalendarUse, Screener};
 use super::store::{DayBar, Listed, Store, Tail, Write};
 use crate::api::UpdatePhase;
 use crate::bars::BarError;
-use crate::kiwoom::api::{DailyChart, IndexDailyChart, StockQuotes};
+use crate::kiwoom::api::{DailyChart, StockQuotes};
 use crate::kiwoom::error::{Failure, Surface};
 use crate::kiwoom::rest::{ContKey, KiwoomError, MergeScope, Priority};
-use crate::kiwoom::wire::{KrxDayQuote, index_days, parse_krx_daily, parse_krx_quotes};
+use crate::kiwoom::wire::{KrxDayQuote, parse_krx_daily, parse_krx_quotes};
 
 const IN_FLIGHT: usize = 2;
 const MAX_HISTORY_PAGES: usize = 100;
@@ -102,12 +102,13 @@ impl Screener {
     }
 
     async fn kospi_days_back_to(&self, stored_through: Option<KstDate>) -> Result<Vec<KstDate>, BarError> {
-        let req = IndexDailyChart::new(IndexCode::KOSPI, self.clock.now().kst_date());
+        let key = SeriesKey { feed: Feed::Index(IndexCode::KOSPI), period: Period::Day };
+        let base = self.clock.now().kst_date();
         let mut pages = Vec::new();
         let mut cont = None;
         for _ in 0..MAX_HISTORY_PAGES {
-            let page = self.kiwoom.rest()?.call(&req, cont.as_ref(), Priority::Background, MergeScope::default()).await?;
-            let days = index_days(page.body).map_err(|e| BarError::Internal(format!("코스피 일봉 응답을 읽지 못했습니다: {e}")))?;
+            let page = self.bars.source().chart_page(key, base, cont, Priority::Background, MergeScope::default()).await?;
+            let days: Vec<KstDate> = page.bars.iter().map(|bar| bar.bucket.start().kst_date()).collect();
             let reaches_stored = stored_through.is_some_and(|last| days.first().is_some_and(|oldest| *oldest <= last));
             pages.push(days);
             cont = page.next;

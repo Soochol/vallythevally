@@ -384,12 +384,7 @@ impl MarketSource for KisMarket {
         Box::pin(async move {
             let mut out = Vec::new();
             for chunk in rows.chunks(MULTI_PRICE_MAX_ROWS) {
-                let query = chunk
-                    .iter()
-                    .enumerate()
-                    .flat_map(|(i, (code, venue))| [(MULTI_MARKET_KEYS[i], market_division(*venue).to_owned()), (MULTI_CODE_KEYS[i], code.as_str().to_owned())])
-                    .collect();
-                let body: MultiPriceBody = self.body(KisApiId::MultiPrice, query, priority).await?;
+                let body = multi_price_body(&self.rest, chunk, priority).await?;
                 let mut unmatched: Vec<(StockCode, Venue)> = chunk.to_vec();
                 for row in body.output {
                     let Ok(code) = StockCode::parse(row.inter_shrn_iscd.trim()) else { continue };
@@ -591,6 +586,39 @@ fn price_query(code: StockCode, venue: Venue) -> Vec<(&'static str, String)> {
     vec![("FID_COND_MRKT_DIV_CODE", market_division(venue).into()), ("FID_INPUT_ISCD", code.as_str().into())]
 }
 
+async fn multi_price_body(rest: &KisRest, chunk: &[(StockCode, Venue)], priority: Priority) -> Result<MultiPriceBody, SourceError> {
+    let query = chunk
+        .iter()
+        .enumerate()
+        .flat_map(|(i, (code, venue))| [(MULTI_MARKET_KEYS[i], market_division(*venue).to_owned()), (MULTI_CODE_KEYS[i], code.as_str().to_owned())])
+        .collect();
+    let page = rest.call(KisRequest::new(KisApiId::MultiPrice, query, kis_priority(priority))).await.map_err(|e| failure_of(&e))?;
+    parse_body(KisApiId::MultiPrice, &page)
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DayValues {
+    pub price_centi: u64,
+    pub base_centi: u64,
+    pub open_centi: u64,
+    pub high_centi: u64,
+    pub low_centi: u64,
+    pub volume: u64,
+    pub traded_won: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DayRow {
+    pub code: StockCode,
+    pub values: Result<DayValues, String>,
+}
+
+pub async fn multi_price_day_rows(rest: &KisRest, chunk: &[(StockCode, Venue)], priority: Priority) -> Result<Vec<DayRow>, SourceError> {
+    assert!(chunk.len() <= MULTI_PRICE_MAX_ROWS, "멀티종목 시세는 {MULTI_PRICE_MAX_ROWS}종목까지 한 번에 받는다");
+    let body = multi_price_body(rest, chunk, priority).await?;
+    Ok(body.output.iter().filter_map(|row| Some(DayRow { code: StockCode::parse(row.inter_shrn_iscd.trim()).ok()?, values: row.day_values() })).collect())
+}
+
 fn minute_floor(t: KstTime) -> KstTime {
     t.plus_secs(-(t.unix().rem_euclid(60)))
 }
@@ -701,8 +729,26 @@ struct MultiPriceRow {
     inter_shrn_iscd: String,
     inter2_prpr: String,
     inter2_sdpr: String,
+    inter2_oprc: String,
+    inter2_hgpr: String,
+    inter2_lwpr: String,
     acml_vol: String,
     acml_tr_pbmn: String,
+}
+
+impl MultiPriceRow {
+    fn day_values(&self) -> Result<DayValues, String> {
+        let field = |name: &str, value: Option<u64>| value.ok_or_else(|| format!("{name}을 읽을 수 없습니다"));
+        Ok(DayValues {
+            price_centi: field("inter2_prpr", centi(&self.inter2_prpr))?,
+            base_centi: field("inter2_sdpr", centi(&self.inter2_sdpr))?,
+            open_centi: field("inter2_oprc", centi(&self.inter2_oprc))?,
+            high_centi: field("inter2_hgpr", centi(&self.inter2_hgpr))?,
+            low_centi: field("inter2_lwpr", centi(&self.inter2_lwpr))?,
+            volume: field("acml_vol", whole(&self.acml_vol))?,
+            traded_won: field("acml_tr_pbmn", whole(&self.acml_tr_pbmn))?,
+        })
+    }
 }
 
 #[derive(Deserialize, Default)]
