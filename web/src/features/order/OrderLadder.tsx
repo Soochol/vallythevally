@@ -1,9 +1,9 @@
-import { memo, type ReactNode, type RefObject, useCallback, useLayoutEffect, useMemo, useState } from "react";
+import { memo, type ReactNode, type RefObject, useCallback, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { OrderSide } from "../../api/generated/OrderSide";
 import { formatPrice } from "../../lib/format";
 import { useStoreValue, type ValueStore } from "../../lib/valueStore";
 import type { LadderRow } from "../market-window/ladder";
-import { type LadderRowSlots, PriceLadder } from "../market-window/PriceLadder";
+import { ladderColumns, type LadderRowSlots, PriceLadder } from "../market-window/PriceLadder";
 import { formatShares } from "../market-window/format";
 import { addQuantityText, type BuyingPower, buyPreview, groupKey, type PriceGroup, previewText, SIDE_LABEL } from "./orderRules";
 import { PENDING_TEXT } from "./statusText";
@@ -40,6 +40,7 @@ interface Props {
   readonly averagePrice: number | null;
   readonly divider: boolean;
   readonly explorer?: ExplorerScroll;
+  readonly currentToken: number;
   readonly ladder: RefObject<HTMLDivElement | null>;
   readonly drag: OrderDrag;
   readonly rowSlots?: LadderRowSlots;
@@ -66,6 +67,25 @@ interface CellProps {
   readonly buying: BuyingPower | null;
   readonly api: CellApi;
 }
+
+const COLUMN_NAMES = ["매도주문", "매도잔량", "호가", "매수잔량", "매수주문"] as const;
+const HEAD_COLUMNS = ladderColumns(true, true);
+
+const LadderHead = memo(function LadderHead() {
+  return (
+    <div className="od-colhead" data-testid="order-colhead" style={{ gridTemplateColumns: HEAD_COLUMNS }}>
+      {COLUMN_NAMES.map((name) => <span key={name}>{name}</span>)}
+    </div>
+  );
+});
+
+const currentRowOffset = (element: HTMLElement): number | null => {
+  const row = element.querySelector<HTMLElement>(".mw-lr[data-current]");
+  if (row === null) return null;
+  const head = element.querySelector<HTMLElement>(".od-colhead")?.offsetHeight ?? 0;
+  const rowCenter = row.getBoundingClientRect().top - element.getBoundingClientRect().top + element.scrollTop + row.offsetHeight / 2;
+  return Math.max(0, rowCenter - head - (element.clientHeight - head) / 2);
+};
 
 const OrderCell = memo(function OrderCell({ side, price, group, writable, previewQuantity, buying, api }: CellProps) {
   const hovered = useStoreValue(api.hover, (cell) => cell !== null && cell.side === side && cell.price === price);
@@ -98,7 +118,7 @@ const OrderCell = memo(function OrderCell({ side, price, group, writable, previe
   );
 });
 
-export function OrderLadder({ rows, previousClose, groups, writable, previewQuantity, buying, hover, actions, averagePrice, divider, explorer, ladder, drag, rowSlots, expectedPrice }: Props) {
+export function OrderLadder({ rows, previousClose, groups, writable, previewQuantity, buying, hover, actions, averagePrice, divider, explorer, currentToken, ladder, drag, rowSlots, expectedPrice }: Props) {
   const [menu, setMenu] = useState<MenuState | null>(null);
   const dragging = useStoreValue(drag.views, (view) => view !== null);
   const api = useMemo<CellApi>(() => ({ hover, drag, actions, openMenu: setMenu }), [hover, drag, actions]);
@@ -134,9 +154,36 @@ export function OrderLadder({ rows, previousClose, groups, writable, previewQuan
     measureRange();
   }, [exploring, centerToken]);
 
+  const hasCurrent = rows.some((row) => row.current);
+  const placed = useRef<number | null>(null);
+  const centerCurrentRow = useCallback(() => {
+    const element = ladder.current;
+    if (!element) return;
+    const top = currentRowOffset(element);
+    if (top === null) return;
+    element.scrollTop = top;
+    placed.current = element.scrollTop;
+  }, [ladder]);
+
+  useLayoutEffect(() => {
+    const element = ladder.current;
+    if (exploring || !element || !hasCurrent || placed.current !== null || element.scrollHeight <= element.clientHeight) return;
+    centerCurrentRow();
+  }, [exploring, hasCurrent, centerCurrentRow, ladder]);
+
+  useLayoutEffect(() => {
+    if (exploring || currentToken === 0) return;
+    centerCurrentRow();
+  }, [currentToken]);
+
+  const onLadderScroll = () => {
+    if (placed.current === null || ladder.current?.scrollTop !== placed.current) placed.current = -1;
+    if (exploring) measureRange();
+  };
+
   const cell = (slot: "left" | "right") => (row: LadderRow): ReactNode => {
     const side = SIDE_OF_SLOT[slot];
-    if (row.price === null) return <div className="od-cell" data-empty="" />;
+    if (row.price === null) return <div className="od-cell" data-empty="" data-side={side} />;
     return <OrderCell side={side} price={row.price} group={row.repeat ? undefined : groups.get(groupKey(side, row.price))} writable={writable} previewQuantity={previewQuantity} buying={buying} api={api} />;
   };
   const slots = { left: cell("left"), right: cell("right") };
@@ -162,8 +209,9 @@ export function OrderLadder({ rows, previousClose, groups, writable, previewQuan
 
   return (
     <div ref={ladder} className="od-ladder" data-testid="order-ladder" data-explorer={exploring ? "" : undefined} data-dragging={dragging ? "" : undefined} data-divider={divider ? "" : undefined}
-      onScroll={exploring ? measureRange : undefined}
+      onScroll={onLadderScroll}
       onContextMenu={(e) => { e.preventDefault(); setMenu({ x: e.clientX, y: e.clientY, group: null }); }}>
+      <LadderHead />
       {exploring
         ? <div className="od-explorer-rows" data-testid="order-explorer-rows" style={{ paddingTop: range.start * LADDER_ROW_HEIGHT_PX, paddingBottom: (rowCount - range.end) * LADDER_ROW_HEIGHT_PX }}>{ladderView}</div>
         : ladderView}

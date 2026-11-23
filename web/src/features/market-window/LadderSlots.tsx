@@ -93,7 +93,7 @@ const TradeBox = memo(function TradeBox({ trades, strength, hold, release, previ
   };
   return (
     <div className="mw-tbox">
-      <div className="mw-slot mw-strength" data-testid="ladder-strength">체결강도 <b>{formatStrength(strength)}</b></div>
+      <div className="mw-slot mw-strength" data-testid="ladder-strength"><span className="mw-strength-name">체결강도</span> <b>{formatStrength(strength)}</b></div>
       <div className="mw-tscroll" data-testid="ladder-trades" data-held={held ? "" : undefined} onScroll={(event) => onScroll(event.currentTarget.scrollTop)}>
         {trades.map((row) => <BoxTrade key={row.key} row={row} previousClose={previousClose} />)}
       </div>

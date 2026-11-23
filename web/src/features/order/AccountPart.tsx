@@ -59,14 +59,14 @@ export const AccountPart = memo(function AccountPart(props: Props) {
   const { settings } = props;
   return (
     <>
-      <AccountBand windowId={props.windowId} choice={props.choice} onPick={props.onPickAccount} maskAccount={settings.maskAccount} openOrders={props.openOrders} balance={props.balance} executions={props.executions} writable={props.writable} mock={props.mock} policy={props.policy} onCancel={props.onCancel} />
+      <AccountBand windowId={props.windowId} choice={props.choice} onPick={props.onPickAccount} maskAccount={settings.maskAccount} openOrders={props.openOrders} balance={props.balance} executions={props.executions} writable={props.writable} mock={props.mock} venue={props.orderVenue} policy={props.policy} onCancel={props.onCancel} />
       <HoldingSummary account={props.accountRef} holding={props.holding} orderable={props.orderable} buyableProblem={props.buyableProblem} sellOrdered={props.sellOrdered} unit={props.profitUnit} onUnit={props.onProfitUnit} onFill={props.onInput} />
       <div className="od-entry">
         <QuantityRow presetKind={props.presetKind} input={props.input} sharePresets={settings.sharePresets} amountPresets={settings.amountPresets} referencePrice={props.referencePrice} keepLastEntry={settings.keepLastEntry} onPresetKind={props.onPresetKind} onInput={props.onInput} />
         <div className="od-toolbar">
           <HoverOrderEstimate hover={props.hover} quantity={props.quantity} referencePrice={props.referencePrice} buying={props.buying} />
           <button type="button" className="od-tool" data-testid="order-explorer" aria-pressed={props.explorerOn} disabled={props.explorerUnavailable} title={props.explorerTitle} onClick={props.onToggleExplorer}>전체 호가</button>
-          <button type="button" className="od-tool" data-testid="order-current" disabled={!props.explorerOn} onClick={props.onCurrent}>현재가</button>
+          <button type="button" className="od-tool" data-testid="order-current" onClick={props.onCurrent}>현재가</button>
           <OrderSettingsPopover settings={settings} venue={props.orderVenue} mock={props.mock} nxtNotTraded={props.nxtNotTraded} holding={props.holding !== null} onChange={props.onSettings} />
         </div>
       </div>

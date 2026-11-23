@@ -8,6 +8,9 @@ import type { WindowId } from "../../layout/kinds";
 import { useLayoutStore } from "../../stores/layout";
 import { useSelectionStore } from "../../stores/selection";
 import { Popover } from "../overlay/Popover";
+import { Badge } from "../ui/Badge";
+import type { Venue } from "../../api/generated/Venue";
+import { routeLabel } from "./orderSettings";
 import { formatQuantity } from "../market-window/format";
 import { formatFillTime, profitText } from "./holdingSummary";
 import { newestFirst } from "./accountLists";
@@ -35,6 +38,7 @@ interface Props {
   readonly executions: readonly TradingExecution[];
   readonly writable: boolean;
   readonly mock: boolean;
+  readonly venue: Venue;
   readonly policy: MarginPolicy | null;
   readonly onCancel: (orderNo: string) => void;
 }
@@ -97,7 +101,7 @@ function FillsPanel({ executions, goTo }: { executions: readonly TradingExecutio
 }
 
 const isTab = (target: Node) => target instanceof Element && target.closest(".od-tab") !== null;
-export function AccountBand({ windowId, choice, onPick, maskAccount, openOrders, balance, executions, writable, mock, policy, onCancel }: Props) {
+export function AccountBand({ windowId, choice, onPick, maskAccount, openOrders, balance, executions, writable, mock, venue, policy, onCancel }: Props) {
   const [panel, setPanel] = useState<PanelKind | null>(null);
   const opener = useRef<HTMLElement | null>(null);
   const counts: Record<PanelKind, number> = { open: openOrders.length, holdings: balance?.holdings.length ?? 0, fills: executions.length };
@@ -113,8 +117,11 @@ export function AccountBand({ windowId, choice, onPick, maskAccount, openOrders,
     <div className="od-account" data-testid="order-account">
       <div className="od-account-bar">
         <AccountLabel choice={choice} maskAccount={maskAccount} onPick={onPick} />
-        {mock && <span className="od-account-mock" data-testid="account-mock">모의</span>}
-        {policy !== null && <span className="od-policy" data-testid="margin-policy" data-policy={policy}>{POLICY_LABEL[policy]}</span>}
+        <Badge tone={mock ? "accent" : "warning"} className="od-env">
+          <span data-testid={mock ? "account-mock" : "account-live"}>{mock ? "모의" : "실전"}</span>
+        </Badge>
+        <span className="od-route" data-testid="account-route" title="주문 경로">{routeLabel(venue)}</span>
+        {policy !== null && <Badge tone={policy === "allow_margin" ? "warning" : "success"} className="od-policy"><span data-testid="margin-policy" data-policy={policy}>{POLICY_LABEL[policy]}</span></Badge>}
         {TABS.map(({ kind, label }) => (
           <button key={kind} type="button" className="od-tab" data-testid={`account-tab-${kind}`} aria-expanded={panel === kind} onClick={(e) => { opener.current = e.currentTarget; setPanel((open) => (open === kind ? null : kind)); }}>
             {label} <b>{counts[kind]}</b>

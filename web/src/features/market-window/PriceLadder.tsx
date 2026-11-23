@@ -121,8 +121,11 @@ const LadderLine = memo(function LadderLine({ row, side, columns, previousClose,
   );
 }, sameLine);
 
+export const ladderColumns = (hasLeft: boolean, hasRight: boolean): string =>
+  `${hasLeft ? "var(--size-64) " : ""}minmax(0, 1fr) var(--size-133) minmax(0, 1fr)${hasRight ? " var(--size-64)" : ""}`;
+
 export function PriceLadder({ rows, previousClose, slots, rowSlots, mark, expectedPrice = null, firstBidIndex = ROWS_ABOVE_BASE }: Props) {
-  const columns = `${slots?.left ? "var(--size-64) " : ""}minmax(0, 1fr) var(--size-133) minmax(0, 1fr)${slots?.right ? " var(--size-64)" : ""}`;
+  const columns = ladderColumns(slots?.left !== undefined, slots?.right !== undefined);
   const boxStart = tradeBoxStart(rows);
   const boxRows = rows.length - boxStart;
   const cardRows = infoCardRows(rows);

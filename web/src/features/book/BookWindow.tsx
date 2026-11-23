@@ -2,6 +2,7 @@ import type { SymbolCode } from "../../api/generated/SymbolCode";
 import { useFundamentals, useSymbolInfo } from "../../api/queries";
 import type { WindowId } from "../../layout/kinds";
 import { useOrderSettings } from "../../stores/ui";
+import { FeedStrip, useFeedDownSince } from "../market-window/FeedStrip";
 import { MarketWindowGate } from "../market-window/MarketWindowGate";
 import { buildDefaultLadder } from "../market-window/ladder";
 import { tickRuleOf } from "../market-window/tick";
@@ -39,7 +40,8 @@ function BookBody({ code, pager }: { code: SymbolCode; pager: InfoPager }) {
   const view = feed.book.phase === "empty" ? null : feed.book.view;
   const totals = stripTotals(view && { ask: view.totalAsk, bid: view.totalBid }, visibleAfterHours(feed.afterHours?.totals ?? null, nowSeconds));
   const afterHours = totals.source === "afterHours";
-  const notice = feed.rejected ? REJECTION[feed.rejected] : feed.connected ? null : "끊김";
+  const notice = feed.rejected ? REJECTION[feed.rejected] : null;
+  const downSince = useFeedDownSince(feed.connected);
   const ladder = (() => {
     if (view === null) return <EmptyState title={feed.snapshotFailed ? "호가를 불러오지 못했습니다" : "호가를 기다리는 중입니다"} />;
     const rows = buildDefaultLadder({ asks: view.asks, bids: view.bids, lastPrice: feed.lastPrice, previousClose: feed.previousClose, bounds, skipSpreadGap, tickRule: tickRuleOf(kind, [...view.asks, ...view.bids].map((level) => level.price)) });
@@ -50,6 +52,7 @@ function BookBody({ code, pager }: { code: SymbolCode; pager: InfoPager }) {
   return (
     <div className="bk" data-testid="book-window" data-symbol={code} data-connected={feed.connected ? "" : undefined}>
       {notice && <div className="bk-alert" role="status">{notice}</div>}
+      {!feed.connected && notice === null && <FeedStrip since={downSince} />}
       <div className="bk-ladder" data-stale={feed.connected ? undefined : ""}>{ladder}</div>
       <Strip divided>
         <TotalFigure testId="book-total-ask" tone="down" value={totals.ask} afterHours={afterHours} description={totals.description} />

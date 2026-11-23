@@ -19,6 +19,7 @@ export interface BookFeed {
   readonly connected: boolean;
   readonly rejected: SubErrorCode | null;
   readonly snapshotFailed: boolean;
+  readonly retry: () => void;
 }
 
 interface Live {
@@ -76,6 +77,7 @@ export function useBookFeed(code: SymbolCode, venue: Venue, lastTrade: LastTrade
     connected: current.socketOpen && current.linkLive,
     rejected: current.rejected,
     snapshotFailed: snapshot.isError && current.book.phase === "empty",
+    retry: () => { void snapshot.refetch(); },
   };
 }
 

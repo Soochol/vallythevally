@@ -1,4 +1,4 @@
-import { type ChangeEvent, useId, useLayoutEffect, useRef } from "react";
+import { type ChangeEvent, type KeyboardEvent, useId, useLayoutEffect, useRef } from "react";
 import { useStoreValue, type ValueStore } from "../../lib/valueStore";
 import { formatWon } from "../market-window/format";
 import { Segmented } from "../market-window/parts";
@@ -42,6 +42,12 @@ export function QuantityRow({ presetKind, input, sharePresets, amountPresets, re
     digitsBeforeCaret.current = digitsBefore;
     onInput(digits);
   };
+  const nudge = (event: KeyboardEvent<HTMLInputElement>) => {
+    if (event.key !== "ArrowUp" && event.key !== "ArrowDown") return;
+    event.preventDefault();
+    const step = (event.key === "ArrowUp" ? 1 : -1) * (event.shiftKey ? 10 : 1);
+    onInput(String(Math.max(0, (Number(input) || 0) + step)));
+  };
   const amountKind = presetKind === "amountPresets";
   const noPrice = amountKind && (referencePrice === null || !(referencePrice > 0));
   const fillAmount = (won: number) => onInput(String(quantityForAmount(won, referencePrice) ?? 0));
@@ -51,11 +57,11 @@ export function QuantityRow({ presetKind, input, sharePresets, amountPresets, re
         <label className="od-qty-label" htmlFor={inputId}>수량</label>
         {keepLastEntry && <span className="od-qty-keep" data-testid="order-keep-mark" title={KEEP_LAST_ENTRY_LABEL}>유지</span>}
       </span>
-      <input id={inputId} ref={field} className="od-qty-input" inputMode="numeric" autoComplete="off" value={input} onChange={change} />
+      <input id={inputId} ref={field} className="od-qty-input" inputMode="numeric" autoComplete="off" value={input} onChange={change} onKeyDown={nudge} />
       <Segmented label="수량 방식" options={PRESET_KINDS} value={presetKind} onChange={onPresetKind} />
       <div className="od-presets" role="group" aria-label="수량 프리셋">
         {amountKind
-          ? amountPresets.map((man) => <button key={man} type="button" className="od-preset" disabled={noPrice} title={noPrice ? NO_REFERENCE_PRICE_TEXT : undefined} onClick={() => fillAmount(man * AMOUNT_UNIT_WON)}>{`${man}만`}</button>)
+          ? amountPresets.map((man) => <button key={man} type="button" className="od-preset" disabled={noPrice} title={noPrice ? NO_REFERENCE_PRICE_TEXT : undefined} onClick={() => fillAmount(man * AMOUNT_UNIT_WON)}>{`${man.toLocaleString("ko-KR")}만`}</button>)
           : sharePresets.map((shares) => <button key={shares} type="button" className="od-preset" onClick={() => onInput(String(shares))}>{shares}</button>)}
       </div>
     </div>

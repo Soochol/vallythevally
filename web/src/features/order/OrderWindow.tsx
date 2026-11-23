@@ -23,7 +23,10 @@ import { stripTotals } from "../book/bookModel";
 import { visibleAfterHours, visibleExpected } from "../book/sessionWindows";
 import { type InfoPager, useInfoPager, useLadderTrades, useQuoteInfo } from "../market-window/useLadderSlots";
 import { useShownVenue } from "../market-window/useShownVenue";
-import { EmptyState } from "../overlay/State";
+import { EmptyState, ErrorState } from "../overlay/State";
+import { isMarketOpen } from "../../chart/time";
+import { FeedStrip, useFeedDownSince } from "../market-window/FeedStrip";
+import { SymbolHead } from "../market-window/SymbolHead";
 import { openSystemSettings } from "../system-settings/open";
 import { AccountPart } from "./AccountPart";
 import { averageRowPrice, ETF_ETN_AFTER_HOURS_TEXT, holdingOf, isEtfOrEtnAfterHours, type ProfitUnit, sellOrderQuantity, sellQuantityAtPrice, toggledUnit } from "./holdingSummary";
@@ -38,6 +41,7 @@ import { OrderStatusBar } from "./OrderStatusBar";
 import { REJECT_TEXT } from "./statusText";
 import { buyBlock, capacityProblem, type DragOutcome, marginOf, modifyBuyProblem, type DragSource, needsHighValueConfirm, orderAmount, SIDE_LABEL, typedQuantity } from "./orderRules";
 import type { PresetKind } from "./orderSettings";
+import { withDirectionJosa } from "./josa";
 import { pendingWrites } from "./pendingWrites";
 import { FALLBACK_NOTICE } from "./orderAccount";
 import { useOrderAccess, useOrderData } from "./useOrderData";
@@ -91,6 +95,8 @@ function OrderBody({ id, code, infoPager }: { id: WindowId; code: SymbolCode; in
     return () => clearInterval(timer);
   }, []);
 
+  const downSince = useFeedDownSince(feed.connected);
+  const marketOpen = isMarketOpen(Math.floor(now / 1000));
   const view = feed.book.phase === "empty" ? null : feed.book.view;
   const bounds = { lower: limits?.lowerLimit ?? null, upper: limits?.upperLimit ?? null };
   const quotes = view ? { asks: view.asks, bids: view.bids, lastPrice: feed.lastPrice, previousClose: feed.previousClose } : null;
@@ -142,7 +148,7 @@ function OrderBody({ id, code, infoPager }: { id: WindowId; code: SymbolCode; in
     }
     const block = side === "buy" ? buyBlock(price, orderQuantity, data.capacity.buying) : null;
     if (block) {
-      writes.say({ tone: "error", text: block.text, action: block.maxQuantity > 0 ? { label: `${block.maxQuantity.toLocaleString("ko-KR")}로 보내기`, run: () => latestPlace.current(side, price, block.maxQuantity) } : undefined });
+      writes.say({ tone: "error", text: block.text, action: block.maxQuantity > 0 ? { label: `${withDirectionJosa(block.maxQuantity)} 보내기`, run: () => latestPlace.current(side, price, block.maxQuantity) } : undefined });
       return;
     }
     submit(side, price, orderQuantity);
@@ -204,15 +210,17 @@ function OrderBody({ id, code, infoPager }: { id: WindowId; code: SymbolCode; in
           <button type="button" className="od-link" onClick={() => openSystemSettings("kiwoom")}>시스템 설정 열기</button>
         </div>
       )}
+      <SymbolHead code={code} name={symbolInfo?.name ?? null} lastPrice={feed.lastPrice} previousClose={feed.previousClose} marketOpen={marketOpen} mock={mock} />
       <AccountPart windowId={id} choice={choice} accountRef={accountRef} onPickAccount={pickAccount} openOrders={data.openOrders} balance={data.balance} executions={data.executions} writable={writable} mock={mock} policy={data.orderable?.policy ?? null} onCancel={cancelOne}
         holding={holding} orderable={data.orderable} buyableProblem={data.buyableProblem} sellOrdered={sellOrdered} profitUnit={profitUnit} onProfitUnit={toggleProfitUnit}
         presetKind={presetKind} input={input} referencePrice={referencePrice} onPresetKind={setPresetKind} onInput={setInput} quantity={quantity} buying={data.capacity.buying} hover={hover}
         explorerOn={explorerOn} explorerUnavailable={referencePrice === null || fullPrices === null} explorerTitle={fullPrices === null ? EXPLORER_UNAVAILABLE : undefined} onToggleExplorer={toggleExplorer} onCurrent={centerOnCurrent}
         settings={settings} orderVenue={orderVenue} nxtNotTraded={nxtNotTraded} onSettings={setSettings} />
+      {!feed.connected && <FeedStrip since={downSince} />}
       <div className="bk-ladder od-ladder-wrap" data-stale={feed.connected ? undefined : ""} data-exploring={explorerOn ? "" : undefined}>
         {view
-            ? <OrderLadder rows={rows} previousClose={feed.previousClose} groups={data.groups} writable={writable} previewQuantity={quantity} buying={data.capacity.buying} hover={hover} averagePrice={averagePrice} divider={settings.divider} explorer={explorerOn ? { centerPrice: referencePrice, centerToken } : undefined} ladder={ladder} drag={drag} expectedPrice={expected?.price ?? null} rowSlots={{ infoCard: infoSlot(infoSlots, infoPager), bottomLeft: tradeSlot(trades, feed.previousClose) }} actions={ladderActions} />
-            : <EmptyState title={feed.snapshotFailed ? "호가를 불러오지 못했습니다" : "호가를 기다리는 중입니다"} />}
+            ? <OrderLadder rows={rows} previousClose={feed.previousClose} groups={data.groups} writable={writable} previewQuantity={quantity} buying={data.capacity.buying} hover={hover} averagePrice={averagePrice} divider={settings.divider} explorer={explorerOn ? { centerPrice: referencePrice, centerToken } : undefined} currentToken={centerToken} ladder={ladder} drag={drag} expectedPrice={expected?.price ?? null} rowSlots={{ infoCard: infoSlot(infoSlots, infoPager), bottomLeft: tradeSlot(trades, feed.previousClose) }} actions={ladderActions} />
+            : feed.snapshotFailed ? <ErrorState message="호가를 불러오지 못했습니다" retry={feed.retry} /> : <EmptyState title="호가를 기다리는 중입니다" />}
         <OrderStatusBar status={writes.status} queued={writes.queued} blocked={data.blocked} onUndo={writes.cancelOne} onReconcile={writes.reconcile} onDismiss={writes.dismiss} />
       </div>
       <OrderTotals groups={data.groups} writable={writable} actions={totalsActions} drag={drag} />
