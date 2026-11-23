@@ -16,7 +16,7 @@ import type { Screens } from "../../api/generated/Screens";
 import type { SymbolCode } from "../../api/generated/SymbolCode";
 import type { UpdatePhase } from "../../api/generated/UpdatePhase";
 import { useScreenerStatus, useUpdateCommands } from "../../api/screener";
-import { useBeforeConnect } from "../status/beforeConnect";
+import { useFeedBeforeConnect } from "../status/beforeConnect";
 import { SCREENER_REFRESH_TOOLTIP, useScreenerRefreshNeedsKiwoom } from "../status/marketFeed";
 import { isTypingTarget } from "../../lib/typingTarget";
 import { DESKTOP_QUERY, useMediaQuery } from "../../lib/media";
@@ -176,7 +176,7 @@ export function ScreenerPanel({ id }: { id: WindowId | null }) {
   useResultKeys({ rows, active, onSelect: select, onRun: execute }, () => ownsKeys(id));
   useEffect(() => dropPendingOpen, []);
   const band = status !== undefined && showsUpdateBand(status);
-  const offline = useBeforeConnect() !== null;
+  const offline = useFeedBeforeConnect() !== null;
   return (
     <aside aria-label="스크리너" data-chart-control className="flex min-h-0 min-w-0 flex-1 flex-col" onPointerDownCapture={() => { lastTouchedWindow = id; }} onFocusCapture={() => { lastTouchedWindow = id; }}>
       {offline && status?.lastDay && <p className="flex-none border-b border-line px-3 py-1.5 text-xs text-text-2">저장된 일봉 {status.lastDay.slice(5).replace("-", "/")}까지 · 오늘 시세는 연결 뒤에 합칩니다</p>}
@@ -341,7 +341,7 @@ function PanelMenu({ screen, rows, status, lead = [] }: { screen: Screen | null;
     fresh === null
       ? []
       : [{ kind: "action", label: `새 목록 "${fresh}"`, disabled: nothing || lists.length >= MAX_WATCHLISTS, onSelect: () => sendToNewWatchlist(fresh, codes) }];
-  const offline = useBeforeConnect() !== null;
+  const offline = useFeedBeforeConnect() !== null;
   const needsKiwoom = useScreenerRefreshNeedsKiwoom();
   const reload = async () => {
     if (await confirmAction(FULL_RELOAD_CONFIRM, { action: "전체 다시 받기" })) void start(true).catch(showCommandError);
@@ -600,7 +600,7 @@ function useUpdateRetry(error: ApiErrorBody | null): UpdateRetry | null {
 
 function UpdateBand({ status }: { status: ScreenerStatus }) {
   const { start, cancel } = useUpdateCommands();
-  const offline = useBeforeConnect() !== null;
+  const offline = useFeedBeforeConnect() !== null;
   const needsKiwoom = useScreenerRefreshNeedsKiwoom();
   const refreshTitle = needsKiwoom ? SCREENER_REFRESH_TOOLTIP : undefined;
   const waitLabel = (label: string) => (offline ? "연결 뒤" : label);
@@ -733,7 +733,7 @@ function StatusFooterLine({ footer, status, onRetry }: { footer: StatusFooter; s
 
 function StoreLine({ status, lastDay }: { status: ScreenerStatus; lastDay: KstDate }) {
   const { start } = useUpdateCommands();
-  const offline = useBeforeConnect() !== null;
+  const offline = useFeedBeforeConnect() !== null;
   const needsKiwoom = useScreenerRefreshNeedsKiwoom();
   const today = status.todayAvailable;
   const history = status.fullHistory.done < status.fullHistory.total ? `과거 이력 ${count(status.fullHistory.done)}/${count(status.fullHistory.total)}종목` : null;

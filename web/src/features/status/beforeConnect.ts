@@ -1,7 +1,7 @@
 import type { Broker } from "../../api/generated/Broker";
 import type { KiwoomLinkStatus } from "../../api/generated/KiwoomLinkStatus";
 import type { UnixSeconds } from "../../api/generated/UnixSeconds";
-import { useKiwoomLinkStore } from "../../stores/kiwoomLink";
+import { useFeedLink, useKiwoomLinkStore } from "../../stores/kiwoomLink";
 import { BROKERS } from "../system-settings/brokers";
 import { KEPT_DISCONNECTED_NOTE } from "../system-settings/kiwoomPanel";
 import { type LinkAction, linkAction, STEP_NAMES } from "./linkAction";
@@ -92,4 +92,8 @@ export const NOT_CONNECTED_FALLBACK: BeforeConnect = { ...base, title: "키움�
 
 export function useBeforeConnect(): BeforeConnect | null {
   return beforeConnect(useKiwoomLinkStore((s) => s.status));
+}
+
+export function useFeedBeforeConnect(): BeforeConnect | null {
+  return beforeConnect(useFeedLink());
 }

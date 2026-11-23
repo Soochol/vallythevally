@@ -4,7 +4,7 @@ import type { Ranking } from "../../api/generated/Ranking";
 import type { RankingRow } from "../../api/generated/RankingRow";
 import type { SymbolCode } from "../../api/generated/SymbolCode";
 import type { WindowId } from "../../layout/kinds";
-import { useKiwoomLinkStore, useMarketSource } from "../../stores/kiwoomLink";
+import { useFeedLink, useMarketSource } from "../../stores/kiwoomLink";
 import { useLayoutStore, watchedSymbol } from "../../stores/layout";
 import { useSelectionStore } from "../../stores/selection";
 import { EmptyState, ErrorState, Skeleton } from "../overlay/State";
@@ -43,7 +43,7 @@ export function RankingWindow({ id }: { id: WindowId }) {
 
 function RankingBody({ id, ranking }: { id: WindowId; ranking: Ranking }) {
   const queryClient = useQueryClient();
-  const link = useKiwoomLinkStore((s) => s.status);
+  const link = useFeedLink();
   const connected = link === null || link.state === "connected";
   const source = useMarketSource();
   const kindOn = rankingKindOn(source, ranking.kind);

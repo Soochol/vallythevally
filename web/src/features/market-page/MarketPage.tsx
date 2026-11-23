@@ -3,7 +3,7 @@ import type { Market } from "../../api/generated/Market";
 import type { MarketOverviewPeriod } from "../../api/generated/MarketOverviewPeriod";
 import type { MarketOverviewPhase } from "../../api/generated/MarketOverviewPhase";
 import { MARKET_REFRESH_MS, useMarketIndex } from "../../api/marketOverview";
-import { useKiwoomLinkStore } from "../../stores/kiwoomLink";
+import { useFeedLink } from "../../stores/kiwoomLink";
 import { DataAgeNote } from "../data-age/DataAgeNote";
 import { formatClock } from "../market-window/format";
 import { EmptyState } from "../overlay/State";
@@ -47,7 +47,7 @@ function Freshness({ market, enabled }: { market: Market; enabled: boolean }) {
 
 export function MarketPage() {
   const [params, setParams] = useSearchParams();
-  const link = useKiwoomLinkStore((s) => s.status);
+  const link = useFeedLink();
   const connected = link === null || link.state === "connected";
   const market = marketOf(params.get("market"));
   const period = periodOf(params.get("period"));
