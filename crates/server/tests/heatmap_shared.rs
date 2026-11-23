@@ -1,6 +1,5 @@
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -14,8 +13,8 @@ use server::app::{ApplicationInputs, application};
 use server::clock::{Clock, kst};
 use server::config::Secret;
 use server::db::AppDb;
-use server::heatmap_board::{Busy, QuoteGate, Refused, board_within};
-use server::heatmap_flow::{FlowCache, FlowGate, Freshness, flow_within};
+use server::heatmap_board::board_within;
+use server::heatmap_flow::flow_within;
 use server::http::{AppState, router};
 use server::kiwoom::auth::KiwoomAuth;
 use server::kiwoom::rest::{Access, KiwoomRest};
@@ -195,55 +194,6 @@ fn rounded(rate: f64) -> f64 {
     (rate * 10_000.0).round() / 10_000.0
 }
 
-struct CountingGate {
-    entered: AtomicU32,
-}
-
-impl CountingGate {
-    fn new() -> CountingGate {
-        CountingGate { entered: AtomicU32::new(0) }
-    }
-
-    fn touched(&self) -> u32 {
-        self.entered.load(Ordering::SeqCst)
-    }
-}
-
-impl QuoteGate for CountingGate {
-    fn begin(&self) -> Result<Box<dyn Send>, Busy> {
-        self.entered.fetch_add(1, Ordering::SeqCst);
-        Ok(Box::new(()))
-    }
-
-    fn grant_tr(&self) -> BoxFuture<'_, bool> {
-        self.entered.fetch_add(1, Ordering::SeqCst);
-        Box::pin(async { true })
-    }
-}
-
-impl Freshness for CountingGate {
-    fn is_fresh(&self, _: domain::KstTime, _: domain::KstTime) -> bool {
-        self.entered.fetch_add(1, Ordering::SeqCst);
-        false
-    }
-
-    fn grant_tr(&self) -> BoxFuture<'_, bool> {
-        self.entered.fetch_add(1, Ordering::SeqCst);
-        Box::pin(async { true })
-    }
-}
-
-impl FlowGate for CountingGate {
-    fn begin(&self) -> Result<Box<dyn Send>, Busy> {
-        self.entered.fetch_add(1, Ordering::SeqCst);
-        Ok(Box::new(()))
-    }
-
-    fn fetch_concurrency(&self) -> usize {
-        1
-    }
-}
-
 fn query(pairs: &[(&str, &str)]) -> HashMap<String, String> {
     pairs.iter().map(|(k, v)| ((*k).to_owned(), (*v).to_owned())).collect()
 }
@@ -320,35 +270,23 @@ async fn without_the_variable_the_server_still_collects_the_themes_itself() {
 }
 
 #[tokio::test]
-async fn the_public_entry_functions_skip_every_gate_when_shared_data_is_there() {
+async fn the_public_entry_functions_read_only_the_shared_data() {
     let h = Harness::start(true).await;
     write_boards(&h.shared);
     write_two_key_minutes(&h.shared);
     h.poll().await;
-    let gate = CountingGate::new();
     let mine = HeatmapThemes { themes: vec![HeatmapTheme { id: "CHIP".into(), name: "반도체".into(), symbols: ["005930", "000660", "IDX:001"].map(|c| SymbolCode(c.into())).to_vec() }], revision: Revision(0) };
-    let (board, tally) = match board_within(&h.state, &h.state.heatmap_quotes, &query(&[("venue", "krx")]), mine, &gate).await {
-        Ok(done) => done,
-        Err(Refused::Busy) => panic!("바쁨"),
-        Err(Refused::Failed(_)) => panic!("실패"),
-    };
-    assert_eq!((board.themes[0].members.len(), tally.fetched, tally.over_budget), (3, 0, 0));
+    let Ok(board) = board_within(&h.state, &query(&[("venue", "krx")]), mine).await else { panic!("보드를 만들지 못했다") };
+    assert_eq!(board.themes[0].members.len(), 3);
     let index = &board.themes[0].members[2];
     assert_eq!((index.symbol.0.as_str(), index.change_rate, index.traded_million_won), ("IDX:001", 1.0, None), "지수 멤버는 스냅샷의 지수 행에서");
     assert_eq!(board.as_of, Some(server::api::UnixSeconds(unix(10, 0, 0))));
 
     let allowed: HashSet<Symbol> = ["005930", "000660", "035420"].iter().map(|c| Symbol::parse(c).unwrap()).collect();
-    let cache = FlowCache::with_generation(h.state.generation.clone());
-    let (series, tally) = match flow_within(&h.state, &cache, &query(&[("symbols", "005930,000660,035420,042700"), ("venue", "krx")]), &allowed, &gate).await {
-        Ok(done) => done,
-        Err(Refused::Busy) => panic!("바쁨"),
-        Err(Refused::Failed(_)) => panic!("실패"),
-    };
+    let Ok(series) = flow_within(&h.state, &query(&[("symbols", "005930,000660,035420,042700"), ("venue", "krx")]), &allowed).await else { panic!("흐름을 만들지 못했다") };
     assert_eq!(series.used.iter().map(|c| c.0.as_str()).collect::<Vec<_>>(), ["005930", "000660"]);
     assert_eq!(series.not_collected, vec![SymbolCode("035420".into())], "분봉이 없는 종목은 채우지 않고 알린다");
     assert_eq!(series.not_in_themes, vec![SymbolCode("042700".into())]);
-    assert_eq!((tally.fetched, tally.over_budget), (0, 0));
-    assert_eq!(gate.touched(), 0);
     assert_eq!(h.kiwoom.total(), 0);
 }
 
@@ -415,10 +353,8 @@ async fn a_symbol_never_collected_stays_out_of_the_flow_without_failing_it() {
     let h = Harness::start(true).await;
     write_boards(&h.shared);
     h.poll().await;
-    let cache = FlowCache::with_generation(h.state.generation.clone());
     let allowed: HashSet<Symbol> = [Symbol::parse("069500").unwrap()].into();
-    let gate = CountingGate::new();
-    let Ok((series, _)) = flow_within(&h.state, &cache, &query(&[("symbols", "069500")]), &allowed, &gate).await else { panic!("분봉이 없어도 실패가 아니다") };
+    let Ok(series) = flow_within(&h.state, &query(&[("symbols", "069500")]), &allowed).await else { panic!("분봉이 없어도 실패가 아니다") };
     assert_eq!((series.points.len(), series.used.len(), series.missing.len()), (0, 0, 0));
     assert_eq!(series.not_collected, vec![SymbolCode("069500".into())]);
     assert_eq!(series.as_of, None);

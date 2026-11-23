@@ -290,8 +290,9 @@ impl Config {
         vars.extend(process);
         let warnings = vars
             .keys()
-            .filter(|k| k.starts_with("VALLY_") && !KNOWN_KEYS.contains(&k.as_str()) && !crate::public::settings::KEYS.contains(&k.as_str()))
+            .filter(|k| k.starts_with("VALLY_") && !KNOWN_KEYS.contains(&k.as_str()) && !crate::public::settings::KEYS.contains(&k.as_str()) && !crate::public::settings::REMOVED_KEYS.contains(&k.as_str()))
             .map(|k| format!("모르는 설정 키 {k}가 있습니다. 오타인지 확인하세요"))
+            .chain(crate::public::settings::removed_keys_in(&vars))
             .collect();
         let present = |k: &str| vars.get(k).filter(|v| !v.is_empty()).cloned();
         let url = |k: &str| vars.get(k).filter(|v| !v.is_empty()).map(|s| s.trim_end_matches('/').to_owned());
@@ -385,6 +386,9 @@ impl Config {
         let bind = BindAddr::parse(vars.get("VALLY_BIND").map_or(default_bind, String::as_str))?;
         let shared_data = shared_data_settings(&vars)?;
         let public = crate::public::settings::PublicSettings::from_vars(crate::public::settings::Inputs { vars: &vars, operator_bind: bind.socket_addr(), mock, connector_mode: account_server_url.is_some(), default_account_db: db_path.with_file_name("public-accounts.db") })?;
+        if public.is_some() && shared_data.is_none() {
+            return Err(ConfigError("공개 리스너(VALLY_PUBLIC_BIND, VALLY_PUBLIC_ORIGIN)를 켜면 VALLY_SHARED_DATA_DIR도 적어야 합니다. 공개 요청은 공용 자료 폴더에서만 읽고 키움을 부르지 않습니다".into()));
+        }
         let config = Config {
             kiwoom_environment,
             kiwoom_credentials,

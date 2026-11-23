@@ -276,6 +276,9 @@ impl Lookup {
     }
 }
 
+#[derive(Clone, Copy)]
+pub struct PublicRoute;
+
 pub(crate) async fn symbol_list(st: &AppState) -> Result<Arc<crate::symbols::Directory>, ApiFailure> {
     st.symbols.ready(st.source.as_ref()).await.map_err(|e| match e {
         NotReady::Source(e) => Lookup::Symbols.failure(e.into(), st.clock.now()),

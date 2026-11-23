@@ -22,6 +22,8 @@ pub enum DataKind {
 }
 
 impl DataKind {
+    pub const ALL: [DataKind; 8] = [DataKind::Probe, DataKind::KiwoomThemes, DataKind::MarketOverview, DataKind::SnapshotKrx, DataKind::SnapshotCombined, DataKind::SnapshotNxt, DataKind::Minute, DataKind::Rankings];
+
     pub fn folder(self) -> &'static str {
         match self {
             DataKind::Probe => "probe",

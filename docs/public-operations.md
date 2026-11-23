@@ -11,6 +11,7 @@
 - `VALLY_PUBLIC_BIND`: 루프백 주소만 받는다(`VALLY_BIND`와 같은 규칙). `VALLY_BIND`와 같은 주소면 설정 오류다.
 - `VALLY_PUBLIC_ORIGIN`: `https://<이름>` 또는 `https://<이름>:<포트>`다. 경로, 질의, 와일드카드, IP는 설정 오류다. 시험용으로 루프백 IP의 `http`만 더 받는다.
 - 공개 리스너는 `VALLY_ACCOUNT_SERVER_URL`(커넥터 계정 모드), `VALLY_KIWOOM_ENV=mock`과 함께 쓸 수 없다. 둘 다 설정 오류다.
+- 공개 설정이 있으면 `VALLY_SHARED_DATA_DIR`(절대 경로)도 있어야 한다. 없으면 서버가 뜨지 않고 그 이유를 한 줄로 낸다. 공개 요청은 그 폴더의 공용 자료에서만 답하고 키움을 부르지 않는다.
 
 끄려면 공개 설정을 지우고 재시작한다. 지금과 같은 동작으로 돌아간다.
 
@@ -48,32 +49,20 @@
 
 넘으면 기다리지 않고 바로 거절한다. 버킷이 모자라면 `429`, 동시 처리 자리나 시간이 모자라면 `503`이다. 두 경우 모두 `Retry-After` 헤더와 본문 `error.retryAt`(유닉스 초)이 같은 시각을 가리킨다. 화면 파일은 어느 한도에도 세지 않는다.
 
-### 키움 경로 보호 (임시 장치)
+### 공용 자료만 읽는 경로
 
-공개 요청이 운영자 키움 키의 대기열을 밀어내는 크기를 묶는 임시 장치다. 수집 데몬이 공용 자료를 만들게 되면(`collector-shared-data`) 걷는다. 코드는 `crates/server/src/public/kiwoom_guard.rs` 한 모듈에 모여 있다.
+공개 리스너의 공용 자료 라우트(종목 검색, 스크리너 실행·상태, ETF, 재무 읽기, 순위, 시장 개요 여섯 칸, 히트맵 보드·흐름)는 수집 데몬이 `VALLY_SHARED_DATA_DIR`에 쓴 자료만 읽는다. **공개 요청은 키움 transport를 한 번도 부르지 않는다.** 그래서 공개 부하가 운영자 화면의 키움 요청을 늦추지 않고, 경로 묶음 동시 한도, 계정당 키움 경로 동시 1, TR 예산, 흐름 요청 안 동시 5, 흐름 분 맞춤 캐시, 시장 개요 응답 캐시, 순위 쪽 수 줄이기, `Gated` 처리, 스크리너 동시·전체 분당 한도는 없다. 코드는 `crates/server/src/public/shared_guard.rs`에 남은 것만 있다.
 
 | 설정 | 기본값 | 뜻 |
 |---|---|---|
-| `VALLY_PUBLIC_KIWOOM_ACCOUNT_IN_FLIGHT` | 1 | 계정당 키움 경로 동시 |
-| `VALLY_PUBLIC_MARKET_CONCURRENCY` | 4 | 시장 개요 묶음 동시 |
-| `VALLY_PUBLIC_RANKINGS_CONCURRENCY` | 2 | 순위 묶음 동시 |
-| `VALLY_PUBLIC_MARKET_CACHE_SECS` | 15 | 시장 개요 카드 응답 캐시. 모든 계정이 같이 쓰고, 적중한 요청은 동시 자리를 잡지 않는다 |
-| `VALLY_PUBLIC_RANKING_MAX_PAGES` | 5 | 공개 순위 최대 쪽 수. 더 청해도 이 값으로 줄인다 |
-| `VALLY_PUBLIC_SCREENER_CONCURRENCY` | 4 (0 = 한도 없음) | 스크리너 동시 실행. 자리가 없으면 바로 503 |
-| `VALLY_PUBLIC_SCREENER_ACCOUNT_PER_MINUTE` | 2 | 계정당 스크리너 실행 |
-| `VALLY_PUBLIC_SCREENER_TOTAL_PER_MINUTE` | 3 (0 = 한도 없음) | 전체 스크리너 실행 |
+| `VALLY_PUBLIC_SCREENER_ACCOUNT_PER_MINUTE` | 2 | 계정당 스크리너 실행. 넘으면 `429` |
 | `VALLY_PUBLIC_SCREENER_STATUS_CACHE_SECS` | 2 | 스크리너 상태 공용 캐시 |
-| `VALLY_PUBLIC_BOARD_CONCURRENCY`, `_FLOW_CONCURRENCY` | 1, 1 | 히트맵 보드·흐름 묶음 동시. 자리는 캐시에 없어 키움을 불러야 할 종목이 있을 때만 잡는다 |
-| `VALLY_PUBLIC_FLOW_TR_PER_MINUTE`, `_FLOW_ACCOUNT_TR_PER_MINUTE` | 60, 60 | 흐름 TR 예산. 캐시에 없는 종목 하나가 TR 하나이고, 예산이 없는 종목은 `missing`이다 |
-| `VALLY_PUBLIC_BOARD_TR_PER_WINDOW` | 45 | 보드 TR 예산. 45초 창마다 전체 한도이고 100종목 묶음 하나가 TR 하나다. 예산이 없는 묶음의 종목은 `missing`이다 |
-| `VALLY_PUBLIC_FLOW_FETCH_CONCURRENCY` | 5 | 흐름 한 요청 안에서 동시에 받는 종목 수 |
-| `VALLY_PUBLIC_KIWOOM_SENDS_PER_WINDOW` | 3 | 흐름 `ka10080`과 보드 `ka10095`가 키움 전송 창(1.05초, 한도 5) 하나에 낼 수 있는 공개 전송 수. 나머지 칸은 운영자 몫이다. 속도만 맞추고 거절하지 않는다 |
 
-키움 경로가 대기열 `Gated`나 한도 대기를 받으면 기다리지 않고 바로 `503`과 짧은 `retryAt`(5초 안)을 낸다. 공개 오류 응답에는 키움 오류 원문이나 `manualActionRequired`가 없고, 고정 문구와 `retryAt`만 있다.
-
-히트맵 흐름은 같은 KST 분에 받은 값을 유효로 보는 분 맞춤 캐시를 쓴다(운영자 리스너는 45초 규칙 그대로). 같은 분 안에서는 공개 사용자가 몇 명이든 종목마다 TR이 한 번이다. 보드의 45초 시세 캐시와 흐름 캐시는 두 리스너와 모든 계정이 같이 쓴다. 흐름의 `symbols`는 세션 계정의 히트맵 테마 문서에 있는 종목만 받고, 없는 종목은 받지 않고 응답의 `notInThemes`로 돌려준다(운영자 리스너 응답에는 이 칸이 없다).
-
-운영자 화면의 같은 TR 요청이 공개 부하 때문에 더 기다리는 시간의 상한은 (묶음 동시 한도 × 공개 요청 하나가 그 TR을 동시에 쌓는 최대 수) ÷ 5초다. 기본값에서 순위는 2초, 시장 개요 웜은 2.4초다. 흐름 `ka10080`과 보드 `ka10095`는 이 계산이 맞지 않는다. 키움 대기열이 TR마다 1.05초 창에 5건을 보내므로, 공개 호출이 창을 가득 채우면 운영자 요청은 창이 다시 열릴 때까지(최대 두 창, 약 2.1초) 기다린다. 그래서 두 경로는 전송 직전에 `VALLY_PUBLIC_KIWOOM_SENDS_PER_WINDOW`로 속도를 맞춰 창에 운영자 몫을 남긴다. 기본값에서 상한은 흐름 1초, 보드 0.2초이고 시험은 0을 잰다. 시장 개요 `flow`의 하루 첫 콜드(기간마다 최대 약 62회)는 한 번 약 12초까지 늘 수 있다.
+- 걷은 한도의 설정 변수(`VALLY_PUBLIC_KIWOOM_ACCOUNT_IN_FLIGHT`, `_MARKET_CONCURRENCY`, `_RANKINGS_CONCURRENCY`, `_BOARD_CONCURRENCY`, `_FLOW_CONCURRENCY`, `_FLOW_TR_PER_MINUTE`, `_FLOW_ACCOUNT_TR_PER_MINUTE`, `_FLOW_FETCH_CONCURRENCY`, `_BOARD_TR_PER_WINDOW`, `_KIWOOM_SENDS_PER_WINDOW`, `_MARKET_CACHE_SECS`, `_RANKING_MAX_PAGES`, `_SCREENER_CONCURRENCY`, `_SCREENER_TOTAL_PER_MINUTE`)가 남아 있으면 시작할 때 경고 한 줄을 내고 무시한다. 설정에서 지운다.
+- 스크리너 상태와 실행이 쓰는 거래일 달력은 공개 요청이 키움에서 받지 않는다. 서버가 5분마다 스스로 받아 두고(운영자 쪽 호출이 먼저 받아도 된다), 달력이 아직 없으면 공개 실행은 `404 not_prepared`다.
+- 순위는 수집 데몬이 미리 만든 조건과 쪽 수(기본 5쪽)만 답한다. 판에 없는 조건이나 더 많은 쪽 수는 공개 리스너에서 `404 not_prepared`다. 시장 개요 칸이 판에 없어도 `404 not_prepared`다.
+- 공개 오류 응답에는 키움 오류 원문이나 `manualActionRequired`가 없고 고정 문구와 `retryAt`만 있다. 시장 개요 응답 안의 실패한 칸의 `error`도 같은 고정 문구로 바뀐다.
+- 흐름의 `symbols`는 세션 계정의 히트맵 테마 문서에 있는 종목만 받고, 없는 종목은 응답의 `notInThemes`로 돌려준다(운영자 리스너 응답에는 이 칸이 없다). 수집 데몬이 분봉을 모으지 않은 종목은 `notCollected`다.
 
 ### 본문 크기
 
@@ -94,6 +83,7 @@
 서버 PC의 env 파일(권한 600)에 다음을 더한다. 값 자리는 자리 표시다.
 
 ```sh
+VALLY_SHARED_DATA_DIR=<수집 데몬이 공용 자료를 쓰는 절대 경로>
 VALLY_PUBLIC_BIND=127.0.0.1:<공개 포트>
 VALLY_PUBLIC_ORIGIN=https://<공개 호스트>
 VALLY_PUBLIC_GOOGLE_CLIENT_ID=<Google client id>
@@ -171,14 +161,15 @@ P5 되돌리기: Funnel을 끄고, 공개 설정(`VALLY_PUBLIC_*`)을 지우고,
 한도를 바꿀 근거는 두 곳에 있다.
 
 - **운영자 리스너 전용 `GET /api/public-usage`.** 공개 리스너에서는 세션이 없으면 401, 세션이 있으면 404다. 시작 뒤 누적값을 낸다.
-  - `bundles`: 묶음별 계수. 묶음은 `rankings`, `market_overview`, `screener_run`, `board`, `flow`, `shared`(그 밖 공용 자료), `user_data`, `login`이다. 값은 `responses`(응답 수), `tooManyRequests`(429 횟수), `unavailable`(503 횟수), `waitTotalMs`·`waitMaxMs`(동시 한도에서 기다린 시간. 바로 거절하는 경로는 0이다), `trCalls`(공개 요청이 낸 TR 수. 순위·시장 개요·스크리너는 요청 앞뒤의 키움 대기열 전송 수 차이로 추정하므로 같은 시간의 운영자 호출이 섞일 수 있다).
-  - `cacheHits`: 시장 개요 응답 캐시와 스크리너 상태 캐시의 적중 수.
-  - `board`·`flow` 묶음에는 `trCalls`(공개 요청이 새로 받은 TR 수, 정확히 센다)와 함께 `cachedSymbols`(캐시에서 찾은 종목 수), `overBudgetSymbols`(예산이 없어 `missing`으로 돌린 종목 수), `rejectedSymbols`(테마에 없어 거절한 종목 수, 흐름만)가 있다. 0인 값은 나오지 않는다.
+  - `bundles`: 묶음별 계수. 묶음은 `rankings`, `market_overview`, `screener_run`, `board`, `flow`, `shared`(그 밖 공용 자료), `user_data`, `login`이다. 값은 `responses`(응답 수), `tooManyRequests`(429 횟수), `unavailable`(503 횟수), `rejectedSymbols`(테마에 없어 거절한 종목 수, 흐름만, 0이면 나오지 않는다).
+  - `cacheHits`: 스크리너 상태 캐시의 적중 수(`screenerStatus`).
+  - `sharedData`: 공용 자료 종류별(`probe`, `kiwoom-themes`, `market-overview`, `snapshot-krx`, `snapshot-combined`, `snapshot-nxt`, `minute`, `rankings`) `ageSecs`(지금 쓰는 판의 기준 시각부터 흐른 초. 아직 읽은 판이 없으면 `null`. `minute`은 늘 `null`)와 `readErrors`(읽지 못해 이전 판을 둔 횟수).
+  - `screenerResults`: 스크리너 결과 재사용 `hits`(다른 요청이 판정한 결과를 다시 쓴 횟수)와 `misses`(이 요청이 판정한 횟수). 공용 자료를 읽을 때만 있다.
   - `topAccounts`: 요청 수 상위 계정 10개(`provider:subject`).
   - `operatorKiwoomLatency`: 운영자 리스너의 키움 경로 응답 시간. 이번 분(`current`)과 지난 분(`lastMinute`)의 표본 수, p50, 최대(밀리초).
 - **분마다 로그 한 줄.** 그 분에 공개 요청이 하나라도 있었을 때만 `공개 사용량 {…}` 한 줄에 위 JSON을 담는다.
 
-429가 자주 나오는 묶음은 그 묶음의 한도를 올리거나 사용 패턴을 본다. 503이 늘면 동시 처리 한도와 `operatorKiwoomLatency`를 함께 본다. 시장 개요 `cacheHits`가 낮으면 캐시 시간을 늘릴 수 있다.
+429가 자주 나오는 묶음은 그 묶음의 한도를 올리거나 사용 패턴을 본다. 503이 늘면 동시 처리 한도를 본다. 자료 종류의 `ageSecs`가 그 자료의 주기(순위 10초, 보드 30초, 흐름·시장 개요 60초)의 몇 배를 넘거나 `readErrors`가 늘면 수집 데몬을 확인한다. `screenerResults`의 `hits`가 낮으면 사용자가 서로 다른 조건식으로 실행한다는 뜻이다.
 
 ### 차단 계정 넣는 법
 
@@ -189,7 +180,6 @@ P5 되돌리기: Funnel을 끄고, 공개 설정(`VALLY_PUBLIC_*`)을 지우고,
 ## 받아들일 한계
 
 - **같은 프로세스.** 공개 처리 중 panic이 운영자 쪽과 나눠 쓰는 `std::sync::Mutex`를 오염시키면 운영자 쪽도 계속 실패할 수 있다. 공개 라우터는 panic을 잡고(`500`), 동시 처리와 시간 상한으로 자원 고갈을 막지만 구조로 없애지는 못한다.
-- **대기열 공유.** 공개 요청은 운영자 화면과 같은 `Priority::Screen` 단계로 나간다. 위 계산한 상한만큼 운영자 요청을 늦출 수 있고, 공개 부하가 만든 실패가 공용 관문을 닫으면 운영자 조회에도 `Gated`가 번진다.
 - **IP를 모름.** 클라이언트 IP 헤더를 믿지 않아 로그인 시작 버킷을 한 사람이 다 쓸 수 있다. P4에서 Funnel이 넘기는 헤더를 확인한 뒤 IP별 버킷으로 고친다.
 - **오래된 브라우저의 `no-cors` `GET`.** `Sec-Fetch-Site`를 보내지 않는 브라우저의 Origin 없는 `GET`은 운영자 리스너에 닿는다. 응답은 읽히지 않는다.
 - **가입 상한 선점.** 가입 100명이 차면 새 가입이 막힌다. 차단 목록이 있으므로 받아들인다.

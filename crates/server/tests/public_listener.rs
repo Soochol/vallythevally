@@ -15,6 +15,8 @@ use axum::Router;
 use domain::{Market, Symbol, SymbolInfo, SymbolKind};
 use serde_json::{Value, json};
 use server::api::{Excludes, Ranking, RankingMarket, Venue};
+use server::market_source::rankings::condition_key;
+use server::shared_data::{Broker, ConditionEntry, ConditionState, DataKind, Header, OverviewBody, RankingsPartBody, ReceivedRanking, SharedRankingRow, SnapshotBody, SnapshotRow, SourceKey, data_path, part_path, write_snapshot, write_snapshot_at};
 use server::app::{Adapters, StreamSource};
 use server::config::Config;
 use server::http::AppState;
@@ -65,6 +67,10 @@ impl Work {
     fn dist(&self) -> PathBuf {
         self.path().join("dist")
     }
+}
+
+fn shared_dir(work: &Work) -> PathBuf {
+    work.path().join("shared")
 }
 
 fn bundle_text() -> String {
@@ -162,6 +168,11 @@ async fn hold_here(Extension(held): Extension<Arc<Held>>) -> &'static str {
     "released"
 }
 
+async fn kiwoom_error_here() -> (axum::http::StatusCode, axum::Json<Value>) {
+    let body = json!({"error": {"code": "kiwoom_unavailable", "message": format!("{ORIGINAL_KIWOOM_TEXT}[1700:유량=5]"), "reason": null, "retryAt": null, "manualActionRequired": true}});
+    (axum::http::StatusCode::BAD_GATEWAY, axum::Json(body))
+}
+
 #[allow(unreachable_code)]
 async fn panic_here() -> &'static str {
     panic!("시험용 panic");
@@ -169,7 +180,7 @@ async fn panic_here() -> &'static str {
 }
 
 fn test_routes(held: Arc<Held>) -> Router<Arc<AppState>> {
-    Router::new().route("/api/test/hold", get(hold_here)).route("/api/test/panic", get(panic_here)).layer(Extension(held))
+    Router::new().route("/api/test/hold", get(hold_here)).route("/api/test/panic", get(panic_here)).route("/api/test/kiwoom-error", get(kiwoom_error_here)).layer(Extension(held))
 }
 
 struct Reply {
@@ -212,10 +223,9 @@ struct Site {
     operator: String,
     operator_port: u16,
     public: String,
-    public_router: Router,
-    operator_router: Router,
     login_router: Router,
     held: Arc<Held>,
+    work_shared: PathBuf,
     http: reqwest::Client,
     tasks: Vec<tokio::task::JoinHandle<()>>,
     _lock: server::instance::InstanceLock,
@@ -266,6 +276,9 @@ impl<'a> Spec<'a> {
         let public_origin = format!("http://127.0.0.1:{public_port}");
         if self.public {
             vars.extend(public_vars(self.idp, &format!("127.0.0.1:{public_port}"), &public_origin));
+            let shared = shared_dir(self.work);
+            std::fs::create_dir_all(&shared).unwrap();
+            vars.insert("VALLY_SHARED_DATA_DIR".to_owned(), shared.display().to_string());
         }
         vars.extend(self.env.into_iter().map(|(key, value)| (key.to_owned(), value)));
         let config = config_of(vars).unwrap_or_else(|e| panic!("설정 오류: {e}"));
@@ -280,21 +293,19 @@ impl<'a> Spec<'a> {
         let held = Arc::new(Held::new());
         let mut tasks = Vec::new();
         let operator_port = listener.local_addr().unwrap().port();
-        let operator_router = router.clone();
         tasks.push(tokio::spawn(async move {
             axum::serve(listener, router).await.unwrap();
         }));
-        let (public_router, public_origin) = match public {
+        let public_origin = match public {
             Some(public) => {
                 let router = public.router_with(test_routes(held.clone()));
-                let served = router.clone();
                 let listener = public.listener;
                 tasks.push(tokio::spawn(async move {
-                    axum::serve(listener, served).await.unwrap();
+                    axum::serve(listener, router).await.unwrap();
                 }));
-                (router, public_origin)
+                public_origin
             }
-            None => (Router::new(), String::new()),
+            None => String::new(),
         };
         let login_router = match self.public {
             true => {
@@ -312,14 +323,13 @@ impl<'a> Spec<'a> {
         Site {
             state,
             login_router,
-            operator_router,
             fake,
             idp: self.idp.clone(),
             operator: format!("http://127.0.0.1:{operator_port}"),
             operator_port,
             public: public_origin,
-            public_router,
             held,
+            work_shared: shared_dir(self.work),
             http: reqwest::Client::builder().redirect(reqwest::redirect::Policy::none()).no_proxy().timeout(Duration::from_secs(15)).build().unwrap(),
             tasks,
             _lock: lock,
@@ -380,14 +390,6 @@ impl Site {
         Session { cookie: format!("{}={}", session.0, session.1) }
     }
 
-    async fn login_many(&self, count: usize) -> Vec<Session> {
-        let mut sessions = Vec::new();
-        for n in 0..count {
-            sessions.push(self.login(&format!("user-{n}")).await);
-        }
-        sessions
-    }
-
     async fn login(&self, subject: &str) -> Session {
         self.login_as("google", subject).await
     }
@@ -430,6 +432,14 @@ impl Site {
         reply.json()
     }
 
+    async fn publish_boards(&self) {
+        let (shared, at) = (self.work_shared.clone(), self.now());
+        write_overview_board(&shared, at, healthy_index());
+        write_rankings_board(&shared, at);
+        write_screener_snapshot(&shared, at);
+        self.state.shared_data.poll_once(&shared).await;
+    }
+
     fn calls_of(&self, api_id: &str) -> usize {
         self.fake.calls().iter().filter(|call| call.api_id == api_id).count()
     }
@@ -451,103 +461,77 @@ fn ranking_body(ranking: Ranking, pages: u8) -> Value {
     json!({"ranking": serde_json::to_value(ranking).unwrap(), "pages": pages, "trigger": "user"})
 }
 
-fn all_indices() -> Value {
-    json!({"all_inds_idex": [
-        {"stk_cd": "001", "stk_nm": "종합(KOSPI)", "cur_prc": "-6613.59", "flu_rt": "-0.67", "rising": "410", "stdns": "52", "fall": "+498", "upl": "3", "lst": "0", "trde_prica": "13,485,976"},
-        {"stk_cd": "101", "stk_nm": "종합(KOSDAQ)", "cur_prc": "-6613.59", "flu_rt": "-0.67", "rising": "410", "stdns": "52", "fall": "+498", "upl": "3", "lst": "0", "trde_prica": "13,485,976"},
-        {"stk_cd": "603", "stk_nm": "VKOSPI", "cur_prc": "+17.20", "flu_rt": "+1.50", "trde_prica": "0"}
-    ], "return_code": 0, "return_msg": "정상적으로 처리되었습니다"})
+const BOARD_DAY: &str = "20261106";
+const ORIGINAL_KIWOOM_TEXT: &str = "ORIGINAL-KIWOOM-TEXT-8005 공인 IP 등록 안내";
+
+fn board_header(kind: DataKind, at: i64) -> Header {
+    Header::new(kind, domain::KstDate::parse_yyyymmdd(BOARD_DAY).unwrap(), at, at, vec![SourceKey { key_name: "rest-01".into(), broker: Broker::Kiwoom }])
 }
 
-fn rank_headers(next: Option<&str>) -> Value {
-    match next {
-        Some(key) => json!({"cont-yn": "Y", "next-key": key}),
-        None => json!({"cont-yn": "N", "next-key": ""}),
-    }
+fn card_context(market: &str, at: i64) -> Value {
+    json!({"market": market, "phase": "regular", "receivedAt": at, "source": "kiwoom"})
 }
 
-fn trade_amount_page(code: &str, next: Option<&str>) -> Value {
-    let row = json!({"stk_cd": code, "stk_nm": format!("키움{code}"), "now_rank": "1", "pred_rank": "1", "cur_prc": "1000", "flu_rt": "0.5", "now_trde_qty": "10", "trde_prica": "1"});
-    json!({"_headers": rank_headers(next), "trde_prica_upper": [row], "return_code": 0, "return_msg": "정상적으로 처리되었습니다"})
+fn ok_part(value: Value) -> Value {
+    json!({"status": "ok", "value": value})
 }
 
-fn script_rankings(fake: &ScriptedTransport, pages: usize) {
-    fake.respond_with("ka10032", 200, trade_amount_page("000001", Some("K2")));
-    for page in 2..=pages {
-        let next = (page < pages).then(|| format!("K{}", page + 1));
-        fake.respond_with_for_key("ka10032", &format!("K{page}"), 200, trade_amount_page(&format!("{page:06}"), next.as_deref()));
-    }
+fn failed_part(message: &str) -> Value {
+    json!({"status": "failed", "error": {"code": "kiwoom_unavailable", "message": message, "manualActionRequired": true, "reason": null, "retryAt": null}})
 }
 
-fn index_days(days: &[String]) -> Value {
-    let rows: Vec<_> = days.iter().map(|day| json!({"dt": day, "cur_prc": "505969", "open_pric": "505969", "high_pric": "505969", "low_pric": "505969", "trde_qty": "1", "trde_prica": "100"})).collect();
-    json!({"inds_dt_pole_qry": rows, "return_code": 0, "return_msg": "정상적으로 처리되었습니다"})
+fn market_cards(market: &str, at: i64, index: Value) -> Value {
+    let context = card_context(market, at);
+    let flow = |period: &str| json!({"context": context, "period": period, "investors": ok_part(json!([{"date": "2026-11-06", "individualEok": 1, "foreignEok": 2, "institutionEok": 3}])), "program": ok_part(json!([{"date": "2026-11-06", "arbitrageEok": 1.0, "nonArbitrageEok": 2.0, "totalEok": 3.0}]))});
+    let turnover = |period: &str| json!({"context": context, "period": period, "days": ok_part(json!([{"date": "2026-11-06", "tradeValueEok": 5.0}]))});
+    let board = json!({"foreign": [{"code": "005930", "name": "삼성전자", "days": 3, "netEok": 1.0, "netShares": 10, "periodChangeRate": 0.1}], "institution": []});
+    json!({
+        "index": {"context": context, "index": index},
+        "sectors": {"context": context, "sectors": ok_part(json!([{"code": "013", "name": "전기전자", "level": 1.0, "changeRate": 2.0, "tradeValueEok": 3.0}])), "flows": ok_part(json!([{"code": "013", "name": "전기전자", "wholeMarket": false, "individualEok": 1, "foreignEok": 2, "institutionEok": 3}]))},
+        "flow": [flow("5"), flow("20"), flow("60")],
+        "turnover": [turnover("5"), turnover("20"), turnover("60")],
+        "streaks": {"context": context, "buying": ok_part(board), "selling": ok_part(json!({"foreign": [], "institution": []}))},
+    })
 }
 
-fn sector_flows() -> Value {
-    let rows: Vec<_> = [("001_AL", "종합(KOSPI)"), ("101_AL", "종합(KOSDAQ)")].iter().map(|(code, name)| json!({"inds_cd": code, "inds_nm": name, "cur_prc": "+658091", "flu_rt": "349", "ind_netprps": "-8787", "frgnr_netprps": "+6473", "orgn_netprps": "+1893"})).collect();
-    json!({"inds_netprps": rows, "return_code": 0, "return_msg": "정상적으로 처리되었습니다"})
+fn healthy_index() -> Value {
+    ok_part(json!({"code": "001", "name": "종합", "level": 2500.0, "changeRate": 0.5, "breadth": {"rising": 1, "flat": 2, "falling": 3, "upperLimit": 4, "lowerLimit": 5}, "tradeValueEok": 9.0, "volatility": null}))
 }
 
-fn program_days(days: &[String]) -> Value {
-    let rows: Vec<_> = days.iter().map(|day| json!({"cntr_tm": format!("{day}000000"), "dfrt_trde_netprps": "100", "ndiffpro_trde_netprps": "250", "all_netprps": "350"})).collect();
-    json!({"prm_trde_trnsn": rows, "return_code": 0, "return_msg": "정상적으로 처리되었습니다"})
+fn write_overview_board(shared: &Path, at: i64, kospi_index: Value) {
+    let body: OverviewBody = serde_json::from_value(json!({"kospi": market_cards("kospi", at, kospi_index), "kosdaq": market_cards("kosdaq", at, healthy_index())})).unwrap();
+    write_snapshot_at(data_path(shared, DataKind::MarketOverview, BOARD_DAY, "json"), board_header(DataKind::MarketOverview, at), body).unwrap();
 }
 
-fn weekdays_before_friday(count: usize) -> Vec<String> {
-    let mut days = Vec::new();
-    let mut day = domain::KstDate::new(2026, 11, 5).unwrap();
-    while days.len() < count {
-        if !matches!(day.weekday(), domain::Weekday::Sat | domain::Weekday::Sun) {
-            days.push(day.yyyymmdd().to_string());
-        }
-        day = day.add_days(-1);
-    }
-    days.reverse();
-    days
+fn ranking_row(code: &str) -> SharedRankingRow {
+    serde_json::from_value(json!({"code": code, "name": format!("판{code}"), "price": 1000, "changeRate": 0.5, "figures": {"kind": "tradeAmount", "tradeAmount": 7, "volume": 3, "placesGained": null}})).unwrap()
 }
 
-fn script_market_overview(fake: &ScriptedTransport) {
-    let days = weekdays_before_friday(24);
-    fake.respond_with("ka20003", 200, all_indices());
-    fake.respond_with("ka20006", 200, index_days(&days));
-    fake.respond_with("ka10051", 200, sector_flows());
-    fake.respond_with("ka90010", 200, program_days(&days));
+fn write_rankings_board(shared: &Path, at: i64) {
+    let rows: Vec<SharedRankingRow> = ["005930", "000660"].iter().cycle().take(10).map(|code| ranking_row(code)).collect();
+    let conditions = [RankingMarket::All, RankingMarket::Kospi, RankingMarket::Kosdaq]
+        .into_iter()
+        .map(|market| ConditionEntry { key: condition_key(&trade_amount(market)), state: ConditionState::Ready, last: Some(ReceivedRanking { rows: rows.clone(), pages: 5, end: false, limited: false, received_at: at, broker: Broker::Kiwoom, page_rows: vec![2; 5] }) })
+        .collect();
+    write_snapshot_at(part_path(shared, BOARD_DAY, "rest-01"), board_header(DataKind::Rankings, at), RankingsPartBody { period_secs: 10, pages: 5, conditions }).unwrap();
+}
+
+fn write_screener_snapshot(shared: &Path, at: i64) {
+    let row = SnapshotRow { code: "200010".into(), day: BOARD_DAY.into(), current_won: 130, base_won: 100, open_won: 100, high_won: 130, low_won: 100, volume: 5_000, traded_million_won: 1, traded_at: None };
+    write_snapshot(shared, board_header(DataKind::SnapshotKrx, at), SnapshotBody { closing: false, requested: 1, missing: 0, stocks: vec![row], indices: vec![] }).unwrap();
+}
+
+fn script_operator_ranking(fake: &ScriptedTransport) {
+    let row = json!({"stk_cd": "000001", "stk_nm": "키움000001", "now_rank": "1", "pred_rank": "1", "cur_prc": "1000", "flu_rt": "0.5", "now_trde_qty": "10", "trde_prica": "1"});
+    fake.respond_with("ka10032", 200, json!({"_headers": {"cont-yn": "N", "next-key": ""}, "trde_prica_upper": [row], "return_code": 0, "return_msg": "정상적으로 처리되었습니다"}));
 }
 
 fn head(text: &str) -> String {
     text.chars().take(200).collect()
 }
 
-fn operator_host(site: &Site) -> String {
-    format!("127.0.0.1:{}", site.operator_port)
-}
-
 fn public_host(site: &Site) -> String {
     site.public.trim_start_matches("http://").to_owned()
-}
-
-async fn through(router: &Router, request: axum::http::Request<axum::body::Body>) -> (u16, Vec<u8>) {
-    let response = router.clone().oneshot(request).await.unwrap();
-    let status = response.status().as_u16();
-    let body = http_body_util::BodyExt::collect(response.into_body()).await.unwrap().to_bytes().to_vec();
-    (status, body)
-}
-
-fn public_post_in_process(site: &Site, session: &Session, path: &str, body: &Value) -> axum::http::Request<axum::body::Body> {
-    axum::http::Request::post(path).header("host", public_host(site)).header("origin", &site.public).header("content-type", "application/json").header("cookie", &session.cookie).body(axum::body::Body::from(body.to_string())).unwrap()
-}
-
-fn public_get_in_process(site: &Site, session: &Session, path: &str) -> axum::http::Request<axum::body::Body> {
-    axum::http::Request::get(path).header("host", public_host(site)).header("cookie", &session.cookie).body(axum::body::Body::empty()).unwrap()
-}
-
-fn operator_post_in_process(site: &Site, path: &str, body: &Value) -> axum::http::Request<axum::body::Body> {
-    axum::http::Request::post(path).header("host", operator_host(site)).header("content-type", "application/json").body(axum::body::Body::from(body.to_string())).unwrap()
-}
-
-fn operator_get_in_process(site: &Site, path: &str) -> axum::http::Request<axum::body::Body> {
-    axum::http::Request::get(path).header("host", operator_host(site)).body(axum::body::Body::empty()).unwrap()
 }
 
 fn open_days(from: domain::KstDate, through: domain::KstDate) -> Vec<domain::KstDate> {
@@ -610,6 +594,7 @@ async fn bad_public_settings_stop_the_start() {
     let build = |edit: &dyn Fn(&mut BTreeMap<String, String>)| {
         let mut vars = operator_vars(work.path(), "127.0.0.1:8080");
         vars.extend(public_vars(&idp, "127.0.0.1:18443", "https://vally.example.ts.net"));
+        vars.insert("VALLY_SHARED_DATA_DIR".into(), shared_dir(&work).display().to_string());
         edit(&mut vars);
         config_of(vars)
     };
@@ -645,8 +630,6 @@ async fn bad_public_settings_stop_the_start() {
         ("VALLY_PUBLIC_MAX_IN_FLIGHT", "0"),
         ("VALLY_PUBLIC_ACCOUNT_IN_FLIGHT", "-1"),
         ("VALLY_PUBLIC_REQUEST_TIMEOUT_SECS", "0"),
-        ("VALLY_PUBLIC_RANKING_MAX_PAGES", "31"),
-        ("VALLY_PUBLIC_MARKET_CONCURRENCY", "0"),
         ("VALLY_PUBLIC_SCREENER_ACCOUNT_PER_MINUTE", "0"),
         ("VALLY_PUBLIC_ACCOUNT_LIMIT", "0"),
     ] {
@@ -654,12 +637,36 @@ async fn bad_public_settings_stop_the_start() {
         let key: &'static str = Box::leak(name.to_owned().into_boxed_str());
         assert!(build(&set(key, leaked)).is_err(), "{name}={value}가 받아들여졌다");
     }
-    assert!(build(&|vars| {
-        vars.insert("VALLY_PUBLIC_SCREENER_CONCURRENCY".into(), "0".into());
-        vars.insert("VALLY_PUBLIC_SCREENER_TOTAL_PER_MINUTE".into(), "0".into());
-    })
-    .is_ok(), "0은 한도 없음이다");
+    let retired: Vec<String> = RETIRED_LIMITS.iter().map(|name| (*name).to_owned()).collect();
+    let mut vars = operator_vars(work.path(), "127.0.0.1:8080");
+    vars.extend(public_vars(&idp, "127.0.0.1:18443", "https://vally.example.ts.net"));
+    vars.insert("VALLY_SHARED_DATA_DIR".into(), shared_dir(&work).display().to_string());
+    for name in &retired {
+        vars.insert(name.clone(), "not-a-number".into());
+    }
+    let (_, warnings) = Config::from_values(vars).unwrap_or_else(|e| panic!("걷은 한도 변수는 틀린 값이어도 시작을 막지 않는다: {e}"));
+    let warning = warnings.iter().find(|line| line.contains("무시")).unwrap_or_else(|| panic!("무시 경고가 없다: {warnings:?}"));
+    for name in &retired {
+        assert!(warning.contains(name.as_str()), "{name}가 경고에 없다: {warning}");
+    }
 }
+
+const RETIRED_LIMITS: &[&str] = &[
+    "VALLY_PUBLIC_KIWOOM_ACCOUNT_IN_FLIGHT",
+    "VALLY_PUBLIC_MARKET_CONCURRENCY",
+    "VALLY_PUBLIC_RANKINGS_CONCURRENCY",
+    "VALLY_PUBLIC_BOARD_CONCURRENCY",
+    "VALLY_PUBLIC_FLOW_CONCURRENCY",
+    "VALLY_PUBLIC_FLOW_TR_PER_MINUTE",
+    "VALLY_PUBLIC_FLOW_ACCOUNT_TR_PER_MINUTE",
+    "VALLY_PUBLIC_FLOW_FETCH_CONCURRENCY",
+    "VALLY_PUBLIC_BOARD_TR_PER_WINDOW",
+    "VALLY_PUBLIC_KIWOOM_SENDS_PER_WINDOW",
+    "VALLY_PUBLIC_MARKET_CACHE_SECS",
+    "VALLY_PUBLIC_RANKING_MAX_PAGES",
+    "VALLY_PUBLIC_SCREENER_CONCURRENCY",
+    "VALLY_PUBLIC_SCREENER_TOTAL_PER_MINUTE",
+];
 
 const CLOSED_ROUTES: &[(&str, &str, bool)] = &[
     ("GET", "/api/ws", true),
@@ -818,15 +825,15 @@ async fn with_a_session_the_shared_reads_answer() {
     fake.set_krx_market(screener_market());
     let site = Spec::new(&work, &idp).with_fake(fake.clone()).start().await;
     update_screener_store(&site).await;
+    site.publish_boards().await;
     let who = site.login("alice").await;
     let status = site.get(&who, "/api/screener/status").await;
     assert_eq!(status.status, 200);
     assert!(status.json()["lastDay"].is_string(), "{}", status.text());
+    let requests_before_reads = site.fake.requests();
     let run = site.post(&who, "/api/screener/run", &new_high_screen()).await;
     assert_eq!(run.status, 200, "{}", head(&run.text()));
     assert!(run.json()["rows"].is_array());
-    script_rankings(&fake, 5);
-    script_market_overview(&fake);
     site.load_symbols();
     for path in ["/api/etf/funds", "/api/symbols?q=%EC%82%BC%EC%84%B1", "/api/symbols/005930", "/api/financial-update", "/api/symbols/005930/financials?period=Y", "/api/symbols/005930/financial-source", "/api/market-overview/index?market=kospi"] {
         let reply = site.get(&who, path).await;
@@ -835,6 +842,7 @@ async fn with_a_session_the_shared_reads_answer() {
     let ranking = site.post(&who, "/api/rankings", &ranking_body(trade_amount(RankingMarket::All), 1)).await;
     assert_eq!(ranking.status, 200, "{}", head(&ranking.text()));
     assert!(ranking.json()["rows"].as_array().is_some_and(|rows| !rows.is_empty()));
+    assert_eq!(site.fake.requests(), requests_before_reads, "공개 읽기는 키움에 가지 않는다");
 }
 
 
@@ -869,6 +877,7 @@ async fn writes_need_the_public_origin_and_a_json_content_type() {
     let idp = start_idp().await;
     let site = Spec::new(&work, &idp).start().await;
     site.load_symbols();
+    site.publish_boards().await;
     let who = site.login("alice").await;
     let body = ranking_body(trade_amount(RankingMarket::All), 1).to_string();
     let send = |origin: Option<&str>, content_type: &str| {
@@ -878,7 +887,6 @@ async fn writes_need_the_public_origin_and_a_json_content_type() {
         }
         async move { Reply::of(request.send().await.unwrap()).await }
     };
-    site.fake.respond_with("ka10032", 200, trade_amount_page("000001", None));
     let ok = send(Some(&site.public), "application/json").await;
     assert_eq!(ok.status, 200, "{}", head(&ok.text()));
     assert_eq!(send(Some(&site.public), "application/json; charset=utf-8").await.status, 200);
@@ -886,7 +894,7 @@ async fn writes_need_the_public_origin_and_a_json_content_type() {
     assert_eq!(send(Some(&site.public), "text/plain").await.status, 400, "text/plain POST");
     assert_eq!(send(Some(&site.public), "application/x-www-form-urlencoded").await.status, 400);
     assert_eq!(send(Some("http://evil.example"), "application/json").await.status, 400, "다른 Origin의 POST");
-    assert_eq!(site.calls_of("ka10032"), 1, "거절된 POST는 키움에 가지 않는다");
+    assert_eq!(site.calls_of("ka10032"), 0, "공개 순위는 키움에 가지 않는다");
 }
 
 #[tokio::test]
@@ -1154,217 +1162,20 @@ async fn a_panicking_route_is_500_and_both_listeners_keep_answering() {
 }
 
 
-fn market_card_calls(call: &support::Call) -> bool {
-    matches!(call.api_id.as_str(), "ka20003" | "ka20006")
-}
-
 #[tokio::test]
-async fn a_full_market_overview_bundle_leaves_rankings_their_own_room() {
+async fn a_kiwoom_failure_leaves_the_public_listener_with_fixed_words_and_no_kiwoom_text() {
     let work = Work::new();
     let idp = start_idp().await;
-    let fake = ScriptedTransport::new();
-    script_market_overview(&fake);
-    script_rankings(&fake, 1);
-    let site = Spec::new(&work, &idp).with_fake(fake.clone()).start().await;
-    site.load_symbols();
-    let sessions: Vec<Session> = site.login_many(8).await;
-    let warm = site.get(&sessions[7], "/api/market-overview/index?market=kospi&period=20").await;
-    assert_eq!(warm.status, 200, "{}", head(&warm.text()));
-    let held = fake.hold("시장 개요 카드", market_card_calls);
-    let queries = ["/api/market-overview/index?market=kospi&period=5", "/api/market-overview/index?market=kosdaq&period=5", "/api/market-overview/turnover?market=kospi&period=5", "/api/market-overview/turnover?market=kosdaq&period=5"];
-    let before = fake.requests();
-    let pending: Vec<_> = queries.iter().enumerate().map(|(n, path)| tokio::spawn({
-        let request = site.public_get(path).header("cookie", &sessions[n].cookie);
-        async move { Reply::of(request.send().await.unwrap()).await }
-    })).collect();
-    held.arrived().await;
-    wait_until("네 묶음 요청이 키움 요청을 냈다", || fake.requests() >= before + 4).await;
-    let started = Instant::now();
-    let fifth = site.get(&sessions[4], "/api/market-overview/index?market=kospi&period=60").await;
-    assert_eq!(fifth.status, 503, "묶음 자리가 없으면 바로 503: {}", head(&fifth.text()));
-    assert!(started.elapsed() < Duration::from_secs(2));
-    assert_retry_matches(&site, &fifth);
-    let cached = site.get(&sessions[6], "/api/market-overview/index?market=kospi&period=20").await;
-    assert_eq!(cached.status, 200, "캐시가 적중한 요청은 묶음 자리를 잡지 않는다");
-    let ranking = site.post(&sessions[5], "/api/rankings", &ranking_body(trade_amount(RankingMarket::All), 1)).await;
-    assert_eq!(ranking.status, 200, "시장 개요 묶음이 차도 순위는 자기 묶음 한도 안에서 응답한다: {}", head(&ranking.text()));
-    held.release();
-    for reply in pending {
-        assert_eq!(reply.await.unwrap().status, 200);
-    }
-}
-
-#[tokio::test]
-async fn one_account_holds_one_kiwoom_path_at_a_time() {
-    let work = Work::new();
-    let idp = start_idp().await;
-    let fake = ScriptedTransport::new();
-    script_market_overview(&fake);
-    script_rankings(&fake, 1);
-    let site = Spec::new(&work, &idp).with_fake(fake.clone()).start().await;
-    site.load_symbols();
+    let site = Spec::new(&work, &idp).start().await;
     let alice = site.login("alice").await;
-    let bob = site.login("bob").await;
-    let held = fake.hold("순위", |call| call.api_id == "ka10032");
-    let first = tokio::spawn({
-        let request = site.post_builder(&alice, "/api/rankings", &ranking_body(trade_amount(RankingMarket::All), 1));
-        async move { Reply::of(request.send().await.unwrap()).await }
-    });
-    held.arrived().await;
-    let started = Instant::now();
-    let second = site.post(&alice, "/api/rankings", &ranking_body(trade_amount(RankingMarket::Kospi), 1)).await;
-    assert_eq!(second.status, 503, "{}", head(&second.text()));
-    let other_bundle = site.get(&alice, "/api/market-overview/index?market=kosdaq").await;
-    assert_eq!(other_bundle.status, 503, "다른 묶음이어도 계정당 키움 경로는 1개다");
-    assert!(started.elapsed() < Duration::from_secs(2), "바로 503이다");
-    assert_retry_matches(&site, &other_bundle);
-    assert_eq!(site.get(&bob, "/api/market-overview/index?market=kosdaq").await.status, 200, "다른 계정은 응답한다");
-    held.release();
-    assert_eq!(first.await.unwrap().status, 200);
-    assert_eq!(site.post(&alice, "/api/rankings", &ranking_body(trade_amount(RankingMarket::Kospi), 1)).await.status, 200, "자리가 돌아왔다");
-}
-
-#[tokio::test]
-async fn the_same_market_overview_query_inside_fifteen_seconds_costs_no_new_kiwoom_request() {
-    let work = Work::new();
-    let idp = start_idp().await;
-    let fake = ScriptedTransport::new();
-    script_market_overview(&fake);
-    let site = Spec::new(&work, &idp).with_fake(fake.clone()).start().await;
-    let alice = site.login("alice").await;
-    let bob = site.login("bob").await;
-    let path = "/api/market-overview/index?market=kospi";
-    let first = site.get(&alice, path).await;
-    assert_eq!(first.status, 200, "{}", head(&first.text()));
-    assert_eq!(site.calls_of("ka20003"), 1);
-    site.jump(14);
-    let second = site.get(&bob, path).await;
-    assert_eq!((second.status, second.body.clone()), (200, first.body.clone()), "모든 계정이 같은 응답을 같이 쓴다");
-    assert_eq!(site.calls_of("ka20003"), 1, "15초 안의 같은 질의는 키움을 다시 부르지 않는다");
-    site.jump(2);
-    assert_eq!(site.get(&bob, path).await.status, 200);
-    assert_eq!(site.calls_of("ka20003"), 2, "15초가 지나면 다시 받는다");
-    assert_eq!(site.usage().await["cacheHits"]["marketOverview"], 1);
-}
-
-#[tokio::test]
-async fn a_ranking_asking_for_thirty_pages_sends_five_to_kiwoom() {
-    let work = Work::new();
-    let idp = start_idp().await;
-    let fake = ScriptedTransport::new();
-    script_rankings(&fake, 12);
-    let site = Spec::new(&work, &idp).with_fake(fake.clone()).start().await;
-    site.load_symbols();
-    let who = site.login("alice").await;
-    let reply = site.post(&who, "/api/rankings", &ranking_body(trade_amount(RankingMarket::All), 30)).await;
-    assert_eq!(reply.status, 200, "{}", head(&reply.text()));
-    let keys: Vec<Option<String>> = fake.calls().into_iter().filter(|call| call.api_id == "ka10032").map(|call| call.next_key).collect();
-    assert_eq!(keys, [None, Some("K2".into()), Some("K3".into()), Some("K4".into()), Some("K5".into())]);
-}
-
-#[tokio::test]
-async fn a_gated_kiwoom_answers_503_with_fixed_words_and_no_kiwoom_text() {
-    let work = Work::new();
-    let idp = start_idp().await;
-    let fake = ScriptedTransport::new();
-    let marker = "ORIGINAL-KIWOOM-TEXT-8005 공인 IP 등록 안내";
-    let refused = || support::ScriptedReply { status: 429, body: json!({"return_code": 5, "return_msg": format!("{marker}[1700:유량=5]")}), delay: Duration::ZERO };
-    fake.script("ka10032", vec![refused(), refused(), refused()]);
-    let site = Spec::new(&work, &idp).with_fake(fake.clone()).start().await;
-    site.load_symbols();
-    let alice = site.login("alice").await;
-    let bob = site.login("bob").await;
-    let closing = site.post(&alice, "/api/rankings", &ranking_body(trade_amount(RankingMarket::All), 1)).await;
-    assert!(!closing.text().contains("ORIGINAL-KIWOOM-TEXT"), "{}", closing.text());
-    let sent = site.calls_of("ka10032");
-    let started = Instant::now();
-    let gated = site.post(&bob, "/api/rankings", &ranking_body(trade_amount(RankingMarket::Kospi), 1)).await;
-    assert_eq!(gated.status, 503, "{}", head(&gated.text()));
-    assert!(started.elapsed() < Duration::from_secs(2), "바로 503이다");
-    let body = gated.json();
+    let failed = site.get(&alice, "/api/test/kiwoom-error").await;
+    assert_eq!(failed.status, 503, "{}", head(&failed.text()));
+    let body = failed.json();
+    assert_eq!(body["error"]["code"], "kiwoom_unavailable");
     assert_eq!(body["error"]["message"], KIWOOM_FIXED);
-    assert_ne!(body["error"]["manualActionRequired"], true);
-    assert!(!gated.text().contains("ORIGINAL-KIWOOM-TEXT") && !gated.text().contains("1700"), "{}", gated.text());
-    assert_retry_matches(&site, &gated);
-    assert_eq!(site.calls_of("ka10032"), sent, "닫힌 관문 뒤에는 키움에 보내지 않는다");
-}
-
-
-#[tokio::test]
-async fn public_rankings_at_their_limit_delay_an_operator_ranking_by_at_most_two_seconds() {
-    let work = Work::new();
-    let idp = start_idp().await;
-    let fake = ScriptedTransport::new();
-    script_rankings(&fake, 10);
-    let site = Spec::new(&work, &idp).with_fake(fake.clone()).start().await;
-    site.load_symbols();
-    let (first, second) = (site.login("first").await, site.login("second").await);
-    tokio::time::pause();
-    let operator_ranking = |market| operator_post_in_process(&site, "/api/rankings", &ranking_body(trade_amount(market), 1));
-    let started = tokio::time::Instant::now();
-    assert_eq!(through(&site.operator_router, operator_ranking(RankingMarket::Kosdaq)).await.0, 200);
-    let alone = started.elapsed();
-    tokio::time::resume();
-    site.jump(10);
-    let walks: Vec<_> = [(&first, RankingMarket::All), (&second, RankingMarket::Kospi)].into_iter().map(|(who, market)| {
-        let request = public_post_in_process(&site, who, "/api/rankings", &ranking_body(trade_amount(market), 30));
-        let router = site.public_router.clone();
-        tokio::spawn(async move { through(&router, request).await })
-    }).collect();
-    wait_until("공개 순위 두 건이 키움 대기열에 들어갔다", || site.calls_of("ka10032") >= 3).await;
-    tokio::time::pause();
-    let started = tokio::time::Instant::now();
-    let (status, body) = through(&site.operator_router, operator_ranking(RankingMarket::Kosdaq)).await;
-    let loaded = started.elapsed();
-    assert_eq!(status, 200, "{}", head(&String::from_utf8_lossy(&body)));
-    for walk in walks {
-        assert_eq!(walk.await.unwrap().0, 200);
-    }
-    let extra = loaded.saturating_sub(alone);
-    eprintln!("D10(9) 순위: 혼자 {alone:?}, 공개 부하 중 {loaded:?}, 더 기다림 {extra:?}");
-    assert!(extra <= Duration::from_secs(2), "공개 순위 묶음이 운영자 순위를 {extra:?} 늦췄다");
-    assert!(extra > Duration::ZERO, "공개 부하가 대기열을 채우지 못했다(시험이 아무것도 재지 않는다): 혼자 {alone:?}, 부하 중 {loaded:?}");
-}
-
-#[tokio::test]
-async fn public_market_overview_at_its_limit_delays_an_operator_card_by_at_most_two_point_four_seconds() {
-    let work = Work::new();
-    let idp = start_idp().await;
-    let fake = ScriptedTransport::new();
-    script_market_overview(&fake);
-    let site = Spec::new(&work, &idp).with_fake(fake.clone()).start().await;
-    site.load_symbols();
-    let sessions: Vec<Session> = site.login_many(4).await;
-    tokio::time::pause();
-    let operator_card = || operator_get_in_process(&site, "/api/market-overview/sectors?market=kospi");
-    let flows = ["/api/market-overview/flow?market=kospi&period=20", "/api/market-overview/flow?market=kosdaq&period=20", "/api/market-overview/flow?market=kospi&period=60", "/api/market-overview/flow?market=kosdaq&period=60"];
-    let started = tokio::time::Instant::now();
-    assert_eq!(through(&site.operator_router, operator_card()).await.0, 200);
-    let alone = started.elapsed();
-    tokio::time::sleep(Duration::from_secs(10)).await;
-    tokio::time::resume();
-    let before = fake.requests();
-    let loads: Vec<_> = flows.iter().zip(&sessions).map(|(path, who)| {
-        let request = public_get_in_process(&site, who, path);
-        let router = site.public_router.clone();
-        tokio::spawn(async move { through(&router, request).await })
-    }).collect();
-    wait_until("공개 시장 개요 네 건이 키움 대기열에 들어갔다", || fake.requests() >= before + 2).await;
-    tokio::time::sleep(Duration::from_millis(300)).await;
-    tokio::time::pause();
-    let public_requests = fake.requests() - before;
-    let started = tokio::time::Instant::now();
-    let (status, body) = through(&site.operator_router, operator_card()).await;
-    let loaded = started.elapsed();
-    assert_eq!(status, 200, "{}", head(&String::from_utf8_lossy(&body)));
-    for load in loads {
-        let (status, body) = load.await.unwrap();
-        assert_eq!(status, 200, "{}", head(&String::from_utf8_lossy(&body)));
-    }
-    let extra = loaded.saturating_sub(alone);
-    eprintln!("D10(9) 시장 개요: 혼자 {alone:?}, 공개 부하 중 {loaded:?}, 더 기다림 {extra:?}, 공개가 낸 요청 {} 이상", public_requests);
-    assert!(extra <= Duration::from_millis(2400), "공개 시장 개요 묶음이 운영자 카드를 {extra:?} 늦췄다");
-    assert!(extra > Duration::ZERO, "공개 부하가 대기열을 채우지 못했다(시험이 아무것도 재지 않는다): 혼자 {alone:?}, 부하 중 {loaded:?}");
+    assert_eq!(body["error"]["manualActionRequired"], false);
+    assert!(!failed.text().contains("ORIGINAL-KIWOOM-TEXT") && !failed.text().contains("1700"), "{}", failed.text());
+    assert_retry_matches(&site, &failed);
 }
 
 
@@ -1377,32 +1188,11 @@ async fn screener_site<'a>(work: &'a Work, idp: &'a Arc<FakeIdp>, env: &[(&'a st
 }
 
 #[tokio::test]
-async fn screener_runs_over_the_concurrency_cap_are_503_at_once() {
-    let work = Work::new();
-    let idp = start_idp().await;
-    let (site, fake) = screener_site(&work, &idp, &[("VALLY_PUBLIC_SCREENER_CONCURRENCY", "1"), ("VALLY_PUBLIC_SCREENER_ACCOUNT_PER_MINUTE", "50"), ("VALLY_PUBLIC_SCREENER_TOTAL_PER_MINUTE", "0")]).await;
-    let (alice, bob) = (site.login("alice").await, site.login("bob").await);
-    let held = fake.hold("스크리너 실행", |call| call.api_id == "ka10095");
-    let first = tokio::spawn({
-        let request = site.post_builder(&alice, "/api/screener/run", &new_high_screen());
-        async move { Reply::of(request.send().await.unwrap()).await }
-    });
-    held.arrived().await;
-    let started = Instant::now();
-    let refused = site.post(&bob, "/api/screener/run", &new_high_screen()).await;
-    assert_eq!(refused.status, 503, "{}", head(&refused.text()));
-    assert!(started.elapsed() < Duration::from_secs(2));
-    assert_retry_matches(&site, &refused);
-    held.release();
-    assert_eq!(first.await.unwrap().status, 200);
-    assert_eq!(site.post(&bob, "/api/screener/run", &new_high_screen()).await.status, 200, "자리가 돌아왔다");
-}
-
-#[tokio::test]
-async fn the_third_run_of_an_account_in_a_minute_and_the_fourth_of_all_are_429() {
+async fn the_third_run_of_an_account_in_a_minute_is_429_and_other_accounts_are_not_held_by_it() {
     let work = Work::new();
     let idp = start_idp().await;
     let (site, _fake) = screener_site(&work, &idp, &[]).await;
+    site.publish_boards().await;
     let (alice, bob, carol) = (site.login("alice").await, site.login("bob").await, site.login("carol").await);
     async fn run_for(site: &Site, who: &Session) -> Reply {
         site.post(who, "/api/screener/run", &new_high_screen()).await
@@ -1412,13 +1202,11 @@ async fn the_third_run_of_an_account_in_a_minute_and_the_fourth_of_all_are_429()
     let third = run_for(&site, &alice).await;
     assert_eq!(third.status, 429, "{}", head(&third.text()));
     assert_retry_matches(&site, &third);
-    assert_eq!(run_for(&site, &bob).await.status, 200, "전체 분당 3회 가운데 세 번째");
-    let fourth = run_for(&site, &carol).await;
-    assert_eq!(fourth.status, 429, "전체 분당 3회를 넘었다: {}", head(&fourth.text()));
-    assert_retry_matches(&site, &fourth);
-    let wait: i64 = fourth.header("retry-after").unwrap().parse().unwrap();
+    assert_eq!(run_for(&site, &bob).await.status, 200, "다른 계정은 같은 분에 막히지 않는다");
+    assert_eq!(run_for(&site, &carol).await.status, 200, "전체 분당 한도는 없다");
+    let wait: i64 = third.header("retry-after").unwrap().parse().unwrap();
     site.jump(wait);
-    assert_eq!(run_for(&site, &carol).await.status, 200, "Retry-After({wait}초)만큼 가짜 시계를 넘기면 다시 받는다");
+    assert_eq!(run_for(&site, &alice).await.status, 200, "Retry-After({wait}초)만큼 가짜 시계를 넘기면 다시 받는다");
 }
 
 #[tokio::test]
@@ -1441,30 +1229,6 @@ async fn the_screener_status_is_shared_for_two_seconds_without_reading_the_store
     assert_ne!(site.get(&bob, "/api/screener/status").await.json()["update"], Value::Null, "2초가 지나면 다시 읽는다");
     held.release();
 }
-
-#[tokio::test]
-async fn no_limit_zero_lets_screener_runs_pass() {
-    let work = Work::new();
-    let idp = start_idp().await;
-    let (site, fake) = screener_site(&work, &idp, &[("VALLY_PUBLIC_SCREENER_CONCURRENCY", "0"), ("VALLY_PUBLIC_SCREENER_TOTAL_PER_MINUTE", "0"), ("VALLY_PUBLIC_SCREENER_ACCOUNT_PER_MINUTE", "100")]).await;
-    let sessions: Vec<Session> = site.login_many(6).await;
-    let held = fake.hold("스크리너 실행", |call| call.api_id == "ka10095");
-    let pending: Vec<_> = sessions.iter().map(|who| tokio::spawn({
-        let request = site.post_builder(who, "/api/screener/run", &new_high_screen());
-        async move { Reply::of(request.send().await.unwrap()).await }
-    })).collect();
-    held.arrived().await;
-    tokio::time::sleep(Duration::from_millis(500)).await;
-    assert!(pending.iter().all(|reply| !reply.is_finished()), "동시 한도가 없어서 모두 실행 중이어야 한다");
-    held.release();
-    for reply in pending {
-        assert_eq!(reply.await.unwrap().status, 200);
-    }
-    for who in &sessions {
-        assert_eq!(site.post(who, "/api/screener/run", &new_high_screen()).await.status, 200, "전체 분당 한도도 없다");
-    }
-}
-
 
 async fn fetch(client: &reqwest::Client, url: String, headers: &[(&str, &str)]) -> Reply {
     let mut request = client.get(url);
@@ -1655,14 +1419,17 @@ async fn server_mode_differs_by_listener_and_public_usage_is_operator_only() {
 }
 
 #[tokio::test]
-async fn usage_counts_limits_cache_hits_top_accounts_and_operator_latency() {
+async fn usage_counts_limits_cache_hits_top_accounts_shared_data_and_operator_latency() {
     let work = Work::new();
     let idp = start_idp().await;
     let fake = ScriptedTransport::new();
-    script_market_overview(&fake);
-    script_rankings(&fake, 1);
+    script_operator_ranking(&fake);
     let site = Spec::new(&work, &idp).env(&[("VALLY_PUBLIC_ACCOUNT_BURST", "6"), ("VALLY_PUBLIC_ACCOUNT_RATE", "0.001")]).with_fake(fake.clone()).start().await;
     site.load_symbols();
+    let before_boards = site.usage().await;
+    assert!(before_boards["sharedData"].is_object(), "{before_boards}");
+    assert!(before_boards["sharedData"].as_object().unwrap().values().all(|kind| kind["ageSecs"].is_null()), "판이 없으면 ageSecs는 null이다: {before_boards}");
+    site.publish_boards().await;
     let (alice, bob) = (site.login("alice").await, site.login("bob").await);
     for _ in 0..6 {
         assert_eq!(site.get(&alice, "/api/collector/access").await.status, 200);
@@ -1674,69 +1441,49 @@ async fn usage_counts_limits_cache_hits_top_accounts_and_operator_latency() {
     for _ in 0..2 {
         assert_eq!(site.get(&bob, "/api/screener/status").await.status, 200);
     }
-    let held = fake.hold("순위", |call| call.api_id == "ka10032");
-    let first = tokio::spawn({
-        let request = site.post_builder(&bob, "/api/rankings", &ranking_body(trade_amount(RankingMarket::All), 1));
-        async move { Reply::of(request.send().await.unwrap()).await }
-    });
-    held.arrived().await;
-    assert_eq!(site.post(&bob, "/api/rankings", &ranking_body(trade_amount(RankingMarket::Kospi), 1)).await.status, 503);
-    held.release();
-    assert_eq!(first.await.unwrap().status, 200);
+    assert_eq!(site.post(&bob, "/api/rankings", &ranking_body(trade_amount(RankingMarket::All), 1)).await.status, 200);
     let operator = site.operator_send(site.operator_request(reqwest::Method::POST, "/api/rankings").header("content-type", "application/json").body(ranking_body(trade_amount(RankingMarket::Kosdaq), 1).to_string())).await;
     assert_eq!(operator.status, 200, "{}", head(&operator.text()));
     let usage = site.usage().await;
     let bundle = |name: &str, field: &str| usage["bundles"][name][field].as_u64().unwrap_or_else(|| panic!("{name}.{field}: {usage}"));
     assert_eq!((bundle("shared", "responses"), bundle("shared", "tooManyRequests"), bundle("shared", "unavailable")), (9, 1, 0), "{usage}");
     assert_eq!((bundle("market_overview", "responses"), bundle("market_overview", "tooManyRequests")), (2, 0), "{usage}");
-    assert_eq!((bundle("rankings", "responses"), bundle("rankings", "tooManyRequests"), bundle("rankings", "unavailable")), (2, 0, 1), "{usage}");
-    assert_eq!(usage["cacheHits"], json!({"marketOverview": 1, "screenerStatus": 1}));
-    assert_eq!(usage["topAccounts"], json!([{"account": "google:alice", "requests": 7}, {"account": "google:bob", "requests": 6}]));
-    assert!(bundle("rankings", "trCalls") >= 1, "공개 순위가 낸 TR 수가 세어지지 않았다: {usage}");
-    assert!(bundle("market_overview", "trCalls") >= 1, "공개 시장 개요가 낸 TR 수가 세어지지 않았다: {usage}");
-    for name in ["rankings", "market_overview", "shared"] {
-        assert_eq!((bundle(name, "waitTotalMs"), bundle(name, "waitMaxMs")), (0, 0), "바로 거절하는 묶음의 대기 시간은 0이다: {name}");
+    assert_eq!((bundle("rankings", "responses"), bundle("rankings", "tooManyRequests"), bundle("rankings", "unavailable")), (1, 0, 0), "{usage}");
+    assert_eq!(usage["cacheHits"], json!({"screenerStatus": 1}));
+    assert_eq!(usage["topAccounts"], json!([{"account": "google:alice", "requests": 7}, {"account": "google:bob", "requests": 5}]));
+    let shared_data = usage["sharedData"].as_object().unwrap_or_else(|| panic!("{usage}"));
+    for (kind, status) in shared_data {
+        assert!(status["readErrors"].is_u64(), "{kind}: {usage}");
     }
+    let aged = |kind: &str| shared_data.get(kind).unwrap_or_else(|| panic!("{kind}: {usage}"))["ageSecs"].clone();
+    assert!(aged("market-overview").is_u64(), "쓴 판은 ageSecs가 숫자이다: {usage}");
+    assert!(shared_data.values().any(|status| status["ageSecs"].is_null()), "쓰지 않은 종류는 ageSecs가 null이다: {usage}");
     let latency = &usage["operatorKiwoomLatency"];
     let samples = latency["current"]["samples"].as_u64().unwrap() + latency["lastMinute"]["samples"].as_u64().unwrap_or(0);
     assert_eq!(samples, 1, "운영자 리스너의 키움 경로 응답 시간만 센다: {latency}");
 }
 
 #[tokio::test]
-async fn a_failed_market_overview_card_carries_fixed_words_and_is_never_served_from_the_cache() {
+async fn a_failed_market_overview_card_carries_fixed_words_on_the_public_listener_and_the_original_on_the_operator_one() {
     let work = Work::new();
     let idp = start_idp().await;
-    let fake = ScriptedTransport::new();
-    script_market_overview(&fake);
-    fake.respond_with("ka20003", 200, json!({"return_code": 1501, "return_msg": "운영자만 아는 사정"}));
-    let site = Spec::new(&work, &idp).with_fake(fake.clone()).start().await;
+    let site = Spec::new(&work, &idp).start().await;
+    let at = site.now();
+    write_overview_board(&work.path().join("shared"), at, failed_part(&format!("{ORIGINAL_KIWOOM_TEXT} 1501 ka20003")));
+    site.state.shared_data.poll_once(&work.path().join("shared")).await;
     let alice = site.login("alice").await;
-    let bob = site.login("bob").await;
     let path = "/api/market-overview/index?market=kospi";
     let failed = site.get(&alice, path).await;
     assert_eq!(failed.status, 200, "{}", head(&failed.text()));
     let text = failed.text();
     assert!(text.contains("\"failed\""), "{}", head(&text));
-    assert!(!text.contains("1501") && !text.contains("ka20003") && !text.contains("운영자"), "{}", head(&text));
-    assert!(text.contains("\"manualActionRequired\":false"), "{}", head(&text));
-    site.jump(1);
-    let again = site.get(&bob, path).await;
-    assert!(!again.text().contains("1501"), "{}", head(&again.text()));
-    assert_eq!(site.usage().await["cacheHits"]["marketOverview"], 0);
-}
-
-#[tokio::test]
-async fn the_same_market_overview_query_in_another_parameter_order_hits_the_cache() {
-    let work = Work::new();
-    let idp = start_idp().await;
-    let fake = ScriptedTransport::new();
-    script_market_overview(&fake);
-    let site = Spec::new(&work, &idp).with_fake(fake.clone()).start().await;
-    let who = site.login("alice").await;
-    assert_eq!(site.get(&who, "/api/market-overview/flow?market=kospi&period=20").await.status, 200);
-    let before = fake.requests();
-    assert_eq!(site.get(&who, "/api/market-overview/flow?period=20&market=kospi").await.status, 200);
-    assert_eq!(fake.requests(), before);
+    assert!(!text.contains("1501") && !text.contains("ka20003") && !text.contains("ORIGINAL-KIWOOM-TEXT"), "{}", head(&text));
+    let error = &failed.json()["index"]["error"];
+    assert_eq!((error["message"].as_str(), error["manualActionRequired"].as_bool()), (Some(KIWOOM_FIXED), Some(false)), "{text}");
+    assert_eq!(error["retryAt"].as_i64(), Some(site.now() + 5), "{text}");
+    let operator = site.operator_get(path).await;
+    assert_eq!(operator.status, 200, "{}", head(&operator.text()));
+    assert!(operator.text().contains("ORIGINAL-KIWOOM-TEXT"), "운영자 리스너는 판의 원문을 그대로 낸다: {}", head(&operator.text()));
 }
 
 #[tokio::test]
