@@ -10,6 +10,11 @@ import { RANKING_NAME } from "../src/features/ranking/rankingKinds";
 import { type Scenario, cell, DEFAULT_LAYOUT_ID, expect, fixedWait, pollSaved, test, windowTab, windowTabs } from "./harness";
 import { CONNECTED_KIWOOM } from "./fixtures/scenario";
 import { isRankingRequest, rankingCalls, rankingRows, serveRankings, tradeAmountRow, UNLISTED_CODE } from "./fixtures/ranking-data";
+import { DENSITY_STORAGE_KEY } from "../src/persist/density";
+
+test.beforeEach(async ({ page }) => {
+  await page.addInitScript((key) => localStorage.setItem(key, "regular"), DENSITY_STORAGE_KEY);
+});
 
 const SETTINGS = { v: 1, style: "candle", scale: "normal", indicators: [], compare: [], panels: [] };
 const TRADE_AMOUNT: Ranking = { kind: "tradeAmount", market: "all", venue: "combined", excludes: { etfEtn: true, preferred: false }, excludeManaged: false };

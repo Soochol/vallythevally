@@ -4,6 +4,11 @@ import type { Quote } from "../src/api/generated/Quote";
 import { allResult } from "./fixtures/screener";
 import { type Scenario, cell, DEFAULT_LAYOUT_ID, expect, test } from "./screener-harness";
 import { openResultDetails, panel as screenerPanel, rowOf, rows as resultRows, runButton, updateBand, waitForUpdateToFinish } from "./screener-page";
+import { DENSITY_STORAGE_KEY } from "../src/persist/density";
+
+test.beforeEach(async ({ page }) => {
+  await page.addInitScript((key) => localStorage.setItem(key, "regular"), DENSITY_STORAGE_KEY);
+});
 
 test.use({ clockStart: "20261109100000" });
 

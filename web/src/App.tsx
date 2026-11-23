@@ -46,6 +46,9 @@ import { DrawingToolbar } from "./features/drawings/DrawingToolbar";
 import { Workspace } from "./features/workspace/Workspace";
 import { DESKTOP_QUERY, useMediaQuery } from "./lib/media";
 import type { WindowId } from "./layout/kinds";
+import { applyStoredDensity } from "./persist/density";
+
+applyStoredDensity();
 
 export function ChartRoute() {
   const page = pageOfPath(useLocation().pathname) ?? "workspace";

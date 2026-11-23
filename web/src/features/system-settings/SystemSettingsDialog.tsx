@@ -10,6 +10,7 @@ import { DialogFrame } from "../dialog/DialogParts";
 import { AccountMenuContent } from "../account/AccountMenuContent";
 import { CollectorBoard } from "../collector-board/CollectorBoard";
 import { BellIcon, ChartIcon, ChevronIcon, CloseIcon, CogIcon, DatabaseIcon, InfoIcon, KeyboardIcon, UserIcon, WalletIcon } from "../icons";
+import { GeneralMenuContent } from "./GeneralMenuContent";
 import { HotkeysMenuContent } from "./HotkeysMenuContent";
 import { cancelHotkeyRecording } from "./hotkeyRecording";
 import { KiwoomMenuContent } from "./KiwoomMenuContent";
@@ -115,7 +116,7 @@ function SystemSettingsBody({ menu }: { menu: SystemMenuId | null }) {
               <button type="button" className="icon-btn flex-none max-md:!h-11 max-md:!w-11" aria-label="닫기" onClick={close}><CloseIcon /></button>
             </header>
             <div className="min-h-0 flex-1 overflow-y-auto px-5 pb-5 pt-4 max-md:px-4">
-              {current.id === "kiwoom" ? <KiwoomMenuContent /> : current.id === "collector" ? <CollectorBoard /> : current.id === "account" ? <AccountMenuContent /> : current.id === "hotkeys" ? <HotkeysMenuContent /> : current.id === "general" || current.id === "data" || current.id === "about" ? <ReadOnlyMenuContent menu={current.id} /> : null}
+              {current.id === "kiwoom" ? <KiwoomMenuContent /> : current.id === "collector" ? <CollectorBoard /> : current.id === "account" ? <AccountMenuContent /> : current.id === "hotkeys" ? <HotkeysMenuContent /> : current.id === "general" ? <GeneralMenuContent /> : current.id === "data" || current.id === "about" ? <ReadOnlyMenuContent menu={current.id} /> : null}
             </div>
           </section>
         )}
