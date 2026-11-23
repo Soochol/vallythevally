@@ -709,6 +709,16 @@ async fn daily_history_ends_on_the_first_empty_window() {
     assert_eq!(rig.transport.sent_to(KisApiId::DailyChart).len(), 2, "봉이 있는 창 하나와 끝을 알리는 빈 창 하나");
 }
 
+#[tokio::test(start_paused = true)]
+async fn daily_history_stops_when_a_window_does_not_reach_further_back_than_the_one_before() {
+    let today = friday_evening().kst_date();
+    let fixed_rows: Vec<String> = weekdays_back_from(today.add_days(-300), 5).into_iter().map(|day| daily_row(day, 10_000)).collect();
+    let rig = rig(move |_| ok(format!(r#"{{"rt_cd":"0","msg_cd":"MCA00000","output1":{{}},"output2":[{}]}}"#, fixed_rows.join(","))));
+    let collected = read_all_daily(&rig).await;
+    assert_eq!(collected.len(), 5, "기간을 무시하는 응답이어도 같은 창을 끝없이 받지 않는다");
+    assert!(rig.transport.sent_to(KisApiId::DailyChart).len() <= 3);
+}
+
 fn trade_row(hour: &str, quantity: u32) -> String {
     format!(r#"{{"stck_cntg_hour":"{hour}","stck_pbpr":"71000","askp":"71100","bidp":"71000","cnqn":"{quantity}"}}"#)
 }

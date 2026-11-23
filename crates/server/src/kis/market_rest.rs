@@ -171,18 +171,18 @@ impl KisMarket {
             ("FID_ORG_ADJ_PRC", ADJUSTED_PRICE_FLAG.into()),
         ];
         let body: ChartBody = self.body(KisApiId::DailyChart, query, priority).await?;
-        let bars = calendar_bars(period, &body.output2)?;
-        let next = bars.first().map(|oldest| oldest.bucket.start().kst_date().add_days(-1));
+        let mut bars = calendar_bars(period, &body.output2)?;
+        bars.retain(|bar| bar.bucket.start().kst_date() <= end);
+        let next = bars.first().map(|oldest| oldest.bucket.start().kst_date().add_days(-1)).filter(|earlier_end| *earlier_end < end && *earlier_end >= index_history_start());
         Ok(ChartPage { bars, next: next.map(|date| Cursor::new(date.yyyymmdd())) })
     }
 
     async fn index_chart_calendar(&self, code: IndexCode, period: Period, base: KstDate, cursor: Option<Cursor>, priority: Priority) -> Result<ChartPage, SourceError> {
         let index_code = kis_index_code(code)?;
-        let (year, month, day) = INDEX_HISTORY_START;
         let query = vec![
             ("FID_COND_MRKT_DIV_CODE", INDEX_MARKET_DIVISION.into()),
             ("FID_INPUT_ISCD", index_code.into()),
-            ("FID_INPUT_DATE_1", KstDate::new(year, month, day).expect("상수 날짜").yyyymmdd()),
+            ("FID_INPUT_DATE_1", index_history_start().yyyymmdd()),
             ("FID_INPUT_DATE_2", base.yyyymmdd()),
             ("FID_PERIOD_DIV_CODE", calendar_period_code(period).into()),
         ];
@@ -548,6 +548,11 @@ fn market_division(venue: Venue) -> &'static str {
         Venue::Krx => KRX_MARKET,
         Venue::Nxt => NXT_MARKET,
     }
+}
+
+fn index_history_start() -> KstDate {
+    let (year, month, day) = INDEX_HISTORY_START;
+    KstDate::new(year, month, day).expect("상수 날짜")
 }
 
 fn kis_index_code(code: IndexCode) -> Result<&'static str, SourceError> {
