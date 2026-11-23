@@ -377,7 +377,7 @@ async fn weekly_monthly_and_yearly_bars_use_their_period_codes_and_wider_windows
     for (period, wire) in [(Period::Week, "W"), (Period::Month, "M"), (Period::Year, "Y")] {
         let page = source.chart_page(samsung_key(Venue::Combined, period), today, None, Priority::Screen, MergeScope::Shared).await.unwrap();
         assert_eq!(page.bars.len(), 2, "{period:?}");
-        assert!(page.next.is_none(), "100개보다 적게 오면 끝이다");
+        assert!(page.next.is_some(), "창에 봉이 있으면 더 이른 창을 이어 받는다");
         let sent = rig.transport.sent_to(KisApiId::DailyChart);
         let last = sent.last().unwrap();
         assert_eq!((last.get("FID_PERIOD_DIV_CODE"), last.get("FID_COND_MRKT_DIV_CODE")), (wire, "UN"));
