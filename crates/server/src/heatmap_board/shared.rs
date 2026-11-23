@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use domain::{KstDate, Symbol, Venue};
+use domain::{Symbol, Venue};
 
 use crate::api::{Quote, QuoteSource, SymbolCode, UnixSeconds};
 use crate::quotes::effective_venue;
@@ -13,8 +13,8 @@ struct Boards {
 }
 
 impl Boards {
-    fn of(data: &SharedData, today: KstDate) -> Boards {
-        Boards { loaded: Venue::ALL.map(|venue| data.snapshot(venue).current().filter(|loaded| loaded.header.observation_date == today.yyyymmdd())) }
+    fn of(data: &SharedData) -> Boards {
+        Boards { loaded: Venue::ALL.map(|venue| data.snapshot(venue).current()) }
     }
 
     fn at(&self, venue: Venue) -> Option<&Arc<Loaded<SnapshotBody>>> {
@@ -42,8 +42,8 @@ pub(super) struct SharedQuotes {
     pub as_of: Option<UnixSeconds>,
 }
 
-pub(super) fn quotes(data: &SharedData, today: KstDate, wanted: &[Symbol], requested: Venue, directory: Option<&Directory>) -> SharedQuotes {
-    let boards = Boards::of(data, today);
+pub(super) fn quotes(data: &SharedData, wanted: &[Symbol], requested: Venue, directory: Option<&Directory>) -> SharedQuotes {
+    let boards = Boards::of(data);
     let rows_by_venue: Vec<(Venue, HashMap<&str, &SnapshotRow>)> = Venue::ALL
         .iter()
         .filter_map(|venue| boards.at(*venue).map(|loaded| (*venue, loaded.body.stocks.iter().rev().map(|row| (row.code.as_str(), row)).collect())))

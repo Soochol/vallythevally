@@ -445,16 +445,18 @@ async fn a_snapshot_of_another_day_never_supplies_todays_previous_close() {
 }
 
 #[tokio::test]
-async fn a_board_of_another_day_is_not_used_as_todays_quotes() {
+async fn the_board_keeps_showing_the_last_snapshot_with_its_own_as_of_until_the_next_days_first_one() {
     let h = Harness::start(true).await;
     h.themes(chip_theme()).await;
-    write_yesterdays_krx_board(&h.shared);
+    write_boards(&h.shared);
     h.poll().await;
 
-    let board = h.ok("/api/heatmap/board?venue=krx").await;
-    let chip = &board["themes"][0];
-    assert_eq!((chip["members"].clone(), chip["summary"].clone()), (json!([]), Value::Null));
-    assert_eq!(chip["missing"], json!(["005930", "000660", "042700", "999990"]));
-    assert_eq!(board["asOf"], Value::Null);
+    for (days_later, hour) in [(1, 7), (3, 12)] {
+        let target = kst(day().add_days(days_later), hour, 0, 0).unix();
+        h.state.clock.jump(target - h.state.clock.now().unix());
+        let board = h.ok("/api/heatmap/board?venue=krx").await;
+        assert_eq!(board["asOf"], unix(10, 0, 0), "{days_later}일 뒤 {hour}시에도 마지막 판의 기준 시각");
+        assert_eq!(board["themes"][0]["members"][0], json!({"symbol": "005930", "name": "삼성전자", "changeRate": 2.0, "tradedMillionWon": 5_000}));
+    }
     assert_eq!(h.kiwoom.total(), 0);
 }
