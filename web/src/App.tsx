@@ -83,7 +83,7 @@ function ChartScreen({ page }: { page: PageId }) {
   useEffect(() => {
     const { loginFailure, showLoginFailure } = useAccountStore.getState();
     if (loginFailure === null) return;
-    useSelectionStore.getState().showToast(loginFailure);
+    useSelectionStore.getState().showToast(loginFailure, { tone: "error" });
     showLoginFailure(null);
   }, []);
   useEffect(() => {

@@ -6,6 +6,8 @@ export interface ChoiceText {
   title: string;
   effect: string;
   warning: string;
+  keeps: string;
+  loses: string;
   confirm: string;
 }
 
@@ -15,12 +17,16 @@ export function choiceText(choice: InitialSyncChoice, local: number, account: nu
         title: "이 PC 셋업 올리기",
         effect: `이 PC의 문서 ${local}개를 계정에 올립니다.`,
         warning: `계정에 있는 셋업 문서 ${account}개는 이 PC 것으로 덮어쓰입니다.`,
+        keeps: `이 PC의 문서 ${local}개`,
+        loses: `계정의 문서 ${account}개`,
         confirm: "이 PC 셋업으로 덮어쓰기",
       }
     : {
         title: "계정 셋업 받기",
         effect: `계정의 문서 ${account}개를 이 PC로 받습니다.`,
         warning: `이 PC에 있는 셋업 문서 ${local}개는 계정 것으로 덮어쓰입니다.`,
+        keeps: `계정의 문서 ${account}개`,
+        loses: `이 PC의 문서 ${local}개`,
         confirm: "계정 셋업으로 덮어쓰기",
       };
 }
