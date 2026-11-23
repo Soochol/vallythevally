@@ -1,0 +1,20 @@
+[Unit]
+Description=Vally 재무자료 수집 (collector financials run)
+PartOf=vally-collector.service
+After=vally-collector.service network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=1h
+StartLimitBurst=5
+
+[Service]
+Type=simple
+Environment=RUST_LOG=info
+WorkingDirectory=%h
+ExecStart=%h/.local/bin/collector financials run --db %h/vally-data/server/financials.db --dart-key %h/.config/vally/opendart-key --data %h/vally-data/hoga
+Restart=on-failure
+RestartSec=30
+RestartPreventExitStatus=2
+TimeoutStopSec=60
+
+[Install]
+WantedBy=default.target

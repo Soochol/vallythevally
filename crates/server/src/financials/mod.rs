@@ -8,6 +8,7 @@ mod response;
 mod updates;
 mod schedule;
 pub mod store;
+mod writer;
 pub mod xbrl;
 
 use std::sync::Arc;
@@ -21,6 +22,9 @@ use company_records::{AttemptKind, CompanyRecord, ReadContext, ReadResolution, R
 use store::Store;
 
 pub use routes::routes;
+pub use schedule::symbol_listings;
+pub use writer::{WriterError, acquire_writer_lock, writer_lock_path};
+use writer::WriterSeat;
 use control::{CollectionState, JobContext, UpdateControl};
 
 pub struct Financials {
@@ -28,6 +32,7 @@ pub struct Financials {
     store: Result<Store, Failure>,
     clock: Clock,
     control: UpdateControl,
+    writer: WriterSeat,
 }
 
 enum StatementStep { Continue(StatementRequest), Done(Option<Statement>) }
@@ -48,7 +53,7 @@ impl Financials {
 
     pub fn with_store(client: Option<Client>, store: Result<Store, Failure>, clock: Clock) -> Arc<Self> {
         let control = UpdateControl::new(client.is_some(), clock.clone());
-        Arc::new(Self { client, store, clock, control })
+        Arc::new(Self { client, store, clock, control, writer: WriterSeat::default() })
     }
 
     fn store(&self) -> Result<&Store, Failure> {
