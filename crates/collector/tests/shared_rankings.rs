@@ -350,7 +350,7 @@ async fn the_rows_in_the_file_are_the_rows_the_source_returned() {
 
     let ranking = default_rankings()[0];
     let (_keep, best) = tokio::sync::watch::channel(Priority::Background);
-    let fetched = KiwoomRankings::new(rest).page(&ranking, None, &mut Demand::new(best)).await.ok().expect("한 쪽을 받는다");
+    let fetched = KiwoomRankings::new(rest).page(&ranking, None, &mut Demand::new(best)).await.expect("한 쪽을 받는다");
     let merged = merged_of(folder.path());
     let written = &merged.find(&ranking, 1).and_then(|found| found.last.clone()).expect("거래대금 전체").rows;
     assert!(!fetched.rows.is_empty());
@@ -380,4 +380,22 @@ async fn a_job_started_after_a_reassignment_keeps_the_previous_value_when_its_fi
     let found = merged.find(&gainers, 1).unwrap();
     assert!(matches!(found.state, ConditionState::Failed { .. }), "{:?}", found.state);
     assert!(found.last.is_some(), "새로 뜬 일도 파일의 이전 값을 이어받는다");
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_restarted_job_does_not_carry_over_a_value_that_walked_fewer_pages_than_it_now_asks() {
+    let folder = tempfile::tempdir().unwrap();
+    let clock = Clock::fake(ten_o_clock());
+    let fake = FakeKiwoom::new(usize::MAX);
+    let rest = kiwoom_rest(&fake, &clock);
+    let one_page = loop_of(json!({"variants": [trade_amount_variant()], "pages": 1}), Slice::WHOLE, &[Broker::Kiwoom]);
+    run_for(&one_page, Market::Kiwoom(&rest), "rest-01", folder.path(), &clock, &LoopStats::default(), 5).await;
+
+    fake.fail("ka10032");
+    let five_pages = loop_of(json!({"variants": [trade_amount_variant()], "pages": 5}), Slice::WHOLE, &[Broker::Kiwoom]);
+    run_for(&five_pages, Market::Kiwoom(&rest), "rest-01", folder.path(), &clock, &LoopStats::default(), 5).await;
+    let merged = merged_of(folder.path());
+    let found = merged.find(&default_rankings()[0], 5).unwrap();
+    assert!(matches!(found.state, ConditionState::Failed { .. }), "{:?}", found.state);
+    assert!(found.last.is_none(), "1쪽 값은 5쪽 조건의 이전 값으로 나가지 않는다");
 }

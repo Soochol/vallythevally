@@ -129,36 +129,35 @@ impl MergedRankings {
     }
 }
 
-fn received_at(condition: &MergedCondition) -> Option<i64> {
-    condition.last.as_ref().map(|last| last.received_at)
+impl ReceivedRanking {
+    pub fn covers(&self, pages: u8) -> bool {
+        self.end || self.pages >= pages
+    }
 }
 
 fn merge(observation_date: String, parts: &[Arc<Loaded>]) -> MergedRankings {
-    let mut by_condition: HashMap<String, MergedCondition> = HashMap::new();
+    let mut candidates: HashMap<String, Vec<MergedCondition>> = HashMap::new();
     for part in parts {
         for entry in &part.body.conditions {
-            let candidate = MergedCondition {
+            candidates.entry(entry.key.clone()).or_default().push(MergedCondition {
                 state: entry.state.clone(),
                 last: entry.last.clone(),
                 part_key: part.key_name.clone(),
                 part_as_of: part.header.as_of,
                 period_secs: part.body.period_secs,
                 pages: part.body.pages,
-            };
-            match by_condition.get_mut(&entry.key) {
-                None => {
-                    by_condition.insert(entry.key.clone(), candidate);
-                }
-                Some(held) => {
-                    let newest_value = if received_at(&candidate) > received_at(held) { candidate.last.clone() } else { held.last.clone() };
-                    if candidate.part_as_of > held.part_as_of {
-                        *held = candidate;
-                    }
-                    held.last = newest_value;
-                }
-            }
+            });
         }
     }
+    let by_condition = candidates
+        .into_iter()
+        .filter_map(|(key, held)| {
+            let mut newest = held.iter().reduce(|best, next| if next.part_as_of > best.part_as_of { next } else { best })?.clone();
+            let pages = newest.pages;
+            newest.last = held.iter().filter_map(|condition| condition.last.as_ref()).filter(|last| last.covers(pages)).max_by_key(|last| last.received_at).cloned();
+            Some((key, newest))
+        })
+        .collect();
     MergedRankings { observation_date, parts: parts.iter().map(|part| part.header.clone()).collect(), by_condition }
 }
 

@@ -76,11 +76,11 @@ async fn fetch_one(source: &dyn RankingSource, condition: &Condition, pages: u8)
 }
 
 impl RankingsJob {
-    fn resume_from_file(&self, call: &JobCall<'_>) {
+    fn resume_from_file(&self, call: &JobCall<'_>, pages: u8) {
         self.resumed.get_or_init(|| {
             let Some(body) = read_own_part(call.shared_dir, &call.observation_date.yyyymmdd(), call.key.as_str()) else { return };
             let mut memory = self.last_good.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-            memory.extend(body.conditions.into_iter().filter_map(|entry| entry.last.map(|last| (entry.key, last))));
+            memory.extend(body.conditions.into_iter().filter_map(|entry| entry.last.filter(|last| last.covers(pages)).map(|last| (entry.key, last))));
         });
     }
 
@@ -120,7 +120,7 @@ impl SharedJob for RankingsJob {
     fn run<'a>(&'a self, call: JobCall<'a>) -> JobFuture<'a> {
         Box::pin(async move {
             let options = options_of(call.options).map_err(JobError)?;
-            self.resume_from_file(&call);
+            self.resume_from_file(&call, options.pages);
             let own = broker_of(&call.market);
             let peers: &[Broker] = if call.peers.is_empty() { std::slice::from_ref(&own) } else { call.peers };
             let capability = self.capability.get_or_init(|| Capability::new(call.clock));

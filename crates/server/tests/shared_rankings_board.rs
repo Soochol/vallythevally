@@ -107,3 +107,20 @@ fn the_new_owners_failure_shows_over_a_dead_keys_older_ready_part_and_keeps_its_
     assert_eq!(found.last.as_ref().map(|last| last.received_at), Some(1_000), "실패한 조건은 이전 값을 둔다");
     assert!(!found.is_stale(KstTime::from_unix(1_070)));
 }
+
+#[test]
+fn a_value_that_walked_fewer_pages_than_asked_is_not_offered_unless_its_list_ended() {
+    let dir = tempfile::tempdir().unwrap();
+    let short = |end: bool| vec![ConditionEntry { key: condition_key(&ranking()), state: ConditionState::Ready, last: Some(ReceivedRanking { pages: 1, end, ..received(1_000, Broker::Kiwoom) }) }];
+    let failed_five_pages = vec![ConditionEntry { key: condition_key(&ranking()), state: ConditionState::Failed { at: 1_060, message: "받지 못했습니다".to_owned() }, last: None }];
+    write(dir.path(), "20261118", "rest-a", Broker::Kiwoom, 1_000, short(false));
+    write(dir.path(), "20261118", "rest-b", Broker::Kiwoom, 1_060, failed_five_pages.clone());
+    let board = RankingsBoard::new();
+    board.poll(dir.path());
+    let found = board.current().unwrap().find(&ranking(), 5).cloned().unwrap();
+    assert_eq!((matches!(found.state, ConditionState::Failed { .. }), found.last.is_none()), (true, true), "1쪽만 받은 값은 5쪽 조건의 이전 값이 아니다");
+
+    write(dir.path(), "20261118", "rest-a", Broker::Kiwoom, 1_001, short(true));
+    board.poll(dir.path());
+    assert!(board.current().unwrap().find(&ranking(), 5).unwrap().last.is_some(), "목록이 끝나 1쪽이 전부면 5쪽 조건도 덮는다");
+}
