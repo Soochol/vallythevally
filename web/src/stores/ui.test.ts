@@ -30,16 +30,33 @@ test("창 배치 방식을 바꾸면 한 번 저장하고 같은 값은 저장�
   expect(useUiStore.getState().revision).toBe(revision + 1);
 });
 
-test("호가주문창의 기억을 지우면 그 레이아웃의 그 창 기억만 지우고 없으면 저장하지 않는다", () => {
+test("호가주문창의 기억을 꺼내면 그 레이아웃의 그 창 기억만 지우고 없으면 저장하지 않는다", () => {
   const entry: OrderEntry = { presetKind: "sharePresets", quantity: 5, usedAt: 1 };
   const s = useUiStore.getState();
   for (const key of [orderEntryKey("L", "order-2", "A"), orderEntryKey("L", "order-2", "B"), orderEntryKey("L", "order-20", "A"), orderEntryKey("L", "order", "A"), orderEntryKey("M", "order-2", "A")]) s.rememberOrderEntry(key, entry);
   const revision = useUiStore.getState().revision;
-  s.forgetOrderWindow("L", "order-2");
+  s.takeOrderWindow("L", "order-2");
   expect(Object.keys(useUiStore.getState().prefs.orderEntries).sort()).toEqual([orderEntryKey("L", "order", "A"), orderEntryKey("L", "order-20", "A"), orderEntryKey("M", "order-2", "A")].sort());
   expect(useUiStore.getState().revision).toBe(revision + 1);
   const prefs = useUiStore.getState().prefs;
-  s.forgetOrderWindow("L", "order-2");
+  s.takeOrderWindow("L", "order-2");
   expect(useUiStore.getState().prefs).toBe(prefs);
   expect(useUiStore.getState().revision).toBe(revision + 1);
+});
+
+test("꺼낸 호가주문창의 기억은 되돌려 넣으면 그 창 기억을 그대로 되찾고 그 사이 남긴 기억은 대신한다", () => {
+  const closed: OrderEntry = { presetKind: "amountPresets", quantity: 37, usedAt: 1 };
+  const reused: OrderEntry = { presetKind: "sharePresets", quantity: 5, usedAt: 2 };
+  const other: OrderEntry = { presetKind: "sharePresets", quantity: 9, usedAt: 3 };
+  const s = useUiStore.getState();
+  s.rememberOrderEntry(orderEntryKey("L", "order-2", "A"), closed);
+  s.rememberOrderEntry(orderEntryKey("L", "order", "A"), other);
+  const taken = s.takeOrderWindow("L", "order-2");
+  expect(taken).toEqual({ [orderEntryKey("L", "order-2", "A")]: closed });
+  s.rememberOrderEntry(orderEntryKey("L", "order-2", "B"), reused);
+  s.restoreOrderWindow("L", "order-2", taken);
+  expect(useUiStore.getState().prefs.orderEntries).toEqual({ [orderEntryKey("L", "order-2", "A")]: closed, [orderEntryKey("L", "order", "A")]: other });
+  const prefs = useUiStore.getState().prefs;
+  s.restoreOrderWindow("L", "order-3", {});
+  expect(useUiStore.getState().prefs).toBe(prefs);
 });

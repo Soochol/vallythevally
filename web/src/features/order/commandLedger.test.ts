@@ -120,3 +120,16 @@ test("같은 가격 일괄 취소도 계좌가 다르면 서로 합쳐지지 않
   expect([first.send, second.send]).toEqual([true, true]);
   expect(ledger.issue(actionInAccount(action, "account-a")).send).toBe(false);
 });
+
+test("창의 재전송 줄을 꺼내면 그 창만 비고 되돌려 넣으면 그대로 되찾는다", () => {
+  const ledger = createLedger(counter());
+  const action = placeAction("005930", "buy", 71_000, 10, "krx");
+  ledger.settleEach("order-2", action, "left-2", "unanswered");
+  ledger.settleEach("order-3", action, "left-3", "unanswered");
+  const taken = ledger.takeWindowResends("order-2");
+  expect(ledger.issueEach("order-2", action)).toBe("id-1");
+  expect(ledger.issueEach("order-3", action)).toBe("left-3");
+  ledger.restoreWindowResends("order-2", taken);
+  expect(ledger.issueEach("order-2", action)).toBe("left-2");
+  expect(ledger.takeWindowResends("order-9").size).toBe(0);
+});

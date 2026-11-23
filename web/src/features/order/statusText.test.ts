@@ -17,9 +17,9 @@ test("서버가 판단을 내린 거절은 답을 받은 것이다", () => {
 
 test("접수 문구는 수량과 가격을 단위 없이 가운뎃점으로 잇는다", () => {
   const command = { kind: "buy", state: "accepted", quantity: 10, price: 70_000, orderNo: null } as OrderCommand;
-  expect(statusOfCommand(command).text).toBe("접수 · 매수 10 · 70,000원");
-  expect(statusOfCommand({ ...command, price: null }).text).toBe("접수 · 매수 10");
-  expect(statusOfCommand({ ...command, kind: "cancel", quantity: null, price: null }).text).toBe("접수 · 취소");
+  expect(statusOfCommand(command, "kiwoom").text).toBe("접수 · 매수 10 · 70,000원");
+  expect(statusOfCommand({ ...command, price: null }, "kiwoom").text).toBe("접수 · 매수 10");
+  expect(statusOfCommand({ ...command, kind: "cancel", quantity: null, price: null }, "kiwoom").text).toBe("접수 · 취소");
 });
 
 test("보내는 중·취소 중·정정 중 문구", () => {

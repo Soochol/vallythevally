@@ -1,3 +1,4 @@
+import type { Broker } from "../../api/generated/Broker";
 import type { OrderCommand } from "../../api/generated/OrderCommand";
 import type { OrderSide } from "../../api/generated/OrderSide";
 import type { OrderRejectReason } from "../../api/generated/OrderRejectReason";
@@ -33,6 +34,16 @@ export const REJECT_TEXT: Readonly<Record<OrderRejectReason, string>> = {
   kiwoom_unavailable: "키움이 응답하지 않습니다",
 };
 
+const KIS_REJECT_TEXT: Readonly<Partial<Record<OrderRejectReason, string>>> = {
+  not_connected: "한투에 연결되지 않았습니다",
+  auth_blocked: "한투 인증이 막혀 있습니다",
+  not_sent: "한투에 보내지 못했습니다",
+  kiwoom_rejected: "한투가 주문을 거절했습니다",
+  kiwoom_unavailable: "한투가 응답하지 않습니다",
+};
+
+const rejectTextOf = (reason: OrderRejectReason, broker: Broker): string => (broker === "kis" ? KIS_REJECT_TEXT[reason] : undefined) ?? REJECT_TEXT[reason];
+
 export type StatusTone = "info" | "ok" | "error" | "warn";
 
 export interface OrderStatus {
@@ -52,12 +63,12 @@ const describe = (command: OrderCommand): string => {
   return figures === "" ? side : `${side} ${figures}`;
 };
 
-export function statusOfCommand(command: OrderCommand): OrderStatus {
+export function statusOfCommand(command: OrderCommand, broker: Broker): OrderStatus {
   switch (command.state) {
     case "accepted":
       return { tone: "ok", text: `접수 · ${describe(command)}`, undoOrderNo: command.kind === "buy" || command.kind === "sell" ? command.orderNo ?? undefined : undefined };
     case "rejected":
-      return { tone: "error", text: `거절 · ${command.reason ? REJECT_TEXT[command.reason] : "사유를 알 수 없습니다"}` };
+      return { tone: "error", text: `거절 · ${command.reason ? rejectTextOf(command.reason, broker) : "사유를 알 수 없습니다"}` };
     case "unknown":
       return { tone: "warn", text: "결과를 확인하지 못했습니다", unknown: true };
     default:

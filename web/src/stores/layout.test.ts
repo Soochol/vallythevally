@@ -815,3 +815,22 @@ test("지울 기억이 없으면 창을 열어도 ui 상태를 바꾸지 않는�
   state().duplicateWindow(windowId("order"));
   expect(useUiStore.getState()).toBe(before);
 });
+
+test("되돌린 호가주문창의 기억은 다시 하기로 새 창이 받을 때 다시 비고 다시 되돌리면 되돌아온다", () => {
+  const key = orderEntryKey(state().layout.id, "order-2", "005930");
+  const closedEntry = { presetKind: "amountPresets", quantity: 37, usedAt: 1 } as const;
+  state().openWindow("order");
+  state().duplicateWindow(windowId("order"));
+  useUiStore.getState().rememberOrderEntry(key, closedEntry);
+  state().closeWindow(windowId("order-2"));
+  state().openWindow("order");
+  state().undoArrangement();
+  state().undoArrangement();
+  expect(useUiStore.getState().prefs.orderEntries[key]).toEqual(closedEntry);
+  state().redoArrangement();
+  state().redoArrangement();
+  expect(useUiStore.getState().prefs.orderEntries[key]).toBeUndefined();
+  state().undoArrangement();
+  state().undoArrangement();
+  expect(useUiStore.getState().prefs.orderEntries[key]).toEqual(closedEntry);
+});
