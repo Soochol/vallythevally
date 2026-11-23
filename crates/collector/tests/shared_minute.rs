@@ -567,7 +567,7 @@ async fn a_wait_with_no_new_write_signal_fails_naming_what_it_waited_for() {
     settle().await;
     tokio::time::advance(FLUSH_EVERY).await;
     gate.until_arrived().await;
-    let waiting = written.until_within("분봉 줄 1개", Duration::from_millis(200), || appended(&shared, "k1").len() >= 1);
+    let waiting = written.until_within("분봉 줄 1개", Duration::from_millis(200), || !appended(&shared, "k1").is_empty());
     let failure = std::panic::AssertUnwindSafe(waiting).catch_unwind().await.expect_err("붙잡힌 쓰기를 기다리면 실패해야 한다");
     let message = failure.downcast_ref::<String>().cloned().unwrap_or_default();
     assert!(message.contains("새 신호가 없다") && message.contains("분봉 줄 1개"), "{message}");
