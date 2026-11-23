@@ -5,6 +5,7 @@ import { TooltipHost } from "./features/overlay/Tooltip";
 import { useEffect, useState } from "react";
 import { useLocation } from "react-router";
 import { PageRail } from "./features/page-rail/PageRail";
+import { ShellSkeleton } from "./features/shell/ShellSkeleton";
 import { PageStage } from "./features/page-rail/PageStage";
 import { PageTopbar } from "./features/page-rail/PageTopbar";
 import { useHiddenWorkspaceKeys } from "./features/page-rail/useHiddenWorkspaceKeys";
@@ -59,7 +60,7 @@ export function ChartRoute() {
   if (account?.state === "owner_mismatch") return <ReplaceLocalScreen status={account} />;
   return (
     <>
-      {restoring || needsChoice(account) ? <div className="h-dvh bg-bg" aria-busy="true" aria-label="마지막 화면을 불러오는 중" /> : <ChartScreen page={page} />}
+      {restoring || needsChoice(account) ? <ShellSkeleton restoring={restoring} /> : <ChartScreen page={page} />}
       {page === "home" && <div className="fixed inset-0 z-50 bg-bg"><Landing /></div>}
       {wizardVisible(account, wizardOpen) && (publicMode ? <PublicSetupWizard /> : <SetupWizard />)}
     </>

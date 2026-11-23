@@ -17,7 +17,7 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 1024, height: 768
     const dialog = await openFinancials(page);
     await expect(dialog).toContainText("전체 이력 확인 완료");
     await expect(dialog).toContainText("다음 자동 확인");
-    await expect(dialog).toContainText("2017. 1. 2. 오전 7:00:00");
+    await expect(dialog).toContainText("2017-01-02 07:00");
     await page.screenshot({ path: info.outputPath("automatic-first-ready.png") });
     financial.job({ status: "collecting", phase: "recent", historyComplete: false });
     await page.reload();
@@ -35,7 +35,7 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 1024, height: 768
     await expect(dialog).toContainText("일시정지됨");
     await dialog.getByRole("button", { name: "재개", exact: true }).click();
     await expect(dialog).toContainText("전체 이력 확인 완료");
-    await expect(dialog).toContainText("2017. 1. 4. 오전 7:00:00");
+    await expect(dialog).toContainText("2017-01-04 07:00");
     await page.screenshot({ path: info.outputPath("automatic-correction-ready.png") });
     await dialog.getByRole("button", { name: "닫기", exact: true }).first().click();
     await expect(page.locator('[data-indicator-row="revenue"]')).toContainText("확인 완료");

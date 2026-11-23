@@ -6,8 +6,11 @@ import { useSelectionStore } from "../../stores/selection";
 import { DESKTOP_QUERY, useMediaQuery } from "../../lib/media";
 import { DialogFrame } from "../dialog/DialogParts";
 import { Popover } from "../overlay/Popover";
-import { CloseIcon } from "../icons";
-import { TONE_CLASS } from "./tone";
+import { ChevronIcon, CloseIcon } from "../icons";
+import { openSystemSettings } from "../system-settings/open";
+import { ProgressBar } from "./ProgressBar";
+import { DOT_CLASS } from "./tone";
+import "./financialUpdate.css";
 
 export function FinancialUpdateDialog() {
   const shown = useSelectionStore((s) => s.dialog?.kind === "financial-update");
@@ -31,27 +34,33 @@ function UpdateDialog() {
         {query.error && <div role="alert" className="text-s text-danger">{query.error.message} <button type="button" className="tb-btn" onClick={() => void query.refetch()}>다시 조회</button></div>}
         {job && view && <>
           <section aria-label="업데이트 현황" className="flex flex-col gap-2">
-            <p role="status" className="flex items-center gap-2 font-semibold"><i aria-hidden="true" className={`size-2 flex-none rounded-full ${TONE_CLASS[view.statusTone]}`} />{view.title}</p>
+            <p role="status" className="flex items-center gap-2 font-semibold"><i aria-hidden="true" className={`size-2 flex-none rounded-full ${DOT_CLASS[view.statusTone]}`} />{view.title}</p>
             {view.progress && <>
-              <progress aria-label="재무 업데이트 진행률" className="h-1.5 w-full accent-accent" value={view.progress.done} max={Math.max(1, view.progress.total)} />
-              <p className="text-s text-text-2">{view.progress.text}</p>
+              <ProgressBar progress={view.progress} />
+              <p className="text-s text-text-2 tabular-nums">{view.progress.text}</p>
             </>}
-            {view.stopNote && <p className="text-s text-text-2">{view.stopNote}</p>}
+            {view.completionNote && <p className="text-s text-text-2 tabular-nums">{view.completionNote}</p>}
+            {view.stop && <div className="fu-stop" data-tone={view.statusTone}>
+              <p>{view.stop.problem}</p>
+              <p className="text-s text-text-2">{view.stop.action}</p>
+            </div>}
             {view.nextCheckNote && <p className="text-s text-text-2">{view.nextCheckNote}</p>}
             {view.latestCheckNote && <p className="text-s text-text-2">{view.latestCheckNote}</p>}
-            {view.failedCompaniesNote && <p className="rounded-m bg-[color-mix(in_srgb,var(--warning)_10%,transparent)] px-3 py-2 text-s text-warning">{view.failedCompaniesNote}</p>}
+            {view.failedCompaniesNote && <p className="rounded-m bg-warning-soft px-3 py-2 text-s text-warning">{view.failedCompaniesNote}</p>}
           </section>
           {view.notice && <p className="text-s text-text-2">{view.notice}</p>}
-          {view.failureNote && <p role="alert" className="text-s text-danger">{view.failureNote}</p>}
-          <button type="button" className="tb-btn h-7 self-start px-2 text-s text-text-2" aria-expanded={detailed} aria-controls="financial-update-details" onClick={() => setDetailed(!detailed)}>{detailed ? "간단히" : "자세히"}</button>
+          {view.failureNote && !view.stop && <p role="alert" className="text-s text-danger">{view.failureNote}</p>}
+          <button type="button" className="fu-fold" aria-expanded={detailed} aria-controls="financial-update-details" onClick={() => setDetailed(!detailed)}><ChevronIcon />{detailed ? "간단히" : "자세히"}</button>
           <div id="financial-update-details" hidden={!detailed} className="flex flex-col gap-3">
+            {view.stopNote && <p className="text-s text-text-2">{view.stopNote}</p>}
+            {view.failureNote && view.stop && <p role="alert" className="text-s text-danger">{view.failureNote}</p>}
             <p className="text-s leading-relaxed text-text-2">코스피·코스닥 전체 지원 회사의 최근 자료를 먼저 업데이트한 뒤 2015년 이후 과거 이력을 이어 받습니다. 차트는 저장된 자료를 사용합니다.</p>
             <p className="text-s text-text-2">{view.yearsNote}</p>
-            <dl className="grid grid-cols-[1fr_auto] gap-x-3 gap-y-2 text-s">
+            <dl className="fu-rows">
               {view.rows.map(([name, value]) => <Fragment key={name}><dt>{name}</dt><dd>{value}</dd></Fragment>)}
             </dl>
             {view.phaseFailureNote && <p className="text-xs text-text-2">{view.phaseFailureNote}</p>}
-            <p className="border-t border-line pt-3 text-xs text-text-2">{view.lastCheckedNote}</p>
+            {!view.completionNote && <p className="border-t border-line pt-3 text-xs text-text-2">{view.lastCheckedNote}</p>}
             {job.failures.length > 0 && <section aria-label="실패·미확인 목록">
               <h3 className="mb-2 text-s font-semibold">실패·미확인 목록</h3>
               <ul className="divide-y divide-line text-s">{job.failures.map((entry) => <li key={entry.code} className="py-2">
@@ -64,8 +73,8 @@ function UpdateDialog() {
         {command.error && <p role="alert" className="text-s text-danger">{command.error.message}</p>}
       </div>
       <footer className="flex flex-none justify-end gap-2 border-t border-line px-4 py-3">
-        <button type="button" className="tb-btn" onClick={close}>닫기</button>
-        <button type="button" className={action.command === "pause" ? "tb-btn disabled:opacity-50" : "btn-primary h-9 px-4 disabled:cursor-not-allowed disabled:opacity-50"} disabled={action.disabled} onClick={() => command.run(action.command)}>{action.label}</button>
+        {view?.stop?.opensSettings && <button type="button" className="btn btn-lg" onClick={() => openSystemSettings("data")}>시스템 설정 열기</button>}
+        <button type="button" className={`btn-lg ${action.command === "pause" ? "btn" : "btn-primary"}`} disabled={action.disabled} onClick={() => command.run(action.command)}>{action.label}</button>
       </footer>
   </>;
   return <Surface desktop={desktop} onClose={close}>{content}</Surface>;

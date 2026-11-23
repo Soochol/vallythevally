@@ -315,6 +315,16 @@ DOM 범례는 `iconMarkup("gear" | "eye" | "eyeOff" | "close" | "up" | "down")`�
 - 날짜로 읽을 수 없는 `received_at`은 "알 수 없는 시각"으로 보인다. 관측일 근거와 종목 목록 안내의 공백 없는 긴 낱말은 줄을 바꿔 `main`이 가로로 넘치지 않는다.
 - 현황판은 오류 경계(`BoardErrorBoundary`)로 감싼다. 그리다 오류가 나면 현황판 자리만 "수집 현황판을 그리지 못했습니다"와 다시 시도를 보이고 차트 화면과 설정 창의 다른 메뉴는 남는다.
 
+## 복원 중·오류 화면과 재무자료 상태
+
+`features/shell/`과 `features/financial-update/`는 표식 `.ui2`가 있어 굵기·글자 크기·색 직접 값 규칙을 시험이 지킨다.
+
+- 복원 중(`usePersistStore`의 `restoring`)에는 `ShellSkeleton`이 위 막대 섬(로고만), 도구 줄 자리, 묶음 뼈대 둘, 오른쪽 레일, 상태 줄을 실제 화면과 같은 클래스(`desktop-topbar`·`ui-island`·`page-rail`·`status-bar`)로 그려 불러온 뒤 위치와 높이가 튀지 않는다. 접근성 이름은 "마지막 화면을 불러오는 중"이고 뼈대는 움직이지 않는다. 상태 줄 문구 "마지막 화면을 불러오는 중…"은 `.chart-loading-label`로 0.4초 뒤에야 보인다. 설정 마법사 선택을 기다리는 뼈대에는 이 문구를 두지 않는다.
+- `ShellErrorBoundary`가 `main.tsx`의 `ChartRoute`를 감싼다. 그리다 예외가 나면 "화면을 그리다 문제가 생겼습니다", `.btn-primary` "다시 불러오기", `.btn` "기본 화면으로 열기", "오류 내용 복사"와 "자세히"의 오류 내용을 보인다. "기본 화면으로 열기"는 `persist/defaultOpen.ts`가 세션 저장소에 한 번짜리 요청을 남기고 다시 열면 `boot()`가 그 요청을 읽어 서버 문서를 읽지도 쓰지도 않은 채 기본 화면을 연다(자동 저장을 시작하지 않으므로 저장된 문서는 그대로다). 세션 저장소를 못 쓰면 요청이 남지 않아 다시 불러오기와 같다.
+- 재무자료 버튼(`financialButtonView`)은 상태를 다섯으로 가른다. 쉼(점 없음. 수집한 적이 없거나 DART 미설정), 수집 중(`--accent` 점과 전체 기준 진행률), 멈춤(`--warning` 점과 "멈춤": 일시정지·중단·사용자 정지), 확인 필요(`--danger` 점과 "확인 필요": 인증·한도·저장 실패 정지, 일부 실패, 실패), 완료(점 없음). 접근성 이름은 "재무자료"로 두고 상태 글자는 `aria-description`에 둔다.
+- 진행률(`financialJobProgress`)은 전체 기준 하나다. 최근 자료·정정 단계가 0~50%, 과거 이력 단계가 50~100%라 단계가 넘어가도 줄지 않는다. 상태 창의 막대(`ProgressBar`)는 최근·과거 두 칸이고 높이 6px, 바탕 `--raised`, 채움 `--accent`를 `transform: scaleX()`로 채우며 `role="progressbar"`와 `aria-valuenow`(0~100)를 가진다.
+- 상태 창은 정지하면 문제 한 줄과 할 일 한 줄만 본문에 둔다(인증 오류는 "DART 인증키를 확인해야 합니다"와 "시스템 설정 열기"·"확인 후 재개"). 정지 사유 문장과 실패 안내는 "자세히" 안에 있다. "자세히"는 꺾쇠가 붙은 전체 폭 접기 줄이고, 바닥에는 닫기가 없고(머리의 닫기만 둔다) 주요 행동 하나만 있다(일시정지는 `.btn`, 나머지는 `.btn-primary`). 완료에는 "마지막 확인 YYYY-MM-DD HH:MM · N개 회사"가 본문에 있다. 날짜는 한국 시각 `YYYY-MM-DD HH:MM`(`financialTime`), 수는 천 단위 쉼표, 자세히 표의 값은 오른쪽 맞춤이다.
+
 ## 랜딩
 
 `features/landing/`가 계정 모드에서 `signed_out`일 때 `App.tsx`의 `ChartRoute`에 그린다(`Landing`). 로컬 전용 모드, `owner_mismatch`, `signed_in` 화면은 바꾸지 않는다. 스타일은 `styles/landing.css`다.

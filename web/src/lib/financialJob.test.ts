@@ -3,8 +3,7 @@ import type { FinancialUpdatePage } from "../api/generated/FinancialUpdatePage";
 import type { FinancialUpdatePhase } from "../api/generated/FinancialUpdatePhase";
 import type { FinancialUpdateStatus } from "../api/generated/FinancialUpdateStatus";
 import type { FinancialUpdateStopReason } from "../api/generated/FinancialUpdateStopReason";
-import { checkedTime } from "../chart/financials";
-import { financialJobAction, financialJobActive, financialJobTone, financialJobView, type FinancialJobAction, type FinancialJobView } from "./financialJob";
+import { financialButtonView, financialJobAction, financialJobActive, financialJobProgress, financialJobTone, financialJobView, financialTime, type FinancialJobAction, type FinancialJobTone } from "./financialJob";
 
 const titleByStatus: Record<FinancialUpdateStatus, string> = {
   idle: "업데이트 전", planning: "대상 회사 확인 중", collecting: "최근 자료 수집 중", pausing: "일시정지 처리 중", paused: "일시정지됨",
@@ -110,10 +109,10 @@ test("정지 사유가 없으면 정지 문구가 없다", () => {
 const nextCheckAt = 1_794_000_000;
 test.each<[string, Partial<FinancialUpdatePage>, string | null]>([
   ["다음 확인 시각이 없으면 없다", { nextCheckAt: null, automatic: true }, null],
-  ["자동이면 다음 자동 확인", { nextCheckAt, automatic: true, status: "ready" }, `다음 자동 확인 (한국 시각): ${checkedTime(nextCheckAt)}`],
-  ["수동이면 다음 확인 기준", { nextCheckAt, automatic: false, status: "ready" }, `다음 확인 기준 (한국 시각): ${checkedTime(nextCheckAt)}`],
-  ["도중에 한도로 정지하면 한도 해제 안내가 붙는다", { nextCheckAt, automatic: true, status: "stopped", stopReason: "rate_limited", canResume: true }, `다음 자동 확인 (한국 시각): ${checkedTime(nextCheckAt)}. 요청 하나가 성공하면 이어 받습니다.`],
-  ["한도 아닌 정지에는 안내가 붙지 않는다", { nextCheckAt, automatic: false, status: "stopped", stopReason: "authentication" }, `다음 확인 기준 (한국 시각): ${checkedTime(nextCheckAt)}`],
+  ["자동이면 다음 자동 확인", { nextCheckAt, automatic: true, status: "ready" }, `다음 자동 확인 (한국 시각): ${financialTime(nextCheckAt)}`],
+  ["수동이면 다음 확인 기준", { nextCheckAt, automatic: false, status: "ready" }, `다음 확인 기준 (한국 시각): ${financialTime(nextCheckAt)}`],
+  ["도중에 한도로 정지하면 한도 해제 안내가 붙는다", { nextCheckAt, automatic: true, status: "stopped", stopReason: "rate_limited", canResume: true }, `다음 자동 확인 (한국 시각): ${financialTime(nextCheckAt)}. 요청 하나가 성공하면 이어 받습니다.`],
+  ["한도 아닌 정지에는 안내가 붙지 않는다", { nextCheckAt, automatic: false, status: "stopped", stopReason: "authentication" }, `다음 확인 기준 (한국 시각): ${financialTime(nextCheckAt)}`],
 ])("다음 확인: %s", (_, overrides, nextCheckNote) => {
   expect(financialJobView(pageOf(overrides), false).nextCheckNote).toBe(nextCheckNote);
 });
@@ -140,7 +139,7 @@ test("사업연도 줄과 현황 표는 페이지의 수를 그대로 적는다"
     ["공식 회사 연결 미확인", "5종목"],
     ["배당 주식 종류 미확인", "6종목"],
   ]);
-  expect(view.lastCheckedNote).toBe(`마지막 확인 ${checkedTime(nextCheckAt)}`);
+  expect(view.lastCheckedNote).toBe(`마지막 확인 ${financialTime(nextCheckAt)}`);
   expect(new Map(financialJobView(pageOf({ historyComplete: true }), false).rows).get("전체 이력 확인")).toBe("완료");
 });
 
@@ -179,30 +178,102 @@ test.each<[FinancialUpdateStatus | undefined, boolean]>([
   expect(financialJobActive(status)).toBe(active);
 });
 
-test.each<[string, Partial<FinancialUpdatePage>, { done: number; total: number; text: string } | null]>([
+test.each<[string, Partial<FinancialUpdatePage>, { done: number; total: number; text: string; percent: number } | null]>([
   ["진행 중이 아니면 없다", { status: "ready", phase: "complete", historyCompletedCompanies: 9, totalCompanies: 9 }, null],
   ["정지면 없다", { status: "stopped", phase: "recent", completedCompanies: 3, totalCompanies: 9 }, null],
-  ["대상 확인 중", { status: "planning", phase: "planning", completedCompanies: 0, totalCompanies: 0 }, { done: 0, total: 0, text: "대상 회사 확인 · 0 / 0회사" }],
-  ["최근 자료 수집은 최근 완료 수", { status: "collecting", phase: "recent", completedCompanies: 3, historyCompletedCompanies: 1, totalCompanies: 9 }, { done: 3, total: 9, text: "최근 자료 · 3 / 9회사" }],
-  ["정정 수집은 최근 완료 수", { status: "collecting", phase: "changes", completedCompanies: 8, historyCompletedCompanies: 1, totalCompanies: 9 }, { done: 8, total: 9, text: "정정·실패 자료 · 8 / 9회사" }],
-  ["과거 이력 수집은 과거 이력 완료 수", { status: "collecting", phase: "history", completedCompanies: 9, historyCompletedCompanies: 4, totalCompanies: 9 }, { done: 4, total: 9, text: "과거 이력 · 4 / 9회사" }],
-  ["처리 종료 단계 정지 중은 과거 이력 완료 수", { status: "pausing", phase: "complete", completedCompanies: 9, historyCompletedCompanies: 7, totalCompanies: 9 }, { done: 7, total: 9, text: "처리 종료 · 7 / 9회사" }],
-  ["재개 확인 중", { status: "checking", phase: "recent", completedCompanies: 2, totalCompanies: 9 }, { done: 2, total: 9, text: "최근 자료 · 2 / 9회사" }],
+  ["대상 확인 중", { status: "planning", phase: "planning", completedCompanies: 0, totalCompanies: 0 }, { done: 0, total: 0, text: "대상 회사 확인 · 0 / 0회사", percent: 0 }],
+  ["최근 자료 수집은 최근 완료 수의 절반까지", { status: "collecting", phase: "recent", completedCompanies: 3, historyCompletedCompanies: 1, totalCompanies: 9 }, { done: 3, total: 9, text: "최근 자료 · 3 / 9회사", percent: 50 / 3 }],
+  ["정정 수집은 최근 완료 수", { status: "collecting", phase: "changes", completedCompanies: 8, historyCompletedCompanies: 1, totalCompanies: 9 }, { done: 8, total: 9, text: "정정·실패 자료 · 8 / 9회사", percent: 400 / 9 }],
+  ["과거 이력 수집은 절반에서 시작해 과거 완료 수만큼 오른다", { status: "collecting", phase: "history", completedCompanies: 9, historyCompletedCompanies: 4, totalCompanies: 9 }, { done: 4, total: 9, text: "과거 이력 · 4 / 9회사", percent: 50 + 200 / 9 }],
+  ["처리 종료 단계 정지 중은 과거 이력 완료 수", { status: "pausing", phase: "complete", completedCompanies: 9, historyCompletedCompanies: 7, totalCompanies: 9 }, { done: 7, total: 9, text: "처리 종료 · 7 / 9회사", percent: 50 + 350 / 9 }],
+  ["재개 확인 중", { status: "checking", phase: "recent", completedCompanies: 2, totalCompanies: 9 }, { done: 2, total: 9, text: "최근 자료 · 2 / 9회사", percent: 100 / 9 }],
 ])("진행률: %s", (_, overrides, progress) => {
-  expect(financialJobView(pageOf(overrides), false).progress).toEqual(progress);
+  const view = financialJobView(pageOf(overrides), false).progress;
+  if (progress === null) expect(view).toBeNull();
+  else {
+    expect(view).toMatchObject({ done: progress.done, total: progress.total, text: progress.text });
+    expect(view!.percent).toBeCloseTo(progress.percent, 6);
+  }
 });
 
-test("아직 불러오지 못한 상태의 점 색은 idle", () => {
+test("최근 자료 단계에서 과거 이력 단계로 넘어갈 때 진행률이 줄지 않는다", () => {
+  const steps: Partial<FinancialUpdatePage>[] = [
+    { phase: "recent", completedCompanies: 4 }, { phase: "recent", completedCompanies: 9 }, { phase: "changes", completedCompanies: 9 },
+    { phase: "history", completedCompanies: 9, historyCompletedCompanies: 0 }, { phase: "history", completedCompanies: 9, historyCompletedCompanies: 5 },
+    { phase: "history", completedCompanies: 9, historyCompletedCompanies: 9 },
+  ];
+  const percents = steps.map((step) => financialJobProgress(pageOf({ status: "collecting", totalCompanies: 9, ...step }))!.percent);
+  expect(percents).toEqual([...percents].sort((a, b) => a - b));
+  expect(percents[2]).toBe(50);
+  expect(percents[3]).toBe(50);
+  expect(percents.at(-1)).toBe(100);
+});
+
+test("진행 막대는 최근·과거 두 칸의 채움 비율을 준다", () => {
+  const stages = financialJobProgress(pageOf({ status: "collecting", phase: "history", totalCompanies: 10, completedCompanies: 10, historyCompletedCompanies: 4 }))!.stages;
+  expect(stages).toEqual([{ name: "최근", fill: 1 }, { name: "과거", fill: 0.4 }]);
+  expect(financialJobProgress(pageOf({ status: "collecting", phase: "recent", totalCompanies: 10, completedCompanies: 3 }))!.stages).toEqual([{ name: "최근", fill: 0.3 }, { name: "과거", fill: 0 }]);
+});
+
+test("아직 불러오지 못한 상태는 쉼이다", () => {
   expect(financialJobTone(undefined)).toBe("idle");
 });
 
-test.each<[FinancialUpdateStatus, FinancialJobView["statusTone"]]>([
-  ["planning", "active"], ["collecting", "active"], ["pausing", "active"], ["checking", "active"],
-  ["ready", "success"], ["idle", "idle"],
-  ["paused", "warning"], ["stopped", "warning"], ["partial_failure", "warning"], ["interrupted", "warning"], ["failed", "warning"], ["not_configured", "warning"],
-])("%s 상태의 점 색은 %s", (status, statusTone) => {
-  expect(financialJobView(pageOf({ status }), false).statusTone).toBe(statusTone);
-  expect(financialJobTone(status)).toBe(statusTone);
+test.each<[string, Partial<FinancialUpdatePage>, FinancialJobTone]>([
+  ["대상 확인", { status: "planning" }, "active"], ["수집 중", { status: "collecting" }, "active"], ["정지 처리 중", { status: "pausing", stopReason: "user" }, "active"], ["재개 확인 중", { status: "checking", stopReason: "rate_limited" }, "active"],
+  ["수집한 적 없음", { status: "idle" }, "idle"], ["DART 미설정", { status: "not_configured", stopReason: "not_configured" }, "idle"],
+  ["일시정지", { status: "paused", stopReason: "user" }, "paused"], ["중단", { status: "interrupted", stopReason: "interrupted" }, "paused"],
+  ["사용자 정지", { status: "stopped", stopReason: "user" }, "paused"], ["서버 중단 정지", { status: "stopped", stopReason: "interrupted" }, "paused"], ["사유 없는 정지", { status: "stopped" }, "paused"],
+  ["인증 정지", { status: "stopped", stopReason: "authentication" }, "attention"], ["한도 정지", { status: "stopped", stopReason: "rate_limited" }, "attention"], ["저장 실패 정지", { status: "stopped", stopReason: "storage" }, "attention"],
+  ["일부 실패", { status: "partial_failure" }, "attention"], ["실패", { status: "failed", failure: "network" }, "attention"],
+  ["완료", { status: "ready" }, "done"],
+])("점 종류: %s는 %s", (_, overrides, tone) => {
+  expect(financialJobTone(pageOf(overrides))).toBe(tone);
+  expect(financialJobView(pageOf(overrides), false).statusTone).toBe(tone);
+});
+
+test("인증 정지와 일시정지의 표시 종류가 다르다", () => {
+  const authentication = financialButtonView(pageOf({ status: "stopped", stopReason: "authentication", canResume: true }));
+  const paused = financialButtonView(pageOf({ status: "paused", stopReason: "user", canResume: true }));
+  expect(authentication.tone).not.toBe(paused.tone);
+  expect(authentication.text).toBe("확인 필요");
+  expect(paused.text).toBe("멈춤");
+});
+
+test.each<[string, Partial<FinancialUpdatePage> | undefined, { dot: boolean; text: string | null }]>([
+  ["자료를 못 불러왔으면 점도 글자도 없다", undefined, { dot: false, text: null }],
+  ["수집한 적이 없으면 점도 글자도 없다", { status: "idle" }, { dot: false, text: null }],
+  ["DART를 쓰지 않아도 경고 점이 없다", { status: "not_configured", stopReason: "not_configured" }, { dot: false, text: null }],
+  ["수집 중이면 점과 전체 기준 진행률", { status: "collecting", phase: "history", totalCompanies: 10, completedCompanies: 10, historyCompletedCompanies: 5 }, { dot: true, text: "75%" }],
+  ["대상 확인 중이면 회사 수가 없어 진행률 글자가 없다", { status: "planning" }, { dot: true, text: null }],
+  ["완료면 점이 없다", { status: "ready" }, { dot: false, text: null }],
+])("버튼 표시: %s", (_, overrides, expected) => {
+  expect(financialButtonView(overrides && pageOf(overrides))).toMatchObject(expected);
+});
+
+test.each<[FinancialUpdateStopReason, { problem: string; opensSettings: boolean }]>([
+  ["authentication", { problem: "DART 인증키를 확인해야 합니다", opensSettings: true }],
+  ["rate_limited", { problem: "DART 호출 한도에 걸렸습니다", opensSettings: false }],
+  ["user", { problem: "사용자가 일시정지했습니다", opensSettings: false }],
+])("%s 정지는 문제 한 줄과 할 일 한 줄만 준다", (stopReason, expected) => {
+  const stop = financialJobView(pageOf({ status: "stopped", stopReason }), false).stop;
+  expect(stop).toMatchObject(expected);
+  expect(stop!.action).not.toBe("");
+});
+
+test("진행 중이거나 정지 사유가 없으면 정지 안내가 없다", () => {
+  expect(financialJobView(pageOf({ status: "pausing", stopReason: "user" }), false).stop).toBeNull();
+  expect(financialJobView(pageOf({ status: "collecting" }), false).stop).toBeNull();
+});
+
+test("시각은 한국 시각 YYYY-MM-DD HH:MM이고 수에는 천 단위 쉼표가 붙는다", () => {
+  expect(financialTime(Date.parse("2016-01-02T07:05:59+09:00") / 1000)).toBe("2016-01-02 07:05");
+  expect(financialTime(Date.parse("2026-11-09T00:00:00+09:00") / 1000)).toBe("2026-11-09 00:00");
+  expect(financialTime(null)).toBe("아직 없음");
+  const view = financialJobView(pageOf({ status: "ready", historyComplete: true, totalCompanies: 2412, completedCompanies: 2409, lastCheckedAt: Date.parse("2026-11-10T07:00:00+09:00") / 1000 }), false);
+  expect(view.completionNote).toBe("마지막 확인 2026-11-10 07:00 · 2,412개 회사");
+  expect(new Map(view.rows).get("최근 자료 완료")).toBe("2,409 / 2,412회사");
+  expect(financialJobView(pageOf({ status: "collecting" }), false).completionNote).toBeNull();
 });
 
 test.each<[string, Partial<FinancialUpdatePage>, string | null]>([

@@ -1,0 +1,23 @@
+.shell-skeleton-tools { flex: none; width: calc(var(--size-40) + var(--size-4)); margin: var(--island-gap) 0 var(--island-gap) var(--island-gap); border-radius: var(--r-l); background: var(--surface); box-shadow: 0 0 0 var(--size-1) var(--line); }
+.shell-skeleton-workspace { position: relative; display: flex; flex: 1; gap: var(--island-gap); min-width: 0; min-height: 0; margin: var(--island-gap); }
+.shell-skeleton-pane { display: flex; flex-direction: column; min-width: 0; min-height: 0; overflow: hidden; border-radius: var(--r-l); background: var(--surface); box-shadow: 0 0 0 var(--size-1) var(--line); }
+.shell-skeleton-pane[data-kind="chart"] { flex: 7 1 0; background: var(--chart-bg); }
+.shell-skeleton-pane[data-kind="side"] { flex: 3 1 0; }
+.shell-skeleton-tabs { display: flex; flex: none; align-items: center; gap: var(--size-8); height: var(--size-34); padding: 0 var(--size-12); border-bottom: var(--size-1) solid var(--line); }
+.shell-skeleton-body { display: flex; flex: 1; flex-direction: column; gap: var(--size-12); padding: var(--size-16); }
+.shell-skeleton-bone { display: block; height: var(--size-12); border-radius: var(--r-s); background: var(--raised); }
+.shell-skeleton-bone[data-size="tab"] { width: var(--size-60); }
+.shell-skeleton-bone[data-size="line"] { width: 100%; }
+.shell-skeleton-bone[data-size="short"] { width: 60%; }
+.shell-skeleton-bone[data-size="tile"] { width: var(--size-24); height: var(--size-24); border-radius: var(--r-m); }
+.shell-skeleton-status { color: var(--text-2); }
+.shell-error { display: grid; place-items: center; height: 100dvh; padding: var(--size-24); background: var(--bg); }
+.shell-error-card { display: flex; flex-direction: column; gap: var(--size-16); width: min(100%, var(--size-480)); padding: var(--size-24); border-radius: var(--r-xl); background: var(--glass-solid); box-shadow: var(--shadow); }
+.shell-error-brand { display: flex; align-items: center; gap: var(--size-4); color: var(--text); font-size: var(--fs-m); font-weight: 700; }
+.shell-error-brand svg { color: var(--accent); }
+.shell-error-card h1 { font-size: var(--fs-h); font-weight: 600; }
+.shell-error-card p { color: var(--text-2); font-size: var(--fs-b); }
+.shell-error-actions { display: flex; flex-wrap: wrap; gap: var(--size-8); }
+.shell-error-detail { color: var(--text-2); font-size: var(--fs-s); }
+.shell-error-detail summary { cursor: pointer; }
+.shell-error-detail pre { max-height: var(--size-180); margin-top: var(--size-8); padding: var(--size-8) var(--size-12); overflow: auto; border-radius: var(--r-s); background: var(--surface); font-family: var(--font-mono); font-size: var(--fs-xs); white-space: pre-wrap; overflow-wrap: anywhere; }

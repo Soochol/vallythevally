@@ -225,7 +225,7 @@ test.describe("같은 재무 키의 응답 순서", () => {
     await page.addInitScript(installFrameProbe);
     await page.goto("/");
     const button = page.getByRole("button", { name: "재무자료", exact: true }).filter({ visible: true });
-    await expect(button).toContainText("50%");
+    await expect(button).toContainText("25%");
     await row(page).getByRole("button", { name: / 보이기$/ }).click({ force: true });
     await first.received;
     holding = false;
