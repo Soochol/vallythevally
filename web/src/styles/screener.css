@@ -1,0 +1,26 @@
+.screen-fields { padding:var(--size-24); gap:var(--size-24); }
+.screen-section { padding:var(--size-20); border:var(--size-1) solid var(--line); border-radius:var(--r-l); background:color-mix(in srgb,var(--bg) 35%,var(--surface)); }
+.screen-section>h3 { margin-bottom:var(--size-16); font-size:var(--size-14); font-weight:650; }
+.condition-card { padding:var(--size-16); border:var(--size-1) solid var(--line); border-radius:var(--r-m); background:var(--surface); }
+.condition-card>header { display:flex; align-items:center; justify-content:space-between; margin-bottom:var(--size-12); color:var(--text-2); font-size:var(--fs-s); }
+.sentence-token,
+.sentence-condition [role="combobox"] {
+  min-height: var(--size-24);
+  height: auto;
+  padding: 0 var(--size-8);
+  border: 0;
+  border-radius: var(--r-s);
+  font-size: inherit;
+  font-variant-numeric: tabular-nums;
+}
+.sentence-token { background: var(--accent-soft); color: var(--accent); font-weight: 650; }
+.sentence-condition [role="combobox"] { gap: var(--size-2); padding-right: var(--size-4); background: var(--hover); color: var(--text); }
+.sentence-condition [role="combobox"] > svg { width: var(--size-12); height: var(--size-12); color: var(--text-3); }
+.sentence-token:hover,
+.sentence-condition [role="combobox"]:hover { box-shadow: inset 0 0 0 var(--size-1) var(--accent); }
+.sentence-token[aria-invalid="true"] { background: color-mix(in srgb, var(--danger) 16%, transparent); color: var(--danger); box-shadow: inset 0 0 0 var(--size-1) var(--danger); }
+.sentence-lines { counter-reset: sentence-line; }
+.sentence-lines > li { counter-increment: sentence-line; align-items: flex-start; }
+.sentence-lines > li::before { content: counter(sentence-line); flex: none; display: grid; place-items: center; width: var(--size-20); height: var(--size-20); margin-top: var(--size-2); border-radius: 50%; background: var(--hover); color: var(--text-2); font-size: var(--fs-xs); font-weight: 600; order: 1; }
+.sentence-lines > li > :first-child { order: 0; }
+.sentence-lines > li > :not(:first-child) { order: 2; }
