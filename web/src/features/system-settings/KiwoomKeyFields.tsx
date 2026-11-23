@@ -1,6 +1,6 @@
 import { type Dispatch, type ReactNode, useState } from "react";
 import { ExternalLinkIcon } from "../icons";
-import { Field, SecretField } from "../ui/Field";
+import { Field, type SecretEdit, SecretField } from "../ui/Field";
 import { ACCOUNT_NUMBER_HINT, ACCOUNT_SHAPE_HINT, HTS_ID_PLACEHOLDER } from "./kisAccount";
 import type { KeyEntry, KeyEntryEvent, KeyFieldErrors, KeyFieldName } from "./kiwoomKeys";
 
@@ -10,11 +10,15 @@ type SecretName = Exclude<KeyFieldName, "alias">;
 
 const TRIMMED_HELP = "앞뒤 공백을 지웠습니다";
 
-function useTrimNotice(entry: KeyEntry, dispatch: Dispatch<KeyEntryEvent>) {
+function useTrimNotice(dispatch: Dispatch<KeyEntryEvent>) {
   const [trimmed, setTrimmed] = useState<ReadonlySet<SecretName>>(new Set());
-  const change = (field: SecretName) => (value: string) => {
-    const before = entry[field];
-    if (value !== before && before.trim() === value) setTrimmed((names) => new Set(names).add(field));
+  const change = (field: SecretName) => (value: string, edit: SecretEdit) => {
+    setTrimmed((names) => {
+      const next = new Set(names);
+      if (edit.trimmed) next.add(field);
+      else next.delete(field);
+      return next;
+    });
     dispatch({ type: field, value });
   };
   return { trimmed, change };
@@ -39,7 +43,7 @@ export function KeyPortalNote({ broker = "kiwoom" }: { broker?: "kiwoom" | "kis"
 }
 
 export function KeyFields({ entry, dispatch, disabled, keyHint, errors = {} }: { entry: KeyEntry; dispatch: Dispatch<KeyEntryEvent>; disabled: boolean; keyHint?: string; errors?: KeyFieldErrors }) {
-  const { trimmed, change } = useTrimNotice(entry, dispatch);
+  const { trimmed, change } = useTrimNotice(dispatch);
   return (
     <>
       <Field label="별칭" name="kiwoom-key-alias" autoComplete="off" maxLength={20} disabled={disabled} value={entry.alias} error={errors.alias} onChange={(e) => dispatch({ type: "alias", value: e.target.value })} />
@@ -50,7 +54,7 @@ export function KeyFields({ entry, dispatch, disabled, keyHint, errors = {} }: {
 }
 
 export function KisAccountFields({ entry, dispatch, disabled, errors = {} }: { entry: KeyEntry; dispatch: Dispatch<KeyEntryEvent>; disabled: boolean; errors?: KeyFieldErrors }) {
-  const { trimmed, change } = useTrimNotice(entry, dispatch);
+  const { trimmed, change } = useTrimNotice(dispatch);
   return (
     <>
       <SecretField label="계좌번호" name="kis-account-no" maxLength={12} placeholder={ACCOUNT_SHAPE_HINT} disabled={disabled} value={entry.accountNo} error={errors.accountNo} help={trimmed.has("accountNo") ? TRIMMED_HELP : ACCOUNT_NUMBER_HINT} onChange={change("accountNo")} />
