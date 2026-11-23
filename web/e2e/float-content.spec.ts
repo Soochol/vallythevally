@@ -51,26 +51,6 @@ test("위 막대 가운데 검색창은 지금 종목을 보이며 눌러도 / �
   await expect(indicators).toHaveAttribute("title", "지표 (I)");
 });
 
-test("재무자료 표시는 상태 점과 함께 배경 없는 상태 창을 열고 자세히에서 전체 현황을 편다", async ({ page }) => {
-  await open(page);
-  const button = toolbar(page).getByRole("button", { name: "재무자료", exact: true });
-  await button.click();
-  const status = page.getByRole("dialog", { name: "재무자료", exact: true });
-  await expect(status.getByRole("status")).toBeVisible();
-  await expect(page.locator(".ui-dialog-backdrop")).toHaveCount(0);
-  const box = (await status.boundingBox())!;
-  const anchor = (await button.boundingBox())!;
-  expect(box.y).toBeGreaterThanOrEqual(anchor.y + anchor.height);
-  await expect(status.getByText("현재 단계", { exact: true })).toBeHidden();
-  await status.getByRole("button", { name: "자세히", exact: true }).click();
-  await expect(status.getByText("현재 단계", { exact: true })).toBeVisible();
-  await status.getByRole("button", { name: "간단히", exact: true }).click();
-  await expect(status.getByText("현재 단계", { exact: true })).toBeHidden();
-  await status.getByRole("button", { name: "닫기", exact: true }).first().click();
-  await expect(status).toHaveCount(0);
-  await expect(button).toBeFocused();
-});
-
 test("조건 문장은 번호 배지와 알약 낱말로 보이고 지우기 확인 창은 무엇을 지우는지 버튼에 적는다", async ({ scenario, page }) => {
   seedScreen(scenario);
   await open(page);

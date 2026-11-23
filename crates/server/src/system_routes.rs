@@ -142,8 +142,6 @@ impl api::SystemSettings {
             screener_db_path: path(&config.screener_db_path),
             financial_db_path: path(&config.financial_db_path),
             screener_update_on_start: config.screener_update_on_start,
-            financial_automatic: config.financial_automatic,
-            opendart_key_present: config.opendart_api_key.is_some(),
             token_path: path(&config.token_path),
             key_path: path(&config.kiwoom_key_path.with_file_name(crate::kiwoom::key_file::KEY_LIST_FILE_NAME)),
             lock_path: path(&config.lock_path),

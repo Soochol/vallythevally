@@ -3,7 +3,6 @@ export const SYSTEM_MENUS = [
   { id: "general", label: "일반", ready: true },
   { id: "hotkeys", label: "단축키", ready: true },
   { id: "telegram", label: "알림 · 텔레그램", ready: false },
-  { id: "dart", label: "재무자료 · DART", ready: false },
   { id: "data", label: "데이터 · 저장소", ready: true },
   { id: "collector", label: "수집 현황판", ready: true },
   { id: "account", label: "계정", ready: true },

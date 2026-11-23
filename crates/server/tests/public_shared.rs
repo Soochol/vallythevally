@@ -56,7 +56,6 @@ fn operator_vars(work: &Path) -> BTreeMap<String, String> {
         ("VALLY_KIWOOM_WS_URL", "ws://127.0.0.1:1".to_owned()),
         ("VALLY_PUBLIC_IP_URL", "http://127.0.0.1:1".to_owned()),
         ("VALLY_SCREENER_UPDATE_ON_START", "off".to_owned()),
-        ("VALLY_FINANCIAL_AUTOMATIC", "off".to_owned()),
         ("VALLY_CLOCK_START", FRIDAY_EVENING.to_owned()),
         ("VALLY_KIWOOM_APP_KEY", APP_KEY.to_owned()),
         ("VALLY_KIWOOM_APP_SECRET", APP_SECRET.to_owned()),
@@ -170,10 +169,9 @@ impl Site {
         let (config, _) = Config::from_values(vars).unwrap_or_else(|e| panic!("설정 오류: {e}"));
         let lock = server::instance::InstanceLock::acquire(&config.lock_path).unwrap();
         let (events, stream_events) = tokio::sync::mpsc::channel(16);
-        let adapters = Adapters { kiwoom: fake.transport(), kis: None, kis_feed: None, stream: StreamSource::Detached(stream_events), kiwoom_spacing: None, dart_spacing: Some(Duration::from_millis(1)) };
+        let adapters = Adapters { kiwoom: fake.transport(), kis: None, kis_feed: None, stream: StreamSource::Detached(stream_events), kiwoom_spacing: None };
         let started = server::app::start(&config, &lock, adapters).await.unwrap_or_else(|_| panic!("서버가 시작하지 못했다"));
-        let server::app::Started { state, router, listener, automatic, public } = started;
-        drop(automatic);
+        let server::app::Started { state, router, listener, public } = started;
         state.rest.set_access(Access::Open);
         let public = public.expect("공개 설정이 있다");
         let operator_host = format!("127.0.0.1:{}", listener.local_addr().unwrap().port());
@@ -444,7 +442,6 @@ async fn every_public_shared_route(site: &Site, who: &Session) -> Vec<(String, u
         "/api/screener/status",
         "/api/etf/funds",
         "/api/etf/stocks/005930",
-        "/api/financial-update",
         "/api/symbols/005930/financials",
         "/api/symbols/005930/financial-source",
         "/api/heatmap/board?venue=krx",

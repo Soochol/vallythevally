@@ -209,38 +209,24 @@ async fn first_and_mid_discovery_failures_retry_in_the_next_update_and_preserve_
 }
 
 #[tokio::test]
-async fn first_and_mid_discovery_failures_leave_price_requests_usable() {
-    let kiwoom = common::ScriptedTransport::new();
-    let mut symbols = common::support::fixture("ka10099_0");
-    let mut preferred = symbols["list"].as_array().unwrap().iter().find(|row| row["code"] == "005935").unwrap().clone();
-    preferred["code"] = STOCK.into();
-    preferred["name"] = "현대차2우B".into();
-    symbols["list"].as_array_mut().unwrap().push(preferred);
-    kiwoom.respond_with("ka10099",200,symbols);
-    let client = reqwest::Client::new();
+async fn first_and_mid_discovery_failures_are_retryable_and_keep_saved_reports() {
     for collected in [false,true] {
         for stage in ["search","contents"] {
             let fake = source().await;
             let dir = tempdir();
-            let server = process(&fake,&kiwoom,dir.path(),"20151231120000");
-            let base = format!("http://{}",server.addr().await);
-            let price = format!("{base}/api/bars?symbol=005930&period=D&limit=5");
-            assert_eq!(client.get(&price).send().await.unwrap().status(),StatusCode::OK);
+            let collector = collector::Collector::open(&fake,dir.path(),"20151231120000",&[("005930",false),(STOCK,true)]).await;
             let previous = if collected {
-                let store = Store::open(&dir.path().join("run/financials.db")).await.unwrap();
-                let service = Financials::new(Some(fake.client()), store, clock());
-                Some(serde_json::to_value(settled(&service).await.collection).unwrap())
+                let service = collector.service.clone();
+                collector.run(async move { run_update(&service,&[("005930",false)]).await }).await;
+                Some(collector.snapshot().await["collection"].clone())
             } else { None };
             fake.state.lock().unwrap().discovery_failure = Some((stage.into(),StatusCode::BAD_GATEWAY));
-            http_start(&client, &base).await;
-            http_settled(&fake, &client, &base).await;
-            let response = client.get(format!("{base}/api/symbols/{STOCK}/financial-source")).send().await.unwrap();
-            let snapshot: Value = serde_json::from_slice(&response.bytes().await.unwrap()).unwrap();
+            collector.start().await;
+            collector.settled(&fake).await;
+            let snapshot = collector.get(&format!("/api/symbols/{STOCK}/financial-source")).await;
             assert_eq!(snapshot["status"],"failed");
             assert_eq!(snapshot["failure"],"remote");
-            assert_eq!(tokio::time::timeout(Duration::from_secs(1),client.get(&price).send()).await.unwrap().unwrap().status(),StatusCode::OK);
-            if let Some(previous) = previous { assert_saved_report_fetches(&http_snapshot(&client,&base).await["collection"], &previous); }
-            assert!(!server.stop().await.contains(KEY));
+            if let Some(previous) = previous { assert_saved_report_fetches(&collector.snapshot().await["collection"], &previous); }
         }
     }
 }

@@ -1,4 +1,3 @@
-import { FinancialUpdateButton } from "../financial-update/FinancialUpdateButton";
 import { SentenceEditor } from "./SentenceEditor";
 import { useScreenEditing } from "./useScreenEditing";
 import { CHANGED, ChangedBadge } from "./ChangedBadge";
@@ -189,7 +188,6 @@ export function ScreenerPanel({ id }: { id: WindowId | null }) {
             <header className="flex h-11 flex-none items-center gap-1 border-b border-line pl-3 pr-1.5">
               <h2 className="text-l font-[700]">스크리너</h2>
               <span className="flex-1" />
-              <FinancialUpdateButton className="md:hidden" />
               <PanelMenu screen={null} rows={rows} status={status} />
             </header>
           )}
@@ -269,7 +267,6 @@ function ScreenHeader({ windowId, screenEditing, chosen, entries, block, status,
   return (
     <header className="flex-none border-b border-line px-3 pb-3 pt-2">
       <div className="flex items-center gap-1">
-        <FinancialUpdateButton className="md:hidden" />
         <ScreenPicker windowId={windowId} screenEditing={screenEditing} entries={entries} chosen={chosen} />
         {chosen.dirty && <ChangedBadge />}
         <span className="flex-1" />

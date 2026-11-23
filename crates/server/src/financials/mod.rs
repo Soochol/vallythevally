@@ -25,14 +25,27 @@ pub use routes::routes;
 pub use schedule::symbol_listings;
 pub use writer::{WriterError, acquire_writer_lock, writer_lock_path};
 use writer::WriterSeat;
-use control::{CollectionState, JobContext, UpdateControl};
+use control::{JobContext, UpdateControl};
 
 pub struct Financials {
     client: Option<Client>,
     store: Result<Store, Failure>,
+    late_reader: Option<LateReader>,
     clock: Clock,
     control: UpdateControl,
     writer: WriterSeat,
+}
+
+struct LateReader { path: std::path::PathBuf, opened: tokio::sync::OnceCell<Store> }
+
+impl LateReader {
+    async fn get(&self) -> Result<Option<&Store>, Failure> {
+        if let Some(store) = self.opened.get() { return Ok(Some(store)); }
+        match Store::open_read_only(&self.path).await? {
+            Some(store) => Ok(Some(self.opened.get_or_init(|| async { store }).await)),
+            None => Ok(None),
+        }
+    }
 }
 
 enum StatementStep { Continue(StatementRequest), Done(Option<Statement>) }
@@ -53,7 +66,17 @@ impl Financials {
 
     pub fn with_store(client: Option<Client>, store: Result<Store, Failure>, clock: Clock) -> Arc<Self> {
         let control = UpdateControl::new(client.is_some(), clock.clone());
-        Arc::new(Self { client, store, clock, control, writer: WriterSeat::default() })
+        Arc::new(Self { client, store, late_reader: None, clock, control, writer: WriterSeat::default() })
+    }
+
+    pub fn read_only(database: &std::path::Path, clock: Clock) -> Arc<Self> {
+        let control = UpdateControl::new(false, clock.clone());
+        let late_reader = Some(LateReader { path: database.to_owned(), opened: tokio::sync::OnceCell::new() });
+        Arc::new(Self { client: None, store: Err(Failure::Storage), late_reader, clock, control, writer: WriterSeat::default() })
+    }
+
+    async fn readable(&self) -> Result<Option<&Store>, Failure> {
+        match &self.late_reader { Some(late) => late.get().await, None => self.store().map(Some) }
     }
 
     fn store(&self) -> Result<&Store, Failure> {
@@ -64,16 +87,19 @@ impl Financials {
         let mut security = None;
         let mut collection = Collection::default();
         let result = async {
-            let store = self.store()?;
+            let Some(store) = self.readable().await? else { return Ok(None); };
             security = store.security(stock).await?;
             if let Some(security) = &security { collection = store.collection(&security.company.corp_code).await?; }
-            Ok::<_, Failure>(())
+            Ok::<_, Failure>(Some(store))
         }.await;
-        if let Err(failure) = result { return ReadSnapshot::resolve(security, collection, ReadContext::StorageFailed(failure)); }
-        if self.client.is_none() { return ReadSnapshot::resolve(security, collection, ReadContext::NotConfigured); }
-        let observed = match &security { Some(security) => self.control.collection_state(&security.company.corp_code).await, None => CollectionState::default() };
-        let resolution = if security.is_none() { self.read_resolution(stock).await } else { ReadResolution::Unchanged };
-        ReadSnapshot::resolve(security, collection, ReadContext::Configured { collecting: observed.collecting, failure: observed.failure, resolution })
+        let store = match result {
+            Ok(Some(store)) => store,
+            Ok(None) => return ReadSnapshot::resolve(None, Collection::default(), ReadContext::NotConfigured),
+            Err(failure) => return ReadSnapshot::resolve(security, collection, ReadContext::StorageFailed(failure)),
+        };
+        let failure = match &security { Some(security) => self.control.company_failure(&security.company.corp_code).await, None => None };
+        let resolution = if security.is_none() { self.read_resolution(store, stock).await } else { ReadResolution::Unchanged };
+        ReadSnapshot::resolve(security, collection, ReadContext::Configured { failure, resolution })
     }
 
     async fn security(&self, stock: &str, preferred: bool) -> Result<Option<Security>, Interrupt> {

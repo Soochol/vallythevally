@@ -1,4 +1,3 @@
-import { FinancialUpdateButton } from "../financial-update/FinancialUpdateButton";
 import { EmptyState } from "../overlay/State";
 import { confirmAction } from "../overlay/Confirm";
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
@@ -72,7 +71,6 @@ export function PhoneWatch() {
   return (
     <section aria-label="관심종목" className="fixed inset-x-0 bottom-[56px] top-0 z-30 flex flex-col bg-bg md:hidden">
       <WatchHead window={null} hidden={NO_COLUMNS} onNaming={onNaming}>
-        <FinancialUpdateButton />
         <button type="button" className="tb-btn h-9 text-s" aria-pressed={editing} onClick={() => setEditing(!editing)}>
           {editing ? "완료" : "편집"}
         </button>
