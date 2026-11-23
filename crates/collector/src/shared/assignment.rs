@@ -34,7 +34,8 @@ struct AssignmentFile {
 #[serde(deny_unknown_fields)]
 struct JobEntry {
     keys: Vec<String>,
-    period_secs: u64,
+    #[serde(default)]
+    period_secs: Option<u64>,
     #[serde(default)]
     options: Value,
 }
@@ -125,10 +126,11 @@ impl Assignment {
             if entry.keys.is_empty() {
                 return Err(AssignmentError::NoKeys(job));
             }
-            if entry.period_secs == 0 {
+            let shared_job = job.job();
+            let period_secs = entry.period_secs.unwrap_or_else(|| shared_job.default_period_secs());
+            if period_secs == 0 {
                 return Err(AssignmentError::BadPeriod(job));
             }
-            let shared_job = job.job();
             shared_job.check_options(&entry.options).map_err(|detail| AssignmentError::BadOptions { job, detail })?;
             let mut names: Vec<KeyName> = Vec::new();
             let mut brokers: Vec<Broker> = Vec::new();
@@ -143,7 +145,7 @@ impl Assignment {
                 names.push(key.identity.name.clone());
                 brokers.push(key.broker);
             }
-            jobs.insert(job, JobPlan { keys: names, brokers, period: Duration::from_secs(entry.period_secs), options: entry.options });
+            jobs.insert(job, JobPlan { keys: names, brokers, period: Duration::from_secs(period_secs), options: entry.options });
         }
         Ok(Assignment { jobs, key_options })
     }

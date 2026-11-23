@@ -10,7 +10,7 @@ use serde::de::DeserializeOwned;
 use super::format::{DataKind, Envelope, FORMAT_VERSION, HeaderOnly, Loaded, SNAPSHOT_EXTENSION, newest_file};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-struct Signature {
+pub(super) struct Signature {
     path: PathBuf,
     modified: Option<SystemTime>,
     len: u64,
@@ -18,7 +18,7 @@ struct Signature {
 }
 
 impl Signature {
-    fn of(path: PathBuf, meta: &Metadata) -> Self {
+    pub(super) fn of(path: PathBuf, meta: &Metadata) -> Self {
         Signature { path, modified: meta.modified().ok(), len: meta.len(), identity: super::format::file_identity(meta) }
     }
 }

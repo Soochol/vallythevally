@@ -196,6 +196,14 @@ pub fn excludes_of(ranking: &Ranking) -> Excludes {
     }
 }
 
+pub fn condition_key(ranking: &Ranking) -> String {
+    let mut body = serde_json::to_value(ranking).expect("순위 요청은 언제나 직렬화된다");
+    if let Value::Object(fields) = &mut body {
+        fields.remove("excludes");
+    }
+    body.to_string()
+}
+
 pub trait RankingSource: Send + Sync + 'static {
     fn name(&self) -> &'static str;
 
@@ -250,11 +258,7 @@ pub trait RankingSource: Send + Sync + 'static {
     }
 
     fn query_key(&self, ranking: &Ranking) -> QueryKey {
-        let mut body = serde_json::to_value(ranking).expect("순위 요청은 언제나 직렬화된다");
-        if let Value::Object(fields) = &mut body {
-            fields.remove("excludes");
-        }
-        QueryKey { source: self.name(), body: body.to_string() }
+        QueryKey { source: self.name(), body: condition_key(ranking) }
     }
 }
 

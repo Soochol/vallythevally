@@ -199,7 +199,7 @@ struct Seat<'a> {
 }
 
 async fn run_once(job: &dyn SharedJob, market: Market<'_>, seat: Seat<'_>) -> Result<(), collector::shared::JobError> {
-    job.run(JobCall { observation_date: seat.day, slice: seat.slice, peers: seat.peers, market, shared_dir: seat.shared, key: seat.key, clock: seat.clock, options: &Value::Null }).await
+    job.run(JobCall { observation_date: seat.day, slice: seat.slice, peers: seat.peers, period: std::time::Duration::from_secs(60), market, shared_dir: seat.shared, key: seat.key, clock: seat.clock, options: &Value::Null }).await
 }
 
 fn overview_file(shared: &Path) -> Option<(server::shared_data::Header, OverviewBody)> {

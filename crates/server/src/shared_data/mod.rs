@@ -2,6 +2,7 @@ mod board;
 mod feed;
 mod format;
 mod minute;
+mod rankings;
 mod overview;
 mod snapshot;
 mod themes;
@@ -16,9 +17,13 @@ pub use feed::Feed;
 pub use format::{Broker, DataKind, FORMAT_VERSION, Header, Loaded, Probe, ProbeBody, ProbeItem, SNAPSHOT_EXTENSION, SourceKey, data_path};
 pub use minute::{MinuteBar, MinuteBarKey, MinuteInstrument, MinuteTrade, MinuteVenue, minute_path};
 pub use snapshot::{IndexRow, SnapshotBody, SnapshotRow, snapshot_kind};
+pub use rankings::{
+    ConditionEntry, ConditionState, DEFAULT_PAGES, DEFAULT_PERIOD_SECS, MergedCondition, MergedRankings, RankingsBoard, RankingsPartBody, ReceivedRanking, SharedRankingRow, broker_of_part,
+    default_rankings, part_path, read_own_part,
+};
+pub use write::{FeedWriter, write_snapshot, write_snapshot_at};
 pub use overview::{CardSlot, CardValue, MadeCard, MarketCards, OverviewBody};
 pub use themes::{ThemeEntry, ThemesBody};
-pub use write::{FeedWriter, write_snapshot};
 
 use domain::{KstTime, Venue};
 
@@ -38,6 +43,7 @@ pub struct SharedData {
     pub snapshot_krx: Board<SnapshotBody>,
     pub snapshot_combined: Board<SnapshotBody>,
     pub snapshot_nxt: Board<SnapshotBody>,
+    pub rankings: RankingsBoard,
 }
 
 impl SharedData {
@@ -48,6 +54,7 @@ impl SharedData {
             snapshot_krx: Board::new(DataKind::SnapshotKrx),
             snapshot_combined: Board::new(DataKind::SnapshotCombined),
             snapshot_nxt: Board::new(DataKind::SnapshotNxt),
+            rankings: RankingsBoard::new(),
             kiwoom_themes: Board::new(DataKind::KiwoomThemes),
             market_overview: Board::new(DataKind::MarketOverview),
         })
@@ -80,6 +87,7 @@ impl SharedData {
         if let Err(e) = tokio::task::spawn_blocking(move || {
             data.probe.poll(&dir);
             data.probe_feed.poll(&dir);
+            data.rankings.poll(&dir);
             data.kiwoom_themes.poll(&dir);
             data.market_overview.poll(&dir);
             for venue in Venue::ALL {
@@ -95,6 +103,7 @@ impl SharedData {
     pub fn error_count(&self, kind: DataKind) -> u64 {
         match kind {
             DataKind::Probe => self.probe.errors() + self.probe_feed.errors(),
+            DataKind::Rankings => self.rankings.errors(),
             DataKind::KiwoomThemes => self.kiwoom_themes.errors(),
             DataKind::MarketOverview => self.market_overview.errors(),
             DataKind::SnapshotKrx => self.snapshot_krx.errors(),
@@ -107,6 +116,7 @@ impl SharedData {
     pub fn age_secs(&self, kind: DataKind, now: KstTime) -> Option<i64> {
         match kind {
             DataKind::Probe => self.probe.age_secs(now),
+            DataKind::Rankings => self.rankings.age_secs(now),
             DataKind::KiwoomThemes => self.kiwoom_themes.age_secs(now),
             DataKind::MarketOverview => self.market_overview.age_secs(now),
             DataKind::SnapshotKrx => self.snapshot_krx.age_secs(now),
