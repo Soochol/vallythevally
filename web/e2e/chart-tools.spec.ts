@@ -50,6 +50,18 @@ test("1280x600에서 차트 설정 팝오버는 버튼 아래 화면 안에 다 
   await expect(settingsPopover(page).getByRole("region", { name: "지표 창", exact: true })).toBeInViewport();
 });
 
+test("800px에서 더 보기로 연 차트 설정 팝오버는 더 보기 버튼 아래에서 열린다", async ({ page }) => {
+  await open(page, { width: 800, height: 900 });
+  const more = toolbar(page).getByRole("button", { name: "더 보기", exact: true });
+  await more.click();
+  await page.getByRole("menuitem", { name: "차트 설정", exact: true }).click();
+  await expect(settingsPopover(page)).toBeVisible();
+  const popover = (await settingsPopover(page).boundingBox())!;
+  const button = (await more.boundingBox())!;
+  expect(popover.y).toBeGreaterThanOrEqual(button.y + button.height - 1);
+  expect(popover.x + popover.width).toBeGreaterThanOrEqual(button.x);
+});
+
 test("봉 모양을 바꾸면 팝오버가 열린 채 차트에 바로 반영된다", async ({ page }) => {
   await open(page, { width: 1440, height: 900 });
   await expect.poll(() => mainSeriesTypes(page)).not.toContain("Line");

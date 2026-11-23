@@ -60,7 +60,7 @@ export function Topbar() {
           <button type="button" className="tb-btn aria-expanded:bg-accent-soft aria-expanded:text-accent" aria-label="더 보기" aria-haspopup="menu" aria-expanded={moreOpen} title="더 보기" onClick={() => setMoreOpen((open) => !open)}><MoreIcon /></button>
           {moreOpen && <Menu label="더 보기" root={moreRoot} items={moreItems} onClose={() => setMoreOpen(false)} />}
         </div>
-        {settingsOpen && <ChartSettingsDialog cellId={cellId} anchor={settingsButton} onClose={() => setSettingsOpen(false)} />}
+        {settingsOpen && <ChartSettingsDialog cellId={cellId} anchor={settingsButton.current?.getClientRects().length ? settingsButton : moreRoot} onClose={() => setSettingsOpen(false)} />}
       </div>
       <div className="topbar-search-slot">
         <button type="button" className="shell-search" aria-haspopup="dialog" aria-label="종목·지표·명령 찾기" title={searchTitle(keys)} onClick={() => openSearch()}>
