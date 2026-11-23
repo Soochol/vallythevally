@@ -1,6 +1,7 @@
 import { placeOverlay, type Placement, type Rect } from "./position";
 interface Layer { panel: HTMLElement; options: LayerOptions }
 const layers: Layer[] = [];
+const PASSTHROUGH = "[data-layer-passthrough]";
 export function ownsChartKeyboard(event: Pick<KeyboardEvent, "key" | "target">): boolean {
   return layers.some((layer) => layer.options.blockChartKeys !== false)
     || (event.key === "Escape" && (layers.length > 0 || (event.target instanceof Element && event.target.closest("[data-chart-escape-owner]") !== null)))
@@ -34,7 +35,7 @@ function consumeOutsidePointer(event: PointerEvent, released?: Node) {
 const onDown = (event: PointerEvent) => {
   const top = layers.at(-1);
   if (!top || !(event.target instanceof Node)) return;
-  const outside = !top.panel.contains(event.target) && !top.options.trigger?.contains(event.target) && !top.options.isInside?.(event.target);
+  const outside = !top.panel.contains(event.target) && !top.options.trigger?.contains(event.target) && !top.options.isInside?.(event.target) && !(event.target instanceof Element && event.target.closest(PASSTHROUGH) !== null);
   if (outside || (top.options.backdrop && event.target === top.panel)) {
     if (top.options.blockChartKeys !== false) consumeOutsidePointer(event, event.button === 0 && top.options.releasesClick?.(event.target) ? (event.target instanceof Element ? event.target.closest("button") ?? event.target : event.target) : undefined);
     top.options.onClose("outside");

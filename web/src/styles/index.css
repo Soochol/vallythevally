@@ -4,6 +4,7 @@
 @import "./drawings.css";
 @import "./screener.css";
 @import "./ui.css";
+@import "./components.css";
 @import "./shell.css";
 @import "./workspace.css";
 @import "./chart-cell.css";
@@ -91,23 +92,39 @@
   }
   .tb-btn:hover { background: var(--hover); }
   .tb-btn[aria-pressed="true"] { color: var(--accent); }
+  .tb-btn:disabled, .tb-btn[aria-disabled="true"] { color: var(--text-3); cursor: not-allowed; }
+  .tb-btn:disabled:hover, .tb-btn[aria-disabled="true"]:hover { background: none; }
   .seg-btn {
     height: 34px; min-width: 32px; padding: 0 10px; border-radius: var(--r-s); color: var(--text-2); font-size: var(--fs-s); white-space: nowrap;
   }
   .seg-btn:hover { background: var(--hover); color: var(--text); }
-  .seg-btn[aria-pressed="true"]:hover { background: var(--accent); color: var(--accent-ink); }
-  .seg-btn[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); font-weight: 600; }
+  .seg-btn[aria-pressed="true"]:hover { background: var(--raised); color: var(--text); }
+  .seg-btn[aria-pressed="true"] { background: var(--raised); color: var(--text); font-weight: 600; }
   .seg-btn[aria-disabled="true"] { color: var(--text-3); opacity: 0.6; cursor: not-allowed; }
   .seg-btn[aria-disabled="true"]:hover { background: none; }
   .icon-btn {
     width: 32px; height: 32px; display: grid; place-items: center; border-radius: var(--r-s); color: var(--text-2);
   }
   .icon-btn:hover { background: var(--hover); color: var(--text); }
-  .btn-primary {
-    height: 38px; padding: 0 var(--s5); border-radius: var(--r-m);
-    background: var(--accent); color: var(--accent-ink); border: 1px solid var(--accent); font-weight: 650;
+  .btn, .btn-ghost, .btn-danger, .btn-primary {
+    height: var(--ctl-m); padding: 0 var(--s4); border: 1px solid transparent; border-radius: var(--r-m);
+    display: inline-flex; align-items: center; justify-content: center; gap: 6px; color: var(--text); white-space: nowrap;
+    font-size: var(--fs-b); font-weight: 500;
   }
+  .btn-sm { height: var(--ctl-s); padding: 0 var(--s3); font-size: var(--fs-s); }
+  .btn-lg { height: var(--ctl-l); padding: 0 var(--s5); font-size: var(--fs-m); }
+  .btn { background: var(--raised); border-color: var(--line-strong); }
+  .btn:hover { background: var(--overlay); }
+  .btn-ghost { background: transparent; }
+  .btn-ghost:hover { background: var(--hover); }
+  .btn-danger { background: var(--danger-soft); border-color: color-mix(in srgb, var(--danger) 45%, transparent); color: var(--danger); font-weight: 600; }
+  .btn-danger:hover { background: color-mix(in srgb, var(--danger) 24%, transparent); }
+  .btn-primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); font-weight: 600; }
   .btn-primary:hover { filter: brightness(1.06); }
+  .btn:disabled, .btn-ghost:disabled, .btn-danger:disabled, .btn-primary:disabled,
+  .btn[aria-disabled="true"], .btn-ghost[aria-disabled="true"], .btn-danger[aria-disabled="true"], .btn-primary[aria-disabled="true"] {
+    background: var(--raised); border-color: var(--line); color: var(--text-3); filter: none; cursor: not-allowed;
+  }
   .tb-sep { width: 1px; height: 20px; background: var(--line); margin: 0 var(--s2); flex: none; }
 
   .conn-dot { width: 7px; height: 7px; border-radius: 50%; flex: none; background: var(--text-3); }
