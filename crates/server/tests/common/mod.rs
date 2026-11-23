@@ -29,6 +29,8 @@ struct Control {
     link: server::kiwoom::link::Link,
     runtime: tokio::runtime::Handle,
     clock: server::clock::Clock,
+    keys: Arc<server::kiwoom::keys::KeyRing>,
+    screener: Arc<server::screener::Screener>,
 }
 
 pub struct Server {
@@ -46,6 +48,14 @@ impl Server {
     }
 
     pub fn spawn_with(transport: &ScriptedTransport, lock: &Path, static_dir: &Path, overrides: &[(&str, &std::ffi::OsStr)]) -> Self {
+        Self::spawn_with_kis(transport, None, lock, static_dir, overrides)
+    }
+
+    pub fn spawn_with_kis(transport: &ScriptedTransport, kis: Option<Arc<dyn server::kis::transport::Transport>>, lock: &Path, static_dir: &Path, overrides: &[(&str, &std::ffi::OsStr)]) -> Self {
+        Self::spawn_with_kis_feed(transport, kis, None, lock, static_dir, overrides)
+    }
+
+    pub fn spawn_with_kis_feed(transport: &ScriptedTransport, kis: Option<Arc<dyn server::kis::transport::Transport>>, kis_feed: Option<server::kis::feed::KisFeedParts>, lock: &Path, static_dir: &Path, overrides: &[(&str, &std::ffi::OsStr)]) -> Self {
         let output = Captured::default();
         let writer = output.clone();
         let transport = transport.clone();
@@ -73,11 +83,11 @@ impl Server {
             let instance = server::instance::InstanceLock::acquire(&lock).unwrap();
             let millis = |key: &str| std::time::Duration::from_millis(value(key).map_or(1, |millis| millis.parse().unwrap()));
             let stream = if value("VALLY_KIWOOM_WS_URL").is_some() { server::app::StreamSource::Connect } else { server::app::StreamSource::Detached(stream_events) };
-            let adapters = server::app::Adapters { kiwoom: transport.transport(), stream, kiwoom_spacing: Some(millis("KIWOOM_SEND_SPACING_MILLIS")), dart_spacing: Some(millis("DART_SPACING_MILLIS")) };
+            let adapters = server::app::Adapters { kiwoom: transport.transport(), kis, kis_feed, stream, kiwoom_spacing: Some(millis("KIWOOM_SEND_SPACING_MILLIS")), dart_spacing: Some(millis("DART_SPACING_MILLIS")) };
             let started = server::app::start(&config, &instance, adapters).await.unwrap();
             let state = started.state.clone();
             let mut background = tokio::task::JoinSet::new();
-            publish.set(Control { link: state.link.clone(), runtime: tokio::runtime::Handle::current(), clock: state.clock.clone() }).ok();
+            publish.set(Control { link: state.link.clone(), runtime: tokio::runtime::Handle::current(), clock: state.clock.clone(), keys: state.keys.clone(), screener: state.screener.clone() }).ok();
             if value("VALLY_KIWOOM_CONNECT") == Some("start") {
                 state.keys.connect_at_start();
             } else if value("VALLY_KIWOOM_CONNECT") != Some("off") {
@@ -87,6 +97,11 @@ impl Server {
             }
             address.send_replace(Some(started.listener.local_addr().unwrap()));
             let automatic = started.automatic.map(AbortOnDrop);
+            if let Some(public) = started.public {
+                let router = public.router();
+                let public_listener = public.listener;
+                background.spawn(async move { axum::serve(public_listener, router).await.unwrap(); });
+            }
             let listener = started.listener;
             let app = started.router;
             axum::serve(listener, app).await.unwrap();
@@ -120,7 +135,11 @@ impl Server {
         }).await.unwrap()
     }
 
+    pub fn keys(&self) -> Arc<server::kiwoom::keys::KeyRing> { self.control.get().expect("서버가 아직 준비되지 않았습니다").keys.clone() }
+
     pub fn clock(&self) -> server::clock::Clock { self.control.get().expect("서버가 아직 준비되지 않았습니다").clock.clone() }
+
+    pub fn screener(&self) -> Arc<server::screener::Screener> { self.control.get().expect("서버가 아직 준비되지 않았습니다").screener.clone() }
 
     pub fn link(&self) -> server::kiwoom::link::Link { self.control.get().expect("서버가 아직 준비되지 않았습니다").link.clone() }
 

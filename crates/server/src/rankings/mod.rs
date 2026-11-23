@@ -13,9 +13,9 @@ use domain::{Symbol, SymbolKind};
 
 use crate::api::{self, RankingPages, RankingRow, SymbolCode, UnixSeconds};
 use crate::bars::BarError;
-use crate::http::{ApiFailure, AppState, Lookup, symbol_list};
+use crate::http::{ApiFailure, AppState, Lookup, feature_symbol_list};
 use crate::market_source::Priority;
-use crate::market_source::rankings::{RankingSource, excludes_of};
+use crate::market_source::rankings::excludes_of;
 use crate::symbols::Directory;
 use crate::user_routes::read_json;
 
@@ -36,11 +36,10 @@ async fn rankings(State(st): State<Arc<AppState>>, body: Body) -> Result<Json<ap
         api::RankingTrigger::Refresh => Priority::Background,
     };
     let excludes = excludes_of(&request.ranking);
-    let rest = st.kiwoom.rest().map_err(|e| failure(WalkError::Source(e.into()), &st))?;
-    let source: Arc<dyn RankingSource> = Arc::new(KiwoomRankings::new(rest.clone()));
-    let served = st.rankings.serve(source, request.ranking, usize::from(u8::from(request.pages)), priority, &st.clock).await.map_err(|e| failure(e, &st))?;
-    let directory = symbol_list(&st).await?;
-    present(served, excludes, &directory).map(Json).map_err(|e| Lookup::Rankings.failure(e, st.clock.now()))
+    let picked = st.route.rankings();
+    let served = st.rankings.serve(picked.source, request.ranking, usize::from(u8::from(request.pages)), priority, &st.clock).await.map_err(|e| failure(e, &st))?;
+    let directory = feature_symbol_list(&st).await?;
+    present(served, picked.broker, excludes, &directory).map(Json).map_err(|e| Lookup::Rankings.failure(e, st.clock.now()))
 }
 
 fn failure(error: WalkError, st: &AppState) -> ApiFailure {
@@ -61,7 +60,7 @@ fn hidden_by(excludes: api::Excludes, kind: SymbolKind) -> bool {
     (excludes.etf_etn && matches!(kind, SymbolKind::Etf | SymbolKind::Etn)) || (excludes.preferred && kind == SymbolKind::Preferred)
 }
 
-fn present(served: Served, excludes: api::Excludes, directory: &Directory) -> Result<api::RankingPage, BarError> {
+fn present(served: Served, source: api::Broker, excludes: api::Excludes, directory: &Directory) -> Result<api::RankingPage, BarError> {
     let mut seen = HashSet::new();
     let mut rows = Vec::new();
     let mut hidden = 0;
@@ -86,5 +85,5 @@ fn present(served: Served, excludes: api::Excludes, directory: &Directory) -> Re
         });
     }
     let pages = u8::try_from(served.pages.len()).ok().and_then(|pages| RankingPages::try_from(pages).ok()).ok_or_else(|| BarError::Internal("순위 페이지 수가 범위를 벗어났습니다".into()))?;
-    Ok(api::RankingPage { rows, pages, end: served.end, limited: served.limited, hidden, fetched_at: UnixSeconds(served.fetched_at.unix()) })
+    Ok(api::RankingPage { rows, pages, end: served.end, limited: served.limited, hidden, fetched_at: UnixSeconds(served.fetched_at.unix()), source })
 }

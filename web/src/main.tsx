@@ -1,3 +1,4 @@
+import { serverModeProbe } from "./public-mode/modeProbe";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
@@ -30,9 +31,11 @@ if (loginFailure) {
   useAccountStore.getState().showLoginFailure(loginFailure.text);
 }
 
+const serverMode = await serverModeProbe;
+
 // React 밖에서 한 번만 되살린다. StrictMode가 효과를 두 번 부르더라도 복원은 한 번이다.
 void start();
-marketSocket.start();
+if (serverMode === "local") marketSocket.start();
 
 const router = createBrowserRouter([
   { element: <ChartRoute />, children: ALL_PAGES.map(({ path }) => ({ path })) },

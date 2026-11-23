@@ -1,6 +1,9 @@
 import { useKiwoomStore } from "../stores/kiwoom";
 import { isMockEnvironment } from "../stores/kiwoomLink";
-import { useServerClock } from "../stores/serverClock";
+import { isPublicMode } from "../public-mode/serverMode";
+import { RetryHold } from "../public-mode/retryHold";
+import { reportSignedOut } from "../public-mode/signedOut";
+import { serverNow, useServerClock } from "../stores/serverClock";
 import type { ApiErrorCode } from "./generated/ApiErrorCode";
 import type { ApiErrorReason } from "./generated/ApiErrorReason";
 import type { UnixSeconds } from "./generated/UnixSeconds";
@@ -149,7 +152,16 @@ export async function sendJson<T>(method: "PUT" | "POST" | "DELETE", path: strin
   return (await res.json()) as T;
 }
 
+export async function sendNoContent(method: "POST" | "DELETE", path: string, json: string, opts: SendOptions = {}): Promise<void> {
+  await request(path, { method, body: json, signal: opts.signal, headers: { "Content-Type": "application/json", ...opts.headers } });
+}
+
+const retryHold = new RetryHold<ApiRequestError>(() => serverNow(useServerClock.getState().serverTimeOrigin));
+
 async function request(path: string, init: RequestInit): Promise<Response> {
+  const holdKey = isPublicMode() ? RetryHold.keyOf(init.method ?? "GET", path) : null;
+  const held = holdKey === null ? null : retryHold.heldError(holdKey);
+  if (held) throw held;
   let res: Response;
   try {
     res = await fetch(path, { ...init, headers: { Accept: "application/json", ...init.headers } });
@@ -161,6 +173,8 @@ async function request(path: string, init: RequestInit): Promise<Response> {
   const kiwoom = useKiwoomStore.getState();
   if (!res.ok) {
     const error = await parseError(res);
+    if (holdKey !== null) retryHold.note(holdKey, res.status, error);
+    if (error.code === "signed_out") reportSignedOut();
     if (error.manualActionRequired) kiwoom.reportStopped(error.message);
     if (error.reason === "kiwoom_timeout") kiwoom.reportNotice(error.message);
     throw error;

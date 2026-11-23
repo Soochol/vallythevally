@@ -7,6 +7,7 @@ use tokio::io::AsyncWriteExt;
 
 use super::session::observation_day;
 use crate::api::Market;
+use crate::market_source::{GenerationTicket, SourceGeneration};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "camelCase")]
@@ -45,6 +46,7 @@ struct Today {
 #[derive(Default)]
 pub struct SampleBook {
     today: Mutex<Today>,
+    generation: SourceGeneration,
 }
 
 const FILE_SUFFIX: &str = ".jsonl";
@@ -58,6 +60,14 @@ fn day_of_file(name: &str) -> Option<KstDate> {
 }
 
 impl SampleBook {
+    pub fn with_generation(generation: SourceGeneration) -> SampleBook {
+        SampleBook { today: Mutex::default(), generation }
+    }
+
+    pub fn ticket(&self) -> GenerationTicket {
+        self.generation.ticket()
+    }
+
     pub async fn open(&self, dir: PathBuf, now: KstTime) {
         if let Err(e) = tokio::fs::create_dir_all(&dir).await {
             tracing::error!(path = %dir.display(), error = %e, "시장 표본 폴더를 만들 수 없어 표본을 메모리에만 둡니다");
@@ -87,10 +97,14 @@ impl SampleBook {
         }
     }
 
-    pub async fn record(&self, now: KstTime, sample: Sample) {
+    pub async fn record(&self, now: KstTime, sample: Sample, started: GenerationTicket) {
         self.roll_over(now).await;
         let (dir, day) = {
             let mut today = self.today.lock().expect("표본 잠금");
+            if !self.generation.is_current(started) {
+                tracing::info!(market = ?sample.market, "받는 증권사가 바뀌기 전에 시작한 장중 표본이라 쌓지 않습니다");
+                return;
+            }
             if today.samples.iter().any(|s| s.at == sample.at && s.market == sample.market && s.value.same_kind(&sample.value)) {
                 return;
             }

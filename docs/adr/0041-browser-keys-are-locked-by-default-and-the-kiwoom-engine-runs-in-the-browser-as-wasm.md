@@ -1,5 +1,7 @@
 # 브라우저 키움 키는 기본으로 자동 잠금하고, 키움 엔진은 Rust 코어를 WASM으로 브라우저에서 돌린다
 
+2026-11-23 [ADR 0045](0045-desktop-app-runs-a-personal-engine-and-the-server-keeps-login-and-shared-data.md)가 이 결정의 엔진 방향을 거뒀다. WASM 엔진, SharedWorker, Web Locks는 하지 않고 엔진은 데스크톱 앱 안의 네이티브 Rust 개인 엔진이다. 키 보관은 OS 키체인 쪽으로 간다.
+
 [ADR 0038](0038-user-kiwoom-keys-stay-in-the-browser-and-collection-runs-on-one-server.md)에 따라 사용자 키움 키는 브라우저에서 입력해 브라우저에만 저장하고, 서버로 보내지 않는다. 브라우저가 사용자 키로 하는 일은 내가 보는 종목의 실시간, 계좌 실시간, 토큰·계좌 조회·주문 셋뿐이다. 이 ADR은 그 키를 어떻게 지키고, 그 셋을 하는 엔진을 어떤 모양으로 브라우저에 두는지의 방향을 정한다. 공개 서버는 [ADR 0040](0040-the-public-listener-serves-browser-logins-and-shared-data-apart-from-the-operator-listener.md)이 다룬다. 첫 단계는 키를 저장하는 데까지다. 엔진은 다음 단계이며, 그 구현은 다중 증권사 플랜의 시세·주문 이전 작업이 병합된 뒤에 한다.
 
 ## 정한 것

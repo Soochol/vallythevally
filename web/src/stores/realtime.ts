@@ -3,12 +3,12 @@ import { type Connection, MarketSocket, sameOriginWsUrl } from "../api/socket";
 import { fetchQuotes } from "../api/userData";
 import { receiveCollectorDaemon } from "../features/collector-board/alerts";
 import { receiveAccountPush } from "./account";
-import { receiveKiwoomLinkPush } from "./kiwoomLink";
+import { receiveKiwoomLinkPush, receiveMarketSourcePush } from "./kiwoomLink";
 import { QuoteBook } from "./quoteBook";
 import { receiveSetupChanged } from "./setupChange";
 import { useUiStore } from "./ui";
 
-export const marketSocket = new MarketSocket({ url: () => sameOriginWsUrl(location), onKiwoomLink: receiveKiwoomLinkPush, onAccount: receiveAccountPush, onSetupChanged: receiveSetupChanged, onCollectorDaemon: receiveCollectorDaemon });
+export const marketSocket = new MarketSocket({ url: () => sameOriginWsUrl(location), onKiwoomLink: receiveKiwoomLinkPush, onMarketSource: receiveMarketSourcePush, onAccount: receiveAccountPush, onSetupChanged: receiveSetupChanged, onCollectorDaemon: receiveCollectorDaemon });
 
 export const quoteBook = new QuoteBook({ socket: marketSocket, fetchQuotes });
 

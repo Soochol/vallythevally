@@ -108,3 +108,10 @@ describe("상태 줄의 바로 연결 단추", () => {
     expect(connectionView(open({}), MON_1000 + 600, waiting).text).toBe("발급 간격 대기 · 곧 저절로 연결");
   });
 });
+
+test("시세 공급원이 한투이면 문장에 한투 이름이 붙고 키움이면 그대로다", () => {
+  expect(connectionView(open({}), MON_1000, null, "kis").text).toBe("한투 실시간 연결됨");
+  expect(connectionView(open({}), MON_1000, null, "kiwoom").text).toBe("실시간 연결됨");
+  expect(connectionView(open({ realtime: "notConnected" }), MON_1000, null, "kis").text).toBe("한투에 연결하지 않았습니다");
+  expect(connectionView(open({ realtime: "reconnecting" }), MON_1000, null, "kis").text).toBe("한투에 다시 연결하는 중 (14:02부터)");
+});

@@ -95,7 +95,7 @@ impl ChildProcess for TokioChild {
 impl Launcher for TokioLauncher {
     fn launch(&self, key: &KeyName) -> io::Result<Spawned> {
         let mut command = OsCommand::new(&self.executable);
-        command.args(["collect", "--child", "--key", key.as_str(), "--data"]).arg(&self.data_dir);
+        command.args(["collect", "--child", "--key", key.as_str(), "--data"]).arg(&self.data_dir).arg("--shared").arg(&self.shared_dir);
         self.spawn(key, command)
     }
 

@@ -6,6 +6,7 @@ import type { DaemonJudgment } from "./generated/DaemonJudgment";
 import type { DocumentKind } from "./generated/DocumentKind";
 import type { FeedKind } from "./generated/FeedKind";
 import type { KiwoomLinkStatus } from "./generated/KiwoomLinkStatus";
+import type { MarketSourceStatus } from "./generated/MarketSourceStatus";
 import type { ServerMessage } from "./generated/ServerMessage";
 import type { SymbolCode } from "./generated/SymbolCode";
 import type { UnixSeconds } from "./generated/UnixSeconds";
@@ -106,7 +107,7 @@ export class MarketSocket implements MarketSocketLike {
   private readonly quoteHandlers = new Set<(e: QuoteEvent) => void>();
   private readonly tradingAccountHandlers = new Set<(accountRef: string) => void>();
 
-  constructor(private readonly opts: { url: () => string; connect?: Connect; onKiwoomLink?: (status: KiwoomLinkStatus) => void; onAccount?: (status: AccountStatus) => void; onSetupChanged?: (kinds: readonly DocumentKind[]) => void; onCollectorDaemon?: (judgment: DaemonJudgment, at: UnixSeconds) => void }) {}
+  constructor(private readonly opts: { url: () => string; connect?: Connect; onKiwoomLink?: (status: KiwoomLinkStatus) => void; onMarketSource?: (status: MarketSourceStatus) => void; onAccount?: (status: AccountStatus) => void; onSetupChanged?: (kinds: readonly DocumentKind[]) => void; onCollectorDaemon?: (judgment: DaemonJudgment, at: UnixSeconds) => void }) {}
 
   start(): void {
     if (this.running) return;
@@ -221,6 +222,8 @@ export class MarketSocket implements MarketSocketLike {
         return this.emitQuotes(m);
       case "kiwoom_link":
         return this.opts.onKiwoomLink?.(m.status);
+      case "market_source":
+        return this.opts.onMarketSource?.(m.status);
       case "account":
         return this.opts.onAccount?.(m.status);
       case "setup_changed":

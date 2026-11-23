@@ -1,3 +1,4 @@
+import { usePublicMode } from "../../public-mode/serverMode";
 import { useKiwoomStore } from "../../stores/kiwoom";
 import { openSystemSettings } from "../system-settings/open";
 import { Attribution } from "./attribution";
@@ -11,7 +12,8 @@ export function StatusBar() {
   const stopped = useKiwoomStore((s) => s.stopped);
   const notice = useKiwoomStore((s) => s.notice);
   const connection = useConnectionView();
-  const halted = !stopped && !notice && connection.tone === "red";
+  const publicMode = usePublicMode();
+  const halted = !publicMode && !stopped && !notice && connection.tone === "red";
   return (
     <footer
       className={`status-bar flex min-w-0 flex-none items-center gap-x-3 overflow-hidden whitespace-nowrap border-t border-line px-3 text-xs text-text-2 max-md:hidden ${halted ? "bg-[color-mix(in_srgb,var(--danger)_14%,transparent)]" : ""}`}
@@ -26,11 +28,11 @@ export function StatusBar() {
           {notice}
         </span>
       ) : (
-        <ConnectionIndicator view={connection} />
+        !publicMode && <ConnectionIndicator view={connection} />
       )}
       <MarketClock />
       <SaveStatus />
-      <SyncIndicator />
+      {!publicMode && <SyncIndicator />}
       <FinancialStatus />
       <span className="flex-1" />
       <Attribution icon className="flex flex-none items-center text-text-2 hover:text-text" />

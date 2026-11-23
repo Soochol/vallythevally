@@ -4,6 +4,7 @@ import type { RankingPage } from "../../api/generated/RankingPage";
 import type { RankingTrigger } from "../../api/generated/RankingTrigger";
 import { ApiRequestError } from "../../api/http";
 import { fetchRanking } from "../../api/rankings";
+import { capRankingPage } from "../../public-mode/rankingPages";
 
 export const REFRESH_MS = 10_000;
 
@@ -47,7 +48,7 @@ export function useRankingFeed(ranking: Ranking, enabled: boolean, refreshing: b
     if (trigger === "user") setFeed((f) => (pages > 1 ? { ...f, loadingMore: true } : f.page === null ? { ...f, error: null } : f));
     fetchRanking(asked, pages, trigger).then(
       (page) => {
-        if (mine === latest.current) setFeed({ page, error: null, failure: null, loadingMore: false, settledAt: Date.now() });
+        if (mine === latest.current) setFeed({ page: capRankingPage(page), error: null, failure: null, loadingMore: false, settledAt: Date.now() });
       },
       (e: unknown) => {
         if (mine !== latest.current) return;

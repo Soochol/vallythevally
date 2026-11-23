@@ -9,6 +9,12 @@ describe("로그인 실패 이유 문장", () => {
     expect(new Set(texts).size).toBe(reasons.length);
   });
 
+  test("공개 모드 로그인이 돌려주는 이유에도 문장이 있다", () => {
+    expect(loginFailureText("account_limit")).toContain("새 계정을 더 받지 않습니다");
+    expect(loginFailureText("blocked")).toContain("이 계정은 쓸 수 없습니다");
+    expect(loginFailureText("account_limit")).not.toBe(loginFailureText(null));
+  });
+
   test("취소는 오류처럼 보이지 않는 문장이다", () => {
     expect(loginFailureText("cancelled")).toBe("로그인을 취소했습니다");
     expect(loginFailureText("access_denied")).toBe("로그인을 취소했습니다");

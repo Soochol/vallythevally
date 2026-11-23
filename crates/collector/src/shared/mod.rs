@@ -5,9 +5,11 @@ use serde::{Deserialize, Serialize};
 mod assignment;
 pub mod child;
 mod job;
+pub mod minute;
 mod probe;
 pub mod rankings;
 mod runner;
+pub mod snapshot;
 mod usage;
 mod wire;
 
@@ -21,12 +23,14 @@ pub use wire::{JobStat, TrMinute};
 #[serde(rename_all = "snake_case")]
 pub enum JobName {
     Probe,
+    Snapshot,
 }
 
 impl JobName {
     pub fn job(self) -> Arc<dyn SharedJob> {
         match self {
             JobName::Probe => Arc::new(probe::ProbeJob),
+            JobName::Snapshot => Arc::new(snapshot::SnapshotJob::default()),
         }
     }
 }

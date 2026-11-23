@@ -47,7 +47,7 @@ impl KiwoomOverview {
         KiwoomOverview { handle }
     }
 
-    fn rest(&self) -> Result<&KiwoomRest, SourceError> {
+    fn rest(&self) -> Result<KiwoomRest, SourceError> {
         Ok(self.handle.rest()?)
     }
 
@@ -89,6 +89,10 @@ fn streak_row(row: InstitutionForeignStreakRow) -> StreakRow {
 }
 
 impl OverviewSource for KiwoomOverview {
+    fn broker(&self) -> crate::api::Broker {
+        crate::api::Broker::Kiwoom
+    }
+
     fn features(&self) -> OverviewFeatures {
         OverviewFeatures::of(OverviewFeature::ALL)
     }
@@ -283,6 +287,7 @@ impl KiwoomOverview {
             to: api::KstDate(range.to()),
             coverage,
             days: days.into_iter().map(|(_, day)| day).collect(),
+            source: crate::api::Broker::Kiwoom,
             skipped_days: skipped,
             undated_rows: undated,
             estimated_days: None,

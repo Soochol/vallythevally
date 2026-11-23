@@ -1,3 +1,4 @@
+use std::path::PathBuf;
 use std::process::ExitCode;
 
 use crate::args::{ArgSpec, Arguments};
@@ -21,7 +22,7 @@ mod session_tests;
 mod testing;
 
 const SPEC: ArgSpec = ArgSpec {
-    value_options: &["items", "key"],
+    value_options: &["items", "key", "shared"],
     flag_options: &["child"],
 };
 
@@ -36,8 +37,8 @@ pub fn run(raw_arguments: &[String]) -> ExitCode {
     if arguments.flag("child") {
         return run_child(&arguments);
     }
-    if arguments.value("key").is_some() {
-        eprintln!("collect: --key는 --child와 함께만 씁니다");
+    if arguments.value("key").is_some() || arguments.value("shared").is_some() {
+        eprintln!("collect: --key와 --shared는 --child와 함께만 씁니다");
         return ExitCode::from(2);
     }
     let items = match items::Items::parse(arguments.value("items")) {
@@ -67,7 +68,7 @@ fn run_child(arguments: &Arguments) -> ExitCode {
         return ExitCode::from(2);
     };
     match KeyName::parse(key_text) {
-        Ok(key) => child::run(key, arguments.data_dir()),
+        Ok(key) => child::run(key, arguments.data_dir(), arguments.value("shared").map(PathBuf::from)),
         Err(error) => {
             eprintln!("collect: --key: {error}");
             ExitCode::from(2)

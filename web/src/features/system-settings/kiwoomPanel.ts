@@ -1,8 +1,15 @@
+import type { Broker } from "../../api/generated/Broker";
 import type { KiwoomConnectStep } from "../../api/generated/KiwoomConnectStep";
 import type { KiwoomLinkStatus } from "../../api/generated/KiwoomLinkStatus";
 import type { UnixSeconds } from "../../api/generated/UnixSeconds";
+import { BROKERS } from "./brokers";
 
 export const ISSUE_INTERVAL_SECONDS = 600;
+
+export const IN_USE_ELSEWHERE_NOTICE = "다른 프로그램이 이 한투 키로 실시간을 쓰고 있습니다. 그 프로그램을 끈 뒤 다시 연결하세요";
+
+export const inUseElsewhere = (link: KiwoomLinkStatus, broker: Broker = "kiwoom"): boolean => broker === "kis" && link.state === "failed" && link.problem === "network" && link.message.includes("OPSP8996");
+
 
 export const CONNECT_STEPS: readonly { step: KiwoomConnectStep; label: string }[] = [
   { step: "checkingKey", label: "키 확인" },
@@ -24,7 +31,8 @@ export type PanelStage =
   | "network"
   | "tokenFileUnusable"
   | "keyFileUnusable"
-  | "pathStopped";
+  | "pathStopped"
+  | "inUseElsewhere";
 
 export interface Confirmations {
   registeredIp: boolean;
@@ -70,21 +78,21 @@ export function formatRemaining(seconds: number): string {
 const waitingLabel = (countdown: Countdown | null) =>
   countdown && countdown.remainingSeconds > 0 ? `다시 연결 (${formatRemaining(countdown.remainingSeconds)} 뒤 가능)` : "다시 연결";
 
-export function panelView(status: KiwoomLinkStatus | null, now: UnixSeconds, confirmations: Confirmations = NO_CONFIRMATIONS): PanelView {
+export function panelView(status: KiwoomLinkStatus | null, now: UnixSeconds, confirmations: Confirmations = NO_CONFIRMATIONS, broker: Broker = "kiwoom"): PanelView {
   const view: PanelView = { stage: "loading", countdown: null, connect: null, disconnect: false, recheckTokenFile: false, needsConfirmations: false, ipHelpOpensByItself: false, startNote: null, disconnectNote: null };
   if (!status) return view;
   switch (status.state) {
     case "noKey":
-      return { ...view, stage: "noKey", connect: { label: "키움에 연결", enabled: false, acknowledged: false, readyNotice: false } };
+      return { ...view, stage: "noKey", connect: { label: `${BROKERS[broker].shortName}에 연결`, enabled: false, acknowledged: false, readyNotice: false } };
     case "disconnected":
-      return { ...view, stage: "disconnected", startNote: disconnectedNote(status), connect: { label: "키움에 연결", enabled: true, acknowledged: false, readyNotice: false } };
+      return { ...view, stage: "disconnected", startNote: disconnectedNote(status), connect: { label: `${BROKERS[broker].shortName}에 연결`, enabled: true, acknowledged: false, readyNotice: false } };
     case "connecting":
       if (status.step === "issueInterval") return { ...view, stage: "connectingWait", countdown: countdownOf(status.retryAt, now), disconnect: true };
       return { ...view, stage: "connecting" };
     case "connected":
       return { ...view, stage: "connected", disconnect: true, startNote: "서버를 다시 켜도 자동으로 연결합니다", disconnectNote: "끊으면 다음에 서버를 켤 때도 연결하지 않습니다" };
     case "failed":
-      return failedView(view, status, now, confirmations);
+      return failedView(view, status, now, confirmations, broker);
     default: {
       const _exhaustive: never = status.state;
       return _exhaustive;
@@ -109,14 +117,16 @@ function disconnectedNote(status: KiwoomLinkStatus): string | null {
   }
 }
 
-export type KeySaveNote = "connectsAtOnce" | "blockedBy8050" | null;
+export type KeySaveNote = "connectsAtOnce" | "blockedBy8050" | "kisConnectsAtOnce" | null;
 
-export function keySaveNote(status: KiwoomLinkStatus | null): KeySaveNote {
+export function keySaveNote(status: KiwoomLinkStatus | null, broker: Broker = "kiwoom"): KeySaveNote {
   if (!status || status.keySource === "env") return null;
+  if (broker === "kis") return "kisConnectsAtOnce";
   return status.problem === "authBlocked8050" ? "blockedBy8050" : "connectsAtOnce";
 }
 
-function failedView(base: PanelView, status: KiwoomLinkStatus, now: UnixSeconds, confirmations: Confirmations): PanelView {
+function failedView(base: PanelView, status: KiwoomLinkStatus, now: UnixSeconds, confirmations: Confirmations, broker: Broker): PanelView {
+  if (inUseElsewhere(status, broker)) return { ...base, stage: "inUseElsewhere", connect: { label: "다시 연결", enabled: true, acknowledged: false, readyNotice: false } };
   const countdown = countdownOf(status.retryAt, now);
   const elapsed = !countdown || countdown.remainingSeconds === 0;
   const acknowledging = status.problem === "authBlocked8050" || status.needsAcknowledgement;

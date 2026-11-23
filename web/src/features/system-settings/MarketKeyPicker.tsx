@@ -2,6 +2,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import type { KiwoomKey } from "../../api/generated/KiwoomKey";
 import { designateMarketKey, loadKiwoomLink, storeKiwoomKeys } from "../../api/system";
 import { confirmAction } from "../overlay/Confirm";
+import { BROKERS, brokerOrder } from "./brokers";
 import { marketChangeText, marketKeyOf, pickerLabel } from "./kiwoomKeys";
 import { useCommand } from "./useCommand";
 
@@ -15,7 +16,7 @@ export function MarketKeyPicker({ keys, now }: { keys: readonly KiwoomKey[]; now
   const choose = async (keyId: string) => {
     const chosen = keys.find((key) => key.keyId === keyId);
     if (!chosen || chosen.market) return;
-    if (!(await confirmAction(marketChangeText(chosen.alias), { action: "시세 바꾸기" }))) return;
+    if (!(await confirmAction(marketChangeText(chosen.alias, market?.broker ?? null, chosen.broker), { action: "시세 바꾸기" }))) return;
     await command.run(async () => {
       await storeKiwoomKeys(queryClient, await designateMarketKey({ keyId }));
       await loadKiwoomLink();
@@ -27,7 +28,14 @@ export function MarketKeyPicker({ keys, now }: { keys: readonly KiwoomKey[]; now
       <label className="flex items-center gap-2 text-m max-md:flex-col max-md:items-stretch max-md:gap-1">
         <span className="flex-none text-text-2">시세 키</span>
         <select className="h-9 min-w-0 flex-1 rounded-s border border-line bg-bg px-2 text-m text-text focus:border-accent focus:outline-none disabled:opacity-60" disabled={command.busy} value={market?.keyId ?? ""} onChange={(e) => void choose(e.target.value)}>
-          {keys.map((key) => <option key={key.keyId} value={key.keyId} className={key.link.state === "failed" ? "text-text-3" : undefined}>{pickerLabel(key, now)}</option>)}
+          {brokerOrder().map((broker) => {
+            const group = keys.filter((key) => key.broker === broker);
+            return group.length === 0 ? null : (
+              <optgroup key={broker} label={BROKERS[broker].name}>
+                {group.map((key) => <option key={key.keyId} value={key.keyId} className={key.link.state === "failed" ? "text-text-3" : undefined}>{pickerLabel(key, now)}</option>)}
+              </optgroup>
+            );
+          })}
         </select>
       </label>
       {command.error && <p role="alert" className="text-m text-danger">{command.error}</p>}

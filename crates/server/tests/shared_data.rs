@@ -247,3 +247,22 @@ async fn bad_header_file_rewritten_in_place_with_a_good_header_is_read() {
     data.poll_once(tmp.path()).await;
     assert_eq!(seqs(&data), vec![7]);
 }
+
+#[tokio::test]
+async fn appended_file_with_blank_lines_before_the_header_is_read_once_and_counts_a_bad_line_once() {
+    let tmp = tempfile::tempdir().unwrap();
+    let data = SharedData::new();
+    std::fs::create_dir_all(tmp.path().join("probe")).unwrap();
+    let header_line = serde_json::to_string(&header(noon())).unwrap();
+    std::fs::write(feed_path(tmp.path()), format!("\n\n{header_line}\n{{\"seq\":1}}\nnot json\n")).unwrap();
+    for _ in 0..3 {
+        data.poll_once(tmp.path()).await;
+    }
+    assert_eq!(seqs(&data), vec![1]);
+    assert_eq!(data.error_count(DataKind::Probe), 1);
+
+    OpenOptions::new().append(true).open(feed_path(tmp.path())).unwrap().write_all(b"{\"seq\":2}\n").unwrap();
+    data.poll_once(tmp.path()).await;
+    assert_eq!(seqs(&data), vec![1, 2]);
+    assert_eq!(data.error_count(DataKind::Probe), 1);
+}

@@ -37,7 +37,10 @@ async fn serve(socket: WebSocket, st: Arc<AppState>, hub: HubHandle) {
     let mut collector_notices = st.system.collector().map(|board| board.subscribe_notices());
     let mut trading_changes = st.accounts.subscribe_changes();
     hub.send_to(conn, ServerMessage::KiwoomLink { status: kiwoom_status(&st) });
+    let mut market_source_changes = st.market_source_board.subscribe();
+    let mut market_source_sent = st.market_source_board.snapshot();
     send_account(&st, &hub, conn).await;
+    hub.send_to(conn, ServerMessage::MarketSource { status: market_source_sent.clone() });
     loop {
         tokio::select! {
             changed = account_changes.changed() => {
@@ -66,6 +69,16 @@ async fn serve(socket: WebSocket, st: Arc<AppState>, hub: HubHandle) {
                     break;
                 }
                 hub.send_to(conn, ServerMessage::KiwoomLink { status: kiwoom_status(&st) });
+            }
+            changed = market_source_changes.changed() => {
+                if changed.is_err() {
+                    break;
+                }
+                let status = market_source_changes.borrow_and_update().clone();
+                if status != market_source_sent {
+                    market_source_sent = status.clone();
+                    hub.send_to(conn, ServerMessage::MarketSource { status });
+                }
             }
             msg = incoming.next() => match msg {
                 Some(Ok(Message::Text(text))) => on_text(&hub, &outbox, conn, text.as_str()),

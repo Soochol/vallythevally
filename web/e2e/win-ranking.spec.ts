@@ -180,7 +180,7 @@ test("더 받는 동안 더 보기 버튼은 받는 중이고 다시 누를 수 
   await expect(more(page)).toBeDisabled();
   await expect(more(page)).toHaveText("받는 중…");
   await expect(more(page)).toHaveAttribute("aria-busy", "true");
-  held.reply({ body: { rows: rankingRows(200), pages: 2, end: false, limited: false, hidden: 0, fetchedAt: 1 } satisfies RankingPage });
+  held.reply({ body: { rows: rankingRows(200), pages: 2, end: false, limited: false, hidden: 0, fetchedAt: 1, source: "kiwoom" } satisfies RankingPage });
   await expect(rows(page)).toHaveCount(200);
   await expect(more(page)).toBeEnabled();
   expect(rankingCalls(scenario).filter((c) => c.pages === 2)).toHaveLength(1);
@@ -313,7 +313,7 @@ test("갱신 응답을 붙잡은 사이 더 보기를 누르면 늦게 온 갱�
   await held.received;
   await more(page).click();
   await expect(rows(page)).toHaveCount(200);
-  held.reply({ body: { rows: rankingRows(100).map((row) => ({ ...row, name: `늦은 ${row.name}` })), pages: 1, end: false, limited: false, hidden: 0, fetchedAt: 1 } satisfies RankingPage });
+  held.reply({ body: { rows: rankingRows(100).map((row) => ({ ...row, name: `늦은 ${row.name}` })), pages: 1, end: false, limited: false, hidden: 0, fetchedAt: 1, source: "kiwoom" } satisfies RankingPage });
   await fixedWait(page, 300, "붙잡았던 갱신 응답이 도착한 뒤에도 표가 그대로임을 보려면 그 시간이 지나야 한다");
   await expect(rows(page)).toHaveCount(200);
   await expect(page.getByText("늦은", { exact: false })).toHaveCount(0);

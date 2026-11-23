@@ -261,6 +261,7 @@ pub enum ServerMessage {
     /// 이 연결의 관심종목 가운데 실시간 한도로 받지 못하는 종목, 목록 순서. 바뀔 때만 온다. 브라우저는 통째로 바꾼다.
     WatchLimited { symbols: Vec<SymbolCode> },
     KiwoomLink { status: KiwoomLinkStatus },
+    MarketSource { status: MarketSourceStatus },
     Account { status: AccountStatus },
     CollectorDaemon { judgment: crate::collector::DaemonJudgment, at: UnixSeconds },
     SetupChanged { kinds: Vec<setup::DocumentKind> },
@@ -512,6 +513,53 @@ pub struct KiwoomLinkStatus {
     pub at_start: Option<KiwoomAtStart>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct RankingChoicesView {
+    pub venues: Vec<Venue>,
+    pub sessions: Vec<TradingSession>,
+    pub baselines: Vec<SurgeBaseline>,
+    pub surge_sorts: Vec<SurgeSort>,
+    pub min_trade_amounts: Vec<MinTradeAmount>,
+    pub investors: Vec<RankingInvestor>,
+    pub spans: Vec<ViewSpan>,
+    pub excludes_managed: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct RankingKindChoices {
+    pub kind: crate::market_source::rankings::RankingKind,
+    pub choices: RankingChoicesView,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct FeedBrokerStatus {
+    pub broker: Broker,
+    pub ranking_kinds: Vec<crate::market_source::rankings::RankingKind>,
+    pub ranking_choices: Vec<RankingKindChoices>,
+    pub overview_features: Vec<crate::market_source::OverviewFeature>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct MarketSourceStatus {
+    pub broker: Broker,
+    pub key_id: Option<String>,
+    pub alias: Option<String>,
+    pub state: KiwoomLinkState,
+    pub problem: Option<KiwoomLinkProblem>,
+    pub step: Option<KiwoomConnectStep>,
+    pub retry_at: Option<UnixSeconds>,
+    pub features: Vec<crate::market_source::MarketFeature>,
+    pub feed_broker: Option<FeedBrokerStatus>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export)]
@@ -580,11 +628,12 @@ impl std::fmt::Debug for KiwoomKeyInput {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export)]
 pub enum Broker {
     Kiwoom,
+    Kis,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -616,6 +665,9 @@ pub struct KiwoomKeyAdd {
     pub alias: String,
     pub app_key: String,
     pub app_secret: String,
+    #[serde(default)]
+    #[ts(optional)]
+    pub broker: Option<Broker>,
 }
 
 impl std::fmt::Debug for KiwoomKeyAdd {
@@ -1384,6 +1436,7 @@ pub struct DayHistory<T> {
     pub to: KstDate,
     pub coverage: RangeCoverage,
     pub days: Vec<T>,
+    pub source: Broker,
     pub skipped_days: Vec<SkippedDay>,
     pub undated_rows: Vec<UndatedRow>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -2394,6 +2447,7 @@ pub struct RankingPage {
     pub limited: bool,
     pub hidden: u32,
     pub fetched_at: UnixSeconds,
+    pub source: Broker,
 }
 
 #[cfg(test)]

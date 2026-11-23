@@ -1,4 +1,5 @@
 import type { Request } from "@playwright/test";
+import type { Broker } from "../../src/api/generated/Broker";
 import type { RankingPage } from "../../src/api/generated/RankingPage";
 import type { RankingRequest } from "../../src/api/generated/RankingRequest";
 import type { RankingRow } from "../../src/api/generated/RankingRow";
@@ -39,6 +40,7 @@ interface ServeOptions {
   pageSize?: number;
   limited?: boolean;
   hidden?: number;
+  source?: Broker;
 }
 
 export function serveRankings(scenario: Scenario, options: ServeOptions = {}): RankingServer {
@@ -55,7 +57,7 @@ export function serveRankings(scenario: Scenario, options: ServeOptions = {}): R
     const all = rows(version);
     const shown = all.slice(0, asked.pages * pageSize);
     const end = shown.length >= all.length;
-    const page: RankingPage = { rows: shown, pages: asked.pages, end, limited: !end && options.limited === true, hidden: options.hidden ?? 0, fetchedAt: Math.floor(scenario.now / 1000) + version };
+    const page: RankingPage = { rows: shown, pages: asked.pages, end, limited: !end && options.limited === true, hidden: options.hidden ?? 0, fetchedAt: Math.floor(scenario.now / 1000) + version, source: options.source ?? "kiwoom" };
     version++;
     return { body: page };
   });

@@ -8,11 +8,11 @@ use axum::response::Json;
 use axum::routing::{get, post, put};
 use serde::de::DeserializeOwned;
 
-use crate::api::{self, ApiErrorCode, KeySource, KiwoomAtStart, KiwoomEnvironment, KiwoomConnectStep, KiwoomLinkProblem, KiwoomLinkState, KiwoomLinkStatus, UnixSeconds};
+use crate::api::{self, ApiErrorCode, Broker, KeySource, KiwoomAtStart, KiwoomEnvironment, KiwoomConnectStep, KiwoomLinkProblem, KiwoomLinkState, KiwoomLinkStatus, UnixSeconds};
 use crate::config::{Config, KiwoomCredentials, Secret};
 use crate::http::{ApiFailure, AppState};
 use crate::kiwoom::key_file::{KEY_LIMIT, KeyId, KeyOrigin, MIGRATED_KEY_ALIAS};
-use crate::kiwoom::keys::{KeyError, KeySetup, KeyView};
+use crate::kiwoom::keys::{Connection, KeyError, KeySetup, KisFactory, ListedKey};
 use crate::kiwoom::link::{ConnectStep, LinkState, Problem};
 use crate::kiwoom::private_file::FileError;
 use crate::kiwoom::rest::Usage;
@@ -23,6 +23,7 @@ const BODY_LIMIT: usize = 4096;
 pub struct SystemState {
     environment: KiwoomEnvironment,
     key_setup: Option<KeySetup>,
+    kis_factory: Option<KisFactory>,
     order_switch: Option<crate::trading::SwitchStore>,
     public_ip: Option<Arc<dyn PublicIpTransport>>,
     key_file_problem: Mutex<Option<String>>,
@@ -38,11 +39,20 @@ pub struct SystemState {
 impl SystemState {
     pub fn new(key_setup: KeySetup, key_file_problem: Option<FileError>, settings: api::SystemSettings) -> Self {
         let order_switch = Some(key_setup.store.order_switch_store());
-        SystemState { environment: settings.environment, key_setup: Some(key_setup), order_switch, public_ip: None, key_file_problem: Mutex::new(key_file_problem.map(|e| e.to_string())), settings: Some(settings), account: crate::account::AccountState::local_only(), collector: None, bound: OnceLock::new(), tailnet_hosts: Default::default(), bound_signal: tokio::sync::Notify::new(), write: tokio::sync::Mutex::new(()) }
+        SystemState { environment: settings.environment, key_setup: Some(key_setup), kis_factory: None, order_switch, public_ip: None, key_file_problem: Mutex::new(key_file_problem.map(|e| e.to_string())), settings: Some(settings), account: crate::account::AccountState::local_only(), collector: None, bound: OnceLock::new(), tailnet_hosts: Default::default(), bound_signal: tokio::sync::Notify::new(), write: tokio::sync::Mutex::new(()) }
     }
 
     pub fn environment(&self) -> KiwoomEnvironment {
         self.environment
+    }
+
+    pub fn with_kis(mut self, factory: KisFactory) -> Self {
+        self.kis_factory = Some(factory);
+        self
+    }
+
+    pub fn take_kis_factory(&mut self) -> Option<KisFactory> {
+        self.kis_factory.take()
     }
 
     pub fn with_public_ip(mut self, transport: Arc<dyn PublicIpTransport>) -> Self {
@@ -86,7 +96,7 @@ impl SystemState {
     }
 
     pub fn unconfigured() -> Self {
-        SystemState { environment: KiwoomEnvironment::Real, key_setup: None, order_switch: None, public_ip: None, key_file_problem: Mutex::new(None), settings: None, account: crate::account::AccountState::local_only(), collector: None, bound: OnceLock::new(), tailnet_hosts: Default::default(), bound_signal: tokio::sync::Notify::new(), write: tokio::sync::Mutex::new(()) }
+        SystemState { environment: KiwoomEnvironment::Real, key_setup: None, kis_factory: None, order_switch: None, public_ip: None, key_file_problem: Mutex::new(None), settings: None, account: crate::account::AccountState::local_only(), collector: None, bound: OnceLock::new(), tailnet_hosts: Default::default(), bound_signal: tokio::sync::Notify::new(), write: tokio::sync::Mutex::new(()) }
     }
 
     pub fn bound(&self, addr: std::net::SocketAddr) {
@@ -159,6 +169,7 @@ fn is_loopback_host(host: &str) -> bool {
 pub fn routes(state: Arc<AppState>) -> Router<Arc<AppState>> {
     Router::new()
         .route("/api/system/kiwoom", get(get_kiwoom))
+        .route("/api/system/market-source", get(get_market_source))
         .route("/api/system/kiwoom/usage", get(get_kiwoom_usage))
         .route("/api/system/kiwoom/key", put(put_key).delete(delete_key))
         .route("/api/system/kiwoom/keys", get(list_keys).post(add_key))
@@ -193,6 +204,10 @@ fn mock_key_conflict() -> ApiFailure {
 
 async fn get_kiwoom(State(st): State<Arc<AppState>>) -> Json<KiwoomLinkStatus> {
     Json(kiwoom_status(&st))
+}
+
+async fn get_market_source(State(st): State<Arc<AppState>>) -> Json<api::MarketSourceStatus> {
+    Json(st.market_source_board.snapshot())
 }
 
 async fn get_kiwoom_usage(State(st): State<Arc<AppState>>) -> Json<api::KiwoomUsage> {
@@ -274,6 +289,7 @@ async fn delete_key(State(st): State<Arc<AppState>>) -> Result<Json<KiwoomLinkSt
         None => st.keys.reset_file().map_err(key_failure)?,
         Some(market) => st.keys.remove(&market.id).map_err(key_failure)?,
     }
+    st.source_switch.sync().await;
     st.system.set_key_file_problem(None);
     tracing::info!("키움 키를 지웠습니다");
     Ok(Json(kiwoom_status(&st)))
@@ -288,9 +304,11 @@ async fn add_key(State(st): State<Arc<AppState>>, body: Body) -> Result<Json<api
     let _write = st.system.write.lock().await;
     refuse_mock(&st)?;
     let credentials = checked_credentials(&input.app_key, &input.app_secret)?;
-    st.keys.add(&input.alias, credentials).map_err(key_failure)?;
+    let broker = input.broker.unwrap_or(Broker::Kiwoom);
+    st.keys.add_for(broker, &input.alias, credentials).map_err(key_failure)?;
+    st.source_switch.sync().await;
     st.system.set_key_file_problem(None);
-    tracing::info!("키움 키를 더했습니다");
+    tracing::info!(broker = ?broker, "키를 더했습니다");
     Ok(Json(key_list(&st)))
 }
 
@@ -310,6 +328,7 @@ async fn replace_key(State(st): State<Arc<AppState>>, Path(id): Path<String>, bo
     refuse_mock(&st)?;
     let credentials = checked_credentials(&input.app_key, &input.app_secret)?;
     st.keys.replace_credentials(&id, credentials).map_err(key_failure)?;
+    st.source_switch.sync().await;
     st.system.set_key_file_problem(None);
     tracing::info!("키움 키를 바꿨습니다");
     Ok(Json(key_list(&st)))
@@ -320,6 +339,7 @@ async fn delete_key_by_id(State(st): State<Arc<AppState>>, Path(id): Path<String
     let _write = st.system.write.lock().await;
     refuse_mock(&st)?;
     st.keys.remove(&id).map_err(key_failure)?;
+    st.source_switch.sync().await;
     tracing::info!("키움 키를 지웠습니다");
     Ok(Json(key_list(&st)))
 }
@@ -330,20 +350,27 @@ async fn put_market_key(State(st): State<Arc<AppState>>, body: Body) -> Result<J
     let _write = st.system.write.lock().await;
     refuse_mock(&st)?;
     st.keys.designate_market(&id).map_err(key_failure)?;
+    st.source_switch.sync().await;
     tracing::info!("시세 키를 바꿨습니다");
     Ok(Json(key_list(&st)))
 }
 
 async fn connect_key(State(st): State<Arc<AppState>>, Path(id): Path<String>, body: Body) -> Result<Json<api::KiwoomKeyList>, ApiFailure> {
     let input: api::KiwoomConnectInput = read_body(body).await?;
-    let view = st.keys.view_of(&key_id(&id)?).ok_or_else(|| key_failure(KeyError::Unknown))?;
-    view.lane.link.connect_until_waiting(input.acknowledged).await;
+    let key = st.keys.listed_key(&key_id(&id)?).ok_or_else(|| key_failure(KeyError::Unknown))?;
+    match key.connection {
+        Connection::Kiwoom { lane, .. } => drop(lane.link.connect_until_waiting(input.acknowledged).await),
+        Connection::Kis(lane) => drop(lane.link.connect_until_waiting().await),
+    }
     Ok(Json(key_list(&st)))
 }
 
 async fn disconnect_key(State(st): State<Arc<AppState>>, Path(id): Path<String>) -> Result<Json<api::KiwoomKeyList>, ApiFailure> {
-    let view = st.keys.view_of(&key_id(&id)?).ok_or_else(|| key_failure(KeyError::Unknown))?;
-    view.lane.link.disconnect_by_user();
+    let key = st.keys.listed_key(&key_id(&id)?).ok_or_else(|| key_failure(KeyError::Unknown))?;
+    match key.connection {
+        Connection::Kiwoom { lane, .. } => lane.link.disconnect_by_user(),
+        Connection::Kis(lane) => lane.link.disconnect_by_user(),
+    }
     Ok(Json(key_list(&st)))
 }
 
@@ -411,20 +438,68 @@ fn key_source(origin: KeyOrigin) -> KeySource {
 }
 
 fn key_list(st: &AppState) -> api::KiwoomKeyList {
-    api::KiwoomKeyList { limit: KEY_LIMIT as u32, keys: st.keys.views().iter().map(|view| key_entry(st, view)).collect(), key_file_problem: st.system.key_file_problem() }
+    api::KiwoomKeyList { limit: KEY_LIMIT as u32, keys: st.keys.listing().iter().map(|key| key_entry(st, key)).collect(), key_file_problem: st.system.key_file_problem() }
 }
 
-fn key_entry(st: &AppState, view: &KeyView) -> api::KiwoomKey {
-    let source = key_source(view.origin);
-    api::KiwoomKey {
-        key_id: view.id.to_string(),
-        alias: view.alias.clone(),
-        broker: view.broker,
-        source,
-        app_key_tail: view.app_key_tail.clone(),
-        market: view.market,
-        link: link_status(st, &view.lane.rest, &view.lane.link, source, view.registered_ip.clone(), view.market),
+fn key_entry(st: &AppState, key: &ListedKey) -> api::KiwoomKey {
+    let source = key_source(key.origin);
+    let link = match &key.connection {
+        Connection::Kiwoom { lane, registered_ip } => link_status(st, &lane.rest, &lane.link, source, registered_ip.clone(), key.market),
+        Connection::Kis(lane) => kis_link_status(st, lane, source),
+    };
+    api::KiwoomKey { key_id: key.id.to_string(), alias: key.alias.clone(), broker: key.broker, source, app_key_tail: key.app_key_tail.clone(), market: key.market, link }
+}
+
+fn kis_link_status(st: &AppState, lane: &crate::kis::link::KisLane, key_source: KeySource) -> KiwoomLinkStatus {
+    let auth = lane.rest.auth();
+    let mut status = KiwoomLinkStatus {
+        environment: st.system.environment,
+        key_source,
+        app_key_tail: auth.app_key_tail(),
+        credential_id: Some(auth.credential_prefix()),
+        state: KiwoomLinkState::Disconnected,
+        problem: None,
+        message: String::new(),
+        retry_at: None,
+        needs_acknowledgement: false,
+        step: None,
+        token_expires_at: None,
+        realtime_registered: None,
+        symbol_count: None,
+        registered_ip: None,
+        at_start: Some(if lane.link.kept_disconnected() { KiwoomAtStart::KeptDisconnected } else { KiwoomAtStart::Connects }),
+    };
+    match lane.link.state() {
+        LinkState::NoKey | LinkState::Disconnected => {
+            status.message = match status.at_start {
+                Some(KiwoomAtStart::KeptDisconnected) => "연결을 끊어 두었습니다. 연결하면 다음부터 서버를 켤 때 자동으로 연결합니다",
+                _ => "키가 저장돼 있습니다. 서버를 켤 때 자동으로 연결합니다",
+            }
+            .to_owned();
+        }
+        LinkState::Connecting(step) => {
+            status.state = KiwoomLinkState::Connecting;
+            status.step = Some(connect_step(step));
+            if let ConnectStep::IssueInterval(until) = step {
+                status.retry_at = Some(UnixSeconds(until.unix()));
+                status.message = "한투 토큰 발급 간격을 기다리는 중입니다. 간격이 끝나면 저절로 연결합니다".to_owned();
+            } else {
+                status.message = "한투에 연결하는 중입니다".to_owned();
+            }
+        }
+        LinkState::Connected => {
+            status.state = KiwoomLinkState::Connected;
+            status.message = "한투에 연결됨".to_owned();
+            status.token_expires_at = auth.token_expires_at().map(|t| UnixSeconds(t.unix()));
+        }
+        LinkState::Failed(failure) => {
+            status.state = KiwoomLinkState::Failed;
+            status.problem = Some(problem(failure.problem));
+            status.message = failure.message;
+            status.retry_at = failure.retry_at.map(|t| UnixSeconds(t.unix()));
+        }
     }
+    status
 }
 
 fn link_status(st: &AppState, rest: &crate::kiwoom::rest::KiwoomRest, link: &crate::kiwoom::link::Link, key_source: KeySource, registered_ip: Option<api::RegisteredIp>, market: bool) -> KiwoomLinkStatus {
@@ -499,7 +574,7 @@ fn count(n: usize) -> u32 {
     u32::try_from(n).unwrap_or(u32::MAX)
 }
 
-fn connect_step(step: ConnectStep) -> KiwoomConnectStep {
+pub(crate) fn connect_step(step: ConnectStep) -> KiwoomConnectStep {
     match step {
         ConnectStep::CheckingKey => KiwoomConnectStep::CheckingKey,
         ConnectStep::Token => KiwoomConnectStep::Token,
@@ -509,7 +584,7 @@ fn connect_step(step: ConnectStep) -> KiwoomConnectStep {
     }
 }
 
-fn problem(problem: Problem) -> KiwoomLinkProblem {
+pub(crate) fn problem(problem: Problem) -> KiwoomLinkProblem {
     match problem {
         Problem::AuthBlocked8050 => KiwoomLinkProblem::AuthBlocked8050,
         Problem::KeyNeedsCheck => KiwoomLinkProblem::KeyNeedsCheck,

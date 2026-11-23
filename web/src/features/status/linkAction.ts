@@ -1,6 +1,8 @@
 import type { KiwoomConnectStep } from "../../api/generated/KiwoomConnectStep";
 import type { KiwoomLinkStatus } from "../../api/generated/KiwoomLinkStatus";
 import type { UnixSeconds } from "../../api/generated/UnixSeconds";
+import type { Broker } from "../../api/generated/Broker";
+import { BROKERS } from "../system-settings/brokers";
 import { countdownOf, formatRemaining } from "../system-settings/kiwoomPanel";
 
 export type LinkActionKind = "connect" | "retry";
@@ -45,19 +47,20 @@ export function waitText(retryAt: UnixSeconds | null, now: UnixSeconds): string 
   return `발급 간격 대기 · ${formatRemaining(countdown.remainingSeconds)} 뒤 저절로 연결`;
 }
 
-export function connectingText(link: KiwoomLinkStatus, now: UnixSeconds): string {
+export function connectingText(link: KiwoomLinkStatus, now: UnixSeconds, broker: Broker = "kiwoom"): string {
   if (isWaitingStep(link)) return waitText(link.retryAt, now);
-  return link.step ? `키움에 연결하는 중 · ${STEP_NAMES[link.step]}` : "키움에 연결하는 중";
+  const name = BROKERS[broker].shortName;
+  return link.step ? `${name}에 연결하는 중 · ${STEP_NAMES[link.step]}` : `${name}에 연결하는 중`;
 }
 
-export function disconnectedText(link: KiwoomLinkStatus): string {
+export function disconnectedText(link: KiwoomLinkStatus, broker: Broker = "kiwoom"): string {
   switch (link.atStart) {
     case "keptDisconnected":
       return "연결을 끊어 두었습니다";
     case "connects":
       return "키는 저장됨 · 연결하지 않았습니다";
     case null:
-      return "키움에 연결하지 않았습니다";
+      return `${BROKERS[broker].shortName}에 연결하지 않았습니다`;
     default: {
       const _exhaustive: never = link.atStart;
       return _exhaustive;

@@ -94,7 +94,8 @@ async fn fetch_directory(rest: &KiwoomRest, priority: Priority) -> Result<Direct
 }
 
 pub async fn refresh_symbols(symbols: &SymbolDirectory, rest: &KiwoomRest, priority: Priority) -> Result<(), KiwoomError> {
-    symbols.replace(fetch_directory(rest, priority).await?);
+    let started = symbols.generation().ticket();
+    symbols.replace_if_current(started, fetch_directory(rest, priority).await?);
     Ok(())
 }
 

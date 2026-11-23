@@ -23,7 +23,13 @@ use crate::db::AppDb;
 use crate::http::{AppState, router};
 use crate::instance::InstanceLock;
 use crate::market::hub::{HubHandle, MarketHub};
+use crate::kis::feed::{KisConnect, KisFeedParts};
+use crate::market_overview::MarketOverview;
+use crate::market_source::active::{ActiveSource, ActiveStream};
+use crate::market_source::switch::{SourceSwitch, SwitchParts};
+use crate::market_source::route::FeatureRoute;
 use crate::market_source::{KiwoomHandle, MarketSource};
+use crate::rankings::RankingCache;
 use crate::kiwoom::auth::{DAILY_REISSUE_AT, KiwoomAuth};
 use crate::kiwoom::link::{Link, LinkState};
 use crate::kiwoom::rest::{KiwoomRest, Priority};
@@ -35,8 +41,8 @@ use crate::screener::Screener;
 use crate::screener::store::Store;
 use crate::symbols::SymbolDirectory;
 use crate::system_routes::SystemState;
-use crate::kiwoom::key_file::{FileBases, KeyFile, KeyPaths, startup_keys};
-use crate::kiwoom::keys::{KeyRing, KeySetup, Lane, LaneFactory};
+use crate::kiwoom::key_file::{FileBases, KeyFile, KeyPaths, KisStartup, market_lane_key, startup_keys_with_kis};
+use crate::kiwoom::keys::{KeyRing, KeySetup, KisFactory, Lane, LaneFactory};
 
 const DAILY_RESET_AT: TimeOfDay = match TimeOfDay::hms(7, 45, 0) {
     Some(t) => t,
@@ -121,26 +127,77 @@ pub fn application_with_system(inputs: ApplicationInputs, system: SystemState) -
 
 pub fn application_with_source(inputs: ApplicationInputs, mut system: SystemState, source: Arc<dyn MarketSource>) -> Arc<AppState> {
     let ApplicationInputs { rest, clock, symbols, db, screener_store, stream: (stream, events), static_dir, screener_update_on_connect } = inputs;
-    let kiwoom = KiwoomHandle::connected(rest.clone());
-    let bars = Arc::new(BarService::new(source.clone(), symbols.clone(), clock.clone()));
-    let screener = Arc::new(Screener::new(screener_store, kiwoom.clone(), bars.clone(), symbols.clone(), clock.clone()));
-    let registered = stream.watch_desired();
-    let seat_rules = stream.seat_rules();
+    let generation = symbols.generation();
+    let route = Arc::new(FeatureRoute::new(rest.clone(), clock.clone()));
+    let active_source = Arc::new(ActiveSource::new(source.clone()));
+    let shared_source: Arc<dyn MarketSource> = active_source.clone();
+    let bars = Arc::new(BarService::new(shared_source.clone(), symbols.clone(), clock.clone()));
+    let screener = Arc::new(Screener::new(screener_store, KiwoomHandle::routed(route.clone()), bars.clone(), symbols.clone(), clock.clone()));
     let account_feed = stream.account_feed();
-    let hub = MarketHub::spawn(bars.clone(), Arc::new(stream), events, clock.clone());
+    let (active_stream, merged_events, kiwoom_stream) = ActiveStream::new(Arc::new(stream), events, clock.clone());
+    let active_stream = Arc::new(active_stream);
+    let registered = active_stream.watch_desired();
+    let seat_rules = active_stream.live_seat_rules();
+    let hub = MarketHub::spawn(bars.clone(), active_stream.clone(), merged_events, clock.clone());
     let link = Link::new(rest.clone(), symbols.clone(), screener.clone(), clock.clone(), screener_update_on_connect);
     let market_lane = Lane::market(rest.clone(), link.clone(), account_feed.clone());
+    let kis_factory = system.take_kis_factory();
+    let kis_feed = kis_factory.as_ref().and_then(|factory| factory.feed.clone());
     let keys = Arc::new(match system.take_key_setup() {
-        Some(setup) => KeyRing::new(setup, market_lane),
+        Some(setup) => KeyRing::with_kis(setup, kis_factory, market_lane),
         None => KeyRing::unconfigured(market_lane),
     });
+    route.bind(&keys);
+    let source_switch = Arc::new(SourceSwitch::new(SwitchParts {
+        keys: keys.clone(),
+        kiwoom_source: source,
+        kiwoom_stream,
+        kiwoom_link: link.clone(),
+        kis_feed,
+        clock: clock.clone(),
+        active_source,
+        active_stream,
+        bars: bars.clone(),
+        hub: hub.clone(),
+        symbols: symbols.clone(),
+        generation: generation.clone(),
+    }));
+    let market_source_board = crate::market_source::status::MarketSourceBoard::start(source_switch.clone(), route.clone(), &keys, link.clone());
     let accounts = crate::trading::Accounts::new(keys.clone(), rest.clone(), account_feed, clock.clone(), system.take_order_switch_store(), db.clone(), symbols.clone());
-    Arc::new(AppState { symbols, bars, rest, source, kiwoom, db, clock, static_dir, hub, screener, link, keys, system, registered, seat_rules, accounts, rankings: Default::default(), market_overview: Default::default(), etf: Default::default(), kiwoom_catalog: Default::default(), public_usage: Default::default(), shared_data: crate::shared_data::SharedData::new(), heatmap_quotes: Default::default(), heatmap_flow: Default::default() })
+    Arc::new(AppState {
+        symbols,
+        bars,
+        rest,
+        source: shared_source,
+        route,
+        db,
+        clock,
+        static_dir,
+        hub,
+        screener,
+        link,
+        keys,
+        system,
+        registered,
+        seat_rules,
+        accounts,
+        rankings: RankingCache::with_generation(generation.clone()),
+        market_overview: MarketOverview::with_generation(generation.clone()),
+        etf: Default::default(),
+        kiwoom_catalog: Default::default(),
+        source_switch,
+        market_source_board,
+        public_usage: Default::default(),
+        shared_data: crate::shared_data::SharedData::new(),
+        heatmap_quotes: Arc::new(crate::heatmap_board::QuoteCache::with_generation(generation.clone())),
+        heatmap_flow: Arc::new(crate::heatmap_flow::FlowCache::with_generation(generation.clone())),
+        generation,
+    })
 }
 
 pub async fn daily_maintenance(state: Arc<AppState>) {
     tokio::join!(
-        daily_reset(state.clock.clone(), state.source.clone(), state.symbols.clone(), state.bars.clone(), state.hub.clone(), state.link.clone()),
+        daily_reset(state.clock.clone(), state.source.clone(), state.symbols.clone(), state.bars.clone(), state.hub.clone(), state.source_switch.clone()),
         daily_token(state.clock.clone(), state.rest.clone(), state.link.clone()),
     );
 }
@@ -152,6 +209,8 @@ pub enum StreamSource {
 
 pub struct Adapters {
     pub kiwoom: Arc<dyn Transport>,
+    pub kis: Option<Arc<dyn crate::kis::transport::Transport>>,
+    pub kis_feed: Option<KisFeedParts>,
     pub stream: StreamSource,
     pub kiwoom_spacing: Option<Duration>,
     pub dart_spacing: Option<Duration>,
@@ -159,8 +218,25 @@ pub struct Adapters {
 
 impl Adapters {
     pub fn production(config: &Config) -> Result<Adapters, StartFailure> {
+        let kis: Option<Arc<dyn crate::kis::transport::Transport>> = match crate::kis::transport::ReqwestTransport::new(config.kis_base_url.clone()) {
+            Ok(transport) => Some(Arc::new(transport)),
+            Err(e) => {
+                tracing::error!(error = %e, "한투용 HTTP 클라이언트를 만들 수 없습니다");
+                return Err(StartFailure);
+            }
+        };
+        let master = match crate::kis::master::HttpMasterDownload::new(config.kis_master_base_url.clone()) {
+            Ok(master) => Arc::new(master),
+            Err(e) => {
+                tracing::error!(error = %e, "한투 종목 마스터용 HTTP 클라이언트를 만들 수 없습니다");
+                return Err(StartFailure);
+            }
+        };
+        let ws_url = config.kis_ws_url.clone();
+        let connect: KisConnect = Arc::new(move || Box::new(crate::kis::stream::WebSocketConnector::new(ws_url.clone())));
+        let kis_feed = Some(KisFeedParts { connect, master });
         match ReqwestTransport::new(config.kiwoom_base_url.clone()) {
-            Ok(transport) => Ok(Adapters { kiwoom: Arc::new(transport), stream: StreamSource::Connect, kiwoom_spacing: None, dart_spacing: None }),
+            Ok(transport) => Ok(Adapters { kiwoom: Arc::new(transport), kis, kis_feed, stream: StreamSource::Connect, kiwoom_spacing: None, dart_spacing: None }),
             Err(e) => {
                 tracing::error!(error = %e, "HTTP 클라이언트를 만들 수 없습니다");
                 Err(StartFailure)
@@ -212,7 +288,7 @@ async fn serve(config: Config, lock: &InstanceLock) -> ExitCode {
 }
 
 pub async fn start(config: &Config, lock: &InstanceLock, adapters: Adapters) -> Result<Started, StartFailure> {
-    let Adapters { kiwoom, stream: stream_source, kiwoom_spacing, dart_spacing } = adapters;
+    let Adapters { kiwoom, kis, kis_feed, stream: stream_source, kiwoom_spacing, dart_spacing } = adapters;
     let key_file = KeyFile::new(config.kiwoom_key_path.clone(), lock).with_environment(config.kiwoom_environment);
     let account_file = config.account_state_path.clone().map(|path| AccountStateFile::new(path, lock));
     tracing::info!(environment = config.kiwoom_environment.as_str(), host = %crate::system_routes::kiwoom_target(&config.kiwoom_base_url).host.as_deref().unwrap_or("loopback"), "키움 투자구분으로 켭니다");
@@ -263,9 +339,11 @@ pub async fn start(config: &Config, lock: &InstanceLock, adapters: Adapters) -> 
         }
     };
     let bases = FileBases { token: config.token_path.clone(), registered_ip: config.kiwoom_key_path.with_file_name(crate::config::REGISTERED_IP_FILE_NAME), held: lock.held() };
-    let startup = startup_keys(config.kiwoom_credentials.clone(), &key_file, config.kiwoom_environment, &bases);
+    let kis_token_base = config.kis_token_path.clone().unwrap_or_else(|| bases.token.with_file_name(crate::config::KIS_TOKEN_FILE_NAME));
+    let kis_startup = KisStartup { env: config.kis_credentials.clone(), token_base: kis_token_base.clone() };
+    let startup = startup_keys_with_kis(config.kiwoom_credentials.clone(), kis_startup, &key_file, config.kiwoom_environment, &bases);
     let token_file_for = |paths: &KeyPaths| TokenFile::held(paths.token.clone(), lock.held()).with_environment(config.kiwoom_environment);
-    let market_key = startup.market.as_ref().and_then(|market| startup.keys.iter().find(|key| key.id == *market));
+    let market_key = market_lane_key(&startup.keys, startup.market.as_ref());
     let auth = match market_key {
         Some(key) => KiwoomAuth::new(key.credentials.app_key.clone(), key.credentials.app_secret.clone(), Some(token_file_for(&key.paths))),
         None => KiwoomAuth::keyless(Some(TokenFile::new(config.token_path.clone(), lock).with_environment(config.kiwoom_environment))),
@@ -313,13 +391,22 @@ pub async fn start(config: &Config, lock: &InstanceLock, adapters: Adapters) -> 
     }
     let factory = LaneFactory { transport: lane_transport, clock: clock.clone(), environment: config.kiwoom_environment, spacing: kiwoom_spacing, ws_url: lane_ws_url, bases };
     let key_setup = KeySetup { store: key_file, keys: startup.keys, market: startup.market, factory };
-    let system = SystemState::new(key_setup, startup.file_problem, crate::api::SystemSettings::from_config(config)).with_public_ip(Arc::new(public_ip)).with_account(account).with_collector(collector).with_tailnet_hosts(config.tailnet_hosts.clone());
+    let kis_factory = kis.map(|transport| KisFactory { transport, clock: clock.clone(), token_base: kis_token_base, feed: kis_feed });
+    let mut system = SystemState::new(key_setup, startup.file_problem, crate::api::SystemSettings::from_config(config)).with_public_ip(Arc::new(public_ip)).with_account(account).with_collector(collector).with_tailnet_hosts(config.tailnet_hosts.clone());
+    if let Some(factory) = kis_factory {
+        system = system.with_kis(factory);
+    }
     let state = application_with_system(ApplicationInputs { rest: rest.clone(), clock: clock.clone(), symbols: symbols.clone(), db, screener_store, stream, static_dir: config.static_dir.clone(), screener_update_on_connect: config.screener_update_on_start }, system);
     state.system.bound(bound_addr);
+    state.source_switch.sync().await;
+    drop(state.source_switch.follow());
     tokio::spawn(daily_maintenance(state.clone()));
     tokio::spawn(crate::account::sync::run(state.clone()));
     tokio::spawn(crate::collector::run(state.clone()));
     state.shared_data.start(config.shared_data.as_ref());
+    if config.shared_data.is_some() {
+        state.screener.read_shared_snapshots(state.shared_data.clone());
+    }
     crate::market_overview::start(state.clone(), config.market_samples_dir.clone());
     crate::etf::start_collection(state.clone(), config.etf_pdf_dir.clone(), config.naver_base_url.clone());
     crate::kiwoom_themes::start_collection(state.clone(), config.kiwoom_themes_dir.clone());
@@ -361,12 +448,12 @@ pub(crate) fn next_try(clock: &Clock, retry_at: KstTime, at_least: Duration) -> 
     retry_at.max(clock.now().plus_secs(at_least.as_secs() as i64))
 }
 
-async fn daily_reset(clock: Clock, source: Arc<dyn MarketSource>, symbols: Arc<SymbolDirectory>, bars: Arc<BarService>, hub: HubHandle, link: Link) {
+async fn daily_reset(clock: Clock, source: Arc<dyn MarketSource>, symbols: Arc<SymbolDirectory>, bars: Arc<BarService>, hub: HubHandle, switch: Arc<SourceSwitch>) {
     loop {
         clock.sleep_until(next_daily(clock.now(), DAILY_RESET_AT)).await;
         bars.clear_all();
         hub.daily_reset();
-        if !link.is_connected() {
+        if !switch.source_connected() {
             continue;
         }
         let deadline = next_daily(clock.now(), DAILY_RESET_AT);

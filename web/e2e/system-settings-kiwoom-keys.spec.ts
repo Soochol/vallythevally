@@ -14,6 +14,7 @@ const panel = (page: Page) => dialog(page).getByRole("tabpanel");
 const accounts = (page: Page) => panel(page).getByRole("region", { name: "계좌 목록" });
 const keyRows = (page: Page) => accounts(page).getByRole("listitem");
 const reconnect = (page: Page) => accounts(page).getByRole("button", { name: /^다시 연결/ });
+const chooseKiwoom = (page: Page) => accounts(page).getByRole("group", { name: "증권사 고르기" }).getByRole("button", { name: /^키움증권/ }).click();
 const expandKey = (page: Page, alias: string) => accounts(page).getByRole("button", { name: alias }).first().click();
 const route = (method: string, pathname: string) => (url: URL, request: { method(): string }) => url.pathname === pathname && request.method() === method;
 const keyGets = (scenario: Scenario) => scenario.requests.filter((r) => r.method() === "GET" && new URL(r.url()).pathname === KEYS);
@@ -90,6 +91,7 @@ test("키를 더한 뒤 더하기 전에 나간 목록 폴링 응답이 늦게 �
   await openKiwoom(page);
   await expect(keyRows(page)).toHaveCount(1);
   await accounts(page).getByRole("button", { name: "＋ 계좌 연결 더하기" }).click();
+  await chooseKiwoom(page);
   const form = accounts(page).getByRole("form", { name: "키 더하기" });
   await form.getByLabel("앱키", { exact: true }).fill("FAKEAPPKEYsecond9999");
   await form.getByLabel("시크릿", { exact: true }).fill("FAKESECRETsecond");
@@ -156,6 +158,7 @@ test("방금 더한 키를 지우면 확인 단계가 남지 않고 더하기 �
   scenario.on(route("DELETE", `${KEYS}/k2`), () => ({ body: (scenario.live.kiwoomKeys = keyListOf(first)) }));
   await openKiwoom(page);
   await accounts(page).getByRole("button", { name: "＋ 계좌 연결 더하기" }).click();
+  await chooseKiwoom(page);
   const form = accounts(page).getByRole("form", { name: "키 더하기" });
   await form.getByLabel("앱키", { exact: true }).fill("AAAA1111");
   await form.getByLabel("시크릿", { exact: true }).fill("SECRET1");
