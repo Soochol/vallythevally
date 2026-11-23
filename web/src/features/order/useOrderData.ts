@@ -38,7 +38,6 @@ export interface OrderBoardData {
   readonly orderable: TradingOrderable | null;
   readonly buyableProblem: string | null;
   readonly openOrders: readonly TradingOpenOrder[];
-  readonly openOrdersListedAt: number;
   readonly balance: TradingBalance | null;
   readonly executions: readonly TradingExecution[];
 }
@@ -78,7 +77,6 @@ export function useOrderData(account: string | null, code: string, open: boolean
     groups,
     blocked: commands.data?.blocked ?? false,
     openOrders: orders ?? NONE,
-    openOrdersListedAt: fetchedAt,
     balance: balance.data ?? null,
     executions: executions.data?.executions ?? NONE,
     orderable: buyable.data ?? null,

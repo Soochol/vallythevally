@@ -24,10 +24,26 @@ export const toggledUnit = (unit: ProfitUnit): ProfitUnit => (unit === "won" ? "
 
 export const ALL_SELLING_TEXT = "모두 매도 주문 중입니다";
 
-export function sellOrderQuantity(groups: ReadonlyMap<string, PriceGroup>, writes: readonly PendingWrite[], code: string, listedAt: number): number {
+const listedSellQuantity = (groups: ReadonlyMap<string, PriceGroup>, price: number): number => {
+  const group = groups.get(groupKey("sell", price));
+  return group !== undefined && group.orders.length > 0 ? group.quantity : 0;
+};
+
+const sendingSells = (writes: readonly PendingWrite[], code: string) =>
+  writes.flatMap((write) => write.code === code && write.kind === "sending" && write.side === "sell" ? [write] : []);
+
+const notYetListed = (groups: ReadonlyMap<string, PriceGroup>, write: { readonly price: number; readonly listedWhenIn: number }): boolean => {
+  const listed = listedSellQuantity(groups, write.price);
+  return listed > 0 && listed < write.listedWhenIn;
+};
+
+export const sellQuantityAtPrice = (groups: ReadonlyMap<string, PriceGroup>, writes: readonly PendingWrite[], code: string, price: number): number =>
+  (groups.get(groupKey("sell", price))?.quantity ?? 0) + sendingSells(writes, code).reduce((sum, write) => sum + (write.price === price && notYetListed(groups, write) ? write.quantity : 0), 0);
+
+export function sellOrderQuantity(groups: ReadonlyMap<string, PriceGroup>, writes: readonly PendingWrite[], code: string): number {
   let quantity = 0;
   for (const group of groups.values()) if (group.side === "sell") quantity += group.quantity;
-  for (const write of writes) if (write.code === code && write.kind === "sending" && write.side === "sell" && write.since > listedAt && (groups.get(groupKey("sell", write.price))?.orders.length ?? 0) > 0) quantity += write.quantity;
+  for (const write of sendingSells(writes, code)) if (notYetListed(groups, write)) quantity += write.quantity;
   return quantity;
 }
 

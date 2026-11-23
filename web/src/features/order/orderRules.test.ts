@@ -190,14 +190,14 @@ test("접수한 취소의 주문은 재조회가 아직 돌려줘도 빼고 남�
 });
 
 test("보내는 중 표시는 빈 칸에 방향·수량의 칩을 그리고 합계에는 넣지 않는다", () => {
-  const writes: PendingWrite[] = [{ ...stamped, kind: "sending", key: "k", side: "sell", price: 70_100, quantity: 3 }];
+  const writes: PendingWrite[] = [{ ...stamped, kind: "sending", key: "k", side: "sell", price: 70_100, quantity: 3, listedWhenIn: 3 }];
   const groups = groupWithPending([], writes, "005930");
   expect(groups.get("sell:70100")).toEqual({ side: "sell", price: 70_100, quantity: 3, orders: [], pending: "sending" });
   expect(sideTotal(groups, "sell")).toEqual({ quantity: 0, count: 0 });
 });
 
 test("같은 빈 칸에 보내는 중 표시가 둘이면 칩 수량은 둘의 합이고 이미 걸린 가격의 칩은 그대로다", () => {
-  const sending = (key: string, price: number, quantity: number): PendingWrite => ({ ...stamped, kind: "sending", key, side: "buy", price, quantity });
+  const sending = (key: string, price: number, quantity: number): PendingWrite => ({ ...stamped, kind: "sending", key, side: "buy", price, quantity, listedWhenIn: 0 });
   const writes = [sending("a", 70_000, 10), sending("b", 70_000, 15), sending("c", 69_900, 4)];
   const groups = groupWithPending([order("0000001", "buy", 69_900, 5)], writes, "005930");
   expect(groups.get("buy:70000")).toMatchObject({ quantity: 25, pending: "sending" });
@@ -220,7 +220,7 @@ test("취소 중·정정 중 표시는 대상 주문의 칩에 붙고 가격 단
 
 test("다른 종목의 표시는 무시한다", () => {
   const writes: PendingWrite[] = [
-    { code: "000660", since: 0, kind: "sending", key: "k", side: "buy", price: 70_000, quantity: 10 },
+    { code: "000660", since: 0, kind: "sending", key: "k", side: "buy", price: 70_000, quantity: 10, listedWhenIn: 0 },
     { code: "000660", since: 0, kind: "gone", orderNo: "0000001" },
     { code: "000660", since: 0, kind: "placed", order: { ...order("0000099", "buy", 70_000, 10), code: "000660" } },
   ];

@@ -24,7 +24,7 @@ import { useShownVenue } from "../market-window/useShownVenue";
 import { EmptyState } from "../overlay/State";
 import { openSystemSettings } from "../system-settings/open";
 import { AccountBand } from "./AccountBand";
-import { averageRowPrice, ETF_ETN_AFTER_HOURS_TEXT, holdingOf, isEtfOrEtnAfterHours, type ProfitUnit, sellOrderQuantity, toggledUnit } from "./holdingSummary";
+import { averageRowPrice, ETF_ETN_AFTER_HOURS_TEXT, holdingOf, isEtfOrEtnAfterHours, type ProfitUnit, sellOrderQuantity, sellQuantityAtPrice, toggledUnit } from "./holdingSummary";
 import { HoldingSummary } from "./HoldingSummary";
 import { OrderSettingsPopover } from "./OrderSettingsPopover";
 import { tickRuleOf } from "../market-window/tick";
@@ -109,7 +109,7 @@ function OrderBody({ id, code, infoPager }: { id: WindowId; code: SymbolCode; in
   const infoSlots = placeInfoItems(rows, info, expectedItemsOnPage(infoPager.page, expected));
   const totals = stripTotals(view && { ask: view.totalAsk, bid: view.totalBid }, visibleAfterHours(feed.afterHours?.totals ?? null, Math.floor(now / 1000)));
   const data = useOrderData(accountRef, code, access.open, referencePrice);
-  const writes = useOrderWrites(choice.current, code, orderVenue);
+  const writes = useOrderWrites(choice.current, code, orderVenue, id);
   const fellBack = choice.fellBack;
   useEffect(() => {
     if (!fellBack) return;
@@ -156,7 +156,7 @@ function OrderBody({ id, code, infoPager }: { id: WindowId; code: SymbolCode; in
   const submit = (side: OrderSide, price: number, quantity: number) => {
     const margin = side === "buy" ? marginOf(orderAmount(price, quantity), data.capacity.buying) : 0;
     const send = (confirmHighValue: boolean) => {
-      writes.place({ side, price, quantity, confirmHighValue, margin });
+      writes.place({ side, price, quantity, confirmHighValue, margin, listedWhenIn: side === "sell" ? sellQuantityAtPrice(data.groups, pending, code, price) + quantity : 0 });
       if (settings.keepLastEntry) rememberEntry(entryKey, { presetKind, quantity, usedAt: Date.now() });
     };
     if (needsHighValueConfirm(price, quantity)) setConfirm({ title: `${SIDE_LABEL[side]} ${formatQuantity(quantity)} · ${formatPrice(price, false)}원`, amount: price * quantity, run: () => send(true) });
@@ -194,7 +194,7 @@ function OrderBody({ id, code, infoPager }: { id: WindowId; code: SymbolCode; in
         </div>
       )}
       <AccountBand windowId={id} choice={choice} onPick={(account) => setSettings({ ...settings, account })} maskAccount={settings.maskAccount} openOrders={data.openOrders} balance={data.balance} executions={data.executions} writable={writable} mock={mock} policy={data.orderable?.policy ?? null} onCancel={writes.cancelOne} />
-      <HoldingSummary account={accountRef} holding={holding} orderable={data.orderable} buyableProblem={data.buyableProblem} sellOrdered={sellOrderQuantity(data.groups, pending, code, data.openOrdersListedAt)} unit={profitUnit} onUnit={() => setProfitUnit(toggledUnit)} onFill={setInput} />
+      <HoldingSummary account={accountRef} holding={holding} orderable={data.orderable} buyableProblem={data.buyableProblem} sellOrdered={sellOrderQuantity(data.groups, pending, code)} unit={profitUnit} onUnit={() => setProfitUnit(toggledUnit)} onFill={setInput} />
       <div className="od-entry">
         <QuantityRow presetKind={presetKind} input={input} sharePresets={settings.sharePresets} amountPresets={settings.amountPresets} referencePrice={referencePrice} keepLastEntry={settings.keepLastEntry} onPresetKind={setPresetKind} onInput={setInput} />
         <div className="od-toolbar">

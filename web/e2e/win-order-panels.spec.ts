@@ -1618,3 +1618,20 @@ test("한투 계좌를 고르면 주문 경로 고르기에 KRX·NXT·SOR가 모
   await pollSaved(() => writesTo(api, "place")).toHaveLength(1);
   expect(writesTo(api, "place")[0]!.body).toMatchObject({ venue: "nxt", account: KIS_ACCOUNT });
 });
+
+test("보내는 중에 미체결을 다시 읽어도 같은 가격 보내는 중 매도가 남은 수량에서 빠진다", async ({ page, scenario }) => {
+  ordersOn(scenario);
+  const api = tradingApi(scenario, [openOrder("0000001", "sell", 70_800, 50)]);
+  api.holdings = [SELL_HOLDING];
+  await openOrderWindow(page, scenario);
+  const held = scenario.hold((url, request) => url.pathname === "/api/trading/commands/place" && request.method() === "POST");
+  await quantityField(page).fill("30");
+  await cellAt(page, "sell", 70_800).dblclick();
+  await held.received;
+  await expect(page.getByTestId("summary-remaining")).toHaveText("남은 40");
+  api.open = [openOrder("0000001", "sell", 70_800, 50), openOrder("0000003", "buy", 69_800, 7)];
+  scenario.live.emit({ type: "trading_account_changed", accountRef: ACCOUNT });
+  await expect(chipAt(page, "buy", 69_800)).toHaveText("7");
+  await expect(page.getByTestId("summary-remaining")).toHaveText("남은 40");
+  held.reply({ body: commandOf("sell", { price: 70_800, quantity: 30 }) });
+});
