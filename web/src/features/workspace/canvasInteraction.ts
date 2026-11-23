@@ -8,6 +8,7 @@ import { useLayoutStore, windowName, type WindowState } from "../../stores/layou
 import { useUiStore } from "../../stores/ui";
 import { useSelectionStore } from "../../stores/selection";
 import { closeWindow } from "./manage";
+import { watchPointerCapture } from "./pointerCapture";
 import { focusWithoutActivation, isProgrammaticFocus } from "./focus";
 import type { FrameBindings } from "./WindowFrame";
 
@@ -165,6 +166,7 @@ export function useCanvasInteraction(canvas: CanvasPlacement, windows: readonly 
     setDraft(next);
     document.documentElement.classList.add("canvas-gesturing");
     event.currentTarget.setPointerCapture(event.pointerId);
+    watchPointerCapture(start.capture, start.pointer, () => gesture.current.kind !== "idle" && gesture.current.start === start, () => finishRef.current(true));
     choose(window);
   };
   const keyHeader = (event: KeyboardEvent<HTMLDivElement>, window: WindowState) => {

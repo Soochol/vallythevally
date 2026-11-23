@@ -12,6 +12,7 @@ import { useSelectionStore } from "../../stores/selection";
 import { useUiStore } from "../../stores/ui";
 import { commandAt, evaluateView, type DockCommand, type DockPlan } from "./dockCommands";
 import { closeWindow } from "./manage";
+import { watchPointerCapture } from "./pointerCapture";
 import { focusWithoutActivation, isProgrammaticFocus } from "./focus";
 import type { FrameBindings } from "./WindowFrame";
 
@@ -207,13 +208,7 @@ export function useDockInteraction({ root, dock, saved, space, enabled, onPick }
     gesture.current = { kind: "pressed", start };
     focusWithoutActivation(event.currentTarget);
     capture.setPointerCapture(event.pointerId);
-    const watchCapture = () => {
-      const active = gesture.current;
-      if (active.kind === "idle" || active.start !== start) return;
-      if (capture.hasPointerCapture(start.pointer)) requestAnimationFrame(watchCapture);
-      else finishRef.current(true);
-    };
-    requestAnimationFrame(watchCapture);
+    watchPointerCapture(capture, start.pointer, () => gesture.current.kind !== "idle" && gesture.current.start === start, () => finishRef.current(true));
     if (operation.kind !== "tab") { choose(window.id); setOutcome({ draft: frontFloat(dock, window.id), next: saved, preview: { kind: "unchanged" }, guides: NO_GUIDES, atMinimum: false, grab: null }); }
   };
   const openMenu = (window: WindowId, x: number, y: number) => {
