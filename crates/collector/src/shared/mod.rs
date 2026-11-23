@@ -24,6 +24,7 @@ pub use wire::{JobStat, TrMinute};
 pub enum JobName {
     Probe,
     Snapshot,
+    Rankings,
 }
 
 impl JobName {
@@ -31,6 +32,7 @@ impl JobName {
         match self {
             JobName::Probe => Arc::new(probe::ProbeJob),
             JobName::Snapshot => Arc::new(snapshot::SnapshotJob::default()),
+            JobName::Rankings => Arc::new(rankings::RankingsJob::default()),
         }
     }
 }

@@ -5,9 +5,12 @@ use futures::future::BoxFuture;
 use serde_json::Value;
 use server::clock::Clock;
 use server::kiwoom::rest::KiwoomRest;
+use server::kis::rest::KisRest;
 use server::shared_data::Broker;
 
 use crate::protocol::KeyName;
+
+pub const DEFAULT_PERIOD_SECS: u64 = 30;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct JobError(pub String);
@@ -42,12 +45,14 @@ impl Slice {
 
 pub enum Market<'a> {
     Kiwoom(&'a KiwoomRest),
-    Kis,
+    Kis(Option<&'a KisRest>),
 }
 
 pub struct JobCall<'a> {
     pub observation_date: KstDate,
     pub slice: Slice,
+    pub peers: &'a [Broker],
+    pub period: std::time::Duration,
     pub market: Market<'a>,
     pub shared_dir: &'a Path,
     pub key: &'a KeyName,
@@ -58,6 +63,9 @@ pub struct JobCall<'a> {
 pub trait SharedJob: Send + Sync {
     fn window(&self) -> JobWindow;
     fn brokers(&self) -> &'static [Broker];
+    fn default_period_secs(&self) -> u64 {
+        DEFAULT_PERIOD_SECS
+    }
     fn check_options(&self, options: &Value) -> Result<(), String>;
     fn run<'a>(&'a self, call: JobCall<'a>) -> JobFuture<'a>;
 }

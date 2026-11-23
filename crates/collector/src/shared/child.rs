@@ -156,11 +156,12 @@ impl JobTask {
             observation_date: self.day,
             period: Duration::from_secs(self.assigned.period_secs),
             slice: Slice { index: self.assigned.slice_index, count: self.assigned.slice_count },
+            peers: if self.assigned.peers.is_empty() { vec![self.broker] } else { self.assigned.peers.clone() },
             options: self.assigned.options.clone(),
         };
         let market = match self.broker {
             Broker::Kiwoom => Market::Kiwoom(&self.rest),
-            Broker::Kis => Market::Kis,
+            Broker::Kis => Market::Kis(None),
         };
         job_loop.run(market, &self.key, &self.shared_dir, &self.clock, &self.stats).await;
     }

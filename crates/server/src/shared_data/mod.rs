@@ -2,6 +2,7 @@ mod board;
 mod feed;
 mod format;
 mod minute;
+mod rankings;
 mod snapshot;
 mod write;
 
@@ -14,7 +15,11 @@ pub use feed::Feed;
 pub use format::{Broker, DataKind, FORMAT_VERSION, Header, Loaded, Probe, ProbeBody, ProbeItem, SourceKey};
 pub use minute::{MinuteBar, MinuteBarKey, MinuteInstrument, MinuteTrade, MinuteVenue, minute_path};
 pub use snapshot::{IndexRow, SnapshotBody, SnapshotRow, snapshot_kind};
-pub use write::{FeedWriter, write_snapshot};
+pub use rankings::{
+    ConditionEntry, ConditionState, DEFAULT_PAGES, DEFAULT_PERIOD_SECS, MergedCondition, MergedRankings, RankingsBoard, RankingsPartBody, ReceivedRanking, SharedRankingRow, broker_of_part,
+    default_rankings, part_path,
+};
+pub use write::{FeedWriter, write_snapshot, write_snapshot_at};
 
 use domain::{KstTime, Venue};
 
@@ -32,6 +37,7 @@ pub struct SharedData {
     pub snapshot_krx: Board<SnapshotBody>,
     pub snapshot_combined: Board<SnapshotBody>,
     pub snapshot_nxt: Board<SnapshotBody>,
+    pub rankings: RankingsBoard,
 }
 
 impl SharedData {
@@ -42,6 +48,7 @@ impl SharedData {
             snapshot_krx: Board::new(DataKind::SnapshotKrx),
             snapshot_combined: Board::new(DataKind::SnapshotCombined),
             snapshot_nxt: Board::new(DataKind::SnapshotNxt),
+            rankings: RankingsBoard::new(),
         })
     }
 
@@ -72,6 +79,7 @@ impl SharedData {
         if let Err(e) = tokio::task::spawn_blocking(move || {
             data.probe.poll(&dir);
             data.probe_feed.poll(&dir);
+            data.rankings.poll(&dir);
             for venue in Venue::ALL {
                 data.snapshot(venue).poll(&dir);
             }
@@ -85,6 +93,7 @@ impl SharedData {
     pub fn error_count(&self, kind: DataKind) -> u64 {
         match kind {
             DataKind::Probe => self.probe.errors() + self.probe_feed.errors(),
+            DataKind::Rankings => self.rankings.errors(),
             DataKind::SnapshotKrx => self.snapshot_krx.errors(),
             DataKind::SnapshotCombined => self.snapshot_combined.errors(),
             DataKind::SnapshotNxt => self.snapshot_nxt.errors(),
@@ -95,6 +104,7 @@ impl SharedData {
     pub fn age_secs(&self, kind: DataKind, now: KstTime) -> Option<i64> {
         match kind {
             DataKind::Probe => self.probe.age_secs(now),
+            DataKind::Rankings => self.rankings.age_secs(now),
             DataKind::SnapshotKrx => self.snapshot_krx.age_secs(now),
             DataKind::SnapshotCombined => self.snapshot_combined.age_secs(now),
             DataKind::SnapshotNxt => self.snapshot_nxt.age_secs(now),

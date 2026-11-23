@@ -5,6 +5,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
 use domain::{KstDate, KstTime};
+use server::shared_data::Broker;
 use serde_json::Value;
 use server::clock::Clock;
 use tokio::time::{Instant, sleep_until};
@@ -44,6 +45,7 @@ pub struct JobLoop {
     pub observation_date: KstDate,
     pub period: Duration,
     pub slice: Slice,
+    pub peers: Vec<Broker>,
     pub options: Value,
 }
 
@@ -59,7 +61,7 @@ impl JobLoop {
             if clock.now() >= closes_at {
                 break;
             }
-            let call = JobCall { observation_date: self.observation_date, slice: self.slice, market: reborrow(&market), shared_dir, key, clock, options: &self.options };
+            let call = JobCall { observation_date: self.observation_date, slice: self.slice, peers: &self.peers, period: self.period, market: reborrow(&market), shared_dir, key, clock, options: &self.options };
             let outcome = self.job.run(call).await;
             stats.runs.fetch_add(1, Ordering::SeqCst);
             *stats.last_error.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = outcome.err().map(|error| error.to_string());
@@ -76,6 +78,6 @@ impl JobLoop {
 fn reborrow<'a>(market: &'a Market<'_>) -> Market<'a> {
     match market {
         Market::Kiwoom(rest) => Market::Kiwoom(rest),
-        Market::Kis => Market::Kis,
+        Market::Kis(rest) => Market::Kis(*rest),
     }
 }

@@ -328,13 +328,13 @@ impl SharedJob for SlowJob {
 #[tokio::test(start_paused = true)]
 async fn a_run_longer_than_the_period_never_overlaps_and_the_overruns_are_counted() {
     let job = Arc::new(SlowJob { running: AtomicUsize::new(0), peak: AtomicUsize::new(0), started_at: Mutex::default(), origin: Instant::now(), takes: Duration::from_secs(25) });
-    let job_loop = JobLoop { job: job.clone(), observation_date: today(), period: Duration::from_secs(10), slice: Slice::WHOLE, options: Value::Null };
+    let job_loop = JobLoop { job: job.clone(), observation_date: today(), period: Duration::from_secs(10), slice: Slice::WHOLE, peers: Vec::new(), options: Value::Null };
     let clock = Clock::fake(at(9, 0, 0));
     let stats = Arc::new(LoopStats::default());
     let key = name_of("rest-01");
     let loop_stats = stats.clone();
     let task = tokio::spawn(async move {
-        job_loop.run(Market::Kis, &key, Path::new("/unused"), &clock, &loop_stats).await;
+        job_loop.run(Market::Kis(None), &key, Path::new("/unused"), &clock, &loop_stats).await;
     });
     sleep(Duration::from_secs(80)).await;
     task.abort();
@@ -345,12 +345,12 @@ async fn a_run_longer_than_the_period_never_overlaps_and_the_overruns_are_counte
     assert_eq!(stats.runs(), 3, "끝난 횟수");
 
     let steady = Arc::new(SlowJob { running: AtomicUsize::new(0), peak: AtomicUsize::new(0), started_at: Mutex::default(), origin: Instant::now(), takes: Duration::from_secs(3) });
-    let steady_loop = JobLoop { job: steady.clone(), observation_date: today(), period: Duration::from_secs(10), slice: Slice::WHOLE, options: Value::Null };
+    let steady_loop = JobLoop { job: steady.clone(), observation_date: today(), period: Duration::from_secs(10), slice: Slice::WHOLE, peers: Vec::new(), options: Value::Null };
     let clock = Clock::fake(at(9, 0, 0));
     let steady_stats = Arc::new(LoopStats::default());
     let (key, loop_stats) = (name_of("rest-01"), steady_stats.clone());
     let task = tokio::spawn(async move {
-        steady_loop.run(Market::Kis, &key, Path::new("/unused"), &clock, &loop_stats).await;
+        steady_loop.run(Market::Kis(None), &key, Path::new("/unused"), &clock, &loop_stats).await;
     });
     sleep(Duration::from_secs(35)).await;
     task.abort();
@@ -379,12 +379,12 @@ async fn a_job_runs_only_inside_its_window_of_the_observation_day() {
         }
     }
     let runs = Arc::new(AtomicUsize::new(0));
-    let job_loop = JobLoop { job: Arc::new(Windowed(runs.clone())), observation_date: today(), period: Duration::from_secs(20), slice: Slice::WHOLE, options: Value::Null };
+    let job_loop = JobLoop { job: Arc::new(Windowed(runs.clone())), observation_date: today(), period: Duration::from_secs(20), slice: Slice::WHOLE, peers: Vec::new(), options: Value::Null };
     let clock = Clock::fake(at(7, 59, 0));
     let stats = LoopStats::default();
     let finished = tokio::spawn({
         let clock = clock.clone();
-        async move { job_loop.run(Market::Kis, &name_of("rest-01"), Path::new("/unused"), &clock, &stats).await }
+        async move { job_loop.run(Market::Kis(None), &name_of("rest-01"), Path::new("/unused"), &clock, &stats).await }
     });
     sleep(Duration::from_secs(30)).await;
     assert_eq!(runs.load(Ordering::SeqCst), 0, "시간대 앞에서는 돌지 않는다");

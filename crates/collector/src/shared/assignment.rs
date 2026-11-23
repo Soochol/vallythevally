@@ -34,7 +34,8 @@ struct AssignmentFile {
 #[serde(deny_unknown_fields)]
 struct JobEntry {
     keys: Vec<String>,
-    period_secs: u64,
+    #[serde(default)]
+    period_secs: Option<u64>,
     #[serde(default)]
     options: Value,
 }
@@ -44,6 +45,8 @@ pub struct AssignedJob {
     pub job: JobName,
     pub slice_index: u32,
     pub slice_count: u32,
+    #[serde(default)]
+    pub peers: Vec<Broker>,
     pub period_secs: u64,
     pub options: Value,
 }
@@ -51,6 +54,7 @@ pub struct AssignedJob {
 #[derive(Debug, Clone, PartialEq)]
 struct JobPlan {
     keys: Vec<KeyName>,
+    brokers: Vec<Broker>,
     period: Duration,
     options: Value,
 }
@@ -122,12 +126,14 @@ impl Assignment {
             if entry.keys.is_empty() {
                 return Err(AssignmentError::NoKeys(job));
             }
-            if entry.period_secs == 0 {
+            let shared_job = job.job();
+            let period_secs = entry.period_secs.unwrap_or_else(|| shared_job.default_period_secs());
+            if period_secs == 0 {
                 return Err(AssignmentError::BadPeriod(job));
             }
-            let shared_job = job.job();
             shared_job.check_options(&entry.options).map_err(|detail| AssignmentError::BadOptions { job, detail })?;
             let mut names: Vec<KeyName> = Vec::new();
+            let mut brokers: Vec<Broker> = Vec::new();
             for name in &entry.keys {
                 let key = rest_key(&format!("일 {job:?}"), name)?;
                 if !shared_job.brokers().contains(&key.broker) {
@@ -137,8 +143,9 @@ impl Assignment {
                     return Err(AssignmentError::DuplicateKey { job, key: key.identity.name.clone() });
                 }
                 names.push(key.identity.name.clone());
+                brokers.push(key.broker);
             }
-            jobs.insert(job, JobPlan { keys: names, period: Duration::from_secs(entry.period_secs), options: entry.options });
+            jobs.insert(job, JobPlan { keys: names, brokers, period: Duration::from_secs(period_secs), options: entry.options });
         }
         Ok(Assignment { jobs, key_options })
     }
@@ -159,11 +166,13 @@ impl Assignment {
         let mut by_key: BTreeMap<KeyName, Vec<AssignedJob>> = BTreeMap::new();
         for (job, plan) in &self.jobs {
             let live: Vec<&KeyName> = plan.keys.iter().filter(|key| !down.contains(*key)).collect();
+            let peers: Vec<Broker> = plan.keys.iter().zip(&plan.brokers).filter(|(key, _)| !down.contains(*key)).map(|(_, broker)| *broker).collect();
             for (index, key) in live.iter().enumerate() {
                 by_key.entry((*key).clone()).or_default().push(AssignedJob {
                     job: *job,
                     slice_index: index as u32,
                     slice_count: live.len() as u32,
+                    peers: peers.clone(),
                     period_secs: plan.period.as_secs(),
                     options: plan.options.clone(),
                 });
