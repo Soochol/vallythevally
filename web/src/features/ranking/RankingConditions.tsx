@@ -5,7 +5,7 @@ import { useVenue } from "../../stores/ui";
 import { SlidersIcon } from "../icons";
 import { Select } from "../menu/Select";
 import { Popover } from "../overlay/Popover";
-import { choiceOn, FEED_CHOICE_TOOLTIP } from "../status/marketFeed";
+import { choiceOn, FEED_CHOICE_TOOLTIP, managedExcludable } from "../status/marketFeed";
 import { Chip } from "../ui/Chip";
 import { RANKING_CATEGORIES, categoryOf, changeRankingKind, changedConditions, conditionsOf } from "./rankingChoices";
 import { RANKING_NAME, type RankingKind } from "./rankingKinds";
@@ -105,9 +105,13 @@ function Conditions({ ranking, onChange }: Props) {
       })}
       {toggles.length > 0 && (
         <div className="rk-toggles">
-          {toggles.map((condition) => condition.type === "toggle" && (
-            <Chip key={condition.id} pressed={condition.on} onPressedChange={(on) => onChange(condition.set(on))}>{condition.label}</Chip>
-          ))}
+          {toggles.map((condition) => {
+            if (condition.type !== "toggle") return null;
+            const refused = condition.id === "excludeManaged" && !managedExcludable(source, ranking.kind);
+            return (
+              <Chip key={condition.id} pressed={condition.on} onPressedChange={(on) => onChange(condition.set(on))} {...(refused ? { disabled: true, title: FEED_CHOICE_TOOLTIP, "data-feed-refused": "" } : {})}>{condition.label}</Chip>
+            );
+          })}
         </div>
       )}
     </div>
