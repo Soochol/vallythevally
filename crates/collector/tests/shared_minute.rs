@@ -502,6 +502,7 @@ async fn a_held_aggregation_leaves_raw_writing_complete() {
     let folder = tempfile::tempdir().unwrap();
     let (data, shared) = (folder.path().join("data"), folder.path().join("shared"));
     let gate = Gate::new();
+    let _release_on_failure = ReleaseOnDrop(gate.clone());
     let held = HeldStore { inner: file_store(&shared, "k1").0, gate: gate.clone() };
     let run = start(&data, "k1", Box::new(held)).await;
     run.push(&stock("005930", "090001", "70000", "10", "KRX"));
@@ -529,6 +530,7 @@ async fn a_full_aggregation_queue_drops_frames_on_the_aggregation_side_and_count
     let folder = tempfile::tempdir().unwrap();
     let shared = folder.path().join("shared");
     let gate = Gate::new();
+    let _release_on_failure = ReleaseOnDrop(gate.clone());
     let held = HeldStore { inner: file_store(&shared, "k1").0, gate: gate.clone() };
     let (feed, worker) = spawn(Box::new(held), DAY_START_MS + 9 * 3_600_000);
     let stats = worker.stats();
