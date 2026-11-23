@@ -365,7 +365,7 @@ impl Bridge {
                 self.send(StreamEvent::Halted).await
             }
             SessionEvent::Rejected { subscription, failure } => {
-                tracing::warn!(?subscription, category = ?failure.category(), "한투 실시간 등록이 거절됐습니다");
+                tracing::warn!(tr_id = ?subscription.as_ref().map(|subscription| subscription.tr_id.as_str()), category = ?failure.category(), "한투 실시간 등록이 거절됐습니다");
                 true
             }
             SessionEvent::Registered { subscription, cipher } => {

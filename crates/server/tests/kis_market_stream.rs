@@ -639,3 +639,35 @@ async fn a_wanted_fill_notice_takes_one_seat_on_the_market_session_and_its_seale
     notices.want(None);
     assert_eq!(rig.stream.seat_rules().limit(), LIMIT, "구독하지 않으면 자리를 돌려준다");
 }
+
+#[derive(Clone, Default)]
+struct CapturedLogs(Arc<Mutex<Vec<u8>>>);
+
+impl std::io::Write for CapturedLogs {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        self.0.lock().unwrap().extend_from_slice(buf);
+        Ok(buf.len())
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_rejected_fill_notice_registration_does_not_log_the_hts_id() {
+    let logs = CapturedLogs::default();
+    let writer = logs.clone();
+    let subscriber = tracing_subscriber::fmt().with_writer(move || writer.clone()).with_ansi(false).with_max_level(tracing::Level::TRACE).finish();
+    let _guard = tracing::subscriber::set_default(subscriber);
+    let (mut rig, _notices) = rig_with(Some("fakehtslog77"));
+    let mut peer = rig.connector.queue_connection();
+    let samsung = stock("005930");
+    rig.stream.set_desired(feeds(&[(samsung, &[StreamKind::Trades])]));
+    let _ = [peer.heard().await, peer.heard().await];
+    assert!(matches!(next_event(&mut rig.events).await, StreamEvent::Live { .. }));
+    peer.say(&serde_json::json!({"header": {"tr_id": "H0STCNI0", "tr_key": "fakehtslog77", "encrypt": "N"}, "body": {"rt_cd": "1", "msg_cd": "OPSP0011", "msg1": "invalid tr_key"}}).to_string());
+    tokio::time::sleep(Duration::from_secs(1)).await;
+    let text = String::from_utf8(logs.0.lock().unwrap().clone()).unwrap();
+    assert!(text.contains("등록이 거절"), "거절 로그가 있어야 한다: {text}");
+    assert!(!text.contains("fakehtslog77"), "HTS ID가 로그에 나왔다: {text}");
+}
