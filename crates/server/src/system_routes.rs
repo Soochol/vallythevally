@@ -357,6 +357,7 @@ async fn put_kis_account(State(st): State<Arc<AppState>>, Path(id): Path<String>
     refuse_mock(&st)?;
     let account = checked_kis_account(Some(&input.account_no), input.hts_id.as_deref())?;
     st.keys.set_kis_account(&id, account).map_err(key_failure)?;
+    st.accounts.forget_verified_of(&id);
     tracing::info!("한투 키의 계좌번호·HTS ID를 바꿨습니다");
     Ok(Json(key_list(&st)))
 }

@@ -112,7 +112,8 @@ impl FakeKis {
                 "output": [
                     {"ord_gno_brno": "91252", "odno": "0000012345", "orgn_odno": "", "ord_dvsn_name": "지정가", "pdno": "005930", "prdt_name": "삼성전자", "rvse_cncl_dvsn_name": "", "ord_qty": "10", "ord_unpr": "71000", "ord_tmd": "093001", "tot_ccld_qty": "3", "psbl_qty": "7", "sll_buy_dvsn_cd": "02", "ord_dvsn_cd": "00", "excg_id_dvsn_cd": "KRX"},
                     {"ord_gno_brno": "91253", "odno": "0000012346", "orgn_odno": "0000012300", "ord_dvsn_name": "지정가", "pdno": "005930", "prdt_name": "삼성전자", "rvse_cncl_dvsn_name": "정정", "ord_qty": "3", "ord_unpr": "72000", "ord_tmd": "093105", "tot_ccld_qty": "0", "psbl_qty": "3", "sll_buy_dvsn_cd": "01", "ord_dvsn_cd": "00", "excg_id_dvsn_cd": "SOR"},
-                    {"ord_gno_brno": "91254", "odno": "0000012347", "orgn_odno": "", "ord_dvsn_name": "지정가", "pdno": "005930", "prdt_name": "삼성전자", "rvse_cncl_dvsn_name": "", "ord_qty": "2", "ord_unpr": "70000", "ord_tmd": "093200", "tot_ccld_qty": "0", "psbl_qty": "2", "sll_buy_dvsn_cd": "02", "ord_dvsn_cd": "00", "excg_id_dvsn_cd": "?"}
+                    {"ord_gno_brno": "91254", "odno": "0000012347", "orgn_odno": "", "ord_dvsn_name": "지정가", "pdno": "005930", "prdt_name": "삼성전자", "rvse_cncl_dvsn_name": "", "ord_qty": "2", "ord_unpr": "70000", "ord_tmd": "093200", "tot_ccld_qty": "0", "psbl_qty": "2", "sll_buy_dvsn_cd": "02", "ord_dvsn_cd": "00", "excg_id_dvsn_cd": "?"},
+                    {"ord_gno_brno": "", "odno": "0000012348", "orgn_odno": "", "ord_dvsn_name": "지정가", "pdno": "005930", "prdt_name": "삼성전자", "rvse_cncl_dvsn_name": "", "ord_qty": "4", "ord_unpr": "70500", "ord_tmd": "093300", "tot_ccld_qty": "0", "psbl_qty": "4", "sll_buy_dvsn_cd": "02", "ord_dvsn_cd": "00", "excg_id_dvsn_cd": "KRX"}
                 ]
             })),
             "TTTC8908R" => fine(json!({"output": {"ord_psbl_cash": "1500000", "nrcvb_buy_amt": "1000000", "nrcvb_buy_qty": "14", "max_buy_amt": "2500000", "max_buy_qty": "35"}})),
@@ -672,4 +673,34 @@ async fn without_an_hts_id_no_fill_notice_subscription_goes_out_and_orders_settl
     tokio::time::sleep(Duration::from_millis(50)).await;
     assert!(!notices.wanted());
     assert_eq!(f.connector.attempts.load(Ordering::SeqCst), 0, "HTS ID가 없으면 실시간 세션을 열지 않고 H0STCNI0도 보내지 않는다");
+}
+
+#[tokio::test]
+async fn changing_the_kis_account_number_ends_reads_on_the_old_reference_with_account_changed() {
+    let f = kis_fixture(Some(KIS_ACCOUNT), None).await;
+    let (_, reference_b) = f.enable_both().await;
+    let (code, balance) = get(&f.app, &format!("/api/trading/balance?account={reference_b}")).await;
+    assert_eq!(code, StatusCode::OK, "{balance}");
+
+    let (code, keys) = call(&f.app, "PUT", &format!("/api/system/kiwoom/keys/{KIS_KEY}/account"), Some(json!({"accountNo": "50099999-01"}))).await;
+    assert_eq!(code, StatusCode::OK, "{keys}");
+    let sent_before = f.kis.sent().len();
+    for uri in [format!("/api/trading/balance?account={reference_b}"), format!("/api/trading/open-orders?account={reference_b}")] {
+        let (code, body) = get(&f.app, &uri).await;
+        assert_eq!((code, body["error"]["reason"].clone()), (StatusCode::CONFLICT, json!("account_changed")), "계좌를 바꾼 직후 옛 참조는 새 계좌 자료를 받지 않는다 {uri}: {body}");
+    }
+    let new_account = f.kis.sent()[sent_before..].iter().filter(|sent| sent.query("CANO") == Some("50099999") || sent.body["CANO"] == "50099999").count();
+    assert_eq!(new_account, 0, "옛 참조로 새 계좌를 조회하지 않는다");
+}
+
+#[tokio::test]
+async fn a_kis_cancel_or_revision_of_a_row_without_a_branch_number_is_refused_as_invalid_order_without_a_request() {
+    let f = kis_fixture(Some(KIS_ACCOUNT), None).await;
+    let (_, reference_b) = f.enable_both().await;
+    let writes_before = f.kis.writes().len();
+    let (code, cancelled) = order_call(&f.app, "/api/trading/commands/cancel", json!({"account": reference_b, "commandId": "cmd-kis-nobranch-c1", "orderNo": "0000012348"})).await;
+    assert_eq!((code, cancelled["state"].clone(), cancelled["reason"].clone()), (StatusCode::OK, json!("rejected"), json!("invalid_order")), "지점번호가 빈 행의 취소는 보내지 않는다: {cancelled}");
+    let (code, modified) = order_call(&f.app, "/api/trading/commands/modify", json!({"account": reference_b, "commandId": "cmd-kis-nobranch-m1", "orderNo": "0000012348", "price": 70600})).await;
+    assert_eq!((code, modified["state"].clone(), modified["reason"].clone()), (StatusCode::OK, json!("rejected"), json!("invalid_order")), "지점번호가 빈 행의 정정은 보내지 않는다: {modified}");
+    assert_eq!(f.kis.writes().len(), writes_before, "한투 쓰기가 나가지 않는다");
 }

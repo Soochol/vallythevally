@@ -221,6 +221,14 @@ pub(super) fn account_ref_for(broker: Broker, salt: &str, number: &str) -> Strin
     hex(&hasher.finalize())[..REF_HEX_CHARS].to_owned()
 }
 
+fn desk_is_verified(desk: &KisAccountNumber, verified: &Verified) -> bool {
+    desk.digits().expose() == verified.number.expose()
+}
+
+fn desk_has_ref(desk: &KisAccountNumber, salt: &str, account_ref: &str) -> bool {
+    account_ref_for(Broker::Kis, salt, desk.digits().expose()) == account_ref
+}
+
 fn tail_of(number: &str) -> String {
     number[USER_VISIBLE_DIGITS - TAIL_DIGITS..USER_VISIBLE_DIGITS].to_owned()
 }
@@ -301,6 +309,25 @@ impl Trading {
 
     pub(super) fn kis_desk(&self) -> Result<KisDesk, TradingError> {
         self.lanes.kis_desk()
+    }
+
+    pub(super) fn kis_desk_of(&self, verified: &Verified) -> Result<KisDesk, TradingError> {
+        let desk = self.lanes.kis_desk()?;
+        if !desk_is_verified(&desk.account, verified) {
+            self.forget_verified();
+            return Err(TradingError::AccountChanged);
+        }
+        Ok(desk)
+    }
+
+    pub(super) fn kis_desk_for_ref(&self, account_ref: &str) -> Result<KisDesk, TradingError> {
+        let desk = self.lanes.kis_desk()?;
+        let salt = self.enabled_record()?.salt;
+        if !desk_has_ref(&desk.account, &salt, account_ref) {
+            self.forget_verified();
+            return Err(TradingError::AccountChanged);
+        }
+        Ok(desk)
     }
 
     pub fn subscribe_changes(&self) -> broadcast::Receiver<AccountChanged> {
@@ -539,7 +566,7 @@ impl Trading {
     pub(super) async fn balance_at(&self, priority: Priority) -> Result<api::TradingBalance, TradingError> {
         let account = self.verified(priority).await?;
         if self.broker() == Broker::Kis {
-            return self.kis_balance(&self.kis_desk()?, &account, priority).await;
+            return self.kis_balance(&self.kis_desk_of(&account)?, &account, priority).await;
         }
         let pages = self.pages(&Balance::individual_krx(), priority).await?;
         let first = pages.first().ok_or(TradingError::Unreadable("빈 응답"))?;
@@ -578,7 +605,7 @@ impl Trading {
         let ticket = self.recent_open.ticket();
         let entries = match self.broker() {
             Broker::Kiwoom => self.kiwoom_open_entries(&account, priority).await?,
-            Broker::Kis => self.kis_open_entries(&self.kis_desk()?, priority).await?,
+            Broker::Kis => self.kis_open_entries(&self.kis_desk_of(&account)?, priority).await?,
         };
         self.recent_open.keep(ticket, &account.account_ref, self.clock.now().unix(), &entries);
         Ok((account.account_ref, entries))
@@ -621,7 +648,7 @@ impl Trading {
     pub(super) async fn orderable_at(&self, code: StockCode, order_side: OrderSide, order_price: u64, priority: Priority) -> Result<api::TradingOrderable, TradingError> {
         let account = self.verified(priority).await?;
         if self.broker() == Broker::Kis {
-            return self.kis_orderable(&self.kis_desk()?, &account, code, order_side, order_price, priority).await;
+            return self.kis_orderable(&self.kis_desk_of(&account)?, &account, code, order_side, order_price, priority).await;
         }
         let reply = self.read(&Orderable::new(code, order_price), None, priority).await?.body;
         let policy = self.enabled_record()?.margin_policy;
@@ -649,7 +676,7 @@ impl Trading {
         let account = self.verified(priority).await?;
         let day = self.clock.now().kst_date();
         if self.broker() == Broker::Kis {
-            let executions = self.kis_executions(&self.kis_desk()?, day, priority).await?;
+            let executions = self.kis_executions(&self.kis_desk_of(&account)?, day, priority).await?;
             return Ok(api::TradingExecutions { account_ref: account.account_ref, day: api::KstDate(day), executions });
         }
         let mut executions = Vec::new();
@@ -841,7 +868,35 @@ fn venue(labels: &[&str]) -> Result<Venue, TradingError> {
 
 #[cfg(test)]
 mod tests {
-    use super::centi;
+    use super::{Verified, account_ref_for, centi, desk_has_ref, desk_is_verified};
+    use crate::api::Broker;
+    use crate::config::Secret;
+    use crate::trading::kis_account::KisAccountNumber;
+
+    fn account(text: &str) -> KisAccountNumber {
+        KisAccountNumber::parse(text).unwrap()
+    }
+
+    fn verified_of(text: &str) -> Verified {
+        let number = account(text).digits();
+        Verified { account_ref: account_ref_for(Broker::Kis, "salt", number.expose()), number, at: 0 }
+    }
+
+    #[test]
+    fn a_desk_for_another_account_than_the_verified_one_is_refused() {
+        let verified = verified_of("50012356-01");
+        assert!(desk_is_verified(&account("50012356-01"), &verified));
+        assert!(!desk_is_verified(&account("50099999-01"), &verified));
+        assert!(!desk_is_verified(&account("50012356-02"), &verified));
+    }
+
+    #[test]
+    fn a_desk_whose_account_no_longer_matches_the_command_reference_is_refused() {
+        let reference = account_ref_for(Broker::Kis, "salt", Secret::new("5001235601".to_owned()).expose());
+        assert!(desk_has_ref(&account("50012356-01"), "salt", &reference));
+        assert!(!desk_has_ref(&account("50099999-01"), "salt", &reference));
+        assert!(!desk_has_ref(&account("50012356-01"), "other-salt", &reference));
+    }
 
     #[test]
     fn centi_reads_ascii_decimals_and_nothing_else() {

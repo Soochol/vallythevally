@@ -275,6 +275,9 @@ pub(super) struct KisTarget {
 impl KisTarget {
     pub(super) fn of(origin: Option<&KisOrigin>, original: &OrderNumber, remaining: NonZeroU64) -> Option<KisTarget> {
         let origin = origin?;
+        if origin.branch.trim().is_empty() {
+            return None;
+        }
         Some(KisTarget { branch: origin.branch.clone(), route: origin.route?, original: original.clone(), remaining })
     }
 }

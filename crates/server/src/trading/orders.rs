@@ -326,12 +326,18 @@ impl Trading {
         let orders_on = || self.open.load(std::sync::atomic::Ordering::SeqCst);
         let settled = match outbound {
             Outbound::Kis(outbound) => {
-                let (result, transmitted) = match self.kis_desk() {
-                    Ok(desk) => self.kis_send_once(&desk, &outbound).await,
-                    Err(_) => (Err(crate::kis::rest::KisError::NotAdmitted), false),
-                };
-                let settled = settle_kis(result, transmitted, orders_on());
-                Settled { state: settled.state, reason: settled.reason, order_no: settled.order_no }
+                match self.kis_desk_for_ref(account_ref) {
+                    Ok(desk) => {
+                        let (result, transmitted) = self.kis_send_once(&desk, &outbound).await;
+                        let settled = settle_kis(result, transmitted, orders_on());
+                        Settled { state: settled.state, reason: settled.reason, order_no: settled.order_no }
+                    }
+                    Err(TradingError::AccountChanged) => Settled { state: OrderCommandState::Rejected, reason: Some(OrderRejectReason::AccountChanged), order_no: None },
+                    Err(_) => {
+                        let settled = settle_kis(Err(crate::kis::rest::KisError::NotAdmitted), false, orders_on());
+                        Settled { state: settled.state, reason: settled.reason, order_no: settled.order_no }
+                    }
+                }
             }
             kiwoom => {
                 let (result, transmitted) = self.send_once(kiwoom).await;
