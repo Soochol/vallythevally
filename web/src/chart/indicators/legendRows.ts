@@ -4,7 +4,7 @@ import { iconMarkup, type MarkupIcon } from "../../features/icons";
 import { indicatorErrorText, type IndicatorRow, type PriceLegendValues } from "./layer";
 import type { LegendField, LegendProjection } from "../legendProjection";
 
-export type IndicatorCommand = "edit" | "toggle" | "remove" | "up" | "down" | "refresh" | "collapse";
+export type IndicatorCommand = "edit" | "toggle" | "remove" | "up" | "down" | "collapse";
 
 const ROW =
   "group pointer-events-auto flex w-max max-w-full items-center gap-1.5 whitespace-nowrap rounded-s pr-1 text-s " +
@@ -29,7 +29,6 @@ interface RowEls {
   select: HTMLButtonElement;
   reportOptions: { label: string; text: string }[];
   dispose(): void;
-  refresh: HTMLButtonElement;
   reports: NonNullable<IndicatorRow["detail"]>["reports"] | null;
 }
 
@@ -178,15 +177,10 @@ export class IndicatorLegend {
     select.dataset.chartControl = "";
     select.setAttribute("aria-label", "보고기간 자료");
     const text = el("p", "whitespace-pre-wrap text-xs");
-    const refresh = el("button", "btn-primary mt-2", "전체 재무자료 업데이트");
-    refresh.type = "button";
-    refresh.dataset.chartControl = "";
-    refresh.title = "전체 재무자료 업데이트";
-    if (interactive) refresh.addEventListener("click", () => this.onCommand(id, "refresh", refresh));
-    box.append(select, text, refresh);
+    box.append(select, text);
     detail.append(summary, box);
     root.append(swatch, name, detail, values, badge, tools);
-    const row: RowEls = { root, swatch, name, collapse, values, badge, toggle, remove, up, down, key: null, detail, summary, text, select, refresh, reports: null, reportOptions: [], dispose: () => {} };
+    const row: RowEls = { root, swatch, name, collapse, values, badge, toggle, remove, up, down, key: null, detail, summary, text, select, reports: null, reportOptions: [], dispose: () => {} };
     const disposeSelect = interactive ? domSelect(select, () => row.reportOptions.map((option, i) => ({ label: option.label, value: String(i) })), (value) => {
       select.dataset.value = value;
       const option = row.reportOptions[Number(value)];

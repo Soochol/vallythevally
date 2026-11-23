@@ -15,7 +15,6 @@ const ENTRIES: Record<"general" | "data" | "about", (s: SystemSettings) => reado
     ["로그 수준", s.logFilter],
     ["접속 대상", targetText(s.kiwoomTarget)],
     ["서버를 켤 때 스크리너 갱신", onOff(s.screenerUpdateOnStart)],
-    ["재무자료 자동 수집", onOff(s.financialAutomatic)],
   ],
   data: (s) => [
     ["차트 데이터베이스", s.dbPath],
@@ -25,7 +24,6 @@ const ENTRIES: Record<"general" | "data" | "about", (s: SystemSettings) => reado
     ["키 파일", s.keyPath],
     ["잠금 파일", s.lockPath],
     ["화면 파일 폴더", s.staticDir],
-    ["OpenDART 키", s.opendartKeyPresent ? "있음" : "없음"],
   ],
   about: (s) => [
     ["서버 버전", s.serverVersion],

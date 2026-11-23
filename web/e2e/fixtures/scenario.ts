@@ -10,7 +10,6 @@ import type { ConnectionStatus } from "../../src/api/generated/ConnectionStatus"
 import type { FinancialsPage } from "../../src/api/generated/FinancialsPage";
 import type { HeatmapThemes } from "../../src/api/generated/HeatmapThemes";
 import type { JumpBarsPage } from "../../src/api/generated/JumpBarsPage";
-import type { FinancialUpdatePage } from "../../src/api/generated/FinancialUpdatePage";
 import type { AccountStatus } from "../../src/api/generated/AccountStatus";
 import type { KiwoomKey } from "../../src/api/generated/KiwoomKey";
 import type { KiwoomKeyList } from "../../src/api/generated/KiwoomKeyList";
@@ -186,7 +185,7 @@ export const SYNCED: SyncStatus = { state: "running", lastSuccessAt: 1_762_650_0
 
 export const DEFAULT_SYSTEM_SETTINGS: SystemSettings = {
   environment: "real", bind: "127.0.0.1:8080", logFilter: "info", staticDir: "web/dist", dbPath: "data/vally.db", screenerDbPath: "data/screener.db", financialDbPath: "data/financial.db",
-  screenerUpdateOnStart: true, financialAutomatic: false, opendartKeyPresent: true, tokenPath: "state/kiwoom-token.json", keyPath: "state/kiwoom-key.json", lockPath: "state/vally.lock",
+  screenerUpdateOnStart: true, tokenPath: "state/kiwoom-token.json", keyPath: "state/kiwoom-key.json", lockPath: "state/vally.lock",
   kiwoomTarget: { kind: "kiwoom", host: "api.kiwoom.com" }, serverVersion: "0.1.0-test",
   accountServerUrl: null, accountStatePath: "state/account.json",
 };
@@ -424,7 +423,6 @@ export class Scenario {
     if (marketOverview) return marketOverview;
     if (path === "/api/rankings" && method === "POST") return { body: { rows: [], pages: 1, end: true, limited: false, hidden: 0, fetchedAt: Math.floor(this.now / 1000), source: "kiwoom" } satisfies RankingPage };
     if (path === "/api/screener/status" && method === "GET") return { body: { lastDay: null, needDay: "2026-11-06", todayAvailable: false, fullHistory: { done: 0, total: 0 }, unconfirmed: 0, update: null } satisfies ScreenerStatus };
-    if (path === "/api/financial-update" && method === "GET") return { body: { id: 0, status: "not_configured", phase: "planning", stopReason: null, nextCheckAt: null, canResume: false, automatic: false, latestCheckPending: false, historyCompletedCompanies: 0, historyFailedCompanies: 0, recentFailedCompanies: 0, historyComplete: false, fromYear: 2015, throughYear: 2026, totalSymbols: 0, processedSymbols: 0, unsupportedSymbols: 0, unverifiedSymbols: 0, unverifiedDividends: 0, totalCompanies: 0, completedCompanies: 0, failedCompanies: 0, startedAt: null, lastCheckedAt: null, failure: null, failures: [] } satisfies FinancialUpdatePage };
     if (/\/financials$/.test(path) && method === "GET") return { body: { symbol: decodeURIComponent(path.split("/")[3] ?? ""), period: url.searchParams.get("period") === "Q" ? "Q" : "Y", status: "not_collected", reason: null, failure: null, corpCode: null, fiscalMonth: null, shareClass: null, shareClassReason: null, lastCheckedAt: null, lastAttemptAt: null, disclosureFailure: null, refreshVersion: 0, disclosureVersion: 0, latestCorrections: false, progress: { total: 0, completed: 0, failed: 0, pending: 0 }, series: [] } satisfies FinancialsPage };
     const description = `Unconfigured API fixture: ${method} ${url.pathname}${url.search}`;
     this.failures.push(description);

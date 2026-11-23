@@ -846,8 +846,6 @@ pub struct SystemSettings {
     pub screener_db_path: String,
     pub financial_db_path: String,
     pub screener_update_on_start: bool,
-    pub financial_automatic: bool,
-    pub opendart_key_present: bool,
     pub token_path: String,
     pub key_path: String,
     pub lock_path: String,

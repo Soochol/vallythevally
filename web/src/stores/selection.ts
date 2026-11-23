@@ -26,7 +26,6 @@ export type Dialog =
   | { kind: "search"; purpose: SearchPurpose }
   | { kind: "indicatorCommand"; cellId: WindowId; mode: IndicatorCommandMode; indicatorId: string | null }
   | { kind: "screen"; window: WindowId | null }
-  | { kind: "financial-update" }
   | { kind: "system-settings"; menu: SystemMenuId | null };
 export type InspectorRequest = { cellId: WindowId; mode: IndicatorCommandMode; indicatorId: string | null };
 export type PhoneTab = "chart" | "watch" | "screener";
@@ -47,7 +46,6 @@ interface SelectionState {
   openIndicatorInspector(cellId: WindowId, mode: IndicatorCommandMode, indicatorId: string | null): void;
   takeInspectorRequest(): InspectorRequest | null;
   openScreenEditor(window: WindowId | null): void;
-  openFinancialUpdate(): void;
   openSystemSettings(menu: SystemMenuId | null): void;
   closeDialog(): void;
   setPhoneTab(tab: PhoneTab): void;
@@ -86,7 +84,6 @@ export const useSelectionStore = create<SelectionState>()((set, get) => ({
     return request;
   },
   openScreenEditor: (window) => set({ dialog: { kind: "screen", window } }),
-  openFinancialUpdate: () => set({ dialog: { kind: "financial-update" } }),
   openSystemSettings: (menu) => set({ dialog: { kind: "system-settings", menu } }),
   closeDialog: () => set({ dialog: null }),
   setPhoneTab: (phoneTab) => set({ phoneTab }),

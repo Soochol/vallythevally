@@ -479,7 +479,7 @@ curl -sS --max-time 5 http://<서버 PC의 Tailscale IP>:8080/api/screener/statu
    systemctl --user restart vally-server.service
    ```
 
-   `stat`은 600이어야 한다. `~/financials-before`는 지운다. `financials.db.before-collector`는 전환이 끝났다고 확인한 뒤에 지운다.
+   `fin-server-read`를 배포한 서버는 `OPENDART_API_KEY`·`VALLY_FINANCIAL_AUTOMATIC`·`VALLY_DART_BASE_URL`·`VALLY_KIND_BASE_URL`을 읽지 않는다. 남아 있으면 시작은 하고 로그에 "재무 수집은 collector financials가 합니다" 경고 한 줄을 남긴다(값은 남기지 않는다). 키 줄과 드롭인을 지우면 경고가 사라진다. `stat`은 600이어야 한다. `~/financials-before`는 지운다. `financials.db.before-collector`는 전환이 끝났다고 확인한 뒤에 지운다.
 
 ### 재무 수집 전환 되돌리기
 

@@ -1,5 +1,7 @@
 # 스크리너는 수집 데몬의 KRX 시세 스냅샷을 읽어 오늘 요약으로 쓰고 같은 조건의 결과를 다시 쓴다
 
+> (2026-11-23 개정) 스냅샷을 쓰는 서버도 달력은 시세 공급원으로 받는다. 한투만 있으면 코스피 지수 일봉 `FHKUP03500100`이다. [ADR 0047](0047-screener-today-summary-falls-back-to-kis-multi-price.md).
+
 [ADR 0014](0014-screener-includes-current-krx-day.md)는 스크리너가 실행할 때마다 전 종목 오늘 KRX 시세를 키움에서 새로 받아 오늘 봉으로 쓰기로 했다. 사용자가 늘면 실행 수만큼 키움 호출이 늘고, 호출 한 번이 전 종목(약 40번의 `ka10095`)이다. [ADR 0043](0043-collector-makes-shared-data-and-the-server-only-reads-it.md)은 공용 자료를 감독 데몬이 만들고 서버는 읽기만 하게 했고, 데몬은 KRX 시세 스냅샷을 30초마다 쓴다. 이 ADR은 스크리너의 오늘 요약을 그 스냅샷으로 바꾼다. 플랜은 [`docs/plans/collector-shared-data.md`](../plans/collector-shared-data.md)(확정 2, 결정 C2)이다. 사용자는 성능을 가장 중요하게 본다.
 
 ## 결정

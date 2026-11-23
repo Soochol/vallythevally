@@ -1,7 +1,6 @@
 import { useRef, useState } from "react";
 import { ChartSettingsDialog } from "../chart-settings/ChartSettingsDialog";
 import { type ChartSettingsMenuId, FIRST_CHART_SETTINGS_MENU } from "../chart-settings/menus";
-import { FinancialUpdateButton } from "../financial-update/FinancialUpdateButton";
 import { BrandLink } from "../page-rail/BrandLink";
 import { MinuteMenu } from "./MinuteMenu";
 import { MockBadge } from "./MockBadge";
@@ -81,7 +80,6 @@ export function Topbar() {
         <ArrangeMenu />
         <AddWindowMenu />
         <span className="tb-sep" />
-        <FinancialUpdateButton />
         <SystemButton />
       </div>
     </header>

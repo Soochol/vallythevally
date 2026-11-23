@@ -5,7 +5,7 @@ use domain::{KstTime, SymbolInfo, SymbolKind};
 use serde::{Deserialize, Serialize};
 
 use crate::api::{FinancialUpdateFailure, FinancialUpdatePage, FinancialUpdateStatus as Status, FinancialUpdatePhase as Phase, UnixSeconds};
-use super::{Financials, CollectionScope, company_records::ReadResolution, control::JobContext, model::{Failure, Interrupt, Security}, schedule::due_check};
+use super::{Financials, CollectionScope, company_records::ReadResolution, control::JobContext, model::{Failure, Interrupt, Security}, schedule::due_check, store::Store};
 
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(tag = "status", content = "value", rename_all = "snake_case")]
@@ -224,9 +224,8 @@ impl Financials {
     }
 
 
-    pub(super) async fn read_resolution(&self, stock: &str) -> ReadResolution {
-        let update = match self.store() { Ok(store) => store.job().await, Err(error) => Err(error) };
-        match update {
+    pub(super) async fn read_resolution(&self, store: &Store, stock: &str) -> ReadResolution {
+        match store.job().await {
             Ok(Some(update)) => match update.targets.iter().find(|target| target.code == stock).map(|target| &target.resolution) {
                 Some(Resolution::Unverified) => ReadResolution::Unverified,
                 Some(Resolution::Failed(error)) => ReadResolution::Failed(*error),

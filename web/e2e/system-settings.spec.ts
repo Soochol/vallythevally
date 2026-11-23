@@ -47,7 +47,6 @@ test("방향키와 Home·End로 메뉴를 옮기고 준비 중 메뉴는 고를 
   await openDesktop(page);
   await page.getByRole("button", { name: "시스템 설정", exact: true }).click();
   await expect(menu(page, "알림 · 텔레그램")).toBeDisabled();
-  await expect(menu(page, "재무자료 · DART")).toBeDisabled();
   await expect(menu(page, "알림 · 텔레그램")).toContainText("준비 중");
   await expect(menu(page, "증권사 · 계좌")).toBeFocused();
   await page.keyboard.press("ArrowDown");
@@ -73,7 +72,8 @@ test("일반·데이터·정보는 서버 설정 값을 읽기 전용으로 보�
   await menu(page, "데이터 · 저장소").click();
   await expect(panel).toContainText(DEFAULT_SYSTEM_SETTINGS.dbPath);
   await expect(panel).toContainText(DEFAULT_SYSTEM_SETTINGS.keyPath);
-  await expect(panel).toContainText("OpenDART 키");
+  await expect(panel).toContainText(DEFAULT_SYSTEM_SETTINGS.financialDbPath);
+  await expect(panel).not.toContainText("OpenDART");
   await menu(page, "정보").click();
   await expect(panel).toContainText(DEFAULT_SYSTEM_SETTINGS.serverVersion);
   await expect(panel.locator("input, textarea, select")).toHaveCount(0);

@@ -83,7 +83,7 @@ impl Server {
             let instance = server::instance::InstanceLock::acquire(&lock).unwrap();
             let millis = |key: &str| std::time::Duration::from_millis(value(key).map_or(1, |millis| millis.parse().unwrap()));
             let stream = if value("VALLY_KIWOOM_WS_URL").is_some() { server::app::StreamSource::Connect } else { server::app::StreamSource::Detached(stream_events) };
-            let adapters = server::app::Adapters { kiwoom: transport.transport(), kis, kis_feed, stream, kiwoom_spacing: Some(millis("KIWOOM_SEND_SPACING_MILLIS")), dart_spacing: Some(millis("DART_SPACING_MILLIS")) };
+            let adapters = server::app::Adapters { kiwoom: transport.transport(), kis, kis_feed, stream, kiwoom_spacing: Some(millis("KIWOOM_SEND_SPACING_MILLIS")) };
             let started = server::app::start(&config, &instance, adapters).await.unwrap();
             let state = started.state.clone();
             let mut background = tokio::task::JoinSet::new();
@@ -96,7 +96,6 @@ impl Server {
                 state.link.subscribe().wait_for(|state| matches!(state, LinkState::NoKey | LinkState::Connected | LinkState::Failed(_) | LinkState::Connecting(ConnectStep::IssueInterval(_) | ConnectStep::Symbols | ConnectStep::Realtime))).await.unwrap();
             }
             address.send_replace(Some(started.listener.local_addr().unwrap()));
-            let automatic = started.automatic.map(AbortOnDrop);
             if let Some(public) = started.public {
                 let router = public.router();
                 let public_listener = public.listener;
@@ -105,7 +104,6 @@ impl Server {
             let listener = started.listener;
             let app = started.router;
             axum::serve(listener, app).await.unwrap();
-            drop(automatic);
                     } => {},
                 }
             });
@@ -167,7 +165,7 @@ impl Drop for Server {
     }
 }
 
-const HARNESS_ONLY: [&str; 5] = ["KIWOOM_SEND_SPACING_MILLIS", "DART_SPACING_MILLIS", "SERVER_RUNTIME_THREADS", "SERVER_BIND_IP", "VALLY_KIWOOM_CONNECT"];
+const HARNESS_ONLY: [&str; 4] = ["KIWOOM_SEND_SPACING_MILLIS", "SERVER_RUNTIME_THREADS", "SERVER_BIND_IP", "VALLY_KIWOOM_CONNECT"];
 
 fn harness_config(overrides: &std::collections::HashMap<String, String>, lock: &Path, static_dir: &Path) -> server::config::Config {
     let parent = lock.parent().unwrap();
@@ -187,18 +185,12 @@ fn harness_config(overrides: &std::collections::HashMap<String, String>, lock: &
         ("VALLY_KIWOOM_WS_URL", "ws://127.0.0.1:1".into()),
         ("VALLY_PUBLIC_IP_URL", "http://127.0.0.1:1".into()),
         ("VALLY_SCREENER_UPDATE_ON_START", "off".into()),
-        ("VALLY_FINANCIAL_AUTOMATIC", "off".into()),
     ].into_iter().map(|(key, value)| (key.to_owned(), value)).collect();
     let (key_name, secret_name) = if value("VALLY_KIWOOM_ENV") == Some("mock") { ("VALLY_KIWOOM_MOCK_APP_KEY", "VALLY_KIWOOM_MOCK_APP_SECRET") } else { ("VALLY_KIWOOM_APP_KEY", "VALLY_KIWOOM_APP_SECRET") };
     vars.insert(key_name.into(), APP_KEY.into());
     vars.insert(secret_name.into(), APP_SECRET.into());
     vars.extend(overrides.iter().filter(|(key, _)| !HARNESS_ONLY.contains(&key.as_str())).map(|(key, value)| (key.clone(), value.clone())));
     if value(key_name) == Some("") { vars.insert(secret_name.into(), String::new()); }
-    if value("OPENDART_API_KEY").is_some_and(|key| !key.is_empty()) {
-        assert!(value("VALLY_DART_BASE_URL").is_some() && value("VALLY_KIND_BASE_URL").is_some(), "DART tests require loopback URL");
-    }
     server::config::Config::from_values(vars).unwrap().0
 }
 
-struct AbortOnDrop(tokio::task::JoinHandle<()>);
-impl Drop for AbortOnDrop { fn drop(&mut self) { self.0.abort(); } }

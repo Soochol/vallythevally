@@ -6,6 +6,8 @@
 
 ## 현재 동작
 
+2026-11-23: 재무 수집과 업데이트 조작은 수집기로 옮겼다([플랜](plans/financials-collector.md), [ADR 0046](adr/0046-financials-are-collected-by-the-collector-and-the-server-only-reads-them.md)). 서버는 저장된 재무자료를 읽기만 한다. 아래 합의와 동작 가운데 업데이트 창·`재무자료` 버튼·차트의 수동 갱신·서버의 업데이트 경로(`/api/financial-update*`, 조회 경로의 `POST`)는 걷었다. 일시정지·재개·자동 확인·증분 규칙은 `collector financials`가 그대로 따른다.
+
 - DART 재무 원자료는 사용자 자료 DB와 별개인 SQLite `financials.db`에 회사별로 저장한다.
 - 재무지표를 처음 사용하는 종목을 수집하고, 이후 접근 시 일일 공시 확인이나 미완료 작업을 시작한다. 차트에는 종목별 수동 갱신 기능이 있다.
 - 현재 수동 갱신은 공시 목록이 그대로여도 해당 회사의 전체 보고서·배당 요청을 다시 받는다. 일일 확인에서 공시 목록이 바뀌어도 회사 전체를 다시 받는다.
