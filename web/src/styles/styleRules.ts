@@ -6,7 +6,7 @@ export const ALLOWED_FONT_WEIGHTS: readonly number[] = [400, 500, 600, 700];
 export const ALLOWED_FONT_SIZES_PX: readonly number[] = [11, 12, 13, 14, 17, 20, 28];
 
 const CUSTOM_PROPERTY_USE = /var\(\s*(--[\w-]+)(?![\w-]|\$\{)/g;
-const CSS_DECLARATION = /(--[\w-]+)\s*:/g;
+const CSS_DECLARATION = /(--[\w-]+)\s*:(?!\s*var\(\s*\1\s*\))/g;
 const SCRIPT_DECLARATION = /["'`](--[\w-]+)["'`](?:\s+as\s+\w+\s*\])?\s*:|setProperty\(\s*["'`](--[\w-]+)["'`]/g;
 const BLOCK_COMMENT = /\/\*[\s\S]*?\*\//g;
 
@@ -24,8 +24,7 @@ export function findUndefinedTokens(files: readonly SourceFile[], tokensPath: st
   const locals = new Set<string>();
   for (const file of files) if (file.path !== tokensPath) for (const name of localDeclarations(file)) locals.add(name);
   const violations: RuleViolation[] = [];
-  for (const file of files) {
-    if (file.path === tokensPath) continue;
+  for (const file of [...files.filter((candidate) => candidate.path !== tokensPath), { path: tokensPath, text: tokensText }]) {
     const reported = new Set<string>();
     for (const match of file.text.replace(BLOCK_COMMENT, "").matchAll(CUSTOM_PROPERTY_USE)) {
       const name = match[1]!;

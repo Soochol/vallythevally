@@ -44,6 +44,20 @@ describe("정의되지 않은 토큰 규칙", () => {
     expect(findUndefinedTokens([{ path: "/src/features/a/colors.ts", text }], TOKENS_PATH, TOKENS_TEXT)).toEqual([]);
   });
 
+  it("@theme의 자기 참조 선언은 정의로 치지 않아 tokens.css에서 지우면 실패한다", () => {
+    const files: SourceFile[] = [
+      { path: "/src/styles/index.css", text: "@theme inline { --font-sans: var(--font-sans); }" },
+      { path: "/src/styles/ui.css", text: "body { font-family: var(--font-sans); }" },
+    ];
+    expect(findUndefinedTokens(files, TOKENS_PATH, TOKENS_TEXT).map((violation) => `${violation.path} ${violation.detail}`)).toEqual(["/src/styles/index.css --font-sans", "/src/styles/ui.css --font-sans"]);
+    expect(findUndefinedTokens(files, TOKENS_PATH, `${TOKENS_TEXT} :root { --font-sans: serif; }`)).toEqual([]);
+  });
+
+  it("tokens.css 안의 var()도 정의돼 있어야 한다", () => {
+    const violations = findUndefinedTokens([], TOKENS_PATH, ":root { --mono: var(--font-sanz); --a: 1px; --b: var(--a); }");
+    expect(violations).toEqual([{ path: TOKENS_PATH, rule: "정의되지 않은 토큰", detail: "--font-sanz" }]);
+  });
+
   it("주석 안의 var()는 세지 않는다", () => {
     const text = "/* var(--nope) */ .a { color: var(--text); }";
     expect(findUndefinedTokens([{ path: "/src/features/a/a.css", text }], TOKENS_PATH, TOKENS_TEXT)).toEqual([]);
