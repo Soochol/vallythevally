@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { OrdersAccount } from "../../api/generated/OrdersAccount";
 import type { OrdersStatus } from "../../api/generated/OrdersStatus";
-import { accountNumberOf, canConfirmEnable, enableTail, enableWarning, mergeOrdersStatus, orderCanTurnOff, orderCanTurnOn, orderInUse, orderMarkOf, orderStateSentence } from "./orderUse";
+import { accountNumberOf, canConfirmEnable, enableTail, enableWarning, mergeOrdersStatus, orderCanTurnOff, orderCanTurnOn, orderInUse, orderMarkOf, orderStateSentence, orderSwitchOn } from "./orderUse";
 
 const row = (patch: Partial<OrdersAccount> = {}): OrdersAccount => ({ keyId: "k", broker: "kiwoom", alias: "k", market: false, state: "on", accountRef: "r", accountTail: "12", ...patch });
 const status = (patch: Partial<OrdersStatus> = {}): OrdersStatus => ({ state: "on", accountRef: "ref-a", accountTail: "01", message: "켜짐", accounts: [row({ keyId: "a", market: true })], ...patch });
@@ -22,6 +22,9 @@ describe("계좌 줄의 주문 사용 표시", () => {
     expect([orderCanTurnOn("on"), orderCanTurnOff("on")]).toEqual([false, true]);
     expect([orderCanTurnOn("account_changed"), orderCanTurnOff("account_changed")]).toEqual([true, true]);
     expect(orderCanTurnOn("file_unusable")).toBe(false);
+  });
+  it("주문 사용 스위치는 켜짐일 때만 켜짐으로 보이고 계좌 바뀜은 꺼짐으로 보인다", () => {
+    expect([orderSwitchOn("on"), orderSwitchOn("account_changed"), orderSwitchOn("off"), orderSwitchOn("file_unusable")]).toEqual([true, false, false, false]);
   });
   it("지우기 문구를 덧붙일 사용 중 여부는 켜짐과 계좌 바뀜이다", () => {
     expect(orderInUse(row({ state: "on" }))).toBe(true);

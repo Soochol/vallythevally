@@ -7,7 +7,7 @@ import { checkOrdersAccount, ORDERS_QUERY_KEY, switchOrders } from "../../api/sy
 import { WarningIcon } from "../icons";
 import { digitsOnly, kisCanEnableOrders, kisListingOf, NO_ACCOUNT_ORDER_NOTE } from "./kisAccount";
 import { FormActions } from "./KiwoomKeyFields";
-import { accountNumberOf, canConfirmEnable, enableTail, enableWarning, mergeOrdersStatus, orderCanTurnOff, orderCanTurnOn, orderStateSentence } from "./orderUse";
+import { accountNumberOf, canConfirmEnable, enableTail, enableWarning, mergeOrdersStatus, orderCanTurnOff, orderCanTurnOn, orderStateSentence, orderSwitchOn } from "./orderUse";
 import { useCommand } from "./useCommand";
 
 export function KiwoomRowOrders({ entry, order, mock }: { entry: KiwoomKey; order: OrdersAccount; mock: boolean }) {
@@ -38,9 +38,10 @@ export function KiwoomRowOrders({ entry, order, mock }: { entry: KiwoomKey; orde
     if (saved) closeConfirmation();
   };
   const startEnabling = () => void command.run(async () => setCheckedTail((await checkOrdersAccount(keyId)).accountTail));
-  const checked = orderCanTurnOff(order.state);
+  const checked = orderSwitchOn(order.state);
+  const inUse = orderCanTurnOff(order.state);
   const settable = checked || orderCanTurnOn(order.state);
-  const reenable = checked && orderCanTurnOn(order.state);
+  const offOnly = inUse && !checked;
   const confirming = checkedTail !== null;
   const stateId = `orders-state-${keyId}`;
 
@@ -52,8 +53,8 @@ export function KiwoomRowOrders({ entry, order, mock }: { entry: KiwoomKey; orde
         <span aria-hidden="true" className="ui-switch-track"><span /></span>
         <span className="text-m">주문 사용</span>
       </button>
-      <p id={stateId} className={`text-s ${checked && !mock ? "text-warning" : "text-text-2"}`}>{orderStateSentence(order.state, mock)}</p>
-      {reenable && !confirming && <button type="button" className="btn self-start" disabled={command.busy || accountMissing} onClick={startEnabling}>계좌를 다시 확인해 켜기</button>}
+      <p id={stateId} className={`text-s ${inUse && !mock ? "text-warning" : "text-text-2"}`}>{orderStateSentence(order.state, mock)}</p>
+      {offOnly && !confirming && <button type="button" className="btn self-start" disabled={command.busy} onClick={() => void apply(false)}>주문 끄기</button>}
       {accountMissing && !confirming && orderCanTurnOn(order.state) && <p className="text-s text-text-2" data-testid="kis-no-account-note">{NO_ACCOUNT_ORDER_NOTE}</p>}
       {confirming && (
         <div role="group" aria-label="주문 켜기 확인" className={`flex flex-col gap-3 rounded-m border p-3 ${mock ? "border-line bg-raised" : "border-warning/40 bg-warning-soft"}`}>

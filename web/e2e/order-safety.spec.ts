@@ -277,3 +277,27 @@ test("여러 건 취소 확인이 떠 있는 동안 같은 대상 주문의 목�
   await confirm.click();
   await pollSaved(() => writesTo(api, "cancel-batch")).toHaveLength(1);
 });
+
+test("칩 메뉴의 이 가격 모두 취소를 한 번 누른 뒤 같은 가격에 새 주문이 들어오면 다음 누름은 새 건수로 다시 묻고 요청이 없다", async ({ page, scenario }) => {
+  await page.clock.install({ time: CLOCK_START });
+  ordersOn(scenario);
+  const api = tradingApi(scenario, [openOrder("0000001", "buy", 70_000, 5), openOrder("0000002", "buy", 70_000, 7)]);
+  await openOrderWindow(page, scenario);
+  await page.clock.pauseAt(new Date("2026-11-18T10:05:00+09:00"));
+  await chipAt(page, "buy", 70_000).click({ button: "right" });
+  const menu = page.getByRole("menu", { name: "주문 목록" });
+  await menu.getByRole("menuitem", { name: "이 가격 모두 취소" }).click();
+  await expect(menu.getByRole("menuitem", { name: "이 가격 2건 취소 · 한 번 더 누르기" })).toBeVisible();
+  api.open.push(openOrder("0000003", "buy", 70_000, 9));
+  const listed = page.waitForResponse((response) => new URL(response.url()).pathname === "/api/trading/open-orders");
+  scenario.live.emit({ type: "trading_account_changed", accountRef: ACCOUNT });
+  await listed;
+  await page.clock.fastForward(50);
+  await expect(chipAt(page, "buy", 70_000)).toContainText("21");
+  await expect(menu.getByRole("menuitem", { name: "9 취소" })).toBeVisible();
+  await menu.getByRole("menuitem", { name: "이 가격 2건 취소 · 한 번 더 누르기" }).click();
+  await expect(menu.getByRole("menuitem", { name: "이 가격 3건 취소 · 한 번 더 누르기" })).toBeVisible();
+  expect(api.writes).toHaveLength(0);
+  await menu.getByRole("menuitem", { name: "이 가격 3건 취소 · 한 번 더 누르기" }).click();
+  await pollSaved(() => writesTo(api, "cancel-batch")).toHaveLength(1);
+});

@@ -7,7 +7,7 @@ import type { OrderSide } from "../../api/generated/OrderSide";
 import type { TradingOpenOrder } from "../../api/generated/TradingOpenOrder";
 import type { Venue } from "../../api/generated/Venue";
 import { actionInAccount, cancelAction, cancelBatchAction, modifyAction, orderLedger, placeAction, type Settlement } from "./commandLedger";
-import type { CurrentAccount } from "./orderAccount";
+import { accountNumberText, type CurrentAccount } from "./orderAccount";
 import { cancelOrder, cancelOrdersAtPrice, modifyOrder, placeOrder, reconcileOrders } from "./orderApi";
 import { needsHighValueConfirm } from "./orderRules";
 import { type PendingDraft, pendingWrites } from "./pendingWrites";
@@ -78,6 +78,7 @@ export function useOrderWrites(account: CurrentAccount | null, code: string, ven
   const tail = useRef<Promise<void>>(Promise.resolve());
   const accountRef = account?.ref ?? null;
   const broker = account?.broker ?? "kiwoom";
+  const accountText = accountNumberText(broker, account?.tail ?? null);
   const writeScope = `${account?.state ?? ""}|${accountRef ?? ""}`;
   useEffect(() => () => pendingWrites.clear(code), [code, writeScope]);
 
@@ -97,7 +98,7 @@ export function useOrderWrites(account: CurrentAccount | null, code: string, ven
         setStatus(plan.describe(result));
       } catch (error) {
         if (isUnanswered(error)) settlement = "unanswered";
-        setStatus(statusOfFailure(error, () => enqueue(plan)));
+        setStatus(statusOfFailure(error, () => enqueue(plan), accountText));
       } finally {
         pendingWrites.resolve(plan.mark.key, []);
         if (coalesced) orderLedger.settle(ledgerKey, settlement);
@@ -106,7 +107,7 @@ export function useOrderWrites(account: CurrentAccount | null, code: string, ven
         void queryClient.invalidateQueries({ queryKey: ORDER_QUERY_KEY });
       }
     });
-  }, [queryClient, accountRef, windowId]);
+  }, [queryClient, accountRef, accountText, windowId]);
 
   const place = useCallback((r: PlaceRequest) => {
     const action = placeAction(code, r.side, r.price, r.quantity, venue);

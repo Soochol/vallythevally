@@ -4,7 +4,7 @@ import type { OrderSide } from "../../api/generated/OrderSide";
 import type { OrderRejectReason } from "../../api/generated/OrderRejectReason";
 import { ApiRequestError } from "../../api/http";
 import { formatPrice } from "../../lib/format";
-import { SIDE_LABEL } from "./orderRules";
+import { type CancelPlan, SIDE_LABEL } from "./orderRules";
 import type { PendingState } from "./pendingWrites";
 
 export const MARGIN_SETTLEMENT_TEXT = "결제일(D+2)까지 입금";
@@ -87,6 +87,11 @@ export const PENDING_CHIP_TEXT: Readonly<Record<PendingState, string>> = { sendi
 
 export const RETRY_LABEL = "다시 보내기";
 
+export const CANCEL_REFUSAL: Readonly<Record<Exclude<CancelPlan["kind"], "ready">, OrderStatus>> = {
+  empty: { tone: "info", text: "취소할 주문이 없습니다", fades: true },
+  sending: { tone: "error", text: "보내는 중인 주문이 있어 취소하지 않았습니다" },
+};
+
 const won = (price: number): string => `${formatPrice(price, false)}원`;
 
 export const statusOfSending = (side: OrderSide, quantity: number, price: number): OrderStatus =>
@@ -100,10 +105,12 @@ export const statusOfModifying = (from: number, to: number): OrderStatus =>
 
 export const isUnanswered = (error: unknown): boolean => !(error instanceof ApiRequestError) || error.code === "network" || error.code === "internal";
 
-export function statusOfFailure(error: unknown, retry?: () => void): OrderStatus {
+export const retryLabelOf = (account: string | null): string => (account === null ? RETRY_LABEL : `${RETRY_LABEL} · ${account}`);
+
+export function statusOfFailure(error: unknown, retry?: () => void, account: string | null = null): OrderStatus {
   if (!(error instanceof ApiRequestError) || isUnanswered(error)) {
     const text = "서버의 답을 받지 못했습니다. 다시 보내면 같은 명령으로 보냅니다";
-    return retry ? { tone: "error", text, action: { label: RETRY_LABEL, run: retry } } : { tone: "error", text };
+    return retry ? { tone: "error", text, action: { label: retryLabelOf(account), run: retry } } : { tone: "error", text };
   }
   return { tone: "error", text: `거절 · ${error.message}` };
 }
