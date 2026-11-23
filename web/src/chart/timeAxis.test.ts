@@ -122,6 +122,17 @@ test("paint 전에 새로 예약한 명령은 이전 예약의 paint 뒤 정리�
   expect(scroll.position(f.scale)).toBe(start + 2);
 });
 
+test("paint 전에 예약한 위치 명령만 paint되지 않은 목표로 드러난다", () => {
+  const f = scaleOf([2015, 2016, 2021].map(year), true);
+  const scroll = new PendingScroll(f.afterNextPaint);
+  expect(scroll.unpaintedTarget).toBeNull();
+  const start = f.scale.scrollPosition();
+  scroll.scrollTo(f.scale, start + 1);
+  expect(scroll.unpaintedTarget).toBe(start + 1);
+  f.paint();
+  expect(scroll.unpaintedTarget).toBeNull();
+});
+
 test("변경 중에 라이브러리가 오른쪽 오프셋을 동기로 바꿔도 예약이 없으면 그 변화를 흡수한다", () => {
   const f = scaleOf([2015, 2016, 2021, 2022, 2023, 2024, 2025, 2026].map(year), true);
   const scroll = new PendingScroll(f.afterNextPaint);

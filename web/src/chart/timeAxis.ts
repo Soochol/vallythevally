@@ -72,6 +72,10 @@ export class PendingScroll {
     return this.pending ? this.pending.target : scale.scrollPosition();
   }
 
+  get unpaintedTarget(): number | null {
+    return this.pending ? this.pending.target : null;
+  }
+
   scrollTo(scale: ScrollScale, target: number): void {
     const command = { target };
     this.pending = command;

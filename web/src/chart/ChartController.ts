@@ -4,6 +4,7 @@ import {
   CrosshairMode,
   type DeepPartial,
   type IChartApi,
+  type IRange,
   LineStyle,
   MismatchDirection,
   PriceScaleMode,
@@ -375,8 +376,14 @@ export class ChartController {
     const draw = () => this.indicators.setFinancials(page, message);
     this.withDataGuard(() => {
       if (this.initialRange.held) {
+        const timeScale = this.chart.timeScale();
+        const unpaintedTarget = this.pendingScroll.unpaintedTarget;
+        const unpaintedShift = unpaintedTarget === null ? 0 : unpaintedTarget - timeScale.scrollPosition();
         draw();
-        this.fitInitialRange();
+        const drawn = timeScale.getVisibleLogicalRange();
+        const lastPointIndex = drawn ? drawn.to - timeScale.scrollPosition() : null;
+        const fitted = this.fitInitialRange();
+        if (unpaintedTarget !== null && fitted && lastPointIndex !== null) this.pendingScroll.scrollTo(timeScale, fitted.to - lastPointIndex + unpaintedShift);
       } else preserveTimeRange(this.chart.timeScale(), this.period(), this.pendingScroll, draw);
     });
     this.requestLegendSources("indicators");
@@ -747,8 +754,8 @@ export class ChartController {
     }
   }
 
-  private fitInitialRange(): void {
-    this.initialRange.fit({ bars: this.bars, period: this.period(), visibleBars: this.view?.settings.visibleBars ?? null, narrow: matchMedia("(max-width: 767px)").matches });
+  private fitInitialRange(): IRange<number> | null {
+    return this.initialRange.fit({ bars: this.bars, period: this.period(), visibleBars: this.view?.settings.visibleBars ?? null, narrow: matchMedia("(max-width: 767px)").matches });
   }
 
   private rightEdgeT(): UnixSeconds | null {
