@@ -49,3 +49,14 @@ test("toast를 null로 되돌리는 기존 시험 방식은 쌓인 알림을 모
   store().showToast("다");
   expect(texts()).toEqual(["다"]);
 });
+
+test("넘칠 때 error가 아닌 알림부터 밀려나 error는 닫기 전까지 남는다", () => {
+  store().showToast("저장하지 못했습니다", { tone: "error" });
+  for (const text of ["가", "나", "다"]) store().showToast(text);
+  expect(texts()).toEqual(["저장하지 못했습니다", "나", "다"]);
+});
+
+test("error만 셋이 쌓인 뒤에는 가장 오래된 error가 밀려난다", () => {
+  for (const text of ["가", "나", "다", "라"]) store().showToast(text, { tone: "error" });
+  expect(texts()).toEqual(["나", "다", "라"]);
+});

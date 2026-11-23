@@ -17,7 +17,7 @@ const TONE_ICON: Record<ToastTone, () => React.ReactNode> = {
 export function Toast() {
   const toasts = useSelectionStore((s) => visibleToasts(s));
   if (toasts.length === 0) return null;
-  return <Popover dismiss={false} focus={false} blockChartKeys={false} restoreFocus={false} onClose={KEEP_OPEN} data-layer-passthrough="" className="ui-toast-stack">
+  return <Popover key={toasts[toasts.length - 1]!.id} dismiss={false} focus={false} blockChartKeys={false} restoreFocus={false} onClose={KEEP_OPEN} data-layer-passthrough="" className="ui-toast-stack">
     {toasts.map((toast) => <ToastItem key={toast.id} toast={toast} />)}
   </Popover>;
 }

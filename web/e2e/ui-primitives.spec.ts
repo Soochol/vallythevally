@@ -108,6 +108,7 @@ test("비활성 주요 버튼은 활성과 다른 면을 칠하고 불투명도�
   const primary = dialog.locator(".btn-primary");
   await expect(primary).toBeDisabled();
   await expect(primary).toHaveCSS("background-color", RAISED);
+  await expect(primary).toHaveCSS("opacity", "1");
   await dialog.getByRole("combobox").fill("000660");
   await dialog.getByRole("option").first().click();
   await expect(primary).toBeEnabled();
@@ -119,4 +120,24 @@ test("위 막대는 흐림 없이 불투명하게 그려진다", async ({ page }
   await expect(topbar(page)).toHaveClass(/\bui-island\b/);
   await expect(topbar(page)).toHaveCSS("backdrop-filter", "none");
   await expect(topbar(page)).toHaveCSS("background-color", "rgb(27, 33, 27)");
+});
+
+test("알림이 떠 있는 채 대화상자 안에서 뜬 알림도 가림막 위에 놓이고 되돌리기를 누를 수 있다", async ({ page }) => {
+  await open(page);
+  await closeButton(page, "스크리너").click();
+  await expect(toasts(page).filter({ hasText: "스크리너 창을 닫았습니다" })).toBeVisible();
+  const dialog = page.getByRole("dialog", { name: "관심종목에 넣을 종목 검색" });
+  const input = dialog.getByRole("combobox", { name: "종목 검색" });
+  await page.getByRole("complementary", { name: "관심종목" }).getByRole("button", { name: "관심종목에 넣기" }).click();
+  await expect(input).toBeFocused();
+  await input.fill("000660");
+  await expect(dialog.getByRole("option").filter({ hasText: "000660" })).toHaveAttribute("aria-disabled", "false");
+  await input.press("Enter");
+  const added = toasts(page).filter({ hasText: "에 넣었습니다" });
+  await expect(added).toBeVisible();
+  const box = await boxOf(added);
+  const top = await page.evaluate(([x, y]) => document.elementFromPoint(x!, y!)?.closest(".ui-toast") !== null, [box.x + box.width / 2, box.y + box.height / 2]);
+  expect(top).toBe(true);
+  await added.getByRole("button", { name: "되돌리기" }).click();
+  await expect(dialog).toBeVisible();
 });

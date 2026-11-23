@@ -93,11 +93,20 @@ export const useSelectionStore = create<SelectionState>()((set, get) => ({
   showToast: (text, options = {}) => set((s) => {
     const { tone = "info", undo } = isUndo(options) ? { undo: options } : options;
     const entry: ToastEntry = { id: ++toastId, text, tone, undo };
-    return toastState([...visibleToasts(s).filter((toast) => toast.text !== text || toast.tone !== tone), entry].slice(-MAX_TOASTS));
+    return toastState(keepNewest([...visibleToasts(s).filter((toast) => toast.text !== text || toast.tone !== tone), entry]));
   }),
   clearToast: (id) => set((s) => (visibleToasts(s).some((toast) => toast.id === id) ? toastState(visibleToasts(s).filter((toast) => toast.id !== id)) : s)),
   clearToasts: () => set(toastState([])),
 }));
+
+function keepNewest(toasts: readonly ToastEntry[]): readonly ToastEntry[] {
+  const kept = [...toasts];
+  while (kept.length > MAX_TOASTS) {
+    const evicted = kept.findIndex((toast) => toast.tone !== "error");
+    kept.splice(evicted < 0 ? 0 : evicted, 1);
+  }
+  return kept;
+}
 
 function toastState(toasts: readonly ToastEntry[]): Pick<SelectionState, "toast" | "toasts"> {
   return { toasts, toast: toasts.at(-1) ?? null };
