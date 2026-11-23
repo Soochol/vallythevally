@@ -31,6 +31,12 @@ const index = (market: Market): Wire<MarketOverviewIndexCard> => ({
   ),
 });
 
+export const indexCardWithoutBreadth = (market: Market): Wire<MarketOverviewIndexCard> => {
+  const card = index(market);
+  if (card.index.status !== "ok") return card;
+  return { ...card, index: part({ ...card.index.value, breadth: { rising: null, flat: null, falling: null, upperLimit: null, lowerLimit: null } }) };
+};
+
 export const SECTOR_NAMES: Record<Market, readonly [string, string, string]> = { kospi: ["전기전자", "금융업", "의약품"], kosdaq: ["반도체", "제약", "IT부품"] };
 
 const sectors = (market: Market): Wire<MarketOverviewSectorsCard> => {

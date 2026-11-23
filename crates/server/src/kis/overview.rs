@@ -6,6 +6,7 @@ use super::api::KisApiId;
 use super::market_rest::{date_of, failure_of, float, kis_priority, parse_body, signed_whole, whole};
 use super::rest::{KisPage, KisRequest, KisRest};
 use crate::api::{self, Market};
+use crate::market_overview::MarketOverviewPeriod;
 use crate::market_source::{
     DayRange, IndexBreadth, IndexLevel, IntradayProgram, InvestorNetEok, MarketIndexSnapshot, OverviewFeature, OverviewFeatures, OverviewSource, Priority, ProgramDay, SectorFlow, SourceError, StreakRow,
     StreakSide, TradingDay, protocol, unsupported,
@@ -28,6 +29,8 @@ const ALL_SECTORS: &str = "0";
 const SECTOR_PAGE_BUDGET: usize = 5;
 const MILLION_WON_PER_EOK: f64 = 100.0;
 const HISTORY_WINDOW_DAYS: i64 = 130;
+const LONGEST_PERIOD_DAYS: usize = MarketOverviewPeriod::Days60.days();
+const INDEX_DAY_PAGE_BUDGET: usize = 5;
 const STOCK_INVESTOR_PAGE_BUDGET: usize = 10;
 const ESTIMATE_UNTIL: TimeOfDay = match TimeOfDay::hms(16, 0, 0) {
     Some(t) => t,
@@ -167,8 +170,8 @@ fn signed_rate(rate: &str, sign: &str) -> Option<f64> {
     Some(if matches!(sign.trim(), "4" | "5") && rate > 0.0 { -rate } else { rate })
 }
 
-fn count(text: &str) -> u32 {
-    whole(text).and_then(|n| u32::try_from(n).ok()).unwrap_or(0)
+fn count(text: &str) -> Option<u32> {
+    whole(text).and_then(|n| u32::try_from(n).ok())
 }
 
 fn window_start(today: KstDate) -> KstDate {
@@ -274,10 +277,17 @@ impl OverviewSource for KisOverview {
                 ("FID_INPUT_DATE_2", today.yyyymmdd()),
                 ("FID_PERIOD_DIV_CODE", "D".to_owned()),
             ];
-            let body: IndexChartBody = self.body(KisApiId::IndexChart, query, priority).await?;
-            let mut days: Vec<TradingDay> = body.output2.iter().filter_map(|row| Some(TradingDay { date: date_of(&row.stck_bsop_date)?, trade_value_eok: eok_float(&row.acml_tr_pbmn)? })).collect();
-            days.sort_by_key(|d| d.date);
-            days.dedup_by_key(|d| d.date);
+            let mut days: Vec<TradingDay> = Vec::new();
+            for pages in 0..INDEX_DAY_PAGE_BUDGET {
+                let page = self.page(KisApiId::IndexChart, query.clone(), priority, pages > 0).await?;
+                let body: IndexChartBody = parse_body(KisApiId::IndexChart, &page)?;
+                days.extend(body.output2.iter().filter_map(|row| Some(TradingDay { date: date_of(&row.stck_bsop_date)?, trade_value_eok: eok_float(&row.acml_tr_pbmn)? })));
+                days.sort_by_key(|d| d.date);
+                days.dedup_by_key(|d| d.date);
+                if !page.more || days.len() >= LONGEST_PERIOD_DAYS {
+                    break;
+                }
+            }
             Ok(days)
         })
     }

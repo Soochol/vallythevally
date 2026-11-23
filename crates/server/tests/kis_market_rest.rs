@@ -345,7 +345,7 @@ async fn two_hundred_fifty_daily_bars_take_three_requests_and_come_oldest_first(
     assert_eq!(collected.len(), 250);
     assert!(collected.windows(2).all(|pair| pair[0].bucket.start() < pair[1].bucket.start()), "오름차순이다");
     let sent = rig.transport.sent_to(KisApiId::DailyChart);
-    assert_eq!(sent.len(), 3, "100 + 100 + 50");
+    assert_eq!(sent.len(), 4, "100 + 100 + 50 + 끝을 알리는 빈 창");
     assert!(sent.iter().all(|s| s.get("FID_PERIOD_DIV_CODE") == "D" && s.get("FID_COND_MRKT_DIV_CODE") == "J" && s.get("FID_INPUT_ISCD") == "005930"));
     assert_eq!(sent[0].get("FID_INPUT_DATE_2"), today.yyyymmdd());
 }
@@ -377,7 +377,7 @@ async fn weekly_monthly_and_yearly_bars_use_their_period_codes_and_wider_windows
     for (period, wire) in [(Period::Week, "W"), (Period::Month, "M"), (Period::Year, "Y")] {
         let page = source.chart_page(samsung_key(Venue::Combined, period), today, None, Priority::Screen, MergeScope::Shared).await.unwrap();
         assert_eq!(page.bars.len(), 2, "{period:?}");
-        assert!(page.next.is_none(), "100개보다 적게 오면 끝이다");
+        assert!(page.next.is_some(), "창에 봉이 있으면 더 이른 창을 이어 받는다");
         let sent = rig.transport.sent_to(KisApiId::DailyChart);
         let last = sent.last().unwrap();
         assert_eq!((last.get("FID_PERIOD_DIV_CODE"), last.get("FID_COND_MRKT_DIV_CODE")), (wire, "UN"));
@@ -648,7 +648,7 @@ async fn a_symbol_jump_with_the_kis_source_reads_minute_and_daily_bars_and_never
 }
 
 #[tokio::test(start_paused = true)]
-async fn index_minute_pages_that_never_fill_a_bucket_stop_at_the_page_budget_with_an_error_not_a_finished_series() {
+async fn index_minutes_end_on_an_empty_page() {
     let rig = rig_at(friday_morning(), synthetic_master(), |sent| {
         let day = friday_morning().kst_date();
         let first = sent.tr_cont.is_none();
@@ -657,7 +657,150 @@ async fn index_minute_pages_that_never_fill_a_bucket_stop_at_the_page_budget_wit
     });
     let source: &dyn MarketSource = rig.market.as_ref();
     let key = SeriesKey { feed: Feed::Index(IndexCode::KOSPI), period: Period::M60 };
-    let result = source.chart_page(key, friday_morning().kst_date(), None, Priority::Screen, MergeScope::Shared).await;
-    assert!(matches!(result, Err(SourceError::Malformed(_))), "{result:?}");
-    assert_eq!(rig.transport.sent_to(KisApiId::IndexMinuteChart).len(), MINUTE_PAGE_BUDGET);
+    let page = source.chart_page(key, friday_morning().kst_date(), None, Priority::Screen, MergeScope::Shared).await.unwrap();
+    assert_eq!(page.bars.len(), 1);
+    assert!(page.next.is_none(), "빈 쪽 뒤에는 이어 받을 곳이 없다");
+    assert_eq!(rig.transport.sent_to(KisApiId::IndexMinuteChart).len(), 2, "봉이 있는 쪽 하나와 빈 쪽 하나");
+}
+
+fn daily_history_of(dates: Vec<KstDate>) -> impl Fn(&Sent) -> HttpResponse + Send + Sync + 'static {
+    move |sent| {
+        let end = KstDate::parse_yyyymmdd(sent.get("FID_INPUT_DATE_2")).unwrap();
+        let start = KstDate::parse_yyyymmdd(sent.get("FID_INPUT_DATE_1")).unwrap();
+        let rows: Vec<String> = dates.iter().filter(|d| **d <= end && **d >= start).take(100).map(|d| daily_row(*d, 10_000)).collect();
+        ok(format!(r#"{{"rt_cd":"0","msg_cd":"MCA00000","output1":{{}},"output2":[{}]}}"#, rows.join(",")))
+    }
+}
+
+async fn read_all_daily(rig: &Rig) -> Vec<server::market_source::PeriodBar> {
+    let source: &dyn MarketSource = rig.market.as_ref();
+    let key = samsung_key(Venue::Krx, Period::Day);
+    let today = rig.clock.now().kst_date();
+    let mut cursor: Option<Cursor> = None;
+    let mut collected = Vec::new();
+    loop {
+        let page = source.chart_page(key, today, cursor.take(), Priority::Screen, MergeScope::Shared).await.unwrap();
+        collected.splice(0..0, page.bars);
+        cursor = page.next;
+        if cursor.is_none() {
+            return collected;
+        }
+    }
+}
+
+#[tokio::test(start_paused = true)]
+async fn daily_history_continues_past_a_window_with_fewer_than_a_page_of_rows() {
+    let today = friday_evening().kst_date();
+    let recent = weekdays_back_from(today, 40);
+    let older = weekdays_back_from(today.add_days(-175), 35);
+    let rig = rig(daily_history_of(recent.iter().chain(&older).copied().collect()));
+    let collected = read_all_daily(&rig).await;
+    assert_eq!(collected.len(), 75, "창 하나가 40행이어도 더 과거 창의 35행이 이어진다");
+    assert!(collected.windows(2).all(|pair| pair[0].bucket.start() < pair[1].bucket.start()));
+    assert_eq!(rig.transport.sent_to(KisApiId::DailyChart).len(), 3, "봉이 있는 창 둘과 빈 창 하나");
+}
+
+#[tokio::test(start_paused = true)]
+async fn daily_history_ends_on_the_first_empty_window() {
+    let today = friday_evening().kst_date();
+    let rig = rig(daily_history_of(weekdays_back_from(today, 30)));
+    let collected = read_all_daily(&rig).await;
+    assert_eq!(collected.len(), 30);
+    assert_eq!(rig.transport.sent_to(KisApiId::DailyChart).len(), 2, "봉이 있는 창 하나와 끝을 알리는 빈 창 하나");
+}
+
+#[tokio::test(start_paused = true)]
+async fn daily_history_stops_when_a_window_does_not_reach_further_back_than_the_one_before() {
+    let today = friday_evening().kst_date();
+    let fixed_rows: Vec<String> = weekdays_back_from(today.add_days(-300), 5).into_iter().map(|day| daily_row(day, 10_000)).collect();
+    let rig = rig(move |_| ok(format!(r#"{{"rt_cd":"0","msg_cd":"MCA00000","output1":{{}},"output2":[{}]}}"#, fixed_rows.join(","))));
+    let collected = read_all_daily(&rig).await;
+    assert_eq!(collected.len(), 5, "기간을 무시하는 응답이어도 같은 창을 끝없이 받지 않는다");
+    assert!(rig.transport.sent_to(KisApiId::DailyChart).len() <= 3);
+}
+
+#[tokio::test(start_paused = true)]
+async fn daily_history_reaches_a_stock_listed_before_nineteen_eighty() {
+    let base = KstDate::new(1980, 1, 10).unwrap();
+    let newer = weekdays_back_from(base, 15);
+    let older = weekdays_back_from(KstDate::new(1979, 7, 13).unwrap(), 10);
+    let rig = rig(daily_history_of(newer.iter().chain(&older).copied().collect()));
+    let source: &dyn MarketSource = rig.market.as_ref();
+    let key = samsung_key(Venue::Krx, Period::Day);
+    let mut cursor: Option<Cursor> = None;
+    let mut count = 0;
+    loop {
+        let page = source.chart_page(key, base, cursor.take(), Priority::Screen, MergeScope::Shared).await.unwrap();
+        count += page.bars.len();
+        cursor = page.next;
+        if cursor.is_none() {
+            break;
+        }
+    }
+    assert_eq!(count, 25, "1980년 이전 창의 봉도 이어 받는다");
+}
+
+fn trade_row(hour: &str, quantity: u32) -> String {
+    format!(r#"{{"stck_cntg_hour":"{hour}","stck_pbpr":"71000","askp":"71100","bidp":"71000","cnqn":"{quantity}"}}"#)
+}
+
+#[tokio::test(start_paused = true)]
+async fn trades_tape_moves_past_a_second_with_more_prints_than_a_page() {
+    let mut tape: Vec<(&str, String)> = Vec::new();
+    tape.extend((0..2).map(|_| ("093002", trade_row("093002", 1))));
+    tape.extend((0..45).map(|_| ("093001", trade_row("093001", 2))));
+    tape.extend((0..3).map(|_| ("093000", trade_row("093000", 3))));
+    let rig = rig(move |sent| {
+        let asked = sent.get("FID_INPUT_HOUR_1");
+        let rows: Vec<&str> = tape.iter().filter(|(hour, _)| *hour <= asked).map(|(_, row)| row.as_str()).take(30).collect();
+        ok(format!(r#"{{"rt_cd":"0","msg_cd":"MCA00000","output1":{{}},"output2":[{}]}}"#, rows.join(",")))
+    });
+    let mut cursor: Option<Cursor> = None;
+    let mut times = Vec::new();
+    let mut skipped = 0;
+    loop {
+        let page = rig.market.trades_page(code("005930"), Venue::Krx, cursor.take(), Priority::Screen).await.unwrap();
+        times.extend(page.rows.iter().map(|print| print.time.clone()));
+        skipped += page.skipped;
+        cursor = page.next;
+        if cursor.is_none() {
+            break;
+        }
+    }
+    assert!(times.iter().any(|time| time == "09:30:00"), "한 초에 45건이 있어도 그보다 이른 초의 체결에 닿는다: {times:?}");
+    assert_eq!(times.iter().filter(|time| *time == "09:30:00").count(), 3);
+    assert_eq!(skipped, 1, "건너뛴 초가 쪽에 남는다");
+    let sent = rig.transport.sent_to(KisApiId::TodayTrades);
+    let asked: Vec<&str> = sent.iter().map(|s| s.get("FID_INPUT_HOUR_1")).collect();
+    for hour in ["200000", "093001", "093000"] {
+        assert!(asked.iter().filter(|h| **h == hour).count() <= 2, "같은 쪽을 두 번 넘게 요청하지 않는다: {asked:?}");
+    }
+    assert!(asked.contains(&"093000"));
+}
+
+fn market_lines(market: MasterMarket, codes: &[&str]) -> Vec<Vec<u8>> {
+    codes.iter().map(|code| master_line(market, code, "가상 종목", "ST")).collect()
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_market_file_losing_almost_all_rows_is_refused() {
+    let _logs = tracing::subscriber::set_default(tracing_subscriber::fmt().with_writer(std::io::sink).with_max_level(tracing::Level::TRACE).finish());
+    let kospi = market_lines(MasterMarket::Kospi, &["005930", "000660", "035420", "051910", "006400", "207940", "068270", "105560", "055550", "012330"]);
+    let kosdaq = market_lines(MasterMarket::Kosdaq, &["247540", "086520", "035720", "091990"]);
+    let master = FakeMaster::serving(&kospi, &kosdaq);
+    let rig = rig_at(friday_evening(), master.clone(), |_| ok("{}"));
+    let symbols = SymbolDirectory::default();
+    let source: &dyn MarketSource = rig.market.as_ref();
+    symbols.refresh(source, Priority::Background).await.unwrap();
+    let before = symbols.updates().borrow().clone().unwrap();
+
+    master.set(&kospi, &kosdaq[..1]);
+    assert!(symbols.refresh(source, Priority::Background).await.is_err(), "합계는 절반 위여도 코스닥이 전 목록의 절반 아래면 받지 않는다");
+    assert!(Arc::ptr_eq(&before, &symbols.updates().borrow().clone().unwrap()));
+    assert!(rig.market.list_outage().is_some());
+
+    master.set(&kospi, &kosdaq[..2]);
+    symbols.refresh(source, Priority::Background).await.unwrap();
+    assert!(!Arc::ptr_eq(&before, &symbols.updates().borrow().clone().unwrap()), "시장별로 절반 이상이면 받는다");
+    assert!(rig.market.list_outage().is_none());
 }

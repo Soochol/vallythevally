@@ -1,5 +1,5 @@
 import type { Page } from "@playwright/test";
-import { anyMarketOverviewCall, marketOverviewCalls, SECTOR_NAMES, serveMarketRankings } from "./fixtures/market-data";
+import { anyMarketOverviewCall, indexCardWithoutBreadth, marketOverviewCalls, SECTOR_NAMES, serveMarketRankings } from "./fixtures/market-data";
 import { CONNECTED_KIWOOM } from "./fixtures/scenario";
 import { cell, expect, test } from "./harness";
 
@@ -23,6 +23,18 @@ test("시장을 코스닥으로 바꾸면 모든 칸이 코스닥 요청으로 �
   await page.reload();
   await expect(page).toHaveURL(/market=kosdaq/);
   await expect(main(page).getByRole("group", { name: "시장" }).getByRole("button", { name: "코스닥" })).toHaveAttribute("aria-pressed", "true");
+});
+
+test("지수 종목 수가 없으면 '-'로 보이고 막대는 그리지 않는다", async ({ page, scenario }) => {
+  scenario.reply((url) => url.pathname === "/api/market-overview/index", { body: indexCardWithoutBreadth("kospi") });
+  await page.goto("/market");
+  const index = card(page, "지수·폭");
+  await expect(index.getByText("코스피", { exact: true })).toBeVisible();
+  await expect(index.getByText("상승 -")).toBeVisible();
+  await expect(index.getByText("보합 -")).toBeVisible();
+  await expect(index.getByText("하락 -")).toBeVisible();
+  await expect(index.locator('[data-cell="limit"] dd')).toHaveText("- / -");
+  await expect(index.locator(".mk-breadth-bar")).toHaveCount(0);
 });
 
 test("기간을 바꾸면 기간 인자가 달린 칸만 그 기간으로 다시 받는다", async ({ page, scenario }) => {
