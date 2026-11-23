@@ -184,7 +184,7 @@ impl Folder {
 }
 
 fn job_loop(job: &Arc<SnapshotJob>, date: u32, slice: Slice, options: Value) -> JobLoop {
-    JobLoop { job: job.clone(), observation_date: day(date), period: Duration::from_secs(30), slice, options }
+    JobLoop { job: job.clone(), observation_date: day(date), period: Duration::from_secs(30), slice, peers: Vec::new(), options }
 }
 
 async fn run_for(job_loop: &JobLoop, rest: &KiwoomRest, key: &str, shared: &Path, clock: &Clock, stats: &LoopStats, seconds: u64) {

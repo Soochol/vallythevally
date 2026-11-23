@@ -5,6 +5,7 @@ use futures::future::BoxFuture;
 use serde_json::Value;
 use server::clock::Clock;
 use server::kiwoom::rest::KiwoomRest;
+use server::kis::rest::KisRest;
 use server::shared_data::Broker;
 
 use crate::protocol::KeyName;
@@ -42,12 +43,13 @@ impl Slice {
 
 pub enum Market<'a> {
     Kiwoom(&'a KiwoomRest),
-    Kis,
+    Kis(Option<&'a KisRest>),
 }
 
 pub struct JobCall<'a> {
     pub observation_date: KstDate,
     pub slice: Slice,
+    pub peers: &'a [Broker],
     pub market: Market<'a>,
     pub shared_dir: &'a Path,
     pub key: &'a KeyName,

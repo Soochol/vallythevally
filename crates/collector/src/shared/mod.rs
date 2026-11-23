@@ -6,6 +6,7 @@ mod assignment;
 pub mod child;
 mod job;
 pub mod minute;
+mod overview;
 mod probe;
 mod runner;
 mod themes;
@@ -24,6 +25,8 @@ pub use wire::{JobStat, TrMinute};
 pub enum JobName {
     Probe,
     KiwoomThemes,
+    Overview,
+    IntradaySamples,
     Snapshot,
 }
 
@@ -32,6 +35,8 @@ impl JobName {
         match self {
             JobName::Probe => Arc::new(probe::ProbeJob),
             JobName::KiwoomThemes => Arc::new(themes::KiwoomThemesJob::default()),
+            JobName::Overview => Arc::new(overview::OverviewJob::default()),
+            JobName::IntradaySamples => Arc::new(overview::IntradaySamplesJob::default()),
             JobName::Snapshot => Arc::new(snapshot::SnapshotJob::default()),
         }
     }

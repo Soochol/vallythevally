@@ -72,7 +72,7 @@ impl Transport for Wire {
 fn start(kiwoom: &Arc<Kiwoom>, clock: &Clock, shared: &Path) -> tokio::task::JoinHandle<()> {
     let rest = KiwoomRest::new(Arc::new(Wire(kiwoom.clone())), KiwoomAuth::new(Secret::new("FAKE_KEY".into()), Secret::new("FAKE_SECRET".into()), None), clock.clone());
     rest.set_access(Access::Open);
-    let job_loop = JobLoop { job: JobName::KiwoomThemes.job(), observation_date: today(), period: Duration::from_secs(60), slice: Slice::WHOLE, options: Value::Null };
+    let job_loop = JobLoop { job: JobName::KiwoomThemes.job(), observation_date: today(), period: Duration::from_secs(60), slice: Slice::WHOLE, peers: Vec::new(), options: Value::Null };
     let (clock, shared) = (clock.clone(), shared.to_owned());
     tokio::spawn(async move {
         let stats = LoopStats::default();
@@ -137,7 +137,7 @@ async fn a_theme_that_cannot_be_asked_keeps_the_previous_days_members() {
     let clock = Clock::fake(kst(yesterday, 8, 30, 0));
     let rest = KiwoomRest::new(Arc::new(Wire(first.clone())), KiwoomAuth::new(Secret::new("FAKE_KEY".into()), Secret::new("FAKE_SECRET".into()), None), clock.clone());
     rest.set_access(Access::Open);
-    let day_before = JobLoop { job: JobName::KiwoomThemes.job(), observation_date: yesterday, period: Duration::from_secs(60), slice: Slice::WHOLE, options: Value::Null };
+    let day_before = JobLoop { job: JobName::KiwoomThemes.job(), observation_date: yesterday, period: Duration::from_secs(60), slice: Slice::WHOLE, peers: Vec::new(), options: Value::Null };
     let task = tokio::spawn({
         let (clock, shared) = (clock.clone(), shared.path().to_owned());
         async move { day_before.run(Market::Kiwoom(&rest), &KeyName::parse("rest-01").unwrap(), &shared, &clock, &LoopStats::default()).await }
