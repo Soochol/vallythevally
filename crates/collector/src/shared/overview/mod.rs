@@ -95,12 +95,12 @@ fn source_of(market: &Market<'_>) -> Result<(Box<dyn OverviewSource>, Broker), J
     }
 }
 
-fn listing_codes(shared_dir: &Path, observation_date: KstDate) -> Result<HashSet<String>, ApiErrorBody> {
+fn exchange_traded_codes(shared_dir: &Path, observation_date: KstDate) -> Result<HashSet<String>, ApiErrorBody> {
     let unavailable = |detail: String| ApiErrorBody { code: ApiErrorCode::CollectorUnavailable, message: detail, reason: None, retry_at: None, manual_action_required: false };
     let data_dir = shared_dir.parent().ok_or_else(|| unavailable("공용 자료 폴더의 위 폴더(데이터 폴더)를 알 수 없습니다".to_owned()))?;
     let date: u32 = observation_date.yyyymmdd().parse().expect("날짜는 숫자 여덟 자리다");
     match read_listing_upto(data_dir, date) {
-        Ok(Some(file)) => Ok(file.stocks.into_iter().map(|stock| stock.code).collect()),
+        Ok(Some(file)) => Ok(file.stocks.into_iter().filter(|stock| stock.exchange_traded).map(|stock| stock.code).collect()),
         Ok(None) => Err(unavailable(format!("{date} 이전의 전체 종목 행 파일이 없어 ETF·ETN을 가릴 수 없습니다"))),
         Err(error) => Err(unavailable(error.to_string())),
     }
@@ -148,10 +148,10 @@ impl SharedJob for OverviewJob {
             }
             let env = CardEnv { source: source.as_ref(), broker: api_broker(broker), clock: call.clock, priority: Priority::Background, book: &self.book };
             let listing = match mine.iter().any(|(_, card)| *card == Card::Streaks) {
-                true => Some(listing_codes(call.shared_dir, call.observation_date)),
+                true => Some(exchange_traded_codes(call.shared_dir, call.observation_date)),
                 false => None,
             };
-            let shown = |row: &StreakRow| listing.as_ref().and_then(|codes| codes.as_ref().ok()).is_none_or(|codes| codes.contains(row.code.as_str()));
+            let shown = |row: &StreakRow| listing.as_ref().and_then(|codes| codes.as_ref().ok()).is_none_or(|hidden| !hidden.contains(row.code.as_str()));
             let filter: StreakFilter<'_> = match &listing {
                 Some(Err(error)) => Err(error.clone()),
                 _ => Ok(&shown),

@@ -126,8 +126,8 @@ TR 줄:
 일 `overview`(60초마다, 08:00~20:00)가 코스피·코스닥의 칸을 만들어 `market-overview/<관측일>.json`에 쓴다. 칸 값은 서버 `GET /api/market-overview/*`가 내는 값과 같은 모양이다(`index`, `sectors`, `flow`·`turnover`의 기간 5·20·60, `streaks`). 계산은 서버의 `market_overview::{index,sectors,flow,turnover,streaks}_card`를 그대로 부른다. 칸마다 `context.source`가 받은 증권사이고, 칸 안의 실패는 그 부분만 `failed`다. 지난 거래일 투자자 값은 데몬 자식이 그 관측일(07:45 경계) 동안 메모리에 둔다.
 
 - 일의 `keys` 순서가 우선순위다. 칸 `u`(시장·칸 순서의 번호)는 키 `u % 키 수`가 맡고, 그 키의 증권사가 받을 수 없는 칸(한투의 연속 매매)은 순서상 다음에 그 칸을 받을 수 있는 키가 맡는다. 받을 수 있는 키가 없으면 처음 키가 그 칸을 `unsupported_by_source` 실패로 쓴다.
-- 키마다 `market-overview-parts/<관측일>.<키>.json`에 자기 칸을 쓰고, 잠금을 잡은 채 모든 조각을 합쳐 `market-overview/<관측일>.json`을 쓴다. 같은 칸이 둘이면 더 늦게 만든 것을 쓴다. 머리의 `asOf`는 칸 가운데 가장 오래된 것이다.
-- 연속 매매의 ETF·ETN 제외는 그날 종목 행 파일(`<데이터 폴더>/listing/`)에 든 종목만 보이는 것으로 한다. 서버는 종목 사전의 종류로 가린다. 파일이 없으면 그 칸이 `collector_unavailable` 실패다.
+- 키마다 `market-overview-parts/<관측일>.<키>.json`에 자기 칸을 쓰고, 잠금을 잡은 채 모든 조각을 합쳐 `market-overview/<관측일>.json`을 쓴다. 같은 칸이 둘이면 더 늦게 만든 것을 쓴다. 머리의 `asOf`는 합친 뒤 남은 칸 가운데 가장 오래된 것이고, `sources`는 그 칸을 만든 키만이다.
+- 연속 매매의 ETF·ETN 제외는 그날 종목 행 파일(`<데이터 폴더>/listing/`)의 `exchange_traded: true` 종목을 가리는 것이다(서버는 종목 사전의 종류로 같은 종목을 가린다). 이 칸은 없으면 거짓이라 쓰지 않는다. 파일이 없으면 그 칸이 `collector_unavailable` 실패다.
 - 한투 키의 공용 자료 자식은 아직 한투 세션(앱키·시크릿)을 받지 못한다. 그 키는 이 일에서 자기 칸을 `이 한투 키의 공용 자료 자식에는 한투 세션이 없습니다` 오류로 못 만든다. 데몬이 한투 자격을 자식에게 넘기는 작업이 있어야 한다.
 
 일 `intraday_samples`(09:00~15:30, 매 분)는 ADR 0034 줄 형식 그대로 `market-samples/<관측일>.jsonl`에 시장마다 투자자·프로그램을 한 줄씩 덧붙인다(한 분 4줄). 형식은 서버의 `market_overview::Sample`이다. 일의 이름은 `overview`, `intraday_samples`이고 키움·한투 키를 받는다.

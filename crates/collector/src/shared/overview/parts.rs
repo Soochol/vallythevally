@@ -62,8 +62,9 @@ pub(super) fn publish(shared_dir: &Path, observation_date: KstDate, key: &KeyNam
     lock.lock()?;
     write_part(shared_dir, &date, &PartFile { key_name: key.as_str().to_owned(), broker, cards }, key)?;
     let parts = parts_of(shared_dir, &date);
-    let sources: Vec<SourceKey> = parts.iter().map(|part| SourceKey { key_name: part.key_name.clone(), broker: part.broker }).collect();
-    let all: Vec<MadeCard> = parts.into_iter().flat_map(|part| part.cards).collect();
+    let brokers: Vec<(String, Broker)> = parts.iter().map(|part| (part.key_name.clone(), part.broker)).collect();
+    let all = OverviewBody::newest_cards(parts.into_iter().flat_map(|part| part.cards));
+    let sources: Vec<SourceKey> = brokers.into_iter().filter(|(name, _)| all.iter().any(|card| &card.key_name == name)).map(|(key_name, broker)| SourceKey { key_name, broker }).collect();
     let as_of = all.iter().map(|card| card.made_at).min().unwrap_or(now.unix());
     let header = Header::new(DataKind::MarketOverview, observation_date, as_of, now.unix(), sources);
     write_snapshot(shared_dir, header, OverviewBody::from_cards(all))?;

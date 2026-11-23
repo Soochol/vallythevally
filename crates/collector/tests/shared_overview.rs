@@ -175,7 +175,7 @@ impl Folders {
     fn new() -> Folders {
         let folders = Folders { data: tempfile::tempdir().unwrap() };
         std::fs::create_dir_all(folders.shared()).unwrap();
-        let listing = ListingFile { format_version: collector::universe::LISTING_FORMAT_VERSION, date: 20261109, fetched_at: "2026-11-09T07:20:00+09:00".into(), stocks: ["005930", "000660"].iter().map(|code| ListedStock { code: (*code).to_owned(), nxt_enabled: true }).collect() };
+        let listing = ListingFile { format_version: collector::universe::LISTING_FORMAT_VERSION, date: 20261109, fetched_at: "2026-11-09T07:20:00+09:00".into(), stocks: [("005930", false), ("000660", false), ("069500", true)].iter().map(|(code, etf)| ListedStock { code: (*code).to_owned(), nxt_enabled: true, exchange_traded: *etf }).collect() };
         write_listing(folders.data.path(), &listing).unwrap();
         folders
     }
@@ -396,4 +396,22 @@ async fn samples_are_four_per_regular_minute_once_resume_after_a_restart_and_old
     assert!(!shared.join("market-samples/20261109.jsonl").exists(), "관측일이 바뀌면 지난 날 파일을 지운다");
     assert_eq!(samples_file(&shared, "20261110").len(), 4);
     sleep(Duration::from_millis(1)).await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_key_that_went_down_no_longer_pins_the_as_of_or_the_sources() {
+    let folders = Folders::new();
+    let clock = Clock::fake(at(monday(), 10, 0, 0));
+    let kiwoom = FakeKiwoom::default();
+    let rest = kiwoom.rest(&clock);
+    let job = JobName::Overview.job();
+    let peers = [Broker::Kiwoom, Broker::Kiwoom];
+    run_once(job.as_ref(), Market::Kiwoom(&rest), Seat { shared: &folders.shared(), day: monday(), clock: &clock, slice: Slice { index: 1, count: 2 }, peers: &peers, key: &key("rest-02") }).await.unwrap();
+    clock.jump(600);
+    let before = clock.now().unix();
+    run_once(job.as_ref(), Market::Kiwoom(&rest), Seat { shared: &folders.shared(), day: monday(), clock: &clock, slice: Slice::WHOLE, peers: &[Broker::Kiwoom], key: &key("rest-01") }).await.unwrap();
+    let (header, body) = overview_file(&folders.shared()).unwrap();
+    assert!((before..=clock.now().unix()).contains(&header.as_of), "모든 칸을 새로 만든 키가 하나면 기준 시각은 그 틱이다: {}", header.as_of);
+    assert_eq!(header.sources.iter().map(|source| source.key_name.as_str()).collect::<Vec<_>>(), ["rest-01"]);
+    assert_eq!(body.kospi.flow.len() + body.kosdaq.flow.len(), 6);
 }

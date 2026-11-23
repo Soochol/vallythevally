@@ -58,7 +58,7 @@ impl OverviewBody {
         }
     }
 
-    pub fn from_cards(cards: impl IntoIterator<Item = MadeCard>) -> OverviewBody {
+    pub fn newest_cards(cards: impl IntoIterator<Item = MadeCard>) -> Vec<MadeCard> {
         let mut newest: Vec<MadeCard> = Vec::new();
         for card in cards {
             let same = newest.iter().position(|kept| kept.market == card.market && kept.card.slot() == card.card.slot());
@@ -68,6 +68,11 @@ impl OverviewBody {
                 None => newest.push(card),
             }
         }
+        newest
+    }
+
+    pub fn from_cards(cards: impl IntoIterator<Item = MadeCard>) -> OverviewBody {
+        let newest = OverviewBody::newest_cards(cards);
         let mut body = OverviewBody::default();
         for made in newest {
             let cards = body.market_mut(made.market);
