@@ -19,7 +19,7 @@ use futures::future::BoxFuture;
 
 pub use error::{SourceError, SourceFailure};
 pub use feature::{MarketFeature, MarketFeatures};
-pub use generation::{GenerationTicket, SourceGeneration};
+pub use generation::{GenerationScoped, GenerationTicket, SourceGeneration};
 pub use kiwoom_handle::KiwoomHandle;
 pub use overview::*;
 pub use types::{
