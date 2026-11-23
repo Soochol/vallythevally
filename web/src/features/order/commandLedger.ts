@@ -7,7 +7,12 @@ export interface Issued {
 
 type Entry = { readonly id: string; readonly phase: "inflight" | "retry" };
 
-export type WindowResends = ReadonlyMap<string, readonly string[]>;
+export interface WindowResends {
+  readonly queues: ReadonlyMap<string, readonly string[]>;
+  readonly issued: ReadonlySet<string>;
+}
+
+export const NO_WINDOW_RESENDS: WindowResends = { queues: new Map(), issued: new Set() };
 
 export interface CommandLedger {
   issue(action: string): Issued;
@@ -21,6 +26,7 @@ export interface CommandLedger {
 export function createLedger(newId: (action: string) => string): CommandLedger {
   const entries = new Map<string, Entry>();
   const resendQueues = new Map<string, Map<string, string[]>>();
+  const issuedIds = new Map<string, Set<string>>();
   return {
     issueEach(windowId, action) {
       const queues = resendQueues.get(windowId);
@@ -28,9 +34,16 @@ export function createLedger(newId: (action: string) => string): CommandLedger {
       const resend = queue?.shift();
       if (queue?.length === 0) queues?.delete(action);
       if (queues?.size === 0) resendQueues.delete(windowId);
-      return resend ?? newId(action);
+      const id = resend ?? newId(action);
+      const issued = issuedIds.get(windowId) ?? new Set<string>();
+      issued.add(id);
+      issuedIds.set(windowId, issued);
+      return id;
     },
     settleEach(windowId, action, id, settlement) {
+      const issued = issuedIds.get(windowId);
+      if (!issued?.delete(id)) return;
+      if (issued.size === 0) issuedIds.delete(windowId);
       if (settlement !== "unanswered") return;
       const queues = resendQueues.get(windowId) ?? new Map<string, string[]>();
       resendQueues.set(windowId, queues);
@@ -39,13 +52,16 @@ export function createLedger(newId: (action: string) => string): CommandLedger {
       else queues.set(action, [id]);
     },
     takeWindowResends(windowId) {
-      const queues = resendQueues.get(windowId) ?? new Map<string, string[]>();
+      const taken = { queues: resendQueues.get(windowId) ?? new Map<string, string[]>(), issued: issuedIds.get(windowId) ?? new Set<string>() };
       resendQueues.delete(windowId);
-      return queues;
+      issuedIds.delete(windowId);
+      return taken;
     },
     restoreWindowResends(windowId, resends) {
-      if (resends.size === 0) resendQueues.delete(windowId);
-      else resendQueues.set(windowId, new Map([...resends].map(([action, ids]) => [action, [...ids]])));
+      if (resends.queues.size === 0) resendQueues.delete(windowId);
+      else resendQueues.set(windowId, new Map([...resends.queues].map(([action, ids]) => [action, [...ids]])));
+      if (resends.issued.size === 0) issuedIds.delete(windowId);
+      else issuedIds.set(windowId, new Set(resends.issued));
     },
     issue(action) {
       const entry = entries.get(action);

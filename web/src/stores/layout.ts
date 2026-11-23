@@ -23,7 +23,7 @@ import { MAX_WINDOWS, windowId, WINDOW_KINDS, type WindowId, type WindowKind, ty
 import type { CanvasPlacement, DockPlacement, Placement } from "../layout/placement";
 import { isIndexCode } from "../lib/symbol";
 import { readDockOrigins, writeDockOrigins } from "../persist/dockOrigins";
-import { orderLedger, type WindowResends } from "../features/order/commandLedger";
+import { NO_WINDOW_RESENDS, orderLedger, type WindowResends } from "../features/order/commandLedger";
 import type { OrderEntries } from "../features/order/orderEntries";
 import { useUiStore } from "./ui";
 
@@ -235,8 +235,6 @@ function returnTo(s: Pick<LayoutState, "layout" | "revision">, step: Arrangement
   return { dockOrigins: step.dockOrigins, layout: { ...s.layout, windows, placement: step.before.placement }, revision: s.revision + 1 };
 }
 
-const forgottenWindow = ({ layoutId, window }: ReclaimedWindow): ReclaimedWindow => ({ layoutId, window, entries: {}, resends: new Map() });
-
 function swapReclaimed(reclaimed: ReclaimedWindow): ReclaimedWindow {
   const ui = useUiStore.getState();
   const current = { layoutId: reclaimed.layoutId, window: reclaimed.window, entries: ui.takeOrderWindow(reclaimed.layoutId, reclaimed.window), resends: orderLedger.takeWindowResends(reclaimed.window) };
@@ -249,7 +247,7 @@ const withReclaimed = (step: ArrangementStep, reclaimed: ReclaimedWindow | undef
 
 export const useLayoutStore = create<LayoutState>()((set, get) => {
   const reclaimWindowId = (layoutId: string, window: string) => {
-    const reclaimed = swapReclaimed({ layoutId, window, entries: {}, resends: new Map() });
+    const reclaimed = swapReclaimed({ layoutId, window, entries: {}, resends: NO_WINDOW_RESENDS });
     set((s) => ({ steps: s.steps.map((step, i) => (i === s.steps.length - 1 ? withReclaimed(step, reclaimed) : step)) }));
   };
   const canvasActive = () => useUiStore.getState().prefs.layoutMode === "canvas" && get().canvasArea !== null;
@@ -356,7 +354,7 @@ export const useLayoutStore = create<LayoutState>()((set, get) => {
       if (!step) return;
       const current = step.reclaimed && swapReclaimed(step.reclaimed);
       set((s) => {
-        const redo = withReclaimed({ id: ++lastStepId, dockOrigins: s.dockOrigins, before: { windows: s.layout.windows, placement: s.layout.placement } }, current && forgottenWindow(current));
+        const redo = withReclaimed({ id: ++lastStepId, dockOrigins: s.dockOrigins, before: { windows: s.layout.windows, placement: s.layout.placement } }, current);
         return { ...returnTo(s, step), steps: s.steps.slice(0, -1), redos: [...s.redos, redo].slice(-ARRANGEMENT_STEPS) };
       });
     },
