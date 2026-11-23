@@ -294,19 +294,25 @@ impl Screener {
         };
     }
 
-    async fn calendar(&self, using: CalendarUse) -> Result<Arc<Calendar>, BarError> {
-        let mut cached = self.calendar.lock().await;
+    async fn fetch_calendar(&self, priority: Priority) -> Result<Arc<Calendar>, BarError> {
         let now = self.clock.now();
-        let (reuse, priority) = match using {
-            CalendarUse::Status => (true, Priority::Screen),
-            CalendarUse::Update => (false, Priority::Background),
-        };
-        if let Some(c) = cached.as_ref().filter(|c| reuse && c.fetched_at.kst_date() == now.kst_date() && now.unix() - c.fetched_at.unix() < CALENDAR_FRESH_SECS) {
-            return Ok(c.clone());
-        }
         let page = self.bars.page_with(SeriesKey { feed: Feed::Index(IndexCode::KOSPI), period: Period::Day }, None, CALENDAR_DAYS, priority).await?;
         let days = page.bars.iter().map(|b| b.bucket).chain(page.current.map(|c| c.bucket)).map(|b| b.start().kst_date()).collect();
-        let calendar = Arc::new(Calendar { fetched_at: now, days });
+        Ok(Arc::new(Calendar { fetched_at: now, days }))
+    }
+
+    async fn calendar(&self, using: CalendarUse) -> Result<Arc<Calendar>, BarError> {
+        if using == CalendarUse::Update {
+            let calendar = self.fetch_calendar(Priority::Background).await?;
+            *self.calendar.lock().await = Some(calendar.clone());
+            return Ok(calendar);
+        }
+        let mut cached = self.calendar.lock().await;
+        let now = self.clock.now();
+        if let Some(c) = cached.as_ref().filter(|c| c.fetched_at.kst_date() == now.kst_date() && now.unix() - c.fetched_at.unix() < CALENDAR_FRESH_SECS) {
+            return Ok(c.clone());
+        }
+        let calendar = self.fetch_calendar(Priority::Screen).await?;
         *cached = Some(calendar.clone());
         Ok(calendar)
     }

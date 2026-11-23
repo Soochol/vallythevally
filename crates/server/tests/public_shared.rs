@@ -627,3 +627,27 @@ async fn the_server_renews_the_calendar_by_itself_so_public_requests_never_have_
     tokio::time::resume();
     assert!(index_days() > fetched_before, "5분마다 서버가 스스로 달력을 새로 받는다");
 }
+
+#[tokio::test]
+async fn a_calendar_renewal_waiting_on_kiwoom_does_not_hold_up_public_screener_requests() {
+    let fake = ScriptedTransport::new();
+    let site = Site::start(fake.clone()).await;
+    site.fill_screener_store().await;
+    site.load_symbols();
+    write_every_board(&site.shared);
+    site.poll().await;
+    let who = site.login("alice").await;
+    let held = fake.hold("달력 갱신", |call| call.api_id == "ka20006");
+    tokio::time::pause();
+    tokio::time::sleep(Duration::from_secs(301)).await;
+    tokio::time::resume();
+    held.arrived().await;
+    let answered = tokio::time::timeout(Duration::from_secs(3), async {
+        let status = site.get(&who, "/api/screener/status").await.status;
+        let run = site.send_json(&who, reqwest::Method::POST, "/api/screener/run", &new_high_screen()).await.status;
+        (status, run)
+    })
+    .await;
+    held.release();
+    assert!(matches!(answered, Ok((200, run)) if run < 500), "달력 갱신이 키움을 기다리는 동안 공개 요청이 멈췄다: {answered:?}");
+}
