@@ -1,0 +1,13 @@
+.financial-status-dot {
+  display: block;
+  width: var(--size-8);
+  height: var(--size-8);
+  border-radius: 50%;
+  background: var(--text-3);
+  cursor: pointer;
+  list-style: none;
+}
+.financial-status-dot::-webkit-details-marker { display: none; }
+.financial-status-dot[data-status="ready"] { background: var(--success); }
+.financial-status-dot[data-status="collecting"], .financial-status-dot[data-status="pending"] { background: var(--warning); }
+.financial-status-dot[data-status="failed"], .financial-status-dot[data-status="partial_failure"] { background: var(--danger); }
