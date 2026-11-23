@@ -170,7 +170,7 @@ pub fn status_of(code: api::ApiErrorCode) -> StatusCode {
     use api::ApiErrorCode::*;
     match code {
         BadRequest => StatusCode::BAD_REQUEST,
-        NotFound | UnknownSymbol => StatusCode::NOT_FOUND,
+        NotFound | UnknownSymbol | NotPrepared => StatusCode::NOT_FOUND,
         KiwoomUnavailable => StatusCode::SERVICE_UNAVAILABLE,
         // 키움이 우리 인증을 거절했다. 다시 시도해도 낫지 않으므로 503이 아니라 502로 둔다.
         KiwoomAuthFailed | AccountServerUnavailable => StatusCode::BAD_GATEWAY,
@@ -1261,6 +1261,7 @@ mod tests {
             (BadRequest, 400),
             (NotFound, 404),
             (UnknownSymbol, 404),
+            (NotPrepared, 404),
             (KiwoomUnavailable, 503),
             (KiwoomAuthFailed, 502),
             (Conflict, 409),

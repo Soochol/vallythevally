@@ -4,6 +4,7 @@ mod kiwoom_overview;
 mod sampler;
 mod samples;
 mod session;
+mod shared;
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};

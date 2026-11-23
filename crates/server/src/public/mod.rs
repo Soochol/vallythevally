@@ -159,7 +159,7 @@ impl PublicListener {
 
     pub fn router_with(&self, extra: Router<Arc<AppState>>) -> Router {
         let runtime = self.runtime.clone();
-        let rankings = crate::rankings::routes().route_layer(from_fn_with_state(runtime.clone(), kiwoom_guard::rankings));
+        let rankings = crate::rankings::routes().route_layer(axum::Extension(crate::rankings::PublicRoute)).route_layer(from_fn_with_state(runtime.clone(), kiwoom_guard::rankings));
         let market = crate::market_overview::routes().route_layer(from_fn_with_state(runtime.clone(), kiwoom_guard::market_overview));
         let screener = crate::screener::routes().route_layer(from_fn_with_state(runtime.clone(), kiwoom_guard::screener));
         let heatmap = Router::<Arc<Runtime>>::new()

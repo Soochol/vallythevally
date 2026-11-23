@@ -18,11 +18,11 @@ pub use format::{Broker, DataKind, FORMAT_VERSION, Header, Loaded, Probe, ProbeB
 pub use minute::{CELL_MINUTES, MinuteBar, MinuteBarKey, MinuteBook, MinuteCell, MinuteCells, MinuteInstrument, MinuteSeries, MinuteTrade, MinuteVenue, minute_path};
 pub use snapshot::{IndexRow, SnapshotBody, SnapshotRow, snapshot_kind};
 pub use rankings::{
-    ConditionEntry, ConditionState, DEFAULT_PAGES, DEFAULT_PERIOD_SECS, MergedCondition, MergedRankings, RankingsBoard, RankingsPartBody, ReceivedRanking, SharedRankingRow, broker_of_part,
-    default_rankings, part_path, read_own_part,
+    ConditionEntry, ConditionState, DEFAULT_PAGES, DEFAULT_PERIOD_SECS, FirstPages, MergedCondition, MergedRankings, RankingsBoard, RankingsPartBody, ReceivedRanking, SharedRankingRow, broker_of_part,
+    default_rankings, part_path, read_own_part, to_api_broker,
 };
 pub use write::{FeedWriter, write_snapshot, write_snapshot_at};
-pub use overview::{CardSlot, CardValue, MadeCard, MarketCards, OverviewBody};
+pub use overview::{CardSlot, CardValue, DaySamples, MadeCard, MarketCards, OverviewBody, SAMPLES_FOLDER, SampleBoard};
 pub use themes::{ThemeEntry, ThemesBody};
 
 use domain::{KstTime, Venue};
@@ -46,6 +46,7 @@ pub struct SharedData {
     pub minutes: MinuteBook,
     dir: OnceLock<PathBuf>,
     pub rankings: RankingsBoard,
+    pub market_samples: SampleBoard,
 }
 
 impl SharedData {
@@ -60,6 +61,7 @@ impl SharedData {
             kiwoom_themes: Board::new(DataKind::KiwoomThemes),
             market_overview: Board::new(DataKind::MarketOverview),
             minutes: MinuteBook::new(),
+            market_samples: SampleBoard::new(),
             dir: OnceLock::new(),
         })
     }
@@ -104,6 +106,7 @@ impl SharedData {
             data.kiwoom_themes.poll(&dir);
             data.market_overview.poll(&dir);
             data.minutes.poll(&dir);
+            data.market_samples.poll(&dir);
             for venue in Venue::ALL {
                 data.snapshot(venue).poll(&dir);
             }

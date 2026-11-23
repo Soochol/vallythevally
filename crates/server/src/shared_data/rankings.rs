@@ -34,6 +34,8 @@ pub struct ReceivedRanking {
     pub limited: bool,
     pub received_at: i64,
     pub broker: Broker,
+    #[serde(default)]
+    pub page_rows: Vec<u32>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -132,6 +134,29 @@ impl MergedRankings {
 impl ReceivedRanking {
     pub fn covers(&self, pages: u8) -> bool {
         self.end || self.pages >= pages
+    }
+
+    pub fn first_pages(&self, wanted: u8) -> Option<FirstPages<'_>> {
+        let pages = self.pages.min(wanted);
+        if pages == self.pages {
+            return Some(FirstPages { rows: &self.rows, pages, end: self.end });
+        }
+        let counts = self.page_rows.get(..usize::from(pages))?;
+        let rows = self.rows.get(..counts.iter().map(|count| *count as usize).sum())?;
+        Some(FirstPages { rows, pages, end: false })
+    }
+}
+
+pub struct FirstPages<'a> {
+    pub rows: &'a [SharedRankingRow],
+    pub pages: u8,
+    pub end: bool,
+}
+
+pub fn to_api_broker(broker: Broker) -> api::Broker {
+    match broker {
+        Broker::Kiwoom => api::Broker::Kiwoom,
+        Broker::Kis => api::Broker::Kis,
     }
 }
 

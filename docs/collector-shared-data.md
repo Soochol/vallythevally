@@ -153,7 +153,7 @@ TR 줄:
 
 파일은 키마다 조각 하나다: `<VALLY_SHARED_DATA_DIR>/rankings/<YYYYMMDD>/<키 이름>.json`. 키가 서로 다른 파일을 쓰므로 쓰기 경합이 없다. 서버는 관측일이 가장 늦은 폴더의 조각들을 읽어 한 판으로 합치고, 조각 파일이 바뀐 때만 다시 합친다. 같은 조건이 여러 조각에 있으면 받은 시각이 가장 늦은 쪽을 쓴다.
 
-조각 본문(`RankingsPartBody`, camelCase): `periodSecs`, `pages`, `conditions`(배열). 항목: `key`(조건 키), `state`(`ready`·`failed`(`at`, `message`)·`unavailable`), `last`(없을 수 있다. `rows`, `pages`(받은 쪽 수), `end`, `limited`, `receivedAt`(Unix 초), `broker`). 행은 `code`, `name`, `price`, `changeRate`, `figures`이고 순번·상장 여부·제외 거름은 서버가 읽을 때 정한다. 머리 `asOf`는 그 키가 마지막으로 돈 시각이고 `sources`에 그 키와 증권사가 하나 든다. 조각이 낡았는지는 지금 − `asOf`가 `periodSecs`의 두 배를 넘는지로 본다(`MergedCondition::is_stale`).
+조각 본문(`RankingsPartBody`, camelCase): `periodSecs`, `pages`, `conditions`(배열). 항목: `key`(조건 키), `state`(`ready`·`failed`(`at`, `message`)·`unavailable`), `last`(없을 수 있다. `rows`, `pages`(받은 쪽 수), `pageRows`(쪽마다 받은 행 수. 서버가 요청 쪽 수만큼 앞에서 자르는 데 쓴다. 없는 옛 조각은 빈 목록), `end`, `limited`, `receivedAt`(Unix 초), `broker`). 행은 `code`, `name`, `price`, `changeRate`, `figures`이고 순번·상장 여부·제외 거름은 서버가 읽을 때 정한다. 머리 `asOf`는 그 키가 마지막으로 돈 시각이고 `sources`에 그 키와 증권사가 하나 든다. 조각이 낡았는지는 지금 − `asOf`가 `periodSecs`의 두 배를 넘는지로 본다(`MergedCondition::is_stale`).
 
 한투 키의 자식은 아직 순위를 받을 `KisRest` 연결이 없다(`Market::Kis(None)`). 그 키가 맡은 일은 오류로 남고 파일을 쓰지 않는다. 한투 키 자격증명을 자식에 건네는 길은 이 일 다음에 더한다.
 

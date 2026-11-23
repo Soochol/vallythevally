@@ -135,7 +135,7 @@ impl SharedJob for RankingsJob {
                 let position = options.conditions.iter().position(|candidate| candidate.key == condition.key).unwrap_or(usize::MAX);
                 let entry = match outcome {
                     Ok(walked) => {
-                        let received = ReceivedRanking { rows: walked.rows.into_iter().map(row_of).collect(), pages: walked.pages, end: walked.end, limited: walked.limited, received_at: now.unix(), broker: own };
+                        let received = ReceivedRanking { rows: walked.rows.into_iter().map(row_of).collect(), page_rows: walked.page_rows, pages: walked.pages, end: walked.end, limited: walked.limited, received_at: now.unix(), broker: own };
                         ConditionEntry { key: condition.key.clone(), state: ConditionState::Ready, last: self.remember(&condition.key, Some(received)) }
                     }
                     Err(message) => {

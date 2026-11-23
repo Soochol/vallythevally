@@ -65,6 +65,12 @@
 
 외국인은 키움이 `내국인대우외국인`을 따로 주므로 그 값은 합치지 않는다. `foreignEok`은 키움의 외국인 열이다.
 
+### 공용 자료에서 답하기
+
+`VALLY_SHARED_DATA_DIR`이 있으면([공용 자료](collector-shared-data.md)) 여섯 칸 모두 수집 데몬이 쓴 `market-overview/<관측일>.json` 판에서 답한다. 키움을 부르지 않고 `context`·칸 값은 판의 것 그대로다. `context.receivedAt`은 판이 그 칸을 받은 시각이다. 칸 안의 실패는 지금과 같은 `MarketOverviewPart`의 `failed`이고 그 부분만 실패다. 판이 없거나 그 칸이 판에 없으면 `404 not_prepared`다(키움으로 되돌아가지 않는다). 변수가 없으면 지금처럼 키움을 부른다.
+
+`flow/intraday`는 공용 자료 폴더의 `market-samples/<관측일>.jsonl`에서 만든다. 서버는 그 파일이 바뀐 때만 다시 읽고 쓰다 끊긴 마지막 줄은 건너뛴다. 이때 서버의 장중 표본 샘플러(`market_overview::start`)는 돌지 않는다. 지난 관측일 파일은 쓰지 않는다. 종목 투자자 경로(`investors.rs`)는 바뀌지 않는다.
+
 ### `flow/intraday`
 
 오늘(관측일)의 누적선이다. 키움을 부르지 않고 서버가 1분마다 쌓은 표본에서 만든다. `points`는 분 시작 시각(`at`, Unix 초) 순이고, 값은 그날 처음부터의 누적이다. 분마다 `individualEok`, `foreignEok`, `institutionEok`(`ka10051`)과 `programEok`(`ka90005` 전체, 억원)가 있다. 그 분에 한 TR이 실패했으면 그 TR의 값만 `null`이다. 표본은 정규장에만 쌓이므로 표본이 없으면 `points`는 빈 배열이다. 장이 끝난 뒤에도 그날 표본은 다음 관측일 07:45까지 남는다.
