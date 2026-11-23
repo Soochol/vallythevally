@@ -50,6 +50,7 @@ const API_ERROR_REASONS = [
   "missing_day",
   "updating",
   "data_changed",
+  "stale_data",
   "not_connected",
   "orders_off",
   "account_changed",

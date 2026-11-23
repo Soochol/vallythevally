@@ -12,6 +12,7 @@ mod update;
 
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
+use std::time::Duration;
 
 use axum::Router;
 use axum::body::Body;
@@ -163,8 +164,8 @@ impl Screener {
         tokio::task::spawn_blocking(move || f(&store)).await.map_err(|e| StoreError(format!("저장소 작업이 끝나지 못했습니다: {e}")))?
     }
 
-    pub fn read_shared_snapshots(&self, data: Arc<crate::shared_data::SharedData>) {
-        if self.shared.set(SharedQuotes::new(data)).is_err() {
+    pub fn read_shared_snapshots(&self, data: Arc<crate::shared_data::SharedData>, stale_limit: Duration) {
+        if self.shared.set(SharedQuotes::new(data, stale_limit)).is_err() {
             tracing::warn!("스크리너가 이미 공용 스냅샷을 읽고 있어 다시 켜지 않습니다");
         }
     }
@@ -366,6 +367,9 @@ impl Screener {
         let Some(snapshot) = shared.snapshot(observation, now.kst_date(), need_day) else {
             return Err(ApiFailure::new(api::ApiErrorCode::KiwoomUnavailable, "공용 시세 스냅샷을 아직 받지 못했습니다. 수집 데몬이 오늘 첫 스냅샷을 쓴 뒤 다시 실행하세요"));
         };
+        if observation == Observation::Current && !Period::Day.bucket(now).is_confirmed_at(now) {
+            shared.refuse_if_stale(&snapshot, now)?;
+        }
         let basis = CollectionBasis { generation, update_epoch };
         let slot = shared.slot(ResultKey::new(screen_key, &snapshot, basis, now.kst_date(), observation));
         let mut judged_here = false;
