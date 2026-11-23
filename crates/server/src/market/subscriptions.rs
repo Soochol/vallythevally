@@ -311,18 +311,18 @@ impl SubscriptionManager {
                 .map(|((s, kind), at)| (*at, *s, Some(*kind))),
         );
         graces.sort();
-        let mut watch_only: Vec<(Rank, Symbol)> = self
+        let mut evictable_by_rank: Vec<(Rank, Symbol)> = self
             .admitted
             .iter()
             .filter(|s| self.holders.contains_key(s) && !self.released_at.contains_key(s))
             .map(|s| (self.rank(*s), *s))
             .filter(|(r, _)| evictable(*r))
             .collect();
-        watch_only.sort_by(|a, b| b.cmp(a));
+        evictable_by_rank.sort_by(|a, b| b.cmp(a));
         graces
             .into_iter()
             .map(|(_, s, kind)| kind.map_or(Eviction::Symbol(s), |kind| Eviction::Venue(s, kind)))
-            .chain(watch_only.into_iter().map(|(_, s)| Eviction::Symbol(s)))
+            .chain(evictable_by_rank.into_iter().map(|(_, s)| Eviction::Symbol(s)))
             .collect()
     }
 
