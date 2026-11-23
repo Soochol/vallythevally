@@ -156,7 +156,7 @@ export class ChartController {
   private ready: ReadyStatus | null = null;
   private settingData = false;
   private readonly initialRange: InitialRange;
-  private readonly pendingScroll = new PendingScroll();
+  private readonly pendingScroll = new PendingScroll((callback) => requestAnimationFrame(callback));
   private disposed = false;
   private extensions = new Set<ChartExtension>();
   private readonly pendingDraw = new Map<UnixSeconds, Bar>();

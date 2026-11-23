@@ -64,18 +64,21 @@ export function chartTimeProjection(scale: ChartTimeScale, period: Period) {
 type ScrollScale = Pick<ChartTimeScale, "scrollPosition" | "scrollToPosition">;
 
 export class PendingScroll {
-  private pending: { from: number; target: number } | null = null;
+  private pending: { target: number } | null = null;
+
+  constructor(private readonly afterNextPaint: (callback: () => void) => void) {}
 
   position(scale: ScrollScale): number {
-    const position = scale.scrollPosition();
-    return this.pending && this.pending.from === position ? this.pending.target : position;
+    return this.pending ? this.pending.target : scale.scrollPosition();
   }
 
   scrollTo(scale: ScrollScale, target: number): void {
-    const position = scale.scrollPosition();
-    const from = this.pending && this.pending.from === position ? this.pending.from : position;
-    this.pending = { from, target };
+    const command = { target };
+    this.pending = command;
     scale.scrollToPosition(target, false);
+    this.afterNextPaint(() => {
+      if (this.pending === command) this.pending = null;
+    });
   }
 }
 
