@@ -40,8 +40,10 @@ async fn start_idp() -> Arc<FakeIdp> {
     )
 }
 
-fn free_port() -> u16 {
-    std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port()
+fn open_public_listener() -> (std::net::TcpListener, u16) {
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    (listener, port)
 }
 
 struct Work {
@@ -246,11 +248,12 @@ struct Spec<'a> {
     env: Vec<(&'a str, String)>,
     public: bool,
     fake: Option<ScriptedTransport>,
+    frozen_clock: bool,
 }
 
 impl<'a> Spec<'a> {
     fn new(work: &'a Work, idp: &'a Arc<FakeIdp>) -> Spec<'a> {
-        Spec { work, idp, env: Vec::new(), public: true, fake: None }
+        Spec { work, idp, env: Vec::new(), public: true, fake: None, frozen_clock: false }
     }
 
     fn env(mut self, pairs: &[(&'a str, &str)]) -> Spec<'a> {
@@ -263,6 +266,11 @@ impl<'a> Spec<'a> {
         self
     }
 
+    fn frozen_clock(mut self) -> Spec<'a> {
+        self.frozen_clock = true;
+        self
+    }
+
     fn with_fake(mut self, fake: ScriptedTransport) -> Spec<'a> {
         self.fake = Some(fake);
         self
@@ -270,10 +278,11 @@ impl<'a> Spec<'a> {
 
     async fn start(self) -> Site {
         let _ = tracing_subscriber::fmt().with_env_filter("warn,server=debug,account_server=debug").with_test_writer().try_init();
-        let public_port = free_port();
         let operator_bind = "127.0.0.1:0";
         let mut vars = operator_vars(self.work.path(), operator_bind);
+        let (opened, public_port) = open_public_listener();
         let public_origin = format!("http://127.0.0.1:{public_port}");
+        let opened = self.public.then_some(opened);
         if self.public {
             vars.extend(public_vars(self.idp, &format!("127.0.0.1:{public_port}"), &public_origin));
             let shared = shared_dir(self.work);
@@ -286,7 +295,8 @@ impl<'a> Spec<'a> {
         let lock = server::instance::InstanceLock::acquire(&config.lock_path).unwrap();
         let (events, stream_events) = tokio::sync::mpsc::channel(16);
         let adapters = Adapters { kiwoom: fake.transport(), kis: None, kis_feed: None, stream: StreamSource::Detached(stream_events), kiwoom_spacing: None, dart_spacing: Some(Duration::from_millis(1)) };
-        let started = server::app::start(&config, &lock, adapters).await.unwrap_or_else(|_| panic!("서버가 시작하지 못했다"));
+        let options = server::app::StartOptions { public_listener: opened, frozen_clock: self.frozen_clock };
+        let started = server::app::start_with(&config, &lock, adapters, options).await.unwrap_or_else(|_| panic!("서버가 시작하지 못했다. 원인은 위 tracing 줄(server=error)에 있다"));
         let server::app::Started { state, router, listener, automatic, public } = started;
         drop(automatic);
         state.rest.set_access(Access::Open);
@@ -987,7 +997,7 @@ async fn the_sum_of_many_accounts_over_the_total_bucket_is_429() {
 async fn a_hundred_and_fifty_symbol_lookups_fit_the_default_account_bucket() {
     let work = Work::new();
     let idp = start_idp().await;
-    let site = Spec::new(&work, &idp).start().await;
+    let site = Spec::new(&work, &idp).frozen_clock().start().await;
     site.load_symbols();
     let who = site.login("alice").await;
     for turn in 0..150 {
