@@ -12,10 +12,25 @@ test.use({ clockStart: "20261109100000", actionTimeout: 10_000 });
 const SETTINGS = { v: 1, style: "candle", scale: "normal", indicators: [], compare: [], panels: [], visibleBars: 40 };
 const SIZES = [{ width: 1440, height: 900 }, { width: 1024, height: 768 }, { width: 1024, height: 920 }];
 
-function seed(scenario: Scenario, count = 4) {
+const chartWindows = (count: number): LayoutWindow[] => Array.from({ length: count }, (_, i) => ({ id: `cell-${i}`, kind: "chart", link: null, symbol: "005930", venue: "combined", period: "D", chartSettings: SETTINGS }));
+const chartGroup = (i: number) => ({ kind: "group", id: `g${i + 1}`, tabs: [`cell-${i}`], active: `cell-${i}` }) as const;
+const chartRow = (left: number, ratio: number) => ({ kind: "split", dir: "row", ratio, first: chartGroup(left), second: chartGroup(left + 1) }) as const;
+const WIDE_FIRST_CHART_SHARE = 0.7;
+const FOUR_CHART_GRID = { kind: "split", dir: "column", ratio: 0.5, first: chartRow(0, WIDE_FIRST_CHART_SHARE), second: chartRow(2, 0.5) } as const;
+
+function seed(scenario: Scenario) {
   const base = scenario.documents.layout();
-  const charts: LayoutWindow[] = Array.from({ length: count }, (_, i) => ({ id: `cell-${i}`, kind: "chart", link: null, symbol: "005930", venue: "combined", period: "D", chartSettings: SETTINGS }));
-  scenario.documents.saveLayout({ ...base, windows: [...charts, ...base.windows.filter((window) => window.kind !== "chart")], placement: {}, revision: base.revision + 1 });
+  scenario.documents.saveLayout({ ...base, windows: [...chartWindows(1), ...base.windows.filter((window) => window.kind !== "chart")], placement: {}, revision: base.revision + 1 });
+  seedDockState(scenario);
+}
+
+function seedFourCharts(scenario: Scenario) {
+  const base = scenario.documents.layout();
+  scenario.documents.saveLayout({ ...base, windows: chartWindows(4), placement: { v: 1, dock: { root: FOUR_CHART_GRID, floats: [] }, canvas: null }, revision: base.revision + 1 });
+  seedDockState(scenario);
+}
+
+function seedDockState(scenario: Scenario) {
   scenario.documents.saveUiState({ ...scenario.documents.uiState(), layoutMode: "dock" });
   const watchlists = scenario.documents.watchlists();
   scenario.documents.saveWatchlists({ ...watchlists, lists: watchlists.lists.map((list) => ({ ...list, symbols: ["035420", "000660"] })) });
@@ -115,7 +130,7 @@ function readable(charts: Awaited<ReturnType<typeof geometry>>) {
 
 test("four chart text and full controls remain readable inside their panes", async ({ page, scenario }, testInfo) => {
   await page.addInitScript(installChartProbe);
-  seed(scenario);
+  seedFourCharts(scenario);
   await page.goto("/");
   const captures = [];
   for (const size of SIZES) {
@@ -203,7 +218,7 @@ async function quietPresentation(page: Page) {
 
 test("compact controls support hover, keyboard, venue, settings, collapse, toolbar end and OHLC updates", async ({ page, scenario }, testInfo) => {
   await page.addInitScript(installChartProbe);
-  seed(scenario);
+  seedFourCharts(scenario);
   await page.setViewportSize({ width: 1024, height: 768 });
   await page.goto("/");
   await settle(page, 4);
@@ -264,7 +279,7 @@ test("compact controls support hover, keyboard, venue, settings, collapse, toolb
 
 test("tall normal charts and repeated resize restore geometry and saved presentation", async ({ page, scenario }, testInfo) => {
   await page.addInitScript(installChartProbe);
-  seed(scenario, 1);
+  seed(scenario);
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto("/");
   await settle(page, 1);
@@ -297,7 +312,7 @@ test("tall normal charts and repeated resize restore geometry and saved presenta
 
 test("full pinned rail restores its capacity and saved state after a short resize", async ({ page, scenario }) => {
   await page.addInitScript(installChartProbe);
-  seed(scenario);
+  seedFourCharts(scenario);
   const state = scenario.documents.uiState();
   scenario.documents.saveUiState({ ...state, drawing: { ...scenario.documents.uiPrefs().drawing, pinnedTools: TOOLS.map((tool) => tool.tool) }, revision: state.revision + 1 });
   await page.setViewportSize({ width: 1440, height: 1600 });
@@ -331,7 +346,7 @@ test("full pinned rail restores its capacity and saved state after a short resiz
 
 test("rail fold boundary keeps stable frames and real help", async ({ page, scenario }, testInfo) => {
   await page.addInitScript(installChartProbe);
-  seed(scenario, 1);
+  seed(scenario);
   const base = scenario.documents.layout();
   scenario.documents.saveLayout({ ...base, windows: base.windows.filter((window) => window.kind === "chart"), placement: { v: 1, dock: null, canvas: { rects: { "cell-0": { x: .02, y: .02, w: .5, h: .38 } }, order: ["cell-0"] } } });
   scenario.documents.saveUiState({ ...scenario.documents.uiState(), layoutMode: "canvas", drawing: { ...scenario.documents.uiPrefs().drawing, pinnedTools: TOOLS.map((tool) => tool.tool) } });
