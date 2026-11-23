@@ -904,6 +904,8 @@ async fn every_public_response_carries_the_csp_and_the_security_headers() {
     let site = Spec::new(&work, &idp).start().await;
     let who = site.login("alice").await;
     let csp = include_str!("../src/public/csp.txt").trim();
+    assert!(csp.contains("connect-src 'self';"), "{csp}");
+    assert!(!csp.contains("kiwoom"), "{csp}");
     let mut replies = vec![
         site.get(&who, "/api/collector/access").await,
         site.get_anonymous("/api/screener/status").await,

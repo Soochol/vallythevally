@@ -69,19 +69,13 @@ test("로그인 전 랜딩은 정책 위반 없이 열린다", async ({ page, sc
   await csp.expectNoViolations();
 });
 
-test("로그인 뒤 작업 공간과 시스템 설정 키 화면은 정책 위반 없이 돈다", async ({ page, scenario }) => {
+test("로그인 뒤 작업 공간과 시스템 설정은 정책 위반 없이 돈다", async ({ page, scenario }) => {
   const csp = await enforcePolicy(page);
   scenario.publicMode.enable(SESSION);
   await page.goto("/");
   await expect(page.getByRole("complementary", { name: "관심종목" })).toBeVisible();
   await page.getByRole("button", { name: "시스템 설정", exact: true }).click();
-  const keys = page.getByRole("dialog", { name: "시스템 설정", exact: true }).getByTestId("browser-keys");
-  await expect(keys).toBeVisible();
-  await keys.getByLabel("별칭").fill("검사용 키");
-  await keys.getByLabel("앱키").fill("AKCSP-0000-aaaa-bbbb-cccc");
-  await keys.getByLabel("시크릿").fill("SKCSP-secret-0000");
-  await keys.getByRole("button", { name: "저장", exact: true }).click();
-  await expect(keys.getByTestId("browser-key-row")).toHaveCount(1);
+  await expect(page.getByRole("dialog", { name: "시스템 설정", exact: true }).getByRole("tab", { name: "단축키" })).toBeVisible();
   await csp.expectNoViolations();
 });
 

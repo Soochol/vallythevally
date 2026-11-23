@@ -167,10 +167,11 @@ test.describe("로그인 뒤", () => {
     listenerOnlyForbidden(scenario);
   });
 
-  test("시스템 설정의 키움 영역은 브라우저 보관소 화면이고 키움 경로를 부르지 않는다", async ({ page, scenario }) => {
+  test("시스템 설정에는 키움 키 칸이 없고 키움 경로를 부르지 않는다", async ({ page, scenario }) => {
     await page.goto("/");
     await page.getByRole("button", { name: "시스템 설정", exact: true }).click();
-    await expect(settings(page).getByTestId("browser-keys")).toBeVisible();
+    await expect(settings(page).getByRole("tab", { name: "증권사 · 계좌" })).toHaveCount(0);
+    await expect(settings(page).getByRole("tab", { name: "단축키" })).toHaveAttribute("aria-selected", "true");
     await expect(settings(page).getByRole("tab", { name: "일반" })).toHaveCount(0);
     await expect(page.getByRole("alert")).toHaveCount(0);
     listenerOnlyForbidden(scenario);
@@ -193,7 +194,8 @@ test.describe("로그인 뒤", () => {
     await openAccountMenu(page);
     await settings(page).getByRole("button", { name: "계정 삭제", exact: true }).click();
     const confirm = settings(page).getByRole("region", { name: "계정 삭제" });
-    await expect(confirm).toContainText("이 브라우저에 저장한 키움 키는 따로 지워야 합니다");
+    await expect(confirm).toContainText("계정 서버에 있는 이 계정과 올려 둔 셋업을 지웁니다");
+    await expect(confirm.getByRole("checkbox")).toHaveCount(0);
     expect(callsTo(scenario, "DELETE", "/v1/account")).toHaveLength(0);
     await confirm.getByRole("textbox").fill("계정 삭제");
     await confirm.getByRole("button", { name: "계정 삭제 실행" }).click();

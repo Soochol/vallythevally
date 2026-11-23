@@ -1,6 +1,5 @@
 import { sendNoContent } from "../api/http";
 import { ACCOUNT_PATH, LOGOUT_PATH } from "./session";
-import { wipeBrowserKeys } from "./keys/vaultStore";
 import { markSignedOut } from "./signedOut";
 
 export async function logoutPublic(): Promise<void> {
@@ -8,11 +7,7 @@ export async function logoutPublic(): Promise<void> {
   markSignedOut();
 }
 
-export async function deletePublicAccount(options: { clearBrowserKeys: boolean }): Promise<void> {
+export async function deletePublicAccount(): Promise<void> {
   await sendNoContent("DELETE", ACCOUNT_PATH, "{}");
-  try {
-    if (options.clearBrowserKeys) await wipeBrowserKeys();
-  } finally {
-    markSignedOut();
-  }
+  markSignedOut();
 }
