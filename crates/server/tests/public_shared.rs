@@ -159,6 +159,14 @@ fn work_folder() -> tempfile::TempDir {
 
 impl Site {
     async fn start(fake: ScriptedTransport) -> Site {
+        Site::start_with_clock(fake, false).await
+    }
+
+    async fn start_frozen(fake: ScriptedTransport) -> Site {
+        Site::start_with_clock(fake, true).await
+    }
+
+    async fn start_with_clock(fake: ScriptedTransport, frozen_clock: bool) -> Site {
         let idp = start_idp().await;
         let work = work_folder();
         let (opened, public_port) = open_public_listener();
@@ -172,7 +180,7 @@ impl Site {
         let lock = server::instance::InstanceLock::acquire(&config.lock_path).unwrap();
         let (events, stream_events) = tokio::sync::mpsc::channel(16);
         let adapters = Adapters { kiwoom: fake.transport(), kis: None, kis_feed: None, stream: StreamSource::Detached(stream_events), kiwoom_spacing: None };
-        let started = server::app::start_with(&config, &lock, adapters, server::app::StartOptions { public_listener: Some(opened), frozen_clock: false }).await.unwrap_or_else(|_| panic!("서버가 시작하지 못했다"));
+        let started = server::app::start_with(&config, &lock, adapters, server::app::StartOptions { public_listener: Some(opened), frozen_clock }).await.unwrap_or_else(|_| panic!("서버가 시작하지 못했다"));
         let server::app::Started { state, router, listener, public } = started;
         state.rest.set_access(Access::Open);
         let public = public.expect("공개 설정이 있다");
@@ -469,7 +477,7 @@ async fn every_public_shared_route(site: &Site, who: &Session) -> Vec<(String, u
 
 #[tokio::test]
 async fn every_shared_public_route_answers_many_accounts_without_one_kiwoom_transport_call() {
-    let site = Site::start(ScriptedTransport::new()).await;
+    let site = Site::start_frozen(ScriptedTransport::new()).await;
     site.fill_screener_store().await;
     site.load_symbols();
     write_every_board(&site.shared);
@@ -513,7 +521,7 @@ async fn every_shared_public_route_answers_many_accounts_without_one_kiwoom_tran
 #[tokio::test]
 async fn a_public_load_neither_queues_behind_nor_in_front_of_an_operator_kiwoom_request() {
     let fake = ScriptedTransport::new();
-    let site = Site::start(fake.clone()).await;
+    let site = Site::start_frozen(fake.clone()).await;
     site.load_symbols();
     write_every_board(&site.shared);
     site.poll().await;
@@ -570,7 +578,7 @@ async fn the_server_without_public_settings_starts_without_the_shared_data_folde
 
 #[tokio::test]
 async fn the_usage_page_reports_each_boards_age_its_read_errors_and_screener_result_reuse() {
-    let site = Site::start(ScriptedTransport::new()).await;
+    let site = Site::start_frozen(ScriptedTransport::new()).await;
     site.fill_screener_store().await;
     site.load_symbols();
     write_every_board(&site.shared);
@@ -597,7 +605,7 @@ async fn the_usage_page_reports_each_boards_age_its_read_errors_and_screener_res
 
 #[tokio::test]
 async fn a_public_screener_run_before_the_server_has_a_calendar_is_not_prepared_and_calls_nothing() {
-    let site = Site::start(ScriptedTransport::new()).await;
+    let site = Site::start_frozen(ScriptedTransport::new()).await;
     site.load_symbols();
     write_every_board(&site.shared);
     site.poll().await;
