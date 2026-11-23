@@ -116,6 +116,19 @@ describe("드로잉 기본색 --draw", () => {
   });
 });
 
+describe("고른 면", () => {
+  const MIN_PICKED_SURFACE_CONTRAST = 1.2;
+  const hoverOnSurface = over(color("--hover"), SURFACES["--surface"]);
+
+  it("고른 면 --raised가 --surface 위에서 1.2:1 이상으로 드러난다", () => {
+    expect(contrastRatio(SURFACES["--raised"], SURFACES["--surface"])).toBeGreaterThanOrEqual(MIN_PICKED_SURFACE_CONTRAST);
+  });
+
+  it("--surface 위 --hover 면의 대비가 고른 면 --raised의 대비보다 낮아 가리킨 줄이 고른 줄보다 먼저 드러나지 않는다", () => {
+    expect(contrastRatio(hoverOnSurface, SURFACES["--surface"])).toBeLessThan(contrastRatio(SURFACES["--raised"], SURFACES["--surface"]));
+  });
+});
+
 describe("값이 바뀐 토큰", () => {
   it("오류색 --danger가 상승색 --up과 ΔE00 14 이상 떨어진다", () => {
     expect(deltaE2000(color("--danger"), color("--up"))).toBeGreaterThanOrEqual(MIN_SERIES_DISTANCE);
