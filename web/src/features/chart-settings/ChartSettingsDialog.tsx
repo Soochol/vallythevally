@@ -31,7 +31,7 @@ const EXTREME_BASES = [
 ] as const satisfies readonly SegmentedOption<ExtremeBasis>[];
 const BAR_PRESET_OPTIONS = BAR_PRESETS.map((bars): SegmentedOption<string> => ({ value: String(bars), label: bars ?? "자동", title: bars === null ? "기본 봉 수 (데스크톱 130, 휴대폰 90, 분기봉·연봉은 전체)" : undefined }));
 
-export function ChartSettingsDialog({ cellId, anchor, onClose }: { cellId: WindowId; anchor: RefObject<HTMLElement | null>; onClose(): void }) {
+export function ChartSettingsDialog({ cellId, anchor, anchorRect, onClose }: { cellId: WindowId; anchor: RefObject<HTMLElement | null>; anchorRect?: () => DOMRect | undefined; onClose(): void }) {
   const cell = useCell(cellId);
   const settings = cell.chartSettings;
   const name = useSymbolInfo(cell.symbol).data?.name ?? cell.symbol;
@@ -68,7 +68,7 @@ export function ChartSettingsDialog({ cellId, anchor, onClose }: { cellId: Windo
   };
 
   return (
-    <Popover anchor={anchor} solid role="dialog" aria-labelledby={`${id}-title`} data-chart-control="" className="cs-popover" fitBelow={160} onClose={onClose}>
+    <Popover anchor={anchor} anchorRect={anchorRect} solid role="dialog" aria-labelledby={`${id}-title`} data-chart-control="" className="cs-popover" fitBelow={160} onClose={onClose}>
       <header className="cs-head">
         <h2 id={`${id}-title`}>차트 설정</h2>
         <span className="cs-cell">{cellName}</span>

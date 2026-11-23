@@ -60,6 +60,8 @@ test("800px에서 더 보기로 연 차트 설정 팝오버는 더 보기 버튼
   const button = (await more.boundingBox())!;
   expect(popover.y).toBeGreaterThanOrEqual(button.y + button.height - 1);
   expect(popover.x + popover.width).toBeGreaterThanOrEqual(button.x);
+  await page.setViewportSize({ width: 900, height: 900 });
+  await expect.poll(async () => (await settingsPopover(page).boundingBox())!.y).toBeGreaterThanOrEqual(button.y + button.height - 1);
 });
 
 test("봉 모양을 바꾸면 팝오버가 열린 채 차트에 바로 반영된다", async ({ page }) => {

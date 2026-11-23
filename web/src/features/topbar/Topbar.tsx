@@ -31,6 +31,7 @@ export function Topbar() {
   const [settingsOpen, setSettingsOpen] = useState(false);
 
   const moreRoot = useRef<HTMLDivElement>(null);
+  const visibleSettingsAnchorRect = () => (settingsButton.current?.getClientRects().length ? settingsButton.current : moreRoot.current)?.getBoundingClientRect();
   const [moreOpen, setMoreOpen] = useState(false);
   const moreItems: MenuItem[] = [
     { kind: "action", label: "비교", icon: <CompareIcon />, onSelect: () => openIndicatorCommand(cellId, "compare") },
@@ -60,7 +61,7 @@ export function Topbar() {
           <button type="button" className="tb-btn aria-expanded:bg-accent-soft aria-expanded:text-accent" aria-label="더 보기" aria-haspopup="menu" aria-expanded={moreOpen} title="더 보기" onClick={() => setMoreOpen((open) => !open)}><MoreIcon /></button>
           {moreOpen && <Menu label="더 보기" root={moreRoot} items={moreItems} onClose={() => setMoreOpen(false)} />}
         </div>
-        {settingsOpen && <ChartSettingsDialog cellId={cellId} anchor={settingsButton.current?.getClientRects().length ? settingsButton : moreRoot} onClose={() => setSettingsOpen(false)} />}
+        {settingsOpen && <ChartSettingsDialog cellId={cellId} anchor={settingsButton} anchorRect={visibleSettingsAnchorRect} onClose={() => setSettingsOpen(false)} />}
       </div>
       <div className="topbar-search-slot">
         <button type="button" className="shell-search" aria-haspopup="dialog" aria-label="종목·지표·명령 찾기" title={searchTitle(keys)} onClick={() => openSearch()}>
