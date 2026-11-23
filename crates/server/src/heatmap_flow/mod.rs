@@ -1,5 +1,6 @@
 mod cache;
 mod series;
+mod shared;
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -18,7 +19,7 @@ use crate::http::{ApiFailure, AppState, Lookup, symbol_list, venue_param};
 use crate::quotes::effective_venue;
 pub use crate::heatmap_board::{Busy, Refused};
 pub use cache::{DayError, FRESH_SECS, FlowCache, Freshness, Origin, Rolling};
-pub use series::{BUCKET_MINUTES, Cell, SymbolDay, group_cells};
+pub use series::{BUCKET_MINUTES, Cell, CollectedCell, SymbolDay, Weighting, group_cells};
 
 pub const REFRESH_SECS: u64 = 60;
 
@@ -45,6 +46,10 @@ pub struct HeatmapFlowSeries {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     #[ts(as = "Option<Vec<SymbolCode>>", optional)]
     pub not_in_themes: Vec<SymbolCode>,
+    #[ts(as = "Option<Vec<SymbolCode>>", optional)]
+    pub not_collected: Vec<SymbolCode>,
+    #[ts(optional = nullable)]
+    pub as_of: Option<UnixSeconds>,
     pub limit: u32,
 }
 
@@ -105,11 +110,12 @@ struct Outcomes {
     days: Vec<Arc<series::SymbolDay>>,
     used: Vec<SymbolCode>,
     missing: Vec<SymbolCode>,
+    not_collected: Vec<SymbolCode>,
     first_error: Option<crate::bars::BarError>,
 }
 
 fn sorted_outcomes(symbols: &[Symbol], outcomes: Vec<Result<Arc<series::SymbolDay>, DayError>>) -> Outcomes {
-    let mut sorted = Outcomes { days: Vec::new(), used: Vec::new(), missing: Vec::new(), first_error: None };
+    let mut sorted = Outcomes { days: Vec::new(), used: Vec::new(), missing: Vec::new(), not_collected: Vec::new(), first_error: None };
     for (symbol, outcome) in symbols.iter().zip(outcomes) {
         match outcome {
             Ok(day) => {
@@ -117,6 +123,7 @@ fn sorted_outcomes(symbols: &[Symbol], outcomes: Vec<Result<Arc<series::SymbolDa
                 sorted.used.push(code(*symbol));
             }
             Err(DayError::OutOfBudget) => sorted.missing.push(code(*symbol)),
+            Err(DayError::NotCollected) => sorted.not_collected.push(code(*symbol)),
             Err(DayError::Bars(e)) => {
                 tracing::info!(symbol = %symbol.as_wire(), reason = %e, "히트맵 흐름에서 종목을 뺍니다");
                 sorted.missing.push(code(*symbol));
@@ -128,10 +135,11 @@ fn sorted_outcomes(symbols: &[Symbol], outcomes: Vec<Result<Arc<series::SymbolDa
 }
 
 fn series_of(st: &AppState, sorted: Outcomes, over_limit: Vec<Symbol>, not_in_themes: Vec<Symbol>) -> Result<HeatmapFlowSeries, ApiFailure> {
-    let Outcomes { days, used, missing, first_error } = sorted;
+    let Outcomes { days, used, missing, not_collected, first_error } = sorted;
     if let Some(e) = first_error.filter(|_| days.is_empty()) {
         return Err(Lookup::Bars.failure(e, st.clock.now()));
     }
+    let as_of = days.iter().filter_map(|day| day.as_of()).max().map(UnixSeconds);
     Ok(HeatmapFlowSeries {
         date: KstDate(st.clock.now().kst_date()),
         bucket_minutes: BUCKET_MINUTES,
@@ -140,6 +148,8 @@ fn series_of(st: &AppState, sorted: Outcomes, over_limit: Vec<Symbol>, not_in_th
         missing,
         over_limit: over_limit.into_iter().map(code).collect(),
         not_in_themes: not_in_themes.into_iter().map(code).collect(),
+        not_collected,
+        as_of,
         limit: MAX_SYMBOLS as u32,
     })
 }
@@ -149,8 +159,18 @@ async fn flow(State(st): State<Arc<AppState>>, Extension(cache): Extension<Arc<F
     let requested = venue_param(&q)?.unwrap_or(Venue::Combined);
     let over_limit = symbols.split_off(symbols.len().min(MAX_SYMBOLS));
     let feeds = feeds_of(&st, &symbols, requested).await?;
-    let outcomes = futures::future::join_all(feeds.iter().map(|feed| cache.day(&st.bars, &st.clock, *feed))).await;
-    let outcomes = outcomes.into_iter().map(|outcome| outcome.map_err(DayError::Bars)).collect();
+    let outcomes = if st.shared_data.is_enabled() {
+        let mut outcomes: Vec<_> = feeds.iter().map(|feed| shared::day(&st, *feed)).collect();
+        let uncollected: Vec<usize> = (0..outcomes.len()).filter(|i| matches!(outcomes[*i], Err(DayError::NotCollected))).collect();
+        let filled = futures::future::join_all(uncollected.iter().map(|i| cache.day(&st.bars, &st.clock, feeds[*i]))).await;
+        for (i, outcome) in uncollected.into_iter().zip(filled) {
+            outcomes[i] = outcome.map_err(DayError::Bars);
+        }
+        outcomes
+    } else {
+        let outcomes = futures::future::join_all(feeds.iter().map(|feed| cache.day(&st.bars, &st.clock, *feed))).await;
+        outcomes.into_iter().map(|outcome| outcome.map_err(DayError::Bars)).collect()
+    };
     Ok(Json(series_of(&st, sorted_outcomes(&symbols, outcomes), over_limit, Vec::new())?))
 }
 
@@ -160,6 +180,12 @@ pub async fn flow_within(st: &AppState, cache: &FlowCache, q: &HashMap<String, S
     let (mut symbols, not_in_themes): (Vec<Symbol>, Vec<Symbol>) = requested_symbols.into_iter().partition(|symbol| allowed.contains(symbol));
     let over_limit = symbols.split_off(symbols.len().min(MAX_SYMBOLS));
     let feeds = feeds_of(st, &symbols, requested).await.map_err(Refused::Failed)?;
+    if st.shared_data.is_enabled() {
+        let outcomes: Vec<_> = feeds.iter().map(|feed| shared::day(st, *feed)).collect();
+        let tally = FlowTally { cached: outcomes.iter().filter(|outcome| outcome.is_ok()).count() as u32, rejected: not_in_themes.len() as u32, ..FlowTally::default() };
+        let series = series_of(st, sorted_outcomes(&symbols, outcomes), over_limit, not_in_themes).map_err(Refused::Failed)?;
+        return Ok((series, tally));
+    }
     let wanted_fetch = cache.stale_count(&feeds, st.clock.now(), gate) > 0;
     let _held = if wanted_fetch { Some(gate.begin().map_err(|_| Refused::Busy)?) } else { None };
     let fetched: Vec<_> = futures::stream::iter(feeds.iter().copied())

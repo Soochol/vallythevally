@@ -1,4 +1,5 @@
 mod board;
+mod shared;
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -193,9 +194,27 @@ async fn assemble(st: &AppState, cache: &QuoteCache, params: BoardParams, mine: 
         }
     }
     let directory = if wanted.is_empty() { None } else { Some(symbol_list(st).await.map_err(Refused::Failed)?) };
+    let (quotes, as_of, tally) = if st.shared_data.is_enabled() {
+        let shared = shared::quotes(&st.shared_data, &wanted, venue, directory.as_deref());
+        let tally = BoardTally { cached: shared.quotes.len() as u32, ..BoardTally::default() };
+        (shared.quotes, shared.as_of, tally)
+    } else {
+        let (quotes, tally) = polled_quotes(st, cache, &wanted, venue, directory.as_deref(), gate).await?;
+        let as_of = quotes.values().map(|quote| quote.t.0).max().map(UnixSeconds);
+        (quotes, as_of, tally)
+    };
+    let by_code: HashMap<SymbolCode, Quote> = quotes.into_iter().map(|(symbol, quote)| (SymbolCode(symbol.as_wire()), quote)).collect();
+    let name_of = |code: &SymbolCode| {
+        Symbol::parse(&code.0).ok().and_then(|symbol| directory.as_deref().and_then(|d| d.get(symbol))).map_or_else(|| code.0.clone(), |info| info.name.clone())
+    };
+    let themes = document.themes.iter().map(|theme| board_theme(theme, &by_code, name_of)).collect();
+    Ok((HeatmapBoard { revision: document.revision, order, as_of, source, catalog, themes: in_order(themes, order) }, tally))
+}
+
+async fn polled_quotes(st: &AppState, cache: &QuoteCache, wanted: &[Symbol], venue: Venue, directory: Option<&crate::symbols::Directory>, gate: &dyn QuoteGate) -> Result<(HashMap<Symbol, Quote>, BoardTally), Refused> {
     let now = st.clock.now();
     let started = cache.ticket();
-    let (mut quotes, stale) = cache.fresh(&wanted, venue, now);
+    let (mut quotes, stale) = cache.fresh(wanted, venue, now);
     let mut tally = BoardTally { cached: quotes.len() as u32, ..BoardTally::default() };
     if !stale.is_empty() {
         let _held = gate.begin().map_err(|_| Refused::Busy)?;
@@ -205,19 +224,13 @@ async fn assemble(st: &AppState, cache: &QuoteCache, params: BoardParams, mine: 
                 tally.over_budget += group.len() as u32;
                 continue;
             }
-            fetched.extend(crate::quotes::quotes(st.source.as_ref(), &st.bars, directory.as_deref(), group, venue).await.map_err(|e| Refused::Failed(Lookup::Quotes.failure(e, now)))?);
+            fetched.extend(crate::quotes::quotes(st.source.as_ref(), &st.bars, directory, group, venue).await.map_err(|e| Refused::Failed(Lookup::Quotes.failure(e, now)))?);
             tally.fetched += 1;
         }
         cache.keep(started, venue, now, &fetched);
         quotes.extend(fetched.into_iter().filter_map(|quote| Symbol::parse(&quote.symbol.0).ok().map(|symbol| (symbol, quote))));
     }
-    let as_of = quotes.values().map(|quote| quote.t.0).max().map(UnixSeconds);
-    let by_code: HashMap<SymbolCode, Quote> = quotes.into_iter().map(|(symbol, quote)| (SymbolCode(symbol.as_wire()), quote)).collect();
-    let name_of = |code: &SymbolCode| {
-        Symbol::parse(&code.0).ok().and_then(|symbol| directory.as_deref().and_then(|d| d.get(symbol))).map_or_else(|| code.0.clone(), |info| info.name.clone())
-    };
-    let themes = document.themes.iter().map(|theme| board_theme(theme, &by_code, name_of)).collect();
-    Ok((HeatmapBoard { revision: document.revision, order, as_of, source, catalog, themes: in_order(themes, order) }, tally))
+    Ok((quotes, tally))
 }
 
 pub const KIWOOM_THEME_ID_PREFIX: &str = "kiwoom-";

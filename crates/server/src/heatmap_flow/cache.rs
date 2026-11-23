@@ -31,6 +31,7 @@ impl Freshness for Rolling {
 #[derive(Debug)]
 pub enum DayError {
     OutOfBudget,
+    NotCollected,
     Bars(BarError),
 }
 
@@ -60,7 +61,7 @@ impl FlowCache {
         match self.day_by(bars, clock, feed, &Rolling).await {
             Ok((day, _)) => Ok(day),
             Err(DayError::Bars(e)) => Err(e),
-            Err(DayError::OutOfBudget) => Err(BarError::Internal("예산이 없는 호출자가 아닌데 예산이 없다고 답했습니다".into())),
+            Err(DayError::OutOfBudget | DayError::NotCollected) => Err(BarError::Internal("예산이 없는 호출자가 아닌데 예산이 없다고 답했습니다".into())),
         }
     }
 

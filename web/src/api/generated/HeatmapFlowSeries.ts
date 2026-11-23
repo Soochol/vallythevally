@@ -2,5 +2,6 @@
 import type { HeatmapFlowPoint } from "./HeatmapFlowPoint";
 import type { KstDate } from "./KstDate";
 import type { SymbolCode } from "./SymbolCode";
+import type { UnixSeconds } from "./UnixSeconds";
 
-export type HeatmapFlowSeries = { date: KstDate, bucketMinutes: number, points: Array<HeatmapFlowPoint>, used: Array<SymbolCode>, missing: Array<SymbolCode>, overLimit: Array<SymbolCode>, notInThemes?: Array<SymbolCode>, limit: number, };
+export type HeatmapFlowSeries = { date: KstDate, bucketMinutes: number, points: Array<HeatmapFlowPoint>, used: Array<SymbolCode>, missing: Array<SymbolCode>, overLimit: Array<SymbolCode>, notInThemes?: Array<SymbolCode>, notCollected?: Array<SymbolCode>, asOf?: UnixSeconds | null, limit: number, };

@@ -11,6 +11,7 @@ use crate::heatmap_board::{KiwoomCatalogInfo, KiwoomCatalogState};
 use crate::http::AppState;
 use crate::kiwoom::api::{ThemeGroups, ThemeMembers};
 use crate::kiwoom::rest::{KiwoomRest, Priority};
+use crate::shared_data::{Loaded, SharedData, ThemesBody};
 
 pub const CATALOG_AT: TimeOfDay = match TimeOfDay::hms(8, 30, 0) {
     Some(at) => at,
@@ -40,11 +41,35 @@ impl StoredCatalog {
     }
 }
 
+type Converted = (Arc<Loaded<ThemesBody>>, Arc<StoredCatalog>);
+
+struct SharedThemes {
+    data: Arc<SharedData>,
+    converted: Mutex<Option<Converted>>,
+}
+
+impl SharedThemes {
+    fn latest(&self) -> Option<Arc<StoredCatalog>> {
+        let loaded = self.data.kiwoom_themes.current()?;
+        let mut converted = self.converted.lock().expect("공용 키움 테마 변환 잠금");
+        if let Some((from, catalog)) = converted.as_ref()
+            && Arc::ptr_eq(from, &loaded)
+        {
+            return Some(catalog.clone());
+        }
+        let themes = loaded.body.themes.iter().map(|theme| StoredTheme { code: theme.code.clone(), name: theme.name.clone(), members: theme.members.clone() }).collect();
+        let catalog = Arc::new(StoredCatalog { date: loaded.header.observation_date.clone(), collected_at: loaded.header.as_of, themes });
+        *converted = Some((loaded, catalog.clone()));
+        Some(catalog)
+    }
+}
+
 #[derive(Default)]
 struct Inner {
     dir: Option<PathBuf>,
     latest: Option<Arc<StoredCatalog>>,
     collecting: bool,
+    shared: Option<Arc<SharedThemes>>,
 }
 
 #[derive(Default)]
@@ -76,18 +101,30 @@ impl CatalogStore {
         inner.latest = latest;
     }
 
+    pub fn read_shared(&self, data: Arc<SharedData>) {
+        self.inner.lock().expect("키움 테마 구성종목 잠금").shared = Some(Arc::new(SharedThemes { data, converted: Mutex::new(None) }));
+    }
+
     pub fn latest(&self) -> Option<Arc<StoredCatalog>> {
-        self.inner.lock().expect("키움 테마 구성종목 잠금").latest.clone()
+        let (shared, kept) = {
+            let inner = self.inner.lock().expect("키움 테마 구성종목 잠금");
+            (inner.shared.clone(), inner.latest.clone())
+        };
+        match shared {
+            Some(shared) => shared.latest(),
+            None => kept,
+        }
     }
 
     pub fn info(&self) -> KiwoomCatalogInfo {
-        let inner = self.inner.lock().expect("키움 테마 구성종목 잠금");
-        let state = match (&inner.latest, inner.collecting) {
+        let latest = self.latest();
+        let collecting = self.inner.lock().expect("키움 테마 구성종목 잠금").collecting;
+        let state = match (&latest, collecting) {
             (Some(_), _) => KiwoomCatalogState::Ready,
             (None, true) => KiwoomCatalogState::Collecting,
             (None, false) => KiwoomCatalogState::Empty,
         };
-        let latest = inner.latest.as_deref();
+        let latest = latest.as_deref();
         KiwoomCatalogInfo {
             date: latest.and_then(StoredCatalog::day).map(crate::api::KstDate),
             collected_at: latest.map(|c| UnixSeconds(c.collected_at)),
@@ -166,6 +203,10 @@ fn due(now: KstTime, store: &CatalogStore) -> bool {
 }
 
 pub fn start_collection(st: Arc<AppState>, dir: PathBuf) -> tokio::task::JoinHandle<()> {
+    if st.shared_data.is_enabled() {
+        st.kiwoom_catalog.read_shared(st.shared_data.clone());
+        return tokio::spawn(async {});
+    }
     st.kiwoom_catalog.open(dir);
     tokio::spawn(async move {
         loop {

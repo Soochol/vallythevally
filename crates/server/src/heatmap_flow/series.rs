@@ -5,6 +5,7 @@ use domain::{KstDate, KstTime, Period};
 pub const BUCKET_MINUTES: u32 = 5;
 const BUCKET_SECS: i64 = BUCKET_MINUTES as i64 * 60;
 const RATE_DECIMALS: f64 = 10_000.0;
+const CENTI_PER_WON: u128 = 100;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct MinuteBar {
@@ -25,6 +26,14 @@ pub struct SymbolDay {
     closes: BTreeMap<i64, u64>,
     traded_through: BTreeMap<i64, u128>,
     weighting: Weighting,
+    as_of: Option<i64>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CollectedCell {
+    pub start: i64,
+    pub close_centi: u64,
+    pub traded_won: u64,
 }
 
 impl SymbolDay {
@@ -32,6 +41,7 @@ impl SymbolDay {
         let mut prev_close_centi = None;
         let mut closes = BTreeMap::new();
         let mut traded_in = BTreeMap::<i64, u128>::new();
+        let mut as_of = None;
         for bar in bars {
             let date = bar.start.kst_date();
             if date < today {
@@ -40,8 +50,23 @@ impl SymbolDay {
                 let cell = Period::M5.bucket(bar.start).start().unix();
                 closes.insert(cell, bar.close_centi);
                 *traded_in.entry(cell).or_default() += u128::from(bar.close_centi) * u128::from(bar.volume);
+                as_of = as_of.max(Some(bar.start.unix()));
             }
         }
+        SymbolDay::assembled(prev_close_centi?, weighting, closes, traded_in, as_of)
+    }
+
+    pub fn from_collected_cells(prev_close_centi: u64, weighting: Weighting, as_of: Option<i64>, cells: impl IntoIterator<Item = CollectedCell>) -> Option<SymbolDay> {
+        let mut closes = BTreeMap::new();
+        let mut traded_in = BTreeMap::<i64, u128>::new();
+        for cell in cells {
+            closes.insert(cell.start, cell.close_centi);
+            *traded_in.entry(cell.start).or_default() += u128::from(cell.traded_won) * CENTI_PER_WON;
+        }
+        SymbolDay::assembled(prev_close_centi, weighting, closes, traded_in, as_of)
+    }
+
+    fn assembled(prev_close_centi: u64, weighting: Weighting, closes: BTreeMap<i64, u64>, traded_in: BTreeMap<i64, u128>, as_of: Option<i64>) -> Option<SymbolDay> {
         let traded_through = traded_in
             .into_iter()
             .scan(0u128, |running, (cell, traded)| {
@@ -49,7 +74,11 @@ impl SymbolDay {
                 Some((cell, *running))
             })
             .collect();
-        prev_close_centi.filter(|prev| *prev > 0).map(|prev_close_centi| SymbolDay { prev_close_centi, closes, traded_through, weighting })
+        (prev_close_centi > 0).then_some(SymbolDay { prev_close_centi, closes, traded_through, weighting, as_of })
+    }
+
+    pub fn as_of(&self) -> Option<i64> {
+        self.as_of
     }
 
     fn first_cell(&self) -> Option<i64> {
