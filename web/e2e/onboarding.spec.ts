@@ -114,6 +114,26 @@ test.describe("처음 설정과 계정 화면", () => {
     await expect(wizard(page).getByRole("button", { name: "차트 보기" })).toHaveClass(/btn-primary/);
   });
 
+  test("저장한 키를 바꾸는 동안에도 키 붙여넣기 화면의 주요 버튼은 하나뿐이다", async ({ page, scenario }) => {
+    scenario.live.account = signedIn();
+    scenario.live.kiwoomLink = DISCONNECTED;
+    answerKiwoom(scenario);
+    await justLoggedIn(page);
+    await page.goto("/");
+    await finishPrepare(page);
+    await expect(current(page)).toContainText("2. 키 붙여넣기");
+    await expect(wizardPrimaries(page)).toHaveCount(1);
+    await expect(wizard(page).getByRole("button", { name: "키움에 연결" })).toHaveClass(/btn-primary/);
+
+    await wizard(page).getByRole("button", { name: "바꾸기" }).click();
+    await expect(wizard(page).getByRole("button", { name: "저장" })).toHaveClass(/btn-primary/);
+    await expect(wizardPrimaries(page)).toHaveCount(1);
+
+    await wizard(page).getByRole("button", { name: "취소" }).click();
+    await expect(wizard(page).getByRole("button", { name: "키움에 연결" })).toHaveClass(/btn-primary/);
+    await expect(wizardPrimaries(page)).toHaveCount(1);
+  });
+
   test("셋업 고르기 화면에는 주요 버튼이 둘 이상 없고 덮어쓰기 확인은 위험 단추다", async ({ page, scenario }) => {
     scenario.live.account = signedIn(NEEDS_CHOICE);
     await page.goto("/");

@@ -1,4 +1,4 @@
-import { useReducer } from "react";
+import { useEffect, useReducer } from "react";
 import type { KiwoomLinkStatus } from "../../api/generated/KiwoomLinkStatus";
 import type { SystemSettings } from "../../api/generated/SystemSettings";
 import { deleteKiwoomKey, saveKiwoomKey, useSystemSettings } from "../../api/system";
@@ -11,9 +11,10 @@ import type { Command } from "./useCommand";
 
 export const MOCK_KEY_NOTICE = "모의투자 키는 환경 설정(VALLY_KIWOOM_MOCK_APP_KEY)에서만 받습니다";
 
-export function KiwoomKeyForm({ status, command, onSaved, onOpenIpHelp }: { status: KiwoomLinkStatus | null; command: Command; onSaved(): void; onOpenIpHelp?(): void }) {
+export function KiwoomKeyForm({ status, command, onSaved, onOpenIpHelp, onEditingChange }: { status: KiwoomLinkStatus | null; command: Command; onSaved(): void; onOpenIpHelp?(): void; onEditingChange?(editing: boolean): void }) {
   const [form, dispatch] = useReducer(keyFormReducer, EMPTY_KEY_FORM);
   const target = useSystemSettings().data?.kiwoomTarget;
+  useEffect(() => onEditingChange?.(form.editing), [form.editing, onEditingChange]);
   if (!status) return null;
   if (status.environment === "mock") return <MockKeyNotice target={target} />;
   const locked = keyLocked(status);

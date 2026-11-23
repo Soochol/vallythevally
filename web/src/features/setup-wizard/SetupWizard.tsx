@@ -78,6 +78,7 @@ function WizardBody({ initial }: { initial: WizardStepId }) {
   const panel = useKiwoomPanel(true);
   const [step, setStep] = useState<WizardStepId>(initial);
   const [chosen, setChosen] = useState<InitialSyncChoice | null>(null);
+  const [editingKey, setEditingKey] = useState(false);
   const choosing = needsChoice(account);
   const [withChoice, setWithChoice] = useState(choosing);
   if (choosing && !withChoice) setWithChoice(true);
@@ -139,8 +140,8 @@ function WizardBody({ initial }: { initial: WizardStepId }) {
           )}
           {step === "paste" && (
             <>
-              <KiwoomKeyForm status={panel.status} command={panel.command} onSaved={panel.clearConfirmations} onOpenIpHelp={() => setStep("prepare")} />
-              {panel.status.state !== "noKey" && (
+              <KiwoomKeyForm status={panel.status} command={panel.command} onSaved={panel.clearConfirmations} onOpenIpHelp={() => setStep("prepare")} onEditingChange={setEditingKey} />
+              {panel.status.state !== "noKey" && !editingKey && (
                 <KiwoomStatusCard status={panel.status} view={panel.view} confirmations={panel.confirmations} onConfirm={panel.confirm} busy={panel.command.busy} onConnect={panel.connect} onDisconnect={panel.disconnect} onRecheckTokenFile={panel.recheckTokenFile} ipHelp={ipHelp} />
               )}
               {panel.command.error && <p role="alert" className="text-m text-danger">{panel.command.error}</p>}
@@ -171,7 +172,7 @@ function WizardBody({ initial }: { initial: WizardStepId }) {
           {step !== "prepare" && step !== "setup" && <button type="button" className="btn" onClick={() => setStep(previousStep(step))}>이전</button>}
           <span className="flex-1" />
           {step === "prepare" && <button type="button" className="btn-primary" disabled={!canAdvance(step, facts)} onClick={() => setStep(nextStep(step, withChoice))}>다음</button>}
-          {step === "paste" && connected && <button type="button" className="btn-primary" onClick={() => setStep(nextStep(step, withChoice))}>다음</button>}
+          {step === "paste" && connected && !editingKey && <button type="button" className="btn-primary" onClick={() => setStep(nextStep(step, withChoice))}>다음</button>}
           {step === "setup" && !choosing && <button type="button" className="btn-primary" onClick={() => setStep("done")}>다음</button>}
           {step === "done" && <button type="button" className="btn-primary" onClick={hide}>차트 보기</button>}
         </div>
