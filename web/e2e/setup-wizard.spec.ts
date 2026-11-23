@@ -128,6 +128,25 @@ for (const viewport of [{ name: "1440×900", width: 1440, height: 900, tag: "des
       expect(callsTo(scenario, "POST", "/api/system/kiwoom/connect").map((r) => r.postDataJSON())).toEqual([{ acknowledged: false }]);
     });
 
+    test("키 붙여넣기 화면에서 네트워크 실패면 다시 시도 단추를 보이고, 누르면 다시 연결해 끝으로 간다", async ({ page, scenario }) => {
+      scenario.live.account = signedIn();
+      scenario.live.kiwoomLink = { ...DISCONNECTED, state: "failed", problem: "network", message: "키움 서버에 닿지 못했습니다", retryAt: null };
+      answerKiwoom(scenario);
+      await justLoggedIn(page);
+      await page.goto("/");
+      await wizard(page).getByRole("button", { name: "내 공인 IP 확인" }).click();
+      await wizard(page).getByLabel("포털에 지금 공인 IP를 등록했습니다").check();
+      await wizard(page).getByRole("button", { name: "다음" }).click();
+      await expect(current(page)).toContainText("2. 키 붙여넣기");
+      const retry = wizard(page).getByRole("button", { name: "다시 시도" });
+      await expect(retry).toBeEnabled();
+      await expect(wizard(page).getByRole("button", { name: "키움에 연결" })).toHaveCount(0);
+      expect(callsTo(scenario, "POST", "/api/system/kiwoom/connect")).toHaveLength(0);
+      await retry.click();
+      await expect(current(page)).toContainText("3. 끝");
+      expect(callsTo(scenario, "POST", "/api/system/kiwoom/connect").map((r) => r.postDataJSON())).toEqual([{ acknowledged: false }]);
+    });
+
     test("나중에 하기로 키 준비와 붙여넣기를 건너뛰면 끝에서 나중에로 남고 연결 전 안내 카드가 이어 받는다", async ({ page, scenario }) => {
       scenario.live.account = signedIn();
       scenario.live.kiwoomLink = NO_KEY;

@@ -16,6 +16,8 @@ describe("마법사 단계 진행 규칙", () => {
   test("연결 전에는 키 준비부터, 이미 연결됐으면 끝부터 열고 셋업을 골라야 하면 고르기부터 연다", () => {
     expect(firstStep(link({ state: "noKey", keySource: "none" }), false)).toBe("prepare");
     expect(firstStep(link({ state: "disconnected", keySource: "env" }), false)).toBe("prepare");
+    expect(firstStep(link({ state: "disconnected", keySource: "file" }), false)).toBe("prepare");
+    expect(firstStep(link({ state: "failed", keySource: "file" }), false)).toBe("prepare");
     expect(firstStep(link({ state: "failed", keySource: "file" }), true)).toBe("prepare");
     expect(firstStep(link({ state: "connected", keySource: "file" }), false)).toBe("done");
     expect(firstStep(link({ state: "connected", keySource: "file" }), true)).toBe("setup");
