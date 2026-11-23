@@ -2,118 +2,128 @@
 
 작성일 2026-11-23. 승인 시점의 기록이며 구현 중 바뀐 것은 반영하지 않는다.
 
-기준: `origin/main` d74851db. 원래 플랜은 `docs/plans/ui-polish.md`(갈림길 16개 확정, 작업 27개)다. 이 문서는 그 가운데 남은 22개의 순서와 방식, 원래 플랜 뒤에 바뀐 것만 적는다. 토큰·공통 부품·성능 규칙·표기 규칙과 작업별 결정은 원래 플랜이 원본이다.
+기준: `origin/main` d74851db. 원래 플랜은 `docs/plans/ui-polish.md`다(갈림길 16개 확정, 작업 27개). 이 문서는 남은 22개를 어떻게 나누고 어떤 순서로 할지, 원래 플랜 뒤에 바뀐 것만 적는다. 토큰·공통 부품·성능 규칙·표기 규칙과 작업별 결정은 원래 플랜을 따른다.
 
-방식: 한 세션, `poteto`. 이 플랜을 쓴 세션이 승인 뒤 같은 브랜치에서 22항목을 차례로 구현하고 PR 하나로 낸다. `poteto`인 이유는 주문 창(`ui2-order`, `ui2-order-safety`), 실시간 구독·렌더 구조(`ui2-mw-perf`, `ui2-list-rows`), 창 배치 저장(`ui2-dock-fit`), 키 입력과 실전 주문 켜기(`ui2-settings`)가 들어 있어서다.
+방식: lane. 사용자가 lane 방식을 지시했고, 22항목은 한 세션이 차례로 하기에 너무 크다. 영역끼리는 독립이라 작업자 여럿이 나눠 맡을 수 있고, 주문 창처럼 위험한 일은 화면 조정과 따로 리뷰받아야 한다(아래 `## 나누는 이유`).
 
 ## 사용자가 풀려는 문제
 
 > fable5.2모델로 현재 프로젝트의 모든 ui를 캡쳐하고 uiux를 더 세련되고 , 사용자 편의성, 가독성 개선할 수 있도록 플래닝하고, claude artifact로 제안해줘
 > 상용서비스로 사용할 수 있을 정도의 극도의 고도화로 제안해줘
 
-이 플랜의 방식은 다음 두 지시에서 왔다.
+남은 일의 방식은 다음 지시에서 왔다.
 
-> ui-polish 이건 지금 진행한 것까지는 현재 방식으로 하고 나머지는 기다렸다가 one planner 방식으로 하자.
+> lane 방식으로 ui polish 진행해줘봐
 
-> 내 의도는 플래너가 플랜을 쓰고 계속 이어가는 거잖아.
-
-- 앞의 세 작업 `ui2-css-split`(#833), `ui2-tokens`(#836), `ui2-primitives`(#840)는 작업자마다 PR 하나를 내는 방식으로 끝났고 main에 있다.
-- 남은 일은 작업자를 여럿 띄우지 않는다. 플래너가 플랜을 쓰고 승인 뒤 그대로 이어서 구현한다. 작업마다 PR·리뷰·병합 대기가 생기는 것을 없애려는 것이다.
+- 앞의 세 작업 `ui2-css-split`(#833), `ui2-tokens`(#836), `ui2-primitives`(#840)는 main에 있다. 약속 작업 둘(토큰, 공통 부품)과 일괄 이관(CSS 나누기)이 끝났으니 lane은 앞 작업을 기다리지 않고 바로 시작한다.
 - 사용자는 성능을 가장 중요하게 본다.
 
 ## 확정된 결정
 
-1. 원래 플랜의 갈림길 16개는 그대로다. 다시 묻지 않는다. 갈림길 3(밀도)은 사용자가 촘촘을 골랐다. 설정은 기본 34px과 촘촘 28px 둘이고, 처음 값은 촘촘이다.
-2. 나누지 않는다. 작업은 하나(`plan-ui-polish-rest`)이고 `tasks.json`은 `"solo": true`다.
-3. `ui2-statusbar`와 `ui2-screener`는 이 플랜에 넣지 않는다. 다른 탭의 screener-kis-summary(2026-11-23 기준 PR 없음)가 `features/status`와 `features/screener`를 고치고 있어서, 그것이 병합된 뒤 따로 한다.
+1. 원래 플랜의 갈림길 16개는 그대로이고 다시 묻지 않는다. 갈림길 3(밀도)은 사용자가 촘촘을 골랐다. 설정은 기본 34px과 촘촘 28px 둘이고, 처음 값은 촘촘이다.
+2. 남은 22항목은 lane 방식으로 나눈다. 항목 ID는 원래 작업 이름(`ui2-*`)을 그대로 쓴다.
+3. `ui2-statusbar`와 `ui2-screener`는 이 플랜에 넣지 않는다. 다른 탭의 screener-kis-summary가 `features/status`와 `features/screener`를 고치고 있어서다(2026-11-23 기준 PR 없음). 그것이 병합된 뒤 따로 한다.
 4. 실제 키움·한투는 부르지 않는다. 합성 transport와 시험이 주는 합성 키만 쓴다.
-5. 성능을 고치는 항목(`ui2-mw-perf`, `ui2-list-rows`, `ui2-heatmap`)은 고치기 전과 뒤의 그리기 횟수를 시험으로 남긴다(원래 플랜의 성능 규칙 8).
+5. 성능 항목(`ui2-mw-perf`, `ui2-list-rows`, `ui2-heatmap`)은 고치기 전과 뒤의 그리기 횟수를 시험으로 남긴다(원래 플랜의 성능 규칙 8).
 6. 시험·검증을 약하게 하는 일은 넣지 않는다. 단언을 지우거나 느슨하게 하지 않고 시험 제한 시간을 늘리지 않는다.
+7. `ui2-onboarding`에서 공개 모드 화면을 뺀다. 오케스트레이터가 권장안대로 진행하라고 전했다(아래 "원래 플랜 뒤에 바뀐 것").
 
-## 스스로 정한 결정과 이유
+## 나누는 이유
 
-### 순서
+- (가) 규모. 원래 플랜은 한 항목을 400~900줄로 추정했다. 22항목이면 약 9천~2만 줄이고, 한 세션이 차례로 하면 그만큼 끝이 늦어진다. 영역끼리는 고치는 파일이 겹치지 않으니 병렬로 돌릴 때 이득이 크다.
+- (다) 위험한 일과 쉬운 일을 가른다. 주문 취소 흐름(`ui2-order-safety`)과 키 입력·실전 주문 켜기(`ui2-settings`)는 화면 조정(`ui2-market-windows` 등)과 리뷰의 무게가 다르다. 쉬운 일을 위험한 일의 PR에 끼우지 않는다.
 
-| # | 항목 | 우선 | 먼저 |
-|---|---|---|---|
-| 1 | `ui2-mw-perf` | P1, 성능 | 없음 |
-| 2 | `ui2-order` | P1 | 1 |
-| 3 | `ui2-order-safety` | P1 | 2 |
-| 4 | `ui2-market-windows` | P2 | 2 |
-| 5 | `ui2-list-rows` | P1, 성능 | 없음 |
-| 6 | `ui2-ranking` | P1 | 5 |
-| 7 | `ui2-topbar` | P1 | 없음 |
-| 8 | `ui2-page-frame` | P2 | 7 |
-| 9 | `ui2-heatmap` | P2, 성능 | 8 |
-| 10 | `ui2-market-page` | P2 | 8, 9 |
-| 11 | `ui2-etf` | P2 | 8 |
-| 12 | `ui2-dock-tabs` | P1 | 없음 |
-| 13 | `ui2-dock-fit` | P1 | 12 |
-| 14 | `ui2-chart-axis` | P1 | 없음 |
-| 15 | `ui2-chart-legend` | P1 | 14 |
-| 16 | `ui2-chart-tools` | P2 | 없음 |
-| 17 | `ui2-drawings` | P2 | 없음 |
-| 18 | `ui2-settings` | P1 | 없음 |
-| 19 | `ui2-onboarding` | P2 | 18 |
-| 20 | `ui2-shell-states` | P2 | 없음 |
-| 21 | `ui2-search` | P2 | 없음 |
-| 22 | `ui2-density` | P2 | 5, 6, 18 |
+## 작업
 
-- 성능 항목 셋을 앞에 둔다. 사용자가 성능을 가장 중요하게 보고, 원래 플랜의 핵심 경로(`ui2-mw-perf` → `ui2-order` → `ui2-order-safety`)도 여기서 시작한다. `ui2-heatmap`은 `ui2-page-frame`의 페이지 틀 위에서 첫 타일 위치를 단언하므로 `ui2-topbar` → `ui2-page-frame` 뒤의 9번이다.
-- 같은 파일을 고치는 항목은 이어 붙인다. 앞 항목에서 읽은 문맥을 다시 읽지 않기 위해서다. 시세 창 넷(1~4), 목록 둘(5~6), 위 막대와 페이지 다섯(7~11), 창 틀 둘(12~13), 차트 넷(14~17), 설정 둘(18~19)이 그 묶음이다.
-- P1이 P2보다 대체로 앞이다. 예외는 같은 파일을 이어 고치는 P2(`ui2-market-windows`, `ui2-page-frame`·`ui2-heatmap`·`ui2-market-page`·`ui2-etf`)다.
-- `ui2-density`가 끝이다. 처음 값이 28px로 바뀌면 34px을 전제한 spec 여럿이 기본 밀도를 명시로 골라야 한다. 목록·순위·설정 항목이 그 spec과 화면을 다 바꾼 뒤에 한 번만 맞춘다.
+일곱 작업이고 PR도 일곱이다. lane 여섯과 항목 하나짜리 작업 하나다. 크기는 원래 플랜의 항목당 추정(400~900줄)을 더한 것이다.
 
-### 진행
+| 작업 | 영역 | 항목(하는 순서) | 방식 | 먼저 | 예상 크기 |
+|---|---|---|---|---|---|
+| `lane-order` | 호가주문 창 | `ui2-mw-perf` → `ui2-order` → `ui2-order-safety` | poteto | 없음 | 1,200~2,700줄 |
+| `ui2-market-windows` | 시세 창(10호가·체결·프로그램·거래원) | `ui2-market-windows` | basic | `lane-order`(after_ready) | 400~900줄 |
+| `lane-lists` | 관심종목·순위 목록 | `ui2-list-rows` → `ui2-ranking` | poteto | 없음 | 800~1,800줄 |
+| `lane-pages` | 위 막대·페이지(시장 종합·히트맵·ETF) | `ui2-topbar` → `ui2-page-frame` → `ui2-heatmap` → `ui2-market-page` → `ui2-etf` | basic | 없음 | 2,000~4,500줄 |
+| `lane-shell` | 셸 상태·찾기·창 틀 | `ui2-shell-states` → `ui2-search` → `ui2-dock-tabs` → `ui2-dock-fit` | poteto | 없음 | 1,800~3,500줄 |
+| `lane-chart` | 차트 칸 | `ui2-chart-axis` → `ui2-chart-legend` → `ui2-chart-tools` → `ui2-drawings` | poteto | 없음 | 1,600~3,600줄 |
+| `lane-settings` | 시스템 설정·처음 설정 | `ui2-settings` → `ui2-onboarding` → `ui2-density` | poteto | `lane-lists`(after_ready) | 1,200~2,700줄 |
 
-- 항목마다 커밋 하나다. `ui2-shell-states`만 원래 묶음(복원·오류 화면 / 재무자료 버튼과 상태 창)대로 커밋 둘이다. 커밋 전에 그 항목의 성공 조건 시험을 돌린다. 전체 시험은 chute가 병합 전에 돌린다.
-- 문맥이 커지면 조사와 시험 실행을 하위 에이전트에 맡기고 결론만 받는다.
-- 한 항목이 막히면 그 항목과 그것을 기다리는 항목만 빼고 다음으로 간다. 뺀 항목은 보고서에 적는다.
-- 독립 리뷰는 22항목을 마친 뒤 한 번 받고, 리뷰로 고친 diff를 다시 리뷰받는다. 항목마다 리뷰받으면 리뷰가 스물두 번이라 한 세션으로 묶은 이득이 사라진다.
+### 방식과 이유
 
-### 원래 지시서를 근거로 쓴다
+- `lane-order` poteto: 실시간 구독·렌더 구조(`ui2-mw-perf`)와 주문 취소 흐름(`ui2-order-safety`)을 바꾼다.
+- `ui2-market-windows` basic: 화면 조정이다. 위험한 `lane-order`에 끼우지 않으려고 따로 뺐다.
+- `lane-lists` poteto: `ui2-list-rows`가 실시간 줄의 구독과 렌더 구조를 바꾼다.
+- `lane-pages` basic: 화면 조정과 렌더 범위다. `ui2-heatmap`의 그리기 범위는 원래 플랜에서도 basic이었고, 그리기 횟수 시험(확정된 결정 5)으로 지킨다.
+- `lane-shell` poteto: `ui2-dock-fit`이 창 배치 계산과 저장 상태에 닿는다.
+- `lane-chart` poteto: `ui2-chart-legend`가 차트 컨트롤러의 배치 계산을 바꾼다.
+- `lane-settings` poteto: `ui2-settings`가 키 입력과 실전 주문 켜기에, `ui2-onboarding`이 키 붙여넣기와 계정 덮어쓰기에 닿는다. `ui2-density`는 이 브라우저 저장소의 값과 첫 그리기 전 뿌리 속성을 다룬다.
 
-- 원래 플랜의 작업 지시서 22개를 항목의 근거로 그대로 쓴다. 지시서는 `/home/dev/.claude/orch/plans/tb15262ef8f663646e9c3c9e8f8b65563d-draft-20261123-154712-ui-polish/briefs/`(저장소 밖)에 있다. 그 지시서가 가리키는 캡처·진단·목업도 저장소 밖의 이전 초안 폴더 `/home/dev/.claude/orch/plans/tb75c4a5b936467916a652e0588d11762c-draft-20261123-130618-ui-polish/`에 있다. 두 폴더는 지우지 않는다.
-- 이 플랜의 지시서 하나가 항목별 성공 조건을 모두 담는다. 근거 지시서와 다른 점은 아래이고 지시서가 앞선다.
-  - 한 세션이라 "같은 시각에 다른 작업이 고치는 곳"은 쓰지 않는다. "그 spec은 고치지 않는다"는 그 항목에서는 회귀 확인으로만 돌린다는 뜻이다.
-  - 공통 부품은 `ui2-primitives`가 실제로 만든 이름(`features/ui`, `overlay/State.tsx`, `menu/Select.tsx` 등)을 쓴다.
-  - 반복 확인은 `VALLY_E2E_CPU_THROTTLE=4`에 `--workers=1 --repeat-each=5`로 한다. 근거 지시서 하나(`ui2-mw-perf`)가 적은 `--workers=6` 반복은 같은 시험을 여러 벌 동시에 돌리는 것이라 쓰지 않는다.
+### lane을 이렇게 묶은 이유
+
+- lane 하나는 한 화면 묶음이고, lane끼리 `paths`가 겹치지 않는다. 함께 고치는 파일은 `shared`에 적고 최소 변경으로 한다. `docs/design-system.md`, `web/src/features/icons.tsx`, `web/src/App.tsx`, `float-*` spec 넷, `PageRail.tsx`다.
+- lane 안의 순서는 원래 플랜의 순서 관계를 따른다. `ui2-order`는 `ui2-mw-perf`가 줄 단위로 나눈 구조 위에서 고친다. `ui2-ranking`은 `ui2-list-rows`의 공통 줄을 쓴다. `ui2-page-frame`은 `ui2-topbar`의 위 막대 부품을 쓴다. 히트맵·시장 종합·ETF는 그 페이지 틀을 쓰고, 시장 종합은 히트맵이 공용 자리로 옮긴 색 함수도 쓴다. `ui2-dock-fit`과 `ui2-dock-tabs`는 같은 창 틀 코드를 고친다. `ui2-chart-legend`와 `ui2-chart-axis`는 같은 `ChartController.ts`를 고친다. 마법사는 설정 창이 정리한 키 폼을 쓰고, 밀도 고르기는 설정 창의 메뉴 묶음에 들어간다.
+- `ui2-topbar`는 셸이 아니라 `lane-pages`의 첫 항목이다. 페이지 틀이 위 막대에 기대고, 이렇게 해야 `ui2-heatmap`(성능)이 다른 lane을 기다리지 않고 시작한다.
+- `ui2-density`는 `lane-settings`의 끝이다. 설정 메뉴가 먼저 정리돼야 하고, 처음 값이 28px로 바뀌면 34px을 전제한 목록 spec들을 한 번에 맞춰야 한다. 그 spec들은 `lane-lists`가 고치므로 `lane-settings` 전체가 `lane-lists` 뒤에 선다.
+- 하나뿐인 lane 밖 작업 `ui2-market-windows`는 위험·쉬움을 가른 결과다. 시세 창은 호가주문 창과 다른 화면 묶음이라 영역 수(일곱)는 넘지 않는다.
+
+### 연결
+
+- `ui2-market-windows` ← `lane-order`: after_ready. 같은 시세 창 코드(`features/book`·`trades`·`program`·`market-window`)를 `lane-order`가 줄 단위 구조로 바꾼 뒤 그 위에서 모양을 고친다.
+- `lane-settings` ← `lane-lists`: after_ready. `ui2-density`가 `lane-lists`의 공통 줄(`--row-h`)과 34px을 단언하는 spec(`list-format`, `win-ranking`, `watch-render` 등)을 쓴다.
+
+### 핵심 경로
+
+핵심 경로: `lane-lists`(`ui2-list-rows` → `ui2-ranking`) → `lane-settings`(`ui2-settings` → `ui2-onboarding` → `ui2-density`). 모두 poteto 작업이고 항목 다섯이다. 그다음은 `lane-order` → `ui2-market-windows`(poteto 셋, basic 하나)와 `lane-pages`(basic 다섯)다.
+
+### 병렬
+
+`lane-order`, `lane-lists`, `lane-pages`, `lane-shell`, `lane-chart` 다섯이 함께 시작한다. `ui2-market-windows`와 `lane-settings`는 각자의 앞 작업이 merge-ready가 되면 그 위에서 시작한다.
 
 ### 성능 항목의 그리기 횟수
 
-- 세는 spec(`mw-render`, `watch-render`, `heatmap-render`)을 먼저 쓰고 고치기 전 코드에서 돌려 횟수를 센다. 고친 뒤 같은 spec이 상한을 단언한다.
-- 고치기 전과 뒤의 수는 항목 커밋 메시지와 PR 본문의 표에 적는다. 고치기 전의 수를 단언하는 시험은 남기지 않는다. 고친 코드에서 실패할 시험이 되기 때문이다.
-- 상한은 원래 지시서의 것이다. 호가 한 가격이 바뀌면 사다리 줄 1개, 종목 하나의 시세면 관심종목 줄 틀 0개, 히트맵 시세 하나면 타일 1개를 다시 그린다.
+- 세는 spec(`mw-render`, `watch-render`, `heatmap-render`)을 먼저 쓰고, 고치기 전 코드에서 돌려 횟수를 센다. 고친 뒤 같은 spec이 상한을 단언한다.
+- 고치기 전과 뒤의 수는 항목 커밋 메시지와 PR 본문의 표에 적는다. 고치기 전의 수를 단언하는 시험은 남기지 않는다. 고친 코드에서 실패하기 때문이다.
+- 상한은 원래 지시서의 것이다. 호가 한 가격이 바뀌면 사다리 줄 1개, 종목 하나의 시세가 오면 관심종목 줄 틀 0개, 히트맵 시세 하나면 타일 1개만 다시 그린다.
+- 반복 확인은 `VALLY_E2E_CPU_THROTTLE=4`에 `--workers=1 --repeat-each=5`로 한다. 원래 `ui2-mw-perf` 지시서의 `--workers=6` 반복은 같은 시험을 여러 벌 동시에 돌리는 것이라 쓰지 않는다.
+
+### 원래 지시서를 근거로 쓴다
+
+- 작업 지시서는 원래 플랜의 작업 지시서 22개를 항목의 근거로 가리킨다. 그 22개는 저장소 밖 `/home/dev/.claude/orch/plans/tb15262ef8f663646e9c3c9e8f8b65563d-draft-20261123-154712-ui-polish/briefs/`에 있다. 거기서 가리키는 캡처·진단·목업은 `/home/dev/.claude/orch/plans/tb75c4a5b936467916a652e0588d11762c-draft-20261123-130618-ui-polish/`에 있다. 두 폴더는 지우지 않는다.
+- 항목별 성공 조건은 원래 지시서의 것을 작업 지시서에 옮겼다. 고친 곳은 `ui2-onboarding`(공개 모드 제외)과 `ui2-density`(원래 플랜 문서를 고치는 조건 제외), 반복 명령이다.
+- 공통 부품은 `ui2-primitives`가 실제로 만든 이름을 쓴다(`features/ui`, `overlay/State.tsx`, `menu/Select.tsx` 등).
 
 ### 원래 플랜 뒤에 바뀐 것
 
-- 브라우저 키 화면이 없어졌다. #839가 `web/src/public-mode/keys/`와 `web/e2e/browser-keys.spec.ts`를 지웠다. 웹 공개판은 운영하지 않고 데스크톱 앱으로 간다(`docs/plans/desktop-app.md`).
-- 그래서 `ui2-onboarding`에서 공개 모드 화면(사용 불가 화면, 공개 마법사, 공개 판 설정 틀, 공개 계정 메뉴, 한도 안내)을 뺐다. 운영하지 않는 화면을 다듬는 일이라서다. 설정 마법사, 덮어쓰기 확인, 계정 메뉴, 다른 소유자 화면, 로그인 실패 알림은 남는다. 이 결정은 아래 "사용자가 정해야 하는 결정"에도 적었다.
-- `ui2-density`의 옛 지시서는 `docs/plans/ui-polish.md`를 고쳐 처음 값 촘촘을 적게 했다. 그 문서는 승인 기록이라 고치지 않는다. 처음 값 촘촘은 이 문서가 기록한다(확정된 결정 1).
-- order-ledger(#826), kis-rest-edges(#829), kis-orders, ladder-gap-narrow가 병합됐다. 그래서 `ui2-mw-perf`와 `ui2-page-frame`·`ui2-market-page`가 기다리던 다른 탭 작업이 없다.
+- #839가 브라우저 키 화면(`web/src/public-mode/keys/`)과 `web/e2e/browser-keys.spec.ts`를 지웠다. 웹 공개판은 운영하지 않고 데스크톱 앱으로 간다(`docs/plans/desktop-app.md`).
+- 그래서 `ui2-onboarding`에서 공개 모드 화면을 뺐다. 사용 불가 화면, 공개 마법사, 공개 판 설정 틀, 공개 계정 메뉴, 한도 안내다. 운영하지 않는 화면이라서다. 설정 마법사, 덮어쓰기 확인, 계정 메뉴, 다른 소유자 화면, 로그인 실패 알림은 남는다.
+- 원래 `ui2-density` 지시서는 `docs/plans/ui-polish.md`를 고쳐 처음 값 촘촘을 적게 했다. 그 문서는 승인 기록이라 고치지 않고, 이 문서가 기록한다(확정된 결정 1).
+- order-ledger(#826), kis-rest-edges(#829), kis-orders, ladder-gap-narrow는 병합됐다. 그래서 기다릴 다른 탭 작업이 없다.
 
 ### 건드리지 않는 곳
 
-`features/status`, `features/screener`, `features/screen-dialog`, `styles/screener.css`는 고치지 않는다. 확정된 결정 3과 같은 이유다. 그쪽도 고칠 수 있는 `App.tsx`, `list-format.spec.ts`, `screener.spec.ts`, `float-shell.spec.ts`는 필요한 몇 줄만 바꾼다.
+`features/status`, `features/screener`, `features/screen-dialog`, `styles/screener.css`는 어느 lane도 고치지 않는다(확정된 결정 3). 그쪽도 고칠 수 있는 `App.tsx`, `list-format.spec.ts`, `screener.spec.ts`, `float-shell.spec.ts`는 필요한 몇 줄만 바꾼다.
 
 ## 범위 밖
 
 - `ui2-statusbar`, `ui2-screener`(확정된 결정 3).
-- 공개 모드 화면(위 "원래 플랜 뒤에 바뀐 것").
-- 원래 플랜의 범위 밖: 휴대폰 화면 다시 짜기, 랜딩과 로그인 뒤 시작 화면, 수집 현황판, 밝은 테마, 체결 알림·키보드 주문·끊긴 동안 주문 막기, 스크리너 조건별 남은 종목 수, 서버 오류 문구.
+- 공개 모드 화면(확정된 결정 7).
+- 원래 플랜이 범위 밖으로 둔 것:
+  - 휴대폰 화면 다시 짜기
+  - 랜딩과 로그인 뒤 시작 화면
+  - 수집 현황판
+  - 밝은 테마
+  - 체결 알림, 키보드 주문, 끊긴 동안 주문 막기
+  - 스크리너 조건별 남은 종목 수
+  - 서버 오류 문구
 
 ## 산출물
 
-- 지시서: `/home/dev/.claude/orch/plans/tb15262ef8f663646e9c3c9e8f8b65563d-draft-20261123-182706-ui-polish-rest/briefs/plan-ui-polish-rest.md`(저장소 밖)
-- 작업 목록: 같은 폴더의 `tasks.json`. `"solo": true`, 작업 `plan-ui-polish-rest` 하나, `mode` `poteto`.
-- 연결은 없다(작업 하나). 핵심 경로는 항목 순서의 1 → 2 → 3이다.
+- 작업 목록: `/home/dev/.claude/orch/plans/tb15262ef8f663646e9c3c9e8f8b65563d-draft-20261123-182706-ui-polish-rest/tasks.json`(저장소 밖)
+- 지시서: 같은 폴더의 `briefs/<작업 ID>.md` 일곱 개
 
 ## 미해결 사항
 
-- PR이 크다. 원래 플랜은 이 22개를 하나에 추정 400~900줄로 보았다. 그러면 합쳐 약 1만~1만 5천 줄이고, 최근 `web/` PR 중앙값 361줄의 30배쯤이다. 리뷰가 길어지고 chute 반송이 나면 전체가 다시 기다린다.
-- 대안은 같은 세션이 중간에 PR을 나눠 내는 방식이다. 예를 들어 시세 창 넷(1~4)을 끝내면 PR을 하나 내고, 그것이 병합되기를 기다리지 않고 그 위에서 다음 묶음을 잇는다. 지금 orch는 한 세션 플랜이 PR 하나만 내므로 이 플랜은 PR 하나로 둔다.
+- `lane-pages`가 가장 크다(추정 최대 4,500줄). 리뷰 한 번에 벅차면 같은 영역 안에서 `ui2-topbar`·`ui2-page-frame`과 `ui2-heatmap`·`ui2-market-page`·`ui2-etf`로 나눌 수 있다. 그러면 뒤쪽이 앞쪽 뒤에 `after_ready`로 선다. 지금은 PR 수를 줄이려고 하나로 두었다.
 
 ## 사용자가 정해야 하는 결정
 
-- 공개 모드 화면 다듬기를 빼는 것(위 "원래 플랜 뒤에 바뀐 것"). 권장안대로 빼고 썼다. 승인하면 뺀 채로 간다. 넣으려면 `ui2-onboarding`의 옛 성공 조건 (5)·(6)(공개 모드 사용 불가 화면, 한도 안내의 남은 시간)과 `web/src/public-mode/**`를 되살린다.
-- 검증을 약하게 하는 작업(검증 단계 삭제, 시간 제한 증가, `paths` 축소)은 없다.
+없다. 공개 모드 제외(확정된 결정 7)는 오케스트레이터가 권장안대로 진행하라고 전했다. 검증을 약하게 하는 작업(검증 단계 삭제, 시간 제한 증가, `paths` 축소)도 없다.
