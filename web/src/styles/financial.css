@@ -9,5 +9,5 @@
 }
 .financial-status-dot::-webkit-details-marker { display: none; }
 .financial-status-dot[data-status="ready"] { background: var(--success); }
-.financial-status-dot[data-status="collecting"], .financial-status-dot[data-status="pending"] { background: var(--warning); }
+.financial-status-dot[data-status="pending"] { background: var(--warning); }
 .financial-status-dot[data-status="failed"], .financial-status-dot[data-status="partial_failure"] { background: var(--danger); }

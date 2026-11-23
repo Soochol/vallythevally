@@ -92,20 +92,21 @@ async fn a_reader_without_a_client_never_takes_the_writer() {
 }
 
 #[tokio::test]
-async fn a_server_configuration_takes_the_writer_when_the_first_update_starts() {
+async fn a_collector_takes_the_writer_when_the_first_update_starts() {
     let fake = Fake::start().await;
-    let kiwoom = common::ScriptedTransport::new();
     let dir = tempdir();
-    let server = process(&fake, &kiwoom, dir.path(), "20171231120000");
-    let base = format!("http://{}", server.addr().await);
+    let collector = collector::Collector::open(&fake, dir.path(), "20171231120000", &[("005930", false)]).await;
     let lock = writer_lock_path(&dir.path().join("run/financials.db"));
-    let client = reqwest::Client::new();
-    assert_eq!(updates::json(&client, &format!("{base}/api/financial-update")).await["status"], "idle");
-    drop(InstanceLock::acquire(&lock).expect("starting the server does not take the lock"));
-    updates::start(&client, &base).await;
+    assert_eq!(collector.status().await["status"], "idle");
+    drop(InstanceLock::acquire(&lock).expect("opening the collector does not take the lock"));
+    collector.start().await;
     assert!(matches!(InstanceLock::acquire(&lock), Err(server::instance::LockError::Held { .. })), "the first update takes the lock");
-    server.stop().await;
-    drop(InstanceLock::acquire(&lock).expect("ending the process releases the lock"));
+    collector.crash().await;
+    let released = tokio::time::timeout(Duration::from_secs(5), async { loop {
+        if let Ok(taken) = InstanceLock::acquire(&lock) { return taken; }
+        tokio::time::sleep(Duration::from_millis(5)).await;
+    } }).await.expect("ending the collector releases the lock");
+    drop(released);
 }
 
 #[tokio::test]
