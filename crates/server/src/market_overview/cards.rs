@@ -8,16 +8,26 @@ use domain::{KstTime, Symbol, SymbolKind};
 
 use super::dto::*;
 use super::overview_source;
-use crate::market_source::route::Picked;
-use crate::market_source::OverviewSource;
 use super::samples::SampleValue;
 use super::session::{observation_day, phase};
+use super::MarketOverview;
 use crate::api::{self, ApiErrorBody, Broker, Market};
 use crate::bars::BarError;
+use crate::clock::Clock;
 use crate::http::{ApiFailure, AppState, Lookup, feature_symbol_list};
-use crate::market_source::{IndexLevel, MarketIndexSnapshot, Priority, SectorFlow, SourceError, StreakColumn, StreakRow, StreakSide, TradingDay};
+use crate::market_source::{IndexLevel, MarketIndexSnapshot, OverviewSource, Priority, SectorFlow, SourceError, StreakColumn, StreakRow, StreakSide, TradingDay};
 
 const DEFAULT_PERIOD: MarketOverviewPeriod = MarketOverviewPeriod::Days20;
+
+pub struct CardEnv<'a> {
+    pub source: &'a dyn OverviewSource,
+    pub broker: Broker,
+    pub clock: &'a Clock,
+    pub priority: Priority,
+    pub book: &'a MarketOverview,
+}
+
+pub type StreakFilter<'a> = Result<&'a (dyn Fn(&StreakRow) -> bool + Sync), ApiErrorBody>;
 
 pub struct Params {
     market: Market,
@@ -53,23 +63,23 @@ impl Answers {
         Answers { latest: None, source }
     }
 
-    async fn ask<T>(&mut self, st: &AppState, call: impl Future<Output = Result<T, SourceError>>) -> Result<T, ApiErrorBody> {
+    async fn ask<T>(&mut self, env: &CardEnv<'_>, call: impl Future<Output = Result<T, SourceError>>) -> Result<T, ApiErrorBody> {
         match call.await {
             Ok(value) => {
-                self.latest = Some(st.clock.now());
+                self.latest = Some(env.clock.now());
                 Ok(value)
             }
-            Err(e) => Err(failed(st, e)),
+            Err(e) => Err(failed(env.clock, e)),
         }
     }
 
-    fn context(&self, st: &AppState, market: Market) -> MarketOverviewContext {
-        MarketOverviewContext { market, phase: phase(st.clock.now()), received_at: self.latest.map(|t| api::UnixSeconds(t.unix())), source: self.source }
+    fn context(&self, clock: &Clock, market: Market) -> MarketOverviewContext {
+        MarketOverviewContext { market, phase: phase(clock.now()), received_at: self.latest.map(|t| api::UnixSeconds(t.unix())), source: self.source }
     }
 }
 
-fn failed(st: &AppState, error: SourceError) -> ApiErrorBody {
-    Lookup::MarketOverview.failure(BarError::from(error), st.clock.now()).into_body()
+fn failed(clock: &Clock, error: SourceError) -> ApiErrorBody {
+    Lookup::MarketOverview.failure(BarError::from(error), clock.now()).into_body()
 }
 
 fn part<T>(result: Result<T, ApiErrorBody>) -> MarketOverviewPart<T> {
@@ -79,12 +89,20 @@ fn part<T>(result: Result<T, ApiErrorBody>) -> MarketOverviewPart<T> {
     }
 }
 
+fn env_of<'a>(st: &'a AppState, picked: &'a crate::market_source::route::Picked<dyn OverviewSource>) -> CardEnv<'a> {
+    CardEnv { source: picked.source.as_ref(), broker: picked.broker, clock: &st.clock, priority: Priority::Screen, book: &st.market_overview }
+}
+
 pub async fn index(State(st): State<Arc<AppState>>, Query(query): Query<HashMap<String, String>>) -> Result<Json<MarketOverviewIndexCard>, ApiFailure> {
     let params = Params::parse(&query)?;
     let picked = overview_source(&st);
-    let (source, mut answers) = (picked.source, Answers::new(picked.broker));
-    let index = part(answers.ask(&st, source.index(params.market, Priority::Screen)).await.map(index_dto));
-    Ok(Json(MarketOverviewIndexCard { context: answers.context(&st, params.market), index }))
+    Ok(Json(index_card(&env_of(&st, &picked), params.market).await))
+}
+
+pub async fn index_card(env: &CardEnv<'_>, market: Market) -> MarketOverviewIndexCard {
+    let mut answers = Answers::new(env.broker);
+    let index = part(answers.ask(env, env.source.index(market, env.priority)).await.map(index_dto));
+    MarketOverviewIndexCard { context: answers.context(env.clock, market), index }
 }
 
 fn index_dto(snapshot: MarketIndexSnapshot) -> MarketOverviewIndex {
@@ -103,14 +121,17 @@ fn index_dto(snapshot: MarketIndexSnapshot) -> MarketOverviewIndex {
 pub async fn sectors(State(st): State<Arc<AppState>>, Query(query): Query<HashMap<String, String>>) -> Result<Json<MarketOverviewSectorsCard>, ApiFailure> {
     let params = Params::parse(&query)?;
     let picked = overview_source(&st);
-    let source = picked.source;
-    let today = st.clock.now().kst_date();
-    let (mut level_answers, mut flow_answers) = (Answers::new(picked.broker), Answers::new(picked.broker));
-    let (levels, flows) = tokio::join!(level_answers.ask(&st, source.sector_levels(params.market, Priority::Screen)), flow_answers.ask(&st, source.sector_flows(params.market, today, Priority::Screen)));
+    Ok(Json(sectors_card(&env_of(&st, &picked), params.market).await))
+}
+
+pub async fn sectors_card(env: &CardEnv<'_>, market: Market) -> MarketOverviewSectorsCard {
+    let today = env.clock.now().kst_date();
+    let (mut level_answers, mut flow_answers) = (Answers::new(env.broker), Answers::new(env.broker));
+    let (levels, flows) = tokio::join!(level_answers.ask(env, env.source.sector_levels(market, env.priority)), flow_answers.ask(env, env.source.sector_flows(market, today, env.priority)));
     let sectors = part(levels.map(|rows| rows.into_iter().map(sector_dto).collect()));
     let flows = part(flows.map(|rows| rows.into_iter().map(sector_flow_dto).collect()));
     let latest = level_answers.latest.max(flow_answers.latest);
-    Ok(Json(MarketOverviewSectorsCard { context: Answers { latest, source: picked.broker }.context(&st, params.market), sectors, flows }))
+    MarketOverviewSectorsCard { context: Answers { latest, source: env.broker }.context(env.clock, market), sectors, flows }
 }
 
 fn sector_dto(row: IndexLevel) -> MarketOverviewSector {
@@ -121,9 +142,9 @@ fn sector_flow_dto(row: SectorFlow) -> MarketOverviewSectorFlow {
     MarketOverviewSectorFlow { code: row.code, name: row.name, whole_market: row.whole_market, individual_eok: row.net.individual, foreign_eok: row.net.foreign, institution_eok: row.net.institution }
 }
 
-async fn trading_days(st: &AppState, source: &dyn OverviewSource, params: &Params, answers: &mut Answers) -> Result<Vec<TradingDay>, ApiErrorBody> {
-    let mut days = answers.ask(st, source.trading_days(params.market, st.clock.now().kst_date(), Priority::Screen)).await?;
-    let keep = days.len().saturating_sub(params.period.days());
+async fn trading_days(env: &CardEnv<'_>, market: Market, period: MarketOverviewPeriod, answers: &mut Answers) -> Result<Vec<TradingDay>, ApiErrorBody> {
+    let mut days = answers.ask(env, env.source.trading_days(market, env.clock.now().kst_date(), env.priority)).await?;
+    let keep = days.len().saturating_sub(period.days());
     days.drain(..keep);
     Ok(days)
 }
@@ -131,44 +152,51 @@ async fn trading_days(st: &AppState, source: &dyn OverviewSource, params: &Param
 pub async fn turnover(State(st): State<Arc<AppState>>, Query(query): Query<HashMap<String, String>>) -> Result<Json<MarketOverviewTurnoverCard>, ApiFailure> {
     let params = Params::parse(&query)?;
     let picked = overview_source(&st);
-    let mut answers = Answers::new(picked.broker);
-    let days = part(trading_days(&st, picked.source.as_ref(), &params, &mut answers).await.map(|days| days.iter().map(|d| MarketOverviewTurnoverDay { date: api::KstDate(d.date), trade_value_eok: d.trade_value_eok }).collect()));
-    Ok(Json(MarketOverviewTurnoverCard { context: answers.context(&st, params.market), period: params.period, days }))
+    Ok(Json(turnover_card(&env_of(&st, &picked), params.market, params.period).await))
+}
+
+pub async fn turnover_card(env: &CardEnv<'_>, market: Market, period: MarketOverviewPeriod) -> MarketOverviewTurnoverCard {
+    let mut answers = Answers::new(env.broker);
+    let days = part(trading_days(env, market, period, &mut answers).await.map(|days| days.iter().map(|d| MarketOverviewTurnoverDay { date: api::KstDate(d.date), trade_value_eok: d.trade_value_eok }).collect()));
+    MarketOverviewTurnoverCard { context: answers.context(env.clock, market), period, days }
 }
 
 pub async fn flow(State(st): State<Arc<AppState>>, Query(query): Query<HashMap<String, String>>) -> Result<Json<MarketOverviewFlowCard>, ApiFailure> {
     let params = Params::parse(&query)?;
     let picked = overview_source(&st);
-    let (mut investor_answers, mut program_answers) = (Answers::new(picked.broker), Answers::new(picked.broker));
-    let (investors, program) = tokio::join!(investor_days(&st, &picked, &params, &mut investor_answers), program_days(&st, picked.source.as_ref(), &params, &mut program_answers));
-    let latest = investor_answers.latest.max(program_answers.latest);
-    Ok(Json(MarketOverviewFlowCard { context: Answers { latest, source: picked.broker }.context(&st, params.market), period: params.period, investors: part(investors), program: part(program) }))
+    Ok(Json(flow_card(&env_of(&st, &picked), params.market, params.period).await))
 }
 
-async fn investor_days(st: &AppState, picked: &Picked<dyn OverviewSource>, params: &Params, answers: &mut Answers) -> Result<Vec<MarketOverviewInvestorDay>, ApiErrorBody> {
-    let started = st.market_overview.ticket();
-    let source = picked.source.as_ref();
-    let days = trading_days(st, source, params, answers).await?;
+pub async fn flow_card(env: &CardEnv<'_>, market: Market, period: MarketOverviewPeriod) -> MarketOverviewFlowCard {
+    let (mut investor_answers, mut program_answers) = (Answers::new(env.broker), Answers::new(env.broker));
+    let (investors, program) = tokio::join!(investor_days(env, market, period, &mut investor_answers), program_days(env, market, period, &mut program_answers));
+    let latest = investor_answers.latest.max(program_answers.latest);
+    MarketOverviewFlowCard { context: Answers { latest, source: env.broker }.context(env.clock, market), period, investors: part(investors), program: part(program) }
+}
+
+async fn investor_days(env: &CardEnv<'_>, market: Market, period: MarketOverviewPeriod, answers: &mut Answers) -> Result<Vec<MarketOverviewInvestorDay>, ApiErrorBody> {
+    let started = env.book.ticket();
+    let days = trading_days(env, market, period, answers).await?;
     let mut rows = Vec::with_capacity(days.len());
     for day in days.iter().map(|d| d.date) {
-        let now = st.clock.now();
-        if let Some(cached) = st.market_overview.cached_investor_day(now, picked.broker, params.market, day) {
+        let now = env.clock.now();
+        if let Some(cached) = env.book.cached_investor_day(now, env.broker, market, day) {
             rows.push(cached);
             continue;
         }
-        let net = answers.ask(st, source.investor_day(params.market, day, Priority::Screen)).await?;
+        let net = answers.ask(env, env.source.investor_day(market, day, env.priority)).await?;
         let row = MarketOverviewInvestorDay { date: api::KstDate(day), individual_eok: net.individual, foreign_eok: net.foreign, institution_eok: net.institution };
         if day < observation_day(now) {
-            st.market_overview.cache_investor_day(now, picked.broker, params.market, row.clone(), started);
+            env.book.cache_investor_day(now, env.broker, market, row.clone(), started);
         }
         rows.push(row);
     }
     Ok(rows)
 }
 
-async fn program_days(st: &AppState, source: &dyn OverviewSource, params: &Params, answers: &mut Answers) -> Result<Vec<MarketOverviewProgramDay>, ApiErrorBody> {
-    let mut rows = answers.ask(st, source.program_days(params.market, st.clock.now().kst_date(), Priority::Screen)).await?;
-    let keep = rows.len().saturating_sub(params.period.days());
+async fn program_days(env: &CardEnv<'_>, market: Market, period: MarketOverviewPeriod, answers: &mut Answers) -> Result<Vec<MarketOverviewProgramDay>, ApiErrorBody> {
+    let mut rows = answers.ask(env, env.source.program_days(market, env.clock.now().kst_date(), env.priority)).await?;
+    let keep = rows.len().saturating_sub(period.days());
     Ok(rows.split_off(keep).into_iter().map(|r| MarketOverviewProgramDay { date: api::KstDate(r.date), arbitrage_eok: r.arbitrage_eok, non_arbitrage_eok: r.non_arbitrage_eok, total_eok: r.total_eok }).collect())
 }
 
@@ -187,7 +215,7 @@ pub async fn intraday_flow(State(st): State<Arc<AppState>>, Query(query): Query<
         }
     }
     let latest = samples.iter().map(|s| s.received_at).max().map(KstTime::from_unix);
-    Ok(Json(MarketOverviewIntradayFlow { context: Answers { latest, source: overview_source(&st).broker }.context(&st, params.market), day: api::KstDate(observation_day(now)), points: points.into_values().collect() }))
+    Ok(Json(MarketOverviewIntradayFlow { context: Answers { latest, source: overview_source(&st).broker }.context(&st.clock, params.market), day: api::KstDate(observation_day(now)), points: points.into_values().collect() }))
 }
 
 const MILLION_WON_PER_EOK: f64 = 100.0;
@@ -195,22 +223,29 @@ const MILLION_WON_PER_EOK: f64 = 100.0;
 pub async fn streaks(State(st): State<Arc<AppState>>, Query(query): Query<HashMap<String, String>>) -> Result<Json<MarketOverviewStreaksCard>, ApiFailure> {
     let params = Params::parse(&query)?;
     let picked = overview_source(&st);
-    let source = picked.source;
     let directory = feature_symbol_list(&st).await.map_err(ApiFailure::into_body);
-    let (mut buy_answers, mut sell_answers) = (Answers::new(picked.broker), Answers::new(picked.broker));
-    let (buying, selling) = tokio::join!(buy_answers.ask(&st, source.streaks(StreakSide::Buying, params.market, Priority::Screen)), sell_answers.ask(&st, source.streaks(StreakSide::Selling, params.market, Priority::Screen)));
-    let board = |result: Result<Vec<StreakRow>, ApiErrorBody>, direction: i64| match (&directory, result) {
-        (Err(error), _) => MarketOverviewPart::Failed { error: error.clone() },
-        (Ok(directory), result) => part(result.map(|rows| streak_board(&rows, direction, directory))),
+    let shown = |row: &StreakRow| !directory.as_ref().ok().and_then(|directory| directory.get(Symbol::Stock(row.code))).is_some_and(|info| matches!(info.kind, SymbolKind::Etf | SymbolKind::Etn));
+    let filter: StreakFilter<'_> = match &directory {
+        Ok(_) => Ok(&shown),
+        Err(error) => Err(error.clone()),
     };
-    let latest = buy_answers.latest.max(sell_answers.latest);
-    Ok(Json(MarketOverviewStreaksCard { context: Answers { latest, source: picked.broker }.context(&st, params.market), buying: board(buying, 1), selling: board(selling, -1) }))
+    Ok(Json(streaks_card(&env_of(&st, &picked), params.market, filter).await))
 }
 
-fn streak_board(rows: &[StreakRow], direction: i64, directory: &crate::symbols::Directory) -> MarketOverviewStreakBoard {
-    let shown = |row: &&StreakRow| !directory.get(Symbol::Stock(row.code)).is_some_and(|info| matches!(info.kind, SymbolKind::Etf | SymbolKind::Etn));
+pub async fn streaks_card(env: &CardEnv<'_>, market: Market, shown: StreakFilter<'_>) -> MarketOverviewStreaksCard {
+    let (mut buy_answers, mut sell_answers) = (Answers::new(env.broker), Answers::new(env.broker));
+    let (buying, selling) = tokio::join!(buy_answers.ask(env, env.source.streaks(StreakSide::Buying, market, env.priority)), sell_answers.ask(env, env.source.streaks(StreakSide::Selling, market, env.priority)));
+    let board = |result: Result<Vec<StreakRow>, ApiErrorBody>, direction: i64| match (&shown, result) {
+        (Err(error), _) => MarketOverviewPart::Failed { error: error.clone() },
+        (Ok(shown), result) => part(result.map(|rows| streak_board(&rows, direction, *shown))),
+    };
+    let latest = buy_answers.latest.max(sell_answers.latest);
+    MarketOverviewStreaksCard { context: Answers { latest, source: env.broker }.context(env.clock, market), buying: board(buying, 1), selling: board(selling, -1) }
+}
+
+fn streak_board(rows: &[StreakRow], direction: i64, shown: &(dyn Fn(&StreakRow) -> bool + Sync)) -> MarketOverviewStreakBoard {
     let pick = |columns: fn(&StreakRow) -> StreakColumn| -> Vec<MarketOverviewStreak> {
-        rows.iter().filter(shown).filter(|row| columns(row).days.signum() == direction).map(|row| {
+        rows.iter().filter(|row| shown(row)).filter(|row| columns(row).days.signum() == direction).map(|row| {
             let c = columns(row);
             MarketOverviewStreak { code: api::SymbolCode(Symbol::Stock(row.code).as_wire()), name: row.name.clone(), days: c.days, net_eok: c.net_eok, net_shares: c.net_shares, period_change_rate: row.period_change_rate }
         }).collect()

@@ -161,7 +161,7 @@ struct Folder {
 impl Folder {
     fn with_listing(dates: &[u32]) -> Folder {
         let root = tempfile::tempdir().unwrap();
-        let stocks: Vec<ListedStock> = (0..STOCKS).map(|index| ListedStock { code: code_of(index), nxt_enabled: index % 2 == 0 }).collect();
+        let stocks: Vec<ListedStock> = (0..STOCKS).map(|index| ListedStock { code: code_of(index), nxt_enabled: index % 2 == 0, exchange_traded: false }).collect();
         for date in dates {
             write_listing(root.path(), &ListingFile { format_version: LISTING_FORMAT_VERSION, date: *date, fetched_at: "2026-11-18T07:20:00+09:00".into(), stocks: stocks.clone() }).unwrap();
         }
@@ -423,7 +423,7 @@ async fn a_listing_of_the_day_that_appears_after_a_fallback_replaces_the_earlier
     run_for(&looping, &rest, "rest-01", &folder.shared(), &clock, &stats, 5).await;
     assert_eq!(board_of(&folder.shared(), Venue::Krx).body.requested, STOCKS as u32, "그날 목록이 없으면 이전 날 것으로 돈다");
 
-    let today: Vec<ListedStock> = (0..STOCKS + 10).map(|index| ListedStock { code: code_of(index), nxt_enabled: index % 2 == 0 }).collect();
+    let today: Vec<ListedStock> = (0..STOCKS + 10).map(|index| ListedStock { code: code_of(index), nxt_enabled: index % 2 == 0, exchange_traded: false }).collect();
     write_listing(folder.root.path(), &ListingFile { format_version: LISTING_FORMAT_VERSION, date: 20261118, fetched_at: "2026-11-18T10:00:10+09:00".into(), stocks: today }).unwrap();
     run_for(&looping, &rest, "rest-01", &folder.shared(), &clock, &stats, 60).await;
     let krx = board_of(&folder.shared(), Venue::Krx);
@@ -437,7 +437,7 @@ async fn a_listing_of_the_day_that_appears_after_a_fallback_replaces_the_earlier
 #[tokio::test(start_paused = true)]
 async fn one_omitted_stock_of_a_tiny_venue_is_missing_not_a_failed_tick_and_a_broken_listing_keeps_the_cached_one() {
     let folder = Folder::with_listing(&[20261117]);
-    let stocks: Vec<ListedStock> = (0..STOCKS).map(|index| ListedStock { code: code_of(index), nxt_enabled: index == 0 }).collect();
+    let stocks: Vec<ListedStock> = (0..STOCKS).map(|index| ListedStock { code: code_of(index), nxt_enabled: index == 0, exchange_traded: false }).collect();
     write_listing(folder.root.path(), &ListingFile { format_version: LISTING_FORMAT_VERSION, date: 20261117, fetched_at: "x".into(), stocks }).unwrap();
     let clock = Clock::fake(at(20261118, 10, 0, 0));
     let fake = FakeKiwoom::new();
@@ -459,7 +459,7 @@ async fn one_omitted_stock_of_a_tiny_venue_is_missing_not_a_failed_tick_and_a_br
 #[tokio::test(start_paused = true)]
 async fn with_two_keys_a_key_whose_share_is_one_omitted_stock_does_not_fail_the_tick() {
     let folder = Folder::with_listing(&[]);
-    let stocks: Vec<ListedStock> = (0..101).map(|index| ListedStock { code: code_of(index), nxt_enabled: false }).collect();
+    let stocks: Vec<ListedStock> = (0..101).map(|index| ListedStock { code: code_of(index), nxt_enabled: false, exchange_traded: false }).collect();
     write_listing(folder.root.path(), &ListingFile { format_version: LISTING_FORMAT_VERSION, date: 20261118, fetched_at: "x".into(), stocks }).unwrap();
     let clock = Clock::fake(at(20261118, 10, 0, 0));
     let (first, second) = (FakeKiwoom::new(), FakeKiwoom::new());

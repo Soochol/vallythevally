@@ -2,7 +2,7 @@ use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
-use domain::{Listing, ListingRow, Symbol, classify};
+use domain::{Listing, ListingRow, Symbol, SymbolKind, classify};
 use serde::{Deserialize, Serialize};
 
 use super::store::StoreError;
@@ -17,6 +17,8 @@ pub const LISTING_FORMAT_VERSION: u32 = 1;
 pub struct ListedStock {
     pub code: String,
     pub nxt_enabled: bool,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub exchange_traded: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -32,7 +34,7 @@ pub fn listed_stocks(rows: &[ListingRow]) -> Vec<ListedStock> {
         .iter()
         .filter_map(|row| match classify(row) {
             Listing::Include(info) => match info.symbol {
-                Symbol::Stock(code) => Some(ListedStock { code: code.as_str().to_owned(), nxt_enabled: info.nxt_enabled }),
+                Symbol::Stock(code) => Some(ListedStock { code: code.as_str().to_owned(), nxt_enabled: info.nxt_enabled, exchange_traded: matches!(info.kind, SymbolKind::Etf | SymbolKind::Etn) }),
                 Symbol::Index(_) => None,
             },
             Listing::Unknown(_) => None,

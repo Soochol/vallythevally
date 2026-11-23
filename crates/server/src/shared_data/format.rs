@@ -12,6 +12,8 @@ pub const FEED_EXTENSION: &str = "jsonl";
 #[serde(rename_all = "camelCase")]
 pub enum DataKind {
     Probe,
+    KiwoomThemes,
+    MarketOverview,
     SnapshotKrx,
     SnapshotCombined,
     SnapshotNxt,
@@ -24,6 +26,8 @@ impl DataKind {
         match self {
             DataKind::Probe => "probe",
             DataKind::Rankings => "rankings",
+            DataKind::KiwoomThemes => "kiwoom-themes",
+            DataKind::MarketOverview => "market-overview",
             DataKind::SnapshotKrx => "snapshot-krx",
             DataKind::SnapshotCombined => "snapshot-combined",
             DataKind::SnapshotNxt => "snapshot-nxt",

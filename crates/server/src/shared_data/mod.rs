@@ -3,7 +3,9 @@ mod feed;
 mod format;
 mod minute;
 mod rankings;
+mod overview;
 mod snapshot;
+mod themes;
 mod write;
 
 use std::path::PathBuf;
@@ -12,7 +14,7 @@ use std::time::Duration;
 
 pub use board::Board;
 pub use feed::Feed;
-pub use format::{Broker, DataKind, FORMAT_VERSION, Header, Loaded, Probe, ProbeBody, ProbeItem, SourceKey};
+pub use format::{Broker, DataKind, FORMAT_VERSION, Header, Loaded, Probe, ProbeBody, ProbeItem, SNAPSHOT_EXTENSION, SourceKey, data_path};
 pub use minute::{MinuteBar, MinuteBarKey, MinuteInstrument, MinuteTrade, MinuteVenue, minute_path};
 pub use snapshot::{IndexRow, SnapshotBody, SnapshotRow, snapshot_kind};
 pub use rankings::{
@@ -20,6 +22,8 @@ pub use rankings::{
     default_rankings, part_path, read_own_part,
 };
 pub use write::{FeedWriter, write_snapshot, write_snapshot_at};
+pub use overview::{CardSlot, CardValue, MadeCard, MarketCards, OverviewBody};
+pub use themes::{ThemeEntry, ThemesBody};
 
 use domain::{KstTime, Venue};
 
@@ -34,6 +38,8 @@ pub const DEFAULT_POLL: Duration = Duration::from_millis(1000);
 pub struct SharedData {
     pub probe: Board<ProbeBody>,
     pub probe_feed: Feed<ProbeItem>,
+    pub kiwoom_themes: Board<ThemesBody>,
+    pub market_overview: Board<OverviewBody>,
     pub snapshot_krx: Board<SnapshotBody>,
     pub snapshot_combined: Board<SnapshotBody>,
     pub snapshot_nxt: Board<SnapshotBody>,
@@ -49,6 +55,8 @@ impl SharedData {
             snapshot_combined: Board::new(DataKind::SnapshotCombined),
             snapshot_nxt: Board::new(DataKind::SnapshotNxt),
             rankings: RankingsBoard::new(),
+            kiwoom_themes: Board::new(DataKind::KiwoomThemes),
+            market_overview: Board::new(DataKind::MarketOverview),
         })
     }
 
@@ -80,6 +88,8 @@ impl SharedData {
             data.probe.poll(&dir);
             data.probe_feed.poll(&dir);
             data.rankings.poll(&dir);
+            data.kiwoom_themes.poll(&dir);
+            data.market_overview.poll(&dir);
             for venue in Venue::ALL {
                 data.snapshot(venue).poll(&dir);
             }
@@ -94,6 +104,8 @@ impl SharedData {
         match kind {
             DataKind::Probe => self.probe.errors() + self.probe_feed.errors(),
             DataKind::Rankings => self.rankings.errors(),
+            DataKind::KiwoomThemes => self.kiwoom_themes.errors(),
+            DataKind::MarketOverview => self.market_overview.errors(),
             DataKind::SnapshotKrx => self.snapshot_krx.errors(),
             DataKind::SnapshotCombined => self.snapshot_combined.errors(),
             DataKind::SnapshotNxt => self.snapshot_nxt.errors(),
@@ -105,6 +117,8 @@ impl SharedData {
         match kind {
             DataKind::Probe => self.probe.age_secs(now),
             DataKind::Rankings => self.rankings.age_secs(now),
+            DataKind::KiwoomThemes => self.kiwoom_themes.age_secs(now),
+            DataKind::MarketOverview => self.market_overview.age_secs(now),
             DataKind::SnapshotKrx => self.snapshot_krx.age_secs(now),
             DataKind::SnapshotCombined => self.snapshot_combined.age_secs(now),
             DataKind::SnapshotNxt => self.snapshot_nxt.age_secs(now),

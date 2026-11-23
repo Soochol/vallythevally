@@ -6,9 +6,11 @@ mod assignment;
 pub mod child;
 mod job;
 pub mod minute;
+mod overview;
 mod probe;
 pub mod rankings;
 mod runner;
+mod themes;
 pub mod snapshot;
 mod usage;
 mod wire;
@@ -23,6 +25,9 @@ pub use wire::{JobStat, TrMinute};
 #[serde(rename_all = "snake_case")]
 pub enum JobName {
     Probe,
+    KiwoomThemes,
+    Overview,
+    IntradaySamples,
     Snapshot,
     Rankings,
 }
@@ -31,6 +36,9 @@ impl JobName {
     pub fn job(self) -> Arc<dyn SharedJob> {
         match self {
             JobName::Probe => Arc::new(probe::ProbeJob),
+            JobName::KiwoomThemes => Arc::new(themes::KiwoomThemesJob::default()),
+            JobName::Overview => Arc::new(overview::OverviewJob::default()),
+            JobName::IntradaySamples => Arc::new(overview::IntradaySamplesJob::default()),
             JobName::Snapshot => Arc::new(snapshot::SnapshotJob::default()),
             JobName::Rankings => Arc::new(rankings::RankingsJob::default()),
         }

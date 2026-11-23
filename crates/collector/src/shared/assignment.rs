@@ -45,10 +45,10 @@ pub struct AssignedJob {
     pub job: JobName,
     pub slice_index: u32,
     pub slice_count: u32,
-    #[serde(default)]
-    pub peers: Vec<Broker>,
     pub period_secs: u64,
     pub options: Value,
+    #[serde(default)]
+    pub peers: Vec<Broker>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -172,9 +172,9 @@ impl Assignment {
                     job: *job,
                     slice_index: index as u32,
                     slice_count: live.len() as u32,
-                    peers: peers.clone(),
                     period_secs: plan.period.as_secs(),
                     options: plan.options.clone(),
+                    peers: peers.clone(),
                 });
             }
         }

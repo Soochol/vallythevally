@@ -8,6 +8,7 @@
 |---|---|
 | `VALLY_SHARED_DATA_DIR` | 자료 폴더. 절대 경로여야 한다. 없으면 서버는 아무것도 읽지 않고 동작이 지금과 같다. |
 | `VALLY_SHARED_DATA_POLL_MILLIS` | 폴링 간격. 기본 1000. 1 이상의 정수. |
+| `VALLY_SCREENER_SNAPSHOT_STALE_SECS` | 장중 스크리너가 받아들이는 스냅샷 나이 한도(초). 기본 120. 1 이상의 정수. 넘으면 실행이 `stale_data`로 실패한다. |
 
 서버는 간격마다 종류 폴더에서 관측일이 가장 늦은 파일을 `stat`으로 보고, 지난번과 바뀐 파일만 블로킹 스레드에서 읽어 메모리 판을 바꿔 끼운다. 요청은 메모리 판만 읽는다. 읽지 못한 파일(깨짐, 모르는 형식 버전, 폴더와 다른 종류)은 이전 판을 두고 종류별 오류 수를 센다. 같은 파일 버전은 오류를 한 번만 센다.
 
@@ -42,7 +43,7 @@
  "jobs": {"probe": {"keys": ["rest-01", "rest-02"], "period_secs": 30, "options": {"calls_per_tr": 4}}}}
 ```
 
-- `jobs`의 이름은 닫힌 열거형이다(`crates/collector/src/shared/mod.rs`의 `JobName`). 지금은 시험용 `probe`, `snapshot`, `rankings`다. 뒤 작업이 자기 일을 한 줄씩 더한다.
+- `jobs`의 이름은 닫힌 열거형이다(`crates/collector/src/shared/mod.rs`의 `JobName`). 지금은 시험용 `probe`와 `snapshot`, `kiwoom_themes`, `overview`, `intraday_samples`, `rankings`다. 뒤 작업이 자기 일을 한 줄씩 더한다.
 - 일마다 `keys`(순서가 우선순위), `period_secs`(1 이상, 없으면 일의 기본값. `rankings`는 10), `options`(일이 정하는 선택값, 없으면 일의 기본값)를 둔다. `keys`의 키는 모두 활성 `rest` 키여야 하고 그 일이 받는 증권사여야 한다. 같은 키를 두 번 적을 수 없다.
 - 같은 일에 키가 여럿이면 일이 나눌 단위를 키 수로 나눠 그 키들이 동시에 부른다. 키 `i`가 단위 `u`를 `u % 키 수 == i`일 때 맡는다. 키 하나가 멈추면(재시작 한도, 8050 등) 남은 키들이 몫을 다시 나눠 갖는다. 마지막 키까지 멈추면 그 일은 서고 상태 API에 경보가 난다.
 - `keys.<이름>.total_per_second`(선택)를 적으면 그 키의 `KiwoomRest` 합계 창을 그 값으로 켜서 모든 TR의 1초 전송 합계가 그 값을 넘지 않게 한다. 적지 않으면 TR별 창(5)만 지킨다.
@@ -95,6 +96,8 @@ TR 줄:
 | `snapshotCombined` | `snapshot-combined/` | `snapshot-combined/<YYYYMMDD>.json` | | `SnapshotBody` |
 | `snapshotNxt` | `snapshot-nxt/` | `snapshot-nxt/<YYYYMMDD>.json` | | `SnapshotBody` |
 | `minute` (1분봉) | `minute/<YYYYMMDD>/` | | `minute/<YYYYMMDD>/<키 이름>.jsonl` | `MinuteBar` |
+| `marketOverview` | `market-overview/` | `market-overview/<YYYYMMDD>.json` | | `OverviewBody`, `MadeCard` |
+| `kiwoomThemes` | `kiwoom-themes/` | `kiwoom-themes/<YYYYMMDD>.json` | | `ThemesBody`, `ThemeEntry` |
 
 ## 1분봉
 
@@ -116,6 +119,19 @@ TR 줄:
 - 인계로 종목이 다른 키로 옮겨 가면 새 키의 파일에 그때부터 쌓인다. 두 파일에 나뉜 같은 분은 `MinuteBar::merged_with`로 합친다. 받는 쪽을 이른 쪽으로 보고, 시가는 `firstSec`가 더 이른 쪽, 종가는 `lastSec`가 더 늦은(같으면 인수로 받은 뒤쪽) 쪽, 고가·저가는 극값, 양·대금·체결 수는 합이다. 키가 다른 봉은 합치지 않는다(`None`).
 - 집계는 원문 쓰기와 다른 작업에서 돈다. 세션은 `0B`·`0J`를 담은 프레임을 가득 차지 않은 큐(16,384개)에 `try_send`로만 넘기고, 큐가 차면 그 프레임을 집계 쪽이 버리고 `dropped`로 센다. 원문 쓰기는 늦어지지 않는다. 누계(`ticks`, `lines`, `dropped`, `skipped`, `unreadable`, `too_late`, `store_errors`)는 1분마다 로그 `분봉 집계 누계`로 남는다. 파일에 쓰지 못하면 바뀐 봉을 그대로 두고 다음 5초에 다시 쓴다. 집계의 오류는 세션을 멈추지 않는다.
 - 하루 파일 크기는 진행 중인 봉이 5초마다 한 줄씩 다시 쓰이므로 체결이 잦은 종목일수록 크다. 읽는 쪽은 지난번 위치부터 읽고 같은 키의 뒤 줄을 앞 줄 대신 쓴다.
+
+`kiwoom_themes`는 ADR 0042의 테마 목록·구성종목이다. 머리의 `asOf`가 받은 시각이고 본문은 테마마다 코드·이름·구성종목 코드다. 일 이름은 `kiwoom_themes`, 키움 키만 받는다.
+
+## 시장 개요와 장중 표본
+
+일 `overview`(60초마다, 08:00~20:00)가 코스피·코스닥의 칸을 만들어 `market-overview/<관측일>.json`에 쓴다. 칸 값은 서버 `GET /api/market-overview/*`가 내는 값과 같은 모양이다(`index`, `sectors`, `flow`·`turnover`의 기간 5·20·60, `streaks`). 계산은 서버의 `market_overview::{index,sectors,flow,turnover,streaks}_card`를 그대로 부른다. 칸마다 `context.source`가 받은 증권사이고, 칸 안의 실패는 그 부분만 `failed`다. 지난 거래일 투자자 값은 데몬 자식이 그 관측일(07:45 경계) 동안 메모리에 둔다.
+
+- 일의 `keys` 순서가 우선순위다. 칸 `u`(시장·칸 순서의 번호)는 키 `u % 키 수`가 맡고, 그 키의 증권사가 받을 수 없는 칸(한투의 연속 매매)은 순서상 다음에 그 칸을 받을 수 있는 키가 맡는다. 받을 수 있는 키가 없으면 처음 키가 그 칸을 `unsupported_by_source` 실패로 쓴다.
+- 키마다 `market-overview-parts/<관측일>.<키>.json`에 자기 칸을 쓰고, 잠금을 잡은 채 모든 조각을 합쳐 `market-overview/<관측일>.json`을 쓴다. 같은 칸이 둘이면 더 늦게 만든 것을 쓴다. 머리의 `asOf`는 합친 뒤 남은 칸 가운데 가장 오래된 것이고, `sources`는 그 칸을 만든 키만이다.
+- 연속 매매의 ETF·ETN 제외는 그날 종목 행 파일(`<데이터 폴더>/listing/`)의 `exchange_traded: true` 종목을 가리는 것이다(서버는 종목 사전의 종류로 같은 종목을 가린다). 이 칸은 없으면 거짓이라 쓰지 않는다. 파일이 없으면 그 칸이 `collector_unavailable` 실패다.
+- 한투 키의 공용 자료 자식은 아직 한투 세션(앱키·시크릿)을 받지 못한다. 그 키는 이 일에서 자기 칸을 `이 한투 키의 공용 자료 자식에는 한투 세션이 없습니다` 오류로 못 만든다. 데몬이 한투 자격을 자식에게 넘기는 작업이 있어야 한다.
+
+일 `intraday_samples`(09:00~15:30, 매 분)는 ADR 0034 줄 형식 그대로 `market-samples/<관측일>.jsonl`에 시장마다 투자자·프로그램을 한 줄씩 덧붙인다(한 분 4줄). 형식은 서버의 `market_overview::Sample`이다. 일의 이름은 `overview`, `intraday_samples`이고 키움·한투 키를 받는다.
 
 ## 순위 (`rankings`)
 

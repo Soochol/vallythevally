@@ -58,7 +58,7 @@ async fn take(st: &AppState, market: Market, mark: KstTime, now: KstTime, kind: 
     }
 }
 
-async fn investors(source: &dyn OverviewSource, market: Market, now: KstTime) -> Option<SampleValue> {
+pub async fn investors(source: &dyn OverviewSource, market: Market, now: KstTime) -> Option<SampleValue> {
     match source.intraday_investors(market, now, Priority::Background).await {
         Ok(net) => net.map(|InvestorNetEok { individual, foreign, institution }| SampleValue::Investors { individual_eok: individual, foreign_eok: foreign, institution_eok: institution }),
         Err(e) => {
@@ -72,7 +72,7 @@ fn million_won(eok: f64) -> i64 {
     (eok * MILLION_WON_PER_EOK).round() as i64
 }
 
-async fn program(source: &dyn OverviewSource, market: Market, now: KstTime) -> Option<SampleValue> {
+pub async fn program(source: &dyn OverviewSource, market: Market, now: KstTime) -> Option<SampleValue> {
     match source.intraday_program(market, now, Priority::Background).await {
         Ok(latest) => latest.map(|IntradayProgram { total_eok, split }| SampleValue::Program {
             arbitrage_million_won: split.map(|s| million_won(s.arbitrage_eok)),
