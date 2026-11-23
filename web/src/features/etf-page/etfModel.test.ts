@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { EtfFundSummary } from "../../api/generated/EtfFundSummary";
 import type { EtfChangePair } from "../../api/generated/EtfChangePair";
-import { commonHoldings, cumulativeCurve, filterFunds, formatRealChange, formatScale, issuersOf, NO_FILTER, overlapBps, pairOf, parseBasket, squarify } from "./etfModel";
+import { commonHoldings, cumulativeCurve, filterFunds, formatRealChange, formatScale, issuersOf, NO_FILTER, overlapBps, pairOf, parseBasket, rankHoldings, sortFunds, squarify } from "./etfModel";
 
 const fund = (code: string, name: string, style: EtfFundSummary["style"], issuer: string): EtfFundSummary => ({
   code, name, issuer, style, benchmark: "", holdingsCount: 1, top5WeightBps: 100, effectiveHoldings: 1,
@@ -70,6 +70,28 @@ describe("cumulativeCurve", () => {
       { rank: 3, cumulativeBps: 3400 },
     ]);
     expect(cumulativeCurve([])).toEqual([]);
+  });
+});
+
+describe("sortFunds", () => {
+  const sized = [
+    { ...fund("a", "다", "passive", "x"), top5WeightBps: 3000, holdingsCount: 10 },
+    { ...fund("b", "가", "passive", "x"), top5WeightBps: 9000, holdingsCount: 5 },
+    { ...fund("c", "나", "passive", "x"), top5WeightBps: 6000, holdingsCount: 50 },
+  ];
+  it("이름순은 가나다 순이다", () => expect(sortFunds(sized, "name").map((f) => f.code)).toEqual(["b", "c", "a"]));
+  it("상위 5 비중순은 큰 것부터다", () => expect(sortFunds(sized, "top5").map((f) => f.code)).toEqual(["b", "c", "a"]));
+  it("종목 수순은 많은 것부터다", () => expect(sortFunds(sized, "count").map((f) => f.code)).toEqual(["c", "a", "b"]));
+  it("원래 배열을 바꾸지 않는다", () => {
+    sortFunds(sized, "count");
+    expect(sized.map((f) => f.code)).toEqual(["a", "b", "c"]);
+  });
+});
+
+describe("rankHoldings", () => {
+  it("큰 비중부터 순위와 누적 비중을 매긴다", () => {
+    const ranked = rankHoldings([{ code: "a", name: "a", weightBps: 500 }, { code: "b", name: "b", weightBps: 1900 }, { code: "c", name: "c", weightBps: 1000 }]);
+    expect(ranked.map((r) => [r.holding.code, r.rank, r.cumulativeBps])).toEqual([["b", 1, 1900], ["c", 2, 2900], ["a", 3, 3400]]);
   });
 });
 
