@@ -1,6 +1,6 @@
 import type { HeatmapSource } from "../../api/generated/HeatmapSource";
 import type { HeatmapThemeOrder } from "../../api/generated/HeatmapThemeOrder";
-import { COLOR_RANGES, type ColorRange, DEFAULT_COLOR_RANGE } from "./colors";
+import { COLOR_RANGES, type ColorRange, DEFAULT_COLOR_RANGE } from "../../lib/heat/colors";
 
 export const SIZE_MODES = ["traded", "equal"] as const;
 export type SizeMode = (typeof SIZE_MODES)[number];

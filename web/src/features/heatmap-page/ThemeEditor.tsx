@@ -164,9 +164,9 @@ export function ThemeEditor({ start, onClose }: Props) {
   const footerIsAlert = problem !== null || failure !== null;
 
   return (
-    <DialogFrame variant="drawer" labelledBy="hm-edit-title" width="w-[min(900px,100vw)]" onClose={close}>
+    <DialogFrame variant="drawer" solid labelledBy="hm-edit-title" width="w-[min(900px,100vw)]" onClose={close}>
       <div className="ui-dialog-head hm-edit-head">
-        <h2 id="hm-edit-title" className="flex-none text-l font-[650]">테마 편집</h2>
+        <h2 id="hm-edit-title" className="flex-none text-l font-semibold">테마 편집</h2>
         <p className="min-w-0 flex-1">저장을 눌러야 히트맵에 반영됩니다. 테마는 관심종목과 따로 서버에 저장됩니다.</p>
         <button type="button" className="icon-btn ml-auto flex-none" aria-label="닫기" title="닫기 (Esc)" onClick={onClose}>
           <CloseIcon />
@@ -179,6 +179,7 @@ export function ThemeEditor({ start, onClose }: Props) {
           <button type="button" className="tb-btn" onClick={load}>다시 시도</button>
         </div>
       )}
+      {failure?.stale && <p className="hm-edit-band">다른 곳에서 먼저 저장한 테마와 겹쳐 저장하지 못했습니다. 최신 문서를 다시 받으면 지금 편집한 내용이 사라지고 다른 곳의 변경이 남습니다.</p>}
       {base !== null && (
         <div className="hm-edit-body">
           <ThemeListPane

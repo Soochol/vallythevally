@@ -15,7 +15,7 @@ export function rateSide(rate: number): "up" | "down" | "flat" {
 }
 
 const MAX_MIX_PERCENT = 82;
-const MIN_MIX_PERCENT = 8;
+const MIN_MIX_PERCENT = 24;
 
 export function rateFill(rate: number, range: ColorRange): string {
   const side = rateSide(rate);

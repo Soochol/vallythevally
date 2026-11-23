@@ -1,19 +1,21 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useCallback, useEffect, useMemo, useReducer, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router";
 import type { HeatmapBoardTheme } from "../../api/generated/HeatmapBoardTheme";
 import type { SymbolCode } from "../../api/generated/SymbolCode";
 import { heatmapBoardQuery } from "../../api/heatmapBoard";
+import { ApiRequestError } from "../../api/http";
 import { useSymbolInfos } from "../../api/queries";
 import { formatKstClockSeconds } from "../../chart/time";
 import { quoteBook } from "../../stores/realtime";
 import { useVenue } from "../../stores/ui";
 import { DataAgeNote } from "../data-age/DataAgeNote";
-import { EmptyState } from "../overlay/State";
+import { EmptyState, ErrorState } from "../overlay/State";
+import { Notice } from "../ui/Notice";
 import { PageFrame } from "../pages/PageFrame";
 import { HeatmapFlow } from "./HeatmapFlow";
 import { HeatmapGroup } from "./HeatmapGroup";
-import { HeatmapToolbar, SourceTabs } from "./HeatmapToolbar";
+import { HeatmapToolbar } from "./HeatmapToolbar";
 import { KiwoomBreadcrumb, KiwoomThemeMap } from "./KiwoomThemeMap";
 import { ThemeEditor, type ThemeEditorStart } from "./ThemeEditor";
 import { copyThemeToMineNow, type ThemeChoice } from "./themeQuickEdit";
@@ -36,18 +38,36 @@ export function heatmapSections(themes: readonly HeatmapBoardTheme[]): HeatmapSe
   return themes.map((theme) => ({ key: theme.id, title: theme.name, symbols: [...theme.members.map((m) => m.symbol), ...theme.missing], color: colors.get(theme.id)!, theme }));
 }
 
-function useBookTick(codes: readonly SymbolCode[]): number {
-  const [tick, bump] = useReducer((n: number) => n + 1, 0);
-  useEffect(() => {
-    const stops = codes.map((code) => quoteBook.subscribe(code, bump));
-    return () => stops.forEach((stop) => stop());
-  }, [codes]);
-  return tick;
-}
+const FRESHNESS_POLL_MS = 1000;
 
 function freshestTime(asOf: number | null, codes: readonly SymbolCode[]): number | null {
   const times = [...(asOf === null ? [] : [asOf]), ...codes.flatMap((code) => quoteBook.get(code).quote?.t ?? [])];
   return times.length === 0 ? null : Math.max(...times);
+}
+
+function useFreshestTime(asOf: number | null, codes: readonly SymbolCode[]): number | null {
+  const [latest, setLatest] = useState<number | null>(() => freshestTime(asOf, codes));
+  useEffect(() => {
+    const read = () => setLatest(freshestTime(asOf, codes));
+    read();
+    const timer = window.setInterval(read, FRESHNESS_POLL_MS);
+    return () => window.clearInterval(timer);
+  }, [asOf, codes]);
+  return latest;
+}
+
+function HeatmapSkeleton() {
+  return (
+    <div className="hm-groups hm-skeleton" role="status" aria-label="보드를 불러오는 중">
+      {[0, 1, 2, 3].map((i) => (
+        <div key={i} className="hm-skeleton-card" aria-hidden="true">
+          <span className="hm-skeleton-line" />
+          <span className="hm-skeleton-line" data-short="" />
+          <span className="hm-skeleton-map" />
+        </div>
+      ))}
+    </div>
+  );
 }
 
 export function HeatmapPage() {
@@ -56,6 +76,7 @@ export function HeatmapPage() {
   const change = useCallback((next: HeatmapSettings) => setParams((current) => withSettings(current, next), { replace: true }), [setParams]);
   const navigate = useCallback((next: HeatmapSettings) => setParams((current) => withSettings(current, next)), [setParams]);
   const hrefOf = (theme: string | null) => `?${withSettings(params, { ...settings, view: "board", theme })}`;
+  const selectSource = useCallback((source: HeatmapSettings["source"]) => source !== settings.source && navigate({ ...settings, source, theme: null }), [navigate, settings]);
   const venue = useVenue();
   const client = useQueryClient();
   const [editor, setEditor] = useState<ThemeEditorStart | null>(null);
@@ -69,7 +90,6 @@ export function HeatmapPage() {
   const choices = useMemo((): ThemeChoice[] => sections.map((section) => ({ id: section.key, name: section.title, symbols: section.symbols })), [sections]);
   const codes = useMemo(() => [...new Set(shown.flatMap((section) => section.symbols))], [shown]);
   useEffect(() => (codes.length > 0 ? quoteBook.lease(codes) : undefined), [codes]);
-  const tick = useBookTick(codes);
   const infos = useSymbolInfos(codes);
   const nameOf = useMemo(() => {
     const names = new Map(infos.map((info) => [info.code, info.name] as const));
@@ -78,8 +98,10 @@ export function HeatmapPage() {
   }, [infos, shown]);
   const settled = boardData !== undefined;
   const tradedKnown = useMemo(() => hasTradedValue(shown.flatMap((section) => boardRows(section.theme, nameOf))), [shown, nameOf]);
-  const latest = useMemo(() => freshestTime(boardData?.asOf ?? null, codes), [boardData, codes, tick]);
-  const quoteFreshness = latest === null ? "시세를 기다리는 중" : `시세 ${formatKstClockSeconds(latest)} 기준 · 자리는 30초마다 바꿈`;
+  const latest = useFreshestTime(boardData?.asOf ?? null, codes);
+  const failed = board.isError;
+  const lastText = latest === null ? "—" : formatKstClockSeconds(latest);
+  const quoteFreshness = failed ? `받지 못함 · 마지막 ${lastText}` : latest === null ? "시세를 기다리는 중" : `시세 ${lastText} 기준 · 자리는 30초마다 바꿈`;
   const catalogDate = kiwoom ? catalogFreshness(boardData?.catalog ?? null) : null;
   const freshness = catalogDate === null ? quoteFreshness : `${quoteFreshness} · ${catalogDate}`;
   const notice = kiwoom && settled ? catalogNotice(boardData.catalog) : null;
@@ -127,30 +149,47 @@ export function HeatmapPage() {
   ) : (
     <KiwoomThemeMap themes={sections.map((section) => section.theme)} range={settings.range} hrefOf={hrefOf} />
   );
+  const retry = () => void board.refetch();
+  const cause = board.error instanceof ApiRequestError ? board.error.message : "서버에 닿지 못했습니다";
+  const noThemes = !kiwoom && settled && sections.length === 0;
+  const firstUse = (
+    <EmptyState title="테마가 없습니다">
+      <p className="hm-empty-hint">히트맵은 내가 고른 종목 묶음인 테마마다 지도를 그립니다. 관심종목 그룹을 그대로 테마로 가져오거나, 빈 테마를 만들어 종목을 넣어 보세요.</p>
+      <div className="hm-empty-actions">
+        <button type="button" className="btn-primary" onClick={() => setEditor("import")}>관심종목 그룹에서 가져오기</button>
+        <button type="button" className="btn" onClick={() => setEditor("create")}>테마 직접 만들기</button>
+        <button type="button" className="btn" onClick={() => selectSource("kiwoom")}>키움 테마 둘러보기</button>
+      </div>
+      <p className="hm-empty-hint">가져와도 관심종목은 그대로 남습니다.</p>
+    </EmptyState>
+  );
+  const body = !settled ? (
+    failed ? (
+      <ErrorState message="히트맵 보드를 받지 못했습니다" retry={retry}>
+        <p className="hm-error-cause">{cause}</p>
+        <p className="hm-error-cause">30초마다 자동으로 다시 받습니다</p>
+      </ErrorState>
+    ) : (
+      <HeatmapSkeleton />
+    )
+  ) : kiwoom ? (
+    kiwoomBody
+  ) : noThemes ? (
+    firstUse
+  ) : settings.view === "flow" ? (
+    <HeatmapFlow sections={sections} names={nameOf} venue={venue} />
+  ) : (
+    <div className="hm-groups">
+      {sections.map((section) => (
+        <HeatmapGroup key={section.key} section={section} settings={settings} names={nameOf} themes={choices} editable />
+      ))}
+    </div>
+  );
   return (
-    <PageFrame title="히트맵" fresh={{ receivedAt: latest }} freshness={<>{freshness}{boardData && <DataAgeNote recordedAt={boardData.asOf} cadence="heatmapBoard" />}</>}>
-      <SourceTabs settings={settings} onSelect={(source) => source !== settings.source && navigate({ ...settings, source, theme: null })} />
-      <HeatmapToolbar settings={settings} onChange={change} tradedKnown={!settled || tradedKnown} onEdit={() => setEditor("browse")} />
-      {kiwoom ? (
-        settled ? kiwoomBody : null
-      ) : settled && sections.length === 0 ? (
-        <EmptyState title="테마가 없습니다">
-          <p className="hm-empty-hint">히트맵은 내가 고른 종목 묶음인 테마마다 지도를 그립니다. 관심종목 그룹을 그대로 테마로 가져오거나, 빈 테마를 만들어 종목을 넣어 보세요.</p>
-          <div className="hm-empty-actions">
-            <button type="button" className="btn-primary" onClick={() => setEditor("import")}>관심종목 그룹에서 가져오기</button>
-            <button type="button" className="tb-btn hm-edit-open" onClick={() => setEditor("create")}>테마 직접 만들기</button>
-          </div>
-          <p className="hm-empty-hint">가져와도 관심종목은 그대로 남습니다.</p>
-        </EmptyState>
-      ) : settings.view === "flow" ? (
-        <HeatmapFlow sections={sections} names={nameOf} venue={venue} />
-      ) : (
-        <div className="hm-groups">
-          {sections.map((section) => (
-            <HeatmapGroup key={section.key} section={section} settings={settings} names={nameOf} themes={choices} editable />
-          ))}
-        </div>
-      )}
+    <PageFrame title="히트맵" fresh={{ receivedAt: latest, failed }} freshness={<>{freshness}{boardData && <DataAgeNote recordedAt={boardData.asOf} cadence="heatmapBoard" />}</>}>
+      {!noThemes && <HeatmapToolbar settings={settings} onChange={change} onSelectSource={selectSource} tradedKnown={!settled || tradedKnown} onEdit={() => setEditor("browse")} />}
+      {settled && failed && <Notice tone="warning" action={{ label: "다시 시도", onClick: retry }}>{cause} · 마지막으로 받은 보드를 흐리게 보이고 있습니다. 자동으로 다시 받습니다.</Notice>}
+      <div className="hm-body" data-stale={settled && failed ? "" : undefined}>{body}</div>
       {editor !== null && <ThemeEditor start={editor} onClose={() => setEditor(null)} />}
     </PageFrame>
   );
