@@ -1,7 +1,14 @@
 {
   "identifier": "bench-remote",
-  "description": "측정 빌드(cargo 기능 bench)가 실행 중에만 더하는 권한. capabilities/ 폴더에 두지 않아 기본 빌드에 들지 않는다.",
-  "windows": ["main"],
-  "remote": { "urls": ["http://127.0.0.1:*/*"] },
-  "permissions": ["allow-bench-stream"]
+  "windows": [
+    "main"
+  ],
+  "remote": {
+    "urls": [
+      "http://127.0.0.1:*/*"
+    ]
+  },
+  "permissions": [
+    "allow-bench-stream"
+  ]
 }
