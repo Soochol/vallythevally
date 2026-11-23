@@ -45,6 +45,7 @@ const LAST_MINUTE_OF_SESSION: TimeOfDay = match TimeOfDay::hms(19, 59, 0) {
 const MASTER_RETRY_SECS: i64 = 600;
 const OUTAGE_POLL: Duration = Duration::from_secs(1);
 const INDEX_HISTORY_START: (i32, u8, u8) = (1980, 1, 1);
+const STOCK_HISTORY_START: (i32, u8, u8) = (1956, 1, 1);
 const MULTI_MARKET_KEYS: [&str; MULTI_PRICE_MAX_ROWS] = [
     "FID_COND_MRKT_DIV_CODE_1",
     "FID_COND_MRKT_DIV_CODE_2",
@@ -173,7 +174,7 @@ impl KisMarket {
         let body: ChartBody = self.body(KisApiId::DailyChart, query, priority).await?;
         let mut bars = calendar_bars(period, &body.output2)?;
         bars.retain(|bar| bar.bucket.start().kst_date() <= end);
-        let next = bars.first().map(|oldest| oldest.bucket.start().kst_date().add_days(-1)).filter(|earlier_end| *earlier_end < end && *earlier_end >= index_history_start());
+        let next = bars.first().map(|oldest| oldest.bucket.start().kst_date().add_days(-1)).filter(|earlier_end| *earlier_end < end && *earlier_end >= stock_history_start());
         Ok(ChartPage { bars, next: next.map(|date| Cursor::new(date.yyyymmdd())) })
     }
 
@@ -552,6 +553,11 @@ fn market_division(venue: Venue) -> &'static str {
 
 fn index_history_start() -> KstDate {
     let (year, month, day) = INDEX_HISTORY_START;
+    KstDate::new(year, month, day).expect("상수 날짜")
+}
+
+fn stock_history_start() -> KstDate {
+    let (year, month, day) = STOCK_HISTORY_START;
     KstDate::new(year, month, day).expect("상수 날짜")
 }
 

@@ -719,6 +719,27 @@ async fn daily_history_stops_when_a_window_does_not_reach_further_back_than_the_
     assert!(rig.transport.sent_to(KisApiId::DailyChart).len() <= 3);
 }
 
+#[tokio::test(start_paused = true)]
+async fn daily_history_reaches_a_stock_listed_before_nineteen_eighty() {
+    let base = KstDate::new(1980, 1, 10).unwrap();
+    let newer = weekdays_back_from(base, 15);
+    let older = weekdays_back_from(KstDate::new(1979, 7, 13).unwrap(), 10);
+    let rig = rig(daily_history_of(newer.iter().chain(&older).copied().collect()));
+    let source: &dyn MarketSource = rig.market.as_ref();
+    let key = samsung_key(Venue::Krx, Period::Day);
+    let mut cursor: Option<Cursor> = None;
+    let mut count = 0;
+    loop {
+        let page = source.chart_page(key, base, cursor.take(), Priority::Screen, MergeScope::Shared).await.unwrap();
+        count += page.bars.len();
+        cursor = page.next;
+        if cursor.is_none() {
+            break;
+        }
+    }
+    assert_eq!(count, 25, "1980년 이전 창의 봉도 이어 받는다");
+}
+
 fn trade_row(hour: &str, quantity: u32) -> String {
     format!(r#"{{"stck_cntg_hour":"{hour}","stck_pbpr":"71000","askp":"71100","bidp":"71000","cnqn":"{quantity}"}}"#)
 }
