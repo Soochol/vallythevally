@@ -70,7 +70,7 @@ export type ViewPlan = { plan: DockPlan; next: DockPlacement };
 export function evaluateView(view: DockView, command: DockCommand, space: DockSpace): ViewPlan {
   const plan = evaluateDock(view.drawn, command, space);
   if (plan.kind !== "change") return { plan, next: view.saved };
-  const next = carryMove(view.saved, plan.dock, command.window);
+  const next = carryMove(view.saved, view.drawn, plan.dock, command.window);
   return JSON.stringify(next) === JSON.stringify(view.saved) ? { plan: { kind: "unchanged" }, next: view.saved } : { plan, next };
 }
 

@@ -82,7 +82,7 @@ export function useDockInteraction({ root, dock, saved, space, enabled, onPick }
       const bounds = root.current!.getBoundingClientRect();
       const rect = detachedRect(start.dock, start.window.id, currentRoom, area, { x: point.x - bounds.left, y: point.y - bounds.top })!;
       const next = detachWindow(start.dock, start.window.id, rect);
-      return next === start.dock ? { ...idle, preview: { kind: "blocked", rect: toPx(rect, area), label: LAST_DOCKED_NOTICE } } : { ...idle, next: carryMove(start.saved, next, start.window.id), preview: { kind: "change", dock: next, rect: toPx(rect, area), label: "띄우기" } };
+      return next === start.dock ? { ...idle, preview: { kind: "blocked", rect: toPx(rect, area), label: LAST_DOCKED_NOTICE } } : { ...idle, next: carryMove(start.saved, start.dock, next, start.window.id), preview: { kind: "change", dock: next, rect: toPx(rect, area), label: "띄우기" } };
     }
     let moved = idle;
     if (start.operation.kind !== "tab") {
@@ -91,7 +91,7 @@ export function useDockInteraction({ root, dock, saved, space, enabled, onPick }
       const offset = { x: point.x - start.point.x, y: point.y - start.point.y };
       const result = start.operation.kind === "float-move" ? { ...moveRect(start.operation.rect, offset, others, start.area), atMinimum: false } : resizeRect(start.operation.rect, start.operation.handle, offset, minWindowSize(start.window.kind), others, start.area);
       const next = moveFloat(frontFloat(start.dock, start.window.id), start.window.id, toRatio(result.rect, start.area));
-      moved = { ...idle, draft: next, next: carryMove(start.saved, next, start.window.id), guides: result.guides, atMinimum: result.atMinimum };
+      moved = { ...idle, draft: next, next: carryMove(start.saved, start.dock, next, start.window.id), guides: result.guides, atMinimum: result.atMinimum };
       if (shift || start.operation.kind === "float-resize") return moved;
     }
     const command = commandAt(root.current!, start.dock, start.window.id, point, currentRoom, start.point);

@@ -221,3 +221,65 @@ test("비율만 눌린 동안 탭 메뉴로 탭 순서를 바꾸면 저장 비�
   await expect.poll(async () => (await boxOf(groupHolding(page, "order"))).width).toBe(wideOrder);
   expect(ratioOf(savedRoot(scenario))).toBe(0.6);
 });
+
+const FOLDED_ORDER_REASON = "자리가 좁아 접혀 들어온 탭과는 순서를 바꿀 수 없습니다";
+
+test("저장 묶음에 혼자인 탭은 접힌 묶음 안에서 순서를 바꿀 수 없고 저장에는 세 묶음과 비율이 남아 넓히면 돌아온다", async ({ page, scenario }) => {
+  const root = row(0.35, group("g1", ["cell-0"]), row(0.45, group("g2", ["brokers"]), group("g3", ["order"])));
+  seed(scenario, [CHART, BROKERS, ORDER], root);
+  await open(page);
+  await page.setViewportSize({ width: 1024, height: 900 });
+  await expect.poll(() => shownGroups(page)).toEqual([["cell-0"], ["brokers", "order"]]);
+
+  await tabOf(page, "brokers").click({ button: "right" });
+  const later = page.getByRole("menu", { name: "창 배치" }).getByRole("menuitem", { name: "뒤로 옮기기" });
+  await expect(later).toBeDisabled();
+  await expect(later).toHaveAccessibleDescription(FOLDED_ORDER_REASON);
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("menu", { name: "창 배치" })).toHaveCount(0);
+
+  await tabOf(page, "brokers").focus();
+  await page.keyboard.press("Alt+ArrowRight");
+  await expect(tabOf(page, "brokers")).toBeFocused();
+  await page.locator('[role=tab][data-window-id="brokers"] + .link-dot').click();
+  await page.getByRole("menu", { name: "연동 색" }).getByRole("menuitemradio", { name: /^B/ }).click();
+  await pollSaved(() => scenario.documents.layout(DEFAULT_LAYOUT_ID).windows.find((window) => window.id === "brokers")?.link).toBe("b");
+  expect(layoutPuts(scenario).length).toBeGreaterThan(0);
+  for (const saved of savedPuts(scenario)) expect(saved).toEqual(root);
+  expect(await shownGroups(page)).toEqual([["cell-0"], ["brokers", "order"]]);
+
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await expect.poll(() => shownGroups(page)).toEqual([["cell-0"], ["brokers"], ["order"]]);
+  const saved = savedRoot(scenario);
+  expect(saved).toEqual(root);
+  expect(ratioOf(saved)).toBe(0.35);
+  expect(ratioOf(saved?.kind === "split" ? saved.second : undefined)).toBe(0.45);
+});
+
+test("접힌 동안 탭을 끌어 접힌 묶음에 놓으면 저장에는 창이 모두 남고 접히지 않은 묶음 구성과 비율이 실려 넓히면 그대로 돌아온다", async ({ page, scenario }) => {
+  seed(scenario, [CHART, WATCH, BROKERS, ORDER], row(0.35, { kind: "group", id: "g1", tabs: ["cell-0", "watchlist"] as never, active: "cell-0" as never }, row(0.45, group("g2", ["brokers"]), group("g3", ["order"]))));
+  await open(page);
+  await page.setViewportSize({ width: 1024, height: 900 });
+  await expect.poll(() => shownGroups(page)).toEqual([["cell-0", "watchlist"], ["brokers", "order"]]);
+
+  const source = await boxOf(tabOf(page, "watchlist"));
+  const target = await boxOf(groupHolding(page, "order"));
+  await page.mouse.move(source.x + source.width / 2, source.y + source.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(target.x + target.width / 2, target.y + target.height / 2, { steps: 12 });
+  await expect(page.locator("[data-dock-preview-label]")).toHaveText("이 묶음에 탭으로 넣기");
+  await page.mouse.up();
+  await expect.poll(() => shownGroups(page)).toEqual([["cell-0"], ["brokers", "order", "watchlist"]]);
+
+  const expected = row(0.35, group("g1", ["cell-0"]), row(0.45, group("g2", ["brokers"]), { kind: "group", id: "g3", tabs: ["order", "watchlist"] as never, active: "watchlist" as never }));
+  await pollSaved(() => savedRoot(scenario)).toEqual(expected);
+  for (const saved of savedPuts(scenario)) {
+    const tabs = saved ? listGroups(saved).map((node) => node.tabs) : [];
+    expect(tabs.flat().sort()).toEqual(["brokers", "cell-0", "order", "watchlist"]);
+    expect(tabs).toContainEqual(["brokers"]);
+  }
+
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await expect.poll(() => shownGroups(page)).toEqual([["cell-0"], ["brokers"], ["order", "watchlist"]]);
+  expect(savedRoot(scenario)).toEqual(expected);
+});
