@@ -8,6 +8,10 @@ use super::format::{Envelope, FEED_EXTENSION, FORMAT_VERSION, Header, SNAPSHOT_E
 
 pub fn write_snapshot<B: Serialize>(dir: &Path, header: Header, body: B) -> io::Result<PathBuf> {
     let path = data_path(dir, header.kind, &header.observation_date, SNAPSHOT_EXTENSION);
+    write_snapshot_at(path, header, body)
+}
+
+pub fn write_snapshot_at<B: Serialize>(path: PathBuf, header: Header, body: B) -> io::Result<PathBuf> {
     let folder = path.parent().expect("자료 파일은 종류 폴더 안에 있다");
     std::fs::create_dir_all(folder)?;
     let temporary = folder.join(format!(".{}.tmp-{}", path.file_name().and_then(|n| n.to_str()).unwrap_or("data"), std::process::id()));

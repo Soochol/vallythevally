@@ -18,12 +18,14 @@ pub enum DataKind {
     SnapshotCombined,
     SnapshotNxt,
     Minute,
+    Rankings,
 }
 
 impl DataKind {
     pub fn folder(self) -> &'static str {
         match self {
             DataKind::Probe => "probe",
+            DataKind::Rankings => "rankings",
             DataKind::KiwoomThemes => "kiwoom-themes",
             DataKind::MarketOverview => "market-overview",
             DataKind::SnapshotKrx => "snapshot-krx",

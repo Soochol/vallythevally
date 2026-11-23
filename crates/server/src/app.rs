@@ -418,7 +418,7 @@ pub async fn start(config: &Config, lock: &InstanceLock, adapters: Adapters) -> 
         Some(spacing) => crate::financials::client::Client::with_spacing(key, config.dart_base_url.clone(), config.kind_base_url.clone(), spacing),
     }.ok());
     let financials = crate::financials::Financials::with_store(dart, financial_store, clock.clone());
-    let automatic = config.financial_automatic.then(|| financials.start_automatic(symbols.clone()));
+    let automatic = config.financial_automatic.then(|| financials.start_automatic(crate::financials::symbol_listings(&symbols)));
     let financial_routes = crate::financials::routes(financials, symbols.clone());
     let public = crate::public::start(config, state.clone(), financial_routes.clone(), sends).await?;
     let router = router(state.clone())

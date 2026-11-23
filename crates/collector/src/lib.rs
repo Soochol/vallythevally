@@ -3,6 +3,7 @@ pub mod build;
 pub mod calendar;
 pub mod collect;
 pub mod finalize;
+pub mod financials;
 pub mod keys;
 pub mod kst;
 pub mod parse;

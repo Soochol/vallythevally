@@ -43,8 +43,8 @@
  "jobs": {"probe": {"keys": ["rest-01", "rest-02"], "period_secs": 30, "options": {"calls_per_tr": 4}}}}
 ```
 
-- `jobs`의 이름은 닫힌 열거형이다(`crates/collector/src/shared/mod.rs`의 `JobName`). 지금은 시험용 `probe`와 `snapshot`이다. 뒤 작업이 자기 일을 한 줄씩 더한다.
-- 일마다 `keys`(순서가 우선순위), `period_secs`(1 이상), `options`(일이 정하는 선택값, 없으면 일의 기본값)를 둔다. `keys`의 키는 모두 활성 `rest` 키여야 하고 그 일이 받는 증권사여야 한다. 같은 키를 두 번 적을 수 없다.
+- `jobs`의 이름은 닫힌 열거형이다(`crates/collector/src/shared/mod.rs`의 `JobName`). 지금은 시험용 `probe`와 `snapshot`, `kiwoom_themes`, `overview`, `intraday_samples`, `rankings`다. 뒤 작업이 자기 일을 한 줄씩 더한다.
+- 일마다 `keys`(순서가 우선순위), `period_secs`(1 이상, 없으면 일의 기본값. `rankings`는 10), `options`(일이 정하는 선택값, 없으면 일의 기본값)를 둔다. `keys`의 키는 모두 활성 `rest` 키여야 하고 그 일이 받는 증권사여야 한다. 같은 키를 두 번 적을 수 없다.
 - 같은 일에 키가 여럿이면 일이 나눌 단위를 키 수로 나눠 그 키들이 동시에 부른다. 키 `i`가 단위 `u`를 `u % 키 수 == i`일 때 맡는다. 키 하나가 멈추면(재시작 한도, 8050 등) 남은 키들이 몫을 다시 나눠 갖는다. 마지막 키까지 멈추면 그 일은 서고 상태 API에 경보가 난다.
 - `keys.<이름>.total_per_second`(선택)를 적으면 그 키의 `KiwoomRest` 합계 창을 그 값으로 켜서 모든 TR의 1초 전송 합계가 그 값을 넘지 않게 한다. 적지 않으면 TR별 창(5)만 지킨다.
 - 모르는 칸, 모르는 일 이름, `rest`가 아닌 키, 키 목록에 없는 키, 0인 주기·한도, 일이 받지 않는 선택값은 읽기 오류다.
@@ -132,3 +132,31 @@ TR 줄:
 - 한투 키의 공용 자료 자식은 아직 한투 세션(앱키·시크릿)을 받지 못한다. 그 키는 이 일에서 자기 칸을 `이 한투 키의 공용 자료 자식에는 한투 세션이 없습니다` 오류로 못 만든다. 데몬이 한투 자격을 자식에게 넘기는 작업이 있어야 한다.
 
 일 `intraday_samples`(09:00~15:30, 매 분)는 ADR 0034 줄 형식 그대로 `market-samples/<관측일>.jsonl`에 시장마다 투자자·프로그램을 한 줄씩 덧붙인다(한 분 4줄). 형식은 서버의 `market_overview::Sample`이다. 일의 이름은 `overview`, `intraday_samples`이고 키움·한투 키를 받는다.
+
+## 순위 (`rankings`)
+
+수집 데몬이 배정표에 적은 조건의 순위를 10초(기본)마다 미리 받아 파일로 쓰고, 서버는 읽기만 한다. 서버가 읽는 일은 따로 한다. 서버 쪽 읽기는 `crates/server/src/shared_data/rankings.rs`다.
+
+배정 예:
+
+```json
+{"version": 1,
+ "jobs": {"rankings": {"keys": ["rest-kis", "rest-01"], "options": {"pages": 5, "variants": [{"kind": "tradeAmount", "market": "all", "venue": "combined", "excludeManaged": false}]}}}}
+```
+
+- `options.variants`는 미리 만들 조건 목록이다. 항목은 서버 `api::Ranking`의 JSON에서 `excludes`를 뺀 것이다(적어도 무시한다). 없으면 기본 목록(`default_rankings()`)이다. 종류마다 기본 선택값(웹의 시작 선택값) × 시장(전체·코스피·코스닥, 프로그램·호가잔량은 코스피·코스닥, 많이 본 종목은 시장 없음) × 통합 거래소로 35개다. `options.pages`는 조건마다 받을 쪽 수로 기본 5(1~30)다. 같은 조건을 두 번 적으면 읽기 오류다.
+- 시간대는 관측일 08:00~20:00이다.
+- 조건의 키는 서버 순위 캐시 `QueryKey`의 본문과 같은 규칙(`market_source::rankings::condition_key`: `Ranking`의 JSON에서 `excludes`를 뺀 글자)이다. 서버는 요청의 조건을 같은 함수로 키로 만들어 찾는다.
+- 받을 키는 `keys` 순서가 우선순위다. 조건마다 그 키가 받을 수 있는지(`RankingSource::check`: 종류, 선택값, 조합)를 보고, 처음 받을 수 있는 키의 증권사에 속한 키들이 그 조건을 조건 번호 순으로 나눠 받는다. 받을 수 있는 키가 없으면 첫 키가 그 조건을 `unavailable`로 적는다. 예: 한투 키가 첫째, 키움 키가 둘째면 한투가 받지 못하는 조건(외국인 연속 순매수, 프로그램 순매수, 한투가 당일 누적만 받는 많이 본 종목 `minute1` 등)만 키움 키로 나간다.
+- 연속조회는 `pages`쪽까지 걷는다. 목록이 먼저 끝나면(`end`) 거기서 멈춘다. 한투 순위는 한 쪽으로 끝난다.
+- 조건 하나가 실패하면 그 조건만 이전 값(`last`)을 두고 `state`를 `failed`로 적는다. 다른 조건은 새 값이다.
+
+파일은 키마다 조각 하나다: `<VALLY_SHARED_DATA_DIR>/rankings/<YYYYMMDD>/<키 이름>.json`. 키가 서로 다른 파일을 쓰므로 쓰기 경합이 없다. 서버는 관측일이 가장 늦은 폴더의 조각들을 읽어 한 판으로 합치고, 조각 파일이 바뀐 때만 다시 합친다. 같은 조건이 여러 조각에 있으면 받은 시각이 가장 늦은 쪽을 쓴다.
+
+조각 본문(`RankingsPartBody`, camelCase): `periodSecs`, `pages`, `conditions`(배열). 항목: `key`(조건 키), `state`(`ready`·`failed`(`at`, `message`)·`unavailable`), `last`(없을 수 있다. `rows`, `pages`(받은 쪽 수), `end`, `limited`, `receivedAt`(Unix 초), `broker`). 행은 `code`, `name`, `price`, `changeRate`, `figures`이고 순번·상장 여부·제외 거름은 서버가 읽을 때 정한다. 머리 `asOf`는 그 키가 마지막으로 돈 시각이고 `sources`에 그 키와 증권사가 하나 든다. 조각이 낡았는지는 지금 − `asOf`가 `periodSecs`의 두 배를 넘는지로 본다(`MergedCondition::is_stale`).
+
+한투 키의 자식은 아직 순위를 받을 `KisRest` 연결이 없다(`Market::Kis(None)`). 그 키가 맡은 일은 오류로 남고 파일을 쓰지 않는다. 한투 키 자격증명을 자식에 건네는 길은 이 일 다음에 더한다.
+
+| 종류 | 폴더 | 한 파일(`.json`) | 본문 |
+|---|---|---|---|
+| `rankings` | `rankings/` | `rankings/<YYYYMMDD>/<키 이름>.json` | `RankingsPartBody` |

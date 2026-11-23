@@ -6,6 +6,7 @@ struct ScheduledApp {
     clock: Clock,
     scheduler: tokio::task::JoinHandle<()>,
     http: tokio::task::JoinHandle<()>,
+    _listings: tokio::sync::watch::Sender<Option<Vec<domain::SymbolInfo>>>,
 }
 
 impl Drop for ScheduledApp { fn drop(&mut self) { self.scheduler.abort(); self.http.abort(); } }
@@ -14,14 +15,16 @@ impl ScheduledApp {
     async fn start(fake: &Fake, path: &std::path::Path, clock: Clock) -> Self {
         use domain::{Market, Symbol, SymbolInfo, SymbolKind};
         let service = Financials::new(Some(fake.client()), Store::open(path).await.unwrap(), clock.clone());
+        let samsung = SymbolInfo { symbol: Symbol::parse("005930").unwrap(), name: "삼성전자".into(), kind: SymbolKind::Common, market: Market::Kospi, nxt_enabled: false };
         let symbols = Arc::new(server::symbols::SymbolDirectory::default());
-        symbols.replace(server::symbols::Directory::build(vec![SymbolInfo { symbol: Symbol::parse("005930").unwrap(), name: "삼성전자".into(), kind: SymbolKind::Common, market: Market::Kospi, nxt_enabled: false }]));
+        symbols.replace(server::symbols::Directory::build(vec![samsung.clone()]));
+        let (listings, listing) = tokio::sync::watch::channel(Some(vec![samsung]));
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let base = format!("http://{}", listener.local_addr().unwrap());
         let router = server::financials::routes(service.clone(), symbols.clone());
-        let scheduler = service.start_automatic(symbols);
+        let scheduler = service.start_automatic(listing);
         let http = tokio::spawn(async move { axum::serve(listener, router).await.unwrap(); });
-        Self { base, clock, scheduler, http }
+        Self { base, clock, scheduler, http, _listings: listings }
     }
 }
 

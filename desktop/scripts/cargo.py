@@ -47,6 +47,8 @@ def test():
     subprocess.run(["cargo", "test", "--locked", "--features", "bench"], cwd=CRATE, check=True)
     print("desktop: 성능 문서와 측정 JSON 대조", flush=True)
     subprocess.run([sys.executable, "-m", "unittest", "test_doc"], cwd=ROOT / "desktop" / "bench", check=True)
+    print("desktop: 릴리스 설정·갱신 목록 도구 시험", flush=True)
+    subprocess.run([sys.executable, "-m", "unittest", "test_release"], cwd=ROOT / "desktop" / "scripts", check=True)
 
 
 def check():

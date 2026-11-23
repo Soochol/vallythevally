@@ -11,6 +11,7 @@ mod lifetime;
 mod locations;
 mod loopback;
 mod tail;
+mod updates;
 
 use engine::{Engine, EngineSpec, EngineStatus, StatusCell};
 use environment::{Environment, engine_environment};
@@ -21,6 +22,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use tail::LogTail;
 use tauri::{AppHandle, Manager, RunEvent, State};
+use updates::UpdateCenter;
 
 const MAIN_WINDOW: &str = "main";
 const ENGINE_BINARY_OVERRIDE: &str = "VALLY_DESKTOP_ENGINE_BIN";
@@ -58,9 +60,11 @@ fn main() {
         .plugin(tauri_plugin_single_instance::init(|app, _arguments, _working_dir| focus_main_window(app)))
         .manage(StatusCell::starting())
         .manage(EngineSlot::default())
-        .invoke_handler(tauri::generate_handler![engine_status])
+        .manage(UpdateCenter::default())
+        .invoke_handler(tauri::generate_handler![engine_status, updates::update_status, updates::install_update, updates::dismiss_update_notice, updates::restart_app])
         .setup(|app| {
             start_engine(app.handle());
+            updates::start(app.handle());
             Ok(())
         })
         .build(context)

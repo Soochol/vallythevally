@@ -8,6 +8,7 @@ mod job;
 pub mod minute;
 mod overview;
 mod probe;
+pub mod rankings;
 mod runner;
 mod themes;
 pub mod snapshot;
@@ -28,6 +29,7 @@ pub enum JobName {
     Overview,
     IntradaySamples,
     Snapshot,
+    Rankings,
 }
 
 impl JobName {
@@ -38,6 +40,7 @@ impl JobName {
             JobName::Overview => Arc::new(overview::OverviewJob::default()),
             JobName::IntradaySamples => Arc::new(overview::IntradaySamplesJob::default()),
             JobName::Snapshot => Arc::new(snapshot::SnapshotJob::default()),
+            JobName::Rankings => Arc::new(rankings::RankingsJob::default()),
         }
     }
 }
