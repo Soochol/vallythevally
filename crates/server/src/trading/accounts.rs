@@ -158,6 +158,13 @@ impl Accounts {
         self.shared.changes.subscribe()
     }
 
+    pub fn forget_verified_of(&self, key: &KeyId) {
+        let service = self.services.lock().expect("계좌 서비스 잠금").get(key.as_str()).map(|(_, service)| service.clone());
+        if let Some(service) = service {
+            service.forget_verified();
+        }
+    }
+
     pub fn remember_price_band(&self, code: StockCode, upper: Option<u64>, lower: Option<u64>) {
         if let Some(band) = PriceBand::from_limits(upper, lower) {
             self.shared.bands.remember(code, self.shared.clock.now().kst_date(), band);
