@@ -12,6 +12,7 @@
 ## 개발 문서
 
 - Rust 빌드·시험·배포 작업 전 [`docs/development-builds.md`](docs/development-builds.md)를 읽는다.
+- 데스크톱 앱(`desktop/`) 작업 전 [`docs/desktop-builds.md`](docs/desktop-builds.md)를 읽는다.
 - 웹 검사·E2E·브라우저 진단 작업 전 [`docs/web-checks.md`](docs/web-checks.md)를 읽는다.
 - e2e 시험을 쓰거나 고치기 전 [`docs/e2e-tests.md`](docs/e2e-tests.md)를 읽는다.
 - 히트맵 테마를 넣고 빼거나 고치기 전 [`docs/heatmap-themes-cli.md`](docs/heatmap-themes-cli.md)를 읽는다. 테마는 그 CLI로만 바꾼다.
