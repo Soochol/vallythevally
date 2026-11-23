@@ -10,7 +10,8 @@ import {
 import { axisPriceFormat, financialAxisUnit, type AxisGeometry } from "../axisFormat";
 import type { Bar } from "../../api/generated/Bar";
 import type { FinancialsPage } from "../../api/generated/FinancialsPage";
-import { adjacentBucket, financialBuckets, financialDetail, financialFailure, financialReason, checkedTime, financialSummary, financialValue, reportingPeriod } from "../financials";
+import type { FinancialPoint } from "../../api/generated/FinancialPoint";
+import { adjacentBucket, financialBuckets, type FinancialDetailRow, financialDetailRows, financialFailure, financialReason, checkedTime, financialSummary, financialSummaryRows, financialValue, reportingPeriod } from "../financials";
 import type { Period } from "../../api/generated/Period";
 import type { UnixSeconds } from "../../api/generated/UnixSeconds";
 import { formatPrice, formatVolume } from "../../lib/format";
@@ -58,8 +59,23 @@ export interface IndicatorRow {
   color: string;
   values: LegendValue[];
   state: "ok" | "pending" | "hidden" | EngineErrorKind;
-  detail?: { status: string; summary: string; text: string; reports: { label: string; text: string }[] };
+  detail?: { status: string; summary: string; rows: readonly FinancialDetailRow[]; reports: readonly FinancialReport[] };
   panel: { index: number; count: number; collapsed?: boolean } | null;
+}
+
+export interface FinancialReport { readonly label: string; readonly rows: readonly FinancialDetailRow[] }
+
+function financialOverviewRows(page: FinancialsPage | null, notice: string | undefined, message: string): FinancialDetailRow[] {
+  if (!page) return [{ name: "상태", value: message }];
+  const failures = [{ name: "자료 조회", value: financialFailure(page.failure) }, { name: "공시 조회", value: financialFailure(page.disclosureFailure) }].filter((row) => row.value !== "");
+  return [
+    ...financialSummaryRows(page),
+    ...(notice ? [{ name: "안내", value: notice }] : []),
+    ...failures,
+    { name: "최근 시도", value: checkedTime(page.lastAttemptAt) },
+    ...(page.shareClassReason ? [{ name: "배당 주식 종류", value: "미확인 · 회사 재무와 별도로 확인합니다" }] : []),
+    ...(page.latestCorrections ? [{ name: "공시 기준", value: "정정된 최신 공시" }] : []),
+  ];
 }
 
 export type PriceLegendValues = Pick<IndicatorRow, "id"> & { slots: readonly (readonly IndicatorRow["values"][number]["text"][])[] };
@@ -127,7 +143,9 @@ export class IndicatorLayer {
   private committedT: UnixSeconds | null = null;
   private broken = false;
   private financials: FinancialsPage | null = null;
-  private financialReports = new Map<string, { label: string; text: string }[]>();
+  private financialReports = new Map<string, FinancialReport[]>();
+  private financialPointRows = new Map<FinancialPoint, readonly FinancialDetailRow[]>();
+  private financialOverview: readonly FinancialDetailRow[] = [];
   private financialSummaryText = "";
   private financialMessage = "재무자료를 불러오는 중입니다";
   private financialNotice: string | undefined;
@@ -136,8 +154,10 @@ export class IndicatorLayer {
     this.financials = page;
     this.financialNotice = message;
     this.financialSummaryText = page ? financialSummary(page) : "";
-    this.financialReports = new Map(page?.series.map((series) => [series.metric, series.points.map((point) => ({ label: `${point.businessYear} / ${point.reportCode} · ${reportingPeriod(point.period)}`, text: financialDetail(point, series.metric) }))]) ?? []);
+    this.financialPointRows = new Map(page?.series.flatMap((series) => series.points.map((point) => [point, financialDetailRows(point, series.metric)] as const)) ?? []);
+    this.financialReports = new Map(page?.series.map((series) => [series.metric, series.points.map((point) => ({ label: `${point.businessYear} / ${point.reportCode} · ${reportingPeriod(point.period)}`, rows: this.financialPointRows.get(point) ?? [] }))]) ?? []);
     this.financialMessage = message ?? "재무자료를 불러오는 중입니다";
+    this.financialOverview = financialOverviewRows(page, message, this.financialMessage);
     this.host.guard(() => {
       for (const s of this.shown.values()) if (isFinancial(s.config.spec)) {
         s.status = { kind: s.config.visible ? "ready" : "hidden" };
@@ -333,7 +353,7 @@ export class IndicatorLayer {
         return { id: config.id, name: `${specName(config.spec)}${fiscalMonth}${unitNote}`, color: indicatorColorValue(tokens, config.style.colors[0] ?? "ind-1"),
           values: at.map((p) => ({ text: p.value === null ? financialReason(p.reason) || "—" : financialValue(p.value, metric, p.currency), color: tokens.text2 })),
           state: config.visible ? "ok" : "hidden", panel: { index: panelIndex, count: this.panels.length, collapsed },
-          detail: { status: this.financialNotice ? "failed" : this.financials?.status ?? "pending", summary, text: [summary, financialFailure(this.financials?.failure ?? null), financialFailure(this.financials?.disclosureFailure ?? null), this.financials ? `최근 시도 ${checkedTime(this.financials.lastAttemptAt)}` : "", this.financials?.shareClassReason ? "배당 주식 종류 미확인 · 회사 재무와 별도로 확인합니다" : "", this.financials?.latestCorrections ? "정정된 최신 공시 기준" : "", ...at.map((p) => financialDetail(p, metric))].join("\n\n"),
+          detail: { status: this.financialNotice ? "failed" : this.financials?.status ?? "pending", summary, rows: [...this.financialOverview, ...at.flatMap((p) => this.financialPointRows.get(p) ?? [])],
             reports: this.financialReports.get(metric) ?? [] } };
       }
       const values: LegendValue[] =

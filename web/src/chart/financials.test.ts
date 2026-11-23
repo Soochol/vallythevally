@@ -1,7 +1,7 @@
 import { expect, test } from "vitest";
 import type { FinancialPoint } from "../api/generated/FinancialPoint";
 import type { FinancialsPage } from "../api/generated/FinancialsPage";
-import { adjacentBucket, checkedTime, financialBuckets, financialDetail, financialDetailRows, financialStatus, financialSummary, financialValue } from "./financials";
+import { adjacentBucket, checkedTime, financialBuckets, financialDetailRows, financialStatus, financialSummary, financialSummaryRows, financialValue } from "./financials";
 import { addIndicator, DEFAULT_CHART_SETTINGS, movePanel, parseChartSettings, setPanelStretches, updateIndicator } from "./settings";
 
 const kst = (date: string) => Date.parse(`${date}T00:00:00+09:00`) / 1000;
@@ -23,8 +23,7 @@ test("실제 종료일의 API bucket과 기간겹침을 보존하고 null과 0�
   const buckets = financialBuckets([overlap, point, { ...point, priceBucket: null }]);
   expect([...buckets.keys()]).toEqual([point.priceBucket]);
   expect(buckets.get(kst("2024-01-01"))).toHaveLength(2);
-  expect(financialDetail(overlap, "revenue")).toContain("원래 보고값 -123 KRW · 합산하지 않음");
-  expect(financialDetail(overlap, "revenue")).toContain("표시값 —");
+  expect(financialDetailRows(overlap, "revenue")).toEqual(expect.arrayContaining([{ name: "원래 보고값", value: "-123 KRW · 합산하지 않음" }, { name: "표시값", value: "—" }]));
   expect(financialValue(0, "dps", "KRW")).toBe("0 원/주");
   expect(financialValue(-10, "investing_cash_flow", "USD")).toBe("-10 USD");
 });
@@ -38,13 +37,35 @@ test("분기·연간 빈 구간은 연결하지 않는다", () => {
 
 test("비교자료와 배당 기간근거의 상태·원금액·시각·실패를 설명한다", () => {
   const input = { businessYear: 2024, reportCode: "11014", usage: "comparison", status: "failed", reason: null, role: "statement", amount: "-1000", period: { kind: "duration", start: "2024-01-01", end: "2024-09-30" }, verificationReason: "receipt_mismatch", basis: "CFS", currency: "KRW", receipt: "20241115000001", disclosedAt: "2024-11-15", contextId: "q", sourceFile: "fact.xbrl", fields: { account_nm: "부채총계" }, checkedAt: 200, lastSuccessAt: 100, failure: "network", refreshVersion: 1 } satisfies FinancialPoint["inputs"][number];
-  const detail = financialDetail({ ...point, inputs: [input, { ...input, usage: "reporting_period" }] }, "debt_ratio");
-  for (const text of ["비교기간", "조회 실패", "배당 보고기간 근거", "부채총계: -1000 KRW", "자본총계가 0 이하", "2024-01-01 ~ 2024-09-30", "접수번호 20241115000001", "마지막 성공", "갱신 실패", "연결"]) expect(detail).toContain(text);
+  const rows = financialDetailRows({ ...point, value: 12.5, inputs: [input, { ...input, usage: "reporting_period" }] }, "debt_ratio");
+  expect(rows.slice(0, 5)).toEqual([
+    { name: "보고서", value: "2024 / 11011" },
+    { name: "보고기간", value: "2024-12-31 기말" },
+    { name: "상태", value: "산출 불가 · 자본총계가 0 이하" },
+    { name: "기준", value: "연결 · KRW" },
+    { name: "표시값", value: "12.5 %" },
+  ]);
+  expect(rows.slice(5, 16)).toEqual([
+    { name: "비교기간", value: "2024 / 11014" },
+    { name: "부채총계", value: "-1000 KRW" },
+    { name: "상태", value: "조회 실패" },
+    { name: "보고기간", value: "2024-01-01 ~ 2024-09-30" },
+    { name: "기준", value: "연결" },
+    { name: "공시일", value: "2024-11-15" },
+    { name: "접수번호", value: "20241115000001" },
+    { name: "조회", value: "1970-01-01 09:03" },
+    { name: "마지막 성공", value: "1970-01-01 09:01 · 갱신 실패 (저장 자료)" },
+    { name: "실패", value: "자료원 연결 실패" },
+    { name: "기간 검증", value: "receipt_mismatch" },
+  ]);
+  expect(rows[16]).toEqual({ name: "배당 보고기간 근거", value: "2024 / 11014" });
+  expect(rows.every((row) => row.name !== "" && row.value !== "")).toBe(true);
 });
 
 test("마지막 확인과 일부 실패·저장값 갱신 실패를 함께 표시한다", () => {
   const page: FinancialsPage = { symbol: "005930", period: "Q", status: "partial_failure", reason: null, failure: "storage", corpCode: null, fiscalMonth: 12, shareClass: null, shareClassReason: null, lastCheckedAt: 100, lastAttemptAt: 200, disclosureFailure: "network", refreshVersion: 1, disclosureVersion: 1, latestCorrections: true, progress: { total: 10, completed: 8, failed: 1, pending: 1 }, series: [{ metric: "revenue", points: [{ ...point, value: 100 }] }] };
   expect(financialSummary(page)).toContain("일부 조회 실패 · 실패 1건 · 갱신 실패 · 저장 자료 유지 · 마지막 확인");
+  expect(financialSummaryRows(page)).toEqual([{ name: "상태", value: "일부 조회 실패 · 실패 1건 · 갱신 실패 · 저장 자료 유지" }, { name: "마지막 확인", value: "1970-01-01 09:01" }]);
 });
 test("서버에 재무자료가 없는 상태를 DART 설정이 아닌 자료 없음으로 안내한다", () => {
   expect(financialStatus("not_configured")).toBe("이 서버에 재무자료가 없습니다");
@@ -55,13 +76,4 @@ test("확인 시각은 한국 시각 YYYY-MM-DD HH:MM이고 없으면 아직 없
   expect(checkedTime(Date.parse("2026-11-09T09:05:59+09:00") / 1000)).toBe("2026-11-09 09:05");
   expect(checkedTime(Date.parse("2026-12-31T23:59:00+09:00") / 1000)).toBe("2026-12-31 23:59");
   expect(checkedTime(null)).toBe("아직 없음");
-});
-
-test("재무 상세 글은 빈 줄 없이 줄마다 첫 구분점 앞을 이름, 뒤를 값으로 나누고 붙은 가운뎃점은 나누지 않는다", () => {
-  expect(financialDetailRows("확인 완료 · 마지막 확인 2026-11-09 09:05\n\n\n  \n최근 시도 2026-11-09 09:00\n확인 · \n연결·별도 기준 변경 · 연결 · KRW")).toEqual([
-    { name: "확인 완료", value: "마지막 확인 2026-11-09 09:05" },
-    { name: "최근 시도 2026-11-09 09:00", value: "" },
-    { name: "확인", value: "" },
-    { name: "연결·별도 기준 변경", value: "연결 · KRW" },
-  ]);
 });

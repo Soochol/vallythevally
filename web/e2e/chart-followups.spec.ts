@@ -2,6 +2,7 @@ import type { Locator, Page } from "@playwright/test";
 import type { ChartSettings } from "../src/chart/settings";
 import { financialTest } from "./financial-update-helpers";
 import { selectOption } from "./select-option";
+import { financialValue } from "../src/chart/financials";
 import { type Scenario, cell, chartOf, DEFAULT_LAYOUT_ID, expect, test, withFirstChart } from "./harness";
 
 test.use({ clockStart: "20261109100030" });
@@ -54,7 +55,7 @@ test("길게 눌러 그룹 메뉴를 연 뒤 버튼 밖에서 놓아도 다음 �
   await expect(magnet).toHaveAttribute("aria-pressed", before === "true" ? "false" : "true");
 });
 
-financialTest("재무 상태 팝오버는 줄 표로 보이고 날짜는 YYYY-MM-DD HH:MM이다", async ({ page, scenario }) => {
+financialTest("재무 상태 팝오버는 줄 표로 보이고 날짜는 YYYY-MM-DD HH:MM이다", async ({ page, scenario, financial }) => {
   seed(scenario, { indicators: [{ id: "revenue", spec: { kind: "revenue" }, panel: "revenue", visible: true, style: { colors: ["ind-2"], width: 1 } }], panels: [{ id: "revenue", stretch: 0.3 }] }, "Y");
   await open(page);
   const row = cell(page).locator('[data-indicator-row="revenue"]');
@@ -70,6 +71,13 @@ financialTest("재무 상태 팝오버는 줄 표로 보이고 날짜는 YYYY-MM
     expect(line.tags).toEqual(["DT", "DD"]);
     expect(line.name.trim()).not.toBe("");
   }
+  const report = financial.page("005930", "Y").series.find((series) => series.metric === "revenue")!.points[0]!;
+  const input = report.inputs[0]!;
+  const valueOf = (name: string) => lines.filter({ has: page.locator("dt").getByText(name, { exact: true }) }).locator("dd").first();
+  await expect(valueOf("표시값")).toHaveText(report.value === null ? "—" : financialValue(report.value, "revenue", report.currency));
+  await expect(valueOf("공시일")).toHaveText(input.disclosedAt ?? "미확인");
+  await expect(valueOf("접수번호")).toHaveText(input.receipt ?? "미확인");
+  await expect(valueOf("조회")).toHaveText(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/);
   await expect(table).toContainText(/\d{4}-\d{2}-\d{2} \d{2}:\d{2}/);
   await expect(table).not.toContainText(/오전|오후/);
 });

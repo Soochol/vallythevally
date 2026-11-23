@@ -21,7 +21,7 @@ class FakeElement {
   constructor(readonly tagName: string) {}
 
   get firstElementChild(): FakeElement | null { return this.children[0] ?? null; }
-  get lastElementChild(): FakeElement | null { return this.children.at(-1) ?? null; }
+  get lastElementChild(): FakeElement | null { return this.children[this.children.length - 1] ?? null; }
   get isConnected(): boolean { return false; }
   append(...nodes: FakeElement[]) { for (const node of nodes) { node.remove(); node.parentElement = this; this.children.push(node); } }
   replaceChildren(...nodes: FakeElement[]) { for (const child of [...this.children]) child.remove(); this.append(...nodes); }
@@ -66,7 +66,7 @@ function newLegend(): IndicatorLegend {
   return new IndicatorLegend(document.createElement("div"), () => {});
 }
 
-test("배치 줄을 거래량이 가격 줄이던 상태로 만든 뒤 요청 없이 거래량 패널 상태로 그리면 알약은 그린 가격 줄 수를 센다", () => {
+test("배치 줄보다 그리는 줄의 가격 줄이 적으면 알약은 그리는 줄의 가격 줄을 센다", () => {
   const legend = newLegend();
   legend.setLayoutRows([...MOVING_AVERAGES, VOLUME_ON_PRICE], []);
   expect(foldLabel(legend)).toBe("지표 8");
@@ -74,7 +74,7 @@ test("배치 줄을 거래량이 가격 줄이던 상태로 만든 뒤 요청 �
   expect(foldLabel(legend)).toBe("지표 7");
 });
 
-test("배치 줄을 만든 뒤 설정이 바뀌어 십자선 그리기가 먼저 오면 그 그리기에서 알약이 새 가격 줄 수를 따른다", () => {
+test("배치 줄보다 그리는 줄의 가격 줄이 많으면 알약은 그리는 줄의 가격 줄을 센다", () => {
   const legend = newLegend();
   legend.setLayoutRows([...MOVING_AVERAGES.slice(0, 4), VOLUME_PANE], []);
   expect(foldLabel(legend)).toBe("지표 4");

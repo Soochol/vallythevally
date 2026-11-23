@@ -34,45 +34,62 @@ export const financialStatus = (status: string) => STATUS[status] ?? status;
 const KST_OFFSET_SECONDS = 9 * 3600;
 export const checkedTime = (t: UnixSeconds | null) => t === null ? "아직 없음" : new Date((t + KST_OFFSET_SECONDS) * 1000).toISOString().slice(0, 16).replace("T", " ");
 
-export interface FinancialDetailRow { readonly name: string; readonly value: string }
-
-export function financialDetailRows(text: string): FinancialDetailRow[] {
-  return text.split("\n").map((line) => line.trim()).filter(Boolean).map((line) => {
-    const [name = "", ...rest] = line.split(/\s+·(?=\s|$)/).map((part) => part.trim()).filter(Boolean);
-    return { name, value: rest.join(" · ") };
-  });
-}
 export const reportingPeriod = (p: FinancialReportingPeriod | null): string => p === null ? "실제 보고기간 미확인" : p.kind === "instant" ? `${p.date} 기말` : `${p.start} ~ ${p.end}`;
 export const financialUnit = (metric: FinancialMetric, currency: string | null) => metric === "owner_roe" || metric === "debt_ratio" ? "%" : metric === "dps" ? "원/주" : currency ?? "통화 미확인";
 export const financialValue = (v: number, metric: FinancialMetric, currency: string | null) => `${v.toLocaleString("ko-KR", { maximumFractionDigits: 2 })} ${financialUnit(metric, currency)}`;
 
-export function financialSummary(page: FinancialsPage): string {
+export interface FinancialDetailRow { readonly name: string; readonly value: string }
+
+const detailRow = (name: string, value: string): FinancialDetailRow => ({ name, value });
+const joined = (...parts: (string | null | undefined | false)[]) => parts.filter(Boolean).join(" · ");
+const basisText = (basis: FinancialPoint["basis"]) => basis === "CFS" ? "연결" : basis === "OFS" ? "별도" : "기준 미확인";
+
+function financialSummaryStatus(page: FinancialsPage): string {
   const { failed } = page.progress;
   const saved = page.series.some((series) => series.points.some((point) => point.value !== null || point.inputs.some((input) => input.lastSuccessAt !== null)));
-  return [financialStatus(page.status), page.reason && (SOURCE_REASON[page.reason] ?? (page.status === "unsupported" ? "이 상품은 가격 차트만 제공합니다" : "회사 자료 미확인")),
-    failed > 0 ? `실패 ${failed}건` : null,
-    page.failure || page.disclosureFailure ? saved ? "갱신 실패 · 저장 자료 유지" : "조회 실패 · 다시 시도하세요" : null,
-    `마지막 확인 ${checkedTime(page.lastCheckedAt)}`].filter(Boolean).join(" · ");
+  return joined(financialStatus(page.status), page.reason && (SOURCE_REASON[page.reason] ?? (page.status === "unsupported" ? "이 상품은 가격 차트만 제공합니다" : "회사 자료 미확인")),
+    failed > 0 && `실패 ${failed}건`,
+    (page.failure || page.disclosureFailure) && (saved ? "갱신 실패 · 저장 자료 유지" : "조회 실패 · 다시 시도하세요"));
 }
 
-function inputDetail(i: FinancialInput): string {
-  const usage = { value: "원금액", comparison: "비교기간", reporting_period: "배당 보고기간 근거" }[i.usage];
+export function financialSummary(page: FinancialsPage): string {
+  return joined(financialSummaryStatus(page), `마지막 확인 ${checkedTime(page.lastCheckedAt)}`);
+}
+
+export function financialSummaryRows(page: FinancialsPage): FinancialDetailRow[] {
+  return [detailRow("상태", financialSummaryStatus(page)), detailRow("마지막 확인", checkedTime(page.lastCheckedAt))];
+}
+
+const INPUT_USAGE: Record<FinancialInput["usage"], string> = { value: "원금액", comparison: "비교기간", reporting_period: "배당 보고기간 근거" };
+
+function inputRows(i: FinancialInput): FinancialDetailRow[] {
   const account = i.fields.account_nm ?? i.fields.se ?? i.fields.account_id ?? (i.role === "statement" ? "보고서" : i.role);
-  return [`${usage} · ${i.businessYear} / ${i.reportCode} · ${account}: ${i.amount ?? "—"} ${i.currency ?? ""}`,
-    `${financialStatus(i.status)} ${financialReason(i.reason)} · ${reportingPeriod(i.period)} · ${i.basis === "CFS" ? "연결" : i.basis === "OFS" ? "별도" : "기준 미확인"}`,
-    `공시일 ${i.disclosedAt ?? "미확인"} · 접수번호 ${i.receipt ?? "미확인"}`,
-    `조회 ${checkedTime(i.checkedAt)} · 마지막 성공 ${checkedTime(i.lastSuccessAt)}${i.failure ? i.lastSuccessAt !== null ? " · 갱신 실패 (저장 자료)" : " · 조회 실패" : ""}`,
-    i.failure ? financialFailure(i.failure) : null,
-    i.verificationReason ? `기간 검증: ${i.verificationReason}` : null].filter(Boolean).join("\n");
+  const failure = i.failure ? i.lastSuccessAt !== null ? "갱신 실패 (저장 자료)" : "조회 실패" : null;
+  return [
+    detailRow(INPUT_USAGE[i.usage], `${i.businessYear} / ${i.reportCode}`),
+    detailRow(account, [i.amount ?? "—", i.currency].filter(Boolean).join(" ")),
+    detailRow("상태", joined(financialStatus(i.status), financialReason(i.reason))),
+    detailRow("보고기간", reportingPeriod(i.period)),
+    detailRow("기준", basisText(i.basis)),
+    detailRow("공시일", i.disclosedAt ?? "미확인"),
+    detailRow("접수번호", i.receipt ?? "미확인"),
+    detailRow("조회", checkedTime(i.checkedAt)),
+    detailRow("마지막 성공", joined(checkedTime(i.lastSuccessAt), failure)),
+    ...(i.failure ? [detailRow("실패", financialFailure(i.failure))] : []),
+    ...(i.verificationReason ? [detailRow("기간 검증", i.verificationReason)] : []),
+  ];
 }
 
-export function financialDetail(point: FinancialPoint, metric: FinancialMetric): string {
-  return [`${point.businessYear} / ${point.reportCode} · ${reportingPeriod(point.period)}`,
-    `${financialStatus(point.status)} · ${financialReason(point.reason)}`,
-    `${point.basis === "CFS" ? "연결" : point.basis === "OFS" ? "별도" : "기준 미확인"} · ${point.currency ?? "통화 미확인"}`,
-    `표시값 ${point.value === null ? "—" : financialValue(point.value, metric, point.currency)}`,
-    point.reportedValue !== null && point.reason === "period_overlap" ? `원래 보고값 ${financialValue(point.reportedValue, metric, point.currency)} · 합산하지 않음` : null,
-    ...point.inputs.map(inputDetail)].filter(Boolean).join("\n\n");
+export function financialDetailRows(point: FinancialPoint, metric: FinancialMetric): FinancialDetailRow[] {
+  return [
+    detailRow("보고서", `${point.businessYear} / ${point.reportCode}`),
+    detailRow("보고기간", reportingPeriod(point.period)),
+    detailRow("상태", joined(financialStatus(point.status), financialReason(point.reason))),
+    detailRow("기준", joined(basisText(point.basis), point.currency ?? "통화 미확인")),
+    detailRow("표시값", point.value === null ? "—" : financialValue(point.value, metric, point.currency)),
+    ...(point.reportedValue !== null && point.reason === "period_overlap" ? [detailRow("원래 보고값", `${financialValue(point.reportedValue, metric, point.currency)} · 합산하지 않음`)] : []),
+    ...point.inputs.flatMap(inputRows),
+  ];
 }
 
 export function financialBuckets(points: readonly FinancialPoint[]): Map<UnixSeconds, FinancialPoint[]> {

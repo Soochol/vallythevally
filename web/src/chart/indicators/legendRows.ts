@@ -1,8 +1,8 @@
 import { domSelect } from "../../features/menu/domSelect";
 import { mountLayer } from "../../features/overlay/topLayer";
 import { iconMarkup, type MarkupIcon } from "../../features/icons";
-import { indicatorErrorText, type IndicatorRow, type PriceLegendValues } from "./layer";
-import { financialDetailRows } from "../financials";
+import { type FinancialReport, indicatorErrorText, type IndicatorRow, type PriceLegendValues } from "./layer";
+import type { FinancialDetailRow } from "../financials";
 import { FOLD_ABOVE_ROWS, indicatorRowsFolded, type LegendField, type LegendProjection, type LegendTier } from "../legendProjection";
 import { indicatorsPinnedOpen, onIndicatorsPinnedChange, setIndicatorsPinnedOpen } from "../legendFold";
 
@@ -32,9 +32,10 @@ interface RowEls {
   summary: HTMLElement;
   text: HTMLDListElement;
   select: HTMLButtonElement;
-  reportOptions: { label: string; text: string }[];
+  currentRows: readonly FinancialDetailRow[];
+  shownRows: readonly FinancialDetailRow[] | null;
   dispose(): void;
-  reports: NonNullable<IndicatorRow["detail"]>["reports"] | null;
+  reports: readonly FinancialReport[] | null;
 }
 
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, className: string, text = ""): HTMLElementTagNameMap[K] {
@@ -44,10 +45,26 @@ function el<K extends keyof HTMLElementTagNameMap>(tag: K, className: string, te
   return e;
 }
 
-function showDetailText(list: HTMLDListElement, text: string): void {
-  if (list.dataset.text === text) return;
-  list.dataset.text = text;
-  list.replaceChildren(...financialDetailRows(text).map(({ name, value }) => {
+function sameDetailRows(a: readonly FinancialDetailRow[] | null, b: readonly FinancialDetailRow[]): boolean {
+  if (a === b) return true;
+  if (!a || a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) if (a[i] !== b[i] && (a[i]!.name !== b[i]!.name || a[i]!.value !== b[i]!.value)) return false;
+  return true;
+}
+
+const CURRENT_REPORT = "차트에서 가리킨 보고기간";
+
+function showReport(r: RowEls, index: number): void {
+  const report = index > 0 ? r.reports?.[index - 1] : undefined;
+  const label = report?.label ?? CURRENT_REPORT;
+  if (r.select.textContent !== label) r.select.textContent = label;
+  showDetailRows(r, report?.rows ?? r.currentRows);
+}
+
+function showDetailRows(r: RowEls, rows: readonly FinancialDetailRow[]): void {
+  if (sameDetailRows(r.shownRows, rows)) return;
+  r.shownRows = rows;
+  r.text.replaceChildren(...rows.map(({ name, value }) => {
     const line = el("div", "");
     line.append(el("dt", "", name), el("dd", "", value));
     return line;
@@ -264,11 +281,10 @@ export class IndicatorLegend {
     box.append(select, text);
     detail.append(summary, box);
     root.append(swatch, name, detail, values, badge, tools);
-    const row: RowEls = { root, swatch, name, collapse, values, badge, toggle, remove, up, down, key: null, detail, summary, text, select, reports: null, reportOptions: [], dispose: () => {} };
-    const disposeSelect = interactive ? domSelect(select, () => row.reportOptions.map((option, i) => ({ label: option.label, value: String(i) })), (value) => {
+    const row: RowEls = { root, swatch, name, collapse, values, badge, toggle, remove, up, down, key: null, detail, summary, text, select, reports: null, currentRows: [], shownRows: null, dispose: () => {} };
+    const disposeSelect = interactive ? domSelect(select, () => [CURRENT_REPORT, ...(row.reports ?? []).map((report) => report.label)].map((label, i) => ({ label, value: String(i) })), (value) => {
       select.dataset.value = value;
-      const option = row.reportOptions[Number(value)];
-      select.textContent = option?.label ?? ""; showDetailText(text, option?.text ?? "");
+      showReport(row, Number(value));
     }) : null;
     row.dispose = () => { cleanup?.(); disposeSelect?.(); };
     return row;
@@ -285,16 +301,10 @@ export class IndicatorLegend {
       r.summary.title = row.detail.summary;
       r.summary.setAttribute("aria-label", `${row.name} 재무자료와 갱신 상태`);
 
-      if (r.reports !== row.detail.reports) {
-        r.reports = row.detail.reports;
-        r.reportOptions = [{ label: "차트에서 가리킨 보고기간", text: row.detail.text }, ...row.detail.reports];
-        if (!r.select.dataset.value) r.select.dataset.value = "0";
-      }
-      const current = r.reportOptions[0];
-      if (current) current.text = row.detail.text;
-      const selected = r.reportOptions[Number(r.select.dataset.value)] ?? current;
-      r.select.textContent = selected?.label ?? "";
-      showDetailText(r.text, selected?.text ?? row.detail.text);
+      r.reports = row.detail.reports;
+      r.currentRows = row.detail.rows;
+      if (!r.select.dataset.value) r.select.dataset.value = "0";
+      showReport(r, Number(r.select.dataset.value));
     }
     labelButton(r.collapse, row.panel?.collapsed ? "패널 펼치기" : "패널 접기");
     r.collapse.setAttribute("aria-expanded", String(!row.panel?.collapsed));
