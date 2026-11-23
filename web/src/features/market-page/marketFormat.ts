@@ -19,3 +19,7 @@ export const signedRate = (rate: number): string => `${rate > 0 ? "+" : rate < 0
 export const toneOf = (value: number): "up" | "down" | "flat" => (value > 0 ? "up" : value < 0 ? "down" : "flat");
 
 export const formatCount = (count: number): string => whole.format(count);
+
+export const pointChangeOf = (level: number, changeRate: number): number => level - level / (1 + changeRate / 100);
+
+export const signedPoints = (points: number): string => `${points > 0 ? "+" : points < 0 ? MINUS : ""}${twoDecimals.format(Math.abs(points))}`;

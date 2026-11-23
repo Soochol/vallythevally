@@ -4,7 +4,7 @@ import { useMarketIndex } from "../../api/marketOverview";
 import { useOverviewOn } from "../status/marketFeed";
 import { CardShell, FeedUnavailable, Loaded, PartView } from "./CardPart";
 import { breadthShares, formatOptionalCount } from "./breadth";
-import { formatEok, formatLevel, signedRate, toneOf } from "./marketFormat";
+import { formatEok, formatLevel, pointChangeOf, signedPoints, signedRate, toneOf } from "./marketFormat";
 
 function BreadthBar({ breadth }: { breadth: MarketOverviewBreadth }) {
   const shares = breadthShares(breadth);
@@ -27,24 +27,26 @@ function BreadthBar({ breadth }: { breadth: MarketOverviewBreadth }) {
   );
 }
 
+const INDEX_SKELETON = { shape: "line", minHeight: "var(--size-84)" } as const;
+
 export function IndexCard({ market, enabled }: { market: Market; enabled: boolean }) {
   const on = useOverviewOn("index");
   const query = useMarketIndex(market, { enabled: enabled && on });
   return (
-    <CardShell title="지수·폭" source={query.data?.context.source}>
-      {!on ? <FeedUnavailable /> : <Loaded query={query} label="지수">
+    <CardShell title="지수·폭" card="index" source={query.data?.context.source}>
+      {!on ? <FeedUnavailable /> : <Loaded query={query} label="지수" skeleton={INDEX_SKELETON}>
         {(card) => (
           <PartView part={card.index}>
             {(index) => (
               <dl className="mk-index">
-                <div className="mk-index-cell" data-cell="level">
+                <div className="mk-index-cell mk-index-level" data-cell="level">
                   <dt>{index.name}</dt>
                   <dd className="mk-big" data-tone={toneOf(index.changeRate)}>{formatLevel(index.level)}</dd>
-                  <dd data-tone={toneOf(index.changeRate)}>{signedRate(index.changeRate)}</dd>
+                  <dd data-tone={toneOf(index.changeRate)}>{signedPoints(pointChangeOf(index.level, index.changeRate))} ({signedRate(index.changeRate)})</dd>
                 </div>
                 <div className="mk-index-cell" data-cell="value">
                   <dt>거래대금</dt>
-                  <dd className="mk-big">{formatEok(index.tradeValueEok)}</dd>
+                  <dd className="mk-mid">{formatEok(index.tradeValueEok)}</dd>
                 </div>
                 <div className="mk-index-cell mk-index-wide" data-cell="breadth">
                   <dt>등락 종목 폭</dt>
@@ -52,8 +54,15 @@ export function IndexCard({ market, enabled }: { market: Market; enabled: boolea
                 </div>
                 <div className="mk-index-cell" data-cell="limit">
                   <dt>상한·하한</dt>
-                  <dd><span data-tone="up">{formatOptionalCount(index.breadth.upperLimit)}</span> / <span data-tone="down">{formatOptionalCount(index.breadth.lowerLimit)}</span></dd>
+                  <dd>상한 <span data-tone="up">{formatOptionalCount(index.breadth.upperLimit)}</span> · 하한 <span data-tone="down">{formatOptionalCount(index.breadth.lowerLimit)}</span></dd>
                 </div>
+                {market === "kospi" && index.volatility !== null && index.volatility !== undefined && (
+                  <div className="mk-index-cell" data-cell="vkospi">
+                    <dt>VKOSPI</dt>
+                    <dd className="mk-mid">{formatLevel(index.volatility.level)}</dd>
+                    <dd data-tone={toneOf(index.volatility.changeRate)}>{signedRate(index.volatility.changeRate)}</dd>
+                  </div>
+                )}
               </dl>
             )}
           </PartView>

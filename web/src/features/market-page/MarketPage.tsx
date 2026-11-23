@@ -7,13 +7,14 @@ import { useKiwoomLinkStore } from "../../stores/kiwoomLink";
 import { DataAgeNote } from "../data-age/DataAgeNote";
 import { formatClock } from "../market-window/format";
 import { EmptyState } from "../overlay/State";
+import { openSystemSettings } from "../system-settings/open";
+import { Segmented } from "../ui/Segmented";
 import { PageFrame } from "../pages/PageFrame";
 import { FlowCard } from "./FlowCard";
 import { IndexCard } from "./IndexCard";
 import { SectorCard } from "./SectorCard";
 import { StockTabs } from "./StockTabs";
 import { TurnoverCard } from "./TurnoverCard";
-import { formatLevel, signedRate, toneOf } from "./marketFormat";
 import "./marketPage.css";
 
 export const MARKETS = [
@@ -30,8 +31,9 @@ export const marketOf = (value: string | null): Market => (value === "kosdaq" ? 
 export const periodOf = (value: string | null): MarketOverviewPeriod => (value === "5" || value === "60" ? value : DEFAULT_PERIOD);
 
 function Freshness({ market, enabled }: { market: Market; enabled: boolean }) {
-  const card = useMarketIndex(market, { enabled }).data;
-  if (card === undefined) return <span>자료를 기다립니다</span>;
+  const query = useMarketIndex(market, { enabled });
+  const card = query.data;
+  if (card === undefined) return <span>{query.isError ? "받지 못함" : "자료를 기다립니다"}</span>;
   const { phase, receivedAt } = card.context;
   return (
     <>
@@ -40,28 +42,6 @@ function Freshness({ market, enabled }: { market: Market; enabled: boolean }) {
       <DataAgeNote recordedAt={receivedAt} cadence="marketOverview" live={phase !== "closed"} />
       <span>{MARKET_REFRESH_MS / 60_000}분마다 갱신</span>
     </>
-  );
-}
-
-function Volatility({ market, enabled }: { market: Market; enabled: boolean }) {
-  const card = useMarketIndex(market, { enabled }).data;
-  const part = card?.index;
-  const volatility = part?.status === "ok" ? part.value.volatility : null;
-  if (volatility === null || volatility === undefined) return null;
-  return (
-    <span className="mk-vkospi" aria-label="VKOSPI">
-      VKOSPI <b>{formatLevel(volatility.level)}</b> <span data-tone={toneOf(volatility.changeRate)}>{signedRate(volatility.changeRate)}</span>
-    </span>
-  );
-}
-
-function Segmented<T extends string>({ label, value, options, onChange }: { label: string; value: T; options: readonly { id: T; label: string }[]; onChange: (next: T) => void }) {
-  return (
-    <div role="group" aria-label={label} className="mk-seg">
-      {options.map((option) => (
-        <button key={option.id} type="button" aria-pressed={value === option.id} onClick={() => onChange(option.id)}>{option.label}</button>
-      ))}
-    </div>
   );
 }
 
@@ -77,21 +57,21 @@ export function MarketPage() {
     query.set("period", next.period ?? period);
     setParams(query, { replace: true });
   };
-  const card = useMarketIndex(market, { enabled: connected }).data;
+  const indexQuery = useMarketIndex(market, { enabled: connected });
+  const card = indexQuery.data;
   const controls = (
     <div className="mk-controls">
-      <Volatility market={market} enabled={connected} />
-      <Segmented label="시장" value={market} options={MARKETS} onChange={(next) => change({ market: next })} />
-      <Segmented label="기간" value={period} options={PERIODS.map((id) => ({ id, label: `${id}일` }))} onChange={(next) => change({ period: next })} />
+      <Segmented label="시장" mode="pressed" value={market} options={MARKETS.map((entry) => ({ value: entry.id, label: entry.label }))} onChange={(next) => change({ market: next })} />
+      <Segmented label="기간" mode="pressed" value={period} options={PERIODS.map((id) => ({ value: id, label: `${id}일` }))} onChange={(next) => change({ period: next })} />
     </div>
   );
   return (
-    <PageFrame title="시장 종합" freshness={connected ? <Freshness market={market} enabled={connected} /> : null} fresh={connected ? { receivedAt: card?.context.receivedAt ?? null, live: card === undefined ? undefined : card.context.phase !== "closed" } : undefined} actions={controls}>
+    <PageFrame title="시장 종합" freshness={connected ? <Freshness market={market} enabled={connected} /> : null} fresh={connected ? { receivedAt: card?.context.receivedAt ?? null, live: card === undefined ? undefined : card.context.phase !== "closed", failed: card === undefined && indexQuery.isError } : undefined} actions={controls}>
       {!connected ? (
-        <EmptyState title="키움 연결 전입니다">{link?.message && <p>{link.message}</p>}</EmptyState>
+        <div className="mk-before-connect"><EmptyState title="키움 연결 전입니다" action="시스템 설정 열기" onAction={() => openSystemSettings("kiwoom")}>{link?.message && <p>{link.message}</p>}</EmptyState></div>
       ) : (
         <div className="mk-grid">
-          <div className="mk-span-2"><IndexCard market={market} enabled={connected} /></div>
+          <IndexCard market={market} enabled={connected} />
           <FlowCard market={market} period={period} enabled={connected} />
           <SectorCard market={market} enabled={connected} />
           <TurnoverCard market={market} period={period} enabled={connected} />
