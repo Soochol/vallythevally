@@ -24,7 +24,9 @@ domain = { path = "../domain" }
 indicators = { path = "../indicators" }
 setup = { path = "../setup" }
 axum = { version = "0.8", features = ["ws"] }
+aes = "0.8"
 base64 = "0.22"
+cbc = { version = "0.1", features = ["alloc"] }
 encoding_rs = "0.8"
 getrandom = "0.3"
 futures = "0.3"

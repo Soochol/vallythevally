@@ -18,9 +18,10 @@ use crate::kiwoom::key_file::KeyId;
 use crate::kiwoom::keys::KeyRing;
 use crate::kiwoom::rest::{Admission, ContKey, Dispatch, KiwoomError, KiwoomRest, MergeScope, Page, Priority};
 use super::journal::Journal;
-use super::memory::{PriceBands, RecentOpenOrders};
+use super::memory::{FillVenues, PriceBands, RecentOpenOrders};
 use crate::symbols::SymbolDirectory;
 use crate::kiwoom::stream::{AccountEvent, AccountFeed};
+use crate::kis::notice::{FillNotice, KisNotices};
 use crate::kis::rest::KisError;
 
 const VERIFY_TTL_SECS: i64 = 60;
@@ -138,6 +139,12 @@ impl Lanes {
         }
     }
 
+    fn notices(&self) -> Option<(KisNotices, Option<Secret<String>>)> {
+        let Lanes::Kis { ring, key } = self else { return None };
+        let view = ring.kis_view_of(key)?;
+        Some((view.lane.notices, view.account.hts_id.map(|id| Secret::new(id.expose().to_owned()))))
+    }
+
     fn kis_account(&self) -> Result<KisAccountNumber, TradingError> {
         let Lanes::Kis { ring, key } = self else { return Err(TradingError::UnknownKey) };
         ring.kis_view_of(key).ok_or(TradingError::UnknownKey)?.account.number.ok_or(TradingError::NoKisAccount)
@@ -191,6 +198,7 @@ pub struct Trading {
     pub(super) turns: Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>,
     pub(super) bands: Arc<PriceBands>,
     pub(super) recent_open: RecentOpenOrders,
+    pub(super) fill_venues: FillVenues,
     feed_task: Mutex<Option<tokio::task::JoinHandle<()>>>,
 }
 
@@ -252,6 +260,7 @@ impl Trading {
             turns: Mutex::new(HashMap::new()),
             bands,
             recent_open: RecentOpenOrders::default(),
+            fill_venues: FillVenues::default(),
             feed_task: Mutex::new(None),
         });
         if let Err(e) = trading.store.load(&trading.key) {
@@ -264,8 +273,11 @@ impl Trading {
     }
 
     pub(super) fn follow_feed(self: &Arc<Self>) {
-        let Some(feed) = self.lanes.feed() else { return };
-        let task = tokio::spawn(forward_events(Arc::downgrade(self), feed.subscribe()));
+        let task = match (self.lanes.feed(), self.lanes.notices()) {
+            (Some(feed), _) => tokio::spawn(forward_events(Arc::downgrade(self), feed.subscribe())),
+            (None, Some((notices, _))) => tokio::spawn(forward_notices(Arc::downgrade(self), notices.subscribe())),
+            (None, None) => return,
+        };
         if let Some(old) = self.feed_task.lock().expect("계좌 실시간 작업 잠금").replace(task) {
             old.abort();
         }
@@ -322,6 +334,9 @@ impl Trading {
         self.open.store(enabled, Ordering::SeqCst);
         if let Some(feed) = self.lanes.feed() {
             feed.set_wanted(enabled);
+        }
+        if let Some((notices, hts_id)) = self.lanes.notices() {
+            notices.want(hts_id.filter(|_| enabled));
         }
     }
 
@@ -668,6 +683,20 @@ impl Trading {
         self.notify(account_ref);
     }
 
+    fn on_fill_notice(&self, notice: &FillNotice) {
+        let Ok(record) = self.enabled_record() else { return };
+        let (Some(account_ref), Ok(number)) = (record.account_ref, self.lanes.kis_account()) else { return };
+        let account = notice.account.expose();
+        if account != number.digits().expose() && account != number.cano() {
+            return;
+        }
+        if let Some(venue) = notice.venue.filter(|_| notice.filled) {
+            self.fill_venues.remember(&notice.order_no, self.clock.now().kst_date(), venue);
+        }
+        self.recent_open.forget();
+        self.notify(account_ref);
+    }
+
     pub(super) fn notify(&self, account_ref: String) {
         let _ = self.changes.send(AccountChanged { account_ref });
     }
@@ -686,6 +715,18 @@ async fn forward_events(trading: std::sync::Weak<Trading>, mut events: broadcast
         let Some(trading) = trading.upgrade() else { return };
         match received {
             Ok(event) => trading.on_account_event(&event),
+            Err(broadcast::error::RecvError::Lagged(_)) => trading.on_events_missed(),
+            Err(broadcast::error::RecvError::Closed) => return,
+        }
+    }
+}
+
+async fn forward_notices(trading: std::sync::Weak<Trading>, mut notices: broadcast::Receiver<FillNotice>) {
+    loop {
+        let received = notices.recv().await;
+        let Some(trading) = trading.upgrade() else { return };
+        match received {
+            Ok(notice) => trading.on_fill_notice(&notice),
             Err(broadcast::error::RecvError::Lagged(_)) => trading.on_events_missed(),
             Err(broadcast::error::RecvError::Closed) => return,
         }

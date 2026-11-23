@@ -5,6 +5,7 @@ use domain::{IndexCode, KstTime, Price, Symbol, TimeOfDay, Venue, Volume};
 use tokio::sync::{mpsc, watch};
 
 use super::auth::KisAuth;
+use super::notice::{KisNotices, NoticeClaim};
 use super::stream::{Connector, KIS_REALTIME_LIMIT, KisStream, RealFrame, StreamEvent as SessionEvent, StreamStatus, Subscription};
 use crate::clock::Clock;
 use crate::market_source::stream::{
@@ -20,17 +21,23 @@ const WON_PER_MILLION: i64 = 1_000_000;
 
 pub struct KisSeats {
     reserved: usize,
+    notices: Option<KisNotices>,
 }
 
 impl KisSeats {
     pub fn new(reserved: usize) -> KisSeats {
-        KisSeats { reserved }
+        KisSeats { reserved, notices: None }
+    }
+
+    pub fn with_notices(reserved: usize, notices: KisNotices) -> KisSeats {
+        KisSeats { reserved, notices: Some(notices) }
     }
 }
 
 impl SeatRules for KisSeats {
     fn limit(&self) -> usize {
-        KIS_REALTIME_LIMIT.saturating_sub(self.reserved)
+        let notice_seat = usize::from(self.notices.as_ref().is_some_and(KisNotices::wanted));
+        KIS_REALTIME_LIMIT.saturating_sub(self.reserved + notice_seat)
     }
 
     fn takes_own_seat(&self, kind: StreamKind) -> bool {
@@ -47,10 +54,12 @@ pub struct KisMarketStream {
     venue: watch::Sender<Venue>,
     status: watch::Receiver<StreamStatus>,
     seats: Arc<KisSeats>,
+    _claim: Option<NoticeClaim>,
 }
 
 impl KisMarketStream {
-    pub fn spawn(connector: Box<dyn Connector>, auth: KisAuth, clock: Clock, directory: watch::Receiver<Option<Arc<Directory>>>, reserved_seats: usize) -> (KisMarketStream, mpsc::Receiver<StreamEvent>) {
+    pub fn spawn(connector: Box<dyn Connector>, auth: KisAuth, clock: Clock, directory: watch::Receiver<Option<Arc<Directory>>>, reserved_seats: usize, notices: Option<KisNotices>) -> (KisMarketStream, mpsc::Receiver<StreamEvent>) {
+        let claim = notices.as_ref().map(KisNotices::claim);
         let (session, session_events) = KisStream::spawn(connector, auth);
         let (desired, desired_rx) = watch::channel(DesiredFeeds::new());
         let (venue, venue_rx) = watch::channel(Venue::Combined);
@@ -65,13 +74,19 @@ impl KisMarketStream {
             directory,
             out,
             clock,
+            notice_wanted: notices.as_ref().map(KisNotices::watch_wanted),
+            notices: notices.clone(),
             registered: BTreeSet::new(),
             open: false,
             index_cumulative: HashMap::new(),
             program_last: HashMap::new(),
         };
         tokio::spawn(bridge.run());
-        (KisMarketStream { desired, venue, status, seats: Arc::new(KisSeats::new(reserved_seats)) }, out_rx)
+        let seats = Arc::new(match notices {
+            Some(notices) => KisSeats::with_notices(reserved_seats, notices),
+            None => KisSeats::new(reserved_seats),
+        });
+        (KisMarketStream { desired, venue, status, seats, _claim: claim }, out_rx)
     }
 
     pub fn status(&self) -> StreamStatus {
@@ -267,6 +282,8 @@ struct Bridge {
     directory: watch::Receiver<Option<Arc<Directory>>>,
     out: mpsc::Sender<StreamEvent>,
     clock: Clock,
+    notices: Option<KisNotices>,
+    notice_wanted: Option<watch::Receiver<Option<crate::config::Secret<String>>>>,
     registered: BTreeSet<Subscription>,
     open: bool,
     index_cumulative: HashMap<IndexCode, u64>,
@@ -286,6 +303,12 @@ impl Bridge {
                     directory_alive = changed.is_ok();
                     true
                 }
+                changed = async { self.notice_wanted.as_mut().expect("체결통보 구독 바람").changed().await }, if self.notice_wanted.is_some() => {
+                    if changed.is_err() {
+                        self.notice_wanted = None;
+                    }
+                    true
+                }
                 changed = self.status.changed(), if status_alive => {
                     status_alive = changed.is_ok();
                     self.on_status().await
@@ -303,7 +326,8 @@ impl Bridge {
     }
 
     fn sync_registrations(&mut self) {
-        let wanted = subscriptions(&self.desired.borrow(), *self.venue.borrow(), self.directory.borrow().as_deref());
+        let mut wanted = subscriptions(&self.desired.borrow(), *self.venue.borrow(), self.directory.borrow().as_deref());
+        wanted.extend(self.notices.as_ref().and_then(KisNotices::subscription));
         if wanted != self.registered {
             self.session.set_desired(wanted.clone());
             self.registered = wanted;
@@ -344,11 +368,27 @@ impl Bridge {
                 tracing::warn!(?subscription, category = ?failure.category(), "한투 실시간 등록이 거절됐습니다");
                 true
             }
-            SessionEvent::Registered(_) => true,
+            SessionEvent::Registered { subscription, cipher } => {
+                if let Some(notices) = &self.notices {
+                    notices.on_registered(&subscription, cipher);
+                }
+                true
+            }
+            SessionEvent::Sealed(frame) => {
+                match self.notices.as_ref().filter(|notices| notices.takes(&frame.tr_id)) {
+                    Some(notices) => notices.on_sealed(&frame),
+                    None => tracing::debug!(tr_id = %frame.tr_id, "받지 않는 암호화 프레임을 버립니다"),
+                }
+                true
+            }
         }
     }
 
     async fn on_frame(&mut self, frame: &RealFrame) -> bool {
+        if let Some(notices) = self.notices.as_ref().filter(|notices| notices.takes(&frame.tr_id)) {
+            notices.on_plain(frame);
+            return true;
+        }
         let received_at = self.clock.now();
         let Some(kind) = incoming(&frame.tr_id) else {
             tracing::debug!(tr_id = %frame.tr_id, "받지 않는 한투 실시간 프레임을 버립니다");

@@ -164,6 +164,7 @@ impl KisFeed {
         let market = KisMarket::new(lane.rest.clone(), clock.clone(), parts.master.clone());
         let source: Arc<dyn MarketSource> = Arc::new(KisSource { market, lane: lane.clone() });
         let (events, received) = mpsc::channel(FEED_BUFFER);
+        let seats = Arc::new(KisSeats::with_notices(0, lane.notices.clone()));
         let feed = Arc::new(KisFeed {
             lane,
             parts,
@@ -174,7 +175,7 @@ impl KisFeed {
             next_epoch: Mutex::new(0),
             wanted: Mutex::new(Wanted { desired: DesiredFeeds::new(), venue: Venue::Combined }),
             desired: watch::channel(DesiredFeeds::new()).0,
-            seats: Arc::new(KisSeats::new(0)),
+            seats,
             tasks: Mutex::new(Vec::new()),
         });
         feed.follow_link();
@@ -212,7 +213,7 @@ impl KisFeed {
             *next += 1;
             *next
         };
-        let (stream, out) = KisMarketStream::spawn((self.parts.connect)(), self.lane.rest.auth().clone(), self.clock.clone(), self.directory.clone(), 0);
+        let (stream, out) = KisMarketStream::spawn((self.parts.connect)(), self.lane.rest.auth().clone(), self.clock.clone(), self.directory.clone(), 0, Some(self.lane.notices.clone()));
         {
             let wanted = self.wanted.lock().expect("구독 잠금");
             stream.set_venue(wanted.venue);

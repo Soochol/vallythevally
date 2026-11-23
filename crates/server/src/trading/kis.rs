@@ -516,7 +516,7 @@ impl Trading {
                 continue;
             }
             let order_no = kis_order_number(&row.odno).ok_or(TradingError::Unreadable("주문번호"))?;
-            let venue = route_of(&row.excg_id_dvsn_cd).map(venue_of).ok_or(TradingError::Unreadable("거래소구분"))?;
+            let venue = self.fill_venues.of(order_no.as_str(), day).or_else(|| route_of(&row.excg_id_dvsn_cd).map(venue_of)).ok_or(TradingError::Unreadable("거래소구분"))?;
             executions.push(api::TradingExecution {
                 order_no: order_no.as_str().to_owned(),
                 code: stock_code(&row.pdno)?,

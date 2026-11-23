@@ -7,6 +7,7 @@ pub mod market_rest;
 pub mod market_stream;
 pub mod master;
 pub mod minute_bars;
+pub mod notice;
 pub mod overview;
 pub mod rankings;
 pub mod rest;

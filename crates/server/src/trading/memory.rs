@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::sync::Mutex;
 
-use domain::{KstDate, StockCode};
+use domain::{KstDate, StockCode, Venue};
 
 use super::service::OpenEntry;
 
@@ -36,6 +36,21 @@ impl PriceBands {
 
     pub(super) fn of_day(&self, code: StockCode, day: KstDate) -> Option<PriceBand> {
         self.0.lock().expect("상·하한가 기억 잠금").get(&code).filter(|(remembered, _)| *remembered == day).map(|(_, band)| *band)
+    }
+}
+
+#[derive(Default)]
+pub(super) struct FillVenues(Mutex<HashMap<String, (KstDate, Venue)>>);
+
+impl FillVenues {
+    pub(super) fn remember(&self, order_no: &str, day: KstDate, venue: Venue) {
+        let mut venues = self.0.lock().expect("체결 거래소 기억 잠금");
+        venues.retain(|_, (remembered, _)| *remembered == day);
+        venues.insert(order_no.to_owned(), (day, venue));
+    }
+
+    pub(super) fn of(&self, order_no: &str, day: KstDate) -> Option<Venue> {
+        self.0.lock().expect("체결 거래소 기억 잠금").get(order_no).filter(|(remembered, _)| *remembered == day).map(|(_, venue)| *venue)
     }
 }
 

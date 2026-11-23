@@ -265,3 +265,14 @@ fn kis_trading_scanner_finds_words_only_and_notices_a_mock_or_an_extra_id() {
     assert_ne!(listed(&format!("{} TTTC8408R", KIS_TRADING_TR_IDS.join(" "))), want, "더해진 id를 알아채야 한다");
     assert_ne!(listed(&KIS_TRADING_TR_IDS[1..].join(" ")), want, "빠진 id를 알아채야 한다");
 }
+
+#[test]
+fn the_kis_fill_notice_tr_lives_only_in_the_kis_module() {
+    let notice = ["H0ST", "CNI0"].concat();
+    let sources = server_sources();
+    for source in sources.iter().filter(|s| !s.relative.starts_with("kis/") && !s.relative.ends_with("_tests.rs")) {
+        assert!(!source.text.contains(&notice), "{}에 한투 체결통보 tr_id가 있습니다", source.relative);
+    }
+    assert!(sources.iter().any(|s| s.relative.starts_with("kis/") && s.text.contains(&notice)), "kis 안에서 체결통보 tr_id를 찾지 못했습니다");
+    assert!(sources.iter().all(|s| !s.text.contains(&["H0ST", "CNI9"].concat())), "모의 체결통보 tr_id는 넣지 않는다");
+}

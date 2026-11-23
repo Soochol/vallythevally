@@ -27,7 +27,11 @@ use crate::kiwoom::rest::testing::{FakeTransport, ok};
 use crate::kiwoom::rest::{Access, KiwoomRest};
 use crate::kiwoom::stream::KiwoomStream;
 use crate::system_routes::SystemState;
+use crate::kis::feed::KisFeedParts;
+use crate::kis::master::{MasterDownload, MasterError, MasterMarket};
+use crate::kis::stream::{Connector, Socket};
 use crate::trading::KisAccountSettings;
+use tokio_tungstenite::tungstenite::{Error as WsError, Message};
 
 const KIWOOM_APP: &str = "FAKE-APPKEY-kisorders-kiwoom";
 const KIS_APP: &str = "FAKE-KIS-APPKEY-kisorders-b";
@@ -115,7 +119,7 @@ impl FakeKis {
             "TTTC0081R" => fine(json!({
                 "ctx_area_fk100": "", "ctx_area_nk100": "",
                 "output1": [
-                    {"odno": "0000012345", "pdno": "005930", "prdt_name": "삼성전자", "sll_buy_dvsn_cd": "02", "tot_ccld_qty": "3", "avg_prvs": "71000", "ord_tmd": "093001", "excg_id_dvsn_Cd": "KRX"},
+                    {"odno": "0000012345", "pdno": "005930", "prdt_name": "삼성전자", "sll_buy_dvsn_cd": "02", "tot_ccld_qty": "3", "avg_prvs": "71000", "ord_tmd": "093001", "excg_id_dvsn_Cd": "SOR"},
                     {"odno": "0000012346", "pdno": "005930", "prdt_name": "삼성전자", "sll_buy_dvsn_cd": "01", "tot_ccld_qty": "0", "avg_prvs": "0", "ord_tmd": "093105", "excg_id_dvsn_Cd": "SOR"}
                 ],
                 "output2": {}
@@ -140,6 +144,7 @@ impl Transport for FakeKis {
         let tr_id = req.header("tr_id").unwrap_or_default().to_owned();
         self.sent.lock().unwrap().push(KisSent { tr_id: tr_id.clone(), query: req.query.iter().map(|(k, v)| ((*k).to_owned(), v.clone())).collect(), body });
         let response = match req.path {
+            "/oauth2/Approval" => Ok(HttpResponse { status: 200, tr_cont: None, body: json!({"approval_key": "FAKE-KIS-APPROVAL-kisorders"}).to_string() }),
             "/oauth2/tokenP" => Ok(HttpResponse { status: 200, tr_cont: None, body: json!({"access_token": "FAKE-KIS-TOKEN-kisorders", "expires_in": 86_400}).to_string() }),
             _ => self.reply_to(&tr_id),
         };
@@ -147,9 +152,93 @@ impl Transport for FakeKis {
     }
 }
 
+struct ChannelSocket {
+    incoming: futures::channel::mpsc::UnboundedReceiver<Result<Message, WsError>>,
+    outgoing: futures::channel::mpsc::UnboundedSender<Message>,
+}
+
+impl futures::Stream for ChannelSocket {
+    type Item = Result<Message, WsError>;
+
+    fn poll_next(mut self: std::pin::Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> std::task::Poll<Option<Self::Item>> {
+        std::pin::Pin::new(&mut self.incoming).poll_next(cx)
+    }
+}
+
+impl futures::Sink<Message> for ChannelSocket {
+    type Error = WsError;
+
+    fn poll_ready(self: std::pin::Pin<&mut Self>, _: &mut std::task::Context<'_>) -> std::task::Poll<Result<(), Self::Error>> {
+        std::task::Poll::Ready(Ok(()))
+    }
+
+    fn start_send(self: std::pin::Pin<&mut Self>, message: Message) -> Result<(), Self::Error> {
+        self.outgoing.unbounded_send(message).map_err(|_| WsError::ConnectionClosed)
+    }
+
+    fn poll_flush(self: std::pin::Pin<&mut Self>, _: &mut std::task::Context<'_>) -> std::task::Poll<Result<(), Self::Error>> {
+        std::task::Poll::Ready(Ok(()))
+    }
+
+    fn poll_close(self: std::pin::Pin<&mut Self>, _: &mut std::task::Context<'_>) -> std::task::Poll<Result<(), Self::Error>> {
+        self.outgoing.close_channel();
+        std::task::Poll::Ready(Ok(()))
+    }
+}
+
+struct Peer {
+    to_client: futures::channel::mpsc::UnboundedSender<Result<Message, WsError>>,
+    from_client: futures::channel::mpsc::UnboundedReceiver<Message>,
+}
+
+impl Peer {
+    fn say(&self, text: &str) {
+        self.to_client.unbounded_send(Ok(Message::Text(text.into()))).unwrap();
+    }
+
+    async fn heard(&mut self) -> Value {
+        use futures::StreamExt;
+        let message = tokio::time::timeout(Duration::from_secs(5), self.from_client.next()).await.expect("클라이언트가 보내지 않았다").expect("연결이 닫혔다");
+        let Message::Text(text) = message else { panic!("글이 아니다: {message:?}") };
+        serde_json::from_str(text.as_str()).unwrap()
+    }
+}
+
+#[derive(Clone, Default)]
+struct ScriptedConnector {
+    sockets: Arc<Mutex<std::collections::VecDeque<Socket>>>,
+    attempts: Arc<AtomicUsize>,
+}
+
+impl ScriptedConnector {
+    fn queue_connection(&self) -> Peer {
+        let (to_client, incoming) = futures::channel::mpsc::unbounded();
+        let (outgoing, from_client) = futures::channel::mpsc::unbounded();
+        self.sockets.lock().unwrap().push_back(Box::new(ChannelSocket { incoming, outgoing }));
+        Peer { to_client, from_client }
+    }
+}
+
+impl Connector for ScriptedConnector {
+    fn connect(&self) -> BoxFuture<'_, Result<Socket, WsError>> {
+        self.attempts.fetch_add(1, Ordering::SeqCst);
+        let next = self.sockets.lock().unwrap().pop_front();
+        Box::pin(async move { next.ok_or(WsError::ConnectionClosed) })
+    }
+}
+
+struct NoMaster;
+
+impl MasterDownload for NoMaster {
+    fn download(&self, market: MasterMarket) -> BoxFuture<'static, Result<Vec<u8>, MasterError>> {
+        Box::pin(async move { Err(MasterError::Empty(market)) })
+    }
+}
+
 struct Kis {
     app: Router,
-    _state: Arc<AppState>,
+    state: Arc<AppState>,
+    connector: ScriptedConnector,
     kiwoom: Arc<FakeTransport>,
     kis: Arc<FakeKis>,
     dir: tempfile::TempDir,
@@ -213,7 +302,12 @@ async fn kis_fixture(account: Option<&str>, hts_id: Option<&str>) -> Kis {
     let market = &startup.keys[0].credentials;
     let rest = KiwoomRest::build(Arc::new(kiwoom.clone()), KiwoomAuth::new(market.app_key.clone(), market.app_secret.clone(), None), clock.clone(), Duration::ZERO, KiwoomEnvironment::Real);
     let factory = LaneFactory { transport: Arc::new(kiwoom.clone()), clock: clock.clone(), environment: KiwoomEnvironment::Real, spacing: Some(Duration::ZERO), ws_url: None, bases };
-    let kis_factory = KisFactory { transport: kis.clone(), clock: clock.clone(), token_base: dir.path().join("state").join("kis-token.json"), feed: None };
+    let connector = ScriptedConnector::default();
+    let connect = {
+        let connector = connector.clone();
+        Arc::new(move || Box::new(connector.clone()) as Box<dyn Connector>) as crate::kis::feed::KisConnect
+    };
+    let kis_factory = KisFactory { transport: kis.clone(), clock: clock.clone(), token_base: dir.path().join("state").join("kis-token.json"), feed: Some(KisFeedParts { connect, master: Arc::new(NoMaster) }) };
     let key_setup = KeySetup { store: key_file, keys: startup.keys, market: startup.market, factory };
     let db = AppDb::open(&dir.path().join("vally.db")).await.unwrap();
     let (stream, _desired) = KiwoomStream::detached();
@@ -230,7 +324,7 @@ async fn kis_fixture(account: Option<&str>, hts_id: Option<&str>) -> Kis {
     state.system.bound(HOST.parse().unwrap());
     state.accounts.remember_price_band(domain::StockCode::parse("005930").unwrap(), Some(100_000), Some(50_000));
     state.accounts.remember_price_band(domain::StockCode::parse("005935").unwrap(), Some(100_000), Some(50_000));
-    Kis { app: router(state.clone()), _state: state, kiwoom, kis, dir, _lock: lock }
+    Kis { app: router(state.clone()), state, connector, kiwoom, kis, dir, _lock: lock }
 }
 
 async fn order_call(app: &Router, uri: &str, body: Value) -> (StatusCode, Value) {
@@ -327,7 +421,7 @@ async fn kis_reads_answer_with_the_kis_reference_and_neutral_shapes() {
     assert_eq!((orderable["amount"].clone(), orderable["cashAmount"].clone(), orderable["marginAmount"].clone(), orderable["deposit"].clone()), (json!(1_000_000), json!(1_000_000), json!(2_500_000), json!(1_500_000)), "{orderable}");
     let (_, executions) = get(&f.app, &format!("/api/trading/executions?account={reference_b}")).await;
     assert_eq!(executions["executions"].as_array().unwrap().len(), 1, "체결 수량 0인 행은 빠진다: {executions}");
-    assert_eq!(executions["executions"][0]["venue"], "krx");
+    assert_eq!(executions["executions"][0]["venue"], "combined", "체결통보가 없으면 행의 SOR를 그대로 쓴다");
     assert_eq!(f.kiwoom.sent().len(), kiwoom_before, "한투 계좌 조회는 키움에 가지 않는다");
     let fills = f.kis.sent().into_iter().find(|sent| sent.tr_id == "TTTC0081R").unwrap();
     assert_eq!((fills.query("INQR_STRT_DT"), fills.query("CANO"), fills.query("CCLD_DVSN")), (Some("20261109"), Some(KIS_CANO), Some("01")));
@@ -513,4 +607,71 @@ async fn an_old_kis_key_without_an_account_number_reads_and_cannot_be_enabled_wi
     assert!(f.kis.trs().is_empty(), "토큰 말고는 한투에 아무것도 보내지 않는다: {:?}", f.kis.trs());
     let listed = get(&f.app, "/api/system/kiwoom/keys").await.1["keys"].as_array().unwrap().iter().find(|key| key["keyId"] == KIS_KEY).unwrap()["kisAccount"].clone();
     assert_eq!(listed, json!({"accountTail": null, "accountMasked": null, "htsIdSet": false, "source": "file"}));
+}
+
+const NOTICE_KEY: &str = "FAKE-NOTICE-KEY-kisorders-012345";
+const NOTICE_IV: &str = "FAKE-NOTICE-IV-2";
+
+fn sealed_notice(account: &str, order_no: &str, exchange: &str) -> String {
+    use aes::Aes256;
+    use base64::Engine;
+    use cbc::cipher::block_padding::Pkcs7;
+    use cbc::cipher::{BlockEncryptMut, KeyIvInit};
+    let mut columns = vec![String::new(); 26];
+    for (index, value) in [(0, HTS_ID), (1, account), (2, order_no), (4, "02"), (8, "005930"), (9, "3"), (10, "71000"), (11, "093001"), (12, "0"), (13, "2"), (14, "2"), (16, "3"), (19, exchange), (25, "71000")] {
+        columns[index] = value.to_owned();
+    }
+    let plain = columns.join("^");
+    let sealed = cbc::Encryptor::<Aes256>::new_from_slices(NOTICE_KEY.as_bytes(), NOTICE_IV.as_bytes()).unwrap().encrypt_padded_vec_mut::<Pkcs7>(plain.as_bytes());
+    format!("1|H0STCNI0|001|{}", base64::engine::general_purpose::STANDARD.encode(sealed))
+}
+
+async fn next_change(changes: &mut tokio::sync::broadcast::Receiver<super::AccountChanged>) -> super::AccountChanged {
+    tokio::time::timeout(Duration::from_secs(5), changes.recv()).await.expect("계좌 변경 알림이 오지 않았다").unwrap()
+}
+
+#[tokio::test]
+async fn an_encrypted_fill_notice_names_the_kis_account_records_sor_nxt_as_nxt_and_the_reads_go_out_again() {
+    let f = kis_fixture(Some(KIS_ACCOUNT), Some(HTS_ID)).await;
+    let notices = f.state.keys.kis_view_of(&KeyId::parse(KIS_KEY).unwrap()).unwrap().lane.notices;
+    assert!(!notices.wanted(), "주문 사용이 꺼져 있으면 체결통보를 구독하지 않는다");
+    let seats = crate::kis::market_stream::KisSeats::with_notices(0, notices.clone());
+    let mut peer = f.connector.queue_connection();
+    let (_, reference_b) = f.enable_both().await;
+    assert!(notices.wanted());
+    assert_eq!(crate::market_source::stream::SeatRules::limit(&seats), crate::kis::stream::KIS_REALTIME_LIMIT - 1, "체결통보가 자리 하나를 먼저 잡는다");
+
+    let register = peer.heard().await;
+    assert_eq!((register["header"]["tr_type"].clone(), register["body"]["input"].clone()), (json!("1"), json!({"tr_id": "H0STCNI0", "tr_key": HTS_ID})));
+    let mut changes = f.state.accounts.subscribe_changes();
+    peer.say(&json!({"header": {"tr_id": "H0STCNI0", "tr_key": HTS_ID, "encrypt": "N"}, "body": {"rt_cd": "0", "msg_cd": "OPSP0000", "msg1": "SUBSCRIBE SUCCESS", "output": {"iv": NOTICE_IV, "key": NOTICE_KEY}}}).to_string());
+    peer.say(&sealed_notice("5559999901", "0000099999", "1"));
+    assert!(tokio::time::timeout(Duration::from_millis(300), changes.recv()).await.is_err(), "다른 계좌의 통보는 알리지 않는다");
+    peer.say(&sealed_notice(KIS_DIGITS, "0000012345", "4"));
+    assert_eq!(next_change(&mut changes).await.account_ref, reference_b, "이 계좌의 통보는 B 참조의 체결 알림이 된다");
+
+    let before = f.kis.trs().len();
+    let (_, executions) = get(&f.app, &format!("/api/trading/executions?account={reference_b}")).await;
+    assert_eq!(executions["executions"][0]["venue"], "nxt", "SOR-NXT 체결은 NXT로 기록한다: {executions}");
+    assert_eq!(get(&f.app, &format!("/api/trading/balance?account={reference_b}")).await.0, StatusCode::OK);
+    assert_eq!(get(&f.app, &format!("/api/trading/open-orders?account={reference_b}")).await.0, StatusCode::OK);
+    let again: Vec<String> = f.kis.trs()[before..].to_vec();
+    assert!(again.contains(&"TTTC8434R".to_owned()) && again.contains(&"TTTC0084R".to_owned()), "체결 알림 뒤 잔고·미체결을 다시 조회한다: {again:?}");
+
+    assert_eq!(call(&f.app, "PUT", "/api/system/orders", Some(json!({"enabled": false, "keyId": KIS_KEY}))).await.0, StatusCode::OK);
+    assert!(!notices.wanted(), "끄면 체결통보 구독을 내려놓는다");
+}
+
+#[tokio::test]
+async fn without_an_hts_id_no_fill_notice_subscription_goes_out_and_orders_settle_by_queries() {
+    let f = kis_fixture(Some(KIS_ACCOUNT), None).await;
+    let (_, reference_b) = f.enable_both().await;
+    let notices = f.state.keys.kis_view_of(&KeyId::parse(KIS_KEY).unwrap()).unwrap().lane.notices;
+    let mut changes = f.state.accounts.subscribe_changes();
+    let (_, command) = f.place(&reference_b, "cmd-kis-nohts-01", "krx", "buy").await;
+    assert_eq!(command["state"], "accepted", "{command}");
+    assert_eq!(next_change(&mut changes).await.account_ref, reference_b, "주문 뒤 그 계좌를 다시 조회하라고 알린다");
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    assert!(!notices.wanted());
+    assert_eq!(f.connector.attempts.load(Ordering::SeqCst), 0, "HTS ID가 없으면 실시간 세션을 열지 않고 H0STCNI0도 보내지 않는다");
 }

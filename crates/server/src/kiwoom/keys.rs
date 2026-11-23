@@ -108,7 +108,7 @@ impl KisFactory {
     fn lane(&self, token_path: PathBuf, credentials: &KiwoomCredentials) -> KisLane {
         let kis_credentials = KisCredentials { app_key: credentials.app_key.clone(), app_secret: credentials.app_secret.clone() };
         let auth = KisAuth::new(kis_credentials, token_path, self.transport.clone(), self.clock.clone());
-        KisLink::lane(KisRest::new(self.transport.clone(), auth), self.clock.clone())
+        KisLink::lane_with_notices(KisRest::new(self.transport.clone(), auth), self.clock.clone(), self.feed.as_ref().map(|feed| feed.connect.clone()))
     }
 }
 
