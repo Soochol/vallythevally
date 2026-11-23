@@ -28,7 +28,7 @@ async function screenshot(page: Page, name: string) {
 }
 
 async function mode(page: Page, next: "도킹" | "캔버스", keyboard = false) {
-  await page.getByRole("button", { name: /^레이아웃:/ }).click();
+  await page.getByRole("button", { name: "배치", exact: true }).click();
   const button = page.getByRole("group", { name: "창 배치 방식" }).getByRole("button", { name: next, exact: true });
   await expect(button).toBeVisible();
   if (keyboard) { await page.keyboard.press("End"); await page.keyboard.press("Tab"); if (next === "캔버스") await page.keyboard.press("Tab"); await expect(button).toBeFocused(); await page.keyboard.press("Enter"); }
@@ -213,8 +213,8 @@ test("실제 머리 끌기는 안내선으로 가장자리에 붙고 크기 조�
   await page.mouse.up();
   expect(Math.abs((await boxOf(frame(page, "cell-1"))).x - first.x)).toBeLessThanOrEqual(1);
   await pollSaved(() => saved(scenario).canvas).not.toEqual(before);
-  await page.getByRole("button", { name: /^레이아웃:/ }).click();
-  await page.getByRole("menuitem", { name: "배치 되돌리기" }).click();
+  await page.getByRole("button", { name: "배치", exact: true }).click();
+  await page.getByRole("menuitem", { name: /^배치 되돌리기/ }).click();
   expect(await boxOf(frame(page, "cell-1"))).toEqual(second);
   await drag(page, header(page, "cell-1"), first.x - second.x + 5, 30);
   const handle = frame(page, "cell-1").locator('[data-resize-handle="se"]');
@@ -235,8 +235,8 @@ test("실제 머리 끌기는 안내선으로 가장자리에 붙고 크기 조�
   await page.mouse.move(east.x + 70, east.y + east.height / 2, { steps: 6 });
   await page.mouse.up();
   expect((await boxOf(frame(page, "cell-1"))).width).toBeGreaterThan(340);
-  await page.getByRole("button", { name: "레이아웃: 기본" }).click();
-  await page.getByRole("menuitem", { name: "배치 되돌리기" }).click();
+  await page.getByRole("button", { name: "배치", exact: true }).click();
+  await page.getByRole("menuitem", { name: /^배치 되돌리기/ }).click();
   expect(await boxOf(frame(page, "cell-1"))).toEqual(minimum);
 });
 
@@ -284,7 +284,7 @@ test("겹친 창을 누르면 앞으로 오고 가지런히·기본 배치·크�
   }
   await screenshot(page, "tidied");
   await drag(page, header(page, "cell-1"), 60, 30);
-  await page.getByRole("button", { name: /^레이아웃:/ }).click();
+  await page.getByRole("button", { name: "배치", exact: true }).click();
   await page.getByRole("menuitem", { name: "기본 배치로" }).click();
   await expect(tidy(page).getByLabel("겹친 곳")).toHaveText("0");
 });
@@ -455,8 +455,8 @@ test("포인터 취소·캡처 상실·초점 상실·작업 영역 변경은 �
     await page.mouse.up();
     await expect(stage(page)).not.toHaveAttribute("data-canvas-dragging");
     expect(await boxOf(frame(page, "cell-1"))).toEqual(original);
-    await page.getByRole("button", { name: /^레이아웃:/ }).click();
-    await expect(page.getByRole("menuitem", { name: "배치 되돌리기" })).toBeDisabled();
+    await page.getByRole("button", { name: "배치", exact: true }).click();
+    await expect(page.getByRole("menuitem", { name: /^배치 되돌리기/ })).toBeDisabled();
     await page.keyboard.press("Escape");
   }
   const persisted = saved(scenario).canvas;
