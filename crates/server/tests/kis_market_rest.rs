@@ -554,6 +554,7 @@ async fn multi_price_day_rows_carry_open_high_low_and_name_the_field_they_cannot
     let quotes = rig.market.quotes(wanted.to_vec(), Priority::Screen).await.unwrap();
     assert_eq!((quotes[0].price_centi, quotes[0].base_centi, quotes[0].volume.0, quotes[0].traded_million_won), (7_100_000, 7_000_000, 1_234_567, Some(87_654)), "quotes()의 결과는 그대로다");
 
+    assert_eq!(server::kis::market_rest::whole("184467440737095516"), None, "u64을 넘기는 값은 읽을 수 없는 값이다");
     let blank_open = r#"{"rt_cd":"0","output":[{"inter_shrn_iscd":"005930","inter2_prpr":"71000","inter2_sdpr":"70000","inter2_oprc":"","inter2_hgpr":"71500","inter2_lwpr":"69800","acml_vol":"1","acml_tr_pbmn":"1"}]}"#;
     let broken = rig_at(friday_evening(), synthetic_master(), move |_| ok(blank_open));
     let rows = multi_price_day_rows(&broken.rest, &wanted[..1], Priority::Screen).await.unwrap();

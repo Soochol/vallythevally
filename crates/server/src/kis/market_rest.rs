@@ -670,7 +670,7 @@ pub fn centi(text: &str) -> Option<u64> {
 }
 
 pub fn whole(text: &str) -> Option<u64> {
-    centi(text).map(|c| (c + 50) / 100)
+    centi(text).and_then(|c| c.checked_add(50)).map(|c| c / 100)
 }
 
 pub(super) fn signed_whole(text: &str) -> Option<i64> {
