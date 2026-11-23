@@ -122,15 +122,25 @@ test("paint 전에 새로 예약한 명령은 이전 예약의 paint 뒤 정리�
   expect(scroll.position(f.scale)).toBe(start + 2);
 });
 
-test("paint 전에 예약한 위치 명령만 paint되지 않은 목표로 드러난다", () => {
-  const f = scaleOf([2015, 2016, 2021].map(year), true);
+test("preserveTimeRange가 예약한 보정만 있으면 사용자 이동량은 0이다", () => {
+  const f = scaleOf([2015, 2016, 2021, 2022, 2023, 2024, 2025, 2026].map(year), true);
   const scroll = new PendingScroll(f.afterNextPaint);
-  expect(scroll.unpaintedTarget).toBeNull();
+  preserveTimeRange(f.scale, "Y", scroll, () => f.change([2013, 2014, 2015, 2016, 2021, 2022, 2023, 2024, 2025, 2026].map(year)));
+  expect(scroll.unpaintedUserShift).toBe(0);
+});
+
+test("사용자 이동 뒤 프로그램 보정이 와도 사용자 이동량은 그대로이고 paint 뒤에는 비워진다", () => {
+  const f = scaleOf([2015, 2016, 2021, 2022, 2023, 2024, 2025, 2026].map(year), true);
+  const scroll = new PendingScroll(f.afterNextPaint);
   const start = f.scale.scrollPosition();
-  scroll.scrollTo(f.scale, start + 1);
-  expect(scroll.unpaintedTarget).toBe(start + 1);
+  scroll.scrollByUser(f.scale, -1.2);
+  scroll.scrollByUser(f.scale, -0.5);
+  expect(scroll.unpaintedUserShift).toBeCloseTo(-1.7, 8);
+  expect(scroll.position(f.scale)).toBeCloseTo(start - 1.7, 8);
+  preserveTimeRange(f.scale, "Y", scroll, () => f.change([2013, 2014, 2015, 2016, 2021, 2022, 2023, 2024, 2025, 2026].map(year)));
+  expect(scroll.unpaintedUserShift).toBeCloseTo(-1.7, 8);
   f.paint();
-  expect(scroll.unpaintedTarget).toBeNull();
+  expect(scroll.unpaintedUserShift).toBe(0);
 });
 
 test("변경 중에 라이브러리가 오른쪽 오프셋을 동기로 바꿔도 예약이 없으면 그 변화를 흡수한다", () => {

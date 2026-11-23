@@ -377,13 +377,12 @@ export class ChartController {
     this.withDataGuard(() => {
       if (this.initialRange.held) {
         const timeScale = this.chart.timeScale();
-        const unpaintedTarget = this.pendingScroll.unpaintedTarget;
-        const unpaintedShift = unpaintedTarget === null ? 0 : unpaintedTarget - timeScale.scrollPosition();
+        const userShift = this.pendingScroll.unpaintedUserShift;
         draw();
         const drawn = timeScale.getVisibleLogicalRange();
         const lastPointIndex = drawn ? drawn.to - timeScale.scrollPosition() : null;
         const fitted = this.fitInitialRange();
-        if (unpaintedTarget !== null && fitted && lastPointIndex !== null) this.pendingScroll.scrollTo(timeScale, fitted.to - lastPointIndex + unpaintedShift);
+        if (userShift !== 0 && fitted && lastPointIndex !== null) this.pendingScroll.scrollTo(timeScale, fitted.to - lastPointIndex + userShift);
       } else preserveTimeRange(this.chart.timeScale(), this.period(), this.pendingScroll, draw);
     });
     this.requestLegendSources("indicators");
@@ -492,7 +491,7 @@ export class ChartController {
       event.stopImmediatePropagation();
       const unit = event.deltaMode === WheelEvent.DOM_DELTA_LINE ? 32 : event.deltaMode === WheelEvent.DOM_DELTA_PAGE ? 120 : 1;
       const shift = event.deltaY * unit * 0.8 / timeScale.options().barSpacing;
-      this.pendingScroll.scrollTo(timeScale, this.pendingScroll.position(timeScale) + shift);
+      this.pendingScroll.scrollByUser(timeScale, shift);
       return;
     }
     if (!wheelScale) {

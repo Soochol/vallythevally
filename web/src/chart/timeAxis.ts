@@ -64,7 +64,7 @@ export function chartTimeProjection(scale: ChartTimeScale, period: Period) {
 type ScrollScale = Pick<ChartTimeScale, "scrollPosition" | "scrollToPosition">;
 
 export class PendingScroll {
-  private pending: { target: number } | null = null;
+  private pending: { target: number; userShift: number } | null = null;
 
   constructor(private readonly afterNextPaint: (callback: () => void) => void) {}
 
@@ -72,12 +72,20 @@ export class PendingScroll {
     return this.pending ? this.pending.target : scale.scrollPosition();
   }
 
-  get unpaintedTarget(): number | null {
-    return this.pending ? this.pending.target : null;
+  get unpaintedUserShift(): number {
+    return this.pending ? this.pending.userShift : 0;
   }
 
   scrollTo(scale: ScrollScale, target: number): void {
-    const command = { target };
+    this.schedule(scale, target, this.unpaintedUserShift);
+  }
+
+  scrollByUser(scale: ScrollScale, shift: number): void {
+    this.schedule(scale, this.position(scale) + shift, this.unpaintedUserShift + shift);
+  }
+
+  private schedule(scale: ScrollScale, target: number, userShift: number): void {
+    const command = { target, userShift };
     this.pending = command;
     scale.scrollToPosition(target, false);
     this.afterNextPaint(() => {
