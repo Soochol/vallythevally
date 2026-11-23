@@ -5,7 +5,7 @@ use std::pin::Pin;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
 use std::task::{Context, Poll};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use collector::collect::child::{ChildParts, run_session};
 use collector::collect::link::{Events, Incoming};
@@ -24,6 +24,7 @@ use tokio::sync::{mpsc, watch};
 use tokio::task::JoinHandle;
 use tokio_tungstenite::tungstenite::{Error as WsError, Message};
 
+const NO_PROGRESS_LIMIT: Duration = Duration::from_secs(30);
 const DAY: u32 = 20261123;
 const DAY_START_MS: i64 = 1_795_395_600_000;
 const SECOND_KEY_TOKEN: &str = "FAKE-MINUTE-TOKEN-0001";
@@ -136,14 +137,23 @@ impl Beacon {
     }
 
     async fn until(&self, what: &str, condition: impl Fn() -> bool) {
+        self.until_within(what, NO_PROGRESS_LIMIT, condition).await;
+    }
+
+    async fn until_within(&self, what: &str, no_progress_limit: Duration, condition: impl Fn() -> bool) {
+        let (mut seen_rings, mut last_progress) = (self.state.lock().unwrap().0, Instant::now());
         loop {
             if condition() {
                 return;
             }
+            let (rings, closed) = *self.state.lock().unwrap();
+            assert!(!closed, "집계가 끝나 더는 오지 않는다: {what}");
+            if rings != seen_rings {
+                (seen_rings, last_progress) = (rings, Instant::now());
+            }
+            assert!(last_progress.elapsed() < no_progress_limit, "{no_progress_limit:?} 동안 새 신호가 없다: {what}");
             let state = self.state.lock().unwrap();
-            assert!(!state.1, "집계가 끝나 더는 오지 않는다: {what}");
-            let rung = state.0;
-            drop(self.changed.wait_timeout_while(state, Duration::from_millis(1), |state| state.0 == rung && !state.1).unwrap());
+            drop(self.changed.wait_timeout_while(state, Duration::from_millis(1), |state| state.0 == rings && !state.1).unwrap());
             tokio::task::yield_now().await;
         }
     }
@@ -531,4 +541,28 @@ async fn a_full_aggregation_queue_drops_frames_on_the_aggregation_side_and_count
     worker.finish().await;
     assert_eq!(stats.ticks(), 1 + capacity as u64);
     assert_eq!(appended(&shared, "k1").iter().filter(|bar| bar.venue == ALL).map(|bar| bar.volume).next_back(), Some(1 + capacity as i64));
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_wait_with_no_new_write_signal_fails_naming_what_it_waited_for() {
+    use futures::FutureExt;
+    let folder = tempfile::tempdir().unwrap();
+    let shared = folder.path().join("shared");
+    let gate = Gate::new();
+    let held = HeldStore { inner: file_store(&shared, "k1").0, gate: gate.clone() };
+    let written = Beacon::new();
+    let watched = Watched { inner: Box::new(held), written: written.clone() };
+    let (feed, worker) = spawn(Box::new(watched), DAY_START_MS + 9 * 3_600_000);
+    let frame = tokio_tungstenite::tungstenite::Utf8Bytes::from(stock("005930", "090001", "70000", "1", "KRX"));
+    feed.offer(DAY_START_MS, &frame);
+    settle().await;
+    tokio::time::advance(FLUSH_EVERY).await;
+    gate.until_arrived().await;
+    let waiting = written.until_within("분봉 줄 1개", Duration::from_millis(200), || appended(&shared, "k1").len() >= 1);
+    let failure = std::panic::AssertUnwindSafe(waiting).catch_unwind().await.expect_err("붙잡힌 쓰기를 기다리면 실패해야 한다");
+    let message = failure.downcast_ref::<String>().cloned().unwrap_or_default();
+    assert!(message.contains("새 신호가 없다") && message.contains("분봉 줄 1개"), "{message}");
+    drop(feed);
+    gate.release();
+    worker.finish().await;
 }
