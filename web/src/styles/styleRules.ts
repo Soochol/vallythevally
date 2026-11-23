@@ -10,6 +10,7 @@ const CSS_DECLARATION = /(?<![\w-])(--[\w-]+)\s*:(?!\s*var\(\s*\1\s*\))/g;
 const SCRIPT_DECLARATION = /["'`](--[\w-]+)["'`](?:\s+as\s+\w+\s*\])?\s*:|setProperty\(\s*["'`](--[\w-]+)["'`]/g;
 const BLOCK_COMMENT = /\/\*[\s\S]*?\*\//g;
 const IMPORT_SPECIFIER = /(?:\bimport\s*(?:[^"'`;]*?\bfrom\s*)?|\bimport\s*\(\s*|@import\s+(?:url\(\s*)?)["']([^"']+)["']/g;
+const APP_ENTRY = /\/main\.tsx?$/;
 const RESOLVED_SUFFIXES = ["", ".ts", ".tsx", ".css", "/index.ts", "/index.tsx", "/index.css"];
 
 const isStyleSheet = (path: string): boolean => path.endsWith(".css");
@@ -81,16 +82,15 @@ export function findUndefinedTokens(files: readonly SourceFile[], tokensPath: st
   const all: SourceFile[] = [...files.filter((candidate) => candidate.path !== tokensPath), { path: tokensPath, text: tokensText }];
   const knownPaths = new Set(all.map((file) => file.path));
   const declarations = new Map(all.map((file) => [file.path, localDeclarations(file)]));
+  const importsOf = new Map(all.map((file) => [file.path, resolveImports(file, knownPaths)]));
   const importers = new Map<string, string[]>();
+  for (const [importer, targets] of importsOf) for (const target of targets) importers.set(target, [...(importers.get(target) ?? []), importer]);
   const globalSheets = new Set<string>();
-  for (const file of all) {
-    for (const target of resolveImports(file, knownPaths)) {
-      importers.set(target, [...(importers.get(target) ?? []), file.path]);
-      if (isStyleSheet(file.path) && isStyleSheet(target)) {
-        globalSheets.add(file.path);
-        globalSheets.add(target);
-      }
-    }
+  const pending = all.filter((file) => APP_ENTRY.test(file.path)).flatMap((entry) => importsOf.get(entry.path)!).filter(isStyleSheet);
+  for (let path = pending.pop(); path !== undefined; path = pending.pop()) {
+    if (globalSheets.has(path)) continue;
+    globalSheets.add(path);
+    pending.push(...importsOf.get(path)!.filter(isStyleSheet));
   }
   const namesOf = (paths: Iterable<string>): string[] => [...paths].flatMap((path) => [...declarations.get(path)!]);
   const globalNames = namesOf(globalSheets);
@@ -191,9 +191,10 @@ function namedColorsIn(value: string): string[] {
   return [...value.replace(/url\([^)]*\)/gi, "").matchAll(NAMED_COLOR)].map((match) => match[0]);
 }
 
-function declarationsOf(text: string, multiline: boolean): { property: string; value: string }[] {
-  const terminator = multiline ? "[^;}]+" : "[^;}\\n\"'`]+";
-  const pattern = new RegExp(`(?<![\\w-])([a-z-][\\w-]*)\\s*:\\s*(${terminator})`, "gi");
+function declarationsOf(text: string, isStyleSheetText: boolean): { property: string; value: string }[] {
+  const pattern = isStyleSheetText
+    ? /(?:^|[{;])\s*([a-z-][\w-]*)\s*:\s*([^;{}]+)/gi
+    : /(?<![\w-])([a-z-][\w-]*)\s*:\s*([^;}\n"'`]+)/gi;
   return [...text.matchAll(pattern)].map((match) => ({ property: match[1]!.toLowerCase(), value: match[2]! }));
 }
 
