@@ -40,6 +40,20 @@ async function countPresses(page: Page) {
   return () => page.evaluate(() => (window as unknown as { __presses: number }).__presses);
 }
 
+async function recordPrimariesPerFrame(page: Page) {
+  await page.addInitScript(() => {
+    const record = window as unknown as { __mostPrimaries: number };
+    record.__mostPrimaries = 0;
+    const sample = () => {
+      const dialog = document.querySelector('[role="dialog"][aria-labelledby="setup-wizard-title"]');
+      if (dialog) record.__mostPrimaries = Math.max(record.__mostPrimaries, dialog.querySelectorAll(".btn-primary").length);
+      requestAnimationFrame(sample);
+    };
+    requestAnimationFrame(sample);
+  });
+  return () => page.evaluate(() => (window as unknown as { __mostPrimaries: number }).__mostPrimaries);
+}
+
 function answerKiwoom(scenario: Scenario) {
   scenario.on(route("PUT", "/api/system/kiwoom/key"), () => {
     scenario.live.link(DISCONNECTED);
@@ -118,6 +132,7 @@ test.describe("처음 설정과 계정 화면", () => {
     scenario.live.account = signedIn();
     scenario.live.kiwoomLink = DISCONNECTED;
     answerKiwoom(scenario);
+    const mostPrimaries = await recordPrimariesPerFrame(page);
     await justLoggedIn(page);
     await page.goto("/");
     await finishPrepare(page);
@@ -132,6 +147,7 @@ test.describe("처음 설정과 계정 화면", () => {
     await wizard(page).getByRole("button", { name: "취소" }).click();
     await expect(wizard(page).getByRole("button", { name: "키움에 연결" })).toHaveClass(/btn-primary/);
     await expect(wizardPrimaries(page)).toHaveCount(1);
+    expect(await mostPrimaries()).toBe(1);
   });
 
   test("셋업 고르기 화면에는 주요 버튼이 둘 이상 없고 덮어쓰기 확인은 위험 단추다", async ({ page, scenario }) => {
