@@ -16,9 +16,9 @@ const REASON: Record<FinancialReason, string> = {
 };
 const STATUS: Record<string, string> = {
   available: "확인", unpublished: "미공시", missing_item: "항목 없음", not_calculable: "산출 불가", failed: "조회 실패", pending: "수집 대기",
-  unsupported: "재무지표 미지원", missing_report: "비교 보고서 없음", not_configured: "DART 연동 미설정 · 서버의 OPENDART_API_KEY 설정이 필요합니다",
-  not_collected: "미수집 · 재무자료 창에서 전체 업데이트를 시작하세요",
-  collecting: "재무자료 수집 중", ready: "확인 완료", stale: "저장 자료 · 갱신 대기", partial_failure: "일부 조회 실패",
+  unsupported: "재무지표 미지원", missing_report: "비교 보고서 없음", not_configured: "이 서버에 재무자료가 없습니다",
+  not_collected: "미수집",
+  ready: "확인 완료", stale: "저장 자료 · 갱신 대기", partial_failure: "일부 조회 실패",
 };
 const FAILURE: Record<string, string> = {
   authentication: "DART 인증 설정 확인 필요", network: "자료원 연결 실패", rate_limited: "자료원 조회 한도 초과", remote: "자료원 응답 오류",
@@ -37,10 +37,9 @@ export const financialUnit = (metric: FinancialMetric, currency: string | null) 
 export const financialValue = (v: number, metric: FinancialMetric, currency: string | null) => `${v.toLocaleString("ko-KR", { maximumFractionDigits: 2 })} ${financialUnit(metric, currency)}`;
 
 export function financialSummary(page: FinancialsPage): string {
-  const { completed, total, failed, pending } = page.progress;
+  const { failed } = page.progress;
   const saved = page.series.some((series) => series.points.some((point) => point.value !== null || point.inputs.some((input) => input.lastSuccessAt !== null)));
   return [financialStatus(page.status), page.reason && (SOURCE_REASON[page.reason] ?? (page.status === "unsupported" ? "이 상품은 가격 차트만 제공합니다" : "회사 자료 미확인")),
-    page.status === "collecting" ? `${completed}/${total}건 확인 · 대기 ${pending}건` : null,
     failed > 0 ? `실패 ${failed}건` : null,
     page.failure || page.disclosureFailure ? saved ? "갱신 실패 · 저장 자료 유지" : "조회 실패 · 다시 시도하세요" : null,
     `마지막 확인 ${checkedTime(page.lastCheckedAt)}`].filter(Boolean).join(" · ");

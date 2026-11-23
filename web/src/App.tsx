@@ -1,5 +1,4 @@
 import { useRefetchNamesOnConnect } from "./api/refetchNamesOnConnect";
-import { FinancialUpdateDialog } from "./features/financial-update/FinancialUpdateDialog";
 import { ConfirmHost } from "./features/overlay/Confirm";
 import { TooltipHost } from "./features/overlay/Tooltip";
 import { useEffect, useState } from "react";
@@ -140,7 +139,6 @@ function ChartScreen({ page }: { page: PageId }) {
       <SearchDialog />
       <IndicatorCommand />
       <ScreenDialog />
-      <FinancialUpdateDialog />
       <SystemSettingsDialog />
       <SetupChangedNotice />
       <Toast />
