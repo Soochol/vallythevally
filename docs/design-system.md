@@ -4,10 +4,13 @@
 
 ## 테마 바꾸기
 
-1. `web/src/styles/tokens.css`에서 배경, 표면, 글자, 간격, 반지름과 글자 크기를 바꾼다. 이 파일을 테마 값의 원본으로 사용한다.
-2. 주요 행동과 선택에는 `--accent`를 사용한다. 경고는 `--warning`, 오류와 삭제는 `--danger`, 성공은 `--success`를 사용한다. 상승과 하락의 `--up`, `--down`은 상태 메시지에 사용하지 않는다.
-3. 차트 전용 색도 같은 파일에서 바꾼다. `readThemeTokens`가 격자, 봉, 거래량, 지표 기본색과 비교 종목 색을 읽는다. 새 토큰을 추가하면 `web/src/chart/theme.ts`와 Tailwind 연결이 필요한 `web/src/styles/index.css`에도 연결한다.
-4. 앱을 다시 빌드해 차트와 지표, 드로잉, 대화상자, PNG 내보내기를 확인한다. 사용자 지정 HEX 색은 테마가 바뀌어도 유지한다.
+1. `web/src/styles/tokens.css`에서 배경, 표면(`--bg`·`--surface`·`--raised`·`--overlay`), 글자, 간격, 모서리(`--r-s`~`--r-xl`), 글자 크기(`--fs-*`), 조작부 높이(`--ctl-*`), 줄 높이(`--row-h`), 전환(`--dur-*`·`--ease`)을 바꾼다. 이 파일을 테마 값의 원본으로 사용한다. 줄 높이는 `[data-density="compact"]`에서 28px가 된다. 옛 토큰 이름(`--size-*` 등)은 지우지 않는다.
+2. 주요 행동과 선택에는 `--accent`를 사용한다. 경고는 `--warning`, 오류와 삭제는 `--danger`, 성공은 `--success`를 사용하고 띠·배지 면에는 `--danger-soft`·`--warning-soft`·`--success-soft`를 사용한다. 상승과 하락의 `--up`, `--down`은 값의 방향에만 사용하고 상태 메시지에 사용하지 않는다. `--up`·`--down`·`--accent` 면 위의 글자는 `--on-data`다.
+3. 차트 전용 색도 같은 파일에서 바꾼다. `readThemeTokens`가 격자(`--grid`·`--grid-h`), 봉, 거래량, 지표 기본색, 비교 종목 색과 `--on-data`를 읽는다. 주체·테마·비교 ETF를 가르는 범주색은 `--series-1`~`--series-10`이다. 새 토큰을 추가하면 `web/src/chart/theme.ts`와 Tailwind 연결이 필요한 `web/src/styles/index.css`에도 연결한다.
+4. 값을 바꾸면 단위 시험 두 개가 규칙을 지킨다. `python3 scripts/web.py check src/styles/tokens.test.ts src/styles/styleRules.test.ts`로 돌린다.
+   - `tokens.test.ts`는 글자·바탕 쌍(`--text`·`--text-2`·`--text-3`·`--up`·`--down`·`--danger`·`--warning`·`--success`·`--accent`가 `--bg`·`--surface`·`--raised`·유리 면 위, `--on-data`가 `--up`·`--down`·`--accent` 위, `--accent-ink`가 `--accent` 위)의 WCAG 대비 4.5:1 이상과 `--series-*`의 색차(서로, 그리고 `--up`·`--down`·`--danger`·`--warning`·`--success`·`--accent`와 ΔE00 14 이상, `--bg` 위 4.5:1 이상)를 확인한다. 쓰지 않기로 한 쌍은 표에 넣지 않고 시험 이름으로 이유를 적는다(`--text-3`는 `--overlay`와 고른 줄 `--accent-soft` 위에서 4.5:1 미만이라 그 위에는 `--text-2`를 쓴다).
+   - `styleRules.test.ts`는 `web/src`의 CSS·TS·TSX가 쓰는 모든 `var(--이름)`이 `tokens.css`에 정의돼 있거나 `web/src`의 다른 CSS 선언·style 객체·`setProperty`가 정한 지역 변수인지 확인한다. 폴더에 표식 파일 `.ui2`를 두면 그 폴더(하위 폴더 포함)는 글자 굵기 400·500·600·700, px 글자 크기 11·12·13·14·17·20·28, `tokens.css` 밖 색 직접 값(`#rgb`·`rgb(`·`rgba(`) 금지도 지켜야 한다. 표식이 없는 폴더는 이 규칙을 검사하지 않는다.
+5. 앱을 다시 빌드해 차트와 지표, 드로잉, 대화상자, PNG 내보내기를 확인한다. 사용자 지정 HEX 색은 테마가 바뀌어도 유지한다.
 
 현재 UI는 다크만 제공한다. 첫 HTML부터 `color-scheme: dark`를 적용한다. `parseUiState`는 과거 `light` 설정을 `dark`로 읽고 다른 설정을 보존한다. 서버의 과거 테마 값 수용 범위는 바꾸지 않는다.
 

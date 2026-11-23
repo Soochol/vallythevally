@@ -132,8 +132,8 @@ test("목록에 없는 종목 줄은 흐리게 보이고 누르거나 Enter를 �
   await open(page);
   await expect(rows(page)).toHaveCount(3);
   await expect(rowOf(page, UNLISTED_CODE)).toHaveAttribute("data-listed", "false");
-  await expect(rowOf(page, UNLISTED_CODE).locator(".rk-name b")).toHaveCSS("color", "rgb(120, 131, 111)");
-  await expect(rowOf(page, "005930").locator(".rk-name b")).not.toHaveCSS("color", "rgb(120, 131, 111)");
+  await expect(rowOf(page, UNLISTED_CODE).locator(".rk-name b")).toHaveCSS("color", "rgb(138, 148, 132)");
+  await expect(rowOf(page, "005930").locator(".rk-name b")).not.toHaveCSS("color", "rgb(138, 148, 132)");
 
   await scroller(page).focus();
   await page.keyboard.press("ArrowDown");
