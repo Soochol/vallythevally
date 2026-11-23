@@ -187,8 +187,6 @@ export function dragGhostText(target: DragTarget, source: DragSource): string {
 
 export const previewText = (side: OrderSide, quantity: number): string => `${SIDE_LABEL[side]} ${quantity}`;
 
-export const addQuantityText = (quantity: number): string => `＋${quantity}`;
-
 export function typedQuantity(input: string): number {
   const typed = Number(input);
   return Number.isFinite(typed) && typed > 0 ? Math.floor(typed) : 0;

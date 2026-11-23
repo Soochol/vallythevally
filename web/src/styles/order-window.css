@@ -28,7 +28,6 @@
 .od-chip[data-side=buy] { background:var(--up); box-shadow:inset calc(-1 * var(--size-3)) 0 0 color-mix(in srgb, var(--on-data) 40%, transparent); }
 .od-chip[data-dragging] { opacity:.4; }
 .od-chip-state { font-weight:500; }
-.od-chip[data-add] .od-chip-state { display:none; }
 .od-chip[data-pending] { cursor:default; border:var(--size-1) dashed var(--on-data); }
 .od-chip[data-pending][data-side=sell] { background:color-mix(in srgb, var(--down) 60%, var(--surface)); }
 .od-chip[data-pending][data-side=buy] { background:color-mix(in srgb, var(--up) 60%, var(--surface)); }
@@ -155,9 +154,6 @@ button.od-cellbtn:not(:disabled) small span { text-decoration:underline dotted; 
 .od-cellbtn small { display:flex; align-items:center; gap:var(--s2); }
 .od-remaining { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--text-2); font-style:normal; }
 .od-unpaid-dot { flex:none; width:var(--size-5); height:var(--size-5); border-radius:50%; background:var(--danger); }
-.od-chip[data-add]::after { content:attr(data-add); position:absolute; right:var(--size-4); top:50%; transform:translateY(-50%); color:var(--on-data); font-size:var(--fs-xs); font-weight:600; pointer-events:none; white-space:nowrap; }
-.od-chip[data-add-over]::after { text-decoration:line-through; }
-.od-chip[data-add-margin]::after { text-decoration:underline dotted; }
 .od-preview[data-over] { color:var(--danger); text-decoration:line-through; }
 .od-preview[data-margin] { color:var(--warning); }
 .od-estimate-note { color:var(--warning); }
