@@ -50,7 +50,7 @@ import { addMainSeries, applyMainColors, type MainSeries, priceFormat, setMainDa
 import { type ChartSettings, type Panel, type PriceScale, shownScale } from "./settings";
 import { composeSnapshot, snapshotFileName } from "./snapshot";
 import type { ThemeTokens } from "./theme";
-import { chartTimeProjection, preserveTimeRange } from "./timeAxis";
+import { chartTimeProjection, PendingScroll, preserveTimeRange } from "./timeAxis";
 import { formatBarTime, formatTickMark, fromChartTime, isIntraday, toChartTime } from "./time";
 import type { ChartExtension, ExtensionFactory } from "./extensions";
 import { InitialRange, RIGHT_OFFSET } from "./initialRange";
@@ -156,6 +156,7 @@ export class ChartController {
   private ready: ReadyStatus | null = null;
   private settingData = false;
   private readonly initialRange: InitialRange;
+  private readonly pendingScroll = new PendingScroll((callback) => requestAnimationFrame(callback));
   private disposed = false;
   private extensions = new Set<ChartExtension>();
   private readonly pendingDraw = new Map<UnixSeconds, Bar>();
@@ -335,7 +336,7 @@ export class ChartController {
     if (prev?.period !== next.period || prev?.settings.indicators !== next.settings.indicators || prev?.settings.panels !== next.settings.panels) {
       const configs = chartIndicators(next.settings, next.period);
       const panels = chartPanels(next.settings, next.period);
-      this.withDataGuard(() => preserveTimeRange(this.chart.timeScale(), next.period, () => this.indicators.setConfigs(configs, panels)));
+      this.withDataGuard(() => preserveTimeRange(this.chart.timeScale(), next.period, this.pendingScroll, () => this.indicators.setConfigs(configs, panels)));
     }
     if (prev && prev.settings.visibleBars !== next.settings.visibleBars) this.fitInitialRange();
     if (prev?.settings.showExtremes !== next.settings.showExtremes || prev?.settings.extremeBasis !== next.settings.extremeBasis) this.scheduleFrame();
@@ -376,7 +377,7 @@ export class ChartController {
       if (this.initialRange.held) {
         draw();
         this.fitInitialRange();
-      } else preserveTimeRange(this.chart.timeScale(), this.period(), draw);
+      } else preserveTimeRange(this.chart.timeScale(), this.period(), this.pendingScroll, draw);
     });
     this.requestLegendSources("indicators");
     this.renderLegend();
@@ -484,7 +485,7 @@ export class ChartController {
       event.stopImmediatePropagation();
       const unit = event.deltaMode === WheelEvent.DOM_DELTA_LINE ? 32 : event.deltaMode === WheelEvent.DOM_DELTA_PAGE ? 120 : 1;
       const shift = event.deltaY * unit * 0.8 / timeScale.options().barSpacing;
-      timeScale.scrollToPosition(timeScale.scrollPosition() + shift, false);
+      this.pendingScroll.scrollTo(timeScale, this.pendingScroll.position(timeScale) + shift);
       return;
     }
     if (!wheelScale) {
@@ -553,7 +554,7 @@ export class ChartController {
 
   private recreateMain(isIndex: boolean): void {
     this.indicators.flush();
-    this.withDataGuard(() => preserveTimeRange(this.chart.timeScale(), this.period(), () => {
+    this.withDataGuard(() => preserveTimeRange(this.chart.timeScale(), this.period(), this.pendingScroll, () => {
       const replaced = this.main;
       this.main = addMainSeries(this.chart, this.view?.settings.style ?? "candle", this.tokens, isIndex, this.priceAxisGeometry());
       this.main.api.setSeriesOrder(replaced.api.seriesOrder());
@@ -868,7 +869,7 @@ export class ChartController {
     this.patchReady({ olderLoading: false });
     this.history = h;
     if (added === 0) return this.updateIntradayEnd();
-    this.withDataGuard(() => preserveTimeRange(this.chart.timeScale(), this.period(), () => {
+    this.withDataGuard(() => preserveTimeRange(this.chart.timeScale(), this.period(), this.pendingScroll, () => {
       this.setBars(displayBars(h));
       this.indicators.prepend(h);
     }));
