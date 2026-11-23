@@ -18,7 +18,7 @@
 .sentence-kind { display: inline-flex; align-items: center; gap: var(--size-2); min-height: var(--size-24); padding: 0 var(--size-4) 0 var(--size-6); border: var(--size-1) solid var(--line-strong); border-radius: var(--r-s); color: var(--text); font-weight: 600; }
 .sentence-kind > svg { width: var(--size-12); height: var(--size-12); color: var(--text-2); }
 .sentence-kind:hover, .sentence-kind[aria-expanded="true"] { border-color: var(--accent); }
-.ui-popover.sentence-editor-window { max-height: min(785px, calc(100dvh - var(--island-gap) - var(--island-h) - var(--size-16))); }
+.ui-popover.sentence-editor-window { max-height: min(var(--sentence-editor-max-h), calc(100dvh - var(--island-gap) - var(--island-h) - var(--size-16))); }
 @media (width < 48rem) { .sentence-token, .sentence-condition [role="combobox"], .sentence-kind { min-height: var(--size-32); } }
 .sentence-condition [role="combobox"] { gap: var(--size-2); padding-right: var(--size-4); background: var(--hover); color: var(--text); }
 .sentence-condition [role="combobox"] > svg { width: var(--size-12); height: var(--size-12); color: var(--text-3); }

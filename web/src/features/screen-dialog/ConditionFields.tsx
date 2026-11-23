@@ -13,7 +13,7 @@ import type { PriceField } from "../../api/generated/PriceField";
 import type { ScreenPeriod } from "../../api/generated/ScreenPeriod";
 import type { Side } from "../../api/generated/Side";
 import type { SurgeField } from "../../api/generated/SurgeField";
-import { BAND_LABEL, DIRECTION_LABEL, EXTREME_LABEL, FIELD_LABEL, KIND_LABEL, MA_METHOD_LABEL, MA_ORDER_LABEL, NEW_HIGH_NAME, NEW_LOW_NAME, PERIOD_NAME, SIDE_LABEL, UNIT, VALUE_UNIT } from "../../lib/screener";
+import { BAND_LABEL, DIRECTION_LABEL, EXTREME_LABEL, FIELD_LABEL, KIND_LABEL, MA_METHOD_LABEL, MA_ORDER_LABEL, NEW_HIGH_NAME, PERIOD_NAME, SIDE_LABEL, UNIT, VALUE_UNIT } from "../../lib/screener";
 import { addMaLine, removeMaLine, MAX_MA_LINES, MIN_MA_LINES, type CloseOrMa, type ConditionDraft, type ConditionErrors, type FieldKey, type KindChoice } from "./screenForm";
 
 export interface LineUi {
@@ -216,9 +216,11 @@ export function KindFields({ ui, line, onChange }: KindProps) {
       const fields = VALUE_FIELDS[ui.kind];
       return (
         <>
-          {fields && <Word><Choice label={choice("값")} value={line.field} options={fields} onChange={(field) => onChange({ ...line, field })} />{subjectMark(FIELD_LABEL[line.field])}</Word>}
+          {fields
+            ? <Word><Choice label={choice("값")} value={line.field} options={fields} onChange={(field) => onChange({ ...line, field })} />{subjectMark(FIELD_LABEL[line.field])}</Word>
+            : <span>{FIELD_LABEL[line.field]}{subjectMark(FIELD_LABEL[line.field])}</span>}
           <Word>{number("n", line.n, (n) => onChange({ ...line, n }))}{unit}</Word>
-          <span>{(line.kind === "new_high" ? NEW_HIGH_NAME : NEW_LOW_NAME)[line.field]}인</span>
+          <span>{line.kind === "new_high" ? "최고" : "최저"}인</span>
         </>
       );
     }

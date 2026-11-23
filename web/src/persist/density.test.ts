@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { applyDensity, DENSITY_STORAGE_KEY, parseDensity, readDensity, writeDensity } from "./density";
+import { appliedDensity, applyDensity, DENSITY_STORAGE_KEY, parseDensity, readDensity, subscribeDensity, writeDensity } from "./density";
 
 const memory = (initial: Record<string, string> = {}) => {
   const values = new Map(Object.entries(initial));
@@ -40,5 +40,17 @@ describe("목록 밀도 저장", () => {
     const root = { dataset: {} } as HTMLElement;
     applyDensity("regular", root);
     expect(root.dataset.density).toBe("regular");
+  });
+
+  test("적용한 밀도는 문서 뿌리 속성에서 읽고 구독자에게 바뀜을 알린다", () => {
+    const root = { dataset: {} } as HTMLElement;
+    expect(appliedDensity(root)).toBe("compact");
+    const seen: string[] = [];
+    const unsubscribe = subscribeDensity(() => seen.push(appliedDensity(root)));
+    applyDensity("regular", root);
+    expect(seen).toEqual(["regular"]);
+    unsubscribe();
+    applyDensity("compact", root);
+    expect(seen).toEqual(["regular"]);
   });
 });

@@ -36,7 +36,17 @@ function useWatchQuote(code: SymbolCode): WatchQuote {
   return useSyncExternalStore(subscribe, () => quoteBook.get(code));
 }
 
-const durationOf = (token: string) => Number.parseFloat(getComputedStyle(document.documentElement).getPropertyValue(token)) || 0;
+const MILLISECONDS_PER_SECOND = 1000;
+
+export function parseDurationMs(raw: string): number {
+  const text = raw.trim();
+  const amount = Number.parseFloat(text);
+  if (!Number.isFinite(amount)) return 0;
+  return text.endsWith("ms") ? amount : text.endsWith("s") ? amount * MILLISECONDS_PER_SECOND : 0;
+}
+
+let tickDurationMs: number | undefined;
+const tickDuration = () => (tickDurationMs ??= parseDurationMs(getComputedStyle(document.documentElement).getPropertyValue("--dur")));
 const reducedMotion = () => matchMedia("(prefers-reduced-motion: reduce)").matches;
 
 function useTickColor(price: number | undefined) {
@@ -46,7 +56,7 @@ function useTickColor(price: number | undefined) {
     const before = previous.current;
     previous.current = price;
     if (before === undefined || price === undefined || price === before || reducedMotion()) return;
-    element.current?.animate([{ color: price > before ? "var(--up)" : "var(--down)" }], { duration: durationOf("--dur"), easing: "ease-out" });
+    element.current?.animate([{ color: price > before ? "var(--up)" : "var(--down)" }, {}], { duration: tickDuration(), easing: "ease-out" });
   }, [price]);
   return element;
 }

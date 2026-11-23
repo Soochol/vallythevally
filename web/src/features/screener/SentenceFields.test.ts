@@ -33,7 +33,7 @@ test("주·월봉, 최근 기간, 억 원과 비교 메뉴를 문장에 유지�
   const markup = markupOf(draftOf(screen));
   expect(markup).toContain('data-value="W"');
   expect(markup).toContain("<span>이내에</span>");
-  expect(markup).toMatch(/>52<\/button>주<\/span><span>신고거래량인<\/span>/);
+  expect(markup).toMatch(/<span>거래량이<\/span>[^]*?>52<\/button>주<\/span><span>최고인<\/span>/);
   expect(markup).toContain("신고거래량");
   expect(markup).toMatch(/>3000<\/button>억 원<\/span>/);
   expect(markup).toContain('aria-label="조건 2 비교"');

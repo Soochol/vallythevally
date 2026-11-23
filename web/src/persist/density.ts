@@ -37,8 +37,32 @@ export function writeDensity(density: Density, storage: () => DensityStorage | n
   }
 }
 
+const densityListeners = new Set<() => void>();
+
+export function subscribeDensity(listener: () => void): () => void {
+  densityListeners.add(listener);
+  return () => void densityListeners.delete(listener);
+}
+
+export const appliedDensity = (root: HTMLElement = document.documentElement): Density => parseDensity(root.dataset.density);
+
 export function applyDensity(density: Density, root: HTMLElement = document.documentElement): void {
   root.dataset.density = density;
+  densityListeners.forEach((listener) => listener());
+}
+
+const densityFromStorageEvent = (event: StorageEvent): Density | null =>
+  event.key === null ? DEFAULT_DENSITY : event.key === DENSITY_STORAGE_KEY ? parseDensity(event.newValue) : null;
+
+let followingOtherTabs = false;
+
+function followDensityOfOtherTabs(): void {
+  if (followingOtherTabs || typeof window === "undefined") return;
+  followingOtherTabs = true;
+  window.addEventListener("storage", (event) => {
+    const density = densityFromStorageEvent(event);
+    if (density !== null) applyDensity(density);
+  });
 }
 
 export function chooseDensity(density: Density): void {
@@ -49,5 +73,6 @@ export function chooseDensity(density: Density): void {
 export function applyStoredDensity(): Density {
   const density = readDensity();
   applyDensity(density);
+  followDensityOfOtherTabs();
   return density;
 }
