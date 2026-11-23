@@ -4,6 +4,7 @@
 
 - (2026-11-23 개정) 공용 자료는 감독 데몬이 `rest` 역할 키로 만들어 파일로 넘기고 서버는 읽기만 한다. 키는 일 단위 배정표로 나눈다. [ADR 0043](0043-collector-makes-shared-data-and-the-server-only-reads-it.md).
 - (2026-11-23 개정) 임시 장치는 collector-shared-data로 걷었다. 공개 리스너는 공용 자료 폴더에서만 읽고 키움 transport를 부르지 않는다. 아래 "첫 단계 동안의 임시 사실"은 이 개정 전의 결정이다.
+- (2026-11-23 개정) 브라우저에 사용자 키를 보관하고 키움을 직접 부르는 길을 걷었다. 웹 공개판은 운영하지 않고, 사용자 키는 데스크톱 앱의 개인 엔진이 보관한다. 공용 서버는 로그인과 공용 자료만 맡는다. [ADR 0045](0045-desktop-app-runs-a-personal-engine-and-the-server-keeps-login-and-shared-data.md).
 
 ## 정한 것
 

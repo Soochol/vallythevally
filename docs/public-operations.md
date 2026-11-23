@@ -97,7 +97,7 @@ VALLY_COLLECTOR_ADMINS=<provider:subject>
 
 ## 공개 입구 두 안 (플랜 D28, 사용자 결정 2)
 
-공개 리스너는 루프백 포트만 연다. 인터넷 쪽 입구는 Funnel이 만든다. 어느 안이든 코드는 `VALLY_PUBLIC_ORIGIN`만 본다. **출처가 바뀌면 브라우저 IndexedDB 키 보관소가 비므로, 공개하기 전에 정한다.**
+공개 리스너는 루프백 포트만 연다. 인터넷 쪽 입구는 Funnel이 만든다. 어느 안이든 코드는 `VALLY_PUBLIC_ORIGIN`만 본다. 웹 공개판은 운영하지 않아([ADR 0045](adr/0045-desktop-app-runs-a-personal-engine-and-the-server-keeps-login-and-shared-data.md)) 브라우저에 사용자 키 보관소가 없다. 시험으로 브라우저에 키를 넣어 둔 적이 있으면 그 출처의 브라우저 자료(IndexedDB `vally-key-vault`)를 지워 없앤다.
 
 ### (가) 별도 노드의 443 (권장)
 
@@ -154,7 +154,7 @@ P4 확인 목록:
 - Funnel 너머의 첫 로딩, 보드, 스크리너 결과 전송 시간을 잰다.
 - `GET /api/public-usage`(운영자 리스너)의 계수가 쌓이는지 본다.
 
-P5 되돌리기: Funnel을 끄고, 공개 설정(`VALLY_PUBLIC_*`)을 지우고, 재시작한다. 지금과 같아야 한다. 호스트 이름이나 출처를 바꾸면 브라우저 키 보관소가 비므로 사용자가 키움 키를 다시 넣어야 한다. 바꾸기 전에 사용자에게 알린다.
+P5 되돌리기: Funnel을 끄고, 공개 설정(`VALLY_PUBLIC_*`)을 지우고, 재시작한다. 지금과 같아야 한다.
 
 ## 계수 읽는 법
 
