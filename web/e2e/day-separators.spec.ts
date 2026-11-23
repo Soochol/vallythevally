@@ -6,6 +6,7 @@ import { installChartProbe } from "./chart-probe";
 import { type Scenario, cell, DEFAULT_LAYOUT_ID, expect, test, firstChart, withFirstChart, pollSaved } from "./harness";
 
 import { chooseSettingsMenu, openChartSettings } from "./chart-settings-menu";
+import { useCenterIndicatorWindow } from "./indicator-window";
 const KST = 32_400;
 const BARS_PER_DAY = 40;
 const DAYS = ["2026-11-04", "2026-11-05", "2026-11-06"];
@@ -148,6 +149,7 @@ test("새로고침 뒤에도 날짜 구분선 스위치가 켜져 있고 구분�
 });
 
 test("지표 패널을 더하면 새 패널에도 날짜 구분선을 긋는다", async ({ page, scenario }) => {
+  useCenterIndicatorWindow(scenario);
   openMinute(scenario, { showDaySeparators: true });
   await open(page);
   await page.getByRole("button", { name: "지표", exact: true }).click();

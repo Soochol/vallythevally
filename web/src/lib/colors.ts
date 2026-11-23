@@ -33,6 +33,8 @@ export const COLOR_TABLE: readonly ColorTableRow[] = [
 
 export const PRESET_COLORS: readonly HexColor[] = COLOR_TABLE.flatMap((row) => row.swatches.map((swatch) => swatch.color));
 
+export const FALLBACK_PICKED_COLOR = "#C7F36B" as HexColor;
+
 export const sameColor = (a: string, b: string): boolean => a.toUpperCase() === b.toUpperCase();
 
 export function colorName(color: HexColor): string {

@@ -12,6 +12,7 @@ import { IndicatorSettingsForm } from "../indicator-dialog/IndicatorSettingsForm
 import { useLiveIndicatorDraft } from "../indicator-dialog/liveDraft";
 import { CompareSection } from "../indicator-command/CompareSection";
 import { COMMAND_TABS, commandKey, currentKey, type CommandRow, type IndicatorCommandMode } from "../indicator-command/model";
+import { removeIndicatorWithUndo } from "./removalUndo";
 import { useIndicatorCommand, useIndicatorDraft, type EditableRow, type EditorAction } from "../indicator-command/useIndicatorCommand";
 import type { WindowId } from "../../layout/kinds";
 
@@ -137,7 +138,7 @@ function InspectorBody({ cellId }: { cellId: WindowId }) {
         {mode === "compare" && !symbols.selectable && search.isFetching && <li role="presentation"><Skeleton label="비교 종목 찾는 중" /></li>}
         {mode === "compare" && search.isError && <li role="presentation"><ErrorState message="종목을 찾지 못했습니다. 다시 시도해 보세요." retry={() => void search.refetch()} /></li>}
       </ul>
-      {mode === "compare" && <CompareSection cellId={cellId} button={compareButton} canAdd={picked !== null} onAdd={submit} className="mt-2 flex flex-col gap-3 border-t border-line px-2 pt-3" />}
+      {mode === "compare" && <CompareSection cellId={cellId} button={compareButton} add={{ enabled: picked !== null, run: submit }} className="mt-2 flex flex-col gap-3 border-t border-line px-2 pt-3" />}
     </div>
     <p className="sr-only" aria-live="polite">{open ? `${rowName(open)} ${open.kind === "symbol" ? "선택" : "펼침"}` : ""}</p>
     <footer className="flex-none border-t border-line px-4 py-2.5 text-xs text-text-3">바로 반영 · Esc로 되돌리고 닫기</footer>
@@ -161,7 +162,7 @@ function IndicatorRow({ cellId, row, open, onToggle, children }: { cellId: Windo
       </button>
       {row.kind === "current" && <>
         <button type="button" className="icon-btn size-6" aria-label={`${name} ${row.config.visible ? "숨기기" : "보이기"}`} onClick={() => useLayoutStore.getState().updateIndicator(cellId, row.config.id, { visible: !row.config.visible })}><EyeIcon size={14} off={!row.config.visible} /></button>
-        <button type="button" className="icon-btn size-6" aria-label={`${name} 지우기`} onClick={() => useLayoutStore.getState().removeIndicator(cellId, row.config.id)}><CloseIcon size={14} /></button>
+        <button type="button" className="icon-btn size-6" aria-label={`${name} 지우기`} onClick={() => removeIndicatorWithUndo(cellId, row.config)}><CloseIcon size={14} /></button>
       </>}
     </div>
     {children}

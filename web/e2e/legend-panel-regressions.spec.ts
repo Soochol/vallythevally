@@ -2,11 +2,13 @@ import type { Page } from "@playwright/test";
 import type { Layout } from "../src/api/generated/Layout";
 import { installChartProbe } from "./chart-probe";
 import { type Scenario, cell, DEFAULT_LAYOUT_ID, expect, test, firstChart, withFirstChart, pollSaved } from "./harness";
+import { useCenterIndicatorWindow } from "./indicator-window";
 
 const row = (page: Page, id: string) => cell(page).locator(`[data-indicator-row="${id}"]`);
 const layout = async (scenario: Scenario): Promise<Layout> => scenario.documents.layout(DEFAULT_LAYOUT_ID);
 
 async function open(page: Page, scenario: Scenario, height = 900, stretches = Array.from({ length: 6 }, () => 0.25)) {
+  useCenterIndicatorWindow(scenario);
   const saved = await layout(scenario);
   const chartSettings = { v: 2, style: "candle", scale: "normal", compare: [], indicators: [
     ...[5, 20].map((period, i) => ({ id: `ma${i}`, spec: { kind: "ma", method: "sma", period }, panel: "price", visible: true, style: { colors: ["ind-1"], width: 1 } })),

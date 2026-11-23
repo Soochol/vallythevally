@@ -1,5 +1,6 @@
 import type { Locator, Page } from "@playwright/test";
 import { cell, expect, SEARCH_BUTTON_TITLE, test } from "./harness";
+import { useCenterIndicatorWindow } from "./indicator-window";
 
 test.use({ clockStart: "20261109100000", viewport: { width: 1440, height: 900 } });
 
@@ -101,7 +102,8 @@ test("찾기 창의 결과 없음은 가운데 정렬 상태 판이고 버튼에
   expect(Math.abs(buttonBox.x + buttonBox.width / 2 - (stateBox.x + stateBox.width / 2))).toBeLessThanOrEqual(1);
 });
 
-test("비활성 주요 버튼은 활성과 다른 면을 칠하고 불투명도로 흐리게 하지 않는다", async ({ page }) => {
+test("비활성 주요 버튼은 활성과 다른 면을 칠하고 불투명도로 흐리게 하지 않는다", async ({ page, scenario }) => {
+  useCenterIndicatorWindow(scenario);
   await open(page);
   await topbar(page).getByRole("button", { name: "비교", exact: true }).click();
   const dialog = page.getByRole("dialog", { name: "지표·비교 입력창", exact: true });

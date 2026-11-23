@@ -28,7 +28,7 @@ export interface UiPrefs {
   drawing: DrawingPrefs;
   lastMinute: MinutePeriod;
   collapsedWatchGroups: readonly string[];
-  indicatorWindow: IndicatorWindow;
+  indicatorWindow: IndicatorWindow | null;
   layoutMode: LayoutMode;
   venue: Venue;
   orderSettings: OrderSettings;
@@ -48,7 +48,7 @@ export const DEFAULT_UI_PREFS: UiPrefs = {
   drawing: DEFAULT_DRAWING_PREFS,
   lastMinute: "3m",
   collapsedWatchGroups: [],
-  indicatorWindow: "dialog",
+  indicatorWindow: null,
   layoutMode: "dock",
   venue: "combined",
   orderSettings: DEFAULT_ORDER_SETTINGS,
@@ -74,7 +74,7 @@ export function parseUiState(raw: unknown): { prefs: UiPrefs; extra: UiExtra } {
     return fallback;
   };
   pick("theme", theme, (x): x is Theme => x === "dark" || x === "light", DEFAULT_UI_PREFS.theme);
-  const windowMode = pick("indicatorWindow", indicatorWindow, (x): x is IndicatorWindow => x === "dialog" || x === "inspector", "dialog", true);
+  const windowMode = pick("indicatorWindow", indicatorWindow, (x): x is IndicatorWindow | null => x === null || x === "dialog" || x === "inspector", null, true);
   const parsedHotkeys = parseHotkeys(hotkeys);
   if (!parsedHotkeys.clean) bad.push("hotkeys");
   const prefs: UiPrefs = {

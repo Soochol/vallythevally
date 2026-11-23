@@ -2,10 +2,12 @@ import { financialPage, financialUpdatePage } from "./financial-update-helpers";
 import { mkdir } from "node:fs/promises";
 import path from "node:path";
 import { cell, DEFAULT_LAYOUT_ID, expect, test, windowTabs, withFirstChart } from "./harness";
+import { useCenterIndicatorWindow } from "./indicator-window";
 
 const tabs = windowTabs;
 
-test("한 줄 셸과 탭은 작은 창에서도 넘치지 않고 휴대폰 경로를 유지한다", async ({ page }) => {
+test("한 줄 셸과 탭은 작은 창에서도 넘치지 않고 휴대폰 경로를 유지한다", async ({ page, scenario }) => {
+  useCenterIndicatorWindow(scenario);
   await page.goto("/?symbol=005930");
   await expect(cell(page)).toHaveAttribute("aria-busy", "false");
   await page.getByRole("button", { name: "비교", exact: true }).click();

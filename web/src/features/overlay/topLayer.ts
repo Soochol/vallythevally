@@ -53,6 +53,7 @@ export interface LayerOptions {
   dismiss?: boolean;
   follow?: boolean;
   fitBelow?: number;
+  minTop?(): number;
   backdrop?: boolean;
   blockChartKeys?: boolean;
   onClose(reason: "escape" | "outside"): void;
@@ -80,8 +81,10 @@ export function mountLayer(panel: HTMLElement, options: LayerOptions) {
       else panel.style.removeProperty("max-height");
     }
     const position = placeOverlay(anchor, panel.getBoundingClientRect(), { width: innerWidth, height: innerHeight }, options.placement);
+    const top = Math.max(position.top, options.minTop?.() ?? 0);
+    if (top > position.top) panel.style.maxHeight = `${Math.max(0, innerHeight - top - FIT_MARGIN)}px`;
     panel.style.left = `${position.left}px`;
-    panel.style.top = `${position.top}px`;
+    panel.style.top = `${top}px`;
     panel.dataset.side = position.side;
   };
   place();

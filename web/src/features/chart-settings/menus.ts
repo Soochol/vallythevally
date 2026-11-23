@@ -1,26 +1,13 @@
-export const CHART_SETTINGS_MENUS = [
+export type ChartSettingsScope = "cell" | "all";
+
+export const CHART_SETTINGS_SECTIONS = [
   { id: "bars", label: "봉·축", scope: "cell" },
   { id: "display", label: "표시", scope: "cell" },
   { id: "windows", label: "지표 창", scope: "all" },
-] as const;
+] as const satisfies readonly { id: string; label: string; scope: ChartSettingsScope }[];
 
-export type ChartSettingsMenuId = (typeof CHART_SETTINGS_MENUS)[number]["id"];
+export type ChartSettingsSectionId = (typeof CHART_SETTINGS_SECTIONS)[number]["id"];
 
-export const FIRST_CHART_SETTINGS_MENU: ChartSettingsMenuId = "bars";
+export const SCOPE_LABEL: Record<ChartSettingsScope, string> = { cell: "이 칸", all: "모든 차트" };
 
-export function menuAfterKey(current: ChartSettingsMenuId, key: string): ChartSettingsMenuId | null {
-  const ids = CHART_SETTINGS_MENUS.map((m) => m.id);
-  const at = ids.indexOf(current);
-  switch (key) {
-    case "ArrowDown":
-      return ids[Math.min(ids.length - 1, at + 1)]!;
-    case "ArrowUp":
-      return ids[Math.max(0, at - 1)]!;
-    case "Home":
-      return ids[0]!;
-    case "End":
-      return ids.at(-1)!;
-    default:
-      return null;
-  }
-}
+export const scopeTitle = (scope: ChartSettingsScope, cellName: string): string => (scope === "all" ? "모든 차트에 적용" : `${cellName}에 적용`);

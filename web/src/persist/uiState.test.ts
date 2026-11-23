@@ -100,14 +100,15 @@ test("접은 관심종목 그룹은 없으면 빈 목록, 틀리면 기본값이
   expect(parseUiState(toUiState(prefs, extra))).toEqual({ prefs, extra });
 });
 
-test("지표 창 방식은 왕복하고, 없으면 경고 없이 가운데 창, 틀리면 가운데 창으로 연다", () => {
+test("지표 창 방식은 왕복하고, 없으면 경고 없이 고른 값 없음, 틀리면 고른 값 없음으로 연다", () => {
   const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
   const { prefs, extra } = parseUiState({ ...DEFAULT_UI_PREFS, indicatorWindow: "inspector" });
   expect(parseUiState(toUiState(prefs, extra)).prefs.indicatorWindow).toBe("inspector");
   const { indicatorWindow: _mode, ...older } = DEFAULT_UI_PREFS;
-  expect(parseUiState(older).prefs.indicatorWindow).toBe("dialog");
+  expect(parseUiState(older).prefs.indicatorWindow).toBeNull();
+  expect(parseUiState(toUiState(parseUiState(older).prefs, {})).prefs.indicatorWindow).toBeNull();
   expect(warn).not.toHaveBeenCalled();
-  expect(parseUiState({ ...DEFAULT_UI_PREFS, indicatorWindow: "side" }).prefs.indicatorWindow).toBe("dialog");
+  expect(parseUiState({ ...DEFAULT_UI_PREFS, indicatorWindow: "side" }).prefs.indicatorWindow).toBeNull();
   expect(warn).toHaveBeenCalledOnce();
 });
 

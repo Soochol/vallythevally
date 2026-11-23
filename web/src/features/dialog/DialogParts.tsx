@@ -34,15 +34,16 @@ interface FrameProps {
   variant?: "command" | "drawer";
   size?: "default" | "compact";
   solid?: boolean;
+  placement?: "center" | "top-end";
   children: ReactNode;
 }
 
 const OPEN_FRAME = ".ui-dialog-backdrop:not([data-command-frame])";
 
-export function DialogFrame({ labelledBy, width, onClose, panelRef, children, variant, size = "default", solid }: FrameProps) {
+export function DialogFrame({ labelledBy, width, onClose, panelRef, children, variant, size = "default", solid, placement = "center" }: FrameProps) {
   const [nested] = useState(() => typeof document !== "undefined" && document.querySelector(OPEN_FRAME) !== null);
   return (
-    <Popover backdrop data-command-frame={variant === "command" ? "" : undefined} data-drawer={variant === "drawer" ? "" : undefined} data-nested={nested ? "" : undefined} onClose={onClose}
+    <Popover backdrop data-command-frame={variant === "command" ? "" : undefined} data-drawer={variant === "drawer" ? "" : undefined} data-nested={nested ? "" : undefined} data-placement={placement === "center" ? undefined : placement} onClose={onClose}
       className="ui-dialog-backdrop fixed inset-0 z-50 flex justify-center bg-[var(--scrim)]"
     >
       <div

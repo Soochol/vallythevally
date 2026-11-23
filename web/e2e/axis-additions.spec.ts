@@ -3,6 +3,7 @@ import type { Page } from "@playwright/test";
 import { installAxisProbe } from "./axis-probe";
 import { installChartProbe } from "./chart-probe";
 import { type Scenario, cell, chartOf, expect, test, pollSaved } from "./harness";
+import { useCenterIndicatorWindow } from "./indicator-window";
 
 declare global { interface Window { axisPaints: number } }
 
@@ -19,6 +20,7 @@ type BarShape = (daysAgo: number) => { price: number; volume: number };
 const DEFAULT_SHAPE: BarShape = (daysAgo) => ({ price: 190500 - daysAgo * 100, volume: 1000000 });
 
 async function open(page: Page, scenario: Scenario, period = "D", shape: BarShape = DEFAULT_SHAPE) {
+  useCenterIndicatorWindow(scenario);
   const errors: string[] = [];
   page.on("pageerror", (error) => errors.push(error.message));
   page.on("console", (message) => { if (message.type() === "error") errors.push(message.text()); });

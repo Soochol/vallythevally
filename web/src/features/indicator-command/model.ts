@@ -13,6 +13,14 @@ export const COMMAND_TABS = [
   { mode: "compare", label: "비교 종목" },
 ] as const satisfies readonly { mode: IndicatorCommandMode; label: string }[];
 
+export type CommandHint = { keys: string; action: string };
+
+export function commandHints(mode: IndicatorCommandMode): readonly CommandHint[] {
+  const apply = mode === "current" ? "적용" : "추가";
+  if (mode === "compare") return [{ keys: "↑↓", action: "고르기" }, { keys: "Enter", action: `${apply}하고 계속` }, { keys: "Shift+Enter", action: `${apply}하고 닫기` }, { keys: "Esc", action: "닫기" }];
+  return [{ keys: "↑↓", action: "고르기" }, { keys: "Tab", action: "설정" }, { keys: "Enter", action: `${apply}하고 계속` }, { keys: "Shift+Enter", action: `${apply}하고 닫기` }, { keys: "Esc", action: "되돌리고 닫기" }];
+}
+
 export const PRICE_GROUP = "가격 패널";
 export const BELOW_GROUP = "아래 패널";
 export const FINANCIAL_GROUP = "재무지표";

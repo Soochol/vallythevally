@@ -1,6 +1,5 @@
 import { useRef, useState } from "react";
 import { ChartSettingsDialog } from "../chart-settings/ChartSettingsDialog";
-import { type ChartSettingsMenuId, FIRST_CHART_SETTINGS_MENU } from "../chart-settings/menus";
 import { FinancialUpdateButton } from "../financial-update/FinancialUpdateButton";
 import { BrandLink } from "../page-rail/BrandLink";
 import { MinuteMenu } from "./MinuteMenu";
@@ -10,8 +9,8 @@ import { useSymbolInfo } from "../../api/queries";
 import { PERIOD_LABEL, PERIODS, symbolSub } from "../../lib/symbol";
 import { useCell, useLayoutStore } from "../../stores/layout";
 import { useSelectionStore } from "../../stores/selection";
-import { useActionKeys, useUiStore } from "../../stores/ui";
-import { openIndicatorCommand } from "../indicator-command/open";
+import { useActionKeys } from "../../stores/ui";
+import { openIndicatorCommand, useShownIndicatorWindow } from "../indicator-command/open";
 import { IndicatorIcon, SearchIcon, SlidersIcon, CompareIcon } from "../icons";
 import { LayoutMenu } from "../layouts/LayoutMenu";
 import { VenuePicker } from "../venue/VenuePicker";
@@ -22,14 +21,13 @@ export function Topbar() {
   const cellId = useSelectionStore((s) => s.activeCell);
   const openSearch = useSelectionStore((s) => s.openSearch);
   const cell = useCell(cellId);
-  const opensDialog = useUiStore((s) => s.prefs.indicatorWindow) === "dialog";
+  const opensDialog = useShownIndicatorWindow() === "dialog";
   const info = useSymbolInfo(cell.symbol).data;
   const name = info?.name ?? cell.symbol;
   const { setPeriod } = useLayoutStore.getState();
   const keys = useActionKeys();
   const settingsButton = useRef<HTMLButtonElement>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [settingsMenu, setSettingsMenu] = useState<ChartSettingsMenuId>(FIRST_CHART_SETTINGS_MENU);
 
   return (
     <header role="toolbar" aria-label="차트 도구 막대" className="desktop-topbar ui-island relative z-20 mx-[var(--island-gap)] mt-[var(--island-gap)] h-[var(--island-h)] flex-none rounded-l max-md:hidden">
@@ -49,7 +47,7 @@ export function Topbar() {
       <button type="button" className="tb-btn" aria-label="비교" aria-haspopup={opensDialog ? "dialog" : undefined} title="비교 종목" onClick={() => openIndicatorCommand(cellId, "compare")}><CompareIcon /><span className="max-lg:hidden">비교</span></button>
       <span className="tb-sep" />
       <button ref={settingsButton} type="button" className="tb-btn aria-expanded:bg-accent-soft aria-expanded:font-semibold aria-expanded:text-accent" aria-label="차트 설정" aria-haspopup="dialog" aria-expanded={settingsOpen} onClick={() => setSettingsOpen((open) => !open)}><SlidersIcon /><span className="max-xl:hidden">차트 설정</span></button>
-      {settingsOpen && <ChartSettingsDialog cellId={cellId} menu={settingsMenu} onMenu={setSettingsMenu} onClose={() => setSettingsOpen(false)} />}
+      {settingsOpen && <ChartSettingsDialog cellId={cellId} anchor={settingsButton} onClose={() => setSettingsOpen(false)} />}
       <div className="topbar-search-slot">
         <button type="button" className="shell-search" aria-haspopup="dialog" aria-label="종목·지표·명령 찾기" title={searchTitle(keys)} onClick={() => openSearch()}>
           <SearchIcon size={14} />

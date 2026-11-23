@@ -6,6 +6,7 @@ import { parseChartSettings } from "../src/chart/settings";
 import { installChartProbe } from "./chart-probe";
 import { installFrameProbe } from "./frame-probe";
 import { type Scenario, cell, DEFAULT_LAYOUT_ID, expect, test, firstChart, withFirstChart, pollSaved } from "./harness";
+import { useCenterIndicatorWindow } from "./indicator-window";
 
 async function settings(scenario: Scenario) {
   const layout: Layout = scenario.documents.layout(DEFAULT_LAYOUT_ID);
@@ -13,6 +14,7 @@ async function settings(scenario: Scenario) {
 }
 
 async function seed(scenario: Scenario) {
+  useCenterIndicatorWindow(scenario);
   const layout: Layout = scenario.documents.layout(DEFAULT_LAYOUT_ID);
   const chartSettings = { v: 2, style: "candle", scale: "normal", compare: [], indicators: [
     { id: "ma", spec: { kind: "ma", method: "sma", period: 5 }, panel: "price", visible: true, style: { colors: ["#C7F36B"], width: 1 } },
@@ -51,6 +53,7 @@ test("범례 설정은 기간·색·굵기를 즉시 그리고 Esc로 처음 값
   const original = await maLine(page);
   await row(page, "ma").getByRole("button", { name: /설정 열기/ }).click();
   const popup = page.getByRole("dialog", { name: /이동평균.*설정/ });
+  await popup.getByRole("button", { name: "색 더 보기", exact: true }).click();
   await popup.getByRole("textbox", { name: "기간", exact: true }).fill("10");
   await expect(row(page, "ma")).toContainText("10");
   await expect.poll(() => maLine(page).then((line) => line?.data)).not.toEqual(original?.data);
@@ -105,11 +108,12 @@ for (const key of ["T", "H"]) {
     await cell(page).focus(); await page.keyboard.press(key);
     await row(page, "ma").getByRole("button", { name: /설정 열기/ }).click();
     const popup = page.getByRole("dialog", { name: /이동평균.*설정/ });
+  await popup.getByRole("button", { name: "색 더 보기", exact: true }).click();
     await popup.getByRole("textbox", { name: "기간", exact: true }).fill("7");
     await popup.getByRole("button", { name: "직접 고르기" }).click();
-    await expect(page.getByRole("dialog", { name: "선 색상", exact: true })).toBeVisible();
+    await expect(page.getByRole("dialog", { name: "선 색", exact: true })).toBeVisible();
     await page.keyboard.press("Escape");
-    await expect(page.getByRole("dialog", { name: "선 색상", exact: true })).toHaveCount(0);
+    await expect(page.getByRole("dialog", { name: "선 색", exact: true })).toHaveCount(0);
     await expect(popup).toBeVisible();
     await popup.getByRole("group", { name: "굵기", exact: true }).getByRole("button", { name: "3", exact: true }).click();
     await popup.getByRole("button", { name: "설정 닫기" }).click();
