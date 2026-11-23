@@ -1,9 +1,9 @@
 import { Popover } from "../overlay/Popover";
 import { Menu } from "../menu/Menu";
 import { Icon, DRAWING_ICONS, CloseIcon, StarIcon } from "../icons";
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { type PointerEvent, type ReactNode, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { surfaceFor } from "../../chart/drawings/DrawingSurface";
-import { gestureHelp } from "../../chart/drawings/gestures";
+import { gestureSections } from "../../chart/drawings/gestures";
 import { toolsByGroup } from "../../chart/drawings/tools";
 import type { Tool } from "../../chart/drawings/toolSpec";
 import { MODES, registeredModes } from "../../chart/drawings/modes";
@@ -69,9 +69,9 @@ export function DrawingToolbar() {
     window.addEventListener("keydown", key); return () => window.removeEventListener("keydown", key);
   }, [shown]);
   if (!shown) return null;
-  const helpDialog = help && <Popover anchor={helpAnchor} follow placement="right" onClose={() => setHelp(false)} className="drawing-help" role="dialog" aria-label="드로잉 단축키"><div className="draw-dialog-head"><strong>드로잉 단축키</strong><button className="icon-btn" aria-label="도움말 닫기" onClick={() => setHelp(false)}><CloseIcon /></button></div>{gestureHelp(registeredModes()).map((h) => <p key={h.keys}><kbd>{h.keys}</kbd><span>{h.label}</span></p>)}</Popover>;
+  const helpDialog = help && <DrawingHelp anchor={helpAnchor} close={() => setHelp(false)} />;
   if (hidden) return <nav data-chart-control aria-label="드로잉 도구" className="drawing-toolbar drawing-toolbar-hidden max-md:hidden">
-    <button ref={helpAnchor} type="button" className="draw-rail-handle" aria-label="드로잉 도구 막대 보이기" title="드로잉 도구 막대 보이기" onClick={() => { setToolbarHidden(false); surfaceFor(cellId)?.focus(); }}><span aria-hidden="true">›</span></button>
+    <button ref={helpAnchor} type="button" className="draw-rail-handle" aria-label="드로잉 도구 막대 보이기" title="드로잉 도구 막대 보이기" onClick={() => { setToolbarHidden(false); surfaceFor(cellId)?.focus(); }}><span aria-hidden="true">»</span></button>
     {helpDialog}
   </nav>;
   return <DrawingRail help={help} setHelp={setHelp} helpAnchor={helpAnchor} helpDialog={helpDialog} />;
@@ -91,20 +91,21 @@ function DrawingRail({ help, setHelp, helpAnchor, helpDialog }: RailHelp) {
   const setTool = (tool: Tool) => { useDrawingSession.getState().setTool(cellId, tool.tool); surfaceFor(cellId)?.focus(); };
   const setPrefs = useUiStore.getState().setDrawingPrefs;
   const action = (f: () => void) => { f(); surfaceFor(cellId)?.focus(); };
-  const pinnedButton = (tool: Tool) => <button key={tool.tool} className="draw-tool" data-active-tool aria-label={`${tool.label} 고정 도구`} title={toolTitle(tool, keys, "고정")} aria-pressed={active === tool.tool} onClick={() => setTool(tool)} onDoubleClick={() => action(() => useDrawingSession.getState().setTool(cellId, tool.tool, true))}><Icon path={tool.icon} /></button>;
+  const pinnedButton = (tool: Tool, press?: GroupPress) => <button key={tool.tool} className="draw-tool" data-active-tool aria-label={`${tool.label} 고정 도구`} title={toolTitle(tool, keys, "고정")} aria-pressed={active === tool.tool} onClick={() => setTool(tool)} onDoubleClick={() => action(() => useDrawingSession.getState().setTool(cellId, tool.tool, true))} {...press}><Icon path={tool.icon} /></button>;
   const folded = pinnedTools.slice(shownPins);
   return <nav data-chart-control aria-label="드로잉 도구" className="drawing-toolbar ui-island max-md:hidden">
     <button className="draw-tool" data-active-tool aria-label="선택 도구" title={keyTitle("선택", keys, "select")} aria-pressed={active === null && mode === null} onClick={() => action(() => useDrawingSession.getState().setTool(cellId, null))}><Icon path={DRAWING_ICONS.pointer} /></button>
     {[...toolsByGroup()].map(([group, tools]) => {
       const t = tools.find((tool) => tool.tool === active) ?? lastTools[group] ?? tools[0]!;
-      return <div className="draw-group" key={group}>
-      <button className="draw-tool" data-active-tool title={toolTitle(t, keys, pinned === t.tool ? "연속" : undefined)} aria-label={t.label} aria-pressed={active === t.tool} onClick={() => setTool(t)} onDoubleClick={() => action(() => useDrawingSession.getState().setTool(cellId, t.tool, true))}><Icon path={t.icon} /></button>
-      {tools.length > 1 && <ToolGroup label={`${GROUP_LABEL[group]} 도구`} tools={tools} keys={keys} onChoose={setTool} />}
-    </div>; })}
+      const groupButton = (press?: GroupPress) => <button className="draw-tool" data-active-tool title={toolTitle(t, keys, pinned === t.tool ? "연속" : undefined)} aria-label={t.label} aria-pressed={active === t.tool} onClick={() => setTool(t)} onDoubleClick={() => action(() => useDrawingSession.getState().setTool(cellId, t.tool, true))} {...press}><Icon path={t.icon} /></button>;
+      return tools.length > 1
+        ? <ToolGroup key={group} label={`${GROUP_LABEL[group]} 도구`} tools={tools} keys={keys} onChoose={setTool}>{groupButton}</ToolGroup>
+        : <div className="draw-group" key={group}>{groupButton()}</div>;
+    })}
     <div ref={pinnedRun} className="draw-pinned">
-      {pinnedTools.length > 0 && pinnedTools.slice(0, shownPins - 1).map(pinnedButton)}
+      {pinnedTools.length > 0 && pinnedTools.slice(0, shownPins - 1).map((tool) => pinnedButton(tool))}
       {pinnedTools.length > 0 && (folded.length > 0
-        ? <div className="draw-group">{pinnedButton(pinnedTools[shownPins - 1]!)}<ToolGroup label="고정 도구" tools={folded} keys={keys} onChoose={setTool} pinnable={false} /></div>
+        ? <ToolGroup label="고정 도구" tools={folded} keys={keys} onChoose={setTool} pinnable={false}>{(press) => pinnedButton(pinnedTools[shownPins - 1]!, press)}</ToolGroup>
         : pinnedButton(pinnedTools[shownPins - 1]!))}
     </div>
     <div className="draw-separator" />
@@ -113,23 +114,50 @@ function DrawingRail({ help, setHelp, helpAnchor, helpDialog }: RailHelp) {
     <button className="draw-tool" aria-label="연속 그리기" title="연속 그리기" aria-pressed={prefs.keepDrawing} onClick={() => action(() => setPrefs({ keepDrawing: !prefs.keepDrawing }))}><Icon path={DRAWING_ICONS.keepDrawing} /></button>
     <div className="draw-toolbar-end">
       <button ref={helpAnchor} className="draw-tool" aria-label="드로잉 단축키 도움말" title="드로잉 단축키" onClick={() => setHelp(!help)}>?</button>
-      <button className="draw-tool" aria-label="드로잉 도구 막대 숨기기" title="드로잉 도구 막대 숨기기" onClick={() => action(() => setToolbarHidden(true))}><CloseIcon /></button>
+      <button className="draw-tool" aria-label="드로잉 도구 막대 숨기기" title="드로잉 도구 막대 숨기기" onClick={() => action(() => setToolbarHidden(true))}><span aria-hidden="true">«</span></button>
     </div>
     {helpDialog}
   </nav>;
 }
 
-function ToolGroup({ label, tools, keys, onChoose, pinnable = true }: { label: string; tools: readonly Tool[]; keys: ActionKeys; onChoose(tool: Tool): void; pinnable?: boolean }) {
+const LONG_PRESS_MS = 300;
+
+interface GroupPress {
+  "aria-haspopup": "menu";
+  "aria-expanded": boolean;
+  onContextMenu(e: React.MouseEvent): void;
+  onPointerDown(e: PointerEvent): void;
+  onPointerUp(): void;
+  onPointerCancel(): void;
+  onPointerLeave(): void;
+  onKeyDown(e: React.KeyboardEvent): void;
+  onClickCapture(e: React.MouseEvent): void;
+}
+
+function ToolGroup({ label, tools, keys, onChoose, pinnable = true, children }: { label: string; tools: readonly Tool[]; keys: ActionKeys; onChoose(tool: Tool): void; pinnable?: boolean; children(press: GroupPress): ReactNode }) {
   const [open, setOpen] = useState(false);
+  const wrapper = useRef<HTMLDivElement>(null);
   const trigger = useRef<HTMLButtonElement>(null);
   const pinned = useUiStore((s) => s.prefs.drawing.pinnedTools);
   const typed = useRef({ text: "", at: 0 });
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const held = useRef(false);
+  const clear = () => { if (timer.current) clearTimeout(timer.current); timer.current = null; };
+  useEffect(() => clear, []);
   const besideRail = () => {
-    const own = trigger.current?.getBoundingClientRect();
-    const rail = trigger.current?.closest("nav")?.getBoundingClientRect();
+    const own = wrapper.current?.getBoundingClientRect();
+    const rail = wrapper.current?.closest("nav")?.getBoundingClientRect();
     return own && rail ? { left: rail.left, right: rail.right, top: own.top, bottom: own.bottom } : own;
   };
-  return <div className="draw-group-toggle"><button ref={trigger} type="button" aria-label={`${label} 펼치기`} title={label} aria-haspopup="menu" aria-expanded={open} className="draw-group-dot" onClick={() => setOpen(!open)}><svg viewBox="0 0 8 8" width="8" height="8" aria-hidden="true"><circle cx="4" cy="4" r="2" fill="currentColor" /></svg></button>
+  const press: GroupPress = {
+    "aria-haspopup": "menu", "aria-expanded": open,
+    onContextMenu: (e) => { e.preventDefault(); clear(); held.current = false; setOpen(true); },
+    onPointerDown: (e) => { if (e.button !== 0) return; held.current = false; clear(); timer.current = setTimeout(() => { held.current = true; setOpen(true); }, LONG_PRESS_MS); },
+    onPointerUp: clear, onPointerCancel: clear, onPointerLeave: clear,
+    onKeyDown: (e) => { if (e.key === "ArrowRight" && !e.nativeEvent.isComposing) { e.preventDefault(); setOpen(true); } },
+    onClickCapture: (e) => { if (held.current) { held.current = false; e.preventDefault(); e.stopPropagation(); } },
+  };
+  return <div className="draw-group" ref={wrapper}>{children(press)}<div className="draw-group-toggle"><button ref={trigger} type="button" aria-label={`${label} 펼치기`} title={label} aria-haspopup="menu" aria-expanded={open} className="draw-group-dot" onClick={() => setOpen(!open)}><svg viewBox="0 0 8 8" width="8" height="8" aria-hidden="true"><circle cx="4" cy="4" r="2" fill="currentColor" /></svg></button>
     {open && <Popover data-chart-control anchor={trigger} anchorRect={besideRail} follow placement="right" role="menu" aria-label={label} className="draw-tool-menu" onClose={() => setOpen(false)} onKeyDown={(e) => {
       e.stopPropagation();
       if (e.nativeEvent.isComposing) return;
@@ -147,7 +175,17 @@ function ToolGroup({ label, tools, keys, onChoose, pinnable = true }: { label: s
         {pinnable && <button type="button" role="menuitemcheckbox" aria-label={`${tool.label} 막대에 고정`} aria-checked={pinned.includes(tool.tool)} title="막대에 고정" onClick={() => useUiStore.getState().setDrawingPrefs({ pinnedTools: pinned.includes(tool.tool) ? pinned.filter((id) => id !== tool.tool) : [...pinned, tool.tool] })}><StarIcon size={16} /></button>}
       </div>)}
     </Popover>}
-  </div>;
+  </div></div>;
+}
+
+function DrawingHelp({ anchor, close }: { anchor: React.RefObject<HTMLButtonElement | null>; close(): void }) {
+  const keys = useActionKeys();
+  const shortcuts = [...toolsByGroup().values()].flat().flatMap((tool) => { const shortcut = allShortcutsOf(keys, toolActionId(tool.tool)); return shortcut ? [{ tool, shortcut }] : []; });
+  return <Popover anchor={anchor} follow placement="right" onClose={close} className="drawing-help" role="dialog" aria-label="드로잉 단축키">
+    <div className="draw-dialog-head"><strong>드로잉 단축키</strong><button className="icon-btn" aria-label="도움말 닫기" onClick={close}><CloseIcon /></button></div>
+    <section className="draw-help-tools" aria-label="도구 단축키"><h3>도구</h3><div>{shortcuts.map(({ tool, shortcut }) => <p key={tool.tool}><span>{tool.label}</span><kbd>{shortcut}</kbd></p>)}</div></section>
+    <div className="draw-help-sections">{gestureSections(registeredModes()).map((section) => <section key={section.title} aria-label={section.title}><h3>{section.title}</h3>{section.rows.map((h) => <p key={h.keys}><kbd>{h.keys}</kbd><span>{h.label}</span></p>)}</section>)}</div>
+  </Popover>;
 }
 function MagnetButton({ action, keys }: { action(f: () => void): void; keys: ActionKeys }) {
   const prefs = useUiStore((s) => s.prefs.drawing);

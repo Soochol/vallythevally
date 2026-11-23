@@ -21,7 +21,7 @@
   --cmp-1: #F0F4EC; --cmp-2: #EE9DD0; --cmp-3: #6EC7D8;
   --link-a: #B9A6FF; --link-b: #5ED4E8; --link-c: #E88AE0;
   --link-d: #F59047; --link-e: #B5C07C; --link-f: #DEBDBA; --link-g: #64F7DE; --link-h: #DED2BA; --link-i: #BAD2DE; --link-j: #CA91A4;
-  --draw: #C7F36B; --cloud-up: rgba(255, 107, 120, 0.10); --cloud-down: rgba(91, 155, 255, 0.10);
+  --draw: #FFE100; --cloud-up: rgba(255, 107, 120, 0.10); --cloud-down: rgba(91, 155, 255, 0.10);
   --shadow: 0 0 0 1px rgba(255, 255, 255, 0.10), inset 0 1px 0 rgba(255, 255, 255, 0.09), 0 24px 60px rgba(0, 0, 0, 0.55); --scrim: rgba(5, 9, 5, 0.7);
   --shadow-s: 0 0 0 1px rgba(255, 255, 255, 0.08), 0 4px 12px rgba(0, 0, 0, 0.4); --scrim-nested: rgba(5, 9, 5, 0.5);
   --glass: rgba(27, 33, 27, 0.74); --glass-solid: #1B211B; --glass-blur: blur(22px) saturate(1.6);

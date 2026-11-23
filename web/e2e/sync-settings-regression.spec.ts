@@ -62,7 +62,7 @@ test('server accepted extreme timestamp must not blank settings', async ({page,s
   await selectLine(page);
   await page.getByRole('button',{name:'드로잉 세부 설정',exact:true}).click();
   const errors:string[]=[];page.on('pageerror',e=>errors.push(e.message));
-  await page.locator('summary').filter({hasText:/^좌표$/}).click();
+  await page.getByRole('tab',{name:'좌표',exact:true}).click();
   await expect(page.getByRole('spinbutton',{name:'가격',exact:true})).toBeVisible();
   await expect(page.getByLabel('시각',{exact:true})).toHaveCount(0);
   console.log('EXTREME_TIME',JSON.stringify({errors,body:await page.locator('body').innerText()}));
@@ -116,7 +116,7 @@ test('visible extreme timestamp has a safe numeric editor and preserves unrelate
   await page.reload(); await expect.poll(async ()=>(await mirror(page)).length).toBe(1);
   await selectLine(page);
   await page.getByRole('button',{name:'드로잉 세부 설정',exact:true}).click();
-  await page.locator('summary').filter({hasText:/^좌표$/}).click();
+  await page.getByRole('tab',{name:'좌표',exact:true}).click();
   const seconds=page.getByRole('textbox',{name:'시작 시각 (Unix 초)'});
   await expect(seconds).toHaveValue(String(Number.MAX_SAFE_INTEGER));
   await seconds.fill('9007199254740992');

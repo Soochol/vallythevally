@@ -1,8 +1,10 @@
-import { type RefObject, useEffect, useRef } from "react";
+import { type RefObject, useEffect, useId, useRef, useState } from "react";
 import { Popover } from "../overlay/Popover";
+import { belowTopbar, type Rect } from "../overlay/position";
+import { panelDomId, tabDomId, Tabs } from "../ui/Tabs";
 import { CloseIcon } from "../icons";
 import type { Period } from "../../api/generated/Period";
-import { surfaceFor } from "../../chart/drawings/DrawingSurface";
+import { type DrawingSurface, surfaceFor } from "../../chart/drawings/DrawingSurface";
 import { defaultObjectStyle, reusableStyle } from "../../chart/drawings/objects";
 import { sameContent } from "../../chart/drawings/history";
 import { toolOf } from "../../chart/drawings/tools";
@@ -36,18 +38,37 @@ function settlePoint(cellId: WindowId, index: number) {
     return { ...editor, draft: { ...editor.draft, points: setPoint(points, index, typed, ctx) } };
   });
 }
+type DetailsTab = "style" | "text" | "coordinates" | "visibility";
+type DetailsSide = "left" | "right";
+const SCREEN_EDGE = 8;
+const TEXT_EDITOR_WIDTH = 320;
+
+function sideAwayFrom(surface: DrawingSurface | undefined): DetailsSide {
+  const bounds = surface?.selectionBounds(); const origin = surface?.host.el.getBoundingClientRect();
+  if (!bounds || !origin) return "right";
+  return window.innerWidth - (origin.left + bounds.x2) >= origin.left + bounds.x1 ? "right" : "left";
+}
+const edgeRect = (side: DetailsSide): Rect => {
+  const x = side === "right" ? window.innerWidth - SCREEN_EDGE : SCREEN_EDGE; const top = belowTopbar();
+  return { left: x, right: x, top, bottom: top };
+};
+
 export function DrawingDetails({ cellId, editor, anchor }: { cellId: WindowId; editor: DrawingEditor; anchor: RefObject<HTMLElement | null> }) {
   const tool = toolOf(editor.draft.tool);
+  const ids = useId();
+  const [tab, setTab] = useState<DetailsTab>("style");
+  const [side] = useState(() => sideAwayFrom(surfaceFor(cellId)));
   if (!tool) return null;
   const fields = (kind: "inputs" | "style" | "text") => <StyleFields fields={tool.settings[kind] ?? []} style={editor.draft.style} text={editor.draft.text} change={(style) => draft(cellId, { style })} setText={(text) => draft(cellId, { text: text || null })} />;
-  return <Popover data-chart-control anchor={anchor} follow placement="bottom" onClose={() => close(cellId)} className="draw-details" role="dialog" aria-label={`${tool.label} 세부 설정`}>
+  const tabs: { id: DetailsTab; label: string }[] = [{ id: "style", label: "스타일" }, ...(tool.settings.text ? [{ id: "text" as const, label: "글자" }] : []), { id: "coordinates", label: "좌표" }, { id: "visibility", label: "보이기" }];
+  const panel = (id: DetailsTab, children: React.ReactNode) => <div role="tabpanel" id={panelDomId(ids, id)} aria-labelledby={tabDomId(ids, id)} hidden={tab !== id} className="draw-panel">{children}</div>;
+  return <Popover data-chart-control anchor={anchor} anchorRect={() => edgeRect(side)} placement={side === "right" ? "left" : "right"} minTop={belowTopbar} solid onClose={() => close(cellId)} className="draw-details" role="dialog" aria-label={`${tool.label} 세부 설정`}>
       <div className="draw-dialog-head"><strong>{tool.label}</strong><button type="button" className="icon-btn" aria-label="세부 설정 닫기" onClick={() => close(cellId)}><CloseIcon /></button></div>
+      <Tabs label="세부 설정 묶음" idPrefix={ids} items={tabs} value={tab} onChange={(id) => setTab(id as DetailsTab)} className="draw-tabs" />
       <div className="draw-details-body">
-        {tool.settings.inputs && <details open><summary>입력</summary>{fields("inputs")}</details>}
-        <details open><summary>스타일</summary>{fields("style")}</details>
-        {tool.settings.text && <details><summary>글자</summary>{fields("text")}</details>}
-        <details><summary>좌표</summary>
-        {editor.draft.points.map((p, i) => {
+        {panel("style", <>{tool.settings.inputs && fields("inputs")}{fields("style")}</>)}
+        {tool.settings.text && panel("text", fields("text"))}
+        {panel("coordinates", editor.draft.points.map((p, i) => {
           const role = tool.pointRoles?.[i];
           const value = role?.uses === "price" ? null : calendarTime(p.t);
           const name = role?.label ?? `점 ${i + 1}`;
@@ -59,13 +80,12 @@ export function DrawingDetails({ cellId, editor, anchor }: { cellId: WindowId; e
               : <label>시각 (KST)<input aria-label={fieldName("시각")} className={INPUT} type="datetime-local" step={1} value={value} onBlur={() => settlePoint(cellId, i)} onChange={(e) => { const t = parseCalendarTime(e.target.value); if (t !== null) update({ t }); }} /></label>)}
             {role?.uses !== "time" && <label>가격<input aria-label={fieldName("가격")} className={INPUT} type="number" step="any" value={p.price} onBlur={() => settlePoint(cellId, i)} onChange={(e) => { if (Number.isFinite(e.target.valueAsNumber)) update({ price: e.target.valueAsNumber }); }} /></label>}
           </fieldset>;
-        })}
-        </details>
-        <details><summary>보이기</summary><label className="draw-visibility-all"><input type="checkbox" checked={editor.draft.periods === null} onChange={(e) => draft(cellId, { periods: e.target.checked ? null : [...PERIODS] })} /> 모든 봉 주기</label>
+        }))}
+        {panel("visibility", <><label className="draw-visibility-all"><input type="checkbox" checked={editor.draft.periods === null} onChange={(e) => draft(cellId, { periods: e.target.checked ? null : [...PERIODS] })} /> 모든 봉 주기</label>
           <div className="draw-periods">{PERIODS.map((p: Period) => <label key={p}><input type="checkbox" checked={editor.draft.periods === null || editor.draft.periods.includes(p)} onChange={(e) => {
             const current = editor.draft.periods ?? [...PERIODS]; const periods = e.target.checked ? [...current, p] : current.filter((v) => v !== p);
             if (periods.length) draft(cellId, { periods });
-          }} />{PERIOD_LABEL[p]}</label>)}</div></details>
+          }} />{PERIOD_LABEL[p]}</label>)}</div></>)}
       </div>
       <div className="draw-settings-foot"><button className="tb-btn" type="button" onClick={() => draft(cellId, { style: defaultObjectStyle(editor.draft) })}>기본 스타일로</button><span />
         <button className="tb-btn" type="button" onClick={() => close(cellId)}>취소</button><button className="btn-primary" type="button" onClick={() => confirm(cellId, { ...editor, draft: { ...editor.draft, text: meaningful(editor.draft.text) } })}>확인</button></div>
@@ -79,7 +99,7 @@ export function DrawingTextEditor({ cellId, editor }: { cellId: WindowId; editor
   const typed = { ...editor, draft: { ...editor.draft, text: meaningful(editor.draft.text) } };
   const submit = () => typed.draft.text === meaningful(editor.original.text) ? close(cellId) : confirm(cellId, typed);
   useEffect(() => { ref.current?.focus(); ref.current?.select(); }, []);
-  return <div data-chart-control ref={anchor} style={{ position: "absolute", left: Math.max(8, Math.min(at?.x ?? 80, (surface?.frame().pane.width ?? 500) - 300)), top: Math.max(8, Math.min(at?.y ?? 80, (surface?.frame().pane.height ?? 400) - 160)) }}><Popover anchor={anchor} onClose={(reason) => reason === "outside" ? submit() : close(cellId)} className="draw-text-editor" style={{ width: 300 }}>
+  return <div data-chart-control ref={anchor} style={{ position: "absolute", left: Math.max(8, Math.min(at?.x ?? 80, (surface?.frame().pane.width ?? 500) - TEXT_EDITOR_WIDTH)), top: Math.max(8, Math.min(at?.y ?? 80, (surface?.frame().pane.height ?? 400) - 160)) }}><Popover anchor={anchor} onClose={(reason) => reason === "outside" ? submit() : close(cellId)} className="draw-text-editor">
     <textarea ref={ref} className={INPUT} aria-label="드로잉 글자" rows={3} value={editor.draft.text ?? ""} onChange={(e) => draft(cellId, { text: e.target.value })} onKeyDown={(e) => {
       if (e.nativeEvent.isComposing || e.keyCode === 229) return;
       if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); submit(); }

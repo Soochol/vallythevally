@@ -1,5 +1,5 @@
 import { Popover } from "../overlay/Popover";
-import { OVERLAY_GAP } from "../overlay/position";
+import { belowTopbar } from "../overlay/position";
 import { useId, useRef, useState } from "react";
 import { FALLBACK_PICKED_COLOR, hexToHsv, hsvToHex, isHexColor, normalizeHex, type HexColor, type HsvColor } from "../../lib/colors";
 import { CheckIcon, ChevronIcon, CloseIcon } from "../icons";
@@ -7,7 +7,6 @@ import { ColorGrid } from "./ColorGrid";
 
 const RECENT_KEY = "vv.recent-colors.v1";
 
-const belowTopbar = () => (document.querySelector(".desktop-topbar")?.getBoundingClientRect().bottom ?? 0) + OVERLAY_GAP;
 
 export function rememberColor(color: HexColor): void {
   try { localStorage.setItem(RECENT_KEY, JSON.stringify([color, ...readRecent().filter((c) => c !== color)].slice(0, 8))); } catch {}

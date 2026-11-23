@@ -105,7 +105,7 @@ test("주석 도구: 공백뿐인 글자는 자리 표시로 남고, 바깥을 �
   await page.locator(".draw-text-editor").getByRole("button", { name: "세부 설정", exact: true }).click();
   const dialog = page.getByRole("dialog", { name: "말풍선 세부 설정" });
   await expect(dialog).toBeVisible();
-  await dialog.getByRole("checkbox", { name: "테두리", exact: true }).uncheck();
+  await dialog.getByRole("switch", { name: "테두리", exact: true }).uncheck();
   await dialog.getByRole("button", { name: "확인", exact: true }).click();
   await pollSaved(async () => (await drawings(scenario)).find((d) => d.tool === "callout")).toMatchObject({ text: "배당", style: { border: false } });
   expect(errors).toEqual([]);

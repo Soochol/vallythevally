@@ -45,3 +45,15 @@ test("좌표 입력 이름은 도구가 정한 점 이름을 쓴다", () => {
   const line = renderToStaticMarkup(createElement(DrawingDetails, { cellId: windowId("cell-0"), editor: { kind: "settings", original: drawing, draft: drawing }, anchor: { current: null } }));
   expect(line).toContain('aria-label="가격"');
 });
+
+test("세부 설정은 탭으로 묶고 참·거짓은 스위치이며 피보나치 수준은 한 줄 다섯 칸이다", () => {
+  const fib = toolOf("fib")!;
+  const body: DrawingBody = { ...drawing, id: "fib", tool: "fib", style: JSON.parse(JSON.stringify(fib.defaultStyle()).replace(/"\$[a-z-]+"/g, '"#123456"')), points: [{ t: 1, price: 100 }, { t: 2, price: 200 }] };
+  const html = renderToStaticMarkup(createElement(DrawingDetails, { cellId: windowId("cell-0"), editor: { kind: "settings", original: body, draft: body }, anchor: { current: null } }));
+  for (const tab of ["스타일", "좌표", "보이기"]) expect(html).toMatch(new RegExp(`role="tab"[^>]*>${tab}<`));
+  expect(html).not.toMatch(/role="tab"[^>]*>글자</);
+  expect(html).not.toContain("<details");
+  expect(html).toContain('role="switch"');
+  expect(html).not.toContain('type="checkbox" aria-label="수준');
+  for (const cell of ["수준 1 켜기", "수준 1 값", "수준 1 색 선택", "수준 1 선 견본"]) expect(html).toContain(cell);
+});

@@ -1,4 +1,5 @@
 import type { IPrimitivePaneRenderer, IPrimitivePaneView, ISeriesPrimitive, ISeriesPrimitiveAxisView, IPanePrimitive, PrimitiveHoveredItem, SeriesAttachedParameter } from "lightweight-charts";
+import { contrastRatio, parseColor } from "../../styles/colorMath";
 import { frameHit, type RenderFrame } from "./frame";
 import { extendedSegment, HANDLE_DIAMETER_PX } from "./geometry";
 import { prepareText, textFont, textLayout, type TextMeasure } from "./textLayout";
@@ -10,6 +11,21 @@ const dash = { solid: [], dashed: [7, 5], dotted: [2, 4] };
 
 export function drawingColor(color: string): string {
   return color.startsWith("$") ? getComputedStyle(document.documentElement).getPropertyValue(`--${color.slice(1)}`).trim() || "#12b5a5" : color;
+}
+const READABLE_CONTRAST = 4.5;
+const BAND_WIDTH_PX = 2;
+
+function contrastOf(foreground: string, background: string): number | null {
+  try { return contrastRatio(parseColor(foreground), parseColor(background)); } catch { return null; }
+}
+export function inkOn(background: string): string {
+  const dark = drawingColor("$on-data"); const light = drawingColor("$text");
+  const onDark = contrastOf(dark, background); const onLight = contrastOf(light, background);
+  return onLight !== null && (onDark === null || onLight > onDark) ? light : dark;
+}
+function readableOnChart(color: string): string {
+  const ratio = contrastOf(color, drawingColor("$chart-bg"));
+  return ratio === null || ratio >= READABLE_CONTRAST ? color : drawingColor("$text");
 }
 function stroke(c: CanvasRenderingContext2D, s: Stroke | undefined) {
   if (!s) return;
@@ -61,7 +77,9 @@ export function paintShape(c: CanvasRenderingContext2D, s: Shape, pane: { width:
       c.translate(s.at.x, s.at.y); if (s.orientation === "vertical") c.rotate(-Math.PI / 2);
       const b = layout.box;
       c.beginPath(); c.rect(b.x1, b.y1, b.x2 - b.x1, b.y2 - b.y1); fill(c, s.box?.background); stroke(c, s.box?.border);
-      c.fillStyle = drawingColor(s.style.color); c.textAlign = "left"; c.textBaseline = "top";
+      const ink = drawingColor(s.style.color);
+      if (s.box?.band) { c.fillStyle = drawingColor(s.box.band); c.fillRect(b.x1, b.y1, BAND_WIDTH_PX, b.y2 - b.y1); }
+      c.fillStyle = s.box?.band ? readableOnChart(ink) : ink; c.textAlign = "left"; c.textBaseline = "top";
       for (const line of layout.lines) c.fillText(line.text, line.x, line.y);
       break;
     }
@@ -112,7 +130,8 @@ export class DrawingLayer implements ISeriesPrimitive {
       const coordinate = label.axis === "price" ? this.frame.ctx.yOf(label.value) : this.frame.ctx.xOf(label.value);
       if (coordinate === null) continue;
       const max = label.axis === "price" ? this.frame.pane.height : this.frame.pane.width;
-      const view: ISeriesPrimitiveAxisView = { coordinate: () => coordinate, text: () => label.text, textColor: () => "#ffffff", backColor: () => drawingColor(label.color), visible: () => coordinate >= 0 && coordinate <= max };
+      const back = drawingColor(label.color); const ink = inkOn(back);
+      const view: ISeriesPrimitiveAxisView = { coordinate: () => coordinate, text: () => label.text, textColor: () => ink, backColor: () => back, visible: () => coordinate >= 0 && coordinate <= max };
       (label.axis === "price" ? this.prices : this.times).push(view);
     }
   }
