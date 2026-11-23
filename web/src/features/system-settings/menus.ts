@@ -1,12 +1,16 @@
+export const MENU_GROUPS = ["연결", "화면", "서버·계정", "준비 중"] as const;
+
+export type MenuGroup = (typeof MENU_GROUPS)[number];
+
 export const SYSTEM_MENUS = [
-  { id: "kiwoom", label: "증권사 · 계좌", ready: true },
-  { id: "general", label: "일반", ready: true },
-  { id: "hotkeys", label: "단축키", ready: true },
-  { id: "telegram", label: "알림 · 텔레그램", ready: false },
-  { id: "data", label: "데이터 · 저장소", ready: true },
-  { id: "collector", label: "수집 현황판", ready: true },
-  { id: "account", label: "계정", ready: true },
-  { id: "about", label: "정보", ready: true },
+  { id: "kiwoom", label: "증권사 · 계좌", ready: true, group: "연결" },
+  { id: "general", label: "일반", ready: true, group: "화면" },
+  { id: "hotkeys", label: "단축키", ready: true, group: "화면" },
+  { id: "data", label: "데이터 · 저장소", ready: true, group: "서버·계정" },
+  { id: "collector", label: "수집 현황판", ready: true, group: "서버·계정" },
+  { id: "account", label: "계정", ready: true, group: "서버·계정" },
+  { id: "about", label: "정보", ready: true, group: "서버·계정" },
+  { id: "telegram", label: "알림 · 텔레그램", ready: false, group: "준비 중" },
 ] as const;
 
 export type SystemMenuId = (typeof SYSTEM_MENUS)[number]["id"];
@@ -32,4 +36,8 @@ export function menuAfterKey(current: SystemMenuId, key: string, menus: readonly
     default:
       return null;
   }
+}
+
+export function groupedMenus(menus: readonly SystemMenu[]): readonly { group: MenuGroup; menus: readonly SystemMenu[] }[] {
+  return MENU_GROUPS.map((group) => ({ group, menus: menus.filter((m) => m.group === group) })).filter((entry) => entry.menus.length > 0);
 }

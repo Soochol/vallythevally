@@ -1,0 +1,16 @@
+.sys-dialog { font-size: var(--fs-m); }
+.sys-dialog :is(.btn, .btn-ghost, .btn-primary, .btn-danger) { font-size: var(--fs-m); }
+.sys-dialog .ui-field-help, .sys-dialog .ui-field-error { font-size: var(--fs-s); }
+.sys-dialog .sys-picker > div > span:last-child { display: flex; width: 100%; flex: 1; }
+.sys-keychip { display: inline-flex; align-items: center; gap: var(--size-4); min-height: var(--ctl-s); padding: 0 var(--size-4) 0 var(--size-8); border: 1px solid var(--line-strong); border-radius: var(--r-m); background: var(--raised); color: var(--text); font-size: var(--fs-s); }
+.sys-keychip-add { padding-right: var(--size-8); color: var(--text-2); }
+.sys-keychip-add:hover { background: var(--overlay); color: var(--text); }
+.sys-keychip-add[aria-pressed=true] { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); }
+@media (width < 48rem) {
+  .sys-dialog :is(.btn, .btn-ghost, .btn-primary, .btn-danger):not(.btn-sm) { min-height: var(--ctl-l); }
+}
+.system-btn .conn-flag { display: grid; flex: none; place-items: center; }
+.system-btn .conn-flag[data-tone=amber] { color: var(--warning); }
+.system-btn .conn-flag[data-tone=red] { color: var(--danger); }
+.system-btn .conn-dot[data-tone=gray] { background: transparent; box-shadow: inset 0 0 0 1.5px var(--text-3); }
+@media (width < 80rem) { .system-btn .conn-flag { position: absolute; top: 1px; right: 0; } }

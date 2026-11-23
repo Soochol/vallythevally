@@ -147,7 +147,7 @@ test.describe("360px 폭", () => {
     await noHorizontalScroll(page);
     await page.screenshot({ path: path.resolve("../target/ux-screens/system-settings-360x800-content.png") });
 
-    await dialog(page).getByRole("button", { name: "‹ 시스템 설정" }).click();
+    await dialog(page).getByRole("button", { name: "시스템 설정 목록으로" }).click();
     await expect(menu(page, "일반")).toBeFocused();
     await expect(dialog(page).getByRole("tabpanel")).toHaveCount(0);
     await noHorizontalScroll(page);

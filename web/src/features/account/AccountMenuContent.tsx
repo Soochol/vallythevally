@@ -1,12 +1,15 @@
 import { useState } from "react";
 import { deleteAccount, logout, syncNow } from "../../api/account";
 import { ApiRequestError } from "../../api/http";
+import type { SyncStatus } from "../../api/generated/SyncStatus";
 import { useAccountStore } from "../../stores/account";
 import { useSelectionStore } from "../../stores/selection";
 import { useWizardStore } from "../setup-wizard/wizardOpen";
-import { syncErrorText } from "../status/syncView";
 import { useCommand } from "../system-settings/useCommand";
-import { DELETE_PHRASE, deleteFailureText, formatSignedInAt, lastSyncText } from "./accountMenu";
+import { Badge } from "../ui/Badge";
+import { Field } from "../ui/Field";
+import { Notice } from "../ui/Notice";
+import { DELETE_PHRASE, deleteFailureText, formatSignedInAt, lastSyncText, syncBand } from "./accountMenu";
 import { PROVIDER_NAME, shortAccountId } from "./provider";
 import { useReturnFocus } from "./useReturnFocus";
 
@@ -45,44 +48,47 @@ export function AccountMenuContent() {
         <dt className="text-text-2">로그인 시각</dt>
         <dd className="max-md:mb-2">{formatSignedInAt(status.signedInAt)}</dd>
       </dl>
-      {status.sync.state === "running" && (
-        <section aria-label="동기화" className="flex flex-col gap-3 rounded-m border border-line bg-surface p-4">
-          <h3 className="text-m font-semibold">동기화</h3>
-          <dl className="grid grid-cols-[minmax(0,10rem)_minmax(0,1fr)] gap-x-4 gap-y-3 text-m max-md:grid-cols-1 max-md:gap-y-1">
-            <dt className="text-text-2">마지막 성공</dt>
-            <dd className="max-md:mb-2">{lastSyncText(status.sync.lastSuccessAt)}</dd>
-            <dt className="text-text-2">올리지 못한 변경</dt>
-            <dd className="max-md:mb-2">{status.sync.pendingDocuments}개</dd>
-            <dt className="text-text-2">거절된 문서</dt>
-            <dd className="max-md:mb-2">{status.sync.refusedDocuments}개</dd>
-            <dt className="text-text-2">마지막 오류</dt>
-            <dd className="max-md:mb-2">{status.sync.lastError === null ? "없음" : syncErrorText(status.sync.lastError)}</dd>
-          </dl>
-          <button type="button" className="tb-btn h-9 self-start border border-line px-3" disabled={command.busy} onClick={() => void command.run(syncNow)}>지금 동기화</button>
-        </section>
-      )}
+      {status.sync.state === "running" && <SyncCard sync={status.sync} busy={command.busy} onSync={() => void command.run(syncNow)} />}
       <div className="flex flex-wrap gap-2">
-        <button type="button" className="tb-btn h-9 border border-line px-3" onClick={() => { useSelectionStore.getState().closeDialog(); useWizardStore.getState().show(); }}>셋업 마법사 다시 열기</button>
-        <button type="button" className="tb-btn h-9 border border-line px-3" disabled={command.busy} onClick={() => void command.run(logout)}>로그아웃</button>
-        {!deleting && <button ref={deleteButton} type="button" className="tb-btn h-9 border border-line px-3 text-danger" onClick={() => setDeleting(true)}>계정 삭제</button>}
+        <button type="button" className="btn" onClick={() => { useSelectionStore.getState().closeDialog(); useWizardStore.getState().show(); }}>셋업 마법사 다시 열기</button>
+        <button type="button" className="btn" disabled={command.busy} onClick={() => void command.run(logout)}>로그아웃</button>
+        {!deleting && <button ref={deleteButton} type="button" className="btn text-danger" onClick={() => setDeleting(true)}>계정 삭제</button>}
       </div>
       {deleting && (
         <section aria-label="계정 삭제" className="flex flex-col gap-3 rounded-m border border-line bg-surface p-4">
           <p className="text-m">계정 서버에 있는 이 계정과 올려 둔 셋업을 지웁니다. 이 PC의 셋업은 남습니다.</p>
-          <label className="flex flex-col gap-1 text-m">
-            <span className="text-text-2">확인하려면 “{DELETE_PHRASE}”을 입력하세요</span>
-            <input autoFocus className="ui-field" value={phrase} autoComplete="off" spellCheck={false} onChange={(e) => setPhrase(e.target.value)} />
-          </label>
+          <Field label={`확인하려면 “${DELETE_PHRASE}”을 입력하세요`} autoFocus value={phrase} autoComplete="off" spellCheck={false} onChange={(e) => setPhrase(e.target.value)} />
           <div className="flex flex-wrap gap-2">
-            <button type="button" className="tb-btn h-9 bg-[color-mix(in_srgb,var(--danger)_16%,transparent)] px-3 font-semibold text-danger disabled:opacity-50" disabled={phrase.trim() !== DELETE_PHRASE || command.busy} onClick={() => void remove()}>
-              계정 삭제 실행
-            </button>
-            <button type="button" className="tb-btn h-9 px-3" disabled={command.busy} onClick={() => { setDeleting(false); setPhrase(""); setDeleteError(null); }}>취소</button>
+            <button type="button" className="btn-danger" disabled={phrase.trim() !== DELETE_PHRASE || command.busy} onClick={() => void remove()}>계정 삭제 실행</button>
+            <button type="button" className="btn" disabled={command.busy} onClick={() => { setDeleting(false); setPhrase(""); setDeleteError(null); }}>취소</button>
           </div>
           {deleteError && <p role="alert" className="text-m text-danger">{deleteError}</p>}
         </section>
       )}
       {command.error && !deleting && <p role="alert" className="text-m text-danger">{command.error}</p>}
     </div>
+  );
+}
+
+function SyncCard({ sync, busy, onSync }: { sync: Extract<SyncStatus, { state: "running" }>; busy: boolean; onSync(): void }) {
+  const band = syncBand(sync);
+  return (
+    <section aria-label="동기화" className="flex flex-col gap-3 rounded-m border border-line bg-surface p-4">
+      <div className="flex items-center justify-between gap-2">
+        <h3 className="text-m font-semibold">동기화</h3>
+        {band.kind === "synced" && <Badge tone="success">동기화됨</Badge>}
+        {band.kind === "uploading" && <Badge>올리는 중</Badge>}
+      </div>
+      {band.kind === "error" && <Notice tone="danger" action={{ label: "지금 동기화", onClick: onSync }}>{band.text}</Notice>}
+      <dl className="grid grid-cols-[minmax(0,10rem)_minmax(0,1fr)] gap-x-4 gap-y-3 text-m max-md:grid-cols-1 max-md:gap-y-1">
+        <dt className="text-text-2">마지막 성공</dt>
+        <dd className="max-md:mb-2">{lastSyncText(sync.lastSuccessAt)}</dd>
+        <dt className="text-text-2">올리지 못한 변경</dt>
+        <dd className="max-md:mb-2">{sync.pendingDocuments}개</dd>
+        <dt className="text-text-2">거절된 문서</dt>
+        <dd className="max-md:mb-2">{sync.refusedDocuments}개</dd>
+      </dl>
+      {band.kind !== "error" && <button type="button" className="btn self-start" disabled={busy} onClick={onSync}>지금 동기화</button>}
+    </section>
   );
 }

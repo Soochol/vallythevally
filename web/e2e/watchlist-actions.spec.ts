@@ -3,6 +3,11 @@ import { mkdir } from "node:fs/promises";
 import path from "node:path";
 import type { Page } from "@playwright/test";
 import { type Scenario, cell, DEFAULT_LAYOUT_ID, expect, test, firstChart, pollSaved } from "./harness";
+import { DENSITY_STORAGE_KEY } from "../src/persist/density";
+
+test.beforeEach(async ({ page }) => {
+  await page.addInitScript((key) => localStorage.setItem(key, "regular"), DENSITY_STORAGE_KEY);
+});
 
 const panel = (page: Page) => page.getByRole("complementary", { name: "관심종목" });
 const row = (page: Page, code: string) => panel(page).locator(`li[data-code="${code}"]`);

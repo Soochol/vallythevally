@@ -4,11 +4,13 @@ import type { KiwoomKey } from "../../api/generated/KiwoomKey";
 import type { OrdersAccount } from "../../api/generated/OrdersAccount";
 import { ApiRequestError } from "../../api/http";
 import { checkOrdersAccount, ORDERS_QUERY_KEY, switchOrders } from "../../api/system";
+import { WarningIcon } from "../icons";
 import { digitsOnly, kisCanEnableOrders, kisListingOf, NO_ACCOUNT_ORDER_NOTE } from "./kisAccount";
-import { accountNumberOf, canConfirmEnable, enableTail, mergeOrdersStatus, orderCanTurnOff, orderCanTurnOn } from "./orderUse";
+import { FormActions } from "./KiwoomKeyFields";
+import { accountNumberOf, canConfirmEnable, enableTail, enableWarning, mergeOrdersStatus, orderCanTurnOff, orderCanTurnOn, orderStateSentence } from "./orderUse";
 import { useCommand } from "./useCommand";
 
-export function KiwoomRowOrders({ entry, order }: { entry: KiwoomKey; order: OrdersAccount }) {
+export function KiwoomRowOrders({ entry, order, mock }: { entry: KiwoomKey; order: OrdersAccount; mock: boolean }) {
   const queryClient = useQueryClient();
   const command = useCommand();
   const keyId = entry.keyId;
@@ -36,43 +38,51 @@ export function KiwoomRowOrders({ entry, order }: { entry: KiwoomKey; order: Ord
     if (saved) closeConfirmation();
   };
   const startEnabling = () => void command.run(async () => setCheckedTail((await checkOrdersAccount(keyId)).accountTail));
+  const checked = orderCanTurnOff(order.state);
+  const settable = checked || orderCanTurnOn(order.state);
+  const reenable = checked && orderCanTurnOn(order.state);
+  const confirming = checkedTail !== null;
+  const stateId = `orders-state-${keyId}`;
 
   return (
     <section aria-label="주문 사용" className="flex flex-col gap-2" data-testid="key-orders">
+      <h4 className="text-s font-semibold text-text-2">주문</h4>
       {!kis && <p className="text-m text-text-2">계좌번호 <span className="font-mono text-text">{accountNumberOf(order.accountTail)}</span></p>}
-      {checkedTail !== null && (
-        <div className="flex flex-col gap-2">
+      <button type="button" role="switch" aria-checked={checked} aria-describedby={stateId} aria-label="주문 사용" disabled={command.busy || confirming || !settable || (accountMissing && !checked)} className="ui-switch" onClick={() => (checked ? void apply(false) : startEnabling())}>
+        <span aria-hidden="true" className="ui-switch-track"><span /></span>
+        <span className="text-m">주문 사용</span>
+      </button>
+      <p id={stateId} className={`text-s ${checked && !mock ? "text-warning" : "text-text-2"}`}>{orderStateSentence(order.state, mock)}</p>
+      {reenable && !confirming && <button type="button" className="btn self-start" disabled={command.busy || accountMissing} onClick={startEnabling}>계좌를 다시 확인해 켜기</button>}
+      {accountMissing && !confirming && orderCanTurnOn(order.state) && <p className="text-s text-text-2" data-testid="kis-no-account-note">{NO_ACCOUNT_ORDER_NOTE}</p>}
+      {confirming && (
+        <div role="group" aria-label="주문 켜기 확인" className={`flex flex-col gap-3 rounded-m border p-3 ${mock ? "border-line bg-raised" : "border-warning/40 bg-warning-soft"}`}>
+          <p className="flex items-start gap-2 text-m font-semibold text-text"><span className={mock ? "text-text-2" : "text-warning"}><WarningIcon /></span><span className="min-w-0">{enableWarning(mock)}</span></p>
           {kis ? (
             <>
               <p className="text-m text-text-2">이 계좌로 잔고 조회가 됐습니다</p>
               <label className="flex items-center gap-2 text-m">
                 <span className="text-text-2">계좌번호 끝 2자리 입력</span>
-                <input className="h-9 w-16 rounded-s border border-line bg-bg px-2 text-center font-mono text-m text-text focus:border-accent focus:outline-none" type="text" inputMode="numeric" name="kis-confirm-tail" aria-label="계좌번호 끝 2자리 입력" autoComplete="off" maxLength={2} disabled={command.busy} value={typedTail} onChange={(e) => setTypedTail(digitsOnly(e.target.value))} />
+                <input className="ui-field w-16 text-center font-mono" type="text" inputMode="numeric" name="kis-confirm-tail" aria-label="계좌번호 끝 2자리 입력" autoComplete="off" maxLength={2} disabled={command.busy} value={typedTail} onChange={(e) => setTypedTail(digitsOnly(e.target.value))} />
               </label>
             </>
           ) : (
             <>
               <p className="text-m text-text-2">키움이 알려 준 계좌번호(8자리) 끝 2자리: <span className="font-mono text-text">{checkedTail}</span></p>
-              <label className="flex items-start gap-2 text-m">
-                <input type="checkbox" className="mt-1" checked={accountConfirmed} onChange={(e) => setAccountConfirmed(e.target.checked)} />
+              <label className="flex min-h-8 items-center gap-2 text-m">
+                <input type="checkbox" className="size-4 accent-accent" checked={accountConfirmed} onChange={(e) => setAccountConfirmed(e.target.checked)} />
                 이 계좌가 맞습니다
               </label>
             </>
           )}
-          <div className="flex gap-2">
-            <button type="button" className="btn-primary h-9 px-4 disabled:cursor-not-allowed disabled:opacity-50" disabled={!canConfirmEnable(entry.broker, accountConfirmed, typedTail) || command.busy} onClick={() => void apply(true)}>켜기 확인</button>
-            <button type="button" className="tb-btn h-9 px-3" disabled={command.busy} onClick={closeConfirmation}>취소</button>
-          </div>
+          <FormActions>
+            <button type="button" className="btn" disabled={command.busy} onClick={closeConfirmation}>취소</button>
+            <button type="button" className={mock ? "btn" : "btn-danger"} disabled={!canConfirmEnable(entry.broker, accountConfirmed, typedTail) || command.busy} onClick={() => void apply(true)}>{mock ? "주문 켜기" : "실전 주문 켜기"}</button>
+          </FormActions>
         </div>
       )}
-      {checkedTail === null && (
-        <div className="flex flex-wrap gap-2">
-          {orderCanTurnOn(order.state) && <button type="button" className="tb-btn h-9 px-3 disabled:cursor-not-allowed disabled:opacity-50" disabled={command.busy || accountMissing} onClick={startEnabling}>주문 사용 켜기</button>}
-          {orderCanTurnOff(order.state) && <button type="button" className="tb-btn h-9 px-3" disabled={command.busy} onClick={() => void apply(false)}>주문 사용 끄기</button>}
-        </div>
-      )}
-      {accountMissing && checkedTail === null && orderCanTurnOn(order.state) && <p className="text-s text-text-3" data-testid="kis-no-account-note">{NO_ACCOUNT_ORDER_NOTE}</p>}
       {command.error && <p role="alert" className="text-m text-danger" data-testid="key-orders-error">{command.error}</p>}
     </section>
   );
 }
+
