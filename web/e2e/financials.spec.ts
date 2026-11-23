@@ -1,6 +1,6 @@
 import { financialTest as test, financialPage, type FinancialFixture } from "./financial-update-helpers";
 import { selectOption } from "./select-option";
-import type { Page } from "@playwright/test";
+import type { Locator, Page } from "@playwright/test";
 import type { FinancialsPage } from "../src/api/generated/FinancialsPage";
 import type { Layout } from "../src/api/generated/Layout";
 import type { Scenario } from "./fixtures/scenario";
@@ -12,6 +12,7 @@ import { useCenterIndicatorWindow } from "./indicator-window";
 const METRICS = ["revenue", "operating_income", "owner_roe", "investing_cash_flow", "dps", "debt_ratio"] as const;
 const LABELS = ["매출액", "영업이익", "지배주주 ROE", "투자활동 현금흐름", "DPS", "부채비율"];
 const row = (page: Page, id: string) => page.locator(`[data-indicator-row="${id}"]`);
+const detailValue = (indicator: Locator, name: string) => indicator.locator("details dl > div").filter({ has: indicator.page().locator("dt").getByText(name, { exact: true }) }).locator("dd").first();
 const data = (financial: FinancialFixture, symbol = "005930", period: "Q" | "Y" = "Y"): FinancialsPage => financial.page(symbol, period);
 
 async function seed(scenario: Scenario, period: "Q" | "Y" = "Y") {
@@ -219,8 +220,8 @@ test.describe("재무지원 경계", () => {
     expect(i).toBeGreaterThanOrEqual(0);
     await selectOption(row(page, "debt_ratio").getByRole("combobox"), { index: i + 1 });
     await expect(row(page, "debt_ratio").locator("details")).toContainText("자본총계가 0 이하");
-    await expect(row(page, "debt_ratio").locator("details")).toContainText("부채총계: 200 KRW");
-    await expect(row(page, "debt_ratio").locator("details")).toContainText("자본총계: 0 KRW");
+    await expect(detailValue(row(page, "debt_ratio"), "부채총계")).toHaveText("200 KRW");
+    await expect(detailValue(row(page, "debt_ratio"), "자본총계")).toHaveText("0 KRW");
     expect(await page.evaluate(() => window.frameProbe.snapshot().filter((s) => s.type === "Custom").flatMap((s) => s.data).some((p) => "connect" in p && p.connect === false))).toBe(true);
     await page.keyboard.press("Escape");
     await expect(row(page, "debt_ratio").locator("details")).not.toHaveAttribute("open", "");
@@ -231,7 +232,7 @@ test.describe("재무지원 경계", () => {
     expect(overlap).toBeGreaterThanOrEqual(0);
     await row(page, "revenue").locator("summary").click();
     await selectOption(row(page, "revenue").getByRole("combobox"), { index: overlap + 1 });
-    await expect(row(page, "revenue").locator("details")).toContainText("원래 보고값 1,000 KRW · 합산하지 않음");
+    await expect(detailValue(row(page, "revenue"), "원래 보고값")).toHaveText("1,000 KRW · 합산하지 않음");
   });
 });
 

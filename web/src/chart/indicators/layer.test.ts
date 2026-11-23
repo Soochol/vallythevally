@@ -796,3 +796,16 @@ test.each([false, true])("가격·지수·소수 지표·거래량의 원천 슬
   for (const t of [null, at(0), at(1)]) for (const row of f.layer.rows(t)) row.values.forEach((value, i) => expect(choices.find((choice) => choice.id === row.id)?.slots[i]).toContain(value.text));
   f.layer.dispose();
 });
+
+test("지표 설정을 그리다 차트가 던져도 범례 원천을 다시 만들도록 한 번 요청하고 예외는 그대로 올린다", () => {
+  let requested = 0;
+  const failing = () => { throw new Error("pane gone"); };
+  const chart = { addSeries: failing, addCustomSeries: failing, removeSeries: () => {}, panes: () => [] };
+  const layer = new IndicatorLayer(
+    { chart: chart as unknown as IChartApi, tokens: () => TOKENS, isIndex: () => false, period: () => "1m", requestFrame: () => { requested++; }, axisFormatted: () => {}, axisCoordinates: () => [], axisFailed: () => {}, guard: (draw) => draw() },
+    () => ({ chart: 1, post: () => {}, close: () => {} }),
+  );
+  expect(() => layer.setConfigs([ICHIMOKU], [])).toThrow("pane gone");
+  expect(requested).toBe(1);
+  expect(layer.rows(null).map((row) => row.id)).toEqual([ICHIMOKU.id]);
+});

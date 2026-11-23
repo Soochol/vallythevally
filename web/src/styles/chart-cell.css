@@ -19,7 +19,7 @@
 .chart-jump-warning { color:var(--warning); }
 .chart-jump-close { display:grid; place-items:center; flex:none; width:var(--size-24); height:var(--size-24); margin-left:var(--size-2); border-radius:var(--r-pill); color:var(--text-2); font-size:var(--fs-s); line-height:1; }
 .chart-jump-close:hover, .chart-jump-close:focus-visible { background:var(--hover); color:var(--text); }
-.chart-legend [data-indicator-row] button[data-indicator-command] { width:var(--size-24); height:var(--size-24); }
+.chart-legend :is([data-indicator-row] button[data-indicator-command],[data-compare-row]>button) { width:var(--size-24); height:var(--size-24); }
 [data-status-anchor]:not(:has(.chart-jump:not([hidden]))) { display:none; }
 [data-indicator-fold-box][data-folded]>:last-child { display:none; }
 [data-indicator-fold-box][data-folded]:is(:hover,:focus-within,[data-open])>:last-child { display:flex; position:absolute; left:0; top:100%; z-index:7; }
