@@ -21,11 +21,18 @@
 .tr-window[data-compact-strips] .tr-strips > .mw-strip:first-child { flex:1 1 0; overflow:hidden; }
 .tr-window[data-compact-strips] .tr-strips .mw-ratio { min-width:var(--size-24); }
 .tr-window[data-compact-strips] .tr-strips .mw-seg { padding:0; gap:0; }
-@container strips (width < 340px) { .tr-window[data-compact-strips] .tr-strips .mw-ratio { display:none; } }
-@container strips (width < 300px) { .tr-window[data-compact-strips] .tr-strips .mw-integrated { display:none; } }
-@container strips (width < 270px) {
-  .tr-window[data-compact-strips] .tr-strips .tr-name { display:none; }
+.tr-window[data-compact-strips] .tr-strips .tr-figure { display:inline-flex; flex:0 1 auto; gap:var(--size-4); min-width:0; }
+.tr-window[data-compact-strips] .tr-strips .tr-figure[data-figure="strength"] { flex-shrink:0; }
+.tr-window[data-compact-strips] .tr-strips .tr-figure b { min-width:0; overflow:hidden; text-overflow:ellipsis; }
+@container strips (width < 420px) { .tr-window[data-compact-strips] .tr-strips .mw-ratio { display:none; } }
+@container strips (width < 360px) {
+  .tr-window[data-compact-strips] .tr-strips .tr-name { position:absolute; width:var(--size-1); height:var(--size-1); margin:calc(-1 * var(--size-1)); padding:0; overflow:hidden; clip:rect(0, 0, 0, 0); white-space:nowrap; }
   .tr-window[data-compact-strips] .tr-strips > .mw-strip { gap:var(--size-4); padding:0 var(--size-4); }
+  .tr-window[data-compact-strips] .tr-strips .mw-seg button { padding:0 var(--size-4); }
+}
+@container strips (width < 340px) {
+  .tr-window[data-compact-strips] .tr-strips .mw-integrated { padding:0 var(--s3); font-size:0; }
+  .tr-window[data-compact-strips] .tr-strips .mw-integrated::before { content:"통합"; font-size:var(--fs-xs); }
 }
 .tr-gap { display:flex; align-items:center; justify-content:center; box-sizing:border-box; height:var(--size-24); padding:0 var(--s4); border-block:var(--size-1) dashed var(--line); overflow:hidden; color:var(--text-3); font-size:var(--fs-xs); white-space:nowrap; }
 .tr-empty { margin:0; padding:var(--s6) var(--s4); color:var(--text-3); font-size:var(--fs-xs); text-align:center; }

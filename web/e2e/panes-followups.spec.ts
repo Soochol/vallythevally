@@ -6,7 +6,7 @@ import type { RankingRow } from "../src/api/generated/RankingRow";
 import type { EtfFundDetail } from "../src/api/generated/EtfFundDetail";
 import { ETF_DETAILS } from "./fixtures/etf-data";
 import { marketOverviewBaseline, RANKING_ROWS } from "./fixtures/market-data";
-import { type Scenario, cell, DEFAULT_LAYOUT_ID, expect, pickDesktopVenue, test, windowTabs } from "./harness";
+import { type Scenario, cell, DEFAULT_LAYOUT_ID, expect, pickDesktopVenue, pollSaved, test, windowTabs } from "./harness";
 import type { TradePrint } from "../src/api/generated/TradePrint";
 import { CODE, FUNDAMENTAL_FIGURES, pinQuote, SETTINGS } from "./order-window";
 
@@ -262,47 +262,96 @@ test("체결 창 높이 260px 아래에서는 띠가 한 줄이다", async ({ pa
   await expectStripsAt(page, (height) => floating.evaluate((element, value) => { element.style.height = `${value}px`; }, height), "떠 있는 창");
 });
 
-const MIN_TRADES_WINDOW_WIDTH = 220;
+const NARROW_STRIP_WIDTHS = [220, 300, 330];
+const LONG_STRENGTH = 123.45;
+const LONG_QUANTITY = 12_000_000;
 
-const stripContentFit = (page: Page) =>
+const stripFit = (page: Page) =>
   page.getByTestId("trades-window").evaluate((window) => {
     const strips = window.querySelector<HTMLElement>(".tr-strips")!.getBoundingClientRect();
-    const parts = ["[data-testid=trade-strength]", "[data-testid=trade-cumulative]", ".mw-seg button:nth-child(1)", ".mw-seg button:nth-child(2)", ".mw-seg button:nth-child(3)"];
-    return parts.map((selector) => {
-      const element = window.querySelector<HTMLElement>(selector);
-      if (element === null) return { selector, found: false, visible: false };
+    const inside = (element: HTMLElement) => {
       const box = element.getBoundingClientRect();
       const owner = element.closest<HTMLElement>(".mw-strip")!.getBoundingClientRect();
-      const inside = box.width > 0 && box.left >= strips.left - 0.5 && box.right <= strips.right + 0.5 && box.right <= owner.right + 0.5;
-      return { selector, found: true, visible: inside && getComputedStyle(element).visibility === "visible", box: [Math.round(box.left), Math.round(box.right)], stripsRight: Math.round(strips.right), ownerRight: Math.round(owner.right) };
-    });
+      return box.width > 0 && box.left >= strips.left - 0.5 && box.right <= strips.right + 0.5 && box.right <= owner.right + 0.5 && box.left >= owner.left - 0.5;
+    };
+    const one = (selector: string) => window.querySelector<HTMLElement>(selector);
+    const strength = one("[data-testid=trade-strength]");
+    const cumulative = one("[data-testid=trade-cumulative]");
+    const badge = one("[data-testid=trade-integrated-only]");
+    const buttons = [...window.querySelectorAll<HTMLElement>(".mw-seg button")];
+    const names = [...window.querySelectorAll<HTMLElement>(".tr-strips .tr-name")];
+    return {
+      stripsHeight: strips.height,
+      stripWidths: [...window.querySelectorAll<HTMLElement>(".tr-strips > .mw-strip")].map((strip) => Math.round(strip.getBoundingClientRect().width)),
+      figureWidths: [strength, cumulative].map((figure) => (figure === null ? null : [Math.round(figure.clientWidth), figure.scrollWidth])),
+      strengthText: strength?.textContent ?? null,
+      cumulativeText: cumulative?.textContent ?? null,
+      strengthInside: strength !== null && inside(strength),
+      strengthWhole: strength !== null && strength.scrollWidth <= strength.clientWidth,
+      cumulativeInside: cumulative !== null && inside(cumulative),
+      cumulativeEllipsis: cumulative !== null && getComputedStyle(cumulative).textOverflow === "ellipsis",
+      buttonsInside: buttons.length === 3 && buttons.every(inside),
+      badgeInside: badge === null ? null : inside(badge),
+      namesKept: names.length === 3 && names.every((name) => getComputedStyle(name).display !== "none" && (name.textContent ?? "").trim() !== ""),
+    };
   });
 
-async function expectStripContentVisible(page: Page, where: string) {
-  await expect.poll(async () => (await tradesLayout(page)).strips, { message: where }).toBe(TRADES_STRIP_ROW_HEIGHT);
-  await expect.poll(async () => (await stripContentFit(page)).every((part) => part.visible), { message: where }).toBe(true);
-  const fit = await stripContentFit(page);
-  expect(fit.every((part) => part.found && part.visible), `${where} ${JSON.stringify(fit)}`).toBe(true);
+async function feedLongFigures(page: Page, scenario: Scenario) {
+  await pollSaved(() => feedSubOf(scenario)).toBeDefined();
+  scenario.live.emit({ type: "feed_trades", sub: feedSubOf(scenario)!, seq: 1, trades: [{ t: scenario.now / 1000 + 1, price: 71_500, qty: LONG_QUANTITY, venue: null, strength: LONG_STRENGTH }] });
+  await expect(page.getByTestId("trade-strength")).toHaveText("123.45%");
 }
 
-test("체결 창 최소 폭 220px·높이 250px에서도 체결강도·누적 값과 최소 금액 버튼이 잘리지 않고 보인다", async ({ page, scenario }) => {
+const feedSubOf = (scenario: Scenario): string | undefined => {
+  const request = scenario.live.messages.filter((message) => message.type === "subscribe_feed" && message.kind === "trades").at(-1);
+  return request?.type === "subscribe_feed" ? request.sub : undefined;
+};
+
+async function expectNarrowStrip(page: Page, where: string, integrated: boolean) {
+  await expect.poll(async () => (await stripFit(page)).stripsHeight, { message: where }).toBe(TRADES_STRIP_ROW_HEIGHT);
+  const settled = async () => { const fit = await stripFit(page); return fit.strengthInside && fit.cumulativeInside && fit.buttonsInside && fit.namesKept && (!integrated || fit.badgeInside === true); };
+  await expect.poll(settled, { message: where }).toBe(true);
+  const fit = await stripFit(page);
+  const note = `${where} ${JSON.stringify(fit)}`;
+  expect(fit.strengthText, note).toBe("123.45%");
+  expect(fit.strengthWhole, note).toBe(true);
+  expect(fit.cumulativeEllipsis, note).toBe(true);
+  expect(fit.cumulativeText, note).toMatch(/^\d{1,2},\d{3},\d{3}$/);
+  if (integrated) {
+    await expect(page.getByTestId("trade-integrated-only"), note).toBeVisible();
+    expect((await page.getByTestId("trade-integrated-only").boundingBox())!.width, note).toBeGreaterThan(0);
+  }
+}
+
+test("체결 창 한 줄 띠는 좁은 폭에서도 값과 통합 기준을 보인다", async ({ page, scenario }) => {
   await openTradesWindow(page, scenario);
   const group = page.locator("[data-dock-group]").filter({ has: page.getByTestId("trades-window") });
-  await group.evaluate((element, size) => {
+  const resize = (width: number) => group.evaluate((element, size) => {
     element.dataset.originalStyle ??= element.getAttribute("style") ?? "";
     element.setAttribute("style", `${element.dataset.originalStyle};flex:none;width:${size.width}px;height:${size.height}px`);
-  }, { width: MIN_TRADES_WINDOW_WIDTH, height: SHORT_WINDOW_HEIGHT });
-  await expect.poll(async () => (await page.getByTestId("trades-window").boundingBox())!.width).toBeLessThanOrEqual(MIN_TRADES_WINDOW_WIDTH);
-  await expectStripContentVisible(page, "도킹 220px");
+  }, { width, height: SHORT_WINDOW_HEIGHT });
+
+  await feedLongFigures(page, scenario);
+  for (const width of NARROW_STRIP_WIDTHS) {
+    await resize(width);
+    await expect.poll(async () => (await page.getByTestId("trades-window").boundingBox())!.width).toBeLessThanOrEqual(width);
+    await expectNarrowStrip(page, `도킹 ${width}px`, false);
+  }
 
   await pickDesktopVenue(page, "NXT");
   await expect(page.getByTestId("trade-integrated-only")).toHaveCount(1);
-  await expectStripContentVisible(page, "도킹 220px 통합 기준");
+  await feedLongFigures(page, scenario);
+  for (const width of NARROW_STRIP_WIDTHS) {
+    await resize(width);
+    await expect.poll(async () => (await page.getByTestId("trades-window").boundingBox())!.width).toBeLessThanOrEqual(width);
+    await expectNarrowStrip(page, `도킹 ${width}px 통합 기준`, true);
+  }
 
   await page.getByRole("tab", { name: /^체결/ }).press("Shift+F10");
   await page.getByRole("menuitem", { name: "띄우기", exact: true }).click();
   const floating = page.locator('[data-dock-float="trades"]');
   await expect(floating).toBeVisible();
-  await floating.evaluate((element, size) => { element.style.width = `${size.width}px`; element.style.height = `${size.height}px`; }, { width: MIN_TRADES_WINDOW_WIDTH, height: SHORT_WINDOW_HEIGHT });
-  await expectStripContentVisible(page, "떠 있는 창 220px 통합 기준");
+  await feedLongFigures(page, scenario);
+  await floating.evaluate((element, size) => { element.style.width = `${size.width}px`; element.style.height = `${size.height}px`; }, { width: NARROW_STRIP_WIDTHS[0]!, height: SHORT_WINDOW_HEIGHT });
+  await expectNarrowStrip(page, "떠 있는 창 220px 통합 기준", true);
 });

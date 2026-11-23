@@ -44,9 +44,9 @@ function TradesBody({ code, venue }: { code: SymbolCode; venue: Venue }) {
       <MarketHead code={code} venue={venue} lastPrice={lastPrice} previousClose={previousClose} />
       <div className="tr-strips">
       <Strip>
-        <span title="체결강도"><span className="tr-name">체결강도 </span><b data-testid="trade-strength">{state.strength === null ? "—" : `${formatDecimal(state.strength)}%`}</b></span>
+        <span className="tr-figure" data-figure="strength" title="체결강도"><span className="tr-name">체결강도 </span><b data-testid="trade-strength">{state.strength === null ? "—" : `${formatDecimal(state.strength)}%`}</b></span>
         <RatioBar buy={split.buy} sell={split.sell} label="최근 체결의 매수·매도 비율" />
-        <span title="누적"><span className="tr-name">누적 </span><b data-testid="trade-cumulative">{formatQuantity(cumulativeQuantity(state, effectiveVenue))}</b></span>
+        <span className="tr-figure" data-figure="cumulative" title="누적"><span className="tr-name">누적 </span><b data-testid="trade-cumulative">{formatQuantity(cumulativeQuantity(state, effectiveVenue))}</b></span>
       </Strip>
       <Strip>
         <span className="tr-name">최소 금액</span>
