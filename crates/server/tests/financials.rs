@@ -334,6 +334,10 @@ async fn settled_stock(service: &Arc<Financials>, stock: &str, preferred: bool) 
 
 async fn settled(service: &Arc<Financials>) -> ReadSnapshot { settled_stock(service,"005930",false).await }
 
+async fn release(service: Arc<Financials>) {
+    tokio::time::timeout(Duration::from_secs(5), async { while Arc::strong_count(&service) > 1 { tokio::time::sleep(Duration::from_millis(5)).await; } }).await.expect("the finished update task lets go of the service");
+}
+
 #[tokio::test]
 async fn collects_only_requested_companies_and_reads_disk_after_restart() {
     let fake = Fake::start().await;
@@ -440,6 +444,7 @@ async fn incomplete_run_resumes_and_disclosure_failures_do_not_discard_saved_dat
     let mut partial = original.collection.clone();
     partial.reports.remove("2015/11014");
     store.save(CORP,&partial).await.unwrap();
+    release(service).await;
     let restarted = Financials::new(Some(fake.client()),store,clock.clone());
     let resumed = settled(&restarted).await;
     assert_eq!(resumed.collection.reports.len(),4);
@@ -829,6 +834,7 @@ async fn review_legacy_snapshots_without_versions_resume_already_saved_correctio
     }
     let mut connection = sqlx::SqliteConnection::connect_with(&sqlx::sqlite::SqliteConnectOptions::new().filename(&path)).await.unwrap();
     sqlx::query("UPDATE companies SET body = ? WHERE corp_code = ?").bind(body.to_string()).bind(CORP).execute(&mut connection).await.unwrap();
+    release(service).await;
     let reopened = Financials::new(Some(fake.client()),Store::open(&path).await.unwrap(),clock.clone());
     let before = fake.count("list.json");
     let waiting = reopened.read("005930").await;
@@ -953,6 +959,7 @@ async fn review2_failed_list_storage_keeps_real_price_usable_and_preserves_verif
     let path = dir.path().join("run/financials.db");
     let service = Financials::new(Some(fake.client()),Store::open(&path).await.unwrap(),clock());
     let original = settled(&service).await.collection;
+    release(service).await;
     std::fs::set_permissions(dir.path().join("run"),std::fs::Permissions::from_mode(0o700)).unwrap();
     let mut connection = sqlx::SqliteConnection::connect_with(&sqlx::sqlite::SqliteConnectOptions::new().filename(&path)).await.unwrap();
     sqlx::query("CREATE TRIGGER fail_list_storage BEFORE INSERT ON companies WHEN NEW.corp_code = '00126380' BEGIN SELECT RAISE(FAIL,'synthetic list storage failure'); END").execute(&mut connection).await.unwrap();
@@ -1036,6 +1043,7 @@ async fn calculated_http_reads_saved_values_without_key_and_applies_correction_w
     let path = dir.path().join("run/financials.db");
     let service = Financials::new(Some(fake.client()),Store::open(&path).await.unwrap(),clock());
     settled(&service).await;
+    release(service).await;
     std::fs::set_permissions(dir.path().join("run"),std::fs::Permissions::from_mode(0o700)).unwrap();
     let client = reqwest::Client::new();
     for configured in [false,true] {
@@ -1077,6 +1085,9 @@ async fn calculated_http_reads_saved_values_without_key_and_applies_correction_w
 
 #[path = "financials/schedule.rs"]
 mod schedule;
+
+#[path = "financials/writer.rs"]
+mod writer;
 
 #[tokio::test(start_paused = true)]
 async fn source_observation_waits_while_earlier_paced_requests_are_progressing() {
