@@ -1834,6 +1834,7 @@ pub enum ApiErrorReason {
     MissingDay,
     Updating,
     DataChanged,
+    StaleData,
     NotConnected,
     OrdersOff,
     AccountChanged,

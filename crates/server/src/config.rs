@@ -154,6 +154,7 @@ const KNOWN_KEYS: &[&str] = &[
     "VALLY_DB_PATH",
     "VALLY_SCREENER_DB_PATH",
     "VALLY_SCREENER_UPDATE_ON_START",
+    "VALLY_SCREENER_SNAPSHOT_STALE_SECS",
     "VALLY_LOCK_PATH",
     "VALLY_TOKEN_PATH",
     "VALLY_KIWOOM_KEY_PATH",
@@ -205,6 +206,7 @@ pub struct Config {
     pub db_path: PathBuf,
     pub screener_db_path: PathBuf,
     pub screener_update_on_start: bool,
+    pub screener_snapshot_stale_limit: Duration,
     pub log_filter: String,
     pub opendart_api_key: Option<Secret<String>>,
     pub dart_base_url: String,
@@ -240,6 +242,18 @@ fn shared_data_settings(vars: &BTreeMap<String, String>) -> Result<Option<crate:
         },
     };
     Ok(Some(crate::shared_data::SharedDataSettings { dir, poll }))
+}
+
+const DEFAULT_SCREENER_SNAPSHOT_STALE_LIMIT: Duration = Duration::from_secs(120);
+
+fn screener_snapshot_stale_limit(vars: &BTreeMap<String, String>) -> Result<Duration, ConfigError> {
+    match vars.get("VALLY_SCREENER_SNAPSHOT_STALE_SECS").filter(|v| !v.is_empty()) {
+        None => Ok(DEFAULT_SCREENER_SNAPSHOT_STALE_LIMIT),
+        Some(s) => match s.parse::<u64>() {
+            Ok(secs) if secs > 0 => Ok(Duration::from_secs(secs)),
+            _ => Err(ConfigError(format!("VALLY_SCREENER_SNAPSHOT_STALE_SECS는 1 이상의 정수입니다: {s}"))),
+        },
+    }
 }
 
 /// 설정을 읽으며 모은 경고. 로그를 켜기 전에 읽으므로 호출자가 나중에 남긴다.
@@ -398,6 +412,7 @@ impl Config {
                 Some("off") => false,
                 Some(other) => return Err(ConfigError(format!("VALLY_SCREENER_UPDATE_ON_START는 on이나 off입니다: {other}"))),
             },
+            screener_snapshot_stale_limit: screener_snapshot_stale_limit(&vars)?,
             account_server_url,
             account_state_path,
             collector_socket,
@@ -826,6 +841,20 @@ mod tests {
         assert!(start("on").unwrap().0.screener_update_on_start);
         assert!(!start("off").unwrap().0.screener_update_on_start);
         assert!(start("no").is_err());
+    }
+
+    #[test]
+    fn screener_snapshot_stale_limit_defaults_to_two_minutes_and_needs_a_positive_integer() {
+        let limit = |value: Option<&str>| {
+            let mut pairs = vec![("VALLY_KIWOOM_APP_KEY", KEY), ("VALLY_KIWOOM_APP_SECRET", SECRET)];
+            pairs.extend(value.map(|v| ("VALLY_SCREENER_SNAPSHOT_STALE_SECS", v)));
+            Config::from_vars(vars(&pairs), vars(&REAL), lock, token, key, account).map(|(config, _)| config.screener_snapshot_stale_limit)
+        };
+        assert_eq!(limit(None).unwrap(), Duration::from_secs(120));
+        assert_eq!(limit(Some("45")).unwrap(), Duration::from_secs(45));
+        for bad in ["0", "-5", "abc", "1.5"] {
+            assert!(limit(Some(bad)).is_err(), "{bad}");
+        }
     }
 
     #[test]

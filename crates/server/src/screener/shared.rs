@@ -1,13 +1,15 @@
 use std::collections::{HashMap, VecDeque};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use domain::{KstDate, KstTime, Ohlcv, Price, StockCode, Venue, Volume};
 use tokio::sync::OnceCell;
 
 use super::Observation;
 use super::summary::{CollectionBasis, CollectionId, MissingSummary, StockSummary, SummaryBatch};
-use crate::api::{Screen, ScreenerResult};
+use crate::api::{ApiErrorReason, Screen, ScreenerResult};
+use crate::http::ApiFailure;
 use crate::kiwoom::wire::{KrxSummary, KrxSummaryValues, MillionWon, WireError};
 use crate::shared_data::{Loaded, SharedData, SnapshotBody, SnapshotRow};
 
@@ -57,6 +59,7 @@ struct State {
 
 pub(super) struct SharedQuotes {
     data: Arc<SharedData>,
+    stale_limit: Duration,
     state: Mutex<State>,
     hits: AtomicU64,
     misses: AtomicU64,
@@ -76,8 +79,8 @@ pub(super) fn screen_key(screen: &Screen) -> String {
 }
 
 impl SharedQuotes {
-    pub(super) fn new(data: Arc<SharedData>) -> Self {
-        SharedQuotes { data, state: Mutex::new(State::default()), hits: AtomicU64::new(0), misses: AtomicU64::new(0) }
+    pub(super) fn new(data: Arc<SharedData>, stale_limit: Duration) -> Self {
+        SharedQuotes { data, stale_limit, state: Mutex::new(State::default()), hits: AtomicU64::new(0), misses: AtomicU64::new(0) }
     }
 
     pub(super) fn counts(&self) -> ReuseCounts {
@@ -98,6 +101,14 @@ impl SharedQuotes {
             Observation::Unresolved => previous_day.is_none_or(|previous| observation_day >= previous),
         };
         current.then(|| Snapshot { id: SnapshotId { observation_day, as_of: loaded.header.as_of, written_at: loaded.header.written_at }, loaded })
+    }
+
+    pub(super) fn refuse_if_stale(&self, snapshot: &Snapshot, now: KstTime) -> Result<(), ApiFailure> {
+        let age = now.unix() - snapshot.id.as_of;
+        if age <= self.stale_limit.as_secs() as i64 {
+            return Ok(());
+        }
+        Err(ApiFailure::screener_not_ready(ApiErrorReason::StaleData, format!("공용 시세 스냅샷이 {age}초 전 자료라 한도 {}초를 넘었습니다. 수집 데몬이 멈췄는지 확인하세요", self.stale_limit.as_secs())))
     }
 
     pub(super) fn slot(&self, key: ResultKey) -> Slot {

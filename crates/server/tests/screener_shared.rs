@@ -135,6 +135,10 @@ impl Session {
     }
 
     fn boot(&self, with_shared: bool) -> Server {
+        self.boot_with(with_shared, &[])
+    }
+
+    fn boot_with(&self, with_shared: bool, extra: &[(&str, &OsStr)]) -> Server {
         let clock = at(self.today, self.hhmm);
         let shared = self.shared.clone();
         let mut overrides: Vec<(&str, &OsStr)> = vec![("VALLY_CLOCK_START", OsStr::new(&clock))];
@@ -142,6 +146,7 @@ impl Session {
             overrides.push(("VALLY_SHARED_DATA_DIR", shared.as_os_str()));
             overrides.push(("VALLY_SHARED_DATA_POLL_MILLIS", OsStr::new("20")));
         }
+        overrides.extend_from_slice(extra);
         Server::spawn_with(&self.fake, &self.dir.path().join("run/server.lock"), self.dir.path(), &overrides)
     }
 
@@ -400,5 +405,60 @@ async fn while_today_is_not_yet_known_a_snapshot_older_than_the_previous_observa
     let result = api.result_of_snapshot(&every(vec![]), as_of).await;
     assert_eq!((result["asOf"].clone(), result["missingSummary"].clone()), (json!(previous.to_string()), json!(2)), "평일 낮 달력에 오늘이 없으면 휴장으로 추정하지 않고 이전 날짜 행을 누락으로 센다: {result}");
     assert_eq!(session.quote_calls(), quote_calls);
+    server.stop().await;
+}
+
+#[tokio::test]
+async fn an_intraday_snapshot_older_than_the_limit_fails_as_stale_and_a_fresh_one_or_a_closed_market_runs_as_before() {
+    let today = day(2026, 11, 9);
+    let stored = last_open_days(20, today.add_days(-1));
+    let rows = |on: KstDate| (0..2).map(|i| quote(&code_of(i), on, 100, 100, 1_000, 1)).collect::<Vec<_>>();
+
+    let intraday = Session::prepare(today, "1200", 2, stored.clone(), [stored.clone(), vec![today]].concat()).await;
+    let stale_as_of = kst(today, 11, 57, 0).unix();
+    publish(&intraday.shared, today, stale_as_of, &rows(today));
+    let server = intraday.boot(true);
+    let api = Api::of(&server).await;
+    api.warm_calendar().await;
+    let mut refused = (200, Value::Null);
+    for _ in 0..500 {
+        refused = api.run(&every(vec![])).await;
+        if refused.1["error"]["reason"] == json!("stale_data") {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    assert_eq!((refused.0, refused.1["error"]["code"].clone(), refused.1["error"]["reason"].clone()), (409, json!("screener_not_ready"), json!("stale_data")), "{}", refused.1);
+
+    let fresh_as_of = kst(today, 11, 59, 30).unix();
+    publish(&intraday.shared, today, fresh_as_of, &rows(today));
+    api.result_of_snapshot(&every(vec![]), fresh_as_of).await;
+    server.stop().await;
+
+    let raised = intraday.boot_with(true, &[("VALLY_SCREENER_SNAPSHOT_STALE_SECS", OsStr::new("600"))]);
+    let api = Api::of(&raised).await;
+    publish(&intraday.shared, today, stale_as_of, &rows(today));
+    api.warm_calendar().await;
+    api.result_of_snapshot(&every(vec![]), stale_as_of).await;
+    raised.stop().await;
+
+    let stored_with_today = [stored.clone(), vec![today]].concat();
+    let after_close = Session::prepare(today, "2030", 2, stored_with_today.clone(), stored_with_today).await;
+    let closing_as_of = kst(today, 20, 0, 30).unix();
+    publish(&after_close.shared, today, closing_as_of, &rows(today));
+    let server = after_close.boot(true);
+    let api = Api::of(&server).await;
+    api.result_of_snapshot(&every(vec![]), closing_as_of).await;
+    server.stop().await;
+
+    let saturday = day(2026, 11, 14);
+    let before_saturday = last_open_days(20, saturday.add_days(-1));
+    let last_friday = *before_saturday.last().unwrap();
+    let weekend = Session::prepare(saturday, "1200", 2, before_saturday.clone(), before_saturday).await;
+    let friday_as_of = kst(last_friday, 20, 0, 30).unix();
+    publish(&weekend.shared, last_friday, friday_as_of, &rows(last_friday));
+    let server = weekend.boot(true);
+    let api = Api::of(&server).await;
+    api.result_of_snapshot(&every(vec![]), friday_as_of).await;
     server.stop().await;
 }
