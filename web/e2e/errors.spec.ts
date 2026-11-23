@@ -12,8 +12,10 @@ test("주소의 없는 종목은 알림으로 알리고 칸은 그대로 둔다"
 test("인증 중단 응답은 상태 막대와 칸에 이유를 보이고 다시 시도를 감춘다", async ({ page, scenario }) => {
   scenario.reply("/api/bars", { status: 503, body: stopped });
   await page.goto("/");
-  const status = page.getByRole("contentinfo").getByRole("alert");
-  await expect(status).toContainText("[8050]");
+  const banner = page.getByTestId("shell-banner");
+  await banner.getByRole("button", { name: "자세히" }).click();
+  await expect(page.getByRole("dialog", { name: "자세히" })).toContainText("[8050]");
+  await expect(page.getByRole("contentinfo")).not.toContainText("[8050]");
   const overlay = cell(page).getByRole("alert");
   await expect(overlay).toContainText("[8050]");
   await expect(overlay.getByRole("button", { name: "다시 시도" })).toHaveCount(0);

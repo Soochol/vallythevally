@@ -125,7 +125,7 @@ test.describe("데스크톱", () => {
     const saved = layoutSaved(page, { venue: "combined", period: "10m" });
     await choose(periods, "10분");
     await saved;
-    await expect(page.getByRole("contentinfo").getByText(/자동 저장됨/)).toBeVisible();
+    await expect(page.getByRole("contentinfo").getByText(/^저장됨$/)).toBeVisible();
 
     const expectRestored = async () => {
       await expectTenMinuteBars(page, requested, "삼성전자 통합 10분", { symbol: "005930", venue: "combined", period: "10m" });

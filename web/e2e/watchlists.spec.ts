@@ -60,7 +60,7 @@ test("목록 셋, 목록마다의 순서, 고른 열이 새로고침 뒤에도 �
   const uiSaved = page.waitForResponse((r) => r.request().method() === "PUT" && r.url().endsWith("/api/ui-state") && r.ok());
   await page.keyboard.press("Escape");
   await uiSaved;
-  await expect(page.getByRole("contentinfo").getByText(/자동 저장됨/)).toBeVisible();
+  await expect(page.getByRole("contentinfo").getByText(/^저장됨$/)).toBeVisible();
 
   const expectRestored = async () => {
     await expect(listButton(page)).toHaveAccessibleName("관심종목 목록: 빈 목록");

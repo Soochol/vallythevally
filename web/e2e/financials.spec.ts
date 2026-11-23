@@ -154,7 +154,7 @@ test.describe("재무지원 경계", () => {
     await pickDesktopVenue(page, "KRX");
     await expect(cell(page)).toHaveAttribute("aria-busy", "false");
     await expect(row(page, "revenue")).toContainText("확인 완료");
-    await expect(page.getByRole("contentinfo")).toContainText("자동 저장됨");
+    await expect(page.getByRole("contentinfo")).toContainText("저장됨");
     const stored: Layout = await scenario.documents.layout(DEFAULT_LAYOUT_ID);
     expect(firstChart(stored).chartSettings).toEqual(settings);
   });

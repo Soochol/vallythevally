@@ -281,3 +281,8 @@ export const PauseIcon = ({ size = 14 }: P) => (
     <path d="M9 6v12M15 6v12" />
   </Icon>
 );
+export const SyncIcon = ({ size = 12 }: P) => (
+  <Icon size={size}>
+    <path d="M20 11a8 8 0 0 0-14.5-4M4 4v4h4M4 13a8 8 0 0 0 14.5 4M20 20v-4h-4" />
+  </Icon>
+);

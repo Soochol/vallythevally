@@ -10,7 +10,7 @@ test("바꾼 종목·거래소·봉 주기가 새로고침 뒤에도 남는다",
   const saved = page.waitForResponse((r) => r.request().method() === "PUT" && r.url().includes("/api/layouts/") && r.ok());
   await toolbar.getByRole("group", { name: "봉 주기" }).getByRole("button", { name: "주", exact: true }).click();
   await saved;
-  await expect(page.getByRole("contentinfo").getByText(/자동 저장됨/)).toBeVisible();
+  await expect(page.getByRole("contentinfo").getByText(/^저장됨$/)).toBeVisible();
 
   const expectRestored = async () => {
     await expect(cell(page)).toHaveAttribute("aria-label", "칸 1: 삼성전자 NXT 주");

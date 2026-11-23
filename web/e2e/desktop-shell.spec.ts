@@ -50,12 +50,12 @@ test("상태 막대는 연결·저장·서버 시계와 공유 재무 조회의 
   await page.goto("/");
   const footer = page.locator("footer").last();
   await expect(footer).toContainText(/실시간 연결됨|장 닫힘: 체결 없음/);
-  await expect(footer.getByLabel("장 상태와 서버 시계")).toHaveText(/장(중| 마감) · \d{2}:\d{2}:\d{2}/);
+  await expect(footer.getByLabel("장 상태와 서버 시계")).toHaveText(/^장(중| 마감) \d{2}:\d{2}$/);
   await expect(footer.getByLabel("재무 수집 상태")).toContainText("저장 자료 · 갱신 대기");
   await expect(footer.getByLabel("재무 수집 상태")).toContainText("실패 1");
   await expect(footer.getByRole("progressbar")).toHaveCount(0);
   await tabs(page).getByRole("tab", { name: "스크리너", exact: true }).click();
-  await expect(footer).toContainText("자동 저장됨");
+  await expect(footer).toContainText("저장됨");
   financial.status = "partial_failure";
   await page.reload();
   await expect(footer.getByLabel("재무 수집 상태")).toContainText("일부 조회 실패");

@@ -112,7 +112,7 @@ test("startup legacy read failure then late ACK retains revision maximum for bac
     await expect.poll(() => pendingRecords(page)).toEqual([]);
     const afterDelete = await page.evaluate(id => JSON.parse(localStorage.getItem(`vv.drawing.completed.${id}`) ?? "null"), original.id);
     releaseAck();
-    await expect(other.getByText(/^자동 저장됨 /)).toBeVisible();
+    await expect(other.getByText(/^저장됨$/)).toBeVisible();
     const afterAck = await page.evaluate(id => JSON.parse(localStorage.getItem(`vv.drawing.completed.${id}`) ?? "null"), original.id);
     const serverAfterAck = await storedDrawings(scenario);
     expect(serverAfterAck).toEqual([]);

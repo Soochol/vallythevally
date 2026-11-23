@@ -224,7 +224,7 @@ test("drawing engine: another tab's edit prevents undoing its content", async ({
 
 test("drawing engine: completed legacy replay is retired locally and the newer server edit wins", async ({ page, scenario }) => {
   await open(page); await draw(page); await pollSaved(async () => (await drawings(scenario)).length).toBe(1);
-  await expect(page.getByText(/^자동 저장됨 /)).toBeVisible();
+  await expect(page.getByText(/^저장됨$/)).toBeVisible();
   const original = (await drawings(scenario))[0]!;
   const changed = { ...original, points: original.points.map((p) => ({ ...p, price: p.price + 100 })), revision: original.revision + 100 };
   scenario.documents.saveDrawing(changed);
@@ -236,7 +236,7 @@ test("drawing engine: completed legacy replay is retired locally and the newer s
   page.on("request", request => { if (request.url().endsWith(`/api/drawings/${original.id}`) && request.method() === "PUT") requests.push(request.method()); });
   await page.reload();
   await expect.poll(() => page.evaluate((id) => localStorage.getItem(`vv.unsaved.drawing.${id}`), original.id)).toBeNull();
-  await expect(page.getByText(/^자동 저장됨 /)).toBeVisible();
+  await expect(page.getByText(/^저장됨$/)).toBeVisible();
   expect(requests).toEqual([]);
   expect(await page.evaluate(key => localStorage.getItem(key), completionKey(original.id))).toBe(completed);
   expect((await drawings(scenario))[0]!.points).toEqual(changed.points);

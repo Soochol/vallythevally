@@ -169,10 +169,10 @@ test("빼기 저장이 처음 실패해도 되돌린 목록을 다시 저장한�
     return route.fallback();
   });
   await action(page, "086520", "관심종목에서 빼기");
-  await expect(page.getByRole("contentinfo").getByRole("alert")).toContainText("저장하지 못했습니다");
+  await expect(page.getByTestId("shell-banner")).toContainText("저장하지 못했습니다");
   await page.getByRole("button", { name: "되돌리기", exact: true }).click();
   await expect(row(page, "086520")).toBeVisible();
-  await expect(page.getByRole("contentinfo")).toContainText("자동 저장됨");
+  await expect(page.getByRole("contentinfo")).toContainText("저장됨");
   expect(scenario.documents.watchlists().lists[0]!.symbols).toEqual(["005930", "086520", "005935"]);
 });
 
