@@ -6,6 +6,8 @@ import { layoutDock, wholePixels, type DockSpace, type GutterBox } from "../../l
 import type { DockPlacement } from "../../layout/placement";
 import { useLayoutStore } from "../../stores/layout";
 import { Menu, type MenuItem } from "../menu/Menu";
+import type { CommitRatios } from "./Divider";
+import { mergeRepeatedReasons } from "./menuReasons";
 
 type Preset = { label: string; preset: SharePreset };
 
@@ -21,18 +23,18 @@ const rectsOf = (placement: DockPlacement, space: DockSpace) => {
   return JSON.stringify(layoutDock(placement.root, px.area, px.gap).groups.map(({ rect }) => rect));
 };
 
-export function DividerMenu({ box, dock, space, root, at, onClose }: { box: GutterBox; dock: DockPlacement; space: DockSpace; root: RefObject<HTMLElement | null>; at: { x: number; y: number }; onClose(): void }) {
+export function DividerMenu({ box, dock, space, onCommit, root, at, onClose }: { box: GutterBox; dock: DockPlacement; space: DockSpace; onCommit: CommitRatios; root: RefObject<HTMLElement | null>; at: { x: number; y: number }; onClose(): void }) {
   const canUndo = useLayoutStore((s) => s.steps.length > 0);
   const dir = box.node.dir;
   const current = dir === "row" ? box.rect.x - box.bounds.x : box.rect.y - box.bounds.y;
   const preset = ({ label, preset }: Preset): MenuItem => {
     const target = presetLead(dock, box.path, space, preset);
     const unchanged = target?.lead === current;
-    const hint = unchanged ? undefined : target?.clamped !== false ? LEAST_REASON[dir] : undefined;
-    return { kind: "action", label, disabled: unchanged || target === null || target.clamped, hint, onSelect: () => useLayoutStore.getState().setDock(applyPreset(dock, box.path, preset, space).dock) };
+    const disabledReason = unchanged ? undefined : target?.clamped !== false ? LEAST_REASON[dir] : undefined;
+    return { kind: "action", label, disabled: unchanged || target === null || target.clamped, disabledReason, onSelect: () => onCommit(applyPreset(dock, box.path, preset, space).dock, dock) };
   };
   const apply = (next: DockPlacement) => {
-    if (rectsOf(next, space) !== rectsOf(dock, space)) useLayoutStore.getState().setDock(next);
+    if (rectsOf(next, space) !== rectsOf(dock, space)) onCommit(next, dock);
   };
   const items: MenuItem[] = [
     ...PRESETS[dir].map(preset),
@@ -42,5 +44,5 @@ export function DividerMenu({ box, dock, space, root, at, onClose }: { box: Gutt
     { kind: "separator" },
     { kind: "action", label: "배치 되돌리기", disabled: !canUndo, onSelect: () => useLayoutStore.getState().undoArrangement() },
   ];
-  return <Menu label="경계 크기" root={root} items={items} style={{ left: at.x, top: at.y }} onClose={onClose} />;
+  return <Menu label="경계 크기" root={root} items={mergeRepeatedReasons(items)} style={{ left: at.x, top: at.y }} onClose={onClose} />;
 }

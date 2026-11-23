@@ -195,6 +195,17 @@ export const askAtLastSnapshot = (spreadGap = 0): ReturnType<typeof snapshot> =>
   bids: Array.from({ length: 10 }, (_, i) => ({ price: BASE - 100 - spreadGap - 100 * i, quantity: 20 + i })),
 });
 
+type DockTree = { kind: "group"; id: string; tabs: string[]; active: string } | { kind: "split"; dir: "row" | "column"; ratio: number; first: DockTree; second: DockTree };
+
+function ordersBelowCharts(windows: readonly LayoutWindow[]): DockTree {
+  const left = windows.filter((window) => window.kind === "chart" || window.kind === "order").map((window) => window.id);
+  const right = windows.filter((window) => window.kind !== "chart" && window.kind !== "order").map((window) => window.id);
+  const groups: DockTree[] = left.map((id, index) => ({ kind: "group", id: `g${index + 1}`, tabs: [id], active: id }));
+  const stack = (rest: DockTree[]): DockTree => rest.length === 1 ? rest[0]! : { kind: "split", dir: "column", ratio: 1 / rest.length, first: rest[0]!, second: stack(rest.slice(1)) };
+  const column = stack(groups);
+  return right.length ? { kind: "split", dir: "row", ratio: 0.72, first: column, second: { kind: "group", id: `g${left.length + 1}`, tabs: right, active: right[0]! } } : column;
+}
+
 export async function openOrderWindow(page: Page, scenario: Scenario, withSecondChart = false, savedVenue: Venue = "krx", limits: { upper: number | null; lower: number | null } = { upper: 91_000, lower: 49_000 }, bookFails = false, book: ReturnType<typeof snapshot> = snapshot(BASE), arrange: (windows: LayoutWindow[]) => LayoutWindow[] = (windows) => windows): Promise<void> {
   const layout = scenario.documents.layout(DEFAULT_LAYOUT_ID);
   const windows: LayoutWindow[] = [
@@ -203,7 +214,8 @@ export async function openOrderWindow(page: Page, scenario: Scenario, withSecond
     ...layout.windows.filter((w) => w.kind !== "chart"),
     { id: "order", link: null, kind: "order", venue: savedVenue },
   ];
-  scenario.documents.saveLayout({ ...layout, windows: arrange(windows), placement: {}, revision: layout.revision + 1 });
+  const arranged = arrange(windows);
+  scenario.documents.saveLayout({ ...layout, windows: arranged, placement: { v: 1, dock: { root: ordersBelowCharts(arranged), floats: [] }, canvas: null }, revision: layout.revision + 1 });
   pinQuote(scenario, CODE, BASE);
   scenario.reply((url) => url.pathname === `/api/symbols/${CODE}/fundamentals`, { body: { symbol: CODE, upperLimit: limits.upper, lowerLimit: limits.lower, ...FUNDAMENTAL_FIGURES } });
   scenario.reply((url) => url.pathname === `/api/symbols/${CODE}/order-book`, bookFails ? { status: 503, body: { error: { code: "internal", message: "호가 조회 실패", reason: null, retryAt: null, manualActionRequired: false } } } : { body: book });

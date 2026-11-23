@@ -26,7 +26,8 @@ test("명령 입력창은 차트를 어둡게 하거나 흐리게 하지 않고 
   await page.keyboard.press("/");
   const search = page.getByRole("dialog", { name: "종목 검색", exact: true });
   await expect(search).toBeVisible();
-  expect(await styleOf(page.locator("[data-command-frame]"))).toMatchObject({ background: "rgba(0, 0, 0, 0)", blur: "none" });
+  expect(await styleOf(page.locator("[data-command-frame]"))).toMatchObject({ background: "rgba(5, 9, 5, 0.7)", blur: "none" });
+  expect(await styleOf(search)).toMatchObject({ background: "rgb(27, 33, 27)", blur: "none" });
   await page.screenshot({ path: info.outputPath("1440-search.png") });
 });
 

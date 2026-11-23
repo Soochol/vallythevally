@@ -5,23 +5,26 @@ import { PlusIcon } from "../icons";
 import { Menu, type MenuItem } from "../menu/Menu";
 import { addWindow, CHART_LIMIT_REASON, WINDOW_LIMIT_REASON, workspaceRoom } from "./manage";
 import { focusWithoutActivation } from "./focus";
+import { KIND_ICONS } from "./kindIcons";
 
 function kindItem(kind: WindowKind, count: number, windowCount: number, targetGroup?: string): MenuItem {
   const { name, maxCount } = WINDOW_KINDS[kind];
+  const Icon = KIND_ICONS[kind];
+  const icon = <Icon size={14} />;
   const onSelect = () => {
     const id = addWindow(kind, workspaceRoom(), targetGroup);
     if (targetGroup && id) requestAnimationFrame(() => focusWithoutActivation(document.getElementById(`window-tab-${id}`)));
   };
   if (kind === "chart") {
     const full = count >= maxCount || windowCount >= MAX_WINDOWS;
-    return { kind: "action", label: name, disabled: full, hint: count >= maxCount ? CHART_LIMIT_REASON : windowCount >= MAX_WINDOWS ? WINDOW_LIMIT_REASON : `${count}/${maxCount}`, onSelect };
+    return { kind: "action", icon, label: name, disabled: full, hint: count >= maxCount ? CHART_LIMIT_REASON : windowCount >= MAX_WINDOWS ? WINDOW_LIMIT_REASON : `${count}/${maxCount}`, onSelect };
   }
   if (isSingleton(kind)) {
-    if (count === 0 && windowCount >= MAX_WINDOWS) return { kind: "action", label: name, disabled: true, hint: WINDOW_LIMIT_REASON, onSelect };
-    return { kind: "action", label: name, hint: count > 0 ? "열려 있음" : undefined, onSelect };
+    if (count === 0 && windowCount >= MAX_WINDOWS) return { kind: "action", icon, label: name, disabled: true, hint: WINDOW_LIMIT_REASON, onSelect };
+    return { kind: "action", icon, label: name, hint: count > 0 ? "열려 있음" : undefined, onSelect };
   }
-  if (windowCount >= MAX_WINDOWS) return { kind: "action", label: name, disabled: true, hint: WINDOW_LIMIT_REASON, onSelect };
-  return { kind: "action", label: name, hint: count > 0 ? `${count}개 열림` : undefined, onSelect };
+  if (windowCount >= MAX_WINDOWS) return { kind: "action", icon, label: name, disabled: true, hint: WINDOW_LIMIT_REASON, onSelect };
+  return { kind: "action", icon, label: name, hint: count > 0 ? `${count}개 열림` : undefined, onSelect };
 }
 
 export function AddWindowMenu({ targetGroup }: { targetGroup?: string }) {

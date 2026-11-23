@@ -7,6 +7,7 @@ import { useSelectionStore } from "../stores/selection";
 import { useUiStore } from "../stores/ui";
 import { useWatchlistStore } from "../stores/watchlist";
 import { type Autosave, startAutosave } from "./autosave";
+import { DEFAULT_OPEN_MESSAGE, takeDefaultOpenRequest } from "./defaultOpen";
 import { layoutReceipt } from "./layoutReceipt";
 import { restore } from "./restore";
 import { clearUnsaved, readUnsaved } from "./unsaved";
@@ -39,9 +40,22 @@ export function suspendSetup() {
   running = null;
 }
 
+function openWithDefaults(message: string) {
+  const theme: Theme = "dark";
+  useUiStore.getState().load({ ...DEFAULT_UI_PREFS, theme }, {});
+  followTheme();
+  followLastMinute();
+  usePersistStore.getState().setPhase({ kind: "offline", message });
+}
+
 export async function boot() {
-  const { setPhase } = usePersistStore.getState();
   const toast = (text: string) => useSelectionStore.getState().showToast(text);
+  if (takeDefaultOpenRequest()) {
+    openWithDefaults(DEFAULT_OPEN_MESSAGE);
+    toast(DEFAULT_OPEN_MESSAGE);
+    return;
+  }
+  const { setPhase } = usePersistStore.getState();
   try {
     const restored = await restore({
       uiState: () => fetchUiState(),
@@ -70,12 +84,8 @@ export async function boot() {
     setPhase({ kind: "ready" });
   } catch (e) {
     console.warn("마지막 화면을 되살리지 못했습니다", e);
-    const theme: Theme = "dark";
-    useUiStore.getState().load({ ...DEFAULT_UI_PREFS, theme }, {});
-    followTheme();
-    followLastMinute();
     const reason = e instanceof ApiRequestError ? e.message : String(e);
-    setPhase({ kind: "offline", message: `${OFFLINE_MESSAGE} (${reason})` });
+    openWithDefaults(`${OFFLINE_MESSAGE} (${reason})`);
     toast(OFFLINE_MESSAGE);
   }
 }

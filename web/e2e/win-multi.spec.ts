@@ -220,7 +220,7 @@ test("한 묶음에 탭 20개가 있을 때 마지막 탭을 단축키나 복제
   const trades: LayoutWindow[] = Array.from({ length: 19 }, (_, n) => ({ id: n === 0 ? "trades" : `trades-${n + 1}`, link: null, kind: "trades" }));
   saveWindows(scenario, [...trades, { id: "watchlist", link: null, kind: "watchlist" }]);
   await open(page);
-  const strip = page.locator(".dock-tabs").filter({ has: tabOf(page, "watchlist") });
+  const strip = page.locator(".dock-tab-scroll").filter({ has: tabOf(page, "watchlist") });
   await expect(strip.getByRole("tab")).toHaveCount(20);
   const overflow = () => strip.evaluate((element) => element.scrollWidth > element.clientWidth);
   expect(await overflow()).toBe(true);

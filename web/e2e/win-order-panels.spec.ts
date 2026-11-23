@@ -1539,9 +1539,11 @@ test("계좌 둘이면 계좌 단추로 목록을 열어 B를 고르면 미체�
   scenario.documents.saveLayout({ ...layout, windows: [...layout.windows, { id: "order-2", link: null, kind: "order", venue: "krx" }], revision: layout.revision + 1 });
   await page.reload();
   await expect(cell(page)).toHaveAttribute("aria-busy", "false");
-  await windowTabs(page).getByRole("tab", { name: /^호가주문 2/ }).click();
-  await expect(accountButton(page)).toHaveText(["위탁 2 · 키움 ****-**05", "위탁 2 · 키움 ****-**05"]);
-  await expect(page.getByTestId("summary-quantity")).toHaveText([/777/, /777/]);
+  for (const name of [/^호가주문 2/, /^호가주문 1/]) {
+    await windowTabs(page).getByRole("tab", { name }).click();
+    await expect(accountButton(page)).toHaveText(["위탁 2 · 키움 ****-**05"]);
+    await expect(page.getByTestId("summary-quantity")).toHaveText([/777/]);
+  }
 });
 
 test("주문 꺼진 계좌는 목록에서 고를 수 없고 시스템 설정에서 계좌 관리 이어가기가 증권사 · 계좌 메뉴를 연다", async ({ page, scenario }) => {

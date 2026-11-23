@@ -20,7 +20,7 @@ test("차트와 시세 창은 연동 색을 따르고 관심종목·스크리너
     ["book", "side", "follows"],
     ["program", "side", "follows"],
     ["brokers", "wide", "follows"],
-    ["order", "wide", "follows"],
+    ["order", "side", "follows"],
     ["ranking", "side", "sends"],
   ]);
 });

@@ -38,7 +38,7 @@ export function DockSizeBalloon({ lead, second, area, point }: { lead: SideSize;
   const left = clamp(beyondRight ? point.x - POINTER_OFFSET - size.w : point.x + POINTER_OFFSET, 0, area.w - size.w);
   const top = clamp(point.y + POINTER_OFFSET, 0, area.h - size.h);
   return (
-    <div ref={element} data-dock-balloon className="dock-balloon" aria-hidden="true" style={{ left, top }}>
+    <div ref={element} data-dock-balloon className="dock-balloon" aria-hidden="true" style={{ transform: `translate(${left}px, ${top}px)` }}>
       <span data-balloon-side="first" data-px={lead.px}>{sideLabel(lead)} · {percent}%</span>
       <span className="dock-balloon-bar">|</span>
       <span data-balloon-side="second" data-px={second.px}>{sideLabel(second)}</span>

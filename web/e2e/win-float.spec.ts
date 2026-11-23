@@ -275,7 +275,7 @@ test("작은 나누기 거절은 떠 있던 위치와 기록을 그대로 둔다
   await page.mouse.up();
   expect(await boxOf(frame(page))).toEqual(before);
   expect(saved(scenario).dock).toEqual(persisted);
-  await expect(page.getByRole("status").filter({ hasText: "자리가 작아 나눌 수 없습니다" })).toBeVisible();
+  await expect(page.getByRole("status").filter({ hasText: "자리가 작습니다 · 가운데에 놓으면 탭" })).toBeVisible();
   await undo(page);
   await expect(frame(page)).toHaveCount(0);
 });
@@ -419,8 +419,9 @@ test("일반 차트 탭을 영역 밖이나 거절한 자리에 놓으면 활성
   twoCharts(scenario);
   await page.setViewportSize({ width: 1440, height: 450 });
   await page.goto("/");
-  await expect(cell(page, 2)).toHaveAttribute("aria-busy", "false");
+  await expect(cell(page)).toHaveAttribute("aria-busy", "false");
   await page.locator("#window-tab-cell-1").click();
+  await expect(cell(page, 2)).toHaveAttribute("aria-busy", "false");
   const active = page.locator("#window-tab-cell-1");
   await expect(active).toHaveAttribute("data-active-cell", "");
   for (const outside of [true, false]) {

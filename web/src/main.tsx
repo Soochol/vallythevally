@@ -8,6 +8,7 @@ import { ChartRoute } from "./App";
 import { CollectorPage } from "./features/collector-board/CollectorPage";
 import { takeLoginFailure } from "./features/account/loginFailure";
 import { ALL_PAGES } from "./features/page-rail/pages";
+import { ShellErrorBoundary } from "./features/shell/ShellErrorBoundary";
 import { start } from "./persist/start";
 import { useAccountStore } from "./stores/account";
 import { marketSocket } from "./stores/realtime";
@@ -36,7 +37,7 @@ void start();
 if (serverMode === "local") marketSocket.start();
 
 const router = createBrowserRouter([
-  { element: <ChartRoute />, children: ALL_PAGES.map(({ path }) => ({ path })) },
+  { element: <ShellErrorBoundary><ChartRoute /></ShellErrorBoundary>, children: ALL_PAGES.map(({ path }) => ({ path })) },
   { path: "/collector", element: <CollectorPage /> },
   { path: "*", element: <Navigate to="/" replace /> },
 ]);

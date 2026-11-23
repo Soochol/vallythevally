@@ -244,7 +244,7 @@ test("겹친 창을 누르면 앞으로 오고 가지런히·기본 배치·크�
   seedCanvas(scenario);
   await page.goto("/");
   await expect(cell(page, 2)).toHaveAttribute("aria-busy", "false");
-  await expect(tidy(page).getByLabel("겹친 곳")).toHaveText("1");
+  await expect(tidy(page).locator(".ui-badge")).toHaveText("겹침 1");
   await screenshot(page, "overlap");
   await header(page, "cell-0").click({ position: { x: 60, y: 17 } });
   expect(Number(await frame(page, "cell-0").evaluate((el) => el.style.zIndex))).toBeGreaterThan(Number(await frame(page, "cell-1").evaluate((el) => el.style.zIndex)));
@@ -273,7 +273,7 @@ test("겹친 창을 누르면 앞으로 오고 가지런히·기본 배치·크�
   await frame(page, "cell-0").getByRole("button", { name: "차트 원래 크기로" }).click();
   expect(await boxOf(frame(page, "cell-0"))).toEqual(original);
   await tidy(page).click();
-  await expect(tidy(page).getByLabel("겹친 곳")).toHaveText("0");
+  await expect(tidy(page).locator(".ui-badge")).toHaveCount(0);
   const area = await boxOf(stage(page));
   for (const item of await page.locator("[data-canvas-window]").all()) {
     const box = await boxOf(item);
@@ -286,7 +286,7 @@ test("겹친 창을 누르면 앞으로 오고 가지런히·기본 배치·크�
   await drag(page, header(page, "cell-1"), 60, 30);
   await page.getByRole("button", { name: "배치", exact: true }).click();
   await page.getByRole("menuitem", { name: "기본 배치로" }).click();
-  await expect(tidy(page).getByLabel("겹친 곳")).toHaveText("0");
+  await expect(tidy(page).locator(".ui-badge")).toHaveCount(0);
 });
 
 test("창 종류와 위 막대는 가운데에 차트를 더하고 기존 창을 앞으로 올리며 닫은 차트는 도킹에서도 빠진다", async ({ page, scenario }) => {

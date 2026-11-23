@@ -1,5 +1,7 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { Fragment, useEffect, useId, useRef, useState, useSyncExternalStore } from "react";
+import { useNavigate } from "react-router";
+import type { Quote } from "../../api/generated/Quote";
 import type { SymbolInfo } from "../../api/generated/SymbolInfo";
 import { useSymbolInfos, useSymbolSearch } from "../../api/queries";
 import { compareRefusal } from "../../chart/settings";
@@ -11,20 +13,39 @@ import { useActiveWatchlist, useWatchlistStore } from "../../stores/watchlist";
 import { removalUndo } from "../watch/removalUndo";
 import { useSendSymbol } from "../pages/sendSymbol";
 import { PutTargetPill } from "./PutTargetPill";
-import { type SearchCommand, searchCommandsSnapshot, subscribeSearchCommands } from "../commands/registry";
-import { CloseIcon, Icon, ICON_PATHS, SearchIcon } from "../icons";
+import { COMMAND_GROUPS, COMMAND_GROUP_LABEL, type CommandGroup, type SearchCommand, searchCommandsSnapshot, subscribeSearchCommands } from "../commands/registry";
+import { ChevronIcon, CloseIcon, Icon, ICON_PATHS, SearchIcon } from "../icons";
+import { RateBadge, type ChangeDirection } from "../list/listRow";
+import { formatPercent } from "../../lib/format";
+import { Kbd } from "../ui/Kbd";
 import { CommandFrame } from "../commands/CommandFrame";
 import { EmptyState, ErrorState, Skeleton } from "../overlay/State";
 import { defaultSearchCommands } from "./commands";
+import { keyParts } from "../hotkey-sheet/sheetRows";
 import { highlight } from "./highlight";
 import { GROUP_LABEL, searchList, type SearchGroup } from "./searchList";
 import { MARKET_FILTERS, SEARCH_FILTERS, matchesMarket, matchingCommands, type MarketFilter, searchMode } from "./searchMode";
 import { useBeforeConnect } from "../status/beforeConnect";
 import { BeforeConnectButton } from "../status/BeforeConnectCard";
-import { QuoteValue, SearchPreview } from "./SearchPreview";
+import { SearchPreview } from "./SearchPreview";
 import { useSearchQuotes } from "./useSearchQuotes";
 
-type ResultRow = { kind: "symbol"; info: SymbolInfo; group: SearchGroup } | { kind: "command"; command: SearchCommand; group: "commands" };
+type CommandRowGroup = "frequent" | CommandGroup;
+type ResultRow = { kind: "symbol"; info: SymbolInfo; group: SearchGroup } | { kind: "command"; command: SearchCommand; group: CommandRowGroup };
+
+const COMMAND_ROW_LABEL: Record<CommandRowGroup, string> = { frequent: "자주 쓰는 명령", ...COMMAND_GROUP_LABEL };
+
+const commandRowsOf = (commands: readonly SearchCommand[], query: string, commandMode: boolean): ResultRow[] => {
+  const matching = matchingCommands(commands, query);
+  if (!commandMode) return matching.filter((command) => command.shortcut !== undefined).map((command): ResultRow => ({ kind: "command", command, group: "frequent" }));
+  return COMMAND_GROUPS.flatMap((group) => matching.filter((command) => (command.group ?? "system") === group).map((command): ResultRow => ({ kind: "command", command, group })));
+};
+
+const directionOf = (rate: number): ChangeDirection => rate > 0 ? "up" : rate < 0 ? "down" : "flat";
+
+const ROW_GRID = "grid min-h-[36px] cursor-pointer items-center gap-2 rounded-m px-3 text-s";
+const SYMBOL_COLUMNS = "grid-cols-[20px_minmax(0,1fr)_56px_96px_72px] max-md:grid-cols-[20px_minmax(0,1fr)_96px_72px]";
+const COMMAND_COLUMNS = "grid-cols-[20px_minmax(0,1fr)_auto]";
 
 export function SearchDialog() {
   const dialog = useSelectionStore((s) => s.dialog);
@@ -43,6 +64,7 @@ function SearchDialogBody({ purpose }: { purpose: SearchPurpose }) {
   const registered = useSyncExternalStore(subscribeSearchCommands, searchCommandsSnapshot);
   const commands = [...defaultSearchCommands(useActionKeys()).filter((c) => !registered.some((r) => r.id === c.id)), ...registered];
   const queryClient = useQueryClient();
+  const navigate = useNavigate();
   const sendToLinkedChart = useSendSymbol();
   const [input, setInput] = useState("");
   const [market, setMarket] = useState<MarketFilter>("all");
@@ -61,7 +83,7 @@ function SearchDialogBody({ purpose }: { purpose: SearchPurpose }) {
   const symbolList = searchList(query, { watch, recent }, search.data, filters);
   const rows: ResultRow[] = [
     ...(mode.kind === "symbols" ? symbolList.rows.filter((row) => (query !== "" || matchesMarket(row.info, market))).map((row): ResultRow => ({ kind: "symbol", ...row })) : []),
-    ...((query === "" || mode.kind === "commands") ? matchingCommands(commands, query).map((command): ResultRow => ({ kind: "command", command, group: "commands" })) : []),
+    ...(query === "" || mode.kind === "commands" ? commandRowsOf(commands, query, mode.kind === "commands") : []),
   ];
   const selectable = mode.kind === "commands" || (!offline && symbolList.selectable);
   const activeIndex = selectable ? Math.min(active, rows.length - 1) : -1;
@@ -120,7 +142,7 @@ function SearchDialogBody({ purpose }: { purpose: SearchPurpose }) {
     if (row.kind === "symbol") return chooseSymbol(row.info, (modifiers.ctrlKey || modifiers.metaKey) ? "toggleWatch" : modifiers.shiftKey ? "compare" : purpose);
     close();
     try {
-      void Promise.resolve(row.command.run({ cellId, queryClient })).catch((error: unknown) => useSelectionStore.getState().showToast(error instanceof Error ? error.message : "명령을 실행하지 못했습니다"));
+      void Promise.resolve(row.command.run({ cellId, queryClient, navigate })).catch((error: unknown) => useSelectionStore.getState().showToast(error instanceof Error ? error.message : "명령을 실행하지 못했습니다"));
     } catch (error) {
       useSelectionStore.getState().showToast(error instanceof Error ? error.message : "명령을 실행하지 못했습니다");
     }
@@ -141,7 +163,20 @@ function SearchDialogBody({ purpose }: { purpose: SearchPurpose }) {
   };
   const resetInput = () => { setInput(""); inputRef.current?.focus(); };
 
-  return <CommandFrame labelledBy={`${ids}-title`} onClose={close} width="h-[500px] w-[min(840px,calc(100vw-32px))] max-md:h-[80dvh]">
+  const commandMode = mode.kind === "commands";
+  const bodyStatus = commandMode || offline ? null
+    : search.isError && query !== "" ? "error"
+    : !selectable && rows.length === 0 ? "loading"
+    : selectable && rows.length === 0 ? "empty"
+    : null;
+  const filteredEmpty = bodyStatus === "empty" && mode.kind === "symbols" && market !== "all";
+  const hints = commandMode
+    ? <><Hint keys={["↵"]}>실행</Hint><Hint keys={["Esc"]}>닫기</Hint></>
+    : purpose === "watch"
+      ? <><Hint keys={["↵"]}>넣기</Hint><Hint keys={["Tab"]}>넣을 곳</Hint><Hint keys={["Esc"]}>닫기</Hint></>
+      : <><Hint keys={["↑", "↓"]}>고르기</Hint><Hint keys={["↵"]}>{purpose === "page" ? "보낼 연동 색 차트에 열기" : "열기"}</Hint><Hint keys={["☆", "Ctrl+↵"]} joiner="·">관심종목</Hint><Hint keys={["Shift+↵"]}>비교</Hint><Hint keys={["Esc"]}>닫기</Hint></>;
+
+  return <CommandFrame solid labelledBy={`${ids}-title`} onClose={close} width="h-[min(640px,80dvh)] w-[min(840px,calc(100vw-32px))] max-md:h-[80dvh]">
     <div className="flex min-h-0 flex-1 flex-col">
       <h2 id={`${ids}-title`} className="sr-only">{purpose === "watch" ? "관심종목에 넣을 종목 검색" : "종목 검색"}</h2>
       <div className="flex flex-none flex-wrap items-center gap-2 border-b border-line px-4 py-3">
@@ -165,38 +200,68 @@ function SearchDialogBody({ purpose }: { purpose: SearchPurpose }) {
         <ul ref={list} id={`${ids}-list`} role="listbox" aria-label={purpose === "watch" ? "관심종목에 넣을 종목" : query === "" ? "관심종목과 최근 본 종목" : "검색 결과"}
           aria-busy={!selectable && !search.isError} className="min-w-0 flex-1 overflow-auto p-1">
           {rows.map((row, i) => <Fragment key={row.kind === "symbol" ? `${row.group}-${row.info.code}` : row.command.id}>
-            {row.group !== rows[i - 1]?.group && <li role="presentation" className="px-3 pb-1 pt-3 text-xs text-text-3">{row.kind === "command" ? query === "" ? "자주 쓰는 명령" : "명령" : GROUP_LABEL[row.group]}</li>}
+            {row.group !== rows[i - 1]?.group && <li role="presentation" className="px-3 pb-1 pt-3 text-xs text-text-3">{row.kind === "command" ? COMMAND_ROW_LABEL[row.group] : GROUP_LABEL[row.group]}</li>}
             <li id={optionId(i)} role="option" aria-selected={i === activeIndex} aria-disabled={!selectable}
               data-symbol={row.kind === "symbol" && selectable ? row.info.code : undefined}
               onPointerMove={() => selectable && i !== activeIndex && setActive(i)} onClick={(e) => choose(row, e)}
-              className="group/row flex min-h-[36px] cursor-pointer items-center gap-2 rounded-m px-3 py-1 text-s aria-selected:bg-accent-soft aria-disabled:cursor-default aria-disabled:opacity-70 max-md:min-h-[44px]">
+              className={`group/row ${ROW_GRID} ${row.kind === "symbol" ? SYMBOL_COLUMNS : COMMAND_COLUMNS} aria-selected:bg-accent-soft aria-disabled:cursor-default aria-disabled:opacity-70 max-md:min-h-[44px]`}>
               {row.kind === "symbol" ? <>
                 <WatchStar included={watchlist.symbols.includes(row.info.code)} disabled={!selectable} addName={putName} removeName={watchlist.name} onToggle={() => toggleOrAdd(row.info, true)} />
-                <span className="min-w-0 flex-1"><span className="font-semibold"><Marked text={row.info.name} query={query} /></span> <span className="whitespace-nowrap text-xs text-text-3"><Marked text={row.info.code} query={query} /></span></span>
-                {putGroup?.symbols.includes(row.info.code) && <span className="max-w-[9rem] flex-none truncate text-[11px] text-text-2">✓ {putGroup.name}에 있음</span>}
-                <span className="rounded-s bg-raised px-1 text-xs text-text-3 max-md:hidden">{row.info.kind === "etf" || row.info.kind === "etn" ? KIND_LABEL[row.info.kind] : MARKET_LABEL[row.info.market]}</span>
-                <QuoteValue quote={bySymbol.get(row.info.code)} />
-              </> : <><Icon size={16} path="M4 17l5-6 4 3 7-9" /><span className="flex-1"><Marked text={row.command.label} query={query} /></span>{row.command.shortcut && <kbd>{row.command.shortcut}</kbd>}</>}
+                <span className="flex min-w-0 items-baseline gap-2">
+                  <span className="min-w-0 truncate"><Marked text={row.info.name} query={query} strong /></span>
+                  <span className="flex-none whitespace-nowrap text-xs text-text-3"><Marked text={row.info.code} query={query} /></span>
+                  {putGroup?.symbols.includes(row.info.code) && <span className="max-w-[9rem] flex-none truncate text-xs text-text-2">✓ {putGroup.name}에 있음</span>}
+                </span>
+                <span data-cell="market" className="justify-self-start whitespace-nowrap rounded-s bg-raised px-1 text-xs text-text-3 max-md:hidden">{row.info.kind === "etf" || row.info.kind === "etn" ? KIND_LABEL[row.info.kind] : MARKET_LABEL[row.info.market]}</span>
+                <QuoteCells quote={bySymbol.get(row.info.code)} />
+              </> : <>
+                <span className="text-text-3">{row.command.icon ? <row.command.icon size={16} /> : <ChevronIcon size={16} />}</span>
+                <span className="min-w-0 truncate"><Marked text={row.command.label} query={query} /></span>
+                {row.command.shortcut && <span className="flex items-center gap-0.5 text-text-3">{keyParts(row.command.shortcut).map((part, index) => <Kbd key={index}>{part}</Kbd>)}</span>}
+              </>}
             </li>
           </Fragment>)}
-          {mode.kind === "symbols" && search.isError && query !== "" ? <li role="presentation"><ErrorState message={search.error.message} retry={() => void search.refetch()} /></li> : !selectable && rows.length === 0 ? <li role="presentation"><Skeleton label="종목 찾는 중" /></li> : selectable && rows.length === 0 ? <li role="presentation"><EmptyState title={mode.kind === "symbols" && market !== "all" ? "조건에 맞는 종목이 없습니다" : "맞는 항목이 없습니다"} action="입력 지우기" onAction={resetInput}>종목 이름·코드·초성이나 &gt; 명령을 입력하세요.</EmptyState></li> : null}
+          {bodyStatus === "error" && search.isError ? <li role="presentation"><ErrorState message={search.error.message} retry={() => void search.refetch()} /></li>
+            : bodyStatus === "loading" ? <li role="presentation"><Skeleton label="종목 찾는 중" shape="row" /></li>
+            : filteredEmpty ? <li role="presentation"><EmptyState title="조건에 맞는 종목이 없습니다" action="전체에서 찾기" onAction={() => setMarket("all")}><span className="flex flex-col items-center gap-2">{MARKET_FILTERS.find((filter) => filter.value === market)?.label} 안에서는 찾지 못했습니다.<button type="button" className="btn" onClick={resetInput}>입력 지우기</button></span></EmptyState></li>
+            : bodyStatus === "empty" ? <li role="presentation"><EmptyState title="맞는 항목이 없습니다" action="입력 지우기" onAction={resetInput}>종목 이름·코드·초성이나 &gt; 명령을 입력하세요.</EmptyState></li>
+            : null}
           {quotes.isError && <li role="presentation"><ErrorState message="시세를 받지 못했습니다. 종목은 계속 열 수 있습니다." retry={() => void quotes.refetch()} /></li>}
         </ul>
-        {selected?.kind === "symbol" ? <SearchPreview key={selected.info.code} purpose={purpose} info={selected.info} quote={bySymbol.get(selected.info.code)} /> : <aside className="w-[280px] flex-none space-y-3 border-l border-line p-4 text-text-2 max-md:hidden"><h3 className="font-semibold text-text">{selected?.kind === "command" ? selected.command.label : "종목·명령 찾기"}</h3><p className="text-s">{selected?.kind === "command" ? "Enter를 눌러 실행합니다" : "종목을 고르면 현재가와 60일 추세를 볼 수 있습니다"}</p><p className="text-xs text-text-3">&gt;로 시작하면 명령만 찾습니다</p></aside>}
+        {selected?.kind === "symbol" ? <SearchPreview key={selected.info.code} info={selected.info} quote={bySymbol.get(selected.info.code)} />
+          : commandMode ? null
+          : <aside className="w-[280px] flex-none space-y-3 border-l border-line p-4 text-text-2 max-md:hidden"><h3 className="font-semibold text-text">종목·명령 찾기</h3><p className="text-s">종목을 고르면 현재가와 60일 추세를 볼 수 있습니다</p><p className="text-xs text-text-3">&gt;로 시작하면 명령만 찾습니다</p></aside>}
       </div>}
-      {purpose === "watch" ? <div className="flex flex-none items-center gap-3 border-t border-line px-4 py-2 text-xs text-text-3 max-md:px-3">
+      {purpose === "watch" && !commandMode ? <div className="flex flex-none items-center gap-3 border-t border-line px-4 py-2 text-xs text-text-3 max-md:px-3">
         <PutTargetPill list={watchlist} group={putGroup} pillRef={pillRef} onBack={() => inputRef.current?.focus()} onType={(char) => { setInput((value) => value + char); inputRef.current?.focus(); }} />
         <span className="flex-1" />
-        <span className="whitespace-nowrap max-md:hidden"><kbd>↵</kbd> 넣기</span><span className="whitespace-nowrap max-md:hidden"><kbd>Tab</kbd> 넣을 곳</span><span className="whitespace-nowrap max-md:hidden"><kbd>Esc</kbd> 닫기</span>
-      </div> : <div className="flex flex-none flex-wrap items-center gap-2 border-t border-line px-4 py-2 text-xs text-text-3">
-        <span><kbd>↑↓</kbd> 고르기</span><span><kbd>↵</kbd> 열기</span><span><kbd>☆·Ctrl+↵</kbd> 관심종목</span><span><kbd>Shift+↵</kbd> 비교</span><span><kbd>Esc</kbd> 닫기</span>
-      </div>}
+        <div role="group" aria-label="키 안내" className="flex items-center gap-3 max-md:hidden">{hints}</div>
+      </div> : <div role="group" aria-label="키 안내" className="flex flex-none items-center gap-3 border-t border-line px-4 py-2 text-xs text-text-3 max-md:hidden">{hints}</div>}
     </div>
   </CommandFrame>;
 }
 
-function Marked({ text, query }: { text: string; query: string }) {
-  return highlight(text, query).map((seg, i) => seg.match ? <mark key={i} className="bg-transparent font-bold text-accent">{seg.text}</mark> : seg.text);
+function Hint({ keys, joiner = "", children }: { keys: readonly string[]; joiner?: string; children: string }) {
+  return <span className="flex items-center gap-1 whitespace-nowrap">
+    <span className="flex items-center gap-0.5">{keys.map((key, index) => <Fragment key={key}>{index > 0 && joiner && <span>{joiner}</span>}<Kbd>{key}</Kbd></Fragment>)}</span>
+    {children}
+  </span>;
+}
+
+function QuoteCells({ quote }: { quote: Quote | undefined }) {
+  return <>
+    <span aria-label="현재가" className="whitespace-nowrap text-right text-text">{quote ? quote.price.toLocaleString("ko-KR") : ""}</span>
+    <span aria-label="등락률" className="min-w-0">
+      {quote ? <RateBadge direction={directionOf(quote.changeRate)}>{formatPercent(quote.changeRate)}</RateBadge> : <span className="block px-1 py-0.5 text-right text-text-3">—</span>}
+    </span>
+  </>;
+}
+
+function Marked({ text, query, strong = false }: { text: string; query: string; strong?: boolean }) {
+  const segments = highlight(text, query);
+  const matched = segments.some((seg) => seg.match);
+  const rest = matched ? "font-medium text-text-2" : strong ? "font-semibold text-text" : "";
+  return segments.map((seg, i) => seg.match ? <mark key={i} className="bg-transparent font-bold text-text">{seg.text}</mark> : <span key={i} className={rest}>{seg.text}</span>);
 }
 
 function WatchStar({ included, disabled, addName, removeName, onToggle }: { included: boolean; disabled: boolean; addName: string; removeName: string; onToggle: () => void }) {

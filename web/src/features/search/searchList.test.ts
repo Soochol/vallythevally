@@ -8,12 +8,11 @@ const samsung = info("005930", "삼성전자");
 const naver = info("035420", "NAVER");
 const none = { watch: [], recent: [] };
 
-test("빈 입력이면 관심종목 다음에 최근 본 종목을 고를 수 있다", () => {
+test("빈 입력이면 관심종목 다음에 관심종목이 아닌 최근 본 종목을 고를 수 있다", () => {
   expect(searchList("", { watch: [naver], recent: [samsung, naver] }, undefined)).toEqual({
     rows: [
       { info: naver, group: "watch" },
       { info: samsung, group: "recent" },
-      { info: naver, group: "recent" },
     ],
     selectable: true,
     empty: true,

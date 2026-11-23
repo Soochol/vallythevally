@@ -1,5 +1,6 @@
 import { WINDOW_KINDS, type HomeSpot, type WindowId, type WindowRef } from "../kinds";
 import type { DockNode, DockPlacement } from "../placement";
+import { tabsMinSize } from "./geometry";
 import { listGroups, newGroupId, pruneGroups, rewriteGroups, singleGroup, type GroupNode } from "./tree";
 
 export type WindowList = readonly [WindowRef, ...WindowRef[]];
@@ -7,6 +8,7 @@ export type WindowList = readonly [WindowRef, ...WindowRef[]];
 export const WIDE_SHARE = 0.72;
 
 const homeOf = (window: WindowRef): HomeSpot => WINDOW_KINDS[window.kind].home;
+const windowsAt = (windows: readonly WindowRef[], home: HomeSpot): WindowRef[] => windows.filter((window) => homeOf(window) === home);
 
 function stack(groups: readonly [GroupNode, ...GroupNode[]]): DockNode {
   const [head, ...rest] = groups;
@@ -14,12 +16,23 @@ function stack(groups: readonly [GroupNode, ...GroupNode[]]): DockNode {
   return next ? { kind: "split", dir: "column", ratio: 1 / groups.length, first: head, second: stack([next, ...more]) } : head;
 }
 
-export function defaultDock(windows: WindowList): DockPlacement {
-  const wide = windows.filter((window) => homeOf(window) === "wide");
-  const side = windows.filter((window) => homeOf(window) !== "wide").map((window) => window.id);
-  const wideGroups = wide.map((window, index) => singleGroup(`g${index + 1}`, window.id));
+export type StackRoom = { h: number; gap: number };
+
+function wideColumn(wide: readonly WindowRef[], windows: readonly WindowRef[], room: StackRoom | undefined): WindowId[][] {
+  const each = wide.map((window) => [window.id]);
+  if (!room || wide.length < 2) return each;
+  const stacked = each.reduce((total, tabs) => total + tabsMinSize(windows, tabs).h, 0) + (each.length - 1) * room.gap;
+  if (stacked <= room.h) return each;
+  const [head, ...rest] = wide.map((window) => window.id);
+  return head ? [[head], rest] : [];
+}
+
+export function defaultDock(windows: WindowList, room?: StackRoom): DockPlacement {
+  const wide = windowsAt(windows, "wide");
+  const side = windowsAt(windows, "side").map((window) => window.id);
+  const wideGroups = wideColumn(wide, windows, room).map((tabs, index): GroupNode => ({ kind: "group", id: `g${index + 1}`, tabs, active: tabs[0]! }));
   const [firstSide] = side;
-  const sideGroup: GroupNode | null = firstSide ? { kind: "group", id: `g${wide.length + 1}`, tabs: side, active: firstSide } : null;
+  const sideGroup: GroupNode | null = firstSide ? { kind: "group", id: `g${wideGroups.length + 1}`, tabs: side, active: firstSide } : null;
   const [firstWide, ...moreWide] = wideGroups;
   const left = firstWide ? stack([firstWide, ...moreWide]) : null;
   const root: DockNode | null =

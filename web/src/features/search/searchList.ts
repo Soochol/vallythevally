@@ -24,9 +24,10 @@ export function searchList(
   filters: SymbolSearchFilters = {},
 ): SearchList {
   if (query === "") {
+    const watched = new Set(empty.watch.map((info) => info.code));
     const rows = [
       ...empty.watch.map((info): SearchRow => ({ info, group: "watch" })),
-      ...empty.recent.map((info): SearchRow => ({ info, group: "recent" })),
+      ...empty.recent.filter((info) => !watched.has(info.code)).map((info): SearchRow => ({ info, group: "recent" })),
     ];
     return { rows, selectable: true, empty: true };
   }

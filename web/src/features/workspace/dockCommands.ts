@@ -1,5 +1,6 @@
 import { dockLevels, levelAtDistance, splitLevel, type DockLevelKind } from "../../layout/dock/levels";
 import { dropTarget, EDGE_ZONE_SHARE, layoutDock, wholePixels, type DockSpace, type Edge, type GroupBox } from "../../layout/dock/geometry";
+import { carryMove } from "../../layout/dock/carry";
 import { splitArea } from "../../layout/dock/split";
 import { groupOfWindow, putTab, withoutWindow } from "../../layout/dock/tree";
 import type { WindowId } from "../../layout/kinds";
@@ -18,7 +19,7 @@ export type DockPlan =
   | { kind: "blocked"; rect: Rect; label: string; levels?: DockLevelView }
   | { kind: "change"; dock: DockPlacement; rect: Rect; label: string; levels?: DockLevelView };
 
-export const SMALL_DOCK_NOTICE = "자리가 작아 나눌 수 없습니다. 가운데에 놓아 탭으로 넣으세요";
+export const SMALL_DOCK_NOTICE = "자리가 작습니다 · 가운데에 놓으면 탭";
 export const EDGE_LABEL: Record<Edge, string> = { left: "왼쪽에 나눠 놓기", right: "오른쪽에 나눠 놓기", top: "위에 나눠 놓기", bottom: "아래에 나눠 놓기" };
 
 export function levelStepName(step: DockLevelStep): string {
@@ -61,6 +62,16 @@ export function evaluateDock(dock: DockPlacement, command: DockCommand, space: D
   if (!box) return { kind: "unchanged" };
   const label = command.kind === "tab" ? "이 묶음에 탭으로 넣기" : edgeLabel(command.edge, command.kind === "area-edge" ? { kind: "area", groupCount: 0 } : chosen);
   return { kind: "change", dock: result.dock, rect: box.rect, label, levels };
+}
+
+export type DockView = { saved: DockPlacement; drawn: DockPlacement };
+export type ViewPlan = { plan: DockPlan; next: DockPlacement };
+
+export function evaluateView(view: DockView, command: DockCommand, space: DockSpace): ViewPlan {
+  const plan = evaluateDock(view.drawn, command, space);
+  if (plan.kind !== "change") return { plan, next: view.saved };
+  const next = carryMove(view.saved, view.drawn, plan.dock, command.window);
+  return JSON.stringify(next) === JSON.stringify(view.saved) ? { plan: { kind: "unchanged" }, next: view.saved } : { plan, next };
 }
 
 export function commandAt(root: HTMLElement, dock: DockPlacement, window: WindowId, point: { x: number; y: number }, space: DockSpace, origin: { x: number; y: number }): DockCommand | null {
