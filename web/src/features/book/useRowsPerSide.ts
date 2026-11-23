@@ -6,6 +6,7 @@ const LADDER_VERTICAL_PADDING_PX = 12;
 const MIN_ROWS_PER_SIDE = 2;
 
 export function rowsPerSideFor(heightPx: number): number {
+  if (!(heightPx > 0)) return ROWS_ABOVE_BASE;
   const fitting = Math.floor((heightPx - LADDER_VERTICAL_PADDING_PX) / (2 * ROW_HEIGHT_PX));
   return Math.min(ROWS_ABOVE_BASE, Math.max(MIN_ROWS_PER_SIDE, fitting));
 }
