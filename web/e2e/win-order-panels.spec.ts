@@ -5,7 +5,7 @@ import type { TradingExecution } from "../src/api/generated/TradingExecution";
 import type { TradingHolding } from "../src/api/generated/TradingHolding";
 import { CONNECTED_KIWOOM } from "./fixtures/scenario";
 import { type Scenario, cell, DEFAULT_LAYOUT_ID, expect, pollSaved, test, windowTabs } from "./harness";
-import { accountData, ACCOUNT, askAtLastSnapshot, SETTINGS, BASE, CODE, cellAt, center, chipAt, commandOf, dragChip, INFO_PAGE_1, INFO_PAGE_2, INFO_PAGE_2_ENDS, INFO_PAGE_2_VALUES, infoCard, infoLabels, infoTab, infoValues, openOrder, openOrderWindow, ordersOn, otherAccount, SECOND_ACCOUNT, status, tradingApi, win, writesTo } from "./order-window";
+import { accountData, ACCOUNT, askAtLastSnapshot, SETTINGS, BASE, CODE, cellAt, center, chipAt, commandOf, dragChip, INFO_PAGE_1, INFO_PAGE_2, INFO_PAGE_2_ENDS, INFO_PAGE_2_VALUES, infoCard, infoLabels, infoTab, infoValues, KIS_ACCOUNT, kisAccount, nxtTraded, openOrder, openOrderWindow, ordersOn, otherAccount, SECOND_ACCOUNT, status, tradingApi, win, writesTo } from "./order-window";
 
 const HOLDING: TradingHolding = { code: CODE, name: "삼성전자", quantity: 120, sellableQuantity: 100, averagePrice: 70_040, currentPrice: BASE, evaluationProfit: -4_800, profitRateCenti: -57 };
 const FILL: TradingExecution = { orderNo: "0000010", code: CODE, name: "삼성전자", side: "buy", quantity: 5, price: 70_000, time: "093015", venue: "krx" };
@@ -1538,7 +1538,7 @@ test("고른 계좌가 없어지면 시세 키 계좌로 돌아가고 상태줄�
   ordersOn(scenario, [otherAccount()]);
   const api = tradingApi(scenario);
   api.accounts[SECOND_ACCOUNT] = bAccount();
-  const first = { keyId: "k1", alias: "키 1", broker: "kiwoom" as const, source: "file" as const, appKeyTail: "1234", market: true, link: CONNECTED_KIWOOM };
+  const first = { keyId: "k1", alias: "키 1", broker: "kiwoom" as const, source: "file" as const, appKeyTail: "1234", market: true, link: CONNECTED_KIWOOM, kisAccount: null };
   const second = { ...first, keyId: "k2", alias: "위탁 2", market: false };
   scenario.live.kiwoomKeys = { limit: 5, keys: [first, second], keyFileProblem: null };
   scenario.on((url, request) => url.pathname === "/api/system/kiwoom/keys/k2" && request.method() === "DELETE", () => {
@@ -1578,4 +1578,43 @@ test("계좌를 바꾸면 보내는 중 칩이 사라진다", async ({ page, sce
   await expect(accountButton(page)).toHaveText("위탁 2 · 키움 ****-**05");
   await expect(chipAt(page, "buy", BASE)).toHaveCount(0);
   place.reply({ body: commandOf("buy") });
+});
+
+test("키움·한투 계좌가 있으면 계좌 목록에 키움 ****-**12와 한투 ****-**34가 함께 보이고, 한투를 고르면 조회와 주문이 한투 참조로 나간다", async ({ page, scenario }) => {
+  ordersOn(scenario, [kisAccount()], "12");
+  const api = tradingApi(scenario, [openOrder("A-0001", "buy", 70_000, 5)]);
+  api.accounts[KIS_ACCOUNT] = bAccount();
+  await openOrderWindow(page, scenario);
+  await expect(accountButton(page)).toHaveText("키 1 · 키움 ****-**12");
+
+  await accountButton(page).click();
+  await expect(accountOptions(page)).toHaveText(["키 1 · 키움 ****-**12시세", "한투 1 · 한투 ****-**34"]);
+  await accountOptions(page).nth(1).click();
+  await expect(accountButton(page)).toHaveText("한투 1 · 한투 ****-**34");
+  await expect(page.getByTestId("summary-quantity")).toContainText("777");
+  const forKis = (path: string) => api.seen.filter((request) => request.path === path && request.account === KIS_ACCOUNT);
+  await pollSaved(() => ["/api/trading/open-orders", "/api/trading/balance", "/api/trading/executions", "/api/trading/orderable"].map((path) => forKis(path).length > 0)).toEqual([true, true, true, true]);
+  await pollSaved(() => savedAccount(scenario)).toBe(KIS_ACCOUNT);
+
+  await cellAt(page, "buy", 70_000).dblclick();
+  await pollSaved(() => writesTo(api, "place")).toHaveLength(1);
+  expect(writesTo(api, "place")[0]!.body.account).toBe(KIS_ACCOUNT);
+});
+
+test("한투 계좌를 고르면 주문 경로 고르기에 KRX·NXT·SOR가 모두 있고, NXT를 고른 주문이 NXT 경로로 나간다", async ({ page, scenario }) => {
+  ordersOn(scenario, [kisAccount()]);
+  const api = tradingApi(scenario);
+  api.accounts[KIS_ACCOUNT] = bAccount();
+  nxtTraded(scenario, true);
+  await openOrderWindow(page, scenario);
+  await pickAccount(page, "한투 1");
+  await expect(accountButton(page)).toHaveText("한투 1 · 한투 ****-**34");
+  await page.getByTestId("order-settings-button").click();
+  const routes = page.getByTestId("order-settings").getByRole("group", { name: "주문 경로" });
+  for (const route of ["KRX", "NXT", "SOR"]) await expect(routes.getByRole("button", { name: route })).toBeEnabled();
+  await routes.getByRole("button", { name: "NXT" }).click();
+  await page.keyboard.press("Escape");
+  await cellAt(page, "buy", 70_000).dblclick();
+  await pollSaved(() => writesTo(api, "place")).toHaveLength(1);
+  expect(writesTo(api, "place")[0]!.body).toMatchObject({ venue: "nxt", account: KIS_ACCOUNT });
 });

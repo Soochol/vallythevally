@@ -46,7 +46,7 @@ export function KiwoomAccountList({ onOpenIpHelp }: { onOpenIpHelp(): void }) {
           </div>
         );
       })}
-      {mock ? <p className="text-m text-text" data-testid="mock-key-notice">{MOCK_KEY_NOTICE}</p> : <AddKeyPanel list={list} now={now} onOpenIpHelp={onOpenIpHelp} />}
+      {mock ? <p className="text-m text-text" data-testid="mock-key-notice">{MOCK_KEY_NOTICE}</p> : <AddKeyPanel list={list} now={now} onOpenIpHelp={onOpenIpHelp} onOpenOrders={setExpanded} />}
     </section>
   );
 }

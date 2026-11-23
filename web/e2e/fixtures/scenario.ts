@@ -25,6 +25,7 @@ import type { DrawingInput } from "../../src/api/generated/DrawingInput";
 import type { Layout } from "../../src/api/generated/Layout";
 import type { LayoutInput } from "../../src/api/generated/LayoutInput";
 import type { LayoutWindow } from "../../src/api/generated/LayoutWindow";
+import type { KisAccountListing } from "../../src/api/generated/KisAccountListing";
 import type { OrdersAccount } from "../../src/api/generated/OrdersAccount";
 import type { OrdersAccountCheck } from "../../src/api/generated/OrdersAccountCheck";
 import type { OrdersStatus } from "../../src/api/generated/OrdersStatus";
@@ -171,8 +172,10 @@ export { KIWOOM_MARKET_SOURCE } from "./market-source";
 export const ORDERS_OFF_MESSAGE = "주문 사용이 꺼져 있습니다";
 export const KEY_LIMIT = 5;
 
+export const NO_KIS_ACCOUNT: KisAccountListing = { accountTail: null, accountMasked: null, htsIdSet: false, source: "file" };
+
 export const keyEntry = (keyId: string, alias: string, link: KiwoomLinkStatus, patch: Partial<KiwoomKey> = {}): KiwoomKey =>
-  ({ keyId, alias, broker: "kiwoom", source: link.keySource === "env" ? "env" : "file", appKeyTail: link.appKeyTail, market: false, link, ...patch });
+  ({ keyId, alias, broker: "kiwoom", source: link.keySource === "env" ? "env" : "file", appKeyTail: link.appKeyTail, market: false, link, kisAccount: patch.broker === "kis" ? NO_KIS_ACCOUNT : null, ...patch });
 
 export const keyListOf = (...keys: KiwoomKey[]): KiwoomKeyList => ({ limit: KEY_LIMIT, keys, keyFileProblem: null });
 
@@ -201,7 +204,7 @@ export class LiveFrames {
   marketSource: MarketSourceStatus = KIWOOM_MARKET_SOURCE;
   account: AccountStatus = { state: "local_only" };
   opened = 0;
-  orders: OrdersStatus = { state: "off", accountRef: null, accountTail: null, message: ORDERS_OFF_MESSAGE, accounts: [{ keyId: "k1", alias: "키 1", market: true, state: "off", accountRef: null, accountTail: null }] };
+  orders: OrdersStatus = { state: "off", accountRef: null, accountTail: null, message: ORDERS_OFF_MESSAGE, accounts: [{ keyId: "k1", broker: "kiwoom", alias: "키 1", market: true, state: "off", accountRef: null, accountTail: null }] };
   ordersAccountTail = "01";
   ordersAccountTails: Record<string, string> = {};
   ordersAccountRefs: Record<string, string> = {};
@@ -372,7 +375,11 @@ export class Scenario {
     if (path === "/api/system/market-source" && method === "GET") return { body: this.live.marketSource };
     if (path === "/api/system/kiwoom/usage" && method === "GET") return { body: this.live.kiwoomUsage };
     if (path === "/api/system/orders" && method === "GET") return this.ordersFor(url.searchParams.get("account"));
-    if (path === "/api/system/orders/check-account" && method === "POST") return { body: { accountTail: this.live.ordersAccountTails[url.searchParams.get("keyId") ?? ""] ?? this.live.ordersAccountTail } satisfies OrdersAccountCheck };
+    if (path === "/api/system/orders/check-account" && method === "POST") {
+      const keyId = url.searchParams.get("keyId") ?? "";
+      const broker = this.live.orders.accounts.find((account) => account.keyId === keyId)?.broker ?? "kiwoom";
+      return { body: { broker, accountTail: this.live.ordersAccountTails[keyId] ?? this.live.ordersAccountTail } satisfies OrdersAccountCheck };
+    }
     if (path === "/api/system/orders" && method === "PUT") return this.switchOrders(request.postDataJSON());
     if (path === "/api/system/settings" && method === "GET") return { body: DEFAULT_SYSTEM_SETTINGS };
     if (path === "/api/symbols" && method === "GET") return { body: this.market.search(url.searchParams.get("q") ?? "", { market: url.searchParams.get("market"), kind: url.searchParams.get("kind") }) };

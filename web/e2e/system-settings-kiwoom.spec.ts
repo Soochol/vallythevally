@@ -1,6 +1,8 @@
 import { mkdir } from "node:fs/promises";
 import path from "node:path";
 import type { Page } from "@playwright/test";
+import type { KisAccountInput } from "../src/api/generated/KisAccountInput";
+import type { KisAccountListing } from "../src/api/generated/KisAccountListing";
 import type { KiwoomConnectInput } from "../src/api/generated/KiwoomConnectInput";
 import type { KiwoomKey } from "../src/api/generated/KiwoomKey";
 import type { KiwoomKeyAdd } from "../src/api/generated/KiwoomKeyAdd";
@@ -9,6 +11,7 @@ import type { KiwoomMarketKeyInput } from "../src/api/generated/KiwoomMarketKeyI
 import type { KiwoomLinkStatus } from "../src/api/generated/KiwoomLinkStatus";
 import type { KiwoomUsage } from "../src/api/generated/KiwoomUsage";
 import type { KiwoomUsageTr } from "../src/api/generated/KiwoomUsageTr";
+import type { OrdersAccount } from "../src/api/generated/OrdersAccount";
 import type { OrdersStatus } from "../src/api/generated/OrdersStatus";
 import type { OrdersSwitchInput } from "../src/api/generated/OrdersSwitchInput";
 import type { PublicIpCheck } from "../src/api/generated/PublicIpCheck";
@@ -49,8 +52,8 @@ const twoKeys = () => keyListOf(keyEntry("k1", "주계좌", CONNECTED_KIWOOM, { 
 const twoOrders = ({ second = "off" }: { second?: "on" | "off" } = {}): OrdersStatus => ({
   state: "on", accountRef: "ref-k1", accountTail: "12", message: "주문 사용이 켜져 있습니다",
   accounts: [
-    { keyId: "k1", alias: "주계좌", market: true, state: "on", accountRef: "ref-k1", accountTail: "12" },
-    { keyId: "k2", alias: "보조", market: false, state: second, accountRef: second === "on" ? "ref-k2" : null, accountTail: second === "on" ? "47" : null },
+    { keyId: "k1", broker: "kiwoom", alias: "주계좌", market: true, state: "on", accountRef: "ref-k1", accountTail: "12" },
+    { keyId: "k2", broker: "kiwoom", alias: "보조", market: false, state: second, accountRef: second === "on" ? "ref-k2" : null, accountTail: second === "on" ? "47" : null },
   ],
 });
 const refusal = (message: string) => ({ status: 400, body: { error: { code: "bad_request", message, reason: null, retryAt: null, manualActionRequired: false } } });
@@ -850,13 +853,27 @@ test.describe("한투", () => {
   const kiwoomKey = () => keyEntry("k1", "주계좌", CONNECTED_KIWOOM, { market: true });
   const kisKey = (patch: Partial<KiwoomKey> = {}, link: KiwoomLinkStatus = { ...CONNECTED_KIWOOM, appKeyTail: "KIS1" }) => keyEntry("kis1", "한투 1", link, { broker: "kis", ...patch });
 
-  test("계좌 연결 더하기에서 한투를 고르고 저장하면 한국투자증권 묶음에 줄이 생기고, 응답과 화면 어디에도 시크릿이 없다", async ({ page, scenario }) => {
+  const ACCOUNT_NO = "50012356-01";
+  const ACCOUNT_DIGITS = "50012356";
+  const listingOf = (patch: Partial<KisAccountListing> = {}): KisAccountListing => ({ accountTail: "34", accountMasked: "****-**34", htsIdSet: true, source: "file", ...patch });
+  const kisOrders = (scenario: Scenario, patch: Partial<OrdersAccount> = {}) => {
+    scenario.live.orders = { state: "on", accountRef: "ref-k1", accountTail: "12", message: "주문 사용이 켜져 있습니다", accounts: [
+      { keyId: "k1", broker: "kiwoom", alias: "주계좌", market: true, state: "on", accountRef: "ref-k1", accountTail: "12" },
+      { keyId: "kis1", broker: "kis", alias: "한투 1", market: false, state: "off", accountRef: null, accountTail: "34", ...patch },
+    ] };
+  };
+  const kisRow = (page: Page) => keyRows(page).filter({ hasText: "한투 1" });
+  const orderMark = (page: Page) => kisRow(page).getByTestId("key-order-mark");
+
+  test("계좌 연결 더하기에서 한투를 고르면 계좌번호 칸이 있고, 비우면 저장할 수 없으며, 저장하면 3단계에 잔고 조회 결과가 보인다. 응답과 화면 어디에도 시크릿과 계좌번호 전체가 없다", async ({ page, scenario }) => {
     scenario.live.kiwoomKeys = keyListOf(kiwoomKey());
+    scenario.live.ordersAccountTails["kis1"] = "56";
     const added: KiwoomKeyAdd[] = [];
     scenario.on(route("POST", KEYS), (request) => {
       const input: KiwoomKeyAdd = request.postDataJSON();
       added.push(input);
-      scenario.live.kiwoomKeys = keyListOf(kiwoomKey(), kisKey({ alias: input.alias }, { ...CONNECTED_KIWOOM, appKeyTail: input.appKey.slice(-4) }));
+      scenario.live.kiwoomKeys = keyListOf(kiwoomKey(), kisKey({ alias: input.alias, kisAccount: listingOf({ accountTail: "56", accountMasked: "****-**56", htsIdSet: false }) }, { ...CONNECTED_KIWOOM, appKeyTail: input.appKey.slice(-4) }));
+      kisOrders(scenario, { accountTail: "56" });
       return { body: scenario.live.kiwoomKeys };
     });
     await openKiwoom(page);
@@ -867,24 +884,133 @@ test.describe("한투", () => {
     await expect(brokers.getByRole("button", { name: /^한국투자증권/ })).toBeEnabled();
     await chooseBroker(page, "한국투자증권");
     await expect(page.getByLabel("별칭", { exact: true })).toHaveValue("한투 1");
-    await expect(accounts(page).getByTestId("kis-source-only")).toContainText("한투 키는 지금 시세 공급원으로만 씁니다");
+    await expect(accounts(page)).not.toContainText("시세 공급원으로만");
     await expect(accounts(page)).not.toContainText("공인 IP");
+    const accountField = page.getByLabel("계좌번호", { exact: true });
+    await expect(accountField).toHaveAttribute("type", "password");
+    await expect(accountField).toHaveAttribute("autocomplete", "off");
+    await expect(accounts(page)).toContainText("12345678-01");
+    await expect(page.getByLabel("HTS ID", { exact: true })).toHaveAttribute("placeholder", "비워 두면 체결 알림 없음");
     await page.getByLabel("앱키", { exact: true }).fill(FAKE_APP_KEY);
     await page.getByLabel("시크릿", { exact: true }).fill(FAKE_APP_SECRET);
-    await page.getByRole("button", { name: "저장하고 연결" }).click();
-    await expect(accounts(page)).toContainText("토큰 받음");
-    await accounts(page).getByRole("button", { name: "닫기" }).click();
+    const save = page.getByRole("button", { name: "저장하고 연결" });
+    await expect(save).toBeDisabled();
+    await accountField.fill(ACCOUNT_NO);
+    await page.getByRole("button", { name: "입력 보기" }).click();
+    await expect(accountField).toHaveAttribute("type", "text");
+    await page.getByRole("button", { name: "입력 가리기" }).click();
+    await expect(accountField).toHaveAttribute("type", "password");
+    await expect(save).toBeEnabled();
+    await save.click();
 
-    expect(added).toEqual([{ alias: "한투 1", appKey: FAKE_APP_KEY, appSecret: FAKE_APP_SECRET, broker: "kis" }]);
+    await expect(accounts(page).getByTestId("kis-account-check")).toHaveText("계좌 ****-**56 잔고 조회가 됐습니다");
+    await expect(accounts(page)).toContainText("토큰 받음");
+    await expect(accounts(page)).toContainText("HTS ID가 없어 체결 알림은 받지 않습니다");
+    expect(added).toEqual([{ alias: "한투 1", appKey: FAKE_APP_KEY, appSecret: FAKE_APP_SECRET, broker: "kis", accountNo: ACCOUNT_NO }]);
+    expect(callsTo(scenario, "POST", "/api/system/orders/check-account").map((r) => new URL(r.url()).searchParams.get("keyId"))).toEqual(["kis1"]);
     await expect(accounts(page).getByText("한국투자증권", { exact: true })).toBeVisible();
-    await expect(accounts(page).getByLabel("1개 / 상한 5개")).toHaveCount(2);
     await expect(keyRows(page)).toHaveCount(2);
-    await expect(keyRows(page).filter({ hasText: "한투 1" })).not.toContainText("시세");
+    await expect(orderMark(page)).toHaveText("주문 꺼짐");
+    await expect(accounts(page).getByRole("button", { name: "주문 사용 켜기로" })).toBeVisible();
+    await expect(page.locator("input[type=password], input[type=text]")).toHaveCount(0);
+
     const shown = (await page.content()) + (await page.locator("body").innerText());
-    for (const secret of [FAKE_APP_KEY, FAKE_APP_SECRET]) {
+    for (const secret of [FAKE_APP_KEY, FAKE_APP_SECRET, ACCOUNT_NO, ACCOUNT_DIGITS]) {
       expect(shown).not.toContain(secret);
       expect(JSON.stringify(scenario.live.kiwoomKeys)).not.toContain(secret);
+      expect(JSON.stringify(scenario.live.orders)).not.toContain(secret);
     }
+    await accounts(page).getByRole("button", { name: "주문 사용 켜기로" }).click();
+    await expect(kisRow(page).getByTestId("key-orders").getByRole("button", { name: "주문 사용 켜기" })).toBeEnabled();
+  });
+
+  test("한투 계좌 줄을 펼쳐 주문 사용 켜기를 누르면 끝 2자리 입력을 거쳐 그 키 ID로 확인 요청이 나가고, 다르면 그 줄에 서버 문구가 보이고 꺼진 채다", async ({ page, scenario }) => {
+    scenario.live.kiwoomKeys = keyListOf(kiwoomKey(), kisKey({ kisAccount: listingOf() }));
+    scenario.live.ordersAccountTails["kis1"] = "34";
+    kisOrders(scenario);
+    const switches: OrdersSwitchInput[] = [];
+    scenario.on(route("PUT", "/api/system/orders"), (request) => {
+      const input: OrdersSwitchInput = request.postDataJSON();
+      switches.push(input);
+      if (input.confirmAccountTail !== "34") return refusal("입력한 끝 2자리가 이 키의 계좌번호와 다릅니다");
+      kisOrders(scenario, { state: "on", accountRef: "ref-kis1" });
+      return { body: scenario.live.orders };
+    });
+    await openKiwoom(page);
+    await expect(kisRow(page).getByTestId("key-account")).toHaveText("****-**34");
+    await expandKey(page, "한투 1");
+    const orders = kisRow(page).getByTestId("key-orders");
+    await orders.getByRole("button", { name: "주문 사용 켜기" }).click();
+    await expect(orders).toContainText("이 계좌로 잔고 조회가 됐습니다");
+    expect(callsTo(scenario, "POST", "/api/system/orders/check-account").map((r) => new URL(r.url()).searchParams.get("keyId"))).toEqual(["kis1"]);
+    expect(switches).toEqual([]);
+    const tail = orders.getByLabel("계좌번호 끝 2자리 입력");
+    const confirm = orders.getByRole("button", { name: "켜기 확인" });
+    await expect(confirm).toBeDisabled();
+    await tail.fill("9");
+    await expect(confirm).toBeDisabled();
+    await tail.fill("99");
+    await confirm.click();
+    await expect(orders.getByTestId("key-orders-error")).toHaveText("입력한 끝 2자리가 이 키의 계좌번호와 다릅니다");
+    await expect(orderMark(page)).toHaveText("주문 꺼짐");
+    expect(switches).toEqual([{ enabled: true, confirmAccountTail: "99", keyId: "kis1" }]);
+
+    await tail.fill("34");
+    await confirm.click();
+    await expect(orderMark(page)).toHaveText("주문 켜짐");
+    expect(switches.at(-1)).toEqual({ enabled: true, confirmAccountTail: "34", keyId: "kis1" });
+    await expect(orders.getByRole("button", { name: "주문 사용 끄기" })).toBeVisible();
+  });
+
+  test("계좌번호 없는 한투 키 줄은 주문 사용 켜기가 꺼져 있고 안내가 보인다", async ({ page, scenario }) => {
+    scenario.live.kiwoomKeys = keyListOf(kiwoomKey(), kisKey({ kisAccount: listingOf({ accountTail: null, accountMasked: null }) }));
+    kisOrders(scenario, { accountTail: null });
+    await openKiwoom(page);
+    await expect(kisRow(page).getByTestId("key-account")).toHaveText("계좌번호 없음");
+    await expandKey(page, "한투 1");
+    const orders = kisRow(page).getByTestId("key-orders");
+    await expect(orders.getByRole("button", { name: "주문 사용 켜기" })).toBeDisabled();
+    await expect(orders.getByTestId("kis-no-account-note")).toHaveText("계좌번호를 넣어야 주문 사용을 켤 수 있습니다");
+    await expect(kisRow(page).getByRole("button", { name: "계좌번호 넣기" })).toBeVisible();
+    expect(callsTo(scenario, "POST", "/api/system/orders/check-account")).toHaveLength(0);
+  });
+
+  test("HTS ID가 없으면 그 줄에 체결 알림 안내가 보인다", async ({ page, scenario }) => {
+    scenario.live.kiwoomKeys = keyListOf(kiwoomKey(), kisKey({ kisAccount: listingOf({ htsIdSet: false }) }));
+    kisOrders(scenario);
+    await openKiwoom(page);
+    await expect(kisRow(page).getByTestId("key-hts-missing")).toHaveText("HTS ID 없음");
+    await expandKey(page, "한투 1");
+    await expect(kisRow(page).getByTestId("kis-hts-note")).toHaveText("HTS ID가 없어 체결 알림을 받지 못합니다. 주문 뒤 조회로 맞춥니다");
+  });
+
+  test("화면에서 넣은 한투 계좌는 바꾸기로 고치고 계좌번호 전체가 화면에 남지 않으며, .env에서 읽은 값은 읽기 전용이다", async ({ page, scenario }) => {
+    scenario.live.kiwoomKeys = keyListOf(kiwoomKey(), kisKey({ kisAccount: listingOf() }), kisKey({ keyId: "kis2", alias: "한투 2", kisAccount: listingOf({ source: "env" }) }));
+    const puts: { path: string; body: KisAccountInput }[] = [];
+    scenario.on((url, request) => request.method() === "PUT" && url.pathname.endsWith("/account"), (request) => {
+      puts.push({ path: new URL(request.url()).pathname, body: request.postDataJSON() });
+      scenario.live.kiwoomKeys = keyListOf(kiwoomKey(), kisKey({ kisAccount: listingOf({ accountTail: "77", accountMasked: "****-**77", htsIdSet: true }) }));
+      return { body: scenario.live.kiwoomKeys };
+    });
+    await openKiwoom(page);
+    await expandKey(page, "한투 2");
+    await expect(keyRows(page).filter({ hasText: "한투 2" })).toContainText(".env에서 읽음 · 읽기 전용");
+    await expect(keyRows(page).filter({ hasText: "한투 2" }).getByRole("button", { name: "계좌번호·HTS ID 바꾸기" })).toHaveCount(0);
+    await expandKey(page, "한투 1");
+    const change = kisRow(page).getByRole("button", { name: "계좌번호·HTS ID 바꾸기" });
+    await change.click();
+    const form = kisRow(page).getByRole("form", { name: "계좌 바꾸기" });
+    const save = form.getByRole("button", { name: "저장" });
+    await expect(save).toBeDisabled();
+    await form.getByLabel("HTS ID", { exact: true }).fill("fakehts1");
+    await expect(save).toBeDisabled();
+    await form.getByLabel("계좌번호", { exact: true }).fill("11223377-01");
+    await save.click();
+    await expect(kisRow(page).getByTestId("key-account")).toHaveText("****-**77");
+    expect(puts).toEqual([{ path: `${KEYS}/kis1/account`, body: { accountNo: "11223377-01", htsId: "fakehts1" } }]);
+    const shown = (await page.content()) + (await page.locator("body").innerText());
+    expect(shown).not.toContain("11223377");
+    expect(shown).not.toContain("fakehts1");
   });
 
   test("키움 키가 5개면 더하기 1단계의 키움 칸이 흐리고 고를 수 없다", async ({ page, scenario }) => {

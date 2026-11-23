@@ -111,11 +111,15 @@ export const requestedVenues = (scenario: Scenario, path: string): (string | nul
 export const MARKET_KEY = "k1";
 export const SECOND_ACCOUNT = "synthetic-account-b";
 
-export const otherAccount = (patch: Partial<OrdersAccount> = {}): OrdersAccount => ({ keyId: "k2", alias: "위탁 2", market: false, state: "on", accountRef: SECOND_ACCOUNT, accountTail: "05", ...patch });
+export const otherAccount = (patch: Partial<OrdersAccount> = {}): OrdersAccount => ({ keyId: "k2", broker: "kiwoom", alias: "위탁 2", market: false, state: "on", accountRef: SECOND_ACCOUNT, accountTail: "05", ...patch });
 
-export function ordersOn(scenario: Scenario, others: OrdersAccount[] = []): void {
-  const market: OrdersAccount = { keyId: MARKET_KEY, alias: "키 1", market: true, state: "on", accountRef: ACCOUNT, accountTail: "01" };
-  scenario.live.orders = { state: "on", accountRef: ACCOUNT, accountTail: "01", message: "주문 사용이 켜져 있습니다", accounts: [market, ...others] };
+export const KIS_ACCOUNT = "synthetic-account-kis";
+
+export const kisAccount = (patch: Partial<OrdersAccount> = {}): OrdersAccount => ({ keyId: "kis1", broker: "kis", alias: "한투 1", market: false, state: "on", accountRef: KIS_ACCOUNT, accountTail: "34", ...patch });
+
+export function ordersOn(scenario: Scenario, others: OrdersAccount[] = [], marketTail = "01"): void {
+  const market: OrdersAccount = { keyId: MARKET_KEY, broker: "kiwoom", alias: "키 1", market: true, state: "on", accountRef: ACCOUNT, accountTail: marketTail };
+  scenario.live.orders = { state: "on", accountRef: ACCOUNT, accountTail: marketTail, message: "주문 사용이 켜져 있습니다", accounts: [market, ...others] };
 }
 
 export const accountData = (patch: Partial<AccountData> = {}): AccountData => ({ open: [], holdings: [], executions: [], orderable: {}, ...patch });

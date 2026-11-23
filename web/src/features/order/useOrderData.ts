@@ -25,7 +25,7 @@ export interface OrderAccess {
 
 export function useOrderAccess(choice: OrderAccountChoice): OrderAccess {
   const link = useKiwoomOnlyLink();
-  if (link !== null && link.state !== "connected") return { open: false, reason: "키움에 연결되지 않아 주문할 수 없습니다" };
+  if (choice.current?.broker !== "kis" && link !== null && link.state !== "connected") return { open: false, reason: "키움에 연결되지 않아 주문할 수 없습니다" };
   if (!choice.current) return { open: false, reason: "주문 사용 상태를 확인하는 중입니다" };
   if (choice.current.state !== "on") return { open: false, reason: choice.current.message || "주문 사용이 꺼져 있습니다" };
   return { open: true, reason: null };

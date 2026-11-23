@@ -2,14 +2,14 @@ import { describe, expect, it } from "vitest";
 import type { KiwoomKey } from "../../api/generated/KiwoomKey";
 import type { KiwoomLinkStatus } from "../../api/generated/KiwoomLinkStatus";
 import type { MarketSourceStatus } from "../../api/generated/MarketSourceStatus";
-import { addedKey, addSteps, brokersShown, defaultAlias, editRequest, emptyEntry, feedLine, marketChangeText, menuDotTone, removeText, shortReason } from "./kiwoomKeys";
+import { accountRequest, addedKey, addInput, addSteps, brokersShown, canAdd, defaultAlias, editRequest, emptyEntry, feedLine, marketChangeText, menuDotTone, removeText, shortReason } from "./kiwoomKeys";
 import { panelView } from "./kiwoomPanel";
 
 const link = (patch: Partial<KiwoomLinkStatus> = {}): KiwoomLinkStatus => ({
   environment: "real", keySource: "file", appKeyTail: "1234", credentialId: null, state: "connected", problem: null, message: "", retryAt: null, needsAcknowledgement: false,
   step: null, tokenExpiresAt: null, realtimeRegistered: null, symbolCount: null, registeredIp: null, atStart: null, ...patch,
 });
-const key = (keyId: string, alias: string, patch: Partial<KiwoomKey> = {}): KiwoomKey => ({ keyId, alias, broker: "kiwoom", source: "file", appKeyTail: "1234", market: false, link: link(), ...patch });
+const key = (keyId: string, alias: string, patch: Partial<KiwoomKey> = {}): KiwoomKey => ({ keyId, alias, broker: "kiwoom", source: "file", appKeyTail: "1234", market: false, link: link(), kisAccount: null, ...patch });
 const blocked = link({ state: "failed", problem: "authBlocked8050" });
 
 describe("키 목록 화면의 판단", () => {
@@ -98,5 +98,29 @@ describe("한투", () => {
   it("시세 키를 지울 때 다음 시세 키가 다른 증권사면 제약을 붙인다", () => {
     const keys = [key("k1", "주계좌", { market: true }), kis("kis1")];
     expect(removeText(keys, keys[0]!)).toContain("한투는 분봉을 1분봉에서 만들고");
+  });
+});
+
+describe("한투 계좌 입력", () => {
+  const filled = { ...emptyEntry("한투 1"), appKey: " A ", appSecret: " S " };
+  it("한투는 계좌번호가 비면 더할 수 없고 키움은 계좌번호 없이 더한다", () => {
+    expect(canAdd(filled, "kis")).toBe(false);
+    expect(canAdd({ ...filled, accountNo: "  " }, "kis")).toBe(false);
+    expect(canAdd({ ...filled, accountNo: "12345678-01" }, "kis")).toBe(true);
+    expect(canAdd(filled, "kiwoom")).toBe(true);
+    expect(canAdd({ ...filled, appSecret: "" }, "kiwoom")).toBe(false);
+  });
+  it("한투 더하기 본문은 계좌번호를 싣고 HTS ID는 있을 때만 싣는다", () => {
+    expect(addInput({ ...filled, accountNo: " 12345678-01 " }, "kis")).toEqual({ alias: "한투 1", appKey: "A", appSecret: "S", broker: "kis", accountNo: "12345678-01" });
+    expect(addInput({ ...filled, accountNo: "12345678-01", htsId: " myid " }, "kis")).toMatchObject({ accountNo: "12345678-01", htsId: "myid" });
+  });
+  it("키움 더하기 본문에는 증권사·계좌번호·HTS ID가 없다", () => {
+    expect(addInput({ ...filled, accountNo: "12345678-01", htsId: "id" }, "kiwoom")).toEqual({ alias: "한투 1", appKey: "A", appSecret: "S" });
+  });
+  it("계좌 바꾸기는 계좌번호가 있어야 하고 HTS ID가 비면 싣지 않는다", () => {
+    expect(accountRequest(emptyEntry(""))).toBeNull();
+    expect(accountRequest({ ...emptyEntry(""), htsId: "id" })).toBeNull();
+    expect(accountRequest({ ...emptyEntry(""), accountNo: "12345678-01" })).toEqual({ accountNo: "12345678-01" });
+    expect(accountRequest({ ...emptyEntry(""), accountNo: "12345678-01", htsId: "id" })).toEqual({ accountNo: "12345678-01", htsId: "id" });
   });
 });
