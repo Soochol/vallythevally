@@ -26,11 +26,12 @@ export function EmptyState({ title, children, action, onAction, icon }: { title:
   );
 }
 
-export function ErrorState({ message, retry, detail, icon }: { message: string; retry(): void; detail?: string; icon?: ReactNode }) {
+export function ErrorState({ message, retry, detail, icon, children }: { message: string; retry(): void; detail?: string; icon?: ReactNode; children?: ReactNode }) {
   return (
     <div role="alert" className="ui-state" data-tone="danger">
       <span className="ui-state-icon">{icon ?? <WarningIcon size={24} />}</span>
       <p className="ui-state-title">{message}</p>
+      {children && <div className="ui-state-body">{children}</div>}
       <button type="button" className="btn" onClick={retry}>다시 시도</button>
       {detail && <details className="ui-state-detail"><summary>자세히</summary><pre>{detail}</pre></details>}
     </div>

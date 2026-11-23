@@ -1,13 +1,11 @@
 import { type RefObject, useId, useLayoutEffect, useRef } from "react";
 import type { CrosshairScope } from "../../api/generated/CrosshairScope";
-import { useUiStore } from "../../stores/ui";
-import { equalizeDockSizes, setLayoutMode } from "../workspace/canvasCommands";
 import { useLayoutStore } from "../../stores/layout";
 import { usePersistStore } from "../../stores/persist";
 import { DialogFrame, Errors } from "../dialog/DialogParts";
 import { ChevronIcon } from "../icons";
 import { Menu, type MenuItem } from "../menu/Menu";
-import { layoutCommands, useLayoutsStore } from "./controller";
+import { useLayoutsStore } from "./controller";
 import { acknowledgeLayoutMenuFocus, layoutMenu, type LayoutNaming, useLayoutMenuPresentation } from "./presentation";
 
 type Focusable = Extract<MenuItem, { kind: "radio" }>;
@@ -19,10 +17,7 @@ export function LayoutMenu() {
   const trigger = useRef<HTMLButtonElement>(null);
   const nameInput = useRef<HTMLInputElement>(null);
   const { surface, focus } = useLayoutMenuPresentation();
-  const mode = useUiStore((s) => s.prefs.layoutMode);
   const layout = useLayoutStore((s) => s.layout);
-  const canUndo = useLayoutStore((s) => s.steps.length > 0);
-  const canRedo = useLayoutStore((s) => s.redos.length > 0);
   const offline = usePersistStore((s) => s.phase.kind !== "ready");
   const { phase, layouts } = useLayoutsStore();
   const busy = phase === "busy";
@@ -44,24 +39,11 @@ export function LayoutMenu() {
       { kind: "radio", label: "끔", checked: !layout.sync.crosshair, onSelect: () => useLayoutStore.getState().setCrosshairSync(false) },
       ...CROSSHAIR_SCOPES.map(([scope, label]): Focusable => ({ kind: "radio", label, checked: layout.sync.crosshair && layout.sync.crosshairScope === scope, onSelect: () => useLayoutStore.getState().setCrosshairScope(scope) })),
     ] },
-    { kind: "separator" },
-    { kind: "action", label: "기본 배치로", onSelect: layoutCommands.resetPlacement },
-    { kind: "action", label: "크기 모두 고르게", disabled: mode !== "dock" || !layout.placement.dock, onSelect: equalizeDockSizes },
-    { kind: "action", label: "배치 되돌리기", disabled: !canUndo, onSelect: () => useLayoutStore.getState().undoArrangement() },
-    { kind: "action", label: "배치 다시 하기", disabled: !canRedo, onSelect: () => useLayoutStore.getState().redoArrangement() },
   ];
   return (
     <div ref={root} className="contents">
-      <button ref={trigger} data-layout-trigger="" type="button" className="tb-btn max-w-[104px] max-lg:max-w-14 aria-expanded:bg-accent-soft aria-expanded:text-accent" aria-label={`레이아웃: ${layout.name}`} title={`레이아웃: ${layout.name}`} aria-haspopup="menu" aria-expanded={surface.kind === "menu"} disabled={offline || busy} onClick={() => { void layoutMenu.toggle(); }}><span className="truncate">{layout.name}</span><ChevronIcon /></button>
-      {surface.kind === "menu" && !busy && <Menu label="레이아웃" root={root} items={items} onClose={layoutMenu.dismissMenu}>
-        <div className="layout-mode-control" onKeyDown={(event) => event.stopPropagation()}>
-          <span id="layout-mode-label">창 배치 방식</span>
-          <div role="group" aria-labelledby="layout-mode-label" className="layout-mode-segments">
-            <button type="button" aria-pressed={mode === "dock"} onClick={() => setLayoutMode("dock")}>도킹</button>
-            <button type="button" aria-pressed={mode === "canvas"} onClick={() => setLayoutMode("canvas")}>캔버스</button>
-          </div>
-        </div>
-      </Menu>}
+      <button ref={trigger} data-layout-trigger="" type="button" className="tb-btn max-w-[104px] max-lg:max-w-14 disabled:opacity-60 aria-expanded:bg-accent-soft aria-expanded:text-accent" aria-label={`레이아웃: ${layout.name}`} title={`레이아웃: ${layout.name}`} aria-haspopup="menu" aria-expanded={surface.kind === "menu"} disabled={offline || busy} onClick={() => { void layoutMenu.toggle(); }}><span className="truncate">{layout.name}</span><ChevronIcon /></button>
+      {surface.kind === "menu" && !busy && <Menu label="레이아웃" root={root} items={items} onClose={layoutMenu.dismissMenu} />}
       {surface.kind === "naming" && <NameDialog naming={surface} input={nameInput} />}
     </div>
   );
@@ -72,7 +54,7 @@ function NameDialog({ naming: { operation, value, error }, input }: { naming: La
   const id = useId();
   const title = operation === "saveAs" ? "새 이름으로 저장" : "이름 바꾸기";
   return (
-    <DialogFrame labelledBy={`${id}-title`} width="w-[360px]" onClose={layoutMenu.closeNaming}>
+    <DialogFrame labelledBy={`${id}-title`} width="w-[360px]" size="compact" onClose={layoutMenu.closeNaming}>
       <form className="flex flex-col" onSubmit={(event) => {
         event.preventDefault();
         void layoutMenu.submitName();
@@ -80,7 +62,8 @@ function NameDialog({ naming: { operation, value, error }, input }: { naming: La
         <header className="ui-dialog-head"><h2 id={`${id}-title`}>{title}</h2></header>
         <div className="flex flex-col gap-3 p-6">
           <label htmlFor={`${id}-name`}>레이아웃 이름</label>
-          <input ref={input} id={`${id}-name`} autoFocus value={value} disabled={busy} aria-invalid={error !== null} aria-describedby={error ? `${id}-error` : undefined} className="ui-field" onChange={(event) => layoutMenu.changeName(event.target.value)} />
+          <input ref={input} id={`${id}-name`} autoFocus onFocus={(event) => event.currentTarget.select()} value={value} disabled={busy} aria-invalid={error !== null} aria-describedby={error ? `${id}-error ${id}-rule` : `${id}-rule`} className="ui-field" onChange={(event) => layoutMenu.changeName(event.target.value)} />
+          <p id={`${id}-rule`} className="text-xs text-text-2">1~20자</p>
           <Errors id={`${id}-error`} messages={error ? [error] : []} />
         </div>
         <footer className="ui-dialog-foot justify-end"><button type="button" className="tb-btn" disabled={busy} onClick={layoutMenu.closeNaming}>취소</button><button type="submit" className="btn-primary" disabled={busy}>저장</button></footer>

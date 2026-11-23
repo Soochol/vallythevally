@@ -6,10 +6,10 @@ test.use({ clockStart: "20261109100000", viewport: { width: 1440, height: 860 } 
 const groups = (page: Page) => page.locator("[data-dock-group]");
 const tabMenu = (page: Page) => page.getByRole("menu", { name: "창 배치" });
 const dividerMenu = (page: Page) => page.getByRole("menu", { name: "경계 크기" });
-const layoutMenu = (page: Page) => page.getByRole("menu", { name: "레이아웃", exact: true });
+const layoutMenu = (page: Page) => page.getByRole("menu", { name: "배치", exact: true });
 const sideways = (page: Page) => page.getByRole("separator", { name: "좌우 창 경계" });
 const stacked = (page: Page) => page.getByRole("separator", { name: "위아래 창 경계" });
-const layoutTrigger = (page: Page) => page.getByRole("button", { name: /^레이아웃:/ });
+const layoutTrigger = (page: Page) => page.getByRole("button", { name: "배치", exact: true });
 const choice = (page: Page, name: string) => dividerMenu(page).getByRole("menuitem", { name: new RegExp(`^${name.replace("/", "\\/")}( |$)`) });
 const widthOf = async (locator: Locator) => (await locator.boundingBox())!.width;
 const heightOf = async (locator: Locator) => (await locator.boundingBox())!.height;
@@ -125,7 +125,7 @@ test("세로로 쌓은 차트 셋은 같은 방향 고르게와 크기 모두 �
   await layoutAction(page, "크기 모두 고르게");
   await expect.poll(async () => spread(await heights())).toBeLessThanOrEqual(1);
   await layoutTrigger(page).click();
-  await layoutMenu(page).getByRole("menuitem", { name: "배치 되돌리기", exact: true }).click();
+  await layoutMenu(page).getByRole("menuitem", { name: /^배치 되돌리기/ }).click();
   await expect.poll(heights).toEqual(before);
 
   await layoutTrigger(page).click();

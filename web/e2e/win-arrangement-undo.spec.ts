@@ -13,7 +13,7 @@ const area = (page: Page) => page.getByRole("main", { name: "작업 영역" });
 const preview = (page: Page) => page.locator("[data-dock-preview]");
 const sideways = (page: Page) => page.getByRole("separator", { name: "좌우 창 경계" });
 const notice = (page: Page, text: string) => page.getByRole("status").filter({ hasText: text });
-const layoutMenu = (page: Page) => page.getByRole("menu", { name: "레이아웃" });
+const layoutMenu = (page: Page) => page.getByRole("menu", { name: "배치", exact: true });
 const savedPlacement = (scenario: Scenario) => parsePlacement(scenario.documents.layout(DEFAULT_LAYOUT_ID).placement);
 const savedDock = (scenario: Scenario) => savedPlacement(scenario).dock;
 const SETTINGS = { v: 1, style: "candle", scale: "normal", indicators: [], compare: [], panels: [] };
@@ -187,8 +187,8 @@ test("탭을 끄는 중의 Ctrl+Z는 배치를 바꾸지 않고 이어 놓으면
 
 test("레이아웃 메뉴의 배치 다시 하기는 되돌린 뒤에만 켜지고 누르면 다시 한다", async ({ page }) => {
   await open(page);
-  const trigger = page.getByRole("button", { name: /^레이아웃:/ });
-  const redo = () => layoutMenu(page).getByRole("menuitem", { name: "배치 다시 하기", exact: true });
+  const trigger = page.getByRole("button", { name: "배치", exact: true });
+  const redo = () => layoutMenu(page).getByRole("menuitem", { name: /^배치 다시 하기/ });
   await trigger.click();
   await expect(redo()).toBeDisabled();
   await page.keyboard.press("Escape");

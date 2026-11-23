@@ -110,7 +110,7 @@ function ChartScreen({ page }: { page: PageId }) {
         (page === "home" ? " invisible" : "")
       }
     >
-      {onWorkspace ? <Topbar /> : <PageTopbar page={page} />}
+      {onWorkspace ? <Topbar /> : <PageTopbar />}
       {onWorkspace && <PhoneHeader cell={cell} info={info} status={status} />}
       {onWorkspace && <PeriodChips cell={cell} />}
       {desktop ? (

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { MarketOverviewIntradayPoint } from "../../api/generated/MarketOverviewIntradayPoint";
-import { cumulativeLines, linePath, zeroY } from "./cumulativeLines";
+import { cumulativeLines, lastValues, linePath, nearestTime, spreadLabels, valuesAt, yFraction, zeroY } from "./cumulativeLines";
 
 const point = (at: number, individual: number | null, foreign: number | null, institution: number | null, program: number | null) =>
   ({ at, individualEok: individual, foreignEok: foreign, institutionEok: institution, programEok: program }) as unknown as MarketOverviewIntradayPoint;
@@ -26,5 +26,25 @@ describe("cumulativeLines", () => {
     const frame = { width: 180, height: 100 };
     expect(linePath(lines, "individual", frame)).toBe("M0.0 60.0 L60.0 52.0 L120.0 40.0 L180.0 0.0");
     expect(zeroY(lines, frame)).toBeCloseTo(60, 5);
+  });
+});
+
+describe("선 끝 이름표와 포인터 값", () => {
+  it("가장 가까운 시각의 네 값을 돌려준다", () => {
+    const lines = cumulativeLines(POINTS)!;
+    expect(nearestTime(lines, 70)).toBe(60);
+    expect(valuesAt(lines, 60)).toEqual({ individual: 40, foreign: -20, institution: 30, program: null });
+  });
+  it("마지막 값과 세로 위치를 돌려준다", () => {
+    const lines = cumulativeLines(POINTS)!;
+    expect(lastValues(lines)).toEqual({ individual: 300, foreign: -200, institution: 80, program: 40 });
+    expect(yFraction(lines, 300)).toBe(0);
+    expect(yFraction(lines, -200)).toBe(1);
+  });
+  it("가까운 이름표는 간격을 벌리고 틀 안에 둔다", () => {
+    expect(spreadLabels([0.5, 0.51, 0.9], 0.1)).toEqual([0.5, 0.6, 0.9]);
+    const crowded = spreadLabels([0.98, 0.99, 1], 0.1);
+    expect(crowded.every((value) => value >= 0 && value <= 1)).toBe(true);
+    expect(Math.min(...crowded.slice(1).map((v, i) => v - crowded[i]!))).toBeGreaterThanOrEqual(0.0999);
   });
 });

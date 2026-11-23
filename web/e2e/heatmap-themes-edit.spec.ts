@@ -386,9 +386,36 @@ test("칸 메뉴로 이 테마에서 빼면 바로 저장하고 그 칸이 사�
   await tile(page, "000660").click({ button: "right" });
   await page.getByRole("menu", { name: "SK하이닉스 칸 동작" }).getByRole("menuitem", { name: "이 테마에서 빼기" }).click();
   await expect(tile(page, "000660")).toHaveCount(0);
-  await expect(toast(page)).toHaveText("‘반도체’ 테마에서 뺐습니다: SK하이닉스");
+  await expect(toast(page).locator(".ui-toast-text")).toHaveText("‘반도체’ 테마에서 뺐습니다: SK하이닉스");
   expect(storedShape(scenario)).toEqual([["반도체", ["005930"]], ["지주", ["028260", "086520"]]]);
   expect(themeRequests(scenario)).toEqual(["GET", "PUT"]);
+});
+
+test("칸 메뉴 첫 항목은 차트로 보내기와 관심종목에 추가이고 테마 목록에서 뒤로 돌아간다", async ({ page, scenario }) => {
+  seedHeatmapThemes(scenario, table());
+  await page.goto("/heatmap");
+  await tile(page, "005930").click({ button: "right" });
+  const actions = page.getByRole("menu", { name: "삼성전자 칸 동작" });
+  await expect(actions.getByRole("menuitem").first()).toHaveAccessibleName("차트로 보내기");
+  await expect(actions.getByRole("menuitem").nth(1)).toHaveAccessibleName("관심종목에 추가");
+  await actions.getByRole("menuitem", { name: "관심종목에 추가" }).click();
+  await expect(toast(page).locator(".ui-toast-text")).toContainText("삼성전자");
+  await tile(page, "005930").click({ button: "right" });
+  await page.getByRole("menu", { name: "삼성전자 칸 동작" }).getByRole("menuitem", { name: "다른 테마에 추가" }).click();
+  await page.getByRole("menu", { name: "삼성전자 다른 테마에 추가" }).getByRole("menuitem", { name: /뒤로/ }).click();
+  await expect(page.getByRole("menu", { name: "삼성전자 칸 동작" })).toBeVisible();
+});
+
+test("뺀 알림의 되돌리기는 같은 자리에 그 종목을 다시 넣는다", async ({ page, scenario }) => {
+  seedHeatmapThemes(scenario, table(), { revision: 100, themes: [{ id: "chips", name: "반도체", symbols: ["005930", "000660", "028260"] }] });
+  await page.goto("/heatmap");
+  await tile(page, "000660").click({ button: "right" });
+  await page.getByRole("menu", { name: "SK하이닉스 칸 동작" }).getByRole("menuitem", { name: "이 테마에서 빼기" }).click();
+  await expect(tile(page, "000660")).toHaveCount(0);
+  expect(storedShape(scenario)).toEqual([["반도체", ["005930", "028260"]]]);
+  await toast(page).getByRole("button", { name: /되돌리기/ }).click();
+  await expect(tile(page, "000660")).toBeVisible();
+  expect(storedShape(scenario)).toEqual([["반도체", ["005930", "000660", "028260"]]]);
 });
 
 test("칸 메뉴는 키보드 Shift+F10으로도 열리고 Esc로 닫힌다", async ({ page, scenario }) => {

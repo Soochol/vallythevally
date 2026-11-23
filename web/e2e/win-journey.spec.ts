@@ -19,6 +19,8 @@ const SETTINGS = { v: 1, style: "candle", scale: "normal", indicators: [], compa
 const topbar = (page: Page) => page.getByRole("toolbar", { name: "차트 도구 막대" });
 const layoutButton = (page: Page) => topbar(page).getByRole("button", { name: /^레이아웃:/ });
 const layoutMenu = (page: Page) => page.getByRole("menu", { name: "레이아웃", exact: true });
+const arrangeButton = (page: Page) => topbar(page).getByRole("button", { name: "배치", exact: true });
+const arrangeMenu = (page: Page) => page.getByRole("menu", { name: "배치", exact: true });
 const tab = (page: Page, id: string) => page.locator(`[role=tab][data-window-id="${id}"]`);
 const head = (page: Page, id: string) => page.locator(`[data-window-header="${id}"]`);
 const frame = (page: Page, id: string) => page.locator(`[data-canvas-window="${id}"], [data-dock-float="${id}"]`);
@@ -52,7 +54,7 @@ async function ready(page: Page, count = 1) {
 }
 
 async function setMode(page: Page, next: typeof MODES[number]) {
-  await layoutButton(page).click();
+  await arrangeButton(page).click();
   const button = page.getByRole("group", { name: "창 배치 방식" }).getByRole("button", { name: next === "dock" ? "도킹" : "캔버스", exact: true });
   await button.click();
   await expect(button).toHaveAttribute("aria-pressed", "true");
@@ -507,9 +509,9 @@ test("키보드만으로 창 더하기·탭·나누기·경계·캔버스·닫�
   const old = Number(await divider.getAttribute("aria-valuenow"));
   await page.keyboard.press("ArrowLeft");
   await expect.poll(async () => Number(await divider.getAttribute("aria-valuenow"))).toBe(old - 16);
-  await tabTo(page, layoutButton(page));
+  await tabTo(page, arrangeButton(page));
   await page.keyboard.press("Enter");
-  await expect(layoutMenu(page).getByRole("menuitemradio").first()).toBeFocused();
+  await expect(arrangeMenu(page).getByRole("menuitem").first()).toBeFocused();
   await page.keyboard.press("End");
   await page.keyboard.press("Tab");
   await page.keyboard.press("Tab");
@@ -761,8 +763,8 @@ for (const mode of MODES) {
     await expect(stage).not.toHaveAttribute(dragging);
     await expect(frame(page, "indicators")).toHaveAttribute("style", beforeStyle);
     expect(placement(scenario)).toEqual(before);
-    await layoutButton(page).click();
-    await expect(layoutMenu(page).getByRole("menuitem", { name: "배치 되돌리기", exact: true })).toBeDisabled();
+    await arrangeButton(page).click();
+    await expect(arrangeMenu(page).getByRole("menuitem", { name: /^배치 되돌리기/ })).toBeDisabled();
     expect(placement(scenario)).toEqual(before);
   });
 }

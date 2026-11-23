@@ -23,6 +23,20 @@ export function filterFunds(funds: readonly EtfFundSummary[], filter: FundFilter
   );
 }
 
+export type FundSort = "name" | "top5" | "count";
+
+export const SORT_CHOICES: readonly { value: FundSort; label: string }[] = [
+  { value: "name", label: "이름순" },
+  { value: "top5", label: "상위 5 비중순" },
+  { value: "count", label: "종목 수순" },
+];
+
+export function sortFunds(funds: readonly EtfFundSummary[], sort: FundSort): EtfFundSummary[] {
+  if (sort === "top5") return funds.toSorted((a, b) => b.top5WeightBps - a.top5WeightBps);
+  if (sort === "count") return funds.toSorted((a, b) => b.holdingsCount - a.holdingsCount);
+  return funds.toSorted((a, b) => a.name.localeCompare(b.name, "ko"));
+}
+
 export function issuersOf(funds: readonly EtfFundSummary[]): string[] {
   return [...new Set(funds.map((fund) => fund.issuer))].sort((a, b) => a.localeCompare(b, "ko"));
 }
@@ -104,6 +118,20 @@ export function cumulativeCurve(weightsBps: readonly number[]): CurvePoint[] {
   return weightsBps.toSorted((a, b) => b - a).map((weight, index) => {
     sum += weight;
     return { rank: index + 1, cumulativeBps: sum };
+  });
+}
+
+export interface RankedHolding<T extends WeightedHolding> {
+  holding: T;
+  rank: number;
+  cumulativeBps: number;
+}
+
+export function rankHoldings<T extends WeightedHolding>(holdings: readonly T[]): RankedHolding<T>[] {
+  let sum = 0;
+  return holdings.toSorted((a, b) => b.weightBps - a.weightBps).map((holding, index) => {
+    sum += holding.weightBps;
+    return { holding, rank: index + 1, cumulativeBps: sum };
   });
 }
 
