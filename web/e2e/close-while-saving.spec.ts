@@ -45,7 +45,7 @@ test("앞 저장이 끝나기 전에 탭을 닫아도 마지막 편집이 HTTP�
     await useLayoutEndpoint(context, origin);
     await page.goto("/?symbol=005930");
     await expect(cell(page)).toHaveAttribute("aria-label", "칸 1: 삼성전자 통합 일");
-    await expect(page.getByRole("contentinfo")).toContainText("자동 저장됨");
+    await expect(page.getByRole("contentinfo")).toContainText("저장됨");
     const periods = page.getByRole("toolbar", { name: "차트 도구 막대" }).getByRole("group", { name: "봉 주기" });
     await periods.getByRole("button", { name: "주", exact: true }).click();
     await firstPut;

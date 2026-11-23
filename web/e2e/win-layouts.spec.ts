@@ -364,7 +364,7 @@ test("이름 입력을 키보드로 저장·취소하고 서버가 거절해도 
   await expect(renamed).toBeHidden();
   await expect(trigger(page)).toHaveAccessibleName("레이아웃: 키보드");
   await expect(trigger(page)).toBeFocused();
-  await expect(page.getByRole("contentinfo")).toContainText("자동 저장됨");
+  await expect(page.getByRole("contentinfo")).toContainText("저장됨");
   for (const kind of ["이름 바꾸기", "새 이름으로 저장"] as const) {
     const cancelled = await open(kind);
     await page.keyboard.press("Escape");

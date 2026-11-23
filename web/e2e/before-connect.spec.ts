@@ -40,7 +40,7 @@ test("키 없음: 차트 칸 카드의 단추가 키움 연결 내용을 열고 
   await expect(guide(page).getByRole("heading", { name: "키움 키를 넣으면 시세가 보입니다" })).toBeVisible();
   await expect(statusBar(page).getByRole("button", { name: /키움 키가 없습니다/ }).locator(".conn-dot")).toHaveAttribute("data-tone", "gray");
   await expect(statusBar(page)).not.toHaveClass(/danger/);
-  await guide(page).getByRole("button", { name: "시스템 설정 열기" }).click();
+  await guide(page).getByRole("button", { name: "키 등록 시작" }).click();
   await expect(dialog(page).getByRole("tab", { name: /^증권사 · 계좌/ })).toHaveAttribute("aria-selected", "true");
   await expect(dialog(page).getByRole("tabpanel")).toContainText("키움 키가 없습니다");
 });
@@ -76,13 +76,13 @@ test("연결 안 함: 관심종목은 보이고 가격은 —, 검색은 연결 
   await expect(rows(page).first()).toBeVisible();
 });
 
-test("8050: 상태 줄이 붉고 시스템 설정으로 이끌며 누르면 키움 연결 내용이 열린다", async ({ page, scenario }) => {
+test("8050: 상태 줄은 짧은 붉은 문장이고 띠가 이유를 말하며 누르면 키움 연결 내용이 열린다", async ({ page, scenario }) => {
   beforeConnect(scenario, blocked);
   await open(page);
-  const sentence = statusBar(page).getByRole("button", { name: "키움 인증 차단: 시스템 설정에서 확인하세요" });
+  const sentence = statusBar(page).getByRole("button", { name: "키움 인증 차단" });
   await expect(sentence).toBeVisible();
   await expect(sentence.locator(".conn-dot")).toHaveAttribute("data-tone", "red");
-  await expect(statusBar(page)).toHaveClass(/danger/);
+  await expect(page.getByTestId("shell-banner")).toContainText("키움 인증 차단: 시스템 설정에서 확인하세요");
   await sentence.click();
   await expect(dialog(page).getByRole("tabpanel")).toContainText("키움이 지정단말기 인증을 거절했습니다");
 });
@@ -212,7 +212,7 @@ test.describe("360px 폭", () => {
   test("키 없음 카드가 가로 스크롤 없이 보인다", async ({ page, scenario }) => {
     beforeConnect(scenario, noKey);
     await open(page);
-    await expect(guide(page).getByRole("button", { name: "시스템 설정 열기" })).toBeVisible();
+    await expect(guide(page).getByRole("button", { name: "키 등록 시작" })).toBeVisible();
     await noHorizontalScroll(page);
     const box = await guide(page).boundingBox();
     expect(box!.x).toBeGreaterThanOrEqual(0);

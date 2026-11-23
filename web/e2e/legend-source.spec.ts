@@ -26,7 +26,7 @@ async function ready(page: Page) {
   await expect(cell(page)).toHaveAttribute("aria-busy", "false");
   await expect(chartOf(cell(page))).toHaveAttribute("data-bar-count", /^[1-9]\d*$/);
   await expect.poll(() => page.evaluate(() => window.legendSources.projections.length)).toBeGreaterThan(0);
-  await expect(page.getByRole("contentinfo")).toContainText("자동 저장됨");
+  await expect(page.getByRole("contentinfo")).toContainText("저장됨");
   await frames(page, 30);
 }
 
