@@ -47,7 +47,7 @@ import { PanelControls } from "./panelControls";
 import { type IndicatorCommand, IndicatorLegend, type PaneBounds } from "./indicators/legendRows";
 import { chartIndicators, chartPanels } from "./indicators/shown";
 import { isTailChange } from "./indicators/sync";
-import { Legend, legendParts } from "./legend";
+import { Legend, type LegendBar, legendParts } from "./legend";
 import { priceTopMargin } from "./legendProjection";
 import { addMainSeries, applyMainColors, type MainSeries, priceFormat, setMainData, updateMainBar } from "./series";
 import { type ChartSettings, type Panel, type PriceScale, shownScale } from "./settings";
@@ -156,7 +156,8 @@ export class ChartController {
   private history: History | null = null;
   private bars: Bar[] = [];
   private hoverIndex: number | null = null;
-  private readonly pendingLegendSources = new Set<"base" | "indicators" | "compare">(["base", "indicators", "compare"]);
+  private pendingBase: "full" | number | null = "full";
+  private readonly pendingLegendSources = new Set<"indicators" | "compare">(["indicators", "compare"]);
   private legendLeftT: UnixSeconds | null = null;
   private priceTopMargin = DEFAULT_PRICE_TOP_MARGIN;
   private ready: ReadyStatus | null = null;
@@ -638,18 +639,25 @@ export class ChartController {
   private onRealtime(h: History, bar: Bar, kind: "live" | "confirmed"): void {
     const prev = this.bars;
     const next = displayBars(h);
+    const prevRealtimeSeen = this.realtimeSeen;
+    const prevStalledAt = this.stalledAt;
     this.history = h;
     this.realtimeSeen = true;
     this.lastRealtimeAt = nowSeconds();
     if (this.realtimeLive) this.stalledAt = null;
-    if (isTailChange(prev, next, bar)) {
+    const tail = isTailChange(prev, next, bar);
+    if (tail) {
       this.bars = next;
       this.pendingDraw.set(bar.t, bar);
     } else {
       this.withDataGuard(() => this.setBars(next));
     }
     this.indicators.advance(h, bar, kind);
-    this.requestLegendSources("base", "indicators", "compare");
+    if (tail && prevRealtimeSeen === this.realtimeSeen && prevStalledAt === this.stalledAt) {
+      this.requestTailLegendSources(next.length - 1);
+    } else {
+      this.requestLegendSources("base", "indicators", "compare");
+    }
     this.refreshReady();
   }
 
@@ -986,23 +994,62 @@ export class ChartController {
   }
 
   private requestLegendSources(...sources: ("base" | "indicators" | "compare")[]): void {
-    for (const source of sources) this.pendingLegendSources.add(source);
+    for (const source of sources) {
+      if (source === "base") this.pendingBase = "full";
+      else this.pendingLegendSources.add(source);
+    }
     this.scheduleFrame();
+  }
+
+  private requestTailLegendSources(from: number): void {
+    if (this.pendingBase !== "full") {
+      this.pendingBase = this.pendingBase === null ? from : Math.min(this.pendingBase, from);
+    }
+    this.pendingLegendSources.add("indicators");
+    this.pendingLegendSources.add("compare");
+    this.scheduleFrame();
+  }
+
+  private legendBarAt(view: CellView, index: number): LegendBar {
+    const bar = this.bars[index]!;
+    return {
+      bar,
+      prev: this.bars[index - 1] ?? null,
+      isCurrent: this.history?.current?.t === bar.t && !this.realtimeSeen,
+      isIndex: isIndexCode(view.symbol),
+      period: view.period,
+      stalledAt: this.stalledAt,
+    };
   }
 
   private refreshPendingLegendSources(): boolean {
     const left = this.leftT();
     const view = this.view;
-    if (left !== this.legendLeftT && view && compareEntries(view).length > 0) this.pendingLegendSources.add("compare");
+    const compareLeftChanged = left !== this.legendLeftT && Boolean(view && compareEntries(view).length > 0);
+    if (compareLeftChanged) this.pendingLegendSources.add("compare");
     this.legendLeftT = left;
-    const changed = this.pendingLegendSources.size > 0;
-    if (this.pendingLegendSources.has("base")) this.legend.setLayoutBars(view ? this.bars.map((bar, i) => ({
-      bar, prev: this.bars[i - 1] ?? null,
-      isCurrent: this.history?.current?.t === bar.t && !this.realtimeSeen,
-      isIndex: isIndexCode(view.symbol), period: view.period, stalledAt: this.stalledAt,
-    })) : []);
-    if (this.pendingLegendSources.has("indicators")) this.indicatorLegend.setLayoutRows(this.indicators.rows(this.bars.at(-1)?.t ?? null), this.indicators.priceLegendValues());
-    if (this.pendingLegendSources.has("compare")) this.compareLegend.setLayoutRows(this.compare.rows(left, null), this.compare.legendValues(left));
+    let changed = false;
+    const base = this.pendingBase;
+    this.pendingBase = null;
+    if (base === "full") {
+      this.legend.setLayoutBars(view ? this.bars.map((_, i) => this.legendBarAt(view, i)) : []);
+      changed = true;
+    } else if (base !== null) {
+      if (!view || this.bars.length === 0) {
+        this.legend.setLayoutBars([]);
+        changed = true;
+      } else {
+        const tail: LegendBar[] = [];
+        for (let i = base; i < this.bars.length; i++) tail.push(this.legendBarAt(view, i));
+        if (this.legend.updateLayoutTail(base, tail)) changed = true;
+      }
+    }
+    if (this.pendingLegendSources.has("indicators")) {
+      if (this.indicatorLegend.setLayoutRows(this.indicators.rows(this.bars.at(-1)?.t ?? null), this.indicators.priceLegendValues())) changed = true;
+    }
+    if (this.pendingLegendSources.has("compare")) {
+      if (this.compareLegend.setLayoutRows(this.compare.rows(left, null), this.compare.legendValues(left)) || compareLeftChanged) changed = true;
+    }
     this.pendingLegendSources.clear();
     return changed;
   }

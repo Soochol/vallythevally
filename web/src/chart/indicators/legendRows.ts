@@ -4,6 +4,7 @@ import { iconMarkup, type MarkupIcon } from "../../features/icons";
 import { type FinancialReport, indicatorErrorText, type IndicatorRow, type PriceLegendValues } from "./layer";
 import type { FinancialDetailRow } from "../financials";
 import { FOLD_ABOVE_ROWS, indicatorRowsFolded, type LegendField, type LegendProjection, type LegendTier } from "../legendProjection";
+import { sameSlotSignature, type SlotSignature, slotSignature } from "../legendShapes";
 import { indicatorsPinnedOpen, onIndicatorsPinnedChange, setIndicatorsPinnedOpen } from "../legendFold";
 
 export type IndicatorCommand = "edit" | "toggle" | "remove" | "up" | "down" | "collapse";
@@ -101,6 +102,13 @@ export class IndicatorLegend {
 
   private layoutRows: readonly IndicatorRow[] = [];
   private layoutValues: readonly PriceLegendValues[] = [];
+  private layoutSignature: readonly {
+    readonly id: string;
+    readonly name: string;
+    readonly state: IndicatorRow["state"];
+    readonly hasDetail: boolean;
+    readonly slots: readonly SlotSignature[];
+  }[] | null = null;
 
   constructor(
     private readonly overlay: HTMLElement,
@@ -149,6 +157,7 @@ export class IndicatorLegend {
     for (const row of rows) if (!row.panel) priceRowCount++;
     if (priceRowCount !== this.layoutRows.length) {
       this.layoutRows = rows.filter((row) => !row.panel);
+      this.layoutSignature = null;
       this.syncFold();
     }
     const seen = new Set<string>();
@@ -186,10 +195,36 @@ export class IndicatorLegend {
     if (focused instanceof HTMLElement && focused !== document.activeElement && focused.isConnected) focused.focus({ preventScroll: true });
   }
 
-  setLayoutRows(rows: readonly IndicatorRow[], values: readonly PriceLegendValues[]): void {
-    this.layoutRows = rows.filter((row) => !row.panel);
+  setLayoutRows(rows: readonly IndicatorRow[], values: readonly PriceLegendValues[]): boolean {
+    const priceRows = rows.filter((row) => !row.panel);
+    const choices = new Map(values.map((row) => [row.id, row.slots]));
+    const nextSignature = priceRows.map((row) => ({
+      id: row.id,
+      name: row.name,
+      state: row.state,
+      hasDetail: Boolean(row.detail),
+      slots: (choices.get(row.id) ?? []).map(slotSignature),
+    }));
+    const prev = this.layoutSignature;
+    const changed =
+      prev === null
+      || prev.length !== nextSignature.length
+      || nextSignature.some((next, i) => {
+        const before = prev[i]!;
+        return (
+          before.id !== next.id
+          || before.name !== next.name
+          || before.state !== next.state
+          || before.hasDetail !== next.hasDetail
+          || before.slots.length !== next.slots.length
+          || next.slots.some((slot, j) => !sameSlotSignature(before.slots[j]!, slot))
+        );
+      });
+    this.layoutRows = priceRows;
     this.layoutValues = values;
+    this.layoutSignature = nextSignature;
     this.syncFold();
+    return changed;
   }
 
   projection(): LegendProjection {

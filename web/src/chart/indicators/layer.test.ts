@@ -6,6 +6,7 @@ import type { Bar } from "../../api/generated/Bar";
 import type { UnixSeconds } from "../../api/generated/UnixSeconds";
 import { normalizeHex } from "../../lib/colors";
 import type { History } from "../barFeed";
+import { trackedValuesOf } from "../legendShapes";
 import type { IndicatorConfig, Panel } from "../settings";
 import type { ThemeTokens } from "../theme";
 import { toChartTime } from "../time";
@@ -808,4 +809,46 @@ test("지표 설정을 그리다 차트가 던져도 범례 원천을 다시 만
   expect(() => layer.setConfigs([ICHIMOKU], [])).toThrow("pane gone");
   expect(requested).toBe(1);
   expect(layer.rows(null).map((row) => row.id)).toEqual([ICHIMOKU.id]);
+});
+
+test("가격 지표 범례 원천은 끝점 체결만 반영해 같은 모양은 버전을 유지하고 자릿수 증감과 결측 전환은 버전을 올린다", () => {
+  const ma: IndicatorConfig = { id: "ma5", spec: { kind: "ma", method: "sma", period: 5 }, panel: "price", visible: true, style: { colors: ["ind-1"], width: 1 } };
+  const overVolume: IndicatorConfig = { ...VOLUME, panel: "price" };
+  const f = fixture("1m", [ma, overVolume], []);
+  const bars = range(0, 9).map((m) => ({ ...bar(m, 50_000 + m * 100), v: 1_000 + m * 10 }));
+  f.layer.reset(history(bars));
+  f.reply({ type: "created", chart: 1, results: [{ id: ma.id, gen: latestCreate(f).gen, ok: true, lines: [{ id: "ma", shift: 0 }], draws: [set(range(4, 9), 50_500)] }] });
+  const initial = f.layer.priceLegendValues();
+  const maValues = initial.find((row) => row.id === ma.id)!.slots[0]!;
+  const volValues = initial.find((row) => row.id === overVolume.id)!.slots[0]!;
+  const maTracked = trackedValuesOf(maValues)!;
+  const volTracked = trackedValuesOf(volValues)!;
+  expect(maValues).toEqual(["50,500", "50,500", "50,500", "50,500", "50,500", "50,500", "—"]);
+  expect(volValues.at(-1)).toBe("1,090");
+  const maVersion = maTracked.shapeVersion;
+  const volVersion = volTracked.shapeVersion;
+
+  const live1 = { ...bar(10, 51_000), v: 1_200 };
+  f.layer.advance(history(bars, live1), live1, "live");
+  f.reply({ type: "tail", chart: 1, results: [{ id: ma.id, gen: latestCreate(f).gen, ok: true, draws: [update(10, 51_200)] }] });
+  expect(f.layer.priceLegendValues().find((row) => row.id === ma.id)!.slots[0]).toEqual(["50,500", "50,500", "50,500", "50,500", "50,500", "50,500", "51,200", "—"]);
+  expect(maTracked.shapeVersion).toBe(maVersion);
+  expect(volTracked.shapeVersion).toBe(volVersion);
+
+  const live2 = { ...bar(10, 120_000), v: 250_000 };
+  f.layer.advance(history(bars, live2), live2, "live");
+  f.reply({ type: "tail", chart: 1, results: [{ id: ma.id, gen: latestCreate(f).gen, ok: true, draws: [update(10, 120_000)] }] });
+  expect(f.layer.priceLegendValues().find((row) => row.id === ma.id)!.slots[0]!.slice(-2)).toEqual(["120,000", "—"]);
+  expect(f.layer.priceLegendValues().find((row) => row.id === overVolume.id)!.slots[0]!.at(-1)).toBe("25만");
+  expect(maTracked.shapeVersion).toBe(maVersion + 1);
+  expect(volTracked.shapeVersion).toBe(volVersion + 1);
+
+  const live3 = { ...bar(10, 52_000), v: 1_500 };
+  f.layer.advance(history(bars, live3), live3, "live");
+  f.reply({ type: "tail", chart: 1, results: [{ id: ma.id, gen: latestCreate(f).gen, ok: true, draws: [update(10, 52_000)] }] });
+  expect(f.layer.priceLegendValues().find((row) => row.id === ma.id)!.slots[0]!.slice(-2)).toEqual(["52,000", "—"]);
+  expect(f.layer.priceLegendValues().find((row) => row.id === overVolume.id)!.slots[0]!.at(-1)).toBe("1,500");
+  expect(maTracked.shapeVersion).toBe(maVersion + 2);
+  expect(volTracked.shapeVersion).toBe(volVersion + 2);
+  f.layer.dispose();
 });

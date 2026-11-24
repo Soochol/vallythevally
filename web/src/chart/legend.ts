@@ -4,6 +4,7 @@ import type { UnixSeconds } from "../api/generated/UnixSeconds";
 import { type Direction, direction, formatChange, formatPercent, formatPrice, formatVolume } from "../lib/format";
 import type { PaneBounds } from "./indicators/legendRows";
 import { legendTier, reserveLegendFields, type LegendField, type LegendProjection, type LegendTier } from "./legendProjection";
+import { OptionalTrackedValues, TrackedValues } from "./legendShapes";
 import type { ChartSettings } from "./settings";
 import { formatBarTime, formatKstClock } from "./time";
 
@@ -110,11 +111,28 @@ function statusParts(value: LegendBar) {
   return { fetched: value.isCurrent ? "조회 값" : "", stalled: value.stalledAt === null ? "" : `멈춤 ${formatKstClock(value.stalledAt)}` };
 }
 
-type PriceAlternatives = { [K in keyof ReturnType<typeof priceFields>["fields"]]: string[] };
-type LayoutAlternatives = { price: PriceAlternatives; cells: { label: string; values: string[] }[]; present: boolean };
+type PriceAlternatives = {
+  close: TrackedValues;
+  change: TrackedValues;
+  time: TrackedValues;
+  fetched: OptionalTrackedValues;
+  stalled: OptionalTrackedValues;
+};
+type LayoutAlternatives = { price: PriceAlternatives; cells: { label: string; values: TrackedValues }[]; present: boolean; count: number };
 
 function emptyAlternatives(): LayoutAlternatives {
-  return { price: { close: [], change: [], time: [], fetched: [], stalled: [] }, cells: [], present: false };
+  return {
+    price: {
+      close: new TrackedValues(),
+      change: new TrackedValues(),
+      time: new TrackedValues(),
+      fetched: new OptionalTrackedValues(),
+      stalled: new OptionalTrackedValues(),
+    },
+    cells: [],
+    present: false,
+    count: 0,
+  };
 }
 
 type LegendViewport = { readonly pricePane: PaneBounds | null; readonly axisWidth: number };
@@ -297,22 +315,64 @@ export class Legend {
   setLayoutBars(bars: readonly LegendBar[]): void {
     const layout = emptyAlternatives();
     layout.present = bars.length > 0;
-    for (const bar of bars) {
-      const parts = legendParts(bar);
-      const status = statusParts(bar);
-      layout.price.close.push(parts.close);
-      layout.price.change.push(parts.change);
-      layout.price.time.push(parts.time);
-      if (status.fetched) layout.price.fetched.push(status.fetched);
-      if (status.stalled) layout.price.stalled.push(status.stalled);
-      parts.cells.forEach(([label, value, change], i) => {
-        const field = layout.cells[i] ?? { label, values: [] };
-        if (!layout.cells[i]) layout.cells.push(field);
-        field.values.push(`${value}${this.display.showOhlcChange && change ? ` (${change.text})` : ""}`);
-      });
-    }
+    layout.count = bars.length;
+    for (let i = 0; i < bars.length; i++) this.putLayoutBar(layout, i, bars[i]!);
     this.layout = layout;
     this.fit("content");
+  }
+
+  updateLayoutTail(from: number, bars: readonly LegendBar[]): boolean {
+    if (from < 0 || from > this.layout.count || (from === 0 && !this.layout.present)) {
+      this.setLayoutBars(bars);
+      return true;
+    }
+    let changed = false;
+    for (let offset = 0; offset < bars.length; offset++) {
+      if (this.putLayoutBar(this.layout, from + offset, bars[offset]!)) changed = true;
+    }
+    const nextCount = from + bars.length;
+    if (nextCount < this.layout.count && this.truncateLayout(this.layout, nextCount)) changed = true;
+    this.layout.count = nextCount;
+    const nextPresent = nextCount > 0;
+    if (this.layout.present !== nextPresent) {
+      this.layout.present = nextPresent;
+      changed = true;
+    }
+    return changed;
+  }
+
+  private putLayoutBar(layout: LayoutAlternatives, index: number, bar: LegendBar): boolean {
+    const parts = legendParts(bar);
+    const status = statusParts(bar);
+    let changed = false;
+    if (layout.price.close.setAt(index, parts.close)) changed = true;
+    if (layout.price.change.setAt(index, parts.change)) changed = true;
+    if (layout.price.time.setAt(index, parts.time)) changed = true;
+    if (layout.price.fetched.setAt(index, status.fetched)) changed = true;
+    if (layout.price.stalled.setAt(index, status.stalled)) changed = true;
+    for (let i = 0; i < parts.cells.length; i++) {
+      const [label, value, change] = parts.cells[i]!;
+      let field = layout.cells[i];
+      if (!field) {
+        field = { label, values: new TrackedValues() };
+        layout.cells.push(field);
+        changed = true;
+      }
+      const text = `${value}${this.display.showOhlcChange && change ? ` (${change.text})` : ""}`;
+      if (field.values.setAt(index, text)) changed = true;
+    }
+    return changed;
+  }
+
+  private truncateLayout(layout: LayoutAlternatives, length: number): boolean {
+    let changed = false;
+    if (layout.price.close.truncate(length)) changed = true;
+    if (layout.price.change.truncate(length)) changed = true;
+    if (layout.price.time.truncate(length)) changed = true;
+    if (layout.price.fetched.truncate(length)) changed = true;
+    if (layout.price.stalled.truncate(length)) changed = true;
+    for (const cell of layout.cells) if (cell.values.truncate(length)) changed = true;
+    return changed;
   }
 
   fit(change: LayoutChange): void {
@@ -356,7 +416,7 @@ export class Legend {
     price.row.hidden = !this.layout.present;
     const field = (name: keyof PriceAlternatives): LegendField => {
       const element = price.fields[name];
-      const alternatives = this.layout.price[name];
+      const alternatives = this.layout.price[name].values;
       element.hidden = alternatives.length === 0;
       element.textContent = alternatives[0] ?? "";
       return { element, alternatives };
@@ -371,11 +431,12 @@ export class Legend {
     ohlc.hidden = !this.layout.present;
     line.hidden = !this.layout.present && this.display.showLegend;
     for (const { label, values } of this.layout.cells) {
-      const cell = ohlcCell([label, values[0] ?? "", null], false);
-      const slot = el("span", "", values[0] ?? "");
+      const alternatives = values.values;
+      const cell = ohlcCell([label, alternatives[0] ?? "", null], false);
+      const slot = el("span", "", alternatives[0] ?? "");
       cell.root.replaceChildren(cell.name, slot);
       ohlc.append(cell.root);
-      fields.push({ element: slot, alternatives: values });
+      fields.push({ element: slot, alternatives });
     }
     if (!this.display.showLegend) group.append(this.venueAnchor.cloneNode(true));
     group.append(ohlc);

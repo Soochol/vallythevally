@@ -10,6 +10,7 @@ import { type Direction, direction, formatPercent } from "../lib/format";
 import { isIndexCode } from "../lib/symbol";
 import type { ShownVenue } from "../lib/venue";
 import { BarFeed, displayBars, type FetchPage, type History } from "./barFeed";
+import { TrackedValues } from "./legendShapes";
 import { priceFormat } from "./series";
 import type { ThemeTokens } from "./theme";
 import { toChartTime } from "./time";
@@ -108,6 +109,10 @@ class CompareLine {
   older: "idle" | "loading" | "failed" = "idle";
   pages = 0;
   stoppedAt: UnixSeconds | null = null;
+  readonly legendValues = new TrackedValues();
+  legendLeftT: UnixSeconds | null = null;
+  legendStart = -1;
+  legendBase: Bar | undefined = undefined;
   readonly feed: BarFeed;
 
   constructor(
@@ -263,11 +268,17 @@ export class CompareLayer {
 
   legendValues(leftT: UnixSeconds | null): readonly CompareLegendValues[] {
     return [...this.lines.values()].map((line) => {
-      const start = leftT === null ? line.points.length : atOrAfter(line.points, leftT);
-      const base = line.points[start];
-      const values = [legendValue(base, undefined).value];
-      for (let i = start; i < line.points.length; i++) values.push(legendValue(base, line.points[i]).value);
-      return { code: line.entry.code, values };
+      if (line.legendStart === -1 || line.legendLeftT !== leftT) {
+        const start = leftT === null ? line.points.length : atOrAfter(line.points, leftT);
+        const base = line.points[start];
+        const values = [legendValue(base, undefined).value];
+        for (let i = start; i < line.points.length; i++) values.push(legendValue(base, line.points[i]).value);
+        line.legendValues.setAll(values);
+        line.legendLeftT = leftT;
+        line.legendStart = start;
+        line.legendBase = base;
+      }
+      return { code: line.entry.code, values: line.legendValues.values };
     });
   }
 
@@ -340,6 +351,7 @@ export class CompareLayer {
   private redraw(line: CompareLine, main: readonly Bar[]): void {
     line.stale = false;
     line.points = line.history ? alignToMain(displayBars(line.history), main) : [];
+    line.legendStart = -1;
     line.series.setData(line.points.map(point));
   }
 
@@ -358,8 +370,25 @@ export class CompareLayer {
         console.error(`비교 종목 선(${line.entry.code})을 다시 그림: ${e instanceof Error ? e.message : String(e)}`);
         return this.redraw(line, main);
       }
-      if (b.t === end.t) line.points[line.points.length - 1] = b;
-      else line.points.push(b);
+      if (b.t === end.t) {
+        const lastIndex = line.points.length - 1;
+        line.points[lastIndex] = b;
+        this.updateLineLegend(line, lastIndex, b, true);
+      } else {
+        line.points.push(b);
+        this.updateLineLegend(line, line.points.length - 1, b, false);
+      }
     }
+  }
+
+  private updateLineLegend(line: CompareLine, index: number, bar: Bar, replaced: boolean): void {
+    if (line.legendStart === -1) return;
+    if (line.legendBase === undefined || index <= line.legendStart) {
+      line.legendStart = -1;
+      return;
+    }
+    const text = legendValue(line.legendBase, bar).value;
+    if (replaced) line.legendValues.setAt(1 + (index - line.legendStart), text);
+    else line.legendValues.push(text);
   }
 }

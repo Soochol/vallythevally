@@ -103,6 +103,13 @@ test("all legend owners bound native main and shifted future fields without hove
   expect(afterWorkers.projections).toBeGreaterThan(beforeWorkers.projections);
   expect(await scenario.live.update("000660", { c: 777_777, v: 1000 })).toBeGreaterThan(0);
   await frames(page, 30);
+  const sameShapeCompare = await page.evaluate(() => ({ ...window.legendSources.counts, projections: window.legendSources.projections.length }));
+  expect(sameShapeCompare.base).toBe(afterWorkers.base);
+  expect(sameShapeCompare.indicator).toBe(afterWorkers.indicator);
+  expect(sameShapeCompare.compare).toBeGreaterThan(afterWorkers.compare);
+  expect(sameShapeCompare.projections).toBe(afterWorkers.projections);
+  expect(await scenario.live.update("000660", { c: 9_999_999, v: 1000 })).toBeGreaterThan(0);
+  await frames(page, 30);
   const afterCompare = await page.evaluate(() => ({ ...window.legendSources.counts, projections: window.legendSources.projections.length }));
   expect(afterCompare.base).toBe(afterWorkers.base);
   expect(afterCompare.indicator).toBe(afterWorkers.indicator);

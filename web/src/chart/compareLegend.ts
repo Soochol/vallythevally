@@ -1,6 +1,7 @@
 import { iconMarkup } from "../features/icons";
 import type { CompareLegendValues, CompareRow } from "./compare";
 import type { LegendProjection } from "./legendProjection";
+import { sameSlotSignature, type SlotSignature, slotSignature } from "./legendShapes";
 
 const ROW =
   "flex w-max max-w-full items-center gap-1.5 whitespace-nowrap rounded-s pr-1 text-s " +
@@ -29,6 +30,12 @@ export class CompareLegend {
 
   private layoutRows: readonly CompareRow[] = [];
   private layoutValues: readonly CompareLegendValues[] = [];
+  private layoutSignature: readonly {
+    readonly code: string;
+    readonly name: string;
+    readonly notes: string;
+    readonly values: SlotSignature;
+  }[] | null = null;
 
   constructor(private readonly onRemove: (code: string) => void) {}
 
@@ -52,9 +59,31 @@ export class CompareLegend {
     if (order.length !== this.box.children.length || order.some((root, i) => this.box.children[i] !== root)) this.box.replaceChildren(...order);
   }
 
-  setLayoutRows(rows: readonly CompareRow[], values: readonly CompareLegendValues[]): void {
+  setLayoutRows(rows: readonly CompareRow[], values: readonly CompareLegendValues[]): boolean {
+    const choices = new Map(values.map((row) => [row.code, row.values]));
+    const nextSignature = rows.map((row) => ({
+      code: row.code,
+      name: row.name,
+      notes: row.notes.join(" · "),
+      values: slotSignature(choices.get(row.code) ?? []),
+    }));
+    const prev = this.layoutSignature;
+    const changed =
+      prev === null
+      || prev.length !== nextSignature.length
+      || nextSignature.some((next, i) => {
+        const before = prev[i]!;
+        return (
+          before.code !== next.code
+          || before.name !== next.name
+          || before.notes !== next.notes
+          || !sameSlotSignature(before.values, next.values)
+        );
+      });
     this.layoutRows = rows;
     this.layoutValues = values;
+    this.layoutSignature = nextSignature;
+    return changed;
   }
 
   projection(): LegendProjection {
