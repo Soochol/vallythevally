@@ -468,7 +468,6 @@ async function openNarrowest(page: Page, scenario: Scenario): Promise<void> {
   await expect(page.getByTestId("ladder-strength")).toHaveCount(2);
   await expect(page.getByTestId("summary-quantity")).toContainText("1,234,567");
   await expect(page.getByTestId("summary-buyable")).toContainText("500,000,000원");
-  await expect(page.getByTestId("account-total-profit")).toContainText("%");
   lastTrade(scenario, 70_000, 1, 123_456);
   for (const strength of await page.getByTestId("ladder-strength").all()) await expect(strength).toContainText("101.50%");
 }

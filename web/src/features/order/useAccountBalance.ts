@@ -2,7 +2,6 @@ import { type QueryClient, useQuery, useQueryClient } from "@tanstack/react-quer
 import { useEffect } from "react";
 import type { TradingBalance } from "../../api/generated/TradingBalance";
 import { marketSocket, quoteBook } from "../../stores/realtime";
-import { leasedBalanceCodes } from "./liveTotal";
 import { fetchBalance } from "./orderApi";
 import { ORDER_QUERY_KEY } from "./useOrderWrites";
 
@@ -93,7 +92,7 @@ export function useAccountBalance(account: string | null, enabled: boolean): Tra
     return hubOf(client).acquire(account);
   }, [client, enabled, account]);
 
-  const codesKey = enabled ? leasedBalanceCodes(balance.data).join("\0") : "";
+  const codesKey = enabled ? (balance.data?.holdings ?? []).map((holding) => holding.code).join("\0") : "";
   useEffect(() => {
     if (codesKey === "") return;
     return quoteBook.lease(codesKey.split("\0"), { front: true });
