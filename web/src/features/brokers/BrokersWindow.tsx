@@ -13,7 +13,7 @@ import { Segmented, type SegmentOption } from "../market-window/parts";
 import { BoardView } from "./BoardView";
 import { DetailTable } from "./DetailTable";
 import { ListView } from "./ListView";
-import { boardAxis, brokerTracks } from "./board";
+import { boardAxis, brokerTracks, trackRuns } from "./board";
 import { EMPTY_BROKER_STATE, reduceBrokers } from "./model";
 import "./brokers.css";
 
@@ -66,6 +66,7 @@ function BrokersBody({ id, code }: { id: WindowId; code: SymbolCode }) {
   const serverTimeOrigin = useServerClock((s) => s.serverTimeOrigin);
   const { grid } = state;
   const tracks = useMemo(() => brokerTracks(grid), [grid]);
+  const runsByCode = useMemo(() => trackRuns(grid), [grid]);
   const axis = useMemo(() => boardAxis(grid.times, Math.floor(serverNow(serverTimeOrigin) / 1000)), [grid.times, serverTimeOrigin]);
   const selectedTrack = selected === null ? null : (tracks.find((track) => track.code === selected) ?? null);
   const shownTime = cursor ?? grid.times[grid.times.length - 1] ?? null;
@@ -105,7 +106,7 @@ function BrokersBody({ id, code }: { id: WindowId; code: SymbolCode }) {
         </>
       )}
       {!failed && grid.times.length > 0 && view === "list" && (
-        <ListView tracks={tracks} axis={axis} cursor={cursor} onCursor={setCursor} />
+        <ListView tracks={tracks} runsByCode={runsByCode} axis={axis} cursor={cursor} onCursor={setCursor} />
       )}
     </div>
   );

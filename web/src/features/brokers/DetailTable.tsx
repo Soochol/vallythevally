@@ -1,10 +1,11 @@
+import { memo } from "react";
 import { MINUS } from "../../lib/format";
 import { formatClock, formatQuantity, withSign } from "../market-window/format";
 import { eventsUntil, type BrokerTrack } from "./board";
 
 const signed = (value: number) => withSign(value, formatQuantity(Math.abs(value)).replace("-", MINUS));
 
-export function DetailTable({ track }: { track: BrokerTrack }) {
+export const DetailTable = memo(function DetailTable({ track }: { track: BrokerTrack }) {
   const rows = eventsUntil(track, null, track.events.length);
   return (
     <div className="br-det" data-testid="broker-detail">
@@ -29,4 +30,4 @@ export function DetailTable({ track }: { track: BrokerTrack }) {
       </table>
     </div>
   );
-}
+});

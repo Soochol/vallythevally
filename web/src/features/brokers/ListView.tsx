@@ -2,50 +2,51 @@ import { Fragment, memo, type PointerEvent, useMemo } from "react";
 import type { UnixSeconds } from "../../api/generated/UnixSeconds";
 import { MINUS } from "../../lib/format";
 import { formatQuantity, withSign } from "../market-window/format";
-import { cumulativeUntil, isForeignBroker, listOrder, type BoardAxis, type BrokerTrack, type BrokerTrackEvent } from "./board";
+import { cumulativeUntil, foreignSum, isForeignBroker, listOrder, type BoardAxis, type BrokerTrack, type TrackRun } from "./board";
 
 const signed = (value: number) => withSign(value, formatQuantity(Math.abs(value)).replace("-", MINUS));
 const SPARK_W = 200;
 const SPARK_H = 22;
+const EMPTY_RUNS: readonly TrackRun[] = [];
 
-const TrajectoryPlot = memo(function TrajectoryPlot({ track, axis }: { track: BrokerTrack; axis: BoardAxis }) {
+const TrajectoryPlot = memo(function TrajectoryPlot({ runs, cumulative, axis }: { runs: readonly TrackRun[]; cumulative: number | null; axis: BoardAxis }) {
   const geometry = useMemo(() => {
-    const { events } = track;
-    if (events.length === 0) return null;
+    if (runs.length === 0) return null;
     const span = Math.max(axis.to - axis.from, 1);
     let low = 0;
     let high = 0;
-    for (const event of events) {
-      if (event.cumulative < low) low = event.cumulative;
-      if (event.cumulative > high) high = event.cumulative;
+    for (const run of runs) {
+      for (const point of run.points) {
+        if (point.cumulative < low) low = point.cumulative;
+        if (point.cumulative > high) high = point.cumulative;
+      }
     }
     const ySpan = high - low || 1;
     const x = (t: UnixSeconds) => ((t - axis.from) / span) * SPARK_W;
     const y = (value: number) => SPARK_H - 1 - ((value - low) / ySpan) * (SPARK_H - 2);
     const zeroY = y(0);
-    const runs: BrokerTrackEvent[][] = [];
-    for (const event of events) {
-      if (runs.length === 0 || event.gap) runs.push([event]);
-      else runs[runs.length - 1]!.push(event);
-    }
     const solids = runs.map((run) => {
-      const points = run.map((event) => `${x(event.t)},${y(event.cumulative)}`).join(" ");
-      const firstX = x(run[0]!.t);
-      const lastX = x(run[run.length - 1]!.t);
-      const area = run.length >= 2 ? `${firstX},${zeroY} ${points} ${lastX},${zeroY}` : null;
-      return { points, area };
+      if (run.points.length === 1) {
+        const only = run.points[0]!;
+        return { points: null, area: null, dot: { x: x(only.t), y: y(only.cumulative) } };
+      }
+      const points = run.points.map((point) => `${x(point.t)},${y(point.cumulative)}`).join(" ");
+      const firstX = x(run.points[0]!.t);
+      const lastX = x(run.points[run.points.length - 1]!.t);
+      const area = `${firstX},${zeroY} ${points} ${lastX},${zeroY}`;
+      return { points, area, dot: null };
     });
     const bridges: { x1: number; y1: number; x2: number; y2: number }[] = [];
     for (let i = 1; i < runs.length; i++) {
-      const previous = runs[i - 1]![runs[i - 1]!.length - 1]!;
-      const next = runs[i]![0]!;
+      const previous = runs[i - 1]!.points[runs[i - 1]!.points.length - 1]!;
+      const next = runs[i]!.points[0]!;
       bridges.push({ x1: x(previous.t), y1: y(previous.cumulative), x2: x(next.t), y2: y(next.cumulative) });
     }
     return { zeroY, solids, bridges };
-  }, [track, axis]);
+  }, [runs, axis]);
 
   if (geometry === null) return null;
-  const color = (track.cumulative ?? 0) >= 0 ? "var(--up)" : "var(--down)";
+  const color = (cumulative ?? 0) >= 0 ? "var(--up)" : "var(--down)";
 
   return (
     <svg viewBox={`0 0 ${SPARK_W} ${SPARK_H}`} width="100%" height={SPARK_H} preserveAspectRatio="none" aria-hidden>
@@ -53,7 +54,8 @@ const TrajectoryPlot = memo(function TrajectoryPlot({ track, axis }: { track: Br
       {geometry.solids.map((solid, index) => (
         <Fragment key={index}>
           {solid.area && <polygon points={solid.area} fill={color} opacity={0.12} />}
-          <polyline points={solid.points} fill="none" stroke={color} strokeWidth={1.3} vectorEffect="non-scaling-stroke" />
+          {solid.points && <polyline points={solid.points} fill="none" stroke={color} strokeWidth={1.3} vectorEffect="non-scaling-stroke" />}
+          {solid.dot && <line x1={solid.dot.x} x2={solid.dot.x} y1={solid.dot.y} y2={solid.dot.y} stroke={color} strokeWidth={4} strokeLinecap="round" vectorEffect="non-scaling-stroke" />}
         </Fragment>
       ))}
       {geometry.bridges.map((bridge, index) => (
@@ -65,11 +67,13 @@ const TrajectoryPlot = memo(function TrajectoryPlot({ track, axis }: { track: Br
 
 export function ListView({
   tracks,
+  runsByCode,
   axis,
   cursor,
   onCursor,
 }: {
   tracks: readonly BrokerTrack[];
+  runsByCode: ReadonlyMap<string, readonly TrackRun[]>;
   axis: BoardAxis;
   cursor: UnixSeconds | null;
   onCursor(t: UnixSeconds | null): void;
@@ -82,14 +86,7 @@ export function ListView({
   let maxAbs = 0;
   for (const net of nets) maxAbs = Math.max(maxAbs, Math.abs(net ?? 0));
 
-  let hasForeign = false;
-  let foreignSum = 0;
-  for (let i = 0; i < rows.length; i++) {
-    if (isForeignBroker(rows[i]!.name)) {
-      hasForeign = true;
-      foreignSum += nets[i] ?? 0;
-    }
-  }
+  const foreignTotal = foreignSum(rows, cursor);
 
   const handleMove = (event: PointerEvent<HTMLSpanElement>) => {
     const rect = event.currentTarget.getBoundingClientRect();
@@ -119,7 +116,7 @@ export function ListView({
                     {foreign && <span className="br-fb">외</span>}
                   </span>
                   <span className="br-spark" onPointerMove={handleMove} onPointerLeave={() => onCursor(null)}>
-                    <TrajectoryPlot track={row} axis={axis} />
+                    <TrajectoryPlot runs={runsByCode.get(row.code) ?? EMPTY_RUNS} cumulative={row.cumulative} axis={axis} />
                     {cursorRatio !== null && <span className="br-cursor" data-testid="broker-cursor" style={{ left: `${cursorRatio * 100}%` }} />}
                   </span>
                   <span className="br-row-net" data-tone={tone}>
@@ -134,8 +131,8 @@ export function ListView({
       </div>
       <div className="br-foot">
         <span>외국계 합계</span>
-        <span className="br-foot-r" data-testid="broker-foreign-sum" data-tone={!hasForeign ? "none" : foreignSum >= 0 ? "up" : "down"}>
-          {hasForeign ? signed(foreignSum) : "-"}
+        <span className="br-foot-r" data-testid="broker-foreign-sum" data-tone={foreignTotal === null ? "none" : foreignTotal >= 0 ? "up" : "down"}>
+          {foreignTotal === null ? "-" : signed(foreignTotal)}
         </span>
       </div>
     </>

@@ -21,6 +21,15 @@ export interface BoardAxis {
   readonly to: UnixSeconds;
 }
 
+export interface TrackRunPoint {
+  readonly t: UnixSeconds;
+  readonly cumulative: number;
+}
+
+export interface TrackRun {
+  readonly points: readonly TrackRunPoint[];
+}
+
 const KST_OFFSET_SECONDS = 9 * 3600;
 const DAY_SECONDS = 24 * 3600;
 const OPEN_SECONDS = 9 * 3600;
@@ -48,17 +57,66 @@ const FOREIGN_HINTS: readonly string[] = [
 export function brokerTracks(grid: BrokerGrid): readonly BrokerTrack[] {
   const tracks: BrokerTrack[] = grid.rows.map((row) => {
     const events: BrokerTrackEvent[] = [];
+    let seenAny = false;
+    let gapSinceLastEvent = false;
     for (let i = 0; i < grid.times.length; i++) {
+      if (seenAny && grid.gapBefore[i]) gapSinceLastEvent = true;
       const cell = row.cells[i];
-      if (!cell || !cell.present || cell.cumulative === null || cell.net === null) continue;
+      if (!cell || !cell.present || cell.cumulative === null || cell.net === null) {
+        if (seenAny) gapSinceLastEvent = true;
+        continue;
+      }
+      seenAny = true;
       if (!cell.first && cell.net === 0) continue;
-      const gap = !cell.first && (Boolean(grid.gapBefore[i]) || (i > 0 && !row.cells[i - 1]?.present));
+      const gap = !cell.first && gapSinceLastEvent;
       events.push({ t: grid.times[i]!, net: cell.net, cumulative: cell.cumulative, first: cell.first, gap });
+      gapSinceLastEvent = false;
     }
     const cumulative = events.length > 0 ? events[events.length - 1]!.cumulative : null;
     return { code: row.code, name: row.name, cumulative, events };
   });
   return tracks.sort((a, b) => Math.abs(b.cumulative ?? 0) - Math.abs(a.cumulative ?? 0));
+}
+
+function compressRun(raw: readonly TrackRunPoint[]): TrackRun {
+  if (raw.length <= 2) return { points: raw };
+  const points: TrackRunPoint[] = [raw[0]!];
+  for (let i = 1; i < raw.length - 1; i++) {
+    const current = raw[i]!;
+    const previous = raw[i - 1]!;
+    const next = raw[i + 1]!;
+    if (current.cumulative !== previous.cumulative || current.cumulative !== next.cumulative) {
+      points.push(current);
+    }
+  }
+  points.push(raw[raw.length - 1]!);
+  return { points };
+}
+
+export function trackRuns(grid: BrokerGrid): ReadonlyMap<string, readonly TrackRun[]> {
+  const result = new Map<string, readonly TrackRun[]>();
+  for (const row of grid.rows) {
+    const runs: TrackRun[] = [];
+    let current: TrackRunPoint[] = [];
+    for (let i = 0; i < grid.times.length; i++) {
+      const cell = row.cells[i];
+      if (!cell || !cell.present || cell.cumulative === null) {
+        if (current.length > 0) {
+          runs.push(compressRun(current));
+          current = [];
+        }
+        continue;
+      }
+      if (grid.gapBefore[i] && current.length > 0) {
+        runs.push(compressRun(current));
+        current = [];
+      }
+      current.push({ t: grid.times[i]!, cumulative: cell.cumulative });
+    }
+    if (current.length > 0) runs.push(compressRun(current));
+    result.set(row.code, runs);
+  }
+  return result;
 }
 
 export function boardAxis(times: readonly UnixSeconds[], now: UnixSeconds): BoardAxis {
@@ -148,6 +206,19 @@ export function listOrder(tracks: readonly BrokerTrack[]): { readonly rows: read
 export function isForeignBroker(name: string): boolean {
   const upper = name.toUpperCase();
   return FOREIGN_HINTS.some((hint) => upper.includes(hint));
+}
+
+export function foreignSum(tracks: readonly BrokerTrack[], t: UnixSeconds | null): number | null {
+  let observed = false;
+  let total = 0;
+  for (const track of tracks) {
+    if (!isForeignBroker(track.name)) continue;
+    const value = cumulativeUntil(track, t);
+    if (value === null) continue;
+    observed = true;
+    total += value;
+  }
+  return observed ? total : null;
 }
 
 export function barBinSeconds(cardWidth: number): number {
