@@ -24,7 +24,7 @@ use crate::clock::Clock;
 use crate::kiwoom::rest::Priority;
 use crate::market_source::SourceError;
 use crate::market_source::stream::{
-    AfterHoursTotals, BookLevel, BookSnapshot, BrokerEntry, BrokerSnapshot, Exchange, MarketStream, RealProgramTrade, RealTick, StreamEvent, StreamKind, TradeSide,
+    AfterHoursTotals, BookLevel, BookSnapshot, BrokerEntry, BrokerSnapshot, Exchange, ExpectedQuote, MarketStream, RealProgramTrade, RealTick, StreamEvent, StreamKind, TradeSide,
 };
 use crate::quotes;
 use crate::symbols::Directory;
@@ -275,6 +275,8 @@ pub struct MarketHub {
     first_after_hours: FirstOfDay,
     first_expected: FirstOfDay,
     tallies: DayTallies,
+    last_fill: HashMap<(StockCode, Exchange), KstTime>,
+    last_row_volume: HashMap<(StockCode, Venue), u64>,
     directory: watch::Receiver<Option<Arc<Directory>>>,
     conns: HashMap<ConnId, Conn>,
     keys: HashMap<SeriesKey, KeyState>,
@@ -307,6 +309,8 @@ impl MarketHub {
             first_after_hours: FirstOfDay::default(),
             first_expected: FirstOfDay::default(),
             tallies: DayTallies::default(),
+            last_fill: HashMap::new(),
+            last_row_volume: HashMap::new(),
             conns: HashMap::new(),
             keys: HashMap::new(),
             next_generation: 0,
@@ -679,6 +683,9 @@ impl MarketHub {
         if watchers.peek().is_none() {
             return;
         }
+        if let (Symbol::Stock(code), Some(exchange)) = (symbol, tick.exchange) {
+            self.last_fill.insert((code, exchange), at);
+        }
         let Some(day) = tick.day else {
             return;
         };
@@ -686,6 +693,7 @@ impl MarketHub {
             return;
         };
         let nxt_enabled = self.nxt_enabled(symbol);
+        let mut sent_volume: [Option<u64>; 3] = [None; 3];
         for conn in watchers {
             let Some(c) = self.conns.get(&conn) else {
                 continue;
@@ -704,6 +712,44 @@ impl MarketHub {
             };
             if let Some(volume) = volume {
                 c.outbox.set_quote(quotes::realtime(symbol, venue, tick.price, base_centi, volume, at));
+                sent_volume[venue_slot(venue)] = Some(volume);
+            }
+        }
+        if let Symbol::Stock(code) = symbol {
+            for venue in [Venue::Combined, Venue::Krx, Venue::Nxt] {
+                if let Some(volume) = sent_volume[venue_slot(venue)] {
+                    self.last_row_volume.insert((code, venue), volume);
+                }
+            }
+        }
+    }
+
+    fn on_expected(&mut self, expected: &ExpectedQuote, received_at: KstTime) {
+        let Ok(at) = resolve_trade_time(received_at, expected.hhmmss) else {
+            return;
+        };
+        let Symbol::Stock(code) = expected.symbol else {
+            return;
+        };
+        let symbol = expected.symbol;
+        let mut watchers = self.manager.watchers(symbol).peekable();
+        if watchers.peek().is_none() {
+            return;
+        }
+        let Some(base_centi) = quotes::base_centi(expected.price, expected.change_centi) else {
+            return;
+        };
+        let nxt_enabled = self.nxt_enabled(symbol);
+        let today_fill = |exchange| self.last_fill.get(&(code, exchange)).copied().filter(|filled| filled.kst_date() == at.kst_date());
+        let from = quotes::expected_exchange(nxt_enabled, expected.hhmmss, today_fill(Exchange::Krx), today_fill(Exchange::Nxt));
+        for conn in watchers {
+            let Some(c) = self.conns.get(&conn) else {
+                continue;
+            };
+            let venue = quotes::effective_venue(c.watch_venue, nxt_enabled);
+            if quotes::expected_moves_row(venue, from, nxt_enabled, expected.hhmmss) {
+                let volume = self.last_row_volume.get(&(code, venue)).copied().unwrap_or(0);
+                c.outbox.set_quote(quotes::expected(symbol, venue, expected.price, base_centi, volume, at));
             }
         }
     }
@@ -856,6 +902,7 @@ impl MarketHub {
     fn on_event(&mut self, ev: StreamEvent) {
         match ev {
             StreamEvent::Tick { tick, received_at } => self.on_trade(tick, received_at),
+            StreamEvent::Expected { quote, received_at } => self.on_expected(&quote, received_at),
             StreamEvent::Book { book, received_at } => self.on_book(&book, received_at),
             StreamEvent::Program { row, received_at } => self.on_program(&row, received_at),
             StreamEvent::Broker { snapshot, received_at } => self.on_broker(snapshot, received_at),
@@ -1203,6 +1250,14 @@ fn spawn_verify(bars: &Arc<BarService>, tx: &mpsc::UnboundedSender<HubInput>, ke
         let result = bars.verify_confirmed(key, bucket).await;
         let _ = tx.send(HubInput::Verified { key, generation, bucket, attempt, result });
     });
+}
+
+fn venue_slot(venue: Venue) -> usize {
+    match venue {
+        Venue::Combined => 0,
+        Venue::Krx => 1,
+        Venue::Nxt => 2,
+    }
 }
 
 fn won(price: Price) -> f64 {

@@ -926,13 +926,13 @@ impl From<&domain::SymbolInfo> for SymbolInfo {
     }
 }
 
-/// 현재가 값의 출처. REST `/api/quotes`는 `polled`, WebSocket `quotes`는 `realtime`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export)]
 pub enum QuoteSource {
     Realtime,
     Polled,
+    Expected,
 }
 
 /// `GET /api/quotes?symbols=005930,IDX:001&venue=krx` → `Quote[]`.

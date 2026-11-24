@@ -122,7 +122,12 @@ export class QuoteBook {
     switch (e.type) {
       case "quotes":
         if (e.venue !== this.venue) return;
-        for (const q of e.quotes) if (this.entries.has(q.symbol)) this.put(q.symbol, { quote: q, limited: this.get(q.symbol).limited });
+        for (const q of e.quotes) {
+          if (!this.entries.has(q.symbol)) continue;
+          const row = this.get(q.symbol);
+          const quote = q.source === "expected" && row.quote ? { ...q, volume: row.quote.volume } : q;
+          this.put(q.symbol, { quote, limited: row.limited });
+        }
         return;
       case "watch_limited":
         this.serverLimited = new Set(e.symbols);

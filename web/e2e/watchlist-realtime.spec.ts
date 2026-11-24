@@ -76,3 +76,21 @@ test("여러 그룹의 같은 종목은 한 번만 구독하고 모든 행에 �
   await expect(buttons.last()).toHaveAccessibleName("삼성전자 51,500 +0.98%");
   expect(requests).toHaveLength(1);
 });
+
+test("예상 시세 줄은 가격 뒤에 별표를 단다", async ({ page, scenario }) => {
+  putWatchlist(scenario, ["005930"]);
+  await page.goto("/?symbol=005930");
+  const button = row(page, "005930").locator("[data-main]");
+  const price = row(page, "005930").locator('[data-cell="price"]');
+  await expect(button).toHaveAccessibleName("삼성전자 50,000 −1.96%");
+  await pollSaved(() => scenario.live.subscriptions().some(value => value.symbol === "005930")).toBe(true);
+  const heightBefore = (await row(page, "005930").boundingBox())?.height;
+  scenario.live.emit({ type: "quotes", venue: "combined", quotes: [{ ...quote(194_900, 17_400, 9.8), source: "expected" }] });
+  await expect(price).toHaveText("194,900*");
+  await expect(button).toHaveAccessibleName("삼성전자 194,900 +9.80% 예상체결");
+  await expect(price.getByText("*")).toHaveAttribute("title", "예상체결가");
+  expect((await row(page, "005930").boundingBox())?.height).toBe(heightBefore);
+  scenario.live.emit({ type: "quotes", venue: "combined", quotes: [quote(195_000, 17_500, 9.86)] });
+  await expect(price).toHaveText("195,000");
+  await expect(button).toHaveAccessibleName("삼성전자 195,000 +9.86%");
+});

@@ -49,6 +49,15 @@ pub struct ExpectedTrade {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ExpectedQuote {
+    pub symbol: Symbol,
+    pub hhmmss: TimeOfDay,
+    pub price: Price,
+    pub change_centi: i64,
+    pub expected_qty: Volume,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct BookSnapshot {
     pub symbol: Symbol,
     pub venue: Venue,
@@ -93,6 +102,7 @@ pub struct BrokerSnapshot {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum StreamEvent {
     Tick { tick: RealTick, received_at: KstTime },
+    Expected { quote: ExpectedQuote, received_at: KstTime },
     Book { book: Box<BookSnapshot>, received_at: KstTime },
     Program { row: RealProgramTrade, received_at: KstTime },
     Broker { snapshot: BrokerSnapshot, received_at: KstTime },
