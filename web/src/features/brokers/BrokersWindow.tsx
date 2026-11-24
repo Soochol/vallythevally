@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useReducer, useState } from "react";
+import { useEffect, useMemo, useReducer, useRef, useState } from "react";
+import { useLocation } from "react-router";
 import { useBrokerDays } from "../../api/brokers";
 import type { SymbolCode } from "../../api/generated/SymbolCode";
 import type { UnixSeconds } from "../../api/generated/UnixSeconds";
@@ -12,6 +13,7 @@ import { MarketWindowGate } from "../market-window/MarketWindowGate";
 import { formatClock } from "../market-window/format";
 import { Segmented, type SegmentOption } from "../market-window/parts";
 import { EmptyState, ErrorState, Skeleton } from "../overlay/State";
+import { pageOfPath } from "../page-rail/pages";
 import { BoardView } from "./BoardView";
 import { DetailTable } from "./DetailTable";
 import { ListView } from "./ListView";
@@ -48,6 +50,9 @@ function BrokersBody({ id, code }: { id: WindowId; code: SymbolCode }) {
   const [cursor, setCursor] = useState<UnixSeconds | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
   const [clockTick, setClockTick] = useState(0);
+  const hadLiveSubscriptionRef = useRef(false);
+
+  const onWorkspace = (pageOfPath(useLocation().pathname) ?? "workspace") === "workspace";
 
   useEffect(() => {
     const timer = setInterval(() => setClockTick((tick) => tick + 1), CLOCK_TICK_MS);
@@ -64,8 +69,8 @@ function BrokersBody({ id, code }: { id: WindowId; code: SymbolCode }) {
     [daysQuery.data?.days, today, selectedDate],
   );
 
-  const day = useBrokerDay(code, nav.date, nav.isToday);
-  const bars = useBrokerMinuteBars(code, nav.date, nav.isToday);
+  const day = useBrokerDay(code, nav.date, nav.isToday, onWorkspace);
+  const bars = useBrokerMinuteBars(code, nav.date, nav.isToday, onWorkspace && day.source !== "store");
 
   const view = useLayoutStore((s) => {
     const win = s.layout.windows.find((w) => w.id === id);
@@ -80,6 +85,8 @@ function BrokersBody({ id, code }: { id: WindowId; code: SymbolCode }) {
 
   useEffect(() => {
     if (day.mode !== "live") return;
+    if (hadLiveSubscriptionRef.current) dispatchLive({ type: "resync" });
+    hadLiveSubscriptionRef.current = true;
     return marketSocket.subscribeFeed({ symbol: code, kind: "brokers" }, (event) => {
       if (event.type === "feed_brokers") dispatchLive({ type: "snapshot", brokers: event.brokers });
       else if (event.type === "feed_link") dispatchLive({ type: "link", live: event.live });
@@ -154,7 +161,7 @@ function BrokersBody({ id, code }: { id: WindowId; code: SymbolCode }) {
       {showContent && view === "board" && (
         <>
           <BoardView tracks={tracks} axis={axis} gaps={gaps} mode={cards} cursor={cursor} selected={selected} onSelect={toggleSelected} onCursor={setCursor} />
-          {selectedTrack !== null && <DetailTable track={selectedTrack} bars={bars} />}
+          {selectedTrack !== null && <DetailTable key={selectedTrack.code} track={selectedTrack} bars={bars} />}
           <div className="br-foot">
             <span><i className="br-swatch" data-kind="buy" />순매수</span>
             <span><i className="br-swatch" data-kind="sell" />순매도</span>

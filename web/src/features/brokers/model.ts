@@ -109,16 +109,21 @@ export function appendSnapshots(
     }
   }
 
-  const mutableRows = new Map<string, { code: string; name: string; cells: BrokerCell[]; lastCumulative: number | null }>();
+  const mutableRows = new Map<
+    string,
+    { code: string; name: string; cells: BrokerCell[]; lastCumulative: number | null; hasPresent: boolean }
+  >();
   for (const row of grid.rows) {
     const cells = new Array<BrokerCell>(totalCols);
     for (let i = 0; i < baseCols; i++) cells[i] = row.cells[i]!;
     for (let i = baseCols; i < totalCols; i++) cells[i] = ABSENT;
+    const lastCumulative = lastKnownCumulativeBefore(row.cells, baseCols);
     mutableRows.set(row.code, {
       code: row.code,
       name: row.name,
       cells,
-      lastCumulative: lastKnownCumulativeBefore(row.cells, baseCols),
+      lastCumulative,
+      hasPresent: lastCumulative !== null,
     });
   }
 
@@ -128,19 +133,20 @@ export function appendSnapshots(
     for (const [code, member] of members) {
       let entry = mutableRows.get(code);
       if (entry === undefined) {
-        entry = { code, name: member.name, cells: new Array<BrokerCell>(totalCols).fill(ABSENT), lastCumulative: null };
+        entry = { code, name: member.name, cells: new Array<BrokerCell>(totalCols).fill(ABSENT), lastCumulative: null, hasPresent: false };
         mutableRows.set(code, entry);
       }
       const previous = entry.lastCumulative;
       entry.cells[col] = { present: true, cumulative: member.net, net: member.net - (previous ?? 0), first: previous === null };
       entry.lastCumulative = member.net;
       entry.name = member.name;
+      entry.hasPresent = true;
     }
   }
 
   const rows: BrokerRow[] = [];
   for (const entry of mutableRows.values()) {
-    rows.push({ code: entry.code, name: entry.name, cells: entry.cells });
+    if (entry.hasPresent) rows.push({ code: entry.code, name: entry.name, cells: entry.cells });
   }
   return { grid: { times, gapBefore, rows }, gapPending: false };
 }

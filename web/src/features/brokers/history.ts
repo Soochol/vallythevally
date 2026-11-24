@@ -60,12 +60,21 @@ export function formatMonthDay(date: string): string {
   return `${date.slice(4, 6)}-${date.slice(6, 8)}`;
 }
 
-export function kstDayBounds(date: string): { readonly open: UnixSeconds; readonly end: UnixSeconds } {
+export function formatIsoDate(date: string): string {
+  return `${date.slice(0, 4)}-${date.slice(4, 6)}-${date.slice(6, 8)}`;
+}
+
+export function kstDayBounds(date: string): { readonly start: UnixSeconds; readonly open: UnixSeconds; readonly end: UnixSeconds } {
   const year = Number(date.slice(0, 4));
   const month = Number(date.slice(4, 6));
   const day = Number(date.slice(6, 8));
   const dayStart = Math.floor(Date.UTC(year, month - 1, day) / 1000) - KST_OFFSET_SECONDS;
-  return { open: dayStart + OPEN_SECONDS, end: dayStart + DAY_SECONDS };
+  return { start: dayStart, open: dayStart + OPEN_SECONDS, end: dayStart + DAY_SECONDS };
+}
+
+export function dayBars(bars: readonly Bar[], date: string): readonly Bar[] {
+  const { start, end } = kstDayBounds(date);
+  return bars.filter((bar) => bar.t >= start && bar.t < end);
 }
 
 export function axisGapRanges(gaps: readonly (readonly [UnixSeconds, UnixSeconds])[], axis: BoardAxis): readonly AxisGapRange[] {
