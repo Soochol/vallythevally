@@ -22,7 +22,7 @@
 | `symbol` | `string` | 종목 코드(예: `"005930"`) |
 | `date` | `string` | 요청 날짜(`YYYYMMDD`) |
 | `source` | `"store" \| "flow" \| "none"` | 읽은 원천 |
-| `snapshots` | `FeedBrokers[]` | 시각 순 거래원 스냅샷(같은 초의 행은 마지막 하나, 이름은 앞뒤 공백 제거, 빈 자리는 제외) |
+| `snapshots` | `FeedBrokers[]` | 시각 순 거래원 스냅샷(같은 초의 행도 받은 순서대로 모두 전송, 이름은 앞뒤 공백 제거, 빈 자리는 제외) |
 | `gaps` | `[number, number][]` | 수집이 끊긴 구간 `[fromSec, toSec]`(Unix 초) |
 | `live` | `boolean` | 지금 수집이 이어지고 있는지(`store`·`none`은 `false`) |
 | `cursor` | `string` | 다음 요청의 `after`에 넘기는 커서(`none`이면 `""`) |

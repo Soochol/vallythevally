@@ -37,7 +37,7 @@ pub(super) fn read_day<K: CollectedKind>(
     let mut raw_rows = stmt
         .query(params![path_text, symbol, day_start_ms, day_end_ms])
         .map_err(|e| format!("수집 저장소 조회 실행 실패({path_text}): {e}"))?;
-    let mut keyed: Vec<(i64, K::View)> = Vec::new();
+    let mut snapshots: Vec<K::View> = Vec::new();
     let mut skipped: u64 = 0;
     while let Some(row) = raw_rows.next().map_err(|e| format!("수집 저장소 행 읽기 실패({path_text}): {e}"))? {
         let recv_ms = row.get::<_, i64>(0).map_err(|e| format!("recv_ms 읽기 실패({path_text}): {e}"))?;
@@ -51,19 +51,11 @@ pub(super) fn read_day<K: CollectedKind>(
             skipped += 1;
             continue;
         };
-        let sec = recv_ms.div_euclid(1000);
-        if let Some(last) = keyed.last_mut()
-            && last.0 == sec
-        {
-            last.1 = view;
-        } else {
-            keyed.push((sec, view));
-        }
+        snapshots.push(view);
     }
     if skipped > 0 {
         tracing::warn!(type_code = K::TYPE_CODE, symbol = %stock_code, skipped, "수집 저장소 행을 읽지 못해 건너뛰었습니다");
     }
-    let snapshots = keyed.into_iter().map(|(_, view)| view).collect();
     Ok(StoreDay { snapshots, gaps })
 }
 

@@ -211,17 +211,27 @@ impl Collected {
         if date != now.kst_date() {
             return Ok(DaySlice::none());
         }
+        let flow_after = parse_flow_cursor(after);
         let collected = Arc::clone(self);
         let shared_dir = dir.join(SHARED_FOLDER);
         let date_owned = date_str.to_owned();
         let stock_str = stock.as_str().to_owned();
-        let flow = tokio::task::spawn_blocking(move || select(&collected).flow.read(&shared_dir, date, &date_owned, &stock_str, now))
-            .await
-            .map_err(|e| format!("수집 흐름 읽기 작업이 멈췄습니다: {e}"))??;
+        let flow = tokio::task::spawn_blocking(move || {
+            select(&collected).flow.read(&shared_dir, date, &date_owned, &stock_str, now, flow_after)
+        })
+        .await
+        .map_err(|e| format!("수집 흐름 읽기 작업이 멈췄습니다: {e}"))??;
         let Some(flow) = flow else {
             return Ok(DaySlice::none());
         };
-        Ok(slice_flow(flow.generation, flow.snapshots, flow.gaps, flow.live, after))
+        Ok(DaySlice {
+            source: api::BrokerDaySource::Flow,
+            snapshots: flow.snapshots,
+            gaps: flow.gaps,
+            live: flow.live,
+            cursor: format!("f:{}:{}", flow.generation, flow.total),
+            reset: flow.reset,
+        })
     }
 }
 
@@ -316,32 +326,11 @@ fn slice_store<V: Clone>(stamp: &FileStamp, day: &StoreDay<V>, after: Option<&st
     }
 }
 
-fn slice_flow<V>(generation: u64, snapshots: Vec<V>, gaps: Vec<[i64; 2]>, live: bool, after: Option<&str>) -> DaySlice<V> {
-    let gen_text = generation.to_string();
-    let total = snapshots.len();
-    let cursor = format!("f:{gen_text}:{total}");
-    if let Some(("f", generation_str, index)) = parse_cursor(after)
-        && generation_str == gen_text
-        && index <= total
-    {
-        let tail = snapshots.into_iter().skip(index).collect();
-        return DaySlice {
-            source: api::BrokerDaySource::Flow,
-            snapshots: tail,
-            gaps,
-            live,
-            cursor,
-            reset: false,
-        };
-    }
-    DaySlice {
-        source: api::BrokerDaySource::Flow,
-        snapshots,
-        gaps,
-        live,
-        cursor,
-        reset: true,
-    }
+fn parse_flow_cursor(after: Option<&str>) -> Option<(u64, usize)> {
+    let ("f", generation, index) = parse_cursor(after)? else {
+        return None;
+    };
+    Some((generation.parse::<u64>().ok()?, index))
 }
 
 fn format_yyyymmdd(date: KstDate) -> String {
