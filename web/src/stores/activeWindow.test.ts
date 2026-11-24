@@ -8,6 +8,7 @@ class FakeElement extends EventTarget {
     attrs: Record<string, string> = {},
     private readonly parent: FakeElement | null = null,
     private readonly tabHost: FakeElement | null = null,
+    private readonly classes: readonly string[] = [],
   ) {
     super();
     this.dataset = attrs;
@@ -20,7 +21,8 @@ class FakeElement extends EventTarget {
         if (item === "[data-window-id]" && node.dataset.windowId !== undefined) return node;
         if (item === "[data-canvas-window]" && node.dataset.canvasWindow !== undefined) return node;
         if (item === "[data-dock-float]" && node.dataset.dockFloat !== undefined) return node;
-        if (item === ".dock-tab-group" && node.tabHost !== null) return node;
+        if (item === ".dock-tab-close" && node.classes.includes("dock-tab-close")) return node;
+        if (item === ".dock-tab-group[data-selected]" && node.tabHost !== null && node.dataset.selected !== undefined) return node;
       }
     }
     return null;
@@ -46,11 +48,21 @@ test("도킹 패널·도킹 탭·캔버스 창·떠 있는 창에서 창 id를 �
   const insidePanel = new FakeElement({}, dockPanel);
   expect(windowIdFromTarget(insidePanel)).toBe(windowId("watchlist"));
 
-  const tabButton = new FakeElement({ windowId: "watchlist-2" });
-  const tabGroup = new FakeElement({}, null, tabButton);
-  const linkDot = new FakeElement({}, tabGroup);
-  expect(windowIdFromTarget(tabButton)).toBe(windowId("watchlist-2"));
-  expect(windowIdFromTarget(linkDot)).toBe(windowId("watchlist-2"));
+  const selectedTabButton = new FakeElement({ windowId: "watchlist-2" });
+  const selectedTabGroup = new FakeElement({ selected: "" }, null, selectedTabButton);
+  const selectedLinkDot = new FakeElement({}, selectedTabGroup);
+  const selectedClose = new FakeElement({}, selectedTabGroup, null, ["dock-tab-close"]);
+  expect(windowIdFromTarget(selectedTabButton)).toBe(windowId("watchlist-2"));
+  expect(windowIdFromTarget(selectedLinkDot)).toBe(windowId("watchlist-2"));
+  expect(windowIdFromTarget(selectedClose)).toBeNull();
+
+  const inactiveTabButton = new FakeElement({ windowId: "trades" });
+  const inactiveTabGroup = new FakeElement({}, null, inactiveTabButton);
+  const inactiveLinkDot = new FakeElement({}, inactiveTabGroup);
+  const inactiveClose = new FakeElement({}, inactiveTabGroup, null, ["dock-tab-close"]);
+  expect(windowIdFromTarget(inactiveTabButton)).toBe(windowId("trades"));
+  expect(windowIdFromTarget(inactiveLinkDot)).toBeNull();
+  expect(windowIdFromTarget(inactiveClose)).toBeNull();
 
   const canvasFrame = new FakeElement({ canvasWindow: "cell-0" });
   expect(windowIdFromTarget(new FakeElement({}, canvasFrame))).toBe(windowId("cell-0"));

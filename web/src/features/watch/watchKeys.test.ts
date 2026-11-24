@@ -1,7 +1,10 @@
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
+import type { AccountStatus } from "../../api/generated/AccountStatus";
 import type { Watchlist } from "../../api/generated/Watchlist";
 import { rowKey } from "../../lib/watchlist";
+import { useAccountStore } from "../../stores/account";
 import { useSelectionStore } from "../../stores/selection";
+import { useWizardStore } from "../setup-wizard/wizardOpen";
 import { createRowPreviewStore, nextWatchRow, visibleWatchRows, type WatchKeyEvent, watchKeyStep } from "./watchKeys";
 
 class KeyTarget extends EventTarget {
@@ -37,9 +40,13 @@ beforeEach(() => {
   vi.stubGlobal("HTMLElement", KeyTarget);
   vi.stubGlobal("Element", KeyTarget);
   useSelectionStore.setState({ dialog: null });
+  useAccountStore.setState({ status: null });
+  useWizardStore.setState({ open: false });
 });
 
 afterEach(() => {
+  useAccountStore.setState({ status: null });
+  useWizardStore.setState({ open: false });
   vi.unstubAllGlobals();
 });
 
@@ -110,6 +117,31 @@ test("보조 키·입력칸·열린 메뉴·대화상자·이미 처리된 키�
 
   useSelectionStore.getState().openSearch();
   expect(watchKeyStep(key())).toBeNull();
+});
+
+test("셋업 마법사가 보이는 동안에는 방향키를 쓰지 않는다", () => {
+  const signedIn: AccountStatus = {
+    state: "signed_in",
+    provider: "google",
+    accountId: "0123456789abcdef0123",
+    signedInAt: 1_762_650_000,
+    sync: { state: "running", lastSuccessAt: 1_762_650_000, pendingDocuments: 0, refusedDocuments: 0, lastError: null },
+  };
+  useAccountStore.setState({ status: signedIn });
+  useWizardStore.getState().show();
+  expect(watchKeyStep(key({ key: "ArrowDown" }))).toBeNull();
+  expect(watchKeyStep(key({ key: "ArrowUp" }))).toBeNull();
+
+  useWizardStore.getState().hide();
+  expect(watchKeyStep(key({ key: "ArrowDown" }))).toBe(1);
+
+  useAccountStore.setState({
+    status: {
+      ...signedIn,
+      sync: { state: "needs_choice", lastSuccessAt: null, pendingDocuments: 0, refusedDocuments: 0, lastError: null, localDocuments: 1, accountDocuments: 1 },
+    },
+  });
+  expect(watchKeyStep(key({ key: "ArrowDown" }))).toBeNull();
 });
 
 test("반복 미리보기 저장소는 줄 이동 때 떠난 줄과 새 줄 구독자만 깨운다", () => {

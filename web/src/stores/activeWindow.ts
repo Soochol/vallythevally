@@ -5,8 +5,9 @@ const mountedWatchWindows = new Set<WindowId>();
 
 export function windowIdFromTarget(target: EventTarget | null): WindowId | null {
   if (!(target instanceof Element)) return null;
+  if (target.closest(".dock-tab-close") !== null) return null;
   const host = target.closest<HTMLElement>("[data-window-id], [data-canvas-window], [data-dock-float]")
-    ?? target.closest<HTMLElement>(".dock-tab-group")?.querySelector<HTMLElement>("[data-window-id]")
+    ?? target.closest<HTMLElement>(".dock-tab-group[data-selected]")?.querySelector<HTMLElement>("[data-window-id]")
     ?? null;
   if (!host) return null;
   const id = host.dataset.windowId ?? host.dataset.canvasWindow ?? host.dataset.dockFloat;

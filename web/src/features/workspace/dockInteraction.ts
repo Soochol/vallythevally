@@ -8,6 +8,7 @@ import { groupOfWindow } from "../../layout/dock/tree";
 import type { WindowId } from "../../layout/kinds";
 import type { DockPlacement, Rect } from "../../layout/placement";
 import { useLayoutStore, windowName, type WindowState } from "../../stores/layout";
+import { touchWindow } from "../../stores/activeWindow";
 import { useSelectionStore } from "../../stores/selection";
 import { ladderRateHidden, useUiStore } from "../../stores/ui";
 import { commandAt, evaluateView, type DockCommand, type DockPlan } from "./dockCommands";
@@ -45,6 +46,7 @@ export function useDockInteraction({ root, dock, saved, space, enabled, onPick }
     current.current.onPick(id);
     useLayoutStore.getState().selectTab(id);
     choose(id);
+    touchWindow(id);
   };
   const [outcome, setOutcome] = useState<Outcome | null>(null);
   const [dragging, setDragging] = useState(false);

@@ -8,9 +8,11 @@ import type { WindowId } from "../../layout/kinds";
 import { isTypingTarget } from "../../lib/typingTarget";
 import { rowKey, type WatchRowRef, watchSections } from "../../lib/watchlist";
 import { activeWatchWindow, registerWatchWindow } from "../../stores/activeWindow";
+import { useAccountStore } from "../../stores/account";
 import { useLayoutStore, watchedSymbol } from "../../stores/layout";
 import { useSelectionStore } from "../../stores/selection";
 import { ownsChartKeyboard } from "../overlay/topLayer";
+import { useWizardStore, wizardVisible } from "../setup-wizard/wizardOpen";
 
 export const WATCH_REPEAT_COMMIT_MS = 150;
 
@@ -96,6 +98,7 @@ export function nextWatchRow(
 export function watchKeyStep(event: WatchKeyEvent): -1 | 1 | null {
   if (event.defaultPrevented || event.isComposing || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return null;
   if (event.key !== "ArrowUp" && event.key !== "ArrowDown") return null;
+  if (wizardVisible(useAccountStore.getState().status, useWizardStore.getState().open)) return null;
   if (useSelectionStore.getState().dialog !== null || ownsChartKeyboard(event) || isTypingTarget(event.target)) return null;
   if (event.target instanceof Element && event.target.closest("[role=dialog], [role=alertdialog], [role=menu]") !== null) return null;
   return event.key === "ArrowDown" ? 1 : -1;
