@@ -144,12 +144,12 @@ test("동시호가 캡처: 매도 3단은 가운데 선 위, 매수 3단은 아�
   expect(rows.slice(10, 13).map((row) => [row.ask, row.bid?.quantity])).toEqual([[null, 3_012], [null, 61], [null, 57]]);
 });
 
-test("동시호가 캡처: 카드는 사다리 1~9행 자리를 다 쓰고 예상체결 두 줄이 맨 아래에 있다", () => {
+test("동시호가 캡처: 카드는 사다리 1~10행 자리를 다 쓰고 시세 6칸 아래 예상체결 두 줄이 있다", () => {
   const rows = auction();
   const info = quoteInfoItems(0, { price: 810_000, previousClose: 810_000, summary: { open: null, high: null, low: null, volume: 0, tradeValueWon: null }, fundamentals: null });
   const lines = placeInfoItems(rows, info, expectedInfoItems({ price: 819_000, qty: 100 }));
-  expect(infoCardRows(rows)).toBe(9);
-  expect(lines.length + 1).toBe(9);
+  expect(infoCardRows(rows)).toBe(10);
+  expect(lines).toHaveLength(8);
   expect(lines.slice(-2).map((line) => (line.kind === "item" ? line.item.label : line.kind))).toEqual(["예상체결가", "예상체결량"]);
 });
 

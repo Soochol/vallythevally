@@ -24,7 +24,7 @@ test("정보란 칸을 누르면 그 칸만 바뀌고 쪽과 종목을 오가도
   await expect(value(page, "시가")).toHaveText("69,900");
   await info(page, "시가").click();
   await expect(value(page, "시가 등락")).toHaveText("−0.14%");
-  await expect(infoLabels(page)).toHaveText(["시가 등락", "고가", "저가", "기준가", "전일대비", "거래량", "거래대금"]);
+  await expect(infoLabels(page)).toHaveText(["시가 등락", "고가 등락", "저가 등락", "기준가", "거래량", "거래대금"]);
   await infoTab(page, "종목").click();
   await infoTab(page, "시세").click();
   await expect(value(page, "시가 등락")).toHaveText("−0.14%");

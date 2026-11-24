@@ -1,44 +1,53 @@
 import type { Fundamentals } from "../../api/generated/Fundamentals";
 import type { SymbolDaySummary } from "../../api/generated/SymbolDaySummary";
-import { direction, formatChange, formatDecimal, formatPercent, formatPrice, formatVolume } from "../../lib/format";
+import { direction, formatDecimal, formatPercent, formatPrice, formatVolume } from "../../lib/format";
 import type { LadderRow } from "./ladder";
 
 export type InfoKey =
   | "open"
   | "high"
   | "low"
-  | "dayRange"
   | "base"
-  | "change"
   | "volume"
   | "value"
   | "expectedPrice"
   | "upper"
   | "lower"
-  | "range52"
-  | "cap"
-  | "per"
-  | "foreign";
+  | "cap";
+
+export const DAY_PRICE_KEYS: readonly InfoKey[] = ["open", "high", "low"];
+
+export function toggleInfoKey(flipped: ReadonlySet<InfoKey>, key: InfoKey): ReadonlySet<InfoKey> {
+  const next = new Set(flipped);
+  const targets: readonly InfoKey[] = DAY_PRICE_KEYS.includes(key) ? DAY_PRICE_KEYS : [key];
+  const remove = flipped.has(key);
+  for (const target of targets) {
+    if (remove) next.delete(target);
+    else next.add(target);
+  }
+  return next;
+}
 
 export interface QuoteInfo {
   readonly label: string;
   readonly value: string;
   readonly tone: "up" | "down" | "warning" | null;
-  readonly band?: true;
 }
 
-export type InfoLine =
-  | { readonly kind: "item"; readonly key?: InfoKey; readonly flipped?: true; readonly item: QuoteInfo }
-  | { readonly kind: "range"; readonly key?: InfoKey; readonly flipped?: true; readonly label: string; readonly position: number | null }
-  | { readonly kind: "ends"; readonly key?: InfoKey; readonly flipped?: true; readonly low: string; readonly high: string; readonly lowTitle?: string; readonly highTitle?: string };
+export interface InfoLine {
+  readonly kind: "item";
+  readonly key?: InfoKey;
+  readonly flipped?: true;
+  readonly item: QuoteInfo;
+}
 
 export type InfoPage = 0 | 1;
 export const INFO_TABS: readonly { readonly page: InfoPage; readonly label: string }[] = [{ page: 0, label: "시세" }, { page: 1, label: "종목" }];
 export const otherInfoPage = (page: InfoPage): InfoPage => (page === 0 ? 1 : 0);
 
 export type QuoteFundamentals =
-  Pick<Fundamentals, "upperLimit" | "lowerLimit" | "high52w" | "low52w" | "marketCap" | "per" | "pbr" | "foreignExhaustionRate">
-  & Partial<Pick<Fundamentals, "listedShares" | "eps" | "bps" | "creditRate">>;
+  Pick<Fundamentals, "upperLimit" | "lowerLimit" | "marketCap">
+  & Partial<Pick<Fundamentals, "listedShares">>;
 
 export interface QuoteInfoInput {
   readonly price: number | null;
@@ -58,8 +67,6 @@ const rateTone = (rate: number | null): "up" | "down" | null => {
   const side = direction(rate);
   return side === "flat" ? null : side;
 };
-const paired = (first: number | null | undefined, second: number | null | undefined, format: (value: number) => string): string =>
-  first == null && second == null ? "-" : `${orDash(first, format)}·${orDash(second, format)}`;
 
 const WON_PER_MAN = 1e4;
 const WON_PER_EOK = 1e8;
@@ -75,12 +82,6 @@ export function formatKoreanWon(amount: number): string {
   if (amount >= WON_PER_MAN) return `${grouped(amount / WON_PER_MAN)}만`;
   return `${grouped(amount)}원`;
 }
-
-const rangePosition = (price: number | null, low: number, high: number): number | null => {
-  if (price === null) return null;
-  if (high === low) return 0.5;
-  return Math.min(1, Math.max(0, (price - low) / (high - low)));
-};
 
 const itemLine = (value: QuoteInfo, key?: InfoKey, flipped?: boolean): InfoLine => ({
   kind: "item",
@@ -109,54 +110,19 @@ export function quoteInfoItems(page: InfoPage, { price, previousClose, summary, 
   const priceOrRate = (key: InfoKey, label: string, flippedLabel: string, value: number | null | undefined, ref: number | null): InfoLine =>
     isFlipped(key) ? signedRate(key, flippedLabel, value, ref) : priced(key, label, value);
   if (page === 1) {
-    const range52Flipped = isFlipped("range52");
-    const low52 = fundamentals?.low52w;
-    const high52 = fundamentals?.high52w;
-    const range52: InfoLine[] = low52 == null || high52 == null || high52 < low52
-      ? [plain("range52", "52주 범위", "-", range52Flipped)]
-      : [
-          { kind: "range", key: "range52", ...(range52Flipped ? { flipped: true as const } : {}), label: "52주 범위", position: rangePosition(price, low52, high52) },
-          range52Flipped
-            ? { kind: "ends", key: "range52", flipped: true, low: orDash(rateOf(price, positiveBase(low52)), formatPercent), high: orDash(rateOf(price, positiveBase(high52)), formatPercent), lowTitle: "저점 대비", highTitle: "고점 대비" }
-            : { kind: "ends", key: "range52", low: won(low52), high: won(high52) },
-        ];
     const cap = isFlipped("cap")
       ? plain("cap", "상장주식", orDash(fundamentals?.listedShares, (value) => `${formatVolume(value)}주`), true)
       : plain("cap", "시가총액", orDash(fundamentals?.marketCap, formatKoreanWon));
-    const per = isFlipped("per")
-      ? plain("per", "EPS·BPS", paired(fundamentals?.eps, fundamentals?.bps, won), true)
-      : plain("per", "PER·PBR", paired(fundamentals?.per, fundamentals?.pbr, formatDecimal));
-    const foreign = isFlipped("foreign")
-      ? plain("foreign", "신용비율", orDash(fundamentals?.creditRate, decimalPercent), true)
-      : plain("foreign", "외국인소진율", orDash(fundamentals?.foreignExhaustionRate, decimalPercent));
     return [
       priceOrRate("upper", "상한가", "상한까지", fundamentals?.upperLimit, current),
       priceOrRate("lower", "하한가", "하한까지", fundamentals?.lowerLimit, current),
-      ...range52,
       cap,
-      per,
-      foreign,
     ];
   }
-  const dayLow = summary?.low;
-  const dayHigh = summary?.high;
-  const hasDayRange = dayLow != null && dayHigh != null && dayHigh >= dayLow;
-  const amplitude = hasDayRange && base !== null ? ((dayHigh - dayLow) / base) * 100 : null;
-  const dayRange: InfoLine[] = isFlipped("dayRange")
-    ? [plain("dayRange", "진폭", orDash(amplitude, decimalPercent), true)]
-    : hasDayRange
-      ? [{ kind: "range", key: "dayRange", label: "당일 범위", position: rangePosition(price, dayLow, dayHigh) }]
-      : [];
   const average = summary?.tradeValueWon != null && summary.volume != null && summary.volume > 0 ? Math.round(summary.tradeValueWon / summary.volume) : null;
   const baseLine = isFlipped("base")
     ? itemLine({ label: "평균가", value: orDash(average, won), tone: against(average) }, "base", true)
     : plain("base", "기준가", orDash(previousClose, won));
-  const change = price !== null && base !== null ? price - base : null;
-  const rate = change !== null && base !== null ? (change / base) * 100 : null;
-  const changeTone = against(price);
-  const changeLine = isFlipped("change")
-    ? signedRate("change", "시가대비", price, positiveBase(summary?.open))
-    : itemLine({ label: "전일대비", value: change === null || rate === null ? "-" : `${formatChange(change, false)} ${formatPercent(rate)}`, tone: changeTone, ...(changeTone === null ? {} : { band: true as const }) }, "change");
   const volumeLine = isFlipped("volume")
     ? plain("volume", "동시간비", orDash(sameTimeRatio, decimalPercent), true)
     : plain("volume", "거래량", orDash(summary?.volume, formatVolume));
@@ -169,9 +135,7 @@ export function quoteInfoItems(page: InfoPage, { price, previousClose, summary, 
     priceOrRate("open", "시가", "시가 등락", summary?.open, base),
     priceOrRate("high", "고가", "고가 등락", summary?.high, base),
     priceOrRate("low", "저가", "저가 등락", summary?.low, base),
-    ...dayRange,
     baseLine,
-    changeLine,
     volumeLine,
     valueLine,
   ];
@@ -182,7 +146,7 @@ export interface ExpectedFillInput {
   readonly qty: number;
 }
 
-export const INFO_CARD_ROWS = 9;
+export const INFO_CARD_ROWS = 10;
 const EXPECTED_LINES = 2;
 const EXPECTED_FLIPPED_LABEL = "예상 등락";
 
