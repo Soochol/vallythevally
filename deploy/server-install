@@ -1,0 +1,135 @@
+#!/bin/sh
+set -eu
+here="$(cd "$(dirname "$0")" && pwd)"
+unit_name="vally-server.service"
+source="$here/systemd/$unit_name"
+unit_dir="${VALLY_SYSTEMD_USER_DIR:-${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user}"
+target="$unit_dir/$unit_name"
+dropin_dir="$unit_dir/$unit_name.d"
+reload_marker="$unit_dir/.vally-server-reload-pending"
+
+if [ ! -f "$source" ]; then
+    echo "vally-deploy server-install: $source가 없습니다" >&2
+    exit 1
+fi
+
+if [ ! -e "$target" ] && [ ! -L "$target" ]; then
+    echo "설치 안 됨, 건너뜀: $target (처음 설치는 docs/server-operations.md의 systemd 사용자 서비스 절)"
+    exit 0
+fi
+
+resolve_link() {
+    if resolved="$(readlink -f "$1")"; then
+        printf '%s\n' "$resolved"
+    elif [ -L "$1" ]; then
+        echo "vally-deploy server-install: $1의 심볼릭 링크를 풀지 못해 건드리지 않습니다" >&2
+        return 1
+    else
+        printf '%s\n' "$1"
+    fi
+}
+
+extract_env_keys() {
+    awk '
+        /^[ \t]*Environment[ \t]*=/ {
+            line = $0
+            sub(/^[ \t]*Environment[ \t]*=[ \t]*/, "", line)
+            while (length(line) > 0) {
+                sub(/^[ \t]+/, "", line)
+                if (length(line) == 0) break
+                first = substr(line, 1, 1)
+                if (first == "\"" || first == "'"'"'") {
+                    quote = first
+                    line = substr(line, 2)
+                    pos = index(line, quote)
+                    if (pos > 0) {
+                        token = substr(line, 1, pos - 1)
+                        line = substr(line, pos + 1)
+                    } else {
+                        token = line
+                        line = ""
+                    }
+                } else {
+                    if (match(line, /[ \t]/)) {
+                        token = substr(line, 1, RSTART - 1)
+                        line = substr(line, RSTART + 1)
+                    } else {
+                        token = line
+                        line = ""
+                    }
+                }
+                eq = index(token, "=")
+                if (eq > 1) {
+                    key = substr(token, 1, eq - 1)
+                    if (key ~ /^[A-Za-z_][A-Za-z0-9_]*$/) {
+                        print key
+                    }
+                }
+            }
+        }
+    ' "$@"
+}
+
+find_uncovered_host_keys() {
+    installed_file="$1"
+    repo_file="$2"
+    installed_keys="$(extract_env_keys "$installed_file" | sort -u)"
+    if [ -z "$installed_keys" ]; then
+        return 0
+    fi
+    covered_keys="$(
+        {
+            extract_env_keys "$repo_file"
+            if [ -d "$dropin_dir" ]; then
+                for conf in "$dropin_dir"/*.conf; do
+                    [ -f "$conf" ] && extract_env_keys "$conf"
+                done
+            fi
+        } | sort -u
+    )"
+    uncovered=""
+    for key in $installed_keys; do
+        if ! printf '%s\n' "$covered_keys" | grep -Fxq "$key"; then
+            uncovered="${uncovered:+$uncovered, }$key"
+        fi
+    done
+    printf '%s' "$uncovered"
+}
+
+real="$(resolve_link "$target")" || exit 1
+if [ ! -f "$real" ]; then
+    echo "vally-deploy server-install: $target가 가리키는 파일이 없습니다($real)" >&2
+    exit 1
+fi
+
+needs_reload=no
+if [ -e "$reload_marker" ]; then
+    needs_reload=yes
+fi
+
+if cmp -s "$source" "$real"; then
+    echo "그대로: $target"
+else
+    uncovered="$(find_uncovered_host_keys "$real" "$source")"
+    if [ -n "$uncovered" ]; then
+        echo "vally-deploy server-install: $target에 드롭인으로 옮기지 않은 호스트 환경 변수가 있어 덮어쓰지 않습니다($uncovered). $dropin_dir/host.conf로 옮긴 뒤 다시 실행하세요" >&2
+        exit 2
+    fi
+    partial="$(mktemp "$real.part.XXXXXX")"
+    if ! { cp "$source" "$partial" && chmod 644 "$partial" && mv -f "$partial" "$real"; }; then
+        rm -f "$partial"
+        echo "vally-deploy server-install: $real을 쓰지 못했습니다" >&2
+        exit 1
+    fi
+    : > "$reload_marker"
+    needs_reload=yes
+    echo "바꿈: $target"
+fi
+
+if [ "$needs_reload" = yes ]; then
+    if ! systemctl --user daemon-reload; then
+        echo "vally-deploy server-install: systemctl --user daemon-reload가 실패했습니다. 다음 실행에서 다시 시도합니다" >&2
+        exit 1
+    fi
+    rm -f "$reload_marker"
+fi

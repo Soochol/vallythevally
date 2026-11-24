@@ -12,7 +12,7 @@ import unittest
 
 
 DEPLOY = Path(__file__).resolve().parent.parent / "deploy"
-SCRIPTS = ["server-build", "web-build", "backup", "restart", "collector-build", "collector-install", "collector-restart"]
+SCRIPTS = ["server-build", "server-install", "web-build", "backup", "restart", "collector-build", "collector-install", "collector-restart"]
 
 
 def write_stub(folder, name, body):
@@ -77,6 +77,167 @@ class ServerBuildTest(DeployScriptCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn(self.head, result.stderr)
         self.assertEqual(self.recorded(), [])
+
+
+class ServerInstallTest(DeployScriptCase):
+    def setUp(self):
+        super().setUp()
+        shutil.copytree(DEPLOY / "systemd", self.root / "deploy" / "systemd")
+        self.units = Path(self.temp.name) / "units"
+        self.units.mkdir()
+        self.state = Path(self.temp.name) / "systemd-state"
+        self.state.mkdir()
+        write_stub(self.stubs, "systemctl", f"""echo "systemctl $*" >> "{self.calls}"
+case "$2" in
+    daemon-reload) [ ! -e "{self.state}/reload-fails" ] ;;
+esac
+""")
+
+    def install(self, **env):
+        return self.run_script("server-install", VALLY_SYSTEMD_USER_DIR=str(self.units), **env)
+
+    def repo_unit_text(self):
+        return (self.root / "deploy/systemd/vally-server.service").read_text()
+
+    def test_skips_when_server_unit_is_not_installed(self):
+        result = self.install()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("설치 안 됨, 건너뜀", result.stdout)
+        self.assertFalse((self.units / "vally-server.service").exists())
+        self.assertEqual(self.recorded(), [])
+
+    def test_replaces_changed_unit_with_mode_644_and_runs_daemon_reload(self):
+        (self.root / "deploy/systemd/vally-server.service").chmod(0o755)
+        target = self.units / "vally-server.service"
+        target.write_text("[Service]\nEnvironment=VALLY_DB_PATH=%h/vally-data/server/vally.db\n")
+        result = self.install()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(target.read_text(), self.repo_unit_text())
+        self.assertEqual(stat.S_IMODE(target.stat().st_mode), 0o644)
+        self.assertEqual(self.recorded(), ["systemctl --user daemon-reload"])
+
+    def test_unchanged_unit_keeps_inode_and_skips_daemon_reload(self):
+        target = self.units / "vally-server.service"
+        target.write_text(self.repo_unit_text())
+        before_inode = target.stat().st_ino
+        result = self.install()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(target.stat().st_ino, before_inode)
+        self.assertEqual(self.recorded(), [])
+
+    def test_refuses_to_overwrite_uncovered_host_env_keys_without_printing_values(self):
+        original = self.repo_unit_text().replace(
+            "ExecStart=",
+            "Environment=VALLY_TAILNET_HOSTS=secret-host.ts.net\nExecStart=",
+        )
+        target = self.units / "vally-server.service"
+        target.write_text(original)
+        result = self.install()
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("VALLY_TAILNET_HOSTS", result.stderr)
+        self.assertNotIn("secret-host.ts.net", result.stderr)
+        self.assertIn("vally-server.service.d/host.conf", result.stderr)
+        self.assertEqual(target.read_text(), original)
+        self.assertEqual(self.recorded(), [])
+
+    def test_replaces_unit_when_host_env_keys_are_covered_by_dropin_conf(self):
+        original = self.repo_unit_text().replace(
+            "ExecStart=",
+            "Environment=VALLY_TAILNET_HOSTS=server.tailnet.ts.net\nExecStart=",
+        )
+        target = self.units / "vally-server.service"
+        target.write_text(original)
+        dropin_dir = self.units / "vally-server.service.d"
+        dropin_dir.mkdir()
+        (dropin_dir / "host.conf").write_text("[Service]\nEnvironment=VALLY_TAILNET_HOSTS=server.tailnet.ts.net\n")
+        result = self.install()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(target.read_text(), self.repo_unit_text())
+        self.assertEqual(self.recorded(), ["systemctl --user daemon-reload"])
+
+    def test_commented_dropin_line_does_not_cover_host_env_key(self):
+        original = self.repo_unit_text().replace(
+            "ExecStart=",
+            "Environment=VALLY_TAILNET_HOSTS=server.tailnet.ts.net\nExecStart=",
+        )
+        target = self.units / "vally-server.service"
+        target.write_text(original)
+        dropin_dir = self.units / "vally-server.service.d"
+        dropin_dir.mkdir()
+        (dropin_dir / "host.conf").write_text("[Service]\n# Environment=VALLY_TAILNET_HOSTS=server.tailnet.ts.net\n")
+        result = self.install()
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("VALLY_TAILNET_HOSTS", result.stderr)
+        self.assertEqual(target.read_text(), original)
+        self.assertEqual(self.recorded(), [])
+
+    def test_quoted_and_multi_pair_environment_lines_are_checked(self):
+        original = self.repo_unit_text().replace(
+            "ExecStart=",
+            'Environment="VALLY_TAILNET_HOSTS=server.tailnet.ts.net" "VALLY_SHARED_DATA_DIR=/srv/shared"\nExecStart=',
+        )
+        target = self.units / "vally-server.service"
+        target.write_text(original)
+        dropin_dir = self.units / "vally-server.service.d"
+        dropin_dir.mkdir()
+        (dropin_dir / "10-host.conf").write_text("[Service]\nEnvironment=VALLY_TAILNET_HOSTS=server.tailnet.ts.net\n")
+        blocked = self.install()
+        self.assertEqual(blocked.returncode, 2)
+        self.assertIn("VALLY_SHARED_DATA_DIR", blocked.stderr)
+        self.assertNotIn("VALLY_TAILNET_HOSTS", blocked.stderr)
+        (dropin_dir / "20-shared.conf").write_text('[Service]\nEnvironment="VALLY_SHARED_DATA_DIR=/srv/shared"\n')
+        allowed = self.install()
+        self.assertEqual(allowed.returncode, 0, allowed.stderr)
+        self.assertEqual(target.read_text(), self.repo_unit_text())
+
+    def test_preserves_symlink_and_updates_target(self):
+        elsewhere = Path(self.temp.name) / "dotfiles"
+        elsewhere.mkdir()
+        (elsewhere / "vally-server.service").write_text("[Service]\nExecStart=/old\n")
+        (self.units / "vally-server.service").symlink_to(elsewhere / "vally-server.service")
+        result = self.install()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertTrue((self.units / "vally-server.service").is_symlink())
+        self.assertEqual((elsewhere / "vally-server.service").read_text(), self.repo_unit_text())
+        self.assertEqual(self.recorded(), ["systemctl --user daemon-reload"])
+
+    def test_unresolvable_symlink_fails_without_replacing(self):
+        elsewhere = Path(self.temp.name) / "dotfiles"
+        elsewhere.mkdir()
+        (elsewhere / "vally-server.service").write_text("[Service]\nExecStart=/old\n")
+        (self.units / "vally-server.service").symlink_to(elsewhere / "vally-server.service")
+        write_stub(self.stubs, "readlink", '[ "$1" = -f ] && exit 1\nexec /usr/bin/readlink "$@"\n')
+        result = self.install()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("심볼릭 링크를 풀지 못해", result.stderr)
+        self.assertTrue((self.units / "vally-server.service").is_symlink())
+        self.assertEqual((elsewhere / "vally-server.service").read_text(), "[Service]\nExecStart=/old\n")
+        self.assertEqual(self.recorded(), [])
+
+    def test_failed_daemon_reload_is_retried_on_next_run(self):
+        target = self.units / "vally-server.service"
+        target.write_text("[Service]\nExecStart=/old\n")
+        (self.state / "reload-fails").write_text("")
+        failed = self.install()
+        self.assertNotEqual(failed.returncode, 0)
+        self.assertEqual(target.read_text(), self.repo_unit_text())
+        (self.state / "reload-fails").unlink()
+        retried = self.install()
+        self.assertEqual(retried.returncode, 0, retried.stderr)
+        self.assertEqual(self.recorded(), ["systemctl --user daemon-reload", "systemctl --user daemon-reload"])
+        third = self.install()
+        self.assertEqual(third.returncode, 0, third.stderr)
+        self.assertEqual(len(self.recorded()), 2)
+
+    def test_runs_without_home_when_systemd_user_dir_is_given(self):
+        target = self.units / "vally-server.service"
+        target.write_text("[Service]\nExecStart=/old\n")
+        full = {key: value for key, value in os.environ.items() if not key.startswith(("VALLY_", "ORCH_DEPLOY_", "HOME"))}
+        full["PATH"] = f"{self.stubs}:{full['PATH']}"
+        full["VALLY_SYSTEMD_USER_DIR"] = str(self.units)
+        result = subprocess.run([str(self.root / "deploy/server-install")], cwd="/", env=full, capture_output=True, text=True, timeout=60)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(target.read_text(), self.repo_unit_text())
 
 
 class FakeCollectorHost(DeployScriptCase):
