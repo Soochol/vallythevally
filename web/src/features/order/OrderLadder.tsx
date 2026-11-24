@@ -51,6 +51,20 @@ type MenuState = { readonly x: number; readonly y: number; readonly group: Price
 
 const SIDE_OF_SLOT: Readonly<Record<"left" | "right", OrderSide>> = { left: "sell", right: "buy" };
 
+function repeatedPrices(rows: readonly LadderRow[]): ReadonlySet<number> | null {
+  let repeated: Set<number> | null = null;
+  for (const row of rows) {
+    if (row.repeat && row.price !== null) {
+      repeated ??= new Set();
+      repeated.add(row.price);
+    }
+  }
+  return repeated;
+}
+
+const chipVisible = (side: OrderSide, row: LadderRow, repeated: ReadonlySet<number> | null): boolean =>
+  row.price === null || repeated === null || !repeated.has(row.price) ? true : side === "buy" ? row.repeat : !row.repeat;
+
 interface CellApi {
   readonly hover: ValueStore<HoverCell | null>;
   readonly drag: OrderDrag;
@@ -197,10 +211,12 @@ export function OrderLadder({ rows, previousClose, groups, writable, previewQuan
     if (exploring) measureRange();
   };
 
+  const repeated = exploring ? null : repeatedPrices(rows);
   const cell = (slot: "left" | "right") => (row: LadderRow): ReactNode => {
     const side = SIDE_OF_SLOT[slot];
     if (row.price === null) return <div className="od-cell" data-empty="" data-side={side} />;
-    return <OrderCell rowKey={row.key} side={side} price={row.price} group={row.repeat ? undefined : groups.get(groupKey(side, row.price))} writable={writable} previewQuantity={previewQuantity} buying={buying} api={api} />;
+    const group = chipVisible(side, row, repeated) ? groups.get(groupKey(side, row.price)) : undefined;
+    return <OrderCell rowKey={row.key} side={side} price={row.price} group={group} writable={writable} previewQuantity={previewQuantity} buying={buying} api={api} />;
   };
   const slots = { left: cell("left"), right: cell("right") };
 
