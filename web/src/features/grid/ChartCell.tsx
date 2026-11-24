@@ -1,6 +1,7 @@
 import { createPortal } from "react-dom";
 import { VenueFallbackBadge } from "../venue/VenuePicker";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useBookReplayDays } from "../../api/bookReplay";
 import { useFinancials } from "../../api/financials";
 import { financialRequest } from "../../chart/indicators/shown";
 import { useSymbolInfo, useSymbolInfos } from "../../api/queries";
@@ -8,6 +9,7 @@ import { type CellStatus, ChartController } from "../../chart/ChartController";
 import type { IndicatorCommand } from "../../chart/indicators/legendRows";
 import { crosshairGroupKey, crosshairSync } from "../../chart/crosshairSync";
 import { readThemeTokens } from "../../chart/theme";
+import { isIntraday } from "../../chart/time";
 import { PERIOD_LABEL } from "../../lib/symbol";
 import { shownVenue, venueLabel } from "../../lib/venue";
 import { chartNumber, chartWindows, useCell, useLayoutStore } from "../../stores/layout";
@@ -74,6 +76,10 @@ export function ChartCell({ cellId, status, onStatus }: Props) {
   const financial = useFinancials(cell.symbol, request.period, request.enabled);
   const theme = useTheme();
   const replayEnabled = useBookReplayEnabled();
+  const replayDaysEnabled = replayEnabled && isIntraday(cell.period);
+  const replayDaysQuery = useBookReplayDays(cell.symbol, replayDaysEnabled);
+  const replayDaysList = replayDaysEnabled ? replayDaysQuery.data?.days : undefined;
+  const replayDays = useMemo(() => (replayDaysList && replayDaysList.length > 0 ? new Set(replayDaysList) : null), [replayDaysList]);
   const openSearch = useSelectionStore((s) => s.openSearch);
   const chartEl = useRef<HTMLDivElement>(null);
   const ctl = useRef<ChartController | null>(null);
@@ -124,6 +130,10 @@ export function ChartCell({ cellId, status, onStatus }: Props) {
       if (bar !== null) useBookReplayStore.getState().point(symbol, bar);
     });
   }, [replayEnabled, cell.symbol]);
+
+  useEffect(() => {
+    ctl.current?.setReplayDays(replayDays);
+  }, [replayDays]);
 
   useEffect(() => {
     ctl.current?.apply({ symbol: cell.symbol, venue, period: cell.period, settings: chartSettings, info, previewIndicator: preview?.id ?? null, compareNames });

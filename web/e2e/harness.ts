@@ -20,6 +20,16 @@ export const test = base.extend<{ scenario: Scenario; clockStart: string | null 
         ? { status: 404, body: { error: { code: "not_found", message: "공개 리스너에 없는 경로입니다", reason: null, retryAt: null, manualActionRequired: false } } }
         : { body: { available: false } },
     );
+    scenario.on(
+      (url) => /^\/api\/symbols\/[^/]+\/book-replay\/days$/.test(url.pathname),
+      (request) => {
+        if (scenario.publicMode.kind === "public") {
+          return { status: 404, body: { error: { code: "not_found", message: "공개 리스너에 없는 경로입니다", reason: null, retryAt: null, manualActionRequired: false } } };
+        }
+        const symbol = decodeURIComponent(new URL(request.url()).pathname.split("/")[3] ?? "");
+        return { body: { symbol, days: [] } };
+      },
+    );
     const throttle = cpuThrottleRate();
     if (throttle !== null) {
       const apply = async (page: Page) => { await (await context.newCDPSession(page)).send("Emulation.setCPUThrottlingRate", { rate: throttle }); };

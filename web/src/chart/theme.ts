@@ -12,6 +12,7 @@ export interface ThemeTokens {
   gridH: string;
   raised: string;
   onData: string;
+  accent: string;
   crosshair: string;
   up: string;
   down: string;
@@ -38,6 +39,7 @@ export function readThemeTokens(root: HTMLElement = document.documentElement): T
     gridH: v("--grid-h"),
     raised: v("--raised"),
     onData: v("--on-data"),
+    accent: v("--accent"),
     crosshair: v("--crosshair"),
     up: v("--up"),
     down: v("--down"),
