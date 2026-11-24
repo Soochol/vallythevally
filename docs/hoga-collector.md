@@ -355,24 +355,26 @@ collector verify [--data <폴더>]  --date YYYYMMDD
 
 ## finalize
 
-`finalize`가 그날 원문을 관측일·타입별 Parquet으로 정리하고, Parquet을 다시 읽어 원문과 대조한다. 코드는 `collector::finalize`이고 파일 형식은 [`collector-store-format.md`](collector-store-format.md)가 계약이다. 대조를 통과하면 커버리지를 모아 정리 완료 표시(`complete.json`)를 쓰고, 폴더를 `store/<YYYYMMDD>/`로 갈아 끼우고, `--prune`이면 조건을 모두 만족한 날의 원문을 지운다.
+`finalize`가 그날 원문을 관측일·타입별 Parquet으로 정리하고, Parquet을 다시 읽어 원문과 대조한다. 코드는 `collector::finalize`이고 파일 형식은 [`collector-store-format.md`](collector-store-format.md)가 계약이다. 대조를 통과하면 커버리지를 모아 정리 완료 표시(`complete.json`)를 쓰고, 폴더를 `store/<YYYYMMDD>/`로 갈아 끼우고, `--prune`이면 조건을 모두 만족한 날의 원문을 지운 뒤, 그날과 정리가 끝났지만 닫힌 분 호가가 없는 지난 날의 닫힌 분 호가를 공용 자료 폴더에 만든다.
 
 ### 명령
 
 ```sh
-collector finalize [--data <폴더>] --date YYYYMMDD [--threads 4] [--buckets 64] [--verify-only] [--prune [--keep-early 7] [--keep 1] [--early-period 10]]
+collector finalize [--data <폴더>] --date YYYYMMDD [--threads 4] [--buckets 64] [--shared <폴더>] [--verify-only] [--prune [--keep-early 7] [--keep 1] [--early-period 10]]
 ```
 
 | 종료 코드 | 뜻 |
 |---|---|
-| 0 | 정리했고 원문 대조가 통과했다. 정리 못 한 줄이 있어도 0이다. 그 수는 `verify.json`에 있다 |
-| 1 | 원문 대조가 실패했다, 원문 폴더가 없다, 읽기·쓰기 오류가 났다 |
+| 0 | 정리했고 원문 대조가 통과했고 닫힌 날 분 호가까지 만들었다. 정리 못 한 줄이 있어도 0이다. 그 수는 `verify.json`에 있다 |
+| 1 | 원문 대조가 실패했다, 원문 폴더가 없다, 읽기·쓰기 오류나 원문 지우기 오류가 났다 |
 | 2 | 인수 오류. `--date`가 없거나 `YYYYMMDD`가 아니다, `--threads`가 1~64가 아니다, `--buckets`가 1~999가 아니다, `--keep-early`·`--keep`이 1 이상 정수가 아니다, `--prune` 없이 지우기 인수를 줬다 |
+| 3 | 정리·대조는 끝났지만 닫힌 날 분 호가를 만들지 못했다. 다음 정리 때 다시 만든다. 원문 지우기도 함께 실패했으면 1이 앞선다 |
 
 - 시작할 때 두 이름 바꾸기 사이에 끊긴 흔적(`store/<YYYYMMDD>.old-*`)이 있으면 고친다. 결과는 `store/<YYYYMMDD>.tmp/`에 쓴다. 폴더가 남아 있으면 지우고 처음부터 쓴다. 대조가 통과하면 `complete.json`을 맨 마지막에 쓰고 `store/<YYYYMMDD>/`로 바꾼다. 대조가 실패하면 `complete.json` 없이 `.tmp`를 남기고 1로 끝난다.
-- `--verify-only`는 쓰지 않고 원문 줄만 다시 세어 Parquet과 대조한다. `.tmp`가 있으면 그것을, 없으면 `store/<YYYYMMDD>/`를 대조한다. `verify.json`을 새로 쓰고 `complete.json`은 건드리지 않는다. 지우기는 하지 않는다.
-- `--prune`은 대조가 통과한 뒤 `raw/` 아래 모든 날을 따져 지울 수 있는 날의 원문을 지운다. 조건과 기록은 [`collector-store-format.md`](collector-store-format.md)의 "원문 지우기"를 따른다. 오늘은 `--date`다. `complete.json`에 적힌 원문 지문(`raw_files`)과 지금 원문이 다른 날, 정리가 읽지 않는 파일이 든 날은 지우지 않는다. 지우기 직전에 한 번 더 확인한다. 지우다 실패한 날이 있으면 1이다.
-- `--threads`는 원문을 해석하는 스레드와 버킷을 정렬해 쓰는 스레드의 수다. 상한은 이 값이다. 원문은 `raw_read::read_day` 하나가 읽고 스레드들이 줄 묶음을 나눠 받는다. 줄에 번호를 매겨 정렬 기준에 넣으므로 스레드 수가 달라도 파일이 같다.
+- `--verify-only`는 쓰지 않고 원문 줄만 다시 세어 Parquet과 대조한다. `.tmp`가 있으면 그것을, 없으면 `store/<YYYYMMDD>/`를 대조한다. `verify.json`을 새로 쓰고 `complete.json`은 건드리지 않는다. 지우기와 분 호가 만들기는 하지 않는다.
+- `--prune`은 대조가 통과한 뒤 `raw/` 아래 모든 날을 따져 지울 수 있는 날의 원문을 지운다. 조건과 기록은 [`collector-store-format.md`](collector-store-format.md)의 "원문 지우기"를 따른다. 오늘은 `--date`다. `complete.json`에 적힌 원문 지문(`raw_files`)과 지금 원문이 다른 날, 정리가 읽지 않는 파일이 든 날은 지우지 않는다. 지우기 직전에 한 번 더 확인한다. 지우다 실패한 날이 있어도 분 호가는 만들고, 종료 코드는 1이다.
+- `--shared`는 닫힌 날 분 호가를 쓸 공용 자료 폴더다. 없으면 `<데이터 폴더>/shared`다. `store/<날짜>/complete.json`이 있는 날 가운데 이번 `--date`(있어도 다시 만든다)를 먼저 만들고, 닫힌 폴더(`<공용 자료 폴더>/quote-minutes/<YYYYMMDD>/`)가 없는 지난 날은 오래된 순으로 `0D` Parquet에서 다시 만들어 `<YYYYMMDD>.tmp`에 쓴 뒤 바꿔 끼우고 그날의 장중 폴더(`quote-minutes-live/<YYYYMMDD>/`)를 지운다. `complete.json`은 `format_version`이 1이고 `verify.passed`가 참이며 `stocks`가 있어야 하고, 아니면 그날은 닫힌 폴더를 만들지 않고 장중 폴더도 남긴 채 실패한다. `0D` 행과 `complete.json` 종목은 `_AL`을 뗀 글자가 `StockCode` 규칙을 지나는 것만 쓴다. 한 날이 실패해도 나머지를 계속 만들고, 끝에 실패한 날짜와 이유를 모아 stderr에 쓰고 종료 코드 3으로 끝난다. 감독 데몬은 `--shared`가 주어졌을 때 같은 값을 `finalize`에 넘기고, 종료 코드 3이면 `stage_failed` 경보를 낸다.
+- `--threads`는 원문을 해석하는 스레드, 버킷을 정렬해 쓰는 스레드, `0D` 버킷을 읽어 분 호가를 만드는 스레드의 수다. 상한은 이 값이다. 원문은 `raw_read::read_day` 하나가 읽고 스레드들이 줄 묶음을 나눠 받는다. 줄에 번호를 매겨 정렬 기준에 넣으므로 스레드 수가 달라도 파일이 같다.
 
 ### 하는 일
 
@@ -386,7 +388,7 @@ collector finalize [--data <폴더>] --date YYYYMMDD [--threads 4] [--buckets 64
 
 `crates/collector/tests/finalize.rs`가 합성 원문(열한 타입, 종목 48개, 버킷 여럿)을 정리해 DuckDB로 읽은 행이 원문 프레임과 같은지, 스레드 1과 4의 결과 파일이 같은지, `verify.json`의 줄 수 구분, 원문에서 줄 하나를 뺀 Parquet이 대조에서 실패하는지, 이미 있는 `store/<날짜>/`를 갈아 끼우는지, 문서의 열 표가 코드의 열 정의와 같은지를 고정한다.
 
-`crates/collector/tests/finalize_complete.rs`는 합성 원문·계획·사건 기록으로 종목별 커버리지(계획, 등록 실패, 받지 못함, 끊긴 구간, 제외, 거래정지, 인계)와 처음 정리, 다시 정리(열린 옛 파일이 끝까지 읽힘), 끊긴 이름 바꾸기 회복, 대조 실패 때 `complete.json`이 없는 것을 확인한다. `finalize_prune.rs`는 지울 날을 가르는 조건과 보관 기간, 설정값, 휴장일, `raw/` 밖 경로 거부를 확인한다. `python3 scripts/dev.py cargo test -p collector --test finalize_complete`, `--test finalize_prune`.
+`crates/collector/tests/finalize_complete.rs`는 합성 원문·계획·사건 기록으로 종목별 커버리지(계획, 등록 실패, 받지 못함, 끊긴 구간, 제외, 거래정지, 인계)와 처음 정리, 다시 정리(열린 옛 파일이 끝까지 읽힘), 끊긴 이름 바꾸기 회복, 대조 실패 때 `complete.json`이 없는 것을 확인한다. `finalize_prune.rs`는 지울 날을 가르는 조건과 보관 기간, 설정값, 휴장일, `raw/` 밖 경로 거부를 확인한다. `finalize_quotes.rs`와 `finalize_quotes_fill.rs`는 `0D` Parquet에서 닫힌 날 분 호가 만들기, 조용한 종목과 끊긴 구간, 누락된 지난 날 채우기와 장중 폴더 제거, 깨진 옛 날이 있어도 이번 날과 다른 멀쩡한 날을 계속 채우는 것, 대조 미통과·버전 불일치·`stocks` 누락 `complete.json` 거부와 이상한 종목 글자 건너뛰기, 쓰기 실패 때 종료 코드 3과 `--verify-only` 생략, `--shared` 인수 전달을 확인한다. `python3 scripts/dev.py cargo test -p collector --test finalize_complete`, `--test finalize_prune`, `--test finalize_quotes`, `--test finalize_quotes_fill`.
 
 ## 수집 종목 목록
 

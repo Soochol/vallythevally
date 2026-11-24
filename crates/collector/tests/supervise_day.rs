@@ -887,6 +887,14 @@ async fn a_failed_finalize_is_alerted_and_not_retried_the_same_day() {
 }
 
 #[tokio::test(start_paused = true)]
+async fn a_finalize_that_exits_with_3_alerts_about_the_quotes() {
+    let harness = Harness::start(Config { forced_exit: Some(3), ..Config::default() });
+    harness.until_finalize_finished(1).await;
+    assert!(harness.status_now().alerts.iter().any(|alert| alert.message.contains("분 호가")), "{:?}", harness.status_now().alerts);
+    harness.finish().await;
+}
+
+#[tokio::test(start_paused = true)]
 async fn the_next_day_finalizes_a_day_whose_finalize_failed() {
     let harness = Harness::start(Config { forced_exit: Some(1), holidays: Holidays::Listed(vec![(20261119, "임시공휴일")]), ..Config::default() });
     harness.until_finalize_finished(1).await;

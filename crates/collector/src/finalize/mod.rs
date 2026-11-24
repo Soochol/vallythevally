@@ -17,6 +17,7 @@ mod coverage;
 mod merge;
 mod observation;
 mod prune;
+mod quotes;
 mod raw_files;
 mod scan;
 pub mod schema;
@@ -28,6 +29,7 @@ pub use prune::{
     CompleteState, DayFacts, KeepReason, PRUNE_LOG_NAME, PruneReport, PrunePlan, RetentionSettings, UnfinalizedCount, delete_planned_day, delete_raw_day,
     RawState, first_complete_day, plan_prune, prune_raw, raw_days_without_complete, read_day_facts,
 };
+pub use quotes::{QuotesReport, fill_closed_days, write_closed_day};
 pub use raw_files::RawFiles;
 pub use check::{Mismatch, StatJson, VERIFY_FILE_NAME, VerifyReport, bucket_count_of, verify_store};
 pub use merge::{ROW_GROUP_ROWS, WrittenFile, bucket_file};
@@ -42,6 +44,7 @@ const MAX_BUCKETS: usize = 999;
 const STORE_FOLDER: &str = "store";
 const TEMPORARY_SUFFIX: &str = ".tmp";
 const SPILL_FOLDER: &str = ".spill";
+const QUOTES_EXIT_CODE: u8 = 3;
 
 const SPEC: ArgSpec = ArgSpec {
     value_options: &["date", "threads", "buckets", "keep-early", "keep", "early-period", "shared"],
@@ -98,9 +101,20 @@ pub fn run(raw_arguments: &[String]) -> ExitCode {
                 );
                 return ExitCode::FAILURE;
             }
-            match prune {
-                Some(settings) if !options.verify_only => prune_after_finalize(&options, &settings),
-                _ => ExitCode::SUCCESS,
+            if options.verify_only {
+                return ExitCode::SUCCESS;
+            }
+            let prune_failed = match prune {
+                Some(settings) => !prune_after_finalize(&options, &settings),
+                None => false,
+            };
+            let quotes_failed = !quotes_after_finalize(&options, &shared_dir);
+            if prune_failed {
+                ExitCode::FAILURE
+            } else if quotes_failed {
+                ExitCode::from(QUOTES_EXIT_CODE)
+            } else {
+                ExitCode::SUCCESS
             }
         }
         Err(error) => {
@@ -124,15 +138,30 @@ pub fn prune_with_cached_calendar(data_dir: &Path, date: u32, settings: &Retenti
     prune_raw(data_dir, date, &calendar, settings)
 }
 
-fn prune_after_finalize(options: &Options, settings: &RetentionSettings) -> ExitCode {
+fn prune_after_finalize(options: &Options, settings: &RetentionSettings) -> bool {
     match prune_with_cached_calendar(&options.data_dir, options.date, settings) {
         Ok(report) => {
             println!("finalize: 원문 지우기 {}일 지움, {}일 남김, {}일 실패", report.deleted.len(), report.kept.len(), report.failed.len());
-            if report.failed.is_empty() { ExitCode::SUCCESS } else { ExitCode::FAILURE }
+            report.failed.is_empty()
         }
         Err(error) => {
             eprintln!("finalize: 원문을 지울 수 없다: {error}");
-            ExitCode::FAILURE
+            false
+        }
+    }
+}
+
+fn quotes_after_finalize(options: &Options, shared_dir: &Path) -> bool {
+    match fill_closed_days(&options.data_dir, shared_dir, options.date, options.threads) {
+        Ok(reports) => {
+            let stocks: usize = reports.iter().map(|report| report.stocks).sum();
+            let minutes: usize = reports.iter().map(|report| report.minutes).sum();
+            println!("finalize: 분 호가 {}일, {}종목, {}분 만듦", reports.len(), stocks, minutes);
+            true
+        }
+        Err(error) => {
+            eprintln!("finalize: 분 호가를 만들지 못했다: {error}");
+            false
         }
     }
 }
