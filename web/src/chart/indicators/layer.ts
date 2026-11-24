@@ -160,6 +160,13 @@ function formatDepthLevel(level: readonly [number, number] | null): string {
   return level ? `${formatPrice(level[0], false)} ${formatVolume(level[1])}` : "—";
 }
 
+interface DepthLegend {
+  asks: TrackedValues;
+  bids: TrackedValues;
+  dirty: boolean;
+  lastT: UnixSeconds | null;
+}
+
 export class IndicatorLayer {
   private readonly port: IndicatorPort;
   private readonly shown = new Map<string, Shown>();
@@ -183,6 +190,7 @@ export class IndicatorLayer {
   private financialNotice: string | undefined;
   private quoteTotals: QuoteView<QuoteTotalPoint> | null = null;
   private quoteDepths: ReadonlyMap<IndicatorConfig["id"], QuoteView<QuoteDepthPoint>> = new Map();
+  private readonly depthLegends = new Map<string, DepthLegend>();
 
   setQuoteTotals(view: QuoteView<QuoteTotalPoint> | null, from: UnixSeconds | null = null): void {
     this.quoteTotals = view;
@@ -198,6 +206,7 @@ export class IndicatorLayer {
     for (const s of this.shown.values()) if (isQuoteDepth(s.config.spec)) {
       this.updateQuoteDepthStatus(s);
     }
+    for (const legend of this.depthLegends.values()) legend.dirty = true;
     this.host.requestFrame();
   }
 
@@ -312,6 +321,7 @@ export class IndicatorLayer {
       this.clearLines(s);
       if (s.config.visible) s.status = { kind: "pending" };
     }
+    if (!keepQuotes) for (const legend of this.depthLegends.values()) legend.dirty = true;
     this.load(h, keepQuotes);
   }
 
@@ -319,6 +329,7 @@ export class IndicatorLayer {
     this.history = h;
     this.display = displayBars(h);
     this.timesDirty = true;
+    if (!keepQuotes) for (const legend of this.depthLegends.values()) legend.dirty = true;
     this.committedT = h.bars[h.bars.length - 1]?.t ?? null;
     this.create(this.configs.filter((c) => c.visible));
     for (const s of this.shown.values()) {
@@ -347,6 +358,12 @@ export class IndicatorLayer {
       this.clearLines(s);
       if (s.config.visible && s.status.kind !== "error") s.status = { kind: "pending" };
     }
+    for (const legend of this.depthLegends.values()) {
+      legend.asks.clear();
+      legend.bids.clear();
+      legend.lastT = null;
+      legend.dirty = true;
+    }
   }
 
   advance(h: History, bar: Bar, kind: "live" | "confirmed"): void {
@@ -357,7 +374,10 @@ export class IndicatorLayer {
       const keepQuotes = this.history !== null && isQuoteTail(prev, next, bar);
       this.host.guard(() => {
         this.resetNow(h, keepQuotes);
-        if (keepQuotes) this.advanceQuoteTotals(bar);
+        if (keepQuotes) {
+          this.advanceQuoteTotals(bar);
+          this.advanceDepthLegends(bar);
+        }
       });
       return;
     }
@@ -377,6 +397,7 @@ export class IndicatorLayer {
       }
     }
     this.advanceQuoteTotals(bar);
+    this.advanceDepthLegends(bar);
     if (this.configs.some((c) => c.visible && usesWorker(c)) && !this.broken) {
       this.port.post({ type: "bar", chart: this.port.chart, kind: op, bar: tuple(bar) });
     }
@@ -538,26 +559,13 @@ export class IndicatorLayer {
           rows.push({ id: config.id, slots: [["호가 자료 조회 실패"]] });
           continue;
         }
-        if (qState === "loading" && !this.display.some((b) => view?.at(b.t))) {
+        if (qState === "loading") {
           rows.push({ id: config.id, slots: [] });
           continue;
         }
-        const asks: string[] = [];
-        const bids: string[] = [];
-        let hasAskGap = false;
-        let hasBidGap = false;
-        for (let i = 0; i < this.display.length; i++) {
-          const pt = view?.at(this.display[i]!.t);
-          const ask = pt ? thickestLevel(pt.asks) : null;
-          const bid = pt ? thickestLevel(pt.bids) : null;
-          if (ask) asks.push(formatDepthLevel(ask));
-          else hasAskGap = true;
-          if (bid) bids.push(formatDepthLevel(bid));
-          else hasBidGap = true;
-        }
-        if (hasAskGap || asks.length === 0) asks.push("—");
-        if (hasBidGap || bids.length === 0) bids.push("—");
-        rows.push({ id: config.id, slots: [asks, bids] });
+        const legend = this.depthLegend(config.id);
+        if (legend.dirty) this.rebuildDepthLegend(legend, view);
+        rows.push({ id: config.id, slots: [legend.asks.values, legend.bids.values] });
         continue;
       }
       const slots: (readonly string[])[] = [];
@@ -1053,10 +1061,61 @@ export class IndicatorLayer {
     this.host.chart.removeSeries(line.series);
   }
 
+  private depthLegend(id: string): DepthLegend {
+    let legend = this.depthLegends.get(id);
+    if (!legend) {
+      legend = { asks: new TrackedValues(), bids: new TrackedValues(), dirty: true, lastT: null };
+      this.depthLegends.set(id, legend);
+    }
+    return legend;
+  }
+
+  private rebuildDepthLegend(legend: DepthLegend, view: QuoteView<QuoteDepthPoint> | undefined): void {
+    const asks: string[] = [];
+    const bids: string[] = [];
+    for (let i = 0; i < this.display.length; i++) {
+      const pt = view?.at(this.display[i]!.t);
+      asks.push(formatDepthLevel(pt ? thickestLevel(pt.asks) : null));
+      bids.push(formatDepthLevel(pt ? thickestLevel(pt.bids) : null));
+    }
+    if (asks.length === 0) {
+      asks.push("—");
+      bids.push("—");
+    }
+    legend.asks.setAll(asks);
+    legend.bids.setAll(bids);
+    legend.lastT = this.display.at(-1)?.t ?? null;
+    legend.dirty = false;
+  }
+
+  private advanceDepthLegends(bar: Bar): void {
+    for (const s of this.shown.values()) {
+      if (!s.config.visible || !isQuoteDepth(s.config.spec)) continue;
+      const legend = this.depthLegends.get(s.config.id);
+      if (!legend || legend.dirty) continue;
+      const view = this.quoteDepths.get(s.config.id);
+      if (!view || view.state !== "ready") continue;
+      const pt = view.at(bar.t);
+      const ask = formatDepthLevel(pt ? thickestLevel(pt.asks) : null);
+      const bid = formatDepthLevel(pt ? thickestLevel(pt.bids) : null);
+      if (legend.lastT === bar.t && legend.asks.values.length > 0) {
+        legend.asks.setAt(legend.asks.values.length - 1, ask);
+        legend.bids.setAt(legend.bids.values.length - 1, bid);
+      } else if (legend.lastT === null || bar.t > legend.lastT) {
+        legend.asks.push(ask);
+        legend.bids.push(bid);
+        legend.lastT = bar.t;
+      } else {
+        legend.dirty = true;
+      }
+    }
+  }
+
   private removeShown(id: string): void {
     const s = this.shown.get(id);
     if (!s) return;
     this.shown.delete(id);
+    this.depthLegends.delete(id);
     for (const line of s.lines) this.removeLine(line);
   }
 

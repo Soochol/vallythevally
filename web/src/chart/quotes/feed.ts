@@ -36,6 +36,8 @@ export interface QuoteView<P> {
 }
 
 export const TAIL_EVERY_MS = 5000;
+const BASE_RETRY_SEC = TAIL_EVERY_MS / 1000;
+const MAX_RETRY_SEC = 60;
 
 const KST_OFFSET = 32400;
 const DAY_SECONDS = 86400;
@@ -84,6 +86,8 @@ export class QuoteFeed<P extends { t: UnixSeconds }> implements QuoteView<P> {
   private receivedAny = false;
   private covering = false;
   private failedCover = false;
+  private coverFailures = 0;
+  private nextCoverRetryAt: UnixSeconds = 0;
   private tailing = false;
   private coverAbort: AbortController | null = null;
   private tailAbort: AbortController | null = null;
@@ -114,6 +118,8 @@ export class QuoteFeed<P extends { t: UnixSeconds }> implements QuoteView<P> {
     this.receivedAny = false;
     this.covering = false;
     this.failedCover = false;
+    this.coverFailures = 0;
+    this.nextCoverRetryAt = 0;
     this.tailing = false;
   }
 
@@ -121,8 +127,15 @@ export class QuoteFeed<P extends { t: UnixSeconds }> implements QuoteView<P> {
     if (this.disposed || !this.key) return;
     const a = kstDateOf(from);
     const b = kstDateOf(to);
-    this.need = a <= b ? { from: a, to: b } : { from: b, to: a };
-    if (!this.covering) this.pumpCover();
+    const next = a <= b ? { from: a, to: b } : { from: b, to: a };
+    const changed = this.need === null || this.need.from !== next.from || this.need.to !== next.to;
+    this.need = next;
+    if (changed) {
+      this.failedCover = false;
+      this.coverFailures = 0;
+      this.nextCoverRetryAt = 0;
+    }
+    if (!this.covering && !this.failedCover) this.pumpCover();
   }
 
   dispose(): void {
@@ -186,6 +199,8 @@ export class QuoteFeed<P extends { t: UnixSeconds }> implements QuoteView<P> {
         if (gen !== this.gen || this.disposed) return;
         this.covering = false;
         this.coverAbort = null;
+        this.coverFailures = 0;
+        this.nextCoverRetryAt = 0;
         this.receivedAny = true;
         this.have = mergeRanges(this.have, chunk);
         for (const day of page.days) this.days.set(day.date, day.state);
@@ -200,6 +215,9 @@ export class QuoteFeed<P extends { t: UnixSeconds }> implements QuoteView<P> {
         this.covering = false;
         this.coverAbort = null;
         this.failedCover = true;
+        this.coverFailures++;
+        const delay = Math.min(MAX_RETRY_SEC, BASE_RETRY_SEC * 2 ** (this.coverFailures - 1));
+        this.nextCoverRetryAt = this.deps.now() + delay;
         if (!this.receivedAny) {
           this._state = "failed";
           this.deps.changed(null);
@@ -211,13 +229,10 @@ export class QuoteFeed<P extends { t: UnixSeconds }> implements QuoteView<P> {
 
   private onTick(): void {
     if (this.disposed || !this.key) return;
-    if (this.failedCover && !this.covering) {
-      this.pumpCover();
-      return;
-    }
     if (typeof document !== "undefined" && document.hidden) return;
-    if (this.tailing || this.have.length === 0) return;
     const now = this.deps.now();
+    if (this.failedCover && !this.covering && now >= this.nextCoverRetryAt) this.pumpCover();
+    if (this.tailing || this.have.length === 0) return;
     const today = kstDateOf(now);
     if (!rangesContain(this.have, today)) return;
     if (!inTailWindow(now)) return;
