@@ -14,7 +14,7 @@ import { priceTone } from "../market-window/PriceLadder";
 import { formatQuantity, withSign } from "../market-window/format";
 import { useWindowedRows } from "../market-window/useWindowedRows";
 import { ErrorState, EmptyState, Skeleton } from "../overlay/State";
-import { boldKeys, type ColumnWidths, eokFromMillionWon, formatEokAmount, historyRows, isNoProgramData, joinHistoryAndLive, liveRow, type ProgramLine, type ProgramRow, rowsOf, sparklinePoints, widestSoFar } from "./program";
+import { boldKeys, type ColumnWidths, eokFromMillionWon, formatEokAmount, historyRows, isNoProgramData, joinHistoryAndLive, liveRow, nonZeroChangeLines, type ProgramLine, type ProgramRow, rowsOf, sparklinePoints, widestSoFar } from "./program";
 
 const VISIBLE_ROWS = 300;
 const SPARK_WIDTH = 100;
@@ -81,7 +81,7 @@ function Summary({ rows }: { rows: readonly ProgramRow[] }) {
 const TONE_CLASS = { up: "mw-up", down: "mw-down", flat: undefined } as const;
 
 function Table({ lines, previousClose }: { lines: readonly ProgramLine[]; previousClose: number | null }) {
-  const visible = useMemo(() => lines.slice(-VISIBLE_ROWS).reverse(), [lines]);
+  const visible = useMemo(() => nonZeroChangeLines(lines).slice(-VISIBLE_ROWS).reverse(), [lines]);
   const rows = useMemo(() => rowsOf(visible), [visible]);
   const bold = useMemo(() => boldKeys(rows), [rows]);
   const widths = useWidestColumns(rows);

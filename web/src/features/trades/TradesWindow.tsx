@@ -28,7 +28,7 @@ export function TradesWindow({ id }: { id: WindowId }) {
 function TradesBody({ code, venue }: { code: SymbolCode; venue: Venue }) {
   const frame = useRef<HTMLDivElement>(null);
   const compactStrips = useBelowHeight(frame, COMPACT_STRIPS_BELOW_HEIGHT_PX);
-  const { state, dispatch, history, feedError, retry } = useTradeTape(marketSocket, code, venue);
+  const { state, history, feedError, retry } = useTradeTape(marketSocket, code, venue);
   const quote = useDayQuote(code, venue);
   const previousClose = quote.previousClose;
   const [minKey, setMinKey] = useState<MinAmountKey>("all");
@@ -56,10 +56,10 @@ function TradesBody({ code, venue }: { code: SymbolCode; venue: Venue }) {
       </div>
       {feedError !== null && <Notice tone="danger" className="mw-notice">실시간 체결을 받지 못합니다</Notice>}
       {history === "failed" && <Notice tone="danger" className="mw-notice" action={{ label: "다시 시도", onClick: retry }}>당일 체결을 불러오지 못했습니다</Notice>}
-      <div className="tr-body" data-testid="trade-body" onMouseEnter={() => dispatch({ type: "hold" })} onMouseLeave={() => dispatch({ type: "release" })}>
+      <div className="tr-body" data-testid="trade-body">
       <div ref={windowed.scroller} className="tr-tape" data-testid="trade-tape" role="table" aria-label="체결 내역" onScroll={windowed.onScroll}>
         <div role="row" className="tr-head">
-          <span role="columnheader">시각{state.holding && <em className="tr-held" data-testid="trade-held">멈춤</em>}</span>
+          <span role="columnheader">시각</span>
           <span role="columnheader">체결가</span>
           <span role="columnheader">체결량</span>
         </div>
@@ -76,7 +76,6 @@ function TradesBody({ code, venue }: { code: SymbolCode; venue: Venue }) {
         </div>
         {empty && history !== "failed" && <p className="tr-empty">{history === "loading" ? "당일 체결을 불러오는 중입니다" : minKey === "all" ? "체결이 아직 없습니다" : "이 금액 이상의 체결이 아직 없습니다"}</p>}
       </div>
-        {view.pendingCount > 0 && <button type="button" className="tr-pill" data-testid="trade-pending" onClick={() => dispatch({ type: "flush" })}>새 체결 {view.pendingCount}건</button>}
       </div>
     </div>
   );

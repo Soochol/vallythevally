@@ -71,6 +71,9 @@ export function joinHistoryAndLive(history: readonly ProgramRow[], live: readonl
 
 export const rowsOf = (lines: readonly ProgramLine[]): ProgramRow[] => lines.flatMap((line) => (line.kind === "row" ? [line.row] : []));
 
+export const nonZeroChangeLines = (lines: readonly ProgramLine[]): ProgramLine[] =>
+  lines.filter((line) => line.kind === "gap" || line.row.netQtyChange !== 0);
+
 const TOP_SHARE = 0.1;
 
 export function boldKeys(visible: readonly ProgramRow[]): ReadonlySet<string> {

@@ -1,6 +1,6 @@
 import { expect, test } from "vitest";
 import type { ProgramTradePoint } from "../../api/generated/ProgramTradePoint";
-import { boldKeys, eokFromMillionWon, historyRows, isNoProgramData, joinHistoryAndLive, liveRow, rowsOf, widestSoFar, type ProgramLine, type ProgramRow } from "./program";
+import { boldKeys, eokFromMillionWon, historyRows, isNoProgramData, joinHistoryAndLive, liveRow, nonZeroChangeLines, rowsOf, widestSoFar, type ProgramLine, type ProgramRow } from "./program";
 
 const KST_0905 = Date.parse("2026-11-09T09:05:00+09:00") / 1000;
 const point = (time: string, netQuantity: number): ProgramTradePoint => ({ time, price: 70_000, buyQuantity: 10, sellQuantity: 5, netQuantity, buyAmount: 0, sellAmount: 0, netAmount: netQuantity * 70_000_000 });
@@ -63,4 +63,15 @@ test("자료 없음은 조회가 비고 실시간 행도 없을 때다", () => {
   expect(isNoProgramData([], [{ kind: "gap", key: "g", time: "09:00:00" }])).toBe(true);
   expect(isNoProgramData([], live(row("a", 1)))).toBe(false);
   expect(isNoProgramData(historyRows([point("09:00:00", 1)]), [])).toBe(false);
+});
+
+test("순매수 증감이 0인 행은 빼고 끊김 줄과 0이 아닌 행만 남긴다", () => {
+  const lines: ProgramLine[] = [
+    { kind: "row", row: row("a", 10) },
+    { kind: "row", row: row("b", 0) },
+    { kind: "gap", key: "g", time: "09:01:00" },
+    { kind: "row", row: row("c", -5) },
+    { kind: "row", row: row("d", 0) },
+  ];
+  expect(nonZeroChangeLines(lines).map((line) => (line.kind === "gap" ? line.key : line.row.key))).toEqual(["a", "g", "c"]);
 });
