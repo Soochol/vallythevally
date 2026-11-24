@@ -37,7 +37,9 @@ impl SeatRules for KiwoomSeats {
 }
 
 fn registrations(desired: &DesiredFeeds) -> Registrations {
-    desired.iter().flat_map(|(&symbol, kinds)| kinds.iter().map(move |&kind| (RealType::from(kind), symbol))).collect()
+    let feeds = desired.iter().flat_map(|(&symbol, kinds)| kinds.iter().map(move |&kind| (RealType::from(kind), symbol)));
+    let expected = desired.iter().filter(|(symbol, kinds)| matches!(symbol, Symbol::Stock(_)) && kinds.contains(&StreamKind::Trades)).map(|(&symbol, _)| (RealType::Expected, symbol));
+    feeds.chain(expected).collect()
 }
 
 #[derive(Clone)]
@@ -696,6 +698,8 @@ impl Session {
                     let tick = RealTick { symbol: Symbol::Index(index), hhmmss, price, qty: Volume(qty), exchange: None, day, strength_centi: None, side: None };
                     StreamEvent::Tick { tick, received_at }
                 }
+                Ok(RealItem::Expected(quote)) => StreamEvent::Expected { quote, received_at },
+                Ok(RealItem::NoExpectedPrice) => continue,
                 Ok(RealItem::Book(book)) => StreamEvent::Book { book, received_at },
                 Ok(RealItem::Program(row)) => StreamEvent::Program { row, received_at },
                 Ok(RealItem::Broker(snapshot)) => StreamEvent::Broker { snapshot, received_at },
@@ -1036,7 +1040,7 @@ pub(crate) mod tests {
         let (_stream, mut events, transport) = peer.start(fast(), &[samsung(), kospi()]);
         assert!(matches!(next(&mut events).await, StreamEvent::Live { .. }));
         assert_eq!(peer.controls(0), ["LOGIN", "REG"]);
-        assert_eq!(peer.messages(0)[1], json!({"trnm": "REG", "grp_no": "1", "refresh": "1", "data": [{"item": ["005930_AL"], "type": ["0B"]}, {"item": ["001"], "type": ["0J"]}]}));
+        assert_eq!(peer.messages(0)[1], json!({"trnm": "REG", "grp_no": "1", "refresh": "1", "data": [{"item": ["005930_AL"], "type": ["0B"]}, {"item": ["001"], "type": ["0J"]}, {"item": ["005930_AL"], "type": ["0H"]}]}));
         assert_eq!(transport.sent().len(), 1);
     }
 
@@ -1079,18 +1083,32 @@ pub(crate) mod tests {
     }
 
     #[tokio::test(start_paused = true)]
+    async fn watch_trades_register_expected_trades_too() {
+        let peer = Peer::ok();
+        let (stream, mut events) = peer.start_feeds(feeds(&[(samsung(), &[RealType::Trade])]));
+        assert!(matches!(next(&mut events).await, StreamEvent::Live { .. }));
+        assert_eq!(peer.messages(0)[1]["data"], json!([{"item": ["005930_AL"], "type": ["0B"]}, {"item": ["005930_AL"], "type": ["0H"]}]));
+        stream.set_desired(DesiredFeeds::new());
+        until("0B와 0H가 해지됐다", || peer.controls(0).len() == 4).await;
+        assert_eq!(peer.controls(0), ["LOGIN", "REG", "REMOVE", "REMOVE"]);
+        assert_eq!(peer.messages(0)[2]["data"], json!([{"item": ["005930_AL"], "type": ["0B"]}]));
+        assert_eq!(peer.messages(0)[3]["data"], json!([{"item": ["005930_AL"], "type": ["0H"]}]));
+    }
+
+    #[tokio::test(start_paused = true)]
     async fn desired_changes_are_one_reg_and_one_remove_per_type() {
         let peer = Peer::ok();
         let (stream, mut events, _) = peer.start(fast(), &[samsung(), kospi()]);
         assert!(matches!(next(&mut events).await, StreamEvent::Live { .. }));
         stream.set_desired(DesiredFeeds::new());
-        until("모두 해지됐다", || peer.controls(0).len() == 4).await;
+        until("모두 해지됐다", || peer.controls(0).len() == 5).await;
         let messages = peer.messages(0);
         assert_eq!(messages[2]["data"], json!([{"item": ["005930_AL"], "type": ["0B"]}]));
         assert_eq!(messages[3]["data"], json!([{"item": ["001"], "type": ["0J"]}]));
+        assert_eq!(messages[4]["data"], json!([{"item": ["005930_AL"], "type": ["0H"]}]));
         stream.set_desired(trades_only([samsung(), kospi()].into()));
-        until("다시 등록됐다", || peer.controls(0).len() == 5).await;
-        assert_eq!(peer.controls(0), ["LOGIN", "REG", "REMOVE", "REMOVE", "REG"]);
+        until("다시 등록됐다", || peer.controls(0).len() == 6).await;
+        assert_eq!(peer.controls(0), ["LOGIN", "REG", "REMOVE", "REMOVE", "REMOVE", "REG"]);
         assert_eq!(peer.logins(), 1);
     }
 
@@ -1309,11 +1327,12 @@ pub(crate) mod tests {
         let (stream, mut events) = peer.start_feeds(both(1..=200));
         assert!(matches!(next(&mut events).await, StreamEvent::Live { .. }));
         stream.set_desired(both(2..=201));
-        until("바꾼 종목이 등록됐다", || peer.controls(0).len() == 5).await;
-        assert_eq!(peer.controls(0), ["LOGIN", "REG", "REMOVE", "REMOVE", "REG"]);
+        until("바꾼 종목이 등록됐다", || peer.controls(0).len() == 6).await;
+        assert_eq!(peer.controls(0), ["LOGIN", "REG", "REMOVE", "REMOVE", "REMOVE", "REG"]);
         assert_eq!(peer.messages(0)[2]["data"], json!([{"item": ["000001_AL"], "type": ["0B"]}]));
         assert_eq!(peer.messages(0)[3]["data"], json!([{"item": ["000001_AL"], "type": ["0D"]}]));
-        assert_eq!(peer.messages(0)[4]["data"], json!([{"item": ["000201_AL"], "type": ["0B"]}, {"item": ["000201_AL"], "type": ["0D"]}]));
+        assert_eq!(peer.messages(0)[4]["data"], json!([{"item": ["000001_AL"], "type": ["0H"]}]));
+        assert_eq!(peer.messages(0)[5]["data"], json!([{"item": ["000201_AL"], "type": ["0B"]}, {"item": ["000201_AL"], "type": ["0D"]}, {"item": ["000201_AL"], "type": ["0H"]}]));
         assert!(events.try_recv().is_err());
     }
 
@@ -1368,6 +1387,7 @@ pub(crate) mod tests {
             {"item": ["005930_AL"], "type": ["0B"]},
             {"item": ["005930"], "type": ["0D"]},
             {"item": ["005930_NX"], "type": ["0D"]},
+            {"item": ["005930_AL"], "type": ["0H"]},
         ]));
         peer.drop_session(0);
         assert!(matches!(next(&mut events).await, StreamEvent::Down { .. }));
@@ -1408,6 +1428,7 @@ pub(crate) mod tests {
             {"item": ["005930_AL"], "type": ["0D"]},
             {"item": ["005930_AL"], "type": ["0w"]},
             {"item": ["005930_AL"], "type": ["0F"]},
+            {"item": ["005930_AL"], "type": ["0H"]},
         ]));
         peer.drop_session(0);
         assert!(matches!(next(&mut events).await, StreamEvent::Down { .. }));

@@ -4,11 +4,12 @@
 
 use std::collections::HashMap;
 
-use domain::{Feed, IndexCode, KstTime, Period, Price, SeriesKey, StockCode, Symbol, Venue};
+use domain::{Feed, IndexCode, KstTime, Period, Price, SeriesKey, StockCode, Symbol, TimeOfDay, Venue};
 
 use crate::api;
 use crate::bars::{BarError, BarService};
 use crate::market::venue_volume::DayVolumes;
+use crate::market_source::stream::Exchange;
 use crate::market_source::{MarketFeature, MarketSource, Priority, SourceError};
 use crate::symbols::Directory;
 
@@ -103,6 +104,57 @@ pub fn base_centi(price: Price, change_centi: i64) -> Option<u64> {
 pub fn realtime(symbol: Symbol, venue: Venue, price: Price, base_centi: u64, volume: u64, at: KstTime) -> api::Quote {
     let venue = matches!(symbol, Symbol::Stock(_)).then_some(venue);
     quote(symbol, venue, price.centi(), base_centi, volume, at.unix(), api::QuoteSource::Realtime)
+}
+
+pub fn expected(symbol: Symbol, venue: Venue, price: Price, base_centi: u64, volume: u64, at: KstTime) -> api::Quote {
+    let venue = matches!(symbol, Symbol::Stock(_)).then_some(venue);
+    quote(symbol, venue, price.centi(), base_centi, volume, at.unix(), api::QuoteSource::Expected)
+}
+
+const NXT_PRE_OPEN: u32 = 8 * 3600;
+const KRX_OPEN: u32 = 8 * 3600 + 50 * 60;
+const BOTH_OPEN: u32 = 9 * 3600 + 30;
+const KRX_CLOSING_AUCTION: u32 = 15 * 3600 + 20 * 60;
+const NXT_AFTER_OPEN: u32 = 15 * 3600 + 30 * 60;
+const NXT_AFTER_BOTH_OPEN: u32 = 15 * 3600 + 40 * 60;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OpenExchanges {
+    KrxOnly,
+    NxtOnly,
+    Both,
+}
+
+pub fn open_exchanges(at: TimeOfDay) -> OpenExchanges {
+    match at.secs() {
+        NXT_PRE_OPEN..KRX_OPEN => OpenExchanges::NxtOnly,
+        KRX_OPEN..BOTH_OPEN => OpenExchanges::KrxOnly,
+        KRX_CLOSING_AUCTION..NXT_AFTER_OPEN => OpenExchanges::KrxOnly,
+        NXT_AFTER_OPEN..NXT_AFTER_BOTH_OPEN => OpenExchanges::NxtOnly,
+        _ => OpenExchanges::Both,
+    }
+}
+
+pub fn expected_exchange(nxt_enabled: bool, at: TimeOfDay, last_krx_fill: Option<KstTime>, last_nxt_fill: Option<KstTime>) -> Exchange {
+    if !nxt_enabled {
+        return Exchange::Krx;
+    }
+    match open_exchanges(at) {
+        OpenExchanges::KrxOnly => Exchange::Krx,
+        OpenExchanges::NxtOnly => Exchange::Nxt,
+        OpenExchanges::Both => match (last_krx_fill, last_nxt_fill) {
+            (Some(krx), Some(nxt)) if nxt < krx => Exchange::Nxt,
+            _ => Exchange::Krx,
+        },
+    }
+}
+
+pub fn expected_moves_row(row: Venue, from: Exchange, nxt_enabled: bool, at: TimeOfDay) -> bool {
+    match row {
+        Venue::Krx => from == Exchange::Krx,
+        Venue::Nxt => from == Exchange::Nxt,
+        Venue::Combined => !nxt_enabled || open_exchanges(at) != OpenExchanges::Both,
+    }
 }
 
 pub async fn day_volumes(source: &dyn MarketSource, codes: &[StockCode]) -> Result<HashMap<StockCode, DayVolumes>, SourceError> {

@@ -11,7 +11,7 @@ use serde_json::{Value, json};
 use super::api::{InvestorUnit, kiwoom_stock_code};
 use crate::api::{self, ExcludeKind};
 use super::error::{WsRejection, judge_ws_ack};
-use crate::market_source::stream::{AfterHoursTotals, BOOK_DEPTH, BookLevel, BookSnapshot, BrokerEntry, BrokerSnapshot, DayTotals, Exchange, ExpectedTrade, RealProgramTrade, RealTick, StreamKind, TradeSide};
+use crate::market_source::stream::{AfterHoursTotals, BOOK_DEPTH, BookLevel, BookSnapshot, BrokerEntry, BrokerSnapshot, DayTotals, Exchange, ExpectedQuote, ExpectedTrade, RealProgramTrade, RealTick, StreamKind, TradeSide};
 use crate::config::Secret;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -2049,11 +2049,12 @@ pub enum RealType {
     AfterHours,
     BookKrx,
     BookNxt,
+    Expected,
 }
 
 impl RealType {
-    pub const ALL: [RealType; 8] =
-        [RealType::Trade, RealType::Index, RealType::Book, RealType::Program, RealType::Broker, RealType::AfterHours, RealType::BookKrx, RealType::BookNxt];
+    pub const ALL: [RealType; 9] =
+        [RealType::Trade, RealType::Index, RealType::Book, RealType::Program, RealType::Broker, RealType::AfterHours, RealType::BookKrx, RealType::BookNxt, RealType::Expected];
 
     pub fn book(venue: Venue) -> RealType {
         match venue {
@@ -2101,6 +2102,7 @@ impl RealType {
             RealType::Program => "0w",
             RealType::Broker => "0F",
             RealType::AfterHours => "0E",
+            RealType::Expected => "0H",
         }
     }
 }
@@ -2129,6 +2131,7 @@ impl From<RealType> for StreamKind {
             RealType::AfterHours => StreamKind::AfterHours,
             RealType::Program => StreamKind::Program,
             RealType::Broker => StreamKind::Brokers,
+            RealType::Expected => StreamKind::Trades,
         }
     }
 }
@@ -2170,6 +2173,8 @@ pub enum RealItem {
     Trade(RealTick),
     /// 0B `15`가 0: 동시호가에만 나온다(kiwoom.md 11.3). 체결이 아니라 버린다.
     AuctionOnly,
+    Expected(ExpectedQuote),
+    NoExpectedPrice,
     /// 0J. 체결량은 `13`(누적거래량)의 증가분이라 세션이 앞 프레임과 비교해 정한다.
     Index { index: IndexCode, hhmmss: TimeOfDay, price: Price, cumulative: u64, change_centi: Option<i64> },
     Book(Box<BookSnapshot>),
@@ -2236,6 +2241,14 @@ fn parse_real_item(entry: &Value) -> Result<RealItem, WireError> {
             let index = IndexCode::parse(item).map_err(|e| WireError(format!("{e}: {item:?}")))?;
             let change_centi = field("11").ok().and_then(signed_level_centi);
             Ok(RealItem::Index { index, hhmmss: hhmmss(field("20")?)?, price: index_level(field("10")?)?, cumulative: unsigned(field("13")?)?, change_centi })
+        }
+        "0H" => {
+            let symbol = combined_stock("0H", item)?;
+            let Some(price) = Price::from_centi(unsigned(field("10")?)?.checked_mul(100).ok_or_else(|| WireError(format!("0H {item}: 예상체결가가 너무 큽니다")))?) else {
+                return Ok(RealItem::NoExpectedPrice);
+            };
+            let change_centi = signed(field("11")?)?.checked_mul(100).ok_or_else(|| WireError(format!("0H {item}: 전일대비가 너무 큽니다")))?;
+            Ok(RealItem::Expected(ExpectedQuote { symbol, hhmmss: hhmmss(field("20")?)?, price, change_centi, expected_qty: Volume(unsigned(field("13")?)?) }))
         }
         "0D" => parse_book(item, values).map(|book| RealItem::Book(Box::new(book))),
         "0w" => parse_program(item, values).map(RealItem::Program),
