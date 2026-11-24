@@ -59,14 +59,11 @@
 .od-total[data-empty] { opacity:.45; }
 .od-list-empty { margin:0; color:var(--text-3); }
 
-.od-qty { display:flex; flex:none; align-items:center; gap:var(--size-3); flex-wrap:wrap; padding:var(--s3) var(--s3); border-bottom:var(--size-1) solid var(--line); }
-.od-qty-label { color:var(--text-3); font-size:var(--fs-xs); line-height:var(--size-28); }
-.od-qty-name { position:relative; display:flex; }
-.od-qty-keep { position:absolute; top:50%; left:0; margin-top:var(--s3); color:var(--text-2); font-size:var(--fs-xs); line-height:var(--size-11); white-space:nowrap; }
+.od-qty { display:flex; flex:none; align-items:center; gap:var(--size-3); flex-wrap:wrap; padding:var(--s3) var(--size-6); border-bottom:var(--size-1) solid var(--line); }
 .od-qty-input { box-sizing:border-box; flex:1 1 var(--size-60); min-width:var(--size-60); max-width:var(--size-84); height:var(--size-30); padding:0 var(--size-3); border:var(--size-1) solid var(--line-strong); border-radius:var(--r-m); background:transparent; color:var(--text); font-size:var(--fs-m); font-weight:600; text-align:right; font-variant-numeric:tabular-nums; }
 .od-qty-input:focus { border-color:var(--accent); outline:0; }
 .od-presets { display:flex; gap:var(--size-2); }
-.od-preset { height:var(--size-30); padding:0 var(--size-3); border-radius:var(--r-s); background:var(--raised); color:var(--text-2); font-size:var(--fs-xs); }
+.od-preset { min-width:var(--size-48); height:var(--size-30); padding:0 var(--size-2); border-radius:var(--r-s); background:var(--raised); color:var(--text-2); font-size:var(--fs-xs); text-align:center; }
 .od-preset:hover { background:var(--hover); color:var(--text); }
 
 .od-status-slot { flex:none; box-sizing:border-box; height:var(--size-24); padding-bottom:var(--size-5); }
@@ -226,7 +223,7 @@ button.od-cellbtn:not(:disabled) small span { text-decoration:underline dotted; 
 .od-head-rate[data-tone=up] { color:var(--up); } .od-head-rate[data-tone=down] { color:var(--down); }
 .od-head-nxt { display:flex; flex:none; }
 .od-qty .mw-seg { gap:var(--size-1); padding:var(--size-2); }
-.od-qty .mw-seg button { height:var(--size-26); padding:0 var(--size-3); }
+.od-qty .mw-seg button { height:var(--size-26); padding:0 var(--size-1); }
 
 .od-confirm { padding:var(--s5) var(--s5) var(--s3); }
 .od-confirm > p { margin:0; }
