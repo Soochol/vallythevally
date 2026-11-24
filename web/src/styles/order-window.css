@@ -222,6 +222,8 @@ button.od-cellbtn:not(:disabled) small span { text-decoration:underline dotted; 
 .od-head-rate { flex:none; font-size:var(--fs-s); font-weight:600; }
 .od-head-rate[data-tone=up] { color:var(--up); } .od-head-rate[data-tone=down] { color:var(--down); }
 .od-head-nxt { display:flex; flex:none; }
+.od-replay-lock { margin-left:auto; }
+.mw-replay-venue + .od-replay-lock { margin-left:0; }
 .od-qty .mw-seg { gap:var(--size-1); padding:var(--size-2); }
 .od-qty .mw-seg button { height:var(--size-26); padding:0 var(--size-3); }
 .od-qty>.mw-seg button { padding:0 var(--size-1); }

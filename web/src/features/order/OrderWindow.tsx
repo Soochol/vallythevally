@@ -12,14 +12,18 @@ import { createValueStore, useStoreValue } from "../../lib/valueStore";
 import { useStableCallback } from "../../lib/useStableCallback";
 import { useMockEnvironment } from "../../stores/kiwoomLink";
 import { useLayoutStore } from "../../stores/layout";
+import { serverNow, useServerClock } from "../../stores/serverClock";
 import { useOrderSettings, useUiStore } from "../../stores/ui";
 import { useSymbolVi } from "../../stores/symbolVi";
 import { useBookFeed } from "../book/useBookFeed";
+import { ReplayStrip } from "../book-replay/ReplayStrip";
+import { replayReference } from "../book-replay/replay";
+import { useBookReplay, useBookReplayEnabled } from "../book-replay/useBookReplay";
 import { basePrice, buildLadderRows, defaultLadderPrices, type LadderPrices, type LadderRow } from "../market-window/ladder";
 import { RatioBar, Strip, TotalFigure } from "../market-window/parts";
 import { useLinkedSymbol } from "../market-window/MarketWindowGate";
 import { formatQuantity } from "../market-window/format";
-import { infoSlot, tradeSlot } from "../market-window/LadderSlots";
+import { infoSlot, replayTradeSlot, tradeSlot } from "../market-window/LadderSlots";
 import { expectedItemsOnPage, placeInfoItems } from "../market-window/quoteInfo";
 import { stripTotals } from "../book/bookModel";
 import { isRegularSession, visibleAfterHours, visibleExpected } from "../book/sessionWindows";
@@ -39,7 +43,7 @@ import { type HoverCell, type LadderActions, OrderLadder } from "./OrderLadder";
 import { orderEntryKey } from "./orderEntries";
 import { OrderTotals } from "./OrderTotals";
 import { OrderStatusBar } from "./OrderStatusBar";
-import { CANCEL_REFUSAL, REJECT_TEXT } from "./statusText";
+import { CANCEL_REFUSAL, REJECT_TEXT, REPLAY_LOCKED_TEXT } from "./statusText";
 import { buyBlock, capacityProblem, type DragOutcome, marginOf, modifyBuyProblem, type DragSource, needsHighValueConfirm, orderAmount, planCancel, type PriceKey, typedQuantity } from "./orderRules";
 import { type PresetKind, routeLabel } from "./orderSettings";
 import { withDirectionJosa } from "./josa";
@@ -68,6 +72,11 @@ function OrderBody({ id, code, infoPager, choice, access, balance }: { id: Windo
   const quoteVenue = useShownVenue(code);
   const trades = useLadderTrades(code, quoteVenue);
   const feed = useBookFeed(code, quoteVenue, trades.lastTrade);
+  const replayEnabled = useBookReplayEnabled();
+  const replay = useBookReplay(code);
+  const replayLocked = replay.kind !== "live";
+  const replayLockedRef = useRef(replayLocked);
+  replayLockedRef.current = replayLocked;
   const accountRef = choice.current?.ref ?? null;
   const entryKey = useLayoutStore((s) => orderEntryKey(s.layout.id, id, code));
   const [kept] = useState(() => { const { prefs } = useUiStore.getState(); return prefs.orderSettings.keepLastEntry ? prefs.orderEntries[entryKey] ?? null : null; });
@@ -97,21 +106,44 @@ function OrderBody({ id, code, infoPager, choice, access, balance }: { id: Windo
   const downSince = useFeedDownSince(feed.connected);
   const vi = useSymbolVi(code, "krx");
   const nowSeconds = Math.floor(now / 1000);
-  const view = feed.book.phase === "empty" ? null : feed.book.view;
+  const liveView = feed.book.phase === "empty" ? null : feed.book.view;
   const bounds = { lower: limits?.lowerLimit ?? null, upper: limits?.upperLimit ?? null };
-  const quotes = view ? { asks: view.asks, bids: view.bids, lastPrice: feed.lastPrice, previousClose: feed.previousClose } : null;
-  const tickRule = tickRuleOf(symbolInfo?.kind ?? null, view ? [...view.asks, ...view.bids].map((level) => level.price) : []);
+  const serverNowSeconds = Math.floor(serverNow(useServerClock.getState().serverTimeOrigin) / 1000);
+  const replayRef = replay.kind === "past" ? replayReference(replay.at, serverNowSeconds, { previousClose: feed.previousClose, bounds }) : null;
+  const replayPreviousClose = replayRef?.previousClose ?? null;
+  const replayLower = replayRef?.bounds.lower ?? null;
+  const replayUpper = replayRef?.bounds.upper ?? null;
+  const symbolKind = symbolInfo?.kind ?? null;
+  const quotes = liveView ? { asks: liveView.asks, bids: liveView.bids, lastPrice: feed.lastPrice, previousClose: feed.previousClose } : null;
+  const tickRule = tickRuleOf(symbolKind, liveView ? [...liveView.asks, ...liveView.bids].map((level) => level.price) : []);
   const liveBase = quotes ? basePrice(quotes) : null;
   const liveLadder = quotes ? defaultLadderPrices({ ...quotes, bounds, tickRule, skipSpreadGap: settings.skipSpreadGap }) : null;
   const heldLadder = useHeldWhile(liveLadder, dragging, sameLadderPrices);
   const referencePrice = feed.lastPrice ?? feed.previousClose ?? liveBase;
   const fullPrices = useMemo(() => fullRangePrices({ lower: bounds.lower, upper: bounds.upper }, tickRule), [bounds.lower, bounds.upper, tickRule]);
-  const explorerOn = exploring && fullPrices !== null;
-  const rows: LadderRow[] = quotes && heldLadder ? (explorerOn ? buildLadderRows(fullPrices, quotes) : buildLadderRows(heldLadder.prices, quotes, heldLadder.sidesSplit)) : [];
+  const explorerOn = !replayLocked && exploring && fullPrices !== null;
+  const pastRows = useMemo<LadderRow[]>(() => {
+    if (replay.kind !== "past") return [];
+    const pastQuotes = { asks: replay.book.asks, bids: replay.book.bids, lastPrice: replay.lastPrice, previousClose: replayPreviousClose };
+    const pastTickRule = tickRuleOf(symbolKind, [...replay.book.asks, ...replay.book.bids].map((level) => level.price));
+    const pastLadder = defaultLadderPrices({ ...pastQuotes, bounds: { lower: replayLower, upper: replayUpper }, tickRule: pastTickRule, skipSpreadGap: settings.skipSpreadGap });
+    return buildLadderRows(pastLadder.prices, pastQuotes, pastLadder.sidesSplit);
+  }, [replay, replayPreviousClose, replayLower, replayUpper, settings.skipSpreadGap, symbolKind]);
+  const pastRowSlots = useMemo(
+    () => (replay.kind === "past" ? { bottomLeft: replayTradeSlot(replay.trades, replayPreviousClose) } : undefined),
+    [replay, replayPreviousClose],
+  );
+  const liveRows: LadderRow[] = replay.kind === "live" && quotes && heldLadder ? (explorerOn ? buildLadderRows(fullPrices, quotes) : buildLadderRows(heldLadder.prices, quotes, heldLadder.sidesSplit)) : [];
+  const rows = replay.kind === "past" ? pastRows : liveRows;
   const info = useQuoteInfo({ code, venue: quoteVenue, lastPrice: feed.lastPrice, previousClose: feed.previousClose, fundamentals: limits, page: infoPager.page, flipped: infoPager.flipped, sameTimeRatio: trades.sameTimeRatio, vi, tickRule, regularSession: isRegularSession(nowSeconds), now: nowSeconds });
-  const expected = view ? visibleExpected(view.t, nowSeconds, view.expected, vi) : null;
-  const infoSlots = placeInfoItems(rows, info, expectedItemsOnPage(infoPager.page, expected, feed.previousClose, infoPager.flipped));
-  const totals = stripTotals(view && { ask: view.totalAsk, bid: view.totalBid }, visibleAfterHours(feed.afterHours?.totals ?? null, nowSeconds));
+  const expected = replay.kind === "live" && liveView ? visibleExpected(liveView.t, nowSeconds, liveView.expected, vi) : null;
+  const infoSlots = replay.kind === "live" ? placeInfoItems(rows, info, expectedItemsOnPage(infoPager.page, expected, feed.previousClose, infoPager.flipped)) : [];
+  const liveTotals = stripTotals(liveView && { ask: liveView.totalAsk, bid: liveView.totalBid }, visibleAfterHours(feed.afterHours?.totals ?? null, nowSeconds));
+  const totals = replay.kind === "live"
+    ? liveTotals
+    : replay.kind === "past"
+      ? { ask: replay.book.totalAsk, bid: replay.book.totalBid, source: "regular" as const, description: null }
+      : { ask: null, bid: null, source: "regular" as const, description: null };
   const data = useOrderData(accountRef, code, access.open, referencePrice, balance);
 
   const pending = useSyncExternalStore(pendingWrites.subscribe, pendingWrites.snapshot);
@@ -130,8 +162,13 @@ function OrderBody({ id, code, infoPager, choice, access, balance }: { id: Windo
   const quantity = typedQuantity(input);
 
   const latestPlace = useRef<(side: OrderSide, price: number, cappedQuantity?: number) => void>(() => undefined);
+  const notifyReplayLocked = () => writes.say({ tone: "error", text: REPLAY_LOCKED_TEXT });
 
   const place = (side: OrderSide, price: number, cappedQuantity?: number) => {
+    if (replayLockedRef.current) {
+      notifyReplayLocked();
+      return;
+    }
     if (nxtNotTraded) {
       writes.say({ tone: "error", text: REJECT_TEXT.nxt_unavailable });
       return;
@@ -167,6 +204,10 @@ function OrderBody({ id, code, infoPager, choice, access, balance }: { id: Windo
   const submit = (side: OrderSide, price: number, quantity: number) => {
     const margin = side === "buy" ? marginOf(orderAmount(price, quantity), data.capacity.buying) : 0;
     const send = (confirmHighValue: boolean) => {
+      if (replayLockedRef.current) {
+        notifyReplayLocked();
+        return;
+      }
       writes.place({ side, price, quantity, confirmHighValue, margin, listedWhenIn: side === "sell" ? sellQuantityAtPrice(data.groups, pending, code, price, data.openOrdersListedAt) + quantity : 0 });
       if (settings.keepLastEntry) rememberEntry(entryKey, { presetKind, quantity, usedAt: Date.now() });
     };
@@ -175,12 +216,22 @@ function OrderBody({ id, code, infoPager, choice, access, balance }: { id: Windo
   };
 
   const modifyOrders = (side: OrderSide, price: number, orders: readonly TradingOpenOrder[], to: number) => {
+    if (replayLockedRef.current) {
+      notifyReplayLocked();
+      return;
+    }
     const problem = side === "buy" ? modifyBuyProblem(price, to, orders.reduce((sum, order) => sum + order.openQuantity, 0), data.capacity.buying) : null;
     if (problem) {
       writes.say({ tone: "error", text: problem });
       return;
     }
-    const run = () => writes.modifyAll(orders, to);
+    const run = () => {
+      if (replayLockedRef.current) {
+        notifyReplayLocked();
+        return;
+      }
+      writes.modifyAll(orders, to);
+    };
     if (orders.some((order) => needsHighValueConfirm(to, order.openQuantity))) setConfirm({ ...confirmContext([...new Set(orders.map((order) => routeLabel(order.venue)))].join("·")), side, verb: "정정", detail: `${formatPrice(price, false)}원 → ${formatPrice(to, false)}원`, amount: to * orders.reduce((sum, order) => sum + order.openQuantity, 0), run });
     else run();
   };
@@ -194,42 +245,74 @@ function OrderBody({ id, code, infoPager, choice, access, balance }: { id: Windo
   const drop = (source: DragSource, outcome: DragOutcome) => {
     if (outcome.kind === "abort") return;
     if (source.kind === "chip") {
+      if (replayLockedRef.current) {
+        notifyReplayLocked();
+        return;
+      }
       if (outcome.kind === "cancel") cancelChecked([source.group]);
       else modifyOrders(source.group.side, source.group.price, source.group.orders, outcome.price);
     } else if (source.kind === "order") {
       if (outcome.kind === "cancel") writes.cancelOne(source.order.orderNo);
+      else if (replayLockedRef.current) notifyReplayLocked();
       else modifyOrders(source.order.side, source.order.price, [source.order], outcome.price);
     } else cancelChecked(source.groups);
   };
 
   const pickAccount = useStableCallback((account: string) => setSettings({ ...settings, account }));
   const toggleProfitUnit = useCallback(() => setProfitUnit(toggledUnit), []);
-  const toggleExplorer = useStableCallback(() => setExploring(!explorerOn));
+  const toggleExplorer = useStableCallback(() => {
+    if (replayLockedRef.current) return;
+    setExploring((was) => !was);
+  });
   const placeOrder = useStableCallback(place);
   const cancelOne = useStableCallback(writes.cancelOne);
   const cancelGroups = useStableCallback(cancelChecked);
-  const ladderActions = useMemo<LadderActions>(() => ({ place: placeOrder, cancelOne, cancelGroups }), []);
+  const cancelLadderOne = useStableCallback((orderNo: string) => {
+    if (replayLockedRef.current) {
+      notifyReplayLocked();
+      return;
+    }
+    writes.cancelOne(orderNo);
+  });
+  const cancelLadderGroups = useStableCallback((keys: readonly PriceKey[]) => {
+    if (replayLockedRef.current) {
+      notifyReplayLocked();
+      return;
+    }
+    cancelChecked(keys);
+  });
+  const ladderActions = useMemo<LadderActions>(() => ({ place: placeOrder, cancelOne: cancelLadderOne, cancelGroups: cancelLadderGroups }), []);
   const totalsActions = useMemo(() => ({ cancelOne, cancelGroups }), []);
   const sellOrdered = sellOrderQuantity(data.groups, pending, code, data.openOrdersListedAt);
+  const headPrice = replay.kind === "live" ? feed.lastPrice : replay.kind === "past" ? replay.lastPrice : null;
+  const headPreviousClose = replay.kind === "live" ? feed.previousClose : replayPreviousClose;
+  const shownLadder = replay.kind === "past" || (replay.kind === "live" && liveView !== null);
 
   return (
-    <div className="od" data-testid="order-window" data-symbol={code} data-venue={orderVenue} data-quote-venue={quoteVenue} data-writable={writable ? "" : undefined} data-rate-hidden={settings.rate ? undefined : ""}>
+    <div className="od" data-testid="order-window" data-symbol={code} data-venue={orderVenue} data-quote-venue={quoteVenue} data-writable={writable ? "" : undefined} data-rate-hidden={settings.rate ? undefined : ""} data-replay={replay.kind === "live" ? undefined : replay.kind}>
       {access.reason && (
         <div className="od-gate" role="status" data-testid="order-gate">
           <span>{access.reason}</span>
           <button type="button" className="od-link" onClick={() => openSystemSettings("kiwoom")}>시스템 설정 열기</button>
         </div>
       )}
-      <SymbolHead code={code} name={symbolInfo?.name ?? null} lastPrice={feed.lastPrice} previousClose={feed.previousClose} nxtTraded={symbolInfo?.nxtEnabled === true} nxtLabel="NXT지원" mock={mock} />
+      <SymbolHead code={code} name={symbolInfo?.name ?? null} lastPrice={headPrice} previousClose={headPreviousClose} nxtTraded={symbolInfo?.nxtEnabled === true} nxtLabel="NXT지원" mock={mock} />
+      {replayEnabled && <ReplayStrip view={replay}><span className="od-replay-lock">주문 잠금</span></ReplayStrip>}
       <AccountPart windowId={id} choice={choice} accountRef={accountRef} onPickAccount={pickAccount} openOrders={data.openOrders} balance={data.balance} executions={data.executions} writable={writable} mock={mock} policy={data.orderable?.policy ?? null} onCancel={cancelOne}
         holding={holding} orderable={data.orderable} buyableProblem={data.buyableProblem} sellOrdered={sellOrdered} profitUnit={profitUnit} onProfitUnit={toggleProfitUnit}
         presetKind={presetKind} input={input} referencePrice={referencePrice} onPresetKind={setPresetKind} onInput={setInput}
         settings={settings} orderVenue={orderVenue} nxtNotTraded={nxtNotTraded} onSettings={setSettings} />
-      {!feed.connected && <FeedStrip since={downSince} />}
-      <div className="bk-ladder od-ladder-wrap" data-stale={feed.connected ? undefined : ""} data-exploring={explorerOn ? "" : undefined}>
-        {view
-            ? <OrderLadder rows={rows} previousClose={feed.previousClose} groups={data.groups} writable={writable} previewQuantity={quantity} buying={data.capacity.buying} hover={hover} averagePrice={averagePrice} divider={settings.divider} rateShown={settings.rate} explorerOn={explorerOn} explorerUnavailable={referencePrice === null || fullPrices === null} explorerTitle={fullPrices === null ? EXPLORER_UNAVAILABLE : undefined} onToggleExplorer={toggleExplorer} explorerCenterPrice={explorerOn ? referencePrice : null} ladder={ladder} drag={drag} expectedPrice={expected?.price ?? null} rowSlots={{ infoCard: infoSlot(infoSlots, infoPager), bottomLeft: tradeSlot(trades, feed.previousClose) }} actions={ladderActions} />
-            : feed.snapshotFailed ? <ErrorState message="호가를 불러오지 못했습니다" retry={feed.retry} /> : <EmptyState title="호가를 기다리는 중입니다" />}
+      {replay.kind === "live" && !feed.connected && <FeedStrip since={downSince} />}
+      <div className="bk-ladder od-ladder-wrap" data-stale={replay.kind === "live" && !feed.connected ? "" : undefined} data-exploring={explorerOn ? "" : undefined} data-state={shownLadder ? undefined : ""}>
+        {replay.kind === "none" ? (
+          <EmptyState title={replay.reason} />
+        ) : shownLadder ? (
+          <OrderLadder rows={rows} previousClose={headPreviousClose} groups={data.groups} writable={writable && !replayLocked} previewQuantity={quantity} buying={data.capacity.buying} hover={hover} averagePrice={averagePrice} divider={settings.divider} rateShown={settings.rate} explorerOn={explorerOn} explorerUnavailable={replayLocked || referencePrice === null || fullPrices === null} explorerTitle={replayLocked ? undefined : fullPrices === null ? EXPLORER_UNAVAILABLE : undefined} onToggleExplorer={toggleExplorer} explorerCenterPrice={explorerOn ? referencePrice : null} ladder={ladder} drag={drag} expectedPrice={expected?.price ?? null} rowSlots={replay.kind === "past" ? pastRowSlots : { infoCard: infoSlot(infoSlots, infoPager), bottomLeft: tradeSlot(trades, feed.previousClose) }} actions={ladderActions} />
+        ) : feed.snapshotFailed ? (
+          <ErrorState message="호가를 불러오지 못했습니다" retry={feed.retry} />
+        ) : (
+          <EmptyState title="호가를 기다리는 중입니다" />
+        )}
       </div>
       <OrderTotals groups={data.groups} writable={writable} actions={totalsActions} drag={drag} />
       <Strip>
