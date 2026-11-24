@@ -246,7 +246,7 @@ pub(crate) fn check_layout(path_id: &str, input: &LayoutInput) -> Result<Vec<Sym
 
 fn check_window_state(w: &api::LayoutWindow) -> Result<(), Refusal> {
     let (symbol, list, screen) = match &w.content {
-        WindowContent::Trades { symbol } | WindowContent::Book { symbol } | WindowContent::Program { symbol } | WindowContent::Brokers { symbol } | WindowContent::Order { symbol, .. } => {
+        WindowContent::Trades { symbol } | WindowContent::Book { symbol } | WindowContent::Program { symbol } | WindowContent::Brokers { symbol, .. } | WindowContent::Order { symbol, .. } => {
             (symbol.as_ref(), None, None)
         }
         WindowContent::Watchlist { list } => (None, list.as_deref(), None),

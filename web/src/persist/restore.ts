@@ -9,7 +9,7 @@ import { parseChartSettings } from "../chart/settings";
 import { MAX_WINDOWS, windowId, WINDOW_KINDS, type WindowKind } from "../layout/kinds";
 import { parsePlacement } from "../layout/placement";
 import { isRanking } from "../features/ranking/rankingShape";
-import { alignLinks, DEFAULT_LAYOUT, type EditableLayout, type WindowState } from "../stores/layout";
+import { alignLinks, DEFAULT_LAYOUT, type BrokerCards, type BrokerView, type EditableLayout, type WindowState } from "../stores/layout";
 import { layoutPath, UI_STATE_PATH, WATCHLISTS_PATH } from "../api/userData";
 import { parseWatchlists } from "../lib/watchlist";
 import type { SaveTarget } from "../stores/persist";
@@ -61,12 +61,17 @@ const absent = (v: unknown): boolean => v === undefined || v === null;
 const isId = (v: unknown, maxBytes: number): v is string => typeof v === "string" && v.length > 0 && new TextEncoder().encode(v).length <= maxBytes;
 const isPin = (v: unknown): boolean => absent(v) || (typeof v === "string" && STOCK_CODE.test(v));
 const PINNABLE_KINDS: readonly WindowKind[] = ["trades", "book", "program", "brokers", "order"];
+const BROKER_VIEWS: readonly unknown[] = ["board", "list"];
+const BROKER_CARDS: readonly unknown[] = ["bars", "both", "numbers"];
+const isBrokerView = (v: unknown): v is BrokerView => BROKER_VIEWS.includes(v);
+const isBrokerCards = (v: unknown): v is BrokerCards => BROKER_CARDS.includes(v);
 
 function isDraftWindow(w: unknown): w is LayoutWindow {
   if (!isFields(w) || typeof w.id !== "string" || !WINDOW_ID.test(w.id) || !DRAFT_LINKS.includes(w.link) || !isWindowKind(w.kind)) return false;
   if (w.kind === "watchlist") return absent(w.list) || isId(w.list, MAX_WATCHLIST_ID_BYTES);
   if (w.kind === "screener") return absent(w.screen) || isId(w.screen, MAX_SCREEN_ID_BYTES);
   if (PINNABLE_KINDS.includes(w.kind) && !isPin(w.symbol)) return false;
+  if (w.kind === "brokers") return (absent(w.view) || isBrokerView(w.view)) && (absent(w.cards) || isBrokerCards(w.cards));
   if (w.kind === "ranking") return isRanking(w.ranking);
   if (w.kind === "order") return w.venue === "combined" || w.venue === "krx" || w.venue === "nxt";
   return w.kind !== "chart" || (typeof w.symbol === "string" && typeof w.period === "string" && (w.venue === null || typeof w.venue === "string") && "chartSettings" in w);
@@ -171,8 +176,15 @@ function restoreWindow(raw: LayoutWindow): WindowState {
     case "trades":
     case "book":
     case "program":
-    case "brokers":
       return { ...base, kind: raw.kind, ...optional("symbol", raw.symbol) };
+    case "brokers":
+      return {
+        ...base,
+        kind: raw.kind,
+        ...optional("symbol", raw.symbol),
+        ...(raw.view && raw.view !== "board" ? { view: raw.view } : {}),
+        ...(raw.cards && raw.cards !== "both" ? { cards: raw.cards } : {}),
+      };
     case "ranking":
       return { ...base, kind: raw.kind, ranking: raw.ranking };
     case "indicators":

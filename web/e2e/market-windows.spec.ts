@@ -126,9 +126,11 @@ test("네 시세 창 모두 창 안에 종목 이름을 보이고 자료 줄은 
   const brokers = page.getByTestId("brokers-window");
   await expect(brokers.getByTestId("market-symbol-name")).toHaveText(NAME);
   scenario.live.emit({ type: "feed_brokers", sub: await subOf(scenario, "brokers"), brokers: BROKERS });
+  await expect(brokers.getByTestId("broker-card")).toHaveCount(2);
+  await brokers.getByRole("group", { name: "보기" }).getByRole("button", { name: "거래원" }).click();
   await expect(brokers.getByTestId("broker-row")).toHaveCount(2);
-  await expectRows(brokers.getByTestId("broker-row"), ":scope");
-  await expectRows(brokers.locator(".br-value"), "span");
+  await expectRows(brokers.getByTestId("broker-row"), "[data-testid='broker-name']");
+  await expectRows(brokers.getByTestId("broker-row"), "[data-testid='broker-cumulative']");
 });
 
 test("프로그램 체결 표의 숫자 열 머리와 값은 오른쪽 끝이 같고 현재가는 전일 대비 색이다", async ({ page, scenario }) => {
@@ -253,7 +255,7 @@ test("거래원 구독이 실패하면 다시 시도로 다시 구독한다", as
   await brokers.getByRole("button", { name: "다시 시도" }).click();
   await pollSaved(() => subscriptions(scenario, "brokers")).toBe(2);
   scenario.live.emit({ type: "feed_brokers", sub: await subOf(scenario, "brokers"), brokers: BROKERS });
-  await expect(brokers.getByTestId("broker-row")).toHaveCount(2);
+  await expect(brokers.getByTestId("broker-card")).toHaveCount(2);
 });
 
 test("키움 연결 전 시세 창에는 연결 버튼이 있고 누르면 키움 설정을 연다", async ({ page, scenario }) => {

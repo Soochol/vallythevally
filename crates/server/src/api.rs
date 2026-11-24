@@ -1344,6 +1344,21 @@ impl TS for ChartFeed {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "lowercase")]
+pub enum BrokerView {
+    Board,
+    List,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "lowercase")]
+pub enum BrokerCards {
+    Bars,
+    Both,
+    Numbers,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 #[serde(tag = "kind", rename_all = "lowercase")]
 #[ts(export)]
@@ -1386,6 +1401,12 @@ pub enum WindowContent {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         #[ts(optional)]
         symbol: Option<SymbolCode>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional, inline)]
+        view: Option<BrokerView>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional, inline)]
+        cards: Option<BrokerCards>,
     },
     Order {
         #[serde(default = "default_order_venue")]

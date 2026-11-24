@@ -249,7 +249,17 @@ fn read_window(r: &SqliteRow) -> Result<LayoutWindow, StoreError> {
             let Some(ranking) = r.get::<Option<String>, _>("ranking") else { return Err(corrupt("순위 창", id.as_str())) };
             WindowContent::Ranking { ranking: serde_json::from_str(&ranking).map_err(|e| corrupt("순위 창", e))? }
         }
-        "trades" | "book" | "program" | "brokers" => {
+        "brokers" => {
+            let symbol: Option<String> = r.get("symbol");
+            let view: Option<String> = r.get("broker_view");
+            let cards: Option<String> = r.get("broker_cards");
+            WindowContent::Brokers {
+                symbol: symbol.map(SymbolCode),
+                view: view.map(|v| from_wire_name("broker_view", v)).transpose()?,
+                cards: cards.map(|c| from_wire_name("broker_cards", c)).transpose()?,
+            }
+        }
+        "trades" | "book" | "program" => {
             let symbol: Option<String> = r.get("symbol");
             serde_json::from_value(serde_json::json!({ "kind": kind, "symbol": symbol })).map_err(|e| corrupt("창 종류", e))?
         }
@@ -333,7 +343,7 @@ pub(crate) async fn store_layout(tx: &mut SqliteConnection, input: &LayoutInput,
     sync_log::saved(tx, DocumentKind::Layout, &input.id, input.revision.0).await?;
     sqlx::query("DELETE FROM layout_windows WHERE layout_id = ?").bind(&input.id).execute(&mut *tx).await?;
     for (position, w) in input.windows.iter().enumerate() {
-        let (symbol, venue, period, chart_settings, list, screen, ranking) = match &w.content {
+        let (symbol, venue, period, chart_settings, list, screen, ranking, broker_view, broker_cards) = match &w.content {
             WindowContent::Chart { feed, period, chart_settings } => (
                 Some(feed.0.symbol().as_wire()),
                 feed.0.venue().map(|v| v.as_wire().to_owned()),
@@ -342,18 +352,31 @@ pub(crate) async fn store_layout(tx: &mut SqliteConnection, input: &LayoutInput,
                 None,
                 None,
                 None,
+                None,
+                None,
             ),
-            WindowContent::Order { venue, symbol } => (symbol.as_ref().map(|s| s.0.clone()), Some(wire_name(venue)), None, None, None, None, None),
-            WindowContent::Watchlist { list } => (None, None, None, None, list.clone(), None, None),
-            WindowContent::Screener { screen } => (None, None, None, None, None, screen.clone(), None),
-            WindowContent::Ranking { ranking } => (None, None, None, None, None, None, Some(serde_json::to_string(ranking).expect("Ranking은 언제나 직렬화된다"))),
-            WindowContent::Trades { symbol } | WindowContent::Book { symbol } | WindowContent::Program { symbol } | WindowContent::Brokers { symbol } => {
-                (symbol.as_ref().map(|s| s.0.clone()), None, None, None, None, None, None)
+            WindowContent::Order { venue, symbol } => (symbol.as_ref().map(|s| s.0.clone()), Some(wire_name(venue)), None, None, None, None, None, None, None),
+            WindowContent::Watchlist { list } => (None, None, None, None, list.clone(), None, None, None, None),
+            WindowContent::Screener { screen } => (None, None, None, None, None, screen.clone(), None, None, None),
+            WindowContent::Ranking { ranking } => (None, None, None, None, None, None, Some(serde_json::to_string(ranking).expect("Ranking은 언제나 직렬화된다")), None, None),
+            WindowContent::Brokers { symbol, view, cards } => (
+                symbol.as_ref().map(|s| s.0.clone()),
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                view.as_ref().map(wire_name),
+                cards.as_ref().map(wire_name),
+            ),
+            WindowContent::Trades { symbol } | WindowContent::Book { symbol } | WindowContent::Program { symbol } => {
+                (symbol.as_ref().map(|s| s.0.clone()), None, None, None, None, None, None, None, None)
             }
-            WindowContent::Indicators => (None, None, None, None, None, None, None),
+            WindowContent::Indicators => (None, None, None, None, None, None, None, None, None),
         };
         sqlx::query(
-            "INSERT INTO layout_windows (layout_id, id, position, kind, link, symbol, venue, period, chart_settings, list, screen, ranking) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO layout_windows (layout_id, id, position, kind, link, symbol, venue, period, chart_settings, list, screen, ranking, broker_view, broker_cards) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         )
         .bind(&input.id)
         .bind(w.id.as_str())
@@ -367,6 +390,8 @@ pub(crate) async fn store_layout(tx: &mut SqliteConnection, input: &LayoutInput,
         .bind(list)
         .bind(screen)
         .bind(ranking)
+        .bind(broker_view)
+        .bind(broker_cards)
         .execute(&mut *tx)
         .await?;
     }
@@ -743,7 +768,7 @@ mod tests {
         windows.push(pinned(WindowContent::Trades { symbol: Some(SymbolCode("000660".into())) }));
         windows.push(pinned(WindowContent::Book { symbol: Some(SymbolCode("0000D0".into())) }));
         windows.push(pinned(WindowContent::Program { symbol: Some(SymbolCode("035720".into())) }));
-        windows.push(pinned(WindowContent::Brokers { symbol: Some(SymbolCode("005930".into())) }));
+        windows.push(pinned(WindowContent::Brokers { symbol: Some(SymbolCode("005930".into())), view: None, cards: None }));
         windows.push(pinned(WindowContent::Order { venue: Venue::Nxt, symbol: Some(SymbolCode("373220".into())) }));
         windows
     }
@@ -799,7 +824,7 @@ mod tests {
             WindowContent::Book { symbol: Some(SymbolCode("IDX:101".into())) },
             WindowContent::Order { venue: Venue::Krx, symbol: Some(SymbolCode("IDX:001".into())) },
             WindowContent::Program { symbol: Some(SymbolCode("5930".into())) },
-            WindowContent::Brokers { symbol: Some(SymbolCode("abcdef".into())) },
+            WindowContent::Brokers { symbol: Some(SymbolCode("abcdef".into())), view: None, cards: None },
             WindowContent::Watchlist { list: Some(String::new()) },
             WindowContent::Watchlist { list: Some("x".repeat(setup::MAX_WATCHLIST_ID_BYTES + 1)) },
             WindowContent::Screener { screen: Some(String::new()) },
@@ -991,7 +1016,7 @@ mod tests {
     }
 
     fn market_windows() -> Vec<LayoutWindow> {
-        vec![side(WindowContent::Trades { symbol: None }), side(WindowContent::Book { symbol: None }), side(WindowContent::Program { symbol: None }), side(WindowContent::Brokers { symbol: None }), side(WindowContent::Order { venue: Venue::Nxt, symbol: None })]
+        vec![side(WindowContent::Trades { symbol: None }), side(WindowContent::Book { symbol: None }), side(WindowContent::Program { symbol: None }), side(WindowContent::Brokers { symbol: None, view: None, cards: None }), side(WindowContent::Order { venue: Venue::Nxt, symbol: None })]
     }
 
     #[sqlx::test(migrations = "./migrations")]
@@ -1113,7 +1138,7 @@ mod tests {
                     WindowContent::Order { venue, symbol } => (symbol.as_ref().map(|s| s.0.clone()), Some(wire_name(venue)), None, None, None, None),
                     WindowContent::Watchlist { list } => (None, None, None, None, list.clone(), None),
                     WindowContent::Screener { screen } => (None, None, None, None, None, screen.clone()),
-                    WindowContent::Trades { symbol } | WindowContent::Book { symbol } | WindowContent::Program { symbol } | WindowContent::Brokers { symbol } => (symbol.as_ref().map(|s| s.0.clone()), None, None, None, None, None),
+                    WindowContent::Trades { symbol } | WindowContent::Book { symbol } | WindowContent::Program { symbol } | WindowContent::Brokers { symbol, .. } => (symbol.as_ref().map(|s| s.0.clone()), None, None, None, None, None),
                     WindowContent::Indicators | WindowContent::Ranking { .. } => unreachable!(),
                 };
                 sqlx::query("INSERT INTO layout_windows (layout_id, id, position, kind, link, symbol, venue, period, chart_settings, list, screen) VALUES ('L3', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
@@ -1161,7 +1186,7 @@ mod tests {
             WindowContent::Trades { symbol: None },
             WindowContent::Book { symbol: None },
             WindowContent::Program { symbol: None },
-            WindowContent::Brokers { symbol: None },
+            WindowContent::Brokers { symbol: None, view: None, cards: None },
             WindowContent::Order { venue: Venue::Krx, symbol: None },
             WindowContent::Ranking { ranking: every_ranking().remove(0) },
         ]
@@ -1422,5 +1447,51 @@ mod tests {
         let state: UiState = serde_json::from_value(json!({"lastLayoutId": null, "theme": "light", "watchCollapsed": true, "nested": {"a": [1]}, "revision": 1})).unwrap();
         put_ui_state(&db, &state, Revision(1)).await.unwrap();
         assert_eq!(get_ui_state(&db).await.unwrap(), state);
+    }
+
+    #[tokio::test]
+    async fn brokers_window_view_and_cards_round_trip_and_old_rows_have_none() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("vally.db");
+        {
+            let pool = SqlitePoolOptions::new().connect_with(SqliteConnectOptions::new().filename(&path).create_if_missing(true).foreign_keys(true)).await.unwrap();
+            sqlx::migrate!("./migrations").run_to(24, &pool).await.unwrap();
+            sqlx::query("INSERT INTO layouts (id, name, sync, position, updated_at, revision) VALUES ('L4', '거래원', '{}', 1, 50, 1)").execute(&pool).await.unwrap();
+            sqlx::query("INSERT INTO layout_windows (layout_id, id, position, kind, symbol, venue, period, chart_settings) VALUES ('L4', 'c', 0, 'chart', '005930', 'krx', 'D', '{}')").execute(&pool).await.unwrap();
+            sqlx::query("INSERT INTO layout_windows (layout_id, id, position, kind, symbol) VALUES ('L4', 'b-old', 1, 'brokers', '005930')").execute(&pool).await.unwrap();
+            pool.close().await;
+        }
+        let db = AppDb::open(&path).await.unwrap();
+        let migrated = get_layout(&db, "L4").await.unwrap();
+        assert_eq!(
+            migrated.windows[1].content,
+            WindowContent::Brokers { symbol: Some(SymbolCode("005930".into())), view: None, cards: None }
+        );
+
+        let updated = vec![
+            chart("c", "005930", Some(Venue::Krx)),
+            LayoutWindow {
+                id: window_id("b1"),
+                link: None,
+                content: WindowContent::Brokers { symbol: Some(SymbolCode("005930".into())), view: Some(crate::api::BrokerView::List), cards: Some(crate::api::BrokerCards::Numbers) },
+            },
+            LayoutWindow {
+                id: window_id("b2"),
+                link: Some(LinkColor::A),
+                content: WindowContent::Brokers { symbol: None, view: Some(crate::api::BrokerView::Board), cards: Some(crate::api::BrokerCards::Bars) },
+            },
+            LayoutWindow {
+                id: window_id("b3"),
+                link: None,
+                content: WindowContent::Brokers { symbol: None, view: None, cards: None },
+            },
+        ];
+        put_layout(&db, &layout_at("L4", "거래원", updated.clone(), 2), UnixSeconds(100)).await.unwrap();
+        assert_eq!(get_layout(&db, "L4").await.unwrap().windows, updated);
+
+        let mut tx = db.begin_write().await.unwrap();
+        assert!(sqlx::query("INSERT INTO layout_windows (layout_id, id, position, kind, broker_view) VALUES ('L4', 'bad1', 90, 'trades', 'list')").execute(&mut *tx).await.is_err());
+        assert!(sqlx::query("INSERT INTO layout_windows (layout_id, id, position, kind, broker_cards) VALUES ('L4', 'bad2', 91, 'brokers', 'pie')").execute(&mut *tx).await.is_err());
+        assert!(sqlx::query("INSERT INTO layout_windows (layout_id, id, position, kind, broker_view) VALUES ('L4', 'bad3', 92, 'brokers', 'grid')").execute(&mut *tx).await.is_err());
     }
 }
