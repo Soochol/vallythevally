@@ -79,6 +79,27 @@ fn side_of(code: &str) -> Result<OrderSide, TradingError> {
     }
 }
 
+fn kis_holding(row: &BalanceRow) -> Result<Option<api::TradingHolding>, TradingError> {
+    let quantity = unsigned(&row.hldg_qty)?;
+    if quantity == 0 {
+        return Ok(None);
+    }
+    let sellable_quantity = unsigned(&row.ord_psbl_qty)?;
+    if sellable_quantity > quantity {
+        return Err(TradingError::Unreadable("주문가능수량이 보유수량보다 큼"));
+    }
+    Ok(Some(api::TradingHolding {
+        code: stock_code(&row.pdno)?,
+        name: row.prdt_name.trim().to_owned(),
+        quantity,
+        sellable_quantity,
+        average_price: whole_won(&row.pchs_avg_pric)?,
+        current_price: price(&row.prpr)?,
+        evaluation_profit: integer(&row.evlu_pfls_amt)?,
+        profit_rate_centi: centi(&row.evlu_pfls_rt),
+    }))
+}
+
 fn whole_won(text: &str) -> Result<u64, TradingError> {
     let whole = text.trim().split_once('.').map_or(text.trim(), |(whole, _)| whole);
     price(whole)
@@ -403,28 +424,18 @@ impl Trading {
         let summary = pages.first().and_then(|page| page.output2.first()).ok_or(TradingError::Unreadable("빈 응답"))?;
         let (total_purchase, total_evaluation, total_profit) = (integer(&summary.pchs_amt_smtl_amt)?, integer(&summary.evlu_amt_smtl_amt)?, integer(&summary.evlu_pfls_smtl_amt)?);
         let mut holdings = Vec::new();
+        let mut credit_holdings = Vec::new();
         for row in pages.into_iter().flat_map(|page| page.output1) {
-            let quantity = unsigned(&row.hldg_qty)?;
             let on_loan = !row.loan_amt.trim().is_empty() && integer(&row.loan_amt)? != 0;
-            if quantity == 0 || on_loan {
-                continue;
+            if on_loan {
+                if let Ok(Some(holding)) = kis_holding(&row) {
+                    credit_holdings.push(holding);
+                }
+            } else if let Some(holding) = kis_holding(&row)? {
+                holdings.push(holding);
             }
-            let sellable_quantity = unsigned(&row.ord_psbl_qty)?;
-            if sellable_quantity > quantity {
-                return Err(TradingError::Unreadable("주문가능수량이 보유수량보다 큼"));
-            }
-            holdings.push(api::TradingHolding {
-                code: stock_code(&row.pdno)?,
-                name: row.prdt_name.trim().to_owned(),
-                quantity,
-                sellable_quantity,
-                average_price: whole_won(&row.pchs_avg_pric)?,
-                current_price: price(&row.prpr)?,
-                evaluation_profit: integer(&row.evlu_pfls_amt)?,
-                profit_rate_centi: centi(&row.evlu_pfls_rt),
-            });
         }
-        Ok(api::TradingBalance { account_ref: account.account_ref.clone(), holdings, total_purchase, total_evaluation, total_profit })
+        Ok(api::TradingBalance { account_ref: account.account_ref.clone(), holdings, credit_holdings, total_purchase, total_evaluation, total_profit })
     }
 
     pub(super) async fn kis_open_entries(&self, desk: &KisDesk, priority: Priority) -> Result<Vec<OpenEntry>, TradingError> {

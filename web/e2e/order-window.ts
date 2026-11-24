@@ -135,7 +135,7 @@ export function tradingApi(scenario: Scenario, open: TradingOpenOrder[] = []): A
     return { ref: account ?? ACCOUNT, data: other ?? { open: api.open, holdings: api.holdings, executions: api.executions, orderable: api.orderable } };
   };
   scenario.on((url) => url.pathname === "/api/trading/open-orders", (request) => { const { ref, data } = scopeOf(request); return { body: { accountRef: ref, orders: data.open } }; });
-  scenario.on((url) => url.pathname === "/api/trading/balance", (request) => { const { ref, data } = scopeOf(request); return { body: { accountRef: ref, holdings: data.holdings, totalPurchase: 0, totalEvaluation: 0, totalProfit: 0 } }; });
+  scenario.on((url) => url.pathname === "/api/trading/balance", (request) => { const { ref, data } = scopeOf(request); return { body: { accountRef: ref, holdings: data.holdings, creditHoldings: [], totalPurchase: 0, totalEvaluation: 0, totalProfit: 0 } }; });
   scenario.on((url) => url.pathname === "/api/trading/executions", (request) => { const { ref, data } = scopeOf(request); return { body: { accountRef: ref, day: "2026-11-18", executions: data.executions } }; });
   scenario.on((url) => url.pathname === "/api/trading/commands", (request) => ({ body: { accountRef: scopeOf(request).ref, blocked: api.blocked, commands: [] } }));
   scenario.on((url) => url.pathname === "/api/trading/orderable", (request) => {

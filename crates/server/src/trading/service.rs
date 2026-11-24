@@ -7,7 +7,7 @@ use domain::{StockCode, Venue};
 use sha2::{Digest, Sha256};
 use tokio::sync::broadcast;
 
-use super::request::{AccountNumber, Balance, Executions, OpenOrders, Orderable, OrderableReply, Rows, TradingRequest};
+use super::request::{AccountNumber, Balance, BalanceRow, Executions, OpenOrders, Orderable, OrderableReply, Rows, TradingRequest};
 use super::switch::{SwitchRecord, SwitchStore};
 use super::kis::{KisDesk, KisOrigin};
 use super::kis_account::KisAccountNumber;
@@ -572,27 +572,17 @@ impl Trading {
         let first = pages.first().ok_or(TradingError::Unreadable("빈 응답"))?;
         let (total_purchase, total_evaluation, total_profit) = (integer(&first.tot_pur_amt)?, integer(&first.tot_evlt_amt)?, integer(&first.tot_evlt_pl)?);
         let mut holdings = Vec::new();
+        let mut credit_holdings = Vec::new();
         for row in pages.into_iter().flat_map(Rows::into_rows) {
-            let quantity = unsigned(&row.rmnd_qty)?;
-            if quantity == 0 || !matches!(row.crd_tp.trim(), "" | "0" | "00") {
-                continue;
+            if matches!(row.crd_tp.trim(), "" | "0" | "00") {
+                if let Some(holding) = kiwoom_holding(&row)? {
+                    holdings.push(holding);
+                }
+            } else if let Ok(Some(holding)) = kiwoom_holding(&row) {
+                credit_holdings.push(holding);
             }
-            let sellable_quantity = unsigned(&row.trde_able_qty)?;
-            if sellable_quantity > quantity {
-                return Err(TradingError::Unreadable("매매가능수량이 보유수량보다 큼"));
-            }
-            holdings.push(api::TradingHolding {
-                code: stock_code(&row.stk_cd)?,
-                name: row.stk_nm.trim().to_owned(),
-                quantity,
-                sellable_quantity,
-                average_price: price(&row.pur_pric)?,
-                current_price: price(&row.cur_prc)?,
-                evaluation_profit: integer(&row.evltv_prft)?,
-                profit_rate_centi: centi(&row.prft_rt),
-            });
         }
-        Ok(api::TradingBalance { account_ref: account.account_ref, holdings, total_purchase, total_evaluation, total_profit })
+        Ok(api::TradingBalance { account_ref: account.account_ref, holdings, credit_holdings, total_purchase, total_evaluation, total_profit })
     }
 
     pub async fn open_orders(&self) -> Result<api::TradingOpenOrders, TradingError> {
@@ -797,6 +787,27 @@ fn orderable_of(account_ref: String, code: StockCode, side: OrderSide, order_pri
         account_rate,
         applied_rate,
     })
+}
+
+fn kiwoom_holding(row: &BalanceRow) -> Result<Option<api::TradingHolding>, TradingError> {
+    let quantity = unsigned(&row.rmnd_qty)?;
+    if quantity == 0 {
+        return Ok(None);
+    }
+    let sellable_quantity = unsigned(&row.trde_able_qty)?;
+    if sellable_quantity > quantity {
+        return Err(TradingError::Unreadable("매매가능수량이 보유수량보다 큼"));
+    }
+    Ok(Some(api::TradingHolding {
+        code: stock_code(&row.stk_cd)?,
+        name: row.stk_nm.trim().to_owned(),
+        quantity,
+        sellable_quantity,
+        average_price: price(&row.pur_pric)?,
+        current_price: price(&row.cur_prc)?,
+        evaluation_profit: integer(&row.evltv_prft)?,
+        profit_rate_centi: centi(&row.prft_rt),
+    }))
 }
 
 pub(super) fn non_negative(text: &str) -> Result<u64, TradingError> {

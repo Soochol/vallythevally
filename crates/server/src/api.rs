@@ -2018,6 +2018,7 @@ pub struct TradingHolding {
 pub struct TradingBalance {
     pub account_ref: String,
     pub holdings: Vec<TradingHolding>,
+    pub credit_holdings: Vec<TradingHolding>,
     #[ts(type = "number")]
     pub total_purchase: i64,
     #[ts(type = "number")]
