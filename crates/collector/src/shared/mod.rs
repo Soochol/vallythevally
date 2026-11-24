@@ -9,6 +9,7 @@ mod job;
 pub mod minute;
 mod overview;
 mod probe;
+pub mod quotes;
 pub mod rankings;
 mod runner;
 mod themes;

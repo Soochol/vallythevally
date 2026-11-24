@@ -46,6 +46,7 @@ fn launch_child(peer: &Peer) -> Child {
         shutdown,
         minutes: None,
         flow: None,
+        quotes: None,
     };
     let task = tokio::spawn(run_session(parts));
     Child { paths, wall, commands, events, stop, task }
@@ -540,6 +541,7 @@ async fn child_session_writes_symbol_flow_and_link_events() {
         shutdown,
         minutes: None,
         flow: Some(FileFlowStore::new(shared.clone(), key)),
+        quotes: None,
     };
     let task = tokio::spawn(run_session(parts));
     let child = Child { paths, wall, commands, events, stop, task };
@@ -581,4 +583,54 @@ async fn child_session_writes_symbol_flow_and_link_events() {
         .map(|line| line["event"].as_str().unwrap().to_owned())
         .collect();
     assert_eq!(link_events, ["start", "live", "down", "live", "down", "end"]);
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_session_outage_reaches_the_quote_gaps() {
+    let peer = Peer::accepting();
+    let paths = Paths::new();
+    let shared = paths.data().join("shared");
+    let wall = FakeWall::new();
+    let (commands, command_source) = mpsc::unbounded_channel();
+    let (event_sink, events) = channel();
+    let (stop, shutdown) = watch::channel(false);
+    let parts = ChildParts {
+        key: KeyName::parse("k1").unwrap(),
+        data_dir: paths.data(),
+        connector: Arc::new(peer.clone()),
+        wall_clock: wall.clone(),
+        timings: Timings::default(),
+        commands: command_source,
+        events: Events::to(event_sink),
+        shutdown,
+        minutes: None,
+        flow: None,
+        quotes: Some(shared.clone()),
+    };
+    let child = Child { paths, wall, commands, events, stop, task: tokio::spawn(run_session(parts)) };
+    child.send(token(CHILD_TOKEN, 1));
+    until("LOGIN을 보냈다", || peer.count_sent("LOGIN") >= 1).await;
+    child.send(Command::Register(stocks("r1", 2, &[RealType::OrderBook])));
+    until("첫 REG를 보냈다", || peer.count_sent("REG") >= 1).await;
+    settle().await;
+
+    tokio::time::sleep(Duration::from_secs(10)).await;
+    let down_sec = crate::kst::KstTime::from_unix_ms(child.wall.now_ms()).ms_of_day / 1000;
+    peer.close(0);
+    until("둘째 연결의 REG를 보냈다", || peer.count_sent("REG") >= 2).await;
+    settle().await;
+    let live_sec = crate::kst::KstTime::from_unix_ms(child.wall.now_ms()).ms_of_day / 1000;
+
+    let (finish, _, _paths, date) = child.stop().await;
+    assert!(matches!(finish, Finish::Shutdown));
+
+    let gaps_path = shared.join("quote-minutes-live").join(date.to_string()).join("k1").join("_gaps.jsonl");
+    let gaps: Vec<(u32, u32)> = std::fs::read_to_string(&gaps_path)
+        .unwrap()
+        .lines()
+        .skip(1)
+        .map(|line| serde_json::from_str(line).unwrap())
+        .collect();
+    assert_eq!(gaps, [(down_sec, live_sec)]);
+    assert!(live_sec > down_sec);
 }
