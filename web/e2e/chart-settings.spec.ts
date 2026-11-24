@@ -648,6 +648,37 @@ test("봉 값 등락률 스위치는 시·고·저·종 옆에 직전 봉 종가
   await expect.poll(texts).toEqual(ohlcCells(zigzagBars[hovered]!, zigzagBars[hovered - 1]!));
 });
 
+test("화면 내 최고·최저 점은 지름 4px이고 극값 봉의 고가·저가 자리에 가운데가 놓인다", async ({ page, scenario }) => {
+  const bars = Array.from({ length: 300 }, (_, i) => {
+    const h = 100_000 - i * 100;
+    return { t: START + i * DAY, o: h - 200, h, l: h - 500, c: h - 300, v: 1000 };
+  });
+  openWith(scenario, { visibleBars: 60, showExtremes: true }, bars);
+  await open(page);
+  await expectShownBars(page, 60);
+  for (const [side, token] of [["high", "--up"], ["low", "--down"]] as const) {
+    const tag = cell(page).locator(`.chart-extreme[data-extreme=${side}]`);
+    await expect(tag.locator("> span")).toBeVisible();
+    const dot = await tag.evaluate((root, name) => {
+      const origin = new DOMMatrix(getComputedStyle(root).transform);
+      const frame = root.parentElement!.getBoundingClientRect();
+      const i = root.querySelector(":scope > i")!;
+      const box = i.getBoundingClientRect();
+      const probe = document.createElement("i");
+      probe.style.color = `var(${name})`;
+      document.body.append(probe);
+      const expected = getComputedStyle(probe).color;
+      probe.remove();
+      return { width: box.width, height: box.height, dx: Math.abs(box.x + box.width / 2 - frame.x - origin.e), dy: Math.abs(box.y + box.height / 2 - frame.y - origin.f), painted: getComputedStyle(i).backgroundColor === expected };
+    }, token);
+    expect(dot.width).toBeCloseTo(4, 1);
+    expect(dot.height).toBeCloseTo(4, 1);
+    expect(dot.dx).toBeLessThanOrEqual(0.5);
+    expect(dot.dy).toBeLessThanOrEqual(0.5);
+    expect(dot.painted).toBe(true);
+  }
+});
+
 test("최고·최저 등락률을 고가·저가 대비로 바꾸면 꼬리표가 최고가·최저가 대비 현재가 %를 적고, 새로고침 뒤 유지하며, 최고·최저가 꺼지면 비활성이다", async ({ page, scenario }) => {
   const bars = Array.from({ length: 300 }, (_, i) => {
     const h = 100_000 - i * 100;
