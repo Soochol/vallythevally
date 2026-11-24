@@ -12,7 +12,7 @@ const at = (hhmmss: string): number => {
 
 const print = (time: string, price: number, quantity: number, exchange: Venue | null = "krx") => ({ time, price, quantity, exchange });
 const tapeOf = (trades: TradeTape["trades"], venue: Venue = "combined"): TradeTape => ({ symbol: "005930", venue, trades, skippedRows: 0 });
-const live = (t: string, price: number, qty: number, venue: Venue | null = "krx", strength: number | null = null): FeedTrade => ({ t: at(t), price, qty, venue, strength });
+const live = (t: string, price: number, qty: number, venue: Venue | null = "krx", strength: number | null = null, sameTimeRatio?: number): FeedTrade => ({ t: at(t), price, qty, venue, strength, ...(sameTimeRatio === undefined ? {} : { sameTimeRatio }) });
 const run = (...actions: TapeAction[]) => actions.reduce(tapeReducer, emptyTape);
 const times = (state: ReturnType<typeof run>, venue: Venue = "combined", minWon = 0) =>
   visibleEntries(state, venue, minWon).entries.flatMap((e) => (e.kind === "trade" ? [`${e.origin[0]}${e.price}`] : ["gap"]));
@@ -86,6 +86,16 @@ test("체결강도는 가장 최근에 받은 값이고 없으면 비어 있다"
   expect(run({ type: "live", trades: [live("10:00:00", 1, 1)], receivedAt: 0 }).strength).toBeNull();
   const state = run({ type: "live", trades: [live("10:00:00", 1, 1, "krx", 101.5), live("10:00:01", 1, 1, "krx", 102.25), live("10:00:02", 1, 1, "krx", null)], receivedAt: 0 });
   expect(state.strength).toBe(102.25);
+});
+
+test("동시간비는 가장 최근에 받은 값을 유지하고 초기화하면 사라진다", () => {
+  expect(run({ type: "live", trades: [live("10:00:00", 1, 1)], receivedAt: 0 }).sameTimeRatio).toBeNull();
+  const state = run(
+    { type: "live", trades: [live("10:00:00", 1, 1, "krx", null, 93.95), live("10:00:01", 1, 1, "krx", null, 95.5), live("10:00:02", 1, 1, "krx", null)], receivedAt: 0 },
+    { type: "live", trades: [live("10:00:03", 1, 1, "krx", null)], receivedAt: 0 },
+  );
+  expect(state.sameTimeRatio).toBe(95.5);
+  expect(tapeReducer(state, { type: "reset" }).sameTimeRatio).toBeNull();
 });
 
 test("수량의 부호가 방향이고 누적은 줄 수 상한과 무관하다", () => {

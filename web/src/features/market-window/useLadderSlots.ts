@@ -7,7 +7,7 @@ import { daySummaryQuery } from "../../api/userData";
 import { marketSocket } from "../../stores/realtime";
 import type { LastTrade, TradeRow } from "../trades/tape";
 import { useTradeTape } from "../trades/useTradeTape";
-import { type InfoLine, type InfoPage, quoteInfoItems } from "./quoteInfo";
+import { type InfoKey, type InfoLine, type InfoPage, quoteInfoItems } from "./quoteInfo";
 import { tradeRows } from "./recentTrades";
 
 const HISTORY_PAGES = 1;
@@ -19,25 +19,39 @@ export interface QuoteInfoSource {
   readonly previousClose: number | null;
   readonly fundamentals: Fundamentals | undefined;
   readonly page: InfoPage;
+  readonly flipped?: ReadonlySet<InfoKey>;
+  readonly sameTimeRatio?: number | null;
 }
 
-export function useQuoteInfo({ code, venue, lastPrice, previousClose, fundamentals, page }: QuoteInfoSource): InfoLine[] {
+export function useQuoteInfo({ code, venue, lastPrice, previousClose, fundamentals, page, flipped, sameTimeRatio }: QuoteInfoSource): InfoLine[] {
   const summary = useQuery(daySummaryQuery(code, venue)).data ?? null;
-  return quoteInfoItems(page, { price: lastPrice ?? summary?.price ?? null, previousClose, summary, fundamentals: fundamentals ?? null });
+  return quoteInfoItems(page, { price: lastPrice ?? summary?.price ?? null, previousClose, summary, fundamentals: fundamentals ?? null, sameTimeRatio }, flipped);
 }
 
 export interface InfoPager {
   readonly page: InfoPage;
   readonly select: (page: InfoPage) => void;
+  readonly flipped: ReadonlySet<InfoKey>;
+  readonly toggle: (key: InfoKey) => void;
 }
 
 export function useInfoPager(): InfoPager {
   const [page, setPage] = useState<InfoPage>(0);
-  return { page, select: setPage };
+  const [flipped, setFlipped] = useState<ReadonlySet<InfoKey>>(() => new Set());
+  const toggle = useCallback((key: InfoKey) => {
+    setFlipped((previous) => {
+      const next = new Set(previous);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  }, []);
+  return { page, select: setPage, flipped, toggle };
 }
 
 export interface LadderTrades {
   readonly strength: number | null;
+  readonly sameTimeRatio: number | null;
   readonly lastTrade: LastTrade | null;
   readonly trades: readonly TradeRow[];
   readonly hold: () => void;
@@ -50,5 +64,5 @@ export function useLadderTrades(code: SymbolCode, venue: Venue): LadderTrades {
   const trades = useMemo(() => tradeRows(state, shownVenue), [state, shownVenue]);
   const hold = useCallback(() => dispatch({ type: "hold" }), [dispatch]);
   const release = useCallback(() => dispatch({ type: "release" }), [dispatch]);
-  return { strength: state.strength, lastTrade: state.lastTrade, trades, hold, release };
+  return { strength: state.strength, sameTimeRatio: state.sameTimeRatio, lastTrade: state.lastTrade, trades, hold, release };
 }

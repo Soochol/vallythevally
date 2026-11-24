@@ -42,7 +42,7 @@ function BookBody({ code, pager }: { code: SymbolCode; pager: InfoPager }) {
   const limits = useFundamentals(code).data;
   const kind = useSymbolInfo(code).data?.kind ?? null;
   const bounds = { lower: limits?.lowerLimit ?? null, upper: limits?.upperLimit ?? null };
-  const info = useQuoteInfo({ code, venue, lastPrice: feed.lastPrice, previousClose: feed.previousClose, fundamentals: limits, page: pager.page });
+  const info = useQuoteInfo({ code, venue, lastPrice: feed.lastPrice, previousClose: feed.previousClose, fundamentals: limits, page: pager.page, flipped: pager.flipped, sameTimeRatio: trades.sameTimeRatio });
   const now = useNowMs();
   const nowSeconds = Math.floor(now / 1000);
   const view = feed.book.phase === "empty" ? null : feed.book.view;
@@ -54,7 +54,7 @@ function BookBody({ code, pager }: { code: SymbolCode; pager: InfoPager }) {
     if (view === null) return feed.snapshotFailed ? <ErrorState message="호가를 불러오지 못했습니다" retry={feed.retry} /> : <EmptyState title="호가를 기다리는 중입니다" />;
     const rows = visibleLadderRows(buildDefaultLadder({ asks: view.asks, bids: view.bids, lastPrice: feed.lastPrice, previousClose: feed.previousClose, bounds, skipSpreadGap, tickRule: tickRuleOf(kind, [...view.asks, ...view.bids].map((level) => level.price)) }), rowsPerSide);
     const expected = visibleExpected(view.t, nowSeconds, view.expected);
-    const infoSlots = placeInfoItems(rows, info, expectedItemsOnPage(pager.page, expected));
+    const infoSlots = placeInfoItems(rows, info, expectedItemsOnPage(pager.page, expected, feed.previousClose, pager.flipped));
     return <PriceLadder rows={rows} firstBidIndex={rowsPerSide} previousClose={feed.previousClose} expectedPrice={expected?.price ?? null} rowSlots={{ infoCard: infoSlot(infoSlots, pager), bottomLeft: tradeSlot(trades, feed.previousClose) }} />;
   })();
   return (

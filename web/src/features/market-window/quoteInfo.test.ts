@@ -17,15 +17,15 @@ test("시세 쪽은 시가·고가·저가, 당일 범위 막대, 기준가·전
   const lines = quoteInfoItems(0, known);
   expect(shape(lines)).toEqual(["시가", "고가", "저가", "range", "기준가", "전일대비", "거래량", "거래대금"]);
   expect(items(lines).map((item) => item.value)).toEqual(["70,100", "71,000", "69,000", "70,000", "+300 +0.43%", "123만", "1조 103억"]);
-  expect(lines[3]).toEqual({ kind: "range", label: "당일 범위", position: (70_300 - 69_000) / 2_000 });
+  expect(lines[3]).toEqual({ kind: "range", key: "dayRange", label: "당일 범위", position: (70_300 - 69_000) / 2_000 });
 });
 
 test("종목 쪽은 상한가·하한가, 52주 범위 막대와 양 끝 값, 시가총액, PER·PBR 한 줄, 외국인소진율 순이다", () => {
   const lines = quoteInfoItems(1, known);
   expect(shape(lines)).toEqual(["상한가", "하한가", "range", "ends", "시가총액", "PER·PBR", "외국인소진율"]);
   expect(items(lines).map((item) => item.value)).toEqual(["91,000", "49,000", "824억", "14.21·1.10", "54.12%"]);
-  expect(lines[2]).toEqual({ kind: "range", label: "52주 범위", position: (70_300 - 51_000) / 37_000 });
-  expect(lines[3]).toEqual({ kind: "ends", low: "51,000", high: "88,000" });
+  expect(lines[2]).toEqual({ kind: "range", key: "range52", label: "52주 범위", position: (70_300 - 51_000) / 37_000 });
+  expect(lines[3]).toEqual({ kind: "ends", key: "range52", low: "51,000", high: "88,000" });
 });
 
 test("시가·고가·저가·전일대비와 상한가·하한가는 기준가 대비 색이고 나머지는 색이 없다", () => {
@@ -138,4 +138,31 @@ test("예상체결 항목은 시세 쪽에만 있고 종목 쪽과 예상체결�
   expect(expectedItemsOnPage(0, EXPECTED)).toEqual(expectedItems);
   expect(expectedItemsOnPage(1, EXPECTED)).toEqual([]);
   expect(expectedItemsOnPage(0, null)).toEqual([]);
+});
+
+test("예상체결가는 바꾸면 기준가 대비 예상 등락이고 예상체결량은 키가 없어 바뀌지 않는다", () => {
+  const flipped = new Set(["expectedPrice"] as const);
+  expect(expectedInfoItems(EXPECTED, 70_000, flipped)).toEqual([
+    { label: "예상 등락", value: "+2.57%", tone: "up" },
+    { label: "예상체결량", value: "3,279", tone: "warning" },
+  ]);
+  expect(expectedInfoItems(EXPECTED, null, flipped)).toEqual([
+    { label: "예상 등락", value: "-", tone: null },
+    { label: "예상체결량", value: "3,279", tone: "warning" },
+  ]);
+  const placed = placeInfoItems(rowsWithBidAt(), base, expectedItemsOnPage(0, EXPECTED, 70_000, flipped));
+  expect(placed.at(-2)).toEqual({ kind: "item", key: "expectedPrice", flipped: true, item: { label: "예상 등락", value: "+2.57%", tone: "up" } });
+  expect(placed.at(-1)).toEqual({ kind: "item", item: { label: "예상체결량", value: "3,279", tone: "warning" } });
+});
+
+test("바꾼 칸의 세부 규칙: 시가대비는 색띠가 없고 52주 끝값에 툴팁이 붙으며 EPS·BPS는 하나만 몰라도 나머지를 보인다", () => {
+  const flippedChange = quoteInfoItems(0, known, new Set(["change"])).find((line) => line.key === "change");
+  expect(flippedChange).toEqual({ kind: "item", key: "change", flipped: true, item: { label: "시가대비", value: "+0.29%", tone: "up" } });
+  const ends = quoteInfoItems(1, known, new Set(["range52"])).find((line) => line.kind === "ends");
+  expect(ends).toEqual({ kind: "ends", key: "range52", flipped: true, low: "+37.84%", high: "−20.11%", lowTitle: "저점 대비", highTitle: "고점 대비" });
+  const epsOnly = items(quoteInfoItems(1, { ...known, fundamentals: { ...known.fundamentals, eps: -1_200, bps: null } }, new Set(["per"])))[3]!.value;
+  const bpsOnly = items(quoteInfoItems(1, { ...known, fundamentals: { ...known.fundamentals, eps: null, bps: 63_636 } }, new Set(["per"])))[3]!.value;
+  expect([epsOnly, bpsOnly]).toEqual(["−1,200·-", "-·63,636"]);
+  const zeroVolume = quoteInfoItems(0, { ...known, summary: { ...known.summary, volume: 0 } }, new Set(["base"])).find((line) => line.key === "base");
+  expect(zeroVolume).toEqual({ kind: "item", key: "base", flipped: true, item: { label: "평균가", value: "-", tone: null } });
 });

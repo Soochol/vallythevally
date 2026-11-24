@@ -794,6 +794,9 @@ test("종목 탭을 누르면 상·하한가·52주 범위·시가총액·PER·P
   await expect(infoLabels(page)).toHaveText(INFO_PAGE_1);
 
   await page.getByTestId("ladder-info").nth(4).click();
+  await expect(infoTab(page, "시세")).toHaveAttribute("aria-selected", "true");
+  await expect(infoLabels(page).nth(4)).toHaveText("시가대비");
+  await page.getByTestId("ladder-info").nth(4).click();
   await expect(infoLabels(page)).toHaveText(INFO_PAGE_1);
 
   await infoTab(page, "종목").click();

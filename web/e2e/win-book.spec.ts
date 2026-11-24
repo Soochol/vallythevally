@@ -134,6 +134,8 @@ test("종목 탭을 누르면 상·하한가·52주 범위·시가총액·PER·P
 
   await page.getByTestId("ladder-info").nth(3).click();
   await expect(infoTab(page, "시세")).toHaveAttribute("aria-selected", "true");
+  await expect(infoLabels(page).nth(3)).toHaveText("평균가");
+  await page.getByTestId("ladder-info").nth(3).click();
   await expect(infoLabels(page)).toHaveText(INFO_PAGE_1);
 
   await infoTab(page, "종목").click();
@@ -150,6 +152,44 @@ test("종목 탭을 누르면 상·하한가·52주 범위·시가총액·PER·P
 
   await infoTab(page, "시세").click();
   await expect(infoTab(page, "시세")).toHaveAttribute("aria-selected", "true");
+  await expect(infoLabels(page)).toHaveText(INFO_PAGE_1);
+});
+
+test("10호가창 정보란 칸을 누르면 그 칸만 바뀌어 강조색 라벨이 되고 저장하지 않아 새로고침하면 처음 값이다", async ({ page, scenario }) => {
+  await open(page, scenario, 70000);
+  scenario.reply((url) => url.pathname === "/api/symbols/005930/fundamentals", { body: { symbol: CODE, upperLimit: 91000, lowerLimit: 49000, ...FUNDAMENTAL_FIGURES, listedShares: 50_000_000, eps: 4_926, bps: 63_636, creditRate: 0.32 } });
+  await page.reload();
+  await expect(cell(page)).toHaveAttribute("aria-busy", "false");
+  await windowTabs(page).getByRole("tab", { name: /^10호가/ }).click();
+  const row = (label: string) => page.getByTestId("ladder-info").and(page.locator(`[data-label="${label}"]`));
+
+  await row("시가").click();
+  await expect(row("시가 등락")).toHaveAttribute("data-flipped", "");
+  await expect(row("시가 등락").locator("b")).toHaveText("+1.30%");
+  expect(await colorOf(row("시가 등락").locator("span"))).toBe(await tokenColor(page, "--accent"));
+
+  await page.getByTestId("ladder-info-range").click();
+  await expect(row("진폭").locator("b")).toHaveText("1.45%");
+  await expect(page.getByTestId("ladder-info-range")).toHaveCount(0);
+
+  await infoTab(page, "종목").click();
+  await row("상한가").click();
+  await expect(row("상한까지").locator("b")).toHaveText("+30.00%");
+  await page.getByTestId("ladder-info-range").click();
+  await expect(page.getByTestId("ladder-info-ends").locator("span")).toHaveText(["+37.25%", "−20.45%"]);
+  await expect(page.getByTestId("ladder-info-ends").locator("span").nth(0)).toHaveAttribute("title", "저점 대비");
+  await expect(page.getByTestId("ladder-info-ends").locator("span").nth(1)).toHaveAttribute("title", "고점 대비");
+  await page.getByTestId("ladder-info-ends").click();
+  await expect(page.getByTestId("ladder-info-ends").locator("span")).toHaveText(INFO_PAGE_2_ENDS);
+  await row("외국인소진율").click();
+  await expect(row("신용비율").locator("b")).toHaveText("0.32%");
+
+  expect(JSON.stringify(scenario.documents.layout(DEFAULT_LAYOUT_ID))).not.toContain("flipped");
+  expect(JSON.stringify(scenario.documents.uiState())).not.toContain("flipped");
+
+  await page.reload();
+  await expect(cell(page)).toHaveAttribute("aria-busy", "false");
+  await windowTabs(page).getByRole("tab", { name: /^10호가/ }).click();
   await expect(infoLabels(page)).toHaveText(INFO_PAGE_1);
 });
 
@@ -936,6 +976,23 @@ test.describe("동시호가 예상체결", () => {
       expect(await tops(info(page, "예상체결량"))).toEqual([rowTops[7]]);
       expect((await infoCard(page).boundingBox())!.height).toBe(9 * CARD_ROW_HEIGHT);
       expect(await shape(page)).toEqual(without);
+    });
+
+    test("예상체결가 칸을 누르면 기준가 대비 예상 등락이 되고 예상체결량은 단추가 아니며 눌러도 바뀌지 않는다", async ({ page, scenario }) => {
+      await open(page, scenario, 70000);
+      const bookSub = await subOf(scenario, "book");
+      scenario.live.emit({ type: "feed_book", sub: bookSub, book: frame(scenario, [[70100, 50], [70200, 40]], [[70000, 80], [69900, 60]], EXPECTED) });
+      await expect(info(page, "예상체결가").locator("b")).toHaveText("70,000");
+      await info(page, "예상체결가").click();
+      await expect(info(page, "예상 등락")).toHaveAttribute("data-flipped", "");
+      await expect(info(page, "예상 등락").locator("b")).toHaveText("+1.45%");
+      const qtyRow = info(page, "예상체결량");
+      expect(await qtyRow.evaluate((element) => element.tagName)).toBe("DIV");
+      await qtyRow.click();
+      await expect(qtyRow.locator("b")).toHaveText("300");
+      await expect(qtyRow).not.toHaveAttribute("data-flipped", "");
+      await info(page, "예상 등락").click();
+      await expect(info(page, "예상체결가").locator("b")).toHaveText("70,000");
     });
 
     test("9행에 매수 잔량이 있으면 카드가 8행으로 줄고 예상체결 두 항목이 그 끝으로 올라가며 기준가는 남는다", async ({ page, scenario }) => {
