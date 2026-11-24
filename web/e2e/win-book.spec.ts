@@ -122,6 +122,7 @@ test("스냅샷 20행이 매도 1호가 기준 격자로 먼저 보이고 상세
 });
 
 test("종목 탭을 누르면 상·하한가·시가총액이 보이고 시세 탭으로 돌아온다", async ({ page, scenario }) => {
+  await page.clock.setFixedTime(new Date(scenario.now));
   await open(page, scenario, 70000);
   await expect(infoLabels(page)).toHaveText(INFO_PAGE_1);
 
@@ -136,7 +137,7 @@ test("종목 탭을 누르면 상·하한가·시가총액이 보이고 시세 �
   await expect(infoLabels(page)).toHaveText(INFO_PAGE_2);
   await expect(infoValues(page)).toHaveText(INFO_PAGE_2_VALUES);
   const rowTops = await tops(ladderRows(page));
-  expect(await tops(page.getByTestId("ladder-info"))).toEqual([0, 1, 2].map((row) => rowTops[row]));
+  expect(await tops(page.getByTestId("ladder-info"))).toEqual([0, 1, 2, 3, 4].map((row) => rowTops[row]));
   expect((await infoCard(page).boundingBox())!.height).toBe(10 * CARD_ROW_HEIGHT);
   await expect(page.getByTestId("ladder-info").filter({ hasText: "하한가" }).locator("b")).toHaveAttribute("data-tone", "down");
 

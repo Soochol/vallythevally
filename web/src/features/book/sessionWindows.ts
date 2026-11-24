@@ -1,4 +1,5 @@
 import type { UnixSeconds } from "../../api/generated/UnixSeconds";
+import type { ViState } from "../../api/generated/ViState";
 import { isMarketOpen } from "../../chart/time";
 import { secondOfDay } from "../trades/tape";
 
@@ -20,6 +21,10 @@ export interface AfterHoursTotals {
   readonly bidQty: number;
 }
 
+const REGULAR_SESSION: readonly SecondRange[] = [
+  { from: clock(9, 0), until: clock(15, 20) },
+];
+
 const CALL_AUCTIONS: readonly SecondRange[] = [
   { from: clock(8, 50), until: clock(9, 0) },
   { from: clock(15, 20), until: clock(15, 30) },
@@ -37,10 +42,20 @@ function rangeIndexOf(ranges: readonly SecondRange[], time: UnixSeconds): number
   return index < 0 ? null : index;
 }
 
+export function isRegularSession(time: UnixSeconds): boolean {
+  return rangeIndexOf(REGULAR_SESSION, time) !== null;
+}
+
 const callAuctionOf = (time: UnixSeconds): number | null => rangeIndexOf(CALL_AUCTIONS, time);
 
-export function visibleExpected(frameTime: UnixSeconds | null, now: UnixSeconds, expected: ExpectedFill | null): ExpectedFill | null {
+export function visibleExpected(
+  frameTime: UnixSeconds | null,
+  now: UnixSeconds,
+  expected: ExpectedFill | null,
+  vi?: Pick<ViState, "active" | "triggeredAt"> | null,
+): ExpectedFill | null {
   if (frameTime === null || expected === null || !(expected.price > 0)) return null;
+  if (vi?.active && (vi.triggeredAt === null || frameTime >= vi.triggeredAt)) return expected;
   const auction = callAuctionOf(frameTime);
   return auction !== null && auction === callAuctionOf(now) ? expected : null;
 }

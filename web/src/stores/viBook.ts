@@ -17,6 +17,8 @@ function sameViState(a: ViState, b: ViState): boolean {
 export class ViBook {
   private readonly rows = new Map<SymbolCode, ViState>();
   private readonly listeners = new Map<SymbolCode, Set<() => void>>();
+  private readonly knownListeners = new Set<() => void>();
+  private known = false;
 
   constructor(socket: Pick<MarketSocket, "onVi" | "watch">) {
     socket.onVi((event) => this.onEvent(event));
@@ -25,6 +27,10 @@ export class ViBook {
 
   get(code: SymbolCode): ViState | null {
     return this.rows.get(code) ?? null;
+  }
+
+  isKnown(): boolean {
+    return this.known;
   }
 
   subscribe(code: SymbolCode, listener: () => void): () => void {
@@ -37,8 +43,23 @@ export class ViBook {
     };
   }
 
+  subscribeKnown(listener: () => void): () => void {
+    this.knownListeners.add(listener);
+    return () => {
+      this.knownListeners.delete(listener);
+    };
+  }
+
+  private setKnown(next: boolean): void {
+    if (this.known === next) return;
+    this.known = next;
+    for (const listener of this.knownListeners) listener();
+  }
+
   private onConnection(connection: Connection): void {
-    if (connection.socket === "open" || this.rows.size === 0) return;
+    if (connection.socket === "open") return;
+    this.setKnown(false);
+    if (this.rows.size === 0) return;
     const cleared = [...this.rows.keys()];
     this.rows.clear();
     for (const code of cleared) this.notify(code);
@@ -70,6 +91,7 @@ export class ViBook {
           changed.add(code);
         }
         for (const code of changed) this.notify(code);
+        this.setKnown(true);
         return;
       }
     }

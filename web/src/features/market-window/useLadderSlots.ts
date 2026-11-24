@@ -2,13 +2,17 @@ import { useQuery } from "@tanstack/react-query";
 import { useCallback, useMemo, useState } from "react";
 import type { Fundamentals } from "../../api/generated/Fundamentals";
 import type { SymbolCode } from "../../api/generated/SymbolCode";
+import type { UnixSeconds } from "../../api/generated/UnixSeconds";
 import type { Venue } from "../../api/generated/Venue";
+import type { ViState } from "../../api/generated/ViState";
 import { daySummaryQuery } from "../../api/userData";
 import { marketSocket } from "../../stores/realtime";
 import type { LastTrade, TradeRow } from "../trades/tape";
 import { useTradeTape } from "../trades/useTradeTape";
 import { type InfoKey, type InfoLine, type InfoPage, quoteInfoItems, toggleInfoKey } from "./quoteInfo";
 import { tradeRows } from "./recentTrades";
+import type { TickRule } from "./tick";
+import { useViInfo } from "./useViInfo";
 
 const HISTORY_PAGES = 1;
 
@@ -21,11 +25,16 @@ export interface QuoteInfoSource {
   readonly page: InfoPage;
   readonly flipped?: ReadonlySet<InfoKey>;
   readonly sameTimeRatio?: number | null;
+  readonly vi: ViState | null;
+  readonly tickRule: TickRule;
+  readonly regularSession: boolean;
+  readonly now: UnixSeconds;
 }
 
-export function useQuoteInfo({ code, venue, lastPrice, previousClose, fundamentals, page, flipped, sameTimeRatio }: QuoteInfoSource): InfoLine[] {
+export function useQuoteInfo({ code, venue, lastPrice, previousClose, fundamentals, page, flipped, sameTimeRatio, vi, tickRule, regularSession, now }: QuoteInfoSource): InfoLine[] {
   const summary = useQuery(daySummaryQuery(code, venue)).data ?? null;
-  return quoteInfoItems(page, { price: lastPrice ?? summary?.price ?? null, previousClose, summary, fundamentals: fundamentals ?? null, sameTimeRatio }, flipped);
+  const viInfo = useViInfo({ code, vi, shown: page === 1, regularSession, now, tickRule });
+  return quoteInfoItems(page, { price: lastPrice ?? summary?.price ?? null, previousClose, summary, fundamentals: fundamentals ?? null, sameTimeRatio, vi: viInfo }, flipped);
 }
 
 export interface InfoPager {

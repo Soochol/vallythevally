@@ -41,7 +41,7 @@ test("정보란 맨 아래 점 줄은 점이 아닌 곳을 눌러도 쪽이 바�
     await expect(labels(area)).toHaveText(PRICES);
     const box = (await dots.boundingBox())!;
     await dots.click({ position: { x: box.width - 3, y: 10 } });
-    await expect(labels(area)).toHaveText(["상한가", "하한가", "시가총액"]);
+    await expect(labels(area)).toHaveText(["상한가", "하한가", "상승VI", "하락VI", "시가총액"]);
   }
 });
 

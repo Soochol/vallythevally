@@ -20,8 +20,8 @@ export const BASE = 70_000;
 export const FUNDAMENTAL_FIGURES = { marketCap: 82_400_000_000, listedShares: null, per: 14.21, pbr: 1.1, roe: null, eps: null, bps: null, foreignExhaustionRate: 54.12, high52w: 88_000, low52w: 51_000 };
 
 export const INFO_PAGE_1 = ["시가", "고가", "저가", "기준가", "거래량", "거래대금"];
-export const INFO_PAGE_2 = ["상한가", "하한가", "시가총액"];
-export const INFO_PAGE_2_VALUES = ["91,000", "49,000", "824억"];
+export const INFO_PAGE_2 = ["상한가", "하한가", "상승VI", "하락VI", "시가총액"];
+export const INFO_PAGE_2_VALUES = ["91,000", "49,000", "76,900", "62,900", "824억"];
 export const infoLabels = (page: Page): Locator => page.getByTestId("ladder-info").locator(":scope > span:first-child");
 export const infoValues = (page: Page): Locator => page.getByTestId("ladder-info").locator(":scope > b");
 export const infoCard = (page: Page): Locator => page.getByTestId("ladder-info-card");

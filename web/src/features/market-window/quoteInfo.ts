@@ -1,5 +1,6 @@
 import type { Fundamentals } from "../../api/generated/Fundamentals";
 import type { SymbolDaySummary } from "../../api/generated/SymbolDaySummary";
+import type { ViDirection } from "../../api/generated/ViDirection";
 import { direction, formatDecimal, formatPercent, formatPrice, formatVolume } from "../../lib/format";
 import type { LadderRow } from "./ladder";
 
@@ -49,12 +50,19 @@ export type QuoteFundamentals =
   Pick<Fundamentals, "upperLimit" | "lowerLimit" | "marketCap">
   & Partial<Pick<Fundamentals, "listedShares">>;
 
+export interface ViInfo {
+  readonly up: number | null;
+  readonly down: number | null;
+  readonly triggered: { readonly direction: ViDirection; readonly price: number | null } | null;
+}
+
 export interface QuoteInfoInput {
   readonly price: number | null;
   readonly previousClose: number | null;
   readonly summary: Pick<SymbolDaySummary, "open" | "high" | "low" | "volume" | "tradeValueWon"> | null;
   readonly fundamentals: QuoteFundamentals | null;
   readonly sameTimeRatio?: number | null;
+  readonly vi?: ViInfo | null;
 }
 
 const orDash = (value: number | null | undefined, format: (value: number) => string): string => (value == null ? "-" : format(value));
@@ -90,7 +98,7 @@ const itemLine = (value: QuoteInfo, key?: InfoKey, flipped?: boolean): InfoLine 
   item: value,
 });
 
-export function quoteInfoItems(page: InfoPage, { price, previousClose, summary, fundamentals, sameTimeRatio }: QuoteInfoInput, flipped?: ReadonlySet<InfoKey>): InfoLine[] {
+export function quoteInfoItems(page: InfoPage, { price, previousClose, summary, fundamentals, sameTimeRatio, vi }: QuoteInfoInput, flipped?: ReadonlySet<InfoKey>): InfoLine[] {
   const base = positiveBase(previousClose);
   const current = positiveBase(price);
   const isFlipped = (key: InfoKey): boolean => flipped?.has(key) ?? false;
@@ -110,12 +118,23 @@ export function quoteInfoItems(page: InfoPage, { price, previousClose, summary, 
   const priceOrRate = (key: InfoKey, label: string, flippedLabel: string, value: number | null | undefined, ref: number | null): InfoLine =>
     isFlipped(key) ? signedRate(key, flippedLabel, value, ref) : priced(key, label, value);
   if (page === 1) {
+    const viLine = (side: ViDirection, label: string, triggeredLabel: string, computed: number | null): InfoLine => {
+      const firing = vi?.triggered?.direction === side;
+      const value = firing ? (vi.triggered?.price ?? computed) : computed;
+      return itemLine({
+        label: firing ? triggeredLabel : label,
+        value: orDash(value, won),
+        tone: value === null ? null : firing ? "warning" : against(value),
+      });
+    };
     const cap = isFlipped("cap")
       ? plain("cap", "상장주식", orDash(fundamentals?.listedShares, (value) => `${formatVolume(value)}주`), true)
       : plain("cap", "시가총액", orDash(fundamentals?.marketCap, formatKoreanWon));
     return [
       priceOrRate("upper", "상한가", "상한까지", fundamentals?.upperLimit, current),
       priceOrRate("lower", "하한가", "하한까지", fundamentals?.lowerLimit, current),
+      viLine("up", "상승VI", "상승VI 발동", vi?.up ?? null),
+      viLine("down", "하락VI", "하락VI 발동", vi?.down ?? null),
       cap,
     ];
   }

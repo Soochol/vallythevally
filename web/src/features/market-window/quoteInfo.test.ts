@@ -19,29 +19,29 @@ test("시세 쪽은 시가·고가·저가·기준가·거래량·거래대금 �
   expect(items(lines).map((item) => item.value)).toEqual(["70,100", "71,000", "69,000", "70,000", "123만", "1조 103억"]);
 });
 
-test("종목 쪽은 상한가·하한가·시가총액 순이다", () => {
+test("종목 쪽은 상한가·하한가·상승VI·하락VI·시가총액 순이다", () => {
   const lines = quoteInfoItems(1, known);
-  expect(shape(lines)).toEqual(["상한가", "하한가", "시가총액"]);
-  expect(items(lines).map((item) => item.value)).toEqual(["91,000", "49,000", "824억"]);
+  expect(shape(lines)).toEqual(["상한가", "하한가", "상승VI", "하락VI", "시가총액"]);
+  expect(items(lines).map((item) => item.value)).toEqual(["91,000", "49,000", "-", "-", "824억"]);
 });
 
 test("시가·고가·저가와 상한가·하한가는 기준가 대비 색이고 나머지는 색이 없다", () => {
   expect(items(quoteInfoItems(0, known)).map((item) => item.tone)).toEqual(["up", "up", "down", null, null, null]);
-  expect(items(quoteInfoItems(1, known)).map((item) => item.tone)).toEqual(["up", "down", null]);
+  expect(items(quoteInfoItems(1, known)).map((item) => item.tone)).toEqual(["up", "down", null, null, null]);
 });
 
 test("기준가를 모르면 값은 보이되 색은 없다", () => {
   const lines = items(quoteInfoItems(0, { ...known, previousClose: null }));
   expect(lines.map((item) => item.value)).toEqual(["70,100", "71,000", "69,000", "-", "123만", "1조 103억"]);
   expect(lines.map((item) => item.tone)).toEqual([null, null, null, null, null, null]);
-  expect(items(quoteInfoItems(1, { ...known, previousClose: null })).map((item) => item.tone)).toEqual([null, null, null]);
+  expect(items(quoteInfoItems(1, { ...known, previousClose: null })).map((item) => item.tone)).toEqual([null, null, null, null, null]);
 });
 
 test("모르는 값은 두 쪽 모두 대시다", () => {
   expect(quoteInfoItems(0, none).map((line) => line.kind)).toEqual(Array(6).fill("item"));
   expect(items(quoteInfoItems(0, none)).map((item) => item.value)).toEqual(["-", "-", "-", "-", "-", "-"]);
-  expect(quoteInfoItems(1, none).map((line) => line.kind)).toEqual(Array(3).fill("item"));
-  expect(items(quoteInfoItems(1, none)).map((item) => item.value)).toEqual(["-", "-", "-"]);
+  expect(quoteInfoItems(1, none).map((line) => line.kind)).toEqual(Array(5).fill("item"));
+  expect(items(quoteInfoItems(1, none)).map((item) => item.value)).toEqual(["-", "-", "-", "-", "-"]);
 });
 
 test("거래대금과 시가총액은 조·억·만 순으로 줄이고 1만 미만은 원이다", () => {

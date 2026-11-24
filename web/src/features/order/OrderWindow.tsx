@@ -13,6 +13,7 @@ import { useStableCallback } from "../../lib/useStableCallback";
 import { useMockEnvironment } from "../../stores/kiwoomLink";
 import { useLayoutStore } from "../../stores/layout";
 import { useOrderSettings, useUiStore } from "../../stores/ui";
+import { useSymbolVi } from "../../stores/symbolVi";
 import { useBookFeed } from "../book/useBookFeed";
 import { basePrice, buildLadderRows, defaultLadderPrices, type LadderPrices, type LadderRow } from "../market-window/ladder";
 import { RatioBar, Strip, TotalFigure } from "../market-window/parts";
@@ -21,7 +22,7 @@ import { formatQuantity } from "../market-window/format";
 import { infoSlot, tradeSlot } from "../market-window/LadderSlots";
 import { expectedItemsOnPage, placeInfoItems } from "../market-window/quoteInfo";
 import { stripTotals } from "../book/bookModel";
-import { visibleAfterHours, visibleExpected } from "../book/sessionWindows";
+import { isRegularSession, visibleAfterHours, visibleExpected } from "../book/sessionWindows";
 import { type InfoPager, useInfoPager, useLadderTrades, useQuoteInfo } from "../market-window/useLadderSlots";
 import { useShownVenue } from "../market-window/useShownVenue";
 import { EmptyState, ErrorState } from "../overlay/State";
@@ -94,6 +95,8 @@ function OrderBody({ id, code, infoPager, choice, access, balance }: { id: Windo
   }, []);
 
   const downSince = useFeedDownSince(feed.connected);
+  const vi = useSymbolVi(code);
+  const nowSeconds = Math.floor(now / 1000);
   const view = feed.book.phase === "empty" ? null : feed.book.view;
   const bounds = { lower: limits?.lowerLimit ?? null, upper: limits?.upperLimit ?? null };
   const quotes = view ? { asks: view.asks, bids: view.bids, lastPrice: feed.lastPrice, previousClose: feed.previousClose } : null;
@@ -105,10 +108,10 @@ function OrderBody({ id, code, infoPager, choice, access, balance }: { id: Windo
   const fullPrices = useMemo(() => fullRangePrices({ lower: bounds.lower, upper: bounds.upper }, tickRule), [bounds.lower, bounds.upper, tickRule]);
   const explorerOn = exploring && fullPrices !== null;
   const rows: LadderRow[] = quotes && heldLadder ? (explorerOn ? buildLadderRows(fullPrices, quotes) : buildLadderRows(heldLadder.prices, quotes, heldLadder.sidesSplit)) : [];
-  const info = useQuoteInfo({ code, venue: quoteVenue, lastPrice: feed.lastPrice, previousClose: feed.previousClose, fundamentals: limits, page: infoPager.page, flipped: infoPager.flipped, sameTimeRatio: trades.sameTimeRatio });
-  const expected = view ? visibleExpected(view.t, Math.floor(now / 1000), view.expected) : null;
+  const info = useQuoteInfo({ code, venue: quoteVenue, lastPrice: feed.lastPrice, previousClose: feed.previousClose, fundamentals: limits, page: infoPager.page, flipped: infoPager.flipped, sameTimeRatio: trades.sameTimeRatio, vi, tickRule, regularSession: isRegularSession(nowSeconds), now: nowSeconds });
+  const expected = view ? visibleExpected(view.t, nowSeconds, view.expected, vi) : null;
   const infoSlots = placeInfoItems(rows, info, expectedItemsOnPage(infoPager.page, expected, feed.previousClose, infoPager.flipped));
-  const totals = stripTotals(view && { ask: view.totalAsk, bid: view.totalBid }, visibleAfterHours(feed.afterHours?.totals ?? null, Math.floor(now / 1000)));
+  const totals = stripTotals(view && { ask: view.totalAsk, bid: view.totalBid }, visibleAfterHours(feed.afterHours?.totals ?? null, nowSeconds));
   const data = useOrderData(accountRef, code, access.open, referencePrice, balance);
 
   const pending = useSyncExternalStore(pendingWrites.subscribe, pendingWrites.snapshot);

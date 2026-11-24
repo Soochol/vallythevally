@@ -3,9 +3,11 @@ import type { LayoutSummary } from "./generated/LayoutSummary";
 import type { Quote } from "./generated/Quote";
 import type { SymbolCode } from "./generated/SymbolCode";
 import type { SymbolDaySummary } from "./generated/SymbolDaySummary";
+import type { UnixSeconds } from "./generated/UnixSeconds";
 import type { Venue } from "./generated/Venue";
 import type { Watchlists } from "./generated/Watchlists";
 import { isPublicMode } from "../public-mode/serverMode";
+import { fetchBarsPage } from "./bars";
 import { getJson } from "./http";
 
 export const QUOTES_MAX_SYMBOLS = 200;
@@ -43,3 +45,20 @@ export const daySummaryQuery = (code: SymbolCode, venue: Venue) => ({
 
 export const fetchDaySummary = (code: SymbolCode, venue: Venue, signal?: AbortSignal) =>
   getJson<SymbolDaySummary>(`/api/symbols/${encodeURIComponent(code)}/day-summary?venue=${venue}`, signal);
+
+export const VI_RETRY_MS = 30_000;
+
+export const krxDayOpenQuery = (code: SymbolCode, kstDate: string) => ({
+  queryKey: ["vi-krx-day-open", code, kstDate] as const,
+  queryFn: ({ signal }: { signal: AbortSignal }) => fetchDaySummary(code, "krx", signal),
+  staleTime: Infinity,
+  retry: false,
+  refetchInterval: (query: { state: { data?: SymbolDaySummary } }) => (query.state.data?.open == null ? VI_RETRY_MS : false as const),
+});
+
+export const krxReleaseBarsQuery = (code: SymbolCode, releasedAt: UnixSeconds) => ({
+  queryKey: ["vi-krx-release-bars", code, releasedAt] as const,
+  queryFn: ({ signal }: { signal: AbortSignal }) => fetchBarsPage({ symbol: code, venue: "krx", period: "1m" }, signal),
+  staleTime: Infinity,
+  retry: false,
+});
