@@ -1,6 +1,7 @@
 import type { Locator, Page } from "@playwright/test";
 import type { TradingHolding } from "../src/api/generated/TradingHolding";
 import { DEFAULT_ORDER_SETTINGS } from "../src/features/order/orderSettings";
+import { CONNECTED_KIWOOM, DEFAULT_SYSTEM_SETTINGS } from "./fixtures/scenario";
 import { type Scenario, expect, pollSaved, test } from "./harness";
 import { ACCOUNT, BASE, CODE, openOrderWindow, ordersOn, otherAccount, tradingApi, win } from "./order-window";
 
@@ -45,9 +46,14 @@ interface Shown {
   readonly allowMargin?: boolean;
   readonly rateOff?: boolean;
   readonly credit?: TradingHolding[];
+  readonly mock?: boolean;
 }
 
-async function openBand(page: Page, scenario: Scenario, { others = false, longAlias = false, allowMargin = false, rateOff = false, credit = [] }: Shown = {}): Promise<void> {
+async function openBand(page: Page, scenario: Scenario, { others = false, longAlias = false, allowMargin = false, rateOff = false, credit = [], mock = false }: Shown = {}): Promise<void> {
+  if (mock) {
+    scenario.live.kiwoomLink = { ...CONNECTED_KIWOOM, environment: "mock" };
+    scenario.reply((url) => url.pathname === "/api/system/settings", { body: { ...DEFAULT_SYSTEM_SETTINGS, environment: "mock" } });
+  }
   ordersOn(scenario, others ? [otherAccount()] : []);
   if (longAlias) {
     scenario.live.orders = { ...scenario.live.orders, accounts: scenario.live.orders.accounts.map((account, index) => (index === 0 ? { ...account, alias: LONG_ALIAS } : account)) };
@@ -80,7 +86,8 @@ async function expectOneLine(page: Page): Promise<void> {
   const name = await boxOf(label(page));
   expect(name.height).toBeLessThanOrEqual(ONE_LINE_PX);
   const tabs = await expectTabsWhole(page);
-  const badges = [await boxOf(page.getByTestId("account-live")), await boxOf(page.getByTestId("account-route")), await boxOf(page.getByTestId("margin-policy"))];
+  const environment = page.getByTestId("account-mock");
+  const badges = [...(await environment.count() === 0 ? [] : [await boxOf(environment)]), await boxOf(page.getByTestId("account-route")), await boxOf(page.getByTestId("margin-policy"))];
   const row = [name, ...badges, ...tabs];
   for (const box of row) expect(Math.abs(centerY(box) - centerY(name))).toBeLessThan(4);
   for (const [index, box] of row.entries()) {
@@ -114,6 +121,13 @@ test("420px 창의 계좌 띠는 한 줄이고 단추는 미체결·보유종목
   expect((await boxOf(label(page))).width).toBeGreaterThan(40);
   const ellipsis = await label(page).locator(".od-account-text").evaluate((element) => ({ overflow: element.scrollWidth > element.clientWidth, textOverflow: getComputedStyle(element).textOverflow }));
   expect(ellipsis).toEqual({ overflow: true, textOverflow: "ellipsis" });
+});
+
+test("모의: 420px 창의 계좌 띠는 모의투자 배지가 있어도 한 줄이다", async ({ page, scenario }) => {
+  await openBand(page, scenario, { others: true, longAlias: true, allowMargin: true, mock: true });
+  await sizeWindow(page, 420);
+  await expect(page.getByTestId("account-mock")).toHaveText("모의투자");
+  await expectOneLine(page);
 });
 
 test("520px 창부터는 단추 이름을 줄이지 않는다", async ({ page, scenario }) => {

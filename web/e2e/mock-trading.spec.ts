@@ -40,13 +40,13 @@ test("실전: 모의 표시가 없고 탭 제목에 [모의]가 없다", async (
   await expect(page).not.toHaveTitle(/\[모의\]/);
 });
 
-test("모의: 계좌 띠의 모의 표시, 설정의 경로 SOR·NXT 끔과 안내, 설정 값이 NXT여도 KRX로 보낸다", async ({ page, scenario }) => {
+test("모의: 계좌 띠의 모의투자 표시, 설정의 경로 SOR·NXT 끔과 안내, 설정 값이 NXT여도 KRX로 보낸다", async ({ page, scenario }) => {
   environmentIs(scenario, "mock");
   ordersOn(scenario);
   const api = tradingApi(scenario);
   scenario.documents.saveUiState({ ...scenario.documents.uiState(), orderSettings: { ...DEFAULT_ORDER_SETTINGS, venue: "nxt" } });
   await openOrderWindow(page, scenario);
-  await expect(page.getByTestId("account-mock")).toHaveText("모의");
+  await expect(page.getByTestId("account-mock")).toHaveText("모의투자");
   await expect(routeButton(page)).toContainText("KRX");
   await openRoutes(page);
   await expect(routes(page).getByRole("button", { name: "SOR" })).toBeDisabled();

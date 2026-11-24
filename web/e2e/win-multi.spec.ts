@@ -160,7 +160,7 @@ test("지표는 메뉴에서 열려 있음이고 다시 골라도 하나다", as
   await pollSaved(() => savedWindows(scenario, "indicators")).toHaveLength(1);
 });
 
-test("호가주문 창 둘에서 수량 칸 이름표는 각자 자기 입력칸을 가리키고 화면 안에 겹치는 id가 없다", async ({ page, scenario }) => {
+test("같은 종류 호가주문 창 둘의 수량 칸은 label 없이 이름이 수량이고 따로 움직인다", async ({ page, scenario }) => {
   ordersOn(scenario);
   tradingApi(scenario);
   pinQuote(scenario, CODE, BASE);
@@ -173,10 +173,7 @@ test("호가주문 창 둘에서 수량 칸 이름표는 각자 자기 입력칸
   await quantity(1).fill("9");
   await expect(quantity(0)).toHaveValue("7");
   await expect(quantity(1)).toHaveValue("9");
-  await win(page).nth(1).locator("label.od-qty-label").dispatchEvent("click");
-  await expect(quantity(1)).toBeFocused();
-  await win(page).nth(0).locator("label.od-qty-label").dispatchEvent("click");
-  await expect(quantity(0)).toBeFocused();
+  await expect(page.getByTestId("order-quantity-row").locator("label")).toHaveCount(0);
   expect(await duplicateIds(page)).toEqual([]);
 });
 
