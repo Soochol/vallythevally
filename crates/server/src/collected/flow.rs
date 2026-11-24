@@ -195,27 +195,17 @@ impl<K: CollectedKind> FlowCache<K> {
         }
         let needs_reset = !tail.initialized || tail.keys.keys().any(|existing| !discovered.contains_key(existing));
         if needs_reset {
-            let generation = self.alloc_generation();
-            let mut keys = BTreeMap::new();
-            for (key, path) in discovered {
-                keys.insert(key, KeyTail::new(path));
-            }
-            tail.initialized = true;
-            tail.generation = generation;
-            tail.keys = keys;
-            tail.rows.clear();
-            let new_rows = read_all_keys::<K>(&mut tail.keys, symbol);
-            merge_into_rows(&mut tail.rows, new_rows);
-            let (gaps, live) = compute_links_status(shared_dir, date, date_str, &mut tail.keys, now);
-            tail.gaps = gaps;
-            tail.live = live;
-            tail.last_read = now;
+            self.rebuild_tail(&mut tail, discovered, shared_dir, date, date_str, symbol, now);
             return Ok(Some(tail.slice(after)));
         }
-        for (key, path) in discovered {
-            tail.keys.entry(key).or_insert_with(|| KeyTail::new(path));
+        for (key, path) in &discovered {
+            tail.keys.entry(key.clone()).or_insert_with(|| KeyTail::new(path.clone()));
         }
-        let new_rows = read_all_keys::<K>(&mut tail.keys, symbol);
+        let (new_rows, restarted) = read_all_keys::<K>(&mut tail.keys, symbol);
+        if restarted {
+            self.rebuild_tail(&mut tail, discovered, shared_dir, date, date_str, symbol, now);
+            return Ok(Some(tail.slice(after)));
+        }
         let reordered = merge_into_rows(&mut tail.rows, new_rows);
         if reordered {
             tail.generation = self.alloc_generation();
@@ -225,6 +215,34 @@ impl<K: CollectedKind> FlowCache<K> {
         tail.live = live;
         tail.last_read = now;
         Ok(Some(tail.slice(after)))
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn rebuild_tail(
+        &self,
+        tail: &mut FlowTail<K::View>,
+        discovered: BTreeMap<String, PathBuf>,
+        shared_dir: &Path,
+        date: KstDate,
+        date_str: &str,
+        symbol: &str,
+        now: KstTime,
+    ) {
+        let generation = self.alloc_generation();
+        let mut keys = BTreeMap::new();
+        for (key, path) in discovered {
+            keys.insert(key, KeyTail::new(path));
+        }
+        tail.initialized = true;
+        tail.generation = generation;
+        tail.keys = keys;
+        tail.rows.clear();
+        let (new_rows, _) = read_all_keys::<K>(&mut tail.keys, symbol);
+        merge_into_rows(&mut tail.rows, new_rows);
+        let (gaps, live) = compute_links_status(shared_dir, date, date_str, &mut tail.keys, now);
+        tail.gaps = gaps;
+        tail.live = live;
+        tail.last_read = now;
     }
 }
 
@@ -254,10 +272,12 @@ fn list_key_files(shared_dir: &Path, date_str: &str, type_code: &str, symbol: &s
     Ok(keys)
 }
 
-fn read_all_keys<K: CollectedKind>(keys: &mut BTreeMap<String, KeyTail>, symbol: &str) -> Vec<(i64, K::View)> {
+fn read_all_keys<K: CollectedKind>(keys: &mut BTreeMap<String, KeyTail>, symbol: &str) -> (Vec<(i64, K::View)>, bool) {
     let mut decoded: Vec<(i64, K::View)> = Vec::new();
     let mut skipped: u64 = 0;
+    let mut restarted = false;
     for (key, tail) in keys.iter_mut() {
+        let prev_restarts = tail.cursor.restarts();
         let blocks = match tail.cursor.read_new() {
             Ok(blocks) => {
                 tail.last_error = None;
@@ -272,6 +292,9 @@ fn read_all_keys<K: CollectedKind>(keys: &mut BTreeMap<String, KeyTail>, symbol:
                 continue;
             }
         };
+        if tail.cursor.restarts() != prev_restarts {
+            restarted = true;
+        }
         for block in blocks {
             for row in block.rows {
                 tail.first_row_ms = Some(tail.first_row_ms.map_or(row.recv_ms, |prev| prev.min(row.recv_ms)));
@@ -286,7 +309,7 @@ fn read_all_keys<K: CollectedKind>(keys: &mut BTreeMap<String, KeyTail>, symbol:
     if skipped > 0 {
         tracing::warn!(type_code = K::TYPE_CODE, symbol = %symbol, skipped, "흐름 행을 읽지 못해 건너뛰었습니다");
     }
-    decoded
+    (decoded, restarted)
 }
 
 fn merge_into_rows<V>(rows: &mut Vec<(i64, V)>, mut new_rows: Vec<(i64, V)>) -> bool {

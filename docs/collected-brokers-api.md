@@ -4,10 +4,10 @@
 
 ## 설정
 
-`VALLY_HOGA_DATA_DIR` 환경 변수로 수집 데이터 폴더를 지정한다(절대 경로). 설정이 없으면 서버는 오류를 내지 않고 두 경로 모두 `200`에 `source: "none"`·빈 목록으로 답해 화면이 기존 실시간 구독으로 돌아가게 한다.
+`VALLY_HOGA_DATA_DIR` 환경 변수로 수집 데이터 폴더를 지정한다(절대 경로). 공용 자료(당일 종목 흐름) 폴더는 `VALLY_SHARED_DATA_DIR`이 설정돼 있으면 그 폴더를 쓰고, 없으면 `<VALLY_HOGA_DATA_DIR>/shared`를 쓴다. 두 설정이 모두 없으면 서버는 오류를 내지 않고 두 경로 모두 `200`에 `source: "none"`·빈 목록으로 답해 화면이 기존 실시간 구독으로 돌아가게 한다.
 
 - 정리된 날 저장소: `<VALLY_HOGA_DATA_DIR>/store/<YYYYMMDD>/`
-- 공용 자료(종목 흐름): `<VALLY_HOGA_DATA_DIR>/shared/symbol-flow/<YYYYMMDD>/`
+- 공용 자료(종목 흐름): `<VALLY_SHARED_DATA_DIR 또는 VALLY_HOGA_DATA_DIR/shared>/symbol-flow/<YYYYMMDD>/`
 
 ## 경로
 
@@ -47,7 +47,7 @@
 `(종목, 날짜)`마다 원천은 하나다.
 
 1. `store/<날짜>/complete.json`이 있고 그 종목을 수집했으면 `store`에서 읽는다. `store/<날짜>/0F/<버킷>.parquet`에서 해당 종목의 행을 DuckDB로 읽고, 끊김은 `complete.json`의 `gaps`를 초 단위로 바꿔 쓴다.
-2. 그렇지 않고 날짜가 오늘(KST)이며 `<VALLY_HOGA_DATA_DIR>/shared/symbol-flow/<오늘>/0F/<종목>/*.flow` 파일이 있으면 `flow`에서 읽는다. 한 종목에 키 파일이 여럿이면 시각 순으로 합친다.
+2. 그렇지 않고 날짜가 오늘(KST)이며 `<공용 자료 폴더>/symbol-flow/<오늘>/0F/<종목>/*.flow` 파일이 있으면 `flow`에서 읽는다. 한 종목에 키 파일이 여럿이면 시각 순으로 합친다.
 3. 둘 다 아니면 `none`이다.
 
 오늘이 장 마감 뒤 정리되어 `store/<오늘>/complete.json`이 생기면 다음 요청부터 원천이 `store`로 바뀌며, 옛 흐름 커서를 받아도 `reset: true`로 전체를 돌려준다.

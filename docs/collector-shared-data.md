@@ -6,7 +6,7 @@
 
 | 변수 | 뜻 |
 |---|---|
-| `VALLY_SHARED_DATA_DIR` | 자료 폴더. 절대 경로여야 한다. 없으면 서버는 아무것도 읽지 않고 동작이 지금과 같다. |
+| `VALLY_SHARED_DATA_DIR` | 자료 폴더. 절대 경로여야 한다. 없으면 서버는 공용 자료 폴링을 켜지 않고, 수집 거래원 당일 흐름은 `<VALLY_HOGA_DATA_DIR>/shared`를 쓴다. |
 | `VALLY_SHARED_DATA_POLL_MILLIS` | 폴링 간격. 기본 1000. 1 이상의 정수. |
 | `VALLY_SCREENER_SNAPSHOT_STALE_SECS` | 장중 스크리너가 받아들이는 스냅샷 나이 한도(초). 기본 120. 1 이상의 정수. 넘으면 실행이 `stale_data`로 실패한다. |
 

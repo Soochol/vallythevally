@@ -110,6 +110,7 @@ enum StoreLookup<V> {
 
 pub struct Collected {
     dir: OnceLock<PathBuf>,
+    shared_dir: OnceLock<PathBuf>,
     day_index: DayIndexCache,
     permits: Arc<Semaphore>,
     brokers: KindSource<Brokers>,
@@ -119,6 +120,7 @@ impl Collected {
     pub fn new() -> Arc<Self> {
         Arc::new(Self {
             dir: OnceLock::new(),
+            shared_dir: OnceLock::new(),
             day_index: DayIndexCache::new(),
             permits: Arc::new(Semaphore::new(MAX_CONCURRENT_QUERIES)),
             brokers: KindSource::new(),
@@ -127,6 +129,17 @@ impl Collected {
 
     pub fn enable(&self, data_dir: PathBuf) {
         let _ = self.dir.set(data_dir);
+    }
+
+    pub fn use_shared_dir(&self, dir: PathBuf) {
+        let _ = self.shared_dir.set(dir);
+    }
+
+    fn resolve_shared_dir(&self) -> Option<PathBuf> {
+        self.shared_dir
+            .get()
+            .cloned()
+            .or_else(|| self.dir.get().map(|dir| dir.join(SHARED_FOLDER)))
     }
 
     pub(super) async fn broker_day(
@@ -145,16 +158,23 @@ impl Collected {
     }
 
     async fn days_for<K: CollectedKind>(self: &Arc<Self>, stock: StockCode, now: KstTime) -> Result<Vec<String>, String> {
-        let Some(dir) = self.dir.get().cloned() else {
+        let dir = self.dir.get().cloned();
+        let shared_dir = self.resolve_shared_dir();
+        if dir.is_none() && shared_dir.is_none() {
             return Ok(Vec::new());
-        };
+        }
         let collected = Arc::clone(self);
         let stock_str = stock.as_str().to_owned();
         let today_str = format_yyyymmdd(now.kst_date());
         tokio::task::spawn_blocking(move || {
-            let mut days = collected.day_index.collected_days(&dir, &stock_str)?;
-            let shared_dir = dir.join(SHARED_FOLDER);
-            if !days.iter().any(|d| d == &today_str) && has_symbol_flow(&shared_dir, &today_str, K::TYPE_CODE, &stock_str)? {
+            let mut days = match &dir {
+                Some(dir) => collected.day_index.collected_days(dir, &stock_str)?,
+                None => Vec::new(),
+            };
+            if let Some(shared_dir) = &shared_dir
+                && !days.iter().any(|d| d == &today_str)
+                && has_symbol_flow(shared_dir, &today_str, K::TYPE_CODE, &stock_str)?
+            {
                 days.push(today_str);
                 days.sort_unstable();
             }
@@ -173,47 +193,48 @@ impl Collected {
         after: Option<&str>,
         now: KstTime,
     ) -> Result<DaySlice<K::View>, String> {
-        let Some(dir) = self.dir.get().cloned() else {
-            return Ok(DaySlice::none());
-        };
-        let cache_key = (stock.as_str().to_owned(), date_str.to_owned());
-        let lookup = {
-            let collected = Arc::clone(self);
-            let dir_check = dir.clone();
-            let date_check = date_str.to_owned();
-            let key_check = cache_key.clone();
-            tokio::task::spawn_blocking(move || check_store_cache(&collected, select(&collected), &dir_check, &date_check, &key_check))
-                .await
-                .map_err(|e| format!("수집 저장소 확인 작업이 멈췄습니다: {e}"))??
-        };
-        match lookup {
-            StoreLookup::Hit(stamp, day) => {
-                return Ok(slice_store(&stamp, &day, after));
-            }
-            StoreLookup::Miss => {
-                let permit = self.permits.clone().acquire_owned().await.map_err(|e| format!("수집 저장소 조회 허가를 얻지 못했습니다: {e}"))?;
+        if let Some(dir) = self.dir.get().cloned() {
+            let cache_key = (stock.as_str().to_owned(), date_str.to_owned());
+            let lookup = {
                 let collected = Arc::clone(self);
-                let dir_load = dir.clone();
-                let date_owned = date_str.to_owned();
-                let stock_str = stock.as_str().to_owned();
-                let loaded = tokio::task::spawn_blocking(move || {
-                    let _permit = permit;
-                    load_store_day(&collected, select(&collected), &dir_load, date, &date_owned, &stock_str, &cache_key)
-                })
-                .await
-                .map_err(|e| format!("수집 저장소 조회 작업이 멈췄습니다: {e}"))??;
-                if let Some(loaded) = loaded {
-                    return Ok(slice_store(&loaded.stamp, &loaded.day, after));
+                let dir_check = dir.clone();
+                let date_check = date_str.to_owned();
+                let key_check = cache_key.clone();
+                tokio::task::spawn_blocking(move || check_store_cache(&collected, select(&collected), &dir_check, &date_check, &key_check))
+                    .await
+                    .map_err(|e| format!("수집 저장소 확인 작업이 멈췄습니다: {e}"))??
+            };
+            match lookup {
+                StoreLookup::Hit(stamp, day) => {
+                    return Ok(slice_store(&stamp, &day, after));
                 }
+                StoreLookup::Miss => {
+                    let permit = self.permits.clone().acquire_owned().await.map_err(|e| format!("수집 저장소 조회 허가를 얻지 못했습니다: {e}"))?;
+                    let collected = Arc::clone(self);
+                    let dir_load = dir.clone();
+                    let date_owned = date_str.to_owned();
+                    let stock_str = stock.as_str().to_owned();
+                    let loaded = tokio::task::spawn_blocking(move || {
+                        let _permit = permit;
+                        load_store_day(&collected, select(&collected), &dir_load, date, &date_owned, &stock_str, &cache_key)
+                    })
+                    .await
+                    .map_err(|e| format!("수집 저장소 조회 작업이 멈췄습니다: {e}"))??;
+                    if let Some(loaded) = loaded {
+                        return Ok(slice_store(&loaded.stamp, &loaded.day, after));
+                    }
+                }
+                StoreLookup::NotCollected => {}
             }
-            StoreLookup::NotCollected => {}
         }
         if date != now.kst_date() {
             return Ok(DaySlice::none());
         }
+        let Some(shared_dir) = self.resolve_shared_dir() else {
+            return Ok(DaySlice::none());
+        };
         let flow_after = parse_flow_cursor(after);
         let collected = Arc::clone(self);
-        let shared_dir = dir.join(SHARED_FOLDER);
         let date_owned = date_str.to_owned();
         let stock_str = stock.as_str().to_owned();
         let flow = tokio::task::spawn_blocking(move || {

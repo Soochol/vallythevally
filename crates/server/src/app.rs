@@ -420,7 +420,8 @@ pub async fn start_with(config: &Config, lock: &InstanceLock, adapters: Adapters
         state.quote_minutes.set_fallback_dir(dir.join("shared"));
         state.collected.enable(dir.clone());
     }
-    if config.shared_data.is_some() {
+    if let Some(shared) = &config.shared_data {
+        state.collected.use_shared_dir(shared.dir.clone());
         state.screener.read_shared_snapshots(state.shared_data.clone(), config.screener_snapshot_stale_limit);
         state.screener.keep_calendar_fresh();
     }
