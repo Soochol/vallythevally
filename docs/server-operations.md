@@ -124,6 +124,7 @@ TimeoutStopSec=60
 WantedBy=default.target
 ```
 
+- `VALLY_HOGA_DATA_DIR`은 호가 재현 저장소 경로이며, `VALLY_SHARED_DATA_DIR`이 없을 때는 분 호가 조회 API가 `<VALLY_HOGA_DATA_DIR>/shared`를 대체 폴더로 읽는다(다른 공용 자료 전환은 켜지 않는다).
 - `VALLY_TAILNET_HOSTS`는 포트 없는 MagicDNS 전체 이름이다. 쉼표로 여러 개를 적을 수 있다. `.ts.net`으로 끝나지 않는 값, 포트·스킴·경로가 붙은 값, 와일드카드, IP는 서버가 시작하지 않는다.
 - 이름이 `tailscale serve`가 쓰는 이름과 같아야 한다. 서버 PC에서 `tailscale status --json`의 `Self.DNSName`(끝의 점 제외)이 그 이름이다.
 - 이 단계에서는 `daemon-reload`만 한다. enable·start는 "전환 순서"에서 한다.

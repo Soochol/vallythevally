@@ -192,6 +192,7 @@ pub fn application_with_source(inputs: ApplicationInputs, mut system: SystemStat
         book_replay: crate::book_replay::BookReplay::new(),
         heatmap_quotes: Arc::new(crate::heatmap_board::QuoteCache::with_generation(generation.clone())),
         heatmap_flow: Arc::new(crate::heatmap_flow::FlowCache::with_generation(generation.clone())),
+        quote_minutes: Arc::new(crate::quote_minutes::QuoteCache::new()),
         generation,
     })
 }
@@ -415,6 +416,7 @@ pub async fn start_with(config: &Config, lock: &InstanceLock, adapters: Adapters
     state.shared_data.start(config.shared_data.as_ref());
     if let Some(dir) = &config.hoga_data_dir {
         state.book_replay.enable(dir.clone());
+        state.quote_minutes.set_fallback_dir(dir.join("shared"));
     }
     if config.shared_data.is_some() {
         state.screener.read_shared_snapshots(state.shared_data.clone(), config.screener_snapshot_stale_limit);

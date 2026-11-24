@@ -30,6 +30,7 @@ pub mod market_source;
 pub mod market_overview;
 pub mod public;
 pub mod public_ip;
+pub mod quote_minutes;
 pub mod quotes;
 pub mod rankings;
 pub mod screener;

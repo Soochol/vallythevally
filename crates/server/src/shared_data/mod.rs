@@ -10,7 +10,7 @@ mod symbol_flow;
 mod themes;
 mod write;
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
@@ -81,6 +81,10 @@ impl SharedData {
 
     pub fn is_enabled(&self) -> bool {
         self.dir.get().is_some()
+    }
+
+    pub fn dir(&self) -> Option<&Path> {
+        self.dir.get().map(PathBuf::as_path)
     }
 
     pub fn snapshot(&self, venue: Venue) -> &Board<SnapshotBody> {

@@ -454,6 +454,8 @@ async fn every_public_shared_route(site: &Site, who: &Session) -> Vec<(String, u
         "/api/etf/stocks/005930",
         "/api/symbols/005930/financials",
         "/api/symbols/005930/financial-source",
+        "/api/symbols/005930/quote-totals?period=1m&from=2026-11-06&to=2026-11-06",
+        "/api/symbols/005930/quote-depth?period=1m&from=2026-11-06&to=2026-11-06",
         "/api/heatmap/board?venue=krx",
         "/api/heatmap/flow?symbols=005930,000660,200010&venue=krx",
         "/api/market-overview/index?market=kospi",
@@ -490,6 +492,8 @@ async fn every_shared_public_route_answers_many_accounts_without_one_kiwoom_tran
         for label in [
             "GET /api/symbols?q=%EC%82%BC%EC%84%B1",
             "GET /api/symbols/005930",
+            "GET /api/symbols/005930/quote-totals?period=1m&from=2026-11-06&to=2026-11-06",
+            "GET /api/symbols/005930/quote-depth?period=1m&from=2026-11-06&to=2026-11-06",
             "GET /api/screener/status",
             "GET /api/heatmap/board?venue=krx",
             "GET /api/heatmap/flow?symbols=005930,000660,200010&venue=krx",

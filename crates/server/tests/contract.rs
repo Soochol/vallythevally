@@ -16,6 +16,7 @@ use server::etf::*;
 use server::heatmap_board::{HeatmapBoard, HeatmapBoardMember, HeatmapBoardTheme, HeatmapSource, HeatmapThemeOrder, HeatmapThemeSummary, KiwoomCatalogInfo, KiwoomCatalogState};
 use server::heatmap_flow::{HeatmapFlowPoint, HeatmapFlowSeries};
 use server::kiwoom_themes::{KiwoomLimitMove, KiwoomTheme, KiwoomThemeList, KiwoomThemeMember, KiwoomThemeMembers};
+use server::quote_minutes::{QuoteDayInfo, QuoteDayState, QuoteDepthPage, QuoteDepthPoint, QuoteDepthSource, QuoteTotalPoint, QuoteTotalsPage};
 use ts_rs::TS;
 
 const DIR: &str = "web/src/api/generated";
@@ -334,6 +335,13 @@ fn generated_typescript_matches_the_committed_files() {
         generated::<MarketOverviewTurnoverCard>(),
         generated::<MarketOverviewTurnoverDay>(),
         generated::<MarketOverviewVolatility>(),
+        generated::<QuoteDayInfo>(),
+        generated::<QuoteDayState>(),
+        generated::<QuoteDepthPage>(),
+        generated::<QuoteDepthPoint>(),
+        generated::<QuoteDepthSource>(),
+        generated::<QuoteTotalPoint>(),
+        generated::<QuoteTotalsPage>(),
     ];
     let mut committed: Vec<String> = git(&["ls-tree", "--name-only", "HEAD", &format!("{DIR}/")])
         .lines()

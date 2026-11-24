@@ -167,6 +167,7 @@ impl PublicListener {
             .merge(rankings)
             .merge(market)
             .merge(crate::etf::routes())
+            .merge(crate::quote_minutes::routes(runtime.state.quote_minutes.clone()))
             .merge(screener)
             .merge(crate::collector::routes())
             .merge(extra)
