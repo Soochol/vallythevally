@@ -65,6 +65,7 @@ export interface TapeState {
   readonly holding: boolean;
   readonly firstLiveSecond: number | null;
   readonly strength: number | null;
+  readonly sameTimeRatio: number | null;
   readonly lastTrade: LastTrade | null;
   readonly nextKey: number;
 }
@@ -79,6 +80,7 @@ export const emptyTape: TapeState = {
   holding: false,
   firstLiveSecond: null,
   strength: null,
+  sameTimeRatio: null,
   lastTrade: null,
   nextKey: 0,
 };
@@ -168,6 +170,14 @@ function replaceNewest(state: TapeState, entry: TapeEntry): TapeState {
   return { ...state, live: [entry, ...state.live.slice(1)] };
 }
 
+function lastNumber(trades: readonly FeedTrade[], pick: (trade: FeedTrade) => number | null | undefined): number | null {
+  for (let index = trades.length - 1; index >= 0; index--) {
+    const value = pick(trades[index]!);
+    if (value != null) return value;
+  }
+  return null;
+}
+
 function liveTrades(state: TapeState, trades: readonly FeedTrade[], receivedAt: number): TapeState {
   if (trades.length === 0) return state;
   const rows: TradeRow[] = trades.map((trade, index) => ({
@@ -182,9 +192,10 @@ function liveTrades(state: TapeState, trades: readonly FeedTrade[], receivedAt: 
     receivedAt,
   }));
   const firstLiveSecond = state.firstLiveSecond ?? Math.min(...rows.map((row) => row.secondOfDay));
-  const strength = [...trades].reverse().find((trade) => trade.strength !== null)?.strength ?? state.strength;
+  const strength = lastNumber(trades, (trade) => trade.strength) ?? state.strength;
+  const sameTimeRatio = lastNumber(trades, (trade) => trade.sameTimeRatio) ?? state.sameTimeRatio;
   const last = trades[trades.length - 1]!;
-  const added = withNewest({ ...state, firstLiveSecond, strength, lastTrade: { price: last.price, t: last.t }, nextKey: state.nextKey + rows.length }, rows.toReversed());
+  const added = withNewest({ ...state, firstLiveSecond, strength, sameTimeRatio, lastTrade: { price: last.price, t: last.t }, nextKey: state.nextKey + rows.length }, rows.toReversed());
   return settleHistory({ ...added, liveTotals: rows.reduce(addTotals, state.liveTotals) });
 }
 

@@ -116,9 +116,9 @@ function OrderBody({ id, code, infoPager, choice, access, balance }: { id: Windo
   const explorerOn = exploring && fullPrices !== null;
   const shownRows: LadderRow[] = quotes && heldLadder ? (explorerOn ? buildLadderRows(fullPrices, quotes) : buildLadderRows(heldLadder.prices, quotes, heldLadder.sidesSplit)) : [];
   const rows = settings.rate ? shownRows : shownRows.map((row) => ({ ...row, rate: null }));
-  const info = useQuoteInfo({ code, venue: quoteVenue, lastPrice: feed.lastPrice, previousClose: feed.previousClose, fundamentals: limits, page: infoPager.page });
+  const info = useQuoteInfo({ code, venue: quoteVenue, lastPrice: feed.lastPrice, previousClose: feed.previousClose, fundamentals: limits, page: infoPager.page, flipped: infoPager.flipped, sameTimeRatio: trades.sameTimeRatio });
   const expected = view ? visibleExpected(view.t, Math.floor(now / 1000), view.expected) : null;
-  const infoSlots = placeInfoItems(rows, info, expectedItemsOnPage(infoPager.page, expected));
+  const infoSlots = placeInfoItems(rows, info, expectedItemsOnPage(infoPager.page, expected, feed.previousClose, infoPager.flipped));
   const totals = stripTotals(view && { ask: view.totalAsk, bid: view.totalBid }, visibleAfterHours(feed.afterHours?.totals ?? null, Math.floor(now / 1000)));
   const data = useOrderData(accountRef, code, access.open, referencePrice, balance);
 

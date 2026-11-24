@@ -4,29 +4,44 @@ import { formatStrength } from "./format";
 import type { InfoPager, LadderTrades } from "./useLadderSlots";
 import { priceTone } from "./PriceLadder";
 import type { TradeRow } from "../trades/tape";
-import { INFO_TABS, type InfoLine, type InfoPage, otherInfoPage } from "./quoteInfo";
+import { INFO_TABS, type InfoKey, type InfoLine, type InfoPage, otherInfoPage } from "./quoteInfo";
 
-function InfoRow({ line }: { line: InfoLine }) {
+function InfoRow({ line, onToggle }: { line: InfoLine; onToggle: (key: InfoKey) => void }) {
+  const flip = line.key === undefined ? undefined : () => onToggle(line.key!);
+  const flipped = line.flipped ? "" : undefined;
   if (line.kind === "range") {
+    const track = (
+      <span className="mw-range-track">{line.position !== null && <i className="mw-range-tick" data-testid="ladder-info-tick" style={{ left: `${line.position * 100}%` }} />}</span>
+    );
+    if (flip === undefined) {
+      return <div className="mw-card-range" data-testid="ladder-info-range" data-label={line.label} role="img" aria-label={line.label}>{track}</div>;
+    }
+    return <button type="button" className="mw-card-range" data-testid="ladder-info-range" data-label={line.label} data-flipped={flipped} aria-label={line.label} aria-pressed={Boolean(line.flipped)} onClick={flip}>{track}</button>;
+  }
+  if (line.kind === "ends") {
+    const content = <><span title={line.lowTitle}>{line.low}</span><span title={line.highTitle}>{line.high}</span></>;
+    if (flip === undefined) {
+      return <div className="mw-card-ends" data-testid="ladder-info-ends">{content}</div>;
+    }
+    return <button type="button" className="mw-card-ends" data-testid="ladder-info-ends" data-flipped={flipped} aria-pressed={Boolean(line.flipped)} onClick={flip}>{content}</button>;
+  }
+  const { item } = line;
+  const content = <><span>{item.label}</span><b data-tone={item.tone ?? undefined}>{item.value}</b></>;
+  if (flip === undefined) {
     return (
-      <div className="mw-card-range" data-testid="ladder-info-range" data-label={line.label} role="img" aria-label={line.label}>
-        <span className="mw-range-track">{line.position !== null && <i className="mw-range-tick" data-testid="ladder-info-tick" style={{ left: `${line.position * 100}%` }} />}</span>
+      <div className="mw-card-row" data-testid="ladder-info" data-label={item.label} data-band={item.band ? item.tone : undefined} data-warn={item.tone === "warning" ? "" : undefined}>
+        {content}
       </div>
     );
   }
-  if (line.kind === "ends") {
-    return <div className="mw-card-ends" data-testid="ladder-info-ends"><span>{line.low}</span><span>{line.high}</span></div>;
-  }
-  const { item } = line;
   return (
-    <div className="mw-card-row" data-testid="ladder-info" data-label={item.label} data-band={item.band ? item.tone : undefined} data-warn={item.tone === "warning" ? "" : undefined}>
-      <span>{item.label}</span>
-      <b data-tone={item.tone ?? undefined}>{item.value}</b>
-    </div>
+    <button type="button" className="mw-card-row" data-testid="ladder-info" data-label={item.label} data-flipped={flipped} data-band={item.band ? item.tone : undefined} data-warn={item.tone === "warning" ? "" : undefined} aria-pressed={Boolean(line.flipped)} onClick={flip}>
+      {content}
+    </button>
   );
 }
 
-function InfoTabs({ pager }: { pager: InfoPager }) {
+function InfoTabs({ pager }: { pager: Pick<InfoPager, "page" | "select"> }) {
   const refs = useRef<Partial<Record<InfoPage, HTMLButtonElement | null>>>({});
   const choose = (page: InfoPage) => {
     pager.select(page);
@@ -47,20 +62,29 @@ function InfoTabs({ pager }: { pager: InfoPager }) {
   );
 }
 
-const sameLines = (a: readonly InfoLine[], b: readonly InfoLine[]): boolean =>
-  a === b || (a.length === b.length && a.every((line, index) => JSON.stringify(line) === JSON.stringify(b[index])));
+const sameLine = (a: InfoLine, b: InfoLine): boolean => {
+  if (a === b) return true;
+  if (a.kind !== b.kind || a.key !== b.key || a.flipped !== b.flipped) return false;
+  if (a.kind === "range" && b.kind === "range") return a.label === b.label && a.position === b.position;
+  if (a.kind === "ends" && b.kind === "ends") return a.low === b.low && a.high === b.high && a.lowTitle === b.lowTitle && a.highTitle === b.highTitle;
+  if (a.kind === "item" && b.kind === "item") return a.item.label === b.item.label && a.item.value === b.item.value && a.item.tone === b.item.tone && a.item.band === b.item.band;
+  return false;
+};
 
-const InfoCard = memo(function InfoCard({ lines, rows, page, select }: { lines: readonly InfoLine[]; rows: number; page: InfoPage; select: InfoPager["select"] }) {
+const sameLines = (a: readonly InfoLine[], b: readonly InfoLine[]): boolean =>
+  a === b || (a.length === b.length && a.every((line, index) => sameLine(line, b[index]!)));
+
+const InfoCard = memo(function InfoCard({ lines, rows, page, select, toggle }: { lines: readonly InfoLine[]; rows: number; page: InfoPage; select: InfoPager["select"]; toggle: InfoPager["toggle"] }) {
   return (
     <div className="mw-card" data-testid="ladder-info-card" style={{ height: `calc(${rows} * var(--size-24))` }}>
-      {lines.map((line, index) => <InfoRow key={index} line={line} />)}
+      {lines.map((line, index) => <InfoRow key={index} line={line} onToggle={toggle} />)}
       <InfoTabs pager={{ page, select }} />
     </div>
   );
-}, (a, b) => a.rows === b.rows && a.page === b.page && a.select === b.select && sameLines(a.lines, b.lines));
+}, (a, b) => a.rows === b.rows && a.page === b.page && a.select === b.select && a.toggle === b.toggle && sameLines(a.lines, b.lines));
 
 export const infoSlot = (lines: readonly InfoLine[], pager: InfoPager) => (rowCount: number): ReactNode => (
-  <InfoCard lines={lines} rows={rowCount} page={pager.page} select={pager.select} />
+  <InfoCard lines={lines} rows={rowCount} page={pager.page} select={pager.select} toggle={pager.toggle} />
 );
 
 export const scrollAction = (scrollTop: number): "hold" | "release" => (scrollTop > 0 ? "hold" : "release");
