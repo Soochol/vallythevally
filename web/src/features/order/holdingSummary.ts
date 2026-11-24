@@ -4,6 +4,7 @@ import type { UnixSeconds } from "../../api/generated/UnixSeconds";
 import { isMarketOpen } from "../../chart/time";
 import { formatPercent } from "../../lib/format";
 import { isEtfOrEtn } from "../../lib/symbol";
+import type { WatchQuote } from "../../stores/quoteBook";
 import { formatWon } from "../market-window/format";
 import { secondOfDay } from "../trades/tape";
 import { groupKey, type PriceGroup } from "./orderRules";
@@ -27,6 +28,11 @@ export function atLivePrice(holding: TradingHolding | null, lastPrice: number | 
     evaluationProfit: holding.evaluationProfit + profitChange,
     profitRateCenti: holding.profitRateCenti === null ? null : holding.profitRateCenti + profitRateChangeCenti(holding, profitChange),
   };
+}
+
+export function atWatchQuote(holding: TradingHolding, watch: WatchQuote): TradingHolding {
+  if (watch.limited || watch.stale || watch.quote === undefined) return holding;
+  return atLivePrice(holding, watch.quote.price) ?? holding;
 }
 
 export interface ProfitDisplay {

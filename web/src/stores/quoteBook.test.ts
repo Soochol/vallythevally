@@ -3,7 +3,7 @@ import type { Quote } from "../api/generated/Quote";
 import type { SymbolCode } from "../api/generated/SymbolCode";
 import type { Venue } from "../api/generated/Venue";
 import { ApiRequestError } from "../api/http";
-import type { QuoteEvent } from "../api/socket";
+import type { Connection, QuoteEvent } from "../api/socket";
 import { QuoteBook } from "./quoteBook";
 
 const quote = (symbol: SymbolCode, price: number, source: Quote["source"] = "realtime"): Quote => ({
@@ -29,6 +29,7 @@ function setup() {
   const watchVenues: Venue[] = [];
   const fetches: Fetch[] = [];
   let emit: (e: QuoteEvent) => void = () => {};
+  let notifyConnection: (c: Connection) => void = () => {};
   const book = new QuoteBook({
     socket: {
       setWatch: (symbols, venue) => {
@@ -37,6 +38,11 @@ function setup() {
       },
       onQuotes: (handler) => {
         emit = handler;
+        return () => {};
+      },
+      watch: (listener) => {
+        notifyConnection = listener;
+        listener({ socket: "open", status: { realtime: "live", since: 1_000, backfilling: false } });
         return () => {};
       },
     },
@@ -48,7 +54,7 @@ function setup() {
   const price = (code: SymbolCode) => book.get(code).quote?.price;
   const realtime = (...quotes: Quote[]) => emit({ type: "quotes", venue: "combined", quotes });
   const realtimeIn = (venue: Venue, ...quotes: Quote[]) => emit({ type: "quotes", venue, quotes });
-  return { book, watches, watchVenues, realtimeIn, fetches, price, realtime, emit: (e: QuoteEvent) => emit(e) };
+  return { book, watches, watchVenues, realtimeIn, fetches, price, realtime, emit: (e: QuoteEvent) => emit(e), setConnection: (c: Connection) => notifyConnection(c) };
 }
 
 const settle = () => vi.advanceTimersByTimeAsync(0);
@@ -107,7 +113,7 @@ describe("QuoteBook", () => {
 
     emit({ type: "resync" });
     await settle();
-    expect(book.get("000660")).toEqual({ quote: quote("000660", 180_000), limited: false });
+    expect(book.get("000660")).toEqual({ quote: quote("000660", 180_000), limited: false, stale: true });
     expect(price("000660")).toBe(180_000);
 
     emit({ type: "watch_limited", symbols: ["005930", "000660"] });
@@ -140,7 +146,7 @@ describe("QuoteBook", () => {
     release();
     const again = book.lease(["005930"]);
     await settle();
-    expect(book.get("000660")).toEqual({ quote: undefined, limited: false });
+    expect(book.get("000660")).toEqual({ quote: undefined, limited: false, stale: false });
     realtime(quote("000660", 182_000));
     fetches[0]!.resolve([quote("000660", 179_000, "polled")]);
     await settle();
@@ -272,7 +278,7 @@ describe("QuoteBook", () => {
     await settle();
     fetches[1]!.resolve([quote("005930", 51_500, "polled")]);
     await settle();
-    expect(book.get("005930")).toEqual({ quote: quote("005930", 51_500, "polled"), limited: true });
+    expect(book.get("005930")).toEqual({ quote: quote("005930", 51_500, "polled"), limited: true, stale: true });
   });
 
   test("함께 부른 종목 중 빠졌다 돌아온 종목만 옛 응답을 버린다", async () => {
@@ -394,7 +400,7 @@ describe("QuoteBook", () => {
       await settle();
       emit({ type: "watch_limited", symbols: ["005930"] });
       book.setVenue("krx");
-      expect(book.get("005930")).toEqual({ quote: undefined, limited: true });
+      expect(book.get("005930")).toEqual({ quote: undefined, limited: true, stale: true });
     });
 
     test("보는 종목이 없을 때 바꾼 거래소는 다음에 종목이 들어올 때 쓴다", async () => {
@@ -416,6 +422,87 @@ describe("QuoteBook", () => {
       fetches[0]!.reject(new ApiRequestError("network", "서버에 연결하지 못했습니다"));
       await vi.advanceTimersByTimeAsync(60_000);
       expect(fetches.map((f) => f.venue)).toEqual(["combined", "krx"]);
+    });
+  });
+
+  describe("옛 시세와 앞자리 재조회", () => {
+    const LIVE: Connection = { socket: "open", status: { realtime: "live", since: 1_000, backfilling: false } };
+    const RECONNECTING: Connection = { socket: "open", status: { realtime: "reconnecting", since: 2_000, backfilling: false } };
+
+    test("watch_limited에서 돌아오면 앞자리 종목만 REST를 한 번 다시 부르고, 새 시세가 올 때까지 stale을 유지한다", async () => {
+      const { book, fetches, realtime, emit } = setup();
+      book.lease(["035420"]);
+      book.lease(["000660"], { front: true });
+      await settle();
+      realtime(quote("000660", 185_000), quote("035420", 200_000));
+      expect(book.get("000660").stale).toBe(false);
+
+      emit({ type: "watch_limited", symbols: ["000660", "035420"] });
+      expect(book.get("000660")).toEqual({ quote: quote("000660", 185_000), limited: true, stale: true });
+      expect(book.get("035420")).toEqual({ quote: quote("035420", 200_000), limited: true, stale: true });
+
+      emit({ type: "watch_limited", symbols: [] });
+      expect(book.get("000660")).toEqual({ quote: quote("000660", 185_000), limited: false, stale: true });
+      expect(book.get("035420")).toEqual({ quote: quote("035420", 200_000), limited: false, stale: true });
+      expect(fetches.map((f) => f.symbols)).toEqual([["000660", "035420"], ["000660"]]);
+
+      fetches[1]!.resolve([quote("000660", 187_000, "polled")]);
+      await settle();
+      expect(book.get("000660")).toEqual({ quote: quote("000660", 187_000, "polled"), limited: false, stale: false });
+    });
+
+    test("브라우저 소켓이 끊겼다 이어지면 앞자리 종목만 한 번 다시 조회하고, 응답 전 실시간 시세가 오면 그 값을 지킨다", async () => {
+      const { book, fetches, realtime, emit, setConnection } = setup();
+      book.lease(["035420"]);
+      book.lease(["000660"], { front: true });
+      await settle();
+      realtime(quote("000660", 185_000), quote("035420", 200_000));
+
+      setConnection({ socket: "closed" });
+      expect(book.get("000660").stale).toBe(true);
+      expect(book.get("035420").stale).toBe(true);
+
+      setConnection(LIVE);
+      emit({ type: "resync" });
+      expect(fetches.map((f) => f.symbols)).toEqual([["000660", "035420"], ["000660"]]);
+      expect(book.get("000660").stale).toBe(true);
+
+      realtime(quote("000660", 188_000));
+      expect(book.get("000660")).toEqual({ quote: quote("000660", 188_000), limited: false, stale: false });
+      fetches[1]!.resolve([quote("000660", 187_000, "polled")]);
+      await settle();
+      expect(book.get("000660").quote?.price).toBe(188_000);
+    });
+
+    test("증권사 실시간이 live가 아니면 stale이고, live로 돌아오면 앞자리 종목을 한 번 다시 조회한다", async () => {
+      const { book, fetches, realtime, setConnection } = setup();
+      book.lease(["000660"], { front: true });
+      await settle();
+      realtime(quote("000660", 185_000));
+
+      setConnection(RECONNECTING);
+      expect(book.get("000660")).toEqual({ quote: quote("000660", 185_000), limited: false, stale: true });
+
+      setConnection(LIVE);
+      expect(fetches.map((f) => f.symbols)).toEqual([["000660"], ["000660"]]);
+      fetches[1]!.resolve([quote("000660", 187_000, "polled")]);
+      await settle();
+      expect(book.get("000660")).toEqual({ quote: quote("000660", 187_000, "polled"), limited: false, stale: false });
+    });
+
+    test("이미 stale인 일반 종목에 앞자리 lease가 붙으면 그 종목을 한 번 다시 조회한다", async () => {
+      const { book, fetches, realtime, setConnection } = setup();
+      book.lease(["000660"]);
+      await settle();
+      realtime(quote("000660", 185_000));
+      setConnection(RECONNECTING);
+      setConnection(LIVE);
+      expect(fetches).toHaveLength(1);
+      expect(book.get("000660").stale).toBe(true);
+
+      book.lease(["000660"], { front: true });
+      await settle();
+      expect(fetches.map((f) => f.symbols)).toEqual([["000660"], ["000660"]]);
     });
   });
 });
