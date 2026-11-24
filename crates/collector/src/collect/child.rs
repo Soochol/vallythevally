@@ -15,6 +15,7 @@ use super::registry::Registry;
 use super::session::{Finish, Halt, Session, SessionParts, SystemWallClock, Timings, Tokens, WallClock};
 use super::start::{KIWOOM_WS_URL, exit_status, forward_termination_signals, init_logging};
 use super::ws::{Connector, WebSocketConnector};
+use crate::shared::flow::{self, FLOW_KINDS, FileFlowStore};
 use crate::shared::minute::{self, FileMinuteStore, MinuteStore};
 use crate::protocol::{Command, Event, HEARTBEAT_EVERY, KeyName, ProtocolError, SessionState, encode_line, parse_command};
 
@@ -31,10 +32,11 @@ pub struct ChildParts {
     pub events: Events,
     pub shutdown: watch::Receiver<bool>,
     pub minutes: Option<Box<dyn MinuteStore>>,
+    pub flow: Option<FileFlowStore>,
 }
 
 pub async fn run_session(parts: ChildParts) -> Finish {
-    let ChildParts { key, data_dir, connector, wall_clock, timings, commands, events, shutdown, minutes } = parts;
+    let ChildParts { key, data_dir, connector, wall_clock, timings, commands, events, shutdown, minutes, flow } = parts;
     if let Err(error) = std::fs::create_dir_all(data_dir.join("raw")) {
         let halt = Halt::Output(error);
         events.halted(&halt.reason(), halt.action());
@@ -50,6 +52,13 @@ pub async fn run_session(parts: ChildParts) -> Finish {
         }
         None => (None, None),
     };
+    let (flow_feed, flow_worker) = match flow {
+        Some(store) => {
+            let (feed, worker) = flow::spawn(FLOW_KINDS, store, wall_clock.now_ms());
+            (Some(feed), Some(worker))
+        }
+        None => (None, None),
+    };
     let session = Session::new(SessionParts {
         tokens: Tokens::supplied(),
         registry: Registry::default(),
@@ -60,9 +69,13 @@ pub async fn run_session(parts: ChildParts) -> Finish {
         shutdown,
         child: Some(ChildLink { commands, events, state }),
         minutes: feed,
+        flow: flow_feed,
     });
     let finish = session.run().await;
     if let Some(worker) = worker {
+        worker.finish().await;
+    }
+    if let Some(worker) = flow_worker {
         worker.finish().await;
     }
     heartbeat.abort();
@@ -187,7 +200,8 @@ pub fn run(key: KeyName, data_dir: PathBuf, shared_dir: Option<PathBuf>) -> Exit
     let (stop, shutdown) = watch::channel(false);
     let finish = runtime.block_on(async {
         tokio::spawn(forward_termination_signals(stop));
-        let minutes = shared_dir.map(|dir| Box::new(FileMinuteStore::new(dir, key.clone())) as Box<dyn MinuteStore>);
+        let minutes = shared_dir.as_ref().map(|dir| Box::new(FileMinuteStore::new(dir.clone(), key.clone())) as Box<dyn MinuteStore>);
+        let flow = shared_dir.map(|dir| FileFlowStore::new(dir, key.clone()));
         run_session(ChildParts {
             key,
             data_dir,
@@ -198,6 +212,7 @@ pub fn run(key: KeyName, data_dir: PathBuf, shared_dir: Option<PathBuf>) -> Exit
             events: events.clone(),
             shutdown,
             minutes,
+            flow,
         })
         .await
     });

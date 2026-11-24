@@ -216,6 +216,7 @@ async fn start(data: &Path, key: &str, store: Box<dyn MinuteStore>) -> Run {
         events: Events::none(),
         shutdown,
         minutes: Some(store),
+        flow: None,
     };
     let task = tokio::spawn(run_session(parts));
     commands.send(Ok(Command::Token { token: Secret::new(SECOND_KEY_TOKEN.to_owned()), generation: 1, expires_at: None })).unwrap();

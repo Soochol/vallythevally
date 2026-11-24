@@ -97,6 +97,7 @@ TR 줄:
 | `snapshotNxt` | `snapshot-nxt/` | `snapshot-nxt/<YYYYMMDD>.json` | | `SnapshotBody` |
 | `minute` (1분봉) | `minute/<YYYYMMDD>/` | | `minute/<YYYYMMDD>/<키 이름>.jsonl` | `MinuteBar` |
 | `quoteMinutes` (분 호가) | `quote-minutes/<YYYYMMDD>/`, `quote-minutes-live/<YYYYMMDD>/` | `quote-minutes/<YYYYMMDD>/<종목>.json.gz`, `quote-minutes-live/<YYYYMMDD>/<키 이름>/_current.json` | `quote-minutes-live/<YYYYMMDD>/<키 이름>/<종목>.jsonl`, `_gaps.jsonl` | `ClosedQuotes`, `CurrentQuotes`, `QuoteMinute` |
+| 종목 흐름 (`symbol-flow`) | `symbol-flow/<YYYYMMDD>/` | | `symbol-flow/<YYYYMMDD>/<타입>/<종목코드>/<키 이름>.flow`, `links/<키 이름>.jsonl` | `FlowDescription`, `FlowRow` |
 | `marketOverview` | `market-overview/` | `market-overview/<YYYYMMDD>.json` | | `OverviewBody`, `MadeCard` |
 | `kiwoomThemes` | `kiwoom-themes/` | `kiwoom-themes/<YYYYMMDD>.json` | | `ThemesBody`, `ThemeEntry` |
 
@@ -182,3 +183,17 @@ TR 줄:
 | 종류 | 폴더 | 한 파일(`.json`) | 본문 |
 |---|---|---|---|
 | `rankings` | `rankings/` | `rankings/<YYYYMMDD>/<키 이름>.json` | `RankingsPartBody` |
+
+## 종목 흐름
+
+`collect` 자식이 받은 실시간 프레임 가운데 종류 표(`crates/collector/src/shared/flow/mod.rs`의 `FLOW_KINDS`)에 든 타입을 종목마다 1초 묶음으로 `<공용 자료 폴더>/symbol-flow/<YYYYMMDD>/<타입>/<종목코드>/<키 이름>.flow`에 덧붙인다. `--shared`가 없으면 쓰지 않는다. 종목코드는 `_AL`을 뗀 글자다. 형식과 쓰기·읽기 타입(`FlowDescription`, `FlowRow`, `FlowBlock`, `FlowWriter`, `FlowCursor`)은 `crates/server/src/shared_data/symbol_flow.rs`에 있다. 종목마다 파일이 나뉘므로 `DataKind`와 서버의 `SharedData` 주기 폴링에는 넣지 않는다. 서버가 읽는 부분은 아직 없다.
+
+- **경로**:
+  - 흐름 파일: `<공용 자료 폴더>/symbol-flow/<YYYYMMDD>/<타입>/<종목코드>/<키 이름>.flow` (`flow_path`)
+  - 연결 기록: `<공용 자료 폴더>/symbol-flow/<YYYYMMDD>/links/<키 이름>.jsonl` (`flow_links_path`)
+- **블록**: 고정 32바이트 머리(리틀엔디언: magic `SFLW` 4B, 종류 1=설명·2=행 1B, 코덱 0=그대로·1=zstd 1B, 예약 2B, payload 길이 u32, 행 수 u32, 첫 `recv_ms` i64, 끝 `recv_ms` i64) 뒤에 payload가 온다. payload는 zstd로 압축해 작아질 때만 코덱 1을 쓰고, 그렇지 않으면 그대로 둔다. 손상된 길이가 메모리를 크게 잡지 않게 payload 길이에 상한(32MiB)을 둔다. 행 블록의 payload는 `[recv_ms, "값"|null, ...]` JSON 배열의 배열이며 값은 원문 글자 그대로, 설명 블록의 `fids` 순서다.
+- **설명 블록**: `{"formatVersion":1,"typeCode":"0F","symbol":"005930","date":"20261124","key":"collect-01","fids":[...]}` JSON이다. 파일 첫 블록으로 쓰며, 같은 파일을 다시 열 때 FID 목록이 바뀌었으면 새 설명 블록을 먼저 덧붙인다. 읽는 쪽(`FlowCursor`)은 설명 블록으로 각 행 블록의 FID를 알므로 종류별 분기가 없다.
+- **쓰기·복구**: 종목마다 파일 핸들을 열어 두지 않고 묶음을 쓸 때만 연다. 프로세스가 처음 만지는 파일만 블록을 훑어 잘린 꼬리를 잘라 내고, 쓰다 실패하면 쓰기 전 길이로 되돌린다. 세션은 `offer`·`link`를 `try_send`로만 넘기고, 쓰기 실패 묶음은 스트림당 상한 안에서 다음 1초에 다시 쓰며 한 종목 실패가 다른 종목을 막지 않는다.
+- **종류 표에 줄 더하기**: `FLOW_KINDS`에 `FlowKindSpec { type_code, fids }` 한 줄만 더하면 쓰기 코드 변경 없이 해당 타입의 흐름 파일이 생긴다. 지금은 `0F`(FID 141~180, 매도·매수 거래원 이름·코드·수량·증감) 한 줄이다.
+- **연결 기록(`links`)**: `{"t":<유닉스 ms>,"event":"start"|"live"|"down"|"alive"|"end"}` JSONL이다. worker가 시작하면 `start`, 끝나면 `end`, 세션이 `live`·`down`으로 바뀔 때 각각 기록하고 30초마다 `alive`를 남긴다.
+- **지우기**: `finalize`가 `complete.json`을 쓴 뒤 `remove_finished_days`를 불러 정리 완료 표시(`store/<YYYYMMDD>/complete.json`)가 있는 가장 새 날보다 앞선 정리 완료 날의 `symbol-flow/<YYYYMMDD>` 폴더를 지운다. 정리 완료 표시가 없는 날은 지우지 않는다. 기본 공용 자료 폴더는 `<데이터 폴더>/shared`이며, 감독 데몬이 다른 `--shared` 경로를 쓰면 `finalize`에 `--shared`로 넘긴다. 지우기 오류는 로그만 남기고 정리를 실패시키지 않는다.

@@ -45,6 +45,7 @@ fn launch_child(peer: &Peer) -> Child {
         events: Events::to(event_sink),
         shutdown,
         minutes: None,
+        flow: None,
     };
     let task = tokio::spawn(run_session(parts));
     Child { paths, wall, commands, events, stop, task }
@@ -513,4 +514,71 @@ fn only_loopback_addresses_may_replace_the_kiwoom_address() {
     assert!(connector(&variables("ws://127.0.0.1:1")).is_ok());
     assert!(connector(&variables("ws://example.com:1")).is_err());
     assert!(connector(&Default::default()).is_ok());
+}
+
+#[tokio::test]
+async fn child_session_writes_symbol_flow_and_link_events() {
+    use crate::shared::flow::FileFlowStore;
+    use server::shared_data::{FlowCursor, flow_links_path, flow_path};
+
+    let peer = Peer::accepting();
+    let paths = Paths::new();
+    let shared = paths.data().join("shared");
+    let wall = FakeWall::new();
+    let (commands, command_source) = mpsc::unbounded_channel();
+    let (event_sink, events) = channel();
+    let (stop, shutdown) = watch::channel(false);
+    let key = KeyName::parse("k1").unwrap();
+    let parts = ChildParts {
+        key: key.clone(),
+        data_dir: paths.data(),
+        connector: Arc::new(peer.clone()),
+        wall_clock: wall.clone(),
+        timings: Timings { backoff: [Duration::from_millis(10); 5], ..Timings::default() },
+        commands: command_source,
+        events: Events::to(event_sink),
+        shutdown,
+        minutes: None,
+        flow: Some(FileFlowStore::new(shared.clone(), key)),
+    };
+    let task = tokio::spawn(run_session(parts));
+    let child = Child { paths, wall, commands, events, stop, task };
+
+    child.send(token(CHILD_TOKEN, 1));
+    until("LOGIN", || peer.count_sent("LOGIN") == 1).await;
+    child.send(Command::Register(stocks("r1", 1, &[RealType::Trade])));
+    until("REG", || peer.count_sent("REG") == 1).await;
+    settle().await;
+
+    let first = json!({"trnm": "REAL", "data": [{"type": "0F", "item": "005930_AL", "values": {"141": "키움", "161": "10"}}]}).to_string();
+    let second = json!({"trnm": "REAL", "data": [{"type": "0F", "item": "005930_AL", "values": {"141": "키움", "161": "25"}}]}).to_string();
+    peer.text(0, &first);
+    settle().await;
+
+    peer.close(0);
+    until("재접속 REG", || peer.count_sent("REG") == 2).await;
+    settle().await;
+    peer.text(1, &second);
+    settle().await;
+
+    let (finish, _, _paths, date) = child.stop().await;
+    assert!(matches!(finish, Finish::Shutdown));
+
+    let date_text = date.to_string();
+    let blocks = FlowCursor::new(flow_path(&shared, &date_text, "0F", "005930", "k1")).read_new().unwrap();
+    let rows: Vec<_> = blocks.iter().flat_map(|block| &block.rows).collect();
+    assert_eq!(rows.len(), 2);
+    let fids = &blocks[0].description.fids;
+    let at = |row: usize, fid: u32| rows[row].values[fids.iter().position(|f| *f == fid).unwrap()].as_deref();
+    assert_eq!((at(0, 141), at(0, 161)), (Some("키움"), Some("10")));
+    assert_eq!((at(1, 141), at(1, 161)), (Some("키움"), Some("25")));
+
+    let links_text = std::fs::read_to_string(flow_links_path(&shared, &date_text, "k1")).unwrap();
+    let link_events: Vec<String> = links_text
+        .lines()
+        .map(|line| serde_json::from_str::<Value>(line).unwrap())
+        .filter(|line| line["event"] != "alive")
+        .map(|line| line["event"].as_str().unwrap().to_owned())
+        .collect();
+    assert_eq!(link_events, ["start", "live", "down", "live", "down", "end"]);
 }

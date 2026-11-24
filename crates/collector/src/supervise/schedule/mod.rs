@@ -82,6 +82,7 @@ pub struct Daemon {
     rest_keys: Vec<ActiveKey>,
     shared: Option<SharedSetup>,
     data_dir: PathBuf,
+    shared_dir: PathBuf,
     supervisor: Settings,
     schedule: ScheduleSettings,
     holiday_key_path: PathBuf,
@@ -148,12 +149,14 @@ impl Daemon {
             },
             None => None,
         };
+        let shared_dir = data_dir.join("shared");
         let today = date_number(injected.clock.now().kst_date());
         Ok(Daemon {
             keys,
             rest_keys,
             shared: None,
             data_dir,
+            shared_dir,
             supervisor,
             schedule,
             holiday_key_path,
@@ -170,6 +173,11 @@ impl Daemon {
 
     pub fn with_shared_jobs(mut self, jobs: SharedJobs) -> Daemon {
         self.shared = Some(SharedSetup { store: AssignmentStore::new(jobs.assignment_path, &self.data_dir), kis_transport: jobs.kis_transport });
+        self
+    }
+
+    pub fn with_shared_dir(mut self, shared_dir: PathBuf) -> Daemon {
+        self.shared_dir = shared_dir;
         self
     }
 

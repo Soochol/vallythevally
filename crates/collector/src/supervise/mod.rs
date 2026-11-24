@@ -255,7 +255,7 @@ fn run_daemon(arguments: &Arguments, keys_path: &std::path::Path) -> ExitCode {
             Err(error) => return usage_error(format_args!("특일정보 HTTP 클라이언트를 만들지 못했습니다: {error}")),
         };
         let injected = DaemonInjected {
-            launcher: Arc::new(TokioLauncher::new(executable.clone(), data_dir.clone(), &process).with_shared_dir(shared_dir)),
+            launcher: Arc::new(TokioLauncher::new(executable.clone(), data_dir.clone(), &process).with_shared_dir(shared_dir.clone())),
             transport: Arc::new(transport),
             holidays: Arc::new(holidays),
             finalizer: Arc::new(ProcessFinalizeRunner::new(executable)),
@@ -269,7 +269,10 @@ fn run_daemon(arguments: &Arguments, keys_path: &std::path::Path) -> ExitCode {
             holiday_key_path,
         };
         let daemon = match Daemon::start(inputs, injected) {
-            Ok(daemon) => daemon.with_shared_jobs(SharedJobs { assignment_path: shared_config, kis_transport }).with_telegram(telegram.map(|telegram| AlertTelegram::spawn(telegram, &state_folder))),
+            Ok(daemon) => daemon
+                .with_shared_dir(shared_dir)
+                .with_shared_jobs(SharedJobs { assignment_path: shared_config, kis_transport })
+                .with_telegram(telegram.map(|telegram| AlertTelegram::spawn(telegram, &state_folder))),
             Err(error) => {
                 eprintln!("supervise: 시작하지 못했습니다: {error}");
                 return ExitCode::FAILURE;

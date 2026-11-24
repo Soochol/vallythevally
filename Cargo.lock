@@ -2868,6 +2868,7 @@ dependencies = [
  "tracing-subscriber",
  "ts-rs",
  "zip",
+ "zstd 0.13.3",
 ]
 
 [[package]]
