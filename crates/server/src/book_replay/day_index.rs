@@ -13,25 +13,25 @@ const DEFAULT_END_MINUTE_EXCLUSIVE: u32 = 20 * 60 + 5;
 const MAX_DAY_FOLDERS: usize = 60;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(super) struct FileStamp {
+pub(crate) struct FileStamp {
     pub len: u64,
     pub modified: Option<SystemTime>,
 }
 
 #[derive(Debug, Clone)]
-pub(super) struct StockCoverage {
+pub(crate) struct StockCoverage {
     pub gaps: Vec<(i64, i64)>,
     pub end_minute_exclusive: u32,
 }
 
 #[derive(Debug)]
-pub(super) struct DayIndex {
+pub(crate) struct DayIndex {
     pub buckets: u64,
     pub stocks: HashMap<String, StockCoverage>,
 }
 
 #[derive(Clone)]
-pub(super) enum DayIndexState {
+pub(crate) enum DayIndexState {
     Missing,
     UnsupportedVersion,
     Ready(Arc<DayIndex>),
@@ -42,7 +42,7 @@ struct CachedDayIndex {
     state: DayIndexState,
 }
 
-pub(super) struct DayIndexCache {
+pub(crate) struct DayIndexCache {
     entries: Mutex<HashMap<String, CachedDayIndex>>,
 }
 
@@ -88,7 +88,7 @@ struct RawHandoff {
     to: String,
 }
 
-pub(super) fn read_stamp(data_dir: &Path, date: &str) -> Result<Option<FileStamp>, String> {
+pub(crate) fn read_stamp(data_dir: &Path, date: &str) -> Result<Option<FileStamp>, String> {
     let path = data_dir.join("store").join(date).join("complete.json");
     match std::fs::metadata(&path) {
         Ok(meta) => Ok(Some(FileStamp { len: meta.len(), modified: meta.modified().ok() })),
@@ -98,11 +98,11 @@ pub(super) fn read_stamp(data_dir: &Path, date: &str) -> Result<Option<FileStamp
 }
 
 impl DayIndexCache {
-    pub(super) fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self { entries: Mutex::new(HashMap::new()) }
     }
 
-    pub(super) fn load(&self, data_dir: &Path, date: &str) -> Result<(Option<FileStamp>, DayIndexState), String> {
+    pub(crate) fn load(&self, data_dir: &Path, date: &str) -> Result<(Option<FileStamp>, DayIndexState), String> {
         let Some(stamp) = read_stamp(data_dir, date)? else {
             self.entries.lock().expect("day index cache").remove(date);
             return Ok((None, DayIndexState::Missing));
@@ -125,7 +125,7 @@ impl DayIndexCache {
         Ok((Some(stamp), state))
     }
 
-    pub(super) fn collected_days(&self, data_dir: &Path, stock_code: &str) -> Result<Vec<String>, String> {
+    pub(crate) fn collected_days(&self, data_dir: &Path, stock_code: &str) -> Result<Vec<String>, String> {
         let store_dir = data_dir.join("store");
         let entries = match std::fs::read_dir(&store_dir) {
             Ok(entries) => entries,

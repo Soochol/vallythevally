@@ -7,6 +7,7 @@ pub mod app;
 pub mod bars;
 pub mod book_replay;
 pub mod clock;
+pub mod collected;
 pub mod collector;
 pub mod config;
 pub mod db;

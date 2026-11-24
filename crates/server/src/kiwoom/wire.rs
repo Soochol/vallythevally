@@ -2457,22 +2457,53 @@ fn parse_program(item: &str, values: &Value) -> Result<RealProgramTrade, WireErr
     })
 }
 
-fn broker_side(values: &Value, code_base: u32, name_base: u32, qty_base: u32, change_base: u32) -> Result<Vec<BrokerEntry>, WireError> {
-    let text = |fid: u32| values.get(fid.to_string()).and_then(Value::as_str).map(str::trim).unwrap_or_default();
+pub(crate) fn parse_broker_side<'a>(
+    get: &impl Fn(u32) -> Option<std::borrow::Cow<'a, str>>,
+    code_base: u32,
+    name_base: u32,
+    qty_base: u32,
+    change_base: u32,
+) -> Result<Vec<BrokerEntry>, WireError> {
     let mut entries = Vec::new();
     for rank in 1..=5 {
-        let (member_code, member_name) = (text(code_base + rank), text(name_base + rank));
+        let code_raw = get(code_base + rank);
+        let name_raw = get(name_base + rank);
+        let member_code = code_raw.as_deref().map(str::trim).unwrap_or_default();
+        let member_name = name_raw.as_deref().map(str::trim).unwrap_or_default();
         if member_code.is_empty() || member_name.is_empty() {
             continue;
         }
+        let qty_raw = get(qty_base + rank);
+        let change_raw = get(change_base + rank);
+        let qty_text = qty_raw.as_deref().map(str::trim).unwrap_or_default();
+        let change_text = change_raw.as_deref().map(str::trim).unwrap_or_default();
+        let cumulative_qty = if qty_text.is_empty() { 0 } else { unsigned(qty_text)? };
+        let change_qty = if change_text.is_empty() { 0 } else { signed(change_text)? };
         entries.push(BrokerEntry {
             member_code: member_code.to_owned(),
             member_name: member_name.to_owned(),
-            cumulative_qty: Volume(fid_or(values, qty_base + rank, unsigned)?),
-            change_qty: fid_or(values, change_base + rank, signed)?,
+            cumulative_qty: Volume(cumulative_qty),
+            change_qty,
         });
     }
     Ok(entries)
+}
+
+pub(crate) fn parse_broker_sides<'a>(
+    get: impl Fn(u32) -> Option<std::borrow::Cow<'a, str>>,
+) -> Result<(Vec<BrokerEntry>, Vec<BrokerEntry>), WireError> {
+    let sells = parse_broker_side(&get, 145, 140, 160, 165)?;
+    let buys = parse_broker_side(&get, 155, 150, 170, 175)?;
+    Ok((sells, buys))
+}
+
+fn broker_side(values: &Value, code_base: u32, name_base: u32, qty_base: u32, change_base: u32) -> Result<Vec<BrokerEntry>, WireError> {
+    let get = |fid: u32| match values.get(fid.to_string()) {
+        Some(Value::String(text)) => Some(std::borrow::Cow::Borrowed(text.as_str())),
+        Some(Value::Number(number)) => Some(std::borrow::Cow::Owned(number.to_string())),
+        _ => None,
+    };
+    parse_broker_side(&get, code_base, name_base, qty_base, change_base)
 }
 
 fn parse_broker(item: &str, values: &Value) -> Result<BrokerSnapshot, WireError> {

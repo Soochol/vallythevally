@@ -1,5 +1,5 @@
-mod day_index;
-mod store;
+pub(crate) mod day_index;
+pub(crate) mod store;
 
 use std::collections::{HashMap, VecDeque};
 use std::path::PathBuf;

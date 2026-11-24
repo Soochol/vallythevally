@@ -190,6 +190,7 @@ pub fn application_with_source(inputs: ApplicationInputs, mut system: SystemStat
         public_usage: Default::default(),
         shared_data: crate::shared_data::SharedData::new(),
         book_replay: crate::book_replay::BookReplay::new(),
+        collected: crate::collected::Collected::new(),
         heatmap_quotes: Arc::new(crate::heatmap_board::QuoteCache::with_generation(generation.clone())),
         heatmap_flow: Arc::new(crate::heatmap_flow::FlowCache::with_generation(generation.clone())),
         quote_minutes: Arc::new(crate::quote_minutes::QuoteCache::new()),
@@ -417,8 +418,10 @@ pub async fn start_with(config: &Config, lock: &InstanceLock, adapters: Adapters
     if let Some(dir) = &config.hoga_data_dir {
         state.book_replay.enable(dir.clone());
         state.quote_minutes.set_fallback_dir(dir.join("shared"));
+        state.collected.enable(dir.clone());
     }
-    if config.shared_data.is_some() {
+    if let Some(shared) = &config.shared_data {
+        state.collected.use_shared_dir(shared.dir.clone());
         state.screener.read_shared_snapshots(state.shared_data.clone(), config.screener_snapshot_stale_limit);
         state.screener.keep_calendar_fresh();
     }

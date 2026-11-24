@@ -310,17 +310,25 @@ pub struct FlowCursor {
     offset: u64,
     head: Vec<u8>,
     description: Option<Arc<FlowDescription>>,
+    restarts: u64,
 }
 
 impl FlowCursor {
     pub fn new(path: PathBuf) -> FlowCursor {
-        FlowCursor { path, identity: None, offset: 0, head: Vec::new(), description: None }
+        FlowCursor { path, identity: None, offset: 0, head: Vec::new(), description: None, restarts: 0 }
+    }
+
+    pub fn restarts(&self) -> u64 {
+        self.restarts
     }
 
     pub fn read_new(&mut self) -> io::Result<Vec<FlowBlock>> {
         let mut file = match File::open(&self.path) {
             Ok(file) => file,
             Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                if self.identity.is_some() {
+                    self.restarts += 1;
+                }
                 self.reset();
                 return Ok(Vec::new());
             }
@@ -333,6 +341,9 @@ impl FlowCursor {
         let mut description = if replaced { None } else { self.description.clone() };
         if len == start_offset {
             if replaced {
+                if self.identity.is_some() {
+                    self.restarts += 1;
+                }
                 self.identity = Some(identity);
                 self.offset = 0;
                 self.head.clear();
@@ -399,10 +410,13 @@ impl FlowCursor {
             }
             pos = payload_end;
         }
-        self.identity = Some(identity);
         if replaced {
+            if self.identity.is_some() {
+                self.restarts += 1;
+            }
             self.head.clear();
         }
+        self.identity = Some(identity);
         if start_offset == 0 && pos > 0 {
             self.head = chunk[..pos.min(HEAD_FINGERPRINT_LEN)].to_vec();
         }
