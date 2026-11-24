@@ -16,12 +16,12 @@ function narrowThemes(): HeatmapThemes {
 }
 
 function initialTable(): HeatmapTable {
-  return Object.fromEntries(CODES.map((code, i) => [code, { rate: i % 2 === 0 ? 1.5 : -1.5, traded: 10_000 }]));
+  return Object.fromEntries(CODES.map((code, i) => [code, { rate: i % 2 === 0 ? 1.5 : -1.5, traded: i < 12 ? 13_500 : 10_000 }]));
 }
 
 test("좁은 타일에서도 예상 별표는 타일 밖으로 잘리지 않는다", async ({ page, scenario }) => {
   seedHeatmapThemes(scenario, initialTable(), narrowThemes());
-  await page.goto("/heatmap?size=equal&order=custom");
+  await page.goto("/heatmap?order=custom");
   const tiles = main(page).locator(".hm-tile");
   await expect(tiles).toHaveCount(CODES.length);
   await pollSaved(() => watched(scenario, CODES[CODES.length - 1]!)).toBe(true);
@@ -29,6 +29,7 @@ test("좁은 타일에서도 예상 별표는 타일 밖으로 잘리지 않는�
   const before = new Map<string, { x: number; y: number; width: number; height: number }>();
   let rateTileCount = 0;
   let narrowRateCount = 0;
+  let wideCount = 0;
   for (const code of CODES) {
     const target = main(page).locator(`.hm-tile[data-code="${code}"]`);
     const box = (await target.boundingBox())!;
@@ -38,14 +39,18 @@ test("좁은 타일에서도 예상 별표는 타일 밖으로 잘리지 않는�
       if ((await target.locator(".hm-tile-name").count()) === 0 && box.width >= 44 && box.width < 64) {
         narrowRateCount += 1;
       }
+      if (box.width >= 64) {
+        wideCount += 1;
+      }
     }
   }
   expect(narrowRateCount).toBeGreaterThanOrEqual(10);
+  expect(wideCount).toBeGreaterThan(0);
 
   scenario.live.emit({
     type: "quotes",
     venue: "combined",
-    quotes: CODES.map((code, i) => heatmapQuote(code, { rate: EXPECTED_RATES[i % EXPECTED_RATES.length]!, traded: 10_000 }, "expected")),
+    quotes: CODES.map((code, i) => heatmapQuote(code, { rate: EXPECTED_RATES[i % EXPECTED_RATES.length]!, traded: i < 12 ? 13_500 : 10_000 }, "expected")),
   });
 
   await expect(main(page).locator('.hm-tile-rate [aria-hidden="true"]')).toHaveCount(rateTileCount);
@@ -64,5 +69,9 @@ test("좁은 타일에서도 예상 별표는 타일 밖으로 잘리지 않는�
     expect(starBox.y).toBeGreaterThanOrEqual(tileBox.y);
     expect(starBox.x + starBox.width).toBeLessThanOrEqual(tileBox.x + tileBox.width);
     expect(starBox.y + starBox.height).toBeLessThanOrEqual(tileBox.y + tileBox.height);
+    if (tileBox.width >= 64) {
+      const value = await target.locator(".hm-tile-rate-value").evaluate((el) => ({ scrollWidth: el.scrollWidth, clientWidth: el.clientWidth }));
+      expect(value.scrollWidth).toBeLessThanOrEqual(value.clientWidth);
+    }
   }
 });

@@ -123,7 +123,7 @@
 .hm-tile-rate { font-variant-numeric: tabular-nums; }
 .hm-tile-rate[data-expected="true"] { display: flex; max-width: 100%; }
 .hm-tile-rate-value { min-width: 0; overflow: hidden; }
-.hm-tile-star { flex: none; }
+.hm-tile-star { flex: none; margin-right: calc(-1 * var(--size-4)); }
 .hm-theme-counts { color: inherit; opacity: 0.8; font-size: var(--fs-xs); }
 .hm-tile-card { position: absolute; z-index: 2; display: grid; gap: var(--size-2); min-width: var(--size-140); padding: var(--size-8) var(--size-10); border-radius: var(--r-m); background: var(--overlay); box-shadow: var(--shadow-s); font-size: var(--fs-s); pointer-events: none; }
 .hm-tile-card[data-flip-x="true"] { transform: translateX(-100%); }
