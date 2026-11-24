@@ -101,6 +101,18 @@ test("한 종목의 시세 프레임은 그 종목의 값 칸만 다시 그리�
   expect(changed.filter((m) => m.code !== CODES[7]! || !m.inCell)).toEqual([]);
 });
 
+test("한 종목의 VI는 그 종목 줄의 배지만 바꾸고 줄 틀은 그리지 않는다", async ({ page, scenario }) => {
+  await openTwentyRows(page, scenario);
+  await resetProbe(page);
+  scenario.live.emit({ type: "vi_update", state: { symbol: CODES[7]!, active: true, direction: "up", triggerPrice: 11_800, base: 10_700, triggeredAt: 1794186000, releasedAt: null } });
+  await expect(row(page, CODES[7]!).getByTestId("watch-vi")).toBeVisible();
+  await settle(page);
+  expect(await frames(page)).toHaveLength(0);
+  const changed = await mutations(page);
+  expect(changed.length).toBeGreaterThan(0);
+  expect(changed.filter((m) => m.code !== CODES[7]! || m.inCell)).toEqual([]);
+});
+
 test("줄을 눌러 차트 종목을 바꾸면 이전·새 보는 종목의 줄 틀만 다시 그린다", async ({ page, scenario }) => {
   await openTwentyRows(page, scenario);
   await row(page, CODES[3]!).locator("[data-main]").click();

@@ -14,6 +14,7 @@ import { LIST_ROW_HEIGHT, SymbolName, listRowFill } from "../list/listRow";
 import { Menu, type MenuItem } from "../menu/Menu";
 import { type GroupNaming, setCollapsed, startGroup } from "./groupActions";
 import { QuoteCells, quoteCellIds } from "./QuoteCells";
+import { WatchViBadge } from "./WatchViBadge";
 import { removalUndo } from "./removalUndo";
 import type { WatchVariant } from "./columns";
 import type { RowPreviewStore } from "./watchKeys";
@@ -182,6 +183,7 @@ function WatchRowFrame({ list, code, groupId, index, last, columns, template, va
       >
         <span className={`flex min-w-0 items-center gap-1 ${unknown ? "opacity-50" : ""}`}>
           <SymbolName id={ids.name} name={name} code={code} />
+          <WatchViBadge id={ids.vi} code={code} />
         </span>
         {unknown ? (
           <span id={unknownId} className={columns.length > 0 ? "text-right text-s text-text-3" : "sr-only"} style={columns.length > 0 ? { gridColumn: `span ${columns.length}` } : undefined}>
