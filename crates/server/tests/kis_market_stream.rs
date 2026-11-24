@@ -221,7 +221,7 @@ async fn next_event(events: &mut mpsc::Receiver<StreamEvent>) -> StreamEvent {
 async fn next_data_event(events: &mut mpsc::Receiver<StreamEvent>) -> StreamEvent {
     loop {
         match next_event(events).await {
-            StreamEvent::Live { .. } => {}
+            StreamEvent::Live { .. } | StreamEvent::Vi { .. } => {}
             event => return event,
         }
     }

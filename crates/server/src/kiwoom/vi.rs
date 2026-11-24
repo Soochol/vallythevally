@@ -16,15 +16,21 @@ enum Progress {
     Answered(KstDate),
 }
 
+#[derive(Debug)]
+struct Ask {
+    progress: Progress,
+    generation: u64,
+}
+
 pub struct ViBackfill {
     rest: KiwoomRest,
     clock: Clock,
-    progress: Arc<Mutex<Progress>>,
+    ask: Arc<Mutex<Ask>>,
 }
 
 impl ViBackfill {
     pub fn new(rest: KiwoomRest, clock: Clock) -> ViBackfill {
-        ViBackfill { rest, clock, progress: Arc::new(Mutex::new(Progress::NotAsked)) }
+        ViBackfill { rest, clock, ask: Arc::new(Mutex::new(Ask { progress: Progress::NotAsked, generation: 0 })) }
     }
 
     pub fn ask_if_due(&self) -> Option<ViHistory> {
@@ -33,19 +39,29 @@ impl ViBackfill {
             return None;
         }
         let today = now.kst_date();
-        {
-            let mut progress = self.progress.lock().expect("VI 보충 잠금");
-            if *progress == Progress::Asking || *progress == Progress::Answered(today) {
+        let generation = {
+            let mut ask = self.ask.lock().expect("VI 보충 잠금");
+            if ask.progress == Progress::Asking || ask.progress == Progress::Answered(today) {
                 return None;
             }
-            *progress = Progress::Asking;
-        }
-        let (rest, progress) = (self.rest.clone(), self.progress.clone());
+            ask.progress = Progress::Asking;
+            ask.generation
+        };
+        let (rest, ask) = (self.rest.clone(), self.ask.clone());
         Some(Box::pin(async move {
             let alerts = fetch(&rest).await;
-            *progress.lock().expect("VI 보충 잠금") = if alerts.is_some() { Progress::Answered(today) } else { Progress::NotAsked };
+            let mut ask = ask.lock().expect("VI 보충 잠금");
+            if ask.generation == generation {
+                ask.progress = if alerts.is_some() { Progress::Answered(today) } else { Progress::NotAsked };
+            }
             alerts
         }))
+    }
+
+    pub fn forget(&self) {
+        let mut ask = self.ask.lock().expect("VI 보충 잠금");
+        ask.progress = Progress::NotAsked;
+        ask.generation += 1;
     }
 }
 

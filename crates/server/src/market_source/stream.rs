@@ -111,6 +111,7 @@ pub enum StreamEvent {
     Broker { snapshot: BrokerSnapshot, received_at: KstTime },
     AfterHours { totals: AfterHoursTotals, received_at: KstTime },
     Vi { signal: ViSignal, received_at: KstTime },
+    SourceSwitched,
     Live { since: KstTime },
     SeatsChanged,
     Down { at: KstTime },
@@ -181,4 +182,5 @@ pub trait MarketStream: Send + Sync + 'static {
     fn vi_history(&self) -> Option<ViHistory> {
         None
     }
+    fn forget_vi_history(&self) {}
 }

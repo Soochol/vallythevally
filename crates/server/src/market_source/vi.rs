@@ -20,10 +20,16 @@ pub struct ViAlert {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ViTurn {
+    On,
+    Off,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ViReading {
     pub code: StockCode,
     pub static_base: Option<Price>,
-    pub active: bool,
+    pub turned: Option<ViTurn>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

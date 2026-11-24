@@ -3,7 +3,7 @@ use std::collections::{BTreeMap, HashMap};
 use domain::{KstTime, Price, StockCode, Symbol};
 
 use crate::api::{self, UnixSeconds};
-use crate::market_source::vi::{ViAlert, ViDirection, ViReading, vi_session_open, vi_triggers_at};
+use crate::market_source::vi::{ViAlert, ViDirection, ViReading, ViTurn, vi_session_open, vi_triggers_at};
 
 const ACTIVE_LIMIT_SECS: i64 = 5 * 60;
 
@@ -107,17 +107,19 @@ impl ViBoard {
         let known = self.rows.get(&reading.code).copied();
         let row = known.unwrap_or(ViRow::without_vi(BaseOrigin::Reading));
         let mut next = ViRow { base: reading.static_base.or(row.base), ..row };
-        if reading.active {
-            if !row.awaits_release() && vi_session_open(now) {
+        match reading.turned {
+            Some(ViTurn::On) if !row.active && vi_session_open(now) => {
                 next.active = true;
                 next.triggered_at = Some(now);
                 next.released_at = None;
                 self.active_until.insert(reading.code, now.plus_secs(ACTIVE_LIMIT_SECS));
             }
-        } else if row.awaits_release() {
-            next.active = false;
-            next.released_at = Some(now);
-            self.active_until.remove(&reading.code);
+            Some(ViTurn::Off) if row.active => {
+                next.active = false;
+                next.released_at = Some(now);
+                self.active_until.remove(&reading.code);
+            }
+            _ => {}
         }
         if next == row {
             return false;
@@ -311,10 +313,33 @@ mod tests {
         assert_eq!(base(&board, SAMSUNG), None);
     }
 
+    fn vi_reading(text: &str, active: bool) -> ViReading {
+        ViReading { code: code(text), static_base: Some(price(800_000)), turned: Some(if active { ViTurn::On } else { ViTurn::Off }) }
+    }
+
+    #[test]
+    fn a_kis_vi_that_released_while_unsubscribed_turns_off_and_the_next_vi_still_starts() {
+        let mut board = ViBoard::default();
+        assert!(board.apply_reading(&vi_reading(SAMSUNG, true), at(9, 30, 0)));
+        assert!(board.apply_reading(&ViReading { static_base: None, ..vi_reading(SAMSUNG, false) }, at(9, 33, 0)));
+        let samsung = board.state(code(SAMSUNG)).unwrap();
+        assert_eq!((samsung.active, samsung.base, samsung.released_at), (false, Some(800_000.0), Some(UnixSeconds(at(9, 33, 0).unix()))));
+
+        assert!(board.apply_reading(&vi_reading(HYNIX, true), at(9, 30, 0)));
+        assert_eq!(board.expire(at(9, 35, 0)), [code(HYNIX)]);
+        assert!(!board.apply_reading(&vi_reading(HYNIX, false), at(9, 50, 0)), "만료 뒤 평시 프레임은 상태를 바꾸지 않는다");
+        assert_eq!(board.state(code(HYNIX)).unwrap().released_at, None);
+        assert!(board.apply_reading(&vi_reading(HYNIX, true), at(10, 0, 0)));
+        let hynix = board.state(code(HYNIX)).unwrap();
+        assert_eq!((hynix.active, hynix.triggered_at, hynix.released_at), (true, Some(UnixSeconds(at(10, 0, 0).unix())), None));
+        assert_eq!(board.expire(at(10, 5, 0)), [code(HYNIX)]);
+        assert!(board.apply_reading(&vi_reading(HYNIX, true), at(10, 20, 0)), "만료 뒤 평시 프레임 없이 바로 온 새 발동도 들어간다");
+    }
+
     #[test]
     fn readings_follow_the_feed_base_without_direction_or_trigger_price() {
         let mut board = ViBoard::default();
-        let reading = |base: Option<u64>, active: bool| ViReading { code: code(SAMSUNG), static_base: base.map(price), active };
+        let reading = |base: Option<u64>, active: bool| ViReading { code: code(SAMSUNG), static_base: base.map(price), turned: Some(if active { ViTurn::On } else { ViTurn::Off }) };
         assert!(!board.apply_reading(&reading(None, false), at(9, 29, 0)));
         assert!(board.states().is_empty());
         assert!(board.apply_reading(&reading(Some(800_000), false), at(9, 29, 0)));
@@ -325,10 +350,9 @@ mod tests {
         assert_eq!((state.direction, state.trigger_price, state.base), (None, None, Some(800_000.0)));
         assert_eq!(board.expire(at(9, 35, 0)), [code(SAMSUNG)]);
         assert_eq!(base(&board, SAMSUNG), Some(800_000.0));
-        assert!(!board.apply_reading(&reading(Some(800_000), true), at(9, 35, 1)), "꺼진 VI를 다시 켜지 않는다");
-        assert!(board.apply_reading(&reading(Some(884_000), false), at(9, 36, 0)));
+        assert!(board.apply_reading(&ViReading { turned: None, ..reading(Some(884_000), true) }, at(9, 35, 1)));
         let state = board.state(code(SAMSUNG)).unwrap();
-        assert_eq!((state.active, state.base, state.released_at), (false, Some(884_000.0), Some(UnixSeconds(at(9, 36, 0).unix()))));
+        assert_eq!((state.active, state.base, state.released_at), (false, Some(884_000.0), None), "기준가만 바뀌면 꺼진 VI를 다시 켜지 않는다");
         assert!(!board.apply_reading(&reading(Some(884_000), true), at(15, 20, 0)), "정규장 밖의 발동 표시는 쓰지 않는다");
     }
 }

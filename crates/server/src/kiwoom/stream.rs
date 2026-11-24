@@ -159,6 +159,12 @@ impl MarketStream for KiwoomStream {
     fn vi_history(&self) -> Option<ViHistory> {
         self.vi_backfill.as_ref()?.ask_if_due()
     }
+
+    fn forget_vi_history(&self) {
+        if let Some(backfill) = &self.vi_backfill {
+            backfill.forget();
+        }
+    }
 }
 
 const EVENT_BUFFER: usize = 4096;
@@ -365,6 +371,7 @@ struct Conn {
     silent_at: Instant,
     /// 0J 체결량을 구하려고 지수마다 앞 프레임의 누적거래량을 든다. 연결마다 새로 시작한다.
     index_cumulative: HashMap<IndexCode, u64>,
+    vi_reply_owed: bool,
 }
 
 impl Session {
@@ -611,7 +618,10 @@ impl Session {
             }
             match self.recv(&mut conn, None, true).await {
                 Ok(Wake::Desired) => {}
-                Ok(Wake::Ack(control, _)) => tracing::debug!(trnm = control.trnm(), "기다리지 않던 응답을 버립니다"),
+                Ok(Wake::Ack(control, _)) => {
+                    conn.vi_reply_owed &= control != WsControl::Reg;
+                    tracing::debug!(trnm = control.trnm(), "기다리지 않던 응답을 버립니다");
+                }
                 Ok(Wake::Deadline) => unreachable!("기한 없이 기다렸다"),
                 Err(end) => break end,
             }
@@ -624,6 +634,7 @@ impl Session {
         conn.send(wire::vi_reg_message()).await?;
         match self.await_ack(conn, WsControl::Reg).await {
             Err(end) if end.is_control_failure() => {
+                conn.vi_reply_owed = matches!(end, End::ControlTimeout(_));
                 tracing::warn!(%end, "VI 실시간 등록이 되지 않았습니다. 시세 세션은 그대로 두고 이 연결에서는 다시 보내지 않습니다");
                 Ok(())
             }
@@ -686,11 +697,23 @@ impl Session {
 
     async fn await_ack(&mut self, conn: &mut Conn, control: WsControl) -> Result<(), End> {
         let deadline = Instant::now() + self.timings.control;
+        let mut maybe_vi_reply = None;
         loop {
             match self.recv(conn, Some(deadline), false).await? {
-                Wake::Ack(got, result) if got == control => return result.map_err(|r| End::ControlRejected(control, r)),
-                Wake::Ack(got, _) => tracing::debug!(trnm = got.trnm(), want = control.trnm(), "기다리던 것과 다른 응답을 버립니다"),
-                Wake::Deadline => return Err(End::ControlTimeout(control)),
+                Wake::Ack(got, result) if got == control => {
+                    let result = result.map_err(|r| End::ControlRejected(control, r));
+                    if control == WsControl::Reg && std::mem::take(&mut conn.vi_reply_owed) {
+                        tracing::debug!(?result, "늦은 VI 등록 응답일 수 있어 다음 응답을 기다립니다");
+                        maybe_vi_reply = Some(result);
+                        continue;
+                    }
+                    return result;
+                }
+                Wake::Ack(got, _) => {
+                    conn.vi_reply_owed &= got != WsControl::Reg;
+                    tracing::debug!(trnm = got.trnm(), want = control.trnm(), "기다리던 것과 다른 응답을 버립니다");
+                }
+                Wake::Deadline => return maybe_vi_reply.unwrap_or(Err(End::ControlTimeout(control))),
                 Wake::Desired => {}
             }
         }
@@ -787,7 +810,7 @@ impl Session {
 
 impl Conn {
     fn new(ws: Socket, silence: Duration) -> Conn {
-        Conn { ws, silence, silent_at: Instant::now() + silence, index_cumulative: HashMap::new() }
+        Conn { ws, silence, silent_at: Instant::now() + silence, index_cumulative: HashMap::new(), vi_reply_owed: false }
     }
 
     fn touch(&mut self) {
@@ -969,6 +992,7 @@ pub(crate) mod tests {
         Silent,
         OkThenBye,
         OkThenFlood,
+        AfterLate { late: u32, own: u32 },
         Refuse,
     }
 
@@ -1072,7 +1096,11 @@ pub(crate) mod tests {
                         if trnm == "PING" { continue; }
                         let nth = counts.entry(trnm.clone()).and_modify(|n| *n += 1).or_insert(1);
                         let reply = script(conn, &trnm, *nth);
-                        let code = match reply { Reply::Code(code) => code, _ => 0 };
+                        if let Reply::AfterLate { late, .. } = reply {
+                            let ack = json!({"trnm": trnm, "return_code": late, "return_msg": ""});
+                            let _ = incoming_tx.unbounded_send(Ok(Message::Text(ack.to_string().into())));
+                        }
+                        let code = match reply { Reply::Code(code) | Reply::AfterLate { own: code, .. } => code, _ => 0 };
                         if !matches!(reply, Reply::Silent | Reply::Refuse) {
                             let detail = if trnm == "LOGIN" && code == 3 { "(CODE=8005)" } else { "" };
                             let ack = json!({"trnm": trnm, "return_code": code, "return_msg": detail});
@@ -1142,6 +1170,77 @@ pub(crate) mod tests {
             assert_eq!(peer.messages(1)[3]["data"][0]["type"], json!(["0D"]));
             assert_eq!(peer.logins(), 2);
         }
+    }
+
+    async fn market_lane_with_a_silent_vi_reply(third_reg: Reply) -> (Peer, KiwoomStream, mpsc::Receiver<StreamEvent>) {
+        let peer = Peer::new(move |conn, trnm, nth| match (conn, trnm, nth) {
+            (0, "REG", 2) => Reply::Silent,
+            (0, "REG", 3) => third_reg,
+            _ => Reply::Ok,
+        });
+        let clock = clock();
+        let (rest, _) = rest(&clock);
+        let (stream, mut events) = peer.start_market_lane(rest, clock, only_trades());
+        assert!(matches!(next(&mut events).await, StreamEvent::Live { .. }));
+        until("1h REG", || peer.vi_registrations(0).len() == 1).await;
+        tokio::time::sleep(Duration::from_secs(6)).await;
+        stream.set_desired(feeds(&[(samsung(), &[RealType::Trade, RealType::Book])]));
+        until("호가 REG", || peer.controls(0).len() >= 4).await;
+        tokio::time::sleep(Duration::from_secs(3)).await;
+        (peer, stream, events)
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_late_vi_refusal_is_not_read_as_the_next_registrations_answer() {
+        let (peer, stream, mut events) = market_lane_with_a_silent_vi_reply(Reply::AfterLate { late: 105118, own: 0 }).await;
+        assert_eq!(peer.controls(0), ["LOGIN", "REG", "REG", "REG"], "성공한 종목 등록을 다시 보내지 않는다");
+        assert_eq!(peer.logins(), 1);
+        peer.real(0, vec![trade("093001", 71_200, 15, 100, "KRX")]);
+        assert_eq!(tick(next(&mut events).await).price.centi(), 7_120_000);
+        stream.set_desired(feeds(&[(samsung(), &[RealType::Trade])]));
+        until("등록이 성공으로 남아 해지가 나간다", || peer.controls(0).len() == 5).await;
+        assert_eq!(peer.controls(0)[4], "REMOVE");
+        assert_eq!(peer.logins(), 1);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_late_vi_success_does_not_hide_the_next_registrations_refusal() {
+        let (peer, _stream, mut events) = market_lane_with_a_silent_vi_reply(Reply::AfterLate { late: 0, own: 105118 }).await;
+        assert!(matches!(next(&mut events).await, StreamEvent::Down { .. }), "종목 등록 거절은 지금처럼 세션을 다시 구성한다");
+        assert_eq!(peer.controls(0).len(), 4);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_vi_registration_that_is_never_answered_only_delays_the_next_registrations_answer() {
+        for (own, kept) in [(Reply::Ok, true), (Reply::Code(105118), false)] {
+            let (peer, stream, mut events) = market_lane_with_a_silent_vi_reply(own).await;
+            tokio::time::sleep(Duration::from_secs(3)).await;
+            if kept {
+                assert_eq!((peer.controls(0).len(), peer.logins()), (4, 1));
+                stream.set_desired(only_trades());
+                until("다음 제어는 기다림 없이 나간다", || peer.controls(0).len() == 5).await;
+            } else {
+                assert!(matches!(next(&mut events).await, StreamEvent::Down { .. }));
+            }
+        }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_late_vi_reply_that_arrives_before_the_next_registration_is_settled_at_once() {
+        let peer = Peer::new(|_, trnm, nth| if trnm == "REG" && nth == 2 { Reply::Silent } else { Reply::Ok });
+        let clock = clock();
+        let (rest, _) = rest(&clock);
+        let (stream, mut events) = peer.start_market_lane(rest, clock, only_trades());
+        assert!(matches!(next(&mut events).await, StreamEvent::Live { .. }));
+        until("1h REG", || peer.vi_registrations(0).len() == 1).await;
+        tokio::time::sleep(Duration::from_secs(6)).await;
+        peer.send(0, Message::Text(json!({"trnm": "REG", "return_code": 105118, "return_msg": ""}).to_string().into()));
+        tokio::time::sleep(Duration::from_millis(10)).await;
+        stream.set_desired(feeds(&[(samsung(), &[RealType::Trade, RealType::Book])]));
+        until("호가 REG", || peer.controls(0).len() == 4).await;
+        stream.set_desired(only_trades());
+        until("응답을 하나만 기다려 바로 다음 제어가 나간다", || peer.controls(0).len() == 5).await;
+        assert_eq!(peer.logins(), 1);
     }
 
     #[tokio::test(start_paused = true)]

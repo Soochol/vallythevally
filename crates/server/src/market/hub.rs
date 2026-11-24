@@ -125,7 +125,7 @@ enum HubInput {
     Seeded { key: SeriesKey, generation: u64, result: Result<Seed, BarError> },
     Verified { key: SeriesKey, generation: u64, bucket: Bucket, attempt: u32, result: Result<Option<ConfirmedBar>, BarError> },
     DayVolumes { requests: Vec<(StockCode, u64)>, result: Result<HashMap<StockCode, DayVolumes>, SourceError> },
-    ViHistory(Vec<ViAlert>),
+    ViHistory { epoch: u64, alerts: Vec<ViAlert> },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -279,6 +279,7 @@ pub struct MarketHub {
     first_expected: FirstOfDay,
     tallies: DayTallies,
     vi: ViBoard,
+    vi_epoch: u64,
     last_fill: HashMap<(StockCode, Exchange), KstTime>,
     last_row_volume: HashMap<(StockCode, Venue), (KstDate, u64)>,
     directory: watch::Receiver<Option<Arc<Directory>>>,
@@ -314,6 +315,7 @@ impl MarketHub {
             first_expected: FirstOfDay::default(),
             tallies: DayTallies::default(),
             vi: ViBoard::default(),
+            vi_epoch: 0,
             last_fill: HashMap::new(),
             last_row_volume: HashMap::new(),
             conns: HashMap::new(),
@@ -395,14 +397,17 @@ impl MarketHub {
                 self.manager.reseat(self.stream.seat_rules());
                 self.replan(now);
                 self.broker_history.clear();
-                self.reset_vi();
                 tracing::info!(keys = self.keys.len(), "시세 공급원이 바뀌어 실시간 키를 모두 다시 시드합니다");
                 self.reseed_all(SeedPurpose::Reload { reason: ReloadReason::DailyReset, from: None });
             }
             HubInput::Seeded { key, generation, result } => self.on_seeded(key, generation, result, now),
             HubInput::Verified { key, generation, bucket, attempt, result } => self.on_verified(key, generation, bucket, attempt, result, now),
             HubInput::DayVolumes { requests, result } => self.on_day_volumes(requests, result, now),
-            HubInput::ViHistory(alerts) => self.on_vi_history(&alerts, now),
+            HubInput::ViHistory { epoch, alerts } => {
+                if epoch == self.vi_epoch {
+                    self.on_vi_history(&alerts, now);
+                }
+            }
         }
     }
 
@@ -635,6 +640,8 @@ impl MarketHub {
         let plan = self.manager.plan(now);
         self.broker_history.retain(|symbol, _| plan.feeds.get(symbol).is_some_and(|kinds| kinds.contains(&StreamKind::Brokers)));
         self.stream.set_desired(plan.feeds);
+        let manager = &self.manager;
+        self.vi.await_base_only_for(|code| manager.is_admitted(Symbol::Stock(code)));
         let newly: Vec<Holder> = plan.rejected.difference(&self.rejected).cloned().collect();
         let recovered: Vec<Holder> = self.rejected.difference(&plan.rejected).cloned().collect();
         self.rejected = plan.rejected;
@@ -934,6 +941,10 @@ impl MarketHub {
                 self.gap_from.get_or_insert(now);
                 self.session_down(RealtimeState::Halted, now);
             }
+            StreamEvent::SourceSwitched => {
+                self.reset_vi();
+                self.stream.forget_vi_history();
+            }
             StreamEvent::SeatsChanged => {
                 let now = self.clock.now();
                 self.replan(now);
@@ -1077,10 +1088,10 @@ impl MarketHub {
         let Some(history) = self.stream.vi_history() else {
             return;
         };
-        let tx = self.tx.clone();
+        let (tx, epoch) = (self.tx.clone(), self.vi_epoch);
         tokio::spawn(async move {
             if let Some(alerts) = history.await {
-                let _ = tx.send(HubInput::ViHistory(alerts));
+                let _ = tx.send(HubInput::ViHistory { epoch, alerts });
             }
         });
     }
@@ -1093,8 +1104,6 @@ impl MarketHub {
     }
 
     fn settle_vi(&mut self, now: KstTime) {
-        let manager = &self.manager;
-        self.vi.await_base_only_for(|code| manager.is_admitted(Symbol::Stock(code)));
         for code in self.vi.expire(now) {
             self.publish_vi(code);
         }
@@ -1102,6 +1111,7 @@ impl MarketHub {
 
     fn reset_vi(&mut self) {
         self.vi.clear();
+        self.vi_epoch += 1;
         for (conn, c) in &self.conns {
             if c.outbox.push(ServerMessage::ViSnapshot { states: Vec::new() }).is_err() {
                 self.closing.push(*conn);
@@ -1771,8 +1781,14 @@ mod tests {
         assert_eq!(take(&out).await, vec![ServerMessage::ViSnapshot { states: vec![] }]);
         vi_event(&h, vi_alert(SAMSUNG, None)).await;
         assert_eq!(take(&out).await.len(), 1);
-        h.hub.source_switched();
+        h.events.send(StreamEvent::SourceSwitched).await.unwrap();
         assert_eq!(take(&out).await, vec![ServerMessage::ViSnapshot { states: vec![] }]);
+        vi_event(&h, vi_alert(SAMSUNG, None)).await;
+        assert_eq!(take(&out).await.len(), 1);
+        h.hub.source_switched();
+        assert_eq!(take(&out).await, vec![], "새 공급원이 먼저 보낸 상태를 뒤늦은 전환 알림이 지우지 않는다");
+        h.events.send(StreamEvent::SourceSwitched).await.unwrap();
+        settle().await;
         assert_eq!(connect_with_vi(&h).await.1, []);
     }
 
@@ -1785,7 +1801,7 @@ mod tests {
         vi_event(&h, vi_alert(SAMSUNG, released)).await;
         h.events.send(trade(&h, (9, 32, 14), 884_000, 1, Some(Exchange::Krx))).await.unwrap();
         assert_eq!(take(&out).await, vec![ServerMessage::ViUpdate { state: vi_state(SAMSUNG, false, None, Some(at(9, 32, 14))) }], "체결을 받지 않는 종목은 기준가가 비어 있다");
-        h.hub.source_switched();
+        h.events.send(StreamEvent::SourceSwitched).await.unwrap();
         h.hub.watch(conn, vec![Symbol::parse(SAMSUNG).unwrap()], Venue::Combined);
         settle().await;
         out.take(true);
@@ -1796,7 +1812,7 @@ mod tests {
         h.events.send(trade(&h, (9, 32, 14), 890_000, 1, Some(Exchange::Krx))).await.unwrap();
         settle().await;
         assert_eq!(connect_with_vi(&h).await.1, [vi_state(SAMSUNG, false, Some(884_000.0), Some(at(9, 32, 14)))]);
-        h.hub.source_switched();
+        h.events.send(StreamEvent::SourceSwitched).await.unwrap();
         settle().await;
         vi_event(&h, vi_alert(SAMSUNG, released)).await;
         settle().await;
@@ -1805,6 +1821,41 @@ mod tests {
         h.events.send(trade(&h, (9, 32, 20), 890_000, 1, Some(Exchange::Krx))).await.unwrap();
         settle().await;
         assert_eq!(connect_with_vi(&h).await.1, [vi_state(SAMSUNG, false, None, Some(at(9, 32, 14)))], "끊긴 사이의 첫 체결을 놓쳤을 수 있어 채우지 않는다");
+    }
+
+    async fn until_desired(h: &Harness, what: &str, ready: impl Fn(&DesiredFeeds) -> bool) {
+        for _ in 0..1000 {
+            if ready(&h.desired.borrow()) {
+                return;
+            }
+            tokio::task::yield_now().await;
+        }
+        panic!("기다린 구독이 되지 않았다: {what}");
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_vi_row_stops_waiting_for_the_base_as_soon_as_the_symbol_leaves_the_seats() {
+        let h = harness(at(9, 32, 14), Chart::default(), Duration::ZERO);
+        live(&h).await;
+        let (conn, _out) = connect(&h).await;
+        for i in 0..REALTIME_LIMIT - 1 {
+            h.hub.subscribe(conn, sub(&format!("f{i}")), key(&listed_filler(i), Venue::Combined));
+        }
+        let samsung = Symbol::parse(SAMSUNG).unwrap();
+        h.hub.watch(conn, vec![samsung], Venue::Combined);
+        tokio::time::sleep(Duration::from_secs(2)).await;
+        assert!(h.desired.borrow().contains_key(&samsung));
+        vi_event(&h, vi_alert(SAMSUNG, TimeOfDay::hms(9, 32, 14))).await;
+        settle().await;
+        let before = tokio::time::Instant::now();
+        h.hub.subscribe(conn, sub("last"), key(&listed_filler(REALTIME_LIMIT - 1), Venue::Combined));
+        until_desired(&h, "삼성전자가 자리에서 밀려남", |desired| !desired.contains_key(&samsung)).await;
+        h.hub.unsubscribe(conn, sub("last"));
+        until_desired(&h, "삼성전자가 다시 들어옴", |desired| desired.contains_key(&samsung)).await;
+        assert_eq!(tokio::time::Instant::now(), before, "1초 타이머가 돌기 전이다");
+        h.events.send(trade(&h, (9, 32, 16), 890_000, 1, Some(Exchange::Krx))).await.unwrap();
+        settle().await;
+        assert_eq!(connect_with_vi(&h).await.1, [vi_state(SAMSUNG, false, None, Some(at(9, 32, 14)))]);
     }
 
     #[tokio::test(start_paused = true)]

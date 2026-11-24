@@ -213,6 +213,7 @@ impl ActiveStream {
         let mut gate = self.merged.gate.lock().await;
         gate.active = next.id;
         let now = self.clock.now();
+        let _ = self.merged.out.send(StreamEvent::SourceSwitched).await;
         let _ = self.merged.out.send(StreamEvent::Down { at: now }).await;
         let replay = match gate.liveness.get(&next.id) {
             Some(StreamEvent::Live { .. }) => Some(StreamEvent::Live { since: now }),
@@ -252,13 +253,11 @@ impl MarketStream for ActiveStream {
     }
 
     fn vi_history(&self) -> Option<ViHistory> {
-        let current = self.current.lock().expect("스트림 잠금").clone();
-        let history = current.stream.vi_history()?;
-        let merged = self.merged.clone();
-        Some(Box::pin(async move {
-            let alerts = history.await?;
-            (merged.gate.lock().await.active == current.id).then_some(alerts)
-        }))
+        self.current.lock().expect("스트림 잠금").stream.vi_history()
+    }
+
+    fn forget_vi_history(&self) {
+        self.current.lock().expect("스트림 잠금").stream.forget_vi_history();
     }
 }
 
@@ -356,13 +355,13 @@ mod tests {
         assert_eq!(active.active(), second.id());
         assert_eq!(kiwoom.last_desired(), Some(DesiredFeeds::new()), "옛 스트림의 실시간 시세를 내린다");
         assert_eq!((kis.last_desired(), kis.venues.lock().unwrap().clone()), (Some(samsung()), vec![Venue::Krx]), "새 스트림에 열린 구독과 거래소를 다시 건다");
-        assert_eq!(drained(&mut merged).await, [StreamEvent::Down { at: clock.now() }, StreamEvent::Live { since: clock.now() }], "바꾸는 순간 끊김을 알리고 이미 살아 있는 새 스트림이면 바로 Live");
+        assert_eq!(drained(&mut merged).await, [StreamEvent::SourceSwitched, StreamEvent::Down { at: clock.now() }, StreamEvent::Live { since: clock.now() }], "바꾸는 순간 끊김을 알리고 이미 살아 있는 새 스트림이면 바로 Live");
         kiwoom_tx.send(StreamEvent::Live { since: clock.now() }).await.unwrap();
         kis_tx.send(StreamEvent::Halted).await.unwrap();
         assert_eq!(drained(&mut merged).await, [StreamEvent::Halted]);
 
         active.activate(&first).await;
         assert_eq!(kiwoom.last_desired(), Some(samsung()));
-        assert_eq!(drained(&mut merged).await, [StreamEvent::Down { at: clock.now() }, StreamEvent::Live { since: clock.now() }], "되돌아온 키움 스트림은 그사이 Live였다");
+        assert_eq!(drained(&mut merged).await, [StreamEvent::SourceSwitched, StreamEvent::Down { at: clock.now() }, StreamEvent::Live { since: clock.now() }], "되돌아온 키움 스트림은 그사이 Live였다");
     }
 }

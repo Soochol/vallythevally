@@ -92,6 +92,7 @@ struct KiwoomFrame {
 struct KiwoomPeer {
     url: String,
     seen: Arc<Mutex<Vec<KiwoomFrame>>>,
+    real_after_reg: Arc<Mutex<Option<String>>>,
 }
 
 impl KiwoomPeer {
@@ -100,10 +101,12 @@ impl KiwoomPeer {
         let url = format!("ws://{}", listener.local_addr().unwrap());
         let seen: Arc<Mutex<Vec<KiwoomFrame>>> = Arc::default();
         let record = seen.clone();
+        let real_after_reg: Arc<Mutex<Option<String>>> = Arc::default();
+        let after_reg = real_after_reg.clone();
         tokio::spawn(async move {
             loop {
                 let (tcp, _) = listener.accept().await.unwrap();
-                let record = record.clone();
+                let (record, after_reg) = (record.clone(), after_reg.clone());
                 tokio::spawn(async move {
                     let Ok(mut socket) = tokio_tungstenite::accept_async(tcp).await else { return };
                     while let Some(Ok(Message::Text(text))) = socket.next().await {
@@ -119,11 +122,17 @@ impl KiwoomPeer {
                         if socket.send(Message::Text(ack.to_string().into())).await.is_err() {
                             return;
                         }
+                        let real = after_reg.lock().unwrap().clone().filter(|_| trnm == "REG");
+                        if let Some(real) = real
+                            && socket.send(Message::Text(real.into())).await.is_err()
+                        {
+                            return;
+                        }
                     }
                 });
             }
         });
-        KiwoomPeer { url, seen }
+        KiwoomPeer { url, seen, real_after_reg }
     }
 
     fn holds(&self, item_prefix: &str) -> bool {
@@ -370,6 +379,46 @@ async fn a_kis_source_key_refused_at_issue_or_stopped_by_opsp8996_on_its_stream_
     assert_eq!(client.key("env").await["link"]["state"], "connected");
     assert_eq!(client.get("/api/system/kiwoom").await.1["state"], "connected");
     restarted.stop().await;
+}
+
+async fn vi_states(server: &Server) -> Vec<(String, bool)> {
+    let mut browser = subscribe_to_samsung(server).await;
+    let snapshot = next_of_type(&mut browser, "vi_snapshot").await;
+    snapshot["states"].as_array().unwrap().iter().map(|state| (state["symbol"].as_str().unwrap().to_owned(), state["active"].as_bool().unwrap())).collect()
+}
+
+async fn until_vi_states(server: &Server, what: &str, wanted: &[(&str, bool)]) {
+    let wanted: Vec<(String, bool)> = wanted.iter().map(|(code, active)| ((*code).to_owned(), *active)).collect();
+    until(what, || async { (vi_states(server).await == wanted).then_some(()) }).await;
+}
+
+#[tokio::test]
+async fn switching_to_kis_and_back_refills_the_vi_states_and_keeps_the_new_sources_events() {
+    let (kiwoom, kis, peer, env) = (ScriptedTransport::new(), FakeKis::new(), KisPeer::default(), Env::new());
+    kiwoom.respond_with("ka10054", 200, json!({"return_code": 0, "motn_stk": [{"stk_cd": "000660", "motn_pric": "110000", "trde_cntr_proc_time": "090100", "virelis_time": "090314", "static_stdpc": "100000", "static_dispty_rt": "+10.00", "dynm_dispty_rt": "0.00"}]}));
+    let kiwoom_ws = KiwoomPeer::start().await;
+    let mut extra = vec![START, ("VALLY_CLOCK_START", "20261109100000"), ("VALLY_KIS_BASE_URL", "http://127.0.0.1:1"), ("VALLY_KIS_WS_URL", "ws://127.0.0.1:1"), ("VALLY_KIWOOM_WS_URL", kiwoom_ws.url.as_str())];
+    extra.extend(KIS_ENV);
+    let server = env.spawn(&kiwoom, &kis, &peer, &extra);
+    let client = Client::of(&server).await;
+    client.until_key_state("env", "connected").await;
+    client.until_key_state("env-kis", "connected").await;
+    let _browser = subscribe_to_samsung(&server).await;
+    until("키움 세션에 삼성전자 구독", || async { kiwoom_ws.holds("005930").then_some(()) }).await;
+    until_vi_states(&server, "ka10054로 받은 VI", &[("000660", false)]).await;
+    let asked = || kiwoom.api_ids().iter().filter(|id| *id == "ka10054").count();
+    assert_eq!(asked(), 1);
+
+    client.designate("env-kis").await;
+    until("키움 세션의 시세 구독이 내려감", || async { (!kiwoom_ws.holds("005930")).then_some(()) }).await;
+    until_vi_states(&server, "공급원을 바꾸면 비운다", &[]).await;
+
+    let vi = json!({"trnm": "REAL", "data": [{"type": "1h", "item": "005930", "values": {"9001": "005930", "9068": "1", "9069": "1", "1221": "881000", "1223": "095959", "1224": "000000", "1236": "800000", "1237": "0"}}]});
+    *kiwoom_ws.real_after_reg.lock().unwrap() = Some(vi.to_string());
+    client.designate("env").await;
+    until_vi_states(&server, "돌아온 키움의 ka10054와 바로 온 1h", &[("000660", false), ("005930", true)]).await;
+    assert_eq!(asked(), 2, "되돌아오면 한 번 더 부른다");
+    server.stop().await;
 }
 
 async fn market_source(client: &Client) -> Value {
