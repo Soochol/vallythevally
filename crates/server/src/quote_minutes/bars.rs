@@ -14,7 +14,7 @@ pub fn total_points(date: KstDate, day: &QuoteDay, period: Period, venue: Minute
             return;
         }
         let close = match slice.last() {
-            Some(&last) => {
+            Some(last) => {
                 if !is_valid_minute(last, venue) {
                     return;
                 }
@@ -40,7 +40,7 @@ pub fn depth_points(date: KstDate, day: &QuoteDay, period: Period, venue: Minute
             return;
         }
         let point = match slice.last() {
-            Some(&last) => {
+            Some(last) => {
                 if !is_valid_minute(last, venue) {
                     return;
                 }
@@ -65,35 +65,50 @@ pub fn depth_points(date: KstDate, day: &QuoteDay, period: Period, venue: Minute
     points
 }
 
-fn walk_bars<'a>(
+fn walk_bars(
     date: KstDate,
-    day: &'a QuoteDay,
+    day: &QuoteDay,
     period: Period,
     now: KstTime,
-    mut on_bar: impl FnMut(i64, &[&'a QuoteMinute], Option<&'a QuoteMinute>, u32),
+    on_bar: impl FnMut(i64, &[QuoteMinute], Option<&QuoteMinute>, u32),
 ) {
     if day.minutes.is_empty() {
         return;
     }
-    let mut sorted: Vec<&QuoteMinute> = day.minutes.iter().collect();
-    sorted.sort_unstable_by_key(|m| m.minute);
+    if day.minutes.windows(2).all(|pair| pair[0].minute <= pair[1].minute) {
+        walk_sorted_bars(date, day.closed, &day.minutes, period, now, on_bar);
+    } else {
+        let mut sorted = day.minutes.clone();
+        sorted.sort_unstable_by_key(|minute| minute.minute);
+        walk_sorted_bars(date, day.closed, &sorted, period, now, on_bar);
+    }
+}
+
+fn walk_sorted_bars(
+    date: KstDate,
+    closed: bool,
+    minutes: &[QuoteMinute],
+    period: Period,
+    now: KstTime,
+    mut on_bar: impl FnMut(i64, &[QuoteMinute], Option<&QuoteMinute>, u32),
+) {
     let day_start = kst(date, 0, 0, 0);
     let minute_time = |minute: u16| day_start.plus_secs(i64::from(minute) * 60);
     let session_close = kst(date, 20, 0, 0);
-    let end_limit = if day.closed { session_close } else { session_close.min(period.bucket(now).end()) };
-    let mut bucket = period.bucket(minute_time(sorted[0].minute));
+    let end_limit = if closed { session_close } else { session_close.min(period.bucket(now).end()) };
+    let mut bucket = period.bucket(minute_time(minutes[0].minute));
     let mut cursor = 0usize;
     let mut prev: Option<&QuoteMinute> = None;
     while bucket.start() < end_limit {
         let bar_end_time = bucket.end();
         let bar_start = cursor;
-        while cursor < sorted.len() && minute_time(sorted[cursor].minute) < bar_end_time {
+        while cursor < minutes.len() && minute_time(minutes[cursor].minute) < bar_end_time {
             cursor += 1;
         }
-        let slice = &sorted[bar_start..cursor];
+        let slice = &minutes[bar_start..cursor];
         let bar_end_sec = (bar_end_time.unix() - day_start.unix()) as u32;
         on_bar(bucket.start().unix(), slice, prev, bar_end_sec);
-        if let Some(&last) = slice.last() {
+        if let Some(last) = slice.last() {
             prev = Some(last);
         }
         bucket = bucket.next();
@@ -116,7 +131,7 @@ fn ladder_to_point(t: i64, ladder: &Ladder) -> QuoteDepthPoint {
     }
 }
 
-fn pick_peak<'a>(slice: &[&'a QuoteMinute], venue: MinuteVenue) -> Option<&'a Ladder> {
+fn pick_peak<'a>(slice: &'a [QuoteMinute], venue: MinuteVenue) -> Option<&'a Ladder> {
     let mut best: Option<(i64, &'a Ladder)> = None;
     for minute in slice {
         let ladder = &minute.venue(venue).peak;
@@ -131,7 +146,7 @@ fn pick_peak<'a>(slice: &[&'a QuoteMinute], venue: MinuteVenue) -> Option<&'a La
     best.map(|(_, ladder)| ladder)
 }
 
-fn merge_price_max(t: i64, slice: &[&QuoteMinute], venue: MinuteVenue) -> Option<QuoteDepthPoint> {
+fn merge_price_max(t: i64, slice: &[QuoteMinute], venue: MinuteVenue) -> Option<QuoteDepthPoint> {
     let mut asks = BTreeMap::<i64, i64>::new();
     let mut bids = BTreeMap::<i64, i64>::new();
     for minute in slice {

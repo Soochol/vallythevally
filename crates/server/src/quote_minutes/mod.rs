@@ -184,13 +184,28 @@ async fn totals(
     let now = st.clock.now();
     let mv = minute_venue(venue);
     let mut days = Vec::with_capacity(loaded.len());
-    let mut points = Vec::new();
+    let mut inputs = Vec::new();
     for item in loaded {
         days.push(QuoteDayInfo { date: KstDate(item.date), state: item.state });
         if let Some(day) = item.day {
-            points.extend(bars::total_points(item.date, &day, params.period, mv, now, params.after));
+            inputs.push((item.date, day));
         }
     }
+    let period = params.period;
+    let after = params.after;
+    let points = if inputs.is_empty() {
+        Vec::new()
+    } else {
+        tokio::task::spawn_blocking(move || {
+            let mut points = Vec::new();
+            for (date, day) in inputs {
+                points.extend(bars::total_points(date, &day, period, mv, now, after));
+            }
+            points
+        })
+        .await
+        .map_err(|e| ApiFailure::new(ApiErrorCode::Internal, format!("분 호가 집계 작업이 멈췄습니다: {e}")))?
+    };
     Ok(Json(QuoteTotalsPage { venue: venue.into(), days, points }))
 }
 
@@ -214,12 +229,27 @@ async fn depth(
     let now = st.clock.now();
     let mv = minute_venue(venue);
     let mut days = Vec::with_capacity(loaded.len());
-    let mut points = Vec::new();
+    let mut inputs = Vec::new();
     for item in loaded {
         days.push(QuoteDayInfo { date: KstDate(item.date), state: item.state });
         if let Some(day) = item.day {
-            points.extend(bars::depth_points(item.date, &day, params.period, mv, source, now, params.after));
+            inputs.push((item.date, day));
         }
     }
+    let period = params.period;
+    let after = params.after;
+    let points = if inputs.is_empty() {
+        Vec::new()
+    } else {
+        tokio::task::spawn_blocking(move || {
+            let mut points = Vec::new();
+            for (date, day) in inputs {
+                points.extend(bars::depth_points(date, &day, period, mv, source, now, after));
+            }
+            points
+        })
+        .await
+        .map_err(|e| ApiFailure::new(ApiErrorCode::Internal, format!("분 호가 집계 작업이 멈췄습니다: {e}")))?
+    };
     Ok(Json(QuoteDepthPage { venue: venue.into(), source, days, points }))
 }
