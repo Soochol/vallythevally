@@ -85,6 +85,7 @@
 
 .od-account { container:od-account / inline-size; flex:none; border-bottom:var(--size-1) solid var(--line); }
 .od-account-bar { box-sizing:border-box; height:var(--size-36); display:flex; align-items:center; gap:var(--s3); padding:var(--s3) var(--s4); font-size:var(--fs-xs); }
+.od-account-head { display:contents; }
 .od-account-label { margin-right:auto; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--text); font-size:var(--fs-s); font-variant-numeric:tabular-nums; }
 .od-env, .od-route, .od-policy { flex:none; white-space:nowrap; }
 .od-route { color:var(--text-2); font-size:var(--fs-xs); font-weight:600; }
@@ -104,6 +105,7 @@
 }
 @container od-account (width < 560px) {
   .od-account-bar { height:auto; flex-wrap:wrap; row-gap:var(--s2); padding:var(--s2) var(--s4); }
+  .od-account-head { display:flex; align-items:center; gap:var(--s3); flex-basis:100%; min-width:0; }
   .od-account-tabs { flex-basis:100%; gap:var(--s2); }
 }
 .ui-popover.od-list-pop { max-height:var(--size-240); padding:var(--s2) var(--s4); font-size:var(--fs-xs); }

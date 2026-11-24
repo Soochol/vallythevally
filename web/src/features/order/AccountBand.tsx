@@ -136,12 +136,14 @@ export function AccountBand({ windowId, choice, onPick, maskAccount, openOrders,
   return (
     <div className="od-account" data-testid="order-account">
       <div className="od-account-bar">
-        <AccountLabel choice={choice} maskAccount={maskAccount} onPick={onPick} />
-        <Badge tone={mock ? "accent" : "warning"} className="od-env">
-          <span data-testid={mock ? "account-mock" : "account-live"}>{mock ? "모의" : "실전"}</span>
-        </Badge>
-        <span className="od-route" data-testid="account-route" title="주문 경로">{routeLabel(venue)}</span>
-        {policy !== null && <Badge tone={policy === "allow_margin" ? "warning" : "success"} className="od-policy"><span data-testid="margin-policy" data-policy={policy}>{POLICY_LABEL[policy]}</span></Badge>}
+        <div className="od-account-head">
+          <AccountLabel choice={choice} maskAccount={maskAccount} onPick={onPick} />
+          <Badge tone={mock ? "accent" : "warning"} className="od-env">
+            <span data-testid={mock ? "account-mock" : "account-live"}>{mock ? "모의" : "실전"}</span>
+          </Badge>
+          <span className="od-route" data-testid="account-route" title="주문 경로">{routeLabel(venue)}</span>
+          {policy !== null && <Badge tone={policy === "allow_margin" ? "warning" : "success"} className="od-policy"><span data-testid="margin-policy" data-policy={policy}>{POLICY_LABEL[policy]}</span></Badge>}
+        </div>
         <div className="od-account-tabs">
           {TABS.map(({ kind, label, shortLabel }) => {
             const withTotal = kind === "holdings" && showTotal;
