@@ -6,7 +6,6 @@ import { fetchBalance } from "./orderApi";
 import { ORDER_QUERY_KEY } from "./useOrderWrites";
 
 export const BALANCE_POLL_MS = 15_000;
-const BALANCE_STALE_MS = 5_000;
 const NO_ACCOUNT = "none";
 
 const balanceQueryKey = (account: string | null) => [...ORDER_QUERY_KEY, account ?? NO_ACCOUNT, "balance"] as const;
@@ -84,7 +83,7 @@ export function useAccountBalance(account: string | null, enabled: boolean): Tra
     enabled,
     refetchInterval: BALANCE_POLL_MS,
     refetchOnMount: "always",
-    staleTime: BALANCE_STALE_MS,
+    staleTime: 0,
     retry: false,
   });
 

@@ -1,7 +1,7 @@
 import type { Page } from "@playwright/test";
 import type { TradingHolding } from "../src/api/generated/TradingHolding";
-import { type Scenario, expect, pollSaved, test } from "./harness";
-import { ACCOUNT, type Api, BASE, CODE, openOrderWindow, ordersOn, tradingApi } from "./order-window";
+import { type Scenario, cell, expect, pollSaved, test } from "./harness";
+import { ACCOUNT, type Api, BASE, CODE, openOrderWindow, ordersOn, tradingApi, win } from "./order-window";
 
 const SAMSUNG: TradingHolding = { code: CODE, name: "삼성전자", quantity: 120, sellableQuantity: 120, averagePrice: 70_040, currentPrice: BASE, evaluationProfit: -4_800, profitRateCenti: -57 };
 
@@ -11,12 +11,15 @@ const SETTLE_MS = 500;
 
 const balances = (api: Api): number => api.seen.filter((seen) => seen.path === "/api/trading/balance").length;
 
-async function openAndFreeze(page: Page, scenario: Scenario): Promise<Api> {
+const watches = (scenario: Scenario): readonly (readonly string[])[] =>
+  scenario.live.messages.flatMap((m) => (m.type === "watch" ? [m.symbols] : []));
+
+async function openAndFreeze(page: Page, scenario: Scenario, twoCells = false): Promise<Api> {
   await page.clock.install({ time: new Date(scenario.now) });
   ordersOn(scenario);
   const api = tradingApi(scenario);
   api.holdings = [SAMSUNG];
-  await openOrderWindow(page, scenario);
+  await openOrderWindow(page, scenario, twoCells);
   await pollSaved(() => balances(api)).toBeGreaterThan(0);
   const now = await page.evaluate(() => Date.now());
   await page.clock.pauseAt(new Date(now + PAUSE_AHEAD_MS));
@@ -84,4 +87,22 @@ test("계좌 변경 신호 전에 시작한 잔고 조회의 늦은 답은 신�
   preSignal.reply({ body: { accountRef: ACCOUNT, holdings: [SAMSUNG], totalPurchase: 0, totalEvaluation: 0, totalProfit: 0 } });
   await page.clock.runFor(SETTLE_MS);
   await expect(page.getByTestId("summary-quantity").first()).toContainText("200");
+});
+
+test("호가주문창에서 종목을 두 번 바꿔도 잔고를 다시 조회하지 않고 보유종목 구독이 풀리지 않는다", async ({ page, scenario }) => {
+  const current = scenario.documents.watchlists();
+  scenario.documents.saveWatchlists({ lists: current.lists.map((list, i) => (i === 0 ? { ...list, symbols: ["035420"] } : list)), revision: current.revision + 1 });
+  const api = await openAndFreeze(page, scenario, true);
+  await pollSaved(() => watches(scenario).at(-1)?.includes(CODE)).toBe(true);
+  const beforeBalances = balances(api);
+  const beforeWatches = watches(scenario).length;
+
+  await cell(page, 2).click();
+  await expect(win(page)).toHaveAttribute("data-symbol", "000660");
+  await cell(page, 1).click();
+  await expect(win(page)).toHaveAttribute("data-symbol", CODE);
+  await page.clock.runFor(SETTLE_MS);
+
+  expect(balances(api)).toBe(beforeBalances);
+  expect(watches(scenario).slice(beforeWatches).every((symbols) => symbols.includes(CODE))).toBe(true);
 });

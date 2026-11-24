@@ -11,7 +11,7 @@ import { buyingPowerOf, type Capacity, groupWithPending, type PriceGroup } from 
 import { pendingWrites } from "./pendingWrites";
 import { fetchCommands, fetchExecutions, fetchOpenOrders, fetchOrderable } from "./orderApi";
 import { holdingOf } from "./holdingSummary";
-import { isBalanceQueryKey, useAccountBalance } from "./useAccountBalance";
+import { isBalanceQueryKey } from "./useAccountBalance";
 import { ORDER_QUERY_KEY } from "./useOrderWrites";
 
 const POLL_MS = 5000;
@@ -63,11 +63,10 @@ function useRefreshOnAccountChange(enabled: boolean, account: string | null): vo
   }, [client, enabled, account]);
 }
 
-export function useOrderData(account: string | null, code: string, open: boolean, referencePrice: number | null): OrderBoardData {
+export function useOrderData(account: string | null, code: string, open: boolean, referencePrice: number | null, balance: TradingBalance | null): OrderBoardData {
   const scope = account ?? NO_ACCOUNT;
   const openOrders = useQuery({ queryKey: [...ORDER_QUERY_KEY, scope, "open"], queryFn: ({ signal }) => fetchOpenOrders(account, signal), enabled: open, refetchInterval: POLL_MS, staleTime: 0, retry: false });
   const commands = useQuery({ queryKey: [...ORDER_QUERY_KEY, scope, "commands"], queryFn: ({ signal }) => fetchCommands(account, signal), enabled: open, refetchInterval: POLL_MS, staleTime: 0, retry: false });
-  const balance = useAccountBalance(account, open);
   const executions = useQuery({ queryKey: [...ORDER_QUERY_KEY, scope, "executions"], queryFn: ({ signal }) => fetchExecutions(account, signal), enabled: open, refetchInterval: POLL_MS * 3, staleTime: POLL_MS, retry: false });
   useRefreshOnAccountChange(open, account);
   const orderableEnabled = open && referencePrice !== null;
