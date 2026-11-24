@@ -161,14 +161,22 @@ impl DayIndexCache {
 }
 
 fn build_index(raw: RawComplete) -> DayIndex {
+    let has_raw_files = !raw.raw_files.is_empty();
     let key_end_minutes = latest_end_minutes(&raw.raw_files);
     let mut stocks = HashMap::new();
     for stock in raw.stocks {
         if !(stock.registered && stock.received) {
             continue;
         }
-        let owner_key = stock.handoff.map(|h| h.to).or(stock.key);
-        let end_minute_exclusive = key_end_minutes.get(&owner_key).copied().unwrap_or(DEFAULT_END_MINUTE_EXCLUSIVE);
+        let end_minute_exclusive = if !has_raw_files {
+            DEFAULT_END_MINUTE_EXCLUSIVE
+        } else {
+            let target = stock.handoff.map(|h| h.to);
+            target
+                .and_then(|key| key_end_minutes.get(&Some(key)).copied())
+                .or_else(|| key_end_minutes.get(&stock.key).copied())
+                .unwrap_or(0)
+        };
         let gaps = stock.gaps.into_iter().map(|g| (g.from_ms, g.to_ms)).collect();
         stocks.insert(stock.code, StockCoverage { gaps, end_minute_exclusive });
     }
@@ -242,5 +250,34 @@ mod tests {
         .unwrap();
         let cache = DayIndexCache::new();
         assert_eq!(cache.collected_days(tmp.path(), "005930").unwrap(), vec!["20261123"]);
+    }
+
+    #[test]
+    fn handoff_without_target_raw_files_falls_back_to_original_key_or_zero() {
+        let tmp = tempfile::tempdir().unwrap();
+        let with_raw = tmp.path().join("store").join("20261123");
+        std::fs::create_dir_all(&with_raw).unwrap();
+        std::fs::write(
+            with_raw.join("complete.json"),
+            r#"{"format_version":1,"raw_files":{"k1/1000-000.jsonl.zst":10,"k3/2000-000.jsonl.zst":10},"stocks":[{"code":"005930","key":"k1","registered":true,"received":true,"gaps":[],"handoff":{"at":"10:05:00","from":"k1","to":"k2"}},{"code":"000660","key":"k4","registered":true,"received":true,"gaps":[],"handoff":{"at":"10:05:00","from":"k4","to":"k2"}}]}"#,
+        )
+        .unwrap();
+        let without_raw = tmp.path().join("store").join("20261122");
+        std::fs::create_dir_all(&without_raw).unwrap();
+        std::fs::write(
+            without_raw.join("complete.json"),
+            r#"{"format_version":1,"stocks":[{"code":"005930","key":"k1","registered":true,"received":true,"gaps":[],"handoff":null}]}"#,
+        )
+        .unwrap();
+        let cache = DayIndexCache::new();
+        let (_, DayIndexState::Ready(index)) = cache.load(tmp.path(), "20261123").unwrap() else {
+            panic!("expected ready index");
+        };
+        assert_eq!(index.stocks["005930"].end_minute_exclusive, 10 * 60 + 5);
+        assert_eq!(index.stocks["000660"].end_minute_exclusive, 0);
+        let (_, DayIndexState::Ready(empty_raw_index)) = cache.load(tmp.path(), "20261122").unwrap() else {
+            panic!("expected ready index");
+        };
+        assert_eq!(empty_raw_index.stocks["005930"].end_minute_exclusive, DEFAULT_END_MINUTE_EXCLUSIVE);
     }
 }
