@@ -434,6 +434,38 @@ pub struct FeedBrokers {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "snake_case")]
 #[ts(export)]
+pub enum BrokerDaySource {
+    Store,
+    Flow,
+    None,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct BrokerDay {
+    pub symbol: SymbolCode,
+    pub date: String,
+    pub source: BrokerDaySource,
+    pub snapshots: Vec<FeedBrokers>,
+    #[ts(type = "[number, number][]")]
+    pub gaps: Vec<[i64; 2]>,
+    pub live: bool,
+    pub cursor: String,
+    pub reset: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct BrokerDays {
+    pub symbol: SymbolCode,
+    pub days: Vec<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
 pub enum SubErrorCode {
     BadRequest,
     UnknownSymbol,

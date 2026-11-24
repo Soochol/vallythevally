@@ -194,7 +194,7 @@ TR 줄:
 
 ## 종목 흐름
 
-`collect` 자식이 받은 실시간 프레임 가운데 종류 표(`crates/collector/src/shared/flow/mod.rs`의 `FLOW_KINDS`)에 든 타입을 종목마다 1초 묶음으로 `<공용 자료 폴더>/symbol-flow/<YYYYMMDD>/<타입>/<종목코드>/<키 이름>.flow`에 덧붙인다. `--shared`가 없으면 쓰지 않는다. 종목코드는 `_AL`을 뗀 글자다. 형식과 쓰기·읽기 타입(`FlowDescription`, `FlowRow`, `FlowBlock`, `FlowWriter`, `FlowCursor`)은 `crates/server/src/shared_data/symbol_flow.rs`에 있다. 종목마다 파일이 나뉘므로 `DataKind`와 서버의 `SharedData` 주기 폴링에는 넣지 않는다. 서버가 읽는 부분은 아직 없다.
+`collect` 자식이 받은 실시간 프레임 가운데 종류 표(`crates/collector/src/shared/flow/mod.rs`의 `FLOW_KINDS`)에 든 타입을 종목마다 1초 묶음으로 `<공용 자료 폴더>/symbol-flow/<YYYYMMDD>/<타입>/<종목코드>/<키 이름>.flow`에 덧붙인다. `--shared`가 없으면 쓰지 않는다. 종목코드는 `_AL`을 뗀 글자다. 형식과 쓰기·읽기 타입(`FlowDescription`, `FlowRow`, `FlowBlock`, `FlowWriter`, `FlowCursor`)은 `crates/server/src/shared_data/symbol_flow.rs`에 있다. 종목마다 파일이 나뉘므로 `DataKind`와 서버의 `SharedData` 주기 폴링에는 넣지 않는다. 서버는 거래원(`0F`) 흐름을 요청한 종목에 한해 읽어 준다([수집 거래원 API](collected-brokers-api.md)).
 
 - **경로**:
   - 흐름 파일: `<공용 자료 폴더>/symbol-flow/<YYYYMMDD>/<타입>/<종목코드>/<키 이름>.flow` (`flow_path`)

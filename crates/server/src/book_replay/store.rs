@@ -63,7 +63,7 @@ pub(super) struct DayReplayData {
     pub trades: Vec<(u32, u32, u64, i64)>,
 }
 
-pub(super) fn fnv1a_bucket(symbol: &str, buckets: u64) -> u64 {
+pub(crate) fn fnv1a_bucket(symbol: &str, buckets: u64) -> u64 {
     let mut hash = FNV_OFFSET_BASIS;
     for byte in symbol.as_bytes() {
         hash ^= u64::from(*byte);
@@ -72,7 +72,7 @@ pub(super) fn fnv1a_bucket(symbol: &str, buckets: u64) -> u64 {
     hash % buckets
 }
 
-pub(super) fn bucket_file_name(symbol: &str, buckets: u64) -> String {
+pub(crate) fn bucket_file_name(symbol: &str, buckets: u64) -> String {
     format!("{:03}.parquet", fnv1a_bucket(symbol, buckets))
 }
 
@@ -95,14 +95,14 @@ pub(super) fn read_day_data(day_dir: &Path, date: KstDate, stock_code: &str, buc
     Ok(DayReplayData { covered, books, trades })
 }
 
-fn open_connection() -> Result<Connection, String> {
+pub(crate) fn open_connection() -> Result<Connection, String> {
     let config = Config::default().enable_autoload_extension(false).map_err(|e| format!("DuckDB 설정 실패: {e}"))?;
     let conn = Connection::open_in_memory_with_flags(config).map_err(|e| format!("DuckDB 연결 실패: {e}"))?;
     conn.execute_batch(&format!("SET threads = {DUCKDB_THREADS};")).map_err(|e| format!("DuckDB 스레드 설정 실패: {e}"))?;
     Ok(conn)
 }
 
-fn file_exists(path: &Path) -> Result<bool, String> {
+pub(crate) fn file_exists(path: &Path) -> Result<bool, String> {
     match std::fs::metadata(path) {
         Ok(meta) => Ok(meta.is_file()),
         Err(e) if e.kind() == ErrorKind::NotFound => Ok(false),
@@ -110,7 +110,7 @@ fn file_exists(path: &Path) -> Result<bool, String> {
     }
 }
 
-fn path_str(path: &Path) -> Result<&str, String> {
+pub(crate) fn path_str(path: &Path) -> Result<&str, String> {
     path.to_str().ok_or_else(|| format!("UTF-8 경로가 아닙니다: {}", path.display()))
 }
 

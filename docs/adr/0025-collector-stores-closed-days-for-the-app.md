@@ -2,7 +2,7 @@
 
 > 보통주·우선주로 좁힌 대상, 감독 데몬 구성, 아침 종목 목록, 인계, 관측일 판단, 수집 현황판, 원문 지우기는 [ADR 0026](0026-collector-supervisor-collects-common-and-preferred-stocks.md)을 따른다. 이 ADR의 "키", "구성", "종목 목록", "용량", "수집 계획", "수집 상태 화면", "하루 순서"와 "수집 저장소"의 원문 지우기는 ADR 0026이 대체한다.
 > 차트 호가 복기가 장중 오늘 자료도 수집 자식의 1분 파일에서 읽도록 넓힌 개정은 [ADR 0050](0050-chart-book-replay-reads-the-collected-store.md)을 따른다.
-> 개정(2026-11-24): 당일 거래원 이력은 수집 자식이 장중에 쓰는 종목 흐름(`symbol-flow`, [`docs/collector-shared-data.md`](../collector-shared-data.md))에서 읽는다(서버가 읽는 부분은 아직 없다).
+> 개정(2026-11-24): 당일 거래원 이력은 수집 자식이 장중에 쓰는 종목 흐름(`symbol-flow`, [`docs/collector-shared-data.md`](../collector-shared-data.md))에서 읽는다([수집 거래원 API](../collected-brokers-api.md)).
 
 [ADR 0022](0022-hoga-replay-collects-quotes-on-disk.md)는 수집기를 키 하나, 소수 종목, 사람이 직접 켜는 프로토타입 범위로 묶었다. 이 ADR은 그 범위를 키 넷, 전종목을 목표로 한 정규장 포함 상시 운영으로 넓힌다. 키 넷의 등록 용량은 760종목이라 전종목 수보다 적다(아래 "용량"). 그리고 하루의 시세를 누가 보여 주는지를 **그날의 정리가 끝났는지**로 나눈다.
 
