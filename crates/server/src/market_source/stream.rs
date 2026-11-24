@@ -4,6 +4,8 @@ use std::sync::Arc;
 use domain::{KstTime, Price, Symbol, TimeOfDay, Venue, Volume};
 use tokio::sync::watch;
 
+use super::vi::{ViHistory, ViSignal};
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Exchange {
     Krx,
@@ -108,6 +110,7 @@ pub enum StreamEvent {
     Program { row: RealProgramTrade, received_at: KstTime },
     Broker { snapshot: BrokerSnapshot, received_at: KstTime },
     AfterHours { totals: AfterHoursTotals, received_at: KstTime },
+    Vi { signal: ViSignal, received_at: KstTime },
     Live { since: KstTime },
     SeatsChanged,
     Down { at: KstTime },
@@ -175,4 +178,7 @@ pub trait MarketStream: Send + Sync + 'static {
     fn set_desired(&self, desired: DesiredFeeds);
     fn watch_desired(&self) -> watch::Receiver<DesiredFeeds>;
     fn set_venue(&self, _venue: Venue) {}
+    fn vi_history(&self) -> Option<ViHistory> {
+        None
+    }
 }

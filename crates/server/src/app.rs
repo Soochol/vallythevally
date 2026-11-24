@@ -365,7 +365,7 @@ pub async fn start_with(config: &Config, lock: &InstanceLock, adapters: Adapters
     rest.set_access(crate::kiwoom::rest::Access::Closed);
     let symbols = Arc::new(SymbolDirectory::default());
     let (stream, lane_ws_url) = match stream_source {
-        StreamSource::Connect => (KiwoomStream::spawn(config.kiwoom_ws_url.clone(), rest.clone(), clock.clone()), Some(config.kiwoom_ws_url.clone())),
+        StreamSource::Connect => (KiwoomStream::spawn_market_lane(config.kiwoom_ws_url.clone(), rest.clone(), clock.clone()), Some(config.kiwoom_ws_url.clone())),
         StreamSource::Detached(events) => ((KiwoomStream::detached().0, events), None),
     };
     let public_ip = match crate::public_ip::ReqwestPublicIp::new(config.public_ip_url.clone()) {

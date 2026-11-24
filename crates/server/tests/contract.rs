@@ -55,6 +55,8 @@ fn generated_typescript_matches_the_committed_files() {
         generated::<OrderReconciliation>(),
         generated::<OrderRejectReason>(),
         generated::<OrderSide>(),
+        generated::<ViDirection>(),
+        generated::<ViState>(),
         generated::<OrdersAccount>(),
         generated::<OrdersAccountCheck>(),
         generated::<OrdersMarginInput>(),

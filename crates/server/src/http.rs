@@ -1417,7 +1417,8 @@ mod tests {
         let (mut ws, _) = tokio_tungstenite::connect_async(format!("ws://{addr}/api/ws")).await.unwrap();
         let hello = recv_json(&mut ws).await;
         assert_eq!((hello["type"].as_str(), hello["protocol"].as_i64()), (Some("hello"), Some(1)), "{hello}");
-        assert_eq!(recv_json(&mut ws).await["type"], "kiwoom_link", "hello 바로 뒤에 키움 연결 상태가 온다");
+        assert_eq!(recv_json(&mut ws).await, json!({"type": "vi_snapshot", "states": []}), "hello 바로 뒤에 VI 스냅샷이 온다");
+        assert_eq!(recv_json(&mut ws).await["type"], "kiwoom_link", "VI 스냅샷 뒤에 키움 연결 상태가 온다");
         assert_eq!(recv_json(&mut ws).await, json!({"type": "account", "status": {"state": "local_only"}}), "그 뒤에 계정 상태가 온다");
         assert_eq!(recv_json(&mut ws).await["type"], "market_source", "계정 상태 뒤에 시세 공급원 상태가 온다");
         for text in [

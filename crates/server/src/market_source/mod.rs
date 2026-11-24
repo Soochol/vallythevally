@@ -9,6 +9,7 @@ pub mod status;
 pub mod switch;
 pub mod rankings;
 pub mod stream;
+pub mod vi;
 mod types;
 
 #[cfg(test)]

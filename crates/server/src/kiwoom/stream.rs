@@ -12,11 +12,14 @@ use tokio_tungstenite::connect_async;
 
 use super::error::{Category, CodeKey, WsRejection, classify};
 use super::rest::{Access, KiwoomRest};
+use super::vi::ViBackfill;
 pub use super::wire::{AccountEvent, AccountKind};
 use super::wire::{self, RealItem, RealType, Registrations, WsControl, WsFrame};
+use crate::api::KiwoomEnvironment;
 use crate::clock::Clock;
 pub use crate::market_source::stream::StreamEvent;
 use crate::market_source::stream::{DayTotals, DesiredFeeds, MarketStream, RealTick, SeatRules, StreamKind};
+use crate::market_source::vi::{ViHistory, ViSignal};
 
 pub const KIWOOM_REALTIME_LIMIT: usize = 200;
 
@@ -76,24 +79,40 @@ const ACCOUNT_EVENT_BUFFER: usize = 64;
 pub struct KiwoomStream {
     desired: watch::Sender<DesiredFeeds>,
     account: AccountFeed,
+    vi_backfill: Option<ViBackfill>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum StreamLane {
+    Market,
+    AccountOnly,
 }
 
 impl KiwoomStream {
+    pub fn spawn_market_lane(url: String, rest: KiwoomRest, clock: Clock) -> (KiwoomStream, mpsc::Receiver<StreamEvent>) {
+        Self::spawn_connector(Box::new(WebSocketConnector(url)), rest, clock, Timings::default(), StreamLane::Market)
+    }
+
     pub fn spawn(url: String, rest: KiwoomRest, clock: Clock) -> (KiwoomStream, mpsc::Receiver<StreamEvent>) {
         KiwoomStream::spawn_with(url, rest, clock, Timings::default())
     }
 
     pub(crate) fn spawn_with(url: String, rest: KiwoomRest, clock: Clock, timings: Timings) -> (KiwoomStream, mpsc::Receiver<StreamEvent>) {
-        Self::spawn_connector(Box::new(WebSocketConnector(url)), rest, clock, timings)
+        Self::spawn_connector(Box::new(WebSocketConnector(url)), rest, clock, timings, StreamLane::AccountOnly)
     }
 
-    fn spawn_connector(connector: Box<dyn Connector>, rest: KiwoomRest, clock: Clock, timings: Timings) -> (KiwoomStream, mpsc::Receiver<StreamEvent>) {
+    fn spawn_connector(connector: Box<dyn Connector>, rest: KiwoomRest, clock: Clock, timings: Timings, lane: StreamLane) -> (KiwoomStream, mpsc::Receiver<StreamEvent>) {
         let (stream, desired) = KiwoomStream::detached();
+        let stream = match lane {
+            StreamLane::Market => stream.with_vi_backfill(rest.clone(), clock.clone()),
+            StreamLane::AccountOnly => stream,
+        };
+        let registers_vi = lane == StreamLane::Market && rest.environment() != KiwoomEnvironment::Mock;
         let (events, rx) = mpsc::channel(EVENT_BUFFER);
         let access = rest.watch_access();
         let account = stream.account.clone();
         let account_wanted = account.wanted.subscribe();
-        let session = Session { connector, rest, clock, timings, desired, access, events, account, account_wanted, account_registered: false, account_refused: None, budget: TokenBudget::Fresh, rebuild: ControlBudget::Fresh, dropped: Dropped::default() };
+        let session = Session { connector, rest, clock, timings, desired, access, events, account, account_wanted, account_registered: false, account_refused: None, registers_vi, budget: TokenBudget::Fresh, rebuild: ControlBudget::Fresh, dropped: Dropped::default() };
         tokio::spawn(session.run());
         (stream, rx)
     }
@@ -101,7 +120,11 @@ impl KiwoomStream {
     /// 세션 없이 손잡이만 만든다. 시험이 원하는 집합을 읽는다.
     pub fn detached() -> (KiwoomStream, watch::Receiver<DesiredFeeds>) {
         let (desired, rx) = watch::channel(DesiredFeeds::new());
-        (KiwoomStream { desired, account: AccountFeed::new() }, rx)
+        (KiwoomStream { desired, account: AccountFeed::new(), vi_backfill: None }, rx)
+    }
+
+    pub(crate) fn with_vi_backfill(self, rest: KiwoomRest, clock: Clock) -> KiwoomStream {
+        KiwoomStream { vi_backfill: Some(ViBackfill::new(rest, clock)), ..self }
     }
 
     pub fn account_feed(&self) -> AccountFeed {
@@ -131,6 +154,10 @@ impl MarketStream for KiwoomStream {
             *cur = desired;
             changed
         });
+    }
+
+    fn vi_history(&self) -> Option<ViHistory> {
+        self.vi_backfill.as_ref()?.ask_if_due()
     }
 }
 
@@ -308,6 +335,7 @@ struct Session {
     account_wanted: watch::Receiver<bool>,
     account_registered: bool,
     account_refused: Option<bool>,
+    registers_vi: bool,
     budget: TokenBudget,
     rebuild: ControlBudget,
     dropped: Dropped,
@@ -560,6 +588,7 @@ impl Session {
     }
 
     async fn live(&mut self, mut conn: Conn, mut accepted: Registrations) -> End {
+        let mut vi_unasked = self.registers_vi;
         let end = loop {
             let desired = registrations(&self.desired.borrow_and_update());
             if let Some(control) = Control::next(&desired, &accepted) {
@@ -574,6 +603,12 @@ impl Session {
                 Ok(false) => {}
                 Err(end) => break end,
             }
+            if std::mem::take(&mut vi_unasked) {
+                match self.register_vi(&mut conn).await {
+                    Ok(()) => continue,
+                    Err(end) => break end,
+                }
+            }
             match self.recv(&mut conn, None, true).await {
                 Ok(Wake::Desired) => {}
                 Ok(Wake::Ack(control, _)) => tracing::debug!(trnm = control.trnm(), "기다리지 않던 응답을 버립니다"),
@@ -583,6 +618,17 @@ impl Session {
         };
         conn.close().await;
         end
+    }
+
+    async fn register_vi(&mut self, conn: &mut Conn) -> Result<(), End> {
+        conn.send(wire::vi_reg_message()).await?;
+        match self.await_ack(conn, WsControl::Reg).await {
+            Err(end) if end.is_control_failure() => {
+                tracing::warn!(%end, "VI 실시간 등록이 되지 않았습니다. 시세 세션은 그대로 두고 이 연결에서는 다시 보내지 않습니다");
+                Ok(())
+            }
+            settled => settled,
+        }
     }
 
     async fn sync_account(&mut self, conn: &mut Conn) -> Result<bool, End> {
@@ -704,6 +750,8 @@ impl Session {
                 Ok(RealItem::Program(row)) => StreamEvent::Program { row, received_at },
                 Ok(RealItem::Broker(snapshot)) => StreamEvent::Broker { snapshot, received_at },
                 Ok(RealItem::AfterHours(totals)) => StreamEvent::AfterHours { totals, received_at },
+                Ok(RealItem::Vi(alert)) => StreamEvent::Vi { signal: ViSignal::Alert(alert), received_at },
+                Ok(RealItem::IgnoredVi) => continue,
                 Ok(RealItem::Account(event)) => {
                     let _ = self.account.events.send(event);
                     continue;
@@ -954,9 +1002,19 @@ pub(crate) mod tests {
         }
 
         fn start_feeds_rest(&self, rest: KiwoomRest, clock: Clock, timings: Timings, desired: DesiredFeeds) -> (KiwoomStream, mpsc::Receiver<StreamEvent>) {
-            let (stream, events) = KiwoomStream::spawn_connector(Box::new(self.clone()), rest, clock, timings);
+            let (stream, events) = KiwoomStream::spawn_connector(Box::new(self.clone()), rest, clock, timings, StreamLane::AccountOnly);
             stream.set_desired(desired);
             (stream, events)
+        }
+
+        fn start_market_lane(&self, rest: KiwoomRest, clock: Clock, desired: DesiredFeeds) -> (KiwoomStream, mpsc::Receiver<StreamEvent>) {
+            let (stream, events) = KiwoomStream::spawn_connector(Box::new(self.clone()), rest, clock, fast(), StreamLane::Market);
+            stream.set_desired(desired);
+            (stream, events)
+        }
+
+        fn vi_registrations(&self, conn: usize) -> Vec<Value> {
+            self.messages(conn).into_iter().filter(|m| m["data"][0]["type"] == json!(["1h"])).collect()
         }
 
         fn start_feeds(&self, desired: DesiredFeeds) -> (KiwoomStream, mpsc::Receiver<StreamEvent>) {
@@ -1042,6 +1100,65 @@ pub(crate) mod tests {
         assert_eq!(peer.controls(0), ["LOGIN", "REG"]);
         assert_eq!(peer.messages(0)[1], json!({"trnm": "REG", "grp_no": "1", "refresh": "1", "data": [{"item": ["005930_AL"], "type": ["0B"]}, {"item": ["001"], "type": ["0J"]}, {"item": ["005930_AL"], "type": ["0H"]}]}));
         assert_eq!(transport.sent().len(), 1);
+    }
+
+    fn vi_frame(item: &str) -> Value {
+        json!({"type": "1h", "item": item, "values": {"9001": "005930", "9068": "1", "9069": "1", "1221": "881000", "1223": "093000", "1224": "000000", "1236": "800000", "1237": "0"}})
+    }
+
+    fn only_trades() -> DesiredFeeds {
+        feeds(&[(samsung(), &[RealType::Trade])])
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn vi_is_registered_once_per_connection_and_a_refusal_keeps_the_feed() {
+        let accepted_peer = Peer::ok();
+        let refused_peer = Peer::new(|_, trnm, nth| if trnm == "REG" && nth == 2 { Reply::Code(105110) } else { Reply::Ok });
+        let silent_peer = Peer::new(|_, trnm, nth| if trnm == "REG" && nth == 2 { Reply::Silent } else { Reply::Ok });
+        for peer in [accepted_peer, refused_peer, silent_peer] {
+            let clock = clock();
+            let (rest, _) = rest(&clock);
+            let (stream, mut events) = peer.start_market_lane(rest, clock, only_trades());
+            for conn in 0..2 {
+                assert!(matches!(next(&mut events).await, StreamEvent::Live { .. }));
+                until("1h REG", || peer.vi_registrations(conn).len() == 1).await;
+                tokio::time::sleep(Duration::from_secs(5)).await;
+                assert_eq!(peer.vi_registrations(conn), [json!({"trnm": "REG", "grp_no": "1", "refresh": "1", "data": [{"item": [""], "type": ["1h"]}]})]);
+                assert_eq!(peer.controls(conn), ["LOGIN", "REG", "REG"]);
+                assert_eq!(peer.logins(), conn + 1, "거절이나 무응답이 시세 세션을 끊지 않는다");
+                peer.real(conn, vec![trade("093001", 71_200, 15, 100, "KRX"), vi_frame("005930_AL"), vi_frame("005930")]);
+                assert_eq!(tick(next(&mut events).await).price.centi(), 7_120_000);
+                let StreamEvent::Vi { signal: ViSignal::Alert(alert), .. } = next(&mut events).await else { panic!("VI 이벤트가 아니다") };
+                assert_eq!(Symbol::Stock(alert.code), samsung());
+                assert_eq!(KiwoomSeats.seats(&stream.watch_desired().borrow()), 1);
+                assert_eq!(registrations(&stream.watch_desired().borrow()).len(), 2);
+                if conn == 0 {
+                    peer.drop_session(0);
+                    assert!(matches!(next(&mut events).await, StreamEvent::Down { .. }));
+                }
+            }
+            stream.set_desired(feeds(&[(samsung(), &[RealType::Trade, RealType::Book])]));
+            until("시세 등록은 계속 된다", || peer.controls(1).len() == 4).await;
+            assert_eq!(peer.messages(1)[3]["data"][0]["type"], json!(["0D"]));
+            assert_eq!(peer.logins(), 2);
+        }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn vi_is_not_registered_on_the_account_lane_or_in_the_mock_environment() {
+        let account_lane = Peer::ok();
+        let (_account, mut account_events) = account_lane.start_feeds(only_trades());
+        assert!(matches!(next(&mut account_events).await, StreamEvent::Live { .. }));
+        let mock = Peer::ok();
+        let clock = clock();
+        let transport = Arc::new(FakeTransport::new(Duration::ZERO, |_| token(1)));
+        let rest = KiwoomRest::for_environment(Arc::new(transport), KiwoomAuth::new(Secret::new("key".into()), Secret::new("secret".into()), None), clock.clone(), KiwoomEnvironment::Mock);
+        let (mock_stream, mut mock_events) = mock.start_market_lane(rest, clock, only_trades());
+        assert!(matches!(next(&mut mock_events).await, StreamEvent::Live { .. }));
+        tokio::time::sleep(Duration::from_secs(5)).await;
+        assert_eq!(account_lane.controls(0), ["LOGIN", "REG"]);
+        assert_eq!(mock.controls(0), ["LOGIN", "REG"]);
+        assert!(mock_stream.vi_history().is_none());
     }
 
     #[tokio::test(start_paused = true)]
@@ -1498,7 +1615,7 @@ pub(crate) mod tests {
         let clock = clock();
         let (rest, _) = rest(&clock);
         let access = rest.watch_access();
-        let session = Session { connector: Box::new(peer.clone()), rest, clock, timings: Timings::default(), desired, access, events: events_tx, account: stream.account_feed(), account_wanted: stream.account_feed().wanted.subscribe(), account_registered: false, account_refused: None, budget: TokenBudget::Fresh, rebuild: ControlBudget::Fresh, dropped: Dropped::default() };
+        let session = Session { connector: Box::new(peer.clone()), rest, clock, timings: Timings::default(), desired, access, events: events_tx, account: stream.account_feed(), account_wanted: stream.account_feed().wanted.subscribe(), account_registered: false, account_refused: None, registers_vi: false, budget: TokenBudget::Fresh, rebuild: ControlBudget::Fresh, dropped: Dropped::default() };
         let sender = session.events.clone();
         stream.set_desired(trades_only([samsung()].into()));
         tokio::spawn(session.run());

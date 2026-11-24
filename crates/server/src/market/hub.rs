@@ -17,6 +17,7 @@ use tokio::sync::{mpsc, oneshot, watch};
 use super::outbox::Outbox;
 use super::subscriptions::{Holder, SubscriptionManager};
 use super::venue_volume::{DayTallies, DayVolumes, Fill};
+use super::vi::{BaseAfterRelease, ViBoard};
 use super::{ConnId, SubId};
 use crate::api::{self, ConnectionStatus, FeedKind, RealtimeState, ReloadReason, ServerMessage, SubErrorCode, UnixSeconds};
 use crate::bars::{BarError, BarService, Seed};
@@ -26,6 +27,7 @@ use crate::market_source::SourceError;
 use crate::market_source::stream::{
     AfterHoursTotals, BookLevel, BookSnapshot, BrokerEntry, BrokerSnapshot, Exchange, ExpectedQuote, MarketStream, RealProgramTrade, RealTick, StreamEvent, StreamKind, TradeSide,
 };
+use crate::market_source::vi::{ViAlert, ViSignal};
 use crate::quotes;
 use crate::symbols::Directory;
 
@@ -123,6 +125,7 @@ enum HubInput {
     Seeded { key: SeriesKey, generation: u64, result: Result<Seed, BarError> },
     Verified { key: SeriesKey, generation: u64, bucket: Bucket, attempt: u32, result: Result<Option<ConfirmedBar>, BarError> },
     DayVolumes { requests: Vec<(StockCode, u64)>, result: Result<HashMap<StockCode, DayVolumes>, SourceError> },
+    ViHistory(Vec<ViAlert>),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -275,6 +278,7 @@ pub struct MarketHub {
     first_after_hours: FirstOfDay,
     first_expected: FirstOfDay,
     tallies: DayTallies,
+    vi: ViBoard,
     last_fill: HashMap<(StockCode, Exchange), KstTime>,
     last_row_volume: HashMap<(StockCode, Venue), (KstDate, u64)>,
     directory: watch::Receiver<Option<Arc<Directory>>>,
@@ -309,6 +313,7 @@ impl MarketHub {
             first_after_hours: FirstOfDay::default(),
             first_expected: FirstOfDay::default(),
             tallies: DayTallies::default(),
+            vi: ViBoard::default(),
             last_fill: HashMap::new(),
             last_row_volume: HashMap::new(),
             conns: HashMap::new(),
@@ -350,7 +355,8 @@ impl MarketHub {
         match input {
             HubInput::Connect { conn, outbox } => {
                 let hello = ServerMessage::Hello { protocol: PROTOCOL, server_time: UnixSeconds(now.unix()), status: self.status() };
-                if outbox.push(hello).is_ok() {
+                let vi = ServerMessage::ViSnapshot { states: self.vi.states() };
+                if outbox.push(hello).is_ok() && outbox.push(vi).is_ok() {
                     self.conns.insert(conn, Conn { outbox, subs: HashMap::new(), feeds: HashMap::new(), requested_watch: Vec::new(), watch_venue: Venue::Combined, limited_sent: BTreeSet::new() });
                 }
             }
@@ -381,6 +387,7 @@ impl MarketHub {
             }
             HubInput::DailyReset => {
                 self.broker_history.clear();
+                self.reset_vi();
                 tracing::info!(keys = self.keys.len(), "07:45 실시간 키를 모두 다시 시드합니다");
                 self.reseed_all(SeedPurpose::Reload { reason: ReloadReason::DailyReset, from: None });
             }
@@ -388,12 +395,14 @@ impl MarketHub {
                 self.manager.reseat(self.stream.seat_rules());
                 self.replan(now);
                 self.broker_history.clear();
+                self.reset_vi();
                 tracing::info!(keys = self.keys.len(), "시세 공급원이 바뀌어 실시간 키를 모두 다시 시드합니다");
                 self.reseed_all(SeedPurpose::Reload { reason: ReloadReason::DailyReset, from: None });
             }
             HubInput::Seeded { key, generation, result } => self.on_seeded(key, generation, result, now),
             HubInput::Verified { key, generation, bucket, attempt, result } => self.on_verified(key, generation, bucket, attempt, result, now),
             HubInput::DayVolumes { requests, result } => self.on_day_volumes(requests, result, now),
+            HubInput::ViHistory(alerts) => self.on_vi_history(&alerts, now),
         }
     }
 
@@ -907,6 +916,7 @@ impl MarketHub {
             StreamEvent::Program { row, received_at } => self.on_program(&row, received_at),
             StreamEvent::Broker { snapshot, received_at } => self.on_broker(snapshot, received_at),
             StreamEvent::AfterHours { totals, received_at } => self.on_after_hours(&totals, received_at),
+            StreamEvent::Vi { signal, received_at } => self.on_vi(&signal, received_at),
             StreamEvent::Down { at } => {
                 self.publish_feed_link(false, at);
                 let from = *self.gap_from.get_or_insert(at);
@@ -933,6 +943,7 @@ impl MarketHub {
                 self.session_live = true;
                 self.realtime = RealtimeState::Live;
                 self.realtime_since = since;
+                self.ask_vi_history();
                 match self.gap_from {
                     Some(from) if gap_overlaps_trading(from, since) && !self.keys.is_empty() => {
                         tracing::info!(%from, %since, keys = self.keys.len(), "끊긴 구간을 키움 조회로 메웁니다");
@@ -1048,8 +1059,68 @@ impl MarketHub {
         }
     }
 
+    fn on_vi(&mut self, signal: &ViSignal, received_at: KstTime) {
+        let (code, changed) = match signal {
+            ViSignal::Alert(alert) => {
+                let hears_trades = self.session_live && self.manager.is_admitted(Symbol::Stock(alert.code));
+                let after_release = if hears_trades { BaseAfterRelease::FirstKrxTrade } else { BaseAfterRelease::Unknown };
+                (alert.code, self.vi.apply_alert(alert, received_at, after_release))
+            }
+            ViSignal::Reading(reading) => (reading.code, self.vi.apply_reading(reading, received_at)),
+        };
+        if changed {
+            self.publish_vi(code);
+        }
+    }
+
+    fn ask_vi_history(&self) {
+        let Some(history) = self.stream.vi_history() else {
+            return;
+        };
+        let tx = self.tx.clone();
+        tokio::spawn(async move {
+            if let Some(alerts) = history.await {
+                let _ = tx.send(HubInput::ViHistory(alerts));
+            }
+        });
+    }
+
+    fn on_vi_history(&mut self, alerts: &[ViAlert], now: KstTime) {
+        let changed: BTreeSet<StockCode> = alerts.iter().filter(|alert| self.vi.apply_alert(alert, now, BaseAfterRelease::Unknown)).map(|alert| alert.code).collect();
+        for code in changed {
+            self.publish_vi(code);
+        }
+    }
+
+    fn settle_vi(&mut self, now: KstTime) {
+        let manager = &self.manager;
+        self.vi.await_base_only_for(|code| manager.is_admitted(Symbol::Stock(code)));
+        for code in self.vi.expire(now) {
+            self.publish_vi(code);
+        }
+    }
+
+    fn reset_vi(&mut self) {
+        self.vi.clear();
+        for (conn, c) in &self.conns {
+            if c.outbox.push(ServerMessage::ViSnapshot { states: Vec::new() }).is_err() {
+                self.closing.push(*conn);
+            }
+        }
+    }
+
+    fn publish_vi(&self, code: StockCode) {
+        let Some(state) = self.vi.state(code) else {
+            return;
+        };
+        for c in self.conns.values() {
+            c.outbox.set_vi(state.clone());
+        }
+    }
+
     fn session_down(&mut self, state: RealtimeState, since: KstTime) {
         self.session_live = false;
+        self.vi.stop_awaiting_base();
         self.realtime = state;
         self.realtime_since = since;
         for ks in self.keys.values_mut() {
@@ -1071,6 +1142,13 @@ impl MarketHub {
         };
         if matches!(tick.symbol, Symbol::Stock(_)) && tick.exchange.is_none() {
             self.counters.unknown_exchange += 1;
+        }
+        if self.vi.awaits_base()
+            && tick.exchange == Some(Exchange::Krx)
+            && let Symbol::Stock(code) = tick.symbol
+            && self.vi.take_base(code, tick.price, at)
+        {
+            self.publish_vi(code);
         }
         self.publish_quotes(&tick, at);
         self.publish_feed_trade(&tick, at);
@@ -1132,6 +1210,7 @@ impl MarketHub {
         }
         self.replan(now);
         self.sync_day_volumes(now);
+        self.settle_vi(now);
         let manager = &self.manager;
         self.keys.retain(|key, ks| {
             !ks.subs.is_empty()
@@ -1598,7 +1677,7 @@ mod tests {
         let conn = h.hub.connect(out.clone());
         settle().await;
         let msgs = out.take(true).messages;
-        assert!(matches!(msgs.as_slice(), [ServerMessage::Hello { protocol: 1, .. }]), "{msgs:?}");
+        assert!(matches!(msgs.as_slice(), [ServerMessage::Hello { protocol: 1, .. }, ServerMessage::ViSnapshot { .. }]), "{msgs:?}");
         (conn, out)
     }
 
@@ -1634,6 +1713,110 @@ mod tests {
         h.hub.subscribe(conn, sub("a"), samsung());
         assert_eq!(take(&out).await, vec![subscribed("a", 0, None), bar_msg("a", 1, bar(at(9, 0, 0), [100, 110, 95, 105, 50]))]);
         (conn, out)
+    }
+
+    fn vi_alert(code: &str, released: Option<TimeOfDay>) -> ViAlert {
+        ViAlert {
+            code: StockCode::parse(code).unwrap(),
+            direction: Some(crate::market_source::vi::ViDirection::Up),
+            trigger_price: Some(won(881_000)),
+            static_base: Some(won(800_000)),
+            triggered: TimeOfDay::hms(9, 30, 0).unwrap(),
+            released,
+        }
+    }
+
+    async fn vi_event(h: &Harness, alert: ViAlert) {
+        h.events.send(StreamEvent::Vi { signal: ViSignal::Alert(alert), received_at: h.clock.now() }).await.unwrap();
+    }
+
+    fn vi_state(code: &str, active: bool, base: Option<f64>, released_at: Option<KstTime>) -> api::ViState {
+        api::ViState {
+            symbol: api::SymbolCode(code.into()),
+            active,
+            direction: Some(api::ViDirection::Up),
+            trigger_price: Some(881_000.0),
+            base,
+            triggered_at: Some(UnixSeconds(at(9, 30, 0).unix())),
+            released_at: released_at.map(|t| UnixSeconds(t.unix())),
+        }
+    }
+
+    async fn connect_with_vi(h: &Harness) -> (Arc<Outbox>, Vec<api::ViState>) {
+        let out = Outbox::new();
+        h.hub.connect(out.clone());
+        match take(&out).await.as_slice() {
+            [ServerMessage::Hello { .. }, ServerMessage::ViSnapshot { states }] => (out, states.clone()),
+            other => panic!("hello 뒤 스냅샷 하나가 아니다: {other:?}"),
+        }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_new_connection_gets_the_vi_snapshot_and_then_only_changes() {
+        let h = harness(at(9, 30, 0), Chart::default(), Duration::ZERO);
+        live(&h).await;
+        vi_event(&h, vi_alert(SAMSUNG, None)).await;
+        vi_event(&h, vi_alert("000660", None)).await;
+        settle().await;
+        let (out, states) = connect_with_vi(&h).await;
+        assert_eq!(states, [vi_state("000660", true, Some(800_000.0), None), vi_state(SAMSUNG, true, Some(800_000.0), None)]);
+        vi_event(&h, vi_alert(SAMSUNG, None)).await;
+        assert_eq!(take(&out).await, vec![], "같은 상태는 다시 보내지 않는다");
+        let released = vi_alert(SAMSUNG, TimeOfDay::hms(9, 32, 14));
+        vi_event(&h, released).await;
+        assert_eq!(take(&out).await, vec![ServerMessage::ViUpdate { state: vi_state(SAMSUNG, false, None, Some(at(9, 32, 14))) }]);
+        vi_event(&h, released).await;
+        assert_eq!(take(&out).await, vec![]);
+        h.hub.daily_reset();
+        assert_eq!(take(&out).await, vec![ServerMessage::ViSnapshot { states: vec![] }]);
+        vi_event(&h, vi_alert(SAMSUNG, None)).await;
+        assert_eq!(take(&out).await.len(), 1);
+        h.hub.source_switched();
+        assert_eq!(take(&out).await, vec![ServerMessage::ViSnapshot { states: vec![] }]);
+        assert_eq!(connect_with_vi(&h).await.1, []);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_released_stock_takes_its_base_from_a_krx_trade_only_while_its_trades_are_received() {
+        let h = harness(at(9, 32, 14), Chart::default(), Duration::ZERO);
+        live(&h).await;
+        let (conn, out) = connect(&h).await;
+        let released = TimeOfDay::hms(9, 32, 14);
+        vi_event(&h, vi_alert(SAMSUNG, released)).await;
+        h.events.send(trade(&h, (9, 32, 14), 884_000, 1, Some(Exchange::Krx))).await.unwrap();
+        assert_eq!(take(&out).await, vec![ServerMessage::ViUpdate { state: vi_state(SAMSUNG, false, None, Some(at(9, 32, 14))) }], "체결을 받지 않는 종목은 기준가가 비어 있다");
+        h.hub.source_switched();
+        h.hub.watch(conn, vec![Symbol::parse(SAMSUNG).unwrap()], Venue::Combined);
+        settle().await;
+        out.take(true);
+        vi_event(&h, vi_alert(SAMSUNG, released)).await;
+        settle().await;
+        h.events.send(trade(&h, (9, 32, 14), 882_000, 1, Some(Exchange::Nxt))).await.unwrap();
+        h.events.send(trade(&h, (9, 32, 14), 884_000, 1, Some(Exchange::Krx))).await.unwrap();
+        h.events.send(trade(&h, (9, 32, 14), 890_000, 1, Some(Exchange::Krx))).await.unwrap();
+        settle().await;
+        assert_eq!(connect_with_vi(&h).await.1, [vi_state(SAMSUNG, false, Some(884_000.0), Some(at(9, 32, 14)))]);
+        h.hub.source_switched();
+        settle().await;
+        vi_event(&h, vi_alert(SAMSUNG, released)).await;
+        settle().await;
+        h.events.send(StreamEvent::Down { at: h.clock.now() }).await.unwrap();
+        live(&h).await;
+        h.events.send(trade(&h, (9, 32, 20), 890_000, 1, Some(Exchange::Krx))).await.unwrap();
+        settle().await;
+        assert_eq!(connect_with_vi(&h).await.1, [vi_state(SAMSUNG, false, None, Some(at(9, 32, 14)))], "끊긴 사이의 첫 체결을 놓쳤을 수 있어 채우지 않는다");
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_vi_without_a_release_is_published_as_off_after_five_minutes() {
+        let h = harness(at(9, 30, 0), Chart::default(), Duration::ZERO);
+        live(&h).await;
+        vi_event(&h, vi_alert(SAMSUNG, None)).await;
+        settle().await;
+        let (out, _) = connect_with_vi(&h).await;
+        h.clock.jump(301);
+        tokio::time::sleep(Duration::from_secs(2)).await;
+        assert_eq!(take(&out).await, vec![ServerMessage::ViUpdate { state: vi_state(SAMSUNG, false, None, None) }]);
     }
 
     #[tokio::test(start_paused = true)]
@@ -1876,7 +2059,7 @@ mod tests {
         h.chart.lock().unwrap().set(at(9, 0, 0), [100, 130, 95, 125, 80]);
         h.bars.clear_all();
         h.hub.daily_reset();
-        assert_eq!(take(&out).await, vec![reload("a", 2, ReloadReason::DailyReset, None)]);
+        assert_eq!(take(&out).await, vec![ServerMessage::ViSnapshot { states: vec![] }, reload("a", 2, ReloadReason::DailyReset, None)]);
         let snap = h.hub.snapshot(samsung()).await.unwrap();
         assert_eq!(snap.current.map(|c| api::Bar::new(c.bucket(), c.ohlcv())), Some(bar(at(9, 0, 0), [100, 130, 95, 125, 80])), "새로 받은 현재 봉");
     }
@@ -3620,7 +3803,7 @@ mod tests {
         h.events.send(broker_event(&h, 200)).await.unwrap();
         take(&out).await;
         h.hub.daily_reset();
-        settle().await;
+        take(&out).await;
         h.hub.unsubscribe(conn, sub("after-grace"));
         subscribe_feed(&h, conn, "after-reset", FeedKind::Brokers, Venue::Combined);
         assert_eq!(take(&out).await, [feed_subscribed("after-reset", FeedKind::Brokers)], "07:45 비우기에서 버린다");

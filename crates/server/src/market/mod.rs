@@ -3,6 +3,7 @@
 pub mod hub;
 pub mod outbox;
 pub mod subscriptions;
+pub mod vi;
 pub mod venue_volume;
 
 /// 브라우저 WebSocket 연결 하나. 서버가 연결마다 새로 붙인다.

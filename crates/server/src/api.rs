@@ -266,6 +266,38 @@ pub enum ServerMessage {
     CollectorDaemon { judgment: crate::collector::DaemonJudgment, at: UnixSeconds },
     SetupChanged { kinds: Vec<setup::DocumentKind> },
     TradingAccountChanged { account_ref: String },
+    ViSnapshot { states: Vec<ViState> },
+    ViUpdate { state: ViState },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum ViDirection {
+    Up,
+    Down,
+}
+
+impl From<crate::market_source::vi::ViDirection> for ViDirection {
+    fn from(direction: crate::market_source::vi::ViDirection) -> ViDirection {
+        match direction {
+            crate::market_source::vi::ViDirection::Up => ViDirection::Up,
+            crate::market_source::vi::ViDirection::Down => ViDirection::Down,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct ViState {
+    pub symbol: SymbolCode,
+    pub active: bool,
+    pub direction: Option<ViDirection>,
+    pub trigger_price: Option<f64>,
+    pub base: Option<f64>,
+    pub triggered_at: Option<UnixSeconds>,
+    pub released_at: Option<UnixSeconds>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, TS)]
@@ -2703,6 +2735,21 @@ mod tests {
                 json!({"type": "quotes", "venue": "nxt", "quotes": [{"symbol": "005930", "price": 71_200.0, "change": 200.0, "changeRate": 0.5, "volume": 9, "t": 4, "source": "realtime", "venue": "combined"}]}),
             ),
             (ServerMessage::WatchLimited { symbols: vec![SymbolCode("000660".into())] }, json!({"type": "watch_limited", "symbols": ["000660"]})),
+            (ServerMessage::ViSnapshot { states: vec![] }, json!({"type": "vi_snapshot", "states": []})),
+            (
+                ServerMessage::ViUpdate {
+                    state: ViState {
+                        symbol: SymbolCode("005930".into()),
+                        active: true,
+                        direction: Some(ViDirection::Up),
+                        trigger_price: Some(881_000.0),
+                        base: None,
+                        triggered_at: Some(UnixSeconds(4)),
+                        released_at: None,
+                    },
+                },
+                json!({"type": "vi_update", "state": {"symbol": "005930", "active": true, "direction": "up", "triggerPrice": 881_000.0, "base": null, "triggeredAt": 4, "releasedAt": null}}),
+            ),
         ];
         for (msg, want) in cases {
             assert_eq!(serde_json::to_value(&msg).unwrap(), want);

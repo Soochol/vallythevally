@@ -13,6 +13,7 @@ use crate::api::{self, ExcludeKind};
 use super::error::{WsRejection, judge_ws_ack};
 use crate::market_source::stream::{AfterHoursTotals, BOOK_DEPTH, BookLevel, BookSnapshot, BrokerEntry, BrokerSnapshot, DayTotals, Exchange, ExpectedQuote, ExpectedTrade, RealProgramTrade, RealTick, StreamKind, TradeSide};
 use crate::config::Secret;
+use crate::market_source::vi::{ViAlert, ViDirection};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WireError(pub String);
@@ -903,6 +904,59 @@ struct TradeValueWireRow {
     flu_rt: String,
     now_trde_qty: String,
     trde_prica: String,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Deserialize)]
+#[serde(default)]
+struct ViTriggeredWireRow {
+    stk_cd: String,
+    motn_pric: String,
+    trde_cntr_proc_time: String,
+    virelis_time: String,
+    static_stdpc: String,
+    static_dispty_rt: String,
+    dynm_dispty_rt: String,
+}
+
+#[derive(Debug, PartialEq, Deserialize)]
+pub struct ViTriggeredStocksResponse {
+    motn_stk: Vec<ViTriggeredWireRow>,
+}
+
+impl ViTriggeredStocksResponse {
+    pub fn alerts(&self) -> ParsedRows<ViAlert> {
+        let mut parsed = collect_rows(&self.motn_stk, |r| {
+            let code = StockCode::parse(r.stk_cd.trim()).map_err(|e| WireError(format!("{e}: {:?}", r.stk_cd)))?;
+            Ok(ViAlert {
+                code,
+                direction: dispersion_direction(&r.static_dispty_rt).or_else(|| dispersion_direction(&r.dynm_dispty_rt)),
+                trigger_price: won_or_zero(&r.motn_pric)?,
+                static_base: won_or_zero(&r.static_stdpc)?,
+                triggered: hhmmss(&r.trde_cntr_proc_time)?,
+                released: vi_release_time(&r.virelis_time)?,
+            })
+        }, "ka10054");
+        parsed.rows.sort_by_key(|alert| alert.triggered);
+        parsed
+    }
+}
+
+fn dispersion_direction(text: &str) -> Option<ViDirection> {
+    let rate = signed_decimal(text).ok()?;
+    if rate > 0.0 {
+        Some(ViDirection::Up)
+    } else if rate < 0.0 {
+        Some(ViDirection::Down)
+    } else {
+        None
+    }
+}
+
+fn won_or_zero(text: &str) -> Result<Option<Price>, WireError> {
+    if text.trim().is_empty() {
+        return Ok(None);
+    }
+    Ok(Price::from_centi(unsigned(text)?.checked_mul(100).ok_or_else(|| WireError(format!("가격이 너무 큽니다: {text:?}")))?))
 }
 
 #[derive(Debug, PartialEq, Deserialize)]
@@ -2184,6 +2238,8 @@ pub enum RealItem {
     Program(RealProgramTrade),
     Broker(BrokerSnapshot),
     AfterHours(AfterHoursTotals),
+    Vi(ViAlert),
+    IgnoredVi,
     Account(AccountEvent),
     OtherType(String),
 }
@@ -2264,6 +2320,7 @@ fn parse_real_item(entry: &Value) -> Result<RealItem, WireError> {
         "0w" => parse_program(item, values).map(RealItem::Program),
         "0F" => parse_broker(item, values).map(RealItem::Broker),
         "0E" => parse_after_hours(item, values).map(RealItem::AfterHours),
+        VI_REAL_TYPE => parse_vi(item, values),
         "00" | "04" => {
             let kind = if kind == "00" { AccountKind::OrderFill } else { AccountKind::Balance };
             Ok(RealItem::Account(AccountEvent { kind, account: Secret::new(field("9201")?.trim().to_owned()) }))
@@ -2339,6 +2396,38 @@ fn parse_after_hours(item: &str, values: &Value) -> Result<AfterHoursTotals, Wir
         total_ask_qty: Volume(fid_or(values, 131, unsigned)?),
         total_bid_qty: Volume(fid_or(values, 135, unsigned)?),
     })
+}
+
+const VI_REAL_TYPE: &str = "1h";
+
+fn parse_vi(item: &str, values: &Value) -> Result<RealItem, WireError> {
+    let text = |fid: &str| values.get(fid).and_then(Value::as_str).map(str::trim).unwrap_or_default();
+    let Ok(code) = StockCode::parse(item.trim()) else {
+        return Ok(RealItem::IgnoredVi);
+    };
+    let direction = match text("9069") {
+        "1" => ViDirection::Up,
+        "2" => ViDirection::Down,
+        _ => return Ok(RealItem::IgnoredVi),
+    };
+    if !matches!(text("9068"), "1" | "2" | "3") {
+        return Ok(RealItem::IgnoredVi);
+    }
+    Ok(RealItem::Vi(ViAlert {
+        code,
+        direction: Some(direction),
+        trigger_price: won_or_absent(values, 1221)?,
+        static_base: won_or_absent(values, 1236)?,
+        triggered: required_time(values, "1223", VI_REAL_TYPE, item)?,
+        released: vi_release_time(text("1224"))?,
+    }))
+}
+
+fn vi_release_time(text: &str) -> Result<Option<TimeOfDay>, WireError> {
+    match text.trim() {
+        "" | "000000" => Ok(None),
+        text => hhmmss(text).map(Some),
+    }
 }
 
 fn parse_program(item: &str, values: &Value) -> Result<RealProgramTrade, WireError> {
@@ -2462,6 +2551,10 @@ pub fn account_reg_message() -> String {
     json!({"trnm": "REG", "grp_no": "1", "refresh": "1", "data": [account_entry()]}).to_string()
 }
 
+pub fn vi_reg_message() -> String {
+    json!({"trnm": "REG", "grp_no": "1", "refresh": "1", "data": [{"item": [""], "type": [VI_REAL_TYPE]}]}).to_string()
+}
+
 pub fn account_remove_message() -> String {
     json!({"trnm": "REMOVE", "grp_no": "1", "data": [account_entry()]}).to_string()
 }
@@ -2473,6 +2566,62 @@ mod tests {
 
     fn trade_values(time: &str, price: i64, qty: i64, cumulative: i64, exchange: &str) -> Value {
         json!({"20": time, "10": price.to_string(), "15": qty.to_string(), "13": cumulative.to_string(), "9081": exchange, "11": "0"})
+    }
+
+    fn vi_frame(item: &str, overrides: &[(&str, &str)]) -> Value {
+        let mut values = json!({"9001": "005930", "9068": "1", "9069": "1", "9075": "1", "1221": "881000", "1223": "093000", "1224": "000000", "1236": "800000", "1237": "0"});
+        for (fid, value) in overrides {
+            values[*fid] = json!(value);
+        }
+        json!({"type": "1h", "item": item, "values": values})
+    }
+
+    #[test]
+    fn a_1h_frame_becomes_a_vi_event_and_other_codes_are_ignored() {
+        let frame = json!({"trnm": "REAL", "data": [
+            vi_frame("005930", &[]),
+            vi_frame("005930_AL", &[]),
+            vi_frame("005930_NX", &[]),
+            vi_frame("005930", &[("9068", "4"), ("1236", "0"), ("1237", "0")]),
+            vi_frame("005930", &[("9069", "9")]),
+            vi_frame("005930", &[("9068", "")]),
+            vi_frame("", &[]),
+            vi_frame("005930", &[("9068", "2"), ("9069", "2"), ("1236", "0"), ("1224", "093214")]),
+        ]});
+        let WsFrame::Real(items) = parse_ws_frame(&frame.to_string()).unwrap() else { panic!("REAL이 아니다") };
+        let alert = ViAlert {
+            code: StockCode::parse("005930").unwrap(),
+            direction: Some(ViDirection::Up),
+            trigger_price: Price::from_centi(88_100_000),
+            static_base: Price::from_centi(80_000_000),
+            triggered: TimeOfDay::hms(9, 30, 0).unwrap(),
+            released: None,
+        };
+        let released = ViAlert { direction: Some(ViDirection::Down), static_base: None, released: TimeOfDay::hms(9, 32, 14), ..alert };
+        let ignored = || Ok(RealItem::IgnoredVi);
+        assert_eq!(items, [Ok(RealItem::Vi(alert)), ignored(), ignored(), ignored(), ignored(), ignored(), ignored(), Ok(RealItem::Vi(released))]);
+    }
+
+    #[test]
+    fn ka10054_rows_take_the_direction_from_the_dispersion_sign_in_trigger_order() {
+        let row = |code: &str, at: &str, released: &str, base: &str, rates: (&str, &str)| {
+            json!({"stk_cd": code, "motn_pric": "3860", "trde_cntr_proc_time": at, "virelis_time": released, "static_stdpc": base, "static_dispty_rt": rates.0, "dynm_dispty_rt": rates.1})
+        };
+        let body: ViTriggeredStocksResponse = serde_json::from_value(json!({"motn_stk": [
+            row("005930", "114359", "000000", "3490", ("+10.60", "0.00")),
+            row("000660", "091000", "091214", "0", ("0.00", "-6.09")),
+            row("035720_NX", "091000", "091214", "0", ("0.00", "-6.09")),
+        ]})).unwrap();
+        let parsed = body.alerts();
+        assert_eq!(parsed.skipped, 1);
+        let shape: Vec<_> = parsed.rows.iter().map(|a| (a.code.as_str().to_owned(), a.direction, a.static_base, a.released)).collect();
+        assert_eq!(
+            shape,
+            [
+                ("000660".to_owned(), Some(ViDirection::Down), None, TimeOfDay::hms(9, 12, 14)),
+                ("005930".to_owned(), Some(ViDirection::Up), Price::from_centi(349_000), None),
+            ]
+        );
     }
 
     fn index_values(time: &str, centi: i64, cumulative: i64) -> Value {

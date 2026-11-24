@@ -7,6 +7,7 @@ use futures::future::BoxFuture;
 use tokio::sync::{mpsc, watch};
 
 use super::stream::{DesiredFeeds, MarketStream, SeatRules, StreamEvent, StreamKind};
+use super::vi::ViHistory;
 use super::{ChartPage, Cursor, DaySummary, MarketFeatures, MarketSource, MergeScope, OrderBookSnapshot, Priority, QuoteRow, SourceError, StockFundamentals, TapePage};
 use crate::api;
 use crate::clock::Clock;
@@ -248,6 +249,16 @@ impl MarketStream for ActiveStream {
         let current = self.current.lock().expect("스트림 잠금");
         self.wanted.lock().expect("스트림 잠금").venue = Some(venue);
         current.stream.set_venue(venue);
+    }
+
+    fn vi_history(&self) -> Option<ViHistory> {
+        let current = self.current.lock().expect("스트림 잠금").clone();
+        let history = current.stream.vi_history()?;
+        let merged = self.merged.clone();
+        Some(Box::pin(async move {
+            let alerts = history.await?;
+            (merged.gate.lock().await.active == current.id).then_some(alerts)
+        }))
     }
 }
 
