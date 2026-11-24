@@ -111,6 +111,7 @@ fn fill_on(date: KstDate, code: &str, hms: (u32, u32, u32), price_won: u64, exch
         exchange: Some(exchange),
         day: Some(DayTotals { change_centi: change_won * 100, cumulative: Volume(cumulative) }),
         strength_centi: None,
+        same_time_ratio_centi: None,
         side: None,
     };
     StreamEvent::Tick { tick, received_at: KstTime::from_kst_civil(date, TimeOfDay::hms(hms.0, hms.1, hms.2).unwrap()) }
