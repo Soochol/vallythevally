@@ -173,16 +173,38 @@ button.od-cellbtn:not(:disabled) small span { text-decoration:underline dotted; 
 .od-unpaid-dot { flex:none; width:var(--size-5); height:var(--size-5); border-radius:50%; background:var(--danger); }
 .od-preview[data-over] { color:var(--danger); text-decoration:line-through; }
 .od-preview[data-margin] { color:var(--warning); }
-.ui-popover.od-funds { max-height:none; }
-.od-funds-title { margin:0 0 var(--s2); color:var(--text-2); font-size:var(--fs-xs); font-weight:600; }
-.od-funds-rows li[data-danger] b, .od-funds-rows li[data-danger] .od-name { color:var(--danger); }
-.od-funds-toggle { display:flex; gap:var(--s2); margin-top:var(--s3); }
-.od-funds-option { flex:1; padding:var(--s2) var(--s3); border-radius:var(--r-m); background:var(--raised); color:var(--text-2); font-size:var(--fs-xs); }
-.od-funds-option[aria-pressed=true] { background:var(--hover); color:var(--text); font-weight:700; }
-.od-funds-option:disabled:not([aria-pressed=true]) { color:var(--text-3); cursor:default; }
+.ui-popover.od-funds { max-height:none; padding:var(--s4); }
+.od-funds-head { display:flex; justify-content:space-between; align-items:baseline; gap:var(--s3); margin-bottom:var(--s3); }
+.od-funds-head h4 { margin:0; color:var(--text); font-size:var(--fs-b); font-weight:600; }
+.od-funds-head span { color:var(--text-3); font-size:var(--fs-xs); font-variant-numeric:tabular-nums; }
+.od-funds-cards { display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:var(--s3); }
+.od-funds-card { container-type:inline-size; display:flex; flex-direction:column; gap:var(--size-3); min-width:0; padding:var(--size-9) var(--size-10) var(--size-10); border-radius:var(--r-m); background:var(--raised); box-shadow:inset 0 0 0 var(--size-1) var(--line); color:var(--text); text-align:left; font-variant-numeric:tabular-nums; }
+.od-funds-card:hover:not(:disabled):not([aria-pressed=true]) { box-shadow:inset 0 0 0 var(--size-1) var(--line-strong); }
+.od-funds-card[aria-pressed=true] { background:var(--accent-soft); box-shadow:inset 0 0 0 1.5px var(--accent); }
+.od-funds-card:disabled:not([aria-pressed=true]) { cursor:not-allowed; opacity:.55; }
+.od-funds-card[aria-pressed=true]:disabled { cursor:default; }
+.od-funds-card-head { display:flex; align-items:center; gap:var(--size-5); min-width:0; color:var(--text-2); font-size:var(--fs-xs); }
+.od-funds-card-head > span { white-space:nowrap; }
+.od-funds-card-dot { flex:none; width:var(--size-9); height:var(--size-9); border:1.5px solid var(--text-3); border-radius:50%; }
+.od-funds-card[aria-pressed=true] .od-funds-card-dot { border-color:var(--accent); background:radial-gradient(circle, var(--accent) 45%, transparent 50%); }
+.od-funds-card-tag { margin-left:auto; color:var(--text-3); font-size:var(--fs-xs); white-space:nowrap; }
+.od-funds-card[aria-pressed=true] .od-funds-card-tag { color:var(--text-2); }
+.od-funds-amount { font-size:var(--fs-l); line-height:1.35; font-weight:700; white-space:nowrap; }
+.od-funds-cards[data-scale=m] .od-funds-amount { font-size:var(--fs-m); }
+.od-funds-cards[data-scale=b] .od-funds-amount { font-size:var(--fs-b); }
+.od-funds-cards[data-scale=s] .od-funds-amount { font-size:var(--fs-s); }
+@container (width < 140px) { .od-funds-amount { font-size:var(--fs-s); } }
+.od-funds-qty { color:var(--text-2); font-size:var(--fs-s); }
+.od-funds-qty[data-zero] { color:var(--warning); }
+.od-funds-facts { display:flex; flex-direction:column; margin:var(--size-10) 0 0; }
+.od-funds-facts > div { display:flex; justify-content:space-between; align-items:center; gap:var(--s3); height:var(--size-26); border-top:var(--size-1) solid var(--line); }
+.od-funds-facts dt { color:var(--text-2); font-size:var(--fs-xs); }
+.od-funds-facts dd { margin:0; font-size:var(--fs-s); font-weight:600; font-variant-numeric:tabular-nums; }
+.od-funds-facts em { margin-left:var(--s3); color:var(--text-3); font-style:normal; font-weight:400; font-size:var(--fs-xs); }
+.od-funds-facts [data-danger] dt, .od-funds-facts [data-danger] dd { color:var(--danger); }
 .od-funds-note { margin:var(--s3) 0 0; color:var(--text-3); font-size:var(--fs-xs); }
 .od-funds-note[data-tone=error] { color:var(--danger); }
-.od-funds-confirm { margin-top:var(--s3); padding:var(--s3); border-radius:var(--r-m); background:color-mix(in srgb, var(--warning) 14%, transparent); color:var(--text); font-size:var(--fs-xs); }
+.od-funds-confirm { margin-top:var(--s3); padding:var(--s3); border-radius:var(--r-m); background:var(--warning-soft); color:var(--text); font-size:var(--fs-xs); }
 .od-funds-confirm p { margin:0 0 var(--s3); }
 .od-funds-confirm-actions { display:flex; justify-content:flex-end; gap:var(--s4); }
 .od-account-pick { display:inline-flex; align-items:center; gap:var(--s2); min-width:0; padding:var(--size-1) var(--s3); border:var(--size-1) solid var(--line-strong, var(--line)); border-radius:var(--r-m); color:var(--text); }
