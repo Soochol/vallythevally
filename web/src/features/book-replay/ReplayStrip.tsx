@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import type { UnixSeconds } from "../../api/generated/UnixSeconds";
 import { toChartTime } from "../../chart/time";
 import { useVenue } from "../../stores/ui";
@@ -11,7 +12,7 @@ function formatReplayAt(at: UnixSeconds): string {
   return `${pad2(date.getUTCMonth() + 1)}/${pad2(date.getUTCDate())} ${pad2(date.getUTCHours())}:${pad2(date.getUTCMinutes())}:${pad2(date.getUTCSeconds())}`;
 }
 
-function PastReplayStrip({ at }: { readonly at: UnixSeconds }) {
+function PastReplayStrip({ at, children }: { readonly at: UnixSeconds; readonly children?: ReactNode }) {
   const appVenue = useVenue();
   return (
     <div className="mw-replay-strip" role="status" data-testid="replay-strip" data-kind="past">
@@ -21,14 +22,15 @@ function PastReplayStrip({ at }: { readonly at: UnixSeconds }) {
           통합
         </span>
       )}
+      {children}
     </div>
   );
 }
 
-export function ReplayStrip({ view }: { readonly view: ReplayView }) {
+export function ReplayStrip({ view, children }: { readonly view: ReplayView; readonly children?: ReactNode }) {
   const enabled = useBookReplayEnabled();
   if (!enabled) return null;
-  if (view.kind === "past") return <PastReplayStrip at={view.at} />;
+  if (view.kind === "past") return <PastReplayStrip at={view.at}>{children}</PastReplayStrip>;
   if (view.kind === "none") {
     return (
       <div className="mw-replay-strip" role="status" data-testid="replay-strip" data-kind="none">

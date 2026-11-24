@@ -11,6 +11,8 @@ export const MARGIN_SETTLEMENT_TEXT = "결제일(D+2)까지 입금";
 
 export const MOCK_KRX_ONLY_TEXT = "모의투자는 KRX 주문만 됩니다";
 
+export const REPLAY_LOCKED_TEXT = "과거 호가를 보는 동안에는 주문할 수 없습니다";
+
 export const REJECT_TEXT: Readonly<Record<OrderRejectReason, string>> = {
   orders_off: "주문 사용이 꺼져 있습니다",
   not_connected: "키움에 연결되지 않았습니다",
