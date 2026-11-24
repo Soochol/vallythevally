@@ -47,7 +47,11 @@ fn uneven_messages(count: usize) -> BTreeMap<String, u64> {
 }
 
 fn plan(keys: &[KeyIdentity], universe: &UniverseFile, messages: &BTreeMap<String, u64>) -> PlanFile {
-    build_plan(&PlanInput { date: DATE, created_at: KstTime { date: DATE, ms_of_day: 7 * 3_600_000 + 35 * 60_000 }, keys, universe, previous_messages: messages }).unwrap()
+    plan_by(keys, universe, messages, None)
+}
+
+fn plan_by(keys: &[KeyIdentity], universe: &UniverseFile, messages: &BTreeMap<String, u64>, turnover: Option<&BTreeMap<String, u64>>) -> PlanFile {
+    build_plan(&PlanInput { date: DATE, created_at: KstTime { date: DATE, ms_of_day: 7 * 3_600_000 + 35 * 60_000 }, keys, universe, previous_messages: messages, turnover }).unwrap()
 }
 
 fn stocks_on(plan: &PlanFile) -> Vec<&String> {
@@ -117,6 +121,40 @@ fn stocks_beyond_the_capacity_are_excluded_by_code_order_with_an_alert() {
 }
 
 #[test]
+fn stocks_beyond_the_capacity_are_picked_by_turnover() {
+    let universe = universe_of(600);
+    let unknown = [100, 200, 300, 400, 500];
+    let turnover: BTreeMap<String, u64> = (0..600).filter(|number| !unknown.contains(number)).map(|number| (code(number), number as u64 + 1)).collect();
+    let first = plan_by(&identities(3), &universe, &uneven_messages(600), Some(&turnover));
+    let expected: Vec<String> = (0..25).chain(unknown).map(code).collect();
+    assert_eq!(first.excluded, expected);
+    assert_eq!(stocks_on(&first).len(), 570);
+    assert!(stocks_on(&first).contains(&&code(599)));
+    assert_eq!(first.alerts.len(), 1, "{:?}", first.alerts);
+    assert!(first.alerts[0].contains("30개") && first.alerts[0].contains("거래대금") && !first.alerts[0].contains('~'), "{}", first.alerts[0]);
+    assert_eq!(check_plan(&first), Ok(()));
+
+    let mut shuffled = universe.clone();
+    shuffled.stocks.reverse();
+    shuffled.stocks.rotate_left(77);
+    assert_eq!(plan_by(&identities(3), &shuffled, &uneven_messages(600), Some(&turnover)), first);
+
+    let flat: BTreeMap<String, u64> = (0..600).map(|number| (code(number), 7)).collect();
+    let tied = plan_by(&identities(3), &universe, &uneven_messages(600), Some(&flat));
+    assert_eq!(tied.excluded, (570..600).map(code).collect::<Vec<_>>());
+}
+
+#[test]
+fn a_plan_without_turnover_falls_back_to_code_order_and_says_so() {
+    let short = plan(&identities(3), &universe_of(600), &uneven_messages(600));
+    assert_eq!(short.excluded, (570..600).map(code).collect::<Vec<_>>());
+    assert_eq!(short.alerts.len(), 1, "{:?}", short.alerts);
+    assert!(short.alerts[0].contains("종목코드 순서") && short.alerts[0].contains("000571~000600"), "{}", short.alerts[0]);
+    let roomy = plan(&identities(3), &universe_of(570), &uneven_messages(570));
+    assert!(roomy.excluded.is_empty() && roomy.alerts.is_empty());
+}
+
+#[test]
 fn a_new_stock_without_yesterdays_count_goes_to_the_key_with_fewer_stocks() {
     let keys = vec![identity("collect-01", KeyRole::Collecting), identity("collect-02", KeyRole::Collecting), identity("spare-01", KeyRole::Spare)];
     let universe = universe(vec![entry("000001", true), entry("000002", true), entry("000003", true), entry("000004", true)]);
@@ -150,6 +188,7 @@ fn a_plan_without_a_collecting_key_is_refused() {
         keys: &keys,
         universe: &universe_of(3),
         previous_messages: &BTreeMap::new(),
+        turnover: None,
     });
     assert!(matches!(result, Err(PlanError::NoCollectingKey)));
 }
@@ -610,12 +649,12 @@ fn the_alert_for_excluded_stocks_counts_the_keys_needed_rounded_up() {
     let plan = plan(&identities(3), &universe_of(600), &BTreeMap::new());
     assert_eq!(
         plan.alerts,
-        ["등록할 종목 600개가 수집 키 3개의 몫 570개를 넘어 30개(000571~000600)를 제외했습니다. 수집 키가 4개 필요합니다"]
+        ["등록할 종목 600개가 수집 키 3개의 몫 570개를 넘어 종목코드 순서로 30개(000571~000600)를 제외했습니다. 수집 키가 4개 필요합니다"]
     );
     let exact = self::plan(&identities(3), &universe_of(760), &BTreeMap::new());
     assert_eq!(
         exact.alerts,
-        ["등록할 종목 760개가 수집 키 3개의 몫 570개를 넘어 190개(000571~000760)를 제외했습니다. 수집 키가 4개 필요합니다"]
+        ["등록할 종목 760개가 수집 키 3개의 몫 570개를 넘어 종목코드 순서로 190개(000571~000760)를 제외했습니다. 수집 키가 4개 필요합니다"]
     );
     let one_over = self::plan(&identities(3), &universe_of(761), &BTreeMap::new());
     assert!(one_over.alerts[0].ends_with("수집 키가 5개 필요합니다"), "{:?}", one_over.alerts);
