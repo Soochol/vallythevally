@@ -113,6 +113,7 @@ Environment=VALLY_DB_PATH=%h/vally-data/server/vally.db
 Environment=VALLY_SCREENER_DB_PATH=%h/vally-data/server/screener.duckdb
 Environment=VALLY_FINANCIAL_DB_PATH=%h/vally-data/server/financials.db
 Environment=VALLY_STATIC_DIR=%h/apps/vallythevally/web/dist
+Environment=VALLY_HOGA_DATA_DIR=%h/vally-data/hoga
 Environment=VALLY_TAILNET_HOSTS=server.<tailnet>.ts.net
 ExecStart=%h/apps/vallythevally/target/release/vally-server
 Restart=on-failure

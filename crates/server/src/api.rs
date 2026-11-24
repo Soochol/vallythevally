@@ -1094,6 +1094,59 @@ pub struct OrderBook {
     pub book_time: Option<String>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct BookReplayAccess {
+    pub available: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct BookReplayDays {
+    pub symbol: SymbolCode,
+    pub days: Vec<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum BookReplayCoverage {
+    Collected,
+    SymbolNotCollected,
+    DayNotCollected,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct BookReplayBook {
+    pub minute: u32,
+    #[ts(type = "[number, number][]")]
+    pub asks: Vec<[u64; 2]>,
+    #[ts(type = "[number, number][]")]
+    pub bids: Vec<[u64; 2]>,
+    #[ts(type = "number")]
+    pub total_ask: u64,
+    #[ts(type = "number")]
+    pub total_bid: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct BookReplayDay {
+    pub symbol: SymbolCode,
+    pub date: String,
+    pub coverage: BookReplayCoverage,
+    #[ts(type = "[number, number][]")]
+    pub covered: Vec<[u32; 2]>,
+    pub books: Vec<BookReplayBook>,
+    #[ts(type = "[number, number, number, number][]")]
+    pub trades: Vec<(u32, u32, u64, i64)>,
+}
+
 /// 체결 한 건. 수량의 부호가 방향이다(+ 매수 체결, - 매도 체결).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]

@@ -49,6 +49,7 @@ pub struct AppState {
     pub market_source_board: Arc<crate::market_source::status::MarketSourceBoard>,
     pub public_usage: Arc<crate::public::usage::Usage>,
     pub shared_data: Arc<crate::shared_data::SharedData>,
+    pub book_replay: Arc<crate::book_replay::BookReplay>,
     pub heatmap_quotes: Arc<crate::heatmap_board::QuoteCache>,
     pub heatmap_flow: Arc<crate::heatmap_flow::FlowCache>,
 }
@@ -71,6 +72,7 @@ pub fn router(state: Arc<AppState>) -> Router {
         .merge(crate::screener::routes())
         .merge(crate::investors::routes())
         .merge(crate::intraday_feed::routes())
+        .merge(crate::book_replay::routes())
         .merge(crate::rankings::routes())
         .merge(crate::market_overview::routes())
         .merge(crate::etf::routes())

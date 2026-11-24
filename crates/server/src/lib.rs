@@ -5,6 +5,7 @@ pub mod account_routes;
 pub mod api;
 pub mod app;
 pub mod bars;
+pub mod book_replay;
 pub mod clock;
 pub mod collector;
 pub mod config;

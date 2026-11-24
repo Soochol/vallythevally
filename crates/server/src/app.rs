@@ -189,6 +189,7 @@ pub fn application_with_source(inputs: ApplicationInputs, mut system: SystemStat
         market_source_board,
         public_usage: Default::default(),
         shared_data: crate::shared_data::SharedData::new(),
+        book_replay: crate::book_replay::BookReplay::new(),
         heatmap_quotes: Arc::new(crate::heatmap_board::QuoteCache::with_generation(generation.clone())),
         heatmap_flow: Arc::new(crate::heatmap_flow::FlowCache::with_generation(generation.clone())),
         generation,
@@ -412,6 +413,9 @@ pub async fn start_with(config: &Config, lock: &InstanceLock, adapters: Adapters
     tokio::spawn(crate::account::sync::run(state.clone()));
     tokio::spawn(crate::collector::run(state.clone()));
     state.shared_data.start(config.shared_data.as_ref());
+    if let Some(dir) = &config.hoga_data_dir {
+        state.book_replay.enable(dir.clone());
+    }
     if config.shared_data.is_some() {
         state.screener.read_shared_snapshots(state.shared_data.clone(), config.screener_snapshot_stale_limit);
         state.screener.keep_calendar_fresh();
