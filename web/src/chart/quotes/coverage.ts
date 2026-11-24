@@ -22,17 +22,7 @@ function splitNewest(fromDayNum: number, toDayNum: number): DateRange[] {
 }
 
 export function missingRanges(need: DateRange, have: DateRange | null): DateRange[] {
-  const nFrom = toDay(need.from);
-  const nTo = toDay(need.to);
-  if (nFrom > nTo) return [];
-  if (!have) return splitNewest(nFrom, nTo);
-  const hFrom = toDay(have.from);
-  const hTo = toDay(have.to);
-  if (nTo < hFrom || nFrom > hTo) return splitNewest(nFrom, nTo);
-  const out: DateRange[] = [];
-  if (nTo > hTo) out.push(...splitNewest(hTo + 1, nTo));
-  if (nFrom < hFrom) out.push(...splitNewest(nFrom, hFrom - 1));
-  return out;
+  return missingFromRanges(need, have ? [have] : []);
 }
 
 export function mergeRanges(ranges: readonly DateRange[], added: DateRange): DateRange[] {
