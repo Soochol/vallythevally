@@ -33,15 +33,15 @@ function InfoTabs({ pager }: { pager: InfoPager }) {
     refs.current[page]?.focus();
   };
   return (
-    <div className="mw-card-tabs" role="tablist" aria-label="상세 정보">
+    <div className="mw-card-dots" role="tablist" aria-label="상세 정보">
       {INFO_TABS.map(({ page, label }) => (
-        <button key={page} ref={(node) => { refs.current[page] = node; }} type="button" role="tab" aria-selected={pager.page === page} tabIndex={pager.page === page ? 0 : -1}
+        <button key={page} ref={(node) => { refs.current[page] = node; }} type="button" role="tab" aria-label={label} aria-selected={pager.page === page} tabIndex={pager.page === page ? 0 : -1}
           onClick={() => pager.select(page)}
           onKeyDown={(event) => {
             if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
             event.preventDefault();
             choose(otherInfoPage(page));
-          }}>{label}</button>
+          }} />
       ))}
     </div>
   );
@@ -53,8 +53,8 @@ const sameLines = (a: readonly InfoLine[], b: readonly InfoLine[]): boolean =>
 const InfoCard = memo(function InfoCard({ lines, page, select }: { lines: readonly InfoLine[]; page: InfoPage; select: InfoPager["select"] }) {
   return (
     <div className="mw-card" data-testid="ladder-info-card" style={{ height: `calc(${lines.length + 1} * var(--size-24))` }}>
-      <InfoTabs pager={{ page, select }} />
       {lines.map((line, index) => <InfoRow key={index} line={line} />)}
+      <InfoTabs pager={{ page, select }} />
     </div>
   );
 }, (a, b) => a.page === b.page && a.select === b.select && sameLines(a.lines, b.lines));

@@ -766,7 +766,7 @@ test("상세 정보 카드가 사다리 1~9행 자리에 있고 시세 쪽에 �
   await expect(infoLabels(page)).toHaveText(INFO_PAGE_1);
   await expect(infoValues(page)).toHaveText(["69,900", "70,400", "69,400", "70,000", "0 0.00%", "123만", "864억"]);
   const rowTops = await tops(ladderRows(page));
-  expect(await tops(info)).toEqual([1, 2, 3, 5, 6, 7, 8].map((row) => rowTops[row]));
+  expect(await tops(info)).toEqual([0, 1, 2, 4, 5, 6, 7].map((row) => rowTops[row]));
   const card = (await infoCard(page).boundingBox())!;
   const price = (await ladderRows(page).first().locator(".mw-px").boundingBox())!;
   expect(card.y).toBeCloseTo(rowTops[0]!, 0);
@@ -791,7 +791,7 @@ test("종목 탭을 누르면 상·하한가·52주 범위·시가총액·PER·P
   await expect(infoValues(page)).toHaveText(INFO_PAGE_2_VALUES);
   await expect(page.getByTestId("ladder-info-ends").locator("span")).toHaveText(INFO_PAGE_2_ENDS);
   const rowTops = await tops(ladderRows(page));
-  expect(await tops(page.getByTestId("ladder-info"))).toEqual([1, 2, 5, 6, 7].map((row) => rowTops[row]));
+  expect(await tops(page.getByTestId("ladder-info"))).toEqual([0, 1, 4, 5, 6].map((row) => rowTops[row]));
 
   await infoTab(page, "시세").click();
   await expect(infoLabels(page)).toHaveText(INFO_PAGE_1);

@@ -44,24 +44,25 @@
 .mw-info-layer { position:absolute; z-index:2; left:0; right:0; display:grid; align-items:start; box-sizing:border-box; padding:0 var(--s4); pointer-events:none; }
 .od-ladder .mw-info-cell { container-type:inline-size; }
 .mw-info-cell { min-width:0; pointer-events:auto; }
-.mw-card { box-sizing:border-box; display:grid; grid-auto-rows:1fr; min-width:0; overflow:hidden; outline:var(--size-1) solid var(--line); outline-offset:calc(-1 * var(--size-1)); border-radius:var(--r-m); background:var(--raised); font-size:var(--size-11); white-space:nowrap; user-select:none; }
+.mw-card { box-sizing:border-box; display:grid; grid-auto-rows:1fr; min-width:0; overflow:hidden; border-left:var(--size-1) solid var(--line-strong); background:var(--surface); font-size:var(--size-11); white-space:nowrap; user-select:none; }
 @container (width < 110px) { .od-ladder .mw-card { display:none; } }
-.mw-card-tabs { display:grid; grid-template-columns:1fr 1fr; min-height:0; }
-.mw-card-tabs button { min-width:0; color:var(--text-2); font-size:var(--size-11); }
-.mw-card-tabs button:hover { color:var(--text); }
-.mw-card-tabs button[aria-selected=true] { background:var(--hover); color:var(--text); font-weight:600; }
-.mw-card-tabs button:focus-visible { outline:var(--size-1) solid var(--accent); outline-offset:calc(-1 * var(--size-1)); }
-.mw-card-row { display:grid; grid-template-columns:minmax(0, 1fr) max-content; align-items:center; gap:var(--s2); min-height:0; padding:0 var(--s3); border-left:var(--size-2) solid transparent; }
-.mw-card-row span { overflow:hidden; color:var(--text-2); text-overflow:ellipsis; }
+.mw-card-dots { display:flex; align-items:center; justify-content:center; gap:var(--size-2); min-height:0; }
+.mw-card-dots button { display:inline-flex; align-items:center; justify-content:center; width:var(--size-14); height:var(--size-20); padding:0; border-radius:var(--r-s); }
+.mw-card-dots button::before { content:""; width:var(--size-6); height:var(--size-6); border-radius:50%; background:var(--line-strong); }
+.mw-card-dots button:hover::before { background:var(--text-3); }
+.mw-card-dots button[aria-selected=true]::before { background:var(--accent); }
+.mw-card-dots button:focus-visible { outline:var(--size-1) solid var(--accent); outline-offset:calc(-1 * var(--size-1)); }
+.mw-card-row { display:grid; grid-template-columns:minmax(0, 1fr) max-content; align-items:center; gap:var(--s2); min-height:0; padding:0 var(--size-6); border-left:var(--size-2) solid transparent; }
+.mw-card-row span { overflow:hidden; color:var(--text-3); text-overflow:ellipsis; }
 .mw-card-row b { color:var(--text); font-weight:600; text-align:right; }
 .mw-card-row b[data-tone=up] { color:var(--up); } .mw-card-row b[data-tone=down] { color:var(--down); }
 .mw-card-row[data-band=up] { border-left-color:var(--up); background:color-mix(in srgb, var(--up) 12%, transparent); }
 .mw-card-row[data-band=down] { border-left-color:var(--down); background:color-mix(in srgb, var(--down) 12%, transparent); }
 .mw-card-row[data-warn] span, .mw-card-row b[data-tone=warning] { color:var(--warning); }
-.mw-card-range { display:flex; align-items:center; min-height:0; padding:0 var(--s3); }
+.mw-card-range { display:flex; align-items:center; min-height:0; padding:0 var(--size-6) 0 var(--s3); }
 .mw-range-track { position:relative; flex:1; height:var(--size-4); border-radius:var(--size-2); background:var(--line-strong); }
 .mw-range-tick { position:absolute; top:calc(-1 * var(--size-3)); width:var(--size-2); height:var(--size-10); transform:translateX(-50%); border-radius:var(--size-1); background:var(--text); }
-.mw-card-ends { display:flex; justify-content:space-between; gap:var(--s3); min-height:0; padding:0 var(--s3); color:var(--text-2); font-size:var(--fs-xs); }
+.mw-card-ends { display:flex; justify-content:space-between; gap:var(--s3); min-height:0; padding:0 var(--size-6) 0 var(--s3); color:var(--text-2); font-size:var(--fs-xs); }
 .mw-card-ends span { align-self:center; }
 .mw-box-layer { position:absolute; z-index:2; left:0; right:0; display:grid; box-sizing:border-box; padding:0 var(--s4); pointer-events:none; }
 .mw-box { grid-column:1; min-width:0; min-height:0; pointer-events:auto; }

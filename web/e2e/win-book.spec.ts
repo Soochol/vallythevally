@@ -114,9 +114,15 @@ test("스냅샷 20행이 매도 1호가 기준 격자로 먼저 보이고 상세
   expect(card.y).toBeCloseTo(rowTops[0]!, 0);
   expect(card.height).toBe(9 * CARD_ROW_HEIGHT);
   expect(card.x).toBeGreaterThanOrEqual(price.x + price.width - 1);
-  expect(await tops(info)).toEqual([1, 2, 3, 5, 6, 7, 8].map((row) => rowTops[row]));
+  expect(await tops(info)).toEqual([0, 1, 2, 4, 5, 6, 7].map((row) => rowTops[row]));
   await expect(page.getByTestId("ladder-info-range")).toHaveCount(1);
-  await expect(page.getByRole("tablist", { name: "상세 정보" }).getByRole("tab")).toHaveText(["시세", "종목"]);
+  const tabs = infoCard(page).getByRole("tablist", { name: "상세 정보" });
+  await expect(tabs.getByRole("tab")).toHaveCount(2);
+  await expect(tabs).toHaveText("");
+  await expect(tabs.getByRole("tab").nth(0)).toHaveAttribute("aria-label", "시세");
+  await expect(tabs.getByRole("tab").nth(1)).toHaveAttribute("aria-label", "종목");
+  const pager = (await tabs.boundingBox())!;
+  expect(Math.abs(pager.y + pager.height / 2 - (card.y + card.height - CARD_ROW_HEIGHT / 2))).toBeLessThanOrEqual(2);
   await expect(infoTab(page, "시세")).toHaveAttribute("aria-selected", "true");
 });
 
@@ -135,7 +141,7 @@ test("종목 탭을 누르면 상·하한가·52주 범위·시가총액·PER·P
   await expect(page.getByTestId("ladder-info-ends").locator("span")).toHaveText(INFO_PAGE_2_ENDS);
   await expect(page.getByTestId("ladder-info-range")).toHaveAttribute("data-label", "52주 범위");
   const rowTops = await tops(ladderRows(page));
-  expect(await tops(page.getByTestId("ladder-info"))).toEqual([1, 2, 5, 6, 7].map((row) => rowTops[row]));
+  expect(await tops(page.getByTestId("ladder-info"))).toEqual([0, 1, 4, 5, 6].map((row) => rowTops[row]));
   expect((await infoCard(page).boundingBox())!.height).toBe(8 * CARD_ROW_HEIGHT);
   await expect(page.getByTestId("ladder-info").filter({ hasText: "하한가" }).locator("b")).toHaveAttribute("data-tone", "down");
   expect(await rangeRatio(page)).toBeCloseTo((70_000 - 51_000) / (88_000 - 51_000), 1);
@@ -347,7 +353,7 @@ test("총잔량 띠가 사다리 아래에 있고 정보 7항목이 카드 안 �
   const strip = (await page.getByTestId("book-total-ask").boundingBox())!;
   expect(strip.y).toBeGreaterThanOrEqual(ladder.y + ladder.height);
   const rowTops = await tops(ladderRows(page));
-  expect(await tops(page.getByTestId("ladder-info"))).toEqual([1, 2, 3, 5, 6, 7, 8].map((row) => rowTops[row]));
+  expect(await tops(page.getByTestId("ladder-info"))).toEqual([0, 1, 2, 4, 5, 6, 7].map((row) => rowTops[row]));
 });
 
 test("첫 실시간 호가가 스냅샷을 대신하고 체결이 현재가 행을 옮기며 증감 글자가 잔량 칸 안에 보인다", async ({ page, scenario }) => {
@@ -904,8 +910,8 @@ test.describe("동시호가 예상체결", () => {
       await expect(page.locator(".mw-lr[data-expected]")).toHaveCount(1);
       await expect(page.locator(".mw-lr[data-expected]")).toContainText("70,000");
       const rowTops = await tops(ladderRows(page));
-      expect(await tops(info(page, "예상체결가"))).toEqual([rowTops[7]]);
-      expect(await tops(info(page, "예상체결량"))).toEqual([rowTops[8]]);
+      expect(await tops(info(page, "예상체결가"))).toEqual([rowTops[6]]);
+      expect(await tops(info(page, "예상체결량"))).toEqual([rowTops[7]]);
       expect((await infoCard(page).boundingBox())!.height).toBe(9 * CARD_ROW_HEIGHT);
       expect(await shape(page)).toEqual(without);
     });
@@ -920,8 +926,8 @@ test.describe("동시호가 예상체결", () => {
       await expect(info(page, "거래대금")).toHaveCount(0);
       const rowTops = await tops(ladderRows(page));
       await expect(info(page, "기준가")).toBeVisible();
-      expect(await tops(info(page, "예상체결가"))).toEqual([rowTops[6]]);
-      expect(await tops(info(page, "예상체결량"))).toEqual([rowTops[7]]);
+      expect(await tops(info(page, "예상체결가"))).toEqual([rowTops[5]]);
+      expect(await tops(info(page, "예상체결량"))).toEqual([rowTops[6]]);
       expect((await infoCard(page).boundingBox())!.height).toBe(8 * CARD_ROW_HEIGHT);
     });
 
