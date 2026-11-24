@@ -2,7 +2,7 @@ import { useEffect } from "react";
 import { DESKTOP_QUERY } from "../../lib/media";
 import { useAccountStore } from "../../stores/account";
 import { useSelectionStore } from "../../stores/selection";
-import { ownsChartKeyboard } from "../overlay/topLayer";
+import { ownsWorkspaceTab } from "../overlay/topLayer";
 import { useWizardStore, wizardVisible } from "../setup-wizard/wizardOpen";
 
 export type WorkspaceTabEvent = Pick<KeyboardEvent, "key" | "ctrlKey" | "metaKey" | "altKey" | "shiftKey" | "defaultPrevented" | "isComposing" | "keyCode">;
@@ -28,8 +28,8 @@ export function shouldBlockWorkspaceTab(event: WorkspaceTabEvent, scene: Workspa
   return scene.desktop && !scene.ownsKeyboard && !scene.wizardShown && !scene.dialogOpen && !scene.inDialog;
 }
 
-const sceneOf = (event: KeyboardEvent): WorkspaceTabScene => ({
-  ownsKeyboard: ownsChartKeyboard(event),
+export const workspaceTabScene = (event: Pick<KeyboardEvent, "target">): WorkspaceTabScene => ({
+  ownsKeyboard: ownsWorkspaceTab(event.target),
   wizardShown: wizardVisible(useAccountStore.getState().status, useWizardStore.getState().open),
   dialogOpen: useSelectionStore.getState().dialog !== null,
   inDialog: event.target instanceof Element && event.target.closest(DIALOG_ANCESTOR) !== null,
@@ -41,7 +41,7 @@ export function useWorkspaceTabGuard(enabled: boolean) {
     if (!enabled) return;
     const onKey = (event: KeyboardEvent) => {
       if (!isWorkspaceTabKey(event)) return;
-      if (shouldBlockWorkspaceTab(event, sceneOf(event))) event.preventDefault();
+      if (shouldBlockWorkspaceTab(event, workspaceTabScene(event))) event.preventDefault();
     };
     window.addEventListener("keydown", onKey, true);
     return () => window.removeEventListener("keydown", onKey, true);
