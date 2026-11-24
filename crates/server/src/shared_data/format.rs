@@ -19,10 +19,11 @@ pub enum DataKind {
     SnapshotNxt,
     Minute,
     Rankings,
+    QuoteMinutes,
 }
 
 impl DataKind {
-    pub const ALL: [DataKind; 8] = [DataKind::Probe, DataKind::KiwoomThemes, DataKind::MarketOverview, DataKind::SnapshotKrx, DataKind::SnapshotCombined, DataKind::SnapshotNxt, DataKind::Minute, DataKind::Rankings];
+    pub const ALL: [DataKind; 9] = [DataKind::Probe, DataKind::KiwoomThemes, DataKind::MarketOverview, DataKind::SnapshotKrx, DataKind::SnapshotCombined, DataKind::SnapshotNxt, DataKind::Minute, DataKind::Rankings, DataKind::QuoteMinutes];
 
     pub fn folder(self) -> &'static str {
         match self {
@@ -34,6 +35,7 @@ impl DataKind {
             DataKind::SnapshotCombined => "snapshot-combined",
             DataKind::SnapshotNxt => "snapshot-nxt",
             DataKind::Minute => "minute",
+            DataKind::QuoteMinutes => "quote-minutes",
         }
     }
 }
