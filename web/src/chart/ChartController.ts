@@ -16,10 +16,13 @@ import { AxisLabelCache } from "./axisLabelCache";
 import { AXIS_WIDTH, axisPriceFormat, priceAxisWidth, type AxisGeometry } from "./axisFormat";
 import type { LastPriceHost } from "./lastPriceTag";
 import { fetchBarsPage, fetchJumpPage } from "../api/bars";
+import { fetchQuoteTotals } from "../api/quoteMinutes";
 import type { Bar } from "../api/generated/Bar";
 import type { FinancialsPage } from "../api/generated/FinancialsPage";
 import type { KstDate } from "../api/generated/KstDate";
 import type { Period } from "../api/generated/Period";
+import type { QuoteTotalPoint } from "../api/generated/QuoteTotalPoint";
+import type { QuoteTotalsPage } from "../api/generated/QuoteTotalsPage";
 import type { SubErrorCode } from "../api/generated/SubErrorCode";
 import type { SymbolCode } from "../api/generated/SymbolCode";
 import type { SymbolInfo } from "../api/generated/SymbolInfo";
@@ -43,11 +46,13 @@ import { JumpBadge } from "./jumpBadge";
 import { type FetchJump, JumpableFeed } from "./jumpFeed";
 import { type Extreme, findExtremes } from "./extremes";
 import { type OpenPort, openIndicatorPort } from "./indicators/client";
+import { isQuote } from "./indicators/kinds";
 import { IndicatorLayer } from "./indicators/layer";
 import { PanelControls } from "./panelControls";
 import { type IndicatorCommand, IndicatorLegend, type PaneBounds } from "./indicators/legendRows";
 import { chartIndicators, chartPanels } from "./indicators/shown";
 import { isTailChange } from "./indicators/sync";
+import { QuoteFeed, type QuoteKey, type QuoteRange } from "./quotes/feed";
 import { Legend, type LegendBar, legendParts } from "./legend";
 import { priceTopMargin } from "./legendProjection";
 import { addMainSeries, applyMainColors, type MainSeries, priceFormat, setMainData, updateMainBar } from "./series";
@@ -117,6 +122,7 @@ export interface ControllerDeps {
   onStatus: (s: CellStatus) => void;
   fetchPage?: FetchPage;
   fetchJump?: FetchJump;
+  fetchQuoteTotals?: (key: QuoteKey, range: QuoteRange, signal: AbortSignal) => Promise<QuoteTotalsPage>;
   /** 없으면 실시간 없이 조회한 봉만 그린다. */
   socket?: MarketSocketLike;
   indicators?: OpenPort;
@@ -148,6 +154,7 @@ export class ChartController {
   private pointerOwnsCrosshair = false;
   get venueAnchor(): HTMLElement { return this.legend.venueAnchor; }
   private readonly feed: JumpableFeed;
+  private readonly quoteTotals: QuoteFeed<QuoteTotalPoint>;
   private readonly badge: JumpBadge;
   private jumpToken = 0;
   private jumpInterval: BarInterval | null = null;
@@ -249,11 +256,16 @@ export class ChartController {
     this.resize.observe(el);
     this.panelControls = new PanelControls(el, this.chart, () => this.scheduleFrame(), () => {
       const shown = this.indicators.stretches();
-      const drawn = this.view ? chartPanels(this.view.settings, this.view.period) : [];
+      const drawn = this.view ? chartPanels(this.view.settings, this.view.period, !isIndexCode(this.view.symbol)) : [];
       let n = 0;
       const now = (this.view?.settings.panels ?? []).map((p) => drawn.some((d) => d.id === p.id) ? shown[n++] ?? p.stretch : p.stretch);
       deps.onPanelStretch?.(now);
       this.scheduleFrame();
+    });
+    this.quoteTotals = new QuoteFeed<QuoteTotalPoint>({
+      fetch: deps.fetchQuoteTotals ?? fetchQuoteTotals,
+      changed: (from) => this.onQuoteTotalsChanged(from),
+      now: nowSeconds,
     });
     this.feed = new JumpableFeed(
       deps.fetchPage ?? fetchBarsPage,
@@ -355,10 +367,13 @@ export class ChartController {
       this.feed.open({ symbol: next.symbol, venue: next.venue, period: next.period });
       this.fineBars.open({ symbol: next.symbol, venue: next.venue, period: next.period });
     }
-    if (prev?.period !== next.period || prev?.settings.indicators !== next.settings.indicators || prev?.settings.panels !== next.settings.panels) {
-      const configs = chartIndicators(next.settings, next.period);
-      const panels = chartPanels(next.settings, next.period);
+    if (prev?.period !== next.period || (prev !== null && isIndexCode(prev.symbol) !== isIndex) || prev?.settings.indicators !== next.settings.indicators || prev?.settings.panels !== next.settings.panels) {
+      const configs = chartIndicators(next.settings, next.period, !isIndex);
+      const panels = chartPanels(next.settings, next.period, !isIndex);
       this.withDataGuard(() => preserveTimeRange(this.chart.timeScale(), next.period, this.pendingScroll, () => this.indicators.setConfigs(configs, panels)));
+    }
+    if (prev?.symbol !== next.symbol || prev.venue !== next.venue || prev.period !== next.period || prev.settings.indicators !== next.settings.indicators) {
+      this.syncQuoteTotalsKey();
     }
     if (prev && prev.settings.visibleBars !== next.settings.visibleBars) this.fitInitialRange();
     if (prev?.settings.showExtremes !== next.settings.showExtremes || prev?.settings.extremeBasis !== next.settings.extremeBasis) this.scheduleFrame();
@@ -489,6 +504,7 @@ export class ChartController {
     this.hostResize.disconnect();
     this.unwatch();
     this.feed.dispose();
+    this.quoteTotals.dispose();
     this.badge.dispose();
     this.fineBars.dispose();
     this.compare.dispose();
@@ -669,6 +685,7 @@ export class ChartController {
       this.withDataGuard(() => this.setBars(next));
     }
     this.indicators.advance(h, bar, kind);
+    if (next.length > prev.length) this.coverQuoteTotals();
     if (tail && prevRealtimeSeen === this.realtimeSeen && prevStalledAt === this.stalledAt) {
       this.requestTailLegendSources(next.length - 1);
     } else {
@@ -821,6 +838,7 @@ export class ChartController {
       this.fitInitialRange();
     });
     this.compare.coverFrom(this.leftT());
+    this.coverQuoteTotals();
     this.renderLegend();
     const latest = bars[bars.length - 1];
     if (latest) {
@@ -911,6 +929,7 @@ export class ChartController {
     const end = this.jumpInterval ? lastBarBefore(bars, this.jumpInterval) : null;
     if (end) this.fitEndingAt(bars[end.index]!.t);
     this.compare.coverFrom(this.leftT());
+    this.coverQuoteTotals();
     this.renderLegend();
     this.updateIntradayEnd();
   }
@@ -968,6 +987,7 @@ export class ChartController {
     }));
     if (this.financialHoverTime !== null) this.hoverIndex = this.bars.findIndex((bar) => bar.t === this.financialHoverTime);
     this.compare.coverFrom(this.leftT());
+    this.coverQuoteTotals();
     this.renderLegend();
     this.updateIntradayEnd();
   }
@@ -1085,7 +1105,7 @@ export class ChartController {
     const bar = this.bars[i];
     const panes = this.paneBounds();
     const axisWidth = this.chart.priceScale("right").width();
-    const panels = view ? chartPanels(view.settings, this.period()) : [];
+    const panels = view ? chartPanels(view.settings, this.period(), !isIndexCode(view.symbol)) : [];
     this.panelControls.render(panels, panes.map((pane) => pane.top));
     this.indicatorLegend.render(this.indicators.rows(this.financialHoverTime ?? bar?.t ?? null), panes, axisWidth);
     this.compareLegend.render(this.compare.rows(this.leftT(), bar?.t ?? null));
@@ -1098,6 +1118,32 @@ export class ChartController {
       period: view.period,
       stalledAt: this.stalledAt,
     }, this.hoverIndex !== null);
+  }
+
+  private syncQuoteTotalsKey(): void {
+    const view = this.view;
+    const active = view !== null && view.venue !== null && !isIndexCode(view.symbol) && isIntraday(view.period)
+      && view.settings.indicators.some((c) => isQuote(c.spec) && c.visible);
+    if (!active) {
+      this.quoteTotals.open(null);
+      this.indicators.setQuoteTotals(null);
+      return;
+    }
+    this.quoteTotals.open({ symbol: view.symbol, venue: view.venue!, period: view.period });
+    this.indicators.setQuoteTotals(this.quoteTotals);
+    this.coverQuoteTotals();
+  }
+
+  private coverQuoteTotals(): void {
+    const first = this.bars[0];
+    const last = this.bars[this.bars.length - 1];
+    if (first && last) this.quoteTotals.cover(first.t, last.t);
+  }
+
+  private onQuoteTotalsChanged(from: UnixSeconds | null): void {
+    if (this.disposed) return;
+    this.indicators.setQuoteTotals(this.quoteTotals, from);
+    this.scheduleFrame();
   }
 }
 

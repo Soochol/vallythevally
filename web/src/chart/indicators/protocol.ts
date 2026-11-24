@@ -1,4 +1,4 @@
-import type { LineId } from "../../api/generated/LineId";
+import type { PlotLineId } from "./kinds";
 import type { Period } from "../../api/generated/Period";
 import type { UnixSeconds } from "../../api/generated/UnixSeconds";
 
@@ -17,12 +17,13 @@ export interface Point {
   t: UnixSeconds;
   v: number;
   up?: boolean;
+  break?: true;
 }
 
 export type LineDraw = { op: "set"; points: Point[] } | { op: "update"; point: Point } | { op: "none" };
 
 export interface LineInfo {
-  id: LineId;
+  id: PlotLineId;
   shift: number;
 }
 

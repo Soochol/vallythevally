@@ -10,6 +10,7 @@ const ALIASES: Record<IndicatorKind, readonly string[]> = {
   rsi: ["RSI", "상대강도지수"],
   macd: ["MACD"],
   stochSlow: ["스토캐스틱 슬로우", "스토캐스틱", "stoch", "stochastic"],
+  quoteTotals: ["총잔량", "호가잔량", "호가"],
   revenue: ["매출액", "매출", "revenue"],
   operating_income: ["영업이익", "operating income"],
   owner_roe: ["지배주주 ROE", "지배주주", "roe"],

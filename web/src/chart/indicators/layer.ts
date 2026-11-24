@@ -13,16 +13,18 @@ import type { FinancialsPage } from "../../api/generated/FinancialsPage";
 import type { FinancialPoint } from "../../api/generated/FinancialPoint";
 import { adjacentBucket, financialBuckets, type FinancialDetailRow, financialDetailRows, financialFailure, financialReason, checkedTime, financialSummary, financialSummaryRows, financialValue, reportingPeriod } from "../financials";
 import type { Period } from "../../api/generated/Period";
+import type { QuoteTotalPoint } from "../../api/generated/QuoteTotalPoint";
 import type { UnixSeconds } from "../../api/generated/UnixSeconds";
 import { formatPrice, formatVolume } from "../../lib/format";
 import { displayBars, type History } from "../barFeed";
 import { TrackedValues } from "../legendShapes";
+import type { QuoteView } from "../quotes/feed";
 import { barOpacityOf, type IndicatorConfig, type Panel } from "../settings";
 import { indicatorColorValue, type ThemeTokens } from "../theme";
 import { toChartTime } from "../time";
 import type { IndicatorPort, OpenPort } from "./client";
 import { applyToPoints, DrawQueue, pointAtTime } from "./drawQueue";
-import { isFinancial, isFinancialBar, type PlotLineId as LineId, isBarLine, lineColor, specLines, specName } from "./kinds";
+import { isFinancial, isFinancialBar, isQuote, isTechnical, type PlotLineId as LineId, isBarLine, lineColor, specLines, specName } from "./kinds";
 import { addOverlayLine, type OverlayPoint, type OverlaySeries } from "./overlayLine";
 import type { BarTuple, Columns, EngineErrorKind, EngineResult, FromWorker, LineInfo, Point } from "./protocol";
 import { syncOp } from "./sync";
@@ -102,7 +104,7 @@ const GUIDES: Partial<Record<Kind, number[]>> = { rsi: [70, 30], stochSlow: [80,
 const tuple = (b: Bar): BarTuple => [b.t, b.o, b.h, b.l, b.c, b.v];
 const volumePoint = (b: Bar): Point => ({ t: b.t, v: b.v, up: b.c >= b.o });
 const isPlainVolume = (spec: IndicatorConfig["spec"]) => spec.kind === "volume" && spec.maPeriod === null;
-const usesWorker = (config: IndicatorConfig) => !isFinancial(config.spec) && !isPlainVolume(config.spec);
+const usesWorker = (config: IndicatorConfig) => isTechnical(config.spec) && !isPlainVolume(config.spec);
 
 function columnsOf(bars: readonly Bar[]): Columns {
   const col = (f: (b: Bar) => number) => Float64Array.from(bars, f);
@@ -120,7 +122,7 @@ function withAlpha(hex: string, alpha: number): string {
   return `rgba(${channel(1)}, ${channel(3)}, ${channel(5)}, ${alpha})`;
 }
 
-function firstAtOrAfter(bars: readonly Bar[], t: UnixSeconds): number {
+function firstAtOrAfter(bars: readonly { t: UnixSeconds }[], t: UnixSeconds): number {
   let lo = 0;
   let hi = bars.length;
   while (lo < hi) {
@@ -129,6 +131,14 @@ function firstAtOrAfter(bars: readonly Bar[], t: UnixSeconds): number {
     else hi = mid;
   }
   return lo;
+}
+
+function isQuoteTail(prev: readonly Bar[], next: readonly Bar[], bar: Bar): boolean {
+  if (next[next.length - 1] !== bar) return false;
+  const kept = next.length - 1;
+  if (kept !== prev.length && !(kept === prev.length - 1 && prev[kept]?.t === bar.t)) return false;
+  for (let i = 0; i < kept; i++) if (next[i]?.t !== prev[i]?.t) return false;
+  return true;
 }
 
 const ERROR_TEXT: Record<EngineErrorKind, string> = { spec: "설정 오류", calc: "계산 오류" };
@@ -155,6 +165,16 @@ export class IndicatorLayer {
   private financialSummaryText = "";
   private financialMessage = "재무자료를 불러오는 중입니다";
   private financialNotice: string | undefined;
+  private quoteTotals: QuoteView<QuoteTotalPoint> | null = null;
+
+  setQuoteTotals(view: QuoteView<QuoteTotalPoint> | null, from: UnixSeconds | null = null): void {
+    this.quoteTotals = view;
+    for (const s of this.shown.values()) if (isQuote(s.config.spec)) {
+      this.updateQuoteStatus(s);
+      if (s.config.visible) this.syncQuoteTotals(s, from);
+    }
+    this.host.requestFrame();
+  }
 
   setFinancials(page: FinancialsPage | null, message?: string): void {
     this.financials = page;
@@ -239,7 +259,13 @@ export class IndicatorLayer {
     if (panelOrderChanged || orderChanged || [...this.shown.values()].some((s) => s.lines.length === 0)) this.rebuildSeries();
     this.applyStretch();
     this.create(fresh);
-    for (const s of this.shown.values()) if (isFinancial(s.config.spec)) this.drawFinancial(s);
+    for (const s of this.shown.values()) {
+      if (isFinancial(s.config.spec)) this.drawFinancial(s);
+      else if (isQuote(s.config.spec)) {
+        this.updateQuoteStatus(s);
+        if (s.config.visible) this.syncQuoteTotals(s, null);
+      }
+    }
   }
 
   reset(h: History): void {
@@ -253,21 +279,28 @@ export class IndicatorLayer {
     });
   }
 
-  private resetNow(h: History): void {
+  private resetNow(h: History, keepQuotes = false): void {
     for (const s of this.shown.values()) {
+      if (keepQuotes && isQuote(s.config.spec)) continue;
       this.clearLines(s);
       if (s.config.visible) s.status = { kind: "pending" };
     }
-    this.load(h);
+    this.load(h, keepQuotes);
   }
 
-  private load(h: History): void {
+  private load(h: History, keepQuotes = false): void {
     this.history = h;
     this.display = displayBars(h);
     this.timesDirty = true;
     this.committedT = h.bars[h.bars.length - 1]?.t ?? null;
     this.create(this.configs.filter((c) => c.visible));
-    for (const s of this.shown.values()) if (isFinancial(s.config.spec)) this.drawFinancial(s);
+    for (const s of this.shown.values()) {
+      if (isFinancial(s.config.spec)) this.drawFinancial(s);
+      else if (isQuote(s.config.spec) && !keepQuotes) {
+        this.updateQuoteStatus(s);
+        if (s.config.visible) this.syncQuoteTotals(s, null);
+      }
+    }
   }
 
   clear(): void {
@@ -291,7 +324,14 @@ export class IndicatorLayer {
     const prev = this.display;
     const next = displayBars(h);
     const op = syncOp(prev, next, bar, kind, this.committedT);
-    if (op === "create" || !this.history) return this.host.guard(() => this.resetNow(h));
+    if (op === "create" || !this.history) {
+      const keepQuotes = this.history !== null && isQuoteTail(prev, next, bar);
+      this.host.guard(() => {
+        this.resetNow(h, keepQuotes);
+        if (keepQuotes) this.advanceQuoteTotals(bar);
+      });
+      return;
+    }
     this.history = h;
     this.display = next;
     if (!this.timesDirty) this.allTimes.add(bar.t);
@@ -307,8 +347,23 @@ export class IndicatorLayer {
         this.queue.push(line, { op: "update", point });
       }
     }
+    this.advanceQuoteTotals(bar);
     if (this.configs.some((c) => c.visible && usesWorker(c)) && !this.broken) {
       this.port.post({ type: "bar", chart: this.port.chart, kind: op, bar: tuple(bar) });
+    }
+  }
+
+  private advanceQuoteTotals(bar: Bar): void {
+    const quotePt = this.quoteTotals?.at(bar.t);
+    if (!quotePt) return;
+    const prevBar = this.display.length >= 2 ? this.display[this.display.length - 2] : undefined;
+    const brk = prevBar !== undefined && !this.quoteTotals?.at(prevBar.t);
+    for (const s of this.shown.values()) if (s.config.visible && isQuote(s.config.spec)) {
+      for (const line of s.lines) {
+        const qp: Point = brk ? { t: bar.t, v: this.quoteValue(line, quotePt), break: true } : { t: bar.t, v: this.quoteValue(line, quotePt) };
+        line.points = applyToPoints(line.points, { op: "update", point: qp });
+        this.queue.push(line, { op: "update", point: qp });
+      }
     }
   }
 
@@ -373,6 +428,23 @@ export class IndicatorLayer {
           detail: { status: this.financialNotice ? "failed" : this.financials?.status ?? "pending", summary, rows: [...this.financialOverview, ...at.flatMap((p) => this.financialPointRows.get(p) ?? [])],
             reports: this.financialReports.get(metric) ?? [] } };
       }
+      if (isQuote(config.spec)) {
+        const panel = panelIndex < 0 ? null : { index: panelIndex, count: this.panels.length, collapsed };
+        if (!config.visible) return { id: config.id, name: specName(config.spec), color: tokens.down, values: [], state: "hidden", panel };
+        const view = this.quoteTotals;
+        const pt = time !== null && view ? view.at(time) : undefined;
+        const qState = view?.state ?? "loading";
+        if (qState === "loading" && !pt) return { id: config.id, name: specName(config.spec), color: tokens.down, values: [], state: "pending", panel };
+        const values: LegendValue[] =
+          qState === "notCollected"
+            ? [{ text: "수집하지 않는 종목", color: tokens.text2 }]
+            : qState === "failed"
+              ? [{ text: "호가 자료 조회 실패", color: tokens.text2 }]
+              : pt
+                ? [{ text: formatVolume(pt.ask), color: tokens.down }, { text: formatVolume(pt.bid), color: tokens.up }]
+                : [{ text: "—", color: tokens.down }, { text: "—", color: tokens.up }];
+        return { id: config.id, name: specName(config.spec), color: tokens.down, values, state: "ok", panel };
+      }
       const values: LegendValue[] =
         state !== "ok" || time === null || !s
           ? []
@@ -400,7 +472,7 @@ export class IndicatorLayer {
     for (const config of this.configs) {
       const shown = this.shown.get(config.id);
       const panelIndex = config.panel === "price" ? -1 : this.panels.findIndex((panel) => panel.id === config.panel);
-      if (isFinancial(config.spec) || panelIndex >= 0) continue;
+      if (isFinancial(config.spec) || isQuote(config.spec) || panelIndex >= 0) continue;
       const slots: (readonly string[])[] = [];
       if (shown?.status.kind === "ready") {
         for (const line of shown.lines) {
@@ -463,7 +535,7 @@ export class IndicatorLayer {
   }
 
   private create(configs: IndicatorConfig[]): void {
-    configs = configs.filter((c) => !isFinancial(c.spec));
+    configs = configs.filter((c) => isTechnical(c.spec));
     const h = this.history;
     if (!h || configs.length === 0) return;
     const gen = ++this.gen;
@@ -582,7 +654,15 @@ export class IndicatorLayer {
     }
     for (const s of this.shown.values()) {
       if (isFinancial(s.config.spec)) this.drawFinancial(s);
-      else for (const line of s.lines) if (line.points.length) this.draw(line, line.points);
+      else if (isQuote(s.config.spec)) {
+        this.updateQuoteStatus(s);
+        if (s.config.visible) {
+          for (const line of s.lines) {
+            line.points = this.buildQuotePoints(line, this.quoteTotals);
+            if (line.points.length) this.draw(line, line.points);
+          }
+        }
+      } else for (const line of s.lines) if (line.points.length) this.draw(line, line.points);
     }
   }
 
@@ -613,8 +693,12 @@ export class IndicatorLayer {
   }
 
   private lineOptions(config: IndicatorConfig, id: LineId, i: number) {
-    const color = indicatorColorValue(this.host.tokens(), lineColor(config.spec, config.style.colors, i));
     const common = { visible: config.visible, priceLineVisible: false, lastValueVisible: config.panel !== "price" && i === 0 && this.firstInPanel(config), title: "" };
+    if (isQuote(config.spec)) {
+      const color = id === "quoteAsk" ? this.host.tokens().down : this.host.tokens().up;
+      return { ...common, color, lineWidth: 2 as const, crosshairMarkerVisible: false };
+    }
+    const color = indicatorColorValue(this.host.tokens(), lineColor(config.spec, config.style.colors, i));
     if (isBarLine(id) || (isFinancial(config.spec) && isFinancialBar(config.spec.kind))) return common;
     const line = { ...common, color, lineWidth: config.style.width };
     return isOverlay(config, id) ? { ...line, halo: config.id === this.previewId } : { ...line, crosshairMarkerVisible: false };
@@ -638,7 +722,7 @@ export class IndicatorLayer {
       const currency = currencies.size === 1 ? [...currencies][0] ?? null : "원문 통화";
       return axisPriceFormat(financialAxisUnit(metric, currency), 0.01, this.axisGeometry(config));
     }
-    const unit = config.spec.kind === "volume" ? "volume" : config.spec.kind === "macd" || config.spec.kind === "rsi" || config.spec.kind === "stochSlow" || this.host.isIndex() ? "index" : "price";
+    const unit = config.spec.kind === "volume" || isQuote(config.spec) ? "volume" : config.spec.kind === "macd" || config.spec.kind === "rsi" || config.spec.kind === "stochSlow" || this.host.isIndex() ? "index" : "price";
     return axisPriceFormat(unit, 0.01, this.axisGeometry(config));
   }
 
@@ -694,14 +778,109 @@ export class IndicatorLayer {
     }
   }
 
+  private updateQuoteStatus(s: Shown): void {
+    if (!s.config.visible) {
+      s.status = { kind: "hidden" };
+      return;
+    }
+    const state = this.quoteTotals?.state ?? "loading";
+    s.status = state === "loading" ? { kind: "pending" } : { kind: "ready" };
+  }
+
+  private quoteValue(line: Line, pt: QuoteTotalPoint): number {
+    return line.id === "quoteAsk" ? pt.ask : pt.bid;
+  }
+
+  private buildQuotePoints(line: Line, view: QuoteView<QuoteTotalPoint> | null): Point[] {
+    if (!view) return [];
+    const out: Point[] = [];
+    let prevHad = true;
+    for (let i = 0; i < this.display.length; i++) {
+      const t = this.display[i]!.t;
+      const pt = view.at(t);
+      if (!pt) {
+        prevHad = false;
+        continue;
+      }
+      out.push(prevHad ? { t, v: this.quoteValue(line, pt) } : { t, v: this.quoteValue(line, pt), break: true });
+      prevHad = true;
+    }
+    return out;
+  }
+
+  private syncQuoteTotals(s: Shown, from: UnixSeconds | null): void {
+    const view = this.quoteTotals;
+    if (!view || from === null) {
+      for (const line of s.lines) {
+        line.points = this.buildQuotePoints(line, view);
+        this.queue.push(line, { op: "set", points: line.points });
+      }
+      return;
+    }
+    const start = firstAtOrAfter(this.display, from);
+    for (const line of s.lines) {
+      let pIdx = firstAtOrAfter(line.points, from);
+      let lastDrawnT = line.points.at(-1)?.t ?? -Infinity;
+      let needRedraw = false;
+      const updates: { index: number | null; point: Point }[] = [];
+      for (let i = start; i < this.display.length; i++) {
+        const t = this.display[i]!.t;
+        while (pIdx < line.points.length && line.points[pIdx]!.t < t) pIdx++;
+        const existing = pIdx < line.points.length && line.points[pIdx]!.t === t ? pIdx : -1;
+        const q = view.at(t);
+        if (!q) {
+          if (existing >= 0) {
+            needRedraw = true;
+            break;
+          }
+          continue;
+        }
+        const brk = i > 0 && !view.at(this.display[i - 1]!.t);
+        const point: Point = brk ? { t, v: this.quoteValue(line, q), break: true } : { t, v: this.quoteValue(line, q) };
+        if (existing >= 0) {
+          updates.push({ index: existing, point });
+          pIdx++;
+        } else if (t > lastDrawnT) {
+          updates.push({ index: null, point });
+          lastDrawnT = t;
+        } else {
+          needRedraw = true;
+          break;
+        }
+      }
+      if (!needRedraw && pIdx < line.points.length) needRedraw = true;
+      if (needRedraw) {
+        line.points = this.buildQuotePoints(line, view);
+        this.queue.push(line, { op: "set", points: line.points });
+      } else {
+        for (const u of updates) {
+          if (u.index !== null) line.points[u.index] = u.point;
+          else line.points.push(u.point);
+          this.queue.push(line, { op: "update", point: u.point });
+        }
+      }
+    }
+  }
+
+  private toOverlayPoint(pt: Point): OverlayPoint {
+    return pt.break ? { time: toChartTime(pt.t), value: pt.v, base: pt.v, break: true } : { time: toChartTime(pt.t), value: pt.v, base: pt.v };
+  }
+
   private draw(line: Line, points: readonly Point[]): void {
-    if (line.overlay) line.series.setData(line.priceOverlay ? this.overlayRows(points) : points.map((pt) => ({ time: toChartTime(pt.t), value: pt.v, base: pt.v })));
+    if (line.overlay) line.series.setData(line.priceOverlay ? this.overlayRows(points) : points.map((pt) => this.toOverlayPoint(pt)));
     else line.series.setData(points.map((pt) => this.toChart(line, pt)));
   }
 
   private put(line: Line, pt: Point): void {
-    if (line.overlay) line.series.update(line.priceOverlay ? this.overlayPoint(pt) : { time: toChartTime(pt.t), value: pt.v, base: pt.v });
-    else line.series.update(this.toChart(line, pt));
+    if (line.overlay) {
+      const lastT = line.points.at(-1)?.t;
+      const historical = lastT !== undefined && pt.t < lastT;
+      const row = line.priceOverlay ? this.overlayPoint(pt) : this.toOverlayPoint(pt);
+      if (historical) line.series.update(row, true);
+      else line.series.update(row);
+    } else {
+      line.series.update(this.toChart(line, pt));
+    }
   }
 
   private overlayRows(points: readonly Point[]): OverlayPoint[] {

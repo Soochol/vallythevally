@@ -18,6 +18,7 @@ export interface OverlayPoint extends CustomData<Time> {
   value?: number;
   base: number;
   connect?: boolean;
+  break?: true;
 }
 
 const HALO_WIDTH = 8;
@@ -49,7 +50,7 @@ export class OverlayLineView implements ICustomSeriesPaneView<Time, OverlayPoint
             if (bar === undefined || v === undefined) continue;
             const y = toY(v);
             if (y === null) continue;
-            if (bar.originalData.connect === false) started = false;
+            if (bar.originalData.connect === false || bar.originalData.break) started = false;
             if (started) ctx.lineTo(bar.x, y);
             else ctx.moveTo(bar.x, y);
             started = true;

@@ -166,6 +166,7 @@ export function readSpecShape(raw: unknown): IndicatorSpec | null {
   if (!isRecord(raw) || typeof raw.kind !== "string" || !(raw.kind in KINDS)) return null;
   const r = raw;
   switch (raw.kind) {
+    case "quoteTotals":
     case "revenue":
     case "operating_income":
     case "owner_roe":

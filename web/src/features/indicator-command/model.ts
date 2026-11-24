@@ -1,5 +1,5 @@
 import type { SymbolInfo } from "../../api/generated/SymbolInfo";
-import { isFinancial, KINDS } from "../../chart/indicators/kinds";
+import { isFinancial, isQuote, KINDS } from "../../chart/indicators/kinds";
 import type { ChartSettings, IndicatorConfig } from "../../chart/settings";
 import type { IndicatorCommandMode } from "../../stores/selection";
 import type { SearchList } from "../search/searchList";
@@ -23,8 +23,9 @@ export function commandHints(mode: IndicatorCommandMode): readonly CommandHint[]
 
 export const PRICE_GROUP = "가격 패널";
 export const BELOW_GROUP = "아래 패널";
+export const QUOTE_GROUP = "호가지표";
 export const FINANCIAL_GROUP = "재무지표";
-const GROUP_ORDER = [PRICE_GROUP, BELOW_GROUP, FINANCIAL_GROUP];
+const GROUP_ORDER = [PRICE_GROUP, BELOW_GROUP, QUOTE_GROUP, FINANCIAL_GROUP];
 
 export type CommandRow = { kind: "current"; key: string; group: string; config: IndicatorConfig }
   | { kind: "candidate"; key: string; group: string; candidate: IndicatorCandidate }
@@ -36,6 +37,7 @@ export function modeAfterInput(mode: IndicatorCommandMode, input: string): Indic
 
 export function candidateGroup(candidate: IndicatorCandidate): string {
   const kind = KINDS[candidate.kind];
+  if (isQuote(kind.defaults)) return QUOTE_GROUP;
   if (isFinancial(kind.defaults)) return FINANCIAL_GROUP;
   return kind.place === "price" ? PRICE_GROUP : BELOW_GROUP;
 }
