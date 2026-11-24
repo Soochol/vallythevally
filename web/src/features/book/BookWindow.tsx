@@ -9,7 +9,7 @@ import { MarketWindowGate } from "../market-window/MarketWindowGate";
 import { buildDefaultLadder, ROWS_ABOVE_BASE, withVisibleRepeats } from "../market-window/ladder";
 import { tickRuleOf } from "../market-window/tick";
 import { expectedItemsOnPage, placeInfoItems } from "../market-window/quoteInfo";
-import { infoSlot, tradeSlot } from "../market-window/LadderSlots";
+import { infoSlot, replayTradeSlot, tradeSlot } from "../market-window/LadderSlots";
 import { PriceLadder } from "../market-window/PriceLadder";
 import { RatioBar, Strip, TotalFigure } from "../market-window/parts";
 import { formatQuantity } from "../market-window/format";
@@ -18,6 +18,9 @@ import { useShownVenue } from "../market-window/useShownVenue";
 import { EmptyState, ErrorState } from "../overlay/State";
 import { Notice } from "../ui/Notice";
 import { MarketHead } from "../market-window/MarketHead";
+import { SymbolHead } from "../market-window/SymbolHead";
+import { ReplayStrip } from "../book-replay/ReplayStrip";
+import { useBookReplay } from "../book-replay/useBookReplay";
 import { ladderColumns } from "../market-window/PriceLadder";
 import { ratioSplit } from "../market-window/ladder";
 import { stripTotals } from "./bookModel";
@@ -40,34 +43,53 @@ function BookBody({ code, pager }: { code: SymbolCode; pager: InfoPager }) {
   const { skipSpreadGap, rate } = useOrderSettings();
   const trades = useLadderTrades(code, venue);
   const feed = useBookFeed(code, venue, trades.lastTrade);
+  const replay = useBookReplay(code);
   const limits = useFundamentals(code).data;
-  const kind = useSymbolInfo(code).data?.kind ?? null;
+  const symbolInfo = useSymbolInfo(code).data;
+  const kind = symbolInfo?.kind ?? null;
   const bounds = { lower: limits?.lowerLimit ?? null, upper: limits?.upperLimit ?? null };
   const now = useNowMs();
   const nowSeconds = Math.floor(now / 1000);
   const vi = useSymbolVi(code, "krx");
-  const view = feed.book.phase === "empty" ? null : feed.book.view;
+  const liveView = feed.book.phase === "empty" ? null : feed.book.view;
+  const view = replay.kind === "live" ? liveView : replay.kind === "past" ? replay.book : null;
   const tickRule = tickRuleOf(kind, view ? [...view.asks, ...view.bids].map((level) => level.price) : []);
   const info = useQuoteInfo({ code, venue, lastPrice: feed.lastPrice, previousClose: feed.previousClose, fundamentals: limits, page: pager.page, flipped: pager.flipped, sameTimeRatio: trades.sameTimeRatio, vi, tickRule, regularSession: isRegularSession(nowSeconds), now: nowSeconds });
-  const totals = stripTotals(view && { ask: view.totalAsk, bid: view.totalBid }, visibleAfterHours(feed.afterHours?.totals ?? null, nowSeconds));
+  const liveTotals = stripTotals(liveView && { ask: liveView.totalAsk, bid: liveView.totalBid }, visibleAfterHours(feed.afterHours?.totals ?? null, nowSeconds));
+  const totals = replay.kind === "live"
+    ? liveTotals
+    : replay.kind === "past"
+      ? { ask: replay.book.totalAsk, bid: replay.book.totalBid, source: "regular" as const, description: null }
+      : { ask: null, bid: null, source: "regular" as const, description: null };
   const afterHours = totals.source === "afterHours";
-  const notice = feed.rejected ? REJECTION[feed.rejected] : null;
+  const notice = replay.kind === "live" && feed.rejected ? REJECTION[feed.rejected] : null;
   const downSince = useFeedDownSince(feed.connected);
   const ladder = (() => {
-    if (view === null) return feed.snapshotFailed ? <ErrorState message="호가를 불러오지 못했습니다" retry={feed.retry} /> : <EmptyState title="호가를 기다리는 중입니다" />;
-    const fullRows = buildDefaultLadder({ asks: view.asks, bids: view.bids, lastPrice: feed.lastPrice, previousClose: feed.previousClose, bounds, skipSpreadGap, tickRule });
+    if (replay.kind === "none") return <EmptyState title={replay.reason} />;
+    if (replay.kind === "past") {
+      const fullRows = buildDefaultLadder({ asks: replay.book.asks, bids: replay.book.bids, lastPrice: replay.lastPrice, previousClose: feed.previousClose, bounds, skipSpreadGap, tickRule });
+      const rows = rowsPerSide >= ROWS_ABOVE_BASE ? fullRows : withVisibleRepeats(visibleLadderRows(fullRows, rowsPerSide), replay.lastPrice);
+      return <PriceLadder rows={rows} firstBidIndex={rowsPerSide} previousClose={feed.previousClose} rateShown={rate} expectedPrice={null} rowSlots={{ bottomLeft: replayTradeSlot(replay.trades, feed.previousClose) }} />;
+    }
+    if (liveView === null) return feed.snapshotFailed ? <ErrorState message="호가를 불러오지 못했습니다" retry={feed.retry} /> : <EmptyState title="호가를 기다리는 중입니다" />;
+    const fullRows = buildDefaultLadder({ asks: liveView.asks, bids: liveView.bids, lastPrice: feed.lastPrice, previousClose: feed.previousClose, bounds, skipSpreadGap, tickRule });
     const rows = rowsPerSide >= ROWS_ABOVE_BASE ? fullRows : withVisibleRepeats(visibleLadderRows(fullRows, rowsPerSide), feed.lastPrice);
-    const expected = visibleExpected(view.t, nowSeconds, view.expected, vi);
+    const expected = visibleExpected(liveView.t, nowSeconds, liveView.expected, vi);
     const infoSlots = placeInfoItems(rows, info, expectedItemsOnPage(pager.page, expected, feed.previousClose, pager.flipped));
     return <PriceLadder rows={rows} firstBidIndex={rowsPerSide} previousClose={feed.previousClose} rateShown={rate} expectedPrice={expected?.price ?? null} rowSlots={{ infoCard: infoSlot(infoSlots, pager), bottomLeft: tradeSlot(trades, feed.previousClose) }} />;
   })();
   return (
-    <div className="bk" data-testid="book-window" data-symbol={code} data-connected={feed.connected ? "" : undefined} data-rate-hidden={rate ? undefined : ""}>
-      <MarketHead code={code} venue={venue} lastPrice={feed.lastPrice} previousClose={feed.previousClose} nxtBadge />
+    <div className="bk" data-testid="book-window" data-symbol={code} data-connected={feed.connected ? "" : undefined} data-rate-hidden={rate ? undefined : ""} data-replay={replay.kind === "live" ? undefined : replay.kind}>
+      {replay.kind === "live" ? (
+        <MarketHead code={code} venue={venue} lastPrice={feed.lastPrice} previousClose={feed.previousClose} nxtBadge />
+      ) : (
+        <SymbolHead code={code} name={symbolInfo?.name ?? null} lastPrice={replay.kind === "past" ? replay.lastPrice : null} previousClose={replay.kind === "past" ? feed.previousClose : null} nxtTraded={symbolInfo?.nxtEnabled === true} mock={false} testIdPrefix="market-symbol" />
+      )}
+      <ReplayStrip view={replay} />
       {notice && <Notice tone="warning" className="mw-notice">{notice}</Notice>}
-      {!feed.connected && notice === null && <FeedStrip since={downSince} />}
+      {replay.kind === "live" && !feed.connected && notice === null && <FeedStrip since={downSince} />}
       {view !== null && <BookColumnHead />}
-      <div ref={ladderBox} className="bk-ladder" data-stale={feed.connected ? undefined : ""} data-state={view === null ? "" : undefined}>{ladder}</div>
+      <div ref={ladderBox} className="bk-ladder" data-stale={replay.kind === "live" && !feed.connected ? "" : undefined} data-state={view === null ? "" : undefined}>{ladder}</div>
       <Strip divided>
         <span className="mw-strip-name">매도</span>
         <TotalFigure testId="book-total-ask" tone="down" value={totals.ask} afterHours={afterHours} description={totals.description} />

@@ -35,6 +35,7 @@ test("옛 라이트 설정은 다크로 옮기고 다른 설정과 모르는 키
     orderEntries: {},
     hotkeys: {},
     pageLink: "a",
+    bookReplay: false,
   });
   expect(extra).toEqual({ phone: { symbol: "000660" } });
   expect(toUiState(prefs, extra)).toEqual({ ...raw, theme: "dark", orderSettings: DEFAULT_UI_PREFS.orderSettings, orderEntries: {}, hotkeys: {}, pageLink: "a" });
@@ -203,4 +204,19 @@ test("호가주문 기억은 틀린 항목만 버리고 저장 때 그대로 돌
   expect(extra).toEqual({});
   expect(toUiState(prefs, extra)["orderEntries"]).toEqual(prefs.orderEntries);
   expect(parseUiState({}).prefs.orderEntries).toEqual({});
+});
+
+test("호가 복기는 없으면 경고 없이 꺼짐, 불리언이면 왕복하고 틀리면 꺼짐으로 연다", () => {
+  const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+  expect(parseUiState({ lastLayoutId: null, theme: "dark" }).prefs.bookReplay).toBe(false);
+  expect(warn).not.toHaveBeenCalled();
+  const { prefs, extra } = parseUiState({ lastLayoutId: null, theme: "dark", bookReplay: true });
+  expect(prefs.bookReplay).toBe(true);
+  expect(extra).toEqual({});
+  expect(parseUiState(toUiState(prefs, extra)).prefs.bookReplay).toBe(true);
+  const off = parseUiState({ lastLayoutId: null, theme: "dark", bookReplay: false });
+  expect(off.prefs.bookReplay).toBe(false);
+  expect(toUiState(off.prefs, off.extra)).not.toHaveProperty("bookReplay");
+  expect(parseUiState({ lastLayoutId: null, theme: "dark", bookReplay: "yes" }).prefs.bookReplay).toBe(false);
+  expect(warn).toHaveBeenCalledOnce();
 });

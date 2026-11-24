@@ -35,6 +35,7 @@ export interface UiPrefs {
   orderEntries: OrderEntries;
   hotkeys: HotkeyOverrides;
   pageLink: LinkColor | null;
+  bookReplay: boolean;
 }
 
 export type UiExtra = Record<string, unknown>;
@@ -55,6 +56,7 @@ export const DEFAULT_UI_PREFS: UiPrefs = {
   orderEntries: NO_ORDER_ENTRIES,
   hotkeys: NO_HOTKEY_OVERRIDES,
   pageLink: "a",
+  bookReplay: false,
 };
 
 const isStringArray = (x: unknown): x is string[] => Array.isArray(x) && x.every((s) => typeof s === "string");
@@ -66,7 +68,7 @@ export function parseUiState(raw: unknown): { prefs: UiPrefs; extra: UiExtra } {
     console.warn("UiState가 객체가 아니어서 기본값으로 엽니다", raw);
     return { prefs: DEFAULT_UI_PREFS, extra: {} };
   }
-  const { rightPanel: _rightPanel, panelWidth: _panelWidth, rightPanelWidth: _rightPanelWidth, lastLayoutId, theme, watchCollapsed: _watchCollapsed, recentSymbols, activeWatchlistId, watchColumns, drawing, lastMinute, pinnedMinutes: _pinnedMinutes, collapsedWatchGroups, indicatorWindow, layoutMode, venue, orderSettings, orderEntries, hotkeys, pageLink, revision: _revision, ...extra } = raw as Record<string, unknown>;
+  const { rightPanel: _rightPanel, panelWidth: _panelWidth, rightPanelWidth: _rightPanelWidth, lastLayoutId, theme, watchCollapsed: _watchCollapsed, recentSymbols, activeWatchlistId, watchColumns, drawing, lastMinute, pinnedMinutes: _pinnedMinutes, collapsedWatchGroups, indicatorWindow, layoutMode, venue, orderSettings, orderEntries, hotkeys, pageLink, bookReplay, revision: _revision, ...extra } = raw as Record<string, unknown>;
   const bad: string[] = [];
   const pick = <T>(key: string, value: unknown, ok: (x: unknown) => x is T, fallback: T, missingOk = false): T => {
     if (ok(value)) return value;
@@ -91,6 +93,7 @@ export function parseUiState(raw: unknown): { prefs: UiPrefs; extra: UiExtra } {
     orderEntries: parseOrderEntries(orderEntries),
     hotkeys: parsedHotkeys.hotkeys,
     pageLink: pick("pageLink", pageLink, (x): x is LinkColor | null => x === null || (typeof x === "string" && (LINK_COLORS as string[]).includes(x)), DEFAULT_UI_PREFS.pageLink, true),
+    bookReplay: pick("bookReplay", bookReplay, (x): x is boolean => typeof x === "boolean", DEFAULT_UI_PREFS.bookReplay, true),
     lastMinute: pick("lastMinute", lastMinute, (x): x is MinutePeriod => typeof x === "string" && isMinutePeriod(x), DEFAULT_UI_PREFS.lastMinute, true),
     collapsedWatchGroups: [...new Set(pick("collapsedWatchGroups", collapsedWatchGroups, isStringArray, [], true))],
   };
@@ -99,7 +102,9 @@ export function parseUiState(raw: unknown): { prefs: UiPrefs; extra: UiExtra } {
 }
 
 export function toUiState(prefs: UiPrefs, extra: UiExtra): Omit<UiState, "revision"> {
-  return { ...extra, ...prefs };
+  if (prefs.bookReplay) return { ...extra, ...prefs };
+  const { bookReplay: _bookReplay, ...rest } = prefs;
+  return { ...extra, ...rest };
 }
 
 export const sortColumns = (columns: readonly WatchColumn[]): readonly WatchColumn[] => WATCH_COLUMNS.filter((c) => columns.includes(c));

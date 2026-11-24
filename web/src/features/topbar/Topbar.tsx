@@ -17,6 +17,7 @@ import { LayoutMenu } from "../layouts/LayoutMenu";
 import { VenuePicker } from "../venue/VenuePicker";
 import { SystemButton } from "../system-settings/SystemButton";
 import { AddWindowMenu } from "../workspace/AddWindowMenu";
+import { BookReplayToggle } from "../book-replay/BookReplayToggle";
 
 export function Topbar() {
   const cellId = useSelectionStore((s) => s.activeCell);
@@ -75,6 +76,7 @@ export function Topbar() {
         </button>
       </div>
       <div className="topbar-zone" data-zone="workspace">
+        <BookReplayToggle />
         <LayoutMenu />
         <ArrangeMenu />
         <AddWindowMenu />
