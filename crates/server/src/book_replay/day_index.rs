@@ -13,9 +13,9 @@ const DEFAULT_END_MINUTE_EXCLUSIVE: u32 = 20 * 60 + 5;
 const MAX_DAY_FOLDERS: usize = 60;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-struct FileStamp {
-    len: u64,
-    modified: Option<SystemTime>,
+pub(super) struct FileStamp {
+    pub len: u64,
+    pub modified: Option<SystemTime>,
 }
 
 #[derive(Debug, Clone)]
@@ -88,27 +88,31 @@ struct RawHandoff {
     to: String,
 }
 
+pub(super) fn read_stamp(data_dir: &Path, date: &str) -> Result<Option<FileStamp>, String> {
+    let path = data_dir.join("store").join(date).join("complete.json");
+    match std::fs::metadata(&path) {
+        Ok(meta) => Ok(Some(FileStamp { len: meta.len(), modified: meta.modified().ok() })),
+        Err(e) if e.kind() == ErrorKind::NotFound => Ok(None),
+        Err(e) => Err(format!("{}를 확인할 수 없습니다: {e}", path.display())),
+    }
+}
+
 impl DayIndexCache {
     pub(super) fn new() -> Self {
         Self { entries: Mutex::new(HashMap::new()) }
     }
 
-    pub(super) fn load(&self, data_dir: &Path, date: &str) -> Result<DayIndexState, String> {
-        let path = data_dir.join("store").join(date).join("complete.json");
-        let meta = match std::fs::metadata(&path) {
-            Ok(meta) => meta,
-            Err(e) if e.kind() == ErrorKind::NotFound => {
-                self.entries.lock().expect("day index cache").remove(date);
-                return Ok(DayIndexState::Missing);
-            }
-            Err(e) => return Err(format!("{}를 확인할 수 없습니다: {e}", path.display())),
+    pub(super) fn load(&self, data_dir: &Path, date: &str) -> Result<(Option<FileStamp>, DayIndexState), String> {
+        let Some(stamp) = read_stamp(data_dir, date)? else {
+            self.entries.lock().expect("day index cache").remove(date);
+            return Ok((None, DayIndexState::Missing));
         };
-        let stamp = FileStamp { len: meta.len(), modified: meta.modified().ok() };
         if let Some(cached) = self.entries.lock().expect("day index cache").get(date)
             && cached.stamp == stamp
         {
-            return Ok(cached.state.clone());
+            return Ok((Some(stamp), cached.state.clone()));
         }
+        let path = data_dir.join("store").join(date).join("complete.json");
         let bytes = std::fs::read(&path).map_err(|e| format!("{}를 읽을 수 없습니다: {e}", path.display()))?;
         let raw: RawComplete = serde_json::from_slice(&bytes).map_err(|e| format!("{}를 해석할 수 없습니다: {e}", path.display()))?;
         let state = if raw.format_version != SUPPORTED_FORMAT_VERSION {
@@ -117,8 +121,8 @@ impl DayIndexCache {
         } else {
             DayIndexState::Ready(Arc::new(build_index(raw)))
         };
-        self.entries.lock().expect("day index cache").insert(date.to_owned(), CachedDayIndex { stamp, state: state.clone() });
-        Ok(state)
+        self.entries.lock().expect("day index cache").insert(date.to_owned(), CachedDayIndex { stamp: stamp.clone(), state: state.clone() });
+        Ok((Some(stamp), state))
     }
 
     pub(super) fn collected_days(&self, data_dir: &Path, stock_code: &str) -> Result<Vec<String>, String> {
@@ -144,10 +148,12 @@ impl DayIndexCache {
         dates.reverse();
         let mut collected = Vec::new();
         for date in dates {
-            if let DayIndexState::Ready(index) = self.load(data_dir, &date)?
-                && index.stocks.contains_key(stock_code)
-            {
-                collected.push(date);
+            match self.load(data_dir, &date) {
+                Ok((_, DayIndexState::Ready(index))) if index.stocks.contains_key(stock_code) => collected.push(date),
+                Ok(_) => {}
+                Err(e) => {
+                    tracing::warn!(date = %date, reason = %e, "complete.json을 읽지 못해 날짜 목록에서 건너뜁니다");
+                }
             }
         }
         Ok(collected)
@@ -214,10 +220,27 @@ mod tests {
         )
         .unwrap();
         let cache = DayIndexCache::new();
-        assert!(matches!(cache.load(tmp.path(), "20261122").unwrap(), DayIndexState::UnsupportedVersion));
-        let DayIndexState::Ready(index) = cache.load(tmp.path(), "20261123").unwrap() else {
+        assert!(matches!(cache.load(tmp.path(), "20261122").unwrap().1, DayIndexState::UnsupportedVersion));
+        let (_, DayIndexState::Ready(index)) = cache.load(tmp.path(), "20261123").unwrap() else {
             panic!("expected ready index");
         };
         assert_eq!(index.stocks["005930"].end_minute_exclusive, 15 * 60 + 35);
+    }
+
+    #[test]
+    fn broken_complete_json_is_skipped_in_collected_days() {
+        let tmp = tempfile::tempdir().unwrap();
+        let broken_dir = tmp.path().join("store").join("20261122");
+        std::fs::create_dir_all(&broken_dir).unwrap();
+        std::fs::write(broken_dir.join("complete.json"), "{broken").unwrap();
+        let good_dir = tmp.path().join("store").join("20261123");
+        std::fs::create_dir_all(&good_dir).unwrap();
+        std::fs::write(
+            good_dir.join("complete.json"),
+            r#"{"format_version":1,"stocks":[{"code":"005930","key":"k1","registered":true,"received":true,"gaps":[],"handoff":null}]}"#,
+        )
+        .unwrap();
+        let cache = DayIndexCache::new();
+        assert_eq!(cache.collected_days(tmp.path(), "005930").unwrap(), vec!["20261123"]);
     }
 }
