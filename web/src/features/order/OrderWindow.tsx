@@ -275,13 +275,13 @@ function OrderBody({ id, code, infoPager }: { id: WindowId; code: SymbolCode; in
             ? <OrderLadder rows={rows} previousClose={feed.previousClose} groups={data.groups} writable={writable} previewQuantity={quantity} buying={data.capacity.buying} hover={hover} averagePrice={averagePrice} divider={settings.divider} explorer={explorerOn ? { centerPrice: referencePrice, centerToken } : undefined} currentToken={centerToken} ladder={ladder} drag={drag} expectedPrice={expected?.price ?? null} rowSlots={{ infoCard: infoSlot(infoSlots, infoPager), bottomLeft: tradeSlot(trades, feed.previousClose) }} actions={ladderActions} />
             : feed.snapshotFailed ? <ErrorState message="호가를 불러오지 못했습니다" retry={feed.retry} /> : <EmptyState title="호가를 기다리는 중입니다" />}
       </div>
-      <OrderStatusBar status={writes.status} queued={writes.queued} blocked={data.blocked} confirm={cancelConfirmStale ? null : cancelConfirm} onConfirm={confirmCancel} onUndo={writes.cancelOne} onReconcile={writes.reconcile} onDismiss={writes.dismiss} />
       <OrderTotals groups={data.groups} writable={writable} actions={totalsActions} drag={drag} />
       <Strip>
         <TotalFigure testId="order-total-ask" tone="down" value={totals.ask} afterHours={totals.source === "afterHours"} description={totals.description} hideAfterHoursTag />
         <RatioBar buy={totals.bid ?? 0} sell={totals.ask ?? 0} sellFirst label={totals.description ?? "총잔량 매도·매수 비율"} />
         <TotalFigure testId="order-total-bid" tone="up" value={totals.bid} afterHours={totals.source === "afterHours"} description={totals.description} hideAfterHoursTag />
       </Strip>
+      <OrderStatusBar status={writes.status} queued={writes.queued} blocked={data.blocked} confirm={cancelConfirmStale ? null : cancelConfirm} onConfirm={confirmCancel} onUndo={writes.cancelOne} onReconcile={writes.reconcile} onDismiss={writes.dismiss} />
       <DragGhost drag={drag} />
       {confirm && <HighValueConfirm request={confirm} onClose={() => setConfirm(null)} />}
     </div>
