@@ -119,6 +119,9 @@ button.od-cellbtn:not(:disabled) small span { text-decoration:underline dotted; 
 .od-cellbtn small { color:var(--text-2); font-size:var(--fs-xs); line-height:var(--size-14); }
 .od-cellbtn b { max-width:100%; white-space:nowrap; font-size:var(--fs-s); font-weight:600; line-height:var(--size-16); }
 .od-cellbtn[data-tone=up] b { color:var(--up); } .od-cellbtn[data-tone=down] b { color:var(--down); }
+.od-profit-value { display:grid; }
+.od-profit-value > span, .od-profit-value::after { grid-area:1 / 1; }
+.od-profit-value::after { content:attr(data-alt) / ""; visibility:hidden; pointer-events:none; }
 
 .od-entry { flex:none; border-top:var(--size-1) solid var(--line); }
 .od-entry .od-qty { border-top:0; padding-bottom:var(--s2); }

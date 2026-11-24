@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { TradingHolding } from "../../api/generated/TradingHolding";
-import { atLivePrice, averageRowPrice, costTitle, formatFillTime, holdingOf, isEtfOrEtnAfterHours, profitText, remainingToSell, sellableFill, sellOrderQuantity, sellQuantityAtPrice, toggledUnit } from "./holdingSummary";
+import { atLivePrice, averageRowPrice, costTitle, formatFillTime, holdingOf, isEtfOrEtnAfterHours, profitDisplay, profitText, remainingToSell, sellableFill, sellOrderQuantity, sellQuantityAtPrice, toggledUnit } from "./holdingSummary";
 import { groupOpenOrders, groupWithPending } from "./orderRules";
 import type { PendingWrite } from "./pendingWrites";
 
@@ -22,6 +22,12 @@ describe("평가손익", () => {
   it("이익은 + 부호가 붙는다", () => {
     expect(profitText({ ...HOLDING, evaluationProfit: 3_000, profitRateCenti: 150 }, "won")).toBe("+3,000원");
     expect(profitText({ ...HOLDING, profitRateCenti: 150 }, "percent")).toBe("+1.50%");
+  });
+
+  it("표시값과 반대 단위 예약값을 짝지어 돌려준다", () => {
+    expect(profitDisplay(HOLDING, "won")).toEqual({ current: "−6,000원", alternate: "−0.71%" });
+    expect(profitDisplay(HOLDING, "percent")).toEqual({ current: "−0.71%", alternate: "−6,000원" });
+    expect(profitDisplay(null, "won")).toEqual({ current: "-", alternate: "-" });
   });
 });
 
