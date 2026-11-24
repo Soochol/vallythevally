@@ -16,6 +16,7 @@ import type { Period } from "../../api/generated/Period";
 import type { UnixSeconds } from "../../api/generated/UnixSeconds";
 import { formatPrice, formatVolume } from "../../lib/format";
 import { displayBars, type History } from "../barFeed";
+import { TrackedValues } from "../legendShapes";
 import { barOpacityOf, type IndicatorConfig, type Panel } from "../settings";
 import { indicatorColorValue, type ThemeTokens } from "../theme";
 import { toChartTime } from "../time";
@@ -39,6 +40,9 @@ type Line = Plot & {
   barOpacity: number;
   points: Point[];
   guides: IPriceLine[];
+  legendValues: TrackedValues;
+  legendDirty: boolean;
+  legendHasGap: boolean;
 };
 
 interface Shown {
@@ -140,6 +144,8 @@ export class IndicatorLayer {
   private gen = 0;
   private history: History | null = null;
   private display: Bar[] = [];
+  private readonly allTimes = new Set<UnixSeconds>();
+  private timesDirty = true;
   private committedT: UnixSeconds | null = null;
   private broken = false;
   private financials: FinancialsPage | null = null;
@@ -158,6 +164,7 @@ export class IndicatorLayer {
     this.financialReports = new Map(page?.series.map((series) => [series.metric, series.points.map((point) => ({ label: `${point.businessYear} / ${point.reportCode} · ${reportingPeriod(point.period)}`, rows: this.financialPointRows.get(point) ?? [] }))]) ?? []);
     this.financialMessage = message ?? "재무자료를 불러오는 중입니다";
     this.financialOverview = financialOverviewRows(page, message, this.financialMessage);
+    this.timesDirty = true;
     this.host.guard(() => {
       for (const s of this.shown.values()) if (isFinancial(s.config.spec)) {
         s.status = { kind: s.config.visible ? "ready" : "hidden" };
@@ -189,6 +196,7 @@ export class IndicatorLayer {
   }
 
   private applyConfigs(configs: IndicatorConfig[], panels: Panel[]): void {
+    this.timesDirty = true;
     const prevConfigs = this.configs;
     const prevPanels = this.panels;
     this.configs = configs;
@@ -256,6 +264,7 @@ export class IndicatorLayer {
   private load(h: History): void {
     this.history = h;
     this.display = displayBars(h);
+    this.timesDirty = true;
     this.committedT = h.bars[h.bars.length - 1]?.t ?? null;
     this.create(this.configs.filter((c) => c.visible));
     for (const s of this.shown.values()) if (isFinancial(s.config.spec)) this.drawFinancial(s);
@@ -268,6 +277,7 @@ export class IndicatorLayer {
   private clearNow(): void {
     this.history = null;
     this.display = [];
+    this.timesDirty = true;
     this.committedT = null;
     this.port.post({ type: "drop", chart: this.port.chart, ids: "all" });
     for (const s of this.shown.values()) {
@@ -284,12 +294,16 @@ export class IndicatorLayer {
     if (op === "create" || !this.history) return this.host.guard(() => this.resetNow(h));
     this.history = h;
     this.display = next;
+    if (!this.timesDirty) this.allTimes.add(bar.t);
     if (op === "confirm") this.committedT = bar.t;
     if (next.length > prev.length || next.at(-1)?.c !== prev.at(-1)?.c) this.rebaseLeadingSpans();
     const point = volumePoint(bar);
     for (const s of this.shown.values()) if (s.config.visible && isPlainVolume(s.config.spec)) {
       for (const line of s.lines) {
+        const prevLen = line.points.length;
+        const lastT = line.points[prevLen - 1]?.t;
         line.points = applyToPoints(line.points, { op: "update", point });
+        this.updateLineLegend(line, s.config, prevLen, lastT, point);
         this.queue.push(line, { op: "update", point });
       }
     }
@@ -328,7 +342,10 @@ export class IndicatorLayer {
   }
 
   refreshPriceFormat(): void {
-    for (const s of this.shown.values()) for (const line of s.lines) line.series.applyOptions({ priceFormat: this.priceFormat(s.config) });
+    for (const s of this.shown.values()) for (const line of s.lines) {
+      line.series.applyOptions({ priceFormat: this.priceFormat(s.config) });
+      line.legendDirty = true;
+    }
   }
 
   rows(t: UnixSeconds | null): IndicatorRow[] {
@@ -377,24 +394,61 @@ export class IndicatorLayer {
   }
 
   priceLegendValues(): readonly PriceLegendValues[] {
-    const times = new Set(this.display.map((bar) => bar.t));
-    const rows: { id: IndicatorRow["id"]; slots: { values: string[]; count: number }[] }[] = [];
+    if (this.timesDirty) this.rebuildAllTimes();
+    const totalTimes = this.allTimes.size;
+    const rows: PriceLegendValues[] = [];
     for (const config of this.configs) {
       const shown = this.shown.get(config.id);
       const panelIndex = config.panel === "price" ? -1 : this.panels.findIndex((panel) => panel.id === config.panel);
-      const price = !isFinancial(config.spec) && panelIndex < 0;
-      const row: { id: IndicatorRow["id"]; slots: { values: string[]; count: number }[] } = { id: config.id, slots: [] };
-      if (price) rows.push(row);
-      for (const line of shown?.lines ?? []) {
-        const values: string[] = [];
-        for (const point of line.points) {
-          times.add(point.t);
-          if (price && shown?.status.kind === "ready") values.push(this.legendText(config, point));
+      if (isFinancial(config.spec) || panelIndex >= 0) continue;
+      const slots: (readonly string[])[] = [];
+      if (shown?.status.kind === "ready") {
+        for (const line of shown.lines) {
+          this.syncLineLegend(line, config, totalTimes);
+          slots.push(line.legendValues.values);
         }
-        if (price && shown?.status.kind === "ready") row.slots.push({ values, count: line.points.length });
       }
+      rows.push({ id: config.id, slots });
     }
-    return rows.map((row) => ({ id: row.id, slots: row.slots.map(({ values, count }) => count < times.size ? [...values, "—"] : values) }));
+    return rows;
+  }
+
+  private rebuildAllTimes(): void {
+    this.allTimes.clear();
+    for (const bar of this.display) this.allTimes.add(bar.t);
+    for (const config of this.configs) {
+      const shown = this.shown.get(config.id);
+      for (const line of shown?.lines ?? []) for (const point of line.points) this.allTimes.add(point.t);
+    }
+    this.timesDirty = false;
+  }
+
+  private syncLineLegend(line: Line, config: IndicatorConfig, totalTimes: number): void {
+    const wantGap = line.points.length < totalTimes;
+    if (line.legendDirty) {
+      const values = line.points.map((point) => this.legendText(config, point));
+      if (wantGap) values.push("—");
+      line.legendValues.setAll(values);
+      line.legendHasGap = wantGap;
+      line.legendDirty = false;
+      return;
+    }
+    if (wantGap && !line.legendHasGap) {
+      line.legendValues.push("—");
+      line.legendHasGap = true;
+    } else if (!wantGap && line.legendHasGap) {
+      line.legendValues.truncate(line.points.length);
+      line.legendHasGap = false;
+    }
+  }
+
+  private updateLineLegend(line: Line, config: IndicatorConfig, prevLen: number, lastT: UnixSeconds | undefined, point: Point): void {
+    if (line.legendDirty) return;
+    if (lastT !== undefined && point.t < lastT) return;
+    const text = this.legendText(config, point);
+    if (lastT === point.t) line.legendValues.setAt(prevLen - 1, text);
+    else if (line.legendHasGap) line.legendValues.pushBeforeLast(text);
+    else line.legendValues.push(text);
   }
 
   stretches(): Panel["stretch"][] {
@@ -421,6 +475,7 @@ export class IndicatorLayer {
         for (const line of s.lines) {
           this.queue.forget(line);
           line.points = this.display.map(volumePoint);
+          line.legendDirty = true;
           this.draw(line, line.points);
         }
         s.status = { kind: "ready" };
@@ -459,21 +514,33 @@ export class IndicatorLayer {
     if (!r.ok) {
       s.status = { kind: "error", error: r.error, message: r.message };
       s.gen = 0;
+      this.timesDirty = true;
       this.clearLines(s);
       if (r.error === "spec") console.warn(`지표 설정 오류(${specName(s.config.spec)}): ${r.message}`);
       else console.error(`지표 계산 오류(${specName(s.config.spec)}): ${r.message}`);
       return;
     }
+    const wasReady = s.status.kind === "ready";
     lines?.forEach((l, i) => {
       const line = s.lines[i];
       if (line) line.shift = l.shift;
     });
     s.status = { kind: "ready" };
+    if (lines !== null || !wasReady) this.timesDirty = true;
     r.draws.forEach((d, i) => {
       const line = s.lines[i];
       if (!line) return;
-      const firstPoint = d.op === "update" && line.overlay && line.points.length === 0;
+      const prevLen = line.points.length;
+      const lastT = line.points[prevLen - 1]?.t;
+      const firstPoint = d.op === "update" && line.overlay && prevLen === 0;
       line.points = applyToPoints(line.points, d);
+      if (lines !== null || !wasReady || d.op === "set") {
+        line.legendDirty = true;
+        if (d.op === "set") this.timesDirty = true;
+      } else if (d.op === "update") {
+        if (!this.timesDirty && !(lastT !== undefined && d.point.t < lastT)) this.allTimes.add(d.point.t);
+        this.updateLineLegend(line, s.config, prevLen, lastT, d.point);
+      }
       if (!lines) return this.queue.push(line, firstPoint ? { op: "set", points: line.points } : d);
       this.queue.forget(line);
       this.draw(line, line.points);
@@ -482,6 +549,7 @@ export class IndicatorLayer {
 
   private onBroken(): void {
     this.broken = true;
+    this.timesDirty = true;
     this.host.guard(() => {
       for (const s of this.shown.values()) {
         if (s.status.kind === "hidden" || !usesWorker(s.config)) continue;
@@ -529,7 +597,7 @@ export class IndicatorLayer {
       if (isVolumeOverPrice(config) && id === "volume") series.setSeriesOrder(0);
       const guides = i === 0 ? (GUIDES[config.spec.kind] ?? []).map((price) => series.createPriceLine(this.guide(price))) : [];
       const same = kept[i]?.id === id ? kept[i] : undefined;
-      return { ...plot, priceOverlay: isOverlay(config, id), id, shift: same?.shift ?? 0, barOpacity: barOpacityOf(config.style), points: same?.points ?? [], guides };
+      return { ...plot, priceOverlay: isOverlay(config, id), id, shift: same?.shift ?? 0, barOpacity: barOpacityOf(config.style), points: same?.points ?? [], guides, legendValues: new TrackedValues(), legendDirty: true, legendHasGap: false };
     });
   }
 
@@ -686,6 +754,9 @@ export class IndicatorLayer {
       this.queue.forget(line);
       if (line.points.length) line.series.setData([]);
       line.points = [];
+      line.legendValues.clear();
+      line.legendDirty = true;
+      line.legendHasGap = false;
     }
   }
 

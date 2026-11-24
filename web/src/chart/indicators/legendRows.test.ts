@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
+import { TrackedValues } from "../legendShapes";
 import type { IndicatorRow } from "./layer";
 import { IndicatorLegend } from "./legendRows";
 
@@ -89,4 +90,20 @@ test("배치 줄과 그리는 줄의 가격 줄 수가 같으면 그리기가 �
   legend.render([...MOVING_AVERAGES, VOLUME_PANE], []);
   expect(legend.priceBox.firstElementChild?.firstElementChild).toBe(label);
   expect(foldLabel(legend)).toBe("지표 7");
+});
+
+test("setLayoutRows는 같은 모양 갱신에는 false, 모양·상태·줄 바뀜에는 true를 돌려준다", () => {
+  const legend = newLegend();
+  const row = movingAverage(5);
+  const slot = new TrackedValues();
+  slot.setAll(["71,200", "72,300"]);
+  expect(legend.setLayoutRows([row], [{ id: row.id, slots: [slot.values] }])).toBe(true);
+  slot.setAt(1, "79,800");
+  expect(legend.setLayoutRows([row], [{ id: row.id, slots: [slot.values] }])).toBe(false);
+  slot.setAt(1, "100,000");
+  expect(legend.setLayoutRows([row], [{ id: row.id, slots: [slot.values] }])).toBe(true);
+  slot.setAt(1, "75,000");
+  expect(legend.setLayoutRows([row], [{ id: row.id, slots: [slot.values] }])).toBe(true);
+  expect(legend.setLayoutRows([{ ...row, state: "hidden" }], [{ id: row.id, slots: [] }])).toBe(true);
+  expect(legend.setLayoutRows([{ ...row, state: "hidden" }], [{ id: row.id, slots: [] }])).toBe(false);
 });

@@ -7,6 +7,7 @@ import { ApiRequestError } from "../api/http";
 import type { SubEvent } from "../api/socket";
 import type { ShownVenue } from "../lib/venue";
 import { alignToMain, COMPARE_NOTE, CompareLayer, compareVenue, MAX_COVER_PAGES } from "./compare";
+import { trackedValuesOf } from "./legendShapes";
 import type { ThemeTokens } from "./theme";
 import { fromChartTime } from "./time";
 
@@ -322,5 +323,40 @@ test("비교 범례 원천은 loading·실패·제한·기준 안내와 현재 f
   f.flush();
   expect(f.layer.rows(1, 4)[0]).toMatchObject({ value: "—", failed: true, notes: [COMPARE_NOTE.missing] });
   expect(f.layer.legendValues(1)[0]?.values).toEqual(["—"]);
+  f.layer.dispose();
+});
+
+test("비교 범례 원천은 끝점 체결만 갱신하고 같은 모양은 버전을 유지하며 자릿수 증감과 왼쪽 끝 변경은 버전을 올린다", async () => {
+  const f = fixture((q) => page(q.symbol, [bar(1, 100), bar(2, 105), bar(3, 110)], null, bar(4, 112), 0));
+  f.setMain(bars(1, 4));
+  f.layer.setCodes([entry("000660")], key);
+  await f.settle();
+  f.flush();
+  const initial = f.layer.legendValues(1)[0]!.values;
+  const tracked = trackedValuesOf(initial)!;
+  expect(tracked).not.toBeNull();
+  const baseVersion = tracked.shapeVersion;
+  expect(initial).toEqual(["—", "0.00%", "+5.00%", "+10.00%", "+12.00%"]);
+  f.push("000660", { type: "bar", sub: "s", seq: 1, bar: bar(4, 118) });
+  f.flush();
+  expect(f.layer.legendValues(1)[0]!.values).toEqual(["—", "0.00%", "+5.00%", "+10.00%", "+18.00%"]);
+  expect(tracked.shapeVersion).toBe(baseVersion);
+  f.push("000660", { type: "bar", sub: "s", seq: 2, bar: bar(4, 250) });
+  f.flush();
+  expect(f.layer.legendValues(1)[0]!.values).toEqual(["—", "0.00%", "+5.00%", "+10.00%", "+150.00%"]);
+  expect(tracked.shapeVersion).toBe(baseVersion + 1);
+  f.push("000660", { type: "bar", sub: "s", seq: 3, bar: bar(4, 115) });
+  f.flush();
+  expect(f.layer.legendValues(1)[0]!.values).toEqual(["—", "0.00%", "+5.00%", "+10.00%", "+15.00%"]);
+  expect(tracked.shapeVersion).toBe(baseVersion + 2);
+  f.appendMain(bar(5));
+  f.push("000660", { type: "confirmed", sub: "s", seq: 4, bar: bar(4, 115) });
+  f.push("000660", { type: "bar", sub: "s", seq: 5, bar: bar(5, 119) });
+  f.flush();
+  expect(f.layer.legendValues(1)[0]!.values).toEqual(["—", "0.00%", "+5.00%", "+10.00%", "+15.00%", "+19.00%"]);
+  expect(tracked.shapeVersion).toBe(baseVersion + 2);
+  const shifted = f.layer.legendValues(2)[0]!.values;
+  expect(shifted).toEqual(["—", "0.00%", "+4.76%", "+9.52%", "+13.33%"]);
+  expect(tracked.shapeVersion).toBe(baseVersion + 3);
   f.layer.dispose();
 });
