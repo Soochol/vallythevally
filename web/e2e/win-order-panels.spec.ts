@@ -472,13 +472,13 @@ async function openNarrowest(page: Page, scenario: Scenario): Promise<void> {
   for (const strength of await page.getByTestId("ladder-strength").all()) await expect(strength).toContainText("101.50%");
 }
 
-test("등락률을 끈 호가주문 창을 최소 폭 372px로 줄여도 글자가 잘리거나 겹치지 않고 금액 프리셋은 두 줄이 된다", async ({ page, scenario }) => {
+test("등락률을 끈 호가주문 창을 최소 폭 372px로 줄여도 글자가 잘리거나 겹치지 않고 수량·금액 프리셋 모두 한 줄이다", async ({ page, scenario }) => {
   await openNarrowest(page, scenario);
   const quantityRow = page.getByTestId("order-quantity-row");
   expect((await win(page).boundingBox())!.width).toBeCloseTo(372, 0);
-  for (const [kind, lines] of [["수량", 1], ["금액", 2]] as const) {
+  for (const kind of ["수량", "금액"] as const) {
     await quantityRow.getByRole("button", { name: kind, exact: true }).click();
-    expect(new Set(await quantityRow.locator(".od-presets, .od-qty-input, .od-gear").evaluateAll((parts) => parts.map((part) => Math.round(part.getBoundingClientRect().top)))).size).toBe(lines);
+    expect(new Set(await quantityRow.locator(".od-presets, .od-qty-input, .od-gear").evaluateAll((parts) => parts.map((part) => Math.round(part.getBoundingClientRect().top)))).size).toBe(1);
     expect(await cutTexts(win(page))).toEqual([]);
     for (const row of [quantityRow, page.getByTestId("order-summary"), page.locator(".od-account-bar"), page.getByTestId("order-symbol-head")]) expect(await overlappingChildren(row)).toEqual([]);
   }
@@ -709,6 +709,30 @@ test("금액 방식이면 같은 줄의 프리셋이 100만·500만·1000만·50
   expect((await tops(presets)).map(Math.round)).toEqual([input, input, input, input]);
 });
 
+test("수량·금액 프리셋 8개는 모두 5,000만이 들어가는 48px이고 더 긴 값만 넓어진다", async ({ page, scenario }) => {
+  ordersOn(scenario);
+  tradingApi(scenario);
+  await openOrderWindow(page, scenario);
+  await win(page).evaluate((element) => { element.style.flex = "none"; element.style.width = "421px"; });
+  const row = page.getByTestId("order-quantity-row");
+  const presets = row.getByRole("group", { name: "수량 프리셋" }).getByRole("button");
+  const sizes = () => presets.evaluateAll((buttons) => buttons.map((button) => { const box = button.getBoundingClientRect(); return { width: Math.round(box.width * 2) / 2, height: Math.round(box.height), cut: button.scrollWidth > button.clientWidth }; }));
+  const even = { width: 48, height: 30, cut: false };
+  await page.evaluate(() => document.fonts.ready);
+  for (const kind of ["수량", "금액"] as const) {
+    await row.getByRole("button", { name: kind, exact: true }).click();
+    await expect.poll(sizes).toEqual([even, even, even, even]);
+  }
+  await openSettings(page);
+  await page.getByRole("textbox", { name: "금액 프리셋 4" }).fill("99999");
+  await page.keyboard.press("Escape");
+  await expect(presets.last()).toHaveText("99,999만");
+  const widened = await sizes();
+  expect(widened.slice(0, 3)).toEqual([even, even, even]);
+  expect(widened[3]!.width).toBeGreaterThan(48);
+  expect(widened[3]!.cut).toBe(false);
+});
+
 const presetKindButton = (page: Page, name: "수량" | "금액") => page.getByRole("group", { name: "수량 방식" }).getByRole("button", { name });
 const quantityField = (page: Page) => page.getByRole("textbox", { name: "수량" });
 const amountPresetButtons = (page: Page) => page.getByRole("group", { name: "수량 프리셋" }).getByRole("button");
@@ -806,7 +830,7 @@ test("폭 420px에서 6·7자리 수량이 잘리지 않고 창이 넓으면 수
       expect(await field.evaluate((element: HTMLInputElement) => element.scrollWidth <= element.clientWidth)).toBe(true);
     }
   }
-  await win(page).evaluate((element) => { element.style.width = "395px"; });
+  await win(page).evaluate((element) => { element.style.width = "380px"; });
   await expect.poll(async () => (await field.boundingBox())!.width).toBeLessThan(84);
   expect((await field.boundingBox())!.width).toBeGreaterThanOrEqual(60);
   await win(page).evaluate((element) => { element.style.width = "600px"; });
@@ -1384,20 +1408,20 @@ async function placeKept(page: Page, api: ReturnType<typeof tradingApi>, kind: "
   await pollSaved(() => writesTo(api, "place")).toHaveLength(count);
 }
 
-test("유지 설정은 처음에 켜져 있고 수량 칸 옆에 유지 표시가 있다", async ({ page, scenario }) => {
+test("수량 줄에 수량·유지 라벨이 없고 마지막 주문 수량 유지 설정은 그대로 켜고 끈다", async ({ page, scenario }) => {
   ordersOn(scenario);
   tradingApi(scenario);
   await openOrderWindow(page, scenario);
-  await expect(page.getByTestId("order-keep-mark")).toHaveText("유지");
-  await expect(page.getByTestId("order-keep-mark")).toHaveAttribute("title", "마지막 주문 수량 유지");
-  await expect(page.getByTestId("order-quantity-row").locator("label")).toHaveText("수량");
+  const row = page.getByTestId("order-quantity-row");
+  await expect(row.getByRole("textbox", { name: "수량", exact: true })).toBeVisible();
+  await expect(row.locator("label")).toHaveCount(0);
+  await expect(row).not.toContainText("유지");
   await openSettings(page);
   const keep = page.getByRole("checkbox", { name: /마지막 주문 수량 유지/ });
   await expect(keep).toBeChecked();
   const order = await page.getByTestId("order-settings").locator("input").evaluateAll((inputs) => inputs.map((input) => input.closest("label")?.textContent ?? input.getAttribute("aria-label")));
   expect(order.slice(0, 9)).toEqual(["프리셋 1", "프리셋 2", "프리셋 3", "프리셋 4", "금액 프리셋 1", "금액 프리셋 2", "금액 프리셋 3", "금액 프리셋 4", expect.stringContaining("마지막 주문 수량 유지")]);
   await keep.uncheck();
-  await expect(page.getByTestId("order-keep-mark")).toHaveCount(0);
   await pollSaved(() => scenario.documents.uiState()["orderSettings"]).toMatchObject({ keepLastEntry: false });
 });
 

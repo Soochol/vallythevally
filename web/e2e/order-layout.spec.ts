@@ -75,31 +75,29 @@ test("창 머리에 종목 이름이 보이고 연동된 종목이 바뀌면 따
   await expect(head.getByTestId("order-symbol-name")).not.toHaveText("삼성전자");
 });
 
-test("실전 계좌에는 실전 배지가, 모의 계좌에는 모의 배지가 계좌 옆에 보인다", async ({ page, scenario }) => {
+test("실전 계좌에는 투자구분 배지가 없다", async ({ page, scenario }) => {
   environmentIs(scenario, "real");
   ordersOn(scenario);
   tradingApi(scenario);
   await openOrderWindow(page, scenario);
   const bar = win(page).getByTestId("order-account");
-  await expect(bar.getByTestId("account-live")).toHaveText("실전");
+  await expect(bar.getByTestId("account-route")).toBeVisible();
   await expect(bar.getByTestId("account-mock")).toHaveCount(0);
-  const label = (await bar.getByTestId("account-label").boundingBox())!;
-  const badge = (await bar.getByTestId("account-live").boundingBox())!;
-  expect(badge.x).toBeGreaterThanOrEqual(label.x + label.width - 1);
-  expect(Math.abs(badge.y + badge.height / 2 - (label.y + label.height / 2))).toBeLessThan(label.height);
+  await expect(bar.getByTestId("account-live")).toHaveCount(0);
+  await expect(bar).not.toContainText("실전");
 });
 
-test("모의 계좌에는 모의 배지가 보이고 머리 줄에 경고색 바탕이 깔린다", async ({ page, scenario }) => {
+test("모의 계좌에는 모의투자 배지가 보이고 머리 줄에 경고색 바탕이 깔린다", async ({ page, scenario }) => {
   environmentIs(scenario, "mock");
   ordersOn(scenario);
   tradingApi(scenario);
   await openOrderWindow(page, scenario);
   const bar = win(page).getByTestId("order-account");
-  await expect(bar.getByTestId("account-mock")).toHaveText("모의");
-  await expect(bar.getByTestId("account-live")).toHaveCount(0);
+  await expect(bar.getByTestId("account-mock")).toHaveText("모의투자");
   const label = (await bar.getByTestId("account-label").boundingBox())!;
   const badge = (await bar.getByTestId("account-mock").boundingBox())!;
   expect(badge.x).toBeGreaterThanOrEqual(label.x + label.width - 1);
+  expect(Math.abs(badge.y + badge.height / 2 - (label.y + label.height / 2))).toBeLessThan(label.height);
   await expect(win(page).getByTestId("order-symbol-head")).toHaveAttribute("data-mock", "");
   await expect(win(page).getByTestId("account-route")).toHaveText("KRX");
 });

@@ -134,9 +134,7 @@ export function AccountBand({ windowId, choice, onPick, maskAccount, openOrders,
       <div className="od-account-bar">
         <div className="od-account-head">
           <AccountLabel choice={choice} maskAccount={maskAccount} onPick={onPick} />
-          <Badge tone={mock ? "accent" : "warning"} className="od-env">
-            <span data-testid={mock ? "account-mock" : "account-live"}>{mock ? "모의" : "실전"}</span>
-          </Badge>
+          {mock && <Badge tone="accent" className="od-env"><span data-testid="account-mock">모의투자</span></Badge>}
           <span className="od-route" data-testid="account-route" title="주문 경로">{routeLabel(venue)}</span>
           {policy !== null && <Badge tone={policy === "allow_margin" ? "warning" : "success"} className="od-policy"><span data-testid="margin-policy" data-policy={policy}>{POLICY_LABEL[policy]}</span></Badge>}
         </div>

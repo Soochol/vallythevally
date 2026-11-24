@@ -220,7 +220,7 @@ function OrderBody({ id, code, infoPager, choice, access, balance }: { id: Windo
           <button type="button" className="od-link" onClick={() => openSystemSettings("kiwoom")}>시스템 설정 열기</button>
         </div>
       )}
-      <SymbolHead code={code} name={symbolInfo?.name ?? null} lastPrice={feed.lastPrice} previousClose={feed.previousClose} nxtTraded={symbolInfo?.nxtEnabled === true} mock={mock} />
+      <SymbolHead code={code} name={symbolInfo?.name ?? null} lastPrice={feed.lastPrice} previousClose={feed.previousClose} nxtTraded={symbolInfo?.nxtEnabled === true} nxtLabel="NXT지원" mock={mock} />
       <AccountPart windowId={id} choice={choice} accountRef={accountRef} onPickAccount={pickAccount} openOrders={data.openOrders} balance={data.balance} executions={data.executions} writable={writable} mock={mock} policy={data.orderable?.policy ?? null} onCancel={cancelOne}
         holding={holding} orderable={data.orderable} buyableProblem={data.buyableProblem} sellOrdered={sellOrdered} profitUnit={profitUnit} onProfitUnit={toggleProfitUnit}
         presetKind={presetKind} input={input} referencePrice={referencePrice} onPresetKind={setPresetKind} onInput={setInput}

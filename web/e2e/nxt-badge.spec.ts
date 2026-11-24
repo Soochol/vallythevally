@@ -16,12 +16,12 @@ async function openAll(page: Page, scenario: Scenario, nxtEnabled: boolean): Pro
 
 const openTab = async (page: Page, name: RegExp) => windowTabs(page).getByRole("tab", { name }).click();
 
-test("10호가와 호가주문 창 머리는 NXT 거래 종목의 이름 바로 뒤에 NXT 배지를 붙인다", async ({ page, scenario }) => {
+test("호가주문 창 머리는 NXT지원, 10호가 창 머리는 NXT 배지를 이름 바로 뒤에 붙인다", async ({ page, scenario }) => {
   await openAll(page, scenario, true);
   await openTab(page, /^10호가/);
-  for (const [area, prefix] of [[book(page), "market-symbol"], [win(page), "order-symbol"]] as const) {
+  for (const [area, prefix, text] of [[book(page), "market-symbol", "NXT"], [win(page), "order-symbol", "NXT지원"]] as const) {
     const badge = area.getByTestId(`${prefix}-nxt`);
-    await expect(badge).toHaveText("NXT");
+    await expect(badge).toHaveText(text);
     const name = (await area.getByTestId(`${prefix}-name`).boundingBox())!;
     const price = (await area.getByTestId(`${prefix}-price`).boundingBox())!;
     const box = (await badge.boundingBox())!;

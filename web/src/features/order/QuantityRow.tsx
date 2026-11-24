@@ -1,7 +1,7 @@
-import { type ChangeEvent, type KeyboardEvent, type ReactNode, useId, useLayoutEffect, useRef } from "react";
+import { type ChangeEvent, type KeyboardEvent, type ReactNode, useLayoutEffect, useRef } from "react";
 import { Segmented } from "../market-window/parts";
 import { quantityForAmount } from "./orderRules";
-import { AMOUNT_UNIT_WON, KEEP_LAST_ENTRY_LABEL, type PresetKind } from "./orderSettings";
+import { AMOUNT_UNIT_WON, type PresetKind } from "./orderSettings";
 
 const PRESET_KINDS = [{ value: "sharePresets", label: "수량" }, { value: "amountPresets", label: "금액" }] as const;
 
@@ -13,14 +13,12 @@ interface Props {
   readonly sharePresets: readonly number[];
   readonly amountPresets: readonly number[];
   readonly referencePrice: number | null;
-  readonly keepLastEntry: boolean;
   readonly onPresetKind: (kind: PresetKind) => void;
   readonly onInput: (input: string) => void;
   readonly trailing?: ReactNode;
 }
 
-export function QuantityRow({ presetKind, input, sharePresets, amountPresets, referencePrice, keepLastEntry, onPresetKind, onInput, trailing }: Props) {
-  const inputId = useId();
+export function QuantityRow({ presetKind, input, sharePresets, amountPresets, referencePrice, onPresetKind, onInput, trailing }: Props) {
   const field = useRef<HTMLInputElement>(null);
   const digitsBeforeCaret = useRef<number | null>(null);
   useLayoutEffect(() => {
@@ -51,11 +49,7 @@ export function QuantityRow({ presetKind, input, sharePresets, amountPresets, re
   const fillAmount = (won: number) => onInput(String(quantityForAmount(won, referencePrice) ?? 0));
   return (
     <div className="od-qty" data-testid="order-quantity-row">
-      <span className="od-qty-name">
-        <label className="od-qty-label" htmlFor={inputId}>수량</label>
-        {keepLastEntry && <span className="od-qty-keep" data-testid="order-keep-mark" title={KEEP_LAST_ENTRY_LABEL}>유지</span>}
-      </span>
-      <input id={inputId} ref={field} className="od-qty-input" inputMode="numeric" autoComplete="off" value={input} onChange={change} onKeyDown={nudge} />
+      <input ref={field} className="od-qty-input" aria-label="수량" inputMode="numeric" autoComplete="off" value={input} onChange={change} onKeyDown={nudge} />
       <Segmented label="수량 방식" options={PRESET_KINDS} value={presetKind} onChange={onPresetKind} />
       <div className="od-presets" role="group" aria-label="수량 프리셋">
         {amountKind
