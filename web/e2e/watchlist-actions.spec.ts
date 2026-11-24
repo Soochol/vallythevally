@@ -53,24 +53,6 @@ test("13종목이 34px 한 줄로 세로 스크롤 없이 보인다", async ({ s
   await page.screenshot({ path: path.resolve("../target/ux-screens/watchlist-390x844.png") });
 });
 
-test("Alt 없는 위아래 화살표는 줄 사이 초점만 옮기고 순서와 저장을 바꾸지 않는다", async ({ scenario, page }) => {
-  await seed(scenario);
-  await page.goto("/?symbol=005930");
-  await expect(row(page, "005935")).toContainText("삼성전자우");
-  const main = (code: string) => row(page, code).locator("[data-main]");
-  await main("005930").focus();
-  await page.keyboard.press("ArrowDown");
-  await expect(main("086520")).toBeFocused();
-  await page.keyboard.press("ArrowDown");
-  await expect(main("005935")).toBeFocused();
-  await page.keyboard.press("ArrowDown");
-  await expect(main("005935")).toBeFocused();
-  await page.keyboard.press("ArrowUp");
-  await expect(main("086520")).toBeFocused();
-  expect(await codes(page)).toEqual(["005930", "086520", "005935"]);
-  expect(scenario.documents.watchlists().revision).toBe(100);
-});
-
 test("열이 모두 빠져도 찾을 수 없는 종목 줄의 접근성 이름에 찾을 수 없음이 남는다", async ({ scenario, page }) => {
   await seed(scenario, ["005930", "999999"]);
   scenario.reply("/api/symbols/999999", { status: 404, body: { error: { code: "unknown_symbol", message: "없는 종목입니다" } } });

@@ -38,6 +38,7 @@ import {
 } from "../../lib/screener";
 import { listNameFrom, MAX_WATCHLISTS } from "../../lib/watchlist";
 import { useLayoutStore, watchedSymbol } from "../../stores/layout";
+import { activeWatchWindow } from "../../stores/activeWindow";
 import type { WindowId } from "../../layout/kinds";
 import { type Rerun, rerunReason, type ScreenRun, shownResult, useScreenerStore } from "../../stores/screener";
 import { useSelectionStore } from "../../stores/selection";
@@ -226,6 +227,7 @@ export function handleResultKey(event: ScreenerKeyEvent, { rows, active, onSelec
     onRun();
     return;
   }
+  if (activeWatchWindow() !== null) return;
   const code = nextResult(rows, pendingResultCode() ?? active, action.step);
   if (rows.length) event.preventDefault();
   if (code) onSelect(code);

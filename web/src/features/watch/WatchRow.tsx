@@ -16,6 +16,7 @@ import { type GroupNaming, setCollapsed, startGroup } from "./groupActions";
 import { QuoteCells, quoteCellIds } from "./QuoteCells";
 import { removalUndo } from "./removalUndo";
 import type { WatchVariant } from "./columns";
+import type { RowPreviewStore } from "./watchKeys";
 
 export interface RowDrag {
   start(row: WatchRowRef): void;
@@ -34,6 +35,7 @@ interface RowProps {
   template: React.CSSProperties;
   variant: WatchVariant;
   sender: WindowId | null;
+  preview: RowPreviewStore | null;
   editing: boolean;
   dropBefore: boolean;
   dragging: boolean;
@@ -42,23 +44,30 @@ interface RowProps {
   drag: RowDrag;
 }
 
-function useIsWatched(sender: WindowId | null, code: SymbolCode): boolean {
+function useIsActiveRow(sender: WindowId | null, code: SymbolCode, key: string, preview: RowPreviewStore | null): boolean {
   const subscribe = useCallback((listener: () => void) => {
     const stopLayout = useLayoutStore.subscribe(listener);
     const stopSelection = useSelectionStore.subscribe(listener);
+    const stopPreview = preview?.subscribe(key, listener);
     return () => {
       stopLayout();
       stopSelection();
+      stopPreview?.();
     };
-  }, []);
-  return useSyncExternalStore(subscribe, () => watchedSymbol(useLayoutStore.getState().layout, sender, useSelectionStore.getState().activeCell) === code);
+  }, [preview, key]);
+  return useSyncExternalStore(subscribe, () => {
+    const pending = preview?.get() ?? null;
+    if (pending !== null) return pending === key;
+    return watchedSymbol(useLayoutStore.getState().layout, sender, useSelectionStore.getState().activeCell) === code;
+  });
 }
 
 const NO_OTHER_LISTS: readonly Watchlist[] = [];
 
-function WatchRowFrame({ list, code, groupId, index, last, columns, template, variant, sender, editing, dropBefore, dragging, onMoved, onNaming, drag }: RowProps) {
+function WatchRowFrame({ list, code, groupId, index, last, columns, template, variant, sender, preview, editing, dropBefore, dragging, onMoved, onNaming, drag }: RowProps) {
   const row: WatchRowRef = { code, groupId };
-  const active = useIsWatched(sender, code);
+  const key = rowKey(row);
+  const active = useIsActiveRow(sender, code, key, preview);
   const [menu, setMenu] = useState<{ kind: "actions" | "transfer" | "group" | "addGroup"; x: number; y: number } | null>(null);
   const root = useRef<HTMLLIElement>(null);
   const button = useRef<HTMLButtonElement>(null);
@@ -130,7 +139,7 @@ function WatchRowFrame({ list, code, groupId, index, last, columns, template, va
       onDragEnd={drag.end}
       onContextMenu={variant === "desktop" ? (e) => { e.preventDefault(); context(e.clientX, e.clientY); } : undefined}
       className={`group relative ${listRowFill(active)} ${dragging ? "opacity-40" : ""} ${
-        dropBefore ? "shadow-[inset_0_2px_0_var(--accent)]" : ""
+        dropBefore ? "shadow-[inset_0_2px_0_var(--accent)]" : index > 0 ? "shadow-[inset_0_1px_0_var(--line)]" : ""
       }`}
     >
       <button
@@ -157,13 +166,17 @@ function WatchRowFrame({ list, code, groupId, index, last, columns, template, va
           }
           if (e.key !== "ArrowUp" && e.key !== "ArrowDown") return;
           if (e.ctrlKey || e.metaKey || e.shiftKey) return;
-          e.preventDefault();
           const step = e.key === "ArrowUp" ? -1 : 1;
-          if (e.altKey) move(step);
-          else focusNeighbor(e.currentTarget, step);
+          if (e.altKey) {
+            e.preventDefault();
+            move(step);
+          } else if (variant === "phone") {
+            e.preventDefault();
+            focusNeighbor(e.currentTarget, step);
+          }
         }}
         style={template}
-        className={`grid gap-x-2 ${LIST_ROW_HEIGHT} w-full items-center ${grouped ? "pl-5" : "pl-3"} pr-3 text-left max-md:h-auto max-md:min-h-[56px] max-md:px-4 max-md:py-2 ${
+        className={`grid gap-x-2 ${LIST_ROW_HEIGHT} w-full items-center ${grouped ? "pl-5" : "pl-3"} pr-3 text-left outline-none max-md:h-auto max-md:min-h-[56px] max-md:px-4 max-md:py-2 ${
           editing ? (grouped ? "max-md:pr-[220px]" : "max-md:pr-[176px]") : ""
         }`}
       >

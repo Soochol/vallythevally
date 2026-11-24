@@ -10,6 +10,7 @@ import type { DockPlacement } from "../../layout/placement";
 import { groupOfWindow, listGroups } from "../../layout/dock/tree";
 import type { WindowId } from "../../layout/kinds";
 import { useLayoutStore, windowRefs } from "../../stores/layout";
+import { touchWindowFromTarget } from "../../stores/activeWindow";
 import { useSelectionStore } from "../../stores/selection";
 import { useLadderRateShown, useUiStore } from "../../stores/ui";
 import { CanvasWorkspace } from "./CanvasWorkspace";
@@ -53,6 +54,14 @@ export function Workspace() {
   const shownCharts = useMemo(() => [...listGroups(drawn.dock.root).filter((group) => maximize.maximized === null || group.id === maximize.maximized).map((group) => group.active), ...drawn.dock.floats.map((float) => float.window)].filter((id) => windows.some((w) => w.id === id && w.kind === "chart")), [drawn.dock, windows, maximize.maximized]);
   const folded = drawn.folds > 0;
   const commitRatios = (next: DockPlacement, from: DockPlacement) => useLayoutStore.getState().setDock(carryRatios(dock, from, next));
+
+  useEffect(() => {
+    const element = root.current;
+    if (!element) return;
+    const onPointerDown = (event: PointerEvent) => touchWindowFromTarget(event.target);
+    element.addEventListener("pointerdown", onPointerDown, true);
+    return () => element.removeEventListener("pointerdown", onPointerDown, true);
+  }, []);
 
   useEffect(() => {
     if (folded) useSelectionStore.getState().showToast(FOLD_NOTICE);
