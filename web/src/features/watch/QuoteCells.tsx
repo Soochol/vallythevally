@@ -9,11 +9,12 @@ import { DIRECTION_TEXT, RateBadge } from "../list/listRow";
 
 export const quoteCellIds = (base: string, columns: readonly WatchColumn[]) => ({
   name: `${base}-name`,
-  vi: `${base}-vi`,
+  kvi: `${base}-kvi`,
+  nvi: `${base}-nvi`,
   expected: `${base}-expected`,
   limited: `${base}-limited`,
   column: (column: WatchColumn) => `${base}-${column}`,
-  labelledBy: [`${base}-name`, `${base}-vi`, ...columns.map((c) => `${base}-${c}`), `${base}-expected`, `${base}-limited`].join(" "),
+  labelledBy: [`${base}-name`, `${base}-kvi`, `${base}-nvi`, ...columns.map((c) => `${base}-${c}`), `${base}-expected`, `${base}-limited`].join(" "),
 });
 
 function cellText(column: WatchColumn, quote: Quote, isIndex: boolean): string {

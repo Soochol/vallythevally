@@ -95,7 +95,7 @@ function OrderBody({ id, code, infoPager, choice, access, balance }: { id: Windo
   }, []);
 
   const downSince = useFeedDownSince(feed.connected);
-  const vi = useSymbolVi(code);
+  const vi = useSymbolVi(code, "krx");
   const nowSeconds = Math.floor(now / 1000);
   const view = feed.book.phase === "empty" ? null : feed.book.view;
   const bounds = { lower: limits?.lowerLimit ?? null, upper: limits?.upperLimit ?? null };

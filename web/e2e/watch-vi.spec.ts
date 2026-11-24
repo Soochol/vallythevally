@@ -67,9 +67,9 @@ test("VI가 걸린 종목 이름 오른쪽에만 방향색 배지가 붙고 해�
     expect(badgeBox.x).toBeGreaterThanOrEqual(nameBox.x + nameBox.width);
   }
   expect((await box(row(page, SAMSUNG))).height).toBe(heightBefore);
-  await expect(main(page, SAMSUNG)).toHaveAccessibleName(/^삼성전자 상승 VI 71,000 /);
-  await expect(main(page, SAMSUNG_PREFERRED)).toHaveAccessibleName(/^삼성전자우 하락 VI 71,000 /);
-  await expect(main(page, HYNIX)).toHaveAccessibleName(/^SK하이닉스 VI 71,000 /);
+  await expect(main(page, SAMSUNG)).toHaveAccessibleName(/^삼성전자 상승 KVI 71,000 /);
+  await expect(main(page, SAMSUNG_PREFERRED)).toHaveAccessibleName(/^삼성전자우 하락 KVI 71,000 /);
+  await expect(main(page, HYNIX)).toHaveAccessibleName(/^SK하이닉스 KVI 71,000 /);
 
   scenario.live.emit({ type: "vi_update", state: released(SAMSUNG) });
   await expect(badge(page, SAMSUNG)).toHaveCount(0);
