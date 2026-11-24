@@ -7,6 +7,9 @@ export function ownsChartKeyboard(event: Pick<KeyboardEvent, "key" | "target">):
     || (event.key === "Escape" && (layers.length > 0 || (event.target instanceof Element && event.target.closest("[data-chart-escape-owner]") !== null)))
     || (event.target instanceof Element && event.target.closest("[popover]:popover-open") !== null);
 }
+export function ownsWorkspaceTab(target: EventTarget | null): boolean {
+  return layers.some((layer) => layer.options.blockChartKeys !== false || (target instanceof Node && layer.panel.contains(target)));
+}
 const onKey = (event: KeyboardEvent) => {
   const top = layers.at(-1);
   if (top && event.key === "Escape" && !event.isComposing) {

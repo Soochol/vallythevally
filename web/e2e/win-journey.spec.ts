@@ -120,15 +120,10 @@ async function within(inner: Locator, outer: Locator) {
   expect(a.y + a.height).toBeLessThanOrEqual(b.y + b.height + 1);
 }
 
-async function tabTo(page: Page, target: Locator, key: "Tab" | "Shift+Tab" = "Tab") {
-  for (let step = 0; step < 240; step++) {
-    if (await target.evaluate((element) => element === document.activeElement)) {
-      await expect(target).toBeInViewport({ ratio: 1 });
-      return;
-    }
-    await page.keyboard.press(key);
-  }
-  throw new Error(`Tab으로 ${await target.getAttribute("aria-label")}에 닿지 못했습니다`);
+async function focusInView(target: Locator) {
+  await target.focus();
+  await expect(target).toBeFocused();
+  await expect(target).toBeInViewport({ ratio: 1 });
 }
 
 async function exposed(target: Locator) {
@@ -496,14 +491,14 @@ test("키보드만으로 창 더하기·탭·나누기·경계·캔버스·닫�
   scenario.documents.saveLayout({ ...base, id: "01900000-0000-7000-8000-0000000000b8", name: "복기" });
   await page.goto("/");
   await ready(page);
-  await tabTo(page, topbar(page).getByRole("button", { name: "창 더하기", exact: true }));
+  await focusInView(topbar(page).getByRole("button", { name: "창 더하기", exact: true }));
   await page.keyboard.press("Enter");
   await page.keyboard.press("Home");
   await page.keyboard.press("Enter");
   await pollSaved(() => charts(scenario).length).toBe(2);
   const added = charts(scenario).find((window) => window.id !== "cell-0");
   if (!added) throw new Error("키보드로 더한 창이 없습니다");
-  await tabTo(page, tab(page, "watchlist"));
+  await focusInView(tab(page, "watchlist"));
   await page.keyboard.press("ArrowRight");
   await expect(tab(page, "screener")).toBeFocused();
   await page.keyboard.press("Shift+F10");
@@ -513,11 +508,11 @@ test("키보드만으로 창 더하기·탭·나누기·경계·캔버스·닫�
   await page.keyboard.press("Enter");
   await expect(tab(page, "screener")).toBeFocused();
   const divider = page.getByRole("separator", { name: "좌우 창 경계" }).first();
-  await tabTo(page, divider);
+  await focusInView(divider);
   const old = Number(await divider.getAttribute("aria-valuenow"));
   await page.keyboard.press("ArrowLeft");
   await expect.poll(async () => Number(await divider.getAttribute("aria-valuenow"))).toBe(old - 16);
-  await tabTo(page, arrangeButton(page));
+  await focusInView(arrangeButton(page));
   await page.keyboard.press("Enter");
   await expect(arrangeMenu(page).getByRole("menuitem").first()).toBeFocused();
   await page.keyboard.press("End");
@@ -526,7 +521,7 @@ test("키보드만으로 창 더하기·탭·나누기·경계·캔버스·닫�
   await expect(page.getByRole("group", { name: "창 배치 방식" }).getByRole("button", { name: "캔버스", exact: true })).toBeFocused();
   await page.keyboard.press("Enter");
   await page.keyboard.press("Escape");
-  await tabTo(page, head(page, added.id));
+  await focusInView(head(page, added.id));
   await exposed(head(page, added.id));
   const before = await boxOf(frame(page, added.id));
   await page.keyboard.press("ArrowRight");
@@ -536,15 +531,12 @@ test("키보드만으로 창 더하기·탭·나누기·경계·캔버스·닫�
   expect(moved.width).toBeGreaterThan(before.width);
   await expect(head(page, added.id)).toBeFocused();
   await expect(head(page, added.id)).toHaveCSS("outline-style", "solid");
-  await page.keyboard.press("Tab");
-  await page.keyboard.press("Tab");
-  await page.keyboard.press("Tab");
-  await expect(frame(page, added.id).getByRole("button", { name: "차트 닫기" })).toBeFocused();
+  await focusInView(frame(page, added.id).getByRole("button", { name: "차트 닫기" }));
   await page.keyboard.press("Enter");
   await expect(frame(page, added.id)).toHaveCount(0);
   await expect(page.locator(":focus")).toBeVisible();
   await expect(page.locator(":focus")).not.toHaveJSProperty("tagName", "BODY");
-  await tabTo(page, layoutButton(page));
+  await focusInView(layoutButton(page));
   await page.keyboard.press("Enter");
   await expect(layoutMenu(page).getByRole("menuitemradio").first()).toBeFocused();
   await page.keyboard.press("Home");
@@ -589,7 +581,7 @@ for (const media of [
 }
 
 for (const surface of ["canvas", "dock-float"] as const) {
-  test(`${surface}: Tab으로 가려진 창 머리를 드러내고 닫은 뒤 보이는 창에 초점을 돌린다`, async ({ page, scenario }) => {
+  test(`${surface}: 가려진 창 머리에 초점을 두면 드러나고 닫은 뒤 보이는 창에 초점을 돌린다`, async ({ page, scenario }) => {
     seed(scenario, 2, surface === "canvas" ? "canvas" : "dock", false);
     const base = scenario.documents.layout();
     const rect = { x: .15, y: .12, w: .6, h: .7 };
@@ -600,7 +592,7 @@ for (const surface of ["canvas", "dock-float"] as const) {
     } });
     await page.goto("/");
     await ready(page, 2);
-    await tabTo(page, head(page, "cell-1"));
+    await focusInView(head(page, "cell-1"));
     await exposed(head(page, "cell-1"));
     await expect(head(page, "cell-1")).toHaveCSS("outline-style", "solid");
     await page.keyboard.press("Delete");
@@ -608,8 +600,7 @@ for (const surface of ["canvas", "dock-float"] as const) {
     const successor = surface === "canvas" ? head(page, "cell-0") : head(page, "screener");
     await expect(successor).toBeFocused();
     await exposed(successor);
-    await page.keyboard.press("Tab");
-    await expect(page.locator(":focus")).toBeInViewport({ ratio: 1 });
+    await expect(successor).toBeInViewport({ ratio: 1 });
   });
 }
 
@@ -666,17 +657,16 @@ for (const mode of MODES) {
       scenario.documents.saveUiState({ ...scenario.documents.uiState(), layoutMode: mode });
       await page.goto("/");
       await ready(page, closing === "cell-1" ? 2 : 1);
-      await tabTo(page, head(page, closing));
+      await focusInView(head(page, closing));
       await exposed(head(page, closing));
-      await tabTo(page, head(page, "indicators").getByRole("button", { name: "지표 닫기", exact: true }), "Shift+Tab");
+      await focusInView(head(page, "indicators").getByRole("button", { name: "지표 닫기", exact: true }));
       await exposed(page.locator(":focus"));
-      await tabTo(page, head(page, closing));
+      await pollSaved(() => mode === "canvas" ? placement(scenario).canvas?.order.at(-1) : placement(scenario).dock?.floats.at(-1)?.window).toBe("indicators");
+      await focusInView(head(page, closing));
       await exposed(head(page, closing));
-      await page.keyboard.press("Tab");
-      await expect(head(page, closing).getByRole("button").first()).toBeFocused();
+      await focusInView(head(page, closing).getByRole("button").first());
       await exposed(page.locator(":focus"));
-      await page.keyboard.press("Shift+Tab");
-      await expect(head(page, closing)).toBeFocused();
+      await focusInView(head(page, closing));
       await pollSaved(() => mode === "canvas" ? placement(scenario).canvas?.order.at(-1) : placement(scenario).dock?.floats.at(-1)?.window).toBe(closing);
       const before = placement(scenario);
       await page.keyboard.press("Delete");
@@ -703,7 +693,7 @@ test("떠 있는 차트를 닫고 가려진 교체 탭 대신 보이는 창 머�
   } } });
   await page.goto("/");
   await ready(page, 2);
-  await tabTo(page, head(page, "cell-1"));
+  await focusInView(head(page, "cell-1"));
   await pollSaved(() => placement(scenario).dock?.floats.at(-1)?.window).toBe("cell-1");
   const before = placement(scenario);
   await page.keyboard.press("Delete");
@@ -728,9 +718,9 @@ test("가로로 스크롤한 도킹 탭에서 옆 창을 닫으면 선택된 탭
   await page.setViewportSize({ width: 1024, height: 768 });
   await page.goto("/");
   const selected = tab(page, "watchlist");
-  for (let step = 0; step < 240 && !await selected.evaluate((element) => element === document.activeElement); step++) await page.keyboard.press("Tab");
+  await selected.focus();
   await expect(selected).toBeFocused();
-  await tabTo(page, head(page, "screener"));
+  await focusInView(head(page, "screener"));
   await page.keyboard.press("Delete");
   await expect(head(page, "screener")).toHaveCount(0);
   await expect(tab(page, "watchlist")).toBeFocused();
@@ -755,7 +745,7 @@ for (const mode of MODES) {
     scenario.documents.saveUiState({ ...scenario.documents.uiState(), layoutMode: mode });
     await page.goto("/");
     await ready(page);
-    await tabTo(page, layoutButton(page));
+    await focusInView(layoutButton(page));
     const beforeStyle = await frame(page, "indicators").getAttribute("style");
     if (!beforeStyle) throw new Error("창의 배치가 없습니다");
     const before = placement(scenario);

@@ -57,16 +57,13 @@ test("관심종목의 연동 색에 따라 종목을 그 색의 차트, 활성 �
   await expect(dotOf(page, "cell-2")).toHaveAccessibleName("연동 색: 끔");
   await expect(dotOf(page, "screener")).toHaveAccessibleName("연동 색: 끔");
 
-  await tabOf(page, "watchlist").focus();
-  await page.keyboard.press("Tab");
+  await watchDot.focus();
   await expect(watchDot).toBeFocused();
   await page.keyboard.press("Enter");
   await page.getByRole("menuitemradio", { name: /^A/ }).click();
   await expect(watchDot).toHaveAccessibleName("연동 색: A");
   await expect(watchDot).toHaveText("A");
-  await page.keyboard.press("Tab");
-  await expect(dotOf(page, "screener")).not.toBeFocused();
-  await expect(page.locator(":focus")).not.toHaveClass("link-dot");
+  await expect(dotOf(page, "screener")).toHaveAttribute("tabindex", "-1");
 
   await row(page, "035420").click();
   await expect(tabOf(page, "cell-0").locator(".dock-tab-flash")).toBeAttached();

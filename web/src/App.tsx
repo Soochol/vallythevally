@@ -37,6 +37,7 @@ import { Toast } from "./features/toast/Toast";
 import { Topbar } from "./features/topbar/Topbar";
 import { useHotkeys } from "./features/useHotkeys";
 import { useArrangementKeys } from "./features/workspace/useArrangementKeys";
+import { useWorkspaceTabGuard } from "./features/workspace/useWorkspaceTabGuard";
 import { useOpenFromAddress } from "./features/useOpenFromAddress";
 import { useCell } from "./stores/layout";
 import { PhoneSaveBand } from "./features/status/SaveStatus";
@@ -85,6 +86,7 @@ function ChartScreen({ page }: { page: PageId }) {
   useHiddenWorkspaceKeys(!onWorkspace);
   useHotkeys(onWorkspace);
   useArrangementKeys(onWorkspace);
+  useWorkspaceTabGuard(onWorkspace && desktop);
   useEffect(() => {
     const { loginFailure, showLoginFailure } = useAccountStore.getState();
     if (loginFailure === null) return;

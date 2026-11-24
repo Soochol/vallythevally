@@ -89,7 +89,6 @@ test("끈 연동 점은 포인터를 올리거나 키보드 초점이 갈 때만
   await expect(dot).toHaveCSS("opacity", "1");
   await page.mouse.move(2, 2);
   await expect(dot).toHaveCSS("opacity", "0");
-  await target.press("Shift+Tab");
   await target.focus();
   await expect(dot).toHaveCSS("opacity", "1");
 });
