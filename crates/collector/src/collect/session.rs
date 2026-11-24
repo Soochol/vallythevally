@@ -26,6 +26,7 @@ use super::registry::{Chunk, Registry};
 use super::ws::{Connector, Socket};
 use crate::protocol::{Command, ProtocolError, Rejection, SessionState};
 use crate::raw_write::RawLine;
+use crate::shared::flow::FlowFeed;
 use crate::shared::minute::MinuteFeed;
 
 pub trait WallClock: Send + Sync {
@@ -410,6 +411,7 @@ pub struct SessionParts {
     pub shutdown: watch::Receiver<bool>,
     pub child: Option<ChildLink>,
     pub minutes: Option<MinuteFeed>,
+    pub flow: Option<FlowFeed>,
 }
 
 pub struct Session {
@@ -425,6 +427,7 @@ pub struct Session {
     events: Events,
     state: watch::Sender<SessionState>,
     minutes: Option<MinuteFeed>,
+    flow: Option<FlowFeed>,
     halt_on_rejected_register: bool,
     gap: Gap,
     attempt: u32,
@@ -456,6 +459,7 @@ impl Session {
             events,
             state,
             minutes: parts.minutes,
+            flow: parts.flow,
             halt_on_rejected_register,
             gap: Gap::Unknown,
             attempt: 0,
@@ -581,6 +585,9 @@ impl Session {
     fn write_down(&mut self, reason: &str) -> Result<(), Exit> {
         self.events.down(reason);
         let recv_ms = self.wall_clock.now_ms();
+        if let Some(flow) = &self.flow {
+            flow.link(recv_ms, false);
+        }
         self.out.write_event(&RawLine::Down { recv_ms, reason })?;
         Ok(())
     }
@@ -673,6 +680,9 @@ impl Session {
         }
         let recv_ms = self.wall_clock.now_ms();
         self.out.write_event(&RawLine::Live { recv_ms })?;
+        if let Some(flow) = &self.flow {
+            flow.link(recv_ms, true);
+        }
         self.gap = Gap::Up;
         self.tokens.confirmed();
         self.live_since = Some(Instant::now());
@@ -822,6 +832,9 @@ impl Session {
                 self.out.write_frame(recv_ms, text)?;
                 if let Some(minutes) = &self.minutes {
                     minutes.offer(recv_ms, bytes);
+                }
+                if let Some(flow) = &self.flow {
+                    flow.offer(recv_ms, bytes);
                 }
                 self.report_market_hours(text, recv_ms);
             }

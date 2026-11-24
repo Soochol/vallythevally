@@ -438,7 +438,11 @@ impl Daemon {
         if let Some(note) = self.finalizer.priority_note() {
             self.reporter.alert(AlertKind::StageFailed, format!("정리: {note}"));
         }
-        let arguments = super::finalize_arguments(&self.data_dir, date, &self.schedule);
+        let mut arguments = super::finalize_arguments(&self.data_dir, date, &self.schedule);
+        if self.shared_dir != self.data_dir.join("shared") {
+            arguments.push("--shared".to_owned());
+            arguments.push(self.shared_dir.to_string_lossy().into_owned());
+        }
         let finalizer = self.finalizer.clone();
         let outcome = stoppable(shutdown, async move { finalizer.run(arguments).await }).await.map_err(|_| DayEnd::Stopped)?;
         match outcome {

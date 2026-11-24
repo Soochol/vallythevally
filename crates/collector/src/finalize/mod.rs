@@ -44,7 +44,7 @@ const TEMPORARY_SUFFIX: &str = ".tmp";
 const SPILL_FOLDER: &str = ".spill";
 
 const SPEC: ArgSpec = ArgSpec {
-    value_options: &["date", "threads", "buckets", "keep-early", "keep", "early-period"],
+    value_options: &["date", "threads", "buckets", "keep-early", "keep", "early-period", "shared"],
     flag_options: &["verify-only", "prune"],
 };
 
@@ -73,14 +73,14 @@ pub fn temporary_store_dir(data_dir: &Path, date: u32) -> PathBuf {
 }
 
 pub fn run(raw_arguments: &[String]) -> ExitCode {
-    let (options, prune) = match parse_command(raw_arguments) {
+    let (options, prune, shared_dir) = match parse_command(raw_arguments) {
         Ok(parsed) => parsed,
         Err(message) => {
             eprintln!("finalize: {message}");
             return ExitCode::from(2);
         }
     };
-    match finalize_day(&options) {
+    match finalize_day_with_shared(&options, &shared_dir) {
         Ok(report) => {
             println!(
                 "finalize: {} 정리 {}줄, 제어 {}줄, 정리 못 함 {}줄, 원문 대조 {}",
@@ -137,18 +137,20 @@ fn prune_after_finalize(options: &Options, settings: &RetentionSettings) -> Exit
     }
 }
 
-fn parse_command(raw_arguments: &[String]) -> Result<(Options, Option<RetentionSettings>), String> {
+fn parse_command(raw_arguments: &[String]) -> Result<(Options, Option<RetentionSettings>, PathBuf), String> {
     let arguments = Arguments::parse(raw_arguments, &SPEC).map_err(|error| error.to_string())?;
     let date = arguments.value("date").ok_or("--date YYYYMMDD가 필요합니다")?;
+    let data_dir = arguments.data_dir();
+    let shared_dir = arguments.value("shared").map_or_else(|| data_dir.join("shared"), PathBuf::from);
     let options = Options {
-        data_dir: arguments.data_dir(),
+        data_dir,
         date: parse_date(date)?,
         threads: bounded(&arguments, "threads", DEFAULT_THREADS, MAX_THREADS)?,
         buckets: bounded(&arguments, "buckets", DEFAULT_BUCKETS, MAX_BUCKETS)?,
         verify_only: arguments.flag("verify-only"),
         spill_budget_bytes: DEFAULT_SPILL_BUDGET_BYTES,
     };
-    Ok((options, parse_retention(&arguments)?))
+    Ok((options, parse_retention(&arguments)?, shared_dir))
 }
 
 fn parse_retention(arguments: &Arguments) -> Result<Option<RetentionSettings>, String> {
@@ -168,6 +170,10 @@ fn bounded(arguments: &Arguments, name: &str, default: usize, max: usize) -> Res
 }
 
 pub fn finalize_day(options: &Options) -> io::Result<VerifyReport> {
+    finalize_day_with_shared(options, &options.data_dir.join("shared"))
+}
+
+pub fn finalize_day_with_shared(options: &Options, shared_dir: &Path) -> io::Result<VerifyReport> {
     if options.verify_only {
         let tally = tally_day(options)?;
         let temporary = temporary_store_dir(&options.data_dir, options.date);
@@ -182,7 +188,11 @@ pub fn finalize_day(options: &Options) -> io::Result<VerifyReport> {
     let raw_files = RawFiles::of_day(&options.data_dir, options.date)?;
     let written = write_store(options)?;
     let report = verify_store(&written.store_dir, options.date, options.buckets, options.threads, &written.tally)?;
-    seal_day(options, &report, raw_files)?;
+    if seal_day(options, &report, raw_files)?
+        && let Err(error) = crate::shared::flow::remove_finished_days(shared_dir, &options.data_dir)
+    {
+        tracing::warn!(%error, shared_dir = %shared_dir.display(), "지난 종목 흐름 폴더를 지우지 못했습니다");
+    }
     Ok(report)
 }
 

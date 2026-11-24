@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 
 mod assignment;
 pub mod child;
+pub mod flow;
 mod job;
 pub mod minute;
 mod overview;

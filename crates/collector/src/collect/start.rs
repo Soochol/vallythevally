@@ -65,6 +65,7 @@ pub async fn execute(
         shutdown,
         child: None,
         minutes: None,
+        flow: None,
     });
     let finish = session.run().await;
     drop(lock);
