@@ -22,6 +22,7 @@ use crate::supervise::journal::{JournalEvent, has_event, journal_path};
 use crate::supervise::shared::{SharedInjected, SharedInputs, SharedSupervisor};
 use crate::supervise::settings::{MarketOpenCheck, Settings};
 use crate::supervise::status::{AlertKind, DayPhase, ObservationDay, ObservationVerdict};
+use crate::turnover::{TurnoverFile, collect_turnover, latest_turnover, turnover_path};
 use crate::universe::{Morning, UniverseFile, after_close_path, collect_after_close, collect_morning, read_universe_if_present};
 
 const FINALIZE_RETRY_NOTE: &str = "같은 날 안에는 다시 하지 않고, 다음 정리 기회(다음 날 시작이나 다음 데몬 시작)에 정리가 안 끝난 날로 다시 시도합니다";
@@ -192,13 +193,32 @@ impl Daemon {
         let universe = universe.ok_or_else(|| Halt::Failed("종목 목록이 없어 계획을 세울 수 없습니다".to_owned()))?;
         let identities: Vec<_> = self.keys.iter().map(|key| key.identity.clone()).collect();
         let previous_messages = self.previous_messages(day);
-        let plan = build_plan(&PlanInput { date: day.date, created_at: kst_of(self.clock.now()), keys: &identities, universe, previous_messages: &previous_messages })
-            .map_err(|error| failed(&error))?;
+        let turnover = self.recent_turnover(day);
+        let plan = build_plan(&PlanInput {
+            date: day.date,
+            created_at: kst_of(self.clock.now()),
+            keys: &identities,
+            universe,
+            previous_messages: &previous_messages,
+            turnover: turnover.as_ref().map(|file| &file.traded_million_won),
+        })
+        .map_err(|error| failed(&error))?;
         match write_plan(&self.data_dir, &plan) {
             Ok(()) => Ok(plan),
             Err(crate::plan::PlanError::AlreadyExists { .. }) => load_plan(&self.data_dir, day.date).map_err(|error| failed(&error)),
             Err(error) => Err(failed(&error)),
         }
+    }
+
+    fn recent_turnover(&self, day: &DayRun) -> Option<TurnoverFile> {
+        let oldest = day
+            .calendar
+            .as_ref()
+            .zip(Day::from_yyyymmdd(day.date))
+            .and_then(|(calendar, today)| calendar.observation_days_before(today, 3).ok())
+            .map(Day::yyyymmdd)
+            .unwrap_or(0);
+        latest_turnover(&self.data_dir, oldest, day.date)
     }
 
     fn previous_messages(&self, day: &DayRun) -> BTreeMap<String, u64> {
@@ -285,6 +305,8 @@ impl Daemon {
 
     pub(super) async fn after_close(&mut self, day: &mut DayRun, shutdown: &mut watch::Receiver<bool>) -> Result<(), DayEnd> {
         self.after_close_rest(day, shutdown).await?;
+        let turnover = self.after_close_turnover(day, shutdown).await;
+        self.soft("거래대금", turnover)?;
         self.reissue_tokens(day, shutdown).await
     }
 
@@ -295,6 +317,20 @@ impl Daemon {
         self.soft("마감 뒤 목록", listed)?;
         let checked = self.index_check(&session, day, shutdown).await;
         self.soft("지수 일봉 대조", checked)?;
+        Ok(())
+    }
+
+    async fn after_close_turnover(&self, day: &DayRun, shutdown: &mut watch::Receiver<bool>) -> StageResult<()> {
+        if turnover_path(&self.data_dir, day.date).is_file() {
+            return Ok(());
+        }
+        let universe = read_universe_if_present(&self.data_dir, day.date)
+            .map_err(|error| Halt::Failed(error.to_string()))?
+            .ok_or_else(|| Halt::Failed(format!("{} 종목 목록이 없습니다", day.date)))?;
+        let codes: Vec<String> = universe.stocks.into_iter().map(|entry| entry.code).collect();
+        let session = self.open_rest(shutdown).await?;
+        let collected = collect_turnover(session.rest(), &self.data_dir, day.date, kst_of(self.clock.now()), &codes);
+        stoppable(shutdown, collected).await?.map_err(|error| Halt::Failed(error.to_string()))?;
         Ok(())
     }
 
