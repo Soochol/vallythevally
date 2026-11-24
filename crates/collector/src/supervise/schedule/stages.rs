@@ -211,13 +211,13 @@ impl Daemon {
     }
 
     fn recent_turnover(&self, day: &DayRun) -> Option<TurnoverFile> {
+        let today = Day::from_yyyymmdd(day.date)?;
         let oldest = day
             .calendar
             .as_ref()
-            .zip(Day::from_yyyymmdd(day.date))
-            .and_then(|(calendar, today)| calendar.observation_days_before(today, 3).ok())
-            .map(Day::yyyymmdd)
-            .unwrap_or(0);
+            .and_then(|calendar| calendar.observation_days_before(today, 3).ok())
+            .unwrap_or_else(|| today.plus_days(-10))
+            .yyyymmdd();
         latest_turnover(&self.data_dir, oldest, day.date)
     }
 

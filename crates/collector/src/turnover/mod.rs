@@ -30,6 +30,7 @@ pub struct TurnoverFile {
 pub enum TurnoverError {
     Fetch { detail: String },
     NoRowsForDate { date: u32 },
+    TooFewRows { date: u32, received: usize, requested: usize },
     Write { path: PathBuf, cause: io::Error },
 }
 
@@ -38,6 +39,9 @@ impl fmt::Display for TurnoverError {
         match self {
             TurnoverError::Fetch { detail } => write!(formatter, "거래대금을 받지 못했습니다: {detail}"),
             TurnoverError::NoRowsForDate { date } => write!(formatter, "{date} 거래대금 행이 하나도 없습니다"),
+            TurnoverError::TooFewRows { date, received, requested } => {
+                write!(formatter, "{date} 거래대금 응답이 요청 {requested}종목 중 {received}종목뿐입니다")
+            }
             TurnoverError::Write { path, cause } => write!(formatter, "{}를 쓸 수 없습니다: {cause}", path.display()),
         }
     }
@@ -69,6 +73,9 @@ pub async fn collect_turnover(
     }
     if traded_million_won.is_empty() {
         return Err(TurnoverError::NoRowsForDate { date });
+    }
+    if traded_million_won.len() * 2 < stock_codes.len() {
+        return Err(TurnoverError::TooFewRows { date, received: traded_million_won.len(), requested: stock_codes.len() });
     }
     let file = TurnoverFile { format_version: FORMAT_VERSION, date, fetched_at: kst_stamp(now), traded_million_won };
     let path = turnover_path(data_dir, date);
@@ -120,7 +127,7 @@ fn parse_amount(text: &str) -> Option<u64> {
 fn read_turnover(data_dir: &Path, date: u32) -> Option<TurnoverFile> {
     let bytes = fs::read(turnover_path(data_dir, date)).ok()?;
     let file: TurnoverFile = serde_json::from_slice(&bytes).ok()?;
-    (file.format_version == FORMAT_VERSION && file.date == date).then_some(file)
+    (file.format_version == FORMAT_VERSION && file.date == date && !file.traded_million_won.is_empty()).then_some(file)
 }
 
 fn date_of_name(name: &str) -> Option<u32> {
