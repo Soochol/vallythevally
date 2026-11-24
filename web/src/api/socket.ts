@@ -24,6 +24,8 @@ export type FeedEvent =
   | Extract<ServerMessage, { type: "feed_subscribed" | "feed_trades" | "feed_book" | "feed_after_hours" | "feed_program" | "feed_brokers" | "feed_link" | "sub_error" }>
   | { type: "resync" };
 
+export type ViEvent = Extract<ServerMessage, { type: "vi_snapshot" | "vi_update" }>;
+
 export interface FeedRequest {
   symbol: SymbolCode;
   kind: FeedKind;
@@ -105,6 +107,7 @@ export class MarketSocket implements MarketSocketLike {
   private watchSymbols: SymbolCode[] = [];
   private watchVenue: Venue = "combined";
   private readonly quoteHandlers = new Set<(e: QuoteEvent) => void>();
+  private readonly viHandlers = new Set<(e: ViEvent) => void>();
   private readonly tradingAccountHandlers = new Set<(accountRef: string) => void>();
 
   constructor(private readonly opts: { url: () => string; connect?: Connect; onKiwoomLink?: (status: KiwoomLinkStatus) => void; onMarketSource?: (status: MarketSourceStatus) => void; onAccount?: (status: AccountStatus) => void; onSetupChanged?: (kinds: readonly DocumentKind[]) => void; onCollectorDaemon?: (judgment: DaemonJudgment, at: UnixSeconds) => void }) {}
@@ -158,6 +161,11 @@ export class MarketSocket implements MarketSocketLike {
   onQuotes(handler: (e: QuoteEvent) => void): () => void {
     this.quoteHandlers.add(handler);
     return () => this.quoteHandlers.delete(handler);
+  }
+
+  onVi(handler: (e: ViEvent) => void): () => void {
+    this.viHandlers.add(handler);
+    return () => this.viHandlers.delete(handler);
   }
 
   watchTradingAccount(handler: (accountRef: string) => void): () => void {
@@ -220,6 +228,9 @@ export class MarketSocket implements MarketSocketLike {
       case "quotes":
       case "watch_limited":
         return this.emitQuotes(m);
+      case "vi_snapshot":
+      case "vi_update":
+        return this.emitVi(m);
       case "kiwoom_link":
         return this.opts.onKiwoomLink?.(m.status);
       case "market_source":
@@ -257,6 +268,10 @@ export class MarketSocket implements MarketSocketLike {
 
   private emitQuotes(e: QuoteEvent): void {
     for (const h of this.quoteHandlers) h(e);
+  }
+
+  private emitVi(e: ViEvent): void {
+    for (const h of this.viHandlers) h(e);
   }
 
   private sendSubscribe(sub: string, key: SeriesKey): void {
