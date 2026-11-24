@@ -1,5 +1,7 @@
 import type { IndicatorSpec } from "./indicators/kinds";
+import type { QuoteDepthSource } from "../api/generated/QuoteDepthSource";
 import type { SymbolCode } from "../api/generated/SymbolCode";
+import { isHexColor, type HexColor } from "../lib/colors";
 import { isIndicatorColor, type IndicatorColor, KINDS, type Placement, placementOf, placementsOf } from "./indicators/kinds";
 
 export type ChartStyle = "candle" | "bar" | "line" | "area";
@@ -103,6 +105,10 @@ const isEmptyArray = (x: unknown): x is never[] => Array.isArray(x) && x.length 
 const isRecord = (x: unknown): x is Record<string, unknown> => typeof x === "object" && x !== null && !Array.isArray(x);
 const isNum = (x: unknown): x is number => typeof x === "number" && Number.isFinite(x);
 const isNumOrNull = (x: unknown): x is number | null => x === null || isNum(x);
+const QUOTE_DEPTH_SOURCES = ["priceMax", "peak", "close"] as const satisfies readonly QuoteDepthSource[];
+const isTopLevels = (x: unknown): x is number | null => x === null || (typeof x === "number" && Number.isInteger(x) && x >= 1 && x <= 5);
+const isDepthOpacity = (x: unknown): x is number => isNum(x) && x >= 0.2 && x <= 1;
+const isHexOrNull = (x: unknown): x is HexColor | null => x === null || isHexColor(x);
 
 export function parseChartSettings(raw: unknown): ChartSettings {
   const parsed = readChartSettings(raw);
@@ -174,6 +180,15 @@ export function readSpecShape(raw: unknown): IndicatorSpec | null {
     case "dps":
     case "debt_ratio":
       return { kind: raw.kind };
+    case "quoteDepth":
+      return isOneOf(QUOTE_DEPTH_SOURCES, r.source)
+        && isTopLevels(r.topLevels)
+        && isDepthOpacity(r.maxOpacity)
+        && typeof r.aboveBars === "boolean"
+        && isHexOrNull(r.askColor)
+        && isHexOrNull(r.bidColor)
+        ? { kind: "quoteDepth", source: r.source, topLevels: r.topLevels, maxOpacity: r.maxOpacity, aboveBars: r.aboveBars, askColor: r.askColor, bidColor: r.bidColor }
+        : null;
     case "ma":
       return (r.method === "sma" || r.method === "ema") && isNum(r.period) ? { kind: "ma", method: r.method, period: r.period } : null;
     case "bollinger":
