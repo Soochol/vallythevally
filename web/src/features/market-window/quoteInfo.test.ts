@@ -1,81 +1,51 @@
 import { expect, test } from "vitest";
 import { buildLadder } from "./ladder";
-import { expectedInfoItems, expectedItemsOnPage, infoCardRows, type InfoLine, otherInfoPage, placeInfoItems, quoteInfoItems } from "./quoteInfo";
+import { expectedInfoItems, expectedItemsOnPage, infoCardRows, type InfoLine, otherInfoPage, placeInfoItems, quoteInfoItems, toggleInfoKey } from "./quoteInfo";
 
 const known = {
   price: 70_300,
   previousClose: 70_000,
   summary: { open: 70_100, high: 71_000, low: 69_000, volume: 1_234_567, tradeValueWon: 1_010_300_000_000 },
-  fundamentals: { upperLimit: 91_000, lowerLimit: 49_000, high52w: 88_000, low52w: 51_000, marketCap: 82_400_000_000, per: 14.2104, pbr: 1.1, foreignExhaustionRate: 54.123 },
+  fundamentals: { upperLimit: 91_000, lowerLimit: 49_000, marketCap: 82_400_000_000 },
 };
 const none = { price: null, previousClose: null, summary: null, fundamentals: null };
 
-const items = (lines: readonly InfoLine[]) => lines.flatMap((line) => (line.kind === "item" ? [line.item] : []));
-const shape = (lines: readonly InfoLine[]) => lines.map((line) => (line.kind === "item" ? line.item.label : line.kind));
+const items = (lines: readonly InfoLine[]) => lines.map((line) => line.item);
+const shape = (lines: readonly InfoLine[]) => lines.map((line) => line.item.label);
 
-test("시세 쪽은 시가·고가·저가, 당일 범위 막대, 기준가·전일대비·거래량·거래대금 순이고 전일대비에 등락률이 붙는다", () => {
+test("시세 쪽은 시가·고가·저가·기준가·거래량·거래대금 순이다", () => {
   const lines = quoteInfoItems(0, known);
-  expect(shape(lines)).toEqual(["시가", "고가", "저가", "range", "기준가", "전일대비", "거래량", "거래대금"]);
-  expect(items(lines).map((item) => item.value)).toEqual(["70,100", "71,000", "69,000", "70,000", "+300 +0.43%", "123만", "1조 103억"]);
-  expect(lines[3]).toEqual({ kind: "range", key: "dayRange", label: "당일 범위", position: (70_300 - 69_000) / 2_000 });
+  expect(shape(lines)).toEqual(["시가", "고가", "저가", "기준가", "거래량", "거래대금"]);
+  expect(items(lines).map((item) => item.value)).toEqual(["70,100", "71,000", "69,000", "70,000", "123만", "1조 103억"]);
 });
 
-test("종목 쪽은 상한가·하한가, 52주 범위 막대와 양 끝 값, 시가총액, PER·PBR 한 줄, 외국인소진율 순이다", () => {
+test("종목 쪽은 상한가·하한가·시가총액 순이다", () => {
   const lines = quoteInfoItems(1, known);
-  expect(shape(lines)).toEqual(["상한가", "하한가", "range", "ends", "시가총액", "PER·PBR", "외국인소진율"]);
-  expect(items(lines).map((item) => item.value)).toEqual(["91,000", "49,000", "824억", "14.21·1.10", "54.12%"]);
-  expect(lines[2]).toEqual({ kind: "range", key: "range52", label: "52주 범위", position: (70_300 - 51_000) / 37_000 });
-  expect(lines[3]).toEqual({ kind: "ends", key: "range52", low: "51,000", high: "88,000" });
+  expect(shape(lines)).toEqual(["상한가", "하한가", "시가총액"]);
+  expect(items(lines).map((item) => item.value)).toEqual(["91,000", "49,000", "824억"]);
 });
 
-test("시가·고가·저가·전일대비와 상한가·하한가는 기준가 대비 색이고 나머지는 색이 없다", () => {
-  expect(items(quoteInfoItems(0, known)).map((item) => item.tone)).toEqual(["up", "up", "down", null, "up", null, null]);
-  expect(items(quoteInfoItems(1, known)).map((item) => item.tone)).toEqual(["up", "down", null, null, null]);
-  expect(items(quoteInfoItems(0, { ...known, price: 69_000 }))[4]!.tone).toBe("down");
-  expect(items(quoteInfoItems(0, { ...known, price: 70_000 }))[4]).toEqual({ label: "전일대비", value: "0 0.00%", tone: null });
+test("시가·고가·저가와 상한가·하한가는 기준가 대비 색이고 나머지는 색이 없다", () => {
+  expect(items(quoteInfoItems(0, known)).map((item) => item.tone)).toEqual(["up", "up", "down", null, null, null]);
+  expect(items(quoteInfoItems(1, known)).map((item) => item.tone)).toEqual(["up", "down", null]);
 });
 
-test("전일대비는 오르내릴 때만 색 띠가 붙는다", () => {
-  const band = (price: number) => items(quoteInfoItems(0, { ...known, price }))[4]!.band;
-  expect([band(70_300), band(69_000), band(70_000)]).toEqual([true, true, undefined]);
-});
-
-test("기준가를 모르면 값은 보이되 색은 없고 전일대비는 대시다", () => {
+test("기준가를 모르면 값은 보이되 색은 없다", () => {
   const lines = items(quoteInfoItems(0, { ...known, previousClose: null }));
-  expect(lines.map((item) => item.value)).toEqual(["70,100", "71,000", "69,000", "-", "-", "123만", "1조 103억"]);
-  expect(lines.map((item) => item.tone)).toEqual([null, null, null, null, null, null, null]);
-  expect(items(quoteInfoItems(1, { ...known, previousClose: null })).map((item) => item.tone)).toEqual([null, null, null, null, null]);
+  expect(lines.map((item) => item.value)).toEqual(["70,100", "71,000", "69,000", "-", "123만", "1조 103억"]);
+  expect(lines.map((item) => item.tone)).toEqual([null, null, null, null, null, null]);
+  expect(items(quoteInfoItems(1, { ...known, previousClose: null })).map((item) => item.tone)).toEqual([null, null, null]);
 });
 
-test("모르는 값은 두 쪽 모두 대시이고 범위 막대는 없다", () => {
-  expect(quoteInfoItems(0, none).map((line) => line.kind)).toEqual(Array(7).fill("item"));
-  expect(items(quoteInfoItems(0, none)).map((item) => item.value)).toEqual(["-", "-", "-", "-", "-", "-", "-"]);
-  expect(quoteInfoItems(1, none).map((line) => line.kind)).toEqual(Array(6).fill("item"));
-  expect(items(quoteInfoItems(1, none)).map((item) => item.value)).toEqual(["-", "-", "-", "-", "-", "-"]);
-});
-
-test("PER과 PBR 중 하나만 모르면 그 자리만 대시다", () => {
-  const per = (value: number | null, pbr: number | null) => items(quoteInfoItems(1, { ...known, fundamentals: { ...known.fundamentals, per: value, pbr } }))[3]!.value;
-  expect([per(14.2104, null), per(null, 1.1)]).toEqual(["14.21·-", "-·1.10"]);
-});
-
-test("당일 범위 막대는 고가·저가가 모두 있을 때만 있고 현재가 위치는 (현재가−저가)/(고가−저가)다", () => {
-  const position = (summary: { high?: number | null; low?: number | null }, price: number | null = 70_300) => {
-    const line = quoteInfoItems(0, { ...known, price, summary: { ...known.summary, ...summary } as typeof known.summary }).find((entry) => entry.kind === "range");
-    return line?.kind === "range" ? line.position : "none";
-  };
-  expect(position({})).toBeCloseTo(0.65);
-  expect(position({ high: null })).toBe("none");
-  expect(position({ low: null })).toBe("none");
-  expect(position({ high: 68_000 })).toBe("none");
-  expect(position({}, null)).toBeNull();
-  expect(position({}, 72_000)).toBe(1);
-  expect(position({}, 60_000)).toBe(0);
-  expect(position({ high: 70_000, low: 70_000 }, 70_000)).toBe(0.5);
+test("모르는 값은 두 쪽 모두 대시다", () => {
+  expect(quoteInfoItems(0, none).map((line) => line.kind)).toEqual(Array(6).fill("item"));
+  expect(items(quoteInfoItems(0, none)).map((item) => item.value)).toEqual(["-", "-", "-", "-", "-", "-"]);
+  expect(quoteInfoItems(1, none).map((line) => line.kind)).toEqual(Array(3).fill("item"));
+  expect(items(quoteInfoItems(1, none)).map((item) => item.value)).toEqual(["-", "-", "-"]);
 });
 
 test("거래대금과 시가총액은 조·억·만 순으로 줄이고 1만 미만은 원이다", () => {
-  const traded = (tradeValueWon: number) => items(quoteInfoItems(0, { ...none, summary: { ...known.summary, tradeValueWon } }))[6]!.value;
+  const traded = (tradeValueWon: number) => items(quoteInfoItems(0, { ...none, summary: { ...known.summary, tradeValueWon } }))[5]!.value;
   expect([2_000_000_000_000, 1_000_010_300_000_000, 82_400_000_000, 100_000_000, 52_300_000, 9_999].map(traded)).toEqual(["2조", "1,000조 103억", "824억", "1억", "5,230만", "9,999원"]);
 });
 
@@ -106,23 +76,23 @@ test("예상체결 두 항목은 경고색이다", () => {
   ]);
 });
 
-test("카드는 사다리 1~9행 자리이고 매수 잔량이 있는 첫 행 위까지만 쓴다", () => {
-  expect(infoCardRows(rowsWithBidAt())).toBe(9);
+test("카드는 사다리 1~10행 자리이고 매수 잔량이 있는 첫 행 위까지만 쓴다", () => {
+  expect(infoCardRows(rowsWithBidAt())).toBe(10);
   expect(infoCardRows(rowsWithBidAt(8))).toBe(7);
   expect(infoCardRows(rowsWithBidAt(1))).toBe(0);
   expect(infoCardRows(rowsWithBidAt(6, 7, 8))).toBe(5);
 });
 
-test("예상체결이 없으면 탭 줄을 뺀 8줄 자리에 시세 쪽이 다 들어간다", () => {
-  expect(shape(placeInfoItems(rowsWithBidAt(), base, []))).toEqual(["시가", "고가", "저가", "range", "기준가", "전일대비", "거래량", "거래대금"]);
+test("예상체결이 없으면 탭 줄을 뺀 9줄 자리에 시세 쪽이 다 들어간다", () => {
+  expect(shape(placeInfoItems(rowsWithBidAt(), base, []))).toEqual(["시가", "고가", "저가", "기준가", "거래량", "거래대금"]);
 });
 
-test("예상체결이 있으면 카드 맨 아래 두 줄에 놓이고 그 앞 줄이 밀려난다", () => {
-  expect(shape(placeInfoItems(rowsWithBidAt(), base, expectedItems))).toEqual(["시가", "고가", "저가", "range", "기준가", "전일대비", "예상체결가", "예상체결량"]);
+test("예상체결이 있으면 시세 쪽 아래 두 줄에 놓인다", () => {
+  expect(shape(placeInfoItems(rowsWithBidAt(), base, expectedItems))).toEqual(["시가", "고가", "저가", "기준가", "거래량", "거래대금", "예상체결가", "예상체결량"]);
 });
 
 test("8행에 매수 잔량이 있으면 카드가 7행으로 줄어 예상체결 두 줄이 그 위 끝에 온다", () => {
-  expect(shape(placeInfoItems(rowsWithBidAt(8), base, expectedItems))).toEqual(["시가", "고가", "저가", "range", "예상체결가", "예상체결량"]);
+  expect(shape(placeInfoItems(rowsWithBidAt(8), base, expectedItems))).toEqual(["시가", "고가", "저가", "기준가", "예상체결가", "예상체결량"]);
 });
 
 test("6행에 매수 잔량이 있으면 카드가 5행이라 시세 두 줄과 예상체결 두 줄만 남는다", () => {
@@ -155,14 +125,13 @@ test("예상체결가는 바꾸면 기준가 대비 예상 등락이고 예상�
   expect(placed.at(-1)).toEqual({ kind: "item", item: { label: "예상체결량", value: "3,279", tone: "warning" } });
 });
 
-test("바꾼 칸의 세부 규칙: 시가대비는 색띠가 없고 52주 끝값에 툴팁이 붙으며 EPS·BPS는 하나만 몰라도 나머지를 보인다", () => {
-  const flippedChange = quoteInfoItems(0, known, new Set(["change"])).find((line) => line.key === "change");
-  expect(flippedChange).toEqual({ kind: "item", key: "change", flipped: true, item: { label: "시가대비", value: "+0.29%", tone: "up" } });
-  const ends = quoteInfoItems(1, known, new Set(["range52"])).find((line) => line.kind === "ends");
-  expect(ends).toEqual({ kind: "ends", key: "range52", flipped: true, low: "+37.84%", high: "−20.11%", lowTitle: "저점 대비", highTitle: "고점 대비" });
-  const epsOnly = items(quoteInfoItems(1, { ...known, fundamentals: { ...known.fundamentals, eps: -1_200, bps: null } }, new Set(["per"])))[3]!.value;
-  const bpsOnly = items(quoteInfoItems(1, { ...known, fundamentals: { ...known.fundamentals, eps: null, bps: 63_636 } }, new Set(["per"])))[3]!.value;
-  expect([epsOnly, bpsOnly]).toEqual(["−1,200·-", "-·63,636"]);
+test("거래량이 0이면 평균가는 대시고 시가·고가·저가 토글은 셋을 함께 바꾸며 다른 칸은 자기만 바꾼다", () => {
   const zeroVolume = quoteInfoItems(0, { ...known, summary: { ...known.summary, volume: 0 } }, new Set(["base"])).find((line) => line.key === "base");
   expect(zeroVolume).toEqual({ kind: "item", key: "base", flipped: true, item: { label: "평균가", value: "-", tone: null } });
+  const afterHigh = toggleInfoKey(new Set(), "high");
+  expect([...afterHigh].sort()).toEqual(["high", "low", "open"]);
+  const afterBase = toggleInfoKey(afterHigh, "base");
+  expect([...afterBase].sort()).toEqual(["base", "high", "low", "open"]);
+  const afterLow = toggleInfoKey(afterBase, "low");
+  expect([...afterLow]).toEqual(["base"]);
 });

@@ -7,7 +7,7 @@ import { daySummaryQuery } from "../../api/userData";
 import { marketSocket } from "../../stores/realtime";
 import type { LastTrade, TradeRow } from "../trades/tape";
 import { useTradeTape } from "../trades/useTradeTape";
-import { type InfoKey, type InfoLine, type InfoPage, quoteInfoItems } from "./quoteInfo";
+import { type InfoKey, type InfoLine, type InfoPage, quoteInfoItems, toggleInfoKey } from "./quoteInfo";
 import { tradeRows } from "./recentTrades";
 
 const HISTORY_PAGES = 1;
@@ -39,12 +39,7 @@ export function useInfoPager(): InfoPager {
   const [page, setPage] = useState<InfoPage>(0);
   const [flipped, setFlipped] = useState<ReadonlySet<InfoKey>>(() => new Set());
   const toggle = useCallback((key: InfoKey) => {
-    setFlipped((previous) => {
-      const next = new Set(previous);
-      if (next.has(key)) next.delete(key);
-      else next.add(key);
-      return next;
-    });
+    setFlipped((previous) => toggleInfoKey(previous, key));
   }, []);
   return { page, select: setPage, flipped, toggle };
 }

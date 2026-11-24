@@ -47,29 +47,22 @@
 .mw-card { box-sizing:border-box; display:flex; flex-direction:column; min-width:0; overflow:hidden; border-left:var(--size-1) solid var(--line-strong); background:var(--surface); font-size:var(--size-11); white-space:nowrap; user-select:none; }
 .mw-card > * { flex:none; height:var(--size-24); }
 @container (width < 110px) { .od-ladder .mw-card { display:none; } }
-.mw-card-dots { display:flex; align-items:center; justify-content:center; gap:var(--size-2); margin-top:auto; min-height:0; }
-.mw-card-dots button { display:inline-flex; align-items:center; justify-content:center; width:var(--size-14); height:var(--size-20); padding:0; border-radius:var(--r-s); }
+.mw-card-dots { display:flex; align-items:center; justify-content:center; gap:var(--size-2); margin-top:auto; min-height:0; cursor:pointer; }
+.mw-card-dots:hover { background:var(--hover); }
+.mw-card-dots button { display:inline-flex; align-items:center; justify-content:center; width:var(--size-14); height:var(--size-20); padding:0; border-radius:var(--r-s); cursor:pointer; }
 .mw-card-dots button::before { content:""; width:var(--size-6); height:var(--size-6); border-radius:50%; background:var(--line-strong); }
-.mw-card-dots button:hover::before { background:var(--text-3); }
+.mw-card-dots:hover button::before, .mw-card-dots button:hover::before { background:var(--text-3); }
 .mw-card-dots button[aria-selected=true]::before { background:var(--accent); }
 .mw-card-dots button:focus-visible { outline:var(--size-1) solid var(--accent); outline-offset:calc(-1 * var(--size-1)); }
-.mw-card-row { box-sizing:border-box; display:grid; grid-template-columns:minmax(0, 1fr) max-content; align-items:center; gap:var(--s2); min-height:0; padding:0 var(--size-6); border:0; border-left:var(--size-2) solid transparent; background:transparent; }
+.mw-card-row { box-sizing:border-box; display:grid; grid-template-columns:minmax(0, 1fr) max-content; align-items:center; gap:var(--s2); min-height:0; padding:0 var(--size-6); border:0; background:transparent; }
 .mw-card-row span { overflow:hidden; color:var(--text-3); text-overflow:ellipsis; }
 .mw-card-row b { color:var(--text); font-weight:600; text-align:right; }
 .mw-card-row b[data-tone=up] { color:var(--up); } .mw-card-row b[data-tone=down] { color:var(--down); }
-.mw-card-row[data-band=up] { border-left-color:var(--up); background:color-mix(in srgb, var(--up) 12%, transparent); }
-.mw-card-row[data-band=down] { border-left-color:var(--down); background:color-mix(in srgb, var(--down) 12%, transparent); }
 .mw-card-row[data-warn] span, .mw-card-row b[data-tone=warning] { color:var(--warning); }
 .mw-card-row[data-flipped] span { color:var(--accent); }
-.mw-card-range { box-sizing:border-box; display:flex; align-items:center; min-height:0; padding:0 var(--size-6) 0 var(--s3); border:0; background:transparent; }
-.mw-range-track { position:relative; flex:1; height:var(--size-4); border-radius:var(--size-2); background:var(--line-strong); }
-.mw-range-tick { position:absolute; top:calc(-1 * var(--size-3)); width:var(--size-2); height:var(--size-10); transform:translateX(-50%); border-radius:var(--size-1); background:var(--text); }
-.mw-card-ends { box-sizing:border-box; display:flex; justify-content:space-between; gap:var(--s3); min-height:0; padding:0 var(--size-6) 0 var(--s3); border:0; background:transparent; color:var(--text-2); font-size:var(--fs-xs); }
-.mw-card-ends span { align-self:center; }
-.mw-card-ends[data-flipped] { color:var(--accent); }
-button.mw-card-row, button.mw-card-range, button.mw-card-ends { width:100%; text-align:left; cursor:pointer; }
-button.mw-card-row:hover, button.mw-card-range:hover, button.mw-card-ends:hover { background:var(--hover); }
-button.mw-card-row:focus-visible, button.mw-card-range:focus-visible, button.mw-card-ends:focus-visible { outline:var(--size-1) solid var(--accent); outline-offset:calc(-1 * var(--size-1)); border-radius:0; }
+button.mw-card-row { width:100%; text-align:left; cursor:pointer; }
+button.mw-card-row:hover { background:var(--hover); }
+button.mw-card-row:focus-visible { outline:var(--size-1) solid var(--accent); outline-offset:calc(-1 * var(--size-1)); border-radius:0; }
 .mw-box-layer { position:absolute; z-index:2; left:0; right:0; display:grid; box-sizing:border-box; padding:0 var(--s4); pointer-events:none; }
 .mw-box { grid-column:1; min-width:0; min-height:0; pointer-events:auto; }
 .mw-tbox { --trade-gap:calc(var(--size-5) + var(--size-1)); container-type:inline-size; display:flex; flex-direction:column; height:100%; }

@@ -5,7 +5,7 @@ import type { TradingExecution } from "../src/api/generated/TradingExecution";
 import type { TradingHolding } from "../src/api/generated/TradingHolding";
 import { CONNECTED_KIWOOM } from "./fixtures/scenario";
 import { type Scenario, cell, DEFAULT_LAYOUT_ID, expect, pollSaved, test, windowTabs } from "./harness";
-import { accountData, ACCOUNT, askAtLastSnapshot, SETTINGS, BASE, CODE, cellAt, center, chipAt, commandOf, dragChip, INFO_PAGE_1, INFO_PAGE_2, INFO_PAGE_2_ENDS, INFO_PAGE_2_VALUES, infoCard, infoLabels, infoTab, infoValues, KIS_ACCOUNT, kisAccount, nxtTraded, openOrder, openOrderWindow, ordersOn, otherAccount, SECOND_ACCOUNT, status, tradingApi, win, writesTo } from "./order-window";
+import { accountData, ACCOUNT, askAtLastSnapshot, SETTINGS, BASE, CODE, cellAt, center, chipAt, commandOf, dragChip, INFO_PAGE_1, INFO_PAGE_2, INFO_PAGE_2_VALUES, infoCard, infoLabels, infoTab, infoValues, KIS_ACCOUNT, kisAccount, nxtTraded, openOrder, openOrderWindow, ordersOn, otherAccount, SECOND_ACCOUNT, status, tradingApi, win, writesTo } from "./order-window";
 
 const HOLDING: TradingHolding = { code: CODE, name: "삼성전자", quantity: 120, sellableQuantity: 100, averagePrice: 70_040, currentPrice: BASE, evaluationProfit: -4_800, profitRateCenti: -57 };
 const FILL: TradingExecution = { orderNo: "0000010", code: CODE, name: "삼성전자", side: "buy", quantity: 5, price: 70_000, time: "093015", venue: "krx" };
@@ -459,7 +459,7 @@ test("구분선을 켜도 상세 정보 카드와 체결 상자 안에는 가로
   const boxLayer = page.getByTestId("ladder-box-layer").locator(".mw-box");
   const underRowTop = async (cellLocator: Locator, row: number) => ({ ...(await boxOfCell(cellLocator)), y: (await boxOfCell(ladderRows(page).nth(row))).y });
   await expect(ladderRows(page)).toHaveCount(20);
-  await expect(page.getByTestId("ladder-info")).toHaveCount(7);
+  await expect(page.getByTestId("ladder-info")).toHaveCount(6);
   await scrollLadder(page, 0);
 
   const on = await rowShadows();
@@ -660,7 +660,7 @@ test("금액 프리셋을 누른 뒤 현재가가 바뀌어도 수량 칸은 그
   await amountPresetButtons(page).first().click();
   await expect(quantityField(page)).toHaveValue("14");
   lastTrade(scenario, BASE + 1_000, 2);
-  await expect(page.getByTestId("ladder-info").filter({ hasText: "전일대비" })).toContainText("+1,000 +1.43%");
+  await expect(page.locator(".mw-lr[data-current]")).toContainText("71,000");
   await expect(quantityField(page)).toHaveValue("14");
   await cellAt(page, "buy", BASE + 1_000).dblclick();
   await pollSaved(() => writesTo(api, "place")).toHaveLength(1);
@@ -768,44 +768,42 @@ test("현재가보다 작은 금액이면 수량 칸이 0이 되고 주문은 �
   expect(writesTo(api, "place")).toHaveLength(0);
 });
 
-test("상세 정보 카드가 사다리 1~9행 자리에 있고 시세 쪽에 시가·고가·저가·기준가·전일대비·거래량·거래대금 값이 맞다", async ({ page, scenario }) => {
+test("상세 정보 카드가 사다리 1~10행 자리에 있고 시세 쪽에 시가·고가·저가·기준가·거래량·거래대금 값이 맞다", async ({ page, scenario }) => {
   ordersOn(scenario);
   tradingApi(scenario);
   await openOrderWindow(page, scenario);
   const info = page.getByTestId("ladder-info");
-  await expect(info).toHaveCount(7);
+  await expect(info).toHaveCount(6);
   await expect(infoLabels(page)).toHaveText(INFO_PAGE_1);
-  await expect(infoValues(page)).toHaveText(["69,900", "70,400", "69,400", "70,000", "0 0.00%", "123만", "864억"]);
+  await expect(infoValues(page)).toHaveText(["69,900", "70,400", "69,400", "70,000", "123만", "864억"]);
   const rowTops = await tops(ladderRows(page));
-  expect(await tops(info)).toEqual([0, 1, 2, 4, 5, 6, 7].map((row) => rowTops[row]));
+  expect(await tops(info)).toEqual([0, 1, 2, 3, 4, 5].map((row) => rowTops[row]));
   const card = (await infoCard(page).boundingBox())!;
   const price = (await ladderRows(page).first().locator(".mw-px").boundingBox())!;
   expect(card.y).toBeCloseTo(rowTops[0]!, 0);
-  expect(card.height).toBe(9 * 24);
+  expect(card.height).toBe(10 * 24);
   expect(card.x).toBeGreaterThanOrEqual(price.x + price.width - 1);
-  await expect(page.getByTestId("ladder-info-range")).toHaveCount(1);
 });
 
-test("종목 탭을 누르면 상·하한가·52주 범위·시가총액·PER·PBR·외국인소진율이 보이고 시세 탭으로 돌아온다", async ({ page, scenario }) => {
+test("종목 탭을 누르면 상·하한가·시가총액이 보이고 시세 탭으로 돌아온다", async ({ page, scenario }) => {
   ordersOn(scenario);
   tradingApi(scenario);
   await openOrderWindow(page, scenario);
   await expect(infoTab(page, "시세")).toHaveAttribute("aria-selected", "true");
   await expect(infoLabels(page)).toHaveText(INFO_PAGE_1);
 
-  await page.getByTestId("ladder-info").nth(4).click();
+  await page.getByTestId("ladder-info").nth(3).click();
   await expect(infoTab(page, "시세")).toHaveAttribute("aria-selected", "true");
-  await expect(infoLabels(page).nth(4)).toHaveText("시가대비");
-  await page.getByTestId("ladder-info").nth(4).click();
+  await expect(infoLabels(page).nth(3)).toHaveText("평균가");
+  await page.getByTestId("ladder-info").nth(3).click();
   await expect(infoLabels(page)).toHaveText(INFO_PAGE_1);
 
   await infoTab(page, "종목").click();
   await expect(infoTab(page, "종목")).toHaveAttribute("aria-selected", "true");
   await expect(infoLabels(page)).toHaveText(INFO_PAGE_2);
   await expect(infoValues(page)).toHaveText(INFO_PAGE_2_VALUES);
-  await expect(page.getByTestId("ladder-info-ends").locator("span")).toHaveText(INFO_PAGE_2_ENDS);
   const rowTops = await tops(ladderRows(page));
-  expect(await tops(page.getByTestId("ladder-info"))).toEqual([0, 1, 4, 5, 6].map((row) => rowTops[row]));
+  expect(await tops(page.getByTestId("ladder-info"))).toEqual([0, 1, 2].map((row) => rowTops[row]));
 
   await infoTab(page, "시세").click();
   await expect(infoLabels(page)).toHaveText(INFO_PAGE_1);
@@ -860,7 +858,7 @@ test("고른 탭은 종목이 바뀌어도 유지된다", async ({ page, scenari
   await expect(win(page)).toHaveAttribute("data-symbol", "000660");
   await expect(infoTab(page, "종목")).toHaveAttribute("aria-selected", "true");
   await expect(infoLabels(page).first()).toHaveText("상한가");
-  await expect(infoLabels(page)).toHaveCount(6);
+  await expect(infoLabels(page)).toHaveCount(3);
   await cell(page, 1).click();
   await expect(win(page)).toHaveAttribute("data-symbol", CODE);
   await expect(infoLabels(page)).toHaveText(INFO_PAGE_2);
@@ -1069,7 +1067,7 @@ test("단일가 호가에서 호가주문창은 6호가만 가운데 선 위·�
   await expect(ladderRows(page).nth(9).locator(".mw-px-num")).toHaveText("69,600");
   await expect(ladderRows(page).nth(10).locator(".mw-px-num")).toHaveText("69,500");
   await expect(ladderRows(page).nth(12).locator(".mw-px-num")).toHaveText("69,300");
-  await expect(page.getByTestId("ladder-info")).toHaveCount(7);
+  await expect(page.getByTestId("ladder-info")).toHaveCount(6);
 
   await ladderRows(page).nth(0).locator("[data-empty]").first().dblclick();
   await ladderRows(page).nth(19).locator("[data-empty]").first().dblclick();

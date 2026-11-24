@@ -52,7 +52,7 @@ test("기준가가 0이면 가격은 상승색이 아니다", () => {
   expect(html).not.toContain("mw-down");
 });
 
-test("정보 카드는 1~9행 높이의 겹침 층 하나로 그리고, 아래 왼쪽 자리는 11~20행을 덮는 상자 하나로 그린다", () => {
+test("정보 카드는 1~10행 높이의 겹침 층 하나로 그리고, 아래 왼쪽 자리는 11~20행을 덮는 상자 하나로 그린다", () => {
   const rowSlots: LadderRowSlots = {
     infoCard: (rowCount) => createElement("em", { className: "top" }, `t${rowCount}`),
     bottomLeft: (rowCount) => createElement("em", { className: "bottom" }, `b${rowCount}`),
@@ -60,8 +60,8 @@ test("정보 카드는 1~9행 높이의 겹침 층 하나로 그리고, 아래 �
   const html = render({ rowSlots });
   expect(tradeBoxStart(rows)).toBe(10);
   expect(html).toContain("top:calc(var(--s1) + 10 * var(--size-24));height:calc(10 * var(--size-24))");
-  expect(html).toContain("top:var(--s1);height:calc(9 * var(--size-24))");
-  expect(html.match(/<em class="top">t\d<\/em>/g)).toEqual(['<em class="top">t9</em>']);
+  expect(html).toContain("top:var(--s1);height:calc(10 * var(--size-24))");
+  expect(html.match(/<em class="top">t\d+<\/em>/g)).toEqual(['<em class="top">t10</em>']);
   expect(html).toContain('class="mw-info-cell" style="grid-column:3"');
   expect(html.match(/<em class="bottom">b\d+<\/em>/g)).toEqual(['<em class="bottom">b10</em>']);
   expect(html.indexOf('class="bottom"')).toBeGreaterThan(html.indexOf("mw-box-layer"));
@@ -74,7 +74,7 @@ test("정보 카드 자리는 바깥 열이 있으면 한 칸 밀리고 슬롯�
   expect(render()).not.toContain("mw-info-layer");
 });
 
-test("11~20행 가운데 매도 잔량이 있는 행은 상자가 가리지 않고, 1~9행 가운데 매수 잔량이 있는 행은 카드가 가리지 않는다", () => {
+test("11~20행 가운데 매도 잔량이 있는 행은 상자가 가리지 않고, 1~10행 가운데 매수 잔량이 있는 행은 카드가 가리지 않는다", () => {
   const crossed = buildLadder({
     asks: [{ price: 71000, quantity: 5, change: 0 }, { price: 70100, quantity: 7, change: 0 }, { price: 69500, quantity: 2, change: 0 }],
     bids: [{ price: 70900, quantity: 9, change: 0 }, { price: 69100, quantity: 3, change: 0 }],

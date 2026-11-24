@@ -69,20 +69,20 @@ test("사다리 지난 체결 요청은 pages=1을 싣고 체결창 요청은 �
   expect(tradeHistoryPath("005930" as never, "krx")).toBe("/api/symbols/005930/trades?venue=krx&limit=500");
 });
 
-test("정보란은 바꿀 수 있는 줄만 button으로 그리고 data-flipped와 52주 대비 툴팁을 싣는다", () => {
+test("정보란은 바꿀 수 있는 줄만 button으로 그리고 data-flipped를 싣는다", () => {
   const rows = buildLadder({ asks: [{ price: 70_100, quantity: 5, change: 0 }], bids: [{ price: 70_000, quantity: 5, change: 0 }], lastPrice: 70_000, previousClose: 70_000, bounds: { lower: null, upper: null }, tickRule: "stock" });
   const input = {
     price: 70_300,
     previousClose: 70_000,
     summary: { open: 70_100, high: 71_000, low: 69_000, volume: 1_234_567, tradeValueWon: 86_790_000_000 },
-    fundamentals: { upperLimit: 91_000, lowerLimit: 49_000, high52w: 88_000, low52w: 51_000, marketCap: 82_400_000_000, per: 14.21, pbr: 1.1, foreignExhaustionRate: 54.12 },
+    fundamentals: { upperLimit: 91_000, lowerLimit: 49_000, marketCap: 82_400_000_000, listedShares: 50_000_000 },
   };
-  const flipped = new Set(["open", "expectedPrice", "range52"] as const);
+  const flipped = new Set(["open", "expectedPrice", "cap"] as const);
   const page0 = placeInfoItems(rows, quoteInfoItems(0, input, flipped), expectedInfoItems({ price: 71_800, qty: 300 }, 70_000, flipped));
-  const html0 = renderToStaticMarkup(infoSlot(page0, { page: 0, select: noop, flipped, toggle: noop })(9) as never);
+  const html0 = renderToStaticMarkup(infoSlot(page0, { page: 0, select: noop, flipped, toggle: noop })(10) as never);
   expect(html0).toContain('<button type="button" class="mw-card-row" data-testid="ladder-info" data-label="시가 등락" data-flipped=""');
   expect(html0).toContain('<button type="button" class="mw-card-row" data-testid="ladder-info" data-label="예상 등락" data-flipped=""');
   expect(html0).toContain('<div class="mw-card-row" data-testid="ladder-info" data-label="예상체결량" data-warn="">');
-  const html1 = renderToStaticMarkup(infoSlot(quoteInfoItems(1, input, flipped), { page: 1, select: noop, flipped, toggle: noop })(9) as never);
-  expect(html1).toContain('<button type="button" class="mw-card-ends" data-testid="ladder-info-ends" data-flipped="" aria-pressed="true"><span title="저점 대비">+37.84%</span><span title="고점 대비">−20.11%</span></button>');
+  const html1 = renderToStaticMarkup(infoSlot(quoteInfoItems(1, input, flipped), { page: 1, select: noop, flipped, toggle: noop })(10) as never);
+  expect(html1).toContain('<button type="button" class="mw-card-row" data-testid="ladder-info" data-label="상장주식" data-flipped=""');
 });
