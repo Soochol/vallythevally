@@ -231,20 +231,20 @@ fn scan_valid_prefix(file: &mut File) -> io::Result<(u64, Option<FlowDescription
             KIND_DESCRIPTION => {
                 let mut payload = vec![0u8; header.payload_len as usize];
                 file.read_exact(&mut payload)?;
-                let Ok(raw) = decode_payload(header.codec, &payload) else {
-                    break;
-                };
-                let Ok(description) = serde_json::from_slice::<FlowDescription>(&raw) else {
-                    break;
-                };
+                let raw = decode_payload(header.codec, &payload)?;
+                let description: FlowDescription =
+                    serde_json::from_slice(&raw).map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
                 if description.format_version != FLOW_FORMAT_VERSION {
-                    break;
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        format!("모르는 흐름 형식 버전: {}", description.format_version),
+                    ));
                 }
                 last_description = Some(description);
             }
             KIND_ROWS => {
                 if last_description.is_none() {
-                    break;
+                    return Err(io::Error::new(io::ErrorKind::InvalidData, "설명 블록 전에 행 블록이 나왔습니다"));
                 }
                 file.seek(SeekFrom::Start(block_end))?;
             }

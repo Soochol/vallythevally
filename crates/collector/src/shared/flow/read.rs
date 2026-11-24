@@ -2,6 +2,7 @@ use std::borrow::Cow;
 use std::collections::HashMap;
 
 use serde::Deserialize;
+use serde_json::value::RawValue;
 use server::shared_data::FlowRow;
 
 use super::FlowKindSpec;
@@ -52,7 +53,16 @@ struct Entry<'a> {
     #[serde(borrow, default)]
     item: Cow<'a, str>,
     #[serde(borrow, default)]
-    values: HashMap<Cow<'a, str>, Option<Cow<'a, str>>>,
+    values: Option<&'a RawValue>,
+}
+
+fn value_text(raw: &RawValue) -> Option<String> {
+    let text = raw.get().trim();
+    match text.as_bytes().first().copied()? {
+        b'"' => serde_json::from_str::<String>(text).ok(),
+        b'-' | b'0'..=b'9' => Some(text.to_owned()),
+        _ => None,
+    }
 }
 
 pub(super) fn read_rows(
@@ -72,10 +82,20 @@ pub(super) fn read_rows(
             reading.skipped += 1;
             continue;
         }
+        let values_map: HashMap<Cow<'_, str>, &RawValue> = match entry.values {
+            Some(raw) => match serde_json::from_str(raw.get()) {
+                Ok(map) => map,
+                Err(_) => {
+                    reading.skipped += 1;
+                    continue;
+                }
+            },
+            None => HashMap::new(),
+        };
         let values = compiled
             .fid_keys
             .iter()
-            .map(|fid_key| entry.values.get(fid_key.as_str()).and_then(|value| value.as_deref()).map(str::to_owned))
+            .map(|fid_key| values_map.get(fid_key.as_str()).and_then(|raw| value_text(raw)))
             .collect();
         reading.rows += 1;
         sink(Extracted {
