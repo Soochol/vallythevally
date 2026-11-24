@@ -19,7 +19,7 @@ const valueOf = (area: Locator, label: string) => info(area, label).locator("b")
 const areas = (page: Page) => [book(page), win(page)];
 const nowOf = (scenario: Scenario) => Math.floor(scenario.now / 1000);
 
-const firing = (scenario: Scenario, patch: Partial<ViState> = {}): ViState => ({ symbol: CODE, active: true, direction: "up", triggerPrice: 77_100, base: KRX_OPEN, triggeredAt: nowOf(scenario) - TRIGGER_AFTER, releasedAt: null, ...patch });
+const firing = (scenario: Scenario, patch: Partial<ViState> = {}): ViState => ({ symbol: CODE, market: "krx", active: true, direction: "up", triggerPrice: 77_100, base: KRX_OPEN, triggeredAt: nowOf(scenario) - TRIGGER_AFTER, releasedAt: null, ...patch });
 const released = (scenario: Scenario): ViState => firing(scenario, { active: false, base: null, triggeredAt: nowOf(scenario) - 600, releasedAt: nowOf(scenario) - 600 + VI_SECONDS });
 
 function serveSummary(scenario: Scenario) {

@@ -17,7 +17,7 @@ const main = (page: Page, code: string) => row(page, code).locator("[data-main]"
 const badge = (page: Page, code: string) => row(page, code).getByTestId("watch-vi");
 const nameText = (page: Page, code: string) => row(page, code).locator("b").first();
 
-const firing = (symbol: string, direction: ViState["direction"]): ViState => ({ symbol, active: true, direction, triggerPrice: direction === null ? null : 77_000, base: 70_000, triggeredAt: TRIGGERED_AT, releasedAt: null });
+const firing = (symbol: string, direction: ViState["direction"]): ViState => ({ symbol, market: "krx", active: true, direction, triggerPrice: direction === null ? null : 77_000, base: 70_000, triggeredAt: TRIGGERED_AT, releasedAt: null });
 const released = (symbol: string): ViState => ({ ...firing(symbol, "up"), active: false, base: null, releasedAt: TRIGGERED_AT + 134 });
 
 async function openWith(page: Page, scenario: Scenario, symbols: string[]) {

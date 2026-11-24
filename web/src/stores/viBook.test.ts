@@ -9,7 +9,7 @@ const HYNIX = "000660";
 const KAKAO = "035720";
 const HELLO: ServerMessage = { type: "hello", protocol: 1, serverTime: 1_000, status: { realtime: "live", since: 1_000, backfilling: false } };
 
-const firing = (symbol: string, patch: Partial<ViState> = {}): ViState => ({ symbol, active: true, direction: "up", triggerPrice: 881_000, base: 800_000, triggeredAt: 1_000, releasedAt: null, ...patch });
+const firing = (symbol: string, patch: Partial<ViState> = {}): ViState => ({ symbol, market: "krx", active: true, direction: "up", triggerPrice: 881_000, base: 800_000, triggeredAt: 1_000, releasedAt: null, ...patch });
 const released = (symbol: string): ViState => firing(symbol, { active: false, base: null, releasedAt: 1_134 });
 const snapshot = (...states: ViState[]): ServerMessage => ({ type: "vi_snapshot", states });
 const update = (state: ViState): ServerMessage => ({ type: "vi_update", state });
@@ -101,4 +101,24 @@ test("소켓이 끊기면 비우고 다시 붙으면 스냅샷으로 채운다",
   receive(HELLO, snapshot(firing(SAMSUNG)));
   expect(book.get(SAMSUNG)).toEqual(firing(SAMSUNG));
   expect(listener).toHaveBeenCalledTimes(2);
+});
+
+test("스냅샷과 갱신 모두에서 NXT 상태는 무시하고 KRX 상태만 유지한다", () => {
+  const { book, receive } = setup();
+  const samsung = vi.fn();
+  const hynix = vi.fn();
+  book.subscribe(SAMSUNG, samsung);
+  book.subscribe(HYNIX, hynix);
+
+  receive(HELLO, snapshot(firing(SAMSUNG), firing(SAMSUNG, { market: "nxt", active: false }), firing(HYNIX, { market: "nxt" })));
+  expect(book.get(SAMSUNG)).toEqual(firing(SAMSUNG));
+  expect(book.get(HYNIX)).toBeNull();
+  expect(samsung).toHaveBeenCalledTimes(1);
+  expect(hynix).not.toHaveBeenCalled();
+
+  receive(update(firing(SAMSUNG, { market: "nxt", active: false })), update(firing(HYNIX, { market: "nxt" })));
+  expect(book.get(SAMSUNG)).toEqual(firing(SAMSUNG));
+  expect(book.get(HYNIX)).toBeNull();
+  expect(samsung).toHaveBeenCalledTimes(1);
+  expect(hynix).not.toHaveBeenCalled();
 });

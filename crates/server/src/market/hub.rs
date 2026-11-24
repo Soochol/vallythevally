@@ -27,7 +27,7 @@ use crate::market_source::SourceError;
 use crate::market_source::stream::{
     AfterHoursTotals, BookLevel, BookSnapshot, BrokerEntry, BrokerSnapshot, Exchange, ExpectedQuote, MarketStream, RealProgramTrade, RealTick, StreamEvent, StreamKind, TradeSide,
 };
-use crate::market_source::vi::{ViAlert, ViSignal};
+use crate::market_source::vi::{ViAlert, ViMarket, ViSignal};
 use crate::quotes;
 use crate::symbols::Directory;
 
@@ -1071,16 +1071,16 @@ impl MarketHub {
     }
 
     fn on_vi(&mut self, signal: &ViSignal, received_at: KstTime) {
-        let (code, changed) = match signal {
+        let (code, market, changed) = match signal {
             ViSignal::Alert(alert) => {
-                let hears_trades = self.session_live && self.manager.is_admitted(Symbol::Stock(alert.code));
+                let hears_trades = alert.market == ViMarket::Krx && self.session_live && self.manager.is_admitted(Symbol::Stock(alert.code));
                 let after_release = if hears_trades { BaseAfterRelease::FirstKrxTrade } else { BaseAfterRelease::Unknown };
-                (alert.code, self.vi.apply_alert(alert, received_at, after_release))
+                (alert.code, alert.market, self.vi.apply_alert(alert, received_at, after_release))
             }
-            ViSignal::Reading(reading) => (reading.code, self.vi.apply_reading(reading, received_at)),
+            ViSignal::Reading(reading) => (reading.code, ViMarket::Krx, self.vi.apply_reading(reading, received_at)),
         };
         if changed {
-            self.publish_vi(code);
+            self.publish_vi(code, market);
         }
     }
 
@@ -1097,15 +1097,15 @@ impl MarketHub {
     }
 
     fn on_vi_history(&mut self, alerts: &[ViAlert], now: KstTime) {
-        let changed: BTreeSet<StockCode> = alerts.iter().filter(|alert| self.vi.apply_alert(alert, now, BaseAfterRelease::Unknown)).map(|alert| alert.code).collect();
-        for code in changed {
-            self.publish_vi(code);
+        let changed: BTreeSet<(StockCode, ViMarket)> = alerts.iter().filter(|alert| self.vi.apply_alert(alert, now, BaseAfterRelease::Unknown)).map(|alert| (alert.code, alert.market)).collect();
+        for (code, market) in changed {
+            self.publish_vi(code, market);
         }
     }
 
     fn settle_vi(&mut self, now: KstTime) {
-        for code in self.vi.expire(now) {
-            self.publish_vi(code);
+        for (code, market) in self.vi.expire(now) {
+            self.publish_vi(code, market);
         }
     }
 
@@ -1119,8 +1119,8 @@ impl MarketHub {
         }
     }
 
-    fn publish_vi(&self, code: StockCode) {
-        let Some(state) = self.vi.state(code) else {
+    fn publish_vi(&self, code: StockCode, market: ViMarket) {
+        let Some(state) = self.vi.state(code, market) else {
             return;
         };
         for c in self.conns.values() {
@@ -1158,7 +1158,7 @@ impl MarketHub {
             && let Symbol::Stock(code) = tick.symbol
             && self.vi.take_base(code, tick.price, at)
         {
-            self.publish_vi(code);
+            self.publish_vi(code, ViMarket::Krx);
         }
         self.publish_quotes(&tick, at);
         self.publish_feed_trade(&tick, at);
@@ -1728,6 +1728,7 @@ mod tests {
     fn vi_alert(code: &str, released: Option<TimeOfDay>) -> ViAlert {
         ViAlert {
             code: StockCode::parse(code).unwrap(),
+            market: ViMarket::Krx,
             direction: Some(crate::market_source::vi::ViDirection::Up),
             trigger_price: Some(won(881_000)),
             static_base: Some(won(800_000)),
@@ -1743,6 +1744,7 @@ mod tests {
     fn vi_state(code: &str, active: bool, base: Option<f64>, released_at: Option<KstTime>) -> api::ViState {
         api::ViState {
             symbol: api::SymbolCode(code.into()),
+            market: api::ViMarket::Krx,
             active,
             direction: Some(api::ViDirection::Up),
             trigger_price: Some(881_000.0),

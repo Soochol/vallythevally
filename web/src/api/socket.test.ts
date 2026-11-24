@@ -81,7 +81,7 @@ describe("MarketSocket", () => {
     last().receive(barMsg);
     last().receive({ type: "data_changed" });
     last().receive({ type: "vi_snapshot", states: [] });
-    last().receive({ type: "vi_update", state: { symbol: "005930", active: true, direction: "up", triggerPrice: 881_000, base: 800_000, triggeredAt: 1_000, releasedAt: null } });
+    last().receive({ type: "vi_update", state: { symbol: "005930", market: "krx", active: true, direction: "up", triggerPrice: 881_000, base: 800_000, triggeredAt: 1_000, releasedAt: null } });
     expect(a).toEqual([]);
     expect(b).toEqual([barMsg]);
   });

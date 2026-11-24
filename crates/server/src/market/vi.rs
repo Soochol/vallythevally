@@ -3,7 +3,7 @@ use std::collections::{BTreeMap, HashMap};
 use domain::{KstTime, Price, StockCode, Symbol};
 
 use crate::api::{self, UnixSeconds};
-use crate::market_source::vi::{ViAlert, ViDirection, ViReading, ViTurn, vi_session_open, vi_triggers_at};
+use crate::market_source::vi::{ViAlert, ViDirection, ViMarket, ViReading, ViTurn, vi_session_open, vi_triggers_at};
 
 const ACTIVE_LIMIT_SECS: i64 = 5 * 60;
 
@@ -39,10 +39,11 @@ impl ViRow {
         self.triggered_at.is_some() && self.released_at.is_none()
     }
 
-    fn state(&self, code: StockCode) -> api::ViState {
+    fn state(&self, code: StockCode, market: ViMarket) -> api::ViState {
         let seconds = |at: KstTime| UnixSeconds(at.unix());
         api::ViState {
             symbol: api::SymbolCode(Symbol::Stock(code).as_wire()),
+            market: api::ViMarket::from(market),
             active: self.active,
             direction: self.direction.map(api::ViDirection::from),
             trigger_price: self.trigger_price.map(won),
@@ -59,9 +60,9 @@ fn won(price: Price) -> f64 {
 
 #[derive(Debug, Default)]
 pub struct ViBoard {
-    rows: BTreeMap<StockCode, ViRow>,
-    active_until: HashMap<StockCode, KstTime>,
-    awaiting_base: HashMap<StockCode, KstTime>,
+    rows: BTreeMap<(StockCode, ViMarket), ViRow>,
+    active_until: HashMap<(StockCode, ViMarket), KstTime>,
+    awaiting_base: HashMap<(StockCode, ViMarket), KstTime>,
 }
 
 impl ViBoard {
@@ -69,13 +70,14 @@ impl ViBoard {
         let today = now.kst_date();
         let triggered_at = KstTime::from_kst_civil(today, alert.triggered);
         let released_at = alert.released.map(|time| KstTime::from_kst_civil(today, time));
-        let known = self.rows.get(&alert.code).copied();
+        let key = (alert.code, alert.market);
+        let known = self.rows.get(&key).copied();
         let same_vi = known.filter(|row| row.triggered_at == Some(triggered_at));
         let already_known = match same_vi {
             Some(row) => released_at.is_none() || !row.awaits_release(),
             None => known.is_some_and(|row| row.triggered_at > Some(triggered_at)),
         };
-        if already_known || !vi_triggers_at(alert.triggered) {
+        if already_known || !vi_triggers_at(alert.market, alert.triggered) {
             return false;
         }
         let active_until = triggered_at.plus_secs(ACTIVE_LIMIT_SECS);
@@ -89,22 +91,24 @@ impl ViBoard {
             triggered_at: Some(triggered_at),
             released_at,
         };
-        self.active_until.remove(&alert.code);
-        self.awaiting_base.remove(&alert.code);
+        self.active_until.remove(&key);
+        self.awaiting_base.remove(&key);
         if active {
-            self.active_until.insert(alert.code, active_until);
+            self.active_until.insert(key, active_until);
         }
         if let Some(released_at) = released_at
+            && alert.market == ViMarket::Krx
             && after_release == BaseAfterRelease::FirstKrxTrade
         {
-            self.awaiting_base.insert(alert.code, released_at);
+            self.awaiting_base.insert(key, released_at);
         }
-        self.rows.insert(alert.code, next);
+        self.rows.insert(key, next);
         true
     }
 
     pub fn apply_reading(&mut self, reading: &ViReading, now: KstTime) -> bool {
-        let known = self.rows.get(&reading.code).copied();
+        let key = (reading.code, ViMarket::Krx);
+        let known = self.rows.get(&key).copied();
         let row = known.unwrap_or(ViRow::without_vi(BaseOrigin::Reading));
         let mut next = ViRow { base: reading.static_base.or(row.base), ..row };
         match reading.turned {
@@ -112,30 +116,30 @@ impl ViBoard {
                 next.active = true;
                 next.triggered_at = Some(now);
                 next.released_at = None;
-                self.active_until.insert(reading.code, now.plus_secs(ACTIVE_LIMIT_SECS));
+                self.active_until.insert(key, now.plus_secs(ACTIVE_LIMIT_SECS));
             }
             Some(ViTurn::Off) if row.active => {
                 next.active = false;
                 next.released_at = Some(now);
-                self.active_until.remove(&reading.code);
+                self.active_until.remove(&key);
             }
             _ => {}
         }
         if next == row {
             return false;
         }
-        self.rows.insert(reading.code, next);
+        self.rows.insert(key, next);
         true
     }
 
-    pub fn expire(&mut self, now: KstTime) -> Vec<StockCode> {
+    pub fn expire(&mut self, now: KstTime) -> Vec<(StockCode, ViMarket)> {
         if self.active_until.is_empty() {
             return Vec::new();
         }
-        let due: Vec<StockCode> = self.active_until.iter().filter(|(_, until)| **until <= now).map(|(code, _)| *code).collect();
-        for code in &due {
-            self.active_until.remove(code);
-            if let Some(row) = self.rows.get_mut(code) {
+        let due: Vec<(StockCode, ViMarket)> = self.active_until.iter().filter(|(_, until)| **until <= now).map(|(key, _)| *key).collect();
+        for key in &due {
+            self.active_until.remove(key);
+            if let Some(row) = self.rows.get_mut(key) {
                 row.active = false;
                 if row.origin == BaseOrigin::Alert {
                     row.base = None;
@@ -150,11 +154,12 @@ impl ViBoard {
     }
 
     pub fn take_base(&mut self, code: StockCode, price: Price, traded_at: KstTime) -> bool {
-        if self.awaiting_base.get(&code).is_none_or(|released_at| traded_at < *released_at) {
+        let key = (code, ViMarket::Krx);
+        if self.awaiting_base.get(&key).is_none_or(|released_at| traded_at < *released_at) {
             return false;
         }
-        self.awaiting_base.remove(&code);
-        match self.rows.get_mut(&code) {
+        self.awaiting_base.remove(&key);
+        match self.rows.get_mut(&key) {
             Some(row) => {
                 row.base = Some(price);
                 true
@@ -164,7 +169,7 @@ impl ViBoard {
     }
 
     pub fn await_base_only_for(&mut self, hears_trades: impl Fn(StockCode) -> bool) {
-        self.awaiting_base.retain(|code, _| hears_trades(*code));
+        self.awaiting_base.retain(|(code, _), _| hears_trades(*code));
     }
 
     pub fn stop_awaiting_base(&mut self) {
@@ -175,12 +180,12 @@ impl ViBoard {
         *self = ViBoard::default();
     }
 
-    pub fn state(&self, code: StockCode) -> Option<api::ViState> {
-        self.rows.get(&code).map(|row| row.state(code))
+    pub fn state(&self, code: StockCode, market: ViMarket) -> Option<api::ViState> {
+        self.rows.get(&(code, market)).map(|row| row.state(code, market))
     }
 
     pub fn states(&self) -> Vec<api::ViState> {
-        self.rows.iter().map(|(code, row)| row.state(*code)).collect()
+        self.rows.iter().map(|((code, market), row)| row.state(*code, *market)).collect()
     }
 }
 
@@ -211,7 +216,7 @@ mod tests {
     }
 
     fn alert(text: &str, triggered: TimeOfDay, released: Option<TimeOfDay>) -> ViAlert {
-        ViAlert { code: code(text), direction: Some(ViDirection::Up), trigger_price: Some(price(881_000)), static_base: Some(price(800_000)), triggered, released }
+        ViAlert { code: code(text), market: ViMarket::Krx, direction: Some(ViDirection::Up), trigger_price: Some(price(881_000)), static_base: Some(price(800_000)), triggered, released }
     }
 
     fn samsung(released: Option<TimeOfDay>) -> ViAlert {
@@ -219,7 +224,7 @@ mod tests {
     }
 
     fn base(board: &ViBoard, text: &str) -> Option<f64> {
-        board.state(code(text)).unwrap().base
+        board.state(code(text), ViMarket::Krx).unwrap().base
     }
 
     fn triggered_board() -> ViBoard {
@@ -255,9 +260,9 @@ mod tests {
     fn a_vi_without_a_release_turns_off_after_five_minutes() {
         let mut board = triggered_board();
         assert!(board.expire(at(9, 34, 59)).is_empty());
-        assert!(board.state(code(SAMSUNG)).unwrap().active);
-        assert_eq!(board.expire(at(9, 35, 0)), [code(SAMSUNG)]);
-        let state = board.state(code(SAMSUNG)).unwrap();
+        assert!(board.state(code(SAMSUNG), ViMarket::Krx).unwrap().active);
+        assert_eq!(board.expire(at(9, 35, 0)), [(code(SAMSUNG), ViMarket::Krx)]);
+        let state = board.state(code(SAMSUNG), ViMarket::Krx).unwrap();
         assert!(!state.active);
         assert_eq!((state.released_at, state.base), (None, None));
         assert!(board.expire(at(9, 35, 1)).is_empty());
@@ -270,16 +275,16 @@ mod tests {
     fn a_rest_row_never_undoes_a_newer_realtime_state() {
         let mut board = released_board();
         assert!(board.take_base(code(SAMSUNG), price(884_000), at(9, 32, 16)));
-        let before = board.state(code(SAMSUNG));
+        let before = board.state(code(SAMSUNG), ViMarket::Krx);
         assert!(!board.apply_alert(&samsung(None), at(10, 0, 0), BaseAfterRelease::Unknown));
-        assert_eq!(board.state(code(SAMSUNG)), before);
+        assert_eq!(board.state(code(SAMSUNG), ViMarket::Krx), before);
         assert!(board.apply_alert(&alert(HYNIX, time(9, 10, 0), Some(time(9, 12, 14))), at(10, 0, 0), BaseAfterRelease::Unknown));
-        let hynix = board.state(code(HYNIX)).unwrap();
+        let hynix = board.state(code(HYNIX), ViMarket::Krx).unwrap();
         assert!(!hynix.active);
         assert_eq!((hynix.base, hynix.released_at), (None, Some(UnixSeconds(at(9, 12, 14).unix()))));
         assert!(!board.awaits_base(), "지난 해제는 지금 체결을 기준가로 쓰지 않는다");
         assert!(!board.apply_alert(&alert(SAMSUNG, time(9, 5, 0), Some(time(9, 7, 0))), at(10, 0, 0), BaseAfterRelease::Unknown), "더 오래된 발동은 무시한다");
-        assert_eq!(board.state(code(SAMSUNG)), before);
+        assert_eq!(board.state(code(SAMSUNG), ViMarket::Krx), before);
     }
 
     #[test]
@@ -295,7 +300,7 @@ mod tests {
     #[test]
     fn a_vi_triggered_outside_regular_hours_is_left_out() {
         let mut board = ViBoard::default();
-        for triggered in [time(8, 59, 59), time(15, 20, 0), time(18, 0, 0)] {
+        for triggered in [time(8, 59, 59), time(15, 20, 0), time(15, 59, 59), time(20, 0, 0)] {
             assert!(!board.apply_alert(&alert(SAMSUNG, triggered, None), at(18, 0, 0), BaseAfterRelease::FirstKrxTrade));
         }
         assert!(board.states().is_empty());
@@ -322,17 +327,17 @@ mod tests {
         let mut board = ViBoard::default();
         assert!(board.apply_reading(&vi_reading(SAMSUNG, true), at(9, 30, 0)));
         assert!(board.apply_reading(&ViReading { static_base: None, ..vi_reading(SAMSUNG, false) }, at(9, 33, 0)));
-        let samsung = board.state(code(SAMSUNG)).unwrap();
+        let samsung = board.state(code(SAMSUNG), ViMarket::Krx).unwrap();
         assert_eq!((samsung.active, samsung.base, samsung.released_at), (false, Some(800_000.0), Some(UnixSeconds(at(9, 33, 0).unix()))));
 
         assert!(board.apply_reading(&vi_reading(HYNIX, true), at(9, 30, 0)));
-        assert_eq!(board.expire(at(9, 35, 0)), [code(HYNIX)]);
+        assert_eq!(board.expire(at(9, 35, 0)), [(code(HYNIX), ViMarket::Krx)]);
         assert!(!board.apply_reading(&vi_reading(HYNIX, false), at(9, 50, 0)), "만료 뒤 평시 프레임은 상태를 바꾸지 않는다");
-        assert_eq!(board.state(code(HYNIX)).unwrap().released_at, None);
+        assert_eq!(board.state(code(HYNIX), ViMarket::Krx).unwrap().released_at, None);
         assert!(board.apply_reading(&vi_reading(HYNIX, true), at(10, 0, 0)));
-        let hynix = board.state(code(HYNIX)).unwrap();
+        let hynix = board.state(code(HYNIX), ViMarket::Krx).unwrap();
         assert_eq!((hynix.active, hynix.triggered_at, hynix.released_at), (true, Some(UnixSeconds(at(10, 0, 0).unix())), None));
-        assert_eq!(board.expire(at(10, 5, 0)), [code(HYNIX)]);
+        assert_eq!(board.expire(at(10, 5, 0)), [(code(HYNIX), ViMarket::Krx)]);
         assert!(board.apply_reading(&vi_reading(HYNIX, true), at(10, 20, 0)), "만료 뒤 평시 프레임 없이 바로 온 새 발동도 들어간다");
     }
 
@@ -345,13 +350,13 @@ mod tests {
         assert!(board.apply_reading(&reading(Some(800_000), false), at(9, 29, 0)));
         assert!(!board.apply_reading(&reading(Some(800_000), false), at(9, 29, 1)));
         assert!(board.apply_reading(&reading(Some(800_000), true), at(9, 30, 0)));
-        let state = board.state(code(SAMSUNG)).unwrap();
+        let state = board.state(code(SAMSUNG), ViMarket::Krx).unwrap();
         assert!(state.active);
         assert_eq!((state.direction, state.trigger_price, state.base), (None, None, Some(800_000.0)));
-        assert_eq!(board.expire(at(9, 35, 0)), [code(SAMSUNG)]);
+        assert_eq!(board.expire(at(9, 35, 0)), [(code(SAMSUNG), ViMarket::Krx)]);
         assert_eq!(base(&board, SAMSUNG), Some(800_000.0));
         assert!(board.apply_reading(&ViReading { turned: None, ..reading(Some(884_000), true) }, at(9, 35, 1)));
-        let state = board.state(code(SAMSUNG)).unwrap();
+        let state = board.state(code(SAMSUNG), ViMarket::Krx).unwrap();
         assert_eq!((state.active, state.base, state.released_at), (false, Some(884_000.0), None), "기준가만 바뀌면 꺼진 VI를 다시 켜지 않는다");
         assert!(!board.apply_reading(&reading(Some(884_000), true), at(15, 20, 0)), "정규장 밖의 발동 표시는 쓰지 않는다");
     }

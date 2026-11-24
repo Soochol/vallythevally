@@ -13,7 +13,7 @@ use crate::api::{self, ExcludeKind};
 use super::error::{WsRejection, judge_ws_ack};
 use crate::market_source::stream::{AfterHoursTotals, BOOK_DEPTH, BookLevel, BookSnapshot, BrokerEntry, BrokerSnapshot, DayTotals, Exchange, ExpectedQuote, ExpectedTrade, RealProgramTrade, RealTick, StreamKind, TradeSide};
 use crate::config::Secret;
-use crate::market_source::vi::{ViAlert, ViDirection};
+use crate::market_source::vi::{ViAlert, ViDirection, ViMarket};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WireError(pub String);
@@ -929,6 +929,7 @@ impl ViTriggeredStocksResponse {
             let code = StockCode::parse(r.stk_cd.trim()).map_err(|e| WireError(format!("{e}: {:?}", r.stk_cd)))?;
             Ok(ViAlert {
                 code,
+                market: ViMarket::Krx,
                 direction: dispersion_direction(&r.static_dispty_rt).or_else(|| dispersion_direction(&r.dynm_dispty_rt)),
                 trigger_price: won_or_zero(&r.motn_pric)?,
                 static_base: won_or_zero(&r.static_stdpc)?,
@@ -2400,9 +2401,18 @@ fn parse_after_hours(item: &str, values: &Value) -> Result<AfterHoursTotals, Wir
 
 const VI_REAL_TYPE: &str = "1h";
 
+fn vi_target(item: &str) -> Option<(StockCode, ViMarket)> {
+    let trimmed = item.trim();
+    let (raw, market) = match trimmed.strip_suffix("_NX") {
+        Some(code) => (code, ViMarket::Nxt),
+        None => (trimmed, ViMarket::Krx),
+    };
+    StockCode::parse(raw).ok().map(|code| (code, market))
+}
+
 fn parse_vi(item: &str, values: &Value) -> Result<RealItem, WireError> {
     let text = |fid: &str| values.get(fid).and_then(Value::as_str).map(str::trim).unwrap_or_default();
-    let Ok(code) = StockCode::parse(item.trim()) else {
+    let Some((code, market)) = vi_target(item) else {
         return Ok(RealItem::IgnoredVi);
     };
     let direction = match text("9069") {
@@ -2415,6 +2425,7 @@ fn parse_vi(item: &str, values: &Value) -> Result<RealItem, WireError> {
     }
     Ok(RealItem::Vi(ViAlert {
         code,
+        market,
         direction: Some(direction),
         trigger_price: won_or_absent(values, 1221)?,
         static_base: won_or_absent(values, 1236)?,
@@ -2591,15 +2602,17 @@ mod tests {
         let WsFrame::Real(items) = parse_ws_frame(&frame.to_string()).unwrap() else { panic!("REAL이 아니다") };
         let alert = ViAlert {
             code: StockCode::parse("005930").unwrap(),
+            market: ViMarket::Krx,
             direction: Some(ViDirection::Up),
             trigger_price: Price::from_centi(88_100_000),
             static_base: Price::from_centi(80_000_000),
             triggered: TimeOfDay::hms(9, 30, 0).unwrap(),
             released: None,
         };
+        let nxt = ViAlert { market: ViMarket::Nxt, ..alert };
         let released = ViAlert { direction: Some(ViDirection::Down), static_base: None, released: TimeOfDay::hms(9, 32, 14), ..alert };
         let ignored = || Ok(RealItem::IgnoredVi);
-        assert_eq!(items, [Ok(RealItem::Vi(alert)), ignored(), ignored(), ignored(), ignored(), ignored(), ignored(), Ok(RealItem::Vi(released))]);
+        assert_eq!(items, [Ok(RealItem::Vi(alert)), ignored(), Ok(RealItem::Vi(nxt)), ignored(), ignored(), ignored(), ignored(), Ok(RealItem::Vi(released))]);
     }
 
     #[test]

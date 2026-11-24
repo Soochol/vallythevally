@@ -5,7 +5,7 @@ import { releaseMinuteOpen, viBaseSource, viPricesOf } from "./viPrices";
 const MINUTE = 60;
 const TEN = 1_794_186_000;
 const bar = (t: number, o: number) => ({ t, o, h: o + 10, l: o - 10, c: o + 5, v: 1 });
-const state = (patch: Partial<ViState>): ViState => ({ symbol: "005930", active: false, direction: "up", triggerPrice: 881_000, base: null, triggeredAt: TEN, releasedAt: TEN + 134, ...patch });
+const state = (patch: Partial<ViState>): ViState => ({ symbol: "005930", market: "krx", active: false, direction: "up", triggerPrice: 881_000, base: null, triggeredAt: TEN, releasedAt: TEN + 134, ...patch });
 
 test("상승VI는 기준가의 1.1배를 호가 단위로 올리고 하락VI는 0.9배를 내린다", () => {
   expect(viPricesOf(800_000, "stock")).toEqual({ up: 880_000, down: 720_000 });

@@ -56,6 +56,7 @@ fn generated_typescript_matches_the_committed_files() {
         generated::<OrderRejectReason>(),
         generated::<OrderSide>(),
         generated::<ViDirection>(),
+        generated::<ViMarket>(),
         generated::<ViState>(),
         generated::<OrdersAccount>(),
         generated::<OrdersAccountCheck>(),
