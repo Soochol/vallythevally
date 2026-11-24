@@ -244,21 +244,6 @@ export function modifyBuyProblem(fromPrice: number, toPrice: number, openQuantit
   return added > buying.amount ? `정정으로 늘어난 ${added.toLocaleString("ko-KR")}원이 ${overText(buying)}` : null;
 }
 
-export interface EstimateNote {
-  readonly tone: BuyPreview;
-  readonly text: string;
-}
-
-export function estimateNote(won: number, buying: BuyingPower | null): EstimateNote | null {
-  if (buying === null) return null;
-  if (won > buying.amount) {
-    const over = (won - buying.amount).toLocaleString("ko-KR");
-    return { tone: "over", text: buying.policy === "cash_only" ? `현금 ${over}원 초과` : `미수 포함 한도 ${over}원 초과` };
-  }
-  const margin = marginOf(won, buying);
-  return margin > 0 ? { tone: "margin", text: `미수 약 ${margin.toLocaleString("ko-KR")}원 생김` } : null;
-}
-
 export function capacityProblem(side: OrderSide, quantity: number, capacity: Capacity): string | null {
   if (!(quantity > 0)) return "수량을 입력하세요";
   if (side === "sell" && capacity.sellableQuantity !== null && quantity > capacity.sellableQuantity) return `매도 가능 수량(${capacity.sellableQuantity.toLocaleString("ko-KR")})을 넘습니다`;

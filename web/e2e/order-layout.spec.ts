@@ -87,7 +87,8 @@ test("사다리 위에 열 머리 다섯 개가 있고 사다리를 스크롤해
   await openOrderWindow(page, scenario);
   await sizeWindow(page, 436, 480);
   const head = page.getByTestId("order-colhead");
-  await expect(head.locator("span")).toHaveText(["매도주문", "매도잔량", "호가", "매수잔량", "매수주문"]);
+  await expect(head.locator(":scope > span")).toHaveText(["매도주문", "매도잔량", "매수잔량", "매수주문"]);
+  await expect(head.getByTestId("order-explorer")).toHaveText("전체호가");
   await ladder(page).evaluate((element) => { element.scrollTop = 0; });
   const firstRow = (await rows(page).first().boundingBox())!;
   const before = (await head.boundingBox())!;
@@ -135,14 +136,13 @@ test("최소 크기 420x520에서도 현재가 줄과 매도·매수 호가가 �
   ordersOn(scenario);
   tradingApi(scenario);
   await openOrderWindow(page, scenario);
+  await sizeWindow(page, 420, 480);
   const sub = await bookSub(scenario);
   const book: FeedBook = { t: 1, asks: Array.from({ length: 10 }, (_, i) => ({ price: BASE + 100 * (i + 1), qty: 10 + i })), bids: Array.from({ length: 10 }, (_, i) => ({ price: BASE - 100 * i, qty: 20 + i })), totalAskQty: 1000, totalBidQty: 3000, expected: null };
   scenario.live.emit({ type: "feed_book", sub, book });
   pushTrades(scenario, [BASE]);
   await expect(rows(page).locator(".mw-qty-value")).toHaveCount(20);
-  await sizeWindow(page, 420, 480);
   await expect(page.locator(".mw-lr[data-current]")).toHaveCount(1);
-  await page.getByTestId("order-current").click();
   const visible = async () => ladder(page).evaluate((element) => {
     const area = element.getBoundingClientRect();
     const head = element.querySelector(".od-colhead")!.getBoundingClientRect();
@@ -152,33 +152,11 @@ test("최소 크기 420x520에서도 현재가 줄과 매도·매수 호가가 �
     const current = all.findIndex((row) => row.hasAttribute("data-current"));
     return { current: shown(all[current]!), asks: all.filter((row, index) => index < current && row.getAttribute("data-side") === "ask" && shown(row)).length, bids: all.filter((row, index) => index > current && row.getAttribute("data-side") === "bid" && shown(row)).length };
   });
+  await expect.poll(async () => (await visible()).current).toBe(true);
   const seen = await visible();
   expect(seen.current).toBe(true);
   expect(seen.asks).toBeGreaterThanOrEqual(3);
   expect(seen.bids).toBeGreaterThanOrEqual(3);
-});
-
-test("현재가 버튼은 스크롤해 간 사다리에서 현재가 줄을 보이는 영역 안으로 되돌린다", async ({ page, scenario }) => {
-  ordersOn(scenario);
-  tradingApi(scenario);
-  await openOrderWindow(page, scenario);
-  pushTrades(scenario, [BASE]);
-  await sizeWindow(page, 436, 480);
-  await expect(page.locator(".mw-lr[data-current]")).toHaveCount(1);
-  await expect(page.getByTestId("order-current")).toBeEnabled();
-  const inside = () => ladder(page).evaluate((element) => {
-    const area = element.getBoundingClientRect();
-    const box = element.querySelector(".mw-lr[data-current]")!.getBoundingClientRect();
-    return box.top >= area.top && box.bottom <= area.bottom;
-  });
-  await ladder(page).evaluate((element) => { element.scrollTop = element.scrollHeight; });
-  await expect.poll(inside).toBe(false);
-  await page.getByTestId("order-current").click();
-  await expect.poll(inside).toBe(true);
-  await ladder(page).evaluate((element) => { element.scrollTop = 0; });
-  await expect.poll(inside).toBe(false);
-  await page.getByTestId("order-current").click();
-  await expect.poll(inside).toBe(true);
 });
 
 test("폭 436px 창에서 체결 상자와 종목 정보 카드에 잘린 숫자가 없다", async ({ page, scenario }) => {

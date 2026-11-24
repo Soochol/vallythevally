@@ -183,12 +183,11 @@ test("보유가 없는 종목의 매입수량 칸에는 툴팁이 없다", async
 const scrollLadder = (page: Page, top: number | "end") => page.getByTestId("order-ladder").evaluate((element, target) => { element.scrollTop = target === "end" ? element.scrollHeight : target; }, top);
 const fullTickCount = 431;
 
-test("전체 호가는 상한부터 하한까지 스크롤하고 현재가 단추로 가운데에 돌아오며 다시 누르면 20행이다", async ({ page, scenario }) => {
+test("전체 호가는 상한부터 하한까지 스크롤하고 다시 누르면 20행이다", async ({ page, scenario }) => {
   ordersOn(scenario);
   tradingApi(scenario);
   await openOrderWindow(page, scenario);
   lastTrade(scenario, BASE);
-  await expect(page.getByTestId("order-current")).toBeEnabled();
   await page.getByTestId("order-explorer").click();
   await expect(page.getByTestId("order-explorer")).toHaveAttribute("aria-pressed", "true");
   const ladder = page.getByTestId("order-ladder");
@@ -206,11 +205,6 @@ test("전체 호가는 상한부터 하한까지 스크롤하고 현재가 단�
   await expect(cellAt(page, "buy", 49_000)).toBeVisible();
   await scrollLadder(page, 0);
   await expect(cellAt(page, "sell", 91_000)).toBeVisible();
-
-  await page.getByTestId("order-current").click();
-  await expect(cellAt(page, "buy", 91_000)).toHaveCount(0);
-  await expect(current).toBeVisible();
-  await expect(page.getByTestId("order-explorer")).toHaveAttribute("aria-pressed", "true");
 
   await page.getByTestId("order-explorer").click();
   await expect(page.getByTestId("order-explorer")).toHaveAttribute("aria-pressed", "false");
@@ -601,7 +595,7 @@ test("설정 창은 Esc와 바깥 클릭으로 닫히고 머리에 적용 범위
   await expect(page.getByTestId("order-settings")).toHaveCount(0);
 });
 
-test("주문 입력은 두 줄로 사다리 위에, 총잔량 띠와 그 위 접수 합계 줄은 사다리 아래에 있다", async ({ page, scenario }) => {
+test("주문 입력은 한 줄로 사다리 위에, 총잔량 띠와 그 위 접수 합계 줄은 사다리 아래에 있다", async ({ page, scenario }) => {
   ordersOn(scenario);
   tradingApi(scenario);
   await openOrderWindow(page, scenario);
@@ -609,20 +603,16 @@ test("주문 입력은 두 줄로 사다리 위에, 총잔량 띠와 그 위 접
   const ladder = page.getByTestId("order-ladder");
   const ladderTop = await topOf(ladder);
   const ladderBottom = ladderTop + (await ladder.boundingBox())!.height;
-  const firstLine = [page.getByRole("textbox", { name: "수량" }), page.getByRole("group", { name: "수량 방식" }), ...(await page.getByRole("group", { name: "수량 프리셋" }).getByRole("button").all())];
-  const secondLine = [page.getByTestId("order-estimate").locator(".."), page.getByTestId("order-explorer"), page.getByTestId("order-current"), page.getByTestId("order-settings-button")];
-  expect(firstLine).toHaveLength(6);
-  const first = await Promise.all(firstLine.map(topOf));
-  const second = await Promise.all(secondLine.map(topOf));
-  expect(new Set(first.map(Math.round)).size).toBe(1);
-  expect(new Set(second.map(Math.round)).size).toBe(1);
-  expect(second[0]!).toBeGreaterThan(first[0]!);
+  const inputLine = [page.getByRole("textbox", { name: "수량" }), page.getByRole("group", { name: "수량 방식" }), ...(await page.getByRole("group", { name: "수량 프리셋" }).getByRole("button").all()), page.getByTestId("order-settings-button")];
+  expect(inputLine).toHaveLength(7);
+  const topsInLine = await Promise.all(inputLine.map(topOf));
+  expect(new Set(topsInLine.map(Math.round)).size).toBe(1);
   const firstRow = ladderRows(page).first();
   await expect(page.getByTestId("order-status")).toHaveCount(0);
   await expect(win(page)).not.toContainText("호가 칸을 더블클릭해 주문합니다");
-  const toolbarBottom = await page.getByTestId("order-explorer").evaluate((element) => element.getBoundingClientRect().bottom);
+  const quantityBottom = await page.getByRole("textbox", { name: "수량" }).evaluate((element) => element.getBoundingClientRect().bottom);
   const columnHead = (await page.getByTestId("order-colhead").boundingBox())!;
-  expect(columnHead.y - toolbarBottom).toBeLessThan(16);
+  expect(columnHead.y - quantityBottom).toBeLessThan(16);
   expect((await topOf(firstRow)) - (columnHead.y + columnHead.height)).toBeLessThan(8);
   expect(await topOf(page.getByTestId("order-total-ask"))).toBeGreaterThanOrEqual(ladderBottom);
   expect(await topOf(page.getByTestId("order-total-sell"))).toBeGreaterThanOrEqual(ladderBottom);
@@ -655,7 +645,6 @@ test("금액 프리셋을 누르면 수량 칸에 현재가로 나눈 수량이 
   await presetKindButton(page, "금액").click();
   await amountPresetButtons(page).first().click();
   await expect(quantityField(page)).toHaveValue("14");
-  await expect(page.getByTestId("order-estimate")).toHaveText("980,000원");
   const otherPrice = BASE - 900;
   await cellAt(page, "buy", otherPrice).dblclick();
   await pollSaved(() => writesTo(api, "place")).toHaveLength(1);
@@ -691,7 +680,7 @@ test("금액 프리셋으로 채운 수량을 손으로 고치면 고친 수량�
   expect(writesTo(api, "place")[0]!.body).toMatchObject({ price: BASE, quantity: 20 });
 });
 
-test("금액 방식이어도 칸 이름은 수량이고 예상 주문금액 줄에 수량을 따로 보이지 않는다", async ({ page, scenario }) => {
+test("금액 방식이어도 칸 이름은 수량이다", async ({ page, scenario }) => {
   ordersOn(scenario);
   tradingApi(scenario);
   await openOrderWindow(page, scenario);
@@ -700,8 +689,6 @@ test("금액 방식이어도 칸 이름은 수량이고 예상 주문금액 줄�
   await amountPresetButtons(page).first().click();
   await expect(quantityField(page)).toBeVisible();
   await expect(page.getByRole("textbox", { name: "금액" })).toHaveCount(0);
-  await expect(page.getByTestId("order-estimate-quantity")).toHaveCount(0);
-  await expect(page.getByTestId("order-estimate")).toHaveText("980,000원");
 });
 
 test("수량 칸 가운데에 숫자 아닌 글자를 쳐도 커서가 제자리에 있고 싼 종목의 큰 수량도 칸 안에 다 보인다", async ({ page, scenario }) => {

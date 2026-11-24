@@ -16,11 +16,6 @@ export interface HoverCell {
   readonly price: number;
 }
 
-export interface ExplorerScroll {
-  readonly centerPrice: number | null;
-  readonly centerToken: number;
-}
-
 export interface LadderActions {
   place(side: OrderSide, price: number): void;
   cancelOne(orderNo: string): void;
@@ -39,8 +34,11 @@ interface Props {
   readonly actions: LadderActions;
   readonly averagePrice: number | null;
   readonly divider: boolean;
-  readonly explorer?: ExplorerScroll;
-  readonly currentToken: number;
+  readonly explorerOn: boolean;
+  readonly explorerUnavailable: boolean;
+  readonly explorerTitle: string | undefined;
+  readonly onToggleExplorer: () => void;
+  readonly explorerCenterPrice: number | null;
   readonly ladder: RefObject<HTMLDivElement | null>;
   readonly drag: OrderDrag;
   readonly rowSlots?: LadderRowSlots;
@@ -68,13 +66,23 @@ interface CellProps {
   readonly api: CellApi;
 }
 
-const COLUMN_NAMES = ["매도주문", "매도잔량", "호가", "매수잔량", "매수주문"] as const;
 const HEAD_COLUMNS = ladderColumns(true, true);
 
-const LadderHead = memo(function LadderHead() {
+interface HeadProps {
+  readonly explorerOn: boolean;
+  readonly explorerUnavailable: boolean;
+  readonly explorerTitle: string | undefined;
+  readonly onToggleExplorer: () => void;
+}
+
+const LadderHead = memo(function LadderHead({ explorerOn, explorerUnavailable, explorerTitle, onToggleExplorer }: HeadProps) {
   return (
     <div className="od-colhead" data-testid="order-colhead" style={{ gridTemplateColumns: HEAD_COLUMNS }}>
-      {COLUMN_NAMES.map((name) => <span key={name}>{name}</span>)}
+      <span>매도주문</span>
+      <span>매도잔량</span>
+      <button type="button" className="od-colhead-explorer" data-testid="order-explorer" aria-pressed={explorerOn} disabled={explorerUnavailable} title={explorerTitle} onClick={onToggleExplorer}>전체호가</button>
+      <span>매수잔량</span>
+      <span>매수주문</span>
     </div>
   );
 });
@@ -117,17 +125,15 @@ const OrderCell = memo(function OrderCell({ side, price, group, writable, previe
   );
 });
 
-export function OrderLadder({ rows, previousClose, groups, writable, previewQuantity, buying, hover, actions, averagePrice, divider, explorer, currentToken, ladder, drag, rowSlots, expectedPrice }: Props) {
+export function OrderLadder({ rows, previousClose, groups, writable, previewQuantity, buying, hover, actions, averagePrice, divider, explorerOn, explorerUnavailable, explorerTitle, onToggleExplorer, explorerCenterPrice, ladder, drag, rowSlots, expectedPrice }: Props) {
   const [menu, setMenu] = useState<MenuState | null>(null);
   const dragging = useStoreValue(drag.views, (view) => view !== null);
   const api = useMemo<CellApi>(() => ({ hover, drag, actions, openMenu: setMenu }), [hover, drag, actions]);
 
-  const exploring = explorer !== undefined;
+  const exploring = explorerOn;
   const [range, setRange] = useState<RowRange>({ start: 0, end: 0 });
   const rowCount = rows.length;
-  const centerPrice = explorer?.centerPrice ?? null;
-  const centerToken = explorer?.centerToken;
-  const centerIndex = centerPrice === null ? -1 : rows.findIndex((row) => row.price !== null && row.price <= centerPrice);
+  const centerIndex = explorerCenterPrice === null ? -1 : rows.findIndex((row) => row.price !== null && row.price <= explorerCenterPrice);
 
   const measureRange = useCallback(() => {
     const element = ladder.current;
@@ -151,7 +157,7 @@ export function OrderLadder({ rows, previousClose, groups, writable, previewQuan
     if (!exploring || !element || centerIndex < 0) return;
     element.scrollTop = scrollTopToCenter(centerIndex, element.clientHeight);
     measureRange();
-  }, [exploring, centerToken]);
+  }, [exploring]);
 
   const hasCurrent = rows.some((row) => row.current);
   const placed = useRef<number | null>(null);
@@ -166,14 +172,19 @@ export function OrderLadder({ rows, previousClose, groups, writable, previewQuan
 
   useLayoutEffect(() => {
     const element = ladder.current;
-    if (exploring || !element || !hasCurrent || placed.current !== null || element.scrollHeight <= element.clientHeight) return;
-    centerCurrentRow();
+    if (exploring || !element || !hasCurrent || placed.current === -1) return;
+    if (element.scrollHeight > element.clientHeight) centerCurrentRow();
+    if (typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(() => {
+      if (placed.current === -1) {
+        observer.disconnect();
+        return;
+      }
+      if (element.scrollHeight > element.clientHeight) centerCurrentRow();
+    });
+    observer.observe(element);
+    return () => observer.disconnect();
   }, [exploring, hasCurrent, centerCurrentRow, ladder]);
-
-  useLayoutEffect(() => {
-    if (exploring || currentToken === 0) return;
-    centerCurrentRow();
-  }, [currentToken]);
 
   const onLadderScroll = () => {
     if (placed.current === null || ladder.current?.scrollTop !== placed.current) placed.current = -1;
@@ -212,7 +223,7 @@ export function OrderLadder({ rows, previousClose, groups, writable, previewQuan
     <div ref={ladder} className="od-ladder" data-testid="order-ladder" data-explorer={exploring ? "" : undefined} data-dragging={dragging ? "" : undefined} data-divider={divider ? "" : undefined}
       onScroll={onLadderScroll}
       onContextMenu={(e) => { e.preventDefault(); setMenu({ x: e.clientX, y: e.clientY, group: null }); }}>
-      <LadderHead />
+      <LadderHead explorerOn={explorerOn} explorerUnavailable={explorerUnavailable} explorerTitle={explorerTitle} onToggleExplorer={onToggleExplorer} />
       {exploring
         ? <div className="od-explorer-rows" data-testid="order-explorer-rows" style={{ paddingTop: range.start * LADDER_ROW_HEIGHT_PX, paddingBottom: (rowCount - range.end) * LADDER_ROW_HEIGHT_PX }}>{ladderView}</div>
         : ladderView}
