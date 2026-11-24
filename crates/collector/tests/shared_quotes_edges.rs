@@ -113,7 +113,9 @@ async fn a_full_queue_counts_what_it_drops() {
     let shared = folder.path().join("shared");
     let key = KeyName::parse("collect-01").unwrap();
     let at_ms = DAY_ONE_START_MS + i64::from(sec(9, 0, 1)) * 1000;
-    let (feed, worker) = spawn(shared, key, at_ms);
+    let down_sec = sec(9, 0, 10);
+    let live_sec = sec(9, 0, 25);
+    let (feed, worker) = spawn(shared.clone(), key, at_ms);
     let stats = worker.stats();
     let frame = frame_for("005930_AL", &row(sec(9, 0, 1), 10));
 
@@ -122,9 +124,13 @@ async fn a_full_queue_counts_what_it_drops() {
     for _ in 0..capacity + overflow {
         feed.offer(at_ms, &frame);
     }
+    feed.link_down(DAY_ONE_START_MS + i64::from(down_sec) * 1000);
+    feed.link_live(DAY_ONE_START_MS + i64::from(live_sec) * 1000);
     assert_eq!(stats.dropped(), overflow as u64);
 
     drop(feed);
     worker.finish().await;
     assert_eq!(stats.books(), capacity as u64);
+    let day = read_quote_day(&shared, &DAY_ONE.to_string(), CODE).unwrap().unwrap();
+    assert_eq!(day.gaps, [(down_sec, live_sec)]);
 }

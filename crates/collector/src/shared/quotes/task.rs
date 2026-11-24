@@ -54,15 +54,20 @@ impl QuoteStats {
     }
 }
 
-enum Input {
-    Frame { recv_ms: i64, text: Utf8Bytes },
+struct Frame {
+    recv_ms: i64,
+    text: Utf8Bytes,
+}
+
+enum Signal {
     Down { recv_ms: i64 },
     Live { recv_ms: i64 },
 }
 
 #[derive(Clone)]
 pub struct QuoteFeed {
-    input: mpsc::Sender<Input>,
+    frames: mpsc::Sender<Frame>,
+    signals: mpsc::UnboundedSender<Signal>,
     stats: Arc<QuoteStats>,
 }
 
@@ -71,21 +76,17 @@ impl QuoteFeed {
         if !mentions_quote_type(text.as_str()) {
             return;
         }
-        if self.input.try_send(Input::Frame { recv_ms, text: text.clone() }).is_err() {
+        if self.frames.try_send(Frame { recv_ms, text: text.clone() }).is_err() {
             QuoteStats::add(&self.stats.dropped, 1);
         }
     }
 
     pub fn link_down(&self, recv_ms: i64) {
-        if self.input.try_send(Input::Down { recv_ms }).is_err() {
-            QuoteStats::add(&self.stats.dropped, 1);
-        }
+        let _ = self.signals.send(Signal::Down { recv_ms });
     }
 
     pub fn link_live(&self, recv_ms: i64) {
-        if self.input.try_send(Input::Live { recv_ms }).is_err() {
-            QuoteStats::add(&self.stats.dropped, 1);
-        }
+        let _ = self.signals.send(Signal::Live { recv_ms });
     }
 }
 
@@ -109,11 +110,12 @@ impl QuoteWorker {
 }
 
 pub fn spawn(shared_dir: PathBuf, key: KeyName, now_ms: i64) -> (QuoteFeed, QuoteWorker) {
-    let (input, receiver) = mpsc::channel(INPUT_CAPACITY);
+    let (frames_tx, frames_rx) = mpsc::channel(INPUT_CAPACITY);
+    let (signals_tx, signals_rx) = mpsc::unbounded_channel();
     let stats = Arc::new(QuoteStats::default());
     let store = QuoteStore::new(shared_dir, key);
-    let task = tokio::spawn(run(receiver, store, stats.clone(), now_ms));
-    (QuoteFeed { input, stats: stats.clone() }, QuoteWorker { task, stats })
+    let task = tokio::spawn(run(frames_rx, signals_rx, store, stats.clone(), now_ms));
+    (QuoteFeed { frames: frames_tx, signals: signals_tx, stats: stats.clone() }, QuoteWorker { task, stats })
 }
 
 struct QuoteStore {
@@ -209,7 +211,13 @@ struct Aggregator {
     stats: Arc<QuoteStats>,
 }
 
-async fn run(mut input: mpsc::Receiver<Input>, store: QuoteStore, stats: Arc<QuoteStats>, now_ms: i64) {
+async fn run(
+    mut frames: mpsc::Receiver<Frame>,
+    mut signals: mpsc::UnboundedReceiver<Signal>,
+    store: QuoteStore,
+    stats: Arc<QuoteStats>,
+    now_ms: i64,
+) {
     let mut flush = interval_at(Instant::now() + FLUSH_EVERY, FLUSH_EVERY);
     let mut report = interval_at(Instant::now() + REPORT_EVERY, REPORT_EVERY);
     for tick in [&mut flush, &mut report] {
@@ -225,19 +233,26 @@ async fn run(mut input: mpsc::Receiver<Input>, store: QuoteStore, stats: Arc<Quo
         stats,
     };
     aggregator.open_day(KstTime::from_unix_ms(now_ms).date).await;
-    loop {
+    let mut frames_open = true;
+    let mut signals_open = true;
+    while frames_open || signals_open {
         tokio::select! {
-            received = input.recv() => match received {
-                Some(item) => aggregator.take(item).await,
-                None => break,
+            received = frames.recv(), if frames_open => match received {
+                Some(frame) => aggregator.take_frame(frame).await,
+                None => frames_open = false,
+            },
+            received = signals.recv(), if signals_open => match received {
+                Some(signal) => aggregator.take_signal(signal).await,
+                None => signals_open = false,
             },
             _ = flush.tick() => {
-                aggregator.take_queued(&mut input).await;
+                aggregator.take_queued(&mut frames, &mut signals).await;
                 aggregator.flush().await;
             }
             _ = report.tick() => aggregator.report(),
         }
     }
+    aggregator.drain_signals(&mut signals).await;
     aggregator.flush().await;
     aggregator.finish().await;
 }
@@ -296,31 +311,32 @@ impl Aggregator {
         kst
     }
 
-    async fn take(&mut self, item: Input) {
-        match item {
-            Input::Frame { recv_ms, text } => {
-                let kst = self.ensure_day(recv_ms).await;
-                self.now_sec = self.now_sec.max(kst.ms_of_day / 1000);
-                let Some(day) = self.day.as_mut() else {
-                    return;
-                };
-                let stats = &self.stats;
-                let read = read_books(text.as_str(), |code, row| match day.take(code, row) {
-                    Applied::Counted => QuoteStats::add(&stats.books, 1),
-                    Applied::TooLate => QuoteStats::add(&stats.too_late, 1),
-                });
-                match read {
-                    Ok(reading) => QuoteStats::add(&stats.skipped, reading.skipped),
-                    Err(_) => QuoteStats::add(&stats.unreadable, 1),
-                }
-            }
-            Input::Down { recv_ms } => {
+    async fn take_frame(&mut self, frame: Frame) {
+        let kst = self.ensure_day(frame.recv_ms).await;
+        self.now_sec = self.now_sec.max(kst.ms_of_day / 1000);
+        let Some(day) = self.day.as_mut() else {
+            return;
+        };
+        let stats = &self.stats;
+        let read = read_books(frame.text.as_str(), |code, row| match day.take(code, row) {
+            Applied::Counted => QuoteStats::add(&stats.books, 1),
+            Applied::TooLate => QuoteStats::add(&stats.too_late, 1),
+        });
+        match read {
+            Ok(reading) => QuoteStats::add(&stats.skipped, reading.skipped),
+            Err(_) => QuoteStats::add(&stats.unreadable, 1),
+        }
+    }
+
+    async fn take_signal(&mut self, signal: Signal) {
+        match signal {
+            Signal::Down { recv_ms } => {
                 let kst = self.ensure_day(recv_ms).await;
                 if self.down_since.is_none() {
                     self.down_since = Some(kst.ms_of_day / 1000);
                 }
             }
-            Input::Live { recv_ms } => {
+            Signal::Live { recv_ms } => {
                 let kst = self.ensure_day(recv_ms).await;
                 if let Some(from_sec) = self.down_since.take() {
                     let to_sec = kst.ms_of_day / 1000;
@@ -332,13 +348,20 @@ impl Aggregator {
         }
     }
 
-    async fn take_queued(&mut self, input: &mut mpsc::Receiver<Input>) {
-        for _ in 0..input.len() {
-            match input.try_recv() {
-                Ok(item) => self.take(item).await,
+    async fn drain_signals(&mut self, signals: &mut mpsc::UnboundedReceiver<Signal>) {
+        while let Ok(signal) = signals.try_recv() {
+            self.take_signal(signal).await;
+        }
+    }
+
+    async fn take_queued(&mut self, frames: &mut mpsc::Receiver<Frame>, signals: &mut mpsc::UnboundedReceiver<Signal>) {
+        for _ in 0..frames.len() {
+            match frames.try_recv() {
+                Ok(frame) => self.take_frame(frame).await,
                 Err(_) => break,
             }
         }
+        self.drain_signals(signals).await;
     }
 
     async fn flush(&mut self) {
