@@ -34,6 +34,10 @@ struct Entry<'a> {
     values: BookValues,
 }
 
+#[derive(Deserialize)]
+#[serde(transparent)]
+struct BorrowedStr<'a>(#[serde(borrow)] Cow<'a, str>);
+
 #[derive(Default)]
 struct BookValues {
     sec: Option<u32>,
@@ -82,15 +86,15 @@ impl<'de> Deserialize<'de> for BookValues {
                 let mut sec = None;
                 let mut asks = [BookLevel::default(); BOOK_DEPTH];
                 let mut bids = [BookLevel::default(); BOOK_DEPTH];
-                while let Some(key) = map.next_key::<Cow<'de, str>>()? {
+                while let Some(BorrowedStr(key)) = map.next_key::<BorrowedStr<'de>>()? {
                     if key.as_ref() == "21" {
-                        if let Some(value) = map.next_value::<Option<Cow<'de, str>>>()? {
+                        if let Some(BorrowedStr(value)) = map.next_value::<Option<BorrowedStr<'de>>>()? {
                             sec = seconds_of_day(value.as_ref());
                         }
                     } else if let Some((is_ask, index, field)) = classify_fid(key.as_ref()) {
                         let parsed = map
-                            .next_value::<Option<Cow<'de, str>>>()?
-                            .and_then(|value| quantity_of(value.as_ref()))
+                            .next_value::<Option<BorrowedStr<'de>>>()?
+                            .and_then(|BorrowedStr(value)| quantity_of(value.as_ref()))
                             .unwrap_or(0);
                         let level = if is_ask { &mut asks[index] } else { &mut bids[index] };
                         match field {
@@ -177,5 +181,22 @@ mod tests {
         ]}"#;
         let reading = read_books(frame, |_, _| panic!("유효한 호가가 없다")).unwrap();
         assert_eq!(reading, Reading { books: 0, skipped: 3 });
+    }
+
+    #[test]
+    fn borrows_unescaped_strings_and_still_reads_escaped_values() {
+        let borrowed: BorrowedStr<'_> = serde_json::from_str(r#""+10100""#).unwrap();
+        assert!(matches!(borrowed.0, Cow::Borrowed("+10100")));
+        let escaped: BorrowedStr<'_> = serde_json::from_str(r#""\u002b10100""#).unwrap();
+        assert!(matches!(escaped.0, Cow::Owned(ref text) if text == "+10100"));
+
+        let frame = r#"{"trnm":"REAL","data":[{"type":"0D","item":"005930_AL","values":{"21":"\u003090159","41":"\u002b10100","61":"12"}}]}"#;
+        let mut seen = Vec::new();
+        let reading = read_books(frame, |code, row| seen.push((code.to_owned(), *row))).unwrap();
+        assert_eq!(reading, Reading { books: 1, skipped: 0 });
+        assert_eq!(seen[0].0, "005930");
+        assert_eq!(seen[0].1.sec, 9 * 3600 + 60 + 59);
+        assert_eq!(seen[0].1.asks[0].price, 10_100);
+        assert_eq!(seen[0].1.asks[0].combined, 12);
     }
 }
