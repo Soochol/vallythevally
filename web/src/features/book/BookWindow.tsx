@@ -21,7 +21,7 @@ import { MarketHead } from "../market-window/MarketHead";
 import { SymbolHead } from "../market-window/SymbolHead";
 import { ReplayStrip } from "../book-replay/ReplayStrip";
 import { replayReference } from "../book-replay/replay";
-import { useBookReplay } from "../book-replay/useBookReplay";
+import { useBookReplay, useBookReplayEnabled } from "../book-replay/useBookReplay";
 import { serverNow, useServerClock } from "../../stores/serverClock";
 import { ladderColumns } from "../market-window/PriceLadder";
 import { ratioSplit } from "../market-window/ladder";
@@ -45,6 +45,7 @@ function BookBody({ code, pager }: { code: SymbolCode; pager: InfoPager }) {
   const { skipSpreadGap, rate } = useOrderSettings();
   const trades = useLadderTrades(code, venue);
   const feed = useBookFeed(code, venue, trades.lastTrade);
+  const replayEnabled = useBookReplayEnabled();
   const replay = useBookReplay(code);
   const limits = useFundamentals(code).data;
   const symbolInfo = useSymbolInfo(code).data;
@@ -90,7 +91,7 @@ function BookBody({ code, pager }: { code: SymbolCode; pager: InfoPager }) {
       ) : (
         <SymbolHead code={code} name={symbolInfo?.name ?? null} lastPrice={replay.kind === "past" ? replay.lastPrice : null} previousClose={replayRef?.previousClose ?? null} nxtTraded={symbolInfo?.nxtEnabled === true} mock={false} testIdPrefix="market-symbol" />
       )}
-      <ReplayStrip view={replay} />
+      {replayEnabled && <ReplayStrip view={replay} />}
       {notice && <Notice tone="warning" className="mw-notice">{notice}</Notice>}
       {replay.kind === "live" && !feed.connected && notice === null && <FeedStrip since={downSince} />}
       {view !== null && <BookColumnHead />}

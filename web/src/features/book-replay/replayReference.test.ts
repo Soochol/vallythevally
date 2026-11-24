@@ -1,7 +1,9 @@
 import { expect, test } from "vitest";
+import type { BookReplayDay } from "../../api/generated/BookReplayDay";
+import { barInterval } from "../../chart/crosshairSync";
 import { buildDefaultLadder } from "../market-window/ladder";
 import { tickRuleOf } from "../market-window/tick";
-import { replayReference } from "./replay";
+import { replayReference, todayRefreshDelayMs } from "./replay";
 
 const TODAY_MIDNIGHT = Date.UTC(2026, 10, 22, 15, 0, 0) / 1000;
 const DAY_SECONDS = 86_400;
@@ -29,4 +31,27 @@ test("오늘 봉은 실시간 전일 종가와 상·하한가를 쓰고, 지난 
   expect(rows.some((row) => row.price === 120_000 && row.ask?.quantity === 50)).toBe(true);
   expect(rows.some((row) => row.price === 119_900 && row.bid?.quantity === 80)).toBe(true);
   expect(rows.every((row) => row.rate === null)).toBe(true);
+});
+
+test("오늘 마감 봉이 미수집이면 응답 나이에 따라 즉시 또는 남은 시간 뒤에 다시 받는다", () => {
+  const at = (hour: number, minute: number) => TODAY_MIDNIGHT + hour * 3600 + minute * 60;
+  const day: BookReplayDay = {
+    symbol: "005930",
+    date: "20261123",
+    coverage: "collected",
+    covered: [[540, 544]],
+    books: [{ minute: 540, asks: [[71_200, 10]], bids: [[71_100, 20]], totalAsk: 10, totalBid: 20 }],
+    trades: [],
+  };
+  const bar0900 = barInterval(at(9, 0), "5m");
+  const bar0905 = barInterval(at(9, 5), "5m");
+  const bar0910 = barInterval(at(9, 10), "5m");
+  const now = at(9, 12);
+
+  expect(todayRefreshDelayMs(day, bar0900, now, 1000, 25_000, 20_000)).toBeNull();
+  expect(todayRefreshDelayMs(day, bar0910, now, 1000, 25_000, 20_000)).toBeNull();
+  expect(todayRefreshDelayMs(day, bar0905, now, 1000, 25_000, 20_000)).toBe(0);
+  expect(todayRefreshDelayMs(day, bar0905, now, 1000, 13_000, 20_000)).toBe(8_000);
+  expect(todayRefreshDelayMs({ ...day, coverage: "day_not_collected", covered: [] }, bar0905, now, 1000, 21_000, 20_000)).toBe(0);
+  expect(todayRefreshDelayMs(day, barInterval(at(9, 5) - DAY_SECONDS, "5m"), now, 1000, 25_000, 20_000)).toBeNull();
 });

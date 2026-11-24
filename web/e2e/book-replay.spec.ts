@@ -317,3 +317,80 @@ test("지난 날 봉은 등락률 없이 오늘 상·하한가 밖 호가도 그
   await expect(bookWindow(page).getByTestId("price-ladder")).toContainText("119,900");
   await expect(bookWindow(page).locator(".mw-px small")).toHaveCount(0);
 });
+
+test("오늘 마감 봉이 미수집이고 응답이 20초 넘었으면 곧바로 다시 받고 다른 봉을 스쳐도 20초 주기가 밀리지 않는다", async ({ page, scenario }) => {
+  await page.clock.install({ time: new Date("2026-11-23T09:20:00+09:00") });
+  seedLayout(scenario);
+  seedMarket(scenario, 80_000);
+  scenario.reply("/api/book-replay/access", { body: { available: true } });
+
+  const initialDay: BookReplayDay = {
+    symbol: CODE,
+    date: "20261123",
+    coverage: "collected",
+    covered: [[540, 544]],
+    books: [
+      { minute: 540, asks: [[71_200, 120]], bids: [[71_100, 150]], totalAsk: 1_200, totalBid: 2_400 },
+    ],
+    trades: [[540, 32_420, 71_200, 25]],
+  };
+  const updatedDay: BookReplayDay = {
+    ...initialDay,
+    covered: [[540, 550]],
+    books: [
+      ...initialDay.books,
+      { minute: 549, asks: [[71_900, 90]], bids: [[71_800, 110]], totalAsk: 900, totalBid: 1_100 },
+    ],
+    trades: [...initialDay.trades, [549, 32_990, 71_900, 15]],
+  };
+
+  let requests = 0;
+  scenario.on(
+    (url) => url.pathname === `/api/symbols/${CODE}/book-replay` && url.searchParams.get("date") === "20261123",
+    () => {
+      requests++;
+      return { body: requests >= 3 ? updatedDay : initialDay };
+    },
+  );
+
+  await page.goto("/");
+  await expect(cell(page)).toHaveAttribute("aria-busy", "false");
+  await replayToggle(page).click();
+
+  const bar0900 = await barCoordinate(page, at(9, 0));
+  const bar0905 = await barCoordinate(page, at(9, 5));
+
+  await page.mouse.move(bar0900.x, bar0900.y);
+  await frames(page);
+  await expect(bookWindow(page).getByTestId("price-ladder")).toContainText("71,200");
+  expect(requests).toBe(1);
+
+  await page.clock.fastForward(25_000);
+  await page.mouse.move(bar0905.x, bar0905.y);
+  await frames(page);
+  await pollSaved(() => requests).toBe(2);
+  await expect(bookWindow(page).getByTestId("replay-strip")).toHaveText("아직 수집되지 않은 구간입니다");
+
+  await page.clock.fastForward(10_000);
+  await page.mouse.move(bar0900.x, bar0900.y);
+  await frames(page);
+  await expect(bookWindow(page).getByTestId("price-ladder")).toContainText("71,200");
+
+  await page.mouse.move(bar0905.x, bar0905.y);
+  await frames(page);
+  expect(requests).toBe(2);
+
+  await page.clock.fastForward(10_000);
+  await pollSaved(() => requests).toBe(3);
+  await expect(bookWindow(page)).toHaveAttribute("data-replay", "past");
+  await expect(bookWindow(page).getByTestId("price-ladder")).toContainText("71,900");
+});
+
+test("공개 모드에서는 book-replay 경로를 호출하지 않고 스위치가 보이지 않는다", async ({ page, scenario }) => {
+  scenario.publicMode.enable({ provider: "google", createdAt: Math.floor(scenario.now / 1000) });
+  await page.goto("/");
+  await expect(page.getByRole("toolbar", { name: "차트 도구 막대" })).toBeVisible();
+  await expect(replayToggle(page)).toHaveCount(0);
+  const replayCalls = scenario.requests.filter((request) => new URL(request.url()).pathname.includes("book-replay"));
+  expect(replayCalls).toHaveLength(0);
+});

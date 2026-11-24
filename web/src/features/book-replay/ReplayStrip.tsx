@@ -11,22 +11,24 @@ function formatReplayAt(at: UnixSeconds): string {
   return `${pad2(date.getUTCMonth() + 1)}/${pad2(date.getUTCDate())} ${pad2(date.getUTCHours())}:${pad2(date.getUTCMinutes())}:${pad2(date.getUTCSeconds())}`;
 }
 
+function PastReplayStrip({ at }: { readonly at: UnixSeconds }) {
+  const appVenue = useVenue();
+  return (
+    <div className="mw-replay-strip" role="status" data-testid="replay-strip" data-kind="past">
+      <span>{`수집 호가 · ${formatReplayAt(at)}`}</span>
+      {appVenue !== "combined" && (
+        <span className="mw-integrated mw-replay-venue" data-testid="replay-venue" title="수집 호가는 통합 시세입니다">
+          통합
+        </span>
+      )}
+    </div>
+  );
+}
+
 export function ReplayStrip({ view }: { readonly view: ReplayView }) {
   const enabled = useBookReplayEnabled();
-  const appVenue = useVenue();
   if (!enabled) return null;
-  if (view.kind === "past") {
-    return (
-      <div className="mw-replay-strip" role="status" data-testid="replay-strip" data-kind="past">
-        <span>{`수집 호가 · ${formatReplayAt(view.at)}`}</span>
-        {appVenue !== "combined" && (
-          <span className="mw-integrated mw-replay-venue" data-testid="replay-venue" title="수집 호가는 통합 시세입니다">
-            통합
-          </span>
-        )}
-      </div>
-    );
-  }
+  if (view.kind === "past") return <PastReplayStrip at={view.at} />;
   if (view.kind === "none") {
     return (
       <div className="mw-replay-strip" role="status" data-testid="replay-strip" data-kind="none">

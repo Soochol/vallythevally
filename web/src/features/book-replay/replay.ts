@@ -117,6 +117,27 @@ export function replayReference(at: UnixSeconds, now: UnixSeconds, live: ReplayR
   return { previousClose: null, bounds: NO_BOUNDS };
 }
 
+export function todayRefreshDelayMs(
+  day: BookReplayDay,
+  bar: BarInterval,
+  now: UnixSeconds,
+  updatedAtMs: number,
+  nowMs: number,
+  intervalMs: number,
+): number | null {
+  if (now < bar.end) return null;
+  if (kstDateOf(bar.end - 1) !== kstDateOf(now)) return null;
+  const uncollected =
+    day.coverage === "day_not_collected" ||
+    day.coverage === "symbol_not_collected" ||
+    (() => {
+      const view = replayView(day, bar, now);
+      return view.kind === "none" && view.reason === REPLAY_REASON.afterLastCovered;
+    })();
+  if (!uncollected) return null;
+  return Math.max(0, intervalMs - Math.max(0, nowMs - updatedAtMs));
+}
+
 export function replayView(day: BookReplayDay, bar: BarInterval, now: UnixSeconds): ReplayView {
   if (now < bar.end) return { kind: "none", reason: REPLAY_REASON.inProgress };
   if (day.coverage === "day_not_collected") return { kind: "none", reason: REPLAY_REASON.dayNotCollected };
