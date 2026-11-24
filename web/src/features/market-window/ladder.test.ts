@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { basePrice, buildDefaultLadder, buildLadder, buildLadderRows, defaultLadderPrices, gridPrices, isSinglePriceBook, LADDER_ROWS, ratioSplit, type BookLevel } from "./ladder";
+import { basePrice, buildDefaultLadder, buildLadder, buildLadderRows, defaultLadderPrices, gridPrices, isSinglePriceBook, LADDER_ROWS, ratioSplit, withVisibleRepeats, type BookLevel } from "./ladder";
 import { expectedInfoItems, infoCardRows, placeInfoItems, quoteInfoItems } from "./quoteInfo";
 
 const NO_BOUNDS = { lower: null, upper: null };
@@ -236,15 +236,22 @@ test("호가가 하나도 없으면 현재가, 없으면 전일종가를 가운�
   expect(prices(captured({ asks: [], bids: [], lastPrice: null, previousClose: null })).every((price) => price === null)).toBe(true);
 });
 
-test("교차 호가는 매도 1호가를 기준으로 그리고 같은 가격 행에 양쪽 잔량을 붙인다", () => {
+test("교차 호가는 위 열 줄에 매도, 아래 열 줄에 매수를 따로 두고 같은 가격의 현재가 표시는 첫 행에만 붙는다", () => {
   const asks = Array.from({ length: 10 }, (_, i) => level(196_400 + 100 * i, 100 + i));
   const bids = Array.from({ length: 10 }, (_, i) => level(196_500 - 100 * i, 200 + i));
   const rows = captured({ asks, bids, lastPrice: 196_500 });
-  expect(prices(rows)[9]).toBe(196_400);
   expect(prices(rows)[8]).toBe(196_500);
-  expect([rows[9]!.ask?.quantity, rows[9]!.bid?.quantity]).toEqual([100, 201]);
-  expect([rows[8]!.ask?.quantity, rows[8]!.bid?.quantity]).toEqual([101, 200]);
-  expect(rows.filter((row) => row.current).map((row) => row.price)).toEqual([196_500]);
+  expect(prices(rows)[9]).toBe(196_400);
+  expect(prices(rows)[10]).toBe(196_500);
+  expect(prices(rows)[11]).toBe(196_400);
+  expect(prices(rows)[19]).toBe(195_600);
+  expect([rows[8]!.ask?.quantity, rows[8]!.bid]).toEqual([101, null]);
+  expect([rows[9]!.ask?.quantity, rows[9]!.bid]).toEqual([100, null]);
+  expect([rows[10]!.ask, rows[10]!.bid?.quantity]).toEqual([null, 200]);
+  expect([rows[11]!.ask, rows[11]!.bid?.quantity]).toEqual([null, 201]);
+  expect(rows.filter((row) => row.current).map((row) => rows.indexOf(row))).toEqual([8]);
+  expect(rows.map((row, index) => [index, row.repeat]).filter(([, repeat]) => repeat)).toEqual([[10, true], [11, true]]);
+  expect(new Set(rows.map((row) => row.key)).size).toBe(LADDER_ROWS);
 });
 
 test("상·하한가 밖 행은 비운다", () => {
@@ -297,4 +304,17 @@ test("교차 단일가 호가에서 같은 가격이 두 행에 있으면 현재
   expect(rows.filter((row) => row.current).map((row) => rows.indexOf(row))).toEqual([8]);
   expect(rows.map((row, index) => [index, row.repeat]).filter(([, repeat]) => repeat)).toEqual([[10, true], [11, true]]);
   expect(buildLadder({ asks: [], bids: [], lastPrice: 70_000, previousClose: null, bounds: NO_BOUNDS, tickRule: "stock" }).some((row) => row.repeat)).toBe(false);
+});
+
+test("보이는 행이 줄어 잘린 교차 가격은 남은 첫 줄이 현재가·비반복이 되고 막대 비율은 20행 기준을 유지한다", () => {
+  const asks = Array.from({ length: 10 }, (_, i) => level(70_100 + 100 * i, i === 9 ? 10_000 : 100));
+  const bids = Array.from({ length: 10 }, (_, i) => level(70_600 - 100 * i, 500));
+  const full = buildDefaultLadder({ asks, bids, lastPrice: 70_600, previousClose: 70_000, bounds: NO_BOUNDS, tickRule: "stock" });
+  const sliced = full.slice(5, 15);
+  const visible = withVisibleRepeats(sliced, 70_600);
+  expect(visible[5]!.price).toBe(70_600);
+  expect([visible[5]!.repeat, visible[5]!.current]).toEqual([false, true]);
+  expect([visible[0]!.repeat, visible[6]!.repeat]).toEqual([false, true]);
+  expect(visible[5]!.bidRatio).toBe(sliced[5]!.bidRatio);
+  expect(visible[5]!.bidRatio).toBeCloseTo(0.05);
 });

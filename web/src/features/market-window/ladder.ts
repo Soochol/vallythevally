@@ -110,19 +110,41 @@ const bestBidPrice = ({ bids }: LadderQuotes): number | null => {
   return prices.length > 0 ? Math.max(...prices) : null;
 };
 
-function askAnchoredPrices(input: LadderInput, bestAsk: number): (number | null)[] {
+function splitSideGrid(bestAsk: number, bestBid: number, bounds: PriceBounds, rule: TickRule): (number | null)[] {
+  const listed = (price: number): number | null => (withinBounds(price, bounds) ? price : null);
+  const prices = Array<number | null>(LADDER_ROWS).fill(null);
+  let price = bestAsk;
+  prices[ROWS_ABOVE_BASE - 1] = listed(price);
+  for (let row = ROWS_ABOVE_BASE - 2; row >= 0; row--) {
+    price = stepPrice(price, 1, rule);
+    prices[row] = listed(price);
+  }
+  price = bestBid;
+  prices[ROWS_ABOVE_BASE] = listed(price);
+  for (let row = ROWS_ABOVE_BASE + 1; row < LADDER_ROWS; row++) {
+    price = stepPrice(price, -1, rule);
+    prices[row] = listed(price);
+  }
+  return prices;
+}
+
+function askAnchoredLadder(input: LadderInput, bestAsk: number): LadderPrices {
   const { bounds, tickRule } = input;
-  const grid = gridAround(bestAsk, ROWS_ABOVE_BASE - 1, bounds, tickRule);
   const bestBid = bestBidPrice(input);
+  if (bestBid !== null && bestBid >= bestAsk) {
+    return { prices: splitSideGrid(bestAsk, bestBid, bounds, tickRule), sidesSplit: true };
+  }
   const spreadHasGap = bestBid !== null && bestBid < stepPrice(bestAsk, -1, tickRule);
-  if (!input.skipSpreadGap || !spreadHasGap) return grid;
-  return [...grid.slice(0, ROWS_ABOVE_BASE), ...gridAround(bestBid, ROWS_ABOVE_BASE, bounds, tickRule).slice(ROWS_ABOVE_BASE)];
+  if (input.skipSpreadGap && spreadHasGap) {
+    return { prices: splitSideGrid(bestAsk, bestBid, bounds, tickRule), sidesSplit: false };
+  }
+  return { prices: gridAround(bestAsk, ROWS_ABOVE_BASE - 1, bounds, tickRule), sidesSplit: false };
 }
 
 export function defaultLadderPrices(input: LadderInput): LadderPrices {
   if (isSinglePriceBook(input)) return { prices: singlePricePrices(input), sidesSplit: true };
   const bestAsk = bestAskPrice(input);
-  if (bestAsk !== null) return { prices: askAnchoredPrices(input, bestAsk), sidesSplit: false };
+  if (bestAsk !== null) return askAnchoredLadder(input, bestAsk);
   return { prices: gridPrices(bestBidPrice(input) ?? basePrice(input), input.bounds, input.tickRule), sidesSplit: false };
 }
 
@@ -161,6 +183,17 @@ export function buildLadder(input: LadderInput): LadderRow[] {
 export function buildDefaultLadder(input: LadderInput): LadderRow[] {
   const { prices, sidesSplit } = defaultLadderPrices(input);
   return buildLadderRows(prices, input, sidesSplit);
+}
+
+export function withVisibleRepeats(rows: readonly LadderRow[], lastPrice: number | null): readonly LadderRow[] {
+  if (!rows.some((row) => row.repeat)) return rows;
+  const shown = new Set<number>();
+  return rows.map((row) => {
+    const repeat = row.price !== null && shown.has(row.price);
+    if (row.price !== null) shown.add(row.price);
+    const current = row.price !== null && row.price === lastPrice && !repeat;
+    return row.repeat === repeat && row.current === current ? row : { ...row, repeat, current };
+  });
 }
 
 export interface RatioSplit {

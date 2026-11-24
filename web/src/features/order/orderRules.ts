@@ -140,7 +140,7 @@ export type DragSource =
   | { readonly kind: "total"; readonly side: OrderSide; readonly groups: readonly PriceGroup[] };
 
 export type DragTarget =
-  | { readonly kind: "cell"; readonly side: OrderSide; readonly price: number }
+  | { readonly kind: "cell"; readonly side: OrderSide; readonly price: number; readonly rowKey?: string }
   | { readonly kind: "ladder" }
   | { readonly kind: "origin" }
   | { readonly kind: "outside" };

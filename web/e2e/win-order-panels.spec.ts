@@ -1185,10 +1185,11 @@ test("교차 단일가 호가에서 같은 가격이 두 행에 있어도 주문
   expect(writesTo(api, "place")[0]!.body).toMatchObject({ side: "buy", price: 70_100 });
 });
 
-test("교차 호가로 카드 자리 행에 매수 잔량이 있으면 잔량이 가려지지 않고 카드는 그 행 위까지만이다", async ({ page, scenario }) => {
+test("교차 호가에서도 매수 잔량은 아래 열 줄에 놓여 정보란에 가려지지 않고 같은 가격 올림 미리보기는 한 줄에만 뜬다", async ({ page, scenario }) => {
   ordersOn(scenario);
   tradingApi(scenario);
   await openOrderWindow(page, scenario);
+  const beforeHeight = (await infoCard(page).boundingBox())!.height;
   let sub = "";
   await pollSaved(() => {
     const message = scenario.live.messages.find((m) => m.type === "subscribe_feed" && m.kind === "book" && m.symbol === CODE);
@@ -1196,15 +1197,15 @@ test("교차 호가로 카드 자리 행에 매수 잔량이 있으면 잔량이
     return sub;
   }).not.toBe("");
   scenario.live.emit({ type: "feed_book", sub, book: { t: 1, asks: [{ price: 70_100, qty: 50 }, { price: 70_200, qty: 40 }, { price: 70_300, qty: 30 }, { price: 70_400, qty: 20 }], bids: [{ price: 70_700, qty: 33 }, { price: 70_000, qty: 80 }], totalAskQty: 140, totalBidQty: 113, expected: null } });
-  const crossed = ladderRows(page).filter({ has: page.locator(".mw-px-num", { hasText: /^70,700$/ }) });
-  await expect(crossed.locator(".mw-qty[data-side=bid] .mw-qty-value")).toHaveText("33");
-  const rowTop = (await crossed.boundingBox())!.y;
+  const bestBidRow = ladderRows(page).nth(10);
+  await expect(bestBidRow.locator(".mw-px-num")).toHaveText("70,700");
+  await expect(bestBidRow.locator(".mw-qty[data-side=bid] .mw-qty-value")).toHaveText("33");
+  const rowTop = (await bestBidRow.boundingBox())!.y;
   const card = (await infoCard(page).boundingBox())!;
   expect(card.y + card.height).toBeLessThanOrEqual(rowTop + 0.5);
-  const info = page.getByTestId("ladder-info");
-  await expect(info.filter({ hasText: "거래대금" })).toHaveCount(0);
-  const crossedIndex = (await tops(ladderRows(page))).indexOf(Math.round(rowTop * 10) / 10);
-  expect(card.height).toBe(crossedIndex * 24);
+  expect(card.height).toBe(beforeHeight);
+  await bestBidRow.locator('[data-order-cell][data-side="buy"]').hover();
+  await expect(page.getByTestId("order-preview")).toHaveCount(1);
 });
 
 test.describe("수요일 08:55 동시호가", () => {

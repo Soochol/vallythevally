@@ -216,18 +216,19 @@ test("고가·저가가 없으면 대시로 보이고 정보란 높이와 아래
   expect(Math.abs(pager.y + pager.height / 2 - (card.y + card.height - CARD_ROW_HEIGHT / 2))).toBeLessThanOrEqual(2);
 });
 
-test("교차 호가로 카드 자리 행에 매수 잔량이 있으면 잔량이 가려지지 않고 카드는 그 행 위까지만이다", async ({ page, scenario }) => {
+test("교차 호가에서도 매수 잔량은 아래 열 줄에 놓여 정보란에 가려지지 않는다", async ({ page, scenario }) => {
   await open(page, scenario, 70000);
+  const beforeHeight = (await infoCard(page).boundingBox())!.height;
   const bookSub = await subOf(scenario, "book");
   scenario.live.emit({ type: "feed_book", sub: bookSub, book: liveOf([[70_100, 50], [70_200, 40], [70_300, 30], [70_400, 20]], [[70_700, 33], [70_000, 80], [69_900, 60]], [140, 173]) });
-  const crossed = ladderRows(page).filter({ has: page.locator(".mw-px-num", { hasText: /^70,700$/ }) });
-  await expect(crossed.locator(".mw-qty[data-side=bid] .mw-qty-value")).toHaveText("33");
-  const rowTop = (await crossed.boundingBox())!.y;
+  const bestBidRow = ladderRows(page).nth(10);
+  await expect(bestBidRow.locator(".mw-px-num")).toHaveText("70,700");
+  await expect(bestBidRow.locator(".mw-qty[data-side=bid] .mw-qty-value")).toHaveText("33");
+  await expect(ladderRows(page).locator(".mw-qty[data-side=bid] .mw-qty-value")).toHaveCount(3);
+  const rowTop = (await bestBidRow.boundingBox())!.y;
   const card = (await infoCard(page).boundingBox())!;
   expect(card.y + card.height).toBeLessThanOrEqual(rowTop + 0.5);
-  const crossedIndex = (await tops(ladderRows(page))).indexOf(Math.round(rowTop * 10) / 10);
-  expect(card.height).toBe(crossedIndex * CARD_ROW_HEIGHT);
-  await expect(page.getByTestId("ladder-info").filter({ hasText: "거래대금" })).toHaveCount(0);
+  expect(card.height).toBe(beforeHeight);
 });
 
 const AUCTION_ASKS: [number, number][] = [[819_000, 934], [820_000, 1_533], [821_000, 418]];
@@ -640,19 +641,19 @@ test("10호가창을 최소 폭 280px까지 줄여도 7자리 가격 옆 7자리
   }
 });
 
-test("교차 가격 행 하나에 매도·매수 잔량이 함께 있고 현재가 행은 하나다", async ({ page, scenario }) => {
+test("교차 호가에서 같은 가격은 매도 줄과 매수 줄로 나뉘고 현재가 행은 하나다", async ({ page, scenario }) => {
   await open(page, scenario, 70000);
   const bookSub = await subOf(scenario, "book");
   scenario.live.emit({ type: "feed_book", sub: bookSub, book: liveOf([[70000, 30], [70100, 20], [70200, 10], [70300, 5]], [[70100, 25], [70000, 15]], [65, 40]) });
   await emitTrade(scenario, 1, 70100, 1);
   await expect(page.locator(".mw-lr[data-current]")).toHaveCount(1);
   const crossed = ladderRows(page).filter({ has: page.locator(".mw-px-num", { hasText: /^70,100$/ }) });
-  await expect(crossed).toHaveCount(1);
-  await expect(crossed.locator(".mw-qty[data-side=ask] .mw-qty-value")).toHaveText("20");
-  await expect(crossed.locator(".mw-qty[data-side=bid] .mw-qty-value")).toHaveText("25");
+  await expect(crossed).toHaveCount(2);
+  await expect(crossed.first().locator(".mw-qty[data-side=ask] .mw-qty-value")).toHaveText("20");
+  await expect(crossed.first().locator(".mw-qty[data-side=bid] .mw-qty-value")).toHaveCount(0);
+  await expect(crossed.last().locator(".mw-qty[data-side=bid] .mw-qty-value")).toHaveText("25");
+  await expect(crossed.last().locator(".mw-qty[data-side=ask] .mw-qty-value")).toHaveCount(0);
   await expect(page.locator(".mw-lr[data-current]")).toContainText("70,100");
-  const shown = await ladderRows(page).locator(".mw-px-num").allTextContents();
-  expect(new Set(shown).size).toBe(shown.length);
 });
 
 test("ETF는 5원 호가 단위 격자로 받은 스무 단이 모두 자기 행에 보인다", async ({ page, scenario }) => {
@@ -965,18 +966,18 @@ test.describe("동시호가 예상체결", () => {
       await expect(info(page, "예상체결가").locator("b")).toHaveText("70,000");
     });
 
-    test("9행에 매수 잔량이 있으면 카드가 8행으로 줄고 예상체결 두 항목이 그 끝으로 올라가며 기준가는 남는다", async ({ page, scenario }) => {
+    test("교차 호가에서도 매수 잔량은 아래 열 줄에 놓여 카드가 줄지 않고 예상체결 두 항목이 보인다", async ({ page, scenario }) => {
       await open(page, scenario, 70000);
+      const beforeHeight = (await infoCard(page).boundingBox())!.height;
       const bookSub = await subOf(scenario, "book");
       scenario.live.emit({ type: "feed_book", sub: bookSub, book: frame(scenario, [[70100, 50], [70200, 40], [70300, 30], [70400, 20]], [[70200, 25], [70000, 80], [69900, 60]], EXPECTED) });
+      await expect(ladderRows(page).nth(10).locator(".mw-px-num")).toHaveText("70,200");
+      await expect(ladderRows(page).nth(10).locator(".mw-qty[data-side=bid] .mw-qty-value")).toHaveText("25");
       await expect(info(page, "예상체결가")).toBeVisible();
       await expect(info(page, "예상체결량")).toBeVisible();
-      await expect(info(page, "거래대금")).toHaveCount(0);
-      const rowTops = await tops(ladderRows(page));
-      await expect(info(page, "기준가")).toBeVisible();
-      expect(await tops(info(page, "예상체결가"))).toEqual([rowTops[5]]);
-      expect(await tops(info(page, "예상체결량"))).toEqual([rowTops[6]]);
-      expect((await infoCard(page).boundingBox())!.height).toBe(8 * CARD_ROW_HEIGHT);
+      const card = (await infoCard(page).boundingBox())!;
+      expect(card.height).toBe(beforeHeight);
+      expect(card.y + card.height).toBeLessThanOrEqual((await ladderRows(page).nth(10).boundingBox())!.y + 0.5);
     });
 
     test("동시호가 예상체결 줄은 시세 쪽에만 붙는다", async ({ page, scenario }) => {
