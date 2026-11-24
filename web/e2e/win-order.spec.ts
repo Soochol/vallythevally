@@ -347,16 +347,12 @@ test("1억원 이상 주문은 확인 상자를 눌러야 보내진다", async (
   const quantity = page.getByLabel("수량", { exact: true });
 
   await quantity.fill("1428");
-  await cellAt(page, "buy", 70_000).hover();
-  await expect(page.getByTestId("order-estimate")).toHaveText("99,960,000원");
   await cellAt(page, "buy", 70_000).dblclick();
   await pollSaved(() => writesTo(api, "place")).toHaveLength(1);
   expect(writesTo(api, "place")[0]!.body.confirmHighValue).toBe(false);
   await expect(page.getByTestId("order-confirm")).toHaveCount(0);
 
   await quantity.fill("1429");
-  await cellAt(page, "buy", 70_000).hover();
-  await expect(page.getByTestId("order-estimate")).toHaveText("100,030,000원");
   await cellAt(page, "buy", 70_000).dblclick();
   const dialog = page.getByRole("dialog");
   await expect(dialog).toContainText("고액 주문 확인");

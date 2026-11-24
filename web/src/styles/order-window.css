@@ -12,6 +12,10 @@
 .od-colhead span { text-align:center; }
 .od-colhead span:nth-child(2) { text-align:right; padding-right:var(--s3); }
 .od-colhead span:nth-child(4) { text-align:left; padding-left:var(--s3); }
+.od-colhead-explorer { justify-self:center; height:var(--size-18); padding:0 var(--s3); border-radius:var(--r-s); background:var(--raised); color:var(--text-2); font-size:var(--fs-xs); font-weight:500; }
+.od-colhead-explorer:hover:not(:disabled) { background:var(--hover); color:var(--text); }
+.od-colhead-explorer[aria-pressed=true] { background:var(--accent-soft); color:var(--accent); font-weight:600; }
+.od-colhead-explorer:disabled { color:var(--text-3); cursor:not-allowed; }
 .od-explorer-rows { box-sizing:border-box; }
 .od-ladder[data-explorer] .mw-ladder { padding:0; }
 .od-ladder[data-dragging] { cursor:grabbing; user-select:none; }
@@ -54,18 +58,15 @@
 .od-total[data-empty] { opacity:.45; }
 .od-list-empty { margin:0; color:var(--text-3); }
 
-.od-qty { display:flex; flex:none; align-items:center; gap:var(--s2); flex-wrap:wrap; padding:var(--s3) var(--s4); border-top:var(--size-1) solid var(--line); }
+.od-qty { display:flex; flex:none; align-items:center; gap:var(--size-3); flex-wrap:wrap; padding:var(--s3) var(--s3); border-bottom:var(--size-1) solid var(--line); }
 .od-qty-label { color:var(--text-3); font-size:var(--fs-xs); line-height:var(--size-28); }
 .od-qty-name { position:relative; display:flex; }
 .od-qty-keep { position:absolute; top:50%; left:0; margin-top:var(--s3); color:var(--text-2); font-size:var(--fs-xs); line-height:var(--size-11); white-space:nowrap; }
-.od-qty-input { width:var(--size-84); min-width:0; height:var(--size-30); padding:0 var(--s3); border:var(--size-1) solid var(--line-strong); border-radius:var(--r-m); background:transparent; color:var(--text); font-size:var(--fs-m); font-weight:600; text-align:right; font-variant-numeric:tabular-nums; }
+.od-qty-input { box-sizing:border-box; flex:1 1 var(--size-60); min-width:var(--size-60); max-width:var(--size-84); height:var(--size-30); padding:0 var(--size-3); border:var(--size-1) solid var(--line-strong); border-radius:var(--r-m); background:transparent; color:var(--text); font-size:var(--fs-m); font-weight:600; text-align:right; font-variant-numeric:tabular-nums; }
 .od-qty-input:focus { border-color:var(--accent); outline:0; }
-.od-presets { display:flex; gap:var(--s2); }
-.od-preset { height:var(--size-30); padding:0 var(--s2); border-radius:var(--r-s); background:var(--raised); color:var(--text-2); font-size:var(--fs-xs); }
+.od-presets { display:flex; gap:var(--size-2); }
+.od-preset { height:var(--size-30); padding:0 var(--size-3); border-radius:var(--r-s); background:var(--raised); color:var(--text-2); font-size:var(--fs-xs); }
 .od-preset:hover { background:var(--hover); color:var(--text); }
-.od-estimate { display:flex; flex:1; column-gap:var(--s2); line-height:var(--size-24); min-width:0; white-space:nowrap; color:var(--text-3); font-size:var(--fs-xs); }
-.od-estimate-amount { min-width:0; overflow:hidden; text-overflow:ellipsis; }
-.od-estimate b { color:var(--text); font-weight:600; }
 
 .od-status-slot { flex:none; box-sizing:border-box; height:var(--size-24); padding-bottom:var(--size-5); }
 .od-status { box-sizing:border-box; display:flex; align-items:center; gap:var(--s3); height:100%; padding:0 var(--s4) 0 var(--s3); border-left:var(--size-3) solid var(--line-strong); color:var(--text-2); font-size:var(--fs-s); }
@@ -123,14 +124,8 @@ button.od-cellbtn:not(:disabled) small span { text-decoration:underline dotted; 
 .od-profit-value > span, .od-profit-value::after { grid-area:1 / 1; }
 .od-profit-value::after { content:attr(data-alt) / ""; visibility:hidden; pointer-events:none; }
 
-.od-entry { flex:none; border-top:var(--size-1) solid var(--line); }
-.od-entry .od-qty { border-top:0; padding-bottom:var(--s2); }
-.od-toolbar { display:flex; flex:none; align-items:center; gap:var(--s3); padding:var(--s2) var(--s4); }
-.od-tool { height:var(--size-24); padding:0 var(--s4); border-radius:var(--r-s); background:var(--raised); color:var(--text-2); font-size:var(--fs-xs); }
-.od-tool:hover:not(:disabled), .od-tool[aria-pressed=true] { background:var(--hover); color:var(--text); }
-.od-tool:disabled { color:var(--text-3); }
 .od-settings { position:relative; margin-left:auto; }
-.od-gear { display:inline-flex; align-items:center; gap:var(--s2); height:var(--size-24); padding:0 var(--s3); border-radius:var(--r-s); color:var(--text-2); }
+.od-gear { display:inline-flex; align-items:center; gap:var(--size-2); height:var(--size-30); padding:0 var(--size-2); border-radius:var(--r-s); color:var(--text-2); }
 .od-gear-route { font-size:var(--fs-xs); font-weight:600; }
 .od-gear:hover, .od-gear[aria-expanded=true] { background:var(--hover); color:var(--text); }
 .od-gear[data-warn] { color:var(--warning); }
@@ -158,8 +153,6 @@ button.od-cellbtn:not(:disabled) small span { text-decoration:underline dotted; 
 .od-unpaid-dot { flex:none; width:var(--size-5); height:var(--size-5); border-radius:50%; background:var(--danger); }
 .od-preview[data-over] { color:var(--danger); text-decoration:line-through; }
 .od-preview[data-margin] { color:var(--warning); }
-.od-estimate-note { color:var(--warning); }
-.od-estimate-note[data-tone=over] { color:var(--danger); }
 .ui-popover.od-funds { max-height:none; }
 .od-funds-title { margin:0 0 var(--s2); color:var(--text-2); font-size:var(--fs-xs); font-weight:600; }
 .od-funds-rows li[data-danger] b, .od-funds-rows li[data-danger] .od-name { color:var(--danger); }
@@ -192,7 +185,8 @@ button.od-cellbtn:not(:disabled) small span { text-decoration:underline dotted; 
 .od-head-rate { flex:none; font-size:var(--fs-s); font-weight:600; }
 .od-head-rate[data-tone=up] { color:var(--up); } .od-head-rate[data-tone=down] { color:var(--down); }
 .od-head-market { flex:none; margin-left:auto; }
-.od-qty .mw-seg button { height:var(--size-26); }
+.od-qty .mw-seg { gap:var(--size-1); padding:var(--size-2); }
+.od-qty .mw-seg button { height:var(--size-26); padding:0 var(--size-3); }
 
 .od-confirm { padding:var(--s5) var(--s5) var(--s3); }
 .od-confirm > p { margin:0; }

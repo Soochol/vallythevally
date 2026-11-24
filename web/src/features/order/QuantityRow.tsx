@@ -1,9 +1,6 @@
-import { type ChangeEvent, type KeyboardEvent, useId, useLayoutEffect, useRef } from "react";
-import { useStoreValue, type ValueStore } from "../../lib/valueStore";
-import { formatWon } from "../market-window/format";
+import { type ChangeEvent, type KeyboardEvent, type ReactNode, useId, useLayoutEffect, useRef } from "react";
 import { Segmented } from "../market-window/parts";
-import type { HoverCell } from "./OrderLadder";
-import { type BuyingPower, type EstimateNote, estimateNote, quantityForAmount } from "./orderRules";
+import { quantityForAmount } from "./orderRules";
 import { AMOUNT_UNIT_WON, KEEP_LAST_ENTRY_LABEL, type PresetKind } from "./orderSettings";
 
 const PRESET_KINDS = [{ value: "sharePresets", label: "수량" }, { value: "amountPresets", label: "금액" }] as const;
@@ -19,9 +16,10 @@ interface Props {
   readonly keepLastEntry: boolean;
   readonly onPresetKind: (kind: PresetKind) => void;
   readonly onInput: (input: string) => void;
+  readonly trailing?: ReactNode;
 }
 
-export function QuantityRow({ presetKind, input, sharePresets, amountPresets, referencePrice, keepLastEntry, onPresetKind, onInput }: Props) {
+export function QuantityRow({ presetKind, input, sharePresets, amountPresets, referencePrice, keepLastEntry, onPresetKind, onInput, trailing }: Props) {
   const inputId = useId();
   const field = useRef<HTMLInputElement>(null);
   const digitsBeforeCaret = useRef<number | null>(null);
@@ -64,27 +62,7 @@ export function QuantityRow({ presetKind, input, sharePresets, amountPresets, re
           ? amountPresets.map((man) => <button key={man} type="button" className="od-preset" disabled={noPrice} title={noPrice ? NO_REFERENCE_PRICE_TEXT : undefined} onClick={() => fillAmount(man * AMOUNT_UNIT_WON)}>{`${man.toLocaleString("ko-KR")}만`}</button>)
           : sharePresets.map((shares) => <button key={shares} type="button" className="od-preset" onClick={() => onInput(String(shares))}>{shares}</button>)}
       </div>
+      {trailing}
     </div>
   );
-}
-
-interface EstimateProps {
-  readonly estimate: number | null;
-  readonly note: EstimateNote | null;
-}
-
-export function OrderEstimate({ estimate, note }: EstimateProps) {
-  return (
-    <div className="od-estimate">
-      <span className="od-estimate-amount" title={estimate === null ? undefined : `예상 주문금액 ${formatWon(estimate)}`}>예상 주문금액 <b data-testid="order-estimate">{estimate === null ? "-" : formatWon(estimate)}</b>{note && <span className="od-estimate-note" data-testid="order-estimate-note" data-tone={note.tone}> · {note.text}</span>}</span>
-    </div>
-  );
-}
-
-export function HoverOrderEstimate({ hover, quantity, referencePrice, buying }: { hover: ValueStore<HoverCell | null>; quantity: number; referencePrice: number | null; buying: BuyingPower | null }) {
-  const hoveredPrice = useStoreValue(hover, (cell) => cell?.price ?? null);
-  const hoveredSide = useStoreValue(hover, (cell) => cell?.side ?? null);
-  const unitPrice = hoveredPrice ?? referencePrice ?? 0;
-  const estimate = unitPrice > 0 && quantity > 0 ? unitPrice * quantity : null;
-  return <OrderEstimate estimate={estimate} note={estimate !== null && hoveredSide !== "sell" ? estimateNote(estimate, buying) : null} />;
 }

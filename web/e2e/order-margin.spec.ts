@@ -158,7 +158,6 @@ test("미수 허용에서 미수가 생기는 매수는 바로 나가고 미수 
   await quantity(page).fill("20");
   await cellAt(page, "buy", BASE).hover();
   await expect(page.getByTestId("order-preview")).toHaveAttribute("data-margin", "");
-  await expect(page.getByTestId("order-estimate-note")).toHaveText(" · 미수 약 700,000원 생김");
   await cellAt(page, "buy", BASE).dblclick();
   await pollSaved(() => writesTo(api, "place")).toHaveLength(1);
   expect(writesTo(api, "place")[0]!.body).toMatchObject({ side: "buy", quantity: 20, price: BASE });
@@ -178,18 +177,15 @@ test("미수 포함 한도를 넘으면 허용에서도 막는다", async ({ pag
   expect(writesTo(api, "place")[0]!.body).toMatchObject({ quantity: 42 });
 });
 
-test("한도를 넘는 수량이면 매수 칸 미리보기와 예상 금액 줄이 미리 알린다", async ({ page, scenario }) => {
+test("한도를 넘는 수량이면 매수 칸 미리보기가 미리 알린다", async ({ page, scenario }) => {
   await ready(page, scenario, CASH_700K);
   await expect(buyable(page).locator("b")).toHaveText("700,000원");
   await quantity(page).fill("10");
   await cellAt(page, "buy", BASE).hover();
   await expect(page.getByTestId("order-preview")).toHaveText("매수 10");
   await expect(page.getByTestId("order-preview")).not.toHaveAttribute("data-over", /.*/);
-  await expect(page.getByTestId("order-estimate-note")).toHaveCount(0);
   await quantity(page).fill("11");
   await expect(page.getByTestId("order-preview")).toHaveAttribute("data-over", "");
-  await expect(page.getByTestId("order-estimate-note")).toHaveText(" · 현금 70,000원 초과");
-  await expect(page.getByTestId("order-estimate-note")).toHaveAttribute("data-tone", "over");
   await cellAt(page, "sell", BASE + 100).hover();
   await expect(page.getByTestId("order-preview")).not.toHaveAttribute("data-over", /.*/);
 });

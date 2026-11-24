@@ -78,7 +78,6 @@ function OrderBody({ id, code, infoPager }: { id: WindowId; code: SymbolCode; in
   const [confirm, setConfirm] = useState<HighValueRequest | null>(null);
   const [cancelConfirm, setCancelConfirm] = useState<CancelConfirm | null>(null);
   const [exploring, setExploring] = useState(false);
-  const [centerToken, setCenterToken] = useState(0);
   const ladder = useRef<HTMLDivElement>(null);
   const drag = useOrderDrag(ladder, (source, outcome) => drop(source, outcome));
   const dragging = useStoreValue(drag.views, (view) => view !== null);
@@ -242,11 +241,7 @@ function OrderBody({ id, code, infoPager }: { id: WindowId; code: SymbolCode; in
 
   const pickAccount = useStableCallback((account: string) => setSettings({ ...settings, account }));
   const toggleProfitUnit = useCallback(() => setProfitUnit(toggledUnit), []);
-  const toggleExplorer = useStableCallback(() => {
-    if (!explorerOn) setCenterToken((token) => token + 1);
-    setExploring(!explorerOn);
-  });
-  const centerOnCurrent = useCallback(() => setCenterToken((token) => token + 1), []);
+  const toggleExplorer = useStableCallback(() => setExploring(!explorerOn));
   const placeOrder = useStableCallback(place);
   const cancelOne = useStableCallback(writes.cancelOne);
   const cancelGroups = useStableCallback(cancelChecked);
@@ -266,13 +261,12 @@ function OrderBody({ id, code, infoPager }: { id: WindowId; code: SymbolCode; in
       <SymbolHead code={code} name={symbolInfo?.name ?? null} lastPrice={feed.lastPrice} previousClose={feed.previousClose} marketOpen={marketOpen} mock={mock} />
       <AccountPart windowId={id} choice={choice} accountRef={accountRef} onPickAccount={pickAccount} openOrders={data.openOrders} balance={balance} executions={data.executions} writable={writable} mock={mock} policy={data.orderable?.policy ?? null} onCancel={cancelOne}
         holding={holding} orderable={data.orderable} buyableProblem={data.buyableProblem} sellOrdered={sellOrdered} profitUnit={profitUnit} onProfitUnit={toggleProfitUnit}
-        presetKind={presetKind} input={input} referencePrice={referencePrice} onPresetKind={setPresetKind} onInput={setInput} quantity={quantity} buying={data.capacity.buying} hover={hover}
-        explorerOn={explorerOn} explorerUnavailable={referencePrice === null || fullPrices === null} explorerTitle={fullPrices === null ? EXPLORER_UNAVAILABLE : undefined} onToggleExplorer={toggleExplorer} onCurrent={centerOnCurrent}
+        presetKind={presetKind} input={input} referencePrice={referencePrice} onPresetKind={setPresetKind} onInput={setInput}
         settings={settings} orderVenue={orderVenue} nxtNotTraded={nxtNotTraded} onSettings={setSettings} />
       {!feed.connected && <FeedStrip since={downSince} />}
       <div className="bk-ladder od-ladder-wrap" data-stale={feed.connected ? undefined : ""} data-exploring={explorerOn ? "" : undefined}>
         {view
-            ? <OrderLadder rows={rows} previousClose={feed.previousClose} groups={data.groups} writable={writable} previewQuantity={quantity} buying={data.capacity.buying} hover={hover} averagePrice={averagePrice} divider={settings.divider} explorer={explorerOn ? { centerPrice: referencePrice, centerToken } : undefined} currentToken={centerToken} ladder={ladder} drag={drag} expectedPrice={expected?.price ?? null} rowSlots={{ infoCard: infoSlot(infoSlots, infoPager), bottomLeft: tradeSlot(trades, feed.previousClose) }} actions={ladderActions} />
+            ? <OrderLadder rows={rows} previousClose={feed.previousClose} groups={data.groups} writable={writable} previewQuantity={quantity} buying={data.capacity.buying} hover={hover} averagePrice={averagePrice} divider={settings.divider} explorerOn={explorerOn} explorerUnavailable={referencePrice === null || fullPrices === null} explorerTitle={fullPrices === null ? EXPLORER_UNAVAILABLE : undefined} onToggleExplorer={toggleExplorer} explorerCenterPrice={explorerOn ? referencePrice : null} ladder={ladder} drag={drag} expectedPrice={expected?.price ?? null} rowSlots={{ infoCard: infoSlot(infoSlots, infoPager), bottomLeft: tradeSlot(trades, feed.previousClose) }} actions={ladderActions} />
             : feed.snapshotFailed ? <ErrorState message="호가를 불러오지 못했습니다" retry={feed.retry} /> : <EmptyState title="호가를 기다리는 중입니다" />}
       </div>
       <OrderTotals groups={data.groups} writable={writable} actions={totalsActions} drag={drag} />

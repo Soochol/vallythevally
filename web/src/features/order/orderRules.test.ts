@@ -2,7 +2,7 @@ import { expect, test } from "vitest";
 import type { TradingOpenOrder } from "../../api/generated/TradingOpenOrder";
 import type { TradingOrderable } from "../../api/generated/TradingOrderable";
 import type { PendingWrite } from "./pendingWrites";
-import { type BuyingPower, buyBlock, buyingPowerOf, buyPreview, CANCEL_CONFIRM_MS, cancelCheckOf, cancelConfirmText, capacityProblem, dragCancels, type DragSource, estimateNote, marginOf, maxBuyQuantity, modifyBuyProblem, type DragTarget, dragGhostText, dragQuantity, dragSide, groupOpenOrders, groupWithPending, HIGH_VALUE_WON, judgeDrag, needsCancelConfirm, needsHighValueConfirm, orderCountOf, planCancel, type PriceGroup, quantityForAmount, sideTotal, typedQuantity } from "./orderRules";
+import { type BuyingPower, buyBlock, buyingPowerOf, buyPreview, CANCEL_CONFIRM_MS, cancelCheckOf, cancelConfirmText, capacityProblem, dragCancels, type DragSource, marginOf, maxBuyQuantity, modifyBuyProblem, type DragTarget, dragGhostText, dragQuantity, dragSide, groupOpenOrders, groupWithPending, HIGH_VALUE_WON, judgeDrag, needsCancelConfirm, needsHighValueConfirm, orderCountOf, planCancel, type PriceGroup, quantityForAmount, sideTotal, typedQuantity } from "./orderRules";
 
 const order = (orderNo: string, side: "buy" | "sell", price: number, openQuantity: number, code = "005930"): TradingOpenOrder => ({
   orderNo, code, name: "삼성전자", side, quantity: openQuantity, price, openQuantity, status: "접수", orderedAt: "090000", originalOrderNo: null, venue: "krx",
@@ -144,15 +144,7 @@ test("정책을 모르거나 수량이 없으면 미리보기도 막음도 없�
   expect(buyPreview(71_000, 1_000, null)).toBeNull();
   expect(buyBlock(71_000, 1_000, null)).toBeNull();
   expect(buyPreview(71_000, 0, cashOnly)).toBeNull();
-  expect(estimateNote(9_999_999, null)).toBeNull();
   expect(marginOf(9_999_999, cashOnly)).toBe(0);
-});
-
-test("예상 주문금액 줄은 초과액과 미수 금액을 정책에 맞게 알린다", () => {
-  expect(estimateNote(900_000, cashOnly)).toBeNull();
-  expect(estimateNote(1_300_000, cashOnly)).toEqual({ tone: "over", text: "현금 300,000원 초과" });
-  expect(estimateNote(1_500_000, allowMargin)).toEqual({ tone: "margin", text: "미수 약 500,000원 생김" });
-  expect(estimateNote(3_100_000, allowMargin)).toEqual({ tone: "over", text: "미수 포함 한도 100,000원 초과" });
 });
 
 test("매수 정정은 가격을 올려 늘어난 금액만 한도로 검사한다", () => {
