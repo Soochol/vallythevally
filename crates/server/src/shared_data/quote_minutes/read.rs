@@ -80,14 +80,14 @@ fn read_live_day(live_dir: &Path, code: &str) -> io::Result<Option<QuoteDay>> {
     let mut gaps: Vec<(u32, u32)> = Vec::new();
     for key_dir in key_dirs {
         let mut key_has_code = false;
+        if let Some(current) = read_current_for(&key_dir.join(CURRENT_FILE), code)? {
+            key_has_code = true;
+            insert_minute(&mut minutes, current);
+        }
         let stock_path = key_dir.join(format!("{code}.{FEED_EXTENSION}"));
         for item in read_jsonl_items::<QuoteMinute>(&stock_path)? {
             key_has_code = true;
             insert_minute(&mut minutes, item);
-        }
-        if let Some(current) = read_current_for(&key_dir.join(CURRENT_FILE), code)? {
-            key_has_code = true;
-            insert_minute(&mut minutes, current);
         }
         if key_has_code {
             gaps.extend(read_jsonl_items::<(u32, u32)>(&key_dir.join(GAPS_FILE))?);
