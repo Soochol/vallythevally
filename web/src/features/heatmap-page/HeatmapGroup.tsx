@@ -33,14 +33,22 @@ interface TileProps {
   onSend(row: SnapshotRow): void;
 }
 
-function useLiveRate(code: SymbolCode, fallback: number | null): number | null {
+interface LiveRate {
+  readonly rate: number | null;
+  readonly expected: boolean;
+}
+
+function useLiveRate(code: SymbolCode, fallback: number | null): LiveRate {
   const subscribe = useMemo(() => (listener: () => void) => quoteBook.subscribe(code, listener), [code]);
   const live = useSyncExternalStore(subscribe, () => quoteBook.get(code));
-  return live.quote?.changeRate ?? fallback;
+  return {
+    rate: live.quote?.changeRate ?? fallback,
+    expected: live.quote?.source === "expected",
+  };
 }
 
 const Tile = memo(function Tile({ row, rect, range, label, lines, editable, onMenu, onSend }: TileProps) {
-  const rate = useLiveRate(row.code, row.changeRate);
+  const { rate, expected } = useLiveRate(row.code, row.changeRate);
   const text = rate === null ? "–" : formatPercent(rate);
   return (
     <button
@@ -49,7 +57,7 @@ const Tile = memo(function Tile({ row, rect, range, label, lines, editable, onMe
       data-code={row.code}
       data-side={rate === null ? "none" : rateSide(rate)}
       data-strong={rate !== null && needsStrongInk(rate, range)}
-      aria-label={`${row.name} ${text}`}
+      aria-label={expected ? `${row.name} ${text} 예상체결` : `${row.name} ${text}`}
       aria-haspopup={editable ? "menu" : undefined}
       aria-keyshortcuts={editable ? "Shift+F10" : undefined}
       style={{
@@ -76,7 +84,10 @@ const Tile = memo(function Tile({ row, rect, range, label, lines, editable, onMe
       {label !== "none" && (
         <span className="hm-tile-text">
           {label === "full" && <b className="hm-tile-name">{row.name}</b>}
-          <span className="hm-tile-rate">{text}</span>
+          <span className="hm-tile-rate">
+            {text}
+            {expected && <span aria-hidden="true">*</span>}
+          </span>
         </span>
       )}
     </button>
@@ -94,6 +105,7 @@ function TileCard({ row, rect, themeName, themeTraded }: CardProps) {
   const subscribe = useMemo(() => (listener: () => void) => quoteBook.subscribe(row.code, listener), [row.code]);
   const quote = useSyncExternalStore(subscribe, () => quoteBook.get(row.code)).quote;
   const rate = quote?.changeRate ?? row.changeRate;
+  const expected = quote?.source === "expected";
   const traded = row.tradedMillionWon === null ? "–" : tradedText(row.tradedMillionWon);
   const share = row.tradedMillionWon === null || themeTraded <= 0 ? null : `${((row.tradedMillionWon / themeTraded) * 100).toFixed(1)}%`;
   const right = rect.x + rect.w / 2 > MAP_WIDTH / 2;
@@ -110,7 +122,10 @@ function TileCard({ row, rect, themeName, themeTraded }: CardProps) {
       <span>{row.code}</span>
       <dl>
         <dt>현재가</dt>
-        <dd>{quote ? formatPrice(quote.price, false) : "–"}</dd>
+        <dd>
+          {quote ? formatPrice(quote.price, false) : "–"}
+          {expected && <span aria-hidden="true">*</span>}
+        </dd>
         <dt>등락률</dt>
         <dd data-side={rate === null ? "none" : rateSide(rate)}>{rate === null ? "–" : formatPercent(rate)}</dd>
         <dt>거래대금</dt>
