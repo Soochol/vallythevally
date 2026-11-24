@@ -320,13 +320,9 @@ impl ViReadings {
         if self.day.replace(today) != Some(today) {
             self.last.clear();
         }
-        let last = self.last.get(&code).copied();
-        let reading = ViReading {
-            code,
-            static_base: fields.static_base.or(last.and_then(|last| last.static_base)),
-            active: fields.in_vi.unwrap_or(last.is_some_and(|last| last.active)),
-        };
-        if last == Some(reading) {
+        let last = self.last.get(&code).copied().unwrap_or(ViReading { code, static_base: None, active: false });
+        let reading = ViReading { code, static_base: fields.static_base.or(last.static_base), active: fields.in_vi.unwrap_or(last.active) };
+        if last == reading {
             return None;
         }
         self.last.insert(code, reading);
@@ -735,6 +731,7 @@ mod tests {
         rig.want(&[StreamKind::Trades, StreamKind::Book(Venue::Combined)]);
         let registered = rig.bridge.registered.clone();
         assert_eq!(registered.len(), 2);
+        assert!(rig.readings(book_frame("H0STASP0", "0")).await.is_empty(), "VI도 기준가도 없으면 알릴 것이 없다");
         assert_eq!(rig.readings(trade_frame("H0STCNT0", "10", "0", "800000")).await, [(Some(800_000), false)]);
         assert!(rig.readings(trade_frame("H0STCNT0", "10", "0", "800000")).await.is_empty());
         assert!(rig.readings(book_frame("H0STASP0", "0")).await.is_empty());

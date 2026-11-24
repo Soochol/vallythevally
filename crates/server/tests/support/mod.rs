@@ -140,6 +140,9 @@ impl ScriptedTransport {
             self.seen.token_bodies.lock().unwrap().push(body.clone());
             return (delay, response(json!({"return_code":0,"token":token_for(body["appkey"].as_str().unwrap()),"expires_dt":"20991231000000"}), true));
         }
+        if id == "ka10054" {
+            return (delay, response(json!({"return_code":0,"motn_stk":[]}), true));
+        }
         if id == "ka10095" && let Some(rows) = &replies.quotes {
             return (delay, response(summary::response(rows, &body), true));
         }
