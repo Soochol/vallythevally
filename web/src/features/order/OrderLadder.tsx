@@ -87,8 +87,8 @@ const LadderHead = memo(function LadderHead({ explorerOn, explorerUnavailable, e
   );
 });
 
-const currentRowOffset = (element: HTMLElement): number | null => {
-  const row = element.querySelector<HTMLElement>(".mw-lr[data-current]");
+const centerRowOffset = (element: HTMLElement, fallbackToBid: boolean): number | null => {
+  const row = element.querySelector<HTMLElement>(".mw-lr[data-current]") ?? (fallbackToBid ? element.querySelector<HTMLElement>('.mw-lr[data-side="bid"]') : null);
   if (row === null) return null;
   const head = element.querySelector<HTMLElement>(".od-colhead")?.offsetHeight ?? 0;
   const rowCenter = row.getBoundingClientRect().top - element.getBoundingClientRect().top + element.scrollTop + row.offsetHeight / 2;
@@ -162,11 +162,14 @@ export function OrderLadder({ rows, previousClose, groups, writable, previewQuan
   const hasCurrent = rows.some((row) => row.current);
   const placed = useRef<number | null>(null);
   const wasExploring = useRef(exploring);
-  const centerCurrentRow = useCallback(() => {
+  const centerCurrentRow = useCallback((fallbackToBid: boolean) => {
     const element = ladder.current;
     if (!element) return;
-    const top = currentRowOffset(element);
-    if (top === null) return;
+    const top = centerRowOffset(element, fallbackToBid);
+    if (top === null) {
+      if (fallbackToBid) placed.current = element.scrollTop;
+      return;
+    }
     element.scrollTop = top;
     placed.current = element.scrollTop;
   }, [ladder]);
@@ -174,13 +177,13 @@ export function OrderLadder({ rows, previousClose, groups, writable, previewQuan
   useLayoutEffect(() => {
     const element = ladder.current;
     if (exploring || !element || !hasCurrent || placed.current !== null || element.scrollHeight <= element.clientHeight) return;
-    centerCurrentRow();
+    centerCurrentRow(false);
   }, [exploring, hasCurrent, centerCurrentRow, ladder]);
 
   useLayoutEffect(() => {
     const turnedOff = wasExploring.current && !exploring;
     wasExploring.current = exploring;
-    if (turnedOff) centerCurrentRow();
+    if (turnedOff) centerCurrentRow(true);
   }, [exploring, centerCurrentRow]);
 
   const onLadderScroll = () => {

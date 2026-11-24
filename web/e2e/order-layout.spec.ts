@@ -191,6 +191,46 @@ test("전체호가를 끄면 현재가 줄이 사다리 안에 보인다", async
   expect((await ladderVisibility(page)).current).toBe(true);
 });
 
+test("현재가 줄이 없을 때 전체호가를 꺼도 매도·매수 경계가 사다리 안에 보인다", async ({ page, scenario }) => {
+  ordersOn(scenario);
+  tradingApi(scenario);
+  await openSizedOrderWindow(page, scenario, 420, 480);
+  const sub = await bookSub(scenario);
+  const book: FeedBook = { t: 1, asks: Array.from({ length: 10 }, (_, i) => ({ price: BASE + 100 * (i + 1), qty: 10 + i })), bids: Array.from({ length: 10 }, (_, i) => ({ price: BASE - 100 * i, qty: 20 + i })), totalAskQty: 1000, totalBidQty: 3000, expected: null };
+  scenario.live.emit({ type: "feed_book", sub, book });
+  const emitTrade = (price: number, seq: number) => {
+    for (const request of scenario.live.messages.filter((m) => m.type === "subscribe_feed" && m.kind === "trades" && m.symbol === CODE)) {
+      if (request.type === "subscribe_feed") scenario.live.emit({ type: "feed_trades", sub: request.sub, seq, trades: [{ t: scenario.now / 1000 + seq, price, qty: 10, venue: "krx", strength: 100 }] });
+    }
+  };
+  emitTrade(BASE + 50, 1);
+  await expect(page.locator(".mw-lr[data-current]")).toHaveCount(0);
+
+  const explorer = page.getByTestId("order-explorer");
+  await explorer.click();
+  await expect(explorer).toHaveAttribute("aria-pressed", "true");
+  await ladder(page).evaluate((element) => { element.scrollTop = element.scrollHeight; });
+  await explorer.click();
+  await expect(explorer).toHaveAttribute("aria-pressed", "false");
+  await expect(rows(page)).toHaveCount(20);
+  await expect(page.locator(".mw-lr[data-current]")).toHaveCount(0);
+
+  const firstBidInside = await ladder(page).evaluate((element) => {
+    const area = element.getBoundingClientRect();
+    const head = element.querySelector(".od-colhead")!.getBoundingClientRect();
+    const top = Math.max(area.top, head.bottom);
+    const firstBid = element.querySelector<HTMLElement>('.mw-lr[data-side="bid"]')!;
+    const box = firstBid.getBoundingClientRect();
+    return { price: firstBid.querySelector(".mw-px-num")?.textContent?.trim(), inside: box.top >= top - 1 && box.bottom <= area.bottom + 1 };
+  });
+  expect(firstBidInside).toEqual({ price: "70,000", inside: true });
+
+  const scrollAfterOff = await ladder(page).evaluate((element) => element.scrollTop);
+  emitTrade(BASE, 2);
+  await expect(page.locator(".mw-lr[data-current] .mw-px-num")).toHaveText("70,000");
+  expect(await ladder(page).evaluate((element) => element.scrollTop)).toBe(scrollAfterOff);
+});
+
 test("행 밖 가격 체결 뒤 현재가 줄이 다시 생겨도 사다리 스크롤은 움직이지 않는다", async ({ page, scenario }) => {
   ordersOn(scenario);
   tradingApi(scenario);
