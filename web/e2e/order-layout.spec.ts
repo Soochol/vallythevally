@@ -16,7 +16,7 @@ function environmentIs(scenario: Scenario, environment: KiwoomEnvironment): void
 async function bookSub(scenario: Scenario): Promise<string> {
   let sub = "";
   await pollSaved(() => {
-    const message = scenario.live.messages.find((m) => m.type === "subscribe_feed" && m.kind === "book" && m.symbol === CODE);
+    const message = scenario.live.messages.filter((m) => m.type === "subscribe_feed" && m.kind === "book" && m.symbol === CODE).at(-1);
     sub = message?.type === "subscribe_feed" ? message.sub : "";
     return sub;
   }).not.toBe("");
@@ -38,6 +38,31 @@ const sizeWindow = (page: Page, width: number, height?: number) =>
     element.style.width = `${size.width}px`;
     if (size.height !== undefined) element.style.height = `${size.height}px`;
   }, { width, height });
+
+async function openSizedOrderWindow(page: Page, scenario: Scenario, width: number, height: number): Promise<void> {
+  await openOrderWindow(page, scenario, true);
+  await win(page).evaluate((element, size) => {
+    const host = element.parentElement!;
+    host.style.flex = "none";
+    host.style.width = `${size.width}px`;
+    host.style.height = `${size.height}px`;
+  }, { width, height });
+  await cell(page, 2).click();
+  await expect(win(page)).toHaveAttribute("data-symbol", "000660");
+  await cell(page, 1).click();
+  await expect(win(page)).toHaveAttribute("data-symbol", CODE);
+  await expect(rows(page)).toHaveCount(20);
+}
+
+const ladderVisibility = (page: Page) => ladder(page).evaluate((element) => {
+  const area = element.getBoundingClientRect();
+  const head = element.querySelector(".od-colhead")!.getBoundingClientRect();
+  const top = Math.max(area.top, head.bottom);
+  const shown = (row: Element) => { const box = row.getBoundingClientRect(); return box.top >= top - 1 && box.bottom <= area.bottom + 1; };
+  const all = Array.from(element.querySelectorAll(".mw-lr"));
+  const current = all.findIndex((row) => row.hasAttribute("data-current"));
+  return { current: current >= 0 && shown(all[current]!), asks: current < 0 ? 0 : all.filter((row, index) => index < current && row.getAttribute("data-side") === "ask" && shown(row)).length, bids: current < 0 ? 0 : all.filter((row, index) => index > current && row.getAttribute("data-side") === "bid" && shown(row)).length };
+});
 
 test("창 머리에 종목 이름과 코드가 보이고 연동된 종목이 바뀌면 따라 바뀐다", async ({ page, scenario }) => {
   ordersOn(scenario);
@@ -135,28 +160,86 @@ test("실시간이 끊기면 창 안에 실시간 끊김 띠가 뜨고 다시 �
 test("최소 크기 420x520에서도 현재가 줄과 매도·매수 호가가 각각 세 단 이상 보인다", async ({ page, scenario }) => {
   ordersOn(scenario);
   tradingApi(scenario);
-  await openOrderWindow(page, scenario);
-  await sizeWindow(page, 420, 480);
+  await openSizedOrderWindow(page, scenario, 420, 480);
   const sub = await bookSub(scenario);
   const book: FeedBook = { t: 1, asks: Array.from({ length: 10 }, (_, i) => ({ price: BASE + 100 * (i + 1), qty: 10 + i })), bids: Array.from({ length: 10 }, (_, i) => ({ price: BASE - 100 * i, qty: 20 + i })), totalAskQty: 1000, totalBidQty: 3000, expected: null };
   scenario.live.emit({ type: "feed_book", sub, book });
   pushTrades(scenario, [BASE]);
   await expect(rows(page).locator(".mw-qty-value")).toHaveCount(20);
   await expect(page.locator(".mw-lr[data-current]")).toHaveCount(1);
-  const visible = async () => ladder(page).evaluate((element) => {
-    const area = element.getBoundingClientRect();
-    const head = element.querySelector(".od-colhead")!.getBoundingClientRect();
-    const top = Math.max(area.top, head.bottom);
-    const shown = (row: Element) => { const box = row.getBoundingClientRect(); return box.top >= top - 1 && box.bottom <= area.bottom + 1; };
-    const all = Array.from(element.querySelectorAll(".mw-lr"));
-    const current = all.findIndex((row) => row.hasAttribute("data-current"));
-    return { current: shown(all[current]!), asks: all.filter((row, index) => index < current && row.getAttribute("data-side") === "ask" && shown(row)).length, bids: all.filter((row, index) => index > current && row.getAttribute("data-side") === "bid" && shown(row)).length };
-  });
-  await expect.poll(async () => (await visible()).current).toBe(true);
-  const seen = await visible();
+  const seen = await ladderVisibility(page);
   expect(seen.current).toBe(true);
   expect(seen.asks).toBeGreaterThanOrEqual(3);
   expect(seen.bids).toBeGreaterThanOrEqual(3);
+});
+
+test("전체호가를 끄면 현재가 줄이 사다리 안에 보인다", async ({ page, scenario }) => {
+  ordersOn(scenario);
+  tradingApi(scenario);
+  await openSizedOrderWindow(page, scenario, 420, 480);
+  pushTrades(scenario, [BASE]);
+  await expect(page.locator(".mw-lr[data-current]")).toHaveCount(1);
+  await expect.poll(async () => (await ladderVisibility(page)).current).toBe(true);
+  const explorer = page.getByTestId("order-explorer");
+  await explorer.click();
+  await expect(explorer).toHaveAttribute("aria-pressed", "true");
+  await ladder(page).evaluate((element) => { element.scrollTop = element.scrollHeight; });
+  await explorer.click();
+  await expect(explorer).toHaveAttribute("aria-pressed", "false");
+  await expect(rows(page)).toHaveCount(20);
+  await expect(page.locator(".mw-lr[data-current]")).toHaveCount(1);
+  expect((await ladderVisibility(page)).current).toBe(true);
+});
+
+test("행 밖 가격 체결 뒤 현재가 줄이 다시 생겨도 사다리 스크롤은 움직이지 않는다", async ({ page, scenario }) => {
+  ordersOn(scenario);
+  tradingApi(scenario);
+  await openSizedOrderWindow(page, scenario, 420, 480);
+  const sub = await bookSub(scenario);
+  const book: FeedBook = { t: 1, asks: Array.from({ length: 10 }, (_, i) => ({ price: BASE + 100 * (i + 1), qty: 10 + i })), bids: Array.from({ length: 10 }, (_, i) => ({ price: BASE - 100 * i, qty: 20 + i })), totalAskQty: 1000, totalBidQty: 3000, expected: null };
+  scenario.live.emit({ type: "feed_book", sub, book });
+  const emitTrade = (price: number, seq: number) => {
+    for (const request of scenario.live.messages.filter((m) => m.type === "subscribe_feed" && m.kind === "trades" && m.symbol === CODE)) {
+      if (request.type === "subscribe_feed") scenario.live.emit({ type: "feed_trades", sub: request.sub, seq, trades: [{ t: scenario.now / 1000 + seq, price, qty: 10, venue: "krx", strength: 100 }] });
+    }
+  };
+  emitTrade(BASE, 1);
+  await expect(page.locator(".mw-lr[data-current] .mw-px-num")).toHaveText("70,000");
+  const initialTop = await ladder(page).evaluate((element) => element.scrollTop);
+  expect(initialTop).toBeGreaterThan(0);
+
+  emitTrade(BASE + 50, 2);
+  await expect(page.locator(".mw-lr[data-current]")).toHaveCount(0);
+  expect(await ladder(page).evaluate((element) => element.scrollTop)).toBe(initialTop);
+
+  emitTrade(BASE + 100, 3);
+  await expect(page.locator(".mw-lr[data-current] .mw-px-num")).toHaveText("70,100");
+  expect(await ladder(page).evaluate((element) => element.scrollTop)).toBe(initialTop);
+});
+
+test("창 크기를 바꿀 때 사다리 스크롤을 코드가 다시 맞추지 않는다", async ({ page, scenario }) => {
+  ordersOn(scenario);
+  tradingApi(scenario);
+  await openSizedOrderWindow(page, scenario, 420, 480);
+  pushTrades(scenario, [BASE]);
+  await expect(page.locator(".mw-lr[data-current]")).toHaveCount(1);
+  const initialTop = await ladder(page).evaluate((element) => element.scrollTop);
+  expect(initialTop).toBeGreaterThan(0);
+
+  const setHostHeight = (height: number) => win(page).evaluate((element, nextHeight) => { element.parentElement!.style.height = `${nextHeight}px`; }, height);
+  await setHostHeight(540);
+  await expect.poll(() => win(page).evaluate((element) => Math.round(element.getBoundingClientRect().height))).toBe(540);
+  expect(await ladder(page).evaluate((element) => element.scrollTop)).toBe(initialTop);
+
+  await setHostHeight(480);
+  await expect.poll(() => win(page).evaluate((element) => Math.round(element.getBoundingClientRect().height))).toBe(480);
+  expect(await ladder(page).evaluate((element) => element.scrollTop)).toBe(initialTop);
+
+  await setHostHeight(1100);
+  await expect.poll(() => ladder(page).evaluate((element) => element.scrollTop)).toBe(0);
+  await setHostHeight(480);
+  await expect.poll(() => win(page).evaluate((element) => Math.round(element.getBoundingClientRect().height))).toBe(480);
+  expect(await ladder(page).evaluate((element) => element.scrollTop)).toBe(0);
 });
 
 test("폭 436px 창에서 체결 상자와 종목 정보 카드에 잘린 숫자가 없다", async ({ page, scenario }) => {

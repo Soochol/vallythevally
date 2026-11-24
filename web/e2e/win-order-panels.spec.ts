@@ -713,6 +713,30 @@ test("수량 칸 가운데에 숫자 아닌 글자를 쳐도 커서가 제자리
   expect(await field.evaluate((element: HTMLInputElement) => element.scrollWidth <= element.clientWidth)).toBe(true);
 });
 
+test("폭 420px에서 6·7자리 수량이 잘리지 않고 창이 넓으면 수량 칸이 84px까지 넓어진다", async ({ page, scenario }) => {
+  ordersOn(scenario);
+  tradingApi(scenario);
+  await openOrderWindow(page, scenario);
+  const field = quantityField(page);
+  await win(page).evaluate((element) => { element.style.flex = "none"; element.style.width = "420px"; });
+  for (const kind of ["수량", "금액"] as const) {
+    await presetKindButton(page, kind).click();
+    const width = (await field.boundingBox())!.width;
+    expect(width).toBeGreaterThanOrEqual(60);
+    expect(width).toBeLessThanOrEqual(84);
+    for (const digits of ["100000", "1000000"]) {
+      await field.fill(digits);
+      await expect(field).toHaveValue(digits);
+      expect(await field.evaluate((element: HTMLInputElement) => element.scrollWidth <= element.clientWidth)).toBe(true);
+    }
+  }
+  await win(page).evaluate((element) => { element.style.width = "395px"; });
+  await expect.poll(async () => (await field.boundingBox())!.width).toBeLessThan(84);
+  expect((await field.boundingBox())!.width).toBeGreaterThanOrEqual(60);
+  await win(page).evaluate((element) => { element.style.width = "600px"; });
+  await expect.poll(async () => Math.round((await field.boundingBox())!.width)).toBe(84);
+});
+
 test("수량·금액 단추는 프리셋 묶음만 바꾸고 수량 칸 값은 그대로다", async ({ page, scenario }) => {
   ordersOn(scenario);
   tradingApi(scenario);

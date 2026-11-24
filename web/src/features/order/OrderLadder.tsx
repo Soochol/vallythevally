@@ -161,6 +161,7 @@ export function OrderLadder({ rows, previousClose, groups, writable, previewQuan
 
   const hasCurrent = rows.some((row) => row.current);
   const placed = useRef<number | null>(null);
+  const wasExploring = useRef(exploring);
   const centerCurrentRow = useCallback(() => {
     const element = ladder.current;
     if (!element) return;
@@ -172,19 +173,15 @@ export function OrderLadder({ rows, previousClose, groups, writable, previewQuan
 
   useLayoutEffect(() => {
     const element = ladder.current;
-    if (exploring || !element || !hasCurrent || placed.current === -1) return;
-    if (element.scrollHeight > element.clientHeight) centerCurrentRow();
-    if (typeof ResizeObserver === "undefined") return;
-    const observer = new ResizeObserver(() => {
-      if (placed.current === -1) {
-        observer.disconnect();
-        return;
-      }
-      if (element.scrollHeight > element.clientHeight) centerCurrentRow();
-    });
-    observer.observe(element);
-    return () => observer.disconnect();
+    if (exploring || !element || !hasCurrent || placed.current !== null || element.scrollHeight <= element.clientHeight) return;
+    centerCurrentRow();
   }, [exploring, hasCurrent, centerCurrentRow, ladder]);
+
+  useLayoutEffect(() => {
+    const turnedOff = wasExploring.current && !exploring;
+    wasExploring.current = exploring;
+    if (turnedOff) centerCurrentRow();
+  }, [exploring, centerCurrentRow]);
 
   const onLadderScroll = () => {
     if (placed.current === null || ladder.current?.scrollTop !== placed.current) placed.current = -1;
