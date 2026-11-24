@@ -82,15 +82,23 @@ pub async fn run_session(parts: ChildParts) -> Finish {
         quotes: quote_feed,
     });
     let finish = session.run().await;
-    if let Some(worker) = worker {
-        worker.finish().await;
-    }
-    if let Some(worker) = flow_worker {
-        worker.finish().await;
-    }
-    if let Some(worker) = quote_worker {
-        worker.finish().await;
-    }
+    tokio::join!(
+        async {
+            if let Some(worker) = worker {
+                worker.finish().await;
+            }
+        },
+        async {
+            if let Some(worker) = flow_worker {
+                worker.finish().await;
+            }
+        },
+        async {
+            if let Some(worker) = quote_worker {
+                worker.finish().await;
+            }
+        }
+    );
     heartbeat.abort();
     let _ = heartbeat.await;
     finish

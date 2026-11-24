@@ -134,7 +134,8 @@ pub fn read_books(text: &str, mut sink: impl FnMut(&str, &BookRow)) -> Result<Re
 }
 
 fn book_of<'a>(entry: &'a Entry<'_>) -> Option<(&'a str, BookRow)> {
-    let code = entry.item.strip_suffix(COMBINED_SUFFIX).filter(|code| !code.is_empty())?;
+    let code = entry.item.strip_suffix(COMBINED_SUFFIX)?;
+    domain::StockCode::parse(code).ok()?;
     let sec = entry.values.sec?;
     Some((code, BookRow { sec, asks: entry.values.asks, bids: entry.values.bids }))
 }
