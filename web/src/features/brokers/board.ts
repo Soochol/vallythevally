@@ -34,6 +34,7 @@ const KST_OFFSET_SECONDS = 9 * 3600;
 const DAY_SECONDS = 24 * 3600;
 const OPEN_SECONDS = 9 * 3600;
 const REGULAR_CLOSE_SECONDS = 15 * 3600 + 30 * 60;
+const AFTER_HOURS_START_SECONDS = 15 * 3600 + 40 * 60;
 const EXTENDED_CLOSE_SECONDS = 20 * 3600;
 
 const FOREIGN_HINTS: readonly string[] = [
@@ -124,11 +125,12 @@ export function boardAxis(times: readonly UnixSeconds[], now: UnixSeconds): Boar
   const dayStart = Math.floor((reference + KST_OFFSET_SECONDS) / DAY_SECONDS) * DAY_SECONDS - KST_OFFSET_SECONDS;
   const open = dayStart + OPEN_SECONDS;
   const regularClose = dayStart + REGULAR_CLOSE_SECONDS;
+  const afterHoursStart = dayStart + AFTER_HOURS_START_SECONDS;
   const extendedClose = dayStart + EXTENDED_CLOSE_SECONDS;
   const first = times[0];
   const last = times[times.length - 1];
-  const from = first !== undefined && first < open ? first : open;
-  const cap = last !== undefined && last > regularClose ? extendedClose : regularClose;
+  const from = now < open && first !== undefined && first < open ? first : open;
+  const cap = last !== undefined && last > afterHoursStart ? extendedClose : regularClose;
   const latest = last !== undefined && last > now ? last : now;
   const to = Math.max(from, Math.min(latest, cap));
   return { from, to };

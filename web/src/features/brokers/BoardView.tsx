@@ -4,6 +4,7 @@ import { MINUS } from "../../lib/format";
 import type { BrokerCards } from "../../stores/layout";
 import { formatClock, formatQuantity, withSign } from "../market-window/format";
 import { barBins, barBinSeconds, barPeakWithoutFirst, cumulativeUntil, eventsUntil, isForeignBroker, type BoardAxis, type BrokerTrack } from "./board";
+import { axisGapRanges, type AxisGapRange } from "./history";
 
 const signed = (value: number) => withSign(value, formatQuantity(Math.abs(value)).replace("-", MINUS));
 const BAR_VIEW_WIDTH = 184;
@@ -28,9 +29,21 @@ const CardBarsPlot = memo(function CardBarsPlot({ bins, peak, height }: { bins: 
   );
 });
 
+const CardGapLayer = memo(function CardGapLayer({ ranges }: { ranges: readonly AxisGapRange[] }) {
+  if (ranges.length === 0) return null;
+  return (
+    <span className="br-gaps" aria-hidden>
+      {ranges.map((range, index) => (
+        <span key={index} className="br-gap" data-testid="broker-gap" style={{ left: `${range.left}%`, width: `${range.width}%` }} />
+      ))}
+    </span>
+  );
+});
+
 function BrokerCard({
   track,
   axis,
+  gapRanges,
   mode,
   binSeconds,
   cursor,
@@ -41,6 +54,7 @@ function BrokerCard({
 }: {
   track: BrokerTrack;
   axis: BoardAxis;
+  gapRanges: readonly AxisGapRange[];
   mode: BrokerCards;
   binSeconds: number;
   cursor: UnixSeconds | null;
@@ -83,6 +97,7 @@ function BrokerCard({
       {mode !== "numbers" && (
         <span className="br-bars" data-testid="broker-bars" onPointerMove={handleMove} onPointerLeave={() => onCursor(null)}>
           <CardBarsPlot bins={bins} peak={peak} height={barHeight} />
+          <CardGapLayer ranges={gapRanges} />
           {cursorRatio !== null && <span className="br-cursor" data-testid="broker-cursor" style={{ left: `${cursorRatio * 100}%` }} />}
         </span>
       )}
@@ -108,6 +123,7 @@ function BrokerCard({
 export function BoardView({
   tracks,
   axis,
+  gaps,
   mode,
   cursor,
   selected,
@@ -116,6 +132,7 @@ export function BoardView({
 }: {
   tracks: readonly BrokerTrack[];
   axis: BoardAxis;
+  gaps: readonly (readonly [UnixSeconds, UnixSeconds])[];
   mode: BrokerCards;
   cursor: UnixSeconds | null;
   selected: string | null;
@@ -136,6 +153,7 @@ export function BoardView({
 
   const columns = width < 460 ? 2 : 3;
   const binSeconds = barBinSeconds(width / columns);
+  const gapRanges = useMemo(() => axisGapRanges(gaps, axis), [gaps, axis]);
   const span = axis.to - axis.from;
   const cursorRatio = cursor !== null && span > 0 && cursor >= axis.from && cursor <= axis.to ? (cursor - axis.from) / span : null;
 
@@ -147,6 +165,7 @@ export function BoardView({
             key={track.code}
             track={track}
             axis={axis}
+            gapRanges={gapRanges}
             mode={mode}
             binSeconds={binSeconds}
             cursor={cursor}

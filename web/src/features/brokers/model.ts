@@ -44,38 +44,117 @@ function netBySnapshot(brokers: FeedBrokers): Map<string, { name: string; net: n
   return members;
 }
 
-function lastKnownCumulative(row: BrokerRow): number | null {
-  for (let i = row.cells.length - 1; i >= 0; i--) {
-    const cumulative = row.cells[i]?.cumulative ?? null;
+function lastKnownCumulativeBefore(cells: readonly BrokerCell[], limit: number): number | null {
+  for (let i = Math.min(limit, cells.length) - 1; i >= 0; i--) {
+    const cumulative = cells[i]?.cumulative ?? null;
     if (cumulative !== null) return cumulative;
   }
   return null;
 }
 
-function appendSnapshot(state: BrokerState, brokers: FeedBrokers): BrokerState {
-  const { grid } = state;
-  const last = grid.times[grid.times.length - 1];
-  if (last !== undefined && brokers.t <= last) return state;
-  const members = netBySnapshot(brokers);
-  const rowsByCode = new Map(grid.rows.map((row) => [row.code, row]));
-  const columns = grid.times.length;
-  for (const code of members.keys()) {
-    if (!rowsByCode.has(code)) rowsByCode.set(code, { code, name: members.get(code)!.name, cells: Array.from({ length: columns }, () => ABSENT) });
+function lastKnownCumulative(row: BrokerRow): number | null {
+  return lastKnownCumulativeBefore(row.cells, row.cells.length);
+}
+
+function hasGapBetween(gaps: readonly (readonly [UnixSeconds, UnixSeconds])[], prevTime: UnixSeconds, currTime: UnixSeconds): boolean {
+  for (const [from, to] of gaps) {
+    if (from < currTime && to > prevTime) return true;
   }
-  const rows = [...rowsByCode.values()].map((row): BrokerRow => {
-    const member = members.get(row.code);
-    if (member === undefined) return { ...row, cells: [...row.cells, ABSENT] };
-    const previous = lastKnownCumulative(row);
-    const cell: BrokerCell = { present: true, cumulative: member.net, net: member.net - (previous ?? 0), first: previous === null };
-    return { ...row, name: member.name, cells: [...row.cells, cell] };
-  });
-  return { grid: { times: [...grid.times, brokers.t], gapBefore: [...grid.gapBefore, state.gapPending], rows }, gapPending: false };
+  return false;
+}
+
+export function appendSnapshots(
+  state: BrokerState,
+  snapshots: readonly FeedBrokers[],
+  gaps: readonly (readonly [UnixSeconds, UnixSeconds])[],
+): BrokerState {
+  if (snapshots.length === 0) return state;
+  const { grid } = state;
+  const oldCols = grid.times.length;
+  const lastExisting = oldCols > 0 ? grid.times[oldCols - 1]! : undefined;
+
+  const effective: FeedBrokers[] = [];
+  for (const snapshot of snapshots) {
+    const prev = effective.length > 0 ? effective[effective.length - 1]!.t : lastExisting;
+    if (prev !== undefined && snapshot.t < prev) continue;
+    if (effective.length > 0 && snapshot.t === effective[effective.length - 1]!.t) {
+      effective[effective.length - 1] = snapshot;
+    } else {
+      effective.push(snapshot);
+    }
+  }
+  if (effective.length === 0) return state;
+
+  const replaceLast = lastExisting !== undefined && effective[0]!.t === lastExisting;
+  const baseCols = replaceLast ? oldCols - 1 : oldCols;
+  const totalCols = baseCols + effective.length;
+
+  const times = new Array<UnixSeconds>(totalCols);
+  const gapBefore = new Array<boolean>(totalCols);
+  for (let i = 0; i < baseCols; i++) {
+    times[i] = grid.times[i]!;
+    gapBefore[i] = grid.gapBefore[i]!;
+  }
+  for (let k = 0; k < effective.length; k++) {
+    const col = baseCols + k;
+    const currTime = effective[k]!.t;
+    times[col] = currTime;
+    if (col === 0) {
+      gapBefore[col] = false;
+    } else if (replaceLast && k === 0) {
+      gapBefore[col] = grid.gapBefore[oldCols - 1]! || hasGapBetween(gaps, times[col - 1]!, currTime);
+    } else {
+      const pending = col === oldCols && state.gapPending;
+      gapBefore[col] = pending || hasGapBetween(gaps, times[col - 1]!, currTime);
+    }
+  }
+
+  const mutableRows = new Map<
+    string,
+    { code: string; name: string; cells: BrokerCell[]; lastCumulative: number | null; hasPresent: boolean }
+  >();
+  for (const row of grid.rows) {
+    const cells = new Array<BrokerCell>(totalCols);
+    for (let i = 0; i < baseCols; i++) cells[i] = row.cells[i]!;
+    for (let i = baseCols; i < totalCols; i++) cells[i] = ABSENT;
+    const lastCumulative = lastKnownCumulativeBefore(row.cells, baseCols);
+    mutableRows.set(row.code, {
+      code: row.code,
+      name: row.name,
+      cells,
+      lastCumulative,
+      hasPresent: lastCumulative !== null,
+    });
+  }
+
+  for (let k = 0; k < effective.length; k++) {
+    const col = baseCols + k;
+    const members = netBySnapshot(effective[k]!);
+    for (const [code, member] of members) {
+      let entry = mutableRows.get(code);
+      if (entry === undefined) {
+        entry = { code, name: member.name, cells: new Array<BrokerCell>(totalCols).fill(ABSENT), lastCumulative: null, hasPresent: false };
+        mutableRows.set(code, entry);
+      }
+      const previous = entry.lastCumulative;
+      entry.cells[col] = { present: true, cumulative: member.net, net: member.net - (previous ?? 0), first: previous === null };
+      entry.lastCumulative = member.net;
+      entry.name = member.name;
+      entry.hasPresent = true;
+    }
+  }
+
+  const rows: BrokerRow[] = [];
+  for (const entry of mutableRows.values()) {
+    if (entry.hasPresent) rows.push({ code: entry.code, name: entry.name, cells: entry.cells });
+  }
+  return { grid: { times, gapBefore, rows }, gapPending: false };
 }
 
 export function reduceBrokers(state: BrokerState, event: BrokerEvent): BrokerState {
   switch (event.type) {
     case "snapshot":
-      return appendSnapshot(state, event.brokers);
+      return appendSnapshots(state, [event.brokers], []);
     case "link":
       return event.live || state.gapPending ? state : { ...state, gapPending: true };
     case "resync":
