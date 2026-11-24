@@ -3,7 +3,7 @@ import type { Bar } from "../src/api/generated/Bar";
 import type { BookReplayDay } from "../src/api/generated/BookReplayDay";
 import { toChartTime } from "../src/chart/time";
 import { installChartProbe } from "./chart-probe";
-import { expect, pollSaved, type Scenario, test } from "./harness";
+import { cell, expect, pickDesktopVenue, pollSaved, type Scenario, test } from "./harness";
 import { cellAt, center, chipAt, CODE, openOrder, openOrderWindow, ordersOn, SETTINGS, status, tradingApi, win, writesTo, type Api } from "./order-window";
 
 test.use({ clockStart: "20261123140000" });
@@ -132,4 +132,28 @@ test("사다리 칩을 끌던 중에 과거 호가로 바뀌면 놓아도 정정
 
   await expect(status(page)).toContainText("과거 호가를 보는 동안에는 주문할 수 없습니다");
   expect(api.writes).toEqual([]);
+});
+
+test("앱 거래소가 KRX일 때 복기 막대 오른쪽에 통합과 주문 잠금이 나란히 보인다", async ({ page, scenario }) => {
+  await open(page, scenario);
+  await pickDesktopVenue(page, "KRX");
+  await expect(cell(page)).toHaveAttribute("aria-busy", "false");
+
+  await pointAt(page, at(9, 0));
+  await expect(win(page)).toHaveAttribute("data-replay", "past");
+  const strip = win(page).getByTestId("replay-strip");
+  const venue = win(page).getByTestId("replay-venue");
+  const lock = strip.locator(".od-replay-lock");
+  await expect(venue).toHaveText("통합");
+  await expect(lock).toHaveText("주문 잠금");
+
+  const stripBox = await strip.boundingBox();
+  const venueBox = await venue.boundingBox();
+  const lockBox = await lock.boundingBox();
+  expect(stripBox).not.toBeNull();
+  expect(venueBox).not.toBeNull();
+  expect(lockBox).not.toBeNull();
+  expect(lockBox!.x).toBeGreaterThanOrEqual(venueBox!.x + venueBox!.width);
+  expect(lockBox!.x - (venueBox!.x + venueBox!.width)).toBeLessThan(20);
+  expect(stripBox!.x + stripBox!.width - (lockBox!.x + lockBox!.width)).toBeLessThan(24);
 });
