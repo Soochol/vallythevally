@@ -198,10 +198,11 @@ describe("실시간 시세로 보유 줄 맞추기", () => {
     expect(live.currentPrice).toBe(70_500);
   });
 
-  it("시세가 없거나 제한됐거나 옛 시세면 잔고 값을 그대로 돌려준다", () => {
+  it("시세가 없거나 제한됐거나 옛 시세거나 예상체결가면 잔고 값을 그대로 돌려준다", () => {
     expect(atWatchQuote(HOLDING, { quote: undefined, limited: false, stale: false })).toBe(HOLDING);
     expect(atWatchQuote(HOLDING, { quote: quote(70_500), limited: true, stale: true })).toBe(HOLDING);
     expect(atWatchQuote(HOLDING, { quote: quote(70_500), limited: false, stale: true })).toBe(HOLDING);
+    expect(atWatchQuote(HOLDING, { quote: { ...quote(70_500), source: "expected" }, limited: false, stale: false })).toBe(HOLDING);
   });
 
   it("시세가 잔고 현재가와 같으면 같은 객체를 돌려준다", () => {

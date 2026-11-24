@@ -31,7 +31,7 @@ export function atLivePrice(holding: TradingHolding | null, lastPrice: number | 
 }
 
 export function atWatchQuote(holding: TradingHolding, watch: WatchQuote): TradingHolding {
-  if (watch.limited || watch.stale || watch.quote === undefined) return holding;
+  if (watch.limited || watch.stale || watch.quote === undefined || watch.quote.source === "expected") return holding;
   return atLivePrice(holding, watch.quote.price) ?? holding;
 }
 

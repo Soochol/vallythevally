@@ -1,4 +1,4 @@
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { type QueryClient, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect } from "react";
 import type { TradingBalance } from "../../api/generated/TradingBalance";
 import { marketSocket, quoteBook } from "../../stores/realtime";
@@ -9,13 +9,77 @@ export const BALANCE_POLL_MS = 15_000;
 const BALANCE_STALE_MS = 5_000;
 const NO_ACCOUNT = "none";
 
-const balanceQueryKey = (scope: string) => [...ORDER_QUERY_KEY, scope, "balance"] as const;
+const balanceQueryKey = (account: string | null) => [...ORDER_QUERY_KEY, account ?? NO_ACCOUNT, "balance"] as const;
+
+export const isBalanceQueryKey = (queryKey: readonly unknown[]): boolean =>
+  queryKey.length === 3 && queryKey[0] === ORDER_QUERY_KEY[0] && queryKey[2] === "balance";
+
+class BalanceHub {
+  private readonly accounts = new Map<string | null, number>();
+  private stop: (() => void) | null = null;
+  private wasClosed = false;
+
+  constructor(private readonly client: QueryClient) {}
+
+  acquire(account: string | null): () => void {
+    this.accounts.set(account, (this.accounts.get(account) ?? 0) + 1);
+    if (this.stop === null) this.start();
+    let released = false;
+    return () => {
+      if (released) return;
+      released = true;
+      const next = (this.accounts.get(account) ?? 0) - 1;
+      if (next > 0) this.accounts.set(account, next);
+      else this.accounts.delete(account);
+      if (this.accounts.size === 0) this.teardown();
+    };
+  }
+
+  private start(): void {
+    this.wasClosed = false;
+    const stopWatch = marketSocket.watch((connection) => {
+      if (connection.socket === "closed") {
+        this.wasClosed = true;
+      } else if (connection.socket === "open" && this.wasClosed) {
+        this.wasClosed = false;
+        for (const account of this.accounts.keys()) {
+          void this.client.invalidateQueries({ queryKey: balanceQueryKey(account) });
+        }
+      }
+    });
+    const stopAccount = marketSocket.watchTradingAccount((changed) => {
+      if (this.accounts.has(changed)) {
+        void this.client.invalidateQueries({ queryKey: balanceQueryKey(changed) });
+      }
+    });
+    this.stop = () => {
+      stopWatch();
+      stopAccount();
+    };
+  }
+
+  private teardown(): void {
+    this.stop?.();
+    this.stop = null;
+    this.wasClosed = false;
+  }
+}
+
+const hubs = new WeakMap<QueryClient, BalanceHub>();
+
+function hubOf(client: QueryClient): BalanceHub {
+  let hub = hubs.get(client);
+  if (hub === undefined) {
+    hub = new BalanceHub(client);
+    hubs.set(client, hub);
+  }
+  return hub;
+}
 
 export function useAccountBalance(account: string | null, enabled: boolean): TradingBalance | null {
   const client = useQueryClient();
-  const scope = account ?? NO_ACCOUNT;
   const balance = useQuery({
-    queryKey: balanceQueryKey(scope),
+    queryKey: balanceQueryKey(account),
     queryFn: ({ signal }) => fetchBalance(account, signal),
     enabled,
     refetchInterval: BALANCE_POLL_MS,
@@ -26,23 +90,8 @@ export function useAccountBalance(account: string | null, enabled: boolean): Tra
 
   useEffect(() => {
     if (!enabled) return;
-    let wasClosed = false;
-    const stopWatch = marketSocket.watch((connection) => {
-      if (connection.socket === "closed") {
-        wasClosed = true;
-      } else if (connection.socket === "open" && wasClosed) {
-        wasClosed = false;
-        void client.invalidateQueries({ queryKey: balanceQueryKey(scope) });
-      }
-    });
-    const stopAccount = marketSocket.watchTradingAccount((changed) => {
-      if (changed === account) void client.invalidateQueries({ queryKey: balanceQueryKey(scope) });
-    });
-    return () => {
-      stopWatch();
-      stopAccount();
-    };
-  }, [client, enabled, account, scope]);
+    return hubOf(client).acquire(account);
+  }, [client, enabled, account]);
 
   const codesKey = enabled ? (balance.data?.holdings ?? []).map((holding) => holding.code).join("\0") : "";
   useEffect(() => {

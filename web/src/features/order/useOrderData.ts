@@ -11,7 +11,7 @@ import { buyingPowerOf, type Capacity, groupWithPending, type PriceGroup } from 
 import { pendingWrites } from "./pendingWrites";
 import { fetchCommands, fetchExecutions, fetchOpenOrders, fetchOrderable } from "./orderApi";
 import { holdingOf } from "./holdingSummary";
-import { useAccountBalance } from "./useAccountBalance";
+import { isBalanceQueryKey, useAccountBalance } from "./useAccountBalance";
 import { ORDER_QUERY_KEY } from "./useOrderWrites";
 
 const POLL_MS = 5000;
@@ -56,7 +56,9 @@ function useRefreshOnAccountChange(enabled: boolean, account: string | null): vo
   useEffect(() => {
     if (!enabled) return;
     return marketSocket.watchTradingAccount((changed) => {
-      if (changed === account) void client.invalidateQueries({ queryKey: ORDER_QUERY_KEY });
+      if (changed === account) {
+        void client.invalidateQueries({ queryKey: ORDER_QUERY_KEY, predicate: (query) => !isBalanceQueryKey(query.queryKey) });
+      }
     });
   }, [client, enabled, account]);
 }
