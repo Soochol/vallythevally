@@ -4,7 +4,7 @@ import type { DockNode, DockPlacement, Rect } from "../placement";
 import { dockMinSize, drawDock, dropTarget, heldMinSize, layoutDock, moveDivider, tabsMinSize, type DockSpace } from "./geometry";
 import { listGroups } from "./tree";
 
-const ref = (id: string, kind: WindowKind): WindowRef => ({ id: windowId(id), kind });
+const ref = (id: string, kind: WindowKind): WindowRef => ({ id: windowId(id), kind, rateHidden: false });
 const group = (id: string, tabs: string[]): DockNode => ({ kind: "group", id, tabs: tabs.map(windowId), active: windowId(tabs[0] ?? "") });
 
 const windows = [ref("c1", "chart"), ref("c2", "chart"), ref("w", "watchlist"), ref("s", "screener"), ref("o", "trades")];

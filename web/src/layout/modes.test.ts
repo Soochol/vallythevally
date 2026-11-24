@@ -10,7 +10,7 @@ import { canvasFromDock, dockFromCanvas, placementForMode } from "./modes";
 import type { DockPlacement, Placement } from "./placement";
 
 const a = windowId("a"), b = windowId("b"), c = windowId("c"), d = windowId("d");
-const windows: WindowList = [{ id: a, kind: "chart" }, { id: b, kind: "chart" }, { id: c, kind: "watchlist" }, { id: d, kind: "trades" }];
+const windows: WindowList = [{ id: a, kind: "chart", rateHidden: false }, { id: b, kind: "chart", rateHidden: false }, { id: c, kind: "watchlist", rateHidden: false }, { id: d, kind: "trades", rateHidden: false }];
 const room = { dock: { area: { w: 1400, h: 760 }, gap: 6 }, canvas: workArea(1400, 712)! };
 
 test("첫 캔버스는 실제 도킹 픽셀을 보존하고 같은 묶음만 24px 비켜 쌓아 고른 탭을 앞으로 놓는다", () => {
@@ -29,7 +29,7 @@ test("첫 캔버스는 실제 도킹 픽셀을 보존하고 같은 묶음만 24p
 
 test("최소 크기의 이웃 탭 묶음은 비켜 쌓기를 줄여 다른 묶음에 침범하지 않는다", () => {
   const tiny = { dock: { area: { w: 566, h: 194 }, gap: 6 }, canvas: workArea(566, 146)! };
-  const allCharts: WindowList = [{ id: a, kind: "chart" }, { id: b, kind: "chart" }, { id: c, kind: "chart" }, { id: d, kind: "chart" }];
+  const allCharts: WindowList = [{ id: a, kind: "chart", rateHidden: false }, { id: b, kind: "chart", rateHidden: false }, { id: c, kind: "chart", rateHidden: false }, { id: d, kind: "chart", rateHidden: false }];
   const dock: DockPlacement = { root: { kind: "split", dir: "row", ratio: .5, first: { kind: "group", id: "l", tabs: [a, b], active: a }, second: { kind: "group", id: "r", tabs: [c, d], active: c } }, floats: [] };
   const result = canvasFromDock(dock, allCharts, tiny);
   expect(result.rects[a]).toEqual(result.rects[b]);
@@ -56,7 +56,7 @@ test("이미 쓴 방식은 원래 배치를 보존하며 닫거나 더한 창만
   expect(placementForMode(placement, windows, "canvas", room)).toBe(placement);
   expect(placementForMode(placement, windows, "dock", room)).toBe(placement);
   const added = windowId("e");
-  const changed: WindowList = [windows[0], windows[2]!, windows[3]!, { id: added, kind: "chart" }];
+  const changed: WindowList = [windows[0], windows[2]!, windows[3]!, { id: added, kind: "chart", rateHidden: false }];
   const next = placementForMode(placement, changed, "canvas", room);
   expect(next.dock).toBe(dock);
   expect(next.canvas!.rects[a]).toBe(canvas.rects[a]);
@@ -106,7 +106,7 @@ test("최소 크기로 커져 보이는 떠 있는 창도 첫 캔버스에서 �
 });
 
 test("처음 캔버스로 옮길 때 픽셀 그대로면 겹친 쌍이 셋을 넘는 배치는 가지런히 놓는다", () => {
-  const six: WindowList = [{ id: a, kind: "chart" }, { id: c, kind: "watchlist" }, { id: d, kind: "trades" }, { id: windowId("s"), kind: "screener" }, { id: windowId("k"), kind: "book" }, { id: windowId("p"), kind: "program" }];
+  const six: WindowList = [{ id: a, kind: "chart", rateHidden: false }, { id: c, kind: "watchlist", rateHidden: false }, { id: d, kind: "trades", rateHidden: false }, { id: windowId("s"), kind: "screener", rateHidden: false }, { id: windowId("k"), kind: "book", rateHidden: false }, { id: windowId("p"), kind: "program", rateHidden: false }];
   const dock: DockPlacement = { root: { kind: "group", id: "g1", tabs: six.map((window) => window.id), active: a }, floats: [] };
   const canvas = canvasFromDock(dock, six, room);
   expect(countOverlaps(Object.values(rectsForArea(canvas, six, room.canvas)))).toBe(0);

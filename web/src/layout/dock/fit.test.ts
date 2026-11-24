@@ -5,7 +5,7 @@ import { defaultDock, fitDock, type WindowList } from "./fit";
 import { drawDock, layoutDock, type DockSpace } from "./geometry";
 import { listGroups, selectTab } from "./tree";
 
-const ref = (id: string, kind: WindowKind): WindowRef => ({ id: windowId(id), kind });
+const ref = (id: string, kind: WindowKind): WindowRef => ({ id: windowId(id), kind, rateHidden: false });
 const group = (id: string, tabs: string[], active = tabs[0] ?? ""): DockNode => ({ kind: "group", id, tabs: tabs.map(windowId), active: windowId(active) });
 const row = (ratio: number, first: DockNode, second: DockNode): DockNode => ({ kind: "split", dir: "row", ratio, first, second });
 const float = (window: string) => ({ window: windowId(window), rect: { x: 0.5, y: 0.1, w: 0.3, h: 0.4 } });

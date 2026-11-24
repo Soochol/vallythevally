@@ -8,7 +8,7 @@ import { findJunctions } from "./junction";
 import { applyPreset, pushDivider } from "./push";
 import { dividerStops, nextStop, presetLead, snapLead, type Stop } from "./stops";
 
-const ref = (id: string, kind: WindowKind): WindowRef => ({ id: windowId(id), kind });
+const ref = (id: string, kind: WindowKind): WindowRef => ({ id: windowId(id), kind, rateHidden: false });
 const group = (id: string, tab: string): DockNode => ({ kind: "group", id, tabs: [windowId(tab)], active: windowId(tab) });
 const split = (dir: "row" | "column", ratio: number, first: DockNode, second: DockNode): DockNode => ({ kind: "split", dir, ratio, first, second });
 const placed = (root: DockNode): DockPlacement => ({ root, floats: [] });

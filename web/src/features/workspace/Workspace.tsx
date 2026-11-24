@@ -80,7 +80,7 @@ export function Workspace() {
   const preview = interaction.preview;
   return (
     <main ref={root} aria-label="작업 영역" className="workspace" data-dock-dragging={interaction.dragging ? "" : undefined} onLostPointerCapture={interaction.lostCapture}>
-      {mode === "canvas" && canvas && canvasArea ? <CanvasWorkspace canvas={canvas} windows={windows} area={canvasArea} /> : null}
+      {mode === "canvas" && canvas && canvasArea ? <CanvasWorkspace canvas={canvas} windows={windows} refs={refs} area={canvasArea} /> : null}
       {mode === "dock" && boxes?.groups.map(({ group, rect }, index) => (maximizedGroup && group.id !== maximizedGroup.group.id ? null : <DockGroup key={group.id} group={group} rect={maximizedGroup && space ? { x: 0, y: 0, w: space.area.w, h: space.area.h } : rect} number={index + 1} interaction={interaction} maximized={maximizedGroup !== undefined} onToggleMaximize={() => maximize.toggle(group.id)} />))}
       {mode === "dock" && space && !maximizedGroup && boxes?.gutters.map((box) => <Divider key={box.path.join("-") || "root"} box={box} dock={drawn.dock} space={space} onDraft={setDraft} onCommit={commitRatios} />)}
       {mode === "dock" && space && !maximizedGroup && boxes && findJunctions(boxes).map((junction) => <DockJunction key={`${junction.rowPath.join("-")}|${junction.columnPath.join("-")}`} junction={junction} layout={boxes} dock={drawn.dock} space={space} onDraft={setDraft} onCommit={commitRatios} />)}

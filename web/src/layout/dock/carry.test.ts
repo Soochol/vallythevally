@@ -8,7 +8,7 @@ import { pushDivider } from "./push";
 import { splitGroup } from "./split";
 import { listGroups, putTab } from "./tree";
 
-const ref = (id: string, kind: WindowKind): WindowRef => ({ id: windowId(id), kind });
+const ref = (id: string, kind: WindowKind): WindowRef => ({ id: windowId(id), kind, rateHidden: false });
 const group = (id: string, tabs: string[], active = tabs[0] ?? ""): DockNode => ({ kind: "group", id, tabs: tabs.map(windowId), active: windowId(active) });
 const row = (ratio: number, first: DockNode, second: DockNode): DockNode => ({ kind: "split", dir: "row", ratio, first, second });
 const placed = (root: DockNode): DockPlacement => ({ root, floats: [] });

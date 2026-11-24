@@ -19,7 +19,7 @@ import type { Size } from "../layout/dock/geometry";
 import { placeBeside } from "../layout/dock/split";
 import { findGroup, groupOfWindow, putTab, selectTab } from "../layout/dock/tree";
 import { defaultRanking } from "../layout/ranking";
-import { isLadderKind, MAX_WINDOWS, windowId, WINDOW_KINDS, type WindowId, type WindowKind, type WindowRef } from "../layout/kinds";
+import { isLadderKind, MAX_WINDOWS, windowId, WINDOW_KINDS, type WindowId, type WindowIdentity, type WindowKind, type WindowRef } from "../layout/kinds";
 import type { CanvasPlacement, DockPlacement, Placement } from "../layout/placement";
 import { isIndexCode } from "../lib/symbol";
 import { readDockOrigins, writeDockOrigins } from "../persist/dockOrigins";
@@ -60,17 +60,17 @@ export const chartWindow = (layout: EditableLayout, id: WindowId): ChartWindowSt
 
 export const chartNumber = (layout: EditableLayout, id: WindowId): number => chartWindows(layout).findIndex((w) => w.id === id) + 1;
 
-export function windowName(windows: readonly WindowRef[], window: WindowRef): string {
+export function windowName(windows: readonly WindowIdentity[], window: WindowIdentity): string {
   const { name } = WINDOW_KINDS[window.kind];
   if (window.kind === "chart") return name;
   const sameKind = windows.filter((w) => w.kind === window.kind);
   return sameKind.length > 1 ? `${name} ${sameKind.findIndex((w) => w.id === window.id) + 1}` : name;
 }
 
-export const useWindowName = (window: WindowRef): string => useLayoutStore((s) => windowName(s.layout.windows, window));
+export const useWindowName = (window: WindowIdentity): string => useLayoutStore((s) => windowName(s.layout.windows, window));
 
 export function windowRefs(windows: readonly WindowState[], rateHidden = ladderRateHidden()): WindowList {
-  const [first, ...rest] = windows.map(({ id, kind }): WindowRef => (rateHidden && isLadderKind(kind) ? { id, kind, rateHidden } : { id, kind }));
+  const [first, ...rest] = windows.map(({ id, kind }): WindowRef => ({ id, kind, rateHidden: rateHidden && isLadderKind(kind) }));
   if (!first) throw new Error("창이 없는 레이아웃은 배치할 수 없습니다");
   return [first, ...rest];
 }

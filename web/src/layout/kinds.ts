@@ -38,10 +38,13 @@ export type WindowId = string & { readonly __brand: "WindowId" };
 
 export const windowId = (raw: string): WindowId => raw as WindowId;
 
-export interface WindowRef {
+export interface WindowIdentity {
   id: WindowId;
   kind: WindowKind;
-  rateHidden?: boolean;
+}
+
+export interface WindowRef extends WindowIdentity {
+  rateHidden: boolean;
 }
 
 export const LADDER_RATE_WIDTH = 48;

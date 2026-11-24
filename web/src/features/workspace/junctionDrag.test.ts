@@ -5,7 +5,7 @@ import type { DockNode, DockPlacement } from "../../layout/placement";
 import { windowId, type WindowRef } from "../../layout/kinds";
 import { junctionStart, moveJunction } from "./junctionDrag";
 
-const ref = (id: string, kind: WindowRef["kind"]): WindowRef => ({ id: windowId(id), kind });
+const ref = (id: string, kind: WindowRef["kind"]): WindowRef => ({ id: windowId(id), kind, rateHidden: false });
 const group = (id: string, tab: string): DockNode => ({ kind: "group", id, tabs: [windowId(tab)], active: windowId(tab) });
 const windows = [ref("c1", "chart"), ref("w", "watchlist"), ref("s", "screener")];
 const space: DockSpace = { area: { w: 1256, h: 684 }, gap: 6, windows };

@@ -10,7 +10,7 @@ import type { CanvasPlacement, DockPlacement, Placement, Rect } from "./placemen
 const area = workArea(1440, 900)!;
 const room: PlacementRoom = { dock: { area: { w: 1440, h: 948 }, gap: 6 }, canvas: area };
 const dockArea = workArea(1440, 948)!;
-const ref = (id: string, kind: WindowKind, rateHidden: boolean): WindowRef => (rateHidden ? { id: windowId(id), kind, rateHidden } : { id: windowId(id), kind });
+const ref = (id: string, kind: WindowKind, rateHidden: boolean): WindowRef => ({ id: windowId(id), kind, rateHidden });
 const list = (hidden: boolean): [WindowRef, ...WindowRef[]] => [ref("chart", "chart", false), ref("order", "order", hidden), ref("book", "book", hidden)];
 const windows = { hidden: list(true), shown: list(false) };
 const none: DockMemory = new Map();
