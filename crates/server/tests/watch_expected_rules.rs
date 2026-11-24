@@ -15,7 +15,7 @@ use server::market::hub::{HubHandle, MarketHub};
 use server::market::outbox::Outbox;
 use server::market::ConnId;
 use server::market_source::stream::{DayTotals, DesiredFeeds, Exchange, ExpectedQuote, MarketStream, RealTick, SeatRules, StreamEvent};
-use server::quotes::{OpenExchanges, expected_exchange, open_exchanges};
+use server::quotes::{OpenExchanges, expected_exchange, expected_moves_row, open_exchanges};
 use server::symbols::{Directory, SymbolDirectory};
 use support::ScriptedTransport;
 use tokio::sync::{mpsc, watch};
@@ -179,4 +179,37 @@ async fn an_expected_row_does_not_carry_yesterdays_volume() {
     let got = quotes(&out).await;
     assert_eq!(got.len(), 1, "{got:?}");
     assert_eq!((got[0].source, got[0].volume), (api::QuoteSource::Expected, 0));
+}
+
+#[test]
+fn after_close_tail_window_splits_at_1531_and_uses_krx_close_fill() {
+    let tod = |h, m, s| TimeOfDay::hms(h, m, s).unwrap();
+    assert_eq!(expected_exchange(true, tod(15, 30, 0), None, None), Exchange::Krx);
+    assert_eq!(expected_exchange(true, tod(15, 30, 59), None, None), Exchange::Krx);
+    assert_eq!(expected_exchange(true, tod(15, 30, 59), Some(time((15, 29, 59))), None), Exchange::Krx);
+    assert_eq!(expected_exchange(true, tod(15, 30, 59), Some(time((15, 30, 0))), None), Exchange::Nxt);
+    assert_eq!(expected_exchange(true, tod(15, 31, 0), None, None), Exchange::Nxt);
+    assert_eq!(expected_exchange(true, tod(15, 31, 0), Some(time((15, 19, 59))), None), Exchange::Nxt);
+    assert_eq!(expected_exchange(true, tod(15, 39, 59), None, None), Exchange::Nxt);
+    assert_eq!(expected_exchange(false, tod(15, 30, 59), None, None), Exchange::Krx);
+    assert_eq!(expected_exchange(false, tod(15, 30, 59), Some(time((15, 30, 0))), None), Exchange::Krx);
+    assert_eq!(expected_exchange(false, tod(15, 31, 0), None, None), Exchange::Krx);
+}
+
+#[test]
+fn expected_moves_row_keeps_krx_unchanged_for_nxt_stocks_only_from_1530_to_1540() {
+    let tod = |h, m, s| TimeOfDay::hms(h, m, s).unwrap();
+    let moves = |nxt_enabled, from, h, m, s| {
+        let at = tod(h, m, s);
+        (expected_moves_row(Venue::Krx, from, nxt_enabled, at), expected_moves_row(Venue::Nxt, from, nxt_enabled, at), expected_moves_row(Venue::Combined, from, nxt_enabled, at))
+    };
+    assert_eq!(moves(true, Exchange::Krx, 15, 29, 59), (true, false, true));
+    assert_eq!(moves(true, Exchange::Krx, 15, 30, 0), (false, false, true));
+    assert_eq!(moves(true, Exchange::Krx, 15, 30, 59), (false, false, true));
+    assert_eq!(moves(true, Exchange::Nxt, 15, 30, 59), (false, true, true));
+    assert_eq!(moves(true, Exchange::Nxt, 15, 31, 0), (false, true, true));
+    assert_eq!(moves(true, Exchange::Nxt, 15, 39, 59), (false, true, true));
+    assert_eq!(moves(true, Exchange::Krx, 15, 40, 0), (true, false, false));
+    assert_eq!(moves(false, Exchange::Krx, 15, 30, 0), (true, false, true));
+    assert_eq!(moves(false, Exchange::Krx, 15, 39, 59), (true, false, true));
 }
