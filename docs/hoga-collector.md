@@ -20,6 +20,7 @@ data/hoga/
   store/prune.log.jsonl                           원문 지우기 기록
   plan/<YYYYMMDD>.json                            그날의 수집 계획
   turnover/<YYYYMMDD>.json                        마감 뒤 받은 그날 종목별 통합 거래대금
+  shared/trade-minute/<YYYYMMDD>/<키 이름>/<종목코드>.jsonl  1분 체결(마지막 10건, 최근 7일 유지)
 ```
 
 날짜와 `HHMM`은 수신 시각의 KST 날짜와 5분 구간 시작이다. `<종목>`은 등록한 글자 그대로다(`005930_AL`).

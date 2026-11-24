@@ -8,6 +8,7 @@ mod overview;
 mod snapshot;
 mod symbol_flow;
 mod themes;
+mod trade_minute;
 mod write;
 
 use std::path::{Path, PathBuf};
@@ -33,6 +34,7 @@ pub use symbol_flow::{
     FLOW_FORMAT_VERSION, FlowBlock, FlowCursor, FlowDescription, FlowRow, FlowWriter, SYMBOL_FLOW_FOLDER, flow_folder, flow_links_path, flow_path,
 };
 pub use themes::{ThemeEntry, ThemesBody};
+pub use trade_minute::{TradeMinuteLine, trade_minute_path};
 
 use domain::{KstTime, Venue};
 
@@ -141,6 +143,7 @@ impl SharedData {
             DataKind::SnapshotNxt => self.snapshot_nxt.errors(),
             DataKind::Minute => self.minutes.errors(),
             DataKind::QuoteMinutes => 0,
+            DataKind::TradeMinute => 0,
         }
     }
 
@@ -155,6 +158,7 @@ impl SharedData {
             DataKind::SnapshotNxt => self.snapshot_nxt.age_secs(now),
             DataKind::Minute => None,
             DataKind::QuoteMinutes => None,
+            DataKind::TradeMinute => None,
         }
     }
 }

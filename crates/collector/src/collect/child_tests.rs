@@ -47,6 +47,7 @@ fn launch_child(peer: &Peer) -> Child {
         minutes: None,
         flow: None,
         quotes: None,
+        trades: None,
     };
     let task = tokio::spawn(run_session(parts));
     Child { paths, wall, commands, events, stop, task }
@@ -542,6 +543,7 @@ async fn child_session_writes_symbol_flow_and_link_events() {
         minutes: None,
         flow: Some(FileFlowStore::new(shared.clone(), key)),
         quotes: None,
+        trades: None,
     };
     let task = tokio::spawn(run_session(parts));
     let child = Child { paths, wall, commands, events, stop, task };
@@ -606,6 +608,7 @@ async fn a_session_outage_reaches_the_quote_gaps() {
         minutes: None,
         flow: None,
         quotes: Some(shared.clone()),
+        trades: None,
     };
     let child = Child { paths, wall, commands, events, stop, task: tokio::spawn(run_session(parts)) };
     child.send(token(CHILD_TOKEN, 1));

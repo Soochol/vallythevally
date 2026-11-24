@@ -67,6 +67,7 @@ pub async fn execute(
         minutes: None,
         flow: None,
         quotes: None,
+        trades: None,
     });
     let finish = session.run().await;
     drop(lock);
