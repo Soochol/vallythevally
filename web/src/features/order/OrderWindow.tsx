@@ -25,7 +25,6 @@ import { visibleAfterHours, visibleExpected } from "../book/sessionWindows";
 import { type InfoPager, useInfoPager, useLadderTrades, useQuoteInfo } from "../market-window/useLadderSlots";
 import { useShownVenue } from "../market-window/useShownVenue";
 import { EmptyState, ErrorState } from "../overlay/State";
-import { isMarketOpen } from "../../chart/time";
 import { FeedStrip, useFeedDownSince } from "../market-window/FeedStrip";
 import { SymbolHead } from "../market-window/SymbolHead";
 import { openSystemSettings } from "../system-settings/open";
@@ -103,7 +102,6 @@ function OrderBody({ id, code, infoPager, choice, access, balance }: { id: Windo
   }, []);
 
   const downSince = useFeedDownSince(feed.connected);
-  const marketOpen = isMarketOpen(Math.floor(now / 1000));
   const view = feed.book.phase === "empty" ? null : feed.book.view;
   const bounds = { lower: limits?.lowerLimit ?? null, upper: limits?.upperLimit ?? null };
   const quotes = view ? { asks: view.asks, bids: view.bids, lastPrice: feed.lastPrice, previousClose: feed.previousClose } : null;
@@ -114,8 +112,7 @@ function OrderBody({ id, code, infoPager, choice, access, balance }: { id: Windo
   const referencePrice = feed.lastPrice ?? feed.previousClose ?? liveBase;
   const fullPrices = useMemo(() => fullRangePrices({ lower: bounds.lower, upper: bounds.upper }, tickRule), [bounds.lower, bounds.upper, tickRule]);
   const explorerOn = exploring && fullPrices !== null;
-  const shownRows: LadderRow[] = quotes && heldLadder ? (explorerOn ? buildLadderRows(fullPrices, quotes) : buildLadderRows(heldLadder.prices, quotes, heldLadder.sidesSplit)) : [];
-  const rows = settings.rate ? shownRows : shownRows.map((row) => ({ ...row, rate: null }));
+  const rows: LadderRow[] = quotes && heldLadder ? (explorerOn ? buildLadderRows(fullPrices, quotes) : buildLadderRows(heldLadder.prices, quotes, heldLadder.sidesSplit)) : [];
   const info = useQuoteInfo({ code, venue: quoteVenue, lastPrice: feed.lastPrice, previousClose: feed.previousClose, fundamentals: limits, page: infoPager.page, flipped: infoPager.flipped, sameTimeRatio: trades.sameTimeRatio });
   const expected = view ? visibleExpected(view.t, Math.floor(now / 1000), view.expected) : null;
   const infoSlots = placeInfoItems(rows, info, expectedItemsOnPage(infoPager.page, expected, feed.previousClose, infoPager.flipped));
@@ -247,14 +244,14 @@ function OrderBody({ id, code, infoPager, choice, access, balance }: { id: Windo
   const sellOrdered = sellOrderQuantity(data.groups, pending, code, data.openOrdersListedAt);
 
   return (
-    <div className="od" data-testid="order-window" data-symbol={code} data-venue={orderVenue} data-quote-venue={quoteVenue} data-writable={writable ? "" : undefined}>
+    <div className="od" data-testid="order-window" data-symbol={code} data-venue={orderVenue} data-quote-venue={quoteVenue} data-writable={writable ? "" : undefined} data-rate-hidden={settings.rate ? undefined : ""}>
       {access.reason && (
         <div className="od-gate" role="status" data-testid="order-gate">
           <span>{access.reason}</span>
           <button type="button" className="od-link" onClick={() => openSystemSettings("kiwoom")}>시스템 설정 열기</button>
         </div>
       )}
-      <SymbolHead code={code} name={symbolInfo?.name ?? null} lastPrice={feed.lastPrice} previousClose={feed.previousClose} marketOpen={marketOpen} mock={mock} />
+      <SymbolHead code={code} name={symbolInfo?.name ?? null} lastPrice={feed.lastPrice} previousClose={feed.previousClose} nxtTraded={symbolInfo?.nxtEnabled === true} mock={mock} />
       <AccountPart windowId={id} choice={choice} accountRef={accountRef} onPickAccount={pickAccount} openOrders={data.openOrders} balance={data.balance} executions={data.executions} writable={writable} mock={mock} policy={data.orderable?.policy ?? null} onCancel={cancelOne}
         holding={holding} orderable={data.orderable} buyableProblem={data.buyableProblem} sellOrdered={sellOrdered} profitUnit={profitUnit} onProfitUnit={toggleProfitUnit}
         presetKind={presetKind} input={input} referencePrice={referencePrice} onPresetKind={setPresetKind} onInput={setInput}
@@ -262,7 +259,7 @@ function OrderBody({ id, code, infoPager, choice, access, balance }: { id: Windo
       {!feed.connected && <FeedStrip since={downSince} />}
       <div className="bk-ladder od-ladder-wrap" data-stale={feed.connected ? undefined : ""} data-exploring={explorerOn ? "" : undefined}>
         {view
-            ? <OrderLadder rows={rows} previousClose={feed.previousClose} groups={data.groups} writable={writable} previewQuantity={quantity} buying={data.capacity.buying} hover={hover} averagePrice={averagePrice} divider={settings.divider} explorerOn={explorerOn} explorerUnavailable={referencePrice === null || fullPrices === null} explorerTitle={fullPrices === null ? EXPLORER_UNAVAILABLE : undefined} onToggleExplorer={toggleExplorer} explorerCenterPrice={explorerOn ? referencePrice : null} ladder={ladder} drag={drag} expectedPrice={expected?.price ?? null} rowSlots={{ infoCard: infoSlot(infoSlots, infoPager), bottomLeft: tradeSlot(trades, feed.previousClose) }} actions={ladderActions} />
+            ? <OrderLadder rows={rows} previousClose={feed.previousClose} groups={data.groups} writable={writable} previewQuantity={quantity} buying={data.capacity.buying} hover={hover} averagePrice={averagePrice} divider={settings.divider} rateShown={settings.rate} explorerOn={explorerOn} explorerUnavailable={referencePrice === null || fullPrices === null} explorerTitle={fullPrices === null ? EXPLORER_UNAVAILABLE : undefined} onToggleExplorer={toggleExplorer} explorerCenterPrice={explorerOn ? referencePrice : null} ladder={ladder} drag={drag} expectedPrice={expected?.price ?? null} rowSlots={{ infoCard: infoSlot(infoSlots, infoPager), bottomLeft: tradeSlot(trades, feed.previousClose) }} actions={ladderActions} />
             : feed.snapshotFailed ? <ErrorState message="호가를 불러오지 못했습니다" retry={feed.retry} /> : <EmptyState title="호가를 기다리는 중입니다" />}
       </div>
       <OrderTotals groups={data.groups} writable={writable} actions={totalsActions} drag={drag} />

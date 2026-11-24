@@ -1,8 +1,8 @@
 import { countOverlaps, type Area } from "../../layout/canvas/geometry";
 import { rectsForArea } from "../../layout/canvas/arrange";
-import { isSingleton, MAX_WINDOWS, WINDOW_KIND_LIST, WINDOW_KINDS } from "../../layout/kinds";
+import { isSingleton, MAX_WINDOWS, WINDOW_KIND_LIST, WINDOW_KINDS, type WindowRef } from "../../layout/kinds";
 import type { CanvasPlacement } from "../../layout/placement";
-import { windowName, windowRefs, type WindowState } from "../../stores/layout";
+import { windowName, type WindowState } from "../../stores/layout";
 import { useSelectionStore } from "../../stores/selection";
 import { Badge } from "../ui/Badge";
 import { AddWindowMenu } from "./AddWindowMenu";
@@ -14,10 +14,10 @@ import { addWindow, CHART_LIMIT_REASON, WINDOW_LIMIT_REASON, workspaceRoom } fro
 import { WindowFrame } from "./WindowFrame";
 import { WindowHeader } from "./WindowHeader";
 
-export function CanvasWorkspace({ canvas, windows, area }: { canvas: CanvasPlacement; windows: readonly WindowState[]; area: Area }) {
-  const interaction = useCanvasInteraction(canvas, windows, area);
+export function CanvasWorkspace({ canvas, windows, refs, area }: { canvas: CanvasPlacement; windows: readonly WindowState[]; refs: readonly WindowRef[]; area: Area }) {
+  const interaction = useCanvasInteraction(canvas, windows, refs, area);
   const active = useSelectionStore((s) => s.activeCell);
-  const boxes = rectsForArea(interaction.shown, windowRefs(windows), area);
+  const boxes = rectsForArea(interaction.shown, refs, area);
   const overlaps = countOverlaps(Object.values(boxes));
   const chartCount = windows.filter((window) => window.kind === "chart").length;
   return (

@@ -12,7 +12,7 @@ export function area(w: number, h: number): Area {
 
 export const AREA = area(1256, 616);
 
-export const win = (id: string, kind: WindowKind): WindowRef => ({ id: windowId(id), kind });
+export const win = (id: string, kind: WindowKind): WindowRef => ({ id: windowId(id), kind, rateHidden: false });
 
 export const WINDOWS: readonly WindowRef[] = [win("c1", "chart"), win("c2", "chart"), win("w", "watchlist"), win("s", "screener"), win("o", "trades")];
 

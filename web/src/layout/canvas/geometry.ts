@@ -1,4 +1,4 @@
-import { WINDOW_HEAD_HEIGHT, WINDOW_KINDS, type WindowKind } from "../kinds";
+import { contentMinSize, WINDOW_HEAD_HEIGHT, type WindowKind } from "../kinds";
 import type { Rect } from "../placement";
 
 export type Size = { w: number; h: number };
@@ -14,7 +14,10 @@ export const toPx = (rect: Rect, area: Area): Rect => ({ x: rect.x * area.w, y: 
 
 export const toRatio = (rect: Rect, area: Area): Rect => ({ x: rect.x / area.w, y: rect.y / area.h, w: rect.w / area.w, h: rect.h / area.h });
 
-export const minWindowSize = (kind: WindowKind): Size => ({ w: WINDOW_KINDS[kind].minSize.w, h: WINDOW_KINDS[kind].minSize.h + WINDOW_HEAD_HEIGHT });
+export function minWindowSize(kind: WindowKind, rateHidden = false): Size {
+  const { w, h } = contentMinSize(kind, rateHidden);
+  return { w, h: h + WINDOW_HEAD_HEIGHT };
+}
 
 export const clamp = (value: number, lo: number, hi: number): number => Math.max(lo, Math.min(hi, value));
 

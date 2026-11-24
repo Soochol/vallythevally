@@ -3,8 +3,6 @@ import type { SymbolCode } from "../../api/generated/SymbolCode";
 import type { Venue } from "../../api/generated/Venue";
 import { useSymbolInfo } from "../../api/queries";
 import { daySummaryQueryKey, fetchDaySummary } from "../../api/userData";
-import { isMarketOpen } from "../../chart/time";
-import { useNowMs } from "../book/useNowMs";
 import { SymbolHead } from "./SymbolHead";
 
 export function useDayQuote(code: SymbolCode, venue: Venue) {
@@ -17,14 +15,14 @@ interface Props {
   readonly venue: Venue;
   readonly lastPrice?: number | null;
   readonly previousClose?: number | null;
+  readonly nxtBadge?: boolean;
 }
 
-export function MarketHead({ code, venue, lastPrice, previousClose }: Props) {
-  const name = useSymbolInfo(code).data?.name ?? null;
+export function MarketHead({ code, venue, lastPrice, previousClose, nxtBadge = false }: Props) {
+  const info = useSymbolInfo(code).data;
   const quote = useDayQuote(code, venue);
-  const now = useNowMs();
   return (
-    <SymbolHead code={code} name={name} lastPrice={lastPrice ?? quote.price} previousClose={previousClose ?? quote.previousClose}
-      marketOpen={isMarketOpen(Math.floor(now / 1000))} mock={false} testIdPrefix="market-symbol" />
+    <SymbolHead code={code} name={info?.name ?? null} lastPrice={lastPrice ?? quote.price} previousClose={previousClose ?? quote.previousClose}
+      nxtTraded={nxtBadge && info?.nxtEnabled === true} mock={false} testIdPrefix="market-symbol" />
   );
 }

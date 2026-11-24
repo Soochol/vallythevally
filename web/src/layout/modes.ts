@@ -25,7 +25,7 @@ export function canvasFromDock(dock: DockPlacement, windows: WindowList, room: P
     inactive.forEach((id, index) => {
       const window = windows.find((candidate) => candidate.id === id);
       if (!window) return;
-      const min = minWindowSize(window.kind);
+      const min = minWindowSize(window.kind, window.rateHidden);
       const offset = (index + 1) * CASCADE_STEP;
       const dx = Math.max(0, Math.min(offset, rect.w - min.w));
       const dy = Math.max(0, Math.min(offset, rect.h - min.h));

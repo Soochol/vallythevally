@@ -51,7 +51,7 @@ export function floatRects(dock: DockPlacement, windows: readonly WindowRef[], a
 export function detachedRect(dock: DockPlacement, window: WindowId, space: DockSpace, area: Area, point?: { x: number; y: number }): Rect | null {
   const ref = space.windows.find((ref) => ref.id === window);
   if (!ref) return null;
-  const base = placeNewWindow(ref.kind, Object.values(floatRects(dock, space.windows, area)), area);
+  const base = placeNewWindow(ref.kind, Object.values(floatRects(dock, space.windows, area)), area, ref.rateHidden);
   const group = layoutDock(dock.root, space.area, space.gap).groups.find(({ group }) => group.tabs.includes(window));
   const position = point ? { x: point.x - 80, y: point.y - 14 } : { x: (group?.rect.x ?? base.x) + 24, y: (group?.rect.y ?? base.y) + 24 };
   return toRatio(keepHeadInArea({ ...base, ...position }, area), area);

@@ -104,7 +104,7 @@ test("KRX인 동안 실시간으로 온 시세가 줄에 반영되고 옛 거래
   await expect(main(page, "005930")).toHaveAccessibleName(/^삼성전자 70,710 /);
 });
 
-test("NXT를 누르면 NXT 불가 종목의 줄에만 통합 표시가 붙고 지수 줄에는 붙지 않는다", async ({ page, scenario }) => {
+test("NXT를 누르면 NXT 불가 종목의 관심종목 줄에도 통합 글자가 없다", async ({ page, scenario }) => {
   seedWatchlist(scenario);
   const served = serveQuotes(scenario);
   await page.goto("/");
@@ -114,15 +114,11 @@ test("NXT를 누르면 NXT 불가 종목의 줄에만 통합 표시가 붙고 �
   await pollSaved(() => served.requests.at(-1)).toEqual({ symbols: WATCHED, venue: "nxt" });
   await pollSaved(() => lastWatch(scenario)).toEqual({ symbols: WATCHED, venue: "nxt" });
   await expect(main(page, "005930")).toHaveAccessibleName(/^삼성전자 70,800 /);
-  await expect(main(page, "005935")).toHaveAccessibleName(/^삼성전자우 통합 시세 52,000 /);
-  await expect(fallbackBadge(page, "005935")).toHaveAttribute("title", "NXT에서 거래되지 않는 종목이라 통합 시세로 보입니다");
-  await expect(fallbackBadge(page, "005930")).toHaveCount(0);
-  await expect(fallbackBadge(page, "IDX:001")).toHaveCount(0);
-  await expect(main(page, "IDX:001")).not.toHaveAccessibleName(/통합 시세/);
-
-  await pickDesktopVenue(page, "통합");
   await expect(main(page, "005935")).toHaveAccessibleName(/^삼성전자우 52,000 /);
-  await expect(fallbackBadge(page, "005935")).toHaveCount(0);
+  for (const code of WATCHED) {
+    await expect(row(page, code)).not.toContainText("통합");
+    await expect(main(page, code)).not.toHaveAccessibleName(/통합/);
+  }
 });
 
 test("새로고침하면 저장된 앱 전체 거래소로 시세를 묻는다", async ({ page, scenario }) => {

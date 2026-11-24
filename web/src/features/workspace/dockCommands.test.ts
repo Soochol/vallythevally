@@ -9,7 +9,7 @@ import { evaluateDock, SMALL_DOCK_NOTICE } from "./dockCommands";
 const chart = windowId("chart");
 const screener = windowId("screener");
 const watchlist = windowId("watchlist");
-const refs = [{ id: chart, kind: "chart" }, { id: watchlist, kind: "watchlist" }, { id: screener, kind: "screener" }] satisfies [WindowRef, ...WindowRef[]];
+const refs = [{ id: chart, kind: "chart", rateHidden: false }, { id: watchlist, kind: "watchlist", rateHidden: false }, { id: screener, kind: "screener", rateHidden: false }] satisfies [WindowRef, ...WindowRef[]];
 const dock = defaultDock(refs);
 const space: DockSpace = { area: { w: 1256, h: 500 }, gap: 6, windows: refs };
 
@@ -52,7 +52,7 @@ test("떠 있는 창을 탭 또는 가장자리에 붙이고 작은 나누기는
   expect(floating.floats).toHaveLength(1);
 });
 
-const ref = (id: string, kind: WindowKind): WindowRef => ({ id: windowId(id), kind });
+const ref = (id: string, kind: WindowKind): WindowRef => ({ id: windowId(id), kind, rateHidden: false });
 const leaf = (id: string, tabs: string[]): DockNode => ({ kind: "group", id, tabs: tabs.map(windowId), active: windowId(tabs[0] ?? "") });
 const levelRefs = [ref("a", "watchlist"), ref("b", "watchlist"), ref("c", "chart"), ref("c2", "watchlist")];
 const levelSpace: DockSpace = { area: { w: 1416, h: 748 }, gap: 6, windows: levelRefs };

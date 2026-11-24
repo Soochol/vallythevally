@@ -9,7 +9,7 @@ import type { WindowId } from "../../layout/kinds";
 import type { DockPlacement, Rect } from "../../layout/placement";
 import { useLayoutStore, windowName, type WindowState } from "../../stores/layout";
 import { useSelectionStore } from "../../stores/selection";
-import { useUiStore } from "../../stores/ui";
+import { ladderRateHidden, useUiStore } from "../../stores/ui";
 import { commandAt, evaluateView, type DockCommand, type DockPlan } from "./dockCommands";
 import { closeWindow } from "./manage";
 import { watchPointerCapture } from "./pointerCapture";
@@ -33,7 +33,7 @@ function choose(id: WindowId) {
   if (useLayoutStore.getState().layout.windows.some((window) => window.id === id && window.kind === "chart")) useSelectionStore.getState().setActiveCell(id);
 }
 function minimumNotice(window: WindowState) {
-  const min = minWindowSize(window.kind);
+  const min = minWindowSize(window.kind, ladderRateHidden());
   useSelectionStore.getState().showToast(`${windowName(useLayoutStore.getState().layout.windows, window)} 창은 ${min.w}×${min.h}보다 작게 줄일 수 없습니다`);
 }
 
@@ -90,7 +90,7 @@ export function useDockInteraction({ root, dock, saved, space, enabled, onPick }
       const boxes = floatRects(start.dock, room.windows, start.area);
       const others = start.dock.floats.filter((float) => float.window !== start.window.id).map((float) => boxes[float.window]!);
       const offset = { x: point.x - start.point.x, y: point.y - start.point.y };
-      const result = start.operation.kind === "float-move" ? { ...moveRect(start.operation.rect, offset, others, start.area), atMinimum: false } : resizeRect(start.operation.rect, start.operation.handle, offset, minWindowSize(start.window.kind), others, start.area);
+      const result = start.operation.kind === "float-move" ? { ...moveRect(start.operation.rect, offset, others, start.area), atMinimum: false } : resizeRect(start.operation.rect, start.operation.handle, offset, minWindowSize(start.window.kind, ladderRateHidden()), others, start.area);
       const next = moveFloat(frontFloat(start.dock, start.window.id), start.window.id, toRatio(result.rect, start.area));
       moved = { ...idle, draft: next, next: carryMove(start.saved, start.dock, next, start.window.id), guides: result.guides, atMinimum: result.atMinimum };
       if (shift || start.operation.kind === "float-resize") return moved;
@@ -265,7 +265,7 @@ export function useDockInteraction({ root, dock, saved, space, enabled, onPick }
           event.preventDefault();
           const boxes = floatRects(saved, space!.windows, area);
           const others = saved.floats.filter((float) => float.window !== window.id).map((float) => boxes[float.window]!);
-          const result = event.shiftKey ? resizeRect(rect, offset.x ? "e" : "s", offset, minWindowSize(window.kind), others, area) : { ...moveRect(rect, offset, others, area), atMinimum: false };
+          const result = event.shiftKey ? resizeRect(rect, offset.x ? "e" : "s", offset, minWindowSize(window.kind, ladderRateHidden()), others, area) : { ...moveRect(rect, offset, others, area), atMinimum: false };
           useLayoutStore.getState().commitDock({ session, expected: saved, next: moveFloat(frontFloat(saved, window.id), window.id, toRatio(result.rect, area)) });
           choose(window.id);
           if (result.atMinimum) minimumNotice(window);

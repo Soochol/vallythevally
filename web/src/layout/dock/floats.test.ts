@@ -6,7 +6,7 @@ import { attachFloat, canDetach, closeDockWindow, detachedRect, detachWindow, fl
 import { groupOfWindow, listGroups, putTab } from "./tree";
 
 const a = windowId("a"), b = windowId("b"), c = windowId("c"), d = windowId("d");
-const windows: WindowList = [{ id: a, kind: "chart" }, { id: b, kind: "chart" }, { id: c, kind: "screener" }, { id: d, kind: "trades" }];
+const windows: WindowList = [{ id: a, kind: "chart", rateHidden: false }, { id: b, kind: "chart", rateHidden: false }, { id: c, kind: "screener", rateHidden: false }, { id: d, kind: "trades", rateHidden: false }];
 const rect = { x: .2, y: .1, w: .3, h: .4 };
 const all = (dock: ReturnType<typeof defaultDock>) => [...listGroups(dock.root).flatMap((group) => group.tabs), ...dock.floats.map((float) => float.window)];
 
@@ -76,9 +76,9 @@ test("새 창 크기와 비율을 쓰고 작은 작업 영역에서도 머리와
 
 
 test("마지막 도킹 보조 창을 닫으면 한 창만 붙이고 나머지 떠 있는 창의 자리를 지킨다", () => {
-  const first = defaultDock([windows[0], windows[2]!, { id: d, kind: "watchlist" }]);
+  const first = defaultDock([windows[0], windows[2]!, { id: d, kind: "watchlist", rateHidden: false }]);
   const floats = detachWindow(detachWindow(first, a, rect), d, { ...rect, x: .5 });
-  const next = closeDockWindow(floats, c, [windows[0], { id: d, kind: "watchlist" }]);
+  const next = closeDockWindow(floats, c, [windows[0], { id: d, kind: "watchlist", rateHidden: false }]);
   expect(listGroups(next.root).flatMap((group) => group.tabs)).toEqual([a]);
   expect(next.floats).toEqual([{ window: d, rect: { ...rect, x: .5 } }]);
 });

@@ -36,7 +36,7 @@ function BookBody({ code, pager }: { code: SymbolCode; pager: InfoPager }) {
   const venue = useShownVenue(code);
   const ladderBox = useRef<HTMLDivElement>(null);
   const rowsPerSide = useRowsPerSide(ladderBox);
-  const { skipSpreadGap } = useOrderSettings();
+  const { skipSpreadGap, rate } = useOrderSettings();
   const trades = useLadderTrades(code, venue);
   const feed = useBookFeed(code, venue, trades.lastTrade);
   const limits = useFundamentals(code).data;
@@ -55,11 +55,11 @@ function BookBody({ code, pager }: { code: SymbolCode; pager: InfoPager }) {
     const rows = visibleLadderRows(buildDefaultLadder({ asks: view.asks, bids: view.bids, lastPrice: feed.lastPrice, previousClose: feed.previousClose, bounds, skipSpreadGap, tickRule: tickRuleOf(kind, [...view.asks, ...view.bids].map((level) => level.price)) }), rowsPerSide);
     const expected = visibleExpected(view.t, nowSeconds, view.expected);
     const infoSlots = placeInfoItems(rows, info, expectedItemsOnPage(pager.page, expected, feed.previousClose, pager.flipped));
-    return <PriceLadder rows={rows} firstBidIndex={rowsPerSide} previousClose={feed.previousClose} expectedPrice={expected?.price ?? null} rowSlots={{ infoCard: infoSlot(infoSlots, pager), bottomLeft: tradeSlot(trades, feed.previousClose) }} />;
+    return <PriceLadder rows={rows} firstBidIndex={rowsPerSide} previousClose={feed.previousClose} rateShown={rate} expectedPrice={expected?.price ?? null} rowSlots={{ infoCard: infoSlot(infoSlots, pager), bottomLeft: tradeSlot(trades, feed.previousClose) }} />;
   })();
   return (
-    <div className="bk" data-testid="book-window" data-symbol={code} data-connected={feed.connected ? "" : undefined}>
-      <MarketHead code={code} venue={venue} lastPrice={feed.lastPrice} previousClose={feed.previousClose} />
+    <div className="bk" data-testid="book-window" data-symbol={code} data-connected={feed.connected ? "" : undefined} data-rate-hidden={rate ? undefined : ""}>
+      <MarketHead code={code} venue={venue} lastPrice={feed.lastPrice} previousClose={feed.previousClose} nxtBadge />
       {notice && <Notice tone="warning" className="mw-notice">{notice}</Notice>}
       {!feed.connected && notice === null && <FeedStrip since={downSince} />}
       {view !== null && <BookColumnHead />}

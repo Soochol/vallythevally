@@ -2,6 +2,7 @@ import { useRef, useState } from "react";
 import type { Venue } from "../../api/generated/Venue";
 import { CogIcon } from "../icons";
 import { Popover } from "../overlay/Popover";
+import { setLadderRate } from "../workspace/canvasCommands";
 import { Segmented } from "../market-window/parts";
 import { KEEP_LAST_ENTRY_LABEL, ORDER_ROUTES, type OrderSettings, type PresetKind, routeLabel, SHARE_PRESET_COUNT, withPresetOf } from "./orderSettings";
 import { MOCK_KRX_ONLY_TEXT, REJECT_TEXT } from "./statusText";
@@ -89,7 +90,7 @@ export function OrderSettingsPopover({ settings, venue, mock, nxtNotTraded, hold
           ))}
           {FLAGS.map(({ key, label, note, title }) => (
             <label key={key} className="od-settings-flag" data-note={note ? "" : undefined} title={title}>
-              <input type="checkbox" checked={settings[key]} onChange={(e) => onChange({ ...settings, [key]: e.target.checked })} />
+              <input type="checkbox" checked={settings[key]} onChange={(e) => (key === "rate" ? setLadderRate(e.target.checked) : onChange({ ...settings, [key]: e.target.checked }))} />
               {label}
               {note && <small>{note}</small>}
               {key === "averageDot" && !holding && <small>보유 종목일 때 보입니다</small>}

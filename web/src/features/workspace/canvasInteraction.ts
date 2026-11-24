@@ -2,10 +2,10 @@ import { type KeyboardEvent, type PointerEvent, useEffect, useRef, useState } fr
 import { bringToFront, rectsForArea } from "../../layout/canvas/arrange";
 import { minWindowSize, toRatio, type Area } from "../../layout/canvas/geometry";
 import { moveRect, resizeRect, type Guides, type ResizeHandle } from "../../layout/canvas/snap";
-import type { WindowId } from "../../layout/kinds";
+import type { WindowId, WindowRef } from "../../layout/kinds";
 import type { CanvasPlacement, Rect } from "../../layout/placement";
 import { useLayoutStore, windowName, type WindowState } from "../../stores/layout";
-import { useUiStore } from "../../stores/ui";
+import { ladderRateHidden, useUiStore } from "../../stores/ui";
 import { useSelectionStore } from "../../stores/selection";
 import { closeWindow } from "./manage";
 import { watchPointerCapture } from "./pointerCapture";
@@ -21,10 +21,10 @@ const ARROWS: Record<string, { x: number; y: number }> = { ArrowLeft: { x: -16, 
 const topologyOf = (windows: readonly WindowState[]) => windows.map((window) => window.id).join("\n");
 export const canvasPanelId = (id: WindowId) => `canvas-panel-${id}`;
 
-export function useCanvasInteraction(canvas: CanvasPlacement, windows: readonly WindowState[], area: Area) {
+export function useCanvasInteraction(canvas: CanvasPlacement, windows: readonly WindowState[], refs: readonly WindowRef[], area: Area) {
   const gesture = useRef<Gesture>({ kind: "idle" });
-  const latest = useRef({ canvas, windows, area });
-  latest.current = { canvas, windows, area };
+  const latest = useRef({ canvas, windows, refs, area });
+  latest.current = { canvas, windows, refs, area };
   const [draft, setDraft] = useState<CanvasPlacement | null>(null);
   const [guides, setGuides] = useState(NO_GUIDES);
   const [dragging, setDragging] = useState(false);
@@ -58,7 +58,7 @@ export function useCanvasInteraction(canvas: CanvasPlacement, windows: readonly 
   const validRef = useRef(valid);
   validRef.current = valid;
   const minimumNotice = (window: WindowState) => {
-    const min = minWindowSize(window.kind);
+    const min = minWindowSize(window.kind, ladderRateHidden());
     useSelectionStore.getState().showToast(`${windowName(useLayoutStore.getState().layout.windows, window)} 창은 ${min.w}×${min.h}보다 작게 줄일 수 없습니다`);
   };
 
@@ -72,9 +72,9 @@ export function useCanvasInteraction(canvas: CanvasPlacement, windows: readonly 
       const offset = { x: event.clientX - active.start.point.x, y: event.clientY - active.start.point.y };
       if (active.kind === "pressed" && Math.hypot(offset.x, offset.y) < 4) return;
       const { start } = active;
-      const boxes = rectsForArea(start.expected, latest.current.windows, start.area);
+      const boxes = rectsForArea(start.expected, latest.current.refs, start.area);
       const others = latest.current.windows.filter((window) => window.id !== start.window.id).map((window) => boxes[window.id]!);
-      const result = start.operation.kind === "move" ? { ...moveRect(start.rect, offset, others, start.area), atMinimum: false } : resizeRect(start.rect, start.operation.handle, offset, minWindowSize(start.window.kind), others, start.area);
+      const result = start.operation.kind === "move" ? { ...moveRect(start.rect, offset, others, start.area), atMinimum: false } : resizeRect(start.rect, start.operation.handle, offset, minWindowSize(start.window.kind, ladderRateHidden()), others, start.area);
       const front = bringToFront(start.expected, start.window.id);
       const next = { ...front, rects: { ...front.rects, [start.window.id]: toRatio(result.rect, start.area) } };
       gesture.current = { kind: "dragging", start, next, atMinimum: result.atMinimum };
@@ -159,7 +159,7 @@ export function useCanvasInteraction(canvas: CanvasPlacement, windows: readonly 
     event.stopPropagation();
     const header = document.querySelector<HTMLElement>(`[data-window-header="${window.id}"]`);
     focusWithoutActivation(header);
-    const rect = rectsForArea(canvas, windows, area)[window.id]!;
+    const rect = rectsForArea(canvas, refs, area)[window.id]!;
     const start: Start = { pointer: event.pointerId, window, operation, point: { x: event.clientX, y: event.clientY }, rect, area, expected: canvas, session: state.session, topology, capture: event.currentTarget };
     const next = bringToFront(canvas, window.id);
     gesture.current = { kind: "pressed", start, next };
@@ -177,9 +177,9 @@ export function useCanvasInteraction(canvas: CanvasPlacement, windows: readonly 
     const offset = ARROWS[event.key];
     if (!offset || event.altKey || event.ctrlKey || event.metaKey || maximized) return;
     event.preventDefault();
-    const boxes = rectsForArea(canvas, windows, area);
+    const boxes = rectsForArea(canvas, refs, area);
     const others = windows.filter((candidate) => candidate.id !== window.id).map((candidate) => boxes[candidate.id]!);
-    const result = event.shiftKey ? resizeRect(boxes[window.id]!, offset.x ? "e" : "s", offset, minWindowSize(window.kind), others, area) : { ...moveRect(boxes[window.id]!, offset, others, area), atMinimum: false };
+    const result = event.shiftKey ? resizeRect(boxes[window.id]!, offset.x ? "e" : "s", offset, minWindowSize(window.kind, ladderRateHidden()), others, area) : { ...moveRect(boxes[window.id]!, offset, others, area), atMinimum: false };
     const front = bringToFront(canvas, window.id);
     useLayoutStore.getState().commitCanvas({ session, expected: canvas, next: { ...front, rects: { ...front.rects, [window.id]: toRatio(result.rect, area) } } });
     choose(window);
