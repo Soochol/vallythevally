@@ -133,9 +133,10 @@ test("멈춘 마우스 아래에 과거 봉이 추가되면 범례가 새 봉 �
   await open(page, scenario, "D");
   await page.evaluate(() => {
     const scale = window.chartProbe.chart.timeScale();
-    scale.setVisibleLogicalRange({ from: 0, to: 39 });
+    scale.setVisibleLogicalRange({ from: -5, to: 34 });
   });
   await olderRequest.received;
+  await frames(page, 2);
   const firstRecent = recent[0]!;
   const at = await barPoint(page, firstRecent.t);
   await page.mouse.move(at.x, at.y);
