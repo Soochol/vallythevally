@@ -5,7 +5,7 @@ import type { WindowId } from "../../layout/kinds";
 import { useOrderSettings } from "../../stores/ui";
 import { FeedStrip, useFeedDownSince } from "../market-window/FeedStrip";
 import { MarketWindowGate } from "../market-window/MarketWindowGate";
-import { buildDefaultLadder } from "../market-window/ladder";
+import { buildDefaultLadder, ROWS_ABOVE_BASE, withVisibleRepeats } from "../market-window/ladder";
 import { tickRuleOf } from "../market-window/tick";
 import { expectedItemsOnPage, placeInfoItems } from "../market-window/quoteInfo";
 import { infoSlot, tradeSlot } from "../market-window/LadderSlots";
@@ -52,7 +52,8 @@ function BookBody({ code, pager }: { code: SymbolCode; pager: InfoPager }) {
   const downSince = useFeedDownSince(feed.connected);
   const ladder = (() => {
     if (view === null) return feed.snapshotFailed ? <ErrorState message="호가를 불러오지 못했습니다" retry={feed.retry} /> : <EmptyState title="호가를 기다리는 중입니다" />;
-    const rows = visibleLadderRows(buildDefaultLadder({ asks: view.asks, bids: view.bids, lastPrice: feed.lastPrice, previousClose: feed.previousClose, bounds, skipSpreadGap, tickRule: tickRuleOf(kind, [...view.asks, ...view.bids].map((level) => level.price)) }), rowsPerSide);
+    const fullRows = buildDefaultLadder({ asks: view.asks, bids: view.bids, lastPrice: feed.lastPrice, previousClose: feed.previousClose, bounds, skipSpreadGap, tickRule: tickRuleOf(kind, [...view.asks, ...view.bids].map((level) => level.price)) });
+    const rows = rowsPerSide >= ROWS_ABOVE_BASE ? fullRows : withVisibleRepeats(visibleLadderRows(fullRows, rowsPerSide), feed.lastPrice);
     const expected = visibleExpected(view.t, nowSeconds, view.expected);
     const infoSlots = placeInfoItems(rows, info, expectedItemsOnPage(pager.page, expected, feed.previousClose, pager.flipped));
     return <PriceLadder rows={rows} firstBidIndex={rowsPerSide} previousClose={feed.previousClose} rateShown={rate} expectedPrice={expected?.price ?? null} rowSlots={{ infoCard: infoSlot(infoSlots, pager), bottomLeft: tradeSlot(trades, feed.previousClose) }} />;

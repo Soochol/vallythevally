@@ -114,7 +114,12 @@ const centerRowOffset = (element: HTMLElement, fallbackToBid: boolean): number |
 
 const OrderCell = memo(function OrderCell({ rowKey, side, price, group, writable, previewQuantity, buying, api }: CellProps) {
   const hovered = useStoreValue(api.hover, (cell) => cell !== null && cell.side === side && cell.rowKey === rowKey);
-  const targeted = useStoreValue(api.drag.views, (view) => view?.target.kind === "cell" && view.target.side === side && view.target.price === price);
+  const targeted = useStoreValue(api.drag.views, (view) =>
+    view?.target.kind === "cell"
+    && view.target.side === side
+    && view.target.price === price
+    && (view.target.rowKey === undefined || view.target.rowKey === rowKey),
+  );
   const chipDragging = useStoreValue(api.drag.views, (view) => group !== undefined && view?.source.kind === "chip" && view.source.group === group);
   const showsPreview = hovered && writable && group === undefined && previewQuantity > 0;
   const previewTone = showsPreview && side === "buy" ? buyPreview(price, previewQuantity, buying) : null;
@@ -124,6 +129,7 @@ const OrderCell = memo(function OrderCell({ rowKey, side, price, group, writable
       data-order-cell=""
       data-side={side}
       data-price={price}
+      data-row-key={rowKey}
       data-disabled={writable ? undefined : ""}
       data-target={targeted ? "" : undefined}
       onDoubleClick={() => { if (writable) api.actions.place(side, price); }}

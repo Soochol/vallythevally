@@ -2,7 +2,7 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { expect, test } from "vitest";
 import { PriceLadder, tradeBoxStart, type LadderRowSlots } from "./PriceLadder";
-import { buildLadder } from "./ladder";
+import { buildDefaultLadder, buildLadder } from "./ladder";
 
 const rows = buildLadder({
   asks: [{ price: 71600, quantity: 300, change: 40 }, { price: 71700, quantity: 900, change: 0 }],
@@ -110,4 +110,31 @@ test("예상체결가와 같은 가격의 행 하나에만 data-expected가 붙�
   expect(html).toMatch(/data-expected=""[^>]*>.*?71,700/);
   expect(render().match(/data-expected/g)).toBeNull();
   expect(render({ expectedPrice: 12_345 }).match(/data-expected/g)).toBeNull();
+});
+
+test("교차 호가의 같은 가격에서 평단가 점과 예상체결 강조는 위 매도 줄 하나에만 붙는다", () => {
+  const crossed = buildDefaultLadder({
+    asks: Array.from({ length: 10 }, (_, i) => ({ price: 855_000 + 1_000 * i, quantity: 100 + i, change: 0 })),
+    bids: Array.from({ length: 10 }, (_, i) => ({ price: 855_000 - 1_000 * i, quantity: 200 + i, change: 0 })),
+    lastPrice: 855_000,
+    previousClose: 855_000,
+    bounds: { lower: null, upper: null },
+    tickRule: "stock",
+  });
+  const html = renderToStaticMarkup(createElement(PriceLadder, {
+    rows: crossed,
+    previousClose: 855_000,
+    mark: { price: 855_000, label: "평단가" },
+    expectedPrice: 855_000,
+  }));
+  const lines = html.split('<div class="mw-lr"').slice(1);
+  expect(lines).toHaveLength(20);
+  expect(html.match(/data-testid="ladder-mark"/g)).toHaveLength(1);
+  expect(html.match(/data-expected=""/g)).toHaveLength(1);
+  expect(lines[9]).toContain('data-side="ask"');
+  expect(lines[9]).toContain('data-testid="ladder-mark"');
+  expect(lines[9]).toContain('data-expected=""');
+  expect(lines[10]).toContain('data-side="bid"');
+  expect(lines[10]).not.toContain('data-testid="ladder-mark"');
+  expect(lines[10]).not.toContain("data-expected");
 });

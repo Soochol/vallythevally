@@ -31,7 +31,7 @@ function targetAt(ladder: HTMLElement, origin: DOMRect | null, x: number, y: num
   if (!within(ladder.getBoundingClientRect(), x, y)) return { kind: "outside" };
   const cell = document.elementFromPoint(x, y)?.closest<HTMLElement>("[data-order-cell]");
   if (!cell || cell.dataset.price === undefined) return { kind: "ladder" };
-  return { kind: "cell", side: cell.dataset.side as OrderSide, price: Number(cell.dataset.price) };
+  return { kind: "cell", side: cell.dataset.side as OrderSide, price: Number(cell.dataset.price), rowKey: cell.dataset.rowKey };
 }
 
 function swallowNextClick(): void {

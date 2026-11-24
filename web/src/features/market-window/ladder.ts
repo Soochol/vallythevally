@@ -185,6 +185,17 @@ export function buildDefaultLadder(input: LadderInput): LadderRow[] {
   return buildLadderRows(prices, input, sidesSplit);
 }
 
+export function withVisibleRepeats(rows: readonly LadderRow[], lastPrice: number | null): readonly LadderRow[] {
+  if (!rows.some((row) => row.repeat)) return rows;
+  const shown = new Set<number>();
+  return rows.map((row) => {
+    const repeat = row.price !== null && shown.has(row.price);
+    if (row.price !== null) shown.add(row.price);
+    const current = row.price !== null && row.price === lastPrice && !repeat;
+    return row.repeat === repeat && row.current === current ? row : { ...row, repeat, current };
+  });
+}
+
 export interface RatioSplit {
   readonly buy: number;
   readonly sell: number;

@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { basePrice, buildDefaultLadder, buildLadder, buildLadderRows, defaultLadderPrices, gridPrices, isSinglePriceBook, LADDER_ROWS, ratioSplit, type BookLevel } from "./ladder";
+import { basePrice, buildDefaultLadder, buildLadder, buildLadderRows, defaultLadderPrices, gridPrices, isSinglePriceBook, LADDER_ROWS, ratioSplit, withVisibleRepeats, type BookLevel } from "./ladder";
 import { expectedInfoItems, infoCardRows, placeInfoItems, quoteInfoItems } from "./quoteInfo";
 
 const NO_BOUNDS = { lower: null, upper: null };
@@ -304,4 +304,17 @@ test("교차 단일가 호가에서 같은 가격이 두 행에 있으면 현재
   expect(rows.filter((row) => row.current).map((row) => rows.indexOf(row))).toEqual([8]);
   expect(rows.map((row, index) => [index, row.repeat]).filter(([, repeat]) => repeat)).toEqual([[10, true], [11, true]]);
   expect(buildLadder({ asks: [], bids: [], lastPrice: 70_000, previousClose: null, bounds: NO_BOUNDS, tickRule: "stock" }).some((row) => row.repeat)).toBe(false);
+});
+
+test("보이는 행이 줄어 잘린 교차 가격은 남은 첫 줄이 현재가·비반복이 되고 막대 비율은 20행 기준을 유지한다", () => {
+  const asks = Array.from({ length: 10 }, (_, i) => level(70_100 + 100 * i, i === 9 ? 10_000 : 100));
+  const bids = Array.from({ length: 10 }, (_, i) => level(70_600 - 100 * i, 500));
+  const full = buildDefaultLadder({ asks, bids, lastPrice: 70_600, previousClose: 70_000, bounds: NO_BOUNDS, tickRule: "stock" });
+  const sliced = full.slice(5, 15);
+  const visible = withVisibleRepeats(sliced, 70_600);
+  expect(visible[5]!.price).toBe(70_600);
+  expect([visible[5]!.repeat, visible[5]!.current]).toEqual([false, true]);
+  expect([visible[0]!.repeat, visible[6]!.repeat]).toEqual([false, true]);
+  expect(visible[5]!.bidRatio).toBe(sliced[5]!.bidRatio);
+  expect(visible[5]!.bidRatio).toBeCloseTo(0.05);
 });
