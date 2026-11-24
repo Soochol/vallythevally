@@ -1,12 +1,11 @@
-import { useCallback, useEffect, useRef, useSyncExternalStore } from "react";
+import { useEffect, useRef } from "react";
 import type { Quote } from "../../api/generated/Quote";
 import type { SymbolCode } from "../../api/generated/SymbolCode";
 import { direction, formatChange, formatPercent, formatPrice, formatVolume } from "../../lib/format";
 import { isIndexCode } from "../../lib/symbol";
 import type { WatchColumn } from "../../lib/watchlist";
-import type { WatchQuote } from "../../stores/quoteBook";
-import { quoteBook } from "../../stores/realtime";
 import { useVenue } from "../../stores/ui";
+import { useWatchQuote } from "../../stores/watchQuote";
 import { DIRECTION_TEXT, RateBadge } from "../list/listRow";
 import { NXT_FALLBACK_TITLE } from "../venue/VenuePicker";
 
@@ -30,11 +29,6 @@ function cellText(column: WatchColumn, quote: Quote, isIndex: boolean): string {
     case "volume":
       return formatVolume(quote.volume);
   }
-}
-
-function useWatchQuote(code: SymbolCode): WatchQuote {
-  const subscribe = useCallback((listener: () => void) => quoteBook.subscribe(code, listener), [code]);
-  return useSyncExternalStore(subscribe, () => quoteBook.get(code));
 }
 
 const MILLISECONDS_PER_SECOND = 1000;

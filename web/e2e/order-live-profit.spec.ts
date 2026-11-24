@@ -17,7 +17,8 @@ async function pushTrade(scenario: Scenario, price: number): Promise<void> {
 
 test("NXT 시간대처럼 키움 잔고의 현재가가 멈춰 있어도 새 체결가로 호가주문창 평가손익이 바뀐다", async ({ page, scenario }) => {
   ordersOn(scenario);
-  tradingApi(scenario).holdings = [KIWOOM_HOLDING, OTHER_HOLDING];
+  const hynixPrice = scenario.market.quote("000660", "combined")!.price;
+  tradingApi(scenario).holdings = [KIWOOM_HOLDING, { ...OTHER_HOLDING, currentPrice: hynixPrice }];
   await openOrderWindow(page, scenario);
   const profit = page.getByTestId("summary-profit");
   await expect(profit).toContainText("−4,800원");

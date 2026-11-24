@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import type { OrderSide } from "../../api/generated/OrderSide";
+import type { TradingBalance } from "../../api/generated/TradingBalance";
 import type { TradingOpenOrder } from "../../api/generated/TradingOpenOrder";
 import type { Venue } from "../../api/generated/Venue";
 import type { SymbolCode } from "../../api/generated/SymbolCode";
@@ -44,8 +45,9 @@ import type { PendingWrite } from "./pendingWrites";
 import { type PresetKind, routeLabel } from "./orderSettings";
 import { withDirectionJosa } from "./josa";
 import { pendingWrites } from "./pendingWrites";
-import { accountNumberText, FALLBACK_NOTICE } from "./orderAccount";
-import { useOrderAccess, useOrderData } from "./useOrderData";
+import { accountNumberText, FALLBACK_NOTICE, type OrderAccountChoice } from "./orderAccount";
+import { useAccountBalance } from "./useAccountBalance";
+import { type OrderAccess, useOrderAccess, useOrderData } from "./useOrderData";
 import { useOrderAccount } from "./useOrderAccount";
 import { useOrderDrag } from "./useOrderDrag";
 import { useOrderWrites } from "./useOrderWrites";
@@ -62,13 +64,11 @@ function useHeldWhile<T>(value: T, hold: boolean, same: (a: T, b: T) => boolean 
 const sameLadderPrices = (a: LadderPrices | null, b: LadderPrices | null): boolean =>
   a === b || (a !== null && b !== null && a.sidesSplit === b.sidesSplit && a.prices.length === b.prices.length && a.prices.every((price, row) => price === b.prices[row]));
 
-function OrderBody({ id, code, infoPager }: { id: WindowId; code: SymbolCode; infoPager: InfoPager }) {
+function OrderBody({ id, code, infoPager, choice, access, balance }: { id: WindowId; code: SymbolCode; infoPager: InfoPager; choice: OrderAccountChoice; access: OrderAccess; balance: TradingBalance | null }) {
   const mock = useMockEnvironment();
   const quoteVenue = useShownVenue(code);
   const trades = useLadderTrades(code, quoteVenue);
   const feed = useBookFeed(code, quoteVenue, trades.lastTrade);
-  const choice = useOrderAccount();
-  const access = useOrderAccess(choice);
   const accountRef = choice.current?.ref ?? null;
   const entryKey = useLayoutStore((s) => orderEntryKey(s.layout.id, id, code));
   const [kept] = useState(() => { const { prefs } = useUiStore.getState(); return prefs.orderSettings.keepLastEntry ? prefs.orderEntries[entryKey] ?? null : null; });
@@ -120,7 +120,7 @@ function OrderBody({ id, code, infoPager }: { id: WindowId; code: SymbolCode; in
   const expected = view ? visibleExpected(view.t, Math.floor(now / 1000), view.expected) : null;
   const infoSlots = placeInfoItems(rows, info, expectedItemsOnPage(infoPager.page, expected));
   const totals = stripTotals(view && { ask: view.totalAsk, bid: view.totalBid }, visibleAfterHours(feed.afterHours?.totals ?? null, Math.floor(now / 1000)));
-  const data = useOrderData(accountRef, code, access.open, referencePrice);
+  const data = useOrderData(accountRef, code, access.open, referencePrice, balance);
 
   const pending = useSyncExternalStore(pendingWrites.subscribe, pendingWrites.snapshot);
   const isStale = (shown: CancelConfirm, writesNow: readonly PendingWrite[]): boolean =>
@@ -142,10 +142,6 @@ function OrderBody({ id, code, infoPager }: { id: WindowId; code: SymbolCode; in
     setSettings({ ...prefs.orderSettings, account: null });
   }, [fellBack]);
   const holding = useMemo(() => atLivePrice(holdingOf(data.balance?.holdings ?? [], code), feed.lastPrice), [data.balance, code, feed.lastPrice]);
-  const balance = useMemo(
-    () => data.balance === null || holding === null ? data.balance : { ...data.balance, holdings: data.balance.holdings.map((row) => row.code === holding.code ? holding : row) },
-    [data.balance, holding],
-  );
   const averagePrice = settings.averageDot ? averageRowPrice(rows.map((row) => row.price), holding?.averagePrice ?? null) : null;
   const writable = access.open && !data.blocked && writes.status?.unknown !== true;
 
@@ -259,7 +255,7 @@ function OrderBody({ id, code, infoPager }: { id: WindowId; code: SymbolCode; in
         </div>
       )}
       <SymbolHead code={code} name={symbolInfo?.name ?? null} lastPrice={feed.lastPrice} previousClose={feed.previousClose} marketOpen={marketOpen} mock={mock} />
-      <AccountPart windowId={id} choice={choice} accountRef={accountRef} onPickAccount={pickAccount} openOrders={data.openOrders} balance={balance} executions={data.executions} writable={writable} mock={mock} policy={data.orderable?.policy ?? null} onCancel={cancelOne}
+      <AccountPart windowId={id} choice={choice} accountRef={accountRef} onPickAccount={pickAccount} openOrders={data.openOrders} balance={data.balance} executions={data.executions} writable={writable} mock={mock} policy={data.orderable?.policy ?? null} onCancel={cancelOne}
         holding={holding} orderable={data.orderable} buyableProblem={data.buyableProblem} sellOrdered={sellOrdered} profitUnit={profitUnit} onProfitUnit={toggleProfitUnit}
         presetKind={presetKind} input={input} referencePrice={referencePrice} onPresetKind={setPresetKind} onInput={setInput}
         settings={settings} orderVenue={orderVenue} nxtNotTraded={nxtNotTraded} onSettings={setSettings} />
@@ -282,10 +278,17 @@ function OrderBody({ id, code, infoPager }: { id: WindowId; code: SymbolCode; in
   );
 }
 
+function OrderStockWindow({ id, code, infoPager }: { id: WindowId; code: SymbolCode; infoPager: InfoPager }) {
+  const choice = useOrderAccount();
+  const access = useOrderAccess(choice);
+  const balance = useAccountBalance(choice.current?.ref ?? null, access.open);
+  return <OrderBody key={code} id={id} code={code} infoPager={infoPager} choice={choice} access={access} balance={balance} />;
+}
+
 export function OrderWindow({ id }: { id: WindowId }) {
   const code = useLinkedSymbol(id);
   const infoPager = useInfoPager();
   if (code === null) return <EmptyState title="연동된 종목이 없습니다" />;
   if (isIndexCode(code)) return <EmptyState title="이 창은 주식만 보입니다" />;
-  return <OrderBody key={code} id={id} code={code} infoPager={infoPager} />;
+  return <OrderStockWindow id={id} code={code} infoPager={infoPager} />;
 }

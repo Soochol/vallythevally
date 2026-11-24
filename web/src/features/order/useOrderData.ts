@@ -9,8 +9,9 @@ import type { TradingOrderable } from "../../api/generated/TradingOrderable";
 import type { OrderAccountChoice } from "./orderAccount";
 import { buyingPowerOf, type Capacity, groupWithPending, type PriceGroup } from "./orderRules";
 import { pendingWrites } from "./pendingWrites";
-import { fetchBalance, fetchCommands, fetchExecutions, fetchOpenOrders, fetchOrderable } from "./orderApi";
+import { fetchCommands, fetchExecutions, fetchOpenOrders, fetchOrderable } from "./orderApi";
 import { holdingOf } from "./holdingSummary";
+import { isBalanceQueryKey } from "./useAccountBalance";
 import { ORDER_QUERY_KEY } from "./useOrderWrites";
 
 const POLL_MS = 5000;
@@ -55,16 +56,17 @@ function useRefreshOnAccountChange(enabled: boolean, account: string | null): vo
   useEffect(() => {
     if (!enabled) return;
     return marketSocket.watchTradingAccount((changed) => {
-      if (changed === account) void client.invalidateQueries({ queryKey: ORDER_QUERY_KEY });
+      if (changed === account) {
+        void client.invalidateQueries({ queryKey: ORDER_QUERY_KEY, predicate: (query) => !isBalanceQueryKey(query.queryKey) });
+      }
     });
   }, [client, enabled, account]);
 }
 
-export function useOrderData(account: string | null, code: string, open: boolean, referencePrice: number | null): OrderBoardData {
+export function useOrderData(account: string | null, code: string, open: boolean, referencePrice: number | null, balance: TradingBalance | null): OrderBoardData {
   const scope = account ?? NO_ACCOUNT;
   const openOrders = useQuery({ queryKey: [...ORDER_QUERY_KEY, scope, "open"], queryFn: ({ signal }) => fetchOpenOrders(account, signal), enabled: open, refetchInterval: POLL_MS, staleTime: 0, retry: false });
   const commands = useQuery({ queryKey: [...ORDER_QUERY_KEY, scope, "commands"], queryFn: ({ signal }) => fetchCommands(account, signal), enabled: open, refetchInterval: POLL_MS, staleTime: 0, retry: false });
-  const balance = useQuery({ queryKey: [...ORDER_QUERY_KEY, scope, "balance"], queryFn: ({ signal }) => fetchBalance(account, signal), enabled: open, refetchInterval: POLL_MS * 3, staleTime: POLL_MS, retry: false });
   const executions = useQuery({ queryKey: [...ORDER_QUERY_KEY, scope, "executions"], queryFn: ({ signal }) => fetchExecutions(account, signal), enabled: open, refetchInterval: POLL_MS * 3, staleTime: POLL_MS, retry: false });
   useRefreshOnAccountChange(open, account);
   const orderableEnabled = open && referencePrice !== null;
@@ -74,13 +76,13 @@ export function useOrderData(account: string | null, code: string, open: boolean
   const fetchedAt = openOrders.dataUpdatedAt;
   useEffect(() => { if (orders) pendingWrites.observe(code, { orders, at: fetchedAt }); }, [orders, fetchedAt, code]);
   const groups = useMemo(() => groupWithPending(orders ?? NONE, writes, code), [orders, writes, code]);
-  const capacity = useMemo(() => ({ sellableQuantity: sellableQuantityOf(balance.data ?? null, code), buying: buyingPowerOf(buyable.data ?? null) }), [balance.data, buyable.data, code]);
+  const capacity = useMemo(() => ({ sellableQuantity: sellableQuantityOf(balance, code), buying: buyingPowerOf(buyable.data ?? null) }), [balance, buyable.data, code]);
   return {
     groups,
     blocked: commands.data?.blocked ?? false,
     openOrders: orders ?? NONE,
     openOrdersListedAt: fetchedAt,
-    balance: balance.data ?? null,
+    balance,
     executions: executions.data?.executions ?? NONE,
     orderable: buyable.data ?? null,
     capacity,

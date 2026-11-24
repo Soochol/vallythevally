@@ -1,9 +1,11 @@
 import { useRef, useState } from "react";
 import type { TradingBalance } from "../../api/generated/TradingBalance";
 import type { TradingExecution } from "../../api/generated/TradingExecution";
+import type { TradingHolding } from "../../api/generated/TradingHolding";
 import type { MarginPolicy } from "../../api/generated/MarginPolicy";
 import type { TradingOpenOrder } from "../../api/generated/TradingOpenOrder";
 import { formatPrice } from "../../lib/format";
+import { useStableCallback } from "../../lib/useStableCallback";
 import type { WindowId } from "../../layout/kinds";
 import { useLayoutStore } from "../../stores/layout";
 import { useSelectionStore } from "../../stores/selection";
@@ -12,7 +14,9 @@ import { Badge } from "../ui/Badge";
 import type { Venue } from "../../api/generated/Venue";
 import { routeLabel } from "./orderSettings";
 import { formatQuantity } from "../market-window/format";
-import { formatFillTime, profitText } from "./holdingSummary";
+import { formatFillTime } from "./holdingSummary";
+import { HoldingRow } from "./HoldingRow";
+import { type GoToSymbol, SymbolName } from "./SymbolName";
 import { newestFirst } from "./accountLists";
 import { AccountLabel } from "./AccountPicker";
 import type { OrderAccountChoice } from "./orderAccount";
@@ -35,18 +39,13 @@ interface Props {
   readonly maskAccount: boolean;
   readonly openOrders: readonly TradingOpenOrder[];
   readonly balance: TradingBalance | null;
+  readonly holding: TradingHolding | null;
   readonly executions: readonly TradingExecution[];
   readonly writable: boolean;
   readonly mock: boolean;
   readonly venue: Venue;
   readonly policy: MarginPolicy | null;
   readonly onCancel: (orderNo: string) => void;
-}
-
-type GoTo = (target: { code: string; name: string }) => void;
-
-function SymbolName({ code, name, goTo }: { code: string; name: string; goTo: GoTo }) {
-  return <button type="button" className="od-name od-symbol" aria-label={`${name}로 이동`} onClick={() => goTo({ code, name })}>{name}</button>;
 }
 
 type RowsKind = "open" | "holdings" | "fills";
@@ -61,7 +60,7 @@ function RowsHead({ kind }: { kind: RowsKind }) {
   return <div className="od-rows-head" data-kind={kind} aria-hidden="true">{HEADS[kind].map((name, index) => <span key={index}>{name}</span>)}</div>;
 }
 
-function OpenPanel({ orders, writable, onCancel, goTo }: { orders: readonly TradingOpenOrder[]; writable: boolean; onCancel(orderNo: string): void; goTo: GoTo }) {
+function OpenPanel({ orders, writable, onCancel, goTo }: { orders: readonly TradingOpenOrder[]; writable: boolean; onCancel(orderNo: string): void; goTo: GoToSymbol }) {
   if (orders.length === 0) return <p className="od-list-empty">미체결 주문이 없습니다</p>;
   return (
     <>
@@ -82,7 +81,7 @@ function OpenPanel({ orders, writable, onCancel, goTo }: { orders: readonly Trad
   );
 }
 
-function HoldingsPanel({ balance, goTo }: { balance: TradingBalance | null; goTo: GoTo }) {
+function HoldingsPanel({ balance, activeHolding, goTo }: { balance: TradingBalance | null; activeHolding: TradingHolding | null; goTo: GoToSymbol }) {
   const holdings = balance?.holdings ?? [];
   if (holdings.length === 0) return <p className="od-list-empty">보유종목이 없습니다</p>;
   return (
@@ -90,19 +89,14 @@ function HoldingsPanel({ balance, goTo }: { balance: TradingBalance | null; goTo
       <RowsHead kind="holdings" />
       <ul className="od-rows" data-kind="holdings" data-testid="account-holdings">
         {holdings.map((holding) => (
-          <li key={holding.code} data-testid="account-holding">
-            <SymbolName code={holding.code} name={holding.name} goTo={goTo} />
-            <span className="od-figure">{formatQuantity(holding.quantity)}</span>
-            <span className="od-figure">{formatPrice(holding.averagePrice, false)}</span>
-            <b className="od-figure" data-tone={holding.evaluationProfit > 0 ? "up" : holding.evaluationProfit < 0 ? "down" : undefined}>{profitText(holding, "won")}</b>
-          </li>
+          <HoldingRow key={holding.code} holding={holding} fixed={activeHolding?.code === holding.code ? activeHolding : null} goTo={goTo} />
         ))}
       </ul>
     </>
   );
 }
 
-function FillsPanel({ executions, goTo }: { executions: readonly TradingExecution[]; goTo: GoTo }) {
+function FillsPanel({ executions, goTo }: { executions: readonly TradingExecution[]; goTo: GoToSymbol }) {
   if (executions.length === 0) return <p className="od-list-empty">오늘 체결이 없습니다</p>;
   return (
     <>
@@ -123,18 +117,18 @@ function FillsPanel({ executions, goTo }: { executions: readonly TradingExecutio
 }
 
 const isTab = (target: Node) => target instanceof Element && target.closest(".od-tab") !== null;
-export function AccountBand({ windowId, choice, onPick, maskAccount, openOrders, balance, executions, writable, mock, venue, policy, onCancel }: Props) {
+export function AccountBand({ windowId, choice, onPick, maskAccount, openOrders, balance, holding, executions, writable, mock, venue, policy, onCancel }: Props) {
   const [panel, setPanel] = useState<PanelKind | null>(null);
   const opener = useRef<HTMLElement | null>(null);
   const counts: Record<PanelKind, number> = { open: openOrders.length, holdings: balance?.holdings.length ?? 0, fills: executions.length };
   const listWindow = listWindowOf(opener.current);
   const label = TABS.find((tab) => tab.kind === panel)?.label;
-  const goTo: GoTo = (target) => {
+  const goTo: GoToSymbol = useStableCallback((target) => {
     const layout = useLayoutStore.getState();
     layout.pinSymbol(windowId, null);
     layout.sendSymbol(windowId, useSelectionStore.getState().activeCell, target);
     setPanel(null);
-  };
+  });
   return (
     <div className="od-account" data-testid="order-account">
       <div className="od-account-bar">
@@ -153,7 +147,7 @@ export function AccountBand({ windowId, choice, onPick, maskAccount, openOrders,
       {panel !== null && (
         <Popover solid key={panel} anchor={opener} anchorRect={() => listAnchorRect(opener.current)} style={listWindow && { width: listWidthIn(listWindow) }} releasesClick={isTab} onClose={() => setPanel(null)} role="dialog" aria-label={label} className="od-list-pop" data-testid="account-panel" data-panel={panel}>
           {panel === "open" && <OpenPanel orders={openOrders} writable={writable} onCancel={onCancel} goTo={goTo} />}
-          {panel === "holdings" && <HoldingsPanel balance={balance} goTo={goTo} />}
+          {panel === "holdings" && <HoldingsPanel balance={balance} activeHolding={holding} goTo={goTo} />}
           {panel === "fills" && <FillsPanel executions={executions} goTo={goTo} />}
         </Popover>
       )}
