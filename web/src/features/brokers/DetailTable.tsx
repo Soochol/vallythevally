@@ -1,33 +1,44 @@
-import { memo } from "react";
-import { MINUS } from "../../lib/format";
+import { memo, useMemo } from "react";
+import type { Bar } from "../../api/generated/Bar";
+import { formatPrice, MINUS } from "../../lib/format";
 import { formatClock, formatQuantity, withSign } from "../market-window/format";
+import { useWindowedRows } from "../market-window/useWindowedRows";
 import { eventsUntil, type BrokerTrack } from "./board";
+import { priceAt } from "./history";
 
 const signed = (value: number) => withSign(value, formatQuantity(Math.abs(value)).replace("-", MINUS));
 
-export const DetailTable = memo(function DetailTable({ track }: { track: BrokerTrack }) {
-  const rows = eventsUntil(track, null, track.events.length);
+export const DetailTable = memo(function DetailTable({ track, bars }: { track: BrokerTrack; bars: readonly Bar[] }) {
+  const rows = useMemo(() => eventsUntil(track, null, track.events.length), [track]);
+  const windowed = useWindowedRows(rows.length);
+  const visible = rows.slice(windowed.range.start, windowed.range.end);
+
   return (
     <div className="br-det" data-testid="broker-detail">
-      <table>
-        <caption>{track.name}</caption>
-        <thead>
-          <tr>
-            <th>시각</th>
-            <th>순간</th>
-            <th>누적 순매수</th>
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((event) => (
-            <tr key={event.t} data-testid="broker-detail-row">
-              <td>{formatClock(event.t)}</td>
-              <td data-tone={event.net >= 0 ? "up" : "down"}>{signed(event.net)}</td>
-              <td data-tone={event.cumulative >= 0 ? "up" : "down"}>{signed(event.cumulative)}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+      <div className="br-det-cap">{track.name}</div>
+      <div className="br-det-table" role="table" aria-label={`${track.name} 건별 내역`}>
+        <div ref={windowed.scroller} className="br-det-body" onScroll={windowed.onScroll}>
+          <div className="br-det-tr br-det-th" role="row">
+            <span role="columnheader">시각</span>
+            <span role="columnheader" className="br-det-num">순간</span>
+            <span role="columnheader" className="br-det-num">누적 순매수</span>
+            <span role="columnheader" className="br-det-num">추정가격</span>
+          </div>
+          <div ref={windowed.list} style={windowed.spacing}>
+            {visible.map((event) => {
+              const price = priceAt(bars, event.t);
+              return (
+                <div key={event.t} className="br-det-tr" role="row" data-testid="broker-detail-row">
+                  <span role="cell" className="br-det-time">{formatClock(event.t)}</span>
+                  <span role="cell" className="br-det-num" data-tone={event.net >= 0 ? "up" : "down"}>{signed(event.net)}</span>
+                  <span role="cell" className="br-det-num" data-tone={event.cumulative >= 0 ? "up" : "down"}>{signed(event.cumulative)}</span>
+                  <span role="cell" className="br-det-num br-det-price">{price === null ? "-" : formatPrice(price, false)}</span>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      </div>
     </div>
   );
 });
