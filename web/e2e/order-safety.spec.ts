@@ -1,3 +1,4 @@
+import type { Locator, Page } from "@playwright/test";
 import { type Scenario, expect, pollSaved, test } from "./harness";
 import { BASE, cellAt, center, chipAt, dragChip, openOrder, openOrderWindow, ordersOn, status, tradingApi, win, writesTo } from "./order-window";
 
@@ -149,4 +150,150 @@ test("정정 직후 목록에 아직 없는 낙관적 주문이 든 가격도 �
   await pollSaved(() => writesTo(api, "cancel-batch")).toHaveLength(1);
   expect(writesTo(api, "cancel-batch")[0]!.body).toMatchObject({ side: "buy", price: 70_000 });
   await expect(status(page)).toContainText("취소 접수");
+});
+
+async function overlapPointInOrderCell(page: Page, item: Locator): Promise<{ pageX: number; pageY: number; position: { x: number; y: number } }> {
+  const box = (await item.boundingBox())!;
+  const hit = await page.evaluate(({ x, y, width, height }) => {
+    for (const element of document.querySelectorAll<HTMLElement>("[data-order-cell]")) {
+      const rect = element.getBoundingClientRect();
+      const left = Math.max(x, rect.left);
+      const right = Math.min(x + width, rect.right);
+      const top = Math.max(y, rect.top);
+      const bottom = Math.min(y + height, rect.bottom);
+      if (right - left >= 4 && bottom - top >= 4) {
+        const pageX = (left + right) / 2;
+        const pageY = (top + bottom) / 2;
+        return { pageX, pageY, position: { x: pageX - x, y: pageY - y } };
+      }
+    }
+    return null;
+  }, box);
+  expect(hit).not.toBeNull();
+  return hit!;
+}
+
+test("이 가격 모두 취소를 주문 칸 위에서 빠르게 두 번 눌러도 취소만 한 번 나가고 신규 주문은 나가지 않는다", async ({ page, scenario }) => {
+  ordersOn(scenario);
+  const api = tradingApi(scenario, [openOrder("0000001", "buy", 70_000, 5), openOrder("0000002", "buy", 70_000, 7)]);
+  await openOrderWindow(page, scenario);
+  await chipAt(page, "buy", 70_000).click({ button: "right" });
+  const menu = page.getByRole("menu", { name: "주문 목록" });
+  const item = menu.getByRole("menuitem", { name: "이 가격 모두 취소" });
+  const { position } = await overlapPointInOrderCell(page, item);
+  const refetched = page.waitForResponse((response) => new URL(response.url()).pathname === "/api/trading/open-orders");
+  await item.dblclick({ position });
+  await pollSaved(() => writesTo(api, "cancel-batch")).toHaveLength(1);
+  await refetched;
+  await expect(menu).toHaveCount(0);
+  await expect(page.getByTestId("order-queue")).toHaveCount(0);
+  expect(placeRequests(scenario)).toHaveLength(0);
+  expect(writesTo(api, "place")).toHaveLength(0);
+  await expect(status(page)).toContainText("취소 접수");
+});
+
+test("빈 곳 우클릭의 전체 모두 취소를 주문 칸 위에서 빠르게 두 번 눌러도 취소만 한 번 나가고 신규 주문은 나가지 않는다", async ({ page, scenario }) => {
+  ordersOn(scenario);
+  const api = tradingApi(scenario, THREE());
+  await openOrderWindow(page, scenario);
+  await cellAt(page, "sell", 70_300).click({ button: "right" });
+  const menu = page.getByRole("menu", { name: "주문 취소" });
+  const item = menu.getByRole("menuitem", { name: "전체 모두 취소" });
+  const { position } = await overlapPointInOrderCell(page, item);
+  const refetched = page.waitForResponse((response) => new URL(response.url()).pathname === "/api/trading/open-orders");
+  await item.dblclick({ position });
+  await pollSaved(() => writesTo(api, "cancel-batch")).toHaveLength(3);
+  await refetched;
+  await expect(menu).toHaveCount(0);
+  await expect(page.getByTestId("order-queue")).toHaveCount(0);
+  expect(placeRequests(scenario)).toHaveLength(0);
+  expect(writesTo(api, "place")).toHaveLength(0);
+  await expect(status(page)).toContainText("취소 접수");
+});
+
+test("주문 한 건의 칩 메뉴 취소를 주문 칸 위에서 빠르게 두 번 눌러도 신규 주문은 나가지 않는다", async ({ page, scenario }) => {
+  ordersOn(scenario);
+  const api = tradingApi(scenario, [openOrder("0000001", "buy", 70_000, 5)]);
+  await openOrderWindow(page, scenario);
+  await chipAt(page, "buy", 70_000).click({ button: "right" });
+  const menu = page.getByRole("menu", { name: "주문 목록" });
+  const item = menu.getByRole("menuitem", { name: "5 취소" });
+  const { position } = await overlapPointInOrderCell(page, item);
+  const refetched = page.waitForResponse((response) => new URL(response.url()).pathname === "/api/trading/open-orders");
+  await item.dblclick({ position });
+  await pollSaved(() => writesTo(api, "cancel")).toHaveLength(1);
+  expect(writesTo(api, "cancel")[0]!.body).toMatchObject({ orderNo: "0000001" });
+  await refetched;
+  await expect(menu).toHaveCount(0);
+  await expect(page.getByTestId("order-queue")).toHaveCount(0);
+  expect(placeRequests(scenario)).toHaveLength(0);
+  expect(writesTo(api, "place")).toHaveLength(0);
+});
+
+test("이 가격 모두 취소를 주문 칸 위에서 빠르게 네 번 눌러도 취소만 한 번 나가고 신규 주문은 나가지 않는다", async ({ page, scenario }) => {
+  ordersOn(scenario);
+  const api = tradingApi(scenario, [openOrder("0000001", "buy", 70_000, 5), openOrder("0000002", "buy", 70_000, 7)]);
+  await openOrderWindow(page, scenario);
+  await chipAt(page, "buy", 70_000).click({ button: "right" });
+  const menu = page.getByRole("menu", { name: "주문 목록" });
+  const item = menu.getByRole("menuitem", { name: "이 가격 모두 취소" });
+  const { pageX, pageY } = await overlapPointInOrderCell(page, item);
+  const refetched = page.waitForResponse((response) => new URL(response.url()).pathname === "/api/trading/open-orders");
+  await page.mouse.move(pageX, pageY);
+  for (const clickCount of [1, 2, 3, 4]) {
+    await page.mouse.down({ clickCount });
+    await page.mouse.up({ clickCount });
+  }
+  await pollSaved(() => writesTo(api, "cancel-batch")).toHaveLength(1);
+  await refetched;
+  await expect(menu).toHaveCount(0);
+  await expect(page.getByTestId("order-queue")).toHaveCount(0);
+  expect(placeRequests(scenario)).toHaveLength(0);
+  expect(writesTo(api, "place")).toHaveLength(0);
+  await expect(status(page)).toContainText("취소 접수");
+});
+
+test("접수 합계 목록의 줄 취소를 빠르게 두 번 눌러도 취소만 한 번 나가고 뒤따르는 더블클릭이 전달되지 않는다", async ({ page, scenario }) => {
+  ordersOn(scenario);
+  const api = tradingApi(scenario, [openOrder("0000001", "buy", 70_000, 5), openOrder("0000002", "buy", 69_900, 3)]);
+  await openOrderWindow(page, scenario);
+  await page.evaluate(() => {
+    (window as unknown as { __dblclicks: number }).__dblclicks = 0;
+    document.addEventListener("dblclick", () => {
+      (window as unknown as { __dblclicks: number }).__dblclicks += 1;
+    });
+  });
+  await page.getByTestId("order-total-buy").click();
+  const menu = page.getByRole("menu", { name: "매수 접수 주문" });
+  const item = menu.getByRole("menuitem", { name: "70,000원 · 5 취소" });
+  const refetched = page.waitForResponse((response) => new URL(response.url()).pathname === "/api/trading/open-orders");
+  await item.dblclick();
+  await pollSaved(() => writesTo(api, "cancel")).toHaveLength(1);
+  expect(writesTo(api, "cancel")[0]!.body).toMatchObject({ orderNo: "0000001" });
+  await refetched;
+  await expect(menu).toHaveCount(0);
+  await expect(page.getByTestId("order-queue")).toHaveCount(0);
+  expect(await page.evaluate(() => (window as unknown as { __dblclicks: number }).__dblclicks)).toBe(0);
+  expect(placeRequests(scenario)).toHaveLength(0);
+  expect(writesTo(api, "place")).toHaveLength(0);
+});
+
+test("메뉴로 취소한 뒤 새로 더블클릭하면 신규 주문이 나간다", async ({ page, scenario }) => {
+  ordersOn(scenario);
+  const api = tradingApi(scenario, [openOrder("0000001", "buy", 70_000, 5), openOrder("0000002", "buy", 70_000, 7)]);
+  await openOrderWindow(page, scenario);
+  await chipAt(page, "buy", 70_000).click({ button: "right" });
+  const menu = page.getByRole("menu", { name: "주문 목록" });
+  const item = menu.getByRole("menuitem", { name: "이 가격 모두 취소" });
+  const { position } = await overlapPointInOrderCell(page, item);
+  const refetched = page.waitForResponse((response) => new URL(response.url()).pathname === "/api/trading/open-orders");
+  await item.dblclick({ position });
+  await pollSaved(() => writesTo(api, "cancel-batch")).toHaveLength(1);
+  await refetched;
+  await expect(menu).toHaveCount(0);
+  await expect(page.getByTestId("order-queue")).toHaveCount(0);
+  expect(placeRequests(scenario)).toHaveLength(0);
+  await cellAt(page, "sell", 70_300).dblclick();
+  await pollSaved(() => writesTo(api, "place")).toHaveLength(1);
+  expect(writesTo(api, "place")[0]!.body).toMatchObject({ side: "sell", price: 70_300, quantity: 10 });
 });
