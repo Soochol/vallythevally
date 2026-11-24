@@ -48,7 +48,7 @@
 
 ## 읽기와 캐시
 
-- 공용 자료 폴더(`VALLY_SHARED_DATA_DIR`)에서 `quote_days`와 `read_quote_day`를 블로킹 스레드 풀(`spawn_blocking`)로 읽는다. 여러 날이 캐시에 없으면 나란히 읽는다.
+- 공용 자료 폴더(`VALLY_SHARED_DATA_DIR`)가 있으면 그 폴더에서, 없으면 `<VALLY_HOGA_DATA_DIR>/shared`에서 `quote_days`와 `read_quote_day`를 블로킹 스레드 풀(`spawn_blocking`)로 읽는다. 여러 날이 캐시에 없으면 나란히 읽고, 봉 묶기도 블로킹 스레드에서 수행한다.
 - 닫힌 날은 `(날짜, 종목)` 단위로 최대 64개까지 LRU 캐시에 두고 다시 압축을 풀지 않는다.
 - 장중 날과 날짜 폴더 목록(`quote_days`)은 서버 시계 기준 2초 동안 캐시한다.
 - 파일 읽기 오류는 캐시하지 않고 `500 internal`로 답한다.

@@ -416,6 +416,7 @@ pub async fn start_with(config: &Config, lock: &InstanceLock, adapters: Adapters
     state.shared_data.start(config.shared_data.as_ref());
     if let Some(dir) = &config.hoga_data_dir {
         state.book_replay.enable(dir.clone());
+        state.quote_minutes.set_fallback_dir(dir.join("shared"));
     }
     if config.shared_data.is_some() {
         state.screener.read_shared_snapshots(state.shared_data.clone(), config.screener_snapshot_stale_limit);

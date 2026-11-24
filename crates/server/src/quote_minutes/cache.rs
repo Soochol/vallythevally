@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 use std::io;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 
 use domain::{KstDate, KstTime};
 
@@ -92,11 +92,20 @@ fn is_fresh(fetched_at: KstTime, now: KstTime, ttl_secs: i64) -> bool {
 #[derive(Default)]
 pub struct QuoteCache {
     state: Mutex<CacheState>,
+    fallback_dir: OnceLock<PathBuf>,
 }
 
 impl QuoteCache {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    pub fn set_fallback_dir(&self, dir: PathBuf) {
+        let _ = self.fallback_dir.set(dir);
+    }
+
+    pub fn fallback_dir(&self) -> Option<&Path> {
+        self.fallback_dir.get().map(PathBuf::as_path)
     }
 
     pub async fn load_range(&self, dir: &Path, code: &str, dates: &[KstDate], clock: &Clock) -> io::Result<Vec<LoadedDay>> {

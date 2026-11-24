@@ -178,7 +178,7 @@ struct PreparedDays {
 
 async fn load_days(st: &AppState, cache: &QuoteCache, params: &CommonParams) -> Result<PreparedDays, ApiFailure> {
     let venue = resolve_venue(st, params.code, params.requested_venue);
-    let Some(dir) = st.shared_data.dir() else {
+    let Some(dir) = st.shared_data.dir().or_else(|| cache.fallback_dir()) else {
         let days = params.dates.iter().map(|&date| QuoteDayInfo { date: KstDate(date), state: QuoteDayState::None }).collect();
         return Ok(PreparedDays { venue, days, inputs: Vec::new() });
     };
