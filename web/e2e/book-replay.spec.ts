@@ -255,3 +255,65 @@ test("새로고침하면 호가 복기 스위치만 남고 10호가창은 실시
   await expect(bookWindow(page).getByTestId("replay-strip")).toHaveText("실시간 · 차트를 가리키면 그 시각 호가");
   await expect(bookWindow(page).getByTestId("price-ladder")).toContainText("80,000");
 });
+
+test("지난 날 봉은 등락률 없이 오늘 상·하한가 밖 호가도 그대로 보인다", async ({ page, scenario }) => {
+  const prevDay = MIDNIGHT - 86_400;
+  const prevAt = (hour: number, minute: number) => prevDay + hour * 3600 + minute * 60;
+  const pastBars: Bar[] = Array.from({ length: 30 }, (_, i) => ({
+    t: prevAt(8, 30 + i * 5),
+    o: 119_800 + i * 50,
+    h: 120_100 + i * 50,
+    l: 119_700 + i * 50,
+    c: 120_000 + i * 50,
+    v: 1000 + i * 10,
+  }));
+  const pastReplay: BookReplayDay = {
+    symbol: CODE,
+    date: "20261122",
+    coverage: "collected",
+    covered: [[540, 620]],
+    books: [
+      {
+        minute: 540,
+        asks: [
+          [120_000, 50],
+          [120_100, 60],
+        ],
+        bids: [
+          [119_900, 70],
+          [119_800, 80],
+        ],
+        totalAsk: 500,
+        totalBid: 700,
+      },
+    ],
+    trades: [[540, 32_420, 120_000, 10]],
+  };
+  seedLayout(scenario);
+  seedMarket(scenario, 80_000);
+  scenario.reply((url) => url.pathname === "/api/bars", {
+    body: { symbol: CODE, venue: "combined", period: "5m", bars: pastBars, current: null, nextBefore: prevAt(8, 25), seq: null },
+  });
+  scenario.reply("/api/book-replay/access", { body: { available: true } });
+  scenario.reply(
+    (url) => url.pathname === `/api/symbols/${CODE}/book-replay` && url.searchParams.get("date") === "20261122",
+    { body: pastReplay },
+  );
+
+  await page.goto("/");
+  await expect(cell(page)).toHaveAttribute("aria-busy", "false");
+  await replayToggle(page).click();
+
+  const pos = await barCoordinate(page, prevAt(9, 0));
+  await page.mouse.move(pos.x, pos.y);
+  await frames(page);
+
+  await expect(bookWindow(page)).toHaveAttribute("data-replay", "past");
+  await expect(bookWindow(page).getByTestId("replay-strip")).toContainText("수집 호가 · 11/22 09:04:59");
+  await expect(bookWindow(page).getByTestId("market-symbol-price")).toHaveText("120,000");
+  await expect(bookWindow(page).getByTestId("market-symbol-price")).toHaveAttribute("data-tone", "flat");
+  await expect(bookWindow(page).locator(".od-head-rate")).toHaveCount(0);
+  await expect(bookWindow(page).getByTestId("price-ladder")).toContainText("120,000");
+  await expect(bookWindow(page).getByTestId("price-ladder")).toContainText("119,900");
+  await expect(bookWindow(page).locator(".mw-px small")).toHaveCount(0);
+});

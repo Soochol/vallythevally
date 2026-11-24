@@ -20,7 +20,9 @@ import { Notice } from "../ui/Notice";
 import { MarketHead } from "../market-window/MarketHead";
 import { SymbolHead } from "../market-window/SymbolHead";
 import { ReplayStrip } from "../book-replay/ReplayStrip";
+import { replayReference } from "../book-replay/replay";
 import { useBookReplay } from "../book-replay/useBookReplay";
+import { serverNow, useServerClock } from "../../stores/serverClock";
 import { ladderColumns } from "../market-window/PriceLadder";
 import { ratioSplit } from "../market-window/ladder";
 import { stripTotals } from "./bookModel";
@@ -50,6 +52,8 @@ function BookBody({ code, pager }: { code: SymbolCode; pager: InfoPager }) {
   const bounds = { lower: limits?.lowerLimit ?? null, upper: limits?.upperLimit ?? null };
   const now = useNowMs();
   const nowSeconds = Math.floor(now / 1000);
+  const serverNowSeconds = Math.floor(serverNow(useServerClock.getState().serverTimeOrigin) / 1000);
+  const replayRef = replay.kind === "past" ? replayReference(replay.at, serverNowSeconds, { previousClose: feed.previousClose, bounds }) : null;
   const vi = useSymbolVi(code, "krx");
   const liveView = feed.book.phase === "empty" ? null : feed.book.view;
   const view = replay.kind === "live" ? liveView : replay.kind === "past" ? replay.book : null;
@@ -67,9 +71,10 @@ function BookBody({ code, pager }: { code: SymbolCode; pager: InfoPager }) {
   const ladder = (() => {
     if (replay.kind === "none") return <EmptyState title={replay.reason} />;
     if (replay.kind === "past") {
-      const fullRows = buildDefaultLadder({ asks: replay.book.asks, bids: replay.book.bids, lastPrice: replay.lastPrice, previousClose: feed.previousClose, bounds, skipSpreadGap, tickRule });
+      const ref = replayRef!;
+      const fullRows = buildDefaultLadder({ asks: replay.book.asks, bids: replay.book.bids, lastPrice: replay.lastPrice, previousClose: ref.previousClose, bounds: ref.bounds, skipSpreadGap, tickRule });
       const rows = rowsPerSide >= ROWS_ABOVE_BASE ? fullRows : withVisibleRepeats(visibleLadderRows(fullRows, rowsPerSide), replay.lastPrice);
-      return <PriceLadder rows={rows} firstBidIndex={rowsPerSide} previousClose={feed.previousClose} rateShown={rate} expectedPrice={null} rowSlots={{ bottomLeft: replayTradeSlot(replay.trades, feed.previousClose) }} />;
+      return <PriceLadder rows={rows} firstBidIndex={rowsPerSide} previousClose={ref.previousClose} rateShown={rate} expectedPrice={null} rowSlots={{ bottomLeft: replayTradeSlot(replay.trades, ref.previousClose) }} />;
     }
     if (liveView === null) return feed.snapshotFailed ? <ErrorState message="호가를 불러오지 못했습니다" retry={feed.retry} /> : <EmptyState title="호가를 기다리는 중입니다" />;
     const fullRows = buildDefaultLadder({ asks: liveView.asks, bids: liveView.bids, lastPrice: feed.lastPrice, previousClose: feed.previousClose, bounds, skipSpreadGap, tickRule });
@@ -83,7 +88,7 @@ function BookBody({ code, pager }: { code: SymbolCode; pager: InfoPager }) {
       {replay.kind === "live" ? (
         <MarketHead code={code} venue={venue} lastPrice={feed.lastPrice} previousClose={feed.previousClose} nxtBadge />
       ) : (
-        <SymbolHead code={code} name={symbolInfo?.name ?? null} lastPrice={replay.kind === "past" ? replay.lastPrice : null} previousClose={replay.kind === "past" ? feed.previousClose : null} nxtTraded={symbolInfo?.nxtEnabled === true} mock={false} testIdPrefix="market-symbol" />
+        <SymbolHead code={code} name={symbolInfo?.name ?? null} lastPrice={replay.kind === "past" ? replay.lastPrice : null} previousClose={replayRef?.previousClose ?? null} nxtTraded={symbolInfo?.nxtEnabled === true} mock={false} testIdPrefix="market-symbol" />
       )}
       <ReplayStrip view={replay} />
       {notice && <Notice tone="warning" className="mw-notice">{notice}</Notice>}

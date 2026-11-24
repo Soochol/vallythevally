@@ -45,6 +45,7 @@ export function useBookReplayDay(
     gcTime: GC_TIME_MS,
     retry: false,
     refetchInterval: (query) => {
+      if (query.state.status === "error") return TODAY_REFETCH_MS;
       const day = query.state.data;
       return day !== undefined && options.shouldPoll(day) ? TODAY_REFETCH_MS : false;
     },

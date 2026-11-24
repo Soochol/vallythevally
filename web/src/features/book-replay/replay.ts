@@ -100,6 +100,23 @@ function toLevels(raw: readonly [number, number][]) {
   return raw.map(([price, quantity]) => ({ price, quantity, change: 0 }));
 }
 
+export interface PriceBounds {
+  readonly lower: number | null;
+  readonly upper: number | null;
+}
+
+export interface ReplayReference {
+  readonly previousClose: number | null;
+  readonly bounds: PriceBounds;
+}
+
+const NO_BOUNDS: PriceBounds = { lower: null, upper: null };
+
+export function replayReference(at: UnixSeconds, now: UnixSeconds, live: ReplayReference): ReplayReference {
+  if (kstDateOf(at) === kstDateOf(now)) return live;
+  return { previousClose: null, bounds: NO_BOUNDS };
+}
+
 export function replayView(day: BookReplayDay, bar: BarInterval, now: UnixSeconds): ReplayView {
   if (now < bar.end) return { kind: "none", reason: REPLAY_REASON.inProgress };
   if (day.coverage === "day_not_collected") return { kind: "none", reason: REPLAY_REASON.dayNotCollected };

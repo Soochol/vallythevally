@@ -102,9 +102,7 @@ export function parseUiState(raw: unknown): { prefs: UiPrefs; extra: UiExtra } {
 }
 
 export function toUiState(prefs: UiPrefs, extra: UiExtra): Omit<UiState, "revision"> {
-  if (prefs.bookReplay) return { ...extra, ...prefs };
-  const { bookReplay: _bookReplay, ...rest } = prefs;
-  return { ...extra, ...rest };
+  return { ...extra, ...prefs };
 }
 
 export const sortColumns = (columns: readonly WatchColumn[]): readonly WatchColumn[] => WATCH_COLUMNS.filter((c) => columns.includes(c));
