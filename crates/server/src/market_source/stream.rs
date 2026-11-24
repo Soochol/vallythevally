@@ -25,6 +25,7 @@ pub struct RealTick {
     pub exchange: Option<Exchange>,
     pub day: Option<DayTotals>,
     pub strength_centi: Option<u64>,
+    pub same_time_ratio_centi: Option<u64>,
     pub side: Option<TradeSide>,
 }
 

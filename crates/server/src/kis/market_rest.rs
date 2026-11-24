@@ -372,6 +372,7 @@ impl MarketSource for KisMarket {
                 eps_won: signed_whole(&row.eps),
                 bps_won: signed_whole(&row.bps),
                 foreign_exhaustion_pct: float(&row.hts_frgn_ehrt),
+                credit_rate: None,
                 high_250_won: whole(&row.w52_hgpr),
                 low_250_won: whole(&row.w52_lwpr),
                 upper_limit_won: whole(&row.stck_mxpr),

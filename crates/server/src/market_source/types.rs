@@ -70,6 +70,7 @@ pub struct StockFundamentals {
     pub eps_won: Option<i64>,
     pub bps_won: Option<i64>,
     pub foreign_exhaustion_pct: Option<f64>,
+    pub credit_rate: Option<f64>,
     pub high_250_won: Option<u64>,
     pub low_250_won: Option<u64>,
     pub upper_limit_won: Option<u64>,

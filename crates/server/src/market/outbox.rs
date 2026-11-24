@@ -317,7 +317,7 @@ mod tests {
     }
 
     fn feed_trade() -> FeedTrade {
-        FeedTrade { t: crate::api::UnixSeconds(0), price: 1.0, qty: 1, venue: None, strength: None }
+        FeedTrade { t: crate::api::UnixSeconds(0), price: 1.0, qty: 1, venue: None, strength: None, same_time_ratio: None }
     }
 
     #[test]

@@ -972,6 +972,7 @@ impl MarketHub {
                 Exchange::Nxt => api::Venue::Nxt,
             }),
             strength: tick.strength_centi.map(|centi| centi as f64 / 100.0),
+            same_time_ratio: tick.same_time_ratio_centi.map(|centi| centi as f64 / 100.0),
         };
         for (conn, sub) in self.feed_targets(tick.symbol, FeedKind::Trades) {
             let Some(c) = self.conns.get(&conn) else {
@@ -1544,6 +1545,7 @@ mod tests {
             exchange,
             day: None,
             strength_centi: None,
+            same_time_ratio_centi: None,
             side: None,
         };
         StreamEvent::Tick { tick, received_at: h.clock.now() }
@@ -3145,6 +3147,7 @@ mod tests {
         };
         tick.side = side;
         tick.strength_centi = Some(11_234);
+        tick.same_time_ratio_centi = Some(9_395);
         StreamEvent::Tick { tick, received_at }
     }
 
@@ -3224,9 +3227,12 @@ mod tests {
         let krx = Some(api::Venue::Krx);
         assert_eq!(feed_trades(&msgs, "t"), [(1, vec![(5, krx), (-7, krx), (2, krx), (9, krx)])], "한 묶음에 네 건이 순서대로 간다");
         let ServerMessage::FeedTrades { trades, .. } = &msgs[0] else { panic!("{msgs:?}") };
-        assert_eq!((trades[0].price, trades[0].strength), (100.0, Some(112.34)));
-        h.events.send(feed_trade_of(&h, 100, 1, Some(TradeSide::Buy), Some(Exchange::Krx))).await.unwrap();
-        assert_eq!(feed_trades(&take(&out).await, "t"), [(2, vec![(1, krx)])]);
+        assert_eq!((trades[0].price, trades[0].strength, trades[0].same_time_ratio), (100.0, Some(112.34), Some(93.95)));
+        h.events.send(trade(&h, (9, 0, 51), 100, 1, Some(Exchange::Krx))).await.unwrap();
+        let next_msgs = take(&out).await;
+        assert_eq!(feed_trades(&next_msgs, "t"), [(2, vec![(1, krx)])]);
+        let ServerMessage::FeedTrades { trades, .. } = &next_msgs[0] else { panic!("{next_msgs:?}") };
+        assert_eq!((trades[0].strength, trades[0].same_time_ratio), (None, None));
         assert!(take(&out).await.is_empty(), "체결이 없으면 빈 묶음을 보내지 않는다");
     }
 

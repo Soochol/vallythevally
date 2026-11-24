@@ -17,6 +17,7 @@ pub async fn fundamentals(source: &dyn MarketSource, code: StockCode) -> Result<
         eps: f.eps_won,
         bps: f.bps_won,
         foreign_exhaustion_rate: f.foreign_exhaustion_pct,
+        credit_rate: f.credit_rate,
         high52w: f.high_250_won,
         low52w: f.low_250_won,
         upper_limit: f.upper_limit_won,

@@ -508,6 +508,8 @@ pub struct BasicInfoRow {
     eps: String,
     bps: String,
     for_exh_rt: String,
+    #[serde(default)]
+    crd_rt: Value,
     #[serde(rename = "250hgst")]
     high_250: String,
     #[serde(rename = "250lwst")]
@@ -548,6 +550,7 @@ impl TryFrom<BasicInfoRow> for StockBasicInfoResponse {
             eps_won: optional(&r.eps, signed)?,
             bps_won: optional(&r.bps, signed)?,
             foreign_exhaustion_pct: optional(&r.for_exh_rt, decimal)?,
+            credit_rate: r.crd_rt.as_str().and_then(|s| optional(s, decimal).ok().flatten()),
             high_250_won: optional(&r.high_250, unsigned)?,
             low_250_won: optional(&r.low_250, unsigned)?,
             upper_limit_won: optional(&r.upl_pric, unsigned)?,
@@ -2235,7 +2238,14 @@ fn parse_real_item(entry: &Value) -> Result<RealItem, WireError> {
                 Some(DayTotals { change_centi, cumulative: Volume(unsigned(field("13").ok()?).ok()?) })
             })();
             let strength_centi = field("228").ok().and_then(|s| level_centi(s.trim().trim_start_matches(['+', '-'])));
-            Ok(RealItem::Trade(RealTick { symbol: Symbol::Stock(code), hhmmss: hhmmss(field("20")?)?, price: stock_price(field("10")?)?, qty: Volume(qty), exchange, day, strength_centi, side }))
+            let same_time_ratio_centi = values.get("851").and_then(Value::as_str).and_then(|s| {
+                let s = s.trim();
+                if s.is_empty() || !s.bytes().all(|b| b.is_ascii_digit()) {
+                    return None;
+                }
+                s.parse::<u64>().ok().filter(|&n| n > 0)
+            });
+            Ok(RealItem::Trade(RealTick { symbol: Symbol::Stock(code), hhmmss: hhmmss(field("20")?)?, price: stock_price(field("10")?)?, qty: Volume(qty), exchange, day, strength_centi, same_time_ratio_centi, side }))
         }
         "0J" => {
             let index = IndexCode::parse(item).map_err(|e| WireError(format!("{e}: {item:?}")))?;
@@ -2662,6 +2672,7 @@ mod tests {
                 eps_won: Some(6_564),
                 bps_won: Some(63_997),
                 foreign_exhaustion_pct: Some(45.93),
+                credit_rate: Some(0.32),
                 high_250_won: Some(380_000),
                 low_250_won: Some(93_500),
                 upper_limit_won: Some(245_000),
@@ -2679,6 +2690,20 @@ mod tests {
         body["lst_pric"] = "".into();
         let StockBasicInfoResponse::Found { fundamentals, .. } = serde_json::from_value(body).unwrap() else { panic!() };
         assert_eq!((fundamentals.upper_limit_won, fundamentals.lower_limit_won), (None, None));
+    }
+
+    #[test]
+    fn basic_info_treats_missing_or_unreadable_credit_rate_as_none() {
+        for value in [None, Some(json!("")), Some(json!(" ")), Some(json!("abc")), Some(Value::Null), Some(json!(0.32))] {
+            let mut body: serde_json::Value = serde_json::from_str(&fixture("ka10001_005930_AL")).unwrap();
+            match &value {
+                Some(v) => body["crd_rt"] = v.clone(),
+                None => drop(body.as_object_mut().unwrap().remove("crd_rt")),
+            }
+            let StockBasicInfoResponse::Found { fundamentals, .. } = serde_json::from_value(body).unwrap() else { panic!() };
+            assert_eq!(fundamentals.credit_rate, None, "{value:?}");
+            assert_eq!((fundamentals.upper_limit_won, fundamentals.lower_limit_won), (Some(245_000), Some(132_100)), "{value:?}");
+        }
     }
 
     #[test]
@@ -3189,7 +3214,7 @@ mod tests {
     fn real_0b_is_a_combined_trade_with_abs_price_and_qty() {
         let code = StockCode::parse("005930").unwrap();
         let day = Some(DayTotals { change_centi: 0, cumulative: Volume(100) });
-        let tick = |exchange| RealTick { symbol: Symbol::Stock(code), hhmmss: TimeOfDay::hms(9, 30, 1).unwrap(), price: Price::from_centi(7_120_000).unwrap(), qty: Volume(15), exchange, day, strength_centi: None, side: None };
+        let tick = |exchange| RealTick { symbol: Symbol::Stock(code), hhmmss: TimeOfDay::hms(9, 30, 1).unwrap(), price: Price::from_centi(7_120_000).unwrap(), qty: Volume(15), exchange, day, strength_centi: None, same_time_ratio_centi: None, side: None };
         let sell = |exchange| RealTick { side: Some(TradeSide::Sell), ..tick(exchange) };
         assert_eq!(one("0B", "005930_AL", trade_values("093001", -71_200, -15, 100, "NXT")), Ok(RealItem::Trade(sell(Some(Exchange::Nxt)))));
         let mut buy = trade_values("093001", 71_200, 15, 100, "KRX");
