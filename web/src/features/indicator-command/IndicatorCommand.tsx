@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useId, useRef, type ReactNode, type Ref } from "react";
-import { indicatorCssColor, isFinancial, KINDS, shownColor, specName } from "../../chart/indicators/kinds";
+import { indicatorCssColor, isFinancial, isQuote, KINDS, shownColor, specName } from "../../chart/indicators/kinds";
 import { symbolSub } from "../../lib/symbol";
 import { useLayoutStore } from "../../stores/layout";
 import { useSelectionStore } from "../../stores/selection";
@@ -123,6 +123,7 @@ function IndicatorEditor({ row, cellId, mode, actionRef, onCommitted }: { row: E
         <p className="inline-flex items-center gap-1.5 text-s text-accent"><span aria-hidden="true" className="size-1.5 rounded-full bg-accent" />{valid ? "차트에 미리보기 중" : validator === "loading" ? "미리보기 준비 중" : "설정을 확인하세요"}</p>
       </div>
       {isFinancial(kind.defaults) && <p className="text-xs text-text-3">분기봉·연봉의 보고기간별 자료입니다. DPS는 연간 전용이며 다른 봉 주기에서는 설정을 보존하고 숨깁니다.</p>}
+      {isQuote(kind.defaults) && <p className="text-xs text-text-3">주식·ETF 분봉의 호가 자료입니다. 일봉 이상이나 지수에서는 설정을 보존하고 숨깁니다.</p>}
       <IndicatorSettingsForm draft={draft} color={color} errors={errors} onChange={setDraft} />
       {errors.filter((error) => !kind.fields.some((field) => field.key === error.field)).map((error, i) => <p key={i} className="text-s text-danger">{error.message}</p>)}
       {validator === "failed" && <p role="alert" className="text-s text-danger">지표 설정 검사기를 불러오지 못했습니다. 새로고침해 보세요.</p>}

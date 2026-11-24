@@ -1417,6 +1417,19 @@ class CommittedModeTest(unittest.TestCase):
         for name in SCRIPTS:
             self.assertTrue((DEPLOY / name).stat().st_mode & stat.S_IXUSR, name)
 
+    def test_server_unit_sets_hoga_data_dir_matching_collector(self):
+        def env_value(unit_name, key):
+            prefix = f"Environment={key}="
+            for line in (DEPLOY / "systemd" / unit_name).read_text().splitlines():
+                if line.startswith(prefix):
+                    return line[len(prefix):]
+            return None
+
+        collector_dir = env_value("vally-collector.service", "VALLY_DATA")
+        server_dir = env_value("vally-server.service", "VALLY_HOGA_DATA_DIR")
+        self.assertIsNotNone(collector_dir)
+        self.assertEqual(server_dir, collector_dir)
+
 
 if __name__ == "__main__":
     unittest.main()
