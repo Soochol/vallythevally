@@ -276,7 +276,7 @@ pub struct MarketHub {
     first_expected: FirstOfDay,
     tallies: DayTallies,
     last_fill: HashMap<(StockCode, Exchange), KstTime>,
-    last_row_volume: HashMap<(StockCode, Venue), u64>,
+    last_row_volume: HashMap<(StockCode, Venue), (KstDate, u64)>,
     directory: watch::Receiver<Option<Arc<Directory>>>,
     conns: HashMap<ConnId, Conn>,
     keys: HashMap<SeriesKey, KeyState>,
@@ -679,12 +679,12 @@ impl MarketHub {
             }
             _ => None,
         };
+        if let (Symbol::Stock(code), Some(exchange)) = (symbol, tick.exchange) {
+            self.last_fill.insert((code, exchange), at);
+        }
         let mut watchers = self.manager.watchers(symbol).peekable();
         if watchers.peek().is_none() {
             return;
-        }
-        if let (Symbol::Stock(code), Some(exchange)) = (symbol, tick.exchange) {
-            self.last_fill.insert((code, exchange), at);
         }
         let Some(day) = tick.day else {
             return;
@@ -718,7 +718,7 @@ impl MarketHub {
         if let Symbol::Stock(code) = symbol {
             for venue in [Venue::Combined, Venue::Krx, Venue::Nxt] {
                 if let Some(volume) = sent_volume[venue_slot(venue)] {
-                    self.last_row_volume.insert((code, venue), volume);
+                    self.last_row_volume.insert((code, venue), (at.kst_date(), volume));
                 }
             }
         }
@@ -748,7 +748,7 @@ impl MarketHub {
             };
             let venue = quotes::effective_venue(c.watch_venue, nxt_enabled);
             if quotes::expected_moves_row(venue, from, nxt_enabled, expected.hhmmss) {
-                let volume = self.last_row_volume.get(&(code, venue)).copied().unwrap_or(0);
+                let volume = self.last_row_volume.get(&(code, venue)).filter(|(day, _)| *day == at.kst_date()).map_or(0, |&(_, volume)| volume);
                 c.outbox.set_quote(quotes::expected(symbol, venue, expected.price, base_centi, volume, at));
             }
         }

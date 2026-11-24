@@ -142,8 +142,10 @@ pub fn expected_exchange(nxt_enabled: bool, at: TimeOfDay, last_krx_fill: Option
     match open_exchanges(at) {
         OpenExchanges::KrxOnly => Exchange::Krx,
         OpenExchanges::NxtOnly => Exchange::Nxt,
-        OpenExchanges::Both if last_nxt_fill < last_krx_fill => Exchange::Nxt,
-        OpenExchanges::Both => Exchange::Krx,
+        OpenExchanges::Both => match (last_krx_fill, last_nxt_fill) {
+            (Some(krx), Some(nxt)) if nxt < krx => Exchange::Nxt,
+            _ => Exchange::Krx,
+        },
     }
 }
 
