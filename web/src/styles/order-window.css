@@ -67,8 +67,7 @@
 .od-estimate-amount { min-width:0; overflow:hidden; text-overflow:ellipsis; }
 .od-estimate b { color:var(--text); font-weight:600; }
 
-.od-status-slot { flex:none; box-sizing:border-box; }
-.od-status-slot:not(:empty) { height:var(--size-32); border-top:var(--size-1) solid var(--line); }
+.od-status-slot { flex:none; box-sizing:border-box; height:var(--size-24); padding-bottom:var(--size-5); }
 .od-status { box-sizing:border-box; display:flex; align-items:center; gap:var(--s3); height:100%; padding:0 var(--s4) 0 var(--s3); border-left:var(--size-3) solid var(--line-strong); color:var(--text-2); font-size:var(--fs-s); }
 .od-status[data-tone=ok] { border-left-color:var(--success); }
 .od-status[data-tone=error] { border-left-color:var(--danger); background:var(--danger-soft); }
@@ -78,8 +77,8 @@
 .od-status[data-tone=error] .od-status-icon, .od-status[data-tone=error] .od-status-text { color:var(--danger); }
 .od-status[data-tone=warn] .od-status-icon, .od-status[data-tone=warn] .od-status-text { color:var(--warning); }
 .od-status-text { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-.od-status-confirm { flex:1; min-width:0; height:var(--size-24); padding:0 var(--s4); border:var(--size-1) solid color-mix(in srgb, var(--danger) 45%, transparent); border-radius:var(--r-s); background:var(--danger-soft); color:var(--danger); font-size:var(--fs-s); font-weight:700; text-align:left; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-.od-status-button { flex:none; height:var(--size-24); padding:0 var(--s3); border-radius:var(--r-s); background:var(--raised); color:var(--text); font-size:var(--fs-xs); font-weight:600; }
+.od-status-confirm { flex:1; min-width:0; height:var(--size-18); padding:0 var(--s4); border:var(--size-1) solid color-mix(in srgb, var(--danger) 45%, transparent); border-radius:var(--r-s); background:var(--danger-soft); color:var(--danger); font-size:var(--fs-s); font-weight:700; text-align:left; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.od-status-button { flex:none; height:var(--size-18); padding:0 var(--s3); border-radius:var(--r-s); background:var(--raised); color:var(--text); font-size:var(--fs-xs); font-weight:600; }
 .od-status-button:hover { background:var(--hover); }
 .od-queue { color:var(--text-3); }
 
