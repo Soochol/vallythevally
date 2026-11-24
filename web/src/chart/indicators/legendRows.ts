@@ -152,6 +152,7 @@ export class IndicatorLegend {
       this.syncFold();
     }
     const seen = new Set<string>();
+    const panelRows: { elements: RowEls; pane: PaneBounds | undefined }[] = [];
     for (const row of rows) {
       seen.add(row.id);
       const r = this.rows.get(row.id) ?? this.build(row.id);
@@ -161,12 +162,9 @@ export class IndicatorLegend {
       if (row.panel) {
         if (r.root.parentElement !== this.overlay) this.overlay.append(r.root);
         r.root.style.maxWidth = `calc(100% - ${axisWidth + 16}px)`;
-        const pane = panes[row.panel.index + 1];
-        const height = Math.max(r.root.getBoundingClientRect().height, ...[...r.root.querySelectorAll("button")].map((button) => button.getBoundingClientRect().height));
-        const marginTop = parseFloat(getComputedStyle(r.root).marginTop);
-        r.root.style.top = `${(pane?.top ?? 0) - marginTop + Math.min(4, Math.max(0, (pane?.height ?? 0) - height))}px`;
         r.up.disabled = row.panel.index === 0;
         r.down.disabled = row.panel.index === row.panel.count - 1;
+        panelRows.push({ elements: r, pane: panes[row.panel.index + 1] });
       }
     }
     const price = rows.filter((row) => !row.panel).map((row) => this.rows.get(row.id)!.root);
@@ -179,6 +177,12 @@ export class IndicatorLegend {
       r.root.remove();
       this.rows.delete(id);
     }
+    const panelTops = panelRows.map(({ elements, pane }) => {
+      const height = Math.max(elements.root.getBoundingClientRect().height, ...[...elements.root.querySelectorAll("button")].map((button) => button.getBoundingClientRect().height));
+      const marginTop = parseFloat(getComputedStyle(elements.root).marginTop);
+      return { elements, top: `${(pane?.top ?? 0) - marginTop + Math.min(4, Math.max(0, (pane?.height ?? 0) - height))}px` };
+    });
+    for (const { elements, top } of panelTops) elements.root.style.top = top;
     if (focused instanceof HTMLElement && focused !== document.activeElement && focused.isConnected) focused.focus({ preventScroll: true });
   }
 

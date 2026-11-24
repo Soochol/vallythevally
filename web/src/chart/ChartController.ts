@@ -167,6 +167,7 @@ export class ChartController {
   private extensions = new Set<ChartExtension>();
   private readonly pendingDraw = new Map<UnixSeconds, Bar>();
   private frame: number | null = null;
+  private legendFrame: number | null = null;
   private statusTimer: ReturnType<typeof setTimeout> | null = null;
   private lastStatusAt = 0;
   private realtimeSeen = false;
@@ -276,10 +277,15 @@ export class ChartController {
 
     this.chart.subscribeCrosshairMove((p) => {
       const n = this.bars.length;
-      this.financialHoverTime = typeof p.time === "number" ? fromChartTime(p.time) : null;
-      this.hoverIndex =
-        this.financialHoverTime !== null && n > 0 ? this.bars.findIndex((bar) => bar.t === this.financialHoverTime) : null;
-      this.paintLegend();
+      const nextTime = typeof p.time === "number" ? fromChartTime(p.time) : null;
+      const nextIndex =
+        nextTime !== null && n > 0
+          ? (this.hoverIndex !== null && this.bars[this.hoverIndex]?.t === nextTime ? this.hoverIndex : this.bars.findIndex((bar) => bar.t === nextTime))
+          : null;
+      const changed = nextTime !== this.financialHoverTime || nextIndex !== this.hoverIndex;
+      this.financialHoverTime = nextTime;
+      this.hoverIndex = nextIndex;
+      if (changed) this.scheduleLegendPaint();
       if (p.sourceEvent) this.pointerOwnsCrosshair = true;
       if (!this.pointerOwnsCrosshair || !this.el.matches(":hover")) return;
       const bar = this.hoverIndex === null ? undefined : this.bars[this.hoverIndex];
@@ -460,6 +466,7 @@ export class ChartController {
     this.extensions.forEach((ext) => ext.dispose());
     this.extensions.clear();
     if (this.frame !== null) cancelAnimationFrame(this.frame);
+    this.cancelLegendFrame();
     if (this.statusTimer !== null) clearTimeout(this.statusTimer);
     this.resize.disconnect();
     this.hostResize.disconnect();
@@ -665,11 +672,26 @@ export class ChartController {
   }
 
   private scheduleFrame(): void {
+    this.cancelLegendFrame();
     if (this.frame !== null || this.disposed) return;
     this.frame = requestAnimationFrame((time) => {
       this.frame = null;
       this.drawFrame(time);
     });
+  }
+
+  private scheduleLegendPaint(): void {
+    if (this.frame !== null || this.legendFrame !== null || this.disposed) return;
+    this.legendFrame = requestAnimationFrame(() => {
+      this.legendFrame = null;
+      this.paintLegend();
+    });
+  }
+
+  private cancelLegendFrame(): void {
+    if (this.legendFrame === null) return;
+    cancelAnimationFrame(this.legendFrame);
+    this.legendFrame = null;
   }
 
   private drawFrame(time: number): void {
@@ -994,6 +1016,7 @@ export class ChartController {
   }
 
   private paintLegend(): void {
+    this.cancelLegendFrame();
     const view = this.view;
     const i = this.hoverIndex ?? this.bars.length - 1;
     const bar = this.bars[i];
