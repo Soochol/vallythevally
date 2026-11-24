@@ -13,4 +13,5 @@ pub mod rest;
 pub mod stream;
 pub mod token_file;
 pub mod transport;
+pub mod vi;
 pub mod wire;

@@ -214,6 +214,7 @@ export class LiveFrames {
     this.opened++;
     this.peers.set(socket, subscriptions);
     socket.send(JSON.stringify({ type: "hello", protocol: 1, serverTime: Math.floor(this.now / 1000), status: this.state } satisfies ServerMessage));
+    socket.send(JSON.stringify({ type: "vi_snapshot", states: [] } satisfies ServerMessage));
     socket.send(JSON.stringify({ type: "kiwoom_link", status: this.kiwoomLink } satisfies ServerMessage));
     socket.send(JSON.stringify({ type: "account", status: this.account } satisfies ServerMessage));
     socket.send(JSON.stringify({ type: "market_source", status: this.marketSource } satisfies ServerMessage));

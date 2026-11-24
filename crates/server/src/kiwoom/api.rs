@@ -61,6 +61,7 @@ pub enum ApiId {
     Ka10131,
     Ka90001,
     Ka90002,
+    Ka10054,
 }
 
 impl ApiId {
@@ -74,6 +75,7 @@ impl ApiId {
             | ApiId::Ka10059
             | ApiId::Ka10003
             | ApiId::Ka90003
+            | ApiId::Ka10054
             | ApiId::Ka00198 => "/api/dostk/stkinfo",
             ApiId::Ka10032
             | ApiId::Ka10030
@@ -141,6 +143,7 @@ impl ApiId {
             ApiId::Ka10131 => "ka10131",
             ApiId::Ka90001 => "ka90001",
             ApiId::Ka90002 => "ka90002",
+            ApiId::Ka10054 => "ka10054",
         }
     }
 }
@@ -1177,6 +1180,41 @@ impl InstitutionForeignStreak {
 
 market_request!(InstitutionForeignStreak, Ka10131, wire::InstitutionForeignStreakResponse);
 
+#[derive(Serialize)]
+pub struct ViTriggeredStocks {
+    mrkt_tp: &'static str,
+    bf_mkrt_tp: &'static str,
+    motn_tp: &'static str,
+    motn_drc: &'static str,
+    skip_stk: &'static str,
+    trde_qty_tp: &'static str,
+    min_trde_qty: &'static str,
+    max_trde_qty: &'static str,
+    trde_prica_tp: &'static str,
+    min_trde_prica: &'static str,
+    max_trde_prica: &'static str,
+    stex_tp: &'static str,
+}
+
+impl ViTriggeredStocks {
+    pub const KRX_TODAY: ViTriggeredStocks = ViTriggeredStocks {
+        mrkt_tp: "000",
+        bf_mkrt_tp: "0",
+        motn_tp: "0",
+        motn_drc: "0",
+        skip_stk: "000000000",
+        trde_qty_tp: "0",
+        min_trde_qty: "0",
+        max_trde_qty: "0",
+        trde_prica_tp: "0",
+        min_trde_prica: "0",
+        max_trde_prica: "0",
+        stex_tp: "1",
+    };
+}
+
+market_request!(ViTriggeredStocks, Ka10054, wire::ViTriggeredStocksResponse);
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1236,6 +1274,91 @@ mod tests {
         assert!(StockQuotes::new(&[], Venue::Combined).is_none());
         let mixed = StockQuotes::of_venues(&[(codes[0], Venue::Nxt), (codes[1], Venue::Combined), (codes[0], Venue::Krx)]).unwrap();
         assert_eq!(serde_json::to_value(mixed).unwrap(), json!({"stk_cd": "005930_NX|000660_AL|005930"}));
+    }
+
+    struct ViRig {
+        hub: crate::market::hub::HubHandle,
+        events: tokio::sync::mpsc::Sender<crate::market_source::stream::StreamEvent>,
+        transport: std::sync::Arc<crate::kiwoom::rest::testing::FakeTransport>,
+        clock: crate::clock::Clock,
+    }
+
+    impl ViRig {
+        fn new(day: u8, hour: u32, environment: crate::api::KiwoomEnvironment, failing_calls: usize) -> ViRig {
+            use std::sync::Arc;
+            use std::sync::atomic::{AtomicUsize, Ordering};
+            use crate::kiwoom::rest::testing::{FakeTransport, ok, token};
+            let asked = AtomicUsize::new(0);
+            let transport = Arc::new(FakeTransport::new(std::time::Duration::ZERO, move |sent| {
+                if sent.api_id == ApiId::Au10001 {
+                    return token(1);
+                }
+                if asked.fetch_add(1, Ordering::SeqCst) < failing_calls {
+                    return ok(json!({"return_code": 2, "return_msg": "입력 값 오류입니다[1511:필수 입력 값에 값이 존재하지 않습니다]"}), None);
+                }
+                ok(json!({"motn_stk": [{"stk_cd": "000660", "motn_pric": "110000", "trde_cntr_proc_time": "091000", "virelis_time": "091214", "static_stdpc": "100000", "static_dispty_rt": "+10.00", "dynm_dispty_rt": "0.00"}], "return_code": 0}), None)
+            }));
+            let clock = crate::clock::Clock::fake(crate::clock::kst(KstDate::new(2026, 11, day).unwrap(), hour, 0, 0));
+            let auth = crate::kiwoom::auth::KiwoomAuth::new(crate::config::Secret::new("k".into()), crate::config::Secret::new("s".into()), None);
+            let rest = crate::kiwoom::rest::KiwoomRest::for_environment(Arc::new(transport.clone()), auth, clock.clone(), environment);
+            let bars = Arc::new(crate::bars::BarService::new(rest.clone(), Arc::new(crate::symbols::SymbolDirectory::default()), clock.clone()));
+            let stream = crate::kiwoom::stream::KiwoomStream::detached().0.with_vi_backfill(rest, clock.clone());
+            let (events, rx) = tokio::sync::mpsc::channel(8);
+            let hub = crate::market::hub::MarketHub::spawn(bars, Arc::new(stream), rx, clock.clone());
+            ViRig { hub, events, transport, clock }
+        }
+
+        async fn connects(&self, times: usize) {
+            use crate::market_source::stream::StreamEvent;
+            for _ in 0..times {
+                self.events.send(StreamEvent::Live { since: self.clock.now() }).await.unwrap();
+                tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+                self.events.send(StreamEvent::Down { at: self.clock.now() }).await.unwrap();
+            }
+        }
+
+        fn asked(&self) -> Vec<serde_json::Value> {
+            self.transport.market_sent().iter().filter(|sent| sent.api_id == ApiId::Ka10054).map(|sent| serde_json::from_str(&sent.body).unwrap()).collect()
+        }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_restart_during_regular_hours_asks_ka10054_once() {
+        use crate::api::{KiwoomEnvironment, ServerMessage};
+        const TUESDAY: u8 = 10;
+        const SATURDAY: u8 = 14;
+        let rig = ViRig::new(TUESDAY, 10, KiwoomEnvironment::Real, 0);
+        rig.connects(3).await;
+        assert_eq!(
+            rig.asked(),
+            [json!({"mrkt_tp": "000", "bf_mkrt_tp": "0", "motn_tp": "0", "motn_drc": "0", "skip_stk": "000000000", "trde_qty_tp": "0", "min_trde_qty": "0", "max_trde_qty": "0",
+                    "trde_prica_tp": "0", "min_trde_prica": "0", "max_trde_prica": "0", "stex_tp": "1"})]
+        );
+        assert_eq!((ApiId::Ka10054.path(), ApiId::Ka10054.as_str()), ("/api/dostk/stkinfo", "ka10054"));
+        let outbox = crate::market::outbox::Outbox::new();
+        rig.hub.connect(outbox.clone());
+        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+        let messages = outbox.take(true).messages;
+        let [ServerMessage::Hello { .. }, ServerMessage::ViSnapshot { states }, ..] = messages.as_slice() else { panic!("{messages:?}") };
+        let shape: Vec<_> = states.iter().map(|s| (s.symbol.0.as_str(), s.active, s.base, s.direction)).collect();
+        assert_eq!(shape, [("000660", false, None, Some(crate::api::ViDirection::Up))]);
+
+        for (day, hour, environment) in [
+            (TUESDAY, 8, KiwoomEnvironment::Real),
+            (TUESDAY, 16, KiwoomEnvironment::Real),
+            (SATURDAY, 10, KiwoomEnvironment::Real),
+            (TUESDAY, 10, KiwoomEnvironment::Mock),
+        ] {
+            let rig = ViRig::new(day, hour, environment, 0);
+            rig.connects(2).await;
+            assert!(rig.asked().is_empty(), "{day}일 {hour}시 {environment:?}");
+        }
+
+        let failed_once = ViRig::new(TUESDAY, 10, KiwoomEnvironment::Real, 1);
+        failed_once.connects(1).await;
+        assert_eq!(failed_once.asked().len(), 1, "실패해도 같은 연결에서는 다시 부르지 않는다");
+        failed_once.connects(2).await;
+        assert_eq!(failed_once.asked().len(), 2, "다음 연결 때 다시 부르고 성공하면 그날은 더 부르지 않는다");
     }
 
     #[test]

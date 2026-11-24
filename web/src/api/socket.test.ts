@@ -80,6 +80,8 @@ describe("MarketSocket", () => {
     const barMsg: ServerMessage = { type: "bar", sub: "s2", seq: 1, bar: { t: 0, o: 1, h: 1, l: 1, c: 1, v: 1 } };
     last().receive(barMsg);
     last().receive({ type: "data_changed" });
+    last().receive({ type: "vi_snapshot", states: [] });
+    last().receive({ type: "vi_update", state: { symbol: "005930", active: true, direction: "up", triggerPrice: 881_000, base: 800_000, triggeredAt: 1_000, releasedAt: null } });
     expect(a).toEqual([]);
     expect(b).toEqual([barMsg]);
   });

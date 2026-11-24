@@ -21,6 +21,7 @@
   - 끊긴 시간은 메우지 않고 보인다. 연결이 다시 이어지면 체결·프로그램·거래원 창에 "끊김" 구분 줄을 넣는다. 호가는 다시 이어진 뒤의 첫 0D로 바꾼다.
 - **필드**: 체결강도는 0B FID 228이고 프레임에 없거나 읽지 못하면 비워 둔다. 상·하한가는 ka10001 `upl_pric`·`lst_pric`이다. 0D·0w·0F의 FID는 [조사](../research/2026-11-15-kiwoom-al-realtime-types.md)와 수집기 파서(`crates/collector/src/parse.rs`)의 규칙을 따른다. 서버는 `collector` 크레이트에 의존하지 않고 같은 규칙으로 서버 안에서 읽는다. 0F는 시각 필드가 없어 수신 시각을 쓴다.
 - **새 시세 TR**: ka10004, ka10003, ka90008은 ADR 0004의 시세 허용 목록에 든다.
+- (2026-11-24 개정) VI 발동·해제 `1h`는 종목별 `DesiredFeeds`가 아니라 연결마다 시장 전체로 한 번 등록하고 자리에 세지 않는다. [ADR 0049](0049-vi-state-and-static-vi-price.md).
 
 ## Considered Options
 

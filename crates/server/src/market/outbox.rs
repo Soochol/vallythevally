@@ -10,7 +10,7 @@ use std::sync::{Arc, Mutex};
 use tokio::sync::Notify;
 
 use super::SubId;
-use crate::api::{Bar, FeedBook, FeedTrade, Quote, ServerMessage, Venue};
+use crate::api::{Bar, FeedBook, FeedTrade, Quote, ServerMessage, Venue, ViState};
 
 pub const MUST_CAPACITY: usize = 256;
 pub const PENDING_TRADES_CAPACITY: usize = 4096;
@@ -35,6 +35,7 @@ struct State {
     pending_trades: usize,
     trade_seq: BTreeMap<String, u64>,
     books: BTreeMap<String, FeedBook>,
+    vi: BTreeMap<String, ViState>,
     closed: bool,
 }
 
@@ -60,6 +61,9 @@ impl Outbox {
         }
         if let Some(sub) = sub_of(&msg) {
             s.bars.remove(sub);
+        }
+        if matches!(msg, ServerMessage::ViSnapshot { .. }) {
+            s.vi.clear();
         }
         s.must.push_back(msg);
         drop(s);
@@ -111,6 +115,13 @@ impl Outbox {
         }
     }
 
+    pub fn set_vi(&self, state: ViState) {
+        let mut s = self.state.lock().expect("outbox 잠금");
+        if !s.closed {
+            s.vi.insert(state.symbol.0.clone(), state);
+        }
+    }
+
     pub fn forget_feed(&self, sub: &SubId) {
         let mut s = self.state.lock().expect("outbox 잠금");
         if let Some(dropped) = s.trades.remove(&sub.0) {
@@ -142,6 +153,7 @@ impl Outbox {
             if !s.quotes.is_empty() {
                 messages.push(ServerMessage::Quotes { venue: s.quote_venue, quotes: std::mem::take(&mut s.quotes).into_values().collect() });
             }
+            messages.extend(std::mem::take(&mut s.vi).into_values().map(|state| ServerMessage::ViUpdate { state }));
         }
         Batch { messages, closed: s.closed }
     }
@@ -166,7 +178,7 @@ fn sub_of(msg: &ServerMessage) -> Option<&str> {
         | ServerMessage::FeedProgram { .. }
         | ServerMessage::FeedBrokers { .. }
         | ServerMessage::FeedLink { .. }
-        | ServerMessage::CollectorDaemon { .. } | ServerMessage::Hello { .. } | ServerMessage::Status { .. } | ServerMessage::Quotes { .. } | ServerMessage::WatchLimited { .. } | ServerMessage::KiwoomLink { .. } | ServerMessage::MarketSource { .. } | ServerMessage::Account { .. } | ServerMessage::SetupChanged { .. } | ServerMessage::TradingAccountChanged { .. } => None,
+        | ServerMessage::CollectorDaemon { .. } | ServerMessage::Hello { .. } | ServerMessage::Status { .. } | ServerMessage::Quotes { .. } | ServerMessage::WatchLimited { .. } | ServerMessage::KiwoomLink { .. } | ServerMessage::MarketSource { .. } | ServerMessage::Account { .. } | ServerMessage::SetupChanged { .. } | ServerMessage::TradingAccountChanged { .. } | ServerMessage::ViSnapshot { .. } | ServerMessage::ViUpdate { .. } => None,
     }
 }
 
@@ -314,6 +326,22 @@ mod tests {
         assert_eq!(out.push(ServerMessage::Confirmed { sub: "a".into(), seq: 999, bar: bar(0.0) }), Err(Closed));
         assert!(out.take(true).closed);
         assert_eq!(out.push(ServerMessage::Status { status: crate::api::ConnectionStatus { realtime: crate::api::RealtimeState::Live, since: UnixSeconds(0), backfilling: false } }), Err(Closed));
+    }
+
+    #[test]
+    fn vi_updates_keep_the_newest_per_symbol_and_a_snapshot_replaces_the_pending_ones() {
+        let out = Outbox::new();
+        let state = |code: &str, active: bool| ViState { symbol: crate::api::SymbolCode(code.into()), active, direction: None, trigger_price: None, base: None, triggered_at: None, released_at: None };
+        for round in 0..MUST_CAPACITY * 2 {
+            out.set_vi(state("005930", round % 2 == 0));
+        }
+        out.set_vi(state("000660", true));
+        assert_eq!(out.take(false).messages, vec![], "묶음을 기다린다");
+        assert_eq!(out.take(true).messages, vec![ServerMessage::ViUpdate { state: state("000660", true) }, ServerMessage::ViUpdate { state: state("005930", false) }]);
+        out.set_vi(state("005930", true));
+        out.push(ServerMessage::ViSnapshot { states: vec![] }).unwrap();
+        out.set_vi(state("000660", false));
+        assert_eq!(out.take(true).messages, vec![ServerMessage::ViSnapshot { states: vec![] }, ServerMessage::ViUpdate { state: state("000660", false) }]);
     }
 
     fn feed_trade() -> FeedTrade {

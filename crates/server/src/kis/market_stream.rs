@@ -1,7 +1,7 @@
 use std::collections::{BTreeSet, HashMap};
 use std::sync::Arc;
 
-use domain::{IndexCode, KstTime, Price, Symbol, TimeOfDay, Venue, Volume};
+use domain::{IndexCode, KstDate, KstTime, Price, StockCode, Symbol, TimeOfDay, Venue, Volume};
 use tokio::sync::{mpsc, watch};
 
 use super::auth::KisAuth;
@@ -12,6 +12,7 @@ use crate::market_source::stream::{
     BOOK_DEPTH, BookLevel, BookSnapshot, BrokerEntry, BrokerSnapshot, DayTotals, DesiredFeeds, Exchange, ExpectedTrade, MarketStream, RealProgramTrade, RealTick, SeatRules, StreamEvent, StreamKind,
     TradeSide,
 };
+use crate::market_source::vi::{ViReading, ViSignal, ViTurn};
 use crate::quotes::effective_book_venue;
 use crate::symbols::Directory;
 
@@ -89,6 +90,7 @@ impl KisMarketStream {
             open: false,
             index_cumulative: HashMap::new(),
             program_last: HashMap::new(),
+            vi: ViReadings::default(),
         };
         tokio::spawn(bridge.run());
         (KisMarketStream { desired, venue, status, seats, _claim: claim }, out_rx)
@@ -278,6 +280,66 @@ struct ProgramLast {
     net_amount_million_won: i64,
 }
 
+const TRADE_HOUR_CLASS: usize = 43;
+const TRADE_VI_STATIC_BASE: usize = 45;
+const BOOK_HOUR_CLASS: usize = 2;
+const VI_HOUR_CLASS: &str = "C";
+
+#[derive(Clone, Copy, Default, PartialEq, Eq)]
+struct ViFields {
+    static_base: Option<Price>,
+    in_vi: Option<ViTurn>,
+}
+
+impl ViFields {
+    fn read(record: &Record, kind: &Incoming) -> Option<ViFields> {
+        let in_vi = |index: usize| record.text(index).map(|class| if class == VI_HOUR_CLASS { ViTurn::On } else { ViTurn::Off });
+        match kind {
+            Incoming::Trades(Venue::Nxt) | Incoming::Book(Venue::Nxt) => None,
+            Incoming::Trades(_) => Some(ViFields { static_base: record.price(TRADE_VI_STATIC_BASE), in_vi: in_vi(TRADE_HOUR_CLASS) }),
+            Incoming::Book(_) => Some(ViFields { static_base: None, in_vi: in_vi(BOOK_HOUR_CLASS) }),
+            Incoming::Program | Incoming::Brokers | Incoming::Index => None,
+        }
+    }
+
+    fn is_blank(&self) -> bool {
+        self.static_base.is_none() && self.in_vi.is_none()
+    }
+}
+
+#[derive(Default)]
+struct ViReadings {
+    day: Option<KstDate>,
+    last: HashMap<StockCode, ViFields>,
+}
+
+impl ViReadings {
+    fn changed_by(&mut self, record: &Record, kind: &Incoming, received_at: KstTime) -> Option<ViReading> {
+        let fields = ViFields::read(record, kind).filter(|fields| !fields.is_blank())?;
+        let code = StockCode::parse(record.text(0)?).ok()?;
+        let today = received_at.kst_date();
+        if self.day.replace(today) != Some(today) {
+            self.last.clear();
+        }
+        let last = self.last.get(&code).copied().unwrap_or_default();
+        let now = ViFields { static_base: fields.static_base.or(last.static_base), in_vi: fields.in_vi.or(last.in_vi) };
+        if last == now {
+            return None;
+        }
+        self.last.insert(code, now);
+        Some(ViReading { code, static_base: now.static_base, turned: now.in_vi.filter(|_| now.in_vi != last.in_vi) })
+    }
+
+    fn forget_all(&mut self) {
+        self.last.clear();
+    }
+
+    fn keep_only(&mut self, subscribed: &BTreeSet<Subscription>) {
+        let codes: BTreeSet<&str> = subscribed.iter().map(|subscription| subscription.tr_key.as_str()).collect();
+        self.last.retain(|code, _| codes.contains(code.as_str()));
+    }
+}
+
 struct Bridge {
     session: KisStream,
     session_events: mpsc::Receiver<SessionEvent>,
@@ -294,6 +356,7 @@ struct Bridge {
     open: bool,
     index_cumulative: HashMap<IndexCode, u64>,
     program_last: HashMap<Symbol, ProgramLast>,
+    vi: ViReadings,
 }
 
 impl Bridge {
@@ -344,6 +407,7 @@ impl Bridge {
             wanted.extend(notice);
         }
         if wanted != self.registered {
+            self.vi.keep_only(&wanted);
             self.session.set_desired(wanted.clone());
             self.registered = wanted;
         }
@@ -372,6 +436,7 @@ impl Bridge {
                 tracing::warn!(?end, "한투 실시간 세션이 끊겼습니다");
                 self.open = false;
                 self.index_cumulative.clear();
+                self.vi.forget_all();
                 self.send(StreamEvent::Down { at: self.clock.now() }).await && self.on_status().await
             }
             SessionEvent::InUseElsewhere => {
@@ -415,6 +480,9 @@ impl Bridge {
         };
         let mut events = Vec::new();
         for record in records {
+            if let Some(reading) = self.vi.changed_by(&record, &kind, received_at) {
+                events.push(StreamEvent::Vi { signal: ViSignal::Reading(reading), received_at });
+            }
             let event = match kind {
                 Incoming::Trades(venue) => trade(&record, venue, received_at),
                 Incoming::Book(venue) => book(&record, venue, received_at),
@@ -558,7 +626,148 @@ fn broker(record: &Record, received_at: KstTime) -> Option<StreamEvent> {
 
 #[cfg(test)]
 mod tests {
+    use futures::future::BoxFuture;
+
     use super::*;
+    use crate::config::{KisCredentials, Secret};
+    use crate::kis::stream::Socket;
+    use crate::kis::transport::{HttpRequest, HttpResponse, Transport, TransportError};
+    use crate::market_source::stream::StreamKind;
+
+    struct NeverConnects;
+
+    impl Connector for NeverConnects {
+        fn connect(&self) -> BoxFuture<'_, Result<Socket, tokio_tungstenite::tungstenite::Error>> {
+            Box::pin(std::future::pending())
+        }
+    }
+
+    struct NeverAnswers;
+
+    impl Transport for NeverAnswers {
+        fn send(&self, _: HttpRequest) -> BoxFuture<'static, Result<HttpResponse, TransportError>> {
+            Box::pin(std::future::pending())
+        }
+    }
+
+    const SAMSUNG: &str = "005930";
+    const TRADE_FIELDS: usize = 46;
+    const BOOK_FIELDS: usize = 62;
+
+    struct BridgeRig {
+        bridge: Bridge,
+        out: mpsc::Receiver<StreamEvent>,
+        desired: watch::Sender<DesiredFeeds>,
+        _venue: watch::Sender<Venue>,
+        _directory: watch::Sender<Option<Arc<Directory>>>,
+        _dir: tempfile::TempDir,
+    }
+
+    impl BridgeRig {
+        fn new() -> BridgeRig {
+            let dir = tempfile::tempdir().unwrap();
+            let clock = Clock::fake(crate::clock::kst(KstDate::new(2026, 11, 24).unwrap(), 9, 30, 0));
+            let credentials = KisCredentials { app_key: Secret::new("key".into()), app_secret: Secret::new("secret".into()) };
+            let auth = KisAuth::new(credentials, dir.path().join("token.json"), Arc::new(NeverAnswers), clock.clone());
+            let (session, session_events) = KisStream::spawn(Box::new(NeverConnects), auth);
+            let (desired, desired_rx) = watch::channel(DesiredFeeds::new());
+            let (venue, venue_rx) = watch::channel(Venue::Combined);
+            let (directory, directory_rx) = watch::channel(None);
+            let (out, out_rx) = mpsc::channel(OUT_BUFFER);
+            let bridge = Bridge {
+                status: session.watch_status(),
+                session,
+                session_events,
+                desired: desired_rx,
+                venue: venue_rx,
+                directory: directory_rx,
+                out,
+                clock,
+                notices: None,
+                seats: Arc::new(KisSeats::new(0)),
+                notice_wanted: None,
+                registered: BTreeSet::new(),
+                open: false,
+                index_cumulative: HashMap::new(),
+                program_last: HashMap::new(),
+                vi: ViReadings::default(),
+            };
+            BridgeRig { bridge, out: out_rx, desired, _venue: venue, _directory: directory, _dir: dir }
+        }
+
+        fn want(&mut self, kinds: &[StreamKind]) {
+            let symbol = Symbol::parse(SAMSUNG).unwrap();
+            self.desired.send_replace(if kinds.is_empty() { DesiredFeeds::new() } else { DesiredFeeds::from([(symbol, kinds.iter().copied().collect())]) });
+            self.bridge.sync_registrations();
+        }
+
+        async fn readings(&mut self, frame: RealFrame) -> Vec<(Option<u64>, Option<ViTurn>)> {
+            assert!(self.bridge.on_frame(&frame).await);
+            let mut readings = Vec::new();
+            while let Ok(event) = self.out.try_recv() {
+                if let StreamEvent::Vi { signal: ViSignal::Reading(reading), .. } = event {
+                    readings.push((reading.static_base.map(|base| base.centi() / 100), reading.turned));
+                }
+            }
+            readings
+        }
+    }
+
+    fn frame(tr_id: &str, size: usize, values: &[(usize, &str)]) -> RealFrame {
+        let mut fields = vec![String::new(); size];
+        fields[0] = SAMSUNG.to_owned();
+        fields[1] = "093000".to_owned();
+        for (index, value) in values {
+            fields[*index] = (*value).to_owned();
+        }
+        RealFrame { tr_id: tr_id.to_owned(), count: 1, fields }
+    }
+
+    fn trade_frame(tr_id: &str, qty: &str, hour_class: &str, base: &str) -> RealFrame {
+        frame(tr_id, TRADE_FIELDS, &[(2, "881000"), (12, qty), (TRADE_HOUR_CLASS, hour_class), (TRADE_VI_STATIC_BASE, base)])
+    }
+
+    fn book_frame(tr_id: &str, hour_class: &str) -> RealFrame {
+        frame(tr_id, BOOK_FIELDS, &[(BOOK_HOUR_CLASS, hour_class)])
+    }
+
+    #[tokio::test]
+    async fn a_kis_frame_reports_the_static_base_and_the_vi_hour_class_only_on_change() {
+        let mut rig = BridgeRig::new();
+        rig.want(&[StreamKind::Trades, StreamKind::Book(Venue::Combined)]);
+        let registered = rig.bridge.registered.clone();
+        assert_eq!(registered.len(), 2);
+        assert_eq!(rig.readings(trade_frame("H0STCNT0", "10", "0", "800000")).await, [(Some(800_000), Some(ViTurn::Off))]);
+        assert!(rig.readings(trade_frame("H0STCNT0", "10", "0", "800000")).await.is_empty());
+        assert!(rig.readings(book_frame("H0STASP0", "0")).await.is_empty());
+        assert_eq!(rig.readings(book_frame("H0STASP0", "C")).await, [(Some(800_000), Some(ViTurn::On))]);
+        assert!(rig.readings(book_frame("H0STASP0", "C")).await.is_empty());
+        assert_eq!(rig.readings(book_frame("H0STASP0", "0")).await, [(Some(800_000), Some(ViTurn::Off))]);
+        assert_eq!(rig.readings(trade_frame("H0STCNT0", "10", "0", "884000")).await, [(Some(884_000), None)]);
+        assert_eq!(rig.readings(trade_frame("H0STCNT0", "0", "C", "884000")).await, [(Some(884_000), Some(ViTurn::On))], "체결량 0인 프레임에서도 읽는다");
+        assert!(rig.readings(trade_frame("H0STCNT0", "0", "C", "0")).await.is_empty(), "기준가 0은 앞 값을 둔다");
+        assert!(rig.readings(trade_frame("H0NXCNT0", "10", "0", "700000")).await.is_empty(), "NXT 프레임은 KRX 상태를 바꾸지 않는다");
+        assert!(rig.readings(book_frame("H0NXASP0", "0")).await.is_empty());
+        rig.bridge.sync_registrations();
+        assert_eq!(rig.bridge.registered, registered, "VI 때문에 더 구독하지 않는다");
+    }
+
+    #[tokio::test]
+    async fn a_symbol_that_is_subscribed_again_reports_its_base_again() {
+        let mut rig = BridgeRig::new();
+        rig.want(&[StreamKind::Trades]);
+        assert_eq!(rig.readings(trade_frame("H0UNCNT0", "10", "0", "800000")).await.len(), 1);
+        rig.want(&[]);
+        rig.want(&[StreamKind::Trades]);
+        assert_eq!(rig.readings(trade_frame("H0UNCNT0", "10", "0", "800000")).await, [(Some(800_000), Some(ViTurn::Off))]);
+        rig.want(&[]);
+        rig.want(&[StreamKind::Book(Venue::Combined)]);
+        assert_eq!(rig.readings(book_frame("H0UNASP0", "0")).await, [(None, Some(ViTurn::Off))], "다시 잡은 뒤의 첫 호가도 알린다");
+        assert!(rig.bridge.on_session_event(SessionEvent::Disconnected(crate::kis::stream::End::Lost)).await);
+        assert_eq!(rig.readings(book_frame("H0UNASP0", "C")).await, [(None, Some(ViTurn::On))], "다시 이어진 뒤의 첫 호가도 알린다");
+        rig.bridge.clock.jump(24 * 60 * 60);
+        assert_eq!(rig.readings(trade_frame("H0UNCNT0", "10", "0", "800000")).await, [(Some(800_000), Some(ViTurn::Off))], "날이 바뀌면 다시 알린다");
+    }
 
     #[test]
     fn prices_and_index_levels_become_hundredths() {
