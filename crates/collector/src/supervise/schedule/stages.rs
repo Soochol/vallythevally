@@ -447,6 +447,7 @@ impl Daemon {
         let outcome = stoppable(shutdown, async move { finalizer.run(arguments).await }).await.map_err(|_| DayEnd::Stopped)?;
         match outcome {
             Ok(0) => {}
+            Ok(3) => self.reporter.alert(AlertKind::StageFailed, format!("정리: 분 호가를 만들지 못했습니다({date}). 다음 정리 때 다시 만듭니다")),
             Ok(code) => self.reporter.alert(AlertKind::StageFailed, format!("정리: finalize가 종료 코드 {code}로 끝났습니다. {FINALIZE_RETRY_NOTE}")),
             Err(error) => self.reporter.alert(AlertKind::StageFailed, format!("정리: finalize를 돌리지 못했습니다: {error}. {FINALIZE_RETRY_NOTE}")),
         }

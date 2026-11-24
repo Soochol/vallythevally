@@ -94,7 +94,7 @@ fn raw_fingerprint(data: &Path, date: u32) -> Value {
 fn put_store_with(data: &Path, date: u32, passed: bool, unfinalized: Value, raw_files: Option<Value>) {
     let folder = data.join("store").join(date.to_string());
     fs::create_dir_all(&folder).unwrap();
-    let mut complete = json!({"format_version": 1, "date": date, "verify": {"passed": passed}});
+    let mut complete = json!({"format_version": 1, "date": date, "verify": {"passed": passed}, "stocks": []});
     if let Some(raw_files) = raw_files {
         complete["raw_files"] = raw_files;
     }
