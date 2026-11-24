@@ -766,7 +766,7 @@ test("상세 정보 카드가 사다리 1~9행 자리에 있고 시세 쪽에 �
   await expect(infoLabels(page)).toHaveText(INFO_PAGE_1);
   await expect(infoValues(page)).toHaveText(["69,900", "70,400", "69,400", "70,000", "0 0.00%", "123만", "864억"]);
   const rowTops = await tops(ladderRows(page));
-  expect(await tops(info)).toEqual([1, 2, 3, 5, 6, 7, 8].map((row) => rowTops[row]));
+  expect(await tops(info)).toEqual([0, 1, 2, 4, 5, 6, 7].map((row) => rowTops[row]));
   const card = (await infoCard(page).boundingBox())!;
   const price = (await ladderRows(page).first().locator(".mw-px").boundingBox())!;
   expect(card.y).toBeCloseTo(rowTops[0]!, 0);
@@ -791,9 +791,30 @@ test("종목 탭을 누르면 상·하한가·52주 범위·시가총액·PER·P
   await expect(infoValues(page)).toHaveText(INFO_PAGE_2_VALUES);
   await expect(page.getByTestId("ladder-info-ends").locator("span")).toHaveText(INFO_PAGE_2_ENDS);
   const rowTops = await tops(ladderRows(page));
-  expect(await tops(page.getByTestId("ladder-info"))).toEqual([1, 2, 5, 6, 7].map((row) => rowTops[row]));
+  expect(await tops(page.getByTestId("ladder-info"))).toEqual([0, 1, 4, 5, 6].map((row) => rowTops[row]));
 
   await infoTab(page, "시세").click();
+  await expect(infoLabels(page)).toHaveText(INFO_PAGE_1);
+});
+
+test("쪽을 넘겨도 정보란 높이와 점 좌표가 같아 같은 자리를 눌러 왕복한다", async ({ page, scenario }) => {
+  ordersOn(scenario);
+  tradingApi(scenario);
+  await openOrderWindow(page, scenario);
+  await expect(infoLabels(page)).toHaveText(INFO_PAGE_1);
+  await expect(infoTab(page, "시세")).toHaveAttribute("title", "시세");
+  await expect(infoTab(page, "종목")).toHaveAttribute("title", "종목");
+  const beforeHeight = (await infoCard(page).boundingBox())!.height;
+  const quoteDot = await center(infoTab(page, "시세"));
+  const stockDot = await center(infoTab(page, "종목"));
+  await page.mouse.click(stockDot.x, stockDot.y);
+  await expect(infoTab(page, "종목")).toHaveAttribute("aria-selected", "true");
+  await expect(infoLabels(page)).toHaveText(INFO_PAGE_2);
+  expect((await infoCard(page).boundingBox())!.height).toBe(beforeHeight);
+  expect(await center(infoTab(page, "시세"))).toEqual(quoteDot);
+  expect(await center(infoTab(page, "종목"))).toEqual(stockDot);
+  await page.mouse.click(quoteDot.x, quoteDot.y);
+  await expect(infoTab(page, "시세")).toHaveAttribute("aria-selected", "true");
   await expect(infoLabels(page)).toHaveText(INFO_PAGE_1);
 });
 

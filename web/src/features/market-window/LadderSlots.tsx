@@ -33,15 +33,15 @@ function InfoTabs({ pager }: { pager: InfoPager }) {
     refs.current[page]?.focus();
   };
   return (
-    <div className="mw-card-tabs" role="tablist" aria-label="상세 정보">
+    <div className="mw-card-dots" role="tablist" aria-label="상세 정보">
       {INFO_TABS.map(({ page, label }) => (
-        <button key={page} ref={(node) => { refs.current[page] = node; }} type="button" role="tab" aria-selected={pager.page === page} tabIndex={pager.page === page ? 0 : -1}
+        <button key={page} ref={(node) => { refs.current[page] = node; }} type="button" role="tab" aria-label={label} title={label} aria-selected={pager.page === page} tabIndex={pager.page === page ? 0 : -1}
           onClick={() => pager.select(page)}
           onKeyDown={(event) => {
             if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
             event.preventDefault();
             choose(otherInfoPage(page));
-          }}>{label}</button>
+          }} />
       ))}
     </div>
   );
@@ -50,17 +50,17 @@ function InfoTabs({ pager }: { pager: InfoPager }) {
 const sameLines = (a: readonly InfoLine[], b: readonly InfoLine[]): boolean =>
   a === b || (a.length === b.length && a.every((line, index) => JSON.stringify(line) === JSON.stringify(b[index])));
 
-const InfoCard = memo(function InfoCard({ lines, page, select }: { lines: readonly InfoLine[]; page: InfoPage; select: InfoPager["select"] }) {
+const InfoCard = memo(function InfoCard({ lines, rows, page, select }: { lines: readonly InfoLine[]; rows: number; page: InfoPage; select: InfoPager["select"] }) {
   return (
-    <div className="mw-card" data-testid="ladder-info-card" style={{ height: `calc(${lines.length + 1} * var(--size-24))` }}>
-      <InfoTabs pager={{ page, select }} />
+    <div className="mw-card" data-testid="ladder-info-card" style={{ height: `calc(${rows} * var(--size-24))` }}>
       {lines.map((line, index) => <InfoRow key={index} line={line} />)}
+      <InfoTabs pager={{ page, select }} />
     </div>
   );
-}, (a, b) => a.page === b.page && a.select === b.select && sameLines(a.lines, b.lines));
+}, (a, b) => a.rows === b.rows && a.page === b.page && a.select === b.select && sameLines(a.lines, b.lines));
 
-export const infoSlot = (lines: readonly InfoLine[], pager: InfoPager) => (): ReactNode => (
-  <InfoCard lines={lines} page={pager.page} select={pager.select} />
+export const infoSlot = (lines: readonly InfoLine[], pager: InfoPager) => (rowCount: number): ReactNode => (
+  <InfoCard lines={lines} rows={rowCount} page={pager.page} select={pager.select} />
 );
 
 export const scrollAction = (scrollTop: number): "hold" | "release" => (scrollTop > 0 ? "hold" : "release");
