@@ -3,10 +3,8 @@ import type { TradingHolding } from "../../api/generated/TradingHolding";
 import { formatPrice } from "../../lib/format";
 import { useWatchQuote } from "../../stores/watchQuote";
 import { formatQuantity } from "../market-window/format";
-import { atWatchQuote, profitText } from "./holdingSummary";
+import { atWatchQuote, profitText, profitTone } from "./holdingSummary";
 import { type GoToSymbol, SymbolName } from "./SymbolName";
-
-const profitTone = (profit: number): "up" | "down" | undefined => (profit > 0 ? "up" : profit < 0 ? "down" : undefined);
 
 const HoldingRowView = memo(function HoldingRowView({ holding, goTo }: { holding: TradingHolding; goTo: GoToSymbol }) {
   return (

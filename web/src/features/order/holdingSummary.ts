@@ -2,7 +2,7 @@ import type { TradingHolding } from "../../api/generated/TradingHolding";
 import type { SymbolKind } from "../../api/generated/SymbolKind";
 import type { UnixSeconds } from "../../api/generated/UnixSeconds";
 import { isMarketOpen } from "../../chart/time";
-import { formatPercent } from "../../lib/format";
+import { formatPercent, MINUS } from "../../lib/format";
 import { isEtfOrEtn } from "../../lib/symbol";
 import type { WatchQuote } from "../../stores/quoteBook";
 import { formatWon } from "../market-window/format";
@@ -30,9 +30,21 @@ export function atLivePrice(holding: TradingHolding | null, lastPrice: number | 
   };
 }
 
+export function liveWatchPrice(watch: WatchQuote): number | null {
+  if (watch.limited || watch.stale || watch.quote === undefined || watch.quote.source === "expected") return null;
+  return watch.quote.price;
+}
+
 export function atWatchQuote(holding: TradingHolding, watch: WatchQuote): TradingHolding {
-  if (watch.limited || watch.stale || watch.quote === undefined || watch.quote.source === "expected") return holding;
-  return atLivePrice(holding, watch.quote.price) ?? holding;
+  return atLivePrice(holding, liveWatchPrice(watch)) ?? holding;
+}
+
+export function profitTone(profit: number): "up" | "down" | undefined {
+  return profit > 0 ? "up" : profit < 0 ? "down" : undefined;
+}
+
+export function signedWonText(won: number): string {
+  return `${won > 0 ? "+" : won < 0 ? MINUS : ""}${Math.abs(won).toLocaleString("ko-KR")}원`;
 }
 
 export interface ProfitDisplay {
@@ -43,8 +55,7 @@ export interface ProfitDisplay {
 export function profitText(holding: TradingHolding | null, unit: ProfitUnit): string {
   if (holding === null) return "-";
   if (unit === "percent") return holding.profitRateCenti === null ? "-" : formatPercent(holding.profitRateCenti / 100);
-  const won = holding.evaluationProfit;
-  return `${won > 0 ? "+" : won < 0 ? "−" : ""}${Math.abs(won).toLocaleString("ko-KR")}원`;
+  return signedWonText(holding.evaluationProfit);
 }
 
 export const toggledUnit = (unit: ProfitUnit): ProfitUnit => (unit === "won" ? "percent" : "won");

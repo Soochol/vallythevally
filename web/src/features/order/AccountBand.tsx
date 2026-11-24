@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useId, useRef, useState } from "react";
 import type { TradingBalance } from "../../api/generated/TradingBalance";
 import type { TradingExecution } from "../../api/generated/TradingExecution";
 import type { TradingHolding } from "../../api/generated/TradingHolding";
@@ -16,6 +16,8 @@ import { routeLabel } from "./orderSettings";
 import { formatQuantity } from "../market-window/format";
 import { formatFillTime } from "./holdingSummary";
 import { HoldingRow } from "./HoldingRow";
+import { HoldingsTotal } from "./HoldingsTotal";
+import { hasAnyHoldings } from "./liveTotal";
 import { type GoToSymbol, SymbolName } from "./SymbolName";
 import { newestFirst } from "./accountLists";
 import { AccountLabel } from "./AccountPicker";
@@ -26,10 +28,10 @@ import { SIDE_LABEL } from "./orderRules";
 
 type PanelKind = "open" | "holdings" | "fills";
 
-const TABS: readonly { readonly kind: PanelKind; readonly label: string }[] = [
-  { kind: "open", label: "미체결 주문" },
-  { kind: "holdings", label: "보유종목" },
-  { kind: "fills", label: "내 체결" },
+const TABS: readonly { readonly kind: PanelKind; readonly label: string; readonly shortLabel: string }[] = [
+  { kind: "open", label: "미체결 주문", shortLabel: "미체결" },
+  { kind: "holdings", label: "보유종목", shortLabel: "보유" },
+  { kind: "fills", label: "내 체결", shortLabel: "체결" },
 ];
 
 interface Props {
@@ -120,7 +122,9 @@ const isTab = (target: Node) => target instanceof Element && target.closest(".od
 export function AccountBand({ windowId, choice, onPick, maskAccount, openOrders, balance, holding, executions, writable, mock, venue, policy, onCancel }: Props) {
   const [panel, setPanel] = useState<PanelKind | null>(null);
   const opener = useRef<HTMLElement | null>(null);
+  const totalLabelId = useId();
   const counts: Record<PanelKind, number> = { open: openOrders.length, holdings: balance?.holdings.length ?? 0, fills: executions.length };
+  const showTotal = hasAnyHoldings(balance);
   const listWindow = listWindowOf(opener.current);
   const label = TABS.find((tab) => tab.kind === panel)?.label;
   const goTo: GoToSymbol = useStableCallback((target) => {
@@ -132,17 +136,28 @@ export function AccountBand({ windowId, choice, onPick, maskAccount, openOrders,
   return (
     <div className="od-account" data-testid="order-account">
       <div className="od-account-bar">
-        <AccountLabel choice={choice} maskAccount={maskAccount} onPick={onPick} />
-        <Badge tone={mock ? "accent" : "warning"} className="od-env">
-          <span data-testid={mock ? "account-mock" : "account-live"}>{mock ? "모의" : "실전"}</span>
-        </Badge>
-        <span className="od-route" data-testid="account-route" title="주문 경로">{routeLabel(venue)}</span>
-        {policy !== null && <Badge tone={policy === "allow_margin" ? "warning" : "success"} className="od-policy"><span data-testid="margin-policy" data-policy={policy}>{POLICY_LABEL[policy]}</span></Badge>}
-        {TABS.map(({ kind, label }) => (
-          <button key={kind} type="button" className="od-tab" data-testid={`account-tab-${kind}`} aria-expanded={panel === kind} onClick={(e) => { opener.current = e.currentTarget; setPanel((open) => (open === kind ? null : kind)); }}>
-            {label} <b>{counts[kind]}</b>
-          </button>
-        ))}
+        <div className="od-account-head">
+          <AccountLabel choice={choice} maskAccount={maskAccount} onPick={onPick} />
+          <Badge tone={mock ? "accent" : "warning"} className="od-env">
+            <span data-testid={mock ? "account-mock" : "account-live"}>{mock ? "모의" : "실전"}</span>
+          </Badge>
+          <span className="od-route" data-testid="account-route" title="주문 경로">{routeLabel(venue)}</span>
+          {policy !== null && <Badge tone={policy === "allow_margin" ? "warning" : "success"} className="od-policy"><span data-testid="margin-policy" data-policy={policy}>{POLICY_LABEL[policy]}</span></Badge>}
+        </div>
+        <div className="od-account-tabs">
+          {TABS.map(({ kind, label, shortLabel }) => {
+            const withTotal = kind === "holdings" && showTotal;
+            return (
+              <button key={kind} type="button" className="od-tab" data-testid={`account-tab-${kind}`} aria-expanded={panel === kind} aria-labelledby={withTotal ? totalLabelId : undefined} onClick={(e) => { opener.current = e.currentTarget; setPanel((open) => (open === kind ? null : kind)); }}>
+                <span className="od-tab-full">{label}</span>
+                <span className="od-tab-short">{shortLabel}</span>
+                {" "}
+                <b>{counts[kind]}</b>
+                {withTotal && <HoldingsTotal balance={balance} activeHolding={holding} count={counts.holdings} labelId={totalLabelId} />}
+              </button>
+            );
+          })}
+        </div>
       </div>
       {panel !== null && (
         <Popover solid key={panel} anchor={opener} anchorRect={() => listAnchorRect(opener.current)} style={listWindow && { width: listWidthIn(listWindow) }} releasesClick={isTab} onClose={() => setPanel(null)} role="dialog" aria-label={label} className="od-list-pop" data-testid="account-panel" data-panel={panel}>
