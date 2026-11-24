@@ -17,6 +17,7 @@ use super::start::{KIWOOM_WS_URL, exit_status, forward_termination_signals, init
 use super::ws::{Connector, WebSocketConnector};
 use crate::shared::flow::{self, FLOW_KINDS, FileFlowStore};
 use crate::shared::minute::{self, FileMinuteStore, MinuteStore};
+use crate::shared::quotes;
 use crate::protocol::{Command, Event, HEARTBEAT_EVERY, KeyName, ProtocolError, SessionState, encode_line, parse_command};
 
 pub const WS_URL_VARIABLE: &str = "VALLY_COLLECTOR_WS_URL";
@@ -33,16 +34,17 @@ pub struct ChildParts {
     pub shutdown: watch::Receiver<bool>,
     pub minutes: Option<Box<dyn MinuteStore>>,
     pub flow: Option<FileFlowStore>,
+    pub quotes: Option<PathBuf>,
 }
 
 pub async fn run_session(parts: ChildParts) -> Finish {
-    let ChildParts { key, data_dir, connector, wall_clock, timings, commands, events, shutdown, minutes, flow } = parts;
+    let ChildParts { key, data_dir, connector, wall_clock, timings, commands, events, shutdown, minutes, flow, quotes } = parts;
     if let Err(error) = std::fs::create_dir_all(data_dir.join("raw")) {
         let halt = Halt::Output(error);
         events.halted(&halt.reason(), halt.action());
         return Finish::Halted(halt);
     }
-    let output = Output::for_key(data_dir, key);
+    let output = Output::for_key(data_dir, key.clone());
     let (state, observed_state) = watch::channel(SessionState::WaitingForToken);
     let heartbeat = tokio::spawn(heartbeat(events.clone(), output.throughput(), observed_state));
     let (feed, worker) = match minutes {
@@ -59,6 +61,13 @@ pub async fn run_session(parts: ChildParts) -> Finish {
         }
         None => (None, None),
     };
+    let (quote_feed, quote_worker) = match quotes {
+        Some(shared_dir) => {
+            let (feed, worker) = quotes::spawn(shared_dir, key, wall_clock.now_ms());
+            (Some(feed), Some(worker))
+        }
+        None => (None, None),
+    };
     let session = Session::new(SessionParts {
         tokens: Tokens::supplied(),
         registry: Registry::default(),
@@ -70,12 +79,16 @@ pub async fn run_session(parts: ChildParts) -> Finish {
         child: Some(ChildLink { commands, events, state }),
         minutes: feed,
         flow: flow_feed,
+        quotes: quote_feed,
     });
     let finish = session.run().await;
     if let Some(worker) = worker {
         worker.finish().await;
     }
     if let Some(worker) = flow_worker {
+        worker.finish().await;
+    }
+    if let Some(worker) = quote_worker {
         worker.finish().await;
     }
     heartbeat.abort();
@@ -201,7 +214,7 @@ pub fn run(key: KeyName, data_dir: PathBuf, shared_dir: Option<PathBuf>) -> Exit
     let finish = runtime.block_on(async {
         tokio::spawn(forward_termination_signals(stop));
         let minutes = shared_dir.as_ref().map(|dir| Box::new(FileMinuteStore::new(dir.clone(), key.clone())) as Box<dyn MinuteStore>);
-        let flow = shared_dir.map(|dir| FileFlowStore::new(dir, key.clone()));
+        let flow = shared_dir.as_ref().map(|dir| FileFlowStore::new(dir.clone(), key.clone()));
         run_session(ChildParts {
             key,
             data_dir,
@@ -213,6 +226,7 @@ pub fn run(key: KeyName, data_dir: PathBuf, shared_dir: Option<PathBuf>) -> Exit
             shutdown,
             minutes,
             flow,
+            quotes: shared_dir,
         })
         .await
     });

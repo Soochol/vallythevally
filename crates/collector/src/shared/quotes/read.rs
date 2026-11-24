@@ -1,0 +1,181 @@
+use std::borrow::Cow;
+use std::fmt;
+
+use serde::de::{IgnoredAny, MapAccess, Visitor};
+use serde::{Deserialize, Deserializer};
+use server::shared_data::{BOOK_DEPTH, BookLevel, BookRow};
+
+const QUOTE_TYPE: &str = "0D";
+const COMBINED_SUFFIX: &str = "_AL";
+
+pub fn mentions_quote_type(text: &str) -> bool {
+    text.contains("\"0D\"")
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Reading {
+    pub books: u64,
+    pub skipped: u64,
+}
+
+#[derive(Deserialize)]
+struct Frame<'a> {
+    #[serde(borrow, default)]
+    data: Vec<Entry<'a>>,
+}
+
+#[derive(Deserialize)]
+struct Entry<'a> {
+    #[serde(rename = "type", borrow, default)]
+    kind: Cow<'a, str>,
+    #[serde(borrow, default)]
+    item: Cow<'a, str>,
+    #[serde(default)]
+    values: BookValues,
+}
+
+#[derive(Default)]
+struct BookValues {
+    sec: Option<u32>,
+    asks: [BookLevel; BOOK_DEPTH],
+    bids: [BookLevel; BOOK_DEPTH],
+}
+
+#[derive(Clone, Copy)]
+enum LevelField {
+    Price,
+    Combined,
+    Krx,
+    Nxt,
+}
+
+fn classify_fid(key: &str) -> Option<(bool, usize, LevelField)> {
+    let fid = match key.len() {
+        2 | 4 if key.bytes().all(|byte| byte.is_ascii_digit()) => key.parse::<u16>().ok()?,
+        _ => return None,
+    };
+    match fid {
+        41..=50 => Some((true, usize::from(fid - 41), LevelField::Price)),
+        51..=60 => Some((false, usize::from(fid - 51), LevelField::Price)),
+        61..=70 => Some((true, usize::from(fid - 61), LevelField::Combined)),
+        71..=80 => Some((false, usize::from(fid - 71), LevelField::Combined)),
+        6044..=6053 => Some((true, usize::from(fid - 6044), LevelField::Krx)),
+        6054..=6063 => Some((false, usize::from(fid - 6054), LevelField::Krx)),
+        6066..=6075 => Some((true, usize::from(fid - 6066), LevelField::Nxt)),
+        6076..=6085 => Some((false, usize::from(fid - 6076), LevelField::Nxt)),
+        _ => None,
+    }
+}
+
+impl<'de> Deserialize<'de> for BookValues {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        struct ValuesVisitor;
+
+        impl<'de> Visitor<'de> for ValuesVisitor {
+            type Value = BookValues;
+
+            fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+                formatter.write_str("a map of Kiwoom quote fields")
+            }
+
+            fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<BookValues, A::Error> {
+                let mut sec = None;
+                let mut asks = [BookLevel::default(); BOOK_DEPTH];
+                let mut bids = [BookLevel::default(); BOOK_DEPTH];
+                while let Some(key) = map.next_key::<Cow<'de, str>>()? {
+                    if key.as_ref() == "21" {
+                        if let Some(value) = map.next_value::<Option<Cow<'de, str>>>()? {
+                            sec = seconds_of_day(value.as_ref());
+                        }
+                    } else if let Some((is_ask, index, field)) = classify_fid(key.as_ref()) {
+                        let parsed = map
+                            .next_value::<Option<Cow<'de, str>>>()?
+                            .and_then(|value| quantity_of(value.as_ref()))
+                            .unwrap_or(0);
+                        let level = if is_ask { &mut asks[index] } else { &mut bids[index] };
+                        match field {
+                            LevelField::Price => level.price = parsed,
+                            LevelField::Combined => level.combined = parsed,
+                            LevelField::Krx => level.krx = parsed,
+                            LevelField::Nxt => level.nxt = parsed,
+                        }
+                    } else {
+                        let _: IgnoredAny = map.next_value()?;
+                    }
+                }
+                Ok(BookValues { sec, asks, bids })
+            }
+        }
+
+        deserializer.deserialize_map(ValuesVisitor)
+    }
+}
+
+pub fn read_books(text: &str, mut sink: impl FnMut(&str, &BookRow)) -> Result<Reading, serde_json::Error> {
+    let frame: Frame<'_> = serde_json::from_str(text)?;
+    let mut reading = Reading::default();
+    for entry in &frame.data {
+        if entry.kind.as_ref() != QUOTE_TYPE {
+            continue;
+        }
+        match book_of(entry) {
+            Some((code, row)) => {
+                reading.books += 1;
+                sink(code, &row);
+            }
+            None => reading.skipped += 1,
+        }
+    }
+    Ok(reading)
+}
+
+fn book_of<'a>(entry: &'a Entry<'_>) -> Option<(&'a str, BookRow)> {
+    let code = entry.item.strip_suffix(COMBINED_SUFFIX).filter(|code| !code.is_empty())?;
+    let sec = entry.values.sec?;
+    Some((code, BookRow { sec, asks: entry.values.asks, bids: entry.values.bids }))
+}
+
+fn seconds_of_day(text: &str) -> Option<u32> {
+    let text = text.trim();
+    if text.len() != 6 || !text.bytes().all(|byte| byte.is_ascii_digit()) {
+        return None;
+    }
+    let part = |range: std::ops::Range<usize>| text[range].parse::<u32>().ok();
+    let (hour, minute, second) = (part(0..2)?, part(2..4)?, part(4..6)?);
+    (hour < 24 && minute < 60 && second < 60).then_some(hour * 3600 + minute * 60 + second)
+}
+
+fn quantity_of(text: &str) -> Option<i64> {
+    let trimmed = text.trim();
+    if trimmed.is_empty() {
+        return Some(0);
+    }
+    let magnitude = trimmed.strip_prefix(['+', '-']).unwrap_or(trimmed);
+    if magnitude.is_empty() || !magnitude.bytes().all(|byte| byte.is_ascii_digit()) {
+        return None;
+    }
+    magnitude.parse().ok()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_cheap_check_passes_only_order_book_frames() {
+        assert!(mentions_quote_type(r#"{"data":[{"type":"0D"}]}"#));
+        assert!(!mentions_quote_type(r#"{"data":[{"type":"0B"}]}"#));
+        assert!(!mentions_quote_type(r#"{"data":[{"type":"0J"}]}"#));
+    }
+
+    #[test]
+    fn rejects_empty_code_with_combined_suffix_and_invalid_clock() {
+        let frame = r#"{"trnm":"REAL","data":[
+            {"type":"0D","item":"_AL","values":{"21":"090000"}},
+            {"type":"0D","item":"005930_AL","values":{"21":"240000"}},
+            {"type":"0D","item":"005930_AL","values":{"21":"096000"}}
+        ]}"#;
+        let reading = read_books(frame, |_, _| panic!("유효한 호가가 없다")).unwrap();
+        assert_eq!(reading, Reading { books: 0, skipped: 3 });
+    }
+}

@@ -46,6 +46,7 @@ fn launch_child(peer: &Peer) -> Child {
         shutdown,
         minutes: None,
         flow: None,
+        quotes: None,
     };
     let task = tokio::spawn(run_session(parts));
     Child { paths, wall, commands, events, stop, task }

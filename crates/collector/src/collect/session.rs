@@ -28,6 +28,7 @@ use crate::protocol::{Command, ProtocolError, Rejection, SessionState};
 use crate::raw_write::RawLine;
 use crate::shared::flow::FlowFeed;
 use crate::shared::minute::MinuteFeed;
+use crate::shared::quotes::QuoteFeed;
 
 pub trait WallClock: Send + Sync {
     fn now_ms(&self) -> i64;
@@ -412,6 +413,7 @@ pub struct SessionParts {
     pub child: Option<ChildLink>,
     pub minutes: Option<MinuteFeed>,
     pub flow: Option<FlowFeed>,
+    pub quotes: Option<QuoteFeed>,
 }
 
 pub struct Session {
@@ -428,6 +430,7 @@ pub struct Session {
     state: watch::Sender<SessionState>,
     minutes: Option<MinuteFeed>,
     flow: Option<FlowFeed>,
+    quotes: Option<QuoteFeed>,
     halt_on_rejected_register: bool,
     gap: Gap,
     attempt: u32,
@@ -460,6 +463,7 @@ impl Session {
             state,
             minutes: parts.minutes,
             flow: parts.flow,
+            quotes: parts.quotes,
             halt_on_rejected_register,
             gap: Gap::Unknown,
             attempt: 0,
@@ -589,6 +593,9 @@ impl Session {
             flow.link(recv_ms, false);
         }
         self.out.write_event(&RawLine::Down { recv_ms, reason })?;
+        if let Some(quotes) = &self.quotes {
+            quotes.link_down(recv_ms);
+        }
         Ok(())
     }
 
@@ -682,6 +689,9 @@ impl Session {
         self.out.write_event(&RawLine::Live { recv_ms })?;
         if let Some(flow) = &self.flow {
             flow.link(recv_ms, true);
+        }
+        if let Some(quotes) = &self.quotes {
+            quotes.link_live(recv_ms);
         }
         self.gap = Gap::Up;
         self.tokens.confirmed();
@@ -835,6 +845,9 @@ impl Session {
                 }
                 if let Some(flow) = &self.flow {
                     flow.offer(recv_ms, bytes);
+                }
+                if let Some(quotes) = &self.quotes {
+                    quotes.offer(recv_ms, bytes);
                 }
                 self.report_market_hours(text, recv_ms);
             }

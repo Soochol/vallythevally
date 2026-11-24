@@ -66,6 +66,7 @@ pub async fn execute(
         child: None,
         minutes: None,
         flow: None,
+        quotes: None,
     });
     let finish = session.run().await;
     drop(lock);
