@@ -132,9 +132,11 @@ test("교차 호가의 같은 가격에서 평단가 점과 예상체결 강조�
   expect(html.match(/data-testid="ladder-mark"/g)).toHaveLength(1);
   expect(html.match(/data-expected=""/g)).toHaveLength(1);
   expect(lines[9]).toContain('data-side="ask"');
+  expect(lines[9]).toContain("855,000");
   expect(lines[9]).toContain('data-testid="ladder-mark"');
   expect(lines[9]).toContain('data-expected=""');
   expect(lines[10]).toContain('data-side="bid"');
+  expect(lines[10]).toContain("855,000");
   expect(lines[10]).not.toContain('data-testid="ladder-mark"');
   expect(lines[10]).not.toContain("data-expected");
 });
