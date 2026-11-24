@@ -14,6 +14,7 @@ import type { OrderDrag } from "./useOrderDrag";
 export interface HoverCell {
   readonly side: OrderSide;
   readonly price: number;
+  readonly rowKey: string;
 }
 
 export interface LadderActions {
@@ -58,6 +59,7 @@ interface CellApi {
 }
 
 interface CellProps {
+  readonly rowKey: string;
   readonly side: OrderSide;
   readonly price: number;
   readonly group: PriceGroup | undefined;
@@ -96,8 +98,8 @@ const centerRowOffset = (element: HTMLElement, fallbackToBid: boolean): number |
   return Math.max(0, rowCenter - head - (element.clientHeight - head) / 2);
 };
 
-const OrderCell = memo(function OrderCell({ side, price, group, writable, previewQuantity, buying, api }: CellProps) {
-  const hovered = useStoreValue(api.hover, (cell) => cell !== null && cell.side === side && cell.price === price);
+const OrderCell = memo(function OrderCell({ rowKey, side, price, group, writable, previewQuantity, buying, api }: CellProps) {
+  const hovered = useStoreValue(api.hover, (cell) => cell !== null && cell.side === side && cell.rowKey === rowKey);
   const targeted = useStoreValue(api.drag.views, (view) => view?.target.kind === "cell" && view.target.side === side && view.target.price === price);
   const chipDragging = useStoreValue(api.drag.views, (view) => group !== undefined && view?.source.kind === "chip" && view.source.group === group);
   const showsPreview = hovered && writable && group === undefined && previewQuantity > 0;
@@ -111,8 +113,11 @@ const OrderCell = memo(function OrderCell({ side, price, group, writable, previe
       data-disabled={writable ? undefined : ""}
       data-target={targeted ? "" : undefined}
       onDoubleClick={() => { if (writable) api.actions.place(side, price); }}
-      onPointerEnter={() => api.hover.set({ side, price })}
-      onPointerLeave={() => api.hover.set(null)}
+      onPointerEnter={() => api.hover.set({ side, price, rowKey })}
+      onPointerLeave={() => {
+        const current = api.hover.get();
+        if (current !== null && current.side === side && current.rowKey === rowKey) api.hover.set(null);
+      }}
     >
       {group
         ? <button type="button" className="od-chip" data-testid="order-chip" data-side={side} data-price={price} data-dragging={chipDragging ? "" : undefined} data-pending={group.pending}
@@ -195,7 +200,7 @@ export function OrderLadder({ rows, previousClose, groups, writable, previewQuan
   const cell = (slot: "left" | "right") => (row: LadderRow): ReactNode => {
     const side = SIDE_OF_SLOT[slot];
     if (row.price === null) return <div className="od-cell" data-empty="" data-side={side} />;
-    return <OrderCell side={side} price={row.price} group={row.repeat ? undefined : groups.get(groupKey(side, row.price))} writable={writable} previewQuantity={previewQuantity} buying={buying} api={api} />;
+    return <OrderCell rowKey={row.key} side={side} price={row.price} group={row.repeat ? undefined : groups.get(groupKey(side, row.price))} writable={writable} previewQuantity={previewQuantity} buying={buying} api={api} />;
   };
   const slots = { left: cell("left"), right: cell("right") };
 
