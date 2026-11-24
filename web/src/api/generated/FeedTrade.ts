@@ -2,4 +2,4 @@
 import type { UnixSeconds } from "./UnixSeconds";
 import type { Venue } from "./Venue";
 
-export type FeedTrade = { t: UnixSeconds, price: number, qty: number, venue: Venue | null, strength: number | null, };
+export type FeedTrade = { t: UnixSeconds, price: number, qty: number, venue: Venue | null, strength: number | null, sameTimeRatio?: number, };

@@ -37,7 +37,7 @@ bps: number | null,
 /**
  * %. 외국인 보유 한도 대비 보유 비율.
  */
-foreignExhaustionRate: number | null, 
+foreignExhaustionRate: number | null, creditRate: number | null, 
 /**
  * 최근 250관측일 최고가(원).
  */

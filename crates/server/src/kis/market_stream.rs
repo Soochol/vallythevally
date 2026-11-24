@@ -472,6 +472,7 @@ impl Bridge {
             exchange: None,
             day,
             strength_centi: None,
+            same_time_ratio_centi: None,
             side: None,
         };
         Some(StreamEvent::Tick { tick, received_at })
@@ -503,6 +504,7 @@ fn trade(record: &Record, venue: Venue, received_at: KstTime) -> Option<StreamEv
         exchange,
         day,
         strength_centi: record.centi(18).and_then(|centi| u64::try_from(centi).ok()),
+        same_time_ratio_centi: None,
         side,
     };
     Some(StreamEvent::Tick { tick, received_at })

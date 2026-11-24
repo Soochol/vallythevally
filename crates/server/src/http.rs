@@ -832,7 +832,7 @@ mod tests {
         assert_eq!(
             v,
             json!({"symbol": "005930", "marketCap": 1_093_838_700_000_000u64, "listedShares": 5_846_279_000u64, "per": 28.51, "pbr": 2.92, "roe": 10.9,
-                   "eps": 6564, "bps": 63997, "foreignExhaustionRate": 45.93, "high52w": 380_000, "low52w": 93_500, "upperLimit": 245_000, "lowerLimit": 132_100})
+                   "eps": 6564, "bps": 63997, "foreignExhaustionRate": 45.93, "creditRate": 0.32, "high52w": 380_000, "low52w": 93_500, "upperLimit": 245_000, "lowerLimit": 132_100})
         );
         let bodies: Vec<String> = f.fake.market_sent().into_iter().filter(|s| s.api_id == ApiId::Ka10001).map(|s| s.body).collect();
         assert_eq!(bodies, [r#"{"stk_cd":"005930_AL"}"#]);

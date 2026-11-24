@@ -513,6 +513,7 @@ async fn stock_info_fills_the_boundary_fields_of_the_synthetic_response() {
     assert_eq!((fundamentals.eps_won, fundamentals.bps_won), (Some(5_421), Some(57_712)));
     assert_eq!(fundamentals.listed_shares, Some(5_969_782_550));
     assert_eq!(fundamentals.foreign_exhaustion_pct, Some(50.25));
+    assert_eq!(fundamentals.credit_rate, None);
     let summary = rig.market.day_summary(code("005930"), Venue::Nxt, Priority::Screen).await.unwrap();
     assert_eq!((summary.price_won, summary.base_won, summary.open_won, summary.high_won, summary.low_won), (Some(71_000), Some(70_000), Some(70_500), Some(71_500), Some(69_800)));
     assert_eq!((summary.volume, summary.trade_value_won), (Some(1_234_567), Some(87_654_321_000)));

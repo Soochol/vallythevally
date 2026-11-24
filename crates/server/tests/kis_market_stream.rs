@@ -436,7 +436,7 @@ async fn a_krx_trade_frame_becomes_one_tick_with_price_quantity_and_side() {
     let StreamEvent::Tick { tick, received_at } = next_data_event(&mut rig.events).await else { panic!("체결이 아니다") };
     assert_eq!(received_at, now());
     assert_eq!((tick.symbol, tick.price.centi(), tick.qty, tick.hhmmss), (stock("005930"), 7_120_000, Volume(15), TimeOfDay::hms(9, 30, 1).unwrap()));
-    assert_eq!((tick.side, tick.exchange, tick.strength_centi), (Some(TradeSide::Buy), Some(Exchange::Krx), Some(11_234)));
+    assert_eq!((tick.side, tick.exchange, tick.strength_centi, tick.same_time_ratio_centi), (Some(TradeSide::Buy), Some(Exchange::Krx), Some(11_234), None));
     let day = tick.day.unwrap();
     assert_eq!((day.change_centi, day.cumulative), (30_000, Volume(1200)));
 
@@ -475,7 +475,7 @@ async fn a_frame_with_too_few_fields_fills_what_it_read_and_the_session_goes_on(
     peer.say("0|H0STCNT0|001|005930^093001^71200^2^300^0.42^71100^70000^71500^69900^71300^71200^15^1200");
     let StreamEvent::Tick { tick, .. } = next_data_event(&mut rig.events).await else { panic!("체결이 아니다") };
     assert_eq!((tick.price.centi(), tick.qty), (7_120_000, Volume(15)));
-    assert_eq!((tick.side, tick.strength_centi), (None, None), "읽지 못한 필드는 비어 있다");
+    assert_eq!((tick.side, tick.strength_centi, tick.same_time_ratio_centi), (None, None, None), "읽지 못한 필드는 비어 있다");
     assert_eq!(tick.day.unwrap().cumulative, Volume(1200));
 
     peer.say("0|H0STCNT0|001|005930^093001");

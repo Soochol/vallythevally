@@ -288,6 +288,9 @@ pub struct FeedTrade {
     pub qty: i64,
     pub venue: Option<Venue>,
     pub strength: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub same_time_ratio: Option<f64>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, TS)]
@@ -1012,6 +1015,7 @@ pub struct Fundamentals {
     pub bps: Option<i64>,
     /// %. 외국인 보유 한도 대비 보유 비율.
     pub foreign_exhaustion_rate: Option<f64>,
+    pub credit_rate: Option<f64>,
     /// 최근 250관측일 최고가(원).
     #[ts(type = "number | null")]
     pub high52w: Option<u64>,
@@ -2665,7 +2669,7 @@ mod tests {
             (ServerMessage::SubError { sub: "c0".into(), code: SubErrorCode::RealtimeLimit }, json!({"type": "sub_error", "sub": "c0", "code": "realtime_limit"})),
             (ServerMessage::FeedSubscribed { sub: "f0".into(), kind: FeedKind::Brokers }, json!({"type": "feed_subscribed", "sub": "f0", "kind": "brokers"})),
             (
-                ServerMessage::FeedTrades { sub: "f0".into(), seq: 3, trades: vec![FeedTrade { t: UnixSeconds(5), price: 71_100.0, qty: -7, venue: Some(Venue::Nxt), strength: None }] },
+                ServerMessage::FeedTrades { sub: "f0".into(), seq: 3, trades: vec![FeedTrade { t: UnixSeconds(5), price: 71_100.0, qty: -7, venue: Some(Venue::Nxt), strength: None, same_time_ratio: None }] },
                 json!({"type": "feed_trades", "sub": "f0", "seq": 3, "trades": [{"t": 5, "price": 71100.0, "qty": -7, "venue": "nxt", "strength": null}]}),
             ),
             (ServerMessage::FeedLink { sub: "f0".into(), live: false, at: UnixSeconds(9) }, json!({"type": "feed_link", "sub": "f0", "live": false, "at": 9})),
