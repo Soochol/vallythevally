@@ -1,8 +1,7 @@
-import { type RefObject, useEffect, useRef, useState } from "react";
+import { type RefObject, useRef } from "react";
 import type { TradingOpenOrder } from "../../api/generated/TradingOpenOrder";
 import { Popover } from "../overlay/Popover";
 import { menuIndex, type Placement } from "../overlay/position";
-import { CANCEL_CONFIRM_MS, type ConfirmCheck } from "./orderRules";
 import type { OrderDrag } from "./useOrderDrag";
 
 export type OrderListItem =
@@ -10,13 +9,7 @@ export type OrderListItem =
   | { kind: "separator" }
   | { kind: "order"; label: string; order: TradingOpenOrder; disabled: boolean; onSelect(): void }
   | { kind: "cancelRow"; label: string; order: TradingOpenOrder; disabled: boolean; onSelect(): void }
-  | { kind: "action"; label: string; danger?: boolean; disabled: boolean; check?: () => ConfirmCheck; onSelect(): void };
-
-interface Armed {
-  readonly label: string;
-  readonly text: string;
-  readonly target: string;
-}
+  | { kind: "action"; label: string; danger?: boolean; disabled: boolean; onSelect(): void };
 
 interface Props {
   label: string;
@@ -35,12 +28,6 @@ export function OrderList({ label, items, drag, root, point, placement, onClose 
   const focusTarget = useRef<HTMLElement | null>(point ? (document.activeElement instanceof HTMLElement ? document.activeElement : null) : trigger.current);
   const buttons = useRef<(HTMLButtonElement | null)[]>([]);
   const typed = useRef({ text: "", at: 0 });
-  const [armed, setArmed] = useState<Armed | null>(null);
-  useEffect(() => {
-    if (armed === null) return;
-    const timer = setTimeout(() => setArmed(null), CANCEL_CONFIRM_MS);
-    return () => clearTimeout(timer);
-  }, [armed]);
 
   const onKeyDown = (e: React.KeyboardEvent) => {
     e.stopPropagation();
@@ -58,15 +45,6 @@ export function OrderList({ label, items, drag, root, point, placement, onClose 
     }
   };
 
-  const choose = (label: string, check: (() => ConfirmCheck) | undefined, pick: () => void) => {
-    const result = check?.();
-    if (result === undefined || result.kind === "refused") return pick();
-    const armedHere = armed !== null && armed.label === label;
-    if (armedHere && armed.target === result.target) return pick();
-    if (result.confirm === null) return armedHere ? setArmed(null) : pick();
-    setArmed({ label, text: result.confirm, target: result.target });
-  };
-
   buttons.current = [];
   const register = (el: HTMLButtonElement | null) => { buttons.current.push(el); };
   return (
@@ -77,10 +55,8 @@ export function OrderList({ label, items, drag, root, point, placement, onClose 
         if (item.kind === "heading") return <div key={i} role="presentation" className="px-2 pb-0.5 pt-1 text-xs text-text-3">{item.label}</div>;
         const pick = () => { item.onSelect(); onClose(); };
         if (item.kind === "action") {
-          const shownArm = armed !== null && armed.label === item.label ? armed : null;
-          return <button key={i} ref={register} type="button" role="menuitem" disabled={item.disabled} data-armed={shownArm ? "" : undefined} className={`${ITEM_CLASS} ${item.danger ? "text-danger" : ""}`}
-            onClick={() => choose(item.label, item.check, pick)}>
-            <span className="group-disabled:opacity-40">{shownArm ? shownArm.text : item.label}</span>
+          return <button key={i} ref={register} type="button" role="menuitem" disabled={item.disabled} className={`${ITEM_CLASS} ${item.danger ? "text-danger" : ""}`} onClick={pick}>
+            <span className="group-disabled:opacity-40">{item.label}</span>
           </button>;
         }
         if (item.kind === "cancelRow") {

@@ -56,7 +56,6 @@
 .od-list-cancel { height:var(--size-24); min-width:var(--size-48); padding:0 var(--s3); border:var(--size-1) solid color-mix(in srgb, var(--danger) 45%, transparent); border-radius:var(--r-s); background:var(--danger-soft); color:var(--danger); font-size:var(--fs-xs); font-weight:600; }
 .od-list-cancel:hover:not(:disabled) { background:color-mix(in srgb, var(--danger) 24%, transparent); }
 .od-list-cancel:disabled { border-color:var(--line); background:transparent; color:var(--text-3); cursor:not-allowed; }
-[role=menuitem][data-armed] { background:var(--danger-soft); font-weight:700; }
 .od-total[data-empty] { opacity:.45; }
 .od-list-empty { margin:0; color:var(--text-3); }
 
@@ -80,7 +79,6 @@
 .od-status[data-tone=error] .od-status-icon, .od-status[data-tone=error] .od-status-text { color:var(--danger); }
 .od-status[data-tone=warn] .od-status-icon, .od-status[data-tone=warn] .od-status-text { color:var(--warning); }
 .od-status-text { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-.od-status-confirm { flex:1; min-width:0; height:var(--size-18); padding:0 var(--s4); border:var(--size-1) solid color-mix(in srgb, var(--danger) 45%, transparent); border-radius:var(--r-s); background:var(--danger-soft); color:var(--danger); font-size:var(--fs-s); font-weight:700; text-align:left; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .od-status-button { flex:none; height:var(--size-18); padding:0 var(--s3); border-radius:var(--r-s); background:var(--raised); color:var(--text); font-size:var(--fs-xs); font-weight:600; }
 .od-status-button:hover { background:var(--hover); }
 .od-queue { color:var(--text-3); }

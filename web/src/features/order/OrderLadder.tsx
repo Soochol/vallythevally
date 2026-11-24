@@ -5,7 +5,7 @@ import { useStoreValue, type ValueStore } from "../../lib/valueStore";
 import type { LadderRow } from "../market-window/ladder";
 import { ladderColumns, type LadderRowSlots, PriceLadder } from "../market-window/PriceLadder";
 import { formatShares } from "../market-window/format";
-import { type BuyingPower, buyPreview, type CancelPlan, cancelCheckOf, groupKey, type PriceGroup, type PriceKey, previewText, SIDE_LABEL } from "./orderRules";
+import { type BuyingPower, buyPreview, groupKey, type PriceGroup, type PriceKey, previewText, SIDE_LABEL } from "./orderRules";
 import { PENDING_CHIP_TEXT, PENDING_TEXT } from "./statusText";
 import { LADDER_ROW_HEIGHT_PX, type RowRange, scrollTopToCenter, visibleRowRange } from "./priceRange";
 import { OrderList, type OrderListItem } from "./OrderList";
@@ -21,7 +21,6 @@ export interface LadderActions {
   place(side: OrderSide, price: number): void;
   cancelOne(orderNo: string): void;
   cancelGroups(keys: readonly PriceKey[]): void;
-  planCancel(keys: readonly PriceKey[]): CancelPlan;
 }
 
 interface Props {
@@ -236,11 +235,11 @@ export function OrderLadder({ rows, previousClose, groups, writable, previewQuan
         { kind: "heading", label: `${formatPrice(group.price, false)}원 ${SIDE_LABEL[group.side]} 주문` },
         ...orders.map((order): OrderListItem => ({ kind: "order", label: `${order.openQuantity.toLocaleString("ko-KR")} 취소`, order, disabled: !writable, onSelect: () => actions.cancelOne(order.orderNo) })),
         { kind: "separator" },
-        { kind: "action", label: "이 가격 모두 취소", danger: true, disabled: !writable || orders.length === 0, check: () => cancelCheckOf("이 가격", actions.planCancel(keys)), onSelect: () => actions.cancelGroups(keys) },
+        { kind: "action", label: "이 가격 모두 취소", danger: true, disabled: !writable || orders.length === 0, onSelect: () => actions.cancelGroups(keys) },
       ];
     }
     const side = (s: OrderSide) => all.filter((g) => g.side === s);
-    const entry = (prefix: string, targets: readonly PriceGroup[]): OrderListItem => ({ kind: "action", label: `${prefix} 모두 취소`, danger: true, disabled: !writable || targets.length === 0, check: () => cancelCheckOf(prefix, actions.planCancel(targets)), onSelect: () => actions.cancelGroups(targets) });
+    const entry = (prefix: string, targets: readonly PriceGroup[]): OrderListItem => ({ kind: "action", label: `${prefix} 모두 취소`, danger: true, disabled: !writable || targets.length === 0, onSelect: () => actions.cancelGroups(targets) });
     return [entry("매수", side("buy")), entry("매도", side("sell")), entry("전체", all)];
   };
 

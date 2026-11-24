@@ -134,7 +134,6 @@ test("일괄 취소에서 일부가 거절되면 그 주문만 칩에 남는다"
   const batch = holdWrite(scenario, "cancel-batch");
   await chipAt(page, "buy", BASE).click({ button: "right" });
   await page.getByRole("menuitem", { name: "이 가격 모두 취소" }).click();
-  await page.getByRole("menuitem", { name: "이 가격 2건 취소 · 한 번 더 누르기" }).click();
   await batch.received;
   await expect(chipAt(page, "buy", BASE)).toHaveAttribute("data-pending", "canceling");
   batch.reply({ body: { accountRef: ACCOUNT, blocked: false, commands: [

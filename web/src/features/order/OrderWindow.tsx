@@ -37,10 +37,9 @@ import { DragGhost } from "./DragGhost";
 import { type HoverCell, type LadderActions, OrderLadder } from "./OrderLadder";
 import { orderEntryKey } from "./orderEntries";
 import { OrderTotals } from "./OrderTotals";
-import { type CancelConfirm, OrderStatusBar } from "./OrderStatusBar";
+import { OrderStatusBar } from "./OrderStatusBar";
 import { CANCEL_REFUSAL, REJECT_TEXT } from "./statusText";
-import { buyBlock, CANCEL_CONFIRM_MS, cancelConfirmText, capacityProblem, type DragOutcome, marginOf, modifyBuyProblem, type DragSource, needsCancelConfirm, needsHighValueConfirm, orderAmount, planCancel, type PriceGroup, type PriceKey, SIDE_LABEL, sendingAt, targetSignature, typedQuantity } from "./orderRules";
-import type { PendingWrite } from "./pendingWrites";
+import { buyBlock, capacityProblem, type DragOutcome, marginOf, modifyBuyProblem, type DragSource, needsHighValueConfirm, orderAmount, planCancel, type PriceKey, typedQuantity } from "./orderRules";
 import { type PresetKind, routeLabel } from "./orderSettings";
 import { withDirectionJosa } from "./josa";
 import { pendingWrites } from "./pendingWrites";
@@ -75,7 +74,6 @@ function OrderBody({ id, code, infoPager, choice, access, balance }: { id: Windo
   const [input, setInput] = useState(kept === null ? "10" : String(kept.quantity));
   const [hover] = useState(() => createValueStore<HoverCell | null>(null));
   const [confirm, setConfirm] = useState<HighValueRequest | null>(null);
-  const [cancelConfirm, setCancelConfirm] = useState<CancelConfirm | null>(null);
   const [exploring, setExploring] = useState(false);
   const ladder = useRef<HTMLDivElement>(null);
   const drag = useOrderDrag(ladder, (source, outcome) => drop(source, outcome));
@@ -89,12 +87,6 @@ function OrderBody({ id, code, infoPager, choice, access, balance }: { id: Windo
   const limits = useFundamentals(code).data;
   const symbolInfo = useSymbolInfo(code).data;
   const nxtNotTraded = orderVenue === "nxt" && symbolInfo?.nxtEnabled === false;
-
-  useEffect(() => {
-    if (cancelConfirm === null) return;
-    const timer = setTimeout(() => setCancelConfirm(null), CANCEL_CONFIRM_MS);
-    return () => clearTimeout(timer);
-  }, [cancelConfirm]);
 
   useEffect(() => {
     const timer = setInterval(() => setNow(Date.now()), CLOCK_MS);
@@ -120,16 +112,6 @@ function OrderBody({ id, code, infoPager, choice, access, balance }: { id: Windo
   const data = useOrderData(accountRef, code, access.open, referencePrice, balance);
 
   const pending = useSyncExternalStore(pendingWrites.subscribe, pendingWrites.snapshot);
-  const isStale = (shown: CancelConfirm, writesNow: readonly PendingWrite[]): boolean =>
-    shown.account !== accountRef || targetSignature(data.groups, shown.targets) !== shown.signature || sendingAt(writesNow, code, shown.targets);
-  const cancelConfirmStale = cancelConfirm !== null && isStale(cancelConfirm, pending);
-  useEffect(() => {
-    if (cancelConfirmStale) setCancelConfirm(null);
-  }, [cancelConfirmStale]);
-  const confirmCancel = useStableCallback(() => {
-    setCancelConfirm(null);
-    if (cancelConfirm !== null && !isStale(cancelConfirm, pendingWrites.snapshot())) cancelConfirm.run();
-  });
   const writes = useOrderWrites(choice.current, code, orderVenue, id);
   const fellBack = choice.fellBack;
   useEffect(() => {
@@ -200,36 +182,21 @@ function OrderBody({ id, code, infoPager, choice, access, balance }: { id: Windo
     else run();
   };
 
-  const currentCancelPlan = (keys: readonly PriceKey[]) => planCancel(data.groups, pendingWrites.snapshot(), code, keys);
-
-  const cancelTargets = (targets: readonly PriceGroup[]) => targets.forEach((group) => writes.cancelAtPrice(group.side, group.price));
-
   const cancelChecked = (keys: readonly PriceKey[]) => {
-    const plan = currentCancelPlan(keys);
-    if (plan.kind === "ready") cancelTargets(plan.targets);
+    const plan = planCancel(data.groups, pendingWrites.snapshot(), code, keys);
+    if (plan.kind === "ready") plan.targets.forEach((group) => writes.cancelAtPrice(group.side, group.price));
     else writes.say(CANCEL_REFUSAL[plan.kind]);
-  };
-
-  const cancelMany = (side: OrderSide, keys: readonly PriceKey[]) => {
-    const plan = currentCancelPlan(keys);
-    if (plan.kind !== "ready") {
-      writes.say(CANCEL_REFUSAL[plan.kind]);
-      return;
-    }
-    const run = () => cancelTargets(plan.targets);
-    if (needsCancelConfirm(plan.orderCount)) setCancelConfirm({ text: `${SIDE_LABEL[side]} ${cancelConfirmText(plan.orderCount)}`, account: accountRef, targets: plan.targets, signature: plan.signature, run });
-    else run();
   };
 
   const drop = (source: DragSource, outcome: DragOutcome) => {
     if (outcome.kind === "abort") return;
     if (source.kind === "chip") {
-      if (outcome.kind === "cancel") cancelMany(source.group.side, [source.group]);
+      if (outcome.kind === "cancel") cancelChecked([source.group]);
       else modifyOrders(source.group.side, source.group.price, source.group.orders, outcome.price);
     } else if (source.kind === "order") {
       if (outcome.kind === "cancel") writes.cancelOne(source.order.orderNo);
       else modifyOrders(source.order.side, source.order.price, [source.order], outcome.price);
-    } else cancelMany(source.side, source.groups);
+    } else cancelChecked(source.groups);
   };
 
   const pickAccount = useStableCallback((account: string) => setSettings({ ...settings, account }));
@@ -238,9 +205,8 @@ function OrderBody({ id, code, infoPager, choice, access, balance }: { id: Windo
   const placeOrder = useStableCallback(place);
   const cancelOne = useStableCallback(writes.cancelOne);
   const cancelGroups = useStableCallback(cancelChecked);
-  const planCancelNow = useStableCallback(currentCancelPlan);
-  const ladderActions = useMemo<LadderActions>(() => ({ place: placeOrder, cancelOne, cancelGroups, planCancel: planCancelNow }), []);
-  const totalsActions = useMemo(() => ({ cancelOne, cancelGroups, planCancel: planCancelNow }), []);
+  const ladderActions = useMemo<LadderActions>(() => ({ place: placeOrder, cancelOne, cancelGroups }), []);
+  const totalsActions = useMemo(() => ({ cancelOne, cancelGroups }), []);
   const sellOrdered = sellOrderQuantity(data.groups, pending, code, data.openOrdersListedAt);
 
   return (
@@ -268,7 +234,7 @@ function OrderBody({ id, code, infoPager, choice, access, balance }: { id: Windo
         <RatioBar buy={totals.bid ?? 0} sell={totals.ask ?? 0} sellFirst label={totals.description ?? "총잔량 매도·매수 비율"} />
         <TotalFigure testId="order-total-bid" tone="up" value={totals.bid} afterHours={totals.source === "afterHours"} description={totals.description} hideAfterHoursTag />
       </Strip>
-      <OrderStatusBar status={writes.status} queued={writes.queued} blocked={data.blocked} confirm={cancelConfirmStale ? null : cancelConfirm} onConfirm={confirmCancel} onUndo={writes.cancelOne} onReconcile={writes.reconcile} onDismiss={writes.dismiss} />
+      <OrderStatusBar status={writes.status} queued={writes.queued} blocked={data.blocked} onUndo={writes.cancelOne} onReconcile={writes.reconcile} onDismiss={writes.dismiss} />
       <DragGhost drag={drag} />
       {confirm && <HighValueConfirm request={confirm} onClose={() => setConfirm(null)} />}
     </div>
