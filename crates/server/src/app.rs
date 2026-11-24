@@ -419,11 +419,15 @@ pub async fn start_with(config: &Config, lock: &InstanceLock, adapters: Adapters
         state.book_replay.enable(dir.clone());
         state.quote_minutes.set_fallback_dir(dir.join("shared"));
         state.collected.enable(dir.clone());
+        tracing::info!(path = %dir.display(), "수집 호가 데이터 폴더를 연결했습니다");
+    } else if config.shared_data.is_none() {
+        tracing::info!("VALLY_HOGA_DATA_DIR과 VALLY_SHARED_DATA_DIR이 없어 분 호가·호가 복기·수집 거래원을 끕니다");
     }
     if let Some(shared) = &config.shared_data {
         state.collected.use_shared_dir(shared.dir.clone());
         state.screener.read_shared_snapshots(state.shared_data.clone(), config.screener_snapshot_stale_limit);
         state.screener.keep_calendar_fresh();
+        tracing::info!(path = %shared.dir.display(), "공용 자료 폴더를 연결했습니다");
     }
     crate::market_overview::start(state.clone(), config.market_samples_dir.clone());
     crate::etf::start_collection(state.clone(), config.etf_pdf_dir.clone(), config.naver_base_url.clone());
