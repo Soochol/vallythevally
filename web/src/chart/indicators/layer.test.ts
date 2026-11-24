@@ -11,7 +11,8 @@ import type { IndicatorConfig, Panel } from "../settings";
 import type { ThemeTokens } from "../theme";
 import { toChartTime } from "../time";
 import type { PortListener } from "./client";
-import { formatVolume } from "../../lib/format";
+import { formatPrice, formatVolume } from "../../lib/format";
+import type { QuoteDepthPoint } from "../../api/generated/QuoteDepthPoint";
 import type { QuoteTotalPoint } from "../../api/generated/QuoteTotalPoint";
 import type { QuoteState, QuoteView } from "../quotes/feed";
 import { specLines } from "./kinds";
@@ -939,4 +940,48 @@ test("총잔량 범례는 값과 수집하지 않는 종목을 알린다", () =>
   expect(row().values.map((v) => v.text)).toEqual(["수집하지 않는 종목"]);
   f.layer.setQuoteTotals(totalsView({}, "failed"));
   expect(row().values.map((v) => v.text)).toEqual(["호가 자료 조회 실패"]);
+});
+
+const DEPTH: IndicatorConfig = { id: "heat", spec: { kind: "quoteDepth", source: "priceMax", topLevels: null, maxOpacity: 0.7, aboveBars: false, askColor: null, bidColor: null }, panel: "price", visible: true, style: { colors: ["ind-1"], width: 1 } };
+
+function depthView(points: Record<number, Pick<QuoteDepthPoint, "asks" | "bids">>, state: QuoteState = "ready"): QuoteView<QuoteDepthPoint> {
+  const known = new Map(Object.entries(points).map(([minute, sides]) => [at(Number(minute)), { t: at(Number(minute)), ...sides }]));
+  return { state, at: (t) => known.get(t) };
+}
+
+test("히트맵 범례는 가장 두꺼운 매도·매수 단을 알린다", () => {
+  const f = fixture("1m", [DEPTH], []);
+  f.layer.reset({ bars: range(0, 5).map((m) => bar(m)), current: null, nextBefore: null });
+  const row = () => f.layer.rows(at(3)).find((r) => r.id === "heat")!;
+  const show = (view: QuoteView<QuoteDepthPoint>) => f.layer.setQuoteDepths(new Map([["heat", view]]));
+  show(depthView({}, "loading"));
+  expect(row().state).toBe("pending");
+  show(depthView({ 3: { asks: [[193_300, 9_000], [193_400, 9_000], [193_500, 10]], bids: [[193_200, 5], [193_100, 12_345]] } }));
+  expect(row()).toMatchObject({ name: "호가 잔량 히트맵", state: "ok", panel: null });
+  expect(row().values).toEqual([
+    { text: `${formatPrice(193_300, false)} ${formatVolume(9_000)}`, color: TOKENS.down },
+    { text: `${formatPrice(193_100, false)} ${formatVolume(12_345)}`, color: TOKENS.up },
+  ]);
+  show(depthView({}));
+  expect(row().values.map((v) => v.text)).toEqual(["—", "—"]);
+  show(depthView({}, "notCollected"));
+  expect(row().values.map((v) => v.text)).toEqual(["수집하지 않는 종목"]);
+  show(depthView({}, "failed"));
+  expect(row().values.map((v) => v.text)).toEqual(["호가 자료 조회 실패"]);
+
+  const teal = normalizeHex("#4FC7B8")!;
+  f.layer.setConfigs([{ ...DEPTH, spec: { ...DEPTH.spec, askColor: teal } as IndicatorConfig["spec"] }], []);
+  show(depthView({ 3: { asks: [[193_300, 1]], bids: [] } }));
+  expect(row().values).toEqual([{ text: `${formatPrice(193_300, false)} ${formatVolume(1)}`, color: teal }, { text: "—", color: TOKENS.up }]);
+});
+
+test("히트맵은 선을 만들지 않고 설정을 바꿔도 다른 선을 다시 만들지 않는다", () => {
+  const f = fixture("1m", [ICHIMOKU, DEPTH], []);
+  f.layer.reset({ bars: CONFIRMED, current: null, nextBefore: null });
+  expect(f.series).toHaveLength(LINES.length);
+  for (const maxOpacity of [0.5, 0.3, 0.9]) f.layer.setConfigs([ICHIMOKU, { ...DEPTH, spec: { ...DEPTH.spec, maxOpacity } as IndicatorConfig["spec"] }], []);
+  f.layer.setConfigs([ICHIMOKU, { ...DEPTH, visible: false }], []);
+  expect(f.series).toHaveLength(LINES.length);
+  expect(f.active).toHaveLength(LINES.length);
+  expect(f.sent.filter((m) => m.type === "create").every((m) => m.type === "create" && m.engines.every((engine) => engine.id === "ichi"))).toBe(true);
 });

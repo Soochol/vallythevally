@@ -83,3 +83,13 @@ test("총잔량은 분봉에서만 그리고 지수에서는 숨긴다", () => {
   }
   expect(settings.indicators).toEqual([totals, ma]);
 });
+
+test("히트맵도 분봉 주식에서만 그린다", () => {
+  const heat = config("heat", { kind: "quoteDepth", source: "priceMax", topLevels: null, maxOpacity: 0.7, aboveBars: false, askColor: null, bidColor: null }, "price");
+  const settings = settingsOf({ indicators: [heat, ma] });
+  for (const period of ["1m", "5m", "60m"] as const) {
+    expect(chartIndicators(settings, period)).toEqual([heat, ma]);
+    expect(chartIndicators(settings, period, false)).toEqual([ma]);
+  }
+  for (const period of ["D", "W", "M", "Q", "Y"] as const) expect(chartIndicators(settings, period)).toEqual([ma]);
+});

@@ -158,3 +158,16 @@ test("테마 색은 토큰 그대로, 표에서 고른 색은 HEX 그대로 초�
   expect(colorsFrom(ma, "ind-3")).toEqual(["ind-3"]);
   expect(colorsFrom(ma, "#4A7FE0" as HexColor)).toEqual(["#4A7FE0"]);
 });
+
+test("히트맵 설정 양식은 값을 그대로 오간다", () => {
+  const spec = { kind: "quoteDepth", source: "close", topLevels: 5, maxOpacity: 0.35, aboveBars: true, askColor: "#4FC7B8" as HexColor, bidColor: null } as const;
+  const form = formFromSpec(spec);
+  expect(form.text).toMatchObject({ source: "close", topLevels: "5", maxOpacity: "35", aboveBars: "true", askColor: "#4FC7B8", bidColor: "" });
+  expect(form.enabled).toEqual({ topLevels: true });
+  expect(checkForm(form, null).spec).toEqual(spec);
+  const off = { ...form, enabled: { topLevels: false } };
+  expect(checkForm(off, null).spec).toMatchObject({ topLevels: null });
+  expect(checkForm({ ...form, text: { ...form.text, topLevels: "6" } }, null).errors.map((error) => error.field)).toEqual(["topLevels"]);
+  expect(checkForm({ ...form, text: { ...form.text, maxOpacity: "101" } }, null).errors.map((error) => error.field)).toEqual(["maxOpacity"]);
+  expect(checkForm({ ...form, text: { ...form.text, maxOpacity: "19" } }, null).errors.map((error) => error.field)).toEqual(["maxOpacity"]);
+});

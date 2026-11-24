@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { colorsFrom, firstUnusedColor, isFinancial, isQuote, isTechnical, KIND_ORDER, KINDS, lineColor, colorLine, placementsOf, shownColor, specLines, specName } from "./kinds";
+import { colorsFrom, firstUnusedColor, isFinancial, isQuote, isQuoteDepth, isQuoteTotals, isTechnical, KIND_ORDER, KINDS, lineColor, colorLine, placementsOf, shownColor, specLines, specName } from "./kinds";
 
 test("기본값은 backend.md §9.5 표를 따른다", () => {
   expect(KIND_ORDER.map((k) => KINDS[k].defaults)).toEqual([
@@ -11,9 +11,10 @@ test("기본값은 backend.md §9.5 표를 따른다", () => {
     { kind: "macd", fast: 12, slow: 26, signal: 9 },
     { kind: "stochSlow", k: 5, d: 3, smooth: 3 },
     { kind: "quoteTotals" },
+    { kind: "quoteDepth", source: "priceMax", topLevels: null, maxOpacity: 0.7, aboveBars: false, askColor: null, bidColor: null },
     ...["revenue", "operating_income", "owner_roe", "investing_cash_flow", "dps", "debt_ratio"].map((kind) => ({ kind })),
   ]);
-  expect(KIND_ORDER.filter((k) => KINDS[k].place === "price")).toEqual(["ma", "bollinger", "ichimoku"]);
+  expect(KIND_ORDER.filter((k) => KINDS[k].place === "price")).toEqual(["ma", "bollinger", "ichimoku", "quoteDepth"]);
 });
 
 test("이름에 설정값을 붙인다", () => {
@@ -49,4 +50,25 @@ test("총잔량은 호가지표이고 선 둘을 아래 패널에 그린다", ()
   expect(placementsOf("quoteTotals")).toEqual(["panel"]);
   expect([isQuote(spec), isTechnical(spec), isFinancial(spec)]).toEqual([true, false, false]);
   expect([isQuote({ kind: "dps" }), isTechnical({ kind: "dps" }), isTechnical({ kind: "volume", maPeriod: null })]).toEqual([false, false, true]);
+});
+
+test("히트맵은 가격 패널의 호가지표다", () => {
+  const spec = KINDS.quoteDepth.defaults;
+  expect(KINDS.quoteDepth.label).toBe("호가 잔량 히트맵");
+  expect(specName(spec)).toBe("호가 잔량 히트맵");
+  expect(spec).toEqual({ kind: "quoteDepth", source: "priceMax", topLevels: null, maxOpacity: 0.7, aboveBars: false, askColor: null, bidColor: null });
+  expect(specLines(spec)).toEqual([]);
+  expect(colorLine(spec)).toBeNull();
+  expect(placementsOf("quoteDepth")).toEqual(["price"]);
+  expect([isQuote(spec), isQuoteDepth(spec), isQuoteTotals(spec), isTechnical(spec)]).toEqual([true, true, false, false]);
+  expect([isQuoteDepth({ kind: "quoteTotals" }), isQuoteTotals({ kind: "quoteTotals" })]).toEqual([false, true]);
+  expect(KINDS.quoteDepth.fields.map((field) => [field.key, field.label, field.type])).toEqual([
+    ["source", "잔량 기준", "choice"],
+    ["topLevels", "가격대 수", "optionalInt"],
+    ["maxOpacity", "최대 불투명도", "percent"],
+    ["aboveBars", "봉 앞에 그리기", "flag"],
+    ["askColor", "매도 색", "color"],
+    ["bidColor", "매수 색", "color"],
+  ]);
+  expect(KINDS.quoteDepth.fields[0]).toMatchObject({ options: [["priceMax", "가격대마다 최댓값"], ["peak", "총잔량 최대 순간"], ["close", "종가 호가"]] });
 });
