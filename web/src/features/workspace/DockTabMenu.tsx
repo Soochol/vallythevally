@@ -5,6 +5,7 @@ import { groupOfWindow, listGroups } from "../../layout/dock/tree";
 import { allowsMany, MAX_WINDOWS } from "../../layout/kinds";
 import type { DockPlacement } from "../../layout/placement";
 import { chartNumber, chartWindows, useLayoutStore, windowName } from "../../stores/layout";
+import { touchWindow } from "../../stores/activeWindow";
 import { Menu, type MenuItem } from "../menu/Menu";
 import { closeWindow, LAST_CHART_REASON, WINDOW_LIMIT_REASON } from "./manage";
 import { EDGE_LABEL, type DockCommand } from "./dockCommands";
@@ -37,7 +38,10 @@ export function DockTabMenu({ interaction, dock, root, maximized, onToggleMaximi
     items.push({ kind: "separator" }, { kind: "action", label: "복제", disabled: full, disabledReason: full ? WINDOW_LIMIT_REASON : undefined, onSelect: () => {
       acted.current = true;
       const copy = useLayoutStore.getState().duplicateWindow(window.id);
-      if (copy) focusTab(copy);
+      if (copy) {
+        touchWindow(copy);
+        focusTab(copy);
+      }
     } });
   }
   if (source.tabs.length > 1) {

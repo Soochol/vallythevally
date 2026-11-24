@@ -34,6 +34,7 @@ import { columnTemplate, fitColumns, type WatchVariant } from "./columns";
 import { GroupHead, type HeadDrop, REFUSAL_NOTE, UngroupedHead } from "./GroupHead";
 import { type GroupNaming, setCollapsed, startGroup } from "./groupActions";
 import { type RowDrag, WatchRow } from "./WatchRow";
+import { createRowPreviewStore, useWatchKeys } from "./watchKeys";
 import { useFitted } from "../list/useFitted";
 import { useBeforeConnect } from "../status/beforeConnect";
 
@@ -266,9 +267,11 @@ function WatchList({ variant, sender, editing, naming, onNaming, columns }: Watc
   const [slotHover, setSlotHover] = useState<"move" | "copy" | null>(null);
   const scroller = useRef<HTMLElement>(null);
   const [focusRow, setFocusRow] = useState<WatchRowRef | null>(null);
+  const preview = useMemo(() => createRowPreviewStore(), []);
   const template = useMemo(() => ({ gridTemplateColumns: columnTemplate(variant, columns) }), [variant, columns]);
   const sections = watchSections(list);
 
+  useWatchKeys({ enabled: variant === "desktop" && sender !== null && onScreen, sender, list, collapsed, scroller, preview });
   useEffect(() => (onScreen ? quoteBook.lease(symbols) : undefined), [onScreen, symbols]);
 
   useEffect(() => {
@@ -407,6 +410,7 @@ function WatchList({ variant, sender, editing, naming, onNaming, columns }: Watc
           template={template}
           variant={variant}
           sender={sender}
+          preview={variant === "desktop" ? preview : null}
           editing={editing}
           dropBefore={sameSection ? here : joins}
           dragging={dragged !== null && dragged.code === code && dragged.groupId === sectionId}
