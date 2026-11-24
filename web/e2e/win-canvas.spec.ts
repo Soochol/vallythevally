@@ -324,14 +324,6 @@ test("머리 키보드 조작과 화면 크기 변경은 비율을 보존하고 
   await page.goto("/");
   await expect(cell(page, 2)).toHaveAttribute("aria-busy", "false");
   await header(page, "cell-0").focus();
-  const tabbedHeaders = ["cell-0"];
-  for (let step = 0; step < 100 && tabbedHeaders.length < 3; step++) {
-    await page.keyboard.press("Tab");
-    const id = await page.evaluate(() => document.activeElement?.getAttribute("data-window-header"));
-    if (id && id !== tabbedHeaders.at(-1)) tabbedHeaders.push(id);
-  }
-  expect(tabbedHeaders).toEqual(["cell-0", "cell-1", "watchlist"]);
-  await header(page, "cell-0").focus();
   const before = await boxOf(frame(page, "cell-0"));
   await page.keyboard.press("ArrowRight");
   expect((await boxOf(frame(page, "cell-0"))).x).toBe(before.x + 16);

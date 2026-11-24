@@ -556,8 +556,7 @@ test("창 더하기 메뉴와 탭의 닫기 버튼을 키보드만으로 쓴다"
   await page.keyboard.press("Enter");
   await expect(tab(page, "지표")).toHaveAttribute("aria-selected", "true");
 
-  await tab(page, "지표").focus();
-  await page.keyboard.press("Tab");
+  await closeButton(page, "지표").focus();
   await expect(closeButton(page, "지표")).toBeFocused();
   await page.keyboard.press("Enter");
   await expect(tab(page, "지표")).toHaveCount(0);

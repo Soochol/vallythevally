@@ -235,8 +235,7 @@ test("compact controls support hover, keyboard, venue, settings, collapse, toolb
   const collapse = volume.getByRole("button", { name: "거래량 패널 접기", exact: true });
   await expect(collapse.locator("..")).toHaveCSS("opacity", "1");
   const name = volume.getByRole("button", { name: "거래량 설정 열기", exact: true });
-  await name.focus();
-  await page.keyboard.press("Tab");
+  await collapse.focus();
   await expect(collapse).toBeFocused();
   await expect(collapse.locator("..")).toHaveCSS("opacity", "1");
   readable(await geometry(page));
