@@ -15,9 +15,9 @@ const shown = (page: InfoPage, flipped?: ReadonlySet<InfoKey>) => labels(quoteIn
 
 test("정보란 1쪽과 2쪽에는 당일 범위·전일대비·52주 범위·PER·PBR·외국인소진율 칸이 없다", () => {
   expect(shown(0)).toEqual(["시가", "고가", "저가", "기준가", "거래량", "거래대금"]);
-  expect(shown(1)).toEqual(["상한가", "하한가", "시가총액"]);
+  expect(shown(1)).toEqual(["상한가", "하한가", "상승VI", "하락VI", "시가총액"]);
   expect(shown(0, new Set(KEYS))).toEqual(["시가 등락", "고가 등락", "저가 등락", "평균가", "동시간비", "회전율"]);
-  expect(shown(1, new Set(KEYS))).toEqual(["상한까지", "하한까지", "상장주식"]);
+  expect(shown(1, new Set(KEYS))).toEqual(["상한까지", "하한까지", "상승VI", "하락VI", "상장주식"]);
 });
 
 function rowsWithBidAt(...askRows: number[]) {

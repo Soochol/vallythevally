@@ -862,6 +862,7 @@ test("상세 정보 카드가 사다리 1~10행 자리에 있고 시세 쪽에 �
 });
 
 test("종목 탭을 누르면 상·하한가·시가총액이 보이고 시세 탭으로 돌아온다", async ({ page, scenario }) => {
+  await page.clock.setFixedTime(new Date(scenario.now));
   ordersOn(scenario);
   tradingApi(scenario);
   await openOrderWindow(page, scenario);
@@ -879,7 +880,7 @@ test("종목 탭을 누르면 상·하한가·시가총액이 보이고 시세 �
   await expect(infoLabels(page)).toHaveText(INFO_PAGE_2);
   await expect(infoValues(page)).toHaveText(INFO_PAGE_2_VALUES);
   const rowTops = await tops(ladderRows(page));
-  expect(await tops(page.getByTestId("ladder-info"))).toEqual([0, 1, 2].map((row) => rowTops[row]));
+  expect(await tops(page.getByTestId("ladder-info"))).toEqual([0, 1, 2, 3, 4].map((row) => rowTops[row]));
 
   await infoTab(page, "시세").click();
   await expect(infoLabels(page)).toHaveText(INFO_PAGE_1);
@@ -934,7 +935,7 @@ test("고른 탭은 종목이 바뀌어도 유지된다", async ({ page, scenari
   await expect(win(page)).toHaveAttribute("data-symbol", "000660");
   await expect(infoTab(page, "종목")).toHaveAttribute("aria-selected", "true");
   await expect(infoLabels(page).first()).toHaveText("상한가");
-  await expect(infoLabels(page)).toHaveCount(3);
+  await expect(infoLabels(page)).toHaveCount(5);
   await cell(page, 1).click();
   await expect(win(page)).toHaveAttribute("data-symbol", CODE);
   await expect(infoLabels(page)).toHaveText(INFO_PAGE_2);
