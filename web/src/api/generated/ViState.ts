@@ -2,5 +2,6 @@
 import type { SymbolCode } from "./SymbolCode";
 import type { UnixSeconds } from "./UnixSeconds";
 import type { ViDirection } from "./ViDirection";
+import type { ViMarket } from "./ViMarket";
 
-export type ViState = { symbol: SymbolCode, active: boolean, direction: ViDirection | null, triggerPrice: number | null, base: number | null, triggeredAt: UnixSeconds | null, releasedAt: UnixSeconds | null, };
+export type ViState = { symbol: SymbolCode, market: ViMarket, active: boolean, direction: ViDirection | null, triggerPrice: number | null, base: number | null, triggeredAt: UnixSeconds | null, releasedAt: UnixSeconds | null, };

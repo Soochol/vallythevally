@@ -270,6 +270,23 @@ pub enum ServerMessage {
     ViUpdate { state: ViState },
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum ViMarket {
+    Krx,
+    Nxt,
+}
+
+impl From<crate::market_source::vi::ViMarket> for ViMarket {
+    fn from(market: crate::market_source::vi::ViMarket) -> ViMarket {
+        match market {
+            crate::market_source::vi::ViMarket::Krx => ViMarket::Krx,
+            crate::market_source::vi::ViMarket::Nxt => ViMarket::Nxt,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "snake_case")]
 #[ts(export)]
@@ -292,6 +309,7 @@ impl From<crate::market_source::vi::ViDirection> for ViDirection {
 #[ts(export)]
 pub struct ViState {
     pub symbol: SymbolCode,
+    pub market: ViMarket,
     pub active: bool,
     pub direction: Option<ViDirection>,
     pub trigger_price: Option<f64>,
@@ -2814,6 +2832,7 @@ mod tests {
                 ServerMessage::ViUpdate {
                     state: ViState {
                         symbol: SymbolCode("005930".into()),
+                        market: ViMarket::Krx,
                         active: true,
                         direction: Some(ViDirection::Up),
                         trigger_price: Some(881_000.0),
@@ -2822,7 +2841,7 @@ mod tests {
                         released_at: None,
                     },
                 },
-                json!({"type": "vi_update", "state": {"symbol": "005930", "active": true, "direction": "up", "triggerPrice": 881_000.0, "base": null, "triggeredAt": 4, "releasedAt": null}}),
+                json!({"type": "vi_update", "state": {"symbol": "005930", "market": "krx", "active": true, "direction": "up", "triggerPrice": 881_000.0, "base": null, "triggeredAt": 4, "releasedAt": null}}),
             ),
         ];
         for (msg, want) in cases {

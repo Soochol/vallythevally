@@ -104,7 +104,7 @@ test("한 종목의 시세 프레임은 그 종목의 값 칸만 다시 그리�
 test("한 종목의 VI는 그 종목 줄의 배지만 바꾸고 줄 틀은 그리지 않는다", async ({ page, scenario }) => {
   await openTwentyRows(page, scenario);
   await resetProbe(page);
-  scenario.live.emit({ type: "vi_update", state: { symbol: CODES[7]!, active: true, direction: "up", triggerPrice: 11_800, base: 10_700, triggeredAt: 1794186000, releasedAt: null } });
+  scenario.live.emit({ type: "vi_update", state: { symbol: CODES[7]!, market: "krx", active: true, direction: "up", triggerPrice: 11_800, base: 10_700, triggeredAt: 1794186000, releasedAt: null } });
   await expect(row(page, CODES[7]!).getByTestId("watch-vi")).toBeVisible();
   await settle(page);
   expect(await frames(page)).toHaveLength(0);

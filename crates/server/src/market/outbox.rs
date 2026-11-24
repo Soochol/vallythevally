@@ -10,7 +10,7 @@ use std::sync::{Arc, Mutex};
 use tokio::sync::Notify;
 
 use super::SubId;
-use crate::api::{Bar, FeedBook, FeedTrade, Quote, ServerMessage, Venue, ViState};
+use crate::api::{Bar, FeedBook, FeedTrade, Quote, ServerMessage, Venue, ViMarket, ViState};
 
 pub const MUST_CAPACITY: usize = 256;
 pub const PENDING_TRADES_CAPACITY: usize = 4096;
@@ -35,7 +35,7 @@ struct State {
     pending_trades: usize,
     trade_seq: BTreeMap<String, u64>,
     books: BTreeMap<String, FeedBook>,
-    vi: BTreeMap<String, ViState>,
+    vi: BTreeMap<(String, ViMarket), ViState>,
     closed: bool,
 }
 
@@ -118,7 +118,7 @@ impl Outbox {
     pub fn set_vi(&self, state: ViState) {
         let mut s = self.state.lock().expect("outbox 잠금");
         if !s.closed {
-            s.vi.insert(state.symbol.0.clone(), state);
+            s.vi.insert((state.symbol.0.clone(), state.market), state);
         }
     }
 
@@ -331,7 +331,7 @@ mod tests {
     #[test]
     fn vi_updates_keep_the_newest_per_symbol_and_a_snapshot_replaces_the_pending_ones() {
         let out = Outbox::new();
-        let state = |code: &str, active: bool| ViState { symbol: crate::api::SymbolCode(code.into()), active, direction: None, trigger_price: None, base: None, triggered_at: None, released_at: None };
+        let state = |code: &str, active: bool| ViState { symbol: crate::api::SymbolCode(code.into()), market: ViMarket::Krx, active, direction: None, trigger_price: None, base: None, triggered_at: None, released_at: None };
         for round in 0..MUST_CAPACITY * 2 {
             out.set_vi(state("005930", round % 2 == 0));
         }

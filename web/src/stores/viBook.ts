@@ -5,6 +5,7 @@ import type { Connection, MarketSocket, ViEvent } from "../api/socket";
 function sameViState(a: ViState, b: ViState): boolean {
   return (
     a.symbol === b.symbol &&
+    a.market === b.market &&
     a.active === b.active &&
     a.direction === b.direction &&
     a.triggerPrice === b.triggerPrice &&
@@ -69,6 +70,7 @@ export class ViBook {
     switch (event.type) {
       case "vi_update": {
         const next = event.state;
+        if (next.market !== "krx") return;
         const prev = this.rows.get(next.symbol);
         if (prev !== undefined && sameViState(prev, next)) return;
         this.rows.set(next.symbol, next);
@@ -79,6 +81,7 @@ export class ViBook {
         const incoming = new Set<SymbolCode>();
         const changed = new Set<SymbolCode>();
         for (const state of event.states) {
+          if (state.market !== "krx") continue;
           incoming.add(state.symbol);
           const prev = this.rows.get(state.symbol);
           if (prev !== undefined && sameViState(prev, state)) continue;
