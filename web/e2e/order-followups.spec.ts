@@ -28,7 +28,7 @@ async function pressTotal(page: Page): Promise<void> {
 }
 
 test.describe("끄는 동안 대상이 바뀐 여러 건 취소", () => {
-  test("한 건이던 칩을 끄는 동안 같은 가격에 새 주문이 들어오면 놓을 때 두 건 확인이 뜨고 요청이 없다", async ({ page, scenario }) => {
+  test("한 건이던 칩을 끄는 동안 같은 가격에 새 주문이 들어오면 놓는 순간 그 가격 일괄 취소가 바로 나간다", async ({ page, scenario }) => {
     await page.clock.install({ time: CLOCK_START });
     ordersOn(scenario);
     const api = tradingApi(scenario, [openOrder("0000001", "buy", 70_000, 5)]);
@@ -38,13 +38,12 @@ test.describe("끄는 동안 대상이 바뀐 여러 건 취소", () => {
     await arriveAtSamePrice(page, scenario, () => api.open.push(openOrder("0000002", "buy", 70_000, 7)));
     await expect(page.getByTestId("order-total-buy")).toContainText("(2)");
     await page.mouse.up();
-    const confirm = page.getByTestId("order-cancel-confirm");
-    await expect(confirm).toHaveText("매수 2건 취소 · 한 번 더 누르기");
-    expect(writesTo(api, "cancel-batch")).toHaveLength(0);
-    expect(api.writes).toHaveLength(0);
+    await pollSaved(() => writesTo(api, "cancel-batch")).toHaveLength(1);
+    expect(writesTo(api, "cancel-batch")[0]!.body).toMatchObject({ side: "buy", price: 70_000 });
+    expect(api.writes).toHaveLength(1);
   });
 
-  test("합계 칸을 끄는 동안 같은 가격에 새 주문이 들어오면 확인 건수가 놓을 때의 건수이고 누르면 가격마다 나간다", async ({ page, scenario }) => {
+  test("합계 칸을 끄는 동안 같은 가격에 새 주문이 들어오면 놓는 순간 가격마다 일괄 취소가 바로 나간다", async ({ page, scenario }) => {
     await page.clock.install({ time: CLOCK_START });
     ordersOn(scenario);
     const api = tradingApi(scenario, [openOrder("0000001", "buy", 70_000, 5), openOrder("0000002", "buy", 69_900, 3)]);
@@ -54,14 +53,11 @@ test.describe("끄는 동안 대상이 바뀐 여러 건 취소", () => {
     await arriveAtSamePrice(page, scenario, () => api.open.push(openOrder("0000003", "buy", 70_000, 9)));
     await expect(page.getByTestId("order-total-buy")).toContainText("(3)");
     await page.mouse.up();
-    const confirm = page.getByTestId("order-cancel-confirm");
-    await expect(confirm).toHaveText("매수 3건 취소 · 한 번 더 누르기");
-    expect(api.writes).toHaveLength(0);
-    await confirm.click();
     await pollSaved(() => writesTo(api, "cancel-batch")).toHaveLength(2);
+    expect(writesTo(api, "cancel-batch").map((w) => `${w.body.side}:${w.body.price}`).sort()).toEqual(["buy:69900", "buy:70000"]);
   });
 
-  test("같은 가격에 새 주문이 전송 중이면 합계 칸을 밖에 놓아도 여러 건 취소 확인이 뜨지 않고 전송이 끝나도 취소가 나가지 않는다", async ({ page, scenario }) => {
+  test("같은 가격에 새 주문이 전송 중이면 합계 칸을 밖에 놓아도 취소가 나가지 않고 전송이 끝나도 나가지 않는다", async ({ page, scenario }) => {
     ordersOn(scenario);
     const api = tradingApi(scenario, [openOrder("0000001", "buy", 70_000, 5), openOrder("0000002", "buy", 69_900, 7)]);
     const sending = scenario.hold((url, request) => url.pathname === "/api/trading/commands/place" && request.method() === "POST");
@@ -70,12 +66,10 @@ test.describe("끄는 동안 대상이 바뀐 여러 건 취소", () => {
     await sending.received;
     await pressTotal(page);
     await page.mouse.up();
-    const confirm = page.getByTestId("order-cancel-confirm");
     await expect(status(page)).toContainText("보내는 중인 주문");
-    await expect(confirm).toHaveCount(0);
+    expect(writesTo(api, "cancel-batch")).toHaveLength(0);
     sending.reply({ body: commandOf("buy", { orderNo: "0000003", quantity: 1, price: 70_000 }) });
     await expect(status(page)).toContainText("접수");
-    await expect(confirm).toHaveCount(0);
     expect(writesTo(api, "cancel-batch")).toHaveLength(0);
   });
 });

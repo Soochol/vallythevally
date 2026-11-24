@@ -4,7 +4,7 @@ import { formatPrice } from "../../lib/format";
 import { useStoreValue } from "../../lib/valueStore";
 import { formatShares } from "../market-window/format";
 import { OrderList, type OrderListItem } from "./OrderList";
-import { type CancelPlan, cancelCheckOf, type PriceGroup, type PriceKey, SIDE_LABEL, sideTotal } from "./orderRules";
+import { type PriceGroup, type PriceKey, SIDE_LABEL, sideTotal } from "./orderRules";
 import type { OrderDrag } from "./useOrderDrag";
 
 const COMPACT_FROM = 10_000;
@@ -16,7 +16,6 @@ const compactQuantity = (quantity: number): string =>
 interface Actions {
   cancelOne(orderNo: string): void;
   cancelGroups(keys: readonly PriceKey[]): void;
-  planCancel(keys: readonly PriceKey[]): CancelPlan;
 }
 
 function OrderTotalCell({ side, groups, writable, actions, drag }: { side: OrderSide; groups: ReadonlyMap<string, PriceGroup>; writable: boolean; actions: Actions; drag: OrderDrag }) {
@@ -42,7 +41,6 @@ function OrderTotalCell({ side, groups, writable, actions, drag }: { side: Order
         label: `${SIDE_LABEL[side]} 모두 취소`,
         danger: true,
         disabled: !writable,
-        check: () => cancelCheckOf(SIDE_LABEL[side], actions.planCancel(sideGroups)),
         onSelect: () => actions.cancelGroups(sideGroups),
       },
     ];

@@ -13,14 +13,6 @@ export const needsHighValueConfirm = (price: number, quantity: number): boolean 
 
 export const SIDE_LABEL: Readonly<Record<OrderSide, string>> = { buy: "매수", sell: "매도" };
 
-export const CANCEL_CONFIRM_MS = 3_000;
-
-export const CANCEL_CONFIRM_FROM = 2;
-
-export const needsCancelConfirm = (orderCount: number): boolean => orderCount >= CANCEL_CONFIRM_FROM;
-
-export const cancelConfirmText = (orderCount: number): string => `${orderCount}건 취소 · 한 번 더 누르기`;
-
 export const orderCountOf = (groups: readonly { readonly orders: readonly unknown[] }[]): number => groups.reduce((sum, group) => sum + group.orders.length, 0);
 
 export interface PriceGroup {
@@ -38,16 +30,13 @@ export interface PriceKey {
   readonly price: number;
 }
 
-export const targetSignature = (groups: ReadonlyMap<string, PriceGroup>, targets: readonly PriceKey[]): string =>
-  targets.flatMap((target) => groups.get(groupKey(target.side, target.price))?.orders.map((order) => order.orderNo) ?? []).sort().join(",");
-
 export const sendingAt = (writes: readonly PendingWrite[], code: string, targets: readonly PriceKey[]): boolean =>
   writes.some((write) => write.kind === "sending" && write.code === code && targets.some((target) => target.side === write.side && target.price === write.price));
 
 export type CancelPlan =
   | { readonly kind: "empty" }
   | { readonly kind: "sending" }
-  | { readonly kind: "ready"; readonly targets: readonly PriceGroup[]; readonly orderCount: number; readonly signature: string };
+  | { readonly kind: "ready"; readonly targets: readonly PriceGroup[]; readonly orderCount: number };
 
 export function planCancel(groups: ReadonlyMap<string, PriceGroup>, writes: readonly PendingWrite[], code: string, keys: readonly PriceKey[]): CancelPlan {
   const targets = keys.flatMap((key) => {
@@ -56,15 +45,8 @@ export function planCancel(groups: ReadonlyMap<string, PriceGroup>, writes: read
   });
   if (targets.length === 0) return { kind: "empty" };
   if (sendingAt(writes, code, targets)) return { kind: "sending" };
-  return { kind: "ready", targets, orderCount: orderCountOf(targets), signature: targetSignature(groups, targets) };
+  return { kind: "ready", targets, orderCount: orderCountOf(targets) };
 }
-
-export type ConfirmCheck =
-  | { readonly kind: "refused" }
-  | { readonly kind: "ready"; readonly confirm: string | null; readonly target: string };
-
-export const cancelCheckOf = (prefix: string, plan: CancelPlan): ConfirmCheck =>
-  plan.kind === "ready" ? { kind: "ready", confirm: needsCancelConfirm(plan.orderCount) ? `${prefix} ${cancelConfirmText(plan.orderCount)}` : null, target: plan.signature } : { kind: "refused" };
 
 export function groupOpenOrders(orders: readonly TradingOpenOrder[], code: string): ReadonlyMap<string, PriceGroup> {
   const byKey = new Map<string, TradingOpenOrder[]>();

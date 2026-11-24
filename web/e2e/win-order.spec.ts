@@ -306,7 +306,6 @@ test("빈 곳 우클릭의 전체 취소는 가격과 방향마다 새 batchId�
   await page.getByTestId("price-ladder").locator(".mw-px").first().click({ button: "right" });
   await expect(page.getByRole("menu", { name: "주문 취소" })).toBeVisible();
   await page.getByRole("menuitem", { name: "전체 모두 취소" }).click();
-  await page.getByRole("menuitem", { name: "전체 3건 취소 · 한 번 더 누르기" }).click();
   await pollSaved(() => writesTo(api, "cancel-batch")).toHaveLength(3);
   const batches = writesTo(api, "cancel-batch").map((w) => w.body);
   expect(batches.map((b) => `${b.side}:${b.price}`).sort()).toEqual(["buy:69900", "buy:70000", "sell:70100"]);
@@ -709,9 +708,6 @@ test("같은 가격 두 건의 칩을 사다리 밖에 놓으면 고스트가 �
   await dragChip(page, chipAt(page, "buy", 70_000), { x: 5, y: 5 }, false);
   await expect(page.getByTestId("order-ghost")).toContainText("놓으면 70,000원 매수 2건 취소");
   await page.mouse.up();
-  await expect(page.getByTestId("order-cancel-confirm")).toHaveText("매수 2건 취소 · 한 번 더 누르기");
-  expect(writesTo(api, "cancel-batch")).toHaveLength(0);
-  await page.getByTestId("order-cancel-confirm").click();
   await pollSaved(() => writesTo(api, "cancel-batch")).toHaveLength(1);
   expect(writesTo(api, "cancel-batch")[0]!.body).toMatchObject({ code: CODE, side: "buy", price: 70_000 });
   expect(writesTo(api, "cancel")).toHaveLength(0);
@@ -763,9 +759,6 @@ test("매수 합계 칸을 사다리 밖으로 끌면 매수 가격마다 일괄
   await dragChip(page, page.getByTestId("order-total-buy"), { x: 5, y: 5 }, false);
   await expect(page.getByTestId("order-ghost")).toContainText("놓으면 매수 3건 모두 취소");
   await page.mouse.up();
-  await expect(page.getByTestId("order-cancel-confirm")).toHaveText("매수 3건 취소 · 한 번 더 누르기");
-  expect(writesTo(api, "cancel-batch")).toHaveLength(0);
-  await page.getByTestId("order-cancel-confirm").click();
   await pollSaved(() => writesTo(api, "cancel-batch")).toHaveLength(2);
   expect(writesTo(api, "cancel-batch").map((w) => `${w.body.side}:${w.body.price}`).sort()).toEqual(["buy:69900", "buy:70000"]);
   await expect(page.getByRole("menu", { name: "매수 접수 주문" })).toHaveCount(0);

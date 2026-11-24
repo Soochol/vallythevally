@@ -1,6 +1,6 @@
-import type { Page } from "@playwright/test";
+import type { Locator, Page } from "@playwright/test";
 import { type Scenario, expect, pollSaved, test } from "./harness";
-import { ACCOUNT, accountData, BASE, cellAt, center, chipAt, dragChip, openOrder, openOrderWindow, ordersOn, otherAccount, SECOND_ACCOUNT, status, tradingApi, win, writesTo } from "./order-window";
+import { BASE, cellAt, center, chipAt, dragChip, openOrder, openOrderWindow, ordersOn, status, tradingApi, win, writesTo } from "./order-window";
 
 const THREE = () => [openOrder("0000001", "buy", 70_000, 5), openOrder("0000002", "buy", 69_900, 3), openOrder("0000003", "sell", 70_100, 4)];
 const ROUTE_LABEL = { combined: "SOR", krx: "KRX", nxt: "NXT" } as const;
@@ -8,51 +8,6 @@ const CLOCK_START = new Date("2026-11-18T10:00:00+09:00");
 
 const placeRequests = (scenario: Scenario) => scenario.requests.filter((r) => new URL(r.url()).pathname === "/api/trading/commands/place" && r.method() === "POST");
 const commandWrites = (scenario: Scenario) => scenario.requests.filter((r) => new URL(r.url()).pathname.startsWith("/api/trading/commands/") && r.method() === "POST");
-const openBlankMenu = async (page: Page) => {
-  await page.getByTestId("price-ladder").locator(".mw-px").first().click({ button: "right" });
-  return page.getByRole("menu", { name: "주문 취소" });
-};
-
-test("여러 건을 한 번에 취소하는 줄은 처음 누르면 건수와 한 번 더 누르기를 보이고 요청이 없다", async ({ page, scenario }) => {
-  ordersOn(scenario);
-  const api = tradingApi(scenario, THREE());
-  await openOrderWindow(page, scenario);
-  const menu = await openBlankMenu(page);
-  await menu.getByRole("menuitem", { name: "전체 모두 취소" }).click();
-  await expect(menu.getByRole("menuitem", { name: "전체 3건 취소 · 한 번 더 누르기" })).toBeVisible();
-  await expect(menu.getByRole("menuitem", { name: "매수 모두 취소" })).toBeVisible();
-  expect(commandWrites(scenario)).toHaveLength(0);
-  expect(api.writes).toHaveLength(0);
-});
-
-test("한 번 더 누르면 취소 요청이 가격과 방향마다 세 건 나간다", async ({ page, scenario }) => {
-  ordersOn(scenario);
-  const api = tradingApi(scenario, THREE());
-  await openOrderWindow(page, scenario);
-  const menu = await openBlankMenu(page);
-  await menu.getByRole("menuitem", { name: "전체 모두 취소" }).click();
-  await menu.getByRole("menuitem", { name: "전체 3건 취소 · 한 번 더 누르기" }).click();
-  await pollSaved(() => writesTo(api, "cancel-batch")).toHaveLength(3);
-  expect(writesTo(api, "cancel-batch").map((w) => `${w.body.side}:${w.body.price}`).sort()).toEqual(["buy:69900", "buy:70000", "sell:70100"]);
-  await expect(menu).toHaveCount(0);
-});
-
-test("한 번 누르고 3초가 지나면 원래 줄로 돌아가고 요청이 없다", async ({ page, scenario }) => {
-  await page.clock.install({ time: CLOCK_START });
-  ordersOn(scenario);
-  const api = tradingApi(scenario, THREE());
-  await openOrderWindow(page, scenario);
-  await page.clock.pauseAt(new Date("2026-11-18T10:05:00+09:00"));
-  const menu = await openBlankMenu(page);
-  await menu.getByRole("menuitem", { name: "전체 모두 취소" }).click();
-  await expect(menu.getByRole("menuitem", { name: "전체 3건 취소 · 한 번 더 누르기" })).toBeVisible();
-  await page.clock.fastForward(2_900);
-  await expect(menu.getByRole("menuitem", { name: "전체 3건 취소 · 한 번 더 누르기" })).toBeVisible();
-  await page.clock.fastForward(300);
-  await expect(menu.getByRole("menuitem", { name: "전체 모두 취소" })).toBeVisible();
-  expect(api.writes).toHaveLength(0);
-  expect(commandWrites(scenario)).toHaveLength(0);
-});
 
 test("주문 한 건의 칩 메뉴 취소는 한 번에 나간다", async ({ page, scenario }) => {
   ordersOn(scenario);
@@ -64,20 +19,20 @@ test("주문 한 건의 칩 메뉴 취소는 한 번에 나간다", async ({ pag
   expect(writesTo(api, "cancel")[0]!.body).toMatchObject({ orderNo: "0000001" });
 });
 
-test("한 건뿐인 가격의 이 가격 모두 취소도 한 번에 나가고 두 건이면 두 번 눌러야 한다", async ({ page, scenario }) => {
+test("한 건이든 두 건이든 이 가격 모두 취소는 한 번에 나간다", async ({ page, scenario }) => {
   ordersOn(scenario);
   const api = tradingApi(scenario, [openOrder("0000001", "buy", 70_000, 5), openOrder("0000002", "buy", 70_000, 7), openOrder("0000003", "sell", 70_100, 4)]);
   await openOrderWindow(page, scenario);
   await chipAt(page, "sell", 70_100).click({ button: "right" });
   await page.getByRole("menuitem", { name: "이 가격 모두 취소" }).click();
   await pollSaved(() => writesTo(api, "cancel-batch")).toHaveLength(1);
+  expect(writesTo(api, "cancel-batch")[0]!.body).toMatchObject({ side: "sell", price: 70_100 });
   await chipAt(page, "buy", 70_000).click({ button: "right" });
   const menu = page.getByRole("menu", { name: "주문 목록" });
   await menu.getByRole("menuitem", { name: "이 가격 모두 취소" }).click();
-  await expect(menu.getByRole("menuitem", { name: "이 가격 2건 취소 · 한 번 더 누르기" })).toBeVisible();
-  expect(writesTo(api, "cancel-batch")).toHaveLength(1);
-  await menu.getByRole("menuitem", { name: "이 가격 2건 취소 · 한 번 더 누르기" }).click();
   await pollSaved(() => writesTo(api, "cancel-batch")).toHaveLength(2);
+  expect(writesTo(api, "cancel-batch")[1]!.body).toMatchObject({ side: "buy", price: 70_000 });
+  await expect(menu).toHaveCount(0);
 });
 
 test("접수 합계 목록에서 값 글자를 눌러도 취소되지 않고 취소 글자를 눌러야 나간다", async ({ page, scenario }) => {
@@ -173,49 +128,6 @@ test("답 없음 막대의 다시 보내기는 같은 명령 번호로 요청을
   await expect(status(page)).toContainText("접수");
 });
 
-test("여러 주문을 가진 합계 칸을 사다리 밖에 놓으면 상태 줄에 확인이 뜨고 눌러야 나간다", async ({ page, scenario }) => {
-  ordersOn(scenario);
-  const api = tradingApi(scenario, THREE());
-  await openOrderWindow(page, scenario);
-  const total = page.getByTestId("order-total-buy");
-  const box = (await total.boundingBox())!;
-  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
-  await page.mouse.down();
-  await page.mouse.move(box.x + 20, box.y - 10, { steps: 3 });
-  await page.mouse.move(5, 5, { steps: 8 });
-  await page.mouse.up();
-  const confirm = page.getByTestId("order-cancel-confirm");
-  await expect(confirm).toHaveText("매수 2건 취소 · 한 번 더 누르기");
-  expect(api.writes).toHaveLength(0);
-  await confirm.click();
-  await pollSaved(() => writesTo(api, "cancel-batch")).toHaveLength(2);
-  await expect(confirm).toHaveCount(0);
-});
-
-test("여러 건 취소 확인이 떠 있는 동안 계좌를 바꾸면 확인이 사라지고 아무 요청도 나가지 않는다", async ({ page, scenario }) => {
-  await page.clock.install({ time: CLOCK_START });
-  ordersOn(scenario, [otherAccount()]);
-  const api = tradingApi(scenario, THREE());
-  api.accounts[SECOND_ACCOUNT] = accountData();
-  await openOrderWindow(page, scenario);
-  await page.clock.pauseAt(new Date("2026-11-18T10:05:00+09:00"));
-  const total = page.getByTestId("order-total-buy");
-  const box = (await total.boundingBox())!;
-  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
-  await page.mouse.down();
-  await page.mouse.move(box.x + 20, box.y - 10, { steps: 3 });
-  await page.mouse.move(5, 5, { steps: 8 });
-  await page.mouse.up();
-  const confirm = page.getByTestId("order-cancel-confirm");
-  await expect(confirm).toHaveText("매수 2건 취소 · 한 번 더 누르기");
-  await page.locator('button[data-testid="account-label"]').click();
-  await page.getByTestId("account-option").nth(1).click();
-  await expect(page.locator('button[data-testid="account-label"]')).toHaveText("위탁 2 · 키움 ****-**05");
-  await expect(confirm).toHaveCount(0);
-  expect(commandWrites(scenario)).toHaveLength(0);
-  expect(api.writes).toHaveLength(0);
-});
-
 test("정정 고액 확인 상자의 주문 경로는 창의 경로가 아니라 원주문의 거래소를 보인다", async ({ page, scenario }) => {
   ordersOn(scenario);
   tradingApi(scenario, [{ ...openOrder("N-0001", "buy", 70_000, 1500), venue: "nxt" }]);
@@ -227,7 +139,7 @@ test("정정 고액 확인 상자의 주문 경로는 창의 경로가 아니라
   await expect(page.getByRole("dialog").getByTestId("order-confirm")).toContainText("정정");
 });
 
-test("정정 직후 목록에 아직 없는 낙관적 주문이 든 가격도 여러 건 취소 확인이 뜬다", async ({ page, scenario }) => {
+test("정정 직후 목록에 아직 없는 낙관적 주문이 든 가격도 끌어서 놓으면 그 가격 일괄 취소가 바로 나간다", async ({ page, scenario }) => {
   ordersOn(scenario);
   const api = tradingApi(scenario, [openOrder("0000001", "buy", 70_000, 5), openOrder("0000002", "buy", 69_900, 3)]);
   await openOrderWindow(page, scenario);
@@ -235,69 +147,153 @@ test("정정 직후 목록에 아직 없는 낙관적 주문이 든 가격도 �
   await pollSaved(() => writesTo(api, "modify")).toHaveLength(1);
   await expect(chipAt(page, "buy", 70_000)).toContainText("8");
   await dragChip(page, chipAt(page, "buy", 70_000), { x: 5, y: 5 });
-  const confirm = page.getByTestId("order-cancel-confirm");
-  await expect(confirm).toHaveText("매수 2건 취소 · 한 번 더 누르기");
-  expect(writesTo(api, "cancel-batch")).toHaveLength(0);
-});
-
-test("여러 건 취소 확인이 떠 있는 동안 같은 가격에 새 주문이 들어오면 확인이 사라지고 요청이 없다", async ({ page, scenario }) => {
-  await page.clock.install({ time: CLOCK_START });
-  ordersOn(scenario);
-  const api = tradingApi(scenario, [openOrder("0000001", "buy", 70_000, 5), openOrder("0000002", "buy", 70_000, 7)]);
-  await openOrderWindow(page, scenario);
-  await page.clock.pauseAt(new Date("2026-11-18T10:05:00+09:00"));
-  await dragChip(page, chipAt(page, "buy", 70_000), { x: 5, y: 5 });
-  const confirm = page.getByTestId("order-cancel-confirm");
-  await expect(confirm).toHaveText("매수 2건 취소 · 한 번 더 누르기");
-  api.open.push(openOrder("0000003", "buy", 70_000, 9));
-  const listed = page.waitForResponse((response) => new URL(response.url()).pathname === "/api/trading/open-orders");
-  scenario.live.emit({ type: "trading_account_changed", accountRef: ACCOUNT });
-  await listed;
-  await page.clock.fastForward(50);
-  await expect(chipAt(page, "buy", 70_000)).toContainText("21");
-  await expect(confirm).toHaveCount(0);
-  expect(api.writes).toHaveLength(0);
-});
-
-test("여러 건 취소 확인이 떠 있는 동안 같은 대상 주문의 목록이 다시 와도 확인이 남고 누르면 나간다", async ({ page, scenario }) => {
-  await page.clock.install({ time: CLOCK_START });
-  ordersOn(scenario);
-  const api = tradingApi(scenario, [openOrder("0000001", "buy", 70_000, 5), openOrder("0000002", "buy", 70_000, 7)]);
-  await openOrderWindow(page, scenario);
-  await page.clock.pauseAt(new Date("2026-11-18T10:05:00+09:00"));
-  await dragChip(page, chipAt(page, "buy", 70_000), { x: 5, y: 5 });
-  const confirm = page.getByTestId("order-cancel-confirm");
-  await expect(confirm).toHaveText("매수 2건 취소 · 한 번 더 누르기");
-  const listed = page.waitForResponse((response) => new URL(response.url()).pathname === "/api/trading/open-orders");
-  scenario.live.emit({ type: "trading_account_changed", accountRef: ACCOUNT });
-  await listed;
-  await page.clock.fastForward(50);
-  await expect(chipAt(page, "buy", 70_000)).toContainText("12");
-  await expect(confirm).toHaveText("매수 2건 취소 · 한 번 더 누르기");
-  await confirm.click();
   await pollSaved(() => writesTo(api, "cancel-batch")).toHaveLength(1);
+  expect(writesTo(api, "cancel-batch")[0]!.body).toMatchObject({ side: "buy", price: 70_000 });
+  await expect(status(page)).toContainText("취소 접수");
 });
 
-test("칩 메뉴의 이 가격 모두 취소를 한 번 누른 뒤 같은 가격에 새 주문이 들어오면 다음 누름은 새 건수로 다시 묻고 요청이 없다", async ({ page, scenario }) => {
-  await page.clock.install({ time: CLOCK_START });
+async function overlapPointInOrderCell(page: Page, item: Locator): Promise<{ pageX: number; pageY: number; position: { x: number; y: number } }> {
+  const box = (await item.boundingBox())!;
+  const hit = await page.evaluate(({ x, y, width, height }) => {
+    for (const element of document.querySelectorAll<HTMLElement>("[data-order-cell]")) {
+      const rect = element.getBoundingClientRect();
+      const left = Math.max(x, rect.left);
+      const right = Math.min(x + width, rect.right);
+      const top = Math.max(y, rect.top);
+      const bottom = Math.min(y + height, rect.bottom);
+      if (right - left >= 4 && bottom - top >= 4) {
+        const pageX = (left + right) / 2;
+        const pageY = (top + bottom) / 2;
+        return { pageX, pageY, position: { x: pageX - x, y: pageY - y } };
+      }
+    }
+    return null;
+  }, box);
+  expect(hit).not.toBeNull();
+  return hit!;
+}
+
+test("이 가격 모두 취소를 주문 칸 위에서 빠르게 두 번 눌러도 취소만 한 번 나가고 신규 주문은 나가지 않는다", async ({ page, scenario }) => {
   ordersOn(scenario);
   const api = tradingApi(scenario, [openOrder("0000001", "buy", 70_000, 5), openOrder("0000002", "buy", 70_000, 7)]);
   await openOrderWindow(page, scenario);
-  await page.clock.pauseAt(new Date("2026-11-18T10:05:00+09:00"));
   await chipAt(page, "buy", 70_000).click({ button: "right" });
   const menu = page.getByRole("menu", { name: "주문 목록" });
-  await menu.getByRole("menuitem", { name: "이 가격 모두 취소" }).click();
-  await expect(menu.getByRole("menuitem", { name: "이 가격 2건 취소 · 한 번 더 누르기" })).toBeVisible();
-  api.open.push(openOrder("0000003", "buy", 70_000, 9));
-  const listed = page.waitForResponse((response) => new URL(response.url()).pathname === "/api/trading/open-orders");
-  scenario.live.emit({ type: "trading_account_changed", accountRef: ACCOUNT });
-  await listed;
-  await page.clock.fastForward(50);
-  await expect(chipAt(page, "buy", 70_000)).toContainText("21");
-  await expect(menu.getByRole("menuitem", { name: "9 취소" })).toBeVisible();
-  await menu.getByRole("menuitem", { name: "이 가격 2건 취소 · 한 번 더 누르기" }).click();
-  await expect(menu.getByRole("menuitem", { name: "이 가격 3건 취소 · 한 번 더 누르기" })).toBeVisible();
-  expect(api.writes).toHaveLength(0);
-  await menu.getByRole("menuitem", { name: "이 가격 3건 취소 · 한 번 더 누르기" }).click();
+  const item = menu.getByRole("menuitem", { name: "이 가격 모두 취소" });
+  const { position } = await overlapPointInOrderCell(page, item);
+  const refetched = page.waitForResponse((response) => new URL(response.url()).pathname === "/api/trading/open-orders");
+  await item.dblclick({ position });
   await pollSaved(() => writesTo(api, "cancel-batch")).toHaveLength(1);
+  await refetched;
+  await expect(menu).toHaveCount(0);
+  await expect(page.getByTestId("order-queue")).toHaveCount(0);
+  expect(placeRequests(scenario)).toHaveLength(0);
+  expect(writesTo(api, "place")).toHaveLength(0);
+  await expect(status(page)).toContainText("취소 접수");
+});
+
+test("빈 곳 우클릭의 전체 모두 취소를 주문 칸 위에서 빠르게 두 번 눌러도 취소만 한 번 나가고 신규 주문은 나가지 않는다", async ({ page, scenario }) => {
+  ordersOn(scenario);
+  const api = tradingApi(scenario, THREE());
+  await openOrderWindow(page, scenario);
+  await cellAt(page, "sell", 70_300).click({ button: "right" });
+  const menu = page.getByRole("menu", { name: "주문 취소" });
+  const item = menu.getByRole("menuitem", { name: "전체 모두 취소" });
+  const { position } = await overlapPointInOrderCell(page, item);
+  const refetched = page.waitForResponse((response) => new URL(response.url()).pathname === "/api/trading/open-orders");
+  await item.dblclick({ position });
+  await pollSaved(() => writesTo(api, "cancel-batch")).toHaveLength(3);
+  await refetched;
+  await expect(menu).toHaveCount(0);
+  await expect(page.getByTestId("order-queue")).toHaveCount(0);
+  expect(placeRequests(scenario)).toHaveLength(0);
+  expect(writesTo(api, "place")).toHaveLength(0);
+  await expect(status(page)).toContainText("취소 접수");
+});
+
+test("주문 한 건의 칩 메뉴 취소를 주문 칸 위에서 빠르게 두 번 눌러도 신규 주문은 나가지 않는다", async ({ page, scenario }) => {
+  ordersOn(scenario);
+  const api = tradingApi(scenario, [openOrder("0000001", "buy", 70_000, 5)]);
+  await openOrderWindow(page, scenario);
+  await chipAt(page, "buy", 70_000).click({ button: "right" });
+  const menu = page.getByRole("menu", { name: "주문 목록" });
+  const item = menu.getByRole("menuitem", { name: "5 취소" });
+  const { position } = await overlapPointInOrderCell(page, item);
+  const refetched = page.waitForResponse((response) => new URL(response.url()).pathname === "/api/trading/open-orders");
+  await item.dblclick({ position });
+  await pollSaved(() => writesTo(api, "cancel")).toHaveLength(1);
+  expect(writesTo(api, "cancel")[0]!.body).toMatchObject({ orderNo: "0000001" });
+  await refetched;
+  await expect(menu).toHaveCount(0);
+  await expect(page.getByTestId("order-queue")).toHaveCount(0);
+  expect(placeRequests(scenario)).toHaveLength(0);
+  expect(writesTo(api, "place")).toHaveLength(0);
+});
+
+test("이 가격 모두 취소를 주문 칸 위에서 빠르게 네 번 눌러도 취소만 한 번 나가고 신규 주문은 나가지 않는다", async ({ page, scenario }) => {
+  ordersOn(scenario);
+  const api = tradingApi(scenario, [openOrder("0000001", "buy", 70_000, 5), openOrder("0000002", "buy", 70_000, 7)]);
+  await openOrderWindow(page, scenario);
+  await chipAt(page, "buy", 70_000).click({ button: "right" });
+  const menu = page.getByRole("menu", { name: "주문 목록" });
+  const item = menu.getByRole("menuitem", { name: "이 가격 모두 취소" });
+  const { pageX, pageY } = await overlapPointInOrderCell(page, item);
+  const refetched = page.waitForResponse((response) => new URL(response.url()).pathname === "/api/trading/open-orders");
+  await page.mouse.move(pageX, pageY);
+  for (const clickCount of [1, 2, 3, 4]) {
+    await page.mouse.down({ clickCount });
+    await page.mouse.up({ clickCount });
+  }
+  await pollSaved(() => writesTo(api, "cancel-batch")).toHaveLength(1);
+  await refetched;
+  await expect(menu).toHaveCount(0);
+  await expect(page.getByTestId("order-queue")).toHaveCount(0);
+  expect(placeRequests(scenario)).toHaveLength(0);
+  expect(writesTo(api, "place")).toHaveLength(0);
+  await expect(status(page)).toContainText("취소 접수");
+});
+
+test("접수 합계 목록의 줄 취소를 빠르게 두 번 눌러도 취소만 한 번 나가고 뒤따르는 더블클릭이 전달되지 않는다", async ({ page, scenario }) => {
+  ordersOn(scenario);
+  const api = tradingApi(scenario, [openOrder("0000001", "buy", 70_000, 5), openOrder("0000002", "buy", 69_900, 3)]);
+  await openOrderWindow(page, scenario);
+  await page.evaluate(() => {
+    (window as unknown as { __dblclicks: number }).__dblclicks = 0;
+    document.addEventListener("dblclick", () => {
+      (window as unknown as { __dblclicks: number }).__dblclicks += 1;
+    });
+  });
+  await page.getByTestId("order-total-buy").click();
+  const menu = page.getByRole("menu", { name: "매수 접수 주문" });
+  const item = menu.getByRole("menuitem", { name: "70,000원 · 5 취소" });
+  const refetched = page.waitForResponse((response) => new URL(response.url()).pathname === "/api/trading/open-orders");
+  await item.dblclick();
+  await pollSaved(() => writesTo(api, "cancel")).toHaveLength(1);
+  expect(writesTo(api, "cancel")[0]!.body).toMatchObject({ orderNo: "0000001" });
+  await refetched;
+  await expect(menu).toHaveCount(0);
+  await expect(page.getByTestId("order-queue")).toHaveCount(0);
+  expect(await page.evaluate(() => (window as unknown as { __dblclicks: number }).__dblclicks)).toBe(0);
+  expect(placeRequests(scenario)).toHaveLength(0);
+  expect(writesTo(api, "place")).toHaveLength(0);
+});
+
+test("메뉴로 취소한 뒤 새로 더블클릭하면 신규 주문이 나간다", async ({ page, scenario }) => {
+  ordersOn(scenario);
+  const api = tradingApi(scenario, [openOrder("0000001", "buy", 70_000, 5), openOrder("0000002", "buy", 70_000, 7)]);
+  await openOrderWindow(page, scenario);
+  await chipAt(page, "buy", 70_000).click({ button: "right" });
+  const menu = page.getByRole("menu", { name: "주문 목록" });
+  const item = menu.getByRole("menuitem", { name: "이 가격 모두 취소" });
+  const { position } = await overlapPointInOrderCell(page, item);
+  const refetched = page.waitForResponse((response) => new URL(response.url()).pathname === "/api/trading/open-orders");
+  await item.dblclick({ position });
+  await pollSaved(() => writesTo(api, "cancel-batch")).toHaveLength(1);
+  await refetched;
+  await expect(menu).toHaveCount(0);
+  await expect(page.getByTestId("order-queue")).toHaveCount(0);
+  expect(placeRequests(scenario)).toHaveLength(0);
+  await cellAt(page, "sell", 70_300).dblclick();
+  await pollSaved(() => writesTo(api, "place")).toHaveLength(1);
+  expect(writesTo(api, "place")[0]!.body).toMatchObject({ side: "sell", price: 70_300, quantity: 10 });
 });
