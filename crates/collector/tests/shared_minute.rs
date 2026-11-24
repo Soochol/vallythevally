@@ -203,6 +203,10 @@ async fn settle() {
 }
 
 async fn start(data: &Path, key: &str, store: Box<dyn MinuteStore>) -> Run {
+    start_with_quotes(data, key, store, None).await
+}
+
+async fn start_with_quotes(data: &Path, key: &str, store: Box<dyn MinuteStore>, quotes: Option<PathBuf>) -> Run {
     let peer = Arc::new(Peer { pushes: Arc::default(), seen: Arc::default(), attempts: Arc::default() });
     let (commands, command_source) = mpsc::unbounded_channel();
     let (stop, shutdown) = watch::channel(false);
@@ -217,6 +221,7 @@ async fn start(data: &Path, key: &str, store: Box<dyn MinuteStore>) -> Run {
         shutdown,
         minutes: Some(store),
         flow: None,
+        quotes,
     };
     let task = tokio::spawn(run_session(parts));
     commands.send(Ok(Command::Token { token: Secret::new(SECOND_KEY_TOKEN.to_owned()), generation: 1, expires_at: None })).unwrap();
@@ -577,4 +582,52 @@ async fn a_wait_with_no_new_write_signal_fails_naming_what_it_waited_for() {
     drop(feed);
     gate.release();
     worker.finish().await;
+}
+
+fn book(item: &str, time: &str, best_ask_qty: i64) -> String {
+    let mut values = serde_json::Map::new();
+    values.insert("21".to_owned(), json!(time));
+    for index in 0..10 {
+        values.insert((41 + index).to_string(), json!(format!("+{}", 10_100 + index * 100)));
+        values.insert((51 + index).to_string(), json!(format!("-{}", 10_000 - index * 100)));
+        for (fid, qty) in [(61, best_ask_qty), (6044, best_ask_qty), (71, 5), (6054, 5)] {
+            values.insert((fid + index).to_string(), json!(qty.to_string()));
+        }
+    }
+    json!({"trnm": "REAL", "data": [{"type": "0D", "item": format!("{item}_AL"), "name": "주식호가잔량", "values": values}]}).to_string()
+}
+
+#[tokio::test(start_paused = true)]
+async fn the_session_feeds_books_to_the_quote_minutes() {
+    let folder = tempfile::tempdir().unwrap();
+    let (data, shared) = (folder.path().join("data"), folder.path().join("shared"));
+    let (store, _written) = file_store(&shared, "k1");
+    let run = start_with_quotes(&data, "k1", store, Some(shared.clone())).await;
+    let frames = [book("005930", "090001", 7), book("005930", "090059", 9), book("005930", "090100", 11)];
+    frames.iter().for_each(|frame| run.push(frame));
+    let quotes = || server::shared_data::read_quote_day(&shared, &DAY.to_string(), "005930").unwrap();
+    for _ in 0..200 {
+        settle().await;
+        if quotes().is_some_and(|day| day.minutes.len() == 2) {
+            break;
+        }
+        tokio::time::advance(FLUSH_EVERY).await;
+        tokio::task::spawn_blocking(|| std::thread::sleep(Duration::from_millis(2))).await.unwrap();
+    }
+    let day = quotes().expect("분 호가 파일이 있다");
+    let shown: Vec<(u16, i64)> = day.minutes.iter().map(|minute| (minute.minute, minute.combined.close.ask_total())).collect();
+    assert_eq!(shown, [(540, 90), (541, 110)]);
+    assert!(!day.closed);
+    assert!(matches!(run.stop().await, Finish::Shutdown));
+    let raw: Vec<String> = read_day(&data, DAY)
+        .unwrap()
+        .filter_map(|item| match item {
+            RawItem::Record(record) => match record.content {
+                RawContent::Frame(text) if text.contains("\"0D\"") => Some(text.to_string()),
+                _ => None,
+            },
+            _ => None,
+        })
+        .collect();
+    assert_eq!(raw, frames);
 }
