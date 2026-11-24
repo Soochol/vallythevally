@@ -83,14 +83,29 @@
 .od-status-button:hover { background:var(--hover); }
 .od-queue { color:var(--text-3); }
 
-.od-account { flex:none; border-bottom:var(--size-1) solid var(--line); }
+.od-account { container:od-account / inline-size; flex:none; border-bottom:var(--size-1) solid var(--line); }
 .od-account-bar { box-sizing:border-box; height:var(--size-36); display:flex; align-items:center; gap:var(--s3); padding:var(--s3) var(--s4); font-size:var(--fs-xs); }
-.od-account-label { margin-right:auto; color:var(--text); font-size:var(--fs-s); font-variant-numeric:tabular-nums; }
+.od-account-label { margin-right:auto; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--text); font-size:var(--fs-s); font-variant-numeric:tabular-nums; }
+.od-env, .od-route, .od-policy { flex:none; white-space:nowrap; }
 .od-route { color:var(--text-2); font-size:var(--fs-xs); font-weight:600; }
 .od-route-note { color:var(--warning); font-size:var(--fs-xs); }
-.od-tab { padding:var(--s2) var(--s3); border:var(--size-1) solid var(--line-strong); border-radius:var(--r-m); background:var(--raised); color:var(--text-2); font-size:var(--fs-xs); }
+.od-account-tabs { display:flex; flex:none; align-items:center; gap:var(--s3); }
+.od-tab { flex:none; padding:var(--s2) var(--s3); border:var(--size-1) solid var(--line-strong); border-radius:var(--r-m); background:var(--raised); color:var(--text-2); font-size:var(--fs-xs); font-variant-numeric:tabular-nums; white-space:nowrap; }
 .od-tab:hover, .od-tab[aria-expanded=true] { background:var(--hover); color:var(--text); }
 .od-tab b { color:var(--text); }
+.od-tab-short { display:none; }
+.od-tab-sep { color:var(--text-3); }
+.od-tab-total { color:var(--text); font-family:var(--font-mono); font-weight:600; }
+.od-tab-total[data-tone=up] { color:var(--up); }
+.od-tab-total[data-tone=down] { color:var(--down); }
+@container od-account (width >= 560px) and (width < 700px) {
+  .od-tab-full { display:none; }
+  .od-tab-short { display:inline; }
+}
+@container od-account (width < 560px) {
+  .od-account-bar { height:auto; flex-wrap:wrap; row-gap:var(--s2); padding:var(--s2) var(--s4); }
+  .od-account-tabs { flex-basis:100%; gap:var(--s2); }
+}
 .ui-popover.od-list-pop { max-height:var(--size-240); padding:var(--s2) var(--s4); font-size:var(--fs-xs); }
 .od-rows { margin:0; padding:0; list-style:none; }
 .od-rows-head, .od-rows li { display:grid; align-items:center; column-gap:var(--s3); font-variant-numeric:tabular-nums; }
@@ -166,6 +181,7 @@ button.od-cellbtn:not(:disabled) small span { text-decoration:underline dotted; 
 .od-funds-confirm p { margin:0 0 var(--s3); }
 .od-funds-confirm-actions { display:flex; justify-content:flex-end; gap:var(--s4); }
 .od-account-pick { display:inline-flex; align-items:center; gap:var(--s2); min-width:0; padding:var(--size-1) var(--s3); border:var(--size-1) solid var(--line-strong, var(--line)); border-radius:var(--r-m); color:var(--text); }
+.od-account-pick svg { flex:none; }
 .od-account-pick:hover, .od-account-pick[aria-expanded=true] { border-color:var(--accent); }
 .od-account-text { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .od-account-menu-head { margin:0 0 var(--s2); color:var(--text-2); }
