@@ -2,6 +2,7 @@ mod board;
 mod feed;
 mod format;
 mod minute;
+mod quote_minutes;
 mod rankings;
 mod overview;
 mod snapshot;
@@ -16,6 +17,10 @@ pub use board::Board;
 pub use feed::Feed;
 pub use format::{Broker, DataKind, FORMAT_VERSION, Header, Loaded, Probe, ProbeBody, ProbeItem, SNAPSHOT_EXTENSION, SourceKey, data_path};
 pub use minute::{CELL_MINUTES, MinuteBar, MinuteBarKey, MinuteBook, MinuteCell, MinuteCells, MinuteInstrument, MinuteSeries, MinuteTrade, MinuteVenue, minute_path};
+pub use quote_minutes::{
+    BOOK_DEPTH, BookLevel, BookRow, ClosedQuotes, CurrentQuotes, Ladder, LevelQty, LiveQuoteWriter, QuoteDay, QuoteMinute, QuoteMinuteBuilder, VenueQuote, closed_day_dir, live_day_dir, quote_days,
+    read_quote_day, write_closed_quotes,
+};
 pub use snapshot::{IndexRow, SnapshotBody, SnapshotRow, snapshot_kind};
 pub use rankings::{
     ConditionEntry, ConditionState, DEFAULT_PAGES, DEFAULT_PERIOD_SECS, FirstPages, MergedCondition, MergedRankings, RankingsBoard, RankingsPartBody, ReceivedRanking, SharedRankingRow, broker_of_part,
@@ -127,6 +132,7 @@ impl SharedData {
             DataKind::SnapshotCombined => self.snapshot_combined.errors(),
             DataKind::SnapshotNxt => self.snapshot_nxt.errors(),
             DataKind::Minute => self.minutes.errors(),
+            DataKind::QuoteMinutes => 0,
         }
     }
 
@@ -140,6 +146,7 @@ impl SharedData {
             DataKind::SnapshotCombined => self.snapshot_combined.age_secs(now),
             DataKind::SnapshotNxt => self.snapshot_nxt.age_secs(now),
             DataKind::Minute => None,
+            DataKind::QuoteMinutes => None,
         }
     }
 }

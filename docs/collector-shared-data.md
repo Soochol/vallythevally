@@ -96,6 +96,7 @@ TR 줄:
 | `snapshotCombined` | `snapshot-combined/` | `snapshot-combined/<YYYYMMDD>.json` | | `SnapshotBody` |
 | `snapshotNxt` | `snapshot-nxt/` | `snapshot-nxt/<YYYYMMDD>.json` | | `SnapshotBody` |
 | `minute` (1분봉) | `minute/<YYYYMMDD>/` | | `minute/<YYYYMMDD>/<키 이름>.jsonl` | `MinuteBar` |
+| `quoteMinutes` (분 호가) | `quote-minutes/<YYYYMMDD>/`, `quote-minutes-live/<YYYYMMDD>/` | `quote-minutes/<YYYYMMDD>/<종목>.json.gz`, `quote-minutes-live/<YYYYMMDD>/<키 이름>/_current.json` | `quote-minutes-live/<YYYYMMDD>/<키 이름>/<종목>.jsonl`, `_gaps.jsonl` | `ClosedQuotes`, `CurrentQuotes`, `QuoteMinute` |
 | `marketOverview` | `market-overview/` | `market-overview/<YYYYMMDD>.json` | | `OverviewBody`, `MadeCard` |
 | `kiwoomThemes` | `kiwoom-themes/` | `kiwoom-themes/<YYYYMMDD>.json` | | `ThemesBody`, `ThemeEntry` |
 
@@ -119,6 +120,27 @@ TR 줄:
 - 인계로 종목이 다른 키로 옮겨 가면 새 키의 파일에 그때부터 쌓인다. 두 파일에 나뉜 같은 분은 `MinuteBar::merged_with`로 합친다. 받는 쪽을 이른 쪽으로 보고, 시가는 `firstSec`가 더 이른 쪽, 종가는 `lastSec`가 더 늦은(같으면 인수로 받은 뒤쪽) 쪽, 고가·저가는 극값, 양·대금·체결 수는 합이다. 키가 다른 봉은 합치지 않는다(`None`).
 - 집계는 원문 쓰기와 다른 작업에서 돈다. 세션은 `0B`·`0J`를 담은 프레임을 가득 차지 않은 큐(16,384개)에 `try_send`로만 넘기고, 큐가 차면 그 프레임을 집계 쪽이 버리고 `dropped`로 센다. 원문 쓰기는 늦어지지 않는다. 누계(`ticks`, `lines`, `dropped`, `skipped`, `unreadable`, `too_late`, `store_errors`)는 1분마다 로그 `분봉 집계 누계`로 남는다. 파일에 쓰지 못하면 바뀐 봉을 그대로 두고 다음 5초에 다시 쓴다. 집계의 오류는 세션을 멈추지 않는다.
 - 하루 파일 크기는 진행 중인 봉이 5초마다 한 줄씩 다시 쓰이므로 체결이 잦은 종목일수록 크다. 읽는 쪽은 지난번 위치부터 읽고 같은 키의 뒤 줄을 앞 줄 대신 쓴다.
+
+## 분 호가 (`quoteMinutes`)
+
+수집기가 한 종목의 1분 동안 받은 10호가를 줄여 장중 파일과 닫힌 날 파일로 쓰고, 서버는 요청한 날짜·종목만 읽는다([ADR 0050](adr/0050-quote-minutes-are-shared-data-made-by-the-collector.md)). 형식·집계·쓰기·읽기는 `crates/server/src/shared_data/quote_minutes/`에 있다. 760종목 하루치를 메모리에 올리지 않으므로 `SharedData::poll_once`에는 넣지 않는다.
+
+- 장중(`quote-minutes-live/<YYYYMMDD>/<키 이름>/`):
+  - `<종목>.jsonl`: 끝난 분을 한 줄씩 덧붙인다(`FeedWriter`, 머리 `kind: "quoteMinutes"`). 종목 파일은 처음 쓸 때 연다.
+  - `_gaps.jsonl`: 그 키의 끊긴 구간 `[fromSec, toSec]`을 한 줄씩 덧붙인다(`FeedWriter`, 머리 `kind: "quoteMinutes"`).
+  - `_current.json`: 진행 중인 분 묶음(`CurrentQuotes`: `{"minutes": {"<종목>": QuoteMinute}}`)을 `write_snapshot_at`으로 덮어쓴다.
+- 닫힌 날(`quote-minutes/<YYYYMMDD>/`):
+  - `<종목>.json.gz`: `Envelope<ClosedQuotes>`(`{"minutes": [...], "gaps": [[fromSec, toSec], ...]}`)를 gzip으로 압축해 쓴다. 쓰는 쪽이 `.tmp` 폴더에 다 쓴 뒤 rename으로 바꿔 끼운다.
+- 항목(`QuoteMinute`, camelCase): `minute`(KST 자정부터의 분), `closeSec`(마지막 호가 시각, KST 자정부터의 초), `singlePrice`(마지막 호가가 단일가 호가인지), `combined`·`krx`·`nxt`(`VenueQuote`: `close`, `peak`, `priceMax`). 각 사다리(`Ladder`)는 `asks`(매도, 낮은 가격부터)·`bids`(매수, 높은 가격부터)이고 단은 `[price, qty]`다. 잔량이 0보다 큰 단만 남기며, JSON에서는 빈 사다리와 빈 거래소를 생략한다.
+- 집계 규칙:
+  - `singlePrice`: 가격이 0이 아닌 단이 양쪽 모두 3개 이하(빈 호가 포함)이면 참이다.
+  - `close`·`closeSec`·`singlePrice`는 넣은 순서의 마지막 호가다.
+  - `peak`와 `priceMax`는 단일가 호가를 빼고 센다. `peak`는 거래소별 총잔량(매도 합 + 매수 합)이 가장 큰 시점의 사다리이고 같으면 먼저 온 쪽이다. `priceMax`는 거래소별 가격마다 가장 큰 잔량이며, 통합은 한 시점 통합 잔량의 최댓값이다.
+  - 같은 분이 여러 키에 나뉘면 `QuoteMinute::merged_with`로 합친다(`close`는 `closeSec`가 늦은 쪽, 같으면 뒤쪽; `peak`는 총잔량이 큰 쪽, 같으면 앞쪽; `priceMax`는 가격마다 큰 쪽).
+- 읽기(`read_quote_day`, `quote_days`):
+  - 닫힌 날 폴더(`quote-minutes/<YYYYMMDD>`)가 있으면 그것만 읽고, 거기 종목 파일이 없으면 장중 파일이 있어도 `None`이다.
+  - 닫힌 날 폴더가 없으면 장중 폴더의 모든 키에서 키마다 `_current.json`을 먼저 읽고 `<종목>.jsonl`을 나중에 읽어 합치며, 그 종목 자료가 있는 키의 `_gaps.jsonl`만 합쳐 오름차순으로 돌려준다(쓰는 쪽은 끝난 분을 덧붙인 뒤 `_current.json`을 갱신한다). 줄바꿈 없는 잘린 꼬리와 깨진 줄은 건너뛴다.
+  - `quote_days`는 닫힌 날 폴더와 장중 폴더의 `YYYYMMDD` 날짜를 합쳐 오름차순으로 돌려준다(`.tmp` 같은 비날짜 폴더는 제외).
 
 `kiwoom_themes`는 ADR 0042의 테마 목록·구성종목이다. 머리의 `asOf`가 받은 시각이고 본문은 테마마다 코드·이름·구성종목 코드다. 일 이름은 `kiwoom_themes`, 키움 키만 받는다.
 
