@@ -51,17 +51,20 @@ test("정책을 알 수 없으면 계좌 줄에 정책 표시가 없다", async 
   await expect(page.getByTestId("margin-policy")).toHaveCount(0);
 });
 
-test("매수 가능 칸을 누르면 예수금·현금·미수 포함·증거금률·미수금이 보인다", async ({ page, scenario }) => {
+test("매수 가능 칸을 누르면 예수금·두 한도·증거금률이 보인다", async ({ page, scenario }) => {
   await ready(page, scenario);
   await expect(buyable(page)).not.toHaveAttribute("data-unpaid", /.+/);
   await openFunds(page);
-  await expect(page.getByTestId("funds-title")).toHaveText("자금 · 기준 70,000원");
+  await expect(page.getByTestId("funds-title")).toContainText("매수 가능 자금");
+  await expect(page.getByTestId("funds-title")).toContainText("70,000원 기준");
   await expect(page.getByTestId("funds-deposit")).toHaveText("예수금520,000,000원");
-  await expect(page.getByTestId("funds-cash")).toHaveText("현금 주문가능 (미수불가)500,000,000원 · 100,000");
-  await expect(page.getByTestId("funds-margin")).toHaveText("미수 포함 주문가능1,500,000,000원 · 300,000");
-  await expect(page.getByTestId("funds-rates")).toHaveText("증거금률종목 100% · 계좌 40% · 적용 100%");
-  await expect(page.getByTestId("funds-unpaid")).toHaveText("미수금0원");
-  await expect(page.getByTestId("funds-unpaid")).not.toHaveAttribute("data-danger", /.*/);
+  await expect(page.getByTestId("funds-cash-amount")).toHaveText("500,000,000원");
+  await expect(page.getByTestId("funds-cash-quantity")).toHaveText("100,000주");
+  await expect(page.getByTestId("funds-margin-amount")).toHaveText("1,500,000,000원");
+  await expect(page.getByTestId("funds-margin-quantity")).toHaveText("300,000주");
+  await expect(page.getByTestId("funds-rates")).toContainText("적용 100%");
+  await expect(page.getByTestId("funds-rates")).toContainText("종목 100 · 계좌 40");
+  await expect(page.getByTestId("funds-unpaid")).toHaveCount(0);
   await expect(page.getByTestId("order-window").getByTestId("funds-panel")).toBeVisible();
 });
 
@@ -103,7 +106,7 @@ test("계좌 증거금률이 100%면 미수 허용을 고를 수 없다", async 
   const api = await ready(page, scenario, { accountRate: 100 });
   await openFunds(page);
   await expect(page.getByRole("button", { name: "미수 허용", exact: true })).toBeDisabled();
-  await expect(page.getByTestId("margin-locked")).toHaveText("계좌가 미수 불가(100%)입니다");
+  await expect(page.getByTestId("margin-locked")).toHaveText("계좌 증거금률이 100%라 미수를 허용할 수 없습니다");
   await expect(page.getByRole("button", { name: "미수 막기" })).toBeEnabled();
   expect(api.policyWrites).toHaveLength(0);
 });
