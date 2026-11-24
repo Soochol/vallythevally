@@ -15,7 +15,7 @@ use ts_rs::TS;
 use crate::api::{ApiErrorCode, KstDate, UnixSeconds};
 use crate::http::{ApiFailure, AppState, venue_param};
 use crate::quotes::effective_venue;
-use crate::shared_data::MinuteVenue;
+use crate::shared_data::{MinuteVenue, QuoteDay};
 pub use cache::QuoteCache;
 
 pub const MAX_RANGE_DAYS: i64 = 31;
@@ -165,24 +165,27 @@ fn minute_venue(venue: Venue) -> MinuteVenue {
     }
 }
 
-async fn totals(
-    State(st): State<Arc<AppState>>,
-    Extension(cache): Extension<Arc<QuoteCache>>,
-    Path(code): Path<String>,
-    Query(q): Query<HashMap<String, String>>,
-) -> Result<Json<QuoteTotalsPage>, ApiFailure> {
-    let params = parse_common(&code, &q)?;
-    let venue = resolve_venue(&st, params.code, params.requested_venue);
+fn internal_error(context: &str, detail: impl std::fmt::Display) -> ApiFailure {
+    tracing::error!(reason = %detail, "{context}");
+    ApiFailure::new(ApiErrorCode::Internal, context)
+}
+
+struct PreparedDays {
+    venue: Venue,
+    days: Vec<QuoteDayInfo>,
+    inputs: Vec<(domain::KstDate, Arc<QuoteDay>)>,
+}
+
+async fn load_days(st: &AppState, cache: &QuoteCache, params: &CommonParams) -> Result<PreparedDays, ApiFailure> {
+    let venue = resolve_venue(st, params.code, params.requested_venue);
     let Some(dir) = st.shared_data.dir() else {
-        let days = params.dates.into_iter().map(|date| QuoteDayInfo { date: KstDate(date), state: QuoteDayState::None }).collect();
-        return Ok(Json(QuoteTotalsPage { venue: venue.into(), days, points: Vec::new() }));
+        let days = params.dates.iter().map(|&date| QuoteDayInfo { date: KstDate(date), state: QuoteDayState::None }).collect();
+        return Ok(PreparedDays { venue, days, inputs: Vec::new() });
     };
     let loaded = cache
         .load_range(dir, params.code.as_str(), &params.dates, &st.clock)
         .await
-        .map_err(|e| ApiFailure::new(ApiErrorCode::Internal, format!("분 호가를 읽지 못했습니다: {e}")))?;
-    let now = st.clock.now();
-    let mv = minute_venue(venue);
+        .map_err(|e| internal_error("분 호가를 읽지 못했습니다", e))?;
     let mut days = Vec::with_capacity(loaded.len());
     let mut inputs = Vec::new();
     for item in loaded {
@@ -191,6 +194,19 @@ async fn totals(
             inputs.push((item.date, day));
         }
     }
+    Ok(PreparedDays { venue, days, inputs })
+}
+
+async fn totals(
+    State(st): State<Arc<AppState>>,
+    Extension(cache): Extension<Arc<QuoteCache>>,
+    Path(code): Path<String>,
+    Query(q): Query<HashMap<String, String>>,
+) -> Result<Json<QuoteTotalsPage>, ApiFailure> {
+    let params = parse_common(&code, &q)?;
+    let PreparedDays { venue, days, inputs } = load_days(&st, &cache, &params).await?;
+    let now = st.clock.now();
+    let mv = minute_venue(venue);
     let period = params.period;
     let after = params.after;
     let points = if inputs.is_empty() {
@@ -204,7 +220,7 @@ async fn totals(
             points
         })
         .await
-        .map_err(|e| ApiFailure::new(ApiErrorCode::Internal, format!("분 호가 집계 작업이 멈췄습니다: {e}")))?
+        .map_err(|e| internal_error("분 호가 집계 작업이 멈췄습니다", e))?
     };
     Ok(Json(QuoteTotalsPage { venue: venue.into(), days, points }))
 }
@@ -217,25 +233,9 @@ async fn depth(
 ) -> Result<Json<QuoteDepthPage>, ApiFailure> {
     let params = parse_common(&code, &q)?;
     let source = parse_source(&q)?;
-    let venue = resolve_venue(&st, params.code, params.requested_venue);
-    let Some(dir) = st.shared_data.dir() else {
-        let days = params.dates.into_iter().map(|date| QuoteDayInfo { date: KstDate(date), state: QuoteDayState::None }).collect();
-        return Ok(Json(QuoteDepthPage { venue: venue.into(), source, days, points: Vec::new() }));
-    };
-    let loaded = cache
-        .load_range(dir, params.code.as_str(), &params.dates, &st.clock)
-        .await
-        .map_err(|e| ApiFailure::new(ApiErrorCode::Internal, format!("분 호가를 읽지 못했습니다: {e}")))?;
+    let PreparedDays { venue, days, inputs } = load_days(&st, &cache, &params).await?;
     let now = st.clock.now();
     let mv = minute_venue(venue);
-    let mut days = Vec::with_capacity(loaded.len());
-    let mut inputs = Vec::new();
-    for item in loaded {
-        days.push(QuoteDayInfo { date: KstDate(item.date), state: item.state });
-        if let Some(day) = item.day {
-            inputs.push((item.date, day));
-        }
-    }
     let period = params.period;
     let after = params.after;
     let points = if inputs.is_empty() {
@@ -249,7 +249,7 @@ async fn depth(
             points
         })
         .await
-        .map_err(|e| ApiFailure::new(ApiErrorCode::Internal, format!("분 호가 집계 작업이 멈췄습니다: {e}")))?
+        .map_err(|e| internal_error("분 호가 집계 작업이 멈췄습니다", e))?
     };
     Ok(Json(QuoteDepthPage { venue: venue.into(), source, days, points }))
 }
