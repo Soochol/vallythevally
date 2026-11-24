@@ -5,7 +5,7 @@ import { moveRect, resizeRect, type Guides, type ResizeHandle } from "../../layo
 import type { WindowId } from "../../layout/kinds";
 import type { CanvasPlacement, Rect } from "../../layout/placement";
 import { useLayoutStore, windowName, type WindowState } from "../../stores/layout";
-import { useUiStore } from "../../stores/ui";
+import { ladderRateHidden, useUiStore } from "../../stores/ui";
 import { useSelectionStore } from "../../stores/selection";
 import { closeWindow } from "./manage";
 import { watchPointerCapture } from "./pointerCapture";
@@ -58,7 +58,7 @@ export function useCanvasInteraction(canvas: CanvasPlacement, windows: readonly 
   const validRef = useRef(valid);
   validRef.current = valid;
   const minimumNotice = (window: WindowState) => {
-    const min = minWindowSize(window.kind);
+    const min = minWindowSize(window.kind, ladderRateHidden());
     useSelectionStore.getState().showToast(`${windowName(useLayoutStore.getState().layout.windows, window)} 창은 ${min.w}×${min.h}보다 작게 줄일 수 없습니다`);
   };
 
@@ -74,7 +74,7 @@ export function useCanvasInteraction(canvas: CanvasPlacement, windows: readonly 
       const { start } = active;
       const boxes = rectsForArea(start.expected, latest.current.windows, start.area);
       const others = latest.current.windows.filter((window) => window.id !== start.window.id).map((window) => boxes[window.id]!);
-      const result = start.operation.kind === "move" ? { ...moveRect(start.rect, offset, others, start.area), atMinimum: false } : resizeRect(start.rect, start.operation.handle, offset, minWindowSize(start.window.kind), others, start.area);
+      const result = start.operation.kind === "move" ? { ...moveRect(start.rect, offset, others, start.area), atMinimum: false } : resizeRect(start.rect, start.operation.handle, offset, minWindowSize(start.window.kind, ladderRateHidden()), others, start.area);
       const front = bringToFront(start.expected, start.window.id);
       const next = { ...front, rects: { ...front.rects, [start.window.id]: toRatio(result.rect, start.area) } };
       gesture.current = { kind: "dragging", start, next, atMinimum: result.atMinimum };
@@ -179,7 +179,7 @@ export function useCanvasInteraction(canvas: CanvasPlacement, windows: readonly 
     event.preventDefault();
     const boxes = rectsForArea(canvas, windows, area);
     const others = windows.filter((candidate) => candidate.id !== window.id).map((candidate) => boxes[candidate.id]!);
-    const result = event.shiftKey ? resizeRect(boxes[window.id]!, offset.x ? "e" : "s", offset, minWindowSize(window.kind), others, area) : { ...moveRect(boxes[window.id]!, offset, others, area), atMinimum: false };
+    const result = event.shiftKey ? resizeRect(boxes[window.id]!, offset.x ? "e" : "s", offset, minWindowSize(window.kind, ladderRateHidden()), others, area) : { ...moveRect(boxes[window.id]!, offset, others, area), atMinimum: false };
     const front = bringToFront(canvas, window.id);
     useLayoutStore.getState().commitCanvas({ session, expected: canvas, next: { ...front, rects: { ...front.rects, [window.id]: toRatio(result.rect, area) } } });
     choose(window);

@@ -4,18 +4,15 @@ import type { SymbolCode } from "../../api/generated/SymbolCode";
 import { direction, formatChange, formatPercent, formatPrice, formatVolume } from "../../lib/format";
 import { isIndexCode } from "../../lib/symbol";
 import type { WatchColumn } from "../../lib/watchlist";
-import { useVenue } from "../../stores/ui";
 import { useWatchQuote } from "../../stores/watchQuote";
 import { DIRECTION_TEXT, RateBadge } from "../list/listRow";
-import { NXT_FALLBACK_TITLE } from "../venue/VenuePicker";
 
 export const quoteCellIds = (base: string, columns: readonly WatchColumn[]) => ({
   name: `${base}-name`,
-  venue: `${base}-venue`,
   expected: `${base}-expected`,
   limited: `${base}-limited`,
   column: (column: WatchColumn) => `${base}-${column}`,
-  labelledBy: [`${base}-name`, `${base}-venue`, ...columns.map((c) => `${base}-${c}`), `${base}-expected`, `${base}-limited`].join(" "),
+  labelledBy: [`${base}-name`, ...columns.map((c) => `${base}-${c}`), `${base}-expected`, `${base}-limited`].join(" "),
 });
 
 function cellText(column: WatchColumn, quote: Quote, isIndex: boolean): string {
@@ -66,9 +63,7 @@ interface QuoteCellsProps {
 
 export function QuoteCells({ code, columns, ids }: QuoteCellsProps) {
   const { quote, limited } = useWatchQuote(code);
-  const appVenue = useVenue();
   const isIndex = isIndexCode(code);
-  const fallsBackToCombined = quote?.venue != null && quote.venue !== appVenue;
   const isExpected = quote?.source === "expected";
   const priceTick = useTickColor(quote?.price);
   const rowDirection = quote ? direction(quote.change) : "flat";
@@ -86,7 +81,6 @@ export function QuoteCells({ code, columns, ids }: QuoteCellsProps) {
                 <span id={ids.column(column)}>{value ?? MISSING}</span>
                 {isExpected && <span aria-hidden="true" title="예상체결가">*</span>}
               </span>
-              {fallsBackToCombined && <span aria-hidden="true" title={NXT_FALLBACK_TITLE} className="pt-0.5 text-xs text-text-3">통합</span>}
             </span>
           );
         if (column === "changeRate")
@@ -101,7 +95,6 @@ export function QuoteCells({ code, columns, ids }: QuoteCellsProps) {
           </span>
         );
       })}
-      <span id={ids.venue} className="sr-only">{fallsBackToCombined ? "통합 시세" : ""}</span>
       <span id={ids.expected} className="sr-only">{isExpected ? "예상체결" : ""}</span>
       <span id={ids.limited} className="sr-only">{limited ? "실시간 아님" : ""}</span>
       {limited && columns.length > 0 && <span aria-hidden="true" title="실시간 아님" className="absolute right-1 top-1/2 size-1.5 -translate-y-1/2 rounded-full bg-warning" />}

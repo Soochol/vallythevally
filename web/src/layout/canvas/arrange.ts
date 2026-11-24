@@ -1,4 +1,4 @@
-import type { WindowId, WindowKind, WindowRef } from "../kinds";
+import { isLadderKind, LADDER_RATE_WIDTH, type WindowId, type WindowKind, type WindowRef } from "../kinds";
 import type { CanvasPlacement, Rect } from "../placement";
 import { clamp, keepHeadInArea, minWindowSize, toPx, toRatio, WINDOW_GAP, type Area, type Size } from "./geometry";
 
@@ -20,10 +20,12 @@ export const DEFAULT_WINDOW_SIZE: Readonly<Record<WindowKind, Size>> = Object.fr
 
 const sameSpot = (a: Rect, b: Rect): boolean => Math.abs(a.x - b.x) < 1 && Math.abs(a.y - b.y) < 1;
 
-export function placeNewWindow(kind: WindowKind, others: readonly Rect[], area: Area): Rect {
-  const min = minWindowSize(kind);
+const defaultWidth = (kind: WindowKind, rateHidden: boolean): number => DEFAULT_WINDOW_SIZE[kind].w - (rateHidden && isLadderKind(kind) ? LADDER_RATE_WIDTH : 0);
+
+export function placeNewWindow(kind: WindowKind, others: readonly Rect[], area: Area, rateHidden = false): Rect {
+  const min = minWindowSize(kind, rateHidden);
   const wanted = DEFAULT_WINDOW_SIZE[kind];
-  const w = Math.max(min.w, Math.min(wanted.w, area.w));
+  const w = Math.max(min.w, Math.min(defaultWidth(kind, rateHidden), area.w));
   const h = Math.max(min.h, Math.min(wanted.h, area.h));
   let rect = keepHeadInArea({ x: (area.w - w) / 2, y: (area.h - h) / 2, w, h }, area);
   for (let step = 0; step < others.length && others.some((other) => sameSpot(other, rect)); step++) {
@@ -37,7 +39,7 @@ type Column = { windows: WindowRef[]; minHeight: number };
 function packColumns(windows: readonly WindowRef[], height: number): Column[] {
   const columns: Column[] = [];
   for (const window of windows) {
-    const need = minWindowSize(window.kind).h;
+    const need = minWindowSize(window.kind, window.rateHidden).h;
     const last = columns.at(-1);
     if (last && last.minHeight + WINDOW_GAP + need <= height) {
       last.windows.push(window);
@@ -74,7 +76,7 @@ export function tidyWindows(windows: readonly WindowRef[], area: Area): { rects:
     const extra = (area.h - column.minHeight) / column.windows.length;
     let y = 0;
     for (const window of column.windows) {
-      const min = minWindowSize(window.kind);
+      const min = minWindowSize(window.kind, window.rateHidden);
       const h = min.h + extra;
       rects.set(window.id, { x, y, w, h });
       if (w < min.w - MIN_SIZE_TOLERANCE || h < min.h - MIN_SIZE_TOLERANCE) undersized++;
@@ -112,11 +114,11 @@ export function fitCanvas(placement: CanvasPlacement | null, windows: readonly W
     else changed = true;
   }
   const order = [...new Set(placement.order)].filter((id) => rects.has(id));
-  for (const { id, kind } of windows) {
+  for (const { id, kind, rateHidden } of windows) {
     if (order.includes(id)) continue;
     if (!rects.has(id)) {
       const others = [...rects.values()].map((rect) => toPx(rect, area));
-      rects.set(id, toRatio(placeNewWindow(kind, others, area), area));
+      rects.set(id, toRatio(placeNewWindow(kind, others, area, rateHidden), area));
       changed = true;
     }
     order.push(id);
@@ -132,11 +134,11 @@ export function bringToFront(placement: CanvasPlacement, id: WindowId): CanvasPl
 
 export function rectsForArea(placement: CanvasPlacement, windows: readonly WindowRef[], area: Area): Record<WindowId, Rect> {
   const drawn = new Map<WindowId, Rect>();
-  for (const { id, kind } of windows) {
+  for (const { id, kind, rateHidden } of windows) {
     const stored = storedRect(placement, id);
     if (!stored) continue;
     const px = toPx(stored, area);
-    const min = minWindowSize(kind);
+    const min = minWindowSize(kind, rateHidden);
     const w = Math.max(px.w, min.w);
     const h = Math.max(px.h, min.h);
     const grown = w === px.w && h === px.h ? px : { x: clamp(px.x, Math.min(px.x, 0), area.w - w), y: clamp(px.y, Math.min(px.y, 0), area.h - h), w, h };

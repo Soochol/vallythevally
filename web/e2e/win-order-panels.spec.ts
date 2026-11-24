@@ -3,9 +3,10 @@ import type { LayoutWindow } from "../src/api/generated/LayoutWindow";
 import type { LinkColor } from "../src/api/generated/LinkColor";
 import type { TradingExecution } from "../src/api/generated/TradingExecution";
 import type { TradingHolding } from "../src/api/generated/TradingHolding";
+import { DEFAULT_ORDER_SETTINGS } from "../src/features/order/orderSettings";
 import { CONNECTED_KIWOOM } from "./fixtures/scenario";
 import { type Scenario, cell, DEFAULT_LAYOUT_ID, expect, pollSaved, test, windowTabs } from "./harness";
-import { accountData, ACCOUNT, askAtLastSnapshot, SETTINGS, BASE, CODE, cellAt, center, chipAt, commandOf, dragChip, INFO_PAGE_1, INFO_PAGE_2, INFO_PAGE_2_VALUES, infoCard, infoLabels, infoTab, infoValues, KIS_ACCOUNT, kisAccount, nxtTraded, openOrder, openOrderWindow, ordersOn, otherAccount, SECOND_ACCOUNT, status, tradingApi, win, writesTo } from "./order-window";
+import { accountData, ACCOUNT, askAtLastSnapshot, SETTINGS, BASE, CODE, cellAt, center, chipAt, commandOf, dragChip, INFO_PAGE_1, INFO_PAGE_2, INFO_PAGE_2_VALUES, infoCard, infoLabels, infoTab, infoValues, KIS_ACCOUNT, kisAccount, nxtTraded, openOrder, openOrderWindow, ordersOn, otherAccount, pinQuote, FUNDAMENTAL_FIGURES, SECOND_ACCOUNT, status, tradingApi, win, writesTo } from "./order-window";
 
 const HOLDING: TradingHolding = { code: CODE, name: "삼성전자", quantity: 120, sellableQuantity: 100, averagePrice: 70_040, currentPrice: BASE, evaluationProfit: -4_800, profitRateCenti: -57 };
 const FILL: TradingExecution = { orderNo: "0000010", code: CODE, name: "삼성전자", side: "buy", quantity: 5, price: 70_000, time: "093015", venue: "krx" };
@@ -413,6 +414,80 @@ test("등락률 표시를 끄면 사다리 어느 행에도 등락률이 없고 
   await expect(rates).toHaveCount(0);
   await page.getByRole("checkbox", { name: "등락률 표시" }).check();
   await expect(rates).toHaveCount(20);
+});
+
+async function cutTexts(area: Locator): Promise<string[]> {
+  return area.evaluate((root) => {
+    const cut: string[] = [];
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+    for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+      const range = document.createRange();
+      range.selectNodeContents(node);
+      const text = range.getBoundingClientRect();
+      if (!node.textContent?.trim() || text.width === 0 || node.parentElement?.closest(".sr-only")) continue;
+      for (let box: Element | null = node.parentElement; box && root.contains(box); box = box.parentElement) {
+        const edge = box.getBoundingClientRect();
+        if (getComputedStyle(box).overflowX !== "visible" && (text.right > edge.right + 1 || text.left < edge.left - 1)) cut.push(`${node.textContent} < ${box.className}`);
+      }
+    }
+    return cut;
+  });
+}
+
+async function overlappingChildren(row: Locator): Promise<string[]> {
+  return row.evaluate((element) => {
+    const boxes = [...element.children].map((child) => ({ name: child.className, box: child.getBoundingClientRect() }));
+    return boxes.flatMap((a, i) => boxes.slice(i + 1).filter((b) => Math.min(a.box.right, b.box.right) - Math.max(a.box.left, b.box.left) > 1 && Math.min(a.box.bottom, b.box.bottom) - Math.max(a.box.top, b.box.top) > 1).map((b) => `${a.name} | ${b.name}`));
+  });
+}
+
+async function openNarrowest(page: Page, scenario: Scenario): Promise<void> {
+  const LARGE = 1_234_567;
+  ordersOn(scenario);
+  const api = tradingApi(scenario, [openOrder("0000001", "buy", 69_900, 10)]);
+  api.holdings = [{ ...HOLDING, quantity: LARGE, sellableQuantity: LARGE, evaluationProfit: -123_456_789, profitRateCenti: -1234 }];
+  nxtTraded(scenario, true);
+  pinQuote(scenario, CODE, BASE);
+  const large = <T extends object>(levels: T[]): T[] => levels.map((level) => ({ ...level, quantity: LARGE }));
+  const { asks, bids, ...rest } = askAtLastSnapshot();
+  scenario.reply((url) => url.pathname === `/api/symbols/${CODE}/fundamentals`, { body: { symbol: CODE, upperLimit: 91_000, lowerLimit: 49_000, ...FUNDAMENTAL_FIGURES } });
+  scenario.reply((url) => url.pathname === `/api/symbols/${CODE}/order-book`, { body: { ...rest, asks: large(asks), bids: large(bids), totalAskQuantity: 12_345_678, totalBidQuantity: 12_345_678 } });
+  scenario.reply((url) => url.pathname === `/api/symbols/${CODE}/trades`, { body: { symbol: CODE, venue: "combined", trades: [], skippedRows: 0 } });
+  const layout = scenario.documents.layout(DEFAULT_LAYOUT_ID);
+  const windows: LayoutWindow[] = [
+    { id: "cell-0", link: null, kind: "chart", symbol: CODE, venue: "combined", period: "D", chartSettings: SETTINGS },
+    { id: "order", link: null, kind: "order", venue: "krx" },
+    { id: "book", link: null, kind: "book" },
+  ];
+  const canvas = { rects: { "cell-0": { x: 0.8, y: 0, w: 0.2, h: 0.2 }, order: { x: 0.01, y: 0.01, w: 0.1, h: 0.95 }, book: { x: 0.45, y: 0.01, w: 0.1, h: 0.95 } }, order: ["cell-0", "order", "book"] };
+  scenario.documents.saveLayout({ ...layout, windows, placement: { v: 1, dock: null, canvas }, revision: layout.revision + 1 });
+  scenario.documents.saveUiState({ ...scenario.documents.uiState(), layoutMode: "canvas", orderSettings: { ...DEFAULT_ORDER_SETTINGS, rate: false } });
+  await page.goto("/");
+  await expect(cell(page)).toHaveAttribute("aria-busy", "false");
+  await expect(page.getByTestId("ladder-strength")).toHaveCount(2);
+  await expect(page.getByTestId("summary-quantity")).toContainText("1,234,567");
+  await expect(page.getByTestId("summary-buyable")).toContainText("500,000,000원");
+  lastTrade(scenario, 70_000, 1, 123_456);
+  for (const strength of await page.getByTestId("ladder-strength").all()) await expect(strength).toContainText("101.50%");
+}
+
+test("등락률을 끈 호가주문 창을 최소 폭 372px로 줄여도 글자가 잘리거나 겹치지 않고 금액 프리셋은 두 줄이 된다", async ({ page, scenario }) => {
+  await openNarrowest(page, scenario);
+  const quantityRow = page.getByTestId("order-quantity-row");
+  expect((await win(page).boundingBox())!.width).toBeCloseTo(372, 0);
+  for (const [kind, lines] of [["수량", 1], ["금액", 2]] as const) {
+    await quantityRow.getByRole("button", { name: kind, exact: true }).click();
+    expect(new Set(await quantityRow.locator(".od-presets, .od-qty-input, .od-gear").evaluateAll((parts) => parts.map((part) => Math.round(part.getBoundingClientRect().top)))).size).toBe(lines);
+    expect(await cutTexts(win(page))).toEqual([]);
+    for (const row of [quantityRow, page.getByTestId("order-summary"), page.locator(".od-account-bar"), page.getByTestId("order-symbol-head")]) expect(await overlappingChildren(row)).toEqual([]);
+  }
+});
+
+test("등락률을 끈 10호가 창을 최소 폭 232px로 줄여도 잔량·체결·총잔량 글자가 잘리지 않는다", async ({ page, scenario }) => {
+  await openNarrowest(page, scenario);
+  const book = page.getByTestId("book-window");
+  expect((await book.boundingBox())!.width).toBeCloseTo(232, 0);
+  expect(await cutTexts(book)).toEqual([]);
 });
 
 test("보유가 없으면 평단가 점 옆에 안내가 보이고 보유가 있으면 점이 가격 숫자 왼쪽에 있으며 끄면 사라진다", async ({ page, scenario }) => {

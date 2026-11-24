@@ -11,7 +11,7 @@ import { groupOfWindow, listGroups } from "../../layout/dock/tree";
 import type { WindowId } from "../../layout/kinds";
 import { useLayoutStore, windowRefs } from "../../stores/layout";
 import { useSelectionStore } from "../../stores/selection";
-import { useUiStore } from "../../stores/ui";
+import { useLadderRateShown, useUiStore } from "../../stores/ui";
 import { CanvasWorkspace } from "./CanvasWorkspace";
 import { canvasPanelId } from "./canvasInteraction";
 import { Divider } from "./Divider";
@@ -37,7 +37,8 @@ export function Workspace() {
   const canvasArea = useMemo(() => area && workArea(area.w, area.h - CANVAS_DOCK_HEIGHT), [area]);
   const windows = useLayoutStore((s) => s.layout.windows);
   const saved = useLayoutStore((s) => s.layout.placement.dock);
-  const refs = useMemo(() => windowRefs(windows), [windows]);
+  const rateShown = useLadderRateShown();
+  const refs = useMemo(() => windowRefs(windows, !rateShown), [windows, rateShown]);
   const dock = useMemo(() => fitDock(saved, refs), [saved, refs]);
   const canvas = useMemo(() => canvasArea && fitCanvas(placement.canvas, refs, canvasArea), [placement.canvas, refs, canvasArea]);
   const [draft, setDraft] = useState<DockPlacement | null>(null);

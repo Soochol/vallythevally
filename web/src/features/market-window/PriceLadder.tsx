@@ -28,6 +28,7 @@ interface Props {
   readonly mark?: LadderMark;
   readonly expectedPrice?: number | null;
   readonly firstBidIndex?: number;
+  readonly rateShown?: boolean;
 }
 
 const TONE = { up: "mw-up", down: "mw-down", flat: "" } as const;
@@ -81,7 +82,7 @@ const sameProps = (a: object, b: object): boolean => {
 const sameNode = (a: ReactNode, b: ReactNode): boolean =>
   Object.is(a, b) || (isValidElement(a) && isValidElement(b) && a.type === b.type && a.key === b.key && sameProps(a.props as object, b.props as object));
 
-function Price({ row, previousClose, markTitle }: { row: LadderRow; previousClose: number | null; markTitle: string | null }) {
+function Price({ row, previousClose, rateShown, markTitle }: { row: LadderRow; previousClose: number | null; rateShown: boolean; markTitle: string | null }) {
   if (row.price === null) return <div className="mw-px" />;
   const tone = priceTone(row.price, previousClose);
   return (
@@ -90,7 +91,7 @@ function Price({ row, previousClose, markTitle }: { row: LadderRow; previousClos
         {markTitle !== null && <i className="mw-px-mark" data-testid="ladder-mark" title={markTitle} />}
         {formatPrice(row.price, false)}
       </span>
-      {row.rate !== null && <small>{formatPercent(row.rate)}</small>}
+      {rateShown && row.rate !== null && <small>{formatPercent(row.rate)}</small>}
     </div>
   );
 }
@@ -100,6 +101,7 @@ interface LineProps {
   readonly side: "ask" | "bid";
   readonly columns: string;
   readonly previousClose: number | null;
+  readonly rateShown: boolean;
   readonly markTitle: string | null;
   readonly expected: boolean;
   readonly left: ReactNode;
@@ -107,14 +109,14 @@ interface LineProps {
 }
 
 const sameLine = (a: LineProps, b: LineProps): boolean =>
-  sameRow(a.row, b.row) && a.side === b.side && a.columns === b.columns && a.previousClose === b.previousClose && a.markTitle === b.markTitle && a.expected === b.expected && sameNode(a.left, b.left) && sameNode(a.right, b.right);
+  sameRow(a.row, b.row) && a.side === b.side && a.columns === b.columns && a.previousClose === b.previousClose && a.rateShown === b.rateShown && a.markTitle === b.markTitle && a.expected === b.expected && sameNode(a.left, b.left) && sameNode(a.right, b.right);
 
-const LadderLine = memo(function LadderLine({ row, side, columns, previousClose, markTitle, expected, left, right }: LineProps) {
+const LadderLine = memo(function LadderLine({ row, side, columns, previousClose, rateShown, markTitle, expected, left, right }: LineProps) {
   return (
     <div className="mw-lr" data-side={side} data-current={row.current ? "" : undefined} data-expected={expected ? "" : undefined} data-empty={row.price === null ? "" : undefined} style={{ gridTemplateColumns: columns }}>
       {left}
       {row.ask ? <Quantity side="ask" quantity={row.ask.quantity} change={row.ask.change} ratio={row.askRatio} /> : <div className="mw-qty" data-side="ask" />}
-      <Price row={row} previousClose={previousClose} markTitle={markTitle} />
+      <Price row={row} previousClose={previousClose} rateShown={rateShown} markTitle={markTitle} />
       {row.bid ? <Quantity side="bid" quantity={row.bid.quantity} change={row.bid.change} ratio={row.bidRatio} /> : <div className="mw-qty" data-side="bid" />}
       {right}
     </div>
@@ -124,7 +126,7 @@ const LadderLine = memo(function LadderLine({ row, side, columns, previousClose,
 export const ladderColumns = (hasLeft: boolean, hasRight: boolean): string =>
   `${hasLeft ? "var(--size-64) " : ""}minmax(0, 1fr) var(--mw-price-col, var(--size-133)) minmax(0, 1fr)${hasRight ? " var(--size-64)" : ""}`;
 
-export function PriceLadder({ rows, previousClose, slots, rowSlots, mark, expectedPrice = null, firstBidIndex = ROWS_ABOVE_BASE }: Props) {
+export function PriceLadder({ rows, previousClose, slots, rowSlots, mark, expectedPrice = null, firstBidIndex = ROWS_ABOVE_BASE, rateShown = true }: Props) {
   const columns = ladderColumns(slots?.left !== undefined, slots?.right !== undefined);
   const boxStart = tradeBoxStart(rows, firstBidIndex);
   const boxRows = rows.length - boxStart;
@@ -132,7 +134,7 @@ export function PriceLadder({ rows, previousClose, slots, rowSlots, mark, expect
   return (
     <div className="mw-ladder" data-testid="price-ladder">
       {rows.map((row, index) => (
-        <LadderLine key={row.key} row={row} side={index < firstBidIndex ? "ask" : "bid"} columns={columns} previousClose={previousClose}
+        <LadderLine key={row.key} row={row} side={index < firstBidIndex ? "ask" : "bid"} columns={columns} previousClose={previousClose} rateShown={rateShown}
           markTitle={mark !== undefined && mark.price === row.price && row.price !== null && !row.repeat ? mark.label : null}
           expected={expectedPrice !== null && row.price === expectedPrice && !row.repeat} left={slots?.left?.(row)} right={slots?.right?.(row)} />
       ))}

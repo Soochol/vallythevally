@@ -41,4 +41,18 @@ export const windowId = (raw: string): WindowId => raw as WindowId;
 export interface WindowRef {
   id: WindowId;
   kind: WindowKind;
+  rateHidden?: boolean;
 }
+
+export const LADDER_RATE_WIDTH = 48;
+
+export const isLadderKind = (kind: WindowKind): boolean => kind === "book" || kind === "order";
+
+const withoutRate = ({ w, h }: WindowKindSpec["minSize"]): WindowKindSpec["minSize"] => Object.freeze({ w: w - LADDER_RATE_WIDTH, h });
+
+const RATE_HIDDEN_MIN_SIZES: Partial<Record<WindowKind, WindowKindSpec["minSize"]>> = {
+  book: withoutRate(WINDOW_KINDS.book.minSize),
+  order: withoutRate(WINDOW_KINDS.order.minSize),
+};
+
+export const contentMinSize = (kind: WindowKind, rateHidden = false): WindowKindSpec["minSize"] => (rateHidden ? RATE_HIDDEN_MIN_SIZES[kind] : undefined) ?? WINDOW_KINDS[kind].minSize;

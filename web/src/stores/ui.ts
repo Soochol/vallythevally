@@ -99,6 +99,10 @@ export const useTheme = (): Theme => useUiStore((s) => s.prefs.theme);
 
 export const useOrderSettings = (): OrderSettings => useUiStore((s) => s.prefs.orderSettings);
 
+export const useLadderRateShown = (): boolean => useUiStore((s) => s.prefs.orderSettings.rate);
+
+export const ladderRateHidden = (): boolean => !useUiStore.getState().prefs.orderSettings.rate;
+
 export const useActionKeys = (): ActionKeys => actualKeys(useUiStore((s) => s.prefs.hotkeys));
 
 export const currentActionKeys = (): ActionKeys => actualKeys(useUiStore.getState().prefs.hotkeys);

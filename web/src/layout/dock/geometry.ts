@@ -1,4 +1,4 @@
-import { WINDOW_HEAD_HEIGHT, WINDOW_KINDS, type WindowId, type WindowRef } from "../kinds";
+import { contentMinSize, WINDOW_HEAD_HEIGHT, type WindowId, type WindowRef } from "../kinds";
 import type { DockNode, DockPlacement, Rect } from "../placement";
 import { listGroups, rewriteGroups, updateSplit, type GroupNode, type SplitNode, type SplitPath } from "./tree";
 
@@ -8,7 +8,7 @@ export type DockSpace = { area: Size; gap: number; windows: readonly WindowRef[]
 export function windowMinSize(windows: readonly WindowRef[], window: WindowId): Size {
   const ref = windows.find((candidate) => candidate.id === window);
   if (!ref) throw new Error(`창 목록에 없는 창 ${window}의 최소 크기를 찾았습니다`);
-  return WINDOW_KINDS[ref.kind].minSize;
+  return contentMinSize(ref.kind, ref.rateHidden);
 }
 
 export function tabsMinSize(windows: readonly WindowRef[], tabs: readonly WindowId[]): Size {
