@@ -180,7 +180,6 @@ button.od-cellbtn:not(:disabled) small span { text-decoration:underline dotted; 
 .od-head { line-height:var(--size-20); display:flex; flex:none; align-items:center; gap:var(--s3); padding:var(--s3) var(--s4); border-bottom:var(--size-1) solid var(--line); font-variant-numeric:tabular-nums; }
 .od-head[data-mock] { background:var(--warning-soft); }
 .od-head-name { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:var(--fs-m); font-weight:600; }
-.od-head-code { flex:none; color:var(--text-2); font-family:var(--font-mono); font-size:var(--fs-xs); }
 .od-head-price { flex:none; margin-left:var(--s3); font-size:var(--fs-m); font-weight:600; }
 .od-head-rate { flex:none; font-size:var(--fs-s); font-weight:600; }
 .od-head-rate[data-tone=up] { color:var(--up); } .od-head-rate[data-tone=down] { color:var(--down); }

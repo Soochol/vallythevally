@@ -21,7 +21,6 @@ export const SymbolHead = memo(function SymbolHead({ code, name, lastPrice, prev
   return (
     <div className="od-head" data-testid={`${testIdPrefix}-head`} data-mock={mock ? "" : undefined}>
       <b className="od-head-name" data-testid={`${testIdPrefix}-name`} title={name ?? undefined}>{name ?? code}</b>
-      <span className="od-head-code" data-testid={`${testIdPrefix}-code`}>{code}</span>
       <span className="od-head-price" data-testid={`${testIdPrefix}-price`} data-tone={tone}>{lastPrice === null ? "-" : formatPrice(lastPrice, false)}</span>
       {rate !== null && <span className="od-head-rate" data-tone={tone}>{ARROW[tone]}{Math.abs(rate).toFixed(2)}%</span>}
       <Badge tone={marketOpen ? "success" : "neutral"} className="od-head-market">{marketOpen ? "장중" : "장 마감"}</Badge>

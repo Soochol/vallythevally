@@ -77,29 +77,6 @@ test("당일 체결을 먼저 구독한 뒤 조회하고 겹치는 행은 실시
   await expect(page.locator(".tr-qty-bar, .tr-big")).toHaveCount(0);
 });
 
-test("마우스를 올린 동안 목록이 밀리지 않고 새 체결 건수를 알리며 단추를 누르면 이어 붙는다", async ({ page, scenario }) => {
-  tradesOf(scenario, "combined");
-  const sub = await openTradesWindow(page, scenario);
-  await expect(rows(page)).toHaveCount(4);
-
-  await page.getByTestId("trade-tape").hover();
-  emit(scenario, sub, [live("10:00:04", 71_400, 5), live("10:00:05", 71_500, 6)]);
-  await expect(page.getByTestId("trade-pending")).toHaveText("새 체결 2건");
-  await expect(rows(page).first()).toContainText("10:00:03");
-  await expect(rows(page)).toHaveCount(4);
-
-  await page.getByTestId("trade-pending").click();
-  await expect(rows(page).first()).toContainText("10:00:05");
-  await expect(rows(page)).toHaveCount(6);
-  await expect(page.getByTestId("trade-pending")).toHaveCount(0);
-
-  emit(scenario, sub, [live("10:00:06", 71_600, 7)]);
-  await expect(page.getByTestId("trade-pending")).toHaveText("새 체결 1건");
-  await page.mouse.move(2, 2);
-  await expect(page.getByTestId("trade-pending")).toHaveCount(0);
-  await expect(rows(page).first()).toContainText("10:00:06");
-});
-
 test("KRX를 고르면 NXT 체결이 보이지 않는다", async ({ page, scenario }) => {
   tradesOf(scenario, "combined");
   const sub = await openTradesWindow(page, scenario);

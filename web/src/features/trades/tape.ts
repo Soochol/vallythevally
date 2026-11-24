@@ -92,7 +92,6 @@ export type TapeAction =
   | { type: "resync"; at: number }
   | { type: "hold" }
   | { type: "release" }
-  | { type: "flush" }
   | { type: "reset" };
 
 const KST_OFFSET_SECONDS = 9 * 3600;
@@ -228,24 +227,20 @@ export function tapeReducer(state: TapeState, action: TapeAction): TapeState {
       return closeGap(openGap(state, action.at), action.at);
     case "hold":
       return { ...state, holding: true };
-    case "release":
-    case "flush": {
+    case "release": {
       const flushed = { ...state, live: newestFirstCap([...state.pending, ...state.live]), pending: [] };
-      const settled = settleHistory({ ...flushed, holding: false });
-      return { ...settled, holding: action.type === "flush" && state.holding };
+      return settleHistory({ ...flushed, holding: false });
     }
   }
 }
 
 export interface TapeView {
   readonly entries: readonly TapeEntry[];
-  readonly pendingCount: number;
 }
 
 export function visibleEntries(state: TapeState, venue: Venue, minWon: number): TapeView {
   const keep = (entry: TapeEntry) => entry.kind === "gap" || (matchesVenue(entry, venue) && passesMinAmount(entry, minWon));
-  const entries = newestFirstCap([...state.live, ...state.history]).filter(keep);
-  return { entries, pendingCount: state.pending.filter((entry) => entry.kind === "trade" && keep(entry)).length };
+  return { entries: newestFirstCap([...state.live, ...state.history]).filter(keep) };
 }
 
 export interface BuySellSplit {

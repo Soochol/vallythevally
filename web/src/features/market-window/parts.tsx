@@ -41,12 +41,12 @@ export function Segmented<T extends string>({ label, options, value, disabled, o
   );
 }
 
-const COMBINED_ONLY_KINDS: readonly WindowKind[] = ["program", "brokers"];
+const COMBINED_ONLY_KINDS: readonly WindowKind[] = ["brokers"];
 const FOLLOWING_KINDS: readonly WindowKind[] = ["book", "order"];
 
 function CombinedOnlyBadge() {
   if (useVenue() === "combined") return null;
-  return <span className="mw-integrated" title="키움 프로그램·거래원은 KRX와 NXT를 합친 값입니다">통합</span>;
+  return <span className="mw-integrated" title="키움 거래원은 KRX와 NXT를 합친 값입니다">통합</span>;
 }
 
 function SubstitutedBadge({ code }: { code: SymbolCode }) {

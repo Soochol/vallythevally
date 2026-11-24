@@ -64,16 +64,14 @@ const ladderVisibility = (page: Page) => ladder(page).evaluate((element) => {
   return { current: current >= 0 && shown(all[current]!), asks: current < 0 ? 0 : all.filter((row, index) => index < current && row.getAttribute("data-side") === "ask" && shown(row)).length, bids: current < 0 ? 0 : all.filter((row, index) => index > current && row.getAttribute("data-side") === "bid" && shown(row)).length };
 });
 
-test("창 머리에 종목 이름과 코드가 보이고 연동된 종목이 바뀌면 따라 바뀐다", async ({ page, scenario }) => {
+test("창 머리에 종목 이름이 보이고 연동된 종목이 바뀌면 따라 바뀐다", async ({ page, scenario }) => {
   ordersOn(scenario);
   tradingApi(scenario);
   await openOrderWindow(page, scenario, true);
   const head = win(page).getByTestId("order-symbol-head");
   await expect(head.getByTestId("order-symbol-name")).toHaveText("삼성전자");
-  await expect(head.getByTestId("order-symbol-code")).toHaveText(CODE);
   await cell(page, 2).click();
   await expect(win(page)).toHaveAttribute("data-symbol", "000660");
-  await expect(head.getByTestId("order-symbol-code")).toHaveText("000660");
   await expect(head.getByTestId("order-symbol-name")).not.toHaveText("삼성전자");
 });
 

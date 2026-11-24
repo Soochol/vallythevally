@@ -1,7 +1,6 @@
 import type { Page } from "@playwright/test";
 import type { ClientMessage } from "../src/api/generated/ClientMessage";
 import type { FeedBook } from "../src/api/generated/FeedBook";
-import type { FeedTrade } from "../src/api/generated/FeedTrade";
 import type { LayoutWindow } from "../src/api/generated/LayoutWindow";
 import type { TradePrint } from "../src/api/generated/TradePrint";
 import { type Scenario, cell, DEFAULT_LAYOUT_ID, expect, pollSaved, test } from "./harness";
@@ -160,7 +159,6 @@ const clockOf = (secondsBack: number): string => {
   return `${two(Math.floor(second / 3600))}:${two(Math.floor((second % 3600) / 60))}:${two(second % 60)}`;
 };
 const history: TradePrint[] = Array.from({ length: TAPE_ROWS }, (_, i) => ({ time: clockOf(i), price: 71_000 + (i % 7) * 100, quantity: 10 + i, exchange: "krx" }));
-const liveTrade = (secondsAhead: number): FeedTrade => ({ t: Date.parse("2026-11-09T10:00:00+09:00") / 1000 + secondsAhead, price: 72_000, qty: 5, venue: "krx", strength: null });
 
 async function openTradesWindow(page: Page, scenario: Scenario): Promise<string> {
   scenario.on((url) => url.pathname === `/api/symbols/${CODE}/trades`, (request) => ({ body: { symbol: CODE, venue: new URL(request.url()).searchParams.get("venue") ?? "combined", trades: history, skippedRows: 0 } }));
@@ -189,19 +187,6 @@ test("체결 500건이 쌓여도 DOM 줄은 80개 이하이고 줄 높이는 24p
   await expect(rows.last()).toContainText(clockOf(TAPE_ROWS - 1));
   expect(await rows.count()).toBeLessThanOrEqual(DOM_ROW_LIMIT);
   await expect(page.getByText(clockOf(0))).toHaveCount(0);
-});
-
-test("체결 창에 포인터를 올리면 목록이 멈추고 새 체결 건수를 알린다", async ({ page, scenario }) => {
-  const sub = await openTradesWindow(page, scenario);
-  const rows = page.getByTestId("trade-row");
-  await expect(rows.first()).toContainText(clockOf(0));
-  await page.getByTestId("trade-body").hover();
-  scenario.live.emit({ type: "feed_trades", sub, seq: 1, trades: [liveTrade(1), liveTrade(2)] });
-  await expect(page.getByTestId("trade-pending")).toHaveText("새 체결 2건");
-  await expect(rows.first()).toContainText(clockOf(0));
-  await page.mouse.move(2, 2);
-  await expect(page.getByTestId("trade-pending")).toHaveCount(0);
-  await expect(rows.first()).toContainText("10:00:02");
 });
 
 for (const reducedMotion of ["no-preference", "reduce"] as const) {

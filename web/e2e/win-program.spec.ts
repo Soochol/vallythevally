@@ -2,7 +2,7 @@ import type { Page } from "@playwright/test";
 import type { FeedProgramRow } from "../src/api/generated/FeedProgramRow";
 import type { LayoutWindow } from "../src/api/generated/LayoutWindow";
 import type { ProgramTradePoint } from "../src/api/generated/ProgramTradePoint";
-import { type Scenario, cell, DEFAULT_LAYOUT_ID, expect, pickDesktopVenue, test, pollSaved } from "./harness";
+import { type Scenario, cell, DEFAULT_LAYOUT_ID, expect, test, pollSaved } from "./harness";
 
 const SETTINGS = { v: 1, style: "candle", scale: "normal", indicators: [], compare: [], panels: [] };
 const kstSeconds = (clock: string) => Date.parse(`2026-11-09T${clock}+09:00`) / 1000;
@@ -85,15 +85,4 @@ test("프로그램매매 자료가 없는 종목은 빈 상태를 보인다", as
   await openProgramWindow(page);
   await expect(page.getByText("이 종목은 프로그램 매매 자료가 없습니다")).toBeVisible();
   await expect(rowsOf(page)).toHaveCount(0);
-});
-
-test("앱 전체 거래소가 KRX이면 통합 표시가 붙는다", async ({ page, scenario }) => {
-  linkStock(scenario, "005930", [point("09:00:00", 10)]);
-  await openProgramWindow(page);
-  await expect(rowsOf(page)).toHaveCount(1);
-  const tab = page.getByRole("tab", { name: /^프로그램 체결/ });
-  await expect(tab.locator(".mw-integrated")).toHaveCount(0);
-  await pickDesktopVenue(page, "KRX");
-  await expect(tab.locator(".mw-integrated")).toHaveText("통합");
-  await expect(page.locator(".dock-panel .mw-integrated, .pg-head .mw-integrated")).toHaveCount(0);
 });

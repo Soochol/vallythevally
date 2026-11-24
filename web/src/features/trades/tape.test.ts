@@ -56,21 +56,23 @@ test("KRX를 고르면 NXT 실시간 체결과 거래소를 모르는 실시간 
   expect(times(state, "nxt")).toEqual(["l2"]);
 });
 
-test("마우스를 올린 동안 새 체결은 대기하고 벗어나면 맨 위에 이어 붙는다", () => {
+test("멈춘 동안 새 체결은 대기하고 풀면 맨 위에 이어 붙는다", () => {
   const held = run({ type: "live", trades: [live("10:00:00", 1, 1)], receivedAt: 0 }, { type: "hold" }, { type: "live", trades: [live("10:00:01", 2, 1), live("10:00:02", 3, 1)], receivedAt: 0 });
   expect(times(held)).toEqual(["l1"]);
-  expect(visibleEntries(held, "combined", 0).pendingCount).toBe(2);
-  expect(times(tapeReducer(held, { type: "release" }))).toEqual(["l3", "l2", "l1"]);
-  expect(tapeReducer(held, { type: "release" }).holding).toBe(false);
-  expect(times(tapeReducer(held, { type: "flush" }))).toEqual(["l3", "l2", "l1"]);
+  expect(held.pending).toHaveLength(2);
+  const released = tapeReducer(held, { type: "release" });
+  expect(times(released)).toEqual(["l3", "l2", "l1"]);
+  expect(released.holding).toBe(false);
+  expect(released.pending).toHaveLength(0);
 });
 
-test("마우스를 올린 동안에는 겹친 조회 행도 그대로 두었다가 단추를 누르면 정리한다", () => {
+test("멈춘 동안에는 겹친 조회 행도 그대로 두었다가 풀면 정리한다", () => {
   const history = tapeOf([print("10:00:03", 103, 1), print("10:00:01", 101, 1)]);
   const held = run({ type: "history", tape: history }, { type: "hold" }, { type: "live", trades: [live("10:00:02", 202, 5)], receivedAt: 0 });
   expect(times(held)).toEqual(["h103", "h101"]);
-  expect(times(tapeReducer(held, { type: "flush" }))).toEqual(["l202", "h101"]);
-  expect(tapeReducer(held, { type: "flush" }).holding).toBe(true);
+  const released = tapeReducer(held, { type: "release" });
+  expect(times(released)).toEqual(["l202", "h101"]);
+  expect(released.holding).toBe(false);
 });
 
 test("끊김은 구분 줄 하나로 보이고 이어지면 같은 줄이 닫힌다", () => {
