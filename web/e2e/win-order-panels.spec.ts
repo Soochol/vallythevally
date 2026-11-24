@@ -797,6 +797,27 @@ test("종목 탭을 누르면 상·하한가·52주 범위·시가총액·PER·P
   await expect(infoLabels(page)).toHaveText(INFO_PAGE_1);
 });
 
+test("쪽을 넘겨도 정보란 높이와 점 좌표가 같아 같은 자리를 눌러 왕복한다", async ({ page, scenario }) => {
+  ordersOn(scenario);
+  tradingApi(scenario);
+  await openOrderWindow(page, scenario);
+  await expect(infoLabels(page)).toHaveText(INFO_PAGE_1);
+  await expect(infoTab(page, "시세")).toHaveAttribute("title", "시세");
+  await expect(infoTab(page, "종목")).toHaveAttribute("title", "종목");
+  const beforeHeight = (await infoCard(page).boundingBox())!.height;
+  const quoteDot = await center(infoTab(page, "시세"));
+  const stockDot = await center(infoTab(page, "종목"));
+  await page.mouse.click(stockDot.x, stockDot.y);
+  await expect(infoTab(page, "종목")).toHaveAttribute("aria-selected", "true");
+  await expect(infoLabels(page)).toHaveText(INFO_PAGE_2);
+  expect((await infoCard(page).boundingBox())!.height).toBe(beforeHeight);
+  expect(await center(infoTab(page, "시세"))).toEqual(quoteDot);
+  expect(await center(infoTab(page, "종목"))).toEqual(stockDot);
+  await page.mouse.click(quoteDot.x, quoteDot.y);
+  await expect(infoTab(page, "시세")).toHaveAttribute("aria-selected", "true");
+  await expect(infoLabels(page)).toHaveText(INFO_PAGE_1);
+});
+
 test("탭은 초점이 가면 화살표·Enter·Space로 바뀐다", async ({ page, scenario }) => {
   ordersOn(scenario);
   tradingApi(scenario);

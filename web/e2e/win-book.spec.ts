@@ -7,7 +7,7 @@ import type { SymbolDaySummary } from "../src/api/generated/SymbolDaySummary";
 import type { TradePrint } from "../src/api/generated/TradePrint";
 import { type Scenario, cell, DEFAULT_LAYOUT_ID, expect, pickDesktopVenue, test, windowTabs, pollSaved } from "./harness";
 import { daySummaryOf } from "./fixtures/scenario";
-import { feedSubscriptions, FUNDAMENTAL_FIGURES, INFO_PAGE_1, INFO_PAGE_2, INFO_PAGE_2_ENDS, INFO_PAGE_2_VALUES, infoCard, infoLabels, infoTab, infoValues, nxtTraded, pinQuote, requestedVenues, venueScene } from "./order-window";
+import { center, feedSubscriptions, FUNDAMENTAL_FIGURES, INFO_PAGE_1, INFO_PAGE_2, INFO_PAGE_2_ENDS, INFO_PAGE_2_VALUES, infoCard, infoLabels, infoTab, infoValues, nxtTraded, pinQuote, requestedVenues, venueScene } from "./order-window";
 
 const SETTINGS = { v: 1, style: "candle", scale: "normal", indicators: [], compare: [], panels: [] };
 const CODE = "005930";
@@ -121,6 +121,8 @@ test("스냅샷 20행이 매도 1호가 기준 격자로 먼저 보이고 상세
   await expect(tabs).toHaveText("");
   await expect(tabs.getByRole("tab").nth(0)).toHaveAttribute("aria-label", "시세");
   await expect(tabs.getByRole("tab").nth(1)).toHaveAttribute("aria-label", "종목");
+  await expect(tabs.getByRole("tab").nth(0)).toHaveAttribute("title", "시세");
+  await expect(tabs.getByRole("tab").nth(1)).toHaveAttribute("title", "종목");
   const pager = (await tabs.boundingBox())!;
   expect(Math.abs(pager.y + pager.height / 2 - (card.y + card.height - CARD_ROW_HEIGHT / 2))).toBeLessThanOrEqual(2);
   await expect(infoTab(page, "시세")).toHaveAttribute("aria-selected", "true");
@@ -142,11 +144,28 @@ test("종목 탭을 누르면 상·하한가·52주 범위·시가총액·PER·P
   await expect(page.getByTestId("ladder-info-range")).toHaveAttribute("data-label", "52주 범위");
   const rowTops = await tops(ladderRows(page));
   expect(await tops(page.getByTestId("ladder-info"))).toEqual([0, 1, 4, 5, 6].map((row) => rowTops[row]));
-  expect((await infoCard(page).boundingBox())!.height).toBe(8 * CARD_ROW_HEIGHT);
+  expect((await infoCard(page).boundingBox())!.height).toBe(9 * CARD_ROW_HEIGHT);
   await expect(page.getByTestId("ladder-info").filter({ hasText: "하한가" }).locator("b")).toHaveAttribute("data-tone", "down");
   expect(await rangeRatio(page)).toBeCloseTo((70_000 - 51_000) / (88_000 - 51_000), 1);
 
   await infoTab(page, "시세").click();
+  await expect(infoTab(page, "시세")).toHaveAttribute("aria-selected", "true");
+  await expect(infoLabels(page)).toHaveText(INFO_PAGE_1);
+});
+
+test("쪽을 넘겨도 정보란 높이와 점 좌표가 같아 같은 자리를 눌러 왕복한다", async ({ page, scenario }) => {
+  await open(page, scenario, 70000);
+  await expect(infoLabels(page)).toHaveText(INFO_PAGE_1);
+  const beforeHeight = (await infoCard(page).boundingBox())!.height;
+  const quoteDot = await center(infoTab(page, "시세"));
+  const stockDot = await center(infoTab(page, "종목"));
+  await page.mouse.click(stockDot.x, stockDot.y);
+  await expect(infoTab(page, "종목")).toHaveAttribute("aria-selected", "true");
+  await expect(infoLabels(page)).toHaveText(INFO_PAGE_2);
+  expect((await infoCard(page).boundingBox())!.height).toBe(beforeHeight);
+  expect(await center(infoTab(page, "시세"))).toEqual(quoteDot);
+  expect(await center(infoTab(page, "종목"))).toEqual(stockDot);
+  await page.mouse.click(quoteDot.x, quoteDot.y);
   await expect(infoTab(page, "시세")).toHaveAttribute("aria-selected", "true");
   await expect(infoLabels(page)).toHaveText(INFO_PAGE_1);
 });
@@ -176,12 +195,15 @@ test("당일 범위 막대의 현재가 눈금이 (현재가−저가)/(고가�
   await expect.poll(async () => Math.abs((await rangeRatio(page)) - (70_200 - 69_400) / (70_400 - 69_400))).toBeLessThan(0.02);
 });
 
-test("고가·저가가 없으면 당일 범위 막대가 없고 카드는 한 줄 줄어든다", async ({ page, scenario }) => {
+test("고가·저가가 없으면 당일 범위 막대가 없고 정보란 높이와 아래 점 자리는 그대로다", async ({ page, scenario }) => {
   await open(page, scenario, 70000, 1000, [], { high: null, low: null });
   await expect(infoValues(page)).toHaveText(["69,900", "-", "-", "69,000", "+1,000 +1.45%", "123만", "864억"]);
   await expect(page.getByTestId("ladder-info-range")).toHaveCount(0);
   await expect(page.getByTestId("ladder-info-tick")).toHaveCount(0);
-  expect((await infoCard(page).boundingBox())!.height).toBe(8 * CARD_ROW_HEIGHT);
+  const card = (await infoCard(page).boundingBox())!;
+  expect(card.height).toBe(9 * CARD_ROW_HEIGHT);
+  const pager = (await infoCard(page).getByRole("tablist", { name: "상세 정보" }).boundingBox())!;
+  expect(Math.abs(pager.y + pager.height / 2 - (card.y + card.height - CARD_ROW_HEIGHT / 2))).toBeLessThanOrEqual(2);
 });
 
 test("교차 호가로 카드 자리 행에 매수 잔량이 있으면 잔량이 가려지지 않고 카드는 그 행 위까지만이다", async ({ page, scenario }) => {
