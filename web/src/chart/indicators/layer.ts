@@ -41,6 +41,7 @@ type Line = Plot & {
   shift: number;
   barOpacity: number;
   points: Point[];
+  drawnLastT: UnixSeconds | null;
   guides: IPriceLine[];
   legendValues: TrackedValues;
   legendDirty: boolean;
@@ -104,6 +105,7 @@ const GUIDES: Partial<Record<Kind, number[]>> = { rsi: [70, 30], stochSlow: [80,
 const tuple = (b: Bar): BarTuple => [b.t, b.o, b.h, b.l, b.c, b.v];
 const volumePoint = (b: Bar): Point => ({ t: b.t, v: b.v, up: b.c >= b.o });
 const isPlainVolume = (spec: IndicatorConfig["spec"]) => spec.kind === "volume" && spec.maPeriod === null;
+const isQuoteLine = (id: LineId) => id === "quoteAsk" || id === "quoteBid";
 const usesWorker = (config: IndicatorConfig) => isTechnical(config.spec) && !isPlainVolume(config.spec);
 
 function columnsOf(bars: readonly Bar[]): Columns {
@@ -677,7 +679,7 @@ export class IndicatorLayer {
       if (isVolumeOverPrice(config) && id === "volume") series.setSeriesOrder(0);
       const guides = i === 0 ? (GUIDES[config.spec.kind] ?? []).map((price) => series.createPriceLine(this.guide(price))) : [];
       const same = kept[i]?.id === id ? kept[i] : undefined;
-      return { ...plot, priceOverlay: isOverlay(config, id), id, shift: same?.shift ?? 0, barOpacity: barOpacityOf(config.style), points: same?.points ?? [], guides, legendValues: new TrackedValues(), legendDirty: true, legendHasGap: false };
+      return { ...plot, priceOverlay: isOverlay(config, id), id, shift: same?.shift ?? 0, barOpacity: barOpacityOf(config.style), points: same?.points ?? [], drawnLastT: null, guides, legendValues: new TrackedValues(), legendDirty: true, legendHasGap: false };
     });
   }
 
@@ -774,6 +776,7 @@ export class IndicatorLayer {
       line.points = points;
       if (line.overlay) line.series.setData(points.map((p, i) => ({ time: toChartTime(p.t), value: p.v, base: p.v, connect: period === "Q" || period === "Y" ? i > 0 && adjacentBucket(points[i - 1]!.t, p.t, period) : false })));
       else line.series.setData(points.map((p) => ({ time: toChartTime(p.t), value: p.v, color: p.v >= 0 ? this.host.tokens().upVol : this.host.tokens().downVol })));
+      line.drawnLastT = points.at(-1)?.t ?? null;
       line.series.applyOptions({ priceFormat: this.priceFormat(s.config) });
     }
   }
@@ -869,17 +872,26 @@ export class IndicatorLayer {
   private draw(line: Line, points: readonly Point[]): void {
     if (line.overlay) line.series.setData(line.priceOverlay ? this.overlayRows(points) : points.map((pt) => this.toOverlayPoint(pt)));
     else line.series.setData(points.map((pt) => this.toChart(line, pt)));
+    line.drawnLastT = points.at(-1)?.t ?? null;
   }
 
   private put(line: Line, pt: Point): void {
     if (line.overlay) {
-      const lastT = line.points.at(-1)?.t;
-      const historical = lastT !== undefined && pt.t < lastT;
-      const row = line.priceOverlay ? this.overlayPoint(pt) : this.toOverlayPoint(pt);
-      if (historical) line.series.update(row, true);
-      else line.series.update(row);
+      if (isQuoteLine(line.id)) {
+        const row = this.toOverlayPoint(pt);
+        if (line.drawnLastT !== null && pt.t < line.drawnLastT) {
+          line.series.update(row, true);
+        } else {
+          line.series.update(row);
+          line.drawnLastT = pt.t;
+        }
+        return;
+      }
+      line.series.update(line.priceOverlay ? this.overlayPoint(pt) : this.toOverlayPoint(pt));
+      if (line.drawnLastT === null || pt.t > line.drawnLastT) line.drawnLastT = pt.t;
     } else {
       line.series.update(this.toChart(line, pt));
+      if (line.drawnLastT === null || pt.t > line.drawnLastT) line.drawnLastT = pt.t;
     }
   }
 
@@ -933,6 +945,7 @@ export class IndicatorLayer {
       this.queue.forget(line);
       if (line.points.length) line.series.setData([]);
       line.points = [];
+      line.drawnLastT = null;
       line.legendValues.clear();
       line.legendDirty = true;
       line.legendHasGap = false;

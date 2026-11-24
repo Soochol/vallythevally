@@ -6,7 +6,7 @@ import type { UnixSeconds } from "../../api/generated/UnixSeconds";
 import type { Venue } from "../../api/generated/Venue";
 import { kstDateOf } from "../barJump";
 import { PERIOD_ORDER } from "../crosshairSync";
-import { type DateRange, missingRanges } from "./coverage";
+import { type DateRange, mergeRanges, missingFromRanges, rangesContain } from "./coverage";
 
 export interface QuoteKey {
   symbol: SymbolCode;
@@ -79,7 +79,7 @@ export class QuoteFeed<P extends { t: UnixSeconds }> implements QuoteView<P> {
   private _state: QuoteState = "loading";
   private readonly points = new Map<UnixSeconds, P>();
   private readonly days = new Map<string, QuoteDayState>();
-  private have: DateRange | null = null;
+  private have: DateRange[] = [];
   private need: DateRange | null = null;
   private receivedAny = false;
   private covering = false;
@@ -109,7 +109,7 @@ export class QuoteFeed<P extends { t: UnixSeconds }> implements QuoteView<P> {
     this._state = "loading";
     this.points.clear();
     this.days.clear();
-    this.have = null;
+    this.have = [];
     this.need = null;
     this.receivedAny = false;
     this.covering = false;
@@ -121,10 +121,7 @@ export class QuoteFeed<P extends { t: UnixSeconds }> implements QuoteView<P> {
     if (this.disposed || !this.key) return;
     const a = kstDateOf(from);
     const b = kstDateOf(to);
-    const range: DateRange = a <= b ? { from: a, to: b } : { from: b, to: a };
-    this.need = this.need
-      ? { from: range.from < this.need.from ? range.from : this.need.from, to: range.to > this.need.to ? range.to : this.need.to }
-      : range;
+    this.need = a <= b ? { from: a, to: b } : { from: b, to: a };
     if (!this.covering) this.pumpCover();
   }
 
@@ -150,7 +147,7 @@ export class QuoteFeed<P extends { t: UnixSeconds }> implements QuoteView<P> {
 
   private syncTimer(): void {
     const today = kstDateOf(this.deps.now());
-    const coversToday = this.have !== null && today >= this.have.from && today <= this.have.to;
+    const coversToday = rangesContain(this.have, today);
     const want = !this.disposed && this.key !== null && (this.failedCover || coversToday);
     if (want && this.timer === null) this.timer = setInterval(() => this.onTick(), TAIL_EVERY_MS);
     else if (!want && this.timer !== null) this.stopTimer();
@@ -171,7 +168,7 @@ export class QuoteFeed<P extends { t: UnixSeconds }> implements QuoteView<P> {
 
   private pumpCover(): void {
     if (this.disposed || !this.key || !this.need || this.covering) return;
-    const chunks = missingRanges(this.need, this.have);
+    const chunks = missingFromRanges(this.need, this.have);
     if (chunks.length === 0) {
       this.failedCover = false;
       this.syncTimer();
@@ -190,9 +187,7 @@ export class QuoteFeed<P extends { t: UnixSeconds }> implements QuoteView<P> {
         this.covering = false;
         this.coverAbort = null;
         this.receivedAny = true;
-        this.have = this.have
-          ? { from: chunk.from < this.have.from ? chunk.from : this.have.from, to: chunk.to > this.have.to ? chunk.to : this.have.to }
-          : chunk;
+        this.have = mergeRanges(this.have, chunk);
         for (const day of page.days) this.days.set(day.date, day.state);
         for (const pt of page.points) this.points.set(pt.t, pt);
         this._state = this.computeState();
@@ -221,10 +216,10 @@ export class QuoteFeed<P extends { t: UnixSeconds }> implements QuoteView<P> {
       return;
     }
     if (typeof document !== "undefined" && document.hidden) return;
-    if (this.tailing || !this.have) return;
+    if (this.tailing || this.have.length === 0) return;
     const now = this.deps.now();
     const today = kstDateOf(now);
-    if (today < this.have.from || today > this.have.to) return;
+    if (!rangesContain(this.have, today)) return;
     if (!inTailWindow(now)) return;
     const todayStart = Date.parse(`${today}T00:00:00+09:00`) / 1000;
     const todayEnd = todayStart + DAY_SECONDS;
