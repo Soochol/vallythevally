@@ -11,6 +11,9 @@ import type { IndicatorConfig, Panel } from "../settings";
 import type { ThemeTokens } from "../theme";
 import { toChartTime } from "../time";
 import type { PortListener } from "./client";
+import { formatVolume } from "../../lib/format";
+import type { QuoteTotalPoint } from "../../api/generated/QuoteTotalPoint";
+import type { QuoteState, QuoteView } from "../quotes/feed";
 import { specLines } from "./kinds";
 import { IndicatorLayer } from "./layer";
 import type { FromWorker, LineDraw, ToWorker } from "./protocol";
@@ -20,6 +23,7 @@ interface Datum {
   value?: number;
   base?: number;
   connect?: boolean;
+  break?: boolean;
   color?: string;
 }
 
@@ -42,12 +46,17 @@ class FakeSeries {
     this.sets.push(this.data);
   }
 
-  update(d: Datum): void {
+  update(d: Datum, historical = false): void {
     if (this.failNextUpdate) {
       this.failNextUpdate = false;
       throw new Error("시리즈가 실패함");
     }
     const last = this.data[this.data.length - 1];
+    if (historical && last && d.time < last.time) {
+      const old = this.data.findIndex((known) => known.time === d.time);
+      if (old >= 0) this.data[old] = d;
+      return;
+    }
     if (last && d.time < last.time) {
       const rejected = `${d.time} < ${last.time}`;
       this.rejected.push(rejected);
@@ -851,4 +860,83 @@ test("가격 지표 범례 원천은 끝점 체결만 반영해 같은 모양은
   expect(maTracked.shapeVersion).toBe(maVersion + 2);
   expect(volTracked.shapeVersion).toBe(volVersion + 2);
   f.layer.dispose();
+});
+
+const TOTALS: IndicatorConfig = { id: "totals", spec: { kind: "quoteTotals" }, panel: "quotes", visible: true, style: { colors: ["ind-1"], width: 1 } };
+
+function totalsView(values: Record<number, [number, number]>, state: QuoteState = "ready"): QuoteView<QuoteTotalPoint> {
+  const points = new Map(Object.entries(values).map(([minute, [ask, bid]]) => [at(Number(minute)), { t: at(Number(minute)), ask, bid }]));
+  return { state, at: (t) => points.get(t) };
+}
+
+function totalsFixture(minutes: number[]) {
+  const f = fixture("1m", [TOTALS], [{ id: "quotes", stretch: 0.25 }]);
+  f.layer.reset({ bars: minutes.map((m) => bar(m)), current: null, nextBefore: null });
+  const [ask, bid] = f.series as [FakeSeries, FakeSeries];
+  return { ...f, ask, bid };
+}
+
+const totalAt = (minute: number, value: number, extra: { break?: true } = {}): Datum => ({ time: toChartTime(at(minute)), value, base: value, ...extra });
+const optionsOf = (s: FakeSeries) => Object.assign({}, ...s.options) as { color?: string; lineWidth?: number };
+
+test("총잔량 선은 봉이 있는 자리에 그리고 빈 봉에서 끊는다", () => {
+  const f = totalsFixture(range(0, 5));
+  f.layer.setQuoteTotals(totalsView({ 0: [10, 20], 1: [11, 21], 3: [13, 23], 4: [14, 24], 99: [1, 1] }));
+  f.layer.flush();
+  expect(f.ask.data).toEqual([totalAt(0, 10), totalAt(1, 11), totalAt(3, 13, { break: true }), totalAt(4, 14)]);
+  expect(f.bid.data).toEqual([totalAt(0, 20), totalAt(1, 21), totalAt(3, 23, { break: true }), totalAt(4, 24)]);
+  expect([optionsOf(f.ask).color, optionsOf(f.bid).color]).toEqual([TOKENS.down, TOKENS.up]);
+  expect([optionsOf(f.ask).lineWidth, optionsOf(f.bid).lineWidth]).toEqual([2, 2]);
+  expect([f.ask.pane, f.bid.pane]).toEqual([1, 1]);
+  expect(f.sent.filter((m) => m.type === "create")).toEqual([]);
+
+  f.layer.setQuoteTotals(totalsView({ 2: [12, 22] }));
+  f.layer.flush();
+  expect(f.ask.data).toEqual([totalAt(2, 12, { break: true })]);
+  f.layer.setQuoteTotals(null);
+  f.layer.flush();
+  expect([f.ask.data, f.bid.data]).toEqual([[], []]);
+});
+
+test("총잔량 꼬리가 바뀌면 바뀐 봉만 고쳐 그린다", () => {
+  const f = totalsFixture(range(0, 5));
+  const values: Record<number, [number, number]> = { 0: [10, 20], 1: [11, 21], 2: [12, 22], 3: [13, 23], 4: [14, 24], 5: [15, 25] };
+  f.layer.setQuoteTotals(totalsView(values));
+  f.layer.flush();
+  const sets = f.ask.setDataCalls;
+  f.layer.setQuoteTotals(totalsView({ ...values, 4: [44, 24], 5: [55, 65], 6: [16, 26] }), at(4));
+  f.layer.flush();
+  expect(f.ask.data.slice(3)).toEqual([totalAt(3, 13), totalAt(4, 44), totalAt(5, 55)]);
+  expect(f.bid.data[5]).toEqual(totalAt(5, 65));
+
+  const six = bar(6);
+  f.layer.advance({ bars: range(0, 5).map((m) => bar(m)), current: six, nextBefore: null }, six, "live");
+  f.layer.flush();
+  expect(lastOf(f.ask)).toEqual(totalAt(6, 16));
+  const eight = bar(8);
+  f.layer.advance({ bars: [...range(0, 6).map((m) => bar(m))], current: eight, nextBefore: null }, eight, "live");
+  f.layer.flush();
+  expect(lastOf(f.ask)).toEqual(totalAt(6, 16));
+  expect(f.ask.setDataCalls).toBe(sets);
+  expect(f.ask.rejected).toEqual([]);
+
+  f.layer.setQuoteTotals(totalsView({ ...values, 4: [44, 24] }), at(5));
+  f.layer.flush();
+  expect(f.ask.data.map((d) => d.value)).toEqual([10, 11, 12, 13, 44, 15]);
+});
+
+test("총잔량 범례는 값과 수집하지 않는 종목을 알린다", () => {
+  const f = totalsFixture(range(0, 5));
+  const row = () => f.layer.rows(at(3)).find((r) => r.id === "totals")!;
+  f.layer.setQuoteTotals(totalsView({}, "loading"));
+  expect(row().state).toBe("pending");
+  f.layer.setQuoteTotals(totalsView({ 3: [61_287, 110_859] }));
+  expect(row()).toMatchObject({ name: "총잔량", state: "ok" });
+  expect(row().values).toEqual([{ text: formatVolume(61_287), color: TOKENS.down }, { text: formatVolume(110_859), color: TOKENS.up }]);
+  f.layer.setQuoteTotals(totalsView({}));
+  expect(row().values.map((v) => v.text)).toEqual(["—", "—"]);
+  f.layer.setQuoteTotals(totalsView({}, "notCollected"));
+  expect(row().values.map((v) => v.text)).toEqual(["수집하지 않는 종목"]);
+  f.layer.setQuoteTotals(totalsView({}, "failed"));
+  expect(row().values.map((v) => v.text)).toEqual(["호가 자료 조회 실패"]);
 });
