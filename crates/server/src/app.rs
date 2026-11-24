@@ -192,6 +192,7 @@ pub fn application_with_source(inputs: ApplicationInputs, mut system: SystemStat
         book_replay: crate::book_replay::BookReplay::new(),
         heatmap_quotes: Arc::new(crate::heatmap_board::QuoteCache::with_generation(generation.clone())),
         heatmap_flow: Arc::new(crate::heatmap_flow::FlowCache::with_generation(generation.clone())),
+        quote_minutes: Arc::new(crate::quote_minutes::QuoteCache::new()),
         generation,
     })
 }
