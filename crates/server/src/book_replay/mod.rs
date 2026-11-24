@@ -1,7 +1,8 @@
 pub(crate) mod day_index;
+mod live;
 pub(crate) mod store;
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::{BTreeSet, HashMap, VecDeque};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, OnceLock};
 
@@ -122,7 +123,11 @@ async fn days(State(st): State<Arc<AppState>>, Path(code): Path<String>) -> Resu
     let stock = parse_stock(&code)?;
     let replay = st.book_replay.clone();
     let stock_str = stock.as_str().to_owned();
-    let days = tokio::task::spawn_blocking(move || replay.day_index.collected_days(&dir, &stock_str))
+    let days = tokio::task::spawn_blocking(move || {
+        let mut merged: BTreeSet<String> = replay.day_index.collected_days(&dir, &stock_str)?.into_iter().collect();
+        merged.extend(live::live_days(&dir, &stock_str)?);
+        Ok::<Vec<String>, String>(merged.into_iter().collect())
+    })
         .await
         .map_err(|e| internal_error("호가 복기 날짜 목록 작업이 멈췄습니다", e.to_string()))?
         .map_err(|e| internal_error("호가 복기 날짜 목록을 읽지 못했습니다", e))?;
@@ -181,7 +186,8 @@ fn load_or_cached_day(replay: &BookReplay, dir: &std::path::Path, stock: StockCo
 fn load_day(replay: &BookReplay, dir: &std::path::Path, stock: StockCode, date: KstDate, date_str: &str) -> Result<(Option<FileStamp>, api::BookReplayDay), String> {
     let (stamp, state) = replay.day_index.load(dir, date_str)?;
     let index = match state {
-        DayIndexState::Missing | DayIndexState::UnsupportedVersion => return Ok((stamp, empty_day(stock, date_str.to_owned(), api::BookReplayCoverage::DayNotCollected))),
+        DayIndexState::Missing => return Ok((None, live::read_live_day(&dir.join("shared"), stock, date, date_str)?)),
+        DayIndexState::UnsupportedVersion => return Ok((stamp, empty_day(stock, date_str.to_owned(), api::BookReplayCoverage::DayNotCollected))),
         DayIndexState::Ready(index) => index,
     };
     let Some(coverage) = index.stocks.get(stock.as_str()) else {

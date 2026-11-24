@@ -58,3 +58,13 @@
 - `store/<YYYYMMDD>/complete.json`은 날짜마다 한 번 해석해 파일 크기·수정 시각이 같으면 다시 읽지 않고, `registered && received` 종목의 끊김·끝 시각만 유지한다.
 - 종목 요청 하나는 해당 종목 버킷의 `0D/<bucket>.parquet`과 `0B/<bucket>.parquet`만 DuckDB 메모리 연결(`enable_autoload_extension = false`)로 읽는다.
 - 정리된 날 응답은 최근 16개를 메모리에 캐시하고, 동시 DuckDB 조회는 세마포어 2로 제한한다.
+
+## 오늘 자료 (`complete.json`이 없는 날)
+
+`store/<YYYYMMDD>/complete.json`이 아직 없는 날은 `<VALLY_HOGA_DATA_DIR>/shared`의 당일 파일을 합쳐 같은 모양의 `BookReplayDay`를 응답한다. `complete.json`이 생기면 저장소만 읽는다.
+
+- 호가: `shared_data::read_quote_day`로 `quote-minutes-live/<YYYYMMDD>`(또는 `quote-minutes/<YYYYMMDD>`)에서 통합 종가 호가(`combined.close`)만 취한다. 빈 사다리 분은 빼고 `totalAsk`·`totalBid`는 단 잔량 합이다. 두 폴더가 모두 없으면 `day_not_collected`, 폴더는 있는데 그 종목이 없으면 `symbol_not_collected`다.
+- 수집 구간(`covered`): `quote-minutes-live/<YYYYMMDD>` 아래 `<종목>.jsonl`이 있는 키만 대상으로 삼고, 그 키에서 종목이 처음 나온 분(파일 첫 줄의 `minute`)부터 인정한다. 각 키의 `symbol-flow/<YYYYMMDD>/links/<키>.jsonl`을 읽어 `live`~`down`/`end`(`alive`로 연장, `start`가 오면 앞 구간은 마지막 연장 시각에서 끝) 구간을 만들고, 분 끝(`m+1`분 0초)이 구간 안이고 구간이 끝 + 15초 이상까지 이어진 분을 수집 확인 분으로 센다. 첫 호가 분부터 키별 확인 분의 합집합을 `covered`로 준다.
+- 체결(`trades`)과 자르기: 위 키들의 `trade-minute/<YYYYMMDD>/<키>/<종목>.jsonl`을 분 순서로 합쳐 같은 분은 이어 붙여 마지막 10건만 쓴다. `books`와 `trades`는 `covered`의 마지막 분까지만 준다. 깨지거나 줄바꿈 없이 끝난 `links`·체결 줄과 모르는 머리의 체결 파일은 경고하고 건너뛴다.
+- 날짜 목록(`days`): `complete.json`이 없는 날 가운데 `quote-minutes-live/<YYYYMMDD>/*/<종목>.jsonl`이 있는 날을 함께 돌려준다.
+- 캐시와 허가: 오늘 자료는 캐시하지 않으며 기존 동시 조회 세마포어(2)를 함께 쓴다. 상주 폴링 작업은 두지 않고 요청한 종목 파일과 그 키의 `links`만 읽는다.

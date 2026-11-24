@@ -14,12 +14,13 @@ use collector::collect::ws::{Connector, Socket};
 use collector::protocol::{Command, KeyName, RealType, Registration};
 use collector::raw_read::{RawContent, RawItem, read_day};
 use collector::shared::minute::{FLUSH_EVERY, FileMinuteStore, MinuteStore, spawn};
+use collector::shared::trade_minute::TradeMinuteStore;
 use futures::channel::mpsc::{UnboundedReceiver, UnboundedSender, unbounded};
 use futures::future::BoxFuture;
 use futures::{Sink, Stream, StreamExt};
 use serde_json::{Value, json};
 use server::config::Secret;
-use server::shared_data::{MinuteBar, MinuteInstrument, MinuteVenue, minute_path};
+use server::shared_data::{MinuteBar, MinuteInstrument, MinuteVenue, TradeMinuteLine, minute_path};
 use tokio::sync::{mpsc, watch};
 use tokio::task::JoinHandle;
 use tokio_tungstenite::tungstenite::{Error as WsError, Message};
@@ -203,10 +204,20 @@ async fn settle() {
 }
 
 async fn start(data: &Path, key: &str, store: Box<dyn MinuteStore>) -> Run {
-    start_with_quotes(data, key, store, None).await
+    start_session(data, key, Some(store), None, None).await
 }
 
 async fn start_with_quotes(data: &Path, key: &str, store: Box<dyn MinuteStore>, quotes: Option<PathBuf>) -> Run {
+    start_session(data, key, Some(store), quotes, None).await
+}
+
+async fn start_session(
+    data: &Path,
+    key: &str,
+    minutes: Option<Box<dyn MinuteStore>>,
+    quotes: Option<PathBuf>,
+    trades: Option<Box<dyn TradeMinuteStore>>,
+) -> Run {
     let peer = Arc::new(Peer { pushes: Arc::default(), seen: Arc::default(), attempts: Arc::default() });
     let (commands, command_source) = mpsc::unbounded_channel();
     let (stop, shutdown) = watch::channel(false);
@@ -219,9 +230,10 @@ async fn start_with_quotes(data: &Path, key: &str, store: Box<dyn MinuteStore>, 
         commands: command_source,
         events: Events::none(),
         shutdown,
-        minutes: Some(store),
+        minutes,
         flow: None,
         quotes,
+        trades,
     };
     let task = tokio::spawn(run_session(parts));
     commands.send(Ok(Command::Token { token: Secret::new(SECOND_KEY_TOKEN.to_owned()), generation: 1, expires_at: None })).unwrap();
@@ -630,4 +642,40 @@ async fn the_session_feeds_books_to_the_quote_minutes() {
         })
         .collect();
     assert_eq!(raw, frames);
+}
+
+struct RecordingTradeStore {
+    lines: Arc<Mutex<Vec<(u32, String, TradeMinuteLine)>>>,
+}
+
+impl TradeMinuteStore for RecordingTradeStore {
+    fn append(&mut self, date: u32, lines: &[(String, TradeMinuteLine)]) -> io::Result<()> {
+        let mut recorded = self.lines.lock().unwrap();
+        for (code, line) in lines {
+            recorded.push((date, code.clone(), line.clone()));
+        }
+        Ok(())
+    }
+
+    fn finish(&mut self) -> io::Result<()> {
+        Ok(())
+    }
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_session_feeds_trades_to_the_trade_minutes() {
+    let folder = tempfile::tempdir().unwrap();
+    let data = folder.path().join("data");
+    let recorded = Arc::new(Mutex::new(Vec::new()));
+    let store = RecordingTradeStore { lines: recorded.clone() };
+    let run = start_session(&data, "k1", None, None, Some(Box::new(store))).await;
+    run.push(&stock("005930", "090001", "-71000", "+5", "KRX"));
+    run.push(&stock("005930", "090002", "+71100", "-3", "NXT"));
+    settle().await;
+    assert!(matches!(run.stop().await, Finish::Shutdown));
+    let lines = recorded.lock().unwrap();
+    assert_eq!(lines.len(), 1);
+    assert_eq!(lines[0].1, "005930");
+    assert_eq!(lines[0].2.trades, [(32_401, 71_000, 5), (32_402, 71_100, -3)]);
+    assert_eq!(raw_realtime_frames(&data), 2);
 }

@@ -14,6 +14,7 @@ pub mod rankings;
 mod runner;
 mod themes;
 pub mod snapshot;
+pub mod trade_minute;
 mod usage;
 mod wire;
 

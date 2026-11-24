@@ -29,6 +29,7 @@ use crate::raw_write::RawLine;
 use crate::shared::flow::FlowFeed;
 use crate::shared::minute::MinuteFeed;
 use crate::shared::quotes::QuoteFeed;
+use crate::shared::trade_minute::TradeMinuteFeed;
 
 pub trait WallClock: Send + Sync {
     fn now_ms(&self) -> i64;
@@ -414,6 +415,7 @@ pub struct SessionParts {
     pub minutes: Option<MinuteFeed>,
     pub flow: Option<FlowFeed>,
     pub quotes: Option<QuoteFeed>,
+    pub trades: Option<TradeMinuteFeed>,
 }
 
 pub struct Session {
@@ -431,6 +433,7 @@ pub struct Session {
     minutes: Option<MinuteFeed>,
     flow: Option<FlowFeed>,
     quotes: Option<QuoteFeed>,
+    trades: Option<TradeMinuteFeed>,
     halt_on_rejected_register: bool,
     gap: Gap,
     attempt: u32,
@@ -464,6 +467,7 @@ impl Session {
             minutes: parts.minutes,
             flow: parts.flow,
             quotes: parts.quotes,
+            trades: parts.trades,
             halt_on_rejected_register,
             gap: Gap::Unknown,
             attempt: 0,
@@ -848,6 +852,9 @@ impl Session {
                 }
                 if let Some(quotes) = &self.quotes {
                     quotes.offer(recv_ms, bytes);
+                }
+                if let Some(trades) = &self.trades {
+                    trades.offer(recv_ms, bytes);
                 }
                 self.report_market_hours(text, recv_ms);
             }

@@ -97,6 +97,7 @@ TR 줄:
 | `snapshotNxt` | `snapshot-nxt/` | `snapshot-nxt/<YYYYMMDD>.json` | | `SnapshotBody` |
 | `minute` (1분봉) | `minute/<YYYYMMDD>/` | | `minute/<YYYYMMDD>/<키 이름>.jsonl` | `MinuteBar` |
 | `quoteMinutes` (분 호가) | `quote-minutes/<YYYYMMDD>/`, `quote-minutes-live/<YYYYMMDD>/` | `quote-minutes/<YYYYMMDD>/<종목>.json.gz`, `quote-minutes-live/<YYYYMMDD>/<키 이름>/_current.json` | `quote-minutes-live/<YYYYMMDD>/<키 이름>/<종목>.jsonl`, `_gaps.jsonl` | `ClosedQuotes`, `CurrentQuotes`, `QuoteMinute` |
+| `tradeMinute` (1분 체결) | `trade-minute/<YYYYMMDD>/` | | `trade-minute/<YYYYMMDD>/<키 이름>/<종목코드>.jsonl` | `TradeMinuteLine` |
 | 종목 흐름 (`symbol-flow`) | `symbol-flow/<YYYYMMDD>/` | | `symbol-flow/<YYYYMMDD>/<타입>/<종목코드>/<키 이름>.flow`, `links/<키 이름>.jsonl` | `FlowDescription`, `FlowRow` |
 | `marketOverview` | `market-overview/` | `market-overview/<YYYYMMDD>.json` | | `OverviewBody`, `MadeCard` |
 | `kiwoomThemes` | `kiwoom-themes/` | `kiwoom-themes/<YYYYMMDD>.json` | | `ThemesBody`, `ThemeEntry` |
@@ -150,6 +151,16 @@ TR 줄:
   - 5초마다와 종료 때 끝난 분을 `<종목>.jsonl`에 먼저 덧붙이고 끊긴 구간을 `_gaps.jsonl`에 덧붙인 뒤, 바뀐 것이 있으면 `_current.json`을 덮어쓴다. 쓰기에 실패하면 `store_errors`를 세고 작성기를 다시 열며, 남은 분과 진행 상태는 다음 5초에 다시 쓴다. 종료 때는 저장 뒤 `sync`하며 끝나지 않은 분은 `_current.json`에 남긴다.
   - 끊긴 구간은 첫 `Down`부터 다음 `Live`까지를 KST 자정부터의 초로 적는다. 다시 시작했을 때 `_current.json`에 진행 분이 있으면 그 가운데 가장 늦은 `closeSec`부터 첫 `Live`까지를 끊긴 구간으로 적고 진행 분을 이어 센다. 종료 때 열려 있는 끊김은 적지 않는다.
   - 누계(`books`, `minutes`, `gaps`, `dropped`, `skipped`, `unreadable`, `too_late`, `store_errors`)는 1분마다 로그 `분 호가 집계 누계`로 남는다.
+
+## 1분 체결 (`tradeMinute`)
+
+`collect` 자식이 `--shared`가 있을 때 받은 실시간 `0B`(주식체결)에서 종목별 마지막 체결 10건을 분이 끝난 뒤 `<공용 자료 폴더>/trade-minute/<YYYYMMDD>/<키 이름>/<종목코드>.jsonl`에 한 줄씩 덧붙인다. 형식(`TradeMinuteLine`, `trade_minute_path`)은 `crates/server/src/shared_data/trade_minute.rs`, 집계·쓰기는 `crates/collector/src/shared/trade_minute/`에 있다. `0D`는 읽지 않는다(호가는 `quote-minutes-live`가 맡는다).
+
+- 대상: `_AL`로 끝나고 `domain::StockCode::parse`를 지나는 종목의 `0B`만 읽는다. 수량(`f15`)이 0이거나 가격(`f10`)이 0이거나 읽을 수 없는 항목은 건너뛰고 센다. 체결이 없는 종목은 쓰지 않는다.
+- 줄(camelCase, 첫 줄은 `kind: "tradeMinute"` 머리): `{"minute":540,"trades":[[32401,71000,3],[32402,71010,-4]]}`. `minute`은 `recv_ms`의 KST 분이고 `trades`는 `[체결 초(f20), 가격(절댓값), 부호 있는 수량]` 튜플 최대 10건이다.
+- 닫힘과 재시도: 1초마다 큐를 비운 뒤 시계가 분 끝 + 1초를 지났으면 닫고, 늦은 분의 프레임이 오면 앞 분을 닫는다. 종료(`finish`) 때는 끝나지 않은 분도 쓴다. 닫은 분의 늦은 프레임은 버리고 센다. 쓰기에 실패한 분의 체결은 다음 분 줄에 이어 싣고(종목당 10건까지), 읽는 쪽은 같은 분 줄이 둘이면 이어 붙여 마지막 10건을 쓴다.
+- 파일 핸들과 지우기: `FeedWriter::open_at`으로 그 묶음을 쓸 때만 열고 닫는다(전 종목 핸들을 열어 두지 않는다). 새 날짜를 열 때 `trade-minute/` 아래 8자리 날짜 폴더 가운데 최근 7개 밖을 지운다.
+- 격리: 세션은 `0B`가 든 프레임만 가득 차지 않는 큐(16,384개)에 `try_send`로 넘기고 기다리지 않는다. `SharedData::poll_once`에는 넣지 않고 호가 복기 요청 때만 읽는다.
 
 `kiwoom_themes`는 ADR 0042의 테마 목록·구성종목이다. 머리의 `asOf`가 받은 시각이고 본문은 테마마다 코드·이름·구성종목 코드다. 일 이름은 `kiwoom_themes`, 키움 키만 받는다.
 
