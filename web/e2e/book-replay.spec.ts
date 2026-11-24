@@ -394,3 +394,69 @@ test("공개 모드에서는 book-replay 경로를 호출하지 않고 스위치
   const replayCalls = scenario.requests.filter((request) => new URL(request.url()).pathname.includes("book-replay"));
   expect(replayCalls).toHaveLength(0);
 });
+
+test("재조회가 실패해도 이미 받은 수집 호가는 유지되고 20초 뒤 다시 시도한다", async ({ page, scenario }) => {
+  await page.clock.install({ time: new Date("2026-11-23T09:20:00+09:00") });
+  seedLayout(scenario);
+  seedMarket(scenario, 80_000);
+  scenario.reply("/api/book-replay/access", { body: { available: true } });
+
+  const initialDay: BookReplayDay = {
+    symbol: CODE,
+    date: "20261123",
+    coverage: "collected",
+    covered: [[540, 544]],
+    books: [{ minute: 540, asks: [[71_200, 120]], bids: [[71_100, 150]], totalAsk: 1_200, totalBid: 2_400 }],
+    trades: [[540, 32_420, 71_200, 25]],
+  };
+  const recoveredDay: BookReplayDay = {
+    ...initialDay,
+    covered: [[540, 550]],
+    books: [
+      ...initialDay.books,
+      { minute: 549, asks: [[71_900, 90]], bids: [[71_800, 110]], totalAsk: 900, totalBid: 1_100 },
+    ],
+    trades: [...initialDay.trades, [549, 32_990, 71_900, 15]],
+  };
+
+  let requests = 0;
+  scenario.on(
+    (url) => url.pathname === `/api/symbols/${CODE}/book-replay` && url.searchParams.get("date") === "20261123",
+    () => {
+      requests++;
+      if (requests === 1) return { body: initialDay };
+      if (requests === 2) return { status: 500, body: { error: { code: "internal", message: "boom", reason: null, retryAt: null, manualActionRequired: false } } };
+      return { body: recoveredDay };
+    },
+  );
+
+  await page.goto("/");
+  await expect(cell(page)).toHaveAttribute("aria-busy", "false");
+  await replayToggle(page).click();
+
+  const bar0900 = await barCoordinate(page, at(9, 0));
+  const bar0905 = await barCoordinate(page, at(9, 5));
+
+  await page.mouse.move(bar0900.x, bar0900.y);
+  await frames(page);
+  await expect(bookWindow(page).getByTestId("price-ladder")).toContainText("71,200");
+  expect(requests).toBe(1);
+
+  await page.clock.fastForward(25_000);
+  await page.mouse.move(bar0905.x, bar0905.y);
+  await frames(page);
+  await pollSaved(() => requests).toBe(2);
+  await expect(bookWindow(page).getByTestId("replay-strip")).toHaveText("아직 수집되지 않은 구간입니다");
+
+  await page.mouse.move(bar0900.x, bar0900.y);
+  await frames(page);
+  await expect(bookWindow(page)).toHaveAttribute("data-replay", "past");
+  await expect(bookWindow(page).getByTestId("price-ladder")).toContainText("71,200");
+
+  await page.mouse.move(bar0905.x, bar0905.y);
+  await frames(page);
+  await page.clock.fastForward(20_000);
+  await pollSaved(() => requests).toBe(3);
+  await expect(bookWindow(page)).toHaveAttribute("data-replay", "past");
+  await expect(bookWindow(page).getByTestId("price-ladder")).toContainText("71,900");
+});

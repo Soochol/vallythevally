@@ -34,19 +34,19 @@ export function useBookReplay(code: SymbolCode): ReplayView {
   useEffect(() => {
     if (retryDelay === null) return;
     if (retryDelay === 0) {
-      void query.refetch();
+      void query.refetch({ cancelRefetch: false });
       return;
     }
     const timer = window.setTimeout(() => {
-      void query.refetch();
+      void query.refetch({ cancelRefetch: false });
     }, retryDelay);
     return () => window.clearTimeout(timer);
   }, [retryDelay, query.refetch, query.dataUpdatedAt, query.errorUpdatedAt, bar]);
 
   return useMemo<ReplayView>(() => {
     if (!enabled || bar === null) return LIVE_VIEW;
+    if (query.data !== undefined) return replayView(query.data, bar, effectiveNow);
     if (query.isPending) return { kind: "none", reason: REPLAY_REASON.loading };
-    if (query.isError || query.data === undefined) return { kind: "none", reason: REPLAY_REASON.failed };
-    return replayView(query.data, bar, effectiveNow);
-  }, [enabled, bar, query.isPending, query.isError, query.data, effectiveNow]);
+    return { kind: "none", reason: REPLAY_REASON.failed };
+  }, [enabled, bar, query.isPending, query.data, effectiveNow]);
 }
