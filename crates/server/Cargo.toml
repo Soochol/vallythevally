@@ -6,7 +6,7 @@ publish.workspace = true
 
 [features]
 default = ["bundled-duckdb"]
-bundled-duckdb = ["duckdb/bundled"]
+bundled-duckdb = ["duckdb/bundled", "duckdb/parquet"]
 
 [lib]
 path = "src/lib.rs"

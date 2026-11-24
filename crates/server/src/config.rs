@@ -180,6 +180,7 @@ const KNOWN_KEYS: &[&str] = &[
     "VALLY_COLLECTOR_TELEGRAM",
     "VALLY_SHARED_DATA_DIR",
     "VALLY_SHARED_DATA_POLL_MILLIS",
+    "VALLY_HOGA_DATA_DIR",
 ];
 
 #[derive(Debug, Clone)]
@@ -221,6 +222,16 @@ pub struct Config {
     pub collector_telegram: Option<PathBuf>,
     pub public: Option<crate::public::settings::PublicSettings>,
     pub shared_data: Option<crate::shared_data::SharedDataSettings>,
+    pub hoga_data_dir: Option<PathBuf>,
+}
+
+fn hoga_data_dir(vars: &BTreeMap<String, String>) -> Result<Option<PathBuf>, ConfigError> {
+    let Some(dir) = vars.get("VALLY_HOGA_DATA_DIR").filter(|v| !v.is_empty()) else { return Ok(None) };
+    let dir = PathBuf::from(dir);
+    if !dir.is_absolute() {
+        return Err(ConfigError(format!("VALLY_HOGA_DATA_DIR은 절대 경로입니다: {}", dir.display())));
+    }
+    Ok(Some(dir))
 }
 
 fn shared_data_settings(vars: &BTreeMap<String, String>) -> Result<Option<crate::shared_data::SharedDataSettings>, ConfigError> {
@@ -383,6 +394,7 @@ impl Config {
         let db_path = PathBuf::from(vars.get("VALLY_DB_PATH").map_or(default_db, String::as_str));
         let bind = BindAddr::parse(vars.get("VALLY_BIND").map_or(default_bind, String::as_str))?;
         let shared_data = shared_data_settings(&vars)?;
+        let hoga_data_dir = hoga_data_dir(&vars)?;
         let public = crate::public::settings::PublicSettings::from_vars(crate::public::settings::Inputs { vars: &vars, operator_bind: bind.socket_addr(), mock, connector_mode: account_server_url.is_some(), default_account_db: db_path.with_file_name("public-accounts.db") })?;
         if public.is_some() && shared_data.is_none() {
             return Err(ConfigError("공개 리스너(VALLY_PUBLIC_BIND, VALLY_PUBLIC_ORIGIN)를 켜면 VALLY_SHARED_DATA_DIR도 적어야 합니다. 공개 요청은 공용 자료 폴더에서만 읽고 키움을 부르지 않습니다".into()));
@@ -413,6 +425,7 @@ impl Config {
             bind,
             public,
             shared_data,
+            hoga_data_dir,
             tailnet_hosts: TailnetHosts::parse(vars.get("VALLY_TAILNET_HOSTS").map_or("", String::as_str))?,
             static_dir: PathBuf::from(vars.get("VALLY_STATIC_DIR").map_or("web/dist", String::as_str)),
             screener_db_path: PathBuf::from(vars.get("VALLY_SCREENER_DB_PATH").map_or(default_screener_db, String::as_str)),
@@ -704,6 +717,20 @@ mod tests {
         }
         process.insert("VALLY_SHARED_DATA_POLL_MILLIS".into(), "250".into());
         process.insert("VALLY_SHARED_DATA_DIR".into(), "relative/shared".into());
+        assert!(Config::from_vars(file, process, lock, token, key, account).is_err());
+    }
+
+    #[test]
+    fn hoga_data_dir_is_off_without_directory_and_needs_absolute_path() {
+        let file = BTreeMap::new();
+        let (config, _) = Config::from_vars(file.clone(), vars(&REAL), lock, token, key, account).unwrap();
+        assert_eq!(config.hoga_data_dir, None);
+        let mut process = vars(&REAL);
+        process.insert("VALLY_HOGA_DATA_DIR".into(), "/srv/hoga".into());
+        let (config, warnings) = Config::from_vars(file.clone(), process.clone(), lock, token, key, account).unwrap();
+        assert!(warnings.is_empty());
+        assert_eq!(config.hoga_data_dir, Some(PathBuf::from("/srv/hoga")));
+        process.insert("VALLY_HOGA_DATA_DIR".into(), "relative/hoga".into());
         assert!(Config::from_vars(file, process, lock, token, key, account).is_err());
     }
 
