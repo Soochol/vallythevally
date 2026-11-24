@@ -33,6 +33,7 @@ interface UiStore {
   restoreOrderWindow(layoutId: string, window: string, entries: OrderEntries): void;
   setHotkeys(hotkeys: HotkeyOverrides): void;
   setPageLink(link: LinkColor | null): void;
+  setBookReplay(enabled: boolean): void;
 }
 
 const withEntryAt = (entries: OrderEntries, [key, entry]: readonly [string, OrderEntry]): OrderEntries => withOrderEntry(entries, key, entry);
@@ -76,6 +77,7 @@ export const useUiStore = create<UiStore>()((set, get) => {
       }),
     setHotkeys: (hotkeys) => edit((p) => (p.hotkeys === hotkeys ? p : { ...p, hotkeys })),
     setPageLink: (pageLink) => edit((p) => (p.pageLink === pageLink ? p : { ...p, pageLink })),
+    setBookReplay: (bookReplay) => edit((p) => (p.bookReplay === bookReplay ? p : { ...p, bookReplay })),
     setVenue: (venue) => edit((p) => (p.venue === venue ? p : { ...p, venue })),
     setIndicatorWindow: (indicatorWindow) => edit((p) => (p.indicatorWindow === indicatorWindow ? p : { ...p, indicatorWindow })),
     setDrawingPrefs: (patch) => edit((p) => ({ ...p, drawing: { ...p.drawing, ...patch } })),
@@ -94,6 +96,8 @@ export const useUiStore = create<UiStore>()((set, get) => {
 });
 
 export const useVenue = (): Venue => useUiStore((s) => s.prefs.venue);
+
+export const useBookReplayPref = (): boolean => useUiStore((s) => s.prefs.bookReplay);
 
 export const useTheme = (): Theme => useUiStore((s) => s.prefs.theme);
 

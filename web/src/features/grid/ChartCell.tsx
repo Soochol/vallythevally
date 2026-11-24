@@ -15,6 +15,8 @@ import { marketSocket } from "../../stores/realtime";
 import { useSelectionStore } from "../../stores/selection";
 import { openIndicatorCommand, shownIndicatorWindow } from "../indicator-command/open";
 import { useTheme, useVenue } from "../../stores/ui";
+import { useBookReplayStore } from "../../stores/bookReplay";
+import { useBookReplayEnabled } from "../book-replay/useBookReplay";
 import { type CellAction, cellErrorView, olderErrorView } from "./cellError";
 import { CellState } from "./CellState";
 import { openSystemSettings } from "../system-settings/open";
@@ -71,6 +73,7 @@ export function ChartCell({ cellId, status, onStatus }: Props) {
   const request = financialRequest(cell.period, chartSettings);
   const financial = useFinancials(cell.symbol, request.period, request.enabled);
   const theme = useTheme();
+  const replayEnabled = useBookReplayEnabled();
   const openSearch = useSelectionStore((s) => s.openSearch);
   const chartEl = useRef<HTMLDivElement>(null);
   const ctl = useRef<ChartController | null>(null);
@@ -113,6 +116,14 @@ export function ChartCell({ cellId, status, onStatus }: Props) {
     if (key === null) return;
     return crosshairSync.connect(key, ctl.current, chartEl.current);
   }, [cellId, layoutId, layoutSession, crosshairScope, cell.symbol, cell.link]);
+
+  useEffect(() => {
+    if (!replayEnabled || !ctl.current) return;
+    const symbol = cell.symbol;
+    return ctl.current.subscribePointedBar((bar) => {
+      if (bar !== null) useBookReplayStore.getState().point(symbol, bar);
+    });
+  }, [replayEnabled, cell.symbol]);
 
   useEffect(() => {
     ctl.current?.apply({ symbol: cell.symbol, venue, period: cell.period, settings: chartSettings, info, previewIndicator: preview?.id ?? null, compareNames });

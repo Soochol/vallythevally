@@ -105,3 +105,17 @@ const TradeBox = memo(function TradeBox({ trades, strength, hold, release, previ
 export const tradeSlot = (ladderTrades: LadderTrades, previousClose: number | null) => (): ReactNode => (
   <TradeBox trades={ladderTrades.trades} strength={ladderTrades.strength} hold={ladderTrades.hold} release={ladderTrades.release} previousClose={previousClose} />
 );
+
+const ReplayTradeBox = memo(function ReplayTradeBox({ trades, previousClose }: { readonly trades: readonly TradeRow[]; readonly previousClose: number | null }) {
+  return (
+    <div className="mw-tbox">
+      <div className="mw-tscroll" data-testid="ladder-trades">
+        {trades.map((row) => <BoxTrade key={row.key} row={row} previousClose={previousClose} />)}
+      </div>
+    </div>
+  );
+});
+
+export const replayTradeSlot = (trades: readonly TradeRow[], previousClose: number | null) => (): ReactNode => (
+  <ReplayTradeBox trades={trades} previousClose={previousClose} />
+);

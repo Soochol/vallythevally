@@ -15,6 +15,11 @@ export const test = base.extend<{ scenario: Scenario; clockStart: string | null 
   scenario: [async ({ context, clockStart }, use) => {
     const now = clockStart ? Date.parse(`${clockStart.slice(0,4)}-${clockStart.slice(4,6)}-${clockStart.slice(6,8)}T${clockStart.slice(8,10)}:${clockStart.slice(10,12)}:${clockStart.slice(12,14)}+09:00`) : undefined;
     const scenario = new Scenario(now);
+    scenario.on("/api/book-replay/access", () =>
+      scenario.publicMode.kind === "public"
+        ? { status: 404, body: { error: { code: "not_found", message: "공개 리스너에 없는 경로입니다", reason: null, retryAt: null, manualActionRequired: false } } }
+        : { body: { available: false } },
+    );
     const throttle = cpuThrottleRate();
     if (throttle !== null) {
       const apply = async (page: Page) => { await (await context.newCDPSession(page)).send("Emulation.setCPUThrottlingRate", { rate: throttle }); };
