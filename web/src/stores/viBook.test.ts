@@ -38,19 +38,19 @@ afterEach(() => {
 
 test("스냅샷은 전체를 바꾸고 갱신은 그 종목만 바꾼다", () => {
   const { book, receive } = setup();
-  expect(book.get(SAMSUNG)).toBeNull();
+  expect(book.get(SAMSUNG, "krx")).toBeNull();
   receive(HELLO, snapshot(firing(SAMSUNG), firing(HYNIX, { direction: "down" })));
-  expect(book.get(SAMSUNG)).toEqual(firing(SAMSUNG));
-  const hynix = book.get(HYNIX);
+  expect(book.get(SAMSUNG, "krx")).toEqual(firing(SAMSUNG));
+  const hynix = book.get(HYNIX, "krx");
   expect(hynix).toEqual(firing(HYNIX, { direction: "down" }));
 
   receive(update(released(SAMSUNG)));
-  expect(book.get(SAMSUNG)).toEqual(released(SAMSUNG));
-  expect(book.get(HYNIX)).toBe(hynix);
+  expect(book.get(SAMSUNG, "krx")).toEqual(released(SAMSUNG));
+  expect(book.get(HYNIX, "krx")).toBe(hynix);
 
   receive(snapshot(firing(KAKAO)));
-  expect([book.get(SAMSUNG), book.get(HYNIX)]).toEqual([null, null]);
-  expect(book.get(KAKAO)).toEqual(firing(KAKAO));
+  expect([book.get(SAMSUNG, "krx"), book.get(HYNIX, "krx")]).toEqual([null, null]);
+  expect(book.get(KAKAO, "krx")).toEqual(firing(KAKAO));
 });
 
 test("바뀐 종목의 구독자만 부르고 같은 상태는 같은 참조로 둔다", () => {
@@ -60,16 +60,16 @@ test("바뀐 종목의 구독자만 부르고 같은 상태는 같은 참조로 
   const hynix = vi.fn();
   const stop = book.subscribe(SAMSUNG, samsung);
   book.subscribe(HYNIX, hynix);
-  const before = [book.get(SAMSUNG), book.get(HYNIX)];
+  const before = [book.get(SAMSUNG, "krx"), book.get(HYNIX, "krx")];
 
   receive(snapshot(firing(HYNIX), firing(SAMSUNG)), update(firing(SAMSUNG)));
-  expect(book.get(SAMSUNG)).toBe(before[0]);
-  expect(book.get(HYNIX)).toBe(before[1]);
+  expect(book.get(SAMSUNG, "krx")).toBe(before[0]);
+  expect(book.get(HYNIX, "krx")).toBe(before[1]);
   expect(samsung).not.toHaveBeenCalled();
   expect(hynix).not.toHaveBeenCalled();
 
   receive(update(firing(SAMSUNG, { base: 884_000 })));
-  expect(book.get(SAMSUNG)?.base).toBe(884_000);
+  expect(book.get(SAMSUNG, "krx")?.base).toBe(884_000);
   expect(samsung).toHaveBeenCalledTimes(1);
   expect(hynix).not.toHaveBeenCalled();
 
@@ -89,21 +89,21 @@ test("소켓이 끊기면 비우고 다시 붙으면 스냅샷으로 채운다",
   book.subscribe(SAMSUNG, listener);
 
   receive({ type: "status", status: { realtime: "reconnecting", since: 1_010, backfilling: false } });
-  expect(book.get(SAMSUNG)).toEqual(firing(SAMSUNG));
+  expect(book.get(SAMSUNG, "krx")).toEqual(firing(SAMSUNG));
   expect(listener).not.toHaveBeenCalled();
 
   drop();
-  expect(book.get(SAMSUNG)).toBeNull();
+  expect(book.get(SAMSUNG, "krx")).toBeNull();
   expect(listener).toHaveBeenCalledTimes(1);
 
   vi.advanceTimersByTime(1_000);
   expect(connections()).toBe(2);
   receive(HELLO, snapshot(firing(SAMSUNG)));
-  expect(book.get(SAMSUNG)).toEqual(firing(SAMSUNG));
+  expect(book.get(SAMSUNG, "krx")).toEqual(firing(SAMSUNG));
   expect(listener).toHaveBeenCalledTimes(2);
 });
 
-test("스냅샷과 갱신 모두에서 NXT 상태는 무시하고 KRX 상태만 유지한다", () => {
+test("스냅샷과 갱신의 NXT 상태는 KRX 상태를 건드리지 않는다", () => {
   const { book, receive } = setup();
   const samsung = vi.fn();
   const hynix = vi.fn();
@@ -111,14 +111,14 @@ test("스냅샷과 갱신 모두에서 NXT 상태는 무시하고 KRX 상태만 
   book.subscribe(HYNIX, hynix);
 
   receive(HELLO, snapshot(firing(SAMSUNG), firing(SAMSUNG, { market: "nxt", active: false }), firing(HYNIX, { market: "nxt" })));
-  expect(book.get(SAMSUNG)).toEqual(firing(SAMSUNG));
-  expect(book.get(HYNIX)).toBeNull();
+  expect(book.get(SAMSUNG, "krx")).toEqual(firing(SAMSUNG));
+  expect(book.get(HYNIX, "krx")).toBeNull();
   expect(samsung).toHaveBeenCalledTimes(1);
-  expect(hynix).not.toHaveBeenCalled();
+  expect(hynix).toHaveBeenCalledTimes(1);
 
   receive(update(firing(SAMSUNG, { market: "nxt", active: false })), update(firing(HYNIX, { market: "nxt" })));
-  expect(book.get(SAMSUNG)).toEqual(firing(SAMSUNG));
-  expect(book.get(HYNIX)).toBeNull();
+  expect(book.get(SAMSUNG, "krx")).toEqual(firing(SAMSUNG));
+  expect(book.get(HYNIX, "krx")).toBeNull();
   expect(samsung).toHaveBeenCalledTimes(1);
-  expect(hynix).not.toHaveBeenCalled();
+  expect(hynix).toHaveBeenCalledTimes(1);
 });

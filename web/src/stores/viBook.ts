@@ -1,6 +1,9 @@
 import type { SymbolCode } from "../api/generated/SymbolCode";
+import type { ViMarket } from "../api/generated/ViMarket";
 import type { ViState } from "../api/generated/ViState";
 import type { Connection, MarketSocket, ViEvent } from "../api/socket";
+
+const MARKETS: readonly ViMarket[] = ["krx", "nxt"];
 
 function sameViState(a: ViState, b: ViState): boolean {
   return (
@@ -16,7 +19,10 @@ function sameViState(a: ViState, b: ViState): boolean {
 }
 
 export class ViBook {
-  private readonly rows = new Map<SymbolCode, ViState>();
+  private readonly rows: Record<ViMarket, Map<SymbolCode, ViState>> = {
+    krx: new Map(),
+    nxt: new Map(),
+  };
   private readonly listeners = new Map<SymbolCode, Set<() => void>>();
   private readonly knownListeners = new Set<() => void>();
   private known = false;
@@ -26,8 +32,8 @@ export class ViBook {
     socket.watch((connection) => this.onConnection(connection));
   }
 
-  get(code: SymbolCode): ViState | null {
-    return this.rows.get(code) ?? null;
+  get(code: SymbolCode, market: ViMarket): ViState | null {
+    return this.rows[market].get(code) ?? null;
   }
 
   isKnown(): boolean {
@@ -60,9 +66,12 @@ export class ViBook {
   private onConnection(connection: Connection): void {
     if (connection.socket === "open") return;
     this.setKnown(false);
-    if (this.rows.size === 0) return;
-    const cleared = [...this.rows.keys()];
-    this.rows.clear();
+    const cleared = new Set<SymbolCode>();
+    for (const market of MARKETS) {
+      const bucket = this.rows[market];
+      for (const code of bucket.keys()) cleared.add(code);
+      bucket.clear();
+    }
     for (const code of cleared) this.notify(code);
   }
 
@@ -70,28 +79,34 @@ export class ViBook {
     switch (event.type) {
       case "vi_update": {
         const next = event.state;
-        if (next.market !== "krx") return;
-        const prev = this.rows.get(next.symbol);
+        const bucket = this.rows[next.market];
+        const prev = bucket.get(next.symbol);
         if (prev !== undefined && sameViState(prev, next)) return;
-        this.rows.set(next.symbol, next);
+        bucket.set(next.symbol, next);
         this.notify(next.symbol);
         return;
       }
       case "vi_snapshot": {
-        const incoming = new Set<SymbolCode>();
+        const incoming: Record<ViMarket, Set<SymbolCode>> = {
+          krx: new Set(),
+          nxt: new Set(),
+        };
         const changed = new Set<SymbolCode>();
         for (const state of event.states) {
-          if (state.market !== "krx") continue;
-          incoming.add(state.symbol);
-          const prev = this.rows.get(state.symbol);
+          const bucket = this.rows[state.market];
+          incoming[state.market].add(state.symbol);
+          const prev = bucket.get(state.symbol);
           if (prev !== undefined && sameViState(prev, state)) continue;
-          this.rows.set(state.symbol, state);
+          bucket.set(state.symbol, state);
           changed.add(state.symbol);
         }
-        for (const code of this.rows.keys()) {
-          if (incoming.has(code)) continue;
-          this.rows.delete(code);
-          changed.add(code);
+        for (const market of MARKETS) {
+          const bucket = this.rows[market];
+          for (const code of bucket.keys()) {
+            if (incoming[market].has(code)) continue;
+            bucket.delete(code);
+            changed.add(code);
+          }
         }
         for (const code of changed) this.notify(code);
         this.setKnown(true);

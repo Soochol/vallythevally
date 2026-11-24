@@ -45,7 +45,7 @@ function BookBody({ code, pager }: { code: SymbolCode; pager: InfoPager }) {
   const bounds = { lower: limits?.lowerLimit ?? null, upper: limits?.upperLimit ?? null };
   const now = useNowMs();
   const nowSeconds = Math.floor(now / 1000);
-  const vi = useSymbolVi(code);
+  const vi = useSymbolVi(code, "krx");
   const view = feed.book.phase === "empty" ? null : feed.book.view;
   const tickRule = tickRuleOf(kind, view ? [...view.asks, ...view.bids].map((level) => level.price) : []);
   const info = useQuoteInfo({ code, venue, lastPrice: feed.lastPrice, previousClose: feed.previousClose, fundamentals: limits, page: pager.page, flipped: pager.flipped, sameTimeRatio: trades.sameTimeRatio, vi, tickRule, regularSession: isRegularSession(nowSeconds), now: nowSeconds });
