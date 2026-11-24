@@ -103,6 +103,8 @@ impl FakeKis {
                 "output1": [
                     {"pdno": "005930", "prdt_name": "삼성전자", "trad_dvsn_name": "현금", "hldg_qty": "10", "ord_psbl_qty": "4", "pchs_avg_pric": "90000.0000", "prpr": "99000", "evlu_pfls_amt": "90000", "evlu_pfls_rt": "10.00", "loan_amt": "0"},
                     {"pdno": "000660", "prdt_name": "융자종목", "trad_dvsn_name": "자기융자", "hldg_qty": "5", "ord_psbl_qty": "5", "pchs_avg_pric": "1000", "prpr": "1000", "evlu_pfls_amt": "0", "evlu_pfls_rt": "0.00", "loan_amt": "5000"},
+                    {"pdno": "035420", "prdt_name": "가격 없는 융자", "trad_dvsn_name": "자기융자", "hldg_qty": "5", "ord_psbl_qty": "5", "pchs_avg_pric": "", "prpr": "", "evlu_pfls_amt": "0", "evlu_pfls_rt": "0.00", "loan_amt": "5000"},
+                    {"pdno": "035720", "prdt_name": "수량 어긋난 융자", "trad_dvsn_name": "자기융자", "hldg_qty": "5", "ord_psbl_qty": "9", "pchs_avg_pric": "1000", "prpr": "1000", "evlu_pfls_amt": "0", "evlu_pfls_rt": "0.00", "loan_amt": "5000"},
                     {"pdno": "000270", "prdt_name": "판종목", "trad_dvsn_name": "현금", "hldg_qty": "0", "ord_psbl_qty": "0", "pchs_avg_pric": "0", "prpr": "1000", "evlu_pfls_amt": "0", "evlu_pfls_rt": "0.00", "loan_amt": "0"}
                 ],
                 "output2": [{"pchs_amt_smtl_amt": "900000", "evlu_amt_smtl_amt": "990000", "evlu_pfls_smtl_amt": "90000"}]
@@ -703,4 +705,15 @@ async fn a_kis_cancel_or_revision_of_a_row_without_a_branch_number_is_refused_as
     let (code, modified) = order_call(&f.app, "/api/trading/commands/modify", json!({"account": reference_b, "commandId": "cmd-kis-nobranch-m1", "orderNo": "0000012348", "price": 70600})).await;
     assert_eq!((code, modified["state"].clone(), modified["reason"].clone()), (StatusCode::OK, json!("rejected"), json!("invalid_order")), "지점번호가 빈 행의 정정은 보내지 않는다: {modified}");
     assert_eq!(f.kis.writes().len(), writes_before, "한투 쓰기가 나가지 않는다");
+}
+
+#[tokio::test]
+async fn kis_loan_rows_are_sent_apart_and_an_unreadable_one_does_not_block_the_balance() {
+    let f = kis_fixture(Some(KIS_ACCOUNT), None).await;
+    let (_, reference_b) = f.enable_both().await;
+
+    let (code, balance) = get(&f.app, &format!("/api/trading/balance?account={reference_b}")).await;
+    assert_eq!(code, StatusCode::OK, "{balance}");
+    assert_eq!(balance["holdings"].as_array().unwrap().iter().map(|h| h["code"].clone()).collect::<Vec<_>>(), vec![json!("005930")]);
+    assert_eq!(balance["creditHoldings"], json!([{"code": "000660", "name": "융자종목", "quantity": 5, "sellableQuantity": 5, "averagePrice": 1000, "currentPrice": 1000, "evaluationProfit": 0, "profitRateCenti": 0}]), "읽을 수 있는 융자 행만 따로 오고, 못 읽는 융자 행은 잔고를 막지 않는다");
 }

@@ -164,6 +164,8 @@ pub(super) fn reply(sent: &Sent, account: &str, rows_account: &str) -> Result<cr
                 "acnt_evlt_remn_indv_tot": [
                     {"stk_cd": "A005930", "stk_nm": "삼성전자", "evltv_prft": "+000000000090000", "prft_rt": "+10.00", "pur_pric": "000000000090000", "rmnd_qty": "000000000000010", "trde_able_qty": "000000000000004", "cur_prc": "000000000099000", "crd_tp": "00"},
                     {"stk_cd": "A000660", "stk_nm": "신용종목", "evltv_prft": "0", "prft_rt": "0.00", "pur_pric": "1000", "rmnd_qty": "5", "trde_able_qty": "5", "cur_prc": "1000", "crd_tp": "03"},
+                    {"stk_cd": "A035420", "stk_nm": "가격 없는 신용", "evltv_prft": "0", "prft_rt": "0.00", "pur_pric": "", "rmnd_qty": "5", "trde_able_qty": "5", "cur_prc": "", "crd_tp": "03"},
+                    {"stk_cd": "A035720", "stk_nm": "수량 어긋난 신용", "evltv_prft": "0", "prft_rt": "0.00", "pur_pric": "1000", "rmnd_qty": "5", "trde_able_qty": "9", "cur_prc": "1000", "crd_tp": "03"},
                     {"stk_cd": "A000270", "stk_nm": "없는종목", "evltv_prft": "0", "prft_rt": "0.00", "pur_pric": "1000", "rmnd_qty": "0", "trde_able_qty": "0", "cur_prc": "1000", "crd_tp": "00"}
                 ],
                 "return_code": 0, "return_msg": "정상"
@@ -939,4 +941,28 @@ async fn changing_the_margin_policy_keeps_a_legacy_switch_record_usable() {
     assert_eq!((status.state, status.account_tail), (crate::api::OrdersState::On, None));
     trading.balance().await.unwrap();
     assert_eq!(trading.status().account_tail.as_deref(), Some("78"));
+}
+
+#[tokio::test]
+async fn credit_rows_are_sent_apart_and_an_unreadable_one_does_not_block_the_balance() {
+    let f = fixture().await;
+    assert_eq!(enable(&f.app, "01").await.0, StatusCode::OK);
+
+    let (_, balance) = get(&f.app, "/api/trading/balance").await;
+    assert_eq!(balance["holdings"].as_array().unwrap().iter().map(|h| h["code"].clone()).collect::<Vec<_>>(), vec![json!("005930")]);
+    assert_eq!(balance["creditHoldings"], json!([{"code": "000660", "name": "신용종목", "quantity": 5, "sellableQuantity": 5, "averagePrice": 1000, "currentPrice": 1000, "evaluationProfit": 0, "profitRateCenti": 0}]), "읽을 수 있는 신용 행만 따로 오고, 못 읽는 신용 행은 잔고를 막지 않는다");
+}
+
+#[tokio::test]
+async fn an_unreadable_credit_row_does_not_block_a_sell() {
+    let f = fixture().await;
+    assert_eq!(enable(&f.app, "01").await.0, StatusCode::OK);
+
+    let (_, balance) = get(&f.app, "/api/trading/balance").await;
+    assert_eq!(balance["creditHoldings"].as_array().map(Vec::len), Some(1), "{balance}");
+    let req = Request::builder().method("POST").uri("/api/trading/commands/place").header("host", HOST).header("content-type", "application/json").header("x-vally-order", "1");
+    let sell = json!({"commandId": "cmd-credit-sell", "code": "005930", "side": "sell", "quantity": 2, "price": 71_000});
+    let resp = f.app.clone().oneshot(req.body(Body::from(sell.to_string())).unwrap()).await.unwrap();
+    let command: Value = serde_json::from_slice(&resp.into_body().collect().await.unwrap().to_bytes()).unwrap();
+    assert_eq!(command["state"], "accepted", "{command}");
 }
