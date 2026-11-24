@@ -22,7 +22,7 @@ test("지표 추가 탭은 입력한 설정의 후보만 고르고 빈 입력은
   expect(typed.map((row) => row.kind)).toEqual(["candidate"]);
   expect(selectedRow(typed, "")).toMatchObject({ kind: "candidate", group: "가격 패널", candidate: { label: "이동평균 단순 20" } });
   const all = commandRows(withMa, "", "add", empty);
-  expect([...new Set(all.map((row) => row.group))]).toEqual(["가격 패널", "아래 패널", "재무지표"]);
+  expect([...new Set(all.map((row) => row.group))]).toEqual(["가격 패널", "아래 패널", "호가지표", "재무지표"]);
   expect(all.filter((row) => row.group === "재무지표").map((row) => row.kind === "candidate" && row.candidate.kind)).toContain("revenue");
   expect(commandRows(withMa, "005930", "add", { rows: [{ info, group: "result" }], selectable: true, empty: false })).toEqual([]);
 });
@@ -58,4 +58,15 @@ test("단축키 안내는 탭에 맞는 것만 보인다", () => {
   expect(commandHints("add")[3]!.action).toBe("추가하고 닫기");
   expect(commandHints("compare").map((hint) => hint.keys)).toEqual(["↑↓", "Enter", "Shift+Enter", "Esc"]);
   expect(commandHints("compare").at(-1)!.action).toBe("닫기");
+});
+
+test("호가지표를 이름으로 찾고 따로 묶어 보인다", () => {
+  const all = commandRows(withMa, "", "add", empty);
+  const quotes = all.filter((row) => row.group === "호가지표");
+  expect(quotes.map((row) => row.kind === "candidate" && row.candidate.kind)).toContain("quoteTotals");
+  for (const input of ["총잔량", "ㅊㅈㄹ", "호가"]) {
+    const rows = commandRows(withMa, input, "add", empty);
+    expect(rows.some((row) => row.kind === "candidate" && row.candidate.kind === "quoteTotals" && row.group === "호가지표"), input).toBe(true);
+  }
+  expect(selectedRow(commandRows(withMa, "총잔량", "add", empty), "")).toMatchObject({ kind: "candidate", candidate: { kind: "quoteTotals", label: "총잔량", errors: [] } });
 });

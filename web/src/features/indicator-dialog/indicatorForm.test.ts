@@ -1,6 +1,6 @@
 import { expect, test } from "vitest";
 import type { IndicatorSpec } from "../../api/generated/IndicatorSpec";
-import { colorsFrom, isFinancial, isFinancialBar, KIND_ORDER, KINDS } from "../../chart/indicators/kinds";
+import { colorsFrom, isFinancial, isFinancialBar, isQuote, KIND_ORDER, KINDS } from "../../chart/indicators/kinds";
 import type { HexColor } from "../../lib/colors";
 import { addIndicator, DEFAULT_CHART_SETTINGS, type IndicatorConfig } from "../../chart/settings";
 import {
@@ -103,7 +103,7 @@ test("색 견본은 색을 고를 선이 있을 때만 보인다", () => {
   expect(hasColor(volume)).toBe(true);
   expect(hasColor(edit(volume, {}, { maPeriod: false }))).toBe(false);
   expect(hasColor(edit(volume, { maPeriod: "" }))).toBe(true);
-  for (const kind of KIND_ORDER.filter((k) => { const spec = KINDS[k].defaults; return k !== "volume" && !(isFinancial(spec) && isFinancialBar(spec.kind)); })) expect(hasColor(formFromSpec(KINDS[kind].defaults))).toBe(true);
+  for (const kind of KIND_ORDER.filter((k) => { const spec = KINDS[k].defaults; return k !== "volume" && !isQuote(spec) && !(isFinancial(spec) && isFinancialBar(spec.kind)); })) expect(hasColor(formFromSpec(KINDS[kind].defaults))).toBe(true);
 });
 
 test("주 버튼은 무엇이 추가될지를 말하고, 편집이면 변경 적용이다", () => {

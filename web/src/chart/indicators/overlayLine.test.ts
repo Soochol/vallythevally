@@ -37,3 +37,17 @@ test("미리보기 선은 같은 색의 옅은 후광을 먼저 그리고 원래
   expect(strokes(false)).toEqual([{ width: 2, alpha: 1 }]);
   expect(strokes(true)).toEqual([{ width: 8, alpha: 0.18 }, { width: 2, alpha: 1 }]);
 });
+
+test("선은 break 표시에서 끊고 점을 찍지 않는다", () => {
+  const view = new OverlayLineView(false);
+  const steps: string[] = [];
+  const ctx = {
+    lineWidth: 0, globalAlpha: 1, strokeStyle: "", lineJoin: "", lineCap: "",
+    beginPath() {}, moveTo(x: number) { steps.push(`move ${x}`); }, lineTo(x: number) { steps.push(`line ${x}`); }, arc() { steps.push("arc"); },
+    save() {}, restore() {}, stroke() {},
+  };
+  const bars = [1, 2, 3].map((x) => ({ x, time, originalData: { time, value: 100 + x, base: 100 + x, ...(x === 2 ? { break: true as const } : {}) }, barColor: "" }));
+  view.update({ bars, barSpacing: 6, visibleRange: { from: 0, to: 3 } } as never, { ...view.defaultOptions(), color: "#5B9BFF", lineWidth: 2 });
+  view.renderer().draw({ useMediaCoordinateSpace: (run: (scope: { context: typeof ctx }) => void) => run({ context: ctx }) } as never, ((v: number) => v) as never, false, undefined);
+  expect(steps).toEqual(["move 1", "move 2", "line 3"]);
+});

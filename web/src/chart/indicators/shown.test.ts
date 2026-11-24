@@ -65,3 +65,21 @@ test.each<[string, Period, IndicatorConfig[], FinancialRequest]>([
 ])("재무자료 요청: %s", (_, period, indicators, request) => {
   expect(financialRequest(period, settingsOf({ indicators }))).toEqual(request);
 });
+
+test("총잔량은 분봉에서만 그리고 지수에서는 숨긴다", () => {
+  const totals = config("totals", { kind: "quoteTotals" }, "quotes");
+  const settings = settingsOf({ indicators: [totals, ma], panels: [panel("quotes")] });
+  const minutes: Period[] = ["1m", "3m", "5m", "10m", "15m", "30m", "60m"];
+  for (const period of minutes) {
+    expect(chartIndicators(settings, period)).toEqual([totals, ma]);
+    expect(chartPanels(settings, period)).toEqual([panel("quotes")]);
+    expect(chartIndicators(settings, period, false)).toEqual([ma]);
+    expect(chartPanels(settings, period, false)).toEqual([]);
+  }
+  const others: Period[] = ["D", "W", "M", "Q", "Y"];
+  for (const period of others) {
+    expect(chartIndicators(settings, period)).toEqual([ma]);
+    expect(chartPanels(settings, period)).toEqual([]);
+  }
+  expect(settings.indicators).toEqual([totals, ma]);
+});

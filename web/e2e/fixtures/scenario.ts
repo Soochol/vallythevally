@@ -34,6 +34,7 @@ import type { RankingPage } from "../../src/api/generated/RankingPage";
 import type { Screens } from "../../src/api/generated/Screens";
 import type { ServerMessage } from "../../src/api/generated/ServerMessage";
 import type { Quote } from "../../src/api/generated/Quote";
+import type { QuoteTotalsPage } from "../../src/api/generated/QuoteTotalsPage";
 import type { SymbolDaySummary } from "../../src/api/generated/SymbolDaySummary";
 import type { SymbolInfo } from "../../src/api/generated/SymbolInfo";
 import type { UiState } from "../../src/api/generated/UiState";
@@ -425,6 +426,11 @@ export class Scenario {
     if (path === "/api/rankings" && method === "POST") return { body: { rows: [], pages: 1, end: true, limited: false, hidden: 0, fetchedAt: Math.floor(this.now / 1000), source: "kiwoom" } satisfies RankingPage };
     if (path === "/api/screener/status" && method === "GET") return { body: { lastDay: null, needDay: "2026-11-06", todayAvailable: false, fullHistory: { done: 0, total: 0 }, unconfirmed: 0, update: null } satisfies ScreenerStatus };
     if (/\/financials$/.test(path) && method === "GET") return { body: { symbol: decodeURIComponent(path.split("/")[3] ?? ""), period: url.searchParams.get("period") === "Q" ? "Q" : "Y", status: "not_collected", reason: null, failure: null, corpCode: null, fiscalMonth: null, shareClass: null, shareClassReason: null, lastCheckedAt: null, lastAttemptAt: null, disclosureFailure: null, refreshVersion: 0, disclosureVersion: 0, latestCorrections: false, progress: { total: 0, completed: 0, failed: 0, pending: 0 }, series: [] } satisfies FinancialsPage };
+    if (/^\/api\/symbols\/[^/]+\/quote-totals$/.test(path) && method === "GET") {
+      const venue = url.searchParams.get("venue") ?? "combined";
+      if (venue !== "combined" && venue !== "krx" && venue !== "nxt") return error(400, "bad_request", "Invalid venue");
+      return { body: { venue, days: [], points: [] } satisfies QuoteTotalsPage };
+    }
     const description = `Unconfigured API fixture: ${method} ${url.pathname}${url.search}`;
     this.failures.push(description);
     return error(599, "internal", description);

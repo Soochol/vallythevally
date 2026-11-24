@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { colorsFrom, firstUnusedColor, KIND_ORDER, KINDS, lineColor, colorLine, shownColor, specLines, specName } from "./kinds";
+import { colorsFrom, firstUnusedColor, isFinancial, isQuote, isTechnical, KIND_ORDER, KINDS, lineColor, colorLine, placementsOf, shownColor, specLines, specName } from "./kinds";
 
 test("기본값은 backend.md §9.5 표를 따른다", () => {
   expect(KIND_ORDER.map((k) => KINDS[k].defaults)).toEqual([
@@ -10,6 +10,7 @@ test("기본값은 backend.md §9.5 표를 따른다", () => {
     { kind: "rsi", period: 14, signal: null },
     { kind: "macd", fast: 12, slow: 26, signal: 9 },
     { kind: "stochSlow", k: 5, d: 3, smooth: 3 },
+    { kind: "quoteTotals" },
     ...["revenue", "operating_income", "owner_roe", "investing_cash_flow", "dps", "debt_ratio"].map((kind) => ({ kind })),
   ]);
   expect(KIND_ORDER.filter((k) => KINDS[k].place === "price")).toEqual(["ma", "bollinger", "ichimoku"]);
@@ -36,4 +37,16 @@ test("안 쓴 첫 색, 선이 늘어나면 대표 색에서 이어 칠한다", (
   const rsi = { kind: "rsi", period: 14, signal: 9 } as const;
   expect(lineColor(rsi, ["ind-5"], 1)).toBe("ind-1");
   expect(colorsFrom({ kind: "ichimoku", conversion: 9, base: 26, spanB: 52, displacement: 26 }, "ind-4")).toEqual(["ind-4", "ind-5", "ind-1", "ind-2", "ind-3"]);
+});
+
+test("총잔량은 호가지표이고 선 둘을 아래 패널에 그린다", () => {
+  const spec = { kind: "quoteTotals" } as const;
+  expect(KINDS.quoteTotals.label).toBe("총잔량");
+  expect(specName(spec)).toBe("총잔량");
+  expect(specLines(spec)).toEqual(["quoteAsk", "quoteBid"]);
+  expect(colorLine(spec)).toBeNull();
+  expect(KINDS.quoteTotals.fields).toEqual([]);
+  expect(placementsOf("quoteTotals")).toEqual(["panel"]);
+  expect([isQuote(spec), isTechnical(spec), isFinancial(spec)]).toEqual([true, false, false]);
+  expect([isQuote({ kind: "dps" }), isTechnical({ kind: "dps" }), isTechnical({ kind: "volume", maPeriod: null })]).toEqual([false, false, true]);
 });

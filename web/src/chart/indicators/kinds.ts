@@ -4,12 +4,15 @@ import type { LineId } from "../../api/generated/LineId";
 import type { SpecValidation } from "../../wasm/indicators/indicators.js";
 import { isHexColor, PRESET_COLORS, type HexColor } from "../../lib/colors";
 
-export type IndicatorSpec = TechnicalSpec | { [K in FinancialMetric]: { kind: K } }[FinancialMetric];
+export type QuoteSpec = { kind: "quoteTotals" };
+export type IndicatorSpec = TechnicalSpec | { [K in FinancialMetric]: { kind: K } }[FinancialMetric] | QuoteSpec;
 export type FinancialSpec = Extract<IndicatorSpec, { kind: FinancialMetric }>;
 export const FINANCIAL_LABEL: Record<FinancialMetric, string> = { revenue: "매출액", operating_income: "영업이익", owner_roe: "지배주주 ROE", investing_cash_flow: "투자활동 현금흐름", dps: "DPS", debt_ratio: "부채비율" };
 export const isFinancial = (spec: IndicatorSpec): spec is FinancialSpec => spec.kind in FINANCIAL_LABEL;
+export const isQuote = (spec: IndicatorSpec): spec is QuoteSpec => spec.kind === "quoteTotals";
+export const isTechnical = (spec: IndicatorSpec): spec is TechnicalSpec => !isFinancial(spec) && !isQuote(spec);
 export const isFinancialBar = (kind: FinancialMetric) => kind !== "owner_roe" && kind !== "debt_ratio";
-export type PlotLineId = LineId | "financial";
+export type PlotLineId = LineId | "financial" | "quoteAsk" | "quoteBid";
 
 export type IndicatorKind = IndicatorSpec["kind"];
 export type SpecOf<K extends IndicatorKind> = Extract<IndicatorSpec, { kind: K }>;
@@ -108,9 +111,17 @@ export const KINDS: Registry = {
     name: (s) => `스토캐스틱 슬로우 ${s.k} ${s.d} ${s.smooth}`,
     lines: () => ["k", "d"],
   },
+  quoteTotals: {
+    label: "총잔량",
+    place: "panel",
+    defaults: { kind: "quoteTotals" },
+    fields: [],
+    name: () => "총잔량",
+    lines: () => ["quoteAsk", "quoteBid"],
+  },
 };
 
-export const KIND_ORDER: IndicatorKind[] = ["ma", "bollinger", "ichimoku", "volume", "rsi", "macd", "stochSlow", "revenue", "operating_income", "owner_roe", "investing_cash_flow", "dps", "debt_ratio"];
+export const KIND_ORDER: IndicatorKind[] = ["ma", "bollinger", "ichimoku", "volume", "rsi", "macd", "stochSlow", "quoteTotals", "revenue", "operating_income", "owner_roe", "investing_cash_flow", "dps", "debt_ratio"];
 
 const kindInfo = <K extends IndicatorKind>(kind: K): KindInfo<K> => KINDS[kind];
 
@@ -148,9 +159,12 @@ export const LINE_LABEL: Record<PlotLineId, string> = {
   histogram: "히스토그램",
   k: "%K",
   d: "%D",
+  quoteAsk: "매도총잔량",
+  quoteBid: "매수총잔량",
 };
 
 export function colorLine(spec: IndicatorSpec): number | null {
+  if (isQuote(spec)) return null;
   if (isFinancial(spec) && isFinancialBar(spec.kind)) return null;
   const i = specLines(spec).findIndex((l) => !isBarLine(l));
   return i < 0 ? null : i;

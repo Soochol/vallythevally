@@ -1,7 +1,8 @@
 import type { FinancialPeriod } from "../../api/generated/FinancialPeriod";
 import type { Period } from "../../api/generated/Period";
 import type { ChartSettings, IndicatorConfig, Panel } from "../settings";
-import { isFinancial } from "./kinds";
+import { isIntraday } from "../time";
+import { isFinancial, isQuote } from "./kinds";
 
 export interface FinancialRequest {
   period: FinancialPeriod;
@@ -9,13 +10,18 @@ export interface FinancialRequest {
 }
 
 const drawsFinancials = (period: Period) => period === "Q" || period === "Y";
+const drawsQuotes = (period: Period, stock: boolean) => stock && isIntraday(period);
 
-export function chartIndicators(settings: Pick<ChartSettings, "indicators">, period: Period): IndicatorConfig[] {
-  return settings.indicators.filter((c) => !isFinancial(c.spec) || drawsFinancials(period));
+export function chartIndicators(settings: Pick<ChartSettings, "indicators">, period: Period, stock = true): IndicatorConfig[] {
+  return settings.indicators.filter((c) => {
+    if (isFinancial(c.spec)) return drawsFinancials(period);
+    if (isQuote(c.spec)) return drawsQuotes(period, stock);
+    return true;
+  });
 }
 
-export function chartPanels(settings: Pick<ChartSettings, "indicators" | "panels">, period: Period): Panel[] {
-  const configs = chartIndicators(settings, period);
+export function chartPanels(settings: Pick<ChartSettings, "indicators" | "panels">, period: Period, stock = true): Panel[] {
+  const configs = chartIndicators(settings, period, stock);
   return settings.panels.filter((p) => configs.some((c) => c.panel === p.id));
 }
 

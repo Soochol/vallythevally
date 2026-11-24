@@ -325,3 +325,12 @@ test("작은 양수 패널 비율도 저장 과정에서 0으로 반올림하지
   expect(settings.panels[0]?.stretch).toBe(0.0001);
   expect(parseChartSettings(JSON.parse(JSON.stringify(settings)))).toEqual(settings);
 });
+
+test("총잔량 설정을 저장했다가 그대로 읽는다", () => {
+  const settings: ChartSettings = {
+    ...DEFAULT_CHART_SETTINGS,
+    indicators: [{ id: "totals", spec: { kind: "quoteTotals" }, panel: "quotes", visible: true, style: { colors: ["ind-1"], width: 1 } }],
+    panels: [{ id: "quotes", stretch: 0.25 }],
+  };
+  expect(parseChartSettings(JSON.parse(JSON.stringify(settings)))).toEqual(settings);
+});
