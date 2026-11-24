@@ -142,10 +142,10 @@ function OrderBody({ id, code, infoPager }: { id: WindowId; code: SymbolCode; in
     const { prefs } = useUiStore.getState();
     setSettings({ ...prefs.orderSettings, account: null });
   }, [fellBack]);
-  const holding = atLivePrice(holdingOf(data.balance?.holdings ?? [], code), feed.lastPrice);
+  const holding = useMemo(() => atLivePrice(holdingOf(data.balance?.holdings ?? [], code), feed.lastPrice), [data.balance, code, feed.lastPrice]);
   const balance = useMemo(
     () => data.balance === null || holding === null ? data.balance : { ...data.balance, holdings: data.balance.holdings.map((row) => row.code === holding.code ? holding : row) },
-    [data.balance, holding?.code, holding?.currentPrice],
+    [data.balance, holding],
   );
   const averagePrice = settings.averageDot ? averageRowPrice(rows.map((row) => row.price), holding?.averagePrice ?? null) : null;
   const writable = access.open && !data.blocked && writes.status?.unknown !== true;

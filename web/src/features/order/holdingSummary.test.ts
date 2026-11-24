@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { TradingHolding } from "../../api/generated/TradingHolding";
-import { averageRowPrice, costTitle, formatFillTime, holdingOf, isEtfOrEtnAfterHours, profitText, remainingToSell, sellableFill, sellOrderQuantity, sellQuantityAtPrice, toggledUnit } from "./holdingSummary";
+import { atLivePrice, averageRowPrice, costTitle, formatFillTime, holdingOf, isEtfOrEtnAfterHours, profitText, remainingToSell, sellableFill, sellOrderQuantity, sellQuantityAtPrice, toggledUnit } from "./holdingSummary";
 import { groupOpenOrders, groupWithPending } from "./orderRules";
 import type { PendingWrite } from "./pendingWrites";
 
@@ -170,5 +170,14 @@ describe("체결 시각", () => {
   it("여섯 자리를 시:분:초로 쓴다", () => {
     expect(formatFillTime("093015")).toBe("09:30:15");
     expect(formatFillTime("09:30")).toBe("09:30");
+  });
+});
+
+describe("매입금액이 0인 보유의 실시간 평가손익", () => {
+  it("수익률은 키움 값 그대로 두고 평가손익만 맞춘다", () => {
+    const free: TradingHolding = { ...HOLDING, averagePrice: 0, profitRateCenti: 0 };
+    const live = atLivePrice(free, 70_500);
+    expect(live).toEqual({ ...free, currentPrice: 70_500, evaluationProfit: free.evaluationProfit + 500 * 120, profitRateCenti: 0 });
+    expect(profitText(live, "percent")).toBe("0.00%");
   });
 });
