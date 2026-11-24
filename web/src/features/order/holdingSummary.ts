@@ -29,6 +29,11 @@ export function atLivePrice(holding: TradingHolding | null, lastPrice: number | 
   };
 }
 
+export interface ProfitDisplay {
+  readonly current: string;
+  readonly alternate: string;
+}
+
 export function profitText(holding: TradingHolding | null, unit: ProfitUnit): string {
   if (holding === null) return "-";
   if (unit === "percent") return holding.profitRateCenti === null ? "-" : formatPercent(holding.profitRateCenti / 100);
@@ -37,6 +42,11 @@ export function profitText(holding: TradingHolding | null, unit: ProfitUnit): st
 }
 
 export const toggledUnit = (unit: ProfitUnit): ProfitUnit => (unit === "won" ? "percent" : "won");
+
+export const profitDisplay = (holding: TradingHolding | null, unit: ProfitUnit): ProfitDisplay => ({
+  current: profitText(holding, unit),
+  alternate: profitText(holding, toggledUnit(unit)),
+});
 
 export const ALL_SELLING_TEXT = "모두 매도 주문 중입니다";
 
