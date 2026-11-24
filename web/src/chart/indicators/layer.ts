@@ -13,6 +13,7 @@ import type { FinancialsPage } from "../../api/generated/FinancialsPage";
 import type { FinancialPoint } from "../../api/generated/FinancialPoint";
 import { adjacentBucket, financialBuckets, type FinancialDetailRow, financialDetailRows, financialFailure, financialReason, checkedTime, financialSummary, financialSummaryRows, financialValue, reportingPeriod } from "../financials";
 import type { Period } from "../../api/generated/Period";
+import type { QuoteDepthPoint } from "../../api/generated/QuoteDepthPoint";
 import type { QuoteTotalPoint } from "../../api/generated/QuoteTotalPoint";
 import type { UnixSeconds } from "../../api/generated/UnixSeconds";
 import { formatPrice, formatVolume } from "../../lib/format";
@@ -24,7 +25,7 @@ import { indicatorColorValue, type ThemeTokens } from "../theme";
 import { toChartTime } from "../time";
 import type { IndicatorPort, OpenPort } from "./client";
 import { applyToPoints, DrawQueue, pointAtTime } from "./drawQueue";
-import { isFinancial, isFinancialBar, isQuote, isTechnical, type PlotLineId as LineId, isBarLine, lineColor, specLines, specName } from "./kinds";
+import { isFinancial, isFinancialBar, isQuoteDepth, isQuoteTotals, isTechnical, type PlotLineId as LineId, isBarLine, lineColor, specLines, specName } from "./kinds";
 import { addOverlayLine, type OverlayPoint, type OverlaySeries } from "./overlayLine";
 import type { BarTuple, Columns, EngineErrorKind, EngineResult, FromWorker, LineInfo, Point } from "./protocol";
 import { syncOp } from "./sync";
@@ -146,6 +147,26 @@ function isQuoteTail(prev: readonly Bar[], next: readonly Bar[], bar: Bar): bool
 const ERROR_TEXT: Record<EngineErrorKind, string> = { spec: "설정 오류", calc: "계산 오류" };
 export const indicatorErrorText = (kind: EngineErrorKind) => ERROR_TEXT[kind];
 
+function thickestLevel(levels: readonly (readonly [number, number])[]): readonly [number, number] | null {
+  let best: readonly [number, number] | null = null;
+  for (let i = 0; i < levels.length; i++) {
+    const level = levels[i]!;
+    if (level[1] > 0 && (best === null || level[1] > best[1])) best = level;
+  }
+  return best;
+}
+
+function formatDepthLevel(level: readonly [number, number] | null): string {
+  return level ? `${formatPrice(level[0], false)} ${formatVolume(level[1])}` : "—";
+}
+
+interface DepthLegend {
+  asks: TrackedValues;
+  bids: TrackedValues;
+  dirty: boolean;
+  lastT: UnixSeconds | null;
+}
+
 export class IndicatorLayer {
   private readonly port: IndicatorPort;
   private readonly shown = new Map<string, Shown>();
@@ -168,13 +189,24 @@ export class IndicatorLayer {
   private financialMessage = "재무자료를 불러오는 중입니다";
   private financialNotice: string | undefined;
   private quoteTotals: QuoteView<QuoteTotalPoint> | null = null;
+  private quoteDepths: ReadonlyMap<IndicatorConfig["id"], QuoteView<QuoteDepthPoint>> = new Map();
+  private readonly depthLegends = new Map<string, DepthLegend>();
 
   setQuoteTotals(view: QuoteView<QuoteTotalPoint> | null, from: UnixSeconds | null = null): void {
     this.quoteTotals = view;
-    for (const s of this.shown.values()) if (isQuote(s.config.spec)) {
+    for (const s of this.shown.values()) if (isQuoteTotals(s.config.spec)) {
       this.updateQuoteStatus(s);
       if (s.config.visible) this.syncQuoteTotals(s, from);
     }
+    this.host.requestFrame();
+  }
+
+  setQuoteDepths(views: ReadonlyMap<IndicatorConfig["id"], QuoteView<QuoteDepthPoint>>): void {
+    this.quoteDepths = views;
+    for (const s of this.shown.values()) if (isQuoteDepth(s.config.spec)) {
+      this.updateQuoteDepthStatus(s);
+    }
+    for (const legend of this.depthLegends.values()) legend.dirty = true;
     this.host.requestFrame();
   }
 
@@ -258,14 +290,16 @@ export class IndicatorLayer {
       if (barOpacityOf(prev.style) !== barOpacityOf(config.style)) this.redrawBars(s);
     }
     const orderChanged = configs.length !== prevConfigs.length || configs.some((c, i) => c.id !== prevConfigs[i]?.id);
-    if (panelOrderChanged || orderChanged || [...this.shown.values()].some((s) => s.lines.length === 0)) this.rebuildSeries();
+    if (panelOrderChanged || orderChanged || [...this.shown.values()].some((s) => s.lines.length === 0 && specLines(s.config.spec).length > 0)) this.rebuildSeries();
     this.applyStretch();
     this.create(fresh);
     for (const s of this.shown.values()) {
       if (isFinancial(s.config.spec)) this.drawFinancial(s);
-      else if (isQuote(s.config.spec)) {
+      else if (isQuoteTotals(s.config.spec)) {
         this.updateQuoteStatus(s);
         if (s.config.visible) this.syncQuoteTotals(s, null);
+      } else if (isQuoteDepth(s.config.spec)) {
+        this.updateQuoteDepthStatus(s);
       }
     }
   }
@@ -283,10 +317,11 @@ export class IndicatorLayer {
 
   private resetNow(h: History, keepQuotes = false): void {
     for (const s of this.shown.values()) {
-      if (keepQuotes && isQuote(s.config.spec)) continue;
+      if (keepQuotes && (isQuoteTotals(s.config.spec) || isQuoteDepth(s.config.spec))) continue;
       this.clearLines(s);
       if (s.config.visible) s.status = { kind: "pending" };
     }
+    if (!keepQuotes) for (const legend of this.depthLegends.values()) legend.dirty = true;
     this.load(h, keepQuotes);
   }
 
@@ -294,13 +329,16 @@ export class IndicatorLayer {
     this.history = h;
     this.display = displayBars(h);
     this.timesDirty = true;
+    if (!keepQuotes) for (const legend of this.depthLegends.values()) legend.dirty = true;
     this.committedT = h.bars[h.bars.length - 1]?.t ?? null;
     this.create(this.configs.filter((c) => c.visible));
     for (const s of this.shown.values()) {
       if (isFinancial(s.config.spec)) this.drawFinancial(s);
-      else if (isQuote(s.config.spec) && !keepQuotes) {
+      else if (isQuoteTotals(s.config.spec) && !keepQuotes) {
         this.updateQuoteStatus(s);
         if (s.config.visible) this.syncQuoteTotals(s, null);
+      } else if (isQuoteDepth(s.config.spec) && !keepQuotes) {
+        this.updateQuoteDepthStatus(s);
       }
     }
   }
@@ -320,6 +358,12 @@ export class IndicatorLayer {
       this.clearLines(s);
       if (s.config.visible && s.status.kind !== "error") s.status = { kind: "pending" };
     }
+    for (const legend of this.depthLegends.values()) {
+      legend.asks.clear();
+      legend.bids.clear();
+      legend.lastT = null;
+      legend.dirty = true;
+    }
   }
 
   advance(h: History, bar: Bar, kind: "live" | "confirmed"): void {
@@ -330,7 +374,10 @@ export class IndicatorLayer {
       const keepQuotes = this.history !== null && isQuoteTail(prev, next, bar);
       this.host.guard(() => {
         this.resetNow(h, keepQuotes);
-        if (keepQuotes) this.advanceQuoteTotals(bar);
+        if (keepQuotes) {
+          this.advanceQuoteTotals(bar);
+          this.advanceDepthLegends(bar);
+        }
       });
       return;
     }
@@ -350,6 +397,7 @@ export class IndicatorLayer {
       }
     }
     this.advanceQuoteTotals(bar);
+    this.advanceDepthLegends(bar);
     if (this.configs.some((c) => c.visible && usesWorker(c)) && !this.broken) {
       this.port.post({ type: "bar", chart: this.port.chart, kind: op, bar: tuple(bar) });
     }
@@ -360,7 +408,7 @@ export class IndicatorLayer {
     if (!quotePt) return;
     const prevBar = this.display.length >= 2 ? this.display[this.display.length - 2] : undefined;
     const brk = prevBar !== undefined && !this.quoteTotals?.at(prevBar.t);
-    for (const s of this.shown.values()) if (s.config.visible && isQuote(s.config.spec)) {
+    for (const s of this.shown.values()) if (s.config.visible && isQuoteTotals(s.config.spec)) {
       for (const line of s.lines) {
         const qp: Point = brk ? { t: bar.t, v: this.quoteValue(line, quotePt), break: true } : { t: bar.t, v: this.quoteValue(line, quotePt) };
         line.points = applyToPoints(line.points, { op: "update", point: qp });
@@ -430,7 +478,7 @@ export class IndicatorLayer {
           detail: { status: this.financialNotice ? "failed" : this.financials?.status ?? "pending", summary, rows: [...this.financialOverview, ...at.flatMap((p) => this.financialPointRows.get(p) ?? [])],
             reports: this.financialReports.get(metric) ?? [] } };
       }
-      if (isQuote(config.spec)) {
+      if (isQuoteTotals(config.spec)) {
         const panel = panelIndex < 0 ? null : { index: panelIndex, count: this.panels.length, collapsed };
         if (!config.visible) return { id: config.id, name: specName(config.spec), color: tokens.down, values: [], state: "hidden", panel };
         const view = this.quoteTotals;
@@ -446,6 +494,27 @@ export class IndicatorLayer {
                 ? [{ text: formatVolume(pt.ask), color: tokens.down }, { text: formatVolume(pt.bid), color: tokens.up }]
                 : [{ text: "—", color: tokens.down }, { text: "—", color: tokens.up }];
         return { id: config.id, name: specName(config.spec), color: tokens.down, values, state: "ok", panel };
+      }
+      if (isQuoteDepth(config.spec)) {
+        const askColor = config.spec.askColor ?? tokens.down;
+        const bidColor = config.spec.bidColor ?? tokens.up;
+        if (!config.visible) return { id: config.id, name: specName(config.spec), color: askColor, values: [], state: "hidden", panel: null };
+        const view = this.quoteDepths.get(config.id);
+        const pt = time !== null && view ? view.at(time) : undefined;
+        const qState = view?.state ?? "loading";
+        if (qState === "loading" && !pt) return { id: config.id, name: specName(config.spec), color: askColor, values: [], state: "pending", panel: null };
+        const values: LegendValue[] =
+          qState === "notCollected"
+            ? [{ text: "수집하지 않는 종목", color: tokens.text2 }]
+            : qState === "failed"
+              ? [{ text: "호가 자료 조회 실패", color: tokens.text2 }]
+              : pt
+                ? [
+                    { text: formatDepthLevel(thickestLevel(pt.asks)), color: askColor },
+                    { text: formatDepthLevel(thickestLevel(pt.bids)), color: bidColor },
+                  ]
+                : [{ text: "—", color: askColor }, { text: "—", color: bidColor }];
+        return { id: config.id, name: specName(config.spec), color: askColor, values, state: "ok", panel: null };
       }
       const values: LegendValue[] =
         state !== "ok" || time === null || !s
@@ -474,7 +543,31 @@ export class IndicatorLayer {
     for (const config of this.configs) {
       const shown = this.shown.get(config.id);
       const panelIndex = config.panel === "price" ? -1 : this.panels.findIndex((panel) => panel.id === config.panel);
-      if (isFinancial(config.spec) || isQuote(config.spec) || panelIndex >= 0) continue;
+      if (isFinancial(config.spec) || isQuoteTotals(config.spec) || panelIndex >= 0) continue;
+      if (isQuoteDepth(config.spec)) {
+        if (!config.visible) {
+          rows.push({ id: config.id, slots: [] });
+          continue;
+        }
+        const view = this.quoteDepths.get(config.id);
+        const qState = view?.state ?? "loading";
+        if (qState === "notCollected") {
+          rows.push({ id: config.id, slots: [["수집하지 않는 종목"]] });
+          continue;
+        }
+        if (qState === "failed") {
+          rows.push({ id: config.id, slots: [["호가 자료 조회 실패"]] });
+          continue;
+        }
+        if (qState === "loading") {
+          rows.push({ id: config.id, slots: [] });
+          continue;
+        }
+        const legend = this.depthLegend(config.id);
+        if (legend.dirty) this.rebuildDepthLegend(legend, view);
+        rows.push({ id: config.id, slots: [legend.asks.values, legend.bids.values] });
+        continue;
+      }
       const slots: (readonly string[])[] = [];
       if (shown?.status.kind === "ready") {
         for (const line of shown.lines) {
@@ -656,7 +749,7 @@ export class IndicatorLayer {
     }
     for (const s of this.shown.values()) {
       if (isFinancial(s.config.spec)) this.drawFinancial(s);
-      else if (isQuote(s.config.spec)) {
+      else if (isQuoteTotals(s.config.spec)) {
         this.updateQuoteStatus(s);
         if (s.config.visible) {
           for (const line of s.lines) {
@@ -664,6 +757,8 @@ export class IndicatorLayer {
             if (line.points.length) this.draw(line, line.points);
           }
         }
+      } else if (isQuoteDepth(s.config.spec)) {
+        this.updateQuoteDepthStatus(s);
       } else for (const line of s.lines) if (line.points.length) this.draw(line, line.points);
     }
   }
@@ -696,7 +791,7 @@ export class IndicatorLayer {
 
   private lineOptions(config: IndicatorConfig, id: LineId, i: number) {
     const common = { visible: config.visible, priceLineVisible: false, lastValueVisible: config.panel !== "price" && i === 0 && this.firstInPanel(config), title: "" };
-    if (isQuote(config.spec)) {
+    if (isQuoteTotals(config.spec)) {
       const color = id === "quoteAsk" ? this.host.tokens().down : this.host.tokens().up;
       return { ...common, color, lineWidth: 2 as const, crosshairMarkerVisible: false };
     }
@@ -724,7 +819,7 @@ export class IndicatorLayer {
       const currency = currencies.size === 1 ? [...currencies][0] ?? null : "원문 통화";
       return axisPriceFormat(financialAxisUnit(metric, currency), 0.01, this.axisGeometry(config));
     }
-    const unit = config.spec.kind === "volume" || isQuote(config.spec) ? "volume" : config.spec.kind === "macd" || config.spec.kind === "rsi" || config.spec.kind === "stochSlow" || this.host.isIndex() ? "index" : "price";
+    const unit = config.spec.kind === "volume" || isQuoteTotals(config.spec) ? "volume" : config.spec.kind === "macd" || config.spec.kind === "rsi" || config.spec.kind === "stochSlow" || this.host.isIndex() ? "index" : "price";
     return axisPriceFormat(unit, 0.01, this.axisGeometry(config));
   }
 
@@ -787,6 +882,15 @@ export class IndicatorLayer {
       return;
     }
     const state = this.quoteTotals?.state ?? "loading";
+    s.status = state === "loading" ? { kind: "pending" } : { kind: "ready" };
+  }
+
+  private updateQuoteDepthStatus(s: Shown): void {
+    if (!s.config.visible) {
+      s.status = { kind: "hidden" };
+      return;
+    }
+    const state = this.quoteDepths.get(s.config.id)?.state ?? "loading";
     s.status = state === "loading" ? { kind: "pending" } : { kind: "ready" };
   }
 
@@ -957,10 +1061,61 @@ export class IndicatorLayer {
     this.host.chart.removeSeries(line.series);
   }
 
+  private depthLegend(id: string): DepthLegend {
+    let legend = this.depthLegends.get(id);
+    if (!legend) {
+      legend = { asks: new TrackedValues(), bids: new TrackedValues(), dirty: true, lastT: null };
+      this.depthLegends.set(id, legend);
+    }
+    return legend;
+  }
+
+  private rebuildDepthLegend(legend: DepthLegend, view: QuoteView<QuoteDepthPoint> | undefined): void {
+    const asks: string[] = [];
+    const bids: string[] = [];
+    for (let i = 0; i < this.display.length; i++) {
+      const pt = view?.at(this.display[i]!.t);
+      asks.push(formatDepthLevel(pt ? thickestLevel(pt.asks) : null));
+      bids.push(formatDepthLevel(pt ? thickestLevel(pt.bids) : null));
+    }
+    if (asks.length === 0) {
+      asks.push("—");
+      bids.push("—");
+    }
+    legend.asks.setAll(asks);
+    legend.bids.setAll(bids);
+    legend.lastT = this.display.at(-1)?.t ?? null;
+    legend.dirty = false;
+  }
+
+  private advanceDepthLegends(bar: Bar): void {
+    for (const s of this.shown.values()) {
+      if (!s.config.visible || !isQuoteDepth(s.config.spec)) continue;
+      const legend = this.depthLegends.get(s.config.id);
+      if (!legend || legend.dirty) continue;
+      const view = this.quoteDepths.get(s.config.id);
+      if (!view || view.state !== "ready") continue;
+      const pt = view.at(bar.t);
+      const ask = formatDepthLevel(pt ? thickestLevel(pt.asks) : null);
+      const bid = formatDepthLevel(pt ? thickestLevel(pt.bids) : null);
+      if (legend.lastT === bar.t && legend.asks.values.length > 0) {
+        legend.asks.setAt(legend.asks.values.length - 1, ask);
+        legend.bids.setAt(legend.bids.values.length - 1, bid);
+      } else if (legend.lastT === null || bar.t > legend.lastT) {
+        legend.asks.push(ask);
+        legend.bids.push(bid);
+        legend.lastT = bar.t;
+      } else {
+        legend.dirty = true;
+      }
+    }
+  }
+
   private removeShown(id: string): void {
     const s = this.shown.get(id);
     if (!s) return;
     this.shown.delete(id);
+    this.depthLegends.delete(id);
     for (const line of s.lines) this.removeLine(line);
   }
 

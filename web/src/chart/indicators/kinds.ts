@@ -1,15 +1,27 @@
 import type { IndicatorSpec as TechnicalSpec } from "../../api/generated/IndicatorSpec";
 import type { FinancialMetric } from "../../api/generated/FinancialMetric";
 import type { LineId } from "../../api/generated/LineId";
+import type { QuoteDepthSource } from "../../api/generated/QuoteDepthSource";
 import type { SpecValidation } from "../../wasm/indicators/indicators.js";
 import { isHexColor, PRESET_COLORS, type HexColor } from "../../lib/colors";
 
-export type QuoteSpec = { kind: "quoteTotals" };
+export type QuoteDepthSpec = {
+  kind: "quoteDepth";
+  source: QuoteDepthSource;
+  topLevels: number | null;
+  maxOpacity: number;
+  aboveBars: boolean;
+  askColor: HexColor | null;
+  bidColor: HexColor | null;
+};
+export type QuoteSpec = { kind: "quoteTotals" } | QuoteDepthSpec;
 export type IndicatorSpec = TechnicalSpec | { [K in FinancialMetric]: { kind: K } }[FinancialMetric] | QuoteSpec;
 export type FinancialSpec = Extract<IndicatorSpec, { kind: FinancialMetric }>;
 export const FINANCIAL_LABEL: Record<FinancialMetric, string> = { revenue: "매출액", operating_income: "영업이익", owner_roe: "지배주주 ROE", investing_cash_flow: "투자활동 현금흐름", dps: "DPS", debt_ratio: "부채비율" };
 export const isFinancial = (spec: IndicatorSpec): spec is FinancialSpec => spec.kind in FINANCIAL_LABEL;
-export const isQuote = (spec: IndicatorSpec): spec is QuoteSpec => spec.kind === "quoteTotals";
+export const isQuoteTotals = (spec: IndicatorSpec): spec is { kind: "quoteTotals" } => spec.kind === "quoteTotals";
+export const isQuoteDepth = (spec: IndicatorSpec): spec is QuoteDepthSpec => spec.kind === "quoteDepth";
+export const isQuote = (spec: IndicatorSpec): spec is QuoteSpec => isQuoteTotals(spec) || isQuoteDepth(spec);
 export const isTechnical = (spec: IndicatorSpec): spec is TechnicalSpec => !isFinancial(spec) && !isQuote(spec);
 export const isFinancialBar = (kind: FinancialMetric) => kind !== "owner_roe" && kind !== "debt_ratio";
 export type PlotLineId = LineId | "financial" | "quoteAsk" | "quoteBid";
@@ -28,8 +40,12 @@ export const indicatorCssColor = (color: IndicatorColor): string => isHexColor(c
 export type SpecField =
   | { key: string; label: string; type: "int"; unit?: string }
   | { key: string; label: string; type: "float" }
-  | { key: string; label: string; type: "optionalInt"; unit?: string; toggle: string; start: number }
-  | { key: string; label: string; type: "method" };
+  | { key: string; label: string; type: "optionalInt"; unit?: string; toggle: string; start: number; max?: number }
+  | { key: string; label: string; type: "method" }
+  | { key: string; label: string; type: "choice"; options: readonly (readonly [value: string, label: string])[] }
+  | { key: string; label: string; type: "flag" }
+  | { key: string; label: string; type: "percent"; min: number; max: number; step: number }
+  | { key: string; label: string; type: "color"; token: "up" | "down" };
 
 interface KindInfo<K extends IndicatorKind> {
   label: string;
@@ -119,9 +135,24 @@ export const KINDS: Registry = {
     name: () => "총잔량",
     lines: () => ["quoteAsk", "quoteBid"],
   },
+  quoteDepth: {
+    label: "호가 잔량 히트맵",
+    place: "price",
+    defaults: { kind: "quoteDepth", source: "priceMax", topLevels: null, maxOpacity: 0.7, aboveBars: false, askColor: null, bidColor: null },
+    fields: [
+      { key: "source", label: "잔량 기준", type: "choice", options: [["priceMax", "가격대마다 최댓값"], ["peak", "총잔량 최대 순간"], ["close", "종가 호가"]] },
+      { key: "topLevels", label: "가격대 수", type: "optionalInt", unit: "개", toggle: "최대 잔량 가격대만", start: 1, max: 5 },
+      { key: "maxOpacity", label: "최대 불투명도", type: "percent", min: 20, max: 100, step: 5 },
+      { key: "aboveBars", label: "봉 앞에 그리기", type: "flag" },
+      { key: "askColor", label: "매도 색", type: "color", token: "down" },
+      { key: "bidColor", label: "매수 색", type: "color", token: "up" },
+    ],
+    name: () => "호가 잔량 히트맵",
+    lines: () => [],
+  },
 };
 
-export const KIND_ORDER: IndicatorKind[] = ["ma", "bollinger", "ichimoku", "volume", "rsi", "macd", "stochSlow", "quoteTotals", "revenue", "operating_income", "owner_roe", "investing_cash_flow", "dps", "debt_ratio"];
+export const KIND_ORDER: IndicatorKind[] = ["ma", "bollinger", "ichimoku", "volume", "rsi", "macd", "stochSlow", "quoteTotals", "quoteDepth", "revenue", "operating_income", "owner_roe", "investing_cash_flow", "dps", "debt_ratio"];
 
 const kindInfo = <K extends IndicatorKind>(kind: K): KindInfo<K> => KINDS[kind];
 

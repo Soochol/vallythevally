@@ -12,6 +12,7 @@ import {
   specName,
 } from "../../chart/indicators/kinds";
 import { barOpacityOf, DEFAULT_BAR_OPACITY, type IndicatorConfig, type LineWidth, type Panel, placementOfConfig, readSpecShape } from "../../chart/settings";
+import { normalizeHex } from "../../lib/colors";
 
 export type { Validate };
 export interface FieldError {
@@ -50,6 +51,12 @@ export function formFromSpec(spec: IndicatorSpec): SpecForm {
     if (f.type === "optionalInt") {
       enabled[f.key] = v !== null;
       text[f.key] = String(v ?? defaults[f.key] ?? f.start);
+    } else if (f.type === "percent") {
+      text[f.key] = String(Math.round(Number(v) * 100));
+    } else if (f.type === "flag") {
+      text[f.key] = v ? "true" : "false";
+    } else if (f.type === "color") {
+      text[f.key] = v === null ? "" : String(v);
     } else {
       text[f.key] = String(v);
     }
@@ -71,14 +78,32 @@ function readForm(form: SpecForm): { spec: IndicatorSpec | null; errors: FieldEr
   const errors: FieldError[] = [];
   for (const f of KINDS[form.kind].fields) {
     const t = (form.text[f.key] ?? "").trim();
-    if (f.type === "method") raw[f.key] = t;
-    else if (f.type === "optionalInt" && !form.enabled[f.key]) raw[f.key] = null;
+    if (f.type === "method" || f.type === "choice") raw[f.key] = t;
+    else if (f.type === "flag") {
+      if (t === "true" || t === "false") raw[f.key] = t === "true";
+      else errors.push({ field: f.key, message: "켜짐 또는 꺼짐이어야 합니다." });
+    } else if (f.type === "percent") {
+      const n = INT.test(t) ? Number(t) : Number.NaN;
+      if (Number.isFinite(n) && n >= f.min && n <= f.max) raw[f.key] = n / 100;
+      else errors.push({ field: f.key, message: `${f.min}~${f.max}% 사이여야 합니다.` });
+    } else if (f.type === "color") {
+      if (t === "") raw[f.key] = null;
+      else {
+        const hex = normalizeHex(t);
+        if (hex) raw[f.key] = hex;
+        else errors.push({ field: f.key, message: "올바른 색상이어야 합니다." });
+      }
+    } else if (f.type === "optionalInt" && !form.enabled[f.key]) raw[f.key] = null;
     else if (f.type === "float") {
       const n = Number(t);
       if (t !== "" && Number.isFinite(n)) raw[f.key] = n;
       else errors.push({ field: f.key, message: "숫자여야 합니다." });
-    } else if (INT.test(t)) raw[f.key] = Number(t);
-    else errors.push({ field: f.key, message: "1 이상의 정수여야 합니다." });
+    } else if (INT.test(t)) {
+      const n = Number(t);
+      if (f.type === "optionalInt" && f.max !== undefined && (n < 1 || n > f.max)) {
+        errors.push({ field: f.key, message: `1~${f.max} 사이의 정수여야 합니다.` });
+      } else raw[f.key] = n;
+    } else errors.push({ field: f.key, message: "1 이상의 정수여야 합니다." });
   }
   if (errors.length) return { spec: null, errors };
   const spec = readSpecShape(raw);

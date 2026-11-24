@@ -11,6 +11,7 @@ const ALIASES: Record<IndicatorKind, readonly string[]> = {
   macd: ["MACD"],
   stochSlow: ["스토캐스틱 슬로우", "스토캐스틱", "stoch", "stochastic"],
   quoteTotals: ["총잔량", "호가잔량", "호가"],
+  quoteDepth: ["호가 잔량 히트맵", "호가히트맵", "히트맵", "호가"],
   revenue: ["매출액", "매출", "revenue"],
   operating_income: ["영업이익", "operating income"],
   owner_roe: ["지배주주 ROE", "지배주주", "roe"],
@@ -44,7 +45,7 @@ export function parseIndicatorInput(input: string): IndicatorCandidate[] {
   return matches.map((kind) => {
     const form = formFromSpec(KINDS[kind].defaults);
     if (kind === "ma" && ["EMA", "지수이평"].includes(query)) form.text.method = "ema";
-    const fields = KINDS[kind].fields.filter((field) => field.type !== "method");
+    const fields = KINDS[kind].fields.filter((field) => field.type === "int" || field.type === "float" || field.type === "optionalInt");
     const values = parameters === "" ? [] : parameters.split(/[\s,]+/);
     const errors: FieldError[] = values.length > fields.length ? [{ field: "", message: `숫자는 ${fields.length}개까지 입력하세요.` }] : [];
     values.slice(0, fields.length).forEach((value, i) => {

@@ -3,6 +3,7 @@ import type { MaMethod } from "../../api/generated/MaMethod";
 import { INDICATOR_COLORS, indicatorCssColor, KINDS, type IndicatorColor, type IndicatorToken } from "../../chart/indicators/kinds";
 import { loadValidator } from "../../chart/indicators/validate";
 import { BAR_OPACITY_MAX, BAR_OPACITY_MIN, type LineWidth } from "../../chart/settings";
+import { isHexColor, type HexColor } from "../../lib/colors";
 import { Errors, Row, Segment } from "../dialog/DialogParts";
 import { ColorTable, type ThemeSwatch } from "../color/ColorTable";
 import { useColorMore } from "../color/colorMore";
@@ -67,7 +68,7 @@ export function IndicatorSettingsForm({ draft, color, errors, onChange, lineSamp
     {lined && lineSample && <svg role="img" aria-label="선 미리보기" className="h-[60px] w-full flex-none rounded-m bg-chart-bg shadow-[inset_0_0_0_1px_var(--line)]" viewBox="0 0 636 60" preserveAspectRatio="none" fill="none">
       <path d="M0 44 C 50 42, 80 18, 140 24 S 230 48, 290 38 S 390 8, 450 16 S 560 34, 636 12" stroke={css} strokeWidth={draft.width} strokeLinecap="round" vectorEffect="non-scaling-stroke" />
     </svg>}
-    <div className="grid gap-5 @min-[600px]:grid-cols-[minmax(0,1fr)_320px]">
+    <div className={lined ? "grid gap-5 @min-[600px]:grid-cols-[minmax(0,1fr)_320px]" : "grid gap-5"}>
       <section aria-labelledby={`${ids}-values`} className="flex min-w-0 flex-col gap-3">
         <h4 id={`${ids}-values`} className="text-xs text-text-3">설정값</h4>
         {KINDS[kind].fields.length === 0 && <p className="text-s text-text-3">정할 값이 없는 지표입니다.</p>}
@@ -82,6 +83,48 @@ export function IndicatorSettingsForm({ draft, color, errors, onChange, lineSamp
                 <Segment label={f.label} options={METHODS} value={text} onChange={(v) => setText(f.key, v)} />
                 <Errors id={errorId} messages={errors} />
               </Row>
+            );
+          }
+          if (f.type === "choice") {
+            return (
+              <Row key={f.key} label={f.label}>
+                <Segment label={f.label} options={f.options} value={text} onChange={(v) => setText(f.key, v)} />
+                <Errors id={errorId} messages={errors} />
+              </Row>
+            );
+          }
+          if (f.type === "flag") {
+            const checked = text === "true";
+            return (
+              <Row key={f.key} label={f.label}>
+                <button type="button" role="switch" aria-label={f.label} aria-checked={checked} className="ui-switch min-h-[var(--size-30)] text-s" onClick={() => setText(f.key, checked ? "false" : "true")}>
+                  <span className="flex-1 text-left">{checked ? "켜짐" : "꺼짐"}</span>
+                  <span aria-hidden="true" className="ui-switch-track"><span /></span>
+                </button>
+                <Errors id={errorId} messages={errors} />
+              </Row>
+            );
+          }
+          if (f.type === "percent") {
+            const pct = Number(text) || f.min;
+            return (
+              <Row key={f.key} label={f.label} labelFor={inputId}>
+                <span className="flex min-h-[30px] min-w-0 items-center gap-2">
+                  <input id={inputId} type="range" min={f.min} max={f.max} step={f.step} value={pct} aria-valuetext={`${pct}%`} className="min-w-0 flex-1 accent-[var(--accent)]" onChange={(e) => setText(f.key, e.target.value)} />
+                  <output htmlFor={inputId} className="w-10 flex-none text-right text-s tabular-nums text-text-2">{pct}%</output>
+                </span>
+                <Errors id={errorId} messages={errors} />
+              </Row>
+            );
+          }
+          if (f.type === "color") {
+            const theme: readonly ThemeSwatch<"">[] = [{ name: "테마 색", value: "", css: f.token === "down" ? "var(--down)" : "var(--up)" }];
+            const current: HexColor | "" = isHexColor(text) ? text : "";
+            return (
+              <div key={f.key} className="flex flex-col gap-1">
+                <ColorTable label={f.label} value={current} theme={theme} more={more} onChange={(next) => setText(f.key, next)} />
+                <Errors id={errorId} messages={errors} />
+              </div>
             );
           }
           const on = f.type !== "optionalInt" || draft.form.enabled[f.key] === true;

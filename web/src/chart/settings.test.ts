@@ -9,6 +9,7 @@ import {
   DEFAULT_CHART_SETTINGS,
   movePanel,
   parseChartSettings,
+  readSpecShape,
   compareRefusal,
   removeCompare,
   removeIndicator,
@@ -333,4 +334,17 @@ test("총잔량 설정을 저장했다가 그대로 읽는다", () => {
     panels: [{ id: "quotes", stretch: 0.25 }],
   };
   expect(parseChartSettings(JSON.parse(JSON.stringify(settings)))).toEqual(settings);
+});
+
+test("히트맵 설정을 저장했다가 그대로 읽고 틀린 값은 거절한다", () => {
+  const spec = { kind: "quoteDepth", source: "peak", topLevels: 3, maxOpacity: 0.45, aboveBars: true, askColor: "#4FC7B8", bidColor: null };
+  const raw = { ...DEFAULT_CHART_SETTINGS, indicators: [{ id: "heat", spec, panel: "price", visible: true, style: { colors: ["ind-1"], width: 1 } }], panels: [] };
+  expect(parseChartSettings(JSON.parse(JSON.stringify(raw)))).toEqual(raw);
+  expect(readSpecShape(spec)).toEqual(spec);
+  expect(readSpecShape({ ...spec, topLevels: null })).toEqual({ ...spec, topLevels: null });
+  const wrong: Record<string, unknown>[] = [
+    { source: "mean" }, { topLevels: 0 }, { topLevels: 6 }, { topLevels: 1.5 }, { maxOpacity: 0.19 }, { maxOpacity: 1.01 }, { maxOpacity: "0.5" },
+    { aboveBars: "true" }, { askColor: "red" }, { bidColor: "ind-1" }, { bidColor: undefined },
+  ];
+  for (const patch of wrong) expect(readSpecShape({ ...spec, ...patch }), JSON.stringify(patch)).toBeNull();
 });

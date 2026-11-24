@@ -16,11 +16,13 @@ import { AxisLabelCache } from "./axisLabelCache";
 import { AXIS_WIDTH, axisPriceFormat, priceAxisWidth, type AxisGeometry } from "./axisFormat";
 import type { LastPriceHost } from "./lastPriceTag";
 import { fetchBarsPage, fetchJumpPage } from "../api/bars";
-import { fetchQuoteTotals } from "../api/quoteMinutes";
+import { fetchQuoteDepth, fetchQuoteTotals } from "../api/quoteMinutes";
 import type { Bar } from "../api/generated/Bar";
 import type { FinancialsPage } from "../api/generated/FinancialsPage";
 import type { KstDate } from "../api/generated/KstDate";
 import type { Period } from "../api/generated/Period";
+import type { QuoteDepthPage } from "../api/generated/QuoteDepthPage";
+import type { QuoteDepthPoint } from "../api/generated/QuoteDepthPoint";
 import type { QuoteTotalPoint } from "../api/generated/QuoteTotalPoint";
 import type { QuoteTotalsPage } from "../api/generated/QuoteTotalsPage";
 import type { SubErrorCode } from "../api/generated/SubErrorCode";
@@ -46,13 +48,14 @@ import { JumpBadge } from "./jumpBadge";
 import { type FetchJump, JumpableFeed } from "./jumpFeed";
 import { type Extreme, findExtremes } from "./extremes";
 import { type OpenPort, openIndicatorPort } from "./indicators/client";
-import { isQuote } from "./indicators/kinds";
+import { isQuoteDepth, isQuoteTotals } from "./indicators/kinds";
 import { IndicatorLayer } from "./indicators/layer";
 import { PanelControls } from "./panelControls";
 import { type IndicatorCommand, IndicatorLegend, type PaneBounds } from "./indicators/legendRows";
 import { chartIndicators, chartPanels } from "./indicators/shown";
 import { isTailChange } from "./indicators/sync";
 import { QuoteFeed, type QuoteKey, type QuoteRange } from "./quotes/feed";
+import { QuoteDepthHeatmap, type QuoteDepthLayer } from "./quotes/heatmap";
 import { Legend, type LegendBar, legendParts } from "./legend";
 import { priceTopMargin } from "./legendProjection";
 import { addMainSeries, applyMainColors, type MainSeries, priceFormat, setMainData, updateMainBar } from "./series";
@@ -123,6 +126,7 @@ export interface ControllerDeps {
   fetchPage?: FetchPage;
   fetchJump?: FetchJump;
   fetchQuoteTotals?: (key: QuoteKey, range: QuoteRange, signal: AbortSignal) => Promise<QuoteTotalsPage>;
+  fetchQuoteDepth?: (key: QuoteKey, range: QuoteRange, signal: AbortSignal) => Promise<QuoteDepthPage>;
   /** 없으면 실시간 없이 조회한 봉만 그린다. */
   socket?: MarketSocketLike;
   indicators?: OpenPort;
@@ -155,6 +159,9 @@ export class ChartController {
   get venueAnchor(): HTMLElement { return this.legend.venueAnchor; }
   private readonly feed: JumpableFeed;
   private readonly quoteTotals: QuoteFeed<QuoteTotalPoint>;
+  private readonly quoteDepthFeeds = new Map<string, QuoteFeed<QuoteDepthPoint>>();
+  private readonly fetchQuoteDepthFn: (key: QuoteKey, range: QuoteRange, signal: AbortSignal) => Promise<QuoteDepthPage>;
+  private readonly quoteDepthHeatmap: QuoteDepthHeatmap;
   private readonly badge: JumpBadge;
   private jumpToken = 0;
   private jumpInterval: BarInterval | null = null;
@@ -207,6 +214,13 @@ export class ChartController {
     // 주 시리즈를 바꿔 붙이는 동안 가격 pane이 비어도 라이브러리가 지우지 않게 한다. 지우면 지표 패널이 0번이 된다.
     this.chart.panes()[0]?.setPreserveEmptyPane(true);
     this.main = addMainSeries(this.chart, "candle", this.tokens, false, this.lastPriceHost, this.priceAxisGeometry());
+    this.fetchQuoteDepthFn = deps.fetchQuoteDepth ?? fetchQuoteDepth;
+    this.quoteDepthHeatmap = new QuoteDepthHeatmap({
+      bars: () => this.bars,
+      tokens: () => this.tokens,
+      layers: () => this.quoteDepthLayers(),
+    });
+    this.main.api.attachPrimitive(this.quoteDepthHeatmap);
     this.crosshairMarker = new CrosshairMarker({ element: el, chart: this.chart, bars: () => this.bars, period: () => this.period() });
     el.addEventListener("pointerleave", this.clearPointedBar);
     this.legend = new Legend(el, {
@@ -374,6 +388,7 @@ export class ChartController {
     }
     if (prev?.symbol !== next.symbol || prev.venue !== next.venue || prev.period !== next.period || prev.settings.indicators !== next.settings.indicators) {
       this.syncQuoteTotalsKey();
+      this.syncQuoteDepthKeys();
     }
     if (prev && prev.settings.visibleBars !== next.settings.visibleBars) this.fitInitialRange();
     if (prev?.settings.showExtremes !== next.settings.showExtremes || prev?.settings.extremeBasis !== next.settings.extremeBasis) this.scheduleFrame();
@@ -482,6 +497,7 @@ export class ChartController {
     applyMainColors(this.main, tokens);
     this.indicators.setTheme();
     this.compare.setTheme();
+    this.quoteDepthHeatmap.redraw();
     this.replayDays.sync();
     this.requestLegendSources("indicators", "compare");
     this.renderLegend();
@@ -505,6 +521,8 @@ export class ChartController {
     this.unwatch();
     this.feed.dispose();
     this.quoteTotals.dispose();
+    for (const feed of this.quoteDepthFeeds.values()) feed.dispose();
+    this.quoteDepthFeeds.clear();
     this.badge.dispose();
     this.fineBars.dispose();
     this.compare.dispose();
@@ -643,6 +661,7 @@ export class ChartController {
     this.withDataGuard(() => preserveTimeRange(this.chart.timeScale(), this.period(), this.pendingScroll, () => {
       const replaced = this.main;
       this.main = addMainSeries(this.chart, this.view?.settings.style ?? "candle", this.tokens, isIndex, this.lastPriceHost, this.priceAxisGeometry());
+      this.main.api.attachPrimitive(this.quoteDepthHeatmap);
       this.main.api.setSeriesOrder(replaced.api.seriesOrder());
       this.chart.removeSeries(replaced.api);
       this.extensions.forEach((ext) => ext.reattach());
@@ -685,7 +704,10 @@ export class ChartController {
       this.withDataGuard(() => this.setBars(next));
     }
     this.indicators.advance(h, bar, kind);
-    if (next.length > prev.length) this.coverQuoteTotals();
+    if (next.length > prev.length) {
+      this.coverQuoteTotals();
+      this.coverQuoteDepths();
+    }
     if (tail && prevRealtimeSeen === this.realtimeSeen && prevStalledAt === this.stalledAt) {
       this.requestTailLegendSources(next.length - 1);
     } else {
@@ -839,6 +861,7 @@ export class ChartController {
     });
     this.compare.coverFrom(this.leftT());
     this.coverQuoteTotals();
+    this.coverQuoteDepths();
     this.renderLegend();
     const latest = bars[bars.length - 1];
     if (latest) {
@@ -930,6 +953,7 @@ export class ChartController {
     if (end) this.fitEndingAt(bars[end.index]!.t);
     this.compare.coverFrom(this.leftT());
     this.coverQuoteTotals();
+    this.coverQuoteDepths();
     this.renderLegend();
     this.updateIntradayEnd();
   }
@@ -988,6 +1012,7 @@ export class ChartController {
     if (this.financialHoverTime !== null) this.hoverIndex = this.bars.findIndex((bar) => bar.t === this.financialHoverTime);
     this.compare.coverFrom(this.leftT());
     this.coverQuoteTotals();
+    this.coverQuoteDepths();
     this.renderLegend();
     this.updateIntradayEnd();
   }
@@ -1123,7 +1148,7 @@ export class ChartController {
   private syncQuoteTotalsKey(): void {
     const view = this.view;
     const active = view !== null && view.venue !== null && !isIndexCode(view.symbol) && isIntraday(view.period)
-      && view.settings.indicators.some((c) => isQuote(c.spec) && c.visible);
+      && view.settings.indicators.some((c) => isQuoteTotals(c.spec) && c.visible);
     if (!active) {
       this.quoteTotals.open(null);
       this.indicators.setQuoteTotals(null);
@@ -1144,6 +1169,62 @@ export class ChartController {
     if (this.disposed) return;
     this.indicators.setQuoteTotals(this.quoteTotals, from);
     this.scheduleFrame();
+  }
+
+  private syncQuoteDepthKeys(): void {
+    const view = this.view;
+    const eligible = view !== null && view.venue !== null && !isIndexCode(view.symbol) && isIntraday(view.period);
+    const active = eligible
+      ? view.settings.indicators.filter((c) => isQuoteDepth(c.spec) && c.visible)
+      : [];
+    const activeIds = new Set(active.map((c) => c.id));
+    for (const [id, feed] of this.quoteDepthFeeds) {
+      if (activeIds.has(id)) continue;
+      feed.dispose();
+      this.quoteDepthFeeds.delete(id);
+    }
+    for (const config of active) {
+      if (!isQuoteDepth(config.spec)) continue;
+      let feed = this.quoteDepthFeeds.get(config.id);
+      if (!feed) {
+        feed = new QuoteFeed<QuoteDepthPoint>({
+          fetch: this.fetchQuoteDepthFn,
+          changed: () => this.onQuoteDepthChanged(),
+          now: nowSeconds,
+        });
+        this.quoteDepthFeeds.set(config.id, feed);
+      }
+      feed.open({ symbol: view!.symbol, venue: view!.venue!, period: view!.period, variant: config.spec.source });
+    }
+    this.indicators.setQuoteDepths(this.quoteDepthFeeds);
+    this.coverQuoteDepths();
+    this.quoteDepthHeatmap.redraw();
+  }
+
+  private coverQuoteDepths(): void {
+    if (this.quoteDepthFeeds.size === 0) return;
+    const first = this.bars[0];
+    const last = this.bars[this.bars.length - 1];
+    if (!first || !last) return;
+    for (const feed of this.quoteDepthFeeds.values()) feed.cover(first.t, last.t);
+  }
+
+  private onQuoteDepthChanged(): void {
+    if (this.disposed) return;
+    this.indicators.setQuoteDepths(this.quoteDepthFeeds);
+    this.quoteDepthHeatmap.redraw();
+    this.scheduleFrame();
+  }
+
+  private quoteDepthLayers(): QuoteDepthLayer[] {
+    if (!this.view || this.quoteDepthFeeds.size === 0) return [];
+    const out: QuoteDepthLayer[] = [];
+    for (const config of this.view.settings.indicators) {
+      if (!config.visible || !isQuoteDepth(config.spec)) continue;
+      const view = this.quoteDepthFeeds.get(config.id);
+      if (view) out.push({ spec: config.spec, view });
+    }
+    return out;
   }
 }
 

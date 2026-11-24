@@ -1,8 +1,11 @@
 import type { IChartApi } from "lightweight-charts";
 import { expect, test } from "vitest";
 import type { Bar } from "../../api/generated/Bar";
+import type { QuoteDepthPoint } from "../../api/generated/QuoteDepthPoint";
 import type { QuoteTotalPoint } from "../../api/generated/QuoteTotalPoint";
 import type { UnixSeconds } from "../../api/generated/UnixSeconds";
+import { formatPrice, formatVolume } from "../../lib/format";
+import { trackedValuesOf } from "../legendShapes";
 import type { QuoteState, QuoteView } from "../quotes/feed";
 import type { IndicatorConfig } from "../settings";
 import type { ThemeTokens } from "../theme";
@@ -109,5 +112,58 @@ test("빈 선과 아직 그리지 않은 점에는 지난 봉 고치기를 쓰�
     { time: toChartTime(at(0)), value: 15, historical: true },
     { time: toChartTime(at(1)), value: 16, historical: false },
   ]);
+  layer.dispose();
+});
+
+const DEPTH: IndicatorConfig = {
+  id: "heat",
+  spec: { kind: "quoteDepth", source: "priceMax", topLevels: null, maxOpacity: 0.7, aboveBars: false, askColor: null, bidColor: null },
+  panel: "price",
+  visible: true,
+  style: { colors: ["ind-1"], width: 1 },
+};
+
+test("체결로 범례 폭을 다시 잴 때 히트맵 점을 다시 훑지 않는다", () => {
+  const add = () => new StrictSeries();
+  const chart = { addSeries: add, addCustomSeries: add, removeSeries: () => {}, panes: () => [] };
+  const layer = new IndicatorLayer(
+    { chart: chart as unknown as IChartApi, tokens: () => TOKENS, isIndex: () => false, period: () => "1m", requestFrame: () => {}, axisFormatted: () => {}, axisCoordinates: () => [], axisFailed: () => {}, guard: (draw) => draw() },
+    () => ({ chart: 1, post: () => {}, close: () => {} }),
+  );
+  layer.setConfigs([DEPTH], []);
+  const bars = Array.from({ length: 300 }, (_, i) => bar(i));
+  layer.reset({ bars, current: null, nextBefore: null });
+
+  const points = new Map<UnixSeconds, QuoteDepthPoint>(
+    bars.map((b) => [b.t, { t: b.t, asks: [[70_100, 1_000]], bids: [[70_000, 2_000]] }]),
+  );
+  let atCalls = 0;
+  const view: QuoteView<QuoteDepthPoint> = {
+    state: "ready",
+    at: (t) => {
+      atCalls++;
+      return points.get(t);
+    },
+  };
+  layer.setQuoteDepths(new Map([["heat", view]]));
+
+  const initial = layer.priceLegendValues();
+  expect(initial).toHaveLength(1);
+  expect(trackedValuesOf(initial[0]!.slots[0]!)).not.toBeNull();
+  expect(initial[0]!.slots[0]).toContain(`${formatPrice(70_100, false)} ${formatVolume(1_000)}`);
+
+  atCalls = 0;
+  for (let tick = 0; tick < 5; tick++) {
+    const live: Bar = { ...bar(300), c: 100 + tick };
+    layer.advance({ bars, current: live, nextBefore: null }, live, "live");
+    layer.priceLegendValues();
+  }
+  expect(atCalls).toBeLessThanOrEqual(5);
+
+  points.set(at(10), { t: at(10), asks: [[999_000, 5_000_000]], bids: [[998_000, 6_000_000]] });
+  layer.setQuoteDepths(new Map([["heat", view]]));
+  const refreshed = layer.priceLegendValues();
+  expect(refreshed[0]!.slots[0]).toContain(`${formatPrice(999_000, false)} ${formatVolume(5_000_000)}`);
+  expect(refreshed[0]!.slots[1]).toContain(`${formatPrice(998_000, false)} ${formatVolume(6_000_000)}`);
   layer.dispose();
 });
