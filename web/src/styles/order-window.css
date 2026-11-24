@@ -110,6 +110,10 @@
   .od-account-head { display:flex; align-items:center; gap:var(--s3); flex-basis:100%; min-width:0; }
   .od-account-tabs { flex-basis:100%; gap:var(--s2); }
 }
+@container od-account (width < 420px) {
+  .od[data-rate-hidden] .od-tab-full { display:none; }
+  .od[data-rate-hidden] .od-tab-short { display:inline; }
+}
 .ui-popover.od-list-pop { max-height:var(--size-240); padding:var(--s2) var(--s4); font-size:var(--fs-xs); }
 .od-rows { margin:0; padding:0; list-style:none; }
 .od-rows-head, .od-rows li { display:grid; align-items:center; column-gap:var(--s3); font-variant-numeric:tabular-nums; }

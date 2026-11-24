@@ -446,6 +446,7 @@ async function openNarrowest(page: Page, scenario: Scenario): Promise<void> {
   ordersOn(scenario);
   const api = tradingApi(scenario, [openOrder("0000001", "buy", 69_900, 10)]);
   api.holdings = [{ ...HOLDING, quantity: LARGE, sellableQuantity: LARGE, evaluationProfit: -123_456_789, profitRateCenti: -1234 }];
+  scenario.reply("/api/trading/balance", { body: { accountRef: ACCOUNT, holdings: api.holdings, creditHoldings: [], totalPurchase: 1_000_000_000, totalEvaluation: 876_543_211, totalProfit: -123_456_789 } });
   nxtTraded(scenario, true);
   pinQuote(scenario, CODE, BASE);
   const large = <T extends object>(levels: T[]): T[] => levels.map((level) => ({ ...level, quantity: LARGE }));
@@ -467,6 +468,7 @@ async function openNarrowest(page: Page, scenario: Scenario): Promise<void> {
   await expect(page.getByTestId("ladder-strength")).toHaveCount(2);
   await expect(page.getByTestId("summary-quantity")).toContainText("1,234,567");
   await expect(page.getByTestId("summary-buyable")).toContainText("500,000,000원");
+  await expect(page.getByTestId("account-total-profit")).toContainText("%");
   lastTrade(scenario, 70_000, 1, 123_456);
   for (const strength of await page.getByTestId("ladder-strength").all()) await expect(strength).toContainText("101.50%");
 }
