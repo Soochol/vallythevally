@@ -211,9 +211,10 @@ export class DrawingSurface implements ChartExtension {
     this.host.el.style.cursor = "";
   }
   private input(e: Input) {
-    const transition = step(this.state, e, this.context()); this.state = transition.state;
+    const previous = this.state;
+    const transition = step(previous, e, this.context()); this.state = transition.state;
     for (const effect of transition.effects) this.effect(effect);
-    this.refresh();
+    if (transition.state !== previous || transition.effects.length > 0) this.refresh();
   }
   private effect(effect: Effect) {
     const session = useDrawingSession.getState();
