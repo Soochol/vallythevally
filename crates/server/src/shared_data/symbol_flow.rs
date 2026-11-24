@@ -258,6 +258,7 @@ fn scan_valid_prefix(file: &mut File) -> io::Result<(u64, Option<FlowDescription
 pub struct FlowWriter {
     file: File,
     len: u64,
+    fid_count: usize,
 }
 
 impl FlowWriter {
@@ -271,23 +272,32 @@ impl FlowWriter {
         if len < file_len {
             file.set_len(len)?;
         }
+        let fid_count = description.fids.len();
         if len == 0 || last_description.as_ref() != Some(&description) {
             let raw = serde_json::to_vec(&description).map_err(io::Error::other)?;
             let block = encode_block(KIND_DESCRIPTION, &raw, 0, 0, 0)?;
             write_block_or_rollback(&mut file, &mut len, &block)?;
         }
-        Ok(FlowWriter { file, len })
+        Ok(FlowWriter { file, len, fid_count })
     }
 
-    pub fn open_verified(path: &Path) -> io::Result<FlowWriter> {
+    pub fn open_verified(path: &Path, fid_count: usize) -> io::Result<FlowWriter> {
         let mut file = OpenOptions::new().write(true).open(path)?;
         let len = file.seek(SeekFrom::End(0))?;
-        Ok(FlowWriter { file, len })
+        Ok(FlowWriter { file, len, fid_count })
     }
 
     pub fn append(&mut self, rows: &[FlowRow]) -> io::Result<()> {
         if rows.is_empty() {
             return Ok(());
+        }
+        for row in rows {
+            if row.values.len() != self.fid_count {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    format!("흐름 행 값 수({})가 FID 수({})와 다릅니다", row.values.len(), self.fid_count),
+                ));
+            }
         }
         let block = encode_rows_block(rows)?;
         write_block_or_rollback(&mut self.file, &mut self.len, &block)
@@ -319,16 +329,18 @@ impl FlowCursor {
         let meta = file.metadata()?;
         let (len, identity) = (meta.len(), file_identity(&meta));
         let replaced = self.identity != Some(identity) || len < self.offset || (!self.head.is_empty() && !head_matches(&mut file, &self.head));
-        if replaced {
-            self.identity = Some(identity);
-            self.offset = 0;
-            self.head.clear();
-            self.description = None;
-        }
-        if len == self.offset {
+        let start_offset = if replaced { 0 } else { self.offset };
+        let mut description = if replaced { None } else { self.description.clone() };
+        if len == start_offset {
+            if replaced {
+                self.identity = Some(identity);
+                self.offset = 0;
+                self.head.clear();
+                self.description = None;
+            }
             return Ok(Vec::new());
         }
-        file.seek(SeekFrom::Start(self.offset))?;
+        file.seek(SeekFrom::Start(start_offset))?;
         let mut chunk = Vec::new();
         file.read_to_end(&mut chunk)?;
         let mut pos = 0usize;
@@ -347,22 +359,37 @@ impl FlowCursor {
             match header.kind {
                 KIND_DESCRIPTION => {
                     let raw = decode_payload(header.codec, payload)?;
-                    let description: FlowDescription = serde_json::from_slice(&raw).map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
-                    if description.format_version != FLOW_FORMAT_VERSION {
-                        return Err(io::Error::new(io::ErrorKind::InvalidData, format!("모르는 흐름 형식 버전: {}", description.format_version)));
+                    let next: FlowDescription = serde_json::from_slice(&raw).map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
+                    if next.format_version != FLOW_FORMAT_VERSION {
+                        return Err(io::Error::new(io::ErrorKind::InvalidData, format!("모르는 흐름 형식 버전: {}", next.format_version)));
                     }
-                    self.description = Some(Arc::new(description));
+                    description = Some(Arc::new(next));
                 }
                 KIND_ROWS => {
-                    let description = self
-                        .description
+                    let current = description
                         .as_ref()
                         .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "설명 블록 전에 행 블록이 나왔습니다"))?;
                     let raw = decode_payload(header.codec, payload)?;
                     let owned: Vec<OwnedWireRow> = serde_json::from_slice(&raw).map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
-                    let rows: Vec<FlowRow> = owned.into_iter().map(|row| row.0).collect();
+                    if owned.len() != header.row_count as usize {
+                        return Err(io::Error::new(
+                            io::ErrorKind::InvalidData,
+                            format!("흐름 블록 행 수({})가 머리({})와 다릅니다", owned.len(), header.row_count),
+                        ));
+                    }
+                    let expected_width = current.fids.len();
+                    let mut rows = Vec::with_capacity(owned.len());
+                    for row in owned {
+                        if row.0.values.len() != expected_width {
+                            return Err(io::Error::new(
+                                io::ErrorKind::InvalidData,
+                                format!("흐름 행 값 수({})가 FID 수({})와 다릅니다", row.0.values.len(), expected_width),
+                            ));
+                        }
+                        rows.push(row.0);
+                    }
                     blocks.push(FlowBlock {
-                        description: Arc::clone(description),
+                        description: Arc::clone(current),
                         first_ms: header.first_ms,
                         last_ms: header.last_ms,
                         rows,
@@ -372,10 +399,15 @@ impl FlowCursor {
             }
             pos = payload_end;
         }
-        if self.offset == 0 && pos > 0 {
+        self.identity = Some(identity);
+        if replaced {
+            self.head.clear();
+        }
+        if start_offset == 0 && pos > 0 {
             self.head = chunk[..pos.min(HEAD_FINGERPRINT_LEN)].to_vec();
         }
-        self.offset += pos as u64;
+        self.offset = start_offset + pos as u64;
+        self.description = description;
         Ok(blocks)
     }
 

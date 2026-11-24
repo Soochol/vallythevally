@@ -8,6 +8,7 @@ use server::shared_data::FlowRow;
 use super::FlowKindSpec;
 
 const COMBINED_SUFFIX: &str = "_AL";
+const MAX_SYMBOL_LEN: usize = 32;
 
 pub(super) struct CompiledKind {
     pub(super) spec: FlowKindSpec,
@@ -78,7 +79,7 @@ pub(super) fn read_rows(
             continue;
         };
         let symbol = entry.item.strip_suffix(COMBINED_SUFFIX).unwrap_or(&entry.item);
-        if symbol.is_empty() {
+        if symbol.len() > MAX_SYMBOL_LEN || !crate::build::day::is_path_safe_symbol(symbol) {
             reading.skipped += 1;
             continue;
         }

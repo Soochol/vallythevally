@@ -1,6 +1,6 @@
-use std::collections::HashMap;
-use std::fs::{self, OpenOptions};
-use std::io::{self, Write};
+use std::collections::{HashMap, HashSet};
+use std::fs::{self, File, OpenOptions};
+use std::io::{self, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 
 use serde::Serialize;
@@ -32,11 +32,12 @@ pub struct FileFlowStore {
     shared_dir: PathBuf,
     key: KeyName,
     verified: HashMap<PathBuf, FlowDescription>,
+    verified_links: HashSet<PathBuf>,
 }
 
 impl FileFlowStore {
     pub fn new(shared_dir: PathBuf, key: KeyName) -> FileFlowStore {
-        FileFlowStore { shared_dir, key, verified: HashMap::new() }
+        FileFlowStore { shared_dir, key, verified: HashMap::new(), verified_links: HashSet::new() }
     }
 
     pub(super) fn append_rows(
@@ -55,7 +56,7 @@ impl FileFlowStore {
         let description = FlowDescription::new(type_code, symbol, &date_text, self.key.as_str(), fids);
         let already_verified = self.verified.get(&path) == Some(&description);
         let mut writer = if already_verified {
-            match FlowWriter::open_verified(&path) {
+            match FlowWriter::open_verified(&path, fids.len()) {
                 Ok(writer) => writer,
                 Err(error) if error.kind() == io::ErrorKind::NotFound => FlowWriter::open(&path, description.clone())?,
                 Err(error) => {
@@ -81,9 +82,33 @@ impl FileFlowStore {
         }
         let mut line = serde_json::to_vec(&LinkLine { t, event }).map_err(io::Error::other)?;
         line.push(b'\n');
-        let mut file = OpenOptions::new().create(true).append(true).open(&path)?;
-        file.write_all(&line)
+        let already_verified = self.verified_links.contains(&path);
+        let mut file = OpenOptions::new().read(!already_verified).write(true).create(true).truncate(false).open(&path)?;
+        let before = if already_verified {
+            file.seek(SeekFrom::End(0))?
+        } else {
+            let file_len = file.metadata()?.len();
+            let complete_len = complete_lines_len(&mut file)?;
+            if complete_len < file_len {
+                file.set_len(complete_len)?;
+            }
+            file.seek(SeekFrom::Start(complete_len))?
+        };
+        if let Err(error) = file.write_all(&line) {
+            let _ = file.set_len(before);
+            self.verified_links.remove(&path);
+            return Err(error);
+        }
+        self.verified_links.insert(path);
+        Ok(())
     }
+}
+
+fn complete_lines_len(file: &mut File) -> io::Result<u64> {
+    file.seek(SeekFrom::Start(0))?;
+    let mut bytes = Vec::new();
+    file.read_to_end(&mut bytes)?;
+    Ok(bytes.iter().rposition(|byte| *byte == b'\n').map_or(0, |index| index as u64 + 1))
 }
 
 fn date_folders(folder: &Path) -> io::Result<Vec<u32>> {
