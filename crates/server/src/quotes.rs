@@ -116,6 +116,7 @@ const KRX_OPEN: u32 = 8 * 3600 + 50 * 60;
 const BOTH_OPEN: u32 = 9 * 3600 + 30;
 const KRX_CLOSING_AUCTION: u32 = 15 * 3600 + 20 * 60;
 const NXT_AFTER_OPEN: u32 = 15 * 3600 + 30 * 60;
+const KRX_CLOSE_TAIL_END: u32 = 15 * 3600 + 31 * 60;
 const NXT_AFTER_BOTH_OPEN: u32 = 15 * 3600 + 40 * 60;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -135,8 +136,23 @@ pub fn open_exchanges(at: TimeOfDay) -> OpenExchanges {
     }
 }
 
+fn in_krx_close_tail(at: TimeOfDay) -> bool {
+    (NXT_AFTER_OPEN..KRX_CLOSE_TAIL_END).contains(&at.secs())
+}
+
+fn in_nxt_after_auction(at: TimeOfDay) -> bool {
+    (NXT_AFTER_OPEN..NXT_AFTER_BOTH_OPEN).contains(&at.secs())
+}
+
+fn filled_at_or_after_krx_close(last_krx_fill: Option<KstTime>) -> bool {
+    last_krx_fill.is_some_and(|krx| krx.kst_time_of_day().secs() >= NXT_AFTER_OPEN)
+}
+
 pub fn expected_exchange(nxt_enabled: bool, at: TimeOfDay, last_krx_fill: Option<KstTime>, last_nxt_fill: Option<KstTime>) -> Exchange {
     if !nxt_enabled {
+        return Exchange::Krx;
+    }
+    if in_krx_close_tail(at) && !filled_at_or_after_krx_close(last_krx_fill) {
         return Exchange::Krx;
     }
     match open_exchanges(at) {
@@ -151,7 +167,7 @@ pub fn expected_exchange(nxt_enabled: bool, at: TimeOfDay, last_krx_fill: Option
 
 pub fn expected_moves_row(row: Venue, from: Exchange, nxt_enabled: bool, at: TimeOfDay) -> bool {
     match row {
-        Venue::Krx => from == Exchange::Krx,
+        Venue::Krx => from == Exchange::Krx && !(nxt_enabled && in_nxt_after_auction(at)),
         Venue::Nxt => from == Exchange::Nxt,
         Venue::Combined => !nxt_enabled || open_exchanges(at) != OpenExchanges::Both,
     }
