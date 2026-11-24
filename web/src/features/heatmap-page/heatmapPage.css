@@ -120,7 +120,10 @@
 .hm-tile:hover, .hm-tile:focus-visible { z-index: 1; box-shadow: inset 0 0 0 2px var(--accent); }
 .hm-tile-text { display: flex; flex-direction: column; gap: 0; padding: var(--size-2) var(--size-4); font-size: var(--fs-s); line-height: 1.2; }
 .hm-tile-name { display: -webkit-box; overflow: hidden; -webkit-box-orient: vertical; -webkit-line-clamp: var(--name-lines, 1); font-weight: 600; overflow-wrap: anywhere; }
-.hm-tile-rate { font-variant-numeric: tabular-nums; white-space: nowrap; }
+.hm-tile-rate { font-variant-numeric: tabular-nums; }
+.hm-tile-rate[data-expected="true"] { display: flex; max-width: 100%; }
+.hm-tile-rate-value { min-width: 0; overflow: hidden; }
+.hm-tile-star { flex: none; }
 .hm-theme-counts { color: inherit; opacity: 0.8; font-size: var(--fs-xs); }
 .hm-tile-card { position: absolute; z-index: 2; display: grid; gap: var(--size-2); min-width: var(--size-140); padding: var(--size-8) var(--size-10); border-radius: var(--r-m); background: var(--overlay); box-shadow: var(--shadow-s); font-size: var(--fs-s); pointer-events: none; }
 .hm-tile-card[data-flip-x="true"] { transform: translateX(-100%); }

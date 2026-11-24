@@ -84,10 +84,14 @@ const Tile = memo(function Tile({ row, rect, range, label, lines, editable, onMe
       {label !== "none" && (
         <span className="hm-tile-text">
           {label === "full" && <b className="hm-tile-name">{row.name}</b>}
-          <span className="hm-tile-rate">
-            {text}
-            {expected && <span aria-hidden="true">*</span>}
-          </span>
+          {expected ? (
+            <span className="hm-tile-rate" data-expected="true">
+              <span className="hm-tile-rate-value">{text}</span>
+              <span className="hm-tile-star" aria-hidden="true">*</span>
+            </span>
+          ) : (
+            <span className="hm-tile-rate">{text}</span>
+          )}
         </span>
       )}
     </button>
