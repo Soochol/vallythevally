@@ -5,10 +5,13 @@ import { type Scenario, cell, DEFAULT_LAYOUT_ID, expect, pickDesktopVenue, test,
 
 const SETTINGS = { v: 1, style: "candle", scale: "normal", indicators: [], compare: [], panels: [] };
 const at = (clock: string) => Date.parse(`2026-11-09T${clock}+09:00`) / 1000;
+test.use({ clockStart: "20261109093230" });
+
 const entry = (code: string, name: string, qty: number) => ({ code, name, qty, qtyChange: 0 });
 
 const FIRST: FeedBrokers = { t: at("09:30:00"), buys: [entry("151", "키움", 100), entry("152", "미래", 40)], sells: [entry("141", "삼성", 90)] };
 const SECOND: FeedBrokers = { t: at("09:31:00"), buys: [entry("151", "키움", 400), entry("152", "미래", 60)], sells: [entry("141", "삼성", 120)] };
+const FOREIGN: FeedBrokers = { t: at("09:33:00"), buys: [entry("151", "키움", 700), entry("033", "JP모간", 250)], sells: [entry("141", "삼성", 130), entry("143", "한투", 500)] };
 const LIVE: FeedBrokers = { t: at("09:32:00"), buys: [entry("151", "키움", 700)], sells: [entry("141", "삼성", 130), entry("143", "한투", 500)] };
 
 function linkedChart(scenario: Scenario) {
@@ -42,55 +45,94 @@ test.beforeEach(async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
 });
 
-test("거래원 창은 처음 스냅샷 묶음과 실시간 스냅샷을 행으로 쌓고 슬라이더로 누적값을 옮긴다", async ({ page, scenario }) => {
+const savedBrokers = (scenario: Scenario) => scenario.documents.layout(DEFAULT_LAYOUT_ID).windows.find((w) => w.kind === "brokers");
+const card = (page: Page, name: string) => window_(page).getByTestId("broker-card").and(page.locator(`[data-broker="${name}"]`));
+const cardNames = (page: Page) => window_(page).getByTestId("broker-card").evaluateAll((cards) => cards.map((c) => c.getAttribute("data-broker")));
+
+async function openWithThree(page: Page, scenario: Scenario) {
   await openBrokers(page, scenario);
-  send(scenario, FIRST);
-  send(scenario, SECOND);
-  await expect(window_(page).getByTestId("brokers-since")).toContainText("09:30:00부터");
-  await expect(window_(page).getByTestId("broker-row")).toHaveText(["키움", "삼성", "미래"]);
-  const cumulative = window_(page).getByTestId("broker-cumulative");
-  await expect(cumulative).toHaveText(["+400", "−120", "+60"]);
+  for (const brokers of [FIRST, SECOND, LIVE]) send(scenario, brokers);
+  await expect(window_(page).getByTestId("broker-card")).toHaveCount(4);
+}
 
-  send(scenario, LIVE);
-  await expect(window_(page).getByTestId("broker-row")).toHaveText(["키움", "한투", "삼성", "미래"]);
-  await expect(cumulative).toHaveText(["+700", "−500", "−130", "+60"]);
-
-  const slider = window_(page).getByRole("slider", { name: "기준 시각" });
-  await slider.fill("0");
-  await expect(window_(page).getByTestId("brokers-time")).toHaveText("09:30:00");
-  await expect(cumulative).toHaveText(["+100", "-", "−90", "+40"]);
+test("입체는 거래원마다 카드이고 막대와 숫자를 함께 보인다", async ({ page, scenario }) => {
+  await openWithThree(page, scenario);
+  await expect.poll(() => cardNames(page)).toEqual(["키움", "한투", "삼성", "미래"]);
+  await expect(card(page, "키움").getByTestId("broker-cumulative")).toHaveText("+700");
+  await expect(card(page, "한투").getByTestId("broker-cumulative")).toHaveText("−500");
+  await expect(window_(page).getByTestId("broker-bars")).toHaveCount(4);
+  await expect(window_(page).getByTestId("broker-numbers")).toHaveCount(4);
+  await expect(card(page, "키움").getByTestId("broker-numbers")).toContainText("+300");
+  await expect(window_(page).getByRole("group", { name: "보기" }).getByRole("button", { name: "입체" })).toHaveAttribute("aria-pressed", "true");
 });
 
-test("행을 누르면 그 거래원의 누적선이 열리고 숫자는 캔버스 안에 있다", async ({ page, scenario }) => {
-  await openBrokers(page, scenario);
-  send(scenario, FIRST);
-  send(scenario, SECOND);
-  send(scenario, LIVE);
-  await expect(window_(page).getByTestId("broker-row")).toHaveCount(4);
-  await expect(window_(page).getByTestId("broker-line")).toHaveCount(0);
-
-  await window_(page).getByTestId("broker-row").first().click();
-  const line = window_(page).getByTestId("broker-line");
-  await expect(line).toHaveAttribute("data-broker", "151");
-  await expect(line).toContainText("키움 누적 순매수");
-
-  const frame = await window_(page).boundingBox();
-  const values = window_(page).getByTestId("broker-cumulative");
-  for (let i = 0; i < 4; i++) {
-    const box = await values.nth(i).boundingBox();
-    expect(box && frame && box.x >= frame.x && box.x + box.width <= frame.x + frame.width).toBe(true);
-  }
-  await expect(window_(page).getByTestId("brokers-canvas")).toBeVisible();
+test("카드 모양 단추로 막대와 숫자를 바꾸고 창을 다시 열어도 기억한다", async ({ page, scenario }) => {
+  await openWithThree(page, scenario);
+  const shape = window_(page).getByRole("group", { name: "카드 모양" });
+  await shape.getByRole("button", { name: "막대", exact: true }).click();
+  await expect(window_(page).getByTestId("broker-numbers")).toHaveCount(0);
+  await expect(window_(page).getByTestId("broker-bars")).toHaveCount(4);
+  await shape.getByRole("button", { name: "숫자", exact: true }).click();
+  await expect(window_(page).getByTestId("broker-bars")).toHaveCount(0);
+  await expect(window_(page).getByTestId("broker-numbers")).toHaveCount(4);
+  await pollSaved(() => savedBrokers(scenario)).toMatchObject({ kind: "brokers", cards: "numbers" });
+  await page.reload();
+  await expect(window_(page).getByRole("group", { name: "카드 모양" }).getByRole("button", { name: "숫자", exact: true })).toHaveAttribute("aria-pressed", "true");
 });
 
-test("거래소가 KRX이면 통합 값이라고 표시하고 범례를 보인다", async ({ page, scenario }) => {
+test("한 카드 막대 위의 시각이 모든 카드의 커서와 누적을 옮긴다", async ({ page, scenario }) => {
+  await openWithThree(page, scenario);
+  await expect(window_(page).getByTestId("broker-cursor")).toHaveCount(0);
+  const bars = (await card(page, "한투").getByTestId("broker-bars").boundingBox())!;
+  await page.mouse.move(bars.x + bars.width * (31.5 / 32.5), bars.y + bars.height / 2);
+  await expect(window_(page).getByTestId("broker-cursor")).toHaveCount(4);
+  await expect(card(page, "키움").getByTestId("broker-cumulative")).toHaveText("+400");
+  await expect(card(page, "한투").getByTestId("broker-cumulative")).toHaveText("-");
+  await expect(card(page, "미래").getByTestId("broker-cumulative")).toHaveText("+60");
+  await expect(window_(page).getByTestId("brokers-time")).toContainText("09:31");
+  await page.mouse.move(5, 5);
+  await expect(window_(page).getByTestId("broker-cursor")).toHaveCount(0);
+  await expect(card(page, "키움").getByTestId("broker-cumulative")).toHaveText("+700");
+});
+
+test("카드를 누르면 건별 표가 열린다", async ({ page, scenario }) => {
+  await openWithThree(page, scenario);
+  await expect(window_(page).getByTestId("broker-detail")).toHaveCount(0);
+  await card(page, "키움").click();
+  await expect(card(page, "키움")).toHaveAttribute("aria-pressed", "true");
+  await page.mouse.move(5, 5);
+  const rows = window_(page).getByTestId("broker-detail-row");
+  await expect(rows).toHaveCount(3);
+  await expect(rows.nth(0)).toContainText("09:32:00");
+  await expect(rows.nth(0)).toContainText("+300");
+  await expect(rows.nth(0)).toContainText("+700");
+  await expect(rows.nth(2)).toContainText("09:30:00");
+  await card(page, "키움").click();
+  await expect(window_(page).getByTestId("broker-detail")).toHaveCount(0);
+});
+
+test("거래원 보기는 순매수 순 궤적과 외국계 합계를 보이고 창마다 기억한다", async ({ page, scenario }) => {
+  await openWithThree(page, scenario);
+  await window_(page).getByRole("group", { name: "보기" }).getByRole("button", { name: "거래원" }).click();
+  await expect(window_(page).getByTestId("broker-name")).toHaveText(["키움", "미래", "삼성", "한투"]);
+  await expect(window_(page).getByTestId("broker-cumulative")).toHaveText(["+700", "+60", "−130", "−500"]);
+  await expect(window_(page).getByTestId("broker-sell-divider")).toHaveCount(1);
+  await expect(window_(page).getByTestId("broker-foreign-sum")).toHaveText("-");
+  send(scenario, FOREIGN);
+  await expect(window_(page).getByTestId("broker-foreign-sum")).toHaveText("+250");
+  await expect(window_(page).getByTestId("broker-card")).toHaveCount(0);
+  await pollSaved(() => savedBrokers(scenario)).toMatchObject({ kind: "brokers", view: "list" });
+});
+
+test("통합 표시와 스냅샷 안내 문구가 없다", async ({ page, scenario }) => {
   await openBrokers(page, scenario);
   send(scenario, FIRST);
-  await expect(window_(page).getByTestId("broker-row")).toHaveCount(3);
-  const tab = windowTabs(page).getByRole("tab", { name: /^거래원 입체분석/ });
-  await expect(tab.locator(".mw-integrated")).toHaveCount(0);
+  await expect(window_(page).getByTestId("broker-card")).toHaveCount(3);
   await pickDesktopVenue(page, "KRX");
-  await expect(tab.locator(".mw-integrated")).toHaveText("통합");
+  const tab = windowTabs(page).getByRole("tab", { name: /^거래원 입체분석/ });
+  await expect(tab).toHaveCount(1);
+  await expect(tab.locator(".mw-integrated")).toHaveCount(0);
   await expect(window_(page).locator(".mw-integrated")).toHaveCount(0);
-  await expect(window_(page).getByLabel("범례")).toContainText("상위 5위 밖");
+  await expect(window_(page)).not.toContainText("받은 스냅샷만");
+  await expect(window_(page).getByRole("slider")).toHaveCount(0);
 });

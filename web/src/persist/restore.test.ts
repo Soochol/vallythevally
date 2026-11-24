@@ -162,13 +162,13 @@ test("창별 상태 셋은 서버 레이아웃과 미저장 본문에서 읽고 
     { id: "order", link: null, kind: "order", venue: "nxt", symbol: "0000D0" },
     { id: "trades", link: null, kind: "trades" },
   ]);
-  const draft = draftWith({ id: "watchlist", link: null, kind: "watchlist", list: null }, { id: "screener", link: null, kind: "screener", screen: "S2" }, { id: "program", link: null, kind: "program", symbol: "005930" }, { id: "brokers", link: null, kind: "brokers", symbol: null });
+  const draft = draftWith({ id: "watchlist", link: null, kind: "watchlist", list: null }, { id: "screener", link: null, kind: "screener", screen: "S2" }, { id: "program", link: null, kind: "program", symbol: "005930" }, { id: "brokers", link: null, kind: "brokers", symbol: null, view: "list", cards: "numbers" });
   const local = await restore(sources({ unsaved: { layout: unsaved("/api/layouts/L1", 11, draft) } }));
   expect(local.layout.windows.slice(1)).toEqual([
     { id: "watchlist", link: null, kind: "watchlist" },
     { id: "screener", link: null, kind: "screener", screen: "S2" },
     { id: "program", link: null, kind: "program", symbol: "005930" },
-    { id: "brokers", link: null, kind: "brokers" },
+    { id: "brokers", link: null, kind: "brokers", view: "list", cards: "numbers" },
   ]);
   expect(local.layoutDirty).toBe(true);
 });
@@ -188,6 +188,8 @@ test.each([
   ["시장이 전체인 프로그램 순위", { id: "ranking", link: null, kind: "ranking", ranking: { kind: "program", market: "all", venue: "krx", direction: "netBuy", excludes: { etfEtn: true, preferred: false } } }],
   ["문자열이 아닌 screen", { id: "screener", link: null, kind: "screener", screen: ["S1"] }],
   ["64바이트를 넘는 screen", { id: "screener", link: null, kind: "screener", screen: "x".repeat(65) }],
+  ["모르는 거래원 보기", { id: "brokers", link: null, kind: "brokers", view: "grid" }],
+  ["모르는 거래원 카드 모양", { id: "brokers", link: null, kind: "brokers", cards: "pie" }],
 ])("%s가 든 미저장 본문은 열지 않고 서버 레이아웃을 연다", async (_, bad) => {
   const r = await restore(sources({ unsaved: { layout: unsaved("/api/layouts/L1", 11, draftWith(bad)) } }));
   expect(chartWindows(r.layout).map((w) => w.period)).toEqual(["D"]);
