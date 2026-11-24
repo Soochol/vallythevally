@@ -13,6 +13,7 @@ pub struct PlanInput<'a> {
     pub keys: &'a [KeyIdentity],
     pub universe: &'a UniverseFile,
     pub previous_messages: &'a BTreeMap<String, u64>,
+    pub turnover: Option<&'a BTreeMap<String, u64>>,
 }
 
 struct Pending<'a> {
@@ -41,13 +42,21 @@ pub fn build_plan(input: &PlanInput) -> Result<PlanFile, PlanError> {
     }
 
     let mut registrable: Vec<&str> = input.universe.registrable().map(|entry| entry.code.as_str()).collect();
-    registrable.sort_unstable();
+    match input.turnover {
+        Some(turnover) => registrable.sort_unstable_by(|a, b| {
+            let a_value = turnover.get(*a).copied().unwrap_or(0);
+            let b_value = turnover.get(*b).copied().unwrap_or(0);
+            b_value.cmp(&a_value).then_with(|| a.cmp(b))
+        }),
+        None => registrable.sort_unstable(),
+    }
     let mut unregistered: Vec<String> =
         input.universe.stocks.iter().filter(|entry| !entry.registered).map(|entry| entry.code.clone()).collect();
     unregistered.sort_unstable();
 
     let capacity = collecting * KEY_CAPACITY;
-    let excluded: Vec<String> = registrable.split_off(capacity.min(registrable.len())).into_iter().map(str::to_owned).collect();
+    let mut excluded: Vec<String> = registrable.split_off(capacity.min(registrable.len())).into_iter().map(str::to_owned).collect();
+    excluded.sort_unstable();
 
     let mut pending: Vec<Pending> =
         registrable.iter().map(|code| Pending { code, load: input.previous_messages.get(*code).copied().unwrap_or(0) }).collect();
@@ -79,22 +88,24 @@ pub fn build_plan(input: &PlanInput) -> Result<PlanFile, PlanError> {
         date: input.date,
         created_at: kst_stamp(input.created_at),
         input: InputSummary { active_keys: input.keys.len(), universe_replaced: input.universe.replaced.clone() },
-        alerts: alerts(collecting, registrable.len() + excluded.len(), &excluded, input.keys),
+        alerts: alerts(collecting, registrable.len() + excluded.len(), &excluded, input.keys, input.turnover.is_some()),
         keys: shares,
         excluded,
         unregistered,
     })
 }
 
-fn alerts(collecting: usize, registrable: usize, excluded: &[String], keys: &[KeyIdentity]) -> Vec<String> {
+fn alerts(collecting: usize, registrable: usize, excluded: &[String], keys: &[KeyIdentity], by_turnover: bool) -> Vec<String> {
     let mut alerts = Vec::new();
     if let (Some(first), Some(last)) = (excluded.first(), excluded.last()) {
-        alerts.push(format!(
-            "등록할 종목 {registrable}개가 수집 키 {collecting}개의 몫 {}개를 넘어 {}개({first}~{last})를 제외했습니다. 수집 키가 {}개 필요합니다",
-            collecting * KEY_CAPACITY,
-            excluded.len(),
-            registrable.div_ceil(KEY_CAPACITY)
-        ));
+        let capacity = collecting * KEY_CAPACITY;
+        let needed = registrable.div_ceil(KEY_CAPACITY);
+        let message = if by_turnover {
+            format!("등록할 종목 {registrable}개가 수집 키 {collecting}개의 몫 {capacity}개를 넘어 거래대금 순서로 {}개를 제외했습니다. 수집 키가 {needed}개 필요합니다", excluded.len())
+        } else {
+            format!("등록할 종목 {registrable}개가 수집 키 {collecting}개의 몫 {capacity}개를 넘어 종목코드 순서로 {}개({first}~{last})를 제외했습니다. 수집 키가 {needed}개 필요합니다", excluded.len())
+        };
+        alerts.push(message);
     }
     if !keys.iter().any(|key| key.role == KeyRole::Spare) {
         alerts.push("활성 예비 키가 없어 인계할 수 없습니다".to_owned());

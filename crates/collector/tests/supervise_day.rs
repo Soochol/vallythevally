@@ -115,11 +115,20 @@ enum Candles {
     Failing,
 }
 
+#[derive(Clone, Copy, PartialEq)]
+enum Turnover {
+    Today,
+    Yesterday,
+    Failing,
+}
+
 struct FakeKiwoom {
     recorder: Recorder,
     after_close_from: KstTime,
     candles: Candles,
     listing_fails: bool,
+    turnover: Turnover,
+    quote_codes: Mutex<Vec<String>>,
     issued: Mutex<Vec<(String, KstTime)>>,
     counter: AtomicUsize,
 }
@@ -152,6 +161,20 @@ impl Transport for FakeKiwoom {
                 let codes: &[&str] = if self.recorder.clock.now() >= self.after_close_from { &AFTER_CLOSE_CODES } else { &MORNING_CODES };
                 let rows = if body["mrkt_tp"] == "0" { listing_rows(codes) } else { Vec::new() };
                 ok(json!({"list": rows, "return_code": 0, "return_msg": "정상"}))
+            }
+            "ka10095" if self.turnover == Turnover::Failing => Err(TransportError::refused()),
+            "ka10095" => {
+                let asked: Vec<String> = body["stk_cd"].as_str().unwrap().split('|').map(str::to_owned).collect();
+                self.quote_codes.lock().unwrap().extend(asked.clone());
+                let dt = if self.turnover == Turnover::Yesterday { PREVIOUS_DATE.to_string() } else { self.recorder.clock.now().kst_date().yyyymmdd() };
+                let rows: Vec<Value> = asked
+                    .iter()
+                    .map(|asked| {
+                        let number: u64 = asked.trim_end_matches("_AL").parse().unwrap();
+                        json!({"stk_cd": asked, "cur_prc": "+100", "base_pric": "100", "pred_pre_sig": "3", "trde_qty": "1", "dt": dt, "cntr_tm": "195959", "open_pric": "100", "high_pric": "100", "low_pric": "100", "trde_prica": (number * 3).to_string()})
+                    })
+                    .collect();
+                ok(json!({"atn_stk_infr": rows, "return_code": 0, "return_msg": "정상"}))
             }
             "ka20006" => match &self.candles {
                 Candles::Failing => Err(TransportError::refused()),
@@ -327,6 +350,7 @@ struct Config {
     hold_finalize: Duration,
     forced_exit: Option<i32>,
     listing_fails: bool,
+    turnover: Turnover,
     socket: bool,
     seed_history: bool,
     seed_today_raw: bool,
@@ -344,6 +368,7 @@ impl Default for Config {
             hold_finalize: Duration::ZERO,
             forced_exit: None,
             listing_fails: false,
+            turnover: Turnover::Today,
             socket: false,
             seed_history: true,
             seed_today_raw: true,
@@ -435,6 +460,8 @@ impl Harness {
             after_close_from: at(20, 0, 0),
             candles: config.candles,
             listing_fails: config.listing_fails,
+            turnover: config.turnover,
+            quote_codes: Mutex::default(),
             issued: Mutex::default(),
             counter: AtomicUsize::new(0),
         });
@@ -820,6 +847,8 @@ async fn a_supervisor_started_after_its_end_time_launches_nothing_and_asks_for_n
         after_close_from: at(20, 0, 0),
         candles: Candles::Failing,
         listing_fails: false,
+        turnover: Turnover::Today,
+        quote_codes: Mutex::default(),
         issued: Mutex::default(),
         counter: AtomicUsize::new(0),
     });
@@ -1201,6 +1230,84 @@ async fn the_daemon_goes_on_to_the_next_day_after_a_whole_day() {
     assert_eq!(harness.status_now().date, 20261119);
     assert_eq!(harness.launcher.launched(), 6, "다음 날도 같은 순서로 자식을 띄운다");
     harness.finish().await;
+}
+
+fn turnover_file(data: &Path, date: u32) -> PathBuf {
+    data.join("turnover").join(format!("{date}.json"))
+}
+
+#[tokio::test(start_paused = true)]
+async fn the_day_total_turnover_is_saved_after_the_close() {
+    let harness = Harness::start(Config::default());
+    harness.until(at(20, 4, 0)).await;
+    assert_eq!(harness.recorder.count("ka10095"), 0);
+    harness.until_finalize_finished(1).await;
+    let calls = harness.recorder.times_of("ka10095");
+    assert_eq!(calls.len(), 1, "여섯 종목은 한 묶음이다");
+    assert!(calls[0] >= at(20, 5, 0) && calls[0] <= harness.recorder.times_of("finalize")[0]);
+    let mut asked = harness.kiwoom.quote_codes.lock().unwrap().clone();
+    asked.sort();
+    assert_eq!(asked, MORNING_CODES.map(|code| format!("{code}_AL")));
+    let saved: Value = serde_json::from_slice(&std::fs::read(turnover_file(&harness.data(), DATE)).unwrap()).unwrap();
+    assert_eq!((saved["format_version"].as_u64(), saved["date"].as_u64()), (Some(1), Some(u64::from(DATE))));
+    assert!(saved["fetched_at"].as_str().unwrap().starts_with("2026-11-18T20:0"), "{saved}");
+    assert_eq!(saved["traded_million_won"], json!({"000010": 30, "000020": 60, "000030": 90, "000040": 120, "000050": 150, "000060": 180}));
+    harness.finish().await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_failed_turnover_fetch_alerts_and_the_day_still_completes() {
+    for turnover in [Turnover::Failing, Turnover::Yesterday] {
+        let harness = Harness::start(Config { turnover, ..Config::default() });
+        harness.until_finalize_finished(1).await;
+        assert!(harness.recorder.count("ka10095") >= 1);
+        assert!(!turnover_file(&harness.data(), DATE).exists());
+        assert!(harness.status_now().alerts.iter().any(|alert| alert.message.contains("거래대금")), "{:?}", harness.status_now().alerts);
+        assert!(harness.complete_exists());
+        assert_eq!(harness.kiwoom.issue_times("collect-01").len(), 2, "토큰 재발급도 이어진다");
+        harness.finish().await;
+    }
+}
+
+async fn excluded_of_a_crowded_morning(files: &[(u32, Option<bool>)]) -> PlanFile {
+    let codes: Vec<String> = (1..=400).map(|number| format!("{:06}", number * 10)).collect();
+    let files = files.to_vec();
+    let harness = Harness::start_with(Config::default(), |data| {
+        let names: Vec<&str> = codes.iter().map(String::as_str).collect();
+        write(&data.join("universe").join(format!("{DATE}.json")), &universe_json(DATE, &names));
+        for (date, larger_codes_first) in files {
+            let text = match larger_codes_first {
+                None => "{broken".to_owned(),
+                Some(larger_first) => {
+                    let traded: serde_json::Map<String, Value> =
+                        codes.iter().enumerate().map(|(rank, code)| (code.clone(), json!(if larger_first { rank + 1 } else { 1000 - rank }))).collect();
+                    json!({"format_version": 1, "date": date, "fetched_at": "2026-11-17T20:06:00+09:00", "traded_million_won": traded}).to_string()
+                }
+            };
+            write(&turnover_file(data, date), &text);
+        }
+    });
+    harness.until(at(7, 36, 0)).await;
+    let plan = read_plan(&harness.data(), DATE).unwrap();
+    harness.finish().await;
+    plan
+}
+
+#[tokio::test(start_paused = true)]
+async fn the_morning_plan_uses_the_newest_fresh_turnover_file() {
+    let numbered = |range: std::ops::RangeInclusive<u32>| range.map(|number| format!("{:06}", number * 10)).collect::<Vec<_>>();
+    let fresh = excluded_of_a_crowded_morning(&[(20261116, Some(false)), (PREVIOUS_DATE, Some(true)), (DATE, Some(false))]).await;
+    assert_eq!(fresh.excluded, numbered(1..=20), "전 관측일 거래대금이 작은 종목이 빠진다");
+    assert!(fresh.alerts.iter().any(|alert| alert.contains("거래대금")), "{:?}", fresh.alerts);
+
+    let three_days_old = excluded_of_a_crowded_morning(&[(20261113, Some(true)), (PREVIOUS_DATE, None)]).await;
+    assert_eq!(three_days_old.excluded, numbered(1..=20), "깨진 파일은 건너뛰고 세 관측일 전 것까지는 쓴다");
+
+    for stale in [vec![(20261112, Some(true))], vec![(PREVIOUS_DATE, None)], Vec::new()] {
+        let plan = excluded_of_a_crowded_morning(&stale).await;
+        assert_eq!(plan.excluded, numbered(381..=400));
+        assert!(plan.alerts.iter().any(|alert| alert.contains("종목코드 순서")), "{:?}", plan.alerts);
+    }
 }
 
 fn day_plan() -> PlanFile {
