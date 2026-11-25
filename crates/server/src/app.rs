@@ -31,8 +31,8 @@ use crate::market_source::switch::SwitchParts;
 use crate::market_source::route::FeatureRoute;
 use crate::market_source::{KiwoomHandle, MarketSource};
 use crate::rankings::RankingCache;
-use crate::kiwoom::auth::{DAILY_REISSUE_AT, KiwoomAuth};
-use crate::kiwoom::link::{Link, LinkState};
+use crate::kiwoom::auth::KiwoomAuth;
+use crate::kiwoom::link::Link;
 use crate::kiwoom::rest::{KiwoomRest, Priority};
 use crate::kiwoom::stream::KiwoomStream;
 use crate::market_source::stream::{MarketStream, StreamEvent};
@@ -50,7 +50,6 @@ const DAILY_RESET_AT: TimeOfDay = match TimeOfDay::hms(7, 45, 0) {
     None => unreachable!(),
 };
 const DAILY_LIST_RETRY: Duration = Duration::from_secs(5 * 60);
-const DAILY_TOKEN_RETRY: Duration = Duration::from_secs(10 * 60);
 
 pub fn main() -> ExitCode {
     let (config, warnings) = match Config::from_env() {
@@ -203,10 +202,7 @@ pub fn application_with_source(inputs: ApplicationInputs, startup: impl Into<Sys
 }
 
 pub async fn daily_maintenance(state: Arc<AppState>) {
-    tokio::join!(
-        daily_reset(state.clock.clone(), state.source.clone(), state.symbols.clone(), state.bars.clone(), state.hub.clone(), state.market_control.clone()),
-        daily_token(state.clock.clone(), state.rest.clone(), state.link.clone()),
-    );
+    daily_reset(state.clock.clone(), state.source.clone(), state.symbols.clone(), state.bars.clone(), state.hub.clone(), state.market_control.clone()).await;
 }
 
 pub enum StreamSource {
@@ -483,30 +479,6 @@ async fn daily_reset(clock: Clock, source: Arc<dyn MarketSource>, symbols: Arc<S
                 break;
             }
             tracing::warn!(error = %e, %at, "종목 목록 갱신에 실패했습니다. 이전 목록을 쓰고 그 시각에 다시 받습니다");
-            clock.sleep_until(at).await;
-        }
-    }
-}
-
-/// 매일 20:05: 그날 20:05 전에 받은 토큰이면 다시 받는다. 실패하면 07:45까지 10분마다.
-pub(crate) async fn daily_token(clock: Clock, rest: KiwoomRest, link: Link) {
-    loop {
-        clock.sleep_until(next_daily(clock.now(), DAILY_REISSUE_AT)).await;
-        if link.settled().await != LinkState::Connected || rest.halted().is_some() || !rest.auth().due_daily_reissue(clock.now()) {
-            continue;
-        }
-        let deadline = next_daily(clock.now(), DAILY_RESET_AT);
-        while let Err(e) = rest.issue_token().await {
-            let Some(retry_at) = e.retry_at() else {
-                tracing::error!(error = %e, "20:05 토큰 발급에 실패했습니다. 다시 받지 않습니다");
-                break;
-            };
-            let at = next_try(&clock, retry_at, DAILY_TOKEN_RETRY);
-            if at >= deadline {
-                tracing::error!(error = %e, "20:05 토큰 발급이 07:45까지 실패했습니다");
-                break;
-            }
-            tracing::warn!(error = %e, %at, "20:05 토큰 발급에 실패했습니다. 그 시각에 다시 받습니다");
             clock.sleep_until(at).await;
         }
     }

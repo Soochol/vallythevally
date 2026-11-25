@@ -1,21 +1,18 @@
 use std::sync::{Arc, Mutex};
 
 use domain::KstTime;
-use futures::FutureExt;
-use futures::future::{BoxFuture, Shared};
+use futures::future::BoxFuture;
 use tokio::sync::watch;
 
 use super::auth::{AuthError, Halt};
 use super::error::Category;
 use super::notice::{KisNotices, NoticeConnect};
 use super::rest::{KisError, KisRest};
-use crate::clock::Clock;
+use crate::clock::{Clock, next_daily};
 use crate::kiwoom::auth::DAILY_REISSUE_AT;
-use crate::kiwoom::link::{ConnectStep, LinkFailure, LinkState, Problem};
-
-const DAILY_TOKEN_GIVE_UP_AT: domain::TimeOfDay = match domain::TimeOfDay::hms(7, 45, 0) {
-    Some(t) => t,
-    None => unreachable!(),
+use crate::market_source::link::{
+    ConnectStep, DAILY_TOKEN_GIVE_UP_AT, Flight, LinkEngine, LinkFailure, LinkState, Problem, ReissueAttempt, Stale,
+    retry_reissue_until, spawn_halt_watcher, spawn_token_refresher,
 };
 
 pub trait SourceDuty: Send + Sync + 'static {
@@ -23,7 +20,6 @@ pub trait SourceDuty: Send + Sync + 'static {
     fn open_realtime(&self) -> BoxFuture<'static, Result<(), LinkFailure>>;
 }
 
-const DAILY_TOKEN_RETRY_SECS: i64 = 10 * 60;
 const EXPIRY_REISSUE_LEAD_SECS: i64 = 10 * 60;
 const IN_USE_ELSEWHERE_MESSAGE: &str = "한투 실시간 접속을 다른 곳에서 쓰고 있어 끊었습니다(OPSP8996). 다른 프로그램의 한투 실시간 연결을 끈 뒤 다시 연결하세요";
 
@@ -34,22 +30,16 @@ pub struct KisLane {
     pub notices: KisNotices,
 }
 
-struct Stale;
-
 enum Decision {
     Done(LinkState),
     WaitUntil(KstTime),
     Proceed,
 }
 
-type Flight = Shared<BoxFuture<'static, LinkState>>;
-
 struct Inner {
     rest: KisRest,
     clock: Clock,
-    state: watch::Sender<LinkState>,
-    flight: Mutex<Option<Flight>>,
-    epoch: watch::Sender<u64>,
+    engine: LinkEngine<()>,
     duty: Mutex<Option<Arc<dyn SourceDuty>>>,
 }
 
@@ -81,8 +71,13 @@ fn failure_of(error: &KisError) -> LinkFailure {
 
 impl KisLink {
     pub fn new(rest: KisRest, clock: Clock) -> KisLink {
-        let link = KisLink(Arc::new(Inner { rest, clock, state: watch::channel(LinkState::Disconnected).0, flight: Mutex::new(None), epoch: watch::channel(0).0, duty: Mutex::new(None) }));
-        link.0.state.send_replace(link.resting_state());
+        let link = KisLink(Arc::new(Inner {
+            rest,
+            clock,
+            engine: LinkEngine::new(LinkState::Disconnected),
+            duty: Mutex::new(None),
+        }));
+        link.0.engine.set(link.resting_state());
         link.watch_halts();
         link.keep_token_fresh();
         link
@@ -111,39 +106,23 @@ impl KisLink {
     }
 
     fn watch_halts(&self) {
-        let inner = Arc::downgrade(&self.0);
-        let mut halted = self.0.rest.auth().watch_halted();
-        tokio::spawn(async move {
-            while halted.wait_for(Option::is_some).await.is_ok() {
-                let Some(inner) = inner.upgrade() else { return };
-                KisLink(inner).stop_for_halt();
-                if halted.wait_for(Option::is_none).await.is_err() {
-                    return;
-                }
-            }
-        });
+        let halted = self.0.rest.auth().watch_halted();
+        spawn_halt_watcher(Arc::downgrade(&self.0), halted, |inner| KisLink(inner).stop_for_halt());
     }
 
     fn keep_token_fresh(&self) {
-        let inner = Arc::downgrade(&self.0);
-        let clock = self.0.clock.clone();
-        tokio::spawn(async move {
-            loop {
-                let wake = {
-                    let Some(inner) = inner.upgrade() else { return };
-                    KisLink(inner).next_token_check()
-                };
-                clock.sleep_until(wake).await;
-                let Some(inner) = inner.upgrade() else { return };
-                KisLink(inner).refresh_token_if_due().await;
-            }
-        });
+        spawn_token_refresher(
+            Arc::downgrade(&self.0),
+            self.0.clock.clone(),
+            KisLink::next_token_check_of,
+            |inner| Box::pin(async move { KisLink(inner).refresh_token_if_due().await }),
+        );
     }
 
-    fn next_token_check(&self) -> KstTime {
-        let now = self.0.clock.now();
-        let daily = crate::clock::next_daily(now, DAILY_REISSUE_AT);
-        match self.0.rest.auth().token_expires_at().map(|expires| expires.plus_secs(-EXPIRY_REISSUE_LEAD_SECS)).filter(|before_expiry| *before_expiry > now) {
+    fn next_token_check_of(inner: &Inner) -> KstTime {
+        let now = inner.clock.now();
+        let daily = next_daily(now, DAILY_REISSUE_AT);
+        match inner.rest.auth().token_expires_at().map(|expires| expires.plus_secs(-EXPIRY_REISSUE_LEAD_SECS)).filter(|before_expiry| *before_expiry > now) {
             Some(before_expiry) => daily.min(before_expiry),
             None => daily,
         }
@@ -156,67 +135,56 @@ impl KisLink {
         if !self.is_connected() || auth.halted().is_some() || !(near_expiry || auth.due_daily_reissue(now, DAILY_REISSUE_AT)) {
             return;
         }
-        let deadline = crate::clock::next_daily(now, DAILY_TOKEN_GIVE_UP_AT);
-        loop {
-            let retry_at = match auth.reissue().await {
-                Ok(_) => {
-                    tracing::info!("한투 토큰을 새로 받았습니다");
-                    return;
+        let deadline = next_daily(now, DAILY_TOKEN_GIVE_UP_AT);
+        let ok = retry_reissue_until(&self.0.clock, deadline, || self.is_connected(), || {
+            let auth = self.0.rest.auth().clone();
+            let now = self.0.clock.now();
+            Box::pin(async move {
+                match auth.reissue().await {
+                    Ok(_) => {
+                        tracing::info!("한투 토큰을 새로 받았습니다");
+                        ReissueAttempt::Done
+                    }
+                    Err(AuthError::IssueInterval { retry_at }) => ReissueAttempt::RetryAt(retry_at),
+                    Err(AuthError::Transport(e)) => {
+                        tracing::warn!(error = %e, "한투 토큰을 다시 받지 못했습니다");
+                        ReissueAttempt::RetryAt(now)
+                    }
+                    Err(e) => {
+                        tracing::error!(error = %e, "한투 토큰을 다시 받지 못했습니다. 다시 받지 않습니다");
+                        ReissueAttempt::Stop
+                    }
                 }
-                Err(AuthError::IssueInterval { retry_at }) => retry_at,
-                Err(AuthError::Transport(e)) => {
-                    tracing::warn!(error = %e, "한투 토큰을 다시 받지 못했습니다");
-                    self.0.clock.now()
-                }
-                Err(e) => {
-                    tracing::error!(error = %e, "한투 토큰을 다시 받지 못했습니다. 다시 받지 않습니다");
-                    return;
-                }
-            };
-            let at = retry_at.max(self.0.clock.now().plus_secs(DAILY_TOKEN_RETRY_SECS));
-            if at >= deadline || !self.is_connected() {
-                tracing::error!("한투 토큰을 07:45까지 다시 받지 못했습니다");
-                return;
-            }
-            self.0.clock.sleep_until(at).await;
+            })
+        })
+        .await;
+        if !ok && self.is_connected() && self.0.clock.now() >= deadline {
+            tracing::error!("한투 토큰을 07:45까지 다시 받지 못했습니다");
         }
     }
 
     pub fn fail_in_use_elsewhere(&self) {
-        self.abandon_connect(|| self.set(LinkState::Failed(LinkFailure { problem: Problem::Network, retry_at: None, message: IN_USE_ELSEWHERE_MESSAGE.into() })));
+        self.0.engine.abandon(|| self.0.engine.set(LinkState::Failed(LinkFailure { problem: Problem::Network, retry_at: None, message: IN_USE_ELSEWHERE_MESSAGE.into() })));
     }
 
     fn stop_for_halt(&self) {
-        let mut slot = self.0.flight.lock().expect("연결 잠금");
-        if !self.is_connected() {
-            if !matches!(self.state(), LinkState::Connecting(_)) {
-                self.set(self.resting_state());
-            }
-            return;
-        }
-        self.0.epoch.send_modify(|epoch| *epoch += 1);
-        slot.take();
-        self.set(self.resting_state());
+        self.0.engine.stop_for_halt(|| self.resting_state(), || {});
     }
 
     pub fn state(&self) -> LinkState {
-        self.0.state.borrow().clone()
+        self.0.engine.state()
     }
 
     pub fn subscribe(&self) -> watch::Receiver<LinkState> {
-        self.0.state.subscribe()
+        self.0.engine.subscribe()
     }
 
     pub async fn settled(&self) -> LinkState {
-        let mut state = self.subscribe();
-        match state.wait_for(|state| !matches!(state, LinkState::Connecting(_))).await {
-            Ok(settled) => settled.clone(),
-            Err(_) => self.state(),
-        }
+        self.0.engine.settled().await
     }
 
     pub fn is_connected(&self) -> bool {
-        *self.0.state.borrow() == LinkState::Connected
+        self.0.engine.is_connected()
     }
 
     pub fn kept_disconnected(&self) -> bool {
@@ -230,52 +198,22 @@ impl KisLink {
         }
     }
 
-    fn set(&self, state: LinkState) {
-        self.0.state.send_replace(state);
-    }
-
-    fn publish(&self, epoch: u64, write: impl FnOnce()) -> Result<(), Stale> {
-        let _slot = self.0.flight.lock().expect("연결 잠금");
-        if *self.0.epoch.borrow() != epoch {
-            return Err(Stale);
-        }
-        write();
-        Ok(())
-    }
-
-    fn step(&self, epoch: u64, state: LinkState) -> Result<(), Stale> {
-        self.publish(epoch, || self.set(state))
-    }
-
-    fn aborted(&self, epoch: u64) -> bool {
-        *self.0.epoch.borrow() != epoch
-    }
-
     pub async fn connect(&self) -> LinkState {
         self.join_or_start().await
     }
 
     fn join_or_start(&self) -> Flight {
-        let mut slot = self.0.flight.lock().expect("연결 잠금");
-        if let Some(flight) = slot.as_ref() {
-            return flight.clone();
-        }
         let link = self.clone();
-        let epoch = *self.0.epoch.borrow();
-        let task = tokio::spawn(async move {
-            let outcome = link.connect_steps(epoch).await.unwrap_or_else(|Stale| link.state());
-            let mut slot = link.0.flight.lock().expect("연결 잠금");
-            if *link.0.epoch.borrow() == epoch {
-                slot.take();
-            }
-            outcome
-        });
-        let flight = async move { task.await.unwrap_or(LinkState::Disconnected) }.boxed().shared();
-        *slot = Some(flight.clone());
-        if !self.is_connected() {
-            self.set(LinkState::Connecting(ConnectStep::CheckingKey));
-        }
-        flight
+        self.0
+            .engine
+            .join_or_start((), move |epoch| {
+                Box::pin(async move {
+                    let outcome = link.connect_steps(epoch).await.unwrap_or_else(|Stale| link.state());
+                    link.0.engine.clear_flight_if_current(epoch);
+                    outcome
+                })
+            })
+            .1
     }
 
     async fn connect_steps(&self, epoch: u64) -> Result<LinkState, Stale> {
@@ -284,18 +222,18 @@ impl KisLink {
             match self.decide(epoch)? {
                 Decision::Done(state) => return Ok(state),
                 Decision::WaitUntil(until) => {
-                    self.wait_for_issue_interval(until, epoch).await?;
+                    self.0.engine.sleep_until_or_aborted(&self.0.clock, until, epoch).await?;
                     continue;
                 }
                 Decision::Proceed => {}
             }
             if !auth.has_usable_token() {
-                self.step(epoch, LinkState::Connecting(ConnectStep::Token))?;
+                self.0.engine.step(epoch, LinkState::Connecting(ConnectStep::Token))?;
                 match auth.token().await.map_err(KisError::from) {
                     Ok(_) => {}
                     Err(KisError::Gated { until }) => {
-                        self.step(epoch, LinkState::Connecting(ConnectStep::IssueInterval(until)))?;
-                        self.wait_for_issue_interval(until, epoch).await?;
+                        self.0.engine.step(epoch, LinkState::Connecting(ConnectStep::IssueInterval(until)))?;
+                        self.0.engine.sleep_until_or_aborted(&self.0.clock, until, epoch).await?;
                         continue;
                     }
                     Err(error) => return self.fail(&error, epoch),
@@ -304,21 +242,21 @@ impl KisLink {
             break;
         }
         if let Some(duty) = self.duty() {
-            self.step(epoch, LinkState::Connecting(ConnectStep::Symbols))?;
+            self.0.engine.step(epoch, LinkState::Connecting(ConnectStep::Symbols))?;
             if let Err(failure) = duty.load_symbols().await {
                 return self.fail_with(failure, epoch);
             }
-            self.step(epoch, LinkState::Connecting(ConnectStep::Realtime))?;
+            self.0.engine.step(epoch, LinkState::Connecting(ConnectStep::Realtime))?;
             if let Err(failure) = duty.open_realtime().await {
                 return self.fail_with(failure, epoch);
             }
         }
         let mut outcome = LinkState::Connected;
-        self.publish(epoch, || {
+        self.0.engine.publish(epoch, || {
             if let Some(halt) = auth.halted() {
                 outcome = LinkState::Failed(failure_of_halt(&halt));
             }
-            self.set(outcome.clone());
+            self.0.engine.set(outcome.clone());
         })?;
         if outcome == LinkState::Connected {
             auth.clear_disconnected();
@@ -328,32 +266,21 @@ impl KisLink {
 
     fn decide(&self, epoch: u64) -> Result<Decision, Stale> {
         let auth = self.0.rest.auth();
-        if self.aborted(epoch) {
+        if self.0.engine.aborted(epoch) {
             return Err(Stale);
         }
         if self.is_connected() {
             return Ok(Decision::Done(LinkState::Connected));
         }
-        self.step(epoch, LinkState::Connecting(ConnectStep::CheckingKey))?;
+        self.0.engine.step(epoch, LinkState::Connecting(ConnectStep::CheckingKey))?;
         if let Some(halt) = auth.halted() {
-            let state = LinkState::Failed(failure_of_halt(&halt));
-            self.step(epoch, state.clone())?;
-            return Ok(Decision::Done(state));
+            return self.0.engine.finish(epoch, LinkState::Failed(failure_of_halt(&halt))).map(Decision::Done);
         }
         if !auth.has_usable_token() && let Some(until) = auth.issue_blocked_until() {
-            self.step(epoch, LinkState::Connecting(ConnectStep::IssueInterval(until)))?;
+            self.0.engine.step(epoch, LinkState::Connecting(ConnectStep::IssueInterval(until)))?;
             return Ok(Decision::WaitUntil(until));
         }
         Ok(Decision::Proceed)
-    }
-
-    async fn wait_for_issue_interval(&self, until: KstTime, epoch: u64) -> Result<(), Stale> {
-        let mut abandoned = self.0.epoch.subscribe();
-        tokio::select! {
-            () = self.0.clock.sleep_until(until) => {}
-            _ = abandoned.wait_for(|current| *current != epoch) => {}
-        }
-        if self.aborted(epoch) { Err(Stale) } else { Ok(()) }
     }
 
     fn fail(&self, error: &KisError, epoch: u64) -> Result<LinkState, Stale> {
@@ -362,9 +289,7 @@ impl KisLink {
     }
 
     fn fail_with(&self, failure: LinkFailure, epoch: u64) -> Result<LinkState, Stale> {
-        let state = LinkState::Failed(failure);
-        self.step(epoch, state.clone())?;
-        Ok(state)
+        self.0.engine.finish(epoch, LinkState::Failed(failure))
     }
 
     pub fn connect_at_start(&self) {
@@ -385,32 +310,18 @@ impl KisLink {
     }
 
     pub async fn connect_until_waiting(&self) -> LinkState {
-        let mut state = self.subscribe();
-        let waiting = async {
-            let _ = state.wait_for(|state| matches!(state, LinkState::Connecting(ConnectStep::IssueInterval(_)))).await;
-        };
-        tokio::select! {
-            outcome = self.connect() => outcome,
-            () = waiting => self.state(),
-        }
-    }
-
-    fn abandon_connect(&self, then: impl FnOnce()) {
-        let mut slot = self.0.flight.lock().expect("연결 잠금");
-        self.0.epoch.send_modify(|epoch| *epoch += 1);
-        slot.take();
-        then();
+        self.0.engine.connect_until_waiting(self.connect()).await
     }
 
     pub fn disconnect_by_user(&self) {
-        self.abandon_connect(|| {
+        self.0.engine.abandon(|| {
             self.0.rest.auth().keep_disconnected();
-            self.set(self.resting_state());
+            self.0.engine.set(self.resting_state());
         });
     }
 
     pub fn disconnect(&self) {
-        self.abandon_connect(|| self.set(self.resting_state()));
+        self.0.engine.abandon(|| self.0.engine.set(self.resting_state()));
     }
 }
 

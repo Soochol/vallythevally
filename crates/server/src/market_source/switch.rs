@@ -12,7 +12,8 @@ use crate::kis::feed::{KisFeed, KisFeedParts};
 use crate::kis::link::KisLane;
 use crate::kiwoom::key_file::KeyId;
 use crate::kiwoom::keys::{Connection, KeyRing, ListedKey};
-use crate::kiwoom::link::{Link, LinkState};
+use super::link::LinkState;
+use crate::kiwoom::link::Link;
 use crate::market::hub::HubHandle;
 use crate::symbols::SymbolDirectory;
 

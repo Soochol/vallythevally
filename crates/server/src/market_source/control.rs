@@ -12,7 +12,8 @@ use crate::api::{Broker, MarketSourceStatus};
 use crate::config::KiwoomCredentials;
 use crate::kiwoom::key_file::{KeyId, MIGRATED_KEY_ALIAS};
 use crate::kiwoom::keys::{Connection, KeyError, KeyRing};
-use crate::kiwoom::link::{Link, LinkState};
+use super::link::LinkState;
+use crate::kiwoom::link::Link;
 use crate::trading::{Accounts, KisAccountSettings};
 
 type Wait = Pin<Box<dyn Future<Output = ()> + Send>>;

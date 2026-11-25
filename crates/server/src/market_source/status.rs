@@ -2,7 +2,7 @@ use super::rankings::RankingChoices;
 use super::route::RouteProfile;
 use super::switch::MarketSourceState;
 use crate::api::{self, KiwoomLinkState, MarketSourceStatus, UnixSeconds};
-use crate::kiwoom::link::{ConnectStep, LinkState};
+use super::link::{ConnectStep, LinkState};
 use crate::system_routes::{connect_step, problem};
 
 fn choices_view(choices: RankingChoices) -> api::RankingChoicesView {

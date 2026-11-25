@@ -13,7 +13,7 @@ use super::master::MasterDownload;
 use super::stream::{Connector, StreamStatus};
 use crate::api::{self, ApiErrorCode, ApiErrorReason};
 use crate::clock::Clock;
-use crate::kiwoom::link::{LinkFailure, LinkState, Problem};
+use crate::market_source::link::{LinkFailure, LinkState, Problem};
 use crate::market_source::stream::{DesiredFeeds, MarketStream, SeatRules, StreamEvent};
 use crate::market_source::{ChartPage, Cursor, DaySummary, MarketFeatures, MarketSource, MergeScope, OrderBookSnapshot, Priority, QuoteRow, SourceError, SourceFailure, StockFundamentals, TapePage};
 use crate::symbols::{Directory, SymbolDirectory};
