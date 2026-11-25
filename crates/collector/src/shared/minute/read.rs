@@ -3,6 +3,8 @@ use std::borrow::Cow;
 use serde::Deserialize;
 use server::shared_data::MinuteInstrument;
 
+use crate::shared::live_tap::{seconds_of_day, unsigned_quantity};
+
 const STOCK_TYPE: &str = "0B";
 const INDEX_TYPE: &str = "0J";
 const COMBINED_SUFFIX: &str = "_AL";
@@ -85,17 +87,24 @@ pub fn read_ticks(text: &str, mut sink: impl FnMut(RawTick<'_>)) -> Result<Readi
     Ok(reading)
 }
 
-fn tick_of<'a>(entry: &'a Entry<'_>, instrument: MinuteInstrument) -> Option<RawTick<'a>> {
-    let symbol = entry.item.strip_suffix(COMBINED_SUFFIX).unwrap_or(&entry.item);
+pub(crate) fn tick_from_fields<'a>(
+    item: &'a str,
+    instrument: MinuteInstrument,
+    time: Option<&str>,
+    price: Option<&str>,
+    volume: Option<&str>,
+    cumulative_value: Option<&str>,
+    exchange: Option<&str>,
+) -> Option<RawTick<'a>> {
+    let symbol = item.strip_suffix(COMBINED_SUFFIX).unwrap_or(item);
     if symbol.is_empty() {
         return None;
     }
-    let values = &entry.values;
-    let sec = seconds_of_day(values.time.as_deref()?)?;
-    let price = price_of(values.price.as_deref()?)?;
-    let volume = quantity_of(values.volume.as_deref().unwrap_or_default())?;
-    let cumulative_value = values.cumulative_value.as_deref().and_then(quantity_of);
-    let exchange = match (instrument, values.exchange.as_deref()) {
+    let sec = seconds_of_day(time?)?;
+    let price = price_of(price?)?;
+    let volume = unsigned_quantity(volume.unwrap_or_default())?;
+    let cumulative_value = cumulative_value.and_then(unsigned_quantity);
+    let exchange = match (instrument, exchange) {
         (MinuteInstrument::Stock, Some("KRX")) => Exchange::Krx,
         (MinuteInstrument::Stock, Some("NXT")) => Exchange::Nxt,
         _ => Exchange::Unstated,
@@ -104,31 +113,23 @@ fn tick_of<'a>(entry: &'a Entry<'_>, instrument: MinuteInstrument) -> Option<Raw
     is_trade.then_some(RawTick { symbol, instrument, exchange, sec, price, volume, cumulative_value })
 }
 
-fn seconds_of_day(text: &str) -> Option<u32> {
-    if text.len() != 6 || !text.bytes().all(|byte| byte.is_ascii_digit()) {
-        return None;
-    }
-    let part = |range: std::ops::Range<usize>| text[range].parse::<u32>().ok();
-    let (hour, minute, second) = (part(0..2)?, part(2..4)?, part(4..6)?);
-    (hour < 24 && minute < 60 && second < 60).then_some(hour * 3600 + minute * 60 + second)
+fn tick_of<'a>(entry: &'a Entry<'_>, instrument: MinuteInstrument) -> Option<RawTick<'a>> {
+    let values = &entry.values;
+    tick_from_fields(
+        entry.item.as_ref(),
+        instrument,
+        values.time.as_deref(),
+        values.price.as_deref(),
+        values.volume.as_deref(),
+        values.cumulative_value.as_deref(),
+        values.exchange.as_deref(),
+    )
 }
 
 fn price_of(text: &str) -> Option<f64> {
     let magnitude = text.trim().strip_prefix(['+', '-']).unwrap_or(text.trim());
     let price = magnitude.parse::<f64>().ok()?;
     (price.is_finite() && price > 0.0).then_some(price)
-}
-
-fn quantity_of(text: &str) -> Option<i64> {
-    let trimmed = text.trim();
-    if trimmed.is_empty() {
-        return Some(0);
-    }
-    let magnitude = trimmed.strip_prefix(['+', '-']).unwrap_or(trimmed);
-    if magnitude.is_empty() || !magnitude.bytes().all(|byte| byte.is_ascii_digit()) {
-        return None;
-    }
-    magnitude.parse().ok()
 }
 
 #[cfg(test)]

@@ -1,7 +1,7 @@
 import { memo, type ReactNode, useEffect, useRef, useState } from "react";
 import { formatPrice } from "../../lib/format";
 import { formatStrength } from "./format";
-import type { InfoPager, LadderTrades } from "./useLadderSlots";
+import type { InfoPager, LadderTrades } from "./useLadderMarket";
 import { priceTone } from "./PriceLadder";
 import type { TradeRow } from "../trades/tape";
 import { INFO_TABS, type InfoKey, type InfoLine, type InfoPage, otherInfoPage } from "./quoteInfo";

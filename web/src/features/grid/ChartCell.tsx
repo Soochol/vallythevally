@@ -2,6 +2,7 @@ import { createPortal } from "react-dom";
 import { VenueFallbackBadge } from "../venue/VenuePicker";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useBookReplayDays } from "../../api/bookReplay";
+import { useBrokerDays } from "../../api/brokers";
 import { useFinancials } from "../../api/financials";
 import { financialRequest } from "../../chart/indicators/shown";
 import { useSymbolInfo, useSymbolInfos } from "../../api/queries";
@@ -17,6 +18,7 @@ import { marketSocket } from "../../stores/realtime";
 import { useSelectionStore } from "../../stores/selection";
 import { openIndicatorCommand, shownIndicatorWindow } from "../indicator-command/open";
 import { useTheme, useVenue } from "../../stores/ui";
+import { chartPointerScheduler, useChartPointerStore } from "../../stores/chartPointer";
 import { replayPointScheduler } from "../book-replay/pointScheduler";
 import { useBookReplayEnabled } from "../book-replay/useBookReplay";
 import { type CellAction, cellErrorView, olderErrorView } from "./cellError";
@@ -76,10 +78,19 @@ export function ChartCell({ cellId, status, onStatus }: Props) {
   const financial = useFinancials(cell.symbol, request.period, request.enabled);
   const theme = useTheme();
   const replayEnabled = useBookReplayEnabled();
+  const brokerSyncActive = useChartPointerStore((s) => (s.brokerSyncSymbols[cell.symbol] ?? 0) > 0);
   const replayDaysEnabled = replayEnabled && isIntraday(cell.period);
+  const brokerDaysEnabled = brokerSyncActive && (isIntraday(cell.period) || cell.period === "D");
   const replayDaysQuery = useBookReplayDays(cell.symbol, replayDaysEnabled);
+  const brokerDaysQuery = useBrokerDays(cell.symbol, brokerDaysEnabled);
   const replayDaysList = replayDaysEnabled ? replayDaysQuery.data?.days : undefined;
-  const replayDays = useMemo(() => (replayDaysList && replayDaysList.length > 0 ? new Set(replayDaysList) : null), [replayDaysList]);
+  const brokerDaysList = brokerDaysEnabled ? brokerDaysQuery.data?.days : undefined;
+  const replayDays = useMemo(() => {
+    const merged = new Set<string>();
+    if (replayDaysList) for (const d of replayDaysList) merged.add(d);
+    if (brokerDaysList) for (const d of brokerDaysList) merged.add(d);
+    return merged.size > 0 ? merged : null;
+  }, [replayDaysList, brokerDaysList]);
   const openSearch = useSelectionStore((s) => s.openSearch);
   const chartEl = useRef<HTMLDivElement>(null);
   const ctl = useRef<ChartController | null>(null);
@@ -124,16 +135,15 @@ export function ChartCell({ cellId, status, onStatus }: Props) {
   }, [cellId, layoutId, layoutSession, crosshairScope, cell.symbol, cell.link]);
 
   useEffect(() => {
-    if (!replayEnabled) {
-      replayPointScheduler.cancel();
-      return;
-    }
-    if (!ctl.current) return;
+    if (!replayEnabled) replayPointScheduler.cancel();
+    if ((!replayEnabled && !brokerSyncActive) || !ctl.current) return;
     const symbol = cell.symbol;
-    return ctl.current.subscribePointedBar((bar) => {
-      if (bar !== null) replayPointScheduler.push(symbol, bar);
+    return ctl.current.subscribePointedBar((bar, close) => {
+      if (bar === null) return;
+      if (replayEnabled) replayPointScheduler.push(symbol, bar);
+      if (brokerSyncActive) chartPointerScheduler.push(symbol, bar, close);
     });
-  }, [replayEnabled, cell.symbol]);
+  }, [replayEnabled, brokerSyncActive, cell.symbol]);
 
   useEffect(() => {
     ctl.current?.setReplayDays(replayDays);

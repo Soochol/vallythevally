@@ -26,10 +26,7 @@ use super::registry::{Chunk, Registry};
 use super::ws::{Connector, Socket};
 use crate::protocol::{Command, ProtocolError, Rejection, SessionState};
 use crate::raw_write::RawLine;
-use crate::shared::flow::FlowFeed;
-use crate::shared::minute::MinuteFeed;
-use crate::shared::quotes::QuoteFeed;
-use crate::shared::trade_minute::TradeMinuteFeed;
+use crate::shared::LiveTapFeed;
 
 pub trait WallClock: Send + Sync {
     fn now_ms(&self) -> i64;
@@ -412,10 +409,7 @@ pub struct SessionParts {
     pub timings: Timings,
     pub shutdown: watch::Receiver<bool>,
     pub child: Option<ChildLink>,
-    pub minutes: Option<MinuteFeed>,
-    pub flow: Option<FlowFeed>,
-    pub quotes: Option<QuoteFeed>,
-    pub trades: Option<TradeMinuteFeed>,
+    pub tap: Option<LiveTapFeed>,
 }
 
 pub struct Session {
@@ -430,10 +424,7 @@ pub struct Session {
     commands: Option<Commands>,
     events: Events,
     state: watch::Sender<SessionState>,
-    minutes: Option<MinuteFeed>,
-    flow: Option<FlowFeed>,
-    quotes: Option<QuoteFeed>,
-    trades: Option<TradeMinuteFeed>,
+    tap: Option<LiveTapFeed>,
     halt_on_rejected_register: bool,
     gap: Gap,
     attempt: u32,
@@ -464,10 +455,7 @@ impl Session {
             commands,
             events,
             state,
-            minutes: parts.minutes,
-            flow: parts.flow,
-            quotes: parts.quotes,
-            trades: parts.trades,
+            tap: parts.tap,
             halt_on_rejected_register,
             gap: Gap::Unknown,
             attempt: 0,
@@ -593,13 +581,10 @@ impl Session {
     fn write_down(&mut self, reason: &str) -> Result<(), Exit> {
         self.events.down(reason);
         let recv_ms = self.wall_clock.now_ms();
-        if let Some(flow) = &self.flow {
-            flow.link(recv_ms, false);
+        if let Some(tap) = &self.tap {
+            tap.on_link(recv_ms, false);
         }
         self.out.write_event(&RawLine::Down { recv_ms, reason })?;
-        if let Some(quotes) = &self.quotes {
-            quotes.link_down(recv_ms);
-        }
         Ok(())
     }
 
@@ -691,11 +676,8 @@ impl Session {
         }
         let recv_ms = self.wall_clock.now_ms();
         self.out.write_event(&RawLine::Live { recv_ms })?;
-        if let Some(flow) = &self.flow {
-            flow.link(recv_ms, true);
-        }
-        if let Some(quotes) = &self.quotes {
-            quotes.link_live(recv_ms);
+        if let Some(tap) = &self.tap {
+            tap.on_link(recv_ms, true);
         }
         self.gap = Gap::Up;
         self.tokens.confirmed();
@@ -844,17 +826,8 @@ impl Session {
             FrameKind::NotJson => self.out.write_text(recv_ms, text)?,
             FrameKind::Real => {
                 self.out.write_frame(recv_ms, text)?;
-                if let Some(minutes) = &self.minutes {
-                    minutes.offer(recv_ms, bytes);
-                }
-                if let Some(flow) = &self.flow {
-                    flow.offer(recv_ms, bytes);
-                }
-                if let Some(quotes) = &self.quotes {
-                    quotes.offer(recv_ms, bytes);
-                }
-                if let Some(trades) = &self.trades {
-                    trades.offer(recv_ms, bytes);
+                if let Some(tap) = &self.tap {
+                    tap.offer_frame(recv_ms, bytes);
                 }
                 self.report_market_hours(text, recv_ms);
             }

@@ -25,7 +25,7 @@ use crate::kiwoom::keys::{KeySetup, LaneFactory};
 use crate::kiwoom::rest::testing::{FakeTransport, ok};
 use crate::kiwoom::rest::{Access, KiwoomRest};
 use crate::kiwoom::stream::{AccountEvent, AccountKind, KiwoomStream};
-use crate::system_routes::SystemState;
+use crate::system_routes::SystemStartup;
 
 const KEYS: [(&str, &str, &str, &str); 3] = [
     ("k1", "주 계좌", "FAKE-APPKEY-order-a", ACCOUNT),
@@ -114,7 +114,7 @@ async fn keyed_with_switch_file(listed: &[usize], switch_file: Option<String>) -
     let (_events, receiver) = tokio::sync::mpsc::channel(8);
     let screener_store = crate::screener::store::Store::open(&dir.path().join("screener.duckdb")).unwrap();
     let inputs = ApplicationInputs { rest: rest.clone(), clock, symbols: listed_symbols(), db, screener_store, stream: (stream, receiver), static_dir: dir.path().to_owned(), screener_update_on_connect: false };
-    let state = application_with_system(inputs, SystemState::new(key_setup, None, settings));
+    let state = application_with_system(inputs, SystemStartup::new(key_setup, None, settings));
     rest.set_access(Access::Open);
     for view in state.keys.views() {
         view.lane.rest.set_access(Access::Open);

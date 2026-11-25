@@ -1,27 +1,19 @@
 use std::collections::{BTreeMap, BTreeSet};
-use std::io::ErrorKind;
 use std::path::Path;
 
 use domain::{KstDate, StockCode};
-use serde::Deserialize;
 
 use crate::api;
 use crate::clock::kst;
 use crate::shared_data::{
-    DataKind, FORMAT_VERSION, Header, QuoteMinute, TradeMinuteLine, closed_day_dir, flow_links_path, live_day_dir, read_quote_day, trade_minute_path,
+    FlowLinkEvent, QuoteMinute, closed_day_dir, flow_links_path, live_day_dir, live_quote_days_for_stock, live_quote_stock_keys, read_flow_links, read_quote_day, read_trade_minute_file,
+    trade_minute_path,
 };
 
 use super::{empty_day, symbol_code};
 
 const COVERED_CONFIRM_MS: i64 = 15_000;
 const MAX_TRADES_PER_MINUTE: usize = 10;
-const LIVE_QUOTES_FOLDER: &str = "quote-minutes-live";
-
-#[derive(Deserialize)]
-struct LinkLine {
-    t: i64,
-    event: String,
-}
 
 pub(super) fn read_live_day(shared: &Path, stock: StockCode, date: KstDate, date_str: &str) -> Result<api::BookReplayDay, String> {
     let code = stock.as_str();
@@ -36,7 +28,7 @@ pub(super) fn read_live_day(shared: &Path, stock: StockCode, date: KstDate, date
     };
     let all_books = books_from_quotes(quote_day.minutes);
     let first_book_minute = all_books.first().map(|book| book.minute);
-    let mut stock_keys = find_stock_keys(&live_dir, code)?;
+    let mut stock_keys = live_quote_stock_keys(shared, date_str, code).map_err(|e| format!("장중 분 호가 키 목록을 읽지 못했습니다: {e}"))?;
     stock_keys.sort_by(|a, b| a.1.cmp(&b.1).then_with(|| a.0.cmp(&b.0)));
 
     let day_start_ms = kst(date, 0, 0, 0).unix() * 1000;
@@ -63,44 +55,9 @@ pub(super) fn read_live_day(shared: &Path, stock: StockCode, date: KstDate, date
 }
 
 pub(super) fn live_days(data_dir: &Path, shared_dir: &Path, stock_code: &str) -> Result<Vec<String>, String> {
-    let live_root = shared_dir.join(LIVE_QUOTES_FOLDER);
-    let entries = match std::fs::read_dir(&live_root) {
-        Ok(entries) => entries,
-        Err(e) if e.kind() == ErrorKind::NotFound => return Ok(Vec::new()),
-        Err(e) => return Err(format!("{}를 읽을 수 없습니다: {e}", live_root.display())),
-    };
-    let file_name = format!("{stock_code}.jsonl");
-    let mut days = Vec::new();
-    for entry in entries {
-        let entry = entry.map_err(|e| format!("{} 항목을 읽을 수 없습니다: {e}", live_root.display()))?;
-        let Ok(date) = entry.file_name().into_string() else { continue };
-        if KstDate::parse_yyyymmdd(&date).is_none() || !entry.file_type().is_ok_and(|ft| ft.is_dir()) {
-            continue;
-        }
-        if data_dir.join("store").join(&date).join("complete.json").is_file() {
-            continue;
-        }
-        if day_has_stock_file(&entry.path(), &file_name)? {
-            days.push(date);
-        }
-    }
-    days.sort_unstable();
+    let mut days = live_quote_days_for_stock(shared_dir, stock_code).map_err(|e| format!("장중 분 호가 날짜 목록을 읽지 못했습니다: {e}"))?;
+    days.retain(|date| !data_dir.join("store").join(date).join("complete.json").is_file());
     Ok(days)
-}
-
-fn day_has_stock_file(day_dir: &Path, file_name: &str) -> Result<bool, String> {
-    let entries = match std::fs::read_dir(day_dir) {
-        Ok(entries) => entries,
-        Err(e) if e.kind() == ErrorKind::NotFound => return Ok(false),
-        Err(e) => return Err(format!("{}를 읽을 수 없습니다: {e}", day_dir.display())),
-    };
-    for entry in entries {
-        let entry = entry.map_err(|e| format!("{} 항목을 읽을 수 없습니다: {e}", day_dir.display()))?;
-        if entry.file_type().is_ok_and(|ft| ft.is_dir()) && entry.path().join(file_name).is_file() {
-            return Ok(true);
-        }
-    }
-    Ok(false)
 }
 
 fn books_from_quotes(minutes: Vec<QuoteMinute>) -> Vec<api::BookReplayBook> {
@@ -123,51 +80,6 @@ fn books_from_quotes(minutes: Vec<QuoteMinute>) -> Vec<api::BookReplayBook> {
         });
     }
     books
-}
-
-fn find_stock_keys(live_dir: &Path, code: &str) -> Result<Vec<(String, u16)>, String> {
-    let entries = match std::fs::read_dir(live_dir) {
-        Ok(entries) => entries,
-        Err(e) if e.kind() == ErrorKind::NotFound => return Ok(Vec::new()),
-        Err(e) => return Err(format!("{}를 읽을 수 없습니다: {e}", live_dir.display())),
-    };
-    let file_name = format!("{code}.jsonl");
-    let mut keys = Vec::new();
-    for entry in entries {
-        let entry = entry.map_err(|e| format!("{} 항목을 읽을 수 없습니다: {e}", live_dir.display()))?;
-        if !entry.file_type().is_ok_and(|ft| ft.is_dir()) {
-            continue;
-        }
-        let Ok(key_name) = entry.file_name().into_string() else { continue };
-        let stock_path = entry.path().join(&file_name);
-        if let Some(first_minute) = first_quote_minute(&stock_path) {
-            keys.push((key_name, first_minute));
-        }
-    }
-    Ok(keys)
-}
-
-fn first_quote_minute(path: &Path) -> Option<u16> {
-    let bytes = std::fs::read(path).ok()?;
-    let complete = complete_prefix(&bytes);
-    let mut header_checked = false;
-    for line in complete.split(|b| *b == b'\n') {
-        if line.is_empty() {
-            continue;
-        }
-        if !header_checked {
-            header_checked = true;
-            let header: Header = serde_json::from_slice(line).ok()?;
-            if header.format_version != FORMAT_VERSION || header.kind != DataKind::QuoteMinutes {
-                return None;
-            }
-            continue;
-        }
-        if let Ok(qm) = serde_json::from_slice::<QuoteMinute>(line) {
-            return Some(qm.minute);
-        }
-    }
-    None
 }
 
 fn compute_covered(
@@ -211,55 +123,36 @@ fn collapse_ranges(minutes: BTreeSet<u32>) -> Vec<[u32; 2]> {
 }
 
 fn read_link_intervals(path: &Path) -> Vec<(i64, i64)> {
-    let bytes = match std::fs::read(path) {
-        Ok(bytes) => bytes,
-        Err(e) if e.kind() == ErrorKind::NotFound => return Vec::new(),
+    let entries = match read_flow_links(path) {
+        Ok(entries) => entries,
         Err(error) => {
             tracing::warn!(%error, path = %path.display(), "연결 기록 파일을 읽지 못해 건너뜁니다");
             return Vec::new();
         }
     };
-    let complete = complete_prefix(&bytes);
     let mut intervals = Vec::new();
     let mut active: Option<(i64, i64)> = None;
-    let mut warned = false;
-    for line in complete.split(|b| *b == b'\n') {
-        if line.is_empty() {
-            continue;
-        }
-        let Ok(entry) = serde_json::from_slice::<LinkLine>(line) else {
-            if !warned {
-                tracing::warn!(path = %path.display(), "깨진 연결 기록 줄을 건너뜁니다");
-                warned = true;
-            }
-            continue;
-        };
-        match entry.event.as_str() {
-            "live" => {
+    for entry in entries {
+        match entry.event {
+            FlowLinkEvent::Live => {
                 active = match active {
                     Some((start, end)) => Some((start, end.max(entry.t))),
                     None => Some((entry.t, entry.t)),
                 };
             }
-            "alive" => {
+            FlowLinkEvent::Alive => {
                 if let Some((start, end)) = active {
                     active = Some((start, end.max(entry.t)));
                 }
             }
-            "down" | "end" => {
+            FlowLinkEvent::Down | FlowLinkEvent::End => {
                 if let Some((start, end)) = active.take() {
                     intervals.push((start, end.max(entry.t)));
                 }
             }
-            "start" => {
+            FlowLinkEvent::Start => {
                 if let Some(interval) = active.take() {
                     intervals.push(interval);
-                }
-            }
-            _ => {
-                if !warned {
-                    tracing::warn!(path = %path.display(), event = %entry.event, "알 수 없는 연결 기록 사건을 건너뜁니다");
-                    warned = true;
                 }
             }
         }
@@ -292,39 +185,14 @@ fn read_merged_trades(
 }
 
 fn read_trade_file(path: &Path, last_covered: u32, per_minute: &mut BTreeMap<u16, Vec<(u32, u64, i64)>>) {
-    let bytes = match std::fs::read(path) {
-        Ok(bytes) => bytes,
-        Err(e) if e.kind() == ErrorKind::NotFound => return,
+    let entries = match read_trade_minute_file(path) {
+        Ok(entries) => entries,
         Err(error) => {
             tracing::warn!(%error, path = %path.display(), "1분 체결 파일을 읽지 못해 건너뜁니다");
             return;
         }
     };
-    let complete = complete_prefix(&bytes);
-    let mut header_checked = false;
-    let mut warned = false;
-    for line in complete.split(|b| *b == b'\n') {
-        if line.is_empty() {
-            continue;
-        }
-        if !header_checked {
-            header_checked = true;
-            match serde_json::from_slice::<Header>(line) {
-                Ok(header) if header.format_version == FORMAT_VERSION && header.kind == DataKind::TradeMinute => {}
-                _ => {
-                    tracing::warn!(path = %path.display(), "지원하지 않는 머리의 1분 체결 파일을 건너뜁니다");
-                    return;
-                }
-            }
-            continue;
-        }
-        let Ok(entry) = serde_json::from_slice::<TradeMinuteLine>(line) else {
-            if !warned {
-                tracing::warn!(path = %path.display(), "깨진 1분 체결 줄을 건너뜁니다");
-                warned = true;
-            }
-            continue;
-        };
+    for entry in entries {
         if u32::from(entry.minute) > last_covered {
             continue;
         }
@@ -337,13 +205,10 @@ fn read_trade_file(path: &Path, last_covered: u32, per_minute: &mut BTreeMap<u16
     }
 }
 
-fn complete_prefix(bytes: &[u8]) -> &[u8] {
-    let len = bytes.iter().rposition(|b| *b == b'\n').map_or(0, |index| index + 1);
-    &bytes[..len]
-}
-
 #[cfg(test)]
 mod tests {
+    use crate::shared_data::{DataKind, Header};
+
     use super::*;
 
     #[test]

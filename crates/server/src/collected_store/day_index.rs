@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::io::ErrorKind;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
-use std::time::SystemTime;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use domain::KstDate;
 use serde::Deserialize;
@@ -16,6 +16,16 @@ const MAX_DAY_FOLDERS: usize = 60;
 pub(crate) struct FileStamp {
     pub len: u64,
     pub modified: Option<SystemTime>,
+}
+
+impl FileStamp {
+    pub(crate) fn token(&self) -> String {
+        let nanos = self
+            .modified
+            .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
+            .map_or(0u128, |d| d.as_nanos());
+        format!("{}-{nanos}", self.len)
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -88,13 +98,16 @@ struct RawHandoff {
     to: String,
 }
 
-pub(crate) fn read_stamp(data_dir: &Path, date: &str) -> Result<Option<FileStamp>, String> {
-    let path = data_dir.join("store").join(date).join("complete.json");
-    match std::fs::metadata(&path) {
+pub(crate) fn read_path_stamp(path: &Path) -> Result<Option<FileStamp>, String> {
+    match std::fs::metadata(path) {
         Ok(meta) => Ok(Some(FileStamp { len: meta.len(), modified: meta.modified().ok() })),
         Err(e) if e.kind() == ErrorKind::NotFound => Ok(None),
         Err(e) => Err(format!("{}를 확인할 수 없습니다: {e}", path.display())),
     }
+}
+
+pub(crate) fn read_stamp(data_dir: &Path, date: &str) -> Result<Option<FileStamp>, String> {
+    read_path_stamp(&data_dir.join("store").join(date).join("complete.json"))
 }
 
 impl DayIndexCache {

@@ -1,4 +1,4 @@
-import { type ChangeEvent, type KeyboardEvent, type ReactNode, useLayoutEffect, useRef } from "react";
+import { type ChangeEvent, type KeyboardEvent, memo, type ReactNode, useLayoutEffect, useRef } from "react";
 import { quantityForAmount } from "./orderRules";
 import { AMOUNT_UNIT_WON } from "./orderSettings";
 
@@ -12,7 +12,7 @@ interface Props {
   readonly trailing?: ReactNode;
 }
 
-export function QuantityRow({ input, amountPresets, referencePrice, onInput, trailing }: Props) {
+export const QuantityRow = memo(function QuantityRow({ input, amountPresets, referencePrice, onInput, trailing }: Props) {
   const field = useRef<HTMLInputElement>(null);
   const digitsBeforeCaret = useRef<number | null>(null);
   useLayoutEffect(() => {
@@ -49,4 +49,4 @@ export function QuantityRow({ input, amountPresets, referencePrice, onInput, tra
       {trailing}
     </div>
   );
-}
+});

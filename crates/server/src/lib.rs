@@ -8,6 +8,7 @@ pub mod bars;
 pub mod book_replay;
 pub mod clock;
 pub mod collected;
+pub mod collected_store;
 pub mod collector;
 pub mod config;
 pub mod db;

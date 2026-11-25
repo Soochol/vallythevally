@@ -14,6 +14,7 @@ use super::session::{Finish, Halt, Timings, WallClock};
 use super::testing::*;
 use crate::protocol::{Command, Event, KeyName, ProtocolError, RealType, Registration, SessionState, encode_line, parse_event};
 use crate::raw_read::{RawContent, RawItem, read_day};
+use crate::shared::LiveTapConfig;
 
 const CHILD_TOKEN: &str = "FAKE-CHILD-TOKEN-0001";
 const NEW_CHILD_TOKEN: &str = "FAKE-CHILD-TOKEN-0002";
@@ -44,10 +45,7 @@ fn launch_child(peer: &Peer) -> Child {
         commands: command_source,
         events: Events::to(event_sink),
         shutdown,
-        minutes: None,
-        flow: None,
-        quotes: None,
-        trades: None,
+        tap: LiveTapConfig::none(),
     };
     let task = tokio::spawn(run_session(parts));
     Child { paths, wall, commands, events, stop, task }
@@ -540,10 +538,7 @@ async fn child_session_writes_symbol_flow_and_link_events() {
         commands: command_source,
         events: Events::to(event_sink),
         shutdown,
-        minutes: None,
-        flow: Some(FileFlowStore::new(shared.clone(), key)),
-        quotes: None,
-        trades: None,
+        tap: LiveTapConfig { flow: Some(FileFlowStore::new(shared.clone(), key)), ..LiveTapConfig::none() },
     };
     let task = tokio::spawn(run_session(parts));
     let child = Child { paths, wall, commands, events, stop, task };
@@ -605,10 +600,7 @@ async fn a_session_outage_reaches_the_quote_gaps() {
         commands: command_source,
         events: Events::to(event_sink),
         shutdown,
-        minutes: None,
-        flow: None,
-        quotes: Some(shared.clone()),
-        trades: None,
+        tap: LiveTapConfig { quotes: Some(shared.clone()), ..LiveTapConfig::none() },
     };
     let child = Child { paths, wall, commands, events, stop, task: tokio::spawn(run_session(parts)) };
     child.send(token(CHILD_TOKEN, 1));

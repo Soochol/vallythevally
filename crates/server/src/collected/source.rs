@@ -1,65 +1,15 @@
-use std::collections::{HashMap, VecDeque};
 use std::path::Path;
 use std::sync::{Arc, Mutex};
-use std::time::UNIX_EPOCH;
 
 use domain::{KstDate, KstTime, StockCode};
-use tokio::sync::Semaphore;
 
 use crate::api;
-use crate::book_replay::day_index::{DayIndexCache, DayIndexState, FileStamp, read_stamp};
+use crate::collected_store::{CollectedStore, DayIndexState, FileStamp, StampLru, read_stamp};
 use crate::shared_data::CollectorPaths;
 
 use super::flow::{FlowCache, has_symbol_flow};
 use super::kind::{Brokers, CollectedKind};
 use super::store::{StoreDay, read_day};
-
-const STORE_CACHE_CAPACITY: usize = 16;
-const MAX_CONCURRENT_QUERIES: usize = 2;
-
-struct CachedStoreDay<V> {
-    stamp: FileStamp,
-    day: Arc<StoreDay<V>>,
-}
-
-struct StoreCache<V> {
-    order: VecDeque<(String, String)>,
-    entries: HashMap<(String, String), CachedStoreDay<V>>,
-}
-
-impl<V> StoreCache<V> {
-    fn new() -> Self {
-        Self {
-            order: VecDeque::with_capacity(STORE_CACHE_CAPACITY),
-            entries: HashMap::with_capacity(STORE_CACHE_CAPACITY),
-        }
-    }
-
-    fn get(&mut self, key: &(String, String), stamp: &FileStamp) -> Option<Arc<StoreDay<V>>> {
-        let entry = self.entries.get(key)?;
-        if &entry.stamp != stamp {
-            return None;
-        }
-        let day = Arc::clone(&entry.day);
-        if let Some(pos) = self.order.iter().position(|k| k == key) {
-            self.order.remove(pos);
-        }
-        self.order.push_back(key.clone());
-        Some(day)
-    }
-
-    fn insert(&mut self, key: (String, String), stamp: FileStamp, day: Arc<StoreDay<V>>) {
-        if let Some(pos) = self.order.iter().position(|k| k == &key) {
-            self.order.remove(pos);
-        } else if self.order.len() >= STORE_CACHE_CAPACITY
-            && let Some(oldest) = self.order.pop_front()
-        {
-            self.entries.remove(&oldest);
-        }
-        self.order.push_back(key.clone());
-        self.entries.insert(key, CachedStoreDay { stamp, day });
-    }
-}
 
 struct LoadedStoreDay<V> {
     stamp: FileStamp,
@@ -67,14 +17,14 @@ struct LoadedStoreDay<V> {
 }
 
 pub(super) struct KindSource<K: CollectedKind> {
-    store_cache: Mutex<StoreCache<K::View>>,
+    store_cache: Mutex<StampLru<Arc<StoreDay<K::View>>>>,
     flow: FlowCache<K>,
 }
 
 impl<K: CollectedKind> KindSource<K> {
     fn new() -> Self {
         Self {
-            store_cache: Mutex::new(StoreCache::new()),
+            store_cache: Mutex::new(StampLru::new()),
             flow: FlowCache::new(),
         }
     }
@@ -117,16 +67,14 @@ struct DayQuery<'a> {
 }
 
 pub struct Collected {
-    day_index: DayIndexCache,
-    permits: Arc<Semaphore>,
+    store: Arc<CollectedStore>,
     brokers: KindSource<Brokers>,
 }
 
 impl Collected {
-    pub fn new() -> Arc<Self> {
+    pub fn new(store: Arc<CollectedStore>) -> Arc<Self> {
         Arc::new(Self {
-            day_index: DayIndexCache::new(),
-            permits: Arc::new(Semaphore::new(MAX_CONCURRENT_QUERIES)),
+            store,
             brokers: KindSource::new(),
         })
     }
@@ -158,7 +106,7 @@ impl Collected {
         let today_str = format_yyyymmdd(now.kst_date());
         tokio::task::spawn_blocking(move || {
             let mut days = match &dir {
-                Some(dir) => collected.day_index.collected_days(dir, &stock_str)?,
+                Some(dir) => collected.store.collected_days(dir, &stock_str)?,
                 None => Vec::new(),
             };
             if let Some(shared_dir) = &shared_dir
@@ -197,7 +145,7 @@ impl Collected {
                     return Ok(slice_store(&stamp, &day, after));
                 }
                 StoreLookup::Miss => {
-                    let permit = self.permits.clone().acquire_owned().await.map_err(|e| format!("수집 저장소 조회 허가를 얻지 못했습니다: {e}"))?;
+                    let permit = self.store.acquire_permit().await.map_err(|e| format!("수집 저장소 조회 허가를 얻지 못했습니다: {e}"))?;
                     let collected = Arc::clone(self);
                     let dir_load = dir.clone();
                     let date_owned = date_str.to_owned();
@@ -257,7 +205,7 @@ fn check_store_cache<K: CollectedKind>(
     if let Some(day) = kind.store_cache.lock().expect("collected store cache").get(cache_key, &stamp) {
         return Ok(StoreLookup::Hit(stamp, day));
     }
-    let (_, state) = collected.day_index.load(dir, date_str)?;
+    let (_, state) = collected.store.load_day_index(dir, date_str)?;
     match state {
         DayIndexState::Ready(index) if index.stocks.contains_key(&cache_key.0) => Ok(StoreLookup::Miss),
         _ => Ok(StoreLookup::NotCollected),
@@ -273,7 +221,7 @@ fn load_store_day<K: CollectedKind>(
     stock_str: &str,
     cache_key: &(String, String),
 ) -> Result<Option<LoadedStoreDay<K::View>>, String> {
-    let (Some(stamp), state) = collected.day_index.load(dir, date_str)? else {
+    let (Some(stamp), state) = collected.store.load_day_index(dir, date_str)? else {
         return Ok(None);
     };
     if let Some(day) = kind.store_cache.lock().expect("collected store cache").get(cache_key, &stamp) {
@@ -291,14 +239,6 @@ fn load_store_day<K: CollectedKind>(
     Ok(Some(LoadedStoreDay { stamp, day }))
 }
 
-fn stamp_token(stamp: &FileStamp) -> String {
-    let nanos = stamp
-        .modified
-        .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
-        .map_or(0u128, |d| d.as_nanos());
-    format!("{}-{nanos}", stamp.len)
-}
-
 fn parse_cursor(after: Option<&str>) -> Option<(&str, &str, usize)> {
     let raw = after?;
     let mut parts = raw.splitn(3, ':');
@@ -309,7 +249,7 @@ fn parse_cursor(after: Option<&str>) -> Option<(&str, &str, usize)> {
 }
 
 fn slice_store<V: Clone>(stamp: &FileStamp, day: &StoreDay<V>, after: Option<&str>) -> DaySlice<V> {
-    let token = stamp_token(stamp);
+    let token = stamp.token();
     let total = day.snapshots.len();
     let cursor = format!("s:{token}:{total}");
     if let Some(("s", generation, index)) = parse_cursor(after)

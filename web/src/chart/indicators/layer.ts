@@ -6,12 +6,13 @@ import {
   LineStyle,
   type PriceFormat,
   PriceScaleMode,
+  type SeriesType,
+  type Time,
 } from "lightweight-charts";
-import { axisPriceFormat, financialAxisUnit, type AxisGeometry } from "../axisFormat";
+import { axisPriceFormat, type AxisGeometry } from "../axisFormat";
 import type { Bar } from "../../api/generated/Bar";
 import type { FinancialsPage } from "../../api/generated/FinancialsPage";
-import type { FinancialPoint } from "../../api/generated/FinancialPoint";
-import { adjacentBucket, financialBuckets, type FinancialDetailRow, financialDetailRows, financialFailure, financialReason, checkedTime, financialSummary, financialSummaryRows, financialValue, reportingPeriod } from "../financials";
+import type { FinancialDetailRow } from "../financials";
 import type { Period } from "../../api/generated/Period";
 import type { QuoteDepthPoint } from "../../api/generated/QuoteDepthPoint";
 import type { QuoteTotalPoint } from "../../api/generated/QuoteTotalPoint";
@@ -25,9 +26,11 @@ import { indicatorColorValue, type ThemeTokens } from "../theme";
 import { toChartTime } from "../time";
 import type { IndicatorPort, OpenPort } from "./client";
 import { applyToPoints, DrawQueue, pointAtTime } from "./drawQueue";
+import { FinancialIndicatorStore } from "./financialFamily";
 import { isFinancial, isFinancialBar, isQuoteDepth, isQuoteTotals, isTechnical, type PlotLineId as LineId, isBarLine, lineColor, specLines, specName } from "./kinds";
 import { addOverlayLine, type OverlayPoint, type OverlaySeries } from "./overlayLine";
 import type { BarTuple, Columns, EngineErrorKind, EngineResult, FromWorker, LineInfo, Point } from "./protocol";
+import { type QuoteFamilyDeps, QuoteIndicatorController, type QuoteTarget } from "./quoteFamily";
 import { syncOp } from "./sync";
 
 type Status = { kind: "pending" } | { kind: "ready" } | { kind: "hidden" } | { kind: "error"; error: EngineErrorKind; message: string };
@@ -72,19 +75,6 @@ export interface IndicatorRow {
 }
 
 export interface FinancialReport { readonly label: string; readonly rows: readonly FinancialDetailRow[] }
-
-function financialOverviewRows(page: FinancialsPage | null, notice: string | undefined, message: string): FinancialDetailRow[] {
-  if (!page) return [{ name: "상태", value: message }];
-  const failures = [{ name: "자료 조회", value: financialFailure(page.failure) }, { name: "공시 조회", value: financialFailure(page.disclosureFailure) }].filter((row) => row.value !== "");
-  return [
-    ...financialSummaryRows(page),
-    ...(notice ? [{ name: "안내", value: notice }] : []),
-    ...failures,
-    { name: "최근 시도", value: checkedTime(page.lastAttemptAt) },
-    ...(page.shareClassReason ? [{ name: "배당 주식 종류", value: "미확인 · 회사 재무와 별도로 확인합니다" }] : []),
-    ...(page.latestCorrections ? [{ name: "공시 기준", value: "정정된 최신 공시" }] : []),
-  ];
-}
 
 export type PriceLegendValues = Pick<IndicatorRow, "id"> & { slots: readonly (readonly IndicatorRow["values"][number]["text"][])[] };
 
@@ -147,26 +137,6 @@ function isQuoteTail(prev: readonly Bar[], next: readonly Bar[], bar: Bar): bool
 const ERROR_TEXT: Record<EngineErrorKind, string> = { spec: "설정 오류", calc: "계산 오류" };
 export const indicatorErrorText = (kind: EngineErrorKind) => ERROR_TEXT[kind];
 
-function thickestLevel(levels: readonly (readonly [number, number])[]): readonly [number, number] | null {
-  let best: readonly [number, number] | null = null;
-  for (let i = 0; i < levels.length; i++) {
-    const level = levels[i]!;
-    if (level[1] > 0 && (best === null || level[1] > best[1])) best = level;
-  }
-  return best;
-}
-
-function formatDepthLevel(level: readonly [number, number] | null): string {
-  return level ? `${formatPrice(level[0], false)} ${formatVolume(level[1])}` : "—";
-}
-
-interface DepthLegend {
-  asks: TrackedValues;
-  bids: TrackedValues;
-  dirty: boolean;
-  lastT: UnixSeconds | null;
-}
-
 export class IndicatorLayer {
   private readonly port: IndicatorPort;
   private readonly shown = new Map<string, Shown>();
@@ -181,43 +151,33 @@ export class IndicatorLayer {
   private timesDirty = true;
   private committedT: UnixSeconds | null = null;
   private broken = false;
-  private financials: FinancialsPage | null = null;
-  private financialReports = new Map<string, FinancialReport[]>();
-  private financialPointRows = new Map<FinancialPoint, readonly FinancialDetailRow[]>();
-  private financialOverview: readonly FinancialDetailRow[] = [];
-  private financialSummaryText = "";
-  private financialMessage = "재무자료를 불러오는 중입니다";
-  private financialNotice: string | undefined;
-  private quoteTotals: QuoteView<QuoteTotalPoint> | null = null;
-  private quoteDepths: ReadonlyMap<IndicatorConfig["id"], QuoteView<QuoteDepthPoint>> = new Map();
-  private readonly depthLegends = new Map<string, DepthLegend>();
+  private readonly financialStore = new FinancialIndicatorStore();
+  private readonly quotes: QuoteIndicatorController;
+
+  attachMainSeries(series: ISeriesApi<SeriesType, Time>): void {
+    this.quotes.attachMainSeries(series);
+  }
+
+  detachMainSeries(series: ISeriesApi<SeriesType, Time>): void {
+    this.quotes.detachMainSeries(series);
+  }
+
+  setQuoteTarget(target: QuoteTarget | null, sync = true): void {
+    this.quotes.setTarget(target, sync);
+  }
 
   setQuoteTotals(view: QuoteView<QuoteTotalPoint> | null, from: UnixSeconds | null = null): void {
-    this.quoteTotals = view;
-    for (const s of this.shown.values()) if (isQuoteTotals(s.config.spec)) {
-      this.updateQuoteStatus(s);
-      if (s.config.visible) this.syncQuoteTotals(s, from);
-    }
-    this.host.requestFrame();
+    this.quotes.setTotalsOverride(view);
+    this.applyQuoteTotalsUpdate(from);
   }
 
   setQuoteDepths(views: ReadonlyMap<IndicatorConfig["id"], QuoteView<QuoteDepthPoint>>): void {
-    this.quoteDepths = views;
-    for (const s of this.shown.values()) if (isQuoteDepth(s.config.spec)) {
-      this.updateQuoteDepthStatus(s);
-    }
-    for (const legend of this.depthLegends.values()) legend.dirty = true;
-    this.host.requestFrame();
+    this.quotes.setDepthOverrides(views);
+    this.applyQuoteDepthUpdate();
   }
 
   setFinancials(page: FinancialsPage | null, message?: string): void {
-    this.financials = page;
-    this.financialNotice = message;
-    this.financialSummaryText = page ? financialSummary(page) : "";
-    this.financialPointRows = new Map(page?.series.flatMap((series) => series.points.map((point) => [point, financialDetailRows(point, series.metric)] as const)) ?? []);
-    this.financialReports = new Map(page?.series.map((series) => [series.metric, series.points.map((point) => ({ label: `${point.businessYear} / ${point.reportCode} · ${reportingPeriod(point.period)}`, rows: this.financialPointRows.get(point) ?? [] }))]) ?? []);
-    this.financialMessage = message ?? "재무자료를 불러오는 중입니다";
-    this.financialOverview = financialOverviewRows(page, message, this.financialMessage);
+    this.financialStore.update(page, message);
     this.timesDirty = true;
     this.host.guard(() => {
       for (const s of this.shown.values()) if (isFinancial(s.config.spec)) {
@@ -231,8 +191,34 @@ export class IndicatorLayer {
   constructor(
     private readonly host: LayerHost,
     open: OpenPort,
+    quoteDeps?: QuoteFamilyDeps,
   ) {
     this.port = open({ message: (m) => this.onMessage(m), broken: () => this.onBroken() });
+    this.quotes = new QuoteIndicatorController(
+      {
+        bars: () => this.display,
+        tokens: () => this.host.tokens(),
+        configs: () => this.configs,
+        onTotalsChanged: (_view, from) => this.applyQuoteTotalsUpdate(from),
+        onDepthChanged: () => this.applyQuoteDepthUpdate(),
+      },
+      quoteDeps,
+    );
+  }
+
+  private applyQuoteTotalsUpdate(from: UnixSeconds | null): void {
+    for (const s of this.shown.values()) if (isQuoteTotals(s.config.spec)) {
+      this.updateQuoteStatus(s);
+      if (s.config.visible) this.syncQuoteTotals(s, from);
+    }
+    this.host.requestFrame();
+  }
+
+  private applyQuoteDepthUpdate(): void {
+    for (const s of this.shown.values()) if (isQuoteDepth(s.config.spec)) {
+      this.updateQuoteDepthStatus(s);
+    }
+    this.host.requestFrame();
   }
 
   setPreview(id: string | null): void {
@@ -315,6 +301,7 @@ export class IndicatorLayer {
     }
     this.applyStretch();
     this.create(fresh);
+    this.quotes.syncFeeds();
     for (const s of this.shown.values()) {
       if (isFinancial(s.config.spec)) this.drawFinancial(s);
       else if (isQuoteTotals(s.config.spec)) {
@@ -377,7 +364,7 @@ export class IndicatorLayer {
       this.clearLines(s);
       if (s.config.visible) s.status = { kind: "pending" };
     }
-    if (!keepQuotes) for (const legend of this.depthLegends.values()) legend.dirty = true;
+    if (!keepQuotes) this.quotes.markDepthLegendsDirty();
     this.load(h, keepQuotes);
   }
 
@@ -385,8 +372,9 @@ export class IndicatorLayer {
     this.history = h;
     this.display = displayBars(h);
     this.timesDirty = true;
-    if (!keepQuotes) for (const legend of this.depthLegends.values()) legend.dirty = true;
+    if (!keepQuotes) this.quotes.markDepthLegendsDirty();
     this.committedT = h.bars[h.bars.length - 1]?.t ?? null;
+    this.quotes.cover(this.display);
     this.create(this.configs.filter((c) => c.visible));
     for (const s of this.shown.values()) {
       if (isFinancial(s.config.spec)) this.drawFinancial(s);
@@ -414,12 +402,7 @@ export class IndicatorLayer {
       this.clearLines(s);
       if (s.config.visible && s.status.kind !== "error") s.status = { kind: "pending" };
     }
-    for (const legend of this.depthLegends.values()) {
-      legend.asks.clear();
-      legend.bids.clear();
-      legend.lastT = null;
-      legend.dirty = true;
-    }
+    this.quotes.clearDepthLegends();
   }
 
   advance(h: History, bar: Bar, kind: "live" | "confirmed"): void {
@@ -432,13 +415,14 @@ export class IndicatorLayer {
         this.resetNow(h, keepQuotes);
         if (keepQuotes) {
           this.advanceQuoteTotals(bar);
-          this.advanceDepthLegends(bar);
+          this.quotes.advanceDepthLegends(this.configs, bar);
         }
       });
       return;
     }
     this.history = h;
     this.display = next;
+    if (next.length > prev.length) this.quotes.cover(next);
     if (!this.timesDirty) this.allTimes.add(bar.t);
     if (op === "confirm") this.committedT = bar.t;
     if (next.length > prev.length || next.at(-1)?.c !== prev.at(-1)?.c) this.rebaseLeadingSpans(bar);
@@ -453,17 +437,18 @@ export class IndicatorLayer {
       }
     }
     this.advanceQuoteTotals(bar);
-    this.advanceDepthLegends(bar);
+    this.quotes.advanceDepthLegends(this.configs, bar);
     if (this.configs.some((c) => c.visible && usesWorker(c)) && !this.broken) {
       this.port.post({ type: "bar", chart: this.port.chart, kind: op, bar: tuple(bar) });
     }
   }
 
   private advanceQuoteTotals(bar: Bar): void {
-    const quotePt = this.quoteTotals?.at(bar.t);
+    const view = this.quotes.totalsView();
+    const quotePt = view?.at(bar.t);
     if (!quotePt) return;
     const prevBar = this.display.length >= 2 ? this.display[this.display.length - 2] : undefined;
-    const brk = prevBar !== undefined && !this.quoteTotals?.at(prevBar.t);
+    const brk = prevBar !== undefined && !view?.at(prevBar.t);
     for (const s of this.shown.values()) if (s.config.visible && isQuoteTotals(s.config.spec)) {
       for (const line of s.lines) {
         const qp: Point = brk ? { t: bar.t, v: this.quoteValue(line, quotePt), break: true } : { t: bar.t, v: this.quoteValue(line, quotePt) };
@@ -500,6 +485,7 @@ export class IndicatorLayer {
       if (isFinancial(s.config.spec)) this.drawFinancial(s);
       for (const line of s.lines) if (isBarLine(line.id)) this.draw(line, line.points);
     }
+    this.quotes.redrawHeatmap();
   }
 
   refreshPriceFormat(): void {
@@ -521,60 +507,16 @@ export class IndicatorLayer {
       const collapsed = this.panels[panelIndex]?.collapsed;
       const time = collapsed ? this.display.at(-1)?.t ?? t : t;
       if (isFinancial(config.spec)) {
-        const metric = config.spec.kind;
-        const points = this.financials?.series.find((series) => series.metric === metric)?.points ?? [];
-        const at = points.filter((p) => p.priceBucket === (collapsed ? points.at(-1)?.priceBucket : time));
-        const fiscalMonth = !fiscalMonthShown && this.financials?.fiscalMonth ? ` · ${this.financials.fiscalMonth}월 결산` : "";
+        const showFiscalMonth = !fiscalMonthShown;
         fiscalMonthShown = true;
-        const summary = this.financials ? [this.financialSummaryText, this.financialNotice].filter(Boolean).join(" · ") : this.financialMessage;
-        const unitNote = metric === "dps" && this.host.period() === "Q" ? " · 연간 전용" : "";
-        return { id: config.id, name: `${specName(config.spec)}${fiscalMonth}${unitNote}`, color: indicatorColorValue(tokens, config.style.colors[0] ?? "ind-1"),
-          values: at.map((p) => ({ text: p.value === null ? financialReason(p.reason) || "—" : financialValue(p.value, metric, p.currency), color: tokens.text2 })),
-          state: config.visible ? "ok" : "hidden", panel: { index: panelIndex, count: this.panels.length, collapsed },
-          detail: { status: this.financialNotice ? "failed" : this.financials?.status ?? "pending", summary, rows: [...this.financialOverview, ...at.flatMap((p) => this.financialPointRows.get(p) ?? [])],
-            reports: this.financialReports.get(metric) ?? [] } };
+        return this.financialStore.row(config, time, this.host.period(), tokens, { index: panelIndex, count: this.panels.length, collapsed }, showFiscalMonth);
       }
       if (isQuoteTotals(config.spec)) {
         const panel = panelIndex < 0 ? null : { index: panelIndex, count: this.panels.length, collapsed };
-        if (!config.visible) return { id: config.id, name: specName(config.spec), color: tokens.down, values: [], state: "hidden", panel };
-        const view = this.quoteTotals;
-        const pt = time !== null && view ? view.at(time) : undefined;
-        const qState = view?.state ?? "loading";
-        if (qState === "loading" && !pt) return { id: config.id, name: specName(config.spec), color: tokens.down, values: [], state: "pending", panel };
-        const values: LegendValue[] =
-          qState === "disabled"
-            ? [{ text: "수집 폴더 미설정", color: tokens.text2 }]
-            : qState === "notCollected"
-              ? [{ text: "수집하지 않는 종목", color: tokens.text2 }]
-              : qState === "failed"
-                ? [{ text: "호가 자료 조회 실패", color: tokens.text2 }]
-                : pt
-                  ? [{ text: formatVolume(pt.ask), color: tokens.down }, { text: formatVolume(pt.bid), color: tokens.up }]
-                  : [{ text: "—", color: tokens.down }, { text: "—", color: tokens.up }];
-        return { id: config.id, name: specName(config.spec), color: tokens.down, values, state: "ok", panel };
+        return this.quotes.totalsRow(config, time, tokens, panel);
       }
       if (isQuoteDepth(config.spec)) {
-        const askColor = config.spec.askColor ?? tokens.down;
-        const bidColor = config.spec.bidColor ?? tokens.up;
-        if (!config.visible) return { id: config.id, name: specName(config.spec), color: askColor, values: [], state: "hidden", panel: null };
-        const view = this.quoteDepths.get(config.id);
-        const pt = time !== null && view ? view.at(time) : undefined;
-        const qState = view?.state ?? "loading";
-        if (qState === "loading" && !pt) return { id: config.id, name: specName(config.spec), color: askColor, values: [], state: "pending", panel: null };
-        const values: LegendValue[] =
-          qState === "disabled"
-            ? [{ text: "수집 폴더 미설정", color: tokens.text2 }]
-            : qState === "notCollected"
-              ? [{ text: "수집하지 않는 종목", color: tokens.text2 }]
-              : qState === "failed"
-                ? [{ text: "호가 자료 조회 실패", color: tokens.text2 }]
-                : pt
-                  ? [
-                      { text: formatDepthLevel(thickestLevel(pt.asks)), color: askColor },
-                      { text: formatDepthLevel(thickestLevel(pt.bids)), color: bidColor },
-                    ]
-                  : [{ text: "—", color: askColor }, { text: "—", color: bidColor }];
-        return { id: config.id, name: specName(config.spec), color: askColor, values, state: "ok", panel: null };
+        return this.quotes.depthRow(config, time, tokens);
       }
       const values: LegendValue[] =
         state !== "ok" || time === null || !s
@@ -605,31 +547,7 @@ export class IndicatorLayer {
       const panelIndex = config.panel === "price" ? -1 : this.panels.findIndex((panel) => panel.id === config.panel);
       if (isFinancial(config.spec) || isQuoteTotals(config.spec) || panelIndex >= 0) continue;
       if (isQuoteDepth(config.spec)) {
-        if (!config.visible) {
-          rows.push({ id: config.id, slots: [] });
-          continue;
-        }
-        const view = this.quoteDepths.get(config.id);
-        const qState = view?.state ?? "loading";
-        if (qState === "disabled") {
-          rows.push({ id: config.id, slots: [["수집 폴더 미설정"]] });
-          continue;
-        }
-        if (qState === "notCollected") {
-          rows.push({ id: config.id, slots: [["수집하지 않는 종목"]] });
-          continue;
-        }
-        if (qState === "failed") {
-          rows.push({ id: config.id, slots: [["호가 자료 조회 실패"]] });
-          continue;
-        }
-        if (qState === "loading") {
-          rows.push({ id: config.id, slots: [] });
-          continue;
-        }
-        const legend = this.depthLegend(config.id);
-        if (legend.dirty) this.rebuildDepthLegend(legend, view);
-        rows.push({ id: config.id, slots: [legend.asks.values, legend.bids.values] });
+        rows.push(this.quotes.depthPriceLegend(config, this.display));
         continue;
       }
       const slots: (readonly string[])[] = [];
@@ -689,6 +607,7 @@ export class IndicatorLayer {
   }
 
   dispose(): void {
+    this.quotes.dispose();
     this.port.close();
     for (const id of [...this.shown.keys()]) this.removeShown(id);
   }
@@ -817,7 +736,7 @@ export class IndicatorLayer {
         this.updateQuoteStatus(s);
         if (s.config.visible) {
           for (const line of s.lines) {
-            line.points = this.buildQuotePoints(line, this.quoteTotals);
+            line.points = this.buildQuotePoints(line, this.quotes.totalsView());
             if (line.points.length) this.draw(line, line.points);
           }
         }
@@ -877,12 +796,8 @@ export class IndicatorLayer {
   }
 
   private priceFormat(config: IndicatorConfig): PriceFormat {
-    if (isFinancial(config.spec)) {
-      const metric = config.spec.kind;
-      const currencies = new Set(this.financials?.series.find((series) => series.metric === metric)?.points.flatMap((p) => p.currency ? [p.currency] : []));
-      const currency = currencies.size === 1 ? [...currencies][0] ?? null : "원문 통화";
-      return axisPriceFormat(financialAxisUnit(metric, currency), 0.01, this.axisGeometry(config));
-    }
+    const financialFormat = this.financialStore.priceFormat(config, this.axisGeometry(config));
+    if (financialFormat !== null) return financialFormat;
     const unit = config.spec.kind === "volume" || isQuoteTotals(config.spec) ? "volume" : config.spec.kind === "macd" || config.spec.kind === "rsi" || config.spec.kind === "stochSlow" || this.host.isIndex() ? "index" : "price";
     return axisPriceFormat(unit, 0.01, this.axisGeometry(config));
   }
@@ -925,15 +840,10 @@ export class IndicatorLayer {
   private drawFinancial(s: Shown): void {
     if (!isFinancial(s.config.spec)) return;
     const period = this.host.period();
-    const metric = s.config.spec.kind;
-    const buckets = financialBuckets(this.financials?.series.find((series) => series.metric === metric)?.points ?? []);
+    const points = this.financialStore.availablePoints(s.config.spec.kind);
     for (const line of s.lines) {
-      const points = [...buckets].sort(([a], [b]) => a - b).flatMap(([t, ps]) => {
-        const p = ps[0];
-        return ps.length === 1 && p?.status === "available" && p.value !== null ? [{ t, v: p.value }] : [];
-      });
       line.points = points;
-      if (line.overlay) line.series.setData(points.map((p, i) => ({ time: toChartTime(p.t), value: p.v, base: p.v, connect: period === "Q" || period === "Y" ? i > 0 && adjacentBucket(points[i - 1]!.t, p.t, period) : false })));
+      if (line.overlay) line.series.setData(points.map((p, i) => ({ time: toChartTime(p.t), value: p.v, base: p.v, connect: i > 0 && this.financialStore.adjacent(points[i - 1]!.t, p.t, period) })));
       else line.series.setData(points.map((p) => ({ time: toChartTime(p.t), value: p.v, color: p.v >= 0 ? this.host.tokens().upVol : this.host.tokens().downVol })));
       line.drawnLastT = points.at(-1)?.t ?? null;
       line.series.applyOptions({ priceFormat: this.priceFormat(s.config) });
@@ -945,7 +855,7 @@ export class IndicatorLayer {
       s.status = { kind: "hidden" };
       return;
     }
-    const state = this.quoteTotals?.state ?? "loading";
+    const state = this.quotes.totalsView()?.state ?? "loading";
     s.status = state === "loading" ? { kind: "pending" } : { kind: "ready" };
   }
 
@@ -954,7 +864,7 @@ export class IndicatorLayer {
       s.status = { kind: "hidden" };
       return;
     }
-    const state = this.quoteDepths.get(s.config.id)?.state ?? "loading";
+    const state = this.quotes.depthView(s.config.id)?.state ?? "loading";
     s.status = state === "loading" ? { kind: "pending" } : { kind: "ready" };
   }
 
@@ -980,7 +890,7 @@ export class IndicatorLayer {
   }
 
   private syncQuoteTotals(s: Shown, from: UnixSeconds | null): void {
-    const view = this.quoteTotals;
+    const view = this.quotes.totalsView();
     if (!view || from === null) {
       for (const line of s.lines) {
         line.points = this.buildQuotePoints(line, view);
@@ -1133,61 +1043,11 @@ export class IndicatorLayer {
     this.host.chart.removeSeries(line.series);
   }
 
-  private depthLegend(id: string): DepthLegend {
-    let legend = this.depthLegends.get(id);
-    if (!legend) {
-      legend = { asks: new TrackedValues(), bids: new TrackedValues(), dirty: true, lastT: null };
-      this.depthLegends.set(id, legend);
-    }
-    return legend;
-  }
-
-  private rebuildDepthLegend(legend: DepthLegend, view: QuoteView<QuoteDepthPoint> | undefined): void {
-    const asks: string[] = [];
-    const bids: string[] = [];
-    for (let i = 0; i < this.display.length; i++) {
-      const pt = view?.at(this.display[i]!.t);
-      asks.push(formatDepthLevel(pt ? thickestLevel(pt.asks) : null));
-      bids.push(formatDepthLevel(pt ? thickestLevel(pt.bids) : null));
-    }
-    if (asks.length === 0) {
-      asks.push("—");
-      bids.push("—");
-    }
-    legend.asks.syncAll(asks);
-    legend.bids.syncAll(bids);
-    legend.lastT = this.display.at(-1)?.t ?? null;
-    legend.dirty = false;
-  }
-
-  private advanceDepthLegends(bar: Bar): void {
-    for (const s of this.shown.values()) {
-      if (!s.config.visible || !isQuoteDepth(s.config.spec)) continue;
-      const legend = this.depthLegends.get(s.config.id);
-      if (!legend || legend.dirty) continue;
-      const view = this.quoteDepths.get(s.config.id);
-      if (!view || view.state !== "ready") continue;
-      const pt = view.at(bar.t);
-      const ask = formatDepthLevel(pt ? thickestLevel(pt.asks) : null);
-      const bid = formatDepthLevel(pt ? thickestLevel(pt.bids) : null);
-      if (legend.lastT === bar.t && legend.asks.values.length > 0) {
-        legend.asks.setAt(legend.asks.values.length - 1, ask);
-        legend.bids.setAt(legend.bids.values.length - 1, bid);
-      } else if (legend.lastT === null || bar.t > legend.lastT) {
-        legend.asks.push(ask);
-        legend.bids.push(bid);
-        legend.lastT = bar.t;
-      } else {
-        legend.dirty = true;
-      }
-    }
-  }
-
   private removeShown(id: string): void {
     const s = this.shown.get(id);
     if (!s) return;
     this.shown.delete(id);
-    this.depthLegends.delete(id);
+    this.quotes.removeDepthLegend(id);
     for (const line of s.lines) this.removeLine(line);
   }
 

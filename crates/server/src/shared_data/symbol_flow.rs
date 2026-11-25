@@ -26,6 +26,53 @@ const ZSTD_LEVEL: i32 = 3;
 const MAX_PAYLOAD_LEN: usize = 32 * 1024 * 1024;
 const HEAD_FINGERPRINT_LEN: usize = 64;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum FlowLinkEvent {
+    Start,
+    Live,
+    Down,
+    Alive,
+    End,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FlowLinkLine {
+    pub t: i64,
+    pub event: FlowLinkEvent,
+}
+
+pub fn complete_jsonl_prefix(bytes: &[u8]) -> &[u8] {
+    let len = bytes.iter().rposition(|b| *b == b'\n').map_or(0, |index| index + 1);
+    &bytes[..len]
+}
+
+pub fn read_flow_links(path: &Path) -> io::Result<Vec<FlowLinkLine>> {
+    let bytes = match std::fs::read(path) {
+        Ok(bytes) => bytes,
+        Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(e) => return Err(e),
+    };
+    let complete = complete_jsonl_prefix(&bytes);
+    let mut events = Vec::new();
+    let mut warned = false;
+    for line in complete.split(|b| *b == b'\n') {
+        if line.is_empty() {
+            continue;
+        }
+        match serde_json::from_slice::<FlowLinkLine>(line) {
+            Ok(entry) => events.push(entry),
+            Err(_) => {
+                if !warned {
+                    tracing::warn!(path = %path.display(), "깨진 연결 기록 줄을 건너뜁니다");
+                    warned = true;
+                }
+            }
+        }
+    }
+    Ok(events)
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FlowDescription {
