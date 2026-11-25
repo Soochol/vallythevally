@@ -83,3 +83,25 @@ test("증감을 불러오지 못하면 다시 시도로 불러온다", async ({ 
   await page.getByRole("button", { name: "다시 시도" }).click();
   await expect(changeTable(page).locator("tbody tr")).toHaveCount(LATEST_CHANGES.rows.length);
 });
+
+test("CU 보정 X-Ray 토글이 실질 증감과 원본 수량 착시를 비교해 보여 준다", async ({ page }) => {
+  await page.goto("/etf?code=444200&tab=history");
+  const naver = changeTable(page).locator('tr[data-code="035420"]');
+  const hynix = changeTable(page).locator('tr[data-code="000660"]');
+
+  await expect(hynix).toContainText("+27.7%");
+  await expect(naver).toHaveAttribute("data-kind", "unchanged");
+  await expect(naver).toContainText("유지");
+
+  await page.getByRole("group", { name: "CU 보정 X-Ray" }).getByRole("button", { name: "보정 OFF · 원본 수량" }).click();
+  await expect(hynix).toContainText("+20.0%");
+  await expect(naver).toHaveAttribute("data-kind", "decreased");
+  await expect(naver).toContainText("-6.0%");
+  await expect(naver).toContainText("CU 노이즈");
+
+  await page.getByRole("group", { name: "CU 보정 X-Ray" }).getByRole("button", { name: "보정 ON · 실질 증감" }).click();
+  await expect(naver).toHaveAttribute("data-kind", "unchanged");
+
+  await page.getByRole("group", { name: "증감 구분 필터" }).getByRole("button", { name: "편입·늘림" }).click();
+  await expect(changeTable(page).locator("tbody tr")).toHaveCount(2);
+});

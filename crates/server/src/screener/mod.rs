@@ -184,8 +184,8 @@ impl Screener {
         self.shared.get().map(SharedQuotes::counts)
     }
 
-    pub fn store_generation(&self) -> u64 {
-        self.store.generation()
+    pub async fn store_generation(&self) -> Result<u64, StoreError> {
+        self.with_store(|store| Ok(store.generation())).await
     }
 
     pub fn keep_calendar_fresh(self: &Arc<Self>) {

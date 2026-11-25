@@ -135,12 +135,76 @@ async fn a_stock_no_fund_holds_has_an_empty_list() {
 #[tokio::test]
 async fn unknown_codes_are_not_found_and_malformed_codes_are_bad_requests() {
     let h = Harness::start(&[]).await;
-    let (status, body) = h.get("/api/etf/funds/999999").await;
-    assert_eq!((status, body["error"]["code"].as_str()), (404, Some("not_found")));
-    for path in ["/api/etf/funds/12345", "/api/etf/funds/09116a", "/api/etf/funds/1234567", "/api/etf/stocks/ABC", "/api/etf/stocks/00593"] {
+    for path in ["/api/etf/funds/999999", "/api/etf/funds/999999/similar"] {
+        let (status, body) = h.get(path).await;
+        assert_eq!((status, body["error"]["code"].as_str()), (404, Some("not_found")), "{path}");
+    }
+    for path in ["/api/etf/funds/12345", "/api/etf/funds/09116a", "/api/etf/funds/1234567", "/api/etf/funds/12345/similar", "/api/etf/funds/09116a/similar", "/api/etf/stocks/ABC", "/api/etf/stocks/00593"] {
         let (status, body) = h.get(path).await;
         assert_eq!((status, body["error"]["code"].as_str()), (400, Some("bad_request")), "{path}");
     }
+}
+
+#[tokio::test]
+async fn similar_funds_returns_top_overlapping_peers_excluding_self() {
+    let h = Harness::start(&[]).await;
+    let body = h.ok("/api/etf/funds/091160/similar").await;
+    assert_eq!(body["code"], "091160");
+    let raw: Value = serde_json::from_str(EMBEDDED).unwrap();
+    let funds = raw["funds"].as_array().unwrap();
+    let target = embedded_fund("091160");
+    let target_weights: std::collections::HashMap<&str, u64> = target["holdings"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|x| (x["code"].as_str().unwrap(), x["weightBps"].as_u64().unwrap()))
+        .collect();
+    let mut expected: Vec<(String, u64, u64)> = funds
+        .iter()
+        .filter(|f| f["code"] != "091160")
+        .filter_map(|f| {
+            let mut overlap = 0u64;
+            let mut common = 0u64;
+            for holding in f["holdings"].as_array().unwrap() {
+                if let Some(&tw) = target_weights.get(holding["code"].as_str().unwrap()) {
+                    overlap += tw.min(holding["weightBps"].as_u64().unwrap());
+                    common += 1;
+                }
+            }
+            (overlap > 0).then(|| (f["code"].as_str().unwrap().to_owned(), overlap, common))
+        })
+        .collect();
+    expected.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| b.2.cmp(&a.2)).then_with(|| a.0.cmp(&b.0)));
+    expected.truncate(6);
+
+    let items = body["items"].as_array().unwrap();
+    let actual: Vec<(String, u64, u64)> = items
+        .iter()
+        .map(|item| (item["fund"]["code"].as_str().unwrap().to_owned(), item["overlapBps"].as_u64().unwrap(), item["commonCount"].as_u64().unwrap()))
+        .collect();
+    assert_eq!(actual, expected);
+    assert_eq!(actual.len(), 6);
+    assert!(actual.iter().all(|(code, _, _)| code != "091160"));
+    assert!(items.iter().all(|item| item["fund"]["recentActivity"].is_null()));
+}
+
+#[test]
+fn similar_excludes_self_and_zero_overlap_and_breaks_ties_deterministically() {
+    let snapshot = json!({
+        "schemaVersion": 1,
+        "holdingsAsOf": "2026-10-30",
+        "funds": [
+            fund("100001", &[("005930", 5000), ("000660", 3000), ("035420", 2000)]),
+            fund("100002", &[("005930", 4000), ("000660", 2000), ("005380", 4000)]),
+            fund("100003", &[("005930", 3000), ("000660", 2000), ("035420", 1000), ("005380", 4000)]),
+            fund("100004", &[("005930", 4000), ("000660", 2000), ("005380", 4000)]),
+            fund("100005", &[("005380", 10000)]),
+        ],
+        "stocks": {"005930": "삼성전자", "000660": "SK하이닉스", "035420": "NAVER", "005380": "현대차"},
+    });
+    let catalog = Catalog::load(&snapshot.to_string()).catalog;
+    let peers: Vec<(&str, u32, u32)> = catalog.similar("100001".parse_stock(), 6).into_iter().map(|(f, o, c)| (f.code.as_str(), o, c)).collect();
+    assert_eq!(peers, [("100003", 6000, 3), ("100002", 6000, 2), ("100004", 6000, 2)]);
 }
 
 fn fund(code: &str, holdings: &[(&str, i64)]) -> Value {
