@@ -1,5 +1,5 @@
 import { expect, test, vi } from "vitest";
-import { axisPriceFormat, distinctAxisTicks, financialAxisUnit, fitAxisValue, formatAxisTicks, formatAxisValue, priceAxisWidth } from "./axisFormat";
+import { axisPriceFormat, distinctAxisTicks, financialAxisUnit, fitAxisValue, formatAxisTicks, formatAxisValue, priceAxisWidth, resetAxisMeasureCache } from "./axisFormat";
 
 test.each([
   [-48_054_251_000_000, "KRW", "−48.1조"],
@@ -136,14 +136,15 @@ test("맞는 첫 포맷 후보 뒤의 숫자 변환은 계산하지 않는다", 
 });
 
 function stubCanvasText(glyphEm: number) {
+  resetAxisMeasureCache();
   let font = "";
   const context = {
     set font(value: string) { font = value; },
     measureText: (text: string) => ({ width: text.length * Number.parseFloat(font) * glyphEm }),
   };
-  vi.stubGlobal("document", { createElement: () => ({ getContext: () => context, setAttribute: () => undefined }), body: { append: () => undefined }, documentElement: {} });
+  vi.stubGlobal("document", { createElement: () => ({ getContext: () => context, setAttribute: () => undefined }), body: { append: () => undefined }, documentElement: { dataset: {} } });
   vi.stubGlobal("getComputedStyle", () => ({ getPropertyValue: (name: string) => name === "--fs-xs" ? "11px" : "sans-serif" }));
-  return { mockRestore: () => vi.unstubAllGlobals() };
+  return { mockRestore: () => { resetAxisMeasureCache(); vi.unstubAllGlobals(); } };
 }
 
 test("축 폭은 6자리 이하는 72px이고 7자리 가격부터 80·88px로 넓어지며 글자는 줄이지 않는다", () => {

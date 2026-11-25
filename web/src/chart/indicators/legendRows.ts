@@ -17,6 +17,12 @@ const TOOL_FADE = "opacity-0 group-hover:opacity-100 group-focus-within:opacity-
 const FOLD_BUTTON = "pointer-events-auto flex min-h-6 w-max items-center gap-1 rounded-s px-1.5 text-xs text-text-2 hover:text-text bg-[color-mix(in_srgb,var(--chart-bg)_78%,transparent)]";
 const ROWS_BOX = "flex flex-col gap-px";
 
+interface ValueSpan {
+  span: HTMLSpanElement;
+  text: string;
+  color: string;
+}
+
 interface RowEls {
   root: HTMLDivElement;
   swatch: HTMLSpanElement;
@@ -28,6 +34,9 @@ interface RowEls {
   remove: HTMLButtonElement;
   up: HTMLButtonElement;
   down: HTMLButtonElement;
+  commandButtons: readonly HTMLButtonElement[];
+  measureButtons: readonly HTMLButtonElement[];
+  valueSpans: ValueSpan[];
   key: RowKey | null;
   detail: HTMLDetailsElement;
   summary: HTMLElement;
@@ -37,6 +46,22 @@ interface RowEls {
   shownRows: readonly FinancialDetailRow[] | null;
   dispose(): void;
   reports: readonly FinancialReport[] | null;
+  lastName: string;
+  lastColor: string;
+  lastState: IndicatorRow["state"] | null;
+  lastCollapsed: boolean | null;
+  lastHasDetail: boolean | null;
+  lastDetailStatus: string;
+  lastDetailSummary: string;
+  lastBadge: string;
+  lastMaxWidth: string;
+  lastUpDisabled: boolean;
+  lastDownDisabled: boolean;
+  lastPaneTop: number | null;
+  lastPaneHeight: number | null;
+  lastTop: string;
+  lastPanelLayoutKey: string;
+  labelsDirty: boolean;
 }
 
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, className: string, text = ""): HTMLElementTagNameMap[K] {
@@ -151,7 +176,7 @@ export class IndicatorLegend {
     if (label && label.textContent !== `지표 ${count}`) label.textContent = `지표 ${count}`;
   }
 
-  render(rows: IndicatorRow[], panes: readonly PaneBounds[], axisWidth = 72): void {
+  render(rows: IndicatorRow[], panes: readonly PaneBounds[] | null, axisWidth?: number): void {
     const focused = document.activeElement;
     let priceRowCount = 0;
     for (const row of rows) if (!row.panel) priceRowCount++;
@@ -161,7 +186,7 @@ export class IndicatorLegend {
       this.syncFold();
     }
     const seen = new Set<string>();
-    const panelRows: { elements: RowEls; pane: PaneBounds | undefined }[] = [];
+    const needMeasure: { elements: RowEls; paneTop: number; paneHeight: number; layoutKey: string }[] = [];
     for (const row of rows) {
       seen.add(row.id);
       const r = this.rows.get(row.id) ?? this.build(row.id);
@@ -170,10 +195,32 @@ export class IndicatorLegend {
       this.fill(r, row);
       if (row.panel) {
         if (r.root.parentElement !== this.overlay) this.overlay.append(r.root);
-        r.root.style.maxWidth = `calc(100% - ${axisWidth + 16}px)`;
-        r.up.disabled = row.panel.index === 0;
-        r.down.disabled = row.panel.index === row.panel.count - 1;
-        panelRows.push({ elements: r, pane: panes[row.panel.index + 1] });
+        if (axisWidth !== undefined || r.lastMaxWidth === "") {
+          const maxWidth = `calc(100% - ${(axisWidth ?? 72) + 16}px)`;
+          if (r.lastMaxWidth !== maxWidth) {
+            r.lastMaxWidth = maxWidth;
+            r.root.style.maxWidth = maxWidth;
+          }
+        }
+        const upDisabled = row.panel.index === 0;
+        if (r.lastUpDisabled !== upDisabled) {
+          r.lastUpDisabled = upDisabled;
+          r.up.disabled = upDisabled;
+        }
+        const downDisabled = row.panel.index === row.panel.count - 1;
+        if (r.lastDownDisabled !== downDisabled) {
+          r.lastDownDisabled = downDisabled;
+          r.down.disabled = downDisabled;
+        }
+        if (panes !== null) {
+          const pane = panes[row.panel.index + 1];
+          const paneTop = pane?.top ?? 0;
+          const paneHeight = pane?.height ?? 0;
+          const layoutKey = `${r.lastCollapsed}:${r.lastHasDetail}`;
+          if (r.lastPaneTop !== paneTop || r.lastPaneHeight !== paneHeight || r.lastPanelLayoutKey !== layoutKey) {
+            needMeasure.push({ elements: r, paneTop, paneHeight, layoutKey });
+          }
+        }
       }
     }
     const price = rows.filter((row) => !row.panel).map((row) => this.rows.get(row.id)!.root);
@@ -186,12 +233,26 @@ export class IndicatorLegend {
       r.root.remove();
       this.rows.delete(id);
     }
-    const panelTops = panelRows.map(({ elements, pane }) => {
-      const height = Math.max(elements.root.getBoundingClientRect().height, ...[...elements.root.querySelectorAll("button")].map((button) => button.getBoundingClientRect().height));
-      const marginTop = parseFloat(getComputedStyle(elements.root).marginTop);
-      return { elements, top: `${(pane?.top ?? 0) - marginTop + Math.min(4, Math.max(0, (pane?.height ?? 0) - height))}px` };
-    });
-    for (const { elements, top } of panelTops) elements.root.style.top = top;
+    if (needMeasure.length > 0) {
+      const panelTops = needMeasure.map(({ elements, paneTop, paneHeight, layoutKey }) => {
+        let height = elements.root.getBoundingClientRect().height;
+        for (const button of elements.measureButtons) {
+          const h = button.getBoundingClientRect().height;
+          if (h > height) height = h;
+        }
+        const marginTop = parseFloat(getComputedStyle(elements.root).marginTop);
+        return { elements, paneTop, paneHeight, layoutKey, top: `${paneTop - marginTop + Math.min(4, Math.max(0, paneHeight - height))}px` };
+      });
+      for (const { elements, paneTop, paneHeight, layoutKey, top } of panelTops) {
+        elements.lastPaneTop = paneTop;
+        elements.lastPaneHeight = paneHeight;
+        elements.lastPanelLayoutKey = layoutKey;
+        if (elements.lastTop !== top) {
+          elements.lastTop = top;
+          elements.root.style.top = top;
+        }
+      }
+    }
     if (focused instanceof HTMLElement && focused !== document.activeElement && focused.isConnected) focused.focus({ preventScroll: true });
   }
 
@@ -251,6 +312,10 @@ export class IndicatorLegend {
     return { root, fields };
   }
 
+  invalidatePanelLayout(): void {
+    for (const r of this.rows.values()) r.lastPaneTop = null;
+  }
+
   dispose(): void {
     for (const r of this.rows.values()) { r.dispose(); r.root.remove(); }
     this.rows.clear();
@@ -263,10 +328,18 @@ export class IndicatorLegend {
     r.key = key;
     const panel = key === "panel";
     r.root.className = panel ? `${ROW} absolute left-2 z-[4]` : ROW;
-    if (!panel) r.root.style.removeProperty("top");
-    if (!panel) r.root.style.removeProperty("max-width");
+    if (!panel) {
+      r.root.style.removeProperty("top");
+      r.root.style.removeProperty("max-width");
+    }
+    r.lastPaneTop = null;
+    r.lastPaneHeight = null;
+    r.lastPanelLayoutKey = "";
+    r.lastMaxWidth = "";
+    r.lastTop = "";
     for (const button of [r.collapse, r.up, r.down]) button.hidden = !panel;
     labelButton(r.remove, panel ? "패널 닫기" : "지우기");
+    r.labelsDirty = true;
   }
 
   private build(id: string, interactive = true): RowEls {
@@ -296,9 +369,10 @@ export class IndicatorLegend {
     const collapse = button("down", "패널 접기", "collapse");
     const up = button("up", "패널 위로", "up");
     const down = button("down", "패널 아래로", "down");
-    button("gear", "설정", "edit");
+    const edit = button("gear", "설정", "edit");
     const toggle = button("eye", "숨기기", "toggle");
     const remove = button("close", "지우기", "remove");
+    const commandButtons = [collapse, up, down, edit, toggle, remove] as const;
     const detail = el("details", "relative min-w-0 text-text-2");
     const summary = el("summary", "max-w-[18ch] cursor-pointer truncate text-xs max-md:max-w-[10ch]", "자료·갱신");
     summary.dataset.chartControl = "";
@@ -320,7 +394,25 @@ export class IndicatorLegend {
     box.append(select, text);
     detail.append(summary, box);
     root.append(swatch, name, detail, values, badge, tools);
-    const row: RowEls = { root, swatch, name, collapse, values, badge, toggle, remove, up, down, key: null, detail, summary, text, select, reports: null, currentRows: [], shownRows: null, dispose: () => {} };
+    const row: RowEls = {
+      root, swatch, name, collapse, values, badge, toggle, remove, up, down,
+      commandButtons,
+      measureButtons: [name, collapse, up, down, edit, toggle, remove],
+      valueSpans: [],
+      key: null, detail, summary, text, select, reports: null, currentRows: [], shownRows: null, dispose: () => {},
+      lastName: "", lastColor: "", lastState: null, lastCollapsed: null, lastHasDetail: null,
+      lastDetailStatus: "", lastDetailSummary: "", lastBadge: "",
+      lastMaxWidth: "", lastUpDisabled: false, lastDownDisabled: false,
+      lastPaneTop: null, lastPaneHeight: null, lastTop: "", lastPanelLayoutKey: "", labelsDirty: true,
+    };
+    if (interactive) {
+      name.addEventListener("click", () => this.onCommand(id, row.lastCollapsed === true ? "collapse" : "edit", name));
+      root.addEventListener("click", (event) => {
+        if (row.lastCollapsed === true && !event.composedPath().some((target) => target instanceof Element && target.matches("button,summary"))) {
+          this.onCommand(id, "collapse", root);
+        }
+      });
+    }
     const disposeSelect = interactive ? domSelect(select, () => [CURRENT_REPORT, ...(row.reports ?? []).map((report) => report.label)].map((label, i) => ({ label, value: String(i) })), (value) => {
       select.dataset.value = value;
       showReport(row, Number(value));
@@ -330,53 +422,111 @@ export class IndicatorLegend {
   }
 
   private fill(r: RowEls, row: IndicatorRow, interactive = true): HTMLSpanElement[] {
-    r.detail.hidden = !row.detail;
-    if (row.detail) {
-      r.name.className = "min-w-0 truncate text-text-2 max-md:max-w-[15ch]";
-      r.values.className = "flex min-w-0 gap-1.5 truncate font-medium max-md:max-w-[10ch]";
-      r.summary.textContent = "";
-      r.summary.className = "financial-status-dot";
-      r.summary.dataset.status = row.detail.status;
-      r.summary.title = row.detail.summary;
-      r.summary.setAttribute("aria-label", `${row.name} 재무자료와 갱신 상태`);
+    const hasDetail = Boolean(row.detail);
+    const nameChanged = r.lastName !== row.name;
+    const collapsed = row.panel?.collapsed === true;
+    const collapsedChanged = r.lastCollapsed !== collapsed;
+    const stateChanged = r.lastState !== row.state;
 
+    if (nameChanged) {
+      r.lastName = row.name;
+      r.name.textContent = row.name;
+      r.name.title = row.name;
+      r.root.title = row.name;
+      r.labelsDirty = true;
+    }
+
+    if (r.lastHasDetail !== hasDetail) {
+      r.lastHasDetail = hasDetail;
+      r.detail.hidden = !hasDetail;
+      if (hasDetail) {
+        r.name.className = "min-w-0 truncate text-text-2 max-md:max-w-[15ch]";
+        r.values.className = "flex min-w-0 gap-1.5 truncate font-medium max-md:max-w-[10ch]";
+        r.summary.textContent = "";
+        r.summary.className = "financial-status-dot";
+      }
+    }
+    if (row.detail) {
+      if (r.lastDetailStatus !== row.detail.status) {
+        r.lastDetailStatus = row.detail.status;
+        r.summary.dataset.status = row.detail.status;
+      }
+      if (r.lastDetailSummary !== row.detail.summary) {
+        r.lastDetailSummary = row.detail.summary;
+        r.summary.title = row.detail.summary;
+      }
+      if (r.labelsDirty) r.summary.setAttribute("aria-label", `${row.name} 재무자료와 갱신 상태`);
       r.reports = row.detail.reports;
       r.currentRows = row.detail.rows;
       if (!r.select.dataset.value) r.select.dataset.value = "0";
       showReport(r, Number(r.select.dataset.value));
     }
-    labelButton(r.collapse, row.panel?.collapsed ? "패널 펼치기" : "패널 접기");
-    r.collapse.setAttribute("aria-expanded", String(!row.panel?.collapsed));
-    const collapseIcon = row.panel?.collapsed ? "up" : "down";
-    if (r.collapse.dataset.icon !== collapseIcon) { r.collapse.innerHTML = iconMarkup(collapseIcon); r.collapse.dataset.icon = collapseIcon; }
-    r.root.classList.toggle("indicator-collapsed", row.panel?.collapsed === true);
-    if (interactive && row.panel?.collapsed) {
-      r.root.dataset.chartControl = "";
-      r.root.onclick = (event) => { if (!event.composedPath().some((target) => target instanceof Element && target.matches("button,summary"))) this.onCommand(row.id, "collapse", r.root); };
-    } else { delete r.root.dataset.chartControl; r.root.onclick = null; }
-    const dim = row.state !== "ok" && row.state !== "pending";
-    r.root.classList.toggle("opacity-60", dim);
-    r.swatch.style.background = row.color;
-    r.name.textContent = row.name;
-    r.name.title = row.name;
-    r.root.title = row.name;
-    r.name.setAttribute("aria-label", `${row.name} ${row.panel?.collapsed ? "펼치기" : "설정 열기"}`);
-    if (interactive) r.name.onclick = () => this.onCommand(row.id, row.panel?.collapsed ? "collapse" : "edit", r.name);
-    const values = row.values.map((v) => {
-      const span = el("span", "", v.text);
-      span.style.color = v.color;
-      return span;
-    });
-    r.values.replaceChildren(...values);
-    const badge = row.state === "spec" || row.state === "calc" ? indicatorErrorText(row.state) : "";
-    r.badge.textContent = badge;
-    r.badge.hidden = badge === "";
-    const hidden = row.state === "hidden";
-    const icon = hidden ? "eyeOff" : "eye";
-    if (r.toggle.dataset.icon !== icon) { r.toggle.innerHTML = iconMarkup(icon); r.toggle.dataset.icon = icon; }
-    r.toggle.className = hidden ? BTN : `${BTN} ${TOOL_FADE}`;
-    labelButton(r.toggle, hidden ? "보이기" : "숨기기");
-    r.root.querySelectorAll<HTMLButtonElement>("button[data-indicator-command]").forEach((b) => b.setAttribute("aria-label", `${row.name} ${b.dataset.label}`));
-    return values;
+
+    if (collapsedChanged) {
+      r.lastCollapsed = collapsed;
+      labelButton(r.collapse, collapsed ? "패널 펼치기" : "패널 접기");
+      r.collapse.setAttribute("aria-expanded", String(!collapsed));
+      const collapseIcon = collapsed ? "up" : "down";
+      if (r.collapse.dataset.icon !== collapseIcon) { r.collapse.innerHTML = iconMarkup(collapseIcon); r.collapse.dataset.icon = collapseIcon; }
+      r.root.classList.toggle("indicator-collapsed", collapsed);
+      if (interactive && collapsed) r.root.dataset.chartControl = "";
+      else delete r.root.dataset.chartControl;
+      r.labelsDirty = true;
+    }
+
+    if (stateChanged) {
+      r.lastState = row.state;
+      const dim = row.state !== "ok" && row.state !== "pending";
+      r.root.classList.toggle("opacity-60", dim);
+      const badge = row.state === "spec" || row.state === "calc" ? indicatorErrorText(row.state) : "";
+      if (r.lastBadge !== badge) {
+        r.lastBadge = badge;
+        r.badge.textContent = badge;
+      }
+      r.badge.hidden = badge === "";
+      const hidden = row.state === "hidden";
+      const icon = hidden ? "eyeOff" : "eye";
+      if (r.toggle.dataset.icon !== icon) { r.toggle.innerHTML = iconMarkup(icon); r.toggle.dataset.icon = icon; }
+      const toggleClass = hidden ? BTN : `${BTN} ${TOOL_FADE}`;
+      if (r.toggle.className !== toggleClass) r.toggle.className = toggleClass;
+      labelButton(r.toggle, hidden ? "보이기" : "숨기기");
+      r.labelsDirty = true;
+    }
+
+    if (r.lastColor !== row.color) {
+      r.lastColor = row.color;
+      r.swatch.style.background = row.color;
+    }
+
+    if (r.labelsDirty) {
+      r.labelsDirty = false;
+      r.name.setAttribute("aria-label", `${row.name} ${collapsed ? "펼치기" : "설정 열기"}`);
+      for (const b of r.commandButtons) b.setAttribute("aria-label", `${row.name} ${b.dataset.label}`);
+    }
+
+    const nextCount = row.values.length;
+    while (r.valueSpans.length > nextCount) {
+      r.valueSpans.pop()!.span.remove();
+    }
+    for (let i = 0; i < nextCount; i++) {
+      const v = row.values[i]!;
+      const entry = r.valueSpans[i];
+      if (!entry) {
+        const span = el("span", "", v.text);
+        span.style.color = v.color;
+        r.valueSpans.push({ span, text: v.text, color: v.color });
+        r.values.append(span);
+      } else {
+        if (entry.text !== v.text) {
+          entry.text = v.text;
+          entry.span.textContent = v.text;
+        }
+        if (entry.color !== v.color) {
+          entry.color = v.color;
+          entry.span.style.color = v.color;
+        }
+      }
+    }
+    return interactive ? [] : r.valueSpans.map((entry) => entry.span);
   }
 }

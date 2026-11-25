@@ -147,6 +147,23 @@ export const AXIS_WIDTH = AXIS_WIDTH_STEPS[0];
 const axisBudget = (fontSize: number, width: number) => width - (11 + fontSize * 5 / 6);
 
 let measureContext: CanvasRenderingContext2D | null | undefined;
+let measureFont = "";
+let styleKey: string | null = null;
+let cachedFamily = "sans-serif";
+let cachedBaseSize = 11;
+const measuredWidths = new Map<string, number>();
+
+export function invalidateAxisMeasureCache(): void {
+  measureFont = "";
+  styleKey = null;
+  measuredWidths.clear();
+}
+
+export function resetAxisMeasureCache(): void {
+  measureContext = undefined;
+  invalidateAxisMeasureCache();
+}
+
 function attachedMeasureContext(): CanvasRenderingContext2D | null {
   if (measureContext === undefined) {
     const canvas = document.createElement("canvas");
@@ -158,17 +175,46 @@ function attachedMeasureContext(): CanvasRenderingContext2D | null {
   return measureContext;
 }
 
-function axisMeasurer(): { baseSize: number; widthAt(text: string, fontSize: number): number } | null {
-  if (typeof document === "undefined") return null;
-  const context = attachedMeasureContext();
-  if (!context) return null;
-  const styles = getComputedStyle(document.documentElement);
-  const family = styles.getPropertyValue("--font-sans") || "sans-serif";
+function refreshAxisStyle(): void {
+  const root = document.documentElement;
+  const key = `${root.dataset.theme ?? ""}:${root.dataset.density ?? ""}`;
+  if (key === styleKey) return;
+  styleKey = key;
+  const styles = getComputedStyle(root);
+  const nextFamily = styles.getPropertyValue("--font-sans") || "sans-serif";
+  const nextBaseSize = Number.parseFloat(styles.getPropertyValue("--fs-xs")) || 11;
+  if (nextFamily !== cachedFamily || nextBaseSize !== cachedBaseSize) {
+    cachedFamily = nextFamily;
+    cachedBaseSize = nextBaseSize;
+    measureFont = "";
+    measuredWidths.clear();
+  }
+}
+
+function axisMeasurer(): { baseSize(): number; widthAt(text: string, fontSize: number): number } | null {
+  if (typeof document === "undefined" || !attachedMeasureContext()) return null;
   return {
-    baseSize: Number.parseFloat(styles.getPropertyValue("--fs-xs")) || 11,
+    baseSize() {
+      refreshAxisStyle();
+      return cachedBaseSize;
+    },
     widthAt(text, fontSize) {
-      context.font = `${fontSize}px ${family}`;
-      return context.measureText(text.replace(/[1-9]/g, "0")).width;
+      const context = attachedMeasureContext();
+      if (!context) return 0;
+      refreshAxisStyle();
+      const normalized = text.replace(/[1-9]/g, "0");
+      const key = `${fontSize}\0${normalized}`;
+      const hit = measuredWidths.get(key);
+      if (hit !== undefined) return hit;
+      const font = `${fontSize}px ${cachedFamily}`;
+      if (measureFont !== font) {
+        context.font = font;
+        measureFont = font;
+      }
+      const width = context.measureText(normalized).width;
+      if (measuredWidths.size >= 512) measuredWidths.clear();
+      measuredWidths.set(key, width);
+      return width;
     },
   };
 }
@@ -183,8 +229,7 @@ export function priceAxisWidth(maxPrice: number, fontSize: number): number {
 
 export function axisPriceFormat(unit: AxisUnit, minMove: number, geometry?: AxisGeometry) {
   const measurer = axisMeasurer();
-  const baseSize = measurer?.baseSize ?? 11;
-  const fontSize = () => geometry?.fontSize?.() ?? baseSize;
+  const fontSize = () => geometry?.fontSize?.() ?? measurer?.baseSize() ?? 11;
   const fits = (text: string) => {
     const size = fontSize();
     return !measurer || measurer.widthAt(text, size) <= axisBudget(size, geometry?.width?.() ?? AXIS_WIDTH);

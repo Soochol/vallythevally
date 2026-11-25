@@ -16,6 +16,15 @@ interface RowEls {
   value: HTMLSpanElement;
   note: HTMLSpanElement;
   remove: HTMLButtonElement;
+  lastColor: string;
+  lastName: string | null;
+  lastValue: string;
+  lastValueClass: string;
+  lastNote: string;
+  lastNoteHidden: boolean | null;
+  lastFailed: boolean | null;
+  lastT: string | null;
+  lastClose: string | null;
 }
 
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, className: string): HTMLElementTagNameMap[K] {
@@ -99,16 +108,48 @@ export class CompareLegend {
   }
 
   private fill(r: RowEls, row: CompareRow): void {
-    r.swatch.style.background = row.color;
-    r.name.textContent = row.name;
-    r.value.textContent = row.value;
-    r.value.className = `font-medium ${DIR_CLASS[row.dir]}`;
-    r.note.textContent = row.notes.join(" · ");
-    r.note.hidden = row.notes.length === 0;
-    r.root.classList.toggle("opacity-60", row.failed);
-    r.remove.setAttribute("aria-label", `${row.name} 비교 종목 지우기`);
-    r.root.dataset.lastT = String(row.last?.t ?? "");
-    r.root.dataset.lastClose = String(row.last?.c ?? "");
+    if (r.lastColor !== row.color) {
+      r.lastColor = row.color;
+      r.swatch.style.background = row.color;
+    }
+    if (r.lastName !== row.name) {
+      r.lastName = row.name;
+      r.name.textContent = row.name;
+      r.remove.setAttribute("aria-label", `${row.name} 비교 종목 지우기`);
+    }
+    if (r.lastValue !== row.value) {
+      r.lastValue = row.value;
+      r.value.textContent = row.value;
+    }
+    const valueClass = `font-medium ${DIR_CLASS[row.dir]}`;
+    if (r.lastValueClass !== valueClass) {
+      r.lastValueClass = valueClass;
+      r.value.className = valueClass;
+    }
+    const note = row.notes.join(" · ");
+    if (r.lastNote !== note) {
+      r.lastNote = note;
+      r.note.textContent = note;
+    }
+    const noteHidden = row.notes.length === 0;
+    if (r.lastNoteHidden !== noteHidden) {
+      r.lastNoteHidden = noteHidden;
+      r.note.hidden = noteHidden;
+    }
+    if (r.lastFailed !== row.failed) {
+      r.lastFailed = row.failed;
+      r.root.classList.toggle("opacity-60", row.failed);
+    }
+    const lastT = String(row.last?.t ?? "");
+    if (r.lastT !== lastT) {
+      r.lastT = lastT;
+      r.root.dataset.lastT = lastT;
+    }
+    const lastClose = String(row.last?.c ?? "");
+    if (r.lastClose !== lastClose) {
+      r.lastClose = lastClose;
+      r.root.dataset.lastClose = lastClose;
+    }
   }
 
   dispose(): void {
@@ -130,6 +171,10 @@ export class CompareLegend {
     remove.innerHTML = iconMarkup("close");
     if (interactive) remove.addEventListener("click", () => this.onRemove(code));
     root.append(swatch, name, value, note, remove);
-    return { root, swatch, name, value, note, remove };
+    return {
+      root, swatch, name, value, note, remove,
+      lastColor: "", lastName: null, lastValue: "", lastValueClass: "font-medium",
+      lastNote: "", lastNoteHidden: null, lastFailed: null, lastT: null, lastClose: null,
+    };
   }
 }

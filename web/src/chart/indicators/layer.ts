@@ -239,6 +239,12 @@ export class IndicatorLayer {
     this.timesDirty = true;
     const prevConfigs = this.configs;
     const prevPanels = this.panels;
+    const prevPaneById = new Map<string, number>();
+    const prevFirstById = new Map<string, boolean>();
+    for (const config of prevConfigs) {
+      prevPaneById.set(config.id, this.paneOf(config));
+      prevFirstById.set(config.id, this.firstInPanel(config));
+    }
     this.configs = configs;
     this.panels = panels;
     const keep = new Set(configs.map((c) => c.id));
@@ -246,8 +252,9 @@ export class IndicatorLayer {
     for (const id of dropped) this.removeShown(id);
     if (dropped.length) this.port.post({ type: "drop", chart: this.port.chart, ids: dropped });
 
-    const panelOrderChanged = prevPanels.length !== panels.length || prevPanels.some((p, i) => p.id !== panels[i]?.id);
     const fresh: IndicatorConfig[] = [];
+    const survivingIds = new Set<string>();
+    const firstChanged: Shown[] = [];
     for (const config of configs) {
       const s = this.shown.get(config.id);
       if (!s || s.config.spec !== config.spec) {
@@ -261,6 +268,7 @@ export class IndicatorLayer {
       }
       const prev = s.config;
       s.config = config;
+      survivingIds.add(config.id);
       if (prev.visible !== config.visible) {
         if (config.visible) {
           s.status = { kind: "pending" };
@@ -273,10 +281,24 @@ export class IndicatorLayer {
         }
       }
       if (prev.style !== config.style || prev.visible !== config.visible) this.styleLines(s);
+      else if (prevFirstById.get(config.id) !== this.firstInPanel(config)) firstChanged.push(s);
       if (barOpacityOf(prev.style) !== barOpacityOf(config.style)) this.redrawBars(s);
     }
-    const orderChanged = configs.length !== prevConfigs.length || configs.some((c, i) => c.id !== prevConfigs[i]?.id);
-    if (panelOrderChanged || orderChanged || [...this.shown.values()].some((s) => s.lines.length === 0 && specLines(s.config.spec).length > 0)) this.rebuildSeries();
+    if (this.canPatchSeries(prevConfigs, prevPanels, prevPaneById, survivingIds)) {
+      for (const s of firstChanged) this.styleLines(s);
+      const added = configs
+        .filter((config) => {
+          const s = this.shown.get(config.id);
+          return s !== undefined && s.lines.length === 0 && specLines(config.spec).length > 0;
+        })
+        .sort((a, b) => this.paneOf(a) - this.paneOf(b));
+      for (const config of added) {
+        const s = this.shown.get(config.id);
+        if (s) s.lines = this.addLines(config, []);
+      }
+    } else {
+      this.rebuildSeries();
+    }
     this.applyStretch();
     this.create(fresh);
     this.quotes.syncFeeds();
@@ -289,6 +311,40 @@ export class IndicatorLayer {
         this.updateQuoteDepthStatus(s);
       }
     }
+  }
+
+  private canPatchSeries(
+    prevConfigs: readonly IndicatorConfig[],
+    prevPanels: readonly Panel[],
+    prevPaneById: ReadonlyMap<string, number>,
+    survivingIds: ReadonlySet<string>,
+  ): boolean {
+    const survivingPanes = new Set<number>();
+    let maxSurvivingPane = 0;
+    for (const config of this.configs) {
+      if (!survivingIds.has(config.id)) continue;
+      const s = this.shown.get(config.id);
+      if (!s || s.lines.length === 0) continue;
+      const nextPane = this.paneOf(config);
+      if (prevPaneById.get(config.id) !== nextPane) return false;
+      survivingPanes.add(nextPane);
+      if (nextPane > maxSurvivingPane) maxSurvivingPane = nextPane;
+    }
+    for (let pane = 1; pane <= maxSurvivingPane; pane++) {
+      if (!survivingPanes.has(pane)) return false;
+      if (prevPanels[pane - 1]?.id !== this.panels[pane - 1]?.id) return false;
+    }
+    for (let pane = 0; pane <= maxSurvivingPane; pane++) {
+      const prevOrder = prevConfigs
+        .filter((config) => survivingIds.has(config.id) && (this.shown.get(config.id)?.lines.length ?? 0) > 0 && prevPaneById.get(config.id) === pane)
+        .map((config) => config.id);
+      const nextSeriesConfigs = this.configs.filter((config) => specLines(config.spec).length > 0 && this.paneOf(config) === pane);
+      if (nextSeriesConfigs.length < prevOrder.length) return false;
+      for (let i = 0; i < prevOrder.length; i++) {
+        if (nextSeriesConfigs[i]?.id !== prevOrder[i]) return false;
+      }
+    }
+    return true;
   }
 
   reset(h: History): void {
