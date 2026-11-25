@@ -1,22 +1,9 @@
-use std::future::Future;
-use std::pin::Pin;
-use std::sync::{Arc, Weak};
-
-use tokio::sync::watch;
-
 use super::rankings::RankingChoices;
-use super::route::{FeatureRoute, RouteProfile};
-use super::switch::{MarketSourceState, SourceSwitch};
+use super::route::RouteProfile;
+use super::switch::MarketSourceState;
 use crate::api::{self, KiwoomLinkState, MarketSourceStatus, UnixSeconds};
-use crate::kiwoom::keys::{Connection, KeyRing};
-use crate::kiwoom::link::{ConnectStep, Link, LinkState};
+use crate::kiwoom::link::{ConnectStep, LinkState};
 use crate::system_routes::{connect_step, problem};
-
-pub struct MarketSourceBoard {
-    switch: Arc<SourceSwitch>,
-    route: Arc<FeatureRoute>,
-    status: watch::Sender<MarketSourceStatus>,
-}
 
 fn choices_view(choices: RankingChoices) -> api::RankingChoicesView {
     api::RankingChoicesView {
@@ -64,76 +51,5 @@ pub fn status_of(state: MarketSourceState, feed: Option<RouteProfile>) -> Market
         retry_at,
         features: state.features.iter().collect(),
         feed_broker: feed.map(feed_view),
-    }
-}
-
-type Wait = Pin<Box<dyn Future<Output = ()> + Send>>;
-
-async fn any_changed(links: Vec<watch::Receiver<LinkState>>) {
-    if links.is_empty() {
-        return std::future::pending().await;
-    }
-    let waits: Vec<Wait> = links
-        .into_iter()
-        .map(|mut link| -> Wait {
-            Box::pin(async move {
-                let _ = link.changed().await;
-            })
-        })
-        .collect();
-    futures::future::select_all(waits).await;
-}
-
-impl MarketSourceBoard {
-    pub fn start(switch: Arc<SourceSwitch>, route: Arc<FeatureRoute>, keys: &Arc<KeyRing>, kiwoom_link: Link) -> Arc<MarketSourceBoard> {
-        let first = status_of(switch.state(), route.current());
-        let board = Arc::new(MarketSourceBoard { switch, route, status: watch::channel(first).0 });
-        tokio::spawn(MarketSourceBoard::follow(Arc::downgrade(&board), Arc::downgrade(keys), kiwoom_link));
-        board
-    }
-
-    pub fn snapshot(&self) -> MarketSourceStatus {
-        status_of(self.switch.state(), self.route.current())
-    }
-
-    pub fn subscribe(&self) -> watch::Receiver<MarketSourceStatus> {
-        self.status.subscribe()
-    }
-
-    fn publish(&self) {
-        let next = self.snapshot();
-        self.status.send_if_modified(|status| {
-            if *status == next {
-                return false;
-            }
-            *status = next;
-            true
-        });
-    }
-
-    async fn follow(board: Weak<MarketSourceBoard>, keys: Weak<KeyRing>, kiwoom_link: Link) {
-        loop {
-            let (Some(strong), Some(keys)) = (board.upgrade(), keys.upgrade()) else { return };
-            let mut key_changes = keys.subscribe_changes();
-            let mut source_changes = strong.switch.subscribe();
-            let mut links = vec![kiwoom_link.subscribe()];
-            for key in keys.listing() {
-                match key.connection {
-                    Connection::Kiwoom { lane, .. } => links.push(lane.link.subscribe()),
-                    Connection::Kis(lane) => links.push(lane.link.subscribe()),
-                }
-            }
-            strong.publish();
-            drop((strong, keys));
-            tokio::select! {
-                changed = key_changes.changed() => if changed.is_err() {
-                    return;
-                },
-                changed = source_changes.changed() => if changed.is_err() {
-                    return;
-                },
-                () = any_changed(links) => {}
-            }
-        }
     }
 }

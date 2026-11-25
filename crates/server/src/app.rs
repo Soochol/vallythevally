@@ -26,7 +26,8 @@ use crate::market::hub::{HubHandle, MarketHub};
 use crate::kis::feed::{KisConnect, KisFeedParts};
 use crate::market_overview::MarketOverview;
 use crate::market_source::active::{ActiveSource, ActiveStream};
-use crate::market_source::switch::{SourceSwitch, SwitchParts};
+use crate::market_source::control::MarketControl;
+use crate::market_source::switch::SwitchParts;
 use crate::market_source::route::FeatureRoute;
 use crate::market_source::{KiwoomHandle, MarketSource};
 use crate::rankings::RankingCache;
@@ -40,7 +41,7 @@ use crate::kiwoom::transport::{ReqwestTransport, Transport};
 use crate::screener::Screener;
 use crate::screener::store::Store;
 use crate::symbols::SymbolDirectory;
-use crate::system_routes::SystemState;
+use crate::system_routes::{SystemStartup, SystemState};
 use crate::kiwoom::key_file::{FileBases, KeyFile, KeyPaths, KisStartup, market_lane_key, startup_keys_with_kis};
 use crate::kiwoom::keys::{KeyRing, KeySetup, KisFactory, Lane, LaneFactory};
 
@@ -120,12 +121,13 @@ pub fn application(inputs: ApplicationInputs) -> Arc<AppState> {
     application_with_system(inputs, SystemState::unconfigured())
 }
 
-pub fn application_with_system(inputs: ApplicationInputs, system: SystemState) -> Arc<AppState> {
+pub fn application_with_system(inputs: ApplicationInputs, system: impl Into<SystemStartup>) -> Arc<AppState> {
     let source: Arc<dyn MarketSource> = inputs.rest.clone().into();
     application_with_source(inputs, system, source)
 }
 
-pub fn application_with_source(inputs: ApplicationInputs, mut system: SystemState, source: Arc<dyn MarketSource>) -> Arc<AppState> {
+pub fn application_with_source(inputs: ApplicationInputs, startup: impl Into<SystemStartup>, source: Arc<dyn MarketSource>) -> Arc<AppState> {
+    let SystemStartup { state: system, key_setup, kis_factory, order_switch } = startup.into();
     let ApplicationInputs { rest, clock, symbols, db, screener_store, stream: (stream, events), static_dir, screener_update_on_connect } = inputs;
     let generation = symbols.generation();
     let route = Arc::new(FeatureRoute::new(rest.clone(), clock.clone()));
@@ -141,29 +143,30 @@ pub fn application_with_source(inputs: ApplicationInputs, mut system: SystemStat
     let hub = MarketHub::spawn(bars.clone(), active_stream.clone(), merged_events, clock.clone());
     let link = Link::new(rest.clone(), symbols.clone(), screener.clone(), clock.clone(), screener_update_on_connect);
     let market_lane = Lane::market(rest.clone(), link.clone(), account_feed.clone());
-    let kis_factory = system.take_kis_factory();
     let kis_feed = kis_factory.as_ref().and_then(|factory| factory.feed.clone());
-    let keys = Arc::new(match system.take_key_setup() {
+    let keys = Arc::new(match key_setup {
         Some(setup) => KeyRing::with_kis(setup, kis_factory, market_lane),
         None => KeyRing::unconfigured(market_lane),
     });
     route.bind(&keys);
-    let source_switch = Arc::new(SourceSwitch::new(SwitchParts {
-        keys: keys.clone(),
-        kiwoom_source: source,
-        kiwoom_stream,
-        kiwoom_link: link.clone(),
-        kis_feed,
-        clock: clock.clone(),
-        active_source,
-        active_stream,
-        bars: bars.clone(),
-        hub: hub.clone(),
-        symbols: symbols.clone(),
-        generation: generation.clone(),
-    }));
-    let market_source_board = crate::market_source::status::MarketSourceBoard::start(source_switch.clone(), route.clone(), &keys, link.clone());
-    let accounts = crate::trading::Accounts::new(keys.clone(), rest.clone(), account_feed, clock.clone(), system.take_order_switch_store(), db.clone(), symbols.clone());
+    let market_control = MarketControl::start(
+        SwitchParts {
+            keys: keys.clone(),
+            kiwoom_source: source,
+            kiwoom_stream,
+            kiwoom_link: link.clone(),
+            kis_feed,
+            clock: clock.clone(),
+            active_source,
+            active_stream,
+            bars: bars.clone(),
+            hub: hub.clone(),
+            symbols: symbols.clone(),
+            generation: generation.clone(),
+        },
+        route.clone(),
+    );
+    let accounts = crate::trading::Accounts::new(keys.clone(), rest.clone(), account_feed, clock.clone(), order_switch.unwrap_or_else(crate::trading::SwitchStore::memory), db.clone(), symbols.clone());
     let collected_store = crate::collected_store::CollectedStore::new();
     Arc::new(AppState {
         symbols,
@@ -186,8 +189,7 @@ pub fn application_with_source(inputs: ApplicationInputs, mut system: SystemStat
         market_overview: MarketOverview::with_generation(generation.clone()),
         etf: Default::default(),
         kiwoom_catalog: Default::default(),
-        source_switch,
-        market_source_board,
+        market_control,
         public_usage: Default::default(),
         shared_data: crate::shared_data::SharedData::new(),
         collector_paths: Arc::new(crate::shared_data::CollectorPathsSlot::new()),
@@ -202,7 +204,7 @@ pub fn application_with_source(inputs: ApplicationInputs, mut system: SystemStat
 
 pub async fn daily_maintenance(state: Arc<AppState>) {
     tokio::join!(
-        daily_reset(state.clock.clone(), state.source.clone(), state.symbols.clone(), state.bars.clone(), state.hub.clone(), state.source_switch.clone()),
+        daily_reset(state.clock.clone(), state.source.clone(), state.symbols.clone(), state.bars.clone(), state.hub.clone(), state.market_control.clone()),
         daily_token(state.clock.clone(), state.rest.clone(), state.link.clone()),
     );
 }
@@ -405,14 +407,13 @@ pub async fn start_with(config: &Config, lock: &InstanceLock, adapters: Adapters
     let factory = LaneFactory { transport: lane_transport, clock: clock.clone(), environment: config.kiwoom_environment, spacing: kiwoom_spacing, ws_url: lane_ws_url, bases };
     let key_setup = KeySetup { store: key_file, keys: startup.keys, market: startup.market, factory };
     let kis_factory = kis.map(|transport| KisFactory { transport, clock: clock.clone(), token_base: kis_token_base, feed: kis_feed });
-    let mut system = SystemState::new(key_setup, startup.file_problem, crate::api::SystemSettings::from_config(config)).with_public_ip(Arc::new(public_ip)).with_account(account).with_collector(collector).with_tailnet_hosts(config.tailnet_hosts.clone());
+    let mut system = SystemStartup::new(key_setup, startup.file_problem, crate::api::SystemSettings::from_config(config)).with_public_ip(Arc::new(public_ip)).with_account(account).with_collector(collector).with_tailnet_hosts(config.tailnet_hosts.clone());
     if let Some(factory) = kis_factory {
         system = system.with_kis(factory);
     }
     let state = application_with_system(ApplicationInputs { rest: rest.clone(), clock: clock.clone(), symbols: symbols.clone(), db, screener_store, stream, static_dir: config.static_dir.clone(), screener_update_on_connect: config.screener_update_on_start }, system);
     state.system.bound(bound_addr);
-    state.source_switch.sync().await;
-    drop(state.source_switch.follow());
+    state.market_control.sync().await;
     tokio::spawn(daily_maintenance(state.clone()));
     tokio::spawn(crate::account::sync::run(state.clone()));
     tokio::spawn(crate::collector::run(state.clone()));
@@ -463,12 +464,12 @@ pub(crate) fn next_try(clock: &Clock, retry_at: KstTime, at_least: Duration) -> 
     retry_at.max(clock.now().plus_secs(at_least.as_secs() as i64))
 }
 
-async fn daily_reset(clock: Clock, source: Arc<dyn MarketSource>, symbols: Arc<SymbolDirectory>, bars: Arc<BarService>, hub: HubHandle, switch: Arc<SourceSwitch>) {
+async fn daily_reset(clock: Clock, source: Arc<dyn MarketSource>, symbols: Arc<SymbolDirectory>, bars: Arc<BarService>, hub: HubHandle, control: Arc<MarketControl>) {
     loop {
         clock.sleep_until(next_daily(clock.now(), DAILY_RESET_AT)).await;
         bars.clear_all();
         hub.daily_reset();
-        if !switch.source_connected() {
+        if !control.source_connected() {
             continue;
         }
         let deadline = next_daily(clock.now(), DAILY_RESET_AT);

@@ -2,7 +2,6 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use tokio::sync::watch;
-use tokio::task::JoinHandle;
 
 use super::active::{ActiveSource, ActiveStream, AttachedStream};
 use super::{MarketFeatures, MarketSource, Priority, SourceGeneration};
@@ -57,13 +56,6 @@ impl Supplier {
         match self {
             Supplier::Kiwoom => kiwoom.state(),
             Supplier::Kis(supplier) => supplier.lane.link.state(),
-        }
-    }
-
-    fn watch_link(&self, kiwoom: &Link) -> watch::Receiver<LinkState> {
-        match self {
-            Supplier::Kiwoom => kiwoom.subscribe(),
-            Supplier::Kis(supplier) => supplier.lane.link.subscribe(),
         }
     }
 }
@@ -198,27 +190,5 @@ impl SourceSwitch {
             Some(lane) => lane.link.is_connected(),
             None => self.parts.kiwoom_link.is_connected(),
         }
-    }
-
-    pub fn follow(self: &Arc<Self>) -> JoinHandle<()> {
-        let switch = Arc::downgrade(self);
-        let mut changes = self.parts.keys.subscribe_changes();
-        tokio::spawn(async move {
-            loop {
-                let Some(strong) = switch.upgrade() else { return };
-                let mut link = strong.current.lock().await.watch_link(&strong.parts.kiwoom_link);
-                drop(strong);
-                tokio::select! {
-                    changed = changes.changed() => if changed.is_err() {
-                        return;
-                    },
-                    changed = link.changed() => if changed.is_err() && changes.changed().await.is_err() {
-                        return;
-                    },
-                }
-                let Some(strong) = switch.upgrade() else { return };
-                strong.sync().await;
-            }
-        })
     }
 }

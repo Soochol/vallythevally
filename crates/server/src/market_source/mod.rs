@@ -1,4 +1,5 @@
 pub mod active;
+pub mod control;
 mod error;
 mod feature;
 mod generation;
