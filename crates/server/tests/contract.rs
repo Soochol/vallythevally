@@ -16,6 +16,7 @@ use server::etf::*;
 use server::heatmap_board::{HeatmapBoard, HeatmapBoardMember, HeatmapBoardTheme, HeatmapSource, HeatmapThemeOrder, HeatmapThemeSummary, KiwoomCatalogInfo, KiwoomCatalogState};
 use server::heatmap_flow::{HeatmapFlowPoint, HeatmapFlowSeries};
 use server::kiwoom_themes::{KiwoomLimitMove, KiwoomTheme, KiwoomThemeList, KiwoomThemeMember, KiwoomThemeMembers};
+use server::micro_series::{MicroSeriesState, ProgramSeriesPage, ProgramSeriesPoint, TickCvdPage, TickCvdPoint};
 use server::quote_minutes::{QuoteDayInfo, QuoteDayState, QuoteDepthPage, QuoteDepthPoint, QuoteDepthSource, QuoteTotalPoint, QuoteTotalsPage};
 use server::vi_playbook::{ViPlaybook, ViPlaybookHorizon, ViPlaybookKind, ViPlaybookMatch};
 use ts_rs::TS;
@@ -354,6 +355,11 @@ fn generated_typescript_matches_the_committed_files() {
         generated::<QuoteDepthSource>(),
         generated::<QuoteTotalPoint>(),
         generated::<QuoteTotalsPage>(),
+        generated::<MicroSeriesState>(),
+        generated::<TickCvdPoint>(),
+        generated::<TickCvdPage>(),
+        generated::<ProgramSeriesPoint>(),
+        generated::<ProgramSeriesPage>(),
     ];
     let mut committed: Vec<String> = git(&["ls-tree", "--name-only", "HEAD", &format!("{DIR}/")])
         .lines()

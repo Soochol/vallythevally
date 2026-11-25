@@ -11,11 +11,14 @@ import {
 } from "lightweight-charts";
 import { axisPriceFormat, type AxisGeometry } from "../axisFormat";
 import type { Bar } from "../../api/generated/Bar";
+import type { FeedProgramRow } from "../../api/generated/FeedProgramRow";
+import type { FeedTrade } from "../../api/generated/FeedTrade";
 import type { FinancialsPage } from "../../api/generated/FinancialsPage";
 import type { FinancialDetailRow } from "../financials";
 import type { Period } from "../../api/generated/Period";
 import type { QuoteDepthPoint } from "../../api/generated/QuoteDepthPoint";
 import type { QuoteTotalPoint } from "../../api/generated/QuoteTotalPoint";
+import type { SymbolCode } from "../../api/generated/SymbolCode";
 import type { UnixSeconds } from "../../api/generated/UnixSeconds";
 import { formatPrice, formatVolume } from "../../lib/format";
 import { displayBars, type History } from "../barFeed";
@@ -27,7 +30,8 @@ import { toChartTime } from "../time";
 import type { IndicatorPort, OpenPort } from "./client";
 import { applyToPoints, DrawQueue, pointAtTime } from "./drawQueue";
 import { FinancialIndicatorStore } from "./financialFamily";
-import { isFinancial, isFinancialBar, isQuoteDepth, isQuoteTotals, isTechnical, type PlotLineId as LineId, isBarLine, lineColor, specLines, specName } from "./kinds";
+import { isFinancial, isFinancialBar, isMicro, isProgramFlow, isQuoteDepth, isQuoteTotals, isTechnical, isTickCvd, type PlotLineId as LineId, isBarLine, lineColor, specLines, specName } from "./kinds";
+import { type MicroFamilyDeps, MicroIndicatorController, type MicroTarget, programLineValue, tickCvdLineValue } from "./microFamily";
 import { addOverlayLine, type OverlayPoint, type OverlaySeries } from "./overlayLine";
 import type { BarTuple, Columns, EngineErrorKind, EngineResult, FromWorker, LineInfo, Point } from "./protocol";
 import { type QuoteFamilyDeps, QuoteIndicatorController, type QuoteTarget } from "./quoteFamily";
@@ -153,6 +157,7 @@ export class IndicatorLayer {
   private broken = false;
   private readonly financialStore = new FinancialIndicatorStore();
   private readonly quotes: QuoteIndicatorController;
+  private readonly micro: MicroIndicatorController;
 
   attachMainSeries(series: ISeriesApi<SeriesType, Time>): void {
     this.quotes.attachMainSeries(series);
@@ -164,6 +169,18 @@ export class IndicatorLayer {
 
   setQuoteTarget(target: QuoteTarget | null, sync = true): void {
     this.quotes.setTarget(target, sync);
+  }
+
+  setMicroTarget(target: MicroTarget | null, sync = true): void {
+    this.micro.setTarget(target, sync);
+  }
+
+  applyLiveTrade(symbol: SymbolCode, tick: FeedTrade): boolean {
+    return this.micro.applyLiveTrade(symbol, tick);
+  }
+
+  applyLiveProgram(symbol: SymbolCode, row: FeedProgramRow): boolean {
+    return this.micro.applyLiveProgram(symbol, row);
   }
 
   setQuoteTotals(view: QuoteView<QuoteTotalPoint> | null, from: UnixSeconds | null = null): void {
@@ -192,6 +209,7 @@ export class IndicatorLayer {
     private readonly host: LayerHost,
     open: OpenPort,
     quoteDeps?: QuoteFamilyDeps,
+    microDeps?: MicroFamilyDeps,
   ) {
     this.port = open({ message: (m) => this.onMessage(m), broken: () => this.onBroken() });
     this.quotes = new QuoteIndicatorController(
@@ -204,6 +222,32 @@ export class IndicatorLayer {
       },
       quoteDeps,
     );
+    this.micro = new MicroIndicatorController(
+      {
+        bars: () => this.display,
+        tokens: () => this.host.tokens(),
+        configs: () => this.configs,
+        onTickCvdChanged: (from) => this.applyTickCvdUpdate(from),
+        onProgramChanged: (from) => this.applyProgramUpdate(from),
+      },
+      microDeps,
+    );
+  }
+
+  private applyTickCvdUpdate(from: UnixSeconds | null): void {
+    for (const s of this.shown.values()) if (isTickCvd(s.config.spec)) {
+      this.updateTickCvdStatus(s);
+      if (s.config.visible) this.syncTickCvd(s, from);
+    }
+    this.host.requestFrame();
+  }
+
+  private applyProgramUpdate(from: UnixSeconds | null): void {
+    for (const s of this.shown.values()) if (isProgramFlow(s.config.spec)) {
+      this.updateProgramStatus(s);
+      if (s.config.visible) this.syncProgramFlow(s, from);
+    }
+    this.host.requestFrame();
   }
 
   private applyQuoteTotalsUpdate(from: UnixSeconds | null): void {
@@ -302,6 +346,7 @@ export class IndicatorLayer {
     this.applyStretch();
     this.create(fresh);
     this.quotes.syncFeeds();
+    this.micro.syncFeeds();
     for (const s of this.shown.values()) {
       if (isFinancial(s.config.spec)) this.drawFinancial(s);
       else if (isQuoteTotals(s.config.spec)) {
@@ -309,6 +354,12 @@ export class IndicatorLayer {
         if (s.config.visible) this.syncQuoteTotals(s, null);
       } else if (isQuoteDepth(s.config.spec)) {
         this.updateQuoteDepthStatus(s);
+      } else if (isTickCvd(s.config.spec)) {
+        this.updateTickCvdStatus(s);
+        if (s.config.visible) this.syncTickCvd(s, null);
+      } else if (isProgramFlow(s.config.spec)) {
+        this.updateProgramStatus(s);
+        if (s.config.visible) this.syncProgramFlow(s, null);
       }
     }
   }
@@ -364,7 +415,7 @@ export class IndicatorLayer {
 
   private resetNow(h: History, keepQuotes = false): void {
     for (const s of this.shown.values()) {
-      if (keepQuotes && (isQuoteTotals(s.config.spec) || isQuoteDepth(s.config.spec))) continue;
+      if (keepQuotes && (isQuoteTotals(s.config.spec) || isQuoteDepth(s.config.spec) || isMicro(s.config.spec))) continue;
       this.clearLines(s);
       if (s.config.visible) s.status = { kind: "pending" };
     }
@@ -379,6 +430,7 @@ export class IndicatorLayer {
     if (!keepQuotes) this.quotes.markDepthLegendsDirty();
     this.committedT = h.bars[h.bars.length - 1]?.t ?? null;
     this.quotes.cover(this.display);
+    this.micro.cover(this.display);
     this.create(this.configs.filter((c) => c.visible));
     for (const s of this.shown.values()) {
       if (isFinancial(s.config.spec)) this.drawFinancial(s);
@@ -387,6 +439,12 @@ export class IndicatorLayer {
         if (s.config.visible) this.syncQuoteTotals(s, null);
       } else if (isQuoteDepth(s.config.spec) && !keepQuotes) {
         this.updateQuoteDepthStatus(s);
+      } else if (isTickCvd(s.config.spec) && !keepQuotes) {
+        this.updateTickCvdStatus(s);
+        if (s.config.visible) this.syncTickCvd(s, null);
+      } else if (isProgramFlow(s.config.spec) && !keepQuotes) {
+        this.updateProgramStatus(s);
+        if (s.config.visible) this.syncProgramFlow(s, null);
       }
     }
   }
@@ -419,6 +477,7 @@ export class IndicatorLayer {
         this.resetNow(h, keepQuotes);
         if (keepQuotes) {
           this.advanceQuoteTotals(bar);
+          this.advanceMicro(bar);
           this.quotes.advanceDepthLegends(this.configs, bar);
         }
       });
@@ -426,7 +485,10 @@ export class IndicatorLayer {
     }
     this.history = h;
     this.display = next;
-    if (next.length > prev.length) this.quotes.cover(next);
+    if (next.length > prev.length) {
+      this.quotes.cover(next);
+      this.micro.cover(next);
+    }
     if (!this.timesDirty) this.allTimes.add(bar.t);
     if (op === "confirm") this.committedT = bar.t;
     if (next.length > prev.length || next.at(-1)?.c !== prev.at(-1)?.c) this.rebaseLeadingSpans(bar);
@@ -441,6 +503,7 @@ export class IndicatorLayer {
       }
     }
     this.advanceQuoteTotals(bar);
+    this.advanceMicro(bar);
     this.quotes.advanceDepthLegends(this.configs, bar);
     if (this.configs.some((c) => c.visible && usesWorker(c)) && !this.broken) {
       this.port.post({ type: "bar", chart: this.port.chart, kind: op, bar: tuple(bar) });
@@ -522,6 +585,14 @@ export class IndicatorLayer {
       if (isQuoteDepth(config.spec)) {
         return this.quotes.depthRow(config, time, tokens);
       }
+      if (isTickCvd(config.spec)) {
+        const panel = panelIndex < 0 ? null : { index: panelIndex, count: this.panels.length, collapsed };
+        return this.micro.tickCvdRow(config, time, tokens, panel);
+      }
+      if (isProgramFlow(config.spec)) {
+        const panel = panelIndex < 0 ? null : { index: panelIndex, count: this.panels.length, collapsed };
+        return this.micro.programFlowRow(config, time, tokens, panel);
+      }
       const values: LegendValue[] =
         state !== "ok" || time === null || !s
           ? []
@@ -549,7 +620,7 @@ export class IndicatorLayer {
     for (const config of this.configs) {
       const shown = this.shown.get(config.id);
       const panelIndex = config.panel === "price" ? -1 : this.panels.findIndex((panel) => panel.id === config.panel);
-      if (isFinancial(config.spec) || isQuoteTotals(config.spec) || panelIndex >= 0) continue;
+      if (isFinancial(config.spec) || isQuoteTotals(config.spec) || isMicro(config.spec) || panelIndex >= 0) continue;
       if (isQuoteDepth(config.spec)) {
         rows.push(this.quotes.depthPriceLegend(config, this.display));
         continue;
@@ -612,6 +683,7 @@ export class IndicatorLayer {
 
   dispose(): void {
     this.quotes.dispose();
+    this.micro.dispose();
     this.port.close();
     for (const id of [...this.shown.keys()]) this.removeShown(id);
   }
@@ -746,6 +818,22 @@ export class IndicatorLayer {
         }
       } else if (isQuoteDepth(s.config.spec)) {
         this.updateQuoteDepthStatus(s);
+      } else if (isTickCvd(s.config.spec)) {
+        this.updateTickCvdStatus(s);
+        if (s.config.visible) {
+          for (const line of s.lines) {
+            line.points = this.buildTickCvdPoints(line);
+            if (line.points.length) this.draw(line, line.points);
+          }
+        }
+      } else if (isProgramFlow(s.config.spec)) {
+        this.updateProgramStatus(s);
+        if (s.config.visible) {
+          for (const line of s.lines) {
+            line.points = this.buildProgramPoints(line);
+            if (line.points.length) this.draw(line, line.points);
+          }
+        }
       } else for (const line of s.lines) if (line.points.length) this.draw(line, line.points);
     }
   }
@@ -766,7 +854,13 @@ export class IndicatorLayer {
   }
 
   private addPlot(config: IndicatorConfig, id: LineId, i: number, pane: number): Plot {
-    const options = { ...this.lineOptions(config, id, i), priceFormat: this.priceFormat(config), ...(isVolumeOverPrice(config) ? { priceScaleId: `volume:${config.id}` } : {}) };
+    const priceFormat = id === "programShare" ? axisPriceFormat("%", 0.1) : this.priceFormat(config);
+    const scaleOverride = isVolumeOverPrice(config)
+      ? { priceScaleId: `volume:${config.id}` }
+      : id === "programShare"
+        ? { priceScaleId: `programShare:${config.id}` }
+        : {};
+    const options = { ...this.lineOptions(config, id, i), priceFormat, ...scaleOverride };
     const bar = isFinancial(config.spec) ? isFinancialBar(config.spec.kind) : isBarLine(id);
     if (!bar) return { overlay: true, series: addOverlayLine(this.host.chart, options, pane, isOverlay(config, id)) };
     return { overlay: false, series: this.host.chart.addSeries(HistogramSeries, options, pane) };
@@ -802,7 +896,7 @@ export class IndicatorLayer {
   private priceFormat(config: IndicatorConfig): PriceFormat {
     const financialFormat = this.financialStore.priceFormat(config, this.axisGeometry(config));
     if (financialFormat !== null) return financialFormat;
-    const unit = config.spec.kind === "volume" || isQuoteTotals(config.spec) ? "volume" : config.spec.kind === "macd" || config.spec.kind === "rsi" || config.spec.kind === "stochSlow" || this.host.isIndex() ? "index" : "price";
+    const unit = config.spec.kind === "volume" || isQuoteTotals(config.spec) ? "volume" : config.spec.kind === "macd" || config.spec.kind === "rsi" || config.spec.kind === "stochSlow" || isMicro(config.spec) || this.host.isIndex() ? "index" : "price";
     return axisPriceFormat(unit, 0.01, this.axisGeometry(config));
   }
 
@@ -851,6 +945,142 @@ export class IndicatorLayer {
       else line.series.setData(points.map((p) => ({ time: toChartTime(p.t), value: p.v, color: p.v >= 0 ? this.host.tokens().upVol : this.host.tokens().downVol })));
       line.drawnLastT = points.at(-1)?.t ?? null;
       line.series.applyOptions({ priceFormat: this.priceFormat(s.config) });
+    }
+  }
+
+  private advanceMicro(bar: Bar): void {
+    const cvdPt = this.micro.cvdPointAt(bar.t);
+    if (cvdPt) {
+      for (const s of this.shown.values()) if (s.config.visible && isTickCvd(s.config.spec)) {
+        for (const line of s.lines) {
+          const point: Point = { t: bar.t, v: tickCvdLineValue(line.id, cvdPt) };
+          line.points = applyToPoints(line.points, { op: "update", point });
+          this.queue.push(line, { op: "update", point });
+        }
+      }
+    }
+    const programPt = this.micro.programPointAt(bar.t);
+    if (programPt) {
+      for (const s of this.shown.values()) if (s.config.visible && isProgramFlow(s.config.spec)) {
+        for (const line of s.lines) {
+          const v = programLineValue(line.id, programPt);
+          if (v === null) continue;
+          const point: Point = { t: bar.t, v };
+          line.points = applyToPoints(line.points, { op: "update", point });
+          this.queue.push(line, { op: "update", point });
+        }
+      }
+    }
+  }
+
+  private updateTickCvdStatus(s: Shown): void {
+    if (!s.config.visible) {
+      s.status = { kind: "hidden" };
+      return;
+    }
+    s.status = this.micro.cvdState() === "loading" ? { kind: "pending" } : { kind: "ready" };
+  }
+
+  private updateProgramStatus(s: Shown): void {
+    if (!s.config.visible) {
+      s.status = { kind: "hidden" };
+      return;
+    }
+    s.status = this.micro.programState() === "loading" ? { kind: "pending" } : { kind: "ready" };
+  }
+
+  private buildTickCvdPoints(line: Line): Point[] {
+    const out: Point[] = [];
+    let prevHad = true;
+    for (let i = 0; i < this.display.length; i++) {
+      const t = this.display[i]!.t;
+      const pt = this.micro.cvdPointAt(t);
+      if (!pt) {
+        prevHad = false;
+        continue;
+      }
+      const v = tickCvdLineValue(line.id, pt);
+      out.push(prevHad ? { t, v } : { t, v, break: true });
+      prevHad = true;
+    }
+    const liveT = this.micro.cvdLiveLatestT();
+    const lastBarT = this.display.at(-1)?.t ?? null;
+    if (liveT !== null && (lastBarT === null || liveT > lastBarT)) {
+      const livePt = this.micro.cvdPointAt(liveT);
+      if (livePt) out.push({ t: liveT, v: tickCvdLineValue(line.id, livePt) });
+    }
+    return out;
+  }
+
+  private buildProgramPoints(line: Line): Point[] {
+    const out: Point[] = [];
+    let prevHad = true;
+    for (let i = 0; i < this.display.length; i++) {
+      const t = this.display[i]!.t;
+      const pt = this.micro.programPointAt(t);
+      const v = pt ? programLineValue(line.id, pt) : null;
+      if (v === null) {
+        prevHad = false;
+        continue;
+      }
+      out.push(prevHad ? { t, v } : { t, v, break: true });
+      prevHad = true;
+    }
+    const liveT = this.micro.programLiveLatestT();
+    const lastBarT = this.display.at(-1)?.t ?? null;
+    if (liveT !== null && (lastBarT === null || liveT > lastBarT)) {
+      const livePt = this.micro.programPointAt(liveT);
+      const v = livePt ? programLineValue(line.id, livePt) : null;
+      if (v !== null) out.push({ t: liveT, v });
+    }
+    return out;
+  }
+
+  private syncTickCvd(s: Shown, from: UnixSeconds | null): void {
+    if (from === null) {
+      for (const line of s.lines) {
+        line.points = this.buildTickCvdPoints(line);
+        this.queue.push(line, { op: "set", points: line.points });
+      }
+      return;
+    }
+    const pt = this.micro.cvdPointAt(from);
+    if (!pt) return;
+    for (const line of s.lines) {
+      const lastT = line.points.at(-1)?.t ?? -Infinity;
+      if (from < lastT) {
+        line.points = this.buildTickCvdPoints(line);
+        this.queue.push(line, { op: "set", points: line.points });
+      } else {
+        const point: Point = { t: from, v: tickCvdLineValue(line.id, pt) };
+        line.points = applyToPoints(line.points, { op: "update", point });
+        this.queue.push(line, { op: "update", point });
+      }
+    }
+  }
+
+  private syncProgramFlow(s: Shown, from: UnixSeconds | null): void {
+    if (from === null) {
+      for (const line of s.lines) {
+        line.points = this.buildProgramPoints(line);
+        this.queue.push(line, { op: "set", points: line.points });
+      }
+      return;
+    }
+    const pt = this.micro.programPointAt(from);
+    if (!pt) return;
+    for (const line of s.lines) {
+      const v = programLineValue(line.id, pt);
+      if (v === null) continue;
+      const lastT = line.points.at(-1)?.t ?? -Infinity;
+      if (from < lastT) {
+        line.points = this.buildProgramPoints(line);
+        this.queue.push(line, { op: "set", points: line.points });
+      } else {
+        const point: Point = { t: from, v };
+        line.points = applyToPoints(line.points, { op: "update", point });
+        this.queue.push(line, { op: "update", point });
+      }
     }
   }
 
