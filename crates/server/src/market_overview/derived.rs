@@ -147,7 +147,13 @@ pub struct DerivedMaCache {
 
 impl DerivedMaCache {
     pub async fn snapshot(&self, screener: &Screener) -> Arc<DerivedStoreSnapshot> {
-        let generation = screener.store_generation();
+        let generation = match screener.store_generation().await {
+            Ok(generation) => generation,
+            Err(error) => {
+                tracing::warn!(%error, "파생 지표용 스크리너 세대를 읽지 못했습니다");
+                return Arc::default();
+            }
+        };
         if let Some((cached, snapshot)) = self.entry.lock().expect("파생 이평선 캐시 잠금").as_ref()
             && *cached == generation
         {
