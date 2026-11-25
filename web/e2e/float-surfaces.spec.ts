@@ -9,7 +9,7 @@ const styleOf = (locator: Locator) => locator.evaluate((node) => {
   return { background: style.backgroundColor, blur: style.backdropFilter, radius: style.borderTopLeftRadius };
 });
 
-test("명령 입력창은 차트를 어둡게 하거나 흐리게 하지 않고 불투명 표면으로 뜨며 미리보기 지표가 범례에 보인다", async ({ page, scenario }, info) => {
+test("명령 입력창은 흐림 없는 가림막 위 불투명 표면으로 뜨며 미리보기 지표가 범례에 보인다", async ({ page, scenario }, info) => {
   useCenterIndicatorWindow(scenario);
   await page.goto("/?symbol=005930");
   await expect(cell(page)).toHaveAttribute("aria-busy", "false");
@@ -18,7 +18,7 @@ test("명령 입력창은 차트를 어둡게 하거나 흐리게 하지 않고 
   await expect(dialog).toBeVisible();
   await page.keyboard.type("이평 20");
   await expect(cell(page).getByText("이동평균 단순 20", { exact: false }).first()).toBeVisible();
-  expect(await styleOf(page.locator("[data-command-frame]"))).toMatchObject({ background: "rgba(0, 0, 0, 0)", blur: "none" });
+  expect(await styleOf(page.locator("[data-command-frame]"))).toMatchObject({ background: "rgba(5, 9, 5, 0.7)", blur: "none" });
   expect(await styleOf(dialog)).toMatchObject({ background: "rgb(27, 33, 27)", blur: "none", radius: "10px" });
   await page.screenshot({ path: info.outputPath("1440-indicator-preview.png") });
   await page.keyboard.press("Escape");
