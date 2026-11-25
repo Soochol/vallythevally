@@ -30,6 +30,7 @@ pub mod kiwoom;
 pub mod market;
 pub mod market_source;
 pub mod market_overview;
+pub mod micro_events;
 pub mod micro_series;
 pub mod premarket;
 pub mod public;

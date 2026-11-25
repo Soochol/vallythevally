@@ -7,6 +7,7 @@ pub mod child;
 pub mod flow;
 mod job;
 pub mod live_tap;
+pub mod micro;
 pub mod minute;
 mod overview;
 mod probe;

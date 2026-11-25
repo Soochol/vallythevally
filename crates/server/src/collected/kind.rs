@@ -298,6 +298,57 @@ impl CollectedKind for TradeTicks {
     }
 }
 
+pub struct MicroEvents;
+
+const MICRO_FIDS: [u32; 6] = [1, 2, 3, 4, 5, 6];
+
+impl CollectedKind for MicroEvents {
+    const TYPE_CODE: &'static str = "ME";
+    type View = domain::MicroEvent;
+
+    fn fids() -> &'static [u32] {
+        &MICRO_FIDS
+    }
+
+    fn decode(recv_ms: i64, values: &FidValues<'_>) -> Option<Self::View> {
+        let kind = match trimmed_or_empty(values.get(1)) {
+            "S" => domain::MicroEventKind::SpoofCancel,
+            "I" => domain::MicroEventKind::IcebergAbsorb,
+            _ => return None,
+        };
+        let side = match trimmed_or_empty(values.get(2)) {
+            "A" => domain::MicroSide::Ask,
+            "B" => domain::MicroSide::Bid,
+            _ => return None,
+        };
+        let price_won = parse_optional_nonzero_won(values.get(3))??;
+        let cancelled_or_absorbed_qty = parse_magnitude(values.get(4)?)?;
+        let displayed_qty = parse_magnitude(values.get(5)?)?;
+        let ratio_bps = parse_optional_u32(values.get(6))?;
+        let executed_qty = match kind {
+            domain::MicroEventKind::IcebergAbsorb => cancelled_or_absorbed_qty,
+            domain::MicroEventKind::SpoofCancel => {
+                if ratio_bps >= 10_000 || ratio_bps == 0 {
+                    0
+                } else {
+                    let drop = (u128::from(cancelled_or_absorbed_qty) * 10_000 + u128::from(ratio_bps) / 2) / u128::from(ratio_bps);
+                    (drop as u64).saturating_sub(cancelled_or_absorbed_qty)
+                }
+            }
+        };
+        Some(domain::MicroEvent {
+            recv_ms,
+            kind,
+            side,
+            price_won,
+            cancelled_or_absorbed_qty,
+            displayed_qty,
+            executed_qty,
+            ratio_bps,
+        })
+    }
+}
+
 fn trimmed_or_empty(raw: Option<&str>) -> &str {
     raw.map(str::trim).unwrap_or_default()
 }

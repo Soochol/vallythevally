@@ -1,5 +1,7 @@
 import type { ISeriesApi, SeriesType, Time } from "lightweight-charts";
 import type { Bar } from "../../api/generated/Bar";
+import type { MicroEvent } from "../../api/generated/MicroEvent";
+import type { MicroEventsPage } from "../../api/generated/MicroEventsPage";
 import type { Period } from "../../api/generated/Period";
 import type { QuoteDepthPage } from "../../api/generated/QuoteDepthPage";
 import type { QuoteDepthPoint } from "../../api/generated/QuoteDepthPoint";
@@ -7,6 +9,7 @@ import type { QuoteTotalPoint } from "../../api/generated/QuoteTotalPoint";
 import type { QuoteTotalsPage } from "../../api/generated/QuoteTotalsPage";
 import type { SymbolCode } from "../../api/generated/SymbolCode";
 import type { UnixSeconds } from "../../api/generated/UnixSeconds";
+import { fetchMicroEvents, kstYyyymmdd } from "../../api/microEvents";
 import { fetchQuoteDepth, fetchQuoteTotals } from "../../api/quoteMinutes";
 import { formatPrice, formatVolume } from "../../lib/format";
 import { isIndexCode } from "../../lib/symbol";
@@ -29,6 +32,7 @@ export interface QuoteTarget {
 export interface QuoteFamilyDeps {
   readonly fetchQuoteTotals?: (key: QuoteKey, range: QuoteRange, signal: AbortSignal) => Promise<QuoteTotalsPage>;
   readonly fetchQuoteDepth?: (key: QuoteKey, range: QuoteRange, signal: AbortSignal) => Promise<QuoteDepthPage>;
+  readonly fetchMicroEvents?: (symbol: SymbolCode, date: string, signal: AbortSignal) => Promise<MicroEventsPage>;
   readonly now?: () => UnixSeconds;
 }
 
@@ -70,12 +74,35 @@ function formatDepthLevel(level: readonly [number, number] | null): string {
   return level ? `${formatPrice(level[0], false)} ${formatVolume(level[1])}` : "—";
 }
 
+function formatMicroHoverDetail(event: MicroEvent): string {
+  if (event.kind === "spoof_cancel") {
+    const pct = Math.round(event.ratioBps / 100);
+    return `허수 취소 ${pct}% (${formatVolume(event.cancelledOrAbsorbedQty)})`;
+  }
+  const multiple = (event.ratioBps / 10_000).toFixed(1);
+  return `아이스버그 ${multiple}x (${formatVolume(event.executedQty)})`;
+}
+
+function periodSeconds(period: Period): number {
+  switch (period) {
+    case "1m": return 60;
+    case "3m": return 180;
+    case "5m": return 300;
+    case "10m": return 600;
+    case "15m": return 900;
+    case "30m": return 1_800;
+    case "60m": return 3_600;
+    default: return 60;
+  }
+}
+
 const defaultNowSeconds = (): UnixSeconds => Math.floor(Date.now() / 1000);
 
 export class QuoteIndicatorController {
   private readonly totalsFeed: QuoteFeed<QuoteTotalPoint>;
   private readonly depthFeeds = new Map<string, QuoteFeed<QuoteDepthPoint>>();
   private readonly fetchDepth: (key: QuoteKey, range: QuoteRange, signal: AbortSignal) => Promise<QuoteDepthPage>;
+  private readonly loadMicroEvents: (symbol: SymbolCode, date: string, signal: AbortSignal) => Promise<MicroEventsPage>;
   private readonly now: () => UnixSeconds;
   private readonly heatmap: QuoteDepthHeatmap;
   private readonly depthLegends = new Map<string, DepthLegend>();
@@ -84,11 +111,15 @@ export class QuoteIndicatorController {
   private totalsOverride: QuoteView<QuoteTotalPoint> | null | undefined = undefined;
   private depthOverrides: ReadonlyMap<string, QuoteView<QuoteDepthPoint>> | null = null;
   private totalsActive = false;
+  private microKey: string | null = null;
+  private microAbort: AbortController | null = null;
+  private microEvents: readonly MicroEvent[] = [];
   private disposed = false;
 
   constructor(private readonly host: QuoteFamilyHost, deps: QuoteFamilyDeps = {}) {
     this.now = deps.now ?? defaultNowSeconds;
     this.fetchDepth = deps.fetchQuoteDepth ?? fetchQuoteDepth;
+    this.loadMicroEvents = deps.fetchMicroEvents ?? fetchMicroEvents;
     this.totalsFeed = new QuoteFeed<QuoteTotalPoint>({
       fetch: deps.fetchQuoteTotals ?? fetchQuoteTotals,
       changed: (from) => {
@@ -165,6 +196,8 @@ export class QuoteIndicatorController {
       this.depthOverrides = null;
       feed.open({ symbol: target!.symbol, venue: target!.venue!, period: target!.period, variant: config.spec.source });
     }
+    const microWanted = activeDepth.some((c) => isQuoteDepth(c.spec) && (c.spec.showSpoof === true || c.spec.showIceberg === true));
+    this.syncMicroEvents(microWanted && target !== null ? target.symbol : null);
     this.cover(this.host.bars());
     this.heatmap.redraw();
   }
@@ -238,6 +271,23 @@ export class QuoteIndicatorController {
       : pt
         ? [{ text: formatDepthLevel(thickestLevel(pt.asks)), color: askColor }, { text: formatDepthLevel(thickestLevel(pt.bids)), color: bidColor }]
         : [{ text: "—", color: askColor }, { text: "—", color: bidColor }];
+    const showSpoof = config.spec.showSpoof === true;
+    const showIceberg = config.spec.showIceberg === true;
+    if (time !== null && (showSpoof || showIceberg)) {
+      const span = this.target ? periodSeconds(this.target.period) : 60;
+      const hit = this.microEvents.find((event) => {
+        if (event.kind === "spoof_cancel" && !showSpoof) return false;
+        if (event.kind === "iceberg_absorb" && !showIceberg) return false;
+        const sec = Math.floor(event.recvMs / 1000);
+        return sec >= time && sec < time + span;
+      });
+      if (hit) {
+        values.push({
+          text: formatMicroHoverDetail(hit),
+          color: hit.kind === "spoof_cancel" ? tokens.ind?.["ind-1"] ?? askColor : tokens.accent ?? bidColor,
+        });
+      }
+    }
     return { id: config.id, name: specName(config.spec), color: askColor, values, state: "ok", panel: null };
   }
 
@@ -295,6 +345,10 @@ export class QuoteIndicatorController {
 
   dispose(): void {
     this.disposed = true;
+    this.microAbort?.abort();
+    this.microAbort = null;
+    this.microKey = null;
+    this.microEvents = [];
     if (this.mainSeries !== null) {
       this.mainSeries.detachPrimitive(this.heatmap);
       this.mainSeries = null;
@@ -305,12 +359,42 @@ export class QuoteIndicatorController {
     this.depthLegends.clear();
   }
 
+  private syncMicroEvents(symbol: SymbolCode | null): void {
+    if (symbol === null) {
+      this.microAbort?.abort();
+      this.microAbort = null;
+      this.microKey = null;
+      this.microEvents = [];
+      return;
+    }
+    const date = kstYyyymmdd(this.now() * 1000);
+    const key = `${symbol}:${date}`;
+    if (this.microKey === key) return;
+    this.microAbort?.abort();
+    this.microKey = key;
+    this.microEvents = [];
+    const abort = new AbortController();
+    this.microAbort = abort;
+    this.loadMicroEvents(symbol, date, abort.signal).then(
+      (page) => {
+        if (this.disposed || abort.signal.aborted || this.microKey !== key) return;
+        this.microEvents = page.events;
+        this.heatmap.redraw();
+        this.host.onDepthChanged();
+      },
+      () => {},
+    );
+  }
+
   private depthLayers(): QuoteDepthLayer[] {
     const out: QuoteDepthLayer[] = [];
     for (const config of this.host.configs()) {
       if (!config.visible || !isQuoteDepth(config.spec)) continue;
       const view = this.depthView(config.id);
-      if (view) out.push({ spec: config.spec, view });
+      if (view) {
+        const showMicro = config.spec.showSpoof === true || config.spec.showIceberg === true;
+        out.push({ spec: config.spec, view, microEvents: showMicro ? this.microEvents : undefined });
+      }
     }
     return out;
   }

@@ -231,7 +231,7 @@ async fn start_session(
         commands: command_source,
         events: Events::none(),
         shutdown,
-        tap: LiveTapConfig { minutes, flow: None, quotes, trades },
+        tap: LiveTapConfig { minutes, flow: None, quotes, trades, micro: None },
     };
     let task = tokio::spawn(run_session(parts));
     commands.send(Ok(Command::Token { token: Secret::new(SECOND_KEY_TOKEN.to_owned()), generation: 1, expires_at: None })).unwrap();

@@ -66,6 +66,17 @@ export const test = base.extend<{ scenario: Scenario; clockStart: string | null 
       },
     );
     scenario.on(
+      (url) => /^\/api\/symbols\/[^/]+\/micro-events$/.test(url.pathname),
+      (request) => {
+        if (scenario.publicMode.kind === "public") {
+          return { status: 404, body: { error: { code: "not_found", message: "공개 리스너에 없는 경로입니다", reason: null, retryAt: null, manualActionRequired: false } } };
+        }
+        const url = new URL(request.url());
+        const symbol = decodeURIComponent(url.pathname.split("/")[3] ?? "");
+        return { body: { symbol, date: url.searchParams.get("date") ?? "", source: "none", events: [] } };
+      },
+    );
+    scenario.on(
       (url) => /^\/api\/symbols\/[^/]+\/premarket\/days$/.test(url.pathname),
       (request) => {
         const symbol = decodeURIComponent(new URL(request.url()).pathname.split("/")[3] ?? "");

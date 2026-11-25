@@ -9,8 +9,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
 use domain::{
-    Aggregator, Applied, Bucket, CLOSE_GRACE_SECS, ConfirmedBar, CurrentBar, Feed, KstDate, KstTime, Ohlcv, Price, SESSION_CLOSE, SeriesKey, StockCode, Symbol,
-    TRADING_OPEN, TimeOfDay, Trade, TradeTimeError, Venue, resolve_trade_time,
+    Aggregator, Applied, BookSideLevel, Bucket, CLOSE_GRACE_SECS, ConfirmedBar, CurrentBar, Feed, KstDate, KstTime, MicroEventDetector, Ohlcv, Price,
+    SESSION_CLOSE, SeriesKey, StockCode, Symbol, TRADING_OPEN, TimeOfDay, Trade, TradeTimeError, Venue, resolve_trade_time,
 };
 use tokio::sync::{mpsc, oneshot, watch};
 
@@ -235,7 +235,7 @@ impl FeedSub {
 fn stream_kind(kind: FeedKind, venue: Venue) -> StreamKind {
     match kind {
         FeedKind::Trades => StreamKind::Trades,
-        FeedKind::Book => StreamKind::Book(venue),
+        FeedKind::Book | FeedKind::Micro => StreamKind::Book(venue),
         FeedKind::Program => StreamKind::Program,
         FeedKind::Brokers => StreamKind::Brokers,
     }
@@ -277,6 +277,7 @@ pub struct MarketHub {
     broker_history: BTreeMap<Symbol, (BrokerSnapshot, KstTime)>,
     last_books: HashMap<(Symbol, Venue), (BookSnapshot, KstTime)>,
     last_expected: HashMap<(Symbol, Venue), (ExpectedTrade, KstTime)>,
+    micro_detectors: HashMap<(Symbol, Venue), MicroEventDetector>,
     first_after_hours: FirstOfDay,
     first_expected: FirstOfDay,
     tallies: DayTallies,
@@ -315,6 +316,7 @@ impl MarketHub {
             broker_history: BTreeMap::new(),
             last_books: HashMap::new(),
             last_expected: HashMap::new(),
+            micro_detectors: HashMap::new(),
             first_after_hours: FirstOfDay::default(),
             first_expected: FirstOfDay::default(),
             tallies: DayTallies::default(),
@@ -395,6 +397,7 @@ impl MarketHub {
                 self.broker_history.clear();
                 self.last_books.clear();
                 self.last_expected.clear();
+                self.micro_detectors.clear();
                 self.reset_vi();
                 tracing::info!(keys = self.keys.len(), "07:45 실시간 키를 모두 다시 시드합니다");
                 self.reseed_all(SeedPurpose::Reload { reason: ReloadReason::DailyReset, from: None });
@@ -405,6 +408,7 @@ impl MarketHub {
                 self.broker_history.clear();
                 self.last_books.clear();
                 self.last_expected.clear();
+                self.micro_detectors.clear();
                 tracing::info!(keys = self.keys.len(), "시세 공급원이 바뀌어 실시간 키를 모두 다시 시드합니다");
                 self.reseed_all(SeedPurpose::Reload { reason: ReloadReason::DailyReset, from: None });
             }
@@ -448,7 +452,7 @@ impl MarketHub {
             return;
         }
         let feed = match feed.kind {
-            FeedKind::Book => FeedSub { venue: self.effective_book_venue(feed), ..feed },
+            FeedKind::Book | FeedKind::Micro => FeedSub { venue: self.effective_book_venue(feed), ..feed },
             _ => feed,
         };
         let old_cell = self.conns.get_mut(&conn).and_then(|c| c.subs.remove(&sub));
@@ -476,7 +480,7 @@ impl MarketHub {
             .conns
             .iter()
             .flat_map(|(&conn, c)| c.feeds.iter().map(move |(sub, &feed)| (conn, sub, feed)))
-            .filter(|(_, _, feed)| feed.kind == FeedKind::Book)
+            .filter(|(_, _, feed)| matches!(feed.kind, FeedKind::Book | FeedKind::Micro))
             .map(|(conn, sub, feed)| (conn, sub.clone(), feed, self.effective_book_venue(feed)))
             .filter(|(_, _, feed, venue)| feed.venue != *venue)
             .collect();
@@ -649,6 +653,14 @@ impl MarketHub {
         self.broker_history.retain(|symbol, _| plan.feeds.get(symbol).is_some_and(|kinds| kinds.contains(&StreamKind::Brokers)));
         self.last_books.retain(|(symbol, venue), _| plan.feeds.get(symbol).is_some_and(|kinds| kinds.contains(&StreamKind::Book(*venue))));
         self.last_expected.retain(|(symbol, venue), _| plan.feeds.get(symbol).is_some_and(|kinds| kinds.contains(&StreamKind::Book(*venue))));
+        let active_micro: HashSet<(Symbol, Venue)> = self
+            .conns
+            .values()
+            .flat_map(|c| c.feeds.values())
+            .filter(|feed| feed.kind == FeedKind::Micro)
+            .map(|feed| (feed.symbol, feed.venue))
+            .collect();
+        self.micro_detectors.retain(|key, _| active_micro.contains(key));
         self.stream.set_desired(plan.feeds);
         let manager = &self.manager;
         self.vi.await_base_only_for(|code| manager.is_admitted(Symbol::Stock(code)));
@@ -1091,6 +1103,36 @@ impl MarketHub {
         if matched {
             self.last_books.insert((resolved.symbol, resolved.venue), (resolved, received_at));
         }
+        let micro_targets: Vec<(ConnId, SubId)> = self
+            .feed_targets(resolved.symbol, FeedKind::Micro)
+            .into_iter()
+            .filter(|(conn, sub)| self.conns.get(conn).is_some_and(|c| c.feeds[sub].venue == resolved.venue))
+            .collect();
+        if !micro_targets.is_empty() {
+            let asks: Vec<BookSideLevel> = resolved
+                .asks
+                .iter()
+                .flatten()
+                .map(|level| BookSideLevel { price_won: level.price.centi() / 100, qty: level.qty.0 })
+                .collect();
+            let bids: Vec<BookSideLevel> = resolved
+                .bids
+                .iter()
+                .flatten()
+                .map(|level| BookSideLevel { price_won: level.price.centi() / 100, qty: level.qty.0 })
+                .collect();
+            let detector = self.micro_detectors.entry((resolved.symbol, resolved.venue)).or_default();
+            let (events, ofi) = detector.on_book(book_at.unix() * 1000, &asks, &bids);
+            let ofi_dto: api::OfiSnapshot = ofi.into();
+            for (conn, sub) in micro_targets {
+                for event in &events {
+                    push(&self.conns, &mut self.closing, conn, ServerMessage::FeedMicro { sub: sub.0.clone(), event: (*event).into() });
+                }
+                if let Some(c) = self.conns.get(&conn) {
+                    c.outbox.set_ofi(&sub, ofi_dto);
+                }
+            }
+        }
     }
 
     fn on_after_hours(&mut self, totals: &AfterHoursTotals, received_at: KstTime) {
@@ -1197,6 +1239,7 @@ impl MarketHub {
     fn session_down(&mut self, state: RealtimeState, since: KstTime) {
         self.session_live = false;
         self.vi.stop_awaiting_base();
+        self.micro_detectors.clear();
         self.realtime = state;
         self.realtime_since = since;
         for ks in self.keys.values_mut() {
@@ -1228,6 +1271,17 @@ impl MarketHub {
         }
         self.publish_quotes(&tick, at);
         self.publish_feed_trade(&tick, at);
+        if !self.micro_detectors.is_empty() && matches!(tick.symbol, Symbol::Stock(_)) {
+            let qty = i64::try_from(tick.qty.0).unwrap_or(i64::MAX);
+            let signed_qty = if tick.side == Some(TradeSide::Sell) { -qty } else { qty };
+            let price_won = tick.price.centi() / 100;
+            let at_ms = at.unix() * 1000;
+            for (&(symbol, venue), detector) in &mut self.micro_detectors {
+                if symbol == tick.symbol && venue_takes(venue, tick.exchange) {
+                    detector.on_trade(at_ms, price_won, signed_qty);
+                }
+            }
+        }
         let trade = Trade { at, price: tick.price, qty: tick.qty };
         let now = self.clock.now();
         for (key, ks) in self.keys.iter_mut().filter(|(k, _)| k.feed.symbol() == tick.symbol && accepts(k.feed, tick.exchange)) {
@@ -4094,5 +4148,54 @@ mod tests {
             })
             .collect();
         assert_eq!(subs, BTreeSet::from(["all".to_owned(), "krx".to_owned()]));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn micro_feed_emits_spoof_event_and_ofi_on_unmatched_book_drop() {
+        let h = harness(at(9, 10, 0), morning_chart(), Duration::ZERO);
+        live(&h).await;
+        let (conn, out) = connect(&h).await;
+        subscribe_feed(&h, conn, "m", FeedKind::Micro, Venue::Combined);
+        assert_eq!(take(&out).await, [feed_subscribed("m", FeedKind::Micro)]);
+
+        let make_book = |sec: u32, ask0: u64, bid0: u64| {
+            let mut asks = [None; 10];
+            let mut bids = [None; 10];
+            for level in 0..5 {
+                asks[level] = Some(BookLevel { price: won(70_100 + level as u64 * 100), qty: Volume(if level == 0 { ask0 } else { 1_000 }) });
+                bids[level] = Some(BookLevel { price: won(70_000 - level as u64 * 100), qty: Volume(if level == 0 { bid0 } else { 1_000 }) });
+            }
+            StreamEvent::Book {
+                book: Box::new(BookSnapshot {
+                    symbol: samsung_symbol(),
+                    venue: Venue::Combined,
+                    hhmmss: TimeOfDay::hms(9, 10, sec).unwrap(),
+                    asks,
+                    bids,
+                    total_ask_qty: Volume(ask0 + 4_000),
+                    total_bid_qty: Volume(bid0 + 4_000),
+                    expected: None,
+                }),
+                received_at: h.clock.now(),
+            }
+        };
+
+        h.events.send(make_book(1, 5_000, 2_000)).await.unwrap();
+        let first = take(&out).await;
+        assert!(first.iter().any(|m| matches!(m, ServerMessage::FeedOfi { sub, ofi } if sub == "m" && ofi.buy_pressure_pct == 50)));
+        assert!(!first.iter().any(|m| matches!(m, ServerMessage::FeedMicro { .. })));
+
+        h.events.send(make_book(2, 100, 2_000)).await.unwrap();
+        let second = take(&out).await;
+        assert!(second.iter().any(|m| matches!(
+            m,
+            ServerMessage::FeedMicro { sub, event }
+                if sub == "m"
+                    && event.kind == api::MicroEventKind::SpoofCancel
+                    && event.side == api::MicroSide::Ask
+                    && event.price_won == 70_100
+                    && event.ratio_bps == 10_000
+        )));
+        assert!(second.iter().any(|m| matches!(m, ServerMessage::FeedOfi { sub, ofi } if sub == "m" && ofi.buy_pressure_pct == 100 && ofi.ofi_qty == 4_900)));
     }
 }

@@ -347,6 +347,11 @@ test("히트맵 설정을 저장했다가 그대로 읽고 틀린 값은 거절�
     { aboveBars: "true" }, { askColor: "red" }, { bidColor: "ind-1" }, { bidColor: undefined },
   ];
   for (const patch of wrong) expect(readSpecShape({ ...spec, ...patch }), JSON.stringify(patch)).toBeNull();
+  const withMicro = { ...spec, showSpoof: true, showIceberg: true, microLabelMode: "verbose" as const };
+  expect(readSpecShape(withMicro)).toEqual(withMicro);
+  expect(readSpecShape({ ...spec, showSpoof: "true" })).toBeNull();
+  expect(readSpecShape({ ...spec, showIceberg: 1 })).toBeNull();
+  expect(readSpecShape({ ...spec, microLabelMode: "full" })).toBeNull();
 });
 
 test("계층별 CVD와 프로그램 수급 설정을 저장했다가 읽고 잘못된 값은 거절한다", () => {

@@ -100,4 +100,65 @@ describe("QuoteIndicatorController", () => {
 
     controller.dispose();
   });
+
+  it("loads micro events only when showSpoof or showIceberg is enabled and surfaces hover detail", async () => {
+    const depthFetch = vi.fn(async (): Promise<QuoteDepthPage> => ({
+      symbol: "005930",
+      venue: "combined",
+      period: "1m",
+      source: "priceMax",
+      days: [{ date: "20261125", state: "ready" }],
+      points: [{ t: T0 as UnixSeconds, asks: [[70_100, 1_000]], bids: [[70_000, 1_000]] }],
+      gaps: [],
+    } as never));
+    const microFetch = vi.fn(async () => ({
+      symbol: "005930",
+      date: "20261125",
+      source: "flow" as const,
+      events: [
+        {
+          recvMs: (T0 + 15) * 1000,
+          kind: "spoof_cancel" as const,
+          side: "ask" as const,
+          priceWon: 70_100,
+          cancelledOrAbsorbedQty: 2_000,
+          displayedQty: 2_500,
+          executedQty: 100,
+          ratioBps: 9_500,
+        },
+      ],
+    }));
+    const onDepthChanged = vi.fn();
+    let configs: IndicatorConfig[] = [DEPTH_CONFIG];
+    const bars = [bar(0), bar(1)];
+
+    const controller = new QuoteIndicatorController(
+      {
+        bars: () => bars,
+        tokens: () => TOKENS,
+        configs: () => configs,
+        onTotalsChanged: () => {},
+        onDepthChanged,
+      },
+      { fetchQuoteDepth: depthFetch, fetchMicroEvents: microFetch, now: () => (T0 + 300) as UnixSeconds },
+    );
+
+    controller.setTarget({ symbol: "005930", venue: "combined" as ShownVenue, period: "1m" });
+    expect(microFetch).toHaveBeenCalledTimes(0);
+
+    const enabledConfig: IndicatorConfig = {
+      ...DEPTH_CONFIG,
+      spec: { ...DEPTH_CONFIG.spec, kind: "quoteDepth", source: "priceMax", topLevels: null, maxOpacity: 0.7, aboveBars: false, askColor: null, bidColor: null, showSpoof: true },
+    };
+    configs = [enabledConfig];
+    controller.syncFeeds();
+    expect(microFetch).toHaveBeenCalledTimes(1);
+
+    await vi.waitFor(() => {
+      const row = controller.depthRow(enabledConfig, T0 as UnixSeconds, TOKENS);
+      expect(row.values.some((v) => v.text.includes("허수 취소 95%"))).toBe(true);
+    });
+
+    controller.dispose();
+  });
 });
