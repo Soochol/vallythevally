@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useReducer, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useLocation } from "react-router";
 import { useBrokerDays } from "../../api/brokers";
 import type { SymbolCode } from "../../api/generated/SymbolCode";
@@ -17,9 +17,9 @@ import { pageOfPath } from "../page-rail/pages";
 import { BoardView } from "./BoardView";
 import { DetailTable } from "./DetailTable";
 import { ListView } from "./ListView";
-import { boardAxis, brokerTracks, trackRuns } from "./board";
+import { boardAxis, brokerTracks, trackRuns, type TrackRun } from "./board";
 import { dayNav, formatMonthDay, kstDateOf, priceAt } from "./history";
-import { EMPTY_BROKER_STATE, reduceBrokers } from "./model";
+import { type BrokerEvent, EMPTY_BROKER_STATE, reduceBrokerEvents } from "./model";
 import { useBrokerDay, useBrokerMinuteBars } from "./useBrokerDay";
 import "./brokers.css";
 
@@ -36,6 +36,7 @@ const CARD_OPTIONS: readonly SegmentOption<BrokerCards>[] = [
 
 const EMPTY_DAYS: readonly string[] = [];
 const EMPTY_GAPS: readonly (readonly [UnixSeconds, UnixSeconds])[] = [];
+const EMPTY_RUNS: ReadonlyMap<string, readonly TrackRun[]> = new Map();
 const CLOCK_TICK_MS = 60_000;
 
 export function BrokersWindow({ id }: { id: WindowId }) {
@@ -43,7 +44,7 @@ export function BrokersWindow({ id }: { id: WindowId }) {
 }
 
 function BrokersBody({ id, code }: { id: WindowId; code: SymbolCode }) {
-  const [liveState, dispatchLive] = useReducer(reduceBrokers, EMPTY_BROKER_STATE);
+  const [liveState, setLiveState] = useState(EMPTY_BROKER_STATE);
   const [liveFailed, setLiveFailed] = useState(false);
   const [liveAttempt, setLiveAttempt] = useState(0);
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
@@ -85,15 +86,33 @@ function BrokersBody({ id, code }: { id: WindowId; code: SymbolCode }) {
 
   useEffect(() => {
     if (day.mode !== "live") return;
-    if (hadLiveSubscriptionRef.current) dispatchLive({ type: "resync" });
+    let pending: BrokerEvent[] = [];
+    let frame: number | null = null;
+    const enqueue = (event: BrokerEvent) => {
+      pending.push(event);
+      if (frame !== null) return;
+      frame = requestAnimationFrame(() => {
+        frame = null;
+        const batch = pending;
+        if (batch.length === 0) return;
+        pending = [];
+        setLiveState((previous) => reduceBrokerEvents(previous, batch));
+      });
+    };
+    if (hadLiveSubscriptionRef.current) enqueue({ type: "resync" });
     hadLiveSubscriptionRef.current = true;
-    return marketSocket.subscribeFeed({ symbol: code, kind: "brokers" }, (event) => {
-      if (event.type === "feed_brokers") dispatchLive({ type: "snapshot", brokers: event.brokers });
-      else if (event.type === "feed_link") dispatchLive({ type: "link", live: event.live });
-      else if (event.type === "resync") dispatchLive({ type: "resync" });
+    const unsubscribe = marketSocket.subscribeFeed({ symbol: code, kind: "brokers" }, (event) => {
+      if (event.type === "feed_brokers") enqueue({ type: "snapshot", brokers: event.brokers });
+      else if (event.type === "feed_link") enqueue({ type: "link", live: event.live });
+      else if (event.type === "resync") enqueue({ type: "resync" });
       else if (event.type === "feed_subscribed") setLiveFailed(false);
       else if (event.type === "sub_error") setLiveFailed(true);
     });
+    return () => {
+      unsubscribe();
+      if (frame !== null) cancelAnimationFrame(frame);
+      pending = [];
+    };
   }, [code, day.mode, liveAttempt]);
 
   const retryLive = () => {
@@ -104,7 +123,7 @@ function BrokersBody({ id, code }: { id: WindowId; code: SymbolCode }) {
   const grid = day.mode === "live" ? liveState.grid : day.state.grid;
   const gaps = day.mode === "collected" ? day.gaps : EMPTY_GAPS;
   const tracks = useMemo(() => brokerTracks(grid), [grid]);
-  const runsByCode = useMemo(() => trackRuns(grid), [grid]);
+  const runsByCode = useMemo(() => (view === "list" ? trackRuns(grid) : EMPTY_RUNS), [grid, view]);
   const axis = useMemo(
     () => boardAxis(grid.times, Math.floor(serverNow(serverTimeOrigin) / 1000)),
     [grid.times, serverTimeOrigin, clockTick],

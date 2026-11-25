@@ -66,6 +66,22 @@ test("멈춘 동안 새 체결은 대기하고 풀면 맨 위에 이어 붙는�
   expect(released.pending).toHaveLength(0);
 });
 
+test("멈춘 동안 대기 체결도 줄 수 상한을 넘지 않는다", () => {
+  const flood: TapeAction[] = [
+    { type: "hold" },
+    ...Array.from({ length: MAX_TAPE_ROWS + 50 }, (_, i): TapeAction => ({
+      type: "live",
+      trades: [live("10:00:00", 2000 + i, 1)],
+      receivedAt: 0,
+    })),
+  ];
+  const held = run(...flood);
+  expect(held.pending).toHaveLength(MAX_TAPE_ROWS);
+  expect(held.pending[0]).toMatchObject({ price: 2000 + MAX_TAPE_ROWS + 49 });
+  const released = tapeReducer(held, { type: "release" });
+  expect(visibleEntries(released, "combined", 0).entries).toHaveLength(MAX_TAPE_ROWS);
+});
+
 test("멈춘 동안에는 겹친 조회 행도 그대로 두었다가 풀면 정리한다", () => {
   const history = tapeOf([print("10:00:03", 103, 1), print("10:00:01", 101, 1)]);
   const held = run({ type: "history", tape: history }, { type: "hold" }, { type: "live", trades: [live("10:00:02", 202, 5)], receivedAt: 0 });

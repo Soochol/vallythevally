@@ -42,6 +42,16 @@ export class ShapeMultiset {
     return this.counts.has(shape);
   }
 
+  keys(): IterableIterator<string> {
+    return this.counts.keys();
+  }
+
+  sameKeys(other: ShapeMultiset): boolean {
+    if (this.counts.size !== other.counts.size) return false;
+    for (const shape of this.counts.keys()) if (!other.counts.has(shape)) return false;
+    return true;
+  }
+
   get size(): number {
     return this.counts.size;
   }
@@ -72,7 +82,7 @@ export function trackedValuesOf(values: readonly string[]): TrackedValues | null
 
 export class TrackedValues {
   readonly values: string[] = [];
-  private readonly shapes = new ShapeMultiset();
+  private shapes = new ShapeMultiset();
   private version = 0;
 
   constructor() {
@@ -83,6 +93,10 @@ export class TrackedValues {
     return this.version;
   }
 
+  uniqueShapes(): string[] {
+    return [...this.shapes.keys()];
+  }
+
   setAll(values: readonly string[]): void {
     this.values.length = 0;
     this.shapes.clear();
@@ -91,6 +105,19 @@ export class TrackedValues {
       this.shapes.add(value);
     }
     this.version++;
+  }
+
+  syncAll(values: readonly string[]): boolean {
+    const next = new ShapeMultiset();
+    this.values.length = 0;
+    for (const value of values) {
+      this.values.push(value);
+      next.add(value);
+    }
+    const changed = !this.shapes.sameKeys(next);
+    this.shapes = next;
+    if (changed) this.version++;
+    return changed;
   }
 
   push(value: string): boolean {

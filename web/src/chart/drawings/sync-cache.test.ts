@@ -235,3 +235,33 @@ test("a rejection after the window left the layout is retried and the drawing mo
   expect(puts(sent)).toEqual(["cell", "layout"]);
   expect(sync.history(CELL).past).toHaveLength(1);
 });
+
+test("acquire tracks mounted symbols by refcount and refresh skips released symbols", async () => {
+  const fetched: string[] = [];
+  const { sync } = setup(async (input) => {
+    const url = new URL(String(input), "http://localhost");
+    fetched.push(url.searchParams.get("symbol") ?? "");
+    return Response.json([]);
+  });
+  const settle = () => new Promise((done) => setTimeout(done, 10));
+  const releaseA1 = sync.acquire("005930");
+  const releaseA2 = sync.acquire("005930");
+  const releaseB = sync.acquire("000660");
+  await vi.waitFor(() => expect(fetched).toEqual(["005930", "000660"]));
+  await settle();
+  fetched.length = 0;
+  releaseA1();
+  sync.refresh();
+  await vi.waitFor(() => expect(fetched.sort()).toEqual(["000660", "005930"]));
+  await settle();
+  fetched.length = 0;
+  releaseA2();
+  sync.refresh();
+  await vi.waitFor(() => expect(fetched).toEqual(["000660"]));
+  await settle();
+  fetched.length = 0;
+  releaseB();
+  sync.refresh();
+  await settle();
+  expect(fetched).toEqual([]);
+});

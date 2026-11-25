@@ -92,6 +92,7 @@ export interface LayerHost {
   chart: IChartApi;
   tokens(): ThemeTokens;
   isIndex(): boolean;
+  isPercentScale?(): boolean;
   period(): Period;
   requestFrame(): void;
   axisFormatted(pane: ReturnType<IChartApi["panes"]>[number]): void;
@@ -106,7 +107,6 @@ const GUIDES: Partial<Record<Kind, number[]>> = { rsi: [70, 30], stochSlow: [80,
 const tuple = (b: Bar): BarTuple => [b.t, b.o, b.h, b.l, b.c, b.v];
 const volumePoint = (b: Bar): Point => ({ t: b.t, v: b.v, up: b.c >= b.o });
 const isPlainVolume = (spec: IndicatorConfig["spec"]) => spec.kind === "volume" && spec.maPeriod === null;
-const isQuoteLine = (id: LineId) => id === "quoteAsk" || id === "quoteBid";
 const usesWorker = (config: IndicatorConfig) => isTechnical(config.spec) && !isPlainVolume(config.spec);
 
 function columnsOf(bars: readonly Bar[]): Columns {
@@ -385,7 +385,7 @@ export class IndicatorLayer {
     this.display = next;
     if (!this.timesDirty) this.allTimes.add(bar.t);
     if (op === "confirm") this.committedT = bar.t;
-    if (next.length > prev.length || next.at(-1)?.c !== prev.at(-1)?.c) this.rebaseLeadingSpans();
+    if (next.length > prev.length || next.at(-1)?.c !== prev.at(-1)?.c) this.rebaseLeadingSpans(bar);
     const point = volumePoint(bar);
     for (const s of this.shown.values()) if (s.config.visible && isPlainVolume(s.config.spec)) {
       for (const line of s.lines) {
@@ -603,7 +603,7 @@ export class IndicatorLayer {
     if (line.legendDirty) {
       const values = line.points.map((point) => this.legendText(config, point));
       if (wantGap) values.push("—");
-      line.legendValues.setAll(values);
+      line.legendValues.syncAll(values);
       line.legendHasGap = wantGap;
       line.legendDirty = false;
       return;
@@ -989,18 +989,13 @@ export class IndicatorLayer {
 
   private put(line: Line, pt: Point): void {
     if (line.overlay) {
-      if (isQuoteLine(line.id)) {
-        const row = this.toOverlayPoint(pt);
-        if (line.drawnLastT !== null && pt.t < line.drawnLastT) {
-          line.series.update(row, true);
-        } else {
-          line.series.update(row);
-          line.drawnLastT = pt.t;
-        }
-        return;
+      const row = line.priceOverlay ? this.overlayPoint(pt) : this.toOverlayPoint(pt);
+      if (line.drawnLastT !== null && pt.t < line.drawnLastT) {
+        line.series.update(row, true);
+      } else {
+        line.series.update(row);
+        if (line.drawnLastT === null || pt.t > line.drawnLastT) line.drawnLastT = pt.t;
       }
-      line.series.update(line.priceOverlay ? this.overlayPoint(pt) : this.toOverlayPoint(pt));
-      if (line.drawnLastT === null || pt.t > line.drawnLastT) line.drawnLastT = pt.t;
     } else {
       line.series.update(this.toChart(line, pt));
       if (line.drawnLastT === null || pt.t > line.drawnLastT) line.drawnLastT = pt.t;
@@ -1038,9 +1033,22 @@ export class IndicatorLayer {
     }
   }
 
-  private rebaseLeadingSpans(): void {
+  refreshPriceOverlays(): void {
+    this.host.guard(() => this.redrawPriceOverlays());
+  }
+
+  private rebaseLeadingSpans(bar: Bar): void {
+    if (this.host.isPercentScale && !this.host.isPercentScale()) return;
     for (const s of this.shown.values()) {
-      for (const line of s.lines) if (line.overlay && line.shift > 0 && line.points.length) this.queue.push(line, { op: "set", points: line.points });
+      for (const line of s.lines) {
+        if (!line.priceOverlay || line.shift <= 0 || line.points.length === 0) continue;
+        if (bar.t < line.points[0]!.t) {
+          this.queue.push(line, { op: "set", points: line.points });
+          continue;
+        }
+        const pt = pointAtTime(line.points, bar.t);
+        if (pt) this.queue.push(line, { op: "update", point: pt });
+      }
     }
   }
 
@@ -1090,8 +1098,8 @@ export class IndicatorLayer {
       asks.push("—");
       bids.push("—");
     }
-    legend.asks.setAll(asks);
-    legend.bids.setAll(bids);
+    legend.asks.syncAll(asks);
+    legend.bids.syncAll(bids);
     legend.lastT = this.display.at(-1)?.t ?? null;
     legend.dirty = false;
   }

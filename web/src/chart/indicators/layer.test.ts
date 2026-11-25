@@ -316,6 +316,8 @@ test.each<Order>(["응답 뒤 그리기", "그리기 뒤 응답", "한 프레임
     const rows = f.line(id).data;
     expect(rows.map((r) => r.base)).toEqual(rows.map((r) => closeAt.get(r.time) ?? r.value));
   }
+  expect(f.line("spanA").setDataCalls).toBe(1);
+  expect(f.line("spanB").setDataCalls).toBe(1);
   expect(LINES.filter((id) => f.line(id).data.some((r) => r.time === current))).toEqual(["conversion", "base", "spanA", "spanB"]);
 });
 

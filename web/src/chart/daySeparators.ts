@@ -1,6 +1,6 @@
 import type { IChartApi, IPaneApi, IPanePrimitive, IPrimitivePaneRenderer, IPrimitivePaneView, PaneAttachedParameter, Time } from "lightweight-charts";
 import type { UnixSeconds } from "../api/generated/UnixSeconds";
-import { kstDateChanges, toChartTime } from "./time";
+import { kstDateChanges, kstDay, toChartTime } from "./time";
 
 type Target = Parameters<IPrimitivePaneRenderer["draw"]>[0];
 type TimedBars = readonly { t: UnixSeconds }[];
@@ -15,7 +15,13 @@ const DASH_PX = [1, 3];
 
 export class DaySeparators {
   private readonly attached = new Map<IPaneApi<Time>, PaneSeparators>();
-  private starts: { bars: TimedBars; indices: number[] } = { bars: [], indices: [] };
+  private starts: { bars: TimedBars; length: number; firstT: UnixSeconds | null; lastT: UnixSeconds | null; indices: number[] } = {
+    bars: [],
+    length: 0,
+    firstT: null,
+    lastT: null,
+    indices: [],
+  };
 
   constructor(private readonly chart: IChartApi, private readonly source: DaySeparatorSource) {}
 
@@ -34,7 +40,26 @@ export class DaySeparators {
   private xs(): number[] {
     if (!this.source.shown()) return [];
     const bars = this.source.bars();
-    if (this.starts.bars !== bars) this.starts = { bars, indices: kstDateChanges(bars) };
+    if (this.starts.bars !== bars) {
+      const length = bars.length;
+      const firstT = length > 0 ? bars[0]!.t : null;
+      const lastT = length > 0 ? bars[length - 1]!.t : null;
+      if (length === this.starts.length && firstT === this.starts.firstT && lastT === this.starts.lastT) {
+        this.starts.bars = bars;
+      } else if (
+        length === this.starts.length + 1
+        && this.starts.length > 0
+        && firstT === this.starts.firstT
+        && bars[this.starts.length - 1]!.t === this.starts.lastT
+      ) {
+        if (kstDay(bars[length - 1]!.t) !== kstDay(bars[length - 2]!.t)) this.starts.indices.push(length - 1);
+        this.starts.bars = bars;
+        this.starts.length = length;
+        this.starts.lastT = lastT;
+      } else {
+        this.starts = { bars, length, firstT, lastT, indices: kstDateChanges(bars) };
+      }
+    }
     const scale = this.chart.timeScale();
     const width = scale.width();
     return this.starts.indices.flatMap((i) => {

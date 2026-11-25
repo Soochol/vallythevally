@@ -80,35 +80,54 @@ export function mountLayer(panel: HTMLElement, options: LayerOptions) {
     if (!anchor) return;
     if (options.fitBelow !== undefined) {
       const room = innerHeight - anchor.bottom - FIT_MARGIN;
-      if (room >= options.fitBelow) panel.style.maxHeight = `${room}px`;
-      else panel.style.removeProperty("max-height");
+      const maxHeight = room >= options.fitBelow ? `${room}px` : "";
+      if (panel.style.maxHeight !== maxHeight) {
+        if (maxHeight) panel.style.maxHeight = maxHeight;
+        else panel.style.removeProperty("max-height");
+      }
     }
     const position = placeOverlay(anchor, panel.getBoundingClientRect(), { width: innerWidth, height: innerHeight }, options.placement);
     const top = Math.max(position.top, options.minTop?.() ?? 0);
-    if (top > position.top) panel.style.maxHeight = `${Math.max(0, innerHeight - top - FIT_MARGIN)}px`;
-    panel.style.left = `${position.left}px`;
-    panel.style.top = `${top}px`;
-    panel.dataset.side = position.side;
+    if (top > position.top) {
+      const maxHeight = `${Math.max(0, innerHeight - top - FIT_MARGIN)}px`;
+      if (panel.style.maxHeight !== maxHeight) panel.style.maxHeight = maxHeight;
+    }
+    const leftPx = `${position.left}px`;
+    const topPx = `${top}px`;
+    if (panel.style.left !== leftPx) panel.style.left = leftPx;
+    if (panel.style.top !== topPx) panel.style.top = topPx;
+    if (panel.dataset.side !== position.side) panel.dataset.side = position.side;
   };
   place();
   let frame = 0;
-  if (options.follow) {
-    const follow = () => { place(); frame = requestAnimationFrame(follow); };
-    frame = requestAnimationFrame(follow);
-  }
-  const observer = new ResizeObserver(place);
+  const schedulePlace = () => {
+    if (frame !== 0) return;
+    frame = requestAnimationFrame(() => {
+      frame = 0;
+      place();
+    });
+  };
+  const observer = new ResizeObserver(schedulePlace);
   observer.observe(panel);
+  if (options.follow && options.trigger) {
+    observer.observe(options.trigger);
+    if (options.trigger.parentElement) observer.observe(options.trigger.parentElement);
+  }
   const restyled = new MutationObserver(place);
-  if (options.follow) for (let around = options.trigger?.parentElement; around; around = around.parentElement) restyled.observe(around, { attributes: true });
-  window.addEventListener("resize", place);
-  window.addEventListener("scroll", place, true);
+  if (options.follow && options.trigger) {
+    restyled.observe(options.trigger, { attributes: true });
+    if (options.trigger.parentElement) restyled.observe(options.trigger.parentElement, { attributes: true, childList: true });
+    for (let around = options.trigger.parentElement?.parentElement; around; around = around.parentElement) restyled.observe(around, { attributes: true });
+  }
+  window.addEventListener("resize", schedulePlace);
+  window.addEventListener("scroll", schedulePlace, true);
   if (options.focus !== false) (panel.querySelector<HTMLElement>("[autofocus]") ?? panel.querySelector<HTMLElement>("button[aria-checked=true]") ?? panel.querySelector<HTMLElement>("button:not(:disabled), input:not(:disabled), textarea, [tabindex='0']") ?? panel).focus();
   return () => {
     cancelAnimationFrame(frame);
     observer.disconnect();
     restyled.disconnect();
-    window.removeEventListener("resize", place);
-    window.removeEventListener("scroll", place, true);
+    window.removeEventListener("resize", schedulePlace);
+    window.removeEventListener("scroll", schedulePlace, true);
     const index = layers.indexOf(layer);
     if (index >= 0) layers.splice(index, 1);
     if (!layers.length) {

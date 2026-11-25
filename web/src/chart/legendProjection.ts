@@ -1,3 +1,5 @@
+import { shapeSetOf, trackedValuesOf } from "./legendShapes";
+
 export type LegendTier = "full" | "compact" | "minimal";
 
 export interface LegendTierInput {
@@ -43,11 +45,30 @@ export interface LegendProjection {
   fields: readonly LegendField[];
 }
 
+const PROBE_DIGITS = ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9"] as const;
+
+function expandShapeDigits(shapes: Iterable<string>): string {
+  const lines: string[] = [];
+  for (const shape of shapes) {
+    if (!shape.includes("0")) {
+      lines.push(shape);
+      continue;
+    }
+    for (const digit of PROBE_DIGITS) lines.push(shape.replaceAll("0", digit));
+  }
+  return lines.join("\n");
+}
+
+function probeShapes(alternatives: readonly string[]): string {
+  const tracked = trackedValuesOf(alternatives);
+  return expandShapeDigits(tracked ? tracked.uniqueShapes() : shapeSetOf(alternatives));
+}
+
 export function reserveLegendFields(fields: readonly LegendField[]): void {
   const styles = fields.map(({ element }) => getComputedStyle(element));
   const probes = fields.map(({ element, alternatives }, i) => {
     const probe = document.createElement("span");
-    probe.textContent = [...new Set(alternatives)].join("\n");
+    probe.textContent = probeShapes(alternatives);
     const style = styles[i];
     if (style) Object.assign(probe.style, { font: style.font, letterSpacing: style.letterSpacing, fontFeatureSettings: style.fontFeatureSettings, fontVariantNumeric: style.fontVariantNumeric });
     Object.assign(probe.style, { position: "absolute", whiteSpace: "pre", width: "max-content", maxWidth: "none", height: "0px", overflow: "hidden" });

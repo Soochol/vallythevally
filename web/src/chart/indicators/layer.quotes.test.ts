@@ -149,8 +149,18 @@ test("체결로 범례 폭을 다시 잴 때 히트맵 점을 다시 훑지 않�
 
   const initial = layer.priceLegendValues();
   expect(initial).toHaveLength(1);
-  expect(trackedValuesOf(initial[0]!.slots[0]!)).not.toBeNull();
+  const askTracked = trackedValuesOf(initial[0]!.slots[0]!)!;
+  const bidTracked = trackedValuesOf(initial[0]!.slots[1]!)!;
+  expect(askTracked).not.toBeNull();
   expect(initial[0]!.slots[0]).toContain(`${formatPrice(70_100, false)} ${formatVolume(1_000)}`);
+  const askVersion = askTracked.shapeVersion;
+  const bidVersion = bidTracked.shapeVersion;
+
+  points.set(at(10), { t: at(10), asks: [[71_200, 1_500]], bids: [[70_900, 2_500]] });
+  layer.setQuoteDepths(new Map([["heat", view]]));
+  layer.priceLegendValues();
+  expect(askTracked.shapeVersion).toBe(askVersion);
+  expect(bidTracked.shapeVersion).toBe(bidVersion);
 
   atCalls = 0;
   for (let tick = 0; tick < 5; tick++) {
@@ -159,10 +169,14 @@ test("체결로 범례 폭을 다시 잴 때 히트맵 점을 다시 훑지 않�
     layer.priceLegendValues();
   }
   expect(atCalls).toBeLessThanOrEqual(5);
+  const askAfterTicks = askTracked.shapeVersion;
+  const bidAfterTicks = bidTracked.shapeVersion;
 
   points.set(at(10), { t: at(10), asks: [[999_000, 5_000_000]], bids: [[998_000, 6_000_000]] });
   layer.setQuoteDepths(new Map([["heat", view]]));
   const refreshed = layer.priceLegendValues();
+  expect(askTracked.shapeVersion).toBe(askAfterTicks + 1);
+  expect(bidTracked.shapeVersion).toBe(bidAfterTicks + 1);
   expect(refreshed[0]!.slots[0]).toContain(`${formatPrice(999_000, false)} ${formatVolume(5_000_000)}`);
   expect(refreshed[0]!.slots[1]).toContain(`${formatPrice(998_000, false)} ${formatVolume(6_000_000)}`);
   layer.dispose();

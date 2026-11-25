@@ -1,5 +1,5 @@
 import { describe, expect, test, vi } from "vitest";
-import { compareIntent, COMPLETION_PREFIX, completionKey, DrawingJournal, parseJournalRecord, stageKey, STAGING_PREFIX } from "./journal";
+import { compareIntent, COMPLETION_PREFIX, completionKey, DrawingJournal, MAX_COMPLETIONS, parseJournalRecord, stageKey, STAGING_PREFIX } from "./journal";
 import { recordKey, type Intent } from "./outbox";
 import type { DrawingBody } from "./types";
 
@@ -339,5 +339,25 @@ describe("drawing journal boundaries and migration", () => {
     const rejecting = { request: () => Promise.reject(new Error("lock failed")) };
     await expect(new DrawingJournal(f.storage, rejecting).admit(intent)).rejects.toThrow("lock failed");
     expect(f.values[stageKey(intent.uuid)]).toBeDefined();
+  });
+
+  test("complete prunes oldest completed keys beyond the cap while preserving pending ids and newest entries", async () => {
+    const initial: Record<string, string> = {};
+    for (let i = 1; i <= MAX_COMPLETIONS + 5; i++) {
+      const id = `d-${i}`;
+      initial[completionKey(id)] = JSON.stringify({ v: 1, id, uuid: `u-${i}`, order: i, lastRevision: i });
+    }
+    const f = fixture(initial);
+    const journal = f.journal();
+    const pending = journal.stage(input("d-1"), () => 10_000);
+    const latest = journal.stage(input("latest"), () => 20_000);
+    await journal.admit(latest);
+    await journal.complete(latest);
+    const completionKeys = Object.keys(f.values).filter((key) => key.startsWith(COMPLETION_PREFIX));
+    expect(completionKeys.length).toBeLessThanOrEqual(MAX_COMPLETIONS);
+    expect(f.values[completionKey("latest")]).toBeDefined();
+    expect(f.values[completionKey("d-1")]).toBeDefined();
+    expect(f.values[stageKey(pending.uuid)]).toBeDefined();
+    expect(f.values[completionKey("d-2")]).toBeUndefined();
   });
 });

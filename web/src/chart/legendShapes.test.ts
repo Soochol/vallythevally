@@ -74,3 +74,15 @@ test("슬롯 서명은 추적 배열은 버전으로, 일반 배열은 모양 �
   expect(sameSlotSignature(slotSignature(["10,000"]), slotSignature(["99,999"]))).toBe(true);
   expect(sameSlotSignature(slotSignature(["10,000"]), slotSignature(["100,000"]))).toBe(false);
 });
+
+test("syncAll은 모양 집합이 그대로면 버전을 올리지 않고 달라질 때만 올린다", () => {
+  const tracked = new TrackedValues();
+  expect(tracked.syncAll(["71,200", "72,300", "—"])).toBe(true);
+  const version = tracked.shapeVersion;
+  expect(tracked.uniqueShapes().sort()).toEqual(["00,000", "—"]);
+  expect(tracked.syncAll(["81,500", "99,900", "—"])).toBe(false);
+  expect(tracked.shapeVersion).toBe(version);
+  expect(tracked.syncAll(["81,500", "100,000", "—"])).toBe(true);
+  expect(tracked.shapeVersion).toBe(version + 1);
+  expect(tracked.uniqueShapes().sort()).toEqual(["00,000", "000,000", "—"]);
+});

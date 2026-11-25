@@ -33,7 +33,7 @@ export class DrawingSync {
   private listeners = new Set<() => void>();
   private version = 0;
   private timer: ReturnType<typeof setTimeout> | null = null;
-  private symbols = new Set<string>();
+  private mountedSymbols = new Map<string, number>();
   private loads = new Map<string, Promise<unknown>>();
   private errors = new Map<string, string>();
   save: SaveState = { kind: "idle" };
@@ -62,8 +62,20 @@ export class DrawingSync {
   private emit() { this.version++; if (useDrawingSave.getState().state !== this.save) useDrawingSave.setState({ state: this.save }); this.listeners.forEach((f) => f()); }
   loadError(symbol: string) { return this.errors.get(symbol) ?? null; }
 
+  acquire(symbol: string): () => void {
+    this.mountedSymbols.set(symbol, (this.mountedSymbols.get(symbol) ?? 0) + 1);
+    void this.load(symbol);
+    let released = false;
+    return () => {
+      if (released) return;
+      released = true;
+      const remaining = (this.mountedSymbols.get(symbol) ?? 1) - 1;
+      if (remaining <= 0) this.mountedSymbols.delete(symbol);
+      else this.mountedSymbols.set(symbol, remaining);
+    };
+  }
+
   load(symbol: string): Promise<unknown> {
-    this.symbols.add(symbol);
     const loading = this.loads.get(symbol);
     if (loading) return loading;
     const task = this.client.fetchQuery({ queryKey: key(symbol), queryFn: ({ signal }) => getJson<Drawing[]>(`/api/drawings?symbol=${encodeURIComponent(symbol)}`, signal), staleTime: 0, retry: false })
@@ -74,8 +86,8 @@ export class DrawingSync {
     return task;
   }
 
-  refresh() { for (const symbol of this.symbols) void this.load(symbol); }
-  private reload() { for (const symbol of this.symbols) void (this.loads.get(symbol) ?? Promise.resolve()).then(() => this.load(symbol)); }
+  refresh() { for (const symbol of this.mountedSymbols.keys()) void this.load(symbol); }
+  private reload() { for (const symbol of this.mountedSymbols.keys()) void (this.loads.get(symbol) ?? Promise.resolve()).then(() => this.load(symbol)); }
 
   private holds(want: queue.Want): boolean {
     if (want.kind !== "put" || want.body.scope.kind !== "cell") return false;
@@ -94,7 +106,7 @@ export class DrawingSync {
     const ops: DrawingOp[] = [...this.desired.values()].flatMap(({ intent: { want } }) =>
       want.kind === "put" && closed(want.body) ? [{ kind: "update", before: want.body, after: { ...want.body, scope: { kind: "layout", layoutId: layout.id } } }] : []);
     if (ops.length) this.write(ops, null);
-    if ([...this.symbols].some((symbol) => (this.client.getQueryData<Drawing[]>(key(symbol)) ?? []).some(closed))) this.reload();
+    if ([...this.mountedSymbols.keys()].some((symbol) => (this.client.getQueryData<Drawing[]>(key(symbol)) ?? []).some(closed))) this.reload();
   }
   dataChanged() { this.refresh(); }
 
@@ -143,7 +155,12 @@ export class DrawingSync {
 
   undo(cellId: WindowId, redo = false) {
     const current = (id: string) => {
-      for (const symbol of this.symbols) { const d = this.drawings(symbol).find((item) => item.id === id); if (d) return d; }
+      const symbols = new Set<string>(this.mountedSymbols.keys());
+      for (const { intent } of this.desired.values()) symbols.add(intent.symbol);
+      for (const [queryKey] of this.client.getQueriesData<Drawing[]>({ queryKey: ["drawings"] })) {
+        if (typeof queryKey[1] === "string") symbols.add(queryKey[1]);
+      }
+      for (const symbol of symbols) { const d = this.drawings(symbol).find((item) => item.id === id); if (d) return d; }
       return null;
     };
     const plan = (redo ? planRedo : planUndo)(this.history(cellId), current);

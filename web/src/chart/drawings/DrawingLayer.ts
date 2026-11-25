@@ -97,7 +97,7 @@ export class DrawingLayer implements ISeriesPrimitive {
   private readonly fontsLoaded = () => this.refresh();
   private attachment = 0;
 
-  constructor(private build: () => RenderFrame) {
+  constructor(private build: () => RenderFrame, private onUpdate?: () => void) {
     const context = document.createElement("canvas").getContext("2d");
     if (!context) throw new Error("Drawing text canvas unavailable");
     this.measure = canvasTextMeasure(context);
@@ -127,15 +127,17 @@ export class DrawingLayer implements ISeriesPrimitive {
   updateAllViews() {
     this.frame = this.prepare(this.build()); this.prices = []; this.times = [];
     const ctx = this.frame.ctx;
-    if (!ctx) return;
-    for (const item of this.frame.items) for (const label of item.labels) {
-      const coordinate = label.axis === "price" ? ctx.yOf(label.value) : ctx.xOf(label.value);
-      if (coordinate === null) continue;
-      const max = label.axis === "price" ? this.frame.pane.height : this.frame.pane.width;
-      const back = drawingColor(label.color); const ink = inkOn(back);
-      const view: ISeriesPrimitiveAxisView = { coordinate: () => coordinate, text: () => label.text, textColor: () => ink, backColor: () => back, visible: () => coordinate >= 0 && coordinate <= max };
-      (label.axis === "price" ? this.prices : this.times).push(view);
+    if (ctx) {
+      for (const item of this.frame.items) for (const label of item.labels) {
+        const coordinate = label.axis === "price" ? ctx.yOf(label.value) : ctx.xOf(label.value);
+        if (coordinate === null) continue;
+        const max = label.axis === "price" ? this.frame.pane.height : this.frame.pane.width;
+        const back = drawingColor(label.color); const ink = inkOn(back);
+        const view: ISeriesPrimitiveAxisView = { coordinate: () => coordinate, text: () => label.text, textColor: () => ink, backColor: () => back, visible: () => coordinate >= 0 && coordinate <= max };
+        (label.axis === "price" ? this.prices : this.times).push(view);
+      }
     }
+    this.onUpdate?.();
   }
   hitTest(x: number, y: number): PrimitiveHoveredItem | null {
     const hit = frameHit(this.current(), { x, y });
