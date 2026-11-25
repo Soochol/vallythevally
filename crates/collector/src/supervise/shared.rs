@@ -15,8 +15,9 @@ use server::shared_data::Broker;
 use tokio::sync::{mpsc, watch};
 use tokio::time::{Instant, sleep_until};
 
+use super::child_slot::{ChildSlot, GoneOutcome, SlotTimer, SupervisedSlot, hash_prefix, next_slot_deadline, shut_down_slots, sleep_until_option};
 use super::journal::{Journal, JournalEvent, journal_path, kst_stamp};
-use super::process::{ChildMessage, ChildProcess, Launcher, SharedLaunch};
+use super::process::{ChildMessage, Launcher, SharedLaunch};
 use super::settings::Settings;
 use super::status::{Alert, AlertKind, KeyState, KeyStatus, KeyUsage, RestProgress};
 use super::tokens::{Halted, Issue, IssueLane, KeyTokens};
@@ -25,7 +26,6 @@ use crate::protocol::{Command, Event, KeyName, ProtocolError, SessionState};
 use crate::shared::{AssignedJob, Assignment, JobStat, UsageLog, UsageMinute};
 
 const ALERT_LIMIT: usize = 100;
-const HASH_PREFIX_LEN: usize = 8;
 const KIS_RETRY: Duration = Duration::from_secs(60);
 
 pub struct SharedInputs {
@@ -131,35 +131,14 @@ fn halted_text(halted: &Halted) -> String {
     if halted.is_8050 { format!("8050을 받았습니다: {}", halted.text) } else { format!("토큰을 받을 수 없습니다: {}", halted.text) }
 }
 
-struct Running {
-    process: Box<dyn ChildProcess>,
-    last_heard: Instant,
-    said_hello: bool,
-    live: bool,
-    retiring: Option<Retiring>,
-}
-
-struct Retiring {
-    stop: Option<String>,
-    kill_at: Instant,
-    killed: bool,
-}
-
-enum Phase {
-    Backoff { until: Instant },
-    Running(Running),
-    Stopped,
-}
-
 struct RestKey {
     name: KeyName,
     broker: Broker,
     hash_prefix: String,
     total_per_second: Option<u32>,
     tokens: Arc<RestTokens>,
-    phase: Phase,
-    restarts: u32,
-    incarnation: u64,
+    slot: ChildSlot<String>,
+    live: bool,
     sent_generation: Option<u64>,
     sent_jobs: Option<Vec<AssignedJob>>,
     issuing: bool,
@@ -167,6 +146,22 @@ struct RestKey {
     usage: Option<UsageMinute>,
     jobs: Vec<JobStat>,
     assigned_job_count: usize,
+}
+
+impl SupervisedSlot for RestKey {
+    type Stop = String;
+
+    fn name(&self) -> KeyName {
+        self.name.clone()
+    }
+
+    fn slot(&self) -> &ChildSlot<String> {
+        &self.slot
+    }
+
+    fn slot_mut(&mut self) -> &mut ChildSlot<String> {
+        &mut self.slot
+    }
 }
 
 enum Inbound {
@@ -205,12 +200,11 @@ impl SharedSupervisor {
             runtimes.push(RestKey {
                 name,
                 broker: key.broker,
-                hash_prefix: key.identity.app_key_hash.strip_prefix("sha256:").unwrap_or(&key.identity.app_key_hash).chars().take(HASH_PREFIX_LEN).collect(),
+                hash_prefix: hash_prefix(&key.identity.app_key_hash),
                 total_per_second: assignment.total_per_second(&key.identity.name),
                 tokens: Arc::new(tokens),
-                phase: Phase::Backoff { until: Instant::now() },
-                restarts: 0,
-                incarnation: 0,
+                slot: ChildSlot::new(Instant::now()),
+                live: false,
                 sent_generation: None,
                 sent_jobs: None,
                 issuing: false,
@@ -299,56 +293,26 @@ impl SharedSupervisor {
     }
 
     fn next_deadline(&self) -> Instant {
-        let mut deadlines = Vec::new();
+        let mut earliest = next_slot_deadline(&self.keys, self.settings.heartbeat_timeout);
         for key in &self.keys {
-            match &key.phase {
-                Phase::Backoff { until } => deadlines.push(*until),
-                Phase::Running(running) => match &running.retiring {
-                    Some(retiring) if !retiring.killed => deadlines.push(retiring.kill_at),
-                    Some(_) => {}
-                    None => deadlines.push(running.last_heard + self.settings.heartbeat_timeout),
-                },
-                Phase::Stopped => {}
+            if let Some(at) = key.issue_at {
+                earliest = Some(earliest.map_or(at, |current| current.min(at)));
             }
-            deadlines.extend(key.issue_at);
         }
-        deadlines.into_iter().min().unwrap_or_else(|| Instant::now() + self.settings.housekeeping_every)
+        earliest.unwrap_or_else(|| Instant::now() + self.settings.housekeeping_every)
     }
 
     fn on_timers(&mut self) {
         let now = Instant::now();
         for index in 0..self.keys.len() {
-            enum Due {
-                Launch,
-                Silent(Duration),
-                Kill,
-                Nothing,
-            }
-            let due = match &self.keys[index].phase {
-                Phase::Backoff { until } if *until <= now => Due::Launch,
-                Phase::Running(running) => match &running.retiring {
-                    Some(retiring) if !retiring.killed && retiring.kill_at <= now => Due::Kill,
-                    None if running.last_heard + self.settings.heartbeat_timeout <= now => Due::Silent(now - running.last_heard),
-                    _ => Due::Nothing,
-                },
-                _ => Due::Nothing,
-            };
-            match due {
-                Due::Launch => self.launch(index),
-                Due::Silent(silent) => {
+            match self.keys[index].slot.poll_timer(now, self.settings.heartbeat_timeout) {
+                SlotTimer::Launch => self.launch(index),
+                SlotTimer::HeartbeatLost(silent) => {
                     let key = self.name(index);
                     self.record(JournalEvent::HeartbeatLost { key, silent_secs: silent.as_secs() });
                     self.retire(index, None);
                 }
-                Due::Kill => {
-                    if let Phase::Running(running) = &mut self.keys[index].phase {
-                        running.process.kill();
-                        if let Some(retiring) = &mut running.retiring {
-                            retiring.killed = true;
-                        }
-                    }
-                }
-                Due::Nothing => {}
+                SlotTimer::Killed | SlotTimer::Nothing => {}
             }
             if self.keys[index].issue_at.is_some_and(|at| at <= now) {
                 self.keys[index].issue_at = None;
@@ -366,50 +330,29 @@ impl SharedSupervisor {
                 self.record(JournalEvent::ChildRejected { key: name, reason: format!("띄우지 못했습니다: {error}") });
                 self.child_gone(index, None);
             }
-            Ok(mut spawned) => {
+            Ok(spawned) => {
                 let key = &mut self.keys[index];
-                key.incarnation += 1;
                 key.sent_generation = None;
                 key.sent_jobs = None;
-                let incarnation = key.incarnation;
-                let restarts = key.restarts;
-                key.phase = Phase::Running(Running { process: spawned.process, last_heard: Instant::now(), said_hello: false, live: false, retiring: None });
-                let inbox = self.inbox.clone();
-                tokio::spawn(async move {
-                    while let Some(message) = spawned.messages.recv().await {
-                        if inbox.send(Inbound::Child { index, incarnation, message }).is_err() {
-                            return;
-                        }
-                    }
+                key.live = false;
+                let (pid, restarts) = key.slot.attach_spawned(spawned, Instant::now(), &self.inbox, move |incarnation, message| {
+                    Inbound::Child { index, incarnation, message }
                 });
-                self.record(JournalEvent::ChildStarted { key: name, pid: spawned.pid, restarts });
+                self.record(JournalEvent::ChildStarted { key: name, pid, restarts });
             }
         }
     }
 
     fn retire(&mut self, index: usize, stop: Option<String>) {
-        let grace = self.settings.shutdown_grace;
-        let Phase::Running(running) = &mut self.keys[index].phase else { return };
-        match &mut running.retiring {
-            None => {
-                running.process.terminate();
-                running.retiring = Some(Retiring { stop, kill_at: Instant::now() + grace, killed: false });
-            }
-            Some(retiring) if retiring.stop.is_none() => retiring.stop = stop,
-            Some(_) => {}
-        }
+        self.keys[index].slot.retire(stop, Instant::now(), self.settings.shutdown_grace);
     }
 
     fn child_gone(&mut self, index: usize, stop: Option<String>) {
-        match stop {
-            Some(reason) => self.stop_key(index, reason),
-            None if self.keys[index].restarts >= self.settings.restart_limit => self.stop_key(index, "그날 재시작 한도를 넘었습니다".to_owned()),
-            None => {
-                let delay = self.settings.restart_delay(self.keys[index].restarts);
-                self.keys[index].restarts += 1;
-                let (key, restart) = (self.name(index), self.keys[index].restarts);
+        match self.keys[index].slot.on_gone(stop, Instant::now(), &self.settings, "그날 재시작 한도를 넘었습니다".to_owned()) {
+            GoneOutcome::Stop(reason) => self.stop_key(index, reason),
+            GoneOutcome::Backoff { restart, delay } => {
+                let key = self.name(index);
                 self.record(JournalEvent::Restart { key, restart, delay_secs: delay.as_secs() });
-                self.keys[index].phase = Phase::Backoff { until: Instant::now() + delay };
             }
         }
     }
@@ -417,7 +360,7 @@ impl SharedSupervisor {
     fn stop_key(&mut self, index: usize, reason: String) {
         let key = self.name(index);
         tracing::error!(%key, %reason, "공용 자료 키를 멈춥니다");
-        self.keys[index].phase = Phase::Stopped;
+        self.keys[index].slot.stop();
         self.record(JournalEvent::KeyStopped { key: key.clone(), reason: reason.clone() });
         self.alert(AlertKind::KeyStopped, format!("{key}를 멈췄습니다: {reason}"));
         let owned: Vec<_> = self.assignment.jobs_of(&self.down).remove(&key).unwrap_or_default();
@@ -437,7 +380,7 @@ impl SharedSupervisor {
 
     fn acquire_token(&mut self, index: usize) {
         let key = &self.keys[index];
-        if key.issuing || key.issue_at.is_some() || matches!(key.phase, Phase::Stopped) {
+        if key.issuing || key.issue_at.is_some() || key.slot.is_stopped() {
             return;
         }
         self.keys[index].issuing = true;
@@ -452,7 +395,7 @@ impl SharedSupervisor {
         match inbound {
             Inbound::Token { index, outcome } => self.on_token(index, outcome),
             Inbound::Child { index, incarnation, message } => {
-                if matches!(self.keys[index].phase, Phase::Running(_)) && self.keys[index].incarnation == incarnation {
+                if self.keys[index].slot.matches_incarnation(incarnation) {
                     self.on_child(index, message);
                 }
             }
@@ -471,21 +414,22 @@ impl SharedSupervisor {
                 tracing::warn!(key = %self.keys[index].name, wait_secs = wait.as_secs(), "토큰을 받지 못해 나중에 다시 시도합니다");
                 self.keys[index].issue_at = Some(Instant::now() + wait);
             }
-            TokenOutcome::Halted(reason) => match &self.keys[index].phase {
-                Phase::Stopped => {}
-                Phase::Running(_) => self.retire(index, Some(reason)),
-                Phase::Backoff { .. } => self.stop_key(index, reason),
-            },
+            TokenOutcome::Halted(reason) => {
+                if self.keys[index].slot.is_running() {
+                    self.retire(index, Some(reason));
+                } else if !self.keys[index].slot.is_stopped() {
+                    self.stop_key(index, reason);
+                }
+            }
         }
     }
 
     fn deliver_token(&mut self, index: usize, token: Secret<String>, generation: u64, expires_at: Option<i64>) {
         let key = &mut self.keys[index];
-        let Phase::Running(running) = &mut key.phase else { return };
-        if !running.said_hello || key.sent_generation == Some(generation) {
+        if !key.slot.is_ready() || key.sent_generation == Some(generation) {
             return;
         }
-        running.process.send(&Command::Token { token, generation, expires_at });
+        key.slot.send_if_ready(&Command::Token { token, generation, expires_at });
         key.sent_generation = Some(generation);
         self.deliver_jobs(index);
     }
@@ -496,11 +440,10 @@ impl SharedSupervisor {
         let date = self.date;
         let key = &mut self.keys[index];
         key.assigned_job_count = wanted.len();
-        let Phase::Running(running) = &mut key.phase else { return };
-        if key.sent_generation.is_none() || key.sent_jobs.as_ref() == Some(&wanted) {
+        if !key.slot.is_ready() || key.sent_generation.is_none() || key.sent_jobs.as_ref() == Some(&wanted) {
             return;
         }
-        running.process.send(&Command::Assign { date, jobs: wanted.clone() });
+        key.slot.send_if_ready(&Command::Assign { date, jobs: wanted.clone() });
         key.sent_jobs = Some(wanted);
     }
 
@@ -508,9 +451,9 @@ impl SharedSupervisor {
         let key = self.name(index);
         match message {
             ChildMessage::Exited(code) => {
-                let Phase::Running(running) = std::mem::replace(&mut self.keys[index].phase, Phase::Stopped) else { return };
+                let Some(stop) = self.keys[index].slot.take_exit() else { return };
                 self.record(JournalEvent::ChildExited { key, code });
-                self.child_gone(index, running.retiring.and_then(|retiring| retiring.stop));
+                self.child_gone(index, stop);
             }
             ChildMessage::BadLine(error) => {
                 let version = matches!(error, ProtocolError::Version(_));
@@ -530,17 +473,13 @@ impl SharedSupervisor {
                 self.retire(index, None);
             }
             Event::Hello { .. } => {
-                if let Phase::Running(running) = &mut self.keys[index].phase {
-                    running.said_hello = true;
-                    running.last_heard = Instant::now();
-                }
+                self.keys[index].slot.mark_hello(Instant::now());
                 self.acquire_token(index);
             }
             Event::Heartbeat { state, .. } => {
-                if let Phase::Running(running) = &mut self.keys[index].phase {
-                    running.last_heard = Instant::now();
-                    running.live = state == SessionState::Live;
-                }
+                let runtime = &mut self.keys[index];
+                runtime.slot.touch(Instant::now());
+                runtime.live = state == SessionState::Live;
             }
             Event::TokenInvalid { generation } => {
                 self.record(JournalEvent::TokenInvalid { key, generation });
@@ -569,15 +508,7 @@ impl SharedSupervisor {
     }
 
     fn state_of(key: &RestKey) -> KeyState {
-        match &key.phase {
-            Phase::Stopped => KeyState::Stopped,
-            Phase::Backoff { .. } if key.incarnation > 0 => KeyState::Disconnected,
-            Phase::Backoff { .. } => KeyState::Waiting,
-            Phase::Running(running) if running.retiring.is_some() => KeyState::Disconnected,
-            Phase::Running(running) if running.live => KeyState::Receiving,
-            Phase::Running(_) if key.sent_generation.is_none() => KeyState::Waiting,
-            Phase::Running(_) => KeyState::Connecting,
-        }
+        key.slot.key_state(key.live, false, key.sent_generation.is_some())
     }
 
     fn publish(&self) {
@@ -592,7 +523,7 @@ impl SharedSupervisor {
                 stocks: 0,
                 messages_per_second: None,
                 register_failures: 0,
-                restarts: key.restarts,
+                restarts: key.slot.restarts(),
                 rest: RestProgress { planned_jobs: key.assigned_job_count, finished_jobs: key.jobs.iter().map(|job| job.runs as usize).sum() },
                 usage: key.usage.as_ref().map(|minute| KeyUsage { minute_start: minute.minute_start, key_max_per_second: minute.key_max_per_second, trs: minute.trs.clone() }),
             })
@@ -608,50 +539,21 @@ impl SharedSupervisor {
     }
 
     async fn shut_down(&mut self) {
-        for key in &mut self.keys {
-            if let Phase::Running(running) = &mut key.phase {
-                running.process.send(&Command::Shutdown);
-            }
+        let mut exited = Vec::new();
+        shut_down_slots(
+            &mut self.keys,
+            &mut self.inbox_source,
+            |inbound| match inbound {
+                Inbound::Child { index, incarnation, message: ChildMessage::Exited(code) } => Some((index, incarnation, code)),
+                _ => None,
+            },
+            self.settings.shutdown_grace,
+            |key, code| exited.push((key, code)),
+            "끝나지 않은 공용 자료 자식이 남았지만 기다리지 않고 끝냅니다",
+        )
+        .await;
+        for (key, code) in exited {
+            self.record(JournalEvent::ChildExited { key, code });
         }
-        let mut stage = 0;
-        let mut deadline = Instant::now() + self.settings.shutdown_grace;
-        while self.keys.iter().any(|key| matches!(key.phase, Phase::Running(_))) {
-            tokio::select! {
-                Some(inbound) = self.inbox_source.recv() => {
-                    if let Inbound::Child { index, incarnation, message: ChildMessage::Exited(code) } = inbound
-                        && self.keys[index].incarnation == incarnation
-                        && matches!(self.keys[index].phase, Phase::Running(_))
-                    {
-                        let key = self.name(index);
-                        self.keys[index].phase = Phase::Stopped;
-                        self.record(JournalEvent::ChildExited { key, code });
-                    }
-                }
-                () = sleep_until(deadline) => {
-                    stage += 1;
-                    deadline = Instant::now() + self.settings.shutdown_grace;
-                    for key in &mut self.keys {
-                        if let Phase::Running(running) = &mut key.phase {
-                            match stage {
-                                1 => running.process.terminate(),
-                                2 => running.process.kill(),
-                                _ => {}
-                            }
-                        }
-                    }
-                    if stage > 2 {
-                        tracing::error!("끝나지 않은 공용 자료 자식이 남았지만 기다리지 않고 끝냅니다");
-                        return;
-                    }
-                }
-            }
-        }
-    }
-}
-
-async fn sleep_until_option(at: Option<Instant>) {
-    match at {
-        Some(at) => sleep_until(at).await,
-        None => std::future::pending().await,
     }
 }

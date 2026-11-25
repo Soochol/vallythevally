@@ -5,19 +5,16 @@ use std::time::Duration;
 use server::shared_data::TradeMinuteLine;
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
-use tokio::time::{Instant, MissedTickBehavior, interval_at, timeout};
 use tokio_tungstenite::tungstenite::Utf8Bytes;
 
-use super::read::{mentions_trade_type, read_trades};
+use super::read::{RawTrade, mentions_trade_type, read_trades};
 use super::state::MinuteState;
 use super::store::TradeMinuteStore;
 use crate::collect::session::WallClock;
 use crate::kst::KstTime;
+use crate::shared::live_tap::{BlockingStore, INPUT_CAPACITY, REPORT_EVERY, delayed_interval, finish_task};
 
-const TICK_EVERY: Duration = Duration::from_secs(1);
-const REPORT_EVERY: Duration = Duration::from_secs(60);
-const INPUT_CAPACITY: usize = 16_384;
-const DRAIN_LIMIT: Duration = Duration::from_secs(5);
+pub(crate) const TICK_EVERY: Duration = Duration::from_secs(1);
 const CLOSE_GRACE_MS: u32 = 1_000;
 const MS_PER_MINUTE: u32 = 60_000;
 
@@ -83,11 +80,7 @@ impl TradeMinuteWorker {
     }
 
     pub async fn finish(self) {
-        let abort = self.task.abort_handle();
-        if timeout(DRAIN_LIMIT, self.task).await.is_err() {
-            abort.abort();
-            tracing::warn!("1분 체결 쓰기가 정한 시간 안에 끝나지 않아 멈춥니다");
-        }
+        finish_task(self.task, "1분 체결 쓰기가 정한 시간 안에 끝나지 않아 멈춥니다").await;
     }
 }
 
@@ -98,8 +91,8 @@ pub fn spawn(store: Box<dyn TradeMinuteStore>, wall: Arc<dyn WallClock>) -> (Tra
     (TradeMinuteFeed { input, stats: stats.clone() }, TradeMinuteWorker { task, stats })
 }
 
-struct Aggregator {
-    store: Option<Box<dyn TradeMinuteStore>>,
+pub(crate) struct Aggregator {
+    store: BlockingStore<Box<dyn TradeMinuteStore>>,
     wall: Arc<dyn WallClock>,
     state: MinuteState,
     stats: Arc<TradeMinuteStats>,
@@ -111,12 +104,9 @@ async fn run(
     wall: Arc<dyn WallClock>,
     stats: Arc<TradeMinuteStats>,
 ) {
-    let mut tick = interval_at(Instant::now() + TICK_EVERY, TICK_EVERY);
-    let mut report = interval_at(Instant::now() + REPORT_EVERY, REPORT_EVERY);
-    for interval in [&mut tick, &mut report] {
-        interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
-    }
-    let mut aggregator = Aggregator { store: Some(store), wall, state: MinuteState::default(), stats };
+    let mut tick = delayed_interval(TICK_EVERY);
+    let mut report = delayed_interval(REPORT_EVERY);
+    let mut aggregator = Aggregator::new(store, wall, stats);
     loop {
         tokio::select! {
             received = frames.recv() => match received {
@@ -135,31 +125,22 @@ async fn run(
 }
 
 impl Aggregator {
-    async fn with_store<T: Send + 'static>(&mut self, work: impl FnOnce(&mut dyn TradeMinuteStore) -> T + Send + 'static) -> Option<T> {
-        let mut store = self.store.take()?;
-        match tokio::task::spawn_blocking(move || {
-            let output = work(store.as_mut());
-            (store, output)
-        })
-        .await
-        {
-            Ok((store, output)) => {
-                self.store = Some(store);
-                Some(output)
-            }
-            Err(error) => {
-                tracing::error!(%error, "1분 체결 파일 작업이 멈춰 이 자식의 1분 체결 쓰기를 그만둡니다");
-                None
-            }
-        }
+    pub(crate) fn new(store: Box<dyn TradeMinuteStore>, wall: Arc<dyn WallClock>, stats: Arc<TradeMinuteStats>) -> Aggregator {
+        Aggregator { store: BlockingStore::new(store), wall, state: MinuteState::default(), stats }
     }
 
-    async fn take(&mut self, frame: Frame) {
-        let kst = KstTime::from_unix_ms(frame.recv_ms);
+    async fn with_store<T: Send + 'static>(&mut self, work: impl FnOnce(&mut dyn TradeMinuteStore) -> T + Send + 'static) -> Option<T> {
+        self.store
+            .run(move |store| work(store.as_mut()), "1분 체결 파일 작업이 멈춰 이 자식의 1분 체결 쓰기를 그만둡니다")
+            .await
+    }
+
+    pub(crate) async fn prepare_frame(&mut self, recv_ms: i64) -> bool {
+        let kst = KstTime::from_unix_ms(recv_ms);
         let minute = (kst.ms_of_day / MS_PER_MINUTE) as u16;
         if self.state.is_too_late(kst.date, minute) {
             TradeMinuteStats::add(&self.stats.too_late, 1);
-            return;
+            return false;
         }
         if let Some((open_date, open_minute)) = self.state.open_key()
             && (kst.date, minute) > (open_date, open_minute)
@@ -170,16 +151,34 @@ impl Aggregator {
             }
         }
         self.state.ensure_open(kst.date, minute);
-        let state = &mut self.state;
-        let read = read_trades(frame.text.as_str(), |trade| {
-            state.push(trade.code, trade.sec, trade.price, trade.quantity);
-        });
+        true
+    }
+
+    pub(crate) fn apply_trade(&mut self, trade: RawTrade<'_>) {
+        self.state.push(trade.code, trade.sec, trade.price, trade.quantity);
+    }
+
+    pub(crate) fn record_read(&self, trades: u64, skipped: u64) {
+        TradeMinuteStats::add(&self.stats.trades, trades);
+        TradeMinuteStats::add(&self.stats.skipped, skipped);
+    }
+
+    pub(crate) fn record_unreadable(&self) {
+        TradeMinuteStats::add(&self.stats.unreadable, 1);
+    }
+
+    pub(crate) fn record_dropped(&self, count: u64) {
+        TradeMinuteStats::add(&self.stats.dropped, count);
+    }
+
+    async fn take(&mut self, frame: Frame) {
+        if !self.prepare_frame(frame.recv_ms).await {
+            return;
+        }
+        let read = read_trades(frame.text.as_str(), |trade| self.apply_trade(trade));
         match read {
-            Ok(reading) => {
-                TradeMinuteStats::add(&self.stats.trades, reading.trades);
-                TradeMinuteStats::add(&self.stats.skipped, reading.skipped);
-            }
-            Err(_) => TradeMinuteStats::add(&self.stats.unreadable, 1),
+            Ok(reading) => self.record_read(reading.trades, reading.skipped),
+            Err(_) => self.record_unreadable(),
         }
     }
 
@@ -192,7 +191,7 @@ impl Aggregator {
         }
     }
 
-    async fn close_if_elapsed(&mut self) {
+    pub(crate) async fn close_if_elapsed(&mut self) {
         if self.state.is_elapsed(self.wall.now_ms(), CLOSE_GRACE_MS) {
             self.flush_open().await;
         }
@@ -205,7 +204,7 @@ impl Aggregator {
         self.write_lines(date, lines).await;
     }
 
-    async fn flush_for_finish(&mut self) {
+    pub(crate) async fn flush_for_finish(&mut self) {
         let Some((date, lines)) = self.state.flush_for_finish() else {
             return;
         };
@@ -230,13 +229,13 @@ impl Aggregator {
         }
     }
 
-    async fn finish(&mut self) {
+    pub(crate) async fn finish(&mut self) {
         if let Some(Err(error)) = self.with_store(|store| store.finish()).await {
             tracing::warn!(%error, "1분 체결 파일을 마무리하지 못했습니다");
         }
     }
 
-    fn report(&self) {
+    pub(crate) fn report(&self) {
         let stats = &self.stats;
         tracing::info!(
             trades = stats.trades.load(Ordering::Relaxed),

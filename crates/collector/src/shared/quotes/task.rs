@@ -7,18 +7,15 @@ use std::time::Duration;
 use server::shared_data::{CurrentQuotes, LiveQuoteWriter, QuoteMinute};
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
-use tokio::time::{Instant, MissedTickBehavior, interval_at, timeout};
 use tokio_tungstenite::tungstenite::Utf8Bytes;
 
 use super::read::{mentions_quote_type, read_books};
 use super::state::{Applied, LiveQuotes};
 use crate::kst::KstTime;
 use crate::protocol::KeyName;
+use crate::shared::live_tap::{BlockingStore, INPUT_CAPACITY, REPORT_EVERY, delayed_interval, finish_task};
 
 pub const FLUSH_EVERY: Duration = Duration::from_secs(5);
-const REPORT_EVERY: Duration = Duration::from_secs(60);
-const INPUT_CAPACITY: usize = 16_384;
-const DRAIN_LIMIT: Duration = Duration::from_secs(5);
 
 #[derive(Debug, Default)]
 pub struct QuoteStats {
@@ -101,11 +98,7 @@ impl QuoteWorker {
     }
 
     pub async fn finish(self) {
-        let abort = self.task.abort_handle();
-        if timeout(DRAIN_LIMIT, self.task).await.is_err() {
-            abort.abort();
-            tracing::warn!("분 호가 집계가 정한 시간 안에 끝나지 않아 멈춥니다");
-        }
+        finish_task(self.task, "분 호가 집계가 정한 시간 안에 끝나지 않아 멈춥니다").await;
     }
 }
 
@@ -202,7 +195,7 @@ impl QuoteStore {
 }
 
 struct Aggregator {
-    store: Option<QuoteStore>,
+    store: BlockingStore<QuoteStore>,
     day: Option<LiveQuotes>,
     now_sec: u32,
     as_of_ms: i64,
@@ -218,13 +211,10 @@ async fn run(
     stats: Arc<QuoteStats>,
     now_ms: i64,
 ) {
-    let mut flush = interval_at(Instant::now() + FLUSH_EVERY, FLUSH_EVERY);
-    let mut report = interval_at(Instant::now() + REPORT_EVERY, REPORT_EVERY);
-    for tick in [&mut flush, &mut report] {
-        tick.set_missed_tick_behavior(MissedTickBehavior::Delay);
-    }
+    let mut flush = delayed_interval(FLUSH_EVERY);
+    let mut report = delayed_interval(REPORT_EVERY);
     let mut aggregator = Aggregator {
-        store: Some(store),
+        store: BlockingStore::new(store),
         day: None,
         now_sec: 0,
         as_of_ms: now_ms,
@@ -259,22 +249,7 @@ async fn run(
 
 impl Aggregator {
     async fn with_store<T: Send + 'static>(&mut self, work: impl FnOnce(&mut QuoteStore) -> T + Send + 'static) -> Option<T> {
-        let mut store = self.store.take()?;
-        match tokio::task::spawn_blocking(move || {
-            let output = work(&mut store);
-            (store, output)
-        })
-        .await
-        {
-            Ok((store, output)) => {
-                self.store = Some(store);
-                Some(output)
-            }
-            Err(error) => {
-                tracing::error!(%error, "분 호가 파일 작업이 멈춰 이 자식의 분 호가 집계를 그만둡니다");
-                None
-            }
-        }
+        self.store.run(work, "분 호가 파일 작업이 멈춰 이 자식의 분 호가 집계를 그만둡니다").await
     }
 
     async fn open_day(&mut self, date: u32) {

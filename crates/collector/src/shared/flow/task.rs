@@ -6,19 +6,17 @@ use std::time::Duration;
 use server::shared_data::{FlowLinkEvent as LinkEvent, FlowRow};
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
-use tokio::time::{Instant, MissedTickBehavior, interval_at, timeout};
+use tokio::time::Instant;
 use tokio_tungstenite::tungstenite::Utf8Bytes;
 
 use super::FlowKindSpec;
 use super::read::{CompiledKind, read_rows};
 use super::store::FileFlowStore;
 use crate::kst::KstTime;
+use crate::shared::live_tap::{BlockingStore, INPUT_CAPACITY, REPORT_EVERY, delayed_interval, finish_task};
 
 pub const FLUSH_EVERY: Duration = Duration::from_secs(1);
 const ALIVE_EVERY: Duration = Duration::from_secs(30);
-const REPORT_EVERY: Duration = Duration::from_secs(60);
-const INPUT_CAPACITY: usize = 16_384;
-const DRAIN_LIMIT: Duration = Duration::from_secs(5);
 const MAX_PENDING_ROWS_PER_STREAM: usize = 16_384;
 const MAX_PENDING_LINKS: usize = 1_024;
 
@@ -100,11 +98,7 @@ impl FlowWorker {
     }
 
     pub async fn finish(self) {
-        let abort = self.task.abort_handle();
-        if timeout(DRAIN_LIMIT, self.task).await.is_err() {
-            abort.abort();
-            tracing::warn!("종목 흐름 쓰기가 정한 시간 안에 끝나지 않아 멈춥니다");
-        }
+        finish_task(self.task, "종목 흐름 쓰기가 정한 시간 안에 끝나지 않아 멈춥니다").await;
     }
 }
 
@@ -135,7 +129,7 @@ struct PendingBatch {
 }
 
 struct Writer {
-    store: Option<FileFlowStore>,
+    store: BlockingStore<FileFlowStore>,
     kinds: Vec<CompiledKind>,
     pending: BTreeMap<StreamKey, PendingStream>,
     pending_links: VecDeque<(u32, i64, LinkEvent)>,
@@ -152,14 +146,11 @@ async fn run(
     stats: Arc<FlowStats>,
     now_ms: i64,
 ) {
-    let mut flush = interval_at(Instant::now() + FLUSH_EVERY, FLUSH_EVERY);
-    let mut alive = interval_at(Instant::now() + ALIVE_EVERY, ALIVE_EVERY);
-    let mut report = interval_at(Instant::now() + REPORT_EVERY, REPORT_EVERY);
-    for tick in [&mut flush, &mut alive, &mut report] {
-        tick.set_missed_tick_behavior(MissedTickBehavior::Delay);
-    }
+    let mut flush = delayed_interval(FLUSH_EVERY);
+    let mut alive = delayed_interval(ALIVE_EVERY);
+    let mut report = delayed_interval(REPORT_EVERY);
     let mut writer = Writer {
-        store: Some(store),
+        store: BlockingStore::new(store),
         kinds: CompiledKind::compile_all(kinds),
         pending: BTreeMap::new(),
         pending_links: VecDeque::new(),
@@ -198,22 +189,7 @@ impl Writer {
     }
 
     async fn with_store<T: Send + 'static>(&mut self, work: impl FnOnce(&mut FileFlowStore) -> T + Send + 'static) -> Option<T> {
-        let mut store = self.store.take()?;
-        match tokio::task::spawn_blocking(move || {
-            let output = work(&mut store);
-            (store, output)
-        })
-        .await
-        {
-            Ok((store, output)) => {
-                self.store = Some(store);
-                Some(output)
-            }
-            Err(error) => {
-                tracing::error!(%error, "종목 흐름 파일 작업이 멈춰 이 자식의 흐름 쓰기를 그만둡니다");
-                None
-            }
-        }
+        self.store.run(work, "종목 흐름 파일 작업이 멈춰 이 자식의 흐름 쓰기를 그만둡니다").await
     }
 
     async fn take(&mut self, item: Input) {

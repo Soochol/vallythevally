@@ -17,6 +17,7 @@ use crate::finalize::RetentionSettings;
 use crate::keys::KeyList;
 
 mod api;
+mod child_slot;
 mod daemon;
 mod files;
 mod handoff;

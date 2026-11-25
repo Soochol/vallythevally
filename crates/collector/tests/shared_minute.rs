@@ -13,6 +13,7 @@ use collector::collect::session::{Finish, Timings, WallClock};
 use collector::collect::ws::{Connector, Socket};
 use collector::protocol::{Command, KeyName, RealType, Registration};
 use collector::raw_read::{RawContent, RawItem, read_day};
+use collector::shared::LiveTapConfig;
 use collector::shared::minute::{FLUSH_EVERY, FileMinuteStore, MinuteStore, spawn};
 use collector::shared::trade_minute::TradeMinuteStore;
 use futures::channel::mpsc::{UnboundedReceiver, UnboundedSender, unbounded};
@@ -230,10 +231,7 @@ async fn start_session(
         commands: command_source,
         events: Events::none(),
         shutdown,
-        minutes,
-        flow: None,
-        quotes,
-        trades,
+        tap: LiveTapConfig { minutes, flow: None, quotes, trades },
     };
     let task = tokio::spawn(run_session(parts));
     commands.send(Ok(Command::Token { token: Secret::new(SECOND_KEY_TOKEN.to_owned()), generation: 1, expires_at: None })).unwrap();

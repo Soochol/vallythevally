@@ -5,6 +5,8 @@ use serde::de::{IgnoredAny, MapAccess, Visitor};
 use serde::{Deserialize, Deserializer};
 use server::shared_data::{BOOK_DEPTH, BookLevel, BookRow};
 
+use crate::shared::live_tap::{seconds_of_day, unsigned_quantity};
+
 const QUOTE_TYPE: &str = "0D";
 const COMBINED_SUFFIX: &str = "_AL";
 
@@ -94,7 +96,7 @@ impl<'de> Deserialize<'de> for BookValues {
                     } else if let Some((is_ask, index, field)) = classify_fid(key.as_ref()) {
                         let parsed = map
                             .next_value::<Option<BorrowedStr<'de>>>()?
-                            .and_then(|BorrowedStr(value)| quantity_of(value.as_ref()))
+                            .and_then(|BorrowedStr(value)| unsigned_quantity(value.as_ref()))
                             .unwrap_or(0);
                         let level = if is_ask { &mut asks[index] } else { &mut bids[index] };
                         match field {
@@ -138,28 +140,6 @@ fn book_of<'a>(entry: &'a Entry<'_>) -> Option<(&'a str, BookRow)> {
     domain::StockCode::parse(code).ok()?;
     let sec = entry.values.sec?;
     Some((code, BookRow { sec, asks: entry.values.asks, bids: entry.values.bids }))
-}
-
-fn seconds_of_day(text: &str) -> Option<u32> {
-    let text = text.trim();
-    if text.len() != 6 || !text.bytes().all(|byte| byte.is_ascii_digit()) {
-        return None;
-    }
-    let part = |range: std::ops::Range<usize>| text[range].parse::<u32>().ok();
-    let (hour, minute, second) = (part(0..2)?, part(2..4)?, part(4..6)?);
-    (hour < 24 && minute < 60 && second < 60).then_some(hour * 3600 + minute * 60 + second)
-}
-
-fn quantity_of(text: &str) -> Option<i64> {
-    let trimmed = text.trim();
-    if trimmed.is_empty() {
-        return Some(0);
-    }
-    let magnitude = trimmed.strip_prefix(['+', '-']).unwrap_or(trimmed);
-    if magnitude.is_empty() || !magnitude.bytes().all(|byte| byte.is_ascii_digit()) {
-        return None;
-    }
-    magnitude.parse().ok()
 }
 
 #[cfg(test)]
