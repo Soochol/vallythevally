@@ -19,7 +19,7 @@ use server::http::{AppState, router};
 use server::kiwoom::auth::KiwoomAuth;
 use server::kiwoom::rest::{Access, KiwoomRest};
 use server::kiwoom::stream::KiwoomStream;
-use server::shared_data::CollectorPaths;
+use server::shared_data::{CollectorPaths, FlowDescription, FlowRow, FlowWriter, flow_path};
 use server::symbols::{Directory, SymbolDirectory};
 use support::ScriptedTransport;
 use tower::ServiceExt;
@@ -126,6 +126,15 @@ struct Harness {
 
 impl Harness {
     async fn start(now: domain::KstTime, hoga: Option<PathBuf>, executions: Vec<Value>, symbol_codes: &[(&str, &str)]) -> Harness {
+        Self::start_with_paths(now, CollectorPaths::new(hoga, None), executions, symbol_codes).await
+    }
+
+    async fn start_with_paths(
+        now: domain::KstTime,
+        paths: CollectorPaths,
+        executions: Vec<Value>,
+        symbol_codes: &[(&str, &str)],
+    ) -> Harness {
         let clock = Clock::fake(now);
         let transport = ScriptedTransport::new();
         transport.respond_with("ka00001", 200, json!({"acctNo": ACCOUNT, "return_code": 0, "return_msg": "정상"}));
@@ -161,7 +170,7 @@ impl Harness {
         });
         state.rest.set_access(Access::Open);
         state.system.bound(HOST.parse().unwrap());
-        state.collector_paths.configure(CollectorPaths::new(hoga, None));
+        state.collector_paths.configure(paths);
         let app = router(state.clone());
         let enable_req = Request::builder()
             .method("PUT")
@@ -188,11 +197,11 @@ impl Harness {
         (status, serde_json::from_slice(&bytes).unwrap_or(Value::Null))
     }
 
-    async fn insert_order_command(&self, command_id: &str, account_ref: &str, order_no: &str, code: &str, price: u64) {
+    async fn insert_order_command(&self, command_id: &str, account_ref: &str, order_no: &str, code: &str, price: u64, created_at: i64) {
         let mut tx = self.state.db.begin_write().await.unwrap();
         sqlx::query(
             "INSERT INTO order_commands (command_id, account_ref, fingerprint, kind, code, venue, quantity, price, target_order_no, batch_id, state, order_no, reconciled, created_at, updated_at) \
-             VALUES (?, ?, ?, 'buy', ?, 'krx', 10, ?, NULL, NULL, 'accepted', ?, 0, 1000, 1000)",
+             VALUES (?, ?, ?, 'buy', ?, 'krx', 10, ?, NULL, NULL, 'accepted', ?, 0, ?, ?)",
         )
         .bind(command_id)
         .bind(account_ref)
@@ -200,6 +209,8 @@ impl Harness {
         .bind(code)
         .bind(price as i64)
         .bind(order_no)
+        .bind(created_at)
+        .bind(created_at)
         .execute(&mut *tx)
         .await
         .unwrap();
@@ -315,7 +326,7 @@ async fn forensics_endpoint_classifies_all_tags_joins_commands_and_validates_dat
     .await;
 
     let account_ref = h.state.accounts.status(None).unwrap().account_ref.unwrap();
-    h.insert_order_command("cmd-forensic-001", &account_ref, "0000101", "005930", 70_000).await;
+    h.insert_order_command("cmd-forensic-001", &account_ref, "0000101", "005930", 70_000, now.unix()).await;
 
     let (bad_status, _) = h.get("/api/trading/executions/forensics?date=2026-11-20").await;
     assert_eq!(bad_status, 400);
@@ -341,7 +352,7 @@ async fn forensics_endpoint_classifies_all_tags_joins_commands_and_validates_dat
     assert_eq!(items[2]["mfePct"], 1.0);
 
     assert_eq!(items[3]["diagnosis"], "early_stop_before_program");
-    assert_eq!(items[3]["programDeltaMillionWon"], 160.0);
+    assert_eq!(items[3]["programDeltaMillionWon"], 170.0);
     assert_eq!(items[3]["maePct"], -1.0);
 
     assert_eq!(items[4]["diagnosis"], "neutral");
@@ -369,6 +380,126 @@ async fn forensics_endpoint_returns_uncollected_fallback_without_collector_data(
     assert!(items[0]["programDeltaMillionWon"].is_null());
     assert!(items[0]["whaleNetDeltaMillionWon"].is_null());
     assert_eq!(items[0]["summary"], "수집 데이터가 없어 체결 해부를 표시할 수 없습니다");
+}
+
+#[tokio::test]
+async fn forensics_endpoint_returns_empty_items_for_mismatched_past_date() {
+    let tmp = tempfile::tempdir().unwrap();
+    let hoga = tmp.path().join("hoga");
+    let past_date = KstDate::parse_yyyymmdd("20261119").unwrap();
+    let today = KstDate::parse_yyyymmdd("20261120").unwrap();
+    let now = kst(today, 11, 0, 0);
+
+    write_complete(&hoga, "20261119", &["005930"]);
+    write_parquet_groups(
+        &hoga,
+        "20261119",
+        "0B",
+        &[(
+            "005930_AL",
+            vec![tick_sql("005930_AL", at_ms(past_date, 9, 30, 0), "093000", 65_000, 50)],
+        )],
+    );
+
+    let executions = vec![execution_row("0000301", "005930", "삼성전자", "buy", 10, 70_000, "09:30:00")];
+    let h = Harness::start(now, Some(hoga), executions, &[("005930", "삼성전자")]).await;
+
+    let (status, body) = h.get("/api/trading/executions/forensics?date=20261119").await;
+    assert_eq!(status, 200);
+    assert_eq!(body["date"], "20261119");
+    assert_eq!(body["items"].as_array().unwrap().len(), 0);
+}
+
+#[tokio::test]
+async fn forensics_live_flow_growth_within_throttle_window_does_not_poison_cache() {
+    let tmp = tempfile::tempdir().unwrap();
+    let shared = tmp.path().join("shared");
+    let date = KstDate::parse_yyyymmdd("20261125").unwrap();
+    let now = kst(date, 9, 35, 0);
+    let fids: [u32; 5] = [20, 10, 15, 1313, 9081];
+    let path = flow_path(&shared, "20261125", "0B", "005930", "k1");
+
+    FlowWriter::open(&path, FlowDescription::new("0B", "005930", "20261125", "k1", &fids))
+        .unwrap()
+        .append(&[FlowRow {
+            recv_ms: at_ms(date, 9, 30, 0),
+            values: vec![
+                Some("093000".to_owned()),
+                Some("70000".to_owned()),
+                Some("50".to_owned()),
+                None,
+                Some("KRX".to_owned()),
+            ],
+        }])
+        .unwrap();
+
+    let executions = vec![execution_row("0000401", "005930", "삼성전자", "buy", 10, 70_000, "09:30:00")];
+    let h = Harness::start_with_paths(
+        now,
+        CollectorPaths::new(None, Some(shared.clone())),
+        executions,
+        &[("005930", "삼성전자")],
+    )
+    .await;
+
+    let (status1, body1) = h.get("/api/trading/executions/forensics").await;
+    assert_eq!(status1, 200);
+    assert_eq!(body1["items"][0]["collected"], true);
+    assert_eq!(body1["items"][0]["maePct"], 0.0);
+
+    FlowWriter::open(&path, FlowDescription::new("0B", "005930", "20261125", "k1", &fids))
+        .unwrap()
+        .append(&[FlowRow {
+            recv_ms: at_ms(date, 9, 32, 0),
+            values: vec![
+                Some("093200".to_owned()),
+                Some("69000".to_owned()),
+                Some("-100".to_owned()),
+                None,
+                Some("KRX".to_owned()),
+            ],
+        }])
+        .unwrap();
+
+    let (status2, body2) = h.get("/api/trading/executions/forensics").await;
+    assert_eq!(status2, 200);
+    assert_eq!(body2["items"][0]["maePct"], 0.0);
+
+    h.state.clock.jump(120);
+
+    let (status3, body3) = h.get("/api/trading/executions/forensics").await;
+    assert_eq!(status3, 200);
+    assert_eq!(body3["items"][0]["maePct"], -1.43);
+}
+
+#[tokio::test]
+async fn forensics_intended_price_ignores_prior_day_and_other_symbol_collisions() {
+    let tmp = tempfile::tempdir().unwrap();
+    let hoga = tmp.path().join("hoga");
+    let date = KstDate::parse_yyyymmdd("20261120").unwrap();
+    let now = kst(date, 15, 0, 0);
+
+    write_complete(&hoga, "20261120", &["005930"]);
+    write_parquet_groups(
+        &hoga,
+        "20261120",
+        "0B",
+        &[(
+            "005930_AL",
+            vec![tick_sql("005930_AL", at_ms(date, 9, 10, 5), "091005", 70_100, 50)],
+        )],
+    );
+
+    let executions = vec![execution_row("0000101", "005930", "삼성전자", "buy", 10, 70_200, "09:10:05")];
+    let h = Harness::start(now, Some(hoga), executions, &[("005930", "삼성전자"), ("000660", "SK하이닉스")]).await;
+    let account_ref = h.state.accounts.status(None).unwrap().account_ref.unwrap();
+
+    h.insert_order_command("cmd-prior-day", &account_ref, "0000101", "005930", 60_000, now.unix() - 86_400).await;
+    h.insert_order_command("cmd-other-symbol", &account_ref, "0000101", "000660", 65_000, now.unix()).await;
+
+    let (status, body) = h.get("/api/trading/executions/forensics?date=20261120").await;
+    assert_eq!(status, 200);
+    assert_eq!(body["items"][0]["slippageTicks"], 1);
 }
 
 #[tokio::test]

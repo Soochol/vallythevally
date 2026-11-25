@@ -133,6 +133,7 @@
 .od-rows-head[data-kind=fills], .od-fill-main { display:grid; align-items:center; column-gap:var(--s3); grid-template-columns:var(--size-54) var(--size-28) minmax(0, 1fr) var(--size-64) var(--size-72); font-variant-numeric:tabular-nums; }
 .od-rows[data-kind=fills] li { display:flex; flex-direction:column; gap:var(--size-2); height:auto; min-height:var(--size-28); padding:var(--size-4) var(--size-4); margin:0 calc(-1 * var(--size-4)); border-radius:var(--r-s); cursor:pointer; }
 .od-rows[data-kind=fills] li:hover { background:var(--hover); }
+.od-rows[data-kind=fills] li:focus-visible { outline:2px solid var(--accent); outline-offset:-2px; }
 .od-rows[data-kind=fills] li[data-selected] { background:var(--accent-soft); }
 .od-fill-symbol { display:flex; min-width:0; }
 .od-fill-diag { display:flex; align-items:center; gap:var(--s2); }

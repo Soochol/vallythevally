@@ -226,6 +226,7 @@ function OrderBody({
         balance={data.balance}
         holding={holding}
         executions={data.executions}
+        ordersOpen={access.open}
         writable={writable}
         mock={mock}
         venue={orderVenue}

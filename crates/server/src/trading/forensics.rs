@@ -1,8 +1,6 @@
 use std::collections::{BTreeSet, HashMap, VecDeque};
-use std::io::ErrorKind;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
-use std::time::UNIX_EPOCH;
 
 use domain::{KstDate, KstTime, MicroEvent, MicroEventKind, MicroSide, StockCode, Symbol, SymbolKind, TimeOfDay};
 use sqlx::Row;
@@ -14,7 +12,7 @@ use crate::collected::kind::{CollectedProgramRow, CollectedTradeTick};
 use crate::collected_store::read_stamp;
 use crate::db::AppDb;
 use crate::micro_events::MicroEventService;
-use crate::shared_data::{CollectorPaths, flow_folder};
+use crate::shared_data::CollectorPaths;
 use crate::symbols::SymbolDirectory;
 use crate::trading::tick;
 
@@ -122,25 +120,32 @@ pub struct ForensicsInputs<'a> {
 }
 
 pub async fn compute_forensics(inputs: ForensicsInputs<'_>) -> Result<ExecutionForensics, String> {
-    let intended_prices = load_intended_prices(inputs.db, &inputs.executions.account_ref)
+    let account = inputs.account_query.map(str::to_owned).or_else(|| Some(inputs.executions.account_ref.clone()));
+    if inputs.executions.day.0 != inputs.date {
+        return Ok(ExecutionForensics {
+            date: inputs.date_str.to_owned(),
+            account,
+            items: Vec::new(),
+        });
+    }
+    let intended_prices = load_intended_prices(inputs.db, &inputs.executions.account_ref, inputs.date)
         .await
         .map_err(|e| format!("주문 명령 이력을 읽지 못했습니다: {e}"))?;
     let unique_stocks = deduplicate_stocks(&inputs.executions.executions);
     let stamp_paths = inputs.paths.clone();
     let stamp_date = inputs.date_str.to_owned();
-    let is_today = inputs.date == inputs.now.kst_date();
-    let stamp_stocks: Vec<String> = unique_stocks.iter().map(|s| s.as_str().to_owned()).collect();
-    let store_stamp = tokio::task::spawn_blocking(move || compute_store_stamp(&stamp_paths, &stamp_date, is_today, &stamp_stocks))
+    let finalized_stamp = tokio::task::spawn_blocking(move || finalized_store_stamp(&stamp_paths, &stamp_date))
         .await
         .map_err(|e| format!("수집 저장소 상태 확인 작업이 멈췄습니다: {e}"))??;
-    let fingerprint = execution_fingerprint(&inputs.executions.executions, &intended_prices);
-    let cache_key = CacheKey {
+    let cache_key = finalized_stamp.map(|store_stamp| CacheKey {
         account: inputs.executions.account_ref.clone(),
         date: inputs.date_str.to_owned(),
-        fingerprint,
+        fingerprint: execution_fingerprint(&inputs.executions.executions, &intended_prices),
         store_stamp,
-    };
-    if let Some(cached) = inputs.cache.get(&cache_key) {
+    });
+    if let Some(ref key) = cache_key
+        && let Some(cached) = inputs.cache.get(key)
+    {
         return Ok(cached);
     }
 
@@ -178,33 +183,43 @@ pub async fn compute_forensics(inputs: ForensicsInputs<'_>) -> Result<ExecutionF
                 .and_then(|s| directory.as_ref().and_then(|dir| dir.get(Symbol::Stock(s))).map(|info| info.kind))
                 .unwrap_or(SymbolKind::Common);
             let data = stock.and_then(|s| per_symbol.get(&s));
-            let intended_price = intended_prices.get(&fill.order_no).copied();
+            let intended_price = intended_prices.get(&(fill.order_no.clone(), fill.code.clone())).copied();
             analyze_execution(fill, inputs.date, kind, intended_price, data)
         })
         .collect();
 
     let result = ExecutionForensics {
         date: inputs.date_str.to_owned(),
-        account: inputs.account_query.map(str::to_owned).or_else(|| Some(inputs.executions.account_ref.clone())),
+        account,
         items,
     };
-    inputs.cache.insert(cache_key, result.clone());
+    if let Some(key) = cache_key {
+        inputs.cache.insert(key, result.clone());
+    }
     Ok(result)
 }
 
-async fn load_intended_prices(db: &AppDb, account_ref: &str) -> Result<HashMap<String, u64>, sqlx::Error> {
+async fn load_intended_prices(db: &AppDb, account_ref: &str, date: KstDate) -> Result<HashMap<(String, String), u64>, sqlx::Error> {
+    let day_start = kst(date, 0, 0, 0).unix();
+    let day_end = day_start + 86_400;
     let rows = sqlx::query(
-        "SELECT order_no, price FROM order_commands WHERE account_ref = ? AND order_no IS NOT NULL AND price IS NOT NULL ORDER BY updated_at DESC, rowid DESC",
+        "SELECT order_no, code, price FROM order_commands \
+         WHERE account_ref = ? AND order_no IS NOT NULL AND price IS NOT NULL \
+           AND created_at >= ? AND created_at < ? \
+         ORDER BY updated_at DESC, rowid DESC",
     )
     .bind(account_ref)
+    .bind(day_start)
+    .bind(day_end)
     .fetch_all(db.read())
     .await?;
     let mut prices = HashMap::new();
     for row in rows {
         let order_no: String = row.try_get("order_no")?;
+        let code: String = row.try_get("code")?;
         let price: i64 = row.try_get("price")?;
         if price > 0 {
-            prices.entry(order_no).or_insert(price as u64);
+            prices.entry((order_no, code)).or_insert(price as u64);
         }
     }
     Ok(prices)
@@ -223,59 +238,14 @@ fn deduplicate_stocks(executions: &[TradingExecution]) -> Vec<StockCode> {
     out
 }
 
-fn compute_store_stamp(paths: &CollectorPaths, date_str: &str, is_today: bool, stocks: &[String]) -> Result<String, String> {
-    if let Some(hoga_dir) = paths.hoga_dir().map(PathBuf::from)
-        && let Some(stamp) = read_stamp(&hoga_dir, date_str)?
-    {
-        return Ok(format!("store:{}", stamp.token()));
-    }
-    if is_today
-        && let Some(shared_dir) = paths.shared_dir()
-    {
-        let hash = hash_flow_dirs(shared_dir, date_str, stocks);
-        return Ok(format!("flow:{hash:016x}"));
-    }
-    Ok(String::from("none"))
+fn finalized_store_stamp(paths: &CollectorPaths, date_str: &str) -> Result<Option<String>, String> {
+    let Some(hoga_dir) = paths.hoga_dir().map(PathBuf::from) else {
+        return Ok(None);
+    };
+    Ok(read_stamp(&hoga_dir, date_str)?.map(|stamp| format!("store:{}", stamp.token())))
 }
 
-fn hash_flow_dirs(shared_dir: &Path, date_str: &str, stocks: &[String]) -> u64 {
-    let mut hash = FNV_OFFSET_BASIS;
-    for kind in ["0B", "0w", "ME"] {
-        for stock in stocks {
-            let dir = flow_folder(shared_dir, date_str, kind, stock);
-            let Ok(entries) = std::fs::read_dir(&dir) else { continue };
-            let mut files: Vec<(String, u64, u128)> = Vec::new();
-            for entry in entries.flatten() {
-                let name = entry.file_name().to_string_lossy().into_owned();
-                if !name.ends_with(".flow") {
-                    continue;
-                }
-                let meta = match entry.metadata() {
-                    Ok(meta) => meta,
-                    Err(e) if e.kind() == ErrorKind::NotFound => continue,
-                    Err(_) => continue,
-                };
-                let modified = meta
-                    .modified()
-                    .ok()
-                    .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
-                    .map_or(0, |d| d.as_nanos());
-                files.push((name, meta.len(), modified));
-            }
-            files.sort_unstable_by(|a, b| a.0.cmp(&b.0));
-            for (name, len, modified) in files {
-                hash = fnv1a_bytes(hash, kind.as_bytes());
-                hash = fnv1a_bytes(hash, stock.as_bytes());
-                hash = fnv1a_bytes(hash, name.as_bytes());
-                hash = fnv1a_bytes(hash, &len.to_le_bytes());
-                hash = fnv1a_bytes(hash, &modified.to_le_bytes());
-            }
-        }
-    }
-    hash
-}
-
-fn execution_fingerprint(executions: &[TradingExecution], intended_prices: &HashMap<String, u64>) -> u64 {
+fn execution_fingerprint(executions: &[TradingExecution], intended_prices: &HashMap<(String, String), u64>) -> u64 {
     let mut hash = FNV_OFFSET_BASIS;
     hash = fnv1a_bytes(hash, &(executions.len() as u64).to_le_bytes());
     for fill in executions {
@@ -287,7 +257,7 @@ fn execution_fingerprint(executions: &[TradingExecution], intended_prices: &Hash
         hash = fnv1a_bytes(hash, fill.time.as_bytes());
         hash = fnv1a_bytes(hash, &fill.price.to_le_bytes());
         hash = fnv1a_bytes(hash, &fill.quantity.to_le_bytes());
-        let intended = intended_prices.get(&fill.order_no).copied().unwrap_or(0);
+        let intended = intended_prices.get(&(fill.order_no.clone(), fill.code.clone())).copied().unwrap_or(0);
         hash = fnv1a_bytes(hash, &intended.to_le_bytes());
     }
     hash
@@ -370,10 +340,10 @@ fn analyze_execution(
     let whale_net_delta_million_won = compute_whale_net_delta(&collected.ticks, whale_start_secs, fill_secs);
 
     let ref_price = intended_price.or_else(|| nearest_reference_price(&collected.ticks, fill_secs, post_end_secs));
-    let slippage_ticks = Some(match ref_price {
-        Some(reference) if reference > 0 && fill.price > 0 => tick::slippage_ticks(fill.side, reference, fill.price, kind),
-        _ => 0,
-    });
+    let slippage_ticks = match ref_price {
+        Some(reference) if reference > 0 && fill.price > 0 => Some(tick::slippage_ticks(fill.side, reference, fill.price, kind)),
+        _ => None,
+    };
 
     let diagnosis = classify_diagnosis(
         fill.side,
@@ -426,17 +396,15 @@ fn compute_mfe_mae(
     if fill_price == 0 {
         return (None, None, None);
     }
-    let start_idx = ticks.partition_point(|t| t.hhmmss.secs() < start_secs);
     let entry = fill_price as f64;
     let mut found = false;
     let mut max_rel = 0.0f64;
     let mut min_rel = 0.0f64;
+    let mut last_order: Option<(u32, i64)> = None;
     let mut last_rel = 0.0f64;
-    for tick in &ticks[start_idx..] {
-        if tick.hhmmss.secs() > end_secs {
-            break;
-        }
-        if tick.price_won == 0 {
+    for tick in ticks {
+        let secs = tick.hhmmss.secs();
+        if secs < start_secs || secs > end_secs || tick.price_won == 0 {
             continue;
         }
         let rel = match side {
@@ -451,7 +419,11 @@ fn compute_mfe_mae(
             max_rel = max_rel.max(rel);
             min_rel = min_rel.min(rel);
         }
-        last_rel = rel;
+        let order = (secs, tick.recv_ms);
+        if last_order.is_none_or(|best| order >= best) {
+            last_order = Some(order);
+            last_rel = rel;
+        }
     }
     if !found {
         return (None, None, None);
@@ -460,7 +432,6 @@ fn compute_mfe_mae(
 }
 
 fn analyze_micro_window(events: &[MicroEvent], side: OrderSide, start_ms: i64, end_ms: i64) -> (f64, bool, bool) {
-    let start_idx = events.partition_point(|e| e.recv_ms < start_ms);
     let supporting_side = match side {
         OrderSide::Buy => MicroSide::Bid,
         OrderSide::Sell => MicroSide::Ask,
@@ -468,9 +439,9 @@ fn analyze_micro_window(events: &[MicroEvent], side: OrderSide, start_ms: i64, e
     let mut max_cancel_rate = 0.0f64;
     let mut has_spoof = false;
     let mut iceberg_supported = false;
-    for event in &events[start_idx..] {
-        if event.recv_ms > end_ms {
-            break;
+    for event in events {
+        if event.recv_ms < start_ms || event.recv_ms > end_ms {
+            continue;
         }
         match event.kind {
             MicroEventKind::SpoofCancel => {
@@ -487,60 +458,54 @@ fn analyze_micro_window(events: &[MicroEvent], side: OrderSide, start_ms: i64, e
     (round2(max_cancel_rate), has_spoof, iceberg_supported)
 }
 
-fn program_window_delta(rows: &[CollectedProgramRow], start_secs: u32, end_secs: u32) -> Option<f64> {
+fn program_delta(rows: &[CollectedProgramRow], start_secs: u32, inclusive_start: bool, end_secs: u32) -> Option<f64> {
     if rows.is_empty() {
         return None;
     }
-    let start_idx = rows.partition_point(|r| r.hhmmss.secs() < start_secs);
-    let end_idx = rows.partition_point(|r| r.hhmmss.secs() <= end_secs);
-    if start_idx >= end_idx {
-        return Some(0.0);
+    let mut before_last: Option<((u32, i64), &CollectedProgramRow)> = None;
+    let mut first_in: Option<((u32, i64), &CollectedProgramRow)> = None;
+    let mut last_in: Option<((u32, i64), &CollectedProgramRow)> = None;
+    for row in rows {
+        let secs = row.hhmmss.secs();
+        let order = (secs, row.recv_ms);
+        let is_before = if inclusive_start { secs < start_secs } else { secs <= start_secs };
+        if is_before {
+            if before_last.is_none_or(|(best, _)| order >= best) {
+                before_last = Some((order, row));
+            }
+        } else if secs <= end_secs {
+            if first_in.is_none_or(|(best, _)| order < best) {
+                first_in = Some((order, row));
+            }
+            if last_in.is_none_or(|(best, _)| order >= best) {
+                last_in = Some((order, row));
+            }
+        }
     }
-    let last = &rows[end_idx - 1];
-    let delta = if start_idx > 0 {
-        last.net_buy_amount_million_won - rows[start_idx - 1].net_buy_amount_million_won
-    } else if end_idx - start_idx >= 2 {
-        last.net_buy_amount_million_won - rows[start_idx].net_buy_amount_million_won
-    } else if last.net_buy_amount_change_million_won != 0 {
-        last.net_buy_amount_change_million_won
-    } else {
-        last.net_buy_amount_million_won
+    let (Some((_, first)), Some((_, last))) = (first_in, last_in) else {
+        return Some(0.0);
     };
-    Some(round2(delta as f64))
+    let baseline = match before_last {
+        Some((_, prior)) => prior.net_buy_amount_million_won,
+        None => first.net_buy_amount_million_won - first.net_buy_amount_change_million_won,
+    };
+    Some(round2((last.net_buy_amount_million_won - baseline) as f64))
+}
+
+fn program_window_delta(rows: &[CollectedProgramRow], start_secs: u32, end_secs: u32) -> Option<f64> {
+    program_delta(rows, start_secs, true, end_secs)
 }
 
 fn program_post_delta(rows: &[CollectedProgramRow], fill_secs: u32, end_secs: u32) -> Option<f64> {
-    if rows.is_empty() {
-        return None;
-    }
-    let after_fill_idx = rows.partition_point(|r| r.hhmmss.secs() <= fill_secs);
-    let end_idx = rows.partition_point(|r| r.hhmmss.secs() <= end_secs);
-    if after_fill_idx >= end_idx {
-        return Some(0.0);
-    }
-    let last = &rows[end_idx - 1];
-    let delta = if after_fill_idx > 0 {
-        last.net_buy_amount_million_won - rows[after_fill_idx - 1].net_buy_amount_million_won
-    } else {
-        let change_sum: i64 = rows[after_fill_idx..end_idx]
-            .iter()
-            .map(|row| row.net_buy_amount_change_million_won)
-            .sum();
-        if change_sum != 0 {
-            change_sum
-        } else {
-            last.net_buy_amount_million_won - rows[after_fill_idx].net_buy_amount_million_won
-        }
-    };
-    Some(round2(delta as f64))
+    program_delta(rows, fill_secs, false, end_secs)
 }
 
 fn compute_whale_net_delta(ticks: &[CollectedTradeTick], start_secs: u32, end_secs: u32) -> f64 {
-    let start_idx = ticks.partition_point(|t| t.hhmmss.secs() < start_secs);
     let mut net_won: i128 = 0;
-    for tick in &ticks[start_idx..] {
-        if tick.hhmmss.secs() > end_secs {
-            break;
+    for tick in ticks {
+        let secs = tick.hhmmss.secs();
+        if secs < start_secs || secs > end_secs {
+            continue;
         }
         let value = tick.value_won();
         if value >= WHALE_TICK_THRESHOLD_WON {
@@ -556,14 +521,25 @@ fn compute_whale_net_delta(ticks: &[CollectedTradeTick], start_secs: u32, end_se
 }
 
 fn nearest_reference_price(ticks: &[CollectedTradeTick], fill_secs: u32, end_secs: u32) -> Option<u64> {
-    let idx = ticks.partition_point(|t| t.hhmmss.secs() <= fill_secs);
-    if idx > 0 {
-        return Some(ticks[idx - 1].price_won);
+    let mut best_before: Option<((u32, i64), u64)> = None;
+    let mut best_after: Option<((u32, i64), u64)> = None;
+    for tick in ticks {
+        if tick.price_won == 0 {
+            continue;
+        }
+        let secs = tick.hhmmss.secs();
+        let order = (secs, tick.recv_ms);
+        if secs <= fill_secs {
+            if best_before.is_none_or(|(best, _)| order >= best) {
+                best_before = Some((order, tick.price_won));
+            }
+        } else if secs <= end_secs
+            && best_after.is_none_or(|(best, _)| order < best)
+        {
+            best_after = Some((order, tick.price_won));
+        }
     }
-    ticks
-        .get(idx)
-        .filter(|t| t.hhmmss.secs() <= end_secs)
-        .map(|t| t.price_won)
+    best_before.or(best_after).map(|(_, price)| price)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -794,7 +770,7 @@ mod tests {
         assert_eq!(res.mae_pct, Some(-0.86));
         assert_eq!(res.mfe_pct, Some(0.0));
         assert_eq!(res.slippage_ticks, Some(1));
-        assert_eq!(res.program_delta_million_won, Some(170.0));
+        assert_eq!(res.program_delta_million_won, Some(180.0));
     }
 
     #[test]
@@ -831,5 +807,154 @@ mod tests {
         assert!(cache.get(&key("20261123")).is_some());
         assert!(cache.get(&key("20261124")).is_none());
         assert!(cache.get(&key("20261125")).is_some());
+    }
+
+    #[test]
+    fn program_window_delta_includes_first_row_inflow_without_prior_row() {
+        let date = KstDate::new(2026, 11, 25).unwrap();
+        let rows = vec![
+            program_row(date, 10, 0, 5, 150, 150),
+            program_row(date, 10, 2, 0, 200, 50),
+        ];
+        let delta = program_window_delta(&rows, hms(9, 59, 50).secs(), hms(10, 5, 0).secs());
+        assert_eq!(delta, Some(200.0));
+    }
+
+    #[test]
+    fn program_post_delta_zero_sum_flow_stays_zero_and_neutral() {
+        let date = KstDate::new(2026, 11, 25).unwrap();
+        let data = SymbolCollectedData {
+            ticks: vec![
+                tick_row(date, 10, 0, 0, 70_000, -50),
+                tick_row(date, 10, 2, 0, 70_600, 100),
+            ],
+            program: vec![
+                program_row(date, 10, 1, 0, -150, -150),
+                program_row(date, 10, 3, 0, 0, 150),
+            ],
+            micro_events: vec![],
+        };
+        let fill = make_fill("0005", OrderSide::Sell, 70_000, "100000");
+        assert_eq!(program_post_delta(&data.program, hms(10, 0, 0).secs(), hms(10, 5, 0).secs()), Some(0.0));
+        let res = analyze_execution(&fill, date, SymbolKind::Common, Some(70_000), Some(&data));
+        assert_eq!(res.diagnosis, DiagnosisTag::Neutral);
+        assert_eq!(res.program_delta_million_won, Some(0.0));
+    }
+
+    #[test]
+    fn out_of_order_hhmmss_ticks_and_program_rows_are_not_truncated() {
+        let date = KstDate::new(2026, 11, 25).unwrap();
+        let data = SymbolCollectedData {
+            ticks: vec![
+                CollectedTradeTick {
+                    recv_ms: at_ms(date, 9, 30, 15),
+                    hhmmss: hms(9, 30, 15),
+                    price_won: 70_000,
+                    signed_qty: 50,
+                    instant_value_thousand_won: None,
+                    exchange: None,
+                },
+                CollectedTradeTick {
+                    recv_ms: at_ms(date, 9, 30, 16),
+                    hhmmss: hms(9, 36, 0),
+                    price_won: 70_100,
+                    signed_qty: 10,
+                    instant_value_thousand_won: None,
+                    exchange: None,
+                },
+                CollectedTradeTick {
+                    recv_ms: at_ms(date, 9, 30, 17),
+                    hhmmss: hms(9, 32, 0),
+                    price_won: 69_000,
+                    signed_qty: -100,
+                    instant_value_thousand_won: None,
+                    exchange: None,
+                },
+                CollectedTradeTick {
+                    recv_ms: at_ms(date, 9, 30, 18),
+                    hhmmss: hms(9, 29, 30),
+                    price_won: 70_000,
+                    signed_qty: 2_000,
+                    instant_value_thousand_won: None,
+                    exchange: None,
+                },
+                CollectedTradeTick {
+                    recv_ms: at_ms(date, 9, 30, 19),
+                    hhmmss: hms(9, 33, 0),
+                    price_won: 70_700,
+                    signed_qty: 100,
+                    instant_value_thousand_won: None,
+                    exchange: None,
+                },
+            ],
+            program: vec![
+                CollectedProgramRow {
+                    recv_ms: at_ms(date, 9, 30, 16),
+                    hhmmss: hms(9, 36, 0),
+                    price_won: Some(70_000),
+                    sell_qty: 0,
+                    sell_amount_million_won: 0,
+                    buy_qty: 0,
+                    buy_amount_million_won: 0,
+                    net_buy_qty: 0,
+                    net_buy_qty_change: 0,
+                    net_buy_amount_million_won: 300,
+                    net_buy_amount_change_million_won: 100,
+                },
+                CollectedProgramRow {
+                    recv_ms: at_ms(date, 9, 30, 17),
+                    hhmmss: hms(9, 32, 0),
+                    price_won: Some(70_000),
+                    sell_qty: 0,
+                    sell_amount_million_won: 0,
+                    buy_qty: 0,
+                    buy_amount_million_won: 0,
+                    net_buy_qty: 0,
+                    net_buy_qty_change: 0,
+                    net_buy_amount_million_won: 200,
+                    net_buy_amount_change_million_won: 150,
+                },
+                CollectedProgramRow {
+                    recv_ms: at_ms(date, 9, 30, 18),
+                    hhmmss: hms(9, 29, 50),
+                    price_won: Some(70_000),
+                    sell_qty: 0,
+                    sell_amount_million_won: 0,
+                    buy_qty: 0,
+                    buy_amount_million_won: 0,
+                    net_buy_qty: 0,
+                    net_buy_qty_change: 0,
+                    net_buy_amount_million_won: 50,
+                    net_buy_amount_change_million_won: 50,
+                },
+            ],
+            micro_events: vec![],
+        };
+        let fill = make_fill("0006", OrderSide::Buy, 70_000, "093015");
+        let res = analyze_execution(&fill, date, SymbolKind::Common, None, Some(&data));
+        assert_eq!(res.mae_pct, Some(-1.43));
+        assert_eq!(res.mfe_pct, Some(1.0));
+        assert_eq!(res.whale_net_delta_million_won, Some(140.0));
+        assert_eq!(res.program_delta_million_won, Some(150.0));
+        assert_eq!(res.diagnosis, DiagnosisTag::WhaleDivergence);
+    }
+
+    #[test]
+    fn zero_price_fill_or_intended_price_returns_null_slippage_ticks() {
+        let date = KstDate::new(2026, 11, 25).unwrap();
+        let data = SymbolCollectedData {
+            ticks: vec![tick_row(date, 9, 30, 15, 70_000, 50)],
+            program: vec![],
+            micro_events: vec![],
+        };
+        let zero_fill = make_fill("0007", OrderSide::Buy, 0, "093015");
+        let res_zero_fill = analyze_execution(&zero_fill, date, SymbolKind::Common, Some(70_000), Some(&data));
+        assert!(res_zero_fill.slippage_ticks.is_none());
+        assert!(res_zero_fill.mfe_pct.is_none());
+        assert!(res_zero_fill.mae_pct.is_none());
+
+        let normal_fill = make_fill("0008", OrderSide::Buy, 70_200, "093015");
+        let res_zero_intended = analyze_execution(&normal_fill, date, SymbolKind::Common, Some(0), Some(&data));
+        assert!(res_zero_intended.slippage_ticks.is_none());
     }
 }

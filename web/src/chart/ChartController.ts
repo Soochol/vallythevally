@@ -39,7 +39,7 @@ import { barAtRightEdge, type JumpAnchor, jumpAnchor, jumpHeld, type JumpOutcome
 import { type CompareEntry, CompareLayer, compareVenue } from "./compare";
 import { CompareLegend } from "./compareLegend";
 import { CrosshairMarker } from "./crosshairMarker";
-import { type BarInterval, barInterval, crosshairVisible, type PointedBar } from "./crosshairSync";
+import { type BarInterval, barInterval, crosshairVisible, matchingBarTime, type PointedBar } from "./crosshairSync";
 import { DaySeparators } from "./daySeparators";
 import { ReplayDays } from "./replayDays";
 import { extremeChange, type ExtremeTag, ExtremeTags } from "./extremeTags";
@@ -476,7 +476,27 @@ export class ChartController {
 
   snapCrosshair(symbol: SymbolCode, bar: BarInterval): boolean {
     if (!this.view || this.view.symbol !== symbol || this.ready === null) return false;
+    const target = matchingBarTime(bar, { bars: this.bars, period: this.period() });
+    if (target !== null) {
+      const targetIndex = barIndexAt(this.bars, target);
+      const timeScale = this.chart.timeScale();
+      const range = timeScale.getVisibleLogicalRange();
+      if (targetIndex >= 0 && range !== null) {
+        const x = timeScale.timeToCoordinate(toChartTime(target));
+        const width = timeScale.width();
+        const offscreen = x === null || !Number.isFinite(x) || x < 0 || x > width;
+        if (targetIndex < range.from || targetIndex > range.to || offscreen) {
+          const span = Math.max(10, range.to - range.from);
+          const half = span / 2;
+          const maxFrom = Math.max(0, this.bars.length - 1 + RIGHT_OFFSET - span);
+          const from = Math.max(0, Math.min(targetIndex - half, maxFrom));
+          this.initialRange.release();
+          timeScale.setVisibleLogicalRange({ from, to: from + span });
+        }
+      }
+    }
     this.crosshairMarker.show(bar);
+    this.scheduleFrame();
     return true;
   }
 

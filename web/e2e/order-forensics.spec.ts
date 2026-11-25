@@ -173,3 +173,267 @@ test("수집 데이터가 없는 체결은 미수집 안내를 카드로 보인�
   await expect(card).toContainText("미수집 종목");
   await expect(card).toContainText("수집 데이터가 없어 체결 해부를 표시할 수 없습니다");
 });
+
+test("새 부분 체결이 들어오면 해부를 즉시 다시 조회하고 열려 있던 카드를 유지하며 이전 체결 해부를 잘못 붙이지 않는다", async ({ page, scenario }) => {
+  ordersOn(scenario);
+  const api = tradingApi(scenario);
+  const bar = scenario.market.page({ symbol: CODE, period: "1m", venue: "combined" }).bars.at(-15)!;
+  const firstFill: TradingExecution = {
+    orderNo: "0003001",
+    code: CODE,
+    name: "삼성전자",
+    side: "buy",
+    quantity: 10,
+    price: 70_000,
+    time: "091500",
+    venue: "krx",
+  };
+  const secondPartialFill: TradingExecution = {
+    orderNo: "0003001",
+    code: CODE,
+    name: "삼성전자",
+    side: "buy",
+    quantity: 5,
+    price: 70_200,
+    time: "092000",
+    venue: "krx",
+  };
+  api.executions = [firstFill];
+
+  const firstForensic = {
+    orderNo: "0003001",
+    code: CODE,
+    name: "삼성전자",
+    side: "buy" as const,
+    time: "091500",
+    fillAt: bar.t,
+    price: 70_000,
+    quantity: 10,
+    collected: true,
+    diagnosis: "iceberg_support" as const,
+    mfePct: 1.1,
+    maePct: -0.05,
+    slippageTicks: 0,
+    preEntryCancelRatePct: 0,
+    programDeltaMillionWon: 80,
+    whaleNetDeltaMillionWon: 30,
+    summary: "진입 직전 아이스버그 지지 포착 · 5분 MFE +1.10%",
+  };
+  const secondForensic = {
+    orderNo: "0003001",
+    code: CODE,
+    name: "삼성전자",
+    side: "buy" as const,
+    time: "092000",
+    fillAt: bar.t + 300,
+    price: 70_200,
+    quantity: 5,
+    collected: true,
+    diagnosis: "spoof_chase_trap" as const,
+    mfePct: 0.0,
+    maePct: -1.2,
+    slippageTicks: 2,
+    preEntryCancelRatePct: 85.0,
+    programDeltaMillionWon: -110,
+    whaleNetDeltaMillionWon: -60,
+    summary: "진입 직전 허수 취소율 85.0% 감지 · 5분 MAE -1.20%",
+  };
+
+  let forensicsResponse: ExecutionForensics = { date: "20261109", account: ACCOUNT, items: [firstForensic] };
+  scenario.on((url) => url.pathname === "/api/trading/executions/forensics", () => ({ body: forensicsResponse }));
+
+  await openOrderWindow(page, scenario, false, "krx", undefined, false, undefined, intradayArrangement);
+  await page.getByTestId("account-tab-fills").click();
+  await expect(page.getByTestId("account-fill")).toHaveCount(1);
+  await page.getByTestId("account-fill").first().click();
+
+  const card = page.getByTestId("execution-forensic-card");
+  await expect(card).toBeVisible();
+  await expect(card).toHaveAttribute("data-diagnosis", "iceberg_support");
+
+  const heldForensics = scenario.hold((url) => url.pathname === "/api/trading/executions/forensics");
+  api.executions = [firstFill, secondPartialFill];
+  forensicsResponse = { date: "20261109", account: ACCOUNT, items: [firstForensic, secondForensic] };
+  scenario.live.emit({ type: "trading_account_changed", accountRef: ACCOUNT });
+
+  await expect(page.getByTestId("account-fill")).toHaveCount(2);
+  await expect(card).toBeVisible();
+  await expect(card).toHaveAttribute("data-diagnosis", "iceberg_support");
+  await expect(page.getByTestId("account-fill").first().getByTestId("fill-diagnosis-badge")).toHaveCount(0);
+
+  await heldForensics.received;
+  heldForensics.reply({ body: forensicsResponse });
+
+  await expect(page.getByTestId("account-fill").first().getByTestId("fill-diagnosis-badge")).toHaveText("허수벽 추격 함정");
+  await expect(card).toBeVisible();
+  await expect(card).toHaveAttribute("data-diagnosis", "iceberg_support");
+});
+
+test("초기 130봉 범위 밖의 과거 체결을 누르면 차트가 해당 시점으로 스크롤해 십자선을 보인다", async ({ page, scenario }) => {
+  ordersOn(scenario);
+  const api = tradingApi(scenario);
+  const bars = scenario.market.page({ symbol: CODE, period: "1m", venue: "combined" }).bars;
+  const oldBar = bars[20]!;
+  api.executions = [
+    { orderNo: "0004001", code: CODE, name: "삼성전자", side: "buy", quantity: 10, price: 70_000, time: "090500", venue: "krx" },
+  ];
+  scenario.on(
+    (url) => url.pathname === "/api/trading/executions/forensics",
+    () => ({
+      body: {
+        date: "20261109",
+        account: ACCOUNT,
+        items: [
+          {
+            orderNo: "0004001",
+            code: CODE,
+            name: "삼성전자",
+            side: "buy",
+            time: "090500",
+            fillAt: oldBar.t,
+            price: 70_000,
+            quantity: 10,
+            collected: true,
+            diagnosis: "iceberg_support",
+            mfePct: 1.0,
+            maePct: 0.0,
+            slippageTicks: 0,
+            preEntryCancelRatePct: 0,
+            programDeltaMillionWon: 50,
+            whaleNetDeltaMillionWon: 0,
+            summary: "진입 직전 아이스버그 지지 포착 · 5분 MFE +1.00%",
+          },
+        ],
+      } satisfies ExecutionForensics,
+    }),
+  );
+
+  await openOrderWindow(page, scenario, false, "krx", undefined, false, undefined, intradayArrangement);
+  await page.getByTestId("account-tab-fills").click();
+  await page.getByTestId("account-fill").first().click();
+
+  const syncedCrosshair = cell(page).locator("[data-synced-crosshair]");
+  await expect(syncedCrosshair).toBeVisible();
+  await expect(syncedCrosshair).toHaveAttribute("data-synced-time", String(oldBar.t));
+});
+
+test("링크된 주문창의 체결 점프는 같은 링크 차트만 이동시키고 다른 링크나 미링크 차트에는 번지지 않는다", async ({ page, scenario }) => {
+  ordersOn(scenario);
+  const api = tradingApi(scenario);
+  const targetBar = scenario.market.page({ symbol: CODE, period: "1m", venue: "combined" }).bars.at(-10)!;
+  api.executions = [
+    { orderNo: "0005001", code: CODE, name: "삼성전자", side: "buy", quantity: 10, price: 70_000, time: "093000", venue: "krx" },
+  ];
+  scenario.on(
+    (url) => url.pathname === "/api/trading/executions/forensics",
+    () => ({
+      body: {
+        date: "20261109",
+        account: ACCOUNT,
+        items: [
+          {
+            orderNo: "0005001",
+            code: CODE,
+            name: "삼성전자",
+            side: "buy",
+            time: "093000",
+            fillAt: targetBar.t,
+            price: 70_000,
+            quantity: 10,
+            collected: true,
+            diagnosis: "whale_divergence",
+            mfePct: 0.9,
+            maePct: -0.1,
+            slippageTicks: 0,
+            preEntryCancelRatePct: 0,
+            programDeltaMillionWon: 40,
+            whaleNetDeltaMillionWon: 180,
+            summary: "진입 1분 고래 순체결 +1.8억 · 5분 MFE +0.90%",
+          },
+        ],
+      } satisfies ExecutionForensics,
+    }),
+  );
+
+  await openOrderWindow(page, scenario, true, "krx", undefined, false, undefined, (windows) => [
+    ...windows.map((window) => {
+      if (window.id === "cell-0") return { ...window, link: "a" as const, symbol: CODE, period: "1m" as const, chartSettings: SETTINGS };
+      if (window.id === "cell-1") return { ...window, link: "b" as const, symbol: CODE, period: "1m" as const, chartSettings: SETTINGS };
+      if (window.kind === "order") return { ...window, link: "a" as const };
+      return window;
+    }),
+    { id: "cell-2", link: null, kind: "chart" as const, symbol: CODE, venue: "combined" as const, period: "1m" as const, chartSettings: SETTINGS },
+  ]);
+
+  await expect(cell(page, 1)).toHaveAttribute("aria-busy", "false");
+  await expect(cell(page, 2)).toHaveAttribute("aria-busy", "false");
+  await expect(cell(page, 3)).toHaveAttribute("aria-busy", "false");
+
+  await page.getByTestId("account-tab-fills").click();
+  await page.getByTestId("account-fill").first().click();
+
+  await expect(cell(page, 1).locator("[data-synced-crosshair]")).toBeVisible();
+  await expect(cell(page, 1).locator("[data-synced-crosshair]")).toHaveAttribute("data-synced-time", String(targetBar.t));
+  await expect(cell(page, 2).locator("[data-synced-crosshair]")).toBeHidden();
+  await expect(cell(page, 3).locator("[data-synced-crosshair]")).toBeHidden();
+});
+
+test("주문 사용이 꺼져 있을 때 내 체결 탭을 열어도 해부 API를 호출하지 않는다", async ({ page, scenario }) => {
+  tradingApi(scenario);
+  await openOrderWindow(page, scenario);
+
+  const forensicsCalls = () => scenario.requests.filter((r) => new URL(r.url()).pathname === "/api/trading/executions/forensics").length;
+  await page.getByTestId("account-tab-fills").click();
+  await expect(page.getByTestId("account-panel")).toBeVisible();
+  expect(forensicsCalls()).toBe(0);
+});
+
+test("내 체결 행을 키보드 포커스 후 Enter로 선택해 해부 카드를 열 수 있다", async ({ page, scenario }) => {
+  ordersOn(scenario);
+  const api = tradingApi(scenario);
+  const targetBar = scenario.market.page({ symbol: CODE, period: "1m", venue: "combined" }).bars.at(-12)!;
+  api.executions = [
+    { orderNo: "0006001", code: CODE, name: "삼성전자", side: "buy", quantity: 10, price: 70_000, time: "094500", venue: "krx" },
+  ];
+  scenario.on(
+    (url) => url.pathname === "/api/trading/executions/forensics",
+    () => ({
+      body: {
+        date: "20261109",
+        account: ACCOUNT,
+        items: [
+          {
+            orderNo: "0006001",
+            code: CODE,
+            name: "삼성전자",
+            side: "buy",
+            time: "094500",
+            fillAt: targetBar.t,
+            price: 70_000,
+            quantity: 10,
+            collected: true,
+            diagnosis: "iceberg_support",
+            mfePct: 1.25,
+            maePct: 0.0,
+            slippageTicks: 0,
+            preEntryCancelRatePct: 0,
+            programDeltaMillionWon: 60,
+            whaleNetDeltaMillionWon: 20,
+            summary: "진입 직전 아이스버그 지지 포착 · 5분 MFE +1.25%",
+          },
+        ],
+      } satisfies ExecutionForensics,
+    }),
+  );
+
+  await openOrderWindow(page, scenario, false, "krx", undefined, false, undefined, intradayArrangement);
+  await page.getByTestId("account-tab-fills").click();
+
+  const row = page.getByTestId("account-fill").first();
+  await row.focus();
+  await expect(row).toBeFocused();
+  await page.keyboard.press("Enter");
+
+  await expect(page.getByTestId("execution-forensic-card")).toBeVisible();
+  await expect(cell(page).locator("[data-synced-crosshair]")).toHaveAttribute("data-synced-time", String(targetBar.t));
+});

@@ -1,4 +1,5 @@
-import { memo, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
+import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { ExecutionForensic } from "../../api/generated/ExecutionForensic";
 import type { MarginPolicy } from "../../api/generated/MarginPolicy";
 import type { TradingBalance } from "../../api/generated/TradingBalance";
@@ -6,17 +7,17 @@ import type { TradingExecution } from "../../api/generated/TradingExecution";
 import type { TradingHolding } from "../../api/generated/TradingHolding";
 import type { TradingOpenOrder } from "../../api/generated/TradingOpenOrder";
 import type { Venue } from "../../api/generated/Venue";
-import { useExecutionForensics } from "../../api/trading";
+import { EXECUTION_FORENSICS_QUERY_KEY, useExecutionForensics } from "../../api/trading";
 import type { WindowId } from "../../layout/kinds";
 import { formatPrice } from "../../lib/format";
 import { useStableCallback } from "../../lib/useStableCallback";
-import { useChartPointerStore } from "../../stores/chartPointer";
-import { useLayoutStore } from "../../stores/layout";
+import { type SnapTarget, useChartPointerStore } from "../../stores/chartPointer";
+import { chartWindows, useLayoutStore } from "../../stores/layout";
 import { useSelectionStore } from "../../stores/selection";
 import { formatQuantity } from "../market-window/format";
 import { Popover } from "../overlay/Popover";
 import { Badge } from "../ui/Badge";
-import { newestFirst } from "./accountLists";
+import { fillIdentityKey, keyNewestFirstFills, newestFirst } from "./accountLists";
 import { AccountLabel } from "./AccountPicker";
 import { DIAGNOSIS_LABEL, ExecutionForensicCard } from "./ExecutionForensicCard";
 import { POLICY_LABEL } from "./funds";
@@ -45,6 +46,7 @@ interface Props {
   readonly balance: TradingBalance | null;
   readonly holding: TradingHolding | null;
   readonly executions: readonly TradingExecution[];
+  readonly ordersOpen: boolean;
   readonly writable: boolean;
   readonly mock: boolean;
   readonly venue: Venue;
@@ -104,16 +106,14 @@ function HoldingsPanel({ balance, activeHolding, goTo }: { balance: TradingBalan
   );
 }
 
-function fillRowKey(fill: TradingExecution, index: number): string {
-  return `${fill.orderNo}:${fill.time}:${fill.price}:${index}`;
-}
-
-function matchForensic(
-  fill: TradingExecution,
-  exactMap: ReadonlyMap<string, ExecutionForensic>,
-  byOrderNo: ReadonlyMap<string, ExecutionForensic>,
-): ExecutionForensic | undefined {
-  return exactMap.get(`${fill.orderNo}:${fill.time}:${fill.price}`) ?? byOrderNo.get(fill.orderNo);
+function snapTargetOf(windowId: WindowId, activeCell: WindowId): SnapTarget | null {
+  const { layout } = useLayoutStore.getState();
+  const senderLink = layout.windows.find((w) => w.id === windowId)?.link ?? null;
+  if (senderLink !== null) return { kind: "link", link: senderLink };
+  const charts = chartWindows(layout);
+  const active = charts.find((w) => w.id === activeCell) ?? charts[0];
+  if (!active) return null;
+  return active.link !== null ? { kind: "link", link: active.link } : { kind: "cell", cellId: active.id };
 }
 
 function FillsPanel({
@@ -129,45 +129,44 @@ function FillsPanel({
   onSelect: (rowKey: string, fill: TradingExecution, forensic: ExecutionForensic | undefined) => void;
   goTo: GoToSymbol;
 }) {
-  const ordered = useMemo(() => newestFirst(executions), [executions]);
-  const { exactMap, byOrderNo } = useMemo(() => {
-    const exact = new Map<string, ExecutionForensic>();
-    const fallback = new Map<string, ExecutionForensic>();
-    for (const item of forensics) {
-      const exactKey = `${item.orderNo}:${item.time}:${item.price}`;
-      if (!exact.has(exactKey)) exact.set(exactKey, item);
-      if (!fallback.has(item.orderNo)) fallback.set(item.orderNo, item);
+  const keyedFills = useMemo(() => keyNewestFirstFills(newestFirst(executions)), [executions]);
+  const forensicByKey = useMemo(() => {
+    const map = new Map<string, ExecutionForensic>();
+    for (const { item, key } of keyNewestFirstFills(newestFirst(forensics))) {
+      map.set(key, item);
     }
-    return { exactMap: exact, byOrderNo: fallback };
+    return map;
   }, [forensics]);
 
   const selectedForensic = useMemo(() => {
     if (selectedKey === null) return undefined;
-    for (let index = 0; index < ordered.length; index++) {
-      const fill = ordered[index]!;
-      if (fillRowKey(fill, index) === selectedKey) {
-        return matchForensic(fill, exactMap, byOrderNo);
-      }
-    }
-    return undefined;
-  }, [ordered, selectedKey, exactMap, byOrderNo]);
+    const found = keyedFills.find(({ key }) => key === selectedKey);
+    return found === undefined ? undefined : forensicByKey.get(found.key);
+  }, [keyedFills, selectedKey, forensicByKey]);
 
-  if (ordered.length === 0) return <p className="od-list-empty">오늘 체결이 없습니다</p>;
+  if (keyedFills.length === 0) return <p className="od-list-empty">오늘 체결이 없습니다</p>;
   return (
     <>
       <RowsHead kind="fills" />
       <ul className="od-rows" data-kind="fills" data-testid="account-fills">
-        {ordered.map((fill, index) => {
-          const rowKey = fillRowKey(fill, index);
-          const forensic = matchForensic(fill, exactMap, byOrderNo);
+        {keyedFills.map(({ item: fill, key: rowKey }) => {
+          const forensic = forensicByKey.get(rowKey);
           const isSelected = selectedKey === rowKey;
           return (
             <li
               key={rowKey}
+              tabIndex={0}
               data-side={fill.side}
               data-testid="account-fill"
               data-selected={isSelected ? "" : undefined}
               onClick={() => onSelect(rowKey, fill, forensic)}
+              onKeyDown={(e) => {
+                if (e.target !== e.currentTarget) return;
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  onSelect(rowKey, fill, forensic);
+                }
+              }}
             >
               <div className="od-fill-main">
                 <span className="od-time">{formatFillTime(fill.time)}</span>
@@ -208,6 +207,7 @@ export const AccountBand = memo(function AccountBand({
   balance,
   holding,
   executions,
+  ordersOpen,
   writable,
   mock,
   venue,
@@ -241,11 +241,24 @@ export const AccountBand = memo(function AccountBand({
       setAnchorReady((n) => n + 1);
     }
   }, [panel]);
+  const queryClient = useQueryClient();
   const counts: Record<AccountPanelKind, number> = { open: openOrders.length, holdings: balance?.holdings.length ?? 0, fills: executions.length };
   const activeAnchor = panel === null ? null : (tabButtons.current[panel] ?? opener.current);
   const listWindow = listWindowOf(activeAnchor);
   const label = TABS.find((tab) => tab.kind === panel)?.label;
-  const forensicsQuery = useExecutionForensics(choice.current?.ref ?? null, panel === "fills");
+  const executionsSignature = useMemo(
+    () => `${choice.current?.ref ?? ""}|${executions.map(fillIdentityKey).join("|")}`,
+    [choice.current?.ref, executions],
+  );
+  const previousExecutionsSignature = useRef(executionsSignature);
+  useEffect(() => {
+    if (previousExecutionsSignature.current === executionsSignature) return;
+    previousExecutionsSignature.current = executionsSignature;
+    if (ordersOpen) {
+      void queryClient.invalidateQueries({ queryKey: EXECUTION_FORENSICS_QUERY_KEY });
+    }
+  }, [executionsSignature, ordersOpen, queryClient]);
+  const forensicsQuery = useExecutionForensics(choice.current?.ref ?? null, ordersOpen && panel === "fills");
   const forensicItems = forensicsQuery.data?.items ?? [];
 
   const goTo: GoToSymbol = useStableCallback((target) => {
@@ -259,10 +272,12 @@ export const AccountBand = memo(function AccountBand({
   const inspectFill = useStableCallback((rowKey: string, fill: TradingExecution, forensic: ExecutionForensic | undefined) => {
     setSelectedFillKey(rowKey);
     const layout = useLayoutStore.getState();
+    const activeCell = useSelectionStore.getState().activeCell;
+    const snapTarget = snapTargetOf(windowId, activeCell);
     layout.pinSymbol(windowId, null);
-    layout.sendSymbol(windowId, useSelectionStore.getState().activeCell, { code: fill.code, name: fill.name });
+    layout.sendSymbol(windowId, activeCell, { code: fill.code, name: fill.name });
     if (forensic !== undefined) {
-      useChartPointerStore.getState().snapTo(fill.code, forensic.fillAt, fill.price);
+      useChartPointerStore.getState().snapTo(fill.code, forensic.fillAt, fill.price, snapTarget);
     }
   });
 

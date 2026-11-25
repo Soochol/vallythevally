@@ -5,6 +5,8 @@ import { getJson } from "./http";
 const STALE_MS = 15_000;
 const GC_TIME_MS = 10 * 60 * 1000;
 
+export const EXECUTION_FORENSICS_QUERY_KEY = ["trading", "executions", "forensics"] as const;
+
 export function fetchExecutionForensics(
   accountRef: string | null,
   date?: string,
@@ -19,7 +21,7 @@ export function fetchExecutionForensics(
 
 export function executionForensicsQuery(accountRef: string | null, enabled: boolean, date?: string) {
   return queryOptions({
-    queryKey: ["trading", "executions", "forensics", accountRef ?? "", date ?? ""],
+    queryKey: [...EXECUTION_FORENSICS_QUERY_KEY, accountRef ?? "", date ?? ""],
     queryFn: ({ signal }) => fetchExecutionForensics(accountRef, date, signal),
     enabled,
     staleTime: STALE_MS,
