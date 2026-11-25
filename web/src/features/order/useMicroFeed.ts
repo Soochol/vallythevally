@@ -1,10 +1,11 @@
-import { useEffect, useState } from "react";
+import { useEffect } from "react";
 import type { FeedBook } from "../../api/generated/FeedBook";
 import type { MicroEvent } from "../../api/generated/MicroEvent";
 import type { OfiSnapshot } from "../../api/generated/OfiSnapshot";
 import type { SymbolCode } from "../../api/generated/SymbolCode";
 import type { Venue } from "../../api/generated/Venue";
 import { fetchMicroEvents, kstYyyymmdd } from "../../api/microEvents";
+import { useFrameFold } from "../../lib/useFrameFold";
 import { marketSocket } from "../../stores/realtime";
 import { ClientMicroDetector, type MicroBookLevel, type MicroCue, toMicroCue } from "./microDetector";
 
@@ -14,6 +15,7 @@ export interface MicroFeedState {
 }
 
 const EMPTY_CUES: ReadonlyMap<number, MicroCue> = new Map();
+const EMPTY_STATE: MicroFeedState = { cuesByPrice: EMPTY_CUES, ofi: null };
 
 function levelsOf(levels: FeedBook["asks"]): MicroBookLevel[] {
   const out: MicroBookLevel[] = [];
@@ -38,10 +40,10 @@ function mergeEvents(prev: ReadonlyMap<number, MicroCue>, events: readonly Micro
 }
 
 export function useMicroFeed(code: SymbolCode, venue: Venue, enabled: boolean): MicroFeedState {
-  const [state, setState] = useState<MicroFeedState>({ cuesByPrice: EMPTY_CUES, ofi: null });
+  const [state, fold] = useFrameFold<MicroFeedState>(() => EMPTY_STATE);
 
   useEffect(() => {
-    setState({ cuesByPrice: EMPTY_CUES, ofi: null });
+    fold(() => EMPTY_STATE);
     if (!enabled) return;
 
     let active = true;
@@ -52,7 +54,7 @@ export function useMicroFeed(code: SymbolCode, venue: Venue, enabled: boolean): 
     fetchMicroEvents(code, kstYyyymmdd(Date.now()), abort.signal).then(
       (page) => {
         if (!active || abort.signal.aborted || page.events.length === 0) return;
-        setState((prev) => ({ ...prev, cuesByPrice: mergeEvents(prev.cuesByPrice, page.events) }));
+        fold((prev) => ({ ...prev, cuesByPrice: mergeEvents(prev.cuesByPrice, page.events) }));
       },
       () => {},
     );
@@ -61,10 +63,10 @@ export function useMicroFeed(code: SymbolCode, venue: Venue, enabled: boolean): 
       if (!active) return;
       if (message.type === "feed_micro") {
         serverMicroActive = true;
-        setState((prev) => ({ ...prev, cuesByPrice: mergeEvents(prev.cuesByPrice, [message.event]) }));
+        fold((prev) => ({ ...prev, cuesByPrice: mergeEvents(prev.cuesByPrice, [message.event]) }));
       } else if (message.type === "feed_ofi") {
         serverMicroActive = true;
-        setState((prev) => ({ ...prev, ofi: message.ofi }));
+        fold((prev) => ({ ...prev, ofi: message.ofi }));
       } else if (message.type === "resync") {
         serverMicroActive = false;
         fallback.reset();
@@ -80,7 +82,7 @@ export function useMicroFeed(code: SymbolCode, venue: Venue, enabled: boolean): 
       } else if (request.kind === "book" && event.type === "feed_book") {
         const recvMs = event.book.t * 1000;
         const { events, ofi } = fallback.onBook(recvMs, levelsOf(event.book.asks), levelsOf(event.book.bids));
-        setState((prev) => ({
+        fold((prev) => ({
           cuesByPrice: events.length > 0 ? mergeEvents(prev.cuesByPrice, events) : prev.cuesByPrice,
           ofi,
         }));
@@ -93,7 +95,7 @@ export function useMicroFeed(code: SymbolCode, venue: Venue, enabled: boolean): 
       stopMicro();
       stopTap();
     };
-  }, [code, venue, enabled]);
+  }, [code, venue, enabled, fold]);
 
   return state;
 }
