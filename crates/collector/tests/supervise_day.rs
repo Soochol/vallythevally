@@ -320,6 +320,7 @@ struct RealFinalize {
     hold: Duration,
     forced_exit: Option<i32>,
     runs: Mutex<Vec<Vec<String>>>,
+    quote_backfill_runs: Mutex<Vec<Vec<String>>>,
     finished: AtomicUsize,
 }
 
@@ -338,6 +339,15 @@ impl FinalizeRunner for RealFinalize {
             };
             self.finished.fetch_add(1, Ordering::SeqCst);
             Ok(code)
+        })
+    }
+
+    fn run_quotes_backfill(&self, arguments: Vec<String>) -> BoxFuture<'_, io::Result<i32>> {
+        Box::pin(async move {
+            self.recorder.note("quotes_backfill");
+            self.quote_backfill_runs.lock().unwrap().push(arguments);
+            sleep(self.hold).await;
+            Ok(0)
         })
     }
 }
@@ -467,7 +477,7 @@ impl Harness {
         });
         let launcher = Arc::new(FakeLauncher { recorder: recorder.clone(), open_at: config.open_at, spawned: Mutex::default() });
         let holidays = Arc::new(FakeHolidays { kind: config.holidays, calls: Mutex::default() });
-        let finalizer = Arc::new(RealFinalize { recorder: recorder.clone(), hold: config.hold_finalize, forced_exit: config.forced_exit, runs: Mutex::default(), finished: AtomicUsize::new(0) });
+        let finalizer = Arc::new(RealFinalize { recorder: recorder.clone(), hold: config.hold_finalize, forced_exit: config.forced_exit, runs: Mutex::default(), quote_backfill_runs: Mutex::default(), finished: AtomicUsize::new(0) });
         let socket_path = sockets.path().join("run").join("supervise.sock");
         let daemon = Daemon::start(
             DaemonInputs {
@@ -1057,6 +1067,30 @@ async fn the_next_day_start_finalizes_every_past_day_left_unfinalized() {
     let runs = harness.finalizer.runs.lock().unwrap().clone();
     let dates: Vec<&str> = runs[2..].iter().map(|arguments| arguments[arguments.iter().position(|argument| argument == "--date").unwrap() + 1].as_str()).collect();
     assert_eq!(dates, ["20261112", "20261118"], "{runs:?}");
+    harness.finish().await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn missing_closed_quote_days_are_backfilled_before_morning_judge_and_stop_at_deadline() {
+    let harness = Harness::start_with(
+        Config { start: kst(monday(), 7, 0, 0), hold_finalize: Duration::from_secs(600), seed_history: false, seed_today_raw: false, ..Config::default() },
+        |data| {
+            for date in [20261110u32, 20261111, 20261112, 20261113] {
+                let complete = data.join("store").join(date.to_string()).join("complete.json");
+                std::fs::create_dir_all(complete.parent().unwrap()).unwrap();
+                std::fs::write(complete, r#"{"format_version":1,"verify":{"passed":true},"stocks":[]}"#).unwrap();
+            }
+            std::fs::create_dir_all(data.join("shared").join("quote-minutes").join("20261110")).unwrap();
+        },
+    );
+    let judge_at = kst(monday(), 7, 20, 0);
+    harness.until(kst(monday(), 8, 0, 0)).await;
+    let started = harness.recorder.times_of("quotes_backfill");
+    assert_eq!(started.len(), 2, "07:20 판단 시각 앞에서 분 호가 채우기를 멈춘다: {started:?}");
+    assert!(started.iter().all(|time| time.unix() < judge_at.unix()), "{started:?}");
+    let runs = harness.finalizer.quote_backfill_runs.lock().unwrap().clone();
+    let dates: Vec<&str> = runs.iter().map(|arguments| arguments[arguments.iter().position(|argument| argument == "--date").unwrap() + 1].as_str()).collect();
+    assert_eq!(dates, ["20261111", "20261112"], "이미 채운 20261110은 건너뛰고 빠진 날부터 채운다: {runs:?}");
     harness.finish().await;
 }
 

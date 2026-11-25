@@ -9,6 +9,7 @@ pub mod kst;
 pub mod parse;
 pub mod plan;
 pub mod protocol;
+pub mod quotes;
 pub mod raw_read;
 pub mod raw_write;
 pub mod serve;

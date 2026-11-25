@@ -9,9 +9,29 @@ use super::settings::ScheduleSettings;
 pub trait FinalizeRunner: Send + Sync {
     fn run(&self, arguments: Vec<String>) -> BoxFuture<'_, io::Result<i32>>;
 
+    fn run_quotes_backfill(&self, _arguments: Vec<String>) -> BoxFuture<'_, io::Result<i32>> {
+        Box::pin(async { Ok(0) })
+    }
+
     fn priority_note(&self) -> Option<String> {
         None
     }
+}
+
+pub fn quotes_backfill_arguments(data_dir: &Path, shared_dir: &Path, date: u32, settings: &ScheduleSettings) -> Vec<String> {
+    let mut arguments = [
+        ("--data", data_dir.to_string_lossy().into_owned()),
+        ("--date", date.to_string()),
+        ("--threads", settings.finalize_threads.to_string()),
+    ]
+    .into_iter()
+    .flat_map(|(name, value)| [name.to_owned(), value])
+    .collect::<Vec<_>>();
+    if shared_dir != data_dir.join("shared") {
+        arguments.push("--shared".to_owned());
+        arguments.push(shared_dir.to_string_lossy().into_owned());
+    }
+    arguments
 }
 
 pub fn finalize_arguments(data_dir: &Path, date: u32, settings: &ScheduleSettings) -> Vec<String> {
@@ -56,7 +76,16 @@ impl ProcessFinalizeRunner {
     }
 
     fn command(&self, arguments: &[String]) -> Command {
-        let mut words = self.prefix.iter().cloned().chain([self.executable.to_string_lossy().into_owned(), "finalize".to_owned()]);
+        self.subcommand(&["finalize"], arguments)
+    }
+
+    fn subcommand(&self, sub: &[&str], arguments: &[String]) -> Command {
+        let mut words = self
+            .prefix
+            .iter()
+            .cloned()
+            .chain(std::iter::once(self.executable.to_string_lossy().into_owned()))
+            .chain(sub.iter().map(|word| (*word).to_owned()));
         let program = words.next().expect("실행 파일 경로가 있다");
         let mut command = Command::new(program);
         command.args(words).args(arguments).kill_on_drop(true);
@@ -73,6 +102,13 @@ impl FinalizeRunner for ProcessFinalizeRunner {
     fn run(&self, arguments: Vec<String>) -> BoxFuture<'_, io::Result<i32>> {
         Box::pin(async move {
             let status = self.command(&arguments).status().await?;
+            Ok(status.code().unwrap_or(-1))
+        })
+    }
+
+    fn run_quotes_backfill(&self, arguments: Vec<String>) -> BoxFuture<'_, io::Result<i32>> {
+        Box::pin(async move {
+            let status = self.subcommand(&["quotes", "backfill"], &arguments).status().await?;
             Ok(status.code().unwrap_or(-1))
         })
     }
@@ -112,5 +148,19 @@ mod tests {
         let command = runner.command(&[]);
         assert_eq!(command.as_std().get_program(), "/bin/collector");
         assert!(runner.priority_note().unwrap().contains("nice·ionice"));
+    }
+
+    #[test]
+    fn quotes_backfill_arguments_include_shared_only_when_separate() {
+        let settings = ScheduleSettings { finalize_threads: 3, ..ScheduleSettings::default() };
+        let default_args = quotes_backfill_arguments(Path::new("/data/hoga"), Path::new("/data/hoga/shared"), 20261118, &settings);
+        assert_eq!(default_args, ["--data", "/data/hoga", "--date", "20261118", "--threads", "3"]);
+        let separate_args = quotes_backfill_arguments(Path::new("/data/hoga"), Path::new("/srv/shared"), 20261118, &settings);
+        assert_eq!(separate_args, ["--data", "/data/hoga", "--date", "20261118", "--threads", "3", "--shared", "/srv/shared"]);
+        let runner = ProcessFinalizeRunner { executable: PathBuf::from("/bin/collector"), prefix: ["nice", "-n", "10"].map(str::to_owned).to_vec(), missing: Vec::new() };
+        let command = runner.subcommand(&["quotes", "backfill"], &default_args);
+        let std = command.as_std();
+        let words: Vec<String> = std::iter::once(std.get_program()).chain(std.get_args()).map(|word| word.to_string_lossy().into_owned()).collect();
+        assert_eq!(words, ["nice", "-n", "10", "/bin/collector", "quotes", "backfill", "--data", "/data/hoga", "--date", "20261118", "--threads", "3"]);
     }
 }

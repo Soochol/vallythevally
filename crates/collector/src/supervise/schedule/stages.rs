@@ -13,7 +13,7 @@ use super::{Daemon, DayEnd, DayRun, Halt, StageResult, date_number, stoppable};
 use crate::calendar::{
     CachedHolidaysOnly, Calendar, CrossCheck, DEFAULT_OPEN_MINUTE, Day, Judgment, Mismatch, Verdict, cross_check, read_service_key,
 };
-use crate::finalize::{COMPLETE_FILE_NAME, IndexCheckResult, JudgedVerdict, TreatedAs, raw_days_without_complete, store_dir};
+use crate::finalize::{COMPLETE_FILE_NAME, IndexCheckResult, JudgedVerdict, TreatedAs, missing_closed_quote_days, raw_days_without_complete, store_dir};
 use crate::shared::Reload;
 use crate::plan::{PlanFile, PlanInput, build_plan, plan_path, write_plan};
 use crate::raw_write::raw_day_dir;
@@ -415,6 +415,32 @@ impl Daemon {
                 break;
             }
             self.finalize_date(date, false, shutdown).await?;
+        }
+        Ok(())
+    }
+
+    pub(super) async fn backfill_quote_minutes(&mut self, start_before: KstTime, shutdown: &mut watch::Receiver<bool>) -> Result<(), DayEnd> {
+        let missing = match missing_closed_quote_days(&self.data_dir, &self.shared_dir) {
+            Ok(missing) => missing,
+            Err(error) => {
+                self.reporter.alert(AlertKind::StageFailed, format!("분 호가 채우기: 빠진 날을 찾지 못했습니다: {error}"));
+                return Ok(());
+            }
+        };
+        let total = missing.len();
+        for (finished, date) in missing.into_iter().enumerate() {
+            if self.clock.now().unix() >= start_before.unix() {
+                tracing::warn!(left = total - finished, "분 호가 채우기를 아침 일정 앞에서 멈춥니다. 남은 날은 다음 기회에 이어서 채웁니다");
+                break;
+            }
+            let arguments = super::quotes_backfill_arguments(&self.data_dir, &self.shared_dir, date, &self.schedule);
+            let finalizer = self.finalizer.clone();
+            let outcome = stoppable(shutdown, async move { finalizer.run_quotes_backfill(arguments).await }).await.map_err(|_| DayEnd::Stopped)?;
+            match outcome {
+                Ok(0) => {}
+                Ok(code) => self.reporter.alert(AlertKind::StageFailed, format!("분 호가 채우기: {date}일이 종료 코드 {code}로 실패했습니다")),
+                Err(error) => self.reporter.alert(AlertKind::StageFailed, format!("분 호가 채우기: {date}일을 돌리지 못했습니다: {error}")),
+            }
         }
         Ok(())
     }

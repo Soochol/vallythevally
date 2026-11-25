@@ -29,7 +29,7 @@ mod rest;
 mod settings;
 mod stages;
 
-pub use finalizer::{FinalizeRunner, ProcessFinalizeRunner, finalize_arguments};
+pub use finalizer::{FinalizeRunner, ProcessFinalizeRunner, finalize_arguments, quotes_backfill_arguments};
 pub use settings::{DayTimes, ScheduleSettings, parse_clock_time};
 
 pub struct DaemonInputs {
@@ -238,6 +238,7 @@ impl Daemon {
     async fn stages(&mut self, day: &mut DayRun, shutdown: &mut watch::Receiver<bool>) -> Result<(), DayEnd> {
         let backlog_until = if self.clock.now().unix() < day.times.close.unix() { day.times.judge } else { self.schedule.times_of(day.day.add_days(1)).judge };
         self.finalize_backlog(day.date, backlog_until, shutdown).await?;
+        self.backfill_quote_minutes(backlog_until, shutdown).await?;
         if self.clock.now().unix() >= day.times.close.unix() {
             return self.after_close_start(day, backlog_until, shutdown).await;
         }

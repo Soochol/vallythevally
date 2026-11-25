@@ -376,6 +376,7 @@ collector finalize [--data <폴더>] --date YYYYMMDD [--threads 4] [--buckets 64
 - `--prune`은 대조가 통과한 뒤 `raw/` 아래 모든 날을 따져 지울 수 있는 날의 원문을 지운다. 조건과 기록은 [`collector-store-format.md`](collector-store-format.md)의 "원문 지우기"를 따른다. 오늘은 `--date`다. `complete.json`에 적힌 원문 지문(`raw_files`)과 지금 원문이 다른 날, 정리가 읽지 않는 파일이 든 날은 지우지 않는다. 지우기 직전에 한 번 더 확인한다. 지우다 실패한 날이 있어도 분 호가는 만들고, 종료 코드는 1이다.
 - `--shared`는 닫힌 날 분 호가를 쓸 공용 자료 폴더다. 없으면 `<데이터 폴더>/shared`다. `store/<날짜>/complete.json`이 있는 날 가운데 이번 `--date`(있어도 다시 만든다)를 먼저 만들고, 닫힌 폴더(`<공용 자료 폴더>/quote-minutes/<YYYYMMDD>/`)가 없는 지난 날은 오래된 순으로 `0D` Parquet에서 다시 만들어 `<YYYYMMDD>.tmp`에 쓴 뒤 바꿔 끼우고 그날의 장중 폴더(`quote-minutes-live/<YYYYMMDD>/`)를 지운다. `complete.json`은 `format_version`이 1이고 `verify.passed`가 참이며 `stocks`가 있어야 하고, 아니면 그날은 닫힌 폴더를 만들지 않고 장중 폴더도 남긴 채 실패한다. `0D` 행과 `complete.json` 종목은 `_AL`을 뗀 글자가 `StockCode` 규칙을 지나는 것만 쓴다. 한 날이 실패해도 나머지를 계속 만들고, 끝에 실패한 날짜와 이유를 모아 stderr에 쓰고 종료 코드 3으로 끝난다. 감독 데몬은 `--shared`가 주어졌을 때 같은 값을 `finalize`에 넘기고, 종료 코드 3이면 `stage_failed` 경보를 낸다.
 - `--threads`는 원문을 해석하는 스레드, 버킷을 정렬해 쓰는 스레드, `0D` 버킷을 읽어 분 호가를 만드는 스레드의 수다. 상한은 이 값이다. 원문은 `raw_read::read_day` 하나가 읽고 스레드들이 줄 묶음을 나눠 받는다. 줄에 번호를 매겨 정렬 기준에 넣으므로 스레드 수가 달라도 파일이 같다.
+- 정리 완료된 날(`store/<YYYYMMDD>/complete.json`) 가운데 닫힌 분 호가(`shared/quote-minutes/<YYYYMMDD>/`)가 비어 있으면 `collector quotes backfill [--data <폴더>] [--shared <폴더>] [--date YYYYMMDD] [--threads 4]`로 따로 채울 수 있다(`--date`를 생략하면 빠진 날 전체를 채우고, 지정하면 그날만 다시 만든다). 감독 데몬도 매일 시작과 기동 직후 밀린 날 정리 뒤 아침 판단 시각 전까지 빠진 닫힌 분 호가를 채운다.
 
 ### 하는 일
 
