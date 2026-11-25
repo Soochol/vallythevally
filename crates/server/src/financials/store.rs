@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::path::Path;
 
 use sqlx::{Row, SqlitePool, sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions}};
@@ -5,6 +6,13 @@ use sqlx::{Row, SqlitePool, sqlite::{SqliteConnectOptions, SqliteJournalMode, Sq
 use super::model::{Collection, Failure, Security};
 
 const READ_CONNECTIONS: u32 = 4;
+
+#[derive(Debug, Clone)]
+pub struct SecurityDisclosures {
+    pub stock_code: String,
+    pub company_name: String,
+    pub disclosures: Vec<BTreeMap<String, String>>,
+}
 
 #[derive(Clone)]
 pub struct Store(SqlitePool);
@@ -68,6 +76,32 @@ impl Store {
         let body = serde_json::to_string(collection).map_err(|_| Failure::Storage)?;
         sqlx::query("INSERT INTO companies VALUES (?, ?) ON CONFLICT(corp_code) DO UPDATE SET body = excluded.body").bind(corp).bind(body).execute(&self.0).await.map_err(|_| Failure::Storage)?;
         Ok(())
+    }
+
+    pub async fn all_security_disclosures(&self) -> Result<Vec<SecurityDisclosures>, Failure> {
+        let rows = sqlx::query(
+            "SELECT s.stock_code,
+                    COALESCE(json_extract(s.body, '$.company.name'), '') AS company_name,
+                    json_extract(c.body, '$.disclosures') AS disclosures
+             FROM securities s
+             JOIN companies c ON c.corp_code = json_extract(s.body, '$.company.corp_code')
+             WHERE json_array_length(c.body, '$.disclosures') > 0",
+        )
+        .fetch_all(&self.0)
+        .await
+        .map_err(|_| Failure::Storage)?;
+        let mut out = Vec::with_capacity(rows.len());
+        for row in rows {
+            let stock_code: String = row.get("stock_code");
+            let company_name: String = row.get("company_name");
+            let raw: Option<String> = row.get("disclosures");
+            let Some(raw) = raw else { continue };
+            let disclosures: Vec<BTreeMap<String, String>> = serde_json::from_str(&raw).map_err(|_| Failure::Storage)?;
+            if !disclosures.is_empty() {
+                out.push(SecurityDisclosures { stock_code, company_name, disclosures });
+            }
+        }
+        Ok(out)
     }
 
     pub(super) async fn begin_requests(&self, job: &str) -> Result<(), Failure> {

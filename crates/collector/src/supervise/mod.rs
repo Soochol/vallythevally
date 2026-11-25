@@ -49,6 +49,7 @@ pub use files::{read_coverage, read_disk};
 pub use wire::{API_VERSION, CoverageDay, CoverageState, DayBytes, DiskUsage, ErrorCode, Filesystem, Reply, ReplyBody, Request, RequestKind};
 
 pub const REST_URL_VARIABLE: &str = "VALLY_COLLECTOR_REST_URL";
+pub const KIS_URL_VARIABLE: &str = "VALLY_COLLECTOR_KIS_URL";
 
 const SPEC: ArgSpec = ArgSpec {
     value_options: &[
@@ -106,15 +107,27 @@ fn stop_runtime(runtime: tokio::runtime::Runtime, limit: std::time::Duration) {
     runtime.shutdown_timeout(limit);
 }
 
-pub fn rest_base_url(variables: &Variables) -> Result<String, String> {
-    let Some(url) = variables.get(REST_URL_VARIABLE).filter(|url| !url.is_empty()) else {
-        return Ok(KIWOOM_BASE_URL.to_owned());
+fn loopback_http_url(variables: &Variables, variable: &str, default: &str) -> Result<String, String> {
+    let Some(url) = variables.get(variable).filter(|url| !url.is_empty()) else {
+        return Ok(default.to_owned());
     };
-    if url.starts_with("http://") && is_loopback_ws(&url.replacen("http://", "ws://", 1)) {
-        Ok(url.trim_end_matches('/').to_owned())
+    let normalized = url.strip_suffix('/').unwrap_or(url);
+    let valid = normalized
+        .strip_prefix("http://")
+        .is_some_and(|rest| !rest.contains(['/', '?', '#']) && is_loopback_ws(&format!("ws://{rest}")));
+    if valid {
+        Ok(normalized.to_owned())
     } else {
-        Err(format!("{REST_URL_VARIABLE}는 http://127.0.0.1, http://localhost, http://[::1] 주소만 받습니다. 앱키를 밖으로 보내지 않기 위해서입니다"))
+        Err(format!("{variable}는 http://127.0.0.1, http://localhost, http://[::1] 주소만 받습니다. 앱키를 밖으로 보내지 않기 위해서입니다"))
     }
+}
+
+pub fn rest_base_url(variables: &Variables) -> Result<String, String> {
+    loopback_http_url(variables, REST_URL_VARIABLE, KIWOOM_BASE_URL)
+}
+
+pub fn kis_base_url(variables: &Variables) -> Result<String, String> {
+    loopback_http_url(variables, KIS_URL_VARIABLE, server::config::KIS_BASE_URL)
 }
 
 fn usage_error(message: impl std::fmt::Display) -> ExitCode {
@@ -234,7 +247,11 @@ fn run_daemon(arguments: &Arguments, keys_path: &std::path::Path) -> ExitCode {
         Err(error) => return usage_error(format_args!("실행 파일 경로를 알 수 없습니다: {error}")),
     };
     let kis_transport: Option<Arc<dyn server::kis::transport::Transport>> = if keys.active.iter().any(|key| key.broker == Broker::Kis) {
-        match server::kis::transport::ReqwestTransport::new(server::config::KIS_BASE_URL.to_owned()) {
+        let kis_url = match kis_base_url(&process) {
+            Ok(url) => url,
+            Err(message) => return usage_error(message),
+        };
+        match server::kis::transport::ReqwestTransport::new(kis_url) {
             Ok(transport) => Some(Arc::new(transport)),
             Err(error) => return usage_error(format_args!("한투 HTTP 클라이언트를 만들지 못했습니다: {error}")),
         }
@@ -396,6 +413,32 @@ mod tests {
         let variables = Variables::from([("HOME".to_string(), "/home/someone".to_string())]);
         assert_eq!(default_holiday_key_path(&variables).unwrap(), PathBuf::from("/home/someone/.config/vally/holiday-service-key"));
         assert!(default_holiday_key_path(&Variables::new()).is_err());
+    }
+
+    #[test]
+    fn kis_base_url_allows_only_loopback_overrides() {
+        assert_eq!(kis_base_url(&Variables::new()).unwrap(), server::config::KIS_BASE_URL);
+        assert_eq!(
+            kis_base_url(&Variables::from([(KIS_URL_VARIABLE.to_owned(), "http://127.0.0.1:18080/".to_owned())])).unwrap(),
+            "http://127.0.0.1:18080"
+        );
+        assert_eq!(
+            kis_base_url(&Variables::from([(KIS_URL_VARIABLE.to_owned(), "http://[::1]:18080".to_owned())])).unwrap(),
+            "http://[::1]:18080"
+        );
+        for bad in [
+            "https://example.com",
+            "http://[::1]evil.example:8080",
+            "http://127.0.0.1:18080/override#frag",
+            "http://127.0.0.1:18080#frag",
+            "http://127.0.0.1:18080?x=1",
+            "http://127.0.0.1:18080/prefix",
+            "http://127.0.0.1:18080//",
+            "http://127.0.0.1:70000",
+        ] {
+            assert!(kis_base_url(&Variables::from([(KIS_URL_VARIABLE.to_owned(), bad.to_owned())])).is_err(), "{bad}");
+            assert!(rest_base_url(&Variables::from([(REST_URL_VARIABLE.to_owned(), bad.to_owned())])).is_err(), "{bad}");
+        }
     }
 
     #[test]

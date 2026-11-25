@@ -13,6 +13,8 @@ pub const FEED_EXTENSION: &str = "jsonl";
 pub enum DataKind {
     Probe,
     KiwoomThemes,
+    IntradayThemes,
+    ViEvents,
     MarketOverview,
     SnapshotKrx,
     SnapshotCombined,
@@ -24,9 +26,11 @@ pub enum DataKind {
 }
 
 impl DataKind {
-    pub const ALL: [DataKind; 10] = [
+    pub const ALL: [DataKind; 12] = [
         DataKind::Probe,
         DataKind::KiwoomThemes,
+        DataKind::IntradayThemes,
+        DataKind::ViEvents,
         DataKind::MarketOverview,
         DataKind::SnapshotKrx,
         DataKind::SnapshotCombined,
@@ -42,6 +46,8 @@ impl DataKind {
             DataKind::Probe => "probe",
             DataKind::Rankings => "rankings",
             DataKind::KiwoomThemes => "kiwoom-themes",
+            DataKind::IntradayThemes => "themes-intraday",
+            DataKind::ViEvents => "vi-events",
             DataKind::MarketOverview => "market-overview",
             DataKind::SnapshotKrx => "snapshot-krx",
             DataKind::SnapshotCombined => "snapshot-combined",
