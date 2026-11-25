@@ -395,7 +395,7 @@ async fn a_store_left_by_a_schema_version_with_no_upgrade_path_starts_empty() {
     let fake = ScriptedTransport::new();
     let today = day(2026, 11, 6);
     let market = KrxMarket::sample(today);
-    for version in [3, 7] {
+    for version in [3, 8] {
         let tmp = tempfile::tempdir().unwrap();
         update_once(&fake, tmp.path(), &market, &at(today, "2030"), false).await;
 
@@ -481,7 +481,7 @@ async fn a_schema_4_store_keeps_its_daily_bars_and_history_and_is_listed_with_sh
         while count(&fake.calls(), "ka10099") == listing_requests { tokio::time::sleep(Duration::from_millis(10)).await; }
     }).await.expect("토큰 발급을 마치고 지연된 종목 목록 요청이 시작된 뒤 응답 전에 종료한다");
     let logs = server.stop().await;
-    assert!(logs.contains("스크리너 저장소를 올립니다"), "종목 목록을 받기 전에 꺼진 시작도 저장소를 스키마 6으로 올렸다");
+    assert!(logs.contains("스크리너 저장소를 올립니다"), "종목 목록을 받기 전에 꺼진 시작도 저장소를 스키마 7로 올렸다");
     fake.reset();
 
     let server = boot_updating();
@@ -516,7 +516,7 @@ async fn a_schema_4_store_keeps_its_daily_bars_and_history_and_is_listed_with_sh
 
     let kept: Vec<(String, String, Option<u64>)> =
         market.stocks.iter().map(|s| (s.code.clone(), if s.market_code == "10" { "kosdaq" } else { "kospi" }.to_owned(), s.listed_shares)).collect();
-    assert_eq!(stored_listing(upgraded.path()), (6, kept), "listed에 상장주식수와 시장이 찬다. 상장주식수가 없는 종목은 비워 둔다");
+    assert_eq!(stored_listing(upgraded.path()), (7, kept), "listed에 상장주식수와 시장이 찬다. 상장주식수가 없는 종목은 비워 둔다");
 }
 
 #[tokio::test]

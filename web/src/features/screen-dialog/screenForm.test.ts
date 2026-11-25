@@ -117,6 +117,9 @@ test("종류를 바꾸면 봉 주기와 봉 범위는 남고 나머지는 그 �
     bollinger: { kind: "bollinger", period: "W", recentBars: 3, length: 20, k: 2, test: { kind: "outside", side: "above" } },
     ichimoku: { kind: "ichimoku", period: "W", recentBars: 3, conversion: 9, base: 26, spanB: 52, displacement: 26, test: { kind: "cloud", side: "above" } },
     market_cap: { kind: "market_cap", min: 300_000_000_000, max: null },
+    program_net_buy: { kind: "program_net_buy", days: 5, minMillionWon: 1000, maxMillionWon: null },
+    whale_net_buy: { kind: "whale_net_buy", days: 5, minMillionWon: 500, maxMillionWon: null },
+    vi_triggered: { kind: "vi_triggered", days: 5, minCount: 1 },
   };
   for (const kind of Object.keys(expected) as ConditionKind[]) {
     const changed = changeKind(start, 0, kind);
@@ -153,14 +156,41 @@ test("신고가 값으로 거래량·거래대금을 골라 저장한 줄은 신
   expect(checkCondition({ ...draft.conditions[2]!, recentBars: "13" }).ok).toBe(true);
 });
 
-test("종류 메뉴는 가격, 거래, 이동평균, 보조지표, 종목 묶음에 15가지와 신고거래량·신고거래대금을 한 번씩 담는다", () => {
+test("종류 메뉴는 가격, 거래, 이동평균, 보조지표, 수급·미시, 종목 묶음에 모든 조건을 한 번씩 담는다", () => {
   expect(KIND_GROUPS.map((g) => [g.label, g.kinds])).toEqual([
     ["가격", ["new_high", "new_low", "value_range", "change", "near_extreme"]],
     ["거래", ["volume_high", "traded_value_high", "surge"]],
     ["이동평균", ["ma_position", "ma_alignment", "ma_cross"]],
     ["보조지표", ["rsi", "macd", "stochastic", "bollinger", "ichimoku"]],
+    ["수급·미시", ["program_net_buy", "whale_net_buy", "vi_triggered"]],
     ["종목", ["market_cap"]],
   ]);
+});
+
+test("수급·미시 조건은 기간 1~60일과 범위·횟수를 검증하고 저장·복원한다", () => {
+  expect(errorsIn({ ...asKind("program_net_buy"), days: "0" })).toEqual({ days: "1 이상의 정수를 넣으세요" });
+  expect(errorsIn({ ...asKind("program_net_buy"), days: "61" })).toEqual({ days: "60 이하로 넣으세요" });
+  expect(errorsIn({ ...asKind("program_net_buy"), minMillionWon: "", maxMillionWon: "" })).toEqual({ minMillionWon: "최소와 최대 가운데 하나는 넣으세요" });
+  expect(errorsIn({ ...asKind("whale_net_buy"), minMillionWon: "500", maxMillionWon: "100" })).toEqual({ maxMillionWon: "최소보다 작을 수 없습니다" });
+  expect(errorsIn({ ...asKind("vi_triggered"), days: "61", minCount: "0" })).toEqual({ days: "60 이하로 넣으세요", minCount: "1 이상의 정수를 넣으세요" });
+  expect(conditionOf({ ...asKind("program_net_buy"), days: "10", minMillionWon: "-200", maxMillionWon: "1500" })).toEqual({
+    kind: "program_net_buy",
+    days: 10,
+    minMillionWon: -200,
+    maxMillionWon: 1500,
+  });
+  const saved: Screen = {
+    id: "micro",
+    name: "수급",
+    markets: [],
+    exclude: [],
+    conditions: [
+      { kind: "program_net_buy", days: 5, minMillionWon: 1000, maxMillionWon: null },
+      { kind: "whale_net_buy", days: 3, minMillionWon: -500, maxMillionWon: 2000 },
+      { kind: "vi_triggered", days: 20, minCount: 2 },
+    ],
+  };
+  expect(draftOf(saved).conditions.map(conditionOf)).toEqual(saved.conditions);
 });
 
 test("▲▼는 이웃한 줄과 자리를 바꾸고, 첫 줄 위와 끝 줄 아래로는 가지 않는다", () => {

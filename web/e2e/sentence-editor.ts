@@ -85,6 +85,7 @@ const KIND_NAMES: Readonly<Record<string, string>> = {
   volume_high: "신고거래량", traded_value_high: "신고거래대금", surge: "거래 급증", ma_position: "이평 위치",
   ma_alignment: "이평 배열", ma_cross: "이평 교차", rsi: "RSI", macd: "MACD", stochastic: "스토캐스틱",
   bollinger: "볼린저 밴드", ichimoku: "일목균형표", market_cap: "시가총액",
+  program_net_buy: "프로그램 순매수", whale_net_buy: "고래 순매수", vi_triggered: "VI 발동 이력",
 };
 
 export async function expectKind(scope: Locator, line: number, value: string) {
