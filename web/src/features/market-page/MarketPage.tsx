@@ -12,11 +12,15 @@ import { PageFrame } from "../pages/PageFrame";
 import { openSystemSettings } from "../system-settings/open";
 import { Segmented } from "../ui/Segmented";
 import { BreadthXrayCard } from "./BreadthXrayCard";
+import { BrokerBookCard } from "./BrokerBookCard";
+import { DisclosureRadarCard } from "./DisclosureRadarCard";
 import { FlowCard } from "./FlowCard";
 import { IndexCard } from "./IndexCard";
 import { MaThrustCard } from "./MaThrustCard";
 import { PointAttributionCard } from "./PointAttributionCard";
+import { RrgQuadrantCard } from "./RrgQuadrantCard";
 import { SectorCard } from "./SectorCard";
+import { SessionDnaCard } from "./SessionDnaCard";
 import { StockTabs } from "./StockTabs";
 import { TurnoverCard } from "./TurnoverCard";
 import { scopeLabel } from "./derivedFormat";
@@ -108,6 +112,10 @@ export function MarketPage() {
           <StockTabs scope={scope} market={activeMarket} enabled={connected} />
           <PointAttributionCard scope={scope} enabled={connected} />
           <MaThrustCard scope={scope} enabled={connected} />
+          <RrgQuadrantCard scope={scope} enabled={connected} />
+          <SessionDnaCard scope={scope} enabled={connected} />
+          <BrokerBookCard scope={scope} enabled={connected} />
+          <DisclosureRadarCard scope={scope} enabled={connected} />
         </div>
       )}
     </PageFrame>

@@ -5,6 +5,7 @@ import type { MarketOverviewFlowCard } from "./generated/MarketOverviewFlowCard"
 import type { MarketOverviewIndexCard } from "./generated/MarketOverviewIndexCard";
 import type { MarketOverviewIntradayFlow } from "./generated/MarketOverviewIntradayFlow";
 import type { MarketOverviewPeriod } from "./generated/MarketOverviewPeriod";
+import type { MarketOverviewProCard } from "./generated/MarketOverviewProCard";
 import type { MarketOverviewScope } from "./generated/MarketOverviewScope";
 import type { MarketOverviewSectorsCard } from "./generated/MarketOverviewSectorsCard";
 import type { MarketOverviewStreaksCard } from "./generated/MarketOverviewStreaksCard";
@@ -51,6 +52,9 @@ export const marketThemesQuery = () =>
 export const marketViQuery = (scope: MarketOverviewScope) =>
   queryOptions({ queryKey: ["market-overview", "vi", scope], queryFn: ({ signal }) => getJson<MarketOverviewViCard>(scopedPath("vi", scope), signal), ...refreshing });
 
+export const marketProQuery = (scope: MarketOverviewScope) =>
+  queryOptions({ queryKey: ["market-overview", "pro", scope], queryFn: ({ signal }) => getJson<MarketOverviewProCard>(scopedPath("pro", scope), signal), ...refreshing });
+
 export const marketRankingQuery = (ranking: Ranking) =>
   queryOptions({ queryKey: ["market-overview", "ranking", ranking], queryFn: () => fetchRanking(ranking, 1, "user"), ...refreshing });
 
@@ -65,4 +69,5 @@ export const useMarketStreaks = (market: Market, { enabled }: Gate) => useQuery(
 export const useMarketDerived = (scope: MarketOverviewScope, { enabled }: Gate) => useQuery({ ...marketDerivedQuery(scope), enabled });
 export const useMarketThemes = ({ enabled }: Gate) => useQuery({ ...marketThemesQuery(), enabled });
 export const useMarketVi = (scope: MarketOverviewScope, { enabled }: Gate) => useQuery({ ...marketViQuery(scope), enabled });
+export const useMarketPro = (scope: MarketOverviewScope, { enabled }: Gate) => useQuery({ ...marketProQuery(scope), enabled });
 export const useMarketRanking = (ranking: Ranking, { enabled }: Gate) => useQuery({ ...marketRankingQuery(ranking), enabled });

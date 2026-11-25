@@ -117,6 +117,102 @@ test("지수 기여도와 시장 추세 체력은 파생 지표를 보이고 기
   await expect(cell(page, 1)).toHaveAttribute("aria-label", /^칸 1: SK하이닉스/);
 });
 
+test("로테이션 RRG는 4분면 SVG 궤적을 그리고 테마·업종 전환과 툴팁을 보인다", async ({ page }) => {
+  await page.goto("/market");
+  const rrg = card(page, "로테이션 RRG");
+  await expect(rrg.locator(".mk-rrg-svg")).toBeVisible();
+  await expect(rrg.locator(".mk-rrg-bg")).toHaveCount(4);
+  await expect(rrg.locator(".mk-rrg-trail")).toHaveCount(4);
+  await expect(rrg.locator(".mk-rrg-arrow")).toHaveCount(4);
+
+  await rrg.locator('.mk-rrg-chip[data-code="304"]').click();
+  const tip = rrg.getByTestId("rrg-tooltip");
+  await expect(tip).toContainText("바이오 신약");
+  await expect(tip).toContainText("개선 (Improving)");
+  await expect(tip).toContainText("99.50");
+  await expect(tip).toContainText("101.30");
+  await expect(tip).toContainText("+1.42%");
+
+  await rrg.getByRole("group", { name: "RRG 대상" }).getByRole("button", { name: "업종" }).click();
+  await expect(rrg.locator('.mk-rrg-series[data-code="013"]')).toBeVisible();
+  await expect(tip).toContainText("전기전자");
+});
+
+test("장중 세션 DNA는 6구간 타임라인과 진행 중 구간 강조, 거래소 비중을 보인다", async ({ page }) => {
+  await page.goto("/market");
+  const dna = card(page, "장중 세션 DNA");
+  await expect(dna.locator(".mk-dna-window")).toHaveCount(6);
+  for (const label of ["NXT 프리", "장초반", "본장", "마감", "NXT 전반", "NXT 후반"]) {
+    await expect(dna.getByText(label, { exact: true })).toBeVisible();
+  }
+  const active = dna.locator('.mk-dna-window[data-window="krxMid"]');
+  await expect(active).toHaveAttribute("data-active", "true");
+  await expect(active.getByText("진행 중")).toBeVisible();
+  await expect(dna.getByTestId("session-venue-split")).toContainText("82.1%");
+  await expect(dna.getByTestId("session-venue-split")).toContainText("17.9%");
+});
+
+test("창구·호가 압력 카드는 매수 압력 막대와 상위 종목 차트 이동을 지원한다", async ({ page }) => {
+  await page.goto("/market");
+  const book = card(page, "창구·호가 압력");
+  await expect(book.getByTestId("broker-pressure-bar")).toContainText("61.4%");
+  await expect(book.getByRole("region", { name: "매수 압력 상위" })).toContainText("삼성전자");
+  await expect(book.getByRole("region", { name: "매도 압력 상위" })).toContainText("LG화학");
+  await expect(book.getByRole("region", { name: "외국인 순매수" })).toContainText("SK하이닉스");
+  await expect(book.getByRole("region", { name: "프로그램 순매수" })).toContainText("삼성전자");
+
+  await book.getByRole("region", { name: "외국인 순매수" }).locator('[data-code="028260"] button').click();
+  await expect(page).toHaveURL(/\/$/);
+  await expect(cell(page, 1)).toHaveAttribute("aria-label", /^칸 1: 삼성물산/);
+});
+
+test("핵심 공시 레이더는 유형별 필터링과 공시 종목 차트 이동을 지원한다", async ({ page }) => {
+  await page.goto("/market");
+  const disc = card(page, "핵심 공시 레이더");
+  await expect(disc.getByTestId("disclosure-total")).toContainText("총 4건");
+  await expect(disc.locator(".mk-disc-item")).toHaveCount(4);
+
+  const filters = disc.getByRole("group", { name: "공시 유형 필터" });
+  await filters.getByRole("button", { name: /수주·계약/ }).click();
+  await expect(disc.locator(".mk-disc-item")).toHaveCount(1);
+  await expect(disc.locator(".mk-disc-item").first()).toContainText("SK하이닉스");
+  await expect(disc.locator(".mk-disc-item").first()).toContainText("2026.11.09");
+
+  await filters.getByRole("button", { name: /실적/ }).click();
+  await expect(disc.locator(".mk-disc-item")).toHaveCount(1);
+  await disc.locator('.mk-disc-item[data-code="196170"] button').click();
+  await expect(page).toHaveURL(/\/$/);
+  await expect(cell(page, 1)).toHaveAttribute("aria-label", /^칸 1: 알테오젠/);
+});
+
+test("프로 인텔리전스 경로가 503으로 실패해도 기존 시장 종합 칸들은 그대로 보인다", async ({ page, scenario }) => {
+  serveMarketRankings(scenario);
+  scenario.on((url) => url.pathname === "/api/market-overview/pro", () => ({ status: 503, body: { error: { code: "not_prepared", message: "프로 지표 자료가 아직 준비되지 않았습니다", reason: null, retryAt: null, manualActionRequired: false } } }));
+  await page.goto("/market");
+  for (const title of ["로테이션 RRG", "장중 세션 DNA", "창구·호가 압력", "핵심 공시 레이더"]) {
+    await expect(card(page, title).getByRole("alert")).toContainText("프로 지표 자료가 아직 준비되지 않았습니다");
+  }
+  await expect(card(page, "지수·폭").getByText("코스피", { exact: true })).toBeVisible();
+  await expect(card(page, "시장 체력 X-Ray").locator(".mk-hist-col")).toHaveCount(9);
+  await expect(card(page, "지수 기여도").getByRole("region", { name: "상승 기여 상위" })).toContainText("삼성전자");
+  await expect(card(page, "종목").getByRole("button", { name: "삼성전자" })).toBeVisible();
+});
+
+test("프로 인텔리전스 한 구역만 실패해도 나머지 프로 카드는 정상 표시된다", async ({ page, scenario }) => {
+  const base = marketOverviewBaseline(new URL("http://host/api/market-overview/pro?scope=all"), "GET")!.body as Record<string, unknown>;
+  scenario.reply((url) => url.pathname === "/api/market-overview/pro", {
+    body: {
+      ...base,
+      brokerBook: { status: "failed", error: { code: "not_prepared", message: "호가 압력 자료가 비어 있습니다", reason: null, retryAt: null, manualActionRequired: false } },
+    },
+  });
+  await page.goto("/market");
+  await expect(card(page, "창구·호가 압력").getByRole("alert")).toContainText("호가 압력 자료가 비어 있습니다");
+  await expect(card(page, "로테이션 RRG").locator(".mk-rrg-trail")).toHaveCount(4);
+  await expect(card(page, "장중 세션 DNA").locator(".mk-dna-window")).toHaveCount(6);
+  await expect(card(page, "핵심 공시 레이더").locator(".mk-disc-item")).toHaveCount(4);
+});
+
 test("종목 탭 행과 VI 발동 탭 행을 누르면 연동 색 차트에 그 종목이 열린다", async ({ page, scenario }) => {
   serveMarketRankings(scenario);
   await page.goto("/market");
