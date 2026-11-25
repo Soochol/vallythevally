@@ -84,6 +84,9 @@ pub struct ProgramSeriesPoint {
     pub buy_amount_million_won: f64,
     pub sell_amount_million_won: f64,
     pub program_share_pct: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub day_traded_million_won: Option<f64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
@@ -140,6 +143,12 @@ impl TickMinuteSlot {
     }
 }
 
+fn minute_index(day_start: i64, hhmmss: TimeOfDay) -> usize {
+    let at = KstTime::from_unix(day_start + i64::from(hhmmss.secs()));
+    let bucket = Period::M1.trade_bucket(at).start().unix();
+    ((bucket - day_start) / 60) as usize
+}
+
 pub fn bucket_ticks_by_minute(date: KstDate, ticks: &[CollectedTradeTick]) -> Vec<TickMinuteBucket> {
     if ticks.is_empty() {
         return Vec::new();
@@ -147,7 +156,7 @@ pub fn bucket_ticks_by_minute(date: KstDate, ticks: &[CollectedTradeTick]) -> Ve
     let day_start = KstTime::from_kst_civil(date, TimeOfDay::MIDNIGHT).unix();
     let mut slots = [TickMinuteSlot::default(); MINUTES_PER_DAY];
     for tick in ticks {
-        let minute_idx = (tick.hhmmss.secs() / 60) as usize;
+        let minute_idx = minute_index(day_start, tick.hhmmss);
         slots[minute_idx].add_tick(tick);
     }
     let mut out = Vec::new();
@@ -188,7 +197,7 @@ fn merge_tick_minutes(date: KstDate, existing: &[TickMinuteBucket], added: &[Col
         }
     }
     for tick in added {
-        let minute_idx = (tick.hhmmss.secs() / 60) as usize;
+        let minute_idx = minute_index(day_start, tick.hhmmss);
         slots[minute_idx].add_tick(tick);
     }
     let mut out = Vec::new();
@@ -215,7 +224,7 @@ pub fn bucket_program_by_minute(date: KstDate, rows: &[CollectedProgramRow]) -> 
     let day_start = KstTime::from_kst_civil(date, TimeOfDay::MIDNIGHT).unix();
     let mut slots: [Option<ProgramMinuteBucket>; MINUTES_PER_DAY] = [None; MINUTES_PER_DAY];
     for row in rows {
-        let minute_idx = (row.hhmmss.secs() / 60) as usize;
+        let minute_idx = minute_index(day_start, row.hhmmss);
         slots[minute_idx] = Some(ProgramMinuteBucket {
             minute_unix: day_start + (minute_idx as i64) * 60,
             net_buy_amount_million_won: row.net_buy_amount_million_won,
@@ -240,7 +249,7 @@ fn merge_program_minutes(date: KstDate, existing: &[ProgramMinuteBucket], added:
         }
     }
     for row in added {
-        let minute_idx = (row.hhmmss.secs() / 60) as usize;
+        let minute_idx = minute_index(day_start, row.hhmmss);
         slots[minute_idx] = Some(ProgramMinuteBucket {
             minute_unix: day_start + (minute_idx as i64) * 60,
             net_buy_amount_million_won: row.net_buy_amount_million_won,
@@ -351,11 +360,11 @@ pub fn rollup_program_day(
         if in_requested_range(bar_t, from, to, period_secs) {
             let buy_million = last.buy_amount_million_won as f64;
             let sell_million = last.sell_amount_million_won as f64;
-            let program_share_pct = if cum_traded_won > 0 {
+            let (program_share_pct, day_traded_million_won) = if cum_traded_won > 0 {
                 let total_million = cum_traded_won as f64 / WON_PER_MILLION;
-                Some((((buy_million + sell_million) / total_million) * 100.0).clamp(0.0, 100.0))
+                (Some((((buy_million + sell_million) / total_million) * 100.0).clamp(0.0, 100.0)), Some(total_million))
             } else {
-                None
+                (None, None)
             };
             out.push(ProgramSeriesPoint {
                 t: UnixSeconds(bar_t),
@@ -364,6 +373,7 @@ pub fn rollup_program_day(
                 buy_amount_million_won: buy_million,
                 sell_amount_million_won: sell_million,
                 program_share_pct,
+                day_traded_million_won,
             });
         }
     }
@@ -862,5 +872,57 @@ mod tests {
         let points = aggregate_program_day(day, &rows, &[], Period::M1, None, None);
         assert_eq!(points.len(), 1);
         assert_eq!(points[0].program_share_pct, None);
+        assert_eq!(points[0].day_traded_million_won, None);
+    }
+
+    #[test]
+    fn close_grace_ticks_and_program_rows_fold_into_closing_bar() {
+        let day = date(23);
+        let ticks = vec![
+            tick(19, 59, 45, 100_000, 1_000),
+            tick(20, 0, 0, 100_000, 1_200),
+            tick(20, 0, 9, 10_000, -300),
+            tick(20, 0, 10, 100_000, 1_500),
+        ];
+        let rows = vec![
+            program(19, 59, 30, 50, 500, 80, 30),
+            program(20, 0, 3, 75, 750, 110, 35),
+            program(20, 0, 9, 90, 900, 130, 40),
+        ];
+
+        let m1_cvd = aggregate_tick_cvd_day(day, &ticks[..3], Period::M1, None, None);
+        assert_eq!(m1_cvd.len(), 1);
+        assert_eq!(m1_cvd[0].t.0, KstTime::from_kst_civil(day, TimeOfDay::hms(19, 59, 0).unwrap()).unix());
+        assert!((m1_cvd[0].whale_net_million_won - 220.0).abs() < 1e-9);
+        assert!((m1_cvd[0].retail_net_million_won - (-3.0)).abs() < 1e-9);
+
+        let m5_cvd = aggregate_tick_cvd_day(day, &ticks[..3], Period::M5, None, None);
+        assert_eq!(m5_cvd.len(), 1);
+        assert_eq!(m5_cvd[0].t.0, KstTime::from_kst_civil(day, TimeOfDay::hms(19, 55, 0).unwrap()).unix());
+
+        let m60_cvd = aggregate_tick_cvd_day(day, &ticks[..3], Period::M60, None, None);
+        assert_eq!(m60_cvd.len(), 1);
+        assert_eq!(m60_cvd[0].t.0, KstTime::from_kst_civil(day, TimeOfDay::hms(19, 0, 0).unwrap()).unix());
+
+        let with_after_grace = aggregate_tick_cvd_day(day, &ticks, Period::M1, None, None);
+        assert_eq!(with_after_grace.len(), 2);
+        assert_eq!(with_after_grace[1].t.0, KstTime::from_kst_civil(day, TimeOfDay::hms(20, 0, 0).unwrap()).unix());
+
+        let merged_ticks = merge_tick_minutes(day, &bucket_ticks_by_minute(day, &ticks[..1]), &ticks[1..3]);
+        assert_eq!(merged_ticks.len(), 1);
+        assert_eq!(merged_ticks[0].minute_unix, KstTime::from_kst_civil(day, TimeOfDay::hms(19, 59, 0).unwrap()).unix());
+        assert_eq!(merged_ticks[0].whale_won, 220_000_000);
+        assert_eq!(merged_ticks[0].retail_won, -3_000_000);
+
+        let m1_prog = aggregate_program_day(day, &rows, &ticks[..3], Period::M1, None, None);
+        assert_eq!(m1_prog.len(), 1);
+        assert_eq!(m1_prog[0].t.0, KstTime::from_kst_civil(day, TimeOfDay::hms(19, 59, 0).unwrap()).unix());
+        assert!((m1_prog[0].net_buy_amount_million_won - 90.0).abs() < 1e-9);
+        assert!((m1_prog[0].day_traded_million_won.unwrap() - 223.0).abs() < 1e-9);
+
+        let merged_prog = merge_program_minutes(day, &bucket_program_by_minute(day, &rows[..1]), &rows[1..]);
+        assert_eq!(merged_prog.len(), 1);
+        assert_eq!(merged_prog[0].minute_unix, KstTime::from_kst_civil(day, TimeOfDay::hms(19, 59, 0).unwrap()).unix());
+        assert_eq!(merged_prog[0].net_buy_amount_million_won, 90);
     }
 }

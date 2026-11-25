@@ -97,9 +97,13 @@ export function IndicatorSettingsForm({ draft, color, errors, onChange, lineSamp
           }
           if (f.type === "flag") {
             const checked = text === "true";
+            const lockLastTier =
+              kind === "tickCvd"
+              && checked
+              && KINDS.tickCvd.fields.filter((field) => draft.form.text[field.key] === "true").length <= 1;
             return (
               <Row key={f.key} label={f.label}>
-                <button type="button" role="switch" aria-label={f.label} aria-checked={checked} className="ui-switch min-h-[var(--size-30)] text-s" onClick={() => setText(f.key, checked ? "false" : "true")}>
+                <button type="button" role="switch" aria-label={f.label} aria-checked={checked} disabled={lockLastTier} className="ui-switch min-h-[var(--size-30)] text-s disabled:opacity-50" onClick={() => setText(f.key, checked ? "false" : "true")}>
                   <span className="flex-1 text-left">{checked ? "켜짐" : "꺼짐"}</span>
                   <span aria-hidden="true" className="ui-switch-track"><span /></span>
                 </button>

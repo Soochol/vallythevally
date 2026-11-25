@@ -1011,6 +1011,7 @@ export class ChartController {
     this.financialHoverTime = null;
     this.realtimeSeen = false;
     this.stalledAt = null;
+    this.syncMicroFeeds();
     const bars = displayBars(h);
     this.withDataGuard(() => {
       this.setBars(bars);
@@ -1030,6 +1031,7 @@ export class ChartController {
 
   private onModeChanged(): void {
     this.syncCompare();
+    this.syncMicroFeeds();
     this.renderBadge();
   }
 
@@ -1043,8 +1045,12 @@ export class ChartController {
   private syncMicroFeeds(): void {
     const view = this.view;
     const socket = this.socket;
-    const eligible = view !== null && socket !== undefined && !isIndexCode(view.symbol) && isIntraday(view.period);
-    const wantTrades = eligible && view.settings.indicators.some((c) => isTickCvd(c.spec) && c.visible);
+    const liveAllowed = this.feed.activeDate === null;
+    this.indicators.setMicroLive(liveAllowed);
+    const eligible = liveAllowed && view !== null && socket !== undefined && !isIndexCode(view.symbol) && isIntraday(view.period);
+    const wantTrades = eligible && view.settings.indicators.some(
+      (c) => c.visible && (isTickCvd(c.spec) || (isProgramFlow(c.spec) && c.spec.showShare)),
+    );
     const wantProgram = eligible && view.settings.indicators.some((c) => isProgramFlow(c.spec) && c.visible);
 
     if (!wantTrades) {
