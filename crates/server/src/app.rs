@@ -167,6 +167,8 @@ pub fn application_with_source(inputs: ApplicationInputs, startup: impl Into<Sys
     );
     let accounts = crate::trading::Accounts::new(keys.clone(), rest.clone(), account_feed, clock.clone(), order_switch.unwrap_or_else(crate::trading::SwitchStore::memory), db.clone(), symbols.clone());
     let collected_store = crate::collected_store::CollectedStore::new();
+    let collected = crate::collected::Collected::new(collected_store.clone());
+    let premarket = crate::premarket::PreMarketService::new(collected.clone());
     Arc::new(AppState {
         symbols,
         bars,
@@ -193,8 +195,9 @@ pub fn application_with_source(inputs: ApplicationInputs, startup: impl Into<Sys
         shared_data: crate::shared_data::SharedData::new(),
         collector_paths: Arc::new(crate::shared_data::CollectorPathsSlot::new()),
         book_replay: crate::book_replay::BookReplay::new(collected_store.clone()),
-        collected: crate::collected::Collected::new(collected_store.clone()),
+        collected,
         micro_events: crate::micro_events::MicroEventService::new(collected_store),
+        premarket,
         heatmap_quotes: Arc::new(crate::heatmap_board::QuoteCache::with_generation(generation.clone())),
         heatmap_flow: Arc::new(crate::heatmap_flow::FlowCache::with_generation(generation.clone())),
         quote_minutes: Arc::new(crate::quote_minutes::QuoteCache::new()),
@@ -422,6 +425,9 @@ pub async fn start_with(config: &Config, lock: &InstanceLock, adapters: Adapters
         tracing::info!("VALLY_HOGA_DATA_DIR과 VALLY_SHARED_DATA_DIR이 없어 분 호가·호가 복기·수집 거래원을 끕니다");
     }
     state.collector_paths.configure(collector_paths);
+    if let Some(shared_dir) = state.collector_paths.shared_dir() {
+        state.screener.read_daily_micro(shared_dir.to_path_buf());
+    }
     if let Some(shared) = &config.shared_data {
         state.screener.read_shared_snapshots(state.shared_data.clone(), config.screener_snapshot_stale_limit);
         state.screener.keep_calendar_fresh();
@@ -431,6 +437,7 @@ pub async fn start_with(config: &Config, lock: &InstanceLock, adapters: Adapters
     crate::etf::start_collection(state.clone(), config.etf_pdf_dir.clone(), config.naver_base_url.clone());
     crate::kiwoom_themes::start_collection(state.clone(), config.kiwoom_themes_dir.clone());
 
+    state.market_overview.set_financial_db_path(Some(config.financial_db_path.clone()));
     let financials = crate::financials::Financials::read_only(&config.financial_db_path, clock.clone());
     let financial_routes = crate::financials::routes(financials, symbols.clone());
     let public = crate::public::start(config, state.clone(), financial_routes.clone(), public_listener).await?;

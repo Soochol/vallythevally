@@ -4,6 +4,7 @@ import { expect, test } from "vitest";
 import type { Screen } from "../../api/generated/Screen";
 import { ScreenFields } from "./ScreenDialog";
 import { CHOICE_LABEL } from "./ConditionFields";
+import { isBarKind } from "../../lib/screener";
 import { conditionChoices } from "../screener/SentenceFields";
 import { addCondition, changeKind, draftOf, editCondition, removeCondition, KIND_GROUPS, type ScreenDraft } from "./screenForm";
 
@@ -131,15 +132,16 @@ test("잘못된 칸은 그 칸에 표시되고 줄 아래에 칸 이름과 이�
   expect(markup).toContain("빠른 기간: 느린 기간 26일보다 짧아야 합니다");
 });
 
-test("종류 검색은 묶음별로 15가지와 신고거래량·신고거래대금을 보이고, 문장 맨 앞 종류 낱말이 지금 종류다", () => {
+test("종류 검색은 묶음별로 모든 조건을 보이고, 문장 맨 앞 종류 낱말이 지금 종류다", () => {
   const markup = markupOf(addCondition(draftOf(null)));
   const groups = KIND_GROUPS.map((group) => [group.label, conditionChoices("").filter((choice) => choice.group === group.label).map((choice) => choice.label)]);
-  expect(conditionChoices("")).toHaveLength(17);
+  expect(conditionChoices("")).toHaveLength(20);
   expect(groups).toEqual([
     ["가격", ["신고가", "신저가", "값 범위", "등락률", "고점·저점 거리"]],
     ["거래", ["신고거래량", "신고거래대금", "거래 급증"]],
     ["이동평균", ["이평 위치", "이평 배열", "이평 교차"]],
     ["보조지표", ["RSI", "MACD", "스토캐스틱", "볼린저 밴드", "일목균형표"]],
+    ["수급·미시", ["프로그램 순매수", "고래 순매수", "VI 발동 이력"]],
     ["종목", ["시가총액"]],
   ]);
   expect(markup).toMatch(new RegExp(`aria-label="조건 1 종류"[^>]*>${CHOICE_LABEL.new_high}<svg`));
@@ -163,7 +165,7 @@ test("모든 봉 조건과 거래 신고 항목은 최근 기간을 세부 값 �
         const line = picked.conditions[0]!;
         const markup = markupOf(editCondition(picked, { ...line, period, recentBars: "260" }));
         const labels = labelsIn(markup).filter((label) => label.startsWith("조건 1 "));
-        if (kind === "market_cap") {
+        if (!isBarKind(line.kind)) {
           expect(labels).not.toContain("조건 1 최근 기간");
           expect(labels).not.toContain("조건 1 봉 주기");
         } else {

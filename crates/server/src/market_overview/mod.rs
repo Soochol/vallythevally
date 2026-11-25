@@ -1,12 +1,20 @@
+pub mod broker_book;
 mod cards;
+pub mod derived;
+pub mod disclosures;
 mod dto;
+mod events;
 mod kiwoom_overview;
+pub mod pro;
+pub mod rrg;
 mod sampler;
 mod samples;
 mod session;
+pub mod session_dna;
 mod shared;
 
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use axum::Router;
@@ -14,6 +22,7 @@ use axum::routing::get;
 use domain::{KstDate, KstTime};
 
 use crate::api::{Broker, Market};
+use crate::financials::store::SecurityDisclosures;
 use crate::http::AppState;
 use crate::market_source::route::Picked;
 use crate::market_source::{GenerationTicket, OverviewSource, SourceGeneration};
@@ -33,6 +42,10 @@ pub fn routes() -> Router<Arc<AppState>> {
         .route("/api/market-overview/flow/intraday", get(cards::intraday_flow))
         .route("/api/market-overview/turnover", get(cards::turnover))
         .route("/api/market-overview/streaks", get(cards::streaks))
+        .route("/api/market-overview/derived", get(derived::derived))
+        .route("/api/market-overview/pro", get(pro::pro))
+        .route("/api/market-overview/themes", get(events::themes))
+        .route("/api/market-overview/vi", get(events::vi))
 }
 
 #[derive(Default)]
@@ -48,6 +61,9 @@ pub struct MarketOverview {
     investor_days: Mutex<InvestorDays>,
     chosen: Mutex<Option<Arc<dyn OverviewSource>>>,
     generation: SourceGeneration,
+    pub(crate) derived_ma_cache: derived::DerivedMaCache,
+    financial_db_path: Mutex<Option<PathBuf>>,
+    disclosure_cache: disclosures::DisclosureCache,
 }
 
 pub fn overview_source(st: &AppState) -> Picked<dyn OverviewSource> {
@@ -59,7 +75,29 @@ pub fn overview_source(st: &AppState) -> Picked<dyn OverviewSource> {
 
 impl MarketOverview {
     pub fn with_generation(generation: SourceGeneration) -> MarketOverview {
-        MarketOverview { samples: SampleBook::with_generation(generation.clone()), investor_days: Mutex::default(), chosen: Mutex::default(), generation }
+        MarketOverview {
+            samples: SampleBook::with_generation(generation.clone()),
+            investor_days: Mutex::default(),
+            chosen: Mutex::default(),
+            generation,
+            derived_ma_cache: derived::DerivedMaCache::default(),
+            financial_db_path: Mutex::default(),
+            disclosure_cache: disclosures::DisclosureCache::default(),
+        }
+    }
+
+    pub fn financial_db_path(&self) -> Option<PathBuf> {
+        self.financial_db_path.lock().expect("재무 DB 경로 잠금").clone()
+    }
+
+    pub fn set_financial_db_path(&self, path: Option<PathBuf>) {
+        *self.financial_db_path.lock().expect("재무 DB 경로 잠금") = path;
+        self.disclosure_cache.clear();
+    }
+
+    pub(crate) async fn load_security_disclosures(&self) -> Option<Arc<Vec<SecurityDisclosures>>> {
+        let path = self.financial_db_path()?;
+        self.disclosure_cache.load(&path).await
     }
 
     pub fn ticket(&self) -> GenerationTicket {

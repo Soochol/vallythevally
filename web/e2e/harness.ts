@@ -86,6 +86,51 @@ export const test = base.extend<{ scenario: Scenario; clockStart: string | null 
         return { body: { date: url.searchParams.get("date") ?? "", account: url.searchParams.get("account"), items: [] } };
       },
     );
+    scenario.on(
+      (url) => /^\/api\/symbols\/[^/]+\/premarket\/days$/.test(url.pathname),
+      (request) => {
+        const symbol = decodeURIComponent(new URL(request.url()).pathname.split("/")[3] ?? "");
+        return { body: { symbol, days: [] } };
+      },
+    );
+    scenario.on(
+      (url) => /^\/api\/symbols\/[^/]+\/premarket\/compare$/.test(url.pathname),
+      (request) => {
+        const symbol = decodeURIComponent(new URL(request.url()).pathname.split("/")[3] ?? "");
+        return { body: { symbol, series: [] } };
+      },
+    );
+    scenario.on(
+      (url) => url.pathname === "/api/premarket/snapshot",
+      (request) => {
+        const date = new URL(request.url()).searchParams.get("date") ?? "";
+        return { body: { date, availableDates: [], source: "none", rows: [] } };
+      },
+    );
+    scenario.on(
+      (url) => /^\/api\/symbols\/[^/]+\/tick-cvd$/.test(url.pathname),
+      (request) => {
+        if (scenario.publicMode.kind === "public") {
+          return { status: 404, body: { error: { code: "not_found", message: "공개 리스너에 없는 경로입니다", reason: null, retryAt: null, manualActionRequired: false } } };
+        }
+        const url = new URL(request.url());
+        const symbol = decodeURIComponent(url.pathname.split("/")[3] ?? "");
+        const period = url.searchParams.get("period") ?? "1m";
+        return { body: { symbol, period, state: "disabled", points: [] } };
+      },
+    );
+    scenario.on(
+      (url) => /^\/api\/symbols\/[^/]+\/program-series$/.test(url.pathname),
+      (request) => {
+        if (scenario.publicMode.kind === "public") {
+          return { status: 404, body: { error: { code: "not_found", message: "공개 리스너에 없는 경로입니다", reason: null, retryAt: null, manualActionRequired: false } } };
+        }
+        const url = new URL(request.url());
+        const symbol = decodeURIComponent(url.pathname.split("/")[3] ?? "");
+        const period = url.searchParams.get("period") ?? "1m";
+        return { body: { symbol, period, state: "disabled", points: [] } };
+      },
+    );
     const throttle = cpuThrottleRate();
     if (throttle !== null) {
       const apply = async (page: Page) => { await (await context.newCDPSession(page)).send("Emulation.setCPUThrottlingRate", { rate: throttle }); };

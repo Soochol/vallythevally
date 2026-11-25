@@ -252,6 +252,22 @@ mod secret_text {
     }
 }
 
+mod opt_secret_text {
+    use serde::{Deserialize, Deserializer, Serializer};
+    use server::config::Secret;
+
+    pub fn serialize<S: Serializer>(secret: &Option<Secret<String>>, serializer: S) -> Result<S::Ok, S::Error> {
+        match secret {
+            Some(secret) => serializer.serialize_str(secret.expose()),
+            None => serializer.serialize_none(),
+        }
+    }
+
+    pub fn deserialize<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Option<Secret<String>>, D::Error> {
+        Option::<String>::deserialize(deserializer).map(|value| value.map(Secret::new))
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "cmd", rename_all = "snake_case")]
 pub enum Command {
@@ -261,6 +277,10 @@ pub enum Command {
         generation: u64,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         expires_at: Option<i64>,
+        #[serde(default, skip_serializing_if = "Option::is_none", with = "opt_secret_text")]
+        app_key: Option<Secret<String>>,
+        #[serde(default, skip_serializing_if = "Option::is_none", with = "opt_secret_text")]
+        app_secret: Option<Secret<String>>,
     },
     Assign {
         date: u32,
@@ -486,7 +506,14 @@ mod tests {
     #[test]
     fn commands_round_trip_through_a_versioned_line() {
         let commands = [
-            Command::Token { token: Secret::new("FAKE-TOKEN".to_owned()), generation: 7, expires_at: None },
+            Command::Token { token: Secret::new("FAKE-TOKEN".to_owned()), generation: 7, expires_at: None, app_key: None, app_secret: None },
+            Command::Token {
+                token: Secret::new("FAKE-KIS-TOKEN".to_owned()),
+                generation: 8,
+                expires_at: Some(1_800_000_000),
+                app_key: Some(Secret::new("FAKE-KIS-KEY".to_owned())),
+                app_secret: Some(Secret::new("FAKE-KIS-SECRET".to_owned())),
+            },
             Command::Register(Registration::new("r1", vec!["005930".into(), "000660".into()], vec![RealType::Trade, RealType::OrderBook]).unwrap()),
             Command::Unregister(Registration::new("u1", vec!["001".into(), String::new()], vec![RealType::SectorIndex]).unwrap()),
             Command::Shutdown,
@@ -501,9 +528,33 @@ mod tests {
 
     #[test]
     fn the_token_wire_shape_is_plain_and_its_debug_form_is_masked() {
-        let command = Command::Token { token: Secret::new("FAKE-TOKEN".to_owned()), generation: 3, expires_at: None };
+        let command = Command::Token { token: Secret::new("FAKE-TOKEN".to_owned()), generation: 3, expires_at: None, app_key: None, app_secret: None };
         assert_eq!(serde_json::from_str::<Value>(&encode_line(&command)).unwrap(), json!({"v": PROTOCOL_VERSION, "cmd": "token", "token": "FAKE-TOKEN", "generation": 3}));
         assert!(!format!("{command:?}").contains("FAKE-TOKEN"));
+
+        let kis_command = Command::Token {
+            token: Secret::new("FAKE-KIS-TOKEN".to_owned()),
+            generation: 4,
+            expires_at: Some(1_800_000_000),
+            app_key: Some(Secret::new("FAKE-KIS-APPKEY".to_owned())),
+            app_secret: Some(Secret::new("FAKE-KIS-APPSECRET".to_owned())),
+        };
+        let encoded = encode_line(&kis_command);
+        assert_eq!(
+            serde_json::from_str::<Value>(&encoded).unwrap(),
+            json!({
+                "v": PROTOCOL_VERSION,
+                "cmd": "token",
+                "token": "FAKE-KIS-TOKEN",
+                "generation": 4,
+                "expires_at": 1_800_000_000,
+                "app_key": "FAKE-KIS-APPKEY",
+                "app_secret": "FAKE-KIS-APPSECRET"
+            })
+        );
+        assert_eq!(parse_command(&encoded).unwrap(), kis_command);
+        let debug = format!("{kis_command:?}");
+        assert!(!debug.contains("FAKE-KIS-TOKEN") && !debug.contains("FAKE-KIS-APPKEY") && !debug.contains("FAKE-KIS-APPSECRET"), "{debug}");
     }
 
     #[test]
@@ -580,6 +631,8 @@ mod tests {
             format!(r#"{{"v":2,"cmd":"token","token":"{secret}"}}"#),
             format!(r#"{{"v":2,"cmd":"{secret}"}}"#),
             format!(r#"{{"v":2,"cmd":"token","token":["{secret}"],"generation":1}}"#),
+            format!(r#"{{"v":2,"cmd":"token","token":"t","generation":1,"app_key":["{secret}"],"app_secret":"{secret}"}}"#),
+            format!(r#"{{"v":2,"cmd":"token","token":"t","generation":"bad","app_key":"{secret}","app_secret":"{secret}"}}"#),
             format!(r#"{{"v":2,"cmd":"register","id":"r","items":["{secret}"],"types":["0B"]}}"#),
             format!(r#"{{"v":2,"cmd":"register","id":"r","items":["005930"],"types":["{secret}"]}}"#),
             format!(r#"{{"v":2,"cmd":"unregister","id":"{secret}","items":"005930","types":["0B"]}}"#),

@@ -351,7 +351,7 @@ mod tests {
         let (inbox, _rx) = mpsc::unbounded_channel();
         slot.attach_spawned(spawned, now, &inbox, |inc, msg| (inc, msg));
 
-        let cmd = Command::Token { token: server::config::Secret::new("t".to_owned()), generation: 1, expires_at: None };
+        let cmd = Command::Token { token: server::config::Secret::new("t".to_owned()), generation: 1, expires_at: None, app_key: None, app_secret: None };
         assert!(!slot.send_if_ready(&cmd));
 
         slot.mark_hello(now);

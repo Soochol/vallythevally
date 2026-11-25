@@ -1,7 +1,21 @@
+import type { EtfAccumulationDirection } from "../../api/generated/EtfAccumulationDirection";
+import type { EtfAccumulationRow } from "../../api/generated/EtfAccumulationRow";
+import type { EtfChangeKind } from "../../api/generated/EtfChangeKind";
 import type { EtfChangePair } from "../../api/generated/EtfChangePair";
+import type { EtfChangeRow } from "../../api/generated/EtfChangeRow";
 import type { EtfFundSummary } from "../../api/generated/EtfFundSummary";
 import type { EtfHolding } from "../../api/generated/EtfHolding";
+import type { EtfMaStates } from "../../api/generated/EtfMaStates";
+import type { EtfRecentActivity } from "../../api/generated/EtfRecentActivity";
 import type { EtfStyle } from "../../api/generated/EtfStyle";
+
+export type GlobalTabId = "accumulation" | "overlap" | "reverse";
+export type FundTabId = "holdings" | "history" | "similar";
+export type TabId = GlobalTabId | FundTabId;
+
+export function isGlobalTab(tab: TabId): tab is GlobalTabId {
+  return tab === "accumulation" || tab === "overlap" || tab === "reverse";
+}
 
 export type StyleFilter = EtfStyle | "all";
 
@@ -23,17 +37,30 @@ export function filterFunds(funds: readonly EtfFundSummary[], filter: FundFilter
   );
 }
 
-export type FundSort = "name" | "top5" | "count";
+export type FundSort = "name" | "top5" | "effective" | "activity" | "count";
 
 export const SORT_CHOICES: readonly { value: FundSort; label: string }[] = [
   { value: "name", label: "이름순" },
   { value: "top5", label: "상위 5 비중순" },
+  { value: "effective", label: "실효 종목순" },
+  { value: "activity", label: "최근 리밸런싱순" },
   { value: "count", label: "종목 수순" },
 ];
+
+export function activityScore(activity: EtfRecentActivity | null): number {
+  if (activity === null) return -1;
+  return activity.added * 3 + activity.increased * 2 + activity.removed * 2 + activity.decreased;
+}
 
 export function sortFunds(funds: readonly EtfFundSummary[], sort: FundSort): EtfFundSummary[] {
   if (sort === "top5") return funds.toSorted((a, b) => b.top5WeightBps - a.top5WeightBps);
   if (sort === "count") return funds.toSorted((a, b) => b.holdingsCount - a.holdingsCount);
+  if (sort === "effective") return funds.toSorted((a, b) => a.effectiveHoldings - b.effectiveHoldings || a.name.localeCompare(b.name, "ko"));
+  if (sort === "activity") {
+    return funds.toSorted(
+      (a, b) => activityScore(b.recentActivity) - activityScore(a.recentActivity) || a.name.localeCompare(b.name, "ko"),
+    );
+  }
   return funds.toSorted((a, b) => a.name.localeCompare(b.name, "ko"));
 }
 
@@ -44,6 +71,42 @@ export function issuersOf(funds: readonly EtfFundSummary[]): string[] {
 export const percentOfBps = (bps: number): number => bps / 100;
 
 export const formatPercent = (bps: number): string => `${percentOfBps(bps).toFixed(2)}%`;
+
+export type TreemapLens = "weight" | "ma" | "flow";
+
+export function maAlignedCount(ma: EtfMaStates): number {
+  let count = 0;
+  if (ma.ma20 === "above") count += 1;
+  if (ma.ma60 === "above") count += 1;
+  if (ma.ma120 === "above") count += 1;
+  return count;
+}
+
+export interface HoldingsBreadth {
+  evaluated: number;
+  above20Pct: number;
+  aligned3Pct: number;
+}
+
+export function holdingsBreadth(holdings: readonly EtfHolding[]): HoldingsBreadth {
+  let evaluated = 0;
+  let above20 = 0;
+  let aligned3 = 0;
+  for (const holding of holdings) {
+    const { ma20, ma60, ma120 } = holding.ma;
+    if (ma20 !== null || ma60 !== null || ma120 !== null) {
+      evaluated += 1;
+      if (ma20 === "above") above20 += 1;
+      if (maAlignedCount(holding.ma) === 3) aligned3 += 1;
+    }
+  }
+  if (evaluated === 0) return { evaluated: 0, above20Pct: 0, aligned3Pct: 0 };
+  return {
+    evaluated,
+    above20Pct: Math.round((above20 / evaluated) * 100),
+    aligned3Pct: Math.round((aligned3 / evaluated) * 100),
+  };
+}
 
 export interface TreemapInput {
   key: string;
@@ -71,7 +134,6 @@ function worstRatio(areas: readonly number[], side: number): number {
   return Math.max(...areas.map((area) => Math.max(area / (thickness * thickness), (thickness * thickness) / area)));
 }
 
-/** 정사각형에 가깝게 배치한다(squarified treemap). 입력은 가중치 내림차순으로 정렬해 쓴다. 가중치가 0 이하인 칸은 뺀다. */
 export function squarify(inputs: readonly TreemapInput[], width: number, height: number): TreemapTile[] {
   const items = inputs.filter((item) => item.weight > 0).toSorted((a, b) => b.weight - a.weight);
   const total = items.reduce((sum, item) => sum + item.weight, 0);
@@ -147,6 +209,15 @@ export function commonHoldings(a: readonly WeightedHolding[], b: readonly Weight
     .toSorted((x, y) => Math.min(y.weightABps, y.weightBBps) - Math.min(x.weightABps, x.weightBBps));
 }
 
+export function uniqueHoldings(a: readonly WeightedHolding[], b: readonly WeightedHolding[]): { onlyA: WeightedHolding[]; onlyB: WeightedHolding[] } {
+  const codesA = new Set(a.map((holding) => holding.code));
+  const codesB = new Set(b.map((holding) => holding.code));
+  return {
+    onlyA: a.filter((holding) => !codesB.has(holding.code)).toSorted((x, y) => y.weightBps - x.weightBps),
+    onlyB: b.filter((holding) => !codesA.has(holding.code)).toSorted((x, y) => y.weightBps - x.weightBps),
+  };
+}
+
 export const overlapBps = (a: readonly WeightedHolding[], b: readonly WeightedHolding[]): number =>
   commonHoldings(a, b).reduce((sum, holding) => sum + Math.min(holding.weightABps, holding.weightBBps), 0);
 
@@ -156,8 +227,108 @@ export function parseBasket(value: string | null): string[] {
 
 export const pairOf = (pairs: readonly EtfChangePair[], after: string | null): EtfChangePair | null => pairs.find((pair) => pair.after === after) ?? pairs[0] ?? null;
 
+export function fullRangePair(pairs: readonly EtfChangePair[]): { before: string; after: string } | null {
+  if (pairs.length < 2) return null;
+  return { before: pairs[pairs.length - 1]!.before, after: pairs[0]!.after };
+}
+
+export function isMaInverseAligned(ma: EtfMaStates): boolean {
+  return ma.ma20 === "below" && ma.ma60 === "below" && ma.ma120 === "below";
+}
+
+export type RadarChipFilter = "all" | "added" | "aligned" | "multi";
+
+export function filterAccumulationRows(
+  rows: readonly EtfAccumulationRow[],
+  chip: RadarChipFilter,
+  direction: EtfAccumulationDirection = "buy",
+): EtfAccumulationRow[] {
+  if (direction === "sell") {
+    if (chip === "added") return rows.filter((row) => row.removedEtfCount > 0);
+    if (chip === "aligned") return rows.filter((row) => isMaInverseAligned(row.ma));
+    if (chip === "multi") return rows.filter((row) => row.sellingEtfCount >= 3);
+    return [...rows];
+  }
+  if (chip === "added") return rows.filter((row) => row.addedEtfCount > 0);
+  if (chip === "aligned") return rows.filter((row) => maAlignedCount(row.ma) === 3);
+  if (chip === "multi") return rows.filter((row) => row.buyingEtfCount >= 3);
+  return [...rows];
+}
+
+export interface RadarSummary {
+  total: number;
+  edgeStocks: number;
+  trendStocks: number;
+  topRow: EtfAccumulationRow | null;
+}
+
+export function radarSummary(
+  rows: readonly EtfAccumulationRow[],
+  direction: EtfAccumulationDirection = "buy",
+): RadarSummary {
+  let edgeStocks = 0;
+  let trendStocks = 0;
+  let topRow: EtfAccumulationRow | null = null;
+  for (const row of rows) {
+    if (direction === "sell") {
+      if (row.removedEtfCount > 0) edgeStocks += 1;
+      if (isMaInverseAligned(row.ma)) trendStocks += 1;
+      if (topRow === null || row.sellingEtfCount > topRow.sellingEtfCount) topRow = row;
+    } else {
+      if (row.addedEtfCount > 0) edgeStocks += 1;
+      if (maAlignedCount(row.ma) === 3) trendStocks += 1;
+      if (topRow === null || row.buyingEtfCount > topRow.buyingEtfCount) topRow = row;
+    }
+  }
+  return { total: rows.length, edgeStocks, trendStocks, topRow };
+}
+
+export type HistoryKindFilter = "all" | "changed" | "buy" | "sell";
+
+export interface DisplayedChangeRow {
+  row: EtfChangeRow;
+  change: number | null;
+  kind: EtfChangeKind;
+  rawChange: number | null;
+  isScaleNoise: boolean;
+}
+
+const CHANGE_THRESHOLD = 0.01;
+
+export function projectChangeRow(row: EtfChangeRow, xrayOn: boolean): DisplayedChangeRow {
+  const rawChange =
+    row.beforeQuantity !== null && row.afterQuantity !== null && row.beforeQuantity > 0
+      ? (row.afterQuantity - row.beforeQuantity) / row.beforeQuantity
+      : null;
+  const isScaleNoise = row.kind === "unchanged" && rawChange !== null && Math.abs(rawChange) > CHANGE_THRESHOLD;
+  if (xrayOn) {
+    return { row, change: row.realChange, kind: row.kind, rawChange, isScaleNoise };
+  }
+  if (row.kind === "added" || row.kind === "removed" || rawChange === null) {
+    return { row, change: null, kind: row.kind, rawChange, isScaleNoise };
+  }
+  const kind: EtfChangeKind =
+    Math.abs(rawChange) <= CHANGE_THRESHOLD ? "unchanged" : rawChange > CHANGE_THRESHOLD ? "increased" : "decreased";
+  return { row, change: rawChange, kind, rawChange, isScaleNoise };
+}
+
+export function filterChangeRows(rows: readonly DisplayedChangeRow[], filter: HistoryKindFilter): DisplayedChangeRow[] {
+  if (filter === "changed") return rows.filter((item) => item.kind !== "unchanged");
+  if (filter === "buy") return rows.filter((item) => item.kind === "added" || item.kind === "increased");
+  if (filter === "sell") return rows.filter((item) => item.kind === "removed" || item.kind === "decreased");
+  return [...rows];
+}
+
 export const formatScale = (scale: number | null): string => (scale === null ? "-" : `×${scale.toFixed(3)}`);
 
 export const formatRealChange = (change: number): string => `${change > 0 ? "+" : ""}${(change * 100).toFixed(1)}%`;
 
 export const formatQuantity = (quantity: number | null): string => (quantity === null ? "-" : quantity.toLocaleString("en-US", { maximumFractionDigits: 4 }));
+
+export const formatMedianRealChange = (change: number | null): string => (change === null ? "-" : formatRealChange(change));
+
+export const formatAccumulationPeriod = (fromDate: string | null, toDate: string | null, collectedDays: number): string | null =>
+  fromDate !== null && toDate !== null ? `${fromDate} ~ ${toDate} · 수집일 ${collectedDays}일` : null;
+
+export const formatBuyingSummary = (buyingEtfCount: number, addedEtfCount: number): string =>
+  addedEtfCount > 0 ? `${buyingEtfCount}개 (신규 ${addedEtfCount})` : `${buyingEtfCount}개`;

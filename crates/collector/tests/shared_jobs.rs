@@ -626,6 +626,7 @@ impl Launcher for FakeLauncher {
             broker: launch.broker,
             shared_dir: self.shared_dir.clone(),
             transport: self.kiwoom.clone(),
+            kis_transport: None,
             clock: self.clock.clone(),
             total_per_second: launch.total_per_second,
             commands,

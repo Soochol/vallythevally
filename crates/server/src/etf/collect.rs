@@ -1,5 +1,6 @@
 use std::collections::{BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock, RwLock};
 use std::time::Duration;
 
@@ -29,6 +30,7 @@ pub struct EtfBook {
     current: RwLock<Arc<Catalog>>,
     state: Mutex<Collected>,
     pdf_dir: OnceLock<PathBuf>,
+    revision: AtomicU64,
 }
 
 #[derive(Default)]
@@ -40,13 +42,17 @@ struct Collected {
 impl Default for EtfBook {
     fn default() -> Self {
         let base = Arc::new(Catalog::embedded());
-        EtfBook { current: RwLock::new(base.clone()), base, state: Mutex::default(), pdf_dir: OnceLock::new() }
+        EtfBook { current: RwLock::new(base.clone()), base, state: Mutex::default(), pdf_dir: OnceLock::new(), revision: AtomicU64::new(0) }
     }
 }
 
 impl EtfBook {
     pub fn catalog(&self) -> Arc<Catalog> {
         self.current.read().expect("ETF 목록 잠금").clone()
+    }
+
+    pub fn revision(&self) -> u64 {
+        self.revision.load(Ordering::Acquire)
     }
 
     pub fn pdf_dir(&self) -> Option<&Path> {
@@ -59,6 +65,7 @@ impl EtfBook {
             Arc::new(self.base.overlaid(&state.funds, &state.attempts))
         };
         *self.current.write().expect("ETF 목록 잠금") = merged;
+        self.revision.fetch_add(1, Ordering::Release);
     }
 
     fn latest_as_of(&self, code: StockCode) -> Option<KstDate> {

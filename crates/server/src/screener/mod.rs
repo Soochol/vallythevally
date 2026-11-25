@@ -4,12 +4,14 @@ mod indicator;
 mod line;
 mod market_cap;
 pub mod memory;
+mod micro;
 mod rules;
 mod shared;
 pub mod store;
 pub mod summary;
 mod update;
 
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
 use std::time::Duration;
@@ -128,6 +130,7 @@ pub struct Screener {
     memory: Memory,
     summaries: Arc<SummaryCollector>,
     shared: OnceLock<SharedQuotes>,
+    daily_micro_dir: OnceLock<PathBuf>,
     kiwoom: KiwoomHandle,
     bars: Arc<BarService>,
     symbols: Arc<SymbolDirectory>,
@@ -146,6 +149,7 @@ impl Screener {
             memory: Memory::default(),
             summaries: SummaryCollector::new(kiwoom.clone(), clock.clone()),
             shared: OnceLock::new(),
+            daily_micro_dir: OnceLock::new(),
             kiwoom,
             bars,
             symbols,
@@ -172,12 +176,16 @@ impl Screener {
         }
     }
 
+    pub fn read_daily_micro(&self, shared_dir: PathBuf) {
+        let _ = self.daily_micro_dir.set(shared_dir);
+    }
+
     pub fn result_reuse(&self) -> Option<ReuseCounts> {
         self.shared.get().map(SharedQuotes::counts)
     }
 
-    pub fn store_generation(&self) -> u64 {
-        self.store.generation()
+    pub async fn store_generation(&self) -> Result<u64, StoreError> {
+        self.with_store(|store| Ok(store.generation())).await
     }
 
     pub fn keep_calendar_fresh(self: &Arc<Self>) {
@@ -212,6 +220,22 @@ impl Screener {
 
     pub async fn recent_closes(&self, codes: Vec<domain::StockCode>, count: usize) -> Result<store::RecentCloses, StoreError> {
         self.with_store(move |store| store.recent_closes(&codes, count)).await
+    }
+
+    pub async fn recent_dated_closes(&self, codes: Vec<domain::StockCode>, count: usize) -> Result<store::RecentDatedCloses, StoreError> {
+        self.with_store(move |store| store.recent_dated_closes(&codes, count)).await
+    }
+
+    pub async fn listed_meta(&self) -> Result<Vec<store::ListedMeta>, StoreError> {
+        self.with_store(Store::listed_meta).await
+    }
+
+    pub async fn daily_codes(&self) -> Result<Vec<domain::StockCode>, StoreError> {
+        self.with_store(Store::daily_codes).await
+    }
+
+    pub async fn recent_trading_days(&self, count: usize) -> Result<Vec<KstDate>, StoreError> {
+        self.with_store(move |store| store.recent_trading_days(count)).await
     }
 
     pub fn start(self: &Arc<Self>, full: bool) {
@@ -377,6 +401,11 @@ impl Screener {
         let need_day = calendar.need_day(now);
         self.refill_listing().await.map_err(|e| Lookup::ScreenerRun.failure(e, now))?;
         self.recents_started_outside_recent()?;
+        if !screen.micros.is_empty()
+            && let Some(shared_dir) = self.daily_micro_dir.get().cloned()
+        {
+            self.with_store(move |store| store.ingest_daily_micro(&shared_dir)).await?;
+        }
         let update_epoch = self.next_run.load(Ordering::SeqCst);
         if let Some(shared) = self.shared.get() {
             return self.run_from_snapshot(shared, SnapshotRun { screen, screen_key, calendar, need_day, now, update_epoch }).await;
@@ -440,7 +469,7 @@ impl Screener {
                 let more = if adjustments.len() > named.len() { " 등" } else { "" };
                 return Err(data_changed(format!("기준가와 확정 이력의 차이가 커 수정 이력을 확인해야 합니다: {}{more}. 업데이트 후 다시 실행하세요. 업데이트 뒤에도 같은 종목이 거절되면 키움이 준 이력이 기준가와 맞지 않는 것이라, 그 종목의 이력이 바뀔 때까지 실행할 수 없습니다", named.join(", "))));
             }
-            let result = engine::screen(&edition, &screen, &batch, calendar.observation(me.clock.now()))?;
+            let result = engine::screen(&edition, &screen, &batch, calendar.observation(me.clock.now()), &me.store)?;
             if me.store.generation() != generation || me.next_run.load(Ordering::SeqCst) != update_epoch || me.clock.now().kst_date() != batch.target {
                 return Err(data_changed("판정 중 날짜나 확정 이력이 바뀌었습니다. 다시 실행하세요"));
             }

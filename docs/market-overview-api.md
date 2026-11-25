@@ -8,7 +8,8 @@
 
 | 인자 | 값 | 뜻 |
 |---|---|---|
-| `market` | `kospi`, `kosdaq` | 필수. 모든 경로가 받는다 |
+| `market` | `kospi`, `kosdaq` | 단일 시장 경로(`index`, `sectors`, `flow`, `flow/intraday`, `turnover`, `streaks`)에서 필수 |
+| `scope` | `all`, `kospi`, `kosdaq` | 범위 경로(`derived`, `vi`, `pro`)에서 사용. 없으면 `all` |
 | `period` | `5`, `20`, `60` | 거래일 수. 없으면 `20`. `flow`와 `turnover`만 쓰고, 다른 경로는 받아도 무시한다 |
 
 그 밖의 값은 `400 bad_request`이고 키움을 부르지 않는다.
@@ -44,6 +45,10 @@
 | `/api/market-overview/flow/intraday` | 누가 사고 파나: 오늘 누적선 | 없음(장중 표본) |
 | `/api/market-overview/turnover` | 거래대금 추이 | `ka20006` 1건 |
 | `/api/market-overview/streaks` | 연속 매매 | `ka10131` 2건 |
+| `/api/market-overview/derived` | 시장 체력 X-Ray · 지수 기여도 · 시장 추세 체력 | 없음(공용 스냅샷·일봉 저장소 파생) |
+| `/api/market-overview/themes` | 장중 키움 테마 | `ka90001`(공용 자료 우선) |
+| `/api/market-overview/vi` | VI 발동 | `ka10054`(공용 자료 우선) |
+| `/api/market-overview/pro` | 로테이션 RRG · 장중 세션 DNA · 창구·호가 압력 · 핵심 공시 레이더 | 없음(공용 자료·일봉·장중 표본·재무 DB 파생) |
 
 화면이 기다리는 호출은 `Priority::Screen`이다. 같은 키움 요청이 동시에 오면 키움 쪽 대기열이 하나로 합친다.
 
@@ -82,6 +87,32 @@
 ### `streaks`
 
 `buying`(순매수 연속)과 `selling`(순매도 연속) 구역, 구역마다 `foreign`과 `institution` 목록이다. 키움 순서를 그대로 두고, 그 주체의 `days`가 방향과 맞는 행만 남긴다(순매수 연속은 양수, 순매도 연속은 음수. 키움은 방향 필터로 종목을 고르지만 두 주체 값을 한 행에 함께 주므로 반대 부호가 섞인다). ETF·ETN은 뺀다. `days`는 부호가 방향이고, `netEok`은 연속 기간의 순매매 금액이다. `period`는 받지 않는다. 앱 종목 목록을 아직 받지 못했으면 두 구역이 `reason: symbol_list_loading`으로 실패한다.
+
+### `derived`
+
+`scope`(`all`, `kospi`, `kosdaq`) 기준의 파생 시장 지표 네 구역을 `MarketOverviewPart`로 따로 담는다. 외부 증권사 호출 없이 공용 자료 스냅샷(`SnapshotCombined`, `SnapshotKrx`, `SnapshotNxt`)과 일봉 저장소에서 계산한다.
+
+- `histogram`: 9구간 등락률 분포(`label`, `count`, `sharePct`).
+- `venueShare`: KRX·NXT 거래대금(억원)과 비중(`krxRatioPct`, `nxtRatioPct`).
+- `attribution`: 지수 기여 상위·하위 종목(`topPositive`, `topNegative`, `points`, `changeRate`, `capDeltaEok`)과 상위 2종목 집중도(`topTwoConcentrationPct`). `scope=all`은 코스피 기준으로 계산한다.
+- `maThrust`: 5·20·60·200일 이동평균선 상회 종목 비율(`above5Pct` 등)과 최근 20거래일 `above20Pct` 추이(`history20d`).
+
+### `themes`
+
+장중 키움 테마(`ka90001`) 등락률 목록을 `themes` 구역으로 돌려준다. 공용 자료(`themes-intraday/<관측일>.json`)가 켜져 있으면 파일에서 읽고, 없으면 키움 REST를 부른다. 각 행은 `code`, `name`, `stockCount`, `changeRate`, `periodReturn`, `rising`, `falling`, `leaders`를 담는다.
+
+### `vi`
+
+`scope`(`all`, `kospi`, `kosdaq`)로 거른 당일 변동성완화장치(VI) 발동 종목(`ka10054`)을 `events` 구역으로 돌려준다. 공용 자료(`vi-events/<관측일>.json`)가 켜져 있으면 파일에서 읽는다. 각 행은 `code`, `name`, `market`, `direction`(`up`·`down`), `triggeredAt`, `releasedAt`, `triggerPrice`, `staticVi`, `dynamicVi`, `dispersionRate`를 담는다.
+
+### `pro`
+
+`scope`(`all`, `kospi`, `kosdaq`) 기준의 프로 인텔리전스 네 구역을 각각 독립된 `MarketOverviewPart`로 돌려준다. 외부 증권사 API를 추가로 부르지 않고 공용 자료(스냅샷·순위·테마·장중 표본), 일봉 저장소, 재무 DB 공시에서 계산한다. 구역 하나에 원천 자료가 없으면 그 구역만 `not_prepared`로 실패하고 나머지는 정상 반환된다.
+
+- `rrg`: 테마(`themes`)와 업종(`sectors`)의 Relative Rotation Graph 궤적(`asOf`, 각 항목의 `code`, `name`, `quadrant`(`leading`·`weakening`·`lagging`·`improving`), `changeRate`, `memberCount`, 최근 5거래일 `points`(`date`, `rsRatio`, `rsMomentum`)). 기준선 `(100, 100)` 중심의 z-정규화 궤적이다.
+- `sessionDna`: 관측일(`day`), 현재 진행 구간(`activeWindow`: `nxtPre`·`krxOpen`·`krxMid`·`krxClose`·`nxtMain`·`nxtLate` 또는 `null`), KRX·NXT 합산 거래대금(`krxTradeValueEok`, `nxtTradeValueEok`), 08:00–20:00 KST 6구간(`windows`)별 외국인·기관·개인·프로그램 순매수 증감(`*DeltaEok`)과 표본 수(`sampleCount`).
+- `brokerBook`: 공용 순위(호가잔량·외국인 순매수·프로그램 순매수)에서 집계한 전체 매수/매도 잔량(`totalBidRemaining`, `totalAskRemaining`), 매수 압력 비중(`buyPressurePct`), 매수/매도 압력 상위 종목(`topBuyPressure`, `topSellPressure`), 외국인·프로그램 순매수 상위 종목(`foreignLeaders`, `programLeaders`).
+- `disclosures`: 재무 DB의 OpenDART 공시를 키워드 4유형(`contract` 수주·계약, `shareholder` 주주환원, `earnings` 실적, `capital` 증자·CB)으로 분류하고 당일 등락률(`changeRate`)을 조인한 목록(`totalMatched`, `counts`, `items` 최대 30건).
 
 ## 단위와 키움 요청의 함정
 

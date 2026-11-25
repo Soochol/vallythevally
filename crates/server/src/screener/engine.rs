@@ -1,15 +1,17 @@
+use std::collections::HashMap;
 use std::num::NonZeroU64;
 
 use domain::{Bucket, KstDate, KstTime, Period, Price, StockCode, TimeOfDay};
 
 use super::memory::{Bar, Edition};
+use super::micro::MicroRule;
 use super::summary::{MissingSummary, SummaryBatch};
 use super::Observation;
 use crate::http::ApiFailure;
 use crate::kiwoom::wire::KrxSummaryValues;
 use super::line::{Cell, Line, Series};
 use super::rules::RunnableScreen;
-use super::store::{StoreError, exclusion_mask, price_of};
+use super::store::{MicroSums, Store, StoreError, exclusion_mask, price_of};
 use crate::api::{self, BarField, ScreenPeriod, ScreenerExcluded, ScreenerResult, ScreenerRow, SymbolCode};
 
 const PERIODS: [ScreenPeriod; 3] = [ScreenPeriod::Day, ScreenPeriod::Week, ScreenPeriod::Month];
@@ -138,7 +140,7 @@ fn today_bar(batch: &SummaryBatch, code: &StockCode) -> Option<Bar> {
     Some(Bar { open: o.open().centi(), high: o.high().centi(), low: o.low().centi(), close: o.close().centi(), volume: o.volume().0, traded: traded.0 })
 }
 
-pub(super) fn screen(edition: &Edition, screen: &RunnableScreen, batch: &SummaryBatch, observation: Observation) -> Result<ScreenerResult, ApiFailure> {
+pub(super) fn screen(edition: &Edition, screen: &RunnableScreen, batch: &SummaryBatch, observation: Observation, store: &Store) -> Result<ScreenerResult, ApiFailure> {
     let stored_day = edition.last_day.expect("확인한 저장소");
     let provisional = stored_day < batch.target;
     let today_traded = batch.stocks.values().any(|s| s.result.as_ref().is_ok_and(|q| matches!(q.values, KrxSummaryValues::Traded { .. })));
@@ -207,6 +209,26 @@ pub(super) fn screen(edition: &Edition, screen: &RunnableScreen, batch: &Summary
             Standing::Judged => (),
         }
     }
+    let micro_windows: HashMap<u32, HashMap<StockCode, MicroSums>> = if screen.micros.is_empty() {
+        HashMap::new()
+    } else {
+        let mut days_list: Vec<u32> = screen.micros.iter().map(MicroRule::days).collect();
+        days_list.sort_unstable();
+        days_list.dedup();
+        store.micro_windows(as_of, &days_list)?
+    };
+    let program_days = screen.micros.iter().find_map(|rule| match *rule {
+        MicroRule::ProgramNetBuy { days, .. } => Some(days),
+        _ => None,
+    });
+    let whale_days = screen.micros.iter().find_map(|rule| match *rule {
+        MicroRule::WhaleNetBuy { days, .. } => Some(days),
+        _ => None,
+    });
+    let vi_days = screen.micros.iter().find_map(|rule| match *rule {
+        MicroRule::ViTriggered { days, .. } => Some(days),
+        _ => None,
+    });
     let mut rows: Vec<ScreenerRow> = Vec::new();
     for (idx, matched_on) in hits {
         let stock = judged[idx];
@@ -217,6 +239,18 @@ pub(super) fn screen(edition: &Edition, screen: &RunnableScreen, batch: &Summary
         if !screen.market_caps.iter().all(|range| range.admits(daily.close, stock.listed_shares)) {
             continue;
         }
+        if !screen.micros.iter().all(|rule| rule.admits(micro_windows.get(&rule.days()).and_then(|map| map.get(&stock.code)))) {
+            continue;
+        }
+        let program_net_million_won = program_days
+            .and_then(|days| micro_windows.get(&days)?.get(&stock.code))
+            .map(|sums| won_to_million(sums.program_net_won));
+        let whale_net_million_won = whale_days
+            .and_then(|days| micro_windows.get(&days)?.get(&stock.code))
+            .map(|sums| won_to_million(sums.whale_net_won));
+        let vi_count = vi_days
+            .and_then(|days| micro_windows.get(&days)?.get(&stock.code))
+            .map(|sums| sums.vi_count);
         rows.push(ScreenerRow {
             symbol: SymbolCode(stock.code.as_str().to_owned()),
             name: stock.name.to_owned(),
@@ -225,6 +259,9 @@ pub(super) fn screen(edition: &Edition, screen: &RunnableScreen, batch: &Summary
             matched_date: api::KstDate(matched_on),
             latest_bar_date: api::KstDate(daily.day),
             provisional: daily.provisional,
+            program_net_million_won,
+            whale_net_million_won,
+            vi_count,
         });
     }
     rows.sort_by(|a, b| b.matched_date.cmp(&a.matched_date).then_with(|| a.symbol.0.cmp(&b.symbol.0)));
@@ -338,4 +375,8 @@ fn daily_close(edition: &Edition, stock: &Stock<'_>, as_of: KstDate) -> Result<O
 fn change_rate(close: Price, previous: Price) -> f64 {
     let (close, previous) = (close.centi() as f64, previous.centi() as f64);
     ((close - previous) / previous * 10_000.0).round() / 100.0
+}
+
+fn won_to_million(won: i128) -> i64 {
+    (won as f64 / 1_000_000.0).round().clamp(i64::MIN as f64, i64::MAX as f64) as i64
 }

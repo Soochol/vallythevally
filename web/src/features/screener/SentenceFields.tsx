@@ -1,5 +1,5 @@
 import { type RefObject, useId, useRef, useState } from "react";
-import { EXCLUDE_LABEL, MARKET_LABEL, NO_CONDITIONS_SENTENCE, UNIT } from "../../lib/screener";
+import { EXCLUDE_LABEL, isBarKind, MARKET_LABEL, NO_CONDITIONS_SENTENCE, UNIT } from "../../lib/screener";
 import { Choice, CHOICE_LABEL, fieldName, KindFields, NumberBox, PERIODS, Word, type LineUi } from "../screen-dialog/ConditionFields";
 import { addCondition, changeKind, checkCondition, editCondition, editNumber, excludesIn, KIND_GROUPS, MARKETS, MAX_CONDITIONS, moveCondition, placeCondition, removeCondition, toggleExclude, toggleMarket, kindChoiceOf, type ConditionDraft, type FieldKey, type KindChoice, type ScreenDraft } from "../screen-dialog/screenForm";
 import { ChevronIcon, CloseIcon, CopyIcon, GripIcon, MoreIcon, PlusIcon } from "../icons";
@@ -85,14 +85,14 @@ export function SentenceCondition({ ids, line, index, onChange, onKind }: LinePr
       {index > 0 && <span className="text-text-3">그리고</span>}
       <button ref={kindButton} type="button" aria-label={`${ui.label} 종류`} aria-haspopup="dialog" aria-expanded={kindQuery !== null} title="눌러서 종류 바꾸기" className="sentence-kind" onClick={() => setKindQuery("")}>{CHOICE_LABEL[ui.kind]}<ChevronIcon /></button>
       {kindQuery !== null && <KindSearch label={`${ui.label} 종류 바꾸기`} anchor={kindButton} query={kindQuery} current={ui.kind} onQuery={setKindQuery} onPick={(kind) => { setKindQuery(null); onKind(kind); }} onClose={() => setKindQuery(null)} />}
-      {line.kind !== "market_cap" && <>
+      {isBarKind(line.kind) && <>
         <Choice label={`${ui.label} 봉 주기`} value={line.period} options={PERIODS} onChange={(period) => onChange({ ...line, period })} />
         <span>최근</span>
         <Word><NumberBox ui={ui} field="recentBars" value={line.recentBars} onChange={(recentBars) => onChange({ ...line, recentBars })} />{UNIT[line.period]}</Word>
         <span>이내에</span>
       </>}
       <KindFields ui={ui} line={line} onChange={onChange} />
-      {line.kind !== "market_cap" && <span>봉이 있다</span>}
+      {isBarKind(line.kind) && <span>봉이 있다</span>}
     </div>
     {(Object.entries(ui.errors) as [FieldKey, string][]).map(([key, message]) => <p key={key} id={`${ui.base}-${key}-error`} role="alert" className="mt-1 text-xs text-danger">{fieldName(ui.kind, key)}: {message}</p>)}
   </div>;

@@ -104,6 +104,7 @@ pub enum KisError {
     Gated { until: KstTime },
     Stopped(Failure),
     TokenFile(FileError),
+    TokenNotSupplied,
     Transport(TransportError),
     BadTokenResponse,
     QueueGone,
@@ -116,6 +117,7 @@ impl fmt::Display for KisError {
             KisError::Failed(failure) | KisError::Stopped(failure) => failure.fmt(f),
             KisError::Gated { .. } => f.write_str("한투 토큰 발급 간격(10분)이 지날 때까지 요청하지 않습니다"),
             KisError::TokenFile(e) => write!(f, "한투 토큰 파일: {e}"),
+            KisError::TokenNotSupplied => f.write_str("한투 접근토큰이 아직 전달되지 않았거나 다시 받아야 합니다"),
             KisError::Transport(e) => write!(f, "한투 요청 실패: {e}"),
             KisError::BadTokenResponse => f.write_str("한투 인증 응답에서 값을 읽지 못했습니다"),
             KisError::QueueGone => f.write_str("한투 요청 대기열이 요청을 끝내지 못했습니다"),
@@ -132,6 +134,7 @@ impl From<AuthError> for KisError {
             AuthError::Halted(Halt::Rejected(failure)) => KisError::Stopped(failure),
             AuthError::Halted(Halt::TokenFileUnreadable(e)) | AuthError::NotRecorded(e) => KisError::TokenFile(e),
             AuthError::IssueInterval { retry_at } => KisError::Gated { until: retry_at },
+            AuthError::IssueDisabled => KisError::TokenNotSupplied,
             AuthError::Transport(e) => KisError::Transport(e),
             AuthError::Failed(failure) => KisError::Failed(failure),
             AuthError::BadResponse => KisError::BadTokenResponse,
@@ -394,8 +397,9 @@ impl Inner {
             if request.once.as_ref().is_some_and(|once| !(once.admit)()) {
                 return Err(KisError::NotAdmitted);
             }
-            let lease = self.auth.token().await?;
+            let _ = self.auth.token().await?;
             let oldest_in_window = self.admit(request.priority).await;
+            let lease = self.auth.token().await?;
             if request.once.as_ref().is_some_and(|once| !(once.admit)()) {
                 return Err(KisError::NotAdmitted);
             }
@@ -425,6 +429,10 @@ impl Inner {
                 Policy::ReissueOnce if !reissued => {
                     reissued = true;
                     self.auth.invalidate(lease.generation);
+                }
+                Policy::ReissueOnce if self.auth.is_supplied() => {
+                    self.auth.invalidate(lease.generation);
+                    return Err(KisError::Failed(failure));
                 }
                 Policy::ReissueOnce | Policy::HaltAll => {
                     self.auth.halt(failure.clone());

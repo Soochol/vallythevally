@@ -91,6 +91,10 @@ const FIELD_NAME: Record<Exclude<FieldKey, `lengths.${number}`>, string> = {
   base: "기준선 기간",
   spanB: "선행스팬 B 기간",
   displacement: "이동 봉 수",
+  days: "기간",
+  minMillionWon: "최소",
+  maxMillionWon: "최대",
+  minCount: "횟수",
 };
 const KIND_FIELD_NAME: { [K in KindChoice]?: Partial<Record<FieldKey, string>> } = {
   new_high: { n: "신고가 기간" },
@@ -123,6 +127,9 @@ const INDICATOR_PRESETS: { [K in KindChoice]?: Partial<Record<FieldKey, readonly
   surge: { times: ["2", "3", "5", "10"] },
   near_extreme: { withinPct: ["1", "3", "5", "10"] },
   change: { minPct: ["-5", "0", "3", "5", "10"], maxPct: ["-5", "0", "3", "5", "10"] },
+  program_net_buy: { days: ["1", "3", "5", "10", "20"], minMillionWon: ["100", "500", "1000", "5000"], maxMillionWon: ["-1000", "-100", "0", "1000"] },
+  whale_net_buy: { days: ["1", "3", "5", "10", "20"], minMillionWon: ["100", "500", "1000", "5000"], maxMillionWon: ["-1000", "-100", "0", "1000"] },
+  vi_triggered: { days: ["1", "3", "5", "10", "20"], minCount: ["1", "2", "3", "5"] },
 };
 const BAR_COUNT_FIELDS: ReadonlySet<FieldKey> = new Set(["n", "back"]);
 const MA_FIELDS: ReadonlySet<KindChoice> = new Set(["ma_position", "ma_alignment", "ma_cross"]);
@@ -174,7 +181,7 @@ export function Choice<T extends string>({ label, value, options, onChange }: Ch
 
 interface RangeProps {
   ui: LineUi;
-  keys: readonly ["min", "max"] | readonly ["minPct", "maxPct"];
+  keys: readonly ["min", "max"] | readonly ["minPct", "maxPct"] | readonly ["minMillionWon", "maxMillionWon"];
   unit: string;
   min: string;
   max: string;
@@ -423,6 +430,20 @@ export function KindFields({ ui, line, onChange }: KindProps) {
     case "market_cap":
       return <>
         <RangeTokens ui={ui} keys={BOUNDS} unit="억 원" min={line.min} max={line.max} end="이다" onChange={(min, max) => onChange({ ...line, min, max })} />
+      </>;
+    case "program_net_buy":
+    case "whale_net_buy":
+      return <>
+        <span>최근</span>
+        <Word>{number("days", line.days, (days) => onChange({ ...line, days }))}일</Word>
+        <RangeTokens ui={ui} keys={["minMillionWon", "maxMillionWon"]} unit="백만 원" min={line.minMillionWon} max={line.maxMillionWon} end="이다" onChange={(minMillionWon, maxMillionWon) => onChange({ ...line, minMillionWon, maxMillionWon })} />
+      </>;
+    case "vi_triggered":
+      return <>
+        <span>최근</span>
+        <Word>{number("days", line.days, (days) => onChange({ ...line, days }))}일</Word>
+        <Word>{number("minCount", line.minCount, (minCount) => onChange({ ...line, minCount }))}회</Word>
+        <span>이상이다</span>
       </>;
   }
 }
