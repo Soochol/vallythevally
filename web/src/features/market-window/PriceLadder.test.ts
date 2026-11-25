@@ -140,3 +140,10 @@ test("교차 호가의 같은 가격에서 평단가 점과 예상체결 강조�
   expect(lines[10]).not.toContain('data-testid="ladder-mark"');
   expect(lines[10]).not.toContain("data-expected");
 });
+
+test("시가·고가·저가가 맞는 가격 행 왼쪽에 시·고·저 뱃지가 붙고 같은 가격이면 나란히 보인다", () => {
+  const html = render({ dayPrices: { open: 71_500, high: 71_700, low: 71_500 } });
+  expect(html).toContain('data-testid="ladder-day-tags" title="고가"><i class="mw-px-tag" data-kind="high" data-testid="ladder-day-tag-high">고</i></span><span class="mw-px-num">71,700</span>');
+  expect(html).toContain('data-testid="ladder-day-tags" title="시가 · 저가"><i class="mw-px-tag" data-kind="open" data-testid="ladder-day-tag-open">시</i><i class="mw-px-tag" data-kind="low" data-testid="ladder-day-tag-low">저</i></span><span class="mw-px-num">71,500</span>');
+  expect(html.match(/data-testid="ladder-day-tags"/g)).toHaveLength(2);
+});

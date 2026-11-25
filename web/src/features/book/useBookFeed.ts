@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { useEffect } from "react";
+import { useEffect, useMemo } from "react";
 import { getJson } from "../../api/http";
 import type { OrderBook } from "../../api/generated/OrderBook";
 import type { SubErrorCode } from "../../api/generated/SubErrorCode";
@@ -8,6 +8,7 @@ import type { Venue } from "../../api/generated/Venue";
 import { daySummaryQuery } from "../../api/userData";
 import { useFrameFold } from "../../lib/useFrameFold";
 import { marketSocket } from "../../stores/realtime";
+import type { DayPrices } from "../market-window/PriceLadder";
 import type { LastTrade } from "../trades/tape";
 import { acceptAfterHoursLive, acceptAfterHoursSnapshot, acceptLive, acceptSnapshot, EMPTY_BOOK, type AfterHoursState, type BookState } from "./bookModel";
 
@@ -16,6 +17,7 @@ export interface BookFeed {
   readonly afterHours: AfterHoursState | null;
   readonly lastPrice: number | null;
   readonly previousClose: number | null;
+  readonly dayPrices: DayPrices;
   readonly connected: boolean;
   readonly rejected: SubErrorCode | null;
   readonly snapshotFailed: boolean;
@@ -65,6 +67,10 @@ export function useBookFeed(code: SymbolCode, venue: Venue, lastTrade: LastTrade
     retry: false,
   });
   const summary = useQuery(daySummaryQuery(code, venue));
+  const open = summary.data?.open ?? null;
+  const high = summary.data?.high ?? null;
+  const low = summary.data?.low ?? null;
+  const dayPrices = useMemo<DayPrices>(() => ({ open, high, low }), [open, high, low]);
 
   const book = snapshot.data ? acceptSnapshot(current.book, snapshot.data) : current.book;
   const afterHours = snapshot.data ? acceptAfterHoursSnapshot(current.afterHours, snapshot.data, Math.floor(snapshot.dataUpdatedAt / 1000)) : current.afterHours;
@@ -74,6 +80,7 @@ export function useBookFeed(code: SymbolCode, venue: Venue, lastTrade: LastTrade
     afterHours,
     lastPrice: laterPrice(lastTrade, quoted),
     previousClose: summary.data?.previousClose ?? null,
+    dayPrices,
     connected: current.socketOpen && current.linkLive,
     rejected: current.rejected,
     snapshotFailed: snapshot.isError && current.book.phase === "empty",

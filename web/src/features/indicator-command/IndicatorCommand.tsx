@@ -61,7 +61,7 @@ export function IndicatorCommandBody({ cellId, initialMode, initialIndicator = n
   };
   const clickedThis = selected?.kind === "candidate" && candidateClick?.key === selected.key;
 
-  return <CommandFrame solid width="ic-frame" labelledBy={`${ids}-title`} onClose={handleClose}>
+  return <CommandFrame solid scrim={false} width="ic-frame" labelledBy={`${ids}-title`} onClose={handleClose}>
     <div data-chart-control="" className="flex min-h-0 flex-1 flex-col" onKeyDown={(event) => {
       if (event.defaultPrevented || event.nativeEvent.isComposing || event.keyCode === 229) return;
       const action = commandKey(event.nativeEvent);

@@ -59,13 +59,18 @@ async function pointAt(page: Page, time: number): Promise<void> {
 
 test("호가 복기 동안 호가주문창은 그 봉의 호가를 보이고 주문 칸을 잠근다", async ({ page, scenario }) => {
   const api = await open(page, scenario);
-  await expect(win(page).getByTestId("replay-strip")).toHaveText("실시간 · 차트를 가리키면 그 시각 호가");
+  const slot = win(page).getByTestId("order-status-slot");
+  const ladderBefore = (await win(page).getByTestId("order-ladder").boundingBox())!;
+  await expect(slot.getByTestId("replay-strip")).toHaveText("실시간 · 차트를 가리키면 그 시각 호가");
   await expect(cellAt(page, "buy", 70_000)).not.toHaveAttribute("data-disabled");
 
   await pointAt(page, at(9, 0));
   await expect(win(page)).toHaveAttribute("data-replay", "past");
-  await expect(win(page).getByTestId("replay-strip")).toContainText("수집 호가 · 11/23 09:04:59");
-  await expect(win(page).getByTestId("replay-strip")).toContainText("주문 잠금");
+  await expect(slot.getByTestId("replay-strip")).toContainText("수집 호가 · 11/23 09:04:59");
+  await expect(slot.getByTestId("replay-strip")).toContainText("주문 잠금");
+  const ladderDuring = (await win(page).getByTestId("order-ladder").boundingBox())!;
+  expect(Math.abs(ladderDuring.y - ladderBefore.y)).toBeLessThanOrEqual(1);
+  expect(Math.abs(ladderDuring.height - ladderBefore.height)).toBeLessThanOrEqual(1);
   await expect(win(page).getByTestId("order-total-ask")).toHaveText("1,234");
   await expect(win(page).getByTestId("order-total-bid")).toHaveText("2,345");
   await expect(win(page).getByTestId("order-symbol-price")).toHaveText("70,300");

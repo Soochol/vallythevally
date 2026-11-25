@@ -80,7 +80,7 @@ export function ChartSettingsDialog({ cellId, onClose }: { cellId: WindowId; onC
   };
 
   return (
-    <DialogFrame solid width="cs-dialog" labelledBy={`${id}-title`} onClose={handleClose}>
+    <DialogFrame solid scrim={false} width="cs-dialog" labelledBy={`${id}-title`} onClose={handleClose}>
       <div data-chart-control="" className="cs-body">
         <header className="cs-head">
           <h2 id={`${id}-title`}>차트 설정</h2>

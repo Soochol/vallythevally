@@ -1,9 +1,9 @@
 @layer components {
-  .ui-seg { display:inline-flex; gap:var(--size-2); width:max-content; max-width:100%; padding:var(--size-2); border-radius:var(--r-m); background:var(--surface); box-shadow:inset 0 0 0 1px var(--line); }
-  .ui-seg-item { height:var(--ctl-s); min-width:var(--size-32); padding:0 var(--s4); border-radius:var(--r-s); color:var(--text-2); font-size:var(--fs-s); font-weight:500; white-space:nowrap; }
+  .ui-seg { box-sizing:border-box; display:inline-flex; align-items:center; gap:var(--size-2); width:max-content; max-width:100%; padding:var(--size-2); border:var(--size-1) solid var(--line); border-radius:var(--r-m); background:var(--surface); }
+  .ui-seg-item { display:inline-flex; align-items:center; justify-content:center; height:var(--ctl-s); min-width:var(--size-32); padding:0 var(--s4); border-radius:var(--r-s); color:var(--text-2); font-size:var(--fs-s); font-weight:500; line-height:1; white-space:nowrap; }
   .ui-seg[data-size=sm] .ui-seg-item { height:var(--ctl-xs); padding:0 var(--s3); }
   .ui-seg-item:hover { background:var(--hover); color:var(--text); }
-  .ui-seg-item[aria-checked=true], .ui-seg-item[aria-pressed=true] { background:var(--raised); color:var(--text); font-weight:600; }
+  .ui-seg-item[aria-checked=true], .ui-seg-item[aria-pressed=true], .ui-seg-item[aria-selected=true] { background:var(--raised); color:var(--text); font-weight:600; }
   .ui-seg-item:disabled { color:var(--text-3); cursor:not-allowed; }
   .ui-seg-item:disabled:hover { background:none; }
 

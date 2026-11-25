@@ -1391,6 +1391,8 @@ test("수량 줄에 수량·유지 라벨과 수량 방식 선택이 없고 마�
   await openSettings(page);
   const keep = page.getByRole("checkbox", { name: /마지막 주문 수량 유지/ });
   await expect(keep).toBeChecked();
+  await expect(page.getByTestId("order-settings")).not.toContainText("창·종목마다 따로 기억합니다");
+  await expect(page.getByTestId("order-settings")).not.toContainText("매수·매도 접수, 체결 시 소리");
   const order = await page.getByTestId("order-settings").locator("input").evaluateAll((inputs) => inputs.map((input) => input.closest("label")?.textContent ?? input.getAttribute("aria-label")));
   expect(order.slice(0, 5)).toEqual(["금액 프리셋 1", "금액 프리셋 2", "금액 프리셋 3", "금액 프리셋 4", expect.stringContaining("마지막 주문 수량 유지")]);
   await keep.uncheck();
