@@ -79,6 +79,8 @@ export function ChartCell({ cellId, status, onStatus }: Props) {
   const theme = useTheme();
   const replayEnabled = useBookReplayEnabled();
   const brokerSyncActive = useChartPointerStore((s) => (s.brokerSyncSymbols[cell.symbol] ?? 0) > 0);
+  const pointerSnap = useChartPointerStore((s) => s.snap);
+  const lastSnapSeq = useRef(0);
   const replayDaysEnabled = replayEnabled && isIntraday(cell.period);
   const brokerDaysEnabled = brokerSyncActive && (isIntraday(cell.period) || cell.period === "D");
   const replayDaysQuery = useBookReplayDays(cell.symbol, replayDaysEnabled);
@@ -152,6 +154,14 @@ export function ChartCell({ cellId, status, onStatus }: Props) {
   useEffect(() => {
     ctl.current?.apply({ symbol: cell.symbol, venue, period: cell.period, settings: chartSettings, info, previewIndicator: preview?.id ?? null, compareNames });
   }, [cell, chartSettings, venue, info, preview, compareNames]);
+
+  useEffect(() => {
+    if (!pointerSnap || pointerSnap.symbol !== cell.symbol || status.kind !== "ready" || !ctl.current) return;
+    if (lastSnapSeq.current === pointerSnap.seq) return;
+    if (ctl.current.snapCrosshair(pointerSnap.symbol, pointerSnap.bar)) {
+      lastSnapSeq.current = pointerSnap.seq;
+    }
+  }, [pointerSnap, cell.symbol, status.kind]);
 
   useEffect(() => {
     ctl.current?.setFinancials(financial.data ?? null, financial.error ? "재무자료 조회 실패" : undefined);

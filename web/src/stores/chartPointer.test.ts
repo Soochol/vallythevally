@@ -6,7 +6,7 @@ const NINE = Date.parse("2026-11-06T09:00:00+09:00") / 1000;
 const DAY = Date.parse("2026-11-06T00:00:00+09:00") / 1000;
 
 beforeEach(() => {
-  useChartPointerStore.setState({ pointed: null, brokerSyncSymbols: {} });
+  useChartPointerStore.setState({ pointed: null, snap: null, brokerSyncSymbols: {} });
 });
 
 describe("차트 포인터 스토어", () => {
@@ -46,6 +46,17 @@ describe("차트 포인터 스토어", () => {
     store.removeBrokerSync("005930");
     expect(useChartPointerStore.getState().brokerSyncSymbols["005930"]).toBeUndefined();
     expect(useChartPointerStore.getState().pointed).toBeNull();
+  });
+
+  it("snapTo는 시각을 1분 봉 시작에 맞추고 seq를 증가시킨다", () => {
+    const store = useChartPointerStore.getState();
+    store.snapTo("005930", NINE + 15, 70_200);
+    const first = useChartPointerStore.getState().snap;
+    expect(first).toEqual({ symbol: "005930", bar: barInterval(NINE, "1m"), seq: 1 });
+    expect(useChartPointerStore.getState().pointed).toEqual({ symbol: "005930", bar: barInterval(NINE, "1m"), close: 70_200 });
+
+    store.snapTo("000660", NINE + 75, 180_000);
+    expect(useChartPointerStore.getState().snap).toEqual({ symbol: "000660", bar: barInterval(NINE + 60, "1m"), seq: 2 });
   });
 
   it("스케줄러는 80ms 간격 안에 들어온 마지막 봉만 프레임에서 반영한다", () => {

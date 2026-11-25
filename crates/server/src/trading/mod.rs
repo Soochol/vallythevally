@@ -1,4 +1,5 @@
 mod accounts;
+pub mod forensics;
 mod journal;
 mod kis;
 mod kis_account;

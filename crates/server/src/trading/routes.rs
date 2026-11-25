@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use axum::Router;
+use axum::{Extension, Router};
 use axum::body::Body;
 use axum::extract::{Path, Query, Request, State};
 use axum::middleware::{self, Next};
@@ -9,8 +9,9 @@ use axum::http::{HeaderValue, header};
 use axum::response::{IntoResponse, Response};
 use axum::response::Json;
 use axum::routing::{get, post};
-use domain::StockCode;
+use domain::{KstDate, StockCode};
 
+use super::forensics::{ForensicsCache, ForensicsInputs, compute_forensics};
 use crate::api::{self, OrderSide};
 use crate::http::{ApiFailure, AppState};
 
@@ -45,6 +46,8 @@ pub fn routes(state: Arc<AppState>) -> Router<Arc<AppState>> {
         .route("/api/trading/open-orders", get(open_orders))
         .route("/api/trading/orderable", get(orderable))
         .route("/api/trading/executions", get(executions))
+        .route("/api/trading/executions/forensics", get(execution_forensics))
+        .layer(Extension(ForensicsCache::new()))
         .layer(middleware::from_fn_with_state(state, crate::write_guard::guard_writes))
 }
 
@@ -108,6 +111,45 @@ async fn orderable(State(st): State<Arc<AppState>>, Query(q): Query<HashMap<Stri
 
 async fn executions(State(st): State<Arc<AppState>>, Query(q): Query<HashMap<String, String>>) -> Result<Json<api::TradingExecutions>, ApiFailure> {
     st.accounts.executions(account_of(&q)).await.map(Json).map_err(ApiFailure::trading)
+}
+
+async fn execution_forensics(
+    State(st): State<Arc<AppState>>,
+    Extension(cache): Extension<Arc<ForensicsCache>>,
+    Query(q): Query<HashMap<String, String>>,
+) -> Result<Json<api::ExecutionForensics>, ApiFailure> {
+    let now = st.clock.now();
+    let (date, date_str) = match q.get("date").map(String::as_str).filter(|s| !s.is_empty()) {
+        Some(raw) => {
+            let parsed = KstDate::parse_yyyymmdd(raw).ok_or_else(|| ApiFailure::bad_request(format!("date는 YYYYMMDD 형식입니다: {raw}")))?;
+            (parsed, raw.to_owned())
+        }
+        None => {
+            let today = now.kst_date();
+            (today, format!("{:04}{:02}{:02}", today.year(), today.month(), today.day()))
+        }
+    };
+    let account = account_of(&q);
+    let fills = st.accounts.executions(account).await.map_err(ApiFailure::trading)?;
+    let result = compute_forensics(ForensicsInputs {
+        collected: &st.collected,
+        micro_events: &st.micro_events,
+        db: &st.db,
+        symbols: &st.symbols,
+        cache: &cache,
+        paths: st.collector_paths.snapshot(),
+        date,
+        date_str: &date_str,
+        account_query: account,
+        executions: &fills,
+        now,
+    })
+    .await
+    .map_err(|detail| {
+        tracing::error!(reason = %detail, "체결 해부를 계산하지 못했습니다");
+        ApiFailure::new(api::ApiErrorCode::Internal, "체결 해부를 계산하지 못했습니다")
+    })?;
+    Ok(Json(result))
 }
 
 async fn read_json<T: serde::de::DeserializeOwned>(body: Body) -> Result<T, ApiFailure> {

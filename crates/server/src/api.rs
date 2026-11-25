@@ -2379,6 +2379,52 @@ pub struct TradingExecutions {
     pub executions: Vec<TradingExecution>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum DiagnosisTag {
+    IcebergSupport,
+    WhaleDivergence,
+    SpoofChaseTrap,
+    EarlyStopBeforeProgram,
+    Neutral,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct ExecutionForensic {
+    pub order_no: String,
+    pub code: SymbolCode,
+    pub name: String,
+    pub side: OrderSide,
+    pub time: String,
+    pub fill_at: UnixSeconds,
+    #[ts(type = "number")]
+    pub price: u64,
+    #[ts(type = "number")]
+    pub quantity: u64,
+    pub collected: bool,
+    pub diagnosis: DiagnosisTag,
+    pub mfe_pct: Option<f64>,
+    pub mae_pct: Option<f64>,
+    #[ts(type = "number | null")]
+    pub slippage_ticks: Option<i64>,
+    pub pre_entry_cancel_rate_pct: Option<f64>,
+    pub program_delta_million_won: Option<f64>,
+    pub whale_net_delta_million_won: Option<f64>,
+    pub summary: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct ExecutionForensics {
+    pub date: String,
+    pub account: Option<String>,
+    pub items: Vec<ExecutionForensic>,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "snake_case")]
 #[ts(export)]

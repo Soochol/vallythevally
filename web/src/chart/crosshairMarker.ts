@@ -34,6 +34,7 @@ export class CrosshairMarker {
 
   private hide(): void {
     this.lastLabelWidth = 0;
+    delete this.root.dataset.syncedTime;
     if (!this.visible) return;
     this.visible = false;
     this.root.hidden = true;
@@ -67,6 +68,7 @@ export class CrosshairMarker {
       this.visible = true;
       this.root.hidden = false;
     }
+    this.root.dataset.syncedTime = String(target);
     if (this.lastX !== x) {
       this.lastX = x;
       this.line.style.left = `${x}px`;

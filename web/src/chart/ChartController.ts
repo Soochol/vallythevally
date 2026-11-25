@@ -461,6 +461,12 @@ export class ChartController {
     this.crosshairMarker.show(bar);
   }
 
+  snapCrosshair(symbol: SymbolCode, bar: BarInterval): boolean {
+    if (!this.view || this.view.symbol !== symbol || this.ready === null) return false;
+    this.crosshairMarker.show(bar);
+    return true;
+  }
+
   setReplayDays(days: ReadonlySet<string> | null): void {
     this.replayDaysSet = days;
     this.replayDays.sync();
