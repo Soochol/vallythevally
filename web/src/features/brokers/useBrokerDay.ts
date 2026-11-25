@@ -1,5 +1,5 @@
 import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { fetchBarsPage, fetchJumpPage, jumpAsBarsPage } from "../../api/bars";
 import { fetchBrokerDay, type BrokerDay } from "../../api/brokers";
 import type { Bar } from "../../api/generated/Bar";
@@ -7,26 +7,26 @@ import type { BrokerDaySource } from "../../api/generated/BrokerDaySource";
 import type { SymbolCode } from "../../api/generated/SymbolCode";
 import type { UnixSeconds } from "../../api/generated/UnixSeconds";
 import { isIndexCode } from "../../lib/symbol";
+import { marketSocket } from "../../stores/realtime";
+import {
+  type BrokerDayMode,
+  type BrokerDaySnapshot,
+  createTodayBrokerFeed,
+  EMPTY_BROKER_GAPS,
+  FAILED_COLLECTED_SNAPSHOT,
+  LOADING_BROKER_SNAPSHOT,
+  type TodayBrokerFeedDeps,
+} from "./dayFeed";
 import { dayBars, formatIsoDate, kstDayBounds } from "./history";
-import { appendSnapshots, EMPTY_BROKER_STATE, type BrokerState } from "./model";
+import { appendSnapshots, type BrokerState, EMPTY_BROKER_STATE } from "./model";
 
-const POLL_MS = 2_000;
 const BARS_REFETCH_MS = 60_000;
 const BARS_GC_MS = 30 * 60 * 1000;
 const PAST_DAY_GC_MS = 30 * 60 * 1000;
 const PAST_DAY_DEBOUNCE_MS = 120;
 const MAX_BAR_PAGES = 3;
 
-export type BrokerDayMode = "loading" | "collected" | "live";
-
-interface DayData {
-  readonly mode: BrokerDayMode;
-  readonly date: string | null;
-  readonly source: BrokerDaySource | null;
-  readonly state: BrokerState;
-  readonly gaps: readonly (readonly [UnixSeconds, UnixSeconds])[];
-  readonly failed: boolean;
-}
+export type { BrokerDayMode };
 
 interface CachedPastDay {
   readonly date: string;
@@ -35,50 +35,32 @@ interface CachedPastDay {
   readonly gaps: readonly (readonly [UnixSeconds, UnixSeconds])[];
 }
 
-export interface BrokerDayResult extends DayData {
+export interface BrokerDayResult extends BrokerDaySnapshot {
   readonly fetching: boolean;
   readonly retry: () => void;
 }
 
-const EMPTY_GAPS: readonly (readonly [UnixSeconds, UnixSeconds])[] = [];
 const EMPTY_BARS: readonly Bar[] = [];
-const LOADING_DATA: DayData = { mode: "loading", date: null, source: null, state: EMPTY_BROKER_STATE, gaps: EMPTY_GAPS, failed: false };
-const LIVE_DATA: DayData = { mode: "live", date: null, source: "none", state: EMPTY_BROKER_STATE, gaps: EMPTY_GAPS, failed: false };
-const FAILED_COLLECTED_DATA: DayData = { mode: "collected", date: null, source: null, state: EMPTY_BROKER_STATE, gaps: EMPTY_GAPS, failed: true };
 
 const pastDayQueryKey = (code: SymbolCode, date: string) => ["brokers", "day", code, date] as const;
 
-function sameGaps(
-  a: readonly (readonly [UnixSeconds, UnixSeconds])[],
-  b: readonly (readonly [UnixSeconds, UnixSeconds])[],
-): boolean {
-  if (a.length !== b.length) return false;
-  for (let i = 0; i < a.length; i++) {
-    if (a[i]![0] !== b[i]![0] || a[i]![1] !== b[i]![1]) return false;
-  }
-  return true;
-}
-
-function applyCollected(previous: DayData, reply: BrokerDay): DayData {
-  const base = reply.reset ? EMPTY_BROKER_STATE : previous.state;
-  const nextState = appendSnapshots(base, reply.snapshots, reply.gaps);
-  const nextGaps = sameGaps(previous.gaps, reply.gaps) ? previous.gaps : reply.gaps;
-  if (
-    previous.mode === "collected" &&
-    previous.date === reply.date &&
-    previous.source === reply.source &&
-    !previous.failed &&
-    nextState === previous.state &&
-    nextGaps === previous.gaps
-  ) {
-    return previous;
-  }
-  return { mode: "collected", date: reply.date, source: reply.source, state: nextState, gaps: nextGaps, failed: false };
-}
+const BROWSER_FEED_DEPS: TodayBrokerFeedDeps = {
+  fetchDay: fetchBrokerDay,
+  subscribeLive: (code, listener) => marketSocket.subscribeFeed({ symbol: code, kind: "brokers" }, listener),
+  setTimer: (fn, ms) => window.setTimeout(fn, ms),
+  clearTimer: (id) => window.clearTimeout(id),
+  requestFrame: (fn) => requestAnimationFrame(fn),
+  cancelFrame: (id) => cancelAnimationFrame(id),
+  isDocumentVisible: () => document.visibilityState === "visible",
+  onVisibilityChange(listener) {
+    document.addEventListener("visibilitychange", listener);
+    return () => document.removeEventListener("visibilitychange", listener);
+  },
+};
 
 function toCachedPastDay(reply: BrokerDay): CachedPastDay {
   if (reply.source === "none") {
-    return { date: reply.date, source: "none", state: EMPTY_BROKER_STATE, gaps: EMPTY_GAPS };
+    return { date: reply.date, source: "none", state: EMPTY_BROKER_STATE, gaps: EMPTY_BROKER_GAPS };
   }
   return {
     date: reply.date,
@@ -89,118 +71,18 @@ function toCachedPastDay(reply: BrokerDay): CachedPastDay {
 }
 
 function useTodayBrokerDay(code: SymbolCode, date: string, enabled: boolean, active: boolean): BrokerDayResult {
-  const [data, setData] = useState<DayData>(LOADING_DATA);
-  const [attempt, setAttempt] = useState(0);
-  const activeRef = useRef(active);
-  const syncVisibilityRef = useRef<() => void>(() => {});
-
-  const retry = useCallback(() => {
-    setAttempt((count) => count + 1);
-  }, []);
+  const feed = useMemo(() => createTodayBrokerFeed(code, BROWSER_FEED_DEPS), [code]);
+  const snapshot = useSyncExternalStore(feed.subscribe, feed.snapshot);
 
   useEffect(() => {
-    activeRef.current = active;
-    syncVisibilityRef.current();
-  }, [active]);
+    feed.configure({ date, enabled, active });
+  }, [feed, date, enabled, active]);
 
-  useEffect(() => {
-    if (!enabled) {
-      setData(LOADING_DATA);
-      return;
-    }
-    setData(LOADING_DATA);
-    let disposed = false;
-    let controller: AbortController | null = null;
-    let timer: ReturnType<typeof setTimeout> | null = null;
-    let cursor = "";
-    let polling = false;
-    let inFlight = false;
-    let paused = false;
+  useEffect(() => () => feed.dispose(), [feed]);
 
-    const isVisible = () => activeRef.current && document.visibilityState === "visible";
+  const retry = useCallback(() => feed.retry(), [feed]);
 
-    const clearTimer = () => {
-      if (timer !== null) {
-        clearTimeout(timer);
-        timer = null;
-      }
-    };
-
-    const scheduleNext = () => {
-      if (disposed || !polling) return;
-      if (!isVisible()) {
-        paused = true;
-        return;
-      }
-      clearTimer();
-      timer = setTimeout(() => {
-        timer = null;
-        void runRequest(false);
-      }, POLL_MS);
-    };
-
-    const runRequest = async (initial: boolean) => {
-      if (disposed || inFlight) return;
-      inFlight = true;
-      controller = new AbortController();
-      const { signal } = controller;
-      try {
-        const reply = await fetchBrokerDay(code, date, initial ? undefined : cursor, signal);
-        if (disposed || signal.aborted) return;
-        inFlight = false;
-        if (reply.source === "none") {
-          polling = false;
-          setData(LIVE_DATA);
-          return;
-        }
-        cursor = reply.cursor;
-        if (reply.source === "store") {
-          polling = false;
-          setData((previous) => applyCollected(previous, reply));
-          return;
-        }
-        polling = true;
-        setData((previous) => applyCollected(previous, reply));
-        scheduleNext();
-      } catch {
-        if (disposed || signal.aborted) return;
-        inFlight = false;
-        if (initial) {
-          polling = false;
-          setData(LIVE_DATA);
-          return;
-        }
-        if (polling) scheduleNext();
-      }
-    };
-
-    const syncVisibility = () => {
-      if (isVisible()) {
-        if (polling && paused && !inFlight) {
-          paused = false;
-          clearTimer();
-          void runRequest(false);
-        }
-      } else if (polling) {
-        paused = true;
-        clearTimer();
-      }
-    };
-
-    syncVisibilityRef.current = syncVisibility;
-    document.addEventListener("visibilitychange", syncVisibility);
-    void runRequest(true);
-
-    return () => {
-      disposed = true;
-      syncVisibilityRef.current = () => {};
-      clearTimer();
-      controller?.abort();
-      document.removeEventListener("visibilitychange", syncVisibility);
-    };
-  }, [code, date, enabled, attempt]);
-
-  return { ...data, fetching: false, retry };
+  return { ...snapshot, fetching: false, retry };
 }
 
 function useDebouncedPastDate(code: SymbolCode, date: string | null): string | null {
@@ -255,9 +137,9 @@ function usePastBrokerDay(code: SymbolCode, date: string | null): BrokerDayResul
     };
   }
   if (query.isError) {
-    return { ...FAILED_COLLECTED_DATA, fetching: false, retry };
+    return { ...FAILED_COLLECTED_SNAPSHOT, fetching: false, retry };
   }
-  return { ...LOADING_DATA, fetching: true, retry };
+  return { ...LOADING_BROKER_SNAPSHOT, fetching: true, retry };
 }
 
 export function useBrokerDay(code: SymbolCode, date: string, isToday: boolean, active: boolean): BrokerDayResult {

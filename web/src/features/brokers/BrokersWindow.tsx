@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useLocation } from "react-router";
 import type { SymbolCode } from "../../api/generated/SymbolCode";
 import type { UnixSeconds } from "../../api/generated/UnixSeconds";
@@ -6,7 +6,6 @@ import type { WindowId } from "../../layout/kinds";
 import { formatPrice } from "../../lib/format";
 import { PERIOD_LABEL } from "../../lib/symbol";
 import { type BrokerCards, type BrokerView, useLayoutStore } from "../../stores/layout";
-import { marketSocket } from "../../stores/realtime";
 import { serverNow, useServerClock } from "../../stores/serverClock";
 import { SyncIcon } from "../icons";
 import { MarketHead } from "../market-window/MarketHead";
@@ -21,7 +20,6 @@ import { ListView } from "./ListView";
 import { boardAxis, brokerTracks, trackRuns, type TrackRun } from "./board";
 import { type BrokerSyncTarget, gapContaining, resolveBrokerSyncTarget, useBrokerChartPointer } from "./chartSync";
 import { formatMonthDay, kstDateOf, priceAt } from "./history";
-import { type BrokerEvent, EMPTY_BROKER_STATE, reduceBrokerEvents } from "./model";
 import { useBrokerDay, useBrokerMinuteBars } from "./useBrokerDay";
 import "./brokers.css";
 
@@ -36,7 +34,6 @@ const CARD_OPTIONS: readonly SegmentOption<BrokerCards>[] = [
   { value: "numbers", label: "숫자" },
 ];
 
-const EMPTY_GAPS: readonly (readonly [UnixSeconds, UnixSeconds])[] = [];
 const EMPTY_RUNS: ReadonlyMap<string, readonly TrackRun[]> = new Map();
 const CLOCK_TICK_MS = 60_000;
 
@@ -86,14 +83,10 @@ export function BrokersWindow({ id }: { id: WindowId }) {
 }
 
 function BrokersBody({ id, code }: { id: WindowId; code: SymbolCode }) {
-  const [liveState, setLiveState] = useState(EMPTY_BROKER_STATE);
-  const [liveFailed, setLiveFailed] = useState(false);
-  const [liveAttempt, setLiveAttempt] = useState(0);
   const [chartSync, setChartSync] = useState(false);
   const [localCursor, setLocalCursor] = useState<UnixSeconds | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
   const [clockTick, setClockTick] = useState(0);
-  const hadLiveSubscriptionRef = useRef(false);
 
   const onWorkspace = (pageOfPath(useLocation().pathname) ?? "workspace") === "workspace";
 
@@ -132,46 +125,10 @@ function BrokersBody({ id, code }: { id: WindowId; code: SymbolCode }) {
   const setBrokersView = useLayoutStore((s) => s.setBrokersView);
   const setBrokersCards = useLayoutStore((s) => s.setBrokersCards);
 
-  useEffect(() => {
-    if (day.mode !== "live") return;
-    let pending: BrokerEvent[] = [];
-    let frame: number | null = null;
-    const enqueue = (event: BrokerEvent) => {
-      pending.push(event);
-      if (frame !== null) return;
-      frame = requestAnimationFrame(() => {
-        frame = null;
-        const batch = pending;
-        if (batch.length === 0) return;
-        pending = [];
-        setLiveState((previous) => reduceBrokerEvents(previous, batch));
-      });
-    };
-    if (hadLiveSubscriptionRef.current) enqueue({ type: "resync" });
-    hadLiveSubscriptionRef.current = true;
-    const unsubscribe = marketSocket.subscribeFeed({ symbol: code, kind: "brokers" }, (event) => {
-      if (event.type === "feed_brokers") enqueue({ type: "snapshot", brokers: event.brokers });
-      else if (event.type === "feed_link") enqueue({ type: "link", live: event.live });
-      else if (event.type === "resync") enqueue({ type: "resync" });
-      else if (event.type === "feed_subscribed") setLiveFailed(false);
-      else if (event.type === "sub_error") setLiveFailed(true);
-    });
-    return () => {
-      unsubscribe();
-      if (frame !== null) cancelAnimationFrame(frame);
-      pending = [];
-    };
-  }, [code, day.mode, liveAttempt]);
-
-  const retryLive = () => {
-    setLiveFailed(false);
-    setLiveAttempt((count) => count + 1);
-  };
-
-  const grid = day.mode === "live" ? liveState.grid : day.state.grid;
+  const grid = day.state.grid;
   const staleDay = day.mode === "collected" && day.date !== null && day.date !== activeDate;
   const displayCursor = staleDay ? null : effectiveCursor;
-  const gaps = day.mode === "collected" ? day.gaps : EMPTY_GAPS;
+  const gaps = day.gaps;
   const tracks = useMemo(() => brokerTracks(grid), [grid]);
   const runsByCode = useMemo(() => (view === "list" ? trackRuns(grid) : EMPTY_RUNS), [grid, view]);
   const axis = useMemo(
@@ -206,8 +163,8 @@ function BrokersBody({ id, code }: { id: WindowId; code: SymbolCode }) {
     setSelected((current) => (current === brokerCode ? null : brokerCode));
   };
 
-  const failed = day.mode === "live" ? liveFailed : day.failed;
-  const retry = day.mode === "live" ? retryLive : day.retry;
+  const failed = day.failed;
+  const retry = day.retry;
   const showEmpty = !failed && day.mode !== "loading" && grid.times.length === 0;
   const showContent = !failed && grid.times.length > 0;
   const activeGap = useMemo(() => gapContaining(gaps, displayCursor), [gaps, displayCursor]);
