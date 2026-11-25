@@ -1,4 +1,4 @@
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useSyncExternalStore } from "react";
 import type { TradingBalance } from "../../api/generated/TradingBalance";
 import type { TradingExecution } from "../../api/generated/TradingExecution";
@@ -8,6 +8,7 @@ import { useKiwoomOnlyLink } from "../../stores/kiwoomLink";
 import type { TradingOrderable } from "../../api/generated/TradingOrderable";
 import type { OrderAccountChoice } from "./orderAccount";
 import { buyingPowerOf, type Capacity, groupWithPending, type PriceGroup } from "./orderRules";
+import { observeOrderExecutions } from "./orderSound";
 import { pendingWrites } from "./pendingWrites";
 import { fetchCommands, fetchExecutions, fetchOpenOrders, fetchOrderable } from "./orderApi";
 import { holdingOf } from "./holdingSummary";
@@ -51,8 +52,7 @@ function sellableQuantityOf(balance: TradingBalance | null, code: string): numbe
 
 const NONE: readonly never[] = [];
 
-function useRefreshOnAccountChange(enabled: boolean, account: string | null): void {
-  const client = useQueryClient();
+function useRefreshOnAccountChange(client: QueryClient, enabled: boolean, account: string | null): void {
   useEffect(() => {
     if (!enabled) return;
     return marketSocket.watchTradingAccount((changed) => {
@@ -64,11 +64,23 @@ function useRefreshOnAccountChange(enabled: boolean, account: string | null): vo
 }
 
 export function useOrderData(account: string | null, code: string, open: boolean, referencePrice: number | null, balance: TradingBalance | null): OrderBoardData {
+  const client = useQueryClient();
   const scope = account ?? NO_ACCOUNT;
   const openOrders = useQuery({ queryKey: [...ORDER_QUERY_KEY, scope, "open"], queryFn: ({ signal }) => fetchOpenOrders(account, signal), enabled: open, refetchInterval: POLL_MS, staleTime: 0, retry: false });
   const commands = useQuery({ queryKey: [...ORDER_QUERY_KEY, scope, "commands"], queryFn: ({ signal }) => fetchCommands(account, signal), enabled: open, refetchInterval: POLL_MS, staleTime: 0, retry: false });
-  const executions = useQuery({ queryKey: [...ORDER_QUERY_KEY, scope, "executions"], queryFn: ({ signal }) => fetchExecutions(account, signal), enabled: open, refetchInterval: POLL_MS * 3, staleTime: POLL_MS, retry: false });
-  useRefreshOnAccountChange(open, account);
+  const executions = useQuery({
+    queryKey: [...ORDER_QUERY_KEY, scope, "executions"],
+    queryFn: async ({ signal }) => {
+      const data = await fetchExecutions(account, signal);
+      observeOrderExecutions(client, data);
+      return data;
+    },
+    enabled: open,
+    refetchInterval: POLL_MS * 3,
+    staleTime: POLL_MS,
+    retry: false,
+  });
+  useRefreshOnAccountChange(client, open, account);
   const orderableEnabled = open && referencePrice !== null;
   const buyable = useQuery({ queryKey: [...ORDERABLE_QUERY_KEY, scope, code, "buy"], queryFn: ({ signal }) => fetchOrderable(account, code, "buy", referencePrice!, signal), enabled: orderableEnabled, refetchInterval: POLL_MS * 3, staleTime: POLL_MS, retry: false });
   const orders = openOrders.data?.orders;

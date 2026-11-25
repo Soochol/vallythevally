@@ -4,7 +4,8 @@ import { CogIcon } from "../icons";
 import { Popover } from "../overlay/Popover";
 import { setLadderRate } from "../workspace/canvasCommands";
 import { Segmented } from "../market-window/parts";
-import { AMOUNT_PRESET_COUNT, KEEP_LAST_ENTRY_LABEL, ORDER_ROUTES, type OrderSettings, routeLabel, withAmountPreset } from "./orderSettings";
+import { AMOUNT_PRESET_COUNT, KEEP_LAST_ENTRY_LABEL, ORDER_ROUTES, ORDER_SOUND_LABEL, type OrderSettings, routeLabel, withAmountPreset } from "./orderSettings";
+import { primeOrderSound } from "./orderSound";
 import { MOCK_KRX_ONLY_TEXT, REJECT_TEXT } from "./statusText";
 
 const MOCK_DISABLED_ROUTES: readonly Venue[] = ["combined", "nxt"];
@@ -18,13 +19,14 @@ interface Props {
   readonly onChange: (settings: OrderSettings) => void;
 }
 
-const FLAGS: readonly { readonly key: "keepLastEntry" | "averageDot" | "divider" | "rate" | "skipSpreadGap" | "maskAccount"; readonly label: string; readonly note?: string; readonly title?: string }[] = [
+const FLAGS: readonly { readonly key: "keepLastEntry" | "averageDot" | "divider" | "rate" | "skipSpreadGap" | "maskAccount" | "sound"; readonly label: string; readonly note?: string; readonly title?: string }[] = [
   { key: "keepLastEntry", label: KEEP_LAST_ENTRY_LABEL, note: "창·종목마다 따로 기억합니다", title: "마지막으로 선택한 수량을 그 창의 그 종목마다 기억해 다시 열 때 그 값으로 시작합니다" },
   { key: "averageDot", label: "평단가 점" },
   { key: "divider", label: "구분선" },
   { key: "rate", label: "등락률 표시" },
   { key: "skipSpreadGap", label: "호가 사이 빈 가격 건너뛰기", title: "매도·매수 1호가 사이가 벌어지면 빈 가격 행을 건너뛰어 매도 10단·매수 10단을 채웁니다. 10호가창에도 적용" },
   { key: "maskAccount", label: "계좌번호 가리기" },
+  { key: "sound", label: ORDER_SOUND_LABEL, note: "매수·매도 접수, 체결 시 소리", title: "매수 주문 접수, 매도 주문 접수, 주문 체결 시 소리로 알립니다" },
 ];
 
 interface PresetInputProps {
@@ -82,7 +84,19 @@ export function OrderSettingsPopover({ settings, venue, mock, nxtNotTraded, hold
           </fieldset>
           {FLAGS.map(({ key, label, note, title }) => (
             <label key={key} className="od-settings-flag" data-note={note ? "" : undefined} title={title}>
-              <input type="checkbox" checked={settings[key]} onChange={(e) => (key === "rate" ? setLadderRate(e.target.checked) : onChange({ ...settings, [key]: e.target.checked }))} />
+              <input
+                type="checkbox"
+                checked={settings[key]}
+                onChange={(e) => {
+                  const checked = e.target.checked;
+                  if (key === "rate") {
+                    setLadderRate(checked);
+                    return;
+                  }
+                  onChange({ ...settings, [key]: checked });
+                  if (key === "sound" && checked) primeOrderSound();
+                }}
+              />
               {label}
               {note && <small>{note}</small>}
               {key === "averageDot" && !holding && <small>보유 종목일 때 보입니다</small>}

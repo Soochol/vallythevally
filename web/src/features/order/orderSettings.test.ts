@@ -9,7 +9,7 @@ describe("호가주문 설정", () => {
   });
 
   it("저장된 값을 읽는다", () => {
-    expect(parseOrderSettings({ amountPresets: [5, 6, 7, 8], averageDot: false, divider: false, rate: false, skipSpreadGap: true, maskAccount: false, keepLastEntry: false, venue: "nxt", account: "ref-b" })).toEqual({ amountPresets: [5, 6, 7, 8], averageDot: false, divider: false, rate: false, skipSpreadGap: true, maskAccount: false, keepLastEntry: false, venue: "nxt", account: "ref-b" });
+    expect(parseOrderSettings({ amountPresets: [5, 6, 7, 8], averageDot: false, divider: false, rate: false, skipSpreadGap: true, maskAccount: false, keepLastEntry: false, sound: false, venue: "nxt", account: "ref-b" })).toEqual({ amountPresets: [5, 6, 7, 8], averageDot: false, divider: false, rate: false, skipSpreadGap: true, maskAccount: false, keepLastEntry: false, sound: false, venue: "nxt", account: "ref-b" });
   });
 
   it("호가 사이 빈 가격 건너뛰기는 기본이 꺼짐이고 옛 저장값에 없거나 불이 아니면 꺼짐이며 있으면 그 값이다", () => {
@@ -36,6 +36,15 @@ describe("호가주문 설정", () => {
     expect(parseOrderSettings({ maskAccount: "no" }).maskAccount).toBe(true);
     expect(parseOrderSettings({ maskAccount: false }).maskAccount).toBe(false);
     expect(parseOrderSettings({ maskAccount: true }).maskAccount).toBe(true);
+  });
+
+  it("주문 소리는 기본이 켜짐이고 옛 저장값에 없거나 깨졌으면 켜짐이며 있으면 그 값이다", () => {
+    expect(DEFAULT_ORDER_SETTINGS.sound).toBe(true);
+    expect(parseOrderSettings({ amountPresets: [1, 2, 3, 4] }).sound).toBe(true);
+    expect(parseOrderSettings({ sound: "no" }).sound).toBe(true);
+    expect(parseOrderSettings({ sound: 0 }).sound).toBe(true);
+    expect(parseOrderSettings({ sound: false }).sound).toBe(false);
+    expect(parseOrderSettings({ sound: true }).sound).toBe(true);
   });
 
   it("주문 경로는 옛 값에 없거나 모르는 값이면 SOR이고 KRX·NXT는 그대로 읽는다", () => {
