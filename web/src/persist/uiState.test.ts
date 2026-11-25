@@ -198,9 +198,9 @@ test("페이지에서 보낼 연동 색은 없으면 경고 없이 A, 색 이름
 });
 
 test("호가주문 기억은 틀린 항목만 버리고 저장 때 그대로 돌려준다", () => {
-  const raw = { orderEntries: { "L1|order|005930": { presetKind: "amountPresets", quantity: 37, usedAt: 9 }, "L1|order|000660": { presetKind: "nope", quantity: 1, usedAt: 1 } } };
+  const raw = { orderEntries: { "L1|order|005930": { quantity: 37, usedAt: 9 }, "L1|order|000660": { quantity: 0, usedAt: 1 } } };
   const { prefs, extra } = parseUiState(raw);
-  expect(prefs.orderEntries).toEqual({ "L1|order|005930": { presetKind: "amountPresets", quantity: 37, usedAt: 9 } });
+  expect(prefs.orderEntries).toEqual({ "L1|order|005930": { quantity: 37, usedAt: 9 } });
   expect(extra).toEqual({});
   expect(toUiState(prefs, extra)["orderEntries"]).toEqual(prefs.orderEntries);
   expect(parseUiState({}).prefs.orderEntries).toEqual({});

@@ -34,34 +34,35 @@ async function open(page: Page, size: { width: number; height: number }) {
 
 const mainSeriesTypes = (page: Page) => page.evaluate(() => window.frameProbe.snapshot().filter((series) => series.data.length > 100).map((series) => series.type));
 
-test("1280x600에서 차트 설정 팝오버는 버튼 아래 화면 안에 다 들어오고 폭이 360px 이하이며 차트 칸의 왼쪽 절반을 가리지 않는다", async ({ page }) => {
+test("1280x600에서 차트 설정 창은 화면 가운데에 다 들어오고 폭이 360px 이하이다", async ({ page }) => {
   await open(page, { width: 1280, height: 600 });
   await settingsButton(page).click();
   await expect(settingsPopover(page)).toBeVisible();
   const popover = (await settingsPopover(page).boundingBox())!;
-  const button = (await settingsButton(page).boundingBox())!;
-  const chart = (await cell(page).boundingBox())!;
   expect(popover.width).toBeLessThanOrEqual(360);
-  expect(popover.y).toBeGreaterThanOrEqual(button.y + button.height);
   expect(popover.x).toBeGreaterThanOrEqual(0);
   expect(popover.x + popover.width).toBeLessThanOrEqual(1280);
+  expect(popover.y).toBeGreaterThanOrEqual(0);
   expect(popover.y + popover.height).toBeLessThanOrEqual(600);
-  expect(popover.x).toBeGreaterThanOrEqual(chart.x + chart.width / 2);
+  expect(Math.abs(popover.x + popover.width / 2 - 1280 / 2)).toBeLessThanOrEqual(2);
+  expect(Math.abs(popover.y + popover.height / 2 - 600 / 2)).toBeLessThanOrEqual(2);
   await expect(settingsPopover(page).getByRole("region", { name: "지표 창", exact: true })).toBeInViewport();
 });
 
-test("800px에서 더 보기로 연 차트 설정 팝오버는 더 보기 버튼 아래에서 열린다", async ({ page }) => {
+test("800px에서 더 보기로 연 차트 설정 창도 화면 가운데에서 열린다", async ({ page }) => {
   await open(page, { width: 800, height: 900 });
   const more = toolbar(page).getByRole("button", { name: "더 보기", exact: true });
   await more.click();
   await page.getByRole("menuitem", { name: "차트 설정", exact: true }).click();
   await expect(settingsPopover(page)).toBeVisible();
   const popover = (await settingsPopover(page).boundingBox())!;
-  const button = (await more.boundingBox())!;
-  expect(popover.y).toBeGreaterThanOrEqual(button.y + button.height - 1);
-  expect(popover.x + popover.width).toBeGreaterThanOrEqual(button.x);
+  expect(Math.abs(popover.x + popover.width / 2 - 800 / 2)).toBeLessThanOrEqual(2);
+  expect(Math.abs(popover.y + popover.height / 2 - 900 / 2)).toBeLessThanOrEqual(2);
   await page.setViewportSize({ width: 900, height: 900 });
-  await expect.poll(async () => (await settingsPopover(page).boundingBox())!.y).toBeGreaterThanOrEqual(button.y + button.height - 1);
+  await expect.poll(async () => {
+    const box = (await settingsPopover(page).boundingBox())!;
+    return Math.abs(box.x + box.width / 2 - 900 / 2);
+  }).toBeLessThanOrEqual(2);
 });
 
 test("봉 모양을 바꾸면 팝오버가 열린 채 차트에 바로 반영된다", async ({ page }) => {
@@ -90,13 +91,13 @@ test("1440px에서 저장된 선택이 없으면 지표 버튼이 차트 옆 지
   await expect(windows.getByRole("button", { name: "차트 옆", exact: true })).toHaveAttribute("aria-pressed", "true");
   await windows.getByRole("button", { name: "가운데 창", exact: true }).click();
   await pollSaved(() => scenario.documents.uiState().indicatorWindow).toBe("dialog");
-  await page.keyboard.press("Escape");
+  await settingsPopover(page).getByRole("button", { name: "닫기", exact: true }).click();
   await expect(settingsPopover(page)).toBeHidden();
   await indicatorButton(page).click();
   await expect(commandDialog(page)).toBeVisible();
 });
 
-test("가운데 지표 창은 폭이 760px 이하로 오른쪽 위에 붙고 흐림 필터가 없다", async ({ page, scenario }) => {
+test("가운데 지표 창은 폭이 760px 이하로 화면 가운데에 열리고 흐림 필터와 하단 적용 버튼이 없다", async ({ page, scenario }) => {
   saveIndicatorWindow(scenario, "dialog");
   await open(page, { width: 1440, height: 900 });
   await indicatorButton(page).click();
@@ -104,17 +105,16 @@ test("가운데 지표 창은 폭이 760px 이하로 오른쪽 위에 붙고 흐
   await expect(dialog).toBeVisible();
   const box = (await dialog.boundingBox())!;
   expect(box.width).toBeLessThanOrEqual(760);
-  expect(box.x).toBeGreaterThanOrEqual(1440 - 760);
-  expect(box.x + box.width).toBeLessThanOrEqual(1440);
-  const topbar = (await toolbar(page).boundingBox())!;
-  expect(box.y).toBeGreaterThanOrEqual(topbar.y + topbar.height);
+  expect(Math.abs(box.x + box.width / 2 - 1440 / 2)).toBeLessThanOrEqual(2);
+  expect(Math.abs(box.y + box.height / 2 - 900 / 2)).toBeLessThanOrEqual(2);
   expect(await dialog.evaluate((node) => getComputedStyle(node).backdropFilter)).toBe("none");
   await expect(dialog.getByRole("button", { name: "거래량 설정", exact: true })).toBeVisible();
   const footer = dialog.locator("footer");
   await expect(footer.getByText("Tab", { exact: true })).toBeVisible();
+  await expect(footer.getByRole("button")).toHaveCount(0);
   await dialog.getByRole("tab", { name: "비교 종목", exact: true }).click();
   await expect(footer.getByText("Tab", { exact: true })).toHaveCount(0);
-  await expect(footer.getByRole("button", { name: /비교 종목 추가/ })).toBeVisible();
+  await expect(footer.getByRole("button")).toHaveCount(0);
 });
 
 test("범례에서 연 지표 팝오버는 높이가 360px 이하이고 색 더 보기를 누르면 색상표가 보인다", async ({ page, scenario }) => {

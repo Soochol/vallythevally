@@ -4,7 +4,7 @@ import { CogIcon } from "../icons";
 import { Popover } from "../overlay/Popover";
 import { setLadderRate } from "../workspace/canvasCommands";
 import { Segmented } from "../market-window/parts";
-import { KEEP_LAST_ENTRY_LABEL, ORDER_ROUTES, type OrderSettings, type PresetKind, routeLabel, SHARE_PRESET_COUNT, withPresetOf } from "./orderSettings";
+import { AMOUNT_PRESET_COUNT, KEEP_LAST_ENTRY_LABEL, ORDER_ROUTES, type OrderSettings, routeLabel, withAmountPreset } from "./orderSettings";
 import { MOCK_KRX_ONLY_TEXT, REJECT_TEXT } from "./statusText";
 
 const MOCK_DISABLED_ROUTES: readonly Venue[] = ["combined", "nxt"];
@@ -19,7 +19,7 @@ interface Props {
 }
 
 const FLAGS: readonly { readonly key: "keepLastEntry" | "averageDot" | "divider" | "rate" | "skipSpreadGap" | "maskAccount"; readonly label: string; readonly note?: string; readonly title?: string }[] = [
-  { key: "keepLastEntry", label: KEEP_LAST_ENTRY_LABEL, note: "창·종목마다 따로 기억합니다", title: "마지막으로 선택한 수량과 수량·금액 방식을 그 창의 그 종목마다 기억해 다시 열 때 그 값으로 시작합니다" },
+  { key: "keepLastEntry", label: KEEP_LAST_ENTRY_LABEL, note: "창·종목마다 따로 기억합니다", title: "마지막으로 선택한 수량을 그 창의 그 종목마다 기억해 다시 열 때 그 값으로 시작합니다" },
   { key: "averageDot", label: "평단가 점" },
   { key: "divider", label: "구분선" },
   { key: "rate", label: "등락률 표시" },
@@ -27,21 +27,15 @@ const FLAGS: readonly { readonly key: "keepLastEntry" | "averageDot" | "divider"
   { key: "maskAccount", label: "계좌번호 가리기" },
 ];
 
-const PRESET_GROUPS = [
-  { kind: "sharePresets", legend: "수량 프리셋", ariaPrefix: "프리셋" },
-  { kind: "amountPresets", legend: "금액 프리셋 (만원)", ariaPrefix: "금액 프리셋" },
-] as const;
-
 interface PresetInputProps {
   readonly settings: OrderSettings;
-  readonly kind: PresetKind;
   readonly index: number;
   readonly label: string;
   readonly onChange: (settings: OrderSettings) => void;
 }
 
-function PresetInput({ settings, kind, index, label, onChange }: PresetInputProps) {
-  const saved = String(settings[kind][index]);
+function PresetInput({ settings, index, label, onChange }: PresetInputProps) {
+  const saved = String(settings.amountPresets[index]);
   const [draft, setDraft] = useState<string | null>(null);
   return (
     <input
@@ -51,7 +45,7 @@ function PresetInput({ settings, kind, index, label, onChange }: PresetInputProp
       onChange={(e) => {
         const text = e.target.value.replace(/[^0-9]/g, "");
         setDraft(text);
-        const next = withPresetOf(settings, kind, index, text);
+        const next = withAmountPreset(settings, index, text);
         if (next !== settings) onChange(next);
       }}
       onKeyDown={(e) => { if (e.key === "Enter") e.currentTarget.blur(); }}
@@ -78,16 +72,14 @@ export function OrderSettingsPopover({ settings, venue, mock, nxtNotTraded, hold
             <Segmented label="주문 경로" options={ORDER_ROUTES} value={venue} disabled={mock ? MOCK_DISABLED_ROUTES : undefined} onChange={(next) => onChange({ ...settings, venue: next })} />
             {mock && <p className="od-route-note" data-testid="order-route-note">{MOCK_KRX_ONLY_TEXT}</p>}
           </fieldset>
-          {PRESET_GROUPS.map(({ kind, legend, ariaPrefix }) => (
-            <fieldset key={kind}>
-              <legend>{legend}</legend>
-              <div className="od-settings-presets">
-                {Array.from({ length: SHARE_PRESET_COUNT }, (_, index) => (
-                  <PresetInput key={index} settings={settings} kind={kind} index={index} label={`${ariaPrefix} ${index + 1}`} onChange={onChange} />
-                ))}
-              </div>
-            </fieldset>
-          ))}
+          <fieldset>
+            <legend>금액 프리셋 (만원)</legend>
+            <div className="od-settings-presets">
+              {Array.from({ length: AMOUNT_PRESET_COUNT }, (_, index) => (
+                <PresetInput key={index} settings={settings} index={index} label={`금액 프리셋 ${index + 1}`} onChange={onChange} />
+              ))}
+            </div>
+          </fieldset>
           {FLAGS.map(({ key, label, note, title }) => (
             <label key={key} className="od-settings-flag" data-note={note ? "" : undefined} title={title}>
               <input type="checkbox" checked={settings[key]} onChange={(e) => (key === "rate" ? setLadderRate(e.target.checked) : onChange({ ...settings, [key]: e.target.checked }))} />

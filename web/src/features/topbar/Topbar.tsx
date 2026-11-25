@@ -28,11 +28,9 @@ export function Topbar() {
   const name = info?.name ?? cell.symbol;
   const { setPeriod } = useLayoutStore.getState();
   const keys = useActionKeys();
-  const settingsButton = useRef<HTMLButtonElement>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
 
   const moreRoot = useRef<HTMLDivElement>(null);
-  const visibleSettingsAnchorRect = () => (settingsButton.current?.getClientRects().length ? settingsButton.current : moreRoot.current)?.getBoundingClientRect();
   const [moreOpen, setMoreOpen] = useState(false);
   const moreItems: MenuItem[] = [
     { kind: "action", label: "비교", icon: <CompareIcon />, onSelect: () => openIndicatorCommand(cellId, "compare") },
@@ -57,12 +55,12 @@ export function Topbar() {
         </div>
         <button type="button" className="tb-btn" aria-label="지표" aria-haspopup={opensDialog ? "dialog" : undefined} title={keyTitle("지표", keys, "indicators")} onClick={() => openIndicatorCommand(cellId)}><IndicatorIcon /><span className="topbar-label-lg">지표</span></button>
         <button type="button" className="tb-btn topbar-fold" aria-label="비교" aria-haspopup={opensDialog ? "dialog" : undefined} title="비교 종목" onClick={() => openIndicatorCommand(cellId, "compare")}><CompareIcon /><span className="topbar-label-lg">비교</span></button>
-        <button ref={settingsButton} type="button" className="tb-btn topbar-fold aria-expanded:bg-accent-soft aria-expanded:font-semibold aria-expanded:text-accent" aria-label="차트 설정" aria-haspopup="dialog" aria-expanded={settingsOpen} onClick={() => setSettingsOpen((open) => !open)}><SlidersIcon /><span className="topbar-label-xl">차트 설정</span></button>
+        <button type="button" className="tb-btn topbar-fold aria-expanded:bg-accent-soft aria-expanded:font-semibold aria-expanded:text-accent" aria-label="차트 설정" aria-haspopup="dialog" aria-expanded={settingsOpen} onClick={() => setSettingsOpen((open) => !open)}><SlidersIcon /><span className="topbar-label-xl">차트 설정</span></button>
         <div ref={moreRoot} className="topbar-more">
           <button type="button" className="tb-btn aria-expanded:bg-accent-soft aria-expanded:text-accent" aria-label="더 보기" aria-haspopup="menu" aria-expanded={moreOpen} title="더 보기" onClick={() => setMoreOpen((open) => !open)}><MoreIcon /></button>
           {moreOpen && <Menu label="더 보기" root={moreRoot} items={moreItems} onClose={() => setMoreOpen(false)} />}
         </div>
-        {settingsOpen && <ChartSettingsDialog cellId={cellId} anchor={settingsButton} anchorRect={visibleSettingsAnchorRect} onClose={() => setSettingsOpen(false)} />}
+        {settingsOpen && <ChartSettingsDialog cellId={cellId} onClose={() => setSettingsOpen(false)} />}
       </div>
       <div className="topbar-search-slot">
         <button type="button" className="shell-search" aria-haspopup="dialog" aria-label="종목·지표·명령 찾기" title={searchTitle(keys)} onClick={() => openSearch()}>

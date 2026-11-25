@@ -47,7 +47,6 @@ async function openCompareTab(page: Page): Promise<Locator> {
 async function addCompare(dialog: Locator, name: string) {
   await dialog.getByRole("combobox", { name: "지표·비교 찾기" }).fill(name);
   await dialog.getByRole("option", { name: new RegExp(name) }).first().click();
-  await dialog.getByRole("button", { name: new RegExp(`^${name}.*추가$`) }).click();
 }
 
 test("비교 종목 탭에서 3개까지 넣고 4번째는 막히며, 빼면 그 구독을 풀고, 새로고침해도 남는다", async ({ page, scenario }) => {
@@ -70,7 +69,7 @@ test("비교 종목 탭에서 3개까지 넣고 4번째는 막히며, 빼면 그
 
   await dialog.getByRole("combobox", { name: "지표·비교 찾기" }).fill("삼성물산");
   await dialog.getByRole("option", { name: /삼성물산/ }).first().click();
-  await expect(dialog.getByRole("button", { name: /^삼성물산.*추가$/ })).toBeDisabled();
+  await expect(rows(page)).toHaveCount(3);
   await expect(dialog).toContainText("비교 종목은 3개까지입니다");
 
   const subOf = (symbol: string) => sent.find((m) => m.type === "subscribe" && m.symbol === symbol)?.sub;
@@ -86,6 +85,15 @@ test("비교 종목 탭에서 3개까지 넣고 4번째는 막히며, 빼면 그
   await expect(cell(page)).toHaveAttribute("aria-busy", "false");
   await expect(rows(page)).toHaveCount(2);
   await expect(chartOf(cell(page))).toHaveAttribute("data-price-scale", "percent");
+
+  const reopened = await openCompareTab(page);
+  await addCompare(reopened, "삼성화재");
+  await expect(rows(page)).toHaveCount(3);
+  await pollSaved(async () => (await settingsOf(scenario)).compare).toEqual(["006400", "IDX:001", "000810"]);
+  await page.keyboard.press("Escape");
+  await expect(reopened).toBeHidden();
+  await expect(rows(page)).toHaveCount(2);
+  await pollSaved(async () => (await settingsOf(scenario)).compare).toEqual(["006400", "IDX:001"]);
   expect(errors).toEqual([]);
 });
 
@@ -183,7 +191,7 @@ test("일반 축에서 그린 드로잉은 % 축이 되고 스크롤로 기준 �
 
   const dialog = await openCompareTab(page);
   await addCompare(dialog, "코스피");
-  await page.keyboard.press("Escape");
+  await dialog.getByRole("button", { name: "입력창 닫기", exact: true }).click();
   await expect(chart).toHaveAttribute("data-price-scale", "percent");
   await expect(row(page, "IDX:001")).not.toHaveAttribute("data-last-t", "");
   await expect.poll(onCandles).toBe(true);
@@ -212,9 +220,9 @@ test("비교 종목이 저장된 칸을 열어도 지표 패널 축은 % 축이 
   };
   await expect.poll(modes).toEqual({ main: 2, volume: 0 });
 
-  await openCompareTab(page);
-  await page.getByRole("dialog").getByRole("button", { name: "코스피 지우기" }).click();
-  await page.keyboard.press("Escape");
+  const compareDialog = await openCompareTab(page);
+  await compareDialog.getByRole("button", { name: "코스피 지우기" }).click();
+  await compareDialog.getByRole("button", { name: "입력창 닫기", exact: true }).click();
   await expect(chartOf(cell(page))).toHaveAttribute("data-price-scale", "normal");
   await selectOption(cell(page).getByRole("combobox", { name: "가격축 방식" }), "log");
   await expect.poll(modes).toEqual({ main: 1, volume: 0 });

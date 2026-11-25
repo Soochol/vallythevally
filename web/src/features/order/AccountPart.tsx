@@ -12,7 +12,7 @@ import type { ProfitUnit } from "./holdingSummary";
 import { HoldingSummary } from "./HoldingSummary";
 import { OrderSettingsPopover } from "./OrderSettingsPopover";
 import type { OrderAccountChoice } from "./orderAccount";
-import type { OrderSettings, PresetKind } from "./orderSettings";
+import type { OrderSettings } from "./orderSettings";
 import { QuantityRow } from "./QuantityRow";
 
 interface Props {
@@ -33,10 +33,8 @@ interface Props {
   readonly sellOrdered: number;
   readonly profitUnit: ProfitUnit;
   readonly onProfitUnit: () => void;
-  readonly presetKind: PresetKind;
   readonly input: string;
   readonly referencePrice: number | null;
-  readonly onPresetKind: (kind: PresetKind) => void;
   readonly onInput: (input: string) => void;
   readonly settings: OrderSettings;
   readonly orderVenue: Venue;
@@ -50,7 +48,7 @@ export const AccountPart = memo(function AccountPart(props: Props) {
     <>
       <AccountBand windowId={props.windowId} choice={props.choice} onPick={props.onPickAccount} maskAccount={settings.maskAccount} openOrders={props.openOrders} balance={props.balance} holding={props.holding} executions={props.executions} writable={props.writable} mock={props.mock} venue={props.orderVenue} policy={props.policy} onCancel={props.onCancel} />
       <HoldingSummary account={props.accountRef} holding={props.holding} orderable={props.orderable} buyableProblem={props.buyableProblem} sellOrdered={props.sellOrdered} unit={props.profitUnit} onUnit={props.onProfitUnit} onFill={props.onInput} />
-      <QuantityRow presetKind={props.presetKind} input={props.input} sharePresets={settings.sharePresets} amountPresets={settings.amountPresets} referencePrice={props.referencePrice} onPresetKind={props.onPresetKind} onInput={props.onInput}
+      <QuantityRow input={props.input} amountPresets={settings.amountPresets} referencePrice={props.referencePrice} onInput={props.onInput}
         trailing={<OrderSettingsPopover settings={settings} venue={props.orderVenue} mock={props.mock} nxtNotTraded={props.nxtNotTraded} holding={props.holding !== null} onChange={props.onSettings} />} />
     </>
   );

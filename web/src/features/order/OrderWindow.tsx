@@ -45,7 +45,7 @@ import { OrderTotals } from "./OrderTotals";
 import { OrderStatusBar } from "./OrderStatusBar";
 import { CANCEL_REFUSAL, REJECT_TEXT, REPLAY_LOCKED_TEXT } from "./statusText";
 import { buyBlock, capacityProblem, type DragOutcome, marginOf, modifyBuyProblem, type DragSource, needsHighValueConfirm, orderAmount, planCancel, type PriceKey, typedQuantity } from "./orderRules";
-import { type PresetKind, routeLabel } from "./orderSettings";
+import { routeLabel } from "./orderSettings";
 import { withDirectionJosa } from "./josa";
 import { pendingWrites } from "./pendingWrites";
 import { accountNumberText, FALLBACK_NOTICE, type OrderAccountChoice } from "./orderAccount";
@@ -81,9 +81,6 @@ function OrderBody({ id, code, infoPager, choice, access, balance }: { id: Windo
   const accountRef = choice.current?.ref ?? null;
   const entryKey = useLayoutStore((s) => orderEntryKey(s.layout.id, id, code));
   const [kept] = useState(() => { const { prefs } = useUiStore.getState(); return prefs.orderSettings.keepLastEntry ? prefs.orderEntries[entryKey] ?? null : null; });
-  const [presetKind, setPresetKind] = useState<PresetKind>(kept?.presetKind ?? "sharePresets");
-  const presetKindRef = useRef(presetKind);
-  presetKindRef.current = presetKind;
   const [input, setInput] = useState(kept === null ? String(DEFAULT_ORDER_QUANTITY) : String(kept.quantity));
   const [hover] = useState(() => createValueStore<HoverCell | null>(null));
   const [confirm, setConfirm] = useState<HighValueRequest | null>(null);
@@ -212,7 +209,7 @@ function OrderBody({ id, code, infoPager, choice, access, balance }: { id: Windo
         return;
       }
       writes.place({ side, price, quantity, confirmHighValue, margin, listedWhenIn: side === "sell" ? sellQuantityAtPrice(data.groups, pending, code, price, data.openOrdersListedAt) + quantity : 0 });
-      if (settings.keepLastEntry) rememberEntry(entryKey, { presetKind, quantity, usedAt: Date.now() });
+      if (settings.keepLastEntry) rememberEntry(entryKey, { quantity, usedAt: Date.now() });
     };
     if (needsHighValueConfirm(price, quantity)) setConfirm({ ...confirmContext(routeLabel(orderVenue)), side, verb: "주문", detail: `${formatQuantity(quantity)} · ${formatPrice(price, false)}원`, amount: price * quantity, run: () => send(true) });
     else send(false);
@@ -262,22 +259,11 @@ function OrderBody({ id, code, infoPager, choice, access, balance }: { id: Windo
   };
 
   const pickAccount = useStableCallback((account: string) => setSettings({ ...settings, account }));
-  const changePresetKind = useStableCallback((nextKind: PresetKind) => {
-    presetKindRef.current = nextKind;
-    setPresetKind(nextKind);
-    const { prefs } = useUiStore.getState();
-    if (!prefs.orderSettings.keepLastEntry) return;
-    const currentQuantity = typedQuantity(input);
-    const positiveQuantity = currentQuantity > 0
-      ? currentQuantity
-      : (prefs.orderEntries[entryKey]?.quantity ?? DEFAULT_ORDER_QUANTITY);
-    rememberEntry(entryKey, { presetKind: nextKind, quantity: positiveQuantity, usedAt: Date.now() });
-  });
   const changeInput = useStableCallback((nextInput: string) => {
     setInput(nextInput);
     if (!useUiStore.getState().prefs.orderSettings.keepLastEntry) return;
     const nextQuantity = typedQuantity(nextInput);
-    if (nextQuantity > 0) rememberEntry(entryKey, { presetKind: presetKindRef.current, quantity: nextQuantity, usedAt: Date.now() });
+    if (nextQuantity > 0) rememberEntry(entryKey, { quantity: nextQuantity, usedAt: Date.now() });
   });
   const toggleProfitUnit = useCallback(() => setProfitUnit(toggledUnit), []);
   const toggleExplorer = useStableCallback(() => {
@@ -320,7 +306,7 @@ function OrderBody({ id, code, infoPager, choice, access, balance }: { id: Windo
       {replayEnabled && <ReplayStrip view={replay}><span className="od-replay-lock">주문 잠금</span></ReplayStrip>}
       <AccountPart windowId={id} choice={choice} accountRef={accountRef} onPickAccount={pickAccount} openOrders={data.openOrders} balance={data.balance} executions={data.executions} writable={writable} mock={mock} policy={data.orderable?.policy ?? null} onCancel={cancelOne}
         holding={holding} orderable={data.orderable} buyableProblem={data.buyableProblem} sellOrdered={sellOrdered} profitUnit={profitUnit} onProfitUnit={toggleProfitUnit}
-        presetKind={presetKind} input={input} referencePrice={referencePrice} onPresetKind={changePresetKind} onInput={changeInput}
+        input={input} referencePrice={referencePrice} onInput={changeInput}
         settings={settings} orderVenue={orderVenue} nxtNotTraded={nxtNotTraded} onSettings={setSettings} />
       {replay.kind === "live" && !feed.connected && <FeedStrip since={downSince} />}
       <div className="bk-ladder od-ladder-wrap" data-stale={replay.kind === "live" && !feed.connected ? "" : undefined} data-exploring={explorerOn ? "" : undefined} data-state={shownLadder ? undefined : ""}>

@@ -775,7 +775,7 @@ test(`다시 하기 기록도 최근 ${ARRANGEMENT_STEPS}단계만 남긴다`, (
   expect(state().redos).toHaveLength(ARRANGEMENT_STEPS);
 });
 
-const rememberedEntry: OrderEntry = { presetKind: "amountPresets", quantity: 37, usedAt: 1 };
+const rememberedEntry: OrderEntry = { quantity: 37, usedAt: 1 };
 const rememberedKeys = () => Object.keys(useUiStore.getState().prefs.orderEntries).sort();
 const rememberOrders = (layoutId: string, windowIds: readonly string[]) => {
   for (const id of windowIds) for (const code of ["005930", "000660"]) useUiStore.getState().rememberOrderEntry(orderEntryKey(layoutId, id, code), rememberedEntry);
@@ -818,7 +818,7 @@ test("지울 기억이 없으면 창을 열어도 ui 상태를 바꾸지 않는�
 
 test("되돌린 호가주문창의 기억은 다시 하기로 새 창이 받을 때 다시 비고 다시 되돌리면 되돌아온다", () => {
   const key = orderEntryKey(state().layout.id, "order-2", "005930");
-  const closedEntry = { presetKind: "amountPresets", quantity: 37, usedAt: 1 } as const;
+  const closedEntry = { quantity: 37, usedAt: 1 } as const;
   state().openWindow("order");
   state().duplicateWindow(windowId("order"));
   useUiStore.getState().rememberOrderEntry(key, closedEntry);

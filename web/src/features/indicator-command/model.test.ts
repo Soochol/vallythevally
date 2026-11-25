@@ -53,11 +53,11 @@ test("Enter는 계속 추가하고 Shift+Enter만 추가 뒤 닫으며 한글 �
 });
 
 test("단축키 안내는 탭에 맞는 것만 보인다", () => {
-  expect(commandHints("current").map((hint) => hint.keys)).toEqual(["↑↓", "Tab", "Enter", "Shift+Enter", "Esc"]);
-  expect(commandHints("current")[2]!.action).toBe("적용하고 계속");
+  expect(commandHints("current").map((hint) => hint.keys)).toEqual(["↑↓", "Tab", "Esc"]);
+  expect(commandHints("current").at(-1)!.action).toBe("되돌리고 닫기");
   expect(commandHints("add")[3]!.action).toBe("추가하고 닫기");
   expect(commandHints("compare").map((hint) => hint.keys)).toEqual(["↑↓", "Enter", "Shift+Enter", "Esc"]);
-  expect(commandHints("compare").at(-1)!.action).toBe("닫기");
+  expect(commandHints("compare").at(-1)!.action).toBe("되돌리고 닫기");
 });
 
 test("호가지표를 이름으로 찾고 따로 묶어 보인다", () => {

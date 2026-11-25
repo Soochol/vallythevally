@@ -53,7 +53,6 @@ for (const phone of [false, true]) test.describe(phone ? "휴대폰 재무지표
     await dialog.getByRole("tab", { name: "지표 추가", exact: true }).click();
     for (const label of LABELS) {
       await dialog.getByRole("option", { name: `${label} 추가 후보`, exact: true }).click();
-      await dialog.getByRole("button", { name: `${label} 추가`, exact: true }).click();
     }
     await dialog.getByRole("button", { name: "입력창 닫기", exact: true }).click();
     await expect(page.locator("[data-indicator-row]")).toHaveCount(7);

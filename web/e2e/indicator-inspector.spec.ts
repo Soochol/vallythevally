@@ -20,7 +20,7 @@ async function chooseWindow(page: Page, label: "가운데 창" | "차트 옆") {
   const choice = popover.getByRole("group", { name: "지표 창" }).getByRole("button", { name: label, exact: true });
   await choice.click();
   await expect(choice).toHaveAttribute("aria-pressed", "true");
-  await page.keyboard.press("Escape");
+  await popover.getByRole("button", { name: "닫기", exact: true }).click();
   await expect(popover).toBeHidden();
 }
 

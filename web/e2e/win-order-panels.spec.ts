@@ -165,11 +165,10 @@ test("보유 요약이 값을 보이고 평가손익을 원과 퍼센트로 바�
   await expect(page.getByTestId("summary-buyable")).toContainText("500,000,000원");
   await page.getByTestId("summary-profit").click();
   await expect(page.getByTestId("summary-profit")).toContainText("−0.57%");
-  await page.getByRole("button", { name: "금액" }).click();
   await page.getByTestId("summary-quantity").click();
   await expect(page.getByRole("textbox", { name: "수량" })).toHaveValue("100");
-  await expect(page.getByRole("group", { name: "수량 방식" }).getByRole("button", { name: "금액" })).toHaveAttribute("aria-pressed", "true");
-  await expect(page.getByRole("group", { name: "수량 프리셋" }).getByRole("button")).toHaveText(["100만", "500만", "1,000만", "5,000만"]);
+  await expect(page.getByRole("group", { name: "수량 방식" })).toHaveCount(0);
+  await expect(page.getByRole("group", { name: "금액 프리셋" }).getByRole("button")).toHaveText(["100만", "500만", "1,000만", "5,000만"]);
   await expect(page.getByTestId("ladder-mark")).toHaveCount(1);
 });
 
@@ -374,23 +373,23 @@ test("설정 ⚙의 값이 창 설정으로 저장되고 새로고침해도 유�
   ordersOn(scenario);
   tradingApi(scenario).holdings = [HOLDING];
   await openOrderWindow(page, scenario);
-  await expect(page.getByRole("group", { name: "수량 프리셋" }).getByRole("button")).toHaveText(["10", "50", "100", "500"]);
+  await expect(page.getByRole("group", { name: "금액 프리셋" }).getByRole("button")).toHaveText(["100만", "500만", "1,000만", "5,000만"]);
   await expect(page.getByTestId("order-ladder")).toHaveAttribute("data-divider", "");
   await expect(page.getByTestId("ladder-mark")).toHaveCount(1);
   await page.getByTestId("order-settings-button").click();
-  const preset = page.getByRole("textbox", { name: "프리셋 2", exact: true });
-  await preset.fill("75");
+  const preset = page.getByRole("textbox", { name: "금액 프리셋 2", exact: true });
+  await preset.fill("750");
   await preset.blur();
   await page.getByRole("checkbox", { name: "구분선" }).uncheck();
   await page.getByRole("checkbox", { name: "평단가 점" }).uncheck();
-  await expect(page.getByRole("group", { name: "수량 프리셋" }).getByRole("button").nth(1)).toHaveText("75");
+  await expect(page.getByRole("group", { name: "금액 프리셋" }).getByRole("button").nth(1)).toHaveText("750만");
   await expect(page.getByTestId("order-ladder")).not.toHaveAttribute("data-divider", "");
   await expect(page.getByTestId("ladder-mark")).toHaveCount(0);
-  await pollSaved(() => scenario.documents.uiState()["orderSettings"]).toMatchObject({ sharePresets: [10, 75, 100, 500], amountPresets: [100, 500, 1000, 5000], averageDot: false, divider: false, rate: true, maskAccount: true });
+  await pollSaved(() => scenario.documents.uiState()["orderSettings"]).toMatchObject({ amountPresets: [100, 750, 1000, 5000], averageDot: false, divider: false, rate: true, maskAccount: true });
 
   await page.reload();
   await expect(win(page)).toBeVisible();
-  await expect(page.getByRole("group", { name: "수량 프리셋" }).getByRole("button").nth(1)).toHaveText("75");
+  await expect(page.getByRole("group", { name: "금액 프리셋" }).getByRole("button").nth(1)).toHaveText("750만");
   await expect(page.getByTestId("order-ladder")).not.toHaveAttribute("data-divider", "");
   await expect(page.getByTestId("ladder-mark")).toHaveCount(0);
   expect(scenario.documents.layout(DEFAULT_LAYOUT_ID).windows.some((w) => w.kind === "order")).toBe(true);
@@ -472,16 +471,13 @@ async function openNarrowest(page: Page, scenario: Scenario): Promise<void> {
   for (const strength of await page.getByTestId("ladder-strength").all()) await expect(strength).toContainText("101.50%");
 }
 
-test("등락률을 끈 호가주문 창을 최소 폭 372px로 줄여도 글자가 잘리거나 겹치지 않고 수량·금액 프리셋 모두 한 줄이다", async ({ page, scenario }) => {
+test("등락률을 끈 호가주문 창을 최소 폭 372px로 줄여도 글자가 잘리거나 겹치지 않고 금액 프리셋이 한 줄이다", async ({ page, scenario }) => {
   await openNarrowest(page, scenario);
   const quantityRow = page.getByTestId("order-quantity-row");
   expect((await win(page).boundingBox())!.width).toBeCloseTo(372, 0);
-  for (const kind of ["수량", "금액"] as const) {
-    await quantityRow.getByRole("button", { name: kind, exact: true }).click();
-    expect(new Set(await quantityRow.locator(".od-presets, .od-qty-input, .od-gear").evaluateAll((parts) => parts.map((part) => Math.round(part.getBoundingClientRect().top)))).size).toBe(1);
-    expect(await cutTexts(win(page))).toEqual([]);
-    for (const row of [quantityRow, page.getByTestId("order-summary"), page.locator(".od-account-bar"), page.getByTestId("order-symbol-head")]) expect(await overlappingChildren(row)).toEqual([]);
-  }
+  expect(new Set(await quantityRow.locator(".od-presets, .od-qty-input, .od-gear").evaluateAll((parts) => parts.map((part) => Math.round(part.getBoundingClientRect().top)))).size).toBe(1);
+  expect(await cutTexts(win(page))).toEqual([]);
+  for (const row of [quantityRow, page.getByTestId("order-summary"), page.locator(".od-account-bar"), page.getByTestId("order-symbol-head")]) expect(await overlappingChildren(row)).toEqual([]);
 });
 
 test("등락률을 끈 10호가 창을 최소 폭 232px로 줄여도 잔량·체결·총잔량 글자가 잘리지 않는다", async ({ page, scenario }) => {
@@ -623,27 +619,27 @@ test("호가 사이 빈 가격 건너뛰기를 켜면 벌어진 호가에서도 
   await pollSaved(() => scenario.documents.uiState()["orderSettings"]).toMatchObject({ skipSpreadGap: false });
 });
 
-test("프리셋 2에 75를 입력하고 Enter를 누르면 단추가 바로 75가 되고 새로고침해도 유지되며 틀린 값은 되돌린다", async ({ page, scenario }) => {
+test("금액 프리셋 2에 750을 입력하고 Enter를 누르면 단추가 바로 750만이 되고 새로고침해도 유지되며 틀린 값은 되돌린다", async ({ page, scenario }) => {
   ordersOn(scenario);
   tradingApi(scenario);
   await openOrderWindow(page, scenario);
   await openSettings(page);
-  const preset = page.getByRole("textbox", { name: "프리셋 2", exact: true });
-  const buttons = page.getByRole("group", { name: "수량 프리셋" }).getByRole("button");
-  await preset.fill("75");
-  await expect(buttons.nth(1)).toHaveText("75");
+  const preset = page.getByRole("textbox", { name: "금액 프리셋 2", exact: true });
+  const buttons = page.getByRole("group", { name: "금액 프리셋" }).getByRole("button");
+  await preset.fill("750");
+  await expect(buttons.nth(1)).toHaveText("750만");
   await preset.press("Enter");
   await page.reload();
   await expect(win(page)).toBeVisible();
-  await expect(buttons.nth(1)).toHaveText("75");
+  await expect(buttons.nth(1)).toHaveText("750만");
   await openSettings(page);
   await preset.fill("0");
-  await expect(buttons.nth(1)).toHaveText("75");
+  await expect(buttons.nth(1)).toHaveText("750만");
   await preset.blur();
-  await expect(preset).toHaveValue("75");
+  await expect(preset).toHaveValue("750");
 });
 
-test("금액 프리셋을 바꾸면 금액 방식의 프리셋 단추가 그 값을 보이고 누르면 그 금액을 현재가로 나눈 수량이 된다", async ({ page, scenario }) => {
+test("금액 프리셋을 바꾸면 프리셋 단추가 그 값을 보이고 누르면 그 금액을 현재가로 나눈 수량이 된다", async ({ page, scenario }) => {
   ordersOn(scenario);
   tradingApi(scenario);
   await openOrderWindow(page, scenario);
@@ -651,8 +647,7 @@ test("금액 프리셋을 바꾸면 금액 방식의 프리셋 단추가 그 값
   await openSettings(page);
   await page.getByRole("textbox", { name: "금액 프리셋 1" }).fill("200");
   await page.keyboard.press("Escape");
-  await page.getByRole("button", { name: "금액" }).click();
-  const buttons = page.getByRole("group", { name: "수량 프리셋" }).getByRole("button");
+  const buttons = page.getByRole("group", { name: "금액 프리셋" }).getByRole("button");
   await expect(buttons).toHaveText(["200만", "500만", "1,000만", "5,000만"]);
   await buttons.first().click();
   await expect(page.getByRole("textbox", { name: "수량" })).toHaveValue("28");
@@ -679,8 +674,8 @@ test("주문 입력은 한 줄로 사다리 위에, 총잔량 띠와 그 위 접
   const ladder = page.getByTestId("order-ladder");
   const ladderTop = await topOf(ladder);
   const ladderBottom = ladderTop + (await ladder.boundingBox())!.height;
-  const inputLine = [page.getByRole("textbox", { name: "수량" }), page.getByRole("group", { name: "수량 방식" }), ...(await page.getByRole("group", { name: "수량 프리셋" }).getByRole("button").all()), page.getByTestId("order-settings-button")];
-  expect(inputLine).toHaveLength(7);
+  const inputLine = [page.getByRole("textbox", { name: "수량" }), ...(await page.getByRole("group", { name: "금액 프리셋" }).getByRole("button").all()), page.getByTestId("order-settings-button")];
+  expect(inputLine).toHaveLength(6);
   const topsInLine = await Promise.all(inputLine.map(topOf));
   expect(new Set(topsInLine.map(Math.round)).size).toBe(1);
   const firstRow = ladderRows(page).first();
@@ -697,32 +692,28 @@ test("주문 입력은 한 줄로 사다리 위에, 총잔량 띠와 그 위 접
   await expect(page.getByTestId("order-quote")).toHaveCount(0);
 });
 
-test("금액 방식이면 같은 줄의 프리셋이 100만·500만·1000만·5000만이다", async ({ page, scenario }) => {
+test("기본 프리셋은 같은 줄에 100만·500만·1000만·5000만이다", async ({ page, scenario }) => {
   ordersOn(scenario);
   tradingApi(scenario);
   await openOrderWindow(page, scenario);
   await win(page).evaluate((element) => { element.style.flex = "none"; element.style.width = "421px"; });
-  await page.getByRole("group", { name: "수량 방식" }).getByRole("button", { name: "금액" }).click();
-  const presets = page.getByRole("group", { name: "수량 프리셋" }).getByRole("button");
+  const presets = page.getByRole("group", { name: "금액 프리셋" }).getByRole("button");
   await expect(presets).toHaveText(["100만", "500만", "1,000만", "5,000만"]);
   const input = Math.round(await topOf(page.getByRole("textbox", { name: "수량" })));
   expect((await tops(presets)).map(Math.round)).toEqual([input, input, input, input]);
 });
 
-test("수량·금액 프리셋 8개는 모두 5,000만이 들어가는 48px이고 더 긴 값만 넓어진다", async ({ page, scenario }) => {
+test("금액 프리셋 4개는 모두 5,000만이 들어가는 48px이고 더 긴 값만 넓어진다", async ({ page, scenario }) => {
   ordersOn(scenario);
   tradingApi(scenario);
   await openOrderWindow(page, scenario);
   await win(page).evaluate((element) => { element.style.flex = "none"; element.style.width = "421px"; });
   const row = page.getByTestId("order-quantity-row");
-  const presets = row.getByRole("group", { name: "수량 프리셋" }).getByRole("button");
+  const presets = row.getByRole("group", { name: "금액 프리셋" }).getByRole("button");
   const sizes = () => presets.evaluateAll((buttons) => buttons.map((button) => { const box = button.getBoundingClientRect(); return { width: Math.round(box.width * 2) / 2, height: Math.round(box.height), cut: button.scrollWidth > button.clientWidth }; }));
   const even = { width: 48, height: 30, cut: false };
   await page.evaluate(() => document.fonts.ready);
-  for (const kind of ["수량", "금액"] as const) {
-    await row.getByRole("button", { name: kind, exact: true }).click();
-    await expect.poll(sizes).toEqual([even, even, even, even]);
-  }
+  await expect.poll(sizes).toEqual([even, even, even, even]);
   await openSettings(page);
   await page.getByRole("textbox", { name: "금액 프리셋 4" }).fill("99999");
   await page.keyboard.press("Escape");
@@ -733,16 +724,14 @@ test("수량·금액 프리셋 8개는 모두 5,000만이 들어가는 48px이�
   expect(widened[3]!.cut).toBe(false);
 });
 
-const presetKindButton = (page: Page, name: "수량" | "금액") => page.getByRole("group", { name: "수량 방식" }).getByRole("button", { name });
 const quantityField = (page: Page) => page.getByRole("textbox", { name: "수량" });
-const amountPresetButtons = (page: Page) => page.getByRole("group", { name: "수량 프리셋" }).getByRole("button");
+const amountPresetButtons = (page: Page) => page.getByRole("group", { name: "금액 프리셋" }).getByRole("button");
 
 test("금액 프리셋을 누르면 수량 칸에 현재가로 나눈 수량이 들어가고 다른 가격 칸에서도 그 수량으로 주문이 나간다", async ({ page, scenario }) => {
   ordersOn(scenario);
   const api = tradingApi(scenario);
   await openOrderWindow(page, scenario);
   lastTrade(scenario, BASE);
-  await presetKindButton(page, "금액").click();
   await amountPresetButtons(page).first().click();
   await expect(quantityField(page)).toHaveValue("14");
   const otherPrice = BASE - 900;
@@ -756,7 +745,6 @@ test("금액 프리셋을 누른 뒤 현재가가 바뀌어도 수량 칸은 그
   const api = tradingApi(scenario);
   await openOrderWindow(page, scenario);
   lastTrade(scenario, BASE);
-  await presetKindButton(page, "금액").click();
   await amountPresetButtons(page).first().click();
   await expect(quantityField(page)).toHaveValue("14");
   lastTrade(scenario, BASE + 1_000, 2);
@@ -772,7 +760,6 @@ test("금액 프리셋으로 채운 수량을 손으로 고치면 고친 수량�
   const api = tradingApi(scenario);
   await openOrderWindow(page, scenario);
   lastTrade(scenario, BASE);
-  await presetKindButton(page, "금액").click();
   await amountPresetButtons(page).first().click();
   await quantityField(page).fill("20");
   await cellAt(page, "buy", BASE).dblclick();
@@ -780,12 +767,11 @@ test("금액 프리셋으로 채운 수량을 손으로 고치면 고친 수량�
   expect(writesTo(api, "place")[0]!.body).toMatchObject({ price: BASE, quantity: 20 });
 });
 
-test("금액 방식이어도 칸 이름은 수량이다", async ({ page, scenario }) => {
+test("금액 프리셋만 있어도 칸 이름은 수량이다", async ({ page, scenario }) => {
   ordersOn(scenario);
   tradingApi(scenario);
   await openOrderWindow(page, scenario);
   lastTrade(scenario, BASE);
-  await presetKindButton(page, "금액").click();
   await amountPresetButtons(page).first().click();
   await expect(quantityField(page)).toBeVisible();
   await expect(page.getByRole("textbox", { name: "금액" })).toHaveCount(0);
@@ -807,7 +793,6 @@ test("수량 칸 가운데에 숫자 아닌 글자를 쳐도 커서가 제자리
   await page.keyboard.type("a");
   await expect(field).toHaveValue("14");
   expect(await field.evaluate((element: HTMLInputElement) => element.selectionStart)).toBe(1);
-  await presetKindButton(page, "금액").click();
   await amountPresetButtons(page).last().click();
   await expect(field).toHaveValue("50000");
   expect(await field.evaluate((element: HTMLInputElement) => element.scrollWidth <= element.clientWidth)).toBe(true);
@@ -819,36 +804,19 @@ test("폭 420px에서 6·7자리 수량이 잘리지 않고 창이 넓으면 수
   await openOrderWindow(page, scenario);
   const field = quantityField(page);
   await win(page).evaluate((element) => { element.style.flex = "none"; element.style.width = "420px"; });
-  for (const kind of ["수량", "금액"] as const) {
-    await presetKindButton(page, kind).click();
-    const width = (await field.boundingBox())!.width;
-    expect(width).toBeGreaterThanOrEqual(60);
-    expect(width).toBeLessThanOrEqual(84);
-    for (const digits of ["100000", "1000000"]) {
-      await field.fill(digits);
-      await expect(field).toHaveValue(digits);
-      expect(await field.evaluate((element: HTMLInputElement) => element.scrollWidth <= element.clientWidth)).toBe(true);
-    }
+  const width = (await field.boundingBox())!.width;
+  expect(width).toBeGreaterThanOrEqual(60);
+  expect(width).toBeLessThanOrEqual(84);
+  for (const digits of ["100000", "1000000"]) {
+    await field.fill(digits);
+    await expect(field).toHaveValue(digits);
+    expect(await field.evaluate((element: HTMLInputElement) => element.scrollWidth <= element.clientWidth)).toBe(true);
   }
-  await win(page).evaluate((element) => { element.style.width = "380px"; });
+  await win(page).evaluate((element) => { element.style.width = "340px"; });
   await expect.poll(async () => (await field.boundingBox())!.width).toBeLessThan(84);
   expect((await field.boundingBox())!.width).toBeGreaterThanOrEqual(60);
   await win(page).evaluate((element) => { element.style.width = "600px"; });
   await expect.poll(async () => Math.round((await field.boundingBox())!.width)).toBe(84);
-});
-
-test("수량·금액 단추는 프리셋 묶음만 바꾸고 수량 칸 값은 그대로다", async ({ page, scenario }) => {
-  ordersOn(scenario);
-  tradingApi(scenario);
-  await openOrderWindow(page, scenario);
-  await quantityField(page).fill("37");
-  await expect(amountPresetButtons(page)).toHaveText(["10", "50", "100", "500"]);
-  await presetKindButton(page, "금액").click();
-  await expect(amountPresetButtons(page)).toHaveText(["100만", "500만", "1,000만", "5,000만"]);
-  await expect(quantityField(page)).toHaveValue("37");
-  await presetKindButton(page, "수량").click();
-  await expect(amountPresetButtons(page)).toHaveText(["10", "50", "100", "500"]);
-  await expect(quantityField(page)).toHaveValue("37");
 });
 
 test("현재가보다 작은 금액이면 수량 칸이 0이 되고 주문은 수량을 입력하라고 막힌다", async ({ page, scenario }) => {
@@ -859,7 +827,6 @@ test("현재가보다 작은 금액이면 수량 칸이 0이 되고 주문은 �
   await openSettings(page);
   await page.getByRole("textbox", { name: "금액 프리셋 1" }).fill("1");
   await page.keyboard.press("Escape");
-  await presetKindButton(page, "금액").click();
   await expect(amountPresetButtons(page).first()).toHaveText("1만");
   await amountPresetButtons(page).first().click();
   await expect(quantityField(page)).toHaveValue("0");
@@ -1402,56 +1369,55 @@ const orderTab = (page: Page, id: string) => page.locator(`[role=tab][data-windo
 const keptEntries = (scenario: Scenario) => scenario.documents.uiState()["orderEntries"];
 const entryKeyOf = (windowId: string, code = CODE) => `${DEFAULT_LAYOUT_ID}|${windowId}|${code}`;
 
-async function expectStart(page: Page, quantity: string, kind: "수량" | "금액") {
+async function expectStart(page: Page, quantity: string) {
   await expect(quantityField(page)).toHaveValue(quantity);
-  await expect(presetKindButton(page, kind)).toHaveAttribute("aria-pressed", "true");
 }
 
-async function placeKept(page: Page, api: ReturnType<typeof tradingApi>, kind: "수량" | "금액", quantity: string, count: number) {
-  await presetKindButton(page, kind).click();
+async function placeKept(page: Page, api: ReturnType<typeof tradingApi>, quantity: string, count: number) {
   await quantityField(page).fill(quantity);
   await cellAt(page, "buy", BASE).dblclick();
   await pollSaved(() => writesTo(api, "place")).toHaveLength(count);
 }
 
-test("수량 줄에 수량·유지 라벨이 없고 마지막 주문 수량 유지 설정은 그대로 켜고 끈다", async ({ page, scenario }) => {
+test("수량 줄에 수량·유지 라벨과 수량 방식 선택이 없고 마지막 주문 수량 유지 설정은 그대로 켜고 끈다", async ({ page, scenario }) => {
   ordersOn(scenario);
   tradingApi(scenario);
   await openOrderWindow(page, scenario);
   const row = page.getByTestId("order-quantity-row");
   await expect(row.getByRole("textbox", { name: "수량", exact: true })).toBeVisible();
   await expect(row.locator("label")).toHaveCount(0);
+  await expect(row.getByRole("group", { name: "수량 방식" })).toHaveCount(0);
   await expect(row).not.toContainText("유지");
   await openSettings(page);
   const keep = page.getByRole("checkbox", { name: /마지막 주문 수량 유지/ });
   await expect(keep).toBeChecked();
   const order = await page.getByTestId("order-settings").locator("input").evaluateAll((inputs) => inputs.map((input) => input.closest("label")?.textContent ?? input.getAttribute("aria-label")));
-  expect(order.slice(0, 9)).toEqual(["프리셋 1", "프리셋 2", "프리셋 3", "프리셋 4", "금액 프리셋 1", "금액 프리셋 2", "금액 프리셋 3", "금액 프리셋 4", expect.stringContaining("마지막 주문 수량 유지")]);
+  expect(order.slice(0, 5)).toEqual(["금액 프리셋 1", "금액 프리셋 2", "금액 프리셋 3", "금액 프리셋 4", expect.stringContaining("마지막 주문 수량 유지")]);
   await keep.uncheck();
   await pollSaved(() => scenario.documents.uiState()["orderSettings"]).toMatchObject({ keepLastEntry: false });
 });
 
-test("유지가 켜져 있으면 A 종목에서 금액 방식·수량 37로 주문하고 B 종목으로 바꾸면 B는 10·수량으로 시작하고, A로 돌아오거나 새로 고치면 금액 방식과 37이다", async ({ page, scenario }) => {
+test("유지가 켜져 있으면 A 종목에서 수량 37로 주문하고 B 종목으로 바꾸면 B는 10으로 시작하고, A로 돌아오거나 새로 고치면 37이다", async ({ page, scenario }) => {
   ordersOn(scenario);
   const api = tradingApi(scenario);
   await openOrderWindow(page, scenario, true);
-  await expectStart(page, "10", "수량");
-  await placeKept(page, api, "금액", "37", 1);
+  await expectStart(page, "10");
+  await placeKept(page, api, "37", 1);
   expect(writesTo(api, "place")[0]!.body).toMatchObject({ quantity: 37 });
-  await pollSaved(() => keptEntries(scenario)).toMatchObject({ [entryKeyOf("order")]: { presetKind: "amountPresets", quantity: 37 } });
+  await pollSaved(() => keptEntries(scenario)).toMatchObject({ [entryKeyOf("order")]: { quantity: 37 } });
   await cell(page, 2).click();
   await expect(win(page)).toHaveAttribute("data-symbol", OTHER);
-  await expectStart(page, "10", "수량");
+  await expectStart(page, "10");
   await cell(page, 1).click();
   await expect(win(page)).toHaveAttribute("data-symbol", CODE);
-  await expectStart(page, "37", "금액");
+  await expectStart(page, "37");
   await page.reload();
   await expect(win(page)).toBeVisible();
   await expect(win(page)).toHaveAttribute("data-symbol", CODE);
-  await expectStart(page, "37", "금액");
+  await expectStart(page, "37");
 });
 
-test("호가주문창 둘에서 같은 종목: 1번 창에서 37로 주문해도 2번 창은 10·수량으로 시작한다", async ({ page, scenario }) => {
+test("호가주문창 둘에서 같은 종목: 1번 창에서 37로 주문해도 2번 창은 10으로 시작한다", async ({ page, scenario }) => {
   ordersOn(scenario);
   const api = tradingApi(scenario);
   await openOrderWindow(page, scenario);
@@ -1461,95 +1427,78 @@ test("호가주문창 둘에서 같은 종목: 1번 창에서 37로 주문해도
   await pollSaved(() => scenario.documents.layout(DEFAULT_LAYOUT_ID).windows.some((w) => w.id === "order-2")).toBe(true);
   await orderTab(page, "order").click();
   await expect(win(page)).toBeVisible();
-  await placeKept(page, api, "수량", "37", 1);
+  await placeKept(page, api, "37", 1);
   await pollSaved(() => keptEntries(scenario)).toMatchObject({ [entryKeyOf("order")]: { quantity: 37 } });
   await page.reload();
   await expect(cell(page)).toHaveAttribute("aria-busy", "false");
   await orderTab(page, "order-2").click();
   await expect(win(page)).toBeVisible();
-  await expectStart(page, "10", "수량");
+  await expectStart(page, "10");
   await orderTab(page, "order").click();
-  await expectStart(page, "37", "수량");
+  await expectStart(page, "37");
 });
 
-test("복제한 호가주문창은 원본의 기억 없이 10·수량으로 시작한다", async ({ page, scenario }) => {
+test("복제한 호가주문창은 원본의 기억 없이 10으로 시작한다", async ({ page, scenario }) => {
   ordersOn(scenario);
   const api = tradingApi(scenario);
   await openOrderWindow(page, scenario);
-  await placeKept(page, api, "금액", "37", 1);
-  await pollSaved(() => keptEntries(scenario)).toMatchObject({ [entryKeyOf("order")]: { presetKind: "amountPresets", quantity: 37 } });
+  await placeKept(page, api, "37", 1);
+  await pollSaved(() => keptEntries(scenario)).toMatchObject({ [entryKeyOf("order")]: { quantity: 37 } });
   await orderTab(page, "order").click({ button: "right" });
   await page.getByRole("menu", { name: "창 배치" }).getByRole("menuitem", { name: "복제" }).click();
   await expect(orderTab(page, "order-2")).toHaveAttribute("aria-selected", "true");
   await expect(win(page)).toBeVisible();
-  await expectStart(page, "10", "수량");
+  await expectStart(page, "10");
 });
 
-test("유지를 끄면 종목을 바꿀 때 10과 수량 방식으로 시작한다", async ({ page, scenario }) => {
+test("유지를 끄면 종목을 바꿀 때 10으로 시작한다", async ({ page, scenario }) => {
   ordersOn(scenario);
   const api = tradingApi(scenario);
   await openOrderWindow(page, scenario, true);
-  await placeKept(page, api, "금액", "37", 1);
+  await placeKept(page, api, "37", 1);
   await pollSaved(() => keptEntries(scenario)).toMatchObject({ [entryKeyOf("order")]: { quantity: 37 } });
   await openSettings(page);
   await page.getByRole("checkbox", { name: /마지막 주문 수량 유지/ }).uncheck();
   await page.keyboard.press("Escape");
   await cell(page, 2).click();
   await expect(win(page)).toHaveAttribute("data-symbol", OTHER);
-  await expectStart(page, "10", "수량");
+  await expectStart(page, "10");
   await cell(page, 1).click();
   await expect(win(page)).toHaveAttribute("data-symbol", CODE);
-  await expectStart(page, "10", "수량");
-  await placeKept(page, api, "금액", "5", 2);
+  await expectStart(page, "10");
+  await placeKept(page, api, "5", 2);
   expect(keptEntries(scenario)).toMatchObject({ [entryKeyOf("order")]: { quantity: 37 } });
 });
 
-test("유지가 켜져 있으면 주문 없이 수량·금액 버튼과 프리셋을 누르기만 해도 창·종목별로 유지된다", async ({ page, scenario }) => {
+test("유지가 켜져 있으면 주문 없이 금액 프리셋을 누르기만 해도 창·종목별로 유지된다", async ({ page, scenario }) => {
   ordersOn(scenario);
   const api = tradingApi(scenario);
   await openOrderWindow(page, scenario, true);
   lastTrade(scenario, BASE);
-  await expectStart(page, "10", "수량");
-  await presetKindButton(page, "금액").click();
+  await expectStart(page, "10");
   await amountPresetButtons(page).first().click();
-  await expectStart(page, "14", "금액");
+  await expectStart(page, "14");
   expect(writesTo(api, "place")).toHaveLength(0);
-  await pollSaved(() => keptEntries(scenario)).toMatchObject({ [entryKeyOf("order")]: { presetKind: "amountPresets", quantity: 14 } });
+  await pollSaved(() => keptEntries(scenario)).toMatchObject({ [entryKeyOf("order")]: { quantity: 14 } });
 
   await cell(page, 2).click();
   await expect(win(page)).toHaveAttribute("data-symbol", OTHER);
-  await expectStart(page, "10", "수량");
-  await amountPresetButtons(page).nth(1).click();
-  await expectStart(page, "50", "수량");
-  await pollSaved(() => keptEntries(scenario)).toMatchObject({ [entryKeyOf("order", OTHER)]: { presetKind: "sharePresets", quantity: 50 } });
+  await expectStart(page, "10");
+  await quantityField(page).fill("50");
+  await expectStart(page, "50");
+  await pollSaved(() => keptEntries(scenario)).toMatchObject({ [entryKeyOf("order", OTHER)]: { quantity: 50 } });
 
   await cell(page, 1).click();
   await expect(win(page)).toHaveAttribute("data-symbol", CODE);
-  await expectStart(page, "14", "금액");
+  await expectStart(page, "14");
 
   await page.reload();
   await expect(win(page)).toBeVisible();
   await expect(win(page)).toHaveAttribute("data-symbol", CODE);
-  await expectStart(page, "14", "금액");
+  await expectStart(page, "14");
   await cell(page, 2).click();
   await expect(win(page)).toHaveAttribute("data-symbol", OTHER);
-  await expectStart(page, "50", "수량");
-});
-
-test("수량 칸이 비었을 때 수량·금액을 바꿔도 직전 양수 수량과 새 방식이 유지된다", async ({ page, scenario }) => {
-  ordersOn(scenario);
-  tradingApi(scenario);
-  await openOrderWindow(page, scenario, true);
-  await amountPresetButtons(page).nth(1).click();
-  await pollSaved(() => keptEntries(scenario)).toMatchObject({ [entryKeyOf("order")]: { presetKind: "sharePresets", quantity: 50 } });
-  await quantityField(page).fill("");
-  await presetKindButton(page, "금액").click();
-  await pollSaved(() => keptEntries(scenario)).toMatchObject({ [entryKeyOf("order")]: { presetKind: "amountPresets", quantity: 50 } });
-  await cell(page, 2).click();
-  await expect(win(page)).toHaveAttribute("data-symbol", OTHER);
-  await cell(page, 1).click();
-  await expect(win(page)).toHaveAttribute("data-symbol", CODE);
-  await expectStart(page, "50", "금액");
+  await expectStart(page, "50");
 });
 
 test("정정·취소는 유지 값을 바꾸지 않고 막힌 주문 뒤 줄여 보내기는 줄인 수량을 남긴다", async ({ page, scenario }) => {
@@ -1557,22 +1506,20 @@ test("정정·취소는 유지 값을 바꾸지 않고 막힌 주문 뒤 줄여 
   const api = tradingApi(scenario, [openOrder("0000001", "buy", 69_800, 5)]);
   api.orderable = { cashAmount: 700_000, cashQuantity: 10 };
   await openOrderWindow(page, scenario);
-  await placeKept(page, api, "수량", "7", 1);
-  await pollSaved(() => keptEntries(scenario)).toMatchObject({ [entryKeyOf("order")]: { presetKind: "sharePresets", quantity: 7 } });
+  await placeKept(page, api, "7", 1);
+  await pollSaved(() => keptEntries(scenario)).toMatchObject({ [entryKeyOf("order")]: { quantity: 7 } });
 
   await dragChip(page, chipAt(page, "buy", 69_800), await center(cellAt(page, "buy", 69_900)));
   await pollSaved(() => writesTo(api, "modify")).toHaveLength(1);
   await page.getByTestId("account-tab-open").click();
   await page.getByTestId("account-open-order").first().getByRole("button", { name: "취소" }).click();
   await pollSaved(() => writesTo(api, "cancel")).toHaveLength(1);
-  expect(keptEntries(scenario)).toEqual({ [entryKeyOf("order")]: expect.objectContaining({ presetKind: "sharePresets", quantity: 7 }) });
+  expect(keptEntries(scenario)).toEqual({ [entryKeyOf("order")]: expect.objectContaining({ quantity: 7 }) });
 
   await page.keyboard.press("Escape");
   await expect(page.getByTestId("account-panel")).toHaveCount(0);
-  await presetKindButton(page, "금액").click();
-  await expect(presetKindButton(page, "금액")).toHaveAttribute("aria-pressed", "true");
   await quantityField(page).fill("11");
-  await pollSaved(() => keptEntries(scenario)).toMatchObject({ [entryKeyOf("order")]: { presetKind: "amountPresets", quantity: 11 } });
+  await pollSaved(() => keptEntries(scenario)).toMatchObject({ [entryKeyOf("order")]: { quantity: 11 } });
   await cellAt(page, "buy", BASE).dblclick();
   await expect(status(page)).toContainText("최대 10");
   expect(writesTo(api, "place")).toHaveLength(1);
@@ -1580,7 +1527,7 @@ test("정정·취소는 유지 값을 바꾸지 않고 막힌 주문 뒤 줄여 
   await page.getByTestId("order-status-action").click();
   await pollSaved(() => writesTo(api, "place")).toHaveLength(2);
   expect(writesTo(api, "place")[1]!.body).toMatchObject({ quantity: 10 });
-  await pollSaved(() => keptEntries(scenario)).toMatchObject({ [entryKeyOf("order")]: { presetKind: "amountPresets", quantity: 10 } });
+  await pollSaved(() => keptEntries(scenario)).toMatchObject({ [entryKeyOf("order")]: { quantity: 10 } });
 });
 
 const SELL_HOLDING: TradingHolding = { ...HOLDING, quantity: 120, sellableQuantity: 120 };
@@ -1594,7 +1541,6 @@ test("매도 50이 걸린 120 보유 종목에서 매입수량을 누르면 70�
   await expect(page.getByTestId("summary-quantity")).toBeEnabled();
   await page.getByTestId("summary-quantity").click();
   await expect(quantityField(page)).toHaveValue("70");
-  await expect(presetKindButton(page, "수량")).toHaveAttribute("aria-pressed", "true");
 });
 
 test("매도 주문이 없으면 남은 수량 표시가 없다", async ({ page, scenario }) => {

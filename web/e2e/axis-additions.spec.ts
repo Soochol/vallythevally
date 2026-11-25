@@ -48,8 +48,7 @@ async function addIndicator(page: Page, label: string, name: string) {
   const dialog = page.getByRole("dialog", { name: "지표·비교 입력창", exact: true });
   await dialog.getByRole("combobox", { name: "지표·비교 찾기" }).fill(label);
   await dialog.getByRole("option", { name: `${name} 추가 후보`, exact: true }).click();
-  await dialog.getByRole("button", { name: `${name} 추가`, exact: true }).click();
-  await page.keyboard.press("Escape");
+  await dialog.getByRole("button", { name: "입력창 닫기", exact: true }).click();
   await expect(page.locator("[data-indicator-row]").filter({ hasText: name }).last()).toBeVisible();
 }
 
@@ -93,8 +92,7 @@ test("비교 종목 추가 뒤 오류 없이 차트를 계속 그리고 축 폭 
   await dialog.getByRole("tab", { name: "비교 종목", exact: true }).click();
   await dialog.getByRole("combobox", { name: "지표·비교 찾기" }).fill("삼성SDI");
   await dialog.getByRole("option", { name: /삼성SDI/ }).first().click();
-  await dialog.getByRole("button", { name: /^삼성SDI.*추가$/ }).click();
-  await page.keyboard.press("Escape");
+  await dialog.getByRole("button", { name: "입력창 닫기", exact: true }).click();
   await expect(page.locator('[data-compare-row="006400"]')).toBeVisible();
   await expect.poll(() => plotted(page)).toBe(before + 1);
   await assertDrawing(page, errors);

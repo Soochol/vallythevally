@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { MAX_ORDER_ENTRIES, NO_ORDER_ENTRIES, type OrderEntry, orderEntryKey, parseOrderEntries, withOrderEntry } from "./orderEntries";
 
-const entry = (quantity: number, usedAt: number, presetKind: OrderEntry["presetKind"] = "sharePresets"): OrderEntry => ({ presetKind, quantity, usedAt });
+const entry = (quantity: number, usedAt: number): OrderEntry => ({ quantity, usedAt });
 
 describe("호가주문 기억", () => {
   it("레이아웃이 다르면 같은 창 ID와 종목도 따로다", () => {
@@ -21,17 +21,16 @@ describe("호가주문 기억", () => {
 
   it("틀린 항목은 버리고 맞는 항목은 읽는다", () => {
     const raw = {
-      ok: { presetKind: "amountPresets", quantity: 37, usedAt: 5 },
-      noKind: { presetKind: "other", quantity: 37, usedAt: 5 },
-      zero: { presetKind: "sharePresets", quantity: 0, usedAt: 5 },
-      fraction: { presetKind: "sharePresets", quantity: 1.5, usedAt: 5 },
-      text: { presetKind: "sharePresets", quantity: "7", usedAt: 5 },
-      noTime: { presetKind: "sharePresets", quantity: 7 },
-      infinite: { presetKind: "sharePresets", quantity: 7, usedAt: Infinity },
+      ok: { quantity: 37, usedAt: 5 },
+      zero: { quantity: 0, usedAt: 5 },
+      fraction: { quantity: 1.5, usedAt: 5 },
+      text: { quantity: "7", usedAt: 5 },
+      noTime: { quantity: 7 },
+      infinite: { quantity: 7, usedAt: Infinity },
       nothing: null,
       array: [],
     };
-    expect(parseOrderEntries(raw)).toEqual({ ok: { presetKind: "amountPresets", quantity: 37, usedAt: 5 } });
+    expect(parseOrderEntries(raw)).toEqual({ ok: { quantity: 37, usedAt: 5 } });
   });
 
   it("읽을 때 모르는 필드는 떼어 낸다", () => {
