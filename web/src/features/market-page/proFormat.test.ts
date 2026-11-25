@@ -10,6 +10,7 @@ import {
   formatReceiptDate,
   formatRrgIndex,
   formatShares,
+  orderbookPressureOf,
   projectRrgPoint,
   rrgArrowPolygon,
   rrgQuadrantCaption,
@@ -89,12 +90,14 @@ describe("proFormat", () => {
     expect(formatShares(125_000)).toBe("12.5만주");
     expect(signedShares(150_000)).toBe("+15.0만주");
     expect(signedShares(-25_000)).toBe("−2.5만주");
+    expect(orderbookPressureOf({ totalBidRemaining: 0, totalAskRemaining: 0, buyPressurePct: 0 })).toEqual({ buyPct: 0, sellPct: 0 });
+    expect(orderbookPressureOf({ totalBidRemaining: 300, totalAskRemaining: 200, buyPressurePct: 60 })).toEqual({ buyPct: 60, sellPct: 40 });
 
     expect(disclosureCategoryLabel("contract")).toBe("수주·계약");
     expect(disclosureCategoryLabel("capital")).toBe("증자·CB");
-    const radar = { totalMatched: 3, counts: { contract: 1, shareholder: 1, earnings: 1, capital: 0 } };
-    expect(disclosureCountFor(radar, "all")).toBe(3);
-    expect(disclosureCountFor(radar, "contract")).toBe(1);
+    expect(disclosureCountFor(sampleDisclosures, "all")).toBe(3);
+    expect(disclosureCountFor(sampleDisclosures, "contract")).toBe(1);
+    expect(disclosureCountFor(sampleDisclosures, "capital")).toBe(0);
     expect(filterDisclosures(sampleDisclosures, "all")).toHaveLength(3);
     expect(filterDisclosures(sampleDisclosures, "shareholder").map((row) => row.code)).toEqual(["005930"]);
     expect(formatReceiptDate("20261109")).toBe("2026.11.09");

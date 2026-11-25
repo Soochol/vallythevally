@@ -1,5 +1,6 @@
 import { useSearchParams } from "react-router";
 import type { Market } from "../../api/generated/Market";
+import type { MarketOverviewIndexCard } from "../../api/generated/MarketOverviewIndexCard";
 import type { MarketOverviewPeriod } from "../../api/generated/MarketOverviewPeriod";
 import type { MarketOverviewPhase } from "../../api/generated/MarketOverviewPhase";
 import type { MarketOverviewScope } from "../../api/generated/MarketOverviewScope";
@@ -9,6 +10,7 @@ import { DataAgeNote } from "../data-age/DataAgeNote";
 import { formatClock } from "../market-window/format";
 import { EmptyState } from "../overlay/State";
 import { PageFrame } from "../pages/PageFrame";
+import { useOverviewOn } from "../status/marketFeed";
 import { openSystemSettings } from "../system-settings/open";
 import { Segmented } from "../ui/Segmented";
 import { BreadthXrayCard } from "./BreadthXrayCard";
@@ -48,11 +50,43 @@ export const periodOf = (value: string | null): MarketOverviewPeriod => (value =
 
 export const activeMarketOf = (scope: MarketOverviewScope): Market => (scope === "kosdaq" ? "kosdaq" : "kospi");
 
-function Freshness({ market, enabled }: { market: Market; enabled: boolean }) {
-  const query = useMarketIndex(market, { enabled });
-  const card = query.data;
-  if (card === undefined) return <span>{query.isError ? "받지 못함" : "자료를 기다립니다"}</span>;
-  const { phase, receivedAt } = card.context;
+export interface ResolvedFreshness {
+  phase: MarketOverviewPhase | null;
+  receivedAt: number | null;
+  failed: boolean;
+}
+
+export function resolveFreshness(
+  scope: MarketOverviewScope,
+  kospi: { data: MarketOverviewIndexCard | undefined; isError: boolean },
+  kosdaq: { data: MarketOverviewIndexCard | undefined; isError: boolean },
+): ResolvedFreshness {
+  const candidates = scope === "kospi" ? [kospi] : scope === "kosdaq" ? [kosdaq] : [kospi, kosdaq];
+  const cards = candidates
+    .map((entry) => entry.data)
+    .filter((entry): entry is MarketOverviewIndexCard => entry !== undefined);
+  if (cards.length === 0) {
+    return {
+      phase: null,
+      receivedAt: null,
+      failed: candidates.every((entry) => entry.isError),
+    };
+  }
+  const latest = cards.reduce((best, current) => {
+    const bestAt = best.context.receivedAt ?? Number.NEGATIVE_INFINITY;
+    const currentAt = current.context.receivedAt ?? Number.NEGATIVE_INFINITY;
+    return currentAt > bestAt ? current : best;
+  });
+  return {
+    phase: latest.context.phase,
+    receivedAt: latest.context.receivedAt,
+    failed: false,
+  };
+}
+
+function Freshness({ resolved }: { resolved: ResolvedFreshness }) {
+  if (resolved.phase === null) return <span>{resolved.failed ? "받지 못함" : "자료를 기다립니다"}</span>;
+  const { phase, receivedAt } = resolved;
   return (
     <>
       <span data-phase={phase}>{PHASE_LABEL[phase]}</span>
@@ -67,6 +101,8 @@ export function MarketPage() {
   const [params, setParams] = useSearchParams();
   const link = useFeedLink();
   const connected = link === null || link.state === "connected";
+  const indexOn = useOverviewOn("index");
+  const indexEnabled = connected && indexOn;
   const scope = scopeOf(params.get("scope"), params.get("market"));
   const activeMarket = activeMarketOf(scope);
   const period = periodOf(params.get("period"));
@@ -77,15 +113,16 @@ export function MarketPage() {
     query.set("period", next.period ?? period);
     setParams(query, { replace: true });
   };
-  const indexQuery = useMarketIndex(activeMarket, { enabled: connected });
-  const card = indexQuery.data;
+  const kospiQuery = useMarketIndex("kospi", { enabled: indexEnabled && scope !== "kosdaq" });
+  const kosdaqQuery = useMarketIndex("kosdaq", { enabled: indexEnabled && scope !== "kospi" });
+  const resolved = resolveFreshness(scope, kospiQuery, kosdaqQuery);
   const controls = (
     <div className="mk-controls">
       <Segmented label="기간" mode="pressed" value={period} options={PERIODS.map((id) => ({ value: id, label: `${id}일` }))} onChange={(next) => change({ period: next })} />
     </div>
   );
   return (
-    <PageFrame title="시장 종합" freshness={connected ? <Freshness market={activeMarket} enabled={connected} /> : null} fresh={connected ? { receivedAt: card?.context.receivedAt ?? null, live: card === undefined ? undefined : card.context.phase !== "closed", failed: card === undefined && indexQuery.isError } : undefined} actions={controls}>
+    <PageFrame title="시장 종합" freshness={connected ? <Freshness resolved={resolved} /> : null} fresh={connected ? { receivedAt: resolved.receivedAt, live: resolved.phase === null ? undefined : resolved.phase !== "closed", failed: resolved.failed } : undefined} actions={controls}>
       {!connected ? (
         <div className="mk-before-connect"><EmptyState title="키움 연결 전입니다" action="시스템 설정 열기" onAction={() => openSystemSettings("kiwoom")}>{link?.message && <p>{link.message}</p>}</EmptyState></div>
       ) : (

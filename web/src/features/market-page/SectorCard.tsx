@@ -4,8 +4,9 @@ import type { MarketOverviewSector } from "../../api/generated/MarketOverviewSec
 import type { MarketOverviewSectorFlow } from "../../api/generated/MarketOverviewSectorFlow";
 import { useMarketSectors, useMarketThemes } from "../../api/marketOverview";
 import { legendStops, needsStrongInk, rateFill, rateSide, type ColorRange } from "../../lib/heat/colors";
+import { useMarketSource } from "../../stores/kiwoomLink";
 import { useElementSize } from "../heatmap-page/useElementSize";
-import { useOverviewOn } from "../status/marketFeed";
+import { feedBrokerOf, useOverviewOn } from "../status/marketFeed";
 import { Segmented, type SegmentedOption } from "../ui/Segmented";
 import { CardError, CardShell, EmptyNote, FeedUnavailable, Loaded, PartView } from "./CardPart";
 import { ThemeRotationPanel } from "./ThemeRotationPanel";
@@ -98,9 +99,12 @@ function SectorFlowDetail({ sector, flow, whole }: { sector: MarketOverviewSecto
 
 export function SectorCard({ market, enabled }: { market: Market; enabled: boolean }) {
   const on = useOverviewOn("sectors");
+  const streaksOn = useOverviewOn("streaks");
+  const marketSource = useMarketSource();
+  const themesOn = streaksOn && feedBrokerOf(marketSource) !== "kis";
   const [mode, setMode] = useState<SectorCardMode>("sectors");
   const query = useMarketSectors(market, { enabled: enabled && on });
-  const themesQuery = useMarketThemes({ enabled: enabled && mode === "themes" });
+  const themesQuery = useMarketThemes({ enabled: enabled && mode === "themes" && themesOn });
   const [picked, setPicked] = useState<string | null>(null);
   return (
     <CardShell
@@ -117,10 +121,10 @@ export function SectorCard({ market, enabled }: { market: Market; enabled: boole
           )}
         </>
       }
-      source={mode === "themes" ? themesQuery.data?.source : query.data?.context.source}
+      source={mode === "themes" ? (themesOn ? themesQuery.data?.source : undefined) : query.data?.context.source}
     >
       {mode === "themes" ? (
-        <ThemeRotationPanel enabled={enabled && mode === "themes"} />
+        themesOn ? <ThemeRotationPanel enabled={enabled && mode === "themes"} /> : <FeedUnavailable />
       ) : !on ? (
         <FeedUnavailable />
       ) : (

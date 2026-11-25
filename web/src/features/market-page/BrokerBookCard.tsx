@@ -7,7 +7,7 @@ import { useSendSymbol } from "../pages/sendSymbol";
 import { CardShell, EmptyNote, Loaded, PartView } from "./CardPart";
 import { formatPercent, scopeLabel } from "./derivedFormat";
 import { signedEok, signedRate, toneOf } from "./marketFormat";
-import { formatShares, signedShares } from "./proFormat";
+import { formatShares, orderbookPressureOf, signedShares } from "./proFormat";
 
 const PRO_SKELETON = { shape: "card", minHeight: "var(--mk-skeleton-pro)" } as const;
 
@@ -97,8 +97,7 @@ function FlowLeaderList({
 }
 
 function BrokerBookBody({ book }: { book: MarketOverviewBrokerBook }) {
-  const buyPct = Math.min(100, Math.max(0, book.buyPressurePct));
-  const sellPct = Math.round((100 - buyPct) * 10) / 10;
+  const { buyPct, sellPct } = orderbookPressureOf(book);
 
   return (
     <div className="mk-book-wrap">

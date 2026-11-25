@@ -11,8 +11,9 @@ import type { RankingPage } from "../../api/generated/RankingPage";
 import type { RankingRow } from "../../api/generated/RankingRow";
 import { useMarketRanking, useMarketStreaks, useMarketVi } from "../../api/marketOverview";
 import { formatPrice } from "../../lib/format";
+import { useMarketSource } from "../../stores/kiwoomLink";
 import { useSendSymbol } from "../pages/sendSymbol";
-import { useOverviewOn } from "../status/marketFeed";
+import { feedBrokerOf, useOverviewOn } from "../status/marketFeed";
 import { Tabs, panelDomId } from "../ui/Tabs";
 import { CardShell, EmptyNote, FeedUnavailable, Loaded, PartView } from "./CardPart";
 import { formatViTime, MARKET_LABEL, viKindLabel } from "./derivedFormat";
@@ -184,19 +185,21 @@ function ViTable({ query }: { query: UseQueryResult<MarketOverviewViCard> }) {
 export function StockTabs({ scope, market, enabled }: { scope: MarketOverviewScope; market: Market; enabled: boolean }) {
   const [tab, setTab] = useState<StockTab>("value");
   const streaksOn = useOverviewOn("streaks");
+  const marketSource = useMarketSource();
+  const kiwoomFeedOn = streaksOn && feedBrokerOf(marketSource) !== "kis";
   const streakTab = tab === "foreign" || tab === "institution";
   const viTab = tab === "vi";
   const rankingTab = !streakTab && !viTab;
   const streaks = useMarketStreaks(market, { enabled: enabled && streaksOn });
-  const vi = useMarketVi(scope, { enabled: enabled && viTab });
+  const vi = useMarketVi(scope, { enabled: enabled && viTab && kiwoomFeedOn });
   const ranking = useMarketRanking(rankingOf(rankingTab ? tab : "value", scope), { enabled: enabled && rankingTab });
-  const source = viTab ? vi.data?.source : streakTab ? streaks.data?.context.source : ranking.data?.source;
+  const source = viTab ? (kiwoomFeedOn ? vi.data?.source : undefined) : streakTab ? (streaksOn ? streaks.data?.context.source : undefined) : ranking.data?.source;
   return (
     <CardShell title="종목" card="stocks" source={source}>
       <Tabs label="종목 보기" idPrefix="mk" className="mk-tabs" items={STOCK_TABS.map((entry) => ({ id: entry.id, label: entry.label }))} value={tab} onChange={(id) => setTab(id as StockTab)} />
       <div role="tabpanel" id={panelDomId("mk", tab)} aria-labelledby={`mk-tab-${tab}`} className="mk-stock-panel">
         {viTab ? (
-          <ViTable query={vi} />
+          kiwoomFeedOn ? <ViTable query={vi} /> : <FeedUnavailable />
         ) : streakTab ? (
           streaksOn ? <StreakTable query={streaks} subject={tab} /> : <FeedUnavailable />
         ) : (

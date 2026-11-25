@@ -26,7 +26,7 @@ function DisclosureRadarBody({ radar }: { radar: MarketOverviewDisclosureRadar }
     <div className="mk-disc-wrap">
       <div className="mk-disc-chips" role="group" aria-label="공시 유형 필터">
         {DISCLOSURE_FILTERS.map((entry) => {
-          const count = disclosureCountFor(radar, entry.id);
+          const count = disclosureCountFor(radar.items, entry.id);
           return (
             <button
               key={entry.id}
@@ -85,7 +85,7 @@ function DisclosureRadarBody({ radar }: { radar: MarketOverviewDisclosureRadar }
 
 export function DisclosureRadarCard({ scope, enabled }: { scope: MarketOverviewScope; enabled: boolean }) {
   const query = useMarketPro(scope, { enabled });
-  const totalMatched = query.data?.disclosures.status === "ok" ? query.data.disclosures.value.totalMatched : null;
+  const radar = query.data?.disclosures.status === "ok" ? query.data.disclosures.value : null;
 
   return (
     <CardShell
@@ -94,9 +94,11 @@ export function DisclosureRadarCard({ scope, enabled }: { scope: MarketOverviewS
       note={
         <>
           <span>{scopeLabel(scope)} 기준 · OpenDART 핵심 공시</span>
-          {totalMatched !== null && (
+          {radar !== null && (
             <span className="mk-pill-badge" data-testid="disclosure-total">
-              총 {formatCount(totalMatched)}건
+              {radar.totalMatched > radar.items.length
+                ? `총 ${formatCount(radar.totalMatched)}건 중 최근 ${formatCount(radar.items.length)}건`
+                : `총 ${formatCount(radar.totalMatched)}건`}
             </span>
           )}
         </>

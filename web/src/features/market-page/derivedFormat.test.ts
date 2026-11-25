@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { attributionBarPercent, bucketTone, formatPercent, formatViTime, maSparklinePath, scopeLabel, thrustToneOf, viKindLabel } from "./derivedFormat";
-import { activeMarketOf, scopeOf } from "./MarketPage";
+import type { MarketOverviewIndexCard } from "../../api/generated/MarketOverviewIndexCard";
+import { attributionBarPercent, bucketTone, formatPercent, formatViTime, maSparklinePath, maSparklinePoints, scopeLabel, thrustToneOf, viKindLabel } from "./derivedFormat";
+import { activeMarketOf, resolveFreshness, scopeOf } from "./MarketPage";
 
 describe("derivedFormat", () => {
   it("범위 이름과 URL 해석을 처리한다", () => {
@@ -41,6 +42,11 @@ describe("derivedFormat", () => {
     expect(thrustToneOf(35)).toBe("down");
     expect(thrustToneOf(50)).toBe("flat");
     expect(maSparklinePath([], 280, 68)).toBe("");
+    expect(maSparklinePoints([], 280, 68)).toEqual([]);
+    const singlePoints = maSparklinePoints([{ date: "2026-11-09", above20Pct: 50 }], 280, 68);
+    expect(singlePoints).toEqual([{ x: 140, y: 34 }]);
+    const singlePath = maSparklinePath([{ date: "2026-11-09", above20Pct: 50 }], 280, 68);
+    expect(singlePath).toBe("M136.0,34.0 L144.0,34.0");
     const path = maSparklinePath(
       [
         { date: "2026-11-05", above20Pct: 40 },
@@ -52,5 +58,51 @@ describe("derivedFormat", () => {
     );
     expect(path.startsWith("M")).toBe(true);
     expect(path.split("L")).toHaveLength(3);
+  });
+
+  it("전체 범위 신선도는 코스피·코스닥 중 하나라도 성공하면 실패로 표시하지 않는다", () => {
+    const makeCard = (market: "kospi" | "kosdaq", phase: MarketOverviewIndexCard["context"]["phase"], receivedAt: number): MarketOverviewIndexCard => ({
+      context: { market, phase, receivedAt, source: "kiwoom" },
+      index: {
+        status: "ok",
+        value: {
+          code: market === "kospi" ? "001" : "101",
+          name: market === "kospi" ? "코스피" : "코스닥",
+          level: 1000,
+          changeRate: 0,
+          breadth: { rising: 10, flat: 5, falling: 5, upperLimit: 0, lowerLimit: 0 },
+          tradeValueEok: 1000,
+          volatility: null,
+        },
+      },
+    });
+    const kospi = makeCard("kospi", "regular", 1000);
+    const kosdaq = makeCard("kosdaq", "afterMarket", 2000);
+
+    expect(resolveFreshness("all", { data: undefined, isError: true }, { data: kosdaq, isError: false })).toEqual({
+      phase: kosdaq.context.phase,
+      receivedAt: 2000,
+      failed: false,
+    });
+    expect(resolveFreshness("all", { data: kospi, isError: false }, { data: kosdaq, isError: false })).toEqual({
+      phase: kosdaq.context.phase,
+      receivedAt: 2000,
+      failed: false,
+    });
+    expect(resolveFreshness("all", { data: undefined, isError: true }, { data: undefined, isError: false })).toEqual({
+      phase: null,
+      receivedAt: null,
+      failed: false,
+    });
+    expect(resolveFreshness("all", { data: undefined, isError: true }, { data: undefined, isError: true })).toEqual({
+      phase: null,
+      receivedAt: null,
+      failed: true,
+    });
+    expect(resolveFreshness("kosdaq", { data: kospi, isError: false }, { data: undefined, isError: true })).toEqual({
+      phase: null,
+      receivedAt: null,
+      failed: true,
+    });
   });
 });

@@ -1,6 +1,6 @@
+import type { MarketOverviewBrokerBook } from "../../api/generated/MarketOverviewBrokerBook";
 import type { MarketOverviewDisclosureCategory } from "../../api/generated/MarketOverviewDisclosureCategory";
 import type { MarketOverviewDisclosureItem } from "../../api/generated/MarketOverviewDisclosureItem";
-import type { MarketOverviewDisclosureRadar } from "../../api/generated/MarketOverviewDisclosureRadar";
 import type { MarketOverviewRrgPoint } from "../../api/generated/MarketOverviewRrgPoint";
 import type { MarketOverviewRrgQuadrant } from "../../api/generated/MarketOverviewRrgQuadrant";
 import type { MarketOverviewRrgSeries } from "../../api/generated/MarketOverviewRrgSeries";
@@ -146,6 +146,17 @@ export function venueSplitOf(krxTradeValueEok: number, nxtTradeValueEok: number)
   return { krxPct, nxtPct, totalEok };
 }
 
+export function orderbookPressureOf(
+  book: Pick<MarketOverviewBrokerBook, "totalBidRemaining" | "totalAskRemaining" | "buyPressurePct">,
+): { buyPct: number; sellPct: number } {
+  if (book.totalBidRemaining <= 0 && book.totalAskRemaining <= 0) {
+    return { buyPct: 0, sellPct: 0 };
+  }
+  const buyPct = Math.min(100, Math.max(0, Number.isFinite(book.buyPressurePct) ? book.buyPressurePct : 0));
+  const sellPct = Math.round((100 - buyPct) * 10) / 10;
+  return { buyPct, sellPct };
+}
+
 export function formatShares(shares: number): string {
   const abs = Math.abs(shares);
   const sign = shares < 0 ? MINUS : "";
@@ -177,11 +188,11 @@ export const disclosureCategoryLabel = (category: MarketOverviewDisclosureCatego
   DISCLOSURE_CATEGORY_LABEL[category];
 
 export function disclosureCountFor(
-  radar: Pick<MarketOverviewDisclosureRadar, "totalMatched" | "counts">,
+  items: readonly MarketOverviewDisclosureItem[],
   filter: DisclosureFilter,
 ): number {
-  if (filter === "all") return radar.totalMatched;
-  return radar.counts[filter];
+  if (filter === "all") return items.length;
+  return items.reduce((sum, item) => (item.category === filter ? sum + 1 : sum), 0);
 }
 
 export function filterDisclosures(

@@ -18,7 +18,8 @@ import { fetchRanking } from "./rankings";
 
 export const MARKET_REFRESH_MS = 60_000;
 
-const refreshing = { staleTime: MARKET_REFRESH_MS, refetchInterval: MARKET_REFRESH_MS, retry: false, placeholderData: keepPreviousData } as const;
+const refreshingBase = { staleTime: MARKET_REFRESH_MS, refetchInterval: MARKET_REFRESH_MS, retry: false } as const;
+const refreshing = { ...refreshingBase, placeholderData: keepPreviousData } as const;
 
 const path = (route: string, market: Market, period?: MarketOverviewPeriod) =>
   `/api/market-overview/${route}?market=${market}${period === undefined ? "" : `&period=${period}`}`;
@@ -44,16 +45,31 @@ export const marketStreaksQuery = (market: Market) =>
   queryOptions({ queryKey: ["market-overview", "streaks", market], queryFn: ({ signal }) => getJson<MarketOverviewStreaksCard>(path("streaks", market), signal), ...refreshing });
 
 export const marketDerivedQuery = (scope: MarketOverviewScope) =>
-  queryOptions({ queryKey: ["market-overview", "derived", scope], queryFn: ({ signal }) => getJson<MarketOverviewDerivedCard>(scopedPath("derived", scope), signal), ...refreshing });
+  queryOptions({
+    queryKey: ["market-overview", "derived", scope],
+    queryFn: ({ signal }) => getJson<MarketOverviewDerivedCard>(scopedPath("derived", scope), signal),
+    ...refreshingBase,
+    placeholderData: (previous) => (previous !== undefined && previous.scope === scope ? previous : undefined),
+  });
 
 export const marketThemesQuery = () =>
   queryOptions({ queryKey: ["market-overview", "themes"], queryFn: ({ signal }) => getJson<MarketOverviewThemesCard>("/api/market-overview/themes", signal), ...refreshing });
 
 export const marketViQuery = (scope: MarketOverviewScope) =>
-  queryOptions({ queryKey: ["market-overview", "vi", scope], queryFn: ({ signal }) => getJson<MarketOverviewViCard>(scopedPath("vi", scope), signal), ...refreshing });
+  queryOptions({
+    queryKey: ["market-overview", "vi", scope],
+    queryFn: ({ signal }) => getJson<MarketOverviewViCard>(scopedPath("vi", scope), signal),
+    ...refreshingBase,
+    placeholderData: (previous) => (previous !== undefined && previous.scope === scope ? previous : undefined),
+  });
 
 export const marketProQuery = (scope: MarketOverviewScope) =>
-  queryOptions({ queryKey: ["market-overview", "pro", scope], queryFn: ({ signal }) => getJson<MarketOverviewProCard>(scopedPath("pro", scope), signal), ...refreshing });
+  queryOptions({
+    queryKey: ["market-overview", "pro", scope],
+    queryFn: ({ signal }) => getJson<MarketOverviewProCard>(scopedPath("pro", scope), signal),
+    ...refreshingBase,
+    placeholderData: (previous) => (previous !== undefined && previous.scope === scope ? previous : undefined),
+  });
 
 export const marketRankingQuery = (ranking: Ranking) =>
   queryOptions({ queryKey: ["market-overview", "ranking", ranking], queryFn: () => fetchRanking(ranking, 1, "user"), ...refreshing });

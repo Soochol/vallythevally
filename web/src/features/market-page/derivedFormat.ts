@@ -53,18 +53,43 @@ export function thrustToneOf(percent: number): "up" | "down" | "flat" {
   return "flat";
 }
 
-export function maSparklinePath(history: readonly MarketOverviewMaHistoryPoint[], width: number, height: number): string {
-  if (history.length === 0) return "";
+export interface SparklinePoint {
+  x: number;
+  y: number;
+}
+
+export function maSparklinePoints(
+  history: readonly MarketOverviewMaHistoryPoint[],
+  width: number,
+  height: number,
+): SparklinePoint[] {
+  if (history.length === 0) return [];
   const pad = 4;
   const innerW = Math.max(1, width - pad * 2);
   const innerH = Math.max(1, height - pad * 2);
-  const step = history.length === 1 ? 0 : innerW / (history.length - 1);
-  return history
-    .map((point, index) => {
-      const x = pad + index * step;
-      const clamped = Math.min(100, Math.max(0, point.above20Pct));
-      const y = pad + ((100 - clamped) / 100) * innerH;
-      return `${index === 0 ? "M" : "L"}${x.toFixed(1)},${y.toFixed(1)}`;
-    })
+  if (history.length === 1) {
+    const clamped = Math.min(100, Math.max(0, history[0]!.above20Pct));
+    return [{ x: width / 2, y: pad + ((100 - clamped) / 100) * innerH }];
+  }
+  const step = innerW / (history.length - 1);
+  return history.map((point, index) => {
+    const clamped = Math.min(100, Math.max(0, point.above20Pct));
+    return {
+      x: pad + index * step,
+      y: pad + ((100 - clamped) / 100) * innerH,
+    };
+  });
+}
+
+export function maSparklinePath(history: readonly MarketOverviewMaHistoryPoint[], width: number, height: number): string {
+  const points = maSparklinePoints(history, width, height);
+  if (points.length === 0) return "";
+  if (points.length === 1) {
+    const point = points[0]!;
+    const halfTick = Math.min(4, Math.max(1, (width - 8) / 2));
+    return `M${(point.x - halfTick).toFixed(1)},${point.y.toFixed(1)} L${(point.x + halfTick).toFixed(1)},${point.y.toFixed(1)}`;
+  }
+  return points
+    .map((point, index) => `${index === 0 ? "M" : "L"}${point.x.toFixed(1)},${point.y.toFixed(1)}`)
     .join(" ");
 }

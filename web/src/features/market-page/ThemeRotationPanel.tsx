@@ -1,8 +1,9 @@
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { KiwoomTheme } from "../../api/generated/KiwoomTheme";
 import type { SymbolInfo } from "../../api/generated/SymbolInfo";
 import { getJson } from "../../api/http";
 import { useMarketThemes } from "../../api/marketOverview";
+import { useSelectionStore } from "../../stores/selection";
 import { useSendSymbol } from "../pages/sendSymbol";
 import { EmptyNote, Loaded, PartView } from "./CardPart";
 import { formatCount, signedRate, toneOf } from "./marketFormat";
@@ -45,15 +46,36 @@ export function ThemeRotationPanel({ enabled }: { enabled: boolean }) {
   const query = useMarketThemes({ enabled });
   const send = useSendSymbol();
   const [busyLeader, setBusyLeader] = useState<string | null>(null);
+  const requestIdRef = useRef(0);
+  const mountedRef = useRef(true);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
 
   const openLeader = useCallback(async (leaderName: string) => {
+    const requestId = ++requestIdRef.current;
     setBusyLeader(leaderName);
     try {
       const rows = await getJson<SymbolInfo[]>(`/api/symbols?q=${encodeURIComponent(leaderName)}`);
+      if (!mountedRef.current || requestId !== requestIdRef.current) return;
       const exact = rows.find((row) => row.name === leaderName) ?? rows[0];
-      if (exact !== undefined) send({ code: exact.code, name: exact.name });
+      if (exact !== undefined) {
+        send({ code: exact.code, name: exact.name });
+      } else {
+        useSelectionStore.getState().showToast("종목 정보를 찾지 못했습니다");
+      }
+    } catch {
+      if (mountedRef.current && requestId === requestIdRef.current) {
+        useSelectionStore.getState().showToast("종목 정보를 찾지 못했습니다");
+      }
     } finally {
-      setBusyLeader(null);
+      if (mountedRef.current && requestId === requestIdRef.current) {
+        setBusyLeader(null);
+      }
     }
   }, [send]);
 

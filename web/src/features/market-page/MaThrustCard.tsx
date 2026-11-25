@@ -2,7 +2,7 @@ import type { MarketOverviewMaHistoryPoint } from "../../api/generated/MarketOve
 import type { MarketOverviewScope } from "../../api/generated/MarketOverviewScope";
 import { useMarketDerived } from "../../api/marketOverview";
 import { CardShell, EmptyNote, Loaded, PartView } from "./CardPart";
-import { formatPercent, maSparklinePath, scopeLabel, thrustToneOf } from "./derivedFormat";
+import { formatPercent, maSparklinePath, maSparklinePoints, scopeLabel, thrustToneOf } from "./derivedFormat";
 import { formatCount } from "./marketFormat";
 
 const MA_SKELETON = { shape: "chart", minHeight: "var(--mk-skeleton-derived)" } as const;
@@ -13,7 +13,9 @@ const shortDate = (date: string): string => date.slice(5).replace("-", ".");
 
 function MaSparkline({ history }: { history: readonly MarketOverviewMaHistoryPoint[] }) {
   if (history.length === 0) return <EmptyNote>20거래일 추이 자료가 없습니다</EmptyNote>;
+  const points = maSparklinePoints(history, SPARK_W, SPARK_H);
   const path = maSparklinePath(history, SPARK_W, SPARK_H);
+  const single = points.length === 1 ? points[0]! : null;
   const first = history[0]!;
   const last = history.at(-1)!;
   return (
@@ -25,6 +27,7 @@ function MaSparkline({ history }: { history: readonly MarketOverviewMaHistoryPoi
       <svg className="mk-ma-svg" viewBox={`0 0 ${SPARK_W} ${SPARK_H}`} role="img" aria-label={`20일선 위 비율 ${history.length}거래일 추이 최신 ${formatPercent(last.above20Pct)}`} preserveAspectRatio="none">
         <line className="mk-ma-midline" x1={0} x2={SPARK_W} y1={SPARK_H / 2} y2={SPARK_H / 2} vectorEffect="non-scaling-stroke" />
         <path className="mk-ma-path" d={path} vectorEffect="non-scaling-stroke" />
+        {single !== null && <circle className="mk-ma-dot" cx={single.x} cy={single.y} r={3} />}
       </svg>
       <div className="mk-ma-dates" aria-hidden="true">
         <span>{shortDate(first.date)}</span>

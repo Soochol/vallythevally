@@ -5,25 +5,25 @@
 .mk-scope-note { color: var(--text-2); font-size: var(--fs-xs); }
 .mk-grid > [data-card="flow"] { grid-column: span 5; min-height: calc(var(--size-220) * 2); }
 .mk-grid > [data-card="sector"] { grid-column: span 7; min-height: calc(var(--size-220) * 2); }
-.mk-grid > [data-card="xray"] { grid-column: 1 / -1; min-height: var(--size-240); }
+.mk-grid > [data-card="xray"] { grid-column: 1 / -1; min-height: var(--size-300); }
 .mk-grid > [data-card="turnover"] { grid-column: span 5; min-height: var(--size-480); }
 .mk-grid > [data-card="stocks"] { grid-column: span 7; min-height: var(--size-480); }
 .mk-grid > [data-card="attribution"] { grid-column: span 7; min-height: var(--size-320); }
 .mk-grid > [data-card="ma-thrust"] { grid-column: span 5; min-height: var(--size-320); }
-.mk-grid > [data-card="rrg"] { grid-column: span 6; min-height: var(--size-360); }
-.mk-grid > [data-card="session-dna"] { grid-column: span 6; min-height: var(--size-360); }
-.mk-grid > [data-card="broker-book"] { grid-column: span 6; min-height: var(--size-360); }
-.mk-grid > [data-card="disclosures"] { grid-column: span 6; min-height: var(--size-360); }
+.mk-grid > [data-card="rrg"] { grid-column: span 6; min-height: calc(var(--size-260) * 2); }
+.mk-grid > [data-card="session-dna"] { grid-column: span 6; min-height: calc(var(--size-260) * 2); }
+.mk-grid > [data-card="broker-book"] { grid-column: span 6; min-height: var(--size-460); }
+.mk-grid > [data-card="disclosures"] { grid-column: span 6; min-height: var(--size-460); }
 .mk-grid {
   --mk-skeleton-index-tile: var(--size-120);
   --mk-skeleton-sector: var(--size-220);
   --mk-skeleton-flow-bars: var(--size-120);
   --mk-skeleton-flow-lines: var(--size-180);
-  --mk-skeleton-xray: var(--size-180);
+  --mk-skeleton-xray: var(--size-220);
   --mk-skeleton-turnover: var(--size-180);
   --mk-skeleton-stocks: var(--size-220);
   --mk-skeleton-derived: var(--size-220);
-  --mk-skeleton-pro: var(--size-300);
+  --mk-skeleton-pro: var(--size-360);
 }
 @media (max-width: 1024px) {
   .mk-grid {
@@ -165,7 +165,7 @@
 .mk-sector-flow dt { color: var(--text-2); font-size: var(--fs-xs); }
 .mk-sector-flow dd { margin: 0; font-size: var(--fs-s); font-variant-numeric: tabular-nums; }
 .mk-sector-whole { color: var(--text-3); font-size: var(--fs-xs); }
-.mk-theme-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--size-8); margin: 0; padding: 0; list-style: none; align-content: start; }
+.mk-theme-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--size-8); margin: 0; padding: 0; list-style: none; align-content: start; max-height: var(--size-340); overflow-y: auto; }
 @media (max-width: 640px) { .mk-theme-grid { grid-template-columns: minmax(0, 1fr); } }
 .mk-theme-card { display: flex; flex-direction: column; gap: var(--size-6); padding: var(--size-10); border-radius: var(--r-m); background: var(--raised); box-shadow: inset 0 0 0 var(--size-1) var(--line); }
 .mk-theme-top { display: flex; align-items: baseline; justify-content: space-between; gap: var(--size-8); }
@@ -236,6 +236,7 @@
 .mk-ma-svg { width: 100%; height: var(--size-64); }
 .mk-ma-midline { stroke: var(--line-strong); stroke-width: 1; stroke-dasharray: 3 3; }
 .mk-ma-path { fill: none; stroke: var(--accent); stroke-width: 1.75; }
+.mk-ma-dot { fill: var(--accent); }
 .mk-ma-dates { display: flex; justify-content: space-between; color: var(--text-3); font-size: var(--fs-xs); font-variant-numeric: tabular-nums; }
 .mk-turnover-chart { display: flex; flex: 1; flex-direction: column; gap: var(--size-4); }
 .mk-turnover-max { color: var(--text-2); font-size: var(--fs-xs); }
@@ -295,7 +296,7 @@ th.mk-num, td.mk-num { text-align: right; font-variant-numeric: tabular-nums; }
 .mk-rrg-metrics > div { display: flex; align-items: baseline; gap: var(--size-4); }
 .mk-rrg-metrics dt { color: var(--text-3); }
 .mk-rrg-metrics dd { margin: 0; color: var(--text); font-weight: 600; }
-.mk-rrg-svg { width: 100%; height: auto; min-height: var(--size-220); border-radius: var(--r-m); background: var(--bg); }
+.mk-rrg-svg { width: 100%; height: auto; min-height: var(--size-220); max-height: var(--size-320); border-radius: var(--r-m); background: var(--bg); }
 .mk-rrg-bg[data-quadrant="leading"] { fill: color-mix(in srgb, var(--success) 8%, transparent); }
 .mk-rrg-bg[data-quadrant="weakening"] { fill: color-mix(in srgb, var(--warning) 8%, transparent); }
 .mk-rrg-bg[data-quadrant="lagging"] { fill: color-mix(in srgb, var(--down) 8%, transparent); }

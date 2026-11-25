@@ -1,7 +1,8 @@
 import type { Page } from "@playwright/test";
 import { anyMarketOverviewCall, indexCardWithoutBreadth, marketOverviewBaseline, marketOverviewCalls, marketOverviewScopedCalls, SECTOR_NAMES, serveMarketRankings } from "./fixtures/market-data";
+import { KIS_MARKET_SOURCE, KIWOOM_MARKET_SOURCE } from "./fixtures/market-source";
 import { CONNECTED_KIWOOM } from "./fixtures/scenario";
-import { cell, expect, test } from "./harness";
+import { cell, expect, fixedWait, test } from "./harness";
 
 const main = (page: Page) => page.getByRole("main", { name: "시장 종합", exact: true });
 const card = (page: Page, name: string) => main(page).getByRole("region", { name });
@@ -461,4 +462,268 @@ test.describe("1440×900 격자", () => {
     await tile.click();
     await expect(tile).toHaveAttribute("aria-pressed", "false");
   });
+
+  test("파생 응답이 늦게 도착해도 시장 체력 X-Ray와 아래 카드들의 y가 변하지 않는다", async ({ page, scenario }) => {
+    serveMarketRankings(scenario);
+    const derivedHold = scenario.hold((url) => url.pathname === "/api/market-overview/derived");
+    await page.goto("/market");
+    await derivedHold.received;
+    await expect(card(page, "종목").getByRole("table")).toBeVisible();
+
+    const snapshot = async () => ({
+      xrayHeight: (await card(page, "시장 체력 X-Ray").boundingBox())!.height,
+      turnoverY: (await card(page, "거래대금 추이").boundingBox())!.y,
+      stocksY: (await card(page, "종목").boundingBox())!.y,
+      attributionY: (await card(page, "지수 기여도").boundingBox())!.y,
+      maThrustY: (await card(page, "시장 추세 체력").boundingBox())!.y,
+    });
+
+    const before = await snapshot();
+    derivedHold.reply(marketOverviewBaseline(new URL("http://host/api/market-overview/derived?scope=all"), "GET")!);
+    await expect(card(page, "시장 체력 X-Ray").locator(".mk-hist-col")).toHaveCount(9);
+    const after = await snapshot();
+    expect(after).toEqual(before);
+  });
+
+  test("업종 지도를 주도 종목이 많은 8개 장중 키움 테마로 전환해도 아래 카드의 y가 변하지 않는다", async ({ page, scenario }) => {
+    const eightWrappedThemes = Array.from({ length: 8 }, (_, idx) => ({
+      code: `30${idx}`,
+      name: `긴이름테마 ${idx + 1}`,
+      stockCount: 25,
+      changeRate: 5.5 - idx * 0.6,
+      periodReturn: 7.0 - idx * 0.5,
+      rising: 18,
+      falling: 5,
+      leaders: ["삼성전자", "SK하이닉스", "삼성바이오로직스", "LG에너지솔루션", "HD현대중공업"],
+    }));
+    scenario.reply((url) => url.pathname === "/api/market-overview/themes", {
+      body: { phase: "regular", receivedAt: 1_794_186_000, source: "kiwoom", themes: { status: "ok", value: eightWrappedThemes } },
+    });
+    await page.goto("/market");
+    await expect(card(page, "업종 지도").locator(".mk-tile").first()).toBeVisible();
+    const xrayBefore = (await card(page, "시장 체력 X-Ray").boundingBox())!.y;
+
+    await card(page, "업종 지도").getByRole("group", { name: "업종 보기" }).getByRole("button", { name: "장중 키움 테마" }).click();
+    await expect(card(page, "업종 지도").locator(".mk-theme-card")).toHaveCount(8);
+    const xrayAfter = (await card(page, "시장 체력 X-Ray").boundingBox())!.y;
+    expect(xrayAfter).toBe(xrayBefore);
+  });
+
+  test("프로 응답이 늦게 도착해도 2행 프로 카드의 y가 변하지 않는다", async ({ page, scenario }) => {
+    const heldPro = scenario.hold((url) => url.pathname === "/api/market-overview/pro");
+    await page.goto("/market");
+    await heldPro.received;
+
+    const book = card(page, "창구·호가 압력");
+    const disc = card(page, "핵심 공시 레이더");
+    await expect(book).toBeVisible();
+    await expect(disc).toBeVisible();
+    const beforeBookY = (await book.boundingBox())!.y;
+    const beforeDiscY = (await disc.boundingBox())!.y;
+
+    heldPro.reply(marketOverviewBaseline(new URL("http://host/api/market-overview/pro?scope=all"), "GET")!);
+    await expect(card(page, "로테이션 RRG").locator(".mk-rrg-trail")).toHaveCount(4);
+    await expect(book.getByTestId("broker-pressure-bar")).toBeVisible();
+
+    expect((await book.boundingBox())!.y).toBe(beforeBookY);
+    expect((await disc.boundingBox())!.y).toBe(beforeDiscY);
+  });
+});
+
+test("범위 전환 중 파생·VI·프로 응답이 대기 중이면 이전 범위 자료를 새 범위 헤더 아래에 띄우지 않는다", async ({ page, scenario }) => {
+  serveMarketRankings(scenario);
+  await page.goto("/market");
+  await expect(card(page, "시장 체력 X-Ray").locator('.mk-venue-cell[data-venue="krx"]')).toContainText("82.1%");
+  await expect(card(page, "지수 기여도")).toContainText("삼성전자");
+  await expect(card(page, "창구·호가 압력").getByRole("region", { name: "매수 압력 상위" })).toContainText("삼성전자");
+  await expect(card(page, "핵심 공시 레이더").getByTestId("disclosure-total")).toContainText("총 4건");
+
+  const stocks = card(page, "종목");
+  await stocks.getByRole("tab", { name: "VI 발동" }).click();
+  await expect(stocks.getByRole("button", { name: "SK하이닉스" })).toBeVisible();
+
+  const kosdaqDerived = scenario.hold((url) => url.pathname === "/api/market-overview/derived" && url.searchParams.get("scope") === "kosdaq");
+  const kosdaqVi = scenario.hold((url) => url.pathname === "/api/market-overview/vi" && url.searchParams.get("scope") === "kosdaq");
+  const kosdaqPro = scenario.hold((url) => url.pathname === "/api/market-overview/pro" && url.searchParams.get("scope") === "kosdaq");
+
+  await card(page, "지수·폭").locator('.mk-market-card[data-market="kosdaq"]').click();
+  await Promise.all([kosdaqDerived.received, kosdaqVi.received, kosdaqPro.received]);
+
+  await expect(card(page, "시장 체력 X-Ray").locator(".mk-card-note")).toContainText("코스닥 기준");
+  await expect(card(page, "시장 체력 X-Ray")).not.toContainText("82.1%");
+  await expect(card(page, "지수 기여도").locator(".mk-card-note")).not.toContainText("코스피 기준");
+  await expect(card(page, "지수 기여도")).not.toContainText("삼성전자");
+  await expect(stocks.locator('tr[data-code="000660"]')).toHaveCount(0);
+  await expect(card(page, "창구·호가 압력").locator(".mk-card-note")).toContainText("코스닥 기준");
+  await expect(card(page, "창구·호가 압력")).not.toContainText("삼성전자");
+  await expect(card(page, "핵심 공시 레이더").locator(".mk-card-note")).toContainText("코스닥 기준");
+  await expect(card(page, "핵심 공시 레이더").getByText("SK하이닉스")).toHaveCount(0);
+  await expect(card(page, "핵심 공시 레이더").getByTestId("disclosure-total")).toHaveCount(0);
+
+  kosdaqDerived.reply(marketOverviewBaseline(new URL("http://host/api/market-overview/derived?scope=kosdaq"), "GET")!);
+  kosdaqVi.reply(marketOverviewBaseline(new URL("http://host/api/market-overview/vi?scope=kosdaq"), "GET")!);
+  kosdaqPro.reply(marketOverviewBaseline(new URL("http://host/api/market-overview/pro?scope=kosdaq"), "GET")!);
+
+  await expect(card(page, "지수 기여도")).toContainText("알테오젠");
+  await expect(stocks.getByRole("button", { name: "에코프로" })).toBeVisible();
+  await expect(card(page, "창구·호가 압력").getByRole("region", { name: "매수 압력 상위" })).toContainText("알테오젠");
+});
+
+test("한투 단독 원천에서는 VI 발동과 장중 키움 테마가 요청 없이 미지원 안내를 보이고 실시간 전환 시 즉시 바뀐다", async ({ page, scenario }) => {
+  scenario.live.marketSource = KIS_MARKET_SOURCE;
+  serveMarketRankings(scenario);
+  await page.goto("/market");
+
+  const stocks = card(page, "종목");
+  await stocks.getByRole("tab", { name: "VI 발동" }).click();
+  await expect(stocks.getByTestId("feed-unavailable")).toBeVisible();
+  expect(scenario.requests.some((r) => new URL(r.url()).pathname === "/api/market-overview/vi")).toBe(false);
+
+  const sector = card(page, "업종 지도");
+  await sector.getByRole("group", { name: "업종 보기" }).getByRole("button", { name: "장중 키움 테마" }).click();
+  await expect(sector.getByTestId("feed-unavailable")).toBeVisible();
+  expect(scenario.requests.some((r) => new URL(r.url()).pathname === "/api/market-overview/themes")).toBe(false);
+
+  scenario.live.source(KIWOOM_MARKET_SOURCE);
+  await expect(stocks.getByRole("button", { name: "SK하이닉스" })).toBeVisible();
+  await expect(sector.getByText("HBM·AI반도체")).toBeVisible();
+
+  scenario.live.source(KIS_MARKET_SOURCE);
+  await expect(stocks.getByTestId("feed-unavailable")).toBeVisible();
+  await expect(sector.getByTestId("feed-unavailable")).toBeVisible();
+});
+
+test("장중 키움 테마 주도 종목 검색 실패는 토스트로 알리고 동시 클릭 경합에서 이전 응답이 차트를 덮어쓰지 않는다", async ({ page, scenario }) => {
+  const pageErrors: string[] = [];
+  page.on("pageerror", (err) => pageErrors.push(err.message));
+
+  scenario.reply((url) => url.pathname === "/api/symbols" && url.searchParams.get("q") === "SK하이닉스", {
+    status: 503,
+    body: { error: { code: "internal", message: "종목 검색 실패", reason: null, retryAt: null, manualActionRequired: false } },
+  });
+  await page.goto("/market");
+  const sector = card(page, "업종 지도");
+  await sector.getByRole("group", { name: "업종 보기" }).getByRole("button", { name: "장중 키움 테마" }).click();
+  await sector.getByRole("button", { name: "SK하이닉스" }).click();
+  await expect(page.getByRole("status").filter({ hasText: "종목 정보를 찾지 못했습니다" })).toBeVisible();
+  await expect(sector.getByRole("button", { name: "SK하이닉스" })).toBeEnabled();
+  expect(pageErrors).toEqual([]);
+
+  const firstLookup = scenario.hold((url) => url.pathname === "/api/symbols" && url.searchParams.get("q") === "SK하이닉스");
+  await sector.getByRole("button", { name: "SK하이닉스" }).click();
+  await firstLookup.received;
+  await sector.getByRole("button", { name: "삼성전자" }).click();
+  await expect(page).toHaveURL(/\/$/);
+  await expect(cell(page, 1)).toHaveAttribute("aria-label", /^칸 1: 삼성전자/);
+
+  const settled = page.waitForResponse((res) => new URL(res.url()).pathname === "/api/symbols" && new URL(res.url()).searchParams.get("q") === "SK하이닉스");
+  firstLookup.reply({ body: [scenario.market.symbols.find((s) => s.code === "000660")!] });
+  await settled;
+  await fixedWait(page, 200, "지연된 첫 주도주 검색 응답이 도착한 뒤에도 차트 종목이 유지되는지 확인");
+  await expect(cell(page, 1)).toHaveAttribute("aria-label", /^칸 1: 삼성전자/);
+});
+
+test("시장 추세 체력 단일 시점 스파크라인은 보이는 경로와 점 마커를 함께 그린다", async ({ page, scenario }) => {
+  const base = marketOverviewBaseline(new URL("http://host/api/market-overview/derived?scope=all"), "GET")!.body as Record<string, unknown>;
+  const maThrust = (base.maThrust as { status: "ok"; value: Record<string, unknown> }).value;
+  scenario.reply((url) => url.pathname === "/api/market-overview/derived", {
+    body: {
+      ...base,
+      maThrust: { status: "ok", value: { ...maThrust, history20d: [{ date: "2026-11-09", above20Pct: 58.6 }] } },
+    },
+  });
+  await page.goto("/market");
+  const maCard = card(page, "시장 추세 체력");
+  const dotEl = maCard.locator(".mk-ma-svg circle.mk-ma-dot");
+  await expect(dotEl).toHaveCount(1);
+  await expect(dotEl).toBeVisible();
+  const dotBox = (await dotEl.boundingBox())!;
+  expect(dotBox.width).toBeGreaterThan(0);
+  expect(dotBox.height).toBeGreaterThan(0);
+  const pathEl = maCard.locator(".mk-ma-path");
+  const pathBox = (await pathEl.boundingBox())!;
+  expect(pathBox.width + pathBox.height).toBeGreaterThan(0);
+  const length = await pathEl.evaluate((el) => (el as SVGPathElement).getTotalLength());
+  expect(length).toBeGreaterThan(0);
+});
+
+test("전체 범위에서 코스피 지수만 503으로 실패해도 코스닥이 살아 있으면 신선도가 실패 상태가 되지 않는다", async ({ page, scenario }) => {
+  scenario.on(
+    (url) => url.pathname === "/api/market-overview/index" && url.searchParams.get("market") === "kospi",
+    () => ({ status: 503, body: { error: { code: "kiwoom_unavailable", message: "코스피 지연", reason: null, retryAt: null, manualActionRequired: false } } }),
+  );
+  await page.goto("/market");
+  await expect(card(page, "지수·폭").getByText("코스닥", { exact: true })).toBeVisible();
+  const freshness = page.getByLabel("자료 신선도");
+  await expect(freshness).not.toHaveAttribute("data-tone", "failed");
+  await expect(freshness).not.toContainText("받지 못함");
+});
+
+test("창구·호가 압력의 총 매수·매도 잔량이 모두 0이면 양쪽 압력이 0.0%로 표시된다", async ({ page, scenario }) => {
+  const base = marketOverviewBaseline(new URL("http://host/api/market-overview/pro?scope=all"), "GET")!.body as Record<string, unknown>;
+  const baseBook = (base.brokerBook as { value: Record<string, unknown> }).value;
+  scenario.reply((url) => url.pathname === "/api/market-overview/pro", {
+    body: {
+      ...base,
+      brokerBook: {
+        status: "ok",
+        value: {
+          ...baseBook,
+          totalBidRemaining: 0,
+          totalAskRemaining: 0,
+          buyPressurePct: 0,
+          topBuyPressure: [],
+          topSellPressure: [],
+        },
+      },
+    },
+  });
+  await page.goto("/market");
+  const bar = card(page, "창구·호가 압력").getByTestId("broker-pressure-bar");
+  await expect(bar).toContainText("매수 압력 0.0%");
+  await expect(bar).toContainText("매도 압력 0.0%");
+  await expect(bar).not.toContainText("100.0%");
+  await expect(bar.locator('.mk-book-bar i[data-side="up"]')).toHaveAttribute("style", /width:\s*0%/);
+  await expect(bar.locator('.mk-book-bar i[data-side="down"]')).toHaveAttribute("style", /width:\s*0%/);
+});
+
+test("핵심 공시 레이더의 칩 카운트는 실제 필터 가능한 항목 수와 일치하고 전체 매칭 수가 더 크면 함께 안내한다", async ({ page, scenario }) => {
+  const base = marketOverviewBaseline(new URL("http://host/api/market-overview/pro?scope=all"), "GET")!.body as Record<string, unknown>;
+  const items = Array.from({ length: 30 }, (_, idx) => ({
+    code: "005930",
+    name: "삼성전자",
+    market: "kospi",
+    category: "contract",
+    reportName: `단일판매·공급계약체결 ${idx + 1}`,
+    receiptNo: `20261109${String(idx + 1).padStart(6, "0")}`,
+    receiptDate: "20261109",
+    filer: "삼성전자",
+    remarks: "",
+    changeRate: 1.5,
+  }));
+  scenario.reply((url) => url.pathname === "/api/market-overview/pro", {
+    body: {
+      ...base,
+      disclosures: {
+        status: "ok",
+        value: {
+          totalMatched: 35,
+          counts: { contract: 30, shareholder: 0, earnings: 0, capital: 5 },
+          items,
+        },
+      },
+    },
+  });
+  await page.goto("/market");
+  const disc = card(page, "핵심 공시 레이더");
+  await expect(disc.getByTestId("disclosure-total")).toHaveText("총 35건 중 최근 30건");
+  const filters = disc.getByRole("group", { name: "공시 유형 필터" });
+  await expect(filters.getByRole("button", { name: /전체/ })).toContainText("30");
+  await expect(filters.getByRole("button", { name: /수주·계약/ })).toContainText("30");
+  const capitalBtn = filters.getByRole("button", { name: /증자·CB/ });
+  await expect(capitalBtn).toContainText("0");
+  await filters.getByRole("button", { name: /수주·계약/ }).click();
+  await expect(disc.locator(".mk-disc-item")).toHaveCount(30);
+  await capitalBtn.click();
+  await expect(disc.locator(".mk-disc-item")).toHaveCount(0);
 });
