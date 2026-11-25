@@ -46,5 +46,6 @@ pub mod trading;
 pub mod setup_documents;
 pub mod user_routes;
 pub mod userdata;
+pub mod vi_playbook;
 pub mod write_guard;
 pub mod ws;

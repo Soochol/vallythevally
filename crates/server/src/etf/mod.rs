@@ -1,3 +1,4 @@
+mod accumulation;
 mod catalog;
 mod collect;
 mod history;
@@ -181,6 +182,53 @@ pub struct EtfChanges {
     pub rows: Vec<EtfChangeRow>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum EtfAccumulationStyle {
+    Active,
+    All,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct EtfAccumulationContributor {
+    pub fund_code: String,
+    pub fund_name: String,
+    pub style: EtfStyle,
+    pub kind: EtfChangeKind,
+    pub real_change: Option<f64>,
+    pub after_weight_bps: Option<u32>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct EtfAccumulationRow {
+    pub code: String,
+    pub name: String,
+    pub buying_etf_count: u32,
+    pub added_etf_count: u32,
+    pub increased_etf_count: u32,
+    pub median_real_change: Option<f64>,
+    pub ma: EtfMaStates,
+    pub contributors: Vec<EtfAccumulationContributor>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct EtfAccumulation {
+    pub window: u32,
+    pub style: EtfAccumulationStyle,
+    pub from_date: Option<KstDate>,
+    pub to_date: Option<KstDate>,
+    pub collected_days: u32,
+    pub ma_as_of: Option<KstDate>,
+    pub rows: Vec<EtfAccumulationRow>,
+}
+
 pub fn routes() -> Router<Arc<AppState>> {
     Router::new()
         .route("/api/etf/funds", get(funds))
@@ -188,7 +236,9 @@ pub fn routes() -> Router<Arc<AppState>> {
         .route("/api/etf/funds/{code}/history", get(history))
         .route("/api/etf/funds/{code}/changes", get(changes))
         .route("/api/etf/stocks/{code}", get(stock))
+        .route("/api/etf/accumulation", get(accumulation))
         .layer(Extension(Arc::new(MaCache::default())))
+        .layer(Extension(Arc::new(accumulation::AccumulationCache::default())))
 }
 
 fn summary(fund: &Fund) -> EtfFundSummary {
@@ -271,4 +321,15 @@ async fn changes(State(st): State<Arc<AppState>>, Path(code): Path<String>, Quer
     }
     let collection = collection_of(&st, code).await;
     history::changes(code, &collection, before, after).map(Json).ok_or_else(|| ApiFailure::new(api::ApiErrorCode::NotFound, format!("{}의 {before}·{after} 수집본이 없습니다", code.as_str())))
+}
+
+async fn accumulation(
+    State(st): State<Arc<AppState>>,
+    Extension(ma_cache): Extension<Arc<MaCache>>,
+    Extension(acc_cache): Extension<Arc<accumulation::AccumulationCache>>,
+    Query(query): Query<HashMap<String, String>>,
+) -> Result<Json<EtfAccumulation>, ApiFailure> {
+    let window = accumulation::parse_window(&query)?;
+    let style = accumulation::parse_style(&query)?;
+    Ok(Json(acc_cache.get(&st, &ma_cache, window, style).await))
 }
