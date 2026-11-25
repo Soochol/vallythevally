@@ -9,6 +9,7 @@ import { createValueStore, useStoreValue } from "../../lib/valueStore";
 import { useMockEnvironment } from "../../stores/kiwoomLink";
 import { useLayoutStore } from "../../stores/layout";
 import { useOrderSettings, useUiStore } from "../../stores/ui";
+import { useViSession } from "../../stores/viSession";
 import { FeedStrip } from "../market-window/FeedStrip";
 import { basePrice, buildLadderRows, defaultLadderPrices, type LadderPrices, type LadderRow } from "../market-window/ladder";
 import { infoSlot, replayTradeSlot, tradeSlot } from "../market-window/LadderSlots";
@@ -40,6 +41,7 @@ import { useOrderCommands } from "./useOrderCommands";
 import { type OrderAccess, useOrderAccess, useOrderData } from "./useOrderData";
 import { useOrderDrag } from "./useOrderDrag";
 import { useOrderWrites } from "./useOrderWrites";
+import { ViOrderOverlay } from "./ViOrderOverlay";
 
 const EXPLORER_UNAVAILABLE = "상·하한가를 아직 받지 못했습니다";
 const DEFAULT_ORDER_QUANTITY = 10;
@@ -161,6 +163,7 @@ function OrderBody({ id, code, infoPager, choice, access, balance }: { id: Windo
   const sellOrdered = sellOrderQuantity(data.groups, data.pending, code, data.openOrdersListedAt);
   const sellableRemaining = holding === null ? null : Math.max(0, remainingToSell(holding, sellOrdered));
   const shownLadder = replay.kind === "past" || (replay.kind === "live" && liveView !== null);
+  const viState = useViSession(code, market.activeVi, market.expected, replay.kind === "live" && !explorerOn && shownLadder);
 
   return (
     <div className="od" data-testid="order-window" data-symbol={code} data-venue={orderVenue} data-quote-venue={market.venue} data-writable={writable ? "" : undefined} data-rate-hidden={settings.rate ? undefined : ""} data-replay={replay.kind === "live" ? undefined : replay.kind}>
@@ -187,6 +190,7 @@ function OrderBody({ id, code, infoPager, choice, access, balance }: { id: Windo
       />
       {replay.kind === "live" && !feed.connected && <FeedStrip since={market.downSince} />}
       <div className="bk-ladder od-ladder-wrap" data-stale={replay.kind === "live" && !feed.connected ? "" : undefined} data-exploring={explorerOn ? "" : undefined} data-state={shownLadder ? undefined : ""}>
+        <ViOrderOverlay band="top" state={viState} previousClose={market.headPreviousClose} />
         {replay.kind === "none" ? (
           <EmptyState title={replay.reason} />
         ) : shownLadder ? (
@@ -196,6 +200,7 @@ function OrderBody({ id, code, infoPager, choice, access, balance }: { id: Windo
         ) : (
           <EmptyState title="호가를 기다리는 중입니다" />
         )}
+        <ViOrderOverlay band="bottom" state={viState} previousClose={market.headPreviousClose} />
       </div>
       <OrderTotals groups={data.groups} writable={writable} actions={totalsActions} drag={drag} />
       <Strip>
