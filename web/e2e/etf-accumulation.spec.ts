@@ -89,3 +89,22 @@ test("수집일이 2일 미만이면 빈 안내를 보이고 오류 시 다시 �
   await page.getByRole("button", { name: "다시 시도" }).click();
   await expect(rankedRows(page)).toHaveCount(ACCUMULATION_5_ACTIVE.rows.length);
 });
+
+test("동시 매집 요약·필터 칩·버블 레이더 클릭과 역추적 이동이 동작한다", async ({ page }) => {
+  await page.goto("/etf?tab=accumulation");
+  const kpis = page.getByLabel("동시 매집 요약");
+  await expect(kpis).toContainText("2종목");
+  await expect(kpis).toContainText("SK하이닉스");
+
+  await page.getByRole("group", { name: "동시 매집 필터" }).getByRole("button", { name: "이평선 정배열 3▲" }).click();
+  await expect(rankedRows(page)).toHaveCount(1);
+  await expect(rankedRows(page).first()).toHaveAttribute("data-code", "000660");
+
+  const radar = page.getByRole("region", { name: "컨빅션 버블 레이더" });
+  await radar.locator('[data-bubble-code="000660"]').click();
+  await expect(page.getByRole("region", { name: "SK하이닉스 매집 ETF 목록" })).toBeVisible();
+
+  await table(page).getByRole("button", { name: "SK하이닉스 역추적" }).click();
+  await expect(page).toHaveURL(/tab=reverse&stock=000660/);
+  await expect(page.getByRole("table", { name: "담은 ETF 표" })).toBeVisible();
+});

@@ -111,3 +111,28 @@ test("나비 막대 값은 기울임꼴이 아니고 둘째 막대는 상승색�
   ]);
   expect(right).not.toBe(up);
 });
+
+test("겹침 3-칼럼 알파 뷰는 양쪽 고유 베팅을 보이고 공통 나비만 보기로 전환된다", async ({ page }) => {
+  await page.goto("/etf?tab=overlap&basket=444200,091160");
+  await matrix(page).locator('[data-row="444200"][data-column="091160"]').click();
+  await expect(page.getByRole("region", { name: "겹침 대비 차별화 요약" })).toContainText("차별화(Active Share)");
+  await expect(page.getByRole("region", { name: `${MEGA.fund.name} 고유 베팅` })).toContainText("현대차");
+  await expect(page.getByRole("region", { name: `${SEMI.fund.name} 고유 베팅` })).toContainText("SK스퀘어");
+
+  await page.getByRole("group", { name: "비교 보기 방식" }).getByRole("button", { name: "공통 나비만" }).click();
+  await expect(page.getByRole("region", { name: `${MEGA.fund.name} 고유 베팅` })).toHaveCount(0);
+  await expect(page.getByRole("region", { name: "공통 종목 나비 막대" })).toBeVisible();
+});
+
+test("역추적은 유형 필터로 담은 ETF를 거르고 비교 바구니에 바로 담는다", async ({ page }) => {
+  await page.goto("/etf?tab=reverse&stock=005930");
+  const rows = page.getByRole("table", { name: "담은 ETF 표" }).locator("tbody tr");
+  await expect(rows).toHaveCount(2);
+
+  await page.getByRole("group", { name: "담은 ETF 유형" }).getByRole("button", { name: "액티브" }).click();
+  await expect(rows).toHaveCount(1);
+  await expect(rows.first()).toHaveAttribute("data-code", "444200");
+
+  await page.getByRole("button", { name: `${MEGA.fund.name} 비교 담기` }).click();
+  await expect(page.getByText("비교 바구니 1/4")).toBeVisible();
+});

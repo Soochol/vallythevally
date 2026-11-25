@@ -226,6 +226,44 @@ test.describe("1440×900", () => {
     await expect(rows).toHaveCount(26);
     await expect(page.locator('tr[data-code="005930"] [data-state="above"]').first()).toHaveText("▲");
   });
+
+  test("기본 데스크톱 진입은 동시 매집 레이더를 보이고 수집일이 2일 미만이면 첫 ETF 구성으로 폴백한다", async ({ page, scenario }) => {
+    await page.goto("/etf");
+    await expect(page.getByRole("tab", { name: "동시 매집" })).toHaveAttribute("aria-selected", "true");
+    await expect(page.getByRole("table", { name: "동시 매집 종목 표" })).toBeVisible();
+    await expect(page.getByRole("heading", { level: 2 })).toHaveCount(0);
+
+    scenario.reply("/api/etf/accumulation", {
+      body: { window: 5, style: "active", fromDate: null, toDate: null, collectedDays: 1, maAsOf: null, rows: [] },
+    });
+    await page.goto("/etf");
+    await expect(page).toHaveURL(/\/etf$/);
+    await expect(page.getByRole("tab", { name: "구성" })).toHaveAttribute("aria-selected", "true");
+    await expect(page.getByRole("heading", { name: MEGA.fund.name, level: 2 })).toBeVisible();
+  });
+
+  test("트리맵 3-렌즈 전환 시 4.5:1 대비를 유지하고 호버가 누적 곡선과 표를 동기화한다", async ({ page }) => {
+    await page.goto("/etf?code=444200&tab=holdings");
+    const treemap = page.getByRole("group", { name: "구성 종목 트리맵" });
+    const lensGroup = page.getByRole("group", { name: "트리맵 렌즈" });
+
+    for (const lensLabel of ["이평선 추세", "최근 매집", "비중 강도"]) {
+      await lensGroup.getByRole("button", { name: lensLabel }).click();
+      const tiles = treemap.locator('.etf-tile:not([data-label="none"])');
+      await expect.poll(() => tiles.count()).toBeGreaterThan(0);
+      const pairs = await inkAndFill(tiles);
+      for (const pair of pairs) expect(pair.opacity).toBe("1");
+      for (const ratio of await contrastOf(page, pairs)) expect(ratio).toBeGreaterThanOrEqual(4.5);
+    }
+
+    await treemap.locator('[data-code="005930"]').hover();
+    await expect(page.getByRole("img", { name: /^누적 비중 곡선/ }).locator('[data-hover-rank="2"]')).toBeVisible();
+    await expect(page.getByRole("table", { name: "구성 종목 표" }).locator('tr[data-code="005930"]')).toHaveAttribute("data-highlighted", "true");
+
+    await page.getByRole("table", { name: "구성 종목 표" }).getByRole("button", { name: "삼성전자 역추적" }).click();
+    await expect(page).toHaveURL(/tab=reverse&stock=005930/);
+    await expect(page.getByRole("table", { name: "담은 ETF 표" })).toBeVisible();
+  });
 });
 
 test.describe("390px", () => {
