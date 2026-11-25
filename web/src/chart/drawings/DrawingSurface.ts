@@ -48,12 +48,13 @@ export class DrawingSurface implements ChartExtension {
   private paneLayers: (() => void)[] = [];
   private transient: (TransientShapes & { createdAt: number }) | null = null;
   private readonly edits: DrawingEdits;
+  private readonly frameListeners = new Set<() => void>();
 
   constructor(readonly host: ChartHost, readonly cellId: WindowId, readonly sync: DrawingSync) {
     this.edits = new DrawingEdits(sync, cellId, () => { const view = host.view(); return view ? { symbol: view.symbol, scope: this.newScope(), period: view.period } : null; });
     this.mirror.className = "drawing-mirror"; this.mirror.setAttribute("aria-hidden", "true"); this.mirror.hidden = true;
     host.el.append(this.mirror);
-    this.layer = new DrawingLayer(() => this.build());
+    this.layer = new DrawingLayer(() => this.build(), () => { for (const listener of this.frameListeners) listener(); });
     host.series().attachPrimitive(this.layer);
     this.attachPanes();
     surfaces.set(cellId, this);
@@ -117,6 +118,10 @@ export class DrawingSurface implements ChartExtension {
     this.raf = requestAnimationFrame(() => { this.raf = null; this.layer.refresh(); if (this.transient) this.refresh(); });
   }
   frame() { return this.layer.current(); }
+  onFrame(listener: () => void): () => void {
+    this.frameListeners.add(listener);
+    return () => { this.frameListeners.delete(listener); };
+  }
   toolContext(): ToolContext { return this.frame().ctx ?? this.context().ctx; }
   projection(): Frame {
     const h = this.host; const ts = h.chart.timeScale(); const view = h.view(); const period = view?.period ?? "D";

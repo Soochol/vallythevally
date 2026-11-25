@@ -51,18 +51,42 @@ function FloatingBar({ cellId }: { cellId: WindowId }) {
   const [shown, setShown] = useState(false);
   useEffect(() => {
     let raf = 0;
-    const follow = () => {
-      raf = requestAnimationFrame(follow);
-      if (!root.current) { setPosition(null); setShown(false); framesWithoutBounds.current = 0; lastSpot.current = null; return; }
+    let disposed = false;
+    let settled = false;
+    let observedToolbar: HTMLElement | null = null;
+    const schedule = () => {
+      if (disposed || raf !== 0) return;
+      raf = requestAnimationFrame(sync);
+    };
+    const resizeObserver = new ResizeObserver(schedule);
+    resizeObserver.observe(surface.host.el);
+    const sync = () => {
+      raf = 0;
+      if (disposed) return;
+      if (!root.current) {
+        if (observedToolbar) {
+          resizeObserver.unobserve(observedToolbar);
+          observedToolbar = null;
+        }
+        setPosition(null); setShown(false); settled = false; framesWithoutBounds.current = 0; lastSpot.current = null;
+        return;
+      }
       const bounds = surface.selectionBounds(); const frame = surface.frame(); const pane = frame.pane;
       if (pane.height <= 0) return;
       root.current.style.setProperty("--floating-max", `${Math.max(0, pane.width - 16)}px`);
       const toolbar = root.current.querySelector<HTMLElement>(".drawing-floating");
-      if (toolbar) size.current = { w: toolbar.offsetWidth, h: toolbar.offsetHeight };
+      if (toolbar) {
+        if (toolbar !== observedToolbar) {
+          if (observedToolbar) resizeObserver.unobserve(observedToolbar);
+          resizeObserver.observe(toolbar);
+          observedToolbar = toolbar;
+        }
+        size.current = { w: toolbar.offsetWidth, h: toolbar.offsetHeight };
+      }
       const { w, h } = size.current;
       const saved = cellDrawing(useDrawingSession.getState(), cellId).toolbarAt;
       if (bounds || saved) framesWithoutBounds.current = 0;
-      else if (framesWithoutBounds.current++ < 2) return;
+      else if (framesWithoutBounds.current++ < 2) { schedule(); return; }
       const left = Math.max(8, Math.min(saved?.x ?? (bounds ? (bounds.x1 + bounds.x2 - w) / 2 : 20), pane.width - w - 8));
       const above = bounds ? bounds.y1 - h - 14 : 60;
       const below = (bounds?.y2 ?? 60) + 14;
@@ -71,10 +95,21 @@ function FloatingBar({ cellId }: { cellId: WindowId }) {
       const y = saved ? Math.max(8, Math.min(saved.y, lowest))
         : Math.max(top, Math.min(Math.max(top, above < top ? below : above), lowest));
       const last = lastSpot.current; lastSpot.current = { x: left, y };
+      const stable = last !== null && Math.abs(last.x - left) < 0.5 && Math.abs(last.y - y) < 0.5;
       setPosition((old) => old && Math.abs(old.x - left) < 0.5 && Math.abs(old.y - y) < 0.5 ? old : { x: left, y });
-      if (last && Math.abs(last.x - left) < 0.5 && Math.abs(last.y - y) < 0.5) setShown(true);
+      if (stable) { settled = true; setShown(true); }
+      else if (!settled) schedule();
     };
-    follow(); return () => cancelAnimationFrame(raf);
+    const unsubscribeFrame = surface.onFrame(schedule);
+    const unsubscribeSession = useDrawingSession.subscribe(schedule);
+    sync();
+    return () => {
+      disposed = true;
+      cancelAnimationFrame(raf);
+      resizeObserver.disconnect();
+      unsubscribeFrame();
+      unsubscribeSession();
+    };
   }, [surface, cellId]);
   if (!selected.length || hideAll) return null;
   const first = selected[0]!; const tool = toolOf(first.tool); if (!tool) return null;

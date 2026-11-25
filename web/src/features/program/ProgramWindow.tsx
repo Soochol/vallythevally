@@ -1,12 +1,11 @@
 import { useQuery } from "@tanstack/react-query";
-import { type CSSProperties, useEffect, useMemo, useReducer, useRef } from "react";
-import type { FeedProgramRow } from "../../api/generated/FeedProgramRow";
+import { type CSSProperties, useEffect, useMemo, useRef } from "react";
 import type { ProgramTradeTimeline } from "../../api/generated/ProgramTradeTimeline";
 import type { SymbolCode } from "../../api/generated/SymbolCode";
 import { getJson } from "../../api/http";
-import { formatKstClockSeconds } from "../../chart/time";
 import type { WindowId } from "../../layout/kinds";
 import { formatPrice, MINUS } from "../../lib/format";
+import { useFrameFold } from "../../lib/useFrameFold";
 import { marketSocket } from "../../stores/realtime";
 import { MarketWindowGate } from "../market-window/MarketWindowGate";
 import { MarketHead, useDayQuote } from "../market-window/MarketHead";
@@ -14,50 +13,46 @@ import { priceTone } from "../market-window/PriceLadder";
 import { formatQuantity, withSign } from "../market-window/format";
 import { useWindowedRows } from "../market-window/useWindowedRows";
 import { ErrorState, EmptyState, Skeleton } from "../overlay/State";
-import { boldKeys, type ColumnWidths, eokFromMillionWon, formatEokAmount, historyRows, isNoProgramData, joinHistoryAndLive, liveRow, nonZeroChangeLines, type ProgramLine, type ProgramRow, rowsOf, sparklinePoints, widestSoFar } from "./program";
+import { boldKeys, type ColumnWidths, EMPTY_PROGRAM_LIVE, eokFromMillionWon, formatEokAmount, historyRows, nonZeroChangeLines, type ProgramLine, type ProgramLiveState, type ProgramRow, reduceProgramLive, rowsOf, sparklinePoints, widestSoFar } from "./program";
 
 const VISIBLE_ROWS = 300;
 const SPARK_WIDTH = 100;
 const SPARK_HEIGHT = 16;
+const quantityFormat = new Intl.NumberFormat("ko-KR");
 
-type LiveAction = { type: "row"; row: FeedProgramRow; at: number } | { type: "gap"; at: number };
-
-function liveReducer(lines: ProgramLine[], action: LiveAction): ProgramLine[] {
-  if (action.type === "row") return [...lines, { kind: "row", row: liveRow(action.row, lines.length) }];
-  if (lines.at(-1)?.kind === "gap") return lines;
-  return [...lines, { kind: "gap", key: `gap-${lines.length}`, time: formatKstClockSeconds(action.at) }];
-}
-
-function useLiveProgram(code: SymbolCode): ProgramLine[] {
-  const [lines, dispatch] = useReducer(liveReducer, []);
+function useLiveProgram(code: SymbolCode): ProgramLiveState {
+  const [live, fold] = useFrameFold<ProgramLiveState>(() => EMPTY_PROGRAM_LIVE);
   useEffect(() => {
     let sawRow = false;
     return marketSocket.subscribeFeed({ symbol: code, kind: "program" }, (m) => {
       if (m.type === "feed_program") {
         sawRow = true;
-        dispatch({ type: "row", row: m.row, at: m.row.t });
-      } else if (m.type === "feed_link" && !m.live && sawRow) dispatch({ type: "gap", at: m.at });
-      else if (m.type === "resync" && sawRow) dispatch({ type: "gap", at: Math.floor(Date.now() / 1000) });
+        fold((state) => reduceProgramLive(state, { type: "row", row: m.row }));
+      } else if (m.type === "feed_link" && !m.live && sawRow) fold((state) => reduceProgramLive(state, { type: "gap", at: m.at }));
+      else if (m.type === "resync" && sawRow) fold((state) => reduceProgramLive(state, { type: "gap", at: Math.floor(Date.now() / 1000) }));
     });
-  }, [code]);
-  return lines;
+  }, [code, fold]);
+  return live;
 }
 
 const priceText = (row: ProgramRow): string => (row.price === null ? "–" : formatPrice(row.price, false));
-const changeText = (row: ProgramRow): string => withSign(row.netQtyChange, new Intl.NumberFormat("ko-KR").format(Math.abs(row.netQtyChange)));
+const changeText = (row: ProgramRow): string => withSign(row.netQtyChange, quantityFormat.format(Math.abs(row.netQtyChange)));
 
 function useWidestColumns(rows: readonly ProgramRow[]): ColumnWidths {
   const widest = useRef<ColumnWidths>([0, 0, 0]);
-  for (const row of rows) widest.current = widestSoFar(widest.current, [row.time, priceText(row), changeText(row)]);
-  return widest.current;
+  return useMemo(() => {
+    let next = widest.current;
+    for (const row of rows) next = widestSoFar(next, [row.time, priceText(row), changeText(row)]);
+    widest.current = next;
+    return next;
+  }, [rows]);
 }
 
-function Summary({ rows }: { rows: readonly ProgramRow[] }) {
-  const latest = rows.at(-1);
+function Summary({ latest, trend }: { latest: ProgramRow | undefined; trend: readonly number[] }) {
   const net = latest?.netQty ?? 0;
   const amount = eokFromMillionWon(latest?.netAmountMillionWon ?? 0);
   const direction = net > 0 ? "up" : net < 0 ? "down" : "flat";
-  const points = sparklinePoints(rows.map((row) => row.netQty), SPARK_WIDTH, SPARK_HEIGHT);
+  const points = useMemo(() => sparklinePoints(trend, SPARK_WIDTH, SPARK_HEIGHT), [trend]);
   const buy = latest?.buyQty ?? 0;
   const sell = latest?.sellQty ?? 0;
   return (
@@ -121,15 +116,27 @@ function ProgramBody({ code }: { code: SymbolCode }) {
   });
   const live = useLiveProgram(code);
   const past = useMemo(() => historyRows(history.data?.points ?? []), [history.data]);
-  const lines = useMemo(() => joinHistoryAndLive(past, live), [past, live]);
-  const liveRows = rowsOf(live);
+  const keptHistory = useMemo(
+    () => (live.firstLiveTime === null ? past : past.filter((row) => row.time < live.firstLiveTime!)),
+    [past, live.firstLiveTime],
+  );
+  const lines = useMemo(
+    () => [...keptHistory.map((row): ProgramLine => ({ kind: "row", row })), ...live.lines],
+    [keptHistory, live.lines],
+  );
+  const trend = useMemo(
+    () => [...keptHistory.map((row) => row.netQty), ...live.trend],
+    [keptHistory, live.trend],
+  );
+  const latest = live.latest ?? keptHistory.at(-1);
+  const hasLive = live.latest !== null;
   const { previousClose } = useDayQuote(code, "combined");
-  const content = history.isPending && liveRows.length === 0 ? <Skeleton label="프로그램 매매 불러오는 중" />
-    : history.isError && liveRows.length === 0 ? <ErrorState message="프로그램 매매를 불러오지 못했습니다" retry={() => void history.refetch()} />
-    : history.isSuccess && isNoProgramData(past, live) ? <EmptyState title="이 종목은 프로그램 매매 자료가 없습니다" />
+  const content = history.isPending && !hasLive ? <Skeleton label="프로그램 매매 불러오는 중" />
+    : history.isError && !hasLive ? <ErrorState message="프로그램 매매를 불러오지 못했습니다" retry={() => void history.refetch()} />
+    : history.isSuccess && past.length === 0 && !hasLive ? <EmptyState title="이 종목은 프로그램 매매 자료가 없습니다" />
     : (
       <div className="pg" data-testid="program-window" data-symbol={code}>
-        <Summary rows={rowsOf(lines)} />
+        <Summary latest={latest} trend={trend} />
         <Table lines={lines} previousClose={previousClose} />
       </div>
     );

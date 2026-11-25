@@ -82,6 +82,33 @@ const SUB_ERROR_TEXT: Record<SubErrorCode, string> = {
 
 const nowSeconds = (): UnixSeconds => Math.floor(Date.now() / 1000);
 
+function barIndexAtOrAfter(bars: readonly Bar[], t: UnixSeconds): number {
+  let lo = 0;
+  let hi = bars.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (bars[mid]!.t < t) lo = mid + 1;
+    else hi = mid;
+  }
+  return lo < bars.length ? lo : -1;
+}
+
+function barIndexAt(bars: readonly Bar[], t: UnixSeconds): number {
+  const index = barIndexAtOrAfter(bars, t);
+  return index >= 0 && bars[index]!.t === t ? index : -1;
+}
+
+function barIndexAfter(bars: readonly Bar[], t: UnixSeconds): number {
+  let lo = 0;
+  let hi = bars.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (bars[mid]!.t <= t) lo = mid + 1;
+    else hi = mid;
+  }
+  return lo < bars.length ? lo : -1;
+}
+
 const PRICE_MODE: Record<PriceScale, PriceScaleMode> = {
   normal: PriceScaleMode.Normal,
   log: PriceScaleMode.Logarithmic,
@@ -247,6 +274,7 @@ export class ChartController {
         chart: this.chart,
         tokens: () => this.tokens,
         isIndex: () => this.view !== null && isIndexCode(this.view.symbol),
+        isPercentScale: () => this.view !== null && shownScale(this.view.settings) === "percent",
         period: () => this.period(),
         requestFrame: () => this.requestLegendSources("indicators"),
         guard: (draw) => this.withDataGuard(draw),
@@ -316,7 +344,7 @@ export class ChartController {
       const nextTime = typeof p.time === "number" ? fromChartTime(p.time) : null;
       const nextIndex =
         nextTime !== null && n > 0
-          ? (this.hoverIndex !== null && this.bars[this.hoverIndex]?.t === nextTime ? this.hoverIndex : this.bars.findIndex((bar) => bar.t === nextTime))
+          ? (this.hoverIndex !== null && this.bars[this.hoverIndex]?.t === nextTime ? this.hoverIndex : barIndexAt(this.bars, nextTime))
           : null;
       const changed = nextTime !== this.financialHoverTime || nextIndex !== this.hoverIndex;
       this.financialHoverTime = nextTime;
@@ -332,7 +360,7 @@ export class ChartController {
       this.initialRange.rangeChanged(r);
       if (this.settingData) return;
       const left = this.leftT();
-      const before = left === null ? -1 : this.bars.findIndex((bar) => bar.t >= left);
+      const before = left === null ? -1 : barIndexAtOrAfter(this.bars, left);
       if (r && before >= 0 && before < LOAD_OLDER_WITHIN) this.feed.needOlder();
       this.updateIntradayEnd();
       this.compare.coverFrom(this.leftT());
@@ -361,6 +389,7 @@ export class ChartController {
     if (!prev || shownScale(prev.settings) !== scale) {
       this.chart.priceScale("right").applyOptions({ mode: PRICE_MODE[scale] });
       this.el.dataset.priceScale = scale;
+      if (prev && scale === "percent") this.indicators.refreshPriceOverlays();
     }
     if (prev?.period !== next.period) this.chart.applyOptions({ timeScale: { timeVisible: isIntraday(next.period) } });
     if (prev?.symbol !== next.symbol || prev.venue !== next.venue || prev.period !== next.period) {
@@ -992,7 +1021,7 @@ export class ChartController {
     const endT = this.pendingEnd;
     if (endT === null || this.disposed || this.el.clientWidth === 0 || this.el.clientHeight === 0) return;
     this.pendingEnd = null;
-    const shown = this.bars.findIndex((bar) => bar.t > endT);
+    const shown = barIndexAfter(this.bars, endT);
     this.initialRange.fit({
       bars: shown === -1 ? this.bars : this.bars.slice(0, shown),
       period: this.period(),
@@ -1010,7 +1039,7 @@ export class ChartController {
       this.setBars(displayBars(h));
       this.indicators.prepend(h);
     }));
-    if (this.financialHoverTime !== null) this.hoverIndex = this.bars.findIndex((bar) => bar.t === this.financialHoverTime);
+    if (this.financialHoverTime !== null) this.hoverIndex = barIndexAt(this.bars, this.financialHoverTime);
     this.compare.coverFrom(this.leftT());
     this.coverQuoteTotals();
     this.coverQuoteDepths();

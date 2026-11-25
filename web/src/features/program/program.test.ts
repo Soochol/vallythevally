@@ -1,6 +1,6 @@
 import { expect, test } from "vitest";
 import type { ProgramTradePoint } from "../../api/generated/ProgramTradePoint";
-import { boldKeys, eokFromMillionWon, historyRows, isNoProgramData, joinHistoryAndLive, liveRow, nonZeroChangeLines, rowsOf, widestSoFar, type ProgramLine, type ProgramRow } from "./program";
+import { boldKeys, EMPTY_PROGRAM_LIVE, eokFromMillionWon, historyRows, isNoProgramData, joinHistoryAndLive, liveRow, MAX_LIVE_PROGRAM_LINES, MAX_PROGRAM_TREND_POINTS, nonZeroChangeLines, reduceProgramLive, rowsOf, sparklinePoints, widestSoFar, type ProgramLine, type ProgramRow } from "./program";
 
 const KST_0905 = Date.parse("2026-11-09T09:05:00+09:00") / 1000;
 const point = (time: string, netQuantity: number): ProgramTradePoint => ({ time, price: 70_000, buyQuantity: 10, sellQuantity: 5, netQuantity, buyAmount: 0, sellAmount: 0, netAmount: netQuantity * 70_000_000 });
@@ -74,4 +74,20 @@ test("순매수 증감이 0인 행은 빼고 끊김 줄과 0이 아닌 행만 �
     { kind: "row", row: row("d", 0) },
   ];
   expect(nonZeroChangeLines(lines).map((line) => (line.kind === "gap" ? line.key : line.row.key))).toEqual(["a", "g", "c"]);
+});
+
+test("실시간 프로그램 상태는 행과 추이 길이를 상한 안에 유지하면서 첫 시각과 최신 값을 보존한다", () => {
+  let state = EMPTY_PROGRAM_LIVE;
+  for (let i = 0; i < MAX_LIVE_PROGRAM_LINES + 50; i++) {
+    state = reduceProgramLive(state, {
+      type: "row",
+      row: { t: KST_0905 + i, price: 70_000, sellQty: 0, sellAmount: 0, buyQty: i, buyAmount: 0, netQty: i * 10, netQtyChange: 10, netAmount: i, netAmountChange: 1 },
+    });
+  }
+  expect(state.firstLiveTime).toBe("09:05:00");
+  expect(state.latest?.netQty).toBe((MAX_LIVE_PROGRAM_LINES + 49) * 10);
+  expect(state.lines.length).toBeLessThanOrEqual(MAX_LIVE_PROGRAM_LINES);
+  expect(state.trend.length).toBeLessThanOrEqual(MAX_PROGRAM_TREND_POINTS);
+  const vertices = sparklinePoints(Array.from({ length: 2_000 }, (_, i) => Math.sin(i / 10) * 100), 100, 16).split(" ");
+  expect(vertices.length).toBeLessThanOrEqual(200);
 });

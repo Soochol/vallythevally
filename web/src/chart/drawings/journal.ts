@@ -2,6 +2,7 @@ import { parseRecord, recordKey, UNSAVED_PREFIX, type Intent, type Want } from "
 
 export const COMPLETION_PREFIX = "vv.drawing.completed.";
 export const completionKey = (id: string) => `${COMPLETION_PREFIX}${id}`;
+export const MAX_COMPLETIONS = 200;
 
 export const STAGING_PREFIX = "vv.unsaved.drawing-intent.";
 export const stageKey = (uuid: string) => `${STAGING_PREFIX}${uuid}`;
@@ -59,6 +60,47 @@ export class DrawingJournal {
     if (current && sameIntent(current, intent)) this.storage.removeItem(recordKey(intent.id));
   }
 
+  private intentsFor(id: string): Intent[] {
+    const intents: Intent[] = [];
+    for (const k of Object.keys(this.storage)) {
+      if (!k.startsWith(UNSAVED_PREFIX) && !k.startsWith(STAGING_PREFIX)) continue;
+      const intent = parseJournalRecord(json(this.storage.getItem(k)));
+      if (!intent || intent.id !== id) continue;
+      if (k !== recordKey(intent.id) && k !== stageKey(intent.uuid)) continue;
+      if (!this.retired(intent) && (k === stageKey(intent.uuid) || this.staged(intent))) intents.push(intent);
+    }
+    return intents;
+  }
+
+  private pruneCompletions(): void {
+    const keys = Object.keys(this.storage);
+    const completionKeys: string[] = [];
+    const pendingIds = new Set<string>();
+    for (const k of keys) {
+      if (k.startsWith(COMPLETION_PREFIX)) {
+        completionKeys.push(k);
+      } else if (k.startsWith(UNSAVED_PREFIX) || k.startsWith(STAGING_PREFIX)) {
+        const raw = json(this.storage.getItem(k));
+        const parsed = parseJournalRecord(raw) ?? parseRecord(raw);
+        if (parsed) pendingIds.add(parsed.id);
+      }
+    }
+    if (completionKeys.length <= MAX_COMPLETIONS) return;
+    const removable: { key: string; entry: Completion }[] = [];
+    for (const k of completionKeys) {
+      const id = k.slice(COMPLETION_PREFIX.length);
+      if (pendingIds.has(id)) continue;
+      const entry = parseCompletion(json(this.storage.getItem(k)));
+      if (entry && entry.id === id) removable.push({ key: k, entry });
+    }
+    const keepRemovable = Math.max(0, MAX_COMPLETIONS - (completionKeys.length - removable.length));
+    if (removable.length <= keepRemovable) return;
+    removable.sort((a, b) => compareIntent(b.entry, a.entry));
+    for (let i = keepRemovable; i < removable.length; i++) {
+      try { this.storage.removeItem(removable[i]!.key); } catch { break; }
+    }
+  }
+
   snapshot(): { intents: Intent[]; ids: string[] } {
     const intents: Intent[] = [];
     const ids = new Set<string>();
@@ -93,8 +135,7 @@ export class DrawingJournal {
     if (sharedIntent) { order = Math.max(order, nextCounter(sharedIntent.order)); revision = Math.max(revision, sharedIntent.lastRevision); }
     const legacy = parseRecord(shared);
     if (legacy) { const floor = Math.max(legacy.lastRevision, legacy.want.kind === "put" ? legacy.want.body.revision : 0); order = Math.max(order, nextCounter(floor)); revision = Math.max(revision, floor); }
-    for (const intent of this.snapshot().intents) {
-      if (intent.id !== id) continue;
+    for (const intent of this.intentsFor(id)) {
       order = Math.max(order, nextCounter(intent.order));
       revision = Math.max(revision, intent.lastRevision);
     }
@@ -139,8 +180,8 @@ export class DrawingJournal {
     const floor = Math.max(legacy.lastRevision, legacy.want.kind === "put" ? legacy.want.body.revision : 0);
     const completed = this.completion(id);
     if (completed && completed.order >= floor) { this.storage.removeItem(key); return; }
-    for (const stage of this.snapshot().intents) {
-      if (stage.id !== id || stage.order !== floor) continue;
+    for (const stage of this.intentsFor(id)) {
+      if (stage.order !== floor) continue;
       if (legacy.want.kind === "put" && !legacy.want.reserved && legacy.want.body.revision === 0 && (stage.want.kind !== "put" || stage.want.body.revision <= floor)) continue;
       const want: Want = legacy.want.kind === "put" && stage.want.kind === "put" ? {
         kind: "put", reserved: true, body: { ...legacy.want.body, revision: legacy.want.reserved || legacy.want.body.revision > 0 ? legacy.want.body.revision : stage.want.body.revision },
@@ -184,8 +225,8 @@ export class DrawingJournal {
       }
       let current = this.current(id);
       if (current && (this.retired(current) || !this.staged(current))) { this.storage.removeItem(recordKey(id)); current = null; }
-      for (const intent of this.snapshot().intents) {
-        if (intent.id === id && (!current || compareIntent(intent, current) > 0)) current = intent;
+      for (const intent of this.intentsFor(id)) {
+        if (!current || compareIntent(intent, current) > 0) current = intent;
       }
       if (current) this.storage.setItem(recordKey(id), JSON.stringify(current));
       return current;
@@ -226,6 +267,7 @@ export class DrawingJournal {
       this.storage.setItem(completionKey(intent.id), JSON.stringify(completed));
       for (const stage of retired.sort(compareIntent)) this.retire(stage);
       if (shared) this.retire(shared);
+      this.pruneCompletions();
     });
   }
 }

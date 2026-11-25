@@ -157,7 +157,9 @@ function historyRows(tape: TradeTape, startKey: number): TradeRow[] {
 }
 
 function withNewest(state: TapeState, entries: readonly TapeEntry[]): TapeState {
-  return state.holding ? { ...state, pending: [...entries, ...state.pending] } : { ...state, live: newestFirstCap([...entries, ...state.live]) };
+  return state.holding
+    ? { ...state, pending: newestFirstCap([...entries, ...state.pending]) }
+    : { ...state, live: newestFirstCap([...entries, ...state.live]) };
 }
 
 function newestEntry(state: TapeState): TapeEntry | undefined {

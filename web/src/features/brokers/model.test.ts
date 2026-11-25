@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { FeedBrokers } from "../../api/generated/FeedBrokers";
-import { EMPTY_BROKER_STATE, cumulativeAt, halfHourTicks, lineSegments, reduceBrokers, sortedRows, startedAt, type BrokerEvent, type BrokerState } from "./model";
+import { EMPTY_BROKER_STATE, MAX_LIVE_BROKER_COLUMNS, cumulativeAt, halfHourTicks, lineSegments, reduceBrokerEvents, reduceBrokers, sortedRows, startedAt, type BrokerEvent, type BrokerState } from "./model";
 
 const member = (code: string, qty: number) => ({ code, name: `사${code}`, qty, qtyChange: 0 });
 const snapshot = (t: number, buys: [string, number][], sells: [string, number][]): BrokerEvent => ({
@@ -108,5 +108,17 @@ describe("거래원 시간 눈금", () => {
   it("스냅샷이 없거나 하나면 눈금이 없다", () => {
     expect(halfHourTicks([])).toEqual([]);
     expect(halfHourTicks([at("09:10:00")])).toEqual([]);
+  });
+});
+
+describe("실시간 거래원 묶음과 압축", () => {
+  it("열 수가 상한을 넘으면 같은 분의 스냅샷을 합쳐 열 수를 줄이고 최종 누적을 유지한다", () => {
+    const events: BrokerEvent[] = Array.from({ length: MAX_LIVE_BROKER_COLUMNS + 60 }, (_, i) =>
+      snapshot(60 + i * 5, [["a", (i + 1) * 10]], [["b", (i + 1) * 3]]),
+    );
+    const state = reduceBrokerEvents(EMPTY_BROKER_STATE, events);
+    expect(state.grid.times.length).toBeLessThanOrEqual(MAX_LIVE_BROKER_COLUMNS);
+    expect(row(state, "a").cells.at(-1)?.cumulative).toBe((MAX_LIVE_BROKER_COLUMNS + 60) * 10);
+    expect(row(state, "b").cells.at(-1)?.cumulative).toBe(-(MAX_LIVE_BROKER_COLUMNS + 60) * 3);
   });
 });

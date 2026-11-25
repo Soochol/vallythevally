@@ -90,11 +90,91 @@ export function widestSoFar(previous: ColumnWidths, texts: readonly [string, str
   return [Math.max(previous[0], texts[0].length), Math.max(previous[1], texts[1].length), Math.max(previous[2], texts[2].length)];
 }
 
+export const MAX_LIVE_PROGRAM_LINES = 600;
+export const MAX_PROGRAM_TREND_POINTS = 400;
+
+export interface ProgramLiveState {
+  readonly firstLiveTime: string | null;
+  readonly latest: ProgramRow | null;
+  readonly lines: readonly ProgramLine[];
+  readonly trend: readonly number[];
+  readonly sequence: number;
+}
+
+export const EMPTY_PROGRAM_LIVE: ProgramLiveState = {
+  firstLiveTime: null,
+  latest: null,
+  lines: [],
+  trend: [],
+  sequence: 0,
+};
+
+export type ProgramLiveAction = { readonly type: "row"; readonly row: FeedProgramRow } | { readonly type: "gap"; readonly at: number };
+
+function downsampleMinMax(values: readonly number[], maxPoints: number): number[] {
+  const n = values.length;
+  if (n <= maxPoints || maxPoints < 4) return [...values];
+  const interior = n - 2;
+  const buckets = Math.max(1, Math.floor((maxPoints - 2) / 2));
+  const out: number[] = [values[0]!];
+  for (let b = 0; b < buckets; b++) {
+    const start = 1 + Math.floor((b * interior) / buckets);
+    const end = 1 + Math.floor(((b + 1) * interior) / buckets);
+    if (start >= end) continue;
+    let minVal = values[start]!;
+    let maxVal = minVal;
+    let minIdx = start;
+    let maxIdx = start;
+    for (let i = start + 1; i < end; i++) {
+      const value = values[i]!;
+      if (value < minVal) { minVal = value; minIdx = i; }
+      if (value > maxVal) { maxVal = value; maxIdx = i; }
+    }
+    if (minIdx === maxIdx) out.push(minVal);
+    else if (minIdx < maxIdx) out.push(minVal, maxVal);
+    else out.push(maxVal, minVal);
+  }
+  out.push(values[n - 1]!);
+  return out;
+}
+
+export function reduceProgramLive(state: ProgramLiveState, action: ProgramLiveAction): ProgramLiveState {
+  if (action.type === "gap") {
+    if (state.lines.at(-1)?.kind === "gap") return state;
+    const gap: ProgramLine = { kind: "gap", key: `gap-${state.sequence}`, time: formatKstClockSeconds(action.at) };
+    const nextLines = state.lines.length >= MAX_LIVE_PROGRAM_LINES
+      ? [...state.lines.slice(-(MAX_LIVE_PROGRAM_LINES - 1)), gap]
+      : [...state.lines, gap];
+    return { ...state, lines: nextLines, sequence: state.sequence + 1 };
+  }
+  const row = liveRow(action.row, state.sequence);
+  const firstLiveTime = state.firstLiveTime ?? row.time;
+  let nextLines = state.lines;
+  if (row.netQtyChange !== 0) {
+    const entry: ProgramLine = { kind: "row", row };
+    nextLines = state.lines.length >= MAX_LIVE_PROGRAM_LINES
+      ? [...state.lines.slice(-(MAX_LIVE_PROGRAM_LINES - 1)), entry]
+      : [...state.lines, entry];
+  }
+  const appendedTrend = [...state.trend, row.netQty];
+  const trend = appendedTrend.length > MAX_PROGRAM_TREND_POINTS
+    ? downsampleMinMax(appendedTrend, Math.floor(MAX_PROGRAM_TREND_POINTS / 2))
+    : appendedTrend;
+  return { firstLiveTime, latest: row, lines: nextLines, trend, sequence: state.sequence + 1 };
+}
+
 export function sparklinePoints(netQtys: readonly number[], width: number, height: number): string {
   if (netQtys.length < 2) return "";
-  const low = Math.min(...netQtys);
-  const span = Math.max(...netQtys) - low || 1;
-  return netQtys.map((value, index) => `${((index / (netQtys.length - 1)) * width).toFixed(2)},${(height - ((value - low) / span) * height).toFixed(2)}`).join(" ");
+  const sampled = downsampleMinMax(netQtys, Math.max(4, Math.round(width) * 2));
+  let low = sampled[0]!;
+  let high = low;
+  for (let i = 1; i < sampled.length; i++) {
+    const value = sampled[i]!;
+    if (value < low) low = value;
+    if (value > high) high = value;
+  }
+  const span = high - low || 1;
+  return sampled.map((value, index) => `${((index / (sampled.length - 1)) * width).toFixed(2)},${(height - ((value - low) / span) * height).toFixed(2)}`).join(" ");
 }
 
 export const isNoProgramData = (history: readonly ProgramRow[], live: readonly ProgramLine[]): boolean => history.length === 0 && rowsOf(live).length === 0;

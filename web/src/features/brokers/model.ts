@@ -151,6 +151,74 @@ export function appendSnapshots(
   return { grid: { times, gapBefore, rows }, gapPending: false };
 }
 
+export const MAX_LIVE_BROKER_COLUMNS = 720;
+
+export function compactBrokerGrid(grid: BrokerGrid): BrokerGrid {
+  const n = grid.times.length;
+  if (n <= MAX_LIVE_BROKER_COLUMNS) return grid;
+  const groups: { start: number; end: number }[] = [];
+  for (let i = 0; i < n; i++) {
+    const minute = Math.floor(grid.times[i]! / 60);
+    const prev = groups[groups.length - 1];
+    if (prev && Math.floor(grid.times[prev.end]! / 60) === minute && !grid.gapBefore[i]) {
+      prev.end = i;
+    } else {
+      groups.push({ start: i, end: i });
+    }
+  }
+  if (groups.length === n) return grid;
+  const times = groups.map((group) => grid.times[group.end]!);
+  const gapBefore = groups.map((group) => grid.gapBefore[group.start]!);
+  const rows: BrokerRow[] = grid.rows.map((row) => {
+    const cells = new Array<BrokerCell>(groups.length);
+    let previousCumulative: number | null = null;
+    for (let g = 0; g < groups.length; g++) {
+      const { start, end } = groups[g]!;
+      let latestPresent: BrokerCell | null = null;
+      for (let i = end; i >= start; i--) {
+        const cell = row.cells[i]!;
+        if (cell.present && cell.cumulative !== null) {
+          latestPresent = cell;
+          break;
+        }
+      }
+      if (latestPresent === null || latestPresent.cumulative === null) {
+        cells[g] = ABSENT;
+      } else {
+        const cumulative = latestPresent.cumulative;
+        cells[g] = { present: true, cumulative, net: cumulative - (previousCumulative ?? 0), first: previousCumulative === null };
+        previousCumulative = cumulative;
+      }
+    }
+    return { code: row.code, name: row.name, cells };
+  });
+  return { times, gapBefore, rows };
+}
+
+export function reduceBrokerEvents(state: BrokerState, events: readonly BrokerEvent[]): BrokerState {
+  let next = state;
+  let batch: FeedBrokers[] = [];
+  const flush = () => {
+    if (batch.length === 0) return;
+    next = appendSnapshots(next, batch, []);
+    batch = [];
+  };
+  for (const event of events) {
+    if (event.type === "snapshot") {
+      batch.push(event.brokers);
+    } else {
+      flush();
+      next = reduceBrokers(next, event);
+    }
+  }
+  flush();
+  if (next.grid.times.length > MAX_LIVE_BROKER_COLUMNS) {
+    const compacted = compactBrokerGrid(next.grid);
+    if (compacted !== next.grid) next = { ...next, grid: compacted };
+  }
+  return next;
+}
+
 export function reduceBrokers(state: BrokerState, event: BrokerEvent): BrokerState {
   switch (event.type) {
     case "snapshot":

@@ -1,6 +1,6 @@
 import type { IChartApi, IPaneApi, IPanePrimitive, IPrimitivePaneRenderer, IPrimitivePaneView, PaneAttachedParameter, Time } from "lightweight-charts";
 import type { UnixSeconds } from "../api/generated/UnixSeconds";
-import { toChartTime } from "./time";
+import { kstDay, toChartTime } from "./time";
 
 type Target = Parameters<IPrimitivePaneRenderer["draw"]>[0];
 type TimedBars = readonly { readonly t: UnixSeconds }[];
@@ -12,8 +12,6 @@ export interface ReplayDaysSource {
   color(): string;
 }
 
-const KST_OFFSET = 32_400;
-const DAY_SECONDS = 86_400;
 const DAY_MS = 86_400_000;
 const LINE_HEIGHT_PX = 2;
 const EMPTY_RUNS: readonly [number, number][] = [];
@@ -27,23 +25,21 @@ function parseDayNumber(day: string): number | null {
   return Math.floor(Date.UTC(year, month - 1, date) / DAY_MS);
 }
 
-function kstDayNumber(t: UnixSeconds): number {
-  return Math.floor((t + KST_OFFSET) / DAY_SECONDS);
-}
-
-export function collectedRuns(bars: TimedBars, days: ReadonlySet<string>): [number, number][] {
-  if (bars.length === 0 || days.size === 0) return [];
+function parseDayNumbers(days: ReadonlySet<string>): Set<number> {
   const dayNumbers = new Set<number>();
   for (const day of days) {
     const parsed = parseDayNumber(day);
     if (parsed !== null) dayNumbers.add(parsed);
   }
-  if (dayNumbers.size === 0) return [];
+  return dayNumbers;
+}
 
+function collectedRunsForDayNumbers(bars: TimedBars, dayNumbers: ReadonlySet<number>): [number, number][] {
+  if (bars.length === 0 || dayNumbers.size === 0) return [];
   const runs: [number, number][] = [];
   let start = -1;
   for (let i = 0; i < bars.length; i++) {
-    const collected = dayNumbers.has(kstDayNumber(bars[i]!.t));
+    const collected = dayNumbers.has(kstDay(bars[i]!.t));
     if (collected && start === -1) start = i;
     else if (!collected && start !== -1) {
       runs.push([start, i - 1]);
@@ -54,13 +50,30 @@ export function collectedRuns(bars: TimedBars, days: ReadonlySet<string>): [numb
   return runs;
 }
 
+export function collectedRuns(bars: TimedBars, days: ReadonlySet<string>): [number, number][] {
+  if (bars.length === 0 || days.size === 0) return [];
+  return collectedRunsForDayNumbers(bars, parseDayNumbers(days));
+}
+
 export class ReplayDays {
   private attachedPane: IPaneApi<Time> | null = null;
   private readonly primitive: PaneReplayDays;
-  private cached: { bars: TimedBars; days: ReadonlySet<string> | null; runs: readonly [number, number][] } = {
+  private cached: {
+    bars: TimedBars;
+    length: number;
+    firstT: UnixSeconds | null;
+    lastT: UnixSeconds | null;
+    days: ReadonlySet<string> | null;
+    dayNumbers: ReadonlySet<number>;
+    runs: [number, number][];
+  } = {
     bars: [],
+    length: 0,
+    firstT: null,
+    lastT: null,
     days: null,
-    runs: EMPTY_RUNS,
+    dayNumbers: new Set(),
+    runs: [],
   };
 
   constructor(private readonly chart: IChartApi, private readonly source: ReplayDaysSource) {
@@ -83,7 +96,43 @@ export class ReplayDays {
     const bars = this.source.bars();
     if (bars.length === 0) return EMPTY_RUNS;
     if (this.cached.bars !== bars || this.cached.days !== days) {
-      this.cached = { bars, days, runs: collectedRuns(bars, days) };
+      const length = bars.length;
+      const firstT = bars[0]!.t;
+      const lastT = bars[length - 1]!.t;
+      if (
+        this.cached.days === days
+        && length === this.cached.length
+        && firstT === this.cached.firstT
+        && lastT === this.cached.lastT
+      ) {
+        this.cached.bars = bars;
+      } else if (
+        this.cached.days === days
+        && length === this.cached.length + 1
+        && this.cached.length > 0
+        && firstT === this.cached.firstT
+        && bars[this.cached.length - 1]!.t === this.cached.lastT
+      ) {
+        if (this.cached.dayNumbers.has(kstDay(lastT))) {
+          const tail = this.cached.runs[this.cached.runs.length - 1];
+          if (tail && tail[1] === length - 2) tail[1] = length - 1;
+          else this.cached.runs.push([length - 1, length - 1]);
+        }
+        this.cached.bars = bars;
+        this.cached.length = length;
+        this.cached.lastT = lastT;
+      } else {
+        const dayNumbers = this.cached.days === days ? this.cached.dayNumbers : parseDayNumbers(days);
+        this.cached = {
+          bars,
+          length,
+          firstT,
+          lastT,
+          days,
+          dayNumbers,
+          runs: collectedRunsForDayNumbers(bars, dayNumbers),
+        };
+      }
     }
     return this.cached.runs;
   }

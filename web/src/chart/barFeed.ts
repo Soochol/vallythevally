@@ -30,12 +30,18 @@ export function prependOlder(h: History, page: BarsPage): { history: History; ad
   };
 }
 
+const displayCache = new WeakMap<History, Bar[]>();
+
 /** 차트에 넘길 봉 열: 확정 봉 뒤에 현재 봉. */
 export function displayBars(h: History): Bar[] {
   const last = h.bars[h.bars.length - 1];
   if (!h.current) return h.bars;
   if (last && h.current.t <= last.t) return h.bars;
-  return h.bars.concat(h.current);
+  const cached = displayCache.get(h);
+  if (cached) return cached;
+  const next = h.bars.concat(h.current);
+  displayCache.set(h, next);
+  return next;
 }
 
 function newestT(h: History): UnixSeconds | null {
