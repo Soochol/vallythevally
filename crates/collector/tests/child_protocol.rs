@@ -6,9 +6,15 @@ use std::time::Duration;
 
 use collector::protocol::{Command as DaemonCommand, Event, KeyName, RealType, Registration, SessionState, encode_line, parse_event};
 use collector::raw_read::{RawContent, RawItem, read_day};
+use domain::{KstDate, StockCode};
 use futures::{SinkExt, StreamExt};
 use serde_json::{Value, json};
+use server::api::BrokerDaySource;
+use server::clock::kst;
+use server::collected::Collected;
+use server::collected_store::CollectedStore;
 use server::config::Secret;
+use server::shared_data::{CollectorPaths, FlowCursor, flow_path};
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::net::TcpListener;
 use tokio::process::{Child, ChildStderr, ChildStdin, ChildStdout, Command};
@@ -479,4 +485,129 @@ async fn the_shared_option_belongs_to_the_child_only() {
     let output = Command::new(env!("CARGO_BIN_EXE_collector")).args(["collect", "--shared", "/nowhere"]).env_clear().output().await.unwrap();
     assert_eq!(output.status.code(), Some(2));
     assert!(String::from_utf8_lossy(&output.stderr).contains("--child"));
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_child_writes_all_new_flow_kinds_readable_by_collected() {
+    let kiwoom = Kiwoom::start().await;
+    let shared = tempfile::tempdir().unwrap();
+    let mut child = spawn_child(&kiwoom, &["--shared", shared.path().to_str().unwrap()]);
+    child.send(&token_command(TOKEN, 1)).await;
+    let reg = Registration::new(
+        "r1",
+        vec!["005930".to_owned()],
+        vec![RealType::Trade, RealType::ProgramTrade, RealType::VolatilityInterruption, RealType::ExpectedTrade],
+    )
+    .unwrap();
+    child.send(&DaemonCommand::Register(reg)).await;
+    child.until("live", |event| matches!(event, Event::Live)).await;
+
+    const TOTAL_FRAMES: u64 = 500;
+    for index in 0..TOTAL_FRAMES {
+        let sec = index % 60;
+        let min = (index / 60) % 60;
+        let hhmmss = format!("09{min:02}{sec:02}");
+        let payload = match index % 5 {
+            0 | 4 => {
+                let qty = if index % 2 == 0 { "+5" } else { "-3" };
+                let venue = if index % 2 == 0 { "KRX" } else { "NXT" };
+                json!({
+                    "trnm": "REAL",
+                    "data": [{
+                        "type": "0B",
+                        "item": "005930_AL",
+                        "values": {"20": hhmmss, "10": "+71000", "15": qty, "1313": "355", "9081": venue}
+                    }]
+                })
+            }
+            1 => json!({
+                "trnm": "REAL",
+                "data": [{
+                    "type": "0w",
+                    "item": "005930_AL",
+                    "values": {
+                        "20": hhmmss, "10": "+71000", "202": "100", "204": "7", "206": "250",
+                        "208": "18", "210": "+150", "211": "+10", "212": "+11", "213": "+1"
+                    }
+                }]
+            }),
+            2 => {
+                let item = if index % 10 == 2 { "005930" } else { "005930_AL" };
+                json!({
+                    "trnm": "REAL",
+                    "data": [{
+                        "type": "1h",
+                        "item": item,
+                        "values": {
+                            "9001": "005930", "9068": "1", "9069": "1", "1221": "78000", "1223": hhmmss,
+                            "1224": "000000", "1225": "1", "1236": "71000", "1237": "72000",
+                            "1238": "9.86", "1239": "8.33", "1489": "9.86", "1490": "1"
+                        }
+                    }]
+                })
+            }
+            _ => json!({
+                "trnm": "REAL",
+                "data": [{
+                    "type": "0H",
+                    "item": "005930_AL",
+                    "values": {"20": hhmmss, "10": "+71500", "11": "+500", "12": "+0.70", "15": "1200", "13": "50000", "25": "2"}
+                }]
+            }),
+        };
+        kiwoom.push(&payload.to_string());
+    }
+
+    let mut frames = 0u64;
+    while frames < TOTAL_FRAMES + 2 {
+        if let Event::Heartbeat { frames: seen, .. } = child.until("heartbeat", |event| matches!(event, Event::Heartbeat { .. })).await {
+            frames += seen;
+        }
+    }
+    assert_eq!(frames, TOTAL_FRAMES + 2);
+
+    child.send(&DaemonCommand::Shutdown).await;
+    let (status, stderr, data, _) = child.finish().await;
+    assert_eq!(status.code(), Some(0), "{stderr}");
+    assert!(!stderr.contains("종목 흐름 블록을 쓰지 못했습니다"), "{stderr}");
+
+    let day = only_day(data.path());
+    let day_str = day.to_string();
+    for (type_code, expected_count) in [("0B", 200usize), ("0w", 100), ("1h", 100), ("0H", 100)] {
+        let blocks = FlowCursor::new(flow_path(shared.path(), &day_str, type_code, "005930", "k1")).read_new().unwrap();
+        let recv_times: Vec<i64> = blocks.iter().flat_map(|b| b.rows.iter().map(|r| r.recv_ms)).collect();
+        assert_eq!(recv_times.len(), expected_count, "{type_code}");
+        assert!(recv_times.windows(2).all(|w| w[0] <= w[1]), "{type_code} not ordered");
+    }
+
+    let collected = Collected::new(CollectedStore::new());
+    let paths = CollectorPaths::shared_only(shared.path().to_path_buf());
+    let stock = StockCode::parse("005930").unwrap();
+    let date = KstDate::parse_yyyymmdd(&day_str).unwrap();
+    let now = kst(date, 12, 0, 0);
+
+    assert_eq!(collected.ticks_days(paths.clone(), stock, now).await.unwrap(), vec![day_str.clone()]);
+    assert_eq!(collected.program_days(paths.clone(), stock, now).await.unwrap(), vec![day_str.clone()]);
+    assert_eq!(collected.vi_days(paths.clone(), stock, now).await.unwrap(), vec![day_str.clone()]);
+    assert_eq!(collected.expected_days(paths.clone(), stock, now).await.unwrap(), vec![day_str.clone()]);
+
+    let ticks = collected.ticks_day(paths.clone(), stock, date, &day_str, None, now).await.unwrap();
+    assert_eq!(ticks.source, BrokerDaySource::Flow);
+    assert_eq!(ticks.snapshots.len(), 200);
+    assert!(ticks.snapshots.windows(2).all(|w| w[0].recv_ms <= w[1].recv_ms));
+
+    let program = collected.program_day(paths.clone(), stock, date, &day_str, None, now).await.unwrap();
+    assert_eq!(program.source, BrokerDaySource::Flow);
+    assert_eq!(program.snapshots.len(), 100);
+    assert!(program.snapshots.windows(2).all(|w| w[0].recv_ms <= w[1].recv_ms));
+
+    let vi = collected.vi_day(paths.clone(), stock, date, &day_str, None, now).await.unwrap();
+    assert_eq!(vi.source, BrokerDaySource::Flow);
+    assert_eq!(vi.snapshots.len(), 100);
+    assert!(vi.snapshots.windows(2).all(|w| w[0].recv_ms <= w[1].recv_ms));
+
+    let expected = collected.expected_day(paths, stock, date, &day_str, None, now).await.unwrap();
+    assert_eq!(expected.source, BrokerDaySource::Flow);
+    assert_eq!(expected.snapshots.len(), 100);
+    assert!(expected.snapshots.windows(2).all(|w| w[0].recv_ms <= w[1].recv_ms));
 }
