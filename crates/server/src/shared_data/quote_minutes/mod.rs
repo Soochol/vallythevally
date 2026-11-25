@@ -4,7 +4,7 @@ mod read;
 
 pub use files::{ClosedQuotes, CurrentQuotes, LiveQuoteWriter, closed_day_dir, live_day_dir, write_closed_quotes};
 pub use fold::{BOOK_DEPTH, BookLevel, BookRow, Ladder, LevelQty, QuoteMinute, QuoteMinuteBuilder, VenueQuote};
-pub use read::{QuoteDay, quote_days, read_quote_day};
+pub use read::{QuoteDay, live_quote_days_for_stock, live_quote_stock_keys, quote_days, read_quote_day};
 
 #[cfg(test)]
 mod tests {

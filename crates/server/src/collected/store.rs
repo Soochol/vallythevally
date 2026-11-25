@@ -3,7 +3,7 @@ use std::path::Path;
 use domain::KstDate;
 use duckdb::params;
 
-use crate::book_replay::store::{bucket_file_name, file_exists, open_connection, path_str};
+use crate::collected_store::{bucket_file_name, file_exists, open_connection, path_str};
 use crate::clock::kst;
 
 use super::kind::{CollectedKind, FidValues};

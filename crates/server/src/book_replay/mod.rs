@@ -1,8 +1,7 @@
-pub(crate) mod day_index;
 mod live;
-pub(crate) mod store;
+mod store;
 
-use std::collections::{BTreeSet, HashMap, VecDeque};
+use std::collections::{BTreeSet, HashMap};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
@@ -11,69 +10,21 @@ use axum::extract::{Path, Query, State};
 use axum::response::Json;
 use axum::routing::get;
 use domain::{KstDate, StockCode, Symbol};
-use tokio::sync::Semaphore;
 
 use crate::api;
+use crate::collected_store::{CollectedStore, DayIndexState, FileStamp, StampLru, read_stamp};
 use crate::http::{ApiFailure, AppState};
 
-use self::day_index::{DayIndexCache, DayIndexState, FileStamp, read_stamp};
-
-const RESPONSE_CACHE_CAPACITY: usize = 16;
-const MAX_CONCURRENT_QUERIES: usize = 2;
-
-struct CachedResponse {
-    stamp: FileStamp,
-    body: Arc<api::BookReplayDay>,
-}
-
-struct ResponseCache {
-    order: VecDeque<(String, String)>,
-    entries: HashMap<(String, String), CachedResponse>,
-}
-
-impl ResponseCache {
-    fn new() -> Self {
-        Self { order: VecDeque::with_capacity(RESPONSE_CACHE_CAPACITY), entries: HashMap::with_capacity(RESPONSE_CACHE_CAPACITY) }
-    }
-
-    fn get(&mut self, key: &(String, String), stamp: &FileStamp) -> Option<Arc<api::BookReplayDay>> {
-        let entry = self.entries.get(key)?;
-        if &entry.stamp != stamp {
-            return None;
-        }
-        let body = entry.body.clone();
-        if let Some(pos) = self.order.iter().position(|k| k == key) {
-            self.order.remove(pos);
-        }
-        self.order.push_back(key.clone());
-        Some(body)
-    }
-
-    fn insert(&mut self, key: (String, String), stamp: FileStamp, body: Arc<api::BookReplayDay>) {
-        if let Some(pos) = self.order.iter().position(|k| k == &key) {
-            self.order.remove(pos);
-        } else if self.order.len() >= RESPONSE_CACHE_CAPACITY
-            && let Some(oldest) = self.order.pop_front()
-        {
-            self.entries.remove(&oldest);
-        }
-        self.order.push_back(key.clone());
-        self.entries.insert(key, CachedResponse { stamp, body });
-    }
-}
-
 pub struct BookReplay {
-    day_index: DayIndexCache,
-    responses: Mutex<ResponseCache>,
-    permits: Arc<Semaphore>,
+    store: Arc<CollectedStore>,
+    responses: Mutex<StampLru<Arc<api::BookReplayDay>>>,
 }
 
 impl BookReplay {
-    pub fn new() -> Arc<Self> {
+    pub fn new(store: Arc<CollectedStore>) -> Arc<Self> {
         Arc::new(Self {
-            day_index: DayIndexCache::new(),
-            responses: Mutex::new(ResponseCache::new()),
-            permits: Arc::new(Semaphore::new(MAX_CONCURRENT_QUERIES)),
+            store,
+            responses: Mutex::new(StampLru::new()),
         })
     }
 }
@@ -116,7 +67,7 @@ async fn days(State(st): State<Arc<AppState>>, Path(code): Path<String>) -> Resu
     let replay = st.book_replay.clone();
     let stock_str = stock.as_str().to_owned();
     let days = tokio::task::spawn_blocking(move || {
-        let mut merged: BTreeSet<String> = replay.day_index.collected_days(&dir, &stock_str)?.into_iter().collect();
+        let mut merged: BTreeSet<String> = replay.store.collected_days(&dir, &stock_str)?.into_iter().collect();
         merged.extend(live::live_days(&dir, &shared, &stock_str)?);
         Ok::<Vec<String>, String>(merged.into_iter().collect())
     })
@@ -143,7 +94,7 @@ async fn day_replay(State(st): State<Arc<AppState>>, Path(code): Path<String>, Q
     {
         return Ok(Json(cached));
     }
-    let permit = st.book_replay.permits.clone().acquire_owned().await.map_err(|e| internal_error("호가 복기 조회 허가를 얻지 못했습니다", e.to_string()))?;
+    let permit = st.book_replay.store.acquire_permit().await.map_err(|e| internal_error("호가 복기 조회 허가를 얻지 못했습니다", e))?;
     let replay = st.book_replay.clone();
     let date_owned = date_str.to_owned();
     let shared = tokio::task::spawn_blocking(move || {
@@ -176,7 +127,7 @@ fn load_or_cached_day(replay: &BookReplay, dir: &std::path::Path, shared_dir: &s
 }
 
 fn load_day(replay: &BookReplay, dir: &std::path::Path, shared_dir: &std::path::Path, stock: StockCode, date: KstDate, date_str: &str) -> Result<(Option<FileStamp>, api::BookReplayDay), String> {
-    let (stamp, state) = replay.day_index.load(dir, date_str)?;
+    let (stamp, state) = replay.store.load_day_index(dir, date_str)?;
     let index = match state {
         DayIndexState::Missing => return Ok((None, live::read_live_day(shared_dir, stock, date, date_str)?)),
         DayIndexState::UnsupportedVersion => return Ok((stamp, empty_day(stock, date_str.to_owned(), api::BookReplayCoverage::DayNotCollected))),
@@ -241,7 +192,7 @@ mod tests {
         )
         .unwrap();
         write_book_parquet(&day_dir.join("0D").join("056.parquet"), recv_ms, 71_000);
-        let replay = BookReplay::new();
+        let replay = BookReplay::new(CollectedStore::new());
         let shared = tmp.path().join("shared");
         let stock = StockCode::parse("005930").unwrap();
         let key = ("005930".to_owned(), "20261123".to_owned());

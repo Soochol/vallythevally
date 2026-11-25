@@ -3,7 +3,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
-use server::shared_data::FlowRow;
+use server::shared_data::{FlowLinkEvent as LinkEvent, FlowRow};
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 use tokio::time::{Instant, MissedTickBehavior, interval_at, timeout};
@@ -11,7 +11,7 @@ use tokio_tungstenite::tungstenite::Utf8Bytes;
 
 use super::FlowKindSpec;
 use super::read::{CompiledKind, read_rows};
-use super::store::{FileFlowStore, LinkEvent};
+use super::store::FileFlowStore;
 use crate::kst::KstTime;
 
 pub const FLUSH_EVERY: Duration = Duration::from_secs(1);

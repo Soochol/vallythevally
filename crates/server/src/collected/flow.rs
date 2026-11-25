@@ -3,13 +3,12 @@ use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::SystemTime;
 
 use domain::{KstDate, KstTime};
-use serde::Deserialize;
 
 use crate::clock::kst;
-use crate::shared_data::{FlowCursor, flow_folder, flow_links_path};
+use crate::collected_store::{FileStamp, read_path_stamp};
+use crate::shared_data::{FlowCursor, FlowLinkEvent, FlowLinkLine, flow_folder, flow_links_path, read_flow_links};
 
 use super::kind::{CollectedKind, FidValues};
 
@@ -27,17 +26,11 @@ pub(super) struct FlowSlice<V> {
     pub reset: bool,
 }
 
-#[derive(Clone, PartialEq, Eq)]
-struct LinksStamp {
-    len: u64,
-    modified: Option<SystemTime>,
-}
-
 struct KeyTail {
     cursor: FlowCursor,
     first_row_ms: Option<i64>,
-    links_stamp: Option<LinksStamp>,
-    link_events: Vec<LinkLine>,
+    links_stamp: Option<FileStamp>,
+    link_events: Vec<FlowLinkLine>,
     last_error: Option<String>,
 }
 
@@ -53,35 +46,22 @@ impl KeyTail {
     }
 
     fn refresh_links(&mut self, path: &Path) {
-        let meta = match std::fs::metadata(path) {
-            Ok(meta) => meta,
-            Err(e) if e.kind() == ErrorKind::NotFound => {
+        let stamp = match read_path_stamp(path) {
+            Ok(Some(stamp)) => stamp,
+            Ok(None) => {
                 self.links_stamp = None;
                 self.link_events.clear();
                 return;
             }
             Err(_) => return,
         };
-        let stamp = LinksStamp { len: meta.len(), modified: meta.modified().ok() };
         if self.links_stamp.as_ref() == Some(&stamp) {
             return;
         }
-        match std::fs::read_to_string(path) {
-            Ok(text) => {
-                let mut events: Vec<LinkLine> = text
-                    .lines()
-                    .filter(|line| !line.trim().is_empty())
-                    .filter_map(|line| serde_json::from_str::<LinkLine>(line).ok())
-                    .collect();
-                events.sort_by_key(|line| line.t);
-                self.link_events = events;
-                self.links_stamp = Some(stamp);
-            }
-            Err(e) if e.kind() == ErrorKind::NotFound => {
-                self.links_stamp = None;
-                self.link_events.clear();
-            }
-            Err(_) => {}
+        if let Ok(mut events) = read_flow_links(path) {
+            events.sort_by_key(|line| line.t);
+            self.link_events = events;
+            self.links_stamp = Some(stamp);
         }
     }
 }
@@ -326,29 +306,13 @@ fn merge_into_rows<V>(rows: &mut Vec<(i64, V)>, mut new_rows: Vec<(i64, V)>) -> 
     true
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
-#[serde(rename_all = "lowercase")]
-enum LinkEvent {
-    Start,
-    Live,
-    Down,
-    Alive,
-    End,
-}
-
-#[derive(Debug, Clone, Copy, Deserialize)]
-struct LinkLine {
-    t: i64,
-    event: LinkEvent,
-}
-
-fn key_coverage(events: &[LinkLine], now_ms: i64) -> (Vec<(i64, i64)>, bool) {
+fn key_coverage(events: &[FlowLinkLine], now_ms: i64) -> (Vec<(i64, i64)>, bool) {
     let mut covered = Vec::new();
     let mut live_since: Option<i64> = None;
     let mut last_t: Option<i64> = None;
     for ev in events {
         match ev.event {
-            LinkEvent::Start => {
+            FlowLinkEvent::Start => {
                 if let Some(start) = live_since.take() {
                     let end = last_t.unwrap_or(start);
                     if end > start {
@@ -356,13 +320,13 @@ fn key_coverage(events: &[LinkLine], now_ms: i64) -> (Vec<(i64, i64)>, bool) {
                     }
                 }
             }
-            LinkEvent::Live => {
+            FlowLinkEvent::Live => {
                 if live_since.is_none() {
                     live_since = Some(ev.t);
                 }
             }
-            LinkEvent::Alive => {}
-            LinkEvent::Down | LinkEvent::End => {
+            FlowLinkEvent::Alive => {}
+            FlowLinkEvent::Down | FlowLinkEvent::End => {
                 if let Some(start) = live_since.take()
                     && ev.t > start
                 {
@@ -585,5 +549,20 @@ mod tests {
         assert_eq!(rows, vec![(10_200, "a"), (10_500, "b"), (10_500, "c"), (10_900, "d")]);
         assert!(merge_into_rows(&mut rows, vec![(10_400, "x")]));
         assert_eq!(rows, vec![(10_200, "a"), (10_400, "x"), (10_500, "b"), (10_500, "c"), (10_900, "d")]);
+    }
+
+    #[test]
+    fn refresh_links_preserves_complete_lines_before_torn_utf8_tail() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = flow_links_path(tmp.path(), "20261124", "k1");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        let mut raw = format!("{{\"t\":{},\"event\":\"live\"}}\n{{\"t\":{},\"event\":\"alive\"}}\n", ts(8, 0, 0).unix() * 1000, ts(9, 0, 0).unix() * 1000).into_bytes();
+        raw.extend_from_slice(b"{\"t\":9999999999999,\"event\":\"\xec\x95");
+        std::fs::write(&path, raw).unwrap();
+        let mut tail = KeyTail::new(PathBuf::new());
+        tail.refresh_links(&path);
+        assert_eq!(tail.link_events.len(), 2);
+        assert_eq!(tail.link_events[0].event, FlowLinkEvent::Live);
+        assert_eq!(tail.link_events[1].event, FlowLinkEvent::Alive);
     }
 }

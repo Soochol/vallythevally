@@ -3,30 +3,13 @@ use std::fs::{self, File, OpenOptions};
 use std::io::{self, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 
-use serde::Serialize;
-use server::shared_data::{FlowDescription, FlowRow, FlowWriter, SYMBOL_FLOW_FOLDER, flow_links_path, flow_path};
+use server::shared_data::{FlowDescription, FlowLinkEvent, FlowLinkLine, FlowRow, FlowWriter, SYMBOL_FLOW_FOLDER, complete_jsonl_prefix, flow_links_path, flow_path};
 
 use crate::finalize::{COMPLETE_FILE_NAME, store_dir};
 use crate::protocol::KeyName;
 
 const STORE_FOLDER: &str = "store";
 const DATE_FOLDER_LEN: usize = 8;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "lowercase")]
-pub(super) enum LinkEvent {
-    Start,
-    Live,
-    Down,
-    Alive,
-    End,
-}
-
-#[derive(Serialize)]
-struct LinkLine {
-    t: i64,
-    event: LinkEvent,
-}
 
 pub struct FileFlowStore {
     shared_dir: PathBuf,
@@ -75,12 +58,12 @@ impl FileFlowStore {
         Ok(())
     }
 
-    pub(super) fn append_link(&mut self, date: u32, t: i64, event: LinkEvent) -> io::Result<()> {
+    pub(super) fn append_link(&mut self, date: u32, t: i64, event: FlowLinkEvent) -> io::Result<()> {
         let path = flow_links_path(&self.shared_dir, &date.to_string(), self.key.as_str());
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent)?;
         }
-        let mut line = serde_json::to_vec(&LinkLine { t, event }).map_err(io::Error::other)?;
+        let mut line = serde_json::to_vec(&FlowLinkLine { t, event }).map_err(io::Error::other)?;
         line.push(b'\n');
         let already_verified = self.verified_links.contains(&path);
         let mut file = OpenOptions::new().read(!already_verified).write(true).create(true).truncate(false).open(&path)?;
@@ -108,7 +91,7 @@ fn complete_lines_len(file: &mut File) -> io::Result<u64> {
     file.seek(SeekFrom::Start(0))?;
     let mut bytes = Vec::new();
     file.read_to_end(&mut bytes)?;
-    Ok(bytes.iter().rposition(|byte| *byte == b'\n').map_or(0, |index| index as u64 + 1))
+    Ok(complete_jsonl_prefix(&bytes).len() as u64)
 }
 
 fn date_folders(folder: &Path) -> io::Result<Vec<u32>> {

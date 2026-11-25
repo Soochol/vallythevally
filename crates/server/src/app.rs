@@ -164,6 +164,7 @@ pub fn application_with_source(inputs: ApplicationInputs, mut system: SystemStat
     }));
     let market_source_board = crate::market_source::status::MarketSourceBoard::start(source_switch.clone(), route.clone(), &keys, link.clone());
     let accounts = crate::trading::Accounts::new(keys.clone(), rest.clone(), account_feed, clock.clone(), system.take_order_switch_store(), db.clone(), symbols.clone());
+    let collected_store = crate::collected_store::CollectedStore::new();
     Arc::new(AppState {
         symbols,
         bars,
@@ -190,8 +191,8 @@ pub fn application_with_source(inputs: ApplicationInputs, mut system: SystemStat
         public_usage: Default::default(),
         shared_data: crate::shared_data::SharedData::new(),
         collector_paths: Arc::new(crate::shared_data::CollectorPathsSlot::new()),
-        book_replay: crate::book_replay::BookReplay::new(),
-        collected: crate::collected::Collected::new(),
+        book_replay: crate::book_replay::BookReplay::new(collected_store.clone()),
+        collected: crate::collected::Collected::new(collected_store),
         heatmap_quotes: Arc::new(crate::heatmap_board::QuoteCache::with_generation(generation.clone())),
         heatmap_flow: Arc::new(crate::heatmap_flow::FlowCache::with_generation(generation.clone())),
         quote_minutes: Arc::new(crate::quote_minutes::QuoteCache::new()),
