@@ -21,7 +21,7 @@ import { SymbolHead } from "../market-window/SymbolHead";
 import { type InfoPager, useInfoPager, useLadderMarket } from "../market-window/useLadderMarket";
 import { EmptyState, ErrorState } from "../overlay/State";
 import { openSystemSettings } from "../system-settings/open";
-import { AccountBand } from "./AccountBand";
+import { AccountBand, type AccountPanelKind } from "./AccountBand";
 import { DragGhost } from "./DragGhost";
 import { HighValueConfirm } from "./HighValueConfirm";
 import { atLivePrice, averageRowPrice, holdingOf, type ProfitUnit, remainingToSell, sellOrderQuantity, toggledUnit } from "./holdingSummary";
@@ -57,7 +57,29 @@ function useHeldWhile<T>(value: T, hold: boolean, same: (a: T, b: T) => boolean 
 const sameLadderPrices = (a: LadderPrices | null, b: LadderPrices | null): boolean =>
   a === b || (a !== null && b !== null && a.sidesSplit === b.sidesSplit && a.prices.length === b.prices.length && a.prices.every((price, row) => price === b.prices[row]));
 
-function OrderBody({ id, code, infoPager, choice, access, balance }: { id: WindowId; code: SymbolCode; infoPager: InfoPager; choice: OrderAccountChoice; access: OrderAccess; balance: TradingBalance | null }) {
+function OrderBody({
+  id,
+  code,
+  infoPager,
+  choice,
+  access,
+  balance,
+  accountPanel,
+  onAccountPanelChange,
+  selectedFillKey,
+  onSelectFillKey,
+}: {
+  id: WindowId;
+  code: SymbolCode;
+  infoPager: InfoPager;
+  choice: OrderAccountChoice;
+  access: OrderAccess;
+  balance: TradingBalance | null;
+  accountPanel: AccountPanelKind | null;
+  onAccountPanelChange: (next: AccountPanelKind | null) => void;
+  selectedFillKey: string | null;
+  onSelectFillKey: (next: string | null) => void;
+}) {
   const mock = useMockEnvironment();
   const settings = useOrderSettings();
   const orderVenue: Venue = mock ? "krx" : settings.venue;
@@ -195,7 +217,26 @@ function OrderBody({ id, code, infoPager, choice, access, balance }: { id: Windo
         </div>
       )}
       <SymbolHead code={code} name={symbolInfo?.name ?? null} lastPrice={market.headPrice} previousClose={market.headPreviousClose} nxtTraded={symbolInfo?.nxtEnabled === true} nxtLabel="NXT지원" mock={mock} />
-      <AccountBand windowId={id} choice={choice} onPick={pickAccount} maskAccount={settings.maskAccount} openOrders={data.openOrders} balance={data.balance} holding={holding} executions={data.executions} writable={writable} mock={mock} venue={orderVenue} policy={data.orderable?.policy ?? null} onCancel={commands.cancelOne} />
+      <AccountBand
+        windowId={id}
+        choice={choice}
+        onPick={pickAccount}
+        maskAccount={settings.maskAccount}
+        openOrders={data.openOrders}
+        balance={data.balance}
+        holding={holding}
+        executions={data.executions}
+        ordersOpen={access.open}
+        writable={writable}
+        mock={mock}
+        venue={orderVenue}
+        policy={data.orderable?.policy ?? null}
+        onCancel={commands.cancelOne}
+        panel={accountPanel}
+        onPanelChange={onAccountPanelChange}
+        selectedFillKey={selectedFillKey}
+        onSelectFillKey={onSelectFillKey}
+      />
       <HoldingSummary account={accountRef} holding={holding} orderable={data.orderable} buyableProblem={data.buyableProblem} sellOrdered={sellOrdered} unit={profitUnit} onUnit={toggleProfitUnit} onFill={changeInput} />
       <QuantityRow
         input={input}
@@ -246,7 +287,23 @@ function OrderStockWindow({ id, code, infoPager }: { id: WindowId; code: SymbolC
   const choice = useOrderAccount();
   const access = useOrderAccess(choice);
   const balance = useAccountBalance(choice.current?.ref ?? null, access.open);
-  return <OrderBody key={code} id={id} code={code} infoPager={infoPager} choice={choice} access={access} balance={balance} />;
+  const [accountPanel, setAccountPanel] = useState<AccountPanelKind | null>(null);
+  const [selectedFillKey, setSelectedFillKey] = useState<string | null>(null);
+  return (
+    <OrderBody
+      key={code}
+      id={id}
+      code={code}
+      infoPager={infoPager}
+      choice={choice}
+      access={access}
+      balance={balance}
+      accountPanel={accountPanel}
+      onAccountPanelChange={setAccountPanel}
+      selectedFillKey={selectedFillKey}
+      onSelectFillKey={setSelectedFillKey}
+    />
+  );
 }
 
 export function OrderWindow({ id }: { id: WindowId }) {

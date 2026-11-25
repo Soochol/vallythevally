@@ -1,12 +1,13 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { barInterval } from "../chart/crosshairSync";
-import { createChartPointerScheduler, useChartPointerStore } from "./chartPointer";
+import { windowId } from "../layout/kinds";
+import { createChartPointerScheduler, matchesSnapTarget, useChartPointerStore } from "./chartPointer";
 
 const NINE = Date.parse("2026-11-06T09:00:00+09:00") / 1000;
 const DAY = Date.parse("2026-11-06T00:00:00+09:00") / 1000;
 
 beforeEach(() => {
-  useChartPointerStore.setState({ pointed: null, brokerSyncSymbols: {} });
+  useChartPointerStore.setState({ pointed: null, snap: null, brokerSyncSymbols: {} });
 });
 
 describe("차트 포인터 스토어", () => {
@@ -46,6 +47,31 @@ describe("차트 포인터 스토어", () => {
     store.removeBrokerSync("005930");
     expect(useChartPointerStore.getState().brokerSyncSymbols["005930"]).toBeUndefined();
     expect(useChartPointerStore.getState().pointed).toBeNull();
+  });
+
+  it("snapTo는 시각을 1분 봉 시작에 맞추고 대상 범위와 seq를 기록한다", () => {
+    const store = useChartPointerStore.getState();
+    store.snapTo("005930", NINE + 15, 70_200, { kind: "link", link: "a" });
+    const first = useChartPointerStore.getState().snap;
+    expect(first).toEqual({ symbol: "005930", bar: barInterval(NINE, "1m"), target: { kind: "link", link: "a" }, seq: 1 });
+    expect(useChartPointerStore.getState().pointed).toEqual({ symbol: "005930", bar: barInterval(NINE, "1m"), close: 70_200 });
+
+    store.snapTo("000660", NINE + 75, 180_000, { kind: "cell", cellId: windowId("cell-0") });
+    expect(useChartPointerStore.getState().snap).toEqual({
+      symbol: "000660",
+      bar: barInterval(NINE + 60, "1m"),
+      target: { kind: "cell", cellId: windowId("cell-0") },
+      seq: 2,
+    });
+  });
+
+  it("matchesSnapTarget은 링크 그룹과 단일 셀 범위를 정확히 가른다", () => {
+    expect(matchesSnapTarget({ kind: "link", link: "a" }, windowId("cell-0"), "a")).toBe(true);
+    expect(matchesSnapTarget({ kind: "link", link: "a" }, windowId("cell-1"), "b")).toBe(false);
+    expect(matchesSnapTarget({ kind: "link", link: "a" }, windowId("cell-2"), null)).toBe(false);
+    expect(matchesSnapTarget({ kind: "cell", cellId: windowId("cell-0") }, windowId("cell-0"), null)).toBe(true);
+    expect(matchesSnapTarget({ kind: "cell", cellId: windowId("cell-0") }, windowId("cell-1"), null)).toBe(false);
+    expect(matchesSnapTarget(null, windowId("cell-1"), "b")).toBe(true);
   });
 
   it("스케줄러는 80ms 간격 안에 들어온 마지막 봉만 프레임에서 반영한다", () => {

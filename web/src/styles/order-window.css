@@ -124,12 +124,19 @@
   .od-account-tabs { flex-basis:100%; }
 }
 .ui-popover.od-list-pop { max-height:var(--size-240); padding:var(--s2) var(--s4); font-size:var(--fs-xs); }
+.ui-popover.od-list-pop[data-forensic-open] { max-height:var(--size-360); }
 .od-rows { margin:0; padding:0; list-style:none; }
 .od-rows-head, .od-rows li { display:grid; align-items:center; column-gap:var(--s3); font-variant-numeric:tabular-nums; }
 .od-rows-head { height:var(--size-24); border-bottom:var(--size-1) solid var(--line); color:var(--text-3); font-size:var(--fs-xs); }
 .od-rows li { height:var(--size-28); }
 .od-rows-head[data-kind=open], .od-rows[data-kind=open] li { grid-template-columns:var(--size-54) var(--size-28) minmax(0, 1fr) var(--size-64) var(--size-72) var(--size-48); }
-.od-rows-head[data-kind=fills], .od-rows[data-kind=fills] li { grid-template-columns:var(--size-54) var(--size-28) minmax(0, 1fr) var(--size-64) var(--size-72); }
+.od-rows-head[data-kind=fills], .od-fill-main { display:grid; align-items:center; column-gap:var(--s3); grid-template-columns:var(--size-54) var(--size-28) minmax(0, 1fr) var(--size-64) var(--size-72); font-variant-numeric:tabular-nums; }
+.od-rows[data-kind=fills] li { display:flex; flex-direction:column; gap:var(--size-2); height:auto; min-height:var(--size-28); padding:var(--size-4) var(--size-4); margin:0 calc(-1 * var(--size-4)); border-radius:var(--r-s); cursor:pointer; }
+.od-rows[data-kind=fills] li:hover { background:var(--hover); }
+.od-rows[data-kind=fills] li:focus-visible { outline:2px solid var(--accent); outline-offset:-2px; }
+.od-rows[data-kind=fills] li[data-selected] { background:var(--accent-soft); }
+.od-fill-symbol { display:flex; min-width:0; }
+.od-fill-diag { display:flex; align-items:center; gap:var(--s2); }
 .od-rows-head[data-kind=holdings], .od-rows[data-kind=holdings] li { grid-template-columns:minmax(0, 1fr) var(--size-64) var(--size-72) var(--size-84); }
 .od-rows-head[data-kind=open] span:nth-child(n+4):nth-child(-n+5), .od-rows-head[data-kind=fills] span:nth-child(n+4), .od-rows-head[data-kind=holdings] span:nth-child(n+2) { text-align:right; }
 .od-rows .od-figure { text-align:right; }
@@ -333,3 +340,29 @@ button.od-cellbtn:not(:disabled) small span { text-decoration:underline dotted; 
 .od-strip-bars .mw-ratio { flex:none; }
 .od-ofi-bar { position:relative; flex:none; height:var(--size-4); overflow:hidden; border-radius:var(--r-pill); background:var(--down-vol); }
 .od-ofi-buy { position:absolute; inset:0; transform-origin:left; background:var(--up); transition:transform var(--dur) var(--ease); }
+
+.od-forensic-badge { display:inline-flex; align-items:center; height:var(--size-18); padding:0 var(--size-6); border-radius:var(--r-pill); background:var(--raised); color:var(--text-2); font-size:var(--fs-xs); font-weight:600; white-space:nowrap; }
+.od-forensic-badge[data-diagnosis=iceberg_support] { background:var(--success-soft); color:var(--success); }
+.od-forensic-badge[data-diagnosis=whale_divergence] { background:var(--accent-soft); color:var(--accent); }
+.od-forensic-badge[data-diagnosis=spoof_chase_trap] { background:var(--danger-soft); color:var(--danger); }
+.od-forensic-badge[data-diagnosis=early_stop_before_program] { background:var(--warning-soft); color:var(--warning); }
+.od-forensic-card { display:flex; flex-direction:column; gap:var(--s2); margin-top:var(--s3); padding:var(--s3); border:var(--size-1) solid var(--line-strong); border-radius:var(--r-m); background:var(--raised); font-variant-numeric:tabular-nums; }
+.od-forensic-head { display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:var(--s2); }
+.od-forensic-meta { display:flex; align-items:center; gap:var(--size-6); min-width:0; }
+.od-forensic-name { color:var(--text); font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.od-forensic-side[data-side=buy] { color:var(--up); font-weight:600; }
+.od-forensic-side[data-side=sell] { color:var(--down); font-weight:600; }
+.od-forensic-price { color:var(--text-2); }
+.od-forensic-head-tags { display:flex; align-items:center; gap:var(--s2); }
+.od-forensic-jump { color:var(--accent); font-size:var(--fs-xs); font-weight:600; white-space:nowrap; }
+.od-forensic-grid { display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:var(--s2); }
+.od-forensic-tile { display:flex; flex-direction:column; gap:var(--size-2); padding:var(--size-6) var(--s3); border:var(--size-1) solid var(--line); border-radius:var(--r-s); background:var(--surface); }
+.od-forensic-label { color:var(--text-3); font-size:var(--fs-xs); }
+.od-forensic-value { color:var(--text); font-size:var(--fs-s); font-weight:700; }
+.od-forensic-value[data-tone=danger] { color:var(--danger); }
+.od-forensic-value[data-tone=success] { color:var(--success); }
+.od-forensic-value[data-tone=up] { color:var(--up); }
+.od-forensic-value[data-tone=down] { color:var(--down); }
+.od-forensic-summary { margin:0; color:var(--text-2); font-size:var(--fs-xs); line-height:1.4; }
+.od-forensic-empty { display:flex; flex-direction:column; gap:var(--size-2); color:var(--text-2); }
+.od-forensic-empty strong { color:var(--text); font-size:var(--fs-s); }

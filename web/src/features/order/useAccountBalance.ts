@@ -1,6 +1,7 @@
 import { type QueryClient, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect } from "react";
 import type { TradingBalance } from "../../api/generated/TradingBalance";
+import { EXECUTION_FORENSICS_QUERY_KEY } from "../../api/trading";
 import { marketSocket, quoteBook } from "../../stores/realtime";
 import { fetchBalance } from "./orderApi";
 import { ORDER_QUERY_KEY } from "./useOrderWrites";
@@ -46,6 +47,7 @@ class BalanceHub {
     const stopAccount = marketSocket.watchTradingAccount((changed) => {
       if (this.accounts.has(changed)) {
         void this.client.invalidateQueries({ queryKey: ORDER_QUERY_KEY });
+        void this.client.invalidateQueries({ queryKey: EXECUTION_FORENSICS_QUERY_KEY });
       }
     });
     this.stop = () => {
