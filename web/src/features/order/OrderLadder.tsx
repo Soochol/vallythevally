@@ -9,6 +9,7 @@ import { type BuyingPower, buyPreview, groupKey, type PriceGroup, type PriceKey,
 import { PENDING_CHIP_TEXT, PENDING_TEXT } from "./statusText";
 import { LADDER_ROW_HEIGHT_PX, type RowRange, scrollTopToCenter, visibleRowRange } from "./priceRange";
 import { OrderList, type OrderListItem } from "./OrderList";
+import { resolveOrderCellAt } from "./nearestCell";
 import type { OrderDrag } from "./useOrderDrag";
 
 export interface HoverCell {
@@ -132,7 +133,6 @@ const OrderCell = memo(function OrderCell({ rowKey, side, price, group, writable
       data-row-key={rowKey}
       data-disabled={writable ? undefined : ""}
       data-target={targeted ? "" : undefined}
-      onDoubleClick={() => { if (writable) api.actions.place(side, price); }}
       onPointerEnter={() => api.hover.set({ side, price, rowKey })}
       onPointerLeave={() => {
         const current = api.hover.get();
@@ -250,6 +250,11 @@ export function OrderLadder({ rows, previousClose, groups, writable, previewQuan
   return (
     <div ref={ladder} className="od-ladder" data-testid="order-ladder" data-explorer={exploring ? "" : undefined} data-dragging={dragging ? "" : undefined} data-divider={divider ? "" : undefined}
       onScroll={onLadderScroll}
+      onDoubleClick={(e) => {
+        if (!writable || !ladder.current) return;
+        const resolved = resolveOrderCellAt(ladder.current, e.clientX, e.clientY, e.target);
+        if (resolved !== null) actions.place(resolved.side, resolved.price);
+      }}
       onContextMenu={(e) => { e.preventDefault(); setMenu({ x: e.clientX, y: e.clientY, group: null }); }}>
       <LadderHead explorerOn={explorerOn} explorerUnavailable={explorerUnavailable} explorerTitle={explorerTitle} onToggleExplorer={onToggleExplorer} />
       {exploring

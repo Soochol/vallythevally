@@ -1,4 +1,4 @@
-.od { display:flex; flex:1; flex-direction:column; min-height:0; overflow:hidden; }
+.od { container:od / inline-size; display:flex; flex:1; flex-direction:column; min-height:0; overflow:hidden; }
 .od-gate { display:flex; align-items:center; gap:var(--s3); padding:var(--s3) var(--s4); background:color-mix(in srgb, var(--warning) 14%, transparent); color:var(--text); font-size:var(--fs-xs); }
 .od-gate span { flex:1; }
 .od-link { color:var(--accent); font-size:var(--fs-xs); font-weight:600; }
@@ -21,7 +21,7 @@
 .od-explorer-rows { box-sizing:border-box; }
 .od-ladder[data-explorer] .mw-ladder { padding:0; }
 .od-ladder[data-dragging] { cursor:grabbing; user-select:none; }
-.od-cell { position:relative; display:flex; align-items:center; justify-content:center; align-self:stretch; width:var(--size-64); margin-top:var(--size-1); }
+.od-cell { position:relative; box-sizing:border-box; display:flex; align-items:center; justify-content:center; align-self:stretch; width:var(--size-64); }
 .od-cell[data-order-cell] { cursor:pointer; }
 .od-cell[data-side=sell] { background:color-mix(in srgb, var(--down) 9%, transparent); }
 .od-cell[data-side=buy] { background:color-mix(in srgb, var(--up) 9%, transparent); }
@@ -62,9 +62,26 @@
 .od-qty { display:flex; flex:none; align-items:center; gap:var(--size-3); flex-wrap:wrap; padding:var(--s3) var(--size-6); border-bottom:var(--size-1) solid var(--line); }
 .od-qty-input { box-sizing:border-box; flex:1 1 var(--size-60); min-width:var(--size-60); max-width:var(--size-84); height:var(--size-30); padding:0 var(--size-3); border:var(--size-1) solid var(--line-strong); border-radius:var(--r-m); background:transparent; color:var(--text); font-size:var(--fs-m); font-weight:600; text-align:right; font-variant-numeric:tabular-nums; }
 .od-qty-input:focus { border-color:var(--accent); outline:0; }
+.od-preset-mode { flex:none; }
+.od-preset-mode button { white-space:nowrap; }
+.od-preset-mode button[data-mode=buy][aria-pressed=true] { background:var(--up); color:var(--on-data); }
+.od-preset-mode button[data-mode=sell][aria-pressed=true] { background:var(--down); color:var(--on-data); }
 .od-presets { display:flex; gap:var(--size-2); }
-.od-preset { min-width:var(--size-48); height:var(--size-30); padding:0 var(--size-2); border-radius:var(--r-s); background:var(--raised); color:var(--text-2); font-size:var(--fs-xs); text-align:center; }
-.od-preset:hover { background:var(--hover); color:var(--text); }
+.od-preset { min-width:var(--size-48); height:var(--size-30); padding:0 var(--size-2); border-radius:var(--r-s); background:var(--raised); color:var(--text-2); font-size:var(--fs-xs); text-align:center; white-space:nowrap; }
+.od-preset:hover:not(:disabled) { background:var(--hover); color:var(--text); }
+.od-preset:disabled { background:var(--raised); color:var(--text-3); cursor:not-allowed; }
+.od-preset[data-picked] { background:var(--accent-soft); color:var(--accent); font-weight:600; }
+.od-preset[data-side-tone=buy]:hover:not(:disabled), .od-preset[data-side-tone=buy][data-picked] { background:var(--up-soft); color:var(--up); }
+.od-preset[data-side-tone=sell]:hover:not(:disabled), .od-preset[data-side-tone=sell][data-picked] { background:var(--down-soft); color:var(--down); }
+@container od (width < 410px) {
+  .od-qty { gap:var(--size-2); padding:var(--s3) var(--size-4); }
+  .od-preset-mode button { padding:0 var(--size-2); }
+  .od-preset { min-width:var(--size-42); }
+  .od-gear-route { display:none; }
+}
+@container od (width < 365px) {
+  .od-qty-input { max-width:var(--size-72); }
+}
 
 .od-status-slot { flex:none; box-sizing:border-box; height:var(--size-24); padding-bottom:var(--size-5); }
 .od-status { box-sizing:border-box; display:flex; align-items:center; gap:var(--s3); height:100%; padding:0 var(--s4) 0 var(--s3); border-left:var(--size-3) solid var(--line-strong); color:var(--text-2); font-size:var(--fs-s); }
@@ -157,6 +174,7 @@ button.od-cellbtn:not(:disabled) small span { text-decoration:underline dotted; 
 
 .od-ladder[data-divider] .mw-lr + .mw-lr { box-shadow:inset 0 var(--size-1) 0 var(--line); }
 .od-ladder[data-divider] .mw-lr[data-side=ask] + .mw-lr[data-side=bid] { box-shadow:inset 0 var(--size-1) 0 var(--text-3); }
+.od-ladder[data-divider] .mw-lr + .mw-lr .od-cell { padding-top:var(--size-1); background-clip:content-box; }
 .od-ladder .mw-trade-price { margin-left:calc(var(--size-5) + var(--size-1)); }
 .od-ladder[data-divider] .mw-box { background:linear-gradient(var(--surface), var(--surface)) 0 var(--size-1) / 100% calc(100% - var(--size-1)) no-repeat; }
 

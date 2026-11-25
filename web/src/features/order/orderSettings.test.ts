@@ -9,7 +9,17 @@ describe("호가주문 설정", () => {
   });
 
   it("저장된 값을 읽는다", () => {
-    expect(parseOrderSettings({ amountPresets: [5, 6, 7, 8], averageDot: false, divider: false, rate: false, skipSpreadGap: true, maskAccount: false, keepLastEntry: false, sound: false, venue: "nxt", account: "ref-b" })).toEqual({ amountPresets: [5, 6, 7, 8], averageDot: false, divider: false, rate: false, skipSpreadGap: true, maskAccount: false, keepLastEntry: false, sound: false, venue: "nxt", account: "ref-b" });
+    expect(parseOrderSettings({ amountPresets: [5, 6, 7, 8], presetMode: "sell", averageDot: false, divider: false, rate: false, skipSpreadGap: true, maskAccount: false, keepLastEntry: false, sound: false, venue: "nxt", account: "ref-b" })).toEqual({ amountPresets: [5, 6, 7, 8], presetMode: "sell", averageDot: false, divider: false, rate: false, skipSpreadGap: true, maskAccount: false, keepLastEntry: false, sound: false, venue: "nxt", account: "ref-b" });
+  });
+
+  it("프리셋 기준은 기본이 금액이고 모르는 값이면 금액이며 금액·매수·매도는 그대로 읽는다", () => {
+    expect(DEFAULT_ORDER_SETTINGS.presetMode).toBe("amount");
+    expect(parseOrderSettings({}).presetMode).toBe("amount");
+    expect(parseOrderSettings({ presetMode: "bogus" }).presetMode).toBe("amount");
+    expect(parseOrderSettings({ presetMode: 1 }).presetMode).toBe("amount");
+    expect(parseOrderSettings({ presetMode: "amount" }).presetMode).toBe("amount");
+    expect(parseOrderSettings({ presetMode: "buy" }).presetMode).toBe("buy");
+    expect(parseOrderSettings({ presetMode: "sell" }).presetMode).toBe("sell");
   });
 
   it("호가 사이 빈 가격 건너뛰기는 기본이 꺼짐이고 옛 저장값에 없거나 불이 아니면 꺼짐이며 있으면 그 값이다", () => {
