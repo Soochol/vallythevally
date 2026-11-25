@@ -161,3 +161,11 @@ export const formatScale = (scale: number | null): string => (scale === null ? "
 export const formatRealChange = (change: number): string => `${change > 0 ? "+" : ""}${(change * 100).toFixed(1)}%`;
 
 export const formatQuantity = (quantity: number | null): string => (quantity === null ? "-" : quantity.toLocaleString("en-US", { maximumFractionDigits: 4 }));
+
+export const formatMedianRealChange = (change: number | null): string => (change === null ? "-" : formatRealChange(change));
+
+export const formatAccumulationPeriod = (fromDate: string | null, toDate: string | null, collectedDays: number): string | null =>
+  fromDate !== null && toDate !== null ? `${fromDate} ~ ${toDate} · 수집일 ${collectedDays}일` : null;
+
+export const formatBuyingSummary = (buyingEtfCount: number, addedEtfCount: number): string =>
+  addedEtfCount > 0 ? `${buyingEtfCount}개 (신규 ${addedEtfCount})` : `${buyingEtfCount}개`;
