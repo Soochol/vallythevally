@@ -1010,3 +1010,13 @@ test("분봉과 일봉 전환으로 히트맵이나 끝 패널 총잔량이 드�
   expect(f.active.slice(-2).map((s) => s.pane)).toEqual([2, 2]);
   expect(f.series).toHaveLength(totalCreated + 2);
 });
+
+test("하단 패널 지표가 있는 상태에서 가격 지표의 스펙이 바뀌면 가격 시리즈를 패널 시리즈보다 앞 순서로 유지한다", () => {
+  const ma5: IndicatorConfig = { id: "ma", spec: { kind: "ma", method: "sma", period: 5 }, panel: "price", visible: true, style: { colors: ["ind-1"], width: 1 } };
+  const ma10: IndicatorConfig = { ...ma5, spec: { kind: "ma", method: "sma", period: 10 } };
+  const panels: Panel[] = [...VOLUME_PANELS, { id: "r", stretch: 0.25 }];
+  const f = fixture("1m", [ma5, VOLUME, RSI], panels);
+  expect(f.active.map((s) => s.pane)).toEqual([0, 1, 2]);
+  f.layer.setConfigs([ma10, VOLUME, RSI], panels);
+  expect(f.active.map((s) => s.pane)).toEqual([0, 1, 2]);
+});

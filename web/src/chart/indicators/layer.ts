@@ -334,6 +334,10 @@ export class IndicatorLayer {
       if (!survivingPanes.has(pane)) return false;
       if (prevPanels[pane - 1]?.id !== this.panels[pane - 1]?.id) return false;
     }
+    for (const config of this.configs) {
+      if (survivingIds.has(config.id)) continue;
+      if (specLines(config.spec).length > 0 && this.paneOf(config) < maxSurvivingPane) return false;
+    }
     for (let pane = 0; pane <= maxSurvivingPane; pane++) {
       const prevOrder = prevConfigs
         .filter((config) => survivingIds.has(config.id) && (this.shown.get(config.id)?.lines.length ?? 0) > 0 && prevPaneById.get(config.id) === pane)
