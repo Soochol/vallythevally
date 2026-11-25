@@ -3,7 +3,7 @@ import { type ReactNode, type Ref, useState } from "react";
 
 const FOCUSABLE = "button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea, [tabindex='0']";
 
-function onDialogKeyDown(e: React.KeyboardEvent<HTMLElement>, close: () => void) {
+function onDialogKeyDown(e: React.KeyboardEvent<HTMLElement>, close: (reason?: "escape" | "outside") => void) {
   if (e.nativeEvent.isComposing || e.keyCode === 229) {
     if (e.key === "Enter") e.preventDefault();
     return;
@@ -11,7 +11,7 @@ function onDialogKeyDown(e: React.KeyboardEvent<HTMLElement>, close: () => void)
   if (e.key === "Escape") {
     e.preventDefault();
     e.stopPropagation();
-    close();
+    close("escape");
   } else if (e.key === "Tab") {
     const nodes = [...e.currentTarget.querySelectorAll<HTMLElement>(FOCUSABLE)].filter((n) => n.tabIndex >= 0 && n.getClientRects().length > 0);
     const first = nodes[0];

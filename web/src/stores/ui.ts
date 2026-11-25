@@ -24,7 +24,7 @@ interface UiStore {
   toggleWatchColumn(column: WatchColumn): void;
   setDrawingPrefs(patch: Partial<DrawingPrefs>): void;
   setWatchGroupCollapsed(id: string, collapsed: boolean, known: readonly string[]): void;
-  setIndicatorWindow(mode: IndicatorWindow): void;
+  setIndicatorWindow(mode: IndicatorWindow | null): void;
   setLayoutMode(mode: LayoutMode): void;
   setVenue(venue: Venue): void;
   setOrderSettings(settings: OrderSettings): void;

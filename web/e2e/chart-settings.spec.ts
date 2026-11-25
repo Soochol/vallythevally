@@ -20,9 +20,13 @@ const barsGroup = (page: Page) => popover(page).getByRole("group", { name: "화�
 
 const openSettings = openChartSettings;
 
-async function choosePeriod(page: Page, label: string) {
-  if (await popover(page).isVisible()) await page.keyboard.press("Escape");
+async function closeSettings(page: Page) {
+  if (await popover(page).isVisible()) await popover(page).getByRole("button", { name: "닫기", exact: true }).click();
   await expect(popover(page)).toBeHidden();
+}
+
+async function choosePeriod(page: Page, label: string) {
+  await closeSettings(page);
   await page.getByRole("toolbar", { name: "차트 도구 막대" }).getByRole("group", { name: "봉 주기" }).getByRole("button", { name: label, exact: true }).click();
   await expect(cell(page)).toHaveAttribute("aria-label", new RegExp(` ${label}$`));
   await expect(cell(page)).toHaveAttribute("aria-busy", "false");
@@ -36,7 +40,7 @@ async function open(page: Page) {
 
 const section = (page: Page, name: string) => popover(page).getByRole("region", { name, exact: true });
 
-test("위 막대의 차트 설정 버튼은 지표 창이 아니라 버튼 아래에 340px 한 열 팝오버를 연다", async ({ page }) => {
+test("위 막대의 차트 설정 버튼은 지표 창이 아니라 화면 가운데에 340px 한 열 창을 연다", async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   await open(page);
   await expect(page.getByRole("button", { name: "봉 모양", exact: true })).toHaveCount(0);
@@ -48,17 +52,27 @@ test("위 막대의 차트 설정 버튼은 지표 창이 아니라 버튼 아�
   for (const name of ["봉·축", "표시", "지표 창"]) await expect(section(page, name)).toBeVisible();
   await expect(popover(page).getByText("삼성전자 · 일").first()).toBeVisible();
   const box = (await popover(page).boundingBox())!;
-  const button = (await settingsButton(page).boundingBox())!;
   expect(box.width).toBe(340);
-  expect(box.y).toBeGreaterThanOrEqual(button.y + button.height);
+  expect(Math.abs(box.x + box.width / 2 - 1440 / 2)).toBeLessThanOrEqual(2);
+  expect(Math.abs(box.y + box.height / 2 - 900 / 2)).toBeLessThanOrEqual(2);
   expect(box.y + box.height).toBeLessThanOrEqual(900);
 });
 
-test("차트 설정 창은 Esc, 바깥 클릭, 닫기 버튼으로 닫히고 바꾼 설정은 남는다", async ({ page, scenario }) => {
+test("차트 설정 창은 닫기 버튼·바깥 클릭으로 닫으면 바꾼 설정이 남고 Esc로 닫으면 이전 상태로 되돌린다", async ({ page, scenario }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   await open(page);
   await openSettings(page);
   await popover(page).getByRole("group", { name: "봉 모양" }).getByRole("button", { name: "라인", exact: true }).click();
+  await pollSaved(() => saved(scenario).style).toBe("line");
+  await popover(page).getByRole("button", { name: "닫기", exact: true }).click();
+  await expect(popover(page)).toBeHidden();
+  await expect(settingsButton(page)).toBeFocused();
+  await expect(settingsButton(page)).toHaveAttribute("aria-expanded", "false");
+  expect(saved(scenario).style).toBe("line");
+
+  await openSettings(page);
+  await popover(page).getByRole("group", { name: "봉 모양" }).getByRole("button", { name: "영역", exact: true }).click();
+  await pollSaved(() => saved(scenario).style).toBe("area");
   await page.keyboard.press("Escape");
   await expect(popover(page)).toBeHidden();
   await expect(settingsButton(page)).toBeFocused();
@@ -66,16 +80,11 @@ test("차트 설정 창은 Esc, 바깥 클릭, 닫기 버튼으로 닫히고 바
   await pollSaved(() => saved(scenario).style).toBe("line");
 
   await openSettings(page);
-  await popover(page).getByRole("button", { name: "닫기", exact: true }).click();
-  await expect(popover(page)).toBeHidden();
-  await expect(settingsButton(page)).toBeFocused();
-  await expect(settingsButton(page)).toHaveAttribute("aria-expanded", "false");
-
-  await openSettings(page);
+  await popover(page).getByRole("group", { name: "봉 모양" }).getByRole("button", { name: "바", exact: true }).click();
   await page.mouse.click(60, 500);
   await expect(popover(page)).toBeHidden();
   await expect(settingsButton(page)).toHaveAttribute("aria-expanded", "false");
-  expect(saved(scenario).style).toBe("line");
+  await pollSaved(() => saved(scenario).style).toBe("bar");
 });
 
 test("구역 셋이 세로로 쌓이고 구역 제목 오른쪽에 적용 범위가 붙으며 새로고침해도 처음 모양으로 열린다", async ({ page }) => {
@@ -213,7 +222,7 @@ test("화면 내 최고·최저 스위치는 보이는 봉의 최고가·최저�
   await expect(high).toBeVisible();
   await expect(low).toBeVisible();
 
-  await page.keyboard.press("Escape");
+  await closeSettings(page);
   await page.reload();
   await expect(cell(page)).toHaveAttribute("aria-busy", "false");
   await expect(high).toBeVisible();
@@ -312,7 +321,7 @@ test("화면 가장자리에 반쯤 잘린 봉은 최고·최저에서 빼고, �
   for (const basis of ["last", "extreme"] as const) {
     await openSettings(page, "표시");
     await basisGroup(page).getByRole("button", { name: basis === "last" ? "현재가 대비" : "고가·저가 대비", exact: true }).click();
-    await page.keyboard.press("Escape");
+    await closeSettings(page);
     for (const range of [{ from: 238.6, to: 298.6 }, { from: 0.3, to: 60.3 }, { from: 79.2, to: 109.2 }, { from: 20.3, to: 180.3 }]) {
       const shown = await page.evaluate((target) => {
         const { chart, main } = window.chartProbe;
@@ -408,7 +417,7 @@ function openWithRaw(scenario: Scenario, chartSettings: object, bars: Bar[] = zi
 }
 
 async function reload(page: Page) {
-  if (await popover(page).isVisible()) await page.keyboard.press("Escape");
+  await closeSettings(page);
   await page.reload();
   await expect(cell(page)).toHaveAttribute("aria-busy", "false");
 }
@@ -469,7 +478,7 @@ test("범례 스위치를 끄면 통합 표시와 봉 값 줄만 한 줄로 남�
   await expect(ohlc(page).locator(":scope > span").first()).toContainText("(");
   await pollSaved(() => saved(scenario).showOhlcChange).toBe(true);
 
-  await page.keyboard.press("Escape");
+  await closeSettings(page);
   await expectLegendOff(page);
 
   await selectMinute(page.getByRole("toolbar", { name: "차트 도구 막대" }).getByRole("button", { name: "분봉", exact: true }), { label: "5분" });
@@ -612,7 +621,7 @@ test("390x844에서 범례를 끄면 봉 값 줄만 남고 휴대폰 머리의 �
   await openSettings(page, "표시");
   await legendSwitch(page).click();
   await pollSaved(() => saved(scenario).showLegend).toBe(false);
-  await page.keyboard.press("Escape");
+  await closeSettings(page);
   await page.setViewportSize({ width: 390, height: 844 });
   await expect(ohlc(page)).toBeVisible();
   await expect(legendRows(page).maRow).toBeHidden();
@@ -640,7 +649,7 @@ test("봉 값 등락률 스위치는 시·고·저·종 옆에 직전 봉 종가
     await expect(spans.nth(n).locator("span")).toHaveClass(change > 0 ? "text-up" : change < 0 ? "text-down" : "text-text-2");
   }
 
-  await page.keyboard.press("Escape");
+  await closeSettings(page);
   const hovered = last - 20;
   const x = await page.evaluate((i) => window.chartProbe.chart.timeScale().timeToCoordinate(window.chartProbe.main.dataByIndex(i)!.time), hovered);
   const box = (await chartOf(cell(page)).boundingBox())!;

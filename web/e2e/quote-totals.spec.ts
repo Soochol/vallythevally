@@ -46,7 +46,6 @@ test("총잔량을 더하면 분봉에 매도·매수 값이 보이고 일봉에
   await dialog.getByRole("tab", { name: "지표 추가", exact: true }).click();
   await dialog.getByRole("option", { name: "총잔량 추가 후보", exact: true }).click();
   await expect(dialog).toContainText("주식·ETF 분봉의 호가 자료입니다");
-  await dialog.getByRole("button", { name: "총잔량 추가", exact: true }).click();
   await dialog.getByRole("button", { name: "입력창 닫기", exact: true }).click();
 
   const totalsRow = page.locator("[data-indicator-row]").filter({ hasText: "총잔량" });
@@ -92,7 +91,6 @@ test("서버에 호가 자료 폴더가 없으면 수집 폴더 미설정 안내
   const dialog = page.getByRole("dialog");
   await dialog.getByRole("tab", { name: "지표 추가", exact: true }).click();
   await dialog.getByRole("option", { name: "총잔량 추가 후보", exact: true }).click();
-  await dialog.getByRole("button", { name: "총잔량 추가", exact: true }).click();
   await dialog.getByRole("button", { name: "입력창 닫기", exact: true }).click();
 
   const totalsRow = page.locator("[data-indicator-row]").filter({ hasText: "총잔량" });

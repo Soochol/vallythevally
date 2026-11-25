@@ -206,7 +206,7 @@ test("조회 값 제거, 과거 봉 추가, 비교 왼쪽 끝 이동, 멈춤, �
   const afterDisplay = await count();
   expect(afterDisplay).toBeGreaterThan(afterStall);
 
-  await page.keyboard.press("Escape");
+  await settingsDialog.getByRole("button", { name: "닫기", exact: true }).click();
   await page.getByRole("toolbar", { name: "차트 도구 막대" }).getByRole("button", { name: "주", exact: true }).click();
   await expect(cell(page).locator("[data-legend-period]")).toHaveText("주");
   await frames(page, 16);

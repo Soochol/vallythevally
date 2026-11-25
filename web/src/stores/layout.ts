@@ -218,7 +218,8 @@ interface LayoutState {
   setShowOhlcChange(cellId: WindowId, on: boolean): void;
   setExtremeBasis(cellId: WindowId, basis: ExtremeBasis): void;
   setShowDaySeparators(cellId: WindowId, on: boolean): void;
-  addIndicator(cellId: WindowId, spec: IndicatorSpec, style: IndicatorConfig["style"], placement?: IndicatorPlacement): void;
+  setChartSettings(cellId: WindowId, settings: ChartSettings): void;
+  addIndicator(cellId: WindowId, spec: IndicatorSpec, style: IndicatorConfig["style"], placement?: IndicatorPlacement): string | null;
   updateIndicator(cellId: WindowId, id: string, patch: Partial<Pick<IndicatorConfig, "spec" | "style" | "visible">>): void;
   setIndicatorPlacement(cellId: WindowId, id: string, placement: IndicatorPlacement, panel?: Panel, at?: number): void;
   removeIndicator(cellId: WindowId, id: string): void;
@@ -515,7 +516,16 @@ export const useLayoutStore = create<LayoutState>()((set, get) => {
     setShowOhlcChange: (cellId, on) => patchSetting(cellId, "showOhlcChange", on),
     setExtremeBasis: (cellId, basis) => patchSetting(cellId, "extremeBasis", basis),
     setShowDaySeparators: (cellId, on) => patchSetting(cellId, "showDaySeparators", on),
-    addIndicator: (cellId, spec, style, placement) => patchSettings(cellId, (s) => edit.addIndicator(s, spec, style, undefined, placement).settings),
+    setChartSettings: (cellId, settings) => patchSettings(cellId, () => settings),
+    addIndicator: (cellId, spec, style, placement) => {
+      let added: string | null = null;
+      patchSettings(cellId, (s) => {
+        const next = edit.addIndicator(s, spec, style, undefined, placement);
+        added = next.id;
+        return next.settings;
+      });
+      return added;
+    },
     updateIndicator: (cellId, id, patch) => patchSettings(cellId, (s) => edit.updateIndicator(s, id, patch)),
     setIndicatorPlacement: (cellId, id, placement, panel, at) => patchSettings(cellId, (s) => edit.setIndicatorPlacement(s, id, placement, panel, at)),
     removeIndicator: (cellId, id) => patchSettings(cellId, (s) => edit.removeIndicator(s, id)),

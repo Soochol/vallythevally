@@ -53,7 +53,7 @@ test("현재가 단추가 없다", async ({ page, scenario }) => {
   await expect(win(page).getByRole("button", { name: "현재가", exact: true })).toHaveCount(0);
 });
 
-test("설정 단추는 수량 방식마다 프리셋 줄 맨 오른쪽에 있고 그 줄 바로 아래가 열 머리다", async ({ page, scenario }) => {
+test("설정 단추는 금액 프리셋 줄 맨 오른쪽에 있고 그 줄 바로 아래가 열 머리다", async ({ page, scenario }) => {
   ordersOn(scenario);
   tradingApi(scenario);
   await openOrderWindow(page, scenario);
@@ -61,18 +61,15 @@ test("설정 단추는 수량 방식마다 프리셋 줄 맨 오른쪽에 있고
   const row = page.getByTestId("order-quantity-row");
   const settings = row.getByTestId("order-settings-button");
   await expect(settings).toHaveCount(1);
-  for (const kind of ["수량", "금액"] as const) {
-    await page.getByRole("group", { name: "수량 방식" }).getByRole("button", { name: kind }).click();
-    await expect(page.getByRole("group", { name: "수량 방식" }).getByRole("button", { name: kind })).toHaveAttribute("aria-pressed", "true");
-    const input = await box(page.getByRole("textbox", { name: "수량" }));
-    const gear = await box(settings);
-    const lastPreset = await box(page.getByRole("group", { name: "수량 프리셋" }).getByRole("button").last());
-    const area = await box(win(page));
-    expect(Math.abs(middleY(gear) - middleY(input))).toBeLessThanOrEqual(3);
-    expect(gear.x).toBeGreaterThanOrEqual(lastPreset.x + lastPreset.width);
-    expect(gear.x + gear.width).toBeLessThanOrEqual(area.x + area.width);
-    const head = await box(page.getByTestId("order-colhead"));
-    expect(head.y - (gear.y + gear.height)).toBeLessThan(16);
-    expect(head.y - (input.y + input.height)).toBeLessThan(16);
-  }
+  await expect(page.getByRole("group", { name: "수량 방식" })).toHaveCount(0);
+  const input = await box(page.getByRole("textbox", { name: "수량" }));
+  const gear = await box(settings);
+  const lastPreset = await box(page.getByRole("group", { name: "금액 프리셋" }).getByRole("button").last());
+  const area = await box(win(page));
+  expect(Math.abs(middleY(gear) - middleY(input))).toBeLessThanOrEqual(3);
+  expect(gear.x).toBeGreaterThanOrEqual(lastPreset.x + lastPreset.width);
+  expect(gear.x + gear.width).toBeLessThanOrEqual(area.x + area.width);
+  const head = await box(page.getByTestId("order-colhead"));
+  expect(head.y - (gear.y + gear.height)).toBeLessThan(16);
+  expect(head.y - (input.y + input.height)).toBeLessThan(16);
 });

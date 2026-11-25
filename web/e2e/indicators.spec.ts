@@ -351,24 +351,20 @@ test("지표 창에서 테마 색을 고르면 토큰을, 색상표의 색을 �
   await theme.getByRole("button", { name: /^테마 4 / }).click();
   await expect(theme.getByRole("button", { name: /^테마 4 / })).toHaveAttribute("aria-pressed", "true");
   await expect(dialog.getByRole("group", { name: "선 색", exact: true })).toContainText("테마 4");
-  await dialog.getByRole("button", { name: "이동평균 단순 9 추가", exact: true }).click();
   await pollSaved(saved).toEqual([["ind-4"]]);
   await input.fill("이평 11");
   await table.getByRole("button", { name: "진한 파랑 #4A7FE0", exact: true }).click();
   await expect(table.getByRole("button", { name: "진한 파랑 #4A7FE0", exact: true })).toHaveAttribute("aria-pressed", "true");
   await expect(theme.getByRole("button", { pressed: true })).toHaveCount(0);
-  await dialog.getByRole("button", { name: "이동평균 단순 11 추가", exact: true }).click();
   await pollSaved(saved).toEqual([["ind-4"], ["#4A7FE0"]]);
 
   await dialog.getByRole("tab", { name: /^이 칸에 띄운 지표/ }).click();
   await dialog.getByRole("button", { name: "이동평균 단순 9 설정", exact: true }).click();
   await expect(theme.getByRole("button", { name: /^테마 4 / })).toHaveAttribute("aria-pressed", "true");
   await table.getByRole("button", { name: "분홍 #EE9DD0", exact: true }).click();
-  await dialog.getByRole("button", { name: "변경 적용", exact: true }).click();
   await pollSaved(saved).toEqual([["#EE9DD0"], ["#4A7FE0"]]);
   await dialog.getByRole("button", { name: "이동평균 단순 11 설정", exact: true }).click();
   await expect(table.getByRole("button", { name: "진한 파랑 #4A7FE0", exact: true })).toHaveAttribute("aria-pressed", "true");
   await theme.getByRole("button", { name: /^테마 1 / }).click();
-  await dialog.getByRole("button", { name: "변경 적용", exact: true }).click();
   await pollSaved(saved).toEqual([["#EE9DD0"], ["ind-1"]]);
 });

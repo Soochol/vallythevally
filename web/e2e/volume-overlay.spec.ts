@@ -190,7 +190,6 @@ test("지표 창에서 겹치기를 켜고 더한 거래량은 가격 패널에 
   await expect.poll(() => paneCount(page)).toBe(3);
   await toggle.click();
   await expect.poll(() => paneCount(page)).toBe(2);
-  await dialog.getByRole("button", { name: "거래량 추가", exact: true }).click();
   await pollSaved(() => saved(scenario).indicators.map((i) => [i.spec.kind, i.panel])).toEqual([["volume", "p-volume"], ["volume", "price"]]);
   expect(saved(scenario).panels).toEqual([{ id: "p-volume", stretch: 0.25 }]);
   expect(await paneCount(page)).toBe(2);

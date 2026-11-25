@@ -7,8 +7,8 @@ import { DEFAULT_LAYOUT, useLayoutStore } from "./layout";
 import { useUiStore } from "./ui";
 
 const state = () => useLayoutStore.getState();
-const closedEntry: OrderEntry = { presetKind: "amountPresets", quantity: 37, usedAt: 1 };
-const reusedEntry: OrderEntry = { presetKind: "sharePresets", quantity: 5, usedAt: 2 };
+const closedEntry: OrderEntry = { quantity: 37, usedAt: 1 };
+const reusedEntry: OrderEntry = { quantity: 5, usedAt: 2 };
 
 beforeEach(() => {
   useLayoutStore.setState({ layout: structuredClone(DEFAULT_LAYOUT), revision: 0, steps: [], redos: [] });

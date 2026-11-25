@@ -32,7 +32,7 @@ test("입력창에서 Enter로 연속 추가하고 Shift+Enter로 닫은 뒤 숨
   await page.getByRole("button", { name: "지표", exact: true }).click();
   await dialog.getByRole("button", { name: "이동평균 단순 7 숨기기", exact: true }).click();
   await dialog.getByRole("button", { name: "RSI 9 지우기", exact: true }).click();
-  await page.keyboard.press("Escape");
+  await dialog.getByRole("button", { name: "입력창 닫기", exact: true }).click();
   await pollSaved(async () => (await settings(scenario)).indicators.map((i) => [i.spec.kind, i.visible])).toEqual([["volume", true], ["ma", false], ["bollinger", true]]);
   await page.reload();
   await expect(cell(page)).toHaveAttribute("aria-busy", "false");
@@ -88,7 +88,7 @@ test("설정 검사기를 받기 전에 누른 Shift+Enter는 그 뒤 다른 후
   expect((await settings(scenario)).indicators.map((i) => i.spec.kind)).toEqual(["volume"]);
 });
 
-test("입력창 설정 미리보기는 실제 선을 바꾸고 Esc는 선과 저장값을 복원한다", async ({ page, scenario }) => {
+test("입력창에서 값을 바꾸면 자동 저장되고 Esc는 선과 저장값을 이전 상태로 복원한다", async ({ page, scenario }) => {
   useCenterIndicatorWindow(scenario);
   await page.addInitScript(installFrameProbe);
   await page.goto("/?symbol=005930");
@@ -103,12 +103,15 @@ test("입력창 설정 미리보기는 실제 선을 바꾸고 Esc는 선과 저
   const first = await customLines();
   await dialog.getByRole("textbox", { name: "기간", exact: true }).fill("11");
   await expect.poll(async () => (await customLines())[0]?.data).not.toEqual(first[0]?.data);
-  expect(await settings(scenario)).toEqual(before);
+  await pollSaved(async () => (await settings(scenario)).indicators.map((i) => i.spec)).toEqual([
+    { kind: "volume", maPeriod: null },
+    { kind: "ma", method: "sma", period: 11 },
+  ]);
   await page.keyboard.press("Escape");
   await expect(dialog).toBeHidden();
   await expect.poll(customLines).toHaveLength(0);
   await expect(cell(page)).toHaveAttribute("aria-busy", "false");
-  expect(await settings(scenario)).toEqual(before);
+  await pollSaved(async () => settings(scenario)).toEqual(before);
 });
 
 test("지표 창은 띄운 지표 탭으로 열고 글자를 치면 지표 추가 탭으로 넘어가며 탭으로 비교 종목을 오간다", async ({ page, scenario }) => {
@@ -141,9 +144,12 @@ test("지표 창은 띄운 지표 탭으로 열고 글자를 치면 지표 추�
   await expect(dialog.getByRole("tab", { name: "이 칸에 띄운 지표 2개", exact: true })).toBeVisible();
   await expect(dialog.getByRole("listbox")).toContainText("가격 패널");
   await dialog.getByRole("button", { name: "이동평균 단순 20 설정", exact: true }).click();
-  await expect(dialog.getByRole("button", { name: "변경 적용", exact: true })).toBeVisible();
+  await expect(dialog.getByRole("button", { name: "변경 적용", exact: true })).toHaveCount(0);
+  await dialog.getByRole("textbox", { name: "기간", exact: true }).fill("15");
+  await pollSaved(async () => (await settings(scenario)).indicators.find((i) => i.spec.kind === "ma")?.spec).toEqual({ kind: "ma", method: "sma", period: 15 });
   await page.keyboard.press("Escape");
   await expect(dialog).toBeHidden();
+  await pollSaved(async () => (await settings(scenario)).indicators.map((i) => i.spec.kind)).toEqual(["volume"]);
   await page.getByRole("button", { name: "비교", exact: true }).click();
   await expect(tab(/^비교 종목$/)).toHaveAttribute("aria-selected", "true");
 });

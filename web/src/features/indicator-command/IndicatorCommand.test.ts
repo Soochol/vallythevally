@@ -14,7 +14,7 @@ function markup(mode: IndicatorCommandMode) {
   return html;
 }
 
-test("지표 창은 세 탭과 띄운 지표 목록, 공유 설정 양식, 입력 경계를 함께 보인다", () => {
+test("지표 창은 세 탭과 띄운 지표 목록, 공유 설정 양식, 입력 경계를 가운데 창으로 보인다", () => {
   const html = markup("current");
   expect(html).toContain("지표·비교 입력창");
   expect(html).toContain('role="combobox"');
@@ -25,21 +25,21 @@ test("지표 창은 세 탭과 띄운 지표 목록, 공유 설정 양식, 입�
   expect(html).toContain('aria-label="거래량 숨기기"');
   expect(html).toContain('aria-label="거래량 지우기"');
   expect(html).toContain("아래 패널");
-  expect(html).toContain("변경 적용");
+  expect(html).not.toContain("변경 적용");
   expect(html).toContain('data-chart-control=""');
   expect(html).toContain('data-command-frame=""');
   expect(html).toContain("ic-frame");
   expect(html).toContain('data-solid=""');
-  expect(html).toContain('data-placement="top-end"');
-  expect(html).toContain("Shift+Enter");
+  expect(html).not.toContain('data-placement="top-end"');
+  expect(html).toContain("되돌리고 닫기");
   expect(html.match(/<footer/g)).toHaveLength(1);
 });
 
-test("지표 추가 탭은 종류별 묶음에 추가 후보를 두고 추가 버튼을 보인다", () => {
+test("지표 추가 탭은 종류별 묶음에 추가 후보를 두고 하단 추가 버튼 없이 자동 저장 안내를 보인다", () => {
   const html = markup("add");
   expect(html).toContain('aria-label="이동평균 단순 20 추가 후보"');
   for (const group of ["가격 패널", "아래 패널", "재무지표"]) expect(html).toContain(group);
-  expect(html).toContain("이동평균 단순 20 추가");
+  expect(html).not.toContain("btn-primary");
   expect(html).toContain('aria-label="선 미리보기"');
   expect(html).toContain('aria-label="굵기"');
   expect(html).toContain('aria-label="테마 색"');
@@ -48,12 +48,12 @@ test("지표 추가 탭은 종류별 묶음에 추가 후보를 두고 추가 �
   expect(html).not.toContain('aria-label="거래량 숨기기"');
 });
 
-test("비교 종목 탭은 같은 틀에서 비교 수·가격축·추가 동작을 보인다", () => {
+test("비교 종목 탭은 같은 틀에서 비교 수·가격축을 보이고 하단 추가 버튼은 두지 않는다", () => {
   const html = markup("compare");
   expect(html).toContain("지표·비교 입력창");
   expect(html).toContain("비교 종목 0/3");
   expect(html).toContain("가격축을 % 변화로");
-  expect(html).toContain("비교 종목 추가");
+  expect(html).not.toContain("비교 종목 추가");
   expect(html).not.toContain("<kbd class=\"ui-kbd \">Tab</kbd>");
   expect(html).toContain('data-chart-control=""');
 });

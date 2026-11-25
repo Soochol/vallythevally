@@ -1,4 +1,5 @@
-.cs-popover { display:flex; flex-direction:column; gap:var(--size-8); width:min(var(--size-340), calc(100vw - var(--size-16))); padding:var(--size-12); }
+.cs-dialog { width:min(var(--size-340), calc(100vw - var(--size-16))); }
+.cs-body { display:flex; flex-direction:column; gap:var(--size-8); min-height:0; overflow:auto; padding:var(--size-12); scrollbar-width:thin; }
 .cs-head { display:flex; align-items:center; gap:var(--size-8); }
 .cs-head h2 { font-size:var(--fs-m); font-weight:600; }
 .cs-cell { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:var(--fs-s); color:var(--text-2); }

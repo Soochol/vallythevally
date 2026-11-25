@@ -31,7 +31,7 @@ test("창 배치 방식을 바꾸면 한 번 저장하고 같은 값은 저장�
 });
 
 test("호가주문창의 기억을 꺼내면 그 레이아웃의 그 창 기억만 지우고 없으면 저장하지 않는다", () => {
-  const entry: OrderEntry = { presetKind: "sharePresets", quantity: 5, usedAt: 1 };
+  const entry: OrderEntry = { quantity: 5, usedAt: 1 };
   const s = useUiStore.getState();
   for (const key of [orderEntryKey("L", "order-2", "A"), orderEntryKey("L", "order-2", "B"), orderEntryKey("L", "order-20", "A"), orderEntryKey("L", "order", "A"), orderEntryKey("M", "order-2", "A")]) s.rememberOrderEntry(key, entry);
   const revision = useUiStore.getState().revision;
@@ -45,9 +45,9 @@ test("호가주문창의 기억을 꺼내면 그 레이아웃의 그 창 기억�
 });
 
 test("꺼낸 호가주문창의 기억은 되돌려 넣으면 그 창 기억을 그대로 되찾고 그 사이 남긴 기억은 대신한다", () => {
-  const closed: OrderEntry = { presetKind: "amountPresets", quantity: 37, usedAt: 1 };
-  const reused: OrderEntry = { presetKind: "sharePresets", quantity: 5, usedAt: 2 };
-  const other: OrderEntry = { presetKind: "sharePresets", quantity: 9, usedAt: 3 };
+  const closed: OrderEntry = { quantity: 37, usedAt: 1 };
+  const reused: OrderEntry = { quantity: 5, usedAt: 2 };
+  const other: OrderEntry = { quantity: 9, usedAt: 3 };
   const s = useUiStore.getState();
   s.rememberOrderEntry(orderEntryKey("L", "order-2", "A"), closed);
   s.rememberOrderEntry(orderEntryKey("L", "order", "A"), other);
