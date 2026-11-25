@@ -15,7 +15,7 @@ use server::http::router;
 use server::kiwoom::auth::KiwoomAuth;
 use server::kiwoom::rest::KiwoomRest;
 use server::kiwoom::stream::KiwoomStream;
-use server::shared_data::{CurrentQuotes, DataKind, FeedWriter, Header, Ladder, LevelQty, LiveQuoteWriter, QuoteMinute, TradeMinuteLine, VenueQuote, flow_links_path, trade_minute_path};
+use server::shared_data::{CollectorPaths, CurrentQuotes, DataKind, FeedWriter, Header, Ladder, LevelQty, LiveQuoteWriter, QuoteMinute, TradeMinuteLine, VenueQuote, flow_links_path, trade_minute_path};
 use server::symbols::SymbolDirectory;
 use support::ScriptedTransport;
 use tower::ServiceExt;
@@ -30,7 +30,7 @@ fn at(hour: u32, minute: u32, second: u32) -> i64 {
     kst(today(), hour, minute, second).unix() * 1000
 }
 
-async fn start(tmp: &Path) -> (Router, PathBuf) {
+async fn start_with_paths(tmp: &Path, separate_shared: bool) -> (Router, PathBuf, PathBuf) {
     let fake = ScriptedTransport::new();
     let clock = Clock::fake(kst(today(), 10, 0, 0));
     let auth = KiwoomAuth::new(Secret::new("FAKE_KEY".into()), Secret::new("FAKE_SECRET".into()), None);
@@ -42,8 +42,20 @@ async fn start(tmp: &Path) -> (Router, PathBuf) {
     let state = application(ApplicationInputs { rest, clock, symbols: Arc::new(SymbolDirectory::default()), db, screener_store: store, stream: (stream, events), static_dir: tmp.to_owned(), screener_update_on_connect: false });
     let data = tmp.join("hoga");
     std::fs::create_dir_all(&data).unwrap();
-    state.book_replay.enable(data.clone());
-    (router(state), data)
+    let shared = if separate_shared {
+        let external = tmp.join("external-shared");
+        state.collector_paths.configure(CollectorPaths::new(Some(data.clone()), Some(external.clone())));
+        external
+    } else {
+        state.collector_paths.configure(CollectorPaths::hoga_only(data.clone()));
+        data.join("shared")
+    };
+    (router(state), data, shared)
+}
+
+async fn start(tmp: &Path) -> (Router, PathBuf) {
+    let (app, data, _) = start_with_paths(tmp, false).await;
+    (app, data)
 }
 
 async fn get(app: &Router, path: &str) -> (u16, Value) {
@@ -160,4 +172,21 @@ async fn covered_minutes_follow_the_link_records_of_the_keys_that_hold_the_stock
 
     let body = day_of(&app, "005930").await;
     assert_eq!(body["covered"], json!([[540, 541], [544, 544], [552, 552]]), "{body}");
+}
+
+#[tokio::test]
+async fn live_replay_reads_from_separate_shared_data_dir() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (app, _data, shared) = start_with_paths(tmp.path(), true).await;
+    let mut writer = LiveQuoteWriter::open(&shared, DATE, "collect-01", 1).unwrap();
+    writer.append_minute("005930", &quote(540, 71_000)).unwrap();
+    write_links(&shared, "collect-01", &[(at(8, 55, 0), "start"), (at(8, 55, 2), "live"), (at(9, 1, 20), "alive")]);
+    write_trades(&shared, "collect-01", "005930", &[(540, &[(32_401, 71_000, 3)])]);
+
+    let body = day_of(&app, "005930").await;
+    assert_eq!(body["coverage"], json!("collected"));
+    assert_eq!(body["covered"], json!([[540, 540]]));
+    assert_eq!(body["books"].as_array().unwrap().len(), 1);
+    assert_eq!(body["trades"], json!([[540, 32_401, 71_000, 3]]));
+    assert_eq!(get(&app, "/api/symbols/005930/book-replay/days").await.1["days"], json!([DATE]));
 }

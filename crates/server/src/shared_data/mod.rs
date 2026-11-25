@@ -45,6 +45,70 @@ pub struct SharedDataSettings {
 }
 
 pub const DEFAULT_POLL: Duration = Duration::from_millis(1000);
+const SHARED_FOLDER: &str = "shared";
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct CollectorPaths {
+    hoga_dir: Option<PathBuf>,
+    shared_dir: Option<PathBuf>,
+}
+
+impl CollectorPaths {
+    pub fn new(hoga_dir: Option<PathBuf>, shared_dir: Option<PathBuf>) -> Self {
+        let shared_dir = shared_dir.or_else(|| hoga_dir.as_ref().map(|dir| dir.join(SHARED_FOLDER)));
+        Self { hoga_dir, shared_dir }
+    }
+
+    pub fn hoga_only(hoga_dir: PathBuf) -> Self {
+        Self::new(Some(hoga_dir), None)
+    }
+
+    pub fn shared_only(shared_dir: PathBuf) -> Self {
+        Self::new(None, Some(shared_dir))
+    }
+
+    pub fn from_config(config: &crate::config::Config) -> Self {
+        Self::new(
+            config.hoga_data_dir.clone(),
+            config.shared_data.as_ref().map(|settings| settings.dir.clone()),
+        )
+    }
+
+    pub fn hoga_dir(&self) -> Option<&Path> {
+        self.hoga_dir.as_deref()
+    }
+
+    pub fn shared_dir(&self) -> Option<&Path> {
+        self.shared_dir.as_deref()
+    }
+}
+
+#[derive(Default)]
+pub struct CollectorPathsSlot {
+    paths: OnceLock<CollectorPaths>,
+}
+
+impl CollectorPathsSlot {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn configure(&self, paths: CollectorPaths) {
+        let _ = self.paths.set(paths);
+    }
+
+    pub fn snapshot(&self) -> CollectorPaths {
+        self.paths.get().cloned().unwrap_or_default()
+    }
+
+    pub fn hoga_dir(&self) -> Option<&Path> {
+        self.paths.get().and_then(CollectorPaths::hoga_dir)
+    }
+
+    pub fn shared_dir(&self) -> Option<&Path> {
+        self.paths.get().and_then(CollectorPaths::shared_dir)
+    }
+}
 
 pub struct SharedData {
     pub probe: Board<ProbeBody>,
@@ -160,5 +224,42 @@ impl SharedData {
             DataKind::QuoteMinutes => None,
             DataKind::TradeMinute => None,
         }
+    }
+}
+
+#[cfg(test)]
+mod collector_paths_tests {
+    use super::*;
+
+    #[test]
+    fn resolves_shared_from_hoga_when_explicit_shared_is_absent() {
+        let paths = CollectorPaths::hoga_only(PathBuf::from("/data/hoga"));
+        assert_eq!(paths.hoga_dir(), Some(Path::new("/data/hoga")));
+        assert_eq!(paths.shared_dir(), Some(Path::new("/data/hoga/shared")));
+    }
+
+    #[test]
+    fn explicit_shared_overrides_hoga_shared_subdirectory() {
+        let paths = CollectorPaths::new(Some(PathBuf::from("/data/hoga")), Some(PathBuf::from("/srv/shared")));
+        assert_eq!(paths.hoga_dir(), Some(Path::new("/data/hoga")));
+        assert_eq!(paths.shared_dir(), Some(Path::new("/srv/shared")));
+    }
+
+    #[test]
+    fn shared_only_leaves_hoga_dir_unset() {
+        let paths = CollectorPaths::shared_only(PathBuf::from("/srv/shared"));
+        assert_eq!(paths.hoga_dir(), None);
+        assert_eq!(paths.shared_dir(), Some(Path::new("/srv/shared")));
+    }
+
+    #[test]
+    fn empty_slot_reports_none_until_configured() {
+        let slot = CollectorPathsSlot::new();
+        assert_eq!(slot.hoga_dir(), None);
+        assert_eq!(slot.shared_dir(), None);
+        assert_eq!(slot.snapshot(), CollectorPaths::default());
+        slot.configure(CollectorPaths::hoga_only(PathBuf::from("/data/hoga")));
+        assert_eq!(slot.hoga_dir(), Some(Path::new("/data/hoga")));
+        assert_eq!(slot.shared_dir(), Some(Path::new("/data/hoga/shared")));
     }
 }

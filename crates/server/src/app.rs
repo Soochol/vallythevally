@@ -189,6 +189,7 @@ pub fn application_with_source(inputs: ApplicationInputs, mut system: SystemStat
         market_source_board,
         public_usage: Default::default(),
         shared_data: crate::shared_data::SharedData::new(),
+        collector_paths: Arc::new(crate::shared_data::CollectorPathsSlot::new()),
         book_replay: crate::book_replay::BookReplay::new(),
         collected: crate::collected::Collected::new(),
         heatmap_quotes: Arc::new(crate::heatmap_board::QuoteCache::with_generation(generation.clone())),
@@ -415,16 +416,14 @@ pub async fn start_with(config: &Config, lock: &InstanceLock, adapters: Adapters
     tokio::spawn(crate::account::sync::run(state.clone()));
     tokio::spawn(crate::collector::run(state.clone()));
     state.shared_data.start(config.shared_data.as_ref());
-    if let Some(dir) = &config.hoga_data_dir {
-        state.book_replay.enable(dir.clone());
-        state.quote_minutes.set_fallback_dir(dir.join("shared"));
-        state.collected.enable(dir.clone());
+    let collector_paths = crate::shared_data::CollectorPaths::from_config(config);
+    if let Some(dir) = collector_paths.hoga_dir() {
         tracing::info!(path = %dir.display(), "수집 호가 데이터 폴더를 연결했습니다");
-    } else if config.shared_data.is_none() {
+    } else if collector_paths.shared_dir().is_none() {
         tracing::info!("VALLY_HOGA_DATA_DIR과 VALLY_SHARED_DATA_DIR이 없어 분 호가·호가 복기·수집 거래원을 끕니다");
     }
+    state.collector_paths.configure(collector_paths);
     if let Some(shared) = &config.shared_data {
-        state.collected.use_shared_dir(shared.dir.clone());
         state.screener.read_shared_snapshots(state.shared_data.clone(), config.screener_snapshot_stale_limit);
         state.screener.keep_calendar_fresh();
         tracing::info!(path = %shared.dir.display(), "공용 자료 폴더를 연결했습니다");
