@@ -205,6 +205,15 @@ export function readSpecShape(raw: unknown): IndicatorSpec | null {
       return isNum(r.fast) && isNum(r.slow) && isNum(r.signal) ? { kind: "macd", fast: r.fast, slow: r.slow, signal: r.signal } : null;
     case "stochSlow":
       return isNum(r.k) && isNum(r.d) && isNum(r.smooth) ? { kind: "stochSlow", k: r.k, d: r.d, smooth: r.smooth } : null;
+    case "tickCvd":
+      return typeof r.showWhale === "boolean"
+        && typeof r.showLarge === "boolean"
+        && typeof r.showMid === "boolean"
+        && typeof r.showRetail === "boolean"
+        ? { kind: "tickCvd", showWhale: r.showWhale, showLarge: r.showLarge, showMid: r.showMid, showRetail: r.showRetail }
+        : null;
+    case "programFlow":
+      return typeof r.showShare === "boolean" ? { kind: "programFlow", showShare: r.showShare } : null;
     default:
       return null;
   }

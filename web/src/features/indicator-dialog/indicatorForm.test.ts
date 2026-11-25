@@ -177,6 +177,8 @@ test("재무·호가 지표만 주기 안내 문구를 돌려준다", () => {
   expect(indicatorPeriodNotice("revenue")).toContain("분기봉·연봉");
   expect(indicatorPeriodNotice("quoteTotals")).toContain("주식·ETF 분봉");
   expect(indicatorPeriodNotice("quoteDepth")).toContain("주식·ETF 분봉");
+  expect(indicatorPeriodNotice("tickCvd")).toContain("주식·ETF 분봉");
+  expect(indicatorPeriodNotice("programFlow")).toContain("주식·ETF 분봉");
   expect(indicatorPeriodNotice("ma")).toBeNull();
   expect(indicatorPeriodNotice("rsi")).toBeNull();
 });

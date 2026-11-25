@@ -20,12 +20,15 @@ import type { Bar } from "../api/generated/Bar";
 import type { FinancialsPage } from "../api/generated/FinancialsPage";
 import type { KstDate } from "../api/generated/KstDate";
 import type { Period } from "../api/generated/Period";
+import type { ProgramSeriesPage } from "../api/generated/ProgramSeriesPage";
 import type { QuoteDepthPage } from "../api/generated/QuoteDepthPage";
 import type { QuoteTotalsPage } from "../api/generated/QuoteTotalsPage";
 import type { SubErrorCode } from "../api/generated/SubErrorCode";
 import type { SymbolCode } from "../api/generated/SymbolCode";
 import type { SymbolInfo } from "../api/generated/SymbolInfo";
+import type { TickCvdPage } from "../api/generated/TickCvdPage";
 import type { UnixSeconds } from "../api/generated/UnixSeconds";
+import type { MicroRange } from "../api/microSeries";
 import { ApiRequestError } from "../api/http";
 import { formatPrice } from "../lib/format";
 import type { Connection, MarketSocketLike } from "../api/socket";
@@ -45,6 +48,7 @@ import { JumpBadge } from "./jumpBadge";
 import { type FetchJump, JumpableFeed } from "./jumpFeed";
 import { type Extreme, findExtremes } from "./extremes";
 import { type OpenPort, openIndicatorPort } from "./indicators/client";
+import { isProgramFlow, isTickCvd } from "./indicators/kinds";
 import { IndicatorLayer } from "./indicators/layer";
 import { PanelControls } from "./panelControls";
 import { type IndicatorCommand, IndicatorLegend, type PaneBounds } from "./indicators/legendRows";
@@ -149,6 +153,8 @@ export interface ControllerDeps {
   fetchJump?: FetchJump;
   fetchQuoteTotals?: (key: QuoteKey, range: QuoteRange, signal: AbortSignal) => Promise<QuoteTotalsPage>;
   fetchQuoteDepth?: (key: QuoteKey, range: QuoteRange, signal: AbortSignal) => Promise<QuoteDepthPage>;
+  fetchTickCvd?: (symbol: SymbolCode, period: Period, range: MicroRange, signal: AbortSignal) => Promise<TickCvdPage>;
+  fetchProgramSeries?: (symbol: SymbolCode, period: Period, range: MicroRange, signal: AbortSignal) => Promise<ProgramSeriesPage>;
   /** 없으면 실시간 없이 조회한 봉만 그린다. */
   socket?: MarketSocketLike;
   indicators?: OpenPort;
@@ -215,6 +221,9 @@ export class ChartController {
   private lastRealtimeAt: UnixSeconds | null = null;
   private stalledAt: UnixSeconds | null = null;
   private readonly unwatch: () => void;
+  private readonly socket: MarketSocketLike | undefined;
+  private tradeFeedSub: { symbol: SymbolCode; venue: ShownVenue | null; stop: () => void } | null = null;
+  private programFeedSub: { symbol: SymbolCode; stop: () => void } | null = null;
   private readonly resize: ResizeObserver;
   private readonly hostResize: ResizeObserver;
   private readonly narrowMedia: MediaQueryList;
@@ -234,6 +243,7 @@ export class ChartController {
 
   constructor(el: HTMLElement, deps: ControllerDeps) {
     this.el = el;
+    this.socket = deps.socket;
     this.onCorner = deps.onCorner;
     this.tokens = deps.tokens;
     this.onStatus = deps.onStatus;
@@ -289,6 +299,7 @@ export class ChartController {
       },
       deps.indicators ?? openIndicatorPort,
       { fetchQuoteTotals: deps.fetchQuoteTotals, fetchQuoteDepth: deps.fetchQuoteDepth, now: nowSeconds },
+      { fetchTickCvd: deps.fetchTickCvd, fetchProgramSeries: deps.fetchProgramSeries },
     );
     this.indicators.attachMainSeries(this.main.api);
     this.indicatorLegend = new IndicatorLegend(el, (id, command, anchor) => deps.onIndicatorCommand?.(id, command, anchor), () => this.legend.fit("content"));
@@ -429,6 +440,7 @@ export class ChartController {
     const targetChanged = prev?.symbol !== next.symbol || prev.venue !== next.venue || prev.period !== next.period;
     if (targetChanged) {
       this.indicators.setQuoteTarget({ symbol: next.symbol, venue: next.venue, period: next.period }, !configsChanged);
+      this.indicators.setMicroTarget({ symbol: next.symbol, period: next.period }, !configsChanged);
     }
     if (configsChanged) {
       this.paneLayoutDirty = true;
@@ -436,6 +448,7 @@ export class ChartController {
       const panels = chartPanels(next.settings, next.period, !isIndex);
       this.withDataGuard(() => preserveTimeRange(this.chart.timeScale(), next.period, this.pendingScroll, () => this.indicators.setConfigs(configs, panels)));
     }
+    if (targetChanged || configsChanged) this.syncMicroFeeds();
     if (prev && prev.settings.visibleBars !== next.settings.visibleBars) this.fitInitialRange();
     if (prev?.settings.showExtremes !== next.settings.showExtremes || prev?.settings.extremeBasis !== next.settings.extremeBasis) this.scheduleFrame();
     this.indicators.setPreview(next.previewIndicator ?? null);
@@ -569,6 +582,7 @@ export class ChartController {
     this.resize.disconnect();
     this.hostResize.disconnect();
     this.unwatch();
+    this.stopMicroFeeds();
     this.feed.dispose();
     this.badge.dispose();
     this.fineBars.dispose();
@@ -1017,6 +1031,48 @@ export class ChartController {
   private onModeChanged(): void {
     this.syncCompare();
     this.renderBadge();
+  }
+
+  private stopMicroFeeds(): void {
+    this.tradeFeedSub?.stop();
+    this.tradeFeedSub = null;
+    this.programFeedSub?.stop();
+    this.programFeedSub = null;
+  }
+
+  private syncMicroFeeds(): void {
+    const view = this.view;
+    const socket = this.socket;
+    const eligible = view !== null && socket !== undefined && !isIndexCode(view.symbol) && isIntraday(view.period);
+    const wantTrades = eligible && view.settings.indicators.some((c) => isTickCvd(c.spec) && c.visible);
+    const wantProgram = eligible && view.settings.indicators.some((c) => isProgramFlow(c.spec) && c.visible);
+
+    if (!wantTrades) {
+      this.tradeFeedSub?.stop();
+      this.tradeFeedSub = null;
+    } else if (!this.tradeFeedSub || this.tradeFeedSub.symbol !== view.symbol || this.tradeFeedSub.venue !== view.venue) {
+      this.tradeFeedSub?.stop();
+      const symbol = view.symbol;
+      const venue = view.venue;
+      const stop = socket.subscribeFeed({ symbol, kind: "trades", venue: venue ?? "combined" }, (m) => {
+        if (this.disposed || m.type !== "feed_trades") return;
+        for (const trade of m.trades) this.indicators.applyLiveTrade(symbol, trade);
+      });
+      this.tradeFeedSub = { symbol, venue, stop };
+    }
+
+    if (!wantProgram) {
+      this.programFeedSub?.stop();
+      this.programFeedSub = null;
+    } else if (!this.programFeedSub || this.programFeedSub.symbol !== view.symbol) {
+      this.programFeedSub?.stop();
+      const symbol = view.symbol;
+      const stop = socket.subscribeFeed({ symbol, kind: "program" }, (m) => {
+        if (this.disposed || m.type !== "feed_program") return;
+        this.indicators.applyLiveProgram(symbol, m.row);
+      });
+      this.programFeedSub = { symbol, stop };
+    }
   }
 
   private syncCompare(): void {

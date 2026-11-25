@@ -4,6 +4,7 @@ import {
   type IndicatorColor,
   type IndicatorKind,
   isFinancial,
+  isMicro,
   isQuote,
   KINDS,
   colorLine,
@@ -159,5 +160,6 @@ export function indicatorPeriodNotice(kind: IndicatorKind): string | null {
   const spec = KINDS[kind].defaults;
   if (isFinancial(spec)) return "분기봉·연봉의 보고기간별 자료입니다. DPS는 연간 전용이며 다른 봉 주기에서는 설정을 보존하고 숨깁니다.";
   if (isQuote(spec)) return "주식·ETF 분봉의 호가 자료입니다. 일봉 이상이나 지수에서는 설정을 보존하고 숨깁니다.";
+  if (isMicro(spec)) return "주식·ETF 분봉의 체결·프로그램 수급 자료입니다. 일봉 이상이나 지수에서는 안내 문구만 보입니다.";
   return null;
 }
