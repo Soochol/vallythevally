@@ -48,6 +48,7 @@ function BrokerCard({
   binSeconds,
   cursor,
   cursorRatio,
+  dimFuture,
   selected,
   onSelect,
   onCursor,
@@ -59,6 +60,7 @@ function BrokerCard({
   binSeconds: number;
   cursor: UnixSeconds | null;
   cursorRatio: number | null;
+  dimFuture: boolean;
   selected: boolean;
   onSelect(code: string): void;
   onCursor(t: UnixSeconds | null): void;
@@ -98,6 +100,7 @@ function BrokerCard({
         <span className="br-bars" data-testid="broker-bars" onPointerMove={handleMove} onPointerLeave={() => onCursor(null)}>
           <CardBarsPlot bins={bins} peak={peak} height={barHeight} />
           <CardGapLayer ranges={gapRanges} />
+          {dimFuture && cursorRatio !== null && <span className="br-future" data-testid="broker-future-shade" style={{ left: `${cursorRatio * 100}%` }} aria-hidden />}
           {cursorRatio !== null && <span className="br-cursor" data-testid="broker-cursor" style={{ left: `${cursorRatio * 100}%` }} />}
         </span>
       )}
@@ -126,6 +129,7 @@ export function BoardView({
   gaps,
   mode,
   cursor,
+  dimFuture = false,
   selected,
   onSelect,
   onCursor,
@@ -135,6 +139,7 @@ export function BoardView({
   gaps: readonly (readonly [UnixSeconds, UnixSeconds])[];
   mode: BrokerCards;
   cursor: UnixSeconds | null;
+  dimFuture?: boolean;
   selected: string | null;
   onSelect(code: string): void;
   onCursor(t: UnixSeconds | null): void;
@@ -170,6 +175,7 @@ export function BoardView({
             binSeconds={binSeconds}
             cursor={cursor}
             cursorRatio={cursorRatio}
+            dimFuture={dimFuture}
             selected={selected === track.code}
             onSelect={onSelect}
             onCursor={onCursor}

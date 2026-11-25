@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { Bar } from "../../api/generated/Bar";
 import type { FeedBrokers } from "../../api/generated/FeedBrokers";
 import { boardAxis } from "./board";
-import { dayNav, priceAt } from "./history";
+import { priceAt } from "./history";
 import { EMPTY_BROKER_STATE, appendSnapshots, reduceBrokers } from "./model";
 
 const entry = (code: string, qty: number) => ({ code, name: `사${code}`, qty, qtyChange: 0 });
@@ -34,14 +34,6 @@ describe("거래원 수집 자료", () => {
     expect(boardAxis([kst("08:10:00"), kst("14:19:00")], kst("14:20:00"))).toEqual({ from: kst("09:00:00"), to: kst("14:20:00") });
     expect(boardAxis([kst("08:10:00"), kst("15:30:10")], kst("16:00:00"))).toEqual({ from: kst("09:00:00"), to: kst("15:30:00") });
     expect(boardAxis([kst("09:10:00"), kst("15:45:00")], kst("16:00:00"))).toEqual({ from: kst("09:00:00"), to: kst("16:00:00") });
-  });
-
-  it("날짜 이동은 수집한 날과 오늘을 오간다", () => {
-    const days = ["20261120", "20261123"];
-    expect(dayNav(days, "20261124", "20261124")).toEqual({ date: "20261124", isToday: true, previous: "20261123", next: null });
-    expect(dayNav(days, "20261124", "20261123")).toEqual({ date: "20261123", isToday: false, previous: "20261120", next: "20261124" });
-    expect(dayNav(days, "20261124", "20261120")).toEqual({ date: "20261120", isToday: false, previous: null, next: "20261123" });
-    expect(dayNav([...days, "20261124"], "20261124", "20261124").previous).toBe("20261123");
   });
 
   it("커서 시각의 가격은 그 시각이 든 분봉의 종가다", () => {

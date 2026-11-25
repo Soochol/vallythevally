@@ -20,12 +20,14 @@ export function fetchBrokerDays(symbol: SymbolCode, signal?: AbortSignal): Promi
   return getJson<BrokerDays>(`/api/symbols/${encodeURIComponent(symbol)}/brokers/days`, signal);
 }
 
-export function useBrokerDays(symbol: SymbolCode) {
+export function useBrokerDays(symbol: SymbolCode, enabled = true) {
+  const active = enabled && !isIndexCode(symbol);
   return useQuery({
     queryKey: ["brokers", "days", symbol],
     queryFn: ({ signal }) => fetchBrokerDays(symbol, signal),
-    enabled: !isIndexCode(symbol),
+    enabled: active,
     staleTime: DAYS_STALE_MS,
+    refetchInterval: active ? DAYS_STALE_MS : false,
     gcTime: GC_TIME_MS,
     retry: false,
   });

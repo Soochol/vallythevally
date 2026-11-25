@@ -1,5 +1,6 @@
 import { memo, useMemo } from "react";
 import type { Bar } from "../../api/generated/Bar";
+import type { UnixSeconds } from "../../api/generated/UnixSeconds";
 import { formatPrice, MINUS } from "../../lib/format";
 import { formatClock, formatQuantity, withSign } from "../market-window/format";
 import { useWindowedRows } from "../market-window/useWindowedRows";
@@ -8,8 +9,8 @@ import { priceAt } from "./history";
 
 const signed = (value: number) => withSign(value, formatQuantity(Math.abs(value)).replace("-", MINUS));
 
-export const DetailTable = memo(function DetailTable({ track, bars }: { track: BrokerTrack; bars: readonly Bar[] }) {
-  const rows = useMemo(() => eventsUntil(track, null, track.events.length), [track]);
+export const DetailTable = memo(function DetailTable({ track, bars, cursor }: { track: BrokerTrack; bars: readonly Bar[]; cursor: UnixSeconds | null }) {
+  const rows = useMemo(() => eventsUntil(track, cursor, track.events.length), [track, cursor]);
   const windowed = useWindowedRows(rows.length);
   const visible = rows.slice(windowed.range.start, windowed.range.end);
 

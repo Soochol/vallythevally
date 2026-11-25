@@ -7,29 +7,9 @@ const KST_OFFSET_SECONDS = 9 * 3600;
 const OPEN_SECONDS = 9 * 3600;
 const DAY_SECONDS = 24 * 3600;
 
-export interface DayNav {
-  readonly date: string;
-  readonly isToday: boolean;
-  readonly previous: string | null;
-  readonly next: string | null;
-}
-
 export interface AxisGapRange {
   readonly left: number;
   readonly width: number;
-}
-
-export function dayNav(days: readonly string[], today: string, shown: string): DayNav {
-  const all = [...new Set([...days, today])].sort();
-  const index = all.indexOf(shown);
-  const resolvedIndex = index === -1 ? all.indexOf(today) : index;
-  const date = all[resolvedIndex]!;
-  return {
-    date,
-    isToday: date === today,
-    previous: resolvedIndex > 0 ? all[resolvedIndex - 1]! : null,
-    next: resolvedIndex < all.length - 1 ? all[resolvedIndex + 1]! : null,
-  };
 }
 
 export function priceAt(bars: readonly Bar[], t: UnixSeconds): number | null {
