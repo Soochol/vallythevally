@@ -48,7 +48,16 @@ pub struct SharedDataSettings {
 }
 
 pub const DEFAULT_POLL: Duration = Duration::from_millis(1000);
+pub const DAILY_MICRO_FOLDER: &str = "daily-micro";
 const SHARED_FOLDER: &str = "shared";
+
+pub fn daily_micro_dir(shared_dir: &Path) -> PathBuf {
+    shared_dir.join(DAILY_MICRO_FOLDER)
+}
+
+pub fn daily_micro_path(shared_dir: &Path, date: u32) -> PathBuf {
+    daily_micro_dir(shared_dir).join(format!("{date}.parquet"))
+}
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct CollectorPaths {

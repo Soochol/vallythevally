@@ -3,9 +3,9 @@ import type { OrderSide } from "../../api/generated/OrderSide";
 import { formatPrice } from "../../lib/format";
 import { useStoreValue, type ValueStore } from "../../lib/valueStore";
 import type { LadderRow } from "../market-window/ladder";
-import { type DayPrices, ladderColumns, type LadderRowSlots, PriceLadder } from "../market-window/PriceLadder";
+import { type DayPrices, ladderColumns, type LadderMicroCue, type LadderRowSlots, PriceLadder } from "../market-window/PriceLadder";
 import { formatShares } from "../market-window/format";
-import { type BuyingPower, buyPreview, groupKey, type PriceGroup, type PriceKey, previewText, SIDE_LABEL } from "./orderRules";
+import { type BuyingPower, buyPreview, groupKey, orderQuantityForPrice, type PriceGroup, type PriceKey, previewText, SIDE_LABEL } from "./orderRules";
 import { PENDING_CHIP_TEXT, PENDING_TEXT } from "./statusText";
 import { LADDER_ROW_HEIGHT_PX, type RowRange, scrollTopToCenter, visibleRowRange } from "./priceRange";
 import { OrderList, type OrderListItem } from "./OrderList";
@@ -30,11 +30,13 @@ interface Props {
   readonly groups: ReadonlyMap<string, PriceGroup>;
   readonly writable: boolean;
   readonly previewQuantity: number;
+  readonly buyFull?: boolean;
   readonly buying: BuyingPower | null;
   readonly hover: ValueStore<HoverCell | null>;
   readonly actions: LadderActions;
   readonly averagePrice: number | null;
   readonly dayPrices?: DayPrices | null;
+  readonly microCues?: ReadonlyMap<number, LadderMicroCue>;
   readonly divider: boolean;
   readonly rateShown: boolean;
   readonly explorerOn: boolean;
@@ -80,6 +82,7 @@ interface CellProps {
   readonly group: PriceGroup | undefined;
   readonly writable: boolean;
   readonly previewQuantity: number;
+  readonly buyFull: boolean;
   readonly buying: BuyingPower | null;
   readonly api: CellApi;
 }
@@ -113,7 +116,7 @@ const centerRowOffset = (element: HTMLElement, fallbackToBid: boolean): number |
   return Math.max(0, rowCenter - head - (element.clientHeight - head) / 2);
 };
 
-const OrderCell = memo(function OrderCell({ rowKey, side, price, group, writable, previewQuantity, buying, api }: CellProps) {
+const OrderCell = memo(function OrderCell({ rowKey, side, price, group, writable, previewQuantity, buyFull, buying, api }: CellProps) {
   const hovered = useStoreValue(api.hover, (cell) => cell !== null && cell.side === side && cell.rowKey === rowKey);
   const targeted = useStoreValue(api.drag.views, (view) =>
     view?.target.kind === "cell"
@@ -122,8 +125,12 @@ const OrderCell = memo(function OrderCell({ rowKey, side, price, group, writable
     && (view.target.rowKey === undefined || view.target.rowKey === rowKey),
   );
   const chipDragging = useStoreValue(api.drag.views, (view) => group !== undefined && view?.source.kind === "chip" && view.source.group === group);
-  const showsPreview = hovered && writable && group === undefined && previewQuantity > 0;
-  const previewTone = showsPreview && side === "buy" ? buyPreview(price, previewQuantity, buying) : null;
+  const cellQuantity = orderQuantityForPrice(side, price, previewQuantity, buying, buyFull);
+  const buyExceedsAll = side === "buy" && buyFull && buying !== null && cellQuantity === 0;
+  const showsPreview = hovered && writable && group === undefined && (cellQuantity > 0 || buyExceedsAll);
+  const previewTone = showsPreview && side === "buy"
+    ? (buyExceedsAll ? "over" : buyPreview(price, cellQuantity, buying))
+    : null;
   return (
     <div
       className="od-cell"
@@ -146,12 +153,12 @@ const OrderCell = memo(function OrderCell({ rowKey, side, price, group, writable
             onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); if (!group.pending) api.openMenu({ x: e.clientX, y: e.clientY, group }); }}>
             {group.quantity.toLocaleString("ko-KR")}{group.pending && <span className="od-chip-state"> {PENDING_CHIP_TEXT[group.pending]}</span>}
           </button>
-        : showsPreview && <span className="od-preview" data-testid="order-preview" data-over={previewTone === "over" ? "" : undefined} data-margin={previewTone === "margin" ? "" : undefined}>{previewText(side, previewQuantity)}</span>}
+        : showsPreview && <span className="od-preview" data-testid="order-preview" data-over={previewTone === "over" ? "" : undefined} data-margin={previewTone === "margin" ? "" : undefined}>{previewText(side, cellQuantity)}</span>}
     </div>
   );
 });
 
-export function OrderLadder({ rows, previousClose, groups, writable, previewQuantity, buying, hover, actions, averagePrice, dayPrices = null, divider, rateShown, explorerOn, explorerUnavailable, explorerTitle, onToggleExplorer, explorerCenterPrice, ladder, drag, rowSlots, expectedPrice }: Props) {
+export function OrderLadder({ rows, previousClose, groups, writable, previewQuantity, buyFull = false, buying, hover, actions, averagePrice, dayPrices = null, microCues, divider, rateShown, explorerOn, explorerUnavailable, explorerTitle, onToggleExplorer, explorerCenterPrice, ladder, drag, rowSlots, expectedPrice }: Props) {
   const [menu, setMenu] = useState<MenuState | null>(null);
   const dragging = useStoreValue(drag.views, (view) => view !== null);
   const api = useMemo<CellApi>(() => ({ hover, drag, actions, openMenu: setMenu }), [hover, drag, actions]);
@@ -222,7 +229,7 @@ export function OrderLadder({ rows, previousClose, groups, writable, previewQuan
     const side = SIDE_OF_SLOT[slot];
     if (row.price === null) return <div className="od-cell" data-empty="" data-side={side} />;
     const group = chipVisible(side, row, repeated) ? groups.get(groupKey(side, row.price)) : undefined;
-    return <OrderCell rowKey={row.key} side={side} price={row.price} group={group} writable={writable} previewQuantity={previewQuantity} buying={buying} api={api} />;
+    return <OrderCell rowKey={row.key} side={side} price={row.price} group={group} writable={writable} previewQuantity={previewQuantity} buyFull={buyFull} buying={buying} api={api} />;
   };
   const slots = { left: cell("left"), right: cell("right") };
 
@@ -245,7 +252,7 @@ export function OrderLadder({ rows, previousClose, groups, writable, previewQuan
   };
 
   const shown = exploring ? rows.slice(range.start, range.end) : rows;
-  const ladderView = <PriceLadder rows={shown} previousClose={previousClose} rateShown={rateShown} slots={slots} rowSlots={exploring ? undefined : rowSlots} mark={{ price: averagePrice, label: "평단가" }} dayPrices={dayPrices} expectedPrice={expectedPrice} firstBidIndex={exploring ? Math.max(0, (centerIndex < 0 ? rowCount : centerIndex) - range.start) : undefined} />;
+  const ladderView = <PriceLadder rows={shown} previousClose={previousClose} rateShown={rateShown} slots={slots} rowSlots={exploring ? undefined : rowSlots} mark={{ price: averagePrice, label: "평단가" }} dayPrices={dayPrices} microCues={microCues} expectedPrice={expectedPrice} firstBidIndex={exploring ? Math.max(0, (centerIndex < 0 ? rowCount : centerIndex) - range.start) : undefined} />;
 
   return (
     <div ref={ladder} className="od-ladder" data-testid="order-ladder" data-explorer={exploring ? "" : undefined} data-dragging={dragging ? "" : undefined} data-divider={divider ? "" : undefined}

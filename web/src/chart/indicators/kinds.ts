@@ -5,6 +5,8 @@ import type { QuoteDepthSource } from "../../api/generated/QuoteDepthSource";
 import type { SpecValidation } from "../../wasm/indicators/indicators.js";
 import { isHexColor, PRESET_COLORS, type HexColor } from "../../lib/colors";
 
+export type MicroLabelMode = "clean" | "verbose";
+
 export type QuoteDepthSpec = {
   kind: "quoteDepth";
   source: QuoteDepthSource;
@@ -13,18 +15,46 @@ export type QuoteDepthSpec = {
   aboveBars: boolean;
   askColor: HexColor | null;
   bidColor: HexColor | null;
+  showSpoof?: boolean;
+  showIceberg?: boolean;
+  microLabelMode?: MicroLabelMode;
 };
 export type QuoteSpec = { kind: "quoteTotals" } | QuoteDepthSpec;
-export type IndicatorSpec = TechnicalSpec | { [K in FinancialMetric]: { kind: K } }[FinancialMetric] | QuoteSpec;
+export type TickCvdSpec = {
+  kind: "tickCvd";
+  showWhale: boolean;
+  showLarge: boolean;
+  showMid: boolean;
+  showRetail: boolean;
+};
+export type ProgramFlowSpec = {
+  kind: "programFlow";
+  showShare: boolean;
+};
+export type MicroSpec = TickCvdSpec | ProgramFlowSpec;
+export type IndicatorSpec = TechnicalSpec | { [K in FinancialMetric]: { kind: K } }[FinancialMetric] | QuoteSpec | MicroSpec;
 export type FinancialSpec = Extract<IndicatorSpec, { kind: FinancialMetric }>;
 export const FINANCIAL_LABEL: Record<FinancialMetric, string> = { revenue: "매출액", operating_income: "영업이익", owner_roe: "지배주주 ROE", investing_cash_flow: "투자활동 현금흐름", dps: "DPS", debt_ratio: "부채비율" };
 export const isFinancial = (spec: IndicatorSpec): spec is FinancialSpec => spec.kind in FINANCIAL_LABEL;
 export const isQuoteTotals = (spec: IndicatorSpec): spec is { kind: "quoteTotals" } => spec.kind === "quoteTotals";
 export const isQuoteDepth = (spec: IndicatorSpec): spec is QuoteDepthSpec => spec.kind === "quoteDepth";
 export const isQuote = (spec: IndicatorSpec): spec is QuoteSpec => isQuoteTotals(spec) || isQuoteDepth(spec);
-export const isTechnical = (spec: IndicatorSpec): spec is TechnicalSpec => !isFinancial(spec) && !isQuote(spec);
+export const isTickCvd = (spec: IndicatorSpec): spec is TickCvdSpec => spec.kind === "tickCvd";
+export const isProgramFlow = (spec: IndicatorSpec): spec is ProgramFlowSpec => spec.kind === "programFlow";
+export const isMicro = (spec: IndicatorSpec): spec is MicroSpec => isTickCvd(spec) || isProgramFlow(spec);
+export const isTechnical = (spec: IndicatorSpec): spec is TechnicalSpec => !isFinancial(spec) && !isQuote(spec) && !isMicro(spec);
 export const isFinancialBar = (kind: FinancialMetric) => kind !== "owner_roe" && kind !== "debt_ratio";
-export type PlotLineId = LineId | "financial" | "quoteAsk" | "quoteBid";
+export type PlotLineId =
+  | LineId
+  | "financial"
+  | "quoteAsk"
+  | "quoteBid"
+  | "cvdWhale"
+  | "cvdLarge"
+  | "cvdMid"
+  | "cvdRetail"
+  | "programNet"
+  | "programShare";
 
 export type IndicatorKind = IndicatorSpec["kind"];
 export type SpecOf<K extends IndicatorKind> = Extract<IndicatorSpec, { kind: K }>;
@@ -127,6 +157,34 @@ export const KINDS: Registry = {
     name: (s) => `스토캐스틱 슬로우 ${s.k} ${s.d} ${s.smooth}`,
     lines: () => ["k", "d"],
   },
+  tickCvd: {
+    label: "계층별 CVD",
+    place: "panel",
+    defaults: { kind: "tickCvd", showWhale: true, showLarge: false, showMid: false, showRetail: true },
+    fields: [
+      { key: "showWhale", label: "초대형(1억+)", type: "flag" },
+      { key: "showLarge", label: "대형(3천만~1억)", type: "flag" },
+      { key: "showMid", label: "중형(5백만~3천만)", type: "flag" },
+      { key: "showRetail", label: "소형(5백만 미만)", type: "flag" },
+    ],
+    name: () => "계층별 CVD",
+    lines: (s) => {
+      const out: PlotLineId[] = [];
+      if (s.showWhale) out.push("cvdWhale");
+      if (s.showLarge) out.push("cvdLarge");
+      if (s.showMid) out.push("cvdMid");
+      if (s.showRetail) out.push("cvdRetail");
+      return out;
+    },
+  },
+  programFlow: {
+    label: "프로그램 수급",
+    place: "panel",
+    defaults: { kind: "programFlow", showShare: false },
+    fields: [{ key: "showShare", label: "프로그램 비중(%) 표시", type: "flag" }],
+    name: () => "프로그램 수급",
+    lines: (s) => (s.showShare ? ["programNet", "programShare"] : ["programNet"]),
+  },
   quoteTotals: {
     label: "총잔량",
     place: "panel",
@@ -138,12 +196,15 @@ export const KINDS: Registry = {
   quoteDepth: {
     label: "호가 잔량 히트맵",
     place: "price",
-    defaults: { kind: "quoteDepth", source: "priceMax", topLevels: null, maxOpacity: 0.7, aboveBars: false, askColor: null, bidColor: null },
+    defaults: { kind: "quoteDepth", source: "priceMax", topLevels: null, maxOpacity: 0.7, aboveBars: false, askColor: null, bidColor: null, showSpoof: false, showIceberg: false, microLabelMode: "clean" },
     fields: [
       { key: "source", label: "잔량 기준", type: "choice", options: [["priceMax", "가격대마다 최댓값"], ["peak", "총잔량 최대 순간"], ["close", "종가 호가"]] },
       { key: "topLevels", label: "가격대 수", type: "optionalInt", unit: "개", toggle: "최대 잔량 가격대만", start: 1, max: 5 },
       { key: "maxOpacity", label: "최대 불투명도", type: "percent", min: 20, max: 100, step: 5 },
       { key: "aboveBars", label: "봉 앞에 그리기", type: "flag" },
+      { key: "showSpoof", label: "허수 취소 표시", type: "flag" },
+      { key: "showIceberg", label: "아이스버그 흡수 표시", type: "flag" },
+      { key: "microLabelMode", label: "미시 표기 방식", type: "choice", options: [["clean", "점 표기"], ["verbose", "배지 표기"]] },
       { key: "askColor", label: "매도 색", type: "color", token: "down" },
       { key: "bidColor", label: "매수 색", type: "color", token: "up" },
     ],
@@ -152,7 +213,7 @@ export const KINDS: Registry = {
   },
 };
 
-export const KIND_ORDER: IndicatorKind[] = ["ma", "bollinger", "ichimoku", "volume", "rsi", "macd", "stochSlow", "quoteTotals", "quoteDepth", "revenue", "operating_income", "owner_roe", "investing_cash_flow", "dps", "debt_ratio"];
+export const KIND_ORDER: IndicatorKind[] = ["ma", "bollinger", "ichimoku", "volume", "rsi", "macd", "stochSlow", "tickCvd", "programFlow", "quoteTotals", "quoteDepth", "revenue", "operating_income", "owner_roe", "investing_cash_flow", "dps", "debt_ratio"];
 
 const kindInfo = <K extends IndicatorKind>(kind: K): KindInfo<K> => KINDS[kind];
 
@@ -192,6 +253,12 @@ export const LINE_LABEL: Record<PlotLineId, string> = {
   d: "%D",
   quoteAsk: "매도총잔량",
   quoteBid: "매수총잔량",
+  cvdWhale: "초대형",
+  cvdLarge: "대형",
+  cvdMid: "중형",
+  cvdRetail: "소형",
+  programNet: "순매수",
+  programShare: "비중",
 };
 
 export function colorLine(spec: IndicatorSpec): number | null {

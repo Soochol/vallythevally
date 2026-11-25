@@ -121,3 +121,42 @@ test("미수 허용 계좌에서는 매수 비율이 미수 포함 주문가능 
   await buttons.nth(1).click();
   await expect(quantityField(page)).toHaveValue("100");
 });
+
+test("매수 전량을 고른 뒤 현재가보다 높은 호가나 낮은 호가에 주문하면 클릭한 가격 기준 최대 수량으로 미리보기되고 주문이 나간다", async ({ page, scenario }) => {
+  ordersOn(scenario);
+  const api = tradingApi(scenario);
+  api.orderable = { cashAmount: 7_000_000, cashQuantity: 100 };
+  await openOrderWindow(page, scenario);
+
+  await modeButton(page, "매수").click();
+  const buttons = presetButtons(page, "매수 비율 프리셋");
+  await buttons.nth(3).click();
+  await expect(quantityField(page)).toHaveValue("100");
+
+  const higher = BASE + 100;
+  await cellAt(page, "buy", higher).hover();
+  await expect(cellAt(page, "buy", higher).getByTestId("order-preview")).toHaveText("매수 99");
+  await expect(cellAt(page, "buy", higher).getByTestId("order-preview")).not.toHaveAttribute("data-over", "");
+  await cellAt(page, "buy", higher).dblclick();
+  await pollSaved(() => writesTo(api, "place")).toHaveLength(1);
+  expect(writesTo(api, "place")[0]!.body).toMatchObject({ side: "buy", price: higher, quantity: 99 });
+
+  const lower = BASE - 900;
+  await cellAt(page, "buy", lower).hover();
+  await expect(cellAt(page, "buy", lower).getByTestId("order-preview")).toHaveText("매수 101");
+  await cellAt(page, "buy", lower).dblclick();
+  await pollSaved(() => writesTo(api, "place")).toHaveLength(2);
+  expect(writesTo(api, "place")[1]!.body).toMatchObject({ side: "buy", price: lower, quantity: 101 });
+
+  await buttons.nth(1).click();
+  await expect(quantityField(page)).toHaveValue("50");
+  await cellAt(page, "buy", higher).hover();
+  await expect(cellAt(page, "buy", higher).getByTestId("order-preview")).toHaveText("매수 50");
+
+  await buttons.nth(3).click();
+  await quantityField(page).fill("");
+  await quantityField(page).fill("100");
+  await cellAt(page, "buy", higher).hover();
+  await expect(cellAt(page, "buy", higher).getByTestId("order-preview")).toHaveText("매수 100");
+  await expect(cellAt(page, "buy", higher).getByTestId("order-preview")).toHaveAttribute("data-over", "");
+});

@@ -10,6 +10,8 @@ const ALIASES: Record<IndicatorKind, readonly string[]> = {
   rsi: ["RSI", "상대강도지수"],
   macd: ["MACD"],
   stochSlow: ["스토캐스틱 슬로우", "스토캐스틱", "stoch", "stochastic"],
+  tickCvd: ["계층별 CVD", "CVD", "틱CVD", "체결강도", "고래"],
+  programFlow: ["프로그램 수급", "프로그램", "프로그램매매", "program"],
   quoteTotals: ["총잔량", "호가잔량", "호가"],
   quoteDepth: ["호가 잔량 히트맵", "호가히트맵", "히트맵", "호가"],
   revenue: ["매출액", "매출", "revenue"],

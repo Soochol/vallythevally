@@ -21,7 +21,7 @@ export type SubEvent =
 export type QuoteEvent = Extract<ServerMessage, { type: "quotes" | "watch_limited" }> | { type: "resync" };
 
 export type FeedEvent =
-  | Extract<ServerMessage, { type: "feed_subscribed" | "feed_trades" | "feed_book" | "feed_after_hours" | "feed_program" | "feed_brokers" | "feed_link" | "sub_error" }>
+  | Extract<ServerMessage, { type: "feed_subscribed" | "feed_trades" | "feed_book" | "feed_after_hours" | "feed_program" | "feed_brokers" | "feed_micro" | "feed_ofi" | "feed_link" | "sub_error" }>
   | { type: "resync" };
 
 export type ViEvent = Extract<ServerMessage, { type: "vi_snapshot" | "vi_update" }>;
@@ -108,6 +108,7 @@ export class MarketSocket implements MarketSocketLike {
   private watchVenue: Venue = "combined";
   private readonly quoteHandlers = new Set<(e: QuoteEvent) => void>();
   private readonly viHandlers = new Set<(e: ViEvent) => void>();
+  private readonly feedTaps = new Set<(request: FeedRequest, event: FeedEvent) => void>();
   private readonly tradingAccountHandlers = new Set<(accountRef: string) => void>();
 
   constructor(private readonly opts: { url: () => string; connect?: Connect; onKiwoomLink?: (status: KiwoomLinkStatus) => void; onMarketSource?: (status: MarketSourceStatus) => void; onAccount?: (status: AccountStatus) => void; onSetupChanged?: (kinds: readonly DocumentKind[]) => void; onCollectorDaemon?: (judgment: DaemonJudgment, at: UnixSeconds) => void }) {}
@@ -168,6 +169,11 @@ export class MarketSocket implements MarketSocketLike {
     return () => this.viHandlers.delete(handler);
   }
 
+  onFeedTap(handler: (request: FeedRequest, event: FeedEvent) => void): () => void {
+    this.feedTaps.add(handler);
+    return () => this.feedTaps.delete(handler);
+  }
+
   watchTradingAccount(handler: (accountRef: string) => void): () => void {
     this.tradingAccountHandlers.add(handler);
     return () => this.tradingAccountHandlers.delete(handler);
@@ -216,9 +222,16 @@ export class MarketSocket implements MarketSocketLike {
       case "feed_after_hours":
       case "feed_program":
       case "feed_brokers":
-      case "feed_link":
-        this.feeds.get(m.sub)?.handler(m);
+      case "feed_micro":
+      case "feed_ofi":
+      case "feed_link": {
+        const feed = this.feeds.get(m.sub);
+        if (feed) {
+          feed.handler(m);
+          for (const tap of this.feedTaps) tap(feed.request, m);
+        }
         return;
+      }
       case "subscribed":
       case "bar":
       case "confirmed":

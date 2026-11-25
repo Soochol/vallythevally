@@ -167,6 +167,8 @@ pub fn application_with_source(inputs: ApplicationInputs, startup: impl Into<Sys
     );
     let accounts = crate::trading::Accounts::new(keys.clone(), rest.clone(), account_feed, clock.clone(), order_switch.unwrap_or_else(crate::trading::SwitchStore::memory), db.clone(), symbols.clone());
     let collected_store = crate::collected_store::CollectedStore::new();
+    let collected = crate::collected::Collected::new(collected_store.clone());
+    let premarket = crate::premarket::PreMarketService::new(collected.clone());
     Arc::new(AppState {
         symbols,
         bars,
@@ -193,7 +195,9 @@ pub fn application_with_source(inputs: ApplicationInputs, startup: impl Into<Sys
         shared_data: crate::shared_data::SharedData::new(),
         collector_paths: Arc::new(crate::shared_data::CollectorPathsSlot::new()),
         book_replay: crate::book_replay::BookReplay::new(collected_store.clone()),
-        collected: crate::collected::Collected::new(collected_store),
+        collected,
+        micro_events: crate::micro_events::MicroEventService::new(collected_store),
+        premarket,
         heatmap_quotes: Arc::new(crate::heatmap_board::QuoteCache::with_generation(generation.clone())),
         heatmap_flow: Arc::new(crate::heatmap_flow::FlowCache::with_generation(generation.clone())),
         quote_minutes: Arc::new(crate::quote_minutes::QuoteCache::new()),
@@ -421,6 +425,9 @@ pub async fn start_with(config: &Config, lock: &InstanceLock, adapters: Adapters
         tracing::info!("VALLY_HOGA_DATA_DIR과 VALLY_SHARED_DATA_DIR이 없어 분 호가·호가 복기·수집 거래원을 끕니다");
     }
     state.collector_paths.configure(collector_paths);
+    if let Some(shared_dir) = state.collector_paths.shared_dir() {
+        state.screener.read_daily_micro(shared_dir.to_path_buf());
+    }
     if let Some(shared) = &config.shared_data {
         state.screener.read_shared_snapshots(state.shared_data.clone(), config.screener_snapshot_stale_limit);
         state.screener.keep_calendar_fresh();

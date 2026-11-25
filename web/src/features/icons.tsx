@@ -107,6 +107,13 @@ export const ProgramIcon = ({ size }: P) => <Icon size={size} path="M5 20v-8M11 
 export const OrderIcon = ({ size }: P) => <Icon size={size} path="M4 6h5v12H4zM15 6h5v12h-5zM9 12h6M12 9v6" />;
 export const RankingIcon = ({ size }: P) => <Icon size={size} path="M3 20h18M5 20v-6h4v6M10 20V5h4v15M15 20v-9h4v9" />;
 export const BrokersIcon = ({ size }: P) => <Icon size={size} path="M4 20h16M6 20V10l6-5 6 5v10M10 20v-6h4v6" />;
+export const PreMarketIcon = ({ size }: P) => (
+  <Icon size={size}>
+    <path d="M3 17h18" />
+    <path d="M6 17a6 6 0 0 1 12 0" />
+    <path d="M12 4v3M5.6 7.6l2.1 2.1M18.4 7.6l-2.1 2.1" />
+  </Icon>
+);
 export const SlidersIcon = ({ size = 16 }: P) => (
   <Icon size={size}>
     <path d="M4 6h8M18 6h2M4 12h2M12 12h8M4 18h10M20 18h0" />

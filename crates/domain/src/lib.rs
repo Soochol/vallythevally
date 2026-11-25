@@ -3,6 +3,7 @@
 mod aggregate;
 mod bar;
 mod listing;
+mod micro;
 mod period;
 mod price;
 mod symbol;
@@ -12,6 +13,7 @@ mod trade;
 pub use aggregate::{Aggregator, Applied, CurrentBar, IgnoreReason, SeedBoundary, aggregate};
 pub use bar::{BarSource, ConfirmedBar, Ohlcv, OhlcvError, SeriesKey};
 pub use listing::{AuditStatus, Listing, ListingRow, classify};
+pub use micro::{BookSideLevel, MicroConfig, MicroEvent, MicroEventDetector, MicroEventKind, MicroSide, OfiSnapshot};
 pub use period::{Bucket, CLOSE_GRACE_SECS, Period, PeriodError, SESSION_CLOSE, SESSION_OPEN};
 pub use price::{Price, Volume};
 pub use symbol::{Feed, IndexCode, Market, StockCode, Symbol, SymbolError, SymbolInfo, SymbolKind, Venue};

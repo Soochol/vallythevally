@@ -231,6 +231,8 @@ pub enum ServerMessage {
     FeedAfterHours { sub: String, totals: FeedAfterHoursTotals },
     FeedProgram { sub: String, row: FeedProgramRow },
     FeedBrokers { sub: String, brokers: FeedBrokers },
+    FeedMicro { sub: String, event: MicroEvent },
+    FeedOfi { sub: String, ofi: OfiSnapshot },
     FeedLink { sub: String, live: bool, at: UnixSeconds },
     /// 현재 봉 갱신. 구독 하나당 초당 최대 10회. 중간 값은 건너뛸 수 있다.
     Bar {
@@ -287,7 +289,7 @@ impl From<crate::market_source::vi::ViMarket> for ViMarket {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, TS)]
 #[serde(rename_all = "snake_case")]
 #[ts(export)]
 pub enum ViDirection {
@@ -326,6 +328,108 @@ pub enum FeedKind {
     Book,
     Program,
     Brokers,
+    Micro,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum MicroSide {
+    Ask,
+    Bid,
+}
+
+impl From<domain::MicroSide> for MicroSide {
+    fn from(side: domain::MicroSide) -> Self {
+        match side {
+            domain::MicroSide::Ask => MicroSide::Ask,
+            domain::MicroSide::Bid => MicroSide::Bid,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum MicroEventKind {
+    SpoofCancel,
+    IcebergAbsorb,
+}
+
+impl From<domain::MicroEventKind> for MicroEventKind {
+    fn from(kind: domain::MicroEventKind) -> Self {
+        match kind {
+            domain::MicroEventKind::SpoofCancel => MicroEventKind::SpoofCancel,
+            domain::MicroEventKind::IcebergAbsorb => MicroEventKind::IcebergAbsorb,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct MicroEvent {
+    #[ts(type = "number")]
+    pub recv_ms: i64,
+    pub kind: MicroEventKind,
+    pub side: MicroSide,
+    #[ts(type = "number")]
+    pub price_won: u64,
+    #[ts(type = "number")]
+    pub cancelled_or_absorbed_qty: u64,
+    #[ts(type = "number")]
+    pub displayed_qty: u64,
+    #[ts(type = "number")]
+    pub executed_qty: u64,
+    pub ratio_bps: u32,
+}
+
+impl From<domain::MicroEvent> for MicroEvent {
+    fn from(event: domain::MicroEvent) -> Self {
+        Self {
+            recv_ms: event.recv_ms,
+            kind: event.kind.into(),
+            side: event.side.into(),
+            price_won: event.price_won,
+            cancelled_or_absorbed_qty: event.cancelled_or_absorbed_qty,
+            displayed_qty: event.displayed_qty,
+            executed_qty: event.executed_qty,
+            ratio_bps: event.ratio_bps,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct OfiSnapshot {
+    #[ts(type = "number")]
+    pub recv_ms: i64,
+    pub buy_pressure_pct: u8,
+    #[ts(type = "number")]
+    pub ofi_qty: i64,
+    pub tape_speed_ratio_bps: u32,
+}
+
+impl From<domain::OfiSnapshot> for OfiSnapshot {
+    fn from(ofi: domain::OfiSnapshot) -> Self {
+        Self {
+            recv_ms: ofi.recv_ms,
+            buy_pressure_pct: ofi.buy_pressure_pct,
+            ofi_qty: ofi.ofi_qty,
+            tape_speed_ratio_bps: ofi.tape_speed_ratio_bps,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct MicroEventsPage {
+    pub symbol: SymbolCode,
+    pub date: String,
+    pub source: BrokerDaySource,
+    pub events: Vec<MicroEvent>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
@@ -1525,6 +1629,11 @@ pub enum WindowContent {
     Ranking {
         ranking: Ranking,
     },
+    PreMarket {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
+        symbol: Option<SymbolCode>,
+    },
 }
 
 fn default_order_venue() -> Venue {
@@ -1889,6 +1998,9 @@ pub enum Condition {
     Bollinger { period: ScreenPeriod, recent_bars: RecentBars, length: u16, k: f64, test: BollingerTest },
     Ichimoku { period: ScreenPeriod, recent_bars: RecentBars, conversion: u16, base: u16, span_b: u16, displacement: u16, test: IchimokuTest },
     MarketCap { min: Bound, max: Bound },
+    ProgramNetBuy { days: u32, min_million_won: Bound, max_million_won: Bound },
+    WhaleNetBuy { days: u32, min_million_won: Bound, max_million_won: Bound },
+    ViTriggered { days: u32, min_count: u32 },
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
@@ -1941,6 +2053,15 @@ pub struct ScreenerRow {
     pub matched_date: KstDate,
     pub latest_bar_date: KstDate,
     pub provisional: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(type = "number", optional)]
+    pub program_net_million_won: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(type = "number", optional)]
+    pub whale_net_million_won: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub vi_count: Option<u32>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -2914,7 +3035,7 @@ mod tests {
             missing_summary: 3,
             universe: 3957,
             excluded: ScreenerExcluded { listed_too_short: 14, history_short: 120, unconfirmed: 2 },
-            rows: vec![ScreenerRow { symbol: SymbolCode("005930".into()), name: "삼성전자".into(), close: 193_400.0, change_rate: None, matched_date: day(2026, 11, 9), latest_bar_date: day(2026, 11, 10), provisional: true }],
+            rows: vec![ScreenerRow { symbol: SymbolCode("005930".into()), name: "삼성전자".into(), close: 193_400.0, change_rate: None, matched_date: day(2026, 11, 9), latest_bar_date: day(2026, 11, 10), provisional: true, program_net_million_won: None, whale_net_million_won: None, vi_count: None }],
         };
         let result_json = json!({"asOf": "2026-11-10", "collectionStartedAt": 1, "collectionCompletedAt": 2, "missingSummary": 3, "universe": 3957, "excluded": {"listedTooShort": 14, "historyShort": 120, "unconfirmed": 2},
                                  "rows": [{"symbol": "005930", "name": "삼성전자", "close": 193_400.0, "changeRate": null, "matchedDate": "2026-11-09", "latestBarDate": "2026-11-10", "provisional": true}]});

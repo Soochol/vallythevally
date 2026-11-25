@@ -4,6 +4,7 @@ import {
   type IndicatorColor,
   type IndicatorKind,
   isFinancial,
+  isMicro,
   isQuote,
   KINDS,
   colorLine,
@@ -49,7 +50,7 @@ export function formFromSpec(spec: IndicatorSpec): SpecForm {
   const text: Record<string, string> = {};
   const enabled: Record<string, boolean> = {};
   for (const f of KINDS[spec.kind].fields) {
-    const v = values[f.key];
+    const v = values[f.key] === undefined ? defaults[f.key] : values[f.key];
     if (f.type === "optionalInt") {
       enabled[f.key] = v !== null;
       text[f.key] = String(v ?? defaults[f.key] ?? f.start);
@@ -159,5 +160,6 @@ export function indicatorPeriodNotice(kind: IndicatorKind): string | null {
   const spec = KINDS[kind].defaults;
   if (isFinancial(spec)) return "분기봉·연봉의 보고기간별 자료입니다. DPS는 연간 전용이며 다른 봉 주기에서는 설정을 보존하고 숨깁니다.";
   if (isQuote(spec)) return "주식·ETF 분봉의 호가 자료입니다. 일봉 이상이나 지수에서는 설정을 보존하고 숨깁니다.";
+  if (isMicro(spec)) return "주식·ETF 분봉의 체결·프로그램 수급 자료입니다. 일봉 이상이나 지수에서는 안내 문구만 보입니다.";
   return null;
 }

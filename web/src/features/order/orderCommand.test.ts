@@ -119,4 +119,30 @@ describe("createOrderCommands", () => {
     expect(sink.place).not.toHaveBeenCalled();
     expect(sink.say).toHaveBeenCalledWith({ tone: "error", text: REPLAY_LOCKED_TEXT });
   });
+
+  it("매수 전량 상태에서는 클릭한 가격 기준으로 최대 수량을 재계산해 주문하고 1주도 못 사면 한도 초과를 알린다", () => {
+    const ctx = makeContext({
+      quantity: 100,
+      buyFull: true,
+      capacity: { sellableQuantity: 50, buying: { policy: "cash_only", cashAmount: 7_000_000, amount: 7_000_000 } },
+    });
+    const { sink } = makeSink();
+    const commands = createOrderCommands(() => ctx, sink);
+
+    commands.place("buy", 70_100);
+    expect(sink.place).toHaveBeenCalledWith(expect.objectContaining({ side: "buy", price: 70_100, quantity: 99 }));
+
+    commands.place("buy", 69_000);
+    expect(sink.place).toHaveBeenCalledWith(expect.objectContaining({ side: "buy", price: 69_000, quantity: 101 }));
+
+    const tinyCtx = makeContext({
+      quantity: 1,
+      buyFull: true,
+      capacity: { sellableQuantity: 0, buying: { policy: "cash_only", cashAmount: 65_000, amount: 65_000 } },
+    });
+    const tinySink = makeSink();
+    createOrderCommands(() => tinyCtx, tinySink.sink).place("buy", 70_000);
+    expect(tinySink.sink.place).not.toHaveBeenCalled();
+    expect(tinySink.sink.say).toHaveBeenCalledWith({ tone: "error", text: "현금 주문가능 65,000원을 넘습니다 (미수 막음) · 살 수 있는 수량이 없습니다" });
+  });
 });

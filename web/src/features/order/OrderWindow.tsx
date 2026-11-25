@@ -9,10 +9,12 @@ import { createValueStore, useStoreValue } from "../../lib/valueStore";
 import { useMockEnvironment } from "../../stores/kiwoomLink";
 import { useLayoutStore } from "../../stores/layout";
 import { useOrderSettings, useUiStore } from "../../stores/ui";
+import { useViSession } from "../../stores/viSession";
 import { FeedStrip } from "../market-window/FeedStrip";
 import { basePrice, buildLadderRows, defaultLadderPrices, type LadderPrices, type LadderRow } from "../market-window/ladder";
 import { infoSlot, replayTradeSlot, tradeSlot } from "../market-window/LadderSlots";
 import { useLinkedSymbol } from "../market-window/MarketWindowGate";
+import { type LadderMicroCue } from "../market-window/PriceLadder";
 import { RatioBar, Strip, TotalFigure } from "../market-window/parts";
 import { expectedItemsOnPage, placeInfoItems } from "../market-window/quoteInfo";
 import { SymbolHead } from "../market-window/SymbolHead";
@@ -35,11 +37,13 @@ import { OrderTotals } from "./OrderTotals";
 import { fullRangePrices } from "./priceRange";
 import { QuantityRow } from "./QuantityRow";
 import { useAccountBalance } from "./useAccountBalance";
+import { useMicroFeed } from "./useMicroFeed";
 import { useOrderAccount } from "./useOrderAccount";
 import { useOrderCommands } from "./useOrderCommands";
 import { type OrderAccess, useOrderAccess, useOrderData } from "./useOrderData";
 import { useOrderDrag } from "./useOrderDrag";
 import { useOrderWrites } from "./useOrderWrites";
+import { ViOrderOverlay } from "./ViOrderOverlay";
 
 const EXPLORER_UNAVAILABLE = "상·하한가를 아직 받지 못했습니다";
 const DEFAULT_ORDER_QUANTITY = 10;
@@ -65,6 +69,7 @@ function OrderBody({ id, code, infoPager, choice, access, balance }: { id: Windo
   const entryKey = useLayoutStore((s) => orderEntryKey(s.layout.id, id, code));
   const [kept] = useState(() => { const { prefs } = useUiStore.getState(); return prefs.orderSettings.keepLastEntry ? prefs.orderEntries[entryKey] ?? null : null; });
   const [input, setInput] = useState(kept === null ? String(DEFAULT_ORDER_QUANTITY) : String(kept.quantity));
+  const [buyFull, setBuyFull] = useState(false);
   const [hover] = useState(() => createValueStore<HoverCell | null>(null));
   const [exploring, setExploring] = useState(false);
   const [profitUnit, setProfitUnit] = useState<ProfitUnit>("won");
@@ -90,6 +95,7 @@ function OrderBody({ id, code, infoPager, choice, access, balance }: { id: Windo
   const holding = useMemo(() => atLivePrice(holdingOf(data.balance?.holdings ?? [], code), feed.lastPrice), [data.balance, code, feed.lastPrice]);
   const writable = access.open && !data.blocked && writes.status?.unknown !== true;
   const quantity = typedQuantity(input);
+  const buyFullActive = buyFull && settings.presetMode === "buy";
 
   const commands = useOrderCommands(
     {
@@ -101,6 +107,7 @@ function OrderBody({ id, code, infoPager, choice, access, balance }: { id: Windo
       nxtNotTraded,
       replayLocked,
       quantity,
+      buyFull: buyFullActive,
       keepLastEntry: settings.keepLastEntry,
       capacity: data.capacity,
       groups: data.groups,
@@ -130,15 +137,18 @@ function OrderBody({ id, code, infoPager, choice, access, balance }: { id: Windo
 
   const pickAccount = useStableCallback((account: string) => setSettings({ ...settings, account }));
   const changePresetMode = useStableCallback((presetMode: PresetMode) => {
+    setBuyFull(false);
     const { prefs } = useUiStore.getState();
     setSettings({ ...prefs.orderSettings, presetMode });
   });
-  const changeInput = useStableCallback((nextInput: string) => {
+  const applyInput = useStableCallback((nextInput: string, nextBuyFull: boolean) => {
+    setBuyFull(nextBuyFull);
     setInput(nextInput);
     if (!useUiStore.getState().prefs.orderSettings.keepLastEntry) return;
     const nextQuantity = typedQuantity(nextInput);
     if (nextQuantity > 0) rememberEntry(entryKey, { quantity: nextQuantity, usedAt: Date.now() });
   });
+  const changeInput = useStableCallback((nextInput: string) => applyInput(nextInput, false));
   const toggleProfitUnit = useCallback(() => setProfitUnit(toggledUnit), []);
   const toggleExplorer = useStableCallback(() => {
     if (replayLocked) return;
@@ -161,6 +171,20 @@ function OrderBody({ id, code, infoPager, choice, access, balance }: { id: Windo
   const sellOrdered = sellOrderQuantity(data.groups, data.pending, code, data.openOrdersListedAt);
   const sellableRemaining = holding === null ? null : Math.max(0, remainingToSell(holding, sellOrdered));
   const shownLadder = replay.kind === "past" || (replay.kind === "live" && liveView !== null);
+  const viState = useViSession(code, market.activeVi, market.expected, replay.kind === "live" && !explorerOn && shownLadder);
+  const micro = useMicroFeed(code, market.venue, replay.kind === "live");
+  const ladderMicroCues = useMemo<ReadonlyMap<number, LadderMicroCue> | undefined>(() => {
+    if (!settings.microCues || replay.kind !== "live" || micro.cuesByPrice.size === 0) return undefined;
+    const out = new Map<number, LadderMicroCue>();
+    for (const [price, cue] of micro.cuesByPrice) {
+      out.set(price, { kind: cue.event.kind, side: cue.event.side, title: cue.title });
+    }
+    return out;
+  }, [settings.microCues, replay.kind, micro.cuesByPrice]);
+  const ofiBuyPct = micro.ofi?.buyPressurePct ?? 50;
+  const ofiQty = micro.ofi?.ofiQty ?? 0;
+  const ofiSpeed = micro.ofi ? (micro.ofi.tapeSpeedRatioBps / 10_000).toFixed(1) : "1.0";
+  const ofiTitle = `10초 OFI 매수압력 ${ofiBuyPct}% · 순흐름 ${ofiQty >= 0 ? "+" : ""}${ofiQty.toLocaleString("ko-KR")}주 · 체결속도 ${ofiSpeed}x`;
 
   return (
     <div className="od" data-testid="order-window" data-symbol={code} data-venue={orderVenue} data-quote-venue={market.venue} data-writable={writable ? "" : undefined} data-rate-hidden={settings.rate ? undefined : ""} data-replay={replay.kind === "live" ? undefined : replay.kind}>
@@ -183,24 +207,32 @@ function OrderBody({ id, code, infoPager, choice, access, balance }: { id: Windo
         hasHolding={hasHolding}
         onMode={changePresetMode}
         onInput={changeInput}
+        onPreset={applyInput}
         trailing={settingsPopover}
       />
       {replay.kind === "live" && !feed.connected && <FeedStrip since={market.downSince} />}
       <div className="bk-ladder od-ladder-wrap" data-stale={replay.kind === "live" && !feed.connected ? "" : undefined} data-exploring={explorerOn ? "" : undefined} data-state={shownLadder ? undefined : ""}>
+        <ViOrderOverlay band="top" state={viState} previousClose={market.headPreviousClose} />
         {replay.kind === "none" ? (
           <EmptyState title={replay.reason} />
         ) : shownLadder ? (
-          <OrderLadder rows={rows} previousClose={market.headPreviousClose} groups={data.groups} writable={writable && !replayLocked} previewQuantity={quantity} buying={data.capacity.buying} hover={hover} averagePrice={averagePrice} dayPrices={replay.kind === "live" ? feed.dayPrices : null} divider={settings.divider} rateShown={settings.rate} explorerOn={explorerOn} explorerUnavailable={replayLocked || referencePrice === null || fullPrices === null} explorerTitle={replayLocked ? undefined : fullPrices === null ? EXPLORER_UNAVAILABLE : undefined} onToggleExplorer={toggleExplorer} explorerCenterPrice={explorerOn ? referencePrice : null} ladder={ladder} drag={drag} expectedPrice={market.expected?.price ?? null} rowSlots={replay.kind === "past" ? pastRowSlots : { infoCard: infoSlot(infoSlots, infoPager), bottomLeft: tradeSlot(trades, feed.previousClose) }} actions={ladderActions} />
+          <OrderLadder rows={rows} previousClose={market.headPreviousClose} groups={data.groups} writable={writable && !replayLocked} previewQuantity={quantity} buyFull={buyFullActive} buying={data.capacity.buying} hover={hover} averagePrice={averagePrice} dayPrices={replay.kind === "live" ? feed.dayPrices : null} microCues={ladderMicroCues} divider={settings.divider} rateShown={settings.rate} explorerOn={explorerOn} explorerUnavailable={replayLocked || referencePrice === null || fullPrices === null} explorerTitle={replayLocked ? undefined : fullPrices === null ? EXPLORER_UNAVAILABLE : undefined} onToggleExplorer={toggleExplorer} explorerCenterPrice={explorerOn ? referencePrice : null} ladder={ladder} drag={drag} expectedPrice={market.expected?.price ?? null} rowSlots={replay.kind === "past" ? pastRowSlots : { infoCard: infoSlot(infoSlots, infoPager), bottomLeft: tradeSlot(trades, feed.previousClose) }} actions={ladderActions} />
         ) : feed.snapshotFailed ? (
           <ErrorState message="호가를 불러오지 못했습니다" retry={feed.retry} />
         ) : (
           <EmptyState title="호가를 기다리는 중입니다" />
         )}
+        <ViOrderOverlay band="bottom" state={viState} previousClose={market.headPreviousClose} />
       </div>
       <OrderTotals groups={data.groups} writable={writable} actions={totalsActions} drag={drag} />
       <Strip>
         <TotalFigure testId="order-total-ask" tone="down" value={totals.ask} afterHours={totals.source === "afterHours"} description={totals.description} hideAfterHoursTag />
-        <RatioBar buy={totals.bid ?? 0} sell={totals.ask ?? 0} sellFirst label={totals.description ?? "총잔량 매도·매수 비율"} />
+        <div className="od-strip-bars">
+          <RatioBar buy={totals.bid ?? 0} sell={totals.ask ?? 0} sellFirst label={totals.description ?? "총잔량 매도·매수 비율"} />
+          <div className="od-ofi-bar" data-testid="order-ofi-bar" data-buy-pct={ofiBuyPct} data-ofi-qty={ofiQty} data-tape-speed={micro.ofi?.tapeSpeedRatioBps ?? 10_000} role="img" aria-label={ofiTitle} title={ofiTitle}>
+            <i className="od-ofi-buy" style={{ transform: `scaleX(${ofiBuyPct / 100})` }} />
+          </div>
+        </div>
         <TotalFigure testId="order-total-bid" tone="up" value={totals.bid} afterHours={totals.source === "afterHours"} description={totals.description} hideAfterHoursTag />
       </Strip>
       <OrderStatusBar status={writes.status} queued={writes.queued} blocked={data.blocked} replay={market.replayEnabled ? replay : null} onUndo={writes.cancelOne} onReconcile={writes.reconcile} onDismiss={writes.dismiss} />

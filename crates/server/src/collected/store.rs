@@ -1,4 +1,4 @@
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use domain::KstDate;
 use duckdb::params;
@@ -20,11 +20,17 @@ pub(super) fn read_day<K: CollectedKind>(
     buckets: u64,
     gaps_ms: &[(i64, i64)],
 ) -> Result<StoreDay<K::View>, String> {
-    let symbol = format!("{stock_code}_AL");
-    let bucket_file = bucket_file_name(&symbol, buckets);
-    let path = day_dir.join(K::TYPE_CODE).join(&bucket_file);
+    let symbols = K::store_symbols(stock_code);
     let gaps = gaps_to_seconds(gaps_ms);
-    if !file_exists(&path)? {
+    let mut targets: Vec<(String, PathBuf)> = Vec::with_capacity(symbols.len());
+    for symbol in symbols {
+        let bucket_file = bucket_file_name(&symbol, buckets);
+        let path = day_dir.join(K::TYPE_CODE).join(&bucket_file);
+        if file_exists(&path)? {
+            targets.push((symbol, path));
+        }
+    }
+    if targets.is_empty() {
         return Ok(StoreDay { snapshots: Vec::new(), gaps });
     }
     let conn = open_connection()?;
@@ -32,35 +38,42 @@ pub(super) fn read_day<K: CollectedKind>(
     let day_end_ms = day_start_ms + 86_400_000;
     let fids = K::fids();
     let sql = build_query(fids);
-    let path_text = path_str(&path)?;
-    let mut stmt = conn.prepare(&sql).map_err(|e| format!("수집 저장소 조회 준비 실패({path_text}): {e}"))?;
-    let mut raw_rows = stmt
-        .query(params![path_text, symbol, day_start_ms, day_end_ms])
-        .map_err(|e| format!("수집 저장소 조회 실행 실패({path_text}): {e}"))?;
-    let mut snapshots: Vec<K::View> = Vec::new();
+    let mut stmt = conn.prepare(&sql).map_err(|e| format!("수집 저장소 조회 준비 실패: {e}"))?;
+    let mut ordered: Vec<(i64, i64, K::View)> = Vec::new();
     let mut skipped: u64 = 0;
-    while let Some(row) = raw_rows.next().map_err(|e| format!("수집 저장소 행 읽기 실패({path_text}): {e}"))? {
-        let recv_ms = row.get::<_, i64>(0).map_err(|e| format!("recv_ms 읽기 실패({path_text}): {e}"))?;
-        let mut values = Vec::with_capacity(fids.len());
-        for index in 0..fids.len() {
-            let value = row.get::<_, Option<String>>(index + 1).map_err(|e| format!("FID 열 읽기 실패({path_text}): {e}"))?;
-            values.push(value);
+    for (symbol, path) in &targets {
+        let path_text = path_str(path)?;
+        let mut raw_rows = stmt
+            .query(params![path_text, symbol, day_start_ms, day_end_ms])
+            .map_err(|e| format!("수집 저장소 조회 실행 실패({path_text}): {e}"))?;
+        while let Some(row) = raw_rows.next().map_err(|e| format!("수집 저장소 행 읽기 실패({path_text}): {e}"))? {
+            let recv_ms = row.get::<_, i64>(0).map_err(|e| format!("recv_ms 읽기 실패({path_text}): {e}"))?;
+            let row_number = row.get::<_, i64>(1).map_err(|e| format!("file_row_number 읽기 실패({path_text}): {e}"))?;
+            let mut values = Vec::with_capacity(fids.len());
+            for index in 0..fids.len() {
+                let value = row.get::<_, Option<String>>(index + 2).map_err(|e| format!("FID 열 읽기 실패({path_text}): {e}"))?;
+                values.push(value);
+            }
+            let fid_values = FidValues::new(fids, &values);
+            let Some(view) = K::decode(recv_ms, &fid_values) else {
+                skipped += 1;
+                continue;
+            };
+            ordered.push((recv_ms, row_number, view));
         }
-        let fid_values = FidValues::new(fids, &values);
-        let Some(view) = K::decode(recv_ms, &fid_values) else {
-            skipped += 1;
-            continue;
-        };
-        snapshots.push(view);
+    }
+    if targets.len() > 1 {
+        ordered.sort_by_key(|(recv_ms, row_number, _)| (*recv_ms, *row_number));
     }
     if skipped > 0 {
         tracing::warn!(type_code = K::TYPE_CODE, symbol = %stock_code, skipped, "수집 저장소 행을 읽지 못해 건너뛰었습니다");
     }
+    let snapshots = ordered.into_iter().map(|(_, _, view)| view).collect();
     Ok(StoreDay { snapshots, gaps })
 }
 
 fn build_query(fids: &[u32]) -> String {
-    let mut cols = String::from("recv_ms");
+    let mut cols = String::from("recv_ms, file_row_number");
     for fid in fids {
         cols.push_str(&format!(", CAST(f{fid} AS VARCHAR)"));
     }

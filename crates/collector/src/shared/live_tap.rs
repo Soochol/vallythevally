@@ -12,6 +12,7 @@ use tokio::time::{Instant, Interval, MissedTickBehavior, interval_at, timeout};
 use tokio_tungstenite::tungstenite::Utf8Bytes;
 
 use super::flow::{self, FLOW_KINDS, FileFlowStore, FlowFeed, FlowWorker};
+use super::micro::{self, MicroFeed, MicroWorker};
 use super::minute::{
     self, FLUSH_EVERY as MINUTE_FLUSH_EVERY, FileMinuteStore, MinuteFeed, MinuteStats, MinuteStore, MinuteWorker,
     read::{RawTick, mentions_minute_type, tick_from_fields},
@@ -180,6 +181,7 @@ pub struct LiveTapConfig {
     pub flow: Option<FileFlowStore>,
     pub quotes: Option<PathBuf>,
     pub trades: Option<Box<dyn TradeMinuteStore>>,
+    pub micro: Option<FileFlowStore>,
 }
 
 impl LiveTapConfig {
@@ -192,12 +194,13 @@ impl LiveTapConfig {
             minutes: Some(Box::new(FileMinuteStore::new(dir.clone(), key.clone()))),
             flow: Some(FileFlowStore::new(dir.clone(), key.clone())),
             quotes: Some(dir.clone()),
-            trades: Some(Box::new(FileTradeMinuteStore::new(dir, key.clone()))),
+            trades: Some(Box::new(FileTradeMinuteStore::new(dir.clone(), key.clone()))),
+            micro: Some(FileFlowStore::new(dir, key.clone())),
         }
     }
 
     pub fn is_empty(&self) -> bool {
-        self.minutes.is_none() && self.flow.is_none() && self.quotes.is_none() && self.trades.is_none()
+        self.minutes.is_none() && self.flow.is_none() && self.quotes.is_none() && self.trades.is_none() && self.micro.is_none()
     }
 }
 
@@ -261,6 +264,7 @@ pub struct LiveTapFeed {
     trade_lane: Option<TradeLaneFeed>,
     flow: Option<FlowFeed>,
     quotes: Option<QuoteFeed>,
+    micro: Option<MicroFeed>,
 }
 
 impl LiveTapFeed {
@@ -273,6 +277,9 @@ impl LiveTapFeed {
         }
         if let Some(quotes) = &self.quotes {
             quotes.offer(recv_ms, bytes);
+        }
+        if let Some(micro) = &self.micro {
+            micro.offer(recv_ms, bytes);
         }
     }
 
@@ -287,6 +294,9 @@ impl LiveTapFeed {
                 quotes.link_down(recv_ms);
             }
         }
+        if let Some(micro) = &self.micro {
+            micro.link(recv_ms, live);
+        }
     }
 }
 
@@ -294,9 +304,14 @@ pub struct LiveTapWorker {
     trade_lane: Option<TradeLaneWorker>,
     flow: Option<FlowWorker>,
     quotes: Option<QuoteWorker>,
+    micro: Option<MicroWorker>,
 }
 
 impl LiveTapWorker {
+    pub fn micro_stats(&self) -> Option<Arc<micro::MicroStats>> {
+        self.micro.as_ref().map(MicroWorker::stats)
+    }
+
     pub async fn finish(self) {
         tokio::join!(
             async {
@@ -311,6 +326,11 @@ impl LiveTapWorker {
             },
             async {
                 if let Some(worker) = self.quotes {
+                    worker.finish().await;
+                }
+            },
+            async {
+                if let Some(worker) = self.micro {
                     worker.finish().await;
                 }
             },
@@ -352,9 +372,16 @@ pub fn spawn_live_tap(config: LiveTapConfig, key: KeyName, wall_clock: Arc<dyn W
         }
         None => (None, None),
     };
+    let (micro_feed, micro_worker) = match config.micro {
+        Some(store) => {
+            let (feed, worker) = micro::spawn(store, now_ms);
+            (Some(feed), Some(worker))
+        }
+        None => (None, None),
+    };
     Some((
-        LiveTapFeed { trade_lane: trade_feed, flow: flow_feed, quotes: quote_feed },
-        LiveTapWorker { trade_lane: trade_worker, flow: flow_worker, quotes: quote_worker },
+        LiveTapFeed { trade_lane: trade_feed, flow: flow_feed, quotes: quote_feed, micro: micro_feed },
+        LiveTapWorker { trade_lane: trade_worker, flow: flow_worker, quotes: quote_worker, micro: micro_worker },
     ))
 }
 
@@ -553,6 +580,7 @@ mod tests {
             flow: None,
             quotes: None,
             trades: Some(Box::new(MemTradeStore(trade_out.clone()))),
+            micro: None,
         };
         let (feed, worker) = spawn_live_tap(config, KeyName::parse("k1").unwrap(), Arc::new(FixedWall(base_ms))).unwrap();
         let frame = Utf8Bytes::from(r#"{"trnm":"REAL","data":[{"type":"0B","item":"005930_AL","values":{"20":"090001","10":"+71000","15":"-5","9081":"KRX"}}]}"#);

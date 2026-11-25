@@ -2,6 +2,7 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { expect, test } from "vitest";
 import type { Screen } from "../../api/generated/Screen";
+import { isBarKind } from "../../lib/screener";
 import { addCondition, changeKind, checkCondition, draftOf, editCondition, editNumber, KIND_GROUPS, type ScreenDraft } from "../screen-dialog/screenForm";
 import { conditionChoices, SentenceCondition, SentenceFields } from "./SentenceFields";
 
@@ -19,8 +20,8 @@ test("모든 조건 종류를 문장의 값 토큰과 메뉴로 편집하고 숫
     expect(markup, kind).toContain('aria-haspopup="dialog"');
     expect(markup, kind).not.toContain("<input");
     expect(markup, kind).toContain('aria-label="조건 1 순서 끌어서 바꾸기"');
-    expect(markup.includes('aria-label="조건 1 봉 주기"'), kind).toBe(kind !== "market_cap");
-    expect([...markup.matchAll(/aria-label="조건 1 최근 기간"/g)], kind).toHaveLength(kind === "market_cap" ? 0 : 1);
+    expect(markup.includes('aria-label="조건 1 봉 주기"'), kind).toBe(isBarKind(line.kind));
+    expect([...markup.matchAll(/aria-label="조건 1 최근 기간"/g)], kind).toHaveLength(isBarKind(line.kind) ? 1 : 0);
     expect(markup, kind).not.toMatch(/봉 범위 시작|봉 범위 끝/);
   }
 });
@@ -56,10 +57,14 @@ test("잘못된 숫자는 값 버튼과 연결된 오류를 보이고 행의 다
 });
 
 test("종류 검색은 그룹·이름·약어로 찾고 검색 결과가 없을 수 있다", () => {
-  expect(conditionChoices("")).toHaveLength(17);
+  expect(conditionChoices("")).toHaveLength(20);
   expect(conditionChoices(" rSi ").map((choice) => choice.kind)).toEqual(["rsi"]);
   expect(conditionChoices("이동평균").map((choice) => choice.kind)).toEqual(["ma_position", "ma_alignment", "ma_cross"]);
   expect(conditionChoices("거래").map((choice) => choice.kind)).toEqual(["volume_high", "traded_value_high", "surge"]);
+  expect(conditionChoices("수급").map((choice) => choice.kind)).toEqual(["program_net_buy", "whale_net_buy", "vi_triggered"]);
+  expect(conditionChoices("프로그램").map((choice) => choice.kind)).toEqual(["program_net_buy"]);
+  expect(conditionChoices("고래").map((choice) => choice.kind)).toEqual(["whale_net_buy"]);
+  expect(conditionChoices("VI").map((choice) => choice.kind)).toEqual(["vi_triggered"]);
   expect(conditionChoices("없는 조건")).toEqual([]);
 });
 

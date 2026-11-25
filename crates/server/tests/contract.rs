@@ -16,7 +16,10 @@ use server::etf::*;
 use server::heatmap_board::{HeatmapBoard, HeatmapBoardMember, HeatmapBoardTheme, HeatmapSource, HeatmapThemeOrder, HeatmapThemeSummary, KiwoomCatalogInfo, KiwoomCatalogState};
 use server::heatmap_flow::{HeatmapFlowPoint, HeatmapFlowSeries};
 use server::kiwoom_themes::{KiwoomLimitMove, KiwoomTheme, KiwoomThemeList, KiwoomThemeMember, KiwoomThemeMembers};
+use server::micro_series::{MicroSeriesState, ProgramSeriesPage, ProgramSeriesPoint, TickCvdPage, TickCvdPoint};
+use server::premarket::{PreMarketCompare, PreMarketDaySeries, PreMarketDays, PreMarketPoint, PreMarketSignal, PreMarketSnapshot, PreMarketSnapshotRow};
 use server::quote_minutes::{QuoteDayInfo, QuoteDayState, QuoteDepthPage, QuoteDepthPoint, QuoteDepthSource, QuoteTotalPoint, QuoteTotalsPage};
+use server::vi_playbook::{ViPlaybook, ViPlaybookHorizon, ViPlaybookKind, ViPlaybookMatch};
 use ts_rs::TS;
 
 const DIR: &str = "web/src/api/generated";
@@ -59,6 +62,10 @@ fn generated_typescript_matches_the_committed_files() {
         generated::<ViDirection>(),
         generated::<ViMarket>(),
         generated::<ViState>(),
+        generated::<ViPlaybook>(),
+        generated::<ViPlaybookHorizon>(),
+        generated::<ViPlaybookKind>(),
+        generated::<ViPlaybookMatch>(),
         generated::<OrdersAccount>(),
         generated::<OrdersAccountCheck>(),
         generated::<OrdersMarginInput>(),
@@ -117,6 +124,11 @@ fn generated_typescript_matches_the_committed_files() {
         generated::<DrawingTool>(),
         generated::<ClientMessage>(),
         generated::<ConnectionStatus>(),
+        generated::<EtfAccumulation>(),
+        generated::<EtfAccumulationContributor>(),
+        generated::<EtfAccumulationDirection>(),
+        generated::<EtfAccumulationRow>(),
+        generated::<EtfAccumulationStyle>(),
         generated::<EtfChangeKind>(),
         generated::<EtfChangePair>(),
         generated::<EtfChangeRow>(),
@@ -130,6 +142,9 @@ fn generated_typescript_matches_the_committed_files() {
         generated::<EtfHolding>(),
         generated::<EtfMaState>(),
         generated::<EtfMaStates>(),
+        generated::<EtfRecentActivity>(),
+        generated::<EtfSimilarFund>(),
+        generated::<EtfSimilarFunds>(),
         generated::<EtfStockHolder>(),
         generated::<EtfStockHolders>(),
         generated::<EtfStyle>(),
@@ -256,6 +271,11 @@ fn generated_typescript_matches_the_committed_files() {
         generated::<StochasticTest>(),
         generated::<SubErrorCode>(),
         generated::<FeedKind>(),
+        generated::<MicroSide>(),
+        generated::<MicroEventKind>(),
+        generated::<MicroEvent>(),
+        generated::<OfiSnapshot>(),
+        generated::<MicroEventsPage>(),
         generated::<FeedTrade>(),
         generated::<FeedBookLevel>(),
         generated::<FeedExpected>(),
@@ -371,6 +391,18 @@ fn generated_typescript_matches_the_committed_files() {
         generated::<QuoteDepthSource>(),
         generated::<QuoteTotalPoint>(),
         generated::<QuoteTotalsPage>(),
+        generated::<MicroSeriesState>(),
+        generated::<TickCvdPoint>(),
+        generated::<TickCvdPage>(),
+        generated::<ProgramSeriesPoint>(),
+        generated::<ProgramSeriesPage>(),
+        generated::<PreMarketSignal>(),
+        generated::<PreMarketPoint>(),
+        generated::<PreMarketDaySeries>(),
+        generated::<PreMarketCompare>(),
+        generated::<PreMarketSnapshotRow>(),
+        generated::<PreMarketSnapshot>(),
+        generated::<PreMarketDays>(),
     ];
     let mut committed: Vec<String> = git(&["ls-tree", "--name-only", "HEAD", &format!("{DIR}/")])
         .lines()

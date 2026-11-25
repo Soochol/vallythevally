@@ -8,7 +8,10 @@ use crate::collected_store::{CollectedStore, DayIndexState, FileStamp, StampLru,
 use crate::shared_data::CollectorPaths;
 
 use super::flow::{FlowCache, has_symbol_flow};
-use super::kind::{Brokers, CollectedKind};
+use super::kind::{
+    Brokers, CollectedExpectedTrade, CollectedKind, CollectedProgramRow, CollectedTradeTick, CollectedViEvent, ExpectedTrades, MicroEvents, ProgramFlow,
+    TradeTicks, ViEvents,
+};
 use super::store::{StoreDay, read_day};
 
 struct LoadedStoreDay<V> {
@@ -30,7 +33,7 @@ impl<K: CollectedKind> KindSource<K> {
     }
 }
 
-pub(super) struct DaySlice<V> {
+pub struct DaySlice<V> {
     pub source: api::BrokerDaySource,
     pub snapshots: Vec<V>,
     pub gaps: Vec<[i64; 2]>,
@@ -69,6 +72,11 @@ struct DayQuery<'a> {
 pub struct Collected {
     store: Arc<CollectedStore>,
     brokers: KindSource<Brokers>,
+    program: KindSource<ProgramFlow>,
+    vi: KindSource<ViEvents>,
+    expected: KindSource<ExpectedTrades>,
+    ticks: KindSource<TradeTicks>,
+    micro: KindSource<MicroEvents>,
 }
 
 impl Collected {
@@ -76,7 +84,16 @@ impl Collected {
         Arc::new(Self {
             store,
             brokers: KindSource::new(),
+            program: KindSource::new(),
+            vi: KindSource::new(),
+            expected: KindSource::new(),
+            ticks: KindSource::new(),
+            micro: KindSource::new(),
         })
+    }
+
+    pub(crate) fn store(&self) -> &Arc<CollectedStore> {
+        &self.store
     }
 
     pub(super) async fn broker_day(
@@ -93,6 +110,86 @@ impl Collected {
 
     pub(super) async fn broker_days(self: &Arc<Self>, paths: CollectorPaths, stock: StockCode, now: KstTime) -> Result<Vec<String>, String> {
         self.days_for::<Brokers>(paths, stock, now).await
+    }
+
+    pub async fn program_day(
+        self: &Arc<Self>,
+        paths: CollectorPaths,
+        stock: StockCode,
+        date: KstDate,
+        date_str: &str,
+        after: Option<&str>,
+        now: KstTime,
+    ) -> Result<DaySlice<CollectedProgramRow>, String> {
+        self.read_day::<ProgramFlow>(|c| &c.program, paths, DayQuery { stock, date, date_str, after, now }).await
+    }
+
+    pub async fn program_days(self: &Arc<Self>, paths: CollectorPaths, stock: StockCode, now: KstTime) -> Result<Vec<String>, String> {
+        self.days_for::<ProgramFlow>(paths, stock, now).await
+    }
+
+    pub async fn vi_day(
+        self: &Arc<Self>,
+        paths: CollectorPaths,
+        stock: StockCode,
+        date: KstDate,
+        date_str: &str,
+        after: Option<&str>,
+        now: KstTime,
+    ) -> Result<DaySlice<CollectedViEvent>, String> {
+        self.read_day::<ViEvents>(|c| &c.vi, paths, DayQuery { stock, date, date_str, after, now }).await
+    }
+
+    pub async fn vi_days(self: &Arc<Self>, paths: CollectorPaths, stock: StockCode, now: KstTime) -> Result<Vec<String>, String> {
+        self.days_for::<ViEvents>(paths, stock, now).await
+    }
+
+    pub async fn expected_day(
+        self: &Arc<Self>,
+        paths: CollectorPaths,
+        stock: StockCode,
+        date: KstDate,
+        date_str: &str,
+        after: Option<&str>,
+        now: KstTime,
+    ) -> Result<DaySlice<CollectedExpectedTrade>, String> {
+        self.read_day::<ExpectedTrades>(|c| &c.expected, paths, DayQuery { stock, date, date_str, after, now }).await
+    }
+
+    pub async fn expected_days(self: &Arc<Self>, paths: CollectorPaths, stock: StockCode, now: KstTime) -> Result<Vec<String>, String> {
+        self.days_for::<ExpectedTrades>(paths, stock, now).await
+    }
+
+    pub async fn ticks_day(
+        self: &Arc<Self>,
+        paths: CollectorPaths,
+        stock: StockCode,
+        date: KstDate,
+        date_str: &str,
+        after: Option<&str>,
+        now: KstTime,
+    ) -> Result<DaySlice<CollectedTradeTick>, String> {
+        self.read_day::<TradeTicks>(|c| &c.ticks, paths, DayQuery { stock, date, date_str, after, now }).await
+    }
+
+    pub async fn ticks_days(self: &Arc<Self>, paths: CollectorPaths, stock: StockCode, now: KstTime) -> Result<Vec<String>, String> {
+        self.days_for::<TradeTicks>(paths, stock, now).await
+    }
+
+    pub async fn micro_day(
+        self: &Arc<Self>,
+        paths: CollectorPaths,
+        stock: StockCode,
+        date: KstDate,
+        date_str: &str,
+        after: Option<&str>,
+        now: KstTime,
+    ) -> Result<DaySlice<domain::MicroEvent>, String> {
+        self.read_day::<MicroEvents>(|c| &c.micro, paths, DayQuery { stock, date, date_str, after, now }).await
+    }
+
+    pub async fn micro_days(self: &Arc<Self>, paths: CollectorPaths, stock: StockCode, now: KstTime) -> Result<Vec<String>, String> {
+        self.days_for::<MicroEvents>(paths, stock, now).await
     }
 
     async fn days_for<K: CollectedKind>(self: &Arc<Self>, paths: CollectorPaths, stock: StockCode, now: KstTime) -> Result<Vec<String>, String> {

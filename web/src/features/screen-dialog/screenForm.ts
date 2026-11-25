@@ -15,13 +15,14 @@ import type { ScreenPeriod } from "../../api/generated/ScreenPeriod";
 import type { Side } from "../../api/generated/Side";
 import type { SurgeField } from "../../api/generated/SurgeField";
 import { KINDS } from "../../chart/indicators/kinds";
-import { type ConditionKind, excludedInOrder, UNIT } from "../../lib/screener";
+import { type ConditionKind, excludedInOrder, isBarCondition, UNIT } from "../../lib/screener";
 
 const MAX_SCREENS = 50;
 const MAX_SCREEN_NAME = 40;
 export const MAX_CONDITIONS = 10;
 const MAX_BARS = 4_294_967_295;
 const MAX_INDICATOR_LENGTH = 65_535;
+const MAX_MICRO_DAYS = 60;
 export const MIN_MA_LINES = 2;
 export const MAX_MA_LINES = 5;
 const EOK_PLACES = 8;
@@ -43,7 +44,10 @@ export type KindFields =
   | { kind: "stochastic"; k: string; d: string; smooth: string; test: "cross" | "range"; direction: Direction; min: string; max: string }
   | { kind: "bollinger"; length: string; k: string; test: "outside" | "cross"; side: Side; band: BollingerBand; direction: Direction }
   | { kind: "ichimoku"; conversion: string; base: string; spanB: string; displacement: string; test: "cloud" | "cross"; side: Side; direction: Direction }
-  | { kind: "market_cap"; min: string; max: string };
+  | { kind: "market_cap"; min: string; max: string }
+  | { kind: "program_net_buy"; days: string; minMillionWon: string; maxMillionWon: string }
+  | { kind: "whale_net_buy"; days: string; minMillionWon: string; maxMillionWon: string }
+  | { kind: "vi_triggered"; days: string; minCount: string };
 
 type FieldsOf<K extends ConditionKind> = Extract<KindFields, { kind: K }>;
 
@@ -78,7 +82,11 @@ export type FieldKey =
   | "conversion"
   | "base"
   | "spanB"
-  | "displacement";
+  | "displacement"
+  | "days"
+  | "minMillionWon"
+  | "maxMillionWon"
+  | "minCount";
 
 export type ConditionErrors = Partial<Record<FieldKey, string>>;
 
@@ -122,6 +130,7 @@ export const KIND_GROUPS: readonly { label: string; kinds: readonly KindChoice[]
   { label: "거래", kinds: ["volume_high", "traded_value_high", "surge"] },
   { label: "이동평균", kinds: ["ma_position", "ma_alignment", "ma_cross"] },
   { label: "보조지표", kinds: ["rsi", "macd", "stochastic", "bollinger", "ichimoku"] },
+  { label: "수급·미시", kinds: ["program_net_buy", "whale_net_buy", "vi_triggered"] },
   { label: "종목", kinds: ["market_cap"] },
 ];
 
@@ -158,6 +167,9 @@ const DEFAULTS: { [K in ConditionKind]: FieldsOf<K> } = {
     direction: "up",
   },
   market_cap: { kind: "market_cap", min: "3000", max: "" },
+  program_net_buy: { kind: "program_net_buy", days: "5", minMillionWon: "1000", maxMillionWon: "" },
+  whale_net_buy: { kind: "whale_net_buy", days: "5", minMillionWon: "500", maxMillionWon: "" },
+  vi_triggered: { kind: "vi_triggered", days: "5", minCount: "1" },
 };
 
 type Decimal = { sign: string; digits: string; point: number };
@@ -249,6 +261,12 @@ function fieldsOf(condition: Condition): KindFields {
     }
     case "market_cap":
       return { kind: "market_cap", min: boundText(condition.min, EOK_PLACES), max: boundText(condition.max, EOK_PLACES) };
+    case "program_net_buy":
+      return { kind: "program_net_buy", days: text(condition.days), minMillionWon: boundText(condition.minMillionWon), maxMillionWon: boundText(condition.maxMillionWon) };
+    case "whale_net_buy":
+      return { kind: "whale_net_buy", days: text(condition.days), minMillionWon: boundText(condition.minMillionWon), maxMillionWon: boundText(condition.maxMillionWon) };
+    case "vi_triggered":
+      return { kind: "vi_triggered", days: text(condition.days), minCount: text(condition.minCount) };
   }
 }
 
@@ -258,7 +276,7 @@ export function draftOf(screen: Screen | null): ScreenDraft {
   if (!screen) return { name: "", conditions: [], markets: [], exclude: [] };
   const conditions: ConditionDraft[] = [];
   for (const condition of screen.conditions) {
-    const line = condition.kind === "market_cap" ? { period: conditions.at(-1)?.period ?? "D", recentBars: "1" } : { period: condition.period, recentBars: text(condition.recentBars) };
+    const line = isBarCondition(condition) ? { period: condition.period, recentBars: text(condition.recentBars) } : { period: conditions.at(-1)?.period ?? "D", recentBars: "1" };
     conditions.push({ key: conditions.length, ...line, ...fieldsOf(condition) });
   }
   return { name: screen.name, conditions, markets: screen.markets, exclude: screen.exclude };
@@ -491,6 +509,21 @@ export function checkCondition(line: ConditionDraft): ConditionCheck {
     case "market_cap": {
       const [min, max] = r.bounds("min", "max", line.min, line.max, "non_negative", EOK_PLACES);
       return r.result({ kind: "market_cap", min, max });
+    }
+    case "program_net_buy": {
+      const days = r.count("days", line.days, MAX_MICRO_DAYS);
+      const [minMillionWon, maxMillionWon] = r.bounds("minMillionWon", "maxMillionWon", line.minMillionWon, line.maxMillionWon, "any");
+      return r.result({ kind: "program_net_buy", days, minMillionWon, maxMillionWon });
+    }
+    case "whale_net_buy": {
+      const days = r.count("days", line.days, MAX_MICRO_DAYS);
+      const [minMillionWon, maxMillionWon] = r.bounds("minMillionWon", "maxMillionWon", line.minMillionWon, line.maxMillionWon, "any");
+      return r.result({ kind: "whale_net_buy", days, minMillionWon, maxMillionWon });
+    }
+    case "vi_triggered": {
+      const days = r.count("days", line.days, MAX_MICRO_DAYS);
+      const minCount = r.count("minCount", line.minCount);
+      return r.result({ kind: "vi_triggered", days, minCount });
     }
   }
 }

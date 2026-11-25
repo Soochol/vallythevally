@@ -4,6 +4,7 @@ import { BookWindow } from "../book/BookWindow";
 import { BrokersWindow } from "../brokers/BrokersWindow";
 import { OrderWindow } from "../order/OrderWindow";
 import { IndicatorInspector } from "../indicator-inspector/IndicatorInspector";
+import { PreMarketWindow } from "../premarket/PreMarketWindow";
 import { ProgramWindow } from "../program/ProgramWindow";
 import { RankingWindow } from "../ranking/RankingWindow";
 import { ScreenerPanel } from "../screener/ScreenerPanel";
@@ -24,4 +25,5 @@ export const WINDOW_CONTENT: { readonly [K in WindowKind]: WindowContent } = {
   brokers: { Content: BrokersWindow, overflow: "hidden" },
   order: { Content: OrderWindow, overflow: "hidden" },
   ranking: { Content: RankingWindow, overflow: "hidden" },
+  premarket: { Content: PreMarketWindow, overflow: "hidden" },
 };

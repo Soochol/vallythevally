@@ -118,10 +118,19 @@ test("시가총액 문장은 봉 주기와 M 없이 억 원으로 적는다", ()
   expect(conditionSentence({ kind: "market_cap", min: 50_000_000_000, max: 3_000_000_000_000 })).toBe("시가총액이 500억 원 이상 30,000억 원 이하다");
 });
 
+test("수급·미시 조건 문장은 최근 일수와 백만 원·횟수로 적는다", () => {
+  expect(conditionSentence({ kind: "program_net_buy", days: 5, minMillionWon: 1000, maxMillionWon: null })).toBe("최근 5일 프로그램 순매수가 1,000백만 원 이상이다");
+  expect(conditionSentence({ kind: "program_net_buy", days: 3, minMillionWon: -500, maxMillionWon: 2000 })).toBe("최근 3일 프로그램 순매수가 −500백만 원 이상 2,000백만 원 이하다");
+  expect(conditionSentence({ kind: "whale_net_buy", days: 10, minMillionWon: 500, maxMillionWon: null })).toBe("최근 10일 고래 순매수가 500백만 원 이상이다");
+  expect(conditionSentence({ kind: "vi_triggered", days: 5, minCount: 2 })).toBe("최근 5일 VI 발동이 2회 이상이다");
+});
+
 test("조건식의 봉 주기는 봉으로 따지는 첫 줄의 것이다", () => {
   expect(screenPeriod(screenOf([newHigh("W", "high", 52, 1), newHigh("D", "close", 20, 1)]))).toBe("W");
   expect(screenPeriod(screenOf([marketCap, newHigh("M", "high", 12, 1)]))).toBe("M");
+  expect(screenPeriod(screenOf([{ kind: "program_net_buy", days: 5, minMillionWon: 100, maxMillionWon: null }, newHigh("W", "high", 52, 1)]))).toBe("W");
   expect(screenPeriod(screenOf([{ kind: "market_cap", min: null, max: 100_000_000_000 }]))).toBe("D");
+  expect(screenPeriod(screenOf([{ kind: "vi_triggered", days: 5, minCount: 1 }]))).toBe("D");
 });
 
 test("제외 목록은 저장 순서와 상관없이 종류, 상태 순으로 보인다", () => {
