@@ -2,11 +2,13 @@ import { useMemo, useRef, useState } from "react";
 import type { Market } from "../../api/generated/Market";
 import type { MarketOverviewSector } from "../../api/generated/MarketOverviewSector";
 import type { MarketOverviewSectorFlow } from "../../api/generated/MarketOverviewSectorFlow";
-import { useMarketSectors } from "../../api/marketOverview";
+import { useMarketSectors, useMarketThemes } from "../../api/marketOverview";
 import { legendStops, needsStrongInk, rateFill, rateSide, type ColorRange } from "../../lib/heat/colors";
 import { useElementSize } from "../heatmap-page/useElementSize";
 import { useOverviewOn } from "../status/marketFeed";
+import { Segmented, type SegmentedOption } from "../ui/Segmented";
 import { CardError, CardShell, EmptyNote, FeedUnavailable, Loaded, PartView } from "./CardPart";
+import { ThemeRotationPanel } from "./ThemeRotationPanel";
 import { formatEok, signedEok, signedRate, toneOf } from "./marketFormat";
 import { layoutSectorMap, SECTOR_RATE_RANGE, sectorTileLabel } from "./sectorMap";
 
@@ -14,6 +16,13 @@ const MAP_WIDTH = 100;
 const MAP_HEIGHT = 56;
 const RANGE = SECTOR_RATE_RANGE satisfies ColorRange;
 const SECTOR_SKELETON = { shape: "chart", minHeight: "var(--mk-skeleton-sector)" } as const;
+
+type SectorCardMode = "sectors" | "themes";
+
+const SECTOR_MODES: readonly SegmentedOption<SectorCardMode>[] = [
+  { value: "sectors", label: "업종 지도" },
+  { value: "themes", label: "장중 키움 테마" },
+];
 
 function SectorLegend() {
   return (
@@ -89,34 +98,57 @@ function SectorFlowDetail({ sector, flow, whole }: { sector: MarketOverviewSecto
 
 export function SectorCard({ market, enabled }: { market: Market; enabled: boolean }) {
   const on = useOverviewOn("sectors");
+  const [mode, setMode] = useState<SectorCardMode>("sectors");
   const query = useMarketSectors(market, { enabled: enabled && on });
+  const themesQuery = useMarketThemes({ enabled: enabled && mode === "themes" });
   const [picked, setPicked] = useState<string | null>(null);
   return (
-    <CardShell title="업종 지도" card="sector" note={<><span>칸 크기 거래대금 · 색 등락률</span><SectorLegend /></>} source={query.data?.context.source}>
-      {!on ? <FeedUnavailable /> : <Loaded query={query} label="업종 지도" skeleton={SECTOR_SKELETON}>
-        {(card) => (
-          <PartView part={card.sectors}>
-            {(sectors) => {
-              const selected = sectors.find((sector) => sector.code === picked) ?? null;
-              const flows = card.flows.status === "ok" ? card.flows.value : null;
-              return (
-                <>
-                  <SectorMap sectors={sectors} selected={selected?.code ?? null} onSelect={(code) => setPicked((current) => (current === code ? null : code))} />
-                  <div className="mk-sector-detail">
-                    {selected === null ? (
-                      <p className="mk-hint">업종 칸을 누르면 그 업종의 주체별 수급을 보입니다. 고른 칸을 다시 누르면 풀립니다</p>
-                    ) : flows === null ? (
-                      <CardError message={card.flows.status === "failed" ? card.flows.error.message : "수급을 받지 못했습니다"} />
-                    ) : (
-                      <SectorFlowDetail sector={selected} flow={flows.find((row) => row.code === selected.code) ?? null} whole={flows.find((row) => row.wholeMarket) ?? null} />
-                    )}
-                  </div>
-                </>
-              );
-            }}
-          </PartView>
-        )}
-      </Loaded>}
+    <CardShell
+      title="업종 지도"
+      card="sector"
+      note={
+        <>
+          <Segmented label="업종 보기" mode="pressed" size="sm" value={mode} options={SECTOR_MODES} onChange={(next) => setMode(next)} />
+          {mode === "sectors" && (
+            <>
+              <span>칸 크기 거래대금 · 색 등락률</span>
+              <SectorLegend />
+            </>
+          )}
+        </>
+      }
+      source={mode === "themes" ? themesQuery.data?.source : query.data?.context.source}
+    >
+      {mode === "themes" ? (
+        <ThemeRotationPanel enabled={enabled && mode === "themes"} />
+      ) : !on ? (
+        <FeedUnavailable />
+      ) : (
+        <Loaded query={query} label="업종 지도" skeleton={SECTOR_SKELETON}>
+          {(card) => (
+            <PartView part={card.sectors}>
+              {(sectors) => {
+                const selected = sectors.find((sector) => sector.code === picked) ?? null;
+                const flows = card.flows.status === "ok" ? card.flows.value : null;
+                return (
+                  <>
+                    <SectorMap sectors={sectors} selected={selected?.code ?? null} onSelect={(code) => setPicked((current) => (current === code ? null : code))} />
+                    <div className="mk-sector-detail">
+                      {selected === null ? (
+                        <p className="mk-hint">업종 칸을 누르면 그 업종의 주체별 수급을 보입니다. 고른 칸을 다시 누르면 풀립니다</p>
+                      ) : flows === null ? (
+                        <CardError message={card.flows.status === "failed" ? card.flows.error.message : "수급을 받지 못했습니다"} />
+                      ) : (
+                        <SectorFlowDetail sector={selected} flow={flows.find((row) => row.code === selected.code) ?? null} whole={flows.find((row) => row.wholeMarket) ?? null} />
+                      )}
+                    </div>
+                  </>
+                );
+              }}
+            </PartView>
+          )}
+        </Loaded>
+      )}
     </CardShell>
   );
 }

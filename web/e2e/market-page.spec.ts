@@ -1,39 +1,53 @@
 import type { Page } from "@playwright/test";
-import { anyMarketOverviewCall, indexCardWithoutBreadth, marketOverviewBaseline, marketOverviewCalls, SECTOR_NAMES, serveMarketRankings } from "./fixtures/market-data";
+import { anyMarketOverviewCall, indexCardWithoutBreadth, marketOverviewBaseline, marketOverviewCalls, marketOverviewScopedCalls, SECTOR_NAMES, serveMarketRankings } from "./fixtures/market-data";
 import { CONNECTED_KIWOOM } from "./fixtures/scenario";
 import { cell, expect, test } from "./harness";
 
 const main = (page: Page) => page.getByRole("main", { name: "시장 종합", exact: true });
 const card = (page: Page, name: string) => main(page).getByRole("region", { name });
-const ROUTES = ["index", "sectors", "flow", "flow/intraday", "turnover", "streaks"] as const;
+const PER_MARKET_ROUTES = ["sectors", "flow", "flow/intraday", "turnover", "streaks"] as const;
 
-test("시장을 코스닥으로 바꾸면 모든 칸이 코스닥 요청으로 다시 받고 주소에 남는다", async ({ page, scenario }) => {
+test("첫 화면은 코스피·코스닥을 동시에 보이고 카드를 눌러 범위를 좁히고 다시 누르면 전체로 돌아간다", async ({ page, scenario }) => {
   serveMarketRankings(scenario);
   await page.goto("/market");
-  await expect(card(page, "지수·폭").getByText("코스피", { exact: true })).toBeVisible();
-  for (const route of ROUTES) expect(marketOverviewCalls(scenario, route, "kosdaq")).toBe(0);
+  const index = card(page, "지수·폭");
+  await expect(index.getByText("코스피", { exact: true })).toBeVisible();
+  await expect(index.getByText("코스닥", { exact: true })).toBeVisible();
+  await expect(index.getByTestId("market-diagnosis")).toContainText("디커플링 · 코스피 쏠림");
+  await expect(index.getByRole("img", { name: /시장 체력 5축 요약/ })).toBeVisible();
+  await expect(main(page).getByRole("group", { name: "시장 범위" }).getByRole("button", { name: "전체" })).toHaveAttribute("aria-pressed", "true");
+  for (const route of PER_MARKET_ROUTES) expect(marketOverviewCalls(scenario, route, "kosdaq")).toBe(0);
 
-  await page.getByRole("group", { name: "시장" }).getByRole("button", { name: "코스닥" }).click();
-  await expect(page).toHaveURL(/market=kosdaq/);
-  await expect(card(page, "지수·폭").getByText("코스닥", { exact: true })).toBeVisible();
+  const kosdaqTile = index.locator('.mk-market-card[data-market="kosdaq"]');
+  await kosdaqTile.click();
+  await expect(page).toHaveURL(/scope=kosdaq/);
+  await expect(kosdaqTile).toHaveAttribute("aria-pressed", "true");
+  await expect(main(page).getByRole("group", { name: "시장 범위" }).getByRole("button", { name: "코스닥" })).toHaveAttribute("aria-pressed", "true");
   await expect(card(page, "업종 지도").getByRole("button", { name: new RegExp(`^${SECTOR_NAMES.kosdaq[0]}`) })).toBeVisible();
-  for (const route of ROUTES) await expect.poll(() => marketOverviewCalls(scenario, route, "kosdaq")).toBeGreaterThan(0);
+  for (const route of PER_MARKET_ROUTES) await expect.poll(() => marketOverviewCalls(scenario, route, "kosdaq")).toBeGreaterThan(0);
+  await expect.poll(() => marketOverviewScopedCalls(scenario, "derived", "kosdaq")).toBeGreaterThan(0);
   await expect(card(page, "종목").getByRole("button", { name: "에코프로" })).toBeVisible();
 
   await page.reload();
-  await expect(page).toHaveURL(/market=kosdaq/);
-  await expect(page.getByRole("group", { name: "시장" }).getByRole("button", { name: "코스닥" })).toHaveAttribute("aria-pressed", "true");
+  await expect(page).toHaveURL(/scope=kosdaq/);
+  await expect(main(page).getByRole("group", { name: "시장 범위" }).getByRole("button", { name: "코스닥" })).toHaveAttribute("aria-pressed", "true");
+  await expect(card(page, "지수·폭").locator('.mk-market-card[data-market="kosdaq"]')).toHaveAttribute("aria-pressed", "true");
+
+  await card(page, "지수·폭").locator('.mk-market-card[data-market="kosdaq"]').click();
+  await expect(page).toHaveURL(/scope=all/);
+  await expect(main(page).getByRole("group", { name: "시장 범위" }).getByRole("button", { name: "전체" })).toHaveAttribute("aria-pressed", "true");
 });
 
 test("지수 종목 수가 없으면 '-'로 보이고 막대는 그리지 않는다", async ({ page, scenario }) => {
   scenario.reply((url) => url.pathname === "/api/market-overview/index", { body: indexCardWithoutBreadth("kospi") });
   await page.goto("/market");
   const index = card(page, "지수·폭");
-  await expect(index.getByText("코스피", { exact: true })).toBeVisible();
-  await expect(index.getByText("상승 -")).toBeVisible();
-  await expect(index.getByText("보합 -")).toBeVisible();
-  await expect(index.getByText("하락 -")).toBeVisible();
-  await expect(index.locator('[data-cell="limit"] dd')).toHaveText("상한 - · 하한 -");
+  const kospiTile = index.locator('.mk-market-card[data-market="kospi"]');
+  await expect(kospiTile.getByText("코스피", { exact: true })).toBeVisible();
+  await expect(kospiTile.getByText("상승 -")).toBeVisible();
+  await expect(kospiTile.getByText("보합 -")).toBeVisible();
+  await expect(kospiTile.getByText("하락 -")).toBeVisible();
+  await expect(kospiTile.locator('[data-cell="limit"] .mk-metric-val')).toHaveText("상한 - · 하한 -");
   await expect(index.locator(".mk-breadth-bar")).toHaveCount(0);
 });
 
@@ -59,24 +73,61 @@ test("누가 사고 파나 칸에 네 주체의 막대와 누적선이 있다", 
   await expect(flow.getByRole("img", { name: "장중 누적선" })).toBeVisible();
 });
 
-test("업종 칸을 누르면 그 업종의 주체별 수급이 보인다", async ({ page }) => {
+test("업종 칸을 누르면 수급이 보이고 장중 키움 테마 전환과 주도 종목 차트 이동이 된다", async ({ page }) => {
   await page.goto("/market");
+  const sectorCard = card(page, "업종 지도");
   const [sector] = SECTOR_NAMES.kospi;
-  await card(page, "업종 지도").getByRole("button", { name: new RegExp(`^${sector}`) }).click();
-  const detail = card(page, "업종 지도").getByRole("region", { name: `${sector} 주체별 수급` });
+  await sectorCard.getByRole("button", { name: new RegExp(`^${sector}`) }).click();
+  const detail = sectorCard.getByRole("region", { name: `${sector} 주체별 수급` });
   await expect(detail).toBeVisible();
   await expect(detail.locator('[data-subject="foreignEok"]')).toContainText("+1,500억");
   await expect(detail.locator('[data-subject="individualEok"]')).toContainText("−700억");
+
+  await sectorCard.getByRole("group", { name: "업종 보기" }).getByRole("button", { name: "장중 키움 테마" }).click();
+  await expect(sectorCard.getByText("HBM·AI반도체")).toBeVisible();
+  await expect(sectorCard.getByText("+3.45%")).toBeVisible();
+  await sectorCard.getByRole("button", { name: "SK하이닉스" }).click();
+  await expect(page).toHaveURL(/\/$/);
+  await expect(cell(page, 1)).toHaveAttribute("aria-label", /^칸 1: SK하이닉스/);
 });
 
-test("종목 탭 행을 누르면 연동 색 차트에 그 종목이 열린다", async ({ page, scenario }) => {
+test("시장 체력 X-Ray는 9구간 분포와 KRX·NXT 거래소 비중을 보인다", async ({ page }) => {
+  await page.goto("/market");
+  const xray = card(page, "시장 체력 X-Ray");
+  await expect(xray.locator(".mk-hist-col")).toHaveCount(9);
+  await xray.locator('.mk-hist-col[data-bucket="+0.5~+2%"] button').click();
+  await expect(xray.getByTestId("histogram-readout")).toContainText("+0.5~+2%");
+  await expect(xray.locator('.mk-venue-cell[data-venue="krx"]')).toContainText("82.1%");
+  await expect(xray.locator('.mk-venue-cell[data-venue="nxt"]')).toContainText("17.9%");
+});
+
+test("지수 기여도와 시장 추세 체력은 파생 지표를 보이고 기여 종목을 누르면 차트로 보낸다", async ({ page }) => {
+  await page.goto("/market");
+  const attribution = card(page, "지수 기여도");
+  await expect(attribution.getByTestId("attribution-concentration")).toContainText("64.5%");
+  await expect(attribution.getByRole("region", { name: "상승 기여 상위" })).toContainText("삼성전자");
+  await expect(attribution.getByRole("region", { name: "하락 기여 상위" })).toContainText("LG화학");
+
+  const maThrust = card(page, "시장 추세 체력");
+  for (const ma of ["ma5", "ma20", "ma60", "ma200"]) await expect(maThrust.locator(`[data-ma="${ma}"]`)).toBeVisible();
+  await expect(maThrust.locator(".mk-ma-path")).toHaveAttribute("d", /^M/);
+
+  await attribution.locator('.mk-attr-item[data-code="000660"] button').click();
+  await expect(page).toHaveURL(/\/$/);
+  await expect(cell(page, 1)).toHaveAttribute("aria-label", /^칸 1: SK하이닉스/);
+});
+
+test("종목 탭 행과 VI 발동 탭 행을 누르면 연동 색 차트에 그 종목이 열린다", async ({ page, scenario }) => {
   serveMarketRankings(scenario);
   await page.goto("/market");
   const stocks = card(page, "종목");
-  await stocks.getByRole("tab", { name: "상승" }).click();
-  await stocks.getByRole("button", { name: "SK하이닉스" }).click();
+  await stocks.getByRole("tab", { name: "VI 발동" }).click();
+  await expect(stocks.getByText("상승 VI").first()).toBeVisible();
+  await expect(stocks.getByText("10:15:32")).toBeVisible();
+  await expect(stocks.getByText("정적", { exact: true })).toBeVisible();
+  await stocks.getByRole("button", { name: "에코프로" }).click();
   await expect(page).toHaveURL(/\/$/);
-  await expect(cell(page, 1)).toHaveAttribute("aria-label", /^칸 1: SK하이닉스/);
+  await expect(cell(page, 1)).toHaveAttribute("aria-label", /^칸 1: 에코프로/);
 });
 
 test("연속 탭은 순매수·순매도 연속 종목을 보이고 행을 누르면 차트로 보낸다", async ({ page }) => {
@@ -96,9 +147,24 @@ test("한 경로가 오류로 답하면 그 칸만 오류이고 나머지 칸은
   await expect(card(page, "거래대금 추이").getByRole("alert")).toContainText("키움이 응답하지 않습니다");
   await expect(card(page, "지수·폭").getByText("코스피", { exact: true })).toBeVisible();
   await expect(card(page, "누가 사고 파나").locator('[data-subject="foreign"]').first()).toBeVisible();
-  await expect(card(page, "업종 지도").getByRole("button").first()).toBeVisible();
+  await expect(card(page, "업종 지도").locator(".mk-tile").first()).toBeVisible();
+  await expect(card(page, "시장 체력 X-Ray").locator(".mk-hist-col")).toHaveCount(9);
   await expect(card(page, "종목").getByRole("button", { name: "삼성전자" })).toBeVisible();
   await expect(main(page).getByRole("alert")).toHaveCount(1);
+});
+
+test("파생 경로가 503으로 실패해도 기존 시장 종합 칸들은 그대로 보인다", async ({ page, scenario }) => {
+  serveMarketRankings(scenario);
+  scenario.on((url) => url.pathname === "/api/market-overview/derived", () => ({ status: 503, body: { error: { code: "not_prepared", message: "파생 표본이 아직 준비되지 않았습니다", reason: null, retryAt: null, manualActionRequired: false } } }));
+  await page.goto("/market");
+  await expect(card(page, "시장 체력 X-Ray").getByRole("alert")).toContainText("파생 표본이 아직 준비되지 않았습니다");
+  await expect(card(page, "지수 기여도").getByRole("alert")).toContainText("파생 표본이 아직 준비되지 않았습니다");
+  await expect(card(page, "시장 추세 체력").getByRole("alert")).toContainText("파생 표본이 아직 준비되지 않았습니다");
+  await expect(card(page, "지수·폭").getByText("코스피", { exact: true })).toBeVisible();
+  await expect(card(page, "누가 사고 파나").getByRole("img", { name: "장중 누적선" })).toBeVisible();
+  await expect(card(page, "업종 지도").locator(".mk-tile").first()).toBeVisible();
+  await expect(card(page, "거래대금 추이").locator(".mk-turnover li").first()).toBeVisible();
+  await expect(card(page, "종목").getByRole("button", { name: "삼성전자" })).toBeVisible();
 });
 
 test("키움 연결 전이면 요청 없이 연결 안내를 보이고 연결되면 칸을 받는다", async ({ page, scenario }) => {
@@ -151,16 +217,18 @@ const rightEdgeOfText = (page: Page, selector: string) =>
 test.describe("1440×900 격자", () => {
   test.use({ viewport: { width: 1440, height: 900 } });
 
-  test("같은 줄의 수급 카드와 업종 지도 카드는 아래 끝이 같다", async ({ page }) => {
+  test("같은 줄의 수급·업종, 거래대금·종목, 기여도·추세 카드는 아래 끝이 같다", async ({ page }) => {
     await page.goto("/market");
     const flow = card(page, "누가 사고 파나");
     const sector = card(page, "업종 지도");
     await expect(flow.getByRole("img", { name: "장중 누적선" })).toBeVisible();
-    await expect(sector.getByRole("button").first()).toBeVisible();
+    await expect(sector.locator(".mk-tile").first()).toBeVisible();
     const [flowBox, sectorBox] = [await flow.boundingBox(), await sector.boundingBox()];
     expect(flowBox!.y + flowBox!.height).toBeCloseTo(sectorBox!.y + sectorBox!.height, 0);
     const [turnoverBox, stocksBox] = [await card(page, "거래대금 추이").boundingBox(), await card(page, "종목").boundingBox()];
     expect(turnoverBox!.y + turnoverBox!.height).toBeCloseTo(stocksBox!.y + stocksBox!.height, 0);
+    const [attrBox, maBox] = [await card(page, "지수 기여도").boundingBox(), await card(page, "시장 추세 체력").boundingBox()];
+    expect(attrBox!.y + attrBox!.height).toBeCloseTo(maBox!.y + maBox!.height, 0);
   });
 
   test("업종 지도의 글자 타일은 대비가 4.5:1 이상이고 색 범례가 보인다", async ({ page }) => {
@@ -251,30 +319,35 @@ test.describe("1440×900 격자", () => {
 
   test("응답을 붙잡았다 풀어도 아래 카드의 y가 변하지 않는다", async ({ page, scenario }) => {
     serveMarketRankings(scenario);
-    const routes = ["index", "sectors", "flow", "flow/intraday"].map((route) => ({ route, held: scenario.hold((url) => url.pathname === `/api/market-overview/${route}`) }));
+    const kospiIndex = scenario.hold((url) => url.pathname === "/api/market-overview/index" && url.searchParams.get("market") === "kospi");
+    const kosdaqIndex = scenario.hold((url) => url.pathname === "/api/market-overview/index" && url.searchParams.get("market") === "kosdaq");
+    const routes = ["sectors", "flow", "flow/intraday"].map((route) => ({ route, held: scenario.hold((url) => url.pathname === `/api/market-overview/${route}`) }));
     await page.goto("/market");
-    await Promise.all(routes.map((entry) => entry.held.received));
+    await Promise.all([kospiIndex.received, kosdaqIndex.received, ...routes.map((entry) => entry.held.received)]);
     const top = async () => [(await card(page, "거래대금 추이").boundingBox())!.y, (await card(page, "종목").boundingBox())!.y];
     await expect(card(page, "종목").getByRole("table")).toBeVisible();
     const waiting = await top();
+    kospiIndex.reply(marketOverviewBaseline(new URL("http://host/api/market-overview/index?market=kospi"), "GET")!);
+    kosdaqIndex.reply(marketOverviewBaseline(new URL("http://host/api/market-overview/index?market=kosdaq"), "GET")!);
     for (const { route, held } of routes) held.reply(marketOverviewBaseline(new URL(`http://host/api/market-overview/${route}?market=kospi&period=20`), "GET")!);
     await expect(card(page, "누가 사고 파나").getByRole("img", { name: "장중 누적선" })).toBeVisible();
-    await expect(card(page, "업종 지도").getByRole("button").first()).toBeVisible();
+    await expect(card(page, "업종 지도").locator(".mk-tile").first()).toBeVisible();
     await expect(card(page, "지수·폭").getByText("코스피", { exact: true })).toBeVisible();
     expect(await top()).toEqual(waiting);
   });
 
-  test("지수·폭 카드는 지수를 크게 포인트와 등락률로 보이고 VKOSPI를 칸으로 둔다", async ({ page }) => {
+  test("지수·폭 카드는 코스피·코스닥을 나란히 28px로 보이고 코스피에 VKOSPI를 둔다", async ({ page }) => {
     await page.goto("/market");
     const index = card(page, "지수·폭");
     const size = await index.locator(".mk-big").first().evaluate((node) => getComputedStyle(node).fontSize);
     expect(size).toBe("28px");
-    await expect(index.locator('[data-cell="level"]')).toContainText("(+0.85%)");
-    await expect(index.locator('[data-cell="limit"] dd')).toHaveText("상한 3 · 하한 1");
-    await expect(index.locator('[data-cell="vkospi"]')).toContainText("18.40");
-    await page.getByRole("group", { name: "시장" }).getByRole("button", { name: "코스닥" }).click();
-    await expect(index.getByText("코스닥", { exact: true })).toBeVisible();
-    await expect(index.locator('[data-cell="vkospi"]')).toHaveCount(0);
+    const kospiTile = index.locator('.mk-market-card[data-market="kospi"]');
+    const kosdaqTile = index.locator('.mk-market-card[data-market="kosdaq"]');
+    await expect(kospiTile.locator('[data-cell="level"]')).toContainText("(+0.85%)");
+    await expect(kospiTile.locator('[data-cell="limit"] .mk-metric-val')).toHaveText("상한 3 · 하한 1");
+    await expect(kospiTile.locator('[data-cell="vkospi"]')).toContainText("18.40");
+    await expect(kosdaqTile.locator('[data-cell="level"]')).toContainText("(−0.30%)");
+    await expect(kosdaqTile.locator('[data-cell="vkospi"]')).toHaveCount(0);
   });
 
   test("종목 탭은 화살표 키로 옮기고 업종 칸은 다시 누르면 풀린다", async ({ page }) => {
@@ -284,7 +357,7 @@ test.describe("1440×900 격자", () => {
     await page.keyboard.press("ArrowRight");
     await expect(stocks.getByRole("tab", { name: "상승" })).toHaveAttribute("aria-selected", "true");
     await page.keyboard.press("End");
-    await expect(stocks.getByRole("tab", { name: "기관 연속" })).toHaveAttribute("aria-selected", "true");
+    await expect(stocks.getByRole("tab", { name: "VI 발동" })).toHaveAttribute("aria-selected", "true");
     const [sector] = SECTOR_NAMES.kospi;
     const tile = card(page, "업종 지도").getByRole("button", { name: new RegExp(`^${sector}`) });
     await tile.click();
