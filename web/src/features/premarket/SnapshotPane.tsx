@@ -21,6 +21,7 @@ const FILTERS: readonly { readonly value: SnapshotFilter; readonly label: string
 
 interface SnapshotPaneProps {
   readonly snapshot: PreMarketSnapshot | undefined;
+  readonly fallbackDates?: readonly string[];
   readonly selectedDate: string | undefined;
   readonly onChangeDate: (date: string) => void;
   readonly activeSymbol: SymbolCode | null;
@@ -31,6 +32,7 @@ interface SnapshotPaneProps {
 
 export function SnapshotPane({
   snapshot,
+  fallbackDates = [],
   selectedDate,
   onChangeDate,
   activeSymbol,
@@ -44,12 +46,12 @@ export function SnapshotPane({
     [snapshot?.rows, filter],
   );
   const dates = useMemo(() => {
-    const list = snapshot?.availableDates ?? [];
-    if (snapshot?.date && !list.includes(snapshot.date)) {
-      return [...list, snapshot.date].sort();
-    }
-    return list;
-  }, [snapshot?.availableDates, snapshot?.date]);
+    const base = snapshot?.availableDates && snapshot.availableDates.length > 0 ? snapshot.availableDates : fallbackDates;
+    const merged = new Set(base);
+    if (snapshot?.date) merged.add(snapshot.date);
+    if (selectedDate && merged.size > 0) merged.add(selectedDate);
+    return [...merged].sort();
+  }, [snapshot?.availableDates, snapshot?.date, fallbackDates, selectedDate]);
   const shownDate = selectedDate ?? snapshot?.date ?? dates[dates.length - 1] ?? "";
   const isClosed = snapshot?.source === "store";
 

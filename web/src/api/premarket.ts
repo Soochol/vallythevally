@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { isIndexCode } from "../lib/symbol";
+import { usePublicMode } from "../public-mode/serverMode";
 import type { PreMarketCompare } from "./generated/PreMarketCompare";
 import type { PreMarketDays } from "./generated/PreMarketDays";
 import type { PreMarketSnapshot } from "./generated/PreMarketSnapshot";
@@ -8,6 +9,7 @@ import { getJson } from "./http";
 
 const STALE_MS = 30_000;
 const GC_TIME_MS = 30 * 60 * 1000;
+const LIVE_FLOW_POLL_MS = 5_000;
 
 export type { PreMarketCompare, PreMarketDays, PreMarketSnapshot };
 
@@ -26,7 +28,8 @@ export function fetchPreMarketSnapshot(date?: string, signal?: AbortSignal): Pro
 }
 
 export function usePreMarketDays(symbol: SymbolCode | null, enabled = true) {
-  const active = enabled && symbol !== null && !isIndexCode(symbol);
+  const publicMode = usePublicMode();
+  const active = enabled && !publicMode && symbol !== null && !isIndexCode(symbol);
   return useQuery({
     queryKey: ["premarket", "days", symbol],
     queryFn: ({ signal }) => fetchPreMarketDays(symbol!, signal),
@@ -38,24 +41,30 @@ export function usePreMarketDays(symbol: SymbolCode | null, enabled = true) {
 }
 
 export function usePreMarketCompare(symbol: SymbolCode | null, days: readonly string[], enabled = true) {
-  const active = enabled && symbol !== null && !isIndexCode(symbol) && days.length > 0;
+  const publicMode = usePublicMode();
+  const active = enabled && !publicMode && symbol !== null && !isIndexCode(symbol) && days.length > 0;
   return useQuery({
     queryKey: ["premarket", "compare", symbol, days.join(",")],
     queryFn: ({ signal }) => fetchPreMarketCompare(symbol!, days, signal),
     enabled: active,
     staleTime: STALE_MS,
     gcTime: GC_TIME_MS,
+    refetchInterval: (query) =>
+      active && query.state.data?.series.some((s) => s.source === "flow") ? LIVE_FLOW_POLL_MS : false,
     retry: false,
   });
 }
 
 export function usePreMarketSnapshot(date: string | undefined, enabled = true) {
+  const publicMode = usePublicMode();
+  const active = enabled && !publicMode;
   return useQuery({
     queryKey: ["premarket", "snapshot", date ?? "latest"],
     queryFn: ({ signal }) => fetchPreMarketSnapshot(date, signal),
-    enabled,
+    enabled: active,
     staleTime: STALE_MS,
     gcTime: GC_TIME_MS,
+    refetchInterval: (query) => (active && query.state.data?.source === "flow" ? LIVE_FLOW_POLL_MS : false),
     retry: false,
   });
 }
