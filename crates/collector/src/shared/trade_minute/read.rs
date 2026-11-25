@@ -3,6 +3,8 @@ use std::borrow::Cow;
 use domain::StockCode;
 use serde::Deserialize;
 
+use crate::shared::live_tap::seconds_of_day;
+
 const TRADE_TYPE: &str = "0B";
 const COMBINED_SUFFIX: &str = "_AL";
 
@@ -68,24 +70,29 @@ pub fn read_trades(text: &str, mut sink: impl FnMut(RawTrade<'_>)) -> Result<Rea
     Ok(reading)
 }
 
-fn trade_of<'a>(entry: &'a Entry<'_>) -> Option<RawTrade<'a>> {
-    let code = entry.item.strip_suffix(COMBINED_SUFFIX)?;
+pub(crate) fn trade_from_fields<'a>(
+    item: &'a str,
+    time: Option<&str>,
+    price: Option<&str>,
+    quantity: Option<&str>,
+) -> Option<RawTrade<'a>> {
+    let code = item.strip_suffix(COMBINED_SUFFIX)?;
     if StockCode::parse(code).is_err() {
         return None;
     }
-    let sec = seconds_of_day(entry.values.time.as_deref()?)?;
-    let price = price_of(entry.values.price.as_deref()?)?;
-    let quantity = quantity_of(entry.values.quantity.as_deref()?)?;
+    let sec = seconds_of_day(time?)?;
+    let price = price_of(price?)?;
+    let quantity = quantity_of(quantity?)?;
     Some(RawTrade { code, sec, price, quantity })
 }
 
-fn seconds_of_day(text: &str) -> Option<u32> {
-    if text.len() != 6 || !text.bytes().all(|byte| byte.is_ascii_digit()) {
-        return None;
-    }
-    let part = |range: std::ops::Range<usize>| text[range].parse::<u32>().ok();
-    let (hour, minute, second) = (part(0..2)?, part(2..4)?, part(4..6)?);
-    (hour < 24 && minute < 60 && second < 60).then_some(hour * 3600 + minute * 60 + second)
+fn trade_of<'a>(entry: &'a Entry<'_>) -> Option<RawTrade<'a>> {
+    trade_from_fields(
+        entry.item.as_ref(),
+        entry.values.time.as_deref(),
+        entry.values.price.as_deref(),
+        entry.values.quantity.as_deref(),
+    )
 }
 
 fn price_of(text: &str) -> Option<u64> {

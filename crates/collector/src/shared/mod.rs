@@ -6,6 +6,7 @@ mod assignment;
 pub mod child;
 pub mod flow;
 mod job;
+pub mod live_tap;
 pub mod minute;
 mod overview;
 mod probe;
@@ -20,6 +21,7 @@ mod wire;
 
 pub use assignment::{AssignedJob, Assignment, AssignmentError, AssignmentStore, KeyOptions, Reload};
 pub use job::{JobCall, JobError, JobFuture, JobWindow, Market, SharedJob, Slice};
+pub use live_tap::{LiveTapConfig, LiveTapFeed, LiveTapWorker, spawn_live_tap};
 pub use runner::{JobLoop, LoopStats};
 pub use usage::{LimitEvidence, UsageLog, UsageMinute, UsagePoller, judge_limit, usage_path};
 pub use wire::{JobStat, TrMinute};

@@ -4,18 +4,15 @@ use std::time::Duration;
 
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
-use tokio::time::{Instant, MissedTickBehavior, interval_at, timeout};
 use tokio_tungstenite::tungstenite::Utf8Bytes;
 
-use super::read::{mentions_minute_type, read_ticks};
+use super::read::{RawTick, mentions_minute_type, read_ticks};
 use super::state::{Applied, Day};
 use super::store::MinuteStore;
 use crate::kst::KstTime;
+use crate::shared::live_tap::{BlockingStore, INPUT_CAPACITY, REPORT_EVERY, delayed_interval, finish_task};
 
 pub const FLUSH_EVERY: Duration = Duration::from_secs(5);
-const REPORT_EVERY: Duration = Duration::from_secs(60);
-const INPUT_CAPACITY: usize = 16_384;
-const DRAIN_LIMIT: Duration = Duration::from_secs(5);
 
 #[derive(Debug, Default)]
 pub struct MinuteStats {
@@ -83,11 +80,7 @@ impl MinuteWorker {
     }
 
     pub async fn finish(self) {
-        let abort = self.task.abort_handle();
-        if timeout(DRAIN_LIMIT, self.task).await.is_err() {
-            abort.abort();
-            tracing::warn!("분봉 집계가 정한 시간 안에 끝나지 않아 멈춥니다");
-        }
+        finish_task(self.task, "분봉 집계가 정한 시간 안에 끝나지 않아 멈춥니다").await;
     }
 }
 
@@ -98,20 +91,17 @@ pub fn spawn(store: Box<dyn MinuteStore>, now_ms: i64) -> (MinuteFeed, MinuteWor
     (MinuteFeed { input, stats: stats.clone() }, MinuteWorker { task, stats })
 }
 
-struct Aggregator {
-    store: Option<Box<dyn MinuteStore>>,
+pub(crate) struct Aggregator {
+    store: BlockingStore<Box<dyn MinuteStore>>,
     day: Option<Day>,
     as_of_ms: i64,
     stats: Arc<MinuteStats>,
 }
 
 async fn run(mut frames: mpsc::Receiver<Frame>, store: Box<dyn MinuteStore>, stats: Arc<MinuteStats>, now_ms: i64) {
-    let mut flush = interval_at(Instant::now() + FLUSH_EVERY, FLUSH_EVERY);
-    let mut report = interval_at(Instant::now() + REPORT_EVERY, REPORT_EVERY);
-    for tick in [&mut flush, &mut report] {
-        tick.set_missed_tick_behavior(MissedTickBehavior::Delay);
-    }
-    let mut aggregator = Aggregator { store: Some(store), day: None, as_of_ms: now_ms, stats };
+    let mut flush = delayed_interval(FLUSH_EVERY);
+    let mut report = delayed_interval(REPORT_EVERY);
+    let mut aggregator = Aggregator::new(store, now_ms, stats);
     aggregator.open_day(KstTime::from_unix_ms(now_ms).date).await;
     loop {
         tokio::select! {
@@ -131,26 +121,17 @@ async fn run(mut frames: mpsc::Receiver<Frame>, store: Box<dyn MinuteStore>, sta
 }
 
 impl Aggregator {
-    async fn with_store<T: Send + 'static>(&mut self, work: impl FnOnce(&mut dyn MinuteStore) -> T + Send + 'static) -> Option<T> {
-        let mut store = self.store.take()?;
-        match tokio::task::spawn_blocking(move || {
-            let output = work(store.as_mut());
-            (store, output)
-        })
-        .await
-        {
-            Ok((store, output)) => {
-                self.store = Some(store);
-                Some(output)
-            }
-            Err(error) => {
-                tracing::error!(%error, "분봉 파일 작업이 멈춰 이 자식의 분봉 집계를 그만둡니다");
-                None
-            }
-        }
+    pub(crate) fn new(store: Box<dyn MinuteStore>, now_ms: i64, stats: Arc<MinuteStats>) -> Aggregator {
+        Aggregator { store: BlockingStore::new(store), day: None, as_of_ms: now_ms, stats }
     }
 
-    async fn open_day(&mut self, date: u32) {
+    async fn with_store<T: Send + 'static>(&mut self, work: impl FnOnce(&mut dyn MinuteStore) -> T + Send + 'static) -> Option<T> {
+        self.store
+            .run(move |store| work(store.as_mut()), "분봉 파일 작업이 멈춰 이 자식의 분봉 집계를 그만둡니다")
+            .await
+    }
+
+    pub(crate) async fn open_day(&mut self, date: u32) {
         let loaded = self.with_store(move |store| store.load(date)).await;
         let bars = match loaded {
             Some(Ok(bars)) => bars,
@@ -164,24 +145,41 @@ impl Aggregator {
         self.day = Some(Day::resumed(date, bars));
     }
 
-    async fn take(&mut self, frame: Frame) {
-        let date = KstTime::from_unix_ms(frame.recv_ms).date;
+    pub(crate) async fn prepare_day(&mut self, recv_ms: i64) {
+        let date = KstTime::from_unix_ms(recv_ms).date;
         if self.day.as_ref().is_none_or(|day| day.date() != date) {
             self.flush().await;
             self.open_day(date).await;
         }
-        self.as_of_ms = self.as_of_ms.max(frame.recv_ms);
-        let Some(day) = self.day.as_mut() else {
-            return;
-        };
-        let stats = &self.stats;
-        let read = read_ticks(frame.text.as_str(), |tick| match day.apply(&tick) {
-            Applied::Counted => MinuteStats::add(&stats.ticks, 1),
-            Applied::TooLate => MinuteStats::add(&stats.too_late, 1),
-        });
+        self.as_of_ms = self.as_of_ms.max(recv_ms);
+    }
+
+    pub(crate) fn apply_tick(&mut self, tick: &RawTick<'_>) {
+        let Some(day) = self.day.as_mut() else { return };
+        match day.apply(tick) {
+            Applied::Counted => MinuteStats::add(&self.stats.ticks, 1),
+            Applied::TooLate => MinuteStats::add(&self.stats.too_late, 1),
+        }
+    }
+
+    pub(crate) fn record_skipped(&self, count: u64) {
+        MinuteStats::add(&self.stats.skipped, count);
+    }
+
+    pub(crate) fn record_unreadable(&self) {
+        MinuteStats::add(&self.stats.unreadable, 1);
+    }
+
+    pub(crate) fn record_dropped(&self, count: u64) {
+        MinuteStats::add(&self.stats.dropped, count);
+    }
+
+    async fn take(&mut self, frame: Frame) {
+        self.prepare_day(frame.recv_ms).await;
+        let read = read_ticks(frame.text.as_str(), |tick| self.apply_tick(&tick));
         match read {
-            Ok(reading) => MinuteStats::add(&stats.skipped, reading.skipped),
-            Err(_) => MinuteStats::add(&stats.unreadable, 1),
+            Ok(reading) => self.record_skipped(reading.skipped),
+            Err(_) => self.record_unreadable(),
         }
     }
 
@@ -194,7 +192,7 @@ impl Aggregator {
         }
     }
 
-    async fn flush(&mut self) {
+    pub(crate) async fn flush(&mut self) {
         let Some(day) = self.day.as_ref() else {
             return;
         };
@@ -218,13 +216,13 @@ impl Aggregator {
         }
     }
 
-    async fn finish(&mut self) {
+    pub(crate) async fn finish(&mut self) {
         if let Some(Err(error)) = self.with_store(|store| store.finish()).await {
             tracing::warn!(%error, "분봉 파일을 동기화하지 못했습니다");
         }
     }
 
-    fn report(&self) {
+    pub(crate) fn report(&self) {
         let stats = &self.stats;
         tracing::info!(
             ticks = stats.ticks.load(Ordering::Relaxed),
