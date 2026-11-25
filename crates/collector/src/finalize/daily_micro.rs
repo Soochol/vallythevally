@@ -7,7 +7,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
 
-use arrow_array::{Array, Int32Array, Int64Array, RecordBatch, StringArray};
+use arrow_array::{Array, BooleanArray, Int32Array, Int64Array, RecordBatch, StringArray};
 use arrow_schema::{DataType, Field, Schema};
 use domain::StockCode;
 use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
@@ -178,14 +178,98 @@ struct BookSnapshot {
     bids: [(i64, i64); SPOOF_DEPTH],
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum StockStream {
+    Combined,
+    Krx,
+    Nxt,
+}
+
+struct StreamSlots<T> {
+    combined: Option<T>,
+    krx: Option<T>,
+    nxt: Option<T>,
+}
+
+impl<T> Default for StreamSlots<T> {
+    fn default() -> Self {
+        Self { combined: None, krx: None, nxt: None }
+    }
+}
+
+impl<T> StreamSlots<T> {
+    fn get(&self, stream: StockStream) -> Option<&T> {
+        match stream {
+            StockStream::Combined => self.combined.as_ref(),
+            StockStream::Krx => self.krx.as_ref(),
+            StockStream::Nxt => self.nxt.as_ref(),
+        }
+    }
+
+    fn preferred(&self) -> Option<&T> {
+        self.combined.as_ref().or(self.krx.as_ref()).or(self.nxt.as_ref())
+    }
+
+    fn get_or_insert_default(&mut self, stream: StockStream) -> &mut T
+    where
+        T: Default,
+    {
+        let slot = match stream {
+            StockStream::Combined => &mut self.combined,
+            StockStream::Krx => &mut self.krx,
+            StockStream::Nxt => &mut self.nxt,
+        };
+        slot.get_or_insert_with(T::default)
+    }
+
+    fn merge_with(&mut self, other: Self, mut merge_fn: impl FnMut(&mut T, T)) {
+        merge_option(&mut self.combined, other.combined, &mut merge_fn);
+        merge_option(&mut self.krx, other.krx, &mut merge_fn);
+        merge_option(&mut self.nxt, other.nxt, &mut merge_fn);
+    }
+
+    fn into_preferred(self) -> Option<T> {
+        self.combined.or(self.krx).or(self.nxt)
+    }
+}
+
+fn merge_option<T>(dst: &mut Option<T>, src: Option<T>, merge_fn: &mut impl FnMut(&mut T, T)) {
+    if let Some(incoming) = src {
+        match dst {
+            Some(existing) => merge_fn(existing, incoming),
+            None => *dst = Some(incoming),
+        }
+    }
+}
+
+fn merge_stream_maps<T>(partials: Vec<HashMap<String, StreamSlots<T>>>, mut merge_fn: impl FnMut(&mut T, T)) -> HashMap<String, StreamSlots<T>> {
+    let mut merged: HashMap<String, StreamSlots<T>> = HashMap::new();
+    for partial in partials {
+        for (symbol, slots) in partial {
+            match merged.entry(symbol) {
+                Entry::Occupied(mut occupied) => occupied.get_mut().merge_with(slots, &mut merge_fn),
+                Entry::Vacant(vacant) => {
+                    vacant.insert(slots);
+                }
+            }
+        }
+    }
+    merged
+}
+
+fn resolve_preferred<T>(map: HashMap<String, StreamSlots<T>>) -> HashMap<String, T> {
+    map.into_iter().filter_map(|(symbol, slots)| slots.into_preferred().map(|acc| (symbol, acc))).collect()
+}
+
 pub fn write_daily_micro(data_dir: &Path, shared_dir: &Path, date: u32, threads: usize) -> io::Result<DailyMicroReport> {
     let day_store = store_dir(data_dir, date);
     let registered = read_registered_stocks(&day_store)?;
-    let trades = scan_trades(&day_store, threads)?;
+    let trade_streams = scan_trades(&day_store, threads)?;
     let programs = scan_programs(&day_store, threads)?;
     let brokers = scan_brokers(&day_store, threads)?;
     let vi_counts = scan_vi(&day_store, threads)?;
-    let spoofs = scan_books_for_spoof(&day_store, &trades, threads)?;
+    let spoofs = scan_books_for_spoof(&day_store, &trade_streams, threads)?;
+    let trades = resolve_preferred(trade_streams);
 
     let mut symbols: BTreeSet<String> = registered;
     symbols.extend(trades.keys().cloned());
@@ -262,13 +346,35 @@ fn compute_vwap_close_gap_bps(total_traded_won: i128, total_volume: i128, last_p
         .clamp(f64::from(i32::MIN), f64::from(i32::MAX)) as i32
 }
 
-fn normalize_stock_code(raw: &str) -> Option<&str> {
+fn parse_stream_symbol(raw: &str) -> Option<(&str, StockStream)> {
     let trimmed = raw.trim();
-    let stripped = trimmed
-        .strip_suffix(STOCK_ITEM_SUFFIX)
-        .or_else(|| trimmed.strip_suffix(NXT_ITEM_SUFFIX))
-        .unwrap_or(trimmed);
+    let (code, stream) = if let Some(code) = trimmed.strip_suffix(STOCK_ITEM_SUFFIX) {
+        (code, StockStream::Combined)
+    } else if let Some(code) = trimmed.strip_suffix(NXT_ITEM_SUFFIX) {
+        (code, StockStream::Nxt)
+    } else {
+        (trimmed, StockStream::Krx)
+    };
+    StockCode::parse(code).ok().map(|_| (code, stream))
+}
+
+fn parse_vi_stock_code(raw: &str) -> Option<&str> {
+    let trimmed = raw.trim();
+    if trimmed.ends_with(STOCK_ITEM_SUFFIX) {
+        return None;
+    }
+    let stripped = trimmed.strip_suffix(NXT_ITEM_SUFFIX).unwrap_or(trimmed);
     StockCode::parse(stripped).ok().map(|_| stripped)
+}
+
+fn is_vi_trigger_frame(releases: Option<&StringArray>, row: usize) -> bool {
+    let Some(col) = releases else {
+        return true;
+    };
+    if col.is_null(row) {
+        return true;
+    }
+    matches!(col.value(row).trim(), "" | "000000")
 }
 
 fn read_registered_stocks(day_store: &Path) -> io::Result<BTreeSet<String>> {
@@ -367,38 +473,32 @@ fn int64_col<'a>(batch: &'a RecordBatch, name: &str) -> Option<&'a Int64Array> {
     batch.column_by_name(name).and_then(|column| column.as_any().downcast_ref::<Int64Array>())
 }
 
-fn scan_trades(day_store: &Path, threads: usize) -> io::Result<HashMap<String, TradeAcc>> {
-    let files = list_type_files(day_store, TRADE_TYPE)?;
-    let partials = run_parallel(&files, threads, scan_trade_bucket)?;
-    let mut merged: HashMap<String, TradeAcc> = HashMap::new();
-    for partial in partials {
-        for (symbol, acc) in partial {
-            match merged.entry(symbol) {
-                Entry::Occupied(mut occupied) => occupied.get_mut().merge(acc),
-                Entry::Vacant(vacant) => {
-                    vacant.insert(acc);
-                }
-            }
-        }
-    }
-    Ok(merged)
+fn bool_col<'a>(batch: &'a RecordBatch, name: &str) -> Option<&'a BooleanArray> {
+    batch.column_by_name(name).and_then(|column| column.as_any().downcast_ref::<BooleanArray>())
 }
 
-fn scan_trade_bucket(path: &Path) -> io::Result<HashMap<String, TradeAcc>> {
-    let reader = projected_reader(path, &[SYMBOL_COLUMN, RECV_MS_COLUMN, "f10", "f15"])?;
-    let mut out: HashMap<String, TradeAcc> = HashMap::new();
+fn scan_trades(day_store: &Path, threads: usize) -> io::Result<HashMap<String, StreamSlots<TradeAcc>>> {
+    let files = list_type_files(day_store, TRADE_TYPE)?;
+    let partials = run_parallel(&files, threads, scan_trade_bucket)?;
+    Ok(merge_stream_maps(partials, TradeAcc::merge))
+}
+
+fn scan_trade_bucket(path: &Path) -> io::Result<HashMap<String, StreamSlots<TradeAcc>>> {
+    let reader = projected_reader(path, &[SYMBOL_COLUMN, RECV_MS_COLUMN, "f10", "f15", "f15_plus"])?;
+    let mut out: HashMap<String, StreamSlots<TradeAcc>> = HashMap::new();
     for batch in reader {
         let batch = batch.map_err(into_io)?;
         let Some(symbols) = string_col(&batch, SYMBOL_COLUMN) else { continue };
         let Some(recvs) = int64_col(&batch, RECV_MS_COLUMN) else { continue };
         let prices = int64_col(&batch, "f10");
         let qtys = int64_col(&batch, "f15");
+        let plus_col = bool_col(&batch, "f15_plus");
         let (Some(prices), Some(qtys)) = (prices, qtys) else { continue };
         for row in 0..batch.num_rows() {
             if symbols.is_null(row) || recvs.is_null(row) || prices.is_null(row) || qtys.is_null(row) {
                 continue;
             }
-            let Some(code) = normalize_stock_code(symbols.value(row)) else { continue };
+            let Some((code, stream)) = parse_stream_symbol(symbols.value(row)) else { continue };
             let price = prices.value(row).saturating_abs();
             let signed_qty = qtys.value(row);
             let qty = signed_qty.saturating_abs();
@@ -407,14 +507,19 @@ fn scan_trade_bucket(path: &Path) -> io::Result<HashMap<String, TradeAcc>> {
             }
             let recv_ms = recvs.value(row);
             let notional = i128::from(price) * i128::from(qty);
-            let acc = match out.get_mut(code) {
+            let slots = match out.get_mut(code) {
                 Some(existing) => existing,
                 None => out.entry(code.to_owned()).or_default(),
             };
+            let acc = slots.get_or_insert_default(stream);
             acc.total_traded_won += notional;
             acc.total_volume += i128::from(qty);
             if notional >= WHALE_MIN_WON {
-                acc.whale_net_won += i128::from(price) * i128::from(signed_qty);
+                if signed_qty < 0 {
+                    acc.whale_net_won -= notional;
+                } else if plus_col.is_none_or(|col| !col.is_null(row) && col.value(row)) {
+                    acc.whale_net_won += notional;
+                }
             }
             if acc.last_recv_ms.is_none_or(|last| recv_ms >= last) {
                 acc.last_recv_ms = Some(recv_ms);
@@ -423,8 +528,10 @@ fn scan_trade_bucket(path: &Path) -> io::Result<HashMap<String, TradeAcc>> {
             acc.trades.push(TradePoint { recv_ms, price, qty });
         }
     }
-    for acc in out.values_mut() {
-        acc.trades.sort_unstable_by_key(|point| point.recv_ms);
+    for slots in out.values_mut() {
+        for acc in [&mut slots.combined, &mut slots.krx, &mut slots.nxt].into_iter().flatten() {
+            acc.trades.sort_unstable_by_key(|point| point.recv_ms);
+        }
     }
     Ok(out)
 }
@@ -432,23 +539,12 @@ fn scan_trade_bucket(path: &Path) -> io::Result<HashMap<String, TradeAcc>> {
 fn scan_programs(day_store: &Path, threads: usize) -> io::Result<HashMap<String, ProgramAcc>> {
     let files = list_type_files(day_store, PROGRAM_TYPE)?;
     let partials = run_parallel(&files, threads, scan_program_bucket)?;
-    let mut merged: HashMap<String, ProgramAcc> = HashMap::new();
-    for partial in partials {
-        for (symbol, acc) in partial {
-            match merged.entry(symbol) {
-                Entry::Occupied(mut occupied) => occupied.get_mut().merge(acc),
-                Entry::Vacant(vacant) => {
-                    vacant.insert(acc);
-                }
-            }
-        }
-    }
-    Ok(merged)
+    Ok(resolve_preferred(merge_stream_maps(partials, ProgramAcc::merge)))
 }
 
-fn scan_program_bucket(path: &Path) -> io::Result<HashMap<String, ProgramAcc>> {
+fn scan_program_bucket(path: &Path) -> io::Result<HashMap<String, StreamSlots<ProgramAcc>>> {
     let reader = projected_reader(path, &[SYMBOL_COLUMN, RECV_MS_COLUMN, "f204", "f208", "f212"])?;
-    let mut out: HashMap<String, ProgramAcc> = HashMap::new();
+    let mut out: HashMap<String, StreamSlots<ProgramAcc>> = HashMap::new();
     for batch in reader {
         let batch = batch.map_err(into_io)?;
         let Some(symbols) = string_col(&batch, SYMBOL_COLUMN) else { continue };
@@ -460,19 +556,23 @@ fn scan_program_bucket(path: &Path) -> io::Result<HashMap<String, ProgramAcc>> {
             if symbols.is_null(row) || recvs.is_null(row) {
                 continue;
             }
-            let Some(code) = normalize_stock_code(symbols.value(row)) else { continue };
+            let sell = sell_col.filter(|col| !col.is_null(row)).map(|col| col.value(row).saturating_abs());
+            let buy = buy_col.filter(|col| !col.is_null(row)).map(|col| col.value(row).saturating_abs());
+            let net = net_col.filter(|col| !col.is_null(row)).map(|col| col.value(row));
+            if sell.is_none() && buy.is_none() && net.is_none() {
+                continue;
+            }
+            let Some((code, stream)) = parse_stream_symbol(symbols.value(row)) else { continue };
             let recv_ms = recvs.value(row);
-            let acc = match out.get_mut(code) {
+            let slots = match out.get_mut(code) {
                 Some(existing) => existing,
                 None => out.entry(code.to_owned()).or_default(),
             };
+            let acc = slots.get_or_insert_default(stream);
             if acc.last_recv_ms.is_none_or(|last| recv_ms >= last) {
-                let sell = sell_col.filter(|col| !col.is_null(row)).map_or(0, |col| col.value(row).saturating_abs());
-                let buy = buy_col.filter(|col| !col.is_null(row)).map_or(0, |col| col.value(row).saturating_abs());
-                let net = net_col.filter(|col| !col.is_null(row)).map_or(0, |col| col.value(row));
                 acc.last_recv_ms = Some(recv_ms);
-                acc.net_million = net;
-                acc.gross_million = i128::from(sell) + i128::from(buy);
+                acc.net_million = net.unwrap_or(0);
+                acc.gross_million = i128::from(sell.unwrap_or(0)) + i128::from(buy.unwrap_or(0));
             }
         }
     }
@@ -482,23 +582,12 @@ fn scan_program_bucket(path: &Path) -> io::Result<HashMap<String, ProgramAcc>> {
 fn scan_brokers(day_store: &Path, threads: usize) -> io::Result<HashMap<String, BrokerAcc>> {
     let files = list_type_files(day_store, BROKER_TYPE)?;
     let partials = run_parallel(&files, threads, scan_broker_bucket)?;
-    let mut merged: HashMap<String, BrokerAcc> = HashMap::new();
-    for partial in partials {
-        for (symbol, acc) in partial {
-            match merged.entry(symbol) {
-                Entry::Occupied(mut occupied) => occupied.get_mut().merge(acc),
-                Entry::Vacant(vacant) => {
-                    vacant.insert(acc);
-                }
-            }
-        }
-    }
-    Ok(merged)
+    Ok(resolve_preferred(merge_stream_maps(partials, BrokerAcc::merge)))
 }
 
-fn scan_broker_bucket(path: &Path) -> io::Result<HashMap<String, BrokerAcc>> {
+fn scan_broker_bucket(path: &Path) -> io::Result<HashMap<String, StreamSlots<BrokerAcc>>> {
     let reader = projected_reader(path, &[SYMBOL_COLUMN, RECV_MS_COLUMN, "f267"])?;
-    let mut out: HashMap<String, BrokerAcc> = HashMap::new();
+    let mut out: HashMap<String, StreamSlots<BrokerAcc>> = HashMap::new();
     for batch in reader {
         let batch = batch.map_err(into_io)?;
         let Some(symbols) = string_col(&batch, SYMBOL_COLUMN) else { continue };
@@ -508,12 +597,13 @@ fn scan_broker_bucket(path: &Path) -> io::Result<HashMap<String, BrokerAcc>> {
             if symbols.is_null(row) || recvs.is_null(row) || foreign_col.is_null(row) {
                 continue;
             }
-            let Some(code) = normalize_stock_code(symbols.value(row)) else { continue };
+            let Some((code, stream)) = parse_stream_symbol(symbols.value(row)) else { continue };
             let recv_ms = recvs.value(row);
-            let acc = match out.get_mut(code) {
+            let slots = match out.get_mut(code) {
                 Some(existing) => existing,
                 None => out.entry(code.to_owned()).or_default(),
             };
+            let acc = slots.get_or_insert_default(stream);
             if acc.last_recv_ms.is_none_or(|last| recv_ms >= last) {
                 acc.last_recv_ms = Some(recv_ms);
                 acc.foreign_est_net_qty = foreign_col.value(row);
@@ -536,26 +626,25 @@ fn scan_vi(day_store: &Path, threads: usize) -> io::Result<HashMap<String, u64>>
 }
 
 fn scan_vi_bucket(path: &Path) -> io::Result<HashMap<String, u64>> {
-    let reader = projected_reader(path, &[SYMBOL_COLUMN, "f9001", "f9068", "f9069"])?;
+    let reader = projected_reader(path, &[SYMBOL_COLUMN, "f9068", "f9069", "f1224"])?;
     let mut out: HashMap<String, u64> = HashMap::new();
     for batch in reader {
         let batch = batch.map_err(into_io)?;
-        let symbols = string_col(&batch, SYMBOL_COLUMN);
-        let fallback_codes = string_col(&batch, "f9001");
+        let Some(symbols) = string_col(&batch, SYMBOL_COLUMN) else { continue };
         let Some(kinds) = string_col(&batch, "f9068") else { continue };
         let Some(directions) = string_col(&batch, "f9069") else { continue };
+        let releases = string_col(&batch, "f1224");
         for row in 0..batch.num_rows() {
-            if kinds.is_null(row) || directions.is_null(row) {
+            if symbols.is_null(row) || kinds.is_null(row) || directions.is_null(row) {
                 continue;
             }
             if !matches!(kinds.value(row).trim(), "1" | "2" | "3") || !matches!(directions.value(row).trim(), "1" | "2") {
                 continue;
             }
-            let code = symbols
-                .filter(|col| !col.is_null(row))
-                .and_then(|col| normalize_stock_code(col.value(row)))
-                .or_else(|| fallback_codes.filter(|col| !col.is_null(row)).and_then(|col| normalize_stock_code(col.value(row))));
-            let Some(code) = code else { continue };
+            if !is_vi_trigger_frame(releases, row) {
+                continue;
+            }
+            let Some(code) = parse_vi_stock_code(symbols.value(row)) else { continue };
             match out.get_mut(code) {
                 Some(count) => *count += 1,
                 None => {
@@ -567,24 +656,13 @@ fn scan_vi_bucket(path: &Path) -> io::Result<HashMap<String, u64>> {
     Ok(out)
 }
 
-fn scan_books_for_spoof(day_store: &Path, trades: &HashMap<String, TradeAcc>, threads: usize) -> io::Result<HashMap<String, SpoofAcc>> {
+fn scan_books_for_spoof(day_store: &Path, trades: &HashMap<String, StreamSlots<TradeAcc>>, threads: usize) -> io::Result<HashMap<String, SpoofAcc>> {
     let files = list_type_files(day_store, BOOK_TYPE)?;
     let partials = run_parallel(&files, threads, |path| scan_book_bucket(path, trades))?;
-    let mut merged: HashMap<String, SpoofAcc> = HashMap::new();
-    for partial in partials {
-        for (symbol, acc) in partial {
-            match merged.entry(symbol) {
-                Entry::Occupied(mut occupied) => occupied.get_mut().merge(acc),
-                Entry::Vacant(vacant) => {
-                    vacant.insert(acc);
-                }
-            }
-        }
-    }
-    Ok(merged)
+    Ok(resolve_preferred(merge_stream_maps(partials, SpoofAcc::merge)))
 }
 
-fn scan_book_bucket(path: &Path, trades: &HashMap<String, TradeAcc>) -> io::Result<HashMap<String, SpoofAcc>> {
+fn scan_book_bucket(path: &Path, trades: &HashMap<String, StreamSlots<TradeAcc>>) -> io::Result<HashMap<String, StreamSlots<SpoofAcc>>> {
     let mut cols: Vec<&str> = Vec::with_capacity(2 + SPOOF_DEPTH * 4);
     cols.push(SYMBOL_COLUMN);
     cols.push(RECV_MS_COLUMN);
@@ -594,8 +672,9 @@ fn scan_book_bucket(path: &Path, trades: &HashMap<String, TradeAcc>) -> io::Resu
     cols.extend_from_slice(&BID_QTY_COLS);
     let reader = projected_reader(path, &cols)?;
 
-    let mut out: HashMap<String, SpoofAcc> = HashMap::new();
+    let mut out: HashMap<String, StreamSlots<SpoofAcc>> = HashMap::new();
     let mut current_code = String::new();
+    let mut current_stream: Option<StockStream> = None;
     let mut prev_book: Option<BookSnapshot> = None;
     let mut trade_cursor = 0usize;
     let mut current_trades: &[TradePoint] = &[];
@@ -613,19 +692,24 @@ fn scan_book_bucket(path: &Path, trades: &HashMap<String, TradeAcc>) -> io::Resu
             if symbols.is_null(row) || recvs.is_null(row) {
                 continue;
             }
-            let Some(code) = normalize_stock_code(symbols.value(row)) else { continue };
-            if current_code != code {
+            let Some((code, stream)) = parse_stream_symbol(symbols.value(row)) else { continue };
+            if current_code != code || current_stream != Some(stream) {
                 current_code.clear();
                 current_code.push_str(code);
+                current_stream = Some(stream);
                 prev_book = None;
                 trade_cursor = 0;
-                current_trades = trades.get(code).map_or(&[], |acc| acc.trades.as_slice());
+                current_trades = trades
+                    .get(code)
+                    .and_then(|slots| slots.get(stream).or_else(|| slots.preferred()))
+                    .map_or(&[], |acc| acc.trades.as_slice());
             }
             let curr = BookSnapshot {
                 recv_ms: recvs.value(row),
                 asks: std::array::from_fn(|i| (abs_int(ask_prices[i], row), pos_int(ask_qtys[i], row))),
                 bids: std::array::from_fn(|i| (abs_int(bid_prices[i], row), pos_int(bid_qtys[i], row))),
             };
+            let acc = out.entry(current_code.clone()).or_default().get_or_insert_default(stream);
             if let Some(prev) = prev_book
                 && curr.recv_ms >= prev.recv_ms
             {
@@ -634,7 +718,6 @@ fn scan_book_bucket(path: &Path, trades: &HashMap<String, TradeAcc>) -> io::Resu
                 while trade_cursor < current_trades.len() && current_trades[trade_cursor].recv_ms < window_start {
                     trade_cursor += 1;
                 }
-                let acc = out.entry(current_code.clone()).or_default();
                 check_side_drops(&prev.asks, &curr.asks, true, current_trades, trade_cursor, window_end, acc);
                 check_side_drops(&prev.bids, &curr.bids, false, current_trades, trade_cursor, window_end, acc);
             }
