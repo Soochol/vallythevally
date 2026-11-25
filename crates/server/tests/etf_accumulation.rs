@@ -338,3 +338,218 @@ async fn sell_radar_populates_ma_for_exited_stock_not_in_catalog() {
     assert_eq!(rows[0]["ma"], json!({"ma20": "below", "ma60": "below", "ma120": "below"}));
     rig.stop().await;
 }
+
+#[tokio::test]
+async fn empty_raw_only_and_corrupt_day_dirs_do_not_inflate_days_or_displace_window() {
+    let rig = Rig::start().await;
+    let valid_days = ["2026-11-12", "2026-11-13", "2026-11-14", "2026-11-15", "2026-11-16", "2026-11-17"];
+    for (idx, day) in valid_days.iter().enumerate() {
+        let hynix = if idx == 0 { 100.0 } else { 140.0 };
+        rig.store(ACTIVE_A, day, &[("005930", 100.0, 5000), ("000660", hynix, 5000)]);
+    }
+    let pdf_root = rig.tmp.path().join("run/etf-pdf/pdf");
+    std::fs::create_dir_all(pdf_root.join("20261118")).unwrap();
+    std::fs::create_dir_all(pdf_root.join("20261119")).unwrap();
+    std::fs::write(pdf_root.join("20261119").join(format!("{ACTIVE_A}.raw.json")), b"[]").unwrap();
+    std::fs::create_dir_all(pdf_root.join("20261120")).unwrap();
+    std::fs::write(pdf_root.join("20261120").join(format!("{ACTIVE_A}.json")), b"corrupt-json").unwrap();
+    std::fs::create_dir_all(pdf_root.join("20261121")).unwrap();
+    std::fs::write(
+        pdf_root.join("20261121").join(format!("{ACTIVE_A}.json")),
+        json!({"schemaVersion": 1, "code": ACTIVE_A, "asOf": "2026-11-20", "holdings": [{"code": "005930", "name": "삼성전자", "cuQuantity": 100.0, "weightBps": 10000}]}).to_string(),
+    )
+    .unwrap();
+    rig.store(ACTIVE_A, "2026-11-22", &[]);
+
+    let res = rig.ok("/api/etf/accumulation?window=5&style=active").await;
+    assert_eq!((res["fromDate"].as_str(), res["toDate"].as_str(), res["collectedDays"].as_u64()), (Some("2026-11-12"), Some("2026-11-17"), Some(6)));
+    let rows = res["rows"].as_array().unwrap();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0]["code"], "000660");
+
+    rig.store(ACTIVE_A, "2026-11-18", &[("005930", 100.0, 5000), ("000660", 140.0, 5000)]);
+    let after_valid = rig.ok("/api/etf/accumulation?window=5&style=active").await;
+    assert_eq!((after_valid["fromDate"].as_str(), after_valid["toDate"].as_str(), after_valid["collectedDays"].as_u64()), (Some("2026-11-13"), Some("2026-11-18"), Some(7)));
+    assert_eq!(after_valid["rows"], json!([]));
+    rig.stop().await;
+}
+
+#[tokio::test]
+async fn same_length_atomic_overwrite_of_interior_day_invalidates_cache() {
+    let rig = Rig::start().await;
+    rig.store(ACTIVE_B, "2026-11-17", &[("005930", 100.0, 5000), ("035420", 100.0, 5000)]);
+    rig.store(ACTIVE_A, "2026-11-18", &[("005930", 100.0, 3500), ("005380", 100.0, 3500), ("000660", 100.0, 3000)]);
+    rig.store(ACTIVE_A, "2026-11-19", &[("005930", 100.0, 3500), ("005380", 100.0, 3500), ("000660", 100.0, 3000)]);
+    rig.store(ACTIVE_B, "2026-11-19", &[("005930", 100.0, 5000), ("035420", 100.0, 5000)]);
+    assert_eq!(rig.ok("/api/etf/accumulation?window=5&style=active").await["rows"], json!([]));
+
+    let target = rig.tmp.path().join("run/etf-pdf/pdf/20261118").join(format!("{ACTIVE_A}.json"));
+    let original_len = std::fs::metadata(&target).unwrap().len();
+    let updated = json!({
+        "schemaVersion": 1,
+        "code": ACTIVE_A,
+        "asOf": "2026-11-18",
+        "holdings": [
+            {"code": "005930", "name": "종목005930", "cuQuantity": 100.0, "weightBps": 3500},
+            {"code": "005380", "name": "종목005380", "cuQuantity": 100.0, "weightBps": 3500},
+            {"code": "000660", "name": "종목000660", "cuQuantity": 50.00, "weightBps": 3000},
+        ]
+    })
+    .to_string();
+    let padded = if (updated.len() as u64) < original_len {
+        format!("{updated}{}", " ".repeat((original_len as usize) - updated.len()))
+    } else {
+        updated
+    };
+    assert_eq!(padded.len() as u64, original_len);
+    let tmp_file = target.with_extension("tmp");
+    std::fs::write(&tmp_file, padded).unwrap();
+    std::fs::rename(&tmp_file, &target).unwrap();
+
+    let refreshed = rig.ok("/api/etf/accumulation?window=5&style=active").await;
+    let rows = refreshed["rows"].as_array().unwrap();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0]["code"], "000660");
+    rig.stop().await;
+}
+
+#[tokio::test]
+async fn newly_accumulated_non_catalog_stock_populates_ma_without_screener_generation_bump() {
+    let added_code = StockCode::parse("999992").unwrap();
+    let catalog_code = StockCode::parse("005930").unwrap();
+    assert!(server::etf::Catalog::embedded().stock_name(added_code).is_none());
+
+    let kiwoom = ScriptedTransport::new();
+    for market_sample in ["ka10051", "ka90005"] {
+        kiwoom.respond_with(market_sample, 500, json!({"return_code": 1, "return_msg": "이 시험은 장중 표본을 쓰지 않는다"}));
+    }
+    let tmp = tempfile::tempdir().unwrap();
+    let run_dir = tmp.path().join("run");
+    std::fs::create_dir_all(&run_dir).unwrap();
+    {
+        let store = Store::open(&run_dir.join("screener.duckdb")).unwrap();
+        let latest = KstDate::new(2026, 11, 18).unwrap();
+        let make_bars = |closes: Vec<u64>| {
+            let count = closes.len() as i64;
+            closes
+                .iter()
+                .enumerate()
+                .map(|(i, close)| {
+                    let price = Price::from_centi(close * 100).unwrap();
+                    let ohlcv = Ohlcv::try_new(price, price, price, price, Volume(1)).unwrap();
+                    DayBar {
+                        day: KstDate::from_days_since_epoch(latest.days_since_epoch() - (count - 1 - i as i64)),
+                        ohlcv,
+                        traded: MillionWon(1),
+                    }
+                })
+                .collect::<Vec<_>>()
+        };
+        store
+            .write(&[
+                Write::Replace { code: catalog_code, bars: make_bars((1..=130).collect()) },
+                Write::Replace { code: added_code, bars: make_bars((1..=130).collect()) },
+            ])
+            .unwrap();
+    }
+    let server = Server::spawn_with(
+        &kiwoom,
+        &run_dir.join("server.lock"),
+        tmp.path(),
+        &[("VALLY_CLOCK_START", OsStr::new("20261119110000")), ("VALLY_NAVER_BASE_URL", OsStr::new("http://127.0.0.1:9"))],
+    );
+    let base = format!("http://{}", server.addr().await);
+    let rig = Rig { tmp, server: Some(server), client: reqwest::Client::new(), base };
+
+    rig.store(ACTIVE_A, "2026-11-17", &[("005930", 100.0, 5000), ("000660", 100.0, 5000)]);
+    rig.store(ACTIVE_A, "2026-11-18", &[("005930", 100.0, 5000), ("000660", 100.0, 5000)]);
+
+    let _prime_ma = rig.ok(&format!("/api/etf/funds/{ACTIVE_A}")).await;
+    assert_eq!(rig.ok("/api/etf/accumulation?window=5&style=active&direction=buy").await["rows"], json!([]));
+
+    rig.store(ACTIVE_A, "2026-11-18", &[("005930", 140.0, 4000), ("000660", 100.0, 3000), ("999992", 50.0, 3000)]);
+    let buy = rig.ok("/api/etf/accumulation?window=5&style=active&direction=buy").await;
+    assert_eq!(buy["maAsOf"], "2026-11-18");
+    let rows = buy["rows"].as_array().unwrap();
+    let find_row = |code: &str| rows.iter().find(|r| r["code"] == code).unwrap();
+    assert_eq!(find_row("999992")["ma"], json!({"ma20": "above", "ma60": "above", "ma120": "above"}));
+    assert_eq!(find_row("005930")["ma"], json!({"ma20": "above", "ma60": "above", "ma120": "above"}));
+
+    let stock_detail = rig.ok("/api/etf/stocks/999992").await;
+    assert_eq!(stock_detail["ma"], json!({"ma20": "above", "ma60": "above", "ma120": "above"}));
+    rig.stop().await;
+}
+
+#[tokio::test]
+async fn stale_multi_month_and_lagging_etfs_are_excluded_from_simultaneous_accumulation() {
+    let rig_gap = Rig::start().await;
+    rig_gap.store(ACTIVE_A, "2026-08-01", &[("005930", 100.0, 5000), ("000660", 100.0, 5000)]);
+    rig_gap.store(ACTIVE_A, "2026-08-02", &[("005930", 100.0, 4000), ("000660", 150.0, 6000)]);
+    rig_gap.store(ACTIVE_B, "2026-11-18", &[("005930", 100.0, 5000), ("000660", 100.0, 5000)]);
+    rig_gap.store(ACTIVE_B, "2026-11-19", &[("005930", 100.0, 4000), ("000660", 150.0, 6000)]);
+
+    let res_gap = rig_gap.ok("/api/etf/accumulation?window=5&style=active").await;
+    assert_eq!((res_gap["fromDate"].as_str(), res_gap["toDate"].as_str()), (Some("2026-11-18"), Some("2026-11-19")));
+    let gap_rows = res_gap["rows"].as_array().unwrap();
+    assert_eq!(gap_rows.len(), 1);
+    assert_eq!(gap_rows[0]["code"], "000660");
+    assert_eq!(gap_rows[0]["buyingEtfCount"], 1);
+    assert_eq!(gap_rows[0]["contributors"].as_array().unwrap().len(), 1);
+    assert_eq!(gap_rows[0]["contributors"][0]["fundCode"], ACTIVE_B);
+    rig_gap.stop().await;
+
+    let rig_window = Rig::start().await;
+    for day_num in 1..=21 {
+        let day = format!("2026-11-{day_num:02}");
+        rig_window.store(ACTIVE_C, &day, &[("005930", 100.0, 5000), ("035420", 100.0, 5000)]);
+    }
+    rig_window.store(ACTIVE_A, "2026-11-01", &[("005930", 100.0, 5000), ("000660", 100.0, 5000)]);
+    rig_window.store(ACTIVE_A, "2026-11-02", &[("005930", 100.0, 4000), ("000660", 150.0, 6000)]);
+    rig_window.store(ACTIVE_B, "2026-11-20", &[("005930", 100.0, 5000), ("000660", 100.0, 5000)]);
+    rig_window.store(ACTIVE_B, "2026-11-21", &[("005930", 100.0, 4000), ("000660", 150.0, 6000)]);
+
+    let res_window = rig_window.ok("/api/etf/accumulation?window=20&style=active").await;
+    assert_eq!((res_window["fromDate"].as_str(), res_window["toDate"].as_str()), (Some("2026-11-01"), Some("2026-11-21")));
+    let window_rows = res_window["rows"].as_array().unwrap();
+    assert_eq!(window_rows.len(), 1);
+    assert_eq!(window_rows[0]["code"], "000660");
+    assert_eq!(window_rows[0]["buyingEtfCount"], 1);
+    assert_eq!(window_rows[0]["contributors"].as_array().unwrap().len(), 1);
+    assert_eq!(window_rows[0]["contributors"][0]["fundCode"], ACTIVE_B);
+    rig_window.stop().await;
+}
+
+#[tokio::test]
+async fn empty_holdings_snapshot_is_rejected_without_false_added_or_removed_rows() {
+    let rig = Rig::start().await;
+    rig.store(ACTIVE_B, "2026-11-17", &[("005930", 100.0, 5000), ("035420", 100.0, 5000)]);
+    rig.store(ACTIVE_B, "2026-11-18", &[("005930", 100.0, 5000), ("035420", 100.0, 5000)]);
+    rig.store(ACTIVE_A, "2026-11-17", &[]);
+    rig.store(ACTIVE_A, "2026-11-18", &[("005930", 100.0, 5000), ("000660", 100.0, 5000)]);
+
+    let buy = rig.ok("/api/etf/accumulation?window=5&style=active&direction=buy").await;
+    assert_eq!(buy["rows"], json!([]));
+
+    rig.store(ACTIVE_A, "2026-11-17", &[("005930", 100.0, 5000), ("000660", 100.0, 5000)]);
+    rig.store(ACTIVE_A, "2026-11-18", &[]);
+    let sell = rig.ok("/api/etf/accumulation?window=5&style=active&direction=sell").await;
+    assert_eq!(sell["rows"], json!([]));
+    rig.stop().await;
+}
+
+#[tokio::test]
+async fn extreme_scale_underflow_never_emits_increased_with_null_real_change() {
+    let rig = Rig::start().await;
+    rig.store(ACTIVE_A, "2026-11-17", &[("000001", 1e200, 3000), ("000002", 1e200, 3000), ("005930", 100.0, 4000)]);
+    rig.store(ACTIVE_A, "2026-11-18", &[("000001", 1e-200, 3000), ("000002", 1e-200, 3000), ("005930", 100.0, 4000)]);
+
+    let buy = rig.ok("/api/etf/accumulation?window=5&style=active&direction=buy").await;
+    assert_eq!(buy["rows"], json!([]));
+
+    let changes = rig.ok(&format!("/api/etf/funds/{ACTIVE_A}/changes?before=2026-11-17&after=2026-11-18")).await;
+    let rows = changes["rows"].as_array().unwrap();
+    let samsung = rows.iter().find(|r| r["code"] == "005930").unwrap();
+    assert_eq!(samsung["kind"], "unchanged");
+    assert!(rows.iter().all(|r| r["kind"] != "increased" || r["realChange"].is_f64()));
+    rig.stop().await;
+}
