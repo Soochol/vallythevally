@@ -1,0 +1,1370 @@
+{
+  "schemaVersion": 1,
+  "code": "247540",
+  "title": "에코프로비엠 · 전기차 양극재 성장과 판가·재고의 역전",
+  "milestones": {
+    "birth": {
+      "day": "2020-03-19",
+      "evidence": [
+        {
+          "kind": "retrospective",
+          "text": "현재 수정주가 13,206원의 코로나 급락 저점에서 뒤의 대상승을 되짚어 시작점을 골랐다. 그 전에 SK이노베이션 공급계약과 삼성SDI 공동출자 계획이 공개됐지만, 당일에 그 저점과 수년의 상승을 확정할 수는 없었다.",
+          "citations": [
+            {
+              "publishedOn": "2026-11-11",
+              "url": "https://github.com/Soochol/vallythevally/blob/feat-143/research/leader-cases/verification/247540.md",
+              "quote": "실제 Bundle 수집·원문 대조 기록. 현재 다운로드한 수정주가·계산값은 사후 관측이며 원시 JSON은 git 제외 data/leader-cases/247540/bundle.json에 보존."
+            },
+            {
+              "publishedOn": "2020-02-03",
+              "url": "https://dart.fss.or.kr/dsaf001/main.do?rcpNo=20200203900297",
+              "quote": "전기차용 하이니켈 NCM 양극소재, SK이노베이션, 2020-01-01~2023-12-31, 2,741,283,000,000원. 금속 국제시세 연동 판가로 계약액 변동 가능."
+            },
+            {
+              "publishedOn": "2020-02-10",
+              "url": "https://dart.fss.or.kr/dsaf001/main.do?rcpNo=20200210900478",
+              "quote": "삼성SDI 공동출자 에코프로이엠, 양극활물질 생산능력 증대, 에코프로비엠 720억원·취득 후 지분 60% 계획."
+            }
+          ]
+        }
+      ]
+    },
+    "peak": {
+      "day": "2023-07-25",
+      "evidence": [
+        {
+          "kind": "retrospective",
+          "text": "사례 안 가장 높은 일봉 종가 454,747원이 관측된 날이다. 당시 메리츠 원문 종가 462,000원과 현재 수정주가 454,747원은 가격 기준이 일치하지 않으며 기업행위 조정계수를 확인하지 못해 차이를 보존한다. 장중 최고가 날짜를 정점으로 쓰지 않았다.",
+          "citations": [
+            {
+              "publishedOn": "2026-11-11",
+              "url": "https://github.com/Soochol/vallythevally/blob/feat-143/research/leader-cases/verification/247540.md",
+              "quote": "실제 Bundle 수집·원문 대조 기록. 현재 다운로드한 수정주가·계산값은 사후 관측이며 원시 JSON은 git 제외 data/leader-cases/247540/bundle.json에 보존."
+            },
+            {
+              "publishedOn": "2023-07-25",
+              "url": "https://home.imeritz.com/include/resource/research/WorkFlow/20230725163022491K_02.pdf",
+              "quote": "메리츠증권 2023-07-25 마감 자료 표. 에코프로비엠 당일 종가 462,000원, 12MF PER 96.1배·PBR 21.44배. 예측 12개월 배수이며 Bundle TTM과 다름."
+            }
+          ]
+        }
+      ]
+    },
+    "extinction": {
+      "day": "2024-02-07",
+      "evidence": [
+        {
+          "kind": "retrospective",
+          "text": "종가는 정점 대비 -50.11% 낮았고, 이날 회사가 4분기 영업적자와 판매량·판가 감소를 공개했다. 주가 하락 이후 이익 훼손이 확인된 관측일로 골랐으며 소멸 이후 2025-02-07까지 따로 관찰한다.",
+          "citations": [
+            {
+              "publishedOn": "2026-11-11",
+              "url": "https://github.com/Soochol/vallythevally/blob/feat-143/research/leader-cases/verification/247540.md",
+              "quote": "실제 Bundle 수집·원문 대조 기록. 현재 다운로드한 수정주가·계산값은 사후 관측이며 원시 JSON은 git 제외 data/leader-cases/247540/bundle.json에 보존."
+            },
+            {
+              "publishedOn": "2024-02-07",
+              "url": "https://www.ecoprobm.com/sub0503/view/page/sub0201/id/1428",
+              "quote": "회사 2023년 4분기 IR 5~6쪽, 감사 전 잠정. BM 매출 11,804억원·영업손실 1,147억원, 재고평가손실 1,245억원, 연간 영업이익 1,532억원, EV 판매량 YoY +67%."
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "sections": [
+    {
+      "number": 0,
+      "sentences": [
+        {
+          "kind": "retrospective",
+          "text": "이 사례는 전동공구용 양극재 업체가 전기차용 판매와 증설로 외형을 키운 뒤, 원료가격 연동 판가와 재고평가 손실에 이익이 흔들린 2020~2024년의 흐름을 공부하기 위해 골랐다. 계약·공장·매출 성장은 확인되지만 그것만으로 주가 상승의 인과가 입증되지는 않는다.",
+          "citations": [
+            {
+              "publishedOn": "2020-02-03",
+              "url": "https://dart.fss.or.kr/dsaf001/main.do?rcpNo=20200203900297",
+              "quote": "전기차용 하이니켈 NCM 양극소재, SK이노베이션, 2020-01-01~2023-12-31, 2,741,283,000,000원. 금속 국제시세 연동 판가로 계약액 변동 가능."
+            },
+            {
+              "publishedOn": "2020-02-10",
+              "url": "https://dart.fss.or.kr/dsaf001/main.do?rcpNo=20200210900478",
+              "quote": "삼성SDI 공동출자 에코프로이엠, 양극활물질 생산능력 증대, 에코프로비엠 720억원·취득 후 지분 60% 계획."
+            },
+            {
+              "publishedOn": "2024-02-07",
+              "url": "https://www.ecoprobm.com/sub0503/view/page/sub0201/id/1428",
+              "quote": "회사 2023년 4분기 IR 5~6쪽, 감사 전 잠정. BM 매출 11,804억원·영업손실 1,147억원, 재고평가손실 1,245억원, 연간 영업이익 1,532억원, EV 판매량 YoY +67%."
+            }
+          ]
+        },
+        {
+          "kind": "retrospective",
+          "text": "탄생일은 2020-03-19, 정점은 사례 안 최고 일봉 종가가 관측된 2023-07-25, 소멸일은 2024-02-07로 정한다. 탄생은 코로나 급락 뒤 장기 상승이 시작된 저점을 사후에 고른 것이고, 소멸은 정점 뒤 하락과 분기 적자 공개가 함께 확인된 관측일이다. 당시의 매매 신호나 고정 판정 규칙이 아니다.",
+          "citations": [
+            {
+              "publishedOn": "2026-11-11",
+              "url": "https://github.com/Soochol/vallythevally/blob/feat-143/research/leader-cases/verification/247540.md",
+              "quote": "실제 Bundle 수집·원문 대조 기록. 현재 다운로드한 수정주가·계산값은 사후 관측이며 원시 JSON은 git 제외 data/leader-cases/247540/bundle.json에 보존."
+            }
+          ]
+        },
+        {
+          "kind": "retrospective",
+          "text": "해석 기간은 탄생 3년 전인 2017-03-19부터 소멸 1년 뒤인 2025-02-07까지다. 최초 수집 요청 2016-01-01~2026-11-10은 보존하며, 위 전체 흐름 요약과 기본 차트에는 범위 밖 관측값도 남아 있다. 2019-03-05 상장 이전에는 이 종목의 거래가격이 없고, 이를 조회 실패와 구분한다.",
+          "citations": [
+            {
+              "publishedOn": "2026-11-11",
+              "url": "https://github.com/Soochol/vallythevally/blob/feat-143/research/leader-cases/verification/247540.md",
+              "quote": "실제 Bundle 수집·원문 대조 기록. 현재 다운로드한 수정주가·계산값은 사후 관측이며 원시 JSON은 git 제외 data/leader-cases/247540/bundle.json에 보존."
+            }
+          ]
+        },
+        {
+          "kind": "retrospective",
+          "text": "2023년 2분기까지 영업이익이 늘었는데 주가는 7월에 정점을 찍었다. 3분기 판가 하락과 재고손실은 이후 원문에서 확인된다. 실적 공개보다 앞선 가격 변화가 관찰된다는 사실과, 시장이 미래 실적을 정확히 예측했다는 주장은 다르다.",
+          "citations": [
+            {
+              "publishedOn": "2023-08-14",
+              "url": "https://dart.fss.or.kr/dsaf001/main.do?rcpNo=20230814002712",
+              "quote": "2023 반기보고서 CFS 연결 포괄손익계산서, 당반기 3개월 매출 1,906,226,538,828원·영업이익 114,700,920,024원. 누적 영업이익 222,027,923,449원."
+            },
+            {
+              "publishedOn": "2023-11-07",
+              "url": "https://ecoprobm.com/sub0503/view/page/2/id/1332",
+              "quote": "회사 2023년 3분기 IR 5~6쪽. BM 영업이익 459억원, QoQ -60%, 재고평가손실 340억원. EV 판매량 QoQ +15%에도 판가 하락."
+            }
+          ]
+        },
+        {
+          "kind": "retrospective",
+          "text": "현재 수정주가 기준 탄생일 종가는 13,206원, 정점 종가는 454,747원으로 3343.49% 올랐다. 소멸일 종가 226,881원은 정점보다 -50.11% 낮았다. 해석 기간 끝까지 정점 뒤 최저 종가는 2025-01-02의 103,844원으로 낙폭 -77.16%다. 배당 포함 총수익률이 아니다.",
+          "citations": [
+            {
+              "publishedOn": "2026-11-11",
+              "url": "https://github.com/Soochol/vallythevally/blob/feat-143/research/leader-cases/verification/247540.md",
+              "quote": "실제 Bundle 수집·원문 대조 기록. 현재 다운로드한 수정주가·계산값은 사후 관측이며 원시 JSON은 git 제외 data/leader-cases/247540/bundle.json에 보존."
+            }
+          ]
+        },
+        {
+          "kind": "retrospective",
+          "text": "상장 이후 전체 자료는 2019-03-05~2026-11-10의 1888개 일봉이다. 전체 종가 최고 관측일은 2023-07-25이며, 마지막 현재 수정 종가 81,200원은 보고서 해석 기간 밖의 요약이다.",
+          "citations": [
+            {
+              "publishedOn": "2026-11-11",
+              "url": "https://github.com/Soochol/vallythevally/blob/feat-143/research/leader-cases/verification/247540.md",
+              "quote": "실제 Bundle 수집·원문 대조 기록. 현재 다운로드한 수정주가·계산값은 사후 관측이며 원시 JSON은 git 제외 data/leader-cases/247540/bundle.json에 보존."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "number": 1,
+      "sentences": [
+        {
+          "kind": "then-visible",
+          "asOf": "2020-02-03",
+          "text": "SK이노베이션과의 전기차용 하이니켈 NCM 양극소재 장기공급 계약은 성장 방향을 구체화한 원문이다. 공시금액 약 2.74조원은 당시 기준 판가로 계산한 계획 물량 금액이며, 금속가격에 따라 가감될 수 있다고 회사가 명시했다.",
+          "citations": [
+            {
+              "publishedOn": "2020-02-03",
+              "url": "https://dart.fss.or.kr/dsaf001/main.do?rcpNo=20200203900297",
+              "quote": "전기차용 하이니켈 NCM 양극소재, SK이노베이션, 2020-01-01~2023-12-31, 2,741,283,000,000원. 금속 국제시세 연동 판가로 계약액 변동 가능."
+            }
+          ]
+        },
+        {
+          "kind": "then-visible",
+          "asOf": "2020-02-10",
+          "text": "삼성SDI와의 에코프로이엠 공동출자 계획은 고객사 전용 공급능력을 늘리는 선택이었다. 에코프로비엠의 취득계획은 720억원과 지분 60%였고, 당시 문서의 취득예정일은 2021년 말이었다.",
+          "citations": [
+            {
+              "publishedOn": "2020-02-10",
+              "url": "https://dart.fss.or.kr/dsaf001/main.do?rcpNo=20200210900478",
+              "quote": "삼성SDI 공동출자 에코프로이엠, 양극활물질 생산능력 증대, 에코프로비엠 720억원·취득 후 지분 60% 계획."
+            }
+          ]
+        },
+        {
+          "kind": "then-visible",
+          "asOf": "2023-04-26",
+          "text": "IEA가 공개한 2022년 전기차 판매는 BEV와 PHEV를 합쳐 1,000만대를 넘었고 전년보다 55% 증가했다. 이 시장 숫자는 에코프로비엠의 고객별 주문이나 이익률을 그대로 뜻하지 않는다.",
+          "citations": [
+            {
+              "publishedOn": "2023-04-26",
+              "url": "https://www.iea.org/reports/global-ev-outlook-2023",
+              "quote": "Global EV Outlook 2023, Trends in electric light-duty vehicles. 2022년 BEV+PHEV 전기차 판매 1,000만대 초과, YoY +55%."
+            }
+          ]
+        },
+        {
+          "kind": "then-visible",
+          "asOf": "2023-03-31",
+          "text": "미 재무부는 IRA 친환경차 세액공제의 광물·배터리부품 요건을 제안지침으로 발표했다. 4월 18일 적용 계획은 공급망 재편의 당시 정책 배경이며, 한국 양극재 기업이 모두 같은 수혜를 받는다는 확정 근거는 아니다.",
+          "citations": [
+            {
+              "publishedOn": "2023-03-31",
+              "url": "https://home.treasury.gov/news/press-releases/jy1379",
+              "quote": "미 재무부 IRA 친환경차 세액공제 제안지침, 2023-04-18부터 핵심광물·배터리부품 요건 적용, 각 3,750달러. 기업 개별 수익 보장 아님."
+            }
+          ]
+        },
+        {
+          "kind": "retrospective",
+          "text": "양극재의 금속가격 연동 계약은 원료가격 상승 때 매출을 키우고 하락 때 판가를 낮추는 통로다. 출하량·판가·원가 반영 시차·재고평가를 나눠야 매출 증가와 이익의 질을 함께 읽을 수 있다.",
+          "citations": [
+            {
+              "publishedOn": "2020-02-03",
+              "url": "https://dart.fss.or.kr/dsaf001/main.do?rcpNo=20200203900297",
+              "quote": "전기차용 하이니켈 NCM 양극소재, SK이노베이션, 2020-01-01~2023-12-31, 2,741,283,000,000원. 금속 국제시세 연동 판가로 계약액 변동 가능."
+            },
+            {
+              "publishedOn": "2023-08-03",
+              "url": "https://ecoprobm.com/sub0503/view/page/3/id/1278",
+              "quote": "회사 2023년 2분기 IR 7~8쪽. BM 매출 19,062억원·영업이익 1,147억원, EV 매출 비중 80%→87%, 3분기 ASP 하락 전망, 재고 13,121억원."
+            },
+            {
+              "publishedOn": "2023-11-07",
+              "url": "https://ecoprobm.com/sub0503/view/page/2/id/1332",
+              "quote": "회사 2023년 3분기 IR 5~6쪽. BM 영업이익 459억원, QoQ -60%, 재고평가손실 340억원. EV 판매량 QoQ +15%에도 판가 하락."
+            }
+          ]
+        },
+        {
+          "kind": "then-visible",
+          "asOf": "2021-09-09",
+          "text": "회사는 SK이노베이션과 2024~2026년 하이니켈 NCM 양극재 공급계약을 공정공시했다. 당시 계산한 계약액 약 10.11조원은 미래 물량의 가시성을 높인 자료였지만, 실제 거래단가는 원재료 시세에 따라 정해진다고 명시했다. 2021년에 공개된 계약액 전부를 그해 매출로 잡아 설명하지 않는다.",
+          "citations": [
+            {
+              "publishedOn": "2021-09-09",
+              "url": "https://dart.fss.or.kr/dsaf001/main.do?rcpNo=20210909900001",
+              "quote": "공정공시 원문, 계약일 2021-09-08, 공시 후 정보 제공 9월 9일. SK이노베이션 하이니켈 NCM, 2024-01-01~2026-12-31, 10,110,232,000,000원. 향후 금속 시세에 따라 실제 단가·금액 가감."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "number": 2,
+      "sentences": [
+        {
+          "kind": "then-visible",
+          "asOf": "2023-08-14",
+          "text": "2023년 2분기 연결 매출은 1,906,226,538,828원, 영업이익은 114,700,920,024원이다. 반기보고서의 3개월 열을 읽었으며, 상반기 누적 영업이익 222,027,923,449원을 한 분기로 쓰지 않았다.",
+          "citations": [
+            {
+              "publishedOn": "2023-08-14",
+              "url": "https://dart.fss.or.kr/dsaf001/main.do?rcpNo=20230814002712",
+              "quote": "2023 반기보고서 CFS 연결 포괄손익계산서, 당반기 3개월 매출 1,906,226,538,828원·영업이익 114,700,920,024원. 누적 영업이익 222,027,923,449원."
+            }
+          ]
+        },
+        {
+          "kind": "then-visible",
+          "asOf": "2023-08-03",
+          "text": "회사는 2분기 판가 하락에도 EV 양극재 판매 비중이 1분기 80%에서 87%로 높아져 수익성이 개선됐다고 설명했다. 이는 회사의 실적 설명이고, 주가 상승 원인을 식별한 분석은 아니다.",
+          "citations": [
+            {
+              "publishedOn": "2023-08-03",
+              "url": "https://ecoprobm.com/sub0503/view/page/3/id/1278",
+              "quote": "회사 2023년 2분기 IR 7~8쪽. BM 매출 19,062억원·영업이익 1,147억원, EV 매출 비중 80%→87%, 3분기 ASP 하락 전망, 재고 13,121억원."
+            }
+          ]
+        },
+        {
+          "kind": "then-visible",
+          "asOf": "2024-04-17",
+          "text": "2023년 사업보고서 정정본의 연결 영업이익은 156,029,935,394원으로, 2022년 380,676,718,075원보다 줄었다. 2021년 값 115,031,248,500원과 비교하면 2022년의 이익 확대 뒤 2023년의 수익성 악화가 구별된다.",
+          "citations": [
+            {
+              "publishedOn": "2024-04-17",
+              "url": "https://dart.fss.or.kr/dsaf001/main.do?rcpNo=20240417000540",
+              "quote": "2023 사업보고서 정정본, 요약 연결재무정보·연결 포괄손익계산서·주식의 총수. 2023 영업이익 156,029,935,394원, 2022 영업이익 380,676,718,075원."
+            }
+          ]
+        },
+        {
+          "kind": "retrospective",
+          "text": "2024-02-07 잠정 IR은 연간 영업이익 1,532억원과 4분기 영업손실 1,147억원을 제시했지만, 이후 사업보고서와 2024년 1분기 IR은 각각 약 1,560억원과 1,119억원 손실을 제시한다. 뒤의 값으로 당시 잠정 발표 내용을 덮어쓰지 않는다.",
+          "citations": [
+            {
+              "publishedOn": "2024-02-07",
+              "url": "https://www.ecoprobm.com/sub0503/view/page/sub0201/id/1428",
+              "quote": "회사 2023년 4분기 IR 5~6쪽, 감사 전 잠정. BM 매출 11,804억원·영업손실 1,147억원, 재고평가손실 1,245억원, 연간 영업이익 1,532억원, EV 판매량 YoY +67%."
+            },
+            {
+              "publishedOn": "2024-04-17",
+              "url": "https://dart.fss.or.kr/dsaf001/main.do?rcpNo=20240417000540",
+              "quote": "2023 사업보고서 정정본, 요약 연결재무정보·연결 포괄손익계산서·주식의 총수. 2023 영업이익 156,029,935,394원, 2022 영업이익 380,676,718,075원."
+            },
+            {
+              "publishedOn": "2024-05-03",
+              "url": "https://ecoprobm.com/sub0503/view/page/2/id/1509",
+              "quote": "회사 2024년 1분기 IR 3~4쪽. BM 영업이익 67억원, 재고자산평가충당금 환입 456억원, 총 판매량 QoQ -5%. 비교 2023년 4분기 영업손실은 1,119억원으로 표시."
+            }
+          ]
+        },
+        {
+          "kind": "then-visible",
+          "asOf": "2023-08-03",
+          "text": "2분기 말 재고자산 13,121억원과 차입금 16,132억원은 생산능력 확장에 돈이 묶여 있음을 보여 주는 점검 항목이었다. 회사는 CAM7 신규 라인 가동에 따른 안전재고 증가를 설명했다.",
+          "citations": [
+            {
+              "publishedOn": "2023-08-03",
+              "url": "https://ecoprobm.com/sub0503/view/page/3/id/1278",
+              "quote": "회사 2023년 2분기 IR 7~8쪽. BM 매출 19,062억원·영업이익 1,147억원, EV 매출 비중 80%→87%, 3분기 ASP 하락 전망, 재고 13,121억원."
+            }
+          ]
+        },
+        {
+          "kind": "retrospective",
+          "text": "회계기간 축은 다운로드 시점의 정정 공시를 반영한다. 공시일 축은 자료 도구가 확인한 접수번호와 다음 관측일을 따른다. 최초 공시가 최종보고서 목록에서 사라진 기간은 실제 최초 공개 빈티지를 복원했다고 주장하지 않으며, 없어진 계정·분모는 0으로 채우지 않는다.",
+          "citations": [
+            {
+              "publishedOn": "2026-11-11",
+              "url": "https://github.com/Soochol/vallythevally/blob/feat-143/research/leader-cases/verification/247540.md",
+              "quote": "실제 Bundle 수집·원문 대조 기록. 현재 다운로드한 수정주가·계산값은 사후 관측이며 원시 JSON은 git 제외 data/leader-cases/247540/bundle.json에 보존."
+            }
+          ]
+        },
+        {
+          "kind": "retrospective",
+          "text": "2021년 연간 영업이익 115,031,248,500원의 원본 접수번호는 20220321001523이며 공개일은 2022-03-21이다. 최종 공시 목록의 첨부정정본 20220323000828은 3월 23일에 공개됐다. 수치의 원본 번호와 날짜를 따로 확인했으며, 첨부정정본 날짜로 원본 수치의 공개일을 바꾸지 않는다. 최신 API 다운로드가 원래의 모든 재무 빈티지를 복원한다는 뜻은 아니다.",
+          "citations": [
+            {
+              "publishedOn": "2022-03-21",
+              "url": "https://dart.fss.or.kr/dsaf001/main.do?rcpNo=20220321001523",
+              "quote": "2021 사업보고서 원본. CFS 연간 영업이익 115,031,248,500원. 공개 2022-03-21, 다음 관측일 2022-03-22."
+            },
+            {
+              "publishedOn": "2022-03-23",
+              "url": "https://dart.fss.or.kr/dsaf001/main.do?rcpNo=20220323000828",
+              "quote": "2021 사업보고서 첨부정정의 공시 목록 메타데이터. 원본과 다른 접수번호·공개일이며 첨부 본문 계정 변경은 미확인."
+            }
+          ]
+        },
+        {
+          "kind": "retrospective",
+          "text": "실적 변곡 분기는 2020년 2분기를 검토 후보로 두되 확정하지 않는다. 연결 원장의 2020년 1분기 영업이익 약 88.2억원에서 2분기 약 138.9억원으로 늘지만, 그 이전 별도·연결 범위와 전년 동기 비교를 같은 기준으로 확보하지 못했다. 더 이른 실적 변곡이 있었다는 증거는 이번 CFS 원장에서 확인하지 못했으므로 해석 시작일을 2017-03-19보다 앞당길 근거는 아직 없다.",
+          "citations": [
+            {
+              "publishedOn": "2026-11-11",
+              "url": "https://github.com/Soochol/vallythevally/blob/feat-143/research/leader-cases/verification/247540.md",
+              "quote": "실제 Bundle 수집·원문 대조 기록. 현재 다운로드한 수정주가·계산값은 사후 관측이며 원시 JSON은 git 제외 data/leader-cases/247540/bundle.json에 보존."
+            }
+          ]
+        },
+        {
+          "kind": "then-visible",
+          "asOf": "2023-03-21",
+          "text": "2022년 사업보고서는 연결 매출이 전년보다 261%, 영업이익이 231% 늘었다고 밝혔다. 고객사의 양극재 수요 증가와 생산능력 확대가 외형 성장의 배경이었고, 원재료 가격 상승은 운전자본 증가와 운영자금 초과 집행으로도 이어졌다. 이익 증가를 현금흐름 개선과 동일하게 읽지 않아야 했다.",
+          "citations": [
+            {
+              "publishedOn": "2023-03-21",
+              "url": "https://dart.fss.or.kr/dsaf001/main.do?rcpNo=20230321001436",
+              "quote": "2022 사업보고서 사업의 내용·경영진단. 연결 매출 5조3,576억원·영업이익 3,807억원, 전년 대비 +261%·+231%. 2022년 말 양극재 생산능력 연 18만톤, 2027년 71만톤은 계획."
+            }
+          ]
+        },
+        {
+          "kind": "then-visible",
+          "asOf": "2023-03-21",
+          "text": "회사는 2022년 말 양극재 생산능력을 연 18만톤으로 기재했다. CAM7 준공과 증설은 물량 대응 기반이지만 상세 실제 생산량과 가동률은 기술·정보유출 우려로 생략했다. 2027년 71만톤은 당시의 계획이므로 이후 실제 달성량으로 쓰지 않았다.",
+          "citations": [
+            {
+              "publishedOn": "2023-03-21",
+              "url": "https://dart.fss.or.kr/dsaf001/main.do?rcpNo=20230321001436",
+              "quote": "2022 사업보고서 사업의 내용·경영진단. 연결 매출 5조3,576억원·영업이익 3,807억원, 전년 대비 +261%·+231%. 2022년 말 양극재 생산능력 연 18만톤, 2027년 71만톤은 계획."
+            }
+          ]
+        },
+        {
+          "kind": "then-visible",
+          "asOf": "2024-04-17",
+          "text": "2023년 정정 사업보고서에서 2022년 연결 영업현금흐름은 -241,250,246,729원으로, 영업이익 380,676,718,075원과 방향이 달랐다. 2023년 영업현금흐름은 20,620,682,315원이고 유형자산 취득 756,168,491,423원을 빼면 FCF는 -735,547,809,108원이다. 같은 원문의 지배주주순이익은 -8,734,809,082원으로, 비지배지분을 포함한 전체 순이익과 구별해야 했다.",
+          "citations": [
+            {
+              "publishedOn": "2024-04-17",
+              "url": "https://dart.fss.or.kr/dsaf001/main.do?rcpNo=20240417000540",
+              "quote": "2023 사업보고서 정정본, 요약 연결재무정보·연결 포괄손익계산서·주식의 총수. 2023 영업이익 156,029,935,394원, 2022 영업이익 380,676,718,075원."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "number": 3,
+      "sentences": [
+        {
+          "kind": "then-visible",
+          "asOf": "2023-01-12",
+          "text": "KB증권 이창민의 원문은 Buy를 유지하면서 목표주가를 180,000원에서 160,000원으로 낮췄다. 2023년 예상 영업이익은 6,540억원이었다. 환율과 장기 가동률 가정을 낮추면서도 고객사 수요와 신규 라인 가동을 성장 근거로 본 표본이다.",
+          "citations": [
+            {
+              "publishedOn": "2023-01-12",
+              "url": "https://rdata.kbsec.com/pdf_data/20230112071909673K.pdf",
+              "quote": "KB증권 이창민 2023-01-12 데일리 수록 기업분석. 목표 180,000→160,000원·Buy, 2023년 예상 영업이익 6,540억원. 원/달러 전망과 장기 가동률 하향."
+            }
+          ]
+        },
+        {
+          "kind": "then-visible",
+          "asOf": "2023-05-03",
+          "text": "유안타증권 이안나의 원문은 목표주가 290,000원과 Hold를 제시했다. 1분기 영업이익 1,073억원을 컨센서스 1,137억원과 비교했고, 2분기 영업이익을 1,402억원으로 예상했다. 목표주가 상향과 투자의견 하향이 한 문서에 공존했다.",
+          "citations": [
+            {
+              "publishedOn": "2023-05-03",
+              "url": "https://file.myasset.com/sitemanager/upload/2023/0502/155705/20230502155705037_1.pdf",
+              "quote": "유안타증권 이안나, 2023-05-03, 1쪽. 목표 290,000원·Hold, 1Q23 영업이익 1,073억원 대 컨센서스 1,137억원. 2Q 예상 영업이익 1,402억원."
+            }
+          ]
+        },
+        {
+          "kind": "then-visible",
+          "asOf": "2023-07-13",
+          "text": "교보증권 최보영은 2분기 잠정 영업이익 1,147억원을 자체 예상 1,162억원 및 컨센서스 1,283억원과 비교했다. 이 문서는 정점 전에 판가 하락 위험을 이미 적었지만, 3분기 출하 증가를 통한 방어도 기대했다.",
+          "citations": [
+            {
+              "publishedOn": "2023-07-13",
+              "url": "https://ssl.pstatic.net/imgstock/upload/research/company/1689208128087.pdf",
+              "quote": "교보증권 최보영 2023-07-13 원문 1쪽. 2Q23 잠정 영업이익 1,147억원, 자체 예상 1,162억원·컨센서스 1,283억원, 3분기 판가 하락 우려. 증권사 작성 원문 PDF의 포털 보관본."
+            }
+          ]
+        },
+        {
+          "kind": "retrospective",
+          "text": "찾아 손으로 읽은 기업분석 표본은 2023-01-12 KB, 2023-05-03 유안타, 2023-07-13 교보의 3건이다. 7월 25일 메리츠 마감 시황은 기업분석 리포트 수에 넣지 않았다. 월별 전체 발간 수·평균 목표주가·컨센서스 구성 증권사 수와 실제 집계 시각은 확보하지 못했으므로 이 3건을 시장 전체 빈도로 해석하지 않는다.",
+          "citations": [
+            {
+              "publishedOn": "2023-01-12",
+              "url": "https://rdata.kbsec.com/pdf_data/20230112071909673K.pdf",
+              "quote": "KB증권 이창민 2023-01-12 데일리 수록 기업분석. 목표 180,000→160,000원·Buy, 2023년 예상 영업이익 6,540억원. 원/달러 전망과 장기 가동률 하향."
+            },
+            {
+              "publishedOn": "2023-05-03",
+              "url": "https://file.myasset.com/sitemanager/upload/2023/0502/155705/20230502155705037_1.pdf",
+              "quote": "유안타증권 이안나, 2023-05-03, 1쪽. 목표 290,000원·Hold, 1Q23 영업이익 1,073억원 대 컨센서스 1,137억원. 2Q 예상 영업이익 1,402억원."
+            },
+            {
+              "publishedOn": "2023-07-13",
+              "url": "https://ssl.pstatic.net/imgstock/upload/research/company/1689208128087.pdf",
+              "quote": "교보증권 최보영 2023-07-13 원문 1쪽. 2Q23 잠정 영업이익 1,147억원, 자체 예상 1,162억원·컨센서스 1,283억원, 3분기 판가 하락 우려. 증권사 작성 원문 PDF의 포털 보관본."
+            }
+          ]
+        },
+        {
+          "kind": "retrospective",
+          "text": "실적을 미리 점검하려면 회사의 EV 판매량과 CAM7 가동, 고객사 배터리 매출, 원료와 제품 판가의 반영 시차를 같은 달력에 놓아야 한다. 이번 원고는 수출통계의 정확한 HS 품목·물량·금액과 원자료 발표 빈티지를 확보하지 못해 국가 수출단가를 이 회사의 계약단가로 대입하지 않았다.",
+          "citations": []
+        },
+        {
+          "kind": "then-visible",
+          "asOf": "2024-01-30",
+          "text": "삼성SDI의 2023년 자동차전지 매출은 40%, 영업이익은 93% 늘었지만 전사 4분기 영업이익은 전년보다 36.5% 줄었다. 고객사 전체 성장률 하나로 소재사의 분기 수익성을 추정하기 어렵다는 당시 관측이다.",
+          "citations": [
+            {
+              "publishedOn": "2024-01-30",
+              "url": "https://samsungsdi.co.kr/sdi-now/sdi-news/3501.html?idx=3501",
+              "quote": "삼성SDI 2023 실적 발표. 연간 자동차전지 매출 +40%·영업이익 +93%, 전사 4분기 영업이익 YoY -36.5%. 고객사 일부 사업 성장과 소재사 이익 감소는 공존."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "number": 4,
+      "sentences": [
+        {
+          "kind": "retrospective",
+          "text": "현재 지도에서 대상은 2차전지 소재 섹터에 속한다. 양극재뿐 아니라 음극재·동박·분리막·전해액·전구체·재활용·도전재를 함께 묶은 16종목이며, 셀 업체 삼성SDI는 고객사 비교이지 이 섹터 구성종목이 아니다.",
+          "citations": [
+            {
+              "publishedOn": "2026-11-11",
+              "url": "https://github.com/Soochol/vallythevally/blob/feat-143/research/leader-cases/verification/247540.md",
+              "quote": "실제 Bundle 수집·원문 대조 기록. 현재 다운로드한 수정주가·계산값은 사후 관측이며 원시 JSON은 git 제외 data/leader-cases/247540/bundle.json에 보존."
+            }
+          ]
+        },
+        {
+          "kind": "retrospective",
+          "text": "섹터 지수는 그날 관측된 상장종목의 같은 비중 일간 수익률을 잇는다. 시가총액 가중지수나 당시 투자 가능했던 산업 분류가 아니며, 에코프로와 자회사 에코프로비엠·에코프로머티의 경제적 중복 노출도 있다. 새 상장종목은 두 번째 관측일부터 수익률에 들어간다.",
+          "citations": [
+            {
+              "publishedOn": "2026-11-11",
+              "url": "https://github.com/Soochol/vallythevally/blob/feat-143/research/leader-cases/verification/247540.md",
+              "quote": "실제 Bundle 수집·원문 대조 기록. 현재 다운로드한 수정주가·계산값은 사후 관측이며 원시 JSON은 git 제외 data/leader-cases/247540/bundle.json에 보존."
+            }
+          ]
+        },
+        {
+          "kind": "retrospective",
+          "text": "섹터 순위와 섹터 안 순위는 13관측주 수익률 비교다. 52주 신고가 확산도에는 52개 연속 관측주가 필요하므로, 신규상장이나 수집 누락을 신고가가 아닌 종목으로 단정하지 않는다.",
+          "citations": [
+            {
+              "publishedOn": "2026-11-11",
+              "url": "https://github.com/Soochol/vallythevally/blob/feat-143/research/leader-cases/verification/247540.md",
+              "quote": "실제 Bundle 수집·원문 대조 기록. 현재 다운로드한 수정주가·계산값은 사후 관측이며 원시 JSON은 git 제외 data/leader-cases/247540/bundle.json에 보존."
+            }
+          ]
+        },
+        {
+          "kind": "then-visible",
+          "asOf": "2025-02-03",
+          "text": "경쟁사 포스코퓨처엠의 2024년 연결 영업이익은 7억원이었다. 회사는 양극재 판매량이 소폭 늘어도 원료가격 연동 판가 하락과 일부 재고 평가손실이 수익성을 낮췄고, 음극재는 중국산 저가제품과 초기 가동비용 영향을 받았다고 설명했다.",
+          "citations": [
+            {
+              "publishedOn": "2025-02-03",
+              "url": "https://newsroom.posco.com/kr/포스코퓨처엠-2024년-경영실적-발표/",
+              "quote": "포스코퓨처엠 2024 실적, 연결 매출 3조6,999억원·영업이익 7억원. 양극재 판매량 소폭 증가에도 원료가격 연동 판가 하락, 음극재 경쟁·초기가동비용 설명."
+            }
+          ]
+        },
+        {
+          "kind": "retrospective",
+          "text": "동일 섹터의 가격 차이를 EV 판매 성장이라는 공통 배경만으로 설명할 수 없다. 양극재와 분리막·동박의 고객, 단가 구조와 가동률이 다르다. 개별 하위 소재업체가 따라오지 못한 원인은 원문을 더 확인하기 전까지 가설로 남기며, 가격 순위를 사업 경쟁력 순위로 바꾸지 않는다.",
+          "citations": [
+            {
+              "publishedOn": "2026-11-11",
+              "url": "https://github.com/Soochol/vallythevally/blob/feat-143/research/leader-cases/verification/247540.md",
+              "quote": "실제 Bundle 수집·원문 대조 기록. 현재 다운로드한 수정주가·계산값은 사후 관측이며 원시 JSON은 git 제외 data/leader-cases/247540/bundle.json에 보존."
+            }
+          ]
+        },
+        {
+          "kind": "retrospective",
+          "text": "2020-03-19에 이용하는 마지막 완료 주 2020-03-13의 섹터 순위는 2/38, 대상의 섹터 안 순위는 2/11다. 52주 신고가 확산도는 자료 없음이며, 당시 구성 11종목 중 신고가 0종목·미확인 1종목을 함께 남긴다.",
+          "citations": [
+            {
+              "publishedOn": "2026-11-11",
+              "url": "https://github.com/Soochol/vallythevally/blob/feat-143/research/leader-cases/verification/247540.md",
+              "quote": "실제 Bundle 수집·원문 대조 기록. 현재 다운로드한 수정주가·계산값은 사후 관측이며 원시 JSON은 git 제외 data/leader-cases/247540/bundle.json에 보존."
+            }
+          ]
+        },
+        {
+          "kind": "retrospective",
+          "text": "2021-11-18에 이용하는 마지막 완료 주 2021-11-12의 섹터 순위는 2/38, 대상의 섹터 안 순위는 3/12다. 52주 신고가 확산도는 자료 없음이며, 당시 구성 13종목 중 신고가 6종목·미확인 2종목을 함께 남긴다.",
+          "citations": [
+            {
+              "publishedOn": "2026-11-11",
+              "url": "https://github.com/Soochol/vallythevally/blob/feat-143/research/leader-cases/verification/247540.md",
+              "quote": "실제 Bundle 수집·원문 대조 기록. 현재 다운로드한 수정주가·계산값은 사후 관측이며 원시 JSON은 git 제외 data/leader-cases/247540/bundle.json에 보존."
+            }
+          ]
+        },
+        {
+          "kind": "retrospective",
+          "text": "2023-07-25에 이용하는 마지막 완료 주 2023-07-21의 섹터 순위는 14/38, 대상의 섹터 안 순위는 4/15다. 52주 신고가 확산도는 자료 없음이며, 당시 구성 15종목 중 신고가 4종목·미확인 1종목을 함께 남긴다.",
+          "citations": [
+            {
+              "publishedOn": "2026-11-11",
+              "url": "https://github.com/Soochol/vallythevally/blob/feat-143/research/leader-cases/verification/247540.md",
+              "quote": "실제 Bundle 수집·원문 대조 기록. 현재 다운로드한 수정주가·계산값은 사후 관측이며 원시 JSON은 git 제외 data/leader-cases/247540/bundle.json에 보존."
+            }
+          ]
+        },
+        {
+          "kind": "retrospective",
+          "text": "2024-02-07에 이용하는 마지막 완료 주 2024-02-02의 섹터 순위는 14/38, 대상의 섹터 안 순위는 5/15다. 52주 신고가 확산도는 자료 없음이며, 당시 구성 16종목 중 신고가 1종목·미확인 1종목을 함께 남긴다.",
+          "citations": [
+            {
+              "publishedOn": "2026-11-11",
+              "url": "https://github.com/Soochol/vallythevally/blob/feat-143/research/leader-cases/verification/247540.md",
+              "quote": "실제 Bundle 수집·원문 대조 기록. 현재 다운로드한 수정주가·계산값은 사후 관측이며 원시 JSON은 git 제외 data/leader-cases/247540/bundle.json에 보존."
+            }
+          ]
+        },
+        {
+          "kind": "retrospective",
+          "text": "정점 무렵의 마지막 완료 주인 2023-07-21에는 섹터 안 13주 수익률 순위가 4위였다. 이 장기 상승 사례를 골랐다는 것과 해당 시점의 단기 대장주가 1위였다는 것은 다르다. 신규상장 종목의 52주 자료가 부족해 확산도가 null인 곳은 일부 관측 가능한 종목만으로 완전한 비율을 만들지 않는다.",
+          "citations": [
+            {
+              "publishedOn": "2026-11-11",
+              "url": "https://github.com/Soochol/vallythevally/blob/feat-143/research/leader-cases/verification/247540.md",
+              "quote": "실제 Bundle 수집·원문 대조 기록. 현재 다운로드한 수정주가·계산값은 사후 관측이며 원시 JSON은 git 제외 data/leader-cases/247540/bundle.json에 보존."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "number": 5,
+      "sentences": [
+        {
+          "kind": "then-visible",
+          "asOf": "2023-01-13",
+          "text": "한국은행은 성장 둔화와 높은 물가를 함께 언급하면서 기준금리를 3.25%에서 3.50%로 올렸다. 2023년 초의 주가 상승을 이미 통화완화가 시작된 결과로 설명하면 이 결정과 충돌한다.",
+          "citations": [
+            {
+              "publishedOn": "2023-01-13",
+              "url": "https://www.bok.or.kr/portal/bbs/P0000559/view.do?menuNo=200690&nttId=10074980",
+              "quote": "통화정책방향, 한국은행 기준금리 3.25%→3.50%, 성장 둔화 속 물가안정 위해 0.25%p 인상."
+            }
+          ]
+        },
+        {
+          "kind": "then-visible",
+          "asOf": "2023-07-27",
+          "text": "미 연준은 미국 7월 26일 오후에 목표금리를 5.25~5.50%로 올렸다. 한국 시각으로 7월 27일 새벽 공개됐으므로 7월 25일 종가나 7월 26일 한국 장중 움직임을 그 확정 발표로 설명하지 않는다.",
+          "citations": [
+            {
+              "publishedOn": "2023-07-27",
+              "url": "https://www.federalreserve.gov/newsevents/pressreleases/monetary20230726a.htm",
+              "quote": "미국 2023-07-26 14:00 EDT 발표, 한국 2023-07-27 03:00. 연방기금금리 목표 5.25~5.50%."
+            }
+          ]
+        },
+        {
+          "kind": "then-visible",
+          "asOf": "2023-11-05",
+          "text": "금융위원회는 다음 날부터 공매도를 전면 금지한다고 발표했다. 시장조성자·유동성공급자 예외가 있었고, 금지 그 자체가 모든 공매도 잔고의 즉시 상환을 뜻하지 않는다.",
+          "citations": [
+            {
+              "publishedOn": "2023-11-05",
+              "url": "https://www.fsc.go.kr/no010101/81013",
+              "quote": "금융위 공매도 전면금지 결정, 2023-11-06부터 2024-06말까지 발표. 시장조성자·유동성공급자 등 예외."
+            }
+          ]
+        },
+        {
+          "kind": "retrospective",
+          "text": "FRED의 원/달러, 한국 10년 월별금리, 미국 국채금리와 실효 연방기금금리는 최신 수정 다운로드다. 전일 이전 값·월말 이후 값만 붙인 보수적 정렬은 실제 당시 발표 빈티지를 입증하지 않는다. 원/달러 상승의 회사 손익 효과도 매출 통화와 매입·헤지 조건 없이 확정하지 않는다.",
+          "citations": [
+            {
+              "publishedOn": "2026-11-11",
+              "url": "https://github.com/Soochol/vallythevally/blob/feat-143/research/leader-cases/verification/247540.md",
+              "quote": "실제 Bundle 수집·원문 대조 기록. 현재 다운로드한 수정주가·계산값은 사후 관측이며 원시 JSON은 git 제외 data/leader-cases/247540/bundle.json에 보존."
+            }
+          ]
+        },
+        {
+          "kind": "retrospective",
+          "text": "MSCI는 2021년 8월 정기 변경을 8월 31일 종가에 반영한다는 일정을 공식 발표했지만, 이번 조사에서는 에코프로비엠을 특정한 구성종목 변경표 원문을 확보하지 못했다. 코스닥150 편출입도 확인되지 않아 사건표에 넣지 않았다. 코스피 이전상장은 추진 발표와 완료를 구별하고, 확인되지 않은 완료일이나 코스피200 편입일을 만들지 않았다.",
+          "citations": [
+            {
+              "publishedOn": "2026-11-11",
+              "url": "https://github.com/Soochol/vallythevally/blob/feat-143/research/leader-cases/verification/247540.md",
+              "quote": "실제 Bundle 수집·원문 대조 기록. 현재 다운로드한 수정주가·계산값은 사후 관측이며 원시 JSON은 git 제외 data/leader-cases/247540/bundle.json에 보존."
+            },
+            {
+              "publishedOn": "2021-08-04",
+              "url": "https://www.msci.com/downloads/documents/press-releases/media-room/9fffbbed-5e47-0a4a-9726-fb9299c9087e.pdf",
+              "quote": "MSCI 2021년 8월 변경 일정: 8월 31일 종가 반영. 개별 에코프로비엠 구성종목 변경표는 이번 조사에서 미확보."
+            }
+          ]
+        },
+        {
+          "kind": "then-visible",
+          "asOf": "2024-06-05",
+          "text": "회사는 에코프로글로벌 합병 등기를 마쳤고 코스피 이전상장을 본격 추진한다고 발표했다. 발표 당시 기업실사와 상장 예비심사 신청 준비 단계였으며 연내 완료는 목표였다. 이 발표를 이전상장 완료나 코스피200 편입으로 기록하지 않는다.",
+          "citations": [
+            {
+              "publishedOn": "2024-06-05",
+              "url": "https://www.ecoprobm.com/bm_/sub0701/view/page/10/id/1534",
+              "quote": "회사 발표. 6월 3일 에코프로글로벌 합병등기 완료, 코스피 이전상장은 기업실사·예비심사 신청 준비 단계이며 연내 완료는 목표."
+            }
+          ]
+        },
+        {
+          "kind": "retrospective",
+          "text": "2020-03-19 코스닥 종가는 428.35, 도구의 사후 장세 분류는 bear이다. 지수 200일선 기울기와 누적 고점 낙폭을 이용한 도구상의 배경 분류이며, 사례 생애 날짜를 만드는 규칙이 아니다.",
+          "citations": [
+            {
+              "publishedOn": "2026-11-11",
+              "url": "https://github.com/Soochol/vallythevally/blob/feat-143/research/leader-cases/verification/247540.md",
+              "quote": "실제 Bundle 수집·원문 대조 기록. 현재 다운로드한 수정주가·계산값은 사후 관측이며 원시 JSON은 git 제외 data/leader-cases/247540/bundle.json에 보존."
+            }
+          ]
+        },
+        {
+          "kind": "retrospective",
+          "text": "2021-11-18 코스닥 종가는 1032.77, 도구의 사후 장세 분류는 bear이다. 지수 200일선 기울기와 누적 고점 낙폭을 이용한 도구상의 배경 분류이며, 사례 생애 날짜를 만드는 규칙이 아니다.",
+          "citations": [
+            {
+              "publishedOn": "2026-11-11",
+              "url": "https://github.com/Soochol/vallythevally/blob/feat-143/research/leader-cases/verification/247540.md",
+              "quote": "실제 Bundle 수집·원문 대조 기록. 현재 다운로드한 수정주가·계산값은 사후 관측이며 원시 JSON은 git 제외 data/leader-cases/247540/bundle.json에 보존."
+            }
+          ]
+        },
+        {
+          "kind": "retrospective",
+          "text": "2023-07-25 코스닥 종가는 939.96, 도구의 사후 장세 분류는 bear이다. 지수 200일선 기울기와 누적 고점 낙폭을 이용한 도구상의 배경 분류이며, 사례 생애 날짜를 만드는 규칙이 아니다.",
+          "citations": [
+            {
+              "publishedOn": "2026-11-11",
+              "url": "https://github.com/Soochol/vallythevally/blob/feat-143/research/leader-cases/verification/247540.md",
+              "quote": "실제 Bundle 수집·원문 대조 기록. 현재 다운로드한 수정주가·계산값은 사후 관측이며 원시 JSON은 git 제외 data/leader-cases/247540/bundle.json에 보존."
+            }
+          ]
+        },
+        {
+          "kind": "retrospective",
+          "text": "2024-02-07 코스닥 종가는 811.92, 도구의 사후 장세 분류는 bear이다. 지수 200일선 기울기와 누적 고점 낙폭을 이용한 도구상의 배경 분류이며, 사례 생애 날짜를 만드는 규칙이 아니다.",
+          "citations": [
+            {
+              "publishedOn": "2026-11-11",
+              "url": "https://github.com/Soochol/vallythevally/blob/feat-143/research/leader-cases/verification/247540.md",
+              "quote": "실제 Bundle 수집·원문 대조 기록. 현재 다운로드한 수정주가·계산값은 사후 관측이며 원시 JSON은 git 제외 data/leader-cases/247540/bundle.json에 보존."
+            }
+          ]
+        },
+        {
+          "kind": "retrospective",
+          "text": "코스닥은 탄생일 428.35에서 정점일 939.96로 119.44% 올랐고, 2023년 첫 관측일 1월 2일 671.51 대비 정점일까지도 39.98% 상승했다. 지수 상승은 관측되지만 그 안의 모든 조정이 사라지는 것은 아니다.",
+          "citations": [
+            {
+              "publishedOn": "2026-11-11",
+              "url": "https://github.com/Soochol/vallythevally/blob/feat-143/research/leader-cases/verification/247540.md",
+              "quote": "실제 Bundle 수집·원문 대조 기록. 현재 다운로드한 수정주가·계산값은 사후 관측이며 원시 JSON은 git 제외 data/leader-cases/247540/bundle.json에 보존."
+            }
+          ]
+        },
+        {
+          "kind": "retrospective",
+          "text": "도구는 누적 종가 고점 대비 20% 하락을 다른 조건보다 먼저 적용한다. 코스닥의 과거 누적 고점은 2000-03-10의 2834.4여서 2023년의 지수 상승과 200일선 위 위치에도 배경 띠가 bear로 남는다. 이 분류를 당시 시장이 상승하지 않았다는 근거로 쓰거나 사용자의 상승장 대기 가설을 기각하는 검증으로 쓰지 않는다.",
+          "citations": [
+            {
+              "publishedOn": "2026-11-11",
+              "url": "https://github.com/Soochol/vallythevally/blob/feat-143/research/leader-cases/verification/247540.md",
+              "quote": "실제 Bundle 수집·원문 대조 기록. 현재 다운로드한 수정주가·계산값은 사후 관측이며 원시 JSON은 git 제외 data/leader-cases/247540/bundle.json에 보존."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "number": 6,
+      "sentences": [
+        {
+          "kind": "retrospective",
+          "text": "10·30·40주 이동평균, 52주 종가 신고가, 지수 대비·섹터 대비 상대강도는 지금 내려받은 수정주가의 사후 계산이다. 당시 차트 화면이나 매매 가능 가격 빈티지를 복원한 것은 아니다.",
+          "citations": []
+        },
+        {
+          "kind": "retrospective",
+          "text": "조정 목록은 일봉 종가의 진행 고점에서 빠졌다가 그 고점을 회복한 구간을 도구 정의대로 모두 보존한다. 작은 하루 조정도 포함되며, 장중 저가를 이용한 최대 손실이나 서로 겹치는 임의 파동 목록이 아니다. 거래량 합계는 주식 수량이며 실제 거래대금과 구분한다.",
+          "citations": []
+        },
+        {
+          "kind": "retrospective",
+          "text": "RSI와 MACD는 보조 관측이다. 종가가 최고인 날과 장중 고가가 최고인 날을 구별하고, 공시 공개일·미국 발표의 한국 날짜를 맞춘 다음에 가격 변화의 선후를 읽는다.",
+          "citations": []
+        },
+        {
+          "kind": "retrospective",
+          "text": "실제 거래대금, 10주 평균 거래대금과 시장 거래대금 비중은 자료 없음이다. 종가×거래량을 거래대금으로 대체하지 않는다. 따라서 가격·거래량 확대를 근거로 시장 전체 자금 집중 비중이 얼마였다고 서술하지 않는다.",
+          "citations": []
+        },
+        {
+          "kind": "retrospective",
+          "text": "2023년 첫 52주 종가 신고가는 2023-02-10, 지수 대비 상대강도 52주 신고가는 2023-02-10, 섹터 대비는 2023-03-10이다. 이 구간에서 관측한 선후이며 주봉 마감일 기준이다. 한 신호가 항상 먼저 온다는 일반 규칙으로 바꾸지 않는다.",
+          "citations": [
+            {
+              "publishedOn": "2026-11-11",
+              "url": "https://github.com/Soochol/vallythevally/blob/feat-143/research/leader-cases/verification/247540.md",
+              "quote": "실제 Bundle 수집·원문 대조 기록. 현재 다운로드한 수정주가·계산값은 사후 관측이며 원시 JSON은 git 제외 data/leader-cases/247540/bundle.json에 보존."
+            }
+          ]
+        },
+        {
+          "kind": "retrospective",
+          "text": "탄생 이후 사례 전체에서 처음 관측된 52주 종가 신고가는 2020-05-22, 지수 대비 상대강도 신고가는 2020-05-29, 섹터 대비는 2020-05-29이다. 이 시작 구간에서는 상대강도 신고가가 가격 신고가보다 먼저 오지 않았다. 이후 재상승 구간의 선후는 별도로 읽는다.",
+          "citations": [
+            {
+              "publishedOn": "2026-11-11",
+              "url": "https://github.com/Soochol/vallythevally/blob/feat-143/research/leader-cases/verification/247540.md",
+              "quote": "실제 Bundle 수집·원문 대조 기록. 현재 다운로드한 수정주가·계산값은 사후 관측이며 원시 JSON은 git 제외 data/leader-cases/247540/bundle.json에 보존."
+            }
+          ]
+        },
+        {
+          "kind": "retrospective",
+          "text": "탄생일 이후 소멸일까지 시작한 조정 39건을 해석 종료일까지 추적했다. 원장에 깊이·회복 또는 해석 종료까지의 관측일 수·거래량 합계·회복일을 남겼다. 이 중 큰 조정은 2023-07-25→2025-01-02 -77.16%, 저점까지 350관측일·회복 또는 해석 종료까지 372관측일, 거래량 344,908,857주, 회복 해석 기간 끝까지 없음; 2021-11-18→2022-02-10 -43.79%, 저점까지 56관측일·회복 또는 해석 종료까지 306관측일, 거래량 341,660,868주, 회복 2023-02-14; 2020-08-10→2020-10-26 -29.80%, 저점까지 50관측일·회복 또는 해석 종료까지 88관측일, 거래량 104,474,144주, 회복 2020-12-17다.",
+          "citations": [
+            {
+              "publishedOn": "2026-11-11",
+              "url": "https://github.com/Soochol/vallythevally/blob/feat-143/research/leader-cases/verification/247540.md",
+              "quote": "실제 Bundle 수집·원문 대조 기록. 현재 다운로드한 수정주가·계산값은 사후 관측이며 원시 JSON은 git 제외 data/leader-cases/247540/bundle.json에 보존."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "number": 7,
+      "sentences": [
+        {
+          "kind": "retrospective",
+          "text": "외국인 보유수량과 투자자 순매수는 서로 다른 자료다. 보유비율은 키움 ka10008의 wght이며, 현재 종목 기본 정보의 외국인 한도 소진율과 같다고 보지 않는다. 보유수량÷표시비율로 역산한 분모는 소수점 반올림 영향이 있어 당시 발행주식수의 독립 증명이 아니다.",
+          "citations": [
+            {
+              "publishedOn": "2026-11-11",
+              "url": "https://github.com/Soochol/vallythevally/blob/feat-143/research/leader-cases/verification/247540.md",
+              "quote": "실제 Bundle 수집·원문 대조 기록. 현재 다운로드한 수정주가·계산값은 사후 관측이며 원시 JSON은 git 제외 data/leader-cases/247540/bundle.json에 보존."
+            }
+          ]
+        },
+        {
+          "kind": "retrospective",
+          "text": "기관계와 연기금·투신·사모·금융투자의 선은 관측 시작부터 순매수 수량을 합친 값이다. 시작 전에 얼마를 보유했는지 모르므로 누적선의 음수를 공매도 잔고나 음의 보유수량으로 읽지 않는다.",
+          "citations": [
+            {
+              "publishedOn": "2026-11-11",
+              "url": "https://github.com/Soochol/vallythevally/blob/feat-143/research/leader-cases/verification/247540.md",
+              "quote": "실제 Bundle 수집·원문 대조 기록. 현재 다운로드한 수정주가·계산값은 사후 관측이며 원시 JSON은 git 제외 data/leader-cases/247540/bundle.json에 보존."
+            }
+          ]
+        },
+        {
+          "kind": "retrospective",
+          "text": "수급 두 API의 과거 깊이는 2019-03-05부터 확인되었다. 이 사실은 페이지당 원시 행 수, 분할·증자 전후 수급 수량 조정 방식이나 보유비율 분모를 입증하지 않는다. 확정하지 못한 기업행위 기준을 전제로 주가 상승을 어느 투자자 집단이 만들었다고 단정하지 않는다.",
+          "citations": [
+            {
+              "publishedOn": "2026-11-11",
+              "url": "https://github.com/Soochol/vallythevally/blob/feat-143/research/leader-cases/verification/247540.md",
+              "quote": "실제 Bundle 수집·원문 대조 기록. 현재 다운로드한 수정주가·계산값은 사후 관측이며 원시 JSON은 git 제외 data/leader-cases/247540/bundle.json에 보존."
+            }
+          ]
+        },
+        {
+          "kind": "retrospective",
+          "text": "2020-03-19 외국인 보유는 1,020,349주·4.96%, 기관계 관측 구간 누적 순매수는 -2,679,275주다. 보유량과 누적 순매수를 서로 바꿔 읽지 않으며 기업행위 수량 수정 방식은 미확인이다.",
+          "citations": [
+            {
+              "publishedOn": "2026-11-11",
+              "url": "https://github.com/Soochol/vallythevally/blob/feat-143/research/leader-cases/verification/247540.md",
+              "quote": "실제 Bundle 수집·원문 대조 기록. 현재 다운로드한 수정주가·계산값은 사후 관측이며 원시 JSON은 git 제외 data/leader-cases/247540/bundle.json에 보존."
+            }
+          ]
+        },
+        {
+          "kind": "retrospective",
+          "text": "2023-07-25 외국인 보유는 9,440,323주·9.65%, 기관계 관측 구간 누적 순매수는 -7,109,059주다. 보유량과 누적 순매수를 서로 바꿔 읽지 않으며 기업행위 수량 수정 방식은 미확인이다.",
+          "citations": [
+            {
+              "publishedOn": "2026-11-11",
+              "url": "https://github.com/Soochol/vallythevally/blob/feat-143/research/leader-cases/verification/247540.md",
+              "quote": "실제 Bundle 수집·원문 대조 기록. 현재 다운로드한 수정주가·계산값은 사후 관측이며 원시 JSON은 git 제외 data/leader-cases/247540/bundle.json에 보존."
+            }
+          ]
+        },
+        {
+          "kind": "retrospective",
+          "text": "2024-02-07 외국인 보유는 8,435,477주·8.63%, 기관계 관측 구간 누적 순매수는 -5,798,044주다. 보유량과 누적 순매수를 서로 바꿔 읽지 않으며 기업행위 수량 수정 방식은 미확인이다.",
+          "citations": [
+            {
+              "publishedOn": "2026-11-11",
+              "url": "https://github.com/Soochol/vallythevally/blob/feat-143/research/leader-cases/verification/247540.md",
+              "quote": "실제 Bundle 수집·원문 대조 기록. 현재 다운로드한 수정주가·계산값은 사후 관측이며 원시 JSON은 git 제외 data/leader-cases/247540/bundle.json에 보존."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "number": 8,
+      "sentences": [
+        {
+          "kind": "then-visible",
+          "asOf": "2023-07-25",
+          "text": "메리츠증권의 당일 마감 표는 종가 462,000원, 12개월 예상 PER 96.1배와 PBR 21.44배를 제시한다. 이는 증권사 자료의 당시 예상 배수이며, 최근 4분기 지배순이익으로 계산한 리포트의 TTM PER과 정의가 다르다.",
+          "citations": [
+            {
+              "publishedOn": "2023-07-25",
+              "url": "https://home.imeritz.com/include/resource/research/WorkFlow/20230725163022491K_02.pdf",
+              "quote": "메리츠증권 2023-07-25 마감 자료 표. 에코프로비엠 당일 종가 462,000원, 12MF PER 96.1배·PBR 21.44배. 예측 12개월 배수이며 Bundle TTM과 다름."
+            }
+          ]
+        },
+        {
+          "kind": "retrospective",
+          "text": "2022년 증자·무상증자와 그 뒤 발행수 변동 때문에 현재 수정 종가에 과거 보고서의 분모를 곱해 과거 시가총액을 만들면 기준이 섞인다. 분모와 가격 수정 기준을 맞출 수 없는 구간의 EPS·PER·PBR·가격 밴드는 null을 유지한다.",
+          "citations": []
+        },
+        {
+          "kind": "retrospective",
+          "text": "사례 수익률을 이익 증가×PER 확장으로 분해하려면 두 날짜의 양수 TTM 지배순이익과 같은 주식수·가격 기준이 필요하다. 시작일의 당시 알려진 CFS 이익·수정 분모를 모두 검증하지 못했으므로 이번 사례 전체의 이익 기여율과 배수 기여율은 계산 불가다. Bundle의 전체 자동 from/to를 사례의 탄생·정점으로 간주하지 않는다.",
+          "citations": []
+        },
+        {
+          "kind": "retrospective",
+          "text": "과거 시장 전체 시가총액 순위는 자료 없음이다. 현재 시총이나 당시 시황의 일부 상위종목 표로 전 상장사 순위를 채우지 않았다. 높은 기대가 관찰되었다는 해석과 모든 가격 상승이 배수 확장 때문이라는 정량 주장은 구별한다.",
+          "citations": [
+            {
+              "publishedOn": "2023-07-25",
+              "url": "https://home.imeritz.com/include/resource/research/WorkFlow/20230725163022491K_02.pdf",
+              "quote": "메리츠증권 2023-07-25 마감 자료 표. 에코프로비엠 당일 종가 462,000원, 12MF PER 96.1배·PBR 21.44배. 예측 12개월 배수이며 Bundle TTM과 다름."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "number": 9,
+      "sentences": [
+        {
+          "kind": "then-visible",
+          "asOf": "2022-06-14",
+          "text": "유무상증자 정정 공시는 유상 신주 1,611,344주와 발행가 387,600원, 무상 1주당 신주 3주와 6월 28일 배정기준일을 담았다. 이는 액면분할과 다른 자본 사건이며 가격이 약 4분의 1이 되는 구간을 투자 손실로 읽지 않도록 해야 한다.",
+          "citations": [
+            {
+              "publishedOn": "2022-06-14",
+              "url": "https://dart.fss.or.kr/dsaf001/main.do?rcpNo=20220614000068",
+              "quote": "정정 주요사항보고서 유무상증자결정. 유상 신주 1,611,344주·발행가 387,600원. 무상 1주당 3주·배정기준일 2022-06-28."
+            }
+          ]
+        },
+        {
+          "kind": "then-visible",
+          "asOf": "2023-07-18",
+          "text": "전환사채 발행결정 정정본의 권면총액은 4,400억원, 전환청구 시작은 2024년 7월 24일이다. 발행 발표액을 즉시 보통주 수에 더하거나 전환청구 시작일에 전액 전환됐다고 가정하지 않는다.",
+          "citations": [
+            {
+              "publishedOn": "2023-07-18",
+              "url": "https://dart.fss.or.kr/dsaf001/main.do?rcpNo=20230718000385",
+              "quote": "정정 전환사채권발행결정. 권면총액 440,000,000,000원, 전환청구 시작 2024-07-24. 결정·예정 조건이며 전환 실행의 증명이 아님."
+            }
+          ]
+        },
+        {
+          "kind": "then-visible",
+          "asOf": "2024-04-17",
+          "text": "2023년 말 보통주 발행수 97,801,344주에서 자기주식 141,263주를 빼면 유통주식수 97,660,081주다. 보고서의 서로 다른 두 주식수를 같은 분모로 사용하지 않는다.",
+          "citations": [
+            {
+              "publishedOn": "2024-04-17",
+              "url": "https://dart.fss.or.kr/dsaf001/main.do?rcpNo=20240417000540",
+              "quote": "2023 사업보고서 정정본, 요약 연결재무정보·연결 포괄손익계산서·주식의 총수. 2023 영업이익 156,029,935,394원, 2022 영업이익 380,676,718,075원."
+            }
+          ]
+        },
+        {
+          "kind": "retrospective",
+          "text": "사업보고서에는 2022년 유상·무상증자와 이익소각 80,474주가 발행수 변동으로 기재된다. 무상증자의 1주당 3주 배정은 기존 1주를 포함해 4주가 되는 것이며, 이익소각은 자본금 감소 없는 소각이라고 회사가 구별했다.",
+          "citations": [
+            {
+              "publishedOn": "2024-04-17",
+              "url": "https://dart.fss.or.kr/dsaf001/main.do?rcpNo=20240417000540",
+              "quote": "2023 사업보고서 정정본, 요약 연결재무정보·연결 포괄손익계산서·주식의 총수. 2023 영업이익 156,029,935,394원, 2022 영업이익 380,676,718,075원."
+            }
+          ]
+        },
+        {
+          "kind": "retrospective",
+          "text": "주요사항보고 API의 사건은 announcement-only이고 일부 접수번호 매칭에 실패할 수 있다. 그 실패를 사건 부재로 해석하지 않는다. 대주주·임원 매도·블록딜과 CB 실제 전환을 전수 확인한 원장은 없으므로 특정 매도가 정점을 만들었다는 설명은 싣지 않았다.",
+          "citations": []
+        },
+        {
+          "kind": "retrospective",
+          "text": "2020년 연간 주식의 총수 API는 종류를 의결권 있는 주식(보통주)으로 주고 발행수 21,035,166주·유통수 20,953,440주를 준다. 발행수와 자기주식을 차감한 유통수를 원문 종류·접수번호와 함께 구별한다. 이 분기말 수량을 현재 수정주가의 과거 주당 분모로 자동 대입하지 않는다.",
+          "citations": [
+            {
+              "publishedOn": "2021-03-19",
+              "url": "https://dart.fss.or.kr/dsaf001/main.do?rcpNo=20210319000143",
+              "quote": "2020 사업보고서 주식의 총수. 의결권 있는 주식(보통주), 발행 21,035,166주·자기주식 81,726주·유통 20,953,440주."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "number": 10,
+      "sentences": [
+        {
+          "kind": "then-visible",
+          "asOf": "2023-08-03",
+          "text": "정점 다음에 공개된 2분기 IR에서 회사는 이미 3분기 ASP 하락으로 수익성이 일시 약해질 가능성을 적었다. 이때까지 공개된 2분기 이익 증가와 다음 분기 위험을 동시에 볼 수 있었다.",
+          "citations": [
+            {
+              "publishedOn": "2023-08-03",
+              "url": "https://ecoprobm.com/sub0503/view/page/3/id/1278",
+              "quote": "회사 2023년 2분기 IR 7~8쪽. BM 매출 19,062억원·영업이익 1,147억원, EV 매출 비중 80%→87%, 3분기 ASP 하락 전망, 재고 13,121억원."
+            }
+          ]
+        },
+        {
+          "kind": "then-visible",
+          "asOf": "2023-11-07",
+          "text": "3분기 IR은 EV 판매량이 전분기보다 15% 늘어도 판가 하락으로 매출이 줄었고 재고평가손실 340억원으로 영업이익이 459억원까지 감소했다고 설명했다. 물량 성장과 이익 둔화의 시차가 원문에서 확인된 구간이다.",
+          "citations": [
+            {
+              "publishedOn": "2023-11-07",
+              "url": "https://ecoprobm.com/sub0503/view/page/2/id/1332",
+              "quote": "회사 2023년 3분기 IR 5~6쪽. BM 영업이익 459억원, QoQ -60%, 재고평가손실 340억원. EV 판매량 QoQ +15%에도 판가 하락."
+            }
+          ]
+        },
+        {
+          "kind": "then-visible",
+          "asOf": "2024-02-07",
+          "text": "4분기 잠정 IR은 판매량 감소·판매단가 하락 뒤 재고평가손실 1,245억원과 영업손실 1,147억원을 발표했다. 2023년 연간 EV 판매량은 67% 늘었다는 설명도 함께 있어, 전기차 판매 성장 자체가 사라진 것과 이익 악화를 혼동하면 안 된다.",
+          "citations": [
+            {
+              "publishedOn": "2024-02-07",
+              "url": "https://www.ecoprobm.com/sub0503/view/page/sub0201/id/1428",
+              "quote": "회사 2023년 4분기 IR 5~6쪽, 감사 전 잠정. BM 매출 11,804억원·영업손실 1,147억원, 재고평가손실 1,245억원, 연간 영업이익 1,532억원, EV 판매량 YoY +67%."
+            }
+          ]
+        },
+        {
+          "kind": "retrospective",
+          "text": "2024-02-07을 소멸일로 고른 이유는 가격 정점 뒤 수익성 둔화가 분기 적자로 확인됐기 때문이다. 주가가 그날부터만 하락했다거나 이후 반등이 없었다는 뜻은 아니다. 반등이 정점 회복으로 이어졌는지는 종가 시계열로 따로 확인한다.",
+          "citations": []
+        },
+        {
+          "kind": "then-visible",
+          "asOf": "2024-05-03",
+          "text": "이후 1분기 영업이익 67억원은 재고평가충당금 환입 456억원의 도움을 받았다. 회사는 총 판매량이 전분기보다 5% 줄었다고 밝혀, 회계상 흑자 전환만으로 본업 회복을 확정하기 어려웠다.",
+          "citations": [
+            {
+              "publishedOn": "2024-05-03",
+              "url": "https://ecoprobm.com/sub0503/view/page/2/id/1509",
+              "quote": "회사 2024년 1분기 IR 3~4쪽. BM 영업이익 67억원, 재고자산평가충당금 환입 456억원, 총 판매량 QoQ -5%. 비교 2023년 4분기 영업손실은 1,119억원으로 표시."
+            }
+          ]
+        },
+        {
+          "kind": "then-visible",
+          "asOf": "2024-11-01",
+          "text": "3분기에는 다시 영업손실 412억원이었고, 재고평가손실 188억원을 제외해도 224억원 적자였다는 회사 설명이 나왔다. 판매량은 전분기보다 35% 줄었다. 소멸 이후 1년 관찰에서 수요·가동률과 회계 효과를 나눠야 할 근거다.",
+          "citations": [
+            {
+              "publishedOn": "2024-11-01",
+              "url": "https://ecoprobm.com/sub0503/view/page/2/id/1664",
+              "quote": "회사 2024년 3분기 IR 5~6쪽. BM 영업손실 412억원, 평가손실 188억원, 평가손 효과 제외 영업손실 224억원, 판매량 QoQ -35%. 페이지 등록일 10/31과 자료 제목 11/1 충돌, 늦은 11/1 사용."
+            }
+          ]
+        },
+        {
+          "kind": "then-visible",
+          "asOf": "2024-02-07",
+          "text": "회사는 실적 자료에서 수산화리튬 가격이 2023년 상반기 kg당 60달러에서 하반기 28달러로 낮아졌다고 설명했다. 이는 회사가 사용한 가격 관측이며, 독립 금속거래소의 일별 가격 원장을 확보한 것으로 간주하지 않는다.",
+          "citations": [
+            {
+              "publishedOn": "2024-02-07",
+              "url": "https://www.ecoprobm.com/sub0503/view/page/sub0201/id/1428",
+              "quote": "회사 2023년 4분기 IR 5쪽, 수산화리튬 가격 상반기 $60/kg→하반기 $28/kg."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "number": 11,
+      "sentences": [
+        {
+          "kind": "retrospective",
+          "text": "이 사례에서 확인한 것은 계약과 고객사 설비 확대가 수년의 매출 성장을 뒷받침한 과정이다. 원료가격 연동 구조 때문에 같은 EV 판매 증가 아래서도 매출과 영업이익은 다른 방향으로 움직일 수 있었다.",
+          "citations": [
+            {
+              "publishedOn": "2020-02-03",
+              "url": "https://dart.fss.or.kr/dsaf001/main.do?rcpNo=20200203900297",
+              "quote": "전기차용 하이니켈 NCM 양극소재, SK이노베이션, 2020-01-01~2023-12-31, 2,741,283,000,000원. 금속 국제시세 연동 판가로 계약액 변동 가능."
+            },
+            {
+              "publishedOn": "2023-08-03",
+              "url": "https://ecoprobm.com/sub0503/view/page/3/id/1278",
+              "quote": "회사 2023년 2분기 IR 7~8쪽. BM 매출 19,062억원·영업이익 1,147억원, EV 매출 비중 80%→87%, 3분기 ASP 하락 전망, 재고 13,121억원."
+            },
+            {
+              "publishedOn": "2024-02-07",
+              "url": "https://www.ecoprobm.com/sub0503/view/page/sub0201/id/1428",
+              "quote": "회사 2023년 4분기 IR 5~6쪽, 감사 전 잠정. BM 매출 11,804억원·영업손실 1,147억원, 재고평가손실 1,245억원, 연간 영업이익 1,532억원, EV 판매량 YoY +67%."
+            }
+          ]
+        },
+        {
+          "kind": "retrospective",
+          "text": "영업이익 증가가 주도 사례를 낳는다는 것과 상승장을 기다리면 폭발한다는 것은 사용자의 검토 가설이다. 이번 한 사례의 동행과 선후만으로 보편 법칙이나 충분조건을 증명하지 않는다.",
+          "citations": []
+        },
+        {
+          "kind": "retrospective",
+          "text": "다음 사례와 비교할 때는 실적 발생 분기와 실제 공개일, 단가와 물량, 지배순이익과 보통주 분모, 시장 상대강도와 섹터 상대강도를 따로 남겨야 한다. 지금은 여러 사례를 묶은 임계값이나 자동 탐지기를 만들지 않는다.",
+          "citations": []
+        },
+        {
+          "kind": "retrospective",
+          "text": "탄생을 저점에서 선택한 사후 편향과 현재 살아 있는 종목으로 만든 섹터 지도의 생존 편향은 성과를 좋아 보이게 할 수 있다. 실패한 기업과 같은 시기에 오르지 못한 기업까지 비교하기 전에는 이 사례만으로 투자전략 수익을 제시하지 않는다.",
+          "citations": []
+        }
+      ]
+    },
+    {
+      "number": 12,
+      "sentences": [
+        {
+          "kind": "retrospective",
+          "text": "자료 묶음은 서버를 통한 KRX 수정 일봉·키움 수급, OpenDART 연결 재무·공시·주식수·자본결정, FRED 최신 CSV를 합쳤다. 최초 원자료와 생성 HTML은 git 제외 data 아래에 보존하고, 재사용 원고와 이 검증 메모만 저장소에 남긴다.",
+          "citations": []
+        },
+        {
+          "kind": "retrospective",
+          "text": "수정주가와 원래 거래 종가의 관계, 과거 주당 분모, 당시 최초 재무 빈티지, 수급 수량 수정 기준·비율 분모, 실제 거래대금·시장 비중·과거 시총 순위는 확인 수준이 서로 다르다. null·실패 사유·정정 충돌을 숨기지 않으며, 원자료의 결측을 계정값 0으로 바꾸지 않았다.",
+          "citations": []
+        },
+        {
+          "kind": "retrospective",
+          "text": "증권사 표본은 발간일을 문서 안에서 확인했고, 현재 검색 결과의 수집일을 과거 발표일로 쓰지 않았다. 회사 IR과 이후 사업보고서가 다른 숫자를 제시한 곳은 양쪽 공개일과 값을 보존한다. 2024년 3분기 IR은 웹 등록일과 자료 날짜가 달라 보수적으로 11월 1일을 사용했다.",
+          "citations": []
+        },
+        {
+          "kind": "retrospective",
+          "text": "원문 출처는 각 문장의 링크에서 확인한다. DART는 접수번호 viewer, 회사 IR은 게시물과 첨부 PDF, 정책은 금융위·한국은행·미 연준·미 재무부 원문을 연결했다. 교보 자료는 증권사 작성 원문의 포털 보관본이며, 기사 재인용을 원문 검증으로 세지 않았다.",
+          "citations": []
+        },
+        {
+          "kind": "retrospective",
+          "text": "원고·생애 날짜·각 절의 해석, 차트의 실제 자료 한계와 화면 구성은 사용자 검토 전 초안이다. 시각 디자인·패널 높이·모바일·절 순서의 승인과 최종 리포트 승인은 아직 받지 않았다.",
+          "citations": []
+        },
+        {
+          "kind": "retrospective",
+          "text": "실제 수집에서 가격 성공 311/311, 누락·실패 기록 2건을 보존했다. DART 재무는 분기 원장 48개·연간 원장 12개다. 이 원장 수는 모든 계정값이 있다는 뜻이 아니다.",
+          "citations": [
+            {
+              "publishedOn": "2026-11-11",
+              "url": "https://github.com/Soochol/vallythevally/blob/feat-143/research/leader-cases/verification/247540.md",
+              "quote": "실제 Bundle 수집·원문 대조 기록. 현재 다운로드한 수정주가·계산값은 사후 관측이며 원시 JSON은 git 제외 data/leader-cases/247540/bundle.json에 보존."
+            }
+          ]
+        },
+        {
+          "kind": "retrospective",
+          "text": "주식수 차트의 공개일 지연은 별도 후속 #175에 남아 있다. 이번 저장 자료에는 보통주 수의 사용 가능일이 재무 사용 가능일보다 앞선 조합이 없어 그 지연을 재현하지 못했다. 수정주가와 당시 종가의 차이를 재현하는 기업행위 조정계수도 확인하지 못했으므로 같은 가격 기준으로 일치했다고 주장하지 않는다.",
+          "citations": [
+            {
+              "publishedOn": "2026-11-11",
+              "url": "https://github.com/Soochol/vallythevally/blob/feat-143/research/leader-cases/verification/247540.md",
+              "quote": "실제 Bundle 수집·원문 대조 기록. 현재 다운로드한 수정주가·계산값은 사후 관측이며 원시 JSON은 git 제외 data/leader-cases/247540/bundle.json에 보존."
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "events": [
+    {
+      "publishedOn": "2020-02-03",
+      "title": "SK이노베이션 EV용 양극재 공급계약",
+      "url": "https://dart.fss.or.kr/dsaf001/main.do?rcpNo=20200203900297",
+      "kind": "industry",
+      "sentences": [
+        {
+          "kind": "then-visible",
+          "asOf": "2020-02-03",
+          "text": "전기차용 하이니켈 NCM 양극소재, SK이노베이션, 2020-01-01~2023-12-31, 2,741,283,000,000원. 금속 국제시세 연동 판가로 계약액 변동 가능.",
+          "citations": [
+            {
+              "publishedOn": "2020-02-03",
+              "url": "https://dart.fss.or.kr/dsaf001/main.do?rcpNo=20200203900297",
+              "quote": "전기차용 하이니켈 NCM 양극소재, SK이노베이션, 2020-01-01~2023-12-31, 2,741,283,000,000원. 금속 국제시세 연동 판가로 계약액 변동 가능."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "publishedOn": "2020-02-10",
+      "title": "삼성SDI와 에코프로이엠 공동출자 계획",
+      "url": "https://dart.fss.or.kr/dsaf001/main.do?rcpNo=20200210900478",
+      "kind": "technology",
+      "sentences": [
+        {
+          "kind": "then-visible",
+          "asOf": "2020-02-10",
+          "text": "삼성SDI 공동출자 에코프로이엠, 양극활물질 생산능력 증대, 에코프로비엠 720억원·취득 후 지분 60% 계획.",
+          "citations": [
+            {
+              "publishedOn": "2020-02-10",
+              "url": "https://dart.fss.or.kr/dsaf001/main.do?rcpNo=20200210900478",
+              "quote": "삼성SDI 공동출자 에코프로이엠, 양극활물질 생산능력 증대, 에코프로비엠 720억원·취득 후 지분 60% 계획."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "publishedOn": "2021-09-09",
+      "title": "SK이노베이션 2024~2026년 양극재 공급계약 공개",
+      "url": "https://dart.fss.or.kr/dsaf001/main.do?rcpNo=20210909900001",
+      "kind": "industry",
+      "sentences": [
+        {
+          "kind": "then-visible",
+          "asOf": "2021-09-09",
+          "text": "공정공시 원문, 계약일 2021-09-08, 공시 후 정보 제공 9월 9일. SK이노베이션 하이니켈 NCM, 2024-01-01~2026-12-31, 10,110,232,000,000원. 향후 금속 시세에 따라 실제 단가·금액 가감.",
+          "citations": [
+            {
+              "publishedOn": "2021-09-09",
+              "url": "https://dart.fss.or.kr/dsaf001/main.do?rcpNo=20210909900001",
+              "quote": "공정공시 원문, 계약일 2021-09-08, 공시 후 정보 제공 9월 9일. SK이노베이션 하이니켈 NCM, 2024-01-01~2026-12-31, 10,110,232,000,000원. 향후 금속 시세에 따라 실제 단가·금액 가감."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "publishedOn": "2022-06-14",
+      "title": "유무상증자 조건 정정",
+      "url": "https://dart.fss.or.kr/dsaf001/main.do?rcpNo=20220614000068",
+      "kind": "capital",
+      "sentences": [
+        {
+          "kind": "then-visible",
+          "asOf": "2022-06-14",
+          "text": "정정 주요사항보고서 유무상증자결정. 유상 신주 1,611,344주·발행가 387,600원. 무상 1주당 3주·배정기준일 2022-06-28.",
+          "citations": [
+            {
+              "publishedOn": "2022-06-14",
+              "url": "https://dart.fss.or.kr/dsaf001/main.do?rcpNo=20220614000068",
+              "quote": "정정 주요사항보고서 유무상증자결정. 유상 신주 1,611,344주·발행가 387,600원. 무상 1주당 3주·배정기준일 2022-06-28."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "publishedOn": "2023-01-13",
+      "title": "한국은행 기준금리 3.50%로 인상",
+      "url": "https://www.bok.or.kr/portal/bbs/P0000559/view.do?menuNo=200690&nttId=10074980",
+      "kind": "policy",
+      "sentences": [
+        {
+          "kind": "then-visible",
+          "asOf": "2023-01-13",
+          "text": "통화정책방향, 한국은행 기준금리 3.25%→3.50%, 성장 둔화 속 물가안정 위해 0.25%p 인상.",
+          "citations": [
+            {
+              "publishedOn": "2023-01-13",
+              "url": "https://www.bok.or.kr/portal/bbs/P0000559/view.do?menuNo=200690&nttId=10074980",
+              "quote": "통화정책방향, 한국은행 기준금리 3.25%→3.50%, 성장 둔화 속 물가안정 위해 0.25%p 인상."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "publishedOn": "2023-03-31",
+      "title": "IRA 핵심광물·배터리부품 제안지침",
+      "url": "https://home.treasury.gov/news/press-releases/jy1379",
+      "kind": "policy",
+      "sentences": [
+        {
+          "kind": "then-visible",
+          "asOf": "2023-03-31",
+          "text": "미 재무부 IRA 친환경차 세액공제 제안지침, 2023-04-18부터 핵심광물·배터리부품 요건 적용, 각 3,750달러. 기업 개별 수익 보장 아님.",
+          "citations": [
+            {
+              "publishedOn": "2023-03-31",
+              "url": "https://home.treasury.gov/news/press-releases/jy1379",
+              "quote": "미 재무부 IRA 친환경차 세액공제 제안지침, 2023-04-18부터 핵심광물·배터리부품 요건 적용, 각 3,750달러. 기업 개별 수익 보장 아님."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "publishedOn": "2023-04-26",
+      "title": "IEA Global EV Outlook 2023 공개",
+      "url": "https://www.iea.org/reports/global-ev-outlook-2023",
+      "kind": "industry",
+      "sentences": [
+        {
+          "kind": "then-visible",
+          "asOf": "2023-04-26",
+          "text": "Global EV Outlook 2023, Trends in electric light-duty vehicles. 2022년 BEV+PHEV 전기차 판매 1,000만대 초과, YoY +55%.",
+          "citations": [
+            {
+              "publishedOn": "2023-04-26",
+              "url": "https://www.iea.org/reports/global-ev-outlook-2023",
+              "quote": "Global EV Outlook 2023, Trends in electric light-duty vehicles. 2022년 BEV+PHEV 전기차 판매 1,000만대 초과, YoY +55%."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "publishedOn": "2023-07-18",
+      "title": "4,400억원 CB 발행결정 정정",
+      "url": "https://dart.fss.or.kr/dsaf001/main.do?rcpNo=20230718000385",
+      "kind": "capital",
+      "sentences": [
+        {
+          "kind": "then-visible",
+          "asOf": "2023-07-18",
+          "text": "정정 전환사채권발행결정. 권면총액 440,000,000,000원, 전환청구 시작 2024-07-24. 결정·예정 조건이며 전환 실행의 증명이 아님.",
+          "citations": [
+            {
+              "publishedOn": "2023-07-18",
+              "url": "https://dart.fss.or.kr/dsaf001/main.do?rcpNo=20230718000385",
+              "quote": "정정 전환사채권발행결정. 권면총액 440,000,000,000원, 전환청구 시작 2024-07-24. 결정·예정 조건이며 전환 실행의 증명이 아님."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "publishedOn": "2023-07-27",
+      "title": "미 연준 목표금리 5.25~5.50% 발표, 한국 날짜",
+      "url": "https://www.federalreserve.gov/newsevents/pressreleases/monetary20230726a.htm",
+      "kind": "policy",
+      "sentences": [
+        {
+          "kind": "then-visible",
+          "asOf": "2023-07-27",
+          "text": "미국 2023-07-26 14:00 EDT 발표, 한국 2023-07-27 03:00. 연방기금금리 목표 5.25~5.50%.",
+          "citations": [
+            {
+              "publishedOn": "2023-07-27",
+              "url": "https://www.federalreserve.gov/newsevents/pressreleases/monetary20230726a.htm",
+              "quote": "미국 2023-07-26 14:00 EDT 발표, 한국 2023-07-27 03:00. 연방기금금리 목표 5.25~5.50%."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "publishedOn": "2023-11-05",
+      "title": "공매도 전면금지 결정, 다음 날 시행",
+      "url": "https://www.fsc.go.kr/no010101/81013",
+      "kind": "policy",
+      "sentences": [
+        {
+          "kind": "then-visible",
+          "asOf": "2023-11-05",
+          "text": "금융위 공매도 전면금지 결정, 2023-11-06부터 2024-06말까지 발표. 시장조성자·유동성공급자 등 예외.",
+          "citations": [
+            {
+              "publishedOn": "2023-11-05",
+              "url": "https://www.fsc.go.kr/no010101/81013",
+              "quote": "금융위 공매도 전면금지 결정, 2023-11-06부터 2024-06말까지 발표. 시장조성자·유동성공급자 등 예외."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "publishedOn": "2024-06-05",
+      "title": "에코프로글로벌 합병 완료·코스피 이전상장 추진 발표",
+      "url": "https://www.ecoprobm.com/bm_/sub0701/view/page/10/id/1534",
+      "kind": "index",
+      "sentences": [
+        {
+          "kind": "then-visible",
+          "asOf": "2024-06-05",
+          "text": "회사 발표. 6월 3일 에코프로글로벌 합병등기 완료, 코스피 이전상장은 기업실사·예비심사 신청 준비 단계이며 연내 완료는 목표.",
+          "citations": [
+            {
+              "publishedOn": "2024-06-05",
+              "url": "https://www.ecoprobm.com/bm_/sub0701/view/page/10/id/1534",
+              "quote": "회사 발표. 6월 3일 에코프로글로벌 합병등기 완료, 코스피 이전상장은 기업실사·예비심사 신청 준비 단계이며 연내 완료는 목표."
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
