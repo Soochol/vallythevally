@@ -7,7 +7,7 @@ import { isHexColor, type HexColor } from "../../lib/colors";
 import { Errors, Row, Segment } from "../dialog/DialogParts";
 import { ColorTable, type ThemeSwatch } from "../color/ColorTable";
 import { useColorMore } from "../color/colorMore";
-import { canOverlayPrice, hasBarOpacity, hasColor, placeErrors, type Draft, type FieldError, type Validate } from "./indicatorForm";
+import { canOverlayPrice, hasBarOpacity, hasColor, indicatorPeriodNotice, placeErrors, type Draft, type FieldError, type Validate } from "./indicatorForm";
 
 const METHODS = [
   ["sma", "단순"],
@@ -63,8 +63,10 @@ export function IndicatorSettingsForm({ draft, color, errors, onChange, lineSamp
   const setText = (key: string, value: string) => onChange({ ...draft, form: { ...draft.form, text: { ...draft.form.text, [key]: value } } });
   const setEnabled = (key: string, on: boolean) => onChange({ ...draft, form: { ...draft.form, enabled: { ...draft.form.enabled, [key]: on } } });
   const lined = hasColor(draft.form);
+  const notice = indicatorPeriodNotice(kind);
   const css = indicatorCssColor(color);
   return <div className="@container flex flex-col gap-4">
+    {notice && <p className="text-xs text-text-3">{notice}</p>}
     {lined && lineSample && <svg role="img" aria-label="선 미리보기" className="h-[60px] w-full flex-none rounded-m bg-chart-bg shadow-[inset_0_0_0_1px_var(--line)]" viewBox="0 0 636 60" preserveAspectRatio="none" fill="none">
       <path d="M0 44 C 50 42, 80 18, 140 24 S 230 48, 290 38 S 390 8, 450 16 S 560 34, 636 12" stroke={css} strokeWidth={draft.width} strokeLinecap="round" vectorEffect="non-scaling-stroke" />
     </svg>}
