@@ -629,3 +629,41 @@ async fn a_null_exclude_at_the_largest_revision_is_fixed_and_keeps_that_revision
     assert_eq!(migrated, json!([stored_screen("null", Some(json!(["etn", "infrastructure", "mutual_fund"])))]));
     assert_eq!(revision, i64::MAX);
 }
+
+#[tokio::test]
+async fn micro_conditions_save_reload_and_reject_invalid_values() {
+    let fake = ScriptedTransport::new();
+    let tmp = tempfile::tempdir().unwrap();
+    let lock = tmp.path().join("run/server.lock");
+    let server = Server::spawn(&fake, &lock, tmp.path());
+    let api = ScreensApi::of(&server).await;
+
+    let valid = screens(
+        vec![screen_of(
+            "S-micro",
+            "수급 조건",
+            vec![
+                json!({"kind": "program_net_buy", "days": 5, "minMillionWon": 1_000.0, "maxMillionWon": null}),
+                json!({"kind": "whale_net_buy", "days": 3, "minMillionWon": -500.0, "maxMillionWon": 2_000.0}),
+                json!({"kind": "vi_triggered", "days": 10, "minCount": 2}),
+            ],
+        )],
+        1,
+    );
+    assert_eq!(api.put(valid.to_string()).await, (200, valid.clone()));
+    assert_eq!(api.get().await, (200, valid.clone()));
+
+    for bad in [
+        json!({"kind": "program_net_buy", "days": 61, "minMillionWon": 100.0, "maxMillionWon": null}),
+        json!({"kind": "whale_net_buy", "days": 0, "minMillionWon": 100.0, "maxMillionWon": null}),
+        json!({"kind": "vi_triggered", "days": 5, "minCount": 0}),
+    ] {
+        let body = screens(vec![screen_of("S-bad", "잘못됨", vec![bad])], 2).to_string();
+        assert_eq!(api.put(body).await.0, 400);
+    }
+
+    server.stop().await;
+    let restarted = Server::spawn(&fake, &lock, tmp.path());
+    assert_eq!(ScreensApi::of(&restarted).await.get().await, (200, valid));
+    restarted.stop().await;
+}

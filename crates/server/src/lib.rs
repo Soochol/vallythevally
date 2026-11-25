@@ -31,6 +31,7 @@ pub mod market;
 pub mod market_source;
 pub mod market_overview;
 pub mod micro_events;
+pub mod micro_series;
 pub mod public;
 pub mod public_ip;
 pub mod quote_minutes;

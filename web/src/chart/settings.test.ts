@@ -353,3 +353,19 @@ test("히트맵 설정을 저장했다가 그대로 읽고 틀린 값은 거절�
   expect(readSpecShape({ ...spec, showIceberg: 1 })).toBeNull();
   expect(readSpecShape({ ...spec, microLabelMode: "full" })).toBeNull();
 });
+
+test("계층별 CVD와 프로그램 수급 설정을 저장했다가 읽고 잘못된 값은 거절한다", () => {
+  const cvd = { kind: "tickCvd", showWhale: true, showLarge: true, showMid: false, showRetail: true } as const;
+  const prog = { kind: "programFlow", showShare: true } as const;
+  const settings: ChartSettings = {
+    ...DEFAULT_CHART_SETTINGS,
+    indicators: [
+      { id: "cvd", spec: cvd, panel: "p-cvd", visible: true, style: { colors: ["ind-1", "ind-2", "ind-3"], width: 1 } },
+      { id: "prog", spec: prog, panel: "p-prog", visible: true, style: { colors: ["ind-4", "ind-5"], width: 2 } },
+    ],
+    panels: [{ id: "p-cvd", stretch: 0.25 }, { id: "p-prog", stretch: 0.25 }],
+  };
+  expect(parseChartSettings(JSON.parse(JSON.stringify(settings)))).toEqual(settings);
+  expect(readSpecShape({ ...cvd, showWhale: "yes" })).toBeNull();
+  expect(readSpecShape({ ...prog, showShare: 1 })).toBeNull();
+});

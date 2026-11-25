@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { colorsFrom, firstUnusedColor, isFinancial, isQuote, isQuoteDepth, isQuoteTotals, isTechnical, KIND_ORDER, KINDS, lineColor, colorLine, placementsOf, shownColor, specLines, specName } from "./kinds";
+import { colorsFrom, firstUnusedColor, isFinancial, isMicro, isProgramFlow, isQuote, isQuoteDepth, isQuoteTotals, isTechnical, isTickCvd, KIND_ORDER, KINDS, lineColor, colorLine, placementsOf, shownColor, specLines, specName } from "./kinds";
 
 test("기본값은 backend.md §9.5 표를 따른다", () => {
   expect(KIND_ORDER.map((k) => KINDS[k].defaults)).toEqual([
@@ -10,6 +10,8 @@ test("기본값은 backend.md §9.5 표를 따른다", () => {
     { kind: "rsi", period: 14, signal: null },
     { kind: "macd", fast: 12, slow: 26, signal: 9 },
     { kind: "stochSlow", k: 5, d: 3, smooth: 3 },
+    { kind: "tickCvd", showWhale: true, showLarge: false, showMid: false, showRetail: true },
+    { kind: "programFlow", showShare: false },
     { kind: "quoteTotals" },
     { kind: "quoteDepth", source: "priceMax", topLevels: null, maxOpacity: 0.7, aboveBars: false, askColor: null, bidColor: null, showSpoof: false, showIceberg: false, microLabelMode: "clean" },
     ...["revenue", "operating_income", "owner_roe", "investing_cash_flow", "dps", "debt_ratio"].map((kind) => ({ kind })),
@@ -74,4 +76,27 @@ test("히트맵은 가격 패널의 호가지표다", () => {
     ["bidColor", "매수 색", "color"],
   ]);
   expect(KINDS.quoteDepth.fields[0]).toMatchObject({ options: [["priceMax", "가격대마다 최댓값"], ["peak", "총잔량 최대 순간"], ["close", "종가 호가"]] });
+});
+
+test("계층별 CVD와 프로그램 수급은 아래 패널의 미세 수급 지표다", () => {
+  const cvd = KINDS.tickCvd.defaults;
+  expect(KINDS.tickCvd.label).toBe("계층별 CVD");
+  expect(specName(cvd)).toBe("계층별 CVD");
+  expect(specLines(cvd)).toEqual(["cvdWhale", "cvdRetail"]);
+  expect(specLines({ kind: "tickCvd", showWhale: true, showLarge: true, showMid: true, showRetail: true })).toEqual([
+    "cvdWhale",
+    "cvdLarge",
+    "cvdMid",
+    "cvdRetail",
+  ]);
+  expect(placementsOf("tickCvd")).toEqual(["panel"]);
+  expect([isMicro(cvd), isTickCvd(cvd), isProgramFlow(cvd), isTechnical(cvd)]).toEqual([true, true, false, false]);
+
+  const prog = KINDS.programFlow.defaults;
+  expect(KINDS.programFlow.label).toBe("프로그램 수급");
+  expect(specName(prog)).toBe("프로그램 수급");
+  expect(specLines(prog)).toEqual(["programNet"]);
+  expect(specLines({ kind: "programFlow", showShare: true })).toEqual(["programNet", "programShare"]);
+  expect(placementsOf("programFlow")).toEqual(["panel"]);
+  expect([isMicro(prog), isProgramFlow(prog), isTickCvd(prog), isTechnical(prog)]).toEqual([true, true, false, false]);
 });

@@ -58,7 +58,7 @@ export function EtfPage() {
       go({ basket: [...basket, next] });
     }
   };
-  const standalone = code === null && (tab === "overlap" || tab === "reverse");
+  const standalone = code === null && (tab === "overlap" || tab === "reverse" || tab === "accumulation");
   const detailOpen = code !== null || standalone;
   return (
     <PageFrame title="ETF" fresh={{ failed: (selected ?? list?.[0])?.status.refreshFailed === true }} freshness={<Freshness status={(selected ?? list?.[0])?.status ?? null} />}>
@@ -78,6 +78,7 @@ export function EtfPage() {
             basketNotice={basketNotice}
             onToggleBasket={toggleBasket}
             onShowOverlap={() => go({ tab: "overlap", code: null })}
+            onShowAccumulation={() => go({ tab: "accumulation", code: null })}
           />
           <div className="etf-main">
             {list !== null && (

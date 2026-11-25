@@ -4,11 +4,15 @@ use super::exact::Decimal;
 use super::indicator::Indicator;
 use super::line::{Kind, Line};
 use super::market_cap::MarketCapRange;
+use super::micro::MicroRule;
 use crate::api::{BarField, Bound, Condition, ExcludeKind, Extreme, Market, RsiTest, Screen, StochasticTest, SurgeField};
+
+const MAX_MICRO_DAYS: u32 = 60;
 
 pub(crate) struct RunnableScreen {
     pub(super) lines: Vec<Line>,
     pub(super) market_caps: Vec<MarketCapRange>,
+    pub(super) micros: Vec<MicroRule>,
     pub(super) markets: Vec<Market>,
     pub(super) exclude: Vec<ExcludeKind>,
 }
@@ -29,19 +33,21 @@ impl fmt::Display for Invalid {
 }
 
 pub(crate) fn parse_screen(screen: &Screen) -> Result<RunnableScreen, Invalid> {
-    let (mut lines, mut market_caps) = (Vec::new(), Vec::new());
+    let (mut lines, mut market_caps, mut micros) = (Vec::new(), Vec::new(), Vec::new());
     for (k, condition) in screen.conditions.iter().enumerate() {
         match rule_of(condition).map_err(|why| Invalid(format!("조건식 {}의 {}번째 조건: {why}", screen.name, k + 1)))? {
             Rule::Bars(line) => lines.push(line),
             Rule::MarketCap(range) => market_caps.push(range),
+            Rule::Micro(rule) => micros.push(rule),
         }
     }
-    Ok(RunnableScreen { lines, market_caps, markets: screen.markets.clone(), exclude: screen.exclude.clone() })
+    Ok(RunnableScreen { lines, market_caps, micros, markets: screen.markets.clone(), exclude: screen.exclude.clone() })
 }
 
 enum Rule {
     Bars(Line),
     MarketCap(MarketCapRange),
+    Micro(MicroRule),
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -67,6 +73,10 @@ impl Allowed {
 
 fn at_least_one(what: &str, value: u32) -> Result<(), String> {
     if value >= 1 { Ok(()) } else { Err(format!("{what}는 1 이상이어야 합니다")) }
+}
+
+fn micro_days(value: u32) -> Result<(), String> {
+    if (1..=MAX_MICRO_DAYS).contains(&value) { Ok(()) } else { Err(format!("days는 1~{MAX_MICRO_DAYS}여야 합니다")) }
 }
 
 fn indicator_length(what: &str, value: u16) -> Result<(), String> {
@@ -193,6 +203,21 @@ fn rule_of(condition: &Condition) -> Result<Rule, String> {
             let (min, max) = bounds(min, max, Allowed::NonNegative)?;
             Ok(Rule::MarketCap(MarketCapRange { min, max }))
         }
+        Condition::ProgramNetBuy { days, min_million_won, max_million_won } => {
+            micro_days(days)?;
+            let (min, max) = bounds(min_million_won, max_million_won, Allowed::Any)?;
+            Ok(Rule::Micro(MicroRule::ProgramNetBuy { days, min, max }))
+        }
+        Condition::WhaleNetBuy { days, min_million_won, max_million_won } => {
+            micro_days(days)?;
+            let (min, max) = bounds(min_million_won, max_million_won, Allowed::Any)?;
+            Ok(Rule::Micro(MicroRule::WhaleNetBuy { days, min, max }))
+        }
+        Condition::ViTriggered { days, min_count } => {
+            micro_days(days)?;
+            at_least_one("minCount", min_count)?;
+            Ok(Rule::Micro(MicroRule::ViTriggered { days, min_count }))
+        }
     }
 }
 
@@ -220,6 +245,9 @@ mod tests {
             "bollinger" => json!({"kind": "bollinger", "period": "D", "recentBars": 1, "length": 20, "k": 2.0, "test": {"kind": "outside", "side": "above"}}),
             "ichimoku" => json!({"kind": "ichimoku", "period": "D", "recentBars": 1, "conversion": 9, "base": 26, "spanB": 52, "displacement": 26, "test": {"kind": "cloud", "side": "above"}}),
             "market_cap" => json!({"kind": "market_cap", "min": 300_000_000_000.0, "max": null}),
+            "program_net_buy" => json!({"kind": "program_net_buy", "days": 5, "minMillionWon": 1_000.0, "maxMillionWon": null}),
+            "whale_net_buy" => json!({"kind": "whale_net_buy", "days": 5, "minMillionWon": 500.0, "maxMillionWon": null}),
+            "vi_triggered" => json!({"kind": "vi_triggered", "days": 5, "minCount": 1}),
             other => panic!("모르는 조건 종류 {other}"),
         }
     }
@@ -415,7 +443,34 @@ mod tests {
     fn the_message_names_the_screen_and_the_failing_line_and_keeps_markets_and_exclusions() {
         let screen = screen_of(vec![example("new_high"), with("new_high", "n", json!(0)), with("rsi", "length", json!(0))]);
         assert_eq!(parse_screen(&screen).map(drop).unwrap_err().to_string(), "조건식 기본의 2번째 조건: n는 1 이상이어야 합니다");
-        let runnable = parse_screen(&screen_of(vec![example("new_high"), example("market_cap"), example("rsi")])).unwrap();
-        assert_eq!((runnable.lines.len(), runnable.market_caps.len(), runnable.markets.len(), runnable.exclude.len()), (2, 1, 1, 1));
+        let runnable = parse_screen(&screen_of(vec![example("new_high"), example("market_cap"), example("rsi"), example("program_net_buy")])).unwrap();
+        assert_eq!((runnable.lines.len(), runnable.market_caps.len(), runnable.micros.len(), runnable.markets.len(), runnable.exclude.len()), (2, 1, 1, 1, 1));
+    }
+
+    #[test]
+    fn micro_conditions_validate_days_count_and_bounds() {
+        let cases = [
+            (example("program_net_buy"), Ok(())),
+            (with("program_net_buy", "days", json!(1)), Ok(())),
+            (with("program_net_buy", "days", json!(60)), Ok(())),
+            (with("program_net_buy", "days", json!(0)), refused("days는 1~60여야 합니다")),
+            (with("program_net_buy", "days", json!(61)), refused("days는 1~60여야 합니다")),
+            (with("program_net_buy", "minMillionWon", json!(-500.0)), Ok(())),
+            (with("program_net_buy", "minMillionWon", Value::Null), refused("min과 max 가운데 하나는 있어야 합니다")),
+            (with("program_net_buy", "maxMillionWon", json!(500.0)), refused("min은 max 이하여야 합니다: min=1000, max=500")),
+            (example("whale_net_buy"), Ok(())),
+            (with("whale_net_buy", "days", json!(0)), refused("days는 1~60여야 합니다")),
+            (with("whale_net_buy", "days", json!(61)), refused("days는 1~60여야 합니다")),
+            (with("whale_net_buy", "minMillionWon", Value::Null), refused("min과 max 가운데 하나는 있어야 합니다")),
+            (with("whale_net_buy", "maxMillionWon", json!(100.0)), refused("min은 max 이하여야 합니다: min=500, max=100")),
+            (example("vi_triggered"), Ok(())),
+            (with("vi_triggered", "days", json!(60)), Ok(())),
+            (with("vi_triggered", "days", json!(0)), refused("days는 1~60여야 합니다")),
+            (with("vi_triggered", "days", json!(61)), refused("days는 1~60여야 합니다")),
+            (with("vi_triggered", "minCount", json!(0)), refused("minCount는 1 이상이어야 합니다")),
+        ];
+        for (condition, expected) in cases {
+            assert_eq!(judged(condition.clone()), expected, "{condition}");
+        }
     }
 }

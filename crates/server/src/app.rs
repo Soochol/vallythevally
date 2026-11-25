@@ -422,6 +422,9 @@ pub async fn start_with(config: &Config, lock: &InstanceLock, adapters: Adapters
         tracing::info!("VALLY_HOGA_DATA_DIR과 VALLY_SHARED_DATA_DIR이 없어 분 호가·호가 복기·수집 거래원을 끕니다");
     }
     state.collector_paths.configure(collector_paths);
+    if let Some(shared_dir) = state.collector_paths.shared_dir() {
+        state.screener.read_daily_micro(shared_dir.to_path_buf());
+    }
     if let Some(shared) = &config.shared_data {
         state.screener.read_shared_snapshots(state.shared_data.clone(), config.screener_snapshot_stale_limit);
         state.screener.keep_calendar_fresh();

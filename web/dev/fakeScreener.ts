@@ -77,8 +77,9 @@ const fail = (status: number, code: ApiErrorCode, message: string, reason: ApiEr
 });
 
 const isObject = (x: unknown): x is Record<string, unknown> => typeof x === "object" && x !== null && !Array.isArray(x);
-type BarCondition = Exclude<Condition, { kind: "market_cap" }>;
-const isBarCondition = (c: Condition): c is BarCondition => c.kind !== "market_cap";
+type BarCondition = Exclude<Condition, { kind: "market_cap" | "program_net_buy" | "whale_net_buy" | "vi_triggered" }>;
+const isBarCondition = (c: Condition): c is BarCondition =>
+  c.kind !== "market_cap" && c.kind !== "program_net_buy" && c.kind !== "whale_net_buy" && c.kind !== "vi_triggered";
 
 const matchChance = (c: Condition) => {
   if (c.kind === "new_high" || c.kind === "new_low") return Math.min(0.9, 0.3 + (4 * c.recentBars) / c.n);

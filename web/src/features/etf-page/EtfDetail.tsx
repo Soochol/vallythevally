@@ -7,6 +7,7 @@ import { useSendSymbol } from "../pages/sendSymbol";
 import { Tabs, panelDomId, tabDomId } from "../ui/Tabs";
 import { Failure, Loading, Notice } from "./EtfStates";
 import { HelpTip } from "./HelpTip";
+import { AccumulationTab } from "./AccumulationTab";
 import { CumulativeCurve } from "./CumulativeCurve";
 import { HistoryTab } from "./HistoryTab";
 import { HoldingsTable } from "./HoldingsTable";
@@ -20,6 +21,7 @@ export const TABS = [
   { id: "overlap", label: "겹침" },
   { id: "history", label: "편입 변경" },
   { id: "reverse", label: "역추적" },
+  { id: "accumulation", label: "동시 매집" },
 ] as const;
 export type TabId = (typeof TABS)[number]["id"];
 
@@ -98,6 +100,7 @@ interface EtfDetailProps {
 function Panel({ fund, funds, tab, basket, stock, pair, onPair, onRemoveFromBasket, onStock, onOpenFund }: EtfDetailProps) {
   if (tab === "overlap") return <OverlapTab basket={basket} funds={funds} onRemove={onRemoveFromBasket} />;
   if (tab === "reverse") return <ReverseTab stock={stock} onStock={onStock} onOpenFund={onOpenFund} />;
+  if (tab === "accumulation") return <AccumulationTab onOpenFund={onOpenFund} />;
   if (tab === "holdings" && fund) return <HoldingsTab code={fund.code} />;
   if (tab === "history" && fund) return <HistoryTab code={fund.code} pair={pair} onPair={onPair} />;
   return <Notice title="준비 중입니다" />;

@@ -205,6 +205,17 @@ export const buyingPowerOf = (orderable: TradingOrderable | null): BuyingPower |
 
 export const maxBuyQuantity = (price: number, amount: number): number => (price > 0 ? Math.floor(amount / price) : 0);
 
+export function orderQuantityForPrice(
+  side: OrderSide,
+  price: number,
+  quantity: number,
+  buying: BuyingPower | null,
+  buyFull: boolean,
+): number {
+  if (side === "buy" && buyFull && buying !== null) return maxBuyQuantity(price, buying.amount);
+  return quantity;
+}
+
 const LIMIT_NAME: Readonly<Record<MarginPolicy, string>> = { cash_only: "현금 주문가능", allow_margin: "미수 포함 주문가능" };
 
 export const marginOf = (won: number, buying: BuyingPower | null): number =>

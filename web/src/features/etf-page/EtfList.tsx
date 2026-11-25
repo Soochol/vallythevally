@@ -26,9 +26,10 @@ interface EtfListProps {
   basketNotice: string | null;
   onToggleBasket: (code: string) => void;
   onShowOverlap: () => void;
+  onShowAccumulation: () => void;
 }
 
-function BasketChips({ funds, basket, onToggleBasket, onShowOverlap }: Pick<EtfListProps, "basket" | "onToggleBasket" | "onShowOverlap"> & { funds: readonly EtfFundSummary[] }) {
+function BasketChips({ funds, basket, onToggleBasket, onShowOverlap, onShowAccumulation }: Pick<EtfListProps, "basket" | "onToggleBasket" | "onShowOverlap" | "onShowAccumulation"> & { funds: readonly EtfFundSummary[] }) {
   const nameOf = (code: string) => funds.find((fund) => fund.code === code)?.name ?? code;
   return (
     <div className="etf-basket">
@@ -44,11 +45,12 @@ function BasketChips({ funds, basket, onToggleBasket, onShowOverlap }: Pick<EtfL
         </ul>
       )}
       <button type="button" className="btn etf-overlap-link" disabled={basket.length < 2} onClick={onShowOverlap}>겹침 보기</button>
+      <button type="button" className="btn etf-overlap-link" onClick={onShowAccumulation}>동시 매집</button>
     </div>
   );
 }
 
-export function EtfList({ funds, selected, filter, sort, onFilter, onSort, onSelect, basket, basketNotice, onToggleBasket, onShowOverlap }: EtfListProps) {
+export function EtfList({ funds, selected, filter, sort, onFilter, onSort, onSelect, basket, basketNotice, onToggleBasket, onShowOverlap, onShowAccumulation }: EtfListProps) {
   const shown = funds === null ? [] : sortFunds(filterFunds(funds, filter), sort);
   const issuerChoices = [{ value: ALL_ISSUERS, label: "운용사 전체" }, ...(funds === null ? [] : issuersOf(funds)).map((issuer) => ({ value: issuer, label: issuer }))];
   return (
@@ -69,7 +71,7 @@ export function EtfList({ funds, selected, filter, sort, onFilter, onSort, onSel
           <Select label="정렬" className="etf-select" value={sort} options={SORT_CHOICES} onChange={onSort} />
         </div>
       </div>
-      {funds !== null && <BasketChips funds={funds} basket={basket} onToggleBasket={onToggleBasket} onShowOverlap={onShowOverlap} />}
+      {funds !== null && <BasketChips funds={funds} basket={basket} onToggleBasket={onToggleBasket} onShowOverlap={onShowOverlap} onShowAccumulation={onShowAccumulation} />}
       {basketNotice !== null && <div className="etf-basket-notice" role="alert">{basketNotice}</div>}
       {funds === null ? (
         <div className="etf-list-loading"><Skeleton label="ETF 목록을 불러오는 중입니다" rows={8} /></div>

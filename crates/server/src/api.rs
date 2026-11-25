@@ -1993,6 +1993,9 @@ pub enum Condition {
     Bollinger { period: ScreenPeriod, recent_bars: RecentBars, length: u16, k: f64, test: BollingerTest },
     Ichimoku { period: ScreenPeriod, recent_bars: RecentBars, conversion: u16, base: u16, span_b: u16, displacement: u16, test: IchimokuTest },
     MarketCap { min: Bound, max: Bound },
+    ProgramNetBuy { days: u32, min_million_won: Bound, max_million_won: Bound },
+    WhaleNetBuy { days: u32, min_million_won: Bound, max_million_won: Bound },
+    ViTriggered { days: u32, min_count: u32 },
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
@@ -2045,6 +2048,15 @@ pub struct ScreenerRow {
     pub matched_date: KstDate,
     pub latest_bar_date: KstDate,
     pub provisional: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(type = "number", optional)]
+    pub program_net_million_won: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(type = "number", optional)]
+    pub whale_net_million_won: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub vi_count: Option<u32>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -3018,7 +3030,7 @@ mod tests {
             missing_summary: 3,
             universe: 3957,
             excluded: ScreenerExcluded { listed_too_short: 14, history_short: 120, unconfirmed: 2 },
-            rows: vec![ScreenerRow { symbol: SymbolCode("005930".into()), name: "삼성전자".into(), close: 193_400.0, change_rate: None, matched_date: day(2026, 11, 9), latest_bar_date: day(2026, 11, 10), provisional: true }],
+            rows: vec![ScreenerRow { symbol: SymbolCode("005930".into()), name: "삼성전자".into(), close: 193_400.0, change_rate: None, matched_date: day(2026, 11, 9), latest_bar_date: day(2026, 11, 10), provisional: true, program_net_million_won: None, whale_net_million_won: None, vi_count: None }],
         };
         let result_json = json!({"asOf": "2026-11-10", "collectionStartedAt": 1, "collectionCompletedAt": 2, "missingSummary": 3, "universe": 3957, "excluded": {"listedTooShort": 14, "historyShort": 120, "unconfirmed": 2},
                                  "rows": [{"symbol": "005930", "name": "삼성전자", "close": 193_400.0, "changeRate": null, "matchedDate": "2026-11-09", "latestBarDate": "2026-11-10", "provisional": true}]});
