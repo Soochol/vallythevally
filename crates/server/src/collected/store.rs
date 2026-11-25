@@ -37,7 +37,7 @@ pub(super) fn read_day<K: CollectedKind>(
     let day_start_ms = kst(date, 0, 0, 0).unix() * 1000;
     let day_end_ms = day_start_ms + 86_400_000;
     let fids = K::fids();
-    let sql = build_query(fids);
+    let sql = build_query(fids, K::plus_sign_fids());
     let mut stmt = conn.prepare(&sql).map_err(|e| format!("수집 저장소 조회 준비 실패: {e}"))?;
     let mut ordered: Vec<(i64, i64, K::View)> = Vec::new();
     let mut skipped: u64 = 0;
@@ -55,7 +55,7 @@ pub(super) fn read_day<K: CollectedKind>(
                 values.push(value);
             }
             let fid_values = FidValues::new(fids, &values);
-            let Some(view) = K::decode(recv_ms, &fid_values) else {
+            let Some(view) = K::decode_store(symbol, recv_ms, &fid_values) else {
                 skipped += 1;
                 continue;
             };
@@ -72,10 +72,16 @@ pub(super) fn read_day<K: CollectedKind>(
     Ok(StoreDay { snapshots, gaps })
 }
 
-fn build_query(fids: &[u32]) -> String {
+fn build_query(fids: &[u32], plus_sign_fids: &[u32]) -> String {
     let mut cols = String::from("recv_ms, file_row_number");
     for fid in fids {
-        cols.push_str(&format!(", CAST(f{fid} AS VARCHAR)"));
+        if plus_sign_fids.contains(fid) {
+            cols.push_str(&format!(
+                ", CASE WHEN f{fid}_plus AND f{fid} IS NOT NULL THEN '+' || CAST(f{fid} AS VARCHAR) ELSE CAST(f{fid} AS VARCHAR) END"
+            ));
+        } else {
+            cols.push_str(&format!(", CAST(f{fid} AS VARCHAR)"));
+        }
     }
     format!(
         "SELECT {cols} FROM read_parquet($1, file_row_number = true) WHERE symbol = $2 AND recv_ms >= $3 AND recv_ms < $4 ORDER BY recv_ms ASC, file_row_number ASC"

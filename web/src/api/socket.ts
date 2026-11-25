@@ -108,7 +108,7 @@ export class MarketSocket implements MarketSocketLike {
   private watchVenue: Venue = "combined";
   private readonly quoteHandlers = new Set<(e: QuoteEvent) => void>();
   private readonly viHandlers = new Set<(e: ViEvent) => void>();
-  private readonly feedTaps = new Set<(request: FeedRequest, event: FeedEvent) => void>();
+  private readonly feedTaps = new Set<(request: FeedRequest, event: FeedEvent, sub: string) => void>();
   private readonly tradingAccountHandlers = new Set<(accountRef: string) => void>();
 
   constructor(private readonly opts: { url: () => string; connect?: Connect; onKiwoomLink?: (status: KiwoomLinkStatus) => void; onMarketSource?: (status: MarketSourceStatus) => void; onAccount?: (status: AccountStatus) => void; onSetupChanged?: (kinds: readonly DocumentKind[]) => void; onCollectorDaemon?: (judgment: DaemonJudgment, at: UnixSeconds) => void }) {}
@@ -169,9 +169,13 @@ export class MarketSocket implements MarketSocketLike {
     return () => this.viHandlers.delete(handler);
   }
 
-  onFeedTap(handler: (request: FeedRequest, event: FeedEvent) => void): () => void {
+  onFeedTap(handler: (request: FeedRequest, event: FeedEvent, sub: string) => void): () => void {
     this.feedTaps.add(handler);
     return () => this.feedTaps.delete(handler);
+  }
+
+  hasFeedSub(sub: string): boolean {
+    return this.feeds.has(sub);
   }
 
   watchTradingAccount(handler: (accountRef: string) => void): () => void {
@@ -228,7 +232,7 @@ export class MarketSocket implements MarketSocketLike {
         const feed = this.feeds.get(m.sub);
         if (feed) {
           feed.handler(m);
-          for (const tap of this.feedTaps) tap(feed.request, m);
+          for (const tap of this.feedTaps) tap(feed.request, m, m.sub);
         }
         return;
       }

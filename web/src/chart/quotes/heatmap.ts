@@ -28,6 +28,7 @@ export interface QuoteDepthHost {
   bars(): readonly { t: UnixSeconds }[];
   tokens(): ThemeTokens;
   layers(): readonly QuoteDepthLayer[];
+  periodSec?(): number;
 }
 
 type DrawTarget = Parameters<IPrimitivePaneRenderer["draw"]>[0];
@@ -134,6 +135,7 @@ export class QuoteDepthHeatmap implements ISeriesPrimitive<Time> {
           bars,
           from,
           to,
+          periodSec: this.host.periodSec?.() ?? 60,
           events: layer.microEvents,
           showSpoof: layer.spec.showSpoof === true,
           showIceberg: layer.spec.showIceberg === true,
@@ -161,10 +163,11 @@ export class QuoteDepthHeatmap implements ISeriesPrimitive<Time> {
   }
 }
 
-interface MicroMarkerArgs {
+export interface MicroMarkerArgs {
   readonly bars: readonly { t: UnixSeconds }[];
   readonly from: number;
   readonly to: number;
+  readonly periodSec: number;
   readonly events: readonly MicroEvent[];
   readonly showSpoof: boolean;
   readonly showIceberg: boolean;
@@ -196,6 +199,25 @@ function barIndexForSec(bars: readonly { t: UnixSeconds }[], from: number, to: n
   return best;
 }
 
+export function resolveMicroMarkerBarIndex(
+  bars: readonly { t: UnixSeconds }[],
+  from: number,
+  to: number,
+  periodSec: number,
+  sec: number,
+): number {
+  if (from > to || bars.length === 0) return -1;
+  const span = Math.max(1, periodSec);
+  const startSec = bars[from]!.t;
+  const endSec = bars[to]!.t + span;
+  if (sec < startSec || sec >= endSec) return -1;
+  const barIdx = barIndexForSec(bars, from, to, sec);
+  if (barIdx < from || barIdx > to) return -1;
+  const barStart = bars[barIdx]!.t;
+  const barEnd = barIdx < to ? Math.min(bars[barIdx + 1]!.t, barStart + span) : barStart + span;
+  return sec < barEnd ? barIdx : -1;
+}
+
 function shortMicroBadge(event: MicroEvent): string {
   if (event.kind === "spoof_cancel") {
     return `허수 ${Math.round(event.ratioBps / 100)}%`;
@@ -203,11 +225,8 @@ function shortMicroBadge(event: MicroEvent): string {
   return `흡수 ${(event.ratioBps / 10_000).toFixed(1)}x`;
 }
 
-function drawMicroMarkers(ctx: CanvasRenderingContext2D, args: MicroMarkerArgs): void {
-  const { bars, from, to, events, showSpoof, showIceberg, verbose, spoofColor, icebergColor, bgColor, textColor, fontFamily, horizontalPixelRatio, verticalPixelRatio } = args;
-  const startSec = bars[from]!.t;
-  const stepSec = to > from ? Math.max(60, bars[to]!.t - bars[to - 1]!.t) : 60;
-  const endSec = bars[to]!.t + stepSec;
+export function drawMicroMarkers(ctx: CanvasRenderingContext2D, args: MicroMarkerArgs): void {
+  const { bars, from, to, periodSec, events, showSpoof, showIceberg, verbose, spoofColor, icebergColor, bgColor, textColor, fontFamily, horizontalPixelRatio, verticalPixelRatio } = args;
   const radius = Math.max(2.5, 3.5 * horizontalPixelRatio);
   const strokeWidth = Math.max(1, 1.25 * horizontalPixelRatio);
   const fontSize = Math.max(9, Math.round(10 * verticalPixelRatio));
@@ -222,9 +241,8 @@ function drawMicroMarkers(ctx: CanvasRenderingContext2D, args: MicroMarkerArgs):
     if (event.kind === "spoof_cancel" && !showSpoof) continue;
     if (event.kind === "iceberg_absorb" && !showIceberg) continue;
     const sec = Math.floor(event.recvMs / 1000);
-    if (sec < startSec || sec >= endSec) continue;
-    const barIdx = barIndexForSec(bars, from, to, sec);
-    if (barIdx < from || barIdx > to) continue;
+    const barIdx = resolveMicroMarkerBarIndex(bars, from, to, periodSec, sec);
+    if (barIdx < 0) continue;
     const px = args.x(barIdx);
     const py = args.y(event.priceWon);
     if (px === null || py === null) continue;

@@ -75,8 +75,9 @@ fn expected_sql(symbol: &str, recv_ms: i64, hhmmss: &str, price: i64, change: i6
 }
 
 fn tick_sql(symbol: &str, recv_ms: i64, hhmmss: &str, price: i64, signed_qty: i64) -> String {
+    let f15_plus = signed_qty > 0;
     format!(
-        "SELECT '{symbol}' AS symbol, {recv_ms}::BIGINT AS recv_ms, '{hhmmss}' AS f20, {price}::BIGINT AS f10, {signed_qty}::BIGINT AS f15, 100::BIGINT AS f1313, 'KRX' AS f9081"
+        "SELECT '{symbol}' AS symbol, {recv_ms}::BIGINT AS recv_ms, '{hhmmss}' AS f20, {price}::BIGINT AS f10, {signed_qty}::BIGINT AS f15, {f15_plus}::BOOLEAN AS f15_plus, 100::BIGINT AS f1313, 'KRX' AS f9081"
     )
 }
 

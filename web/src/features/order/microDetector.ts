@@ -128,7 +128,9 @@ export class ClientMicroDetector {
 
     const validAsks = asks.filter((level) => level.priceWon > 0);
     const validBids = bids.filter((level) => level.priceWon > 0);
-    if (validAsks.length <= SINGLE_PRICE_MAX_LEVELS && validBids.length <= SINGLE_PRICE_MAX_LEVELS) {
+    const activeAskCount = validAsks.filter((level) => level.qty > 0).length;
+    const activeBidCount = validBids.filter((level) => level.qty > 0).length;
+    if (activeAskCount <= SINGLE_PRICE_MAX_LEVELS && activeBidCount <= SINGLE_PRICE_MAX_LEVELS) {
       this.prevAsks = [];
       this.prevBids = [];
       this.askExec.clear();
@@ -168,6 +170,7 @@ export class ClientMicroDetector {
     let boundary: number | null = null;
     for (const level of currLevels) {
       currByPrice.set(level.priceWon, level.qty);
+      if (level.qty <= 0) continue;
       if (side === "ask") {
         if (boundary === null || level.priceWon > boundary) boundary = level.priceWon;
       } else if (boundary === null || level.priceWon < boundary) {

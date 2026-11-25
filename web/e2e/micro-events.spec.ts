@@ -10,6 +10,13 @@ function feedSub(scenario: Scenario, kind: "book" | "trades"): string {
   return message?.type === "subscribe_feed" ? message.sub : "";
 }
 
+function feedSubs(scenario: Scenario, kind: "book" | "trades"): string[] {
+  return scenario.live.messages
+    .filter((m) => m.type === "subscribe_feed" && m.kind === kind && m.symbol === CODE)
+    .map((m) => (m.type === "subscribe_feed" ? m.sub : ""))
+    .filter((sub) => sub !== "");
+}
+
 function makeBook(t: number, ask0Qty: number, bid0Qty: number): FeedBook {
   const base = snapshot(BASE);
   return {
@@ -139,5 +146,76 @@ test.describe("허수 취소·아이스버그·OFI 미시 신호", () => {
 
     await dialog.getByRole("button", { name: "설정 닫기", exact: true }).click();
     await expect(dialog).toHaveCount(0);
+  });
+
+  test("체결창이 함께 열려도 호가주문창 fallback 미시 감지가 체결을 이중 집계하지 않는다", async ({ page, scenario }) => {
+    ordersOn(scenario);
+    tradingApi(scenario);
+    await openOrderWindow(
+      page,
+      scenario,
+      false,
+      "krx",
+      { upper: 91_000, lower: 49_000 },
+      false,
+      snapshot(BASE),
+      (windows) => [
+        ...windows.filter((w) => w.kind === "chart" || w.kind === "order"),
+        { id: "trades-co", link: null, kind: "trades", symbol: CODE },
+      ],
+    );
+
+    await pollSaved(() => feedSubs(scenario, "book").length).toBeGreaterThanOrEqual(1);
+    await pollSaved(() => feedSubs(scenario, "trades").length).toBeGreaterThanOrEqual(2);
+    const bookSub = feedSubs(scenario, "book")[0]!;
+    const tradeSubs = feedSubs(scenario, "trades");
+    const now = nowOf(scenario);
+    const ask0Price = BASE + 100;
+
+    scenario.live.emit({ type: "feed_book", sub: bookSub, book: makeBook(now, 1_000, 2_000) });
+    for (const sub of tradeSubs) {
+      scenario.live.emit({
+        type: "feed_trades",
+        sub,
+        seq: 1,
+        trades: [{ t: now + 1, price: ask0Price, qty: 800, venue: "krx", strength: 120 }],
+      });
+    }
+    scenario.live.emit({ type: "feed_book", sub: bookSub, book: makeBook(now + 2, 600, 2_000) });
+
+    await expect(win(page).getByTestId("order-ofi-bar")).toHaveAttribute("data-ofi-qty", "400");
+    await expect(win(page).getByTestId("order-micro-cue")).toHaveCount(0);
+  });
+
+  test("호가창이 함께 열려도 호가주문창 fallback 미시 감지가 호가를 중복 처리하지 않는다", async ({ page, scenario }) => {
+    ordersOn(scenario);
+    tradingApi(scenario);
+    await openOrderWindow(
+      page,
+      scenario,
+      false,
+      "krx",
+      { upper: 91_000, lower: 49_000 },
+      false,
+      snapshot(BASE),
+      (windows) => [
+        ...windows.filter((w) => w.kind === "chart" || w.kind === "order"),
+        { id: "book-co", link: null, kind: "book", symbol: CODE },
+      ],
+    );
+
+    await pollSaved(() => feedSubs(scenario, "book").length).toBeGreaterThanOrEqual(2);
+    const bookSubs = feedSubs(scenario, "book");
+    const now = nowOf(scenario);
+
+    for (const sub of bookSubs) {
+      scenario.live.emit({ type: "feed_book", sub, book: makeBook(now, 5_000, 2_000) });
+    }
+    for (const sub of bookSubs) {
+      scenario.live.emit({ type: "feed_book", sub, book: makeBook(now + 1, 100, 2_000) });
+    }
+
+    await expect(win(page).getByTestId("order-ofi-bar")).toHaveAttribute("data-ofi-qty", "4900");
+    await expect(win(page).getByTestId("order-micro-cue")).toHaveCount(1);
   });
 });

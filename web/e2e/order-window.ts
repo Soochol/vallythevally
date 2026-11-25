@@ -227,7 +227,7 @@ export async function openOrderWindow(page: Page, scenario: Scenario, withSecond
   await expect(cell(page)).toHaveAttribute("aria-busy", "false");
   await windowTabs(page).getByRole("tab", { name: /^호가주문/ }).click();
   await expect(win(page)).toBeVisible();
-  if (!bookFails) await expect(page.getByTestId("price-ladder").locator(".mw-lr")).toHaveCount(20);
+  if (!bookFails) await expect(win(page).getByTestId("price-ladder").locator(".mw-lr")).toHaveCount(20);
 }
 
 export async function center(locator: Locator): Promise<{ x: number; y: number }> {
