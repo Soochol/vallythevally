@@ -181,7 +181,7 @@ export class ChartController {
   private readonly replayDays: ReplayDays;
   private replayDaysSet: ReadonlySet<string> | null = null;
   private readonly crosshairMarker: CrosshairMarker;
-  private readonly pointedListeners = new Set<(bar: PointedBar) => void>();
+  private readonly pointedListeners = new Set<(bar: PointedBar, close: number | null) => void>();
   private pointerOwnsCrosshair = false;
   get venueAnchor(): HTMLElement { return this.legend.venueAnchor; }
   private readonly feed: JumpableFeed;
@@ -264,7 +264,7 @@ export class ChartController {
       color: () => this.tokens.text3,
     });
     this.replayDays = new ReplayDays(this.chart, {
-      shown: () => this.view !== null && isIntraday(this.view.period) && this.replayDaysSet !== null && this.replayDaysSet.size > 0,
+      shown: () => this.view !== null && (isIntraday(this.view.period) || this.view.period === "D") && this.replayDaysSet !== null && this.replayDaysSet.size > 0,
       bars: () => this.bars,
       days: () => this.replayDaysSet,
       color: () => this.tokens.accent,
@@ -353,7 +353,8 @@ export class ChartController {
       if (p.sourceEvent) this.pointerOwnsCrosshair = true;
       if (this.pointedListeners.size === 0 || !this.pointerOwnsCrosshair || !this.el.matches(":hover")) return;
       const bar = this.hoverIndex === null ? undefined : this.bars[this.hoverIndex];
-      this.emitPointedBar(p.point && bar && crosshairVisible(this.el) ? barInterval(bar.t, this.period()) : null);
+      const pointed = p.point && bar && crosshairVisible(this.el) ? barInterval(bar.t, this.period()) : null;
+      this.emitPointedBar(pointed, pointed === null ? null : (bar?.c ?? null));
     });
     this.chart.timeScale().subscribeVisibleLogicalRangeChange(() => {
       const r = this.chart.timeScale().getVisibleLogicalRange();
@@ -431,7 +432,7 @@ export class ChartController {
     this.renderLegend();
   }
 
-  subscribePointedBar(listener: (bar: PointedBar) => void): () => void {
+  subscribePointedBar(listener: (bar: PointedBar, close: number | null) => void): () => void {
     if (this.pointedListeners.size === 0) this.pointerOwnsCrosshair = false;
     this.pointedListeners.add(listener);
     return () => {
@@ -449,13 +450,13 @@ export class ChartController {
     this.replayDays.sync();
   }
 
-  private emitPointedBar(bar: PointedBar): void {
-    for (const listener of this.pointedListeners) listener(bar);
+  private emitPointedBar(bar: PointedBar, close: number | null): void {
+    for (const listener of this.pointedListeners) listener(bar, close);
   }
 
   private readonly clearPointedBar = (): void => {
     this.pointerOwnsCrosshair = false;
-    this.emitPointedBar(null);
+    this.emitPointedBar(null, null);
   };
 
   setFinancials(page: FinancialsPage | null, message?: string): void {
