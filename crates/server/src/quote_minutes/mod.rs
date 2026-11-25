@@ -53,6 +53,7 @@ pub struct QuoteTotalPoint {
 #[serde(rename_all = "camelCase")]
 #[ts(export)]
 pub struct QuoteTotalsPage {
+    pub available: bool,
     pub venue: crate::api::Venue,
     pub days: Vec<QuoteDayInfo>,
     pub points: Vec<QuoteTotalPoint>,
@@ -83,6 +84,7 @@ pub struct QuoteDepthPoint {
 #[serde(rename_all = "camelCase")]
 #[ts(export)]
 pub struct QuoteDepthPage {
+    pub available: bool,
     pub venue: crate::api::Venue,
     pub source: QuoteDepthSource,
     pub days: Vec<QuoteDayInfo>,
@@ -171,6 +173,7 @@ fn internal_error(context: &str, detail: impl std::fmt::Display) -> ApiFailure {
 }
 
 struct PreparedDays {
+    available: bool,
     venue: Venue,
     days: Vec<QuoteDayInfo>,
     inputs: Vec<(domain::KstDate, Arc<QuoteDay>)>,
@@ -180,7 +183,7 @@ async fn load_days(st: &AppState, cache: &QuoteCache, params: &CommonParams) -> 
     let venue = resolve_venue(st, params.code, params.requested_venue);
     let Some(dir) = st.collector_paths.shared_dir() else {
         let days = params.dates.iter().map(|&date| QuoteDayInfo { date: KstDate(date), state: QuoteDayState::None }).collect();
-        return Ok(PreparedDays { venue, days, inputs: Vec::new() });
+        return Ok(PreparedDays { available: false, venue, days, inputs: Vec::new() });
     };
     let loaded = cache
         .load_range(dir, params.code.as_str(), &params.dates, &st.clock)
@@ -194,7 +197,7 @@ async fn load_days(st: &AppState, cache: &QuoteCache, params: &CommonParams) -> 
             inputs.push((item.date, day));
         }
     }
-    Ok(PreparedDays { venue, days, inputs })
+    Ok(PreparedDays { available: true, venue, days, inputs })
 }
 
 async fn totals(
@@ -204,7 +207,7 @@ async fn totals(
     Query(q): Query<HashMap<String, String>>,
 ) -> Result<Json<QuoteTotalsPage>, ApiFailure> {
     let params = parse_common(&code, &q)?;
-    let PreparedDays { venue, days, inputs } = load_days(&st, &cache, &params).await?;
+    let PreparedDays { available, venue, days, inputs } = load_days(&st, &cache, &params).await?;
     let now = st.clock.now();
     let mv = minute_venue(venue);
     let period = params.period;
@@ -222,7 +225,7 @@ async fn totals(
         .await
         .map_err(|e| internal_error("분 호가 집계 작업이 멈췄습니다", e))?
     };
-    Ok(Json(QuoteTotalsPage { venue: venue.into(), days, points }))
+    Ok(Json(QuoteTotalsPage { available, venue: venue.into(), days, points }))
 }
 
 async fn depth(
@@ -233,7 +236,7 @@ async fn depth(
 ) -> Result<Json<QuoteDepthPage>, ApiFailure> {
     let params = parse_common(&code, &q)?;
     let source = parse_source(&q)?;
-    let PreparedDays { venue, days, inputs } = load_days(&st, &cache, &params).await?;
+    let PreparedDays { available, venue, days, inputs } = load_days(&st, &cache, &params).await?;
     let now = st.clock.now();
     let mv = minute_venue(venue);
     let period = params.period;
@@ -251,5 +254,5 @@ async fn depth(
         .await
         .map_err(|e| internal_error("분 호가 집계 작업이 멈췄습니다", e))?
     };
-    Ok(Json(QuoteDepthPage { venue: venue.into(), source, days, points }))
+    Ok(Json(QuoteDepthPage { available, venue: venue.into(), source, days, points }))
 }

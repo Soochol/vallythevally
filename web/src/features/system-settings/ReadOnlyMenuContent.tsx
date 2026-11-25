@@ -22,6 +22,8 @@ const ENTRIES: Record<"general" | "data" | "about", (s: SystemSettings) => reado
     ["차트 데이터베이스", s.dbPath, true],
     ["스크리너 데이터베이스", s.screenerDbPath, true],
     ["재무 데이터베이스", s.financialDbPath, true],
+    ["수집 호가 폴더", s.hogaDataDir ?? "미설정", s.hogaDataDir !== null ? true : undefined],
+    ["공용 자료 폴더", s.sharedDataDir ?? "미설정", s.sharedDataDir !== null ? true : undefined],
     ["토큰 파일", s.tokenPath, true],
     ["키 파일", s.keyPath, true],
     ["잠금 파일", s.lockPath, true],

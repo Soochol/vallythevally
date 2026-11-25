@@ -152,7 +152,7 @@ export function fakeApi(screenerScenario: string | undefined): Plugin {
         if (/^\/symbols\/[^/]+\/quote-totals$/.test(path) && method === "GET") {
           const venue = url.searchParams.get("venue") ?? "combined";
           if (venue !== "combined" && venue !== "krx" && venue !== "nxt") return fail(res, 400, "bad_request", "거래소는 combined, krx, nxt 중 하나입니다");
-          return send(res, 200, { venue, days: [], points: [] });
+          return send(res, 200, { available: true, venue, days: [], points: [] });
         }
         if (path.startsWith("/symbols/")) {
           const code = decodeURIComponent(path.slice("/symbols/".length));

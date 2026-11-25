@@ -938,6 +938,8 @@ test("총잔량 범례는 값과 수집하지 않는 종목을 알린다", () =>
   expect(row().values.map((v) => v.text)).toEqual(["—", "—"]);
   f.layer.setQuoteTotals(totalsView({}, "notCollected"));
   expect(row().values.map((v) => v.text)).toEqual(["수집하지 않는 종목"]);
+  f.layer.setQuoteTotals(totalsView({}, "disabled"));
+  expect(row().values.map((v) => v.text)).toEqual(["수집 폴더 미설정"]);
   f.layer.setQuoteTotals(totalsView({}, "failed"));
   expect(row().values.map((v) => v.text)).toEqual(["호가 자료 조회 실패"]);
 });
@@ -966,6 +968,8 @@ test("히트맵 범례는 가장 두꺼운 매도·매수 단을 알린다", () 
   expect(row().values.map((v) => v.text)).toEqual(["—", "—"]);
   show(depthView({}, "notCollected"));
   expect(row().values.map((v) => v.text)).toEqual(["수집하지 않는 종목"]);
+  show(depthView({}, "disabled"));
+  expect(row().values.map((v) => v.text)).toEqual(["수집 폴더 미설정"]);
   show(depthView({}, "failed"));
   expect(row().values.map((v) => v.text)).toEqual(["호가 자료 조회 실패"]);
 

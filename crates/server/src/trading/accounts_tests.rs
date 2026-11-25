@@ -98,6 +98,8 @@ async fn keyed_with_switch_file(listed: &[usize], switch_file: Option<String>) -
         db_path: String::new(),
         screener_db_path: String::new(),
         financial_db_path: String::new(),
+        hoga_data_dir: None,
+        shared_data_dir: None,
         screener_update_on_start: false,
         token_path: String::new(),
         key_path: String::new(),

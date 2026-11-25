@@ -930,6 +930,8 @@ pub struct SystemSettings {
     pub db_path: String,
     pub screener_db_path: String,
     pub financial_db_path: String,
+    pub hoga_data_dir: Option<String>,
+    pub shared_data_dir: Option<String>,
     pub screener_update_on_start: bool,
     pub token_path: String,
     pub key_path: String,

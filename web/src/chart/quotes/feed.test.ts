@@ -9,7 +9,7 @@ interface Call {
   key: QuoteKey;
   range: QuoteRange;
   signal: AbortSignal;
-  reply(points: Point[], state?: QuoteDayState): Promise<void>;
+  reply(points: Point[], state?: QuoteDayState, available?: boolean): Promise<void>;
   fail(): Promise<void>;
 }
 
@@ -25,7 +25,7 @@ function started(key: QuoteKey | null = KEY) {
     fetch: (requested, range, signal) => new Promise<QuotePage<Point>>((resolve, reject) => {
       calls.push({
         key: requested, range, signal,
-        reply: async (points, state = "closed") => { resolve({ days: [{ date: range.to, state }], points }); await settle(); },
+        reply: async (points, state = "closed", available = true) => { resolve({ available, days: [{ date: range.to, state }], points }); await settle(); },
         fail: async () => { reject(new Error("실패")); await settle(); },
       });
     }),
@@ -156,5 +156,16 @@ test("수집하지 않는 종목과 실패를 상태로 알리고 실패는 다�
   await g.last().reply([], "none");
   expect(g.feed.state).toBe("ready");
   g.feed.dispose();
+  f.feed.dispose();
+});
+
+test("서버에 호가 자료 폴더가 없으면 disabled 상태로 알리고 장중 꼬리 조회를 멈춘다", async () => {
+  const f = started();
+  f.feed.cover(at("2026-11-24T09:00:00"), at("2026-11-24T10:00:00"));
+  await f.last().reply([], "none", false);
+  expect(f.feed.state).toBe("disabled");
+  expect(f.calls).toHaveLength(1);
+  await five(3);
+  expect(f.calls).toHaveLength(1);
   f.feed.dispose();
 });

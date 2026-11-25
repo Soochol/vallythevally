@@ -24,6 +24,7 @@
 
 | 칸 | 뜻 |
 |---|---|
+| `available` | 서버에 분 호가 자료 폴더(`VALLY_SHARED_DATA_DIR` 또는 `VALLY_HOGA_DATA_DIR`)가 설정되었는지 여부. `false`면 기능이 꺼져 있다 |
 | `venue` | 실제로 적용된 거래소(`combined`, `krx`, `nxt`) |
 | `days` | 요청 범위 날짜마다 `{date, state}`. `state`는 `closed`(닫힌 날 파일 있음), `live`(장중 파일 있음), `notCollected`(그날 폴더는 있으나 요청 종목 없음), `none`(그날 폴더 없음 또는 공용 자료 꺼짐) |
 | `points` | 값이 있는 봉마다 `{t, ask, bid}`. `t`는 봉 시작 시각(Unix 초), `ask`·`bid`는 그 봉의 매도·매수 총잔량 |
@@ -34,6 +35,7 @@
 
 | 칸 | 뜻 |
 |---|---|
+| `available` | `QuoteTotalsPage`와 같다 |
 | `venue` | 실제로 적용된 거래소 |
 | `source` | 적용된 기준(`priceMax`, `peak`, `close`) |
 | `days` | `QuoteTotalsPage`와 같다 |

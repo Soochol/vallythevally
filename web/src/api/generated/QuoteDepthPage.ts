@@ -4,4 +4,4 @@ import type { QuoteDepthPoint } from "./QuoteDepthPoint";
 import type { QuoteDepthSource } from "./QuoteDepthSource";
 import type { Venue } from "./Venue";
 
-export type QuoteDepthPage = { venue: Venue, source: QuoteDepthSource, days: Array<QuoteDayInfo>, points: Array<QuoteDepthPoint>, };
+export type QuoteDepthPage = { available: boolean, venue: Venue, source: QuoteDepthSource, days: Array<QuoteDayInfo>, points: Array<QuoteDepthPoint>, };
