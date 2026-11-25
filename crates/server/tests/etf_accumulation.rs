@@ -4,7 +4,10 @@ use std::ffi::OsStr;
 use std::path::PathBuf;
 
 use common::{ScriptedTransport, Server};
+use domain::{KstDate, Ohlcv, Price, StockCode, Volume};
 use serde_json::{Value, json};
+use server::kiwoom::wire::MillionWon;
+use server::screener::store::{DayBar, Store, Write};
 
 const ACTIVE_A: &str = "444200";
 const ACTIVE_B: &str = "445290";
@@ -249,5 +252,89 @@ async fn recent_activity_populates_after_two_days_and_invalidates_on_new_pdf() {
     rig.store(ACTIVE_A, "2026-11-19", &[("005930", 100.0, 2500), ("000660", 130.0, 3000), ("035420", 70.0, 2000), ("051910", 50.0, 2500)]);
     let three_days = rig.ok("/api/etf/funds").await;
     assert_eq!(find_fund(&three_days, ACTIVE_A)["recentActivity"], json!({"added": 0, "removed": 0, "increased": 0, "decreased": 0}));
+    rig.stop().await;
+}
+
+#[tokio::test]
+async fn intermediate_day_overwrite_invalidates_accumulation_and_activity_caches() {
+    let rig = Rig::start().await;
+    let find_fund = |body: &Value, code: &str| body["funds"].as_array().unwrap().iter().find(|f| f["code"] == code).unwrap().clone();
+
+    rig.store(ACTIVE_B, "2026-11-17", &[("005930", 100.0, 5000), ("035420", 100.0, 5000)]);
+    rig.store(ACTIVE_A, "2026-11-18", &[("005930", 100.0, 3500), ("005380", 100.0, 3500), ("000660", 100.0, 3000)]);
+    rig.store(ACTIVE_A, "2026-11-19", &[("005930", 100.0, 3500), ("005380", 100.0, 3500), ("000660", 100.0, 3000)]);
+    rig.store(ACTIVE_B, "2026-11-19", &[("005930", 100.0, 5000), ("035420", 100.0, 5000)]);
+
+    assert_eq!(rig.ok("/api/etf/accumulation?window=5&style=active").await["rows"], json!([]));
+    assert_eq!(
+        find_fund(&rig.ok("/api/etf/funds").await, ACTIVE_A)["recentActivity"],
+        json!({"added": 0, "removed": 0, "increased": 0, "decreased": 0})
+    );
+
+    rig.store(ACTIVE_A, "2026-11-18", &[("005930", 100.0, 3000), ("005380", 100.0, 3000), ("000660", 50.0, 2000), ("035420", 100.0, 2000)]);
+    let refreshed_acc = rig.ok("/api/etf/accumulation?window=5&style=active").await;
+    let rows = refreshed_acc["rows"].as_array().unwrap();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0]["code"], "000660");
+
+    let refreshed_funds = rig.ok("/api/etf/funds").await;
+    assert_eq!(
+        find_fund(&refreshed_funds, ACTIVE_A)["recentActivity"],
+        json!({"added": 0, "removed": 1, "increased": 1, "decreased": 0})
+    );
+    rig.stop().await;
+}
+
+#[tokio::test]
+async fn sell_radar_populates_ma_for_exited_stock_not_in_catalog() {
+    let exited_code = StockCode::parse("999991").unwrap();
+    assert!(server::etf::Catalog::embedded().stock_name(exited_code).is_none());
+
+    let kiwoom = ScriptedTransport::new();
+    for market_sample in ["ka10051", "ka90005"] {
+        kiwoom.respond_with(market_sample, 500, json!({"return_code": 1, "return_msg": "이 시험은 장중 표본을 쓰지 않는다"}));
+    }
+    let tmp = tempfile::tempdir().unwrap();
+    let run_dir = tmp.path().join("run");
+    std::fs::create_dir_all(&run_dir).unwrap();
+    {
+        let store = Store::open(&run_dir.join("screener.duckdb")).unwrap();
+        let latest = KstDate::new(2026, 11, 18).unwrap();
+        let closes: Vec<u64> = (1..=130).rev().collect();
+        let count = closes.len() as i64;
+        let bars: Vec<DayBar> = closes
+            .iter()
+            .enumerate()
+            .map(|(i, close)| {
+                let price = Price::from_centi(close * 100).unwrap();
+                let ohlcv = Ohlcv::try_new(price, price, price, price, Volume(1)).unwrap();
+                DayBar {
+                    day: KstDate::from_days_since_epoch(latest.days_since_epoch() - (count - 1 - i as i64)),
+                    ohlcv,
+                    traded: MillionWon(1),
+                }
+            })
+            .collect();
+        store.write(&[Write::Replace { code: exited_code, bars }]).unwrap();
+    }
+    let server = Server::spawn_with(
+        &kiwoom,
+        &run_dir.join("server.lock"),
+        tmp.path(),
+        &[("VALLY_CLOCK_START", OsStr::new("20261119110000")), ("VALLY_NAVER_BASE_URL", OsStr::new("http://127.0.0.1:9"))],
+    );
+    let base = format!("http://{}", server.addr().await);
+    let rig = Rig { tmp, server: Some(server), client: reqwest::Client::new(), base };
+
+    rig.store(ACTIVE_A, "2026-11-17", &[("005930", 100.0, 5000), ("999991", 100.0, 5000)]);
+    rig.store(ACTIVE_A, "2026-11-18", &[("005930", 100.0, 10_000)]);
+
+    let _prime_catalog_only = rig.ok(&format!("/api/etf/funds/{ACTIVE_A}")).await;
+    let sell = rig.ok("/api/etf/accumulation?window=5&style=active&direction=sell").await;
+    assert_eq!(sell["maAsOf"], "2026-11-18");
+    let rows = sell["rows"].as_array().unwrap();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0]["code"], "999991");
+    assert_eq!(rows[0]["ma"], json!({"ma20": "below", "ma60": "below", "ma120": "below"}));
     rig.stop().await;
 }

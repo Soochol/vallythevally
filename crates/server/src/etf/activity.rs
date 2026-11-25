@@ -17,7 +17,7 @@ use crate::http::AppState;
 struct ActivityDirStamp {
     days: Vec<KstDate>,
     dir_mtimes: Vec<Option<SystemTime>>,
-    latest_fingerprint: u64,
+    days_fingerprint: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -39,16 +39,17 @@ pub(super) struct RecentActivityCache {
 fn scan_activity_stamp(dir: &Path) -> ActivityDirStamp {
     let days = discover_days(dir);
     if days.len() < 2 {
-        return ActivityDirStamp { days, dir_mtimes: Vec::new(), latest_fingerprint: 0 };
+        return ActivityDirStamp { days, dir_mtimes: Vec::new(), days_fingerprint: 0 };
     }
     let dir_mtimes = days
         .iter()
         .map(|day| std::fs::metadata(pdf_dir(dir, *day)).ok().and_then(|m| m.modified().ok()))
         .collect();
     let mut hasher = DefaultHasher::new();
-    hash_day_dir(&pdf_dir(dir, days[days.len() - 2]), &mut hasher);
-    hash_day_dir(&pdf_dir(dir, days[days.len() - 1]), &mut hasher);
-    ActivityDirStamp { days, dir_mtimes, latest_fingerprint: hasher.finish() }
+    for &day in &days {
+        hash_day_dir(&pdf_dir(dir, day), &mut hasher);
+    }
+    ActivityDirStamp { days, dir_mtimes, days_fingerprint: hasher.finish() }
 }
 
 fn load_latest_pair(dir: &Path, days: &[KstDate], code: StockCode) -> Option<(Vec<Held>, Vec<Held>)> {
@@ -98,7 +99,7 @@ impl RecentActivityCache {
         let scan_dir = dir.clone();
         let dir_stamp = tokio::task::spawn_blocking(move || scan_activity_stamp(&scan_dir))
             .await
-            .unwrap_or_else(|_| ActivityDirStamp { days: Vec::new(), dir_mtimes: Vec::new(), latest_fingerprint: 0 });
+            .unwrap_or_else(|_| ActivityDirStamp { days: Vec::new(), dir_mtimes: Vec::new(), days_fingerprint: 0 });
         let catalog = st.etf.catalog();
         let catalog_revision = st.etf.revision();
         let stamp = ActivityCacheStamp { dir: dir_stamp, catalog_revision };

@@ -45,7 +45,7 @@ pub(super) fn parse_direction(query: &HashMap<String, String>) -> Result<EtfAccu
 struct DirStamp {
     days: Vec<KstDate>,
     window_dir_mtimes: Vec<Option<SystemTime>>,
-    boundary_fingerprint: u64,
+    window_fingerprint: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -53,7 +53,7 @@ struct CacheStamp {
     dir: DirStamp,
     catalog_revision: u64,
     ma_generation: u64,
-    symbols_stamp: usize,
+    symbols_revision: u64,
 }
 
 struct CacheEntry {
@@ -143,7 +143,7 @@ pub(super) fn hash_day_dir(path: &Path, hasher: &mut DefaultHasher) {
 fn scan_stamp(dir: &Path, window: u32) -> DirStamp {
     let days = discover_days(dir);
     if days.len() < 2 {
-        return DirStamp { days, window_dir_mtimes: Vec::new(), boundary_fingerprint: 0 };
+        return DirStamp { days, window_dir_mtimes: Vec::new(), window_fingerprint: 0 };
     }
     let slice = window_slice(&days, window);
     let window_dir_mtimes = slice
@@ -151,9 +151,10 @@ fn scan_stamp(dir: &Path, window: u32) -> DirStamp {
         .map(|day| std::fs::metadata(pdf_dir(dir, *day)).ok().and_then(|m| m.modified().ok()))
         .collect();
     let mut hasher = DefaultHasher::new();
-    hash_day_dir(&pdf_dir(dir, slice[0]), &mut hasher);
-    hash_day_dir(&pdf_dir(dir, slice[slice.len() - 1]), &mut hasher);
-    DirStamp { days, window_dir_mtimes, boundary_fingerprint: hasher.finish() }
+    for &day in slice {
+        hash_day_dir(&pdf_dir(dir, day), &mut hasher);
+    }
+    DirStamp { days, window_dir_mtimes, window_fingerprint: hasher.finish() }
 }
 
 pub(super) fn read_stored_snapshot(path: &Path, code: StockCode, day: KstDate) -> Option<FundSnapshot> {
@@ -350,25 +351,33 @@ impl AccumulationCache {
         let scan_dir = dir.clone();
         let dir_stamp = tokio::task::spawn_blocking(move || scan_stamp(&scan_dir, window))
             .await
-            .unwrap_or_else(|_| DirStamp { days: Vec::new(), window_dir_mtimes: Vec::new(), boundary_fingerprint: 0 });
+            .unwrap_or_else(|_| DirStamp { days: Vec::new(), window_dir_mtimes: Vec::new(), window_fingerprint: 0 });
         let catalog = st.etf.catalog();
         let catalog_revision = st.etf.revision();
-        let ma_generation = st.screener.store_generation();
-        let symbols_stamp = st.symbols.updates().borrow().as_ref().map_or(0, |d| Arc::as_ptr(d) as usize);
-        let stamp = CacheStamp { dir: dir_stamp, catalog_revision, ma_generation, symbols_stamp };
+        let ma_generation = st.screener.store_generation().await.ok();
+        let symbols_revision = st.symbols.revision();
         let key = (window, style, direction);
-        if let Some(entry) = self.entries.lock().expect("동시 매집 캐시 잠금").get(&key)
-            && entry.stamp == stamp
+        let stamp = ma_generation.map(|ma_generation| CacheStamp {
+            dir: dir_stamp.clone(),
+            catalog_revision,
+            ma_generation,
+            symbols_revision,
+        });
+        if let Some(ref stamp) = stamp
+            && let Some(entry) = self.entries.lock().expect("동시 매집 캐시 잠금").get(&key)
+            && entry.stamp == *stamp
         {
             return (*entry.response).clone();
         }
-        let collected_days = stamp.dir.days.len() as u32;
-        if stamp.dir.days.len() < 2 {
+        let collected_days = dir_stamp.days.len() as u32;
+        if dir_stamp.days.len() < 2 {
             let response = empty_response(window, style, direction, collected_days);
-            self.entries.lock().expect("동시 매집 캐시 잠금").insert(key, CacheEntry { stamp, response: Arc::new(response.clone()) });
+            if let Some(stamp) = stamp {
+                self.entries.lock().expect("동시 매집 캐시 잠금").insert(key, CacheEntry { stamp, response: Arc::new(response.clone()) });
+            }
             return response;
         }
-        let window_days = window_slice(&stamp.dir.days, window).to_vec();
+        let window_days = window_slice(&dir_stamp.days, window).to_vec();
         let from_date = window_days[0];
         let to_date = window_days[window_days.len() - 1];
         let funds: Vec<FundMeta> = catalog
@@ -380,7 +389,13 @@ impl AccumulationCache {
         let aggregated = tokio::task::spawn_blocking(move || compute_from_dir(&dir, &window_days, &funds, direction))
             .await
             .unwrap_or_default();
-        let ma = ma_cache.snapshot(&st.screener, || catalog.stock_codes()).await;
+        let ma = ma_cache
+            .snapshot(&st.screener, || {
+                let mut codes = catalog.stock_codes();
+                codes.extend(aggregated.iter().filter_map(|item| StockCode::parse(&item.code).ok()));
+                codes
+            })
+            .await;
         let rows = aggregated
             .into_iter()
             .map(|item| {
@@ -412,7 +427,11 @@ impl AccumulationCache {
             ma_as_of: ma.as_of.map(api::KstDate),
             rows,
         };
-        self.entries.lock().expect("동시 매집 캐시 잠금").insert(key, CacheEntry { stamp, response: Arc::new(response.clone()) });
+        if ma.ok
+            && let Some(stamp) = stamp
+        {
+            self.entries.lock().expect("동시 매집 캐시 잠금").insert(key, CacheEntry { stamp, response: Arc::new(response.clone()) });
+        }
         response
     }
 }
