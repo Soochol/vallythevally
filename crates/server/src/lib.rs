@@ -30,6 +30,7 @@ pub mod kiwoom;
 pub mod market;
 pub mod market_source;
 pub mod market_overview;
+pub mod premarket;
 pub mod public;
 pub mod public_ip;
 pub mod quote_minutes;

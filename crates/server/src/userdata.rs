@@ -259,7 +259,7 @@ fn read_window(r: &SqliteRow) -> Result<LayoutWindow, StoreError> {
                 cards: cards.map(|c| from_wire_name("broker_cards", c)).transpose()?,
             }
         }
-        "trades" | "book" | "program" => {
+        "trades" | "book" | "program" | "premarket" => {
             let symbol: Option<String> = r.get("symbol");
             serde_json::from_value(serde_json::json!({ "kind": kind, "symbol": symbol })).map_err(|e| corrupt("창 종류", e))?
         }
@@ -370,7 +370,10 @@ pub(crate) async fn store_layout(tx: &mut SqliteConnection, input: &LayoutInput,
                 view.as_ref().map(wire_name),
                 cards.as_ref().map(wire_name),
             ),
-            WindowContent::Trades { symbol } | WindowContent::Book { symbol } | WindowContent::Program { symbol } => {
+            WindowContent::Trades { symbol }
+            | WindowContent::Book { symbol }
+            | WindowContent::Program { symbol }
+            | WindowContent::PreMarket { symbol } => {
                 (symbol.as_ref().map(|s| s.0.clone()), None, None, None, None, None, None, None, None)
             }
             WindowContent::Indicators => (None, None, None, None, None, None, None, None, None),
@@ -1139,7 +1142,7 @@ mod tests {
                     WindowContent::Watchlist { list } => (None, None, None, None, list.clone(), None),
                     WindowContent::Screener { screen } => (None, None, None, None, None, screen.clone()),
                     WindowContent::Trades { symbol } | WindowContent::Book { symbol } | WindowContent::Program { symbol } | WindowContent::Brokers { symbol, .. } => (symbol.as_ref().map(|s| s.0.clone()), None, None, None, None, None),
-                    WindowContent::Indicators | WindowContent::Ranking { .. } => unreachable!(),
+                    WindowContent::Indicators | WindowContent::Ranking { .. } | WindowContent::PreMarket { .. } => unreachable!(),
                 };
                 sqlx::query("INSERT INTO layout_windows (layout_id, id, position, kind, link, symbol, venue, period, chart_settings, list, screen) VALUES ('L3', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
                     .bind(w.id.as_str()).bind(position as i64).bind(window_kind(&w.content)).bind(w.link.as_ref().map(wire_name)).bind(symbol).bind(venue).bind(period).bind(chart_settings).bind(list).bind(screen)
@@ -1189,6 +1192,7 @@ mod tests {
             WindowContent::Brokers { symbol: None, view: None, cards: None },
             WindowContent::Order { venue: Venue::Krx, symbol: None },
             WindowContent::Ranking { ranking: every_ranking().remove(0) },
+            WindowContent::PreMarket { symbol: None },
         ]
     }
 
@@ -1493,5 +1497,55 @@ mod tests {
         assert!(sqlx::query("INSERT INTO layout_windows (layout_id, id, position, kind, broker_view) VALUES ('L4', 'bad1', 90, 'trades', 'list')").execute(&mut *tx).await.is_err());
         assert!(sqlx::query("INSERT INTO layout_windows (layout_id, id, position, kind, broker_cards) VALUES ('L4', 'bad2', 91, 'brokers', 'pie')").execute(&mut *tx).await.is_err());
         assert!(sqlx::query("INSERT INTO layout_windows (layout_id, id, position, kind, broker_view) VALUES ('L4', 'bad3', 92, 'brokers', 'grid')").execute(&mut *tx).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn premarket_window_round_trips_and_validates_symbol() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("vally.db");
+        {
+            let pool = SqlitePoolOptions::new().connect_with(SqliteConnectOptions::new().filename(&path).create_if_missing(true).foreign_keys(true)).await.unwrap();
+            sqlx::migrate!("./migrations").run_to(25, &pool).await.unwrap();
+            sqlx::query("INSERT INTO layouts (id, name, sync, position, updated_at, revision) VALUES ('L5', '장전', '{}', 1, 50, 1)").execute(&pool).await.unwrap();
+            sqlx::query("INSERT INTO layout_windows (layout_id, id, position, kind, symbol, venue, period, chart_settings) VALUES ('L5', 'c', 0, 'chart', '005930', 'krx', 'D', '{}')").execute(&pool).await.unwrap();
+            sqlx::query("INSERT INTO layout_windows (layout_id, id, position, kind, symbol, broker_view, broker_cards) VALUES ('L5', 'b', 1, 'brokers', '005930', 'list', 'numbers')").execute(&pool).await.unwrap();
+            pool.close().await;
+        }
+        let db = AppDb::open(&path).await.unwrap();
+        let migrated = get_layout(&db, "L5").await.unwrap();
+        assert_eq!(
+            migrated.windows[1].content,
+            WindowContent::Brokers { symbol: Some(SymbolCode("005930".into())), view: Some(crate::api::BrokerView::List), cards: Some(crate::api::BrokerCards::Numbers) }
+        );
+
+        let updated = vec![
+            chart("c", "005930", Some(Venue::Krx)),
+            LayoutWindow {
+                id: window_id("pm1"),
+                link: Some(LinkColor::A),
+                content: WindowContent::PreMarket { symbol: None },
+            },
+            LayoutWindow {
+                id: window_id("pm2"),
+                link: None,
+                content: WindowContent::PreMarket { symbol: Some(SymbolCode("005930".into())) },
+            },
+        ];
+        assert!(crate::setup_documents::check_layout("L5", &layout_at("L5", "장전", updated.clone(), 2)).is_ok());
+        put_layout(&db, &layout_at("L5", "장전", updated.clone(), 2), UnixSeconds(100)).await.unwrap();
+        assert_eq!(get_layout(&db, "L5").await.unwrap().windows, updated);
+
+        let bad_index = vec![
+            chart("c", "005930", Some(Venue::Krx)),
+            LayoutWindow {
+                id: window_id("pm-bad"),
+                link: None,
+                content: WindowContent::PreMarket { symbol: Some(SymbolCode("IDX:001".into())) },
+            },
+        ];
+        assert!(crate::setup_documents::check_layout("L5", &layout_at("L5", "장전", bad_index, 3)).is_err());
+
+        let mut tx = db.begin_write().await.unwrap();
+        assert!(sqlx::query("INSERT INTO layout_windows (layout_id, id, position, kind, symbol) VALUES ('L5', 'pm-idx', 90, 'premarket', 'IDX:001')").execute(&mut *tx).await.is_err());
     }
 }

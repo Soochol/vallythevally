@@ -36,7 +36,7 @@ export type WatchlistWindowState = { id: WindowId; link: LinkColor | null; kind:
 export type ScreenerWindowState = { id: WindowId; link: LinkColor | null; kind: "screener"; screen?: string };
 export type BrokerView = "board" | "list";
 export type BrokerCards = "bars" | "both" | "numbers";
-export type PinnableKind = "trades" | "book" | "program";
+export type PinnableKind = "trades" | "book" | "program" | "premarket";
 export type PinnableWindowState = { id: WindowId; link: LinkColor | null; kind: PinnableKind; symbol?: SymbolCode };
 export type BrokersWindowState = { id: WindowId; link: LinkColor | null; kind: "brokers"; symbol?: SymbolCode; view?: BrokerView; cards?: BrokerCards };
 export type OrderWindowState = { id: WindowId; link: LinkColor | null; kind: "order"; venue: Venue; symbol?: SymbolCode };
@@ -86,7 +86,7 @@ export const linkLabel = (link: LinkColor): string => link.toUpperCase();
 export const linkedWindowCount = (windows: readonly WindowState[], link: LinkColor, except: WindowId): number =>
   windows.filter((w) => w.link === link && w.id !== except).length;
 
-const PINNABLE: ReadonlySet<WindowKind> = new Set<WindowKind>(["trades", "book", "program", "brokers", "order"]);
+const PINNABLE: ReadonlySet<WindowKind> = new Set<WindowKind>(["trades", "book", "program", "brokers", "order", "premarket"]);
 
 export type SymbolTarget = Pick<SymbolInfo, "code"> & { name?: string };
 export type SymbolChange = { changed: WindowId[]; notice: string | null };

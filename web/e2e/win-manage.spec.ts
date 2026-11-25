@@ -550,8 +550,8 @@ test("창 더하기 메뉴와 탭의 닫기 버튼을 키보드만으로 쓴다"
   await page.keyboard.press("Enter");
   await expect(kindItem(page, "차트")).toBeFocused();
   await page.keyboard.press("End");
-  await expect(kindItem(page, "순위")).toBeFocused();
-  for (let up = 0; up < 6; up++) await page.keyboard.press("ArrowUp");
+  await expect(kindItem(page, "장전 동시호가")).toBeFocused();
+  for (let up = 0; up < 7; up++) await page.keyboard.press("ArrowUp");
   await expect(kindItem(page, "지표")).toBeFocused();
   await page.keyboard.press("Enter");
   await expect(tab(page, "지표")).toHaveAttribute("aria-selected", "true");

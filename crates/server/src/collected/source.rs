@@ -90,6 +90,10 @@ impl Collected {
         })
     }
 
+    pub(crate) fn store(&self) -> &Arc<CollectedStore> {
+        &self.store
+    }
+
     pub(super) async fn broker_day(
         self: &Arc<Self>,
         paths: CollectorPaths,

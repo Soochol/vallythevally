@@ -51,6 +51,27 @@ export const test = base.extend<{ scenario: Scenario; clockStart: string | null 
         return { body: { symbol, date: url.searchParams.get("date") ?? "", source: "none", snapshots: [], gaps: [], live: false, cursor: "", reset: true } };
       },
     );
+    scenario.on(
+      (url) => /^\/api\/symbols\/[^/]+\/premarket\/days$/.test(url.pathname),
+      (request) => {
+        const symbol = decodeURIComponent(new URL(request.url()).pathname.split("/")[3] ?? "");
+        return { body: { symbol, days: [] } };
+      },
+    );
+    scenario.on(
+      (url) => /^\/api\/symbols\/[^/]+\/premarket\/compare$/.test(url.pathname),
+      (request) => {
+        const symbol = decodeURIComponent(new URL(request.url()).pathname.split("/")[3] ?? "");
+        return { body: { symbol, series: [] } };
+      },
+    );
+    scenario.on(
+      (url) => url.pathname === "/api/premarket/snapshot",
+      (request) => {
+        const date = new URL(request.url()).searchParams.get("date") ?? "";
+        return { body: { date, availableDates: [], source: "none", rows: [] } };
+      },
+    );
     const throttle = cpuThrottleRate();
     if (throttle !== null) {
       const apply = async (page: Page) => { await (await context.newCDPSession(page)).send("Emulation.setCPUThrottlingRate", { rate: throttle }); };

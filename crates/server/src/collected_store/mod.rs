@@ -29,6 +29,10 @@ impl CollectedStore {
         })
     }
 
+    pub(crate) fn available_dates(&self, data_dir: &Path) -> Result<Vec<String>, String> {
+        self.day_index.available_dates(data_dir)
+    }
+
     pub(crate) fn collected_days(&self, data_dir: &Path, stock_code: &str) -> Result<Vec<String>, String> {
         self.day_index.collected_days(data_dir, stock_code)
     }
