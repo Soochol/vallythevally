@@ -42,6 +42,7 @@ export interface ResolvedLadderMarket {
   readonly liveQuotes: LadderQuotes | null;
   readonly pastRows: readonly LadderRow[];
   readonly expected: BookView["expected"];
+  readonly activeVi: ViState | null;
   readonly totals: StripTotals;
   readonly headPrice: number | null;
   readonly headPreviousClose: number | null;
@@ -89,6 +90,7 @@ export function resolveLadderMarket(input: LadderMarketInput): ResolvedLadderMar
         })
       : [];
   const expectedVi = viForExpected(venue, vi, nxtVi);
+  const activeVi = expectedVi?.active === true ? expectedVi : null;
   const expected = replay.kind === "live" && liveView !== null ? visibleExpected(liveView.t, nowSeconds, liveView.expected, expectedVi, venue, nxtEnabled) : null;
   const liveTotals = stripTotals(liveView && { ask: liveView.totalAsk, bid: liveView.totalBid }, visibleAfterHours(afterHours?.totals ?? null, nowSeconds, venue));
   const totals: StripTotals =
@@ -111,6 +113,7 @@ export function resolveLadderMarket(input: LadderMarketInput): ResolvedLadderMar
     liveQuotes,
     pastRows,
     expected,
+    activeVi,
     totals,
     headPrice,
     headPreviousClose,

@@ -51,6 +51,20 @@ export const test = base.extend<{ scenario: Scenario; clockStart: string | null 
         return { body: { symbol, date: url.searchParams.get("date") ?? "", source: "none", snapshots: [], gaps: [], live: false, cursor: "", reset: true } };
       },
     );
+    scenario.on(
+      (url) => /^\/api\/symbols\/[^/]+\/vi-playbook$/.test(url.pathname),
+      (request) => {
+        if (scenario.publicMode.kind === "public") {
+          return { status: 404, body: { error: { code: "not_found", message: "공개 리스너에 없는 경로입니다", reason: null, retryAt: null, manualActionRequired: false } } };
+        }
+        const url = new URL(request.url());
+        const symbol = decodeURIComponent(url.pathname.split("/")[3] ?? "");
+        const direction = url.searchParams.get("direction") === "down" ? "down" : "up";
+        const kindParam = url.searchParams.get("kind");
+        const kind = kindParam === "dynamic" || kindParam === "static" ? kindParam : "all";
+        return { body: { symbol, direction, kind, lookbackDays: 0, sampleCount: 0, horizons: [], recentMatches: [] } };
+      },
+    );
     const throttle = cpuThrottleRate();
     if (throttle !== null) {
       const apply = async (page: Page) => { await (await context.newCDPSession(page)).send("Emulation.setCPUThrottlingRate", { rate: throttle }); };

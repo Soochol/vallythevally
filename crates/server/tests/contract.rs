@@ -17,6 +17,7 @@ use server::heatmap_board::{HeatmapBoard, HeatmapBoardMember, HeatmapBoardTheme,
 use server::heatmap_flow::{HeatmapFlowPoint, HeatmapFlowSeries};
 use server::kiwoom_themes::{KiwoomLimitMove, KiwoomTheme, KiwoomThemeList, KiwoomThemeMember, KiwoomThemeMembers};
 use server::quote_minutes::{QuoteDayInfo, QuoteDayState, QuoteDepthPage, QuoteDepthPoint, QuoteDepthSource, QuoteTotalPoint, QuoteTotalsPage};
+use server::vi_playbook::{ViPlaybook, ViPlaybookHorizon, ViPlaybookKind, ViPlaybookMatch};
 use ts_rs::TS;
 
 const DIR: &str = "web/src/api/generated";
@@ -59,6 +60,10 @@ fn generated_typescript_matches_the_committed_files() {
         generated::<ViDirection>(),
         generated::<ViMarket>(),
         generated::<ViState>(),
+        generated::<ViPlaybook>(),
+        generated::<ViPlaybookHorizon>(),
+        generated::<ViPlaybookKind>(),
+        generated::<ViPlaybookMatch>(),
         generated::<OrdersAccount>(),
         generated::<OrdersAccountCheck>(),
         generated::<OrdersMarginInput>(),
