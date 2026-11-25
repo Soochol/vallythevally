@@ -12,28 +12,27 @@ const DAYS_STALE_MS = 60_000;
 const DAYS_REFETCH_MS = 60_000;
 export const TODAY_REFETCH_MS = 20_000;
 
-export function useBookReplayAccess() {
-  const publicMode = usePublicMode();
-  return useQuery({
-    queryKey: ["book-replay", "access"],
-    queryFn: ({ signal }) => getJson<BookReplayAccess>("/api/book-replay/access", signal),
-    enabled: !publicMode,
+function accessQueryOptions(enabled: boolean) {
+  return {
+    queryKey: ["book-replay", "access"] as const,
+    queryFn: ({ signal }: { readonly signal: AbortSignal }) => getJson<BookReplayAccess>("/api/book-replay/access", signal),
+    enabled,
     staleTime: Infinity,
     gcTime: GC_TIME_MS,
     retry: false,
-  });
+  };
+}
+
+export function useBookReplayAccess() {
+  const publicMode = usePublicMode();
+  return useQuery(accessQueryOptions(!publicMode));
 }
 
 export function useBookReplayAvailable(enabled: boolean): boolean {
   const publicMode = usePublicMode();
   const active = enabled && !publicMode;
   const { data } = useQuery({
-    queryKey: ["book-replay", "access"],
-    queryFn: ({ signal }) => getJson<BookReplayAccess>("/api/book-replay/access", signal),
-    enabled: active,
-    staleTime: Infinity,
-    gcTime: GC_TIME_MS,
-    retry: false,
+    ...accessQueryOptions(active),
     select: (access) => (active && access.available ? true : undefined),
     notifyOnChangeProps: ["data"],
   });

@@ -1,18 +1,16 @@
-import { useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useSyncExternalStore } from "react";
 import type { TradingBalance } from "../../api/generated/TradingBalance";
 import type { TradingExecution } from "../../api/generated/TradingExecution";
 import type { TradingOpenOrder } from "../../api/generated/TradingOpenOrder";
-import { marketSocket } from "../../stores/realtime";
 import { useKiwoomOnlyLink } from "../../stores/kiwoomLink";
 import type { TradingOrderable } from "../../api/generated/TradingOrderable";
 import type { OrderAccountChoice } from "./orderAccount";
 import { buyingPowerOf, type Capacity, groupWithPending, type PriceGroup } from "./orderRules";
 import { observeOrderExecutions } from "./orderSound";
-import { pendingWrites } from "./pendingWrites";
+import { type PendingWrite, pendingWrites } from "./pendingWrites";
 import { fetchCommands, fetchExecutions, fetchOpenOrders, fetchOrderable } from "./orderApi";
 import { holdingOf } from "./holdingSummary";
-import { isBalanceQueryKey } from "./useAccountBalance";
 import { ORDER_QUERY_KEY } from "./useOrderWrites";
 
 const POLL_MS = 5000;
@@ -43,6 +41,7 @@ export interface OrderBoardData {
   readonly openOrdersListedAt: number;
   readonly balance: TradingBalance | null;
   readonly executions: readonly TradingExecution[];
+  readonly pending: readonly PendingWrite[];
 }
 
 function sellableQuantityOf(balance: TradingBalance | null, code: string): number | null {
@@ -51,17 +50,6 @@ function sellableQuantityOf(balance: TradingBalance | null, code: string): numbe
 }
 
 const NONE: readonly never[] = [];
-
-function useRefreshOnAccountChange(client: QueryClient, enabled: boolean, account: string | null): void {
-  useEffect(() => {
-    if (!enabled) return;
-    return marketSocket.watchTradingAccount((changed) => {
-      if (changed === account) {
-        void client.invalidateQueries({ queryKey: ORDER_QUERY_KEY, predicate: (query) => !isBalanceQueryKey(query.queryKey) });
-      }
-    });
-  }, [client, enabled, account]);
-}
 
 export function useOrderData(account: string | null, code: string, open: boolean, referencePrice: number | null, balance: TradingBalance | null): OrderBoardData {
   const client = useQueryClient();
@@ -80,7 +68,6 @@ export function useOrderData(account: string | null, code: string, open: boolean
     staleTime: POLL_MS,
     retry: false,
   });
-  useRefreshOnAccountChange(client, open, account);
   const orderableEnabled = open && referencePrice !== null;
   const buyable = useQuery({ queryKey: [...ORDERABLE_QUERY_KEY, scope, code, "buy"], queryFn: ({ signal }) => fetchOrderable(account, code, "buy", referencePrice!, signal), enabled: orderableEnabled, refetchInterval: POLL_MS * 3, staleTime: POLL_MS, retry: false });
   const orders = openOrders.data?.orders;
@@ -99,5 +86,6 @@ export function useOrderData(account: string | null, code: string, open: boolean
     orderable: buyable.data ?? null,
     capacity,
     buyableProblem: buyable.error?.message ?? null,
+    pending: writes,
   };
 }

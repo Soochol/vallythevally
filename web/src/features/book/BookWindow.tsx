@@ -1,34 +1,21 @@
 import { useRef } from "react";
 import type { SymbolCode } from "../../api/generated/SymbolCode";
-import { useFundamentals, useSymbolInfo } from "../../api/queries";
 import type { WindowId } from "../../layout/kinds";
 import { useOrderSettings } from "../../stores/ui";
-import { useSymbolVi } from "../../stores/symbolVi";
-import { FeedStrip, useFeedDownSince } from "../market-window/FeedStrip";
-import { MarketWindowGate } from "../market-window/MarketWindowGate";
-import { buildDefaultLadder, ROWS_ABOVE_BASE, withVisibleRepeats } from "../market-window/ladder";
-import { tickRuleOf } from "../market-window/tick";
-import { expectedItemsOnPage, placeInfoItems } from "../market-window/quoteInfo";
-import { infoSlot, replayTradeSlot, tradeSlot } from "../market-window/LadderSlots";
-import { PriceLadder } from "../market-window/PriceLadder";
-import { RatioBar, Strip, TotalFigure } from "../market-window/parts";
+import { ReplayStrip } from "../book-replay/ReplayStrip";
+import { FeedStrip } from "../market-window/FeedStrip";
 import { formatQuantity } from "../market-window/format";
-import { type InfoPager, useInfoPager, useLadderTrades, useQuoteInfo } from "../market-window/useLadderSlots";
-import { useShownVenue } from "../market-window/useShownVenue";
+import { buildDefaultLadder, ratioSplit, ROWS_ABOVE_BASE, withVisibleRepeats } from "../market-window/ladder";
+import { infoSlot, replayTradeSlot, tradeSlot } from "../market-window/LadderSlots";
+import { MarketHead } from "../market-window/MarketHead";
+import { MarketWindowGate } from "../market-window/MarketWindowGate";
+import { RatioBar, Strip, TotalFigure } from "../market-window/parts";
+import { ladderColumns, PriceLadder } from "../market-window/PriceLadder";
+import { expectedItemsOnPage, placeInfoItems } from "../market-window/quoteInfo";
+import { SymbolHead } from "../market-window/SymbolHead";
+import { type InfoPager, useInfoPager, useLadderMarket } from "../market-window/useLadderMarket";
 import { EmptyState, ErrorState } from "../overlay/State";
 import { Notice } from "../ui/Notice";
-import { MarketHead } from "../market-window/MarketHead";
-import { SymbolHead } from "../market-window/SymbolHead";
-import { ReplayStrip } from "../book-replay/ReplayStrip";
-import { replayReference } from "../book-replay/replay";
-import { useBookReplay, useBookReplayEnabled } from "../book-replay/useBookReplay";
-import { serverNow, useServerClock } from "../../stores/serverClock";
-import { ladderColumns } from "../market-window/PriceLadder";
-import { ratioSplit } from "../market-window/ladder";
-import { stripTotals } from "./bookModel";
-import { isRegularSession, visibleAfterHours, visibleExpected } from "./sessionWindows";
-import { useBookFeed } from "./useBookFeed";
-import { useNowMs } from "./useNowMs";
 import { useRowsPerSide, visibleLadderRows } from "./useRowsPerSide";
 
 const REJECTION: Record<string, string> = {
@@ -39,61 +26,38 @@ const REJECTION: Record<string, string> = {
 };
 
 function BookBody({ code, pager }: { code: SymbolCode; pager: InfoPager }) {
-  const venue = useShownVenue(code);
   const ladderBox = useRef<HTMLDivElement>(null);
   const rowsPerSide = useRowsPerSide(ladderBox);
   const { skipSpreadGap, rate } = useOrderSettings();
-  const trades = useLadderTrades(code, venue);
-  const feed = useBookFeed(code, venue, trades.lastTrade);
-  const replayEnabled = useBookReplayEnabled();
-  const replay = useBookReplay(code);
-  const limits = useFundamentals(code).data;
-  const symbolInfo = useSymbolInfo(code).data;
-  const kind = symbolInfo?.kind ?? null;
-  const bounds = { lower: limits?.lowerLimit ?? null, upper: limits?.upperLimit ?? null };
-  const now = useNowMs();
-  const nowSeconds = Math.floor(now / 1000);
-  const serverNowSeconds = Math.floor(serverNow(useServerClock.getState().serverTimeOrigin) / 1000);
-  const replayRef = replay.kind === "past" ? replayReference(replay.at, serverNowSeconds, { previousClose: feed.previousClose, bounds }) : null;
-  const vi = useSymbolVi(code, "krx");
-  const liveView = feed.book.phase === "empty" ? null : feed.book.view;
-  const view = replay.kind === "live" ? liveView : replay.kind === "past" ? replay.book : null;
-  const tickRule = tickRuleOf(kind, view ? [...view.asks, ...view.bids].map((level) => level.price) : []);
-  const info = useQuoteInfo({ code, venue, lastPrice: feed.lastPrice, previousClose: feed.previousClose, fundamentals: limits, page: pager.page, flipped: pager.flipped, sameTimeRatio: trades.sameTimeRatio, vi, tickRule, regularSession: isRegularSession(nowSeconds), now: nowSeconds });
-  const liveTotals = stripTotals(liveView && { ask: liveView.totalAsk, bid: liveView.totalBid }, visibleAfterHours(feed.afterHours?.totals ?? null, nowSeconds));
-  const totals = replay.kind === "live"
-    ? liveTotals
-    : replay.kind === "past"
-      ? { ask: replay.book.totalAsk, bid: replay.book.totalBid, source: "regular" as const, description: null }
-      : { ask: null, bid: null, source: "regular" as const, description: null };
+  const market = useLadderMarket(code, pager, skipSpreadGap);
+  const { feed, replay, totals, view, liveView, trades } = market;
   const afterHours = totals.source === "afterHours";
   const notice = replay.kind === "live" && feed.rejected ? REJECTION[feed.rejected] : null;
-  const downSince = useFeedDownSince(feed.connected);
+
   const ladder = (() => {
     if (replay.kind === "none") return <EmptyState title={replay.reason} />;
     if (replay.kind === "past") {
-      const ref = replayRef!;
-      const fullRows = buildDefaultLadder({ asks: replay.book.asks, bids: replay.book.bids, lastPrice: replay.lastPrice, previousClose: ref.previousClose, bounds: ref.bounds, skipSpreadGap, tickRule });
-      const rows = rowsPerSide >= ROWS_ABOVE_BASE ? fullRows : withVisibleRepeats(visibleLadderRows(fullRows, rowsPerSide), replay.lastPrice);
+      const ref = market.replayRef!;
+      const rows = rowsPerSide >= ROWS_ABOVE_BASE ? market.pastRows : withVisibleRepeats(visibleLadderRows(market.pastRows, rowsPerSide), replay.lastPrice);
       return <PriceLadder rows={rows} firstBidIndex={rowsPerSide} previousClose={ref.previousClose} rateShown={rate} expectedPrice={null} rowSlots={{ bottomLeft: replayTradeSlot(replay.trades, ref.previousClose) }} />;
     }
     if (liveView === null) return feed.snapshotFailed ? <ErrorState message="호가를 불러오지 못했습니다" retry={feed.retry} /> : <EmptyState title="호가를 기다리는 중입니다" />;
-    const fullRows = buildDefaultLadder({ asks: liveView.asks, bids: liveView.bids, lastPrice: feed.lastPrice, previousClose: feed.previousClose, bounds, skipSpreadGap, tickRule });
+    const fullRows = buildDefaultLadder({ asks: liveView.asks, bids: liveView.bids, lastPrice: feed.lastPrice, previousClose: feed.previousClose, bounds: market.bounds, skipSpreadGap, tickRule: market.tickRule });
     const rows = rowsPerSide >= ROWS_ABOVE_BASE ? fullRows : withVisibleRepeats(visibleLadderRows(fullRows, rowsPerSide), feed.lastPrice);
-    const expected = visibleExpected(liveView.t, nowSeconds, liveView.expected, vi);
-    const infoSlots = placeInfoItems(rows, info, expectedItemsOnPage(pager.page, expected, feed.previousClose, pager.flipped));
-    return <PriceLadder rows={rows} firstBidIndex={rowsPerSide} previousClose={feed.previousClose} rateShown={rate} dayPrices={feed.dayPrices} expectedPrice={expected?.price ?? null} rowSlots={{ infoCard: infoSlot(infoSlots, pager), bottomLeft: tradeSlot(trades, feed.previousClose) }} />;
+    const infoSlots = placeInfoItems(rows, market.info, expectedItemsOnPage(pager.page, market.expected, feed.previousClose, pager.flipped));
+    return <PriceLadder rows={rows} firstBidIndex={rowsPerSide} previousClose={feed.previousClose} rateShown={rate} expectedPrice={market.expected?.price ?? null} rowSlots={{ infoCard: infoSlot(infoSlots, pager), bottomLeft: tradeSlot(trades, feed.previousClose) }} />;
   })();
+
   return (
     <div className="bk" data-testid="book-window" data-symbol={code} data-connected={feed.connected ? "" : undefined} data-rate-hidden={rate ? undefined : ""} data-replay={replay.kind === "live" ? undefined : replay.kind}>
       {replay.kind === "live" ? (
-        <MarketHead code={code} venue={venue} lastPrice={feed.lastPrice} previousClose={feed.previousClose} nxtBadge />
+        <MarketHead code={code} venue={market.venue} lastPrice={feed.lastPrice} previousClose={feed.previousClose} nxtBadge />
       ) : (
-        <SymbolHead code={code} name={symbolInfo?.name ?? null} lastPrice={replay.kind === "past" ? replay.lastPrice : null} previousClose={replayRef?.previousClose ?? null} nxtTraded={symbolInfo?.nxtEnabled === true} mock={false} testIdPrefix="market-symbol" />
+        <SymbolHead code={code} name={market.symbolInfo?.name ?? null} lastPrice={market.headPrice} previousClose={market.headPreviousClose} nxtTraded={market.symbolInfo?.nxtEnabled === true} mock={false} testIdPrefix="market-symbol" />
       )}
-      {replayEnabled && <ReplayStrip view={replay} />}
+      {market.replayEnabled && <ReplayStrip view={replay} />}
       {notice && <Notice tone="warning" className="mw-notice">{notice}</Notice>}
-      {replay.kind === "live" && !feed.connected && notice === null && <FeedStrip since={downSince} />}
+      {replay.kind === "live" && !feed.connected && notice === null && <FeedStrip since={market.downSince} />}
       {view !== null && <BookColumnHead />}
       <div ref={ladderBox} className="bk-ladder" data-stale={replay.kind === "live" && !feed.connected ? "" : undefined} data-state={view === null ? "" : undefined}>{ladder}</div>
       <Strip divided>

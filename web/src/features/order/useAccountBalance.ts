@@ -10,9 +10,6 @@ const NO_ACCOUNT = "none";
 
 const balanceQueryKey = (account: string | null) => [...ORDER_QUERY_KEY, account ?? NO_ACCOUNT, "balance"] as const;
 
-export const isBalanceQueryKey = (queryKey: readonly unknown[]): boolean =>
-  queryKey.length === 3 && queryKey[0] === ORDER_QUERY_KEY[0] && queryKey[2] === "balance";
-
 class BalanceHub {
   private readonly accounts = new Map<string | null, number>();
   private stop: (() => void) | null = null;
@@ -48,7 +45,7 @@ class BalanceHub {
     });
     const stopAccount = marketSocket.watchTradingAccount((changed) => {
       if (this.accounts.has(changed)) {
-        void this.client.invalidateQueries({ queryKey: balanceQueryKey(changed) });
+        void this.client.invalidateQueries({ queryKey: ORDER_QUERY_KEY });
       }
     });
     this.stop = () => {
