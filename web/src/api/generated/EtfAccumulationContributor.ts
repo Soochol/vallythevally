@@ -2,4 +2,4 @@
 import type { EtfChangeKind } from "./EtfChangeKind";
 import type { EtfStyle } from "./EtfStyle";
 
-export type EtfAccumulationContributor = { fundCode: string, fundName: string, style: EtfStyle, kind: EtfChangeKind, realChange: number | null, afterWeightBps: number | null, };
+export type EtfAccumulationContributor = { fundCode: string, fundName: string, style: EtfStyle, kind: EtfChangeKind, realChange: number | null, beforeWeightBps: number | null, afterWeightBps: number | null, };

@@ -52,6 +52,7 @@ pub struct AppState {
     pub book_replay: Arc<crate::book_replay::BookReplay>,
     pub collected: Arc<crate::collected::Collected>,
     pub micro_events: Arc<crate::micro_events::MicroEventService>,
+    pub premarket: Arc<crate::premarket::PreMarketService>,
     pub heatmap_quotes: Arc<crate::heatmap_board::QuoteCache>,
     pub heatmap_flow: Arc<crate::heatmap_flow::FlowCache>,
     pub quote_minutes: Arc<crate::quote_minutes::QuoteCache>,
@@ -80,6 +81,7 @@ pub fn router(state: Arc<AppState>) -> Router {
         .merge(crate::micro_events::routes())
         .merge(crate::vi_playbook::routes())
         .merge(crate::micro_series::routes())
+        .merge(crate::premarket::routes())
         .merge(crate::rankings::routes())
         .merge(crate::market_overview::routes())
         .merge(crate::etf::routes())

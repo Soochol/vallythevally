@@ -17,6 +17,7 @@ use server::heatmap_board::{HeatmapBoard, HeatmapBoardMember, HeatmapBoardTheme,
 use server::heatmap_flow::{HeatmapFlowPoint, HeatmapFlowSeries};
 use server::kiwoom_themes::{KiwoomLimitMove, KiwoomTheme, KiwoomThemeList, KiwoomThemeMember, KiwoomThemeMembers};
 use server::micro_series::{MicroSeriesState, ProgramSeriesPage, ProgramSeriesPoint, TickCvdPage, TickCvdPoint};
+use server::premarket::{PreMarketCompare, PreMarketDaySeries, PreMarketDays, PreMarketPoint, PreMarketSignal, PreMarketSnapshot, PreMarketSnapshotRow};
 use server::quote_minutes::{QuoteDayInfo, QuoteDayState, QuoteDepthPage, QuoteDepthPoint, QuoteDepthSource, QuoteTotalPoint, QuoteTotalsPage};
 use server::vi_playbook::{ViPlaybook, ViPlaybookHorizon, ViPlaybookKind, ViPlaybookMatch};
 use ts_rs::TS;
@@ -125,6 +126,7 @@ fn generated_typescript_matches_the_committed_files() {
         generated::<ConnectionStatus>(),
         generated::<EtfAccumulation>(),
         generated::<EtfAccumulationContributor>(),
+        generated::<EtfAccumulationDirection>(),
         generated::<EtfAccumulationRow>(),
         generated::<EtfAccumulationStyle>(),
         generated::<EtfChangeKind>(),
@@ -140,6 +142,9 @@ fn generated_typescript_matches_the_committed_files() {
         generated::<EtfHolding>(),
         generated::<EtfMaState>(),
         generated::<EtfMaStates>(),
+        generated::<EtfRecentActivity>(),
+        generated::<EtfSimilarFund>(),
+        generated::<EtfSimilarFunds>(),
         generated::<EtfStockHolder>(),
         generated::<EtfStockHolders>(),
         generated::<EtfStyle>(),
@@ -365,6 +370,13 @@ fn generated_typescript_matches_the_committed_files() {
         generated::<TickCvdPage>(),
         generated::<ProgramSeriesPoint>(),
         generated::<ProgramSeriesPage>(),
+        generated::<PreMarketSignal>(),
+        generated::<PreMarketPoint>(),
+        generated::<PreMarketDaySeries>(),
+        generated::<PreMarketCompare>(),
+        generated::<PreMarketSnapshotRow>(),
+        generated::<PreMarketSnapshot>(),
+        generated::<PreMarketDays>(),
     ];
     let mut committed: Vec<String> = git(&["ls-tree", "--name-only", "HEAD", &format!("{DIR}/")])
         .lines()

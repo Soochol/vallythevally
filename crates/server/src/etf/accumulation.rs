@@ -11,8 +11,8 @@ use super::collect::{PDF_DIR, RAW_SUFFIX, STORED_SCHEMA_VERSION, StoredPdf, pdf_
 use super::history::{Held, compare, median};
 use super::ma::MaCache;
 use super::{
-    EtfAccumulation, EtfAccumulationContributor, EtfAccumulationRow, EtfAccumulationStyle,
-    EtfChangeKind, EtfMaStates, EtfStyle, stock_name,
+    EtfAccumulation, EtfAccumulationContributor, EtfAccumulationDirection, EtfAccumulationRow,
+    EtfAccumulationStyle, EtfChangeKind, EtfMaStates, EtfStyle, stock_name,
 };
 use crate::api;
 use crate::http::{ApiFailure, AppState};
@@ -33,11 +33,19 @@ pub(super) fn parse_style(query: &HashMap<String, String>) -> Result<EtfAccumula
     }
 }
 
+pub(super) fn parse_direction(query: &HashMap<String, String>) -> Result<EtfAccumulationDirection, ApiFailure> {
+    match query.get("direction").map(String::as_str) {
+        None | Some("buy") => Ok(EtfAccumulationDirection::Buy),
+        Some("sell") => Ok(EtfAccumulationDirection::Sell),
+        Some(_) => Err(ApiFailure::bad_request("direction은 buy 또는 sell이어야 합니다")),
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct DirStamp {
     days: Vec<KstDate>,
     window_dir_mtimes: Vec<Option<SystemTime>>,
-    boundary_fingerprint: u64,
+    window_fingerprint: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -45,7 +53,7 @@ struct CacheStamp {
     dir: DirStamp,
     catalog_revision: u64,
     ma_generation: u64,
-    symbols_stamp: usize,
+    symbols_revision: u64,
 }
 
 struct CacheEntry {
@@ -55,7 +63,7 @@ struct CacheEntry {
 
 #[derive(Default)]
 pub(super) struct AccumulationCache {
-    entries: Mutex<HashMap<(u32, EtfAccumulationStyle), CacheEntry>>,
+    entries: Mutex<HashMap<(u32, EtfAccumulationStyle, EtfAccumulationDirection), CacheEntry>>,
 }
 
 #[derive(Debug, Clone)]
@@ -66,8 +74,8 @@ struct FundMeta {
 }
 
 #[derive(Debug, Clone)]
-struct FundSnapshot {
-    holdings: Vec<Held>,
+pub(super) struct FundSnapshot {
+    pub(super) holdings: Vec<Held>,
     weights: HashMap<String, u32>,
 }
 
@@ -78,6 +86,9 @@ struct AggregatedStock {
     buying_etf_count: u32,
     added_etf_count: u32,
     increased_etf_count: u32,
+    selling_etf_count: u32,
+    removed_etf_count: u32,
+    decreased_etf_count: u32,
     median_real_change: Option<f64>,
     contributors: Vec<EtfAccumulationContributor>,
 }
@@ -88,7 +99,7 @@ fn window_slice(days: &[KstDate], window: u32) -> &[KstDate] {
     &days[from_idx..=to_idx]
 }
 
-fn discover_days(dir: &Path) -> Vec<KstDate> {
+pub(super) fn discover_days(dir: &Path) -> Vec<KstDate> {
     let Ok(entries) = std::fs::read_dir(dir.join(PDF_DIR)) else {
         return Vec::new();
     };
@@ -105,7 +116,7 @@ fn discover_days(dir: &Path) -> Vec<KstDate> {
     days.into_iter().collect()
 }
 
-fn hash_day_dir(path: &Path, hasher: &mut DefaultHasher) {
+pub(super) fn hash_day_dir(path: &Path, hasher: &mut DefaultHasher) {
     let Ok(entries) = std::fs::read_dir(path) else {
         return;
     };
@@ -132,7 +143,7 @@ fn hash_day_dir(path: &Path, hasher: &mut DefaultHasher) {
 fn scan_stamp(dir: &Path, window: u32) -> DirStamp {
     let days = discover_days(dir);
     if days.len() < 2 {
-        return DirStamp { days, window_dir_mtimes: Vec::new(), boundary_fingerprint: 0 };
+        return DirStamp { days, window_dir_mtimes: Vec::new(), window_fingerprint: 0 };
     }
     let slice = window_slice(&days, window);
     let window_dir_mtimes = slice
@@ -140,12 +151,13 @@ fn scan_stamp(dir: &Path, window: u32) -> DirStamp {
         .map(|day| std::fs::metadata(pdf_dir(dir, *day)).ok().and_then(|m| m.modified().ok()))
         .collect();
     let mut hasher = DefaultHasher::new();
-    hash_day_dir(&pdf_dir(dir, slice[0]), &mut hasher);
-    hash_day_dir(&pdf_dir(dir, slice[slice.len() - 1]), &mut hasher);
-    DirStamp { days, window_dir_mtimes, boundary_fingerprint: hasher.finish() }
+    for &day in slice {
+        hash_day_dir(&pdf_dir(dir, day), &mut hasher);
+    }
+    DirStamp { days, window_dir_mtimes, window_fingerprint: hasher.finish() }
 }
 
-fn read_stored_snapshot(path: &Path, code: StockCode, day: KstDate) -> Option<FundSnapshot> {
+pub(super) fn read_stored_snapshot(path: &Path, code: StockCode, day: KstDate) -> Option<FundSnapshot> {
     let bytes = match std::fs::read(path) {
         Ok(bytes) => bytes,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return None,
@@ -192,11 +204,20 @@ fn load_fund_endpoints(dir: &Path, window_days: &[KstDate], code: StockCode) -> 
     None
 }
 
-fn contributor_rank(kind: EtfChangeKind) -> u8 {
-    match kind {
-        EtfChangeKind::Added => 0,
-        EtfChangeKind::Increased => 1,
+fn contributor_rank(kind: EtfChangeKind, direction: EtfAccumulationDirection) -> u8 {
+    match (direction, kind) {
+        (EtfAccumulationDirection::Buy, EtfChangeKind::Added)
+        | (EtfAccumulationDirection::Sell, EtfChangeKind::Removed) => 0,
+        (EtfAccumulationDirection::Buy, EtfChangeKind::Increased)
+        | (EtfAccumulationDirection::Sell, EtfChangeKind::Decreased) => 1,
         _ => 2,
+    }
+}
+
+fn matches_direction(kind: EtfChangeKind, direction: EtfAccumulationDirection) -> bool {
+    match direction {
+        EtfAccumulationDirection::Buy => matches!(kind, EtfChangeKind::Added | EtfChangeKind::Increased),
+        EtfAccumulationDirection::Sell => matches!(kind, EtfChangeKind::Removed | EtfChangeKind::Decreased),
     }
 }
 
@@ -205,16 +226,18 @@ struct StockBucket {
     fallback_name: String,
     added_etf_count: u32,
     increased_etf_count: u32,
+    removed_etf_count: u32,
+    decreased_etf_count: u32,
     real_changes: Vec<f64>,
     contributors: Vec<EtfAccumulationContributor>,
 }
 
-fn aggregate_pairs(pairs: &[(FundMeta, FundSnapshot, FundSnapshot)]) -> Vec<AggregatedStock> {
+fn aggregate_pairs(pairs: &[(FundMeta, FundSnapshot, FundSnapshot)], direction: EtfAccumulationDirection) -> Vec<AggregatedStock> {
     let mut buckets: HashMap<String, StockBucket> = HashMap::new();
     for (fund, before, after) in pairs {
         let comparison = compare(&before.holdings, &after.holdings);
         for row in comparison.rows {
-            if !matches!(row.kind, EtfChangeKind::Added | EtfChangeKind::Increased) {
+            if !matches_direction(row.kind, direction) {
                 continue;
             }
             let bucket = buckets.entry(row.code.clone()).or_default();
@@ -229,7 +252,14 @@ fn aggregate_pairs(pairs: &[(FundMeta, FundSnapshot, FundSnapshot)]) -> Vec<Aggr
                         bucket.real_changes.push(rc);
                     }
                 }
-                _ => {}
+                EtfChangeKind::Removed => bucket.removed_etf_count += 1,
+                EtfChangeKind::Decreased => {
+                    bucket.decreased_etf_count += 1;
+                    if let Some(rc) = row.real_change {
+                        bucket.real_changes.push(rc);
+                    }
+                }
+                EtfChangeKind::Unchanged => {}
             }
             bucket.contributors.push(EtfAccumulationContributor {
                 fund_code: fund.code.as_str().into(),
@@ -237,6 +267,7 @@ fn aggregate_pairs(pairs: &[(FundMeta, FundSnapshot, FundSnapshot)]) -> Vec<Aggr
                 style: fund.style,
                 kind: row.kind,
                 real_change: row.real_change,
+                before_weight_bps: before.weights.get(&row.code).copied(),
                 after_weight_bps: after.weights.get(&row.code).copied(),
             });
         }
@@ -245,9 +276,12 @@ fn aggregate_pairs(pairs: &[(FundMeta, FundSnapshot, FundSnapshot)]) -> Vec<Aggr
         .into_iter()
         .map(|(code, mut bucket)| {
             bucket.contributors.sort_by(|a, b| {
-                contributor_rank(a.kind)
-                    .cmp(&contributor_rank(b.kind))
-                    .then_with(|| b.real_change.unwrap_or(f64::NEG_INFINITY).total_cmp(&a.real_change.unwrap_or(f64::NEG_INFINITY)))
+                contributor_rank(a.kind, direction)
+                    .cmp(&contributor_rank(b.kind, direction))
+                    .then_with(|| match direction {
+                        EtfAccumulationDirection::Buy => b.real_change.unwrap_or(f64::NEG_INFINITY).total_cmp(&a.real_change.unwrap_or(f64::NEG_INFINITY)),
+                        EtfAccumulationDirection::Sell => a.real_change.unwrap_or(f64::INFINITY).total_cmp(&b.real_change.unwrap_or(f64::INFINITY)),
+                    })
                     .then_with(|| a.fund_code.cmp(&b.fund_code))
             });
             AggregatedStock {
@@ -256,33 +290,43 @@ fn aggregate_pairs(pairs: &[(FundMeta, FundSnapshot, FundSnapshot)]) -> Vec<Aggr
                 buying_etf_count: bucket.added_etf_count + bucket.increased_etf_count,
                 added_etf_count: bucket.added_etf_count,
                 increased_etf_count: bucket.increased_etf_count,
+                selling_etf_count: bucket.removed_etf_count + bucket.decreased_etf_count,
+                removed_etf_count: bucket.removed_etf_count,
+                decreased_etf_count: bucket.decreased_etf_count,
                 median_real_change: median(bucket.real_changes),
                 contributors: bucket.contributors,
             }
         })
         .collect();
-    rows.sort_by(|a, b| {
-        b.buying_etf_count
+    rows.sort_by(|a, b| match direction {
+        EtfAccumulationDirection::Buy => b
+            .buying_etf_count
             .cmp(&a.buying_etf_count)
             .then_with(|| b.added_etf_count.cmp(&a.added_etf_count))
             .then_with(|| b.median_real_change.unwrap_or(f64::NEG_INFINITY).total_cmp(&a.median_real_change.unwrap_or(f64::NEG_INFINITY)))
-            .then_with(|| a.code.cmp(&b.code))
+            .then_with(|| a.code.cmp(&b.code)),
+        EtfAccumulationDirection::Sell => b
+            .selling_etf_count
+            .cmp(&a.selling_etf_count)
+            .then_with(|| b.removed_etf_count.cmp(&a.removed_etf_count))
+            .then_with(|| a.median_real_change.unwrap_or(f64::INFINITY).total_cmp(&b.median_real_change.unwrap_or(f64::INFINITY)))
+            .then_with(|| a.code.cmp(&b.code)),
     });
     rows
 }
 
-fn compute_from_dir(dir: &Path, window_days: &[KstDate], funds: &[FundMeta]) -> Vec<AggregatedStock> {
+fn compute_from_dir(dir: &Path, window_days: &[KstDate], funds: &[FundMeta], direction: EtfAccumulationDirection) -> Vec<AggregatedStock> {
     let mut pairs = Vec::with_capacity(funds.len());
     for fund in funds {
         if let Some((before, after)) = load_fund_endpoints(dir, window_days, fund.code) {
             pairs.push((fund.clone(), before, after));
         }
     }
-    aggregate_pairs(&pairs)
+    aggregate_pairs(&pairs, direction)
 }
 
-fn empty_response(window: u32, style: EtfAccumulationStyle, collected_days: u32) -> EtfAccumulation {
-    EtfAccumulation { window, style, from_date: None, to_date: None, collected_days, ma_as_of: None, rows: Vec::new() }
+fn empty_response(window: u32, style: EtfAccumulationStyle, direction: EtfAccumulationDirection, collected_days: u32) -> EtfAccumulation {
+    EtfAccumulation { window, style, direction, from_date: None, to_date: None, collected_days, ma_as_of: None, rows: Vec::new() }
 }
 
 fn style_matches(fund_style: EtfStyle, filter: EtfAccumulationStyle) -> bool {
@@ -293,31 +337,47 @@ fn style_matches(fund_style: EtfStyle, filter: EtfAccumulationStyle) -> bool {
 }
 
 impl AccumulationCache {
-    pub(super) async fn get(&self, st: &AppState, ma_cache: &MaCache, window: u32, style: EtfAccumulationStyle) -> EtfAccumulation {
+    pub(super) async fn get(
+        &self,
+        st: &AppState,
+        ma_cache: &MaCache,
+        window: u32,
+        style: EtfAccumulationStyle,
+        direction: EtfAccumulationDirection,
+    ) -> EtfAccumulation {
         let Some(dir) = st.etf.pdf_dir().map(PathBuf::from) else {
-            return empty_response(window, style, 0);
+            return empty_response(window, style, direction, 0);
         };
         let scan_dir = dir.clone();
         let dir_stamp = tokio::task::spawn_blocking(move || scan_stamp(&scan_dir, window))
             .await
-            .unwrap_or_else(|_| DirStamp { days: Vec::new(), window_dir_mtimes: Vec::new(), boundary_fingerprint: 0 });
+            .unwrap_or_else(|_| DirStamp { days: Vec::new(), window_dir_mtimes: Vec::new(), window_fingerprint: 0 });
         let catalog = st.etf.catalog();
         let catalog_revision = st.etf.revision();
-        let ma_generation = st.screener.store_generation();
-        let symbols_stamp = st.symbols.updates().borrow().as_ref().map_or(0, |d| Arc::as_ptr(d) as usize);
-        let stamp = CacheStamp { dir: dir_stamp, catalog_revision, ma_generation, symbols_stamp };
-        if let Some(entry) = self.entries.lock().expect("동시 매집 캐시 잠금").get(&(window, style))
-            && entry.stamp == stamp
+        let ma_generation = st.screener.store_generation().await.ok();
+        let symbols_revision = st.symbols.revision();
+        let key = (window, style, direction);
+        let stamp = ma_generation.map(|ma_generation| CacheStamp {
+            dir: dir_stamp.clone(),
+            catalog_revision,
+            ma_generation,
+            symbols_revision,
+        });
+        if let Some(ref stamp) = stamp
+            && let Some(entry) = self.entries.lock().expect("동시 매집 캐시 잠금").get(&key)
+            && entry.stamp == *stamp
         {
             return (*entry.response).clone();
         }
-        let collected_days = stamp.dir.days.len() as u32;
-        if stamp.dir.days.len() < 2 {
-            let response = empty_response(window, style, collected_days);
-            self.entries.lock().expect("동시 매집 캐시 잠금").insert((window, style), CacheEntry { stamp, response: Arc::new(response.clone()) });
+        let collected_days = dir_stamp.days.len() as u32;
+        if dir_stamp.days.len() < 2 {
+            let response = empty_response(window, style, direction, collected_days);
+            if let Some(stamp) = stamp {
+                self.entries.lock().expect("동시 매집 캐시 잠금").insert(key, CacheEntry { stamp, response: Arc::new(response.clone()) });
+            }
             return response;
         }
-        let window_days = window_slice(&stamp.dir.days, window).to_vec();
+        let window_days = window_slice(&dir_stamp.days, window).to_vec();
         let from_date = window_days[0];
         let to_date = window_days[window_days.len() - 1];
         let funds: Vec<FundMeta> = catalog
@@ -326,10 +386,16 @@ impl AccumulationCache {
             .filter(|f| style_matches(f.style, style))
             .map(|f| FundMeta { code: f.code, name: f.name.clone(), style: f.style })
             .collect();
-        let aggregated = tokio::task::spawn_blocking(move || compute_from_dir(&dir, &window_days, &funds))
+        let aggregated = tokio::task::spawn_blocking(move || compute_from_dir(&dir, &window_days, &funds, direction))
             .await
             .unwrap_or_default();
-        let ma = ma_cache.snapshot(&st.screener, || catalog.stock_codes()).await;
+        let ma = ma_cache
+            .snapshot(&st.screener, || {
+                let mut codes = catalog.stock_codes();
+                codes.extend(aggregated.iter().filter_map(|item| StockCode::parse(&item.code).ok()));
+                codes
+            })
+            .await;
         let rows = aggregated
             .into_iter()
             .map(|item| {
@@ -342,6 +408,9 @@ impl AccumulationCache {
                     buying_etf_count: item.buying_etf_count,
                     added_etf_count: item.added_etf_count,
                     increased_etf_count: item.increased_etf_count,
+                    selling_etf_count: item.selling_etf_count,
+                    removed_etf_count: item.removed_etf_count,
+                    decreased_etf_count: item.decreased_etf_count,
                     median_real_change: item.median_real_change,
                     ma: states,
                     contributors: item.contributors,
@@ -351,13 +420,18 @@ impl AccumulationCache {
         let response = EtfAccumulation {
             window,
             style,
+            direction,
             from_date: Some(api::KstDate(from_date)),
             to_date: Some(api::KstDate(to_date)),
             collected_days,
             ma_as_of: ma.as_of.map(api::KstDate),
             rows,
         };
-        self.entries.lock().expect("동시 매집 캐시 잠금").insert((window, style), CacheEntry { stamp, response: Arc::new(response.clone()) });
+        if ma.ok
+            && let Some(stamp) = stamp
+        {
+            self.entries.lock().expect("동시 매집 캐시 잠금").insert(key, CacheEntry { stamp, response: Arc::new(response.clone()) });
+        }
         response
     }
 }
@@ -410,6 +484,12 @@ mod tests {
         for bad in ["", "passive", "ACTIVE", "both"] {
             assert!(parse_style(&query(&[("style", bad)])).is_err(), "{bad}");
         }
+        assert_eq!(parse_direction(&query(&[])).unwrap(), EtfAccumulationDirection::Buy);
+        assert_eq!(parse_direction(&query(&[("direction", "buy")])).unwrap(), EtfAccumulationDirection::Buy);
+        assert_eq!(parse_direction(&query(&[("direction", "sell")])).unwrap(), EtfAccumulationDirection::Sell);
+        for bad in ["", "BUY", "SELL", "both", "short"] {
+            assert!(parse_direction(&query(&[("direction", bad)])).is_err(), "{bad}");
+        }
     }
 
     #[test]
@@ -427,8 +507,11 @@ mod tests {
             ("035420", "NAVER", 100.0, 2500),
             ("005380", "현대차", 150.0, 2500),
         ]);
-        let rows = aggregate_pairs(&[(fund, before, after)]);
-        assert!(rows.is_empty(), "CU 2배 증가는 매집으로 잡히면 안 된다: {rows:?}");
+        let pairs = [(fund, before, after)];
+        let buy_rows = aggregate_pairs(&pairs, EtfAccumulationDirection::Buy);
+        assert!(buy_rows.is_empty(), "CU 2배 증가는 매집으로 잡히면 안 된다: {buy_rows:?}");
+        let sell_rows = aggregate_pairs(&pairs, EtfAccumulationDirection::Sell);
+        assert!(sell_rows.is_empty(), "CU 2배 증가는 매도로 잡히면 안 된다: {sell_rows:?}");
     }
 
     #[test]
@@ -443,18 +526,20 @@ mod tests {
         let b3 = snap(&[("000001", "A", 100.0, 5000), ("000003", "C", 100.0, 5000)]);
         let a3 = snap(&[("000001", "A", 100.0, 4000), ("000003", "C", 100.0, 4000), ("000002", "B", 20.0, 2000)]);
 
-        let rows = aggregate_pairs(&[(f1, b1, a1), (f2, b2, a2), (f3, b3, a3)]);
+        let rows = aggregate_pairs(&[(f1, b1, a1), (f2, b2, a2), (f3, b3, a3)], EtfAccumulationDirection::Buy);
         let codes: Vec<&str> = rows.iter().map(|r| r.code.as_str()).collect();
         assert_eq!(codes, ["000002", "000004"]);
 
         let b_row = &rows[0];
         assert_eq!((b_row.buying_etf_count, b_row.added_etf_count, b_row.increased_etf_count), (3, 1, 2));
+        assert_eq!((b_row.selling_etf_count, b_row.removed_etf_count, b_row.decreased_etf_count), (0, 0, 0));
         assert!((b_row.median_real_change.unwrap() - 0.4).abs() < 1e-9);
-        let contrib_order: Vec<(&str, EtfChangeKind, Option<u32>)> = b_row.contributors.iter().map(|c| (c.fund_code.as_str(), c.kind, c.after_weight_bps)).collect();
+        let contrib_order: Vec<(&str, EtfChangeKind, Option<u32>, Option<u32>)> =
+            b_row.contributors.iter().map(|c| (c.fund_code.as_str(), c.kind, c.before_weight_bps, c.after_weight_bps)).collect();
         assert_eq!(contrib_order, [
-            ("426030", EtfChangeKind::Added, Some(2000)),
-            ("444200", EtfChangeKind::Increased, Some(3500)),
-            ("445290", EtfChangeKind::Increased, Some(3000)),
+            ("426030", EtfChangeKind::Added, None, Some(2000)),
+            ("444200", EtfChangeKind::Increased, Some(3000), Some(3500)),
+            ("445290", EtfChangeKind::Increased, Some(3000), Some(3000)),
         ]);
 
         let d_row = &rows[1];
@@ -462,6 +547,39 @@ mod tests {
         assert_eq!(d_row.median_real_change, None);
         let d_contribs: Vec<&str> = d_row.contributors.iter().map(|c| c.fund_code.as_str()).collect();
         assert_eq!(d_contribs, ["444200", "445290"]);
+    }
+
+    #[test]
+    fn sell_direction_ranks_removed_before_decreased_and_most_negative_first() {
+        let f1 = meta("444200", "액티브1", EtfStyle::Active);
+        let f2 = meta("445290", "액티브2", EtfStyle::Active);
+        let f3 = meta("426030", "액티브3", EtfStyle::Active);
+        let b1 = snap(&[("000001", "A", 100.0, 2500), ("000002", "B", 100.0, 2500), ("000003", "C", 100.0, 2500), ("000004", "D", 100.0, 2500)]);
+        let a1 = snap(&[("000001", "A", 100.0, 4000), ("000002", "B", 60.0, 2000), ("000003", "C", 100.0, 4000)]);
+        let b2 = snap(&[("000001", "A", 100.0, 2500), ("000002", "B", 100.0, 2500), ("000003", "C", 100.0, 2500), ("000004", "D", 100.0, 2500)]);
+        let a2 = snap(&[("000001", "A", 100.0, 3500), ("000002", "B", 80.0, 2500), ("000003", "C", 100.0, 4000)]);
+        let b3 = snap(&[("000001", "A", 100.0, 3500), ("000002", "B", 100.0, 3000), ("000003", "C", 100.0, 3500)]);
+        let a3 = snap(&[("000001", "A", 100.0, 5000), ("000003", "C", 100.0, 5000)]);
+
+        let rows = aggregate_pairs(&[(f1, b1, a1), (f2, b2, a2), (f3, b3, a3)], EtfAccumulationDirection::Sell);
+        let codes: Vec<&str> = rows.iter().map(|r| r.code.as_str()).collect();
+        assert_eq!(codes, ["000002", "000004"]);
+
+        let b_row = &rows[0];
+        assert_eq!((b_row.buying_etf_count, b_row.added_etf_count, b_row.increased_etf_count), (0, 0, 0));
+        assert_eq!((b_row.selling_etf_count, b_row.removed_etf_count, b_row.decreased_etf_count), (3, 1, 2));
+        assert!((b_row.median_real_change.unwrap() - (-0.3)).abs() < 1e-9);
+        let contrib_order: Vec<(&str, EtfChangeKind, Option<u32>, Option<u32>)> =
+            b_row.contributors.iter().map(|c| (c.fund_code.as_str(), c.kind, c.before_weight_bps, c.after_weight_bps)).collect();
+        assert_eq!(contrib_order, [
+            ("426030", EtfChangeKind::Removed, Some(3000), None),
+            ("444200", EtfChangeKind::Decreased, Some(2500), Some(2000)),
+            ("445290", EtfChangeKind::Decreased, Some(2500), Some(2500)),
+        ]);
+
+        let d_row = &rows[1];
+        assert_eq!((d_row.selling_etf_count, d_row.removed_etf_count, d_row.decreased_etf_count), (2, 2, 0));
+        assert_eq!(d_row.median_real_change, None);
     }
 
     #[test]
@@ -516,7 +634,7 @@ mod tests {
             let t0 = Instant::now();
             let stamp = scan_stamp(tmp.path(), 20);
             let slice = window_slice(&stamp.days, 20);
-            let rows = compute_from_dir(tmp.path(), slice, &funds);
+            let rows = compute_from_dir(tmp.path(), slice, &funds, EtfAccumulationDirection::Buy);
             let elapsed = t0.elapsed().as_secs_f64() * 1000.0;
             assert!(!rows.is_empty());
             last_rows = rows.len();

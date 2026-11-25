@@ -2,6 +2,7 @@
 
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
 use domain::{IndexCode, Market, Symbol, SymbolInfo, SymbolKind};
@@ -151,6 +152,7 @@ fn choseong_of(c: char) -> char {
 pub struct SymbolDirectory {
     current: watch::Sender<Option<Arc<Directory>>>,
     generation: SourceGeneration,
+    revision: AtomicU64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -161,7 +163,7 @@ pub enum NotReady {
 
 impl Default for SymbolDirectory {
     fn default() -> Self {
-        SymbolDirectory { current: watch::channel(None).0, generation: SourceGeneration::default() }
+        SymbolDirectory { current: watch::channel(None).0, generation: SourceGeneration::default(), revision: AtomicU64::new(0) }
     }
 }
 
@@ -175,8 +177,13 @@ impl SymbolDirectory {
         self.generation.clone()
     }
 
+    pub fn revision(&self) -> u64 {
+        self.revision.load(Ordering::SeqCst)
+    }
+
     pub fn replace(&self, dir: Directory) {
         self.current.send_replace(Some(Arc::new(dir)));
+        self.revision.fetch_add(1, Ordering::SeqCst);
     }
 
     pub fn replace_if_current(&self, started: GenerationTicket, dir: Directory) -> bool {
@@ -187,7 +194,9 @@ impl SymbolDirectory {
             *current = Some(Arc::new(dir));
             true
         });
-        if !replaced {
+        if replaced {
+            self.revision.fetch_add(1, Ordering::SeqCst);
+        } else {
             tracing::info!("공급원이 바뀌는 중 늦게 도착한 종목 목록은 넣지 않았습니다");
         }
         replaced

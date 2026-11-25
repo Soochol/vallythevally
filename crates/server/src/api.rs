@@ -1629,6 +1629,11 @@ pub enum WindowContent {
     Ranking {
         ranking: Ranking,
     },
+    PreMarket {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
+        symbol: Option<SymbolCode>,
+    },
 }
 
 fn default_order_venue() -> Venue {
