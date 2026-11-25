@@ -10,6 +10,7 @@ import { actionInAccount, cancelAction, cancelBatchAction, modifyAction, orderLe
 import { accountNumberText, type CurrentAccount } from "./orderAccount";
 import { cancelOrder, cancelOrdersAtPrice, modifyOrder, placeOrder, reconcileOrders } from "./orderApi";
 import { needsHighValueConfirm } from "./orderRules";
+import { playOrderSound, primeOrderSound } from "./orderSound";
 import { type PendingDraft, pendingWrites } from "./pendingWrites";
 import { isUnanswered, type OrderStatus, statusOfCanceling, statusOfCommand, statusOfFailure, statusOfModifying, statusOfSending, withMargin } from "./statusText";
 
@@ -38,6 +39,7 @@ interface Plan<T> {
   call(id: string): Promise<T>;
   describe(result: T): OrderStatus;
   settled(result: T): readonly PendingDraft[];
+  onResult?(result: T): void;
 }
 
 const acceptedOrderNo = (command: OrderCommand): string | null => command.state === "accepted" ? command.orderNo : null;
@@ -96,6 +98,7 @@ export function useOrderWrites(account: CurrentAccount | null, code: string, ven
         const result = await plan.call(commandId);
         pendingWrites.resolve(plan.mark.key, plan.settled(result));
         setStatus(plan.describe(result));
+        plan.onResult?.(result);
       } catch (error) {
         if (isUnanswered(error)) settlement = "unanswered";
         setStatus(statusOfFailure(error, () => enqueue(plan), accountText));
@@ -110,6 +113,7 @@ export function useOrderWrites(account: CurrentAccount | null, code: string, ven
   }, [queryClient, accountRef, accountText, windowId]);
 
   const place = useCallback((r: PlaceRequest) => {
+    primeOrderSound();
     const action = placeAction(code, r.side, r.price, r.quantity, venue);
     enqueue<OrderCommand>({
       action,
@@ -121,6 +125,9 @@ export function useOrderWrites(account: CurrentAccount | null, code: string, ven
       settled: (command) => {
         const orderNo = acceptedOrderNo(command);
         return orderNo === null ? [] : [{ kind: "placed", code, order: openOrderOf(orderNo, code, venue, r.side, r.price, r.quantity) }];
+      },
+      onResult: (command) => {
+        if (command.state === "accepted") playOrderSound(r.side === "buy" ? "buy-accepted" : "sell-accepted");
       },
     });
   }, [code, venue, enqueue, accountRef, broker]);
