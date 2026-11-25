@@ -1,17 +1,11 @@
-use std::io::ErrorKind;
 use std::path::Path;
 
 use domain::KstDate;
-use duckdb::{Config, Connection, params};
+use duckdb::{Connection, params};
 
 use crate::api;
 use crate::clock::kst;
-
-use super::day_index::StockCoverage;
-
-const FNV_OFFSET_BASIS: u64 = 0xcbf2_9ce4_8422_2325;
-const FNV_PRIME: u64 = 0x0100_0000_01b3;
-const DUCKDB_THREADS: usize = 4;
+use crate::collected_store::{StockCoverage, bucket_file_name, file_exists, open_connection, path_str};
 
 const BOOK_QUERY: &str = "
 WITH picked AS (
@@ -63,19 +57,6 @@ pub(super) struct DayReplayData {
     pub trades: Vec<(u32, u32, u64, i64)>,
 }
 
-pub(crate) fn fnv1a_bucket(symbol: &str, buckets: u64) -> u64 {
-    let mut hash = FNV_OFFSET_BASIS;
-    for byte in symbol.as_bytes() {
-        hash ^= u64::from(*byte);
-        hash = hash.wrapping_mul(FNV_PRIME);
-    }
-    hash % buckets
-}
-
-pub(crate) fn bucket_file_name(symbol: &str, buckets: u64) -> String {
-    format!("{:03}.parquet", fnv1a_bucket(symbol, buckets))
-}
-
 pub(super) fn read_day_data(day_dir: &Path, date: KstDate, stock_code: &str, buckets: u64, coverage: &StockCoverage) -> Result<DayReplayData, String> {
     let symbol = format!("{stock_code}_AL");
     let bucket_file = bucket_file_name(&symbol, buckets);
@@ -93,25 +74,6 @@ pub(super) fn read_day_data(day_dir: &Path, date: KstDate, stock_code: &str, buc
     let trades = if has_trades { query_trades(&conn, &trade_path, &symbol, day_start_ms, day_end_ms)? } else { Vec::new() };
     let covered = compute_covered(day_start_ms, books.first().map(|b| b.minute), coverage.end_minute_exclusive, &coverage.gaps);
     Ok(DayReplayData { covered, books, trades })
-}
-
-pub(crate) fn open_connection() -> Result<Connection, String> {
-    let config = Config::default().enable_autoload_extension(false).map_err(|e| format!("DuckDB 설정 실패: {e}"))?;
-    let conn = Connection::open_in_memory_with_flags(config).map_err(|e| format!("DuckDB 연결 실패: {e}"))?;
-    conn.execute_batch(&format!("SET threads = {DUCKDB_THREADS};")).map_err(|e| format!("DuckDB 스레드 설정 실패: {e}"))?;
-    Ok(conn)
-}
-
-pub(crate) fn file_exists(path: &Path) -> Result<bool, String> {
-    match std::fs::metadata(path) {
-        Ok(meta) => Ok(meta.is_file()),
-        Err(e) if e.kind() == ErrorKind::NotFound => Ok(false),
-        Err(e) => Err(format!("{}를 확인할 수 없습니다: {e}", path.display())),
-    }
-}
-
-pub(crate) fn path_str(path: &Path) -> Result<&str, String> {
-    path.to_str().ok_or_else(|| format!("UTF-8 경로가 아닙니다: {}", path.display()))
 }
 
 fn query_books(conn: &Connection, path: &Path, symbol: &str, day_start_ms: i64, day_end_ms: i64) -> Result<Vec<api::BookReplayBook>, String> {
@@ -210,12 +172,6 @@ pub(super) fn compute_covered(day_start_ms: i64, first_book_minute: Option<u32>,
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn samsung_bucket_is_56() {
-        assert_eq!(fnv1a_bucket("005930_AL", 64), 56);
-        assert_eq!(bucket_file_name("005930_AL", 64), "056.parquet");
-    }
 
     #[test]
     fn covered_is_empty_without_books() {
