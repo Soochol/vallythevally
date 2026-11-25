@@ -121,6 +121,7 @@ export class FineBars implements FineBarsReader {
   }
 
   demand(spans: readonly FineSpan[]): void {
+    if (spans.length === 0 && this.series.size === 0) return;
     const key = this.key;
     if (!key) return;
     const now = this.now();

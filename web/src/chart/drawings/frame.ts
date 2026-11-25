@@ -19,7 +19,7 @@ export interface RenderFrame {
   transient?: { shapes: readonly Shape[]; opacity: number };
   box: { start: ScreenPoint; end: ScreenPoint } | null;
   pane: Pane;
-  ctx: ToolContext;
+  ctx: ToolContext | null;
   editable: boolean;
 }
 

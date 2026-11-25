@@ -29,7 +29,7 @@ function confirm(cellId: WindowId, editor: DrawingEditor) {
 const draft = (cellId: WindowId, patch: Partial<DrawingBody>) => useDrawingSession.getState().updateEditor(cellId, (editor) => ({ ...editor, draft: { ...editor.draft, ...patch } }));
 const meaningful = (text: string | null) => text?.trim() ? text : null;
 function settlePoint(cellId: WindowId, index: number) {
-  const ctx = surfaceFor(cellId)?.frame().ctx;
+  const ctx = surfaceFor(cellId)?.toolContext();
   useDrawingSession.getState().updateEditor(cellId, (editor) => {
     const typed = editor.draft.points[index]; const before = editor.original.points[index];
     const setPoint = toolOf(editor.draft.tool)?.setPoint;
@@ -95,7 +95,7 @@ export function DrawingDetails({ cellId, editor, anchor }: { cellId: WindowId; e
 export function DrawingTextEditor({ cellId, editor }: { cellId: WindowId; editor: DrawingEditor }) {
   const ref = useRef<HTMLTextAreaElement>(null);
   const anchor = useRef<HTMLDivElement>(null);
-  const surface = surfaceFor(cellId); const p = editor.draft.points.at(-1); const at = p ? surface?.frame().ctx.toScreen(p) : null;
+  const surface = surfaceFor(cellId); const p = editor.draft.points.at(-1); const at = p ? surface?.toolContext().toScreen(p) : null;
   const typed = { ...editor, draft: { ...editor.draft, text: meaningful(editor.draft.text) } };
   const submit = () => typed.draft.text === meaningful(editor.original.text) ? close(cellId) : confirm(cellId, typed);
   useEffect(() => { ref.current?.focus(); ref.current?.select(); }, []);
