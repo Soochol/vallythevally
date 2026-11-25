@@ -27,3 +27,22 @@ test.each([
   expect(kept).not.toContain(code);
   expect(kept).toHaveLength(everyone.length - 1);
 });
+
+test("가짜 스크리너가 미시 조건 3종과 결합 조건을 200으로 실행한다", () => {
+  const screener = createScreener("ready", () => now);
+  const cases = [
+    [{ kind: "program_net_buy", days: 5, minMillionWon: 1000, maxMillionWon: null }],
+    [{ kind: "whale_net_buy", days: 5, minMillionWon: 500, maxMillionWon: null }],
+    [{ kind: "vi_triggered", days: 5, minCount: 1 }],
+    [
+      { kind: "program_net_buy", days: 5, minMillionWon: 1000, maxMillionWon: null },
+      { kind: "whale_net_buy", days: 5, minMillionWon: 500, maxMillionWon: null },
+      { kind: "vi_triggered", days: 5, minCount: 1 },
+      { kind: "new_high", period: "D", recentBars: 1, field: "high", n: 60 },
+    ],
+  ];
+  for (const conditions of cases) {
+    const reply = screener.run({ id: "s-micro", name: "미시", markets: [], exclude: [], conditions });
+    expect(reply.status).toBe(200);
+  }
+});
