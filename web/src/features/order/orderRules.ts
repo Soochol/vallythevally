@@ -176,6 +176,19 @@ export function typedQuantity(input: string): number {
 
 export const quantityForAmount = (amount: number, price: number | null): number | null => (price !== null && price > 0 ? Math.floor(amount / price) : null);
 
+export const RATIO_PRESETS = [
+  { percent: 25, label: "25%" },
+  { percent: 50, label: "50%" },
+  { percent: 75, label: "75%" },
+  { percent: 100, label: "전량" },
+] as const;
+
+export function quantityForRatio(baseQuantity: number, percent: number): number {
+  const whole = Math.floor(baseQuantity);
+  if (!(whole > 0) || !(percent > 0)) return 0;
+  return percent >= 100 ? whole : Math.floor((whole * percent) / 100);
+}
+
 export interface BuyingPower {
   readonly policy: MarginPolicy;
   readonly amount: number;

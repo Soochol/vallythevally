@@ -2,7 +2,7 @@ import { expect, test } from "vitest";
 import type { TradingOpenOrder } from "../../api/generated/TradingOpenOrder";
 import type { TradingOrderable } from "../../api/generated/TradingOrderable";
 import type { PendingWrite } from "./pendingWrites";
-import { type BuyingPower, buyBlock, buyingPowerOf, buyPreview, capacityProblem, dragCancels, type DragSource, marginOf, maxBuyQuantity, modifyBuyProblem, type DragTarget, dragGhostText, dragQuantity, dragSide, groupOpenOrders, groupWithPending, HIGH_VALUE_WON, judgeDrag, needsHighValueConfirm, orderCountOf, planCancel, type PriceGroup, quantityForAmount, sideTotal, typedQuantity } from "./orderRules";
+import { type BuyingPower, buyBlock, buyingPowerOf, buyPreview, capacityProblem, dragCancels, type DragSource, marginOf, maxBuyQuantity, modifyBuyProblem, type DragTarget, dragGhostText, dragQuantity, dragSide, groupOpenOrders, groupWithPending, HIGH_VALUE_WON, judgeDrag, needsHighValueConfirm, orderCountOf, planCancel, type PriceGroup, quantityForAmount, quantityForRatio, RATIO_PRESETS, sideTotal, typedQuantity } from "./orderRules";
 
 const order = (orderNo: string, side: "buy" | "sell", price: number, openQuantity: number, code = "005930"): TradingOpenOrder => ({
   orderNo, code, name: "삼성전자", side, quantity: openQuantity, price, openQuantity, status: "접수", orderedAt: "090000", originalOrderNo: null, venue: "krx",
@@ -92,6 +92,15 @@ test("금액은 가격으로 나눈 몫을 수량으로 쓰고 가격이 없으�
   expect(quantityForAmount(500, 71_000)).toBe(0);
   expect(quantityForAmount(1_000_000, 0)).toBeNull();
   expect(quantityForAmount(1_000_000, null)).toBeNull();
+});
+
+test("비율은 기준 수량의 25·50·75% 내림과 전량을 내고 기준 수량이 없으면 0이다", () => {
+  expect(RATIO_PRESETS.map((preset) => preset.label)).toEqual(["25%", "50%", "75%", "전량"]);
+  expect(RATIO_PRESETS.map((preset) => quantityForRatio(70, preset.percent))).toEqual([17, 35, 52, 70]);
+  expect(RATIO_PRESETS.map((preset) => quantityForRatio(3, preset.percent))).toEqual([0, 1, 2, 3]);
+  expect(quantityForRatio(0, 100)).toBe(0);
+  expect(quantityForRatio(-5, 50)).toBe(0);
+  expect(quantityForRatio(10, 0)).toBe(0);
 });
 
 test("주문 수량은 칸의 수 그대로다", () => {

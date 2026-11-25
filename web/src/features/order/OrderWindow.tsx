@@ -22,12 +22,13 @@ import { openSystemSettings } from "../system-settings/open";
 import { AccountBand } from "./AccountBand";
 import { DragGhost } from "./DragGhost";
 import { HighValueConfirm } from "./HighValueConfirm";
-import { atLivePrice, averageRowPrice, holdingOf, type ProfitUnit, sellOrderQuantity, toggledUnit } from "./holdingSummary";
+import { atLivePrice, averageRowPrice, holdingOf, type ProfitUnit, remainingToSell, sellOrderQuantity, toggledUnit } from "./holdingSummary";
 import { HoldingSummary } from "./HoldingSummary";
 import { FALLBACK_NOTICE, type OrderAccountChoice } from "./orderAccount";
 import { orderEntryKey } from "./orderEntries";
 import { type HoverCell, type LadderActions, OrderLadder } from "./OrderLadder";
 import { typedQuantity } from "./orderRules";
+import type { PresetMode } from "./orderSettings";
 import { OrderSettingsPopover } from "./OrderSettingsPopover";
 import { OrderStatusBar } from "./OrderStatusBar";
 import { OrderTotals } from "./OrderTotals";
@@ -128,6 +129,10 @@ function OrderBody({ id, code, infoPager, choice, access, balance }: { id: Windo
   const averagePrice = settings.averageDot ? averageRowPrice(rows.map((row) => row.price), holding?.averagePrice ?? null) : null;
 
   const pickAccount = useStableCallback((account: string) => setSettings({ ...settings, account }));
+  const changePresetMode = useStableCallback((presetMode: PresetMode) => {
+    const { prefs } = useUiStore.getState();
+    setSettings({ ...prefs.orderSettings, presetMode });
+  });
   const changeInput = useStableCallback((nextInput: string) => {
     setInput(nextInput);
     if (!useUiStore.getState().prefs.orderSettings.keepLastEntry) return;
@@ -154,6 +159,7 @@ function OrderBody({ id, code, infoPager, choice, access, balance }: { id: Windo
     [settings, orderVenue, mock, nxtNotTraded, hasHolding, setSettings],
   );
   const sellOrdered = sellOrderQuantity(data.groups, data.pending, code, data.openOrdersListedAt);
+  const sellableRemaining = holding === null ? null : Math.max(0, remainingToSell(holding, sellOrdered));
   const shownLadder = replay.kind === "past" || (replay.kind === "live" && liveView !== null);
 
   return (
@@ -169,8 +175,13 @@ function OrderBody({ id, code, infoPager, choice, access, balance }: { id: Windo
       <HoldingSummary account={accountRef} holding={holding} orderable={data.orderable} buyableProblem={data.buyableProblem} sellOrdered={sellOrdered} unit={profitUnit} onUnit={toggleProfitUnit} onFill={changeInput} />
       <QuantityRow
         input={input}
+        mode={settings.presetMode}
         amountPresets={settings.amountPresets}
         referencePrice={referencePrice}
+        buying={data.capacity.buying}
+        sellableRemaining={sellableRemaining}
+        hasHolding={hasHolding}
+        onMode={changePresetMode}
         onInput={changeInput}
         trailing={settingsPopover}
       />

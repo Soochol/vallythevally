@@ -1,6 +1,6 @@
 import { type RefObject, useCallback, useEffect, useMemo, useRef } from "react";
-import type { OrderSide } from "../../api/generated/OrderSide";
 import { createValueStore, type ValueStore } from "../../lib/valueStore";
+import { resolveOrderCellAt } from "./nearestCell";
 import { type DragOutcome, type DragSource, type DragTarget, judgeDrag } from "./orderRules";
 
 export interface DragView {
@@ -29,9 +29,9 @@ const within = (box: DOMRect, x: number, y: number): boolean => x >= box.left &&
 function targetAt(ladder: HTMLElement, origin: DOMRect | null, x: number, y: number): DragTarget {
   if (origin && within(origin, x, y)) return { kind: "origin" };
   if (!within(ladder.getBoundingClientRect(), x, y)) return { kind: "outside" };
-  const cell = document.elementFromPoint(x, y)?.closest<HTMLElement>("[data-order-cell]");
-  if (!cell || cell.dataset.price === undefined) return { kind: "ladder" };
-  return { kind: "cell", side: cell.dataset.side as OrderSide, price: Number(cell.dataset.price), rowKey: cell.dataset.rowKey };
+  const resolved = resolveOrderCellAt(ladder, x, y);
+  if (resolved === null) return { kind: "ladder" };
+  return { kind: "cell", side: resolved.side, price: resolved.price, rowKey: resolved.rowKey };
 }
 
 function swallowNextClick(): void {
