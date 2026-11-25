@@ -36,6 +36,7 @@ pub enum Halt {
 pub enum AuthError {
     Halted(Halt),
     IssueInterval { retry_at: KstTime },
+    IssueDisabled,
     NotRecorded(FileError),
     Transport(TransportError),
     Failed(Failure),
@@ -48,6 +49,7 @@ impl fmt::Display for AuthError {
             AuthError::Halted(Halt::Rejected(failure)) | AuthError::Failed(failure) => failure.fmt(f),
             AuthError::Halted(Halt::TokenFileUnreadable(e)) | AuthError::NotRecorded(e) => write!(f, "한투 토큰 파일: {e}"),
             AuthError::IssueInterval { .. } => f.write_str("한투 토큰 발급 간격(10분)이 지나지 않았습니다"),
+            AuthError::IssueDisabled => f.write_str("한투 토큰은 부모 데몬에서만 발급합니다"),
             AuthError::Transport(e) => write!(f, "한투 인증 요청 실패: {e}"),
             AuthError::BadResponse => f.write_str("한투 인증 응답에서 값을 읽지 못했습니다"),
         }
@@ -65,6 +67,7 @@ struct Issued {
 
 #[derive(Default)]
 struct State {
+    supplied_credentials: Option<KisCredentials>,
     issued: Option<Issued>,
     last_request_at: Option<KstTime>,
     stale: bool,
@@ -73,11 +76,18 @@ struct State {
     disconnected: bool,
 }
 
+enum Mode {
+    Managed {
+        credentials: KisCredentials,
+        credential_id: String,
+        file: TokenFile,
+        transport: Arc<dyn Transport>,
+    },
+    Supplied,
+}
+
 struct Inner {
-    credentials: KisCredentials,
-    credential_id: String,
-    file: TokenFile,
-    transport: Arc<dyn Transport>,
+    mode: Mode,
     clock: Clock,
     state: Mutex<State>,
     halted: watch::Sender<Option<Halt>>,
@@ -90,12 +100,16 @@ pub struct KisAuth(Arc<Inner>);
 impl fmt::Debug for KisAuth {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let st = self.lock();
-        f.debug_struct("KisAuth")
-            .field("app_key", &self.0.credentials.app_key)
-            .field("file", &self.0.file.path())
-            .field("token", &st.issued.as_ref().map(|i| &i.token))
-            .field("halt", &st.halt)
-            .finish()
+        let mut debug = f.debug_struct("KisAuth");
+        match &self.0.mode {
+            Mode::Managed { credentials, file, .. } => {
+                debug.field("app_key", &credentials.app_key).field("file", &file.path());
+            }
+            Mode::Supplied => {
+                debug.field("app_key", &st.supplied_credentials.as_ref().map(|credentials| &credentials.app_key)).field("supplied", &true);
+            }
+        }
+        debug.field("token", &st.issued.as_ref().map(|i| &i.token)).field("halt", &st.halt).finish()
     }
 }
 
@@ -129,7 +143,25 @@ impl KisAuth {
         let file = TokenFile::new(token_path);
         let state = loaded_state(&file, &credential_id);
         let halted = watch::channel(state.halt.clone()).0;
-        KisAuth(Arc::new(Inner { credentials, credential_id, file, transport, clock, state: Mutex::new(state), halted, issuing: tokio::sync::Mutex::new(()) }))
+        let mode = Mode::Managed { credentials, credential_id, file, transport };
+        KisAuth(Arc::new(Inner { mode, clock, state: Mutex::new(state), halted, issuing: tokio::sync::Mutex::new(()) }))
+    }
+
+    pub fn supplied(clock: Clock) -> Self {
+        let halted = watch::channel(None).0;
+        KisAuth(Arc::new(Inner { mode: Mode::Supplied, clock, state: Mutex::new(State::default()), halted, issuing: tokio::sync::Mutex::new(()) }))
+    }
+
+    pub fn record_supplied(&self, credentials: KisCredentials, token: Secret<String>, generation: TokenGen, now: KstTime, expires_at: KstTime) {
+        let mut st = self.lock();
+        st.supplied_credentials = Some(credentials);
+        st.issued_count = st.issued_count.max(generation.0);
+        st.issued = Some(Issued { token, issued_at: now, expires_at, generation });
+        st.stale = false;
+    }
+
+    pub fn needs_issue(&self) -> bool {
+        matches!(self.usable(), Ok(None))
     }
 
     fn lock(&self) -> std::sync::MutexGuard<'_, State> {
@@ -137,7 +169,13 @@ impl KisAuth {
     }
 
     pub fn app_headers(&self) -> Vec<(&'static str, Secret<String>)> {
-        vec![("appkey", self.0.credentials.app_key.clone()), ("appsecret", self.0.credentials.app_secret.clone())]
+        match &self.0.mode {
+            Mode::Managed { credentials, .. } => vec![("appkey", credentials.app_key.clone()), ("appsecret", credentials.app_secret.clone())],
+            Mode::Supplied => match &self.lock().supplied_credentials {
+                Some(credentials) => vec![("appkey", credentials.app_key.clone()), ("appsecret", credentials.app_secret.clone())],
+                None => Vec::new(),
+            },
+        }
     }
 
     pub fn halted(&self) -> Option<Halt> {
@@ -165,12 +203,19 @@ impl KisAuth {
     }
 
     pub fn app_key_tail(&self) -> Option<String> {
-        let key = self.0.credentials.app_key.expose();
-        (key.chars().count() >= 8).then(|| key.chars().rev().take(4).collect::<Vec<_>>().into_iter().rev().collect())
+        let tail = |key: &str| (key.chars().count() >= 8).then(|| key.chars().rev().take(4).collect::<Vec<_>>().into_iter().rev().collect());
+        match &self.0.mode {
+            Mode::Managed { credentials, .. } => tail(credentials.app_key.expose()),
+            Mode::Supplied => self.lock().supplied_credentials.as_ref().and_then(|credentials| tail(credentials.app_key.expose())),
+        }
     }
 
     pub fn credential_prefix(&self) -> String {
-        self.0.credential_id.trim_start_matches("sha256:").chars().take(8).collect()
+        let prefix = |id: &str| id.trim_start_matches("sha256:").chars().take(8).collect();
+        match &self.0.mode {
+            Mode::Managed { credential_id, .. } => prefix(credential_id),
+            Mode::Supplied => self.lock().supplied_credentials.as_ref().map(|credentials| prefix(&credential_id(credentials.app_key.expose()))).unwrap_or_default(),
+        }
     }
 
     pub fn kept_disconnected(&self) -> bool {
@@ -243,9 +288,12 @@ impl KisAuth {
     }
 
     async fn issue(&self) -> Result<TokenLease, AuthError> {
+        let Mode::Managed { credentials, transport, .. } = &self.0.mode else {
+            return Err(AuthError::IssueDisabled);
+        };
         let now = self.0.clock.now();
-        let body = self.begin_issue(now)?;
-        let response = self.0.transport.send(self.credential_request(TOKEN_PATH, body)).await.map_err(AuthError::Transport)?;
+        let body = self.begin_issue(credentials, now)?;
+        let response = transport.send(self.credential_request(TOKEN_PATH, body)).await.map_err(AuthError::Transport)?;
         if let Some(failure) = judge_issue(response.status, &response.body) {
             return Err(self.refused(failure, now));
         }
@@ -262,7 +310,7 @@ impl KisAuth {
         Ok(self.record_issued(parsed.access_token, now, expires_at))
     }
 
-    fn begin_issue(&self, now: KstTime) -> Result<Secret<String>, AuthError> {
+    fn begin_issue(&self, credentials: &KisCredentials, now: KstTime) -> Result<Secret<String>, AuthError> {
         let mut st = self.lock();
         if let Some(halt) = &st.halt {
             return Err(AuthError::Halted(halt.clone()));
@@ -275,17 +323,7 @@ impl KisAuth {
             st.last_request_at = previous;
             return Err(AuthError::NotRecorded(e));
         }
-        Ok(self.credential_body(Credential::Token))
-    }
-
-    fn credential_body(&self, kind: Credential) -> Secret<String> {
-        let app_key = self.0.credentials.app_key.expose();
-        let app_secret = self.0.credentials.app_secret.expose();
-        let body = match kind {
-            Credential::Token => CredentialBody { grant_type: "client_credentials", appkey: app_key, appsecret: Some(app_secret), secretkey: None },
-            Credential::Approval => CredentialBody { grant_type: "client_credentials", appkey: app_key, appsecret: None, secretkey: Some(app_secret) },
-        };
-        Secret::new(serde_json::to_string(&body).expect("문자열만 담은 구조체"))
+        Ok(credential_body(credentials, Credential::Token))
     }
 
     fn credential_request(&self, path: &'static str, body: Secret<String>) -> HttpRequest {
@@ -317,21 +355,27 @@ impl KisAuth {
     }
 
     fn save(&self, st: &State) -> Result<(), FileError> {
-        self.0.file.save(&Saved {
-            credential: Some(self.0.credential_id.clone()),
+        let Mode::Managed { credential_id, file, .. } = &self.0.mode else {
+            return Ok(());
+        };
+        file.save(&Saved {
+            credential: Some(credential_id.clone()),
             token: st.issued.as_ref().map(|issued| SavedToken { value: issued.token.expose().clone(), expires_at: issued.expires_at.unix(), issued_at: issued.issued_at.unix() }),
             last_request_at: st.last_request_at.map_or(0, KstTime::unix),
-            disconnected: st.disconnected.then(|| self.0.credential_id.clone()),
+            disconnected: st.disconnected.then(|| credential_id.clone()),
         })
     }
 
     pub async fn approval_key(&self) -> Result<Secret<String>, AuthError> {
+        let Mode::Managed { credentials, transport, .. } = &self.0.mode else {
+            return Err(AuthError::IssueDisabled);
+        };
         if let Some(halt) = self.halted() {
             return Err(AuthError::Halted(halt));
         }
         let now = self.0.clock.now();
-        let body = self.credential_body(Credential::Approval);
-        let response = self.0.transport.send(self.credential_request(APPROVAL_PATH, body)).await.map_err(AuthError::Transport)?;
+        let body = credential_body(credentials, Credential::Approval);
+        let response = transport.send(self.credential_request(APPROVAL_PATH, body)).await.map_err(AuthError::Transport)?;
         if let Some(failure) = judge_issue(response.status, &response.body) {
             return Err(self.refused(failure, now));
         }
@@ -341,6 +385,16 @@ impl KisAuth {
         }
         Ok(Secret::new(parsed.approval_key))
     }
+}
+
+fn credential_body(credentials: &KisCredentials, kind: Credential) -> Secret<String> {
+    let app_key = credentials.app_key.expose();
+    let app_secret = credentials.app_secret.expose();
+    let body = match kind {
+        Credential::Token => CredentialBody { grant_type: "client_credentials", appkey: app_key, appsecret: Some(app_secret), secretkey: None },
+        Credential::Approval => CredentialBody { grant_type: "client_credentials", appkey: app_key, appsecret: None, secretkey: Some(app_secret) },
+    };
+    Secret::new(serde_json::to_string(&body).expect("문자열만 담은 구조체"))
 }
 
 #[derive(Clone, Copy)]
@@ -393,5 +447,50 @@ mod tests {
         for bad in ["", "2026-11-23", "2026/11/23 18:30:05", "2026-13-23 18:30:05", "2026-11-23 25:00:00"] {
             assert_eq!(parse_kst_datetime(bad), None, "{bad}");
         }
+    }
+
+    #[tokio::test]
+    async fn supplied_auth_serves_recorded_token_and_refuses_issuing() {
+        let start = KstTime::from_kst_civil(KstDate::new(2026, 11, 25).unwrap(), TimeOfDay::hms(9, 0, 0).unwrap());
+        let clock = Clock::fake(start);
+        let auth = KisAuth::supplied(clock.clone());
+
+        assert!(auth.needs_issue());
+        assert!(auth.app_headers().is_empty());
+        assert_eq!(auth.token().await.err(), Some(AuthError::IssueDisabled));
+        assert_eq!(auth.reissue().await.err(), Some(AuthError::IssueDisabled));
+        assert_eq!(auth.approval_key().await.err(), Some(AuthError::IssueDisabled));
+        assert_eq!(auth.halted(), None);
+
+        let credentials = KisCredentials { app_key: Secret::new("FAKE-KIS-KEY-1234".to_owned()), app_secret: Secret::new("FAKE-KIS-SECRET-5678".to_owned()) };
+        auth.record_supplied(credentials, Secret::new("FAKE-KIS-TOKEN-9999".to_owned()), TokenGen(3), start, start.plus_secs(3600));
+
+        assert!(!auth.needs_issue());
+        let lease = auth.token().await.unwrap();
+        assert_eq!(lease.token.expose(), "FAKE-KIS-TOKEN-9999");
+        assert_eq!(lease.generation, TokenGen(3));
+        let headers: Vec<(&'static str, String)> = auth.app_headers().into_iter().map(|(name, value)| (name, value.expose().clone())).collect();
+        assert_eq!(headers, vec![("appkey", "FAKE-KIS-KEY-1234".to_owned()), ("appsecret", "FAKE-KIS-SECRET-5678".to_owned())]);
+        let debug = format!("{auth:?}");
+        assert!(!debug.contains("FAKE-KIS-KEY-1234") && !debug.contains("FAKE-KIS-SECRET-5678") && !debug.contains("FAKE-KIS-TOKEN-9999"), "{debug}");
+
+        assert_eq!(auth.reissue().await.err(), Some(AuthError::IssueDisabled));
+        assert_eq!(auth.approval_key().await.err(), Some(AuthError::IssueDisabled));
+        assert_eq!(auth.halted(), None);
+
+        auth.invalidate(TokenGen(2));
+        assert!(!auth.needs_issue());
+        auth.invalidate(TokenGen(3));
+        assert!(auth.needs_issue());
+        assert_eq!(auth.token().await.err(), Some(AuthError::IssueDisabled));
+        assert_eq!(auth.halted(), None);
+
+        let next_credentials = KisCredentials { app_key: Secret::new("FAKE-KIS-KEY-1234".to_owned()), app_secret: Secret::new("FAKE-KIS-SECRET-5678".to_owned()) };
+        auth.record_supplied(next_credentials, Secret::new("FAKE-KIS-TOKEN-NEXT".to_owned()), TokenGen(4), start, start.plus_secs(3600));
+        assert!(!auth.needs_issue());
+        clock.jump(3600 - EXPIRY_MARGIN_SECS + 1);
+        assert!(auth.needs_issue());
+        assert_eq!(auth.token().await.err(), Some(AuthError::IssueDisabled));
+        assert_eq!(auth.halted(), None);
     }
 }

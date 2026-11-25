@@ -12,7 +12,7 @@ use server::shared_data::Broker;
 use crate::collect::config::Variables;
 use crate::protocol::{Command, Event, KeyName, ProtocolError, encode_line, parse_event};
 
-pub const FORWARDED_VARIABLES: [&str; 3] = ["VALLY_COLLECTOR_WS_URL", "VALLY_COLLECTOR_REST_URL", "RUST_LOG"];
+pub const FORWARDED_VARIABLES: [&str; 4] = ["VALLY_COLLECTOR_WS_URL", "VALLY_COLLECTOR_REST_URL", "VALLY_COLLECTOR_KIS_URL", "RUST_LOG"];
 
 #[derive(Debug)]
 pub enum ChildMessage {

@@ -234,7 +234,7 @@ async fn start_session(
         tap: LiveTapConfig { minutes, flow: None, quotes, trades },
     };
     let task = tokio::spawn(run_session(parts));
-    commands.send(Ok(Command::Token { token: Secret::new(SECOND_KEY_TOKEN.to_owned()), generation: 1, expires_at: None })).unwrap();
+    commands.send(Ok(Command::Token { token: Secret::new(SECOND_KEY_TOKEN.to_owned()), generation: 1, expires_at: None, app_key: None, app_secret: None })).unwrap();
     yield_until("LOGIN", || peer.seen.lock().unwrap().iter().any(|trnm| trnm == "LOGIN")).await;
     let registration = Registration::new("r1", vec!["005930".to_owned()], vec![RealType::Trade]).unwrap();
     commands.send(Ok(Command::Register(registration))).unwrap();

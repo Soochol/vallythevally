@@ -63,8 +63,8 @@ fn failure_of(error: &KisError) -> LinkFailure {
             Category::BusinessRejected | Category::Unknown => (Problem::PathStopped, None),
         },
         KisError::TokenFile(_) => (Problem::TokenFileUnusable, None),
+        KisError::TokenNotSupplied | KisError::BadTokenResponse => (Problem::AuthUncertain, None),
         KisError::Transport(_) | KisError::QueueGone | KisError::NotAdmitted => (Problem::Network, None),
-        KisError::BadTokenResponse => (Problem::AuthUncertain, None),
     };
     LinkFailure { problem, retry_at, message: error.to_string() }
 }

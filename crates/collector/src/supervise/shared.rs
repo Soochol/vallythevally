@@ -113,7 +113,7 @@ impl RestTokens {
             },
             RestTokens::Kis { auth, .. } => match auth.token().await {
                 Ok(lease) => TokenOutcome::Ready { token: lease.token, generation: lease.generation.0, expires_at: auth.token_expires_at().map(|at| at.unix()) },
-                Err(error @ (AuthError::Halted(_) | AuthError::Failed(_))) => TokenOutcome::Halted(error.to_string()),
+                Err(error @ (AuthError::Halted(_) | AuthError::Failed(_) | AuthError::IssueDisabled)) => TokenOutcome::Halted(error.to_string()),
                 Err(AuthError::IssueInterval { .. } | AuthError::NotRecorded(_) | AuthError::Transport(_) | AuthError::BadResponse) => TokenOutcome::Retry(KIS_RETRY),
             },
         }
@@ -134,6 +134,7 @@ fn halted_text(halted: &Halted) -> String {
 struct RestKey {
     name: KeyName,
     broker: Broker,
+    kis_credentials: Option<KisCredentials>,
     hash_prefix: String,
     total_per_second: Option<u32>,
     tokens: Arc<RestTokens>,
@@ -197,9 +198,11 @@ impl SharedSupervisor {
         for name in assignment.keys_in_use() {
             let key = keys.iter().find(|key| key.identity.name == name && key.identity.role == KeyRole::Rest).ok_or_else(|| SharedStartError::KeyMissing(name.clone()))?;
             let tokens = RestTokens::open(key, &injected.transport, injected.kis_transport.as_ref(), &injected.clock)?;
+            let kis_credentials = (key.broker == Broker::Kis).then(|| KisCredentials { app_key: key.app_key.clone(), app_secret: key.app_secret.clone() });
             runtimes.push(RestKey {
                 name,
                 broker: key.broker,
+                kis_credentials,
                 hash_prefix: hash_prefix(&key.identity.app_key_hash),
                 total_per_second: assignment.total_per_second(&key.identity.name),
                 tokens: Arc::new(tokens),
@@ -429,7 +432,11 @@ impl SharedSupervisor {
         if !key.slot.is_ready() || key.sent_generation == Some(generation) {
             return;
         }
-        key.slot.send_if_ready(&Command::Token { token, generation, expires_at });
+        let (app_key, app_secret) = match &key.kis_credentials {
+            Some(credentials) => (Some(credentials.app_key.clone()), Some(credentials.app_secret.clone())),
+            None => (None, None),
+        };
+        key.slot.send_if_ready(&Command::Token { token, generation, expires_at, app_key, app_secret });
         key.sent_generation = Some(generation);
         self.deliver_jobs(index);
     }

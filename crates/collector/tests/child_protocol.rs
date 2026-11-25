@@ -172,7 +172,7 @@ impl Collector {
 }
 
 fn token_command(token: &str, generation: u64) -> DaemonCommand {
-    DaemonCommand::Token { token: Secret::new(token.to_owned()), generation, expires_at: None }
+    DaemonCommand::Token { token: Secret::new(token.to_owned()), generation, expires_at: None, app_key: None, app_secret: None }
 }
 
 fn stock_registration(id: &str, count: usize) -> DaemonCommand {
