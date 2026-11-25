@@ -1,6 +1,7 @@
 mod cards;
 pub mod derived;
 mod dto;
+mod events;
 mod kiwoom_overview;
 mod sampler;
 mod samples;
@@ -35,6 +36,8 @@ pub fn routes() -> Router<Arc<AppState>> {
         .route("/api/market-overview/turnover", get(cards::turnover))
         .route("/api/market-overview/streaks", get(cards::streaks))
         .route("/api/market-overview/derived", get(derived::derived))
+        .route("/api/market-overview/themes", get(events::themes))
+        .route("/api/market-overview/vi", get(events::vi))
 }
 
 #[derive(Default)]

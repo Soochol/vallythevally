@@ -915,12 +915,29 @@ struct TradeValueWireRow {
 #[serde(default)]
 struct ViTriggeredWireRow {
     stk_cd: String,
+    stk_nm: String,
     motn_pric: String,
     trde_cntr_proc_time: String,
     virelis_time: String,
     static_stdpc: String,
     static_dispty_rt: String,
     dynm_dispty_rt: String,
+    motn_tp: String,
+    mrkt_nm: String,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ViTriggeredEvent {
+    pub code: StockCode,
+    pub name: String,
+    pub market: Option<crate::api::Market>,
+    pub direction: crate::api::ViDirection,
+    pub triggered: TimeOfDay,
+    pub released: Option<TimeOfDay>,
+    pub trigger_price: Option<u64>,
+    pub static_vi: bool,
+    pub dynamic_vi: bool,
+    pub dispersion_rate: Option<f64>,
 }
 
 #[derive(Debug, PartialEq, Deserialize)]
@@ -944,6 +961,54 @@ impl ViTriggeredStocksResponse {
         }, "ka10054");
         parsed.rows.sort_by_key(|alert| alert.triggered);
         parsed
+    }
+
+    pub fn events(&self) -> ParsedRows<ViTriggeredEvent> {
+        let mut parsed = collect_rows(&self.motn_stk, |r| {
+            let code = StockCode::parse(r.stk_cd.trim()).map_err(|e| WireError(format!("{e}: {:?}", r.stk_cd)))?;
+            let trigger_price = won_or_zero(&r.motn_pric)?.map(|price| price.centi() / 100);
+            let static_base = won_or_zero(&r.static_stdpc)?.map(|price| price.centi() / 100);
+            let static_rate = nonzero_signed_decimal(&r.static_dispty_rt);
+            let dynamic_rate = nonzero_signed_decimal(&r.dynm_dispty_rt);
+            let dispersion_rate = static_rate.or(dynamic_rate);
+            let kind = r.motn_tp.trim();
+            let static_vi = static_rate.is_some() || kind.contains("정적") || kind == "1" || kind == "3";
+            let dynamic_vi = dynamic_rate.is_some() || kind.contains("동적") || kind == "2" || kind == "3";
+            let direction = match dispersion_rate {
+                Some(rate) if rate < 0.0 => crate::api::ViDirection::Down,
+                Some(_) => crate::api::ViDirection::Up,
+                None => match (trigger_price, static_base) {
+                    (Some(price), Some(base)) if price < base => crate::api::ViDirection::Down,
+                    _ => crate::api::ViDirection::Up,
+                },
+            };
+            Ok(ViTriggeredEvent {
+                code,
+                name: r.stk_nm.trim().to_owned(),
+                market: parse_vi_market(&r.mrkt_nm),
+                direction,
+                triggered: hhmmss(&r.trde_cntr_proc_time)?,
+                released: vi_release_time(&r.virelis_time)?,
+                trigger_price,
+                static_vi,
+                dynamic_vi,
+                dispersion_rate,
+            })
+        }, "ka10054");
+        parsed.rows.sort_by(|a, b| b.triggered.cmp(&a.triggered).then_with(|| a.code.as_str().cmp(b.code.as_str())));
+        parsed
+    }
+}
+
+fn nonzero_signed_decimal(text: &str) -> Option<f64> {
+    signed_decimal(text).ok().filter(|rate| *rate != 0.0)
+}
+
+fn parse_vi_market(text: &str) -> Option<crate::api::Market> {
+    match text.trim() {
+        "코스피" | "거래소" | "KOSPI" | "kospi" => Some(crate::api::Market::Kospi),
+        "코스닥" | "KOSDAQ" | "kosdaq" => Some(crate::api::Market::Kosdaq),
+        _ => None,
     }
 }
 

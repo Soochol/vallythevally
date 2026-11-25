@@ -1,3 +1,7 @@
+mod intraday;
+
+pub(super) use intraday::IntradayThemesJob;
+
 use std::path::Path;
 use std::sync::Mutex;
 

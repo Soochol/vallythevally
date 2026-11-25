@@ -17,6 +17,7 @@ mod themes;
 pub mod snapshot;
 pub mod trade_minute;
 mod usage;
+mod vi;
 mod wire;
 
 pub use assignment::{AssignedJob, Assignment, AssignmentError, AssignmentStore, KeyOptions, Reload};
@@ -31,6 +32,8 @@ pub use wire::{JobStat, TrMinute};
 pub enum JobName {
     Probe,
     KiwoomThemes,
+    IntradayThemes,
+    ViEvents,
     Overview,
     IntradaySamples,
     Snapshot,
@@ -42,6 +45,8 @@ impl JobName {
         match self {
             JobName::Probe => Arc::new(probe::ProbeJob),
             JobName::KiwoomThemes => Arc::new(themes::KiwoomThemesJob::default()),
+            JobName::IntradayThemes => Arc::new(themes::IntradayThemesJob),
+            JobName::ViEvents => Arc::new(vi::ViEventsJob),
             JobName::Overview => Arc::new(overview::OverviewJob::default()),
             JobName::IntradaySamples => Arc::new(overview::IntradaySamplesJob::default()),
             JobName::Snapshot => Arc::new(snapshot::SnapshotJob::default()),

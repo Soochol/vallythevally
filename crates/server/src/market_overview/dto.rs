@@ -1,7 +1,8 @@
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
-use crate::api::{ApiErrorBody, Broker, KstDate, Market, SymbolCode, UnixSeconds};
+use crate::api::{ApiErrorBody, Broker, KstDate, Market, SymbolCode, UnixSeconds, ViDirection};
+use crate::kiwoom_themes::KiwoomTheme;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, TS)]
 #[ts(export)]
@@ -306,4 +307,42 @@ pub struct MarketOverviewDerivedCard {
     pub venue_share: MarketOverviewPart<MarketOverviewVenueShare>,
     pub attribution: MarketOverviewPart<MarketOverviewAttribution>,
     pub ma_thrust: MarketOverviewPart<MarketOverviewMaThrust>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct MarketOverviewThemesCard {
+    pub phase: MarketOverviewPhase,
+    pub received_at: Option<UnixSeconds>,
+    pub source: Broker,
+    pub themes: MarketOverviewPart<Vec<KiwoomTheme>>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct MarketOverviewViEvent {
+    pub code: SymbolCode,
+    pub name: String,
+    pub market: Market,
+    pub direction: ViDirection,
+    pub triggered_at: String,
+    pub released_at: Option<String>,
+    #[ts(type = "number | null")]
+    pub trigger_price: Option<u64>,
+    pub static_vi: bool,
+    pub dynamic_vi: bool,
+    pub dispersion_rate: Option<f64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct MarketOverviewViCard {
+    pub scope: MarketOverviewScope,
+    pub phase: MarketOverviewPhase,
+    pub received_at: Option<UnixSeconds>,
+    pub source: Broker,
+    pub events: MarketOverviewPart<Vec<MarketOverviewViEvent>>,
 }
