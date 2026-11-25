@@ -52,6 +52,20 @@ export const test = base.extend<{ scenario: Scenario; clockStart: string | null 
       },
     );
     scenario.on(
+      (url) => /^\/api\/symbols\/[^/]+\/vi-playbook$/.test(url.pathname),
+      (request) => {
+        if (scenario.publicMode.kind === "public") {
+          return { status: 404, body: { error: { code: "not_found", message: "공개 리스너에 없는 경로입니다", reason: null, retryAt: null, manualActionRequired: false } } };
+        }
+        const url = new URL(request.url());
+        const symbol = decodeURIComponent(url.pathname.split("/")[3] ?? "");
+        const direction = url.searchParams.get("direction") === "down" ? "down" : "up";
+        const kindParam = url.searchParams.get("kind");
+        const kind = kindParam === "dynamic" || kindParam === "static" ? kindParam : "all";
+        return { body: { symbol, direction, kind, lookbackDays: 0, sampleCount: 0, horizons: [], recentMatches: [] } };
+      },
+    );
+    scenario.on(
       (url) => /^\/api\/symbols\/[^/]+\/premarket\/days$/.test(url.pathname),
       (request) => {
         const symbol = decodeURIComponent(new URL(request.url()).pathname.split("/")[3] ?? "");

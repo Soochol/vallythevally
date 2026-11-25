@@ -1,4 +1,5 @@
 import type { ApiError } from "../../src/api/generated/ApiError";
+import type { EtfAccumulation } from "../../src/api/generated/EtfAccumulation";
 import type { EtfChangePair } from "../../src/api/generated/EtfChangePair";
 import type { EtfChangeRow } from "../../src/api/generated/EtfChangeRow";
 import type { EtfChanges } from "../../src/api/generated/EtfChanges";
@@ -125,8 +126,118 @@ export const SINGLE_DAY_HISTORY: EtfHistory = { code: "091160", firstCollectedOn
 
 const NO_HISTORY = (code: string): EtfHistory => ({ code, firstCollectedOn: null, pairs: [] });
 
+export const ACCUMULATION_5_ACTIVE: EtfAccumulation = {
+  window: 5,
+  style: "active",
+  fromDate: "2026-11-11",
+  toDate: "2026-11-18",
+  collectedDays: 6,
+  maAsOf: "2026-11-18",
+  rows: [
+    {
+      code: "000660",
+      name: "SK하이닉스",
+      buyingEtfCount: 2,
+      addedEtfCount: 1,
+      increasedEtfCount: 1,
+      medianRealChange: 0.2766,
+      ma: { ma20: "above", ma60: "above", ma120: "above" },
+      contributors: [
+        { fundCode: "426030", fundName: "TIME 미국나스닥100액티브", style: "active", kind: "added", realChange: null, afterWeightBps: 650 },
+        { fundCode: "444200", fundName: "SOL 코리아메가테크액티브", style: "active", kind: "increased", realChange: 0.2766, afterWeightBps: 1800 },
+      ],
+    },
+    {
+      code: "402340",
+      name: "SK스퀘어",
+      buyingEtfCount: 1,
+      addedEtfCount: 1,
+      increasedEtfCount: 0,
+      medianRealChange: null,
+      ma: { ma20: "above", ma60: "equal", ma120: "below" },
+      contributors: [
+        { fundCode: "444200", fundName: "SOL 코리아메가테크액티브", style: "active", kind: "added", realChange: null, afterWeightBps: 520 },
+      ],
+    },
+  ],
+};
+
+export const ACCUMULATION_5_ALL: EtfAccumulation = {
+  window: 5,
+  style: "all",
+  fromDate: "2026-11-11",
+  toDate: "2026-11-18",
+  collectedDays: 6,
+  maAsOf: "2026-11-18",
+  rows: [
+    {
+      code: "000660",
+      name: "SK하이닉스",
+      buyingEtfCount: 3,
+      addedEtfCount: 1,
+      increasedEtfCount: 2,
+      medianRealChange: 0.2133,
+      ma: { ma20: "above", ma60: "above", ma120: "above" },
+      contributors: [
+        { fundCode: "426030", fundName: "TIME 미국나스닥100액티브", style: "active", kind: "added", realChange: null, afterWeightBps: 650 },
+        { fundCode: "444200", fundName: "SOL 코리아메가테크액티브", style: "active", kind: "increased", realChange: 0.2766, afterWeightBps: 1800 },
+        { fundCode: "091160", fundName: "KODEX 반도체", style: "passive", kind: "increased", realChange: 0.15, afterWeightBps: 2600 },
+      ],
+    },
+    {
+      code: "005930",
+      name: "삼성전자",
+      buyingEtfCount: 1,
+      addedEtfCount: 0,
+      increasedEtfCount: 1,
+      medianRealChange: 0.085,
+      ma: { ma20: "above", ma60: "below", ma120: "equal" },
+      contributors: [
+        { fundCode: "091160", fundName: "KODEX 반도체", style: "passive", kind: "increased", realChange: 0.085, afterWeightBps: 3100 },
+      ],
+    },
+  ],
+};
+
+export const ACCUMULATION_20_ACTIVE: EtfAccumulation = {
+  window: 20,
+  style: "active",
+  fromDate: "2026-10-21",
+  toDate: "2026-11-18",
+  collectedDays: 21,
+  maAsOf: "2026-11-18",
+  rows: [
+    {
+      code: "035420",
+      name: "NAVER",
+      buyingEtfCount: 2,
+      addedEtfCount: 0,
+      increasedEtfCount: 2,
+      medianRealChange: 0.315,
+      ma: { ma20: "above", ma60: "above", ma120: "above" },
+      contributors: [
+        { fundCode: "444200", fundName: "SOL 코리아메가테크액티브", style: "active", kind: "increased", realChange: 0.42, afterWeightBps: 1100 },
+        { fundCode: "426030", fundName: "TIME 미국나스닥100액티브", style: "active", kind: "increased", realChange: 0.21, afterWeightBps: 1500 },
+      ],
+    },
+    ACCUMULATION_5_ACTIVE.rows[0]!,
+  ],
+};
+
+export const ACCUMULATION_20_ALL: EtfAccumulation = {
+  ...ACCUMULATION_20_ACTIVE,
+  style: "all",
+  rows: [ACCUMULATION_5_ALL.rows[0]!, ACCUMULATION_20_ACTIVE.rows[0]!, ACCUMULATION_5_ALL.rows[1]!],
+};
+
 export function etfBaseline(path: string, method: string, query: URLSearchParams = new URLSearchParams()): FixtureReply | null {
   if (method !== "GET") return null;
+  if (path === "/api/etf/accumulation") {
+    const window = query.get("window") ?? "5";
+    const style = query.get("style") ?? "active";
+    if (window === "20") return { body: style === "all" ? ACCUMULATION_20_ALL : ACCUMULATION_20_ACTIVE };
+    return { body: style === "all" ? ACCUMULATION_5_ALL : ACCUMULATION_5_ACTIVE };
+  }
   const history = /^\/api\/etf\/funds\/([^/]+)\/history$/.exec(path);
   if (history) {
     const code = decodeURIComponent(history[1]!);
