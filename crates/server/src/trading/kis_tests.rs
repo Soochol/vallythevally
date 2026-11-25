@@ -26,7 +26,7 @@ use crate::kiwoom::link::LinkState;
 use crate::kiwoom::rest::testing::{FakeTransport, ok};
 use crate::kiwoom::rest::{Access, KiwoomRest};
 use crate::kiwoom::stream::KiwoomStream;
-use crate::system_routes::SystemState;
+use crate::system_routes::SystemStartup;
 use crate::kis::feed::KisFeedParts;
 use crate::kis::master::{MasterDownload, MasterError, MasterMarket};
 use crate::kis::stream::{Connector, Socket};
@@ -317,7 +317,7 @@ async fn kis_fixture(account: Option<&str>, hts_id: Option<&str>) -> Kis {
     let (_events, receiver) = tokio::sync::mpsc::channel(8);
     let screener_store = crate::screener::store::Store::open(&dir.path().join("screener.duckdb")).unwrap();
     let inputs = ApplicationInputs { rest: rest.clone(), clock, symbols: listed_symbols(), db, screener_store, stream: (stream, receiver), static_dir: dir.path().to_owned(), screener_update_on_connect: false };
-    let state = application_with_system(inputs, SystemState::new(key_setup, None, settings()).with_kis(kis_factory));
+    let state = application_with_system(inputs, SystemStartup::new(key_setup, None, settings()).with_kis(kis_factory));
     rest.set_access(Access::Open);
     for view in state.keys.views() {
         view.lane.rest.set_access(Access::Open);

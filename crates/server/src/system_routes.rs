@@ -11,7 +11,7 @@ use serde::de::DeserializeOwned;
 use crate::api::{self, ApiErrorCode, Broker, KeySource, KiwoomAtStart, KiwoomEnvironment, KiwoomConnectStep, KiwoomLinkProblem, KiwoomLinkState, KiwoomLinkStatus, UnixSeconds};
 use crate::config::{Config, KiwoomCredentials, Secret};
 use crate::http::{ApiFailure, AppState};
-use crate::kiwoom::key_file::{KEY_LIMIT, KeyId, KeyOrigin, MIGRATED_KEY_ALIAS};
+use crate::kiwoom::key_file::{KEY_LIMIT, KeyId, KeyOrigin};
 use crate::kiwoom::keys::{Connection, KeyError, KeySetup, KisFactory, ListedKey};
 use crate::kiwoom::link::{ConnectStep, LinkState, Problem};
 use crate::kiwoom::private_file::FileError;
@@ -21,11 +21,69 @@ use crate::trading::KisAccountSettings;
 
 const BODY_LIMIT: usize = 4096;
 
+pub struct SystemStartup {
+    pub state: SystemState,
+    pub key_setup: Option<KeySetup>,
+    pub kis_factory: Option<KisFactory>,
+    pub order_switch: Option<crate::trading::SwitchStore>,
+}
+
+impl SystemStartup {
+    pub fn new(key_setup: KeySetup, key_file_problem: Option<FileError>, settings: api::SystemSettings) -> Self {
+        let order_switch = Some(key_setup.store.order_switch_store());
+        Self {
+            state: SystemState {
+                environment: settings.environment,
+                public_ip: None,
+                key_file_problem: Mutex::new(key_file_problem.map(|e| e.to_string())),
+                settings: Some(settings),
+                account: crate::account::AccountState::local_only(),
+                collector: None,
+                bound: OnceLock::new(),
+                tailnet_hosts: Default::default(),
+                bound_signal: tokio::sync::Notify::new(),
+                write: tokio::sync::Mutex::new(()),
+            },
+            key_setup: Some(key_setup),
+            kis_factory: None,
+            order_switch,
+        }
+    }
+
+    pub fn with_kis(mut self, factory: KisFactory) -> Self {
+        self.kis_factory = Some(factory);
+        self
+    }
+
+    pub fn with_public_ip(mut self, transport: Arc<dyn PublicIpTransport>) -> Self {
+        self.state = self.state.with_public_ip(transport);
+        self
+    }
+
+    pub fn with_account(mut self, account: crate::account::AccountState) -> Self {
+        self.state = self.state.with_account(account);
+        self
+    }
+
+    pub fn with_tailnet_hosts(mut self, tailnet_hosts: crate::config::TailnetHosts) -> Self {
+        self.state = self.state.with_tailnet_hosts(tailnet_hosts);
+        self
+    }
+
+    pub fn with_collector(mut self, collector: Option<crate::collector::CollectorBoard>) -> Self {
+        self.state = self.state.with_collector(collector);
+        self
+    }
+}
+
+impl From<SystemState> for SystemStartup {
+    fn from(state: SystemState) -> Self {
+        Self { state, key_setup: None, kis_factory: None, order_switch: None }
+    }
+}
+
 pub struct SystemState {
     environment: KiwoomEnvironment,
-    key_setup: Option<KeySetup>,
-    kis_factory: Option<KisFactory>,
-    order_switch: Option<crate::trading::SwitchStore>,
     public_ip: Option<Arc<dyn PublicIpTransport>>,
     key_file_problem: Mutex<Option<String>>,
     settings: Option<api::SystemSettings>,
@@ -38,22 +96,8 @@ pub struct SystemState {
 }
 
 impl SystemState {
-    pub fn new(key_setup: KeySetup, key_file_problem: Option<FileError>, settings: api::SystemSettings) -> Self {
-        let order_switch = Some(key_setup.store.order_switch_store());
-        SystemState { environment: settings.environment, key_setup: Some(key_setup), kis_factory: None, order_switch, public_ip: None, key_file_problem: Mutex::new(key_file_problem.map(|e| e.to_string())), settings: Some(settings), account: crate::account::AccountState::local_only(), collector: None, bound: OnceLock::new(), tailnet_hosts: Default::default(), bound_signal: tokio::sync::Notify::new(), write: tokio::sync::Mutex::new(()) }
-    }
-
     pub fn environment(&self) -> KiwoomEnvironment {
         self.environment
-    }
-
-    pub fn with_kis(mut self, factory: KisFactory) -> Self {
-        self.kis_factory = Some(factory);
-        self
-    }
-
-    pub fn take_kis_factory(&mut self) -> Option<KisFactory> {
-        self.kis_factory.take()
     }
 
     pub fn with_public_ip(mut self, transport: Arc<dyn PublicIpTransport>) -> Self {
@@ -88,16 +132,8 @@ impl SystemState {
         &self.account
     }
 
-    pub fn take_order_switch_store(&mut self) -> crate::trading::SwitchStore {
-        self.order_switch.take().unwrap_or_else(crate::trading::SwitchStore::memory)
-    }
-
-    pub fn take_key_setup(&mut self) -> Option<KeySetup> {
-        self.key_setup.take()
-    }
-
     pub fn unconfigured() -> Self {
-        SystemState { environment: KiwoomEnvironment::Real, key_setup: None, kis_factory: None, order_switch: None, public_ip: None, key_file_problem: Mutex::new(None), settings: None, account: crate::account::AccountState::local_only(), collector: None, bound: OnceLock::new(), tailnet_hosts: Default::default(), bound_signal: tokio::sync::Notify::new(), write: tokio::sync::Mutex::new(()) }
+        SystemState { environment: KiwoomEnvironment::Real, public_ip: None, key_file_problem: Mutex::new(None), settings: None, account: crate::account::AccountState::local_only(), collector: None, bound: OnceLock::new(), tailnet_hosts: Default::default(), bound_signal: tokio::sync::Notify::new(), write: tokio::sync::Mutex::new(()) }
     }
 
     pub fn bound(&self, addr: std::net::SocketAddr) {
@@ -209,7 +245,7 @@ async fn get_kiwoom(State(st): State<Arc<AppState>>) -> Json<KiwoomLinkStatus> {
 }
 
 async fn get_market_source(State(st): State<Arc<AppState>>) -> Json<api::MarketSourceStatus> {
-    Json(st.market_source_board.snapshot())
+    Json(st.market_control.snapshot())
 }
 
 async fn get_kiwoom_usage(State(st): State<Arc<AppState>>) -> Json<api::KiwoomUsage> {
@@ -278,11 +314,7 @@ async fn put_key(State(st): State<Arc<AppState>>, body: Body) -> Result<Json<Kiw
     let _write = st.system.write.lock().await;
     refuse_mock(&st)?;
     let credentials = checked_credentials(&input.app_key, &input.app_secret)?;
-    match st.keys.market() {
-        None => st.keys.add(MIGRATED_KEY_ALIAS, credentials).map(drop),
-        Some(market) => st.keys.replace_credentials(&market.id, credentials),
-    }
-    .map_err(key_failure)?;
+    st.market_control.save_market_credentials(credentials).await.map_err(key_failure)?;
     st.system.set_key_file_problem(None);
     tracing::info!("키움 키를 저장했습니다");
     Ok(Json(kiwoom_status(&st)))
@@ -291,11 +323,7 @@ async fn put_key(State(st): State<Arc<AppState>>, body: Body) -> Result<Json<Kiw
 async fn delete_key(State(st): State<Arc<AppState>>) -> Result<Json<KiwoomLinkStatus>, ApiFailure> {
     let _write = st.system.write.lock().await;
     refuse_mock(&st)?;
-    match st.keys.market() {
-        None => st.keys.reset_file().map_err(key_failure)?,
-        Some(market) => st.keys.remove(&market.id).map_err(key_failure)?,
-    }
-    st.source_switch.sync().await;
+    st.market_control.remove_market_key().await.map_err(key_failure)?;
     st.system.set_key_file_problem(None);
     tracing::info!("키움 키를 지웠습니다");
     Ok(Json(kiwoom_status(&st)))
@@ -312,8 +340,7 @@ async fn add_key(State(st): State<Arc<AppState>>, body: Body) -> Result<Json<api
     let credentials = checked_credentials(&input.app_key, &input.app_secret)?;
     let broker = input.broker.unwrap_or(Broker::Kiwoom);
     let account = checked_kis_account(input.account_no.as_deref(), input.hts_id.as_deref())?;
-    st.keys.add_for(broker, &input.alias, credentials, account).map_err(key_failure)?;
-    st.source_switch.sync().await;
+    st.market_control.add_key(broker, &input.alias, credentials, account).await.map_err(key_failure)?;
     st.system.set_key_file_problem(None);
     tracing::info!(broker = ?broker, "키를 더했습니다");
     Ok(Json(key_list(&st)))
@@ -324,7 +351,7 @@ async fn rename_key(State(st): State<Arc<AppState>>, Path(id): Path<String>, bod
     let id = key_id(&id)?;
     let _write = st.system.write.lock().await;
     refuse_mock(&st)?;
-    st.keys.rename(&id, &input.alias).map_err(key_failure)?;
+    st.market_control.rename_key(&id, &input.alias).map_err(key_failure)?;
     Ok(Json(key_list(&st)))
 }
 
@@ -335,18 +362,10 @@ async fn replace_key(State(st): State<Arc<AppState>>, Path(id): Path<String>, bo
     refuse_mock(&st)?;
     let credentials = checked_credentials(&input.app_key, &input.app_secret)?;
     let account = match input.account_no.as_deref() {
-        Some(account_no) => {
-            let account = checked_kis_account(Some(account_no), input.hts_id.as_deref())?;
-            st.keys.check_kis_account(&id, &account).map_err(key_failure)?;
-            Some(account)
-        }
+        Some(account_no) => Some(checked_kis_account(Some(account_no), input.hts_id.as_deref())?),
         None => None,
     };
-    st.keys.replace_credentials(&id, credentials).map_err(key_failure)?;
-    if let Some(account) = account {
-        st.keys.set_kis_account(&id, account).map_err(key_failure)?;
-    }
-    st.source_switch.sync().await;
+    st.market_control.replace_key(&id, credentials, account).await.map_err(key_failure)?;
     st.system.set_key_file_problem(None);
     tracing::info!("키움 키를 바꿨습니다");
     Ok(Json(key_list(&st)))
@@ -358,8 +377,7 @@ async fn put_kis_account(State(st): State<Arc<AppState>>, Path(id): Path<String>
     let _write = st.system.write.lock().await;
     refuse_mock(&st)?;
     let account = checked_kis_account(Some(&input.account_no), input.hts_id.as_deref())?;
-    st.keys.set_kis_account(&id, account).map_err(key_failure)?;
-    st.accounts.forget_verified_of(&id);
+    st.market_control.set_kis_account(&id, account, &st.accounts).map_err(key_failure)?;
     tracing::info!("한투 키의 계좌번호·HTS ID를 바꿨습니다");
     Ok(Json(key_list(&st)))
 }
@@ -368,8 +386,7 @@ async fn delete_key_by_id(State(st): State<Arc<AppState>>, Path(id): Path<String
     let id = key_id(&id)?;
     let _write = st.system.write.lock().await;
     refuse_mock(&st)?;
-    st.keys.remove(&id).map_err(key_failure)?;
-    st.source_switch.sync().await;
+    st.market_control.remove_key(&id).await.map_err(key_failure)?;
     tracing::info!("키움 키를 지웠습니다");
     Ok(Json(key_list(&st)))
 }
@@ -379,8 +396,7 @@ async fn put_market_key(State(st): State<Arc<AppState>>, body: Body) -> Result<J
     let id = key_id(&input.key_id)?;
     let _write = st.system.write.lock().await;
     refuse_mock(&st)?;
-    st.keys.designate_market(&id).map_err(key_failure)?;
-    st.source_switch.sync().await;
+    st.market_control.designate_market(&id).await.map_err(key_failure)?;
     tracing::info!("시세 키를 바꿨습니다");
     Ok(Json(key_list(&st)))
 }
