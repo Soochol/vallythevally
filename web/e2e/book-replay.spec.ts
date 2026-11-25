@@ -63,6 +63,7 @@ function liveSnapshot(ask1: number): OrderBook {
     afterHoursAskQuantity: null,
     afterHoursBidQuantity: null,
     bookTime: null,
+    expected: null,
   };
 }
 

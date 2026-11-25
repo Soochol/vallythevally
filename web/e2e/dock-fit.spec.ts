@@ -47,7 +47,7 @@ async function groupSizes(page: Page) {
 
 function stubMarket(scenario: Scenario) {
   for (const code of ["005930", "000660"]) {
-    scenario.reply((url) => url.pathname === `/api/symbols/${code}/order-book`, { body: { symbol: code, asks: [], bids: [], totalAskQuantity: 0, totalBidQuantity: 0, afterHoursAskQuantity: null, afterHoursBidQuantity: null, bookTime: null } });
+    scenario.reply((url) => url.pathname === `/api/symbols/${code}/order-book`, { body: { symbol: code, asks: [], bids: [], totalAskQuantity: 0, totalBidQuantity: 0, afterHoursAskQuantity: null, afterHoursBidQuantity: null, bookTime: null, expected: null } });
     scenario.reply((url) => url.pathname === `/api/symbols/${code}/fundamentals`, { body: { symbol: code, upperLimit: null, lowerLimit: null } });
     scenario.reply((url) => url.pathname === `/api/symbols/${code}/trades`, { body: { symbol: code, venue: "combined", trades: [], skippedRows: 0 } });
     scenario.reply((url) => url.pathname === `/api/symbols/${code}/program-trades`, { body: { symbol: code, points: [], skippedRows: 0 } });

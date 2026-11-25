@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { visibleAfterHours, visibleExpected } from "./sessionWindows";
+import { isNxtAfterAuction, visibleAfterHours, visibleExpected } from "./sessionWindows";
 
 const at = (date: string, clock: string): number => Date.parse(`${date}T${clock}+09:00`) / 1000;
 const WEDNESDAY = "2026-11-18";
@@ -91,4 +91,29 @@ test("토요일 08:35는 시간외 잔량이 보이지 않는다", () => {
 
 test("시간외 잔량이 없으면 보이지 않는다", () => {
   expect(visibleAfterHours(null, at(WEDNESDAY, "08:35:00"))).toBeNull();
+});
+
+test("NXT 애프터마켓 동시호가 15:30~15:40은 NXT 가능 종목의 nxt·combined에서만 예상체결이 보인다", () => {
+  const time = at(WEDNESDAY, "15:35:00");
+  expect(isNxtAfterAuction(time, "nxt", true)).toBe(true);
+  expect(isNxtAfterAuction(time, "combined", true)).toBe(true);
+  expect(isNxtAfterAuction(time, "krx", true)).toBe(false);
+  expect(isNxtAfterAuction(time, "combined", false)).toBe(false);
+  expect(isNxtAfterAuction(at(WEDNESDAY, "15:40:00"), "nxt", true)).toBe(false);
+  expect(visibleExpected(time, time, EXPECTED, null, "nxt", true)).toEqual(EXPECTED);
+  expect(visibleExpected(time, time, EXPECTED, null, "combined", true)).toEqual(EXPECTED);
+  expect(visibleExpected(time, time, EXPECTED, null, "krx", true)).toBeNull();
+  expect(visibleExpected(time, time, EXPECTED, null, "combined", false)).toBeNull();
+  expect(visibleExpected(at(WEDNESDAY, "15:30:00"), at(WEDNESDAY, "15:30:00"), EXPECTED, null, "nxt", true)).toEqual(EXPECTED);
+  expect(visibleExpected(at(WEDNESDAY, "15:39:59"), at(WEDNESDAY, "15:39:59"), EXPECTED, null, "combined", true)).toEqual(EXPECTED);
+  expect(visibleExpected(at(WEDNESDAY, "15:40:00"), at(WEDNESDAY, "15:40:00"), EXPECTED, null, "nxt", true)).toBeNull();
+});
+
+test("NXT 단독 거래소에서는 KRX 동시호가와 KRX 시간외 종가 잔량이 보이지 않는다", () => {
+  const open = at(WEDNESDAY, "08:55:00");
+  const close = at(WEDNESDAY, "15:25:00");
+  expect(visibleExpected(open, open, EXPECTED, null, "nxt", true)).toBeNull();
+  expect(visibleExpected(close, close, EXPECTED, null, "nxt", true)).toBeNull();
+  expect(visibleAfterHours(totalsAt(WEDNESDAY, "08:35:00"), at(WEDNESDAY, "08:35:00"), "nxt")).toBeNull();
+  expect(visibleAfterHours(totalsAt(WEDNESDAY, "15:45:00"), at(WEDNESDAY, "15:45:00"), "nxt")).toBeNull();
 });

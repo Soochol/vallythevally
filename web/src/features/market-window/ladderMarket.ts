@@ -1,11 +1,12 @@
 import type { Fundamentals } from "../../api/generated/Fundamentals";
 import type { SymbolKind } from "../../api/generated/SymbolKind";
 import type { UnixSeconds } from "../../api/generated/UnixSeconds";
+import type { Venue } from "../../api/generated/Venue";
 import type { ViState } from "../../api/generated/ViState";
 import { type AfterHoursState, type BookState, type BookView, type StripTotals, stripTotals } from "../book/bookModel";
-import { isRegularSession, visibleAfterHours, visibleExpected } from "../book/sessionWindows";
+import { isNxtAfterAuction, isRegularSession, visibleAfterHours, visibleExpected } from "../book/sessionWindows";
 import { type ReplayReference, replayReference, type ReplayView } from "../book-replay/replay";
-import { buildDefaultLadder, type LadderQuotes, type LadderRow } from "./ladder";
+import { buildDefaultLadder, type LadderQuotes, type LadderRow, trimSinglePriceLevels } from "./ladder";
 import { type TickRule, tickRuleOf } from "./tick";
 
 export interface LadderBounds {
@@ -22,6 +23,9 @@ export interface LadderMarketInput {
   readonly symbolKind: SymbolKind | null;
   readonly replay: ReplayView;
   readonly vi: ViState | null;
+  readonly nxtVi?: ViState | null;
+  readonly venue?: Venue;
+  readonly nxtEnabled?: boolean;
   readonly nowSeconds: UnixSeconds;
   readonly serverNowSeconds: UnixSeconds;
   readonly skipSpreadGap: boolean;
@@ -43,8 +47,19 @@ export interface ResolvedLadderMarket {
   readonly headPreviousClose: number | null;
 }
 
+function viForExpected(venue: Venue, krxVi: ViState | null, nxtVi: ViState | null): ViState | null {
+  if (venue === "nxt") return nxtVi;
+  if (venue === "krx") return krxVi;
+  if (krxVi?.active) return krxVi;
+  if (nxtVi?.active) return nxtVi;
+  return krxVi;
+}
+
 export function resolveLadderMarket(input: LadderMarketInput): ResolvedLadderMarket {
   const { book, afterHours, lastPrice, previousClose, fundamentals, symbolKind, replay, vi, nowSeconds, serverNowSeconds, skipSpreadGap } = input;
+  const venue = input.venue ?? "combined";
+  const nxtEnabled = input.nxtEnabled ?? false;
+  const nxtVi = input.nxtVi ?? null;
   const liveView = book.phase === "empty" ? null : book.view;
   const bounds: LadderBounds = { lower: fundamentals?.lowerLimit ?? null, upper: fundamentals?.upperLimit ?? null };
   const replayLocked = replay.kind !== "live";
@@ -52,7 +67,15 @@ export function resolveLadderMarket(input: LadderMarketInput): ResolvedLadderMar
   const view = replay.kind === "live" ? liveView : replay.kind === "past" ? replay.book : null;
   const tickRule = tickRuleOf(symbolKind, view ? [...view.asks, ...view.bids].map((level) => level.price) : []);
   const regularSession = isRegularSession(nowSeconds);
-  const liveQuotes: LadderQuotes | null = liveView ? { asks: liveView.asks, bids: liveView.bids, lastPrice, previousClose } : null;
+  const nxtAuctionDepth = replay.kind === "live" && liveView !== null && isNxtAfterAuction(nowSeconds, venue, nxtEnabled);
+  const liveQuotes: LadderQuotes | null = liveView
+    ? {
+        asks: nxtAuctionDepth ? trimSinglePriceLevels(liveView.asks, "ask") : liveView.asks,
+        bids: nxtAuctionDepth ? trimSinglePriceLevels(liveView.bids, "bid") : liveView.bids,
+        lastPrice,
+        previousClose,
+      }
+    : null;
   const pastRows: readonly LadderRow[] =
     replay.kind === "past" && replayRef !== null
       ? buildDefaultLadder({
@@ -65,8 +88,9 @@ export function resolveLadderMarket(input: LadderMarketInput): ResolvedLadderMar
           tickRule,
         })
       : [];
-  const expected = replay.kind === "live" && liveView !== null ? visibleExpected(liveView.t, nowSeconds, liveView.expected, vi) : null;
-  const liveTotals = stripTotals(liveView && { ask: liveView.totalAsk, bid: liveView.totalBid }, visibleAfterHours(afterHours?.totals ?? null, nowSeconds));
+  const expectedVi = viForExpected(venue, vi, nxtVi);
+  const expected = replay.kind === "live" && liveView !== null ? visibleExpected(liveView.t, nowSeconds, liveView.expected, expectedVi, venue, nxtEnabled) : null;
+  const liveTotals = stripTotals(liveView && { ask: liveView.totalAsk, bid: liveView.totalBid }, visibleAfterHours(afterHours?.totals ?? null, nowSeconds, venue));
   const totals: StripTotals =
     replay.kind === "live"
       ? liveTotals

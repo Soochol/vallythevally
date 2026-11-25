@@ -32,11 +32,36 @@ function withChange(previous: readonly BookLevel[] | null, raw: readonly RawLeve
   return raw.map(({ price, quantity }) => ({ price, quantity, change: previous === null ? 0 : (before.has(price) ? quantity - before.get(price)! : 0) }));
 }
 
-export function acceptSnapshot(state: BookState, book: OrderBook): BookState {
+const KST_OFFSET_SECONDS = 9 * 3600;
+const DAY_SECONDS = 86_400;
+
+function snapshotTime(bookTime: string | null, fetchedAt: UnixSeconds | null): UnixSeconds | null {
+  if (fetchedAt === null) return null;
+  if (bookTime === null) return fetchedAt;
+  const match = /^(\d{2}):(\d{2}):(\d{2})$/.exec(bookTime);
+  if (!match) return fetchedAt;
+  const hours = Number(match[1]);
+  const minutes = Number(match[2]);
+  const seconds = Number(match[3]);
+  if (hours > 23 || minutes > 59 || seconds > 59) return fetchedAt;
+  const kstSeconds = fetchedAt + KST_OFFSET_SECONDS;
+  const kstMidnight = kstSeconds - (((kstSeconds % DAY_SECONDS) + DAY_SECONDS) % DAY_SECONDS);
+  return kstMidnight + hours * 3600 + minutes * 60 + seconds - KST_OFFSET_SECONDS;
+}
+
+export function acceptSnapshot(state: BookState, book: OrderBook, fetchedAt: UnixSeconds | null = null): BookState {
   if (state.phase === "live") return state;
+  const expected = book.expected && book.expected.price > 0 ? { price: book.expected.price, qty: book.expected.qty } : null;
   return {
     phase: "snapshot",
-    view: { asks: withChange(null, book.asks), bids: withChange(null, book.bids), totalAsk: book.totalAskQuantity, totalBid: book.totalBidQuantity, expected: null, t: null },
+    view: {
+      asks: withChange(null, book.asks),
+      bids: withChange(null, book.bids),
+      totalAsk: book.totalAskQuantity,
+      totalBid: book.totalBidQuantity,
+      expected,
+      t: expected !== null ? snapshotTime(book.bookTime, fetchedAt) : null,
+    },
   };
 }
 

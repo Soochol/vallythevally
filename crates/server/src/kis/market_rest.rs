@@ -452,6 +452,9 @@ impl MarketSource for KisMarket {
                     .filter_map(|(price, quantity)| Some(api::OrderBookLevel { price: whole(price).filter(|p| *p > 0)?, quantity: whole(quantity).unwrap_or(0) }))
                     .collect::<Vec<_>>()
             };
+            let expected = whole(&body.output2.antc_cnpr)
+                .filter(|p| *p > 0)
+                .map(|price| api::FeedExpected { price: price as f64, qty: whole(&body.output2.antc_cnqn).unwrap_or(0) });
             Ok(OrderBookSnapshot {
                 asks: levels(book.ask_prices(), book.ask_quantities()),
                 bids: levels(book.bid_prices(), book.bid_quantities()),
@@ -460,6 +463,7 @@ impl MarketSource for KisMarket {
                 after_hours_ask_quantity: whole(&book.ovtm_total_askp_rsqn),
                 after_hours_bid_quantity: whole(&book.ovtm_total_bidp_rsqn),
                 book_time: clock_of(&book.aspr_acpt_hour).map(|t| hms_text(t.secs())),
+                expected,
             })
         })
     }
@@ -853,6 +857,14 @@ fn malformed_minute(bad: &Minute) -> SourceError {
 #[serde(default)]
 struct OrderBookBody {
     output1: OrderBookRow,
+    output2: OrderBookExpectedRow,
+}
+
+#[derive(Deserialize, Default)]
+#[serde(default)]
+struct OrderBookExpectedRow {
+    antc_cnpr: String,
+    antc_cnqn: String,
 }
 
 #[derive(Deserialize, Default)]

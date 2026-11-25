@@ -1,4 +1,5 @@
 import type { UnixSeconds } from "../../api/generated/UnixSeconds";
+import type { Venue } from "../../api/generated/Venue";
 import type { ViState } from "../../api/generated/ViState";
 import { isMarketOpen } from "../../chart/time";
 import { secondOfDay } from "../trades/tape";
@@ -25,9 +26,13 @@ const REGULAR_SESSION: readonly SecondRange[] = [
   { from: clock(9, 0), until: clock(15, 20) },
 ];
 
-const CALL_AUCTIONS: readonly SecondRange[] = [
+const KRX_CALL_AUCTIONS: readonly SecondRange[] = [
   { from: clock(8, 50), until: clock(9, 0) },
   { from: clock(15, 20), until: clock(15, 30) },
+];
+
+const NXT_AFTER_AUCTION: readonly SecondRange[] = [
+  { from: clock(15, 30), until: clock(15, 40) },
 ];
 
 const AFTER_HOURS_CLOSES: readonly SecondRange[] = [
@@ -46,22 +51,35 @@ export function isRegularSession(time: UnixSeconds): boolean {
   return rangeIndexOf(REGULAR_SESSION, time) !== null;
 }
 
-const callAuctionOf = (time: UnixSeconds): number | null => rangeIndexOf(CALL_AUCTIONS, time);
+export function isNxtAfterAuction(time: UnixSeconds, venue: Venue = "combined", nxtEnabled = false): boolean {
+  return nxtEnabled && (venue === "nxt" || venue === "combined") && rangeIndexOf(NXT_AFTER_AUCTION, time) !== null;
+}
+
+const callAuctionOf = (time: UnixSeconds, venue: Venue, nxtEnabled: boolean): number | null => {
+  if (venue !== "nxt") {
+    const krx = rangeIndexOf(KRX_CALL_AUCTIONS, time);
+    if (krx !== null) return krx;
+  }
+  if (isNxtAfterAuction(time, venue, nxtEnabled)) return KRX_CALL_AUCTIONS.length;
+  return null;
+};
 
 export function visibleExpected(
   frameTime: UnixSeconds | null,
   now: UnixSeconds,
   expected: ExpectedFill | null,
   vi?: Pick<ViState, "active" | "triggeredAt"> | null,
+  venue: Venue = "combined",
+  nxtEnabled = false,
 ): ExpectedFill | null {
   if (frameTime === null || expected === null || !(expected.price > 0)) return null;
   if (vi?.active && (vi.triggeredAt === null || frameTime >= vi.triggeredAt)) return expected;
-  const auction = callAuctionOf(frameTime);
-  return auction !== null && auction === callAuctionOf(now) ? expected : null;
+  const auction = callAuctionOf(frameTime, venue, nxtEnabled);
+  return auction !== null && auction === callAuctionOf(now, venue, nxtEnabled) ? expected : null;
 }
 
-export function visibleAfterHours(totals: AfterHoursTotals | null, now: UnixSeconds): AfterHoursTotals | null {
-  if (totals === null) return null;
+export function visibleAfterHours(totals: AfterHoursTotals | null, now: UnixSeconds, venue: Venue = "combined"): AfterHoursTotals | null {
+  if (totals === null || venue === "nxt") return null;
   const window = rangeIndexOf(AFTER_HOURS_CLOSES, totals.t);
   return window !== null && window === rangeIndexOf(AFTER_HOURS_CLOSES, now) ? totals : null;
 }

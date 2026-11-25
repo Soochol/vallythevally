@@ -119,9 +119,16 @@ async fn the_order_book_is_read_from_one_combined_request_by_default() {
     assert_eq!(body["symbol"], "005930");
     assert_eq!((body["asks"].as_array().unwrap().len(), body["bids"].as_array().unwrap().len()), (9, 10));
     assert_eq!(body["asks"][0], json!({"price": 70_100, "quantity": 1_000}));
-    assert_eq!((&body["totalAskQuantity"], &body["totalBidQuantity"], &body["bookTime"]), (&json!(55_000), &json!(66_000), &json!("15:30:00")));
+    assert_eq!((&body["totalAskQuantity"], &body["totalBidQuantity"], &body["bookTime"], &body["expected"]), (&json!(55_000), &json!(66_000), &json!("15:30:00"), &Value::Null));
     let calls = f.calls("ka10004");
     assert_eq!(calls.iter().map(|c| c.body.clone()).collect::<Vec<_>>(), [json!({"stk_cd": "005930_AL"})]);
+    let mut with_expected = fixture("ka10004_005930_AL");
+    with_expected["exp_cntr_pric"] = "+70150".into();
+    with_expected["exp_cntr_qty"] = "420".into();
+    f.fake.respond_with("ka10004", 200, with_expected);
+    let (status, body) = f.get("/api/symbols/005930/order-book?venue=nxt").await;
+    assert_eq!(status, 200, "{body}");
+    assert_eq!(body["expected"], json!({"price": 70_150.0, "qty": 420}));
 }
 
 #[tokio::test]

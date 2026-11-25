@@ -58,6 +58,7 @@ async fn order_book(State(st): State<Arc<AppState>>, Path(code): Path<String>, Q
         after_hours_ask_quantity: book.after_hours_ask_quantity,
         after_hours_bid_quantity: book.after_hours_bid_quantity,
         book_time: book.book_time,
+        expected: book.expected,
     }))
 }
 
