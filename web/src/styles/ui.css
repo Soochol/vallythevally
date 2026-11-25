@@ -30,7 +30,7 @@
 .ui-popover.ui-dialog-backdrop[data-nested]:not([data-command-frame]) { background:var(--scrim-nested); }
 .ui-tooltip { pointer-events:none; padding:var(--size-4) var(--size-8); max-width:var(--size-300); font-size:var(--fs-xs); }
 @media (width < 48rem) { .ui-popover.ui-toast-stack { bottom:var(--size-72); } }
-.ui-popover.ui-dialog-backdrop[data-command-frame]:not(:has(> .ui-dialog[data-solid])),.ui-popover.ui-dialog-backdrop[data-command-frame][data-placement] { background:transparent; }
+.ui-popover.ui-dialog-backdrop[data-command-frame]:not(:has(> .ui-dialog[data-solid])),.ui-popover.ui-dialog-backdrop[data-command-frame][data-placement],.ui-popover.ui-dialog-backdrop[data-no-scrim] { background:transparent; }
 .ui-popover.ui-dialog-backdrop[data-drawer] { padding:0; align-items:stretch; justify-content:flex-end; }
 .ui-dialog[data-drawer] { height:100dvh; max-height:none; border-radius:0; }
 .ui-switch { display:flex; align-items:center; gap:var(--size-10); width:100%; border-radius:var(--r-m); }

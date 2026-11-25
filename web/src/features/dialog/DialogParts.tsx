@@ -34,17 +34,18 @@ interface FrameProps {
   variant?: "command" | "drawer";
   size?: "default" | "compact";
   solid?: boolean;
+  scrim?: boolean;
   placement?: "center" | "top-end";
   children: ReactNode;
 }
 
 const OPEN_FRAME = ".ui-dialog-backdrop:not([data-command-frame])";
 
-export function DialogFrame({ labelledBy, width, onClose, panelRef, children, variant, size = "default", solid, placement = "center" }: FrameProps) {
+export function DialogFrame({ labelledBy, width, onClose, panelRef, children, variant, size = "default", solid, scrim = true, placement = "center" }: FrameProps) {
   const [nested] = useState(() => typeof document !== "undefined" && document.querySelector(OPEN_FRAME) !== null);
   return (
-    <Popover backdrop data-command-frame={variant === "command" ? "" : undefined} data-drawer={variant === "drawer" ? "" : undefined} data-nested={nested ? "" : undefined} data-placement={placement === "center" ? undefined : placement} onClose={onClose}
-      className="ui-dialog-backdrop fixed inset-0 z-50 flex justify-center bg-[var(--scrim)]"
+    <Popover backdrop data-command-frame={variant === "command" ? "" : undefined} data-drawer={variant === "drawer" ? "" : undefined} data-nested={nested ? "" : undefined} data-no-scrim={scrim ? undefined : ""} data-placement={placement === "center" ? undefined : placement} onClose={onClose}
+      className={`ui-dialog-backdrop fixed inset-0 z-50 flex justify-center${scrim ? " bg-[var(--scrim)]" : ""}`}
     >
       <div
         ref={panelRef}
@@ -102,7 +103,7 @@ export function Segment<T extends string | number>({
           type="button"
           aria-pressed={v === value}
           onClick={() => onChange(v)}
-          className="h-9 border-r border-line px-3 text-text-2 last:border-r-0 hover:text-text aria-pressed:bg-accent-soft aria-pressed:font-semibold aria-pressed:text-accent"
+          className="inline-flex h-9 items-center justify-center border-r border-line px-3 text-text-2 last:border-r-0 hover:text-text aria-pressed:bg-accent-soft aria-pressed:font-semibold aria-pressed:text-accent"
         >
           {text}
         </button>

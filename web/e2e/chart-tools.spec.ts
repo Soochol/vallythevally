@@ -46,6 +46,19 @@ test("1280x600에서 차트 설정 창은 화면 가운데에 다 들어오고 �
   expect(popover.y + popover.height).toBeLessThanOrEqual(600);
   expect(Math.abs(popover.x + popover.width / 2 - 1280 / 2)).toBeLessThanOrEqual(2);
   expect(Math.abs(popover.y + popover.height / 2 - 600 / 2)).toBeLessThanOrEqual(2);
+  await expect(settingsPopover(page).locator("xpath=..")).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
+  for (const groupName of ["봉 모양", "가격 축"] as const) {
+    const group = settingsPopover(page).getByRole("group", { name: groupName, exact: true });
+    const selected = group.locator("[aria-pressed=true]");
+    const groupBox = (await group.boundingBox())!;
+    const itemBox = (await selected.boundingBox())!;
+    const topGap = itemBox.y - groupBox.y;
+    const bottomGap = groupBox.y + groupBox.height - (itemBox.y + itemBox.height);
+    const leftGap = itemBox.x - groupBox.x;
+    expect(topGap).toBeGreaterThanOrEqual(2);
+    expect(Math.abs(topGap - bottomGap)).toBeLessThanOrEqual(1);
+    expect(leftGap).toBeGreaterThanOrEqual(2);
+  }
   await expect(settingsPopover(page).getByRole("region", { name: "지표 창", exact: true })).toBeInViewport();
 });
 
@@ -108,6 +121,7 @@ test("가운데 지표 창은 폭이 760px 이하로 화면 가운데에 열리�
   expect(Math.abs(box.x + box.width / 2 - 1440 / 2)).toBeLessThanOrEqual(2);
   expect(Math.abs(box.y + box.height / 2 - 900 / 2)).toBeLessThanOrEqual(2);
   expect(await dialog.evaluate((node) => getComputedStyle(node).backdropFilter)).toBe("none");
+  await expect(dialog.locator("xpath=..")).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
   await expect(dialog.getByRole("button", { name: "거래량 설정", exact: true })).toBeVisible();
   const footer = dialog.locator("footer");
   await expect(footer.getByText("Tab", { exact: true })).toBeVisible();

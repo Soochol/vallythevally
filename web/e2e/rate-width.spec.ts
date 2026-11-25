@@ -1,6 +1,6 @@
 import type { Locator, Page } from "@playwright/test";
 import type { LayoutWindow } from "../src/api/generated/LayoutWindow";
-import { type Scenario, cell, DEFAULT_LAYOUT_ID, expect, test, windowTabs } from "./harness";
+import { type Scenario, cell, DEFAULT_LAYOUT_ID, expect, pickDesktopVenue, test, windowTabs } from "./harness";
 import { BASE, CODE, FUNDAMENTAL_FIGURES, openOrderWindow, ordersOn, pinQuote, SETTINGS, snapshot, tradingApi, win } from "./order-window";
 
 const RATE_WIDTH = 48;
@@ -19,7 +19,7 @@ async function start(page: Page, scenario: Scenario): Promise<void> {
   await openOrderWindow(page, scenario, false, "krx", LIMITS, false, undefined, withBook);
 }
 
-async function canvasWith(page: Page, scenario: Scenario, rects: Record<string, { x: number; y: number; w: number; h: number }>): Promise<void> {
+async function canvasWith(page: Page, scenario: Scenario, rects: Record<string, { x: number; y: number; w: number; h: number }>, afterPin?: () => void): Promise<void> {
   ordersOn(scenario);
   tradingApi(scenario);
   const layout = scenario.documents.layout(DEFAULT_LAYOUT_ID);
@@ -32,6 +32,7 @@ async function canvasWith(page: Page, scenario: Scenario, rects: Record<string, 
   scenario.documents.saveLayout({ ...layout, windows, placement: { v: 1, dock: null, canvas }, revision: layout.revision + 1 });
   scenario.documents.saveUiState({ ...scenario.documents.uiState(), layoutMode: "canvas" });
   pinQuote(scenario, CODE, BASE);
+  afterPin?.();
   scenario.reply((url) => url.pathname === `/api/symbols/${CODE}/fundamentals`, { body: { symbol: CODE, upperLimit: LIMITS.upper, lowerLimit: LIMITS.lower, ...FUNDAMENTAL_FIGURES } });
   scenario.reply((url) => url.pathname === `/api/symbols/${CODE}/order-book`, { body: snapshot(BASE) });
   scenario.reply((url) => url.pathname === `/api/symbols/${CODE}/trades`, { body: { symbol: CODE, venue: "combined", trades: [], skippedRows: 0 } });
@@ -130,4 +131,35 @@ test("등락률을 끈 10호가 창은 좁은 폭 경계도 48px 낮아져 정�
   await setRate(page, false);
   await expect.poll(() => width(book(page))).toBeLessThan(320);
   await expect(book(page).getByTestId("ladder-info-card")).toBeVisible();
+});
+
+test("10호가와 호가주문 창 모두 거래소에 맞는 시·고·저 뱃지를 가격 왼쪽에 보이고 같은 가격이면 나란히 둔다", async ({ page, scenario }) => {
+  await canvasWith(page, scenario, { book: { x: 0.22, y: 0.01, w: 0.25, h: 0.6 }, order: { x: 0.5, y: 0.01, w: 0.35, h: 0.7 } }, () => {
+    scenario.on((url) => url.pathname === `/api/symbols/${CODE}/day-summary`, (request) => {
+      const venue = new URL(request.url()).searchParams.get("venue") ?? "combined";
+      const prices = venue === "krx"
+        ? { open: 70_100, high: 70_400, low: 69_900 }
+        : { open: 69_900, high: 70_300, low: 69_900 };
+      return {
+        body: { symbol: CODE, venue, price: BASE, previousClose: BASE, ...prices, volume: 100_000, tradeValueWon: 7_000_000_000, t: 1_700_000_000 },
+      };
+    });
+  });
+  const rowOf = (area: Locator, price: string) => rows(area).filter({ has: page.locator(".mw-px-num", { hasText: new RegExp(`^${price}$`) }) });
+  for (const area of [book(page), win(page)]) {
+    const highRow = rowOf(area, "70,300");
+    await expect(highRow.getByTestId("ladder-day-tag-high")).toHaveText("고");
+    const overlapRow = rowOf(area, "69,900");
+    await expect(overlapRow.getByTestId("ladder-day-tags")).toHaveText("시저");
+    const tagsBox = (await overlapRow.getByTestId("ladder-day-tags").boundingBox())!;
+    const numBox = (await overlapRow.locator(".mw-px-num").boundingBox())!;
+    expect(tagsBox.x + tagsBox.width).toBeLessThanOrEqual(numBox.x + 1);
+  }
+  await pickDesktopVenue(page, "KRX");
+  for (const area of [book(page), win(page)]) {
+    await expect(rowOf(area, "70,400").getByTestId("ladder-day-tag-high")).toHaveText("고");
+    await expect(rowOf(area, "70,100").getByTestId("ladder-day-tag-open")).toHaveText("시");
+    await expect(rowOf(area, "69,900").getByTestId("ladder-day-tag-low")).toHaveText("저");
+    await expect(rowOf(area, "69,900").getByTestId("ladder-day-tag-open")).toHaveCount(0);
+  }
 });

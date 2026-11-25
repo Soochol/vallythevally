@@ -17,7 +17,7 @@
 .tr-window[data-compact-strips] .tr-strips > .mw-strip { flex:none; flex-wrap:nowrap; gap:var(--s3); min-width:0; padding:0 var(--s3); border:0; white-space:nowrap; }
 .tr-window[data-compact-strips] .tr-strips > .mw-strip:first-child { flex:1 1 0; overflow:hidden; }
 .tr-window[data-compact-strips] .tr-strips .mw-ratio { min-width:var(--size-24); }
-.tr-window[data-compact-strips] .tr-strips .mw-seg { padding:0; gap:0; }
+.tr-window[data-compact-strips] .tr-strips .mw-seg { padding:0; gap:0; overflow:hidden; border-radius:var(--r-s); }
 .tr-window[data-compact-strips] .tr-strips .tr-figure { display:inline-flex; flex:0 1 auto; gap:var(--size-4); min-width:0; }
 .tr-window[data-compact-strips] .tr-strips .tr-figure[data-figure="strength"] { flex-shrink:0; }
 .tr-window[data-compact-strips] .tr-strips .tr-figure b { min-width:0; overflow:hidden; text-overflow:ellipsis; }

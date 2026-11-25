@@ -71,10 +71,12 @@
 .od-status[data-tone=ok] { border-left-color:var(--success); }
 .od-status[data-tone=error] { border-left-color:var(--danger); background:var(--danger-soft); }
 .od-status[data-tone=warn] { border-left-color:var(--warning); background:var(--warning-soft); }
+.od-status[data-tone=replay] { border-left-color:var(--accent); background:var(--accent-soft); color:var(--accent); font-weight:600; }
 .od-status-icon { display:inline-flex; flex:none; }
 .od-status[data-tone=ok] .od-status-icon, .od-status[data-tone=ok] .od-status-text { color:var(--success); }
 .od-status[data-tone=error] .od-status-icon, .od-status[data-tone=error] .od-status-text { color:var(--danger); }
 .od-status[data-tone=warn] .od-status-icon, .od-status[data-tone=warn] .od-status-text { color:var(--warning); }
+.od-status[data-tone=replay] .od-status-icon, .od-status[data-tone=replay] .od-status-text { color:var(--accent); }
 .od-status-text { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .od-status-button { flex:none; height:var(--size-18); padding:0 var(--s3); border-radius:var(--r-s); background:var(--raised); color:var(--text); font-size:var(--fs-xs); font-weight:600; }
 .od-status-button:hover { background:var(--hover); }
@@ -151,8 +153,6 @@ button.od-cellbtn:not(:disabled) small span { text-decoration:underline dotted; 
 .od-settings-presets input { width:100%; min-width:0; height:var(--size-24); padding:0 var(--s2); border:var(--size-1) solid var(--line-strong); border-radius:var(--r-s); background:transparent; color:var(--text); text-align:right; }
 .od-settings-flag { display:flex; align-items:center; gap:var(--s3); color:var(--text); }
 .od-settings-flag small { color:var(--text-2); font-size:var(--fs-xs); }
-.od-settings-flag[data-note] { flex-wrap:wrap; }
-.od-settings-flag[data-note] small { flex-basis:100%; padding-left:calc(var(--size-13) + var(--s3)); }
 .od-settings-head { margin:0; color:var(--text-2); }
 
 .od-ladder[data-divider] .mw-lr + .mw-lr { box-shadow:inset 0 var(--size-1) 0 var(--line); }
@@ -222,7 +222,8 @@ button.od-cellbtn:not(:disabled) small span { text-decoration:underline dotted; 
 .od-head-rate { flex:none; font-size:var(--fs-s); font-weight:600; }
 .od-head-rate[data-tone=up] { color:var(--up); } .od-head-rate[data-tone=down] { color:var(--down); }
 .od-head-nxt { display:flex; flex:none; }
-.od-replay-lock { margin-left:auto; }
+.od-replay-lock { flex:none; margin-left:auto; white-space:nowrap; font-size:var(--fs-xs); }
+.od-status .mw-replay-venue { margin-left:0; }
 .mw-replay-venue + .od-replay-lock { margin-left:0; }
 .od-qty .mw-seg { gap:var(--size-1); padding:var(--size-2); }
 .od-qty .mw-seg button { height:var(--size-26); padding:0 var(--size-3); }
