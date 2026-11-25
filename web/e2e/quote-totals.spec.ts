@@ -21,6 +21,7 @@ test("총잔량을 더하면 분봉에 매도·매수 값이 보이고 일봉에
       requested.push({ symbol, period });
       if (symbol === "005930") {
         const body: QuoteTotalsPage = {
+          available: true,
           venue: "combined",
           days: [{ date: to, state: "closed" }],
           points: bars.map((b) => ({ t: b.t, ask, bid })),
@@ -28,6 +29,7 @@ test("총잔량을 더하면 분봉에 매도·매수 값이 보이고 일봉에
         return { body };
       }
       const body: QuoteTotalsPage = {
+        available: true,
         venue: "combined",
         days: [{ date: to, state: "notCollected" }],
         points: [],
@@ -70,4 +72,30 @@ test("총잔량을 더하면 분봉에 매도·매수 값이 보이고 일봉에
   await page.getByRole("dialog").getByRole("option").filter({ hasText: "000660" }).first().click();
   await expect(cell(page)).toHaveAttribute("aria-busy", "false");
   await expect(totalsRow).toContainText("수집하지 않는 종목");
+});
+
+test("서버에 호가 자료 폴더가 없으면 수집 폴더 미설정 안내를 보인다", async ({ page, scenario }) => {
+  useCenterIndicatorWindow(scenario);
+  scenario.on(
+    (url, request) => request.method() === "GET" && /^\/api\/symbols\/[^/]+\/quote-totals$/.test(url.pathname),
+    (request) => {
+      const to = new URL(request.url()).searchParams.get("to") ?? "2026-11-09";
+      const body: QuoteTotalsPage = { available: false, venue: "combined", days: [{ date: to, state: "none" }], points: [] };
+      return { body };
+    },
+  );
+
+  await page.goto("/?symbol=005930&period=5m");
+  await expect(cell(page)).toHaveAttribute("aria-busy", "false");
+
+  await page.getByRole("button", { name: /^지표/ }).first().click();
+  const dialog = page.getByRole("dialog");
+  await dialog.getByRole("tab", { name: "지표 추가", exact: true }).click();
+  await dialog.getByRole("option", { name: "총잔량 추가 후보", exact: true }).click();
+  await dialog.getByRole("button", { name: "총잔량 추가", exact: true }).click();
+  await dialog.getByRole("button", { name: "입력창 닫기", exact: true }).click();
+
+  const totalsRow = page.locator("[data-indicator-row]").filter({ hasText: "총잔량" });
+  await expect(totalsRow).toHaveCount(1);
+  await expect(totalsRow).toContainText("수집 폴더 미설정");
 });

@@ -486,13 +486,15 @@ export class IndicatorLayer {
         const qState = view?.state ?? "loading";
         if (qState === "loading" && !pt) return { id: config.id, name: specName(config.spec), color: tokens.down, values: [], state: "pending", panel };
         const values: LegendValue[] =
-          qState === "notCollected"
-            ? [{ text: "수집하지 않는 종목", color: tokens.text2 }]
-            : qState === "failed"
-              ? [{ text: "호가 자료 조회 실패", color: tokens.text2 }]
-              : pt
-                ? [{ text: formatVolume(pt.ask), color: tokens.down }, { text: formatVolume(pt.bid), color: tokens.up }]
-                : [{ text: "—", color: tokens.down }, { text: "—", color: tokens.up }];
+          qState === "disabled"
+            ? [{ text: "수집 폴더 미설정", color: tokens.text2 }]
+            : qState === "notCollected"
+              ? [{ text: "수집하지 않는 종목", color: tokens.text2 }]
+              : qState === "failed"
+                ? [{ text: "호가 자료 조회 실패", color: tokens.text2 }]
+                : pt
+                  ? [{ text: formatVolume(pt.ask), color: tokens.down }, { text: formatVolume(pt.bid), color: tokens.up }]
+                  : [{ text: "—", color: tokens.down }, { text: "—", color: tokens.up }];
         return { id: config.id, name: specName(config.spec), color: tokens.down, values, state: "ok", panel };
       }
       if (isQuoteDepth(config.spec)) {
@@ -504,16 +506,18 @@ export class IndicatorLayer {
         const qState = view?.state ?? "loading";
         if (qState === "loading" && !pt) return { id: config.id, name: specName(config.spec), color: askColor, values: [], state: "pending", panel: null };
         const values: LegendValue[] =
-          qState === "notCollected"
-            ? [{ text: "수집하지 않는 종목", color: tokens.text2 }]
-            : qState === "failed"
-              ? [{ text: "호가 자료 조회 실패", color: tokens.text2 }]
-              : pt
-                ? [
-                    { text: formatDepthLevel(thickestLevel(pt.asks)), color: askColor },
-                    { text: formatDepthLevel(thickestLevel(pt.bids)), color: bidColor },
-                  ]
-                : [{ text: "—", color: askColor }, { text: "—", color: bidColor }];
+          qState === "disabled"
+            ? [{ text: "수집 폴더 미설정", color: tokens.text2 }]
+            : qState === "notCollected"
+              ? [{ text: "수집하지 않는 종목", color: tokens.text2 }]
+              : qState === "failed"
+                ? [{ text: "호가 자료 조회 실패", color: tokens.text2 }]
+                : pt
+                  ? [
+                      { text: formatDepthLevel(thickestLevel(pt.asks)), color: askColor },
+                      { text: formatDepthLevel(thickestLevel(pt.bids)), color: bidColor },
+                    ]
+                  : [{ text: "—", color: askColor }, { text: "—", color: bidColor }];
         return { id: config.id, name: specName(config.spec), color: askColor, values, state: "ok", panel: null };
       }
       const values: LegendValue[] =
@@ -551,6 +555,10 @@ export class IndicatorLayer {
         }
         const view = this.quoteDepths.get(config.id);
         const qState = view?.state ?? "loading";
+        if (qState === "disabled") {
+          rows.push({ id: config.id, slots: [["수집 폴더 미설정"]] });
+          continue;
+        }
         if (qState === "notCollected") {
           rows.push({ id: config.id, slots: [["수집하지 않는 종목"]] });
           continue;

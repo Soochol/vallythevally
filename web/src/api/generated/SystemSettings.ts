@@ -2,4 +2,4 @@
 import type { KiwoomEnvironment } from "./KiwoomEnvironment";
 import type { KiwoomTarget } from "./KiwoomTarget";
 
-export type SystemSettings = { environment: KiwoomEnvironment, bind: string, logFilter: string, staticDir: string, dbPath: string, screenerDbPath: string, financialDbPath: string, screenerUpdateOnStart: boolean, tokenPath: string, keyPath: string, lockPath: string, kiwoomTarget: KiwoomTarget, serverVersion: string, accountServerUrl: string | null, accountStatePath: string | null, };
+export type SystemSettings = { environment: KiwoomEnvironment, bind: string, logFilter: string, staticDir: string, dbPath: string, screenerDbPath: string, financialDbPath: string, hogaDataDir: string | null, sharedDataDir: string | null, screenerUpdateOnStart: boolean, tokenPath: string, keyPath: string, lockPath: string, kiwoomTarget: KiwoomTarget, serverVersion: string, accountServerUrl: string | null, accountStatePath: string | null, };

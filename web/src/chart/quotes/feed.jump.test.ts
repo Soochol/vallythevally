@@ -24,7 +24,7 @@ test("떨어진 구간을 오가도 사이를 받지 않고 필요할 때만 받
       calls.push({
         range,
         reply: async (points, state = "closed") => {
-          resolve({ days: [{ date: range.to, state }], points });
+          resolve({ available: true, days: [{ date: range.to, state }], points });
           await settle();
         },
       });
@@ -73,10 +73,10 @@ test("옛 구간이 계속 실패해도 오늘 꼬리를 받는다", async () =>
       totalCalls++;
       if (range.after !== undefined) {
         tailCount++;
-        return Promise.resolve({ days: [{ date: range.to, state: "live" }], points: [{ t: at("2026-11-24T10:00:00"), v: tailCount }] });
+        return Promise.resolve({ available: true, days: [{ date: range.to, state: "live" }], points: [{ t: at("2026-11-24T10:00:00"), v: tailCount }] });
       }
       if (range.to === "2026-11-24") {
-        return Promise.resolve({ days: [{ date: "2026-11-24", state: "live" }], points: [{ t: at("2026-11-24T10:00:00"), v: 1 }] });
+        return Promise.resolve({ available: true, days: [{ date: "2026-11-24", state: "live" }], points: [{ t: at("2026-11-24T10:00:00"), v: 1 }] });
       }
       coverRetryTimes.push(now - start);
       return Promise.reject(new Error("old chunk failed"));

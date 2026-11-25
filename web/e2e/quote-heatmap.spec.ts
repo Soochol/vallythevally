@@ -69,6 +69,7 @@ test("히트맵을 더하면 값이 보이고 기준을 바꾸면 그 기준으�
       const askQty = source === "close" ? 3_210 : 9_000;
       const bidQty = source === "close" ? 5_432 : 12_345;
       const body: QuoteDepthPage = {
+        available: true,
         venue: "combined",
         source,
         days: [{ date: to, state: "closed" }],

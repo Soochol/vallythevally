@@ -3,4 +3,4 @@ import type { QuoteDayInfo } from "./QuoteDayInfo";
 import type { QuoteTotalPoint } from "./QuoteTotalPoint";
 import type { Venue } from "./Venue";
 
-export type QuoteTotalsPage = { venue: Venue, days: Array<QuoteDayInfo>, points: Array<QuoteTotalPoint>, };
+export type QuoteTotalsPage = { available: boolean, venue: Venue, days: Array<QuoteDayInfo>, points: Array<QuoteTotalPoint>, };

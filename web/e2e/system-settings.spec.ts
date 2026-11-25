@@ -73,6 +73,8 @@ test("일반·데이터·정보는 서버 설정 값을 읽기 전용으로 보�
   await expect(panel).toContainText(DEFAULT_SYSTEM_SETTINGS.dbPath);
   await expect(panel).toContainText(DEFAULT_SYSTEM_SETTINGS.keyPath);
   await expect(panel).toContainText(DEFAULT_SYSTEM_SETTINGS.financialDbPath);
+  await expect(panel).toContainText(DEFAULT_SYSTEM_SETTINGS.hogaDataDir!);
+  await expect(panel).toContainText("미설정");
   await expect(panel).not.toContainText("OpenDART");
   await menu(page, "정보").click();
   await expect(panel).toContainText(DEFAULT_SYSTEM_SETTINGS.serverVersion);

@@ -16,6 +16,7 @@ export interface QuoteKey {
 }
 
 export interface QuotePage<P> {
+  available: boolean;
   days: readonly QuoteDayInfo[];
   points: readonly P[];
 }
@@ -28,7 +29,7 @@ export interface QuoteFeedDeps<P> {
   now(): UnixSeconds;
 }
 
-export type QuoteState = "loading" | "ready" | "notCollected" | "failed";
+export type QuoteState = "loading" | "ready" | "notCollected" | "disabled" | "failed";
 
 export interface QuoteView<P> {
   readonly state: QuoteState;
@@ -83,6 +84,7 @@ export class QuoteFeed<P extends { t: UnixSeconds }> implements QuoteView<P> {
   private readonly days = new Map<string, QuoteDayState>();
   private have: DateRange[] = [];
   private need: DateRange | null = null;
+  private available = true;
   private receivedAny = false;
   private covering = false;
   private failedCover = false;
@@ -115,6 +117,7 @@ export class QuoteFeed<P extends { t: UnixSeconds }> implements QuoteView<P> {
     this.days.clear();
     this.have = [];
     this.need = null;
+    this.available = true;
     this.receivedAny = false;
     this.covering = false;
     this.failedCover = false;
@@ -161,13 +164,14 @@ export class QuoteFeed<P extends { t: UnixSeconds }> implements QuoteView<P> {
   private syncTimer(): void {
     const today = kstDateOf(this.deps.now());
     const coversToday = rangesContain(this.have, today);
-    const want = !this.disposed && this.key !== null && (this.failedCover || coversToday);
+    const want = !this.disposed && this.key !== null && (this.failedCover || (this.available && coversToday));
     if (want && this.timer === null) this.timer = setInterval(() => this.onTick(), TAIL_EVERY_MS);
     else if (!want && this.timer !== null) this.stopTimer();
   }
 
   private computeState(): QuoteState {
     if (!this.receivedAny) return this.failedCover ? "failed" : "loading";
+    if (!this.available) return "disabled";
     let nonNone = 0;
     let allNotCollected = true;
     for (const state of this.days.values()) {
@@ -201,6 +205,7 @@ export class QuoteFeed<P extends { t: UnixSeconds }> implements QuoteView<P> {
         this.coverAbort = null;
         this.coverFailures = 0;
         this.nextCoverRetryAt = 0;
+        this.available = page.available;
         this.receivedAny = true;
         this.have = mergeRanges(this.have, chunk);
         for (const day of page.days) this.days.set(day.date, day.state);
@@ -254,10 +259,12 @@ export class QuoteFeed<P extends { t: UnixSeconds }> implements QuoteView<P> {
         if (gen !== this.gen || this.disposed) return;
         this.tailing = false;
         this.tailAbort = null;
+        this.available = page.available;
         this.receivedAny = true;
         for (const day of page.days) this.days.set(day.date, day.state);
         const prevState = this._state;
         this._state = this.computeState();
+        this.syncTimer();
         const nextMap = new Map<UnixSeconds, P>();
         for (const pt of page.points) if (pt.t >= after) nextMap.set(pt.t, pt);
         let firstChanged: UnixSeconds | null = null;

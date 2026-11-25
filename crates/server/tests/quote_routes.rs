@@ -261,14 +261,19 @@ async fn days_tell_why_there_is_nothing_to_draw() {
     ]);
     for path in ["quote-totals", "quote-depth"] {
         let collected = harness.ok(&format!("/api/symbols/{CODE}/{path}?{range}")).await;
+        assert_eq!(collected["available"], json!(true), "{path}");
         assert_eq!(collected["days"], days(["none", "none", "closed", "live"]), "{path}");
         let missing = harness.ok(&format!("/api/symbols/035420/{path}?{range}")).await;
+        assert_eq!(missing["available"], json!(true), "{path}");
         assert_eq!(missing["days"], days(["none", "none", "notCollected", "notCollected"]), "{path}");
         assert!(points(&missing).is_empty());
     }
     let off = Harness::start_with(false).await;
-    let page = off.ok(&format!("/api/symbols/{CODE}/quote-totals?{range}")).await;
-    assert_eq!(page["days"], days(["none"; 4]));
+    for path in ["quote-totals", "quote-depth"] {
+        let page = off.ok(&format!("/api/symbols/{CODE}/{path}?{range}")).await;
+        assert_eq!(page["available"], json!(false), "{path}");
+        assert_eq!(page["days"], days(["none"; 4]), "{path}");
+    }
 }
 
 #[tokio::test]

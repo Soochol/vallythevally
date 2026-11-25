@@ -141,6 +141,8 @@ impl api::SystemSettings {
             db_path: path(&config.db_path),
             screener_db_path: path(&config.screener_db_path),
             financial_db_path: path(&config.financial_db_path),
+            hoga_data_dir: config.hoga_data_dir.as_deref().map(path),
+            shared_data_dir: config.shared_data.as_ref().map(|shared| path(&shared.dir)),
             screener_update_on_start: config.screener_update_on_start,
             token_path: path(&config.token_path),
             key_path: path(&config.kiwoom_key_path.with_file_name(crate::kiwoom::key_file::KEY_LIST_FILE_NAME)),

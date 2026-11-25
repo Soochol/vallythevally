@@ -186,6 +186,7 @@ export const SYNCED: SyncStatus = { state: "running", lastSuccessAt: 1_762_650_0
 
 export const DEFAULT_SYSTEM_SETTINGS: SystemSettings = {
   environment: "real", bind: "127.0.0.1:8080", logFilter: "info", staticDir: "web/dist", dbPath: "data/vally.db", screenerDbPath: "data/screener.db", financialDbPath: "data/financial.db",
+  hogaDataDir: "data/hoga", sharedDataDir: null,
   screenerUpdateOnStart: true, tokenPath: "state/kiwoom-token.json", keyPath: "state/kiwoom-key.json", lockPath: "state/vally.lock",
   kiwoomTarget: { kind: "kiwoom", host: "api.kiwoom.com" }, serverVersion: "0.1.0-test",
   accountServerUrl: null, accountStatePath: "state/account.json",
@@ -429,7 +430,7 @@ export class Scenario {
     if (/^\/api\/symbols\/[^/]+\/quote-totals$/.test(path) && method === "GET") {
       const venue = url.searchParams.get("venue") ?? "combined";
       if (venue !== "combined" && venue !== "krx" && venue !== "nxt") return error(400, "bad_request", "Invalid venue");
-      return { body: { venue, days: [], points: [] } satisfies QuoteTotalsPage };
+      return { body: { available: true, venue, days: [], points: [] } satisfies QuoteTotalsPage };
     }
     const description = `Unconfigured API fixture: ${method} ${url.pathname}${url.search}`;
     this.failures.push(description);
