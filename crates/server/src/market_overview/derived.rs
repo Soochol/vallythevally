@@ -596,7 +596,7 @@ fn resolve_index_quote(
     overview_index
 }
 
-fn extract_today_overlay(combined: Option<&Loaded<SnapshotBody>>, latest_day: Option<KstDate>) -> (HashMap<StockCode, Price>, TodayOverlay) {
+pub(crate) fn extract_today_overlay(combined: Option<&Loaded<SnapshotBody>>, latest_day: Option<KstDate>) -> (HashMap<StockCode, Price>, TodayOverlay) {
     let Some(loaded) = combined else {
         return (HashMap::new(), TodayOverlay::None);
     };
@@ -622,7 +622,7 @@ fn extract_today_overlay(combined: Option<&Loaded<SnapshotBody>>, latest_day: Op
     (prices, overlay)
 }
 
-fn not_prepared<T>(message: impl Into<String>) -> MarketOverviewPart<T> {
+pub(crate) fn not_prepared<T>(message: impl Into<String>) -> MarketOverviewPart<T> {
     MarketOverviewPart::Failed {
         error: ApiFailure::new(ApiErrorCode::NotPrepared, message).into_body(),
     }

@@ -346,3 +346,175 @@ pub struct MarketOverviewViCard {
     pub source: Broker,
     pub events: MarketOverviewPart<Vec<MarketOverviewViEvent>>,
 }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub enum MarketOverviewRrgQuadrant {
+    Leading,
+    Weakening,
+    Lagging,
+    Improving,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct MarketOverviewRrgPoint {
+    pub date: KstDate,
+    pub rs_ratio: f64,
+    pub rs_momentum: f64,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct MarketOverviewRrgSeries {
+    pub code: String,
+    pub name: String,
+    pub quadrant: MarketOverviewRrgQuadrant,
+    pub change_rate: f64,
+    pub member_count: u32,
+    pub points: Vec<MarketOverviewRrgPoint>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct MarketOverviewRrg {
+    pub as_of: Option<KstDate>,
+    pub themes: Vec<MarketOverviewRrgSeries>,
+    pub sectors: Vec<MarketOverviewRrgSeries>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub enum MarketOverviewSessionWindowId {
+    NxtPre,
+    KrxOpen,
+    KrxMid,
+    KrxClose,
+    NxtMain,
+    NxtLate,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct MarketOverviewSessionWindow {
+    pub id: MarketOverviewSessionWindowId,
+    pub label: String,
+    pub time_range: String,
+    pub foreign_delta_eok: f64,
+    pub institution_delta_eok: f64,
+    pub individual_delta_eok: f64,
+    pub program_delta_eok: f64,
+    pub sample_count: u32,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct MarketOverviewSessionDna {
+    pub day: KstDate,
+    pub active_window: Option<MarketOverviewSessionWindowId>,
+    pub krx_trade_value_eok: f64,
+    pub nxt_trade_value_eok: f64,
+    pub windows: Vec<MarketOverviewSessionWindow>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct MarketOverviewOrderbookStock {
+    pub code: SymbolCode,
+    pub name: String,
+    pub change_rate: Option<f64>,
+    pub bid_ask_ratio: f64,
+    #[ts(type = "number")]
+    pub net_remaining: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct MarketOverviewFlowLeader {
+    pub code: SymbolCode,
+    pub name: String,
+    pub change_rate: Option<f64>,
+    pub net_eok: f64,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct MarketOverviewBrokerBook {
+    #[ts(type = "number")]
+    pub total_bid_remaining: i64,
+    #[ts(type = "number")]
+    pub total_ask_remaining: i64,
+    pub buy_pressure_pct: f64,
+    pub top_buy_pressure: Vec<MarketOverviewOrderbookStock>,
+    pub top_sell_pressure: Vec<MarketOverviewOrderbookStock>,
+    pub foreign_leaders: Vec<MarketOverviewFlowLeader>,
+    pub program_leaders: Vec<MarketOverviewFlowLeader>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub enum MarketOverviewDisclosureCategory {
+    Contract,
+    Shareholder,
+    Earnings,
+    Capital,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct MarketOverviewDisclosureCounts {
+    pub contract: u32,
+    pub shareholder: u32,
+    pub earnings: u32,
+    pub capital: u32,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct MarketOverviewDisclosureItem {
+    pub code: SymbolCode,
+    pub name: String,
+    pub market: Option<Market>,
+    pub category: MarketOverviewDisclosureCategory,
+    pub report_name: String,
+    pub receipt_no: String,
+    pub receipt_date: String,
+    pub filer: String,
+    pub remarks: String,
+    pub change_rate: Option<f64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct MarketOverviewDisclosureRadar {
+    pub total_matched: u32,
+    pub counts: MarketOverviewDisclosureCounts,
+    pub items: Vec<MarketOverviewDisclosureItem>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct MarketOverviewProCard {
+    pub scope: MarketOverviewScope,
+    pub phase: MarketOverviewPhase,
+    pub received_at: Option<UnixSeconds>,
+    pub rrg: MarketOverviewPart<MarketOverviewRrg>,
+    pub session_dna: MarketOverviewPart<MarketOverviewSessionDna>,
+    pub broker_book: MarketOverviewPart<MarketOverviewBrokerBook>,
+    pub disclosures: MarketOverviewPart<MarketOverviewDisclosureRadar>,
+}
